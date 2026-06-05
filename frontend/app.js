@@ -739,7 +739,8 @@ function initMarkdown() {
     gfm: true,
     breaks: false,
     renderer: {
-      code({ text, lang }) {
+      code(codeText, lang) {
+        const text = String(codeText ?? "");
         let highlighted = escapeHtml(text);
         if (typeof hljs !== "undefined") {
           if (lang && hljs.getLanguage(lang)) {

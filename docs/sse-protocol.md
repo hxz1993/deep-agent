@@ -6,6 +6,15 @@
 
 ### 请求
 
+`POST /api/v1/chat/stream` 使用统一的 `StreamChatRequest` 请求体。通过可选字段 `agent_id` 区分两种模式：
+
+| 模式 | 条件 | 行为 |
+|------|------|------|
+| 默认 Agent | 省略 `agent_id` | 使用 Settings 默认配置，可通过 `model` / `capabilities` 覆盖 |
+| DB Agent | 传入 `agent_id`（UUID） | 从数据库加载 Agent 配置，忽略 `model` / `capabilities` |
+
+**默认 Agent 模式：**
+
 ```http
 POST /api/v1/chat/stream HTTP/1.1
 Content-Type: application/json
@@ -19,6 +28,23 @@ Accept: text/event-stream
   "user": "可选用户标识"
 }
 ```
+
+**DB Agent 模式：**
+
+```http
+POST /api/v1/chat/stream HTTP/1.1
+Content-Type: application/json
+Accept: text/event-stream
+
+{
+  "agent_id": "550e8400-e29b-41d4-a716-446655440000",
+  "message": "用户输入",
+  "session_id": "可选，省略则服务端生成",
+  "user": "可选用户标识"
+}
+```
+
+> 带 `agent_id` 时，会话存储键为 `{agent_id}:{session_id}`，与默认模式的裸 `session_id` 隔离。
 
 ### 响应
 
@@ -88,17 +114,29 @@ sequenceDiagram
 
 流中**第一个**事件，告知本次会话标识。
 
+默认 Agent 模式：
+
 ```json
 {
   "session_id": "3eff69967bee4a809c46a47c19e113ff"
 }
 ```
 
+DB Agent 模式（请求体含 `agent_id`）：
+
+```json
+{
+  "session_id": "3eff69967bee4a809c46a47c19e113ff",
+  "agent_id": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | `session_id` | `string` | 会话 ID；请求未传时由服务端 `uuid4().hex` 生成 |
+| `agent_id` | `string` | 可选；DB Agent 模式时回显请求中的 Agent UUID |
 
-客户端应将 `session_id` 持久化，后续同一会话的请求需带上该字段以延续上下文。
+客户端应将 `session_id`（及 `agent_id`，若使用 DB Agent）持久化，后续同一会话的请求需带上相同字段以延续上下文。
 
 ---
 
@@ -297,7 +335,7 @@ data: {"type": "final", "output": "## 平台的 11 种维度类型\n...", "usage
 | 接口 | 说明 |
 |------|------|
 | `POST /api/v1/chat` | 非流式，直接返回 `{ session_id, output, usage }` |
-| `POST /api/v1/chat/stream` | 流式，事件语义与上表一致，最终 `output`/`usage` 同 `final` |
+| `POST /api/v1/chat/stream` | 流式（`StreamChatRequest`），支持默认 Agent 与 DB Agent 两种请求体，事件语义与上表一致 |
 | `GET /api/v1/sessions/{id}` | 查询会话元信息（消息条数等），不返回 SSE |
 | `DELETE /api/v1/sessions/{id}` | 删除会话历史 |
 

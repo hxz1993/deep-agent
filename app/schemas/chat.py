@@ -23,6 +23,13 @@ class ChatRequest(BaseModel):
     user: str | None = Field(default=None, description="Optional user identifier.")
 
 
+class StreamChatRequest(ChatRequest):
+    agent_id: UUID | None = Field(
+        default=None,
+        description="Load agent config from the database. When set, model/capabilities are ignored.",
+    )
+
+
 class ChatResponse(BaseModel):
     session_id: str
     output: Any

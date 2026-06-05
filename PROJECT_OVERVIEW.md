@@ -53,7 +53,7 @@ deep-agent/
 │   │   └── spec.py              # AgentSpec 声明式配置
 │   ├── api/v1/                  # REST + SSE API
 │   │   ├── router.py            # 路由聚合 (/api/v1)
-│   │   ├── chat.py              # 对话接口（含 /chat/agent/stream）
+│   │   ├── chat.py              # 对话接口（/chat/stream 支持默认与 DB Agent）
 │   │   ├── agents.py            # Agent 配置 CRUD
 │   │   ├── mcp.py               # MCP 配置 CRUD + 热重载
 │   │   ├── sessions.py          # 会话管理 + 历史查询
@@ -76,7 +76,7 @@ deep-agent/
 │   │   └── history.py           # ModelMessage → 前端历史格式
 │   └── schemas/                 # Pydantic 请求/响应模型
 │       ├── chat.py
-│       ├── agent.py             # Agent CRUD / AgentChatRequest
+│       ├── agent.py             # Agent CRUD schemas
 │       └── mcp.py               # MCP CRUD schemas
 ├── config/mcp.json              # 历史参考；Alembic 002 迁移时导入 DB，运行时不再读取
 ├── mcps/                        # 内置 MCP server 源码（迁移时导入 DB 为 stdio 配置）
@@ -141,7 +141,7 @@ deps.build_runner_for_agent
 - **`AgentRunner`** (`runner.py`)：与 FastAPI 解耦的纯 async 入口。
   - `run()`：加 session 锁 → 读 history → `agent.run()` → 持久化 `new_messages()` → 返回 `{output, usage}`。
   - `run_stream()`：`agent.iter()` 迭代节点，把 Pydantic AI 事件映射为 SSE 字典。
-- **`AgentDeps`** (`deps.py`)：每轮注入 `session_id`、`user?`、`agent_name?`（DB agent 流式接口用于会话元数据），供工具通过 `RunContext[AgentDeps]` 读取。
+- **`AgentDeps`** (`deps.py`)：每轮注入 `session_id`、`user?`、`agent_id?`（DB agent 流式接口用于会话元数据），供工具通过 `RunContext[AgentDeps]` 读取。
 
 ### app/capabilities — 能力层
 统一抽象 `Capability`：
@@ -179,15 +179,16 @@ deps.build_runner_for_agent
 - **`SessionStore` Protocol**：`get_history` / `append`（可选 `agent_name`、`user_id`）/ `list_sessions` / `delete`，存储 Pydantic AI `ModelMessage`。
 - **`PostgresSessionStore`**：消息写入 JSONB 时使用 `TypeAdapter.dump_python(..., mode="json")`，避免 `datetime` 等类型无法 JSON 序列化；按 `sequence` 有序读写；进程内 `asyncio.Lock` 串行化同 session 并发。
 - **`InMemorySessionStore`**：`database_url` 为空时回退。
-- **`scoped_session_key(agent, session_id)`**：新接口会话隔离为 `{agent}:{session_id}`；旧 `/chat` 仍用原始 `session_id`。
+- **`scoped_session_key(agent_id, session_id)`**：带 `agent_id` 的流式请求会话隔离为 `{agent_id}:{session_id}`；未传 `agent_id` 时仍用原始 `session_id`。
 - **`model_messages_to_history`** (`history.py`)：将 `ModelMessage[]` 转为前端可渲染时间线（user 文本 + assistant 的 text / tool_call / tool_result）。
 
 ### app/schemas — 数据模型
 | 模型 | 字段 |
 |------|------|
 | `ChatRequest` | `message`, `session_id?`, `model?`, `capabilities?`, `user?` |
+| `StreamChatRequest` | 继承 `ChatRequest`，额外 `agent_id?`（有值时从 DB 加载 Agent，忽略 `model`/`capabilities`） |
 | `ChatResponse` | `session_id`, `output`, `usage` |
-| `AgentChatRequest` | `agent`, `message`, `session_id`（必填）, `user?` |
+| `AgentChatRequest` | 历史类型，字段为 `agent_id`, `message`, `session_id?`, `user?`（API 已合并至 `StreamChatRequest`） |
 | `AgentCreate` / `AgentUpdate` / `AgentResponse` | Agent CRUD（响应中 `api_key` 脱敏为 `api_key_set`） |
 | `SessionHistoryResponse` | `session_id`, `messages[]`（`role` + `content` 或 `parts[]`） |
 | `CapabilityDescription` | `name`, `kind`, `description`, `tools[]` |
@@ -205,8 +206,7 @@ deps.build_runner_for_agent
 | 方法 | 路径 | 请求体 | 响应 |
 |------|------|--------|------|
 | POST | `/api/v1/chat` | `ChatRequest` | `ChatResponse` |
-| POST | `/api/v1/chat/stream` | `ChatRequest` | SSE 流（Settings 默认 Agent） |
-| POST | `/api/v1/chat/agent/stream` | `AgentChatRequest` | SSE 流（从 DB 加载 Agent 配置后动态组装） |
+| POST | `/api/v1/chat/stream` | `StreamChatRequest` | SSE 流（无 `agent_id` 用 Settings 默认 Agent；有 `agent_id` 从 DB 加载） |
 
 ### /api/v1 — Agent 配置
 | 方法 | 路径 | 说明 |
@@ -237,7 +237,7 @@ deps.build_runner_for_agent
 
 > Agent / 会话相关接口需配置 `DEEP_AGENT_DATABASE_URL`，否则 `get_db` 返回 503。
 
-**ChatRequest 示例：**
+**StreamChatRequest 示例（默认 Agent，无 `agent_id`）：**
 ```json
 {
   "message": "现在几点了？",
@@ -248,16 +248,16 @@ deps.build_runner_for_agent
 }
 ```
 
-**AgentChatRequest 示例（`/chat/agent/stream`）：**
+**StreamChatRequest 示例（DB Agent，带 `agent_id`）：**
 ```json
 {
-  "agent": "default",
+  "agent_id": "550e8400-e29b-41d4-a716-446655440000",
   "message": "你好",
   "session_id": "sess-001",
   "user": "alice"
 }
 ```
-会话键为 `default:sess-001`，与旧接口的裸 `session_id` 隔离。
+存储键为 `{agent_id}:sess-001`，与未传 `agent_id` 时的裸 `session_id` 隔离。
 
 ### SSE 事件（/chat/stream）
 
@@ -265,7 +265,7 @@ deps.build_runner_for_agent
 
 | event | data 内容 |
 |-------|-----------|
-| `session` | `{"session_id": "..."}` |
+| `session` | `{"session_id": "..."}` 或 `{"session_id": "...", "agent_id": "..."}`（DB Agent 模式） |
 | `text` | `{"type":"text","delta":"..."}` |
 | `tool_call` | `{"type":"tool_call","tool","args","tool_call_id"}`（同 ID 可能推送 2 次，首帧 `args` 可能为 `{}`） |
 | `tool_result` | `{"type":"tool_result","tool","result","tool_call_id"}` |
@@ -315,22 +315,18 @@ uvicorn app.main:app --reload
   → database_url 已配置 ? PostgresSessionStore : InMemorySessionStore()
 ```
 
-### Chat 请求（以 /chat/stream 为例）
-1. `chat.py` 解析请求，`session_id = body.session_id or uuid`。
-2. `build_runner(model, capabilities)` → `build_agent(spec, registry)` 组装 Agent + toolsets。
-3. `AgentRunner.run_stream(session_id, message, AgentDeps)`。
-4. 从 Store 读 `message_history` → `agent.iter()` 迭代 agent loop。
-5. LLM 请求/工具调用过程中实时映射为 SSE 事件（text / tool_call / tool_result）。
-6. 结束后 `append(new_messages)` 持久化，发送 `final` 事件（含 output + usage）。
+### Chat 流式请求（`/chat/stream`）
+1. `chat.py` 解析 `StreamChatRequest`，`session_id = body.session_id or uuid`。
+2. **无 `agent_id`**：`build_runner(model, capabilities)` → `build_agent(spec, registry)` 组装 Agent + toolsets；存储键为 `session_id`。
+3. **有 `agent_id`**：`build_runner_for_agent(db, agent_id)` 从 `agents` 表加载配置 → `AgentSpec` → `build_agent()`；存储键为 `{agent_id}:{session_id}`。
+4. `AgentRunner.run_stream(session_key, message, AgentDeps)`。
+5. 从 Store 读 `message_history` → `agent.iter()` 迭代 agent loop。
+6. LLM 请求/工具调用过程中实时映射为 SSE 事件（text / tool_call / tool_result）。
+7. 结束后 `append(new_messages)` 持久化，发送 `final` 事件（含 output + usage）。
 
-**会话连续性**：同一 `session_id` 多次请求会加载完整历史，run 结束后追加新消息。
+**会话连续性**：同一 `session_id`（及相同 `agent_id` 作用域）多次请求会加载完整历史，run 结束后追加新消息。
 
-**能力筛选**：`capabilities: null`（默认）→ 仅 `default_enabled=True` 能力；显式传列表 → 只启用指定能力。
-
-### DB Agent 流式请求（/chat/agent/stream）
-1. `build_runner_for_agent(db, agent_name)` 从 `agents` 表加载配置 → `AgentSpec` → `build_agent()`。
-2. `session_key = f"{agent}:{session_id}"`，`AgentDeps` 携带 `agent_name` / `user`。
-3. 其余与 `/chat/stream` 相同（SSE、`PostgresSessionStore` 持久化）。
+**能力筛选**（仅无 `agent_id` 时生效）：`capabilities: null`（默认）→ 仅 `default_enabled=True` 能力；显式传列表 → 只启用指定能力。
 
 ### 前端历史会话
 - 启动时 `GET /api/v1/sessions` 同步侧边栏会话列表。
@@ -380,7 +376,7 @@ curl -X POST http://127.0.0.1:8000/api/v1/chat \
 | 限定能力 | 请求体 `capabilities: [...]` | — |
 | 持久化会话 | 已实现 `PostgresSessionStore`；无 DB 时设空 `DATABASE_URL` | `app/memory/postgres.py` |
 | 新增 DB Agent | `POST /api/v1/agents` 或迁移种子 | `agents` 表 |
-| 按 DB Agent 对话 | `POST /api/v1/chat/agent/stream` | `AgentChatRequest` |
+| 按 DB Agent 对话 | `POST /api/v1/chat/stream`（请求体带 `agent_id`） | `StreamChatRequest` |
 | 自定义 OpenAI 兼容 API | `DEEP_AGENT_MODEL_BASE_URL` + `DEEP_AGENT_MODEL_API_KEY` | `.env` |
 
 ## 11. 注意事项
@@ -391,4 +387,4 @@ curl -X POST http://127.0.0.1:8000/api/v1/chat \
 4. MCP 连接懒加载：`async with agent` 时才建立 MCP 子进程/网络连接。
 5. Cursor Skill 的 `default_enabled` 由 frontmatter `disable-model-invocation` 控制，缺省不自动启用，需显式在 `capabilities` 中指定。
 6. 生产化路线（README）：上下文压缩、HITL、OpenTelemetry、多实例 DB 级 session 锁、多租户限流、durable execution、pydantic-graph 编排等为后续规划。
-7. `/chat/agent` 同步版（非流式）尚未实现；多实例部署时 session 锁仍为进程内 `asyncio.Lock`。
+7. DB Agent 同步版（非流式，`POST /chat` 带 `agent_id`）尚未实现；多实例部署时 session 锁仍为进程内 `asyncio.Lock`。

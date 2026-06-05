@@ -1,7 +1,7 @@
 "use strict";
 
 /* ------------------------------------------------------------------ *
- * deep-agent 前端 —— 适配 FastAPI /api/v1/chat/agent/stream (SSE over POST)
+ * deep-agent 前端 —— 适配 FastAPI /api/v1/chat/stream (SSE over POST)
  * 协议详见 docs/sse-protocol.md
  *
  * 后端 SSE 事件 (event: <type>, data: <json>):
@@ -425,7 +425,7 @@ async function onSend() {
   const payload = { agent_id: state.agentId, message: text, session_id: state.sessionId };
 
   try {
-    const resp = await fetch(`${state.baseUrl}/api/v1/chat/agent/stream`, {
+    const resp = await fetch(`${state.baseUrl}/api/v1/chat/stream`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
       body: JSON.stringify(payload),

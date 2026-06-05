@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>deep-agent · 管理后台</title>
+  <link rel="stylesheet" href="./admin.css" />
+</head>
+<body>
+  <div class="admin-app">
+    <header class="admin-header">
+      <div class="brand">
+        <span class="brand-dot"></span>
+        <span class="brand-name">deep-agent 管理后台</span>
+      </div>
+      <nav class="tabs" id="mainTabs">
+        <button class="tab active" data-tab="agents">Agent 配置</button>
+        <button class="tab" data-tab="mcp">MCP 配置</button>
+      </nav>
+      <div class="header-actions">
+        <label class="inline-field">
+          <span>后端</span>
+          <input type="text" id="baseUrlInput" placeholder="http://localhost:8000" />
+        </label>
+        <a class="link-btn" href="/" id="chatLink">返回对话</a>
+      </div>
+    </header>
+
+    <div class="banner hidden" id="dbBanner">
+      数据库未配置。请设置 <code>DEEP_AGENT_DATABASE_URL</code> 后重启后端。
+    </div>
+    <div class="toast hidden" id="toast"></div>
+
+    <!-- Agent panel -->
+    <section class="panel active" id="panel-agents">
+      <div class="panel-toolbar">
+        <h2>Agent 列表</h2>
+        <button class="btn primary" id="newAgentBtn">＋ 新建 Agent</button>
+      </div>
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>名称</th>
+              <th>模型</th>
+              <th>能力</th>
+              <th>更新时间</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="agentsTableBody">
+            <tr><td colspan="5" class="empty-cell">加载中…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- MCP panel -->
+    <section class="panel" id="panel-mcp">
+      <div class="panel-toolbar">
+        <h2>MCP 服务列表</h2>
+        <button class="btn primary" id="newMcpBtn">＋ 新建 MCP</button>
+      </div>
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>名称</th>
+              <th>传输</th>
+              <th>启用</th>
+              <th>描述</th>
+              <th>更新时间</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="mcpTableBody">
+            <tr><td colspan="6" class="empty-cell">加载中…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+
+  <!-- Agent modal -->
+  <dialog class="modal modal-agent" id="agentModal">
+    <form id="agentForm" method="dialog">
+      <div class="modal-header">
+        <h3 id="agentModalTitle">新建 Agent</h3>
+        <button type="button" class="icon-btn" id="closeAgentModal">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="agent-form-grid">
+          <div class="agent-form-col">
+            <label class="field">
+              <span>名称</span>
+              <input type="text" id="agentName" required />
+            </label>
+            <label class="field">
+              <span>模型</span>
+              <input type="text" id="agentModel" placeholder="openai:gpt-4o" required />
+            </label>
+            <label class="field">
+              <span>Base URL（可选）</span>
+              <input type="text" id="agentBaseUrl" placeholder="https://api.openai.com/v1" />
+            </label>
+            <label class="field">
+              <span>API Key（可选，留空表示不修改）</span>
+              <input type="password" id="agentApiKey" autocomplete="new-password" />
+            </label>
+          </div>
+          <div class="agent-form-col">
+            <label class="field field-grow">
+              <span>System Prompt</span>
+              <textarea id="agentPrompt" rows="10" required></textarea>
+            </label>
+          </div>
+        </div>
+
+        <section class="cap-section">
+          <div class="cap-section-header">
+            <div>
+              <span class="cap-section-title">能力配置</span>
+              <p class="field-hint">不选任何项表示启用所有默认能力。</p>
+            </div>
+            <div class="cap-section-actions">
+              <input type="search" class="cap-search" id="capSearch" placeholder="搜索能力…" />
+              <span class="cap-counter" id="capCounter"></span>
+            </div>
+          </div>
+          <div class="cap-tabs" id="capTabs"></div>
+          <div class="cap-panels" id="agentCapGroups"></div>
+        </section>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn" id="cancelAgentBtn">取消</button>
+        <button type="submit" class="btn primary">保存</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- MCP modal -->
+  <dialog class="modal" id="mcpModal">
+    <form id="mcpForm" method="dialog">
+      <div class="modal-header">
+        <h3 id="mcpModalTitle">新建 MCP</h3>
+        <button type="button" class="icon-btn" id="closeMcpModal">✕</button>
+      </div>
+      <div class="modal-body">
+        <label class="field">
+          <span>名称</span>
+          <input type="text" id="mcpName" required pattern="[a-zA-Z][a-zA-Z0-9_-]*" />
+        </label>
+        <label class="field">
+          <span>传输类型</span>
+          <select id="mcpTransport">
+            <option value="url">url（远程 SSE / HTTP）</option>
+            <option value="stdio">stdio（本地子进程）</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>描述（可选）</span>
+          <input type="text" id="mcpDescription" />
+        </label>
+        <label class="field checkbox-field">
+          <input type="checkbox" id="mcpEnabled" checked />
+          <span>启用</span>
+        </label>
+
+        <div id="mcpUrlFields">
+          <label class="field">
+            <span>URL</span>
+            <input type="url" id="mcpUrl" placeholder="http://localhost:8080/sse" />
+          </label>
+          <label class="field">
+            <span>Headers JSON（可选）</span>
+            <textarea id="mcpHeaders" rows="2" placeholder='{"Authorization": "Bearer ..."}'></textarea>
+          </label>
+        </div>
+
+        <div id="mcpStdioFields" class="hidden">
+          <label class="field">
+            <span>Command</span>
+            <input type="text" id="mcpCommand" placeholder="python" />
+          </label>
+          <label class="field">
+            <span>Args（JSON 数组或逗号分隔）</span>
+            <input type="text" id="mcpArgs" placeholder='["mcps/text_tools/server.py"]' />
+          </label>
+          <label class="field">
+            <span>Env JSON（可选）</span>
+            <textarea id="mcpEnv" rows="2" placeholder='{"KEY": "value"}'></textarea>
+          </label>
+          <label class="field">
+            <span>工作目录（可选）</span>
+            <input type="text" id="mcpCwd" />
+          </label>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn" id="cancelMcpBtn">取消</button>
+        <button type="submit" class="btn primary">保存</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="./admin.js"></script>
+  <script src="./agents.js"></script>
+  <script src="./mcp.js"></script>
+</body>
+</html>

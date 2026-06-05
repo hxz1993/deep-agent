@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>deep-agent · 对话</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="stylesheet" href="./vendor/github-markdown-dark.min.css" />
+  <link rel="stylesheet" href="./vendor/highlight-github-dark.min.css" />
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div class="app">
+    <!-- 侧边栏 -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-header">
+        <div class="brand">
+          <span class="brand-dot"></span>
+          <span class="brand-name">deep-agent</span>
+        </div>
+        <button class="icon-btn" id="newChatBtn" title="新建会话">＋</button>
+      </div>
+
+      <button class="new-chat" id="newChatBtnWide">＋ 新建对话</button>
+
+      <div class="sidebar-section">
+        <div class="section-title">历史会话</div>
+        <ul class="session-list" id="sessionList"></ul>
+      </div>
+
+      <div class="sidebar-section grow">
+        <div class="section-title">
+          能力 (capabilities)
+          <button class="link-btn" id="refreshCapsBtn">刷新</button>
+        </div>
+        <ul class="cap-list" id="capList">
+          <li class="cap-empty">未加载</li>
+        </ul>
+      </div>
+
+      <div class="sidebar-footer">
+        <label class="field">
+          <span>后端地址</span>
+          <input type="text" id="baseUrlInput" placeholder="http://localhost:8000" />
+        </label>
+        <label class="field">
+          <span>Agent</span>
+          <select id="agentSelect">
+            <option value="">加载中…</option>
+          </select>
+        </label>
+        <div class="conn-status" id="connStatus">
+          <span class="dot"></span><span class="conn-text">未连接</span>
+        </div>
+        <a class="admin-link" id="adminLink" href="http://localhost:8000/admin" target="_blank" rel="noopener">管理后台</a>
+      </div>
+    </aside>
+
+    <!-- 主聊天区 -->
+    <main class="chat">
+      <header class="chat-header">
+        <button class="icon-btn ghost" id="toggleSidebar" title="切换侧边栏">☰</button>
+        <div class="chat-title">
+          <span id="chatTitle">新对话</span>
+          <span class="session-badge" id="sessionBadge"></span>
+        </div>
+        <div class="chat-actions">
+          <span class="usage" id="usageInfo"></span>
+        </div>
+      </header>
+
+      <div class="messages" id="messages">
+        <div class="empty-state" id="emptyState">
+          <div class="empty-logo">🤖</div>
+          <h1>deep-agent 对话</h1>
+          <p>输入消息开始与智能体对话。支持工具调用的实时流式输出。</p>
+          <div class="suggestions" id="suggestions">
+            <button class="suggestion">现在几点了？</button>
+            <button class="suggestion">帮我总结一下今天的待办</button>
+            <button class="suggestion">用 Python 写一个快速排序</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="composer">
+        <div class="composer-inner">
+          <textarea
+            id="input"
+            rows="1"
+            placeholder="给 Agent 发送消息…（Enter 发送，Shift+Enter 换行）"
+          ></textarea>
+          <button class="send-btn" id="sendBtn" title="发送">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+          </button>
+          <button class="stop-btn hidden" id="stopBtn" title="停止生成">
+            <span class="stop-square"></span>
+          </button>
+        </div>
+        <div class="composer-hint">deep-agent 可能会出错，请核对重要信息。</div>
+      </div>
+    </main>
+  </div>
+
+  <script src="./vendor/marked.min.js"></script>
+  <script src="./vendor/purify.min.js"></script>
+  <script src="./vendor/highlight.min.js"></script>
+  <script src="./app.js"></script>
+</body>
+</html>

@@ -1,0 +1,25 @@
+from __future__ import annotations
+
+
+class DeepAgentError(Exception):
+    """Base class for application errors."""
+
+
+class SessionNotFoundError(DeepAgentError):
+    def __init__(self, session_id: str) -> None:
+        super().__init__(f"Session not found: {session_id}")
+        self.session_id = session_id
+
+
+class CapabilityError(DeepAgentError):
+    """Raised when a capability fails to load or is misconfigured."""
+
+
+class AgentRunError(DeepAgentError):
+    """Raised when an agent run fails (LLM error, limit exceeded, etc.)."""
+
+
+class AgentNotFoundError(DeepAgentError):
+    def __init__(self, agent_id: object) -> None:
+        super().__init__(f"Agent not found: {agent_id}")
+        self.agent_id = agent_id

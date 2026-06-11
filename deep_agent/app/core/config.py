@@ -4,6 +4,8 @@ from functools import lru_cache
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from app.core.paths import DEEP_AGENT_ROOT, REPO_ROOT
+
 
 class Settings(BaseSettings):
     """Application configuration, loaded from environment / .env file.
@@ -14,7 +16,7 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_prefix="DEEP_AGENT_",
-        env_file=".env",
+        env_file=str(DEEP_AGENT_ROOT / ".env"),
         env_file_encoding="utf-8",
         extra="ignore",
     )
@@ -48,11 +50,11 @@ class Settings(BaseSettings):
     request_retries: int = 2
 
     # Declarative extension points
-    skills_dir: str = "skills"
+    skills_dir: str = str(DEEP_AGENT_ROOT / "skills")
 
     # Cursor SKILL.md skills (comma-separated directories). Each immediate
     # subdirectory containing a SKILL.md becomes one ``cursor-skill:<name>``.
-    cursor_skills_dir: str = ".cursor/skills"
+    cursor_skills_dir: str = str(REPO_ROOT / ".cursor" / "skills")
 
 
 @lru_cache

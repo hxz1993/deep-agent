@@ -36,53 +36,27 @@
 ## 3. 目录结构
 
 ```
-deep-agent/
-├── README.md                    # 项目说明、快速开始、扩展指南
-├── requirements.txt             # Python 依赖
-├── docker-compose.yml           # 本地 PostgreSQL（可选）
-├── alembic/                     # 数据库迁移
-│   └── versions/001_initial_schema.py
-├── .env / .env.example          # 环境变量配置
-├── app/                         # 后端核心
-│   ├── main.py                  # FastAPI 应用入口（lifespan + 路由 + 异常处理）
-│   ├── agent/                   # Agent 运行时（与 FastAPI 解耦）
-│   │   ├── deps.py              # 每轮运行的依赖注入上下文 AgentDeps
-│   │   ├── events.py            # SSE 事件字典构造
-│   │   ├── factory.py           # 从 AgentSpec + Registry 构建 Pydantic AI Agent
-│   │   ├── runner.py            # AgentRunner：run / run_stream
-│   │   └── spec.py              # AgentSpec 声明式配置
-│   ├── api/v1/                  # REST + SSE API
-│   │   ├── router.py            # 路由聚合 (/api/v1)
-│   │   ├── chat.py              # 对话接口（/chat/stream 支持默认与 DB Agent）
-│   │   ├── agents.py            # Agent 配置 CRUD
-│   │   ├── mcp.py               # MCP 配置 CRUD + 热重载
-│   │   ├── sessions.py          # 会话管理 + 历史查询
-│   │   ├── tools.py             # 能力列表
-│   │   └── deps.py              # FastAPI 依赖 + build_runner / build_runner_for_agent
-│   ├── db/                      # 数据库层
-│   │   ├── engine.py            # async engine / session factory
-│   │   ├── models.py            # ORM：agents / chat_sessions / chat_messages
-│   │   ├── deps.py              # get_db 依赖
-│   │   └── repositories/agent.py
-│   ├── capabilities/            # 可扩展能力层
-│   │   ├── registry.py          # CapabilityRegistry 统一注册
-│   │   ├── native/builtin.py    # 内置 Python 工具
-│   │   ├── skills/              # skills/ 目录加载器
-│   │   ├── cursor_skills/       # Cursor SKILL.md 加载器
-│   │   └── mcp/                 # MCP 数据库加载（db_loader.py）
-│   ├── core/                    # 配置、异常、日志
-│   ├── memory/                  # 会话存储（Protocol + Postgres / 内存）
-│   │   ├── postgres.py          # PostgresSessionStore
-│   │   └── history.py           # ModelMessage → 前端历史格式
-│   └── schemas/                 # Pydantic 请求/响应模型
-│       ├── chat.py
-│       ├── agent.py             # Agent CRUD schemas
-│       └── mcp.py               # MCP CRUD schemas
-├── config/mcp.json              # 历史参考；Alembic 002 迁移时导入 DB，运行时不再读取
-├── mcps/                        # 内置 MCP server 源码（迁移时导入 DB 为 stdio 配置）
-│   └── text_tools/server.py
-├── skills/                      # Python Skill 扩展点（calculator 示例当前未启用）
-├── frontend/                    # 零依赖静态 Web UI（对话 + admin/ 管理后台）
+deep-agent/                      # 仓库根目录
+├── README.md
+├── frontend/                    # 静态前端（聊天 UI + 管理后台）
+├── deep_agent/                  # 后端（FastAPI + Pydantic AI）
+│   ├── README.md
+│   ├── requirements.txt
+│   ├── docker-compose.yml
+│   ├── .env / .env.example
+│   ├── alembic/
+│   ├── app/                     # 后端核心
+│   │   ├── main.py
+│   │   ├── agent/
+│   │   ├── api/v1/
+│   │   ├── capabilities/
+│   │   ├── core/
+│   │   ├── db/
+│   │   ├── memory/
+│   │   └── schemas/
+│   ├── config/mcp.json
+│   ├── mcps/
+│   └── skills/
 └── .cursor/skills/              # Cursor SKILL.md（code-review、commit-helper 等）
 ```
 
@@ -336,6 +310,7 @@ uvicorn app.main:app --reload
 
 ### 后端
 ```bash
+cd deep_agent
 python -m venv .venv
 .venv\Scripts\activate          # Windows
 pip install -r requirements.txt

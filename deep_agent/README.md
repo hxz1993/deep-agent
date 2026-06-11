@@ -19,7 +19,11 @@ HTTP (REST/SSE)  ->  AgentRunner  ->  Pydantic AI Agent  ->  Capabilities (tools
 
 ## 快速开始
 
+在仓库根目录下进入本目录后安装依赖并启动：
+
 ```bash
+cd deep_agent
+
 python -m venv .venv
 # Windows
 .venv\Scripts\activate

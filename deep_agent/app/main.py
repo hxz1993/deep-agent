@@ -2,14 +2,13 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 
-from pathlib import Path
-
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api.v1.router import api_router
+from app.core.paths import REPO_ROOT
 from app.capabilities import build_registry, load_and_register_mcp
 from app.core.config import get_settings
 from app.core.exceptions import AgentNotFoundError, DeepAgentError
@@ -104,7 +103,7 @@ async def root(request: Request) -> dict[str, object]:
         "docs": "/docs",
     }
 
-_frontend_dir = Path(__file__).resolve().parents[1] / "frontend"
+_frontend_dir = REPO_ROOT / "frontend"
 _index_html = _frontend_dir / "index.html"
 if _index_html.is_file():
     # mount index.html as root

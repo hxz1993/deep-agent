@@ -50,6 +50,7 @@ it can run as an independent subprocess.
 and `reverse`. Run it directly to sanity-check:
 
 ```bash
+cd deep_agent
 python mcps/text_tools/server.py
 ```
 

@@ -14,7 +14,7 @@
 
 ## 对接的 SSE 事件
 
-完整协议说明见 **[docs/sse-protocol.md](../docs/sse-protocol.md)**（含事件生命周期、`tool_call` 同 ID 多次推送、客户端实现清单等）。
+完整协议说明见 **[docs/sse-protocol.md](../deep_agent/docs/sse-protocol.md)**（含事件生命周期、`tool_call` 同 ID 多次推送、客户端实现清单等）。
 
 | event         | data 字段                                  |
 | ------------- | ------------------------------------------ |

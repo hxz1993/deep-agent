@@ -1,0 +1,46 @@
+from __future__ import annotations
+
+from typing import Any
+
+from pydantic_ai import RunContext
+from pydantic_ai.mcp import MCPToolset
+from pydantic_ai.toolsets._dynamic import DynamicToolset
+
+from deep_agent.agent.deps import AgentDeps
+from deep_agent.capabilities.mcp.request_context import inject_request_meta, merge_mcp_headers
+
+
+def build_mcp_toolset(name: str, transport: str, config: dict[str, Any]) -> Any:
+    """Build a registry-ready MCP toolset with request header forwarding."""
+    if transport == "url":
+        return _build_url_toolset(name, config)
+    if transport == "stdio":
+        return _build_stdio_toolset(name, config)
+    raise ValueError(f"Unsupported MCP transport: {transport!r}")
+
+
+def _build_url_toolset(name: str, config: dict[str, Any]) -> DynamicToolset[AgentDeps]:
+    url = config["url"]
+    static_headers = dict(config.get("headers") or {})
+
+    def factory(ctx: RunContext[AgentDeps]) -> MCPToolset[AgentDeps]:
+        headers = merge_mcp_headers(static_headers, dict(ctx.deps.request_headers) or None)
+        return MCPToolset(url, id=name, headers=headers).prefixed(name)
+
+    return DynamicToolset(factory, per_run_step=False, id=f"mcp:{name}")
+
+
+def _build_stdio_toolset(name: str, config: dict[str, Any]) -> MCPToolset[AgentDeps]:
+    from fastmcp.client.transports import StdioTransport
+
+    transport_obj = StdioTransport(
+        command=config["command"],
+        args=list(config.get("args", [])),
+        env=config.get("env"),
+        cwd=config.get("cwd"),
+    )
+    return MCPToolset(
+        transport_obj,
+        id=name,
+        process_tool_call=inject_request_meta,
+    ).prefixed(name)

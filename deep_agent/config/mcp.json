@@ -1,5 +1,0 @@
-{
-  "mcpServers": {
-    "cubeQuery": { "url": "http://172.16.1.23:8080/sse" }
-  }
-}

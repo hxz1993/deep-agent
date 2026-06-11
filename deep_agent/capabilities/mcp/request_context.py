@@ -1,0 +1,43 @@
+"""Request-scoped context forwarded into MCP tool invocations.
+
+HTTP MCP servers receive merged headers on the transport connection. Stdio MCP
+servers receive the same data on each tool call as MCP ``_meta``:
+
+    meta = ctx.request_context.meta  # FastMCP Context in mcps/*/server.py
+    headers = getattr(meta, "headers", None) or {}
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+from pydantic_ai import RunContext
+from pydantic_ai.mcp import CallToolFunc
+
+from deep_agent.agent.deps import AgentDeps
+
+
+async def inject_request_meta(
+    ctx: RunContext[AgentDeps],
+    call_tool: CallToolFunc,
+    name: str,
+    args: dict[str, Any],
+) -> Any:
+    """Attach inbound HTTP headers to each MCP tool call via ``_meta``."""
+    metadata = None
+    if ctx.deps.request_headers:
+        metadata = {"headers": dict(ctx.deps.request_headers)}
+    return await call_tool(name, args, metadata=metadata)
+
+
+def merge_mcp_headers(
+    static_headers: dict[str, str] | None,
+    request_headers: dict[str, str] | None,
+) -> dict[str, str] | None:
+    """Merge configured MCP headers with per-request forwarded headers."""
+    merged: dict[str, str] = {}
+    if static_headers:
+        merged.update(static_headers)
+    if request_headers:
+        merged.update(request_headers)
+    return merged or None

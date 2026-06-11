@@ -1,0 +1,23 @@
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Mapping
+from uuid import UUID
+
+
+@dataclass
+class AgentDeps:
+    """Per-run dependencies injected into tools via ``RunContext[AgentDeps]``.
+
+    Add request-scoped services here (db handles, http clients, the current
+    user, feature flags). Tools declare ``ctx: RunContext[AgentDeps]`` to read them.
+
+    ``request_headers`` carries a whitelist of HTTP headers from the inbound client
+    request. MCP toolsets read them when opening HTTP connections or when calling
+    stdio tools (via MCP ``_meta``).
+    """
+
+    session_id: str
+    user: str | None = None
+    agent_id: UUID | None = None
+    request_headers: Mapping[str, str] = field(default_factory=dict)

@@ -69,7 +69,7 @@ async def _install_module(module: ModuleDescriptor):
 async def register_module(module: ModuleDescriptor):
     set_module_descriptor(module)
     await _install_module(module)
-    register_service(module)
+    register_service(module.serverName)
 
 
 def sync_register_module(port, module: ModuleDescriptor = None):
@@ -80,4 +80,4 @@ def sync_register_module(port, module: ModuleDescriptor = None):
         OPTION.gunicorn.inst_port = str(port)
 
     asyncio.run(_install_module(module))
-    register_service(module)
+    register_service(module.serverName)

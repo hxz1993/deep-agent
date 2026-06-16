@@ -49,32 +49,21 @@ class ChatHeaderForwardingTests(unittest.TestCase):
         self.assertEqual(recorded, {})
 
     def test_chat_stream_forwards_request_headers_to_mcp_tool(self) -> None:
-        from unittest.mock import MagicMock
-
-        from deep_agent.db.deps import get_db
-
-        async def override_get_db():
-            yield MagicMock()
-
         with test_chat_client() as (client, record_file):
-            client.app.dependency_overrides[get_db] = override_get_db
-            try:
-                with client.stream(
-                    "POST",
-                    "/api/v1/chat/stream",
-                    json={
-                        "message": "inspect headers",
-                        "capabilities": ["mcp:echo"],
-                    },
-                    headers={
-                        "Authorization": "Bearer stream-token",
-                        "X-Tenant-Id": "tenant-stream",
-                    },
-                ) as response:
-                    self.assertEqual(response.status_code, 200)
-                    list(response.iter_lines())
-            finally:
-                client.app.dependency_overrides.pop(get_db, None)
+            with client.stream(
+                "POST",
+                "/api/v1/chat/stream",
+                json={
+                    "message": "inspect headers",
+                    "capabilities": ["mcp:echo"],
+                },
+                headers={
+                    "Authorization": "Bearer stream-token",
+                    "X-Tenant-Id": "tenant-stream",
+                },
+            ) as response:
+                self.assertEqual(response.status_code, 200)
+                list(response.iter_lines())
 
         recorded = json.loads(record_file.read_text(encoding="utf-8"))
         self.assertEqual(

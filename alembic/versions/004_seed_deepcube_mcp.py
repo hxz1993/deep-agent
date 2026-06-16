@@ -41,9 +41,6 @@ def upgrade() -> None:
     config = {
         "command": sys.executable,
         "args": [str(SERVER_FILE.resolve())],
-        "env": {
-            "DEEPCUBE_ROOT": r"C:\Users\wei\Work\deepcube",
-        },
     }
 
     op.execute(
@@ -52,7 +49,7 @@ def upgrade() -> None:
             name="deepcube",
             transport="stdio",
             config=config,
-            description="DeepCube SDK assistant: search, read, and examples (read-only).",
+            description="DeepCube SDK assistant: knowledge tools + live cube/dimension/member metadata.",
             enabled=True,
         )
         .on_conflict_do_update(

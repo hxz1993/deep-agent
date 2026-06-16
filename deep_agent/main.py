@@ -15,11 +15,6 @@ from deep_agent.core.exceptions import AgentNotFoundError, DeepAgentError
 from deep_agent.core.logging import configure_logging, get_logger
 from deep_agent.db.engine import close_db, create_engine
 from deep_agent.memory import InMemorySessionStore, PostgresSessionStore
-import logging
-
-# logging.basicConfig(level=logging.DEBUG)
-# logging.getLogger("httpx").setLevel(logging.DEBUG)
-# logging.getLogger("openai").setLevel(logging.DEBUG)
 
 
 logger = get_logger(__name__)
@@ -62,7 +57,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="deep-agent",
     version="0.1.0",
-    description="General-purpose AI agent backend (FastAPI + Pydantic AI).",
+    description="General-purpose AI agent backend.",
     lifespan=lifespan,
 )
 

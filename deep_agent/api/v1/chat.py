@@ -4,15 +4,14 @@ import json
 import uuid
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
-from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi import APIRouter, HTTPException, Request, status
 from sse_starlette.sse import EventSourceResponse
 
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.headers import extract_forward_headers
 from deep_agent.api.v1.deps import build_runner, build_runner_for_agent, get_settings
 from deep_agent.core.exceptions import AgentNotFoundError
-from deep_agent.db.deps import get_db
+from deep_agent.db.deps import db_session
 from deep_agent.memory.postgres import scoped_session_key
 from deep_agent.schemas.chat import ChatRequest, ChatResponse, StreamChatRequest
 
@@ -45,16 +44,13 @@ async def chat(request: Request, body: ChatRequest) -> ChatResponse:
 
 
 @router.post("/chat/stream")
-async def chat_stream(
-    request: Request,
-    body: StreamChatRequest,
-    db: AsyncSession = Depends(get_db),
-) -> EventSourceResponse:
+async def chat_stream(request: Request, body: StreamChatRequest) -> EventSourceResponse:
     session_id = body.session_id or uuid.uuid4().hex
 
     if body.agent_id is not None:
         try:
-            runner = await build_runner_for_agent(request, db, body.agent_id)
+            async with db_session(request) as db:
+                runner = await build_runner_for_agent(request, db, body.agent_id)
         except AgentNotFoundError as exc:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
         run_session_key = scoped_session_key(body.agent_id, session_id)

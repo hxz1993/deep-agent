@@ -8,7 +8,7 @@ from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
-from deep_agent.core.config import get_settings
+from deep_agent.core.config import get_database_url, get_settings
 from deep_agent.db.models import Base
 
 config = context.config
@@ -18,9 +18,10 @@ if config.config_file_name is not None:
 
 target_metadata = Base.metadata
 
-settings = get_settings()
-if settings.database_url:
-    config.set_main_option("sqlalchemy.url", settings.database_url)
+get_settings()  # load .env before resolving DB URL
+database_url = get_database_url()
+if database_url:
+    config.set_main_option("sqlalchemy.url", database_url)
 
 
 def run_migrations_offline() -> None:

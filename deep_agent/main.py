@@ -15,6 +15,7 @@ from deep_agent.core.config import get_database_url, get_settings
 from deep_agent.core.exceptions import AgentNotFoundError, DeepAgentError
 from deep_agent.core.logging import configure_logging, get_logger
 from deep_agent.db.engine import close_db, create_engine
+from deep_agent.db.migrate import upgrade_database
 from deep_agent.memory import InMemorySessionStore, MySQLSessionStore, PostgresSessionStore
 
 
@@ -32,6 +33,7 @@ async def lifespan(app: FastAPI):
     app.state.registry = build_registry(settings)
 
     if database_url:
+        await upgrade_database()
         engine, session_factory = create_engine(database_url)
         app.state.db_engine = engine
         app.state.db_session_factory = session_factory
@@ -45,10 +47,7 @@ async def lifespan(app: FastAPI):
             async with session_factory() as session:
                 await load_and_register_mcp(app.state.registry, session)
         except Exception:
-            logger.exception(
-                "Failed to load MCP servers from database. "
-                "Run `alembic upgrade head` if mcp_servers is missing."
-            )
+            logger.exception("Failed to load MCP servers from database.")
         logger.info("%s started (model=%s, database=%s)", settings.app_name, settings.model, db_kind)
     else:
         app.state.db_engine = None

@@ -79,9 +79,7 @@ def _run_context(request_headers: dict[str, str]) -> RunContext[AgentDeps]:
 async def call_echo_tool(toolset: Any, request_headers: dict[str, str]) -> dict[str, str]:
     """Call MCP echo tool directly (MCP-layer integration, not full HTTP path)."""
     ctx = _run_context(request_headers)
-    active = toolset
-    if isinstance(toolset, DynamicToolset):
-        active = await toolset.for_run(ctx)
+    active = await toolset.for_run(ctx)
 
     async with active:
         tools = await active.get_tools(ctx)

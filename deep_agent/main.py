@@ -10,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from deep_agent.api.v1.router import api_router
 from deep_agent.core.paths import REPO_ROOT
 from deep_agent.capabilities import build_registry, load_and_register_mcp
+from deep_agent.capabilities.mcp.session_pool import McpSessionPool, set_mcp_session_pool
 from deep_agent.core.config import get_database_url, get_settings
 from deep_agent.core.exceptions import AgentNotFoundError, DeepAgentError
 from deep_agent.core.logging import configure_logging, get_logger
@@ -26,6 +27,8 @@ async def lifespan(app: FastAPI):
     settings = get_settings()
     database_url = get_database_url()
     app.state.settings = settings
+    app.state.mcp_session_pool = McpSessionPool()
+    set_mcp_session_pool(app.state.mcp_session_pool)
     app.state.registry = build_registry(settings)
 
     if database_url:
@@ -55,6 +58,8 @@ async def lifespan(app: FastAPI):
         logger.info("%s started (model=%s, database=in-memory)", settings.app_name, settings.model)
 
     yield
+
+    await app.state.mcp_session_pool.close_all()
 
     if app.state.db_engine is not None:
         await close_db(app.state.db_engine)

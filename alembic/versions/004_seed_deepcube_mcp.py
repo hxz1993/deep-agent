@@ -41,6 +41,11 @@ def upgrade() -> None:
     config = {
         "command": sys.executable,
         "args": [str(SERVER_FILE.resolve())],
+        "env": {
+            "DEEPCUBE_MCP_TRANSPORT": "stdio",
+            "DEEPCUBE_MCP_ENV_URL": "https://test.deepfos.com/deepfos-server/",
+            "DEEPCUBE_MCP_HEADERS": "{}",
+        },
     }
 
     op.execute(

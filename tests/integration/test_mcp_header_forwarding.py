@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import unittest
 
+from deep_agent.capabilities.mcp.session_pool import McpSessionPool, reset_mcp_session_pool, set_mcp_session_pool
 from tests.integration.helpers.mcp import (
     call_echo_tool,
     stdio_echo_toolset,
@@ -13,6 +14,13 @@ from tests.integration.helpers.mcp import (
 
 
 class McpHeaderForwardingTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        reset_mcp_session_pool()
+        set_mcp_session_pool(McpSessionPool())
+
+    def tearDown(self) -> None:
+        reset_mcp_session_pool()
+
     async def test_stdio_mcp_server_receives_forwarded_headers(self) -> None:
         forwarded = {
             "Authorization": "Bearer stdio-integration-token",

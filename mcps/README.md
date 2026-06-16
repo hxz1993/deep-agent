@@ -56,3 +56,28 @@ python mcps/text_tools/server.py
 
 It will wait for MCP stdio traffic (Ctrl+C to quit). Once the app is running it
 shows up as the `mcp:text_tools` capability, e.g. via `GET /api/v1/tools`.
+
+## DeepCube (`deepcube/`)
+
+Thin stdio launcher for the installed `deepcube-mcp` package. Capability name:
+`mcp:deepcube` (tools prefixed with `deepcube_`).
+
+Startup defaults (override via `mcp_servers.config.env`):
+
+| Variable | Default |
+|----------|---------|
+| `DEEPCUBE_MCP_TRANSPORT` | `stdio` |
+| `DEEPCUBE_MCP_ENV_URL` | `https://test.deepfos.com/deepfos-server/` |
+| `DEEPCUBE_MCP_HEADERS` | JSON object, e.g. `{"app":"demo","space":"demo","token":"..."}` |
+
+Example DB `config.env` for live DeepFOS metadata:
+
+```json
+{
+  "DEEPCUBE_MCP_TRANSPORT": "stdio",
+  "DEEPCUBE_MCP_ENV_URL": "https://test.deepfos.com/deepfos-server/",
+  "DEEPCUBE_MCP_HEADERS": "{\"app\":\"demo\",\"space\":\"demo\",\"token\":\"...\"}"
+}
+```
+
+Subprocesses are kept alive per chat session when `DEEP_AGENT_MCP_STDIO_SESSION_SCOPE=true` (default).

@@ -32,3 +32,6 @@ starlette-context==0.3.2
 starlette!=0.36.0
 pycryptodome==3.14.1
 deepfos-loguru-corotate>=0.1.0
+
+# DeepCube MCP assistant (mcps/deepcube/server.py); install in the same Python env as deep-agent.
+deepcube[mcp]

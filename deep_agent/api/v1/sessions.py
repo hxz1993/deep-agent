@@ -85,5 +85,8 @@ async def get_session_history(request: Request, session_id: str) -> SessionHisto
 async def delete_session(request: Request, session_id: str) -> None:
     store = get_store(request)
     await store.delete(session_id)
+    pool = getattr(request.app.state, "mcp_session_pool", None)
+    if pool is not None:
+        await pool.close_session(session_id)
 
 

@@ -20,10 +20,10 @@ class DBMS(Category):
         val_choices=("postgres", "mysql", "kingbase", "dameng"),
         extra_check=_ensure_db_module
     )
-    username = Option(..., val_type=str, if_unset=Action.RAISE, bind_env="USER")
-    hostname = Option(..., val_type=str, if_unset=Action.RAISE, bind_env="HOSTNAME")
-    port = Option(..., val_type=int, if_unset=Action.RAISE, bind_env="PORT")
-    db_name = Option(..., val_type=str, if_unset=Action.RAISE, bind_env="DATABASE")
+    username = Option(..., val_type=str, bind_env="USER")
+    hostname = Option(..., val_type=str, bind_env="HOSTNAME")
+    port = Option(..., val_type=int, bind_env="PORT")
+    db_name = Option(..., val_type=str, bind_env="DATABASE")
     password = Option(
         ..., val_type=str, protected=True,
         bind_env="PASSWORD",
@@ -59,6 +59,11 @@ class Agent(Category):
         "authorization,x-tenant-id,x-user-token",
         val_type=str,
         bind_env="MCP_FORWARD_REQUEST_HEADERS",
+    )
+    mcp_stdio_session_scope = Option(
+        True,
+        val_type=bool,
+        bind_env="MCP_STDIO_SESSION_SCOPE",
     )
 
     def __get__(self, instance, owner) -> "Agent":

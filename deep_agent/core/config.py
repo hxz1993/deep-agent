@@ -37,6 +37,7 @@ class Settings:
     skills_dir: str = str(DEEP_AGENT_ROOT / "skills")
     cursor_skills_dir: str = str(REPO_ROOT / ".cursor" / "skills")
     mcp_forward_request_headers: str = "authorization,x-tenant-id,x-user-token"
+    mcp_stdio_session_scope: bool = True
 
     @classmethod
     def from_option(cls) -> "Settings":
@@ -52,19 +53,19 @@ class Settings:
             skills_dir=str((REPO_ROOT / OPTION.agent.skills_dir).resolve()),
             cursor_skills_dir=str((REPO_ROOT / OPTION.agent.cursor_skills_dir).resolve()),
             mcp_forward_request_headers=OPTION.agent.mcp_forward_request_headers,
+            mcp_stdio_session_scope=OPTION.agent.mcp_stdio_session_scope,
         )
 
 
 def get_database_url() -> str | None:
     """Build async SQLAlchemy DSN from `OPTION.dbms`, or return None if unset."""
     try:
-        dbms = OPTION.dbms
-        dialect = dbms.name
-        username = dbms.username
-        password = dbms.password
-        host = dbms.hostname
-        port = dbms.port
-        database = dbms.db_name
+        dialect = OPTION.dbms.name
+        username = OPTION.dbms.username
+        password = OPTION.dbms.password
+        host = OPTION.dbms.hostname
+        port = OPTION.dbms.port
+        database = OPTION.dbms.db_name
     except (OptionNotSetError, KeyError):
         return None
 

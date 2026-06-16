@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 from pydantic_ai.models.test import TestModel
 
 from deep_agent.api.v1.router import api_router
+from deep_agent.capabilities.mcp.session_pool import McpSessionPool, set_mcp_session_pool
 from deep_agent.capabilities.registry import Capability, CapabilityRegistry
 from deep_agent.capabilities.mcp.toolset_builder import build_mcp_toolset
 from deep_agent.core.config import Settings, get_settings
@@ -69,6 +70,8 @@ def configure_test_app(
     registry = CapabilityRegistry()
     registry.register(echo_capability(record_path=record_path))
     app.state.settings = settings
+    app.state.mcp_session_pool = McpSessionPool()
+    set_mcp_session_pool(app.state.mcp_session_pool)
     app.state.registry = registry
     app.state.store = InMemorySessionStore()
     app.state.db_engine = None

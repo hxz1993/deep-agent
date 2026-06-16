@@ -160,7 +160,7 @@ class ServiceDiscovery(Category):
 class Eureka(Category):
     _ENV_PREFIX = "EXPORT_EUREKA_"
 
-    server = Option(..., val_type=str, bind_env="SERVER_ADDR")
+    server = Option(..., val_type=str, bind_env=["DEFAULTZONE", "SERVER_ADDR"])
     prefer_https = Option(False, val_type=bool, bind_env="PREFER_HTTPS")
 
     if typing.TYPE_CHECKING:

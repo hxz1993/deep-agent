@@ -3,6 +3,20 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <script>
+    (function () {
+      var p = location.pathname;
+      if (!p.endsWith("/")) {
+        var last = p.slice(p.lastIndexOf("/") + 1);
+        p = /\.[A-Za-z0-9]+$/.test(last) ? p.slice(0, p.lastIndexOf("/") + 1) : p + "/";
+      }
+      var b = document.createElement("base");
+      b.href = p;
+      document.head.appendChild(b);
+      window.__DEEP_AGENT_BASE__ = p;
+      window.__DEEP_AGENT_APP_ROOT__ = p.replace(/admin\/$/, "");
+    })();
+  </script>
   <title>deep-agent · 管理后台</title>
   <link rel="stylesheet" href="./admin.css" />
 </head>
@@ -22,7 +36,7 @@
           <span>后端</span>
           <input type="text" id="baseUrlInput" placeholder="http://localhost:8000" />
         </label>
-        <a class="link-btn" href="/" id="chatLink">返回对话</a>
+        <a class="link-btn" href="../" id="chatLink">返回对话</a>
       </div>
     </header>
 

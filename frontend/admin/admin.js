@@ -9,7 +9,8 @@ const state = {
 
 function defaultBaseUrl() {
   if (location.protocol === "file:") return "http://localhost:8000";
-  return `${location.protocol}//${location.host}`;
+  const root = window.__DEEP_AGENT_APP_ROOT__ || window.__DEEP_AGENT_BASE__ || "/";
+  return `${location.origin}${root.replace(/\/$/, "")}`;
 }
 
 function getBaseUrl() {

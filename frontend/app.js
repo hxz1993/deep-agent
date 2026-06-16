@@ -13,7 +13,13 @@
  *   error        -> { type:"error", message }
  * ------------------------------------------------------------------ */
 
-const DEFAULT_BASE_URL = `${location.protocol === "file:" ? "http:" : location.protocol}//${location.hostname || "localhost"}:8000`;
+function defaultBaseUrl() {
+  if (location.protocol === "file:") return "http://localhost:8000";
+  const root = window.__DEEP_AGENT_APP_ROOT__ || window.__DEEP_AGENT_BASE__ || "/";
+  return `${location.origin}${root.replace(/\/$/, "")}`;
+}
+
+const DEFAULT_BASE_URL = defaultBaseUrl();
 
 const state = {
   baseUrl: localStorage.getItem("da_base_url") || DEFAULT_BASE_URL,

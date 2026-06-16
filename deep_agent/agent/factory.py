@@ -32,7 +32,12 @@ def _resolve_model(spec: AgentSpec) -> str | Model:
     return OpenAIChatModel(model_name, provider=provider)
 
 
-def build_agent(spec: AgentSpec, registry: CapabilityRegistry) -> Agent[AgentDeps, str]:
+def build_agent(
+    spec: AgentSpec,
+    registry: CapabilityRegistry,
+    *,
+    request_retries: int = 2,
+) -> Agent[AgentDeps, str]:
     """Construct a Pydantic AI agent from a spec + the capability registry.
 
     The model string (e.g. "openai:gpt-4o") selects the provider, so switching
@@ -46,5 +51,5 @@ def build_agent(spec: AgentSpec, registry: CapabilityRegistry) -> Agent[AgentDep
         deps_type=AgentDeps,
         instructions=spec.instructions,
         toolsets=toolsets,
-        retries=2,
+        retries=request_retries,
     )

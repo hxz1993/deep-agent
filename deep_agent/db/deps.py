@@ -13,7 +13,10 @@ async def db_session(request: Request) -> AsyncIterator[AsyncSession]:
     if session_factory is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Database is not configured. Set DEEP_AGENT_DATABASE_URL.",
+            detail=(
+                "Database is not configured. "
+                "Set DEEP_AGENT_DBMS_NAME/USER/PASSWORD/HOSTNAME/PORT/DATABASE."
+            ),
         )
     async with session_factory() as session:
         yield session

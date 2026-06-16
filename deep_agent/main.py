@@ -10,11 +10,11 @@ from fastapi.staticfiles import StaticFiles
 from deep_agent.api.v1.router import api_router
 from deep_agent.core.paths import REPO_ROOT
 from deep_agent.capabilities import build_registry, load_and_register_mcp
-from deep_agent.core.config import get_settings
+from deep_agent.core.config import get_database_url, get_settings
 from deep_agent.core.exceptions import AgentNotFoundError, DeepAgentError
 from deep_agent.core.logging import configure_logging, get_logger
 from deep_agent.db.engine import close_db, create_engine
-from deep_agent.memory import InMemorySessionStore, PostgresSessionStore
+from deep_agent.memory import InMemorySessionStore, MySQLSessionStore, PostgresSessionStore
 
 
 logger = get_logger(__name__)
@@ -24,14 +24,20 @@ logger = get_logger(__name__)
 async def lifespan(app: FastAPI):
     configure_logging()
     settings = get_settings()
+    database_url = get_database_url()
     app.state.settings = settings
     app.state.registry = build_registry(settings)
 
-    if settings.database_url:
-        engine, session_factory = create_engine(settings.database_url)
+    if database_url:
+        engine, session_factory = create_engine(database_url)
         app.state.db_engine = engine
         app.state.db_session_factory = session_factory
-        app.state.store = PostgresSessionStore(session_factory)
+        if database_url.startswith("mysql+"):
+            app.state.store = MySQLSessionStore(session_factory)
+            db_kind = "mysql"
+        else:
+            app.state.store = PostgresSessionStore(session_factory)
+            db_kind = "postgres"
         try:
             async with session_factory() as session:
                 await load_and_register_mcp(app.state.registry, session)
@@ -40,7 +46,7 @@ async def lifespan(app: FastAPI):
                 "Failed to load MCP servers from database. "
                 "Run `alembic upgrade head` if mcp_servers is missing."
             )
-        logger.info("%s started (model=%s, database=postgres)", settings.app_name, settings.model)
+        logger.info("%s started (model=%s, database=%s)", settings.app_name, settings.model, db_kind)
     else:
         app.state.db_engine = None
         app.state.db_session_factory = None

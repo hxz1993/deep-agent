@@ -70,7 +70,7 @@ def _build_runner_from_spec(
     registry: CapabilityRegistry,
     store: SessionStore,
 ) -> AgentRunner:
-    agent = build_agent(spec, registry)
+    agent = build_agent(spec, registry, request_retries=settings.request_retries)
     limits = UsageLimits(
         request_limit=settings.max_requests,
         total_tokens_limit=settings.max_total_tokens,

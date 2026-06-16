@@ -63,7 +63,7 @@ async def update_mcp_server(
     return McpServerResponse.from_row(row)
 
 
-@router.delete("/mcp/{name}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/mcp/{name}", status_code=status.HTTP_200_OK)
 async def delete_mcp_server(
     name: str,
     request: Request,

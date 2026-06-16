@@ -4,6 +4,7 @@ pydantic-ai-slim[openai,anthropic,google,mcp]>=1.0
 
 # Web framework
 uvicorn[standard]>=0.30
+gunicorn~=26.0.0
 
 # Config & streaming
 pydantic-settings>=2.5

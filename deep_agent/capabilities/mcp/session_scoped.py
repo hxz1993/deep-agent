@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import Any
 
@@ -12,6 +12,7 @@ from typing_extensions import Self
 
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.capabilities.mcp.errors import is_recoverable_mcp_disconnect
+from deep_agent.capabilities.mcp.request_context import apply_request_headers_to_stdio_config
 from deep_agent.capabilities.mcp.session_pool import McpSessionPool, get_mcp_session_pool
 
 
@@ -20,14 +21,16 @@ class SessionScopedMcpToolset(AbstractToolset[AgentDeps]):
     """Session-scoped wrapper around a stdio MCP toolset.
 
     ``async with agent`` enters the registry copy without a session id (no-op).
-    Each agent run binds ``ctx.deps.session_id`` via ``for_run`` and reuses the
-    same subprocess for that session across multiple messages.
+    Each agent run binds ``ctx.deps.session_id`` and ``ctx.deps.request_headers``
+    via ``for_run``. The first run that starts the pooled subprocess supplies
+    headers for :data:`~deep_agent.lib.const.REQUEST_HEADERS_ENV`.
     """
 
     server_name: str
     config: dict[str, Any]
     pool: McpSessionPool = field(default_factory=get_mcp_session_pool)
     _session_id: str | None = field(default=None, repr=False, compare=False)
+    _request_headers: Mapping[str, str] | None = field(default=None, repr=False, compare=False)
     _inner: AbstractToolset[AgentDeps] | None = field(default=None, repr=False, compare=False)
 
     @property
@@ -38,7 +41,13 @@ class SessionScopedMcpToolset(AbstractToolset[AgentDeps]):
         return PrefixedToolset(self, prefix)
 
     async def for_run(self, ctx: RunContext[AgentDeps]) -> AbstractToolset[AgentDeps]:
-        return replace(self, _session_id=ctx.deps.session_id, _inner=None)
+        request_headers = dict(ctx.deps.request_headers) if ctx.deps.request_headers else None
+        return replace(
+            self,
+            _session_id=ctx.deps.session_id,
+            _request_headers=request_headers,
+            _inner=None,
+        )
 
     async def __aenter__(self) -> Self:
         if self._session_id is None:
@@ -60,7 +69,8 @@ class SessionScopedMcpToolset(AbstractToolset[AgentDeps]):
     def _build_inner_toolset(self) -> AbstractToolset[AgentDeps]:
         from deep_agent.capabilities.mcp.toolset_builder import build_raw_stdio_mcp_toolset
 
-        return build_raw_stdio_mcp_toolset(self.server_name, self.config)
+        spawn_config = apply_request_headers_to_stdio_config(self.config, self._request_headers)
+        return build_raw_stdio_mcp_toolset(self.server_name, spawn_config)
 
     async def get_instructions(
         self, ctx: RunContext[AgentDeps]

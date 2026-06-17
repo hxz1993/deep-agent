@@ -36,7 +36,9 @@ class Settings:
     request_retries: int = 2
     skills_dir: str = str(DEEP_AGENT_ROOT / "skills")
     cursor_skills_dir: str = str(REPO_ROOT / ".cursor" / "skills")
-    mcp_forward_request_headers: str = "authorization,x-tenant-id,x-user-token"
+    mcp_forward_request_headers: str = (
+        "authorization,app,space,cookie,user,language,x-deepfos-*,x-tenant-id,x-user-token"
+    )
     mcp_stdio_session_scope: bool = True
     mcp_init_timeout: float = 30.0
     mcp_acquire_retries: int = 1

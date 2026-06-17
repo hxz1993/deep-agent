@@ -22,6 +22,7 @@ HEADER_ECHO_SERVER = (
     Path(__file__).resolve().parents[1] / "fixtures" / "header_echo_server.py"
 )
 ECHO_TOOL_NAME = "echo_echo_request_headers"
+STARTUP_HEADERS_TOOL_NAME = "echo_echo_startup_headers"
 
 
 def free_tcp_port() -> int:
@@ -92,6 +93,28 @@ async def call_echo_tool(toolset: Any, request_headers: dict[str, str]) -> dict[
         if isinstance(raw, dict):
             return {str(k).lower(): str(v) for k, v in raw.items()}
         raise AssertionError(f"Unexpected tool result type: {type(raw)!r} {raw!r}")
+
+
+async def call_startup_headers_tool(toolset: Any, request_headers: dict[str, str]) -> dict[str, str]:
+    """Call MCP tool that returns headers captured at subprocess startup."""
+    ctx = _run_context(request_headers)
+    active = await toolset.for_run(ctx)
+
+    async with active:
+        tools = await active.get_tools(ctx)
+        if STARTUP_HEADERS_TOOL_NAME not in tools:
+            raise AssertionError(
+                f"Expected tool {STARTUP_HEADERS_TOOL_NAME!r}, got {sorted(tools)}"
+            )
+
+        raw = await active.call_tool(STARTUP_HEADERS_TOOL_NAME, {}, ctx, tools[STARTUP_HEADERS_TOOL_NAME])
+        if isinstance(raw, str):
+            payload = json.loads(raw) if raw else {}
+        elif isinstance(raw, dict):
+            payload = raw
+        else:
+            raise AssertionError(f"Unexpected tool result type: {type(raw)!r} {raw!r}")
+        return {str(k).lower(): str(v) for k, v in payload.items()}
 
 
 def stdio_echo_toolset():

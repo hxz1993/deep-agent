@@ -7,6 +7,7 @@ import unittest
 from deep_agent.capabilities.mcp.session_pool import McpSessionPool, reset_mcp_session_pool, set_mcp_session_pool
 from tests.integration.helpers.mcp import (
     call_echo_tool,
+    call_startup_headers_tool,
     stdio_echo_toolset,
     streamable_http_echo_server,
     url_echo_toolset,
@@ -32,6 +33,41 @@ class McpHeaderForwardingTests(unittest.IsolatedAsyncioTestCase):
             {
                 "authorization": "Bearer stdio-integration-token",
                 "x-tenant-id": "tenant-stdio",
+            },
+        )
+
+    async def test_stdio_mcp_subprocess_receives_startup_headers(self) -> None:
+        forwarded = {
+            "Authorization": "Bearer startup-token",
+            "X-Tenant-Id": "tenant-startup",
+        }
+        received = await call_startup_headers_tool(stdio_echo_toolset(), forwarded)
+        self.assertEqual(
+            received,
+            {
+                "authorization": "Bearer startup-token",
+                "x-tenant-id": "tenant-startup",
+            },
+        )
+
+    async def test_stdio_mcp_startup_headers_use_first_request_in_session(self) -> None:
+        toolset = stdio_echo_toolset()
+        first = {
+            "Authorization": "Bearer first-token",
+            "X-Tenant-Id": "tenant-first",
+        }
+        second = {
+            "Authorization": "Bearer second-token",
+            "X-Tenant-Id": "tenant-second",
+        }
+
+        await call_startup_headers_tool(toolset, first)
+        received = await call_startup_headers_tool(toolset, second)
+        self.assertEqual(
+            received,
+            {
+                "authorization": "Bearer first-token",
+                "x-tenant-id": "tenant-first",
             },
         )
 

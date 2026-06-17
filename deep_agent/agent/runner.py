@@ -51,13 +51,12 @@ class AgentRunner:
     async def run(self, session_id: str, prompt: str, deps: AgentDeps) -> dict[str, Any]:
         async with self._session_lock(session_id):
             history = await self.store.get_history(session_id)
-            async with self.agent:
-                result = await self.agent.run(
-                    prompt,
-                    deps=deps,
-                    message_history=history,
-                    usage_limits=self.usage_limits,
-                )
+            result = await self.agent.run(
+                prompt,
+                deps=deps,
+                message_history=history,
+                usage_limits=self.usage_limits,
+            )
             await self.store.append(
                 session_id,
                 result.new_messages(),
@@ -73,33 +72,32 @@ class AgentRunner:
         async with self._session_lock(session_id):
             history = await self.store.get_history(session_id)
             try:
-                async with self.agent:
-                    async with self.agent.iter(
-                        prompt,
-                        deps=deps,
-                        message_history=history,
-                        usage_limits=self.usage_limits,
-                    ) as run:
-                        async for node in run:
-                            if Agent.is_model_request_node(node):
-                                async with node.stream(run.ctx) as stream:
-                                    async for event in stream:
-                                        mapped = _map_model_event(event)
-                                        if mapped is not None:
-                                            yield mapped
-                            elif Agent.is_call_tools_node(node):
-                                async with node.stream(run.ctx) as stream:
-                                    async for event in stream:
-                                        mapped = _map_tool_event(event)
-                                        if mapped is not None:
-                                            yield mapped
-                        result = run.result
-                    await self.store.append(
-                        session_id,
-                        result.new_messages(),
-                        agent_id=deps.agent_id,
-                        user_id=deps.user,
-                    )
+                async with self.agent.iter(
+                    prompt,
+                    deps=deps,
+                    message_history=history,
+                    usage_limits=self.usage_limits,
+                ) as run:
+                    async for node in run:
+                        if Agent.is_model_request_node(node):
+                            async with node.stream(run.ctx) as stream:
+                                async for event in stream:
+                                    mapped = _map_model_event(event)
+                                    if mapped is not None:
+                                        yield mapped
+                        elif Agent.is_call_tools_node(node):
+                            async with node.stream(run.ctx) as stream:
+                                async for event in stream:
+                                    mapped = _map_tool_event(event)
+                                    if mapped is not None:
+                                        yield mapped
+                    result = run.result
+                await self.store.append(
+                    session_id,
+                    result.new_messages(),
+                    agent_id=deps.agent_id,
+                    user_id=deps.user,
+                )
             except Exception as exc:  # noqa: BLE001 - surface as an SSE error event
                 logger.exception("Agent stream failed for session %s", session_id)
                 yield events.error(str(exc))

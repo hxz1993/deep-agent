@@ -56,7 +56,7 @@ class Agent(Category):
     skills_dir = Option("skills", val_type=str, bind_env="SKILLS_DIR")
     cursor_skills_dir = Option(".cursor/skills", val_type=str, bind_env="CURSOR_SKILLS_DIR")
     mcp_forward_request_headers = Option(
-        "authorization,x-tenant-id,x-user-token",
+        "authorization,app,space,cookie,user,language,x-deepfos-*,x-tenant-id,x-user-token",
         val_type=str,
         bind_env="MCP_FORWARD_REQUEST_HEADERS",
     )

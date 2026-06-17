@@ -62,13 +62,21 @@ python mcps/<name>/server.py
 
 ## DeepCube（`deepcube/`）
 
-薄启动器，委托 `deepcube.mcp.server:main`。stdio 模式**不**读 per-request `_meta.headers`，须在环境变量或 DB `config.env` 配置静态 headers。
+薄启动器，委托 `deepcube.mcp.server:main`。**所有运行时参数由 `deepcube-mcp` 从 `DEEPCUBE_MCP_*` 环境变量读取**（见包内 `deepcube.mcp.config`）；launcher 仅设置 stdio 默认值，并在未配置时把 `deepfos_platform` 的 `EXPORT_SERVICE_DISCOVERY_*` / `EXPORT_EUREKA_*` / `EXPORT_NACOS_*` / `EXPORT_K8S_DISCOVERY_NAMESPACE` 桥接为 `DEEPCUBE_MCP_*`。
 
-| 变量 | 默认 |
+stdio 模式**不**读 per-request `_meta.headers`，须在环境变量或 DB `config.env` 配置静态 headers。
+
+| 变量 | 默认 / 说明 |
 | --- | --- |
-| `DEEPCUBE_MCP_TRANSPORT` | `stdio` |
+| `DEEPCUBE_MCP_TRANSPORT` | launcher 默认 `stdio`（包内默认 `http`） |
 | `DEEPCUBE_MCP_ENV_URL` | `https://test.deepfos.com/deepfos-server/` |
 | `DEEPCUBE_MCP_HEADERS` | JSON，如 `{"app":"demo","space":"demo","token":"..."}` |
+| `DEEPCUBE_MCP_DISCOVERY` | JSON，含 `enabled` / `implementation` / `take_over` / `eureka` / `nacos` / `k8s` |
+| `DEEPCUBE_MCP_DISCOVERY_ENABLED` | `true` / `false` |
+| `DEEPCUBE_MCP_EUREKA` | Eureka 地址 |
+| `DEEPCUBE_MCP_CACHE_*` | 元数据缓存 TTL / 开关 / 上限 |
+
+未单独提供 env 的 discovery 子项（如 `nacos.cluster`、`take_over`）请写入 `DEEPCUBE_MCP_DISCOVERY` JSON，或依赖上述 `EXPORT_*` 桥接。
 
 DB 配置示例（`mcp_servers.config.env`）：
 
@@ -76,7 +84,8 @@ DB 配置示例（`mcp_servers.config.env`）：
 {
   "DEEPCUBE_MCP_TRANSPORT": "stdio",
   "DEEPCUBE_MCP_ENV_URL": "https://test.deepfos.com/deepfos-server/",
-  "DEEPCUBE_MCP_HEADERS": "{\"app\":\"demo\",\"space\":\"demo\",\"token\":\"...\"}"
+  "DEEPCUBE_MCP_HEADERS": "{\"app\":\"demo\",\"space\":\"demo\",\"token\":\"...\"}",
+  "DEEPCUBE_MCP_DISCOVERY": "{\"enabled\":true,\"implementation\":\"eureka\",\"take_over\":true,\"eureka\":\"http://eureka:8761/eureka\"}"
 }
 ```
 

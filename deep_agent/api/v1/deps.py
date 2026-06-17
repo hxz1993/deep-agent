@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from uuid import UUID
-
 from fastapi import Request
 from pydantic_ai.usage import UsageLimits
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,7 +8,7 @@ from deep_agent.agent.factory import build_agent
 from deep_agent.agent.runner import AgentRunner
 from deep_agent.agent.spec import AgentSpec, default_spec
 from deep_agent.capabilities.registry import CapabilityRegistry
-from deep_agent.core.config import Settings
+from deep_agent.core.config import Settings, resolve_agent_max_requests
 from deep_agent.core.exceptions import AgentNotFoundError
 from deep_agent.db.repositories.agent import AgentRepository
 from deep_agent.memory.base import SessionStore
@@ -50,7 +48,7 @@ def build_runner(
     return _build_runner_from_spec(spec, settings, registry, store)
 
 
-async def build_runner_for_agent(request: Request, db: AsyncSession, agent_id: UUID) -> AgentRunner:
+async def build_runner_for_agent(request: Request, db: AsyncSession, agent_id: str) -> AgentRunner:
     """Assemble a per-request AgentRunner from a database agent configuration."""
     settings = get_settings(request)
     registry = get_registry(request)
@@ -72,7 +70,7 @@ def _build_runner_from_spec(
 ) -> AgentRunner:
     agent = build_agent(spec, registry, request_retries=settings.request_retries)
     limits = UsageLimits(
-        request_limit=settings.max_requests,
+        request_limit=resolve_agent_max_requests(spec.max_requests, settings.max_requests),
         total_tokens_limit=settings.max_total_tokens,
     )
     return AgentRunner(agent, store, limits)

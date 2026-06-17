@@ -26,3 +26,9 @@ env/
 # OS
 .DS_Store
 Thumbs.db
+
+.agents/
+.claude/
+.cursor/
+_bmad/
+_bmad-output/

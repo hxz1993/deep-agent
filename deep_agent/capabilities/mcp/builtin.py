@@ -1,15 +1,12 @@
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
+from deep_agent.capabilities.mcp.builtin_config import SERVER_FILENAME
 from deep_agent.capabilities.registry import Capability
 from deep_agent.core.logging import get_logger
 
 logger = get_logger(__name__)
-
-# A builtin server is any ``mcps/<name>/`` directory holding this entrypoint.
-SERVER_FILENAME = "server.py"
 
 
 def load_builtin_mcp_capabilities(mcps_dir: str) -> list[Capability]:
@@ -35,11 +32,7 @@ def load_builtin_mcp_capabilities(mcps_dir: str) -> list[Capability]:
             continue
 
         name = entry.name
-        server = build_mcp_toolset(
-            name,
-            "stdio",
-            {"command": sys.executable, "args": [str(server_file)]},
-        )
+        server = build_mcp_toolset(name, "builtin", {})
         capabilities.append(
             Capability(
                 name=f"mcp:{name}",

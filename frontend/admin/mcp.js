@@ -1,3 +1,9 @@
+const MCP_TRANSPORT_LABELS = {
+  url: "url",
+  stdio: "stdio",
+  builtin: "builtin",
+};
+
 const mcpAdmin = {
   async refresh() {
     const tbody = document.getElementById("mcpTableBody");
@@ -15,7 +21,7 @@ const mcpAdmin = {
           (s) => `
         <tr>
           <td><strong>${escapeHtml(s.name)}</strong></td>
-          <td><span class="badge">${escapeHtml(s.transport)}</span></td>
+          <td><span class="badge">${escapeHtml(MCP_TRANSPORT_LABELS[s.transport] || s.transport)}</span></td>
           <td><span class="badge ${s.enabled ? "on" : "off"}">${s.enabled ? "是" : "否"}</span></td>
           <td>${escapeHtml(s.description || "—")}</td>
           <td>${escapeHtml(formatDate(s.updated_at))}</td>
@@ -40,10 +46,37 @@ const mcpAdmin = {
     }
   },
 
+  setTransportSelectMode(mode) {
+    const select = document.getElementById("mcpTransport");
+    const builtinOption = select?.querySelector('option[value="builtin"]');
+    if (!select || !builtinOption) return;
+
+    if (mode === "create") {
+      builtinOption.hidden = true;
+      builtinOption.disabled = true;
+      select.disabled = false;
+      return;
+    }
+    if (mode === "edit-builtin") {
+      builtinOption.hidden = false;
+      builtinOption.disabled = false;
+      select.disabled = true;
+      return;
+    }
+    builtinOption.hidden = true;
+    builtinOption.disabled = true;
+    select.disabled = false;
+  },
+
   toggleTransportFields() {
     const transport = document.getElementById("mcpTransport").value;
     document.getElementById("mcpUrlFields").classList.toggle("hidden", transport !== "url");
     document.getElementById("mcpStdioFields").classList.toggle("hidden", transport !== "stdio");
+    document.getElementById("mcpBuiltinFields").classList.toggle("hidden", transport !== "builtin");
+    document.getElementById("mcpEnvCwdFields").classList.toggle(
+      "hidden",
+      transport !== "stdio" && transport !== "builtin"
+    );
   },
 
   openCreate() {
@@ -60,6 +93,7 @@ const mcpAdmin = {
     document.getElementById("mcpArgs").value = "";
     document.getElementById("mcpEnv").value = "";
     document.getElementById("mcpCwd").value = "";
+    this.setTransportSelectMode("create");
     this.toggleTransportFields();
     document.getElementById("mcpModal").showModal();
   },
@@ -80,7 +114,22 @@ const mcpAdmin = {
         document.getElementById("mcpHeaders").value = server.config.headers
           ? JSON.stringify(server.config.headers, null, 2)
           : "";
+        document.getElementById("mcpCommand").value = "";
+        document.getElementById("mcpArgs").value = "";
+        document.getElementById("mcpEnv").value = "";
+        document.getElementById("mcpCwd").value = "";
+      } else if (server.transport === "builtin") {
+        document.getElementById("mcpUrl").value = "";
+        document.getElementById("mcpHeaders").value = "";
+        document.getElementById("mcpCommand").value = "";
+        document.getElementById("mcpArgs").value = "";
+        document.getElementById("mcpEnv").value = server.config.env
+          ? JSON.stringify(server.config.env, null, 2)
+          : "";
+        document.getElementById("mcpCwd").value = server.config.cwd || "";
       } else {
+        document.getElementById("mcpUrl").value = "";
+        document.getElementById("mcpHeaders").value = "";
         document.getElementById("mcpCommand").value = server.config.command || "";
         document.getElementById("mcpArgs").value = JSON.stringify(server.config.args || []);
         document.getElementById("mcpEnv").value = server.config.env
@@ -89,6 +138,7 @@ const mcpAdmin = {
         document.getElementById("mcpCwd").value = server.config.cwd || "";
       }
 
+      this.setTransportSelectMode(server.transport === "builtin" ? "edit-builtin" : "edit");
       this.toggleTransportFields();
       document.getElementById("mcpModal").showModal();
     } catch (err) {
@@ -102,6 +152,14 @@ const mcpAdmin = {
       const config = { url: document.getElementById("mcpUrl").value.trim() };
       const headers = parseJsonOrEmpty(document.getElementById("mcpHeaders").value);
       if (headers) config.headers = headers;
+      return config;
+    }
+    if (transport === "builtin") {
+      const config = {};
+      const env = parseJsonOrEmpty(document.getElementById("mcpEnv").value);
+      const cwd = document.getElementById("mcpCwd").value.trim();
+      if (env) config.env = env;
+      if (cwd) config.cwd = cwd;
       return config;
     }
     const config = {
@@ -118,6 +176,10 @@ const mcpAdmin = {
   async save(event) {
     event.preventDefault();
     const transport = document.getElementById("mcpTransport").value;
+    if (!state.editingMcp && transport === "builtin") {
+      showToast("builtin 类型 MCP 由仓库内置，不能手动新建", true);
+      return;
+    }
     let config;
     try {
       config = this.buildConfig();
@@ -127,11 +189,13 @@ const mcpAdmin = {
     }
 
     const payload = {
-      transport,
       config,
       description: document.getElementById("mcpDescription").value.trim() || null,
       enabled: document.getElementById("mcpEnabled").checked,
     };
+    if (transport !== "builtin") {
+      payload.transport = transport;
+    }
 
     try {
       if (state.editingMcp) {

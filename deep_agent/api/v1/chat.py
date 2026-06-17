@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import uuid
-from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Request, status
 from sse_starlette.sse import EventSourceResponse
@@ -12,6 +11,7 @@ from deep_agent.agent.headers import extract_forward_headers
 from deep_agent.api.v1.deps import build_runner, build_runner_for_agent, get_settings
 from deep_agent.core.exceptions import AgentNotFoundError
 from deep_agent.db.deps import db_session
+from deep_agent.db.ids import normalize_agent_id
 from deep_agent.memory.postgres import scoped_session_key
 from deep_agent.schemas.chat import ChatRequest, ChatResponse, StreamChatRequest
 
@@ -23,7 +23,7 @@ def _agent_deps(
     *,
     session_id: str,
     user: str | None,
-    agent_id: UUID | None = None,
+    agent_id: str | None = None,
 ) -> AgentDeps:
     settings = get_settings(request)
     return AgentDeps(
@@ -49,13 +49,17 @@ async def chat_stream(request: Request, body: StreamChatRequest) -> EventSourceR
 
     if body.agent_id is not None:
         try:
+            agent_id = normalize_agent_id(body.agent_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+        try:
             async with db_session(request) as db:
-                runner = await build_runner_for_agent(request, db, body.agent_id)
+                runner = await build_runner_for_agent(request, db, agent_id)
         except AgentNotFoundError as exc:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-        run_session_key = scoped_session_key(body.agent_id, session_id)
-        deps = _agent_deps(request, session_id=run_session_key, user=body.user, agent_id=body.agent_id)
-        session_data = {"session_id": session_id, "agent_id": str(body.agent_id)}
+        run_session_key = scoped_session_key(agent_id, session_id)
+        deps = _agent_deps(request, session_id=run_session_key, user=body.user, agent_id=agent_id)
+        session_data = {"session_id": session_id, "agent_id": agent_id}
     else:
         runner = build_runner(request, model=body.model, capabilities=body.capabilities)
         run_session_key = session_id

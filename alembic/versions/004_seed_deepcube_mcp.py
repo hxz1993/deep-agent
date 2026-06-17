@@ -8,7 +8,6 @@ Create Date: 2026-06-10
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 from typing import Sequence, Union
 
@@ -25,22 +24,90 @@ ROOT = Path(__file__).resolve().parents[2]
 SERVER_FILE = ROOT / "mcps" / "deepcube" / "server.py"
 
 
-def upgrade() -> None:
-    if not SERVER_FILE.is_file():
+def _is_postgresql() -> bool:
+    return op.get_bind().dialect.name == "postgresql"
+
+
+def _json_type():
+    if _is_postgresql():
+        return postgresql.JSONB(astext_type=sa.Text())
+    return sa.JSON()
+
+
+def _upsert_mcp_server(
+    *,
+    name: str,
+    transport: str,
+    config: dict,
+    description: str,
+    enabled: bool = True,
+) -> None:
+    if _is_postgresql():
+        mcp_servers = sa.table(
+            "mcp_servers",
+            sa.column("name", sa.Text()),
+            sa.column("transport", sa.Text()),
+            sa.column("config", _json_type()),
+            sa.column("description", sa.Text()),
+            sa.column("enabled", sa.Boolean()),
+        )
+        op.execute(
+            postgresql.insert(mcp_servers)
+            .values(
+                name=name,
+                transport=transport,
+                config=config,
+                description=description,
+                enabled=enabled,
+            )
+            .on_conflict_do_update(
+                index_elements=["name"],
+                set_={
+                    "transport": transport,
+                    "config": config,
+                    "description": description,
+                    "enabled": enabled,
+                    "updated_at": sa.text("now()"),
+                },
+            )
+        )
         return
+
+    from sqlalchemy.dialects.mysql import insert as mysql_insert
 
     mcp_servers = sa.table(
         "mcp_servers",
         sa.column("name", sa.Text()),
         sa.column("transport", sa.Text()),
-        sa.column("config", postgresql.JSONB(astext_type=sa.Text())),
+        sa.column("config", _json_type()),
         sa.column("description", sa.Text()),
         sa.column("enabled", sa.Boolean()),
+        sa.column("updated_at", sa.DateTime(timezone=True)),
+    )
+    op.execute(
+        mysql_insert(mcp_servers)
+        .values(
+            name=name,
+            transport=transport,
+            config=config,
+            description=description,
+            enabled=enabled,
+        )
+        .on_duplicate_key_update(
+            transport=transport,
+            config=config,
+            description=description,
+            enabled=enabled,
+            updated_at=sa.text("CURRENT_TIMESTAMP"),
+        )
     )
 
+
+def upgrade() -> None:
+    if not SERVER_FILE.is_file():
+        return
+
     config = {
-        "command": sys.executable,
-        "args": [str(SERVER_FILE.resolve())],
         "env": {
             "DEEPCUBE_MCP_TRANSPORT": "stdio",
             "DEEPCUBE_MCP_ENV_URL": "https://test.deepfos.com/deepfos-server/",
@@ -48,25 +115,12 @@ def upgrade() -> None:
         },
     }
 
-    op.execute(
-        postgresql.insert(mcp_servers)
-        .values(
-            name="deepcube",
-            transport="stdio",
-            config=config,
-            description="DeepCube SDK assistant: knowledge tools + live cube/dimension/member metadata.",
-            enabled=True,
-        )
-        .on_conflict_do_update(
-            index_elements=["name"],
-            set_={
-                "transport": "stdio",
-                "config": config,
-                "description": "DeepCube SDK assistant: search, read, and examples (read-only).",
-                "enabled": True,
-                "updated_at": sa.text("now()"),
-            },
-        )
+    _upsert_mcp_server(
+        name="deepcube",
+        transport="builtin",
+        config=config,
+        description="DeepCube SDK assistant: knowledge tools + live cube/dimension/member metadata.",
+        enabled=True,
     )
 
 

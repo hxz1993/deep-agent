@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from typing import Any
-from uuid import UUID
 
 from pydantic import BaseModel, Field
 
@@ -24,7 +23,7 @@ class ChatRequest(BaseModel):
 
 
 class StreamChatRequest(ChatRequest):
-    agent_id: UUID | None = Field(
+    agent_id: str | None = Field(
         default=None,
         description="Load agent config from the database. When set, model/capabilities are ignored.",
     )
@@ -51,6 +50,6 @@ class CapabilityDescription(BaseModel):
 class SessionInfo(BaseModel):
     session_id: str
     message_count: int
-    agent_id: UUID | None = Field(default=None, description="Agent id used for this session.")
+    agent_id: str | None = Field(default=None, description="Agent id used for this session.")
     agent_name: str | None = Field(default=None, description="Agent display name (if known).")
     user_prompt: str | None = Field(default=None, description="First user message in the session.")

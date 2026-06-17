@@ -263,6 +263,7 @@ const agentsAdmin = {
       "You are a helpful assistant. Use available tools when they help answer accurately.";
     document.getElementById("agentBaseUrl").value = "";
     document.getElementById("agentApiKey").value = "";
+    document.getElementById("agentMaxRequests").value = "";
     this.renderCapabilityCheckboxes(null);
     document.getElementById("agentModal").showModal();
   },
@@ -278,6 +279,8 @@ const agentsAdmin = {
       document.getElementById("agentPrompt").value = agent.prompt;
       document.getElementById("agentBaseUrl").value = agent.base_url || "";
       document.getElementById("agentApiKey").value = "";
+      document.getElementById("agentMaxRequests").value =
+        agent.max_requests == null ? "" : String(agent.max_requests);
       this.renderCapabilityCheckboxes(agent.capabilities);
       document.getElementById("agentModal").showModal();
     } catch (err) {
@@ -296,6 +299,13 @@ const agentsAdmin = {
     };
     const apiKey = document.getElementById("agentApiKey").value.trim();
     if (apiKey) payload.api_key = apiKey;
+
+    const maxRequestsRaw = document.getElementById("agentMaxRequests").value.trim();
+    if (maxRequestsRaw) {
+      payload.max_requests = Number(maxRequestsRaw);
+    } else if (state.editingAgentId) {
+      payload.max_requests = null;
+    }
 
     try {
       if (state.editingAgentId) {

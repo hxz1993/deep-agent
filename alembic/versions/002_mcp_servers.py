@@ -9,7 +9,6 @@ Create Date: 2026-06-05
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
 from typing import Sequence, Union
 
@@ -26,6 +25,34 @@ ROOT = Path(__file__).resolve().parents[2]
 MCP_JSON = ROOT / "config" / "mcp.json"
 MCPS_DIR = ROOT / "mcps"
 SERVER_FILENAME = "server.py"
+
+
+def _is_postgresql() -> bool:
+    return op.get_bind().dialect.name == "postgresql"
+
+
+def _json_type():
+    if _is_postgresql():
+        return postgresql.JSONB(astext_type=sa.Text())
+    return sa.JSON()
+
+
+def _boolean_true_default():
+    if _is_postgresql():
+        return sa.text("true")
+    return sa.text("1")
+
+
+def _now_default():
+    if _is_postgresql():
+        return sa.text("now()")
+    return sa.text("CURRENT_TIMESTAMP")
+
+
+def _key_type():
+    if _is_postgresql():
+        return sa.Text()
+    return sa.String(191)
 
 
 def _seed_rows() -> list[dict]:
@@ -82,11 +109,8 @@ def _seed_rows() -> list[dict]:
             rows.append(
                 {
                     "name": name,
-                    "transport": "stdio",
-                    "config": {
-                        "command": sys.executable,
-                        "args": [str(server_file.resolve())],
-                    },
+                    "transport": "builtin",
+                    "config": {},
                     "description": f"Builtin MCP server '{name}'.",
                     "enabled": True,
                 }
@@ -99,13 +123,13 @@ def _seed_rows() -> list[dict]:
 def upgrade() -> None:
     op.create_table(
         "mcp_servers",
-        sa.Column("name", sa.Text(), nullable=False),
+        sa.Column("name", _key_type(), nullable=False),
         sa.Column("transport", sa.Text(), nullable=False),
-        sa.Column("config", postgresql.JSONB(astext_type=sa.Text()), nullable=False),
+        sa.Column("config", _json_type(), nullable=False),
         sa.Column("description", sa.Text(), nullable=True),
-        sa.Column("enabled", sa.Boolean(), server_default=sa.text("true"), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column("enabled", sa.Boolean(), server_default=_boolean_true_default(), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=_now_default(), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=_now_default(), nullable=False),
         sa.PrimaryKeyConstraint("name"),
     )
 
@@ -113,7 +137,7 @@ def upgrade() -> None:
         "mcp_servers",
         sa.column("name", sa.Text()),
         sa.column("transport", sa.Text()),
-        sa.column("config", postgresql.JSONB(astext_type=sa.Text())),
+        sa.column("config", _json_type()),
         sa.column("description", sa.Text()),
         sa.column("enabled", sa.Boolean()),
     )

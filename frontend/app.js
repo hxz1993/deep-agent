@@ -53,7 +53,7 @@ const el = {
 /* --------------------------- 初始化 --------------------------- */
 function updateAdminLink() {
   const link = $("adminLink");
-  if (link) link.href = `${state.baseUrl}/admin`;
+  if (link) link.href = `${state.baseUrl}/admin/`;
 }
 
 function scopedSessionKey(agentId, sessionId) {
@@ -67,6 +67,22 @@ function sessionLookupKey(session) {
 function agentNameById(agentId) {
   const found = state.agents.find((a) => a.id === agentId);
   return found ? found.name : agentId;
+}
+
+function defaultAgentId() {
+  if (!state.agents.length) return "";
+  const named = state.agents.find((a) => a.name === "default");
+  return named ? named.id : state.agents[0].id;
+}
+
+function ensureAgentSelected() {
+  const valid = state.agentId && state.agents.some((a) => a.id === state.agentId);
+  if (!valid && state.agents.length) {
+    state.agentId = defaultAgentId();
+    localStorage.setItem("da_agent_id", state.agentId);
+  }
+  if (el.agentSelect && state.agentId) el.agentSelect.value = state.agentId;
+  return !!state.agentId;
 }
 
 function generateSessionId() {
@@ -180,6 +196,8 @@ function newChat(agentId) {
     state.agentId = agentId;
     localStorage.setItem("da_agent_id", state.agentId);
     if (el.agentSelect) el.agentSelect.value = state.agentId;
+  } else {
+    ensureAgentSelected();
   }
   state.sessionId = null;
   el.messages.innerHTML = "";
@@ -357,11 +375,7 @@ async function loadAgents() {
       opt.textContent = a.name;
       el.agentSelect.appendChild(opt);
     }
-    if (!state.agentId || !state.agents.some((a) => a.id === state.agentId)) {
-      state.agentId = state.agents[0].id;
-      localStorage.setItem("da_agent_id", state.agentId);
-    }
-    el.agentSelect.value = state.agentId;
+    ensureAgentSelected();
     updateChatHeader();
   } catch (e) {
     el.agentSelect.innerHTML = `<option value="">加载失败</option>`;
@@ -410,7 +424,7 @@ async function loadCapabilities() {
 async function onSend() {
   const text = el.input.value.trim();
   if (!text || state.streaming) return;
-  if (!state.agentId) {
+  if (!ensureAgentSelected()) {
     addSystemNote("请先选择 Agent。");
     return;
   }

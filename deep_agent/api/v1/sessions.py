@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from uuid import UUID
-
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,7 +16,7 @@ router = APIRouter()
 _agent_repo = AgentRepository()
 
 
-async def _resolve_agent_name(db: AsyncSession, agent_id: UUID | None) -> str | None:
+async def _resolve_agent_name(db: AsyncSession, agent_id: str | None) -> str | None:
     if agent_id is None:
         return None
     row = await _agent_repo.get_by_id(db, agent_id)

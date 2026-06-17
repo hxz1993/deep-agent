@@ -33,7 +33,11 @@ async def lifespan(app: FastAPI):
     app.state.registry = build_registry(settings)
 
     if database_url:
-        await upgrade_database()
+        try:
+            await upgrade_database()
+        except Exception:
+            logger.exception("Startup aborted: database migration failed")
+            raise
         engine, session_factory = create_engine(database_url)
         app.state.db_engine = engine
         app.state.db_session_factory = session_factory

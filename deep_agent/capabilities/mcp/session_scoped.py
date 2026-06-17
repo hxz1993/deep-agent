@@ -11,21 +11,8 @@ from pydantic_ai.toolsets.prefixed import PrefixedToolset
 from typing_extensions import Self
 
 from deep_agent.agent.deps import AgentDeps
+from deep_agent.capabilities.mcp.errors import is_recoverable_mcp_disconnect
 from deep_agent.capabilities.mcp.session_pool import McpSessionPool, get_mcp_session_pool
-
-
-def _is_recoverable_mcp_disconnect(exc: Exception) -> bool:
-    text = str(exc).lower()
-    return any(
-        marker in text
-        for marker in (
-            "failed to connect",
-            "peer closed connection",
-            "incomplete chunked",
-            "broken pipe",
-            "connection reset",
-        )
-    )
 
 
 @dataclass
@@ -99,7 +86,7 @@ class SessionScopedMcpToolset(AbstractToolset[AgentDeps]):
         try:
             return await self._inner.call_tool(name, tool_args, ctx, tool)
         except Exception as exc:
-            if self._session_id is None or not _is_recoverable_mcp_disconnect(exc):
+            if self._session_id is None or not is_recoverable_mcp_disconnect(exc):
                 raise
 
             # Stdio MCP subprocess may die between runs; reset pooled entry and retry once.

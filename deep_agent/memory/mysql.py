@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from datetime import datetime
-from uuid import UUID
 
 from sqlalchemy.dialects.mysql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,7 +17,7 @@ class MySQLSessionStore(SqlSessionStore):
         db: AsyncSession,
         session_key: str,
         *,
-        agent_id: UUID | None,
+        agent_id: str | None,
         user_id: str | None,
         now: datetime,
     ) -> None:

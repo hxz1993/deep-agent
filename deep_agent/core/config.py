@@ -31,13 +31,15 @@ class Settings:
         "Use the available tools when they help you answer accurately. "
         "Be concise and explain your reasoning when it is useful."
     )
-    max_requests: int = 12
+    max_requests: int = 50
     max_total_tokens: int | None = None
     request_retries: int = 2
     skills_dir: str = str(DEEP_AGENT_ROOT / "skills")
     cursor_skills_dir: str = str(REPO_ROOT / ".cursor" / "skills")
     mcp_forward_request_headers: str = "authorization,x-tenant-id,x-user-token"
     mcp_stdio_session_scope: bool = True
+    mcp_init_timeout: float = 30.0
+    mcp_acquire_retries: int = 1
 
     @classmethod
     def from_option(cls) -> "Settings":
@@ -54,7 +56,14 @@ class Settings:
             cursor_skills_dir=str((REPO_ROOT / OPTION.agent.cursor_skills_dir).resolve()),
             mcp_forward_request_headers=OPTION.agent.mcp_forward_request_headers,
             mcp_stdio_session_scope=OPTION.agent.mcp_stdio_session_scope,
+            mcp_init_timeout=OPTION.agent.mcp_init_timeout,
+            mcp_acquire_retries=OPTION.agent.mcp_acquire_retries,
         )
+
+
+def escape_for_ini(value: str) -> str:
+    """Escape ``%`` for ConfigParser values (e.g. Alembic ``alembic.ini``)."""
+    return value.replace("%", "%%")
 
 
 def get_database_url() -> str | None:
@@ -94,6 +103,27 @@ def _load_dotenv_if_exists() -> None:
         except Exception:
             return
         load_dotenv(env_file, override=False)
+
+
+def default_agent_max_requests(global_max: int) -> int:
+    """Per-agent default when ``max_requests`` is unset."""
+    return max(1, global_max // 2)
+
+
+def resolve_agent_max_requests(agent_max_requests: int | None, global_max: int) -> int:
+    """Resolve effective request limit for one agent turn."""
+    if agent_max_requests is None:
+        return default_agent_max_requests(global_max)
+    return min(agent_max_requests, global_max)
+
+
+def validate_agent_max_requests(agent_max_requests: int | None, global_max: int) -> None:
+    if agent_max_requests is None:
+        return
+    if agent_max_requests < 1 or agent_max_requests > global_max:
+        raise ValueError(
+            f"max_requests must be between 1 and {global_max}, got {agent_max_requests}"
+        )
 
 
 @lru_cache

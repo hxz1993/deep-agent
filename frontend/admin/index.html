@@ -121,6 +121,11 @@
               <span>API Key（可选，留空表示不修改）</span>
               <input type="password" id="agentApiKey" autocomplete="new-password" />
             </label>
+            <label class="field">
+              <span>最大请求次数（可选）</span>
+              <input type="number" id="agentMaxRequests" min="1" placeholder="默认：全局上限的一半" />
+              <span class="field-hint">留空使用默认值，不超过 DEEP_AGENT_MAX_REQUESTS。</span>
+            </label>
           </div>
           <div class="agent-form-col">
             <label class="field field-grow">
@@ -169,6 +174,7 @@
           <select id="mcpTransport">
             <option value="url">url（远程 SSE / HTTP）</option>
             <option value="stdio">stdio（本地子进程）</option>
+            <option value="builtin">builtin（仓库内置 mcps/）</option>
           </select>
         </label>
         <label class="field">
@@ -200,6 +206,13 @@
             <span>Args（JSON 数组或逗号分隔）</span>
             <input type="text" id="mcpArgs" placeholder='["mcps/text_tools/server.py"]' />
           </label>
+        </div>
+
+        <div id="mcpBuiltinFields" class="hidden">
+          <p class="field-hint">启动路径固定为 <code>mcps/&lt;名称&gt;/server.py</code>，无需配置 command / args。</p>
+        </div>
+
+        <div id="mcpEnvCwdFields" class="hidden">
           <label class="field">
             <span>Env JSON（可选）</span>
             <textarea id="mcpEnv" rows="2" placeholder='{"KEY": "value"}'></textarea>

@@ -4,7 +4,6 @@ import asyncio
 from abc import ABC, abstractmethod
 from collections import defaultdict
 from datetime import datetime, timezone
-from uuid import UUID
 
 from pydantic import TypeAdapter
 from pydantic_ai.messages import ModelMessage
@@ -37,7 +36,7 @@ class SqlSessionStore(ABC):
         db: AsyncSession,
         session_key: str,
         *,
-        agent_id: UUID | None,
+        agent_id: str | None,
         user_id: str | None,
         now: datetime,
     ) -> None:
@@ -58,7 +57,7 @@ class SqlSessionStore(ABC):
         session_key: str,
         messages: list[ModelMessage],
         *,
-        agent_id: UUID | None = None,
+        agent_id: str | None = None,
         user_id: str | None = None,
     ) -> None:
         if not messages:
@@ -99,7 +98,7 @@ class SqlSessionStore(ABC):
             )
             return list(result.scalars().all())
 
-    async def get_session_agent_id(self, session_key: str) -> UUID | None:
+    async def get_session_agent_id(self, session_key: str) -> str | None:
         async with self._session_factory() as db:
             result = await db.execute(
                 select(ChatSession.agent_id).where(ChatSession.session_key == session_key)

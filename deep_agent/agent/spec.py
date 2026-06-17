@@ -20,6 +20,7 @@ class AgentSpec:
     # Optional OpenAI-compatible endpoint override (see Settings.model_base_url).
     base_url: str | None = None
     api_key: str | None = None
+    max_requests: int | None = None
 
 
 def default_spec(settings: Settings) -> AgentSpec:

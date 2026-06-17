@@ -50,7 +50,7 @@ class Agent(Category):
         val_type=str,
         bind_env="SYSTEM_PROMPT",
     )
-    max_requests = Option(12, val_type=int, bind_env="MAX_REQUESTS")
+    max_requests = Option(50, val_type=int, bind_env="MAX_REQUESTS")
     max_total_tokens = Option(None, val_type=int, bind_env="MAX_TOTAL_TOKENS")
     request_retries = Option(2, val_type=int, bind_env="REQUEST_RETRIES")
     skills_dir = Option("skills", val_type=str, bind_env="SKILLS_DIR")
@@ -64,6 +64,16 @@ class Agent(Category):
         True,
         val_type=bool,
         bind_env="MCP_STDIO_SESSION_SCOPE",
+    )
+    mcp_init_timeout = Option(
+        30,
+        val_type=float,
+        bind_env="MCP_INIT_TIMEOUT",
+    )
+    mcp_acquire_retries = Option(
+        1,
+        val_type=int,
+        bind_env="MCP_ACQUIRE_RETRIES",
     )
 
     def __get__(self, instance, owner) -> "Agent":

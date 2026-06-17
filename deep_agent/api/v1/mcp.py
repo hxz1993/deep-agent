@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from deep_agent.capabilities import load_and_register_mcp
 from deep_agent.db.deps import get_db
 from deep_agent.db.repositories.mcp import McpServerRepository
-from deep_agent.schemas.mcp import McpServerCreate, McpServerResponse, McpServerUpdate
+from deep_agent.schemas.mcp import McpBuiltinConfig, McpServerCreate, McpServerResponse, McpServerUpdate
 
 router = APIRouter()
 _repo = McpServerRepository()
@@ -15,6 +15,24 @@ _repo = McpServerRepository()
 async def _reload_mcp_registry(request: Request, db: AsyncSession) -> None:
     registry = request.app.state.registry
     await load_and_register_mcp(registry, db)
+
+
+def _assert_builtin_row_mutable(row, body: McpServerUpdate) -> None:
+    if row.transport != "builtin":
+        return
+    if body.transport is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Builtin MCP transport cannot be changed via API",
+        )
+    if body.config is not None:
+        try:
+            McpBuiltinConfig.model_validate(body.config)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=str(exc),
+            ) from exc
 
 
 @router.get("/mcp", response_model=list[McpServerResponse])
@@ -58,6 +76,7 @@ async def update_mcp_server(
     row = await _repo.get_by_name(db, name)
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"MCP server not found: {name}")
+    _assert_builtin_row_mutable(row, body)
     row = await _repo.update(db, row, body)
     await _reload_mcp_registry(request, db)
     return McpServerResponse.from_row(row)

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Mapping
-from uuid import UUID
 
 
 @dataclass
@@ -19,5 +18,5 @@ class AgentDeps:
 
     session_id: str
     user: str | None = None
-    agent_id: UUID | None = None
+    agent_id: str | None = None
     request_headers: Mapping[str, str] = field(default_factory=dict)

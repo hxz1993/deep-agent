@@ -37,11 +37,21 @@ def build_mcp_toolset(name: str, transport: str, config: dict[str, Any]) -> Any:
     raise ValueError(f"Unsupported MCP transport: {transport!r}")
 
 
+def _expand_python_path(env: dict[str, str], path: str):
+    sep = ";" if os.name == "nt" else ":"
+    if "PYTHONPATH" in env: 
+        env["PYTHONPATH"] = sep.join([env["PYTHONPATH"], path])
+    else:
+        env["PYTHONPATH"] = path
+
+
 def build_raw_stdio_mcp_toolset(name: str, config: dict[str, Any]) -> MCPToolset[AgentDeps]:
     from fastmcp.client.transports import StdioTransport
 
     env = os.environ.copy()
     env.update(config.get("env", {}))
+    _expand_python_path(env, str(DEEP_AGENT_ROOT))
+
     transport_obj = StdioTransport(
         command=config["command"],
         args=list(config.get("args", [])),

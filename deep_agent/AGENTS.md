@@ -64,7 +64,7 @@ HTTP (REST/SSE)
 | `runner.py` | `run()` / `run_stream()` — 会话锁、history、事件映射 |
 | `deps.py` | `AgentDeps`：session_id、user、agent_id、request_headers |
 | `headers.py` | HTTP → MCP 的 header 白名单提取 |
-| `events.py` | Pydantic AI 事件 → SSE 字典 |
+| `events.py` | Pydantic AI 事件 → SSE 字典（`singledispatch` 分层映射，见[重构风格规则](../.cursor/rules/python-refactoring.mdc)） |
 
 ### `capabilities/`
 
@@ -89,7 +89,7 @@ HTTP (REST/SSE)
 | `mcp.py` | CRUD `/mcp`（写后热重载 registry） |
 | `sessions.py` | 会话列表 / 历史 / 删除 |
 | `tools.py` | `GET /tools` |
-| `deps.py` | `build_runner` / `build_runner_for_agent` |
+| `deps.py` | `build_runner` / `build_runner_for_agent`（多入口共享组装，见[重构风格规则](../.cursor/rules/python-refactoring.mdc)） |
 
 ### `db/` + `memory/`
 
@@ -191,6 +191,9 @@ SSE 协议：[`../docs/sse-protocol.md`](../docs/sse-protocol.md)。前端对接
 
 ## 约定与陷阱
 
+0. **重构风格**：Python 后端重构遵循 [`.cursor/rules/python-refactoring.mdc`](../.cursor/rules/python-refactoring.mdc)
+   - 事件多态映射 → `agent/events.py`（`singledispatch` 分层）
+   - 多入口共享组装 → `api/v1/deps.py`（变化量留在入口，上下文在 `_build_*` 内统一解包）
 1. 包名 **`deep_agent`**，启动 `deep_agent.main:app`（非 `app.main`）
 2. 扩展优先走路径注册，避免改 `runner.py` 核心
 3. 能力命名：`native` \| `skill:<name>` \| `cursor-skill:<name>` \| `mcp:<name>`

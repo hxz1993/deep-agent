@@ -81,7 +81,7 @@ class ChatHeaderForwardingTests(unittest.TestCase):
         from fastapi.testclient import TestClient
         from pydantic_ai.models.test import TestModel
 
-        from deep_agent.api.v1.router import api_router
+        from deep_agent.api.v1 import api_router
         from deep_agent.capabilities import build_registry
         from deep_agent.capabilities.mcp.builtin import load_builtin_mcp_capabilities
         from deep_agent.core.config import get_settings

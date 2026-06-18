@@ -36,38 +36,33 @@ def build_runner(
 ) -> AgentRunner:
     """Assemble a per-request AgentRunner from settings + registry + store."""
     settings = get_settings(request)
-    registry = get_registry(request)
-    store = get_store(request)
-
     spec = default_spec(settings)
     if model:
         spec.model = model
     if capabilities is not None:
         spec.capabilities = capabilities
 
-    return _build_runner_from_spec(spec, settings, registry, store)
+    return _build_runner_from_spec(spec, request)
 
 
 async def build_runner_for_agent(request: Request, db: AsyncSession, agent_id: str) -> AgentRunner:
     """Assemble a per-request AgentRunner from a database agent configuration."""
-    settings = get_settings(request)
-    registry = get_registry(request)
-    store = get_store(request)
-
     row = await _agent_repo.get_by_id(db, agent_id)
     if row is None:
         raise AgentNotFoundError(agent_id)
 
     spec = _agent_repo.to_spec(row)
-    return _build_runner_from_spec(spec, settings, registry, store)
+    return _build_runner_from_spec(spec, request)
 
 
 def _build_runner_from_spec(
     spec: AgentSpec,
-    settings: Settings,
-    registry: CapabilityRegistry,
-    store: SessionStore,
+    request: Request,
 ) -> AgentRunner:
+    settings = get_settings(request)
+    registry = get_registry(request)
+    store = get_store(request)
+
     agent = build_agent(spec, registry, request_retries=settings.request_retries)
     limits = UsageLimits(
         request_limit=resolve_agent_max_requests(spec.max_requests, settings.max_requests),

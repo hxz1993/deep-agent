@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from deep_agent.api.v1.router import api_router
+from deep_agent.api.v1 import api_router
 from deep_agent.core.paths import REPO_ROOT
 from deep_agent.capabilities import build_registry, load_and_register_mcp
 from deep_agent.capabilities.mcp.session_pool import McpSessionPool, set_mcp_session_pool

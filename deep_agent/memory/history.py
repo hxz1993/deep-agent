@@ -14,7 +14,7 @@ from pydantic_ai.messages import (
     UserPromptPart,
 )
 
-from deep_agent.agent.runner import _to_jsonable
+from deep_agent.agent.events import _to_jsonable
 
 
 class HistoryTextPart(BaseModel):

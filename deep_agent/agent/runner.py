@@ -3,16 +3,7 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator
 
-from pydantic_ai import Agent
-from pydantic_ai.messages import (
-    FunctionToolCallEvent,
-    FunctionToolResultEvent,
-    PartDeltaEvent,
-    PartStartEvent,
-    TextPart,
-    TextPartDelta,
-    ToolCallPart,
-)
+from pydantic_ai import Agent, AgentRunResultEvent
 from pydantic_ai.usage import UsageLimits
 
 from deep_agent.agent import events
@@ -71,27 +62,21 @@ class AgentRunner:
     async def run_stream(self, session_id: str, prompt: str, deps: AgentDeps) -> AsyncIterator[dict[str, Any]]:
         async with self._session_lock(session_id):
             history = await self.store.get_history(session_id)
+            result = None
             try:
-                async with self.agent.iter(
+                async with self.agent.run_stream_events(
                     prompt,
                     deps=deps,
                     message_history=history,
                     usage_limits=self.usage_limits,
-                ) as run:
-                    async for node in run:
-                        if Agent.is_model_request_node(node):
-                            async with node.stream(run.ctx) as stream:
-                                async for event in stream:
-                                    mapped = _map_model_event(event)
-                                    if mapped is not None:
-                                        yield mapped
-                        elif Agent.is_call_tools_node(node):
-                            async with node.stream(run.ctx) as stream:
-                                async for event in stream:
-                                    mapped = _map_tool_event(event)
-                                    if mapped is not None:
-                                        yield mapped
-                    result = run.result
+                ) as stream:
+                    async for event in stream:
+                        if isinstance(event, AgentRunResultEvent):
+                            result = event.result
+                            continue
+                        mapped = events.map_event(event)
+                        if mapped is not None:
+                            yield mapped
                 await self.store.append(
                     session_id,
                     result.new_messages(),
@@ -105,52 +90,6 @@ class AgentRunner:
 
         yield events.final(_serialize_output(result.output), _usage_dict(result))
 
-
-def _safe_args(part: ToolCallPart) -> Any:
-    try:
-        return part.args_as_dict()
-    except Exception:  # noqa: BLE001
-        return getattr(part, "args", None)
-
-
-def _map_model_event(event: Any) -> dict[str, Any] | None:
-    if isinstance(event, PartStartEvent):
-        part = event.part
-        if isinstance(part, TextPart) and part.content:
-            return events.text_delta(part.content)
-        if isinstance(part, ToolCallPart):
-            return events.tool_call(part.tool_name, _safe_args(part), getattr(part, "tool_call_id", None))
-        return None
-    if isinstance(event, PartDeltaEvent):
-        delta = event.delta
-        if isinstance(delta, TextPartDelta) and delta.content_delta:
-            return events.text_delta(delta.content_delta)
-        return None
-    return None
-
-
-def _map_tool_event(event: Any) -> dict[str, Any] | None:
-    if isinstance(event, FunctionToolCallEvent):
-        part = event.part
-        return events.tool_call(part.tool_name, _safe_args(part), getattr(part, "tool_call_id", None))
-    if isinstance(event, FunctionToolResultEvent):
-        result_part = event.result
-        return events.tool_result(
-            getattr(result_part, "tool_name", None),
-            _to_jsonable(getattr(result_part, "content", None)),
-            getattr(result_part, "tool_call_id", None),
-        )
-    return None
-
-
-def _to_jsonable(value: Any) -> Any:
-    if isinstance(value, (str, int, float, bool)) or value is None:
-        return value
-    if hasattr(value, "model_dump"):
-        return value.model_dump()
-    if isinstance(value, (list, dict)):
-        return value
-    return str(value)
 
 
 def _serialize_output(output: Any) -> Any:

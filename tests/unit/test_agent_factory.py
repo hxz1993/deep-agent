@@ -9,9 +9,10 @@ from pydantic_ai.profiles.openai import OpenAIModelProfile
 from pydantic_ai.providers.deepseek import DeepSeekProvider
 from pydantic_ai.providers.openai import OpenAIProvider
 
-from deep_agent.agent.factory import _instructions_for_model, _resolve_model
+from deep_agent.agent.factory import _resolve_model, build_agent
 from deep_agent.agent.models import DeepSeekChatModel
-from deep_agent.agent.models.deepseek_chat import DEEPSEEK_OUTPUT_INSTRUCTIONS
+from deep_agent.agent.capabilities.deepseek_thinking_retry import DeepSeekThinkingRetry
+from deep_agent.capabilities.registry import CapabilityRegistry
 from deep_agent.agent.spec import AgentSpec
 
 
@@ -105,16 +106,25 @@ class ResolveModelTests(unittest.TestCase):
         self.assertIsInstance(model, DeepSeekChatModel)
         self.assertIsInstance(model._provider, DeepSeekProvider)
 
-    def test_deepseek_appends_output_instructions(self) -> None:
-        model = _resolve_model(_spec(model="deepseek:deepseek-v4-flash", api_key="sk-test"))
-        instructions = _instructions_for_model(_spec(instructions="base prompt"), model)
-        self.assertIn("base prompt", instructions)
-        self.assertIn(DEEPSEEK_OUTPUT_INSTRUCTIONS, instructions)
+    def test_deepseek_registers_thinking_retry_capability(self) -> None:
+        agent = build_agent(
+            _spec(model="deepseek:deepseek-v4-flash", api_key="sk-test"),
+            CapabilityRegistry(),
+        )
+        caps = [c for c in agent.root_capability.capabilities if isinstance(c, DeepSeekThinkingRetry)]
+        self.assertEqual(len(caps), 1)
 
-    def test_non_deepseek_instructions_unchanged(self) -> None:
-        model = _resolve_model(_spec(model="openai:gpt-4o", api_key="sk-test"))
-        instructions = _instructions_for_model(_spec(instructions="base prompt"), model)
-        self.assertEqual(instructions, "base prompt")
+    def test_non_deepseek_has_no_thinking_retry_capability(self) -> None:
+        agent = build_agent(
+            _spec(
+                model="deepseek:deepseek-v4-flash",
+                api_key="sk-test",
+                base_url="https://gateway.example.com/v1",
+            ),
+            CapabilityRegistry(),
+        )
+        caps = [c for c in agent.root_capability.capabilities if isinstance(c, DeepSeekThinkingRetry)]
+        self.assertEqual(len(caps), 0)
 
 
 if __name__ == "__main__":

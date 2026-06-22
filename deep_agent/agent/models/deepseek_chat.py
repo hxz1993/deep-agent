@@ -5,15 +5,6 @@ from dataclasses import dataclass
 from openai.types import chat
 from pydantic_ai.models.openai import OpenAIChatModel
 
-DEEPSEEK_OUTPUT_INSTRUCTIONS = (
-    "【回复格式要求】面向用户的完整回复必须写在正常的 content 文本字段中。"
-    "reasoning/思考内容仅用于内部分析，不要只把最终答案放在 reasoning 里。"
-    "即使只是简单问候，也必须在 content 中输出用户可见的文本。"
-    "若收到要求返回 text 或调用工具的校验提示，请用 content 字段重新给出正式回复，"
-    "不要重复解释校验原因。"
-)
-
-
 def _thinking_fallback_content(thinkings: dict[str, list[str]]) -> str | None:
     if not thinkings:
         return None

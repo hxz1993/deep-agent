@@ -1,22 +1,20 @@
 from __future__ import annotations
 
 import asyncio
-from logging.config import fileConfig
 
 from alembic import context
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
+from deep_agent.core.logging import configure_logging, is_configured
 from deep_agent.db.url import escape_for_ini, get_database_url
 from deep_agent.db.models import Base
 
 config = context.config
 
-if config.config_file_name is not None:
-    # Keep handlers configured by the app (e.g. uvicorn lifespan) so migration
-    # failures remain visible in the same console output.
-    fileConfig(config.config_file_name, disable_existing_loggers=False)
+if not is_configured():
+    configure_logging()
 
 target_metadata = Base.metadata
 

@@ -2,11 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from loguru import logger
+
 from deep_agent.capabilities.mcp.builtin_config import SERVER_FILENAME
 from deep_agent.capabilities.registry import Capability
-from deep_agent.core.logging import get_logger
-
-logger = get_logger(__name__)
 
 
 def load_builtin_mcp_capabilities(mcps_dir: str) -> list[Capability]:
@@ -20,7 +19,7 @@ def load_builtin_mcp_capabilities(mcps_dir: str) -> list[Capability]:
     """
     root = Path(mcps_dir)
     if not root.is_dir():
-        logger.info("Builtin MCP dir %r not found; skipping.", mcps_dir)
+        logger.info("Builtin MCP dir {!r} not found; skipping.", mcps_dir)
         return []
 
     from deep_agent.capabilities.mcp.toolset_builder import build_mcp_toolset
@@ -42,6 +41,6 @@ def load_builtin_mcp_capabilities(mcps_dir: str) -> list[Capability]:
                 tools=[],
             )
         )
-        logger.info("Loaded builtin MCP server %r (%s)", name, server_file)
+        logger.info("Loaded builtin MCP server {!r} ({})", name, server_file)
 
     return capabilities

@@ -3,11 +3,9 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from loguru import logger
+
 import yaml
-
-from deep_agent.core.logging import get_logger
-
-logger = get_logger(__name__)
 
 # Matches a leading YAML frontmatter block delimited by '---' lines, capturing
 # the YAML payload and the markdown body that follows it.
@@ -48,12 +46,12 @@ def parse_skill_md(text: str) -> ParsedSkill | None:
 
     name = meta.get("name")
     if not isinstance(name, str) or not _NAME_RE.match(name):
-        logger.warning("SKILL.md 'name' missing or invalid (%r); skipping.", name)
+        logger.warning("SKILL.md 'name' missing or invalid ({!r}); skipping.", name)
         return None
 
     description = meta.get("description")
     if not isinstance(description, str) or not description.strip():
-        logger.warning("SKILL.md %r has empty 'description'; skipping.", name)
+        logger.warning("SKILL.md {!r} has empty 'description'; skipping.", name)
         return None
 
     # Default true, matching Cursor: a skill only auto-loads when it opts in.

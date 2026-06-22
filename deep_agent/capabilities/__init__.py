@@ -8,12 +8,11 @@ from deep_agent.capabilities.mcp.db_loader import capabilities_from_rows
 from deep_agent.capabilities.native import build_native_capability
 from deep_agent.capabilities.registry import Capability, CapabilityRegistry, ToolInfo
 from deep_agent.capabilities.skills import load_skill_capabilities
+from loguru import logger
+
 from deep_agent.core.paths import DEEP_AGENT_ROOT
-from deep_agent.core.logging import get_logger
 from deep_agent.db.repositories.mcp import McpServerRepository
 from deep_agent.options import OPTION
-
-logger = get_logger(__name__)
 
 __all__ = [
     "Capability",
@@ -36,7 +35,7 @@ def build_registry() -> CapabilityRegistry:
     for cap in load_cursor_skill_capabilities(OPTION.agent.cursor_skills_dir):
         registry.register(cap)
 
-    logger.info("Registered capabilities: %s", ", ".join(registry.names()))
+    logger.info("Registered capabilities: {}", ", ".join(registry.names()))
     return registry
 
 
@@ -56,6 +55,6 @@ async def load_and_register_mcp(registry: CapabilityRegistry, db: AsyncSession) 
 
     registry.replace_by_kind("mcp", caps)
     logger.info(
-        "Registered MCP capabilities from database: %s",
+        "Registered MCP capabilities from database: {}",
         ", ".join(c.name for c in caps) or "(none)",
     )

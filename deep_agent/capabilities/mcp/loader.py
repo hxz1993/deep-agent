@@ -4,11 +4,10 @@ import json
 from pathlib import Path
 from typing import Any
 
+from loguru import logger
+
 from deep_agent.capabilities.mcp.toolset_builder import build_mcp_toolset
 from deep_agent.capabilities.registry import Capability
-from deep_agent.core.logging import get_logger
-
-logger = get_logger(__name__)
 
 
 def _infer_transport(config: dict[str, Any]) -> str:
@@ -28,13 +27,13 @@ def load_mcp_capabilities(config_path: str) -> list[Capability]:
     """
     path = Path(config_path)
     if not path.is_file():
-        logger.info("MCP config %r not found; skipping MCP loading.", config_path)
+        logger.info("MCP config {!r} not found; skipping MCP loading.", config_path)
         return []
 
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
-        logger.exception("Invalid JSON in MCP config %r", config_path)
+        logger.exception("Invalid JSON in MCP config {!r}", config_path)
         return []
 
     servers: dict[str, dict[str, Any]] = raw.get("mcpServers", {})
@@ -47,7 +46,7 @@ def load_mcp_capabilities(config_path: str) -> list[Capability]:
             transport = _infer_transport(config)
             toolset = build_mcp_toolset(key, transport, config)
         except Exception:
-            logger.exception("Failed to load MCP server %r from %r", key, config_path)
+            logger.exception("Failed to load MCP server {!r} from {!r}", key, config_path)
             continue
         capabilities.append(
             Capability(
@@ -58,6 +57,6 @@ def load_mcp_capabilities(config_path: str) -> list[Capability]:
                 tools=[],
             )
         )
-        logger.info("Loaded MCP server %r", key)
+        logger.info("Loaded MCP server {!r}", key)
 
     return capabilities

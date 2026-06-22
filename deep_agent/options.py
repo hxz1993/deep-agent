@@ -7,7 +7,6 @@ from pathlib import Path
 from deepfos_platform.conf.option import GlobalOptions, Category, Option, Action
 from deepfos_platform.lib.cipher import maybe_decrypt_pwd
 from deepfos_platform.lib.constants import BOOLEAN_STATES
-
 from deep_agent.core.paths import DEEP_AGENT_ROOT, REPO_ROOT
 
 DEFAULT_MCP_FORWARD_HEADERS = frozenset(

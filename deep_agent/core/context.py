@@ -9,15 +9,14 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from deep_agent.capabilities import build_registry, load_and_register_mcp
 from deep_agent.capabilities.mcp.session_pool import McpSessionPool
 from deep_agent.capabilities.registry import CapabilityRegistry
-from deep_agent.core.logging import get_logger
+from loguru import logger
+
 from deep_agent.db.engine import close_db, create_engine
 from deep_agent.db.migrate import upgrade_database
 from deep_agent.db.url import get_database_url
 from deep_agent.memory import InMemorySessionStore, MySQLSessionStore, PostgresSessionStore
 from deep_agent.memory.base import SessionStore
 from deep_agent.options import OPTION
-
-logger = get_logger(__name__)
 
 _context: AppContext | None = None
 
@@ -64,7 +63,7 @@ class AppContext:
             except Exception:
                 logger.exception("Failed to load MCP servers from database.")
             logger.info(
-                "%s started (model=%s, database=%s)",
+                "{} started (model={}, database={})",
                 OPTION.agent.app_name,
                 OPTION.agent.model,
                 db_kind,
@@ -72,7 +71,7 @@ class AppContext:
         else:
             logger.warning("Database not configured; MCP servers will not be loaded.")
             logger.info(
-                "%s started (model=%s, database=in-memory)",
+                "{} started (model={}, database=in-memory)",
                 OPTION.agent.app_name,
                 OPTION.agent.model,
             )

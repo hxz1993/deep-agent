@@ -3,10 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from deep_agent.capabilities.cursor_skills.parser import parse_skill_md
-from deep_agent.core.logging import get_logger
+from loguru import logger
 
-logger = get_logger(__name__)
+from deep_agent.capabilities.cursor_skills.parser import parse_skill_md
 
 
 @dataclass
@@ -35,7 +34,7 @@ def discover_cursor_skills(skills_dirs: str) -> list[SkillEntry]:
     for dir_str in _split_dirs(skills_dirs):
         base = Path(dir_str)
         if not base.is_dir():
-            logger.info("Cursor skills dir %r not found; skipping.", dir_str)
+            logger.info("Cursor skills dir {!r} not found; skipping.", dir_str)
             continue
 
         for entry in sorted(base.iterdir()):
@@ -48,16 +47,16 @@ def discover_cursor_skills(skills_dirs: str) -> list[SkillEntry]:
             try:
                 text = skill_md.read_text(encoding="utf-8")
             except OSError:
-                logger.exception("Could not read %s", skill_md)
+                logger.exception("Could not read {}", skill_md)
                 continue
 
             parsed = parse_skill_md(text)
             if parsed is None:
-                logger.warning("Skipping invalid skill at %s", skill_md)
+                logger.warning("Skipping invalid skill at {}", skill_md)
                 continue
             if parsed.name in entries:
                 logger.warning(
-                    "Duplicate cursor skill %r at %s; keeping the first.", parsed.name, entry
+                    "Duplicate cursor skill {!r} at {}; keeping the first.", parsed.name, entry
                 )
                 continue
 

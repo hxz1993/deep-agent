@@ -14,16 +14,15 @@ from __future__ import annotations
 import ast
 import operator
 
+from loguru import logger
 from pydantic_ai import FunctionToolset
 
 from deep_agent.capabilities.registry import ToolInfo
 from deep_agent.capabilities.skills.base import Skill
-from deep_agent.core.logging import get_logger
 
 _toolset = FunctionToolset(
     instructions="For any arithmetic, call the calculate tool instead of computing in your head."
 )
-logger = get_logger(__name__)
 
 _BIN_OPS = {
     ast.Add: operator.add,
@@ -50,7 +49,7 @@ def _eval(node: ast.AST) -> float:
 @_toolset.tool_plain
 def calculate(expression: str) -> float:
     """Safely evaluate an arithmetic expression, e.g. "2 * (3 + 4) ** 2"."""
-    logger.info(f"Calculating expression: {expression}")
+    logger.info("Calculating expression: {}", expression)
     return _eval(ast.parse(expression, mode="eval").body)
 
 

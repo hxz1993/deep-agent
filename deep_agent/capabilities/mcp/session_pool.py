@@ -6,11 +6,10 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from deep_agent.capabilities.mcp.errors import is_recoverable_mcp_disconnect
-from deep_agent.core.logging import get_logger
-from deep_agent.options import OPTION
+from loguru import logger
 
-logger = get_logger(__name__)
+from deep_agent.capabilities.mcp.errors import is_recoverable_mcp_disconnect
+from deep_agent.options import OPTION
 
 McpToolsetFactory = Callable[[], Any]
 
@@ -70,7 +69,7 @@ class McpSessionPool:
             entry.run_refs += 1
             entry.last_used = time.monotonic()
             logger.info(
-                "Started MCP server %r for session %r",
+                "Started MCP server {!r} for session {!r}",
                 server_name,
                 session_id,
             )
@@ -95,7 +94,7 @@ class McpSessionPool:
                 if attempt >= max_retries or not is_recoverable_mcp_disconnect(exc):
                     raise
                 logger.warning(
-                    "MCP connect failed for %r session %r (attempt %d/%d): %s",
+                    "MCP connect failed for {!r} session {!r} (attempt {}/{}): {}",
                     server_name,
                     session_id,
                     attempt + 1,
@@ -107,7 +106,7 @@ class McpSessionPool:
 
             if attempt > 0:
                 logger.info(
-                    "MCP server %r connected for session %r after retry %d",
+                    "MCP server {!r} connected for session {!r} after retry {}",
                     server_name,
                     session_id,
                     attempt,
@@ -148,16 +147,16 @@ class McpSessionPool:
         try:
             await entry.toolset.__aexit__(None, None, None)
         except Exception:
-            logger.exception("Failed to close MCP server %r for session %r", key[0], key[1])
+            logger.exception("Failed to close MCP server {!r} for session {!r}", key[0], key[1])
         else:
-            logger.info("Closed MCP server %r for session %r", key[0], key[1])
+            logger.info("Closed MCP server {!r} for session {!r}", key[0], key[1])
 
     @staticmethod
     async def _safe_close(toolset: Any) -> None:
         try:
             await toolset.__aexit__(None, None, None)
         except Exception:
-            logger.debug("Ignored error while closing failed MCP connect attempt", exc_info=True)
+            logger.opt(exception=True).debug("Ignored error while closing failed MCP connect attempt")
 
 
 def get_mcp_session_pool() -> McpSessionPool:

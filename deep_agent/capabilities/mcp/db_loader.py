@@ -2,14 +2,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from loguru import logger
+
 from deep_agent.capabilities.mcp.toolset_builder import build_mcp_toolset
 from deep_agent.capabilities.registry import Capability
-from deep_agent.core.logging import get_logger
 
 if TYPE_CHECKING:
     from deep_agent.db.models import McpServer
-
-logger = get_logger(__name__)
 
 
 def capability_from_row(row: McpServer) -> Capability:
@@ -32,7 +31,7 @@ def capabilities_from_rows(rows: list[McpServer]) -> list[Capability]:
             continue
         try:
             caps.append(capability_from_row(row))
-            logger.info("Loaded MCP server %r from database", row.name)
+            logger.info("Loaded MCP server {!r} from database", row.name)
         except Exception:
-            logger.exception("Failed to load MCP server %r from database", row.name)
+            logger.exception("Failed to load MCP server {!r} from database", row.name)
     return caps

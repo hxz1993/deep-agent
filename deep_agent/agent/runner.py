@@ -8,10 +8,9 @@ from pydantic_ai.usage import UsageLimits
 
 from deep_agent.agent import events
 from deep_agent.agent.deps import AgentDeps
-from deep_agent.core.logging import get_logger
-from deep_agent.memory.base import SessionStore
+from loguru import logger
 
-logger = get_logger(__name__)
+from deep_agent.memory.base import SessionStore
 
 
 class AgentRunner:
@@ -84,7 +83,7 @@ class AgentRunner:
                     user_id=deps.user,
                 )
             except Exception as exc:  # noqa: BLE001 - surface as an SSE error event
-                logger.exception("Agent stream failed for session %s", session_id)
+                logger.exception("Agent stream failed for session {}", session_id)
                 yield events.error(str(exc))
                 return
 

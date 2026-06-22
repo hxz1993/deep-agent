@@ -2,13 +2,12 @@ from __future__ import annotations
 
 import re
 
+from loguru import logger
+
 from pydantic_ai import FunctionToolset
 
 from deep_agent.capabilities.cursor_skills.discovery import SkillEntry, discover_cursor_skills
 from deep_agent.capabilities.registry import Capability, ToolInfo
-from deep_agent.core.logging import get_logger
-
-logger = get_logger(__name__)
 
 # Cap a loaded body so a large SKILL.md cannot blow up the context window.
 _BODY_LIMIT = 8000
@@ -53,5 +52,5 @@ def load_cursor_skill_capabilities(skills_dirs: str) -> list[Capability]:
     """Build one ``cursor-skill:<name>`` capability per discovered SKILL.md."""
     capabilities = [_build_capability(skill) for skill in discover_cursor_skills(skills_dirs)]
     for cap in capabilities:
-        logger.info("Loaded cursor skill %r (default_enabled=%s)", cap.name, cap.default_enabled)
+        logger.info("Loaded cursor skill {!r} (default_enabled={})", cap.name, cap.default_enabled)
     return capabilities

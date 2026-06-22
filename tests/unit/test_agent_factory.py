@@ -9,8 +9,9 @@ from pydantic_ai.profiles.openai import OpenAIModelProfile
 from pydantic_ai.providers.deepseek import DeepSeekProvider
 from pydantic_ai.providers.openai import OpenAIProvider
 
-from deep_agent.agent.factory import _resolve_model
+from deep_agent.agent.factory import _instructions_for_model, _resolve_model
 from deep_agent.agent.models import DeepSeekChatModel
+from deep_agent.agent.models.deepseek_chat import DEEPSEEK_OUTPUT_INSTRUCTIONS
 from deep_agent.agent.spec import AgentSpec
 
 
@@ -103,6 +104,17 @@ class ResolveModelTests(unittest.TestCase):
             model = _resolve_model(_spec(model="deepseek:deepseek-v4-flash"))
         self.assertIsInstance(model, DeepSeekChatModel)
         self.assertIsInstance(model._provider, DeepSeekProvider)
+
+    def test_deepseek_appends_output_instructions(self) -> None:
+        model = _resolve_model(_spec(model="deepseek:deepseek-v4-flash", api_key="sk-test"))
+        instructions = _instructions_for_model(_spec(instructions="base prompt"), model)
+        self.assertIn("base prompt", instructions)
+        self.assertIn(DEEPSEEK_OUTPUT_INSTRUCTIONS, instructions)
+
+    def test_non_deepseek_instructions_unchanged(self) -> None:
+        model = _resolve_model(_spec(model="openai:gpt-4o", api_key="sk-test"))
+        instructions = _instructions_for_model(_spec(instructions="base prompt"), model)
+        self.assertEqual(instructions, "base prompt")
 
 
 if __name__ == "__main__":

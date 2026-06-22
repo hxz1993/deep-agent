@@ -9,6 +9,7 @@ from pydantic_ai.messages import (
     ModelMessage,
     ModelRequest,
     ModelResponse,
+    RetryPromptPart,
     TextPart,
     ThinkingPart,
     ToolReturnPart,
@@ -81,6 +82,36 @@ def _tool_call_args(part: BaseToolCallPart) -> Any:
         return part.args_as_dict()
     except Exception:  # noqa: BLE001
         return part.args
+
+
+def is_thinking_only_response(response: ModelResponse) -> bool:
+    """True when a model turn has thinking but no user-visible text or tool calls."""
+    if not response.parts:
+        return False
+    if any(isinstance(part, TextPart) and part.content for part in response.parts):
+        return False
+    if any(isinstance(part, BaseToolCallPart) for part in response.parts):
+        return False
+    return all(isinstance(part, ThinkingPart) for part in response.parts)
+
+
+def is_retry_only_request(request: ModelRequest) -> bool:
+    """True for pydantic_ai output-validation retry prompts (not user turns)."""
+    if not request.parts:
+        return False
+    return all(isinstance(part, RetryPromptPart) for part in request.parts)
+
+
+def filter_ephemeral_agent_messages(messages: list[ModelMessage]) -> list[ModelMessage]:
+    """Drop thinking-only retries and validation prompts from persisted history."""
+    filtered: list[ModelMessage] = []
+    for message in messages:
+        if isinstance(message, ModelResponse) and is_thinking_only_response(message):
+            continue
+        if isinstance(message, ModelRequest) and is_retry_only_request(message):
+            continue
+        filtered.append(message)
+    return filtered
 
 
 def _response_parts(response: ModelResponse) -> list[HistoryPart]:
@@ -187,6 +218,8 @@ def model_messages_to_history(messages: list[ModelMessage]) -> list[HistoryMessa
                 pending_tool_results.extend(tool_results)
 
         elif isinstance(message, ModelResponse):
+            if is_thinking_only_response(message):
+                continue
             flush_tool_results()
             parts = _response_parts(message)
             if parts:

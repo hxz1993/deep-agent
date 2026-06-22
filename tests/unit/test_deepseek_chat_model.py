@@ -5,11 +5,10 @@ from datetime import datetime, timezone
 
 from openai.types.chat import ChatCompletion, ChatCompletionMessage
 from openai.types.chat.chat_completion import Choice
-from pydantic_ai.messages import ModelResponse, TextPart, ThinkingPart, ToolCallPart
+from pydantic_ai.messages import ModelResponse, TextPart, ThinkingPart
 from pydantic_ai.providers.deepseek import DeepSeekProvider
 
 from deep_agent.agent.models import DeepSeekChatModel
-from deep_agent.agent.models.deepseek_chat import _promote_thinking_only_parts
 
 
 class DeepSeekChatModelTests(unittest.TestCase):
@@ -51,29 +50,7 @@ class DeepSeekChatModelTests(unittest.TestCase):
         self.assertEqual(message_param["content"], "你好！")
         self.assertNotIn("reasoning_content", message_param)
 
-    def test_promote_thinking_only_parts(self) -> None:
-        promoted = _promote_thinking_only_parts(
-            [ThinkingPart(content="你好！有什么我可以帮你的吗？")]
-        )
-        self.assertEqual(len(promoted), 1)
-        self.assertIsInstance(promoted[0], TextPart)
-        self.assertEqual(promoted[0].content, "你好！有什么我可以帮你的吗？")
-
-    def test_promote_thinking_only_parts_keeps_mixed_response(self) -> None:
-        parts = [
-            ThinkingPart(content="internal"),
-            TextPart(content="你好！"),
-        ]
-        self.assertIs(_promote_thinking_only_parts(parts), parts)
-
-    def test_promote_thinking_only_parts_keeps_tool_calls(self) -> None:
-        parts = [
-            ThinkingPart(content="call the tool"),
-            ToolCallPart("get_current_time", {}, tool_call_id="call_1"),
-        ]
-        self.assertIs(_promote_thinking_only_parts(parts), parts)
-
-    def test_process_response_promotes_reasoning_only_completion(self) -> None:
+    def test_process_response_keeps_reasoning_as_thinking_part(self) -> None:
         completion = ChatCompletion(
             id="chatcmpl-test",
             choices=[
@@ -95,7 +72,7 @@ class DeepSeekChatModelTests(unittest.TestCase):
         model_response = self.model._process_response(completion)
 
         self.assertEqual(len(model_response.parts), 1)
-        self.assertIsInstance(model_response.parts[0], TextPart)
+        self.assertIsInstance(model_response.parts[0], ThinkingPart)
         self.assertEqual(model_response.parts[0].content, "你好！有什么我可以帮你的吗？")
 
 

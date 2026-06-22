@@ -1,16 +1,17 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 
 from openai.types import chat
-from pydantic_ai.messages import (
-    BaseToolCallPart,
-    ModelResponse,
-    ModelResponsePart,
-    TextPart,
-    ThinkingPart,
+from pydantic_ai.models.openai import OpenAIChatModel
+
+DEEPSEEK_OUTPUT_INSTRUCTIONS = (
+    "【回复格式要求】面向用户的完整回复必须写在正常的 content 文本字段中。"
+    "reasoning/思考内容仅用于内部分析，不要只把最终答案放在 reasoning 里。"
+    "即使只是简单问候，也必须在 content 中输出用户可见的文本。"
+    "若收到要求返回 text 或调用工具的校验提示，请用 content 字段重新给出正式回复，"
+    "不要重复解释校验原因。"
 )
-from pydantic_ai.models.openai import OpenAIChatModel, OpenAIStreamedResponse
 
 
 def _thinking_fallback_content(thinkings: dict[str, list[str]]) -> str | None:
@@ -22,30 +23,6 @@ def _thinking_fallback_content(thinkings: dict[str, list[str]]) -> str | None:
     if not parts:
         return None
     return "\n\n".join(parts)
-
-
-def _promote_thinking_only_parts(parts: list[ModelResponsePart]) -> list[ModelResponsePart]:
-    """Turn thinking-only model output into text so pydantic_ai accepts it as final output.
-
-    DeepSeek may place user-visible replies in ``reasoning_content``, which pydantic_ai
-    stores as ``ThinkingPart``. Without text or tool calls the agent loop retries and
-    persists multiple assistant messages.
-    """
-    if not parts:
-        return parts
-    if any(isinstance(part, TextPart) and part.content for part in parts):
-        return parts
-    if any(isinstance(part, BaseToolCallPart) for part in parts):
-        return parts
-    if not all(isinstance(part, ThinkingPart) for part in parts):
-        return parts
-
-    thinking_text = _thinking_fallback_content(
-        {str(index): [part.content] for index, part in enumerate(parts) if part.content}
-    )
-    if thinking_text is None:
-        return parts
-    return [TextPart(content=thinking_text)]
 
 
 @dataclass
@@ -67,37 +44,13 @@ class _DeepSeekMapModelResponseContext(OpenAIChatModel._MapModelResponseContext)
         return message_param
 
 
-@dataclass
-class DeepSeekStreamedResponse(OpenAIStreamedResponse):
-    """Streamed DeepSeek response that promotes thinking-only output at stream end."""
-
-    def get(self) -> ModelResponse:
-        response = super().get()
-        promoted = _promote_thinking_only_parts(list(response.parts))
-        if promoted == list(response.parts):
-            return response
-        return replace(response, parts=promoted)
-
-
 class DeepSeekChatModel(OpenAIChatModel):
     """OpenAI-chat model with DeepSeek-specific assistant message round-tripping.
 
     DeepSeek may return user-visible text only in ``reasoning_content``. Pydantic AI
     stores that as ``ThinkingPart``, but the Chat Completions API rejects assistant
     messages with ``content=null`` and no ``tool_calls`` on retry. We mirror reasoning
-    text into ``content`` only for that serialization path, and promote thinking-only
-    responses to ``TextPart`` so the agent loop does not retry.
+    text into ``content`` only for that serialization path.
     """
 
     _MapModelResponseContext = _DeepSeekMapModelResponseContext
-
-    def _process_response(self, response: chat.ChatCompletion | str) -> ModelResponse:
-        model_response = super()._process_response(response)
-        promoted = _promote_thinking_only_parts(list(model_response.parts))
-        if promoted == list(model_response.parts):
-            return model_response
-        return replace(model_response, parts=promoted)
-
-    @property
-    def _streamed_response_cls(self) -> type[OpenAIStreamedResponse]:
-        return DeepSeekStreamedResponse

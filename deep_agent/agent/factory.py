@@ -10,6 +10,7 @@ from pydantic_ai.providers.openai import OpenAIProvider
 
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.models import DeepSeekChatModel
+from deep_agent.agent.models.deepseek_chat import DEEPSEEK_OUTPUT_INSTRUCTIONS
 from deep_agent.agent.spec import AgentSpec
 from deep_agent.capabilities.registry import CapabilityRegistry
 
@@ -77,6 +78,13 @@ def _resolve_model(spec: AgentSpec) -> str | Model:
     return spec.model
 
 
+def _instructions_for_model(spec: AgentSpec, model: str | Model) -> str:
+    instructions = spec.instructions
+    if isinstance(model, DeepSeekChatModel):
+        instructions = f"{instructions.rstrip()}\n\n{DEEPSEEK_OUTPUT_INSTRUCTIONS}"
+    return instructions
+
+
 def build_agent(
     spec: AgentSpec,
     registry: CapabilityRegistry,
@@ -90,11 +98,12 @@ def build_agent(
     spec to target an OpenAI-compatible endpoint. Capability instructions ride
     along with their toolsets and are injected automatically when enabled.
     """
+    model = _resolve_model(spec)
     toolsets = registry.toolsets(spec.capabilities)
     return Agent(
-        _resolve_model(spec),
+        model,
         deps_type=AgentDeps,
-        instructions=spec.instructions,
+        instructions=_instructions_for_model(spec, model),
         toolsets=toolsets,
         retries=request_retries,
     )

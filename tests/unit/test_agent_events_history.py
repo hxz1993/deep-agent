@@ -3,10 +3,22 @@ from __future__ import annotations
 import unittest
 from datetime import datetime, timezone
 
-from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, ThinkingPart, ThinkingPartDelta, UserPromptPart
+from pydantic_ai.messages import (
+    ModelRequest,
+    ModelResponse,
+    RetryPromptPart,
+    TextPart,
+    ThinkingPart,
+    ThinkingPartDelta,
+    UserPromptPart,
+)
 
 from deep_agent.agent import events
-from deep_agent.memory.history import model_messages_to_history, session_activity_timestamps
+from deep_agent.memory.history import (
+    filter_ephemeral_agent_messages,
+    model_messages_to_history,
+    session_activity_timestamps,
+)
 
 
 class AgentEventsThinkingTests(unittest.TestCase):
@@ -95,6 +107,35 @@ class HistoryThinkingTests(unittest.TestCase):
         self.assertEqual(len(history), 1)
         self.assertEqual(history[0].parts[0].type, "text")
         self.assertEqual(history[0].parts[0].content, "hello")
+
+    def test_model_messages_to_history_skips_thinking_only_retry(self) -> None:
+        ts = datetime(2025, 6, 22, 10, 45, tzinfo=timezone.utc)
+        messages = [
+            ModelRequest(parts=[UserPromptPart(content="你好")], timestamp=ts),
+            ModelResponse(
+                parts=[ThinkingPart(content="你好！有什么我可以帮你的吗？")],
+                timestamp=ts,
+            ),
+            ModelRequest(parts=[RetryPromptPart(content="Please return text or call a tool.")]),
+            ModelResponse(parts=[TextPart(content="你好！")], timestamp=ts),
+        ]
+        history = model_messages_to_history(messages)
+        self.assertEqual(len(history), 2)
+        self.assertEqual(history[0].role, "user")
+        self.assertEqual(history[1].role, "assistant")
+        self.assertEqual(history[1].parts[0].type, "text")
+        self.assertEqual(history[1].parts[0].content, "你好！")
+
+    def test_filter_ephemeral_agent_messages(self) -> None:
+        messages = [
+            ModelResponse(parts=[ThinkingPart(content="internal only")]),
+            ModelRequest(parts=[RetryPromptPart(content="Please return text.")]),
+            ModelResponse(parts=[TextPart(content="hello")]),
+        ]
+        filtered = filter_ephemeral_agent_messages(messages)
+        self.assertEqual(len(filtered), 1)
+        self.assertIsInstance(filtered[0], ModelResponse)
+        self.assertEqual(filtered[0].parts[0].content, "hello")
 
 
 if __name__ == "__main__":

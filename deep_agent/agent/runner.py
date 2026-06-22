@@ -11,6 +11,7 @@ from deep_agent.agent.deps import AgentDeps
 from loguru import logger
 
 from deep_agent.memory.base import SessionStore
+from deep_agent.memory.history import filter_ephemeral_agent_messages
 
 
 class AgentRunner:
@@ -49,7 +50,7 @@ class AgentRunner:
             )
             await self.store.append(
                 session_id,
-                result.new_messages(),
+                filter_ephemeral_agent_messages(result.new_messages()),
                 agent_id=deps.agent_id,
                 user_id=deps.user,
             )
@@ -78,7 +79,7 @@ class AgentRunner:
                             yield mapped
                 await self.store.append(
                     session_id,
-                    result.new_messages(),
+                    filter_ephemeral_agent_messages(result.new_messages()),
                     agent_id=deps.agent_id,
                     user_id=deps.user,
                 )

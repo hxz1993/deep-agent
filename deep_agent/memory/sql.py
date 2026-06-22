@@ -105,6 +105,18 @@ class SqlSessionStore(ABC):
             )
             return result.scalar_one_or_none()
 
+    async def get_session_timestamps(self, session_key: str) -> tuple[datetime | None, datetime | None]:
+        async with self._session_factory() as db:
+            result = await db.execute(
+                select(ChatSession.created_at, ChatSession.updated_at).where(
+                    ChatSession.session_key == session_key
+                )
+            )
+            row = result.one_or_none()
+            if row is None:
+                return None, None
+            return row.created_at, row.updated_at
+
     async def delete(self, session_key: str) -> None:
         async with self._session_factory() as db:
             await db.execute(delete(ChatSession).where(ChatSession.session_key == session_key))

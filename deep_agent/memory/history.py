@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
@@ -48,6 +49,7 @@ class HistoryMessage(BaseModel):
     role: Literal["user", "assistant"]
     content: str | None = Field(default=None, description="User message text.")
     parts: list[HistoryPart] = Field(default_factory=list, description="Assistant message parts in order.")
+    timestamp: datetime | None = Field(default=None, description="Message time (UTC).")
 
 
 class SessionHistoryResponse(BaseModel):
@@ -113,6 +115,15 @@ def _request_tool_returns(request: ModelRequest) -> list[HistoryPart]:
     return parts
 
 
+def _request_timestamp(request: ModelRequest) -> datetime | None:
+    if request.timestamp is not None:
+        return request.timestamp
+    for part in request.parts:
+        if isinstance(part, UserPromptPart) and part.timestamp is not None:
+            return part.timestamp
+    return None
+
+
 def first_user_prompt(messages: list[ModelMessage]) -> str | None:
     """Return the first user message text from raw model history."""
     for item in model_messages_to_history(messages):
@@ -121,20 +132,43 @@ def first_user_prompt(messages: list[ModelMessage]) -> str | None:
     return None
 
 
+def session_activity_timestamps(messages: list[ModelMessage]) -> tuple[datetime | None, datetime | None]:
+    """Infer session created/updated times from message timestamps."""
+    timestamps: list[datetime] = []
+    for message in messages:
+        if isinstance(message, ModelRequest):
+            ts = _request_timestamp(message)
+            if ts is not None:
+                timestamps.append(ts)
+        elif isinstance(message, ModelResponse) and message.timestamp is not None:
+            timestamps.append(message.timestamp)
+    if not timestamps:
+        return None, None
+    return min(timestamps), max(timestamps)
+
+
 def model_messages_to_history(messages: list[ModelMessage]) -> list[HistoryMessage]:
     """Convert Pydantic AI message history to a frontend-friendly timeline."""
     history: list[HistoryMessage] = []
     pending_tool_results: list[HistoryPart] = []
+    pending_tool_results_timestamp: datetime | None = None
 
     def flush_tool_results() -> None:
-        nonlocal pending_tool_results
+        nonlocal pending_tool_results, pending_tool_results_timestamp
         if not pending_tool_results:
             return
         if history and history[-1].role == "assistant":
             history[-1].parts.extend(pending_tool_results)
         else:
-            history.append(HistoryMessage(role="assistant", parts=list(pending_tool_results)))
+            history.append(
+                HistoryMessage(
+                    role="assistant",
+                    parts=list(pending_tool_results),
+                    timestamp=pending_tool_results_timestamp,
+                )
+            )
         pending_tool_results = []
+        pending_tool_results_timestamp = None
 
     for message in messages:
         if isinstance(message, ModelRequest):
@@ -144,15 +178,19 @@ def model_messages_to_history(messages: list[ModelMessage]) -> list[HistoryMessa
 
             if user_text:
                 flush_tool_results()
-                history.append(HistoryMessage(role="user", content=user_text))
+                history.append(
+                    HistoryMessage(role="user", content=user_text, timestamp=_request_timestamp(message))
+                )
             if tool_results:
+                if not pending_tool_results:
+                    pending_tool_results_timestamp = _request_timestamp(message)
                 pending_tool_results.extend(tool_results)
 
         elif isinstance(message, ModelResponse):
             flush_tool_results()
             parts = _response_parts(message)
             if parts:
-                history.append(HistoryMessage(role="assistant", parts=parts))
+                history.append(HistoryMessage(role="assistant", parts=parts, timestamp=message.timestamp))
 
     flush_tool_results()
     return history

@@ -21,6 +21,7 @@ def capability_from_row(row: McpServer) -> Capability:
         toolset=toolset,
         description=description,
         tools=[],
+        default_enabled=False,
     )
 
 

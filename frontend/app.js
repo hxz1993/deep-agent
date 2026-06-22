@@ -57,12 +57,41 @@ function updateAdminLink() {
   if (link) link.href = `${state.baseUrl}/admin/`;
 }
 
-function scopedSessionKey(agentId, sessionId) {
-  return `${agentId}:${sessionId}`;
+/** Normalize local / API session records to display id + agentId. */
+function normalizeSession(session) {
+  let id = session.id;
+  let agentId = session.agentId || "";
+  const colon = id.indexOf(":");
+  if (colon > 0) {
+    const prefix = id.slice(0, colon);
+    const suffix = id.slice(colon + 1);
+    if (!agentId || agentId === prefix) {
+      agentId = prefix;
+      id = suffix;
+    }
+  }
+  return { ...session, id, agentId };
+}
+
+function sessionApiUrl(session, suffix = "") {
+  const s = normalizeSession(session);
+  const params = new URLSearchParams();
+  if (s.agentId) params.set("agent_id", s.agentId);
+  const qs = params.toString();
+  return `${state.baseUrl}/api/v1/sessions/${encodeURIComponent(s.id)}${suffix}${qs ? `?${qs}` : ""}`;
 }
 
 function sessionLookupKey(session) {
-  return `${session.agentId || ""}:${session.id}`;
+  const s = normalizeSession(session);
+  return `${s.agentId || ""}:${s.id}`;
+}
+
+function sessionSortTime(session) {
+  return Date.parse(session.updatedAt || session.createdAt || 0) || 0;
+}
+
+function sortSessions() {
+  state.sessions.sort((a, b) => sessionSortTime(b) - sessionSortTime(a));
 }
 
 function agentNameById(agentId) {
@@ -138,6 +167,9 @@ function init() {
   );
 
   initMarkdown();
+  state.sessions = state.sessions.map((s) => normalizeSession(s));
+  sortSessions();
+  persistSessions();
   renderSessions();
   syncSessionsFromBackend();
   checkHealth();
@@ -159,25 +191,29 @@ async function syncSessionsFromBackend() {
       const agentId = row.agent_id || "";
       const key = `${agentId}:${row.session_id}`;
       const title = (row.user_prompt || row.session_id.slice(0, 8)).slice(0, 40);
+      const createdAt = row.created_at || null;
+      const updatedAt = row.updated_at || createdAt || null;
       const existing = byKey.get(key);
       if (existing) {
-        existing.agentId = agentId || existing.agentId;
+        Object.assign(existing, normalizeSession({ ...existing, id: row.session_id, agentId }));
         existing.agentName = row.agent_name || existing.agentName;
         existing.title = title;
+        if (createdAt) existing.createdAt = createdAt;
+        if (updatedAt) existing.updatedAt = updatedAt;
       } else {
-        state.sessions.push({
-          id: row.session_id,
-          agentId,
-          agentName: row.agent_name,
-          title,
-        });
+        state.sessions.push(
+          normalizeSession({
+            id: row.session_id,
+            agentId,
+            agentName: row.agent_name,
+            title,
+            createdAt,
+            updatedAt,
+          })
+        );
       }
     }
-    state.sessions.sort((a, b) => {
-      const ai = rows.findIndex((r) => `${r.agent_id || ""}:${r.session_id}` === sessionLookupKey(a));
-      const bi = rows.findIndex((r) => `${r.agent_id || ""}:${r.session_id}` === sessionLookupKey(b));
-      return ai - bi;
-    });
+    sortSessions();
     persistSessions();
     renderSessions();
   } catch (_) {
@@ -218,20 +254,25 @@ function persistSessions() {
 }
 
 function upsertSession(id, title, agentId, agentName) {
-  const key = `${agentId || ""}:${id}`;
+  const normalized = normalizeSession({ id, agentId: agentId || state.agentId });
+  const key = `${normalized.agentId || ""}:${normalized.id}`;
+  const now = new Date().toISOString();
   const existing = state.sessions.find((s) => sessionLookupKey(s) === key);
   if (existing) {
+    Object.assign(existing, normalized);
     if (title) existing.title = title.slice(0, 40);
-    if (agentId) existing.agentId = agentId;
     if (agentName) existing.agentName = agentName;
+    existing.updatedAt = now;
   } else {
-    state.sessions.unshift({
-      id,
-      agentId: agentId || state.agentId,
-      agentName: agentName || agentNameById(agentId || state.agentId),
-      title: (title || id.slice(0, 8)).slice(0, 40),
+    state.sessions.push({
+      ...normalized,
+      agentName: agentName || agentNameById(normalized.agentId),
+      title: (title || normalized.id.slice(0, 8)).slice(0, 40),
+      createdAt: now,
+      updatedAt: now,
     });
   }
+  sortSessions();
   persistSessions();
   renderSessions();
 }
@@ -264,23 +305,23 @@ function renderSessions() {
 
 async function switchSession(s) {
   if (state.streaming) stopStream();
-  state.sessionId = s.id;
-  if (s?.agentId) {
-    state.agentId = s.agentId;
+  const session = normalizeSession(s);
+  state.sessionId = session.id;
+  if (session.agentId) {
+    state.agentId = session.agentId;
     localStorage.setItem("da_agent_id", state.agentId);
     if (el.agentSelect) el.agentSelect.value = state.agentId;
   }
   el.messages.innerHTML = "";
   el.emptyState.classList.add("hidden");
-  el.sessionBadge.textContent = s.id.slice(0, 8);
-  el.chatTitle.textContent = s.title || "对话";
+  el.sessionBadge.textContent = session.id.slice(0, 8);
+  el.chatTitle.textContent = session.title || "对话";
   updateChatHeader();
   updateAgentSelectState();
   renderSessions();
 
-  const historyKey = s.agentId ? scopedSessionKey(s.agentId, s.id) : s.id;
   try {
-    const r = await fetch(`${state.baseUrl}/api/v1/sessions/${encodeURIComponent(historyKey)}/history`);
+    const r = await fetch(sessionApiUrl(session, "/history"));
     if (r.status === 404) {
       addSystemNote("会话不存在或尚无历史记录。");
       return;
@@ -299,13 +340,22 @@ async function switchSession(s) {
 }
 
 function renderHistory(messages) {
+  let lastDayKey = null;
   for (const msg of messages) {
+    const ts = msg.timestamp || null;
+    if (ts) {
+      const dayKey = localDayKey(ts);
+      if (dayKey !== lastDayKey) {
+        addDateSeparator(ts);
+        lastDayKey = dayKey;
+      }
+    }
     if (msg.role === "user" && msg.content) {
-      addMessage("user", msg.content);
+      addMessage("user", msg.content, ts);
       continue;
     }
     if (msg.role === "assistant" && msg.parts && msg.parts.length) {
-      const assistant = createAssistantMessage();
+      const assistant = createAssistantMessage(ts);
       for (const part of msg.parts) {
         if (part.type === "thinking" && part.content) {
           assistant.addThinkingBlock(part.content);
@@ -333,14 +383,14 @@ function renderHistory(messages) {
 }
 
 async function deleteSession(session) {
-  const key = sessionLookupKey(session);
+  const normalized = normalizeSession(session);
+  const key = sessionLookupKey(normalized);
   state.sessions = state.sessions.filter((s) => sessionLookupKey(s) !== key);
   persistSessions();
   try {
-    const deleteKey = session.agentId ? scopedSessionKey(session.agentId, session.id) : session.id;
-    await fetch(`${state.baseUrl}/api/v1/sessions/${encodeURIComponent(deleteKey)}`, { method: "DELETE" });
+    await fetch(sessionApiUrl(normalized), { method: "DELETE" });
   } catch (_) { /* 忽略 */ }
-  if (session.id === state.sessionId && (session.agentId || "") === (state.agentId || "")) newChat();
+  if (normalized.id === state.sessionId && (normalized.agentId || "") === (state.agentId || "")) newChat();
   else renderSessions();
 }
 
@@ -598,16 +648,32 @@ function renderUsage(usage) {
 }
 
 /* --------------------------- 消息渲染 --------------------------- */
-function addMessage(role, text) {
+function addMessage(role, text, timestamp) {
   const row = document.createElement("div");
   row.className = `msg-row ${role}`;
   row.innerHTML = `
     <div class="avatar ${role}">${role === "user" ? "你" : "🤖"}</div>
     <div class="bubble-wrap"><div class="bubble"></div></div>`;
-  row.querySelector(".bubble").textContent = text;
+  const wrap = row.querySelector(".bubble-wrap");
+  if (timestamp) prependMsgTime(wrap, timestamp);
+  wrap.querySelector(".bubble").textContent = text;
   el.messages.appendChild(row);
   scrollToBottom();
   return row;
+}
+
+function addDateSeparator(iso) {
+  const sep = document.createElement("div");
+  sep.className = "date-separator";
+  sep.textContent = formatDateSeparator(iso);
+  el.messages.appendChild(sep);
+}
+
+function prependMsgTime(wrap, iso) {
+  const timeEl = document.createElement("div");
+  timeEl.className = "msg-time";
+  timeEl.textContent = formatMessageTime(iso);
+  wrap.insertBefore(timeEl, wrap.firstChild);
 }
 
 function addSystemNote(text) {
@@ -619,13 +685,14 @@ function addSystemNote(text) {
   scrollToBottom();
 }
 
-function createAssistantMessage() {
+function createAssistantMessage(timestamp) {
   const row = document.createElement("div");
   row.className = "msg-row assistant";
   row.innerHTML = `
     <div class="avatar assistant">🤖</div>
     <div class="bubble-wrap"></div>`;
   const wrap = row.querySelector(".bubble-wrap");
+  if (timestamp) prependMsgTime(wrap, timestamp);
   el.messages.appendChild(row);
   scrollToBottom();
 
@@ -769,6 +836,29 @@ function addErrorTo(assistant, message) {
 }
 
 /* --------------------------- 工具函数 --------------------------- */
+function localDayKey(iso) {
+  const d = new Date(iso);
+  return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+}
+
+function formatDateSeparator(iso) {
+  const d = new Date(iso);
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const msgDay = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const diffDays = Math.round((today - msgDay) / 86400000);
+  if (diffDays === 0) return "今天";
+  if (diffDays === 1) return "昨天";
+  if (d.getFullYear() === now.getFullYear()) return `${d.getMonth() + 1}月${d.getDate()}日`;
+  return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`;
+}
+
+function formatMessageTime(iso) {
+  return new Intl.DateTimeFormat("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false }).format(
+    new Date(iso)
+  );
+}
+
 function lastUserText() {
   const rows = el.messages.querySelectorAll(".msg-row.user .bubble");
   return rows.length ? rows[rows.length - 1].textContent : "";

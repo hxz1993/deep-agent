@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+from loguru import logger
 from pydantic_ai import Agent
-from pydantic_ai.models import Model, infer_model
+from pydantic_ai.models import Model
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers import infer_provider_class
 from pydantic_ai.providers.deepseek import DeepSeekProvider
 from pydantic_ai.providers.openai import OpenAIProvider
 
 from deep_agent.agent.deps import AgentDeps
+from deep_agent.agent.models import DeepSeekChatModel
 from deep_agent.agent.spec import AgentSpec
 from deep_agent.capabilities.registry import CapabilityRegistry
 
@@ -62,10 +64,10 @@ def _resolve_model(spec: AgentSpec) -> str | Model:
             not spec.base_url
             or _normalize_url(spec.base_url) == _normalize_url(provider.base_url)
         ):
-            def provider_factory(_name: str) -> object:
-                return provider
-
-            return infer_model(spec.model, provider_factory=provider_factory)
+            model_name = _model_name_without_prefix(spec.model)
+            profile = DeepSeekProvider.model_profile(model_name)
+            logger.debug("Resolving {} with DeepSeekChatModel", spec.model)
+            return DeepSeekChatModel(model_name, provider=provider, profile=profile)
 
     if spec.base_url:
         prefix, sep, rest = spec.model.partition(":")

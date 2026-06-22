@@ -55,6 +55,7 @@ def load_mcp_capabilities(config_path: str) -> list[Capability]:
                 toolset=toolset,
                 description=f"MCP server '{key}'. Tools are prefixed with '{key}_'.",
                 tools=[],
+                default_enabled=False,
             )
         )
         logger.info("Loaded MCP server {!r}", key)

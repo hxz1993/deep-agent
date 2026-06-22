@@ -10,6 +10,7 @@ from pydantic_ai.providers.deepseek import DeepSeekProvider
 from pydantic_ai.providers.openai import OpenAIProvider
 
 from deep_agent.agent.factory import _resolve_model
+from deep_agent.agent.models import DeepSeekChatModel
 from deep_agent.agent.spec import AgentSpec
 
 
@@ -32,7 +33,7 @@ class ResolveModelTests(unittest.TestCase):
         model = _resolve_model(
             _spec(model="deepseek:deepseek-v4-flash", api_key="sk-test"),
         )
-        self.assertIsInstance(model, OpenAIChatModel)
+        self.assertIsInstance(model, DeepSeekChatModel)
         self.assertIsInstance(model._provider, DeepSeekProvider)
         profile = OpenAIModelProfile.from_profile(model.profile)
         self.assertEqual(profile.openai_chat_thinking_field, "reasoning_content")
@@ -46,7 +47,7 @@ class ResolveModelTests(unittest.TestCase):
                 base_url="https://api.deepseek.com/",
             ),
         )
-        self.assertIsInstance(model, OpenAIChatModel)
+        self.assertIsInstance(model, DeepSeekChatModel)
         self.assertIsInstance(model._provider, DeepSeekProvider)
 
     def test_deepseek_with_custom_base_url_falls_back_to_openai_provider(self) -> None:
@@ -100,7 +101,7 @@ class ResolveModelTests(unittest.TestCase):
     def test_deepseek_without_spec_api_key_uses_deepseek_env_key(self) -> None:
         with mock.patch.dict(os.environ, {"DEEPSEEK_API_KEY": "sk-env"}, clear=False):
             model = _resolve_model(_spec(model="deepseek:deepseek-v4-flash"))
-        self.assertIsInstance(model, OpenAIChatModel)
+        self.assertIsInstance(model, DeepSeekChatModel)
         self.assertIsInstance(model._provider, DeepSeekProvider)
 
 

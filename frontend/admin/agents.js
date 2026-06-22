@@ -32,6 +32,32 @@ function groupCapabilities(caps) {
   return { byKind, kinds: ordered };
 }
 
+function defaultEnabledCapabilityNames(caps) {
+  return (caps || []).filter((c) => c.default_enabled).map((c) => c.name);
+}
+
+function formatCapabilitiesPreview(capabilities) {
+  if (capabilities == null) return "（全部默认）";
+  if (!capabilities.length) return "（无）";
+  return capabilities.join(", ");
+}
+
+function buildCapabilitySelectionSet(selected, caps) {
+  if (selected === null) {
+    return new Set(defaultEnabledCapabilityNames(caps));
+  }
+  return new Set(selected || []);
+}
+
+function selectionMatchesDefaults(selectedSet, caps) {
+  const defaults = new Set(defaultEnabledCapabilityNames(caps));
+  if (defaults.size !== selectedSet.size) return false;
+  for (const name of defaults) {
+    if (!selectedSet.has(name)) return false;
+  }
+  return true;
+}
+
 const agentsAdmin = {
   async refresh() {
     const tbody = document.getElementById("agentsTableBody");
@@ -50,9 +76,7 @@ const agentsAdmin = {
         <tr>
           <td><strong>${escapeHtml(a.name)}</strong></td>
           <td>${escapeHtml(a.model)}</td>
-          <td><div class="cap-preview">${escapeHtml(
-            a.capabilities?.length ? a.capabilities.join(", ") : "（全部默认）"
-          )}</div></td>
+          <td><div class="cap-preview">${escapeHtml(formatCapabilitiesPreview(a.capabilities))}</div></td>
           <td>${escapeHtml(formatDate(a.updated_at))}</td>
           <td>
             <div class="row-actions">
@@ -77,7 +101,7 @@ const agentsAdmin = {
   },
 
   renderCapCard(cap, selectedSet) {
-    const checked = selectedSet === null ? false : selectedSet.has(cap.name);
+    const checked = selectedSet.has(cap.name);
     const displayName = capDisplayName(cap.name, cap.kind);
     const kindLabel = KIND_LABELS[cap.kind] || cap.kind;
     const toolCount = cap.tools?.length || 0;
@@ -115,7 +139,6 @@ const agentsAdmin = {
 
   countSelectedInKind(kind, selectedSet) {
     const caps = (state.capabilities || []).filter((c) => c.kind === kind);
-    if (selectedSet === null) return 0;
     return caps.filter((c) => selectedSet.has(c.name)).length;
   },
 
@@ -135,7 +158,7 @@ const agentsAdmin = {
       return;
     }
 
-    const selectedSet = selected === null ? null : new Set(selected || []);
+    const selectedSet = buildCapabilitySelectionSet(selected, caps);
     const { byKind, kinds } = groupCapabilities(caps);
     const defaultTab = kinds.find((k) => k !== "mcp") || kinds[0];
 
@@ -226,15 +249,21 @@ const agentsAdmin = {
     const checked = document.querySelectorAll('#agentCapGroups input[name="cap"]:checked');
     const total = allBoxes.length;
     const selected = checked.length;
+    const selectedSet = new Set(Array.from(checked).map((b) => b.value));
 
     if (!total) {
       counter.textContent = "";
       return;
     }
 
-    counter.textContent = selected === 0 ? "全部默认" : `已选 ${selected} / ${total}`;
+    if (selected === 0) {
+      counter.textContent = "无能力";
+    } else if (selectionMatchesDefaults(selectedSet, state.capabilities || [])) {
+      counter.textContent = "全部默认";
+    } else {
+      counter.textContent = `已选 ${selected} / ${total}`;
+    }
 
-    const selectedSet = new Set(Array.from(checked).map((b) => b.value));
     document.querySelectorAll("[data-kind-badge]").forEach((badge) => {
       const kind = badge.dataset.kindBadge;
       const kindTotal = (state.capabilities || []).filter((c) => c.kind === kind).length;
@@ -248,8 +277,9 @@ const agentsAdmin = {
     const selected = Array.from(boxes).map((b) => b.value);
     const allBoxes = document.querySelectorAll('#agentCapGroups input[name="cap"]');
     if (!allBoxes.length) return null;
-    if (selected.length === 0) return null;
-    if (selected.length === allBoxes.length) return null;
+    if (selected.length === 0) return [];
+    const selectedSet = new Set(selected);
+    if (selectionMatchesDefaults(selectedSet, state.capabilities || [])) return null;
     return selected;
   },
 
@@ -264,7 +294,7 @@ const agentsAdmin = {
     document.getElementById("agentBaseUrl").value = "";
     document.getElementById("agentApiKey").value = "";
     document.getElementById("agentMaxRequests").value = "";
-    this.renderCapabilityCheckboxes(null);
+    this.renderCapabilityCheckboxes([]);
     document.getElementById("agentModal").showModal();
   },
 

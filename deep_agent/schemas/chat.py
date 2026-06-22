@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -53,3 +54,5 @@ class SessionInfo(BaseModel):
     agent_id: str | None = Field(default=None, description="Agent id used for this session.")
     agent_name: str | None = Field(default=None, description="Agent display name (if known).")
     user_prompt: str | None = Field(default=None, description="First user message in the session.")
+    created_at: datetime | None = Field(default=None, description="Session creation time (UTC).")
+    updated_at: datetime | None = Field(default=None, description="Last conversation activity time (UTC).")

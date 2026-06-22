@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from pydantic_ai import Agent
-from pydantic_ai.models import Model
+from pydantic_ai.models import Model, infer_model
 from pydantic_ai.models.openai import OpenAIChatModel
+from pydantic_ai.providers import infer_provider_class
+from pydantic_ai.providers.deepseek import DeepSeekProvider
 from pydantic_ai.providers.openai import OpenAIProvider
 
 from deep_agent.agent.deps import AgentDeps
@@ -12,24 +14,65 @@ from deep_agent.capabilities.registry import CapabilityRegistry
 _OPENAI_PREFIXES = {"openai", "openai-chat"}
 
 
+def _model_provider_prefix(model: str) -> str | None:
+    prefix, sep, _rest = model.partition(":")
+    return prefix if sep else None
+
+
+def _model_name_without_prefix(model: str) -> str:
+    _prefix, sep, rest = model.partition(":")
+    return rest if sep else model
+
+
+def _normalize_url(url: str | None) -> str | None:
+    if url is None:
+        return None
+    stripped = url.strip()
+    if not stripped:
+        return None
+    return stripped.rstrip("/")
+
+
+def _resolve_openai_compatible(spec: AgentSpec, model_name: str) -> Model:
+    provider = OpenAIProvider(base_url=spec.base_url, api_key=spec.api_key)
+    return OpenAIChatModel(model_name, provider=provider)
+
+
 def _resolve_model(spec: AgentSpec) -> str | Model:
     """Turn the spec's model string into a model for Pydantic AI.
 
-    Without ``base_url`` we pass the plain string (e.g. "openai:gpt-4o") and let
-    Pydantic AI pick the provider from the prefix. With ``base_url`` set we route
-    through an explicit OpenAI-compatible provider, which works for OpenAI as
-    well as most domestic models (DeepSeek, Qwen, GLM, Kimi, ...).
+    For ``provider:model`` strings, the provider class comes from
+    :func:`~pydantic_ai.providers.infer_provider_class`. When that class is
+    :class:`~pydantic_ai.providers.deepseek.DeepSeekProvider` and ``base_url`` is
+    unset or matches the provider's official endpoint, the native provider is used
+    so reasoning fields round-trip correctly. A different ``base_url`` falls back
+    to :class:`~pydantic_ai.providers.openai.OpenAIProvider`.
     """
-    if not spec.base_url:
+    provider_name = _model_provider_prefix(spec.model)
+    if provider_name is None:
+        if spec.base_url:
+            return _resolve_openai_compatible(spec, spec.model)
         return spec.model
 
-    # A custom base_url already fixes the provider to an OpenAI-compatible
-    # endpoint, so drop a leading "openai:"/"openai-chat:" prefix if present.
-    prefix, sep, rest = spec.model.partition(":")
-    model_name = rest if sep and prefix in _OPENAI_PREFIXES else spec.model
+    provider_class = infer_provider_class(provider_name)
 
-    provider = OpenAIProvider(base_url=spec.base_url, api_key=spec.api_key)
-    return OpenAIChatModel(model_name, provider=provider)
+    if provider_class is DeepSeekProvider:
+        provider = DeepSeekProvider(api_key=spec.api_key)
+        if (
+            not spec.base_url
+            or _normalize_url(spec.base_url) == _normalize_url(provider.base_url)
+        ):
+            def provider_factory(_name: str) -> object:
+                return provider
+
+            return infer_model(spec.model, provider_factory=provider_factory)
+
+    if spec.base_url:
+        prefix, sep, rest = spec.model.partition(":")
+        model_name = rest if sep and prefix in _OPENAI_PREFIXES else _model_name_without_prefix(spec.model)
+        return _resolve_openai_compatible(spec, model_name)
+
+    return spec.model
 
 
 def build_agent(

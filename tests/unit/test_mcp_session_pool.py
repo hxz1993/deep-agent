@@ -4,17 +4,11 @@ import unittest
 from dataclasses import replace
 from unittest.mock import AsyncMock, patch
 
-from deep_agent.capabilities.mcp.session_pool import McpSessionPool, reset_mcp_session_pool
+from deep_agent.capabilities.mcp.session_pool import McpSessionPool
 from deep_agent.core.config import Settings, get_settings
 
 
 class McpSessionPoolTests(unittest.IsolatedAsyncioTestCase):
-    def setUp(self) -> None:
-        reset_mcp_session_pool()
-
-    def tearDown(self) -> None:
-        reset_mcp_session_pool()
-
     async def test_reuses_toolset_for_same_session(self) -> None:
         pool = McpSessionPool()
         created: list[object] = []

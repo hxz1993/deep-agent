@@ -39,22 +39,26 @@ with patch("deep_agent.agent.factory._resolve_model", return_value=test_model):
 
 ### 2. 不要用 `main.app` 直接做 TestClient
 
-`deep_agent.main.app` 带有 **lifespan**：会连 PostgreSQL、从 DB 重载 MCP registry，**覆盖**测试里手动设置的 `app.state.registry`。
+`deep_agent.main.app` 带有 **lifespan**：会连 PostgreSQL、从 DB 重载 MCP registry，**覆盖**测试里手动设置的 context。
 
-正确做法：用 **最小 FastAPI 应用**，只挂载 `api_router`，并自行设置 state：
+正确做法：用 **最小 FastAPI 应用**，只挂载 `api_router`，并通过 `AppContext.for_testing()` 注入：
 
 ```python
 from fastapi import FastAPI
-from deep_agent.api.v1.router import api_router
+from deep_agent.api.v1 import api_router
+from deep_agent.core.context import AppContext, init_context, reset_context
 from deep_agent.memory import InMemorySessionStore
 
 app = FastAPI()
 app.include_router(api_router)
-app.state.settings = settings
-app.state.registry = registry          # 测试专用 registry
-app.state.store = InMemorySessionStore()
-app.state.db_engine = None
-app.state.db_session_factory = None
+init_context(
+    AppContext.for_testing(
+        settings=settings,
+        registry=registry,          # 测试专用 registry
+        store=InMemorySessionStore(),
+    )
+)
+# 测试结束后调用 reset_context()
 ```
 
 封装见 [`helpers/chat.py`](helpers/chat.py) 的 `create_test_app()` / `test_chat_client()`。

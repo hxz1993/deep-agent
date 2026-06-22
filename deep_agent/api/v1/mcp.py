@@ -1,9 +1,11 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from deep_agent.capabilities import load_and_register_mcp
+from deep_agent.capabilities.registry import CapabilityRegistry
+from deep_agent.core.context import AppContextDep
 from deep_agent.db.deps import get_db
 from deep_agent.db.repositories.mcp import McpServerRepository
 from deep_agent.schemas.mcp import McpBuiltinConfig, McpServerCreate, McpServerResponse, McpServerUpdate
@@ -12,8 +14,7 @@ router = APIRouter()
 _repo = McpServerRepository()
 
 
-async def _reload_mcp_registry(request: Request, db: AsyncSession) -> None:
-    registry = request.app.state.registry
+async def _reload_mcp_registry(registry: CapabilityRegistry, db: AsyncSession) -> None:
     await load_and_register_mcp(registry, db)
 
 
@@ -51,8 +52,8 @@ async def get_mcp_server(name: str, db: AsyncSession = Depends(get_db)) -> McpSe
 
 @router.post("/mcp", response_model=McpServerResponse, status_code=status.HTTP_201_CREATED)
 async def create_mcp_server(
+    ctx: AppContextDep,
     body: McpServerCreate,
-    request: Request,
     db: AsyncSession = Depends(get_db),
 ) -> McpServerResponse:
     existing = await _repo.get_by_name(db, body.name)
@@ -62,15 +63,15 @@ async def create_mcp_server(
             detail=f"MCP server already exists: {body.name}",
         )
     row = await _repo.create(db, body)
-    await _reload_mcp_registry(request, db)
+    await _reload_mcp_registry(ctx.registry, db)
     return McpServerResponse.from_row(row)
 
 
 @router.patch("/mcp/{name}", response_model=McpServerResponse)
 async def update_mcp_server(
+    ctx: AppContextDep,
     name: str,
     body: McpServerUpdate,
-    request: Request,
     db: AsyncSession = Depends(get_db),
 ) -> McpServerResponse:
     row = await _repo.get_by_name(db, name)
@@ -78,17 +79,17 @@ async def update_mcp_server(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"MCP server not found: {name}")
     _assert_builtin_row_mutable(row, body)
     row = await _repo.update(db, row, body)
-    await _reload_mcp_registry(request, db)
+    await _reload_mcp_registry(ctx.registry, db)
     return McpServerResponse.from_row(row)
 
 
 @router.delete("/mcp/{name}", status_code=status.HTTP_200_OK)
 async def delete_mcp_server(
+    ctx: AppContextDep,
     name: str,
-    request: Request,
     db: AsyncSession = Depends(get_db),
 ) -> None:
     deleted = await _repo.delete(db, name)
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"MCP server not found: {name}")
-    await _reload_mcp_registry(request, db)
+    await _reload_mcp_registry(ctx.registry, db)

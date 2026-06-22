@@ -8,64 +8,19 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from deep_agent.api.v1 import api_router
-from deep_agent.core.paths import REPO_ROOT
-from deep_agent.capabilities import build_registry, load_and_register_mcp
-from deep_agent.capabilities.mcp.session_pool import McpSessionPool, set_mcp_session_pool
-from deep_agent.core.config import get_database_url, get_settings
+from deep_agent.core.context import AppContext, AppContextDep, reset_context
 from deep_agent.core.exceptions import AgentNotFoundError, DeepAgentError
-from deep_agent.core.logging import configure_logging, get_logger
-from deep_agent.db.engine import close_db, create_engine
-from deep_agent.db.migrate import upgrade_database
-from deep_agent.memory import InMemorySessionStore, MySQLSessionStore, PostgresSessionStore
-
-
-logger = get_logger(__name__)
+from deep_agent.core.logging import configure_logging
+from deep_agent.core.paths import REPO_ROOT
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     configure_logging()
-    settings = get_settings()
-    database_url = get_database_url()
-    app.state.settings = settings
-    app.state.mcp_session_pool = McpSessionPool()
-    set_mcp_session_pool(app.state.mcp_session_pool)
-    app.state.registry = build_registry(settings)
-
-    if database_url:
-        try:
-            await upgrade_database()
-        except Exception:
-            logger.exception("Startup aborted: database migration failed")
-            raise
-        engine, session_factory = create_engine(database_url)
-        app.state.db_engine = engine
-        app.state.db_session_factory = session_factory
-        if database_url.startswith("mysql+"):
-            app.state.store = MySQLSessionStore(session_factory)
-            db_kind = "mysql"
-        else:
-            app.state.store = PostgresSessionStore(session_factory)
-            db_kind = "postgres"
-        try:
-            async with session_factory() as session:
-                await load_and_register_mcp(app.state.registry, session)
-        except Exception:
-            logger.exception("Failed to load MCP servers from database.")
-        logger.info("%s started (model=%s, database=%s)", settings.app_name, settings.model, db_kind)
-    else:
-        app.state.db_engine = None
-        app.state.db_session_factory = None
-        app.state.store = InMemorySessionStore()
-        logger.warning("Database not configured; MCP servers will not be loaded.")
-        logger.info("%s started (model=%s, database=in-memory)", settings.app_name, settings.model)
-
+    ctx = await AppContext.bootstrap()
     yield
-
-    await app.state.mcp_session_pool.close_all()
-
-    if app.state.db_engine is not None:
-        await close_db(app.state.db_engine)
+    await ctx.aclose()
+    reset_context()
 
 
 app = FastAPI(
@@ -102,13 +57,11 @@ async def health() -> dict[str, str]:
 
 
 @app.get("/info", tags=["meta"])
-async def root(request: Request) -> dict[str, object]:
-    settings = request.app.state.settings
-    registry = request.app.state.registry
+async def root(ctx: AppContextDep) -> dict[str, object]:
     return {
-        "name": settings.app_name,
-        "model": settings.model,
-        "capabilities": registry.names(),
+        "name": ctx.settings.app_name,
+        "model": ctx.settings.model,
+        "capabilities": ctx.registry.names(),
         "docs": "/docs",
     }
 

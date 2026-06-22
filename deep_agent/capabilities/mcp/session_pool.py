@@ -156,21 +156,7 @@ class McpSessionPool:
             logger.debug("Ignored error while closing failed MCP connect attempt", exc_info=True)
 
 
-_pool: McpSessionPool | None = None
-
-
 def get_mcp_session_pool() -> McpSessionPool:
-    global _pool
-    if _pool is None:
-        _pool = McpSessionPool()
-    return _pool
+    from deep_agent.core.context import get_context
 
-
-def set_mcp_session_pool(pool: McpSessionPool) -> None:
-    global _pool
-    _pool = pool
-
-
-def reset_mcp_session_pool() -> None:
-    global _pool
-    _pool = None
+    return get_context().mcp_session_pool

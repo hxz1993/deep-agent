@@ -10,7 +10,7 @@
 
 | 任务 | 先看文件 |
 | --- | --- |
-| 启动与全局状态 | `main.py` |
+| 启动与全局状态 | `main.py` → `core/context.py` |
 | 对话入口 | `api/v1/chat.py` |
 | Agent 执行 | `agent/runner.py` |
 | 能力注册 | `capabilities/__init__.py` |
@@ -34,12 +34,14 @@ HTTP (REST/SSE)
     → SessionStore（memory/）
 ```
 
-### 启动生命周期（`main.py` lifespan）
+### 启动生命周期（`main.py` lifespan → `AppContext.bootstrap()`）
 
-1. `configure_logging()` → `get_settings()` → `build_registry()`（native + skill + cursor-skill）
-2. 有数据库：`upgrade_database()` → async engine → `PostgresSessionStore` 或 `MySQLSessionStore`
-3. `load_and_register_mcp(registry, session)` — DB 加载 MCP；DB 未覆盖的 `mcps/<name>/` 自动兜底
-4. 关闭：`McpSessionPool.close_all()` → `close_db()`
+1. `configure_logging()` → `AppContext.bootstrap()`（见 `core/context.py`）
+2. `get_settings()` → `build_registry()`（native + skill + cursor-skill）
+3. 有数据库：`upgrade_database()` → async engine → `PostgresSessionStore` 或 `MySQLSessionStore`
+4. `load_and_register_mcp(registry, session)` — DB 加载 MCP；DB 未覆盖的 `mcps/<name>/` 自动兜底
+5. `init_context(ctx)` — 路由通过 `Depends(AppContextDep)` 注入
+6. 关闭：`ctx.aclose()` → `reset_context()`
 
 无数据库 → `InMemorySessionStore`；`load_and_register_mcp` 跳过，**builtin MCP 也不注册**。调试 MCP 需配置 `DEEP_AGENT_DBMS_*`。
 

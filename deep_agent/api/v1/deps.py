@@ -1,71 +1,49 @@
 from __future__ import annotations
 
-from fastapi import Request
 from pydantic_ai.usage import UsageLimits
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from deep_agent.agent.factory import build_agent
 from deep_agent.agent.runner import AgentRunner
 from deep_agent.agent.spec import AgentSpec, default_spec
-from deep_agent.capabilities.registry import CapabilityRegistry
-from deep_agent.core.config import Settings, resolve_agent_max_requests
+from deep_agent.core.config import resolve_agent_max_requests
+from deep_agent.core.context import AppContext
 from deep_agent.core.exceptions import AgentNotFoundError
 from deep_agent.db.repositories.agent import AgentRepository
-from deep_agent.memory.base import SessionStore
 
 _agent_repo = AgentRepository()
 
 
-def get_settings(request: Request) -> Settings:
-    return request.app.state.settings
-
-
-def get_registry(request: Request) -> CapabilityRegistry:
-    return request.app.state.registry
-
-
-def get_store(request: Request) -> SessionStore:
-    return request.app.state.store
-
-
 def build_runner(
-    request: Request,
+    ctx: AppContext,
     *,
     model: str | None = None,
     capabilities: list[str] | None = None,
 ) -> AgentRunner:
     """Assemble a per-request AgentRunner from settings + registry + store."""
-    settings = get_settings(request)
-    spec = default_spec(settings)
+    spec = default_spec(ctx.settings)
     if model:
         spec.model = model
     if capabilities is not None:
         spec.capabilities = capabilities
 
-    return _build_runner_from_spec(spec, request)
+    return _build_runner_from_spec(spec, ctx)
 
 
-async def build_runner_for_agent(request: Request, db: AsyncSession, agent_id: str) -> AgentRunner:
+async def build_runner_for_agent(ctx: AppContext, db: AsyncSession, agent_id: str) -> AgentRunner:
     """Assemble a per-request AgentRunner from a database agent configuration."""
     row = await _agent_repo.get_by_id(db, agent_id)
     if row is None:
         raise AgentNotFoundError(agent_id)
 
     spec = _agent_repo.to_spec(row)
-    return _build_runner_from_spec(spec, request)
+    return _build_runner_from_spec(spec, ctx)
 
 
-def _build_runner_from_spec(
-    spec: AgentSpec,
-    request: Request,
-) -> AgentRunner:
-    settings = get_settings(request)
-    registry = get_registry(request)
-    store = get_store(request)
-
-    agent = build_agent(spec, registry, request_retries=settings.request_retries)
+def _build_runner_from_spec(spec: AgentSpec, ctx: AppContext) -> AgentRunner:
+    agent = build_agent(spec, ctx.registry, request_retries=ctx.settings.request_retries)
     limits = UsageLimits(
-        request_limit=resolve_agent_max_requests(spec.max_requests, settings.max_requests),
-        total_tokens_limit=settings.max_total_tokens,
+        request_limit=resolve_agent_max_requests(spec.max_requests, ctx.settings.max_requests),
+        total_tokens_limit=ctx.settings.max_total_tokens,
     )
-    return AgentRunner(agent, store, limits)
+    return AgentRunner(agent, ctx.store, limits)

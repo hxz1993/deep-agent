@@ -3,13 +3,15 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import HTTPException, Request, status
+from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from deep_agent.core.context import AppContext, AppContextDep
 
 
 @asynccontextmanager
-async def db_session(request: Request) -> AsyncIterator[AsyncSession]:
-    session_factory = getattr(request.app.state, "db_session_factory", None)
+async def db_session(ctx: AppContext) -> AsyncIterator[AsyncSession]:
+    session_factory = ctx.db_session_factory
     if session_factory is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -22,6 +24,6 @@ async def db_session(request: Request) -> AsyncIterator[AsyncSession]:
         yield session
 
 
-async def get_db(request: Request) -> AsyncIterator[AsyncSession]:
-    async with db_session(request) as session:
+async def get_db(ctx: AppContextDep) -> AsyncIterator[AsyncSession]:
+    async with db_session(ctx) as session:
         yield session

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from deep_agent.api.v1.deps import get_store
+from deep_agent.core.context import AppContextDep
 from deep_agent.db.deps import get_db
 from deep_agent.db.repositories.agent import AgentRepository
 from deep_agent.memory.base import SessionStore
@@ -50,41 +50,34 @@ async def _build_session_info(
 
 
 @router.get("/sessions", response_model=list[SessionInfo])
-async def list_sessions(request: Request, db: AsyncSession = Depends(get_db)) -> list[SessionInfo]:
-    store = get_store(request)
+async def list_sessions(ctx: AppContextDep, db: AsyncSession = Depends(get_db)) -> list[SessionInfo]:
     result: list[SessionInfo] = []
-    for session_key in await store.list_sessions():
-        result.append(await _build_session_info(store, session_key, db=db))
+    for session_key in await ctx.store.list_sessions():
+        result.append(await _build_session_info(ctx.store, session_key, db=db))
     return result
 
 
 @router.get("/sessions/{session_id}", response_model=SessionInfo)
 async def get_session(
-    request: Request,
+    ctx: AppContextDep,
     session_id: str,
     db: AsyncSession = Depends(get_db),
 ) -> SessionInfo:
-    store = get_store(request)
-    history = await store.get_history(session_id)
-    if not history and session_id not in await store.list_sessions():
+    history = await ctx.store.get_history(session_id)
+    if not history and session_id not in await ctx.store.list_sessions():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
-    return await _build_session_info(store, session_id, db=db)
+    return await _build_session_info(ctx.store, session_id, db=db)
 
 
 @router.get("/sessions/{session_id}/history", response_model=SessionHistoryResponse)
-async def get_session_history(request: Request, session_id: str) -> SessionHistoryResponse:
-    store = get_store(request)
-    raw = await store.get_history(session_id)
+async def get_session_history(ctx: AppContextDep, session_id: str) -> SessionHistoryResponse:
+    raw = await ctx.store.get_history(session_id)
     _, display_id = parse_scoped_session_key(session_id)
     return SessionHistoryResponse(session_id=display_id, messages=model_messages_to_history(raw))
 
 
 @router.delete("/sessions/{session_id}", status_code=status.HTTP_200_OK)
-async def delete_session(request: Request, session_id: str) -> None:
-    store = get_store(request)
-    await store.delete(session_id)
-    pool = getattr(request.app.state, "mcp_session_pool", None)
-    if pool is not None:
-        await pool.close_session(session_id)
-
+async def delete_session(ctx: AppContextDep, session_id: str) -> None:
+    await ctx.store.delete(session_id)
+    await ctx.mcp_session_pool.close_session(session_id)
 

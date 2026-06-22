@@ -84,42 +84,51 @@ class ChatHeaderForwardingTests(unittest.TestCase):
         from deep_agent.api.v1 import api_router
         from deep_agent.capabilities import build_registry
         from deep_agent.capabilities.mcp.builtin import load_builtin_mcp_capabilities
+        from deep_agent.capabilities.mcp.session_pool import McpSessionPool
         from deep_agent.core.config import get_settings
+        from deep_agent.core.context import AppContext, get_context, init_context, reset_context
         from deep_agent.core.paths import DEEP_AGENT_ROOT
         from deep_agent.memory import InMemorySessionStore
 
         settings = get_settings()
+        pool = McpSessionPool()
+        init_context(
+            AppContext.for_testing(
+                settings=settings,
+                store=InMemorySessionStore(),
+                mcp_session_pool=pool,
+            )
+        )
         registry = build_registry(settings)
         registry.replace_by_kind(
             "mcp",
             load_builtin_mcp_capabilities(str(DEEP_AGENT_ROOT / "mcps")),
         )
+        get_context().registry = registry
 
         app = FastAPI()
         app.include_router(api_router)
-        app.state.settings = settings
-        app.state.registry = registry
-        app.state.store = InMemorySessionStore()
-        app.state.db_engine = None
-        app.state.db_session_factory = None
 
         test_model = TestModel(
             call_tools=["text_tools_reverse"],
             custom_output_text="ok",
         )
-        with patch("deep_agent.agent.factory._resolve_model", return_value=test_model):
-            with TestClient(app) as client:
-                response = client.post(
-                    "/api/v1/chat",
-                    json={
-                        "message": "reverse abc",
-                        "capabilities": ["mcp:text_tools"],
-                    },
-                    headers={
-                        "Authorization": "Bearer text-tools-token",
-                        "X-Tenant-Id": "tenant-text-tools",
-                    },
-                )
+        try:
+            with patch("deep_agent.agent.factory._resolve_model", return_value=test_model):
+                with TestClient(app) as client:
+                    response = client.post(
+                        "/api/v1/chat",
+                        json={
+                            "message": "reverse abc",
+                            "capabilities": ["mcp:text_tools"],
+                        },
+                        headers={
+                            "Authorization": "Bearer text-tools-token",
+                            "X-Tenant-Id": "tenant-text-tools",
+                        },
+                    )
+        finally:
+            reset_context()
 
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(response.json()["output"], "ok")

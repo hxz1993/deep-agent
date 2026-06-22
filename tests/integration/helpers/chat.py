@@ -13,10 +13,11 @@ from fastapi.testclient import TestClient
 from pydantic_ai.models.test import TestModel
 
 from deep_agent.api.v1 import api_router
-from deep_agent.capabilities.mcp.session_pool import McpSessionPool, set_mcp_session_pool
+from deep_agent.capabilities.mcp.session_pool import McpSessionPool
 from deep_agent.capabilities.registry import Capability, CapabilityRegistry
 from deep_agent.capabilities.mcp.toolset_builder import build_mcp_toolset
 from deep_agent.core.config import Settings, get_settings
+from deep_agent.core.context import AppContext, init_context, reset_context
 from deep_agent.memory import InMemorySessionStore
 
 HEADER_ECHO_SERVER = (
@@ -67,16 +68,15 @@ def configure_test_app(
 ) -> CapabilityRegistry:
     """Attach in-memory dependencies and a single header-echo MCP capability."""
     settings = settings or get_settings()
-    registry = CapabilityRegistry()
-    registry.register(echo_capability(record_path=record_path))
-    app.state.settings = settings
-    app.state.mcp_session_pool = McpSessionPool()
-    set_mcp_session_pool(app.state.mcp_session_pool)
-    app.state.registry = registry
-    app.state.store = InMemorySessionStore()
-    app.state.db_engine = None
-    app.state.db_session_factory = None
-    return registry
+    ctx = AppContext.for_testing(
+        settings=settings,
+        registry=CapabilityRegistry(),
+        store=InMemorySessionStore(),
+        mcp_session_pool=McpSessionPool(),
+    )
+    init_context(ctx)
+    ctx.registry.register(echo_capability(record_path=record_path))
+    return ctx.registry
 
 
 @contextmanager
@@ -92,6 +92,9 @@ def test_chat_client(
         custom_output_text="ok",
     )
     app = create_test_app(record_path=record_file)
-    with patch("deep_agent.agent.factory._resolve_model", return_value=test_model):
-        with TestClient(app) as client:
-            yield client, record_file
+    try:
+        with patch("deep_agent.agent.factory._resolve_model", return_value=test_model):
+            with TestClient(app) as client:
+                yield client, record_file
+    finally:
+        reset_context()

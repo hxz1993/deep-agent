@@ -10,6 +10,8 @@ from pydantic_ai.messages import (
     PartStartEvent,
     TextPart,
     TextPartDelta,
+    ThinkingPart,
+    ThinkingPartDelta,
     ToolCallPart,
     ToolReturnPart,
 )
@@ -17,6 +19,10 @@ from pydantic_ai.messages import (
 
 def text_delta(delta: str) -> dict[str, Any]:
     return {"type": "text", "delta": delta}
+
+
+def thinking_delta(delta: str) -> dict[str, Any]:
+    return {"type": "thinking", "delta": delta}
 
 
 def tool_call(tool: str, args: Any, tool_call_id: str | None = None) -> dict[str, Any]:
@@ -76,6 +82,20 @@ def _map_text_part_delta(part: TextPartDelta) -> dict[str, Any] | None:
     if not part.content_delta:
         return None
     return text_delta(part.content_delta)
+
+
+@map_part.register(ThinkingPart)
+def _map_thinking_part(part: ThinkingPart) -> dict[str, Any] | None:
+    if not part.content:
+        return None
+    return thinking_delta(part.content)
+
+
+@map_part.register(ThinkingPartDelta)
+def _map_thinking_part_delta(part: ThinkingPartDelta) -> dict[str, Any] | None:
+    if not part.content_delta:
+        return None
+    return thinking_delta(part.content_delta)
 
 
 @singledispatch

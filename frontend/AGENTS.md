@@ -24,6 +24,7 @@ frontend/
 | 功能 | 实现 |
 | --- | --- |
 | 流式对话 | `fetch` + `ReadableStream` 手动解析 SSE（非 `EventSource`，因需 POST） |
+| 思考过程 UI | `thinking` 可折叠块，默认折叠；与 `text` 分离 |
 | 工具调用 UI | `tool_call` / `tool_result` 可折叠；同 `tool_call_id` 合并更新 |
 | Markdown | marked + DOMPurify + highlight.js |
 | 会话 | `session_id` 由后端 `session` 事件返回；`GET/DELETE /api/v1/sessions` |
@@ -40,6 +41,7 @@ frontend/
 | --- | --- |
 | `session` | `{ session_id }` 或含 `agent_id` |
 | `text` | `{ type, delta }` |
+| `thinking` | `{ type, delta }` |
 | `tool_call` | `{ type, tool, args, tool_call_id }` |
 | `tool_result` | `{ type, tool, result, tool_call_id }` |
 | `final` | `{ type, output, usage }` |

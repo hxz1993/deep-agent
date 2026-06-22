@@ -22,6 +22,11 @@ class HistoryTextPart(BaseModel):
     content: str
 
 
+class HistoryThinkingPart(BaseModel):
+    type: Literal["thinking"] = "thinking"
+    content: str
+
+
 class HistoryToolCallPart(BaseModel):
     type: Literal["tool_call"] = "tool_call"
     tool: str
@@ -36,7 +41,7 @@ class HistoryToolResultPart(BaseModel):
     tool_call_id: str | None = None
 
 
-HistoryPart = HistoryTextPart | HistoryToolCallPart | HistoryToolResultPart
+HistoryPart = HistoryTextPart | HistoryThinkingPart | HistoryToolCallPart | HistoryToolResultPart
 
 
 class HistoryMessage(BaseModel):
@@ -82,7 +87,7 @@ def _response_parts(response: ModelResponse) -> list[HistoryPart]:
         if isinstance(part, TextPart) and part.content:
             parts.append(HistoryTextPart(content=part.content))
         elif isinstance(part, ThinkingPart) and part.content:
-            parts.append(HistoryTextPart(content=part.content))
+            parts.append(HistoryThinkingPart(content=part.content))
         elif isinstance(part, BaseToolCallPart):
             parts.append(
                 HistoryToolCallPart(

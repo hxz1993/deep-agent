@@ -13,6 +13,8 @@
   --user-bubble: #1f6feb;
   --tool-bg: #16241f;
   --tool-border: #2ea04340;
+  --thinking-bg: #1a1829;
+  --thinking-border: #6366f140;
   --danger: #f85149;
   --radius: 14px;
   --shadow: 0 8px 30px rgba(0, 0, 0, 0.35);
@@ -323,6 +325,41 @@ html, body {
 .tool-body .args-pending {
   color: var(--text-faint);
   font-style: italic;
+}
+
+/* 思考过程块 */
+.thinking-block {
+  border: 1px solid var(--thinking-border);
+  background: var(--thinking-bg);
+  border-radius: 10px;
+  overflow: hidden;
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+.thinking-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+  user-select: none;
+}
+.thinking-head .thinking-icon { font-size: 14px; }
+.thinking-head .thinking-title { font-weight: 600; color: var(--text-faint); }
+.thinking-head .thinking-status { margin-left: auto; font-size: 11px; color: var(--text-faint); }
+.thinking-head .chevron { transition: transform 0.15s; color: var(--text-faint); }
+.thinking-block.open .chevron { transform: rotate(90deg); }
+.thinking-body { display: none; border-top: 1px solid var(--thinking-border); padding: 10px 12px; }
+.thinking-block.open .thinking-body { display: block; }
+.thinking-body .thinking-content {
+  margin: 0;
+  white-space: pre-wrap;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-faint);
+  max-height: 280px;
+  overflow: auto;
 }
 
 /* 工具调用块 */

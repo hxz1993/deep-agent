@@ -92,6 +92,7 @@ sequenceDiagram
     Client->>Server: POST /chat/stream
     Server-->>Client: session
     loop Agent 推理
+        Server-->>Client: thinking (delta, 可选)
         Server-->>Client: text (delta)
         Server-->>Client: tool_call (可能多次，同 id)
         Server-->>Client: tool_result
@@ -102,6 +103,7 @@ sequenceDiagram
 | 阶段 | 事件 | 说明 |
 |------|------|------|
 | 开始 | `session` | 返回本次会话 ID，客户端应保存用于后续请求 |
+| 思考过程 | `thinking` | 模型内部推理增量（reasoning 模型）；与 `text` 分离展示 |
 | 流式输出 | `text` | 模型回复的文本增量 |
 | 工具调用 | `tool_call` | 模型发起工具调用（同一 `tool_call_id` 可能推送多次） |
 | 工具结果 | `tool_result` | 工具执行完毕的返回 |
@@ -164,7 +166,32 @@ DB Agent 模式（请求体含 `agent_id`）：
 
 ---
 
-### 4.3 `tool_call`
+### 4.3 `thinking`
+
+模型**内部推理**的文本增量（如 DeepSeek reasoning、Claude extended thinking）。与面向用户的 `text` 分离，客户端应单独展示（建议默认折叠）。
+
+```json
+{
+  "type": "thinking",
+  "delta": "用户用中文打招呼，我应该用中文回应。"
+}
+```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `type` | `"thinking"` | 固定值 |
+| `delta` | `string` | 本帧新增的思考片段 |
+
+**客户端处理建议**：
+
+- 将 `delta` 追加到独立的思考缓冲区，**不要**与 `text` 拼接
+- 建议以可折叠区块展示，默认折叠；流式时标题可显示「思考中…」
+- 出现 `text` 或 `tool_call` 时，应结束当前思考块的流式状态
+- 历史回放：`GET /sessions/{id}/history` 中 assistant `parts` 含 `{ "type": "thinking", "content": "..." }`
+
+---
+
+### 4.4 `tool_call`
 
 模型请求调用某个工具。由于底层使用 Pydantic AI 流式 API，**同一 `tool_call_id` 可能收到 2 次** `tool_call` 事件：
 
@@ -208,7 +235,7 @@ DB Agent 模式（请求体含 `agent_id`）：
 
 ---
 
-### 4.4 `tool_result`
+### 4.5 `tool_result`
 
 工具执行完成后的返回。
 
@@ -236,7 +263,7 @@ DB Agent 模式（请求体含 `agent_id`）：
 
 ---
 
-### 4.5 `final`
+### 4.6 `final`
 
 流正常结束时的汇总事件，**一定在成功路径末尾出现**（在 `session` 锁释放后发出）。
 
@@ -275,7 +302,7 @@ DB Agent 模式（请求体含 `agent_id`）：
 
 ---
 
-### 4.6 `error`
+### 4.7 `error`
 
 Agent 执行过程中抛出未捕获异常时发出，此后流结束，**不会**再发 `final`。
 
@@ -325,10 +352,11 @@ data: {"type": "final", "output": "## 平台的 11 种维度类型\n...", "usage
 1. **解析 SSE**：支持 `\n\n` / `\r\n\r\n` 分帧，忽略 `:` 心跳注释
 2. **保存 session**：收到 `session` 后写入状态，后续请求携带 `session_id`
 3. **文本流**：`text.delta` 顺序拼接，支持 Markdown 渲染
-4. **工具调用 upsert**：同 `tool_call_id` 的 `tool_call` 更新而非重复创建
-5. **工具结果关联**：用 `tool_call_id` 匹配并关闭对应工具块
-6. **结束判断**：收到 `final` 或 `error` 后关闭 loading 状态
-7. **中断**：用户取消时 `AbortController.abort()`，并优雅处理 `AbortError`
+4. **思考过程**：`thinking.delta` 独立缓冲，可折叠展示，不与 `text` 拼接
+5. **工具调用 upsert**：同 `tool_call_id` 的 `tool_call` 更新而非重复创建
+6. **工具结果关联**：用 `tool_call_id` 匹配并关闭对应工具块
+7. **结束判断**：收到 `final` 或 `error` 后关闭 loading 状态
+8. **中断**：用户取消时 `AbortController.abort()`，并优雅处理 `AbortError`
 
 ## 7. 与 REST 接口的关系
 

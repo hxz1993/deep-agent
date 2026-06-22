@@ -7,6 +7,7 @@
  * 后端 SSE 事件 (event: <type>, data: <json>):
  *   session      -> { session_id, agent_id }
  *   text         -> { type:"text", delta }
+ *   thinking     -> { type:"thinking", delta }
  *   tool_call    -> { type:"tool_call", tool, args, tool_call_id }  // 同 id 可能多次，需 upsert
  *   tool_result  -> { type:"tool_result", tool, result, tool_call_id }
  *   final        -> { type:"final", output, usage }
@@ -306,7 +307,9 @@ function renderHistory(messages) {
     if (msg.role === "assistant" && msg.parts && msg.parts.length) {
       const assistant = createAssistantMessage();
       for (const part of msg.parts) {
-        if (part.type === "text" && part.content) {
+        if (part.type === "thinking" && part.content) {
+          assistant.addThinkingBlock(part.content);
+        } else if (part.type === "text" && part.content) {
           assistant.appendText(part.content);
         } else if (part.type === "tool_call") {
           assistant.addToolCall({
@@ -322,6 +325,7 @@ function renderHistory(messages) {
           });
         }
       }
+      assistant.finalizeThinking();
       assistant.finalizeText();
     }
   }
@@ -461,6 +465,7 @@ async function onSend() {
     await readSse(resp.body, (evt) => handleEvent(evt, assistant));
   } catch (e) {
     if (e.name === "AbortError") {
+      assistant.finalizeThinking();
       assistant.finalizeText();
       addErrorTo(assistant, "（已停止生成）");
     } else {
@@ -468,6 +473,7 @@ async function onSend() {
       addErrorTo(assistant, `请求失败：${e.message}`);
     }
   } finally {
+    assistant.finalizeThinking();
     assistant.finalizeText();
     setStreaming(false);
     state.abortController = null;
@@ -555,7 +561,11 @@ function handleEvent({ event, data }, assistant) {
       }
       break;
     }
+    case "thinking":
+      assistant.appendThinking(data.delta || "");
+      break;
     case "text":
+      assistant.finalizeThinking();
       assistant.appendText(data.delta || "");
       break;
     case "tool_call":
@@ -565,6 +575,7 @@ function handleEvent({ event, data }, assistant) {
       assistant.addToolResult(data);
       break;
     case "final":
+      assistant.finalizeThinking();
       assistant.finalizeText();
       if (data.usage) renderUsage(data.usage);
       break;
@@ -620,7 +631,41 @@ function createAssistantMessage() {
 
   let textBuffer = "";
   let textBubble = null;
+  let thinkingBlock = null;
+  let thinkingBuffer = "";
   const toolBlocks = new Map(); // tool_call_id -> element
+
+  function ensureThinkingBlock() {
+    if (!thinkingBlock) {
+      thinkingBlock = document.createElement("div");
+      thinkingBlock.className = "thinking-block";
+      thinkingBlock.innerHTML = `
+        <div class="thinking-head">
+          <span class="chevron">▶</span>
+          <span class="thinking-icon">💭</span>
+          <span class="thinking-title">思考中…</span>
+          <span class="thinking-status"><span class="spinner"></span></span>
+        </div>
+        <div class="thinking-body"><pre class="thinking-content"></pre></div>`;
+      thinkingBlock.querySelector(".thinking-head").addEventListener("click", () => {
+        thinkingBlock.classList.toggle("open");
+      });
+      wrap.appendChild(thinkingBlock);
+    }
+    return thinkingBlock;
+  }
+
+  function renderThinkingContent() {
+    const pre = ensureThinkingBlock().querySelector(".thinking-content");
+    pre.textContent = thinkingBuffer;
+  }
+
+  function finalizeThinkingBlock() {
+    if (!thinkingBlock) return;
+    thinkingBlock.querySelector(".thinking-title").textContent = "思考过程";
+    thinkingBlock.querySelector(".thinking-status").innerHTML = "";
+    thinkingBlock.classList.remove("open");
+  }
 
   function ensureTextBubble() {
     if (!textBubble) {
@@ -633,6 +678,19 @@ function createAssistantMessage() {
 
   return {
     row,
+    appendThinking(delta) {
+      thinkingBuffer += delta;
+      renderThinkingContent();
+      scrollToBottom();
+    },
+    finalizeThinking() {
+      finalizeThinkingBlock();
+    },
+    addThinkingBlock(content) {
+      thinkingBuffer = content;
+      renderThinkingContent();
+      finalizeThinkingBlock();
+    },
     appendText(delta) {
       textBuffer += delta;
       ensureTextBubble().innerHTML = renderMarkdownBody(textBuffer);
@@ -644,6 +702,7 @@ function createAssistantMessage() {
       }
     },
     addToolCall(data) {
+      finalizeThinkingBlock();
       const key = data.tool_call_id || `${data.tool}-${toolBlocks.size}`;
       const hasArgs = hasNonEmptyArgs(data.args);
       const existing = toolBlocks.get(key);

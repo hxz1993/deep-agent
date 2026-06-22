@@ -8,7 +8,7 @@ from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
-from deep_agent.core.config import escape_for_ini, get_database_url, get_settings
+from deep_agent.db.url import escape_for_ini, get_database_url
 from deep_agent.db.models import Base
 
 config = context.config
@@ -20,7 +20,6 @@ if config.config_file_name is not None:
 
 target_metadata = Base.metadata
 
-get_settings()  # load .env before resolving DB URL
 database_url = get_database_url()
 if database_url:
     config.set_main_option("sqlalchemy.url", escape_for_ini(database_url))

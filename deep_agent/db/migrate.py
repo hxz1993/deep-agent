@@ -7,9 +7,9 @@ import traceback
 from alembic import command
 from alembic.config import Config
 
-from deep_agent.core.config import escape_for_ini, get_database_url, get_settings
 from deep_agent.core.logging import configure_logging, get_logger
 from deep_agent.core.paths import REPO_ROOT
+from deep_agent.db.url import escape_for_ini, get_database_url
 
 logger = get_logger(__name__)
 
@@ -27,7 +27,6 @@ def _build_alembic_config() -> Config:
 def upgrade_database_sync(revision: str = "head") -> None:
     """Run Alembic upgrade in the current thread."""
     configure_logging()
-    get_settings()
     if not get_database_url():
         return
     logger.info("Running database migrations (upgrade %s)", revision)
@@ -42,7 +41,6 @@ def upgrade_database_sync(revision: str = "head") -> None:
 
 async def upgrade_database(revision: str = "head") -> None:
     """Run Alembic upgrade without blocking the event loop."""
-    get_settings()
     if not get_database_url():
         return
     await asyncio.to_thread(upgrade_database_sync, revision)

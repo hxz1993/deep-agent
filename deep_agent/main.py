@@ -12,6 +12,7 @@ from deep_agent.core.context import AppContext, AppContextDep, reset_context
 from deep_agent.core.exceptions import AgentNotFoundError, DeepAgentError
 from deep_agent.core.logging import configure_logging
 from deep_agent.core.paths import REPO_ROOT
+from deep_agent.options import OPTION
 
 
 @asynccontextmanager
@@ -59,8 +60,8 @@ async def health() -> dict[str, str]:
 @app.get("/info", tags=["meta"])
 async def root(ctx: AppContextDep) -> dict[str, object]:
     return {
-        "name": ctx.settings.app_name,
-        "model": ctx.settings.model,
+        "name": OPTION.agent.app_name,
+        "model": OPTION.agent.model,
         "capabilities": ctx.registry.names(),
         "docs": "/docs",
     }

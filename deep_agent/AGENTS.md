@@ -14,7 +14,7 @@
 | 对话入口 | `api/v1/chat.py` |
 | Agent 执行 | `agent/runner.py` |
 | 能力注册 | `capabilities/__init__.py` |
-| 配置解析 | `options.py` → `core/config.py` |
+| 配置解析 | `options.py`（`OPTION` + accessor）；DB URL 见 `db/url.py` |
 | MCP 加载 | `capabilities/mcp/db_loader.py`、`capabilities/mcp/builtin.py` |
 
 ---
@@ -37,7 +37,7 @@ HTTP (REST/SSE)
 ### 启动生命周期（`main.py` lifespan → `AppContext.bootstrap()`）
 
 1. `configure_logging()` → `AppContext.bootstrap()`（见 `core/context.py`）
-2. `get_settings()` → `build_registry()`（native + skill + cursor-skill）
+2. `OPTION` → `build_registry()`（native + skill + cursor-skill）；非 Linux 本地开发时 `options.py` 模块级自动加载 `.env`（可用 `DEEP_AGENT_LOAD_DOTENV` 覆盖）
 3. 有数据库：`upgrade_database()` → async engine → `PostgresSessionStore` 或 `MySQLSessionStore`
 4. `load_and_register_mcp(registry, session)` — DB 加载 MCP；DB 未覆盖的 `mcps/<name>/` 自动兜底
 5. `init_context(ctx)` — 路由通过 `Depends(AppContextDep)` 注入
@@ -48,7 +48,7 @@ HTTP (REST/SSE)
 ### 对话请求流（`POST /api/v1/chat/stream`）
 
 1. 解析 `StreamChatRequest`；`session_id` 缺省则生成 UUID
-2. **无 `agent_id`**：`build_runner(model?, capabilities?)` → Settings 默认 `AgentSpec`
+2. **无 `agent_id`**：`build_runner(model?, capabilities?)` → `OPTION` 默认 `AgentSpec`
 3. **有 `agent_id`**：`build_runner_for_agent()` → `agents` 表 → 存储键 `{agent_id}:{session_id}`
 4. `AgentRunner.run_stream()`：session 锁 → history → `agent.iter()` → SSE 事件 → `append(new_messages)`
 5. `capabilities: null` → 仅 `default_enabled=True`；显式列表按名启用

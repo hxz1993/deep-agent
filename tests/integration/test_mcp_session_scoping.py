@@ -4,8 +4,6 @@ import json
 import os
 import sys
 import unittest
-import unittest.mock
-from dataclasses import replace
 from pathlib import Path
 
 from pydantic_ai import RunContext
@@ -16,7 +14,6 @@ from deep_agent.agent.deps import AgentDeps
 from deep_agent.capabilities.mcp.session_pool import McpSessionPool, get_mcp_session_pool
 from deep_agent.core.context import AppContext, init_context, reset_context
 from deep_agent.capabilities.mcp.toolset_builder import build_mcp_toolset
-from deep_agent.core.config import get_settings
 
 PID_ECHO_SERVER = Path(__file__).resolve().parent / "fixtures" / "pid_echo_server.py"
 PID_TOOL_NAME = "pid_echo_echo_process_id"
@@ -31,17 +28,15 @@ def _run_context(session_id: str) -> RunContext[AgentDeps]:
 
 
 def _build_pid_toolset(record_path: Path):
-    settings = replace(get_settings(), mcp_stdio_session_scope=True)
-    with unittest.mock.patch("deep_agent.capabilities.mcp.toolset_builder.get_settings", return_value=settings):
-        return build_mcp_toolset(
-            "pid_echo",
-            "stdio",
-            {
-                "command": sys.executable,
-                "args": [str(PID_ECHO_SERVER)],
-                "env": {**os.environ, "MCP_PID_RECORD": str(record_path)},
-            },
-        )
+    return build_mcp_toolset(
+        "pid_echo",
+        "stdio",
+        {
+            "command": sys.executable,
+            "args": [str(PID_ECHO_SERVER)],
+            "env": {**os.environ, "MCP_PID_RECORD": str(record_path)},
+        },
+    )
 
 
 class McpSessionScopingIntegrationTests(unittest.IsolatedAsyncioTestCase):

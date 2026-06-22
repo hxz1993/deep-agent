@@ -85,21 +85,18 @@ class ChatHeaderForwardingTests(unittest.TestCase):
         from deep_agent.capabilities import build_registry
         from deep_agent.capabilities.mcp.builtin import load_builtin_mcp_capabilities
         from deep_agent.capabilities.mcp.session_pool import McpSessionPool
-        from deep_agent.core.config import get_settings
         from deep_agent.core.context import AppContext, get_context, init_context, reset_context
         from deep_agent.core.paths import DEEP_AGENT_ROOT
         from deep_agent.memory import InMemorySessionStore
 
-        settings = get_settings()
         pool = McpSessionPool()
         init_context(
             AppContext.for_testing(
-                settings=settings,
                 store=InMemorySessionStore(),
                 mcp_session_pool=pool,
             )
         )
-        registry = build_registry(settings)
+        registry = build_registry()
         registry.replace_by_kind(
             "mcp",
             load_builtin_mcp_capabilities(str(DEEP_AGENT_ROOT / "mcps")),

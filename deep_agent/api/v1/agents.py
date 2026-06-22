@@ -3,11 +3,12 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from deep_agent.core.config import Settings, validate_agent_max_requests
+from deep_agent.agent.limits import validate_agent_max_requests
 from deep_agent.core.context import AppContextDep
 from deep_agent.db.deps import get_db
 from deep_agent.db.ids import normalize_agent_id
 from deep_agent.db.repositories.agent import AgentRepository
+from deep_agent.options import OPTION
 from deep_agent.schemas.agent import AgentCreate, AgentResponse, AgentUpdate
 
 router = APIRouter()
@@ -21,9 +22,9 @@ def _parse_agent_id(agent_id: str) -> str:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
 
 
-def _check_max_requests(settings: Settings, max_requests: int | None) -> None:
+def _check_max_requests(max_requests: int | None) -> None:
     try:
-        validate_agent_max_requests(max_requests, settings.max_requests)
+        validate_agent_max_requests(max_requests, OPTION.agent.max_requests)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
@@ -45,11 +46,10 @@ async def get_agent(agent_id: str, db: AsyncSession = Depends(get_db)) -> AgentR
 
 @router.post("/agents", response_model=AgentResponse, status_code=status.HTTP_201_CREATED)
 async def create_agent(
-    ctx: AppContextDep,
     body: AgentCreate,
     db: AsyncSession = Depends(get_db),
 ) -> AgentResponse:
-    _check_max_requests(ctx.settings, body.max_requests)
+    _check_max_requests(body.max_requests)
     existing = await _repo.get_by_name(db, body.name)
     if existing is not None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"Agent already exists: {body.name}")
@@ -59,13 +59,12 @@ async def create_agent(
 
 @router.patch("/agents/{agent_id}", response_model=AgentResponse)
 async def update_agent(
-    ctx: AppContextDep,
     agent_id: str,
     body: AgentUpdate,
     db: AsyncSession = Depends(get_db),
 ) -> AgentResponse:
     if "max_requests" in body.model_fields_set:
-        _check_max_requests(ctx.settings, body.max_requests)
+        _check_max_requests(body.max_requests)
     normalized_id = _parse_agent_id(agent_id)
     row = await _repo.get_by_id(db, normalized_id)
     if row is None:

@@ -10,7 +10,7 @@
 
 | 模式 | 条件 | 行为 |
 |------|------|------|
-| 默认 Agent | 省略 `agent_id` | 使用 Settings 默认配置，可通过 `model` / `capabilities` 覆盖 |
+| 默认 Agent | 省略 `agent_id` | 使用 `OPTION` 默认配置，可通过 `model` / `capabilities` 覆盖 |
 | DB Agent | 传入 `agent_id`（UUID） | 从数据库加载 Agent 配置，忽略 `model` / `capabilities` |
 
 **默认 Agent 模式：**

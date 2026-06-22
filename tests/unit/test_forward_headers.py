@@ -4,8 +4,8 @@ import unittest
 
 from starlette.requests import Request
 
-from deep_agent.agent.headers import extract_forward_headers, forward_header_names
-from deep_agent.core.config import Settings
+from deep_agent.agent.headers import extract_forward_headers
+from deep_agent.options import DEFAULT_MCP_FORWARD_HEADERS, OPTION
 
 
 def _request(headers: list[tuple[bytes, bytes]]) -> Request:
@@ -20,7 +20,6 @@ def _request(headers: list[tuple[bytes, bytes]]) -> Request:
 
 class ForwardHeaderAllowlistTests(unittest.TestCase):
     def test_extract_forward_headers_uses_allowlist(self) -> None:
-        settings = Settings(mcp_forward_request_headers="authorization,x-tenant-id")
         request = _request(
             [
                 (b"authorization", b"Bearer secret"),
@@ -29,22 +28,24 @@ class ForwardHeaderAllowlistTests(unittest.TestCase):
             ]
         )
         self.assertEqual(
-            extract_forward_headers(request, settings),
+            extract_forward_headers(
+                request,
+                allowed=frozenset({"authorization", "x-tenant-id"}),
+            ),
             {
                 "authorization": "Bearer secret",
                 "x-tenant-id": "t1",
             },
         )
 
-    def test_forward_header_names_defaults_when_empty(self) -> None:
-        settings = Settings(mcp_forward_request_headers="")
-        self.assertIn("authorization", forward_header_names(settings))
-        self.assertIn("app", forward_header_names(settings))
-        self.assertIn("language", forward_header_names(settings))
-        self.assertIn("x-deepfos-*", forward_header_names(settings))
+    def test_default_allowlist_when_empty(self) -> None:
+        OPTION.agent.mcp_forward_request_headers = ""
+        self.assertIn("authorization", OPTION.agent.mcp_forward_request_headers)
+        self.assertIn("app", OPTION.agent.mcp_forward_request_headers)
+        self.assertIn("language", OPTION.agent.mcp_forward_request_headers)
+        self.assertIn("x-deepfos-*", OPTION.agent.mcp_forward_request_headers)
 
     def test_extract_forward_headers_supports_wildcard_prefix(self) -> None:
-        settings = Settings(mcp_forward_request_headers="x-deepfos-*")
         request = _request(
             [
                 (b"X-DeepFOS-Token", b"abc"),
@@ -53,7 +54,7 @@ class ForwardHeaderAllowlistTests(unittest.TestCase):
             ]
         )
         self.assertEqual(
-            extract_forward_headers(request, settings),
+            extract_forward_headers(request, allowed=frozenset({"x-deepfos-*"})),
             {
                 "X-DeepFOS-Token": "abc",
                 "x-deepfos-space": "s1",
@@ -61,7 +62,6 @@ class ForwardHeaderAllowlistTests(unittest.TestCase):
         )
 
     def test_extract_forward_headers_is_case_insensitive(self) -> None:
-        settings = Settings(mcp_forward_request_headers="APP,Language")
         request = _request(
             [
                 (b"app", b"demo"),
@@ -70,12 +70,15 @@ class ForwardHeaderAllowlistTests(unittest.TestCase):
             ]
         )
         self.assertEqual(
-            extract_forward_headers(request, settings),
+            extract_forward_headers(request, allowed=frozenset({"app", "language"})),
             {
                 "app": "demo",
                 "LANGUAGE": "zh-CN",
             },
         )
+
+    def test_default_mcp_forward_headers_constant(self) -> None:
+        self.assertEqual(OPTION.agent.mcp_forward_request_headers, DEFAULT_MCP_FORWARD_HEADERS)
 
 
 if __name__ == "__main__":

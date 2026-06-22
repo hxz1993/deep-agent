@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from deep_agent.core.config import (
+from deep_agent.agent.limits import (
     default_agent_max_requests,
     resolve_agent_max_requests,
     validate_agent_max_requests,

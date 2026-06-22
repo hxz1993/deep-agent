@@ -286,7 +286,7 @@ Claude 风格 MCP 配置，每个 key 注册为 capability `mcp:<key>`，工具�
 docker compose up -d          # 可选：启动 Postgres
 alembic upgrade head          # 建表 + 种子 default agent
 uvicorn app.main:app --reload
-  → lifespan: configure_logging() → get_settings() → build_registry()
+  → lifespan: configure_logging() → OPTION → build_registry()（`options.py` 非 Linux 自动加载 `.env`）
   → database_url 已配置 ? PostgresSessionStore : InMemorySessionStore()
 ```
 

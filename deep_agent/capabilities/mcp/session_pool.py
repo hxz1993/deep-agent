@@ -7,8 +7,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from deep_agent.capabilities.mcp.errors import is_recoverable_mcp_disconnect
-from deep_agent.core.config import get_settings
 from deep_agent.core.logging import get_logger
+from deep_agent.options import OPTION
 
 logger = get_logger(__name__)
 
@@ -32,7 +32,12 @@ class McpSessionPool:
     is deleted or the pool is shut down.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, mcp_acquire_retries: int | None = None) -> None:
+        self._mcp_acquire_retries = (
+            OPTION.agent.mcp_acquire_retries
+            if mcp_acquire_retries is None
+            else mcp_acquire_retries
+        )
         self._entries: dict[tuple[str, str], _SessionMcpEntry] = {}
         self._lock = asyncio.Lock()
 
@@ -77,8 +82,7 @@ class McpSessionPool:
         session_id: str,
         factory: McpToolsetFactory,
     ) -> Any:
-        settings = get_settings()
-        max_retries = max(0, settings.mcp_acquire_retries)
+        max_retries = max(0, self._mcp_acquire_retries)
         last_exc: Exception | None = None
 
         for attempt in range(max_retries + 1):

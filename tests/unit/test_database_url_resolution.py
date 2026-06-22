@@ -6,8 +6,8 @@ from unittest.mock import patch
 
 from alembic.config import Config
 
-from deep_agent.core import config as config_module
 from deep_agent.core.paths import REPO_ROOT
+from deep_agent.db import url as db_url_module
 
 
 def _build_option(*, dbms_name: str) -> SimpleNamespace:
@@ -39,29 +39,29 @@ class DatabaseUrlResolutionTests(unittest.TestCase):
     def test_builds_postgres_url_from_dbms(self) -> None:
         option = _build_option(dbms_name="postgres")
         option.dbms.port = 5432
-        with patch.object(config_module, "OPTION", option):
+        with patch.object(db_url_module, "OPTION", option):
             self.assertEqual(
-                config_module.get_database_url(),
+                db_url_module.get_database_url(),
                 "postgresql+asyncpg://user:p%40ss%3Aword@localhost:5432/deep_agent",
             )
 
     def test_builds_mysql_url_from_dbms(self) -> None:
         option = _build_option(dbms_name="mysql")
-        with patch.object(config_module, "OPTION", option):
+        with patch.object(db_url_module, "OPTION", option):
             self.assertEqual(
-                config_module.get_database_url(),
+                db_url_module.get_database_url(),
                 "mysql+asyncmy://user:p%40ss%3Aword@localhost:3306/deep_agent",
             )
 
     def test_returns_none_for_unsupported_dbms(self) -> None:
         option = _build_option(dbms_name="dameng")
-        with patch.object(config_module, "OPTION", option):
-            self.assertIsNone(config_module.get_database_url())
+        with patch.object(db_url_module, "OPTION", option):
+            self.assertIsNone(db_url_module.get_database_url())
 
     def test_alembic_ini_accepts_percent_encoded_password(self) -> None:
         url = "mysql+asyncmy://deepfos:Okf%21S30Zjk@192.168.9.108:10307/deepagent"
         cfg = Config(str(REPO_ROOT / "alembic.ini"))
-        cfg.set_main_option("sqlalchemy.url", config_module.escape_for_ini(url))
+        cfg.set_main_option("sqlalchemy.url", db_url_module.escape_for_ini(url))
         self.assertEqual(cfg.get_main_option("sqlalchemy.url"), url)
 
 

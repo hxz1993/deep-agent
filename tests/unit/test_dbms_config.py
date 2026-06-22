@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from deep_agent.core.config import get_database_url
+from deep_agent.db.url import get_database_url
 from deep_agent.options import OPTION
 
 

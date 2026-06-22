@@ -16,7 +16,7 @@ from deep_agent.capabilities.mcp.request_context import (
     merge_mcp_headers,
 )
 from deep_agent.capabilities.mcp.session_scoped import SessionScopedMcpToolset
-from deep_agent.core.config import get_settings
+from deep_agent.options import OPTION
 
 
 def resolve_mcp_init_timeout(config: dict[str, Any]) -> float:
@@ -24,7 +24,7 @@ def resolve_mcp_init_timeout(config: dict[str, Any]) -> float:
     raw = config.get("init_timeout")
     if raw is not None:
         return float(raw)
-    return float(get_settings().mcp_init_timeout)
+    return float(OPTION.agent.mcp_init_timeout)
 
 
 def build_mcp_toolset(name: str, transport: str, config: dict[str, Any]) -> Any:
@@ -79,7 +79,7 @@ def _build_url_toolset(name: str, config: dict[str, Any]) -> DynamicToolset[Agen
 
 
 def _build_stdio_toolset(name: str, config: dict[str, Any]) -> Any:
-    if get_settings().mcp_stdio_session_scope:
+    if OPTION.agent.mcp_stdio_session_scope:
         return SessionScopedMcpToolset(server_name=name, config=config).prefixed(name)
 
     def factory(ctx: RunContext[AgentDeps]) -> MCPToolset[AgentDeps]:

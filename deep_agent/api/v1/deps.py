@@ -4,12 +4,13 @@ from pydantic_ai.usage import UsageLimits
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from deep_agent.agent.factory import build_agent
+from deep_agent.agent.limits import resolve_agent_max_requests
 from deep_agent.agent.runner import AgentRunner
 from deep_agent.agent.spec import AgentSpec, default_spec
-from deep_agent.core.config import resolve_agent_max_requests
 from deep_agent.core.context import AppContext
 from deep_agent.core.exceptions import AgentNotFoundError
 from deep_agent.db.repositories.agent import AgentRepository
+from deep_agent.options import OPTION
 
 _agent_repo = AgentRepository()
 
@@ -21,7 +22,7 @@ def build_runner(
     capabilities: list[str] | None = None,
 ) -> AgentRunner:
     """Assemble a per-request AgentRunner from settings + registry + store."""
-    spec = default_spec(ctx.settings)
+    spec = default_spec()
     if model:
         spec.model = model
     if capabilities is not None:
@@ -41,9 +42,9 @@ async def build_runner_for_agent(ctx: AppContext, db: AsyncSession, agent_id: st
 
 
 def _build_runner_from_spec(spec: AgentSpec, ctx: AppContext) -> AgentRunner:
-    agent = build_agent(spec, ctx.registry, request_retries=ctx.settings.request_retries)
+    agent = build_agent(spec, ctx.registry, request_retries=OPTION.agent.request_retries)
     limits = UsageLimits(
-        request_limit=resolve_agent_max_requests(spec.max_requests, ctx.settings.max_requests),
-        total_tokens_limit=ctx.settings.max_total_tokens,
+        request_limit=resolve_agent_max_requests(spec.max_requests, OPTION.agent.max_requests),
+        total_tokens_limit=OPTION.agent.max_total_tokens,
     )
     return AgentRunner(agent, ctx.store, limits)

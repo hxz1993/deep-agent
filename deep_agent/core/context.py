@@ -9,12 +9,13 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from deep_agent.capabilities import build_registry, load_and_register_mcp
 from deep_agent.capabilities.mcp.session_pool import McpSessionPool
 from deep_agent.capabilities.registry import CapabilityRegistry
-from deep_agent.core.config import Settings, get_database_url, get_settings
 from deep_agent.core.logging import get_logger
 from deep_agent.db.engine import close_db, create_engine
 from deep_agent.db.migrate import upgrade_database
+from deep_agent.db.url import get_database_url
 from deep_agent.memory import InMemorySessionStore, MySQLSessionStore, PostgresSessionStore
 from deep_agent.memory.base import SessionStore
+from deep_agent.options import OPTION
 
 logger = get_logger(__name__)
 
@@ -23,7 +24,6 @@ _context: AppContext | None = None
 
 @dataclass
 class AppContext:
-    settings: Settings
     registry: CapabilityRegistry
     store: SessionStore
     mcp_session_pool: McpSessionPool
@@ -32,13 +32,11 @@ class AppContext:
 
     @classmethod
     async def bootstrap(cls) -> AppContext:
-        settings = get_settings()
         database_url = get_database_url()
-        registry = build_registry(settings)
-        mcp_session_pool = McpSessionPool()
+        registry = build_registry()
+        mcp_session_pool = McpSessionPool(mcp_acquire_retries=OPTION.agent.mcp_acquire_retries)
 
         ctx = cls(
-            settings=settings,
             registry=registry,
             store=InMemorySessionStore(),
             mcp_session_pool=mcp_session_pool,
@@ -65,10 +63,19 @@ class AppContext:
                     await load_and_register_mcp(registry, session)
             except Exception:
                 logger.exception("Failed to load MCP servers from database.")
-            logger.info("%s started (model=%s, database=%s)", settings.app_name, settings.model, db_kind)
+            logger.info(
+                "%s started (model=%s, database=%s)",
+                OPTION.agent.app_name,
+                OPTION.agent.model,
+                db_kind,
+            )
         else:
             logger.warning("Database not configured; MCP servers will not be loaded.")
-            logger.info("%s started (model=%s, database=in-memory)", settings.app_name, settings.model)
+            logger.info(
+                "%s started (model=%s, database=in-memory)",
+                OPTION.agent.app_name,
+                OPTION.agent.model,
+            )
 
         return ctx
 
@@ -76,18 +83,24 @@ class AppContext:
     def for_testing(
         cls,
         *,
-        settings: Settings | None = None,
         registry: CapabilityRegistry | None = None,
         store: SessionStore | None = None,
         mcp_session_pool: McpSessionPool | None = None,
+        mcp_acquire_retries: int | None = None,
         db_engine: AsyncEngine | None = None,
         db_session_factory: async_sessionmaker[AsyncSession] | None = None,
     ) -> AppContext:
+        if mcp_session_pool is None:
+            retries = (
+                OPTION.agent.mcp_acquire_retries
+                if mcp_acquire_retries is None
+                else mcp_acquire_retries
+            )
+            mcp_session_pool = McpSessionPool(mcp_acquire_retries=retries)
         return cls(
-            settings=settings or get_settings(),
             registry=registry or CapabilityRegistry(),
             store=store or InMemorySessionStore(),
-            mcp_session_pool=mcp_session_pool or McpSessionPool(),
+            mcp_session_pool=mcp_session_pool,
             db_engine=db_engine,
             db_session_factory=db_session_factory,
         )

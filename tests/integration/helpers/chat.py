@@ -16,7 +16,6 @@ from deep_agent.api.v1 import api_router
 from deep_agent.capabilities.mcp.session_pool import McpSessionPool
 from deep_agent.capabilities.registry import Capability, CapabilityRegistry
 from deep_agent.capabilities.mcp.toolset_builder import build_mcp_toolset
-from deep_agent.core.config import Settings, get_settings
 from deep_agent.core.context import AppContext, init_context, reset_context
 from deep_agent.memory import InMemorySessionStore
 
@@ -26,15 +25,11 @@ HEADER_ECHO_SERVER = (
 ECHO_TOOL_NAME = "echo_echo_request_headers"
 
 
-def create_test_app(
-    *,
-    record_path: Path | None = None,
-    settings: Settings | None = None,
-) -> FastAPI:
+def create_test_app(*, record_path: Path | None = None) -> FastAPI:
     """Build a minimal FastAPI app without production lifespan/DB side effects."""
     test_app = FastAPI()
     test_app.include_router(api_router)
-    configure_test_app(test_app, record_path=record_path, settings=settings)
+    configure_test_app(test_app, record_path=record_path)
     return test_app
 
 
@@ -64,12 +59,9 @@ def configure_test_app(
     app: FastAPI,
     *,
     record_path: Path | None = None,
-    settings: Settings | None = None,
 ) -> CapabilityRegistry:
     """Attach in-memory dependencies and a single header-echo MCP capability."""
-    settings = settings or get_settings()
     ctx = AppContext.for_testing(
-        settings=settings,
         registry=CapabilityRegistry(),
         store=InMemorySessionStore(),
         mcp_session_pool=McpSessionPool(),

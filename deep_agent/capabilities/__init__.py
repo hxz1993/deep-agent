@@ -8,10 +8,10 @@ from deep_agent.capabilities.mcp.db_loader import capabilities_from_rows
 from deep_agent.capabilities.native import build_native_capability
 from deep_agent.capabilities.registry import Capability, CapabilityRegistry, ToolInfo
 from deep_agent.capabilities.skills import load_skill_capabilities
-from deep_agent.core.config import Settings
 from deep_agent.core.paths import DEEP_AGENT_ROOT
 from deep_agent.core.logging import get_logger
 from deep_agent.db.repositories.mcp import McpServerRepository
+from deep_agent.options import OPTION
 
 logger = get_logger(__name__)
 
@@ -24,16 +24,16 @@ __all__ = [
 ]
 
 
-def build_registry(settings: Settings) -> CapabilityRegistry:
+def build_registry() -> CapabilityRegistry:
     """Assemble the registry from native, skill, and cursor-skill sources."""
     registry = CapabilityRegistry()
 
     registry.register(build_native_capability())
 
-    for cap in load_skill_capabilities(settings.skills_dir):
+    for cap in load_skill_capabilities(OPTION.agent.skills_dir):
         registry.register(cap)
 
-    for cap in load_cursor_skill_capabilities(settings.cursor_skills_dir):
+    for cap in load_cursor_skill_capabilities(OPTION.agent.cursor_skills_dir):
         registry.register(cap)
 
     logger.info("Registered capabilities: %s", ", ".join(registry.names()))

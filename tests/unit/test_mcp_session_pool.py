@@ -3,7 +3,13 @@ from __future__ import annotations
 import unittest
 from unittest.mock import AsyncMock, patch
 
+from mcp.shared.exceptions import McpError
+
 from deep_agent.capabilities.mcp.session_pool import McpSessionPool
+
+
+def _mcp_connection_closed() -> McpError:
+    return McpError(type("ErrorData", (), {"message": "Connection closed"})())
 
 
 class McpSessionPoolTests(unittest.IsolatedAsyncioTestCase):
@@ -59,9 +65,7 @@ class McpSessionPoolTests(unittest.IsolatedAsyncioTestCase):
             toolset = AsyncMock()
             attempts["count"] += 1
             if attempts["count"] == 1:
-                toolset.__aenter__ = AsyncMock(
-                    side_effect=RuntimeError("Client failed to connect: Failed to initialize server session")
-                )
+                toolset.__aenter__ = AsyncMock(side_effect=_mcp_connection_closed())
             else:
                 toolset.__aenter__ = AsyncMock(return_value=toolset)
             toolset.__aexit__ = AsyncMock(return_value=None)

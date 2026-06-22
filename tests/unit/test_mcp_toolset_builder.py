@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import unittest
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 from deep_agent.capabilities.mcp.toolset_builder import build_raw_stdio_mcp_toolset, resolve_mcp_init_timeout
 from deep_agent.options import OPTION
@@ -38,12 +38,16 @@ class BuildRawStdioMcpToolsetTests(unittest.TestCase):
         }
         with (
             unittest.mock.patch("deep_agent.capabilities.mcp.toolset_builder.MCPToolset") as mcp_toolset_cls,
+            unittest.mock.patch("deep_agent.capabilities.mcp.toolset_builder.SerializingToolset") as serializing_cls,
             unittest.mock.patch("fastmcp.client.transports.StdioTransport") as stdio_cls,
         ):
-            stdio_cls.return_value = MagicMock()
+            stdio_cls.return_value = unittest.mock.MagicMock()
+            mcp_toolset_cls.return_value = unittest.mock.MagicMock()
+            serializing_cls.side_effect = lambda wrapped: wrapped
             build_raw_stdio_mcp_toolset("deepcube", config)
             _, kwargs = mcp_toolset_cls.call_args
             self.assertEqual(kwargs["init_timeout"], 25.0)
+            serializing_cls.assert_called_once()
 
 
 if __name__ == "__main__":

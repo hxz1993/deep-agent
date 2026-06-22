@@ -15,6 +15,7 @@ from deep_agent.capabilities.mcp.request_context import (
     inject_request_meta,
     merge_mcp_headers,
 )
+from deep_agent.capabilities.mcp.serializing import SerializingToolset
 from deep_agent.capabilities.mcp.session_scoped import SessionScopedMcpToolset
 from deep_agent.options import OPTION
 
@@ -45,7 +46,7 @@ def _expand_python_path(env: dict[str, str], path: str):
         env["PYTHONPATH"] = path
 
 
-def build_raw_stdio_mcp_toolset(name: str, config: dict[str, Any]) -> MCPToolset[AgentDeps]:
+def build_raw_stdio_mcp_toolset(name: str, config: dict[str, Any]) -> SerializingToolset:
     from fastmcp.client.transports import StdioTransport
 
     env = os.environ.copy()
@@ -58,11 +59,13 @@ def build_raw_stdio_mcp_toolset(name: str, config: dict[str, Any]) -> MCPToolset
         env=env,
         cwd=config.get("cwd"),
     )
-    return MCPToolset(
-        transport_obj,
-        id=name,
-        process_tool_call=inject_request_meta,
-        init_timeout=resolve_mcp_init_timeout(config),
+    return SerializingToolset(
+        MCPToolset(
+            transport_obj,
+            id=name,
+            process_tool_call=inject_request_meta,
+            init_timeout=resolve_mcp_init_timeout(config),
+        )
     )
 
 

@@ -4,6 +4,7 @@ _RECOVERABLE_MARKERS = (
     "failed to connect",
     "failed to initialize server session",
     "peer closed connection",
+    "connection closed",
     "incomplete chunked",
     "broken pipe",
     "connection reset",

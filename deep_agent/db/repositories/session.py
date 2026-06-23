@@ -63,21 +63,15 @@ class SessionRepository:
         if not session_keys:
             return {}
 
-        row_number = func.row_number().over(
-            partition_by=ChatMessage.session_key,
-            order_by=ChatMessage.sequence,
-        ).label("rn")
-        ranked = (
-            select(
-                ChatMessage.session_key.label("session_key"),
-                ChatMessage.payload.label("payload"),
-                row_number,
-            )
-            .where(ChatMessage.session_key.in_(session_keys))
-            .subquery()
-        )
+        # Messages use contiguous sequence starting at 0 (see SqlSessionStore.append).
+        # Avoid ROW_NUMBER() so this works on MySQL 5.7 without window functions.
         result = await db.execute(
-            select(ranked.c.session_key, ranked.c.payload).where(ranked.c.rn <= EARLY_MESSAGE_LIMIT)
+            select(ChatMessage.session_key, ChatMessage.payload)
+            .where(
+                ChatMessage.session_key.in_(session_keys),
+                ChatMessage.sequence < EARLY_MESSAGE_LIMIT,
+            )
+            .order_by(ChatMessage.session_key, ChatMessage.sequence)
         )
 
         payloads_by_key: dict[str, list[ModelMessage]] = {}

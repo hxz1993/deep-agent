@@ -92,7 +92,7 @@ async def update_ui_tool(
     return UiToolResponse(**row_to_response(row))
 
 
-@router.delete("/ui-tools/{name}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/ui-tools/{name}", status_code=status.HTTP_200_OK)
 async def delete_ui_tool(name: str, db: AsyncSession = Depends(get_db)) -> None:
     row = await _repo.get_by_name(db, name)
     if row is None:

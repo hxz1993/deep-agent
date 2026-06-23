@@ -87,7 +87,7 @@ class ChatHeaderForwardingTests(unittest.TestCase):
         from deep_agent.capabilities.mcp.session_pool import McpSessionPool
         from deep_agent.core.context import AppContext, get_context, init_context, reset_context
         from deep_agent.core.paths import DEEP_AGENT_ROOT
-        from deep_agent.memory import InMemorySessionStore
+        from deep_agent.db.stores import InMemorySessionStore
 
         pool = McpSessionPool()
         init_context(

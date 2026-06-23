@@ -47,7 +47,7 @@ with patch("deep_agent.agent.factory._resolve_model", return_value=test_model):
 from fastapi import FastAPI
 from deep_agent.api.v1 import api_router
 from deep_agent.core.context import AppContext, init_context, reset_context
-from deep_agent.memory import InMemorySessionStore
+from deep_agent.db.stores import InMemorySessionStore
 
 app = FastAPI()
 app.include_router(api_router)

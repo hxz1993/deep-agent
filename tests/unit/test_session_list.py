@@ -8,7 +8,7 @@ from pydantic_ai.messages import ModelRequest, UserPromptPart
 
 from deep_agent.api.v1 import api_router
 from deep_agent.core.context import get_context, reset_context
-from deep_agent.memory.postgres import scoped_session_key
+from deep_agent.db.session_key import scoped_session_key
 from tests.integration.helpers.chat import create_test_app
 
 

@@ -10,7 +10,7 @@ from deep_agent.agent.deferred import build_deferred_tool_results, serialize_def
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.runner import AgentRunner
 from deep_agent.capabilities.ui.builtin import build_ui_toolset
-from deep_agent.memory import InMemorySessionStore
+from deep_agent.db.stores import InMemorySessionStore
 from deep_agent.schemas.chat import DeferredToolResultItem
 from pydantic_ai.models.test import TestModel
 from pydantic_ai.usage import UsageLimits

@@ -31,7 +31,7 @@ HTTP (REST/SSE)
         ├─ skill        skills/<name>/（仓库根，见 DEEP_AGENT_SKILLS_DIR）
         ├─ cursor-skill .cursor/skills/<name>/SKILL.md
         └─ mcp          mcp_servers 表 + mcps/ 内置兜底
-    → SessionStore（`db/stores/`；`memory/` 已 deprecated）
+    → SessionStore（`db/stores/`）
 ```
 
 ### 启动生命周期（`main.py` lifespan → `AppContext.bootstrap()`）
@@ -116,12 +116,6 @@ HTTP (REST/SSE)
 | `ui_tool_definitions` | UI 工具定义（builtin / mcp / manual） |
 | `chat_sessions` | 会话元数据 |
 | `chat_messages` | `ModelMessage` JSONB 历史 |
-
-### `memory/`（deprecated）
-
-仅 re-export `db/stores` 与 `db/session_key`；新代码请直接 `from deep_agent.db.stores import ...`。
-
----
 
 ## 扩展指南
 

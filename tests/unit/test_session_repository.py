@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from deep_agent.db.models import Agent, Base, ChatMessage, ChatSession
 from deep_agent.db.repositories.session import SessionRepository
-from deep_agent.memory.postgres import scoped_session_key
+from deep_agent.db.session_key import scoped_session_key
 
 _message_adapter: TypeAdapter[ModelMessage] = TypeAdapter(ModelMessage)
 

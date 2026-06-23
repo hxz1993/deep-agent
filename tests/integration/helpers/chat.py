@@ -17,7 +17,7 @@ from deep_agent.capabilities.mcp.session_pool import McpSessionPool
 from deep_agent.capabilities.registry import Capability, CapabilityRegistry
 from deep_agent.capabilities.mcp.toolset_builder import build_mcp_toolset
 from deep_agent.core.context import AppContext, init_context, reset_context
-from deep_agent.memory import InMemorySessionStore
+from deep_agent.db.stores import InMemorySessionStore
 
 HEADER_ECHO_SERVER = (
     Path(__file__).resolve().parents[1] / "fixtures" / "header_echo_server.py"

@@ -74,7 +74,7 @@ class DeepSeekThinkingRetry(AbstractCapability[AgentDeps]):
 
         previous = messages[-2]
         assert isinstance(previous, ModelResponse)
-        logger.warning(
+        logger.debug(
             "DeepSeek thinking-only output retry for session {}: replaced validation prompt "
             "(thinking preview: {!r})",
             ctx.deps.session_id,

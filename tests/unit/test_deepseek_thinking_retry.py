@@ -97,7 +97,7 @@ class DeepSeekThinkingRetryTests(unittest.IsolatedAsyncioTestCase):
         assert isinstance(part, RetryPromptPart)
         self.assertEqual(part.content, DEEPSEEK_THINKING_RETRY_PROMPT)
         self.assertIsNone(updated.model_settings)
-        log.warning.assert_called_once()
+        log.debug.assert_called_once()
 
 
 if __name__ == "__main__":

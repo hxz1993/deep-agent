@@ -56,3 +56,10 @@ class SessionInfo(BaseModel):
     user_prompt: str | None = Field(default=None, description="First user message in the session.")
     created_at: datetime | None = Field(default=None, description="Session creation time (UTC).")
     updated_at: datetime | None = Field(default=None, description="Last conversation activity time (UTC).")
+
+
+class SessionListResponse(BaseModel):
+    items: list[SessionInfo]
+    total: int = Field(description="Total sessions matching the filters.")
+    limit: int
+    offset: int

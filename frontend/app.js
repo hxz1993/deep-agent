@@ -182,10 +182,11 @@ function init() {
 
 async function syncSessionsFromBackend() {
   try {
-    const r = await fetch(`${state.baseUrl}/api/v1/sessions`);
+    const r = await fetch(`${state.baseUrl}/api/v1/sessions?limit=50`);
     if (!r.ok) return;
-    const rows = await r.json();
-    if (!Array.isArray(rows) || rows.length === 0) return;
+    const payload = await r.json();
+    const rows = Array.isArray(payload?.items) ? payload.items : [];
+    if (rows.length === 0) return;
     const byKey = new Map(state.sessions.map((s) => [sessionLookupKey(s), s]));
     for (const row of rows) {
       const agentId = row.agent_id || "";

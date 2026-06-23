@@ -19,6 +19,7 @@ class AgentRepository:
             base_url=row.base_url,
             api_key=row.api_key,
             max_requests=row.max_requests,
+            agent_id=row.id,
         )
 
     async def get_by_id(self, db: AsyncSession, agent_id: str) -> Agent | None:

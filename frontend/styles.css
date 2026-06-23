@@ -425,6 +425,25 @@ html, body {
 }
 .tool-body pre:last-child { margin-bottom: 0; }
 
+.hitl-widget { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--tool-border); }
+.hitl-prompt { margin: 0 0 10px; line-height: 1.5; }
+.hitl-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.hitl-btn {
+  border: 1px solid var(--tool-border);
+  background: #1a2332;
+  color: var(--text);
+  border-radius: 6px;
+  padding: 6px 14px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.hitl-btn:hover { border-color: var(--accent); }
+.hitl-btn.hitl-confirm { background: #1f3d2a; border-color: #3fb950; }
+.hitl-btn.hitl-cancel { background: #3d1f1f; border-color: #f85149; }
+.hitl-choices { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
+.hitl-choice { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+.tool-block.hitl-pending { border-color: #d29922; }
+
 .spinner {
   width: 12px; height: 12px;
   border: 2px solid var(--text-faint);

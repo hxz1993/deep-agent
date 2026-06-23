@@ -21,6 +21,7 @@ class AgentSpec:
     base_url: str | None = None
     api_key: str | None = None
     max_requests: int | None = None
+    agent_id: str | None = None
 
 
 def default_spec() -> AgentSpec:

@@ -19,6 +19,13 @@ def is_shipped_builtin(name: str) -> bool:
     return builtin_server_path(name).is_file()
 
 
+def is_builtin_mcp_row(name: str, transport: str, config: dict[str, Any]) -> bool:
+    """Repo-shipped ``mcps/<name>/`` servers never participate in UI tool discovery."""
+    if transport == "builtin":
+        return True
+    return is_legacy_builtin_stdio_config(name, config)
+
+
 def is_legacy_builtin_stdio_config(name: str, config: dict[str, Any]) -> bool:
     """Detect stdio rows that point at a repo-shipped ``mcps/<name>/server.py``."""
     if not is_shipped_builtin(name):

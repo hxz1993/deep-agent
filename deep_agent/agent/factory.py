@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 from loguru import logger
 from pydantic_ai import Agent
 from pydantic_ai.models import Model
@@ -78,11 +80,41 @@ def _resolve_model(spec: AgentSpec) -> str | Model:
     return spec.model
 
 
+def _toolset_id(toolset: Any) -> str | None:
+    toolset_id = getattr(toolset, "id", None)
+    if toolset_id is not None:
+        return str(toolset_id)
+    wrapped = getattr(toolset, "wrapped", None)
+    if wrapped is not None:
+        return _toolset_id(wrapped)
+    return None
+
+
+def _toolsets_for_spec(
+    registry: CapabilityRegistry,
+    spec: AgentSpec,
+    *,
+    dynamic_ui_toolset: Any | None = None,
+) -> list[Any]:
+    """Resolve capability toolsets and include UI tools for HITL."""
+    toolsets = list(registry.toolsets(spec.capabilities))
+
+    if dynamic_ui_toolset is not None:
+        toolsets = [toolset for toolset in toolsets if _toolset_id(toolset) != "ui"]
+        toolsets.append(dynamic_ui_toolset)
+        return toolsets
+
+    if spec.capabilities is not None and "ui" not in spec.capabilities and "ui" in registry.names():
+        toolsets.append(registry.get("ui").toolset)
+    return toolsets
+
+
 def build_agent(
     spec: AgentSpec,
     registry: CapabilityRegistry,
     *,
     request_retries: int = 2,
+    dynamic_ui_toolset: Any | None = None,
 ) -> Agent[AgentDeps, str]:
     """Construct a Pydantic AI agent from a spec + the capability registry.
 
@@ -92,7 +124,7 @@ def build_agent(
     along with their toolsets and are injected automatically when enabled.
     """
     model = _resolve_model(spec)
-    toolsets = registry.toolsets(spec.capabilities)
+    toolsets = _toolsets_for_spec(registry, spec, dynamic_ui_toolset=dynamic_ui_toolset)
     capabilities = [DeepSeekThinkingRetry()] if isinstance(model, DeepSeekChatModel) else None
     return Agent(
         model,

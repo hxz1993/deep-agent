@@ -10,6 +10,7 @@ from deep_agent.capabilities.registry import Capability, CapabilityRegistry, Too
 from deep_agent.capabilities.skills import load_skill_capabilities
 from loguru import logger
 
+from deep_agent.capabilities.ui.builtin import build_ui_capability
 from deep_agent.core.paths import DEEP_AGENT_ROOT
 from deep_agent.db.repositories.mcp import McpServerRepository
 from deep_agent.options import OPTION
@@ -28,6 +29,7 @@ def build_registry() -> CapabilityRegistry:
     registry = CapabilityRegistry()
 
     registry.register(build_native_capability())
+    # registry.register(build_ui_capability())
 
     for cap in load_skill_capabilities(OPTION.agent.skills_dir):
         registry.register(cap)

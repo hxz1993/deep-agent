@@ -103,6 +103,7 @@ function initTabs() {
       document.getElementById(`panel-${name}`)?.classList.add("active");
       if (name === "agents" && window.agentsAdmin) window.agentsAdmin.refresh();
       if (name === "mcp" && window.mcpAdmin) window.mcpAdmin.refresh();
+      if (name === "ui-tools" && window.uiToolsAdmin) window.uiToolsAdmin.refresh();
     });
   });
 }
@@ -128,6 +129,7 @@ document.addEventListener("DOMContentLoaded", () => {
     saveBaseUrl(baseInput.value);
     if (window.agentsAdmin) window.agentsAdmin.refresh();
     if (window.mcpAdmin) window.mcpAdmin.refresh();
+    if (window.uiToolsAdmin) window.uiToolsAdmin.refresh();
   });
 
   const chatLink = document.getElementById("chatLink");

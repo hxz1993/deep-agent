@@ -270,6 +270,7 @@ DB Agent 模式（请求体含 `agent_id`）：
 ```json
 {
   "type": "final",
+  "status": "completed",
   "output": "## 平台的 11 种维度类型\n\n...",
   "usage": {
     "requests": 4,
@@ -280,11 +281,36 @@ DB Agent 模式（请求体含 `agent_id`）：
 }
 ```
 
+当 Agent 调用了需在前端执行的 UI 工具（human-in-the-loop）且 run 暂停等待用户输入时，`status` 为 `"pending"`，并附带 `deferred`：
+
+```json
+{
+  "type": "final",
+  "status": "pending",
+  "output": null,
+  "deferred": {
+    "calls": [
+      {
+        "tool": "confirm_action",
+        "args": { "message": "是否继续？" },
+        "tool_call_id": "call_00_abc"
+      }
+    ],
+    "approvals": []
+  },
+  "usage": { "requests": 2, "input_tokens": 100, "output_tokens": 20, "total_tokens": 120 }
+}
+```
+
+续跑：客户端再次 `POST /chat/stream`，请求体携带相同 `session_id` 与 `deferred_tool_results`（`message` 可省略）。
+
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | `type` | `"final"` | 固定值 |
-| `output` | `string \| object \| ...` | Agent 最终结构化输出；字符串时通常为完整 Markdown |
-| `usage` | `object` | Token 与请求次数统计，字段可能部分为 `null` |
+| `status` | `"completed" \| "pending"` | `pending` 表示等待 UI 工具结果 |
+| `output` | `string \| object \| ... \| null` | Agent 最终输出；`pending` 时常为 `null` |
+| `deferred` | `object \| null` | `pending` 时包含未完成的 `calls` / `approvals` |
+| `usage` | `object` | Token 与请求次数统计 |
 
 `usage` 字段：
 

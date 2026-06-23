@@ -38,6 +38,19 @@ def build_mcp_toolset(name: str, transport: str, config: dict[str, Any]) -> Any:
     raise ValueError(f"Unsupported MCP transport: {transport!r}")
 
 
+def build_discovery_toolset(name: str, transport: str, config: dict[str, Any]) -> Any:
+    """Unprefixed MCP toolset for platform discovery calls (ui_tools_list, resources)."""
+    transport, config = normalize_mcp_config(name, transport, config)
+    if transport == "url":
+        url = config["url"]
+        static_headers = dict(config.get("headers") or {})
+        init_timeout = resolve_mcp_init_timeout(config)
+        return MCPToolset(url, id=f"discovery:{name}", headers=static_headers, init_timeout=init_timeout)
+    if transport == "stdio":
+        return build_raw_stdio_mcp_toolset(name, config)
+    raise ValueError(f"Unsupported MCP transport: {transport!r}")
+
+
 def _expand_python_path(env: dict[str, str], path: str):
     sep = ";" if os.name == "nt" else ":"
     if "PYTHONPATH" in env: 

@@ -4,11 +4,13 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from deep_agent.capabilities import load_and_register_mcp
+from deep_agent.capabilities.mcp.ui_discovery import discover_and_persist_ui_tools
 from deep_agent.capabilities.registry import CapabilityRegistry
 from deep_agent.core.context import AppContextDep
 from deep_agent.db.deps import get_db
 from deep_agent.db.repositories.mcp import McpServerRepository
 from deep_agent.schemas.mcp import McpBuiltinConfig, McpServerCreate, McpServerResponse, McpServerUpdate
+from deep_agent.schemas.ui_tools import UiToolsRefreshResponse
 
 router = APIRouter()
 _repo = McpServerRepository()
@@ -93,3 +95,11 @@ async def delete_mcp_server(
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"MCP server not found: {name}")
     await _reload_mcp_registry(ctx.registry, db)
+
+
+@router.post("/mcp/{name}/ui-tools/refresh", response_model=UiToolsRefreshResponse)
+async def refresh_mcp_ui_tools(name: str, db: AsyncSession = Depends(get_db)) -> UiToolsRefreshResponse:
+    row = await _repo.get_by_name(db, name)
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"MCP server not found: {name}")
+    return await discover_and_persist_ui_tools(db, row, use_cache_on_error=False)

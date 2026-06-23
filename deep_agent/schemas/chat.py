@@ -7,7 +7,10 @@ from pydantic import BaseModel, Field
 
 
 class ChatRequest(BaseModel):
-    message: str = Field(..., description="The user's message/prompt.")
+    message: str | None = Field(
+        default=None,
+        description="The user's message/prompt. Omit when resuming with deferred_tool_results only.",
+    )
     session_id: str | None = Field(
         default=None,
         description="Conversation id. If omitted, a new session id is generated.",
@@ -28,12 +31,37 @@ class StreamChatRequest(ChatRequest):
         default=None,
         description="Load agent config from the database. When set, model/capabilities are ignored.",
     )
+    deferred_tool_results: list["DeferredToolResultItem"] | None = Field(
+        default=None,
+        description="Results for pending UI/approval tool calls from a prior run.",
+    )
+
+
+class DeferredToolResultItem(BaseModel):
+    tool_call_id: str = Field(..., description="ID matching the pending tool_call event.")
+    result: Any | None = Field(
+        default=None,
+        description="Return value for a deferred external/UI tool call.",
+    )
+    approved: bool | None = Field(
+        default=None,
+        description="Approval decision for a deferred approval tool call.",
+    )
+    denied_message: str | None = Field(
+        default=None,
+        description="Optional message to the model when approved is false.",
+    )
 
 
 class ChatResponse(BaseModel):
     session_id: str
     output: Any
     usage: dict[str, Any] = Field(default_factory=dict)
+    status: str = Field(default="completed", description="completed or pending (awaiting UI input).")
+    deferred: dict[str, Any] | None = Field(
+        default=None,
+        description="Pending tool calls when status is pending.",
+    )
 
 
 class ToolDescription(BaseModel):

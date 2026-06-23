@@ -27,6 +27,7 @@ const mcpAdmin = {
           <td>${escapeHtml(formatDate(s.updated_at))}</td>
           <td>
             <div class="row-actions">
+              <button type="button" data-refresh-ui="${escapeHtml(s.name)}" title="拉取 ui_tools_list">刷新 UI</button>
               <button type="button" data-edit="${escapeHtml(s.name)}">编辑</button>
               <button type="button" class="danger" data-delete="${escapeHtml(s.name)}">删除</button>
             </div>
@@ -38,11 +39,52 @@ const mcpAdmin = {
       tbody.querySelectorAll("[data-edit]").forEach((btn) => {
         btn.addEventListener("click", () => this.openEdit(btn.dataset.edit));
       });
+      tbody.querySelectorAll("[data-refresh-ui]").forEach((btn) => {
+        btn.addEventListener("click", () => this.refreshUiTools(btn.dataset.refreshUi));
+      });
       tbody.querySelectorAll("[data-delete]").forEach((btn) => {
         btn.addEventListener("click", () => this.remove(btn.dataset.delete));
       });
     } catch (err) {
       tbody.innerHTML = `<tr><td colspan="6" class="empty-cell">${escapeHtml(err.message)}</td></tr>`;
+    }
+  },
+
+  fillUiToolsFields(config) {
+    const ui = (config && config.ui_tools) || {};
+    document.getElementById("mcpUiToolsEnabled").checked = ui.enabled !== false;
+    document.getElementById("mcpUiToolsMode").value = ui.mode || "tool";
+    document.getElementById("mcpUiToolsRefresh").value = ui.refresh_seconds || 300;
+  },
+
+  readUiToolsConfig() {
+    const refresh = parseInt(document.getElementById("mcpUiToolsRefresh").value, 10);
+    return {
+      enabled: document.getElementById("mcpUiToolsEnabled").checked,
+      mode: document.getElementById("mcpUiToolsMode").value,
+      refresh_seconds: Number.isFinite(refresh) && refresh >= 60 ? refresh : 300,
+    };
+  },
+
+  async refreshUiTools(name) {
+    try {
+      const result = await apiFetch(
+        `/api/v1/mcp/${encodeURIComponent(name)}/ui-tools/refresh`,
+        { method: "POST" }
+      );
+      const errNote = result.errors?.length ? `；${result.errors.join("; ")}` : "";
+      if (result.discovered === 0 && !result.upserted && !result.removed && !errNote) {
+        showToast("内置 MCP 不参与 UI 工具发现");
+        return;
+      }
+      showToast(
+        `UI 发现：${result.discovered} 条，写入 ${result.upserted}，移除 ${result.removed}${errNote}`,
+        Boolean(result.errors?.length)
+      );
+      if (window.uiToolsAdmin) await window.uiToolsAdmin.refresh();
+      await loadCapabilities();
+    } catch (err) {
+      showToast(err.message, true);
     }
   },
 
@@ -93,6 +135,7 @@ const mcpAdmin = {
     document.getElementById("mcpArgs").value = "";
     document.getElementById("mcpEnv").value = "";
     document.getElementById("mcpCwd").value = "";
+    this.fillUiToolsFields({});
     this.setTransportSelectMode("create");
     this.toggleTransportFields();
     document.getElementById("mcpModal").showModal();
@@ -138,6 +181,7 @@ const mcpAdmin = {
         document.getElementById("mcpCwd").value = server.config.cwd || "";
       }
 
+      this.fillUiToolsFields(server.config);
       this.setTransportSelectMode(server.transport === "builtin" ? "edit-builtin" : "edit");
       this.toggleTransportFields();
       document.getElementById("mcpModal").showModal();
@@ -148,28 +192,28 @@ const mcpAdmin = {
 
   buildConfig() {
     const transport = document.getElementById("mcpTransport").value;
+    let config;
     if (transport === "url") {
-      const config = { url: document.getElementById("mcpUrl").value.trim() };
+      config = { url: document.getElementById("mcpUrl").value.trim() };
       const headers = parseJsonOrEmpty(document.getElementById("mcpHeaders").value);
       if (headers) config.headers = headers;
-      return config;
-    }
-    if (transport === "builtin") {
-      const config = {};
+    } else if (transport === "builtin") {
+      config = {};
       const env = parseJsonOrEmpty(document.getElementById("mcpEnv").value);
       const cwd = document.getElementById("mcpCwd").value.trim();
       if (env) config.env = env;
       if (cwd) config.cwd = cwd;
-      return config;
+    } else {
+      config = {
+        command: document.getElementById("mcpCommand").value.trim(),
+        args: parseArgs(document.getElementById("mcpArgs").value),
+      };
+      const env = parseJsonOrEmpty(document.getElementById("mcpEnv").value);
+      const cwd = document.getElementById("mcpCwd").value.trim();
+      if (env) config.env = env;
+      if (cwd) config.cwd = cwd;
     }
-    const config = {
-      command: document.getElementById("mcpCommand").value.trim(),
-      args: parseArgs(document.getElementById("mcpArgs").value),
-    };
-    const env = parseJsonOrEmpty(document.getElementById("mcpEnv").value);
-    const cwd = document.getElementById("mcpCwd").value.trim();
-    if (env) config.env = env;
-    if (cwd) config.cwd = cwd;
+    config.ui_tools = this.readUiToolsConfig();
     return config;
   },
 

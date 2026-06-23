@@ -30,6 +30,7 @@
       <nav class="tabs" id="mainTabs">
         <button class="tab active" data-tab="agents">Agent 配置</button>
         <button class="tab" data-tab="mcp">MCP 配置</button>
+        <button class="tab" data-tab="ui-tools">UI 工具</button>
       </nav>
       <div class="header-actions">
         <label class="inline-field">
@@ -89,6 +90,56 @@
           </thead>
           <tbody id="mcpTableBody">
             <tr><td colspan="6" class="empty-cell">加载中…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- UI tools panel -->
+    <section class="panel" id="panel-ui-tools">
+      <div class="panel-toolbar">
+        <h2>UI 工具（HITL）</h2>
+        <button class="btn primary" id="newUiToolBtn">＋ 手工注册</button>
+      </div>
+      <div class="filter-bar" id="uiToolsFilters">
+        <label class="inline-field">
+          <span>来源</span>
+          <select id="uiToolFilterSource" class="filter-select">
+            <option value="">全部</option>
+            <option value="manual">manual</option>
+            <option value="mcp">mcp</option>
+          </select>
+        </label>
+        <label class="inline-field">
+          <span>MCP</span>
+          <input type="text" id="uiToolFilterMcp" class="filter-input" placeholder="mcp 名称" />
+        </label>
+        <label class="inline-field">
+          <span>启用</span>
+          <select id="uiToolFilterEnabled" class="filter-select">
+            <option value="">全部</option>
+            <option value="true">是</option>
+            <option value="false">否</option>
+          </select>
+        </label>
+        <button type="button" class="btn" id="uiToolFilterApply">筛选</button>
+      </div>
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>名称</th>
+              <th>来源</th>
+              <th>Widget</th>
+              <th>启用</th>
+              <th>MCP</th>
+              <th>描述</th>
+              <th>更新时间</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="uiToolsTableBody">
+            <tr><td colspan="8" class="empty-cell">加载中…</td></tr>
           </tbody>
         </table>
       </div>
@@ -222,6 +273,27 @@
             <input type="text" id="mcpCwd" />
           </label>
         </div>
+
+        <section class="ui-discovery-section">
+          <span class="cap-section-title">UI 工具发现（RFC 0001）</span>
+          <p class="field-hint">MCP Server 需实现 <code>ui_tools_list</code> 或 Resource <code>ui://tools/manifest</code>。</p>
+          <label class="field checkbox-field">
+            <input type="checkbox" id="mcpUiToolsEnabled" checked />
+            <span>启用 UI 发现</span>
+          </label>
+          <label class="field">
+            <span>发现模式</span>
+            <select id="mcpUiToolsMode">
+              <option value="tool">tool（ui_tools_list）</option>
+              <option value="resource">resource（ui://tools/manifest）</option>
+              <option value="none">none（不发现）</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>刷新间隔（秒）</span>
+            <input type="number" id="mcpUiToolsRefresh" min="60" value="300" />
+          </label>
+        </section>
       </div>
       <div class="modal-footer">
         <button type="button" class="btn" id="cancelMcpBtn">取消</button>
@@ -230,8 +302,89 @@
     </form>
   </dialog>
 
+  <!-- UI tool modal -->
+  <dialog class="modal modal-wide" id="uiToolModal">
+    <form id="uiToolForm" method="dialog">
+      <div class="modal-header">
+        <h3 id="uiToolModalTitle">注册 UI 工具</h3>
+        <button type="button" class="icon-btn" id="closeUiToolModal">✕</button>
+      </div>
+      <div class="modal-body">
+        <section class="ui-tool-template-section" id="uiToolTemplateSection">
+          <label class="field">
+            <span>配置模板</span>
+            <select id="uiToolTemplate"></select>
+          </label>
+          <p class="field-hint" id="uiToolTemplateDesc"></p>
+        </section>
+
+        <label class="field">
+          <span>名称</span>
+          <input type="text" id="uiToolName" required pattern="[a-z][a-z0-9_]{1,120}" placeholder="myapp__ask_confirm" />
+        </label>
+        <label class="field">
+          <span>描述</span>
+          <textarea id="uiToolDescription" rows="2" required></textarea>
+        </label>
+        <label class="field">
+          <span>Widget</span>
+          <div class="widget-picker">
+            <select id="uiToolWidget">
+              <option value="">—</option>
+              <option value="confirm">confirm</option>
+              <option value="choice">choice</option>
+              <option value="text">text</option>
+              <option value="date_picker">date_picker</option>
+              <option value="custom">自定义…</option>
+            </select>
+            <input type="text" id="uiToolWidgetCustom" class="hidden" placeholder="输入自定义 widget 名称" />
+          </div>
+        </label>
+
+        <section class="field field-grow">
+          <span>参数 Schema</span>
+          <div id="uiToolParamsEditor"></div>
+        </section>
+
+        <section class="field field-grow">
+          <span>结果 Schema</span>
+          <div id="uiToolResultEditor"></div>
+        </section>
+
+        <label class="field">
+          <span>Metadata（选填）</span>
+          <textarea id="uiToolMetadata" rows="2" class="mono-textarea" placeholder='{"key": "value"}'></textarea>
+        </label>
+        <label class="field">
+          <span>绑定 Agent</span>
+          <select id="uiToolAgentSelect" class="agent-multi-select" multiple size="5"></select>
+          <span class="field-hint">不选表示全部 Agent；按住 Ctrl 可多选</span>
+        </label>
+        <label class="field checkbox-field">
+          <input type="checkbox" id="uiToolEnabled" checked />
+          <span>启用</span>
+        </label>
+        <label class="field checkbox-field">
+          <input type="checkbox" id="uiToolOverride" />
+          <span>覆盖同名 MCP 定义</span>
+        </label>
+        <p class="field-hint hidden" id="uiToolMcpHint">MCP 来源工具默认仅可改启用、绑定与覆盖。</p>
+        <label class="field checkbox-field hidden" id="uiToolForceWrap">
+          <input type="checkbox" id="uiToolForceEdit" />
+          <span>允许编辑 Schema</span>
+        </label>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn" id="cancelUiToolBtn">取消</button>
+        <button type="submit" class="btn primary">保存</button>
+      </div>
+    </form>
+  </dialog>
+
   <script src="./admin.js"></script>
   <script src="./agents.js"></script>
   <script src="./mcp.js"></script>
+  <script src="./ui_schema_editor.js"></script>
+  <script src="./ui_tools.js"></script>
 </body>
 </html>

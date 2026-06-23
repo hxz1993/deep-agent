@@ -10,7 +10,7 @@
  *   thinking     -> { type:"thinking", delta }
  *   tool_call    -> { type:"tool_call", tool, args, tool_call_id }  // 同 id 可能多次，需 upsert
  *   tool_result  -> { type:"tool_result", tool, result, tool_call_id }
- *   final        -> { type:"final", output, usage }
+ *   final        -> { type:"final", status, output, usage, deferred? }
  *   error        -> { type:"error", message }
  * ------------------------------------------------------------------ */
 
@@ -22,6 +22,8 @@ function defaultBaseUrl() {
 
 const DEFAULT_BASE_URL = defaultBaseUrl();
 
+const UI_TOOLS = new Set(["confirm_action", "ask_user_choice"]);
+
 const state = {
   baseUrl: localStorage.getItem("da_base_url") || DEFAULT_BASE_URL,
   agentId: localStorage.getItem("da_agent_id") || "",
@@ -29,6 +31,7 @@ const state = {
   sessionId: null,
   sessions: JSON.parse(localStorage.getItem("da_sessions") || "[]"), // [{id, agentId, agentName, title}]
   streaming: false,
+  awaitingHitl: false,
   abortController: null,
 };
 
@@ -357,6 +360,7 @@ function renderHistory(messages) {
     }
     if (msg.role === "assistant" && msg.parts && msg.parts.length) {
       const assistant = createAssistantMessage(ts);
+      const completedToolIds = collectCompletedToolIds(msg.parts);
       for (const part of msg.parts) {
         if (part.type === "thinking" && part.content) {
           assistant.addThinkingBlock(part.content);
@@ -376,11 +380,58 @@ function renderHistory(messages) {
           });
         }
       }
+      for (const part of msg.parts) {
+        if (isPendingUiToolCall(part, completedToolIds)) {
+          assistant.attachHitlWidget({
+            tool: part.tool,
+            args: part.args,
+            tool_call_id: part.tool_call_id,
+          });
+        }
+      }
       assistant.finalizeThinking();
       assistant.finalizeText();
     }
   }
+  state.awaitingHitl = findResumablePendingUiCall(messages) !== null;
+  updateHitlInputState();
   scrollToBottom();
+}
+
+function collectCompletedToolIds(parts) {
+  const ids = new Set();
+  for (const part of parts) {
+    if (part.type === "tool_result" && part.tool_call_id) {
+      ids.add(part.tool_call_id);
+    }
+  }
+  return ids;
+}
+
+function isPendingUiToolCall(part, completedToolIds) {
+  return (
+    part.type === "tool_call" &&
+    part.tool_call_id &&
+    UI_TOOLS.has(part.tool) &&
+    !completedToolIds.has(part.tool_call_id)
+  );
+}
+
+/** Pending UI tool call at the end of history (safe to resume). */
+function findResumablePendingUiCall(messages) {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i];
+    if (msg.role === "user") return null;
+    if (msg.role !== "assistant" || !msg.parts?.length) continue;
+    const completedToolIds = collectCompletedToolIds(msg.parts);
+    for (const part of msg.parts) {
+      if (isPendingUiToolCall(part, completedToolIds)) {
+        return part;
+      }
+    }
+    return null;
+  }
+  return null;
 }
 
 async function deleteSession(session) {
@@ -479,6 +530,10 @@ async function loadCapabilities() {
 async function onSend() {
   const text = el.input.value.trim();
   if (!text || state.streaming) return;
+  if (state.awaitingHitl) {
+    addSystemNote("请先完成上方待处理的交互。");
+    return;
+  }
   if (!ensureAgentSelected()) {
     addSystemNote("请先选择 Agent。");
     return;
@@ -496,9 +551,29 @@ async function onSend() {
 
   if (!state.sessionId) state.sessionId = generateSessionId();
 
-  state.abortController = new AbortController();
   const payload = { agent_id: state.agentId, message: text, session_id: state.sessionId };
+  await runChatStream(payload, assistant);
+}
 
+async function resumeDeferred(deferredResults) {
+  if (state.streaming || !state.sessionId) return;
+  state.awaitingHitl = false;
+  updateHitlInputState();
+
+  const assistant = createAssistantMessage();
+  setStreaming(true);
+  updateAgentSelectState();
+
+  const payload = {
+    agent_id: state.agentId,
+    session_id: state.sessionId,
+    deferred_tool_results: deferredResults,
+  };
+  await runChatStream(payload, assistant);
+}
+
+async function runChatStream(payload, assistant) {
+  state.abortController = new AbortController();
   try {
     const resp = await fetch(`${state.baseUrl}/api/v1/chat/stream`, {
       method: "POST",
@@ -529,6 +604,14 @@ async function onSend() {
     setStreaming(false);
     state.abortController = null;
   }
+}
+
+function updateHitlInputState() {
+  if (el.input) {
+    el.input.placeholder = state.awaitingHitl ? "请先完成上方交互…" : "输入消息…";
+    el.input.disabled = state.awaitingHitl;
+  }
+  if (el.sendBtn) el.sendBtn.disabled = state.awaitingHitl;
 }
 
 function stopStream() {
@@ -629,6 +712,16 @@ function handleEvent({ event, data }, assistant) {
       assistant.finalizeThinking();
       assistant.finalizeText();
       if (data.usage) renderUsage(data.usage);
+      if (data.status === "pending" && data.deferred) {
+        state.awaitingHitl = true;
+        const pending = [...(data.deferred.calls || []), ...(data.deferred.approvals || [])];
+        for (const call of pending) {
+          assistant.attachHitlWidget(call);
+        }
+      } else {
+        state.awaitingHitl = false;
+      }
+      updateHitlInputState();
       break;
     case "error":
       addErrorTo(assistant, data.message || "未知错误");
@@ -818,14 +911,82 @@ function createAssistantMessage(timestamp) {
       }
       if (!block) return;
       block.dataset.done = "1";
-      block.classList.remove("open");
+      block.classList.remove("hitl-pending");
       block.querySelector(".tool-status").innerHTML = '<span style="color:#3fb950">✓ 完成</span>';
       const body = block.querySelector(".tool-body");
+      const existingWidget = body.querySelector(".hitl-widget");
+      if (existingWidget) existingWidget.remove();
       const res = document.createElement("div");
       res.innerHTML = `<div class="label" style="margin-top:8px">结果 result</div>${renderToolResult(data.result)}`;
       body.appendChild(res);
     },
+    attachHitlWidget(call) {
+      const key = call.tool_call_id;
+      let block = key && toolBlocks.get(key);
+      if (!block) {
+        this.addToolCall(call);
+        block = toolBlocks.get(key);
+      }
+      if (!block || !UI_TOOLS.has(call.tool)) return;
+      renderHitlWidget(block, call, resumeDeferred);
+    },
   };
+}
+
+function renderHitlWidget(block, call, onSubmit) {
+  const { tool, args = {}, tool_call_id: toolCallId } = call;
+  const body = block.querySelector(".tool-body");
+  if (!body || body.querySelector(".hitl-widget")) return;
+
+  block.classList.add("open", "hitl-pending");
+  block.querySelector(".tool-status").innerHTML = '<span style="color:#d29922">等待操作</span>';
+
+  const widget = document.createElement("div");
+  widget.className = "hitl-widget";
+
+  if (tool === "confirm_action") {
+    const message = args.message || "确认执行？";
+    widget.innerHTML = `
+      <p class="hitl-prompt">${escapeHtml(message)}</p>
+      <div class="hitl-actions">
+        <button type="button" class="hitl-btn hitl-confirm">${escapeHtml(args.confirm_label || "确认")}</button>
+        <button type="button" class="hitl-btn hitl-cancel">${escapeHtml(args.cancel_label || "取消")}</button>
+      </div>`;
+    widget.querySelector(".hitl-confirm").addEventListener("click", () => {
+      onSubmit([{ tool_call_id: toolCallId, result: { confirmed: true } }]);
+    });
+    widget.querySelector(".hitl-cancel").addEventListener("click", () => {
+      onSubmit([{ tool_call_id: toolCallId, result: { confirmed: false } }]);
+    });
+  } else if (tool === "ask_user_choice") {
+    const options = Array.isArray(args.options) ? args.options : [];
+    const allowMultiple = !!args.allow_multiple;
+    widget.innerHTML = `
+      <p class="hitl-prompt">${escapeHtml(args.prompt || "请选择：")}</p>
+      <div class="hitl-choices"></div>
+      <button type="button" class="hitl-btn hitl-submit">提交</button>`;
+    const choicesEl = widget.querySelector(".hitl-choices");
+    for (const opt of options) {
+      const label = document.createElement("label");
+      label.className = "hitl-choice";
+      const input = document.createElement("input");
+      input.type = allowMultiple ? "checkbox" : "radio";
+      input.name = `choice-${toolCallId}`;
+      input.value = opt;
+      label.appendChild(input);
+      label.appendChild(document.createTextNode(` ${opt}`));
+      choicesEl.appendChild(label);
+    }
+    widget.querySelector(".hitl-submit").addEventListener("click", () => {
+      const selected = [...choicesEl.querySelectorAll("input:checked")].map((i) => i.value);
+      const result = allowMultiple ? { selected } : { selected: selected[0] ?? null };
+      onSubmit([{ tool_call_id: toolCallId, result }]);
+    });
+  } else {
+    return;
+  }
+
+  body.appendChild(widget);
 }
 
 function addErrorTo(assistant, message) {

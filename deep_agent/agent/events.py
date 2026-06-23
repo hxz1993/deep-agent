@@ -33,8 +33,22 @@ def tool_result(tool: str, result: Any, tool_call_id: str | None = None) -> dict
     return {"type": "tool_result", "tool": tool, "result": result, "tool_call_id": tool_call_id}
 
 
-def final(output: Any, usage: dict[str, Any] | None = None) -> dict[str, Any]:
-    return {"type": "final", "output": output, "usage": usage or {}}
+def final(
+    output: Any,
+    usage: dict[str, Any] | None = None,
+    *,
+    status: str = "completed",
+    deferred: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "type": "final",
+        "status": status,
+        "output": output,
+        "usage": usage or {},
+    }
+    if deferred is not None:
+        payload["deferred"] = deferred
+    return payload
 
 
 def error(message: str) -> dict[str, Any]:

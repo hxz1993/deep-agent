@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
-from datetime import datetime
 from typing import Any
 
 from loguru import logger
@@ -13,15 +11,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from deep_agent.agent.spec import AgentSpec
 from deep_agent.capabilities.ui.builtin import builtin_ui_records
 from deep_agent.capabilities.ui.constants import SOURCE_PRIORITY
-from deep_agent.db.models import UiToolDefinition
+from deep_agent.capabilities.mcp.builtin_config import is_builtin_mcp_row
 from deep_agent.capabilities.mcp.ui_discovery import (
     discover_and_persist_ui_tools,
     non_builtin_mcp_names_for_spec,
     resolve_ui_tools_config,
 )
-from deep_agent.capabilities.mcp.builtin_config import is_builtin_mcp_row
-from deep_agent.db.repositories.mcp import McpServerRepository
-from deep_agent.db.repositories.ui_tool import UiToolRepository
+from deep_agent.db.deps import get_mcp_repo, get_ui_tool_repo
 from deep_agent.capabilities.ui.types import UIToolRecord
 
 
@@ -144,7 +140,7 @@ async def ensure_mcp_ui_tools_discovered(db: AsyncSession, spec: AgentSpec) -> N
     if not mcp_names:
         return
 
-    mcp_repo = McpServerRepository()
+    mcp_repo = get_mcp_repo()
     for name in sorted(mcp_names):
         row = await mcp_repo.get_by_name(db, name)
         if row is None or not row.enabled or is_builtin_mcp_row(row.name, row.transport, row.config):
@@ -161,14 +157,12 @@ async def load_effective_ui_tools(
     *,
     mcp_enabled_names: set[str] | None = None,
 ) -> EffectiveUiTools:
-    repo = UiToolRepository()
+    repo = get_ui_tool_repo()
     db_rows = await repo.list_all(db, enabled=True)
     db_records = [UIToolRecord.from_row(row) for row in db_rows if row.source != "builtin"]
 
     if mcp_enabled_names is None:
-        from deep_agent.db.repositories.mcp import McpServerRepository
-
-        mcp_rows = await McpServerRepository().list_all(db)
+        mcp_rows = await get_mcp_repo().list_all(db)
         mcp_enabled_names = {row.name for row in mcp_rows if row.enabled}
 
     visible_db = [
@@ -199,26 +193,3 @@ async def prepare_ui_toolset_for_spec(
     if not effective.has_dynamic:
         return None, hints
     return build_external_toolset(effective.definitions), hints
-
-
-def row_to_response(row: UiToolDefinition, *, shadowed_by: str | None = None) -> dict[str, Any]:
-    return {
-        "name": row.name,
-        "description": row.description,
-        "parameters_json_schema": row.parameters_json_schema,
-        "widget": row.widget,
-        "result_schema": row.result_schema,
-        "metadata": row.metadata_,
-        "source": row.source,
-        "mcp_server_name": row.mcp_server_name,
-        "enabled": row.enabled,
-        "override": row.override,
-        "agent_ids": row.agent_ids,
-        "discovered_at": row.discovered_at,
-        "created_at": row.created_at,
-        "updated_at": row.updated_at,
-        "shadowed_by": shadowed_by,
-    }
-
-
-from deep_agent.capabilities.ui.manifest import parse_manifest_payload

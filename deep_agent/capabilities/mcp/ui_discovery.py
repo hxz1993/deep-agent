@@ -19,7 +19,8 @@ from deep_agent.capabilities.ui.constants import (
 )
 from deep_agent.capabilities.ui.manifest import parse_manifest_payload
 from deep_agent.db.models import McpServer, UiToolDefinition
-from deep_agent.db.repositories.ui_tool import UiToolRepository
+from deep_agent.db.deps import get_ui_tool_repo
+from deep_agent.db.services.ui_tool_sync import sync_mcp_tools
 from deep_agent.schemas.ui_tools import UiToolsRefreshResponse
 
 
@@ -114,7 +115,7 @@ async def discover_and_persist_ui_tools(
         )
 
     errors: list[str] = []
-    repo = UiToolRepository()
+    ui_tool_repo = get_ui_tool_repo()
 
     try:
         import asyncio
@@ -123,7 +124,7 @@ async def discover_and_persist_ui_tools(
             fetch_ui_tools_manifest(row),
             timeout=DISCOVERY_TIMEOUT_SEC,
         )
-        upserted, removed = await repo.upsert_mcp_tools(db, row.name, definitions)
+        upserted, removed = await sync_mcp_tools(db, row.name, definitions, repo=ui_tool_repo)
         return UiToolsRefreshResponse(
             mcp_server=row.name,
             discovered=len(definitions),
@@ -136,7 +137,7 @@ async def discover_and_persist_ui_tools(
         errors.append(message)
         logger.exception("UI tool discovery failed for MCP server {!r}", row.name)
         if use_cache_on_error:
-            cached = await repo.list_all(db, source="mcp", mcp_server_name=row.name, enabled=True)
+            cached = await ui_tool_repo.list_all(db, source="mcp", mcp_server_name=row.name, enabled=True)
             return UiToolsRefreshResponse(
                 mcp_server=row.name,
                 discovered=len(cached),

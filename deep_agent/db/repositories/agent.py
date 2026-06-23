@@ -45,7 +45,7 @@ class AgentRepository:
             prompt=data.prompt,
         )
         db.add(row)
-        await db.commit()
+        await db.flush()
         await db.refresh(row)
         return row
 
@@ -53,11 +53,11 @@ class AgentRepository:
         updates = data.model_dump(exclude_unset=True)
         for field, value in updates.items():
             setattr(row, field, value)
-        await db.commit()
+        await db.flush()
         await db.refresh(row)
         return row
 
     async def delete(self, db: AsyncSession, agent_id: str) -> bool:
         result = await db.execute(delete(Agent).where(Agent.id == agent_id))
-        await db.commit()
+        await db.flush()
         return result.rowcount > 0

@@ -7,23 +7,21 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from deep_agent.core.context import AppContextDep
-from deep_agent.db.deps import db_session, get_db
-from deep_agent.db.repositories.agent import AgentRepository
-from deep_agent.db.repositories.session import MAX_LIST_LIMIT, SessionRepository, SessionSummaryRow
-from deep_agent.memory.base import SessionStore
-from deep_agent.memory.history import (
+from deep_agent.db.deps import get_db
+from deep_agent.db.deps import get_agent_repo
+from deep_agent.db.session_list import MAX_LIST_LIMIT, SessionListFilters, SessionSummaryRow
+from deep_agent.db.session_key import parse_scoped_session_key, resolve_session_key
+from deep_agent.db.stores.base import SessionStore
+from deep_agent.agent.history import (
     SessionHistoryResponse,
     first_user_prompt,
     model_messages_to_history,
     session_activity_timestamps,
 )
-from deep_agent.memory.postgres import parse_scoped_session_key, resolve_session_key
-from deep_agent.memory.sql import SqlSessionStore
 from deep_agent.schemas.chat import SessionInfo, SessionListResponse
 
 router = APIRouter()
-_agent_repo = AgentRepository()
-_session_repo = SessionRepository()
+_agent_repo = get_agent_repo()
 
 
 async def _resolve_agent_name(db: AsyncSession, agent_id: str | None) -> str | None:
@@ -56,8 +54,9 @@ async def _build_session_info(
     parsed_agent_id, session_id = parse_scoped_session_key(session_key)
 
     agent_id = parsed_agent_id
-    if isinstance(store, SqlSessionStore):
-        stored_agent_id = await store.get_session_agent_id(session_key)
+    get_agent_id = getattr(store, "get_session_agent_id", None)
+    if get_agent_id is not None:
+        stored_agent_id = await get_agent_id(session_key)
         if stored_agent_id:
             agent_id = stored_agent_id
 
@@ -65,8 +64,9 @@ async def _build_session_info(
 
     created_at: datetime | None = None
     updated_at: datetime | None = None
-    if isinstance(store, SqlSessionStore):
-        created_at, updated_at = await store.get_session_timestamps(session_key)
+    get_timestamps = getattr(store, "get_session_timestamps", None)
+    if get_timestamps is not None:
+        created_at, updated_at = await get_timestamps(session_key)
     if updated_at is None and history:
         created_at, updated_at = session_activity_timestamps(history)
 
@@ -79,44 +79,6 @@ async def _build_session_info(
         created_at=created_at,
         updated_at=updated_at,
     )
-
-
-async def _list_sessions_in_memory(
-    store: SessionStore,
-    *,
-    agent_id: str | None,
-    limit: int,
-    offset: int,
-    updated_after: datetime | None,
-    updated_before: datetime | None,
-    has_messages: bool | None,
-    sort: Literal["updated_at", "created_at"],
-    db: AsyncSession | None,
-) -> SessionListResponse:
-    items: list[SessionInfo] = []
-    for session_key in await store.list_sessions():
-        info = await _build_session_info(store, session_key, db=db)
-        if agent_id is not None and info.agent_id != agent_id:
-            continue
-        if updated_after is not None and (info.updated_at is None or info.updated_at < updated_after):
-            continue
-        if updated_before is not None and (info.updated_at is None or info.updated_at > updated_before):
-            continue
-        if has_messages is True and info.message_count == 0:
-            continue
-        if has_messages is False and info.message_count > 0:
-            continue
-        items.append(info)
-
-    reverse = True
-    if sort == "updated_at":
-        items.sort(key=lambda item: item.updated_at or datetime.min, reverse=reverse)
-    else:
-        items.sort(key=lambda item: item.created_at or datetime.min, reverse=reverse)
-
-    total = len(items)
-    page = items[offset : offset + limit]
-    return SessionListResponse(items=page, total=total, limit=limit, offset=offset)
 
 
 @router.get("/sessions", response_model=SessionListResponse)
@@ -137,36 +99,22 @@ async def list_sessions(
         description="Sort field; results are always descending.",
     ),
 ) -> SessionListResponse:
-    if isinstance(ctx.store, SqlSessionStore):
-        async with db_session(ctx) as db:
-            rows, total = await _session_repo.list_summaries(
-                db,
-                agent_id=agent_id,
-                user_id=user_id,
-                limit=limit,
-                offset=offset,
-                updated_after=updated_after,
-                updated_before=updated_before,
-                has_messages=has_messages,
-                sort=sort,
-            )
-        return SessionListResponse(
-            items=[_summary_to_session_info(row) for row in rows],
-            total=total,
-            limit=limit,
-            offset=offset,
-        )
-
-    return await _list_sessions_in_memory(
-        ctx.store,
+    filters = SessionListFilters(
         agent_id=agent_id,
+        user_id=user_id,
         limit=limit,
         offset=offset,
         updated_after=updated_after,
         updated_before=updated_before,
         has_messages=has_messages,
         sort=sort,
-        db=None,
+    )
+    rows, total = await ctx.store.list_session_summaries(filters)
+    return SessionListResponse(
+        items=[_summary_to_session_info(row) for row in rows],
+        total=total,
+        limit=limit,
+        offset=offset,
     )
 
 

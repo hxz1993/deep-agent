@@ -1,37 +1,31 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from datetime import datetime
-from typing import Literal
 
-from pydantic import TypeAdapter
-from pydantic_ai.messages import ModelMessage
 from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from deep_agent.db.models import Agent, ChatMessage, ChatSession
-from deep_agent.memory.history import first_user_prompt
+from deep_agent.db.repositories.message import MessageRepository
+from deep_agent.db.session_list import (
+    MAX_LIST_LIMIT,
+    SessionListFilters,
+    SessionSummaryRow,
+    SortField,
+)
 
-_message_adapter: TypeAdapter[ModelMessage] = TypeAdapter(ModelMessage)
-
-EARLY_MESSAGE_LIMIT = 5
-MAX_LIST_LIMIT = 200
-
-SortField = Literal["updated_at", "created_at"]
-
-
-@dataclass(frozen=True)
-class SessionSummaryRow:
-    session_key: str
-    agent_id: str | None
-    agent_name: str | None
-    created_at: datetime
-    updated_at: datetime
-    message_count: int
-    user_prompt: str | None = None
-
+__all__ = [
+    "MAX_LIST_LIMIT",
+    "SessionListFilters",
+    "SessionRepository",
+    "SessionSummaryRow",
+    "SortField",
+]
 
 class SessionRepository:
+    def __init__(self) -> None:
+        self._messages = MessageRepository()
+
     @staticmethod
     def _apply_session_filters(
         stmt: Select,
@@ -60,26 +54,9 @@ class SessionRepository:
         db: AsyncSession,
         session_keys: list[str],
     ) -> dict[str, str | None]:
-        if not session_keys:
-            return {}
+        from deep_agent.agent.history import first_user_prompt
 
-        # Messages use contiguous sequence starting at 0 (see SqlSessionStore.append).
-        # Avoid ROW_NUMBER() so this works on MySQL 5.7 without window functions.
-        result = await db.execute(
-            select(ChatMessage.session_key, ChatMessage.payload)
-            .where(
-                ChatMessage.session_key.in_(session_keys),
-                ChatMessage.sequence < EARLY_MESSAGE_LIMIT,
-            )
-            .order_by(ChatMessage.session_key, ChatMessage.sequence)
-        )
-
-        payloads_by_key: dict[str, list[ModelMessage]] = {}
-        for session_key, payload in result.all():
-            payloads_by_key.setdefault(session_key, []).append(
-                _message_adapter.validate_python(payload)
-            )
-
+        payloads_by_key = await self._messages.fetch_early_payloads(db, session_keys)
         return {
             session_key: first_user_prompt(messages)
             for session_key, messages in payloads_by_key.items()

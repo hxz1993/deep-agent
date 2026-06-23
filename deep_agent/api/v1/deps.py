@@ -10,10 +10,10 @@ from deep_agent.agent.spec import AgentSpec, default_spec
 from deep_agent.capabilities.ui.registry import prepare_ui_toolset_for_spec
 from deep_agent.core.context import AppContext
 from deep_agent.core.exceptions import AgentNotFoundError
-from deep_agent.db.repositories.agent import AgentRepository
+from deep_agent.db.deps import get_agent_repo
 from deep_agent.options import OPTION
 
-_agent_repo = AgentRepository()
+_agent_repo = get_agent_repo()
 
 
 async def build_runner(
@@ -38,7 +38,7 @@ async def build_runner_for_agent(ctx: AppContext, db: AsyncSession, agent_id: st
     if row is None:
         raise AgentNotFoundError(agent_id)
 
-    spec = _agent_repo.to_spec(row)
+    spec = AgentSpec.from_row(row)
     return await _build_runner_from_spec(spec, ctx, db)
 
 

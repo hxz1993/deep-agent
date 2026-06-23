@@ -45,7 +45,7 @@ class UiToolRepository:
             agent_ids=data.agent_ids,
         )
         db.add(row)
-        await db.commit()
+        await db.flush()
         await db.refresh(row)
         return row
 
@@ -60,13 +60,13 @@ class UiToolRepository:
             updates["metadata_"] = updates.pop("metadata")
         for field, value in updates.items():
             setattr(row, field, value)
-        await db.commit()
+        await db.flush()
         await db.refresh(row)
         return row
 
     async def delete(self, db: AsyncSession, name: str) -> bool:
         result = await db.execute(delete(UiToolDefinition).where(UiToolDefinition.name == name))
-        await db.commit()
+        await db.flush()
         return result.rowcount > 0
 
     async def delete_by_mcp_server(self, db: AsyncSession, mcp_server_name: str) -> int:
@@ -76,7 +76,7 @@ class UiToolRepository:
                 UiToolDefinition.source == "mcp",
             )
         )
-        await db.commit()
+        await db.flush()
         return result.rowcount
 
     async def upsert_mcp_tools(
@@ -122,5 +122,5 @@ class UiToolRepository:
                     current.enabled = tool.enabled
                 upserted += 1
 
-        await db.commit()
+        await db.flush()
         return upserted, removed

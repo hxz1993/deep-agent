@@ -12,9 +12,9 @@ from deep_agent.agent.headers import extract_forward_headers
 from deep_agent.api.v1.deps import build_runner, build_runner_for_agent
 from deep_agent.core.context import AppContext, AppContextDep
 from deep_agent.core.exceptions import AgentNotFoundError
-from deep_agent.db.deps import db_session
+from deep_agent.db.unit_of_work import unit_of_work
 from deep_agent.db.ids import normalize_agent_id
-from deep_agent.memory.postgres import scoped_session_key
+from deep_agent.db.session_key import scoped_session_key
 from deep_agent.schemas.chat import ChatRequest, ChatResponse, StreamChatRequest
 
 router = APIRouter()
@@ -61,7 +61,7 @@ async def _optional_db_runner(
 ):
     if ctx.db_session_factory is None:
         return await build_runner(ctx, None, model=model, capabilities=capabilities)
-    async with db_session(ctx) as db:
+    async with unit_of_work(ctx) as db:
         return await build_runner(ctx, db, model=model, capabilities=capabilities)
 
 
@@ -94,7 +94,7 @@ async def chat_stream(request: Request, ctx: AppContextDep, body: StreamChatRequ
         except ValueError as exc:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
         try:
-            async with db_session(ctx) as db:
+            async with unit_of_work(ctx) as db:
                 runner = await build_runner_for_agent(ctx, db, agent_id)
         except AgentNotFoundError as exc:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc

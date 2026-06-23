@@ -84,6 +84,7 @@ class UiToolRepositoryTests(unittest.IsolatedAsyncioTestCase):
                     widget="custom",
                 ),
             )
+            await db.commit()
             rows = await self.repo.list_all(db, source="manual")
         self.assertEqual(row.name, "myapp__custom_form")
         self.assertEqual(len(rows), 1)

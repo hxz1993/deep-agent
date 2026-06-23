@@ -7,6 +7,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from deep_agent.db.models import UiToolDefinition
+
 from deep_agent.capabilities.ui.constants import (
     MAX_DESCRIPTION_LEN,
     MAX_SCHEMA_BYTES,
@@ -121,6 +123,26 @@ class UiToolResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     shadowed_by: str | None = None
+
+    @classmethod
+    def from_row(cls, row: UiToolDefinition, *, shadowed_by: str | None = None) -> UiToolResponse:
+        return cls(
+            name=row.name,
+            description=row.description,
+            parameters_json_schema=row.parameters_json_schema,
+            widget=row.widget,
+            result_schema=row.result_schema,
+            metadata=row.metadata_,
+            source=row.source,
+            mcp_server_name=row.mcp_server_name,
+            enabled=row.enabled,
+            override=row.override,
+            agent_ids=row.agent_ids,
+            discovered_at=row.discovered_at,
+            created_at=row.created_at,
+            updated_at=row.updated_at,
+            shadowed_by=shadowed_by,
+        )
 
 
 class UiToolListResponse(BaseModel):

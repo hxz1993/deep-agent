@@ -31,14 +31,14 @@ HTTP (REST/SSE)
         ├─ skill        skills/<name>/（仓库根，见 DEEP_AGENT_SKILLS_DIR）
         ├─ cursor-skill .cursor/skills/<name>/SKILL.md
         └─ mcp          mcp_servers 表 + mcps/ 内置兜底
-    → SessionStore（memory/）
+    → SessionStore（`db/stores/`；`memory/` 已 deprecated）
 ```
 
 ### 启动生命周期（`main.py` lifespan → `AppContext.bootstrap()`）
 
 1. `configure_logging()` → `AppContext.bootstrap()`（见 `core/context.py`）
 2. `OPTION` → `build_registry()`（native + skill + cursor-skill）；非 Linux 本地开发时 `options.py` 模块级自动加载 `.env`（可用 `DEEP_AGENT_LOAD_DOTENV` 覆盖）
-3. 有数据库：`upgrade_database()` → async engine → `PostgresSessionStore` 或 `MySQLSessionStore`
+3. 有数据库：`upgrade_database()` → `bootstrap_database()` → `PostgresSessionStore` / `MySQLSessionStore` / `InMemorySessionStore`
 4. `load_and_register_mcp(registry, session)` — DB 加载 MCP；DB 未覆盖的 `mcps/<name>/` 自动兜底
 5. `init_context(ctx)` — 路由通过 `Depends(AppContextDep)` 注入
 6. 关闭：`ctx.aclose()` → `reset_context()`
@@ -49,7 +49,7 @@ HTTP (REST/SSE)
 
 1. 解析 `StreamChatRequest`；`session_id` 缺省则生成 UUID
 2. **无 `agent_id`**：`build_runner(model?, capabilities?)` → `OPTION` 默认 `AgentSpec`
-3. **有 `agent_id`**：`build_runner_for_agent()` → `agents` 表 → 存储键 `{agent_id}:{session_id}`
+3. **有 `agent_id`**：`build_runner_for_agent()` → `agents` 表 → `AgentSpec.from_row()` → 存储键 `{agent_id}:{session_id}`
 4. `AgentRunner.run_stream()`：session 锁 → history → `agent.iter()` → SSE 事件 → `append(new_messages)`
 5. `capabilities: null` → 仅 `default_enabled=True`；显式列表按名启用
 
@@ -61,7 +61,8 @@ HTTP (REST/SSE)
 
 | 文件 | 职责 |
 | --- | --- |
-| `spec.py` | `AgentSpec`：model、instructions、capabilities、base_url/api_key、max_requests |
+| `spec.py` | `AgentSpec`：`from_row()`、model、instructions、capabilities |
+| `history.py` | `ModelMessage[]` → 前端时间线 |
 | `factory.py` | `build_agent()` — model 字符串或 OpenAI 兼容 endpoint |
 | `runner.py` | `run()` / `run_stream()` — 会话锁、history、事件映射 |
 | `deps.py` | `AgentDeps`：session_id、user、agent_id、request_headers |
@@ -81,6 +82,8 @@ HTTP (REST/SSE)
 | `mcp/toolset_builder.py` | url / stdio / builtin + header 注入 |
 | `mcp/session_scoped.py` | stdio MCP 按 chat session 保活子进程 |
 | `mcp/session_pool.py` | 全局 MCP 会话池 |
+| `ui/registry.py` | UI 工具合并、可见性、`prepare_ui_toolset_for_spec` |
+| `mcp/ui_discovery.py` | MCP manifest 发现 → `db/services/ui_tool_sync.sync_mcp_tools` |
 
 ### `api/v1/`
 
@@ -88,21 +91,35 @@ HTTP (REST/SSE)
 | --- | --- |
 | `chat.py` | `POST /chat`, `POST /chat/stream` |
 | `agents.py` | CRUD `/agents` |
-| `mcp.py` | CRUD `/mcp`（写后热重载 registry） |
+| `mcp.py` | CRUD `/mcp`、UI 工具刷新（写后热重载 registry） |
+| `ui_tools.py` | CRUD `/ui-tools` |
 | `sessions.py` | 会话列表 / 历史 / 删除 |
 | `tools.py` | `GET /tools` |
 | `deps.py` | `build_runner` / `build_runner_for_agent`（多入口共享组装，见[重构风格规则](../.cursor/rules/python-refactoring.mdc)） |
 
-### `db/` + `memory/`
+### `db/`
+
+| 路径 | 职责 |
+| --- | --- |
+| `deps.py` | `get_db`（只读）、`get_uow`（写事务）、repository Depends 单例 |
+| `unit_of_work.py` | 请求级 commit / rollback |
+| `factory.py` / `dialect.py` | 方言工厂、`bootstrap_database()` |
+| `stores/` | `SessionStore` 实现（postgres / mysql / in-memory） |
+| `repositories/` | ORM 访问（无内部 `commit()`） |
+| `services/ui_tool_sync.py` | MCP UI 工具同步（来源优先级、override 保护） |
+| `session_key.py` / `session_list.py` | 会话键解析、列表过滤 DTO |
 
 | 表 | 用途 |
 | --- | --- |
 | `agents` | DB Agent（UUID PK，name 唯一） |
 | `mcp_servers` | MCP transport + config JSON |
+| `ui_tool_definitions` | UI 工具定义（builtin / mcp / manual） |
 | `chat_sessions` | 会话元数据 |
 | `chat_messages` | `ModelMessage` JSONB 历史 |
 
-`memory/history.py`：`ModelMessage[]` → 前端时间线。
+### `memory/`（deprecated）
+
+仅 re-export `db/stores` 与 `db/session_key`；新代码请直接 `from deep_agent.db.stores import ...`。
 
 ---
 
@@ -183,7 +200,8 @@ alembic upgrade head
 | POST | `/api/v1/chat`, `/api/v1/chat/stream` | 否（持久化需 DB） |
 | CRUD | `/api/v1/agents` | 是 |
 | CRUD | `/api/v1/mcp` | 是 |
-| GET | `/api/v1/tools` | 否 |
+| CRUD | `/api/v1/ui-tools` | 是 |
+| GET | `/api/v1/tools` | 否（无 DB 时跳过动态 UI 工具） |
 | | `/api/v1/sessions/*` | 是 |
 | | `/admin` | 是 |
 

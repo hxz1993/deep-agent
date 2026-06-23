@@ -10,7 +10,7 @@ from pydantic_ai.tools import RunContext
 
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.models import DeepSeekChatModel
-from deep_agent.memory.history import is_retry_only_request, is_thinking_only_response
+from deep_agent.agent.history import is_retry_only_request, is_thinking_only_response
 
 DEEPSEEK_THINKING_RETRY_PROMPT = (
     "上一条回复只写在 reasoning/思考字段中，用户看不到。"

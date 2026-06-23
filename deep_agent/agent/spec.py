@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from deep_agent.db.models import Agent
 from deep_agent.options import OPTION
 
 

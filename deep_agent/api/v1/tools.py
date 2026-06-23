@@ -4,6 +4,7 @@ from fastapi import APIRouter
 
 from deep_agent.capabilities.ui.registry import load_effective_ui_tools
 from deep_agent.core.context import AppContextDep
+from deep_agent.db.deps import db_session
 from deep_agent.schemas.chat import CapabilityDescription, ToolDescription
 
 router = APIRouter()
@@ -17,7 +18,7 @@ async def list_capabilities(ctx: AppContextDep) -> list[CapabilityDescription]:
     if ctx.db_session_factory is None:
         return caps
 
-    async with ctx.db_session_factory() as db:
+    async with db_session(ctx) as db:
         effective = await load_effective_ui_tools(db, spec=_anonymous_spec())
         dynamic_tools = [record for record in effective.definitions if record.source in {"mcp", "manual"}]
 

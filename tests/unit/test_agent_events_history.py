@@ -14,7 +14,7 @@ from pydantic_ai.messages import (
 )
 
 from deep_agent.agent import events
-from deep_agent.memory.history import (
+from deep_agent.agent.history import (
     filter_ephemeral_agent_messages,
     model_messages_to_history,
     session_activity_timestamps,

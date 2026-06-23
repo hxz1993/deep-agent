@@ -11,11 +11,11 @@ from deep_agent.capabilities.mcp.session_pool import McpSessionPool
 from deep_agent.capabilities.registry import CapabilityRegistry
 from loguru import logger
 
-from deep_agent.db.engine import close_db, create_engine
-from deep_agent.db.migrate import upgrade_database
-from deep_agent.db.url import get_database_url
-from deep_agent.memory import InMemorySessionStore, MySQLSessionStore, PostgresSessionStore
-from deep_agent.memory.base import SessionStore
+from deep_agent.db.dialect import DbDialect
+from deep_agent.db.engine import close_db
+from deep_agent.db.factory import bootstrap_database
+from deep_agent.db.stores.base import SessionStore
+from deep_agent.db.stores.in_memory import InMemorySessionStore
 from deep_agent.options import OPTION
 
 _context: AppContext | None = None
@@ -31,7 +31,6 @@ class AppContext:
 
     @classmethod
     async def bootstrap(cls) -> AppContext:
-        database_url = get_database_url()
         registry = build_registry()
         mcp_session_pool = McpSessionPool(mcp_acquire_retries=OPTION.agent.mcp_acquire_retries)
 
@@ -42,23 +41,23 @@ class AppContext:
         )
         init_context(ctx)
 
-        if database_url:
+        try:
+            bundle = await bootstrap_database()
+        except Exception:
+            logger.exception("Startup aborted: database migration failed")
+            raise
+
+        if bundle is not None:
+            ctx.store = bundle.store
+            ctx.db_engine = bundle.engine
+            ctx.db_session_factory = bundle.session_factory
+            db_kind = (
+                "mysql"
+                if bundle.dialect is DbDialect.MYSQL
+                else "postgres"
+            )
             try:
-                await upgrade_database()
-            except Exception:
-                logger.exception("Startup aborted: database migration failed")
-                raise
-            db_engine, db_session_factory = create_engine(database_url)
-            if database_url.startswith("mysql+"):
-                ctx.store = MySQLSessionStore(db_session_factory)
-                db_kind = "mysql"
-            else:
-                ctx.store = PostgresSessionStore(db_session_factory)
-                db_kind = "postgres"
-            ctx.db_engine = db_engine
-            ctx.db_session_factory = db_session_factory
-            try:
-                async with db_session_factory() as session:
+                async with bundle.session_factory() as session:
                     await load_and_register_mcp(registry, session)
             except Exception:
                 logger.exception("Failed to load MCP servers from database.")

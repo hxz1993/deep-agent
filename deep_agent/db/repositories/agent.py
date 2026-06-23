@@ -3,25 +3,11 @@ from __future__ import annotations
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from deep_agent.agent.spec import AgentSpec
 from deep_agent.db.models import Agent
 from deep_agent.schemas.agent import AgentCreate, AgentUpdate
 
 
 class AgentRepository:
-    @staticmethod
-    def to_spec(row: Agent) -> AgentSpec:
-        return AgentSpec(
-            name=row.name,
-            model=row.model,
-            instructions=row.prompt,
-            capabilities=row.capabilities,
-            base_url=row.base_url,
-            api_key=row.api_key,
-            max_requests=row.max_requests,
-            agent_id=row.id,
-        )
-
     async def get_by_id(self, db: AsyncSession, agent_id: str) -> Agent | None:
         result = await db.execute(select(Agent).where(Agent.id == agent_id))
         return result.scalar_one_or_none()

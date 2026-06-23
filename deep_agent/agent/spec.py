@@ -24,6 +24,19 @@ class AgentSpec:
     max_requests: int | None = None
     agent_id: str | None = None
 
+    @classmethod
+    def from_row(cls, row: Agent) -> AgentSpec:
+        return cls(
+            name=row.name,
+            model=row.model,
+            instructions=row.prompt,
+            capabilities=row.capabilities,
+            base_url=row.base_url,
+            api_key=row.api_key,
+            max_requests=row.max_requests,
+            agent_id=row.id,
+        )
+
 
 def default_spec() -> AgentSpec:
     return AgentSpec(

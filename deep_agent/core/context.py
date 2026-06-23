@@ -14,8 +14,8 @@ from loguru import logger
 from deep_agent.db.dialect import DbDialect
 from deep_agent.db.engine import close_db
 from deep_agent.db.factory import bootstrap_database
-from deep_agent.db.stores.base import SessionStore
-from deep_agent.db.stores.in_memory import InMemorySessionStore
+from deep_agent.db.stores.bundle import DataStores, create_data_stores
+from deep_agent.db.stores.conversation import InMemoryConversationStore, SessionStore
 from deep_agent.options import OPTION
 
 _context: AppContext | None = None
@@ -24,19 +24,24 @@ _context: AppContext | None = None
 @dataclass
 class AppContext:
     registry: CapabilityRegistry
-    store: SessionStore
+    stores: DataStores
     mcp_session_pool: McpSessionPool
     db_engine: AsyncEngine | None = None
     db_session_factory: async_sessionmaker[AsyncSession] | None = None
+
+    @property
+    def store(self) -> SessionStore:
+        return self.stores.conversation
 
     @classmethod
     async def bootstrap(cls) -> AppContext:
         registry = build_registry()
         mcp_session_pool = McpSessionPool(mcp_acquire_retries=OPTION.agent.mcp_acquire_retries)
 
+        stores = create_data_stores(DbDialect.MEMORY, None)
         ctx = cls(
             registry=registry,
-            store=InMemorySessionStore(),
+            stores=stores,
             mcp_session_pool=mcp_session_pool,
         )
         init_context(ctx)
@@ -48,7 +53,7 @@ class AppContext:
             raise
 
         if bundle is not None:
-            ctx.store = bundle.store
+            ctx.stores = bundle.stores
             ctx.db_engine = bundle.engine
             ctx.db_session_factory = bundle.session_factory
             db_kind = (
@@ -57,8 +62,8 @@ class AppContext:
                 else "postgres"
             )
             try:
-                async with bundle.session_factory() as session:
-                    await load_and_register_mcp(registry, session)
+                if bundle.stores.mcp is not None:
+                    await load_and_register_mcp(registry, bundle.stores.mcp)
             except Exception:
                 logger.exception("Failed to load MCP servers from database.")
             logger.info(
@@ -83,6 +88,7 @@ class AppContext:
         *,
         registry: CapabilityRegistry | None = None,
         store: SessionStore | None = None,
+        stores: DataStores | None = None,
         mcp_session_pool: McpSessionPool | None = None,
         mcp_acquire_retries: int | None = None,
         db_engine: AsyncEngine | None = None,
@@ -95,9 +101,17 @@ class AppContext:
                 else mcp_acquire_retries
             )
             mcp_session_pool = McpSessionPool(mcp_acquire_retries=retries)
+        if stores is None:
+            conversation = store or InMemoryConversationStore()
+            stores = DataStores(
+                conversation=conversation,
+                agent=None,
+                mcp=None,
+                ui_tool=None,
+            )
         return cls(
             registry=registry or CapabilityRegistry(),
-            store=store or InMemorySessionStore(),
+            stores=stores,
             mcp_session_pool=mcp_session_pool,
             db_engine=db_engine,
             db_session_factory=db_session_factory,

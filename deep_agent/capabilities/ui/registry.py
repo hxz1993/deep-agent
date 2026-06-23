@@ -6,19 +6,18 @@ from typing import Any
 from loguru import logger
 from pydantic_ai import ExternalToolset
 from pydantic_ai.tools import ToolDefinition
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from deep_agent.agent.spec import AgentSpec
-from deep_agent.capabilities.ui.builtin import builtin_ui_records
-from deep_agent.capabilities.ui.constants import SOURCE_PRIORITY
 from deep_agent.capabilities.mcp.builtin_config import is_builtin_mcp_row
 from deep_agent.capabilities.mcp.ui_discovery import (
     discover_and_persist_ui_tools,
     non_builtin_mcp_names_for_spec,
     resolve_ui_tools_config,
 )
-from deep_agent.db.deps import get_mcp_repo, get_ui_tool_repo
+from deep_agent.capabilities.ui.builtin import builtin_ui_records
+from deep_agent.capabilities.ui.constants import SOURCE_PRIORITY
 from deep_agent.capabilities.ui.types import UIToolRecord
+from deep_agent.db.stores.bundle import DataStores
 
 
 @dataclass(frozen=True)
@@ -134,35 +133,35 @@ def enrich_deferred(deferred: dict[str, Any], hints: dict[str, dict[str, Any]]) 
     return enriched
 
 
-async def ensure_mcp_ui_tools_discovered(db: AsyncSession, spec: AgentSpec) -> None:
+async def ensure_mcp_ui_tools_discovered(stores: DataStores, spec: AgentSpec) -> None:
     """Discover MCP UI tools on demand when building an agent with non-builtin MCP."""
     mcp_names = non_builtin_mcp_names_for_spec(spec.capabilities)
-    if not mcp_names:
+    if not mcp_names or stores.mcp is None or stores.ui_tool is None:
         return
 
-    mcp_repo = get_mcp_repo()
     for name in sorted(mcp_names):
-        row = await mcp_repo.get_by_name(db, name)
+        row = await stores.mcp.get_by_name(name)
         if row is None or not row.enabled or is_builtin_mcp_row(row.name, row.transport, row.config):
             continue
         cfg = resolve_ui_tools_config(row.config)
         if not cfg["enabled"] or cfg["mode"] == "none":
             continue
-        await discover_and_persist_ui_tools(db, row, use_cache_on_error=True)
+        await discover_and_persist_ui_tools(stores.ui_tool, row, use_cache_on_error=True)
 
 
 async def load_effective_ui_tools(
-    db: AsyncSession,
+    stores: DataStores,
     spec: AgentSpec,
     *,
     mcp_enabled_names: set[str] | None = None,
 ) -> EffectiveUiTools:
-    repo = get_ui_tool_repo()
-    db_rows = await repo.list_all(db, enabled=True)
+    assert stores.ui_tool is not None
+    db_rows = await stores.ui_tool.list_all(enabled=True)
     db_records = [UIToolRecord.from_row(row) for row in db_rows if row.source != "builtin"]
 
     if mcp_enabled_names is None:
-        mcp_rows = await get_mcp_repo().list_all(db)
+        assert stores.mcp is not None
+        mcp_rows = await stores.mcp.list_all()
         mcp_enabled_names = {row.name for row in mcp_rows if row.enabled}
 
     visible_db = [
@@ -184,11 +183,11 @@ async def load_effective_ui_tools(
 
 
 async def prepare_ui_toolset_for_spec(
-    db: AsyncSession,
+    stores: DataStores,
     spec: AgentSpec,
 ) -> tuple[ExternalToolset | None, dict[str, dict[str, Any]]]:
-    await ensure_mcp_ui_tools_discovered(db, spec)
-    effective = await load_effective_ui_tools(db, spec)
+    await ensure_mcp_ui_tools_discovered(stores, spec)
+    effective = await load_effective_ui_tools(stores, spec)
     hints = build_tool_hints(effective.definitions)
     if not effective.has_dynamic:
         return None, hints

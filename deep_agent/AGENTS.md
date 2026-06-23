@@ -83,7 +83,7 @@ HTTP (REST/SSE)
 | `mcp/session_scoped.py` | stdio MCP 按 chat session 保活子进程 |
 | `mcp/session_pool.py` | 全局 MCP 会话池 |
 | `ui/registry.py` | UI 工具合并、可见性、`prepare_ui_toolset_for_spec` |
-| `mcp/ui_discovery.py` | MCP manifest 发现 → `db/services/ui_tool_sync.sync_mcp_tools` |
+| `mcp/ui_discovery.py` | MCP manifest 发现 → `UiToolStore.sync_mcp_tools` |
 
 ### `api/v1/`
 
@@ -101,12 +101,9 @@ HTTP (REST/SSE)
 
 | 路径 | 职责 |
 | --- | --- |
-| `deps.py` | `get_db`（只读）、`get_uow`（写事务）、repository Depends 单例 |
-| `unit_of_work.py` | 请求级 commit / rollback |
+| `deps.py` | `require_db`、`get_*_store(ctx)` Depends |
+| `stores/` | 各领域 Store（`agent/`、`mcp/`、`chat_session/`…）+ `bundle.DataStores` |
 | `factory.py` / `dialect.py` | 方言工厂、`bootstrap_database()` |
-| `stores/` | `SessionStore` 实现（postgres / mysql / in-memory） |
-| `repositories/` | ORM 访问（无内部 `commit()`） |
-| `services/ui_tool_sync.py` | MCP UI 工具同步（来源优先级、override 保护） |
 | `session_key.py` / `session_list.py` | 会话键解析、列表过滤 DTO |
 
 | 表 | 用途 |

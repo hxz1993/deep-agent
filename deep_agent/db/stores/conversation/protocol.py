@@ -9,16 +9,9 @@ from deep_agent.db.session_list import SessionListFilters, SessionSummaryRow
 
 @runtime_checkable
 class SessionStore(Protocol):
-    """Persistence boundary for conversation history.
-
-    History is stored as Pydantic AI ``ModelMessage`` objects so it can be fed
-    straight back into an agent run via ``message_history``. Swapping the
-    in-memory implementation for Postgres/Redis means implementing this Protocol
-    only; nothing else in the app changes.
-    """
+    """Persistence boundary for conversation history."""
 
     async def get_history(self, session_id: str) -> list[ModelMessage]:
-        """Return the full message history for a session (empty if new)."""
         ...
 
     async def append(
@@ -29,20 +22,16 @@ class SessionStore(Protocol):
         agent_id: str | None = None,
         user_id: str | None = None,
     ) -> None:
-        """Append the messages produced by a run to the session history."""
         ...
 
     async def list_sessions(self) -> list[str]:
-        """Return all known session ids."""
         ...
 
     async def delete(self, session_id: str) -> None:
-        """Delete a session and its history."""
         ...
 
     async def list_session_summaries(
         self,
         filters: SessionListFilters,
     ) -> tuple[list[SessionSummaryRow], int]:
-        """Return filtered session summaries and total count."""
         ...

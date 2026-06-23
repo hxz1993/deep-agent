@@ -6,13 +6,11 @@ from sqlalchemy.dialects.mysql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from deep_agent.db.models import ChatSession
-from deep_agent.db.stores.sql import SqlSessionStore
+from deep_agent.db.stores.chat_session.base import ChatSessionStoreBase
 
 
-class MySQLSessionStore(SqlSessionStore):
-    """MySQL-backed session store."""
-
-    async def _upsert_session(
+class MySQLChatSessionStore(ChatSessionStoreBase):
+    async def _upsert(
         self,
         db: AsyncSession,
         session_key: str,

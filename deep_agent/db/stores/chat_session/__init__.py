@@ -1,0 +1,21 @@
+from __future__ import annotations
+
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+from deep_agent.db.dialect import DbDialect
+from deep_agent.db.stores.chat_session.base import ChatSessionStoreBase
+from deep_agent.db.stores.chat_session.mysql import MySQLChatSessionStore
+from deep_agent.db.stores.chat_session.postgres import PostgresChatSessionStore
+
+__all__ = ["ChatSessionStoreBase", "create_chat_session_store"]
+
+
+def create_chat_session_store(
+    dialect: DbDialect,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> ChatSessionStoreBase:
+    match dialect:
+        case DbDialect.MYSQL:
+            return MySQLChatSessionStore(session_factory)
+        case _:
+            return PostgresChatSessionStore(session_factory)

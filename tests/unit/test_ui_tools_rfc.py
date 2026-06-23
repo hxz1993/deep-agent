@@ -17,7 +17,11 @@ from deep_agent.capabilities.ui.registry import (
 )
 from deep_agent.capabilities.ui.types import UIToolRecord
 from deep_agent.db.models import Base, McpServer, UiToolDefinition
-from deep_agent.db.repositories.ui_tool import UiToolRepository
+from deep_agent.db.dialect import DbDialect
+from deep_agent.db.stores.conversation import InMemoryConversationStore
+from deep_agent.db.stores.bundle import DataStores
+from deep_agent.db.stores.mcp import create_mcp_store
+from deep_agent.db.stores.ui_tool import UiToolStoreBase, create_ui_tool_store
 from deep_agent.schemas.ui_tools import UiToolCreate
 
 
@@ -62,30 +66,33 @@ class ManifestParseTests(unittest.TestCase):
         self.assertEqual(rows[0].source, "mcp")
 
 
-class UiToolRepositoryTests(unittest.IsolatedAsyncioTestCase):
+class UiToolStoreTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         self.engine = create_async_engine("sqlite+aiosqlite:///:memory:")
         async with self.engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
         self.session_factory = async_sessionmaker(self.engine, expire_on_commit=False)
-        self.repo = UiToolRepository()
+        self.store: UiToolStoreBase = create_ui_tool_store(DbDialect.POSTGRES, self.session_factory)
+        self.stores = DataStores(
+            conversation=InMemoryConversationStore(),
+            agent=None,
+            mcp=create_mcp_store(DbDialect.POSTGRES, self.session_factory),
+            ui_tool=self.store,
+        )
 
     async def asyncTearDown(self) -> None:
         await self.engine.dispose()
 
     async def test_create_manual_and_list(self) -> None:
-        async with self.session_factory() as db:
-            row = await self.repo.create_manual(
-                db,
-                UiToolCreate(
-                    name="myapp__custom_form",
-                    description="Custom form",
-                    parameters_json_schema={"type": "object", "properties": {}},
-                    widget="custom",
-                ),
-            )
-            await db.commit()
-            rows = await self.repo.list_all(db, source="manual")
+        row = await self.store.create_manual(
+            UiToolCreate(
+                name="myapp__custom_form",
+                description="Custom form",
+                parameters_json_schema={"type": "object", "properties": {}},
+                widget="custom",
+            ),
+        )
+        rows = await self.store.list_all(source="manual")
         self.assertEqual(row.name, "myapp__custom_form")
         self.assertEqual(len(rows), 1)
 
@@ -106,15 +113,15 @@ class UiToolRepositoryTests(unittest.IsolatedAsyncioTestCase):
             )
             await db.commit()
 
-            spec = AgentSpec(
-                name="demo",
-                model="test",
-                instructions="hi",
-                capabilities=["ui"],
-                agent_id="00000000-0000-4000-8000-000000000001",
-            )
-            effective = await load_effective_ui_tools(db, spec, mcp_enabled_names=set())
-            toolset, hints = await prepare_ui_toolset_for_spec(db, spec)
+        spec = AgentSpec(
+            name="demo",
+            model="test",
+            instructions="hi",
+            capabilities=["ui"],
+            agent_id="00000000-0000-4000-8000-000000000001",
+        )
+        effective = await load_effective_ui_tools(self.stores, spec, mcp_enabled_names=set())
+        toolset, hints = await prepare_ui_toolset_for_spec(self.stores, spec)
 
         names = {item.name for item in effective.definitions}
         self.assertIn("confirm_action", names)

@@ -1,19 +1,15 @@
 from __future__ import annotations
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from deep_agent.capabilities.cursor_skills import load_cursor_skill_capabilities
 from deep_agent.capabilities.mcp.builtin import load_builtin_mcp_capabilities
 from deep_agent.capabilities.mcp.db_loader import capabilities_from_rows
 from deep_agent.capabilities.native import build_native_capability
 from deep_agent.capabilities.registry import Capability, CapabilityRegistry, ToolInfo
 from deep_agent.capabilities.skills import load_skill_capabilities
-from loguru import logger
-
-from deep_agent.capabilities.ui.builtin import build_ui_capability
 from deep_agent.core.paths import DEEP_AGENT_ROOT
-from deep_agent.db.repositories.mcp import McpServerRepository
+from deep_agent.db.stores.mcp import McpServerStoreBase
 from deep_agent.options import OPTION
+from loguru import logger
 
 __all__ = [
     "Capability",
@@ -29,7 +25,6 @@ def build_registry() -> CapabilityRegistry:
     registry = CapabilityRegistry()
 
     registry.register(build_native_capability())
-    # registry.register(build_ui_capability())
 
     for cap in load_skill_capabilities(OPTION.agent.skills_dir):
         registry.register(cap)
@@ -41,13 +36,11 @@ def build_registry() -> CapabilityRegistry:
     return registry
 
 
-async def load_and_register_mcp(registry: CapabilityRegistry, db: AsyncSession) -> None:
+async def load_and_register_mcp(registry: CapabilityRegistry, mcp_store: McpServerStoreBase) -> None:
     """Load enabled MCP servers from the database and hot-reload registry entries."""
-    repo = McpServerRepository()
-    rows = await repo.list_all(db)
+    rows = await mcp_store.list_all()
     caps = capabilities_from_rows(rows)
 
-    # Builtin ``mcps/<name>/server.py`` entries fill gaps not covered by the DB.
     db_names = {row.name for row in rows if row.enabled}
     mcps_dir = DEEP_AGENT_ROOT / "mcps"
     for builtin in load_builtin_mcp_capabilities(str(mcps_dir)):

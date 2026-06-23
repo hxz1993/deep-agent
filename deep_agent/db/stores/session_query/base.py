@@ -6,25 +6,57 @@ from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from deep_agent.db.models import Agent, ChatMessage, ChatSession
-from deep_agent.db.repositories.message import MessageRepository
 from deep_agent.db.session_list import (
     MAX_LIST_LIMIT,
     SessionListFilters,
     SessionSummaryRow,
     SortField,
 )
+from deep_agent.db.stores._session import SessionBoundMixin
+from deep_agent.db.stores.message.base import MessageStoreBase
 
 __all__ = [
     "MAX_LIST_LIMIT",
     "SessionListFilters",
-    "SessionRepository",
+    "SessionQueryStoreBase",
     "SessionSummaryRow",
     "SortField",
 ]
 
-class SessionRepository:
-    def __init__(self) -> None:
-        self._messages = MessageRepository()
+
+class SessionQueryStoreBase(SessionBoundMixin):
+    def __init__(
+        self,
+        session_factory,
+        message_store: MessageStoreBase,
+    ) -> None:
+        super().__init__(session_factory)
+        self._messages = message_store
+
+    async def list_summaries(
+        self,
+        *,
+        agent_id: str | None = None,
+        user_id: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+        updated_after: datetime | None = None,
+        updated_before: datetime | None = None,
+        has_messages: bool | None = None,
+        sort: SortField = "updated_at",
+    ) -> tuple[list[SessionSummaryRow], int]:
+        async with self._read() as db:
+            return await self._list_summaries(
+                db,
+                agent_id=agent_id,
+                user_id=user_id,
+                limit=limit,
+                offset=offset,
+                updated_after=updated_after,
+                updated_before=updated_before,
+                has_messages=has_messages,
+                sort=sort,
+            )
 
     @staticmethod
     def _apply_session_filters(
@@ -56,13 +88,13 @@ class SessionRepository:
     ) -> dict[str, str | None]:
         from deep_agent.agent.history import first_user_prompt
 
-        payloads_by_key = await self._messages.fetch_early_payloads(db, session_keys)
+        payloads_by_key = await self._messages._fetch_early_payloads(db, session_keys)
         return {
             session_key: first_user_prompt(messages)
             for session_key, messages in payloads_by_key.items()
         }
 
-    async def list_summaries(
+    async def _list_summaries(
         self,
         db: AsyncSession,
         *,

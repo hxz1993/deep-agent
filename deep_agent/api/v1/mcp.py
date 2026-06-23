@@ -1,22 +1,22 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from deep_agent.capabilities import load_and_register_mcp
 from deep_agent.capabilities.mcp.ui_discovery import discover_and_persist_ui_tools
 from deep_agent.capabilities.registry import CapabilityRegistry
 from deep_agent.core.context import AppContextDep
-from deep_agent.db.deps import get_db, get_mcp_repo, get_uow
-from deep_agent.db.repositories.mcp import McpServerRepository
+from deep_agent.db.deps import get_mcp_store, get_ui_tool_store
+from deep_agent.db.stores.mcp import McpServerStoreBase
+from deep_agent.db.stores.ui_tool import UiToolStoreBase
 from deep_agent.schemas.mcp import McpBuiltinConfig, McpServerCreate, McpServerResponse, McpServerUpdate
 from deep_agent.schemas.ui_tools import UiToolsRefreshResponse
 
 router = APIRouter()
 
 
-async def _reload_mcp_registry(registry: CapabilityRegistry, db: AsyncSession) -> None:
-    await load_and_register_mcp(registry, db)
+async def _reload_mcp_registry(registry: CapabilityRegistry, mcp_store: McpServerStoreBase) -> None:
+    await load_and_register_mcp(registry, mcp_store)
 
 
 def _assert_builtin_row_mutable(row, body: McpServerUpdate) -> None:
@@ -39,20 +39,18 @@ def _assert_builtin_row_mutable(row, body: McpServerUpdate) -> None:
 
 @router.get("/mcp", response_model=list[McpServerResponse])
 async def list_mcp_servers(
-    db: AsyncSession = Depends(get_db),
-    repo: McpServerRepository = Depends(get_mcp_repo),
+    store: McpServerStoreBase = Depends(get_mcp_store),
 ) -> list[McpServerResponse]:
-    rows = await repo.list_all(db)
+    rows = await store.list_all()
     return [McpServerResponse.from_row(row) for row in rows]
 
 
 @router.get("/mcp/{name}", response_model=McpServerResponse)
 async def get_mcp_server(
     name: str,
-    db: AsyncSession = Depends(get_db),
-    repo: McpServerRepository = Depends(get_mcp_repo),
+    store: McpServerStoreBase = Depends(get_mcp_store),
 ) -> McpServerResponse:
-    row = await repo.get_by_name(db, name)
+    row = await store.get_by_name(name)
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"MCP server not found: {name}")
     return McpServerResponse.from_row(row)
@@ -62,17 +60,19 @@ async def get_mcp_server(
 async def create_mcp_server(
     ctx: AppContextDep,
     body: McpServerCreate,
-    db: AsyncSession = Depends(get_uow),
-    repo: McpServerRepository = Depends(get_mcp_repo),
+    store: McpServerStoreBase = Depends(get_mcp_store),
 ) -> McpServerResponse:
-    existing = await repo.get_by_name(db, body.name)
+    existing = await store.get_by_name(body.name)
     if existing is not None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"MCP server already exists: {body.name}",
         )
-    row = await repo.create(db, body)
-    await _reload_mcp_registry(ctx.registry, db)
+    try:
+        row = await store.create_unique(body)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    await _reload_mcp_registry(ctx.registry, store)
     return McpServerResponse.from_row(row)
 
 
@@ -81,38 +81,37 @@ async def update_mcp_server(
     ctx: AppContextDep,
     name: str,
     body: McpServerUpdate,
-    db: AsyncSession = Depends(get_uow),
-    repo: McpServerRepository = Depends(get_mcp_repo),
+    store: McpServerStoreBase = Depends(get_mcp_store),
 ) -> McpServerResponse:
-    row = await repo.get_by_name(db, name)
+    row = await store.get_by_name(name)
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"MCP server not found: {name}")
     _assert_builtin_row_mutable(row, body)
-    row = await repo.update(db, row, body)
-    await _reload_mcp_registry(ctx.registry, db)
-    return McpServerResponse.from_row(row)
+    updated = await store.update(name, body)
+    assert updated is not None
+    await _reload_mcp_registry(ctx.registry, store)
+    return McpServerResponse.from_row(updated)
 
 
 @router.delete("/mcp/{name}", status_code=status.HTTP_200_OK)
 async def delete_mcp_server(
     ctx: AppContextDep,
     name: str,
-    db: AsyncSession = Depends(get_uow),
-    repo: McpServerRepository = Depends(get_mcp_repo),
+    store: McpServerStoreBase = Depends(get_mcp_store),
 ) -> None:
-    deleted = await repo.delete(db, name)
+    deleted = await store.delete(name)
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"MCP server not found: {name}")
-    await _reload_mcp_registry(ctx.registry, db)
+    await _reload_mcp_registry(ctx.registry, store)
 
 
 @router.post("/mcp/{name}/ui-tools/refresh", response_model=UiToolsRefreshResponse)
 async def refresh_mcp_ui_tools(
     name: str,
-    db: AsyncSession = Depends(get_uow),
-    repo: McpServerRepository = Depends(get_mcp_repo),
+    mcp_store: McpServerStoreBase = Depends(get_mcp_store),
+    ui_tool_store: UiToolStoreBase = Depends(get_ui_tool_store),
 ) -> UiToolsRefreshResponse:
-    row = await repo.get_by_name(db, name)
+    row = await mcp_store.get_by_name(name)
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"MCP server not found: {name}")
-    return await discover_and_persist_ui_tools(db, row, use_cache_on_error=False)
+    return await discover_and_persist_ui_tools(ui_tool_store, row, use_cache_on_error=False)

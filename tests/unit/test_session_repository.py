@@ -8,19 +8,26 @@ from pydantic_ai.messages import ModelMessage, ModelRequest, UserPromptPart
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from deep_agent.db.models import Agent, Base, ChatMessage, ChatSession
-from deep_agent.db.repositories.session import SessionRepository
+from deep_agent.db.dialect import DbDialect
+from deep_agent.db.stores.message import create_message_store
+from deep_agent.db.stores.session_query import SessionQueryStoreBase, create_session_query_store
 from deep_agent.db.session_key import scoped_session_key
 
 _message_adapter: TypeAdapter[ModelMessage] = TypeAdapter(ModelMessage)
 
 
-class SessionRepositoryTests(unittest.IsolatedAsyncioTestCase):
+class SessionQueryStoreTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         self.engine = create_async_engine("sqlite+aiosqlite:///:memory:")
         async with self.engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
         self.session_factory = async_sessionmaker(self.engine, expire_on_commit=False)
-        self.repo = SessionRepository()
+        message_store = create_message_store(DbDialect.POSTGRES, self.session_factory)
+        self.store: SessionQueryStoreBase = create_session_query_store(
+            DbDialect.POSTGRES,
+            self.session_factory,
+            message_store,
+        )
 
         async with self.session_factory() as db:
             agent = Agent(
@@ -58,8 +65,7 @@ class SessionRepositoryTests(unittest.IsolatedAsyncioTestCase):
         await self.engine.dispose()
 
     async def test_list_summaries_joins_agent_and_counts_messages(self) -> None:
-        async with self.session_factory() as db:
-            rows, total = await self.repo.list_summaries(db)
+        rows, total = await self.store.list_summaries()
 
         self.assertEqual(total, 1)
         self.assertEqual(len(rows), 1)
@@ -69,17 +75,14 @@ class SessionRepositoryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(row.user_prompt, "hello sql")
 
     async def test_list_summaries_filters_by_agent_and_user(self) -> None:
-        async with self.session_factory() as db:
-            rows, total = await self.repo.list_summaries(
-                db,
-                agent_id="00000000-0000-4000-8000-000000000001",
-                user_id="user-1",
-            )
+        rows, total = await self.store.list_summaries(
+            agent_id="00000000-0000-4000-8000-000000000001",
+            user_id="user-1",
+        )
         self.assertEqual(total, 1)
         self.assertEqual(len(rows), 1)
 
-        async with self.session_factory() as db:
-            rows, total = await self.repo.list_summaries(db, user_id="missing")
+        rows, total = await self.store.list_summaries(user_id="missing")
         self.assertEqual(total, 0)
         self.assertEqual(rows, [])
 
@@ -98,8 +101,7 @@ class SessionRepositoryTests(unittest.IsolatedAsyncioTestCase):
                 )
             await db.commit()
 
-        async with self.session_factory() as db:
-            rows, total = await self.repo.list_summaries(db, limit=2, offset=1)
+        rows, total = await self.store.list_summaries(limit=2, offset=1)
 
         self.assertEqual(total, 4)
         self.assertEqual(len(rows), 2)

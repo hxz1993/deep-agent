@@ -10,9 +10,8 @@ from deep_agent.agent.deferred import build_deferred_tool_results
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.headers import extract_forward_headers
 from deep_agent.api.v1.deps import build_runner, build_runner_for_agent
-from deep_agent.core.context import AppContext, AppContextDep
+from deep_agent.core.context import AppContextDep
 from deep_agent.core.exceptions import AgentNotFoundError
-from deep_agent.db.unit_of_work import unit_of_work
 from deep_agent.db.ids import normalize_agent_id
 from deep_agent.db.session_key import scoped_session_key
 from deep_agent.schemas.chat import ChatRequest, ChatResponse, StreamChatRequest
@@ -53,23 +52,11 @@ def _deferred_results(body: StreamChatRequest):
     return build_deferred_tool_results(body.deferred_tool_results)
 
 
-async def _optional_db_runner(
-    ctx: AppContextDep,
-    *,
-    model: str | None = None,
-    capabilities: list[str] | None = None,
-):
-    if ctx.db_session_factory is None:
-        return await build_runner(ctx, None, model=model, capabilities=capabilities)
-    async with unit_of_work(ctx) as db:
-        return await build_runner(ctx, db, model=model, capabilities=capabilities)
-
-
 @router.post("/chat", response_model=ChatResponse)
 async def chat(request: Request, ctx: AppContextDep, body: ChatRequest) -> ChatResponse:
     _validate_chat_body(body)
     session_id = body.session_id or uuid.uuid4().hex
-    runner = await _optional_db_runner(ctx, model=body.model, capabilities=body.capabilities)
+    runner = await build_runner(ctx, model=body.model, capabilities=body.capabilities)
     deps = _agent_deps(request, ctx, session_id=session_id, user=body.user)
     result = await runner.run(session_id, body.message or "", deps)
     return ChatResponse(
@@ -94,15 +81,14 @@ async def chat_stream(request: Request, ctx: AppContextDep, body: StreamChatRequ
         except ValueError as exc:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
         try:
-            async with unit_of_work(ctx) as db:
-                runner = await build_runner_for_agent(ctx, db, agent_id)
+            runner = await build_runner_for_agent(ctx, agent_id)
         except AgentNotFoundError as exc:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
         run_session_key = scoped_session_key(agent_id, session_id)
         deps = _agent_deps(request, ctx, session_id=run_session_key, user=body.user, agent_id=agent_id)
         session_data = {"session_id": session_id, "agent_id": agent_id}
     else:
-        runner = await _optional_db_runner(ctx, model=body.model, capabilities=body.capabilities)
+        runner = await build_runner(ctx, model=body.model, capabilities=body.capabilities)
         run_session_key = session_id
         deps = _agent_deps(request, ctx, session_id=session_id, user=body.user)
         session_data = {"session_id": session_id}

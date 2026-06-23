@@ -10,13 +10,8 @@ from deep_agent.db.session_list import MAX_LIST_LIMIT, SessionListFilters, Sessi
 from deep_agent.db.session_key import parse_scoped_session_key
 
 
-class InMemorySessionStore:
-    """Process-local session store.
-
-    Good enough for development and single-process deployments. Each session has
-    its own lock so concurrent requests on the same session serialize their
-    history reads/writes. Replace with a durable store for production.
-    """
+class InMemoryConversationStore:
+    """Process-local session store for dev and single-process deployments."""
 
     def __init__(self) -> None:
         self._histories: dict[str, list[ModelMessage]] = defaultdict(list)

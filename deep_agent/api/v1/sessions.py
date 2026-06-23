@@ -3,15 +3,12 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi import APIRouter, HTTPException, Query, status
 
 from deep_agent.core.context import AppContextDep
-from deep_agent.db.deps import get_db
-from deep_agent.db.deps import get_agent_repo
 from deep_agent.db.session_list import MAX_LIST_LIMIT, SessionListFilters, SessionSummaryRow
 from deep_agent.db.session_key import parse_scoped_session_key, resolve_session_key
-from deep_agent.db.stores.base import SessionStore
+from deep_agent.db.stores.conversation import SessionStore
 from deep_agent.agent.history import (
     SessionHistoryResponse,
     first_user_prompt,
@@ -21,13 +18,12 @@ from deep_agent.agent.history import (
 from deep_agent.schemas.chat import SessionInfo, SessionListResponse
 
 router = APIRouter()
-_agent_repo = get_agent_repo()
 
 
-async def _resolve_agent_name(db: AsyncSession, agent_id: str | None) -> str | None:
-    if agent_id is None:
+async def _resolve_agent_name(ctx: AppContextDep, agent_id: str | None) -> str | None:
+    if agent_id is None or ctx.stores.agent is None:
         return None
-    row = await _agent_repo.get_by_id(db, agent_id)
+    row = await ctx.stores.agent.get_by_id(agent_id)
     return row.name if row else None
 
 
@@ -45,10 +41,9 @@ def _summary_to_session_info(row: SessionSummaryRow) -> SessionInfo:
 
 
 async def _build_session_info(
+    ctx: AppContextDep,
     store: SessionStore,
     session_key: str,
-    *,
-    db: AsyncSession | None = None,
 ) -> SessionInfo:
     history = await store.get_history(session_key)
     parsed_agent_id, session_id = parse_scoped_session_key(session_key)
@@ -60,7 +55,7 @@ async def _build_session_info(
         if stored_agent_id:
             agent_id = stored_agent_id
 
-    agent_name = await _resolve_agent_name(db, agent_id) if db is not None else None
+    agent_name = await _resolve_agent_name(ctx, agent_id)
 
     created_at: datetime | None = None
     updated_at: datetime | None = None
@@ -123,7 +118,6 @@ async def get_session(
     ctx: AppContextDep,
     session_id: str,
     agent_id: str | None = None,
-    db: AsyncSession = Depends(get_db),
 ) -> SessionInfo:
     session_key = await resolve_session_key(ctx.store, session_id, agent_id=agent_id)
     if session_key is None:
@@ -131,7 +125,7 @@ async def get_session(
     history = await ctx.store.get_history(session_key)
     if not history and session_key not in await ctx.store.list_sessions():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
-    return await _build_session_info(ctx.store, session_key, db=db)
+    return await _build_session_info(ctx, ctx.store, session_key)
 
 
 @router.get("/sessions/{session_id}/history", response_model=SessionHistoryResponse)

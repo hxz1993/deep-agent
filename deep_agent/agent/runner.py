@@ -12,7 +12,7 @@ from deep_agent.agent.deps import AgentDeps
 from deep_agent.capabilities.ui.registry import enrich_deferred, enrich_tool_event
 from loguru import logger
 
-from deep_agent.db.stores.base import SessionStore
+from deep_agent.db.stores.conversation import SessionStore
 from deep_agent.agent.history import filter_ephemeral_agent_messages
 
 _STREAM_OUTPUT_TYPE: list[Any] = [str, DeferredToolRequests]

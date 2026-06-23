@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from deep_agent.agent.limits import validate_agent_max_requests
-from deep_agent.db.deps import get_agent_repo, get_db, get_uow
+from deep_agent.core.context import AppContextDep
+from deep_agent.db.deps import get_agent_store
 from deep_agent.db.ids import normalize_agent_id
-from deep_agent.db.repositories.agent import AgentRepository
+from deep_agent.db.stores.agent import AgentStoreBase
 from deep_agent.options import OPTION
 from deep_agent.schemas.agent import AgentCreate, AgentResponse, AgentUpdate
 
@@ -29,21 +29,19 @@ def _check_max_requests(max_requests: int | None) -> None:
 
 @router.get("/agents", response_model=list[AgentResponse])
 async def list_agents(
-    db: AsyncSession = Depends(get_db),
-    repo: AgentRepository = Depends(get_agent_repo),
+    store: AgentStoreBase = Depends(get_agent_store),
 ) -> list[AgentResponse]:
-    rows = await repo.list_all(db)
+    rows = await store.list_all()
     return [AgentResponse.from_row(row) for row in rows]
 
 
 @router.get("/agents/{agent_id}", response_model=AgentResponse)
 async def get_agent(
     agent_id: str,
-    db: AsyncSession = Depends(get_db),
-    repo: AgentRepository = Depends(get_agent_repo),
+    store: AgentStoreBase = Depends(get_agent_store),
 ) -> AgentResponse:
     normalized_id = _parse_agent_id(agent_id)
-    row = await repo.get_by_id(db, normalized_id)
+    row = await store.get_by_id(normalized_id)
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Agent not found: {agent_id}")
     return AgentResponse.from_row(row)
@@ -52,14 +50,16 @@ async def get_agent(
 @router.post("/agents", response_model=AgentResponse, status_code=status.HTTP_201_CREATED)
 async def create_agent(
     body: AgentCreate,
-    db: AsyncSession = Depends(get_uow),
-    repo: AgentRepository = Depends(get_agent_repo),
+    store: AgentStoreBase = Depends(get_agent_store),
 ) -> AgentResponse:
     _check_max_requests(body.max_requests)
-    existing = await repo.get_by_name(db, body.name)
+    existing = await store.get_by_name(body.name)
     if existing is not None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"Agent already exists: {body.name}")
-    row = await repo.create(db, body)
+    try:
+        row = await store.create_unique(body)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     return AgentResponse.from_row(row)
 
 
@@ -67,30 +67,26 @@ async def create_agent(
 async def update_agent(
     agent_id: str,
     body: AgentUpdate,
-    db: AsyncSession = Depends(get_uow),
-    repo: AgentRepository = Depends(get_agent_repo),
+    store: AgentStoreBase = Depends(get_agent_store),
 ) -> AgentResponse:
     if "max_requests" in body.model_fields_set:
         _check_max_requests(body.max_requests)
     normalized_id = _parse_agent_id(agent_id)
-    row = await repo.get_by_id(db, normalized_id)
+    try:
+        row = await store.update_unique(normalized_id, body)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Agent not found: {agent_id}")
-    if body.name is not None and body.name != row.name:
-        conflict = await repo.get_by_name(db, body.name)
-        if conflict is not None:
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"Agent already exists: {body.name}")
-    row = await repo.update(db, row, body)
     return AgentResponse.from_row(row)
 
 
 @router.delete("/agents/{agent_id}", status_code=status.HTTP_200_OK)
 async def delete_agent(
     agent_id: str,
-    db: AsyncSession = Depends(get_uow),
-    repo: AgentRepository = Depends(get_agent_repo),
+    store: AgentStoreBase = Depends(get_agent_store),
 ) -> None:
     normalized_id = _parse_agent_id(agent_id)
-    deleted = await repo.delete(db, normalized_id)
+    deleted = await store.delete(normalized_id)
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Agent not found: {agent_id}")

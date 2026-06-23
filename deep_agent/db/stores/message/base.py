@@ -6,12 +6,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from deep_agent.db.models import ChatMessage
 from deep_agent.db.serialization import deserialize_message, serialize_message
+from deep_agent.db.stores._session import SessionBoundMixin
 
 EARLY_MESSAGE_LIMIT = 5
 
 
-class MessageRepository:
-    async def get_history(self, db: AsyncSession, session_key: str) -> list[ModelMessage]:
+class MessageStoreBase(SessionBoundMixin):
+    async def get_history(self, session_key: str) -> list[ModelMessage]:
+        async with self._read() as db:
+            return await self._get_history(db, session_key)
+
+    async def _get_history(self, db: AsyncSession, session_key: str) -> list[ModelMessage]:
         result = await db.execute(
             select(ChatMessage.payload)
             .where(ChatMessage.session_key == session_key)
@@ -19,7 +24,7 @@ class MessageRepository:
         )
         return [deserialize_message(payload) for payload in result.scalars().all()]
 
-    async def get_max_sequence(self, db: AsyncSession, session_key: str) -> int:
+    async def _get_max_sequence(self, db: AsyncSession, session_key: str) -> int:
         result = await db.execute(
             select(func.coalesce(func.max(ChatMessage.sequence), -1)).where(
                 ChatMessage.session_key == session_key
@@ -27,7 +32,7 @@ class MessageRepository:
         )
         return result.scalar_one()
 
-    async def append_messages(
+    async def _append_messages(
         self,
         db: AsyncSession,
         session_key: str,
@@ -44,7 +49,7 @@ class MessageRepository:
                 )
             )
 
-    async def fetch_early_payloads(
+    async def _fetch_early_payloads(
         self,
         db: AsyncSession,
         session_keys: list[str],

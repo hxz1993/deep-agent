@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from pydantic_ai.usage import UsageLimits
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from deep_agent.agent.factory import build_agent
 from deep_agent.agent.limits import resolve_agent_max_requests
@@ -10,15 +9,12 @@ from deep_agent.agent.spec import AgentSpec, default_spec
 from deep_agent.capabilities.ui.registry import prepare_ui_toolset_for_spec
 from deep_agent.core.context import AppContext
 from deep_agent.core.exceptions import AgentNotFoundError
-from deep_agent.db.deps import get_agent_repo
+from deep_agent.db.deps import require_db
 from deep_agent.options import OPTION
-
-_agent_repo = get_agent_repo()
 
 
 async def build_runner(
     ctx: AppContext,
-    db: AsyncSession | None = None,
     *,
     model: str | None = None,
     capabilities: list[str] | None = None,
@@ -29,28 +25,26 @@ async def build_runner(
         spec.model = model
     if capabilities is not None:
         spec.capabilities = capabilities
-    return await _build_runner_from_spec(spec, ctx, db)
+    return await _build_runner_from_spec(spec, ctx)
 
 
-async def build_runner_for_agent(ctx: AppContext, db: AsyncSession, agent_id: str) -> AgentRunner:
+async def build_runner_for_agent(ctx: AppContext, agent_id: str) -> AgentRunner:
     """Assemble a per-request AgentRunner from a database agent configuration."""
-    row = await _agent_repo.get_by_id(db, agent_id)
+    require_db(ctx.stores)
+    assert ctx.stores.agent is not None
+    row = await ctx.stores.agent.get_by_id(agent_id)
     if row is None:
         raise AgentNotFoundError(agent_id)
 
     spec = AgentSpec.from_row(row)
-    return await _build_runner_from_spec(spec, ctx, db)
+    return await _build_runner_from_spec(spec, ctx)
 
 
-async def _build_runner_from_spec(
-    spec: AgentSpec,
-    ctx: AppContext,
-    db: AsyncSession | None,
-) -> AgentRunner:
+async def _build_runner_from_spec(spec: AgentSpec, ctx: AppContext) -> AgentRunner:
     dynamic_ui_toolset = None
     ui_tool_hints: dict[str, dict] = {}
-    if db is not None:
-        dynamic_ui_toolset, ui_tool_hints = await prepare_ui_toolset_for_spec(db, spec)
+    if ctx.stores.ui_tool is not None:
+        dynamic_ui_toolset, ui_tool_hints = await prepare_ui_toolset_for_spec(ctx.stores, spec)
 
     agent = build_agent(
         spec,

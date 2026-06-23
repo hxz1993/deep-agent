@@ -5,12 +5,12 @@ import unittest
 from pydantic_ai.messages import ModelRequest, UserPromptPart
 
 from deep_agent.db.session_key import resolve_session_key, scoped_session_key
-from deep_agent.db.stores.in_memory import InMemorySessionStore
+from deep_agent.db.stores import InMemoryConversationStore
 
 
 class SessionResolveTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
-        self.store = InMemorySessionStore()
+        self.store = InMemoryConversationStore()
 
     async def _seed(self, key: str) -> None:
         await self.store.append(key, [ModelRequest(parts=[UserPromptPart(content="hi")])])

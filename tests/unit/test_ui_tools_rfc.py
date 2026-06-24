@@ -72,7 +72,7 @@ class UiToolStoreTests(unittest.IsolatedAsyncioTestCase):
         async with self.engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
         self.session_factory = async_sessionmaker(self.engine, expire_on_commit=False)
-        self.store: UiToolStoreBase = create_ui_tool_store(DbDialect.POSTGRES, self.session_factory)
+        self.store: UiToolStoreBase = create_ui_tool_store(DbDialect.MYSQL, self.session_factory)
         self.stores = DataStores(
             chat_session=None,
             message=None,
@@ -126,6 +126,43 @@ class UiToolStoreTests(unittest.IsolatedAsyncioTestCase):
         rows = await self.store.list_all(enabled=True, mcp_server_names={"acme"})
         names = {row.name for row in rows}
         self.assertEqual(names, {"acme__tool", "demo__manual"})
+
+    async def test_list_all_filters_by_agent_id(self) -> None:
+        agent_a = "00000000-0000-4000-8000-000000000001"
+        agent_b = "00000000-0000-4000-8000-000000000002"
+        now = datetime.now(timezone.utc)
+        async with self.session_factory() as db:
+            db.add_all(
+                [
+                    UiToolDefinition(
+                        name="global__tool",
+                        description="all agents",
+                        parameters_json_schema={"type": "object"},
+                        source="manual",
+                        enabled=True,
+                        created_at=now,
+                        updated_at=now,
+                    ),
+                    UiToolDefinition(
+                        name="scoped__tool",
+                        description="agent a only",
+                        parameters_json_schema={"type": "object"},
+                        source="manual",
+                        enabled=True,
+                        agent_ids=[agent_a],
+                        created_at=now,
+                        updated_at=now,
+                    ),
+                ]
+            )
+            await db.commit()
+
+        rows = await self.store.list_all(enabled=True, agent_id=agent_a)
+        names = {row.name for row in rows}
+        self.assertEqual(names, {"global__tool", "scoped__tool"})
+
+        rows_b = await self.store.list_all(enabled=True, agent_id=agent_b)
+        self.assertEqual({row.name for row in rows_b}, {"global__tool"})
 
     async def test_create_manual_and_list(self) -> None:
         row = await self.store.create_manual(

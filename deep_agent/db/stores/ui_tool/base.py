@@ -1,16 +1,16 @@
 from __future__ import annotations
 
-from sqlalchemy import cast, delete, func, or_, select
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from deep_agent.capabilities.ui.constants import SOURCE_PRIORITY
 from deep_agent.db.models import UiToolDefinition
 from deep_agent.db.stores._session import SessionBoundMixin
 from deep_agent.schemas.ui_tools import UiToolCreate, UiToolUpdate
 
 
 class UiToolStoreBase(SessionBoundMixin):
+    _sql_agent_id_filter = False
+
     async def get_by_name(self, name: str) -> UiToolDefinition | None:
         async with self._read() as db:
             return await self._get_by_name(db, name)
@@ -105,30 +105,18 @@ class UiToolStoreBase(SessionBoundMixin):
         return {row.name: row for row in result.scalars().all()}
 
     @staticmethod
-    def _apply_agent_id_filter(stmt, agent_id: str, dialect_name: str):
-        unrestricted = or_(
+    def _agent_id_unrestricted():
+        return or_(
             UiToolDefinition.agent_ids.is_(None),
             UiToolDefinition.agent_ids == "[]",
         )
-        if dialect_name == "postgresql":
-            return stmt.where(
-                or_(
-                    unrestricted,
-                    cast(UiToolDefinition.agent_ids, JSONB).contains([agent_id]),
-                )
-            )
-        if dialect_name == "mysql":
-            return stmt.where(
-                or_(
-                    unrestricted,
-                    func.json_contains(
-                        UiToolDefinition.agent_ids,
-                        func.json_quote(agent_id),
-                        "$",
-                    ),
-                )
-            )
+
+    def _apply_agent_id_filter(self, stmt, agent_id: str):
         return stmt
+
+    @staticmethod
+    def _post_filter_agent_id(rows: list[UiToolDefinition], agent_id: str) -> list[UiToolDefinition]:
+        return [row for row in rows if not row.agent_ids or agent_id in row.agent_ids]
 
     async def _list_all(
         self,
@@ -158,11 +146,11 @@ class UiToolStoreBase(SessionBoundMixin):
         if enabled is not None:
             stmt = stmt.where(UiToolDefinition.enabled == enabled)
         if agent_id is not None:
-            stmt = self._apply_agent_id_filter(stmt, agent_id, db.bind.dialect.name)
+            stmt = self._apply_agent_id_filter(stmt, agent_id)
         result = await db.execute(stmt)
         rows = list(result.scalars().all())
-        if agent_id is not None and db.bind.dialect.name not in {"postgresql", "mysql"}:
-            rows = [row for row in rows if not row.agent_ids or agent_id in row.agent_ids]
+        if agent_id is not None and not self._sql_agent_id_filter:
+            rows = self._post_filter_agent_id(rows, agent_id)
         return rows
 
     async def _sync_mcp_tools(
@@ -171,6 +159,8 @@ class UiToolStoreBase(SessionBoundMixin):
         mcp_server_name: str,
         tools: list[UiToolDefinition],
     ) -> tuple[int, int]:
+        from deep_agent.capabilities.ui.constants import SOURCE_PRIORITY
+
         existing = await self._list_all(db, source="mcp", mcp_server_name=mcp_server_name)
         new_names = {row.name for row in tools}
 

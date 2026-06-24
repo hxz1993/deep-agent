@@ -88,5 +88,9 @@ async def resolve_mcp_toolsets(
     return [c.toolset for c in caps]
 
 
-async def describe_mcp_capabilities(stores: DataStores) -> list[dict[str, Any]]:
-    return [_describe_capability(cap) for cap in await load_mcp_capabilities(stores)]
+async def describe_mcp_capabilities(
+    stores: DataStores,
+    *,
+    mcp_rows: list[McpServer] | None = None,
+) -> list[dict[str, Any]]:
+    return [_describe_capability(cap) for cap in await load_mcp_capabilities(stores, rows=mcp_rows)]

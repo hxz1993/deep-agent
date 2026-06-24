@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import itertools
+
 from fastapi import APIRouter
 
 from deep_agent.capabilities.mcp.resolver import describe_mcp_capabilities
@@ -13,10 +15,14 @@ router = APIRouter()
 @router.get("/tools", response_model=list[CapabilityDescription])
 async def list_capabilities(ctx: AppContextDep) -> list[CapabilityDescription]:
     """List all registered capabilities (native / skill / mcp / ui) and their tools."""
-    caps = [CapabilityDescription(**cap) for cap in ctx.registry.describe()]
-    caps.extend(CapabilityDescription(**cap) for cap in await describe_mcp_capabilities(ctx.stores))
+    mcp_rows = await ctx.stores.mcp.list_all()
+    mcp_caps = await describe_mcp_capabilities(ctx.stores, mcp_rows=mcp_rows)
+    caps = [
+        CapabilityDescription(**cap) for cap in
+        itertools.chain(mcp_caps, ctx.registry.describe())
+    ]
 
-    effective = await load_effective_ui_tools(ctx.stores, spec=_anonymous_spec())
+    effective = await load_effective_ui_tools(ctx.stores, spec=_anonymous_spec(), mcp_rows=mcp_rows)
     dynamic_tools = [record for record in effective.definitions if record.source in {"mcp", "manual"}]
 
     if dynamic_tools:

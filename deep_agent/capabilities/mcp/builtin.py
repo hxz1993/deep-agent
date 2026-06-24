@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import functools
 from pathlib import Path
 
 from loguru import logger
@@ -8,6 +9,7 @@ from deep_agent.capabilities.mcp.builtin_config import SERVER_FILENAME
 from deep_agent.capabilities.registry import Capability
 
 
+@functools.lru_cache(maxsize=None)
 def load_builtin_mcp_capabilities(mcps_dir: str) -> list[Capability]:
     """Discover builtin MCP servers shipped under ``mcps/``.
 

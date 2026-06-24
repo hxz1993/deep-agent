@@ -32,7 +32,6 @@ def capabilities_from_rows(rows: list[McpServer]) -> list[Capability]:
             continue
         try:
             caps.append(capability_from_row(row))
-            logger.info("Loaded MCP server {!r} from database", row.name)
         except Exception:
             logger.exception("Failed to load MCP server {!r} from database", row.name)
     return caps

@@ -13,6 +13,13 @@ from typing import Sequence, Union
 
 import sqlalchemy as sa
 from alembic import op
+from deep_agent.db.migration_dialect import (
+    create_foreign_key,
+    drop_foreign_key,
+    find_foreign_key_name,
+    is_postgresql,
+    is_sqlite,
+)
 from sqlalchemy.dialects import postgresql
 
 revision: str = "008"
@@ -32,46 +39,16 @@ def _is_postgresql() -> bool:
 
 
 def _uuid_column_type():
-    if _is_postgresql():
+    bind = op.get_bind()
+    if is_postgresql(bind):
         return postgresql.UUID(as_uuid=True)
-    # Migration 003 stores MySQL agent ids as CHAR(32) hex (no hyphens).
+    if is_sqlite(bind):
+        return sa.String(AGENT_ID_LENGTH)
     return sa.CHAR(32)
 
 
 def _find_agent_fk_name(bind) -> str | None:
-    if _is_postgresql():
-        result = bind.execute(
-            sa.text(
-                """
-                SELECT tc.constraint_name
-                FROM information_schema.table_constraints tc
-                JOIN information_schema.key_column_usage kcu
-                  ON tc.constraint_name = kcu.constraint_name
-                 AND tc.table_schema = kcu.table_schema
-                WHERE tc.constraint_type = 'FOREIGN KEY'
-                  AND tc.table_schema = current_schema()
-                  AND tc.table_name = 'chat_sessions'
-                  AND kcu.column_name = 'agent_id'
-                LIMIT 1
-                """
-            )
-        )
-    else:
-        result = bind.execute(
-            sa.text(
-                """
-                SELECT CONSTRAINT_NAME
-                FROM information_schema.KEY_COLUMN_USAGE
-                WHERE TABLE_SCHEMA = DATABASE()
-                  AND TABLE_NAME = 'chat_sessions'
-                  AND COLUMN_NAME = 'agent_id'
-                  AND REFERENCED_TABLE_NAME = 'agents'
-                LIMIT 1
-                """
-            )
-        )
-    row = result.fetchone()
-    return row[0] if row else None
+    return find_foreign_key_name(bind, "chat_sessions", "agent_id", referenced_table="agents")
 
 
 def _string_agent_id_type():
@@ -190,14 +167,15 @@ def _drop_agent_fk() -> None:
     fk_name = _find_agent_fk_name(bind)
     if fk_name is None:
         return
-    op.drop_constraint(fk_name, "chat_sessions", type_="foreignkey")
+    drop_foreign_key(bind, "chat_sessions", fk_name)
 
 
 def _create_agent_fk() -> None:
     bind = op.get_bind()
     if _find_agent_fk_name(bind) is not None:
         return
-    op.create_foreign_key(
+    create_foreign_key(
+        bind,
         "chat_sessions_agent_id_fkey",
         "chat_sessions",
         "agents",
@@ -208,10 +186,11 @@ def _create_agent_fk() -> None:
 
 
 def _alter_uuid_columns_to_string() -> None:
+    bind = op.get_bind()
     uuid_type = _uuid_column_type()
     string_type = _string_agent_id_type()
 
-    if _is_postgresql():
+    if is_postgresql(bind):
         op.alter_column(
             "agents",
             "id",
@@ -228,6 +207,23 @@ def _alter_uuid_columns_to_string() -> None:
             existing_nullable=True,
             postgresql_using="agent_id::text",
         )
+        return
+
+    if is_sqlite(bind):
+        with op.batch_alter_table("agents") as batch_op:
+            batch_op.alter_column(
+                "id",
+                existing_type=uuid_type,
+                type_=string_type,
+                existing_nullable=False,
+            )
+        with op.batch_alter_table("chat_sessions") as batch_op:
+            batch_op.alter_column(
+                "agent_id",
+                existing_type=uuid_type,
+                type_=string_type,
+                existing_nullable=True,
+            )
         return
 
     op.alter_column(
@@ -289,10 +285,9 @@ def upgrade() -> None:
     bind = op.get_bind()
     _drop_agent_fk()
 
-    if _is_postgresql():
+    if is_postgresql(bind):
         _alter_uuid_columns_to_string()
     else:
-        # Widen CHAR(32) -> VARCHAR(36) before writing hyphenated UUID strings.
         _alter_uuid_columns_to_string()
         id_map = _normalize_agent_ids(bind)
         _normalize_chat_session_references(bind, id_map)

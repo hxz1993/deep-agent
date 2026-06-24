@@ -47,15 +47,17 @@ with patch("deep_agent.agent.factory._resolve_model", return_value=test_model):
 from fastapi import FastAPI
 from deep_agent.api.v1 import api_router
 from deep_agent.core.context import AppContext, init_context, reset_context
-from deep_agent.db.stores import InMemorySessionStore
+from tests.helpers.sqlite_stores import make_sqlite_stores_sync
 
 app = FastAPI()
 app.include_router(api_router)
+stores, engine, session_factory = make_sqlite_stores_sync()
 init_context(
     AppContext.for_testing(
-        settings=settings,
         registry=registry,          # 测试专用 registry
-        store=InMemorySessionStore(),
+        stores=stores,
+        db_engine=engine,
+        db_session_factory=session_factory,
     )
 )
 # 测试结束后调用 reset_context()

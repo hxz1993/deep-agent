@@ -12,6 +12,15 @@ from typing import Sequence, Union
 
 import sqlalchemy as sa
 from alembic import op
+from deep_agent.db.migration_dialect import (
+    agent_prefix_from_key_expr,
+    constraint_exists,
+    has_column,
+    is_postgresql,
+    is_sqlite,
+    key_type,
+    session_id_from_key_expr,
+)
 
 revision: str = "011"
 down_revision: Union[str, Sequence[str], None] = "010"
@@ -30,80 +39,16 @@ _KNOWN_FOREIGN_KEYS: tuple[tuple[str, str], ...] = (
 )
 
 
-def _dialect_name() -> str:
-    return op.get_bind().dialect.name
-
-
-def _is_postgresql() -> bool:
-    return _dialect_name() == "postgresql"
-
-
-def _key_type():
-    if _is_postgresql():
-        return sa.Text()
-    return sa.String(191)
+def _bind():
+    return op.get_bind()
 
 
 def _has_column(table_name: str, column_name: str) -> bool:
-    bind = op.get_bind()
-    if _is_postgresql():
-        result = bind.execute(
-            sa.text(
-                """
-                SELECT COUNT(*)
-                FROM information_schema.columns
-                WHERE table_schema = current_schema()
-                  AND table_name = :table_name
-                  AND column_name = :column_name
-                """
-            ),
-            {"table_name": table_name, "column_name": column_name},
-        )
-    else:
-        result = bind.execute(
-            sa.text(
-                """
-                SELECT COUNT(*)
-                FROM information_schema.columns
-                WHERE table_schema = DATABASE()
-                  AND table_name = :table_name
-                  AND column_name = :column_name
-                """
-            ),
-            {"table_name": table_name, "column_name": column_name},
-        )
-    return bool(result.scalar_one())
+    return has_column(_bind(), table_name, column_name)
 
 
 def _constraint_exists(table_name: str, constraint_name: str) -> bool:
-    bind = op.get_bind()
-    if _is_postgresql():
-        result = bind.execute(
-            sa.text(
-                """
-                SELECT COUNT(*)
-                FROM information_schema.table_constraints
-                WHERE table_schema = current_schema()
-                  AND table_name = :table_name
-                  AND constraint_name = :constraint_name
-                """
-            ),
-            {"table_name": table_name, "constraint_name": constraint_name},
-        )
-    else:
-        result = bind.execute(
-            sa.text(
-                """
-                SELECT COUNT(*)
-                FROM information_schema.table_constraints
-                WHERE table_schema = DATABASE()
-                  AND table_name = :table_name
-                  AND constraint_name = :constraint_name
-                """
-            ),
-            {"table_name": table_name, "constraint_name": constraint_name},
-        )
-    return bool(result.scalar_one())
+    return constraint_exists(_bind(), table_name, constraint_name)
 
 
 def _drop_constraint_if_exists(
@@ -112,8 +57,14 @@ def _drop_constraint_if_exists(
     *,
     constraint_type: str,
 ) -> None:
-    if _constraint_exists(table_name, constraint_name):
-        op.drop_constraint(constraint_name, table_name, type_=constraint_type)
+    if not _constraint_exists(table_name, constraint_name):
+        return
+    bind = _bind()
+    if is_sqlite(bind):
+        with op.batch_alter_table(table_name) as batch_op:
+            batch_op.drop_constraint(constraint_name, type_=constraint_type)
+        return
+    op.drop_constraint(constraint_name, table_name, type_=constraint_type)
 
 
 def _drop_known_foreign_keys() -> None:
@@ -121,32 +72,8 @@ def _drop_known_foreign_keys() -> None:
         _drop_constraint_if_exists(table_name, constraint_name, constraint_type="foreignkey")
 
 
-def _session_id_expr(column: str = "session_key") -> str:
-    if _is_postgresql():
-        return (
-            f"CASE WHEN position(':' in {column}) > 0 "
-            f"THEN split_part({column}, ':', 2) ELSE {column} END"
-        )
-    return (
-        f"CASE WHEN INSTR({column}, ':') > 0 "
-        f"THEN SUBSTRING_INDEX({column}, ':', -1) ELSE {column} END"
-    )
-
-
-def _agent_prefix_expr(column: str = "session_key") -> str:
-    if _is_postgresql():
-        return (
-            f"CASE WHEN position(':' in {column}) > 0 "
-            f"THEN split_part({column}, ':', 1) ELSE '' END"
-        )
-    return (
-        f"CASE WHEN INSTR({column}, ':') > 0 "
-        f"THEN SUBSTRING_INDEX({column}, ':', 1) ELSE '' END"
-    )
-
-
-def _coalesced_agent_id_expr() -> str:
-    prefix = _agent_prefix_expr()
+def _coalesced_agent_id_expr(bind) -> str:
+    prefix = agent_prefix_from_key_expr(bind=bind)
     return f"COALESCE(NULLIF(TRIM(agent_id), ''), NULLIF({prefix}, ''), '')"
 
 
@@ -169,39 +96,8 @@ def _assert_no_duplicate_sessions(bind) -> None:
         )
 
 
-def upgrade() -> None:
-    dialect = _dialect_name()
-    if dialect not in {"postgresql", "mysql"}:
-        return
-
-    if not _has_column("chat_sessions", "session_key"):
-        _drop_known_foreign_keys()
-        return
-
-    bind = op.get_bind()
-    session_id_expr = _session_id_expr()
-    agent_id_expr = _coalesced_agent_id_expr()
-
-    if not _has_column("chat_sessions", "session_id"):
-        op.add_column("chat_sessions", sa.Column("session_id", _key_type(), nullable=True))
-    if not _has_column("chat_messages", "agent_id"):
-        op.add_column(
-            "chat_messages",
-            sa.Column("agent_id", sa.String(AGENT_ID_LENGTH), nullable=True),
-        )
-    if not _has_column("chat_messages", "session_id"):
-        op.add_column("chat_messages", sa.Column("session_id", _key_type(), nullable=True))
-
-    bind.execute(
-        sa.text(
-            f"""
-            UPDATE chat_sessions
-            SET session_id = {session_id_expr},
-                agent_id = {agent_id_expr}
-            """
-        )
-    )
-    if _is_postgresql():
+def _sync_chat_messages_from_sessions(bind) -> None:
+    if is_postgresql(bind):
         bind.execute(
             sa.text(
                 """
@@ -213,70 +109,151 @@ def upgrade() -> None:
                 """
             )
         )
-    else:
+        return
+    if is_sqlite(bind):
         bind.execute(
             sa.text(
                 """
-                UPDATE chat_messages AS cm
-                INNER JOIN chat_sessions AS cs ON cm.session_key = cs.session_key
-                SET cm.agent_id = cs.agent_id,
-                    cm.session_id = cs.session_id
+                UPDATE chat_messages
+                SET agent_id = (
+                    SELECT cs.agent_id
+                    FROM chat_sessions cs
+                    WHERE cs.session_key = chat_messages.session_key
+                ),
+                session_id = (
+                    SELECT cs.session_id
+                    FROM chat_sessions cs
+                    WHERE cs.session_key = chat_messages.session_key
+                )
                 """
             )
         )
+        return
+    bind.execute(
+        sa.text(
+            """
+            UPDATE chat_messages AS cm
+            INNER JOIN chat_sessions AS cs ON cm.session_key = cs.session_key
+            SET cm.agent_id = cs.agent_id,
+                cm.session_id = cs.session_id
+            """
+        )
+    )
 
-    _assert_no_duplicate_sessions(bind)
 
-    _drop_known_foreign_keys()
-
-    _drop_constraint_if_exists("chat_messages", "uq_chat_messages_session_sequence", constraint_type="unique")
+def _drop_chat_sessions_primary_key() -> None:
+    bind = _bind()
+    if is_sqlite(bind):
+        return
     _drop_constraint_if_exists("chat_sessions", "chat_sessions_pkey", constraint_type="primary")
 
-    op.alter_column("chat_sessions", "session_id", nullable=False)
-    op.alter_column("chat_sessions", "agent_id", nullable=False, server_default=NO_AGENT_SCOPE)
-    op.alter_column("chat_messages", "agent_id", nullable=False, server_default=NO_AGENT_SCOPE)
-    op.alter_column("chat_messages", "session_id", nullable=False)
 
-    if _has_column("chat_sessions", "session_key"):
-        op.drop_column("chat_sessions", "session_key")
-    if _has_column("chat_messages", "session_key"):
-        op.drop_column("chat_messages", "session_key")
-
+def _create_chat_sessions_primary_key() -> None:
+    bind = _bind()
     if not _constraint_exists("chat_sessions", "chat_sessions_pkey"):
+        if is_sqlite(bind):
+            with op.batch_alter_table("chat_sessions") as batch_op:
+                batch_op.create_primary_key("chat_sessions_pkey", ["agent_id", "session_id"])
+            return
         op.create_primary_key(
             "chat_sessions_pkey",
             "chat_sessions",
             ["agent_id", "session_id"],
         )
+
+
+def upgrade() -> None:
+    if not _has_column("chat_sessions", "session_key"):
+        _drop_known_foreign_keys()
+        return
+
+    bind = _bind()
+    session_id_expr = session_id_from_key_expr(bind=bind)
+    agent_id_expr = _coalesced_agent_id_expr(bind)
+
+    if not _has_column("chat_sessions", "session_id"):
+        op.add_column("chat_sessions", sa.Column("session_id", key_type(bind), nullable=True))
+    if not _has_column("chat_messages", "agent_id"):
+        op.add_column(
+            "chat_messages",
+            sa.Column("agent_id", sa.String(AGENT_ID_LENGTH), nullable=True),
+        )
+    if not _has_column("chat_messages", "session_id"):
+        op.add_column("chat_messages", sa.Column("session_id", key_type(bind), nullable=True))
+
+    bind.execute(
+        sa.text(
+            f"""
+            UPDATE chat_sessions
+            SET session_id = {session_id_expr},
+                agent_id = {agent_id_expr}
+            """
+        )
+    )
+    _sync_chat_messages_from_sessions(bind)
+    _assert_no_duplicate_sessions(bind)
+
+    _drop_known_foreign_keys()
+    _drop_constraint_if_exists("chat_messages", "uq_chat_messages_session_sequence", constraint_type="unique")
+    _drop_chat_sessions_primary_key()
+
+    drop_session_key_cs = _has_column("chat_sessions", "session_key")
+    drop_session_key_cm = _has_column("chat_messages", "session_key")
+
+    if is_sqlite(bind):
+        with op.batch_alter_table("chat_sessions") as batch_op:
+            batch_op.alter_column("session_id", nullable=False)
+            batch_op.alter_column("agent_id", nullable=False, server_default=NO_AGENT_SCOPE)
+            if drop_session_key_cs:
+                batch_op.drop_column("session_key")
+        with op.batch_alter_table("chat_messages") as batch_op:
+            batch_op.alter_column("agent_id", nullable=False, server_default=NO_AGENT_SCOPE)
+            batch_op.alter_column("session_id", nullable=False)
+            if drop_session_key_cm:
+                batch_op.drop_column("session_key")
+    else:
+        op.alter_column("chat_sessions", "session_id", nullable=False)
+        op.alter_column("chat_sessions", "agent_id", nullable=False, server_default=NO_AGENT_SCOPE)
+        op.alter_column("chat_messages", "agent_id", nullable=False, server_default=NO_AGENT_SCOPE)
+        op.alter_column("chat_messages", "session_id", nullable=False)
+        if drop_session_key_cs:
+            op.drop_column("chat_sessions", "session_key")
+        if drop_session_key_cm:
+            op.drop_column("chat_messages", "session_key")
+
+    _create_chat_sessions_primary_key()
     _drop_constraint_if_exists("chat_messages", "uq_chat_messages_session_sequence", constraint_type="unique")
     if not _constraint_exists("chat_messages", "uq_chat_messages_session_sequence"):
-        op.create_unique_constraint(
-            "uq_chat_messages_session_sequence",
-            "chat_messages",
-            ["agent_id", "session_id", "sequence"],
-        )
+        if is_sqlite(bind):
+            with op.batch_alter_table("chat_messages") as batch_op:
+                batch_op.create_unique_constraint(
+                    "uq_chat_messages_session_sequence",
+                    ["agent_id", "session_id", "sequence"],
+                )
+        else:
+            op.create_unique_constraint(
+                "uq_chat_messages_session_sequence",
+                "chat_messages",
+                ["agent_id", "session_id", "sequence"],
+            )
 
 
 def downgrade() -> None:
-    dialect = _dialect_name()
-    if dialect not in {"postgresql", "mysql"}:
-        return
-
-    bind = op.get_bind()
+    bind = _bind()
 
     if not _has_column("chat_sessions", "session_id"):
         return
 
     _drop_known_foreign_keys()
     _drop_constraint_if_exists("chat_messages", "uq_chat_messages_session_sequence", constraint_type="unique")
-    _drop_constraint_if_exists("chat_sessions", "chat_sessions_pkey", constraint_type="primary")
+    _drop_chat_sessions_primary_key()
 
     if not _has_column("chat_sessions", "session_key"):
-        op.add_column("chat_sessions", sa.Column("session_key", _key_type(), nullable=True))
+        op.add_column("chat_sessions", sa.Column("session_key", key_type(bind), nullable=True))
     if not _has_column("chat_messages", "session_key"):
-        op.add_column("chat_messages", sa.Column("session_key", _key_type(), nullable=True))
+        op.add_column("chat_messages", sa.Column("session_key", key_type(bind), nullable=True))
 
-    if _is_postgresql():
+    if is_postgresql(bind) or is_sqlite(bind):
         bind.execute(
             sa.text(
                 """
@@ -291,10 +268,10 @@ def downgrade() -> None:
         bind.execute(
             sa.text(
                 """
-                UPDATE chat_messages AS cm
+                UPDATE chat_messages
                 SET session_key = CASE
-                    WHEN cm.agent_id = '' THEN cm.session_id
-                    ELSE cm.agent_id || ':' || cm.session_id
+                    WHEN agent_id = '' THEN session_id
+                    ELSE agent_id || ':' || session_id
                 END
                 """
             )

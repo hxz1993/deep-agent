@@ -16,17 +16,13 @@ _ALEMBIC_INI = REPO_ROOT / "alembic.ini"
 
 def _build_alembic_config() -> Config:
     cfg = Config(str(_ALEMBIC_INI))
-    database_url = get_database_url()
-    if database_url:
-        cfg.set_main_option("sqlalchemy.url", escape_for_ini(database_url))
+    cfg.set_main_option("sqlalchemy.url", escape_for_ini(get_database_url()))
     return cfg
 
 
 def upgrade_database_sync(revision: str = "head") -> None:
     """Run Alembic upgrade in the current thread."""
     configure_logging()
-    if not get_database_url():
-        return
     logger.info("Running database migrations (upgrade {})", revision)
     try:
         command.upgrade(_build_alembic_config(), revision)
@@ -38,6 +34,4 @@ def upgrade_database_sync(revision: str = "head") -> None:
 
 async def upgrade_database(revision: str = "head") -> None:
     """Run Alembic upgrade without blocking the event loop."""
-    if not get_database_url():
-        return
     await asyncio.to_thread(upgrade_database_sync, revision)

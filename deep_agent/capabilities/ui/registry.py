@@ -145,9 +145,6 @@ async def ensure_mcp_ui_tools_discovered(
     mcp_rows: list[McpServer] | None = None,
 ) -> None:
     """Discover MCP UI tools on demand for non-builtin MCP enabled on this agent."""
-    if stores.mcp is None or stores.ui_tool is None:
-        return
-
     if mcp_rows is None:
         mcp_rows = await stores.mcp.list_all()
 
@@ -165,11 +162,8 @@ async def load_effective_ui_tools(
     mcp_enabled_names: set[str] | None = None,
     mcp_rows: list[McpServer] | None = None,
 ) -> EffectiveUiTools:
-    assert stores.ui_tool is not None
-
     if mcp_enabled_names is None:
         if mcp_rows is None:
-            assert stores.mcp is not None
             mcp_rows = await stores.mcp.list_all()
         caps = capabilities_from_rows(mcp_rows)
         mcp_enabled_names = effective_mcp_names_for_ui(spec, caps, mcp_rows)

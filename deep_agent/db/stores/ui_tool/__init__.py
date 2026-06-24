@@ -6,6 +6,7 @@ from deep_agent.db.dialect import DbDialect
 from deep_agent.db.stores.ui_tool.base import UiToolStoreBase
 from deep_agent.db.stores.ui_tool.mysql import MySQLUiToolStore
 from deep_agent.db.stores.ui_tool.postgres import PostgresUiToolStore
+from deep_agent.db.stores.ui_tool.sqlite import SqliteUiToolStore
 
 __all__ = ["UiToolStoreBase", "create_ui_tool_store"]
 
@@ -17,5 +18,7 @@ def create_ui_tool_store(
     match dialect:
         case DbDialect.MYSQL:
             return MySQLUiToolStore(session_factory)
+        case DbDialect.SQLITE:
+            return SqliteUiToolStore(session_factory)
         case _:
             return PostgresUiToolStore(session_factory)

@@ -18,9 +18,7 @@ from deep_agent.capabilities.ui.registry import (
 from deep_agent.capabilities.ui.types import UIToolRecord
 from deep_agent.db.models import Base, McpServer, UiToolDefinition
 from deep_agent.db.dialect import DbDialect
-from deep_agent.db.conversation import InMemoryConversationCoordinator
-from deep_agent.db.stores.bundle import DataStores
-from deep_agent.db.stores.mcp import create_mcp_store
+from deep_agent.db.stores.bundle import create_data_stores
 from deep_agent.db.stores.ui_tool import UiToolStoreBase, create_ui_tool_store
 from deep_agent.schemas.ui_tools import UiToolCreate
 
@@ -72,15 +70,8 @@ class UiToolStoreTests(unittest.IsolatedAsyncioTestCase):
         async with self.engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
         self.session_factory = async_sessionmaker(self.engine, expire_on_commit=False)
-        self.store: UiToolStoreBase = create_ui_tool_store(DbDialect.MYSQL, self.session_factory)
-        self.stores = DataStores(
-            chat_session=None,
-            message=None,
-            coordinator=InMemoryConversationCoordinator(),
-            agent=None,
-            mcp=create_mcp_store(DbDialect.POSTGRES, self.session_factory),
-            ui_tool=self.store,
-        )
+        self.stores = create_data_stores(DbDialect.SQLITE, self.session_factory)
+        self.store: UiToolStoreBase = self.stores.ui_tool
 
     async def asyncTearDown(self) -> None:
         await self.engine.dispose()

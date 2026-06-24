@@ -12,7 +12,8 @@ from pydantic_ai.usage import RunUsage
 
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.capabilities.mcp.session_pool import McpSessionPool, get_mcp_session_pool
-from deep_agent.core.context import AppContext, init_context, reset_context
+from deep_agent.core.context import reset_context
+from tests.helpers.testing_context import init_test_context
 from deep_agent.capabilities.mcp.toolset_builder import build_mcp_toolset
 
 PID_ECHO_SERVER = Path(__file__).resolve().parent / "fixtures" / "pid_echo_server.py"
@@ -41,7 +42,7 @@ def _build_pid_toolset(record_path: Path):
 
 class McpSessionScopingIntegrationTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
-        init_context(AppContext.for_testing(mcp_session_pool=McpSessionPool()))
+        init_test_context(mcp_session_pool=McpSessionPool())
 
     def tearDown(self) -> None:
         reset_context()

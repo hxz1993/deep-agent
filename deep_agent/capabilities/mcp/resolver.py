@@ -48,8 +48,6 @@ def effective_mcp_rows_for_discovery(spec: AgentSpec, rows: list[McpServer]) -> 
 
 
 async def load_mcp_rows(stores: DataStores) -> list[McpServer]:
-    if stores.mcp is None:
-        return []
     return await stores.mcp.list_all()
 
 
@@ -59,9 +57,6 @@ async def load_mcp_capabilities(
     rows: list[McpServer] | None = None,
 ) -> list[Capability]:
     """Load enabled MCP servers from the database with builtin fallback."""
-    if stores.mcp is None:
-        return []
-
     if rows is None:
         rows = await stores.mcp.list_all()
     caps = capabilities_from_rows(rows)

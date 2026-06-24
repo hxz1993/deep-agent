@@ -10,7 +10,6 @@ from deep_agent.capabilities.mcp.resolver import load_mcp_rows, resolve_mcp_tool
 from deep_agent.capabilities.ui.registry import prepare_ui_toolset_for_spec
 from deep_agent.core.context import AppContext
 from deep_agent.core.exceptions import AgentNotFoundError
-from deep_agent.db.deps import require_db
 from deep_agent.options import OPTION
 
 
@@ -31,8 +30,6 @@ async def build_runner(
 
 async def build_runner_for_agent(ctx: AppContext, agent_id: str) -> AgentRunner:
     """Assemble a per-request AgentRunner from a database agent configuration."""
-    require_db(ctx.stores)
-    assert ctx.stores.agent is not None
     row = await ctx.stores.agent.get_by_id(agent_id)
     if row is None:
         raise AgentNotFoundError(agent_id)
@@ -42,16 +39,13 @@ async def build_runner_for_agent(ctx: AppContext, agent_id: str) -> AgentRunner:
 
 
 async def _build_runner_from_spec(spec: AgentSpec, ctx: AppContext) -> AgentRunner:
-    mcp_rows = await load_mcp_rows(ctx.stores) if ctx.stores.mcp is not None else None
+    mcp_rows = await load_mcp_rows(ctx.stores)
 
-    dynamic_ui_toolset = None
-    ui_tool_hints: dict[str, dict] = {}
-    if ctx.stores.ui_tool is not None:
-        dynamic_ui_toolset, ui_tool_hints = await prepare_ui_toolset_for_spec(
-            ctx.stores,
-            spec,
-            mcp_rows=mcp_rows,
-        )
+    dynamic_ui_toolset, ui_tool_hints = await prepare_ui_toolset_for_spec(
+        ctx.stores,
+        spec,
+        mcp_rows=mcp_rows,
+    )
 
     mcp_toolsets = await resolve_mcp_toolsets(ctx.stores, spec, mcp_rows=mcp_rows)
 

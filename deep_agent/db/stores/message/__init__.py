@@ -6,6 +6,7 @@ from deep_agent.db.dialect import DbDialect
 from deep_agent.db.stores.message.base import EARLY_MESSAGE_LIMIT, MessageStoreBase
 from deep_agent.db.stores.message.mysql import MySQLMessageStore
 from deep_agent.db.stores.message.postgres import PostgresMessageStore
+from deep_agent.db.stores.message.sqlite import SqliteMessageStore
 
 __all__ = ["EARLY_MESSAGE_LIMIT", "MessageStoreBase", "create_message_store"]
 
@@ -17,5 +18,7 @@ def create_message_store(
     match dialect:
         case DbDialect.MYSQL:
             return MySQLMessageStore(session_factory)
+        case DbDialect.SQLITE:
+            return SqliteMessageStore(session_factory)
         case _:
             return PostgresMessageStore(session_factory)

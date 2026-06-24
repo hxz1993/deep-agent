@@ -17,6 +17,7 @@ pyyaml>=6
 sqlalchemy[asyncio]>=2.0
 asyncpg
 asyncmy
+aiosqlite
 alembic
 
 # deepfos platform

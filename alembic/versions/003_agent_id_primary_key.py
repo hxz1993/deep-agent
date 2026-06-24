@@ -12,6 +12,13 @@ from typing import Sequence, Union
 
 import sqlalchemy as sa
 from alembic import op
+from deep_agent.db.migration_dialect import (
+    has_column,
+    is_postgresql,
+    is_sqlite,
+    random_agent_id_expr,
+    rebuild_agents_primary_key_sqlite,
+)
 from sqlalchemy.dialects import postgresql
 
 revision: str = "003"
@@ -21,7 +28,7 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def _is_postgresql() -> bool:
-    return op.get_bind().dialect.name == "postgresql"
+    return is_postgresql(op.get_bind())
 
 
 def _uuid_type():
@@ -37,20 +44,7 @@ def _uuid_server_default():
 
 
 def _has_column(table_name: str, column_name: str) -> bool:
-    bind = op.get_bind()
-    result = bind.execute(
-        sa.text(
-            """
-            SELECT COUNT(*)
-            FROM information_schema.columns
-            WHERE table_schema = DATABASE()
-              AND table_name = :table_name
-              AND column_name = :column_name
-            """
-        ),
-        {"table_name": table_name, "column_name": column_name},
-    )
-    return int(result.scalar_one()) > 0
+    return has_column(op.get_bind(), table_name, column_name)
 
 
 def _upgrade_postgresql() -> None:
@@ -243,16 +237,226 @@ def _upgrade_mysql() -> None:
     )
 
 
+def _drop_fk_sqlite(table_name: str, constraint_name: str) -> None:
+    with op.batch_alter_table(table_name) as batch_op:
+        batch_op.drop_constraint(constraint_name, type_="foreignkey")
+
+
+def _upgrade_sqlite() -> None:
+    bind = op.get_bind()
+    id_expr = random_agent_id_expr(bind)
+    id_type = sa.String(36)
+
+    if not _has_column("agents", "id"):
+        op.add_column("agents", sa.Column("id", id_type, nullable=True))
+    op.execute(sa.text(f"UPDATE agents SET id = {id_expr} WHERE id IS NULL"))
+
+    if not _has_column("chat_sessions", "agent_id"):
+        op.add_column("chat_sessions", sa.Column("agent_id", id_type, nullable=True))
+    op.execute(
+        sa.text(
+            """
+            UPDATE chat_sessions
+            SET agent_id = (
+                SELECT a.id FROM agents a WHERE a.name = chat_sessions.agent_name
+            )
+            """
+        )
+    )
+
+    if not _has_column("chat_sessions", "new_session_key"):
+        op.add_column("chat_sessions", sa.Column("new_session_key", sa.Text(), nullable=True))
+    op.execute(
+        sa.text(
+            """
+            UPDATE chat_sessions
+            SET new_session_key = (
+                SELECT a.id || ':' || SUBSTR(chat_sessions.session_key, INSTR(chat_sessions.session_key, ':') + 1)
+                FROM agents a
+                WHERE a.name = chat_sessions.agent_name
+                  AND INSTR(chat_sessions.session_key, ':') > 0
+                  AND SUBSTR(chat_sessions.session_key, 1, INSTR(chat_sessions.session_key, ':') - 1) = a.name
+            )
+            """
+        )
+    )
+    op.execute(
+        sa.text(
+            """
+            UPDATE chat_sessions
+            SET new_session_key = session_key
+            WHERE new_session_key IS NULL
+            """
+        )
+    )
+
+    _drop_fk_sqlite("chat_messages", "chat_messages_session_key_fkey")
+    op.execute(
+        sa.text(
+            """
+            UPDATE chat_messages
+            SET session_key = (
+                SELECT cs.new_session_key
+                FROM chat_sessions cs
+                WHERE cs.session_key = chat_messages.session_key
+                  AND cs.new_session_key IS NOT NULL
+                  AND cs.new_session_key <> cs.session_key
+            )
+            WHERE session_key IN (
+                SELECT cs.session_key
+                FROM chat_sessions cs
+                WHERE cs.new_session_key IS NOT NULL
+                  AND cs.new_session_key <> cs.session_key
+            )
+            """
+        )
+    )
+    op.execute(
+        sa.text(
+            """
+            UPDATE chat_sessions
+            SET session_key = new_session_key
+            WHERE new_session_key IS NOT NULL
+            """
+        )
+    )
+    with op.batch_alter_table("chat_sessions") as batch_op:
+        batch_op.drop_column("new_session_key")
+    with op.batch_alter_table("chat_messages") as batch_op:
+        batch_op.create_foreign_key(
+            "chat_messages_session_key_fkey",
+            "chat_sessions",
+            ["session_key"],
+            ["session_key"],
+            ondelete="CASCADE",
+        )
+
+    _drop_fk_sqlite("chat_sessions", "chat_sessions_agent_name_fkey")
+    with op.batch_alter_table("chat_sessions") as batch_op:
+        batch_op.drop_column("agent_name")
+
+    rebuild_agents_primary_key_sqlite(bind, pk_column="id")
+
+    with op.batch_alter_table("chat_sessions") as batch_op:
+        batch_op.create_foreign_key(
+            "chat_sessions_agent_id_fkey",
+            "agents",
+            ["agent_id"],
+            ["id"],
+            ondelete="SET NULL",
+        )
+
+
+def _downgrade_sqlite() -> None:
+    op.add_column("chat_sessions", sa.Column("agent_name", sa.Text(), nullable=True))
+    op.execute(
+        sa.text(
+            """
+            UPDATE chat_sessions
+            SET agent_name = (
+                SELECT a.name FROM agents a WHERE a.id = chat_sessions.agent_id
+            )
+            """
+        )
+    )
+
+    op.add_column("chat_sessions", sa.Column("new_session_key", sa.Text(), nullable=True))
+    op.execute(
+        sa.text(
+            """
+            UPDATE chat_sessions
+            SET new_session_key = (
+                SELECT a.name || ':' || SUBSTR(chat_sessions.session_key, INSTR(chat_sessions.session_key, ':') + 1)
+                FROM agents a
+                WHERE a.id = chat_sessions.agent_id
+                  AND INSTR(chat_sessions.session_key, ':') > 0
+                  AND SUBSTR(chat_sessions.session_key, 1, INSTR(chat_sessions.session_key, ':') - 1) = a.id
+            )
+            """
+        )
+    )
+    op.execute(
+        sa.text(
+            """
+            UPDATE chat_sessions
+            SET new_session_key = session_key
+            WHERE new_session_key IS NULL
+            """
+        )
+    )
+
+    op.drop_constraint("chat_messages_session_key_fkey", "chat_messages", type_="foreignkey")
+    op.execute(
+        sa.text(
+            """
+            UPDATE chat_messages
+            SET session_key = (
+                SELECT cs.new_session_key
+                FROM chat_sessions cs
+                WHERE cs.session_key = chat_messages.session_key
+                  AND cs.new_session_key IS NOT NULL
+                  AND cs.new_session_key <> cs.session_key
+            )
+            WHERE session_key IN (
+                SELECT cs.session_key
+                FROM chat_sessions cs
+                WHERE cs.new_session_key IS NOT NULL
+                  AND cs.new_session_key <> cs.session_key
+            )
+            """
+        )
+    )
+    op.execute(
+        sa.text(
+            """
+            UPDATE chat_sessions
+            SET session_key = new_session_key
+            WHERE new_session_key IS NOT NULL
+            """
+        )
+    )
+    op.drop_column("chat_sessions", "new_session_key")
+    op.create_foreign_key(
+        "chat_messages_session_key_fkey",
+        "chat_messages",
+        "chat_sessions",
+        ["session_key"],
+        ["session_key"],
+        ondelete="CASCADE",
+    )
+
+    op.drop_constraint("chat_sessions_agent_id_fkey", "chat_sessions", type_="foreignkey")
+    op.drop_column("chat_sessions", "agent_id")
+
+    rebuild_agents_primary_key_sqlite(bind, pk_column="name")
+
+    op.create_foreign_key(
+        "chat_sessions_agent_name_fkey",
+        "chat_sessions",
+        "agents",
+        ["agent_name"],
+        ["name"],
+        ondelete="SET NULL",
+    )
+    op.drop_column("agents", "id")
+
+
 def upgrade() -> None:
-    if _is_postgresql():
+    bind = op.get_bind()
+    if is_postgresql(bind):
         _upgrade_postgresql()
+    elif is_sqlite(bind):
+        _upgrade_sqlite()
     else:
         _upgrade_mysql()
 
 
 def downgrade() -> None:
-    if _is_postgresql():
+    bind = op.get_bind()
+    if is_postgresql(bind):
         _downgrade_postgresql()
+    elif is_sqlite(bind):
+        _downgrade_sqlite()
     else:
         _downgrade_mysql()
 

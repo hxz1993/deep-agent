@@ -11,10 +11,9 @@ from deep_agent.capabilities.mcp.session_pool import McpSessionPool
 from deep_agent.capabilities.registry import CapabilityRegistry
 from loguru import logger
 
-from deep_agent.db.dialect import DbDialect
 from deep_agent.db.factory import bootstrap_database, close_db
-from deep_agent.db.stores.bundle import DataStores, create_data_stores
-from deep_agent.db.conversation import InMemoryConversationCoordinator, SessionStore
+from deep_agent.db.stores.bundle import DataStores
+from deep_agent.db.conversation import SessionStore
 from deep_agent.options import OPTION
 
 _context: AppContext | None = None
@@ -25,8 +24,8 @@ class AppContext:
     registry: CapabilityRegistry
     stores: DataStores
     mcp_session_pool: McpSessionPool
-    db_engine: AsyncEngine | None = None
-    db_session_factory: async_sessionmaker[AsyncSession] | None = None
+    db_engine: AsyncEngine
+    db_session_factory: async_sessionmaker[AsyncSession]
 
     @property
     def store(self) -> SessionStore:
@@ -42,32 +41,19 @@ class AppContext:
             logger.exception("Startup aborted: database migration failed")
             raise
 
-        if bundle is not None:
-            stores = bundle.stores
-            db_engine = bundle.engine
-            db_session_factory = bundle.session_factory
-            logger.info(
-                "{} started (model={}, database={})",
-                OPTION.agent.app_name,
-                OPTION.agent.model,
-                bundle.dialect.value,
-            )
-        else:
-            stores = create_data_stores(DbDialect.MEMORY, None)
-            logger.info(
-                "{} started (model={}, database=in-memory)",
-                OPTION.agent.app_name,
-                OPTION.agent.model,
-            )
-            db_engine = None
-            db_session_factory = None
+        logger.info(
+            "{} started (model={}, database={})",
+            OPTION.agent.app_name,
+            OPTION.agent.model,
+            bundle.dialect.value,
+        )
 
         ctx = cls(
-            registry=build_registry(stores=stores),
-            stores=stores,
+            registry=build_registry(stores=bundle.stores),
+            stores=bundle.stores,
             mcp_session_pool=mcp_session_pool,
-            db_engine=db_engine,
-            db_session_factory=db_session_factory,
+            db_engine=bundle.engine,
+            db_session_factory=bundle.session_factory,
         )
         init_context(ctx)
         return ctx
@@ -77,7 +63,6 @@ class AppContext:
         cls,
         *,
         registry: CapabilityRegistry | None = None,
-        store: SessionStore | None = None,
         stores: DataStores | None = None,
         mcp_session_pool: McpSessionPool | None = None,
         mcp_acquire_retries: int | None = None,
@@ -92,15 +77,9 @@ class AppContext:
             )
             mcp_session_pool = McpSessionPool(mcp_acquire_retries=retries)
         if stores is None:
-            coordinator = store or InMemoryConversationCoordinator()
-            stores = DataStores(
-                chat_session=None,
-                message=None,
-                coordinator=coordinator,
-                agent=None,
-                mcp=None,
-                ui_tool=None,
-            )
+            raise ValueError("for_testing requires explicit stores (use tests.helpers.sqlite_stores)")
+        if db_engine is None or db_session_factory is None:
+            raise ValueError("for_testing requires db_engine and db_session_factory when using SQL stores")
         return cls(
             registry=registry or CapabilityRegistry(),
             stores=stores,
@@ -111,8 +90,7 @@ class AppContext:
 
     async def aclose(self) -> None:
         await self.mcp_session_pool.close_all()
-        if self.db_engine is not None:
-            await close_db(self.db_engine)
+        await close_db(self.db_engine)
 
 
 def init_context(ctx: AppContext) -> None:

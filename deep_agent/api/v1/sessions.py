@@ -22,7 +22,7 @@ router = APIRouter()
 
 
 async def _resolve_agent_name(ctx: AppContextDep, agent_id: str | None) -> str | None:
-    if agent_id is None or ctx.stores.agent is None:
+    if agent_id is None:
         return None
     row = await ctx.stores.agent.get_by_id(agent_id)
     return row.name if row else None

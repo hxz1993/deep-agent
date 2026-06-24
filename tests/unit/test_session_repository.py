@@ -21,9 +21,9 @@ class ChatSessionStoreTests(unittest.IsolatedAsyncioTestCase):
         async with self.engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
         self.session_factory = async_sessionmaker(self.engine, expire_on_commit=False)
-        message_store = create_message_store(DbDialect.POSTGRES, self.session_factory)
+        message_store = create_message_store(DbDialect.SQLITE, self.session_factory)
         self.store: ChatSessionStoreBase = create_chat_session_store(
-            DbDialect.POSTGRES,
+            DbDialect.SQLITE,
             self.session_factory,
             message_store=message_store,
         )

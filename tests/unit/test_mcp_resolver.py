@@ -16,17 +16,6 @@ from deep_agent.db.stores.bundle import DataStores
 
 
 class McpResolverTests(unittest.IsolatedAsyncioTestCase):
-    async def test_load_mcp_capabilities_returns_empty_when_no_store(self) -> None:
-        stores = DataStores(
-            chat_session=None,
-            message=None,
-            coordinator=MagicMock(),
-            agent=None,
-            mcp=None,
-            ui_tool=None,
-        )
-        self.assertEqual(await load_mcp_capabilities(stores), [])
-
     async def test_load_mcp_capabilities_reads_from_store(self) -> None:
         row = MagicMock()
         row.name = "echo"
@@ -34,12 +23,12 @@ class McpResolverTests(unittest.IsolatedAsyncioTestCase):
         mcp_store = MagicMock()
         mcp_store.list_all = AsyncMock(return_value=[row])
         stores = DataStores(
-            chat_session=None,
-            message=None,
+            chat_session=MagicMock(),
+            message=MagicMock(),
             coordinator=MagicMock(),
-            agent=None,
+            agent=MagicMock(),
             mcp=mcp_store,
-            ui_tool=None,
+            ui_tool=MagicMock(),
         )
         with unittest.mock.patch(
             "deep_agent.capabilities.mcp.resolver.capabilities_from_rows",

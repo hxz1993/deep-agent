@@ -163,6 +163,12 @@ class Agent(Category):
         val_type=int,
         bind_env="MCP_ACQUIRE_RETRIES",
     )
+    sqlite_path = Option(
+        _resolve_repo_path("data/deep-agent.db"),
+        val_type=str,
+        bind_env="SQLITE_PATH",
+        convertor=_resolve_repo_path,
+    )
 
     def __get__(self, instance, owner) -> "Agent":
         """defined to help ide"""

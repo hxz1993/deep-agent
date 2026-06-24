@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, DateTime, Integer, PrimaryKeyConstraint, String, Text, UniqueConstraint, func
+from sqlalchemy import Boolean, DateTime, Integer, PrimaryKeyConstraint, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from deep_agent.db.ids import AGENT_ID_LENGTH, new_agent_id
@@ -109,7 +109,7 @@ class ChatMessage(Base):
         UniqueConstraint("agent_id", "session_id", "sequence", name="uq_chat_messages_session_sequence"),
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     agent_id: Mapped[str] = mapped_column(String(AGENT_ID_LENGTH), nullable=False, default=NO_AGENT_SCOPE)
     session_id: Mapped[str] = mapped_column(KeyText, nullable=False)
     sequence: Mapped[int] = mapped_column(Integer, nullable=False)

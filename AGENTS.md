@@ -13,7 +13,7 @@
 | **是什么** | 通用 AI Agent 全栈：FastAPI 后端 + Pydantic AI 运行时 + 静态前端 |
 | **启动** | 仓库根：`.venv\Scripts\python.exe -m uvicorn deep_agent.main:app --reload` |
 | **测试** | `.venv\Scripts\python.exe -m unittest discover -s tests -p "test_*.py" -v` |
-| **配置** | 仓库根 `.env`（`DEEP_AGENT_*` / `DEEP_AGENT_DBMS_*`） |
+| **配置** | 仓库根 `.env`（`DEEP_AGENT_*` / `DEEP_AGENT_DBMS_*` / `DEEP_AGENT_SQLITE_PATH`） |
 
 ---
 
@@ -54,7 +54,7 @@ deep-agent/
 
 ```
 HTTP → deep_agent/api/v1 → AgentRunner → pydantic_ai.Agent → Capabilities
-                                      └→ SessionStore (postgres/mysql/memory)
+                                      └→ SessionStore (postgres/mysql/sqlite)
 ```
 
 能力来源：`native` | `skill:*` | `cursor-skill:*` | `mcp:*`（DB + `mcps/` 兜底）

@@ -12,7 +12,7 @@ from pydantic_ai.usage import UsageLimits
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.history import is_user_only_request
 from deep_agent.agent.runner import AgentRunner
-from deep_agent.db.stores import InMemorySessionStore
+from tests.helpers.sqlite_stores import make_sqlite_stores
 
 
 class IsUserOnlyRequestTests(unittest.TestCase):
@@ -26,10 +26,16 @@ class IsUserOnlyRequestTests(unittest.TestCase):
 
 
 class AgentRunnerHistoryTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self) -> None:
+        stores, self._engine, _ = await make_sqlite_stores()
+        self.store = stores.coordinator
+
+    async def asyncTearDown(self) -> None:
+        await self._engine.dispose()
+
     async def test_run_stream_persists_user_on_error(self) -> None:
         agent = Agent(TestModel(), deps_type=AgentDeps)
-        store = InMemorySessionStore()
-        runner = AgentRunner(agent, store, UsageLimits(request_limit=10))
+        runner = AgentRunner(agent, self.store, UsageLimits(request_limit=10))
         deps = AgentDeps(session_id="sess-err")
 
         @asynccontextmanager
@@ -44,39 +50,37 @@ class AgentRunnerHistoryTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(events_out[-1]["type"], "error")
         self.assertTrue(events_out[-1].get("history_persisted"))
-        history = await store.get_history("sess-err")
+        history = await self.store.get_history("sess-err")
         self.assertEqual(len(history), 1)
         self.assertIsInstance(history[0], ModelRequest)
         self.assertTrue(is_user_only_request(history[0]))
 
     async def test_run_stream_no_duplicate_user_on_success(self) -> None:
         agent = Agent(TestModel(), deps_type=AgentDeps)
-        store = InMemorySessionStore()
-        runner = AgentRunner(agent, store, UsageLimits(request_limit=10))
+        runner = AgentRunner(agent, self.store, UsageLimits(request_limit=10))
         deps = AgentDeps(session_id="sess-ok")
 
         async for _ in runner.run_stream("sess-ok", "hello", deps):
             pass
 
-        history = await store.get_history("sess-ok")
+        history = await self.store.get_history("sess-ok")
         user_messages = [m for m in history if is_user_only_request(m)]
         self.assertEqual(len(user_messages), 1)
 
     async def test_branch_from_truncates_and_restarts(self) -> None:
         agent = Agent(TestModel(), deps_type=AgentDeps)
-        store = InMemorySessionStore()
-        runner = AgentRunner(agent, store, UsageLimits(request_limit=10))
+        runner = AgentRunner(agent, self.store, UsageLimits(request_limit=10))
         deps = AgentDeps(session_id="sess-branch")
 
         async for _ in runner.run_stream("sess-branch", "first", deps):
             pass
         async for _ in runner.run_stream("sess-branch", "second", deps):
             pass
-        self.assertEqual(len(await store.get_history("sess-branch")), 4)
+        self.assertEqual(len(await self.store.get_history("sess-branch")), 4)
 
         async for _ in runner.run_stream("sess-branch", "branched", deps, branch_from=0):
             pass
-        history = await store.get_history("sess-branch")
+        history = await self.store.get_history("sess-branch")
         user_texts = [
             p.content
             for m in history
@@ -88,24 +92,29 @@ class AgentRunnerHistoryTests(unittest.IsolatedAsyncioTestCase):
 
 
 class TruncateHistoryTests(unittest.IsolatedAsyncioTestCase):
-    async def test_in_memory_truncate(self) -> None:
-        store = InMemorySessionStore()
+    async def asyncSetUp(self) -> None:
+        stores, self._engine, _ = await make_sqlite_stores()
+        self.store = stores.coordinator
+
+    async def asyncTearDown(self) -> None:
+        await self._engine.dispose()
+
+    async def test_truncate(self) -> None:
         messages: list[ModelMessage] = [
             ModelRequest(parts=[UserPromptPart(content="a")]),
             ModelResponse(parts=[TextPart(content="b")]),
             ModelRequest(parts=[UserPromptPart(content="c")]),
         ]
-        await store.append("s1", messages)
-        await store.truncate_history("s1", keep_count=2)
-        history = await store.get_history("s1")
+        await self.store.append("s1", messages)
+        await self.store.truncate_history("s1", keep_count=2)
+        history = await self.store.get_history("s1")
         self.assertEqual(len(history), 2)
         self.assertIsInstance(history[-1], ModelResponse)
 
-    async def test_in_memory_truncate_empty(self) -> None:
-        store = InMemorySessionStore()
-        await store.append("s2", [ModelRequest(parts=[UserPromptPart(content="x")])])
-        await store.truncate_history("s2", keep_count=0)
-        self.assertEqual(await store.get_history("s2"), [])
+    async def test_truncate_empty(self) -> None:
+        await self.store.append("s2", [ModelRequest(parts=[UserPromptPart(content="x")])])
+        await self.store.truncate_history("s2", keep_count=0)
+        self.assertEqual(await self.store.get_history("s2"), [])
 
 
 if __name__ == "__main__":

@@ -16,9 +16,6 @@ async def list_capabilities(ctx: AppContextDep) -> list[CapabilityDescription]:
     caps = [CapabilityDescription(**cap) for cap in ctx.registry.describe()]
     caps.extend(CapabilityDescription(**cap) for cap in await describe_mcp_capabilities(ctx.stores))
 
-    if ctx.stores.ui_tool is None:
-        return caps
-
     effective = await load_effective_ui_tools(ctx.stores, spec=_anonymous_spec())
     dynamic_tools = [record for record in effective.definitions if record.source in {"mcp", "manual"}]
 

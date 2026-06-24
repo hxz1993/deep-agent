@@ -13,6 +13,7 @@ from typing import Sequence, Union
 
 import sqlalchemy as sa
 from alembic import op
+from deep_agent.db.migration_dialect import is_postgresql, is_sqlite
 from sqlalchemy.dialects import postgresql
 
 revision: str = "004"
@@ -25,7 +26,7 @@ SERVER_FILE = ROOT / "mcps" / "deepcube" / "server.py"
 
 
 def _is_postgresql() -> bool:
-    return op.get_bind().dialect.name == "postgresql"
+    return is_postgresql(op.get_bind())
 
 
 def _json_type():
@@ -42,24 +43,27 @@ def _upsert_mcp_server(
     description: str,
     enabled: bool = True,
 ) -> None:
-    if _is_postgresql():
-        mcp_servers = sa.table(
-            "mcp_servers",
-            sa.column("name", sa.Text()),
-            sa.column("transport", sa.Text()),
-            sa.column("config", _json_type()),
-            sa.column("description", sa.Text()),
-            sa.column("enabled", sa.Boolean()),
-        )
+    bind = op.get_bind()
+    mcp_servers = sa.table(
+        "mcp_servers",
+        sa.column("name", sa.Text()),
+        sa.column("transport", sa.Text()),
+        sa.column("config", _json_type()),
+        sa.column("description", sa.Text()),
+        sa.column("enabled", sa.Boolean()),
+        sa.column("updated_at", sa.DateTime(timezone=True)),
+    )
+    values = dict(
+        name=name,
+        transport=transport,
+        config=config,
+        description=description,
+        enabled=enabled,
+    )
+    if is_postgresql(bind):
         op.execute(
             postgresql.insert(mcp_servers)
-            .values(
-                name=name,
-                transport=transport,
-                config=config,
-                description=description,
-                enabled=enabled,
-            )
+            .values(**values)
             .on_conflict_do_update(
                 index_elements=["name"],
                 set_={
@@ -73,26 +77,30 @@ def _upsert_mcp_server(
         )
         return
 
+    if is_sqlite(bind):
+        from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+
+        op.execute(
+            sqlite_insert(mcp_servers)
+            .values(**values)
+            .on_conflict_do_update(
+                index_elements=["name"],
+                set_={
+                    "transport": transport,
+                    "config": config,
+                    "description": description,
+                    "enabled": enabled,
+                    "updated_at": sa.text("CURRENT_TIMESTAMP"),
+                },
+            )
+        )
+        return
+
     from sqlalchemy.dialects.mysql import insert as mysql_insert
 
-    mcp_servers = sa.table(
-        "mcp_servers",
-        sa.column("name", sa.Text()),
-        sa.column("transport", sa.Text()),
-        sa.column("config", _json_type()),
-        sa.column("description", sa.Text()),
-        sa.column("enabled", sa.Boolean()),
-        sa.column("updated_at", sa.DateTime(timezone=True)),
-    )
     op.execute(
         mysql_insert(mcp_servers)
-        .values(
-            name=name,
-            transport=transport,
-            config=config,
-            description=description,
-            enabled=enabled,
-        )
+        .values(**values)
         .on_duplicate_key_update(
             transport=transport,
             config=config,

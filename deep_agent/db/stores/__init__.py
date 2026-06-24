@@ -5,11 +5,7 @@ from deep_agent.db.stores.mcp import McpServerStoreBase, create_mcp_store
 from deep_agent.db.stores.message import EARLY_MESSAGE_LIMIT, MessageStoreBase, create_message_store
 from deep_agent.db.stores.ui_tool import UiToolStoreBase, create_ui_tool_store
 
-# ponytail: backward-compat re-exports from db.conversation
 from deep_agent.db.conversation import (
-    InMemoryConversationCoordinator,
-    InMemoryConversationStore,
-    InMemorySessionStore,
     SessionStore,
     SqlConversationCoordinator,
     SqlConversationStore,
@@ -20,9 +16,6 @@ __all__ = [
     "ChatSessionStoreBase",
     "DataStores",
     "EARLY_MESSAGE_LIMIT",
-    "InMemoryConversationCoordinator",
-    "InMemoryConversationStore",
-    "InMemorySessionStore",
     "McpServerStoreBase",
     "MessageStoreBase",
     "SessionStore",

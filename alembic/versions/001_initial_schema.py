@@ -12,6 +12,7 @@ from typing import Sequence, Union
 
 import sqlalchemy as sa
 from alembic import op
+from deep_agent.db.migration_dialect import insert_default_agent_statement, json_type, key_type, now_default
 from sqlalchemy.dialects import postgresql
 
 revision: str = "001"
@@ -25,55 +26,19 @@ def _is_postgresql() -> bool:
 
 
 def _json_type():
-    if _is_postgresql():
-        return postgresql.JSONB(astext_type=sa.Text())
-    return sa.JSON()
+    return json_type(op.get_bind())
 
 
 def _key_type():
-    if _is_postgresql():
-        return sa.Text()
-    return sa.String(191)
+    return key_type(op.get_bind())
 
 
 def _now_default():
-    if _is_postgresql():
-        return sa.text("now()")
-    return sa.text("CURRENT_TIMESTAMP")
+    return now_default(op.get_bind())
 
 
 def _insert_default_agent() -> None:
-    if _is_postgresql():
-        op.execute(
-            sa.text(
-                """
-                INSERT INTO agents (name, model, prompt)
-                VALUES (
-                    'default',
-                    'openai:gpt-4o',
-                    'You are deep-agent, a helpful general-purpose assistant. '
-                    'Use the available tools when they help you answer accurately. '
-                    'Be concise and explain your reasoning when it is useful.'
-                )
-                ON CONFLICT (name) DO NOTHING
-                """
-            )
-        )
-        return
-    op.execute(
-        sa.text(
-            """
-            INSERT IGNORE INTO agents (name, model, prompt)
-            VALUES (
-                'default',
-                'openai:gpt-4o',
-                'You are deep-agent, a helpful general-purpose assistant. '
-                'Use the available tools when they help you answer accurately. '
-                'Be concise and explain your reasoning when it is useful.'
-            )
-            """
-        )
-    )
+    op.execute(sa.text(insert_default_agent_statement(op.get_bind())))
 
 
 def upgrade() -> None:
@@ -108,7 +73,7 @@ def upgrade() -> None:
 
     op.create_table(
         "chat_messages",
-        sa.Column("id", sa.BigInteger(), autoincrement=True, nullable=False),
+        sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
         sa.Column("session_key", _key_type(), nullable=False),
         sa.Column("sequence", sa.Integer(), nullable=False),
         sa.Column("payload", _json_type(), nullable=False),

@@ -31,6 +31,7 @@ def _build_option(*, dbms_name: str) -> SimpleNamespace:
         skills_dir="skills",
         cursor_skills_dir=".cursor/skills",
         mcp_forward_request_headers="authorization",
+        sqlite_path="data/deep-agent.db",
     )
     return SimpleNamespace(dbms=dbms, agent=agent)
 
@@ -53,10 +54,10 @@ class DatabaseUrlResolutionTests(unittest.TestCase):
                 "mysql+asyncmy://user:p%40ss%3Aword@localhost:3306/deep_agent",
             )
 
-    def test_returns_none_for_unsupported_dbms(self) -> None:
+    def test_falls_back_to_sqlite_for_unsupported_dbms(self) -> None:
         option = _build_option(dbms_name="dameng")
         with patch.object(db_url_module, "OPTION", option):
-            self.assertIsNone(db_url_module.get_database_url())
+            self.assertTrue(db_url_module.get_database_url().startswith("sqlite+aiosqlite:///"))
 
     def test_alembic_ini_accepts_percent_encoded_password(self) -> None:
         url = "mysql+asyncmy://deepfos:Okf%21S30Zjk@192.168.9.108:10307/deepagent"

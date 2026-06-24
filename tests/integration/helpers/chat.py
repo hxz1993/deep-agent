@@ -17,8 +17,9 @@ from deep_agent.api.v1 import api_router
 from deep_agent.capabilities import build_registry
 from deep_agent.capabilities.mcp.session_pool import McpSessionPool
 from deep_agent.core.context import AppContext, init_context, reset_context
-from deep_agent.db.stores import InMemorySessionStore
 from deep_agent.db.stores.bundle import DataStores
+from deep_agent.schemas.mcp import McpServerCreate
+from tests.helpers.sqlite_stores import make_sqlite_stores_sync
 
 HEADER_ECHO_SERVER = (
     Path(__file__).resolve().parents[1] / "fixtures" / "header_echo_server.py"
@@ -33,22 +34,6 @@ class _McpRow:
     config: dict[str, Any]
     description: str | None = None
     enabled: bool = True
-
-
-class InMemoryMcpStore:
-    """Minimal MCP store for integration tests (list_all / get_by_name only)."""
-
-    def __init__(self, rows: list[_McpRow] | None = None) -> None:
-        self._rows = list(rows or [])
-
-    async def list_all(self) -> list[_McpRow]:
-        return list(self._rows)
-
-    async def get_by_name(self, name: str) -> _McpRow | None:
-        for row in self._rows:
-            if row.name == name:
-                return row
-        return None
 
 
 def echo_mcp_row(*, record_path: Path | None = None) -> _McpRow:
@@ -67,20 +52,30 @@ def echo_mcp_row(*, record_path: Path | None = None) -> _McpRow:
     )
 
 
+async def _seed_mcp_rows(stores: DataStores, rows: list[_McpRow]) -> None:
+    for row in rows:
+        await stores.mcp.create_unique(
+            McpServerCreate(
+                name=row.name,
+                transport=row.transport,
+                config=row.config,
+                description=row.description,
+                enabled=row.enabled,
+            )
+        )
+
+
 def testing_data_stores(
     *,
     record_path: Path | None = None,
     mcp_rows: list[_McpRow] | None = None,
-) -> DataStores:
+) -> tuple[DataStores, Any, Any]:
     rows = mcp_rows if mcp_rows is not None else [echo_mcp_row(record_path=record_path)]
-    return DataStores(
-        chat_session=None,
-        message=None,
-        coordinator=InMemorySessionStore(),
-        agent=None,
-        mcp=InMemoryMcpStore(rows),
-        ui_tool=None,
-    )
+    stores, engine, session_factory = make_sqlite_stores_sync()
+    import asyncio
+
+    asyncio.run(_seed_mcp_rows(stores, rows))
+    return stores, engine, session_factory
 
 
 def create_test_app(*, record_path: Path | None = None) -> FastAPI:
@@ -96,12 +91,18 @@ def configure_test_app(
     *,
     record_path: Path | None = None,
     stores: DataStores | None = None,
+    db_engine: Any | None = None,
+    db_session_factory: Any | None = None,
 ) -> AppContext:
-    """Attach in-memory dependencies and MCP rows resolved at use time."""
+    """Attach sqlite-backed dependencies and MCP rows resolved at use time."""
+    if stores is None:
+        stores, db_engine, db_session_factory = testing_data_stores(record_path=record_path)
     ctx = AppContext.for_testing(
         registry=build_registry(),
-        stores=stores or testing_data_stores(record_path=record_path),
+        stores=stores,
         mcp_session_pool=McpSessionPool(),
+        db_engine=db_engine,
+        db_session_factory=db_session_factory,
     )
     init_context(ctx)
     return ctx
@@ -122,7 +123,18 @@ def test_chat_client(
     )
     app = FastAPI()
     app.include_router(api_router)
-    configure_test_app(app, record_path=record_file, stores=stores)
+    if stores is None:
+        stores, db_engine, db_session_factory = testing_data_stores(record_path=record_file)
+    else:
+        db_engine = None
+        db_session_factory = None
+    configure_test_app(
+        app,
+        record_path=record_file,
+        stores=stores,
+        db_engine=db_engine,
+        db_session_factory=db_session_factory,
+    )
     try:
         with patch("deep_agent.agent.factory._resolve_model", return_value=test_model):
             with TestClient(app) as client:

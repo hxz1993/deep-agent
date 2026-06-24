@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from sqlalchemy import event
+from sqlalchemy.engine import Engine
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -12,7 +14,15 @@ from sqlalchemy.ext.asyncio import (
 from deep_agent.db.dialect import DbDialect, resolve_dialect
 from deep_agent.db.migrate import upgrade_database
 from deep_agent.db.stores.bundle import DataStores, create_data_stores
-from deep_agent.db.url import get_database_url
+from deep_agent.db.url import ensure_sqlite_parent_dir, get_database_url
+
+
+@event.listens_for(Engine, "connect")
+def _sqlite_pragma_foreign_keys(dbapi_connection, _connection_record) -> None:
+    if dbapi_connection.__class__.__module__.startswith("sqlite3"):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
 
 
 def create_engine(database_url: str) -> tuple[AsyncEngine, async_sessionmaker[AsyncSession]]:
@@ -33,11 +43,10 @@ class DatabaseBundle:
     dialect: DbDialect
 
 
-async def bootstrap_database() -> DatabaseBundle | None:
+async def bootstrap_database() -> DatabaseBundle:
     """Run migrations, create engine, and select store backends."""
     database_url = get_database_url()
-    if database_url is None:
-        return None
+    ensure_sqlite_parent_dir(database_url)
 
     await upgrade_database()
     engine, session_factory = create_engine(database_url)

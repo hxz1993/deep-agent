@@ -88,11 +88,14 @@ class ChatHeaderForwardingTests(unittest.TestCase):
         from tests.integration.helpers.chat import testing_data_stores
 
         pool = McpSessionPool()
+        stores, engine, session_factory = testing_data_stores(mcp_rows=[])
         init_context(
             AppContext.for_testing(
                 registry=build_registry(),
-                stores=testing_data_stores(mcp_rows=[]),
+                stores=stores,
                 mcp_session_pool=pool,
+                db_engine=engine,
+                db_session_factory=session_factory,
             )
         )
 

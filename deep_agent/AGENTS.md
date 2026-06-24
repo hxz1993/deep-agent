@@ -37,14 +37,14 @@ HTTP (REST/SSE)
 ### 启动生命周期（`main.py` lifespan → `AppContext.bootstrap()`）
 
 1. `configure_logging()` → `AppContext.bootstrap()`（见 `core/context.py`）
-2. 有数据库：`upgrade_database()` → `bootstrap_database()` → 5 个表 Store + `SqlConversationCoordinator`
+2. `upgrade_database()` → `bootstrap_database()` → 6 个 Store（含 `SqlConversationCoordinator`）
 3. `build_registry(stores=)` — native + skill + cursor-skill（静态能力）；`stores` 预留未来启动期只读配置
 4. `init_context(ctx)` — 路由通过 `Depends(AppContextDep)` 注入
 5. 关闭：`ctx.aclose()` → `reset_context()`
 
-无数据库 → `InMemoryConversationCoordinator`；MCP 在请求时由 `resolve_mcp_toolsets` 解析，**无 DB 时不加载**（builtin 也不注册）。调试 MCP 需配置 `DEEP_AGENT_DBMS_*`。
+未配置 `DEEP_AGENT_DBMS_*` 时默认使用 SQLite 文件 `data/deep-agent.db`（可用 `DEEP_AGENT_SQLITE_PATH` 覆盖）。配置 `DEEP_AGENT_DBMS_*` 则使用 PostgreSQL / MySQL。
 
-MCP / UI 等可变 store 配置：**使用时读取**（`api/v1/deps.py`），不写 registry、不做进程内热重载。
+MCP 在请求时由 `resolve_mcp_toolsets` 解析（DB 行 + `mcps/` builtin 兜底）。
 
 ### 对话请求流（`POST /api/v1/chat/stream`）
 
@@ -102,7 +102,7 @@ MCP / UI 等可变 store 配置：**使用时读取**（`api/v1/deps.py`），�
 
 | 路径 | 职责 |
 | --- | --- |
-| `deps.py` | `require_db`、`get_*_store(ctx)` Depends |
+| `deps.py` | `get_*_store(ctx)` Depends |
 | `conversation.py` | `SessionStore` 协议 + SQL/内存协调器（跨表写入、进程锁） |
 | `stores/` | 5 个表 Store（`agent/`、`mcp/`、`ui_tool/`、`chat_session/`、`message/`）+ `bundle.DataStores` |
 | `factory.py` / `dialect.py` | `create_engine` / `close_db`、`bootstrap_database()`、方言解析 |

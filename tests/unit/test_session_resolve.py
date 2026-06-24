@@ -5,12 +5,16 @@ import unittest
 from pydantic_ai.messages import ModelRequest, UserPromptPart
 
 from deep_agent.db.session_scope import resolve_session
-from deep_agent.db.stores import InMemoryConversationStore
+from tests.helpers.sqlite_stores import make_sqlite_stores
 
 
 class SessionResolveTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
-        self.store = InMemoryConversationStore()
+        stores, self._engine, _ = await make_sqlite_stores()
+        self.store = stores.coordinator
+
+    async def asyncTearDown(self) -> None:
+        await self._engine.dispose()
 
     async def _seed(self, session_id: str, *, agent_id: str | None = None) -> None:
         await self.store.append(

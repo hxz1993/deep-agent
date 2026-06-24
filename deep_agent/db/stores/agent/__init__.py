@@ -6,6 +6,7 @@ from deep_agent.db.dialect import DbDialect
 from deep_agent.db.stores.agent.base import AgentStoreBase
 from deep_agent.db.stores.agent.mysql import MySQLAgentStore
 from deep_agent.db.stores.agent.postgres import PostgresAgentStore
+from deep_agent.db.stores.agent.sqlite import SqliteAgentStore
 
 __all__ = ["AgentStoreBase", "create_agent_store"]
 
@@ -17,5 +18,7 @@ def create_agent_store(
     match dialect:
         case DbDialect.MYSQL:
             return MySQLAgentStore(session_factory)
+        case DbDialect.SQLITE:
+            return SqliteAgentStore(session_factory)
         case _:
             return PostgresAgentStore(session_factory)

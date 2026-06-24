@@ -49,7 +49,7 @@ HTTP (REST/SSE)
 
 1. 解析 `StreamChatRequest`；`session_id` 缺省则生成 UUID
 2. **无 `agent_id`**：`build_runner(model?, capabilities?)` → `OPTION` 默认 `AgentSpec`
-3. **有 `agent_id`**：`build_runner_for_agent()` → `agents` 表 → `AgentSpec.from_row()` → 存储键 `{agent_id}:{session_id}`
+3. **有 `agent_id`**：`build_runner_for_agent()` → `agents` 表 → `AgentSpec.from_row()` → 存储 `(agent_id, session_id)`
 4. `AgentRunner.run_stream()`：session 锁 → history → `agent.iter()` → SSE 事件 → `append(new_messages)`
 5. `capabilities: null` → 仅 `default_enabled=True`；显式列表按名启用
 
@@ -105,7 +105,7 @@ HTTP (REST/SSE)
 | `conversation.py` | `SessionStore` 协议 + SQL/内存协调器（跨表写入、进程锁） |
 | `stores/` | 5 个表 Store（`agent/`、`mcp/`、`ui_tool/`、`chat_session/`、`message/`）+ `bundle.DataStores` |
 | `factory.py` / `dialect.py` | 方言工厂、`bootstrap_database()` |
-| `session_key.py` / `session_list.py` | 会话键解析、列表过滤 DTO |
+| `session_scope.py` / `session_list.py` | 会话作用域解析、列表过滤 DTO |
 
 | 表 | 用途 |
 | --- | --- |
@@ -209,7 +209,7 @@ SSE 协议：[`../docs/sse-protocol.md`](../docs/sse-protocol.md)。前端对接
 1. 包名 **`deep_agent`**，启动 `deep_agent.main:app`（非 `app.main`）
 2. 扩展优先走路径注册，避免改 `runner.py` 核心
 3. 能力命名：`native` \| `skill:<name>` \| `cursor-skill:<name>` \| `mcp:<name>`
-4. DB Agent 会话键：`{agent_id}:{session_id}`
+4. DB Agent 会话：复合键 `(agent_id, session_id)`；无 agent 时 `agent_id=''`
 5. 同 session 用 `SessionStore.lock()` 串行；多实例 DB 级锁未实现
 
 | 现象 | 原因 |

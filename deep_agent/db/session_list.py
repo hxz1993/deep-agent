@@ -23,7 +23,7 @@ class SessionListFilters:
 
 @dataclass(frozen=True)
 class SessionSummaryRow:
-    session_key: str
+    session_id: str
     agent_id: str | None
     agent_name: str | None
     created_at: datetime

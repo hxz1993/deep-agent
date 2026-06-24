@@ -13,21 +13,21 @@ class PostgresChatSessionStore(ChatSessionStoreBase):
     async def _upsert(
         self,
         db: AsyncSession,
-        session_key: str,
+        agent_scope: str,
+        session_id: str,
         *,
-        agent_id: str | None,
         user_id: str | None,
         now: datetime,
     ) -> None:
         stmt = insert(ChatSession).values(
-            session_key=session_key,
-            agent_id=agent_id,
+            agent_id=agent_scope,
+            session_id=session_id,
             user_id=user_id,
             created_at=now,
             updated_at=now,
         )
         stmt = stmt.on_conflict_do_update(
-            index_elements=[ChatSession.session_key],
+            index_elements=[ChatSession.agent_id, ChatSession.session_id],
             set_={
                 "updated_at": now,
                 **({"user_id": user_id} if user_id is not None else {}),

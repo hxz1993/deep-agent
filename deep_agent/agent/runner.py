@@ -43,10 +43,10 @@ class AgentRunner:
         self.ui_tool_hints = ui_tool_hints or {}
 
     @asynccontextmanager
-    async def _session_lock(self, session_id: str) -> AsyncIterator[None]:
+    async def _session_lock(self, session_id: str, *, agent_id: str | None) -> AsyncIterator[None]:
         lock = getattr(self.store, "lock", None)
         if callable(lock):
-            async with lock(session_id):
+            async with lock(session_id, agent_id=agent_id):
                 yield
         else:
             yield
@@ -59,8 +59,8 @@ class AgentRunner:
         *,
         deferred_tool_results: DeferredToolResults | None = None,
     ) -> dict[str, Any]:
-        async with self._session_lock(session_id):
-            history = await self.store.get_history(session_id)
+        async with self._session_lock(session_id, agent_id=deps.agent_id):
+            history = await self.store.get_history(session_id, agent_id=deps.agent_id)
             result = await self.agent.run(
                 prompt,
                 deps=deps,
@@ -85,8 +85,8 @@ class AgentRunner:
         *,
         deferred_tool_results: DeferredToolResults | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
-        async with self._session_lock(session_id):
-            history = await self.store.get_history(session_id)
+        async with self._session_lock(session_id, agent_id=deps.agent_id):
+            history = await self.store.get_history(session_id, agent_id=deps.agent_id)
             result = None
             try:
                 async with self.agent.run_stream_events(

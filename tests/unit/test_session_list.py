@@ -8,7 +8,6 @@ from pydantic_ai.messages import ModelRequest, UserPromptPart
 
 from deep_agent.api.v1 import api_router
 from deep_agent.core.context import get_context, reset_context
-from deep_agent.db.session_key import scoped_session_key
 from tests.integration.helpers.chat import create_test_app
 
 
@@ -26,12 +25,14 @@ class SessionListApiTests(unittest.TestCase):
 
         async def seed() -> None:
             await store.append(
-                scoped_session_key("agent-a", "sess-1"),
+                "sess-1",
                 [ModelRequest(parts=[UserPromptPart(content="hello one")])],
+                agent_id="agent-a",
             )
             await store.append(
-                scoped_session_key("agent-b", "sess-2"),
+                "sess-2",
                 [ModelRequest(parts=[UserPromptPart(content="hello two")])],
+                agent_id="agent-b",
             )
 
         asyncio.run(seed())
@@ -51,12 +52,14 @@ class SessionListApiTests(unittest.TestCase):
 
         async def seed() -> None:
             await store.append(
-                scoped_session_key("agent-a", "sess-1"),
+                "sess-1",
                 [ModelRequest(parts=[UserPromptPart(content="only a")])],
+                agent_id="agent-a",
             )
             await store.append(
-                scoped_session_key("agent-b", "sess-2"),
+                "sess-2",
                 [ModelRequest(parts=[UserPromptPart(content="only b")])],
+                agent_id="agent-b",
             )
 
         asyncio.run(seed())
@@ -89,14 +92,14 @@ class SessionListApiTests(unittest.TestCase):
 
 
 class SummaryToSessionInfoTests(unittest.TestCase):
-    def test_summary_maps_scoped_session_id(self) -> None:
+    def test_summary_maps_session_id(self) -> None:
         from deep_agent.api.v1.sessions import _summary_to_session_info
         from deep_agent.db.session_list import SessionSummaryRow
 
         now = datetime.now(timezone.utc)
         info = _summary_to_session_info(
             SessionSummaryRow(
-                session_key="agent-1:sess-1",
+                session_id="sess-1",
                 agent_id="agent-1",
                 agent_name="Demo",
                 created_at=now,

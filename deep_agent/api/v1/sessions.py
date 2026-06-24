@@ -5,9 +5,10 @@ from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Query, status
 
+from deep_agent.api.v1.chat import mcp_pool_session_key
 from deep_agent.core.context import AppContextDep
 from deep_agent.db.session_list import MAX_LIST_LIMIT, SessionListFilters, SessionSummaryRow
-from deep_agent.db.session_key import parse_scoped_session_key, resolve_session_key
+from deep_agent.db.session_scope import resolve_session
 from deep_agent.agent.history import (
     SessionHistoryResponse,
     first_user_prompt,
@@ -27,9 +28,8 @@ async def _resolve_agent_name(ctx: AppContextDep, agent_id: str | None) -> str |
 
 
 def _summary_to_session_info(row: SessionSummaryRow) -> SessionInfo:
-    _, session_id = parse_scoped_session_key(row.session_key)
     return SessionInfo(
-        session_id=session_id,
+        session_id=row.session_id,
         message_count=row.message_count,
         agent_id=row.agent_id,
         agent_name=row.agent_name,
@@ -41,23 +41,22 @@ def _summary_to_session_info(row: SessionSummaryRow) -> SessionInfo:
 
 async def _build_session_info(
     ctx: AppContextDep,
-    session_key: str,
+    session_id: str,
+    *,
+    agent_id: str | None,
 ) -> SessionInfo:
-    history = await ctx.store.get_history(session_key)
-    parsed_agent_id, session_id = parse_scoped_session_key(session_key)
-
-    agent_id = parsed_agent_id
-    if ctx.stores.chat_session is not None:
-        stored_agent_id = await ctx.stores.chat_session.get_agent_id(session_key)
-        if stored_agent_id:
-            agent_id = stored_agent_id
-
+    history = await ctx.store.get_history(session_id, agent_id=agent_id)
     agent_name = await _resolve_agent_name(ctx, agent_id)
 
     created_at: datetime | None = None
     updated_at: datetime | None = None
     if ctx.stores.chat_session is not None:
-        created_at, updated_at = await ctx.stores.chat_session.get_timestamps(session_key)
+        from deep_agent.db.session_scope import normalize_agent_scope
+
+        created_at, updated_at = await ctx.stores.chat_session.get_timestamps(
+            normalize_agent_scope(agent_id),
+            session_id,
+        )
     if updated_at is None and history:
         created_at, updated_at = session_activity_timestamps(history)
 
@@ -115,13 +114,18 @@ async def get_session(
     session_id: str,
     agent_id: str | None = None,
 ) -> SessionInfo:
-    session_key = await resolve_session_key(ctx.store, session_id, agent_id=agent_id)
-    if session_key is None:
+    resolved = await resolve_session(ctx.store, session_id, agent_id=agent_id)
+    if resolved is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
-    history = await ctx.store.get_history(session_key)
-    if not history and session_key not in await ctx.store.list_sessions():
+    scope, resolved_session_id = resolved
+    from deep_agent.db.session_scope import agent_scope_to_api
+
+    api_agent_id = agent_id or agent_scope_to_api(scope)
+    history = await ctx.store.get_history(resolved_session_id, agent_id=api_agent_id)
+    if not history and resolved not in await ctx.store.list_sessions():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
-    return await _build_session_info(ctx, session_key)
+
+    return await _build_session_info(ctx, resolved_session_id, agent_id=api_agent_id)
 
 
 @router.get("/sessions/{session_id}/history", response_model=SessionHistoryResponse)
@@ -130,12 +134,15 @@ async def get_session_history(
     session_id: str,
     agent_id: str | None = None,
 ) -> SessionHistoryResponse:
-    session_key = await resolve_session_key(ctx.store, session_id, agent_id=agent_id)
-    if session_key is None:
+    resolved = await resolve_session(ctx.store, session_id, agent_id=agent_id)
+    if resolved is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
-    raw = await ctx.store.get_history(session_key)
-    _, display_id = parse_scoped_session_key(session_key)
-    return SessionHistoryResponse(session_id=display_id, messages=model_messages_to_history(raw))
+    scope, resolved_session_id = resolved
+    from deep_agent.db.session_scope import agent_scope_to_api
+
+    api_agent_id = agent_id or agent_scope_to_api(scope)
+    raw = await ctx.store.get_history(resolved_session_id, agent_id=api_agent_id)
+    return SessionHistoryResponse(session_id=resolved_session_id, messages=model_messages_to_history(raw))
 
 
 @router.delete("/sessions/{session_id}", status_code=status.HTTP_200_OK)
@@ -144,8 +151,12 @@ async def delete_session(
     session_id: str,
     agent_id: str | None = None,
 ) -> None:
-    session_key = await resolve_session_key(ctx.store, session_id, agent_id=agent_id)
-    if session_key is None:
+    resolved = await resolve_session(ctx.store, session_id, agent_id=agent_id)
+    if resolved is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
-    await ctx.store.delete(session_key)
-    await ctx.mcp_session_pool.close_session(session_key)
+    scope, resolved_session_id = resolved
+    from deep_agent.db.session_scope import agent_scope_to_api
+
+    api_agent_id = agent_id or agent_scope_to_api(scope)
+    await ctx.store.delete(resolved_session_id, agent_id=api_agent_id)
+    await ctx.mcp_session_pool.close_session(mcp_pool_session_key(resolved_session_id, agent_id=api_agent_id))

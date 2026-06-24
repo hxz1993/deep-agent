@@ -13,7 +13,7 @@ from deep_agent.api.v1.deps import build_runner, build_runner_for_agent
 from deep_agent.core.context import AppContextDep
 from deep_agent.core.exceptions import AgentNotFoundError
 from deep_agent.db.ids import normalize_agent_id
-from deep_agent.db.session_key import scoped_session_key
+from deep_agent.db.session_scope import runtime_session_key
 from deep_agent.schemas.chat import ChatRequest, ChatResponse, StreamChatRequest
 
 router = APIRouter()
@@ -84,19 +84,17 @@ async def chat_stream(request: Request, ctx: AppContextDep, body: StreamChatRequ
             runner = await build_runner_for_agent(ctx, agent_id)
         except AgentNotFoundError as exc:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-        run_session_key = scoped_session_key(agent_id, session_id)
-        deps = _agent_deps(request, ctx, session_id=run_session_key, user=body.user, agent_id=agent_id)
+        deps = _agent_deps(request, ctx, session_id=session_id, user=body.user, agent_id=agent_id)
         session_data = {"session_id": session_id, "agent_id": agent_id}
     else:
         runner = await build_runner(ctx, model=body.model, capabilities=body.capabilities)
-        run_session_key = session_id
         deps = _agent_deps(request, ctx, session_id=session_id, user=body.user)
         session_data = {"session_id": session_id}
 
     async def event_generator():
         yield {"event": "session", "data": json.dumps(session_data)}
         async for ev in runner.run_stream(
-            run_session_key,
+            session_id,
             prompt,
             deps,
             deferred_tool_results=deferred_tool_results,
@@ -106,3 +104,8 @@ async def chat_stream(request: Request, ctx: AppContextDep, body: StreamChatRequ
             yield {"event": ev["type"], "data": json.dumps(ev, ensure_ascii=False)}
 
     return EventSourceResponse(event_generator())
+
+
+def mcp_pool_session_key(session_id: str, *, agent_id: str | None = None) -> str:
+    """Runtime key for MCP subprocess pooling (not persisted)."""
+    return runtime_session_key(session_id, agent_id=agent_id)

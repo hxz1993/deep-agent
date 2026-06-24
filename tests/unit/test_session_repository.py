@@ -11,7 +11,6 @@ from deep_agent.db.models import Agent, Base, ChatMessage, ChatSession
 from deep_agent.db.dialect import DbDialect
 from deep_agent.db.stores.chat_session import ChatSessionStoreBase, create_chat_session_store
 from deep_agent.db.stores.message import create_message_store
-from deep_agent.db.session_key import scoped_session_key
 
 _message_adapter: TypeAdapter[ModelMessage] = TypeAdapter(ModelMessage)
 
@@ -38,11 +37,10 @@ class ChatSessionStoreTests(unittest.IsolatedAsyncioTestCase):
             )
             db.add(agent)
             now = datetime.now(timezone.utc)
-            session_key = scoped_session_key(agent.id, "sess-1")
             db.add(
                 ChatSession(
-                    session_key=session_key,
                     agent_id=agent.id,
+                    session_id="sess-1",
                     user_id="user-1",
                     created_at=now,
                     updated_at=now,
@@ -51,7 +49,8 @@ class ChatSessionStoreTests(unittest.IsolatedAsyncioTestCase):
             db.add(
                 ChatMessage(
                     id=1,
-                    session_key=session_key,
+                    agent_id=agent.id,
+                    session_id="sess-1",
                     sequence=0,
                     payload=_message_adapter.dump_python(
                         ModelRequest(parts=[UserPromptPart(content="hello sql")]),
@@ -89,12 +88,12 @@ class ChatSessionStoreTests(unittest.IsolatedAsyncioTestCase):
     async def test_list_summaries_pagination(self) -> None:
         async with self.session_factory() as db:
             now = datetime.now(timezone.utc)
+            agent_id = "00000000-0000-4000-8000-000000000001"
             for index in range(3):
-                key = scoped_session_key("00000000-0000-4000-8000-000000000001", f"sess-extra-{index}")
                 db.add(
                     ChatSession(
-                        session_key=key,
-                        agent_id="00000000-0000-4000-8000-000000000001",
+                        agent_id=agent_id,
+                        session_id=f"sess-extra-{index}",
                         created_at=now,
                         updated_at=now,
                     )

@@ -14,6 +14,7 @@ from deep_agent.agent.deps import AgentDeps
 from deep_agent.capabilities.mcp.errors import is_recoverable_mcp_disconnect
 from deep_agent.capabilities.mcp.request_context import apply_request_headers_to_stdio_config
 from deep_agent.capabilities.mcp.session_pool import McpSessionPool, get_mcp_session_pool
+from deep_agent.db.session_scope import runtime_session_key
 
 
 @dataclass
@@ -42,9 +43,10 @@ class SessionScopedMcpToolset(AbstractToolset[AgentDeps]):
 
     async def for_run(self, ctx: RunContext[AgentDeps]) -> AbstractToolset[AgentDeps]:
         request_headers = dict(ctx.deps.request_headers) if ctx.deps.request_headers else None
+        pool_key = runtime_session_key(ctx.deps.session_id, agent_id=ctx.deps.agent_id)
         return replace(
             self,
-            _session_id=ctx.deps.session_id,
+            _session_id=pool_key,
             _request_headers=request_headers,
             _inner=None,
         )

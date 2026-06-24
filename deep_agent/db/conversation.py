@@ -10,6 +10,7 @@ from pydantic_ai.messages import ModelMessage
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from deep_agent.db.session_list import MAX_LIST_LIMIT, SessionListFilters, SessionSummaryRow
+from deep_agent.db.session_scope import NO_AGENT_SCOPE, agent_scope_to_api, normalize_agent_scope, runtime_session_key
 from deep_agent.db.stores.chat_session.base import ChatSessionStoreBase
 from deep_agent.db.stores.message.base import MessageStoreBase
 
@@ -27,7 +28,7 @@ __all__ = [
 class SessionStore(Protocol):
     """Persistence boundary for conversation history."""
 
-    async def get_history(self, session_id: str) -> list[ModelMessage]:
+    async def get_history(self, session_id: str, *, agent_id: str | None = None) -> list[ModelMessage]:
         ...
 
     async def append(
@@ -40,10 +41,10 @@ class SessionStore(Protocol):
     ) -> None:
         ...
 
-    async def list_sessions(self) -> list[str]:
+    async def list_sessions(self) -> list[tuple[str, str]]:
         ...
 
-    async def delete(self, session_id: str) -> None:
+    async def delete(self, session_id: str, *, agent_id: str | None = None) -> None:
         ...
 
     async def list_session_summaries(
@@ -68,8 +69,8 @@ class SqlConversationCoordinator:
         self._chat_sessions = chat_session
         self._messages = message
 
-    def lock(self, session_key: str) -> asyncio.Lock:
-        return self._locks[session_key]
+    def lock(self, session_id: str, *, agent_id: str | None = None) -> asyncio.Lock:
+        return self._locks[runtime_session_key(session_id, agent_id=agent_id)]
 
     @asynccontextmanager
     async def _write(self):
@@ -81,12 +82,13 @@ class SqlConversationCoordinator:
                 await db.rollback()
                 raise
 
-    async def get_history(self, session_key: str) -> list[ModelMessage]:
-        return await self._messages.get_history(session_key)
+    async def get_history(self, session_id: str, *, agent_id: str | None = None) -> list[ModelMessage]:
+        scope = normalize_agent_scope(agent_id)
+        return await self._messages.get_history(scope, session_id)
 
     async def append(
         self,
-        session_key: str,
+        session_id: str,
         messages: list[ModelMessage],
         *,
         agent_id: str | None = None,
@@ -95,35 +97,41 @@ class SqlConversationCoordinator:
         if not messages:
             return
 
+        scope = normalize_agent_scope(agent_id)
         async with self._write() as db:
             now = datetime.now(timezone.utc)
             await self._chat_sessions._upsert(
                 db,
-                session_key,
-                agent_id=agent_id,
+                scope,
+                session_id,
                 user_id=user_id,
                 now=now,
             )
-            next_sequence = await self._messages._get_max_sequence(db, session_key) + 1
+            next_sequence = await self._messages._get_max_sequence(db, scope, session_id) + 1
             await self._messages._append_messages(
                 db,
-                session_key,
+                scope,
+                session_id,
                 messages,
                 start_sequence=next_sequence,
             )
 
-    async def list_sessions(self) -> list[str]:
-        return await self._chat_sessions.list_session_keys()
+    async def list_sessions(self) -> list[tuple[str, str]]:
+        return await self._chat_sessions.list_sessions()
 
-    async def get_session_agent_id(self, session_key: str) -> str | None:
-        return await self._chat_sessions.get_agent_id(session_key)
+    async def get_session_timestamps(
+        self,
+        session_id: str,
+        *,
+        agent_id: str | None = None,
+    ) -> tuple[datetime | None, datetime | None]:
+        scope = normalize_agent_scope(agent_id)
+        return await self._chat_sessions.get_timestamps(scope, session_id)
 
-    async def get_session_timestamps(self, session_key: str) -> tuple[datetime | None, datetime | None]:
-        return await self._chat_sessions.get_timestamps(session_key)
-
-    async def delete(self, session_key: str) -> None:
-        await self._chat_sessions.delete(session_key)
-        self._locks.pop(session_key, None)
+    async def delete(self, session_id: str, *, agent_id: str | None = None) -> None:
+        scope = normalize_agent_scope(agent_id)
+        await self._chat_sessions.delete(scope, session_id)
+        self._locks.pop(runtime_session_key(session_id, agent_id=agent_id), None)
 
     async def list_session_summaries(
         self,
@@ -145,52 +153,54 @@ class InMemoryConversationCoordinator:
     """Process-local coordinator for dev and single-process deployments."""
 
     def __init__(self) -> None:
-        self._histories: dict[str, list[ModelMessage]] = defaultdict(list)
+        self._histories: dict[tuple[str, str], list[ModelMessage]] = defaultdict(list)
         self._locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
 
-    def lock(self, session_id: str) -> asyncio.Lock:
-        return self._locks[session_id]
+    def lock(self, session_id: str, *, agent_id: str | None = None) -> asyncio.Lock:
+        return self._locks[runtime_session_key(session_id, agent_id=agent_id)]
 
-    async def get_history(self, session_id: str) -> list[ModelMessage]:
-        return list(self._histories.get(session_id, []))
+    async def get_history(self, session_id: str, *, agent_id: str | None = None) -> list[ModelMessage]:
+        scope = normalize_agent_scope(agent_id)
+        return list(self._histories.get((scope, session_id), []))
 
     async def append(
         self,
         session_id: str,
         messages: list[ModelMessage],
         *,
-        agent_id: object | None = None,
+        agent_id: str | None = None,
         user_id: str | None = None,
     ) -> None:
-        del agent_id, user_id
+        del user_id
         if not messages:
             return
-        self._histories[session_id].extend(messages)
+        scope = normalize_agent_scope(agent_id)
+        self._histories[(scope, session_id)].extend(messages)
 
-    async def list_sessions(self) -> list[str]:
+    async def list_sessions(self) -> list[tuple[str, str]]:
         return list(self._histories.keys())
 
-    async def delete(self, session_id: str) -> None:
-        self._histories.pop(session_id, None)
-        self._locks.pop(session_id, None)
+    async def delete(self, session_id: str, *, agent_id: str | None = None) -> None:
+        scope = normalize_agent_scope(agent_id)
+        self._histories.pop((scope, session_id), None)
+        self._locks.pop(runtime_session_key(session_id, agent_id=agent_id), None)
 
     async def list_session_summaries(
         self,
         filters: SessionListFilters,
     ) -> tuple[list[SessionSummaryRow], int]:
         from deep_agent.agent.history import first_user_prompt, session_activity_timestamps
-        from deep_agent.db.session_key import parse_scoped_session_key
 
         limit = min(max(filters.limit, 1), MAX_LIST_LIMIT)
         offset = max(filters.offset, 0)
         rows: list[SessionSummaryRow] = []
 
-        for session_key in self._histories:
-            history = self._histories[session_key]
-            parsed_agent_id, _ = parse_scoped_session_key(session_key)
+        for agent_scope, session_id in self._histories:
+            history = self._histories[(agent_scope, session_id)]
+            api_agent_id = agent_scope_to_api(agent_scope)
             created_at, updated_at = session_activity_timestamps(history) if history else (None, None)
 
-            if filters.agent_id is not None and parsed_agent_id != filters.agent_id:
+            if filters.agent_id is not None and api_agent_id != filters.agent_id:
                 continue
             if filters.user_id is not None:
                 continue
@@ -210,8 +220,8 @@ class InMemoryConversationCoordinator:
 
             rows.append(
                 SessionSummaryRow(
-                    session_key=session_key,
-                    agent_id=parsed_agent_id,
+                    session_id=session_id,
+                    agent_id=api_agent_id,
                     agent_name=None,
                     created_at=created_at or datetime.min,
                     updated_at=updated_at or datetime.min,

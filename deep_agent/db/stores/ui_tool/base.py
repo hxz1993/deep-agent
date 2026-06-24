@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from sqlalchemy import delete, select
+from sqlalchemy import cast, delete, func, or_, select
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from deep_agent.capabilities.ui.constants import SOURCE_PRIORITY
@@ -20,6 +21,7 @@ class UiToolStoreBase(SessionBoundMixin):
         source: str | None = None,
         mcp_server_name: str | None = None,
         enabled: bool | None = None,
+        agent_id: str | None = None,
     ) -> list[UiToolDefinition]:
         async with self._read() as db:
             return await self._list_all(
@@ -27,6 +29,7 @@ class UiToolStoreBase(SessionBoundMixin):
                 source=source,
                 mcp_server_name=mcp_server_name,
                 enabled=enabled,
+                agent_id=agent_id,
             )
 
     async def create_manual(self, data: UiToolCreate) -> UiToolDefinition:
@@ -93,6 +96,38 @@ class UiToolStoreBase(SessionBoundMixin):
         result = await db.execute(select(UiToolDefinition).where(UiToolDefinition.name == name))
         return result.scalar_one_or_none()
 
+    async def _get_by_names(self, db: AsyncSession, names: list[str]) -> dict[str, UiToolDefinition]:
+        if not names:
+            return {}
+        result = await db.execute(select(UiToolDefinition).where(UiToolDefinition.name.in_(names)))
+        return {row.name: row for row in result.scalars().all()}
+
+    @staticmethod
+    def _apply_agent_id_filter(stmt, agent_id: str, dialect_name: str):
+        unrestricted = or_(
+            UiToolDefinition.agent_ids.is_(None),
+            UiToolDefinition.agent_ids == "[]",
+        )
+        if dialect_name == "postgresql":
+            return stmt.where(
+                or_(
+                    unrestricted,
+                    cast(UiToolDefinition.agent_ids, JSONB).contains([agent_id]),
+                )
+            )
+        if dialect_name == "mysql":
+            return stmt.where(
+                or_(
+                    unrestricted,
+                    func.json_contains(
+                        UiToolDefinition.agent_ids,
+                        func.json_quote(agent_id),
+                        "$",
+                    ),
+                )
+            )
+        return stmt
+
     async def _list_all(
         self,
         db: AsyncSession,
@@ -100,6 +135,7 @@ class UiToolStoreBase(SessionBoundMixin):
         source: str | None = None,
         mcp_server_name: str | None = None,
         enabled: bool | None = None,
+        agent_id: str | None = None,
     ) -> list[UiToolDefinition]:
         stmt = select(UiToolDefinition).order_by(UiToolDefinition.name)
         if source is not None:
@@ -108,8 +144,13 @@ class UiToolStoreBase(SessionBoundMixin):
             stmt = stmt.where(UiToolDefinition.mcp_server_name == mcp_server_name)
         if enabled is not None:
             stmt = stmt.where(UiToolDefinition.enabled == enabled)
+        if agent_id is not None:
+            stmt = self._apply_agent_id_filter(stmt, agent_id, db.bind.dialect.name)
         result = await db.execute(stmt)
-        return list(result.scalars().all())
+        rows = list(result.scalars().all())
+        if agent_id is not None and db.bind.dialect.name not in {"postgresql", "mysql"}:
+            rows = [row for row in rows if not row.agent_ids or agent_id in row.agent_ids]
+        return rows
 
     async def _sync_mcp_tools(
         self,
@@ -127,8 +168,9 @@ class UiToolStoreBase(SessionBoundMixin):
                 removed += 1
 
         upserted = 0
+        existing_by_name = await self._get_by_names(db, [tool.name for tool in tools])
         for tool in tools:
-            current = await self._get_by_name(db, tool.name)
+            current = existing_by_name.get(tool.name)
             if current is not None and SOURCE_PRIORITY[current.source] < SOURCE_PRIORITY["mcp"]:
                 continue
             if current is not None and current.source == "manual" and current.override:

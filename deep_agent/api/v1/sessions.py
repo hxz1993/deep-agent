@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Query, status
+from pydantic_ai.messages import ModelMessage
 
 from deep_agent.api.v1.chat import mcp_pool_session_key
 from deep_agent.core.context import AppContextDep
@@ -44,8 +45,10 @@ async def _build_session_info(
     session_id: str,
     *,
     agent_id: str | None,
+    history: list[ModelMessage] | None = None,
 ) -> SessionInfo:
-    history = await ctx.store.get_history(session_id, agent_id=agent_id)
+    if history is None:
+        history = await ctx.store.get_history(session_id, agent_id=agent_id)
     agent_name = await _resolve_agent_name(ctx, agent_id)
 
     created_at: datetime | None = None
@@ -122,10 +125,12 @@ async def get_session(
 
     api_agent_id = agent_id or agent_scope_to_api(scope)
     history = await ctx.store.get_history(resolved_session_id, agent_id=api_agent_id)
-    if not history and resolved not in await ctx.store.list_sessions():
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
-
-    return await _build_session_info(ctx, resolved_session_id, agent_id=api_agent_id)
+    return await _build_session_info(
+        ctx,
+        resolved_session_id,
+        agent_id=api_agent_id,
+        history=history,
+    )
 
 
 @router.get("/sessions/{session_id}/history", response_model=SessionHistoryResponse)

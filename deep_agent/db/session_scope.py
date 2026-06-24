@@ -31,19 +31,4 @@ async def resolve_session(
     agent_id: str | None = None,
 ) -> tuple[str, str] | None:
     """Resolve API session id to ``(agent_scope, session_id)``."""
-    scope = normalize_agent_scope(agent_id)
-    sessions = await store.list_sessions()
-    target = (scope, session_id)
-    if target in sessions:
-        return target
-
-    matches = [ref for ref in sessions if ref[1] == session_id]
-    if not matches:
-        return None
-    if len(matches) == 1:
-        return matches[0]
-    if scope != NO_AGENT_SCOPE:
-        for ref in matches:
-            if ref[0] == scope:
-                return ref
-    return None
+    return await store.resolve_ref(session_id, agent_id=agent_id)

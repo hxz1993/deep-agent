@@ -34,6 +34,15 @@ class ChatSessionStoreBase(SessionBoundMixin):
         async with self._read() as db:
             return await self._list_sessions(db)
 
+    async def resolve_ref(
+        self,
+        session_id: str,
+        *,
+        agent_id: str | None = None,
+    ) -> tuple[str, str] | None:
+        async with self._read() as db:
+            return await self._resolve_ref(db, session_id, agent_id=agent_id)
+
     async def get_timestamps(
         self,
         agent_scope: str,
@@ -88,6 +97,35 @@ class ChatSessionStoreBase(SessionBoundMixin):
             select(ChatSession.agent_id, ChatSession.session_id).order_by(ChatSession.updated_at.desc())
         )
         return list(result.all())
+
+    async def _resolve_ref(
+        self,
+        db: AsyncSession,
+        session_id: str,
+        *,
+        agent_id: str | None = None,
+    ) -> tuple[str, str] | None:
+        scope = normalize_agent_scope(agent_id)
+        result = await db.execute(
+            select(ChatSession.agent_id, ChatSession.session_id).where(
+                ChatSession.session_id == session_id,
+            )
+        )
+        matches = list(result.all())
+        if not matches:
+            return None
+
+        target = (scope, session_id)
+        for row in matches:
+            if (row.agent_id, row.session_id) == target:
+                return target
+        if len(matches) == 1:
+            return (matches[0].agent_id, matches[0].session_id)
+        if scope != NO_AGENT_SCOPE:
+            for row in matches:
+                if row.agent_id == scope:
+                    return (row.agent_id, row.session_id)
+        return None
 
     async def _get_timestamps(
         self,

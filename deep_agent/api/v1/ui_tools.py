@@ -21,9 +21,12 @@ async def list_ui_tools(
     source: str | None = Query(default=None),
     enabled: bool | None = Query(default=None),
 ) -> UiToolListResponse:
-    rows = await store.list_all(source=source, mcp_server_name=mcp_server, enabled=enabled)
-    if agent_id is not None:
-        rows = [row for row in rows if not row.agent_ids or agent_id in row.agent_ids]
+    rows = await store.list_all(
+        source=source,
+        mcp_server_name=mcp_server,
+        enabled=enabled,
+        agent_id=agent_id,
+    )
 
     db_records = [UIToolRecord.from_row(row) for row in rows if row.source != "builtin"]
     merged, _ = merge_definitions(builtin_ui_records(), db_records)

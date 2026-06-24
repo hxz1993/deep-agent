@@ -44,6 +44,14 @@ class SessionStore(Protocol):
     async def list_sessions(self) -> list[tuple[str, str]]:
         ...
 
+    async def resolve_ref(
+        self,
+        session_id: str,
+        *,
+        agent_id: str | None = None,
+    ) -> tuple[str, str] | None:
+        ...
+
     async def delete(self, session_id: str, *, agent_id: str | None = None) -> None:
         ...
 
@@ -119,6 +127,14 @@ class SqlConversationCoordinator:
     async def list_sessions(self) -> list[tuple[str, str]]:
         return await self._chat_sessions.list_sessions()
 
+    async def resolve_ref(
+        self,
+        session_id: str,
+        *,
+        agent_id: str | None = None,
+    ) -> tuple[str, str] | None:
+        return await self._chat_sessions.resolve_ref(session_id, agent_id=agent_id)
+
     async def get_session_timestamps(
         self,
         session_id: str,
@@ -179,6 +195,29 @@ class InMemoryConversationCoordinator:
 
     async def list_sessions(self) -> list[tuple[str, str]]:
         return list(self._histories.keys())
+
+    async def resolve_ref(
+        self,
+        session_id: str,
+        *,
+        agent_id: str | None = None,
+    ) -> tuple[str, str] | None:
+        scope = normalize_agent_scope(agent_id)
+        sessions = list(self._histories.keys())
+        target = (scope, session_id)
+        if target in sessions:
+            return target
+
+        matches = [ref for ref in sessions if ref[1] == session_id]
+        if not matches:
+            return None
+        if len(matches) == 1:
+            return matches[0]
+        if scope != NO_AGENT_SCOPE:
+            for ref in matches:
+                if ref[0] == scope:
+                    return ref
+        return None
 
     async def delete(self, session_id: str, *, agent_id: str | None = None) -> None:
         scope = normalize_agent_scope(agent_id)

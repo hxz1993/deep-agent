@@ -4,15 +4,12 @@ from dataclasses import dataclass
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from deep_agent.db.conversation import InMemoryConversationCoordinator, SessionStore, SqlConversationCoordinator
 from deep_agent.db.dialect import DbDialect
 from deep_agent.db.stores.agent import AgentStoreBase, create_agent_store
 from deep_agent.db.stores.chat_session import ChatSessionStoreBase, create_chat_session_store
-from deep_agent.db.stores.conversation.memory import InMemoryConversationStore
-from deep_agent.db.stores.conversation.protocol import SessionStore
-from deep_agent.db.stores.conversation.sql import SqlConversationStore
 from deep_agent.db.stores.mcp import McpServerStoreBase, create_mcp_store
 from deep_agent.db.stores.message import MessageStoreBase, create_message_store
-from deep_agent.db.stores.session_query import SessionQueryStoreBase, create_session_query_store
 from deep_agent.db.stores.ui_tool import UiToolStoreBase, create_ui_tool_store
 
 __all__ = ["DataStores", "create_data_stores"]
@@ -20,7 +17,9 @@ __all__ = ["DataStores", "create_data_stores"]
 
 @dataclass
 class DataStores:
-    conversation: SessionStore
+    chat_session: ChatSessionStoreBase | None
+    message: MessageStoreBase | None
+    coordinator: SessionStore
     agent: AgentStoreBase | None
     mcp: McpServerStoreBase | None
     ui_tool: UiToolStoreBase | None
@@ -32,22 +31,24 @@ def create_data_stores(
 ) -> DataStores:
     if session_factory is None:
         return DataStores(
-            conversation=InMemoryConversationStore(),
+            chat_session=None,
+            message=None,
+            coordinator=InMemoryConversationCoordinator(),
             agent=None,
             mcp=None,
             ui_tool=None,
         )
 
     message = create_message_store(dialect, session_factory)
-    chat_session = create_chat_session_store(dialect, session_factory)
-    session_query = create_session_query_store(dialect, session_factory, message)
+    chat_session = create_chat_session_store(dialect, session_factory, message_store=message)
 
     return DataStores(
-        conversation=SqlConversationStore(
+        chat_session=chat_session,
+        message=message,
+        coordinator=SqlConversationCoordinator(
             session_factory,
             chat_session=chat_session,
             message=message,
-            session_query=session_query,
         ),
         agent=create_agent_store(dialect, session_factory),
         mcp=create_mcp_store(dialect, session_factory),

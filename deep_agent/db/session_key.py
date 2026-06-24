@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from deep_agent.db.stores.conversation import SessionStore
+    from deep_agent.db.conversation import SessionStore
 
 
 def scoped_session_key(agent_id: str, session_id: str) -> str:
@@ -42,13 +42,13 @@ async def resolve_session_key(
     if not search_agent:
         return None
 
-    from deep_agent.db.stores.conversation.sql import SqlConversationStore
+    from deep_agent.db.conversation import SqlConversationCoordinator
 
     for key in matches:
         key_agent, _ = parse_scoped_session_key(key)
         if key_agent == search_agent:
             return key
-        if isinstance(store, SqlConversationStore):
+        if isinstance(store, SqlConversationCoordinator):
             stored_agent_id = await store.get_session_agent_id(key)
             if stored_agent_id == search_agent:
                 return key

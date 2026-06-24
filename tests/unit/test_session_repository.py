@@ -9,24 +9,24 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from deep_agent.db.models import Agent, Base, ChatMessage, ChatSession
 from deep_agent.db.dialect import DbDialect
+from deep_agent.db.stores.chat_session import ChatSessionStoreBase, create_chat_session_store
 from deep_agent.db.stores.message import create_message_store
-from deep_agent.db.stores.session_query import SessionQueryStoreBase, create_session_query_store
 from deep_agent.db.session_key import scoped_session_key
 
 _message_adapter: TypeAdapter[ModelMessage] = TypeAdapter(ModelMessage)
 
 
-class SessionQueryStoreTests(unittest.IsolatedAsyncioTestCase):
+class ChatSessionStoreTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         self.engine = create_async_engine("sqlite+aiosqlite:///:memory:")
         async with self.engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
         self.session_factory = async_sessionmaker(self.engine, expire_on_commit=False)
         message_store = create_message_store(DbDialect.POSTGRES, self.session_factory)
-        self.store: SessionQueryStoreBase = create_session_query_store(
+        self.store: ChatSessionStoreBase = create_chat_session_store(
             DbDialect.POSTGRES,
             self.session_factory,
-            message_store,
+            message_store=message_store,
         )
 
         async with self.session_factory() as db:

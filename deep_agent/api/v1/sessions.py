@@ -8,7 +8,6 @@ from fastapi import APIRouter, HTTPException, Query, status
 from deep_agent.core.context import AppContextDep
 from deep_agent.db.session_list import MAX_LIST_LIMIT, SessionListFilters, SessionSummaryRow
 from deep_agent.db.session_key import parse_scoped_session_key, resolve_session_key
-from deep_agent.db.stores.conversation import SessionStore
 from deep_agent.agent.history import (
     SessionHistoryResponse,
     first_user_prompt,
@@ -42,16 +41,14 @@ def _summary_to_session_info(row: SessionSummaryRow) -> SessionInfo:
 
 async def _build_session_info(
     ctx: AppContextDep,
-    store: SessionStore,
     session_key: str,
 ) -> SessionInfo:
-    history = await store.get_history(session_key)
+    history = await ctx.store.get_history(session_key)
     parsed_agent_id, session_id = parse_scoped_session_key(session_key)
 
     agent_id = parsed_agent_id
-    get_agent_id = getattr(store, "get_session_agent_id", None)
-    if get_agent_id is not None:
-        stored_agent_id = await get_agent_id(session_key)
+    if ctx.stores.chat_session is not None:
+        stored_agent_id = await ctx.stores.chat_session.get_agent_id(session_key)
         if stored_agent_id:
             agent_id = stored_agent_id
 
@@ -59,9 +56,8 @@ async def _build_session_info(
 
     created_at: datetime | None = None
     updated_at: datetime | None = None
-    get_timestamps = getattr(store, "get_session_timestamps", None)
-    if get_timestamps is not None:
-        created_at, updated_at = await get_timestamps(session_key)
+    if ctx.stores.chat_session is not None:
+        created_at, updated_at = await ctx.stores.chat_session.get_timestamps(session_key)
     if updated_at is None and history:
         created_at, updated_at = session_activity_timestamps(history)
 
@@ -125,7 +121,7 @@ async def get_session(
     history = await ctx.store.get_history(session_key)
     if not history and session_key not in await ctx.store.list_sessions():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
-    return await _build_session_info(ctx, ctx.store, session_key)
+    return await _build_session_info(ctx, session_key)
 
 
 @router.get("/sessions/{session_id}/history", response_model=SessionHistoryResponse)

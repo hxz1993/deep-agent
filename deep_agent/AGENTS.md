@@ -31,19 +31,19 @@ HTTP (REST/SSE)
         ├─ skill        skills/<name>/（仓库根，见 DEEP_AGENT_SKILLS_DIR）
         ├─ cursor-skill .cursor/skills/<name>/SKILL.md
         └─ mcp          mcp_servers 表 + mcps/ 内置兜底
-    → SessionStore（`db/stores/`）
+    → SessionStore（`db/conversation.py` 协调器；表 Store 在 `db/stores/`）
 ```
 
 ### 启动生命周期（`main.py` lifespan → `AppContext.bootstrap()`）
 
 1. `configure_logging()` → `AppContext.bootstrap()`（见 `core/context.py`）
 2. `OPTION` → `build_registry()`（native + skill + cursor-skill）；非 Linux 本地开发时 `options.py` 模块级自动加载 `.env`（可用 `DEEP_AGENT_LOAD_DOTENV` 覆盖）
-3. 有数据库：`upgrade_database()` → `bootstrap_database()` → `PostgresSessionStore` / `MySQLSessionStore` / `InMemorySessionStore`
+3. 有数据库：`upgrade_database()` → `bootstrap_database()` → 5 个表 Store + `SqlConversationCoordinator`
 4. `load_and_register_mcp(registry, session)` — DB 加载 MCP；DB 未覆盖的 `mcps/<name>/` 自动兜底
 5. `init_context(ctx)` — 路由通过 `Depends(AppContextDep)` 注入
 6. 关闭：`ctx.aclose()` → `reset_context()`
 
-无数据库 → `InMemorySessionStore`；`load_and_register_mcp` 跳过，**builtin MCP 也不注册**。调试 MCP 需配置 `DEEP_AGENT_DBMS_*`。
+无数据库 → `InMemoryConversationCoordinator`；`load_and_register_mcp` 跳过，**builtin MCP 也不注册**。调试 MCP 需配置 `DEEP_AGENT_DBMS_*`。
 
 ### 对话请求流（`POST /api/v1/chat/stream`）
 
@@ -102,7 +102,8 @@ HTTP (REST/SSE)
 | 路径 | 职责 |
 | --- | --- |
 | `deps.py` | `require_db`、`get_*_store(ctx)` Depends |
-| `stores/` | 各领域 Store（`agent/`、`mcp/`、`chat_session/`…）+ `bundle.DataStores` |
+| `conversation.py` | `SessionStore` 协议 + SQL/内存协调器（跨表写入、进程锁） |
+| `stores/` | 5 个表 Store（`agent/`、`mcp/`、`ui_tool/`、`chat_session/`、`message/`）+ `bundle.DataStores` |
 | `factory.py` / `dialect.py` | 方言工厂、`bootstrap_database()` |
 | `session_key.py` / `session_list.py` | 会话键解析、列表过滤 DTO |
 

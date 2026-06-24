@@ -91,7 +91,7 @@ class SessionListApiTests(unittest.TestCase):
 class SummaryToSessionInfoTests(unittest.TestCase):
     def test_summary_maps_scoped_session_id(self) -> None:
         from deep_agent.api.v1.sessions import _summary_to_session_info
-        from deep_agent.db.stores.session_query import SessionSummaryRow
+        from deep_agent.db.session_list import SessionSummaryRow
 
         now = datetime.now(timezone.utc)
         info = _summary_to_session_info(

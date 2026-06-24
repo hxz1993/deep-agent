@@ -15,7 +15,7 @@ from deep_agent.db.dialect import DbDialect
 from deep_agent.db.engine import close_db
 from deep_agent.db.factory import bootstrap_database
 from deep_agent.db.stores.bundle import DataStores, create_data_stores
-from deep_agent.db.stores.conversation import InMemoryConversationStore, SessionStore
+from deep_agent.db.conversation import InMemoryConversationCoordinator, SessionStore
 from deep_agent.options import OPTION
 
 _context: AppContext | None = None
@@ -31,7 +31,7 @@ class AppContext:
 
     @property
     def store(self) -> SessionStore:
-        return self.stores.conversation
+        return self.stores.coordinator
 
     @classmethod
     async def bootstrap(cls) -> AppContext:
@@ -102,9 +102,11 @@ class AppContext:
             )
             mcp_session_pool = McpSessionPool(mcp_acquire_retries=retries)
         if stores is None:
-            conversation = store or InMemoryConversationStore()
+            coordinator = store or InMemoryConversationCoordinator()
             stores = DataStores(
-                conversation=conversation,
+                chat_session=None,
+                message=None,
+                coordinator=coordinator,
                 agent=None,
                 mcp=None,
                 ui_tool=None,

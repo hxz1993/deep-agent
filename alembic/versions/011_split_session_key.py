@@ -162,6 +162,31 @@ def _create_chat_sessions_primary_key() -> None:
         )
 
 
+def _alter_not_null(
+    table: str,
+    column: str,
+    *,
+    column_type,
+    bind,
+    server_default: str | None = None,
+) -> None:
+    alter_kwargs: dict = {"nullable": False}
+    if server_default is not None:
+        alter_kwargs["server_default"] = server_default
+    if is_sqlite(bind):
+        with op.batch_alter_table(table) as batch_op:
+            batch_op.alter_column(column, **alter_kwargs)
+        return
+    # ponytail: MySQL MODIFY COLUMN requires existing_type even when only changing nullability.
+    op.alter_column(
+        table,
+        column,
+        existing_type=column_type,
+        existing_nullable=True,
+        **alter_kwargs,
+    )
+
+
 def upgrade() -> None:
     if not _has_column("chat_sessions", "session_key"):
         _drop_known_foreign_keys()
@@ -200,26 +225,30 @@ def upgrade() -> None:
     drop_session_key_cs = _has_column("chat_sessions", "session_key")
     drop_session_key_cm = _has_column("chat_messages", "session_key")
 
-    if is_sqlite(bind):
-        with op.batch_alter_table("chat_sessions") as batch_op:
-            batch_op.alter_column("session_id", nullable=False)
-            batch_op.alter_column("agent_id", nullable=False, server_default=NO_AGENT_SCOPE)
-            if drop_session_key_cs:
-                batch_op.drop_column("session_key")
-        with op.batch_alter_table("chat_messages") as batch_op:
-            batch_op.alter_column("agent_id", nullable=False, server_default=NO_AGENT_SCOPE)
-            batch_op.alter_column("session_id", nullable=False)
-            if drop_session_key_cm:
-                batch_op.drop_column("session_key")
-    else:
-        op.alter_column("chat_sessions", "session_id", nullable=False)
-        op.alter_column("chat_sessions", "agent_id", nullable=False, server_default=NO_AGENT_SCOPE)
-        op.alter_column("chat_messages", "agent_id", nullable=False, server_default=NO_AGENT_SCOPE)
-        op.alter_column("chat_messages", "session_id", nullable=False)
-        if drop_session_key_cs:
-            op.drop_column("chat_sessions", "session_key")
-        if drop_session_key_cm:
-            op.drop_column("chat_messages", "session_key")
+    session_col_type = key_type(bind)
+    agent_col_type = sa.String(AGENT_ID_LENGTH)
+
+    _alter_not_null("chat_sessions", "session_id", column_type=session_col_type, bind=bind)
+    _alter_not_null(
+        "chat_sessions",
+        "agent_id",
+        column_type=agent_col_type,
+        bind=bind,
+        server_default=NO_AGENT_SCOPE,
+    )
+    _alter_not_null(
+        "chat_messages",
+        "agent_id",
+        column_type=agent_col_type,
+        bind=bind,
+        server_default=NO_AGENT_SCOPE,
+    )
+    _alter_not_null("chat_messages", "session_id", column_type=session_col_type, bind=bind)
+
+    if drop_session_key_cs:
+        op.drop_column("chat_sessions", "session_key")
+    if drop_session_key_cm:
+        op.drop_column("chat_messages", "session_key")
 
     _create_chat_sessions_primary_key()
     _drop_constraint_if_exists("chat_messages", "uq_chat_messages_session_sequence", constraint_type="unique")
@@ -300,8 +329,9 @@ def downgrade() -> None:
             )
         )
 
-    op.alter_column("chat_sessions", "session_key", nullable=False)
-    op.alter_column("chat_messages", "session_key", nullable=False)
+    session_key_type = key_type(bind)
+    _alter_not_null("chat_sessions", "session_key", column_type=session_key_type, bind=bind)
+    _alter_not_null("chat_messages", "session_key", column_type=session_key_type, bind=bind)
 
     op.drop_column("chat_sessions", "session_id")
     op.drop_column("chat_messages", "agent_id")

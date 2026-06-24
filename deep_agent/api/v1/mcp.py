@@ -2,10 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from deep_agent.capabilities import load_and_register_mcp
 from deep_agent.capabilities.mcp.ui_discovery import discover_and_persist_ui_tools
-from deep_agent.capabilities.registry import CapabilityRegistry
-from deep_agent.core.context import AppContextDep
 from deep_agent.db.deps import get_mcp_store, get_ui_tool_store
 from deep_agent.db.stores.mcp import McpServerStoreBase
 from deep_agent.db.stores.ui_tool import UiToolStoreBase
@@ -13,10 +10,6 @@ from deep_agent.schemas.mcp import McpBuiltinConfig, McpServerCreate, McpServerR
 from deep_agent.schemas.ui_tools import UiToolsRefreshResponse
 
 router = APIRouter()
-
-
-async def _reload_mcp_registry(registry: CapabilityRegistry, mcp_store: McpServerStoreBase) -> None:
-    await load_and_register_mcp(registry, mcp_store)
 
 
 def _assert_builtin_row_mutable(row, body: McpServerUpdate) -> None:
@@ -58,7 +51,6 @@ async def get_mcp_server(
 
 @router.post("/mcp", response_model=McpServerResponse, status_code=status.HTTP_201_CREATED)
 async def create_mcp_server(
-    ctx: AppContextDep,
     body: McpServerCreate,
     store: McpServerStoreBase = Depends(get_mcp_store),
 ) -> McpServerResponse:
@@ -72,13 +64,11 @@ async def create_mcp_server(
         row = await store.create_unique(body)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-    await _reload_mcp_registry(ctx.registry, store)
     return McpServerResponse.from_row(row)
 
 
 @router.patch("/mcp/{name}", response_model=McpServerResponse)
 async def update_mcp_server(
-    ctx: AppContextDep,
     name: str,
     body: McpServerUpdate,
     store: McpServerStoreBase = Depends(get_mcp_store),
@@ -89,20 +79,17 @@ async def update_mcp_server(
     _assert_builtin_row_mutable(row, body)
     updated = await store.update(name, body)
     assert updated is not None
-    await _reload_mcp_registry(ctx.registry, store)
     return McpServerResponse.from_row(updated)
 
 
 @router.delete("/mcp/{name}", status_code=status.HTTP_200_OK)
 async def delete_mcp_server(
-    ctx: AppContextDep,
     name: str,
     store: McpServerStoreBase = Depends(get_mcp_store),
 ) -> None:
     deleted = await store.delete(name)
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"MCP server not found: {name}")
-    await _reload_mcp_registry(ctx.registry, store)
 
 
 @router.post("/mcp/{name}/ui-tools/refresh", response_model=UiToolsRefreshResponse)

@@ -12,10 +12,11 @@
 mcps/<name>/server.py  →  capability mcp:<name>  →  工具前缀 <name>_
 ```
 
-1. 启动时 `load_builtin_mcp_capabilities`（`deep_agent/capabilities/mcp/builtin.py`）扫描本目录
-2. 有数据库时：`load_and_register_mcp` 以 DB `mcp_servers` 为主；**DB 无同名 enabled 记录**时 builtin 兜底
+1. 每次构建 Agent / 列举工具时，`resolve_mcp_toolsets`（`deep_agent/capabilities/mcp/resolver.py`）从 DB 读取 enabled 行
+2. `load_builtin_mcp_capabilities`（`builtin.py`）扫描本目录作兜底：**DB 无同名 enabled 记录**时启用 builtin
 3. 连接懒加载：`async with agent` 时才拉起子进程
 4. `MCP_STDIO_SESSION_SCOPE=true`（默认）时，stdio 子进程按 chat session 保活
+5. MCP CRUD API 只写库，不做 registry 热重载（多实例下无意义）
 
 无数据库 → MCP 整段不加载（builtin 也不注册）。
 

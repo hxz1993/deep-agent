@@ -94,10 +94,13 @@ def _toolsets_for_spec(
     registry: CapabilityRegistry,
     spec: AgentSpec,
     *,
+    mcp_toolsets: list[Any] | None = None,
     dynamic_ui_toolset: Any | None = None,
 ) -> list[Any]:
     """Resolve capability toolsets and include UI tools for HITL."""
     toolsets = list(registry.toolsets(spec.capabilities))
+    if mcp_toolsets:
+        toolsets.extend(mcp_toolsets)
 
     if dynamic_ui_toolset is not None:
         toolsets = [toolset for toolset in toolsets if _toolset_id(toolset) != "ui"]
@@ -114,6 +117,7 @@ def build_agent(
     registry: CapabilityRegistry,
     *,
     request_retries: int = 2,
+    mcp_toolsets: list[Any] | None = None,
     dynamic_ui_toolset: Any | None = None,
 ) -> Agent[AgentDeps, str]:
     """Construct a Pydantic AI agent from a spec + the capability registry.
@@ -124,7 +128,12 @@ def build_agent(
     along with their toolsets and are injected automatically when enabled.
     """
     model = _resolve_model(spec)
-    toolsets = _toolsets_for_spec(registry, spec, dynamic_ui_toolset=dynamic_ui_toolset)
+    toolsets = _toolsets_for_spec(
+        registry,
+        spec,
+        mcp_toolsets=mcp_toolsets,
+        dynamic_ui_toolset=dynamic_ui_toolset,
+    )
     capabilities = [DeepSeekThinkingRetry()] if isinstance(model, DeepSeekChatModel) else None
     return Agent(
         model,

@@ -6,6 +6,7 @@ from deep_agent.agent.factory import build_agent
 from deep_agent.agent.limits import resolve_agent_max_requests
 from deep_agent.agent.runner import AgentRunner
 from deep_agent.agent.spec import AgentSpec, default_spec
+from deep_agent.capabilities.mcp.resolver import resolve_mcp_toolsets
 from deep_agent.capabilities.ui.registry import prepare_ui_toolset_for_spec
 from deep_agent.core.context import AppContext
 from deep_agent.core.exceptions import AgentNotFoundError
@@ -46,10 +47,13 @@ async def _build_runner_from_spec(spec: AgentSpec, ctx: AppContext) -> AgentRunn
     if ctx.stores.ui_tool is not None:
         dynamic_ui_toolset, ui_tool_hints = await prepare_ui_toolset_for_spec(ctx.stores, spec)
 
+    mcp_toolsets = await resolve_mcp_toolsets(ctx.stores, spec)
+
     agent = build_agent(
         spec,
         ctx.registry,
         request_retries=OPTION.agent.request_retries,
+        mcp_toolsets=mcp_toolsets,
         dynamic_ui_toolset=dynamic_ui_toolset,
     )
     limits = UsageLimits(

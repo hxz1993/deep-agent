@@ -1,13 +1,10 @@
 from __future__ import annotations
 
 from deep_agent.capabilities.cursor_skills import load_cursor_skill_capabilities
-from deep_agent.capabilities.mcp.builtin import load_builtin_mcp_capabilities
-from deep_agent.capabilities.mcp.db_loader import capabilities_from_rows
 from deep_agent.capabilities.native import build_native_capability
 from deep_agent.capabilities.registry import Capability, CapabilityRegistry, ToolInfo
 from deep_agent.capabilities.skills import load_skill_capabilities
-from deep_agent.core.paths import DEEP_AGENT_ROOT
-from deep_agent.db.stores.mcp import McpServerStoreBase
+from deep_agent.db.stores.bundle import DataStores
 from deep_agent.options import OPTION
 from loguru import logger
 
@@ -16,12 +13,17 @@ __all__ = [
     "CapabilityRegistry",
     "ToolInfo",
     "build_registry",
-    "load_and_register_mcp",
 ]
 
 
-def build_registry() -> CapabilityRegistry:
-    """Assemble the registry from native, skill, and cursor-skill sources."""
+def build_registry(*, stores: DataStores | None = None) -> CapabilityRegistry:
+    """Assemble the registry from static capability sources.
+
+    ``stores`` is reserved for future immutable store-backed registration at
+    startup. Mutable store config (e.g. MCP servers) is resolved at use time via
+    ``capabilities.mcp.resolver``.
+    """
+    _ = stores
     registry = CapabilityRegistry()
 
     registry.register(build_native_capability())
@@ -34,22 +36,3 @@ def build_registry() -> CapabilityRegistry:
 
     logger.info("Registered capabilities: {}", ", ".join(registry.names()))
     return registry
-
-
-async def load_and_register_mcp(registry: CapabilityRegistry, mcp_store: McpServerStoreBase) -> None:
-    """Load enabled MCP servers from the database and hot-reload registry entries."""
-    rows = await mcp_store.list_all()
-    caps = capabilities_from_rows(rows)
-
-    db_names = {row.name for row in rows if row.enabled}
-    mcps_dir = DEEP_AGENT_ROOT / "mcps"
-    for builtin in load_builtin_mcp_capabilities(str(mcps_dir)):
-        short_name = builtin.name.removeprefix("mcp:")
-        if short_name not in db_names:
-            caps.append(builtin)
-
-    registry.replace_by_kind("mcp", caps)
-    logger.info(
-        "Registered MCP capabilities from database: {}",
-        ", ".join(c.name for c in caps) or "(none)",
-    )

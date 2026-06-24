@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
+from deep_agent.capabilities.mcp.resolver import describe_mcp_capabilities
 from deep_agent.capabilities.ui.registry import load_effective_ui_tools
 from deep_agent.core.context import AppContextDep
 from deep_agent.schemas.chat import CapabilityDescription, ToolDescription
@@ -13,6 +14,7 @@ router = APIRouter()
 async def list_capabilities(ctx: AppContextDep) -> list[CapabilityDescription]:
     """List all registered capabilities (native / skill / mcp / ui) and their tools."""
     caps = [CapabilityDescription(**cap) for cap in ctx.registry.describe()]
+    caps.extend(CapabilityDescription(**cap) for cap in await describe_mcp_capabilities(ctx.stores))
 
     if ctx.stores.ui_tool is None:
         return caps

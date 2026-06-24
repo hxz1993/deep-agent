@@ -83,25 +83,18 @@ class ChatHeaderForwardingTests(unittest.TestCase):
 
         from deep_agent.api.v1 import api_router
         from deep_agent.capabilities import build_registry
-        from deep_agent.capabilities.mcp.builtin import load_builtin_mcp_capabilities
         from deep_agent.capabilities.mcp.session_pool import McpSessionPool
-        from deep_agent.core.context import AppContext, get_context, init_context, reset_context
-        from deep_agent.core.paths import DEEP_AGENT_ROOT
-        from deep_agent.db.stores import InMemorySessionStore
+        from deep_agent.core.context import AppContext, init_context, reset_context
+        from tests.integration.helpers.chat import testing_data_stores
 
         pool = McpSessionPool()
         init_context(
             AppContext.for_testing(
-                store=InMemorySessionStore(),
+                registry=build_registry(),
+                stores=testing_data_stores(mcp_rows=[]),
                 mcp_session_pool=pool,
             )
         )
-        registry = build_registry()
-        registry.replace_by_kind(
-            "mcp",
-            load_builtin_mcp_capabilities(str(DEEP_AGENT_ROOT / "mcps")),
-        )
-        get_context().registry = registry
 
         app = FastAPI()
         app.include_router(api_router)

@@ -6,7 +6,7 @@ from typing import Annotated
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
-from deep_agent.capabilities import build_registry, load_and_register_mcp
+from deep_agent.capabilities import build_registry
 from deep_agent.capabilities.mcp.session_pool import McpSessionPool
 from deep_agent.capabilities.registry import CapabilityRegistry
 from loguru import logger
@@ -34,7 +34,6 @@ class AppContext:
 
     @classmethod
     async def bootstrap(cls) -> AppContext:
-        registry = build_registry()
         mcp_session_pool = McpSessionPool(mcp_acquire_retries=OPTION.agent.mcp_acquire_retries)
 
         try:
@@ -47,9 +46,14 @@ class AppContext:
             stores = bundle.stores
             db_engine = bundle.engine
             db_session_factory = bundle.session_factory
+            logger.info(
+                "{} started (model={}, database={})",
+                OPTION.agent.app_name,
+                OPTION.agent.model,
+                bundle.dialect.value,
+            )
         else:
             stores = create_data_stores(DbDialect.MEMORY, None)
-            logger.warning("Database not configured; MCP servers will not be loaded.")
             logger.info(
                 "{} started (model={}, database=in-memory)",
                 OPTION.agent.app_name,
@@ -59,28 +63,13 @@ class AppContext:
             db_session_factory = None
 
         ctx = cls(
-            registry=registry,
+            registry=build_registry(stores=stores),
             stores=stores,
             mcp_session_pool=mcp_session_pool,
             db_engine=db_engine,
             db_session_factory=db_session_factory,
         )
         init_context(ctx)
-
-        if (
-            bundle is not None
-            and (mcp_store := bundle.stores.mcp) is not None
-        ):
-            try:
-                await load_and_register_mcp(registry, mcp_store)
-                logger.info(
-                    "{} started (model={}, database={})",
-                    OPTION.agent.app_name,
-                    OPTION.agent.model,
-                    bundle.dialect.value,
-                )
-            except Exception:  # noqa
-                logger.exception("Failed to load MCP servers from database.")
         return ctx
 
     @classmethod

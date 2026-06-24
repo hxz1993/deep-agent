@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from deep_agent.api.v1 import api_router
+from deep_agent.capabilities.mcp.resolver import load_mcp_capabilities
 from deep_agent.core.context import AppContext, AppContextDep, reset_context
 from deep_agent.core.exceptions import AgentNotFoundError, DeepAgentError
 from deep_agent.core.logging import configure_logging
@@ -58,11 +59,13 @@ async def health() -> dict[str, str]:
 
 
 @app.get("/info", tags=["meta"])
-async def root(ctx: AppContextDep) -> dict[str, object]:
+async def info(ctx: AppContextDep) -> dict[str, object]:
+    mcp_caps = await load_mcp_capabilities(ctx.stores)
+    capability_names = ctx.registry.names() + [cap.name for cap in mcp_caps]
     return {
         "name": OPTION.agent.app_name,
         "model": OPTION.agent.model,
-        "capabilities": ctx.registry.names(),
+        "capabilities": capability_names,
         "docs": "/docs",
     }
 

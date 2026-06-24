@@ -13,8 +13,8 @@ def load_builtin_mcp_capabilities(mcps_dir: str) -> list[Capability]:
 
     Each immediate subdirectory containing a ``server.py`` becomes one MCP
     capability, launched lazily over stdio with the current Python interpreter.
-    Tool names are prefixed with the directory name to avoid collisions, mirroring
-    the ``config/mcp.json`` loader. No subprocess is spawned here; the agent opens
+    Tool names are prefixed with the directory name to avoid collisions. No subprocess
+    is spawned here; the agent opens
     the connection on demand (``async with agent``).
     """
     root = Path(mcps_dir)

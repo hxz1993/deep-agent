@@ -22,7 +22,7 @@ class Capability:
     Pydantic AI toolset:
       - native:       a ``FunctionToolset`` of in-process Python functions
       - skill:        instructions + a ``FunctionToolset`` loaded from ``skills/``
-      - mcp:          an MCP server toolset loaded from ``config/mcp.json``
+      - mcp:          an MCP server toolset loaded from ``mcp_servers`` DB rows
       - cursor-skill: a Cursor ``SKILL.md`` exposed via progressive disclosure
 
     ``toolset`` is any Pydantic AI ``AbstractToolset`` (typed as ``Any`` to avoid

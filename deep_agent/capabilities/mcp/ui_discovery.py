@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from typing import Any
 
 from loguru import logger
@@ -55,6 +56,36 @@ def _normalize_tool_result(raw: Any) -> Any:
             text = first.text
             return json.loads(text) if isinstance(text, str) and text.strip() else {}
     return json.loads(str(raw))
+
+
+def mcp_rows_for_ui_discovery(rows: list[McpServer]) -> list[McpServer]:
+    """Remote MCP rows with ui_tools discovery enabled."""
+    candidates: list[McpServer] = []
+    for row in rows:
+        if is_builtin_mcp_row(row.name, row.transport, row.config):
+            continue
+        cfg = resolve_ui_tools_config(row.config)
+        if not cfg["enabled"] or cfg["mode"] == "none":
+            continue
+        candidates.append(row)
+    return candidates
+
+
+async def should_refresh_mcp_ui_tools(ui_tool_store: UiToolStoreBase, row: McpServer) -> bool:
+    """True when cached MCP UI tools are missing or older than refresh_seconds."""
+    cfg = resolve_ui_tools_config(row.config)
+    cached = await ui_tool_store.list_all(
+        source="mcp",
+        mcp_server_name=row.name,
+        enabled=True,
+    )
+    if not cached:
+        return True
+    discovered_at = [item.discovered_at for item in cached if item.discovered_at is not None]
+    if not discovered_at:
+        return True
+    age_seconds = (datetime.now(timezone.utc) - max(discovered_at)).total_seconds()
+    return age_seconds >= cfg["refresh_seconds"]
 
 
 async def fetch_ui_tools_manifest(row: McpServer) -> list[UiToolDefinition]:

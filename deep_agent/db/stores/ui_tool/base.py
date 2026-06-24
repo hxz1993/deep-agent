@@ -20,6 +20,7 @@ class UiToolStoreBase(SessionBoundMixin):
         *,
         source: str | None = None,
         mcp_server_name: str | None = None,
+        mcp_server_names: set[str] | frozenset[str] | None = None,
         enabled: bool | None = None,
         agent_id: str | None = None,
     ) -> list[UiToolDefinition]:
@@ -28,6 +29,7 @@ class UiToolStoreBase(SessionBoundMixin):
                 db,
                 source=source,
                 mcp_server_name=mcp_server_name,
+                mcp_server_names=mcp_server_names,
                 enabled=enabled,
                 agent_id=agent_id,
             )
@@ -134,6 +136,7 @@ class UiToolStoreBase(SessionBoundMixin):
         *,
         source: str | None = None,
         mcp_server_name: str | None = None,
+        mcp_server_names: set[str] | frozenset[str] | None = None,
         enabled: bool | None = None,
         agent_id: str | None = None,
     ) -> list[UiToolDefinition]:
@@ -142,6 +145,16 @@ class UiToolStoreBase(SessionBoundMixin):
             stmt = stmt.where(UiToolDefinition.source == source)
         if mcp_server_name is not None:
             stmt = stmt.where(UiToolDefinition.mcp_server_name == mcp_server_name)
+        elif mcp_server_names is not None:
+            if mcp_server_names:
+                stmt = stmt.where(
+                    or_(
+                        UiToolDefinition.mcp_server_name.is_(None),
+                        UiToolDefinition.mcp_server_name.in_(mcp_server_names),
+                    )
+                )
+            else:
+                stmt = stmt.where(UiToolDefinition.mcp_server_name.is_(None))
         if enabled is not None:
             stmt = stmt.where(UiToolDefinition.enabled == enabled)
         if agent_id is not None:

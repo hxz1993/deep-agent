@@ -8,15 +8,20 @@ from pydantic_ai import ExternalToolset
 from pydantic_ai.tools import ToolDefinition
 
 from deep_agent.agent.spec import AgentSpec
-from deep_agent.capabilities.mcp.builtin_config import is_builtin_mcp_row
+from deep_agent.capabilities.mcp.resolver import (
+    effective_mcp_names_for_ui,
+    effective_mcp_rows_for_discovery,
+)
+from deep_agent.capabilities.mcp.db_loader import capabilities_from_rows
 from deep_agent.capabilities.mcp.ui_discovery import (
     discover_and_persist_ui_tools,
-    non_builtin_mcp_names_for_spec,
-    resolve_ui_tools_config,
+    mcp_rows_for_ui_discovery,
+    should_refresh_mcp_ui_tools,
 )
 from deep_agent.capabilities.ui.builtin import builtin_ui_records
 from deep_agent.capabilities.ui.constants import SOURCE_PRIORITY
 from deep_agent.capabilities.ui.types import UIToolRecord
+from deep_agent.db.models import McpServer
 from deep_agent.db.stores.bundle import DataStores
 
 
@@ -133,18 +138,22 @@ def enrich_deferred(deferred: dict[str, Any], hints: dict[str, dict[str, Any]]) 
     return enriched
 
 
-async def ensure_mcp_ui_tools_discovered(stores: DataStores, spec: AgentSpec) -> None:
-    """Discover MCP UI tools on demand when building an agent with non-builtin MCP."""
-    mcp_names = non_builtin_mcp_names_for_spec(spec.capabilities)
-    if not mcp_names or stores.mcp is None or stores.ui_tool is None:
+async def ensure_mcp_ui_tools_discovered(
+    stores: DataStores,
+    spec: AgentSpec,
+    *,
+    mcp_rows: list[McpServer] | None = None,
+) -> None:
+    """Discover MCP UI tools on demand for non-builtin MCP enabled on this agent."""
+    if stores.mcp is None or stores.ui_tool is None:
         return
 
-    for name in sorted(mcp_names):
-        row = await stores.mcp.get_by_name(name)
-        if row is None or not row.enabled or is_builtin_mcp_row(row.name, row.transport, row.config):
-            continue
-        cfg = resolve_ui_tools_config(row.config)
-        if not cfg["enabled"] or cfg["mode"] == "none":
+    if mcp_rows is None:
+        mcp_rows = await stores.mcp.list_all()
+
+    scoped = effective_mcp_rows_for_discovery(spec, mcp_rows)
+    for row in sorted(mcp_rows_for_ui_discovery(scoped), key=lambda item: item.name):
+        if not await should_refresh_mcp_ui_tools(stores.ui_tool, row):
             continue
         await discover_and_persist_ui_tools(stores.ui_tool, row, use_cache_on_error=True)
 
@@ -154,15 +163,23 @@ async def load_effective_ui_tools(
     spec: AgentSpec,
     *,
     mcp_enabled_names: set[str] | None = None,
+    mcp_rows: list[McpServer] | None = None,
 ) -> EffectiveUiTools:
     assert stores.ui_tool is not None
-    db_rows = await stores.ui_tool.list_all(enabled=True)
-    db_records = [UIToolRecord.from_row(row) for row in db_rows if row.source != "builtin"]
 
     if mcp_enabled_names is None:
-        assert stores.mcp is not None
-        mcp_rows = await stores.mcp.list_all()
-        mcp_enabled_names = {row.name for row in mcp_rows if row.enabled}
+        if mcp_rows is None:
+            assert stores.mcp is not None
+            mcp_rows = await stores.mcp.list_all()
+        caps = capabilities_from_rows(mcp_rows)
+        mcp_enabled_names = effective_mcp_names_for_ui(spec, caps, mcp_rows)
+
+    db_rows = await stores.ui_tool.list_all(
+        enabled=True,
+        agent_id=spec.agent_id,
+        mcp_server_names=mcp_enabled_names,
+    )
+    db_records = [UIToolRecord.from_row(row) for row in db_rows if row.source != "builtin"]
 
     visible_db = [
         record
@@ -185,9 +202,11 @@ async def load_effective_ui_tools(
 async def prepare_ui_toolset_for_spec(
     stores: DataStores,
     spec: AgentSpec,
+    *,
+    mcp_rows: list[McpServer] | None = None,
 ) -> tuple[ExternalToolset | None, dict[str, dict[str, Any]]]:
-    await ensure_mcp_ui_tools_discovered(stores, spec)
-    effective = await load_effective_ui_tools(stores, spec)
+    await ensure_mcp_ui_tools_discovered(stores, spec, mcp_rows=mcp_rows)
+    effective = await load_effective_ui_tools(stores, spec, mcp_rows=mcp_rows)
     hints = build_tool_hints(effective.definitions)
     if not effective.has_dynamic:
         return None, hints

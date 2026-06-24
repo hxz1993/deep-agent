@@ -85,6 +85,48 @@ class UiToolStoreTests(unittest.IsolatedAsyncioTestCase):
     async def asyncTearDown(self) -> None:
         await self.engine.dispose()
 
+    async def test_list_all_scopes_mcp_server_names(self) -> None:
+        now = datetime.now(timezone.utc)
+        async with self.session_factory() as db:
+            db.add_all(
+                [
+                    UiToolDefinition(
+                        name="acme__tool",
+                        description="acme",
+                        parameters_json_schema={"type": "object"},
+                        source="mcp",
+                        mcp_server_name="acme",
+                        enabled=True,
+                        created_at=now,
+                        updated_at=now,
+                    ),
+                    UiToolDefinition(
+                        name="crm__tool",
+                        description="crm",
+                        parameters_json_schema={"type": "object"},
+                        source="mcp",
+                        mcp_server_name="crm",
+                        enabled=True,
+                        created_at=now,
+                        updated_at=now,
+                    ),
+                    UiToolDefinition(
+                        name="demo__manual",
+                        description="manual",
+                        parameters_json_schema={"type": "object"},
+                        source="manual",
+                        enabled=True,
+                        created_at=now,
+                        updated_at=now,
+                    ),
+                ]
+            )
+            await db.commit()
+
+        rows = await self.store.list_all(enabled=True, mcp_server_names={"acme"})
+        names = {row.name for row in rows}
+        self.assertEqual(names, {"acme__tool", "demo__manual"})
+
     async def test_create_manual_and_list(self) -> None:
         row = await self.store.create_manual(
             UiToolCreate(

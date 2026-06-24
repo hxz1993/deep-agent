@@ -38,14 +38,6 @@ class AppContext:
         registry = build_registry()
         mcp_session_pool = McpSessionPool(mcp_acquire_retries=OPTION.agent.mcp_acquire_retries)
 
-        stores = create_data_stores(DbDialect.MEMORY, None)
-        ctx = cls(
-            registry=registry,
-            stores=stores,
-            mcp_session_pool=mcp_session_pool,
-        )
-        init_context(ctx)
-
         try:
             bundle = await bootstrap_database()
         except Exception:
@@ -53,33 +45,43 @@ class AppContext:
             raise
 
         if bundle is not None:
-            ctx.stores = bundle.stores
-            ctx.db_engine = bundle.engine
-            ctx.db_session_factory = bundle.session_factory
-            db_kind = (
-                "mysql"
-                if bundle.dialect is DbDialect.MYSQL
-                else "postgres"
-            )
-            try:
-                if bundle.stores.mcp is not None:
-                    await load_and_register_mcp(registry, bundle.stores.mcp)
-            except Exception:
-                logger.exception("Failed to load MCP servers from database.")
-            logger.info(
-                "{} started (model={}, database={})",
-                OPTION.agent.app_name,
-                OPTION.agent.model,
-                db_kind,
-            )
+            stores = bundle.stores
+            db_engine = bundle.engine
+            db_session_factory = bundle.session_factory
         else:
+            stores = create_data_stores(DbDialect.MEMORY, None)
             logger.warning("Database not configured; MCP servers will not be loaded.")
             logger.info(
                 "{} started (model={}, database=in-memory)",
                 OPTION.agent.app_name,
                 OPTION.agent.model,
             )
+            db_engine = None
+            db_session_factory = None
 
+        ctx = cls(
+            registry=registry,
+            stores=stores,
+            mcp_session_pool=mcp_session_pool,
+            db_engine=db_engine,
+            db_session_factory=db_session_factory,
+        )
+        init_context(ctx)
+
+        if (
+            bundle is not None
+            and (mcp_store := bundle.stores.mcp) is not None
+        ):
+            try:
+                await load_and_register_mcp(registry, mcp_store)
+                logger.info(
+                    "{} started (model={}, database={})",
+                    OPTION.agent.app_name,
+                    OPTION.agent.model,
+                    bundle.dialect.value,
+                )
+            except Exception:  # noqa
+                logger.exception("Failed to load MCP servers from database.")
         return ctx
 
     @classmethod

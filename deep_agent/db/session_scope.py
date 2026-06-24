@@ -16,14 +16,6 @@ def agent_scope_to_api(agent_scope: str) -> str | None:
     return agent_scope or None
 
 
-def split_legacy_session_key(session_key: str) -> tuple[str, str]:
-    """Split legacy ``agent_id:session_id`` storage keys."""
-    if ":" in session_key:
-        agent_part, session_id = session_key.split(":", 1)
-        return agent_part or NO_AGENT_SCOPE, session_id
-    return NO_AGENT_SCOPE, session_key
-
-
 def runtime_session_key(session_id: str, *, agent_id: str | None = None) -> str:
     """Process-local key for locks and MCP pools."""
     scope = normalize_agent_scope(agent_id)

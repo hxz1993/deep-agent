@@ -2,13 +2,27 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 
 from deep_agent.db.dialect import DbDialect, resolve_dialect
-from deep_agent.db.engine import create_engine
 from deep_agent.db.migrate import upgrade_database
 from deep_agent.db.stores.bundle import DataStores, create_data_stores
 from deep_agent.db.url import get_database_url
+
+
+def create_engine(database_url: str) -> tuple[AsyncEngine, async_sessionmaker[AsyncSession]]:
+    engine = create_async_engine(database_url, pool_pre_ping=True)
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+    return engine, session_factory
+
+
+async def close_db(engine: AsyncEngine) -> None:
+    await engine.dispose()
 
 
 @dataclass(frozen=True)

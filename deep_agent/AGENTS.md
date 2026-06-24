@@ -104,7 +104,7 @@ HTTP (REST/SSE)
 | `deps.py` | `require_db`、`get_*_store(ctx)` Depends |
 | `conversation.py` | `SessionStore` 协议 + SQL/内存协调器（跨表写入、进程锁） |
 | `stores/` | 5 个表 Store（`agent/`、`mcp/`、`ui_tool/`、`chat_session/`、`message/`）+ `bundle.DataStores` |
-| `factory.py` / `dialect.py` | 方言工厂、`bootstrap_database()` |
+| `factory.py` / `dialect.py` | `create_engine` / `close_db`、`bootstrap_database()`、方言解析 |
 | `session_scope.py` / `session_list.py` | 会话作用域解析、列表过滤 DTO |
 
 | 表 | 用途 |

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import HTTPException, status
 
-from deep_agent.core.context import AppContext, AppContextDep
+from deep_agent.core.context import AppContextDep
 from deep_agent.db.stores.agent import AgentStoreBase
 from deep_agent.db.stores.bundle import DataStores
 from deep_agent.db.stores.mcp import McpServerStoreBase
@@ -18,11 +18,6 @@ def require_db(stores: DataStores) -> None:
                 "Set DEEP_AGENT_DBMS_NAME/USER/PASSWORD/HOSTNAME/PORT/DATABASE."
             ),
         )
-
-
-def get_stores(ctx: AppContextDep) -> DataStores:
-    return ctx.stores
-
 
 def get_agent_store(ctx: AppContextDep) -> AgentStoreBase:
     require_db(ctx.stores)

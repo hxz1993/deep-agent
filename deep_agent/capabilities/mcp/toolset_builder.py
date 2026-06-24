@@ -28,6 +28,11 @@ def resolve_mcp_init_timeout(config: dict[str, Any]) -> float:
     return float(OPTION.agent.mcp_init_timeout)
 
 
+def resolve_mcp_max_retries() -> int:
+    """Tool arg validation retries for MCP tools (matches Agent ``retries``)."""
+    return OPTION.agent.request_retries
+
+
 def build_mcp_toolset(name: str, transport: str, config: dict[str, Any]) -> Any:
     """Build a registry-ready MCP toolset with request header forwarding."""
     transport, config = normalize_mcp_config(name, transport, config)
@@ -45,7 +50,13 @@ def build_discovery_toolset(name: str, transport: str, config: dict[str, Any]) -
         url = config["url"]
         static_headers = dict(config.get("headers") or {})
         init_timeout = resolve_mcp_init_timeout(config)
-        return MCPToolset(url, id=f"discovery:{name}", headers=static_headers, init_timeout=init_timeout)
+        return MCPToolset(
+            url,
+            id=f"discovery:{name}",
+            headers=static_headers,
+            init_timeout=init_timeout,
+            max_retries=resolve_mcp_max_retries(),
+        )
     if transport == "stdio":
         return build_raw_stdio_mcp_toolset(name, config)
     raise ValueError(f"Unsupported MCP transport: {transport!r}")
@@ -78,6 +89,7 @@ def build_raw_stdio_mcp_toolset(name: str, config: dict[str, Any]) -> Serializin
             id=name,
             process_tool_call=inject_request_meta,
             init_timeout=resolve_mcp_init_timeout(config),
+            max_retries=resolve_mcp_max_retries(),
         )
     )
 
@@ -89,7 +101,13 @@ def _build_url_toolset(name: str, config: dict[str, Any]) -> DynamicToolset[Agen
 
     def factory(ctx: RunContext[AgentDeps]) -> MCPToolset[AgentDeps]:
         headers = merge_mcp_headers(static_headers, dict(ctx.deps.request_headers) or None)
-        return MCPToolset(url, id=name, headers=headers, init_timeout=init_timeout).prefixed(name)
+        return MCPToolset(
+            url,
+            id=name,
+            headers=headers,
+            init_timeout=init_timeout,
+            max_retries=resolve_mcp_max_retries(),
+        ).prefixed(name)
 
     return DynamicToolset(factory, per_run_step=False, id=f"mcp:{name}")
 

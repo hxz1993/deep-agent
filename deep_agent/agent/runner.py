@@ -59,7 +59,7 @@ class AgentRunner:
         deps: AgentDeps,
         *,
         branch_from: int | None = None,
-    ) -> tuple[list[ModelMessage], bool]:
+    ) -> tuple[list[ModelMessage], bool, int | None]:
         if branch_from is not None:
             await self.store.truncate_history(
                 session_id,
@@ -68,6 +68,7 @@ class AgentRunner:
             )
         history = await self.store.get_history(session_id, agent_id=deps.agent_id)
         pre_persisted_user = False
+        user_branch_point: int | None = None
         if prompt.strip():
             user_request = ModelRequest(parts=[UserPromptPart(content=prompt)])
             await self.store.append(
@@ -78,7 +79,18 @@ class AgentRunner:
             )
             history = [*history, user_request]
             pre_persisted_user = True
-        return history, pre_persisted_user
+            user_branch_point = len(history) - 1
+        return history, pre_persisted_user, user_branch_point
+
+    async def _history_meta(
+        self,
+        session_id: str,
+        deps: AgentDeps,
+        *,
+        user_branch_point: int | None,
+    ) -> tuple[int, int | None]:
+        count = len(await self.store.get_history(session_id, agent_id=deps.agent_id))
+        return count, user_branch_point
 
     async def _persist_run_messages(
         self,
@@ -108,7 +120,7 @@ class AgentRunner:
         branch_from: int | None = None,
     ) -> dict[str, Any]:
         async with self._session_lock(session_id, agent_id=deps.agent_id):
-            history, pre_persisted_user = await self._prepare_history(
+            history, pre_persisted_user, _ = await self._prepare_history(
                 session_id,
                 prompt,
                 deps,
@@ -140,7 +152,7 @@ class AgentRunner:
         branch_from: int | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
         async with self._session_lock(session_id, agent_id=deps.agent_id):
-            history, pre_persisted_user = await self._prepare_history(
+            history, pre_persisted_user, user_branch_point = await self._prepare_history(
                 session_id,
                 prompt,
                 deps,
@@ -171,10 +183,30 @@ class AgentRunner:
                 )
             except Exception as exc:  # noqa: BLE001 - surface as an SSE error event
                 logger.exception("Agent stream failed for session {}", session_id)
-                yield events.error(str(exc), history_persisted=pre_persisted_user)
+                msg_count, branch_pt = await self._history_meta(
+                    session_id,
+                    deps,
+                    user_branch_point=user_branch_point if pre_persisted_user else None,
+                )
+                yield events.error(
+                    str(exc),
+                    history_persisted=pre_persisted_user,
+                    model_message_count=msg_count if pre_persisted_user else None,
+                    user_branch_point=branch_pt,
+                )
                 return
 
-        yield _final_event(result, self.ui_tool_hints)
+        msg_count, branch_pt = await self._history_meta(
+            session_id,
+            deps,
+            user_branch_point=user_branch_point,
+        )
+        yield _final_event(
+            result,
+            self.ui_tool_hints,
+            model_message_count=msg_count,
+            user_branch_point=branch_pt,
+        )
 
 
 def _build_run_result(result: Any, ui_tool_hints: dict[str, dict[str, Any]]) -> dict[str, Any]:
@@ -194,7 +226,13 @@ def _build_run_result(result: Any, ui_tool_hints: dict[str, dict[str, Any]]) -> 
     }
 
 
-def _final_event(result: Any, ui_tool_hints: dict[str, dict[str, Any]]) -> dict[str, Any]:
+def _final_event(
+    result: Any,
+    ui_tool_hints: dict[str, dict[str, Any]],
+    *,
+    model_message_count: int | None = None,
+    user_branch_point: int | None = None,
+) -> dict[str, Any]:
     output = result.output
     usage = _usage_dict(result)
     if isinstance(output, DeferredToolRequests):
@@ -204,8 +242,16 @@ def _final_event(result: Any, ui_tool_hints: dict[str, dict[str, Any]]) -> dict[
             usage,
             status="pending",
             deferred=deferred,
+            model_message_count=model_message_count,
+            user_branch_point=user_branch_point,
         )
-    return events.final(_serialize_output(output), usage, status="completed")
+    return events.final(
+        _serialize_output(output),
+        usage,
+        status="completed",
+        model_message_count=model_message_count,
+        user_branch_point=user_branch_point,
+    )
 
 
 def _serialize_output(output: Any) -> Any:

@@ -39,6 +39,8 @@ def final(
     *,
     status: str = "completed",
     deferred: dict[str, Any] | None = None,
+    model_message_count: int | None = None,
+    user_branch_point: int | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "type": "final",
@@ -48,13 +50,27 @@ def final(
     }
     if deferred is not None:
         payload["deferred"] = deferred
+    if model_message_count is not None:
+        payload["model_message_count"] = model_message_count
+    if user_branch_point is not None:
+        payload["user_branch_point"] = user_branch_point
     return payload
 
 
-def error(message: str, *, history_persisted: bool = False) -> dict[str, Any]:
+def error(
+    message: str,
+    *,
+    history_persisted: bool = False,
+    model_message_count: int | None = None,
+    user_branch_point: int | None = None,
+) -> dict[str, Any]:
     payload: dict[str, Any] = {"type": "error", "message": message}
     if history_persisted:
         payload["history_persisted"] = True
+    if model_message_count is not None:
+        payload["model_message_count"] = model_message_count
+    if user_branch_point is not None:
+        payload["user_branch_point"] = user_branch_point
     return payload
 
 

@@ -698,6 +698,16 @@ function parseSseBlock(block) {
   return { event, data };
 }
 
+function syncHistoryMeta({ model_message_count: count, user_branch_point: branchPt }) {
+  if (count != null) state.modelMessageCount = count;
+  if (branchPt != null) {
+    state.lastUserBranchPoint = branchPt;
+    const rows = el.messages.querySelectorAll(".msg-row.user");
+    const last = rows[rows.length - 1];
+    if (last) last.dataset.branchPoint = String(branchPt);
+  }
+}
+
 function handleEvent({ event, data }, assistant) {
   const type = event || data.type;
   switch (type) {
@@ -734,6 +744,7 @@ function handleEvent({ event, data }, assistant) {
     case "final":
       assistant.finalizeThinking();
       assistant.finalizeText();
+      syncHistoryMeta(data);
       if (data.usage) renderUsage(data.usage);
       if (data.status === "pending" && data.deferred) {
         state.awaitingHitl = true;
@@ -747,6 +758,7 @@ function handleEvent({ event, data }, assistant) {
       updateHitlInputState();
       break;
     case "error":
+      syncHistoryMeta(data);
       addErrorTo(assistant, data.message || "未知错误", {
         branchFrom: state.lastUserBranchPoint,
         message: lastUserText(),

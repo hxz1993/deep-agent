@@ -333,6 +333,8 @@ DB Agent 模式（请求体含 `agent_id`）：
 | `output` | `string \| object \| ... \| null` | Agent 最终输出；`pending` 时常为 `null` |
 | `deferred` | `object \| null` | `pending` 时包含未完成的 `calls` / `approvals` |
 | `usage` | `object` | Token 与请求次数统计 |
+| `model_message_count` | `integer` | 可选；持久化后原始 `ModelMessage` 条数，供客户端同步编辑锚点 |
+| `user_branch_point` | `integer` | 可选；本轮用户消息下标，与 `messages[].branch_point` 一致 |
 
 `usage` 字段：
 
@@ -367,6 +369,8 @@ Agent 执行过程中抛出未捕获异常时发出，此后流结束，**不会
 | `type` | `"error"` | 固定值 |
 | `message` | `string` | 错误描述 |
 | `history_persisted` | `boolean` | 可选；为 `true` 时表示本轮用户 `message` 已写入会话历史，可用 `branch_from` 重试 |
+| `model_message_count` | `integer` | 可选；错误后当前会话原始 `ModelMessage` 条数 |
+| `user_branch_point` | `integer` | 可选；本轮用户消息在原始历史中的下标（与 `branch_point` 一致） |
 
 ## 5. 完整示例
 

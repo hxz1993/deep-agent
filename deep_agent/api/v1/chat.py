@@ -44,6 +44,33 @@ def _validate_chat_body(body: ChatRequest | StreamChatRequest) -> None:
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Either message or deferred_tool_results is required.",
         )
+    if body.branch_from is not None and has_deferred:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="branch_from and deferred_tool_results are mutually exclusive.",
+        )
+    if body.branch_from is not None and body.branch_from < 0:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="branch_from must be non-negative.",
+        )
+
+
+async def _validate_branch_from(
+    ctx: AppContextDep,
+    session_id: str,
+    *,
+    agent_id: str | None,
+    branch_from: int | None,
+) -> None:
+    if branch_from is None:
+        return
+    history = await ctx.store.get_history(session_id, agent_id=agent_id)
+    if branch_from > len(history):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"branch_from {branch_from} out of range (history length {len(history)}).",
+        )
 
 
 def _deferred_results(body: StreamChatRequest):
@@ -56,9 +83,17 @@ def _deferred_results(body: StreamChatRequest):
 async def chat(request: Request, ctx: AppContextDep, body: ChatRequest) -> ChatResponse:
     _validate_chat_body(body)
     session_id = body.session_id or uuid.uuid4().hex
+    await _validate_branch_from(ctx, session_id, agent_id=None, branch_from=body.branch_from)
+    if body.branch_from is not None:
+        await ctx.mcp_session_pool.close_session(mcp_pool_session_key(session_id))
     runner = await build_runner(ctx, model=body.model, capabilities=body.capabilities)
     deps = _agent_deps(request, ctx, session_id=session_id, user=body.user)
-    result = await runner.run(session_id, body.message or "", deps)
+    result = await runner.run(
+        session_id,
+        body.message or "",
+        deps,
+        branch_from=body.branch_from,
+    )
     return ChatResponse(
         session_id=session_id,
         output=result["output"],
@@ -75,6 +110,7 @@ async def chat_stream(request: Request, ctx: AppContextDep, body: StreamChatRequ
     deferred_tool_results = _deferred_results(body)
     prompt = body.message or ""
 
+    api_agent_id: str | None = None
     if body.agent_id is not None:
         try:
             agent_id = normalize_agent_id(body.agent_id)
@@ -86,10 +122,16 @@ async def chat_stream(request: Request, ctx: AppContextDep, body: StreamChatRequ
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
         deps = _agent_deps(request, ctx, session_id=session_id, user=body.user, agent_id=agent_id)
         session_data = {"session_id": session_id, "agent_id": agent_id}
+        api_agent_id = agent_id
     else:
         runner = await build_runner(ctx, model=body.model, capabilities=body.capabilities)
         deps = _agent_deps(request, ctx, session_id=session_id, user=body.user)
         session_data = {"session_id": session_id}
+        api_agent_id = None
+
+    await _validate_branch_from(ctx, session_id, agent_id=api_agent_id, branch_from=body.branch_from)
+    if body.branch_from is not None:
+        await ctx.mcp_session_pool.close_session(mcp_pool_session_key(session_id, agent_id=api_agent_id))
 
     async def event_generator():
         yield {"event": "session", "data": json.dumps(session_data)}
@@ -98,6 +140,7 @@ async def chat_stream(request: Request, ctx: AppContextDep, body: StreamChatRequ
             prompt,
             deps,
             deferred_tool_results=deferred_tool_results,
+            branch_from=body.branch_from,
         ):
             if await request.is_disconnected():
                 break

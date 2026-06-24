@@ -46,6 +46,28 @@ Accept: text/event-stream
 
 > 带 `agent_id` 时，会话存储键为 `{agent_id}:{session_id}`，与默认模式的裸 `session_id` 隔离。
 
+#### 编辑续聊（`branch_from`）
+
+从已有会话的指定位置截断历史并继续对话：
+
+- 请求体可选 `branch_from`（整数），取值来自 `GET /api/v1/sessions/{id}/history` 返回的 `messages[].branch_point`
+- 服务端在运行前删除 `sequence >= branch_from` 的持久化消息，再发送新 `message`
+- 与 `deferred_tool_results` 互斥（不可同时传）
+- 用户消息在 Agent 运行前即写入存储，因此即使后续 `error` 事件，用户输入仍会保留
+
+历史响应示例：
+
+```json
+{
+  "session_id": "abc",
+  "model_message_count": 4,
+  "messages": [
+    { "role": "user", "content": "你好", "branch_point": 0 },
+    { "role": "assistant", "parts": [...], "branch_point": 1 }
+  ]
+}
+```
+
 ### 响应
 
 - `Content-Type: text/event-stream`
@@ -335,7 +357,8 @@ Agent 执行过程中抛出未捕获异常时发出，此后流结束，**不会
 ```json
 {
   "type": "error",
-  "message": "Connection timeout"
+  "message": "Connection timeout",
+  "history_persisted": true
 }
 ```
 
@@ -343,6 +366,7 @@ Agent 执行过程中抛出未捕获异常时发出，此后流结束，**不会
 |------|------|------|
 | `type` | `"error"` | 固定值 |
 | `message` | `string` | 错误描述 |
+| `history_persisted` | `boolean` | 可选；为 `true` 时表示本轮用户 `message` 已写入会话历史，可用 `branch_from` 重试 |
 
 ## 5. 完整示例
 

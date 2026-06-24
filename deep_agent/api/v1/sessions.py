@@ -147,7 +147,11 @@ async def get_session_history(
 
     api_agent_id = agent_id or agent_scope_to_api(scope)
     raw = await ctx.store.get_history(resolved_session_id, agent_id=api_agent_id)
-    return SessionHistoryResponse(session_id=resolved_session_id, messages=model_messages_to_history(raw))
+    return SessionHistoryResponse(
+        session_id=resolved_session_id,
+        messages=model_messages_to_history(raw),
+        model_message_count=len(raw),
+    )
 
 
 @router.delete("/sessions/{session_id}", status_code=status.HTTP_200_OK)

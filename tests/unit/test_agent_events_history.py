@@ -69,6 +69,7 @@ class HistoryThinkingTests(unittest.TestCase):
         self.assertEqual(len(history), 1)
         self.assertEqual(history[0].role, "user")
         self.assertEqual(history[0].timestamp, ts)
+        self.assertEqual(history[0].branch_point, 0)
 
     def test_model_messages_to_history_falls_back_to_user_prompt_part_timestamp(self) -> None:
         part_ts = datetime(2025, 6, 22, 9, 0, tzinfo=timezone.utc)

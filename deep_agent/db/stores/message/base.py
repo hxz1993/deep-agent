@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pydantic_ai.messages import ModelMessage
-from sqlalchemy import func, select, tuple_
+from sqlalchemy import delete, func, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from deep_agent.db.models import ChatMessage
@@ -54,6 +54,22 @@ class MessageStoreBase(SessionBoundMixin):
                     payload=serialize_message(message),
                 )
             )
+
+    async def _truncate_from_sequence(
+        self,
+        db: AsyncSession,
+        agent_scope: str,
+        session_id: str,
+        *,
+        keep_count: int,
+    ) -> None:
+        await db.execute(
+            delete(ChatMessage).where(
+                ChatMessage.agent_id == agent_scope,
+                ChatMessage.session_id == session_id,
+                ChatMessage.sequence >= keep_count,
+            )
+        )
 
     async def _fetch_early_payloads(
         self,

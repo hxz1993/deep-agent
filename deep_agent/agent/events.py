@@ -51,8 +51,11 @@ def final(
     return payload
 
 
-def error(message: str) -> dict[str, Any]:
-    return {"type": "error", "message": message}
+def error(message: str, *, history_persisted: bool = False) -> dict[str, Any]:
+    payload: dict[str, Any] = {"type": "error", "message": message}
+    if history_persisted:
+        payload["history_persisted"] = True
+    return payload
 
 
 def _to_jsonable(value: Any) -> Any:

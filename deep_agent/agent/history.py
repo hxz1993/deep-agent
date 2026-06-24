@@ -51,11 +51,19 @@ class HistoryMessage(BaseModel):
     content: str | None = Field(default=None, description="User message text.")
     parts: list[HistoryPart] = Field(default_factory=list, description="Assistant message parts in order.")
     timestamp: datetime | None = Field(default=None, description="Message time (UTC).")
+    branch_point: int | None = Field(
+        default=None,
+        description="Index in raw ModelMessage list; truncate here to branch.",
+    )
 
 
 class SessionHistoryResponse(BaseModel):
     session_id: str
     messages: list[HistoryMessage]
+    model_message_count: int = Field(
+        default=0,
+        description="Raw ModelMessage count; use as branch_from to append at end.",
+    )
 
 
 def _user_prompt_text(part: UserPromptPart) -> str:
@@ -102,6 +110,15 @@ def is_retry_only_request(request: ModelRequest) -> bool:
     return all(isinstance(part, RetryPromptPart) for part in request.parts)
 
 
+def is_user_only_request(message: ModelMessage) -> bool:
+    """True for a user prompt turn (no tool returns mixed in)."""
+    if not isinstance(message, ModelRequest):
+        return False
+    if not message.parts:
+        return False
+    return all(isinstance(part, UserPromptPart) for part in message.parts)
+
+
 def filter_ephemeral_agent_messages(messages: list[ModelMessage]) -> list[ModelMessage]:
     """Drop thinking-only retries and validation prompts from persisted history."""
     filtered: list[ModelMessage] = []
@@ -112,6 +129,18 @@ def filter_ephemeral_agent_messages(messages: list[ModelMessage]) -> list[ModelM
             continue
         filtered.append(message)
     return filtered
+
+
+def incremental_append_messages(
+    messages: list[ModelMessage],
+    *,
+    skip_user_prompt: bool,
+) -> list[ModelMessage]:
+    """Messages to persist after a run when the user prompt was pre-appended."""
+    filtered = filter_ephemeral_agent_messages(messages)
+    if not skip_user_prompt:
+        return filtered
+    return [message for message in filtered if not is_user_only_request(message)]
 
 
 def _response_parts(response: ModelResponse) -> list[HistoryPart]:
@@ -183,9 +212,10 @@ def model_messages_to_history(messages: list[ModelMessage]) -> list[HistoryMessa
     history: list[HistoryMessage] = []
     pending_tool_results: list[HistoryPart] = []
     pending_tool_results_timestamp: datetime | None = None
+    pending_tool_results_branch_point: int | None = None
 
     def flush_tool_results() -> None:
-        nonlocal pending_tool_results, pending_tool_results_timestamp
+        nonlocal pending_tool_results, pending_tool_results_timestamp, pending_tool_results_branch_point
         if not pending_tool_results:
             return
         if history and history[-1].role == "assistant":
@@ -196,12 +226,14 @@ def model_messages_to_history(messages: list[ModelMessage]) -> list[HistoryMessa
                     role="assistant",
                     parts=list(pending_tool_results),
                     timestamp=pending_tool_results_timestamp,
+                    branch_point=pending_tool_results_branch_point,
                 )
             )
         pending_tool_results = []
         pending_tool_results_timestamp = None
+        pending_tool_results_branch_point = None
 
-    for message in messages:
+    for idx, message in enumerate(messages):
         if isinstance(message, ModelRequest):
             user_texts = [_user_prompt_text(p) for p in message.parts if isinstance(p, UserPromptPart)]
             user_text = "\n".join(t for t in user_texts if t).strip()
@@ -210,11 +242,17 @@ def model_messages_to_history(messages: list[ModelMessage]) -> list[HistoryMessa
             if user_text:
                 flush_tool_results()
                 history.append(
-                    HistoryMessage(role="user", content=user_text, timestamp=_request_timestamp(message))
+                    HistoryMessage(
+                        role="user",
+                        content=user_text,
+                        timestamp=_request_timestamp(message),
+                        branch_point=idx,
+                    )
                 )
             if tool_results:
                 if not pending_tool_results:
                     pending_tool_results_timestamp = _request_timestamp(message)
+                    pending_tool_results_branch_point = idx
                 pending_tool_results.extend(tool_results)
 
         elif isinstance(message, ModelResponse):
@@ -223,7 +261,14 @@ def model_messages_to_history(messages: list[ModelMessage]) -> list[HistoryMessa
             flush_tool_results()
             parts = _response_parts(message)
             if parts:
-                history.append(HistoryMessage(role="assistant", parts=parts, timestamp=message.timestamp))
+                history.append(
+                    HistoryMessage(
+                        role="assistant",
+                        parts=parts,
+                        timestamp=message.timestamp,
+                        branch_point=idx,
+                    )
+                )
 
     flush_tool_results()
     return history

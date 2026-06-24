@@ -41,6 +41,15 @@ class SessionStore(Protocol):
     ) -> None:
         ...
 
+    async def truncate_history(
+        self,
+        session_id: str,
+        *,
+        agent_id: str | None = None,
+        keep_count: int,
+    ) -> None:
+        ...
+
     async def list_sessions(self) -> list[tuple[str, str]]:
         ...
 
@@ -124,6 +133,22 @@ class SqlConversationCoordinator:
                 start_sequence=next_sequence,
             )
 
+    async def truncate_history(
+        self,
+        session_id: str,
+        *,
+        agent_id: str | None = None,
+        keep_count: int,
+    ) -> None:
+        scope = normalize_agent_scope(agent_id)
+        async with self._write() as db:
+            await self._messages._truncate_from_sequence(
+                db,
+                scope,
+                session_id,
+                keep_count=max(keep_count, 0),
+            )
+
     async def list_sessions(self) -> list[tuple[str, str]]:
         return await self._chat_sessions.list_sessions()
 
@@ -192,6 +217,18 @@ class InMemoryConversationCoordinator:
             return
         scope = normalize_agent_scope(agent_id)
         self._histories[(scope, session_id)].extend(messages)
+
+    async def truncate_history(
+        self,
+        session_id: str,
+        *,
+        agent_id: str | None = None,
+        keep_count: int,
+    ) -> None:
+        scope = normalize_agent_scope(agent_id)
+        key = (scope, session_id)
+        if key in self._histories:
+            self._histories[key] = self._histories[key][: max(keep_count, 0)]
 
     async def list_sessions(self) -> list[tuple[str, str]]:
         return list(self._histories.keys())

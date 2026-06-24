@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator
 
 from pydantic_ai import Agent, AgentRunResultEvent, DeferredToolRequests, DeferredToolResults
+from pydantic_ai.messages import ModelMessage, ModelRequest, UserPromptPart
 from pydantic_ai.usage import UsageLimits
 
 from deep_agent.agent import events
@@ -13,7 +14,7 @@ from deep_agent.capabilities.ui.registry import enrich_deferred, enrich_tool_eve
 from loguru import logger
 
 from deep_agent.db.conversation import SessionStore
-from deep_agent.agent.history import filter_ephemeral_agent_messages
+from deep_agent.agent.history import incremental_append_messages
 
 _STREAM_OUTPUT_TYPE: list[Any] = [str, DeferredToolRequests]
 
@@ -51,6 +52,52 @@ class AgentRunner:
         else:
             yield
 
+    async def _prepare_history(
+        self,
+        session_id: str,
+        prompt: str,
+        deps: AgentDeps,
+        *,
+        branch_from: int | None = None,
+    ) -> tuple[list[ModelMessage], bool]:
+        if branch_from is not None:
+            await self.store.truncate_history(
+                session_id,
+                agent_id=deps.agent_id,
+                keep_count=branch_from,
+            )
+        history = await self.store.get_history(session_id, agent_id=deps.agent_id)
+        pre_persisted_user = False
+        if prompt.strip():
+            user_request = ModelRequest(parts=[UserPromptPart(content=prompt)])
+            await self.store.append(
+                session_id,
+                [user_request],
+                agent_id=deps.agent_id,
+                user_id=deps.user,
+            )
+            history = [*history, user_request]
+            pre_persisted_user = True
+        return history, pre_persisted_user
+
+    async def _persist_run_messages(
+        self,
+        session_id: str,
+        new_messages: list[ModelMessage],
+        deps: AgentDeps,
+        *,
+        pre_persisted_user: bool,
+    ) -> None:
+        to_append = incremental_append_messages(new_messages, skip_user_prompt=pre_persisted_user)
+        if not to_append:
+            return
+        await self.store.append(
+            session_id,
+            to_append,
+            agent_id=deps.agent_id,
+            user_id=deps.user,
+        )
+
     async def run(
         self,
         session_id: str,
@@ -58,9 +105,15 @@ class AgentRunner:
         deps: AgentDeps,
         *,
         deferred_tool_results: DeferredToolResults | None = None,
+        branch_from: int | None = None,
     ) -> dict[str, Any]:
         async with self._session_lock(session_id, agent_id=deps.agent_id):
-            history = await self.store.get_history(session_id, agent_id=deps.agent_id)
+            history, pre_persisted_user = await self._prepare_history(
+                session_id,
+                prompt,
+                deps,
+                branch_from=branch_from,
+            )
             result = await self.agent.run(
                 prompt,
                 deps=deps,
@@ -69,11 +122,11 @@ class AgentRunner:
                 deferred_tool_results=deferred_tool_results,
                 output_type=_STREAM_OUTPUT_TYPE,
             )
-            await self.store.append(
+            await self._persist_run_messages(
                 session_id,
-                filter_ephemeral_agent_messages(result.new_messages()),
-                agent_id=deps.agent_id,
-                user_id=deps.user,
+                result.new_messages(),
+                deps,
+                pre_persisted_user=pre_persisted_user,
             )
         return _build_run_result(result, self.ui_tool_hints)
 
@@ -84,9 +137,15 @@ class AgentRunner:
         deps: AgentDeps,
         *,
         deferred_tool_results: DeferredToolResults | None = None,
+        branch_from: int | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
         async with self._session_lock(session_id, agent_id=deps.agent_id):
-            history = await self.store.get_history(session_id, agent_id=deps.agent_id)
+            history, pre_persisted_user = await self._prepare_history(
+                session_id,
+                prompt,
+                deps,
+                branch_from=branch_from,
+            )
             result = None
             try:
                 async with self.agent.run_stream_events(
@@ -104,15 +163,15 @@ class AgentRunner:
                         mapped = events.map_event(event)
                         if mapped is not None:
                             yield enrich_tool_event(mapped, self.ui_tool_hints)
-                await self.store.append(
+                await self._persist_run_messages(
                     session_id,
-                    filter_ephemeral_agent_messages(result.new_messages()),
-                    agent_id=deps.agent_id,
-                    user_id=deps.user,
+                    result.new_messages(),
+                    deps,
+                    pre_persisted_user=pre_persisted_user,
                 )
             except Exception as exc:  # noqa: BLE001 - surface as an SSE error event
                 logger.exception("Agent stream failed for session {}", session_id)
-                yield events.error(str(exc))
+                yield events.error(str(exc), history_persisted=pre_persisted_user)
                 return
 
         yield _final_event(result, self.ui_tool_hints)
@@ -167,4 +226,3 @@ def _usage_dict(result: Any) -> dict[str, Any]:
         "output_tokens": getattr(usage, "output_tokens", getattr(usage, "response_tokens", None)),
         "total_tokens": getattr(usage, "total_tokens", None),
     }
-

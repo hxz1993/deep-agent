@@ -33,6 +33,9 @@ const state = {
   streaming: false,
   awaitingHitl: false,
   abortController: null,
+  branchFrom: null,
+  modelMessageCount: 0,
+  lastUserBranchPoint: null,
 };
 
 /* ----------------------------- DOM ----------------------------- */
@@ -241,6 +244,9 @@ function newChat(agentId) {
     ensureAgentSelected();
   }
   state.sessionId = null;
+  state.branchFrom = null;
+  state.modelMessageCount = 0;
+  state.lastUserBranchPoint = null;
   el.messages.innerHTML = "";
   el.messages.appendChild(el.emptyState);
   el.emptyState.classList.remove("hidden");
@@ -311,6 +317,8 @@ async function switchSession(s) {
   if (state.streaming) stopStream();
   const session = normalizeSession(s);
   state.sessionId = session.id;
+  state.branchFrom = null;
+  state.lastUserBranchPoint = null;
   if (session.agentId) {
     state.agentId = session.agentId;
     localStorage.setItem("da_agent_id", state.agentId);
@@ -337,13 +345,14 @@ async function switchSession(s) {
       el.messages.appendChild(el.emptyState);
       return;
     }
-    renderHistory(data.messages);
+    renderHistory(data.messages, data.model_message_count);
   } catch (e) {
     addSystemNote(`加载历史失败：${e.message}`);
   }
 }
 
-function renderHistory(messages) {
+function renderHistory(messages, modelMessageCount) {
+  state.modelMessageCount = modelMessageCount ?? 0;
   let lastDayKey = null;
   for (const msg of messages) {
     const ts = msg.timestamp || null;
@@ -355,11 +364,11 @@ function renderHistory(messages) {
       }
     }
     if (msg.role === "user" && msg.content) {
-      addMessage("user", msg.content, ts);
+      addMessage("user", msg.content, ts, msg.branch_point);
       continue;
     }
     if (msg.role === "assistant" && msg.parts && msg.parts.length) {
-      const assistant = createAssistantMessage(ts);
+      const assistant = createAssistantMessage(ts, msg.branch_point);
       const completedToolIds = collectCompletedToolIds(msg.parts);
       for (const part of msg.parts) {
         if (part.type === "thinking" && part.content) {
@@ -543,7 +552,14 @@ async function onSend() {
   el.input.value = "";
   autoGrow();
 
-  addMessage("user", text);
+  const branchFrom = state.branchFrom;
+  if (branchFrom != null) {
+    removeDomFromBranchPoint(branchFrom);
+  }
+
+  const userBranchPoint = branchFrom != null ? branchFrom : state.modelMessageCount;
+  addMessage("user", text, null, userBranchPoint);
+  state.lastUserBranchPoint = userBranchPoint;
 
   const assistant = createAssistantMessage();
   setStreaming(true);
@@ -552,6 +568,13 @@ async function onSend() {
   if (!state.sessionId) state.sessionId = generateSessionId();
 
   const payload = { agent_id: state.agentId, message: text, session_id: state.sessionId };
+  if (branchFrom != null) {
+    payload.branch_from = branchFrom;
+    state.modelMessageCount = branchFrom + 1;
+    state.branchFrom = null;
+  } else {
+    state.modelMessageCount += 1;
+  }
   await runChatStream(payload, assistant);
 }
 
@@ -724,7 +747,10 @@ function handleEvent({ event, data }, assistant) {
       updateHitlInputState();
       break;
     case "error":
-      addErrorTo(assistant, data.message || "未知错误");
+      addErrorTo(assistant, data.message || "未知错误", {
+        branchFrom: state.lastUserBranchPoint,
+        message: lastUserText(),
+      });
       break;
     default:
       break;
@@ -742,18 +768,68 @@ function renderUsage(usage) {
 }
 
 /* --------------------------- 消息渲染 --------------------------- */
-function addMessage(role, text, timestamp) {
+function addMessage(role, text, timestamp, branchPoint) {
   const row = document.createElement("div");
   row.className = `msg-row ${role}`;
+  if (branchPoint != null) row.dataset.branchPoint = String(branchPoint);
   row.innerHTML = `
     <div class="avatar ${role}">${role === "user" ? "你" : "🤖"}</div>
     <div class="bubble-wrap"><div class="bubble"></div></div>`;
   const wrap = row.querySelector(".bubble-wrap");
   if (timestamp) prependMsgTime(wrap, timestamp);
   wrap.querySelector(".bubble").textContent = text;
+  if (role === "user") {
+    const actions = document.createElement("div");
+    actions.className = "msg-actions";
+    const editBtn = document.createElement("button");
+    editBtn.type = "button";
+    editBtn.className = "msg-edit-btn";
+    editBtn.title = "编辑";
+    editBtn.textContent = "编辑";
+    editBtn.addEventListener("click", () => startEditUserMessage(row, text, branchPoint));
+    actions.appendChild(editBtn);
+    wrap.appendChild(actions);
+  }
   el.messages.appendChild(row);
   scrollToBottom();
   return row;
+}
+
+function startEditUserMessage(row, text, branchPoint) {
+  if (state.streaming) return;
+  if (branchPoint == null) return;
+  state.branchFrom = branchPoint;
+  el.input.value = text;
+  autoGrow();
+  truncateDomAfterRow(row);
+  el.input.focus();
+}
+
+function truncateDomAfterRow(row) {
+  let node = row.nextSibling;
+  while (node) {
+    const next = node.nextSibling;
+    node.remove();
+    node = next;
+  }
+}
+
+/** Remove the user bubble at branch_point and everything after it. */
+function removeDomFromBranchPoint(branchPoint) {
+  const row = el.messages.querySelector(
+    `.msg-row.user[data-branch-point="${branchPoint}"]`
+  );
+  if (!row) return;
+  truncateDomAfterRow(row);
+  row.remove();
+}
+
+async function retryFromBranch({ branchFrom, message }) {
+  if (state.streaming || branchFrom == null || !message) return;
+  if (!ensureAgentSelected()) return;
+  state.branchFrom = branchFrom;
+  el.input.value = message;
+  await onSend();
 }
 
 function addDateSeparator(iso) {
@@ -779,9 +855,10 @@ function addSystemNote(text) {
   scrollToBottom();
 }
 
-function createAssistantMessage(timestamp) {
+function createAssistantMessage(timestamp, branchPoint) {
   const row = document.createElement("div");
   row.className = "msg-row assistant";
+  if (branchPoint != null) row.dataset.branchPoint = String(branchPoint);
   row.innerHTML = `
     <div class="avatar assistant">🤖</div>
     <div class="bubble-wrap"></div>`;
@@ -989,11 +1066,20 @@ function renderHitlWidget(block, call, onSubmit) {
   body.appendChild(widget);
 }
 
-function addErrorTo(assistant, message) {
+function addErrorTo(assistant, message, retryOpts) {
+  const wrap = assistant.row.querySelector(".bubble-wrap");
   const div = document.createElement("div");
   div.className = "error-bubble";
   div.textContent = "⚠ " + message;
-  assistant.row.querySelector(".bubble-wrap").appendChild(div);
+  wrap.appendChild(div);
+  if (retryOpts && retryOpts.branchFrom != null && retryOpts.message) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "msg-retry-btn";
+    btn.textContent = "重试";
+    btn.addEventListener("click", () => retryFromBranch(retryOpts));
+    wrap.appendChild(btn);
+  }
   scrollToBottom();
 }
 

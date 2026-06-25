@@ -10,7 +10,7 @@ from pydantic_ai.messages import ModelRequest, UserPromptPart
 
 from deep_agent.api.v1 import api_router
 from deep_agent.capabilities import build_registry
-from deep_agent.capabilities.mcp.session_pool import McpSessionPool
+from deep_agent.capabilities.mcp.lease_manager import McpLeaseManager
 from deep_agent.core.context import AppContext, get_context, init_context, reset_context
 from tests.helpers.sqlite_stores import make_sqlite_stores_sync
 
@@ -23,7 +23,7 @@ class SessionListApiTests(unittest.TestCase):
         ctx = AppContext.for_testing(
             registry=build_registry(),
             stores=self.stores,
-            mcp_session_pool=McpSessionPool(),
+            mcp_lease_manager=McpLeaseManager(),
             db_engine=self.engine,
             db_session_factory=self.session_factory,
         )

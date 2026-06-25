@@ -13,14 +13,14 @@ from typing_extensions import Self
 
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.capabilities.mcp.errors import is_recoverable_mcp_disconnect
+from deep_agent.capabilities.mcp.lease_manager import McpLeaseManager, get_mcp_lease_manager
 from deep_agent.capabilities.mcp.request_context import merge_mcp_headers
-from deep_agent.capabilities.mcp.session_pool import McpSessionPool, get_mcp_session_pool
 from deep_agent.db.session_scope import runtime_session_key
 
 
 @dataclass
-class SessionScopedMcpToolset(AbstractToolset[AgentDeps]):
-    """Pooled MCP toolset scoped to a chat session run.
+class RunScopedMcpToolset(AbstractToolset[AgentDeps]):
+    """MCP toolset activated per pydantic_ai run.
 
     Builtin servers are launched once per pod as shared HTTP processes.
     Each run opens a short-lived HTTP client; the shared server is kept alive
@@ -29,7 +29,7 @@ class SessionScopedMcpToolset(AbstractToolset[AgentDeps]):
 
     server_name: str
     config: dict[str, Any]
-    pool: McpSessionPool | None = field(default=None, repr=False, compare=False)
+    lease_manager: McpLeaseManager | None = field(default=None, repr=False, compare=False)
     _session_id: str | None = field(default=None, repr=False, compare=False)
     _request_headers: Mapping[str, str] | None = field(default=None, repr=False, compare=False)
     _inner: AbstractToolset[AgentDeps] | None = field(default=None, repr=False, compare=False)
@@ -37,7 +37,7 @@ class SessionScopedMcpToolset(AbstractToolset[AgentDeps]):
 
     @property
     def id(self) -> str | None:
-        return f"mcp-session:{self.server_name}"
+        return f"mcp-run:{self.server_name}"
 
     def prefixed(self, prefix: str) -> PrefixedToolset[AgentDeps]:
         return PrefixedToolset(self, prefix)
@@ -66,15 +66,19 @@ class SessionScopedMcpToolset(AbstractToolset[AgentDeps]):
             init_timeout=self.config.get("init_timeout"),
         )
 
-    def _pool(self) -> McpSessionPool:
-        return self.pool if self.pool is not None else get_mcp_session_pool()
+    def _lease_manager(self) -> McpLeaseManager:
+        return (
+            self.lease_manager
+            if self.lease_manager is not None
+            else get_mcp_lease_manager()
+        )
 
     async def __aenter__(self) -> Self:
         if self._session_id is None:
             return self
         self._exit_stack = AsyncExitStack()
         self._inner = await self._exit_stack.enter_async_context(
-            self._pool().lease(
+            self._lease_manager().lease(
                 self.server_name,
                 self._session_id,
                 self._build_inner_toolset,
@@ -112,7 +116,7 @@ class SessionScopedMcpToolset(AbstractToolset[AgentDeps]):
         tool: ToolsetTool[AgentDeps],
     ) -> Any:
         if self._inner is None:
-            raise RuntimeError("Session-scoped MCP toolset is not active for this run")
+            raise RuntimeError("Run-scoped MCP toolset is not active for this run")
 
         for attempt in range(2):
             try:
@@ -127,7 +131,7 @@ class SessionScopedMcpToolset(AbstractToolset[AgentDeps]):
                         await self._exit_stack.aclose()
                     self._exit_stack = AsyncExitStack()
                     self._inner = await self._exit_stack.enter_async_context(
-                        self._pool().lease(
+                        self._lease_manager().lease(
                             self.server_name,
                             self._session_id,
                             self._build_inner_toolset,
@@ -136,4 +140,3 @@ class SessionScopedMcpToolset(AbstractToolset[AgentDeps]):
                     )
                     continue
                 raise
-        raise RuntimeError("unreachable")

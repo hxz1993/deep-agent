@@ -12,8 +12,8 @@ from pydantic_ai.usage import RunUsage
 
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.capabilities.mcp.errors import is_recoverable_mcp_disconnect
-from deep_agent.capabilities.mcp.session_scoped import SessionScopedMcpToolset
-from deep_agent.capabilities.mcp.session_pool import McpSessionPool
+from deep_agent.capabilities.mcp.lease_manager import McpLeaseManager
+from deep_agent.capabilities.mcp.run_scoped import RunScopedMcpToolset
 from deep_agent.core.context import reset_context
 from tests.helpers.testing_context import init_test_context
 
@@ -30,9 +30,9 @@ class McpRecoverableDisconnectTests(unittest.TestCase):
         self.assertFalse(is_recoverable_mcp_disconnect(ValueError("bad tool args")))
 
 
-class SessionScopedMcpRetryTests(unittest.IsolatedAsyncioTestCase):
+class RunScopedMcpRetryTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
-        init_test_context(mcp_session_pool=McpSessionPool())
+        init_test_context(mcp_lease_manager=McpLeaseManager())
 
     def tearDown(self) -> None:
         reset_context()
@@ -59,13 +59,13 @@ class SessionScopedMcpRetryTests(unittest.IsolatedAsyncioTestCase):
             lease_calls["count"] += 1
             yield inner
 
-        pool = McpSessionPool()
-        pool.lease = fake_lease  # type: ignore[method-assign]
+        manager = McpLeaseManager()
+        manager.lease = fake_lease  # type: ignore[method-assign]
 
-        toolset = SessionScopedMcpToolset(
+        toolset = RunScopedMcpToolset(
             server_name="deepcube",
             config={"command": "python", "args": ["server.py"]},
-            pool=pool,
+            lease_manager=manager,
             _session_id="session-a",
         )
 

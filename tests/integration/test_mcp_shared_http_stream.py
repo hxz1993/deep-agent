@@ -16,7 +16,7 @@ from pydantic_ai.models.test import TestModel
 from deep_agent.api.v1 import api_router
 from deep_agent.capabilities import build_registry
 from deep_agent.capabilities.mcp.shared_registry import McpSharedRegistry
-from deep_agent.capabilities.mcp.session_pool import McpSessionPool
+from deep_agent.capabilities.mcp.lease_manager import McpLeaseManager
 from deep_agent.core.context import AppContext, init_context, reset_context
 from deep_agent.options import OPTION
 from tests.helpers.sqlite_stores import make_sqlite_stores
@@ -78,13 +78,13 @@ class McpSharedHttpStreamTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_chat_stream_completes_with_shared_http_text_tools(self) -> None:
         registry = McpSharedRegistry(runtime_dir=Path(self._tmpdir.name))
-        pool = McpSessionPool(shared_registry=registry)
+        manager = McpLeaseManager(shared_registry=registry)
         stores, engine, session_factory = await make_sqlite_stores()
         init_context(
             AppContext.for_testing(
                 registry=build_registry(),
                 stores=stores,
-                mcp_session_pool=pool,
+                mcp_lease_manager=manager,
                 db_engine=engine,
                 db_session_factory=session_factory,
             )

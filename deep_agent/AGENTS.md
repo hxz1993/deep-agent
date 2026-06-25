@@ -81,8 +81,8 @@ MCP 在请求时由 `resolve_mcp_toolsets` 解析（DB 行 + `mcps/` builtin 兜
 | `mcp/db_loader.py` | 从 `mcp_servers` 构建 MCPToolset |
 | `mcp/builtin.py` | 发现 `mcps/<name>/server.py` |
 | `mcp/toolset_builder.py` | url / stdio / builtin + header 注入 |
-| `mcp/session_scoped.py` | stdio MCP 按 chat session 保活子进程 |
-| `mcp/session_pool.py` | 全局 MCP 会话池 |
+| `mcp/run_scoped.py` | builtin MCP：按 agent run 租约 HTTP client |
+| `mcp/lease_manager.py` | worker 级 MCP lease + shared registry touch |
 | `ui/registry.py` | UI 工具合并、可见性、`prepare_ui_toolset_for_spec` |
 | `mcp/ui_discovery.py` | MCP manifest 发现 → `UiToolStore.sync_mcp_tools` |
 

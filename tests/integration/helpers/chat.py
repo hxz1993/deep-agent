@@ -13,7 +13,7 @@ from pydantic_ai.models.test import TestModel
 
 from deep_agent.api.v1 import api_router
 from deep_agent.capabilities import build_registry
-from deep_agent.capabilities.mcp.session_pool import McpSessionPool
+from deep_agent.capabilities.mcp.lease_manager import McpLeaseManager
 from deep_agent.core.context import AppContext, init_context, reset_context
 from deep_agent.db.stores.bundle import DataStores
 from deep_agent.schemas.mcp import McpServerCreate
@@ -89,7 +89,7 @@ def configure_test_app(
     ctx = AppContext.for_testing(
         registry=build_registry(),
         stores=stores,
-        mcp_session_pool=McpSessionPool(),
+        mcp_lease_manager=McpLeaseManager(),
         db_engine=db_engine,
         db_session_factory=db_session_factory,
     )

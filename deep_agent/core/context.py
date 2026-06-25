@@ -7,7 +7,7 @@ from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from deep_agent.capabilities import build_registry
-from deep_agent.capabilities.mcp.session_pool import McpSessionPool
+from deep_agent.capabilities.mcp.lease_manager import McpLeaseManager
 from deep_agent.capabilities.registry import CapabilityRegistry
 from loguru import logger
 
@@ -23,7 +23,7 @@ _context: AppContext | None = None
 class AppContext:
     registry: CapabilityRegistry
     stores: DataStores
-    mcp_session_pool: McpSessionPool
+    mcp_lease_manager: McpLeaseManager
     db_engine: AsyncEngine
     db_session_factory: async_sessionmaker[AsyncSession]
 
@@ -33,7 +33,7 @@ class AppContext:
 
     @classmethod
     async def bootstrap(cls) -> AppContext:
-        mcp_session_pool = McpSessionPool(mcp_acquire_retries=OPTION.agent.mcp_acquire_retries)
+        mcp_lease_manager = McpLeaseManager(mcp_acquire_retries=OPTION.agent.mcp_acquire_retries)
 
         try:
             bundle = await bootstrap_database()
@@ -51,7 +51,7 @@ class AppContext:
         ctx = cls(
             registry=build_registry(stores=bundle.stores),
             stores=bundle.stores,
-            mcp_session_pool=mcp_session_pool,
+            mcp_lease_manager=mcp_lease_manager,
             db_engine=bundle.engine,
             db_session_factory=bundle.session_factory,
         )
@@ -64,18 +64,18 @@ class AppContext:
         *,
         registry: CapabilityRegistry | None = None,
         stores: DataStores | None = None,
-        mcp_session_pool: McpSessionPool | None = None,
+        mcp_lease_manager: McpLeaseManager | None = None,
         mcp_acquire_retries: int | None = None,
         db_engine: AsyncEngine | None = None,
         db_session_factory: async_sessionmaker[AsyncSession] | None = None,
     ) -> AppContext:
-        if mcp_session_pool is None:
+        if mcp_lease_manager is None:
             retries = (
                 OPTION.agent.mcp_acquire_retries
                 if mcp_acquire_retries is None
                 else mcp_acquire_retries
             )
-            mcp_session_pool = McpSessionPool(mcp_acquire_retries=retries)
+            mcp_lease_manager = McpLeaseManager(mcp_acquire_retries=retries)
         if stores is None:
             raise ValueError("for_testing requires explicit stores (use tests.helpers.sqlite_stores)")
         if db_engine is None or db_session_factory is None:
@@ -83,13 +83,13 @@ class AppContext:
         return cls(
             registry=registry or CapabilityRegistry(),
             stores=stores,
-            mcp_session_pool=mcp_session_pool,
+            mcp_lease_manager=mcp_lease_manager,
             db_engine=db_engine,
             db_session_factory=db_session_factory,
         )
 
     async def aclose(self) -> None:
-        await self.mcp_session_pool.close_all()
+        await self.mcp_lease_manager.close_all()
         await close_db(self.db_engine)
 
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import unittest
 
-from deep_agent.capabilities.mcp.session_pool import McpSessionPool
+from deep_agent.capabilities.mcp.lease_manager import McpLeaseManager
 from deep_agent.core.context import reset_context
 from tests.helpers.testing_context import init_test_context
 from tests.integration.helpers.mcp import (
@@ -16,7 +16,7 @@ from tests.integration.helpers.mcp import (
 
 class McpHeaderForwardingTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
-        init_test_context(mcp_session_pool=McpSessionPool())
+        init_test_context(mcp_lease_manager=McpLeaseManager())
 
     def tearDown(self) -> None:
         reset_context()

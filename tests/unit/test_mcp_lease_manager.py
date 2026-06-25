@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, patch
 
 from mcp.shared.exceptions import McpError
 
-from deep_agent.capabilities.mcp.session_pool import McpSessionPool
+from deep_agent.capabilities.mcp.lease_manager import McpLeaseManager
 
 
 def _mcp_connection_closed() -> McpError:
@@ -14,22 +14,22 @@ def _mcp_connection_closed() -> McpError:
 
 
 @contextlib.contextmanager
-def _mock_shared_registry(pool: McpSessionPool):
+def _mock_shared_registry(manager: McpLeaseManager):
     with (
         patch.object(
-            pool._shared_registry,
+            manager._shared_registry,
             "ensure_server",
             new=AsyncMock(return_value="http://127.0.0.1:19000/mcp"),
         ),
-        patch.object(pool._shared_registry, "start_touch", new=AsyncMock()),
-        patch.object(pool._shared_registry, "stop_touch", new=AsyncMock()),
+        patch.object(manager._shared_registry, "start_touch", new=AsyncMock()),
+        patch.object(manager._shared_registry, "stop_touch", new=AsyncMock()),
     ):
         yield
 
 
-class McpSessionPoolTests(unittest.IsolatedAsyncioTestCase):
-    async def test_sequential_acquires_create_new_clients(self) -> None:
-        pool = McpSessionPool()
+class McpLeaseManagerTests(unittest.IsolatedAsyncioTestCase):
+    async def test_sequential_leases_create_new_clients(self) -> None:
+        manager = McpLeaseManager()
         created: list[AsyncMock] = []
 
         def factory(_url: str) -> AsyncMock:
@@ -39,11 +39,11 @@ class McpSessionPoolTests(unittest.IsolatedAsyncioTestCase):
             created.append(toolset)
             return toolset
 
-        with _mock_shared_registry(pool):
-            first = await pool.acquire("text_tools", "session-a", factory)
-            await pool.release("text_tools", "session-a")
-            second = await pool.acquire("text_tools", "session-a", factory)
-            await pool.release("text_tools", "session-a")
+        with _mock_shared_registry(manager):
+            async with manager.lease("text_tools", "session-a", factory):
+                first = created[-1]
+            async with manager.lease("text_tools", "session-a", factory):
+                second = created[-1]
 
         self.assertIsNot(first, second)
         self.assertEqual(len(created), 2)
@@ -51,38 +51,38 @@ class McpSessionPoolTests(unittest.IsolatedAsyncioTestCase):
         second.__aexit__.assert_awaited_once()
 
     async def test_different_sessions_get_different_toolsets(self) -> None:
-        pool = McpSessionPool()
+        manager = McpLeaseManager()
+        seen: list[AsyncMock] = []
 
         def factory(_url: str) -> AsyncMock:
             toolset = AsyncMock()
             toolset.__aenter__ = AsyncMock(return_value=toolset)
             toolset.__aexit__ = AsyncMock(return_value=None)
+            seen.append(toolset)
             return toolset
 
-        with _mock_shared_registry(pool):
-            first = await pool.acquire("text_tools", "session-a", factory)
-            second = await pool.acquire("text_tools", "session-b", factory)
-            await pool.release("text_tools", "session-a")
-            await pool.release("text_tools", "session-b")
+        with _mock_shared_registry(manager):
+            async with manager.lease("text_tools", "session-a", factory):
+                first = seen[-1]
+            async with manager.lease("text_tools", "session-b", factory):
+                second = seen[-1]
 
         self.assertIsNot(first, second)
 
     async def test_lease_closes_client_on_exit(self) -> None:
-        pool = McpSessionPool()
+        manager = McpLeaseManager()
         toolset = AsyncMock()
         toolset.__aenter__ = AsyncMock(return_value=toolset)
         toolset.__aexit__ = AsyncMock(return_value=None)
 
-        with _mock_shared_registry(pool):
-            async with pool.lease("text_tools", "session-a", lambda _url: toolset):
-                self.assertIn(("text_tools", "session-a"), pool._entries)
-
-            self.assertNotIn(("text_tools", "session-a"), pool._entries)
+        with _mock_shared_registry(manager):
+            async with manager.lease("text_tools", "session-a", lambda _url: toolset):
+                pass
 
         toolset.__aexit__.assert_awaited_once()
 
-    async def test_acquire_retries_recoverable_connect_failure(self) -> None:
-        pool = McpSessionPool(mcp_acquire_retries=1)
+    async def test_lease_retries_recoverable_connect_failure(self) -> None:
+        manager = McpLeaseManager(mcp_acquire_retries=1)
         attempts = {"count": 0}
 
         def factory(_url: str) -> AsyncMock:
@@ -95,15 +95,14 @@ class McpSessionPoolTests(unittest.IsolatedAsyncioTestCase):
             toolset.__aexit__ = AsyncMock(return_value=None)
             return toolset
 
-        with _mock_shared_registry(pool):
-            toolset = await pool.acquire("text_tools", "session-a", factory)
-            await pool.release("text_tools", "session-a")
+        with _mock_shared_registry(manager):
+            async with manager.lease("text_tools", "session-a", factory) as toolset:
+                self.assertIsNotNone(toolset)
 
         self.assertEqual(attempts["count"], 2)
-        self.assertIsNotNone(toolset)
 
-    async def test_acquire_does_not_retry_non_recoverable_errors(self) -> None:
-        pool = McpSessionPool(mcp_acquire_retries=2)
+    async def test_lease_does_not_retry_non_recoverable_errors(self) -> None:
+        manager = McpLeaseManager(mcp_acquire_retries=2)
         attempts = {"count": 0}
 
         def factory(_url: str) -> AsyncMock:
@@ -113,9 +112,10 @@ class McpSessionPoolTests(unittest.IsolatedAsyncioTestCase):
             toolset.__aexit__ = AsyncMock(return_value=None)
             return toolset
 
-        with _mock_shared_registry(pool):
+        with _mock_shared_registry(manager):
             with self.assertRaises(ValueError):
-                await pool.acquire("text_tools", "session-a", factory)
+                async with manager.lease("text_tools", "session-a", factory):
+                    pass
 
         self.assertEqual(attempts["count"], 1)
 

@@ -44,7 +44,7 @@ tests/
 | `test_dbms_config.py` | `DEEP_AGENT_DBMS_*` 解析 |
 | `test_deepcube_server.py` | DeepCube 启动器 argv |
 | `test_forward_headers.py` | MCP header 白名单 |
-| `test_mcp_session_pool.py` | MCP 会话池 |
+| `test_mcp_lease_manager.py` | MCP lease 管理 |
 
 ---
 
@@ -54,7 +54,7 @@ tests/
 | --- | --- |
 | `test_chat_header_forwarding.py` | HTTP → MCP header 透传 |
 | `test_mcp_header_forwarding.py` | MCP 层 header 注入 |
-| `test_mcp_session_scoping.py` | stdio MCP 按 session 隔离子进程 |
+| `test_mcp_run_scoping.py` | builtin MCP 按 run lease 隔离 client |
 
 公共 fixture：`integration/fixtures/header_echo_server.py`、`pid_echo_server.py`。
 

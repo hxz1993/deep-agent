@@ -9,7 +9,7 @@ from pydantic_ai.toolsets._dynamic import DynamicToolset
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.capabilities.mcp.builtin_config import normalize_mcp_config
 from deep_agent.capabilities.mcp.request_context import inject_request_meta, merge_mcp_headers
-from deep_agent.capabilities.mcp.session_scoped import SessionScopedMcpToolset
+from deep_agent.capabilities.mcp.run_scoped import RunScopedMcpToolset
 from deep_agent.options import OPTION
 
 
@@ -30,7 +30,7 @@ def build_mcp_toolset(name: str, transport: str, config: dict[str, Any]) -> Any:
     """Build a registry-ready MCP toolset with request header forwarding."""
     transport, config = normalize_mcp_config(name, transport, config)
     if transport == "builtin":
-        return SessionScopedMcpToolset(server_name=name, config=config).prefixed(name)
+        return RunScopedMcpToolset(server_name=name, config=config).prefixed(name)
     if transport == "url":
         return _build_url_toolset(name, config)
     raise ValueError(f"Unsupported MCP transport: {transport!r}")

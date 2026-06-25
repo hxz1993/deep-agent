@@ -245,12 +245,21 @@ def upgrade() -> None:
     )
     _alter_not_null("chat_messages", "session_id", column_type=session_col_type, bind=bind)
 
-    if drop_session_key_cs:
-        op.drop_column("chat_sessions", "session_key")
-    if drop_session_key_cm:
-        op.drop_column("chat_messages", "session_key")
+    if is_sqlite(bind):
+        if drop_session_key_cs:
+            with op.batch_alter_table("chat_sessions") as batch_op:
+                batch_op.create_primary_key("chat_sessions_pkey", ["agent_id", "session_id"])
+                batch_op.drop_column("session_key")
+        if drop_session_key_cm:
+            with op.batch_alter_table("chat_messages") as batch_op:
+                batch_op.drop_column("session_key")
+    else:
+        if drop_session_key_cs:
+            op.drop_column("chat_sessions", "session_key")
+        if drop_session_key_cm:
+            op.drop_column("chat_messages", "session_key")
+        _create_chat_sessions_primary_key()
 
-    _create_chat_sessions_primary_key()
     _drop_constraint_if_exists("chat_messages", "uq_chat_messages_session_sequence", constraint_type="unique")
     if not _constraint_exists("chat_messages", "uq_chat_messages_session_sequence"):
         if is_sqlite(bind):

@@ -1,23 +1,38 @@
 from __future__ import annotations
 
+import asyncio
 import unittest
 from datetime import datetime, timezone
 
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pydantic_ai.messages import ModelRequest, UserPromptPart
 
 from deep_agent.api.v1 import api_router
-from deep_agent.core.context import get_context, reset_context
-from tests.integration.helpers.chat import create_test_app
+from deep_agent.capabilities import build_registry
+from deep_agent.capabilities.mcp.session_pool import McpSessionPool
+from deep_agent.core.context import AppContext, get_context, init_context, reset_context
+from tests.helpers.sqlite_stores import make_sqlite_stores_sync
 
 
 class SessionListApiTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.app = create_test_app()
+        self.stores, self.engine, self.session_factory = make_sqlite_stores_sync()
+        self.app = FastAPI()
+        self.app.include_router(api_router)
+        ctx = AppContext.for_testing(
+            registry=build_registry(),
+            stores=self.stores,
+            mcp_session_pool=McpSessionPool(),
+            db_engine=self.engine,
+            db_session_factory=self.session_factory,
+        )
+        init_context(ctx)
         self.client = TestClient(self.app)
 
     def tearDown(self) -> None:
         reset_context()
+        asyncio.run(self.engine.dispose())
 
     def test_list_sessions_returns_paginated_wrapper(self) -> None:
         store = get_context().store

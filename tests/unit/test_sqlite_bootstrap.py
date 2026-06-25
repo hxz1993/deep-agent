@@ -28,6 +28,7 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
             try:
                 stores = create_data_stores(DbDialect.SQLITE, session_factory)
                 self.assertIsNotNone(stores.agent)
+                self.assertIsNotNone(stores.llm_model)
                 self.assertIsNotNone(stores.mcp)
                 self.assertIsNotNone(stores.ui_tool)
 

@@ -15,13 +15,11 @@ from loguru import logger
 
 from deep_agent.capabilities.mcp.builtin_config import resolve_builtin_spawn_config
 from deep_agent.lib.const import MCP_REGISTRY_JSON_ENV, MCP_SERVER_TTL_ENV
+from deep_agent.core.paths import REPO_ROOT
 from deep_agent.options import OPTION
 
 _SHARED_HOST = "127.0.0.1"
 _MCP_HTTP_PATH = "/mcp"
-_DEEPCUBE_ENV_TRANSPORT = "DEEPCUBE_MCP_TRANSPORT"
-_DEEPCUBE_ENV_HOST = "DEEPCUBE_MCP_HOST"
-_DEEPCUBE_ENV_PORT = "DEEPCUBE_MCP_PORT"
 
 
 def shared_mcp_identity(server_name: str) -> str:
@@ -110,7 +108,6 @@ async def _wait_for_live_server(
             raise RuntimeError(
                 f"Shared MCP server {server_name!r} (pid={process.pid}) exited before "
                 f"listening on {host}:{port}. "
-                "For deepcube use transport=http, not streamable-http."
             )
         try:
             _, writer = await asyncio.wait_for(
@@ -202,44 +199,25 @@ class McpSharedRegistry:
                 env.update(spawn_config.get("env") or {})
                 env[MCP_REGISTRY_JSON_ENV] = str(json_path)
                 env[MCP_SERVER_TTL_ENV] = str(self._server_ttl)
+                env["PYTHONPATH"] = str(REPO_ROOT)
                 command = spawn_config["command"]
                 args = list(spawn_config.get("args", []))
-                if server_name == "deepcube":
-                    env[_DEEPCUBE_ENV_TRANSPORT] = "http"
-                    env[_DEEPCUBE_ENV_HOST] = _SHARED_HOST
-                    env[_DEEPCUBE_ENV_PORT] = str(port)
-                    args.extend(
-                        [
-                            "--transport",
-                            "http",
-                            "--host",
-                            _SHARED_HOST,
-                            "--port",
-                            str(port),
-                        ]
-                    )
-                else:
-                    args.extend(
-                        [
-                            "--transport",
-                            "streamable-http",
-                            "--host",
-                            _SHARED_HOST,
-                            "--port",
-                            str(port),
-                        ]
-                    )
-
-                spawn_kwargs: dict[str, Any] = {
-                    "env": env,
-                    "cwd": spawn_config.get("cwd"),
-                }
-
+                args.extend(
+                    [
+                        "--transport",
+                        "streamable-http",
+                        "--host",
+                        _SHARED_HOST,
+                        "--port",
+                        str(port),
+                    ]
+                )
                 # ponytail: omit stdout/stderr so the child inherits the worker console.
                 process = await asyncio.create_subprocess_exec(
                     command,
                     *args,
-                    **spawn_kwargs,
+                    env=env,
+                    cwd=spawn_config.get("cwd"),
                 )
                 new_record = {
                     "url": f"http://{_SHARED_HOST}:{port}{_MCP_HTTP_PATH}",

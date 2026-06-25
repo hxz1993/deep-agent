@@ -3,7 +3,9 @@ const STORAGE_KEY = "deep-agent-base-url";
 const state = {
   baseUrl: "",
   capabilities: [],
+  llmModels: [],
   editingAgentId: null,
+  editingLlmModelId: null,
   editingMcp: null,
 };
 
@@ -92,6 +94,33 @@ async function loadCapabilities() {
   return state.capabilities;
 }
 
+async function loadLlmModels() {
+  try {
+    state.llmModels = await apiFetch("/api/v1/llm-models");
+  } catch {
+    state.llmModels = [];
+  }
+  return state.llmModels;
+}
+
+function populateAgentModelSelect(selectedId = null) {
+  const select = document.getElementById("agentModelId");
+  if (!select) return;
+  const models = state.llmModels || [];
+  if (!models.length) {
+    select.innerHTML = `<option value="">（请先创建模型配置）</option>`;
+    select.disabled = true;
+    return;
+  }
+  select.disabled = false;
+  select.innerHTML = models
+    .map(
+      (m) =>
+        `<option value="${escapeHtml(m.id)}" ${m.id === selectedId ? "selected" : ""}>${escapeHtml(m.name)} (${escapeHtml(m.model)})</option>`
+    )
+    .join("");
+}
+
 function initTabs() {
   const tabs = document.querySelectorAll(".tab");
   tabs.forEach((tab) => {
@@ -101,7 +130,10 @@ function initTabs() {
       const name = tab.dataset.tab;
       document.querySelectorAll(".panel").forEach((p) => p.classList.remove("active"));
       document.getElementById(`panel-${name}`)?.classList.add("active");
-      if (name === "agents" && window.agentsAdmin) window.agentsAdmin.refresh();
+      if (name === "agents" && window.agentsAdmin) {
+        loadLlmModels().then(() => window.agentsAdmin.refresh());
+      }
+      if (name === "llm-models" && window.llmModelsAdmin) window.llmModelsAdmin.refresh();
       if (name === "mcp" && window.mcpAdmin) window.mcpAdmin.refresh();
       if (name === "ui-tools" && window.uiToolsAdmin) window.uiToolsAdmin.refresh();
     });
@@ -128,6 +160,7 @@ document.addEventListener("DOMContentLoaded", () => {
   baseInput?.addEventListener("change", () => {
     saveBaseUrl(baseInput.value);
     if (window.agentsAdmin) window.agentsAdmin.refresh();
+    if (window.llmModelsAdmin) window.llmModelsAdmin.refresh();
     if (window.mcpAdmin) window.mcpAdmin.refresh();
     if (window.uiToolsAdmin) window.uiToolsAdmin.refresh();
   });
@@ -139,4 +172,5 @@ document.addEventListener("DOMContentLoaded", () => {
 
   initTabs();
   loadCapabilities().catch(() => {});
+  loadLlmModels().catch(() => {});
 });

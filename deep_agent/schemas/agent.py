@@ -5,8 +5,10 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, Field
 
+from deep_agent.schemas.llm_model import LlmModelSummary
+
 if TYPE_CHECKING:
-    from deep_agent.db.models import Agent
+    from deep_agent.db.models import Agent, LlmModel
 
 
 class AgentChatRequest(BaseModel):
@@ -21,10 +23,14 @@ class AgentChatRequest(BaseModel):
 
 class AgentCreate(BaseModel):
     name: str = Field(..., description="Unique agent display name.")
-    model: str = Field(..., description='Model string, e.g. "openai:gpt-4o".')
+    model_id: str = Field(..., description="LLM model preset id.")
     prompt: str = Field(..., description="System prompt / instructions.")
-    base_url: str | None = Field(default=None, description="Optional OpenAI-compatible base URL.")
-    api_key: str | None = Field(default=None, description="Optional API key for the model endpoint.")
+    temperature: float | None = Field(
+        default=None,
+        ge=0,
+        le=2,
+        description="Optional sampling temperature for this agent.",
+    )
     capabilities: list[str] | None = Field(
         default=None,
         description="Capability names to enable. Null means all registered capabilities.",
@@ -38,10 +44,9 @@ class AgentCreate(BaseModel):
 
 class AgentUpdate(BaseModel):
     name: str | None = None
-    model: str | None = None
+    model_id: str | None = None
     prompt: str | None = None
-    base_url: str | None = None
-    api_key: str | None = None
+    temperature: float | None = Field(default=None, ge=0, le=2)
     capabilities: list[str] | None = None
     max_requests: int | None = Field(default=None, ge=1)
 
@@ -49,10 +54,10 @@ class AgentUpdate(BaseModel):
 class AgentResponse(BaseModel):
     id: str
     name: str
-    model: str
+    model_id: str
+    model: LlmModelSummary
     prompt: str
-    base_url: str | None = None
-    api_key_set: bool = Field(description="Whether an API key is configured (value is never returned).")
+    temperature: float | None = None
     capabilities: list[str] | None = None
     max_requests: int | None = Field(
         default=None,
@@ -62,14 +67,14 @@ class AgentResponse(BaseModel):
     updated_at: datetime
 
     @classmethod
-    def from_row(cls, row: Agent) -> AgentResponse:
+    def from_row(cls, row: Agent, llm_model: LlmModel) -> AgentResponse:
         return cls(
             id=row.id,
             name=row.name,
-            model=row.model,
+            model_id=row.model_id,
+            model=LlmModelSummary.from_row(llm_model),
             prompt=row.prompt,
-            base_url=row.base_url,
-            api_key_set=bool(row.api_key),
+            temperature=row.temperature,
             capabilities=row.capabilities,
             max_requests=row.max_requests,
             created_at=row.created_at,

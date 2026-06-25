@@ -17,7 +17,17 @@ class ChatRequest(BaseModel):
     )
     model: str | None = Field(
         default=None,
-        description='Optional model override, e.g. "anthropic:claude-sonnet-4-5".',
+        description='Optional model override, e.g. "anthropic:claude-sonnet-4-5". Ignored when model_id is set.',
+    )
+    model_id: str | None = Field(
+        default=None,
+        description="Optional LLM model preset id from the database. Ignored when agent_id is set.",
+    )
+    temperature: float | None = Field(
+        default=None,
+        ge=0,
+        le=2,
+        description="Optional sampling temperature. Ignored when agent_id is set.",
     )
     capabilities: list[str] | None = Field(
         default=None,
@@ -33,7 +43,7 @@ class ChatRequest(BaseModel):
 class StreamChatRequest(ChatRequest):
     agent_id: str | None = Field(
         default=None,
-        description="Load agent config from the database. When set, model/capabilities are ignored.",
+        description="Load agent config from the database. When set, model/model_id/capabilities/temperature are ignored.",
     )
     deferred_tool_results: list["DeferredToolResultItem"] | None = Field(
         default=None,

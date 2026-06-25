@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Integer, PrimaryKeyConstraint, String, Text, UniqueConstraint, func
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, PrimaryKeyConstraint, String, Text, UniqueConstraint, func
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 from deep_agent.db.ids import AGENT_ID_LENGTH, new_agent_id
 from deep_agent.db.session_scope import NO_AGENT_SCOPE
@@ -17,15 +17,37 @@ class Base(DeclarativeBase):
 KeyText = String(191)
 
 
+class LlmModel(Base):
+    __tablename__ = "llm_models"
+    __table_args__ = (UniqueConstraint("name", name="uq_llm_models_name"),)
+
+    id: Mapped[str] = mapped_column(String(AGENT_ID_LENGTH), primary_key=True, default=new_agent_id)
+    name: Mapped[str] = mapped_column(KeyText, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    model: Mapped[str] = mapped_column(Text, nullable=False)
+    base_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    api_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+
 class Agent(Base):
     __tablename__ = "agents"
     __table_args__ = (UniqueConstraint("name", name="uq_agents_name"),)
 
     id: Mapped[str] = mapped_column(String(AGENT_ID_LENGTH), primary_key=True, default=new_agent_id)
     name: Mapped[str] = mapped_column(KeyText, nullable=False)
-    model: Mapped[str] = mapped_column(Text, nullable=False)
-    base_url: Mapped[str | None] = mapped_column(Text, nullable=True)
-    api_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+    model_id: Mapped[str] = mapped_column(
+        String(AGENT_ID_LENGTH),
+        ForeignKey("llm_models.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    temperature: Mapped[float | None] = mapped_column(Float, nullable=True)
     capabilities: Mapped[list[str] | None] = mapped_column(JSONType, nullable=True)
     max_requests: Mapped[int | None] = mapped_column(Integer, nullable=True)
     prompt: Mapped[str] = mapped_column(Text, nullable=False)
@@ -36,6 +58,7 @@ class Agent(Base):
         onupdate=func.now(),
         nullable=False,
     )
+    llm_model: Mapped[LlmModel] = relationship("LlmModel", lazy="joined")
 
 
 class McpServer(Base):

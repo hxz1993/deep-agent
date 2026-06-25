@@ -29,6 +29,7 @@
       </div>
       <nav class="tabs" id="mainTabs">
         <button class="tab active" data-tab="agents">Agent 配置</button>
+        <button class="tab" data-tab="llm-models">模型配置</button>
         <button class="tab" data-tab="mcp">MCP 配置</button>
         <button class="tab" data-tab="ui-tools">UI 工具</button>
       </nav>
@@ -65,6 +66,31 @@
           </thead>
           <tbody id="agentsTableBody">
             <tr><td colspan="5" class="empty-cell">加载中…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- LLM models panel -->
+    <section class="panel" id="panel-llm-models">
+      <div class="panel-toolbar">
+        <h2>模型配置列表</h2>
+        <button class="btn primary" id="newLlmModelBtn">＋ 新建模型</button>
+      </div>
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>名称</th>
+              <th>模型</th>
+              <th>Base URL</th>
+              <th>API Key</th>
+              <th>Agent 数</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="llmModelsTableBody">
+            <tr><td colspan="6" class="empty-cell">加载中…</td></tr>
           </tbody>
         </table>
       </div>
@@ -161,16 +187,12 @@
               <input type="text" id="agentName" required />
             </label>
             <label class="field">
-              <span>模型</span>
-              <input type="text" id="agentModel" placeholder="openai:gpt-4o" required />
+              <span>模型配置</span>
+              <select id="agentModelId" required></select>
             </label>
             <label class="field">
-              <span>Base URL（可选）</span>
-              <input type="text" id="agentBaseUrl" placeholder="https://api.openai.com/v1" />
-            </label>
-            <label class="field">
-              <span>API Key（可选，留空表示不修改）</span>
-              <input type="password" id="agentApiKey" autocomplete="new-password" />
+              <span>Temperature（可选）</span>
+              <input type="number" id="agentTemperature" min="0" max="2" step="0.1" placeholder="留空使用模型默认" />
             </label>
             <label class="field">
               <span>最大请求次数（可选）</span>
@@ -203,6 +225,42 @@
       </div>
       <div class="modal-footer">
         <button type="button" class="btn" id="cancelAgentBtn">取消</button>
+        <button type="submit" class="btn primary">保存</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- LLM model modal -->
+  <dialog class="modal" id="llmModelModal">
+    <form id="llmModelForm" method="dialog">
+      <div class="modal-header">
+        <h3 id="llmModelModalTitle">新建模型配置</h3>
+        <button type="button" class="icon-btn" id="closeLlmModelModal">✕</button>
+      </div>
+      <div class="modal-body">
+        <label class="field">
+          <span>名称</span>
+          <input type="text" id="llmModelName" required />
+        </label>
+        <label class="field">
+          <span>描述（可选）</span>
+          <input type="text" id="llmModelDescription" />
+        </label>
+        <label class="field">
+          <span>模型</span>
+          <input type="text" id="llmModelModel" placeholder="openai:gpt-4o" required />
+        </label>
+        <label class="field">
+          <span>Base URL（可选）</span>
+          <input type="text" id="llmModelBaseUrl" placeholder="https://api.openai.com/v1" />
+        </label>
+        <label class="field">
+          <span>API Key（可选，编辑时留空表示不修改）</span>
+          <input type="password" id="llmModelApiKey" autocomplete="new-password" />
+        </label>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn" id="cancelLlmModelBtn">取消</button>
         <button type="submit" class="btn primary">保存</button>
       </div>
     </form>
@@ -382,6 +440,7 @@
   </dialog>
 
   <script src="./admin.js"></script>
+  <script src="./llm_models.js"></script>
   <script src="./agents.js"></script>
   <script src="./mcp.js"></script>
   <script src="./ui_schema_editor.js"></script>

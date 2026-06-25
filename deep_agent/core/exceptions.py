@@ -23,3 +23,9 @@ class AgentNotFoundError(DeepAgentError):
     def __init__(self, agent_id: object) -> None:
         super().__init__(f"Agent not found: {agent_id}")
         self.agent_id = agent_id
+
+
+class LlmModelNotFoundError(DeepAgentError):
+    def __init__(self, model_id: object) -> None:
+        super().__init__(f"LLM model not found: {model_id}")
+        self.model_id = model_id

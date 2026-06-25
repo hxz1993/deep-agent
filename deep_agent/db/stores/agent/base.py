@@ -27,9 +27,8 @@ class AgentStoreBase(SessionBoundMixin):
                 raise ValueError(f"Agent already exists: {data.name}")
             row = Agent(
                 name=data.name,
-                model=data.model,
-                base_url=data.base_url,
-                api_key=data.api_key,
+                model_id=data.model_id,
+                temperature=data.temperature,
                 capabilities=data.capabilities,
                 max_requests=data.max_requests,
                 prompt=data.prompt,

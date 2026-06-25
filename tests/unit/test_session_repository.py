@@ -7,7 +7,7 @@ from pydantic import TypeAdapter
 from pydantic_ai.messages import ModelMessage, ModelRequest, UserPromptPart
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from deep_agent.db.models import Agent, Base, ChatMessage, ChatSession
+from deep_agent.db.models import Agent, Base, ChatMessage, ChatSession, LlmModel
 from deep_agent.db.dialect import DbDialect
 from deep_agent.db.stores.chat_session import ChatSessionStoreBase, create_chat_session_store
 from deep_agent.db.stores.message import create_message_store
@@ -29,10 +29,16 @@ class ChatSessionStoreTests(unittest.IsolatedAsyncioTestCase):
         )
 
         async with self.session_factory() as db:
+            llm = LlmModel(
+                id="00000000-0000-4000-8000-000000000099",
+                name="test-model",
+                model="test",
+            )
+            db.add(llm)
             agent = Agent(
                 id="00000000-0000-4000-8000-000000000001",
                 name="Demo Agent",
-                model="test",
+                model_id=llm.id,
                 prompt="test",
             )
             db.add(agent)

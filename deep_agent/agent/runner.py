@@ -5,6 +5,7 @@ from typing import Any, AsyncIterator
 
 from pydantic_ai import Agent, AgentRunResultEvent, DeferredToolRequests, DeferredToolResults
 from pydantic_ai.messages import ModelMessage, ModelRequest, UserPromptPart
+from pydantic_ai.settings import ModelSettings
 from pydantic_ai.usage import UsageLimits
 
 from deep_agent.agent import events
@@ -37,11 +38,13 @@ class AgentRunner:
         usage_limits: UsageLimits,
         *,
         ui_tool_hints: dict[str, dict[str, Any]] | None = None,
+        model_settings: ModelSettings | None = None,
     ) -> None:
         self.agent = agent
         self.store = store
         self.usage_limits = usage_limits
         self.ui_tool_hints = ui_tool_hints or {}
+        self.model_settings = model_settings
 
     @asynccontextmanager
     async def _session_lock(self, session_id: str, *, agent_id: str | None) -> AsyncIterator[None]:
@@ -133,6 +136,7 @@ class AgentRunner:
                 usage_limits=self.usage_limits,
                 deferred_tool_results=deferred_tool_results,
                 output_type=_STREAM_OUTPUT_TYPE,
+                model_settings=self.model_settings,
             )
             await self._persist_run_messages(
                 session_id,
@@ -167,6 +171,7 @@ class AgentRunner:
                     usage_limits=self.usage_limits,
                     deferred_tool_results=deferred_tool_results,
                     output_type=_STREAM_OUTPUT_TYPE,
+                    model_settings=self.model_settings,
                 ) as stream:
                     async for event in stream:
                         if isinstance(event, AgentRunResultEvent):

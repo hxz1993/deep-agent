@@ -77,7 +77,7 @@ const agentsAdmin = {
           (a) => `
         <tr>
           <td><strong>${escapeHtml(a.name)}</strong></td>
-          <td>${escapeHtml(a.model)}</td>
+          <td>${escapeHtml(a.model?.name || "—")}</td>
           <td><div class="cap-preview">${escapeHtml(formatCapabilitiesPreview(a.capabilities))}</div></td>
           <td>${escapeHtml(formatDate(a.updated_at))}</td>
           <td>
@@ -290,11 +290,10 @@ const agentsAdmin = {
     document.getElementById("agentModalTitle").textContent = "新建 Agent";
     document.getElementById("agentName").disabled = false;
     document.getElementById("agentName").value = "";
-    document.getElementById("agentModel").value = "openai:gpt-4o";
+    populateAgentModelSelect(state.llmModels[0]?.id || null);
+    document.getElementById("agentTemperature").value = "";
     document.getElementById("agentPrompt").value =
       "You are a helpful assistant. Use available tools when they help answer accurately.";
-    document.getElementById("agentBaseUrl").value = "";
-    document.getElementById("agentApiKey").value = "";
     document.getElementById("agentMaxRequests").value = "";
     this.renderCapabilityCheckboxes([]);
     document.getElementById("agentModal").showModal();
@@ -307,10 +306,10 @@ const agentsAdmin = {
       document.getElementById("agentModalTitle").textContent = `编辑 Agent · ${agent.name}`;
       document.getElementById("agentName").disabled = false;
       document.getElementById("agentName").value = agent.name;
-      document.getElementById("agentModel").value = agent.model;
+      populateAgentModelSelect(agent.model_id);
+      document.getElementById("agentTemperature").value =
+        agent.temperature == null ? "" : String(agent.temperature);
       document.getElementById("agentPrompt").value = agent.prompt;
-      document.getElementById("agentBaseUrl").value = agent.base_url || "";
-      document.getElementById("agentApiKey").value = "";
       document.getElementById("agentMaxRequests").value =
         agent.max_requests == null ? "" : String(agent.max_requests);
       this.renderCapabilityCheckboxes(agent.capabilities);
@@ -324,13 +323,16 @@ const agentsAdmin = {
     event.preventDefault();
     const capabilities = this.getSelectedCapabilities();
     const payload = {
-      model: document.getElementById("agentModel").value.trim(),
+      model_id: document.getElementById("agentModelId").value,
       prompt: document.getElementById("agentPrompt").value,
-      base_url: document.getElementById("agentBaseUrl").value.trim() || null,
       capabilities,
     };
-    const apiKey = document.getElementById("agentApiKey").value.trim();
-    if (apiKey) payload.api_key = apiKey;
+    const tempRaw = document.getElementById("agentTemperature").value.trim();
+    if (tempRaw) {
+      payload.temperature = Number(tempRaw);
+    } else if (state.editingAgentId) {
+      payload.temperature = null;
+    }
 
     const maxRequestsRaw = document.getElementById("agentMaxRequests").value.trim();
     if (maxRequestsRaw) {

@@ -422,4 +422,12 @@ def doc_images(path: str) -> str:
 
 
 if __name__ == "__main__":
-    mcp.run()
+    import sys
+    from pathlib import Path
+
+    _root = Path(__file__).resolve().parents[2]
+    if str(_root) not in sys.path:
+        sys.path.insert(0, str(_root))
+    from mcps._run import run_fastmcp
+
+    run_fastmcp(mcp, prog="doc_search")

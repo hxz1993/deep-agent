@@ -19,27 +19,24 @@ def is_shipped_builtin(name: str) -> bool:
     return builtin_server_path(name).is_file()
 
 
+def list_builtin_server_names() -> list[str]:
+    """Sorted names of shipped ``mcps/<name>/server.py`` builtins."""
+    if not MCPS_DIR.is_dir():
+        return []
+    names: list[str] = []
+    for entry in sorted(MCPS_DIR.iterdir()):
+        if entry.is_dir() and (entry / SERVER_FILENAME).is_file():
+            names.append(entry.name)
+    return names
+
+
 def is_builtin_mcp_row(name: str, transport: str, config: dict[str, Any]) -> bool:
     """Repo-shipped ``mcps/<name>/`` servers never participate in UI tool discovery."""
-    if transport == "builtin":
-        return True
-    return is_legacy_builtin_stdio_config(name, config)
+    return transport == "builtin"
 
 
-def is_legacy_builtin_stdio_config(name: str, config: dict[str, Any]) -> bool:
-    """Detect stdio rows that point at a repo-shipped ``mcps/<name>/server.py``."""
-    if not is_shipped_builtin(name):
-        return False
-    if config.get("source") == "builtin":
-        return True
-    args = config.get("args") or []
-    if len(args) == 1 and Path(str(args[0])).name == SERVER_FILENAME:
-        return True
-    return "command" not in config and "args" not in config
-
-
-def resolve_builtin_stdio_config(name: str, config: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Resolve a portable builtin config to a concrete stdio launch config."""
+def resolve_builtin_spawn_config(name: str, config: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Resolve spawn metadata for a shared-HTTP builtin MCP server."""
     server_file = builtin_server_path(name)
     if not server_file.is_file():
         raise ValueError(
@@ -60,12 +57,9 @@ def resolve_builtin_stdio_config(name: str, config: dict[str, Any] | None = None
 
 
 def normalize_mcp_config(name: str, transport: str, config: dict[str, Any]) -> tuple[str, dict[str, Any]]:
-    """Normalize DB/API config to a concrete transport + stdio/url config."""
-    if transport == "builtin":
-        return "stdio", resolve_builtin_stdio_config(name, config)
-
-    if transport == "stdio" and is_legacy_builtin_stdio_config(name, config):
-        portable = {k: config[k] for k in ("env", "cwd") if k in config}
-        return "stdio", resolve_builtin_stdio_config(name, portable)
-
+    """Normalize DB/API config to a concrete transport + connection config."""
+    if transport == "stdio":
+        raise ValueError("stdio MCP transport is no longer supported; use url or builtin")
+    if transport in ("builtin", "stdio"):
+        return "builtin", resolve_builtin_spawn_config(name, config)
     return transport, config

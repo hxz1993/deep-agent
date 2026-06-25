@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+from pathlib import Path
 
 from deepcube.mcp.config import (
     ENV_DISCOVERY,
@@ -116,12 +117,25 @@ def ensure_stdio_defaults() -> None:
 
 def main_entry() -> None:
     ensure_stdio_defaults()
-    bridge_agent_request_headers_env()
+    transport = os.environ.get(ENV_TRANSPORT, "stdio").lower()
+    if transport in ("stdio", ""):
+        bridge_agent_request_headers_env()
     bridge_platform_discovery_env()
+
+    if transport == "http":
+        _root = Path(__file__).resolve().parents[2]
+        if str(_root) not in sys.path:
+            sys.path.insert(0, str(_root))
+        from mcps._run import start_registry_ttl_watcher
+
+        start_registry_ttl_watcher()
 
     from deepcube.mcp.server import main as deepcube_main
 
-    deepcube_main(sys.argv[1:])
+    try:
+        deepcube_main(sys.argv[1:])
+    except KeyboardInterrupt:
+        print("[mcp] exited deepcube", flush=True)
 
 
 if __name__ == "__main__":

@@ -10,20 +10,13 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from deep_agent.db.models import McpServer
 
-McpUserTransport = Literal["url", "stdio"]
-McpTransport = Literal["url", "stdio", "builtin"]
+McpUserTransport = Literal["url"]
+McpTransport = Literal["url", "builtin"]
 
 
 class McpUrlConfig(BaseModel):
     url: str = Field(..., description="Remote MCP server URL (SSE or streamable HTTP).")
     headers: dict[str, str] | None = Field(default=None, description="Optional HTTP headers.")
-
-
-class McpStdioConfig(BaseModel):
-    command: str = Field(..., description="Executable to launch the MCP server.")
-    args: list[str] = Field(default_factory=list, description="Arguments passed to the command.")
-    env: dict[str, str] | None = Field(default=None, description="Optional environment variables.")
-    cwd: str | None = Field(default=None, description="Optional working directory.")
 
 
 class McpBuiltinConfig(BaseModel):
@@ -42,10 +35,7 @@ class McpServerCreate(BaseModel):
 
     @model_validator(mode="after")
     def validate_config(self) -> McpServerCreate:
-        if self.transport == "url":
-            McpUrlConfig.model_validate(self.config)
-        else:
-            McpStdioConfig.model_validate(self.config)
+        McpUrlConfig.model_validate(self.config)
         return self
 
 
@@ -61,10 +51,7 @@ class McpServerUpdate(BaseModel):
             return self
         if self.transport is None:
             raise ValueError("transport is required when config is updated")
-        if self.transport == "url":
-            McpUrlConfig.model_validate(self.config)
-        else:
-            McpStdioConfig.model_validate(self.config)
+        McpUrlConfig.model_validate(self.config)
         return self
 
 

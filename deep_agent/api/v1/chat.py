@@ -13,7 +13,6 @@ from deep_agent.api.v1.deps import build_runner, build_runner_for_agent
 from deep_agent.core.context import AppContextDep
 from deep_agent.core.exceptions import AgentNotFoundError, LlmModelNotFoundError
 from deep_agent.db.ids import normalize_agent_id
-from deep_agent.db.session_scope import runtime_session_key
 from deep_agent.schemas.chat import ChatRequest, ChatResponse, StreamChatRequest
 
 router = APIRouter()
@@ -84,8 +83,6 @@ async def chat(request: Request, ctx: AppContextDep, body: ChatRequest) -> ChatR
     _validate_chat_body(body)
     session_id = body.session_id or uuid.uuid4().hex
     await _validate_branch_from(ctx, session_id, agent_id=None, branch_from=body.branch_from)
-    if body.branch_from is not None:
-        await ctx.mcp_session_pool.close_session(mcp_pool_session_key(session_id))
     try:
         runner = await build_runner(
             ctx,
@@ -148,8 +145,6 @@ async def chat_stream(request: Request, ctx: AppContextDep, body: StreamChatRequ
         api_agent_id = None
 
     await _validate_branch_from(ctx, session_id, agent_id=api_agent_id, branch_from=body.branch_from)
-    if body.branch_from is not None:
-        await ctx.mcp_session_pool.close_session(mcp_pool_session_key(session_id, agent_id=api_agent_id))
 
     async def event_generator():
         yield {"event": "session", "data": json.dumps(session_data)}
@@ -165,8 +160,3 @@ async def chat_stream(request: Request, ctx: AppContextDep, body: StreamChatRequ
             yield {"event": ev["type"], "data": json.dumps(ev, ensure_ascii=False)}
 
     return EventSourceResponse(event_generator())
-
-
-def mcp_pool_session_key(session_id: str, *, agent_id: str | None = None) -> str:
-    """Runtime key for MCP subprocess pooling (not persisted)."""
-    return runtime_session_key(session_id, agent_id=agent_id)

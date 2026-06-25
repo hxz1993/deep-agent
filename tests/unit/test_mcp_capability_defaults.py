@@ -9,8 +9,8 @@ from deep_agent.capabilities.registry import Capability
 class _McpRow:
     def __init__(self) -> None:
         self.name = "echo"
-        self.transport = "stdio"
-        self.config = {"command": "python", "args": ["server.py"]}
+        self.transport = "url"
+        self.config = {"url": "http://127.0.0.1:8765/mcp"}
         self.description = None
 
 

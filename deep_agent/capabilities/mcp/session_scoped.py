@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from contextlib import AsyncExitStack
 from dataclasses import dataclass, field, replace
 from typing import Any
 
@@ -12,27 +13,27 @@ from typing_extensions import Self
 
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.capabilities.mcp.errors import is_recoverable_mcp_disconnect
-from deep_agent.capabilities.mcp.request_context import apply_request_headers_to_stdio_config
+from deep_agent.capabilities.mcp.request_context import merge_mcp_headers
 from deep_agent.capabilities.mcp.session_pool import McpSessionPool, get_mcp_session_pool
 from deep_agent.db.session_scope import runtime_session_key
 
 
 @dataclass
 class SessionScopedMcpToolset(AbstractToolset[AgentDeps]):
-    """Session-scoped wrapper around a stdio MCP toolset.
+    """Pooled MCP toolset scoped to a chat session run.
 
-    ``async with agent`` enters the registry copy without a session id (no-op).
-    Each agent run binds ``ctx.deps.session_id`` and ``ctx.deps.request_headers``
-    via ``for_run``. The first run that starts the pooled subprocess supplies
-    headers for :data:`~deep_agent.lib.const.REQUEST_HEADERS_ENV`.
+    Builtin servers are launched once per pod as shared HTTP processes.
+    Each run opens a short-lived HTTP client; the shared server is kept alive
+    via registry touch while any worker holds an active lease.
     """
 
     server_name: str
     config: dict[str, Any]
-    pool: McpSessionPool = field(default_factory=get_mcp_session_pool)
+    pool: McpSessionPool | None = field(default=None, repr=False, compare=False)
     _session_id: str | None = field(default=None, repr=False, compare=False)
     _request_headers: Mapping[str, str] | None = field(default=None, repr=False, compare=False)
     _inner: AbstractToolset[AgentDeps] | None = field(default=None, repr=False, compare=False)
+    _exit_stack: AsyncExitStack | None = field(default=None, repr=False, compare=False)
 
     @property
     def id(self) -> str | None:
@@ -49,30 +50,47 @@ class SessionScopedMcpToolset(AbstractToolset[AgentDeps]):
             _session_id=pool_key,
             _request_headers=request_headers,
             _inner=None,
+            _exit_stack=None,
         )
+
+    def _build_inner_toolset(self, connect_url: str) -> AbstractToolset[AgentDeps]:
+        from deep_agent.capabilities.mcp.toolset_builder import build_raw_url_mcp_toolset
+
+        static_headers = dict(self.config.get("headers") or {})
+        request_headers = dict(self._request_headers) if self._request_headers else None
+        merged = merge_mcp_headers(static_headers, request_headers) or {}
+        return build_raw_url_mcp_toolset(
+            self.server_name,
+            connect_url,
+            static_headers=merged,
+            init_timeout=self.config.get("init_timeout"),
+        )
+
+    def _pool(self) -> McpSessionPool:
+        return self.pool if self.pool is not None else get_mcp_session_pool()
 
     async def __aenter__(self) -> Self:
         if self._session_id is None:
             return self
-        self._inner = await self.pool.acquire(
-            self.server_name,
-            self._session_id,
-            self._build_inner_toolset,
+        self._exit_stack = AsyncExitStack()
+        self._inner = await self._exit_stack.enter_async_context(
+            self._pool().lease(
+                self.server_name,
+                self._session_id,
+                self._build_inner_toolset,
+                spawn_config=dict(self.config),
+            )
         )
         return self
 
     async def __aexit__(self, *args: Any) -> bool | None:
         if self._session_id is None:
             return None
-        await self.pool.release_run(self.server_name, self._session_id)
+        if self._exit_stack is not None:
+            await self._exit_stack.aclose()
+        self._exit_stack = None
         self._inner = None
         return None
-
-    def _build_inner_toolset(self) -> AbstractToolset[AgentDeps]:
-        from deep_agent.capabilities.mcp.toolset_builder import build_raw_stdio_mcp_toolset
-
-        spawn_config = apply_request_headers_to_stdio_config(self.config, self._request_headers)
-        return build_raw_stdio_mcp_toolset(self.server_name, spawn_config)
 
     async def get_instructions(
         self, ctx: RunContext[AgentDeps]
@@ -95,17 +113,27 @@ class SessionScopedMcpToolset(AbstractToolset[AgentDeps]):
     ) -> Any:
         if self._inner is None:
             raise RuntimeError("Session-scoped MCP toolset is not active for this run")
-        try:
-            return await self._inner.call_tool(name, tool_args, ctx, tool)
-        except Exception as exc:
-            if self._session_id is None or not is_recoverable_mcp_disconnect(exc):
-                raise
 
-            # Stdio MCP subprocess may die between runs; reset pooled entry and retry once.
-            await self.pool.reset_entry(self.server_name, self._session_id)
-            self._inner = await self.pool.acquire(
-                self.server_name,
-                self._session_id,
-                self._build_inner_toolset,
-            )
-            return await self._inner.call_tool(name, tool_args, ctx, tool)
+        for attempt in range(2):
+            try:
+                return await self._inner.call_tool(name, tool_args, ctx, tool)
+            except Exception as exc:
+                if (
+                    attempt == 0
+                    and self._session_id is not None
+                    and is_recoverable_mcp_disconnect(exc)
+                ):
+                    if self._exit_stack is not None:
+                        await self._exit_stack.aclose()
+                    self._exit_stack = AsyncExitStack()
+                    self._inner = await self._exit_stack.enter_async_context(
+                        self._pool().lease(
+                            self.server_name,
+                            self._session_id,
+                            self._build_inner_toolset,
+                            spawn_config=dict(self.config),
+                        )
+                    )
+                    continue
+                raise
+        raise RuntimeError("unreachable")

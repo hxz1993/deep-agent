@@ -9,8 +9,6 @@ from deep_agent.core.context import reset_context
 from tests.helpers.testing_context import init_test_context
 from tests.integration.helpers.mcp import (
     call_echo_tool,
-    call_startup_headers_tool,
-    stdio_echo_toolset,
     streamable_http_echo_server,
     url_echo_toolset,
 )
@@ -22,55 +20,6 @@ class McpHeaderForwardingTests(unittest.IsolatedAsyncioTestCase):
 
     def tearDown(self) -> None:
         reset_context()
-
-    async def test_stdio_mcp_server_receives_forwarded_headers(self) -> None:
-        forwarded = {
-            "Authorization": "Bearer stdio-integration-token",
-            "X-Tenant-Id": "tenant-stdio",
-        }
-        received = await call_echo_tool(stdio_echo_toolset(), forwarded)
-        self.assertEqual(
-            received,
-            {
-                "authorization": "Bearer stdio-integration-token",
-                "x-tenant-id": "tenant-stdio",
-            },
-        )
-
-    async def test_stdio_mcp_subprocess_receives_startup_headers(self) -> None:
-        forwarded = {
-            "Authorization": "Bearer startup-token",
-            "X-Tenant-Id": "tenant-startup",
-        }
-        received = await call_startup_headers_tool(stdio_echo_toolset(), forwarded)
-        self.assertEqual(
-            received,
-            {
-                "authorization": "Bearer startup-token",
-                "x-tenant-id": "tenant-startup",
-            },
-        )
-
-    async def test_stdio_mcp_startup_headers_use_first_request_in_session(self) -> None:
-        toolset = stdio_echo_toolset()
-        first = {
-            "Authorization": "Bearer first-token",
-            "X-Tenant-Id": "tenant-first",
-        }
-        second = {
-            "Authorization": "Bearer second-token",
-            "X-Tenant-Id": "tenant-second",
-        }
-
-        await call_startup_headers_tool(toolset, first)
-        received = await call_startup_headers_tool(toolset, second)
-        self.assertEqual(
-            received,
-            {
-                "authorization": "Bearer first-token",
-                "x-tenant-id": "tenant-first",
-            },
-        )
 
     async def test_http_mcp_server_receives_forwarded_headers(self) -> None:
         forwarded = {

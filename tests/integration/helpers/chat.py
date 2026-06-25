@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import os
-import sys
 import tempfile
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -20,10 +18,8 @@ from deep_agent.core.context import AppContext, init_context, reset_context
 from deep_agent.db.stores.bundle import DataStores
 from deep_agent.schemas.mcp import McpServerCreate
 from tests.helpers.sqlite_stores import make_sqlite_stores_sync
+from tests.integration.helpers.mcp import streamable_http_echo_server
 
-HEADER_ECHO_SERVER = (
-    Path(__file__).resolve().parents[1] / "fixtures" / "header_echo_server.py"
-)
 ECHO_TOOL_NAME = "echo_echo_request_headers"
 
 
@@ -36,18 +32,11 @@ class _McpRow:
     enabled: bool = True
 
 
-def echo_mcp_row(*, record_path: Path | None = None) -> _McpRow:
-    env = dict(os.environ)
-    if record_path is not None:
-        env["MCP_HEADER_RECORD"] = str(record_path)
+def echo_mcp_row(url: str) -> _McpRow:
     return _McpRow(
         name="echo",
-        transport="stdio",
-        config={
-            "command": sys.executable,
-            "args": [str(HEADER_ECHO_SERVER)],
-            "env": env,
-        },
+        transport="url",
+        config={"url": url},
         description="Test MCP header echo server.",
     )
 
@@ -67,36 +56,36 @@ async def _seed_mcp_rows(stores: DataStores, rows: list[_McpRow]) -> None:
 
 def testing_data_stores(
     *,
-    record_path: Path | None = None,
     mcp_rows: list[_McpRow] | None = None,
 ) -> tuple[DataStores, Any, Any]:
-    rows = mcp_rows if mcp_rows is not None else [echo_mcp_row(record_path=record_path)]
+    rows = [] if mcp_rows is None else mcp_rows
     stores, engine, session_factory = make_sqlite_stores_sync()
-    import asyncio
+    if rows:
+        import asyncio
 
-    asyncio.run(_seed_mcp_rows(stores, rows))
+        asyncio.run(_seed_mcp_rows(stores, rows))
     return stores, engine, session_factory
 
 
-def create_test_app(*, record_path: Path | None = None) -> FastAPI:
+def create_test_app(*, mcp_url: str) -> FastAPI:
     """Build a minimal FastAPI app without production lifespan/DB side effects."""
     test_app = FastAPI()
     test_app.include_router(api_router)
-    configure_test_app(test_app, record_path=record_path)
+    configure_test_app(test_app, mcp_url=mcp_url)
     return test_app
 
 
 def configure_test_app(
     app: FastAPI,
     *,
-    record_path: Path | None = None,
+    mcp_url: str,
     stores: DataStores | None = None,
     db_engine: Any | None = None,
     db_session_factory: Any | None = None,
 ) -> AppContext:
     """Attach sqlite-backed dependencies and MCP rows resolved at use time."""
     if stores is None:
-        stores, db_engine, db_session_factory = testing_data_stores(record_path=record_path)
+        stores, db_engine, db_session_factory = testing_data_stores(mcp_rows=[echo_mcp_row(mcp_url)])
     ctx = AppContext.for_testing(
         registry=build_registry(),
         stores=stores,
@@ -121,23 +110,24 @@ def test_chat_client(
         call_tools=call_tools or [ECHO_TOOL_NAME],
         custom_output_text="ok",
     )
-    app = FastAPI()
-    app.include_router(api_router)
-    if stores is None:
-        stores, db_engine, db_session_factory = testing_data_stores(record_path=record_file)
-    else:
-        db_engine = None
-        db_session_factory = None
-    configure_test_app(
-        app,
-        record_path=record_file,
-        stores=stores,
-        db_engine=db_engine,
-        db_session_factory=db_session_factory,
-    )
-    try:
-        with patch("deep_agent.agent.factory._resolve_model", return_value=test_model):
-            with TestClient(app) as client:
-                yield client, record_file
-    finally:
-        reset_context()
+    with streamable_http_echo_server(record_path=record_file) as mcp_url:
+        app = FastAPI()
+        app.include_router(api_router)
+        if stores is None:
+            stores, db_engine, db_session_factory = testing_data_stores(mcp_rows=[echo_mcp_row(mcp_url)])
+        else:
+            db_engine = None
+            db_session_factory = None
+        configure_test_app(
+            app,
+            mcp_url=mcp_url,
+            stores=stores,
+            db_engine=db_engine,
+            db_session_factory=db_session_factory,
+        )
+        try:
+            with patch("deep_agent.agent.factory._resolve_model", return_value=test_model):
+                with TestClient(app) as client:
+                    yield client, record_file
+        finally:
+            reset_context()

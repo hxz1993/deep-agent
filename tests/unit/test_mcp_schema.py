@@ -18,15 +18,25 @@ class McpSchemaBuiltinGuardTests(unittest.TestCase):
                 }
             )
 
-    def test_create_accepts_stdio(self) -> None:
+    def test_create_rejects_stdio(self) -> None:
+        with self.assertRaises(ValidationError):
+            McpServerCreate.model_validate(
+                {
+                    "name": "external",
+                    "transport": "stdio",
+                    "config": {"url": "http://127.0.0.1:8765/mcp"},
+                }
+            )
+
+    def test_create_accepts_url(self) -> None:
         row = McpServerCreate.model_validate(
             {
                 "name": "external",
-                "transport": "stdio",
-                "config": {"command": "python", "args": ["server.py"]},
+                "transport": "url",
+                "config": {"url": "http://127.0.0.1:8765/mcp"},
             }
         )
-        self.assertEqual(row.transport, "stdio")
+        self.assertEqual(row.transport, "url")
 
     def test_update_rejects_builtin_transport(self) -> None:
         with self.assertRaises(ValidationError):

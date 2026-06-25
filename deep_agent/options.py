@@ -148,11 +148,6 @@ class Agent(Category):
         bind_env="MCP_FORWARD_REQUEST_HEADERS",
         convertor=_parse_forward_headers,
     )
-    mcp_stdio_session_scope = Option(
-        True,
-        val_type=bool,
-        bind_env="MCP_STDIO_SESSION_SCOPE",
-    )
     mcp_init_timeout = Option(
         30,
         val_type=float,
@@ -162,6 +157,21 @@ class Agent(Category):
         1,
         val_type=int,
         bind_env="MCP_ACQUIRE_RETRIES",
+    )
+    mcp_runtime_dir = Option(
+        "/tmp/deep-agent-mcp",
+        val_type=str,
+        bind_env="MCP_RUNTIME_DIR",
+    )
+    mcp_shared_server_ttl = Option(
+        300,
+        val_type=float,
+        bind_env="MCP_SHARED_SERVER_TTL",
+    )
+    mcp_shared_lock_timeout = Option(
+        30,
+        val_type=float,
+        bind_env="MCP_SHARED_LOCK_TIMEOUT",
     )
     sqlite_path = Option(
         _resolve_repo_path("data/deep-agent.db"),

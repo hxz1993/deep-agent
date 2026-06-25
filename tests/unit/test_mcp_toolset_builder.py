@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 import unittest
-from unittest.mock import AsyncMock
 
 from deep_agent.capabilities.mcp.toolset_builder import (
-    build_raw_stdio_mcp_toolset,
+    build_raw_url_mcp_toolset,
     resolve_mcp_init_timeout,
     resolve_mcp_max_retries,
 )
@@ -39,7 +38,7 @@ class ResolveMcpMaxRetriesTests(unittest.TestCase):
         self.assertEqual(resolve_mcp_max_retries(), 3)
 
 
-class BuildRawStdioMcpToolsetTests(unittest.TestCase):
+class BuildRawUrlMcpToolsetTests(unittest.TestCase):
     def setUp(self) -> None:
         self._original_timeout = OPTION.agent.mcp_init_timeout
         self._original_retries = OPTION.agent.request_retries
@@ -50,38 +49,17 @@ class BuildRawStdioMcpToolsetTests(unittest.TestCase):
 
     def test_passes_init_timeout_to_mcp_toolset(self) -> None:
         OPTION.agent.mcp_init_timeout = 25.0
-        config = {
-            "command": "/usr/bin/python",
-            "args": ["server.py"],
-        }
-        with (
-            unittest.mock.patch("deep_agent.capabilities.mcp.toolset_builder.MCPToolset") as mcp_toolset_cls,
-            unittest.mock.patch("deep_agent.capabilities.mcp.toolset_builder.SerializingToolset") as serializing_cls,
-            unittest.mock.patch("fastmcp.client.transports.StdioTransport") as stdio_cls,
-        ):
-            stdio_cls.return_value = unittest.mock.MagicMock()
+        with unittest.mock.patch("deep_agent.capabilities.mcp.toolset_builder.MCPToolset") as mcp_toolset_cls:
             mcp_toolset_cls.return_value = unittest.mock.MagicMock()
-            serializing_cls.side_effect = lambda wrapped: wrapped
-            build_raw_stdio_mcp_toolset("deepcube", config)
+            build_raw_url_mcp_toolset("deepcube", "http://127.0.0.1:19000/mcp")
             _, kwargs = mcp_toolset_cls.call_args
             self.assertEqual(kwargs["init_timeout"], 25.0)
-            serializing_cls.assert_called_once()
 
     def test_passes_max_retries_to_mcp_toolset(self) -> None:
         OPTION.agent.request_retries = 4
-        config = {
-            "command": "/usr/bin/python",
-            "args": ["server.py"],
-        }
-        with (
-            unittest.mock.patch("deep_agent.capabilities.mcp.toolset_builder.MCPToolset") as mcp_toolset_cls,
-            unittest.mock.patch("deep_agent.capabilities.mcp.toolset_builder.SerializingToolset") as serializing_cls,
-            unittest.mock.patch("fastmcp.client.transports.StdioTransport") as stdio_cls,
-        ):
-            stdio_cls.return_value = unittest.mock.MagicMock()
+        with unittest.mock.patch("deep_agent.capabilities.mcp.toolset_builder.MCPToolset") as mcp_toolset_cls:
             mcp_toolset_cls.return_value = unittest.mock.MagicMock()
-            serializing_cls.side_effect = lambda wrapped: wrapped
-            build_raw_stdio_mcp_toolset("deepcube", config)
+            build_raw_url_mcp_toolset("deepcube", "http://127.0.0.1:19000/mcp")
             _, kwargs = mcp_toolset_cls.call_args
             self.assertEqual(kwargs["max_retries"], 4)
 

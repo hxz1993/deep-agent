@@ -1,43 +1,49 @@
 from __future__ import annotations
 
 import asyncio
-import time
-from collections.abc import Callable
-from dataclasses import dataclass, field
+import contextlib
+from collections.abc import AsyncIterator, Callable
+from dataclasses import dataclass
 from typing import Any
 
 from loguru import logger
 
 from deep_agent.capabilities.mcp.errors import is_recoverable_mcp_disconnect
+from deep_agent.capabilities.mcp.shared_registry import McpSharedRegistry
 from deep_agent.options import OPTION
 
-McpToolsetFactory = Callable[[], Any]
+McpToolsetFactory = Callable[[str], Any]
 
 _ACQUIRE_RETRY_DELAY_SECONDS = 0.5
 
 
 @dataclass
-class _SessionMcpEntry:
+class _PoolEntry:
     toolset: Any
     run_refs: int = 0
-    last_used: float = field(default_factory=time.monotonic)
 
 
 class McpSessionPool:
-    """Keep stdio MCP subprocesses alive for the lifetime of a chat session.
+    """Worker-local MCP client coordinator for shared-HTTP builtin servers.
 
-    Agent runs acquire a pooled toolset on enter and release on exit without
-    tearing down the subprocess. The subprocess is destroyed when the session
-    is deleted or the pool is shut down.
+    HTTP clients are opened per lease and closed when the last concurrent user
+    releases. Pod-wide server processes are coordinated via
+    :class:`McpSharedRegistry` (registry touch + in-server TTL watcher).
     """
 
-    def __init__(self, *, mcp_acquire_retries: int | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        mcp_acquire_retries: int | None = None,
+        shared_registry: McpSharedRegistry | None = None,
+    ) -> None:
         self._mcp_acquire_retries = (
             OPTION.agent.mcp_acquire_retries
             if mcp_acquire_retries is None
             else mcp_acquire_retries
         )
-        self._entries: dict[tuple[str, str], _SessionMcpEntry] = {}
+        self._shared_registry = shared_registry or McpSharedRegistry()
+        self._entries: dict[tuple[str, str], _PoolEntry] = {}
         self._lock = asyncio.Lock()
 
     async def acquire(
@@ -45,33 +51,48 @@ class McpSessionPool:
         server_name: str,
         session_id: str,
         factory: McpToolsetFactory,
+        *,
+        spawn_config: dict[str, Any] | None = None,
     ) -> Any:
         key = (server_name, session_id)
         async with self._lock:
             entry = self._entries.get(key)
             if entry is not None:
                 entry.run_refs += 1
-                entry.last_used = time.monotonic()
                 return entry.toolset
 
-        toolset = await self._connect_with_retry(server_name, session_id, factory)
+        connect_url = await self._shared_registry.ensure_server(
+            server_name,
+            spawn_config,
+        )
+        await self._shared_registry.start_touch(server_name)
+
+        try:
+            toolset = await self._connect_with_retry(
+                server_name,
+                session_id,
+                factory,
+                connect_url=connect_url,
+            )
+        except Exception:
+            await self._shared_registry.stop_touch(server_name)
+            raise
 
         async with self._lock:
             entry = self._entries.get(key)
             if entry is not None:
                 await self._safe_close(toolset)
+                await self._shared_registry.stop_touch(server_name)
                 entry.run_refs += 1
-                entry.last_used = time.monotonic()
                 return entry.toolset
 
-            entry = _SessionMcpEntry(toolset=toolset)
+            entry = _PoolEntry(toolset=toolset, run_refs=1)
             self._entries[key] = entry
-            entry.run_refs += 1
-            entry.last_used = time.monotonic()
             logger.info(
-                "Started MCP server {!r} for session {!r}",
+                "Connected MCP client for {!r} session {!r} at {}",
                 server_name,
                 session_id,
+                connect_url,
             )
             return entry.toolset
 
@@ -80,12 +101,14 @@ class McpSessionPool:
         server_name: str,
         session_id: str,
         factory: McpToolsetFactory,
+        *,
+        connect_url: str,
     ) -> Any:
         max_retries = max(0, self._mcp_acquire_retries)
         last_exc: Exception | None = None
 
         for attempt in range(max_retries + 1):
-            toolset = factory()
+            toolset = factory(connect_url)
             try:
                 await toolset.__aenter__()
             except Exception as exc:
@@ -116,47 +139,103 @@ class McpSessionPool:
         assert last_exc is not None
         raise last_exc
 
-    async def release_run(self, server_name: str, session_id: str) -> None:
+    async def release(self, server_name: str, session_id: str) -> None:
         key = (server_name, session_id)
+        entry: _PoolEntry | None = None
         async with self._lock:
-            entry = self._entries.get(key)
-            if entry is None:
+            active = self._entries.get(key)
+            if active is None:
                 return
-            entry.run_refs = max(0, entry.run_refs - 1)
-            entry.last_used = time.monotonic()
+            active.run_refs -= 1
+            if active.run_refs <= 0:
+                entry = self._entries.pop(key)
 
-    async def reset_entry(self, server_name: str, session_id: str) -> None:
-        """Force-close one pooled stdio MCP subprocess entry."""
-        await self._close_key((server_name, session_id))
+        if entry is not None:
+            await self._close_toolset(server_name, session_id, entry.toolset)
+            await self._shared_registry.stop_touch(server_name)
 
-    async def close_session(self, session_id: str) -> None:
-        keys = [key for key in self._entries if key[1] == session_id]
-        for key in keys:
-            await self._close_key(key)
+    @contextlib.asynccontextmanager
+    async def lease(
+        self,
+        server_name: str,
+        session_id: str,
+        factory: McpToolsetFactory,
+        *,
+        spawn_config: dict[str, Any] | None = None,
+    ) -> AsyncIterator[Any]:
+        key = (server_name, session_id)
+        evict = False
+        toolset = await self.acquire(
+            server_name,
+            session_id,
+            factory,
+            spawn_config=spawn_config,
+        )
+        try:
+            yield toolset
+        except Exception as exc:
+            if is_recoverable_mcp_disconnect(exc):
+                evict = True
+            raise
+        finally:
+            if evict:
+                await self._evict_key(key)
+            else:
+                await self.release(server_name, session_id)
+
+    async def _evict_key(self, key: tuple[str, str]) -> None:
+        server_name, session_id = key
+        entry: _PoolEntry | None = None
+        async with self._lock:
+            active = self._entries.get(key)
+            if active is not None:
+                active.run_refs = max(0, active.run_refs - 1)
+                if active.run_refs <= 0:
+                    entry = self._entries.pop(key)
+        if entry is not None:
+            await self._close_toolset(server_name, session_id, entry.toolset)
+            await self._shared_registry.stop_touch(server_name)
 
     async def close_all(self) -> None:
         keys = list(self._entries)
-        for key in keys:
-            await self._close_key(key)
+        for server_name, session_id in keys:
+            entry: _PoolEntry | None = None
+            async with self._lock:
+                entry = self._entries.pop((server_name, session_id), None)
+            if entry is not None:
+                await self._close_toolset(server_name, session_id, entry.toolset)
+                await self._shared_registry.stop_touch(server_name)
+        await self._shared_registry.aclose()
 
-    async def _close_key(self, key: tuple[str, str]) -> None:
-        async with self._lock:
-            entry = self._entries.pop(key, None)
-        if entry is None:
-            return
+    async def _close_toolset(
+        self,
+        server_name: str,
+        session_id: str,
+        toolset: Any,
+    ) -> None:
         try:
-            await entry.toolset.__aexit__(None, None, None)
+            await toolset.__aexit__(None, None, None)
         except Exception:
-            logger.exception("Failed to close MCP server {!r} for session {!r}", key[0], key[1])
+            logger.exception(
+                "Failed to close MCP client for {!r} session {!r}",
+                server_name,
+                session_id,
+            )
         else:
-            logger.info("Closed MCP server {!r} for session {!r}", key[0], key[1])
+            logger.info(
+                "Closed MCP client for {!r} session {!r}",
+                server_name,
+                session_id,
+            )
 
     @staticmethod
     async def _safe_close(toolset: Any) -> None:
         try:
             await toolset.__aexit__(None, None, None)
         except Exception:
-            logger.opt(exception=True).debug("Ignored error while closing failed MCP connect attempt")
+            logger.opt(exception=True).debug(
+                "Ignored error while closing failed MCP connect attempt"
+            )
 
 
 def get_mcp_session_pool() -> McpSessionPool:

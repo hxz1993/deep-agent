@@ -6,7 +6,6 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException, Query, status
 from pydantic_ai.messages import ModelMessage
 
-from deep_agent.api.v1.chat import mcp_pool_session_key
 from deep_agent.core.context import AppContextDep
 from deep_agent.db.session_list import MAX_LIST_LIMIT, SessionListFilters, SessionSummaryRow
 from deep_agent.db.session_scope import resolve_session
@@ -168,4 +167,3 @@ async def delete_session(
 
     api_agent_id = agent_id or agent_scope_to_api(scope)
     await ctx.store.delete(resolved_session_id, agent_id=api_agent_id)
-    await ctx.mcp_session_pool.close_session(mcp_pool_session_key(resolved_session_id, agent_id=api_agent_id))

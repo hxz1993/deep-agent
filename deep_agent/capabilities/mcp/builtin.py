@@ -14,7 +14,7 @@ def load_builtin_mcp_capabilities(mcps_dir: str) -> list[Capability]:
     """Discover builtin MCP servers shipped under ``mcps/``.
 
     Each immediate subdirectory containing a ``server.py`` becomes one MCP
-    capability, launched lazily over stdio with the current Python interpreter.
+    capability, launched lazily as a shared HTTP server in the pod.
     Tool names are prefixed with the directory name to avoid collisions. No subprocess
     is spawned here; the agent opens
     the connection on demand (``async with agent``).

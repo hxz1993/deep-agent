@@ -19,6 +19,7 @@ asyncpg
 asyncmy
 aiosqlite
 alembic
+filelock>=3.13
 
 # deepfos platform
 aiohttp~=3.9.5

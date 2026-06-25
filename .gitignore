@@ -35,3 +35,4 @@ data/deep-agent.db
 .cursor/
 _bmad/
 _bmad-output/
+debug/

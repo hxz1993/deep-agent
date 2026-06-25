@@ -13,7 +13,7 @@ class AgentDeps:
 
     ``request_headers`` carries a whitelist of HTTP headers from the inbound client
     request. MCP toolsets read them when opening HTTP connections or when calling
-    stdio tools (via MCP ``_meta``).
+    MCP tools (via connection headers and MCP ``_meta``).
     """
 
     session_id: str

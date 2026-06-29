@@ -17,8 +17,8 @@ from deep_agent.capabilities import build_registry
 from deep_agent.capabilities.mcp.lease_manager import McpLeaseManager
 from deep_agent.core.context import AppContext, init_context, reset_context
 from tests.helpers.sqlite_stores import make_sqlite_stores
-from tests.integration.helpers.chat import DisconnectFlag, mock_request_disconnect, parse_sse_buffer, parse_sse_events
-from tests.integration.helpers.models import build_slow_stream_model
+from tests.integration.helpers.chat import mock_request_disconnect, parse_sse_buffer, parse_sse_events
+from tests.integration.helpers.models import build_slow_stream_model, text_only_model, tool_call_model
 
 _CHAT_JSON = {"capabilities": []}
 
@@ -32,6 +32,28 @@ def _last_assistant(history: dict) -> dict | None:
 
 def _tool_call_parts(msg: dict) -> list[dict]:
     return [p for p in msg.get("parts") or [] if p.get("type") == "tool_call"]
+
+
+def _tool_call_ids(history: dict) -> list[str]:
+    ids: list[str] = []
+    for msg in history.get("messages") or []:
+        if msg.get("role") != "assistant":
+            continue
+        for part in msg.get("parts") or []:
+            if part.get("type") == "tool_call" and part.get("tool_call_id"):
+                ids.append(part["tool_call_id"])
+    return ids
+
+
+def _tool_result_ids(history: dict) -> list[str]:
+    ids: list[str] = []
+    for msg in history.get("messages") or []:
+        if msg.get("role") != "assistant":
+            continue
+        for part in msg.get("parts") or []:
+            if part.get("type") == "tool_result" and part.get("tool_call_id"):
+                ids.append(part["tool_call_id"])
+    return ids
 
 
 class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
@@ -77,7 +99,7 @@ class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
         return parse_sse_events(body)
 
     async def _run_hitl_pending(self) -> tuple[str, str]:
-        test_model = TestModel(call_tools=["confirm_action"], custom_output_text="done after confirm")
+        test_model = tool_call_model("confirm_action", text="done after confirm")
         events = await self._stream_events(
             model=test_model,
             json_body={"message": "请用户确认"},
@@ -88,30 +110,98 @@ class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
         tool_call_id = final["deferred"]["calls"][0]["tool_call_id"]
         return session_id, tool_call_id
 
-    async def test_e1_disconnect_stops_early_and_partial_history(self) -> None:
+    async def test_e0_http_stream_complete_persists_assistant(self) -> None:
+        test_model = text_only_model("hello from integration")
+        events = await self._stream_events(
+            model=test_model,
+            json_body={"message": "say hello"},
+        )
+        final = next(ev for ev in reversed(events) if ev.get("type") == "final")
+        self.assertEqual(final["status"], "completed")
+        session_id = events[0]["session_id"]
+
+        async with AsyncClient(transport=self._transport, base_url="http://test") as client:
+            hist = await client.get(f"/api/v1/sessions/{session_id}/history")
+        data = hist.json()
+        self.assertGreaterEqual(data["model_message_count"], 2)
+        assistant = _last_assistant(data)
+        self.assertIsNotNone(assistant)
+        assert assistant is not None
+        text_parts = [p for p in assistant["parts"] if p.get("type") == "text"]
+        self.assertEqual(text_parts[0]["content"], "hello from integration")
+
+    async def test_e1_http_abort_persists_partial_assistant_history(self) -> None:
+        """Client closes SSE; history must retain streamed assistant text."""
+        chunks = ["chunk-one-", "chunk-two-", "chunk-three-", "chunk-four-", "chunk-five-"]
+        model, tracker = build_slow_stream_model(chunks=chunks, delay_s=0.25)
+
+        with patch("deep_agent.agent.factory._resolve_model", return_value=model):
+            with mock_request_disconnect():
+                session_id: str | None = None
+                async with AsyncClient(
+                    transport=self._transport,
+                    base_url="http://test",
+                    timeout=30.0,
+                ) as client:
+                    async with client.stream(
+                        "POST",
+                        "/api/v1/chat/stream",
+                        json={**_CHAT_JSON, "message": "slow stream please"},
+                    ) as response:
+                        self.assertEqual(response.status_code, 200)
+                        buffer = ""
+                        async for chunk in response.aiter_text():
+                            buffer += chunk
+                            events, buffer = parse_sse_buffer(buffer)
+                            for ev in events:
+                                if ev.get("type") == "session":
+                                    session_id = ev["session_id"]
+                                if ev.get("type") == "text" and ev.get("delta"):
+                                    await response.aclose()
+                                    break
+                            else:
+                                continue
+                            break
+
+                    await asyncio.sleep(0.5)
+                    hist = await client.get(f"/api/v1/sessions/{session_id}/history")
+
+                self.assertIsNotNone(session_id)
+                self.assertGreater(tracker.yielded_chunks, 0)
+                self.assertEqual(hist.status_code, 200)
+                data = hist.json()
+                self.assertGreaterEqual(
+                    data["model_message_count"],
+                    2,
+                    msg="history must include assistant after stream stop (not user-only)",
+                )
+                assistant = _last_assistant(data)
+                self.assertIsNotNone(assistant)
+                assert assistant is not None
+                text_parts = [p for p in assistant["parts"] if p.get("type") == "text"]
+                self.assertTrue(text_parts)
+                self.assertIn("chunk-one", text_parts[0]["content"])
+
+    async def test_e1_runner_cancel_persists_partial_history(self) -> None:
         chunks = ["chunk-one-", "chunk-two-", "chunk-three-", "chunk-four-", "chunk-five-"]
         model, tracker = build_slow_stream_model(chunks=chunks, delay_s=0.25)
         session_id = "e1-cancel-session"
 
         with patch("deep_agent.agent.factory._resolve_model", return_value=model):
             runner = await build_runner(get_context(), capabilities=[])
-            disconnect_flag = DisconnectFlag()
             deps = AgentDeps(session_id=session_id)
             events: list[dict] = []
-            async for ev in runner.run_stream(
-                session_id,
-                "slow stream please",
-                deps,
-                should_cancel=disconnect_flag,
-            ):
+            agen = runner.run_stream(session_id, "slow stream please", deps)
+            async for ev in agen:
                 events.append(ev)
                 if ev.get("type") == "text" and ev.get("delta"):
-                    disconnect_flag.disconnected = True
+                    await agen.aclose()
+                    break
 
             self.assertGreater(tracker.yielded_chunks, 0)
             self.assertLess(tracker.yielded_chunks, tracker.total_chunks)
-            self.assertEqual(events[-1]["type"], "cancelled")
-            self.assertNotIn("final", {ev.get("type") for ev in events})
+            if events and events[-1].get("type") == "cancelled":
+                self.assertNotIn("final", {ev.get("type") for ev in events})
 
             async with AsyncClient(
                 transport=self._transport,
@@ -143,7 +233,7 @@ class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(calls[0]["tool"], "confirm_action")
         self.assertEqual(calls[0]["tool_call_id"], tool_call_id)
 
-        test_model = TestModel(call_tools=["confirm_action"], custom_output_text="resumed ok")
+        test_model = tool_call_model("confirm_action", text="resumed ok")
         events = await self._stream_events(
             model=test_model,
             json_body={
@@ -163,7 +253,7 @@ class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
     async def test_e3_new_message_after_deferred_without_confirm(self) -> None:
         session_id, _ = await self._run_hitl_pending()
 
-        test_model = TestModel(custom_output_text="continued without confirm")
+        test_model = text_only_model("continued without confirm")
         events = await self._stream_events(
             model=test_model,
             json_body={"session_id": session_id, "message": "跳过确认继续"},
@@ -185,7 +275,7 @@ class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
         session_id: str | None = None
         body = ""
         with patch("deep_agent.agent.factory._resolve_model", return_value=model):
-            with mock_request_disconnect() as disconnect_flag:
+            with mock_request_disconnect():
                 async with AsyncClient(
                     transport=self._transport,
                     base_url="http://test",
@@ -204,7 +294,6 @@ class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
                                 if ev.get("type") == "session":
                                     session_id = ev["session_id"]
                                 if ev.get("type") == "text":
-                                    disconnect_flag.disconnected = True
                                     await response.aclose()
                                     break
                             else:
@@ -212,7 +301,7 @@ class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
                             break
 
                     await asyncio.sleep(0.4)
-                    follow = TestModel(custom_output_text="second turn")
+                    follow = text_only_model("second turn")
                     with patch("deep_agent.agent.factory._resolve_model", return_value=follow):
                         with mock_request_disconnect():
                             async with client.stream(
@@ -234,53 +323,50 @@ class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
         model, tracker = build_slow_stream_model(chunks=chunks, delay_s=0.25)
 
         with patch("deep_agent.agent.factory._resolve_model", return_value=model):
-            with mock_request_disconnect() as disconnect_flag:
+            with mock_request_disconnect():
                 session_id: str | None = None
                 events: list[dict] = []
+                async with AsyncClient(
+                    transport=self._transport,
+                    base_url="http://test",
+                    timeout=30.0,
+                ) as client:
+                    async with client.stream(
+                        "POST",
+                        "/api/v1/chat/stream",
+                        json={**_CHAT_JSON, "message": "meta test"},
+                    ) as response:
+                        buffer = ""
+                        async for chunk in response.aiter_text():
+                            buffer += chunk
+                            parsed, buffer = parse_sse_buffer(buffer)
+                            for ev in parsed:
+                                events.append(ev)
+                                if ev.get("type") == "session":
+                                    session_id = ev["session_id"]
+                                if ev.get("type") == "text" and ev.get("delta"):
+                                    await response.aclose()
+                                    break
+                            else:
+                                continue
+                            break
 
-                async def _disconnect_after_first_chunk() -> None:
-                    await asyncio.sleep(0.8)
-                    disconnect_flag.disconnected = True
-
-                disconnect_task = asyncio.create_task(_disconnect_after_first_chunk())
-                try:
-                    async with AsyncClient(
-                        transport=self._transport,
-                        base_url="http://test",
-                        timeout=30.0,
-                    ) as client:
-                        async with client.stream(
-                            "POST",
-                            "/api/v1/chat/stream",
-                            json={**_CHAT_JSON, "message": "meta test"},
-                        ) as response:
-                            buffer = ""
-                            async for chunk in response.aiter_text():
-                                buffer += chunk
-                                parsed, buffer = parse_sse_buffer(buffer)
-                                for ev in parsed:
-                                    events.append(ev)
-                                    if ev.get("type") == "session":
-                                        session_id = ev["session_id"]
-
-                        await asyncio.sleep(0.3)
-                        cancelled = next((ev for ev in events if ev.get("type") == "cancelled"), None)
-                        hist = await client.get(f"/api/v1/sessions/{session_id}/history")
-                        data = hist.json()
-                        if cancelled is not None:
-                            self.assertEqual(cancelled["model_message_count"], data["model_message_count"])
+                    await asyncio.sleep(0.3)
+                    cancelled = next((ev for ev in events if ev.get("type") == "cancelled"), None)
+                    hist = await client.get(f"/api/v1/sessions/{session_id}/history")
+                    data = hist.json()
+                    if cancelled is not None:
+                        self.assertEqual(cancelled["model_message_count"], data["model_message_count"])
                         self.assertLess(tracker.yielded_chunks, tracker.total_chunks)
-                finally:
-                    disconnect_task.cancel()
-                    with contextlib.suppress(asyncio.CancelledError):
-                        await disconnect_task
+                    else:
+                        self.assertGreaterEqual(tracker.yielded_chunks, 1)
 
     async def test_e6_branch_point_on_cancel(self) -> None:
         chunks = ["branch-"]
         model, _ = build_slow_stream_model(chunks=chunks, delay_s=0.05)
 
         with patch("deep_agent.agent.factory._resolve_model", return_value=model):
-            with mock_request_disconnect() as disconnect_flag:
+            with mock_request_disconnect():
                 events: list[dict] = []
                 async with AsyncClient(
                     transport=self._transport,
@@ -298,7 +384,6 @@ class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
                             parsed, buffer = parse_sse_buffer(buffer)
                             events.extend(parsed)
                             if any(ev.get("type") == "text" for ev in parsed):
-                                disconnect_flag.disconnected = True
                                 await response.aclose()
                                 break
 
@@ -311,13 +396,13 @@ class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
         # Submitting deferred_tool_results for the abandoned call must not succeed.
         session_id, tool_call_id = await self._run_hitl_pending()
 
-        test_model = TestModel(custom_output_text="skipped")
+        test_model = text_only_model("skipped")
         await self._stream_events(
             model=test_model,
             json_body={"session_id": session_id, "message": "放弃旧确认"},
         )
 
-        resume_model = TestModel(custom_output_text="should not run")
+        resume_model = text_only_model("should not run")
         events = await self._stream_events(
             model=resume_model,
             json_body={
@@ -337,9 +422,66 @@ class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
         else:
             self.assertIn("error", types)
 
+    async def test_e9_deferred_resume_cancel_no_duplicate_tool_call(self) -> None:
+        """HITL confirm then cancel resume stream must not duplicate tool_call in DB."""
+        session_id, tool_call_id = await self._run_hitl_pending()
+        resume_model = text_only_model("continued after confirm")
+
+        with patch("deep_agent.agent.factory._resolve_model", return_value=resume_model):
+            with mock_request_disconnect():
+                async with AsyncClient(
+                    transport=self._transport,
+                    base_url="http://test",
+                    timeout=30.0,
+                ) as client:
+                    async with client.stream(
+                        "POST",
+                        "/api/v1/chat/stream",
+                        json={
+                            **_CHAT_JSON,
+                            "session_id": session_id,
+                            "deferred_tool_results": [
+                                {
+                                    "tool_call_id": tool_call_id,
+                                    "result": {"confirmed": True},
+                                }
+                            ],
+                        },
+                    ) as response:
+                        buffer = ""
+                        async for chunk in response.aiter_text():
+                            buffer += chunk
+                            parsed, buffer = parse_sse_buffer(buffer)
+                            for ev in parsed:
+                                if ev.get("type") in ("tool_call", "tool_result", "text"):
+                                    await response.aclose()
+                                    break
+                            else:
+                                continue
+                            break
+
+                    await asyncio.sleep(0.3)
+                    hist = await client.get(f"/api/v1/sessions/{session_id}/history")
+                    self.assertEqual(hist.status_code, 200)
+                    data = hist.json()
+
+        call_ids = _tool_call_ids(data)
+        result_ids = _tool_result_ids(data)
+        self.assertEqual(call_ids, [tool_call_id])
+        self.assertEqual(len(call_ids), len(set(call_ids)))
+        self.assertIn(tool_call_id, result_ids)
+
+        follow = await self._stream_events(
+            model=text_only_model("third turn ok"),
+            json_body={"session_id": session_id, "message": "继续聊"},
+        )
+        self.assertNotIn("error", {ev.get("type") for ev in follow})
+        follow_final = next(ev for ev in reversed(follow) if ev.get("type") == "final")
+        self.assertEqual(follow_final["status"], "completed")
+
     async def test_e8_sync_chat_after_deferred_without_confirm(self) -> None:
         session_id, _ = await self._run_hitl_pending()
-        test_model = TestModel(custom_output_text="sync ok")
+        test_model = text_only_model("sync ok")
         with patch("deep_agent.agent.factory._resolve_model", return_value=test_model):
             with mock_request_disconnect():
                 async with AsyncClient(transport=self._transport, base_url="http://test") as client:

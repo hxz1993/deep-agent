@@ -68,14 +68,15 @@ class StreamAccumulator:
             return True
         return bool(self._tool_results)
 
-    def to_model_messages(self) -> list[ModelMessage]:
+    def to_model_messages(self, *, include_tool_calls: bool = True) -> list[ModelMessage]:
         messages: list[ModelMessage] = []
         response_parts: list[Any] = []
         if self._thinking:
             response_parts.append(ThinkingPart(content=self._thinking))
         if self._text:
             response_parts.append(TextPart(content=self._text))
-        response_parts.extend(self._complete_tool_calls())
+        if include_tool_calls:
+            response_parts.extend(self._complete_tool_calls())
         if response_parts:
             messages.append(ModelResponse(parts=response_parts, state="interrupted"))
         if self._tool_results:

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator
 
@@ -28,11 +27,6 @@ from deep_agent.db.conversation import SessionStore
 from deep_agent.schemas.attachment import AttachmentRef
 
 _STREAM_OUTPUT_TYPE: list[Any] = [str, DeferredToolRequests]
-_CANCEL_POLL_INTERVAL_S = 0.2
-
-
-class _StreamCancelled(Exception):
-    """Client disconnected while waiting for the next agent stream event."""
 
 
 class AgentRunner:
@@ -147,16 +141,23 @@ class AgentRunner:
         deps: AgentDeps,
         *,
         pre_persisted_user: bool,
-    ) -> None:
+    ) -> bool:
         to_append = incremental_append_messages(new_messages, skip_user_prompt=pre_persisted_user)
         if not to_append:
-            return
-        await self.store.append(
-            session_id,
-            to_append,
-            agent_id=deps.agent_id,
-            user_id=deps.user,
-        )
+            return False
+        try:
+            await asyncio.shield(
+                self.store.append(
+                    session_id,
+                    to_append,
+                    agent_id=deps.agent_id,
+                    user_id=deps.user,
+                )
+            )
+        except asyncio.CancelledError:
+            # ponytail: shield may finish append then raise; avoid a second snapshot append
+            return True
+        return True
 
     async def run(
         self,
@@ -210,7 +211,6 @@ class AgentRunner:
         attachments: list[AttachmentRef] | None = None,
         deferred_tool_results: DeferredToolResults | None = None,
         branch_from: int | None = None,
-        should_cancel: Callable[[], Awaitable[bool]] | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
         async with self._session_lock(session_id, agent_id=deps.agent_id):
             history, pre_persisted_user, user_branch_point = await self._prepare_history(
@@ -231,6 +231,27 @@ class AgentRunner:
             result = None
             cancelled = False
             accumulator = StreamAccumulator()
+            full_persisted = False
+            snapshot_persisted = False
+
+            async def _ensure_partial_persisted() -> bool:
+                nonlocal snapshot_persisted
+                if snapshot_persisted or full_persisted:
+                    return snapshot_persisted
+                if not accumulator.has_content():
+                    return False
+                await asyncio.shield(
+                    self._persist_cancelled_snapshot(
+                        session_id,
+                        accumulator,
+                        deps,
+                        pre_persisted_user=pre_persisted_user,
+                        include_tool_calls=deferred_tool_results is None,
+                    )
+                )
+                snapshot_persisted = True
+                return True
+
             try:
                 async with self.agent.run_stream_events(
                     user_prompt,
@@ -243,10 +264,7 @@ class AgentRunner:
                 ) as stream:
                     while True:
                         try:
-                            event = await _next_stream_event(stream, should_cancel)
-                        except _StreamCancelled:
-                            cancelled = True
-                            break
+                            event = await stream.__anext__()
                         except StopAsyncIteration:
                             break
                         if isinstance(event, AgentRunResultEvent):
@@ -255,31 +273,23 @@ class AgentRunner:
                         mapped = events.map_event(event)
                         if mapped is not None:
                             accumulator.ingest(mapped)
-                            yield enrich_tool_event(mapped, self.ui_tool_hints)
-                if cancelled:
-                    await self._persist_cancelled_snapshot(
+                            try:
+                                yield enrich_tool_event(mapped, self.ui_tool_hints)
+                            except asyncio.CancelledError:
+                                cancelled = True
+                                break
+                if not cancelled:
+                    full_persisted = await self._persist_run_messages(
                         session_id,
-                        accumulator,
+                        result.new_messages(),
                         deps,
                         pre_persisted_user=pre_persisted_user,
                     )
-                    msg_count, branch_pt = await self._history_meta(
-                        session_id,
-                        deps,
-                        user_branch_point=user_branch_point,
-                    )
-                    yield events.cancelled(
-                        history_persisted=accumulator.has_content() or pre_persisted_user,
-                        model_message_count=msg_count,
-                        user_branch_point=branch_pt,
-                    )
-                    return
-                await self._persist_run_messages(
-                    session_id,
-                    result.new_messages(),
-                    deps,
-                    pre_persisted_user=pre_persisted_user,
-                )
+            except asyncio.CancelledError:
+                cancelled = True
+            except GeneratorExit:
+                cancelled = True
+                raise
             except Exception as exc:  # noqa: BLE001 - surface as an SSE error event
                 logger.exception("Agent stream failed for session {}", session_id)
                 msg_count, branch_pt = await self._history_meta(
@@ -291,6 +301,31 @@ class AgentRunner:
                     str(exc),
                     history_persisted=pre_persisted_user,
                     model_message_count=msg_count if pre_persisted_user else None,
+                    user_branch_point=branch_pt,
+                )
+                return
+            finally:
+                # ponytail: snapshot only on client cancel — normal full_persist + snapshot duplicates assistant turns
+                if cancelled and not full_persisted:
+                    if result is not None:
+                        full_persisted = await self._persist_run_messages(
+                            session_id,
+                            result.new_messages(),
+                            deps,
+                            pre_persisted_user=pre_persisted_user,
+                        )
+                    else:
+                        await _ensure_partial_persisted()
+
+            if cancelled:
+                msg_count, branch_pt = await self._history_meta(
+                    session_id,
+                    deps,
+                    user_branch_point=user_branch_point,
+                )
+                yield events.cancelled(
+                    history_persisted=accumulator.has_content() or pre_persisted_user,
+                    model_message_count=msg_count,
                     user_branch_point=branch_pt,
                 )
                 return
@@ -314,8 +349,10 @@ class AgentRunner:
         deps: AgentDeps,
         *,
         pre_persisted_user: bool,
+        include_tool_calls: bool = True,
     ) -> None:
-        partial = accumulator.to_model_messages()
+        # ponytail: deferred resume re-streams tool_call for UI; tool_call is already in DB
+        partial = accumulator.to_model_messages(include_tool_calls=include_tool_calls)
         if not partial:
             return
         await self._persist_run_messages(
@@ -324,42 +361,6 @@ class AgentRunner:
             deps,
             pre_persisted_user=pre_persisted_user,
         )
-
-
-async def _poll_cancel(should_cancel: Callable[[], Awaitable[bool]]) -> None:
-    while True:
-        if await should_cancel():
-            return
-        await asyncio.sleep(_CANCEL_POLL_INTERVAL_S)
-
-
-async def _next_stream_event(
-    stream: Any,
-    should_cancel: Callable[[], Awaitable[bool]] | None,
-) -> Any:
-    if should_cancel is None:
-        return await stream.__anext__()
-    next_task = asyncio.create_task(stream.__anext__())
-    cancel_task = asyncio.create_task(_poll_cancel(should_cancel))
-    done, pending = await asyncio.wait(
-        {next_task, cancel_task},
-        return_when=asyncio.FIRST_COMPLETED,
-    )
-    for task in pending:
-        task.cancel()
-        try:
-            await task
-        except asyncio.CancelledError:
-            pass
-    if cancel_task in done:
-        if not next_task.done():
-            next_task.cancel()
-            try:
-                await next_task
-            except (asyncio.CancelledError, StopAsyncIteration):
-                pass
-        raise _StreamCancelled
-    return next_task.result()
 
 
 def _build_run_result(result: Any, ui_tool_hints: dict[str, dict[str, Any]]) -> dict[str, Any]:

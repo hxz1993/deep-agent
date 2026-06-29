@@ -84,6 +84,7 @@ const state = {
   awaitingHitl: false,
   abortController: null,
   streamCancelled: false,
+  skipHistoryRefresh: false,
   branchFrom: null,
   modelMessageCount: 0,
   lastUserBranchPoint: null,
@@ -641,7 +642,15 @@ async function onSend() {
 }
 
 async function resumeDeferred(deferredResults) {
-  if (state.streaming || !state.sessionId) return;
+  if (!state.sessionId) return;
+  if (state.streaming) {
+    stopStream();
+    const deadline = Date.now() + 2000;
+    while (state.streaming && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    if (state.streaming) return;
+  }
   state.awaitingHitl = false;
   updateHitlInputState();
 
@@ -660,6 +669,8 @@ async function resumeDeferred(deferredResults) {
 async function runChatStream(payload, assistant) {
   state.abortController = new AbortController();
   state.streamCancelled = false;
+  state.skipHistoryRefresh = false;
+  let stoppedByUser = false;
   try {
     const resp = await fetch(`${state.baseUrl}/api/v1/chat/stream`, {
       method: "POST",
@@ -677,6 +688,7 @@ async function runChatStream(payload, assistant) {
     await readSse(resp.body, (evt) => handleEvent(evt, assistant));
   } catch (e) {
     if (e.name === "AbortError") {
+      stoppedByUser = true;
       assistant.finalizeThinking();
       assistant.finalizeText();
       if (!state.streamCancelled) {
@@ -692,7 +704,12 @@ async function runChatStream(payload, assistant) {
     setStreaming(false);
     state.abortController = null;
     if (state.sessionId) {
-      await refreshCurrentHistory();
+      if (!state.skipHistoryRefresh) {
+        if (stoppedByUser || state.streamCancelled) {
+          await new Promise((r) => setTimeout(r, 250));
+        }
+        await refreshCurrentHistory();
+      }
       await syncSessionsFromBackend();
     }
   }
@@ -714,8 +731,8 @@ function setStreaming(v) {
   state.streaming = v;
   el.sendBtn.classList.toggle("hidden", v);
   el.stopBtn.classList.toggle("hidden", !v);
-  el.input.disabled = false;
   updateAgentSelectState();
+  updateHitlInputState();
 }
 
 /**
@@ -815,8 +832,10 @@ function handleEvent({ event, data }, assistant) {
       assistant.finalizeText();
       syncHistoryMeta(data);
       if (data.usage) renderUsage(data.usage);
+      state.skipHistoryRefresh = true;
       if (data.status === "pending" && data.deferred) {
         state.awaitingHitl = true;
+        setStreaming(false);
         const pending = [...(data.deferred.calls || []), ...(data.deferred.approvals || [])];
         for (const call of pending) {
           assistant.attachHitlWidget(mergeUiToolCall(call));
@@ -1141,6 +1160,7 @@ function createAssistantMessage(timestamp, branchPoint) {
         }
         if (merged.widget) existing.dataset.widget = merged.widget;
         if (merged.metadata) existing.dataset.metadata = JSON.stringify(merged.metadata);
+        maybeAttachHitlWidget(existing, merged);
         scrollToBottom();
         return;
       }
@@ -1168,6 +1188,7 @@ function createAssistantMessage(timestamp, branchPoint) {
       block.querySelector(".tool-head").addEventListener("click", () => block.classList.toggle("open"));
       wrap.appendChild(block);
       toolBlocks.set(key, block);
+      maybeAttachHitlWidget(block, merged);
       // 新文本将进入一个新气泡
       textBubble = null;
       textBuffer = "";
@@ -1202,6 +1223,16 @@ function createAssistantMessage(timestamp, branchPoint) {
       renderHitlWidget(block, merged, resumeDeferred);
     },
   };
+}
+
+function maybeAttachHitlWidget(block, call) {
+  const merged = mergeUiToolCall(call);
+  if (!block || !isUiToolCall(merged) || !hasNonEmptyArgs(merged.args)) return;
+  if (block.querySelector(".hitl-widget")) return;
+  renderHitlWidget(block, merged, resumeDeferred);
+  state.awaitingHitl = true;
+  state.skipHistoryRefresh = true;
+  updateHitlInputState();
 }
 
 function renderHitlWidget(block, call, onSubmit) {

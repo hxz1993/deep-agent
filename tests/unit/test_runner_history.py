@@ -166,27 +166,14 @@ class AgentRunnerHistoryTests(unittest.IsolatedAsyncioTestCase):
         runner = AgentRunner(agent, self.store, UsageLimits(request_limit=10))
         deps = AgentDeps(session_id="sess-cancel")
 
-        cancel_event = asyncio.Event()
+        events_out: list[dict] = []
+        agen = runner.run_stream("sess-cancel", "hello", deps)
+        async for ev in agen:
+            events_out.append(ev)
+            if ev.get("type") == "text" and ev.get("delta"):
+                await agen.aclose()
+                break
 
-        async def should_cancel() -> bool:
-            return cancel_event.is_set()
-
-        async def collect_events() -> list[dict]:
-            events_out: list[dict] = []
-            async for ev in runner.run_stream(
-                "sess-cancel",
-                "hello",
-                deps,
-                should_cancel=should_cancel,
-            ):
-                events_out.append(ev)
-                if ev.get("type") == "text" and ev.get("delta"):
-                    cancel_event.set()
-            return events_out
-
-        events_out = await collect_events()
-
-        self.assertEqual(events_out[-1]["type"], "cancelled")
         self.assertLess(tracker.yielded_chunks, tracker.total_chunks)
         history = await self.store.get_history("sess-cancel")
         self.assertGreaterEqual(len(history), 2)
@@ -194,6 +181,55 @@ class AgentRunnerHistoryTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(last, ModelResponse)
         text = last.parts[0].content if last.parts else ""
         self.assertTrue(str(text).startswith("alpha"))
+
+    async def test_run_stream_persists_partial_when_consumer_closes_mid_yield(self) -> None:
+        from tests.integration.helpers.models import build_slow_stream_model
+
+        chunks = ["part-a-", "part-b-", "part-c-"]
+        model, tracker = build_slow_stream_model(chunks=chunks, delay_s=0.05)
+        agent = Agent(model, deps_type=AgentDeps)
+        runner = AgentRunner(agent, self.store, UsageLimits(request_limit=10))
+        deps = AgentDeps(session_id="sess-close")
+
+        agen = runner.run_stream("sess-close", "hello", deps)
+        async for ev in agen:
+            if ev.get("type") == "text" and ev.get("delta"):
+                await agen.aclose()
+                break
+
+        self.assertGreater(tracker.yielded_chunks, 0)
+        self.assertLess(tracker.yielded_chunks, tracker.total_chunks)
+        history = await self.store.get_history("sess-close")
+        self.assertGreaterEqual(len(history), 2)
+        last = history[-1]
+        self.assertIsInstance(last, ModelResponse)
+        text = last.parts[0].content if last.parts else ""
+        self.assertIn("part-a", str(text))
+
+    async def test_run_stream_normal_complete_does_not_snapshot_after_full_persist(self) -> None:
+        from tests.integration.helpers.models import build_slow_stream_model
+
+        chunks = ["only-reply"]
+        model, _ = build_slow_stream_model(chunks=chunks, delay_s=0.01)
+        agent = Agent(model, deps_type=AgentDeps)
+        runner = AgentRunner(agent, self.store, UsageLimits(request_limit=10))
+        deps = AgentDeps(session_id="sess-no-dup")
+
+        snapshot_calls = 0
+        original = runner._persist_cancelled_snapshot
+
+        async def counting_snapshot(*args, **kwargs):
+            nonlocal snapshot_calls
+            snapshot_calls += 1
+            return await original(*args, **kwargs)
+
+        with patch.object(runner, "_persist_cancelled_snapshot", side_effect=counting_snapshot):
+            async for _ in runner.run_stream("sess-no-dup", "hello", deps):
+                pass
+
+        self.assertEqual(snapshot_calls, 0)
+        history = await self.store.get_history("sess-no-dup")
+        self.assertEqual(len(history), 2)
 
     async def test_run_stream_new_message_after_pending_hitl(self) -> None:
         from pydantic_ai import DeferredToolRequests

@@ -219,9 +219,13 @@ def mock_request_disconnect(
     """Patch Starlette disconnect probe; real ASGITransport blocks on is_disconnected."""
     flag = DisconnectFlag()
     flag.disconnected = disconnected
+
+    async def _is_disconnected(self) -> bool:  # noqa: ARG001
+        return await flag()
+
     with patch(
         "starlette.requests.Request.is_disconnected",
-        new=flag,
+        new=_is_disconnected,
     ):
         yield flag
 

@@ -21,21 +21,18 @@ TestClient (HTTP)
 ### 1. 用 TestClient + TestModel，不要调真 LLM
 
 ```python
-from unittest.mock import patch
-from fastapi.testclient import TestClient
-from pydantic_ai.models.test import TestModel
+from tests.integration.helpers.models import text_only_model, tool_call_model
 
-test_model = TestModel(
-    call_tools=["echo_echo_request_headers"],  # 强制调用的 tool 名（含 MCP 前缀）
-    custom_output_text="ok",
-)
-with patch("deep_agent.agent.factory._resolve_model", return_value=test_model):
-    with TestClient(app) as client:
-        response = client.post("/api/v1/chat", json={...}, headers={...})
+# 纯文本回复（不调用任何 tool）
+test_model = text_only_model("ok")
+
+# 指定调用的 tool（名称与 registry 一致）
+test_model = tool_call_model("confirm_action", text="done after confirm")
 ```
 
-- `call_tools`：指定要调用的 tool，名称与 registry 中一致（如 `text_tools_reverse`）。
-- `custom_output_text`：tool 执行后的最终回复，避免多轮对话。
+- `TestModel` 默认 `call_tools='all'`，会调用 agent 上挂的**每一个** tool。`capabilities=[]` 时仍会挂载 UI tools，未显式设 `call_tools=[]` 时容易得到 `status=pending` 而非文本回复。
+- `text_only_model` / `tool_call_model`：见 [`helpers/models.py`](helpers/models.py)。
+- `custom_output_text`：tool 执行后的最终回复文本。
 
 ### 2. 不要用 `main.app` 直接做 TestClient
 
@@ -108,6 +105,8 @@ stdio 读 `ctx.request_context.meta.headers`；HTTP MCP 读连接上的 request 
 | [`helpers/mcp.py`](helpers/mcp.py) | 直接调 toolset、启动 HTTP echo 子进程 |
 | [`fixtures/header_echo_server.py`](fixtures/header_echo_server.py) | 测试用 MCP server |
 | [`test_chat_header_forwarding.py`](test_chat_header_forwarding.py) | **推荐模板**：完整 HTTP → MCP |
+| [`test_chat_history_persistence.py`](test_chat_history_persistence.py) | **正常对话**：流式/同步完成后 history 含 assistant |
+| [`test_chat_stream_cancel_and_history.py`](test_chat_stream_cancel_and_history.py) | 停止流、HITL 续聊、部分持久化 |
 | [`test_mcp_header_forwarding.py`](test_mcp_header_forwarding.py) | MCP toolset 层（stdio / HTTP） |
 
 ## 教训：为什么 toolset 层测试会通过、线上却失败？
@@ -155,7 +154,7 @@ headers = getattr(meta, "headers", None) or {}
 ## 新增集成测试检查清单
 
 - [ ] 使用 `create_test_app` 或等价物，避免生产 lifespan
-- [ ] LLM 使用 `TestModel`，指定 `call_tools`
+- [ ] LLM 使用 `text_only_model` / `tool_call_model`，勿裸用 `TestModel()`（默认 `call_tools='all'`）
 - [ ] HTTP 测试用 `TestClient` 的 `headers=` 传白名单内 header
 - [ ] MCP 断言在 **server 侧**（落盘 / 返回值），不只断言 HTTP 200
 - [ ] 至少一条负例（无 header / 错误 capability）

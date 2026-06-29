@@ -275,6 +275,11 @@ class ToolHintsTests(unittest.TestCase):
         self.assertEqual(enriched["widget"], "text")
         self.assertEqual(enriched["metadata"], {"v": 1})
 
+    def test_enrich_tool_event_builtin_without_hints(self) -> None:
+        event = {"type": "tool_call", "tool": "confirm_action", "args": {"message": "ok"}, "tool_call_id": "c1"}
+        enriched = enrich_tool_event(event, {})
+        self.assertEqual(enriched["widget"], "confirm")
+
     def test_enrich_tool_event_ignores_non_tool_call(self) -> None:
         event = {"type": "text", "delta": "hi"}
         self.assertIs(enrich_tool_event(event, {"x": {}}), event)

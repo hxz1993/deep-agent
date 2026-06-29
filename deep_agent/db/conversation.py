@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import sys
 from collections import defaultdict
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 from pydantic_ai.messages import ModelMessage
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -88,13 +90,25 @@ class SqlConversationCoordinator:
 
     @asynccontextmanager
     async def _write(self):
-        async with self._session_factory() as db:
+        db = self._session_factory()
+        await db.__aenter__()
+        exc_info: tuple[type[BaseException] | None, BaseException | None, Any] = (
+            None,
+            None,
+            None,
+        )
+        try:
             try:
                 yield db
-                await db.commit()
-            except Exception:
-                await db.rollback()
+                await asyncio.shield(db.commit())
+            except BaseException:
+                exc_info = sys.exc_info()
+                with contextlib.suppress(Exception):
+                    await asyncio.shield(db.rollback())
                 raise
+        finally:
+            with contextlib.suppress(Exception):
+                await asyncio.shield(db.__aexit__(*exc_info))
 
     async def get_history(self, session_id: str, *, agent_id: str | None = None) -> list[ModelMessage]:
         scope = normalize_agent_scope(agent_id)

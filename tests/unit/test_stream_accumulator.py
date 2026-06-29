@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from pydantic_ai.messages import ModelResponse, TextPart
+from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, ToolReturnPart
 
 from deep_agent.agent.stream_accumulator import StreamAccumulator
 
@@ -57,6 +57,31 @@ class StreamAccumulatorTests(unittest.TestCase):
         response = messages[0]
         assert isinstance(response, ModelResponse)
         self.assertEqual(len(response.parts), 1)
+
+    def test_deferred_resume_snapshot_omits_duplicate_tool_calls(self) -> None:
+        acc = StreamAccumulator()
+        acc.ingest(
+            {
+                "type": "tool_call",
+                "tool": "confirm_action",
+                "args": {"message": "allow?"},
+                "tool_call_id": "c1",
+            }
+        )
+        acc.ingest(
+            {
+                "type": "tool_result",
+                "tool": "confirm_action",
+                "result": {"confirmed": True},
+                "tool_call_id": "c1",
+            }
+        )
+        messages = acc.to_model_messages(include_tool_calls=False)
+        self.assertEqual(len(messages), 1)
+        self.assertIsInstance(messages[0], ModelRequest)
+        returns = [p for p in messages[0].parts if isinstance(p, ToolReturnPart)]
+        self.assertEqual(len(returns), 1)
+        self.assertEqual(returns[0].tool_call_id, "c1")
 
 
 if __name__ == "__main__":

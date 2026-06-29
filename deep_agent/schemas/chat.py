@@ -5,6 +5,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from deep_agent.schemas.attachment import AttachmentRef
+
 
 class ChatRequest(BaseModel):
     message: str | None = Field(
@@ -37,6 +39,10 @@ class ChatRequest(BaseModel):
     branch_from: int | None = Field(
         default=None,
         description="branch_point from history; truncates stored messages at this index before run.",
+    )
+    attachments: list[AttachmentRef] | None = Field(
+        default=None,
+        description="Uploaded file references from POST /api/v1/uploads.",
     )
 
 

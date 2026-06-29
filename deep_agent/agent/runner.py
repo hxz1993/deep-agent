@@ -6,11 +6,17 @@ from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator
 
 from pydantic_ai import Agent, AgentRunResultEvent, DeferredToolRequests, DeferredToolResults
-from pydantic_ai.messages import ModelMessage, ModelRequest, UserPromptPart
+from pydantic_ai.messages import ModelMessage, ModelRequest, UserContent, UserPromptPart
 from pydantic_ai.settings import ModelSettings
 from pydantic_ai.usage import UsageLimits
 
 from deep_agent.agent import events
+from deep_agent.agent.attachments import (
+    has_user_turn,
+    refs_from_attachments,
+    resolve_history_for_llm,
+    resolve_user_prompt,
+)
 from deep_agent.agent.deferred import serialize_deferred
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.history import incremental_append_messages, repair_unprocessed_tool_calls
@@ -19,6 +25,7 @@ from deep_agent.capabilities.ui.registry import enrich_deferred, enrich_tool_eve
 from loguru import logger
 
 from deep_agent.db.conversation import SessionStore
+from deep_agent.schemas.attachment import AttachmentRef
 
 _STREAM_OUTPUT_TYPE: list[Any] = [str, DeferredToolRequests]
 _CANCEL_POLL_INTERVAL_S = 0.2
@@ -66,9 +73,10 @@ class AgentRunner:
     async def _prepare_history(
         self,
         session_id: str,
-        prompt: str,
+        message: str,
         deps: AgentDeps,
         *,
+        attachments: list[AttachmentRef] | None = None,
         branch_from: int | None = None,
         deferred_tool_results: DeferredToolResults | None = None,
     ) -> tuple[list[ModelMessage], bool, int | None]:
@@ -79,12 +87,13 @@ class AgentRunner:
                 keep_count=branch_from,
             )
         history = await self.store.get_history(session_id, agent_id=deps.agent_id)
-        if prompt.strip() and not deferred_tool_results:
+        if has_user_turn(message, attachments) and not deferred_tool_results:
             history = repair_unprocessed_tool_calls(history)
         pre_persisted_user = False
         user_branch_point: int | None = None
-        if prompt.strip():
-            user_request = ModelRequest(parts=[UserPromptPart(content=prompt)])
+        if has_user_turn(message, attachments):
+            content = refs_from_attachments(message, attachments)
+            user_request = ModelRequest(parts=[UserPromptPart(content=content)])
             await self.store.append(
                 session_id,
                 [user_request],
@@ -95,6 +104,31 @@ class AgentRunner:
             pre_persisted_user = True
             user_branch_point = len(history) - 1
         return history, pre_persisted_user, user_branch_point
+
+    async def _llm_inputs(
+        self,
+        history: list[ModelMessage],
+        message: str,
+        attachments: list[AttachmentRef] | None,
+        deps: AgentDeps,
+        *,
+        pre_persisted_user: bool,
+    ) -> tuple[list[ModelMessage], str | list[UserContent] | None]:
+        current_user_index = len(history) - 1 if pre_persisted_user else None
+        llm_history = await resolve_history_for_llm(
+            history,
+            current_user_index=current_user_index,
+            request_headers=deps.request_headers,
+        )
+        if pre_persisted_user:
+            return llm_history, None
+        if has_user_turn(message, attachments):
+            return llm_history, await resolve_user_prompt(
+                message,
+                attachments,
+                deps.request_headers,
+            )
+        return llm_history, message or None
 
     async def _history_meta(
         self,
@@ -127,24 +161,33 @@ class AgentRunner:
     async def run(
         self,
         session_id: str,
-        prompt: str,
+        message: str,
         deps: AgentDeps,
         *,
+        attachments: list[AttachmentRef] | None = None,
         deferred_tool_results: DeferredToolResults | None = None,
         branch_from: int | None = None,
     ) -> dict[str, Any]:
         async with self._session_lock(session_id, agent_id=deps.agent_id):
             history, pre_persisted_user, _ = await self._prepare_history(
                 session_id,
-                prompt,
+                message,
                 deps,
+                attachments=attachments,
                 branch_from=branch_from,
                 deferred_tool_results=deferred_tool_results,
             )
+            llm_history, user_prompt = await self._llm_inputs(
+                history,
+                message,
+                attachments,
+                deps,
+                pre_persisted_user=pre_persisted_user,
+            )
             result = await self.agent.run(
-                prompt,
+                user_prompt,
                 deps=deps,
-                message_history=history,
+                message_history=llm_history,
                 usage_limits=self.usage_limits,
                 deferred_tool_results=deferred_tool_results,
                 output_type=_STREAM_OUTPUT_TYPE,
@@ -161,9 +204,10 @@ class AgentRunner:
     async def run_stream(
         self,
         session_id: str,
-        prompt: str,
+        message: str,
         deps: AgentDeps,
         *,
+        attachments: list[AttachmentRef] | None = None,
         deferred_tool_results: DeferredToolResults | None = None,
         branch_from: int | None = None,
         should_cancel: Callable[[], Awaitable[bool]] | None = None,
@@ -171,19 +215,27 @@ class AgentRunner:
         async with self._session_lock(session_id, agent_id=deps.agent_id):
             history, pre_persisted_user, user_branch_point = await self._prepare_history(
                 session_id,
-                prompt,
+                message,
                 deps,
+                attachments=attachments,
                 branch_from=branch_from,
                 deferred_tool_results=deferred_tool_results,
+            )
+            llm_history, user_prompt = await self._llm_inputs(
+                history,
+                message,
+                attachments,
+                deps,
+                pre_persisted_user=pre_persisted_user,
             )
             result = None
             cancelled = False
             accumulator = StreamAccumulator()
             try:
                 async with self.agent.run_stream_events(
-                    prompt,
+                    user_prompt,
                     deps=deps,
-                    message_history=history,
+                    message_history=llm_history,
                     usage_limits=self.usage_limits,
                     deferred_tool_results=deferred_tool_results,
                     output_type=_STREAM_OUTPUT_TYPE,
@@ -373,3 +425,4 @@ def _usage_dict(result: Any) -> dict[str, Any]:
         "output_tokens": getattr(usage, "output_tokens", getattr(usage, "response_tokens", None)),
         "total_tokens": getattr(usage, "total_tokens", None),
     }
+

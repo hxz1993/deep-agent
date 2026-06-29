@@ -13,6 +13,7 @@ from deep_agent.api.v1.deps import build_runner, build_runner_for_agent
 from deep_agent.core.context import AppContextDep
 from deep_agent.core.exceptions import AgentNotFoundError, LlmModelNotFoundError
 from deep_agent.db.ids import normalize_agent_id
+from deep_agent.options import OPTION
 from deep_agent.schemas.chat import ChatRequest, ChatResponse, StreamChatRequest
 
 router = APIRouter()
@@ -36,12 +37,18 @@ def _agent_deps(
 
 def _validate_chat_body(body: ChatRequest | StreamChatRequest) -> None:
     has_message = bool(body.message and body.message.strip())
+    has_attachments = bool(body.attachments)
     deferred = getattr(body, "deferred_tool_results", None)
     has_deferred = bool(deferred)
-    if not has_message and not has_deferred:
+    if not has_message and not has_attachments and not has_deferred:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Either message or deferred_tool_results is required.",
+            detail="Either message, attachments, or deferred_tool_results is required.",
+        )
+    if body.attachments and len(body.attachments) > OPTION.agent.upload_max_count:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"At most {OPTION.agent.upload_max_count} attachments per message.",
         )
     if body.branch_from is not None and has_deferred:
         raise HTTPException(
@@ -98,6 +105,7 @@ async def chat(request: Request, ctx: AppContextDep, body: ChatRequest) -> ChatR
         session_id,
         body.message or "",
         deps,
+        attachments=body.attachments,
         branch_from=body.branch_from,
     )
     return ChatResponse(
@@ -114,7 +122,7 @@ async def chat_stream(request: Request, ctx: AppContextDep, body: StreamChatRequ
     _validate_chat_body(body)
     session_id = body.session_id or uuid.uuid4().hex
     deferred_tool_results = _deferred_results(body)
-    prompt = body.message or ""
+    message = body.message or ""
 
     api_agent_id: str | None = None
     if body.agent_id is not None:
@@ -150,8 +158,9 @@ async def chat_stream(request: Request, ctx: AppContextDep, body: StreamChatRequ
         yield {"event": "session", "data": json.dumps(session_data)}
         async for ev in runner.run_stream(
             session_id,
-            prompt,
+            message,
             deps,
+            attachments=body.attachments,
             deferred_tool_results=deferred_tool_results,
             branch_from=body.branch_from,
             should_cancel=request.is_disconnected,

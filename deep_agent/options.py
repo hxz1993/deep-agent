@@ -179,6 +179,22 @@ class Agent(Category):
         bind_env="SQLITE_PATH",
         convertor=_resolve_repo_path,
     )
+    upload_max_size_mb = Option(20, val_type=int, bind_env="UPLOAD_MAX_SIZE_MB")
+    upload_max_count = Option(10, val_type=int, bind_env="UPLOAD_MAX_COUNT")
+    upload_allowed_mimes = Option(
+        "",
+        val_type=str,
+        bind_env="UPLOAD_ALLOWED_MIMES",
+        convertor=_strip_optional_str,
+    )
+    upload_extract_text_max_chars = Option(
+        32000,
+        val_type=int,
+        bind_env="UPLOAD_EXTRACT_TEXT_MAX_CHARS",
+    )
+    image_max_dimension = Option(1568, val_type=int, bind_env="IMAGE_MAX_DIMENSION")
+    image_max_bytes = Option(4_194_304, val_type=int, bind_env="IMAGE_MAX_BYTES")
+    image_jpeg_quality = Option(85, val_type=int, bind_env="IMAGE_JPEG_QUALITY")
 
     def __get__(self, instance, owner) -> "Agent":
         """defined to help ide"""

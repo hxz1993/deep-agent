@@ -79,7 +79,7 @@ const state = {
   agentId: localStorage.getItem("da_agent_id") || "",
   agents: [],
   sessionId: null,
-  sessions: JSON.parse(localStorage.getItem("da_sessions") || "[]"), // [{id, agentId, agentName, title}]
+  sessions: [], // [{id, agentId, agentName, title}] — 仅来自 GET /api/v1/sessions
   streaming: false,
   awaitingHitl: false,
   abortController: null,
@@ -87,6 +87,7 @@ const state = {
   branchFrom: null,
   modelMessageCount: 0,
   lastUserBranchPoint: null,
+  pendingAttachments: [],
 };
 
 /* ----------------------------- DOM ----------------------------- */
@@ -106,6 +107,9 @@ const el = {
   sessionBadge: $("sessionBadge"),
   chatTitle: $("chatTitle"),
   usageInfo: $("usageInfo"),
+  attachBtn: $("attachBtn"),
+  fileInput: $("fileInput"),
+  attachmentPreview: $("attachmentPreview"),
 };
 
 /* --------------------------- 初始化 --------------------------- */
@@ -193,6 +197,7 @@ function init() {
     checkHealth();
     loadCapabilities();
     loadAgents();
+    syncSessionsFromBackend();
   });
   el.agentSelect?.addEventListener("change", () => {
     state.agentId = el.agentSelect.value;
@@ -215,6 +220,9 @@ function init() {
     }
   });
   el.input.addEventListener("input", autoGrow);
+  el.attachBtn?.addEventListener("click", () => el.fileInput?.click());
+  el.fileInput?.addEventListener("change", onFilesSelected);
+  el.input?.addEventListener("paste", onPaste);
 
   document.querySelectorAll(".suggestion").forEach((b) =>
     b.addEventListener("click", () => {
@@ -225,9 +233,7 @@ function init() {
   );
 
   initMarkdown();
-  state.sessions = state.sessions.map((s) => normalizeSession(s));
-  sortSessions();
-  persistSessions();
+  localStorage.removeItem("da_sessions");
   renderSessions();
   syncSessionsFromBackend();
   checkHealth();
@@ -245,39 +251,23 @@ async function syncSessionsFromBackend() {
     if (!r.ok) return;
     const payload = await r.json();
     const rows = Array.isArray(payload?.items) ? payload.items : [];
-    if (rows.length === 0) return;
-    const byKey = new Map(state.sessions.map((s) => [sessionLookupKey(s), s]));
-    for (const row of rows) {
+    state.sessions = rows.map((row) => {
       const agentId = row.agent_id || "";
-      const key = `${agentId}:${row.session_id}`;
       const title = (row.user_prompt || row.session_id.slice(0, 8)).slice(0, 40);
-      const createdAt = row.created_at || null;
-      const updatedAt = row.updated_at || createdAt || null;
-      const existing = byKey.get(key);
-      if (existing) {
-        Object.assign(existing, normalizeSession({ ...existing, id: row.session_id, agentId }));
-        existing.agentName = row.agent_name || existing.agentName;
-        existing.title = title;
-        if (createdAt) existing.createdAt = createdAt;
-        if (updatedAt) existing.updatedAt = updatedAt;
-      } else {
-        state.sessions.push(
-          normalizeSession({
-            id: row.session_id,
-            agentId,
-            agentName: row.agent_name,
-            title,
-            createdAt,
-            updatedAt,
-          })
-        );
-      }
-    }
+      return normalizeSession({
+        id: row.session_id,
+        agentId,
+        agentName: row.agent_name,
+        title,
+        createdAt: row.created_at || null,
+        updatedAt: row.updated_at || row.created_at || null,
+      });
+    });
     sortSessions();
-    persistSessions();
     renderSessions();
   } catch (_) {
-    /* 后端不可用时保留 localStorage 列表 */
+    state.sessions = [];
+    renderSessions();
   }
 }
 
@@ -312,10 +302,6 @@ function newChat(agentId) {
   el.input.focus();
 }
 
-function persistSessions() {
-  localStorage.setItem("da_sessions", JSON.stringify(state.sessions));
-}
-
 function upsertSession(id, title, agentId, agentName) {
   const normalized = normalizeSession({ id, agentId: agentId || state.agentId });
   const key = `${normalized.agentId || ""}:${normalized.id}`;
@@ -336,7 +322,6 @@ function upsertSession(id, title, agentId, agentName) {
     });
   }
   sortSessions();
-  persistSessions();
   renderSessions();
 }
 
@@ -377,17 +362,22 @@ async function switchSession(s) {
     localStorage.setItem("da_agent_id", state.agentId);
     if (el.agentSelect) el.agentSelect.value = state.agentId;
   }
-  el.messages.innerHTML = "";
-  el.emptyState.classList.add("hidden");
   el.sessionBadge.textContent = session.id.slice(0, 8);
   el.chatTitle.textContent = session.title || "对话";
   updateChatHeader();
   updateAgentSelectState();
   renderSessions();
+  await loadSessionHistory(session);
+}
 
+/** 从后端拉取并渲染指定会话的历史（唯一消息来源）。 */
+async function loadSessionHistory(session) {
+  const normalized = normalizeSession(session);
+  el.messages.innerHTML = "";
+  el.emptyState.classList.add("hidden");
   try {
     await loadUiTools(state.agentId);
-    const r = await fetch(sessionApiUrl(session, "/history"));
+    const r = await fetch(sessionApiUrl(normalized, "/history"));
     if (r.status === 404) {
       addSystemNote("会话不存在或尚无历史记录。");
       return;
@@ -397,12 +387,20 @@ async function switchSession(s) {
     if (!data.messages || data.messages.length === 0) {
       el.emptyState.classList.remove("hidden");
       el.messages.appendChild(el.emptyState);
+      state.modelMessageCount = 0;
+      state.awaitingHitl = false;
+      updateHitlInputState();
       return;
     }
     renderHistory(data.messages, data.model_message_count);
   } catch (e) {
     addSystemNote(`加载历史失败：${e.message}`);
   }
+}
+
+async function refreshCurrentHistory() {
+  if (!state.sessionId) return;
+  await loadSessionHistory({ id: state.sessionId, agentId: state.agentId });
 }
 
 function renderHistory(messages, modelMessageCount) {
@@ -417,8 +415,8 @@ function renderHistory(messages, modelMessageCount) {
         lastDayKey = dayKey;
       }
     }
-    if (msg.role === "user" && msg.content) {
-      addMessage("user", msg.content, ts, msg.branch_point);
+    if (msg.role === "user" && (msg.content || (msg.attachments && msg.attachments.length))) {
+      addMessage("user", msg.content || "", ts, msg.branch_point, msg.attachments);
       continue;
     }
     if (msg.role === "assistant" && msg.parts && msg.parts.length) {
@@ -497,7 +495,7 @@ async function deleteSession(session) {
   const normalized = normalizeSession(session);
   const key = sessionLookupKey(normalized);
   state.sessions = state.sessions.filter((s) => sessionLookupKey(s) !== key);
-  persistSessions();
+  renderSessions();
   try {
     await fetch(sessionApiUrl(normalized), { method: "DELETE" });
   } catch (_) { /* 忽略 */ }
@@ -588,7 +586,8 @@ async function loadCapabilities() {
 /* --------------------------- 发送 / 流式 --------------------------- */
 async function onSend() {
   const text = el.input.value.trim();
-  if (!text || state.streaming) return;
+  const attachments = state.pendingAttachments.slice();
+  if ((!text && attachments.length === 0) || state.streaming) return;
   if (state.awaitingHitl) {
     addSystemNote("请先完成上方待处理的交互。");
     return;
@@ -600,6 +599,7 @@ async function onSend() {
 
   el.emptyState.classList.add("hidden");
   el.input.value = "";
+  clearPendingAttachments();
   autoGrow();
 
   const branchFrom = state.branchFrom;
@@ -608,7 +608,7 @@ async function onSend() {
   }
 
   const userBranchPoint = branchFrom != null ? branchFrom : state.modelMessageCount;
-  addMessage("user", text, null, userBranchPoint);
+  addMessage("user", text, null, userBranchPoint, attachments);
   state.lastUserBranchPoint = userBranchPoint;
 
   const assistant = createAssistantMessage();
@@ -617,7 +617,19 @@ async function onSend() {
 
   if (!state.sessionId) state.sessionId = generateSessionId();
 
-  const payload = { agent_id: state.agentId, message: text, session_id: state.sessionId };
+  const payload = {
+    agent_id: state.agentId,
+    message: text || null,
+    session_id: state.sessionId,
+  };
+  if (attachments.length) {
+    payload.attachments = attachments.map((a) => ({
+      id: a.id,
+      name: a.name,
+      mime: a.mime,
+      extracted_text: a.extracted_text ?? null,
+    }));
+  }
   if (branchFrom != null) {
     payload.branch_from = branchFrom;
     state.modelMessageCount = branchFrom + 1;
@@ -679,6 +691,10 @@ async function runChatStream(payload, assistant) {
     assistant.finalizeText();
     setStreaming(false);
     state.abortController = null;
+    if (state.sessionId) {
+      await refreshCurrentHistory();
+      await syncSessionsFromBackend();
+    }
   }
 }
 
@@ -839,7 +855,7 @@ function renderUsage(usage) {
 }
 
 /* --------------------------- 消息渲染 --------------------------- */
-function addMessage(role, text, timestamp, branchPoint) {
+function addMessage(role, text, timestamp, branchPoint, attachments) {
   const row = document.createElement("div");
   row.className = `msg-row ${role}`;
   if (branchPoint != null) row.dataset.branchPoint = String(branchPoint);
@@ -848,7 +864,16 @@ function addMessage(role, text, timestamp, branchPoint) {
     <div class="bubble-wrap"><div class="bubble"></div></div>`;
   const wrap = row.querySelector(".bubble-wrap");
   if (timestamp) prependMsgTime(wrap, timestamp);
-  wrap.querySelector(".bubble").textContent = text;
+  const bubble = wrap.querySelector(".bubble");
+  if (text) {
+    const textEl = document.createElement("div");
+    textEl.className = "bubble-text";
+    textEl.textContent = text;
+    bubble.appendChild(textEl);
+  }
+  if (attachments?.length) {
+    renderMessageAttachments(bubble, attachments);
+  }
   if (role === "user") {
     const actions = document.createElement("div");
     actions.className = "msg-actions";
@@ -864,6 +889,98 @@ function addMessage(role, text, timestamp, branchPoint) {
   el.messages.appendChild(row);
   scrollToBottom();
   return row;
+}
+
+function renderMessageAttachments(container, attachments) {
+  const wrap = document.createElement("div");
+  wrap.className = "msg-attachments";
+  for (const att of attachments) {
+    const chip = document.createElement("div");
+    chip.className = "attachment-chip";
+    const mime = (att.mime || "").toLowerCase();
+    if (mime.startsWith("image/")) {
+      const img = document.createElement("div");
+      img.className = "attachment-thumb";
+      img.textContent = "🖼";
+      chip.appendChild(img);
+    }
+    const label = document.createElement("span");
+    label.className = "attachment-name";
+    label.textContent = att.name || att.id || "附件";
+    chip.appendChild(label);
+    wrap.appendChild(chip);
+  }
+  container.appendChild(wrap);
+}
+
+async function onFilesSelected(e) {
+  const files = Array.from(e.target.files || []);
+  e.target.value = "";
+  for (const file of files) {
+    await uploadAttachment(file);
+  }
+}
+
+async function onPaste(e) {
+  const items = Array.from(e.clipboardData?.items || []);
+  for (const item of items) {
+    if (!item.type.startsWith("image/")) continue;
+    e.preventDefault();
+    const file = item.getAsFile();
+    if (file) await uploadAttachment(file);
+  }
+}
+
+async function uploadAttachment(file) {
+  if (state.pendingAttachments.length >= 10) {
+    addSystemNote("单次最多 10 个附件。");
+    return;
+  }
+  const form = new FormData();
+  form.append("file", file, file.name);
+  try {
+    const r = await fetch(`${state.baseUrl}/api/v1/uploads`, { method: "POST", body: form });
+    if (!r.ok) {
+      const detail = await r.text().catch(() => "");
+      throw new Error(detail || `HTTP ${r.status}`);
+    }
+    const data = await r.json();
+    state.pendingAttachments.push({
+      id: data.id,
+      name: data.name,
+      mime: data.mime,
+      extracted_text: data.extracted_text,
+    });
+    renderPendingAttachments();
+  } catch (err) {
+    addSystemNote(`上传失败：${err.message}`);
+  }
+}
+
+function renderPendingAttachments() {
+  if (!el.attachmentPreview) return;
+  if (!state.pendingAttachments.length) {
+    el.attachmentPreview.classList.add("hidden");
+    el.attachmentPreview.innerHTML = "";
+    return;
+  }
+  el.attachmentPreview.classList.remove("hidden");
+  el.attachmentPreview.innerHTML = "";
+  for (const att of state.pendingAttachments) {
+    const chip = document.createElement("div");
+    chip.className = "pending-attachment";
+    chip.innerHTML = `<span>${escapeHtml(att.name || att.id)}</span><button type="button" title="移除">×</button>`;
+    chip.querySelector("button").addEventListener("click", () => {
+      state.pendingAttachments = state.pendingAttachments.filter((a) => a.id !== att.id);
+      renderPendingAttachments();
+    });
+    el.attachmentPreview.appendChild(chip);
+  }
+}
+
+function clearPendingAttachments() {
+  state.pendingAttachments = [];
+  renderPendingAttachments();
 }
 
 function startEditUserMessage(row, text, branchPoint) {

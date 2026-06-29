@@ -22,6 +22,14 @@ Accept: text/event-stream
 
 {
   "message": "用户输入",
+  "attachments": [
+    {
+      "id": "platform-file-id",
+      "name": "diagram.png",
+      "mime": "image/png",
+      "extracted_text": null
+    }
+  ],
   "session_id": "可选，省略则服务端生成",
   "model": "可选，如 openai:gpt-4o",
   "capabilities": ["native", "mcp:doc_search"],

@@ -17,6 +17,7 @@ from pydantic_ai.messages import (
     UserPromptPart,
 )
 
+from deep_agent.agent.attachments import is_attachment_ref
 from deep_agent.agent.events import _to_jsonable
 
 
@@ -48,12 +49,30 @@ class HistoryToolResultPart(BaseModel):
     tool_call_id: str | None = None
 
 
-HistoryPart = HistoryTextPart | HistoryThinkingPart | HistoryToolCallPart | HistoryToolResultPart
+class HistoryAttachmentPart(BaseModel):
+    type: Literal["attachment"] = "attachment"
+    id: str
+    name: str | None = None
+    mime: str | None = None
+    extracted_text: str | None = None
+
+
+HistoryPart = (
+    HistoryTextPart
+    | HistoryThinkingPart
+    | HistoryToolCallPart
+    | HistoryToolResultPart
+    | HistoryAttachmentPart
+)
 
 
 class HistoryMessage(BaseModel):
     role: Literal["user", "assistant"]
     content: str | None = Field(default=None, description="User message text.")
+    attachments: list[HistoryAttachmentPart] = Field(
+        default_factory=list,
+        description="User-uploaded files attached to this turn.",
+    )
     parts: list[HistoryPart] = Field(default_factory=list, description="Assistant message parts in order.")
     timestamp: datetime | None = Field(default=None, description="Message time (UTC).")
     branch_point: int | None = Field(
@@ -69,6 +88,27 @@ class SessionHistoryResponse(BaseModel):
         default=0,
         description="Raw ModelMessage count; use as branch_from to append at end.",
     )
+
+
+def _user_prompt_attachments(part: UserPromptPart) -> list[HistoryAttachmentPart]:
+    content = part.content
+    if isinstance(content, str):
+        return []
+    if not isinstance(content, list):
+        return []
+    attachments: list[HistoryAttachmentPart] = []
+    for item in content:
+        if not is_attachment_ref(item):
+            continue
+        attachments.append(
+            HistoryAttachmentPart(
+                id=str(item["id"]),
+                name=item.get("name"),
+                mime=item.get("mime"),
+                extracted_text=item.get("extracted_text"),
+            )
+        )
+    return attachments
 
 
 def _user_prompt_text(part: UserPromptPart) -> str:
@@ -220,8 +260,12 @@ def _request_timestamp(request: ModelRequest) -> datetime | None:
 def first_user_prompt(messages: list[ModelMessage]) -> str | None:
     """Return the first user message text from raw model history."""
     for item in model_messages_to_history(messages):
-        if item.role == "user" and item.content:
-            return item.content
+        if item.role == "user":
+            if item.content:
+                return item.content
+            if item.attachments:
+                names = [a.name or a.id for a in item.attachments]
+                return "[附件] " + ", ".join(names)
     return None
 
 
@@ -268,16 +312,21 @@ def model_messages_to_history(messages: list[ModelMessage]) -> list[HistoryMessa
 
     for idx, message in enumerate(messages):
         if isinstance(message, ModelRequest):
+            user_attachments: list[HistoryAttachmentPart] = []
+            for part in message.parts:
+                if isinstance(part, UserPromptPart):
+                    user_attachments.extend(_user_prompt_attachments(part))
             user_texts = [_user_prompt_text(p) for p in message.parts if isinstance(p, UserPromptPart)]
-            user_text = "\n".join(t for t in user_texts if t).strip()
+            user_text = "\n".join(t for t in user_texts if t).strip() or None
             tool_results = _request_tool_returns(message)
 
-            if user_text:
+            if user_text or user_attachments:
                 flush_tool_results()
                 history.append(
                     HistoryMessage(
                         role="user",
                         content=user_text,
+                        attachments=user_attachments,
                         timestamp=_request_timestamp(message),
                         branch_point=idx,
                     )

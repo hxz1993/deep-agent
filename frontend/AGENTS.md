@@ -32,7 +32,7 @@ frontend/
 | 流式对话 | `fetch` + `ReadableStream` 手动解析 SSE（非 `EventSource`，因需 POST） |
 | 思考过程 UI | `thinking` 可折叠块，默认折叠；与 `text` 分离 |
 | 工具调用 UI | `tool_call` / `tool_result` 可折叠；同 `tool_call_id` 合并更新 |
-| HITL UI 工具 | 内置 `confirm_action` / `ask_user_choice`；集成见 [`../docs/ui-tools-external.md`](../docs/ui-tools-external.md)，扩展见 [`../docs/ui-tools.md`](../docs/ui-tools.md) |
+| HITL UI 工具 | 内置 `confirm_action` / `ask_user_choice` + 动态 manual/MCP 工具；SSE / history 携带 `widget` / `metadata`；见 [`../docs/ui-tools-external.md`](../docs/ui-tools-external.md) |
 | Markdown | marked + DOMPurify + highlight.js |
 | 会话 | `session_id` 由后端 `session` 事件返回；`GET/DELETE /api/v1/sessions` |
 | 能力面板 | `GET /api/v1/tools` |
@@ -49,9 +49,9 @@ frontend/
 | `session` | `{ session_id }` 或含 `agent_id` |
 | `text` | `{ type, delta }` |
 | `thinking` | `{ type, delta }` |
-| `tool_call` | `{ type, tool, args, tool_call_id }` |
+| `tool_call` | `{ type, tool, args, tool_call_id, widget?, metadata?, source? }` |
 | `tool_result` | `{ type, tool, result, tool_call_id }` |
-| `final` | `{ type, status, output, usage, deferred? }` |
+| `final` | `{ type, status, output, usage, deferred? }`（`deferred.calls[]` 可含 `widget` / `metadata`） |
 | `error` | `{ type, message }` |
 
 完整协议（含同 ID 多次推送、生命周期）：[`../docs/sse-protocol.md`](../docs/sse-protocol.md)。
@@ -89,11 +89,12 @@ python -m http.server 5173
 | 聊天气泡、工具块 UI | `app.js` + `styles.css` |
 | 新增 HITL UI 工具（改仓库） | [`../docs/ui-tools.md`](../docs/ui-tools.md) |
 | 使用 / 对接 HITL（不改仓库） | [`../docs/ui-tools-external.md`](../docs/ui-tools-external.md) |
+| HITL 渲染与 metadata | `app.js` → `isUiToolCall`、`loadUiTools`、`renderHitlWidget` |
 | 页面布局 | `index.html` |
 | Admin CRUD | `admin/` 下各文件（含 **UI 工具** 页 `/admin/` →「UI 工具」标签） |
 | Markdown 主题/安全 | `vendor/`，见 `vendor/README.md` |
 
-历史消息由后端按 `session_id` 维护；切换会话时 `GET /api/v1/sessions/{id}/history` 回放。
+历史消息由后端按 `session_id` 维护；切换会话时 `GET /api/v1/sessions/{id}/history` 回放。pending UI 工具的 `tool_call` part 同样经后端 enrichment 附带 `widget` / `metadata`。
 
 ---
 

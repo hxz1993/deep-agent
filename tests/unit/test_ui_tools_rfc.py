@@ -5,11 +5,15 @@ from datetime import datetime, timezone
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from deep_agent.agent.history import HistoryMessage, HistoryToolCallPart, enrich_history_messages
 from deep_agent.agent.spec import AgentSpec
 from deep_agent.capabilities.ui.builtin import builtin_ui_records
 from deep_agent.capabilities.ui.manifest import parse_manifest_payload
 from deep_agent.capabilities.ui.registry import (
     build_external_toolset,
+    build_tool_hints,
+    enrich_deferred,
+    enrich_tool_event,
     is_tool_visible,
     load_effective_ui_tools,
     merge_definitions,
@@ -247,6 +251,62 @@ class VisibilityTests(unittest.TestCase):
                 mcp_enabled_names={"acme"},
             )
         )
+
+
+class ToolHintsTests(unittest.TestCase):
+    def test_build_tool_hints_includes_metadata(self) -> None:
+        record = UIToolRecord(
+            name="myapp__form",
+            description="form",
+            parameters_json_schema={"type": "object"},
+            widget="text",
+            metadata={"form_version": "1"},
+            source="manual",
+        )
+        hints = build_tool_hints([record])
+        self.assertEqual(hints["myapp__form"]["widget"], "text")
+        self.assertEqual(hints["myapp__form"]["metadata"], {"form_version": "1"})
+        self.assertEqual(hints["myapp__form"]["source"], "manual")
+
+    def test_enrich_tool_event_merges_hints(self) -> None:
+        event = {"type": "tool_call", "tool": "myapp__form", "args": {}, "tool_call_id": "c1"}
+        hints = {"myapp__form": {"widget": "text", "metadata": {"v": 1}}}
+        enriched = enrich_tool_event(event, hints)
+        self.assertEqual(enriched["widget"], "text")
+        self.assertEqual(enriched["metadata"], {"v": 1})
+
+    def test_enrich_tool_event_ignores_non_tool_call(self) -> None:
+        event = {"type": "text", "delta": "hi"}
+        self.assertIs(enrich_tool_event(event, {"x": {}}), event)
+
+    def test_enrich_deferred_merges_calls(self) -> None:
+        deferred = {"calls": [{"tool": "myapp__form", "args": {}, "tool_call_id": "c1"}], "approvals": []}
+        hints = {"myapp__form": {"widget": "text", "metadata": {"v": 1}}}
+        enriched = enrich_deferred(deferred, hints)
+        self.assertEqual(enriched["calls"][0]["metadata"], {"v": 1})
+        self.assertEqual(enriched["calls"][0]["widget"], "text")
+
+
+class HistoryEnrichmentTests(unittest.TestCase):
+    def test_enrich_history_messages_adds_metadata(self) -> None:
+        messages = [
+            HistoryMessage(
+                role="assistant",
+                parts=[
+                    HistoryToolCallPart(
+                        tool="myapp__form",
+                        args={"prompt": "hi"},
+                        tool_call_id="c1",
+                    )
+                ],
+            )
+        ]
+        hints = {"myapp__form": {"widget": "text", "metadata": {"form_version": "1"}}}
+        enriched = enrich_history_messages(messages, hints)
+        part = enriched[0].parts[0]
+        assert isinstance(part, HistoryToolCallPart)
+        self.assertEqual(part.widget, "text")
+        self.assertEqual(part.metadata, {"form_version": "1"})
 
 
 class ExternalToolsetTests(unittest.TestCase):

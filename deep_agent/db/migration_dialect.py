@@ -26,6 +26,10 @@ def has_column(bind, table_name: str, column_name: str) -> bool:
     return column_name in {col["name"] for col in inspect(bind).get_columns(table_name)}
 
 
+def has_table(bind, table_name: str) -> bool:
+    return table_name in inspect(bind).get_table_names()
+
+
 def constraint_exists(bind, table_name: str, constraint_name: str) -> bool:
     insp = inspect(bind)
     pk = insp.get_pk_constraint(table_name)

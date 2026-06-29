@@ -130,6 +130,7 @@ sequenceDiagram
 | 工具调用 | `tool_call` | 模型发起工具调用（同一 `tool_call_id` 可能推送多次） |
 | 工具结果 | `tool_result` | 工具执行完毕的返回 |
 | 结束 | `final` | 完整输出与 token 用量 |
+| 用户停止 | `cancelled` | 客户端断开连接；已产出内容部分持久化 |
 | 异常 | `error` | 流中错误（出现后流通常结束） |
 
 ## 4. 事件类型详解
@@ -226,12 +227,15 @@ DB Agent 模式（请求体含 `agent_id`）：
   "tool_call_id": "call_00_evdBG0xFNRn5Q8IlwgZW4217"
 }
 
-// 第 2 次：参数就绪，即将执行
+// 第 2 次：参数就绪，即将执行（UI 工具可能附带 widget / metadata）
 {
   "type": "tool_call",
-  "tool": "doc_search_doc_search",
-  "args": { "query": "维度类型" },
-  "tool_call_id": "call_00_evdBG0xFNRn5Q8IlwgZW4217"
+  "tool": "myapp__pick_date",
+  "args": { "prompt": "请选择交付日期" },
+  "tool_call_id": "call_00_evdBG0xFNRn5Q8IlwgZW4217",
+  "widget": "date_picker",
+  "metadata": { "form_version": "1" },
+  "source": "manual"
 }
 ```
 
@@ -241,6 +245,10 @@ DB Agent 模式（请求体含 `agent_id`）：
 | `tool` | `string` | 工具名称（含 capability 前缀时如 `doc_search_doc_search`） |
 | `args` | `object` | 工具参数；首帧可能为 `{}`，应以同 `tool_call_id` 的后续帧覆盖 |
 | `tool_call_id` | `string \| null` | 调用唯一标识，用于关联 `tool_result` |
+| `widget` | `string \| null` | 可选；UI 工具渲染提示（来自 DB，**不发给模型**） |
+| `metadata` | `object \| null` | 可选；客户端扩展字段（来自 Admin/MCP 配置，**不发给模型**） |
+| `source` | `string \| null` | 可选；`builtin` \| `manual` \| `mcp` |
+| `mcp_server_name` | `string \| null` | 可选；MCP 来源工具的服务名 |
 
 **事件来源（后端实现）**：
 
@@ -254,6 +262,7 @@ DB Agent 模式（请求体含 `agent_id`）：
 - 以 `tool_call_id` 为键做 **upsert**，不要为每次事件新建 UI 块
 - 当 `args` 为空对象时，可显示「参数接收中…」占位，收到完整参数后更新
 - 不要假设每个 `tool_call_id` 只出现一次
+- UI 工具（manual / MCP）的 `widget` / `metadata` 由后端 enrichment 注入；客户端可优先使用 SSE 字段，或与 `GET /api/v1/ui-tools` 缓存合并
 
 ---
 
@@ -313,9 +322,11 @@ DB Agent 模式（请求体含 `agent_id`）：
   "deferred": {
     "calls": [
       {
-        "tool": "confirm_action",
-        "args": { "message": "是否继续？" },
-        "tool_call_id": "call_00_abc"
+        "tool": "myapp__pick_date",
+        "args": { "prompt": "是否继续？" },
+        "tool_call_id": "call_00_abc",
+        "widget": "date_picker",
+        "metadata": { "form_version": "1" }
       }
     ],
     "approvals": []
@@ -331,7 +342,7 @@ DB Agent 模式（请求体含 `agent_id`）：
 | `type` | `"final"` | 固定值 |
 | `status` | `"completed" \| "pending"` | `pending` 表示等待 UI 工具结果 |
 | `output` | `string \| object \| ... \| null` | Agent 最终输出；`pending` 时常为 `null` |
-| `deferred` | `object \| null` | `pending` 时包含未完成的 `calls` / `approvals` |
+| `deferred` | `object \| null` | `pending` 时包含未完成的 `calls` / `approvals`；`calls[]` 项可含与 `tool_call` 相同的 `widget` / `metadata` 可选字段 |
 | `usage` | `object` | Token 与请求次数统计 |
 | `model_message_count` | `integer` | 可选；持久化后原始 `ModelMessage` 条数，供客户端同步编辑锚点 |
 | `user_branch_point` | `integer` | 可选；本轮用户消息下标，与 `messages[].branch_point` 一致 |
@@ -372,6 +383,30 @@ Agent 执行过程中抛出未捕获异常时发出，此后流结束，**不会
 | `model_message_count` | `integer` | 可选；错误后当前会话原始 `ModelMessage` 条数 |
 | `user_branch_point` | `integer` | 可选；本轮用户消息在原始历史中的下标（与 `branch_point` 一致） |
 
+---
+
+### 4.8 `cancelled`
+
+客户端断开 SSE 连接（如 `AbortController.abort()`）且服务端检测到断开后发出。此后流结束，**不会**再发 `final`。
+
+```json
+{
+  "type": "cancelled",
+  "status": "cancelled",
+  "history_persisted": true,
+  "model_message_count": 3,
+  "user_branch_point": 0
+}
+```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `type` | `"cancelled"` | 固定值 |
+| `status` | `"cancelled"` | 固定值 |
+| `history_persisted` | `boolean` | 是否已写入部分 assistant 内容 |
+| `model_message_count` | `integer` | 可选；当前会话 `ModelMessage` 条数 |
+| `user_branch_point` | `integer` | 可选；本轮 user 消息的 `branch_point` |
+
 ## 5. 完整示例
 
 以下摘录一次真实对话流（省略大量 `text` delta）：
@@ -409,8 +444,8 @@ data: {"type": "final", "output": "## 平台的 11 种维度类型\n...", "usage
 4. **思考过程**：`thinking.delta` 独立缓冲，可折叠展示，不与 `text` 拼接
 5. **工具调用 upsert**：同 `tool_call_id` 的 `tool_call` 更新而非重复创建
 6. **工具结果关联**：用 `tool_call_id` 匹配并关闭对应工具块
-7. **结束判断**：收到 `final` 或 `error` 后关闭 loading 状态
-8. **中断**：用户取消时 `AbortController.abort()`，并优雅处理 `AbortError`
+7. **结束判断**：收到 `final`、`cancelled` 或 `error` 后关闭 loading 状态
+8. **中断**：用户取消时 `AbortController.abort()`；若已收到 `cancelled` 则不必再提示错误
 
 ## 7. 与 REST 接口的关系
 

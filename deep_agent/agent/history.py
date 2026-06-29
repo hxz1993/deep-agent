@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
+from pydantic_ai import ToolDenied
 from pydantic_ai.messages import (
     BaseToolCallPart,
     ModelMessage,
@@ -34,6 +35,10 @@ class HistoryToolCallPart(BaseModel):
     tool: str
     args: Any = None
     tool_call_id: str | None = None
+    widget: str | None = None
+    metadata: dict[str, Any] | None = None
+    source: str | None = None
+    mcp_server_name: str | None = None
 
 
 class HistoryToolResultPart(BaseModel):
@@ -129,6 +134,34 @@ def filter_ephemeral_agent_messages(messages: list[ModelMessage]) -> list[ModelM
             continue
         filtered.append(message)
     return filtered
+
+
+_USER_CANCELLED_TOOL_MESSAGE = "User cancelled"
+
+
+def repair_unprocessed_tool_calls(messages: list[ModelMessage]) -> list[ModelMessage]:
+    """Close dangling tool_call turns so a new user message can run without pydantic_ai errors."""
+    pending: dict[str, str] = {}
+    for message in messages:
+        if isinstance(message, ModelResponse):
+            for part in message.parts:
+                if isinstance(part, BaseToolCallPart) and part.tool_call_id:
+                    pending[part.tool_call_id] = part.tool_name
+        elif isinstance(message, ModelRequest):
+            for part in message.parts:
+                if isinstance(part, ToolReturnPart) and part.tool_call_id:
+                    pending.pop(part.tool_call_id, None)
+    if not pending:
+        return messages
+    denied = [
+        ToolReturnPart(
+            tool_name=tool_name,
+            content=ToolDenied(message=_USER_CANCELLED_TOOL_MESSAGE),
+            tool_call_id=tool_call_id,
+        )
+        for tool_call_id, tool_name in pending.items()
+    ]
+    return [*messages, ModelRequest(parts=denied)]
 
 
 def incremental_append_messages(
@@ -272,3 +305,26 @@ def model_messages_to_history(messages: list[ModelMessage]) -> list[HistoryMessa
 
     flush_tool_results()
     return history
+
+
+def enrich_history_messages(
+    messages: list[HistoryMessage],
+    hints: dict[str, dict[str, Any]],
+) -> list[HistoryMessage]:
+    """Merge UI tool widget/metadata into history tool_call parts (API-layer only)."""
+    if not hints:
+        return messages
+    enriched: list[HistoryMessage] = []
+    for msg in messages:
+        if msg.role != "assistant":
+            enriched.append(msg)
+            continue
+        parts: list[HistoryPart] = []
+        for part in msg.parts:
+            if isinstance(part, HistoryToolCallPart):
+                extra = hints.get(part.tool, {})
+                parts.append(part.model_copy(update=extra) if extra else part)
+            else:
+                parts.append(part)
+        enriched.append(msg.model_copy(update={"parts": parts}))
+    return enriched

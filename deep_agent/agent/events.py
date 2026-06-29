@@ -74,6 +74,22 @@ def error(
     return payload
 
 
+def cancelled(
+    *,
+    history_persisted: bool = True,
+    model_message_count: int | None = None,
+    user_branch_point: int | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {"type": "cancelled", "status": "cancelled"}
+    if history_persisted:
+        payload["history_persisted"] = history_persisted
+    if model_message_count is not None:
+        payload["model_message_count"] = model_message_count
+    if user_branch_point is not None:
+        payload["user_branch_point"] = user_branch_point
+    return payload
+
+
 def _to_jsonable(value: Any) -> Any:
     if isinstance(value, (str, int, float, bool)) or value is None:
         return value

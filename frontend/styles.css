@@ -442,6 +442,33 @@ html, body {
 .hitl-btn.hitl-cancel { background: #3d1f1f; border-color: #f85149; }
 .hitl-choices { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
 .hitl-choice { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+.hitl-text-input, .hitl-custom-result {
+  width: 100%;
+  margin-bottom: 10px;
+  padding: 8px;
+  border-radius: 6px;
+  border: 1px solid var(--tool-border);
+  background: var(--bg);
+  color: var(--text);
+  font-family: inherit;
+  resize: vertical;
+}
+.hitl-date-input {
+  margin-bottom: 10px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--tool-border);
+  background: var(--bg);
+  color: var(--text);
+}
+.hitl-metadata {
+  font-size: 12px;
+  margin: 0 0 8px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: var(--bg);
+  opacity: 0.9;
+}
 .tool-block.hitl-pending { border-color: #d29922; }
 
 .spinner {

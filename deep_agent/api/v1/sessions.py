@@ -11,10 +11,14 @@ from deep_agent.db.session_list import MAX_LIST_LIMIT, SessionListFilters, Sessi
 from deep_agent.db.session_scope import resolve_session
 from deep_agent.agent.history import (
     SessionHistoryResponse,
+    enrich_history_messages,
     first_user_prompt,
     model_messages_to_history,
     session_activity_timestamps,
 )
+from deep_agent.agent.spec import AgentSpec, default_spec
+from deep_agent.capabilities.mcp.resolver import load_mcp_rows
+from deep_agent.capabilities.ui.registry import load_ui_tool_hints
 from deep_agent.schemas.chat import SessionInfo, SessionListResponse
 
 router = APIRouter()
@@ -132,6 +136,14 @@ async def get_session(
     )
 
 
+async def _spec_for_history(ctx: AppContextDep, agent_id: str | None) -> AgentSpec:
+    if agent_id:
+        row = await ctx.stores.agent.get_by_id(agent_id)
+        if row is not None:
+            return AgentSpec.from_row(row, row.llm_model)
+    return default_spec()
+
+
 @router.get("/sessions/{session_id}/history", response_model=SessionHistoryResponse)
 async def get_session_history(
     ctx: AppContextDep,
@@ -146,9 +158,14 @@ async def get_session_history(
 
     api_agent_id = agent_id or agent_scope_to_api(scope)
     raw = await ctx.store.get_history(resolved_session_id, agent_id=api_agent_id)
+    messages = model_messages_to_history(raw)
+    mcp_rows = await load_mcp_rows(ctx.stores)
+    spec = await _spec_for_history(ctx, api_agent_id)
+    hints = await load_ui_tool_hints(ctx.stores, spec, mcp_rows=mcp_rows)
+    messages = enrich_history_messages(messages, hints)
     return SessionHistoryResponse(
         session_id=resolved_session_id,
-        messages=model_messages_to_history(raw),
+        messages=messages,
         model_message_count=len(raw),
     )
 

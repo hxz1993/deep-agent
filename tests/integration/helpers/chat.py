@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import tempfile
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -21,6 +22,47 @@ from tests.helpers.sqlite_stores import make_sqlite_stores_sync
 from tests.integration.helpers.mcp import streamable_http_echo_server
 
 ECHO_TOOL_NAME = "echo_echo_request_headers"
+
+
+def parse_sse_events(raw: str) -> list[dict]:
+    events: list[dict] = []
+    event_type: str | None = None
+    for line in raw.splitlines():
+        if line.startswith("event:"):
+            event_type = line.removeprefix("event:").strip()
+        elif line.startswith("data:") and event_type is not None:
+            payload = json.loads(line.removeprefix("data:").strip())
+            events.append({"type": event_type, **payload})
+            event_type = None
+    return events
+
+
+def parse_sse_buffer(buffer: str) -> tuple[list[dict], str]:
+    """Parse complete SSE blocks from buffer; return events and trailing partial buffer."""
+    events: list[dict] = []
+    while True:
+        match = None
+        for sep in ("\r\n\r\n", "\n\n"):
+            idx = buffer.find(sep)
+            if idx != -1:
+                match = (idx, len(sep))
+                break
+        if match is None:
+            break
+        idx, width = match
+        block = buffer[:idx]
+        buffer = buffer[idx + width :]
+        event_type: str | None = None
+        data_lines: list[str] = []
+        for line in block.splitlines():
+            if line.startswith("event:"):
+                event_type = line.removeprefix("event:").strip()
+            elif line.startswith("data:"):
+                data_lines.append(line.removeprefix("data:").strip())
+        if event_type and data_lines:
+            payload = json.loads("\n".join(data_lines))
+            events.append({"type": event_type, **payload})
+    return events, buffer
 
 
 @dataclass
@@ -131,3 +173,68 @@ def test_chat_client(
                     yield client, record_file
         finally:
             reset_context()
+
+
+@contextmanager
+def sqlite_chat_app() -> Iterator[FastAPI]:
+    """Minimal chat app with sqlite stores and no MCP servers."""
+    app = FastAPI()
+    app.include_router(api_router)
+    stores, engine, session_factory = testing_data_stores(mcp_rows=[])
+    configure_test_app(
+        app,
+        mcp_url="http://unused",
+        stores=stores,
+        db_engine=engine,
+        db_session_factory=session_factory,
+    )
+    try:
+        yield app
+    finally:
+        reset_context()
+
+
+@contextmanager
+def patched_model_client(app: FastAPI, model: Any) -> Iterator[TestClient]:
+    with patch("deep_agent.agent.factory._resolve_model", return_value=model):
+        with TestClient(app) as client:
+            yield client
+
+
+class DisconnectFlag:
+    """Controllable stand-in for Request.is_disconnected in ASGI tests."""
+
+    def __init__(self) -> None:
+        self.disconnected = False
+
+    async def __call__(self) -> bool:
+        return self.disconnected
+
+
+@contextmanager
+def mock_request_disconnect(
+    *,
+    disconnected: bool = False,
+) -> Iterator[DisconnectFlag]:
+    """Patch Starlette disconnect probe; real ASGITransport blocks on is_disconnected."""
+    flag = DisconnectFlag()
+    flag.disconnected = disconnected
+    with patch(
+        "starlette.requests.Request.is_disconnected",
+        new=flag,
+    ):
+        yield flag
+
+
+def parse_sse_events_incremental(chunks: list[str]) -> list[dict]:
+    """Parse SSE from incremental chunk list (disconnect scenarios)."""
+    buffer = ""
+    events: list[dict] = []
+    for chunk in chunks:
+        buffer += chunk
+        parsed, buffer = parse_sse_buffer(buffer)
+        events.extend(parsed)
+    if buffer.strip():
+        parsed, _ = parse_sse_buffer(buffer + "\n\n")
+        events.extend(parsed)
+    return events

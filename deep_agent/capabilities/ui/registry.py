@@ -138,6 +138,18 @@ def enrich_deferred(deferred: dict[str, Any], hints: dict[str, dict[str, Any]]) 
     return enriched
 
 
+async def load_ui_tool_hints(
+    stores: DataStores,
+    spec: AgentSpec,
+    *,
+    mcp_rows: list[McpServer] | None = None,
+) -> dict[str, dict[str, Any]]:
+    if stores.ui_tool is None:
+        return {}
+    effective = await load_effective_ui_tools(stores, spec, mcp_rows=mcp_rows)
+    return build_tool_hints(effective.definitions)
+
+
 async def ensure_mcp_ui_tools_discovered(
     stores: DataStores,
     spec: AgentSpec,
@@ -202,6 +214,6 @@ async def prepare_ui_toolset_for_spec(
     await ensure_mcp_ui_tools_discovered(stores, spec, mcp_rows=mcp_rows)
     effective = await load_effective_ui_tools(stores, spec, mcp_rows=mcp_rows)
     hints = build_tool_hints(effective.definitions)
-    if not effective.has_dynamic:
+    if not effective.definitions:
         return None, hints
     return build_external_toolset(effective.definitions), hints

@@ -154,9 +154,8 @@ async def chat_stream(request: Request, ctx: AppContextDep, body: StreamChatRequ
             deps,
             deferred_tool_results=deferred_tool_results,
             branch_from=body.branch_from,
+            should_cancel=request.is_disconnected,
         ):
-            if await request.is_disconnected():
-                break
             yield {"event": ev["type"], "data": json.dumps(ev, ensure_ascii=False)}
 
     return EventSourceResponse(event_generator())

@@ -10,6 +10,8 @@ from deep_agent.agent.deferred import build_deferred_tool_results, serialize_def
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.runner import AgentRunner
 from deep_agent.capabilities.ui.builtin import build_ui_toolset
+from deep_agent.capabilities.ui.registry import build_external_toolset, build_tool_hints
+from deep_agent.capabilities.ui.types import UIToolRecord
 from deep_agent.schemas.chat import DeferredToolResultItem
 from pydantic_ai.models.test import TestModel
 from pydantic_ai.usage import UsageLimits
@@ -89,6 +91,39 @@ class AgentRunnerDeferredTests(unittest.IsolatedAsyncioTestCase):
         tool_calls = [e for e in events_out if e.get("type") == "tool_call"]
         self.assertTrue(tool_calls)
         self.assertEqual(tool_calls[-1]["tool"], "confirm_action")
+
+    async def test_run_stream_tool_call_includes_metadata_from_hints(self) -> None:
+        manual_tool = UIToolRecord(
+            name="myapp__form",
+            description="form",
+            parameters_json_schema={"type": "object", "properties": {}},
+            widget="text",
+            metadata={"form_version": "1"},
+            source="manual",
+        )
+        test_model = TestModel(call_tools=["myapp__form"], custom_output_text="done")
+        agent = Agent(
+            test_model,
+            deps_type=AgentDeps,
+            toolsets=[build_external_toolset([manual_tool])],
+            output_type=[str, DeferredToolRequests],
+        )
+        hints = build_tool_hints([manual_tool])
+        runner = AgentRunner(agent, self.store, UsageLimits(request_limit=10), ui_tool_hints=hints)
+
+        events_out: list[dict] = []
+        async for ev in runner.run_stream(
+            "sess-meta",
+            "请填写表单",
+            AgentDeps(session_id="sess-meta"),
+        ):
+            events_out.append(ev)
+
+        tool_calls = [e for e in events_out if e.get("type") == "tool_call"]
+        self.assertTrue(tool_calls)
+        self.assertEqual(tool_calls[-1]["metadata"], {"form_version": "1"})
+        self.assertEqual(tool_calls[-1]["widget"], "text")
+        self.assertEqual(events_out[-1]["deferred"]["calls"][0]["metadata"], {"form_version": "1"})
 
     async def test_run_stream_resume_completes_after_deferred_result(self) -> None:
         test_model = TestModel(

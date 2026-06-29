@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import unittest
 from contextlib import asynccontextmanager
 from unittest.mock import patch
@@ -155,6 +156,69 @@ class AgentRunnerHistoryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(final["type"], "final")
         self.assertEqual(final["model_message_count"], 2)
         self.assertEqual(final["user_branch_point"], 0)
+
+    async def test_run_stream_cancel_persists_partial_text(self) -> None:
+        from tests.integration.helpers.models import build_slow_stream_model
+
+        chunks = ["alpha-", "beta-", "gamma-", "delta-", "omega"]
+        model, tracker = build_slow_stream_model(chunks=chunks, delay_s=0.03)
+        agent = Agent(model, deps_type=AgentDeps)
+        runner = AgentRunner(agent, self.store, UsageLimits(request_limit=10))
+        deps = AgentDeps(session_id="sess-cancel")
+
+        cancel_event = asyncio.Event()
+
+        async def should_cancel() -> bool:
+            return cancel_event.is_set()
+
+        async def collect_events() -> list[dict]:
+            events_out: list[dict] = []
+            async for ev in runner.run_stream(
+                "sess-cancel",
+                "hello",
+                deps,
+                should_cancel=should_cancel,
+            ):
+                events_out.append(ev)
+                if ev.get("type") == "text" and ev.get("delta"):
+                    cancel_event.set()
+            return events_out
+
+        events_out = await collect_events()
+
+        self.assertEqual(events_out[-1]["type"], "cancelled")
+        self.assertLess(tracker.yielded_chunks, tracker.total_chunks)
+        history = await self.store.get_history("sess-cancel")
+        self.assertGreaterEqual(len(history), 2)
+        last = history[-1]
+        self.assertIsInstance(last, ModelResponse)
+        text = last.parts[0].content if last.parts else ""
+        self.assertTrue(str(text).startswith("alpha"))
+
+    async def test_run_stream_new_message_after_pending_hitl(self) -> None:
+        from pydantic_ai import DeferredToolRequests
+
+        from deep_agent.capabilities.ui.builtin import build_ui_toolset
+
+        test_model = TestModel(call_tools=["confirm_action"], custom_output_text="continued")
+        agent = Agent(
+            test_model,
+            deps_type=AgentDeps,
+            toolsets=[build_ui_toolset()],
+            output_type=[str, DeferredToolRequests],
+        )
+        runner = AgentRunner(agent, self.store, UsageLimits(request_limit=10))
+        deps = AgentDeps(session_id="sess-skip-hitl")
+
+        async for _ in runner.run_stream("sess-skip-hitl", "need confirm", deps):
+            pass
+
+        second: list[dict] = []
+        async for ev in runner.run_stream("sess-skip-hitl", "skip confirm", deps):
+            second.append(ev)
+
+        self.assertEqual(second[-1]["type"], "final")
+        self.assertEqual(second[-1]["status"], "completed")
 
 
 class BranchPointAlignmentTests(unittest.TestCase):

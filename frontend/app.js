@@ -8,9 +8,10 @@
  *   session      -> { session_id, agent_id }
  *   text         -> { type:"text", delta }
  *   thinking     -> { type:"thinking", delta }
- *   tool_call    -> { type:"tool_call", tool, args, tool_call_id }  // 同 id 可能多次，需 upsert
+ *   tool_call    -> { type:"tool_call", tool, args, tool_call_id, widget?, metadata? }
  *   tool_result  -> { type:"tool_result", tool, result, tool_call_id }
  *   final        -> { type:"final", status, output, usage, deferred? }
+ *   cancelled    -> { type:"cancelled", status, model_message_count?, user_branch_point? }
  *   error        -> { type:"error", message }
  * ------------------------------------------------------------------ */
 
@@ -22,7 +23,56 @@ function defaultBaseUrl() {
 
 const DEFAULT_BASE_URL = defaultBaseUrl();
 
-const UI_TOOLS = new Set(["confirm_action", "ask_user_choice"]);
+const BUILTIN_UI_TOOLS = new Set(["confirm_action", "ask_user_choice"]);
+/** @type {Map<string, object>} */
+const uiToolsByName = new Map();
+
+function mergeUiToolCall(call) {
+  const def = uiToolsByName.get(call.tool);
+  if (!def) return call;
+  return {
+    ...call,
+    widget: call.widget || def.widget || null,
+    metadata: call.metadata ?? def.metadata ?? null,
+    source: call.source || def.source || null,
+    mcp_server_name: call.mcp_server_name || def.mcp_server_name || null,
+    parameters_json_schema: call.parameters_json_schema || def.parameters_json_schema || null,
+    result_schema: call.result_schema || def.result_schema || null,
+  };
+}
+
+function isUiToolCall(call) {
+  if (!call?.tool) return false;
+  if (BUILTIN_UI_TOOLS.has(call.tool)) return true;
+  if (call.widget) return true;
+  return uiToolsByName.has(call.tool);
+}
+
+function resolveWidgetType(call) {
+  if (call.tool === "confirm_action" || call.widget === "confirm") return "confirm";
+  if (call.tool === "ask_user_choice" || call.widget === "choice") return "choice";
+  if (call.widget === "text") return "text";
+  if (call.widget === "date_picker") return "date_picker";
+  if (call.widget) return "custom";
+  return null;
+}
+
+async function loadUiTools(agentId) {
+  try {
+    const params = new URLSearchParams({ enabled: "true" });
+    if (agentId) params.set("agent_id", agentId);
+    const r = await fetch(`${state.baseUrl}/api/v1/ui-tools?${params}`);
+    if (!r.ok) return;
+    const data = await r.json();
+    const rows = Array.isArray(data?.items) ? data.items : [];
+    uiToolsByName.clear();
+    for (const tool of rows) {
+      uiToolsByName.set(tool.name, tool);
+    }
+  } catch (e) {
+    console.warn("[deep-agent] 加载 UI 工具失败", e);
+  }
+}
 
 const state = {
   baseUrl: localStorage.getItem("da_base_url") || DEFAULT_BASE_URL,
@@ -33,6 +83,7 @@ const state = {
   streaming: false,
   awaitingHitl: false,
   abortController: null,
+  streamCancelled: false,
   branchFrom: null,
   modelMessageCount: 0,
   lastUserBranchPoint: null,
@@ -147,6 +198,7 @@ function init() {
     state.agentId = el.agentSelect.value;
     localStorage.setItem("da_agent_id", state.agentId);
     updateChatHeader();
+    loadUiTools(state.agentId);
   });
 
   $("newChatBtn").addEventListener("click", newChat);
@@ -181,6 +233,7 @@ function init() {
   checkHealth();
   loadCapabilities();
   loadAgents().then(() => {
+    loadUiTools(state.agentId);
     if (agentFromUrl) newChat(agentFromUrl);
     else updateAgentSelectState();
   });
@@ -333,6 +386,7 @@ async function switchSession(s) {
   renderSessions();
 
   try {
+    await loadUiTools(state.agentId);
     const r = await fetch(sessionApiUrl(session, "/history"));
     if (r.status === 404) {
       addSystemNote("会话不存在或尚无历史记录。");
@@ -391,11 +445,7 @@ function renderHistory(messages, modelMessageCount) {
       }
       for (const part of msg.parts) {
         if (isPendingUiToolCall(part, completedToolIds)) {
-          assistant.attachHitlWidget({
-            tool: part.tool,
-            args: part.args,
-            tool_call_id: part.tool_call_id,
-          });
+          assistant.attachHitlWidget(mergeUiToolCall(part));
         }
       }
       assistant.finalizeThinking();
@@ -421,7 +471,7 @@ function isPendingUiToolCall(part, completedToolIds) {
   return (
     part.type === "tool_call" &&
     part.tool_call_id &&
-    UI_TOOLS.has(part.tool) &&
+    isUiToolCall(mergeUiToolCall(part)) &&
     !completedToolIds.has(part.tool_call_id)
   );
 }
@@ -597,6 +647,7 @@ async function resumeDeferred(deferredResults) {
 
 async function runChatStream(payload, assistant) {
   state.abortController = new AbortController();
+  state.streamCancelled = false;
   try {
     const resp = await fetch(`${state.baseUrl}/api/v1/chat/stream`, {
       method: "POST",
@@ -616,7 +667,9 @@ async function runChatStream(payload, assistant) {
     if (e.name === "AbortError") {
       assistant.finalizeThinking();
       assistant.finalizeText();
-      addErrorTo(assistant, "（已停止生成）");
+      if (!state.streamCancelled) {
+        addErrorTo(assistant, "（已停止生成）");
+      }
     } else {
       setConn("err", "请求失败");
       addErrorTo(assistant, `请求失败：${e.message}`);
@@ -750,7 +803,7 @@ function handleEvent({ event, data }, assistant) {
         state.awaitingHitl = true;
         const pending = [...(data.deferred.calls || []), ...(data.deferred.approvals || [])];
         for (const call of pending) {
-          assistant.attachHitlWidget(call);
+          assistant.attachHitlWidget(mergeUiToolCall(call));
         }
       } else {
         state.awaitingHitl = false;
@@ -763,6 +816,12 @@ function handleEvent({ event, data }, assistant) {
         branchFrom: state.lastUserBranchPoint,
         message: lastUserText(),
       });
+      break;
+    case "cancelled":
+      state.streamCancelled = true;
+      assistant.finalizeThinking();
+      assistant.finalizeText();
+      syncHistoryMeta(data);
       break;
     default:
       break;
@@ -953,15 +1012,18 @@ function createAssistantMessage(timestamp, branchPoint) {
     },
     addToolCall(data) {
       finalizeThinkingBlock();
-      const key = data.tool_call_id || `${data.tool}-${toolBlocks.size}`;
-      const hasArgs = hasNonEmptyArgs(data.args);
+      const merged = mergeUiToolCall(data);
+      const key = merged.tool_call_id || `${merged.tool}-${toolBlocks.size}`;
+      const hasArgs = hasNonEmptyArgs(merged.args);
       const existing = toolBlocks.get(key);
 
       if (existing) {
         if (hasArgs) {
           const argsEl = existing.querySelector(".args");
-          if (argsEl) argsEl.textContent = pretty(data.args);
+          if (argsEl) argsEl.textContent = pretty(merged.args);
         }
+        if (merged.widget) existing.dataset.widget = merged.widget;
+        if (merged.metadata) existing.dataset.metadata = JSON.stringify(merged.metadata);
         scrollToBottom();
         return;
       }
@@ -970,14 +1032,16 @@ function createAssistantMessage(timestamp, branchPoint) {
       const block = document.createElement("div");
       block.className = "tool-block open";
       block.dataset.toolCallId = key;
+      if (merged.widget) block.dataset.widget = merged.widget;
+      if (merged.metadata) block.dataset.metadata = JSON.stringify(merged.metadata);
       const argsHtml = hasArgs
-        ? `<pre class="args">${escapeHtml(pretty(data.args))}</pre>`
+        ? `<pre class="args">${escapeHtml(pretty(merged.args))}</pre>`
         : `<pre class="args args-pending">参数接收中…</pre>`;
       block.innerHTML = `
         <div class="tool-head">
           <span class="chevron">▶</span>
           <span class="tool-icon">🛠️</span>
-          <span class="tool-name">${escapeHtml(data.tool || "tool")}</span>
+          <span class="tool-name">${escapeHtml(merged.tool || "tool")}</span>
           <span class="tool-status"><span class="spinner"></span></span>
         </div>
         <div class="tool-body">
@@ -1010,51 +1074,58 @@ function createAssistantMessage(timestamp, branchPoint) {
       body.appendChild(res);
     },
     attachHitlWidget(call) {
-      const key = call.tool_call_id;
+      const merged = mergeUiToolCall(call);
+      const key = merged.tool_call_id;
       let block = key && toolBlocks.get(key);
       if (!block) {
-        this.addToolCall(call);
+        this.addToolCall(merged);
         block = toolBlocks.get(key);
       }
-      if (!block || !UI_TOOLS.has(call.tool)) return;
-      renderHitlWidget(block, call, resumeDeferred);
+      if (!block || !isUiToolCall(merged)) return;
+      renderHitlWidget(block, merged, resumeDeferred);
     },
   };
 }
 
 function renderHitlWidget(block, call, onSubmit) {
-  const { tool, args = {}, tool_call_id: toolCallId } = call;
+  const merged = mergeUiToolCall(call);
+  const { tool, args = {}, tool_call_id: toolCallId, metadata = {} } = merged;
   const body = block.querySelector(".tool-body");
   if (!body || body.querySelector(".hitl-widget")) return;
 
   block.classList.add("open", "hitl-pending");
+  if (merged.widget) block.dataset.widget = merged.widget;
+  if (metadata && Object.keys(metadata).length) {
+    block.dataset.metadata = JSON.stringify(metadata);
+  }
   block.querySelector(".tool-status").innerHTML = '<span style="color:#d29922">等待操作</span>';
 
-  const widget = document.createElement("div");
-  widget.className = "hitl-widget";
+  const widgetEl = document.createElement("div");
+  widgetEl.className = "hitl-widget";
+  const widgetType = resolveWidgetType(merged);
 
-  if (tool === "confirm_action") {
+  if (widgetType === "confirm") {
     const message = args.message || "确认执行？";
-    widget.innerHTML = `
+    widgetEl.innerHTML = `
       <p class="hitl-prompt">${escapeHtml(message)}</p>
       <div class="hitl-actions">
         <button type="button" class="hitl-btn hitl-confirm">${escapeHtml(args.confirm_label || "确认")}</button>
         <button type="button" class="hitl-btn hitl-cancel">${escapeHtml(args.cancel_label || "取消")}</button>
       </div>`;
-    widget.querySelector(".hitl-confirm").addEventListener("click", () => {
+    widgetEl.querySelector(".hitl-confirm").addEventListener("click", () => {
       onSubmit([{ tool_call_id: toolCallId, result: { confirmed: true } }]);
     });
-    widget.querySelector(".hitl-cancel").addEventListener("click", () => {
+    widgetEl.querySelector(".hitl-cancel").addEventListener("click", () => {
       onSubmit([{ tool_call_id: toolCallId, result: { confirmed: false } }]);
     });
-  } else if (tool === "ask_user_choice") {
+  } else if (widgetType === "choice") {
     const options = Array.isArray(args.options) ? args.options : [];
     const allowMultiple = !!args.allow_multiple;
-    widget.innerHTML = `
+    widgetEl.innerHTML = `
       <p class="hitl-prompt">${escapeHtml(args.prompt || "请选择：")}</p>
       <div class="hitl-choices"></div>
       <button type="button" class="hitl-btn hitl-submit">提交</button>`;
-    const choicesEl = widget.querySelector(".hitl-choices");
+    const choicesEl = widgetEl.querySelector(".hitl-choices");
     for (const opt of options) {
       const label = document.createElement("label");
       label.className = "hitl-choice";
@@ -1066,16 +1137,56 @@ function renderHitlWidget(block, call, onSubmit) {
       label.appendChild(document.createTextNode(` ${opt}`));
       choicesEl.appendChild(label);
     }
-    widget.querySelector(".hitl-submit").addEventListener("click", () => {
+    widgetEl.querySelector(".hitl-submit").addEventListener("click", () => {
       const selected = [...choicesEl.querySelectorAll("input:checked")].map((i) => i.value);
       const result = allowMultiple ? { selected } : { selected: selected[0] ?? null };
+      onSubmit([{ tool_call_id: toolCallId, result }]);
+    });
+  } else if (widgetType === "text") {
+    const rows = args.multiline ? 4 : 1;
+    widgetEl.innerHTML = `
+      <p class="hitl-prompt">${escapeHtml(args.prompt || "请输入：")}</p>
+      <textarea class="hitl-text-input" rows="${rows}" placeholder="${escapeHtml(args.placeholder || "")}"></textarea>
+      <button type="button" class="hitl-btn hitl-submit">提交</button>`;
+    const input = widgetEl.querySelector(".hitl-text-input");
+    widgetEl.querySelector(".hitl-submit").addEventListener("click", () => {
+      onSubmit([{ tool_call_id: toolCallId, result: { text: input.value } }]);
+    });
+  } else if (widgetType === "date_picker") {
+    widgetEl.innerHTML = `
+      <p class="hitl-prompt">${escapeHtml(args.prompt || "请选择日期：")}</p>
+      <input type="date" class="hitl-date-input"${args.min_date ? ` min="${escapeHtml(args.min_date)}"` : ""}${args.max_date ? ` max="${escapeHtml(args.max_date)}"` : ""} />
+      <button type="button" class="hitl-btn hitl-submit">提交</button>`;
+    const input = widgetEl.querySelector(".hitl-date-input");
+    widgetEl.querySelector(".hitl-submit").addEventListener("click", () => {
+      onSubmit([{ tool_call_id: toolCallId, result: { date: input.value } }]);
+    });
+  } else if (widgetType === "custom" || isUiToolCall(merged)) {
+    const prompt = args.prompt || args.title || args.message || tool;
+    const metaHtml =
+      metadata && Object.keys(metadata).length
+        ? `<pre class="hitl-metadata">${escapeHtml(pretty(metadata))}</pre>`
+        : "";
+    widgetEl.innerHTML = `
+      <p class="hitl-prompt">${escapeHtml(prompt)}</p>
+      ${metaHtml}
+      <textarea class="hitl-custom-result" rows="4" placeholder="JSON 结果"></textarea>
+      <button type="button" class="hitl-btn hitl-submit">提交</button>`;
+    widgetEl.querySelector(".hitl-submit").addEventListener("click", () => {
+      const raw = widgetEl.querySelector(".hitl-custom-result").value.trim();
+      let result;
+      try {
+        result = raw ? JSON.parse(raw) : {};
+      } catch (_) {
+        result = { text: raw };
+      }
       onSubmit([{ tool_call_id: toolCallId, result }]);
     });
   } else {
     return;
   }
 
-  body.appendChild(widget);
+  body.appendChild(widgetEl);
 }
 
 function addErrorTo(assistant, message, retryOpts) {

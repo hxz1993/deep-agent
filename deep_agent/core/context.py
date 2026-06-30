@@ -6,6 +6,7 @@ from typing import Annotated
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
+from deep_agent.agent.event_persister import EventPersister
 from deep_agent.capabilities import build_registry
 from deep_agent.capabilities.mcp.lease_manager import McpLeaseManager
 from deep_agent.capabilities.registry import CapabilityRegistry
@@ -24,6 +25,7 @@ class AppContext:
     registry: CapabilityRegistry
     stores: DataStores
     mcp_lease_manager: McpLeaseManager
+    event_persister: EventPersister
     db_engine: AsyncEngine
     db_session_factory: async_sessionmaker[AsyncSession]
 
@@ -51,9 +53,11 @@ class AppContext:
             registry=build_registry(stores=bundle.stores),
             stores=bundle.stores,
             mcp_lease_manager=mcp_lease_manager,
+            event_persister=EventPersister(bundle.stores.coordinator),
             db_engine=bundle.engine,
             db_session_factory=bundle.session_factory,
         )
+        await ctx.event_persister.start()
         init_context(ctx)
         return ctx
 
@@ -65,6 +69,7 @@ class AppContext:
         stores: DataStores | None = None,
         mcp_lease_manager: McpLeaseManager | None = None,
         mcp_acquire_retries: int | None = None,
+        event_persister: EventPersister | None = None,
         db_engine: AsyncEngine | None = None,
         db_session_factory: async_sessionmaker[AsyncSession] | None = None,
     ) -> AppContext:
@@ -79,16 +84,20 @@ class AppContext:
             raise ValueError("for_testing requires explicit stores (use tests.helpers.sqlite_stores)")
         if db_engine is None or db_session_factory is None:
             raise ValueError("for_testing requires db_engine and db_session_factory when using SQL stores")
+        if event_persister is None:
+            event_persister = EventPersister(stores.coordinator)
         return cls(
             registry=registry or CapabilityRegistry(),
             stores=stores,
             mcp_lease_manager=mcp_lease_manager,
+            event_persister=event_persister,
             db_engine=db_engine,
             db_session_factory=db_session_factory,
         )
 
     async def aclose(self) -> None:
         await self.mcp_lease_manager.close_all()
+        await self.event_persister.aclose()
         await close_db(self.db_engine)
 
 

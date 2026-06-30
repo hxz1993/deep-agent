@@ -18,6 +18,7 @@ from deep_agent.agent.attachments import (
 )
 from deep_agent.agent.deferred import serialize_deferred
 from deep_agent.agent.deps import AgentDeps
+from deep_agent.agent.event_persister import EventPersister, PersistEvent
 from deep_agent.agent.history import incremental_append_messages, repair_unprocessed_tool_calls
 from deep_agent.agent.stream_accumulator import StreamAccumulator
 from deep_agent.capabilities.ui.registry import enrich_deferred, enrich_tool_event
@@ -73,6 +74,7 @@ class AgentRunner:
         attachments: list[AttachmentRef] | None = None,
         branch_from: int | None = None,
         deferred_tool_results: DeferredToolResults | None = None,
+        persister: EventPersister | None = None,
     ) -> tuple[list[ModelMessage], bool, int | None]:
         if branch_from is not None:
             await self.store.truncate_history(
@@ -88,12 +90,23 @@ class AgentRunner:
         if has_user_turn(message, attachments):
             content = refs_from_attachments(message, attachments)
             user_request = ModelRequest(parts=[UserPromptPart(content=content)])
-            await self.store.append(
-                session_id,
-                [user_request],
-                agent_id=deps.agent_id,
-                user_id=deps.user,
-            )
+            if persister is not None:
+                persister.publish(
+                    PersistEvent(
+                        session_id=session_id,
+                        agent_id=deps.agent_id,
+                        user_id=deps.user,
+                        kind="user_turn",
+                        user_message=user_request,
+                    )
+                )
+            else:
+                await self.store.append(
+                    session_id,
+                    [user_request],
+                    agent_id=deps.agent_id,
+                    user_id=deps.user,
+                )
             history = [*history, user_request]
             pre_persisted_user = True
             user_branch_point = len(history) - 1
@@ -124,14 +137,22 @@ class AgentRunner:
             )
         return llm_history, message or None
 
-    async def _history_meta(
+    def _stream_history_meta(
         self,
-        session_id: str,
-        deps: AgentDeps,
+        history: list[ModelMessage],
         *,
         user_branch_point: int | None,
+        pending_messages: list[ModelMessage] | None = None,
+        pre_persisted_user: bool = False,
     ) -> tuple[int, int | None]:
-        count = len(await self.store.get_history(session_id, agent_id=deps.agent_id))
+        count = len(history)
+        if pending_messages:
+            count += len(
+                incremental_append_messages(
+                    pending_messages,
+                    skip_user_prompt=pre_persisted_user,
+                )
+            )
         return count, user_branch_point
 
     async def _persist_run_messages(
@@ -145,19 +166,68 @@ class AgentRunner:
         to_append = incremental_append_messages(new_messages, skip_user_prompt=pre_persisted_user)
         if not to_append:
             return False
-        try:
-            await asyncio.shield(
-                self.store.append(
-                    session_id,
-                    to_append,
+        await self.store.append(
+            session_id,
+            to_append,
+            agent_id=deps.agent_id,
+            user_id=deps.user,
+        )
+        return True
+
+    def _publish_run_complete(
+        self,
+        persister: EventPersister,
+        session_id: str,
+        deps: AgentDeps,
+        new_messages: list[ModelMessage],
+        *,
+        pre_persisted_user: bool,
+    ) -> None:
+        persister.publish(
+            PersistEvent(
+                session_id=session_id,
+                agent_id=deps.agent_id,
+                user_id=deps.user,
+                kind="run_complete",
+                new_messages=new_messages,
+                skip_user_prompt=pre_persisted_user,
+            )
+        )
+
+    def _publish_run_cancelled(
+        self,
+        persister: EventPersister,
+        session_id: str,
+        deps: AgentDeps,
+        *,
+        pre_persisted_user: bool,
+        result: Any | None,
+        accumulator: StreamAccumulator,
+        deferred_tool_results: DeferredToolResults | None,
+    ) -> None:
+        if result is not None:
+            persister.publish(
+                PersistEvent(
+                    session_id=session_id,
                     agent_id=deps.agent_id,
                     user_id=deps.user,
+                    kind="run_cancelled",
+                    result_messages=result.new_messages(),
+                    skip_user_prompt=pre_persisted_user,
                 )
             )
-        except asyncio.CancelledError:
-            # ponytail: shield may finish append then raise; avoid a second snapshot append
-            return True
-        return True
+        elif accumulator.has_content():
+            persister.publish(
+                PersistEvent(
+                    session_id=session_id,
+                    agent_id=deps.agent_id,
+                    user_id=deps.user,
+                    kind="run_cancelled",
+                    accumulator=accumulator,
+                    skip_user_prompt=pre_persisted_user,
+                    include_tool_calls=deferred_tool_results is None,
+                )
+            )
 
     async def run(
         self,
@@ -211,6 +281,7 @@ class AgentRunner:
         attachments: list[AttachmentRef] | None = None,
         deferred_tool_results: DeferredToolResults | None = None,
         branch_from: int | None = None,
+        persister: EventPersister,
     ) -> AsyncIterator[dict[str, Any]]:
         async with self._session_lock(session_id, agent_id=deps.agent_id):
             history, pre_persisted_user, user_branch_point = await self._prepare_history(
@@ -220,6 +291,7 @@ class AgentRunner:
                 attachments=attachments,
                 branch_from=branch_from,
                 deferred_tool_results=deferred_tool_results,
+                persister=persister,
             )
             llm_history, user_prompt = await self._llm_inputs(
                 history,
@@ -230,27 +302,8 @@ class AgentRunner:
             )
             result = None
             cancelled = False
+            run_published = False
             accumulator = StreamAccumulator()
-            full_persisted = False
-            snapshot_persisted = False
-
-            async def _ensure_partial_persisted() -> bool:
-                nonlocal snapshot_persisted
-                if snapshot_persisted or full_persisted:
-                    return snapshot_persisted
-                if not accumulator.has_content():
-                    return False
-                await asyncio.shield(
-                    self._persist_cancelled_snapshot(
-                        session_id,
-                        accumulator,
-                        deps,
-                        pre_persisted_user=pre_persisted_user,
-                        include_tool_calls=deferred_tool_results is None,
-                    )
-                )
-                snapshot_persisted = True
-                return True
 
             try:
                 async with self.agent.run_stream_events(
@@ -278,13 +331,15 @@ class AgentRunner:
                             except asyncio.CancelledError:
                                 cancelled = True
                                 break
-                if not cancelled:
-                    full_persisted = await self._persist_run_messages(
+                if not cancelled and result is not None:
+                    self._publish_run_complete(
+                        persister,
                         session_id,
-                        result.new_messages(),
                         deps,
+                        result.new_messages(),
                         pre_persisted_user=pre_persisted_user,
                     )
+                    run_published = True
             except asyncio.CancelledError:
                 cancelled = True
             except GeneratorExit:
@@ -292,9 +347,8 @@ class AgentRunner:
                 raise
             except Exception as exc:  # noqa: BLE001 - surface as an SSE error event
                 logger.exception("Agent stream failed for session {}", session_id)
-                msg_count, branch_pt = await self._history_meta(
-                    session_id,
-                    deps,
+                msg_count, branch_pt = self._stream_history_meta(
+                    history,
                     user_branch_point=user_branch_point if pre_persisted_user else None,
                 )
                 yield events.error(
@@ -305,23 +359,34 @@ class AgentRunner:
                 )
                 return
             finally:
-                # ponytail: snapshot only on client cancel — normal full_persist + snapshot duplicates assistant turns
-                if cancelled and not full_persisted:
-                    if result is not None:
-                        full_persisted = await self._persist_run_messages(
-                            session_id,
-                            result.new_messages(),
-                            deps,
-                            pre_persisted_user=pre_persisted_user,
-                        )
-                    else:
-                        await _ensure_partial_persisted()
+                if cancelled and not run_published:
+                    self._publish_run_cancelled(
+                        persister,
+                        session_id,
+                        deps,
+                        pre_persisted_user=pre_persisted_user,
+                        result=result,
+                        accumulator=accumulator,
+                        deferred_tool_results=deferred_tool_results,
+                    )
 
             if cancelled:
-                msg_count, branch_pt = await self._history_meta(
-                    session_id,
-                    deps,
+                pending = (
+                    result.new_messages()
+                    if result is not None
+                    else (
+                        accumulator.to_model_messages(
+                            include_tool_calls=deferred_tool_results is None,
+                        )
+                        if accumulator.has_content()
+                        else None
+                    )
+                )
+                msg_count, branch_pt = self._stream_history_meta(
+                    history,
                     user_branch_point=user_branch_point,
+                    pending_messages=pending,
+                    pre_persisted_user=pre_persisted_user,
                 )
                 yield events.cancelled(
                     history_persisted=accumulator.has_content() or pre_persisted_user,
@@ -330,36 +395,17 @@ class AgentRunner:
                 )
                 return
 
-        msg_count, branch_pt = await self._history_meta(
-            session_id,
-            deps,
+        msg_count, branch_pt = self._stream_history_meta(
+            history,
             user_branch_point=user_branch_point,
+            pending_messages=result.new_messages() if result is not None else None,
+            pre_persisted_user=pre_persisted_user,
         )
         yield _final_event(
             result,
             self.ui_tool_hints,
             model_message_count=msg_count,
             user_branch_point=branch_pt,
-        )
-
-    async def _persist_cancelled_snapshot(
-        self,
-        session_id: str,
-        accumulator: StreamAccumulator,
-        deps: AgentDeps,
-        *,
-        pre_persisted_user: bool,
-        include_tool_calls: bool = True,
-    ) -> None:
-        # ponytail: deferred resume re-streams tool_call for UI; tool_call is already in DB
-        partial = accumulator.to_model_messages(include_tool_calls=include_tool_calls)
-        if not partial:
-            return
-        await self._persist_run_messages(
-            session_id,
-            partial,
-            deps,
-            pre_persisted_user=pre_persisted_user,
         )
 
 
@@ -426,4 +472,3 @@ def _usage_dict(result: Any) -> dict[str, Any]:
         "output_tokens": getattr(usage, "output_tokens", getattr(usage, "response_tokens", None)),
         "total_tokens": getattr(usage, "total_tokens", None),
     }
-

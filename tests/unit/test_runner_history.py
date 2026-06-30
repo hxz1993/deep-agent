@@ -11,6 +11,7 @@ from pydantic_ai.models.test import TestModel
 from pydantic_ai.usage import UsageLimits
 
 from deep_agent.agent.deps import AgentDeps
+from deep_agent.agent.event_persister import EventPersister
 from deep_agent.agent.history import is_user_only_request, model_messages_to_history
 from deep_agent.agent.runner import AgentRunner
 from tests.helpers.sqlite_stores import make_sqlite_stores
@@ -30,9 +31,15 @@ class AgentRunnerHistoryTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         stores, self._engine, _ = await make_sqlite_stores()
         self.store = stores.coordinator
+        self.persister = EventPersister(self.store)
+        await self.persister.start()
 
     async def asyncTearDown(self) -> None:
+        await self.persister.aclose()
         await self._engine.dispose()
+
+    async def _flush(self, session_id: str, *, agent_id: str | None = None) -> None:
+        await self.persister.flush(session_id, agent_id=agent_id)
 
     async def test_run_stream_persists_user_on_error(self) -> None:
         agent = Agent(TestModel(), deps_type=AgentDeps)
@@ -46,8 +53,10 @@ class AgentRunnerHistoryTests(unittest.IsolatedAsyncioTestCase):
 
         with patch.object(agent, "run_stream_events", side_effect=failing_stream):
             events_out: list[dict] = []
-            async for ev in runner.run_stream("sess-err", "hello", deps):
+            async for ev in runner.run_stream("sess-err", "hello", deps, persister=self.persister):
                 events_out.append(ev)
+
+        await self._flush("sess-err")
 
         self.assertEqual(events_out[-1]["type"], "error")
         self.assertTrue(events_out[-1].get("history_persisted"))
@@ -63,8 +72,10 @@ class AgentRunnerHistoryTests(unittest.IsolatedAsyncioTestCase):
         runner = AgentRunner(agent, self.store, UsageLimits(request_limit=10))
         deps = AgentDeps(session_id="sess-ok")
 
-        async for _ in runner.run_stream("sess-ok", "hello", deps):
+        async for _ in runner.run_stream("sess-ok", "hello", deps, persister=self.persister):
             pass
+
+        await self._flush("sess-ok")
 
         history = await self.store.get_history("sess-ok")
         user_messages = [m for m in history if is_user_only_request(m)]
@@ -75,14 +86,19 @@ class AgentRunnerHistoryTests(unittest.IsolatedAsyncioTestCase):
         runner = AgentRunner(agent, self.store, UsageLimits(request_limit=10))
         deps = AgentDeps(session_id="sess-branch")
 
-        async for _ in runner.run_stream("sess-branch", "first", deps):
+        async for _ in runner.run_stream("sess-branch", "first", deps, persister=self.persister):
             pass
-        async for _ in runner.run_stream("sess-branch", "second", deps):
+        await self._flush("sess-branch")
+        async for _ in runner.run_stream("sess-branch", "second", deps, persister=self.persister):
             pass
+        await self._flush("sess-branch")
         self.assertEqual(len(await self.store.get_history("sess-branch")), 4)
 
-        async for _ in runner.run_stream("sess-branch", "branched", deps, branch_from=0):
+        async for _ in runner.run_stream(
+            "sess-branch", "branched", deps, branch_from=0, persister=self.persister
+        ):
             pass
+        await self._flush("sess-branch")
         history = await self.store.get_history("sess-branch")
         user_texts = [
             p.content
@@ -98,15 +114,20 @@ class AgentRunnerHistoryTests(unittest.IsolatedAsyncioTestCase):
         runner = AgentRunner(agent, self.store, UsageLimits(request_limit=10))
         deps = AgentDeps(session_id="sess-mid")
 
-        async for _ in runner.run_stream("sess-mid", "first", deps):
+        async for _ in runner.run_stream("sess-mid", "first", deps, persister=self.persister):
             pass
-        async for _ in runner.run_stream("sess-mid", "second", deps):
+        await self._flush("sess-mid")
+        async for _ in runner.run_stream("sess-mid", "second", deps, persister=self.persister):
             pass
+        await self._flush("sess-mid")
         history_before = await self.store.get_history("sess-mid")
         self.assertEqual(len(history_before), 4)
 
-        async for _ in runner.run_stream("sess-mid", "edited-second", deps, branch_from=2):
+        async for _ in runner.run_stream(
+            "sess-mid", "edited-second", deps, branch_from=2, persister=self.persister
+        ):
             pass
+        await self._flush("sess-mid")
 
         history = await self.store.get_history("sess-mid")
         self.assertEqual(len(history), 4)
@@ -126,12 +147,16 @@ class AgentRunnerHistoryTests(unittest.IsolatedAsyncioTestCase):
         runner = AgentRunner(agent, self.store, UsageLimits(request_limit=10))
         deps = AgentDeps(session_id="sess-repeat")
 
-        async for _ in runner.run_stream("sess-repeat", "hello", deps):
+        async for _ in runner.run_stream("sess-repeat", "hello", deps, persister=self.persister):
             pass
+        await self._flush("sess-repeat")
 
         for edited in ("hello v2", "hello v3"):
-            async for _ in runner.run_stream("sess-repeat", edited, deps, branch_from=0):
+            async for _ in runner.run_stream(
+                "sess-repeat", edited, deps, branch_from=0, persister=self.persister
+            ):
                 pass
+            await self._flush("sess-repeat")
             history = await self.store.get_history("sess-repeat")
             user_texts = [
                 p.content
@@ -149,8 +174,10 @@ class AgentRunnerHistoryTests(unittest.IsolatedAsyncioTestCase):
         deps = AgentDeps(session_id="sess-meta")
 
         events_out: list[dict] = []
-        async for ev in runner.run_stream("sess-meta", "hello", deps):
+        async for ev in runner.run_stream("sess-meta", "hello", deps, persister=self.persister):
             events_out.append(ev)
+
+        await self._flush("sess-meta")
 
         final = events_out[-1]
         self.assertEqual(final["type"], "final")
@@ -167,12 +194,14 @@ class AgentRunnerHistoryTests(unittest.IsolatedAsyncioTestCase):
         deps = AgentDeps(session_id="sess-cancel")
 
         events_out: list[dict] = []
-        agen = runner.run_stream("sess-cancel", "hello", deps)
+        agen = runner.run_stream("sess-cancel", "hello", deps, persister=self.persister)
         async for ev in agen:
             events_out.append(ev)
             if ev.get("type") == "text" and ev.get("delta"):
                 await agen.aclose()
                 break
+
+        await self._flush("sess-cancel")
 
         self.assertLess(tracker.yielded_chunks, tracker.total_chunks)
         history = await self.store.get_history("sess-cancel")
@@ -191,11 +220,13 @@ class AgentRunnerHistoryTests(unittest.IsolatedAsyncioTestCase):
         runner = AgentRunner(agent, self.store, UsageLimits(request_limit=10))
         deps = AgentDeps(session_id="sess-close")
 
-        agen = runner.run_stream("sess-close", "hello", deps)
+        agen = runner.run_stream("sess-close", "hello", deps, persister=self.persister)
         async for ev in agen:
             if ev.get("type") == "text" and ev.get("delta"):
                 await agen.aclose()
                 break
+
+        await self._flush("sess-close")
 
         self.assertGreater(tracker.yielded_chunks, 0)
         self.assertLess(tracker.yielded_chunks, tracker.total_chunks)
@@ -215,21 +246,14 @@ class AgentRunnerHistoryTests(unittest.IsolatedAsyncioTestCase):
         runner = AgentRunner(agent, self.store, UsageLimits(request_limit=10))
         deps = AgentDeps(session_id="sess-no-dup")
 
-        snapshot_calls = 0
-        original = runner._persist_cancelled_snapshot
+        async for _ in runner.run_stream("sess-no-dup", "hello", deps, persister=self.persister):
+            pass
 
-        async def counting_snapshot(*args, **kwargs):
-            nonlocal snapshot_calls
-            snapshot_calls += 1
-            return await original(*args, **kwargs)
-
-        with patch.object(runner, "_persist_cancelled_snapshot", side_effect=counting_snapshot):
-            async for _ in runner.run_stream("sess-no-dup", "hello", deps):
-                pass
-
-        self.assertEqual(snapshot_calls, 0)
+        await self._flush("sess-no-dup")
         history = await self.store.get_history("sess-no-dup")
         self.assertEqual(len(history), 2)
+        assistants = [m for m in history if isinstance(m, ModelResponse)]
+        self.assertEqual(len(assistants), 1)
 
     async def test_run_stream_new_message_after_pending_hitl(self) -> None:
         from pydantic_ai import DeferredToolRequests
@@ -246,12 +270,18 @@ class AgentRunnerHistoryTests(unittest.IsolatedAsyncioTestCase):
         runner = AgentRunner(agent, self.store, UsageLimits(request_limit=10))
         deps = AgentDeps(session_id="sess-skip-hitl")
 
-        async for _ in runner.run_stream("sess-skip-hitl", "need confirm", deps):
+        async for _ in runner.run_stream(
+            "sess-skip-hitl", "need confirm", deps, persister=self.persister
+        ):
             pass
+        await self._flush("sess-skip-hitl")
 
         second: list[dict] = []
-        async for ev in runner.run_stream("sess-skip-hitl", "skip confirm", deps):
+        async for ev in runner.run_stream(
+            "sess-skip-hitl", "skip confirm", deps, persister=self.persister
+        ):
             second.append(ev)
+        await self._flush("sess-skip-hitl")
 
         self.assertEqual(second[-1]["type"], "final")
         self.assertEqual(second[-1]["status"], "completed")

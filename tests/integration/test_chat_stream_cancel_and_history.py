@@ -73,6 +73,7 @@ class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
         self._transport = ASGITransport(app=self._app)
 
     async def asyncTearDown(self) -> None:
+        await get_context().event_persister.aclose()
         reset_context()
         await self._engine.dispose()
 
@@ -110,6 +111,13 @@ class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
         tool_call_id = final["deferred"]["calls"][0]["tool_call_id"]
         return session_id, tool_call_id
 
+    async def _history(self, session_id: str) -> dict:
+        await get_context().event_persister.flush(session_id)
+        async with AsyncClient(transport=self._transport, base_url="http://test") as client:
+            resp = await client.get(f"/api/v1/sessions/{session_id}/history")
+        self.assertEqual(resp.status_code, 200)
+        return resp.json()
+
     async def test_e0_http_stream_complete_persists_assistant(self) -> None:
         test_model = text_only_model("hello from integration")
         events = await self._stream_events(
@@ -120,9 +128,7 @@ class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(final["status"], "completed")
         session_id = events[0]["session_id"]
 
-        async with AsyncClient(transport=self._transport, base_url="http://test") as client:
-            hist = await client.get(f"/api/v1/sessions/{session_id}/history")
-        data = hist.json()
+        data = await self._history(session_id)
         self.assertGreaterEqual(data["model_message_count"], 2)
         assistant = _last_assistant(data)
         self.assertIsNotNone(assistant)
@@ -163,13 +169,11 @@ class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
                                 continue
                             break
 
-                    await asyncio.sleep(0.5)
-                    hist = await client.get(f"/api/v1/sessions/{session_id}/history")
+                    await get_context().event_persister.flush(session_id)
+                    data = await self._history(session_id)
 
                 self.assertIsNotNone(session_id)
                 self.assertGreater(tracker.yielded_chunks, 0)
-                self.assertEqual(hist.status_code, 200)
-                data = hist.json()
                 self.assertGreaterEqual(
                     data["model_message_count"],
                     2,
@@ -191,26 +195,26 @@ class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
             runner = await build_runner(get_context(), capabilities=[])
             deps = AgentDeps(session_id=session_id)
             events: list[dict] = []
-            agen = runner.run_stream(session_id, "slow stream please", deps)
+            agen = runner.run_stream(
+                session_id,
+                "slow stream please",
+                deps,
+                persister=get_context().event_persister,
+            )
             async for ev in agen:
                 events.append(ev)
                 if ev.get("type") == "text" and ev.get("delta"):
                     await agen.aclose()
                     break
 
+            await get_context().event_persister.flush(session_id)
+
             self.assertGreater(tracker.yielded_chunks, 0)
             self.assertLess(tracker.yielded_chunks, tracker.total_chunks)
             if events and events[-1].get("type") == "cancelled":
                 self.assertNotIn("final", {ev.get("type") for ev in events})
 
-            async with AsyncClient(
-                transport=self._transport,
-                base_url="http://test",
-                timeout=30.0,
-            ) as client:
-                hist = await client.get(f"/api/v1/sessions/{session_id}/history")
-            self.assertEqual(hist.status_code, 200)
-            data = hist.json()
+            data = await self._history(session_id)
             self.assertGreaterEqual(data["model_message_count"], 2)
             assistant = _last_assistant(data)
             self.assertIsNotNone(assistant)
@@ -222,9 +226,7 @@ class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
     async def test_e2_deferred_tool_call_persists_in_history_and_resumes(self) -> None:
         session_id, tool_call_id = await self._run_hitl_pending()
 
-        async with AsyncClient(transport=self._transport, base_url="http://test") as client:
-            hist = await client.get(f"/api/v1/sessions/{session_id}/history")
-        data = hist.json()
+        data = await self._history(session_id)
         assistant = _last_assistant(data)
         self.assertIsNotNone(assistant)
         assert assistant is not None
@@ -262,9 +264,8 @@ class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(final["status"], "completed")
         self.assertNotIn("error", {ev.get("type") for ev in events})
 
-        async with AsyncClient(transport=self._transport, base_url="http://test") as client:
-            hist = await client.get(f"/api/v1/sessions/{session_id}/history")
-        messages = hist.json()["messages"]
+        data = await self._history(session_id)
+        messages = data["messages"]
         assistants = [m for m in messages if m.get("role") == "assistant"]
         self.assertGreaterEqual(len(assistants), 2)
 
@@ -351,10 +352,9 @@ class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
                                 continue
                             break
 
-                    await asyncio.sleep(0.3)
+                    await get_context().event_persister.flush(session_id)
                     cancelled = next((ev for ev in events if ev.get("type") == "cancelled"), None)
-                    hist = await client.get(f"/api/v1/sessions/{session_id}/history")
-                    data = hist.json()
+                    data = await self._history(session_id)
                     if cancelled is not None:
                         self.assertEqual(cancelled["model_message_count"], data["model_message_count"])
                         self.assertLess(tracker.yielded_chunks, tracker.total_chunks)
@@ -460,10 +460,8 @@ class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
                                 continue
                             break
 
-                    await asyncio.sleep(0.3)
-                    hist = await client.get(f"/api/v1/sessions/{session_id}/history")
-                    self.assertEqual(hist.status_code, 200)
-                    data = hist.json()
+                    await get_context().event_persister.flush(session_id)
+                    data = await self._history(session_id)
 
         call_ids = _tool_call_ids(data)
         result_ids = _tool_result_ids(data)

@@ -10,7 +10,7 @@ from pydantic_ai.models.test import TestModel
 from deep_agent.api.v1 import api_router
 from deep_agent.capabilities import build_registry
 from deep_agent.capabilities.mcp.lease_manager import McpLeaseManager
-from deep_agent.core.context import AppContext, init_context, reset_context
+from deep_agent.core.context import AppContext, get_context, init_context, reset_context
 from tests.helpers.sqlite_stores import make_sqlite_stores
 from tests.integration.helpers.chat import mock_request_disconnect, parse_sse_events
 from tests.integration.helpers.models import build_slow_stream_model, text_only_model, tool_call_model
@@ -63,6 +63,7 @@ class ChatHistoryPersistenceTests(unittest.IsolatedAsyncioTestCase):
         self._transport = ASGITransport(app=self._app)
 
     async def asyncTearDown(self) -> None:
+        await get_context().event_persister.aclose()
         reset_context()
         await self._engine.dispose()
 
@@ -84,6 +85,7 @@ class ChatHistoryPersistenceTests(unittest.IsolatedAsyncioTestCase):
         return parse_sse_events(body)
 
     async def _history(self, session_id: str) -> dict:
+        await get_context().event_persister.flush(session_id)
         async with AsyncClient(transport=self._transport, base_url="http://test") as client:
             resp = await client.get(f"/api/v1/sessions/{session_id}/history")
         self.assertEqual(resp.status_code, 200)

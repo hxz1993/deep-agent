@@ -8,6 +8,7 @@ from pydantic_ai.messages import ToolCallPart
 from deep_agent.agent import events
 from deep_agent.agent.deferred import build_deferred_tool_results, serialize_deferred
 from deep_agent.agent.deps import AgentDeps
+from deep_agent.agent.event_persister import EventPersister
 from deep_agent.agent.runner import AgentRunner
 from deep_agent.capabilities.ui.builtin import build_ui_toolset
 from deep_agent.capabilities.ui.registry import build_external_toolset, build_tool_hints
@@ -63,8 +64,11 @@ class AgentRunnerDeferredTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         stores, self._engine, _ = await make_sqlite_stores()
         self.store = stores.coordinator
+        self.persister = EventPersister(self.store)
+        await self.persister.start()
 
     async def asyncTearDown(self) -> None:
+        await self.persister.aclose()
         await self._engine.dispose()
 
     async def test_run_stream_emits_pending_final_for_external_tool(self) -> None:
@@ -82,6 +86,7 @@ class AgentRunnerDeferredTests(unittest.IsolatedAsyncioTestCase):
             "sess-1",
             "请用户确认",
             AgentDeps(session_id="sess-1"),
+            persister=self.persister,
         ):
             events_out.append(ev)
 
@@ -116,6 +121,7 @@ class AgentRunnerDeferredTests(unittest.IsolatedAsyncioTestCase):
             "sess-meta",
             "请填写表单",
             AgentDeps(session_id="sess-meta"),
+            persister=self.persister,
         ):
             events_out.append(ev)
 
@@ -140,8 +146,9 @@ class AgentRunnerDeferredTests(unittest.IsolatedAsyncioTestCase):
         deps = AgentDeps(session_id="sess-2")
 
         first: list[dict] = []
-        async for ev in runner.run_stream("sess-2", "需要确认", deps):
+        async for ev in runner.run_stream("sess-2", "需要确认", deps, persister=self.persister):
             first.append(ev)
+        await self.persister.flush("sess-2")
         self.assertEqual(first[-1]["status"], "pending")
         tool_call_id = first[-1]["deferred"]["calls"][0]["tool_call_id"]
 
@@ -151,6 +158,7 @@ class AgentRunnerDeferredTests(unittest.IsolatedAsyncioTestCase):
             "",
             deps,
             deferred_tool_results=DeferredToolResults(calls={tool_call_id: {"confirmed": True}}),
+            persister=self.persister,
         ):
             second.append(ev)
 

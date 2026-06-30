@@ -163,6 +163,7 @@ async def chat_stream(request: Request, ctx: AppContextDep, body: StreamChatRequ
             attachments=body.attachments,
             deferred_tool_results=deferred_tool_results,
             branch_from=body.branch_from,
+            persister=ctx.event_persister,
         ):
             yield {"event": ev["type"], "data": json.dumps(ev, ensure_ascii=False)}
 

@@ -61,7 +61,7 @@ async function loadUiTools(agentId) {
   try {
     const params = new URLSearchParams({ enabled: "true" });
     if (agentId) params.set("agent_id", agentId);
-    const r = await fetch(`${state.baseUrl}/api/v1/ui-tools?${params}`);
+    const r = await daFetch(`${state.baseUrl}/api/v1/ui-tools?${params}`);
     if (!r.ok) return;
     const data = await r.json();
     const rows = Array.isArray(data?.items) ? data.items : [];
@@ -248,7 +248,7 @@ function init() {
 
 async function syncSessionsFromBackend() {
   try {
-    const r = await fetch(`${state.baseUrl}/api/v1/sessions?limit=50`);
+    const r = await daFetch(`${state.baseUrl}/api/v1/sessions?limit=50`);
     if (!r.ok) return;
     const payload = await r.json();
     const rows = Array.isArray(payload?.items) ? payload.items : [];
@@ -378,7 +378,7 @@ async function loadSessionHistory(session) {
   el.emptyState.classList.add("hidden");
   try {
     await loadUiTools(state.agentId);
-    const r = await fetch(sessionApiUrl(normalized, "/history"));
+    const r = await daFetch(sessionApiUrl(normalized, "/history"));
     if (r.status === 404) {
       addSystemNote("会话不存在或尚无历史记录。");
       return;
@@ -498,7 +498,7 @@ async function deleteSession(session) {
   state.sessions = state.sessions.filter((s) => sessionLookupKey(s) !== key);
   renderSessions();
   try {
-    await fetch(sessionApiUrl(normalized), { method: "DELETE" });
+    await daFetch(sessionApiUrl(normalized), { method: "DELETE" });
   } catch (_) { /* 忽略 */ }
   if (normalized.id === state.sessionId && (normalized.agentId || "") === (state.agentId || "")) newChat();
   else renderSessions();
@@ -508,7 +508,7 @@ async function deleteSession(session) {
 async function checkHealth() {
   setConn("pending", "检测中…");
   try {
-    const r = await fetch(`${state.baseUrl}/health`, { method: "GET" });
+    const r = await daFetch(`${state.baseUrl}/health`, { method: "GET" });
     if (r.ok) setConn("ok", "已连接");
     else setConn("err", `HTTP ${r.status}`);
   } catch (_) {
@@ -525,7 +525,7 @@ async function loadAgents() {
   if (!el.agentSelect) return;
   el.agentSelect.innerHTML = '<option value="">加载中…</option>';
   try {
-    const r = await fetch(`${state.baseUrl}/api/v1/agents`);
+    const r = await daFetch(`${state.baseUrl}/api/v1/agents`);
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     state.agents = await r.json();
     el.agentSelect.innerHTML = "";
@@ -562,7 +562,7 @@ function updateAgentSelectState() {
 async function loadCapabilities() {
   el.capList.innerHTML = '<li class="cap-empty">加载中…</li>';
   try {
-    const r = await fetch(`${state.baseUrl}/api/v1/tools`);
+    const r = await daFetch(`${state.baseUrl}/api/v1/tools`);
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const caps = await r.json();
     el.capList.innerHTML = "";
@@ -672,7 +672,7 @@ async function runChatStream(payload, assistant) {
   state.skipHistoryRefresh = false;
   let stoppedByUser = false;
   try {
-    const resp = await fetch(`${state.baseUrl}/api/v1/chat/stream`, {
+    const resp = await daFetch(`${state.baseUrl}/api/v1/chat/stream`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
       body: JSON.stringify(payload),
@@ -958,7 +958,7 @@ async function uploadAttachment(file) {
   const form = new FormData();
   form.append("file", file, file.name);
   try {
-    const r = await fetch(`${state.baseUrl}/api/v1/uploads`, { method: "POST", body: form });
+    const r = await daFetch(`${state.baseUrl}/api/v1/uploads`, { method: "POST", body: form });
     if (!r.ok) {
       const detail = await r.text().catch(() => "");
       throw new Error(detail || `HTTP ${r.status}`);

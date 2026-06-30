@@ -63,10 +63,11 @@ function showDbBanner(show) {
 }
 
 async function apiFetch(path, options = {}) {
+  const { headers: optionHeaders, ...rest } = options;
   const url = `${getBaseUrl()}${path}`;
-  const resp = await fetch(url, {
-    headers: { "Content-Type": "application/json", ...(options.headers || {}) },
-    ...options,
+  const resp = await daFetch(url, {
+    ...rest,
+    headers: { "Content-Type": "application/json", ...optionHeaders },
   });
 
   if (resp.status === 503) {

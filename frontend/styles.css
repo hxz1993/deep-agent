@@ -615,3 +615,204 @@ html, body {
   .sidebar { position: fixed; z-index: 20; height: 100%; box-shadow: var(--shadow); }
   .msg-row { padding: 10px 16px; }
 }
+
+/* ---------- 请求头配置页 ---------- */
+.settings-page {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+
+.settings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 24px;
+  border-bottom: 1px solid var(--border);
+}
+
+.settings-nav {
+  display: flex;
+  gap: 16px;
+  font-size: 13px;
+}
+
+.settings-nav a {
+  color: var(--text-dim);
+  text-decoration: none;
+}
+
+.settings-nav a:hover { color: var(--accent-hover); }
+
+.settings-card {
+  width: min(720px, calc(100% - 32px));
+  margin: 32px auto;
+  padding: 28px;
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.settings-card h1 {
+  margin: 0 0 8px;
+  font-size: 22px;
+}
+
+.settings-desc {
+  margin: 0 0 20px;
+  color: var(--text-dim);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.settings-editor-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.field-label {
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.header-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) minmax(160px, 2fr) 32px;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.header-row-labels {
+  font-size: 11px;
+  color: var(--text-faint);
+  margin-bottom: 6px;
+}
+
+.header-row input {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  color: var(--text);
+  font-size: 13px;
+  min-width: 0;
+}
+
+.header-row input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.row-remove {
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.row-remove:hover {
+  color: var(--danger);
+  border-color: rgba(248, 81, 73, 0.4);
+}
+
+.add-row-btn {
+  margin-top: 4px;
+}
+
+.settings-card .field textarea {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.5;
+  resize: vertical;
+  min-height: 180px;
+}
+
+.settings-card .field textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.settings-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.btn {
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 8px 14px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.btn:hover { border-color: var(--text-dim); }
+
+.btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.btn.primary:hover { background: var(--accent-hover); }
+
+.btn.ghost {
+  background: transparent;
+}
+
+.settings-status {
+  margin: 12px 0 0;
+  font-size: 13px;
+}
+
+.settings-status.ok { color: #3fb950; }
+.settings-status.err { color: var(--danger); }
+
+.settings-hint {
+  margin-top: 20px;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+.settings-hint summary {
+  cursor: pointer;
+  color: var(--text);
+}
+
+.settings-hint ul {
+  margin: 8px 0 0;
+  padding-left: 20px;
+  line-height: 1.7;
+}
+
+.settings-hint code {
+  font-family: var(--mono);
+  font-size: 12px;
+  background: var(--bg-elev);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+@media (max-width: 560px) {
+  .header-row {
+    grid-template-columns: 1fr;
+  }
+  .header-row-labels { display: none; }
+  .row-remove { justify-self: end; }
+}

@@ -21,10 +21,6 @@ def _build_option(*, dbms_name: str) -> SimpleNamespace:
     )
     agent = SimpleNamespace(
         app_name="deep-agent",
-        model="openai:gpt-4o",
-        model_base_url=None,
-        model_api_key=None,
-        system_prompt="test",
         max_requests=12,
         max_total_tokens=None,
         request_retries=2,

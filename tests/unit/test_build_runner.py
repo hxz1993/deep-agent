@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from deep_agent.agent.spec import AgentSpec, default_spec
+from deep_agent.agent.spec import AgentSpec, DEFAULT_INSTRUCTIONS
 from deep_agent.api.v1.deps import _model_settings_for_spec, build_runner
 from deep_agent.core.exceptions import LlmModelNotFoundError
 from deep_agent.db.models import LlmModel
@@ -40,11 +40,34 @@ class BuildRunnerTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(LlmModelNotFoundError):
             await build_runner(ctx, model_id="missing")
 
+    async def test_model_override_uses_default_instructions(self) -> None:
+        ctx = AsyncMock()
+        ctx.stores.llm_model.list_all = AsyncMock(return_value=[])
 
-class DefaultSpecTests(unittest.TestCase):
-    def test_default_spec_accepts_temperature(self) -> None:
-        spec = default_spec(temperature=1.0)
-        self.assertEqual(spec.temperature, 1.0)
+        with patch("deep_agent.api.v1.deps._build_runner_from_spec", new_callable=AsyncMock) as build:
+            build.return_value = object()
+            await build_runner(ctx, model="anthropic:claude-sonnet-4-5", temperature=1.0)
+            spec = build.call_args.args[0]
+            self.assertEqual(spec.model, "anthropic:claude-sonnet-4-5")
+            self.assertEqual(spec.instructions, DEFAULT_INSTRUCTIONS)
+            self.assertEqual(spec.temperature, 1.0)
+
+    async def test_no_model_uses_first_llm_preset(self) -> None:
+        llm = LlmModel(id="00000000-0000-4000-8000-000000000099", name="m", model="openai:gpt-4o")
+        ctx = AsyncMock()
+        ctx.stores.llm_model.list_all = AsyncMock(return_value=[llm])
+
+        with patch("deep_agent.api.v1.deps._build_runner_from_spec", new_callable=AsyncMock) as build:
+            build.return_value = object()
+            await build_runner(ctx)
+            spec = build.call_args.args[0]
+            self.assertEqual(spec.model, "openai:gpt-4o")
+
+    async def test_no_model_and_empty_llm_table_raises(self) -> None:
+        ctx = AsyncMock()
+        ctx.stores.llm_model.list_all = AsyncMock(return_value=[])
+        with self.assertRaises(LlmModelNotFoundError):
+            await build_runner(ctx)
 
 
 if __name__ == "__main__":

@@ -106,27 +106,6 @@ class Agent(Category):
     _ENV_PREFIX = "DEEP_AGENT_"
 
     app_name = Option("deep-agent", val_type=str, bind_env="APP_NAME")
-    model = Option("openai:gpt-4o", val_type=str, bind_env="MODEL")
-    model_base_url = Option(
-        None,
-        val_type=str,
-        bind_env="MODEL_BASE_URL",
-        convertor=_strip_optional_str,
-    )
-    model_api_key = Option(
-        None,
-        val_type=str,
-        protected=True,
-        bind_env="MODEL_API_KEY",
-        convertor=_strip_optional_str,
-    )
-    system_prompt = Option(
-        "You are deep-agent, a helpful general-purpose assistant. "
-        "Use the available tools when they help you answer accurately. "
-        "Be concise and explain your reasoning when it is useful.",
-        val_type=str,
-        bind_env="SYSTEM_PROMPT",
-    )
     max_requests = Option(50, val_type=int, bind_env="MAX_REQUESTS")
     max_total_tokens = Option(None, val_type=int, bind_env="MAX_TOTAL_TOKENS")
     request_retries = Option(2, val_type=int, bind_env="REQUEST_RETRIES")

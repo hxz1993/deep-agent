@@ -10,8 +10,6 @@ class OptionsConvertorTests(unittest.TestCase):
         self._original = (
             OPTION.agent.skills_dir,
             OPTION.agent.cursor_skills_dir,
-            OPTION.agent.model_base_url,
-            OPTION.agent.model_api_key,
             OPTION.agent.mcp_forward_request_headers,
         )
 
@@ -19,16 +17,10 @@ class OptionsConvertorTests(unittest.TestCase):
         (
             skills_dir,
             cursor_skills_dir,
-            model_base_url,
-            model_api_key,
             mcp_forward_request_headers,
         ) = self._original
         OPTION.agent.skills_dir = skills_dir
         OPTION.agent.cursor_skills_dir = cursor_skills_dir
-        if model_base_url is not None:
-            OPTION.agent.model_base_url = model_base_url
-        if model_api_key is not None:
-            OPTION.agent.model_api_key = model_api_key
         OPTION.agent.mcp_forward_request_headers = mcp_forward_request_headers
 
     def test_skills_dir_convertor_resolves_relative_path(self) -> None:
@@ -36,16 +28,6 @@ class OptionsConvertorTests(unittest.TestCase):
         path = OPTION.agent.skills_dir
         self.assertTrue(path.endswith("skills") or path.endswith("skills\\"))
         self.assertIn(":", path)  # absolute on Windows
-
-    def test_model_base_url_convertor_strips_blank(self) -> None:
-        OPTION.agent.model_base_url = "  "
-        self.assertEqual(OPTION.agent.model_base_url, "")
-        OPTION.agent.model_base_url = " https://api.example "
-        self.assertEqual(OPTION.agent.model_base_url, "https://api.example")
-
-    def test_model_api_key_convertor_strips_blank(self) -> None:
-        OPTION.agent.model_api_key = ""
-        self.assertEqual(OPTION.agent.model_api_key, "")
 
     def test_cursor_skills_dir_convertor_resolves_relative_path(self) -> None:
         OPTION.agent.cursor_skills_dir = ".cursor/skills"

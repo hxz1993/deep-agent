@@ -44,6 +44,6 @@ async def list_capabilities(ctx: AppContextDep) -> list[CapabilityDescription]:
 
 
 def _anonymous_spec():
-    from deep_agent.agent.spec import default_spec
+    from deep_agent.agent.spec import anonymous_spec
 
-    return default_spec()
+    return anonymous_spec()

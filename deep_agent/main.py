@@ -64,7 +64,6 @@ async def info(ctx: AppContextDep) -> dict[str, object]:
     capability_names = ctx.registry.names() + [cap.name for cap in mcp_caps]
     return {
         "name": OPTION.agent.app_name,
-        "model": OPTION.agent.model,
         "capabilities": capability_names,
         "docs": "/docs",
     }

@@ -16,7 +16,7 @@ from deep_agent.agent.history import (
     model_messages_to_history,
     session_activity_timestamps,
 )
-from deep_agent.agent.spec import AgentSpec, default_spec
+from deep_agent.agent.spec import AgentSpec, anonymous_spec
 from deep_agent.capabilities.mcp.resolver import load_mcp_rows
 from deep_agent.capabilities.ui.registry import load_ui_tool_hints
 from deep_agent.schemas.chat import SessionInfo, SessionListResponse
@@ -141,7 +141,7 @@ async def _spec_for_history(ctx: AppContextDep, agent_id: str | None) -> AgentSp
         row = await ctx.stores.agent.get_by_id(agent_id)
         if row is not None:
             return AgentSpec.from_row(row, row.llm_model)
-    return default_spec()
+    return anonymous_spec()
 
 
 @router.get("/sessions/{session_id}/history", response_model=SessionHistoryResponse)

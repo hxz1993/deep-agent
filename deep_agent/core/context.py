@@ -42,9 +42,8 @@ class AppContext:
             raise
 
         logger.info(
-            "{} started (model={}, database={})",
+            "{} started (database={})",
             OPTION.agent.app_name,
-            OPTION.agent.model,
             bundle.dialect.value,
         )
 

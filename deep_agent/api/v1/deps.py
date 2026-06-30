@@ -6,7 +6,7 @@ from pydantic_ai.usage import UsageLimits
 from deep_agent.agent.factory import build_agent
 from deep_agent.agent.limits import resolve_agent_max_requests
 from deep_agent.agent.runner import AgentRunner
-from deep_agent.agent.spec import AgentSpec, default_spec
+from deep_agent.agent.spec import DEFAULT_INSTRUCTIONS, AgentSpec
 from deep_agent.capabilities.mcp.resolver import load_mcp_rows, resolve_mcp_toolsets
 from deep_agent.capabilities.ui.registry import prepare_ui_toolset_for_spec
 from deep_agent.core.context import AppContext
@@ -34,10 +34,18 @@ async def build_runner(
         if llm_row is None:
             raise LlmModelNotFoundError(model_id)
         spec = AgentSpec.from_llm_model(llm_row, temperature=temperature)
+    elif model:
+        spec = AgentSpec(
+            name="default",
+            model=model,
+            instructions=DEFAULT_INSTRUCTIONS,
+            temperature=temperature,
+        )
     else:
-        spec = default_spec(temperature=temperature)
-        if model:
-            spec.model = model
+        llm_rows = await ctx.stores.llm_model.list_all()
+        if not llm_rows:
+            raise LlmModelNotFoundError("default")
+        spec = AgentSpec.from_llm_model(llm_rows[0], temperature=temperature)
     if capabilities is not None:
         spec.capabilities = capabilities
     return await _build_runner_from_spec(spec, ctx)

@@ -3,7 +3,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from deep_agent.db.models import Agent, LlmModel
-from deep_agent.options import OPTION
+
+DEFAULT_INSTRUCTIONS = (
+    "You are deep-agent, a helpful general-purpose assistant. "
+    "Use the available tools when they help you answer accurately. "
+    "Be concise and explain your reasoning when it is useful."
+)
 
 
 @dataclass
@@ -18,7 +23,6 @@ class AgentSpec:
     model: str
     instructions: str
     capabilities: list[str] | None = None
-    # Optional OpenAI-compatible endpoint override (see OPTION.agent.model_base_url).
     base_url: str | None = None
     api_key: str | None = None
     temperature: float | None = None
@@ -53,7 +57,7 @@ class AgentSpec:
         return cls(
             name=name,
             model=llm_model.model,
-            instructions=instructions or OPTION.agent.system_prompt,
+            instructions=instructions or DEFAULT_INSTRUCTIONS,
             capabilities=capabilities,
             base_url=llm_model.base_url,
             api_key=llm_model.api_key,
@@ -62,13 +66,6 @@ class AgentSpec:
         )
 
 
-def default_spec(*, temperature: float | None = None) -> AgentSpec:
-    return AgentSpec(
-        name="default",
-        model=OPTION.agent.model,
-        instructions=OPTION.agent.system_prompt,
-        capabilities=None,
-        base_url=OPTION.agent.model_base_url or None,
-        api_key=OPTION.agent.model_api_key or None,
-        temperature=temperature,
-    )
+def anonymous_spec() -> AgentSpec:
+    """Minimal spec for UI/history paths that have no agent or LLM preset."""
+    return AgentSpec(name="anonymous", model="", instructions="")

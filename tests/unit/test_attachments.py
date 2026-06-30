@@ -1,17 +1,20 @@
 from __future__ import annotations
 
 import unittest
+import warnings
 from unittest.mock import AsyncMock, patch
 
 from pydantic_ai.messages import ModelRequest, UserPromptPart
 
 from deep_agent.agent.attachments import (
     attachment_ref_dict,
+    model_supports_image_input,
     refs_from_attachments,
     resolve_history_for_llm,
     resolve_user_prompt,
 )
 from deep_agent.agent.history import model_messages_to_history
+from deep_agent.db.serialization import deserialize_message, serialize_message
 from deep_agent.schemas.attachment import AttachmentRef
 
 
@@ -24,11 +27,55 @@ class TestAttachments(unittest.IsolatedAsyncioTestCase):
             "see this",
             [AttachmentRef(id="platform-file-1", name="a.jpg", mime="image/jpeg")],
             headers,
+            vision_capable=True,
         )
         self.assertEqual(parts[0], "see this")
         self.assertEqual(parts[1].media_type, "image/jpeg")
         self.assertEqual(parts[1].data, b"img-bytes")
         mock_download.assert_awaited_once_with("platform-file-1", headers)
+
+    @patch("deep_agent.agent.attachments._download_file", new_callable=AsyncMock)
+    async def test_non_vision_model_image_falls_back_to_text(self, mock_download: AsyncMock) -> None:
+        parts = await resolve_user_prompt(
+            "see this",
+            [AttachmentRef(id="platform-file-1", name="a.jpg", mime="image/jpeg")],
+            {},
+            vision_capable=False,
+        )
+        self.assertEqual(parts[0], "see this")
+        self.assertIn("不支持图片输入", parts[1].content)
+        mock_download.assert_not_awaited()
+
+    @patch("deep_agent.agent.attachments._download_file", new_callable=AsyncMock)
+    async def test_image_download_error_falls_back_to_text(self, mock_download: AsyncMock) -> None:
+        from deep_agent.agent.attachments import AttachmentDownloadError
+
+        mock_download.side_effect = AttachmentDownloadError("failed")
+        parts = await resolve_user_prompt(
+            "",
+            [AttachmentRef(id="bad-id", name="a.jpg", mime="image/jpeg")],
+            {},
+            vision_capable=True,
+        )
+        self.assertIn("文件下载失败", parts[0].content)
+
+    def test_model_supports_image_input(self) -> None:
+        self.assertTrue(model_supports_image_input("openai:gpt-4o"))
+        self.assertFalse(model_supports_image_input("deepseek:deepseek-v4-flash"))
+
+    def test_attachment_ref_message_roundtrip(self) -> None:
+        ref = attachment_ref_dict(
+            AttachmentRef(id="f1", name="a.png", mime="image/png"),
+        )
+        msg = ModelRequest(parts=[UserPromptPart(content=["hello", ref])])
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            payload = serialize_message(msg)
+        self.assertFalse(any("PydanticSerializationUnexpectedValue" in str(w.message) for w in caught))
+        restored = deserialize_message(payload)
+        first = restored.parts[0]
+        assert isinstance(first, UserPromptPart)
+        self.assertEqual(first.content, ["hello", ref])
 
     async def test_resolve_document_uses_extracted_text(self) -> None:
         ref = AttachmentRef(

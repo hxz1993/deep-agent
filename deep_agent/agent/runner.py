@@ -12,6 +12,7 @@ from pydantic_ai.usage import UsageLimits
 from deep_agent.agent import events
 from deep_agent.agent.attachments import (
     has_user_turn,
+    model_supports_image_input,
     refs_from_attachments,
     resolve_history_for_llm,
     resolve_user_prompt,
@@ -112,6 +113,11 @@ class AgentRunner:
             user_branch_point = len(history) - 1
         return history, pre_persisted_user, user_branch_point
 
+    def _vision_capable(self) -> bool:
+        model = self.agent.model
+        model_name = getattr(model, "model_name", None) or str(model)
+        return model_supports_image_input(model_name)
+
     async def _llm_inputs(
         self,
         history: list[ModelMessage],
@@ -121,11 +127,13 @@ class AgentRunner:
         *,
         pre_persisted_user: bool,
     ) -> tuple[list[ModelMessage], str | list[UserContent] | None]:
+        vision_capable = self._vision_capable()
         current_user_index = len(history) - 1 if pre_persisted_user else None
         llm_history = await resolve_history_for_llm(
             history,
             current_user_index=current_user_index,
             request_headers=deps.request_headers,
+            vision_capable=vision_capable,
         )
         if pre_persisted_user:
             return llm_history, None
@@ -134,6 +142,7 @@ class AgentRunner:
                 message,
                 attachments,
                 deps.request_headers,
+                vision_capable=vision_capable,
             )
         return llm_history, message or None
 

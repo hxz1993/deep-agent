@@ -4,9 +4,11 @@ import os
 import unittest
 from unittest import mock
 
+from pydantic_ai.models.google import GoogleModel
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.profiles.openai import OpenAIModelProfile
 from pydantic_ai.providers.deepseek import DeepSeekProvider
+from pydantic_ai.providers.google import GoogleProvider
 from pydantic_ai.providers.openai import OpenAIProvider
 
 from deep_agent.agent.factory import _resolve_model, build_agent
@@ -14,6 +16,7 @@ from deep_agent.agent.models import DeepSeekChatModel
 from deep_agent.agent.capabilities.deepseek_thinking_retry import DeepSeekThinkingRetry
 from deep_agent.capabilities.registry import CapabilityRegistry
 from deep_agent.agent.spec import AgentSpec
+from deep_agent.options import OPTION
 
 
 def _spec(**kwargs: object) -> AgentSpec:
@@ -105,6 +108,42 @@ class ResolveModelTests(unittest.TestCase):
             model = _resolve_model(_spec(model="deepseek:deepseek-v4-flash"))
         self.assertIsInstance(model, DeepSeekChatModel)
         self.assertIsInstance(model._provider, DeepSeekProvider)
+
+    def test_gemini_without_prefix_uses_google_provider_with_spec_api_key(self) -> None:
+        model = _resolve_model(
+            _spec(model="gemini-3.5-flash", api_key="google-test-key"),
+        )
+        self.assertIsInstance(model, GoogleModel)
+        self.assertIsInstance(model._provider, GoogleProvider)
+        self.assertEqual(model.model_name, "gemini-3.5-flash")
+
+    def test_google_prefixed_model_uses_google_provider_with_spec_api_key(self) -> None:
+        model = _resolve_model(
+            _spec(model="google:gemini-2.5-flash", api_key="google-test-key"),
+        )
+        self.assertIsInstance(model, GoogleModel)
+        self.assertIsInstance(model._provider, GoogleProvider)
+        self.assertEqual(model.model_name, "gemini-2.5-flash")
+
+    def test_google_without_spec_api_key_uses_google_env_key(self) -> None:
+        with mock.patch.dict(os.environ, {"GOOGLE_API_KEY": "google-env"}, clear=False):
+            model = _resolve_model(_spec(model="google:gemini-2.5-flash"))
+        self.assertIsInstance(model, GoogleModel)
+        self.assertIsInstance(model._provider, GoogleProvider)
+
+    def test_google_with_gemini_proxy_uses_dedicated_http_client(self) -> None:
+        prev = OPTION.agent.gemini_proxy
+        try:
+            OPTION.agent.gemini_proxy = "http://127.0.0.1:7890"
+            model = _resolve_model(
+                _spec(model="google:gemini-2.5-flash", api_key="google-test-key"),
+            )
+            client = model._provider._client._api_client._async_httpx_client
+            self.assertFalse(client._trust_env)
+            transport = list(client._mounts.values())[0]
+            self.assertIn("127.0.0.1", str(transport._pool._proxy_url))
+        finally:
+            OPTION.agent.gemini_proxy = prev
 
     def test_deepseek_registers_thinking_retry_capability(self) -> None:
         agent = build_agent(

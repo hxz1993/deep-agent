@@ -2,12 +2,15 @@ from __future__ import annotations
 
 from typing import Any
 
+import httpx
 from loguru import logger
 from pydantic_ai import Agent
-from pydantic_ai.models import Model
+from pydantic_ai.models import DEFAULT_HTTP_TIMEOUT, Model, get_user_agent, parse_model_id
+from pydantic_ai.models.google import GoogleModel
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers import infer_provider_class
 from pydantic_ai.providers.deepseek import DeepSeekProvider
+from pydantic_ai.providers.google import GoogleProvider
 from pydantic_ai.providers.openai import OpenAIProvider
 
 from deep_agent.agent.capabilities import DeepSeekThinkingRetry
@@ -15,6 +18,7 @@ from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.models import DeepSeekChatModel
 from deep_agent.agent.spec import AgentSpec
 from deep_agent.capabilities.registry import CapabilityRegistry
+from deep_agent.options import OPTION
 
 _OPENAI_PREFIXES = {"openai", "openai-chat"}
 
@@ -43,6 +47,26 @@ def _resolve_openai_compatible(spec: AgentSpec, model_name: str) -> Model:
     return OpenAIChatModel(model_name, provider=provider)
 
 
+def _gemini_http_client(proxy: str) -> httpx.AsyncClient:
+    # ponytail: trust_env=False so global HTTP_PROXY does not leak into Gemini-only traffic
+    return httpx.AsyncClient(
+        proxy=proxy,
+        trust_env=False,
+        timeout=httpx.Timeout(timeout=DEFAULT_HTTP_TIMEOUT, connect=5),
+        headers={"User-Agent": get_user_agent()},
+    )
+
+
+def _resolve_google(spec: AgentSpec, model_name: str) -> GoogleModel:
+    proxy = OPTION.agent.gemini_proxy or None
+    provider = GoogleProvider(
+        api_key=spec.api_key or None,
+        base_url=_normalize_url(spec.base_url),
+        http_client=_gemini_http_client(proxy) if proxy else None,
+    )
+    return GoogleModel(model_name, provider=provider)
+
+
 def _resolve_model(spec: AgentSpec) -> str | Model:
     """Turn the spec's model string into a model for Pydantic AI.
 
@@ -55,11 +79,17 @@ def _resolve_model(spec: AgentSpec) -> str | Model:
     """
     provider_name = _model_provider_prefix(spec.model)
     if provider_name is None:
+        parsed_provider, model_name = parse_model_id(spec.model)
+        if parsed_provider == "google":
+            return _resolve_google(spec, model_name)
         if spec.base_url:
             return _resolve_openai_compatible(spec, spec.model)
         return spec.model
 
     provider_class = infer_provider_class(provider_name)
+
+    if provider_class is GoogleProvider:
+        return _resolve_google(spec, _model_name_without_prefix(spec.model))
 
     if provider_class is DeepSeekProvider:
         provider = DeepSeekProvider(api_key=spec.api_key)

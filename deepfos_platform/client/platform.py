@@ -9,7 +9,7 @@ from ..options import OPTION
 
 __all__ = ['PlatformAPI']
 
-FILE_TYPE_ATTACHMENT = "ATT"
+FILE_TYPE_ATTACHMENT = "DL"
 
 
 class PlatformAPI(BaseAPI):
@@ -45,4 +45,4 @@ class File(ComponentAPI):
 
     @get('download', content_type=ContentType.bytes, data_wrapped=False)
     def download(self, file_id: str):
-        return {'param': {'fileId': file_id}}
+        return {'param': {'id': file_id}}

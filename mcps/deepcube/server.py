@@ -13,19 +13,13 @@ from __future__ import annotations
 
 import json
 import os
-import sys
-from pathlib import Path
 
 from deepcube.mcp.config import (
     ENV_DISCOVERY,
-    ENV_DISCOVERY_ENABLED,
     ENV_ENV_URL,
-    ENV_EUREKA,
-    ENV_TRANSPORT,
 )
 from deepcube.mcp.server import mcp, finalize_mcp
 from deepfos_platform.options import OPTION
-from deep_agent.lib.const import REQUEST_HEADERS_ENV
 
 
 def _optional_value(value: object) -> str | None:
@@ -39,10 +33,7 @@ def sync_env() -> None:
     """Map ``OPTION`` discovery settings into ``DEEPCUBE_MCP_*`` when unset."""
     discovery: dict = {}
 
-    if ENV_DISCOVERY_ENABLED not in os.environ:
-        os.environ[ENV_DISCOVERY_ENABLED] = str(bool(OPTION.srvdis.enabled)).lower()
     discovery["enabled"] = bool(OPTION.srvdis.enabled)
-
     impl = _optional_value(OPTION.srvdis.implementation)
     if impl is not None:
         discovery["implementation"] = impl
@@ -51,8 +42,6 @@ def sync_env() -> None:
         elif impl == 'eureka':
             eureka = _optional_value(OPTION.eureka.server)
             if eureka:
-                if ENV_EUREKA not in os.environ:
-                    os.environ[ENV_EUREKA] = eureka
                 discovery["eureka"] = eureka
         elif impl == 'nacos':
             discovery["nacos"] = nacos = {}

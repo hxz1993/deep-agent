@@ -174,6 +174,12 @@ class Agent(Category):
     image_max_dimension = Option(1568, val_type=int, bind_env="IMAGE_MAX_DIMENSION")
     image_max_bytes = Option(4_194_304, val_type=int, bind_env="IMAGE_MAX_BYTES")
     image_jpeg_quality = Option(85, val_type=int, bind_env="IMAGE_JPEG_QUALITY")
+    gemini_proxy = Option(
+        "",
+        val_type=str,
+        bind_env="GEMINI_PROXY",
+        convertor=_strip_optional_str,
+    )
 
     def __get__(self, instance, owner) -> "Agent":
         """defined to help ide"""

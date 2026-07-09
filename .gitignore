@@ -33,6 +33,7 @@ data/deep-agent.db
 .agents/
 .claude/
 .cursor/
+.omo/
 _bmad/
 _bmad-output/
 debug/

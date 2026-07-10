@@ -6,7 +6,6 @@ from unittest import mock
 
 from pydantic_ai.models.google import GoogleModel
 from pydantic_ai.models.openai import OpenAIChatModel
-from pydantic_ai.profiles.openai import OpenAIModelProfile
 from pydantic_ai.providers.deepseek import DeepSeekProvider
 from pydantic_ai.providers.google import GoogleProvider
 from pydantic_ai.providers.openai import OpenAIProvider
@@ -40,9 +39,8 @@ class ResolveModelTests(unittest.TestCase):
         )
         self.assertIsInstance(model, DeepSeekChatModel)
         self.assertIsInstance(model._provider, DeepSeekProvider)
-        profile = OpenAIModelProfile.from_profile(model.profile)
-        self.assertEqual(profile.openai_chat_thinking_field, "reasoning_content")
-        self.assertEqual(profile.openai_chat_send_back_thinking_parts, "field")
+        self.assertEqual(model.profile["openai_chat_thinking_field"], "reasoning_content")
+        self.assertEqual(model.profile["openai_chat_send_back_thinking_parts"], "field")
 
     def test_deepseek_with_matching_base_url_uses_deepseek_provider(self) -> None:
         model = _resolve_model(
@@ -109,13 +107,11 @@ class ResolveModelTests(unittest.TestCase):
         self.assertIsInstance(model, DeepSeekChatModel)
         self.assertIsInstance(model._provider, DeepSeekProvider)
 
-    def test_gemini_without_prefix_uses_google_provider_with_spec_api_key(self) -> None:
-        model = _resolve_model(
+    def test_gemini_without_prefix_returns_string_without_google_prefix(self) -> None:
+        resolved = _resolve_model(
             _spec(model="gemini-3.5-flash", api_key="google-test-key"),
         )
-        self.assertIsInstance(model, GoogleModel)
-        self.assertIsInstance(model._provider, GoogleProvider)
-        self.assertEqual(model.model_name, "gemini-3.5-flash")
+        self.assertEqual(resolved, "gemini-3.5-flash")
 
     def test_google_prefixed_model_uses_google_provider_with_spec_api_key(self) -> None:
         model = _resolve_model(

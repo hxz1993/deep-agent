@@ -2,8 +2,41 @@ from __future__ import annotations
 
 import json
 import unittest
+from unittest.mock import patch
 
-from tests.integration.helpers.chat import test_chat_client
+from pydantic_ai.models.test import TestModel
+
+from tests.integration.helpers.chat import async_echo_chat_app, read_chat_stream, test_chat_client
+
+
+class ChatHeaderForwardingStreamTest(unittest.IsolatedAsyncioTestCase):
+    async def test_chat_stream_forwards_request_headers_to_mcp_tool(self) -> None:
+        test_model = TestModel(
+            call_tools=["echo_echo_request_headers"],
+            custom_output_text="ok",
+        )
+        async with async_echo_chat_app() as (app, record_file):
+            with patch("deep_agent.agent.factory._resolve_model", return_value=test_model):
+                await read_chat_stream(
+                    app,
+                    json_body={
+                        "message": "inspect headers",
+                        "capabilities": ["mcp:echo"],
+                    },
+                    headers={
+                        "Authorization": "Bearer stream-token",
+                        "X-Tenant-Id": "tenant-stream",
+                    },
+                )
+
+        recorded = json.loads(record_file.read_text(encoding="utf-8"))
+        self.assertEqual(
+            recorded,
+            {
+                "authorization": "Bearer stream-token",
+                "x-tenant-id": "tenant-stream",
+            },
+        )
 
 
 class ChatHeaderForwardingTests(unittest.TestCase):
@@ -48,38 +81,9 @@ class ChatHeaderForwardingTests(unittest.TestCase):
         recorded = json.loads(record_file.read_text(encoding="utf-8"))
         self.assertEqual(recorded, {})
 
-    def test_chat_stream_forwards_request_headers_to_mcp_tool(self) -> None:
-        with test_chat_client() as (client, record_file):
-            with client.stream(
-                "POST",
-                "/api/v1/chat/stream",
-                json={
-                    "message": "inspect headers",
-                    "capabilities": ["mcp:echo"],
-                },
-                headers={
-                    "Authorization": "Bearer stream-token",
-                    "X-Tenant-Id": "tenant-stream",
-                },
-            ) as response:
-                self.assertEqual(response.status_code, 200)
-                list(response.iter_lines())
-
-        recorded = json.loads(record_file.read_text(encoding="utf-8"))
-        self.assertEqual(
-            recorded,
-            {
-                "authorization": "Bearer stream-token",
-                "x-tenant-id": "tenant-stream",
-            },
-        )
-
     def test_chat_uses_production_builtin_loader_for_text_tools(self) -> None:
-        from unittest.mock import patch
-
         from fastapi import FastAPI
         from fastapi.testclient import TestClient
-        from pydantic_ai.models.test import TestModel
 
         from deep_agent.api.v1 import api_router
         from deep_agent.capabilities import build_registry

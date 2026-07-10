@@ -117,6 +117,11 @@ def enrich_tool_event(event: dict[str, Any], hints: dict[str, dict[str, Any]]) -
         return event
     extra = hints.get(tool)
     if not extra:
+        for record in builtin_ui_records():
+            if record.name == tool:
+                extra = build_tool_hints([record]).get(tool)
+                break
+    if not extra:
         return event
     merged = dict(event)
     merged.update(extra)

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
@@ -12,7 +12,7 @@ from deep_agent.capabilities import build_registry
 from deep_agent.capabilities.mcp.lease_manager import McpLeaseManager
 from deep_agent.core.context import AppContext, get_context, init_context, reset_context
 from tests.helpers.sqlite_stores import make_sqlite_stores
-from tests.integration.helpers.chat import mock_request_disconnect, parse_sse_events
+from tests.integration.helpers.chat import _disable_title_generation_for_tests, mock_request_disconnect, parse_sse_events
 from tests.integration.helpers.models import build_slow_stream_model, text_only_model, tool_call_model
 
 _CHAT_JSON = {"capabilities": []}
@@ -49,6 +49,7 @@ def _tool_call_ids(history: dict) -> list[str]:
 class ChatHistoryPersistenceTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         stores, self._engine, session_factory = await make_sqlite_stores()
+        _disable_title_generation_for_tests()
         self._app = FastAPI()
         self._app.include_router(api_router)
         init_context(
@@ -60,9 +61,15 @@ class ChatHistoryPersistenceTests(unittest.IsolatedAsyncioTestCase):
                 db_session_factory=session_factory,
             )
         )
+        self._no_title = patch(
+            "deep_agent.agent.runner.AgentRunner._maybe_generate_title",
+            new_callable=AsyncMock,
+        )
+        self._no_title.start()
         self._transport = ASGITransport(app=self._app)
 
     async def asyncTearDown(self) -> None:
+        self._no_title.stop()
         await get_context().event_persister.aclose()
         reset_context()
         await self._engine.dispose()

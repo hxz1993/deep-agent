@@ -43,10 +43,8 @@ class RunScopedMcpToolset(AbstractToolset[AgentDeps]):
         return PrefixedToolset(self, prefix)
 
     async def for_run(self, ctx: RunContext[AgentDeps]) -> AbstractToolset[AgentDeps]:
-        request_headers = dict(ctx.deps.request_headers) if ctx.deps.request_headers else None
-        request_headers.update({
-            "x-session-id": ctx.deps.session_id,
-        })
+        request_headers = dict(ctx.deps.request_headers or {})
+        request_headers["x-session-id"] = ctx.deps.session_id
         pool_key = runtime_session_key(ctx.deps.session_id, agent_id=ctx.deps.agent_id)
         return replace(
             self,

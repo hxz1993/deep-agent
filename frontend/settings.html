@@ -17,8 +17,25 @@
       window.__DEEP_AGENT_APP_ROOT__ = p.replace(/admin\/$/, "");
     })();
   </script>
+  <script>
+    (function () {
+      var t = localStorage.getItem("da_theme") || "dark";
+      document.documentElement.setAttribute("data-theme", t);
+    })();
+  </script>
   <title>deep-agent · 请求头配置</title>
+  <link id="hljsTheme" rel="stylesheet" href="./vendor/highlight-github-dark.min.css" />
   <link rel="stylesheet" href="./styles.css" />
+  <link rel="stylesheet" href="./themes.css" />
+  <script>
+    (function () {
+      var t = localStorage.getItem("da_theme") || "dark";
+      var link = document.getElementById("hljsTheme");
+      if (link && (t === "light" || t === "paper" || t === "contrast")) {
+        link.href = "./vendor/highlight-github.min.css";
+      }
+    })();
+  </script>
 </head>
 <body>
   <div class="settings-page">
@@ -34,6 +51,10 @@
     </header>
 
     <main class="settings-card">
+      <label class="field settings-theme-field">
+        <span>界面主题</span>
+        <select id="themeSelect" title="切换界面配色"></select>
+      </label>
       <h1>请求头配置</h1>
       <p class="settings-desc">
         逐行配置自定义 HTTP 请求头，会合并到<strong>聊天页</strong>与<strong>管理后台</strong>发出的所有 API 请求中。
@@ -84,6 +105,7 @@
   </div>
 
   <script src="./request_config.js"></script>
+  <script src="./theme.js"></script>
   <script src="./settings.js"></script>
 </body>
 </html>

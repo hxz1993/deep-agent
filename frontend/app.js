@@ -89,7 +89,30 @@ const state = {
   modelMessageCount: 0,
   lastUserBranchPoint: null,
   pendingAttachments: [],
+  pendingTitleRefresh: false,
+  titlePollGeneration: 0,
 };
+
+const TITLE_POLL_TIMEOUT_MS = 30000;
+const TITLE_POLL_INTERVAL_MS = 500;
+
+const MODALITY_LABELS = {
+  text: "文本",
+  image: "图片",
+  audio: "音频",
+  video: "视频",
+  pdf: "PDF",
+};
+
+const MODALITY_ICONS = {
+  text: "T",
+  image: "🖼",
+  audio: "🔊",
+  video: "🎬",
+  pdf: "📄",
+};
+
+const ALL_MODALITIES = ["text", "image", "pdf", "audio", "video"];
 
 /* ----------------------------- DOM ----------------------------- */
 const $ = (id) => document.getElementById(id);
@@ -107,10 +130,15 @@ const el = {
   connStatus: $("connStatus"),
   sessionBadge: $("sessionBadge"),
   chatTitle: $("chatTitle"),
+  newChatMenu: $("newChatMenu"),
+  newChatBtnWide: $("newChatBtnWide"),
   usageInfo: $("usageInfo"),
   attachBtn: $("attachBtn"),
   fileInput: $("fileInput"),
   attachmentPreview: $("attachmentPreview"),
+  composerMeta: $("composerMeta"),
+  composerModel: $("composerModel"),
+  composerModalities: $("composerModalities"),
 };
 
 /* --------------------------- 初始化 --------------------------- */
@@ -154,6 +182,72 @@ function sessionSortTime(session) {
 
 function sortSessions() {
   state.sessions.sort((a, b) => sessionSortTime(b) - sessionSortTime(a));
+}
+
+function hideEmptyState() {
+  el.emptyState.classList.add("hidden");
+}
+
+function showEmptyState() {
+  el.emptyState.classList.remove("hidden");
+  if (!el.messages.contains(el.emptyState)) {
+    el.messages.appendChild(el.emptyState);
+  }
+}
+
+function clearMessages() {
+  el.messages.innerHTML = "";
+}
+
+function currentSessionSnapshot() {
+  if (!state.sessionId) return null;
+  const title = (el.chatTitle.textContent || "").trim();
+  const displayTitle =
+    title && title !== "新对话" && title !== "对话"
+      ? title.slice(0, 40)
+      : (lastUserText() || state.sessionId.slice(0, 8)).slice(0, 40);
+  return normalizeSession({
+    id: state.sessionId,
+    agentId: state.agentId || "",
+    agentName: agentNameById(state.agentId),
+    title: displayTitle,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  });
+}
+
+function mergeSessionsFromBackend(rows) {
+  const mapped = rows.map((row) => {
+    const agentId = row.agent_id || "";
+    const title = (row.title || row.user_prompt || row.session_id.slice(0, 8)).slice(0, 40);
+    return normalizeSession({
+      id: row.session_id,
+      agentId,
+      agentName: row.agent_name,
+      title,
+      createdAt: row.created_at || null,
+      updatedAt: row.updated_at || row.created_at || null,
+    });
+  });
+
+  const mergedByKey = new Map(mapped.map((s) => [sessionLookupKey(s), s]));
+
+  const current = currentSessionSnapshot();
+  if (current) {
+    const key = sessionLookupKey(current);
+    const existing = mergedByKey.get(key);
+    if (existing) {
+      if (!existing.title || existing.title === existing.id.slice(0, 8)) {
+        existing.title = current.title;
+      }
+      existing.updatedAt = existing.updatedAt || current.updatedAt;
+    } else {
+      mergedByKey.set(key, current);
+    }
+  }
+
+  state.sessions = [...mergedByKey.values()];
+  sortSessions();
 }
 
 function agentNameById(agentId) {
@@ -207,8 +301,22 @@ function init() {
     loadUiTools(state.agentId);
   });
 
-  $("newChatBtn").addEventListener("click", newChat);
-  $("newChatBtnWide").addEventListener("click", newChat);
+  $("newChatBtn").addEventListener("click", (e) => {
+    e.stopPropagation();
+    toggleNewChatMenu(e.currentTarget);
+  });
+  el.newChatBtnWide?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    toggleNewChatMenu(e.currentTarget);
+  });
+  document.addEventListener("click", (e) => {
+    if (el.newChatMenu?.classList.contains("hidden")) return;
+    if (e.target.closest("#newChatMenu, #newChatBtn, #newChatBtnWide")) return;
+    closeNewChatMenu();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") closeNewChatMenu();
+  });
   $("toggleSidebar").addEventListener("click", () => el.sidebar.classList.toggle("collapsed"));
   $("refreshCapsBtn").addEventListener("click", loadCapabilities);
   el.sendBtn.addEventListener("click", onSend);
@@ -233,6 +341,50 @@ function init() {
     })
   );
 
+  // 聊天标题点击编辑
+  el.chatTitle.addEventListener("click", () => {
+    if (state.streaming || !state.sessionId) return;
+    const currentTitle = el.chatTitle.textContent;
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "chat-title-input";
+    input.value = currentTitle === "新对话" || currentTitle === "对话" ? "" : currentTitle;
+    input.maxLength = 40;
+    input.placeholder = "输入会话名称…";
+
+    el.chatTitle.textContent = "";
+    el.chatTitle.appendChild(input);
+    input.focus();
+    input.select();
+
+    const finishEdit = async (save) => {
+      const newTitle = save ? input.value.trim() : currentTitle;
+      el.chatTitle.removeChild(input);
+      if (save && newTitle && newTitle !== currentTitle) {
+        el.chatTitle.textContent = newTitle;
+        const session = state.sessions.find(
+          (s) => s.id === state.sessionId && (s.agentId || "") === (state.agentId || "")
+        );
+        if (session) {
+          await renameSession(session, newTitle);
+        }
+      } else {
+        el.chatTitle.textContent = currentTitle;
+      }
+    };
+
+    input.addEventListener("blur", () => finishEdit(true));
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        finishEdit(true);
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        finishEdit(false);
+      }
+    });
+  });
+
   initMarkdown();
   localStorage.removeItem("da_sessions");
   renderSessions();
@@ -252,22 +404,15 @@ async function syncSessionsFromBackend() {
     if (!r.ok) return;
     const payload = await r.json();
     const rows = Array.isArray(payload?.items) ? payload.items : [];
-    state.sessions = rows.map((row) => {
-      const agentId = row.agent_id || "";
-      const title = (row.user_prompt || row.session_id.slice(0, 8)).slice(0, 40);
-      return normalizeSession({
-        id: row.session_id,
-        agentId,
-        agentName: row.agent_name,
-        title,
-        createdAt: row.created_at || null,
-        updatedAt: row.updated_at || row.created_at || null,
-      });
-    });
-    sortSessions();
+    mergeSessionsFromBackend(rows);
     renderSessions();
   } catch (_) {
-    state.sessions = [];
+    if (state.sessionId) {
+      const current = currentSessionSnapshot();
+      state.sessions = current ? [current] : [];
+    } else {
+      state.sessions = [];
+    }
     renderSessions();
   }
 }
@@ -278,22 +423,93 @@ function autoGrow() {
 }
 
 /* --------------------------- 会话管理 --------------------------- */
+function normalizeAgentId(agentId) {
+  return typeof agentId === "string" && agentId ? agentId : null;
+}
+
+function closeNewChatMenu() {
+  if (!el.newChatMenu) return;
+  el.newChatMenu.classList.add("hidden");
+  el.newChatBtnWide?.setAttribute("aria-expanded", "false");
+}
+
+function positionNewChatMenu(anchor) {
+  if (!el.newChatMenu || !anchor) return;
+  const rect = anchor.getBoundingClientRect();
+  const menuWidth = Math.max(rect.width, 240);
+  let left = rect.left;
+  if (left + menuWidth > window.innerWidth - 12) {
+    left = Math.max(12, window.innerWidth - menuWidth - 12);
+  }
+  el.newChatMenu.style.width = `${menuWidth}px`;
+  el.newChatMenu.style.left = `${left}px`;
+  el.newChatMenu.style.top = `${rect.bottom + 6}px`;
+}
+
+function renderNewChatMenu() {
+  if (!el.newChatMenu) return;
+  const adminUrl = `${state.baseUrl}/admin/`;
+  if (!state.agents.length) {
+    el.newChatMenu.innerHTML = `
+      <div class="new-chat-menu-empty">
+        暂无可用 Agent。<br />
+        <a href="${escapeHtml(adminUrl)}" target="_blank" rel="noopener">前往管理后台创建</a>
+      </div>`;
+    return;
+  }
+  const items = state.agents
+    .map((agent) => {
+      const active = agent.id === state.agentId ? " active" : "";
+      const modelLabel = agent.model?.name || agent.model?.model || "";
+      return `
+        <button type="button" class="new-chat-menu-item${active}" role="menuitem" data-agent-id="${escapeHtml(agent.id)}">
+          <span class="new-chat-menu-name">${escapeHtml(agent.name)}</span>
+          ${modelLabel ? `<span class="new-chat-menu-model">${escapeHtml(modelLabel)}</span>` : ""}
+        </button>`;
+    })
+    .join("");
+  el.newChatMenu.innerHTML = `<div class="new-chat-menu-title">选择 Agent 新建对话</div>${items}`;
+  el.newChatMenu.querySelectorAll("[data-agent-id]").forEach((btn) => {
+    btn.addEventListener("click", () => newChat(btn.dataset.agentId));
+  });
+}
+
+function toggleNewChatMenu(anchor) {
+  if (!el.newChatMenu) return;
+  const isOpen = !el.newChatMenu.classList.contains("hidden");
+  if (isOpen) {
+    closeNewChatMenu();
+    return;
+  }
+  renderNewChatMenu();
+  positionNewChatMenu(anchor);
+  el.newChatMenu.classList.remove("hidden");
+  el.newChatBtnWide?.setAttribute("aria-expanded", "true");
+  el.newChatMenu.querySelector(".new-chat-menu-item")?.focus();
+}
+
 function newChat(agentId) {
+  const id = normalizeAgentId(agentId);
+  closeNewChatMenu();
   if (state.streaming) stopStream();
-  if (agentId) {
-    state.agentId = agentId;
+  cancelTitlePoll();
+  state.pendingTitleRefresh = false;
+  cancelTitlePoll();
+  state.pendingTitleRefresh = false;
+  if (id) {
+    state.agentId = id;
     localStorage.setItem("da_agent_id", state.agentId);
     if (el.agentSelect) el.agentSelect.value = state.agentId;
   } else {
     ensureAgentSelected();
   }
+  loadUiTools(state.agentId);
   state.sessionId = null;
   state.branchFrom = null;
   state.modelMessageCount = 0;
   state.lastUserBranchPoint = null;
-  el.messages.innerHTML = "";
-  el.messages.appendChild(el.emptyState);
-  el.emptyState.classList.remove("hidden");
+  clearMessages();
+  showEmptyState();
   el.sessionBadge.textContent = "";
   el.chatTitle.textContent = "新对话";
   el.usageInfo.textContent = "";
@@ -326,6 +542,77 @@ function upsertSession(id, title, agentId, agentName) {
   renderSessions();
 }
 
+function cancelTitlePoll() {
+  state.titlePollGeneration += 1;
+}
+
+function applySessionTitle(session, title) {
+  const normalized = normalizeSession(session);
+  const displayTitle = (title || "").slice(0, 40);
+  if (!displayTitle) return;
+
+  const key = sessionLookupKey(normalized);
+  const existing = state.sessions.find((s) => sessionLookupKey(s) === key);
+  if (existing) existing.title = displayTitle;
+
+  if (
+    normalized.id === state.sessionId &&
+    (normalized.agentId || "") === (state.agentId || "")
+  ) {
+    el.chatTitle.textContent = displayTitle;
+  }
+  renderSessions();
+}
+
+function knownSessionTitle(session) {
+  const normalized = normalizeSession(session);
+  const key = sessionLookupKey(normalized);
+  const found = state.sessions.find((s) => sessionLookupKey(s) === key);
+  return found?.title || "";
+}
+
+async function pollSessionTitle(session, knownTitle, generation) {
+  const normalized = normalizeSession(session);
+  const deadline = Date.now() + TITLE_POLL_TIMEOUT_MS;
+
+  while (Date.now() < deadline) {
+    if (generation !== state.titlePollGeneration) return;
+    await new Promise((r) => setTimeout(r, TITLE_POLL_INTERVAL_MS));
+    if (generation !== state.titlePollGeneration) return;
+
+    try {
+      const r = await daFetch(sessionApiUrl(normalized));
+      if (!r.ok) continue;
+      const data = await r.json();
+      const title = data.title ? data.title.slice(0, 40) : "";
+      if (title && title !== knownTitle) {
+        applySessionTitle(normalized, title);
+        return;
+      }
+    } catch (_) {
+      /* retry until timeout */
+    }
+  }
+
+  if (generation === state.titlePollGeneration) {
+    await syncSessionsFromBackend();
+    const key = sessionLookupKey(normalized);
+    const existing = state.sessions.find((s) => sessionLookupKey(s) === key);
+    if (existing?.title && existing.title !== knownTitle) {
+      applySessionTitle(normalized, existing.title);
+    }
+  }
+}
+
+function scheduleTitleRefresh() {
+  if (!state.sessionId) return;
+  const session = { id: state.sessionId, agentId: state.agentId };
+  const knownTitle = knownSessionTitle(session) || lastUserText().slice(0, 40);
+  cancelTitlePoll();
+  const generation = state.titlePollGeneration;
+  void pollSessionTitle(session, knownTitle, generation);
+}
+
 function renderSessions() {
   el.sessionList.innerHTML = "";
   if (state.sessions.length === 0) {
@@ -342,8 +629,23 @@ function renderSessions() {
       : s.agentId
         ? `<span class="session-agent">${escapeHtml(s.agentId.slice(0, 8))}</span>`
         : "";
-    li.innerHTML = `<span class="sid" title="${escapeHtml(s.id)}"><span class="session-title">${escapeHtml(s.title)}</span>${agentLabel}</span><span class="del" title="删除">✕</span>`;
+    li.innerHTML = `<span class="sid" title="${escapeHtml(s.id)}"><span class="session-title">${escapeHtml(s.title)}</span>${agentLabel}</span><span class="session-actions"><span class="rename-btn" title="重命名">✏️</span><span class="auto-rename-btn" title="自动重命名">🔄</span><span class="del" title="删除">✕</span></span>`;
     li.querySelector(".sid").addEventListener("click", () => switchSession(s));
+    li.querySelector(".rename-btn").addEventListener("click", (e) => {
+      e.stopPropagation();
+      startInlineEdit(s, li.querySelector(".session-title"));
+    });
+    li.querySelector(".auto-rename-btn").addEventListener("click", async (e) => {
+      e.stopPropagation();
+      const titleEl = li.querySelector(".session-title");
+      const originalTitle = titleEl.textContent;
+      titleEl.textContent = "生成中…";
+      const result = await autoRenameSession(s);
+      // 如果失败，恢复原标题
+      if (!result) {
+        titleEl.textContent = originalTitle;
+      }
+    });
     li.querySelector(".del").addEventListener("click", (e) => {
       e.stopPropagation();
       deleteSession(s);
@@ -354,6 +656,8 @@ function renderSessions() {
 
 async function switchSession(s) {
   if (state.streaming) stopStream();
+  cancelTitlePoll();
+  state.pendingTitleRefresh = false;
   const session = normalizeSession(s);
   state.sessionId = session.id;
   state.branchFrom = null;
@@ -374,8 +678,8 @@ async function switchSession(s) {
 /** 从后端拉取并渲染指定会话的历史（唯一消息来源）。 */
 async function loadSessionHistory(session) {
   const normalized = normalizeSession(session);
-  el.messages.innerHTML = "";
-  el.emptyState.classList.add("hidden");
+  clearMessages();
+  hideEmptyState();
   try {
     await loadUiTools(state.agentId);
     const r = await daFetch(sessionApiUrl(normalized, "/history"));
@@ -386,8 +690,7 @@ async function loadSessionHistory(session) {
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const data = await r.json();
     if (!data.messages || data.messages.length === 0) {
-      el.emptyState.classList.remove("hidden");
-      el.messages.appendChild(el.emptyState);
+      showEmptyState();
       state.modelMessageCount = 0;
       state.awaitingHitl = false;
       updateHitlInputState();
@@ -504,6 +807,104 @@ async function deleteSession(session) {
   else renderSessions();
 }
 
+/* --------------------------- 会话重命名 --------------------------- */
+async function renameSession(session, newTitle) {
+  const normalized = normalizeSession(session);
+  try {
+    const r = await daFetch(sessionApiUrl(normalized), {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: newTitle }),
+    });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const data = await r.json();
+    // 更新本地会话列表
+    const key = sessionLookupKey(normalized);
+    const existing = state.sessions.find((s) => sessionLookupKey(s) === key);
+    if (existing && data.title) {
+      existing.title = data.title.slice(0, 40);
+      renderSessions();
+    }
+    // 如果是当前会话，更新标题显示
+    if (normalized.id === state.sessionId && (normalized.agentId || "") === (state.agentId || "")) {
+      el.chatTitle.textContent = data.title || "对话";
+    }
+    return data.title;
+  } catch (e) {
+    console.warn("[deep-agent] 重命名失败", e);
+    addSystemNote(`重命名失败：${e.message}`);
+    return null;
+  }
+}
+
+async function autoRenameSession(session) {
+  const normalized = normalizeSession(session);
+  try {
+    const r = await daFetch(sessionApiUrl(normalized), {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ auto: true }),
+    });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const data = await r.json();
+    // 更新本地会话列表
+    const key = sessionLookupKey(normalized);
+    const existing = state.sessions.find((s) => sessionLookupKey(s) === key);
+    if (existing && data.title) {
+      existing.title = data.title.slice(0, 40);
+      renderSessions();
+    }
+    // 如果是当前会话，更新标题显示
+    if (normalized.id === state.sessionId && (normalized.agentId || "") === (state.agentId || "")) {
+      el.chatTitle.textContent = data.title || "对话";
+    }
+    return data.title;
+  } catch (e) {
+    console.warn("[deep-agent] 自动重命名失败", e);
+    addSystemNote(`自动重命名失败：${e.message}`);
+    return null;
+  }
+}
+
+function startInlineEdit(session, titleElement) {
+  if (state.streaming) return;
+
+  const currentTitle = titleElement.textContent;
+  const input = document.createElement("input");
+  input.type = "text";
+  input.className = "session-title-input";
+  input.value = currentTitle;
+  input.maxLength = 40;
+
+  // 替换文本为输入框
+  titleElement.textContent = "";
+  titleElement.appendChild(input);
+  input.focus();
+  input.select();
+
+  const finishEdit = async (save) => {
+    const newTitle = save ? input.value.trim() : currentTitle;
+    titleElement.removeChild(input);
+    if (save && newTitle !== currentTitle) {
+      titleElement.textContent = newTitle || currentTitle;
+      await renameSession(session, newTitle);
+    } else {
+      titleElement.textContent = currentTitle;
+    }
+  };
+
+  input.addEventListener("blur", () => finishEdit(true));
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      finishEdit(true);
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      finishEdit(false);
+    }
+  });
+}
+
 /* --------------------------- 健康检查 / 能力 --------------------------- */
 async function checkHealth() {
   setConn("pending", "检测中…");
@@ -541,9 +942,58 @@ async function loadAgents() {
     }
     ensureAgentSelected();
     updateChatHeader();
+    if (el.newChatMenu && !el.newChatMenu.classList.contains("hidden")) {
+      renderNewChatMenu();
+    }
   } catch (e) {
     el.agentSelect.innerHTML = `<option value="">加载失败</option>`;
     console.warn("[deep-agent] 加载 Agent 失败", e);
+  }
+}
+
+function currentAgent() {
+  return state.agents.find((a) => a.id === state.agentId) || null;
+}
+
+function currentModelInfo() {
+  const agent = currentAgent();
+  if (!agent?.model) return null;
+  return {
+    presetName: agent.model.name || agent.name,
+    modelId: agent.model.model || "",
+    modalities: Array.isArray(agent.model.input_modalities) ? agent.model.input_modalities : [],
+  };
+}
+
+function updateComposerModelInfo() {
+  if (!el.composerMeta) return;
+  const info = currentModelInfo();
+  if (!info) {
+    el.composerMeta.classList.add("hidden");
+    return;
+  }
+  el.composerMeta.classList.remove("hidden");
+
+  if (el.composerModel) {
+    el.composerModel.innerHTML = `
+      <span class="composer-model-name">${escapeHtml(info.presetName)}</span>
+      <span class="composer-model-id">${escapeHtml(info.modelId)}</span>`;
+  }
+
+  if (el.composerModalities) {
+    const supported = new Set(info.modalities.map((m) => String(m).toLowerCase()));
+    if (!supported.size) {
+      el.composerModalities.innerHTML =
+        '<span class="composer-modalities-label">输入</span><span class="modality-chip">未配置（管理后台可刷新模型元数据）</span>';
+    } else {
+      const chips = ALL_MODALITIES.map((key) => {
+        const on = supported.has(key);
+        const label = MODALITY_LABELS[key] || key;
+        const icon = MODALITY_ICONS[key] || "";
+        return `<span class="modality-chip ${on ? "supported" : "unsupported"}" title="${on ? "支持" : "不支持"}${escapeHtml(label)}">${icon} ${escapeHtml(label)}</span>`;
+      }).join("");
+      el.composerModalities.innerHTML = `<span class="composer-modalities-label">输入</span>${chips}`;
+    }
   }
 }
 
@@ -553,6 +1003,7 @@ function updateChatHeader() {
       ? state.sessionId.slice(0, 8)
       : agentNameById(state.agentId);
   }
+  updateComposerModelInfo();
 }
 
 function updateAgentSelectState() {
@@ -598,7 +1049,7 @@ async function onSend() {
     return;
   }
 
-  el.emptyState.classList.add("hidden");
+  hideEmptyState();
   el.input.value = "";
   clearPendingAttachments();
   autoGrow();
@@ -609,6 +1060,7 @@ async function onSend() {
   }
 
   const userBranchPoint = branchFrom != null ? branchFrom : state.modelMessageCount;
+  const isFirstTurn = branchFrom == null && state.modelMessageCount === 0;
   addMessage("user", text, null, userBranchPoint, attachments);
   state.lastUserBranchPoint = userBranchPoint;
 
@@ -638,6 +1090,7 @@ async function onSend() {
   } else {
     state.modelMessageCount += 1;
   }
+  state.pendingTitleRefresh = isFirstTurn;
   await runChatStream(payload, assistant);
 }
 
@@ -671,6 +1124,8 @@ async function runChatStream(payload, assistant) {
   state.streamCancelled = false;
   state.skipHistoryRefresh = false;
   let stoppedByUser = false;
+  const shouldRefreshTitle = state.pendingTitleRefresh;
+  state.pendingTitleRefresh = false;
   try {
     const resp = await daFetch(`${state.baseUrl}/api/v1/chat/stream`, {
       method: "POST",
@@ -711,6 +1166,18 @@ async function runChatStream(payload, assistant) {
         await refreshCurrentHistory();
       }
       await syncSessionsFromBackend();
+      if (state.sessionId) {
+        const title = lastUserText() || el.chatTitle.textContent;
+        upsertSession(state.sessionId, title, state.agentId, agentNameById(state.agentId));
+      }
+      if (
+        shouldRefreshTitle &&
+        !state.awaitingHitl &&
+        !stoppedByUser &&
+        !state.streamCancelled
+      ) {
+        scheduleTitleRefresh();
+      }
     }
   }
 }

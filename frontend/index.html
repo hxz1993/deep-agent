@@ -19,9 +19,19 @@
   </script>
   <title>deep-agent · 对话</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="stylesheet" href="./vendor/github-markdown-dark.min.css" />
-  <link rel="stylesheet" href="./vendor/highlight-github-dark.min.css" />
+  <link id="hljsTheme" rel="stylesheet" href="./vendor/highlight-github-dark.min.css" />
   <link rel="stylesheet" href="./styles.css" />
+  <link rel="stylesheet" href="./themes.css" />
+  <script>
+    (function () {
+      var t = localStorage.getItem("da_theme") || "dark";
+      document.documentElement.setAttribute("data-theme", t);
+      var link = document.getElementById("hljsTheme");
+      if (link && (t === "light" || t === "paper" || t === "contrast")) {
+        link.href = "./vendor/highlight-github.min.css";
+      }
+    })();
+  </script>
 </head>
 <body>
   <div class="app">
@@ -35,7 +45,10 @@
         <button class="icon-btn" id="newChatBtn" title="新建会话">＋</button>
       </div>
 
-      <button class="new-chat" id="newChatBtnWide">＋ 新建对话</button>
+      <button type="button" class="new-chat" id="newChatBtnWide" aria-haspopup="menu" aria-expanded="false">
+        <span class="new-chat-label">＋ 新建对话</span>
+        <span class="new-chat-chevron" aria-hidden="true">▾</span>
+      </button>
 
       <div class="sidebar-section">
         <div class="section-title">历史会话</div>
@@ -53,6 +66,10 @@
       </div>
 
       <div class="sidebar-footer">
+        <label class="field">
+          <span>界面主题</span>
+          <select id="themeSelect" title="切换界面配色"></select>
+        </label>
         <label class="field">
           <span>后端地址</span>
           <input type="text" id="baseUrlInput" placeholder="http://localhost:8000" />
@@ -99,6 +116,10 @@
 
       <div class="composer">
         <div class="attachment-preview hidden" id="attachmentPreview"></div>
+        <div class="composer-meta" id="composerMeta">
+          <span class="composer-model" id="composerModel"></span>
+          <span class="composer-modalities" id="composerModalities"></span>
+        </div>
         <div class="composer-inner">
           <button type="button" class="attach-btn" id="attachBtn" title="添加附件">📎</button>
           <input type="file" id="fileInput" class="hidden" multiple accept="image/*,.pdf,.docx,.xlsx,.txt,.csv" />
@@ -119,7 +140,10 @@
     </main>
   </div>
 
+  <div class="new-chat-menu hidden" id="newChatMenu" role="menu" aria-label="选择 Agent 新建对话"></div>
+
   <script src="./request_config.js"></script>
+  <script src="./theme.js"></script>
   <script src="./vendor/marked.min.js"></script>
   <script src="./vendor/purify.min.js"></script>
   <script src="./vendor/highlight.min.js"></script>

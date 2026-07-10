@@ -89,4 +89,7 @@ async def _build_runner_from_spec(spec: AgentSpec, ctx: AppContext) -> AgentRunn
         limits,
         ui_tool_hints=ui_tool_hints,
         model_settings=_model_settings_for_spec(spec),
+        input_modalities=spec.input_modalities,
+        capabilities_source=spec.capabilities_source,
+        model_base_url=spec.base_url,
     )

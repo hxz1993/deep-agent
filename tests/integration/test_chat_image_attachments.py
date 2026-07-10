@@ -27,9 +27,6 @@ _IMAGE_ATTACHMENT = {
 class ChatImageAttachmentTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         stores, self._engine, session_factory = await make_sqlite_stores()
-        await stores.llm_model.create_unique(
-            LlmModelCreate(name="test-default", model="test"),
-        )
         self._app = FastAPI()
         self._app.include_router(api_router)
         init_context(
@@ -133,3 +130,58 @@ class ChatImageAttachmentTests(unittest.IsolatedAsyncioTestCase):
         session_id = events[0]["session_id"]
         history = await self._history(session_id)
         self.assertEqual(len([m for m in history["messages"] if m.get("role") == "user"]), 1)
+
+    @patch("deep_agent.agent.attachments._download_file", new_callable=AsyncMock)
+    async def test_db_text_only_override_skips_image_download(
+        self,
+        mock_download: AsyncMock,
+    ) -> None:
+        """DB user override text-only should win over name heuristics (e.g. kimi-k2.6)."""
+        stores = get_context().stores
+        row = await stores.llm_model.create_unique(
+            LlmModelCreate(
+                name="kimi-text-only",
+                model="kimi-k2.6",
+                base_url="https://api.moonshot.cn",
+                input_modalities=["text"],
+            ),
+        )
+        self.assertEqual(row.capabilities_source, "user")
+
+        events = await self._stream_events(
+            model=text_only_model("text only"),
+            json_body={
+                "message": "这张图是什么",
+                "attachments": [_IMAGE_ATTACHMENT],
+                "model_id": row.id,
+            },
+        )
+        self.assertFalse(any(ev.get("type") == "error" for ev in events))
+        mock_download.assert_not_awaited()
+
+    @patch("deep_agent.agent.attachments._download_file", new_callable=AsyncMock)
+    async def test_db_vision_modalities_enable_image_download(
+        self,
+        mock_download: AsyncMock,
+    ) -> None:
+        """DB modalities with image should download bytes for image attachments."""
+        mock_download.return_value = b"\x89PNG\r\n\x1a\n"
+        stores = get_context().stores
+        row = await stores.llm_model.create_unique(
+            LlmModelCreate(
+                name="vision-db",
+                model="private:vision-model",
+                input_modalities=["text", "image"],
+            ),
+        )
+        self.assertEqual(row.capabilities_source, "user")
+
+        await self._stream_events(
+            model=text_only_model("vision reply"),
+            json_body={
+                "message": "描述图片",
+                "attachments": [_IMAGE_ATTACHMENT],
+                "model_id": row.id,
+            },
+        )
+        mock_download.assert_awaited_once()

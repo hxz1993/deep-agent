@@ -144,6 +144,12 @@ html, body {
   font-size: 18px;
 }
 
+.panel-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .btn {
   background: var(--bg-soft);
   border: 1px solid var(--border);

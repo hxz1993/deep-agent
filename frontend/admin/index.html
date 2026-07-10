@@ -76,7 +76,10 @@
     <section class="panel" id="panel-llm-models">
       <div class="panel-toolbar">
         <h2>模型配置列表</h2>
-        <button class="btn primary" id="newLlmModelBtn">＋ 新建模型</button>
+        <div class="panel-toolbar-actions">
+          <button class="btn" type="button" id="refreshAllLlmModelMetaBtn">刷新全部 Meta</button>
+          <button class="btn primary" type="button" id="newLlmModelBtn">＋ 新建模型</button>
+        </div>
       </div>
       <div class="table-wrap">
         <table class="data-table">
@@ -85,13 +88,15 @@
               <th>名称</th>
               <th>模型</th>
               <th>Base URL</th>
+              <th>输入模态</th>
+              <th>来源</th>
               <th>API Key</th>
               <th>Agent 数</th>
               <th>操作</th>
             </tr>
           </thead>
           <tbody id="llmModelsTableBody">
-            <tr><td colspan="6" class="empty-cell">加载中…</td></tr>
+            <tr><td colspan="8" class="empty-cell">加载中…</td></tr>
           </tbody>
         </table>
       </div>

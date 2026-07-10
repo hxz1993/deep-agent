@@ -89,3 +89,32 @@ async def delete_llm_model(
             detail=f"LLM model is referenced by {agent_count} agent(s)",
         )
     await store.delete(normalized_id)
+
+
+@router.post("/llm-models/{model_id}/refresh-metadata", response_model=LlmModelResponse)
+async def refresh_model_metadata(
+    model_id: str,
+    store: LlmModelStoreBase = Depends(get_llm_model_store),
+) -> LlmModelResponse:
+    """Refresh input modalities for a model from bundled data."""
+    from deep_agent.agent.models.modality_resolver import refresh_model_modalities
+
+    normalized_id = _parse_model_id(model_id)
+    row = await store.get_by_id(normalized_id)
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"LLM model not found: {model_id}")
+
+    await refresh_model_modalities(normalized_id, store, force=True)
+    row = await store.get_by_id(normalized_id)
+    return await _response_for_row(store, row)
+
+
+@router.post("/llm-models/refresh-metadata")
+async def refresh_all_metadata(
+    store: LlmModelStoreBase = Depends(get_llm_model_store),
+) -> dict[str, int]:
+    """Batch refresh input modalities for all models from bundled data."""
+    from deep_agent.agent.models.modality_resolver import refresh_all_model_modalities
+
+    count = await refresh_all_model_modalities(store, force=False)
+    return {"updated": count}

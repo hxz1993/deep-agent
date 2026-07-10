@@ -69,7 +69,15 @@ class TestAttachments(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(model_supports_image_input("moonshot-v1-8k-vision-preview"))
         self.assertFalse(model_supports_image_input("deepseek:deepseek-v4-flash"))
         self.assertFalse(model_supports_image_input("qwen2-vl-7b-instruct"))
-        self.assertFalse(model_supports_image_input("qwen-vl-max"))
+        # Bundled catalog includes qwen-vl-max; DB user override can force text-only.
+        self.assertTrue(model_supports_image_input("qwen-vl-max"))
+        self.assertFalse(
+            model_supports_image_input(
+                "qwen-vl-max",
+                db_modalities=["text"],
+                capabilities_source="user",
+            )
+        )
 
     def test_attachment_ref_message_roundtrip(self) -> None:
         ref = attachment_ref_dict(

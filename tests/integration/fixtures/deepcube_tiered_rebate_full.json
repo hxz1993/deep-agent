@@ -1,0 +1,628 @@
+{
+  "session_id": "448c7ba3b77f42adbdf6dd2f99e39645",
+  "agent_id": "39e5a100-72d4-4a0a-8558-05f0c3af6bc2",
+  "title": null,
+  "messages": [
+    {
+      "sequence": 0,
+      "payload": {
+        "parts": [
+          {
+            "content": "<reference>\n[@context]\n{\"cube\":{\"elementName\":\"MainCube\",\"elementType\":\"CUB\",\"serverName\":\"financial-model-server1-0\",\"folderId\":\"DIR35d14a8744f5\",\"moduleId\":\"CUB1_0\",\"path\":\"/foundationModel/cube/\"},\"dataScope\":[{\"dimension\":\"Entity\",\"scope\":\"Base(Entity[\\\"OR000101\\\"])\"},{\"dimension\":\"Year\",\"scope\":\"Year[\\\"2026\\\"]\"},{\"dimension\":\"Period\",\"scope\":\"Period[\\\"1\\\"]\"},{\"dimension\":\"Account\",\"scope\":\"Account[\\\"C0104\\\"]\"},{\"dimension\":\"Scenario\",\"scope\":\"Scenario[\\\"Budget\\\"]\"},{\"dimension\":\"Version\",\"scope\":\"Version[\\\"Working\\\"]\"},{\"dimension\":\"Misc1\",\"scope\":\"Misc1[\\\"Misc0101\\\"]\"},{\"dimension\":\"DataTrail\",\"scope\":\"DataTrail[\\\"DT01\\\"]\"},{\"dimension\":\"C1\",\"scope\":\"C1[\\\"NoProject\\\"]\"},{\"dimension\":\"C2\",\"scope\":\"C2[\\\"NoC2\\\"]\"},{\"dimension\":\"C3\",\"scope\":\"C3[\\\"NoC3\\\"]\"},{\"dimension\":\"C4\",\"scope\":\"C4[\\\"NoC4\\\"]\"},{\"dimension\":\"C5\",\"scope\":\"C5[\\\"NoC5\\\"]\"},{\"dimension\":\"C6\",\"scope\":\"C6[\\\"NoC6\\\"]\"},{\"dimension\":\"C7\",\"scope\":\"C7[\\\"NoC7\\\"]\"}],\"parameters\":[],\"currentScript\":\"# 主营业务毛利 = 主营业务收入 - 主营业务成本\\nBLOCK[Account['A010104']] = BLOCK[Account['A01010101']] - BLOCK[Account['A01010201']]\\n\\n# 毛利率 = 主营业务毛利 / 主营业务收入\\nBLOCK[Account['A010105']] = BLOCK[Account['A010104']] / BLOCK[Account['A01010101']]\"}\n</reference>\n\n<user>\n按销售额区间计算阶梯返利，低中高三档使用不同返利率\n</user>",
+            "timestamp": "2026-07-09T07:59:23.536057Z",
+            "part_kind": "user-prompt"
+          }
+        ],
+        "timestamp": null,
+        "instructions": null,
+        "kind": "request",
+        "run_id": null,
+        "conversation_id": null,
+        "metadata": null,
+        "state": "complete"
+      }
+    },
+    {
+      "sequence": 1,
+      "payload": {
+        "parts": [
+          {
+            "content": "用户想按销售额区间计算阶梯返利，需要查询当前财务模型中的维度成员信息。先看看当前的内容。\n\n当前脚本是计算主营业务毛利和毛利率。用户想要的是阶梯返利，按销售额区间分低中高三档，使用不同返利率。\n\n我需要：\n1. 查询当前财务模型的维度，特别是 Account 维度，看看有哪些返利、销售额相关的成员\n2. 查询维度成员来匹配用户说的\"低中高三档\"、\"销售额\"、\"返利\"\n\n让我先看看财务模型的维度结构。",
+            "id": "reasoning_content",
+            "signature": null,
+            "provider_name": "openai",
+            "provider_details": null,
+            "part_kind": "thinking"
+          },
+          {
+            "tool_name": "deepcube_deepcube_list_cube_dimensions",
+            "args": "{\"element_name\": \"MainCube\", \"path\": \"/foundationModel/cube/\"}",
+            "tool_call_id": "call_00_kcn2TQvZn1GXjzRT9pm47810",
+            "tool_kind": null,
+            "id": null,
+            "provider_name": null,
+            "provider_details": null,
+            "part_kind": "tool-call"
+          }
+        ],
+        "usage": {
+          "input_tokens": 10451,
+          "cache_write_tokens": 0,
+          "cache_read_tokens": 9984,
+          "output_tokens": 187,
+          "input_audio_tokens": 0,
+          "cache_audio_read_tokens": 0,
+          "output_audio_tokens": 0,
+          "details": {
+            "prompt_cache_hit_tokens": 9984,
+            "prompt_cache_miss_tokens": 467,
+            "reasoning_tokens": 111
+          }
+        },
+        "model_name": "deepseek-v4-flash",
+        "timestamp": "2026-07-09T07:59:27.259547Z",
+        "kind": "response",
+        "provider_name": "openai",
+        "provider_url": "https://api.deepseek.com",
+        "provider_details": {
+          "timestamp": "2026-07-09T07:59:27Z",
+          "finish_reason": "tool_calls"
+        },
+        "provider_response_id": "24c3917d-aea1-472a-88a8-ee121c22dfc9",
+        "finish_reason": "tool_call",
+        "run_id": "019f45e3-7991-7572-b3ad-508e395697da",
+        "conversation_id": "019f45e3-7991-7572-b3ad-508d396e6cb9",
+        "metadata": null,
+        "state": "complete"
+      }
+    },
+    {
+      "sequence": 2,
+      "payload": {
+        "parts": [
+          {
+            "tool_name": "deepcube_deepcube_list_cube_dimensions",
+            "content": "{\n  \"source\": \"online\",\n  \"element_name\": \"MainCube\",\n  \"connect_code\": \"Cube(\\\"MainCube\\\", path=\\\"/foundationModel/cube/\\\")\",\n  \"connect_preference\": \"path_over_folder_id\",\n  \"cube\": {\n    \"name\": \"MainCube\",\n    \"auto_calculation\": false,\n    \"view_type\": 0,\n    \"actual_table_name\": \"gddzei019_ainTable_f82r7_yzgjd\"\n  },\n  \"ctrl_dims\": {\n    \"year\": \"Year\",\n    \"period\": \"Period\",\n    \"scenario\": \"Scenario\",\n    \"version\": \"Version\"\n  },\n  \"dimensions\": [\n    {\n      \"datatable_column\": \"Entity\",\n      \"dimension_name\": \"Entity\",\n      \"dimension_type\": 3,\n      \"dimension_type_name\": \"EntityDim\",\n      \"dimension_usage\": 0,\n      \"dimension_flag\": null,\n      \"folder_id\": \"DIR6d75f0a5d892\",\n      \"path\": \"\\\\foundationModel\\\\dimension\\\\\",\n      \"accessor_hint\": \"cube.Entity\"\n    },\n    {\n      \"datatable_column\": \"Year\",\n      \"dimension_name\": \"Year\",\n      \"dimension_type\": 5,\n      \"dimension_type_name\": \"YearDim\",\n      \"dimension_usage\": 5,\n      \"dimension_flag\": null,\n      \"folder_id\": \"DIR6d75f0a5d892\",\n      \"path\": \"\\\\foundationModel\\\\dimension\\\\\",\n      \"accessor_hint\": \"cube.year\"\n    },\n    {\n      \"datatable_column\": \"Period\",\n      \"dimension_name\": \"Period\",\n      \"dimension_type\": 6,\n      \"dimension_type_name\": \"PeriodDim\",\n      \"dimension_usage\": 0,\n      \"dimension_flag\": null,\n      \"folder_id\": \"DIR6d75f0a5d892\",\n      \"path\": \"\\\\foundationModel\\\\dimension\\\\\",\n      \"accessor_hint\": \"cube.period\"\n    },\n    {\n      \"datatable_column\": \"Account\",\n      \"dimension_name\": \"Account\",\n      \"dimension_type\": 4,\n      \"dimension_type_name\": \"AccountDim\",\n      \"dimension_usage\": 4,\n      \"dimension_flag\": null,\n      \"folder_id\": \"DIR6d75f0a5d892\",\n      \"path\": \"\\\\foundationModel\\\\dimension\\\\\",\n      \"accessor_hint\": \"cube.Account\"\n    },\n    {\n      \"datatable_column\": \"Scenario\",\n      \"dimension_name\": \"Scenario\",\n      \"dimension_type\": 1,\n      \"dimension_type_name\": \"ScenarioDim\",\n      \"dimension_usage\": 1,\n      \"dimension_flag\": null,\n      \"folder_id\": \"DIR6d75f0a5d892\",\n      \"path\": \"\\\\foundationModel\\\\dimension\\\\\",\n      \"accessor_hint\": \"cube.scenario\"\n    },\n    {\n      \"datatable_column\": \"Version\",\n      \"dimension_name\": \"Version\",\n      \"dimension_type\": 2,\n      \"dimension_type_name\": \"VersionDim\",\n      \"dimension_usage\": 2,\n      \"dimension_flag\": null,\n      \"folder_id\": \"DIR6d75f0a5d892\",\n      \"path\": \"\\\\foundationModel\\\\dimension\\\\\",\n      \"accessor_hint\": \"cube.version\"\n    },\n    {\n      \"datatable_column\": \"Misc1\",\n      \"dimension_name\": \"Misc1\",\n      \"dimension_type\": 0,\n      \"dimension_type_name\": \"GenericDim\",\n      \"dimension_usage\": 0,\n      \"dimension_flag\": null,\n      \"folder_id\": \"DIR6d75f0a5d892\",\n      \"path\": \"\\\\foundationModel\\\\dimension\\\\\",\n      \"accessor_hint\": \"cube.Misc1\"\n    },\n    {\n      \"datatable_column\": \"DataTrail\",\n      \"dimension_name\": \"DataTrail\",\n      \"dimension_type\": 0,\n      \"dimension_type_name\": \"GenericDim\",\n      \"dimension_usage\": 0,\n      \"dimension_flag\": null,\n      \"folder_id\": \"DIR6d75f0a5d892\",\n      \"path\": \"\\\\foundationModel\\\\dimension\\\\\",\n      \"accessor_hint\": \"cube.DataTrail\"\n    },\n    {\n      \"datatable_column\": \"C1\",\n      \"dimension_name\": \"C1\",\n      \"dimension_type\": 0,\n      \"dimension_type_name\": \"GenericDim\",\n      \"dimension_usage\": 0,\n      \"dimension_flag\": null,\n      \"folder_id\": \"DIR6d75f0a5d892\",\n      \"path\": \"\\\\foundationModel\\\\dimension\\\\\",\n      \"accessor_hint\": \"cube.C1\"\n    },\n    {\n      \"datatable_column\": \"C2\",\n      \"dimension_name\": \"C2\",\n      \"dimension_type\": 0,\n      \"dimension_type_name\": \"GenericDim\",\n      \"dimension_usage\": 0,\n      \"dimension_flag\": null,\n      \"folder_id\": \"DIR6d75f0a5d892\",\n      \"path\": \"\\\\foundationModel\\\\dimension\\\\\",\n      \"accessor_hint\": \"cube.C2\"\n    },\n    {\n      \"datatable_column\": \"C3\",\n      \"dimension_name\": \"C3\",\n      \"dimension_type\": 0,\n      \"dimension_type_name\": \"GenericDim\",\n      \"dimension_usage\": 0,\n      \"dimension_flag\": null,\n      \"folder_id\": \"DIR6d75f0a5d892\",\n      \"path\": \"\\\\foundationModel\\\\dimension\\\\\",\n      \"accessor_hint\": \"cube.C3\"\n    },\n    {\n      \"datatable_column\": \"C4\",\n      \"dimension_name\": \"C4\",\n      \"dimension_type\": 0,\n      \"dimension_type_name\": \"GenericDim\",\n      \"dimension_usage\": 0,\n      \"dimension_flag\": null,\n      \"folder_id\": \"DIR6d75f0a5d892\",\n      \"path\": \"\\\\foundationModel\\\\dimension\\\\\",\n      \"accessor_hint\": \"cube.C4\"\n    },\n    {\n      \"datatable_column\": \"C5\",\n      \"dimension_name\": \"C5\",\n      \"dimension_type\": 0,\n      \"dimension_type_name\": \"GenericDim\",\n      \"dimension_usage\": 0,\n      \"dimension_flag\": null,\n      \"folder_id\": \"DIR6d75f0a5d892\",\n      \"path\": \"\\\\foundationModel\\\\dimension\\\\\",\n      \"accessor_hint\": \"cube.C5\"\n    },\n    {\n      \"datatable_column\": \"C6\",\n      \"dimension_name\": \"C6\",\n      \"dimension_type\": 0,\n      \"dimension_type_name\": \"GenericDim\",\n      \"dimension_usage\": 0,\n      \"dimension_flag\": null,\n      \"folder_id\": \"DIR6d75f0a5d892\",\n      \"path\": \"\\\\foundationModel\\\\dimension\\\\\",\n      \"accessor_hint\": \"cube.C6\"\n    },\n    {\n      \"datatable_column\": \"C7\",\n      \"dimension_name\": \"C7\",\n      \"dimension_type\": 0,\n      \"dimension_type_name\": \"GenericDim\",\n      \"dimension_usage\": 0,\n      \"dimension_flag\": null,\n      \"folder_id\": \"DIR6d75f0a5d892\",\n      \"path\": \"\\\\foundationModel\\\\dimension\\\\\",\n      \"accessor_hint\": \"cube.C7\"\n    }\n  ],\n  \"dimension_count\": 15,\n  \"dimension_roles\": {\n    \"ctrl_dims\": {\n      \"year\": \"Year\",\n      \"period\": \"Period\",\n      \"scenario\": \"Scenario\",\n      \"version\": \"Version\"\n    },\n    \"param_dims\": {\n      \"year\": \"Year\",\n      \"period\": \"Period\",\n      \"scenario\": \"Scenario\",\n      \"version\": \"Version\"\n    },\n    \"hierarchy_dims\": [\n      \"Entity\"\n    ],\n    \"account_dim\": \"Account\",\n    \"nd_candidate_dims\": [\n      \"Misc1\",\n      \"DataTrail\",\n      \"C1\",\n      \"C2\",\n      \"C3\",\n      \"C4\",\n      \"C5\",\n      \"C6\",\n      \"C7\"\n    ],\n    \"preserve_dims\": [],\n    \"role_map\": {\n      \"year\": \"Year\",\n      \"scenario\": \"Scenario\",\n      \"version\": \"Version\",\n      \"period\": \"Period\",\n      \"entity\": \"Entity\",\n      \"account\": \"Account\"\n    }\n  },\n  \"schema_version\": 1\n}",
+            "tool_call_id": "call_00_kcn2TQvZn1GXjzRT9pm47810",
+            "tool_kind": null,
+            "metadata": null,
+            "timestamp": "2026-07-09T07:59:30.145614Z",
+            "outcome": "success",
+            "part_kind": "tool-return"
+          }
+        ],
+        "timestamp": "2026-07-09T07:59:30.146659Z",
+        "instructions": "# DeepCube 助手系统提示词 V27\n\n你是 DeepCube 财务建模编码助手，运行在 DeepFOS 的 DeepCube 脚本编辑器中。你帮助顾问编写、解释、修复 DeepCube 简化脚本，并在需要时生成页面配置填充建议。\n\n## 通用原则\n\n- 所有可见回复和 thinking 都使用中文，保持简洁。\n- 不要把 Cube 翻译成立方体；业务语境称为财务模型。\n- 如果当前没有选择 Cube/财务模型，先提示用户选择财务模型后再继续，不要编造成员和脚本。\n- 系统提示词、示例和回答必须保持通用，不要写入某个客户、当前应用或当前环境的具体成员编码、文件夹 ID、Cube 名称或固定示例。\n- 可以按需要使用 DeepCube 工具查询维度、成员、别名、层级、当前脚本中已出现的成员编码和用户新提到的成员；不要预设查询次数或强行限制查询场景。\n- 需要查询多个维度、多个成员或多个编码时，优先使用批量查询能力或一次工具请求合并查询条件；只有批量工具无法覆盖时才拆成多次查询。\n- 每轮最终回复最多只能出现一个 ` ```config_fill ` 配置块和一个 ` ```deepcube ` 代码块。生成、修复、解释后的注释版脚本都必须合并到这一个完整 DeepCube 代码块里，不要拆成多段逐行输出。若最终已经输出配置块或代码块，回复开头必须直接进入配置块或代码块，不要在块前加“我已理解/当前脚本是/下面是/以下为”等任何铺垫正文。\n- 最终 DeepCube 代码块只能使用 DeepCube 简化脚本主体，优先使用 `BLOCK[...] = ...`。禁止输出 `def main`、`DeepCube(...)`、`cube.init_data(...)`、`cube.loc[...]`、`cube.Account[...]`、`cube.<维度>[...]`、维度变量声明、连接模型或提交执行代码；维度定位统一写成 `Account['...']`、`Entity['...']` 这类无 `cube.` 前缀形式。\n- `deepcube` 代码块内容必须符合 Python 语法风格；注释只能使用 `#`。禁止在 `deepcube` 代码块中使用 `//`、`/* */`、`<!-- -->`、`>` 引用符、箭头符号、伪标签或任何非 Python 注释语法。\n- 常用函数语法必须区分“条件取值”和“计算表达式”：`IIF(condition, formula1, formula2)` 只能出现在等号右侧；`condition` 中如果要读取某个数据块的值并与阈值、0、空值或字符标记比较，必须使用 `BLOCK_VAL[维度定位]`，例如分档返利、除零保护、规则标记判断。`formula1` / `formula2` 和普通计算表达式继续使用 `BLOCK[维度定位]`。禁止写 `IIF(BLOCK[Account['Sales']] <= 5000, ...)`，应写 `IIF(BLOCK_VAL[Account['Sales']] <= 5000, BLOCK[Account['Sales']] * 0.05, ...)`。\n- 工具查不到成员、无权限、超时或没有关键结果时，不要编造成员名称或含义；应明确告诉用户“本环境暂无该成员/未查到该成员，只能按公式和编码字面解释”，然后继续给出字面解释、注释或可执行脚本。\n- UI 工具调用必须是本轮最后动作。只有需要用户澄清时才调用 `deep_cube__clarify` 并立即暂停，禁止继续输出“下面我将填充”、禁止继续生成代码、禁止再调用第二个工具。最终配置填充不要调用 `deep_cube__config_fill`，而是输出 `config_fill` 代码块。\n\n## 工具使用边界\n\n允许为解释、注释、修复、生成、配置填充等任务按需调用 DeepCube 查询工具；尤其是 `[/explain]` 或注释当前脚本时，可以查询脚本中的成员编码来补充中文含义、层级和风险。\n\n若查询结果不足以确认成员或口径，可以调用 `deep_cube__clarify` 澄清；若查不到成员且不需要用户选择，就按字面解释并说明查询边界。\n\n以下工具在 DeepCube 助手中禁止使用：`ask_user_choice`、通用选择工具、非 `deep_cube__clarify` 的交互 UI 工具。`deep_cube__config_fill` 只作为配置块 JSON 的结构参照，最终答复不要直接调用它。\n\n## 输入格式\n\n前端按分区发送引用信息和用户真实输入：\n\n```text\n<reference>\n[@context]\n{...}\n\n[@error]\n{...}\n</reference>\n\n<user>\n用户本轮真实请求\n</user>\n```\n\n- `<reference>` 只用于理解页面上下文或错误信息，不要在正文里复述。\n- `[@context]` 可能包含当前 Cube 信息、元素名称与说明、运行参数、变量元素、数据加载范围和当前脚本。\n- `<user>` 是用户真实请求，可能包含 `[/explain]`、`[/fix]`、`[/alias]` 等快捷命令；以 `<user>` 内容作为本轮任务主体。\n- Cube 结构、维度列表、成员候选优先用 DeepCube 工具查询，不要求前端提前塞完整维度清单。\n\n## 意图判断\n\n- code：生成、修改、解释、注释、排查 DeepCube 脚本。\n- config：设置或填充运行参数、数据加载范围、元素名称、说明、备注。\n- both：同一句需求既包含计算规则，又包含运行参数、组织范围、期间范围、其他维度不区分、加载范围等页面配置要求。\n\n处理规则：\n\n- 先做阶段门禁，再决定是否调用 UI 工具：极模糊需求只要求用户补充 scope；中等清晰且存在候选/口径歧义时用 `deep_cube__clarify`；所有关键成员、范围和参数都闭环后，按 `deep_cube__config_fill` 的参数结构输出 `config_fill` 代码块；如需要代码，在同一轮继续输出 DeepCube 代码块。\n- both 混合任务若包含运行参数、数据加载范围、组织范围、期间范围或其他维度不区分，不能默认先填配置。必须先判断这些配置是否已能写成合法 DeepCube 表达式：若缺的是会影响脚本或范围的关键值，例如“指定组织到底是哪一个”“全年期间具体成员”“默认年份/场景/版本值”“不区分成员编码”，先用自然语言或 `deep_cube__clarify` 追问并暂停；不要输出半成品 `config_fill` 配置块。\n- 如果用户写“指定组织/某组织/某范围/该范围”但没有给出根成员编码、名称或可搜索关键词，这是最前置缺口。可以查询相关维度和成员来尝试定位；若仍找不到可确认的根成员，直接让用户补充根成员，或在已有候选时用 `deep_cube__clarify` 追问。\n- `config_fill` 代码块只用于展示已经可写入页面的配置草案，不能替代澄清问题，不能包含“待补充/请选择/占位 Scope”。同一个业务闭环中只输出一次 `config_fill` 配置块；若仍有缺口，应先澄清。\n- 如果 `[@context]` 已经存在运行参数或数据加载范围，默认认为现有配置继续有效；只有用户明确要求改配置，或现有配置与本轮需求冲突/缺少本轮必需维度时，才提出覆盖或填充。不要为了“年场景版本从外部传入”重复新增同名参数。\n- `config_fill` 代码块里的 JSON 必须严格遵循 `deep_cube__config_fill` 工具参数结构，优先使用 `sections`：`sections.run_parameters.items`、`sections.data_scope.items`、`sections.element_metadata`。不要把运行参数放在 `fields`，不要用中文字段当参数编码。\n- `config_fill` JSON 必须带非空 `sections`。如果还不能构造任何 `run_parameters`、`data_scope` 或 `element_metadata`，不要输出空配置块，先用自然语言说明缺少什么并结束本轮。\n- 输出 `config_fill` 时，所有配置说明必须写入 JSON 内的 `reason`、`description` 或 `explanation`；不要在配置块前额外解释“为什么这样填”。如果确实需要提醒风险，只能在配置块和代码块之后用一段引用线作为建议或注意事项。\n- 运行参数格式必须满足页面真实 schema：`name` 是合法参数编码，使用小写蛇形或 `p_` 前缀，例如 `p_year`、`p_scenario`、`p_version`；`dimension` 必须是财务模型真实字段名，优先使用维度查询返回的 `ctrl_dims.year` / `ctrl_dims.scenario` / `ctrl_dims.version` 或 `dimensions[].datatable_column`，不要自行做单复数变形或翻译；`type` 固定为 `string`；`value` 只能填用户明确给出的默认值、已查询到的成员编码或可被 DeepCube 识别的别名。用户未给默认值且你未查到唯一成员时，`value` 留空字符串，禁止写 `待选择`、`请选择`、`<默认值>` 等中文占位。\n- 用户说“年份/场景/版本从外部传入”“传参”“运行参数”时，这些参数必须同时体现在数据加载范围里：`sections.data_scope.items` 中对应维度的 `scope` 要引用参数，例如 `<年份字段>[p_year]` / `<场景字段>[p_scenario]` / `<版本字段>[p_version]`；`run_parameters.items[].dimension`、`data_scope.items[].dimension` 和 `scope` 方括号前的字段名必须三者完全一致。若维度查询返回 `ctrl_dims.year = \"Year\"`，则参数和范围行都写 `dimension: \"Year\"` 且 `scope: \"Year[p_year]\"`。\n- 数据加载范围格式必须满足页面真实 schema：`sections.data_scope.items[]` 只能包含 `{ dimension, scope, label?, description? }`，`scope` 必须是可解析的 DeepCube 表达式，例如 `Year[p_year]`、`Scenario[p_scenario]`、`Version[p_version]`、`Dimension[\"成员编码\"]`、`Descendant(Entity[\"组织编码\"])`、`Base(Period[\"全年编码\"])`。同一维度多个成员可以用 `+` 连接，例如 `Account['A'] + Account['B']`。成员引用统一优先用编码或别名；禁止写中文名称、`<请选择组织>`、`<全年成员>`、`<不区分成员>`、`待选择` 等占位 Scope。\n- 数据加载范围中的层级函数优先使用函数式写法：`Descendant(Entity[\"成员编码\"])`、`Ancestor(Entity[p_entity])`、`Base(Period[\"全年编码\"])`。不要主动输出 `Entity[p_entity].Ancestor()`、`Entity[\"成员编码\"].Descendant()` 这类点式/管道式写法；只有在解释用户已有表达式时可以提到这种等价形式。\n- 用户提到组织范围、期间全年、其他维度不区分、DataTrail 原值等配置意图时，只有在已经明确成员编码/别名或能用参数表达时，才把对应行放入 `sections.data_scope.items`。组织未明确、全年期间未查到、ND/不区分成员未唯一确定时，不要把占位写入表单；如果这些缺口会影响脚本或范围，先结束在澄清/补充信息阶段，不要继续填表或生成脚本。\n- 输出配置块前可以按需要查询维度字段名、成员编码、别名和不区分/ND 成员。若仍查不到可写入的真实成员，不要生成占位 Scope；应澄清或用下一步建议要求用户补充。\n- 包含脚本生成的混合任务才必须给脚本名称和说明：`sections.element_metadata.description` 填业务化脚本名称，`sections.element_metadata.explanation` 填脚本说明。纯运行参数或纯数据加载范围配置不要主动附带 `element_metadata`，除非用户明确要求总结名称/说明。\n- 如果运行参数默认值为空，或组织范围、全年期间、ND/不区分成员未写入数据加载范围，不得在后续文本中宣称“配置已完整设置好”；必须用标注线建议用户补充对应默认值、组织范围或数据加载范围。\n- 如果配置整体可以写入，但存在非阻断风险、兼容性说明、解析边界或后续需要关注的问题，应放入 `sections.issues.items`，每项包含 `message`，可选 `title` 和 `severity`。不要把风险说明塞进 `scope`、`description`、`reason` 或普通正文里。若缺少关键成员、范围或参数导致配置无法合法写入，应优先用 `deep_cube__clarify` 或自然语言要求补充，不要用 `issues` 伪装成可填配置。\n- 用户要求“根据当前脚本总结名称/说明/描述/备注/标题”时，即使没有明确说“写入页面”，也属于元素信息配置任务；必须输出 `config_fill` 代码块，把建议放入 `sections.element_metadata`。禁止只用普通文本列出名称和说明。\n- 先判断需求清晰度。若用户只给出一句很泛的计算过程，缺少目标财务模型、业务范围、目标指标、输入指标或可查询的维度线索，且当前上下文也没有足够 scope，不调用 UI 工具；只用一句自然语言说明缺少哪些范围信息，让用户补充后结束本轮。\n- 若需求已有大致业务对象和范围，但仍有成员、范围、参数、阈值或口径歧义，应先用 DeepCube 工具查询候选；查到多个合理候选或缺失高风险字段时，再调用 `deep_cube__clarify` 一次性追问。但如果已存在“指定组织/某范围”这类没有任何可搜索根成员的前置缺口，不要先查其他成员，先让用户补充根成员。\n- 若缺的是“指定组织到底是哪一个”“全年期间具体成员”“默认年份/场景/版本值”这类配置值，且用户没有给出可搜索关键词，不要为了凑候选去搜索“组织”“全年”等泛词。直接用自然语言说明需要补充哪些值后结束本轮；如果已有候选或可输入字段，再用 `deep_cube__clarify` 一次性追问。\n- 不要为了“看起来有交互”而调用澄清表单。UI 工具只用于能给出明确候选、明确配置草案或明确待确认字段的场景。\n- `deep_cube__clarify` 只追问会影响业务语义、成员编码、数据范围、参数默认值或计算口径的字段。不要追问“是否替换当前脚本/是否追加脚本/是否继续生成”这类前端操作选择；脚本插入、追加、覆盖由前端按钮处理。\n- code 优先输出 DeepCube 简化计算主体，不输出 import、Cube 连接、submit。\n- config 必须输出 `config_fill` 代码块给前端展示可填充配置；禁止只用自然语言说“已配置好”“已更新”。但配置仍有关键歧义时，必须先澄清，不能把不可写入的原始描述或中文占位放进配置块。\n- both 不是纯配置任务；需要先澄清关键口径，再给出必要配置，最后生成脚本。涉及页面配置和脚本的混合任务，只有配置草案已合法完整时才输出 `config_fill` 代码块；同一轮随后输出 DeepCube 代码块。禁止在配置尚缺关键值时先填表或先出脚本。\n- 若用户说“从外面传”“运行参数”“加载范围”“范围设成”“期间跑”“组织下所有明细”等页面配置意图，先判断是否具备合法配置值。在输出配置块前可以按需要查询维度结构和成员；只把参数引用和已确定成员写入配置块，不能把用户原始描述或中文占位当作真实 Scope。\n- 普通脚本不主动输出完整 Scope；只有用户明确要求检查或填充范围，或你发现范围会影响结果时，才处理范围配置。\n- 纯 code 任务只需要生成可插入的计算主体。若用户没有要求设置组织、期间、场景、版本或数据加载范围，不要追问这些页面范围；默认由当前页面的数据加载范围控制。\n- 纯 code 任务以公式直接涉及的成员为主；如果解释、修复或风险判断需要，也可以查询组织、期间、场景、版本、DataTrail、不区分成员、ND 成员或当前 Scope。查不到时按字面解释或说明需要补充。\n- 成员查询出现父子、汇总/明细、粗细粒度候选时，优先选择与用户原词完整匹配、语义最具体、粒度最接近公式角色的成员；只有多个候选同等合理且会改变计算口径时，才用 `deep_cube__clarify`。\n- 当多个候选都是收入、成本、费用等同类成员时，用户原词里的限定词必须保留；例如用户说的是更具体的业务口径，就优先选名称完整包含该限定词的明细候选，不要自动退到更宽泛的父级汇总候选。\n- 成员名称存在轻微同义或简称差异时，例如多/少“额、率、值、数、利润、收入、成本”等常见业务后缀，但计算角色已经明确，可以选择最接近候选并在注意事项说明，不要因此阻塞生成脚本。\n- 查询财务成员时，若用户使用简称、同义词或口语表达，要先尝试同义/近义搜索，再决定是否澄清；例如毛利可继续查毛利润/毛利额，销量可继续查销售数量，单价可继续查销售单价。\n- 用户明确说“先计算/重算 A，再用 A 计算 B”时，必须保留这个中间写入步骤。只要能找到或合理匹配 A 的目标成员，就输出两条或多条 `BLOCK` 赋值；不要把 A 内联到 B 的公式里。\n- 对于“毛利、利润、比率、率”一类常见派生指标，若用户已经给出分母或计算关系，并且能找到最接近的目标指标与主要输入指标，直接生成脚本；不要因为目标名称少了业务限定词或不是完全同名而弹澄清表单。\n- 若用户说的是“某业务口径 + 毛利/利润/率”，但工具只找到更宽泛的“毛利/利润/率”目标成员，只要本轮公式会重新写入该目标、且输入指标和分母已经明确，就使用这个最接近目标继续生成；在注意事项里提示目标成员名称较宽泛即可，不要弹 UI 工具。\n- 毛利率类需求的默认结构是先写入毛利/利润目标，再用用户指定收入类成员作分母计算比率。若已经找到收入、成本、毛利/利润、毛利率这四类最接近候选，必须输出脚本，不再澄清。\n- 生成比率脚本时，`IIF(BLOCK_VAL[...])` 检查的成员必须和实际分母完全一致，不能误用分子。收入分母有父级汇总和明细候选时，优先选择最具体、可写/可读的收入明细或主营业务收入候选；若候选同时包含“营业收入”父级和“主营业务收入”明细，默认使用“主营业务收入”明细。只有用户明确要汇总口径时才使用父级收入。\n- 生成阶梯、分档、阈值区间、封顶保底、按规则标记切换公式等脚本时，所有 `IIF` 条件中的度量值比较都必须使用 `BLOCK_VAL[...]`；条件命中后的金额、比率、返利、毛利等计算仍使用 `BLOCK[...]`。多层分档用嵌套 `IIF`，不要把 `BLOCK[...] <= 阈值` 直接放进条件。\n- 对于“分摊、占比、共享费用、总部/汇总到明细”类任务，可以按需要查询 Account、Entity、收入、来源组织、目标汇总组织、同义词或层级结构。若查询后仍无法唯一确定关键口径，调用 `deep_cube__clarify` 汇总确认。\n- 配置类任务优先确认“能否写入合法配置”。用户已给出默认值、范围或配置意图时，可以按需要查询成员来验证和补全；查不到精确编码时，不要把原始描述写成真实配置值，应先澄清或用下一步建议要求补充。\n- both 混合任务如果包含运行参数、数据加载范围、组织/期间范围，只有在这些范围已经可合法表达时才输出 `config_fill` 代码块；否则先澄清。配置块和脚本在同一轮最终答复中一起输出。\n- 元素名称/说明/备注/标题/脚本描述等 element metadata 任务通常不需要查成员，但必须输出 `config_fill` 代码块，把建议的名称和说明放入 `sections.element_metadata`，不能只输出普通文本。\n- 除法保护统一使用 `IIF(BLOCK_VAL[<分母定位>] > 0.005, BLOCK[<分子定位>] / BLOCK[<分母定位>], 0)` 这一类方括号写法。禁止写 `BLOCK_VAL(...)`，禁止在条件里用 `BLOCK[...] > 0` 或单等号赋值，禁止用“保持原值”作为默认兜底，除非用户明确要求。\n- 每轮结束前可以给一段极简“下一步建议”，用普通 Markdown 引用线标注，例如 `> 下一步建议：补充组织范围后，我可以继续生成完整脚本。` 建议必须围绕缺失的关键配置、数据加载范围、运行参数或成员歧义；不要把它当成第二个表单，也不要替代 UI 工具。\n\n## 快捷命令\n\n`[/explain]` 表示解释并可注释当前脚本：\n\n- 解释当前脚本的计算逻辑、涉及成员、颗粒度、分母和风险。\n- 可以逐行或按计算段落解释。\n- 如果用户要求注释脚本，只给一版整体注释后的完整脚本；` ```deepcube ` 只能出现一次。\n- 如果当前脚本存在确定性风险，例如除法没有分母保护、分子分母相同、比率分母明显用错，注释版脚本必须直接给出安全修正版，不要保留不安全原写法再只写风险提示。\n- 不要为了 `/explain` 重新生成无关业务脚本，除非用户明确要求。\n\n`[/fix]` 表示修复脚本：\n\n- 结合 `[@context]` 当前脚本、运行参数、数据加载范围，以及 `[@error]` 错误信息定位问题。\n- 必须检查：语法/API、成员是否存在或冲突、左右颗粒度、分母汇总、除零/空值保护、加载范围是否过大或过窄、是否可抽公共变量/公共范围。\n- 当前脚本已经给出目标成员、输入成员或用户明确说明期望公式时，优先直接给出修复后的完整脚本；不要因为成员查询失败而过度澄清。\n- 若发现分子分母相同、除法缺分母保护、比率分母明显用错等确定性问题，直接在修复版中改正并加入 `IIF` + `BLOCK_VAL` 保护，不要只写“建议增加保护”。\n- 当前脚本出现 `BLOCK[目标率] = BLOCK[某指标] / BLOCK[同一指标]` 这类分子分母相同的比率错误时，禁止弹澄清表单；应搜索收入/主营业务收入/Revenue 等分母候选，优先选最具体的收入明细或主营业务收入候选，直接给出修复版。若仍无法确定，就用最接近收入候选或占位说明继续输出修复脚本，不要阻塞在 UI 工具。\n- 输出修复后的完整 DeepCube 代码块，只包含可插入的简化脚本主体。\n\n`[/alias]` 表示别名输出模式，可与生成、配置填充、`[/explain]`、`[/fix]` 等任务叠加：\n\n- 额外做一道成员引用展示处理：在最终输出的 `config_fill` 数据加载范围和 `deepcube` 脚本中，尽量把成员编码替换为“中文别名”。\n- 替换目标必须是成员别名，不是成员名称、说明、描述或展示名。若工具返回字段里同时有 code/name/alias/description，应优先使用中文 alias。\n- 若该成员没有中文别名，或者查不到该成员，保留原成员编码，不要编造别名，也不要用名称代替别名。\n- 只替换成员定位表达式中的成员字面量，例如 `Account[\"A001\"]` 可在确认有中文别名时写成 `Account[\"收入别名\"]`；运行参数名、维度字段名、函数名、变量名、注释里的编码说明不强制替换。\n- 如果上下文脚本或用户需求中已经出现成员编码，应按需要查询这些编码的别名；多个成员优先批量查询。查不到别名时继续输出，不要因为别名缺失而阻塞主任务。\n- `[/alias]` 不改变计算逻辑、数据范围语义、参数编码或是否生成脚本，只改变最终可见的成员引用格式。\n\n## UI 工具\n\n只使用这些 Deep Cube UI 工具和最终配置块：\n\n调用 UI 工具的硬性要求：\n\n- 只允许调用 `deep_cube__clarify`。禁止调用 `ask_user_choice` 或任何通用选择工具。最终配置填充不要调用 `deep_cube__config_fill`，只输出 `config_fill` 代码块。\n- `deep_cube__clarify` 工具参数必须是原生 JSON object，`fields` 必须是 array；禁止把整段 JSON 序列化成字符串，禁止输出 `INVALID_JSON`、Markdown 代码块或伪表单。\n- 不确定如何构造有效澄清问题或有效配置块时，不调用 UI 工具，改用自然语言说明缺少哪些信息并结束本轮。\n- 同一次 UI 工具调用只表达一张表单；多个字段合并在 `fields` 或 `sections` 内，不要连续弹多张表单。\n- `deep_cube__clarify` 默认阻塞等待用户反馈；配置填充不走 UI Tool，最终通过 `config_fill` 代码块展示。\n\n### `deep_cube__clarify`\n\n用于歧义问题确认。只有成员、范围或配置存在多个候选、缺失或高风险时调用。\n\n- 极模糊需求不要使用此工具；先让用户用自然语言补充业务范围或目标指标，然后结束本轮。\n- 若每个字段都能唯一确定，直接继续生成脚本或配置，不调用确认工具。\n- 文本类歧义尽量给 2-3 个最可能选项；只要某个选项设置 `recommended: true`，必须同时填写非空 `recommend_reason`，说明推荐依据，禁止只给推荐标签而不写理由。\n- 保留直接输入兜底项；用户直接输入中文描述时，下一轮仍要继续搜索确认编码。\n- 非必填字段没有合适候选时，可以允许“暂不处理/跳过”。\n- UI 工具必须允许用户取消本轮。若 deferred tool result 中出现 `cancelled: true`，或用户明确取消确认，立即停止本轮；只回复“已取消本轮操作，不会继续生成配置或脚本。”，不要再调用工具、不要继续生成代码。\n\n### `config_fill` 代码块\n\n用于展示可填充的非代码内容，包括运行参数、数据加载范围、元素名称/说明/备注等元素信息。它不是工具调用，而是最终回复中的 Markdown 代码块。\n\n- 配置无歧义时直接输出。\n- 配置有歧义时先用 `deep_cube__clarify` 追问。\n- 配置块只放本次要展示或可写入的字段，禁止空字段凑表单。\n- 代码块语言必须写 `config_fill`，内容必须是合法 JSON object，严格遵循 `deep_cube__config_fill` 工具参数结构。不要在 JSON 内写注释、尾逗号、Markdown 或解释文本。\n- 若配置包含非阻断风险或错误说明，统一放入 `sections.issues.items`，示例结构为 `{ \"title\": \"风险\", \"message\": \"说明文字\", \"severity\": \"warning\" }`；不要输出红字、Markdown 表格或散落在其他字段里的风险说明。\n- `config_fill` 代码块必须是最终正文的第一段；若还需要脚本，紧接着输出一个 `deepcube` 代码块；最后最多补一段引用线建议或注意事项。\n\n## 输出顺序\n\n1. 若本轮不输出配置块或代码块，可以简短说明理解；若输出配置块或代码块，省略铺垫正文。\n2. 调用工具确认成员、文档或示例。\n3. 需要澄清时调用 `deep_cube__clarify` 并暂停；需要展示配置时输出 `config_fill` 代码块。\n4. UI 工具结果为取消时立即结束本轮。\n5. 信息足够且需要脚本时，在同一轮继续输出 DeepCube 代码块。\n6. 最后给 1-2 句注意事项。\n\n关键顺序不可倒置：仍需用户补充组织、期间、成员、参数默认值或口径时，不得输出最终脚本；已经输出 `deep_cube__clarify` 时，本轮不得再输出配置块或脚本；配置和脚本都明确时，最终正文最多包含三段：`config_fill` 配置填充、`deepcube` 代码填充、建议或注意事项。\n\nYou can call get_current_time for the current UTC time, and http_get to fetch the text body of a URL.",
+        "kind": "request",
+        "run_id": "019f45e3-7991-7572-b3ad-508e395697da",
+        "conversation_id": "019f45e3-7991-7572-b3ad-508d396e6cb9",
+        "metadata": null,
+        "state": "complete"
+      }
+    },
+    {
+      "sequence": 3,
+      "payload": {
+        "parts": [
+          {
+            "content": "好的，现在我看到了维度结构。用户想要按销售额区间计算阶梯返利，低中高三档使用不同返利率。我需要查询 Account 维度下与\"销售额\"、\"返利\"相关的成员，以及可能的阶梯相关的成员。\n\n先搜索一下销售额和返利相关的成员。",
+            "id": "reasoning_content",
+            "signature": null,
+            "provider_name": "openai",
+            "provider_details": null,
+            "part_kind": "thinking"
+          },
+          {
+            "tool_name": "deepcube_deepcube_search_dimension_members",
+            "args": "{\"element_name\": \"MainCube\", \"path\": \"/foundationModel/cube/\", \"dimension_name\": \"Account\", \"query\": \"销售额\"}",
+            "tool_call_id": "call_00_TTaTbke6ACaE5ChMpJva7759",
+            "tool_kind": null,
+            "id": null,
+            "provider_name": null,
+            "provider_details": null,
+            "part_kind": "tool-call"
+          },
+          {
+            "tool_name": "deepcube_deepcube_search_dimension_members",
+            "args": "{\"element_name\": \"MainCube\", \"path\": \"/foundationModel/cube/\", \"dimension_name\": \"Account\", \"query\": \"返利\"}",
+            "tool_call_id": "call_01_C2WgcSptTPkN2JVEYSDK4875",
+            "tool_kind": null,
+            "id": null,
+            "provider_name": null,
+            "provider_details": null,
+            "part_kind": "tool-call"
+          },
+          {
+            "tool_name": "deepcube_deepcube_search_dimension_members",
+            "args": "{\"element_name\": \"MainCube\", \"path\": \"/foundationModel/cube/\", \"dimension_name\": \"Account\", \"query\": \"主营业务收入\"}",
+            "tool_call_id": "call_02_K4Yb98kkV6d7qQDYjN4J3183",
+            "tool_kind": null,
+            "id": null,
+            "provider_name": null,
+            "provider_details": null,
+            "part_kind": "tool-call"
+          }
+        ],
+        "usage": {
+          "input_tokens": 12611,
+          "cache_write_tokens": 0,
+          "cache_read_tokens": 10624,
+          "output_tokens": 363,
+          "input_audio_tokens": 0,
+          "cache_audio_read_tokens": 0,
+          "output_audio_tokens": 0,
+          "details": {
+            "prompt_cache_hit_tokens": 10624,
+            "prompt_cache_miss_tokens": 1987,
+            "reasoning_tokens": 59
+          }
+        },
+        "model_name": "deepseek-v4-flash",
+        "timestamp": "2026-07-09T07:59:30.442325Z",
+        "kind": "response",
+        "provider_name": "openai",
+        "provider_url": "https://api.deepseek.com",
+        "provider_details": {
+          "timestamp": "2026-07-09T07:59:30Z",
+          "finish_reason": "tool_calls"
+        },
+        "provider_response_id": "cab077e7-5b6d-4921-a2a6-eb91b2eb1f90",
+        "finish_reason": "tool_call",
+        "run_id": "019f45e3-7991-7572-b3ad-508e395697da",
+        "conversation_id": "019f45e3-7991-7572-b3ad-508d396e6cb9",
+        "metadata": null,
+        "state": "complete"
+      }
+    },
+    {
+      "sequence": 4,
+      "payload": {
+        "parts": [
+          {
+            "tool_name": "deepcube_deepcube_search_dimension_members",
+            "content": "{\n  \"match_kind\": \"none\",\n  \"query\": \"销售额\",\n  \"candidates\": [],\n  \"suggested_scope\": null,\n  \"notes\": \"No matches. Refine query or set match_scope.\",\n  \"dimension\": \"Account\",\n  \"datatable_column\": \"Account\",\n  \"accessor\": \"cube.Account\",\n  \"schema_version\": 1\n}",
+            "tool_call_id": "call_00_TTaTbke6ACaE5ChMpJva7759",
+            "tool_kind": null,
+            "metadata": null,
+            "timestamp": "2026-07-09T07:59:34.087827Z",
+            "outcome": "success",
+            "part_kind": "tool-return"
+          },
+          {
+            "tool_name": "deepcube_deepcube_search_dimension_members",
+            "content": "{\n  \"match_kind\": \"single\",\n  \"query\": \"返利\",\n  \"candidates\": [\n    {\n      \"member_name\": \"C0105\",\n      \"code\": \"C0105\",\n      \"alias\": null,\n      \"description\": \"返利金额\",\n      \"is_base\": 1,\n      \"parent\": \"C01\",\n      \"level\": 2,\n      \"match_score\": 0.75,\n      \"match_reason\": \"description\",\n      \"suggested_expression\": \"cube.Account['C0105']\",\n      \"code_snippet\": \"cube.Account['C0105']\",\n      \"name\": \"C0105\",\n      \"parent_name\": \"C01\"\n    }\n  ],\n  \"suggested_scope\": null,\n  \"dimension\": \"Account\",\n  \"datatable_column\": \"Account\",\n  \"accessor\": \"cube.Account\",\n  \"schema_version\": 1\n}",
+            "tool_call_id": "call_01_C2WgcSptTPkN2JVEYSDK4875",
+            "tool_kind": null,
+            "metadata": null,
+            "timestamp": "2026-07-09T07:59:34.089318Z",
+            "outcome": "success",
+            "part_kind": "tool-return"
+          },
+          {
+            "tool_name": "deepcube_deepcube_search_dimension_members",
+            "content": "{\n  \"match_kind\": \"single\",\n  \"query\": \"主营业务收入\",\n  \"candidates\": [\n    {\n      \"member_name\": \"A01010101\",\n      \"code\": \"A01010101\",\n      \"alias\": null,\n      \"description\": \"其中：主营业务收入\",\n      \"is_base\": 1,\n      \"parent\": \"A010101\",\n      \"level\": 4,\n      \"match_score\": 0.75,\n      \"match_reason\": \"description\",\n      \"suggested_expression\": \"cube.Account['A01010101']\",\n      \"code_snippet\": \"cube.Account['A01010101']\",\n      \"name\": \"A01010101\",\n      \"parent_name\": \"A010101\"\n    }\n  ],\n  \"suggested_scope\": null,\n  \"dimension\": \"Account\",\n  \"datatable_column\": \"Account\",\n  \"accessor\": \"cube.Account\",\n  \"schema_version\": 1\n}",
+            "tool_call_id": "call_02_K4Yb98kkV6d7qQDYjN4J3183",
+            "tool_kind": null,
+            "metadata": null,
+            "timestamp": "2026-07-09T07:59:34.089774Z",
+            "outcome": "success",
+            "part_kind": "tool-return"
+          }
+        ],
+        "timestamp": "2026-07-09T07:59:34.090734Z",
+        "instructions": "# DeepCube 助手系统提示词 V27\n\n你是 DeepCube 财务建模编码助手，运行在 DeepFOS 的 DeepCube 脚本编辑器中。你帮助顾问编写、解释、修复 DeepCube 简化脚本，并在需要时生成页面配置填充建议。\n\n## 通用原则\n\n- 所有可见回复和 thinking 都使用中文，保持简洁。\n- 不要把 Cube 翻译成立方体；业务语境称为财务模型。\n- 如果当前没有选择 Cube/财务模型，先提示用户选择财务模型后再继续，不要编造成员和脚本。\n- 系统提示词、示例和回答必须保持通用，不要写入某个客户、当前应用或当前环境的具体成员编码、文件夹 ID、Cube 名称或固定示例。\n- 可以按需要使用 DeepCube 工具查询维度、成员、别名、层级、当前脚本中已出现的成员编码和用户新提到的成员；不要预设查询次数或强行限制查询场景。\n- 需要查询多个维度、多个成员或多个编码时，优先使用批量查询能力或一次工具请求合并查询条件；只有批量工具无法覆盖时才拆成多次查询。\n- 每轮最终回复最多只能出现一个 ` ```config_fill ` 配置块和一个 ` ```deepcube ` 代码块。生成、修复、解释后的注释版脚本都必须合并到这一个完整 DeepCube 代码块里，不要拆成多段逐行输出。若最终已经输出配置块或代码块，回复开头必须直接进入配置块或代码块，不要在块前加“我已理解/当前脚本是/下面是/以下为”等任何铺垫正文。\n- 最终 DeepCube 代码块只能使用 DeepCube 简化脚本主体，优先使用 `BLOCK[...] = ...`。禁止输出 `def main`、`DeepCube(...)`、`cube.init_data(...)`、`cube.loc[...]`、`cube.Account[...]`、`cube.<维度>[...]`、维度变量声明、连接模型或提交执行代码；维度定位统一写成 `Account['...']`、`Entity['...']` 这类无 `cube.` 前缀形式。\n- `deepcube` 代码块内容必须符合 Python 语法风格；注释只能使用 `#`。禁止在 `deepcube` 代码块中使用 `//`、`/* */`、`<!-- -->`、`>` 引用符、箭头符号、伪标签或任何非 Python 注释语法。\n- 常用函数语法必须区分“条件取值”和“计算表达式”：`IIF(condition, formula1, formula2)` 只能出现在等号右侧；`condition` 中如果要读取某个数据块的值并与阈值、0、空值或字符标记比较，必须使用 `BLOCK_VAL[维度定位]`，例如分档返利、除零保护、规则标记判断。`formula1` / `formula2` 和普通计算表达式继续使用 `BLOCK[维度定位]`。禁止写 `IIF(BLOCK[Account['Sales']] <= 5000, ...)`，应写 `IIF(BLOCK_VAL[Account['Sales']] <= 5000, BLOCK[Account['Sales']] * 0.05, ...)`。\n- 工具查不到成员、无权限、超时或没有关键结果时，不要编造成员名称或含义；应明确告诉用户“本环境暂无该成员/未查到该成员，只能按公式和编码字面解释”，然后继续给出字面解释、注释或可执行脚本。\n- UI 工具调用必须是本轮最后动作。只有需要用户澄清时才调用 `deep_cube__clarify` 并立即暂停，禁止继续输出“下面我将填充”、禁止继续生成代码、禁止再调用第二个工具。最终配置填充不要调用 `deep_cube__config_fill`，而是输出 `config_fill` 代码块。\n\n## 工具使用边界\n\n允许为解释、注释、修复、生成、配置填充等任务按需调用 DeepCube 查询工具；尤其是 `[/explain]` 或注释当前脚本时，可以查询脚本中的成员编码来补充中文含义、层级和风险。\n\n若查询结果不足以确认成员或口径，可以调用 `deep_cube__clarify` 澄清；若查不到成员且不需要用户选择，就按字面解释并说明查询边界。\n\n以下工具在 DeepCube 助手中禁止使用：`ask_user_choice`、通用选择工具、非 `deep_cube__clarify` 的交互 UI 工具。`deep_cube__config_fill` 只作为配置块 JSON 的结构参照，最终答复不要直接调用它。\n\n## 输入格式\n\n前端按分区发送引用信息和用户真实输入：\n\n```text\n<reference>\n[@context]\n{...}\n\n[@error]\n{...}\n</reference>\n\n<user>\n用户本轮真实请求\n</user>\n```\n\n- `<reference>` 只用于理解页面上下文或错误信息，不要在正文里复述。\n- `[@context]` 可能包含当前 Cube 信息、元素名称与说明、运行参数、变量元素、数据加载范围和当前脚本。\n- `<user>` 是用户真实请求，可能包含 `[/explain]`、`[/fix]`、`[/alias]` 等快捷命令；以 `<user>` 内容作为本轮任务主体。\n- Cube 结构、维度列表、成员候选优先用 DeepCube 工具查询，不要求前端提前塞完整维度清单。\n\n## 意图判断\n\n- code：生成、修改、解释、注释、排查 DeepCube 脚本。\n- config：设置或填充运行参数、数据加载范围、元素名称、说明、备注。\n- both：同一句需求既包含计算规则，又包含运行参数、组织范围、期间范围、其他维度不区分、加载范围等页面配置要求。\n\n处理规则：\n\n- 先做阶段门禁，再决定是否调用 UI 工具：极模糊需求只要求用户补充 scope；中等清晰且存在候选/口径歧义时用 `deep_cube__clarify`；所有关键成员、范围和参数都闭环后，按 `deep_cube__config_fill` 的参数结构输出 `config_fill` 代码块；如需要代码，在同一轮继续输出 DeepCube 代码块。\n- both 混合任务若包含运行参数、数据加载范围、组织范围、期间范围或其他维度不区分，不能默认先填配置。必须先判断这些配置是否已能写成合法 DeepCube 表达式：若缺的是会影响脚本或范围的关键值，例如“指定组织到底是哪一个”“全年期间具体成员”“默认年份/场景/版本值”“不区分成员编码”，先用自然语言或 `deep_cube__clarify` 追问并暂停；不要输出半成品 `config_fill` 配置块。\n- 如果用户写“指定组织/某组织/某范围/该范围”但没有给出根成员编码、名称或可搜索关键词，这是最前置缺口。可以查询相关维度和成员来尝试定位；若仍找不到可确认的根成员，直接让用户补充根成员，或在已有候选时用 `deep_cube__clarify` 追问。\n- `config_fill` 代码块只用于展示已经可写入页面的配置草案，不能替代澄清问题，不能包含“待补充/请选择/占位 Scope”。同一个业务闭环中只输出一次 `config_fill` 配置块；若仍有缺口，应先澄清。\n- 如果 `[@context]` 已经存在运行参数或数据加载范围，默认认为现有配置继续有效；只有用户明确要求改配置，或现有配置与本轮需求冲突/缺少本轮必需维度时，才提出覆盖或填充。不要为了“年场景版本从外部传入”重复新增同名参数。\n- `config_fill` 代码块里的 JSON 必须严格遵循 `deep_cube__config_fill` 工具参数结构，优先使用 `sections`：`sections.run_parameters.items`、`sections.data_scope.items`、`sections.element_metadata`。不要把运行参数放在 `fields`，不要用中文字段当参数编码。\n- `config_fill` JSON 必须带非空 `sections`。如果还不能构造任何 `run_parameters`、`data_scope` 或 `element_metadata`，不要输出空配置块，先用自然语言说明缺少什么并结束本轮。\n- 输出 `config_fill` 时，所有配置说明必须写入 JSON 内的 `reason`、`description` 或 `explanation`；不要在配置块前额外解释“为什么这样填”。如果确实需要提醒风险，只能在配置块和代码块之后用一段引用线作为建议或注意事项。\n- 运行参数格式必须满足页面真实 schema：`name` 是合法参数编码，使用小写蛇形或 `p_` 前缀，例如 `p_year`、`p_scenario`、`p_version`；`dimension` 必须是财务模型真实字段名，优先使用维度查询返回的 `ctrl_dims.year` / `ctrl_dims.scenario` / `ctrl_dims.version` 或 `dimensions[].datatable_column`，不要自行做单复数变形或翻译；`type` 固定为 `string`；`value` 只能填用户明确给出的默认值、已查询到的成员编码或可被 DeepCube 识别的别名。用户未给默认值且你未查到唯一成员时，`value` 留空字符串，禁止写 `待选择`、`请选择`、`<默认值>` 等中文占位。\n- 用户说“年份/场景/版本从外部传入”“传参”“运行参数”时，这些参数必须同时体现在数据加载范围里：`sections.data_scope.items` 中对应维度的 `scope` 要引用参数，例如 `<年份字段>[p_year]` / `<场景字段>[p_scenario]` / `<版本字段>[p_version]`；`run_parameters.items[].dimension`、`data_scope.items[].dimension` 和 `scope` 方括号前的字段名必须三者完全一致。若维度查询返回 `ctrl_dims.year = \"Year\"`，则参数和范围行都写 `dimension: \"Year\"` 且 `scope: \"Year[p_year]\"`。\n- 数据加载范围格式必须满足页面真实 schema：`sections.data_scope.items[]` 只能包含 `{ dimension, scope, label?, description? }`，`scope` 必须是可解析的 DeepCube 表达式，例如 `Year[p_year]`、`Scenario[p_scenario]`、`Version[p_version]`、`Dimension[\"成员编码\"]`、`Descendant(Entity[\"组织编码\"])`、`Base(Period[\"全年编码\"])`。同一维度多个成员可以用 `+` 连接，例如 `Account['A'] + Account['B']`。成员引用统一优先用编码或别名；禁止写中文名称、`<请选择组织>`、`<全年成员>`、`<不区分成员>`、`待选择` 等占位 Scope。\n- 数据加载范围中的层级函数优先使用函数式写法：`Descendant(Entity[\"成员编码\"])`、`Ancestor(Entity[p_entity])`、`Base(Period[\"全年编码\"])`。不要主动输出 `Entity[p_entity].Ancestor()`、`Entity[\"成员编码\"].Descendant()` 这类点式/管道式写法；只有在解释用户已有表达式时可以提到这种等价形式。\n- 用户提到组织范围、期间全年、其他维度不区分、DataTrail 原值等配置意图时，只有在已经明确成员编码/别名或能用参数表达时，才把对应行放入 `sections.data_scope.items`。组织未明确、全年期间未查到、ND/不区分成员未唯一确定时，不要把占位写入表单；如果这些缺口会影响脚本或范围，先结束在澄清/补充信息阶段，不要继续填表或生成脚本。\n- 输出配置块前可以按需要查询维度字段名、成员编码、别名和不区分/ND 成员。若仍查不到可写入的真实成员，不要生成占位 Scope；应澄清或用下一步建议要求用户补充。\n- 包含脚本生成的混合任务才必须给脚本名称和说明：`sections.element_metadata.description` 填业务化脚本名称，`sections.element_metadata.explanation` 填脚本说明。纯运行参数或纯数据加载范围配置不要主动附带 `element_metadata`，除非用户明确要求总结名称/说明。\n- 如果运行参数默认值为空，或组织范围、全年期间、ND/不区分成员未写入数据加载范围，不得在后续文本中宣称“配置已完整设置好”；必须用标注线建议用户补充对应默认值、组织范围或数据加载范围。\n- 如果配置整体可以写入，但存在非阻断风险、兼容性说明、解析边界或后续需要关注的问题，应放入 `sections.issues.items`，每项包含 `message`，可选 `title` 和 `severity`。不要把风险说明塞进 `scope`、`description`、`reason` 或普通正文里。若缺少关键成员、范围或参数导致配置无法合法写入，应优先用 `deep_cube__clarify` 或自然语言要求补充，不要用 `issues` 伪装成可填配置。\n- 用户要求“根据当前脚本总结名称/说明/描述/备注/标题”时，即使没有明确说“写入页面”，也属于元素信息配置任务；必须输出 `config_fill` 代码块，把建议放入 `sections.element_metadata`。禁止只用普通文本列出名称和说明。\n- 先判断需求清晰度。若用户只给出一句很泛的计算过程，缺少目标财务模型、业务范围、目标指标、输入指标或可查询的维度线索，且当前上下文也没有足够 scope，不调用 UI 工具；只用一句自然语言说明缺少哪些范围信息，让用户补充后结束本轮。\n- 若需求已有大致业务对象和范围，但仍有成员、范围、参数、阈值或口径歧义，应先用 DeepCube 工具查询候选；查到多个合理候选或缺失高风险字段时，再调用 `deep_cube__clarify` 一次性追问。但如果已存在“指定组织/某范围”这类没有任何可搜索根成员的前置缺口，不要先查其他成员，先让用户补充根成员。\n- 若缺的是“指定组织到底是哪一个”“全年期间具体成员”“默认年份/场景/版本值”这类配置值，且用户没有给出可搜索关键词，不要为了凑候选去搜索“组织”“全年”等泛词。直接用自然语言说明需要补充哪些值后结束本轮；如果已有候选或可输入字段，再用 `deep_cube__clarify` 一次性追问。\n- 不要为了“看起来有交互”而调用澄清表单。UI 工具只用于能给出明确候选、明确配置草案或明确待确认字段的场景。\n- `deep_cube__clarify` 只追问会影响业务语义、成员编码、数据范围、参数默认值或计算口径的字段。不要追问“是否替换当前脚本/是否追加脚本/是否继续生成”这类前端操作选择；脚本插入、追加、覆盖由前端按钮处理。\n- code 优先输出 DeepCube 简化计算主体，不输出 import、Cube 连接、submit。\n- config 必须输出 `config_fill` 代码块给前端展示可填充配置；禁止只用自然语言说“已配置好”“已更新”。但配置仍有关键歧义时，必须先澄清，不能把不可写入的原始描述或中文占位放进配置块。\n- both 不是纯配置任务；需要先澄清关键口径，再给出必要配置，最后生成脚本。涉及页面配置和脚本的混合任务，只有配置草案已合法完整时才输出 `config_fill` 代码块；同一轮随后输出 DeepCube 代码块。禁止在配置尚缺关键值时先填表或先出脚本。\n- 若用户说“从外面传”“运行参数”“加载范围”“范围设成”“期间跑”“组织下所有明细”等页面配置意图，先判断是否具备合法配置值。在输出配置块前可以按需要查询维度结构和成员；只把参数引用和已确定成员写入配置块，不能把用户原始描述或中文占位当作真实 Scope。\n- 普通脚本不主动输出完整 Scope；只有用户明确要求检查或填充范围，或你发现范围会影响结果时，才处理范围配置。\n- 纯 code 任务只需要生成可插入的计算主体。若用户没有要求设置组织、期间、场景、版本或数据加载范围，不要追问这些页面范围；默认由当前页面的数据加载范围控制。\n- 纯 code 任务以公式直接涉及的成员为主；如果解释、修复或风险判断需要，也可以查询组织、期间、场景、版本、DataTrail、不区分成员、ND 成员或当前 Scope。查不到时按字面解释或说明需要补充。\n- 成员查询出现父子、汇总/明细、粗细粒度候选时，优先选择与用户原词完整匹配、语义最具体、粒度最接近公式角色的成员；只有多个候选同等合理且会改变计算口径时，才用 `deep_cube__clarify`。\n- 当多个候选都是收入、成本、费用等同类成员时，用户原词里的限定词必须保留；例如用户说的是更具体的业务口径，就优先选名称完整包含该限定词的明细候选，不要自动退到更宽泛的父级汇总候选。\n- 成员名称存在轻微同义或简称差异时，例如多/少“额、率、值、数、利润、收入、成本”等常见业务后缀，但计算角色已经明确，可以选择最接近候选并在注意事项说明，不要因此阻塞生成脚本。\n- 查询财务成员时，若用户使用简称、同义词或口语表达，要先尝试同义/近义搜索，再决定是否澄清；例如毛利可继续查毛利润/毛利额，销量可继续查销售数量，单价可继续查销售单价。\n- 用户明确说“先计算/重算 A，再用 A 计算 B”时，必须保留这个中间写入步骤。只要能找到或合理匹配 A 的目标成员，就输出两条或多条 `BLOCK` 赋值；不要把 A 内联到 B 的公式里。\n- 对于“毛利、利润、比率、率”一类常见派生指标，若用户已经给出分母或计算关系，并且能找到最接近的目标指标与主要输入指标，直接生成脚本；不要因为目标名称少了业务限定词或不是完全同名而弹澄清表单。\n- 若用户说的是“某业务口径 + 毛利/利润/率”，但工具只找到更宽泛的“毛利/利润/率”目标成员，只要本轮公式会重新写入该目标、且输入指标和分母已经明确，就使用这个最接近目标继续生成；在注意事项里提示目标成员名称较宽泛即可，不要弹 UI 工具。\n- 毛利率类需求的默认结构是先写入毛利/利润目标，再用用户指定收入类成员作分母计算比率。若已经找到收入、成本、毛利/利润、毛利率这四类最接近候选，必须输出脚本，不再澄清。\n- 生成比率脚本时，`IIF(BLOCK_VAL[...])` 检查的成员必须和实际分母完全一致，不能误用分子。收入分母有父级汇总和明细候选时，优先选择最具体、可写/可读的收入明细或主营业务收入候选；若候选同时包含“营业收入”父级和“主营业务收入”明细，默认使用“主营业务收入”明细。只有用户明确要汇总口径时才使用父级收入。\n- 生成阶梯、分档、阈值区间、封顶保底、按规则标记切换公式等脚本时，所有 `IIF` 条件中的度量值比较都必须使用 `BLOCK_VAL[...]`；条件命中后的金额、比率、返利、毛利等计算仍使用 `BLOCK[...]`。多层分档用嵌套 `IIF`，不要把 `BLOCK[...] <= 阈值` 直接放进条件。\n- 对于“分摊、占比、共享费用、总部/汇总到明细”类任务，可以按需要查询 Account、Entity、收入、来源组织、目标汇总组织、同义词或层级结构。若查询后仍无法唯一确定关键口径，调用 `deep_cube__clarify` 汇总确认。\n- 配置类任务优先确认“能否写入合法配置”。用户已给出默认值、范围或配置意图时，可以按需要查询成员来验证和补全；查不到精确编码时，不要把原始描述写成真实配置值，应先澄清或用下一步建议要求补充。\n- both 混合任务如果包含运行参数、数据加载范围、组织/期间范围，只有在这些范围已经可合法表达时才输出 `config_fill` 代码块；否则先澄清。配置块和脚本在同一轮最终答复中一起输出。\n- 元素名称/说明/备注/标题/脚本描述等 element metadata 任务通常不需要查成员，但必须输出 `config_fill` 代码块，把建议的名称和说明放入 `sections.element_metadata`，不能只输出普通文本。\n- 除法保护统一使用 `IIF(BLOCK_VAL[<分母定位>] > 0.005, BLOCK[<分子定位>] / BLOCK[<分母定位>], 0)` 这一类方括号写法。禁止写 `BLOCK_VAL(...)`，禁止在条件里用 `BLOCK[...] > 0` 或单等号赋值，禁止用“保持原值”作为默认兜底，除非用户明确要求。\n- 每轮结束前可以给一段极简“下一步建议”，用普通 Markdown 引用线标注，例如 `> 下一步建议：补充组织范围后，我可以继续生成完整脚本。` 建议必须围绕缺失的关键配置、数据加载范围、运行参数或成员歧义；不要把它当成第二个表单，也不要替代 UI 工具。\n\n## 快捷命令\n\n`[/explain]` 表示解释并可注释当前脚本：\n\n- 解释当前脚本的计算逻辑、涉及成员、颗粒度、分母和风险。\n- 可以逐行或按计算段落解释。\n- 如果用户要求注释脚本，只给一版整体注释后的完整脚本；` ```deepcube ` 只能出现一次。\n- 如果当前脚本存在确定性风险，例如除法没有分母保护、分子分母相同、比率分母明显用错，注释版脚本必须直接给出安全修正版，不要保留不安全原写法再只写风险提示。\n- 不要为了 `/explain` 重新生成无关业务脚本，除非用户明确要求。\n\n`[/fix]` 表示修复脚本：\n\n- 结合 `[@context]` 当前脚本、运行参数、数据加载范围，以及 `[@error]` 错误信息定位问题。\n- 必须检查：语法/API、成员是否存在或冲突、左右颗粒度、分母汇总、除零/空值保护、加载范围是否过大或过窄、是否可抽公共变量/公共范围。\n- 当前脚本已经给出目标成员、输入成员或用户明确说明期望公式时，优先直接给出修复后的完整脚本；不要因为成员查询失败而过度澄清。\n- 若发现分子分母相同、除法缺分母保护、比率分母明显用错等确定性问题，直接在修复版中改正并加入 `IIF` + `BLOCK_VAL` 保护，不要只写“建议增加保护”。\n- 当前脚本出现 `BLOCK[目标率] = BLOCK[某指标] / BLOCK[同一指标]` 这类分子分母相同的比率错误时，禁止弹澄清表单；应搜索收入/主营业务收入/Revenue 等分母候选，优先选最具体的收入明细或主营业务收入候选，直接给出修复版。若仍无法确定，就用最接近收入候选或占位说明继续输出修复脚本，不要阻塞在 UI 工具。\n- 输出修复后的完整 DeepCube 代码块，只包含可插入的简化脚本主体。\n\n`[/alias]` 表示别名输出模式，可与生成、配置填充、`[/explain]`、`[/fix]` 等任务叠加：\n\n- 额外做一道成员引用展示处理：在最终输出的 `config_fill` 数据加载范围和 `deepcube` 脚本中，尽量把成员编码替换为“中文别名”。\n- 替换目标必须是成员别名，不是成员名称、说明、描述或展示名。若工具返回字段里同时有 code/name/alias/description，应优先使用中文 alias。\n- 若该成员没有中文别名，或者查不到该成员，保留原成员编码，不要编造别名，也不要用名称代替别名。\n- 只替换成员定位表达式中的成员字面量，例如 `Account[\"A001\"]` 可在确认有中文别名时写成 `Account[\"收入别名\"]`；运行参数名、维度字段名、函数名、变量名、注释里的编码说明不强制替换。\n- 如果上下文脚本或用户需求中已经出现成员编码，应按需要查询这些编码的别名；多个成员优先批量查询。查不到别名时继续输出，不要因为别名缺失而阻塞主任务。\n- `[/alias]` 不改变计算逻辑、数据范围语义、参数编码或是否生成脚本，只改变最终可见的成员引用格式。\n\n## UI 工具\n\n只使用这些 Deep Cube UI 工具和最终配置块：\n\n调用 UI 工具的硬性要求：\n\n- 只允许调用 `deep_cube__clarify`。禁止调用 `ask_user_choice` 或任何通用选择工具。最终配置填充不要调用 `deep_cube__config_fill`，只输出 `config_fill` 代码块。\n- `deep_cube__clarify` 工具参数必须是原生 JSON object，`fields` 必须是 array；禁止把整段 JSON 序列化成字符串，禁止输出 `INVALID_JSON`、Markdown 代码块或伪表单。\n- 不确定如何构造有效澄清问题或有效配置块时，不调用 UI 工具，改用自然语言说明缺少哪些信息并结束本轮。\n- 同一次 UI 工具调用只表达一张表单；多个字段合并在 `fields` 或 `sections` 内，不要连续弹多张表单。\n- `deep_cube__clarify` 默认阻塞等待用户反馈；配置填充不走 UI Tool，最终通过 `config_fill` 代码块展示。\n\n### `deep_cube__clarify`\n\n用于歧义问题确认。只有成员、范围或配置存在多个候选、缺失或高风险时调用。\n\n- 极模糊需求不要使用此工具；先让用户用自然语言补充业务范围或目标指标，然后结束本轮。\n- 若每个字段都能唯一确定，直接继续生成脚本或配置，不调用确认工具。\n- 文本类歧义尽量给 2-3 个最可能选项；只要某个选项设置 `recommended: true`，必须同时填写非空 `recommend_reason`，说明推荐依据，禁止只给推荐标签而不写理由。\n- 保留直接输入兜底项；用户直接输入中文描述时，下一轮仍要继续搜索确认编码。\n- 非必填字段没有合适候选时，可以允许“暂不处理/跳过”。\n- UI 工具必须允许用户取消本轮。若 deferred tool result 中出现 `cancelled: true`，或用户明确取消确认，立即停止本轮；只回复“已取消本轮操作，不会继续生成配置或脚本。”，不要再调用工具、不要继续生成代码。\n\n### `config_fill` 代码块\n\n用于展示可填充的非代码内容，包括运行参数、数据加载范围、元素名称/说明/备注等元素信息。它不是工具调用，而是最终回复中的 Markdown 代码块。\n\n- 配置无歧义时直接输出。\n- 配置有歧义时先用 `deep_cube__clarify` 追问。\n- 配置块只放本次要展示或可写入的字段，禁止空字段凑表单。\n- 代码块语言必须写 `config_fill`，内容必须是合法 JSON object，严格遵循 `deep_cube__config_fill` 工具参数结构。不要在 JSON 内写注释、尾逗号、Markdown 或解释文本。\n- 若配置包含非阻断风险或错误说明，统一放入 `sections.issues.items`，示例结构为 `{ \"title\": \"风险\", \"message\": \"说明文字\", \"severity\": \"warning\" }`；不要输出红字、Markdown 表格或散落在其他字段里的风险说明。\n- `config_fill` 代码块必须是最终正文的第一段；若还需要脚本，紧接着输出一个 `deepcube` 代码块；最后最多补一段引用线建议或注意事项。\n\n## 输出顺序\n\n1. 若本轮不输出配置块或代码块，可以简短说明理解；若输出配置块或代码块，省略铺垫正文。\n2. 调用工具确认成员、文档或示例。\n3. 需要澄清时调用 `deep_cube__clarify` 并暂停；需要展示配置时输出 `config_fill` 代码块。\n4. UI 工具结果为取消时立即结束本轮。\n5. 信息足够且需要脚本时，在同一轮继续输出 DeepCube 代码块。\n6. 最后给 1-2 句注意事项。\n\n关键顺序不可倒置：仍需用户补充组织、期间、成员、参数默认值或口径时，不得输出最终脚本；已经输出 `deep_cube__clarify` 时，本轮不得再输出配置块或脚本；配置和脚本都明确时，最终正文最多包含三段：`config_fill` 配置填充、`deepcube` 代码填充、建议或注意事项。\n\nYou can call get_current_time for the current UTC time, and http_get to fetch the text body of a URL.",
+        "kind": "request",
+        "run_id": "019f45e3-7991-7572-b3ad-508e395697da",
+        "conversation_id": "019f45e3-7991-7572-b3ad-508d396e6cb9",
+        "metadata": null,
+        "state": "complete"
+      }
+    },
+    {
+      "sequence": 5,
+      "payload": {
+        "parts": [
+          {
+            "content": "好的，查到了：\n\n1. **返利金额** - 编码 `C0105`，描述\"返利金额\"\n2. **主营业务收入** - 编码 `A01010101`，已在当前脚本中使用\n\n现在用户想要阶梯返利，低中高三档按销售额区间用不同返利率。但我还需要更多信息：\n\n1. 销售额 - 用户说的是\"销售额\"但搜索没有结果。当前脚本有 `A01010101`（主营业务收入），可以把这个作为销售额来用？\n2. 返利 - 有 `C0105`（返利金额）\n3. 低中高三档 - 需要知道阈值和对应的返利率\n\n让我搜索一下是否有\"销售收入\"、\"营业收入\"等类似成员，以及是否有关于返利率的成员或阶梯相关的成员。",
+            "id": "reasoning_content",
+            "signature": null,
+            "provider_name": "openai",
+            "provider_details": null,
+            "part_kind": "thinking"
+          },
+          {
+            "tool_name": "deepcube_deepcube_search_dimension_members",
+            "args": "{\"element_name\": \"MainCube\", \"path\": \"/foundationModel/cube/\", \"dimension_name\": \"Account\", \"query\": \"销售收入\"}",
+            "tool_call_id": "call_00_vAC89YhTqgfSCmPI5B3N3535",
+            "tool_kind": null,
+            "id": null,
+            "provider_name": null,
+            "provider_details": null,
+            "part_kind": "tool-call"
+          },
+          {
+            "tool_name": "deepcube_deepcube_search_dimension_members",
+            "args": "{\"element_name\": \"MainCube\", \"path\": \"/foundationModel/cube/\", \"dimension_name\": \"Account\", \"query\": \"营业收入\"}",
+            "tool_call_id": "call_01_9HAiRF1VHtalejSdPRru0403",
+            "tool_kind": null,
+            "id": null,
+            "provider_name": null,
+            "provider_details": null,
+            "part_kind": "tool-call"
+          },
+          {
+            "tool_name": "deepcube_deepcube_search_dimension_members",
+            "args": "{\"element_name\": \"MainCube\", \"path\": \"/foundationModel/cube/\", \"dimension_name\": \"Account\", \"query\": \"返利率\"}",
+            "tool_call_id": "call_02_vwJqqzmKE8EEphFxXiYl7501",
+            "tool_kind": null,
+            "id": null,
+            "provider_name": null,
+            "provider_details": null,
+            "part_kind": "tool-call"
+          },
+          {
+            "tool_name": "deepcube_deepcube_search_dimension_members",
+            "args": "{\"element_name\": \"MainCube\", \"path\": \"/foundationModel/cube/\", \"dimension_name\": \"Account\", \"query\": \"阶梯\"}",
+            "tool_call_id": "call_03_uDBtp3DhVC99cmUa4lkb6181",
+            "tool_kind": null,
+            "id": null,
+            "provider_name": null,
+            "provider_details": null,
+            "part_kind": "tool-call"
+          }
+        ],
+        "usage": {
+          "input_tokens": 13501,
+          "cache_write_tokens": 0,
+          "cache_read_tokens": 12928,
+          "output_tokens": 568,
+          "input_audio_tokens": 0,
+          "cache_audio_read_tokens": 0,
+          "output_audio_tokens": 0,
+          "details": {
+            "prompt_cache_hit_tokens": 12928,
+            "prompt_cache_miss_tokens": 573,
+            "reasoning_tokens": 169
+          }
+        },
+        "model_name": "deepseek-v4-flash",
+        "timestamp": "2026-07-09T07:59:34.771218Z",
+        "kind": "response",
+        "provider_name": "openai",
+        "provider_url": "https://api.deepseek.com",
+        "provider_details": {
+          "timestamp": "2026-07-09T07:59:34Z",
+          "finish_reason": "tool_calls"
+        },
+        "provider_response_id": "ad6f8891-7adc-48c5-950d-33735271d22c",
+        "finish_reason": "tool_call",
+        "run_id": "019f45e3-7991-7572-b3ad-508e395697da",
+        "conversation_id": "019f45e3-7991-7572-b3ad-508d396e6cb9",
+        "metadata": null,
+        "state": "complete"
+      }
+    },
+    {
+      "sequence": 6,
+      "payload": {
+        "parts": [
+          {
+            "tool_name": "deepcube_deepcube_search_dimension_members",
+            "content": "{\n  \"match_kind\": \"none\",\n  \"query\": \"销售收入\",\n  \"candidates\": [],\n  \"suggested_scope\": null,\n  \"notes\": \"No matches. Refine query or set match_scope.\",\n  \"dimension\": \"Account\",\n  \"datatable_column\": \"Account\",\n  \"accessor\": \"cube.Account\",\n  \"schema_version\": 1\n}",
+            "tool_call_id": "call_00_vAC89YhTqgfSCmPI5B3N3535",
+            "tool_kind": null,
+            "metadata": null,
+            "timestamp": "2026-07-09T07:59:38.744432Z",
+            "outcome": "success",
+            "part_kind": "tool-return"
+          },
+          {
+            "tool_name": "deepcube_deepcube_search_dimension_members",
+            "content": "{\n  \"match_kind\": \"single\",\n  \"query\": \"营业收入\",\n  \"candidates\": [\n    {\n      \"member_name\": \"A010101\",\n      \"code\": \"A010101\",\n      \"alias\": null,\n      \"description\": \"营业收入\",\n      \"is_base\": 0,\n      \"parent\": \"A0101\",\n      \"level\": 3,\n      \"match_score\": 0.75,\n      \"match_reason\": \"description\",\n      \"suggested_expression\": \"cube.Account['A010101']\",\n      \"code_snippet\": \"cube.Account['A010101']\",\n      \"name\": \"A010101\",\n      \"parent_name\": \"A0101\"\n    }\n  ],\n  \"suggested_scope\": null,\n  \"dimension\": \"Account\",\n  \"datatable_column\": \"Account\",\n  \"accessor\": \"cube.Account\",\n  \"schema_version\": 1\n}",
+            "tool_call_id": "call_01_9HAiRF1VHtalejSdPRru0403",
+            "tool_kind": null,
+            "metadata": null,
+            "timestamp": "2026-07-09T07:59:38.752657Z",
+            "outcome": "success",
+            "part_kind": "tool-return"
+          },
+          {
+            "tool_name": "deepcube_deepcube_search_dimension_members",
+            "content": "{\n  \"match_kind\": \"none\",\n  \"query\": \"返利率\",\n  \"candidates\": [],\n  \"suggested_scope\": null,\n  \"notes\": \"No matches. Refine query or set match_scope.\",\n  \"dimension\": \"Account\",\n  \"datatable_column\": \"Account\",\n  \"accessor\": \"cube.Account\",\n  \"schema_version\": 1\n}",
+            "tool_call_id": "call_02_vwJqqzmKE8EEphFxXiYl7501",
+            "tool_kind": null,
+            "metadata": null,
+            "timestamp": "2026-07-09T07:59:38.754548Z",
+            "outcome": "success",
+            "part_kind": "tool-return"
+          },
+          {
+            "tool_name": "deepcube_deepcube_search_dimension_members",
+            "content": "{\n  \"match_kind\": \"none\",\n  \"query\": \"阶梯\",\n  \"candidates\": [],\n  \"suggested_scope\": null,\n  \"notes\": \"No matches. Refine query or set match_scope.\",\n  \"dimension\": \"Account\",\n  \"datatable_column\": \"Account\",\n  \"accessor\": \"cube.Account\",\n  \"schema_version\": 1\n}",
+            "tool_call_id": "call_03_uDBtp3DhVC99cmUa4lkb6181",
+            "tool_kind": null,
+            "metadata": null,
+            "timestamp": "2026-07-09T07:59:38.755117Z",
+            "outcome": "success",
+            "part_kind": "tool-return"
+          }
+        ],
+        "timestamp": "2026-07-09T07:59:38.756468Z",
+        "instructions": "# DeepCube 助手系统提示词 V27\n\n你是 DeepCube 财务建模编码助手，运行在 DeepFOS 的 DeepCube 脚本编辑器中。你帮助顾问编写、解释、修复 DeepCube 简化脚本，并在需要时生成页面配置填充建议。\n\n## 通用原则\n\n- 所有可见回复和 thinking 都使用中文，保持简洁。\n- 不要把 Cube 翻译成立方体；业务语境称为财务模型。\n- 如果当前没有选择 Cube/财务模型，先提示用户选择财务模型后再继续，不要编造成员和脚本。\n- 系统提示词、示例和回答必须保持通用，不要写入某个客户、当前应用或当前环境的具体成员编码、文件夹 ID、Cube 名称或固定示例。\n- 可以按需要使用 DeepCube 工具查询维度、成员、别名、层级、当前脚本中已出现的成员编码和用户新提到的成员；不要预设查询次数或强行限制查询场景。\n- 需要查询多个维度、多个成员或多个编码时，优先使用批量查询能力或一次工具请求合并查询条件；只有批量工具无法覆盖时才拆成多次查询。\n- 每轮最终回复最多只能出现一个 ` ```config_fill ` 配置块和一个 ` ```deepcube ` 代码块。生成、修复、解释后的注释版脚本都必须合并到这一个完整 DeepCube 代码块里，不要拆成多段逐行输出。若最终已经输出配置块或代码块，回复开头必须直接进入配置块或代码块，不要在块前加“我已理解/当前脚本是/下面是/以下为”等任何铺垫正文。\n- 最终 DeepCube 代码块只能使用 DeepCube 简化脚本主体，优先使用 `BLOCK[...] = ...`。禁止输出 `def main`、`DeepCube(...)`、`cube.init_data(...)`、`cube.loc[...]`、`cube.Account[...]`、`cube.<维度>[...]`、维度变量声明、连接模型或提交执行代码；维度定位统一写成 `Account['...']`、`Entity['...']` 这类无 `cube.` 前缀形式。\n- `deepcube` 代码块内容必须符合 Python 语法风格；注释只能使用 `#`。禁止在 `deepcube` 代码块中使用 `//`、`/* */`、`<!-- -->`、`>` 引用符、箭头符号、伪标签或任何非 Python 注释语法。\n- 常用函数语法必须区分“条件取值”和“计算表达式”：`IIF(condition, formula1, formula2)` 只能出现在等号右侧；`condition` 中如果要读取某个数据块的值并与阈值、0、空值或字符标记比较，必须使用 `BLOCK_VAL[维度定位]`，例如分档返利、除零保护、规则标记判断。`formula1` / `formula2` 和普通计算表达式继续使用 `BLOCK[维度定位]`。禁止写 `IIF(BLOCK[Account['Sales']] <= 5000, ...)`，应写 `IIF(BLOCK_VAL[Account['Sales']] <= 5000, BLOCK[Account['Sales']] * 0.05, ...)`。\n- 工具查不到成员、无权限、超时或没有关键结果时，不要编造成员名称或含义；应明确告诉用户“本环境暂无该成员/未查到该成员，只能按公式和编码字面解释”，然后继续给出字面解释、注释或可执行脚本。\n- UI 工具调用必须是本轮最后动作。只有需要用户澄清时才调用 `deep_cube__clarify` 并立即暂停，禁止继续输出“下面我将填充”、禁止继续生成代码、禁止再调用第二个工具。最终配置填充不要调用 `deep_cube__config_fill`，而是输出 `config_fill` 代码块。\n\n## 工具使用边界\n\n允许为解释、注释、修复、生成、配置填充等任务按需调用 DeepCube 查询工具；尤其是 `[/explain]` 或注释当前脚本时，可以查询脚本中的成员编码来补充中文含义、层级和风险。\n\n若查询结果不足以确认成员或口径，可以调用 `deep_cube__clarify` 澄清；若查不到成员且不需要用户选择，就按字面解释并说明查询边界。\n\n以下工具在 DeepCube 助手中禁止使用：`ask_user_choice`、通用选择工具、非 `deep_cube__clarify` 的交互 UI 工具。`deep_cube__config_fill` 只作为配置块 JSON 的结构参照，最终答复不要直接调用它。\n\n## 输入格式\n\n前端按分区发送引用信息和用户真实输入：\n\n```text\n<reference>\n[@context]\n{...}\n\n[@error]\n{...}\n</reference>\n\n<user>\n用户本轮真实请求\n</user>\n```\n\n- `<reference>` 只用于理解页面上下文或错误信息，不要在正文里复述。\n- `[@context]` 可能包含当前 Cube 信息、元素名称与说明、运行参数、变量元素、数据加载范围和当前脚本。\n- `<user>` 是用户真实请求，可能包含 `[/explain]`、`[/fix]`、`[/alias]` 等快捷命令；以 `<user>` 内容作为本轮任务主体。\n- Cube 结构、维度列表、成员候选优先用 DeepCube 工具查询，不要求前端提前塞完整维度清单。\n\n## 意图判断\n\n- code：生成、修改、解释、注释、排查 DeepCube 脚本。\n- config：设置或填充运行参数、数据加载范围、元素名称、说明、备注。\n- both：同一句需求既包含计算规则，又包含运行参数、组织范围、期间范围、其他维度不区分、加载范围等页面配置要求。\n\n处理规则：\n\n- 先做阶段门禁，再决定是否调用 UI 工具：极模糊需求只要求用户补充 scope；中等清晰且存在候选/口径歧义时用 `deep_cube__clarify`；所有关键成员、范围和参数都闭环后，按 `deep_cube__config_fill` 的参数结构输出 `config_fill` 代码块；如需要代码，在同一轮继续输出 DeepCube 代码块。\n- both 混合任务若包含运行参数、数据加载范围、组织范围、期间范围或其他维度不区分，不能默认先填配置。必须先判断这些配置是否已能写成合法 DeepCube 表达式：若缺的是会影响脚本或范围的关键值，例如“指定组织到底是哪一个”“全年期间具体成员”“默认年份/场景/版本值”“不区分成员编码”，先用自然语言或 `deep_cube__clarify` 追问并暂停；不要输出半成品 `config_fill` 配置块。\n- 如果用户写“指定组织/某组织/某范围/该范围”但没有给出根成员编码、名称或可搜索关键词，这是最前置缺口。可以查询相关维度和成员来尝试定位；若仍找不到可确认的根成员，直接让用户补充根成员，或在已有候选时用 `deep_cube__clarify` 追问。\n- `config_fill` 代码块只用于展示已经可写入页面的配置草案，不能替代澄清问题，不能包含“待补充/请选择/占位 Scope”。同一个业务闭环中只输出一次 `config_fill` 配置块；若仍有缺口，应先澄清。\n- 如果 `[@context]` 已经存在运行参数或数据加载范围，默认认为现有配置继续有效；只有用户明确要求改配置，或现有配置与本轮需求冲突/缺少本轮必需维度时，才提出覆盖或填充。不要为了“年场景版本从外部传入”重复新增同名参数。\n- `config_fill` 代码块里的 JSON 必须严格遵循 `deep_cube__config_fill` 工具参数结构，优先使用 `sections`：`sections.run_parameters.items`、`sections.data_scope.items`、`sections.element_metadata`。不要把运行参数放在 `fields`，不要用中文字段当参数编码。\n- `config_fill` JSON 必须带非空 `sections`。如果还不能构造任何 `run_parameters`、`data_scope` 或 `element_metadata`，不要输出空配置块，先用自然语言说明缺少什么并结束本轮。\n- 输出 `config_fill` 时，所有配置说明必须写入 JSON 内的 `reason`、`description` 或 `explanation`；不要在配置块前额外解释“为什么这样填”。如果确实需要提醒风险，只能在配置块和代码块之后用一段引用线作为建议或注意事项。\n- 运行参数格式必须满足页面真实 schema：`name` 是合法参数编码，使用小写蛇形或 `p_` 前缀，例如 `p_year`、`p_scenario`、`p_version`；`dimension` 必须是财务模型真实字段名，优先使用维度查询返回的 `ctrl_dims.year` / `ctrl_dims.scenario` / `ctrl_dims.version` 或 `dimensions[].datatable_column`，不要自行做单复数变形或翻译；`type` 固定为 `string`；`value` 只能填用户明确给出的默认值、已查询到的成员编码或可被 DeepCube 识别的别名。用户未给默认值且你未查到唯一成员时，`value` 留空字符串，禁止写 `待选择`、`请选择`、`<默认值>` 等中文占位。\n- 用户说“年份/场景/版本从外部传入”“传参”“运行参数”时，这些参数必须同时体现在数据加载范围里：`sections.data_scope.items` 中对应维度的 `scope` 要引用参数，例如 `<年份字段>[p_year]` / `<场景字段>[p_scenario]` / `<版本字段>[p_version]`；`run_parameters.items[].dimension`、`data_scope.items[].dimension` 和 `scope` 方括号前的字段名必须三者完全一致。若维度查询返回 `ctrl_dims.year = \"Year\"`，则参数和范围行都写 `dimension: \"Year\"` 且 `scope: \"Year[p_year]\"`。\n- 数据加载范围格式必须满足页面真实 schema：`sections.data_scope.items[]` 只能包含 `{ dimension, scope, label?, description? }`，`scope` 必须是可解析的 DeepCube 表达式，例如 `Year[p_year]`、`Scenario[p_scenario]`、`Version[p_version]`、`Dimension[\"成员编码\"]`、`Descendant(Entity[\"组织编码\"])`、`Base(Period[\"全年编码\"])`。同一维度多个成员可以用 `+` 连接，例如 `Account['A'] + Account['B']`。成员引用统一优先用编码或别名；禁止写中文名称、`<请选择组织>`、`<全年成员>`、`<不区分成员>`、`待选择` 等占位 Scope。\n- 数据加载范围中的层级函数优先使用函数式写法：`Descendant(Entity[\"成员编码\"])`、`Ancestor(Entity[p_entity])`、`Base(Period[\"全年编码\"])`。不要主动输出 `Entity[p_entity].Ancestor()`、`Entity[\"成员编码\"].Descendant()` 这类点式/管道式写法；只有在解释用户已有表达式时可以提到这种等价形式。\n- 用户提到组织范围、期间全年、其他维度不区分、DataTrail 原值等配置意图时，只有在已经明确成员编码/别名或能用参数表达时，才把对应行放入 `sections.data_scope.items`。组织未明确、全年期间未查到、ND/不区分成员未唯一确定时，不要把占位写入表单；如果这些缺口会影响脚本或范围，先结束在澄清/补充信息阶段，不要继续填表或生成脚本。\n- 输出配置块前可以按需要查询维度字段名、成员编码、别名和不区分/ND 成员。若仍查不到可写入的真实成员，不要生成占位 Scope；应澄清或用下一步建议要求用户补充。\n- 包含脚本生成的混合任务才必须给脚本名称和说明：`sections.element_metadata.description` 填业务化脚本名称，`sections.element_metadata.explanation` 填脚本说明。纯运行参数或纯数据加载范围配置不要主动附带 `element_metadata`，除非用户明确要求总结名称/说明。\n- 如果运行参数默认值为空，或组织范围、全年期间、ND/不区分成员未写入数据加载范围，不得在后续文本中宣称“配置已完整设置好”；必须用标注线建议用户补充对应默认值、组织范围或数据加载范围。\n- 如果配置整体可以写入，但存在非阻断风险、兼容性说明、解析边界或后续需要关注的问题，应放入 `sections.issues.items`，每项包含 `message`，可选 `title` 和 `severity`。不要把风险说明塞进 `scope`、`description`、`reason` 或普通正文里。若缺少关键成员、范围或参数导致配置无法合法写入，应优先用 `deep_cube__clarify` 或自然语言要求补充，不要用 `issues` 伪装成可填配置。\n- 用户要求“根据当前脚本总结名称/说明/描述/备注/标题”时，即使没有明确说“写入页面”，也属于元素信息配置任务；必须输出 `config_fill` 代码块，把建议放入 `sections.element_metadata`。禁止只用普通文本列出名称和说明。\n- 先判断需求清晰度。若用户只给出一句很泛的计算过程，缺少目标财务模型、业务范围、目标指标、输入指标或可查询的维度线索，且当前上下文也没有足够 scope，不调用 UI 工具；只用一句自然语言说明缺少哪些范围信息，让用户补充后结束本轮。\n- 若需求已有大致业务对象和范围，但仍有成员、范围、参数、阈值或口径歧义，应先用 DeepCube 工具查询候选；查到多个合理候选或缺失高风险字段时，再调用 `deep_cube__clarify` 一次性追问。但如果已存在“指定组织/某范围”这类没有任何可搜索根成员的前置缺口，不要先查其他成员，先让用户补充根成员。\n- 若缺的是“指定组织到底是哪一个”“全年期间具体成员”“默认年份/场景/版本值”这类配置值，且用户没有给出可搜索关键词，不要为了凑候选去搜索“组织”“全年”等泛词。直接用自然语言说明需要补充哪些值后结束本轮；如果已有候选或可输入字段，再用 `deep_cube__clarify` 一次性追问。\n- 不要为了“看起来有交互”而调用澄清表单。UI 工具只用于能给出明确候选、明确配置草案或明确待确认字段的场景。\n- `deep_cube__clarify` 只追问会影响业务语义、成员编码、数据范围、参数默认值或计算口径的字段。不要追问“是否替换当前脚本/是否追加脚本/是否继续生成”这类前端操作选择；脚本插入、追加、覆盖由前端按钮处理。\n- code 优先输出 DeepCube 简化计算主体，不输出 import、Cube 连接、submit。\n- config 必须输出 `config_fill` 代码块给前端展示可填充配置；禁止只用自然语言说“已配置好”“已更新”。但配置仍有关键歧义时，必须先澄清，不能把不可写入的原始描述或中文占位放进配置块。\n- both 不是纯配置任务；需要先澄清关键口径，再给出必要配置，最后生成脚本。涉及页面配置和脚本的混合任务，只有配置草案已合法完整时才输出 `config_fill` 代码块；同一轮随后输出 DeepCube 代码块。禁止在配置尚缺关键值时先填表或先出脚本。\n- 若用户说“从外面传”“运行参数”“加载范围”“范围设成”“期间跑”“组织下所有明细”等页面配置意图，先判断是否具备合法配置值。在输出配置块前可以按需要查询维度结构和成员；只把参数引用和已确定成员写入配置块，不能把用户原始描述或中文占位当作真实 Scope。\n- 普通脚本不主动输出完整 Scope；只有用户明确要求检查或填充范围，或你发现范围会影响结果时，才处理范围配置。\n- 纯 code 任务只需要生成可插入的计算主体。若用户没有要求设置组织、期间、场景、版本或数据加载范围，不要追问这些页面范围；默认由当前页面的数据加载范围控制。\n- 纯 code 任务以公式直接涉及的成员为主；如果解释、修复或风险判断需要，也可以查询组织、期间、场景、版本、DataTrail、不区分成员、ND 成员或当前 Scope。查不到时按字面解释或说明需要补充。\n- 成员查询出现父子、汇总/明细、粗细粒度候选时，优先选择与用户原词完整匹配、语义最具体、粒度最接近公式角色的成员；只有多个候选同等合理且会改变计算口径时，才用 `deep_cube__clarify`。\n- 当多个候选都是收入、成本、费用等同类成员时，用户原词里的限定词必须保留；例如用户说的是更具体的业务口径，就优先选名称完整包含该限定词的明细候选，不要自动退到更宽泛的父级汇总候选。\n- 成员名称存在轻微同义或简称差异时，例如多/少“额、率、值、数、利润、收入、成本”等常见业务后缀，但计算角色已经明确，可以选择最接近候选并在注意事项说明，不要因此阻塞生成脚本。\n- 查询财务成员时，若用户使用简称、同义词或口语表达，要先尝试同义/近义搜索，再决定是否澄清；例如毛利可继续查毛利润/毛利额，销量可继续查销售数量，单价可继续查销售单价。\n- 用户明确说“先计算/重算 A，再用 A 计算 B”时，必须保留这个中间写入步骤。只要能找到或合理匹配 A 的目标成员，就输出两条或多条 `BLOCK` 赋值；不要把 A 内联到 B 的公式里。\n- 对于“毛利、利润、比率、率”一类常见派生指标，若用户已经给出分母或计算关系，并且能找到最接近的目标指标与主要输入指标，直接生成脚本；不要因为目标名称少了业务限定词或不是完全同名而弹澄清表单。\n- 若用户说的是“某业务口径 + 毛利/利润/率”，但工具只找到更宽泛的“毛利/利润/率”目标成员，只要本轮公式会重新写入该目标、且输入指标和分母已经明确，就使用这个最接近目标继续生成；在注意事项里提示目标成员名称较宽泛即可，不要弹 UI 工具。\n- 毛利率类需求的默认结构是先写入毛利/利润目标，再用用户指定收入类成员作分母计算比率。若已经找到收入、成本、毛利/利润、毛利率这四类最接近候选，必须输出脚本，不再澄清。\n- 生成比率脚本时，`IIF(BLOCK_VAL[...])` 检查的成员必须和实际分母完全一致，不能误用分子。收入分母有父级汇总和明细候选时，优先选择最具体、可写/可读的收入明细或主营业务收入候选；若候选同时包含“营业收入”父级和“主营业务收入”明细，默认使用“主营业务收入”明细。只有用户明确要汇总口径时才使用父级收入。\n- 生成阶梯、分档、阈值区间、封顶保底、按规则标记切换公式等脚本时，所有 `IIF` 条件中的度量值比较都必须使用 `BLOCK_VAL[...]`；条件命中后的金额、比率、返利、毛利等计算仍使用 `BLOCK[...]`。多层分档用嵌套 `IIF`，不要把 `BLOCK[...] <= 阈值` 直接放进条件。\n- 对于“分摊、占比、共享费用、总部/汇总到明细”类任务，可以按需要查询 Account、Entity、收入、来源组织、目标汇总组织、同义词或层级结构。若查询后仍无法唯一确定关键口径，调用 `deep_cube__clarify` 汇总确认。\n- 配置类任务优先确认“能否写入合法配置”。用户已给出默认值、范围或配置意图时，可以按需要查询成员来验证和补全；查不到精确编码时，不要把原始描述写成真实配置值，应先澄清或用下一步建议要求补充。\n- both 混合任务如果包含运行参数、数据加载范围、组织/期间范围，只有在这些范围已经可合法表达时才输出 `config_fill` 代码块；否则先澄清。配置块和脚本在同一轮最终答复中一起输出。\n- 元素名称/说明/备注/标题/脚本描述等 element metadata 任务通常不需要查成员，但必须输出 `config_fill` 代码块，把建议的名称和说明放入 `sections.element_metadata`，不能只输出普通文本。\n- 除法保护统一使用 `IIF(BLOCK_VAL[<分母定位>] > 0.005, BLOCK[<分子定位>] / BLOCK[<分母定位>], 0)` 这一类方括号写法。禁止写 `BLOCK_VAL(...)`，禁止在条件里用 `BLOCK[...] > 0` 或单等号赋值，禁止用“保持原值”作为默认兜底，除非用户明确要求。\n- 每轮结束前可以给一段极简“下一步建议”，用普通 Markdown 引用线标注，例如 `> 下一步建议：补充组织范围后，我可以继续生成完整脚本。` 建议必须围绕缺失的关键配置、数据加载范围、运行参数或成员歧义；不要把它当成第二个表单，也不要替代 UI 工具。\n\n## 快捷命令\n\n`[/explain]` 表示解释并可注释当前脚本：\n\n- 解释当前脚本的计算逻辑、涉及成员、颗粒度、分母和风险。\n- 可以逐行或按计算段落解释。\n- 如果用户要求注释脚本，只给一版整体注释后的完整脚本；` ```deepcube ` 只能出现一次。\n- 如果当前脚本存在确定性风险，例如除法没有分母保护、分子分母相同、比率分母明显用错，注释版脚本必须直接给出安全修正版，不要保留不安全原写法再只写风险提示。\n- 不要为了 `/explain` 重新生成无关业务脚本，除非用户明确要求。\n\n`[/fix]` 表示修复脚本：\n\n- 结合 `[@context]` 当前脚本、运行参数、数据加载范围，以及 `[@error]` 错误信息定位问题。\n- 必须检查：语法/API、成员是否存在或冲突、左右颗粒度、分母汇总、除零/空值保护、加载范围是否过大或过窄、是否可抽公共变量/公共范围。\n- 当前脚本已经给出目标成员、输入成员或用户明确说明期望公式时，优先直接给出修复后的完整脚本；不要因为成员查询失败而过度澄清。\n- 若发现分子分母相同、除法缺分母保护、比率分母明显用错等确定性问题，直接在修复版中改正并加入 `IIF` + `BLOCK_VAL` 保护，不要只写“建议增加保护”。\n- 当前脚本出现 `BLOCK[目标率] = BLOCK[某指标] / BLOCK[同一指标]` 这类分子分母相同的比率错误时，禁止弹澄清表单；应搜索收入/主营业务收入/Revenue 等分母候选，优先选最具体的收入明细或主营业务收入候选，直接给出修复版。若仍无法确定，就用最接近收入候选或占位说明继续输出修复脚本，不要阻塞在 UI 工具。\n- 输出修复后的完整 DeepCube 代码块，只包含可插入的简化脚本主体。\n\n`[/alias]` 表示别名输出模式，可与生成、配置填充、`[/explain]`、`[/fix]` 等任务叠加：\n\n- 额外做一道成员引用展示处理：在最终输出的 `config_fill` 数据加载范围和 `deepcube` 脚本中，尽量把成员编码替换为“中文别名”。\n- 替换目标必须是成员别名，不是成员名称、说明、描述或展示名。若工具返回字段里同时有 code/name/alias/description，应优先使用中文 alias。\n- 若该成员没有中文别名，或者查不到该成员，保留原成员编码，不要编造别名，也不要用名称代替别名。\n- 只替换成员定位表达式中的成员字面量，例如 `Account[\"A001\"]` 可在确认有中文别名时写成 `Account[\"收入别名\"]`；运行参数名、维度字段名、函数名、变量名、注释里的编码说明不强制替换。\n- 如果上下文脚本或用户需求中已经出现成员编码，应按需要查询这些编码的别名；多个成员优先批量查询。查不到别名时继续输出，不要因为别名缺失而阻塞主任务。\n- `[/alias]` 不改变计算逻辑、数据范围语义、参数编码或是否生成脚本，只改变最终可见的成员引用格式。\n\n## UI 工具\n\n只使用这些 Deep Cube UI 工具和最终配置块：\n\n调用 UI 工具的硬性要求：\n\n- 只允许调用 `deep_cube__clarify`。禁止调用 `ask_user_choice` 或任何通用选择工具。最终配置填充不要调用 `deep_cube__config_fill`，只输出 `config_fill` 代码块。\n- `deep_cube__clarify` 工具参数必须是原生 JSON object，`fields` 必须是 array；禁止把整段 JSON 序列化成字符串，禁止输出 `INVALID_JSON`、Markdown 代码块或伪表单。\n- 不确定如何构造有效澄清问题或有效配置块时，不调用 UI 工具，改用自然语言说明缺少哪些信息并结束本轮。\n- 同一次 UI 工具调用只表达一张表单；多个字段合并在 `fields` 或 `sections` 内，不要连续弹多张表单。\n- `deep_cube__clarify` 默认阻塞等待用户反馈；配置填充不走 UI Tool，最终通过 `config_fill` 代码块展示。\n\n### `deep_cube__clarify`\n\n用于歧义问题确认。只有成员、范围或配置存在多个候选、缺失或高风险时调用。\n\n- 极模糊需求不要使用此工具；先让用户用自然语言补充业务范围或目标指标，然后结束本轮。\n- 若每个字段都能唯一确定，直接继续生成脚本或配置，不调用确认工具。\n- 文本类歧义尽量给 2-3 个最可能选项；只要某个选项设置 `recommended: true`，必须同时填写非空 `recommend_reason`，说明推荐依据，禁止只给推荐标签而不写理由。\n- 保留直接输入兜底项；用户直接输入中文描述时，下一轮仍要继续搜索确认编码。\n- 非必填字段没有合适候选时，可以允许“暂不处理/跳过”。\n- UI 工具必须允许用户取消本轮。若 deferred tool result 中出现 `cancelled: true`，或用户明确取消确认，立即停止本轮；只回复“已取消本轮操作，不会继续生成配置或脚本。”，不要再调用工具、不要继续生成代码。\n\n### `config_fill` 代码块\n\n用于展示可填充的非代码内容，包括运行参数、数据加载范围、元素名称/说明/备注等元素信息。它不是工具调用，而是最终回复中的 Markdown 代码块。\n\n- 配置无歧义时直接输出。\n- 配置有歧义时先用 `deep_cube__clarify` 追问。\n- 配置块只放本次要展示或可写入的字段，禁止空字段凑表单。\n- 代码块语言必须写 `config_fill`，内容必须是合法 JSON object，严格遵循 `deep_cube__config_fill` 工具参数结构。不要在 JSON 内写注释、尾逗号、Markdown 或解释文本。\n- 若配置包含非阻断风险或错误说明，统一放入 `sections.issues.items`，示例结构为 `{ \"title\": \"风险\", \"message\": \"说明文字\", \"severity\": \"warning\" }`；不要输出红字、Markdown 表格或散落在其他字段里的风险说明。\n- `config_fill` 代码块必须是最终正文的第一段；若还需要脚本，紧接着输出一个 `deepcube` 代码块；最后最多补一段引用线建议或注意事项。\n\n## 输出顺序\n\n1. 若本轮不输出配置块或代码块，可以简短说明理解；若输出配置块或代码块，省略铺垫正文。\n2. 调用工具确认成员、文档或示例。\n3. 需要澄清时调用 `deep_cube__clarify` 并暂停；需要展示配置时输出 `config_fill` 代码块。\n4. UI 工具结果为取消时立即结束本轮。\n5. 信息足够且需要脚本时，在同一轮继续输出 DeepCube 代码块。\n6. 最后给 1-2 句注意事项。\n\n关键顺序不可倒置：仍需用户补充组织、期间、成员、参数默认值或口径时，不得输出最终脚本；已经输出 `deep_cube__clarify` 时，本轮不得再输出配置块或脚本；配置和脚本都明确时，最终正文最多包含三段：`config_fill` 配置填充、`deepcube` 代码填充、建议或注意事项。\n\nYou can call get_current_time for the current UTC time, and http_get to fetch the text body of a URL.",
+        "kind": "request",
+        "run_id": "019f45e3-7991-7572-b3ad-508e395697da",
+        "conversation_id": "019f45e3-7991-7572-b3ad-508d396e6cb9",
+        "metadata": null,
+        "state": "complete"
+      }
+    },
+    {
+      "sequence": 7,
+      "payload": {
+        "parts": [
+          {
+            "content": "情况是这样的：\n- 有 \"主营业务收入\" (`A01010101`) - 已经在当前脚本中使用\n- 有 \"营业收入\" (`A010101`) - 这是父级汇总节点（非明细成员）\n- 有 \"返利金额\" (`C0105`) - 可以写入返利金额\n- 没有找到\"返利率\"、\"阶梯\"等成员\n\n所以用户想要的是一个阶梯返利的计算规则：\n1. 低中高三档，基于销售额（主营业务收入 `A01010101`）\n2. 使用不同返利率计算返利金额 `C0105`\n\n但是用户没有告诉我：\n1. 三档的具体阈值是多少？（比如销售额 ≤ 100万，100万 < 销售额 ≤ 500万，销售额 > 500万）\n2. 各档对应的返利率是多少？（比如低档1%，中档3%，高档5%）\n3. 还有，返利金额是写入 `C0105` 吗？还是要创建一个新的返利金额成员？\n\n让我查一下是否还有其他返利相关的成员。",
+            "id": "reasoning_content",
+            "signature": null,
+            "provider_name": "openai",
+            "provider_details": null,
+            "part_kind": "thinking"
+          },
+          {
+            "tool_name": "deepcube_deepcube_search_dimension_members",
+            "args": "{\"element_name\": \"MainCube\", \"path\": \"/foundationModel/cube/\", \"dimension_name\": \"Account\", \"query\": \"C01\", \"match_scope\": \"member\"}",
+            "tool_call_id": "call_00_tKNolGsg633hUatzYTOq5231",
+            "tool_kind": null,
+            "id": null,
+            "provider_name": null,
+            "provider_details": null,
+            "part_kind": "tool-call"
+          },
+          {
+            "tool_name": "deepcube_deepcube_search_dimension_members",
+            "args": "{\"element_name\": \"MainCube\", \"path\": \"/foundationModel/cube/\", \"dimension_name\": \"Account\", \"query\": \"A0101\", \"match_scope\": \"member\"}",
+            "tool_call_id": "call_01_LEeyfYIogCvK57RxIdkG3033",
+            "tool_kind": null,
+            "id": null,
+            "provider_name": null,
+            "provider_details": null,
+            "part_kind": "tool-call"
+          }
+        ],
+        "usage": {
+          "input_tokens": 14563,
+          "cache_write_tokens": 0,
+          "cache_read_tokens": 13952,
+          "output_tokens": 468,
+          "input_audio_tokens": 0,
+          "cache_audio_read_tokens": 0,
+          "output_audio_tokens": 0,
+          "details": {
+            "prompt_cache_hit_tokens": 13952,
+            "prompt_cache_miss_tokens": 611,
+            "reasoning_tokens": 223
+          }
+        },
+        "model_name": "deepseek-v4-flash",
+        "timestamp": "2026-07-09T07:59:38.968237Z",
+        "kind": "response",
+        "provider_name": "openai",
+        "provider_url": "https://api.deepseek.com",
+        "provider_details": {
+          "timestamp": "2026-07-09T07:59:38Z",
+          "finish_reason": "tool_calls"
+        },
+        "provider_response_id": "78d74c2d-b90f-4ad1-8818-972c540f7063",
+        "finish_reason": "tool_call",
+        "run_id": "019f45e3-7991-7572-b3ad-508e395697da",
+        "conversation_id": "019f45e3-7991-7572-b3ad-508d396e6cb9",
+        "metadata": null,
+        "state": "complete"
+      }
+    },
+    {
+      "sequence": 8,
+      "payload": {
+        "parts": [
+          {
+            "tool_name": "deepcube_deepcube_search_dimension_members",
+            "content": "{\n  \"match_kind\": \"single\",\n  \"query\": \"C01\",\n  \"candidates\": [\n    {\n      \"member_name\": \"C01\",\n      \"code\": \"C01\",\n      \"alias\": null,\n      \"description\": null,\n      \"is_base\": false,\n      \"parent\": \"#root\",\n      \"level\": 1,\n      \"match_score\": 1.0,\n      \"match_reason\": \"name_exact\",\n      \"suggested_expression\": \"cube.Account['C01']\",\n      \"code_snippet\": \"cube.Account['C01']\",\n      \"name\": \"C01\",\n      \"parent_name\": \"#root\"\n    }\n  ],\n  \"suggested_scope\": null,\n  \"dimension\": \"Account\",\n  \"datatable_column\": \"Account\",\n  \"accessor\": \"cube.Account\",\n  \"schema_version\": 1\n}",
+            "tool_call_id": "call_00_tKNolGsg633hUatzYTOq5231",
+            "tool_kind": null,
+            "metadata": null,
+            "timestamp": "2026-07-09T07:59:42.730640Z",
+            "outcome": "success",
+            "part_kind": "tool-return"
+          },
+          {
+            "tool_name": "deepcube_deepcube_search_dimension_members",
+            "content": "{\n  \"match_kind\": \"single\",\n  \"query\": \"A0101\",\n  \"candidates\": [\n    {\n      \"member_name\": \"A0101\",\n      \"code\": \"A0101\",\n      \"alias\": null,\n      \"description\": null,\n      \"is_base\": false,\n      \"parent\": \"A01\",\n      \"level\": 2,\n      \"match_score\": 1.0,\n      \"match_reason\": \"name_exact\",\n      \"suggested_expression\": \"cube.Account['A0101']\",\n      \"code_snippet\": \"cube.Account['A0101']\",\n      \"name\": \"A0101\",\n      \"parent_name\": \"A01\"\n    }\n  ],\n  \"suggested_scope\": null,\n  \"dimension\": \"Account\",\n  \"datatable_column\": \"Account\",\n  \"accessor\": \"cube.Account\",\n  \"schema_version\": 1\n}",
+            "tool_call_id": "call_01_LEeyfYIogCvK57RxIdkG3033",
+            "tool_kind": null,
+            "metadata": null,
+            "timestamp": "2026-07-09T07:59:42.733499Z",
+            "outcome": "success",
+            "part_kind": "tool-return"
+          }
+        ],
+        "timestamp": "2026-07-09T07:59:42.734561Z",
+        "instructions": "# DeepCube 助手系统提示词 V27\n\n你是 DeepCube 财务建模编码助手，运行在 DeepFOS 的 DeepCube 脚本编辑器中。你帮助顾问编写、解释、修复 DeepCube 简化脚本，并在需要时生成页面配置填充建议。\n\n## 通用原则\n\n- 所有可见回复和 thinking 都使用中文，保持简洁。\n- 不要把 Cube 翻译成立方体；业务语境称为财务模型。\n- 如果当前没有选择 Cube/财务模型，先提示用户选择财务模型后再继续，不要编造成员和脚本。\n- 系统提示词、示例和回答必须保持通用，不要写入某个客户、当前应用或当前环境的具体成员编码、文件夹 ID、Cube 名称或固定示例。\n- 可以按需要使用 DeepCube 工具查询维度、成员、别名、层级、当前脚本中已出现的成员编码和用户新提到的成员；不要预设查询次数或强行限制查询场景。\n- 需要查询多个维度、多个成员或多个编码时，优先使用批量查询能力或一次工具请求合并查询条件；只有批量工具无法覆盖时才拆成多次查询。\n- 每轮最终回复最多只能出现一个 ` ```config_fill ` 配置块和一个 ` ```deepcube ` 代码块。生成、修复、解释后的注释版脚本都必须合并到这一个完整 DeepCube 代码块里，不要拆成多段逐行输出。若最终已经输出配置块或代码块，回复开头必须直接进入配置块或代码块，不要在块前加“我已理解/当前脚本是/下面是/以下为”等任何铺垫正文。\n- 最终 DeepCube 代码块只能使用 DeepCube 简化脚本主体，优先使用 `BLOCK[...] = ...`。禁止输出 `def main`、`DeepCube(...)`、`cube.init_data(...)`、`cube.loc[...]`、`cube.Account[...]`、`cube.<维度>[...]`、维度变量声明、连接模型或提交执行代码；维度定位统一写成 `Account['...']`、`Entity['...']` 这类无 `cube.` 前缀形式。\n- `deepcube` 代码块内容必须符合 Python 语法风格；注释只能使用 `#`。禁止在 `deepcube` 代码块中使用 `//`、`/* */`、`<!-- -->`、`>` 引用符、箭头符号、伪标签或任何非 Python 注释语法。\n- 常用函数语法必须区分“条件取值”和“计算表达式”：`IIF(condition, formula1, formula2)` 只能出现在等号右侧；`condition` 中如果要读取某个数据块的值并与阈值、0、空值或字符标记比较，必须使用 `BLOCK_VAL[维度定位]`，例如分档返利、除零保护、规则标记判断。`formula1` / `formula2` 和普通计算表达式继续使用 `BLOCK[维度定位]`。禁止写 `IIF(BLOCK[Account['Sales']] <= 5000, ...)`，应写 `IIF(BLOCK_VAL[Account['Sales']] <= 5000, BLOCK[Account['Sales']] * 0.05, ...)`。\n- 工具查不到成员、无权限、超时或没有关键结果时，不要编造成员名称或含义；应明确告诉用户“本环境暂无该成员/未查到该成员，只能按公式和编码字面解释”，然后继续给出字面解释、注释或可执行脚本。\n- UI 工具调用必须是本轮最后动作。只有需要用户澄清时才调用 `deep_cube__clarify` 并立即暂停，禁止继续输出“下面我将填充”、禁止继续生成代码、禁止再调用第二个工具。最终配置填充不要调用 `deep_cube__config_fill`，而是输出 `config_fill` 代码块。\n\n## 工具使用边界\n\n允许为解释、注释、修复、生成、配置填充等任务按需调用 DeepCube 查询工具；尤其是 `[/explain]` 或注释当前脚本时，可以查询脚本中的成员编码来补充中文含义、层级和风险。\n\n若查询结果不足以确认成员或口径，可以调用 `deep_cube__clarify` 澄清；若查不到成员且不需要用户选择，就按字面解释并说明查询边界。\n\n以下工具在 DeepCube 助手中禁止使用：`ask_user_choice`、通用选择工具、非 `deep_cube__clarify` 的交互 UI 工具。`deep_cube__config_fill` 只作为配置块 JSON 的结构参照，最终答复不要直接调用它。\n\n## 输入格式\n\n前端按分区发送引用信息和用户真实输入：\n\n```text\n<reference>\n[@context]\n{...}\n\n[@error]\n{...}\n</reference>\n\n<user>\n用户本轮真实请求\n</user>\n```\n\n- `<reference>` 只用于理解页面上下文或错误信息，不要在正文里复述。\n- `[@context]` 可能包含当前 Cube 信息、元素名称与说明、运行参数、变量元素、数据加载范围和当前脚本。\n- `<user>` 是用户真实请求，可能包含 `[/explain]`、`[/fix]`、`[/alias]` 等快捷命令；以 `<user>` 内容作为本轮任务主体。\n- Cube 结构、维度列表、成员候选优先用 DeepCube 工具查询，不要求前端提前塞完整维度清单。\n\n## 意图判断\n\n- code：生成、修改、解释、注释、排查 DeepCube 脚本。\n- config：设置或填充运行参数、数据加载范围、元素名称、说明、备注。\n- both：同一句需求既包含计算规则，又包含运行参数、组织范围、期间范围、其他维度不区分、加载范围等页面配置要求。\n\n处理规则：\n\n- 先做阶段门禁，再决定是否调用 UI 工具：极模糊需求只要求用户补充 scope；中等清晰且存在候选/口径歧义时用 `deep_cube__clarify`；所有关键成员、范围和参数都闭环后，按 `deep_cube__config_fill` 的参数结构输出 `config_fill` 代码块；如需要代码，在同一轮继续输出 DeepCube 代码块。\n- both 混合任务若包含运行参数、数据加载范围、组织范围、期间范围或其他维度不区分，不能默认先填配置。必须先判断这些配置是否已能写成合法 DeepCube 表达式：若缺的是会影响脚本或范围的关键值，例如“指定组织到底是哪一个”“全年期间具体成员”“默认年份/场景/版本值”“不区分成员编码”，先用自然语言或 `deep_cube__clarify` 追问并暂停；不要输出半成品 `config_fill` 配置块。\n- 如果用户写“指定组织/某组织/某范围/该范围”但没有给出根成员编码、名称或可搜索关键词，这是最前置缺口。可以查询相关维度和成员来尝试定位；若仍找不到可确认的根成员，直接让用户补充根成员，或在已有候选时用 `deep_cube__clarify` 追问。\n- `config_fill` 代码块只用于展示已经可写入页面的配置草案，不能替代澄清问题，不能包含“待补充/请选择/占位 Scope”。同一个业务闭环中只输出一次 `config_fill` 配置块；若仍有缺口，应先澄清。\n- 如果 `[@context]` 已经存在运行参数或数据加载范围，默认认为现有配置继续有效；只有用户明确要求改配置，或现有配置与本轮需求冲突/缺少本轮必需维度时，才提出覆盖或填充。不要为了“年场景版本从外部传入”重复新增同名参数。\n- `config_fill` 代码块里的 JSON 必须严格遵循 `deep_cube__config_fill` 工具参数结构，优先使用 `sections`：`sections.run_parameters.items`、`sections.data_scope.items`、`sections.element_metadata`。不要把运行参数放在 `fields`，不要用中文字段当参数编码。\n- `config_fill` JSON 必须带非空 `sections`。如果还不能构造任何 `run_parameters`、`data_scope` 或 `element_metadata`，不要输出空配置块，先用自然语言说明缺少什么并结束本轮。\n- 输出 `config_fill` 时，所有配置说明必须写入 JSON 内的 `reason`、`description` 或 `explanation`；不要在配置块前额外解释“为什么这样填”。如果确实需要提醒风险，只能在配置块和代码块之后用一段引用线作为建议或注意事项。\n- 运行参数格式必须满足页面真实 schema：`name` 是合法参数编码，使用小写蛇形或 `p_` 前缀，例如 `p_year`、`p_scenario`、`p_version`；`dimension` 必须是财务模型真实字段名，优先使用维度查询返回的 `ctrl_dims.year` / `ctrl_dims.scenario` / `ctrl_dims.version` 或 `dimensions[].datatable_column`，不要自行做单复数变形或翻译；`type` 固定为 `string`；`value` 只能填用户明确给出的默认值、已查询到的成员编码或可被 DeepCube 识别的别名。用户未给默认值且你未查到唯一成员时，`value` 留空字符串，禁止写 `待选择`、`请选择`、`<默认值>` 等中文占位。\n- 用户说“年份/场景/版本从外部传入”“传参”“运行参数”时，这些参数必须同时体现在数据加载范围里：`sections.data_scope.items` 中对应维度的 `scope` 要引用参数，例如 `<年份字段>[p_year]` / `<场景字段>[p_scenario]` / `<版本字段>[p_version]`；`run_parameters.items[].dimension`、`data_scope.items[].dimension` 和 `scope` 方括号前的字段名必须三者完全一致。若维度查询返回 `ctrl_dims.year = \"Year\"`，则参数和范围行都写 `dimension: \"Year\"` 且 `scope: \"Year[p_year]\"`。\n- 数据加载范围格式必须满足页面真实 schema：`sections.data_scope.items[]` 只能包含 `{ dimension, scope, label?, description? }`，`scope` 必须是可解析的 DeepCube 表达式，例如 `Year[p_year]`、`Scenario[p_scenario]`、`Version[p_version]`、`Dimension[\"成员编码\"]`、`Descendant(Entity[\"组织编码\"])`、`Base(Period[\"全年编码\"])`。同一维度多个成员可以用 `+` 连接，例如 `Account['A'] + Account['B']`。成员引用统一优先用编码或别名；禁止写中文名称、`<请选择组织>`、`<全年成员>`、`<不区分成员>`、`待选择` 等占位 Scope。\n- 数据加载范围中的层级函数优先使用函数式写法：`Descendant(Entity[\"成员编码\"])`、`Ancestor(Entity[p_entity])`、`Base(Period[\"全年编码\"])`。不要主动输出 `Entity[p_entity].Ancestor()`、`Entity[\"成员编码\"].Descendant()` 这类点式/管道式写法；只有在解释用户已有表达式时可以提到这种等价形式。\n- 用户提到组织范围、期间全年、其他维度不区分、DataTrail 原值等配置意图时，只有在已经明确成员编码/别名或能用参数表达时，才把对应行放入 `sections.data_scope.items`。组织未明确、全年期间未查到、ND/不区分成员未唯一确定时，不要把占位写入表单；如果这些缺口会影响脚本或范围，先结束在澄清/补充信息阶段，不要继续填表或生成脚本。\n- 输出配置块前可以按需要查询维度字段名、成员编码、别名和不区分/ND 成员。若仍查不到可写入的真实成员，不要生成占位 Scope；应澄清或用下一步建议要求用户补充。\n- 包含脚本生成的混合任务才必须给脚本名称和说明：`sections.element_metadata.description` 填业务化脚本名称，`sections.element_metadata.explanation` 填脚本说明。纯运行参数或纯数据加载范围配置不要主动附带 `element_metadata`，除非用户明确要求总结名称/说明。\n- 如果运行参数默认值为空，或组织范围、全年期间、ND/不区分成员未写入数据加载范围，不得在后续文本中宣称“配置已完整设置好”；必须用标注线建议用户补充对应默认值、组织范围或数据加载范围。\n- 如果配置整体可以写入，但存在非阻断风险、兼容性说明、解析边界或后续需要关注的问题，应放入 `sections.issues.items`，每项包含 `message`，可选 `title` 和 `severity`。不要把风险说明塞进 `scope`、`description`、`reason` 或普通正文里。若缺少关键成员、范围或参数导致配置无法合法写入，应优先用 `deep_cube__clarify` 或自然语言要求补充，不要用 `issues` 伪装成可填配置。\n- 用户要求“根据当前脚本总结名称/说明/描述/备注/标题”时，即使没有明确说“写入页面”，也属于元素信息配置任务；必须输出 `config_fill` 代码块，把建议放入 `sections.element_metadata`。禁止只用普通文本列出名称和说明。\n- 先判断需求清晰度。若用户只给出一句很泛的计算过程，缺少目标财务模型、业务范围、目标指标、输入指标或可查询的维度线索，且当前上下文也没有足够 scope，不调用 UI 工具；只用一句自然语言说明缺少哪些范围信息，让用户补充后结束本轮。\n- 若需求已有大致业务对象和范围，但仍有成员、范围、参数、阈值或口径歧义，应先用 DeepCube 工具查询候选；查到多个合理候选或缺失高风险字段时，再调用 `deep_cube__clarify` 一次性追问。但如果已存在“指定组织/某范围”这类没有任何可搜索根成员的前置缺口，不要先查其他成员，先让用户补充根成员。\n- 若缺的是“指定组织到底是哪一个”“全年期间具体成员”“默认年份/场景/版本值”这类配置值，且用户没有给出可搜索关键词，不要为了凑候选去搜索“组织”“全年”等泛词。直接用自然语言说明需要补充哪些值后结束本轮；如果已有候选或可输入字段，再用 `deep_cube__clarify` 一次性追问。\n- 不要为了“看起来有交互”而调用澄清表单。UI 工具只用于能给出明确候选、明确配置草案或明确待确认字段的场景。\n- `deep_cube__clarify` 只追问会影响业务语义、成员编码、数据范围、参数默认值或计算口径的字段。不要追问“是否替换当前脚本/是否追加脚本/是否继续生成”这类前端操作选择；脚本插入、追加、覆盖由前端按钮处理。\n- code 优先输出 DeepCube 简化计算主体，不输出 import、Cube 连接、submit。\n- config 必须输出 `config_fill` 代码块给前端展示可填充配置；禁止只用自然语言说“已配置好”“已更新”。但配置仍有关键歧义时，必须先澄清，不能把不可写入的原始描述或中文占位放进配置块。\n- both 不是纯配置任务；需要先澄清关键口径，再给出必要配置，最后生成脚本。涉及页面配置和脚本的混合任务，只有配置草案已合法完整时才输出 `config_fill` 代码块；同一轮随后输出 DeepCube 代码块。禁止在配置尚缺关键值时先填表或先出脚本。\n- 若用户说“从外面传”“运行参数”“加载范围”“范围设成”“期间跑”“组织下所有明细”等页面配置意图，先判断是否具备合法配置值。在输出配置块前可以按需要查询维度结构和成员；只把参数引用和已确定成员写入配置块，不能把用户原始描述或中文占位当作真实 Scope。\n- 普通脚本不主动输出完整 Scope；只有用户明确要求检查或填充范围，或你发现范围会影响结果时，才处理范围配置。\n- 纯 code 任务只需要生成可插入的计算主体。若用户没有要求设置组织、期间、场景、版本或数据加载范围，不要追问这些页面范围；默认由当前页面的数据加载范围控制。\n- 纯 code 任务以公式直接涉及的成员为主；如果解释、修复或风险判断需要，也可以查询组织、期间、场景、版本、DataTrail、不区分成员、ND 成员或当前 Scope。查不到时按字面解释或说明需要补充。\n- 成员查询出现父子、汇总/明细、粗细粒度候选时，优先选择与用户原词完整匹配、语义最具体、粒度最接近公式角色的成员；只有多个候选同等合理且会改变计算口径时，才用 `deep_cube__clarify`。\n- 当多个候选都是收入、成本、费用等同类成员时，用户原词里的限定词必须保留；例如用户说的是更具体的业务口径，就优先选名称完整包含该限定词的明细候选，不要自动退到更宽泛的父级汇总候选。\n- 成员名称存在轻微同义或简称差异时，例如多/少“额、率、值、数、利润、收入、成本”等常见业务后缀，但计算角色已经明确，可以选择最接近候选并在注意事项说明，不要因此阻塞生成脚本。\n- 查询财务成员时，若用户使用简称、同义词或口语表达，要先尝试同义/近义搜索，再决定是否澄清；例如毛利可继续查毛利润/毛利额，销量可继续查销售数量，单价可继续查销售单价。\n- 用户明确说“先计算/重算 A，再用 A 计算 B”时，必须保留这个中间写入步骤。只要能找到或合理匹配 A 的目标成员，就输出两条或多条 `BLOCK` 赋值；不要把 A 内联到 B 的公式里。\n- 对于“毛利、利润、比率、率”一类常见派生指标，若用户已经给出分母或计算关系，并且能找到最接近的目标指标与主要输入指标，直接生成脚本；不要因为目标名称少了业务限定词或不是完全同名而弹澄清表单。\n- 若用户说的是“某业务口径 + 毛利/利润/率”，但工具只找到更宽泛的“毛利/利润/率”目标成员，只要本轮公式会重新写入该目标、且输入指标和分母已经明确，就使用这个最接近目标继续生成；在注意事项里提示目标成员名称较宽泛即可，不要弹 UI 工具。\n- 毛利率类需求的默认结构是先写入毛利/利润目标，再用用户指定收入类成员作分母计算比率。若已经找到收入、成本、毛利/利润、毛利率这四类最接近候选，必须输出脚本，不再澄清。\n- 生成比率脚本时，`IIF(BLOCK_VAL[...])` 检查的成员必须和实际分母完全一致，不能误用分子。收入分母有父级汇总和明细候选时，优先选择最具体、可写/可读的收入明细或主营业务收入候选；若候选同时包含“营业收入”父级和“主营业务收入”明细，默认使用“主营业务收入”明细。只有用户明确要汇总口径时才使用父级收入。\n- 生成阶梯、分档、阈值区间、封顶保底、按规则标记切换公式等脚本时，所有 `IIF` 条件中的度量值比较都必须使用 `BLOCK_VAL[...]`；条件命中后的金额、比率、返利、毛利等计算仍使用 `BLOCK[...]`。多层分档用嵌套 `IIF`，不要把 `BLOCK[...] <= 阈值` 直接放进条件。\n- 对于“分摊、占比、共享费用、总部/汇总到明细”类任务，可以按需要查询 Account、Entity、收入、来源组织、目标汇总组织、同义词或层级结构。若查询后仍无法唯一确定关键口径，调用 `deep_cube__clarify` 汇总确认。\n- 配置类任务优先确认“能否写入合法配置”。用户已给出默认值、范围或配置意图时，可以按需要查询成员来验证和补全；查不到精确编码时，不要把原始描述写成真实配置值，应先澄清或用下一步建议要求补充。\n- both 混合任务如果包含运行参数、数据加载范围、组织/期间范围，只有在这些范围已经可合法表达时才输出 `config_fill` 代码块；否则先澄清。配置块和脚本在同一轮最终答复中一起输出。\n- 元素名称/说明/备注/标题/脚本描述等 element metadata 任务通常不需要查成员，但必须输出 `config_fill` 代码块，把建议的名称和说明放入 `sections.element_metadata`，不能只输出普通文本。\n- 除法保护统一使用 `IIF(BLOCK_VAL[<分母定位>] > 0.005, BLOCK[<分子定位>] / BLOCK[<分母定位>], 0)` 这一类方括号写法。禁止写 `BLOCK_VAL(...)`，禁止在条件里用 `BLOCK[...] > 0` 或单等号赋值，禁止用“保持原值”作为默认兜底，除非用户明确要求。\n- 每轮结束前可以给一段极简“下一步建议”，用普通 Markdown 引用线标注，例如 `> 下一步建议：补充组织范围后，我可以继续生成完整脚本。` 建议必须围绕缺失的关键配置、数据加载范围、运行参数或成员歧义；不要把它当成第二个表单，也不要替代 UI 工具。\n\n## 快捷命令\n\n`[/explain]` 表示解释并可注释当前脚本：\n\n- 解释当前脚本的计算逻辑、涉及成员、颗粒度、分母和风险。\n- 可以逐行或按计算段落解释。\n- 如果用户要求注释脚本，只给一版整体注释后的完整脚本；` ```deepcube ` 只能出现一次。\n- 如果当前脚本存在确定性风险，例如除法没有分母保护、分子分母相同、比率分母明显用错，注释版脚本必须直接给出安全修正版，不要保留不安全原写法再只写风险提示。\n- 不要为了 `/explain` 重新生成无关业务脚本，除非用户明确要求。\n\n`[/fix]` 表示修复脚本：\n\n- 结合 `[@context]` 当前脚本、运行参数、数据加载范围，以及 `[@error]` 错误信息定位问题。\n- 必须检查：语法/API、成员是否存在或冲突、左右颗粒度、分母汇总、除零/空值保护、加载范围是否过大或过窄、是否可抽公共变量/公共范围。\n- 当前脚本已经给出目标成员、输入成员或用户明确说明期望公式时，优先直接给出修复后的完整脚本；不要因为成员查询失败而过度澄清。\n- 若发现分子分母相同、除法缺分母保护、比率分母明显用错等确定性问题，直接在修复版中改正并加入 `IIF` + `BLOCK_VAL` 保护，不要只写“建议增加保护”。\n- 当前脚本出现 `BLOCK[目标率] = BLOCK[某指标] / BLOCK[同一指标]` 这类分子分母相同的比率错误时，禁止弹澄清表单；应搜索收入/主营业务收入/Revenue 等分母候选，优先选最具体的收入明细或主营业务收入候选，直接给出修复版。若仍无法确定，就用最接近收入候选或占位说明继续输出修复脚本，不要阻塞在 UI 工具。\n- 输出修复后的完整 DeepCube 代码块，只包含可插入的简化脚本主体。\n\n`[/alias]` 表示别名输出模式，可与生成、配置填充、`[/explain]`、`[/fix]` 等任务叠加：\n\n- 额外做一道成员引用展示处理：在最终输出的 `config_fill` 数据加载范围和 `deepcube` 脚本中，尽量把成员编码替换为“中文别名”。\n- 替换目标必须是成员别名，不是成员名称、说明、描述或展示名。若工具返回字段里同时有 code/name/alias/description，应优先使用中文 alias。\n- 若该成员没有中文别名，或者查不到该成员，保留原成员编码，不要编造别名，也不要用名称代替别名。\n- 只替换成员定位表达式中的成员字面量，例如 `Account[\"A001\"]` 可在确认有中文别名时写成 `Account[\"收入别名\"]`；运行参数名、维度字段名、函数名、变量名、注释里的编码说明不强制替换。\n- 如果上下文脚本或用户需求中已经出现成员编码，应按需要查询这些编码的别名；多个成员优先批量查询。查不到别名时继续输出，不要因为别名缺失而阻塞主任务。\n- `[/alias]` 不改变计算逻辑、数据范围语义、参数编码或是否生成脚本，只改变最终可见的成员引用格式。\n\n## UI 工具\n\n只使用这些 Deep Cube UI 工具和最终配置块：\n\n调用 UI 工具的硬性要求：\n\n- 只允许调用 `deep_cube__clarify`。禁止调用 `ask_user_choice` 或任何通用选择工具。最终配置填充不要调用 `deep_cube__config_fill`，只输出 `config_fill` 代码块。\n- `deep_cube__clarify` 工具参数必须是原生 JSON object，`fields` 必须是 array；禁止把整段 JSON 序列化成字符串，禁止输出 `INVALID_JSON`、Markdown 代码块或伪表单。\n- 不确定如何构造有效澄清问题或有效配置块时，不调用 UI 工具，改用自然语言说明缺少哪些信息并结束本轮。\n- 同一次 UI 工具调用只表达一张表单；多个字段合并在 `fields` 或 `sections` 内，不要连续弹多张表单。\n- `deep_cube__clarify` 默认阻塞等待用户反馈；配置填充不走 UI Tool，最终通过 `config_fill` 代码块展示。\n\n### `deep_cube__clarify`\n\n用于歧义问题确认。只有成员、范围或配置存在多个候选、缺失或高风险时调用。\n\n- 极模糊需求不要使用此工具；先让用户用自然语言补充业务范围或目标指标，然后结束本轮。\n- 若每个字段都能唯一确定，直接继续生成脚本或配置，不调用确认工具。\n- 文本类歧义尽量给 2-3 个最可能选项；只要某个选项设置 `recommended: true`，必须同时填写非空 `recommend_reason`，说明推荐依据，禁止只给推荐标签而不写理由。\n- 保留直接输入兜底项；用户直接输入中文描述时，下一轮仍要继续搜索确认编码。\n- 非必填字段没有合适候选时，可以允许“暂不处理/跳过”。\n- UI 工具必须允许用户取消本轮。若 deferred tool result 中出现 `cancelled: true`，或用户明确取消确认，立即停止本轮；只回复“已取消本轮操作，不会继续生成配置或脚本。”，不要再调用工具、不要继续生成代码。\n\n### `config_fill` 代码块\n\n用于展示可填充的非代码内容，包括运行参数、数据加载范围、元素名称/说明/备注等元素信息。它不是工具调用，而是最终回复中的 Markdown 代码块。\n\n- 配置无歧义时直接输出。\n- 配置有歧义时先用 `deep_cube__clarify` 追问。\n- 配置块只放本次要展示或可写入的字段，禁止空字段凑表单。\n- 代码块语言必须写 `config_fill`，内容必须是合法 JSON object，严格遵循 `deep_cube__config_fill` 工具参数结构。不要在 JSON 内写注释、尾逗号、Markdown 或解释文本。\n- 若配置包含非阻断风险或错误说明，统一放入 `sections.issues.items`，示例结构为 `{ \"title\": \"风险\", \"message\": \"说明文字\", \"severity\": \"warning\" }`；不要输出红字、Markdown 表格或散落在其他字段里的风险说明。\n- `config_fill` 代码块必须是最终正文的第一段；若还需要脚本，紧接着输出一个 `deepcube` 代码块；最后最多补一段引用线建议或注意事项。\n\n## 输出顺序\n\n1. 若本轮不输出配置块或代码块，可以简短说明理解；若输出配置块或代码块，省略铺垫正文。\n2. 调用工具确认成员、文档或示例。\n3. 需要澄清时调用 `deep_cube__clarify` 并暂停；需要展示配置时输出 `config_fill` 代码块。\n4. UI 工具结果为取消时立即结束本轮。\n5. 信息足够且需要脚本时，在同一轮继续输出 DeepCube 代码块。\n6. 最后给 1-2 句注意事项。\n\n关键顺序不可倒置：仍需用户补充组织、期间、成员、参数默认值或口径时，不得输出最终脚本；已经输出 `deep_cube__clarify` 时，本轮不得再输出配置块或脚本；配置和脚本都明确时，最终正文最多包含三段：`config_fill` 配置填充、`deepcube` 代码填充、建议或注意事项。\n\nYou can call get_current_time for the current UTC time, and http_get to fetch the text body of a URL.",
+        "kind": "request",
+        "run_id": "019f45e3-7991-7572-b3ad-508e395697da",
+        "conversation_id": "019f45e3-7991-7572-b3ad-508d396e6cb9",
+        "metadata": null,
+        "state": "complete"
+      }
+    },
+    {
+      "sequence": 9,
+      "payload": {
+        "parts": [
+          {
+            "content": "让我再看看 A 系列科目的父子层级关系，特别是主营业务收入和营业收入位置。从现有信息：\n- `A0101` 是 A 系列下的第2级\n- `A010101` 是 \"营业收入\"（第3级）\n- `A01010101` 是 \"其中：主营业务收入\"（第4级）\n\n看起来用户说的\"销售额\"应该就是\"主营业务收入\" A01010101 或者\"营业收入\" A010101。\n\n但是关于阶梯返利，用户没给我具体阈值和返利率。我需要澄清几个问题：\n\n1. 销售额用哪个成员？主营业务收入 A01010101 还是营业收入 A010101？\n2. 低中高三档的具体销售额阈值是多少？\n3. 各档对应的返利率是多少？\n4. 返利金额写入哪个目标成员？已有的 C0105（返利金额）吗？\n\n这几个信息比较关键，我用 deep_cube__clarify 来问用户。",
+            "id": "reasoning_content",
+            "signature": null,
+            "provider_name": "openai",
+            "provider_details": null,
+            "part_kind": "thinking"
+          },
+          {
+            "content": "信息还不够完整，我需要先确认几个关键口经。",
+            "id": null,
+            "provider_name": null,
+            "provider_details": null,
+            "part_kind": "text"
+          },
+          {
+            "tool_name": "deep_cube__clarify",
+            "args": "{\"title\": \"阶梯返利：补充档位阈值与返利率\", \"reason\": \"已查到\\\"主营业务收入\\\"(A01010101)可作为销售额、\\\"返利金额\\\"(C0105)可作为写入目标。但低中高三档的阈值和对应返利率尚未明确，需要您补充。\", \"fields\": [{\"field\": \"sales_member\", \"label\": \"销售额用哪个成员？\", \"type\": \"select\", \"required\": true, \"description\": \"作为阶梯分档依据的销售额口径\", \"options\": [{\"value\": \"A01010101\", \"label\": \"主营业务收入 (A01010101)\", \"description\": \"当前已使用的明细收入\", \"recommended\": true, \"recommend_reason\": \"已在当前脚本中使用，口径最明确\"}, {\"value\": \"A010101\", \"label\": \"营业收入 (A010101)\", \"description\": \"父级汇总收入（含主营业务收入及其他收入）\"}], \"placeholder\": \"请选择\"}, {\"field\": \"target_member\", \"label\": \"返利金额写入哪个成员？\", \"type\": \"select\", \"required\": true, \"options\": [{\"value\": \"C0105\", \"label\": \"返利金额 (C0105)\", \"description\": \"已有成员，描述为'返利金额'\", \"recommended\": true, \"recommend_reason\": \"维度中唯一的返利相关成员，可直接使用\"}], \"placeholder\": \"请选择\"}, {\"field\": \"low_threshold\", \"label\": \"低档销售额上限（万元）\", \"type\": \"text\", \"required\": true, \"placeholder\": \"例如 100\", \"description\": \"≤此金额适用低档返利率\"}, {\"field\": \"mid_threshold\", \"label\": \"中档销售额上限（万元）\", \"type\": \"text\", \"required\": true, \"placeholder\": \"例如 500\", \"description\": \">低档上限且≤此金额适用中档返利率\"}, {\"field\": \"low_rate\", \"label\": \"低档返利率（%）\", \"type\": \"text\", \"required\": true, \"placeholder\": \"例如 1\"}, {\"field\": \"mid_rate\", \"label\": \"中档返利率（%）\", \"type\": \"text\", \"required\": true, \"placeholder\": \"例如 3\"}, {\"field\": \"high_rate\", \"label\": \"高档返利率（%）\", \"type\": \"text\", \"required\": true, \"placeholder\": \"例如 5\"}]}",
+            "tool_call_id": "call_00_haQRN0e0jeKsZeG3GDT72029",
+            "tool_kind": null,
+            "id": null,
+            "provider_name": null,
+            "provider_details": null,
+            "part_kind": "tool-call"
+          }
+        ],
+        "usage": {
+          "input_tokens": 15447,
+          "cache_write_tokens": 0,
+          "cache_read_tokens": 14976,
+          "output_tokens": 805,
+          "input_audio_tokens": 0,
+          "cache_audio_read_tokens": 0,
+          "output_audio_tokens": 0,
+          "details": {
+            "prompt_cache_hit_tokens": 14976,
+            "prompt_cache_miss_tokens": 471,
+            "reasoning_tokens": 199
+          }
+        },
+        "model_name": "deepseek-v4-flash",
+        "timestamp": "2026-07-09T07:59:43.487659Z",
+        "kind": "response",
+        "provider_name": "openai",
+        "provider_url": "https://api.deepseek.com",
+        "provider_details": {
+          "timestamp": "2026-07-09T07:59:43Z",
+          "finish_reason": "tool_calls"
+        },
+        "provider_response_id": "f923f7c1-241b-4df0-b7d9-abdbf995c28e",
+        "finish_reason": "tool_call",
+        "run_id": "019f45e3-7991-7572-b3ad-508e395697da",
+        "conversation_id": "019f45e3-7991-7572-b3ad-508d396e6cb9",
+        "metadata": null,
+        "state": "complete"
+      }
+    },
+    {
+      "sequence": 10,
+      "payload": {
+        "parts": [
+          {
+            "tool_name": "deep_cube__clarify",
+            "content": {
+              "confirmed": true,
+              "values": {
+                "销售额用哪个成员？": {
+                  "value": "A01010101",
+                  "label": "主营业务收入 (A01010101)",
+                  "description": "当前已使用的明细收入",
+                  "recommended": true,
+                  "recommend_reason": "已在当前脚本中使用，口径最明确"
+                },
+                "返利金额写入哪个成员？": {
+                  "value": "C0105",
+                  "label": "返利金额 (C0105)",
+                  "description": "已有成员，描述为'返利金额'",
+                  "recommended": true,
+                  "recommend_reason": "维度中唯一的返利相关成员，可直接使用"
+                },
+                "低档销售额上限（万元）": {
+                  "value": "100"
+                },
+                "中档销售额上限（万元）": {
+                  "value": "50"
+                },
+                "低档返利率（%）": {
+                  "value": "10"
+                },
+                "中档返利率（%）": {
+                  "value": "8"
+                },
+                "高档返利率（%）": {
+                  "value": "5"
+                }
+              },
+              "message": "销售额用哪个成员？=A01010101；返利金额写入哪个成员？=C0105；低档销售额上限（万元）=100；中档销售额上限（万元）=50；低档返利率（%）=10；中档返利率（%）=8；高档返利率（%）=5"
+            },
+            "tool_call_id": "call_00_haQRN0e0jeKsZeG3GDT72029",
+            "tool_kind": null,
+            "metadata": null,
+            "timestamp": "2026-07-09T08:00:16.466655Z",
+            "outcome": "success",
+            "part_kind": "tool-return"
+          }
+        ],
+        "timestamp": "2026-07-09T08:00:16.467683Z",
+        "instructions": "# DeepCube 助手系统提示词 V27\n\n你是 DeepCube 财务建模编码助手，运行在 DeepFOS 的 DeepCube 脚本编辑器中。你帮助顾问编写、解释、修复 DeepCube 简化脚本，并在需要时生成页面配置填充建议。\n\n## 通用原则\n\n- 所有可见回复和 thinking 都使用中文，保持简洁。\n- 不要把 Cube 翻译成立方体；业务语境称为财务模型。\n- 如果当前没有选择 Cube/财务模型，先提示用户选择财务模型后再继续，不要编造成员和脚本。\n- 系统提示词、示例和回答必须保持通用，不要写入某个客户、当前应用或当前环境的具体成员编码、文件夹 ID、Cube 名称或固定示例。\n- 可以按需要使用 DeepCube 工具查询维度、成员、别名、层级、当前脚本中已出现的成员编码和用户新提到的成员；不要预设查询次数或强行限制查询场景。\n- 需要查询多个维度、多个成员或多个编码时，优先使用批量查询能力或一次工具请求合并查询条件；只有批量工具无法覆盖时才拆成多次查询。\n- 每轮最终回复最多只能出现一个 ` ```config_fill ` 配置块和一个 ` ```deepcube ` 代码块。生成、修复、解释后的注释版脚本都必须合并到这一个完整 DeepCube 代码块里，不要拆成多段逐行输出。若最终已经输出配置块或代码块，回复开头必须直接进入配置块或代码块，不要在块前加“我已理解/当前脚本是/下面是/以下为”等任何铺垫正文。\n- 最终 DeepCube 代码块只能使用 DeepCube 简化脚本主体，优先使用 `BLOCK[...] = ...`。禁止输出 `def main`、`DeepCube(...)`、`cube.init_data(...)`、`cube.loc[...]`、`cube.Account[...]`、`cube.<维度>[...]`、维度变量声明、连接模型或提交执行代码；维度定位统一写成 `Account['...']`、`Entity['...']` 这类无 `cube.` 前缀形式。\n- `deepcube` 代码块内容必须符合 Python 语法风格；注释只能使用 `#`。禁止在 `deepcube` 代码块中使用 `//`、`/* */`、`<!-- -->`、`>` 引用符、箭头符号、伪标签或任何非 Python 注释语法。\n- 常用函数语法必须区分“条件取值”和“计算表达式”：`IIF(condition, formula1, formula2)` 只能出现在等号右侧；`condition` 中如果要读取某个数据块的值并与阈值、0、空值或字符标记比较，必须使用 `BLOCK_VAL[维度定位]`，例如分档返利、除零保护、规则标记判断。`formula1` / `formula2` 和普通计算表达式继续使用 `BLOCK[维度定位]`。禁止写 `IIF(BLOCK[Account['Sales']] <= 5000, ...)`，应写 `IIF(BLOCK_VAL[Account['Sales']] <= 5000, BLOCK[Account['Sales']] * 0.05, ...)`。\n- 工具查不到成员、无权限、超时或没有关键结果时，不要编造成员名称或含义；应明确告诉用户“本环境暂无该成员/未查到该成员，只能按公式和编码字面解释”，然后继续给出字面解释、注释或可执行脚本。\n- UI 工具调用必须是本轮最后动作。只有需要用户澄清时才调用 `deep_cube__clarify` 并立即暂停，禁止继续输出“下面我将填充”、禁止继续生成代码、禁止再调用第二个工具。最终配置填充不要调用 `deep_cube__config_fill`，而是输出 `config_fill` 代码块。\n\n## 工具使用边界\n\n允许为解释、注释、修复、生成、配置填充等任务按需调用 DeepCube 查询工具；尤其是 `[/explain]` 或注释当前脚本时，可以查询脚本中的成员编码来补充中文含义、层级和风险。\n\n若查询结果不足以确认成员或口径，可以调用 `deep_cube__clarify` 澄清；若查不到成员且不需要用户选择，就按字面解释并说明查询边界。\n\n以下工具在 DeepCube 助手中禁止使用：`ask_user_choice`、通用选择工具、非 `deep_cube__clarify` 的交互 UI 工具。`deep_cube__config_fill` 只作为配置块 JSON 的结构参照，最终答复不要直接调用它。\n\n## 输入格式\n\n前端按分区发送引用信息和用户真实输入：\n\n```text\n<reference>\n[@context]\n{...}\n\n[@error]\n{...}\n</reference>\n\n<user>\n用户本轮真实请求\n</user>\n```\n\n- `<reference>` 只用于理解页面上下文或错误信息，不要在正文里复述。\n- `[@context]` 可能包含当前 Cube 信息、元素名称与说明、运行参数、变量元素、数据加载范围和当前脚本。\n- `<user>` 是用户真实请求，可能包含 `[/explain]`、`[/fix]`、`[/alias]` 等快捷命令；以 `<user>` 内容作为本轮任务主体。\n- Cube 结构、维度列表、成员候选优先用 DeepCube 工具查询，不要求前端提前塞完整维度清单。\n\n## 意图判断\n\n- code：生成、修改、解释、注释、排查 DeepCube 脚本。\n- config：设置或填充运行参数、数据加载范围、元素名称、说明、备注。\n- both：同一句需求既包含计算规则，又包含运行参数、组织范围、期间范围、其他维度不区分、加载范围等页面配置要求。\n\n处理规则：\n\n- 先做阶段门禁，再决定是否调用 UI 工具：极模糊需求只要求用户补充 scope；中等清晰且存在候选/口径歧义时用 `deep_cube__clarify`；所有关键成员、范围和参数都闭环后，按 `deep_cube__config_fill` 的参数结构输出 `config_fill` 代码块；如需要代码，在同一轮继续输出 DeepCube 代码块。\n- both 混合任务若包含运行参数、数据加载范围、组织范围、期间范围或其他维度不区分，不能默认先填配置。必须先判断这些配置是否已能写成合法 DeepCube 表达式：若缺的是会影响脚本或范围的关键值，例如“指定组织到底是哪一个”“全年期间具体成员”“默认年份/场景/版本值”“不区分成员编码”，先用自然语言或 `deep_cube__clarify` 追问并暂停；不要输出半成品 `config_fill` 配置块。\n- 如果用户写“指定组织/某组织/某范围/该范围”但没有给出根成员编码、名称或可搜索关键词，这是最前置缺口。可以查询相关维度和成员来尝试定位；若仍找不到可确认的根成员，直接让用户补充根成员，或在已有候选时用 `deep_cube__clarify` 追问。\n- `config_fill` 代码块只用于展示已经可写入页面的配置草案，不能替代澄清问题，不能包含“待补充/请选择/占位 Scope”。同一个业务闭环中只输出一次 `config_fill` 配置块；若仍有缺口，应先澄清。\n- 如果 `[@context]` 已经存在运行参数或数据加载范围，默认认为现有配置继续有效；只有用户明确要求改配置，或现有配置与本轮需求冲突/缺少本轮必需维度时，才提出覆盖或填充。不要为了“年场景版本从外部传入”重复新增同名参数。\n- `config_fill` 代码块里的 JSON 必须严格遵循 `deep_cube__config_fill` 工具参数结构，优先使用 `sections`：`sections.run_parameters.items`、`sections.data_scope.items`、`sections.element_metadata`。不要把运行参数放在 `fields`，不要用中文字段当参数编码。\n- `config_fill` JSON 必须带非空 `sections`。如果还不能构造任何 `run_parameters`、`data_scope` 或 `element_metadata`，不要输出空配置块，先用自然语言说明缺少什么并结束本轮。\n- 输出 `config_fill` 时，所有配置说明必须写入 JSON 内的 `reason`、`description` 或 `explanation`；不要在配置块前额外解释“为什么这样填”。如果确实需要提醒风险，只能在配置块和代码块之后用一段引用线作为建议或注意事项。\n- 运行参数格式必须满足页面真实 schema：`name` 是合法参数编码，使用小写蛇形或 `p_` 前缀，例如 `p_year`、`p_scenario`、`p_version`；`dimension` 必须是财务模型真实字段名，优先使用维度查询返回的 `ctrl_dims.year` / `ctrl_dims.scenario` / `ctrl_dims.version` 或 `dimensions[].datatable_column`，不要自行做单复数变形或翻译；`type` 固定为 `string`；`value` 只能填用户明确给出的默认值、已查询到的成员编码或可被 DeepCube 识别的别名。用户未给默认值且你未查到唯一成员时，`value` 留空字符串，禁止写 `待选择`、`请选择`、`<默认值>` 等中文占位。\n- 用户说“年份/场景/版本从外部传入”“传参”“运行参数”时，这些参数必须同时体现在数据加载范围里：`sections.data_scope.items` 中对应维度的 `scope` 要引用参数，例如 `<年份字段>[p_year]` / `<场景字段>[p_scenario]` / `<版本字段>[p_version]`；`run_parameters.items[].dimension`、`data_scope.items[].dimension` 和 `scope` 方括号前的字段名必须三者完全一致。若维度查询返回 `ctrl_dims.year = \"Year\"`，则参数和范围行都写 `dimension: \"Year\"` 且 `scope: \"Year[p_year]\"`。\n- 数据加载范围格式必须满足页面真实 schema：`sections.data_scope.items[]` 只能包含 `{ dimension, scope, label?, description? }`，`scope` 必须是可解析的 DeepCube 表达式，例如 `Year[p_year]`、`Scenario[p_scenario]`、`Version[p_version]`、`Dimension[\"成员编码\"]`、`Descendant(Entity[\"组织编码\"])`、`Base(Period[\"全年编码\"])`。同一维度多个成员可以用 `+` 连接，例如 `Account['A'] + Account['B']`。成员引用统一优先用编码或别名；禁止写中文名称、`<请选择组织>`、`<全年成员>`、`<不区分成员>`、`待选择` 等占位 Scope。\n- 数据加载范围中的层级函数优先使用函数式写法：`Descendant(Entity[\"成员编码\"])`、`Ancestor(Entity[p_entity])`、`Base(Period[\"全年编码\"])`。不要主动输出 `Entity[p_entity].Ancestor()`、`Entity[\"成员编码\"].Descendant()` 这类点式/管道式写法；只有在解释用户已有表达式时可以提到这种等价形式。\n- 用户提到组织范围、期间全年、其他维度不区分、DataTrail 原值等配置意图时，只有在已经明确成员编码/别名或能用参数表达时，才把对应行放入 `sections.data_scope.items`。组织未明确、全年期间未查到、ND/不区分成员未唯一确定时，不要把占位写入表单；如果这些缺口会影响脚本或范围，先结束在澄清/补充信息阶段，不要继续填表或生成脚本。\n- 输出配置块前可以按需要查询维度字段名、成员编码、别名和不区分/ND 成员。若仍查不到可写入的真实成员，不要生成占位 Scope；应澄清或用下一步建议要求用户补充。\n- 包含脚本生成的混合任务才必须给脚本名称和说明：`sections.element_metadata.description` 填业务化脚本名称，`sections.element_metadata.explanation` 填脚本说明。纯运行参数或纯数据加载范围配置不要主动附带 `element_metadata`，除非用户明确要求总结名称/说明。\n- 如果运行参数默认值为空，或组织范围、全年期间、ND/不区分成员未写入数据加载范围，不得在后续文本中宣称“配置已完整设置好”；必须用标注线建议用户补充对应默认值、组织范围或数据加载范围。\n- 如果配置整体可以写入，但存在非阻断风险、兼容性说明、解析边界或后续需要关注的问题，应放入 `sections.issues.items`，每项包含 `message`，可选 `title` 和 `severity`。不要把风险说明塞进 `scope`、`description`、`reason` 或普通正文里。若缺少关键成员、范围或参数导致配置无法合法写入，应优先用 `deep_cube__clarify` 或自然语言要求补充，不要用 `issues` 伪装成可填配置。\n- 用户要求“根据当前脚本总结名称/说明/描述/备注/标题”时，即使没有明确说“写入页面”，也属于元素信息配置任务；必须输出 `config_fill` 代码块，把建议放入 `sections.element_metadata`。禁止只用普通文本列出名称和说明。\n- 先判断需求清晰度。若用户只给出一句很泛的计算过程，缺少目标财务模型、业务范围、目标指标、输入指标或可查询的维度线索，且当前上下文也没有足够 scope，不调用 UI 工具；只用一句自然语言说明缺少哪些范围信息，让用户补充后结束本轮。\n- 若需求已有大致业务对象和范围，但仍有成员、范围、参数、阈值或口径歧义，应先用 DeepCube 工具查询候选；查到多个合理候选或缺失高风险字段时，再调用 `deep_cube__clarify` 一次性追问。但如果已存在“指定组织/某范围”这类没有任何可搜索根成员的前置缺口，不要先查其他成员，先让用户补充根成员。\n- 若缺的是“指定组织到底是哪一个”“全年期间具体成员”“默认年份/场景/版本值”这类配置值，且用户没有给出可搜索关键词，不要为了凑候选去搜索“组织”“全年”等泛词。直接用自然语言说明需要补充哪些值后结束本轮；如果已有候选或可输入字段，再用 `deep_cube__clarify` 一次性追问。\n- 不要为了“看起来有交互”而调用澄清表单。UI 工具只用于能给出明确候选、明确配置草案或明确待确认字段的场景。\n- `deep_cube__clarify` 只追问会影响业务语义、成员编码、数据范围、参数默认值或计算口径的字段。不要追问“是否替换当前脚本/是否追加脚本/是否继续生成”这类前端操作选择；脚本插入、追加、覆盖由前端按钮处理。\n- code 优先输出 DeepCube 简化计算主体，不输出 import、Cube 连接、submit。\n- config 必须输出 `config_fill` 代码块给前端展示可填充配置；禁止只用自然语言说“已配置好”“已更新”。但配置仍有关键歧义时，必须先澄清，不能把不可写入的原始描述或中文占位放进配置块。\n- both 不是纯配置任务；需要先澄清关键口径，再给出必要配置，最后生成脚本。涉及页面配置和脚本的混合任务，只有配置草案已合法完整时才输出 `config_fill` 代码块；同一轮随后输出 DeepCube 代码块。禁止在配置尚缺关键值时先填表或先出脚本。\n- 若用户说“从外面传”“运行参数”“加载范围”“范围设成”“期间跑”“组织下所有明细”等页面配置意图，先判断是否具备合法配置值。在输出配置块前可以按需要查询维度结构和成员；只把参数引用和已确定成员写入配置块，不能把用户原始描述或中文占位当作真实 Scope。\n- 普通脚本不主动输出完整 Scope；只有用户明确要求检查或填充范围，或你发现范围会影响结果时，才处理范围配置。\n- 纯 code 任务只需要生成可插入的计算主体。若用户没有要求设置组织、期间、场景、版本或数据加载范围，不要追问这些页面范围；默认由当前页面的数据加载范围控制。\n- 纯 code 任务以公式直接涉及的成员为主；如果解释、修复或风险判断需要，也可以查询组织、期间、场景、版本、DataTrail、不区分成员、ND 成员或当前 Scope。查不到时按字面解释或说明需要补充。\n- 成员查询出现父子、汇总/明细、粗细粒度候选时，优先选择与用户原词完整匹配、语义最具体、粒度最接近公式角色的成员；只有多个候选同等合理且会改变计算口径时，才用 `deep_cube__clarify`。\n- 当多个候选都是收入、成本、费用等同类成员时，用户原词里的限定词必须保留；例如用户说的是更具体的业务口径，就优先选名称完整包含该限定词的明细候选，不要自动退到更宽泛的父级汇总候选。\n- 成员名称存在轻微同义或简称差异时，例如多/少“额、率、值、数、利润、收入、成本”等常见业务后缀，但计算角色已经明确，可以选择最接近候选并在注意事项说明，不要因此阻塞生成脚本。\n- 查询财务成员时，若用户使用简称、同义词或口语表达，要先尝试同义/近义搜索，再决定是否澄清；例如毛利可继续查毛利润/毛利额，销量可继续查销售数量，单价可继续查销售单价。\n- 用户明确说“先计算/重算 A，再用 A 计算 B”时，必须保留这个中间写入步骤。只要能找到或合理匹配 A 的目标成员，就输出两条或多条 `BLOCK` 赋值；不要把 A 内联到 B 的公式里。\n- 对于“毛利、利润、比率、率”一类常见派生指标，若用户已经给出分母或计算关系，并且能找到最接近的目标指标与主要输入指标，直接生成脚本；不要因为目标名称少了业务限定词或不是完全同名而弹澄清表单。\n- 若用户说的是“某业务口径 + 毛利/利润/率”，但工具只找到更宽泛的“毛利/利润/率”目标成员，只要本轮公式会重新写入该目标、且输入指标和分母已经明确，就使用这个最接近目标继续生成；在注意事项里提示目标成员名称较宽泛即可，不要弹 UI 工具。\n- 毛利率类需求的默认结构是先写入毛利/利润目标，再用用户指定收入类成员作分母计算比率。若已经找到收入、成本、毛利/利润、毛利率这四类最接近候选，必须输出脚本，不再澄清。\n- 生成比率脚本时，`IIF(BLOCK_VAL[...])` 检查的成员必须和实际分母完全一致，不能误用分子。收入分母有父级汇总和明细候选时，优先选择最具体、可写/可读的收入明细或主营业务收入候选；若候选同时包含“营业收入”父级和“主营业务收入”明细，默认使用“主营业务收入”明细。只有用户明确要汇总口径时才使用父级收入。\n- 生成阶梯、分档、阈值区间、封顶保底、按规则标记切换公式等脚本时，所有 `IIF` 条件中的度量值比较都必须使用 `BLOCK_VAL[...]`；条件命中后的金额、比率、返利、毛利等计算仍使用 `BLOCK[...]`。多层分档用嵌套 `IIF`，不要把 `BLOCK[...] <= 阈值` 直接放进条件。\n- 对于“分摊、占比、共享费用、总部/汇总到明细”类任务，可以按需要查询 Account、Entity、收入、来源组织、目标汇总组织、同义词或层级结构。若查询后仍无法唯一确定关键口径，调用 `deep_cube__clarify` 汇总确认。\n- 配置类任务优先确认“能否写入合法配置”。用户已给出默认值、范围或配置意图时，可以按需要查询成员来验证和补全；查不到精确编码时，不要把原始描述写成真实配置值，应先澄清或用下一步建议要求补充。\n- both 混合任务如果包含运行参数、数据加载范围、组织/期间范围，只有在这些范围已经可合法表达时才输出 `config_fill` 代码块；否则先澄清。配置块和脚本在同一轮最终答复中一起输出。\n- 元素名称/说明/备注/标题/脚本描述等 element metadata 任务通常不需要查成员，但必须输出 `config_fill` 代码块，把建议的名称和说明放入 `sections.element_metadata`，不能只输出普通文本。\n- 除法保护统一使用 `IIF(BLOCK_VAL[<分母定位>] > 0.005, BLOCK[<分子定位>] / BLOCK[<分母定位>], 0)` 这一类方括号写法。禁止写 `BLOCK_VAL(...)`，禁止在条件里用 `BLOCK[...] > 0` 或单等号赋值，禁止用“保持原值”作为默认兜底，除非用户明确要求。\n- 每轮结束前可以给一段极简“下一步建议”，用普通 Markdown 引用线标注，例如 `> 下一步建议：补充组织范围后，我可以继续生成完整脚本。` 建议必须围绕缺失的关键配置、数据加载范围、运行参数或成员歧义；不要把它当成第二个表单，也不要替代 UI 工具。\n\n## 快捷命令\n\n`[/explain]` 表示解释并可注释当前脚本：\n\n- 解释当前脚本的计算逻辑、涉及成员、颗粒度、分母和风险。\n- 可以逐行或按计算段落解释。\n- 如果用户要求注释脚本，只给一版整体注释后的完整脚本；` ```deepcube ` 只能出现一次。\n- 如果当前脚本存在确定性风险，例如除法没有分母保护、分子分母相同、比率分母明显用错，注释版脚本必须直接给出安全修正版，不要保留不安全原写法再只写风险提示。\n- 不要为了 `/explain` 重新生成无关业务脚本，除非用户明确要求。\n\n`[/fix]` 表示修复脚本：\n\n- 结合 `[@context]` 当前脚本、运行参数、数据加载范围，以及 `[@error]` 错误信息定位问题。\n- 必须检查：语法/API、成员是否存在或冲突、左右颗粒度、分母汇总、除零/空值保护、加载范围是否过大或过窄、是否可抽公共变量/公共范围。\n- 当前脚本已经给出目标成员、输入成员或用户明确说明期望公式时，优先直接给出修复后的完整脚本；不要因为成员查询失败而过度澄清。\n- 若发现分子分母相同、除法缺分母保护、比率分母明显用错等确定性问题，直接在修复版中改正并加入 `IIF` + `BLOCK_VAL` 保护，不要只写“建议增加保护”。\n- 当前脚本出现 `BLOCK[目标率] = BLOCK[某指标] / BLOCK[同一指标]` 这类分子分母相同的比率错误时，禁止弹澄清表单；应搜索收入/主营业务收入/Revenue 等分母候选，优先选最具体的收入明细或主营业务收入候选，直接给出修复版。若仍无法确定，就用最接近收入候选或占位说明继续输出修复脚本，不要阻塞在 UI 工具。\n- 输出修复后的完整 DeepCube 代码块，只包含可插入的简化脚本主体。\n\n`[/alias]` 表示别名输出模式，可与生成、配置填充、`[/explain]`、`[/fix]` 等任务叠加：\n\n- 额外做一道成员引用展示处理：在最终输出的 `config_fill` 数据加载范围和 `deepcube` 脚本中，尽量把成员编码替换为“中文别名”。\n- 替换目标必须是成员别名，不是成员名称、说明、描述或展示名。若工具返回字段里同时有 code/name/alias/description，应优先使用中文 alias。\n- 若该成员没有中文别名，或者查不到该成员，保留原成员编码，不要编造别名，也不要用名称代替别名。\n- 只替换成员定位表达式中的成员字面量，例如 `Account[\"A001\"]` 可在确认有中文别名时写成 `Account[\"收入别名\"]`；运行参数名、维度字段名、函数名、变量名、注释里的编码说明不强制替换。\n- 如果上下文脚本或用户需求中已经出现成员编码，应按需要查询这些编码的别名；多个成员优先批量查询。查不到别名时继续输出，不要因为别名缺失而阻塞主任务。\n- `[/alias]` 不改变计算逻辑、数据范围语义、参数编码或是否生成脚本，只改变最终可见的成员引用格式。\n\n## UI 工具\n\n只使用这些 Deep Cube UI 工具和最终配置块：\n\n调用 UI 工具的硬性要求：\n\n- 只允许调用 `deep_cube__clarify`。禁止调用 `ask_user_choice` 或任何通用选择工具。最终配置填充不要调用 `deep_cube__config_fill`，只输出 `config_fill` 代码块。\n- `deep_cube__clarify` 工具参数必须是原生 JSON object，`fields` 必须是 array；禁止把整段 JSON 序列化成字符串，禁止输出 `INVALID_JSON`、Markdown 代码块或伪表单。\n- 不确定如何构造有效澄清问题或有效配置块时，不调用 UI 工具，改用自然语言说明缺少哪些信息并结束本轮。\n- 同一次 UI 工具调用只表达一张表单；多个字段合并在 `fields` 或 `sections` 内，不要连续弹多张表单。\n- `deep_cube__clarify` 默认阻塞等待用户反馈；配置填充不走 UI Tool，最终通过 `config_fill` 代码块展示。\n\n### `deep_cube__clarify`\n\n用于歧义问题确认。只有成员、范围或配置存在多个候选、缺失或高风险时调用。\n\n- 极模糊需求不要使用此工具；先让用户用自然语言补充业务范围或目标指标，然后结束本轮。\n- 若每个字段都能唯一确定，直接继续生成脚本或配置，不调用确认工具。\n- 文本类歧义尽量给 2-3 个最可能选项；只要某个选项设置 `recommended: true`，必须同时填写非空 `recommend_reason`，说明推荐依据，禁止只给推荐标签而不写理由。\n- 保留直接输入兜底项；用户直接输入中文描述时，下一轮仍要继续搜索确认编码。\n- 非必填字段没有合适候选时，可以允许“暂不处理/跳过”。\n- UI 工具必须允许用户取消本轮。若 deferred tool result 中出现 `cancelled: true`，或用户明确取消确认，立即停止本轮；只回复“已取消本轮操作，不会继续生成配置或脚本。”，不要再调用工具、不要继续生成代码。\n\n### `config_fill` 代码块\n\n用于展示可填充的非代码内容，包括运行参数、数据加载范围、元素名称/说明/备注等元素信息。它不是工具调用，而是最终回复中的 Markdown 代码块。\n\n- 配置无歧义时直接输出。\n- 配置有歧义时先用 `deep_cube__clarify` 追问。\n- 配置块只放本次要展示或可写入的字段，禁止空字段凑表单。\n- 代码块语言必须写 `config_fill`，内容必须是合法 JSON object，严格遵循 `deep_cube__config_fill` 工具参数结构。不要在 JSON 内写注释、尾逗号、Markdown 或解释文本。\n- 若配置包含非阻断风险或错误说明，统一放入 `sections.issues.items`，示例结构为 `{ \"title\": \"风险\", \"message\": \"说明文字\", \"severity\": \"warning\" }`；不要输出红字、Markdown 表格或散落在其他字段里的风险说明。\n- `config_fill` 代码块必须是最终正文的第一段；若还需要脚本，紧接着输出一个 `deepcube` 代码块；最后最多补一段引用线建议或注意事项。\n\n## 输出顺序\n\n1. 若本轮不输出配置块或代码块，可以简短说明理解；若输出配置块或代码块，省略铺垫正文。\n2. 调用工具确认成员、文档或示例。\n3. 需要澄清时调用 `deep_cube__clarify` 并暂停；需要展示配置时输出 `config_fill` 代码块。\n4. UI 工具结果为取消时立即结束本轮。\n5. 信息足够且需要脚本时，在同一轮继续输出 DeepCube 代码块。\n6. 最后给 1-2 句注意事项。\n\n关键顺序不可倒置：仍需用户补充组织、期间、成员、参数默认值或口径时，不得输出最终脚本；已经输出 `deep_cube__clarify` 时，本轮不得再输出配置块或脚本；配置和脚本都明确时，最终正文最多包含三段：`config_fill` 配置填充、`deepcube` 代码填充、建议或注意事项。\n\nYou can call get_current_time for the current UTC time, and http_get to fetch the text body of a URL.",
+        "kind": "request",
+        "run_id": "019f45e4-481a-700f-b25c-59cabaac0da6",
+        "conversation_id": "019f45e3-7991-7572-b3ad-508d396e6cb9",
+        "metadata": null,
+        "state": "complete"
+      }
+    },
+    {
+      "sequence": 11,
+      "payload": {
+        "parts": [
+          {
+            "content": "好的，用户确认了：\n- 销售额：主营业务收入 `A01010101`\n- 目标：返利金额 `C0105`\n- 低档：≤100万 → 返利率 10%\n- 中档：50万 < 销售额 ≤ 100万 → 返利率 8%\n- 高档：>100万 → 返利率 5%\n\n等等...用户填的值有点逻辑问题：\n- 低档销售额上限（万元）= 100\n- 中档销售额上限（万元）= 50\n\n这样低档是 ≤100万，中档是 ≤50万...这显然区间重叠且不合理。\n\n等等，让我重新理解：可能用户的意思是：\n- 低档：0-50万？但是低档上限填了100万\n- 中档上限填了50万\n\n这逻辑有问题。低档上限100万，中档上限50万，但又说中档返利8% < 低档10%。所以可能用户认为：\n- 销售额越高返利越低？\n- 或者理解颠倒了？\n\n实际上用户填的：\n- 低档（≤100万）→ 10%\n- 中档（≤50万）→ 8%\n- 高档（>100万）→ 5%\n\n这很混乱，50万 < 100万，所以中档和低档的区间完全重叠。\n\n通常情况下阶梯返利是：\n- 低档：≤ 低门槛（例如 50万）→ 较高的返利率（10% - 小客户激励）\n- 中档：低门槛 < 销售额 ≤ 高门槛（例如 50-100万）→ 中档返利率（8%）\n- 高档：> 高门槛（例如 >100万）→ 高档返利率（5%）\n\n这可能用户填写的时候把中档上限理解错了？或者用户的意思是\n- 低档：≤50万 → 10%\n- 中档：50-100万 → 8%  \n- 高档：>100万 → 5%\n\n但用户填的是\"低档销售额上限=100万，中档上限=50万\"，和常规理解相反。\n\n我觉得用户可能是把两个数值填反了（中档应该是100万，低档应该是50万），或者用户有自己的业务逻辑。\n\n由于数值看起来有明显的逻辑矛盾（中档上限50万小于低档上限100万会导致区间重叠且无法解释），最好先跟用户确认一下。\n\n不过，让我再想想，也许用户的意图是一种\"返利率递减\"的模式：\n- 低销量（≤50万）：高返利率10%\n- 中等销量（50-100万）：中返利率8%\n- 高销量（>100万）：低返利率5%\n\n这种情况下，低档上限应该是50万，中档上限是100万。用户可能是把低档和中档的上限填反了。\n\n我觉得这是一个明显的逻辑问题，需要向用户澄清。",
+            "id": "reasoning_content",
+            "signature": null,
+            "provider_name": "openai",
+            "provider_details": null,
+            "part_kind": "thinking"
+          },
+          {
+            "content": "我注意到您填写的阈值数值可能存在逻辑重叠，需要跟您确认一下：\n\n您填写的：\n- **低档**：销售额 ≤ 100万 → 返利率 10%\n- **中档**：销售额 ≤ 50万 → 返利率 8%\n- **高档**：销售额 > 100万 → 返利率 5%\n\n这里**中档上限（50万）小于低档上限（100万）**，会导致区间重叠，常规阶梯逻辑无法执行。我猜测您的真实意图可能是：\n\n| 档位 | 销售额区间 | 返利率 |\n|------|-----------|-------|\n| 🟢 低档 | ≤ 50万 | 10% |\n| 🟡 中档 | 50万 < 销售额 ≤ 100万 | 8% |\n| 🔴 高档 | > 100万 | 5% |\n\n即：**销量越低返利率越高**（激励小客户），低档上限=50万、中档上限=100万。\n\n还是您预期的是**递增**逻辑：\n\n| 档位 | 销售额区间 | 返利率 |\n|------|-----------|-------|\n| 🟢 低档 | ≤ 100万 | 5% |\n| 🟡 中档 | 100万 < 销售额 ≤ 500万 | 8% |\n| 🔴 高档 | > 500万 | 10% |\n\n请确认正确的阈值方案，我再生成完整脚本。",
+            "id": null,
+            "provider_name": null,
+            "provider_details": null,
+            "part_kind": "text"
+          }
+        ],
+        "usage": {
+          "input_tokens": 16430,
+          "cache_write_tokens": 0,
+          "cache_read_tokens": 15360,
+          "output_tokens": 925,
+          "input_audio_tokens": 0,
+          "cache_audio_read_tokens": 0,
+          "output_audio_tokens": 0,
+          "details": {
+            "prompt_cache_hit_tokens": 15360,
+            "prompt_cache_miss_tokens": 1070,
+            "reasoning_tokens": 616
+          }
+        },
+        "model_name": "deepseek-v4-flash",
+        "timestamp": "2026-07-09T08:00:16.748735Z",
+        "kind": "response",
+        "provider_name": "openai",
+        "provider_url": "https://api.deepseek.com",
+        "provider_details": {
+          "timestamp": "2026-07-09T08:00:16Z",
+          "finish_reason": "stop"
+        },
+        "provider_response_id": "86672aa4-53a6-4dac-afa8-6f3b9b402395",
+        "finish_reason": "stop",
+        "run_id": "019f45e4-481a-700f-b25c-59cabaac0da6",
+        "conversation_id": "019f45e3-7991-7572-b3ad-508d396e6cb9",
+        "metadata": null,
+        "state": "complete"
+      }
+    }
+  ]
+}

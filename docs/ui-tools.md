@@ -125,6 +125,15 @@ ToolInfo("ask_user_text", "Show a text input and wait for user text."),
 - `required` 只放必要字段；可选字段在 description 里说明默认值语义
 - 工具名全局唯一，不与 MCP / native 工具重名
 
+### 3.4 SSE 上的 `widget` / `metadata`（builtin 回退）
+
+流式 `tool_call` 与 `final.deferred` 事件上的 `widget`、`metadata` 由 [`registry.py`](../deep_agent/capabilities/ui/registry.py) 的 `enrich_tool_event` / `enrich_deferred` 注入：
+
+- **DB / MCP 工具**：从 `load_ui_tool_hints()` 加载的 hints 合并进事件。
+- **builtin 工具**（`confirm_action`、`ask_user_choice` 等）：即使 DB 无对应行，也会在 hints 未命中时回退到 `builtin_ui_records()`，保证 SSE 仍带 `widget` 供客户端渲染。
+
+详见 [`sse-protocol.md`](sse-protocol.md) 中 `tool_call` 可选字段说明。
+
 ---
 
 ## 4. 前端：渲染控件并续跑
@@ -270,7 +279,7 @@ curl http://127.0.0.1:8000/api/v1/tools
 ### 7.3 单元测试
 
 ```bash
-.venv\Scripts\python.exe -m unittest tests.unit.test_hitl_deferred -v
+venv\Scripts\python.exe -m unittest tests.unit.test_hitl_deferred -v
 ```
 
 可为新工具增加类似用例：TestModel `call_tools=["your_tool"]` → `final.status == "pending"` → 带 `DeferredToolResults` 续跑。
@@ -316,6 +325,7 @@ UI 工具适合确认、表单、选择器；业务 API 调用仍应使用 MCP�
 | 文件 | 说明 |
 |------|------|
 | [`deep_agent/capabilities/ui/builtin.py`](../deep_agent/capabilities/ui/builtin.py) | UI 工具 schema 与 capability |
+| [`deep_agent/capabilities/ui/registry.py`](../deep_agent/capabilities/ui/registry.py) | UI 工具 DB 注册表；SSE `widget` / `metadata` enrichment（含 builtin 回退） |
 | [`deep_agent/agent/factory.py`](../deep_agent/agent/factory.py) | `_toolsets_for_spec` 注入 UI |
 | [`deep_agent/agent/runner.py`](../deep_agent/agent/runner.py) | deferred run / pending final |
 | [`deep_agent/agent/deferred.py`](../deep_agent/agent/deferred.py) | 序列化与 `DeferredToolResults` 转换 |

@@ -312,8 +312,8 @@ uvicorn app.main:app --reload
 ### 后端
 ```bash
 cd deep_agent
-python -m venv .venv
-.venv\Scripts\activate          # Windows
+python -m venv venv
+venv\Scripts\activate          # Windows
 pip install -r requirements.txt
 copy .env.example .env          # 编辑 DEEP_AGENT_MODEL、API key、DATABASE_URL
 docker compose up -d            # 可选

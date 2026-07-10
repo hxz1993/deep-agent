@@ -62,20 +62,20 @@ init_context(
 
 封装见 [`helpers/chat.py`](helpers/chat.py) 的 `create_test_app()` / `test_chat_client()`。
 
-### 3. `/chat/stream` 需要 mock `get_db`
+### 3. `/chat/stream` 用 `httpx.AsyncClient`，不要用 `TestClient.stream`
 
-流式接口签名包含 `Depends(get_db)`，无数据库时会 503。测试中 override：
+`TestClient.stream()` 在 SSE 场景下会**无限阻塞**（与 `is_disconnected` 探测有关）。集成测试应使用 `httpx.AsyncClient` + `ASGITransport`，并配合 `mock_request_disconnect()`：
 
 ```python
-from deep_agent.db.deps import get_db
+from httpx import ASGITransport, AsyncClient
+from tests.integration.helpers.chat import mock_request_disconnect, read_chat_stream
 
-async def override_get_db():
-    yield MagicMock()
-
-client.app.dependency_overrides[get_db] = override_get_db
+# 或 helpers/chat.py 的 echo_chat_app + read_chat_stream
 ```
 
-并消费完 SSE 流（`list(response.iter_lines())`），否则 agent run 可能未完成。
+同步 `POST /chat` 仍可用 `TestClient`。
+
+流式接口若未注入 sqlite `AppContext`，`Depends(get_db)` 会 503；使用 `make_sqlite_stores` / `testing_data_stores` 即可。
 
 ### 4. 断言 MCP 侧行为：用 fixture server + 落盘
 
@@ -102,6 +102,8 @@ stdio 读 `ctx.request_context.meta.headers`；HTTP MCP 读连接上的 request 
 | 路径 | 说明 |
 |------|------|
 | [`helpers/chat.py`](helpers/chat.py) | TestClient、TestModel、最小 app |
+| [`helpers/session_seed.py`](helpers/session_seed.py) | 灌入会话 fixture、`wait_for_session_title` |
+| [`helpers/export_session_fixture.py`](helpers/export_session_fixture.py) | 从 DB 导出会话 JSON fixture |
 | [`helpers/mcp.py`](helpers/mcp.py) | 直接调 toolset、启动 HTTP echo 子进程 |
 | [`fixtures/header_echo_server.py`](fixtures/header_echo_server.py) | 测试用 MCP server |
 | [`test_chat_header_forwarding.py`](test_chat_header_forwarding.py) | **推荐模板**：完整 HTTP → MCP |
@@ -148,7 +150,7 @@ headers = getattr(meta, "headers", None) or {}
 ## 运行
 
 ```bash
-.venv\Scripts\python.exe -m unittest discover -s tests/integration -p "test_*.py" -v
+venv\Scripts\python.exe -m unittest discover -s tests/integration -p "test_*.py" -v
 ```
 
 ## 新增集成测试检查清单

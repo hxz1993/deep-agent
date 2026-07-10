@@ -39,5 +39,5 @@
 ## 运行
 
 ```bash
-.venv\Scripts\python.exe -m unittest discover -s tests/unit -p "test_*.py" -v
+venv\Scripts\python.exe -m unittest discover -s tests/unit -p "test_*.py" -v
 ```

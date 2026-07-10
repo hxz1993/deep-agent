@@ -10,13 +10,16 @@
 
 ```bash
 # 全部
-.venv\Scripts\python.exe -m unittest discover -s tests -p "test_*.py" -v
+venv\Scripts\python.exe -m unittest discover -s tests -p "test_*.py" -v
+
+# 排查失败：首个报错即停（推荐配合 tests/run.ps1 的 30s 超时）
+venv\Scripts\python.exe -m unittest discover -s tests -p "test_*.py" --failfast -v
 
 # 仅单元（无网络、无外部子进程）
-.venv\Scripts\python.exe -m unittest discover -s tests/unit -p "test_*.py" -v
+venv\Scripts\python.exe -m unittest discover -s tests/unit -p "test_*.py" -v
 
 # 仅集成（HTTP、MCP 子进程、header 转发）
-.venv\Scripts\python.exe -m unittest discover -s tests/integration -p "test_*.py" -v
+venv\Scripts\python.exe -m unittest discover -s tests/integration -p "test_*.py" -v
 ```
 
 ---
@@ -45,6 +48,11 @@ tests/
 | `test_deepcube_server.py` | DeepCube 启动器 argv |
 | `test_forward_headers.py` | MCP header 白名单 |
 | `test_mcp_lease_manager.py` | MCP lease 管理 |
+| `test_title_generator.py` | AI 标题清洗与无配置行为 |
+| `test_modality_resolver.py` | 模型 modality bundled 解析与 refresh |
+| `test_models_dev.py` | models.dev catalog lookup |
+| `test_modality_resolver.py` | 模型 modality bundled 解析与 refresh |
+| `test_models_dev.py` | models.dev catalog lookup |
 
 ---
 
@@ -55,6 +63,8 @@ tests/
 | `test_chat_header_forwarding.py` | HTTP → MCP header 透传 |
 | `test_mcp_header_forwarding.py` | MCP 层 header 注入 |
 | `test_mcp_run_scoping.py` | builtin MCP 按 run lease 隔离 client |
+| `test_session_title.py` | 标题回显、AI 生成、兜底、DeepCube fixture |
+| `test_llm_model_modalities.py` | 模型 modality CRUD + 解析链 refresh |
 
 公共 fixture：`integration/fixtures/header_echo_server.py`、`pid_echo_server.py`。
 

@@ -35,7 +35,7 @@ frontend/
 | 工具调用 UI | `tool_call` / `tool_result` 可折叠；同 `tool_call_id` 合并更新 |
 | HITL UI 工具 | 内置 `confirm_action` / `ask_user_choice` + 动态 manual/MCP 工具；SSE / history 携带 `widget` / `metadata`；见 [`../docs/ui-tools-external.md`](../docs/ui-tools-external.md) |
 | Markdown | marked + DOMPurify + highlight.js |
-| 会话 | `session_id` 由后端 `session` 事件返回；`GET/DELETE /api/v1/sessions` |
+| 会话 | `session_id` 由后端 `session` 事件返回；`GET/DELETE /api/v1/sessions`；标题展示 `title \|\| user_prompt`（见 [`../docs/experience/ai-title-generator.md`](../docs/experience/ai-title-generator.md)） |
 | 能力面板 | `GET /api/v1/tools` |
 | 配置 | 后端地址、模型覆盖存 `localStorage` |
 
@@ -93,6 +93,7 @@ python -m http.server 5173
 | HITL 渲染与 metadata | `app.js` → `isUiToolCall`、`loadUiTools`、`renderHitlWidget` |
 | 页面布局 | `index.html` |
 | Admin CRUD | `admin/` 下各文件（含 **UI 工具** 页 `/admin/` →「UI 工具」标签） |
+| Admin 模型 Meta 刷新 | `admin/llm_models.js` → `POST /api/v1/llm-models/refresh-metadata`；详见 [`../docs/experience/llm-model-modalities.md`](../docs/experience/llm-model-modalities.md) |
 | Markdown 主题/安全 | `vendor/`，见 `vendor/README.md` |
 
 历史消息由后端按 `session_id` 维护；切换会话时 `GET /api/v1/sessions/{id}/history` 回放。pending UI 工具的 `tool_call` part 同样经后端 enrichment 附带 `widget` / `metadata`。

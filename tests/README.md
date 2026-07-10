@@ -1,16 +1,16 @@
 # deep-agent 测试
 
-测试按 **单元测试** 与 **集成测试** 分目录存放，在**仓库根目录**下运行（需已激活 `deep_agent/.venv` 或等价环境）：
+测试按 **单元测试** 与 **集成测试** 分目录存放，在**仓库根目录**下运行（需已激活 `deep_agent/venv` 或等价环境）：
 
 ```bash
 # 全部
-.venv\Scripts\python.exe -m unittest discover -s tests -p "test_*.py" -v
+venv\Scripts\python.exe -m unittest discover -s tests -p "test_*.py" -v
 
 # 仅单元
-.venv\Scripts\python.exe -m unittest discover -s tests/unit -p "test_*.py" -v
+venv\Scripts\python.exe -m unittest discover -s tests/unit -p "test_*.py" -v
 
 # 仅集成
-.venv\Scripts\python.exe -m unittest discover -s tests/integration -p "test_*.py" -v
+venv\Scripts\python.exe -m unittest discover -s tests/integration -p "test_*.py" -v
 ```
 
 | 目录 | 用途 | 文档 |

@@ -11,8 +11,8 @@
 | 项 | 内容 |
 | --- | --- |
 | **是什么** | 通用 AI Agent 全栈：FastAPI 后端 + Pydantic AI 运行时 + 静态前端 |
-| **启动** | 仓库根：`.venv\Scripts\python.exe -m uvicorn deep_agent.main:app --reload` |
-| **测试** | `.venv\Scripts\python.exe -m unittest discover -s tests -p "test_*.py" -v` |
+| **启动** | 仓库根：`venv\Scripts\python.exe -m uvicorn deep_agent.main:app --reload` |
+| **测试** | `venv\Scripts\python.exe -m unittest discover -s tests -p "test_*.py" -v` |
 | **配置** | 仓库根 `.env`（`DEEP_AGENT_*` / `DEEP_AGENT_DBMS_*` / `DEEP_AGENT_SQLITE_PATH`） |
 
 ---
@@ -68,6 +68,8 @@ HTTP → deep_agent/api/v1 → AgentRunner → pydantic_ai.Agent → Capabilitie
 | [`README.md`](README.md) | 人类快速开始 |
 | [`PROJECT_OVERVIEW.md`](PROJECT_OVERVIEW.md) | 历史架构总结（部分路径已过时） |
 | [`docs/sse-protocol.md`](docs/sse-protocol.md) | SSE 事件协议详解 |
+| [`docs/experience/llm-model-modalities.md`](docs/experience/llm-model-modalities.md) | LLM 模型 `input_modalities` 元数据：原则、来源、刷新与离线兜底 |
+| [`docs/experience/ai-title-generator.md`](docs/experience/ai-title-generator.md) | AI 会话标题生成实现经验 |
 | [`docs/ui-tools.md`](docs/ui-tools.md) | UI 工具扩展（**内部**，改仓库代码） |
 | [`docs/ui-tools-external.md`](docs/ui-tools-external.md) | UI 工具使用（**外部集成方**，不改代码） |
 | [`docs/ui-tools-extension-proposals.md`](docs/ui-tools-extension-proposals.md) | UI 工具扩展能力 — 方案对比（产品/架构） |

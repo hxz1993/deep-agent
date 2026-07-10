@@ -15,7 +15,7 @@
 在仓库根目录（已安装 `deep_agent/requirements.txt` 依赖）：
 
 ```bash
-.venv\Scripts\python.exe -m unittest discover -s tests -p "test_*.py" -v
+venv\Scripts\python.exe -m unittest discover -s tests -p "test_*.py" -v
 ```
 
 详见 [`tests/README.md`](tests/README.md)。
@@ -26,8 +26,8 @@
 
 ```bash
 cd deep_agent
-python -m venv .venv
-.venv\Scripts\activate          # Windows
+python -m venv venv
+venv\Scripts\activate          # Windows
 pip install -r requirements.txt
 copy .env.example .env
 uvicorn app.main:app --reload

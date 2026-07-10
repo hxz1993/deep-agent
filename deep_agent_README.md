@@ -24,11 +24,11 @@ HTTP (REST/SSE)  ->  AgentRunner  ->  Pydantic AI Agent  ->  Capabilities (tools
 ```bash
 cd deep_agent
 
-python -m venv .venv
+python -m venv venv
 # Windows
-.venv\Scripts\activate
+venv\Scripts\activate
 # macOS/Linux
-# source .venv/bin/activate
+# source venv/bin/activate
 
 pip install -r requirements.txt
 

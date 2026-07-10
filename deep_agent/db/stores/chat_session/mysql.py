@@ -17,17 +17,21 @@ class MySQLChatSessionStore(ChatSessionStoreBase):
         session_id: str,
         *,
         user_id: str | None,
+        title: str | None = None,
         now: datetime,
     ) -> None:
         stmt = insert(ChatSession).values(
             agent_id=agent_scope,
             session_id=session_id,
             user_id=user_id,
+            title=title,
             created_at=now,
             updated_at=now,
         )
         update_values = {"updated_at": now}
         if user_id is not None:
             update_values["user_id"] = user_id
+        if title is not None:
+            update_values["title"] = title
         stmt = stmt.on_duplicate_key_update(**update_values)
         await db.execute(stmt)

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from abc import abstractmethod
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 from sqlalchemy import Select, delete, func, select
@@ -88,6 +88,7 @@ class ChatSessionStoreBase(SessionBoundMixin):
         session_id: str,
         *,
         user_id: str | None,
+        title: str | None = None,
         now: datetime,
     ) -> None:
         """Dialect-specific upsert for ChatSession."""
@@ -216,6 +217,7 @@ class ChatSessionStoreBase(SessionBoundMixin):
             select(
                 ChatSession.session_id,
                 ChatSession.agent_id,
+                ChatSession.title,
                 ChatSession.created_at,
                 ChatSession.updated_at,
                 Agent.name.label("agent_name"),
@@ -231,6 +233,7 @@ class ChatSessionStoreBase(SessionBoundMixin):
             .group_by(
                 ChatSession.session_id,
                 ChatSession.agent_id,
+                ChatSession.title,
                 ChatSession.created_at,
                 ChatSession.updated_at,
                 Agent.name,
@@ -264,6 +267,7 @@ class ChatSessionStoreBase(SessionBoundMixin):
                 updated_at=row.updated_at,
                 message_count=int(row.message_count),
                 user_prompt=user_prompts.get((row.agent_id, row.session_id)),
+                title=row.title,  # Use title from database if available
             )
             for row in rows
         ]
@@ -303,3 +307,29 @@ class ChatSessionStoreBase(SessionBoundMixin):
             total = int((await db.execute(select(func.count()).select_from(grouped.subquery()))).scalar_one())
 
         return summaries, total
+
+    async def get_session_title(
+        self, db_session: AsyncSession, scope: str, session_id: str
+    ) -> str | None:
+        """查询会话标题。"""
+        stmt = select(ChatSession.title).where(
+            ChatSession.agent_id == scope,
+            ChatSession.session_id == session_id,
+        )
+        result = await db_session.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def update_session_title(
+        self, db_session: AsyncSession, scope: str, session_id: str, title: str
+    ) -> None:
+        """更新标题，同时刷新 updated_at。"""
+        from sqlalchemy import update
+        stmt = (
+            update(ChatSession)
+            .where(
+                ChatSession.agent_id == scope,
+                ChatSession.session_id == session_id,
+            )
+            .values(title=title, updated_at=datetime.now(timezone.utc))
+        )
+        await db_session.execute(stmt)

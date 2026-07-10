@@ -27,6 +27,8 @@ class LlmModel(Base):
     model: Mapped[str] = mapped_column(Text, nullable=False)
     base_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     api_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+    input_modalities: Mapped[list[str] | None] = mapped_column(JSONType, nullable=True)
+    capabilities_source: Mapped[str | None] = mapped_column(String(32), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -93,6 +95,7 @@ class ChatSession(Base):
     )
     session_id: Mapped[str] = mapped_column(KeyText, primary_key=True)
     user_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    title: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

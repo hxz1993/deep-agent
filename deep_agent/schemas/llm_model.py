@@ -15,6 +15,10 @@ class LlmModelCreate(BaseModel):
     model: str = Field(..., description='Model string, e.g. "openai:gpt-4o".')
     base_url: str | None = Field(default=None, description="Optional OpenAI-compatible base URL.")
     api_key: str | None = Field(default=None, description="Optional API key for the model endpoint.")
+    input_modalities: list[str] = Field(
+        default_factory=list,
+        description='Supported input modalities, e.g. ["text", "image", "audio", "video", "pdf"].',
+    )
 
 
 class LlmModelUpdate(BaseModel):
@@ -23,6 +27,7 @@ class LlmModelUpdate(BaseModel):
     model: str | None = None
     base_url: str | None = None
     api_key: str | None = None
+    input_modalities: list[str] | None = None
 
 
 class LlmModelResponse(BaseModel):
@@ -32,6 +37,8 @@ class LlmModelResponse(BaseModel):
     model: str
     base_url: str | None = None
     api_key_set: bool = Field(description="Whether an API key is configured (value is never returned).")
+    input_modalities: list[str] = Field(default_factory=list, description="Supported input modalities.")
+    capabilities_source: str | None = Field(default=None, description="Source of capabilities data.")
     agent_count: int = Field(default=0, description="Number of agents referencing this preset.")
     created_at: datetime
     updated_at: datetime
@@ -45,6 +52,8 @@ class LlmModelResponse(BaseModel):
             model=row.model,
             base_url=row.base_url,
             api_key_set=bool(row.api_key),
+            input_modalities=row.input_modalities or [],
+            capabilities_source=row.capabilities_source,
             agent_count=agent_count,
             created_at=row.created_at,
             updated_at=row.updated_at,
@@ -55,7 +64,13 @@ class LlmModelSummary(BaseModel):
     id: str
     name: str
     model: str
+    input_modalities: list[str] = Field(default_factory=list, description="Supported input modalities.")
 
     @classmethod
     def from_row(cls, row: LlmModel) -> LlmModelSummary:
-        return cls(id=row.id, name=row.name, model=row.model)
+        return cls(
+            id=row.id,
+            name=row.name,
+            model=row.model,
+            input_modalities=row.input_modalities or [],
+        )

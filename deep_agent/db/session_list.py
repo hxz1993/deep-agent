@@ -30,3 +30,4 @@ class SessionSummaryRow:
     updated_at: datetime
     message_count: int
     user_prompt: str | None = None
+    title: str | None = None

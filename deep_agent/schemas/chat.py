@@ -102,6 +102,7 @@ class SessionInfo(BaseModel):
     agent_id: str | None = Field(default=None, description="Agent id used for this session.")
     agent_name: str | None = Field(default=None, description="Agent display name (if known).")
     user_prompt: str | None = Field(default=None, description="First user message in the session.")
+    title: str | None = Field(default=None, description="Session title (generated from first user message).")
     created_at: datetime | None = Field(default=None, description="Session creation time (UTC).")
     updated_at: datetime | None = Field(default=None, description="Last conversation activity time (UTC).")
 

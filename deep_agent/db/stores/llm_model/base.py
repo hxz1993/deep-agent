@@ -38,6 +38,8 @@ class LlmModelStoreBase(SessionBoundMixin):
                 model=data.model,
                 base_url=data.base_url,
                 api_key=data.api_key,
+                input_modalities=data.input_modalities or None,
+                capabilities_source="user" if data.input_modalities else None,
             )
             db.add(row)
             await db.flush()
@@ -54,6 +56,8 @@ class LlmModelStoreBase(SessionBoundMixin):
                 if conflict is not None:
                     raise ValueError(f"LLM model already exists: {data.name}")
             updates = data.model_dump(exclude_unset=True)
+            if "input_modalities" in updates:
+                row.capabilities_source = "user"
             for field, value in updates.items():
                 setattr(row, field, value)
             await db.flush()
@@ -65,6 +69,23 @@ class LlmModelStoreBase(SessionBoundMixin):
             result = await db.execute(delete(LlmModel).where(LlmModel.id == model_id))
             await db.flush()
             return result.rowcount > 0
+
+    async def update_metadata(
+        self,
+        model_id: str,
+        *,
+        input_modalities: list[str],
+        capabilities_source: str,
+    ) -> LlmModel | None:
+        async with self._write() as db:
+            row = await self._get_by_id(db, model_id)
+            if row is None:
+                return None
+            row.input_modalities = input_modalities if input_modalities else None
+            row.capabilities_source = capabilities_source
+            await db.flush()
+            await db.refresh(row)
+            return row
 
     async def _get_by_id(self, db: AsyncSession, model_id: str) -> LlmModel | None:
         result = await db.execute(select(LlmModel).where(LlmModel.id == model_id))

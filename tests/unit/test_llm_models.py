@@ -35,6 +35,24 @@ class LlmModelStoreTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(await self.store.count_agents(row.id), 1)
 
+    async def test_create_with_modalities_sets_capabilities_source_user(self) -> None:
+        row = await self.store.create_unique(
+            LlmModelCreate(
+                name="vision",
+                model="private:vision",
+                input_modalities=["text", "image"],
+            ),
+        )
+        self.assertEqual(row.capabilities_source, "user")
+        self.assertEqual(row.input_modalities, ["text", "image"])
+
+    async def test_create_without_modalities_leaves_source_empty(self) -> None:
+        row = await self.store.create_unique(
+            LlmModelCreate(name="plain", model="openai:gpt-4o"),
+        )
+        self.assertIsNone(row.capabilities_source)
+        self.assertIsNone(row.input_modalities)
+
     async def test_delete_blocked_when_referenced(self) -> None:
         row = await self.store.create_unique(
             LlmModelCreate(name="shared", model="openai:gpt-4o"),
@@ -44,6 +62,24 @@ class LlmModelStoreTests(unittest.IsolatedAsyncioTestCase):
         )
         # ponytail: FK RESTRICT on DB; store delete would fail at flush in real DB.
         self.assertEqual(await self.store.count_agents(row.id), 1)
+
+    async def test_update_metadata_persists_modalities(self) -> None:
+        row = await self.store.create_unique(
+            LlmModelCreate(name="refresh-target", model="openai:gpt-4o"),
+        )
+        updated = await self.store.update_metadata(
+            row.id,
+            input_modalities=["text", "image"],
+            capabilities_source="models_dev",
+        )
+        self.assertIsNotNone(updated)
+        assert updated is not None
+        self.assertEqual(updated.input_modalities, ["text", "image"])
+        self.assertEqual(updated.capabilities_source, "models_dev")
+
+        fetched = await self.store.get_by_id(row.id)
+        assert fetched is not None
+        self.assertEqual(fetched.input_modalities, ["text", "image"])
 
 
 class LlmModelMigrationShapeTests(unittest.TestCase):
@@ -59,8 +95,29 @@ class LlmModelMigrationShapeTests(unittest.TestCase):
         cols = {c.name for c in LlmModel.__table__.columns}
         self.assertEqual(
             cols,
-            {"id", "name", "description", "model", "base_url", "api_key", "created_at", "updated_at"},
+            {
+                "id",
+                "name",
+                "description",
+                "model",
+                "base_url",
+                "api_key",
+                "input_modalities",
+                "capabilities_source",
+                "created_at",
+                "updated_at",
+            },
         )
+
+    def test_input_modalities_uses_text_json_type(self) -> None:
+        """ORM stores JSON as TEXT; Alembic must match (not native JSON on Postgres)."""
+        from sqlalchemy import Text
+
+        from deep_agent.db.types import JSONType
+
+        col = LlmModel.__table__.c.input_modalities
+        self.assertIsInstance(col.type, JSONType)
+        self.assertIsInstance(col.type.impl, Text)
 
 
 if __name__ == "__main__":

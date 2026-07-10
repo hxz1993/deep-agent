@@ -11,7 +11,8 @@ from typing import Any, Protocol, runtime_checkable
 from pydantic_ai.messages import ModelMessage
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from deep_agent.db.session_list import MAX_LIST_LIMIT, SessionListFilters, SessionSummaryRow
+from deep_agent.agent.history import first_user_prompt
+from deep_agent.db.session_list import SessionListFilters, SessionSummaryRow
 from deep_agent.db.session_scope import normalize_agent_scope, runtime_session_key
 from deep_agent.db.stores.chat_session.base import ChatSessionStoreBase
 from deep_agent.db.stores.message.base import MessageStoreBase
@@ -61,6 +62,18 @@ class SessionStore(Protocol):
         ...
 
     async def delete(self, session_id: str, *, agent_id: str | None = None) -> None:
+        ...
+
+    async def get_session_title(
+        self, session_id: str, *, agent_id: str | None = None
+    ) -> str | None:
+        """获取会话标题，无标题返回 None"""
+        ...
+
+    async def update_session_title(
+        self, session_id: str, agent_id: str | None, title: str
+    ) -> None:
+        """更新会话标题"""
         ...
 
     async def list_session_summaries(
@@ -128,14 +141,22 @@ class SqlConversationCoordinator:
         scope = normalize_agent_scope(agent_id)
         async with self._write() as db:
             now = datetime.now(timezone.utc)
+            next_sequence = await self._messages._get_max_sequence(db, scope, session_id) + 1
+            existing_title = await self._chat_sessions.get_session_title(db, scope, session_id)
+            # 仅首轮写入时 seed；避免迁移前无 title 的历史会话在后续轮次被误写。
+            title = (
+                first_user_prompt(messages)
+                if existing_title is None and next_sequence == 1
+                else None
+            )
             await self._chat_sessions._upsert(
                 db,
                 scope,
                 session_id,
                 user_id=user_id,
+                title=title,
                 now=now,
             )
-            next_sequence = await self._messages._get_max_sequence(db, scope, session_id) + 1
             await self._messages._append_messages(
                 db,
                 scope,
@@ -184,6 +205,22 @@ class SqlConversationCoordinator:
         scope = normalize_agent_scope(agent_id)
         await self._chat_sessions.delete(scope, session_id)
         self._locks.pop(runtime_session_key(session_id, agent_id=agent_id), None)
+
+    async def get_session_title(
+        self, session_id: str, *, agent_id: str | None = None
+    ) -> str | None:
+        """获取会话标题。"""
+        scope = normalize_agent_scope(agent_id)
+        async with self._session_factory() as db:
+            return await self._chat_sessions.get_session_title(db, scope, session_id)
+
+    async def update_session_title(
+        self, session_id: str, agent_id: str | None, title: str
+    ) -> None:
+        """更新会话标题。"""
+        scope = normalize_agent_scope(agent_id)
+        async with self._write() as db:
+            await self._chat_sessions.update_session_title(db, scope, session_id, title)
 
     async def list_session_summaries(
         self,

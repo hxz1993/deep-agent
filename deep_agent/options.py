@@ -180,6 +180,30 @@ class Agent(Category):
         bind_env="GEMINI_PROXY",
         convertor=_strip_optional_str,
     )
+    title_model = Option(
+        "",  # 标题生成专用模型名，空=不启用 AI 标题生成
+        val_type=str,
+        bind_env="TITLE_MODEL",
+        convertor=_strip_optional_str,
+    )
+    title_model_base_url = Option(
+        "",  # 标题模型 API 基础 URL
+        val_type=str,
+        bind_env="TITLE_MODEL_BASE_URL",
+        convertor=_strip_optional_str,
+    )
+    title_model_api_key = Option(
+        "",  # 标题模型 API Key
+        val_type=str,
+        protected=True,  # 敏感信息不暴露到日志
+        bind_env="TITLE_MODEL_API_KEY",
+        convertor=_strip_optional_str,
+    )
+    title_generation_timeout = Option(
+        30.0,  # 标题生成超时（秒）；慢速 OpenAI 兼容端点可能需要更久
+        val_type=float,
+        bind_env="TITLE_GENERATION_TIMEOUT",
+    )
 
     def __get__(self, instance, owner) -> "Agent":
         """defined to help ide"""

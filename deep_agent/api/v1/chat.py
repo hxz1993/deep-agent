@@ -155,16 +155,20 @@ async def chat_stream(request: Request, ctx: AppContextDep, body: StreamChatRequ
     await _validate_branch_from(ctx, session_id, agent_id=api_agent_id, branch_from=body.branch_from)
 
     async def event_generator():
-        yield {"event": "session", "data": json.dumps(session_data)}
-        async for ev in runner.run_stream(
-            session_id,
-            message,
-            deps,
-            attachments=body.attachments,
-            deferred_tool_results=deferred_tool_results,
-            branch_from=body.branch_from,
-            persister=ctx.event_persister,
-        ):
-            yield {"event": ev["type"], "data": json.dumps(ev, ensure_ascii=False)}
+        try:
+            yield {"event": "session", "data": json.dumps(session_data)}
+            async for ev in runner.run_stream(
+                session_id,
+                message,
+                deps,
+                attachments=body.attachments,
+                deferred_tool_results=deferred_tool_results,
+                branch_from=body.branch_from,
+                persister=ctx.event_persister,
+            ):
+                yield {"event": ev["type"], "data": json.dumps(ev, ensure_ascii=False)}
+        finally:
+            # Ensure background persistence finishes before the client refreshes session list.
+            await ctx.event_persister.flush(session_id, agent_id=api_agent_id)
 
     return EventSourceResponse(event_generator())

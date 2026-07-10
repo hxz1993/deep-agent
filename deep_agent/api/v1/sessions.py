@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Literal, Optional
 
 from fastapi import APIRouter, HTTPException, Query, status
+from pydantic import BaseModel
 from pydantic_ai.messages import ModelMessage
 
 from deep_agent.core.context import AppContextDep
@@ -11,6 +12,7 @@ from deep_agent.db.session_list import MAX_LIST_LIMIT, SessionListFilters, Sessi
 from deep_agent.db.session_scope import resolve_session
 from deep_agent.agent.history import (
     SessionHistoryResponse,
+    _extract_assistant_text,
     enrich_history_messages,
     first_user_prompt,
     model_messages_to_history,
@@ -38,6 +40,7 @@ def _summary_to_session_info(row: SessionSummaryRow) -> SessionInfo:
         agent_id=row.agent_id,
         agent_name=row.agent_name,
         user_prompt=row.user_prompt,
+        title=row.title,
         created_at=row.created_at,
         updated_at=row.updated_at,
     )
@@ -56,6 +59,7 @@ async def _build_session_info(
 
     created_at: datetime | None = None
     updated_at: datetime | None = None
+    title: str | None = None
     if ctx.stores.chat_session is not None:
         from deep_agent.db.session_scope import normalize_agent_scope
 
@@ -63,6 +67,8 @@ async def _build_session_info(
             normalize_agent_scope(agent_id),
             session_id,
         )
+        # 通过 coordinator 获取标题（封装了 db_session 管理）
+        title = await ctx.store.get_session_title(session_id, agent_id=agent_id)
     if updated_at is None and history:
         created_at, updated_at = session_activity_timestamps(history)
 
@@ -72,6 +78,7 @@ async def _build_session_info(
         agent_id=agent_id,
         agent_name=agent_name,
         user_prompt=first_user_prompt(history),
+        title=title,
         created_at=created_at,
         updated_at=updated_at,
     )
@@ -184,3 +191,86 @@ async def delete_session(
 
     api_agent_id = agent_id or agent_scope_to_api(scope)
     await ctx.store.delete(resolved_session_id, agent_id=api_agent_id)
+
+
+class SessionRenameRequest(BaseModel):
+    """会话重命名请求体。"""
+
+    title: Optional[str] = None
+    """手动设置的标题。与 auto 互斥。"""
+
+    auto: bool = False
+    """是否自动重新生成标题（基于对话内容）。与 title 互斥。"""
+
+
+@router.patch("/sessions/{session_id}", response_model=SessionInfo)
+async def rename_session(
+    ctx: AppContextDep,
+    session_id: str,
+    body: SessionRenameRequest,
+    agent_id: str | None = None,
+) -> SessionInfo:
+    """重命名会话：手动设置标题或自动重新生成。
+
+    - `{"title": "新名称"}` → 手动重命名
+    - `{"auto": true}` → 基于对话内容自动重新生成标题
+    """
+    if body.title is not None and body.auto:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Cannot specify both 'title' and 'auto'",
+        )
+    if body.title is None and not body.auto:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Must specify either 'title' or 'auto'",
+        )
+
+    resolved = await resolve_session(ctx.store, session_id, agent_id=agent_id)
+    if resolved is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
+    scope, resolved_session_id = resolved
+    from deep_agent.db.session_scope import agent_scope_to_api
+
+    api_agent_id = agent_id or agent_scope_to_api(scope)
+
+    if body.title is not None:
+        # 手动设置标题
+        title = body.title.strip()[:80] if body.title.strip() else None
+        await ctx.store.update_session_title(resolved_session_id, api_agent_id, title)
+    elif body.auto:
+        # 自动重新生成标题
+        history = await ctx.store.get_history(resolved_session_id, agent_id=api_agent_id)
+        if not history:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot auto-rename: session has no messages",
+            )
+        user_text = first_user_prompt(history) or ""
+        assistant_text = _extract_assistant_text(history)
+
+        from deep_agent.agent.title_generator import generate_title, resolve_main_model_for_title
+
+        spec = await _spec_for_history(ctx, api_agent_id)
+        main_model = resolve_main_model_for_title(spec)
+
+        title = await generate_title(
+            user_text=user_text,
+            assistant_text=assistant_text or user_text,
+            main_model=main_model,
+        )
+
+        # LLM 失败时回退到文本提取
+        if not title:
+            title = user_text
+
+        await ctx.store.update_session_title(resolved_session_id, api_agent_id, title)
+
+    # 返回更新后的会话信息
+    history = await ctx.store.get_history(resolved_session_id, agent_id=api_agent_id)
+    return await _build_session_info(
+        ctx,
+        resolved_session_id,
+        agent_id=api_agent_id,
+        history=history,
+    )

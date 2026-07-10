@@ -269,6 +269,28 @@ def first_user_prompt(messages: list[ModelMessage]) -> str | None:
     return None
 
 
+def _extract_assistant_text(messages: list[ModelMessage]) -> str:
+    """从消息列表中提取助手响应文本。
+
+    使用提前返回模式（if not ... continue）减少缩进深度。
+    只处理 ModelResponse 中的 TextPart 内容。
+    """
+    texts: list[str] = []
+    for msg in messages:
+        # 只处理助手响应消息
+        if not isinstance(msg, ModelResponse):
+            continue
+        for part in msg.parts:
+            # 只处理文本片段
+            if not isinstance(part, TextPart):
+                continue
+            # 跳过空内容
+            if not part.content:
+                continue
+            texts.append(part.content)
+    return "\n".join(texts).strip()
+
+
 def session_activity_timestamps(messages: list[ModelMessage]) -> tuple[datetime | None, datetime | None]:
     """Infer session created/updated times from message timestamps."""
     timestamps: list[datetime] = []

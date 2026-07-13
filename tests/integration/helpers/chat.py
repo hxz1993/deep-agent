@@ -19,18 +19,11 @@ from deep_agent.capabilities import build_registry
 from deep_agent.capabilities.mcp.lease_manager import McpLeaseManager
 from deep_agent.core.context import AppContext, get_context, init_context, reset_context
 from deep_agent.db.stores.bundle import DataStores
-from deep_agent.options import OPTION
 from deep_agent.schemas.mcp import McpServerCreate
-from tests.helpers.sqlite_stores import make_sqlite_stores, make_sqlite_stores_sync
+from tests.helpers.sqlite_stores import ensure_title_uses_main_model, make_sqlite_stores, make_sqlite_stores_sync
 from tests.integration.helpers.mcp import streamable_http_echo_server
 
 ECHO_TOOL_NAME = "echo_echo_request_headers"
-
-
-def _disable_title_generation_for_tests() -> None:
-    """Non-title integration tests must not spawn background title LLM calls."""
-    OPTION.agent.title_model = ""
-    OPTION.agent.title_model_api_key = ""
 
 
 async def aclose_test_context(*, engine: Any | None = None) -> None:
@@ -142,12 +135,25 @@ def testing_data_stores(
     return stores, engine, session_factory
 
 
-def create_test_app(*, mcp_url: str) -> FastAPI:
-    """Build a minimal FastAPI app without production lifespan/DB side effects."""
-    test_app = FastAPI()
-    test_app.include_router(api_router)
-    configure_test_app(test_app, mcp_url=mcp_url)
-    return test_app
+def _build_test_context(
+    *,
+    mcp_url: str,
+    stores: DataStores | None = None,
+    db_engine: Any | None = None,
+    db_session_factory: Any | None = None,
+) -> AppContext:
+    """Create AppContext for integration tests (without async store seeding)."""
+    if stores is None:
+        stores, db_engine, db_session_factory = testing_data_stores(mcp_rows=[echo_mcp_row(mcp_url)])
+    ctx = AppContext.for_testing(
+        registry=build_registry(),
+        stores=stores,
+        mcp_lease_manager=McpLeaseManager(),
+        db_engine=db_engine,
+        db_session_factory=db_session_factory,
+    )
+    init_context(ctx)
+    return ctx
 
 
 def configure_test_app(
@@ -159,17 +165,34 @@ def configure_test_app(
     db_session_factory: Any | None = None,
 ) -> AppContext:
     """Attach sqlite-backed dependencies and MCP rows resolved at use time."""
-    if stores is None:
-        stores, db_engine, db_session_factory = testing_data_stores(mcp_rows=[echo_mcp_row(mcp_url)])
-    ctx = AppContext.for_testing(
-        registry=build_registry(),
+    ctx = _build_test_context(
+        mcp_url=mcp_url,
         stores=stores,
-        mcp_lease_manager=McpLeaseManager(),
         db_engine=db_engine,
         db_session_factory=db_session_factory,
     )
-    init_context(ctx)
-    _disable_title_generation_for_tests()
+    import asyncio
+
+    asyncio.run(ensure_title_uses_main_model(ctx.stores))
+    return ctx
+
+
+async def configure_test_app_async(
+    app: FastAPI,
+    *,
+    mcp_url: str,
+    stores: DataStores | None = None,
+    db_engine: Any | None = None,
+    db_session_factory: Any | None = None,
+) -> AppContext:
+    """Async variant for callers already inside a running event loop."""
+    ctx = _build_test_context(
+        mcp_url=mcp_url,
+        stores=stores,
+        db_engine=db_engine,
+        db_session_factory=db_session_factory,
+    )
+    await ensure_title_uses_main_model(ctx.stores)
     return ctx
 
 
@@ -187,7 +210,7 @@ async def async_echo_chat_app(
         stores, db_engine, db_session_factory = await testing_data_stores_async(
             mcp_rows=[echo_mcp_row(mcp_url)],
         )
-        configure_test_app(
+        await configure_test_app_async(
             app,
             mcp_url=mcp_url,
             stores=stores,
@@ -198,36 +221,6 @@ async def async_echo_chat_app(
             yield app, record_file
         finally:
             await aclose_test_context(engine=db_engine)
-
-
-@contextmanager
-def echo_chat_app(
-    *,
-    record_path: Path | None = None,
-    call_tools: list[str] | None = None,
-    stores: DataStores | None = None,
-) -> Iterator[tuple[FastAPI, Path]]:
-    """Minimal app + header-echo MCP; prefer AsyncClient for /chat/stream (TestClient.stream hangs)."""
-    record_file = record_path or Path(tempfile.mkstemp(suffix=".json")[1])
-    with streamable_http_echo_server(record_path=record_file) as mcp_url:
-        app = FastAPI()
-        app.include_router(api_router)
-        if stores is None:
-            stores, db_engine, db_session_factory = testing_data_stores(mcp_rows=[echo_mcp_row(mcp_url)])
-        else:
-            db_engine = None
-            db_session_factory = None
-        configure_test_app(
-            app,
-            mcp_url=mcp_url,
-            stores=stores,
-            db_engine=db_engine,
-            db_session_factory=db_session_factory,
-        )
-        try:
-            yield app, record_file
-        finally:
-            reset_context()
 
 
 async def read_chat_stream(

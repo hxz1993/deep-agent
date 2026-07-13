@@ -238,3 +238,32 @@ def create_foreign_key(
         remote_cols,
         ondelete=ondelete,
     )
+
+
+def insert_or_ignore(
+    bind,
+    table: sa.TableClause,
+    values: dict,
+    *,
+    conflict_columns: list[str],
+) -> None:
+    """Insert a row; skip silently when unique/PK columns already exist."""
+    if is_postgresql(bind):
+        stmt = (
+            postgresql.insert(table)
+            .values(**values)
+            .on_conflict_do_nothing(index_elements=conflict_columns)
+        )
+    elif is_sqlite(bind):
+        from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+
+        stmt = (
+            sqlite_insert(table)
+            .values(**values)
+            .on_conflict_do_nothing(index_elements=conflict_columns)
+        )
+    else:
+        from sqlalchemy.dialects.mysql import insert as mysql_insert
+
+        stmt = mysql_insert(table).values(**values).prefix_with("IGNORE")
+    bind.execute(stmt)

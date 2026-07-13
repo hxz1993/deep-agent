@@ -630,7 +630,10 @@ function renderSessions() {
         ? `<span class="session-agent">${escapeHtml(s.agentId.slice(0, 8))}</span>`
         : "";
     li.innerHTML = `<span class="sid" title="${escapeHtml(s.id)}"><span class="session-title">${escapeHtml(s.title)}</span>${agentLabel}</span><span class="session-actions"><span class="rename-btn" title="重命名">✏️</span><span class="auto-rename-btn" title="自动重命名">🔄</span><span class="del" title="删除">✕</span></span>`;
-    li.querySelector(".sid").addEventListener("click", () => switchSession(s));
+    li.querySelector(".sid").addEventListener("click", (e) => {
+      if (e.target.closest(".session-title-input")) return;
+      switchSession(s);
+    });
     li.querySelector(".rename-btn").addEventListener("click", (e) => {
       e.stopPropagation();
       startInlineEdit(s, li.querySelector(".session-title"));
@@ -808,6 +811,10 @@ async function deleteSession(session) {
 }
 
 /* --------------------------- 会话重命名 --------------------------- */
+function noteSessionNotFound() {
+  addSystemNote("会话不存在，请刷新页面。");
+}
+
 async function renameSession(session, newTitle) {
   const normalized = normalizeSession(session);
   try {
@@ -816,6 +823,10 @@ async function renameSession(session, newTitle) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ title: newTitle }),
     });
+    if (r.status === 404) {
+      noteSessionNotFound();
+      return null;
+    }
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const data = await r.json();
     // 更新本地会话列表
@@ -845,6 +856,10 @@ async function autoRenameSession(session) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ auto: true }),
     });
+    if (r.status === 404) {
+      noteSessionNotFound();
+      return null;
+    }
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const data = await r.json();
     // 更新本地会话列表
@@ -882,7 +897,15 @@ function startInlineEdit(session, titleElement) {
   input.focus();
   input.select();
 
+  const stopBubble = (e) => e.stopPropagation();
+  input.addEventListener("mousedown", stopBubble);
+  input.addEventListener("click", stopBubble);
+  input.addEventListener("pointerdown", stopBubble);
+
+  let finished = false;
   const finishEdit = async (save) => {
+    if (finished) return;
+    finished = true;
     const newTitle = save ? input.value.trim() : currentTitle;
     titleElement.removeChild(input);
     if (save && newTitle !== currentTitle) {
@@ -1166,7 +1189,7 @@ async function runChatStream(payload, assistant) {
         await refreshCurrentHistory();
       }
       await syncSessionsFromBackend();
-      if (state.sessionId) {
+      if (shouldRefreshTitle && state.sessionId) {
         const title = lastUserText() || el.chatTitle.textContent;
         upsertSession(state.sessionId, title, state.agentId, agentNameById(state.agentId));
       }
@@ -1274,9 +1297,13 @@ function handleEvent({ event, data }, assistant) {
           if (el.agentSelect) el.agentSelect.value = state.agentId;
         }
         updateChatHeader();
-        const title = lastUserText() || id.slice(0, 8);
+        const sessionKey = sessionLookupKey({ id, agentId: state.agentId });
+        const isNewSession = !state.sessions.some((s) => sessionLookupKey(s) === sessionKey);
+        const title = isNewSession ? lastUserText() || id.slice(0, 8) : null;
         upsertSession(id, title, state.agentId, agentNameById(state.agentId));
-        if (el.chatTitle.textContent === "新对话") el.chatTitle.textContent = title.slice(0, 40);
+        if (isNewSession && el.chatTitle.textContent === "新对话") {
+          el.chatTitle.textContent = (title || id.slice(0, 8)).slice(0, 40);
+        }
         updateAgentSelectState();
       }
       break;

@@ -28,6 +28,7 @@ class McpResolverTests(unittest.IsolatedAsyncioTestCase):
             coordinator=MagicMock(),
             agent=MagicMock(),
             llm_model=MagicMock(),
+            auxiliary_model=MagicMock(),
             mcp=mcp_store,
             ui_tool=MagicMock(),
         )

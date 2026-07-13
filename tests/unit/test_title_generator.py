@@ -7,7 +7,6 @@ from pydantic_ai.models.test import TestModel
 
 from deep_agent.agent.history import _extract_assistant_text
 from deep_agent.agent.title_generator import _clean_title, generate_title
-from deep_agent.options import OPTION
 
 
 class TestCleanTitle(unittest.TestCase):
@@ -72,19 +71,6 @@ class TestExtractAssistantText(unittest.TestCase):
 
 class TestGenerateTitle(unittest.IsolatedAsyncioTestCase):
     """测试标题生成函数。"""
-
-    async def asyncSetUp(self) -> None:
-        self._title_model_backup = OPTION.agent.title_model
-        self._title_key_backup = OPTION.agent.title_model_api_key
-        self._title_url_backup = OPTION.agent.title_model_base_url
-        OPTION.agent.title_model = ""
-        OPTION.agent.title_model_api_key = ""
-        OPTION.agent.title_model_base_url = ""
-
-    async def asyncTearDown(self) -> None:
-        OPTION.agent.title_model = self._title_model_backup
-        OPTION.agent.title_model_api_key = self._title_key_backup
-        OPTION.agent.title_model_base_url = self._title_url_backup
 
     async def test_no_model_configured(self) -> None:
         """未配置专用模型且无主模型时返回 None。"""

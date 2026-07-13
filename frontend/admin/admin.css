@@ -144,6 +144,16 @@ html, body {
   font-size: 18px;
 }
 
+.panel-subtitle {
+  margin: 6px 0 0;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+.text-dim {
+  color: var(--text-dim);
+}
+
 .panel-toolbar-actions {
   display: flex;
   align-items: center;

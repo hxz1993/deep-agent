@@ -95,6 +95,7 @@ MCP 在请求时由 `resolve_mcp_toolsets` 解析（DB 行 + `mcps/` builtin 兜
 | `mcp.py` | CRUD `/mcp`、UI 工具刷新（写后热重载 registry） |
 | `ui_tools.py` | CRUD `/ui-tools` |
 | `sessions.py` | 会话列表 / 历史 / 删除 |
+| `auxiliary_models.py` | CRUD `/auxiliary-models` |
 | `tools.py` | `GET /tools` |
 | `deps.py` | `build_runner` / `build_runner_for_agent`（多入口共享组装，见[重构风格规则](../.cursor/rules/python-refactoring.mdc)） |
 
@@ -104,13 +105,15 @@ MCP 在请求时由 `resolve_mcp_toolsets` 解析（DB 行 + `mcps/` builtin 兜
 | --- | --- |
 | `deps.py` | `get_*_store(ctx)` Depends |
 | `conversation.py` | `SessionStore` 协议 + SQL/内存协调器（跨表写入、进程锁） |
-| `stores/` | 5 个表 Store（`agent/`、`mcp/`、`ui_tool/`、`chat_session/`、`message/`）+ `bundle.DataStores` |
+| `stores/` | 7 个表 Store（`agent/`、`llm_model/`、`auxiliary_model/`、`mcp/`、`ui_tool/`、`chat_session/`、`message/`）+ `bundle.DataStores` |
 | `factory.py` / `dialect.py` | `create_engine` / `close_db`、`bootstrap_database()`、方言解析 |
 | `session_scope.py` / `session_list.py` | 会话作用域解析、列表过滤 DTO |
 
 | 表 | 用途 |
 | --- | --- |
 | `agents` | DB Agent（UUID PK，name 唯一） |
+| `llm_models` | LLM 模型预设 |
+| `auxiliary_model_configs` | 辅助模型场景（如标题生成）绑定 |
 | `mcp_servers` | MCP transport + config JSON |
 | `ui_tool_definitions` | UI 工具定义（builtin / mcp / manual） |
 | `chat_sessions` | 会话元数据 |

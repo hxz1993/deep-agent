@@ -2,22 +2,22 @@
 
 from __future__ import annotations
 
+import os
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
-from pydantic_ai.models.test import TestModel
 
 from deep_agent.api.v1 import api_router
 from deep_agent.capabilities import build_registry
 from deep_agent.capabilities.mcp.lease_manager import McpLeaseManager
 from deep_agent.core.context import AppContext, get_context, init_context, reset_context
-from deep_agent.options import OPTION
 from deep_agent.schemas.agent import AgentCreate
+from deep_agent.schemas.auxiliary_model import AuxiliaryModelUpdate
 from deep_agent.schemas.llm_model import LlmModelCreate
-from tests.helpers.sqlite_stores import make_sqlite_stores
+from tests.helpers.sqlite_stores import AUX_TITLE_MODEL_NAME, ensure_title_uses_main_model, make_sqlite_stores, seed_auxiliary_model_configs
 from tests.integration.helpers.chat import mock_request_disconnect, parse_sse_events
 from tests.integration.helpers.live_llm import skip_unless_title_llm, title_llm_configured
 from tests.integration.helpers.models import text_only_model
@@ -45,6 +45,7 @@ class SessionTitleIntegrationTests(unittest.IsolatedAsyncioTestCase):
             LlmModelCreate(name="chat-model", model="test:chat-model"),
         )
         self._model_id = model_row.id
+        self._stores = stores
         self._agent_id = (
             await stores.agent.create_unique(
                 AgentCreate(name="title-agent", model_id=model_row.id, prompt="helpful assistant"),
@@ -62,26 +63,14 @@ class SessionTitleIntegrationTests(unittest.IsolatedAsyncioTestCase):
             )
         )
         self._transport = ASGITransport(app=self._app)
-        self._title_model_backup = OPTION.agent.title_model
-        self._title_key_backup = OPTION.agent.title_model_api_key
-        self._title_url_backup = OPTION.agent.title_model_base_url
 
     async def asyncTearDown(self) -> None:
-        OPTION.agent.title_model = self._title_model_backup
-        OPTION.agent.title_model_api_key = self._title_key_backup
-        OPTION.agent.title_model_base_url = self._title_url_backup
         await get_context().event_persister.aclose()
         reset_context()
         await self._engine.dispose()
 
-    def _apply_title_env_to_option(self) -> None:
-        import os
-
-        OPTION.agent.title_model = os.environ.get("DEEP_AGENT_TITLE_MODEL", "")
-        OPTION.agent.title_model_api_key = os.environ.get("DEEP_AGENT_TITLE_MODEL_API_KEY", "")
-        OPTION.agent.title_model_base_url = os.environ.get("DEEP_AGENT_TITLE_MODEL_BASE_URL", "")
-        timeout_raw = os.environ.get("DEEP_AGENT_TITLE_GENERATION_TIMEOUT", "30")
-        OPTION.agent.title_generation_timeout = float(timeout_raw)
+    async def _apply_title_env_to_store(self) -> None:
+        await seed_auxiliary_model_configs(self._stores)
 
     async def _stream_first_turn(self, *, message: str, session_id: str | None = None) -> tuple[str, list[dict]]:
         body = {
@@ -141,7 +130,7 @@ class SessionTitleIntegrationTests(unittest.IsolatedAsyncioTestCase):
     async def test_auto_rename_uses_main_model_when_title_model_unconfigured(self) -> None:
         fixture = load_session_fixture(_FIXTURES / "legacy_no_title.json")
         seeded = await seed_session_from_fixture(self._session_factory, fixture)
-        OPTION.agent.title_model = ""
+        await ensure_title_uses_main_model(self._stores)
 
         with patch(
             "deep_agent.agent.factory._resolve_model",
@@ -161,7 +150,7 @@ class SessionTitleIntegrationTests(unittest.IsolatedAsyncioTestCase):
     async def test_auto_rename_falls_back_to_user_prompt_without_any_model(self) -> None:
         fixture = load_session_fixture(_FIXTURES / "legacy_no_title.json")
         seeded = await seed_session_from_fixture(self._session_factory, fixture)
-        OPTION.agent.title_model = ""
+        await ensure_title_uses_main_model(self._stores)
 
         with patch("deep_agent.agent.factory._resolve_model", return_value="unconfigured:model"):
             with patch(
@@ -180,7 +169,7 @@ class SessionTitleIntegrationTests(unittest.IsolatedAsyncioTestCase):
 
     @skip_unless_title_llm
     async def test_first_chat_turn_generates_ai_title(self) -> None:
-        self._apply_title_env_to_option()
+        await self._apply_title_env_to_store()
         session_id, _ = await self._stream_first_turn(message="请解释 Python 装饰器的作用")
         title = await wait_for_session_title(
             get_context().store,
@@ -200,7 +189,7 @@ class SessionTitleIntegrationTests(unittest.IsolatedAsyncioTestCase):
 
     @skip_unless_title_llm
     async def test_deepcube_fixture_auto_rename_uses_live_title_llm(self) -> None:
-        self._apply_title_env_to_option()
+        await self._apply_title_env_to_store()
         fixture = load_session_fixture(_DEEPCUBE_FIXTURE)
         seeded = await seed_session_from_fixture(
             self._session_factory,
@@ -224,7 +213,7 @@ class SessionTitleIntegrationTests(unittest.IsolatedAsyncioTestCase):
     async def test_deepcube_full_fixture_auto_rename_live_smoke(self) -> None:
         """Slow opt-in smoke using the exported 12-message session when available."""
         full_fixture_path = Path(__file__).resolve().parent / "fixtures" / "deepcube_tiered_rebate_full.json"
-        self._apply_title_env_to_option()
+        await self._apply_title_env_to_store()
         fixture = load_session_fixture(full_fixture_path)
         seeded = await seed_session_from_fixture(self._session_factory, fixture)
         async with AsyncClient(transport=self._transport, base_url="http://test", timeout=90.0) as client:
@@ -235,6 +224,50 @@ class SessionTitleIntegrationTests(unittest.IsolatedAsyncioTestCase):
             )
         self.assertEqual(resp.status_code, 200)
         assert_title_reasonable(resp.json()["title"])
+
+
+class AuxiliaryModelApiTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self) -> None:
+        stores, self._engine, self._session_factory = await make_sqlite_stores()
+        self._stores = stores
+        await stores.auxiliary_model.update("title", AuxiliaryModelUpdate(llm_model_id=None))
+        self._app = FastAPI()
+        self._app.include_router(api_router)
+        init_context(
+            AppContext.for_testing(
+                registry=build_registry(),
+                stores=stores,
+                mcp_lease_manager=McpLeaseManager(),
+                db_engine=self._engine,
+                db_session_factory=self._session_factory,
+            )
+        )
+        self._transport = ASGITransport(app=self._app)
+
+    async def asyncTearDown(self) -> None:
+        await get_context().event_persister.aclose()
+        reset_context()
+        await self._engine.dispose()
+
+    async def test_list_defaults_to_auto_title_row(self) -> None:
+        async with AsyncClient(transport=self._transport, base_url="http://test") as client:
+            resp = await client.get("/api/v1/auxiliary-models")
+        self.assertEqual(resp.status_code, 200)
+        items = resp.json()
+        title_row = next(item for item in items if item["use_case"] == "title")
+        self.assertEqual(title_row["mode"], "auto")
+        self.assertIsNone(title_row["llm_model_id"])
+
+    async def test_update_title_model_from_env_seed(self) -> None:
+        if not os.environ.get("DEEP_AGENT_TITLE_MODEL"):
+            self.skipTest("DEEP_AGENT_TITLE_MODEL not set")
+        await seed_auxiliary_model_configs(self._stores)
+        async with AsyncClient(transport=self._transport, base_url="http://test") as client:
+            resp = await client.get("/api/v1/auxiliary-models/title")
+        self.assertEqual(resp.status_code, 200)
+        body = resp.json()
+        self.assertEqual(body["mode"], "dedicated")
+        self.assertEqual(body["llm_model_name"], AUX_TITLE_MODEL_NAME)
 
 
 if __name__ == "__main__":

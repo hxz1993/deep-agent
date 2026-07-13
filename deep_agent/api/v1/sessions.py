@@ -249,15 +249,13 @@ async def rename_session(
         user_text = first_user_prompt(history) or ""
         assistant_text = _extract_assistant_text(history)
 
-        from deep_agent.agent.title_generator import generate_title, resolve_main_model_for_title
+        from deep_agent.agent.title_generator import generate_title
 
         spec = await _spec_for_history(ctx, api_agent_id)
-        main_model = resolve_main_model_for_title(spec)
-
         title = await generate_title(
             user_text=user_text,
             assistant_text=assistant_text or user_text,
-            main_model=main_model,
+            spec=spec,
         )
 
         # LLM 失败时回退到文本提取

@@ -16,8 +16,8 @@ from deep_agent.core.context import get_context
 from deep_agent.capabilities import build_registry
 from deep_agent.capabilities.mcp.lease_manager import McpLeaseManager
 from deep_agent.core.context import AppContext, init_context, reset_context
-from tests.helpers.sqlite_stores import make_sqlite_stores
-from tests.integration.helpers.chat import _disable_title_generation_for_tests, mock_request_disconnect, parse_sse_buffer, parse_sse_events
+from tests.helpers.sqlite_stores import ensure_title_uses_main_model, make_sqlite_stores
+from tests.integration.helpers.chat import mock_request_disconnect, parse_sse_buffer, parse_sse_events
 from tests.integration.helpers.models import build_slow_stream_model, text_only_model, tool_call_model
 
 _CHAT_JSON = {"capabilities": []}
@@ -59,7 +59,7 @@ def _tool_result_ids(history: dict) -> list[str]:
 class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         stores, self._engine, session_factory = await make_sqlite_stores()
-        _disable_title_generation_for_tests()
+        await ensure_title_uses_main_model(stores)
         self._app = FastAPI()
         self._app.include_router(api_router)
         init_context(

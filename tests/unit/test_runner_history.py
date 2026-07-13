@@ -340,5 +340,40 @@ class TruncateHistoryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(history[1].parts[0].content, "a0")
 
 
+class AgentRunnerTitleGenerationTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self) -> None:
+        stores, self._engine, _ = await make_sqlite_stores()
+        self.store = stores.coordinator
+        self.runner = AgentRunner(
+            Agent(TestModel(), output_type=str),
+            self.store,
+            UsageLimits(request_limit=5),
+        )
+
+    async def asyncTearDown(self) -> None:
+        await self._engine.dispose()
+
+    async def test_second_exchange_skips_title_generation_when_title_exists(self) -> None:
+        await self.store.append(
+            "title-session",
+            [
+                ModelRequest(parts=[UserPromptPart(content="第一句")]),
+                ModelResponse(parts=[TextPart(content="第一句回复")]),
+                ModelRequest(parts=[UserPromptPart(content="第二句")]),
+                ModelResponse(parts=[TextPart(content="第二句回复")]),
+            ],
+        )
+        await self.store.update_session_title("title-session", None, "已有标题")
+
+        with patch("deep_agent.agent.title_generator.generate_title", autospec=True) as generate_title:
+            await self.runner._maybe_generate_title(
+                "title-session",
+                AgentDeps(session_id="title-session"),
+                [ModelResponse(parts=[TextPart(content="第二句回复")])],
+            )
+
+        generate_title.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()

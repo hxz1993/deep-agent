@@ -19,7 +19,7 @@ from deep_agent.capabilities.mcp.shared_registry import McpSharedRegistry
 from deep_agent.capabilities.mcp.lease_manager import McpLeaseManager
 from deep_agent.core.context import AppContext, get_context, init_context, reset_context
 from deep_agent.options import OPTION
-from tests.helpers.sqlite_stores import make_sqlite_stores
+from tests.helpers.sqlite_stores import ensure_title_uses_main_model, make_sqlite_stores
 
 
 def _parse_sse_events(raw: str) -> list[dict]:
@@ -80,6 +80,7 @@ class McpSharedHttpStreamTests(unittest.IsolatedAsyncioTestCase):
         registry = McpSharedRegistry(runtime_dir=Path(self._tmpdir.name))
         manager = McpLeaseManager(shared_registry=registry)
         stores, engine, session_factory = await make_sqlite_stores()
+        await ensure_title_uses_main_model(stores)
         init_context(
             AppContext.for_testing(
                 registry=build_registry(),
@@ -98,9 +99,8 @@ class McpSharedHttpStreamTests(unittest.IsolatedAsyncioTestCase):
         )
 
         with patch("deep_agent.agent.factory._resolve_model", return_value=test_model):
-            from tests.integration.helpers.chat import _disable_title_generation_for_tests, mock_request_disconnect
+            from tests.integration.helpers.chat import mock_request_disconnect
 
-            _disable_title_generation_for_tests()
             self._no_title = patch(
                 "deep_agent.agent.runner.AgentRunner._maybe_generate_title",
                 new_callable=AsyncMock,

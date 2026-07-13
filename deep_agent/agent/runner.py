@@ -254,14 +254,6 @@ class AgentRunner:
                 )
             )
 
-    # ============================================
-    # 标题生成：首次交换完成后异步触发
-    # ============================================
-    async def _is_first_exchange(self, session_id: str, agent_id: str | None) -> bool:
-        """判断当前消息是否为会话的首次交换。"""
-        history = await self.store.get_history(session_id, agent_id=agent_id)
-        user_count = sum(1 for m in history if isinstance(m, ModelRequest))
-        return user_count <= 1
 
     async def _maybe_generate_title(
         self,
@@ -272,22 +264,19 @@ class AgentRunner:
         """后台生成并持久化会话标题。"""
         try:
             # 步骤 1：判断是否首次交换
-            if not await self._is_first_exchange(session_id, deps.agent_id):
-                return
-
-            # 步骤 2：检查是否已有标题（用户手动设置的不覆盖）
-            existing = await self.store.get_session_title(session_id, agent_id=deps.agent_id)
-            if existing:
-                return
-
-            # 步骤 3：提取用户文本
             history = await self.store.get_history(session_id, agent_id=deps.agent_id)
+            user_count = sum(1 for m in history if isinstance(m, ModelRequest))
+            if not (user_count <= 1):
+                return
+
             user_text = first_user_prompt(history) or ""
+            existing = await self.store.get_session_title(session_id, agent_id=deps.agent_id)
+            # 已有非 seed 标题（AI 或手动）则不再覆盖；seed 与用户首句相同时允许 AI 升级。
+            if existing and (not user_text or existing != user_text):
+                return
 
-            # 步骤 4：提取助手文本
-            assistant_text = _extract_assistant_text(new_messages)
+            assistant_text = _extract_assistant_text(new_messages) or _extract_assistant_text(history)
 
-            # 步骤 5：LLM 生成标题
             from deep_agent.agent.title_generator import generate_title
 
             title = await generate_title(
@@ -296,12 +285,13 @@ class AgentRunner:
                 main_model=self.agent.model,
             )
 
-            # 步骤 6：生成失败时回退到文本提取
             if not title:
                 title = user_text
 
-            # 步骤 7：持久化标题
             if title:
+                latest = await self.store.get_session_title(session_id, agent_id=deps.agent_id)
+                if latest and (not user_text or latest != user_text):
+                    return
                 await self.store.update_session_title(session_id, deps.agent_id, title)
 
         except Exception as e:
@@ -419,12 +409,10 @@ class AgentRunner:
                     )
                     run_published = True
 
-                    # ============================================
-                    # 标题生成：首次交换完成后异步触发（不阻塞）
-                    # ============================================
-                    asyncio.create_task(self._maybe_generate_title(
-                        session_id, deps, result.new_messages(),
-                    ))
+                    if branch_from is None:
+                        asyncio.create_task(self._maybe_generate_title(
+                            session_id, deps, result.new_messages(),
+                        ))
             except asyncio.CancelledError:
                 cancelled = True
             except GeneratorExit:

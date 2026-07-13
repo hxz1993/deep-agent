@@ -13,13 +13,14 @@ from typing import TYPE_CHECKING, Optional
 
 from pydantic_ai import Agent
 from pydantic_ai.models import Model
-from pydantic_ai.models.openai import OpenAIChatModel
-from pydantic_ai.providers.openai import OpenAIProvider
 
+from deep_agent.agent.auxiliary_models import TITLE_USE_CASE, resolve_llm_model_for_use_case
 from deep_agent.options import OPTION
 
 if TYPE_CHECKING:
     from deep_agent.agent.spec import AgentSpec
+    from deep_agent.db.stores.auxiliary_model import AuxiliaryModelStoreBase
+    from deep_agent.db.stores.llm_model import LlmModelStoreBase
 
 logger = logging.getLogger(__name__)
 
@@ -33,21 +34,56 @@ _TITLE_PROMPT = (
 )
 
 
-def _build_title_model() -> Optional[Model]:
-    """根据配置构建标题生成专用的 LLM 模型实例。
+async def _resolve_dedicated_title_model(
+    auxiliary_store: AuxiliaryModelStoreBase | None = None,
+    llm_model_store: LlmModelStoreBase | None = None,
+) -> Model | str | None:
+    if auxiliary_store is None or llm_model_store is None:
+        try:
+            from deep_agent.core.context import get_context
 
-    优先使用 DEEP_AGENT_TITLE_MODEL 配置的专用模型；
-    未配置时返回 None，由调用方使用主模型。
-    """
-    model_str = OPTION.agent.title_model
-    if not model_str:
+            ctx = get_context()
+            auxiliary_store = ctx.stores.auxiliary_model
+            llm_model_store = ctx.stores.llm_model
+        except RuntimeError:
+            return None
+
+    llm_row = await resolve_llm_model_for_use_case(
+        auxiliary_store,
+        llm_model_store,
+        TITLE_USE_CASE,
+    )
+    if llm_row is None:
         return None
 
-    # 构建 OpenAI 兼容 provider
-    base_url = OPTION.agent.title_model_base_url or None
-    api_key = OPTION.agent.title_model_api_key or None
-    provider = OpenAIProvider(base_url=base_url, api_key=api_key)
-    return OpenAIChatModel(model_str, provider=provider)
+    from deep_agent.agent.factory import _resolve_model
+    from deep_agent.agent.spec import AgentSpec
+
+    return _resolve_model(AgentSpec.from_llm_model(llm_row))
+
+
+async def resolve_title_model(
+    *,
+    main_model: Model | str | None = None,
+    spec: AgentSpec | None = None,
+    auxiliary_store: AuxiliaryModelStoreBase | None = None,
+    llm_model_store: LlmModelStoreBase | None = None,
+) -> Model | str | None:
+    """专用标题模型优先，否则回退对话主模型（显式传入或从 spec 解析）。"""
+    dedicated = await _resolve_dedicated_title_model(auxiliary_store, llm_model_store)
+    if dedicated is not None:
+        return dedicated
+    if main_model is not None:
+        logger.debug("Using main chat model for title generation")
+        return main_model
+    if spec is not None and spec.model:
+        try:
+            from deep_agent.agent.factory import _resolve_model
+
+            return _resolve_model(spec)
+        except Exception as exc:
+            logger.debug("Cannot resolve main model for title generation: %s", exc)
+    return None
 
 
 def _clean_title(raw: str) -> Optional[str]:
@@ -80,56 +116,26 @@ def _clean_title(raw: str) -> Optional[str]:
     return cleaned.strip() or None
 
 
-def _resolve_title_model(main_model: Model | str | None = None) -> Model | str | None:
-    """专用标题模型优先，否则回退对话主模型。"""
-    dedicated = _build_title_model()
-    if dedicated is not None:
-        return dedicated
-    if main_model:
-        logger.debug("Using main chat model for title generation")
-        return main_model
-    return None
-
-
-def resolve_main_model_for_title(spec: AgentSpec) -> Model | str | None:
-    """解析对话主模型供标题回退；已配置专用标题模型时跳过。"""
-    if OPTION.agent.title_model or not spec.model:
-        return None
-    try:
-        from deep_agent.agent.factory import _resolve_model
-
-        return _resolve_model(spec)
-    except Exception as exc:
-        logger.debug("Cannot resolve main model for title generation: %s", exc)
-        return None
-
-
 async def generate_title(
     user_text: str,
     assistant_text: str,
     *,
     main_model: Model | str | None = None,
+    spec: AgentSpec | None = None,
+    auxiliary_store: AuxiliaryModelStoreBase | None = None,
+    llm_model_store: LlmModelStoreBase | None = None,
 ) -> Optional[str]:
-    """从首轮对话生成标题，失败返回 None。
-
-    流程：
-    1. 构建提示词（用户消息 + 助手响应）
-    2. 调用专用标题模型；未配置时回退到 ``main_model``（对话主模型）
-    3. 清洗 LLM 输出
-    4. 失败时记录日志，返回 None
-
-    Args:
-        user_text: 用户首条消息文本
-        assistant_text: 助手首次响应文本
-        main_model: 当前会话的对话主模型（Agent.model），供专用模型未配置时回退
-    Returns:
-        生成的标题字符串，失败则 None
-    """
+    """从首轮对话生成标题，失败返回 None。"""
     user_snippet = (user_text or "")[:500]
     assistant_snippet = (assistant_text or "")[:500]
     user_content = f"User: {user_snippet}\n\nAssistant: {assistant_snippet}"
 
-    model = _resolve_title_model(main_model)
+    model = await resolve_title_model(
+        main_model=main_model,
+        spec=spec,
+        auxiliary_store=auxiliary_store,
+        llm_model_store=llm_model_store,
+    )
     if not model:
         logger.info("No title model or main model available, skipping AI title generation")
         return None

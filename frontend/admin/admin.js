@@ -135,6 +135,7 @@ function initTabs() {
         loadLlmModels().then(() => window.agentsAdmin.refresh());
       }
       if (name === "llm-models" && window.llmModelsAdmin) window.llmModelsAdmin.refresh();
+      if (name === "auxiliary-models" && window.auxiliaryModelsAdmin) window.auxiliaryModelsAdmin.refresh();
       if (name === "mcp" && window.mcpAdmin) window.mcpAdmin.refresh();
       if (name === "ui-tools" && window.uiToolsAdmin) window.uiToolsAdmin.refresh();
     });
@@ -162,6 +163,7 @@ document.addEventListener("DOMContentLoaded", () => {
     saveBaseUrl(baseInput.value);
     if (window.agentsAdmin) window.agentsAdmin.refresh();
     if (window.llmModelsAdmin) window.llmModelsAdmin.refresh();
+    if (window.auxiliaryModelsAdmin) window.auxiliaryModelsAdmin.refresh();
     if (window.mcpAdmin) window.mcpAdmin.refresh();
     if (window.uiToolsAdmin) window.uiToolsAdmin.refresh();
   });

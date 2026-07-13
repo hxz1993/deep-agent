@@ -11,7 +11,7 @@ from pydantic_ai.models.test import TestModel
 
 from deep_agent.api.v1 import api_router
 from deep_agent.schemas.ui_tools import UiToolCreate
-from tests.integration.helpers.chat import aclose_test_context, configure_test_app, mock_request_disconnect, parse_sse_events, testing_data_stores_async
+from tests.integration.helpers.chat import aclose_test_context, configure_test_app_async, mock_request_disconnect, parse_sse_events, testing_data_stores_async
 
 
 async def _seed_manual_ui_tool(stores, *, name: str, metadata: dict) -> None:
@@ -48,7 +48,7 @@ async def ui_tool_stream_app(
 
     app = FastAPI()
     app.include_router(api_router)
-    configure_test_app(
+    await configure_test_app_async(
         app,
         mcp_url="http://unused",
         stores=stores,

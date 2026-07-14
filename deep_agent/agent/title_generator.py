@@ -26,11 +26,9 @@ logger = logging.getLogger(__name__)
 
 # 标题生成提示词模板
 _TITLE_PROMPT = (
-    "Generate a short, descriptive title (3-7 words) for a conversation "
-    "that starts with the following exchange. The title should capture the "
-    "main topic or intent. Write the title in the same language the user is "
-    "writing in. Return ONLY the title text, nothing else. No quotes, no "
-    "punctuation at the end, no prefixes."
+    "为一段以以下对话开头的会话生成一个简短且描述性强的中文标题（3-7个词），"
+    "标题应涵盖主要话题或意图。"
+    "仅返回标题文本，无需其他内容。不加引号，末尾无标点，无前缀，专用名词不需要转中文。"
 )
 
 

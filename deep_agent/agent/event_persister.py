@@ -33,6 +33,7 @@ class PersistEvent:
     accumulator: StreamAccumulator | None = None
     result_messages: list[ModelMessage] | None = None
     include_tool_calls: bool = True
+    repair_dangling_tool_calls: bool = True
 
 
 class EventPersister:
@@ -163,7 +164,8 @@ class EventPersister:
                 messages,
                 skip_user_prompt=ev.skip_user_prompt,
             )
-            to_append = repair_unprocessed_tool_calls(to_append)
+            if ev.repair_dangling_tool_calls:
+                to_append = repair_unprocessed_tool_calls(to_append)
             if to_append:
                 await self._store.append(
                     session_id,
@@ -186,7 +188,8 @@ class EventPersister:
                 )
             else:
                 to_append = []
-            to_append = repair_unprocessed_tool_calls(to_append)
+            if ev.repair_dangling_tool_calls:
+                to_append = repair_unprocessed_tool_calls(to_append)
             if to_append:
                 await self._store.append(
                     session_id,

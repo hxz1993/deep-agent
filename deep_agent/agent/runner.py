@@ -197,9 +197,11 @@ class AgentRunner:
         deps: AgentDeps,
         *,
         pre_persisted_user: bool,
+        repair_dangling_tool_calls: bool = True,
     ) -> bool:
         to_append = incremental_append_messages(new_messages, skip_user_prompt=pre_persisted_user)
-        to_append = repair_unprocessed_tool_calls(to_append)
+        if repair_dangling_tool_calls:
+            to_append = repair_unprocessed_tool_calls(to_append)
         if not to_append:
             return False
         await self.store.append(
@@ -218,6 +220,7 @@ class AgentRunner:
         new_messages: list[ModelMessage],
         *,
         pre_persisted_user: bool,
+        repair_dangling_tool_calls: bool = True,
     ) -> None:
         persister.publish(
             PersistEvent(
@@ -227,6 +230,7 @@ class AgentRunner:
                 kind="run_complete",
                 new_messages=new_messages,
                 skip_user_prompt=pre_persisted_user,
+                repair_dangling_tool_calls=repair_dangling_tool_calls,
             )
         )
 
@@ -348,6 +352,7 @@ class AgentRunner:
                 result.new_messages(),
                 deps,
                 pre_persisted_user=pre_persisted_user,
+                repair_dangling_tool_calls=not isinstance(result.output, DeferredToolRequests),
             )
         return _build_run_result(result, self.ui_tool_hints)
 
@@ -411,12 +416,14 @@ class AgentRunner:
                                 cancelled = True
                                 break
                 if not cancelled and result is not None:
+                    deferred_pending = isinstance(result.output, DeferredToolRequests)
                     self._publish_run_complete(
                         persister,
                         session_id,
                         deps,
                         result.new_messages(),
                         pre_persisted_user=pre_persisted_user,
+                        repair_dangling_tool_calls=not deferred_pending,
                     )
                     run_published = True
 

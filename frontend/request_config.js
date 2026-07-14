@@ -25,12 +25,17 @@ function clearRequestHeaders() {
   clearConfiguredCookies();
 }
 
+function inferApiBaseUrlDefault() {
+  if (location.protocol === "file:") return "http://localhost:8000";
+  const root = window.__DEEP_AGENT_APP_ROOT__ || window.__DEEP_AGENT_BASE__ || "/";
+  return `${location.origin}${root.replace(/\/$/, "")}`;
+}
+
 function defaultApiBaseUrl() {
-  return (
+  const saved =
     localStorage.getItem("da_base_url") ||
-    localStorage.getItem("deep-agent-base-url") ||
-    location.origin
-  );
+    localStorage.getItem("deep-agent-base-url");
+  return (saved || inferApiBaseUrlDefault()).replace(/\/$/, "");
 }
 
 function resolveOrigin(url) {

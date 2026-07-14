@@ -39,28 +39,40 @@ function escapeHtml(s) {
     .replace(/"/g, "&quot;");
 }
 
-function apiBase() {
-  return (
-    localStorage.getItem("da_base_url") ||
-    localStorage.getItem("deep-agent-base-url") ||
-    location.origin
-  ).replace(/\/$/, "");
+async function parseJsonResponse(r) {
+  const text = await r.text();
+  const trimmed = text.trimStart();
+  const looksLikeHtml =
+    trimmed.startsWith("<") || trimmed.toLowerCase().startsWith("<!doctype");
+
+  if (looksLikeHtml) {
+    throw new Error(
+      `后端返回了 HTML 而非 JSON。请确认后端已发版/启动，或在对话页侧边栏配置后端地址（当前 ${defaultApiBaseUrl()}）`,
+    );
+  }
+
+  try {
+    return JSON.parse(text);
+  } catch (err) {
+    const preview = trimmed.slice(0, 120);
+    throw new Error(preview || err.message || "响应不是有效 JSON");
+  }
 }
 
 async function apiFetch(path) {
-  const url = `${apiBase()}${path}`;
+  const url = `${defaultApiBaseUrl()}${path}`;
   const r = await daFetch(url);
   if (!r.ok) {
     let detail = `HTTP ${r.status}`;
     try {
-      const body = await r.json();
+      const body = await parseJsonResponse(r);
       if (body?.detail) detail = typeof body.detail === "string" ? body.detail : JSON.stringify(body.detail);
-    } catch (_) {
-      /* ignore */
+    } catch (parseErr) {
+      if (parseErr?.message) detail = parseErr.message;
     }
     throw new Error(detail);
   }
-  return r.json();
+  return parseJsonResponse(r);
 }
 
 function modalitySet(item) {
@@ -157,7 +169,7 @@ function renderTable() {
 
   if (status) {
     const src = state.sourceLabel || state.source;
-    status.textContent = `共 ${state.total} 个模型 · 数据源 ${src} · 后端 ${apiBase()}`;
+    status.textContent = `共 ${state.total} 个模型 · 数据源 ${src} · 后端 ${defaultApiBaseUrl()}`;
   }
 
   renderPagination();

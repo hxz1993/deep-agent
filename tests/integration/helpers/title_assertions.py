@@ -20,7 +20,7 @@ def assert_title_keywords(title: str, *keywords: str) -> None:
 
 def assert_title_reasonable(title: str | None) -> None:
     assert title, "expected non-empty title"
-    assert 1 <= len(title) <= 80, f"unexpected title length: {len(title)}"
+    assert 1 <= len(title) <= 30, f"unexpected title length: {len(title)}"
 
 
 def assert_fallback_title(title: str | None, user_prompt: str | None) -> None:

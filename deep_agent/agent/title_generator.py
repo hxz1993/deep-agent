@@ -104,8 +104,8 @@ def _clean_title(raw: str) -> Optional[str]:
         cleaned = cleaned[6:].strip()
     # 步骤 4：限制最大长度（先截断，再清理末尾标点）
     truncated = False
-    if len(cleaned) > 80:
-        cleaned = cleaned[:77] + "..."
+    if len(cleaned) > 30:
+        cleaned = cleaned[:27] + "..."
         truncated = True
     # 步骤 5：去除末尾标点（截断后有 "..." 时不再清理，避免误删省略号）
     if not truncated:

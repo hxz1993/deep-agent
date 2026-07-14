@@ -337,7 +337,7 @@ venv\Scripts\python.exe -m unittest ^
 ## 10. 后续可选优化
 
 - [ ] 标题生成失败监控 / 指标
-- [ ] `DEEP_AGENT_TITLE_MAX_LENGTH` 可配置化（当前硬编码 80）
+- [ ] `DEEP_AGENT_TITLE_MAX_LENGTH` 可配置化（当前硬编码 30）
 - [ ] `auto` 重命名时可选只用首轮消息而非全量 history
 - [ ] 从 DeepCube prompt 中提取简短 `<user>` 段（**当前明确不做**）
 

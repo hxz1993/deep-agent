@@ -37,6 +37,16 @@ class TestCleanTitle(unittest.TestCase):
         result = _clean_title("Python 快速排序实现")
         self.assertEqual(result, "Python 快速排序实现")
 
+    def test_truncate_long_title(self):
+        long_title = "这是一段超过三十个汉字的会话标题用来验证截断逻辑是否按预期工作"
+        result = _clean_title(long_title)
+        self.assertIsNotNone(result)
+        assert result is not None
+        self.assertLessEqual(len(result), 30)
+        self.assertTrue(result.endswith("..."))
+        self.assertEqual(len(result), 30)
+        self.assertEqual(result, long_title[:27] + "...")
+
 
 class TestExtractAssistantText(unittest.TestCase):
     """测试助手文本提取函数。"""

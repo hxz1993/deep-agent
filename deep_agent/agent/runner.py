@@ -20,6 +20,7 @@ from deep_agent.agent.attachments import (
 from deep_agent.agent.deferred import serialize_deferred
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.event_persister import EventPersister, PersistEvent
+from deep_agent.agent.limits import format_stream_error
 from deep_agent.agent.history import (
     _extract_assistant_text,
     first_user_prompt,
@@ -95,8 +96,17 @@ class AgentRunner:
                 keep_count=branch_from,
             )
         history = await self.store.get_history(session_id, agent_id=deps.agent_id)
-        if has_user_turn(message, attachments) and not deferred_tool_results:
-            history = repair_unprocessed_tool_calls(history)
+        if not deferred_tool_results:
+            repaired = repair_unprocessed_tool_calls(history)
+            if repaired is not history:
+                replace_history = getattr(self.store, "replace_history", None)
+                if callable(replace_history):
+                    await replace_history(
+                        session_id,
+                        repaired,
+                        agent_id=deps.agent_id,
+                    )
+                history = repaired
         pre_persisted_user = False
         user_branch_point: int | None = None
         if has_user_turn(message, attachments):
@@ -189,6 +199,7 @@ class AgentRunner:
         pre_persisted_user: bool,
     ) -> bool:
         to_append = incremental_append_messages(new_messages, skip_user_prompt=pre_persisted_user)
+        to_append = repair_unprocessed_tool_calls(to_append)
         if not to_append:
             return False
         await self.store.append(
@@ -425,7 +436,7 @@ class AgentRunner:
                     user_branch_point=user_branch_point if pre_persisted_user else None,
                 )
                 yield events.error(
-                    str(exc),
+                    format_stream_error(exc),
                     history_persisted=pre_persisted_user,
                     model_message_count=msg_count if pre_persisted_user else None,
                     user_branch_point=branch_pt,

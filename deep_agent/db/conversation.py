@@ -50,6 +50,15 @@ class SessionStore(Protocol):
     ) -> None:
         ...
 
+    async def replace_history(
+        self,
+        session_id: str,
+        messages: list[ModelMessage],
+        *,
+        agent_id: str | None = None,
+    ) -> None:
+        ...
+
     async def list_sessions(self) -> list[tuple[str, str]]:
         ...
 
@@ -180,6 +189,30 @@ class SqlConversationCoordinator:
                 session_id,
                 keep_count=max(keep_count, 0),
             )
+
+    async def replace_history(
+        self,
+        session_id: str,
+        messages: list[ModelMessage],
+        *,
+        agent_id: str | None = None,
+    ) -> None:
+        scope = normalize_agent_scope(agent_id)
+        async with self._write() as db:
+            await self._messages._truncate_from_sequence(
+                db,
+                scope,
+                session_id,
+                keep_count=0,
+            )
+            if messages:
+                await self._messages._append_messages(
+                    db,
+                    scope,
+                    session_id,
+                    messages,
+                    start_sequence=0,
+                )
 
     async def list_sessions(self) -> list[tuple[str, str]]:
         return await self._chat_sessions.list_sessions()

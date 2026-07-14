@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import unittest
 
+from pydantic_ai.exceptions import UsageLimitExceeded
+
 from deep_agent.agent.limits import (
     default_agent_max_requests,
+    format_stream_error,
     resolve_agent_max_requests,
     validate_agent_max_requests,
 )
@@ -31,6 +34,25 @@ class AgentMaxRequestsTests(unittest.TestCase):
         validate_agent_max_requests(None, 50)
         validate_agent_max_requests(1, 50)
         validate_agent_max_requests(50, 50)
+
+    def test_format_stream_error_request_limit(self) -> None:
+        exc = UsageLimitExceeded("The next request would exceed the request_limit of 30")
+        self.assertEqual(
+            format_stream_error(exc),
+            "本轮对话模型请求次数已达上限（30 次），请简化问题或开启新对话后重试。",
+        )
+
+    def test_format_stream_error_total_tokens_limit(self) -> None:
+        exc = UsageLimitExceeded(
+            "The next request would exceed the total_tokens_limit of 1000000 (total_tokens=1000001)"
+        )
+        self.assertEqual(
+            format_stream_error(exc),
+            "本轮对话 token 用量已达上限（1000000），请缩短上下文或开启新对话后重试。",
+        )
+
+    def test_format_stream_error_passthrough(self) -> None:
+        self.assertEqual(format_stream_error(RuntimeError("boom")), "boom")
 
 
 if __name__ == "__main__":

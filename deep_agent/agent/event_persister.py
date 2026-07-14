@@ -8,7 +8,7 @@ from typing import Any, Literal
 from loguru import logger
 from pydantic_ai.messages import ModelMessage, ModelRequest
 
-from deep_agent.agent.history import incremental_append_messages
+from deep_agent.agent.history import incremental_append_messages, repair_unprocessed_tool_calls
 from deep_agent.agent.stream_accumulator import StreamAccumulator
 from deep_agent.db.conversation import SessionStore
 from deep_agent.db.session_scope import runtime_session_key
@@ -163,6 +163,7 @@ class EventPersister:
                 messages,
                 skip_user_prompt=ev.skip_user_prompt,
             )
+            to_append = repair_unprocessed_tool_calls(to_append)
             if to_append:
                 await self._store.append(
                     session_id,
@@ -185,6 +186,7 @@ class EventPersister:
                 )
             else:
                 to_append = []
+            to_append = repair_unprocessed_tool_calls(to_append)
             if to_append:
                 await self._store.append(
                     session_id,

@@ -324,6 +324,25 @@ class TruncateHistoryTests(unittest.IsolatedAsyncioTestCase):
         await self.store.truncate_history("s2", keep_count=0)
         self.assertEqual(await self.store.get_history("s2"), [])
 
+    async def test_replace_history_rewrites_messages(self) -> None:
+        await self.store.append(
+            "s4",
+            [
+                ModelRequest(parts=[UserPromptPart(content="old")]),
+                ModelResponse(parts=[TextPart(content="stale")]),
+            ],
+        )
+        replacement = [
+            ModelRequest(parts=[UserPromptPart(content="new")]),
+            ModelResponse(parts=[TextPart(content="fresh")]),
+        ]
+        await self.store.replace_history("s4", replacement)
+        history = await self.store.get_history("s4")
+        self.assertEqual(len(history), 2)
+        self.assertIsInstance(history[0], ModelRequest)
+        self.assertEqual(history[0].parts[0].content, "new")
+        self.assertEqual(history[1].parts[0].content, "fresh")
+
     async def test_truncate_does_not_remove_prior_assistant(self) -> None:
         messages: list[ModelMessage] = [
             ModelRequest(parts=[UserPromptPart(content="u0")]),

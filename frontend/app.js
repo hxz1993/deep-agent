@@ -1340,7 +1340,11 @@ function handleEvent({ event, data }, assistant) {
       updateHitlInputState();
       break;
     case "error":
+      assistant.finalizeThinking();
+      assistant.finalizeText();
       syncHistoryMeta(data);
+      // Error is transient SSE only — refreshing history would wipe the bubble.
+      state.skipHistoryRefresh = true;
       addErrorTo(assistant, data.message || "未知错误", {
         branchFrom: state.lastUserBranchPoint,
         message: lastUserText(),
@@ -1615,6 +1619,12 @@ function createAssistantMessage(timestamp, branchPoint) {
     return textBubble;
   }
 
+  function sealTextBubble() {
+    if (!textBubble) return;
+    textBubble.classList.remove("streaming");
+    textBubble.innerHTML = renderMarkdownBody(textBuffer);
+  }
+
   return {
     row,
     appendThinking(delta) {
@@ -1635,10 +1645,7 @@ function createAssistantMessage(timestamp, branchPoint) {
       ensureTextBubble().innerHTML = renderMarkdownBody(textBuffer);
     },
     finalizeText() {
-      if (textBubble) {
-        textBubble.classList.remove("streaming");
-        textBubble.innerHTML = renderMarkdownBody(textBuffer);
-      }
+      sealTextBubble();
     },
     addToolCall(data) {
       finalizeThinkingBlock();
@@ -1683,7 +1690,8 @@ function createAssistantMessage(timestamp, branchPoint) {
       wrap.appendChild(block);
       toolBlocks.set(key, block);
       maybeAttachHitlWidget(block, merged);
-      // 新文本将进入一个新气泡
+      // 工具调用后开启新文本段；先封存当前气泡，避免多个 streaming 光标并存
+      sealTextBubble();
       textBubble = null;
       textBuffer = "";
       scrollToBottom();

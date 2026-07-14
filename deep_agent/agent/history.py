@@ -180,28 +180,59 @@ _USER_CANCELLED_TOOL_MESSAGE = "User cancelled"
 
 
 def repair_unprocessed_tool_calls(messages: list[ModelMessage]) -> list[ModelMessage]:
-    """Close dangling tool_call turns so a new user message can run without pydantic_ai errors."""
+    """Close dangling tool_call turns in message order for LLM API validation.
+
+    Synthetic tool returns are inserted immediately after the assistant turn they
+    belong to, not only at history tail. This fixes histories where a later
+    assistant message or user turn appeared before all tool_call_ids were answered.
+    """
+    if not messages:
+        return messages
+
+    repaired: list[ModelMessage] = []
     pending: dict[str, str] = {}
+
+    def flush_pending() -> None:
+        nonlocal pending
+        if not pending:
+            return
+        repaired.append(ModelRequest(
+            parts=[
+                ToolReturnPart(
+                    tool_name=tool_name,
+                    content=ToolDenied(message=_USER_CANCELLED_TOOL_MESSAGE),
+                    tool_call_id=tool_call_id,
+                )
+                for tool_call_id, tool_name in pending.items()
+            ]
+        ))
+        pending = {}
+
     for message in messages:
         if isinstance(message, ModelResponse):
+            flush_pending()
+            repaired.append(message)
             for part in message.parts:
                 if isinstance(part, BaseToolCallPart) and part.tool_call_id:
                     pending[part.tool_call_id] = part.tool_name
-        elif isinstance(message, ModelRequest):
+            continue
+
+        if isinstance(message, ModelRequest):
+            if pending and any(isinstance(part, UserPromptPart) for part in message.parts):
+                flush_pending()
+            repaired.append(message)
             for part in message.parts:
                 if isinstance(part, ToolReturnPart) and part.tool_call_id:
                     pending.pop(part.tool_call_id, None)
-    if not pending:
+            continue
+
+        flush_pending()
+        repaired.append(message)
+
+    flush_pending()
+    if len(repaired) == len(messages):
         return messages
-    denied = [
-        ToolReturnPart(
-            tool_name=tool_name,
-            content=ToolDenied(message=_USER_CANCELLED_TOOL_MESSAGE),
-            tool_call_id=tool_call_id,
-        )
-        for tool_call_id, tool_name in pending.items()
-    ]
-    return [*messages, ModelRequest(parts=denied)]
+    return repaired
 
 
 def incremental_append_messages(

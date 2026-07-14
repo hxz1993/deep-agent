@@ -35,7 +35,7 @@
 | 项 | 原则 |
 |----|------|
 | 对话主模型 | Agent 配置的 `llm_models` 行 / `AgentRunner.agent.model` |
-| 标题模型优先级 | ① `DEEP_AGENT_TITLE_MODEL*` 专用配置 → ② **对话主模型** → ③ 调用方文本兜底 |
+| 标题模型优先级 | ① Admin「辅助模型」中配置的专用预设 → ② **对话主模型** → ③ 调用方文本兜底 |
 | 专用模型 | 配置后始终优先于主模型（便于用便宜/快模型专门起标题） |
 | 均未成功 | `generate_title()` 返回 `None` → runner / `PATCH auto` 回退 `first_user_prompt` |
 
@@ -77,18 +77,20 @@
 | `title` | `chat_sessions.title` 列 |
 | `user_prompt` | 从消息历史动态计算（`first_user_prompt`），**非**持久化列 |
 
-### 3.3 标题 LLM 配置（环境变量）
+### 3.3 标题 LLM 配置（辅助模型 + 集成测试 env）
 
-前缀 `DEEP_AGENT_`（`options.py` 中 `bind_env` 为短名）：
+**生产 / 日常开发**：在 Admin → **辅助模型** 标签页为 `title` 用例选择「模型配置」预设，或保持「主模型（auto）」。
+
+**集成测试 seed**（`tests/helpers/sqlite_stores.py` 的 `seed_auxiliary_model_configs`）仍读取以下环境变量，将专用标题模型写入 `auxiliary_model_configs` 表：
 
 ```bash
-DEEP_AGENT_TITLE_MODEL=deepseek-v4-flash          # 空 = 不启用 AI 标题
+DEEP_AGENT_TITLE_MODEL=deepseek-v4-flash
 DEEP_AGENT_TITLE_MODEL_BASE_URL=https://api.example/v1
 DEEP_AGENT_TITLE_MODEL_API_KEY=sk-...
 DEEP_AGENT_TITLE_GENERATION_TIMEOUT=10
 ```
 
-示例（开发/测试可用 OpenCode Zen 等），**以实际部署环境为准**。
+`DEEP_AGENT_TITLE_GENERATION_TIMEOUT` 由 `options.py` 加载，控制单次标题 LLM 超时（秒）。
 
 ---
 
@@ -101,7 +103,8 @@ POST /chat/stream → AgentRunner.run → 首轮完成
   → asyncio.create_task(_maybe_generate_title)
        ├─ _is_first_exchange?
        ├─ existing title 为空?
-       ├─ generate_title(user, assistant, main_model=…)  # 专用 LLM → 主模型
+       ├─ resolve_title_model(dedicated → main_model / spec)  # 单次解析
+       ├─ generate_title(user, assistant, …)
        ├─ 失败 → user_text
        └─ update_session_title
 ```
@@ -111,7 +114,7 @@ POST /chat/stream → AgentRunner.run → 首轮完成
 ```
 PATCH /api/v1/sessions/{id}?agent_id=...
   {"title": "新名称"}     → 直接写 DB
-  {"auto": true}          → resolve AgentSpec → 主模型 → generate_title → 失败则 user_prompt
+  {"auto": true}          → resolve AgentSpec → generate_title(spec=…) → 失败则 user_prompt
 ```
 
 前端：`app.js` 侧边栏 🔄 → `PATCH {"auto": true}`；双击/编辑 → `PATCH {"title": ...}`。
@@ -135,14 +138,17 @@ title = _clean_title(result.output)
 | 路径 | 说明 |
 |------|------|
 | `alembic/versions/014_chat_session_title.py` | `chat_sessions.title` 迁移 |
-| `deep_agent/db/models.py` | `ChatSession.title` |
+| `alembic/versions/015_auxiliary_model_configs.py` | `auxiliary_model_configs` 表 |
+| `deep_agent/db/models.py` | `ChatSession.title`、`AuxiliaryModelConfig` |
+| `deep_agent/db/stores/auxiliary_model/*.py` | 辅助模型 CRUD |
 | `deep_agent/db/stores/chat_session/*.py` | `get/update_session_title`、列表带 `title` |
 | `deep_agent/db/conversation.py` | append 时条件 seed title |
 | `deep_agent/db/session_list.py` | `SessionListItem.title` / `user_prompt` |
-| `deep_agent/options.py` | 4 个 `TITLE_*` 配置项 |
-| `deep_agent/agent/title_generator.py` | `generate_title`、`_clean_title`、`_build_title_model` |
+| `deep_agent/agent/auxiliary_models.py` | 用例 catalog、`resolve_llm_model_for_use_case` |
+| `deep_agent/agent/title_generator.py` | `generate_title`、`resolve_title_model`、`_clean_title` |
 | `deep_agent/agent/history.py` | `first_user_prompt`、`_extract_assistant_text` |
 | `deep_agent/agent/runner.py` | `_maybe_generate_title`、首轮触发 |
+| `deep_agent/api/v1/auxiliary_models.py` | `GET/PATCH /auxiliary-models` |
 | `deep_agent/api/v1/sessions.py` | 列表/详情返回 `title`+`user_prompt`；`PATCH` 重命名 |
 
 ### 5.2 前端
@@ -150,6 +156,7 @@ title = _clean_title(result.output)
 | 路径 | 说明 |
 |------|------|
 | `frontend/app.js` | `title \|\| user_prompt` 展示；🔄 自动重命名；内联编辑标题 |
+| `frontend/admin/auxiliary_models.js` | Admin「辅助模型」配置 UI |
 
 ### 5.3 测试
 
@@ -160,7 +167,8 @@ title = _clean_title(result.output)
 | `tests/integration/helpers/session_seed.py` | fixture 灌库 |
 | `tests/integration/helpers/title_assertions.py` | 标题合理性断言 |
 | `tests/integration/helpers/live_llm.py` | `skip_unless_title_llm` |
-| `tests/integration/helpers/chat.py` | `_disable_title_generation_for_tests`、`mock_request_disconnect`、流式 AsyncClient 辅助 |
+| `tests/helpers/sqlite_stores.py` | `ensure_title_uses_main_model`、`seed_auxiliary_model_configs` |
+| `tests/integration/helpers/chat.py` | `mock_request_disconnect`、流式 AsyncClient 辅助 |
 | `tests/run.ps1` | failfast + 进程级超时封装（单测默认 30s，全量加大） |
 | `tests/fixtures/sessions/legacy_no_title.json` | 无 title 历史会话 |
 | `tests/integration/fixtures/deepcube_tiered_rebate_session.json` | DeepCube 快路径（3 条消息） |
@@ -177,7 +185,7 @@ title = _clean_title(result.output)
 |----|------|
 | 框架 | **unittest**（仓库主入口），非 pytest |
 | 对话主模型 | 集成测试 **mock**（`TestModel` / `patch _resolve_model`） |
-| 标题 LLM | **真实调用**；未配置 `DEEP_AGENT_TITLE_MODEL*` 则 `@skip` |
+| 标题 LLM | **真实调用**；未 seed 专用模型（`DEEP_AGENT_TITLE_MODEL` 未设）则 `@skip` |
 | 运行目录 | 始终在**仓库根** |
 
 ### 6.2 Live 用例前置
@@ -260,18 +268,18 @@ venv\Scripts\python.exe -m unittest ^
 
 ### 6.6 非标题集成测试须隔离后台标题任务
 
-本地 `.env` 若已配置 `DEEP_AGENT_TITLE_MODEL*`，其它 chat / HITL / MCP 流式集成测试在首轮对话后仍会触发 `AgentRunner._maybe_generate_title`（后台真实 LLM 调用）。后果包括：
+本地 `.env` 若已配置 `DEEP_AGENT_TITLE_MODEL*`，`make_sqlite_stores()` 会通过 `seed_auxiliary_model_configs` 将专用标题模型写入测试库；其它 chat / HITL / MCP 流式集成测试在首轮对话后仍会触发 `AgentRunner._maybe_generate_title`（后台真实 LLM 调用）。后果包括：
 
 - teardown 卡在 `title_generation_timeout`（默认 30s）
 - HITL 续聊、history 断言被异步标题任务干扰
 
 **约定**（仅 `test_session_title.py` 等标题专用文件除外）：
 
-1. 在 `setUp` / 用例开头调用 `tests/integration/helpers/chat.py` 的 `_disable_title_generation_for_tests()`（清空专用标题模型配置）。
+1. 在 `setUp` / 用例开头调用 `tests/helpers/sqlite_stores.py` 的 `ensure_title_uses_main_model(stores)`（将 `title` 用例设回 auto）。
 2. 对易受影响用例再 `patch("deep_agent.agent.runner.AgentRunner._maybe_generate_title", new_callable=AsyncMock)`，并在 `tearDown` / `finally` 中 `stop()`。
 3. 流式用例配合 `mock_request_disconnect()`，见 integration README §3。
 
-标题专用 live 用例（`test_first_chat_turn_generates_ai_title` 等）**不要**调用 `_disable_title_generation_for_tests()`，应通过 `_apply_title_env_to_option()` 显式启用标题模型。
+标题专用 live 用例（`test_first_chat_turn_generates_ai_title` 等）**不要**调用 `ensure_title_uses_main_model`，应通过 `_apply_title_env_to_store()` / `seed_auxiliary_model_configs` 显式启用专用标题模型。
 
 ---
 
@@ -279,10 +287,9 @@ venv\Scripts\python.exe -m unittest ^
 
 ### 7.1 启用 AI 标题
 
-1. **推荐**：配置 `DEEP_AGENT_TITLE_MODEL*` 使用便宜/快模型专门起标题  
-2. **或**：不配置专用模型，自动回退到各 Agent 绑定的**对话主模型**  
-3. 重启后端（仅改专用模型环境变量时）  
-4. 新会话首轮对话结束后，侧边栏标题异步更新
+1. **推荐**：Admin → **辅助模型** → 为「标题生成」选择便宜/快的模型预设  
+2. **或**：保持 auto，自动回退到各 Agent 绑定的**对话主模型**  
+3. 新会话首轮对话结束后，侧边栏标题异步更新
 
 ### 7.2 仅文本兜底（无 AI）
 
@@ -309,7 +316,7 @@ venv\Scripts\python.exe -m unittest ^
 | DeepCube 长 prompt 兜底 | 无 LLM 时兜底标题=整段 user 消息，可能很长 |
 | `event_persister.flush` | 集成测试需传 `agent_id`，否则读不到会话 |
 | 异步标题 | 首轮 SSE 结束后标题可能稍晚写入，测试用 `wait_for_session_title` 轮询 |
-| `.env` 配了标题模型 | 非标题集成测试须 `_disable_title_generation_for_tests()` + 必要时 patch `_maybe_generate_title`，见 §6.6 |
+| `.env` 配了标题模型 | 非标题集成测试须 `ensure_title_uses_main_model(stores)` + 必要时 patch `_maybe_generate_title`，见 §6.6 |
 | 全量测试超时 | 含 live 标题时约 270 用例 / ~4 分钟；`run.ps1` 默认 30s 或 180s 会误杀，用 `-TimeoutSec 300` |
 | `TestClient.stream` | SSE 集成测试会挂死；改用 `AsyncClient`，见 integration README |
 | `_extract_assistant_text` 重复 | `title_generator.py` 与 `history.py` 各有一份；**runner 使用 `history` 版** |
@@ -322,7 +329,7 @@ venv\Scripts\python.exe -m unittest ^
 - [ ] 改 sessions API / conversation 后跑 `tests/integration/test_session_title.py`
 - [ ] 改前端展示逻辑时确认 `title \|\| user_prompt` 仍成立
 - [ ] 新环境部署后执行迁移 `014`，确认 `chat_sessions.title` 存在
-- [ ] Live 验证：配置 `DEEP_AGENT_TITLE_MODEL*` 后跑 skip 以外的集成用例
+- [ ] Live 验证：Admin 或 `DEEP_AGENT_TITLE_MODEL*` seed 后跑 skip 以外的集成用例
 - [ ] 新增 chat 流式集成测试：确认已禁用后台标题任务（§6.6），且未使用 `TestClient.stream`
 
 ---
@@ -336,4 +343,4 @@ venv\Scripts\python.exe -m unittest ^
 
 ---
 
-*最后更新：2026-07-10*
+*最后更新：2026-07-13*

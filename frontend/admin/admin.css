@@ -339,6 +339,12 @@ html, body {
   gap: 8px;
 }
 
+.modality-checkboxes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 16px;
+}
+
 .agent-form-grid {
   display: grid;
   grid-template-columns: minmax(260px, 1fr) minmax(320px, 1.2fr);

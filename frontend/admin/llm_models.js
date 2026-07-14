@@ -5,6 +5,19 @@ const CAPABILITIES_SOURCE_LABELS = {
   heuristic: "启发式",
 };
 
+function setLlmModelModalities(modalities) {
+  const selected = new Set(Array.isArray(modalities) ? modalities : []);
+  document.querySelectorAll('input[name="llmModelModality"]').forEach((input) => {
+    input.checked = selected.has(input.value);
+  });
+}
+
+function readLlmModelModalities() {
+  return [...document.querySelectorAll('input[name="llmModelModality"]:checked')].map(
+    (input) => input.value,
+  );
+}
+
 function formatModalities(modalities) {
   if (!Array.isArray(modalities) || modalities.length === 0) return "—";
   return modalities.map((item) => escapeHtml(item)).join(", ");
@@ -104,6 +117,7 @@ const llmModelsAdmin = {
     document.getElementById("llmModelModel").value = "openai:gpt-4o";
     document.getElementById("llmModelBaseUrl").value = "";
     document.getElementById("llmModelApiKey").value = "";
+    setLlmModelModalities(["text"]);
     document.getElementById("llmModelModal").showModal();
   },
 
@@ -118,6 +132,7 @@ const llmModelsAdmin = {
       document.getElementById("llmModelModel").value = model.model;
       document.getElementById("llmModelBaseUrl").value = model.base_url || "";
       document.getElementById("llmModelApiKey").value = "";
+      setLlmModelModalities(model.input_modalities);
       document.getElementById("llmModelModal").showModal();
     } catch (err) {
       showToast(err.message, true);
@@ -131,6 +146,7 @@ const llmModelsAdmin = {
       description: document.getElementById("llmModelDescription").value.trim() || null,
       model: document.getElementById("llmModelModel").value.trim(),
       base_url: document.getElementById("llmModelBaseUrl").value.trim() || null,
+      input_modalities: readLlmModelModalities(),
     };
     const apiKey = document.getElementById("llmModelApiKey").value.trim();
     if (apiKey) payload.api_key = apiKey;

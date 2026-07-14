@@ -292,6 +292,17 @@
           <span>API Key（可选，编辑时留空表示不修改）</span>
           <input type="password" id="llmModelApiKey" autocomplete="new-password" />
         </label>
+        <div class="field">
+          <span>输入模态</span>
+          <p class="field-hint">手动勾选后来源标记为「手动」；全量刷新 Meta 不会覆盖，单条「刷新 Meta」可强制更新。</p>
+          <div class="modality-checkboxes" id="llmModelModalities">
+            <label class="checkbox-field"><input type="checkbox" name="llmModelModality" value="text" checked /> text</label>
+            <label class="checkbox-field"><input type="checkbox" name="llmModelModality" value="image" /> image</label>
+            <label class="checkbox-field"><input type="checkbox" name="llmModelModality" value="audio" /> audio</label>
+            <label class="checkbox-field"><input type="checkbox" name="llmModelModality" value="video" /> video</label>
+            <label class="checkbox-field"><input type="checkbox" name="llmModelModality" value="pdf" /> pdf</label>
+          </div>
+        </div>
       </div>
       <div class="modal-footer">
         <button type="button" class="btn" id="cancelLlmModelBtn">取消</button>

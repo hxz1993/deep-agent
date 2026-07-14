@@ -131,8 +131,10 @@ async def chat_stream(request: Request, ctx: AppContextDep, body: StreamChatRequ
         except ValueError as exc:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
         try:
-            runner = await build_runner_for_agent(ctx, agent_id)
+            runner = await build_runner_for_agent(ctx, agent_id, model_id=body.model_id)
         except AgentNotFoundError as exc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+        except LlmModelNotFoundError as exc:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
         deps = _agent_deps(request, ctx, session_id=session_id, user=body.user, agent_id=agent_id)
         session_data = {"session_id": session_id, "agent_id": agent_id}

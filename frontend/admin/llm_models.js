@@ -5,6 +5,42 @@ const CAPABILITIES_SOURCE_LABELS = {
   heuristic: "启发式",
 };
 
+function readModalityMode() {
+  const checked = document.querySelector('input[name="llmModelModalityMode"]:checked');
+  return checked?.value === "manual" ? "manual" : "auto";
+}
+
+function setModalityMode(mode) {
+  const auto = mode !== "manual";
+  document.querySelectorAll('input[name="llmModelModalityMode"]').forEach((input) => {
+    input.checked = input.value === (auto ? "auto" : "manual");
+  });
+  const manualPanel = document.getElementById("llmModelManualModalities");
+  const autoHint = document.getElementById("llmModelAutoModalitiesHint");
+  if (manualPanel) manualPanel.classList.toggle("hidden", auto);
+  if (autoHint) autoHint.classList.toggle("hidden", !auto);
+  if (!auto) {
+    const preview = document.getElementById("llmModelAutoModalitiesPreview");
+    if (preview) preview.classList.add("hidden");
+  }
+}
+
+function updateAutoModalityPreview(modalities, source) {
+  const preview = document.getElementById("llmModelAutoModalitiesPreview");
+  if (!preview || readModalityMode() !== "auto") return;
+  const items = Array.isArray(modalities) ? modalities : [];
+  if (!items.length && !source) {
+    preview.textContent = "保存后将自动解析模态。";
+    preview.classList.remove("hidden");
+    return;
+  }
+  const sourceLabel = source ? CAPABILITIES_SOURCE_LABELS[source] || source : "未刷新";
+  preview.textContent = items.length
+    ? `当前：${items.join(", ")}（来源：${sourceLabel}）`
+    : `当前无模态数据（来源：${sourceLabel}）`;
+  preview.classList.remove("hidden");
+}
+
 function setLlmModelModalities(modalities) {
   const selected = new Set(Array.isArray(modalities) ? modalities : []);
   document.querySelectorAll('input[name="llmModelModality"]').forEach((input) => {
@@ -110,6 +146,7 @@ const llmModelsAdmin = {
 
   openCreate() {
     state.editingLlmModelId = null;
+    state.llmModelInitialModalityMode = "auto";
     document.getElementById("llmModelModalTitle").textContent = "新建模型配置";
     document.getElementById("llmModelName").disabled = false;
     document.getElementById("llmModelName").value = "";
@@ -117,7 +154,10 @@ const llmModelsAdmin = {
     document.getElementById("llmModelModel").value = "openai:gpt-4o";
     document.getElementById("llmModelBaseUrl").value = "";
     document.getElementById("llmModelApiKey").value = "";
+    setModalityMode("auto");
     setLlmModelModalities(["text"]);
+    const preview = document.getElementById("llmModelAutoModalitiesPreview");
+    if (preview) preview.classList.add("hidden");
     document.getElementById("llmModelModal").showModal();
   },
 
@@ -125,6 +165,8 @@ const llmModelsAdmin = {
     try {
       const model = await apiFetch(`/api/v1/llm-models/${encodeURIComponent(modelId)}`);
       state.editingLlmModelId = modelId;
+      const manual = model.capabilities_source === "user";
+      state.llmModelInitialModalityMode = manual ? "manual" : "auto";
       document.getElementById("llmModelModalTitle").textContent = `编辑模型 · ${model.name}`;
       document.getElementById("llmModelName").disabled = false;
       document.getElementById("llmModelName").value = model.name;
@@ -132,11 +174,33 @@ const llmModelsAdmin = {
       document.getElementById("llmModelModel").value = model.model;
       document.getElementById("llmModelBaseUrl").value = model.base_url || "";
       document.getElementById("llmModelApiKey").value = "";
-      setLlmModelModalities(model.input_modalities);
+      setModalityMode(manual ? "manual" : "auto");
+      setLlmModelModalities(manual ? model.input_modalities : ["text"]);
+      updateAutoModalityPreview(model.input_modalities, model.capabilities_source);
       document.getElementById("llmModelModal").showModal();
     } catch (err) {
       showToast(err.message, true);
     }
+  },
+
+  applyModalityPayload(payload) {
+    const mode = readModalityMode();
+    if (mode === "manual") {
+      const modalities = readLlmModelModalities();
+      if (!modalities.length) {
+        showToast("手动模式请至少选择一种输入模态", true);
+        return false;
+      }
+      if (state.editingLlmModelId) {
+        payload.modalities_mode = "manual";
+      }
+      payload.input_modalities = modalities;
+      return true;
+    }
+    if (state.editingLlmModelId && state.llmModelInitialModalityMode === "manual") {
+      payload.modalities_mode = "auto";
+    }
+    return true;
   },
 
   async save(event) {
@@ -146,8 +210,8 @@ const llmModelsAdmin = {
       description: document.getElementById("llmModelDescription").value.trim() || null,
       model: document.getElementById("llmModelModel").value.trim(),
       base_url: document.getElementById("llmModelBaseUrl").value.trim() || null,
-      input_modalities: readLlmModelModalities(),
     };
+    if (!this.applyModalityPayload(payload)) return;
     const apiKey = document.getElementById("llmModelApiKey").value.trim();
     if (apiKey) payload.api_key = apiKey;
 
@@ -194,6 +258,9 @@ document.addEventListener("DOMContentLoaded", () => {
     llmModelsAdmin.refreshAllMetadata();
   });
   document.getElementById("llmModelForm")?.addEventListener("submit", (e) => llmModelsAdmin.save(e));
+  document.querySelectorAll('input[name="llmModelModalityMode"]').forEach((input) => {
+    input.addEventListener("change", () => setModalityMode(readModalityMode()));
+  });
   document.getElementById("closeLlmModelModal")?.addEventListener("click", () => {
     document.getElementById("llmModelModal").close();
   });

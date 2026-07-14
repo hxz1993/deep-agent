@@ -101,6 +101,21 @@ class LlmModelModalitiesIntegrationTests(unittest.IsolatedAsyncioTestCase):
         "deep_agent.agent.models.models_dev.fetch_models_dev_modalities",
         new=mock_fetch_models_dev_modalities,
     )
+    async def test_create_auto_refreshes_modalities_on_insert(self) -> None:
+        async with AsyncClient(transport=self._transport, base_url="http://test") as client:
+            resp = await client.post(
+                "/api/v1/llm-models",
+                json={"name": "auto-on-create", "model": "openai:online-only-model"},
+            )
+        self.assertEqual(resp.status_code, 201)
+        body = resp.json()
+        self.assertEqual(body["input_modalities"], ["text", "image"])
+        self.assertEqual(body["capabilities_source"], "models_dev")
+
+    @patch(
+        "deep_agent.agent.models.models_dev.fetch_models_dev_modalities",
+        new=mock_fetch_models_dev_modalities,
+    )
     async def test_refresh_metadata_prefers_models_dev_snapshot(self) -> None:
         async with AsyncClient(transport=self._transport, base_url="http://test") as client:
             create_resp = await client.post(

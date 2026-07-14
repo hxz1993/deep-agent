@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 from pydantic_ai.settings import ModelSettings
 from pydantic_ai.usage import UsageLimits
 
 from deep_agent.agent.factory import build_agent
+from deep_agent.agent.input_capabilities import augment_instructions_with_capabilities
 from deep_agent.agent.limits import resolve_agent_max_requests
 from deep_agent.agent.runner import AgentRunner
 from deep_agent.agent.spec import DEFAULT_INSTRUCTIONS, AgentSpec
@@ -51,13 +54,23 @@ async def build_runner(
     return await _build_runner_from_spec(spec, ctx)
 
 
-async def build_runner_for_agent(ctx: AppContext, agent_id: str) -> AgentRunner:
+async def build_runner_for_agent(
+    ctx: AppContext,
+    agent_id: str,
+    *,
+    model_id: str | None = None,
+) -> AgentRunner:
     """Assemble a per-request AgentRunner from a database agent configuration."""
     row = await ctx.stores.agent.get_by_id(agent_id)
     if row is None:
         raise AgentNotFoundError(agent_id)
 
-    spec = AgentSpec.from_row(row, row.llm_model)
+    effective_model_id = model_id or row.model_id
+    llm_row = await ctx.stores.llm_model.get_by_id(effective_model_id)
+    if llm_row is None:
+        raise LlmModelNotFoundError(effective_model_id)
+
+    spec = AgentSpec.from_row(row, llm_row)
     return await _build_runner_from_spec(spec, ctx)
 
 
@@ -72,6 +85,7 @@ async def _build_runner_from_spec(spec: AgentSpec, ctx: AppContext) -> AgentRunn
 
     mcp_toolsets = await resolve_mcp_toolsets(ctx.stores, spec, mcp_rows=mcp_rows)
 
+    spec = replace(spec, instructions=augment_instructions_with_capabilities(spec))
     agent = build_agent(
         spec,
         ctx.registry,

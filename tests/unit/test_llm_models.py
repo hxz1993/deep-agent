@@ -81,6 +81,23 @@ class LlmModelStoreTests(unittest.IsolatedAsyncioTestCase):
         assert fetched is not None
         self.assertEqual(fetched.input_modalities, ["text", "image"])
 
+    async def test_update_modalities_mode_auto_clears_manual_override(self) -> None:
+        from deep_agent.schemas.llm_model import LlmModelUpdate
+
+        row = await self.store.create_unique(
+            LlmModelCreate(
+                name="manual-model",
+                model="openai:gpt-4o",
+                input_modalities=["text", "image"],
+            ),
+        )
+        self.assertEqual(row.capabilities_source, "user")
+
+        updated = await self.store.update_unique(row.id, LlmModelUpdate(modalities_mode="auto"))
+        assert updated is not None
+        self.assertIsNone(updated.input_modalities)
+        self.assertIsNone(updated.capabilities_source)
+
 
 class LlmModelMigrationShapeTests(unittest.TestCase):
     def test_agent_requires_model_id_column(self) -> None:

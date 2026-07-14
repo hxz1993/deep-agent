@@ -118,8 +118,12 @@
       <div class="composer">
         <div class="attachment-preview hidden" id="attachmentPreview"></div>
         <div class="composer-meta" id="composerMeta">
-          <span class="composer-model" id="composerModel"></span>
-          <span class="composer-modalities" id="composerModalities"></span>
+          <label class="composer-model-picker">
+            <span class="composer-model-label">模型</span>
+            <select id="modelSelect" class="composer-model-select" title="选择本会话使用的 LLM 模型"></select>
+          </label>
+          <span class="composer-modalities" id="composerModelModalities"></span>
+          <span class="composer-modalities" id="composerUploadCapabilities"></span>
         </div>
         <div class="composer-inner">
           <button type="button" class="attach-btn" id="attachBtn" title="添加附件">📎</button>

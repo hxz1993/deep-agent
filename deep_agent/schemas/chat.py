@@ -23,7 +23,7 @@ class ChatRequest(BaseModel):
     )
     model_id: str | None = Field(
         default=None,
-        description="Optional LLM model preset id from the database. Ignored when agent_id is set.",
+        description="Optional LLM preset id. With agent_id, overrides the agent default for this request only.",
     )
     temperature: float | None = Field(
         default=None,
@@ -49,7 +49,7 @@ class ChatRequest(BaseModel):
 class StreamChatRequest(ChatRequest):
     agent_id: str | None = Field(
         default=None,
-        description="Load agent config from the database. When set, model/model_id/capabilities/temperature are ignored.",
+        description="Load agent config from the database. model_id may override the agent's LLM preset per request.",
     )
     deferred_tool_results: list["DeferredToolResultItem"] | None = Field(
         default=None,

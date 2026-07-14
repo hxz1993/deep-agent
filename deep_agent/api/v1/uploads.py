@@ -3,11 +3,18 @@ from __future__ import annotations
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile, status
 
 from deep_agent.agent.headers import extract_forward_headers
+from deep_agent.agent.input_capabilities import upload_capabilities_payload
 from deep_agent.agent.media_pipeline import MediaPipelineError, process_upload
 from deep_agent.schemas.attachment import UploadResponse
 from deepfos_platform.client.platform import FILE_TYPE_ATTACHMENT, PlatformAPI
 
 router = APIRouter()
+
+
+@router.get("/uploads/capabilities")
+async def list_upload_capabilities() -> dict:
+    """MIME types and upload kinds enabled by the platform upload pipeline."""
+    return upload_capabilities_payload()
 
 
 @router.post("/uploads", response_model=UploadResponse)

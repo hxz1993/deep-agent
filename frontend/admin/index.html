@@ -295,13 +295,30 @@
         </label>
         <div class="field">
           <span>输入模态</span>
-          <p class="field-hint">手动勾选后来源标记为「手动」；全量刷新 Meta 不会覆盖，单条「刷新 Meta」可强制更新。</p>
-          <div class="modality-checkboxes" id="llmModelModalities">
-            <label class="checkbox-field"><input type="checkbox" name="llmModelModality" value="text" checked /> text</label>
-            <label class="checkbox-field"><input type="checkbox" name="llmModelModality" value="image" /> image</label>
-            <label class="checkbox-field"><input type="checkbox" name="llmModelModality" value="audio" /> audio</label>
-            <label class="checkbox-field"><input type="checkbox" name="llmModelModality" value="video" /> video</label>
-            <label class="checkbox-field"><input type="checkbox" name="llmModelModality" value="pdf" /> pdf</label>
+          <div class="modality-mode" role="radiogroup" aria-label="输入模态来源">
+            <label class="radio-field">
+              <input type="radio" name="llmModelModalityMode" value="auto" checked />
+              自动（保存后可刷新 Meta）
+            </label>
+            <label class="radio-field">
+              <input type="radio" name="llmModelModalityMode" value="manual" />
+              手动指定
+            </label>
+          </div>
+          <p id="llmModelAutoModalitiesHint" class="field-hint">
+            仅描述 <strong>LLM 原生输入</strong>（text / image / audio / video / pdf），不含平台上传抽文本或 Agent 工具能力。
+            保存时自动解析（models.dev → 内置 → 启发式）；列表中也可手动「刷新 Meta」。
+          </p>
+          <p id="llmModelAutoModalitiesPreview" class="field-hint hidden"></p>
+          <div id="llmModelManualModalities" class="hidden">
+            <p class="field-hint">手动指定的模态为 LLM 原生能力；平台附件（PDF 抽文本等）与工具能力不在此列。</p>
+            <div class="modality-checkboxes" id="llmModelModalities">
+              <label class="checkbox-field"><input type="checkbox" name="llmModelModality" value="text" checked /> text</label>
+              <label class="checkbox-field"><input type="checkbox" name="llmModelModality" value="image" /> image</label>
+              <label class="checkbox-field"><input type="checkbox" name="llmModelModality" value="audio" /> audio</label>
+              <label class="checkbox-field"><input type="checkbox" name="llmModelModality" value="video" /> video</label>
+              <label class="checkbox-field"><input type="checkbox" name="llmModelModality" value="pdf" /> pdf</label>
+            </div>
           </div>
         </div>
       </div>

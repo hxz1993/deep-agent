@@ -26,6 +26,17 @@ async def _response_for_row(store: LlmModelStoreBase, row) -> LlmModelResponse:
     return LlmModelResponse.from_row(row, agent_count=agent_count)
 
 
+async def _refresh_auto_modalities(store: LlmModelStoreBase, model_id: str) -> None:
+    from deep_agent.agent.models.modality_resolver import refresh_model_modalities
+
+    await refresh_model_modalities(model_id, store)
+
+
+async def _row_after_auto_refresh(store: LlmModelStoreBase, model_id: str):
+    await _refresh_auto_modalities(store, model_id)
+    return await store.get_by_id(model_id)
+
+
 @router.get("/llm-models", response_model=list[LlmModelResponse])
 async def list_llm_models(
     store: LlmModelStoreBase = Depends(get_llm_model_store),
@@ -119,6 +130,10 @@ async def create_llm_model(
         row = await store.create_unique(body)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    if not body.input_modalities:
+        refreshed = await _row_after_auto_refresh(store, row.id)
+        if refreshed is not None:
+            row = refreshed
     return await _response_for_row(store, row)
 
 
@@ -135,6 +150,10 @@ async def update_llm_model(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"LLM model not found: {model_id}")
+    if body.modalities_mode == "auto":
+        refreshed = await _row_after_auto_refresh(store, normalized_id)
+        if refreshed is not None:
+            row = refreshed
     return await _response_for_row(store, row)
 
 

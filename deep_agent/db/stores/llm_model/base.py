@@ -56,7 +56,14 @@ class LlmModelStoreBase(SessionBoundMixin):
                 if conflict is not None:
                     raise ValueError(f"LLM model already exists: {data.name}")
             updates = data.model_dump(exclude_unset=True)
-            if "input_modalities" in updates:
+            modalities_mode = updates.pop("modalities_mode", None)
+            if modalities_mode == "auto":
+                row.input_modalities = None
+                row.capabilities_source = None
+            elif modalities_mode == "manual" and "input_modalities" in updates:
+                row.input_modalities = updates["input_modalities"] or None
+                row.capabilities_source = "user"
+            elif "input_modalities" in updates:
                 row.capabilities_source = "user"
             for field, value in updates.items():
                 setattr(row, field, value)

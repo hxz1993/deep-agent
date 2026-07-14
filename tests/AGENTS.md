@@ -51,8 +51,7 @@ tests/
 | `test_title_generator.py` | AI 标题清洗与无配置行为 |
 | `test_modality_resolver.py` | 模型 modality bundled 解析与 refresh |
 | `test_models_dev.py` | models.dev catalog lookup |
-| `test_modality_resolver.py` | 模型 modality bundled 解析与 refresh |
-| `test_models_dev.py` | models.dev catalog lookup |
+| `test_session_model_override.py` | Agent 对话 `model_id` 请求级覆盖（`build_runner_for_agent`） |
 
 ---
 
@@ -65,6 +64,7 @@ tests/
 | `test_mcp_run_scoping.py` | builtin MCP 按 run lease 隔离 client |
 | `test_session_title.py` | 标题回显、AI 生成、兜底、DeepCube fixture |
 | `test_llm_model_modalities.py` | 模型 modality CRUD + 解析链 refresh |
+| `test_session_model_override.py` | Agent 流式对话 `model_id` 覆盖、默认回退、轮次切换 |
 
 公共 fixture：`integration/fixtures/header_echo_server.py`、`pid_echo_server.py`。
 

@@ -78,6 +78,10 @@ const state = {
   baseUrl: localStorage.getItem("da_base_url") || DEFAULT_BASE_URL,
   agentId: localStorage.getItem("da_agent_id") || "",
   agents: [],
+  llmModels: [],
+  uploadCapabilities: { kinds: [], labels: {} },
+  llmModelId: "",
+  sessionModelIds: {},
   sessionId: null,
   sessions: [], // [{id, agentId, agentName, title}] — 仅来自 GET /api/v1/sessions
   streaming: false,
@@ -96,15 +100,15 @@ const state = {
 const TITLE_POLL_TIMEOUT_MS = 30000;
 const TITLE_POLL_INTERVAL_MS = 500;
 
-const MODALITY_LABELS = {
+const LLM_MODALITY_LABELS = {
   text: "文本",
-  image: "图片",
+  image: "图像",
   audio: "音频",
   video: "视频",
-  pdf: "PDF",
+  pdf: "PDF（原生）",
 };
 
-const MODALITY_ICONS = {
+const LLM_MODALITY_ICONS = {
   text: "T",
   image: "🖼",
   audio: "🔊",
@@ -112,7 +116,18 @@ const MODALITY_ICONS = {
   pdf: "📄",
 };
 
-const ALL_MODALITIES = ["text", "image", "pdf", "audio", "video"];
+/** LLM-native modalities only (Admin ``input_modalities``). */
+const ALL_LLM_MODALITIES = ["text", "image", "audio", "video", "pdf"];
+
+const UPLOAD_KIND_ORDER = ["image", "text_file", "pdf_text", "docx_text", "xlsx_text"];
+
+const UPLOAD_KIND_ICONS = {
+  image: "🖼",
+  text_file: "📄",
+  pdf_text: "📄",
+  docx_text: "📝",
+  xlsx_text: "📊",
+};
 
 /* ----------------------------- DOM ----------------------------- */
 const $ = (id) => document.getElementById(id);
@@ -137,8 +152,9 @@ const el = {
   fileInput: $("fileInput"),
   attachmentPreview: $("attachmentPreview"),
   composerMeta: $("composerMeta"),
-  composerModel: $("composerModel"),
-  composerModalities: $("composerModalities"),
+  modelSelect: $("modelSelect"),
+  composerModelModalities: $("composerModelModalities"),
+  composerUploadCapabilities: $("composerUploadCapabilities"),
 };
 
 /* --------------------------- 初始化 --------------------------- */
@@ -291,14 +307,23 @@ function init() {
     updateAdminLink();
     checkHealth();
     loadCapabilities();
+    loadUploadCapabilities();
     loadAgents();
     syncSessionsFromBackend();
   });
   el.agentSelect?.addEventListener("change", () => {
     state.agentId = el.agentSelect.value;
     localStorage.setItem("da_agent_id", state.agentId);
+    if (!state.sessionId) {
+      state.llmModelId = defaultLlmModelId();
+    }
     updateChatHeader();
     loadUiTools(state.agentId);
+  });
+  el.modelSelect?.addEventListener("change", () => {
+    state.llmModelId = el.modelSelect.value;
+    rememberSessionModel();
+    updateComposerModelInfo();
   });
 
   $("newChatBtn").addEventListener("click", (e) => {
@@ -391,7 +416,9 @@ function init() {
   syncSessionsFromBackend();
   checkHealth();
   loadCapabilities();
-  loadAgents().then(() => {
+  loadUploadCapabilities();
+  loadAgents().then(async () => {
+    await loadLlmModels();
     loadUiTools(state.agentId);
     if (agentFromUrl) newChat(agentFromUrl);
     else updateAgentSelectState();
@@ -508,6 +535,7 @@ function newChat(agentId) {
   state.branchFrom = null;
   state.modelMessageCount = 0;
   state.lastUserBranchPoint = null;
+  state.llmModelId = defaultLlmModelId();
   clearMessages();
   showEmptyState();
   el.sessionBadge.textContent = "";
@@ -670,6 +698,7 @@ async function switchSession(s) {
     localStorage.setItem("da_agent_id", state.agentId);
     if (el.agentSelect) el.agentSelect.value = state.agentId;
   }
+  restoreSessionModel(session);
   el.sessionBadge.textContent = session.id.slice(0, 8);
   el.chatTitle.textContent = session.title || "对话";
   updateChatHeader();
@@ -965,6 +994,7 @@ async function loadAgents() {
     }
     ensureAgentSelected();
     updateChatHeader();
+    await loadLlmModels();
     if (el.newChatMenu && !el.newChatMenu.classList.contains("hidden")) {
       renderNewChatMenu();
     }
@@ -978,44 +1008,170 @@ function currentAgent() {
   return state.agents.find((a) => a.id === state.agentId) || null;
 }
 
-function currentModelInfo() {
+function defaultLlmModelId() {
   const agent = currentAgent();
-  if (!agent?.model) return null;
-  return {
-    presetName: agent.model.name || agent.name,
-    modelId: agent.model.model || "",
-    modalities: Array.isArray(agent.model.input_modalities) ? agent.model.input_modalities : [],
-  };
+  return agent?.model_id || agent?.model?.id || "";
+}
+
+function rememberSessionModel() {
+  if (!state.sessionId) return;
+  const key = sessionLookupKey({ id: state.sessionId, agentId: state.agentId });
+  if (state.llmModelId) state.sessionModelIds[key] = state.llmModelId;
+}
+
+function restoreSessionModel(session) {
+  const normalized = normalizeSession(session);
+  const key = sessionLookupKey(normalized);
+  const remembered = state.sessionModelIds[key];
+  if (remembered && state.llmModels.some((m) => m.id === remembered)) {
+    state.llmModelId = remembered;
+  } else {
+    state.llmModelId = defaultLlmModelId();
+  }
+  ensureLlmModelSelected();
+}
+
+function selectedLlmModel() {
+  const id = state.llmModelId || defaultLlmModelId();
+  return state.llmModels.find((m) => m.id === id) || null;
+}
+
+function ensureLlmModelSelected() {
+  if (!state.llmModels.length) return false;
+  const fallback = defaultLlmModelId();
+  const valid = state.llmModelId && state.llmModels.some((m) => m.id === state.llmModelId);
+  if (!valid) state.llmModelId = fallback || state.llmModels[0]?.id || "";
+  return !!state.llmModelId;
+}
+
+function chatPayloadModelId() {
+  ensureLlmModelSelected();
+  return state.llmModelId || undefined;
+}
+
+function currentModelInfo() {
+  const model = selectedLlmModel();
+  const agent = currentAgent();
+  if (!model && !agent?.model) return null;
+  const presetName = model?.name || agent?.model?.name || agent?.name || "";
+  const modelId = model?.model || agent?.model?.model || "";
+  const modalities = Array.isArray(model?.input_modalities)
+    ? model.input_modalities
+    : Array.isArray(agent?.model?.input_modalities)
+      ? agent.model.input_modalities
+      : [];
+  return { presetName, modelId, modalities };
+}
+
+async function loadUploadCapabilities() {
+  try {
+    const r = await daFetch(`${state.baseUrl}/api/v1/uploads/capabilities`);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    state.uploadCapabilities = await r.json();
+  } catch (e) {
+    state.uploadCapabilities = { kinds: [], labels: {} };
+    console.warn("[deep-agent] 加载上传能力失败", e);
+  }
+  updateComposerModelInfo();
+}
+
+async function loadLlmModels() {
+  try {
+    const r = await daFetch(`${state.baseUrl}/api/v1/llm-models`);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    state.llmModels = await r.json();
+    ensureLlmModelSelected();
+    updateComposerModelInfo();
+  } catch (e) {
+    state.llmModels = [];
+    console.warn("[deep-agent] 加载 LLM 模型失败", e);
+    updateComposerModelInfo();
+  }
+}
+
+function modelOptionLabel(m) {
+  const name = String(m?.name || "").trim();
+  const model = String(m?.model || "").trim();
+  if (!name) return model;
+  if (!model || name === model) return name;
+  if (name.includes(model) || model.includes(name)) return name;
+  return `${name} — ${model}`;
 }
 
 function updateComposerModelInfo() {
   if (!el.composerMeta) return;
   const info = currentModelInfo();
-  if (!info) {
+  if (!info && !state.llmModels.length) {
     el.composerMeta.classList.add("hidden");
     return;
   }
   el.composerMeta.classList.remove("hidden");
 
-  if (el.composerModel) {
-    el.composerModel.innerHTML = `
-      <span class="composer-model-name">${escapeHtml(info.presetName)}</span>
-      <span class="composer-model-id">${escapeHtml(info.modelId)}</span>`;
+  if (el.modelSelect) {
+    if (!state.llmModels.length) {
+      el.modelSelect.innerHTML = `<option value="">${escapeHtml(info?.presetName || "无可用模型")}</option>`;
+      el.modelSelect.disabled = true;
+    } else {
+      ensureLlmModelSelected();
+      el.modelSelect.innerHTML = state.llmModels
+        .map((m) => {
+          const label = modelOptionLabel(m);
+          return `<option value="${escapeHtml(m.id)}" title="${escapeHtml(label)}">${escapeHtml(label)}</option>`;
+        })
+        .join("");
+      el.modelSelect.value = state.llmModelId;
+      el.modelSelect.disabled = state.streaming;
+      const selected = selectedLlmModel();
+      el.modelSelect.title = selected ? modelOptionLabel(selected) : "选择本会话使用的 LLM 模型";
+    }
   }
 
-  if (el.composerModalities) {
-    const supported = new Set(info.modalities.map((m) => String(m).toLowerCase()));
+  if (el.composerModelModalities) {
+    const supported = new Set((info?.modalities || []).map((m) => String(m).toLowerCase()));
     if (!supported.size) {
-      el.composerModalities.innerHTML =
-        '<span class="composer-modalities-label">输入</span><span class="modality-chip">未配置（管理后台可刷新模型元数据）</span>';
+      el.composerModelModalities.innerHTML =
+        '<span class="composer-modalities-label">模型输入</span><span class="modality-chip">未配置（管理后台可刷新 Meta）</span>';
     } else {
-      const chips = ALL_MODALITIES.map((key) => {
+      const chips = ALL_LLM_MODALITIES.map((key) => {
         const on = supported.has(key);
-        const label = MODALITY_LABELS[key] || key;
-        const icon = MODALITY_ICONS[key] || "";
-        return `<span class="modality-chip ${on ? "supported" : "unsupported"}" title="${on ? "支持" : "不支持"}${escapeHtml(label)}">${icon} ${escapeHtml(label)}</span>`;
+        const label = LLM_MODALITY_LABELS[key] || key;
+        const icon = LLM_MODALITY_ICONS[key] || "";
+        const title = on ? `LLM 原生支持：${label}` : `LLM 原生不支持：${label}`;
+        return `<span class="modality-chip ${on ? "supported" : "unsupported"}" title="${escapeHtml(title)}">${icon} ${escapeHtml(label)}</span>`;
       }).join("");
-      el.composerModalities.innerHTML = `<span class="composer-modalities-label">输入</span>${chips}`;
+      el.composerModelModalities.innerHTML = `<span class="composer-modalities-label">模型输入</span>${chips}`;
+    }
+  }
+
+  if (el.composerUploadCapabilities) {
+    const kinds = Array.isArray(state.uploadCapabilities?.kinds) ? state.uploadCapabilities.kinds : [];
+    const labels = state.uploadCapabilities?.labels || {};
+    const vision = new Set((info?.modalities || []).map((m) => String(m).toLowerCase())).has("image");
+    if (!kinds.length) {
+      el.composerUploadCapabilities.innerHTML =
+        '<span class="composer-modalities-label">附件</span><span class="modality-chip">未配置</span>';
+    } else {
+      const ordered = UPLOAD_KIND_ORDER.filter((k) => kinds.includes(k)).concat(
+        kinds.filter((k) => !UPLOAD_KIND_ORDER.includes(k)),
+      );
+      const chips = ordered
+        .map((key) => {
+          const label = labels[key] || key;
+          const icon = UPLOAD_KIND_ICONS[key] || "📎";
+          let chipClass = "supported";
+          let title = `平台上传：${label}`;
+          if (key === "image" && !vision) {
+            chipClass = "upload-partial";
+            title = `${label}：可上传，但当前模型不支持原生看图`;
+          } else if (key === "image") {
+            title = `${label}：可上传，当前模型支持原生看图`;
+          } else if (key.endsWith("_text") || key === "text_file") {
+            title = `${label}：上传后抽文本注入对话（非 LLM 原生多模态）`;
+          }
+          return `<span class="modality-chip ${chipClass}" title="${escapeHtml(title)}">${icon} ${escapeHtml(label)}</span>`;
+        })
+        .join("");
+      el.composerUploadCapabilities.innerHTML = `<span class="composer-modalities-label">附件</span>${chips}`;
     }
   }
 }
@@ -1031,6 +1187,7 @@ function updateChatHeader() {
 
 function updateAgentSelectState() {
   if (el.agentSelect) el.agentSelect.disabled = state.streaming || !!state.sessionId;
+  updateComposerModelInfo();
 }
 
 async function loadCapabilities() {
@@ -1098,6 +1255,9 @@ async function onSend() {
     message: text || null,
     session_id: state.sessionId,
   };
+  const modelId = chatPayloadModelId();
+  if (modelId) payload.model_id = modelId;
+  rememberSessionModel();
   if (attachments.length) {
     payload.attachments = attachments.map((a) => ({
       id: a.id,
@@ -1139,6 +1299,9 @@ async function resumeDeferred(deferredResults) {
     session_id: state.sessionId,
     deferred_tool_results: deferredResults,
   };
+  const modelId = chatPayloadModelId();
+  if (modelId) payload.model_id = modelId;
+  rememberSessionModel();
   await runChatStream(payload, assistant);
 }
 
@@ -1296,6 +1459,7 @@ function handleEvent({ event, data }, assistant) {
           localStorage.setItem("da_agent_id", state.agentId);
           if (el.agentSelect) el.agentSelect.value = state.agentId;
         }
+        rememberSessionModel();
         updateChatHeader();
         const sessionKey = sessionLookupKey({ id, agentId: state.agentId });
         const isNewSession = !state.sessions.some((s) => sessionLookupKey(s) === sessionKey);

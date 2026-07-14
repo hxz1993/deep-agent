@@ -6,6 +6,7 @@ const state = {
   llmModels: [],
   editingAgentId: null,
   editingLlmModelId: null,
+  llmModelInitialModalityMode: "auto",
   editingMcp: null,
 };
 

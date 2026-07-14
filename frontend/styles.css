@@ -621,12 +621,44 @@ html, body {
   max-width: 820px;
   margin: 0 auto 8px;
   display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 6px 10px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
   font-size: 12px;
   color: var(--text-muted);
   min-height: 20px;
+}
+.composer-model-picker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-weight: 500;
+  color: var(--text);
+}
+.composer-model-label {
+  flex-shrink: 0;
+  color: var(--text-muted);
+  font-weight: 400;
+}
+.composer-model-select {
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+  padding: 5px 28px 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-elevated, var(--bg));
+  color: var(--text);
+  font-size: 12px;
+  font-family: inherit;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+}
+.composer-model-select:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 .composer-model {
   display: inline-flex;
@@ -642,10 +674,11 @@ html, body {
   font-size: 11px;
 }
 .composer-modalities {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 4px;
+  min-width: 0;
 }
 .composer-modalities-label {
   color: var(--text-faint);
@@ -664,6 +697,11 @@ html, body {
 }
 .modality-chip.supported { border-color: color-mix(in srgb, var(--accent) 35%, var(--border)); color: var(--text); }
 .modality-chip.unsupported { opacity: 0.45; }
+.modality-chip.upload-partial {
+  border-color: color-mix(in srgb, #d97706 40%, var(--border));
+  color: var(--text);
+  opacity: 0.92;
+}
 .composer-inner {
   max-width: 820px;
   margin: 0 auto;
@@ -895,11 +933,11 @@ html, body {
 }
 
 .settings-card .field textarea:focus {
-  outline: none;
   border-color: var(--accent);
+  outline: none;
 }
 
-/* ---------- 模型模态目录 ---------- */
+/* ---------- 模型模态总览 ---------- */
 .models-card {
   width: min(1200px, calc(100% - 32px));
 }
@@ -1022,21 +1060,21 @@ html, body {
   margin-top: 20px;
 }
 
-.models-page .data-table {
+.data-table {
   width: 100%;
   border-collapse: collapse;
   font-size: 13px;
 }
 
-.models-page .data-table th,
-.models-page .data-table td {
+.data-table th,
+.data-table td {
   padding: 10px 12px;
   border-bottom: 1px solid var(--border-soft);
   text-align: left;
   vertical-align: middle;
 }
 
-.models-page .data-table th {
+.data-table th {
   color: var(--text-muted);
   font-weight: 500;
   background: var(--bg);
@@ -1045,13 +1083,13 @@ html, body {
   z-index: 1;
 }
 
-.models-page .data-table .empty-cell {
+.data-table .empty-cell {
   text-align: center;
   color: var(--text-faint);
   padding: 24px;
 }
 
-.models-page .badge {
+.badge {
   display: inline-block;
   padding: 2px 8px;
   border-radius: 999px;
@@ -1061,7 +1099,26 @@ html, body {
   color: var(--text-muted);
 }
 
-.models-page .table-wrap {
+.badge.on { border-color: color-mix(in srgb, var(--accent) 35%, var(--border)); }
+.badge.off { opacity: 0.65; }
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 7px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-soft);
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.btn:hover { background: var(--bg-hover); }
+
+.table-wrap {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--bg);

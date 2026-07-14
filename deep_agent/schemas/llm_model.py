@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, Field
 
 if TYPE_CHECKING:
     from deep_agent.db.models import LlmModel
+
+ModalitiesMode = Literal["auto", "manual"]
 
 
 class LlmModelCreate(BaseModel):
@@ -17,7 +19,10 @@ class LlmModelCreate(BaseModel):
     api_key: str | None = Field(default=None, description="Optional API key for the model endpoint.")
     input_modalities: list[str] = Field(
         default_factory=list,
-        description='Supported input modalities, e.g. ["text", "image", "audio", "video", "pdf"].',
+        description=(
+            "LLM-native input modalities only (e.g. text, image, audio, video, pdf). "
+            "Does not include platform upload extraction or agent tools."
+        ),
     )
 
 
@@ -27,6 +32,10 @@ class LlmModelUpdate(BaseModel):
     model: str | None = None
     base_url: str | None = None
     api_key: str | None = None
+    modalities_mode: ModalitiesMode | None = Field(
+        default=None,
+        description='Set to "auto" to clear manual modalities; "manual" with input_modalities sets user override.',
+    )
     input_modalities: list[str] | None = None
 
 

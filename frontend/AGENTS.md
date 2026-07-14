@@ -94,6 +94,7 @@ python -m http.server 5173
 | 页面布局 | `index.html` |
 | Admin CRUD | `admin/` 下各文件（含 **UI 工具** 页 `/admin/` →「UI 工具」标签） |
 | Admin 模型 Meta 刷新 | `admin/llm_models.js` → `POST /api/v1/llm-models/refresh-metadata`；详见 [`../docs/experience/llm-model-modalities.md`](../docs/experience/llm-model-modalities.md) |
+| 模型模态目录 | `models.html` + `models.js` → `GET /api/v1/llm-models/catalog`；浏览 models.dev / 内置 JSON，按 provider / 模态筛选 |
 | Markdown 主题/安全 | `vendor/`，见 `vendor/README.md` |
 
 历史消息由后端按 `session_id` 维护；切换会话时 `GET /api/v1/sessions/{id}/history` 回放。pending UI 工具的 `tool_call` part 同样经后端 enrichment 附带 `widget` / `metadata`。

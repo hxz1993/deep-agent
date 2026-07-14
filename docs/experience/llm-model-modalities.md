@@ -119,23 +119,29 @@ refresh_model_modalities(row)
 | `deep_agent/db/models.py` | `LlmModel.input_modalities`, `capabilities_source` |
 | `deep_agent/schemas/llm_model.py` | API schema |
 | `deep_agent/db/stores/llm_model/base.py` | `update_metadata`；PATCH modalities → `user` |
-| `deep_agent/api/v1/llm_models.py` | CRUD + refresh 端点 |
+| `deep_agent/api/v1/llm_models.py` | CRUD + refresh + `GET /llm-models/catalog` |
 | `deep_agent/agent/models/model_lookup.py` | lookup key 与 base_url 推断 |
 | `deep_agent/agent/models/models_dev.py` | models.dev `api.json` 客户端 |
 | `deep_agent/agent/models/modality_resolver.py` | 解析链 + `refresh_*` |
 | `deep_agent/agent/models/modality_data.json` | **离线 bundled 数据（Git 维护）** |
 | `deep_agent/agent/models/models_dev_snapshot.json` | 在线失败小兜底 |
+| `deep_agent/agent/models/catalog.py` | models.dev + bundled **目录浏览**（筛选 / 分页 / 按 provider 懒解析） |
+| `deep_agent/schemas/model_catalog.py` | `GET /llm-models/catalog` 响应 schema |
 | `deep_agent/agent/attachments.py` | `model_supports_image_input()` 调用 resolver |
 
-### 5.2 前端（Admin）
+### 5.2 前端
 
 | 路径 | 说明 |
 |------|------|
-| `frontend/admin/index.html` | 模型表：输入模态 / 来源列；「刷新全部 Meta」按钮 |
+| `frontend/models.html` + `models.js` | **模型模态目录**：浏览 models.dev / 内置 JSON；筛选 provider / 模态；分页；「刷新」带 `refresh=true` 清缓存 |
+| `frontend/admin/index.html` | 模型表：输入模态 / 来源列；「刷新全部 Meta」按钮；链到 `models.html` |
 | `frontend/admin/llm_models.js` | 全量 / 单条 refresh；列表展示 |
 | `frontend/admin/admin.css` | `panel-toolbar-actions` 样式 |
 
-入口：`/admin/` → **模型配置** 标签页。
+入口：
+
+- `/models.html` — 按原生模态挑选模型的只读目录（对话侧栏 / 设置页可进入）
+- `/admin/` → **模型配置** 标签页 — 管理已保存预设与刷新 Meta
 
 ### 5.3 测试
 
@@ -143,12 +149,36 @@ refresh_model_modalities(row)
 |------|------|
 | `tests/unit/test_modality_resolver.py` | bundled 解析、test 环境裸名 refresh |
 | `tests/unit/test_models_dev.py` | catalog lookup |
+| `tests/unit/test_catalog.py` | 目录聚合、按 provider 懒解析、refresh 清缓存 |
 | `tests/integration/test_llm_model_modalities.py` | CRUD、四层 refresh、batch skip user |
+| `tests/integration/test_llm_model_catalog.py` | `GET /llm-models/catalog` 筛选 / 分页 / 已配置标记 / 回退 |
 | `tests/integration/helpers/models_dev.py` | models.dev mock |
 
 ---
 
-## 6. 运维操作
+## 6. 模型模态目录（选型浏览）
+
+与 Admin「已保存预设」不同，**目录页**面向选型：展示 models.dev 在线 catalog 与仓库内 `modality_data.json` 的全量原生 `input_modalities`。
+
+| 项 | 说明 |
+|----|------|
+| **页面** | `frontend/models.html` |
+| **API** | `GET /api/v1/llm-models/catalog` |
+| **数据源** | `source=auto`（优先 models.dev，失败回退内置 JSON） / `online` / `bundled` |
+| **筛选** | `provider`、`modality`、`q`（子串搜索） |
+| **分页** | `offset` + `limit`（默认 100，最大 500） |
+| **刷新** | `refresh=true` 清除进程内 models.dev 与 catalog 解析缓存 |
+| **已配置** | 仅当 DB 预设 `model` 为完整 `provider:model-id` 时，在对应行显示预设名称 |
+| **内存** | models.dev 按 **provider 懒解析** 并缓存；Provider 下拉来自 catalog 顶层 key，无需先解析全部 model |
+
+```bash
+curl "http://127.0.0.1:8000/api/v1/llm-models/catalog?source=auto&modality=image&limit=20"
+curl "http://127.0.0.1:8000/api/v1/llm-models/catalog?source=online&refresh=true"
+```
+
+---
+
+## 7. 运维操作
 
 ### Admin UI
 
@@ -177,25 +207,25 @@ curl -X POST http://127.0.0.1:8000/api/v1/llm-models/{model_id}/refresh-metadata
 
 ---
 
-## 7. 已知限制与后续
+## 8. 已知限制与后续
 
 | 项 | 说明 |
 |----|------|
 | `max_context` | JSON 中有字段，业务代码尚未使用 |
 | 运行时附件判断 | ``runner._vision_capable`` 读取 ``AgentSpec`` 中的 DB ``input_modalities``（构建 Runner 时快照）；Admin 刷新后下轮请求生效 |
 | `modality_data.json` 覆盖率 | 仅覆盖常用模型；未在 models.dev 的 legacy ID 仍为人工值 |
-| models.dev 缓存 | 进程内内存缓存；更新 catalog 需重启或调用 `clear_models_dev_cache()`（测试用） |
+| models.dev 缓存 | 进程内内存缓存；目录页「刷新」或 `refresh=true` 可清；测试用 `clear_models_dev_cache()` |
 
 ---
 
-## 8. 维护检查清单
+## 9. 维护检查清单
 
 - [ ] 新增常用模型：在 `modality_data.json` 增加 `provider/model` + 裸名别名
 - [ ] 公网环境验证 refresh 后 `capabilities_source=models_dev`
 - [ ] 离线环境验证 refresh 后 `capabilities_source=bundled` 且 modalities 合理
 - [ ] 用户手动配置后确认全量刷新不会覆盖（`user` 行保持）
-- [ ] 跑测试：`tests/unit/test_modality_resolver.py`、`tests/unit/test_models_dev.py`、`tests/integration/test_llm_model_modalities.py`
+- [ ] 跑测试：`tests/unit/test_modality_resolver.py`、`tests/unit/test_models_dev.py`、`tests/unit/test_catalog.py`、`tests/integration/test_llm_model_modalities.py`、`tests/integration/test_llm_model_catalog.py`
 
 ---
 
-*最后更新：2026-07-10*
+*最后更新：2026-07-14*

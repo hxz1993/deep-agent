@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <script>
+    (function () {
+      var p = location.pathname;
+      if (!p.endsWith("/")) {
+        var last = p.slice(p.lastIndexOf("/") + 1);
+        p = /\.[A-Za-z0-9]+$/.test(last) ? p.slice(0, p.lastIndexOf("/") + 1) : p + "/";
+      }
+      var b = document.createElement("base");
+      b.href = p;
+      document.head.appendChild(b);
+      window.__DEEP_AGENT_BASE__ = p;
+      window.__DEEP_AGENT_APP_ROOT__ = p.replace(/admin\/$/, "");
+    })();
+  </script>
+  <script>
+    (function () {
+      var t = localStorage.getItem("da_theme") || "dark";
+      document.documentElement.setAttribute("data-theme", t);
+    })();
+  </script>
+  <title>deep-agent · 模型模态目录</title>
+  <link id="hljsTheme" rel="stylesheet" href="./vendor/highlight-github-dark.min.css" />
+  <link rel="stylesheet" href="./styles.css" />
+  <link rel="stylesheet" href="./themes.css" />
+  <script>
+    (function () {
+      var t = localStorage.getItem("da_theme") || "dark";
+      var link = document.getElementById("hljsTheme");
+      if (link && (t === "light" || t === "paper" || t === "contrast")) {
+        link.href = "./vendor/highlight-github.min.css";
+      }
+    })();
+  </script>
+</head>
+<body>
+  <div class="settings-page models-page">
+    <header class="settings-header">
+      <div class="brand">
+        <span class="brand-dot"></span>
+        <span class="brand-name">deep-agent</span>
+      </div>
+      <nav class="settings-nav">
+        <a href="./">返回对话</a>
+        <a href="./settings.html">请求头配置</a>
+        <a href="./admin/">管理后台</a>
+      </nav>
+    </header>
+
+    <main class="settings-card models-card">
+      <label class="field settings-theme-field">
+        <span>界面主题</span>
+        <select id="themeSelect" title="切换界面配色"></select>
+      </label>
+
+      <div class="models-toolbar">
+        <div>
+          <h1>模型模态目录</h1>
+          <p class="settings-desc models-desc">
+            浏览 <strong>models.dev</strong> 在线目录与内置 <code>modality_data.json</code> 的<strong>原生输入模态</strong>，
+            便于按能力挑选模型。平台附件抽文本、Agent 工具能力不在此表。
+          </p>
+        </div>
+        <div class="models-toolbar-actions">
+          <button type="button" class="btn" id="refreshBtn">刷新</button>
+        </div>
+      </div>
+
+      <div class="models-filters">
+        <label class="field models-filter-field">
+          <span>数据源</span>
+          <select id="sourceSelect">
+            <option value="auto">自动（优先 models.dev）</option>
+            <option value="online">models.dev 在线</option>
+            <option value="bundled">内置 JSON</option>
+          </select>
+        </label>
+        <label class="field models-filter-field">
+          <span>Provider</span>
+          <select id="providerSelect">
+            <option value="">全部</option>
+          </select>
+        </label>
+        <label class="field models-filter-field">
+          <span>模态</span>
+          <select id="modalitySelect">
+            <option value="">全部</option>
+            <option value="text">文本</option>
+            <option value="image">图像</option>
+            <option value="audio">音频</option>
+            <option value="video">视频</option>
+            <option value="pdf">PDF</option>
+          </select>
+        </label>
+        <label class="field models-search-field">
+          <span>搜索</span>
+          <input type="search" id="searchInput" placeholder="provider / model id / key…" autocomplete="off" />
+        </label>
+      </div>
+
+      <p class="models-status" id="statusLine">加载中…</p>
+
+      <div class="table-wrap models-table-wrap">
+        <table class="data-table models-matrix" id="modelsTable">
+          <thead>
+            <tr>
+              <th>Provider</th>
+              <th>Model</th>
+              <th class="mod-col" title="text">文本</th>
+              <th class="mod-col" title="image">图像</th>
+              <th class="mod-col" title="audio">音频</th>
+              <th class="mod-col" title="video">视频</th>
+              <th class="mod-col" title="pdf">PDF</th>
+              <th>Context</th>
+              <th>已配置</th>
+            </tr>
+          </thead>
+          <tbody id="modelsTableBody">
+            <tr><td colspan="9" class="empty-cell">加载中…</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="models-pagination" id="paginationBar">
+        <button type="button" class="btn btn-sm" id="prevPageBtn" disabled>上一页</button>
+        <span class="models-page-info" id="pageInfo">—</span>
+        <button type="button" class="btn btn-sm" id="nextPageBtn" disabled>下一页</button>
+      </div>
+
+      <details class="settings-hint models-hint">
+        <summary>说明</summary>
+        <ul>
+          <li>数据来自 <code>GET /api/v1/llm-models/catalog</code>；「自动」优先拉取 models.dev，离线时回退内置 JSON。</li>
+          <li>在管理后台「模型配置」中创建预设时，可将 <code>model</code> 设为 <code>provider:model-id</code>（如 <code>openai:gpt-4o</code>）。</li>
+          <li>「已配置」列显示数据库中 model 字符串与本行匹配的预设名称；PDF 列表示 LLM <strong>原生</strong> PDF 输入。</li>
+        </ul>
+      </details>
+    </main>
+  </div>
+
+  <script src="./request_config.js"></script>
+  <script src="./theme.js"></script>
+  <script src="./models.js"></script>
+</body>
+</html>

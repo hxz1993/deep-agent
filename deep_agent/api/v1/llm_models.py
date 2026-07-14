@@ -1,11 +1,15 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from typing import Annotated
 
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+
+from deep_agent.agent.models.catalog import CatalogSource
 from deep_agent.db.deps import get_llm_model_store
 from deep_agent.db.ids import normalize_agent_id
 from deep_agent.db.stores.llm_model import LlmModelStoreBase
 from deep_agent.schemas.llm_model import LlmModelCreate, LlmModelResponse, LlmModelUpdate
+from deep_agent.schemas.model_catalog import ModelCatalogItem, ModelCatalogResponse
 
 router = APIRouter()
 
@@ -28,6 +32,67 @@ async def list_llm_models(
 ) -> list[LlmModelResponse]:
     rows = await store.list_all()
     return [await _response_for_row(store, row) for row in rows]
+
+
+@router.get("/llm-models/catalog", response_model=ModelCatalogResponse)
+async def list_model_catalog(
+    source: Annotated[CatalogSource, Query()] = "auto",
+    q: str | None = Query(None, description="Search provider, model id, or key."),
+    provider: str | None = Query(None, description="Filter by provider id."),
+    modality: str | None = Query(None, description="Filter by input modality, e.g. image."),
+    offset: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=500),
+    refresh: bool = Query(False, description="Bypass in-process catalog caches."),
+    store: LlmModelStoreBase = Depends(get_llm_model_store),
+) -> ModelCatalogResponse:
+    """Browse models.dev / bundled modality catalog for model selection."""
+    from deep_agent.agent.models.catalog import (
+        build_configured_preset_map,
+        catalog_source_label,
+        filter_catalog_entries,
+        load_catalog_entries,
+        lookup_configured_preset,
+        paginate_catalog,
+    )
+
+    entries, resolved, provider_ids = await load_catalog_entries(
+        source,
+        provider=provider,
+        refresh=refresh,
+    )
+    filtered = filter_catalog_entries(entries, q=q, provider=provider, modality=modality)
+    page, total = paginate_catalog(filtered, offset=offset, limit=limit)
+
+    preset_rows = await store.list_all()
+    preset_map = build_configured_preset_map([(r.name, r.model) for r in preset_rows])
+
+    source_label = catalog_source_label(resolved)
+    if source == "online" and resolved == "bundled":
+        source_label = "内置 modality_data.json（models.dev 不可用，已回退）"
+
+    items = [
+        ModelCatalogItem(
+            key=e.key,
+            provider=e.provider,
+            model_id=e.model_id,
+            provider_label=e.provider_label,
+            input_modalities=e.input_modalities,
+            max_context=e.max_context,
+            source=e.source,
+            configured_preset=lookup_configured_preset(preset_map, e),
+        )
+        for e in page
+    ]
+
+    return ModelCatalogResponse(
+        items=items,
+        total=total,
+        source=resolved,
+        source_label=source_label,
+        offset=offset,
+        limit=limit,
+        providers=provider_ids,
+    )
 
 
 @router.get("/llm-models/{model_id}", response_model=LlmModelResponse)

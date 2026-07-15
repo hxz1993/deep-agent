@@ -120,6 +120,7 @@ def upgrade() -> None:
             "DEEPCUBE_MCP_TRANSPORT": "stdio",
             "DEEPCUBE_MCP_ENV_URL": "https://test.deepfos.com/deepfos-server/",
             "DEEPCUBE_MCP_HEADERS": "{}",
+            "DEEPCUBE_MCP_DIM_INIT_MAX_CONCURRENCY": "4",
         },
     }
 

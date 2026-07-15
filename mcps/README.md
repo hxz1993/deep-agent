@@ -64,11 +64,12 @@ Thin stdio launcher for the installed `deepcube-mcp` package. Capability name:
 
 Startup defaults (override via `mcp_servers.config.env`):
 
-| Variable | Default |
-|----------|---------|
-| `DEEPCUBE_MCP_TRANSPORT` | `stdio` |
-| `DEEPCUBE_MCP_ENV_URL` | `https://test.deepfos.com/deepfos-server/` |
+| Variable | Default                                                         |
+|----------|-----------------------------------------------------------------|
+| `DEEPCUBE_MCP_TRANSPORT` | `stdio`                                                         |
+| `DEEPCUBE_MCP_ENV_URL` | `https://test.deepfos.com/deepfos-server/`                      |
 | `DEEPCUBE_MCP_HEADERS` | JSON object, e.g. `{"app":"demo","space":"demo","token":"..."}` |
+| `DEEPCUBE_MCP_DIM_INIT_MAX_CONCURRENCY` | `4` (Cube dimension init concurrency)                           |
 
 Example DB `config.env` for live DeepFOS metadata:
 
@@ -76,7 +77,8 @@ Example DB `config.env` for live DeepFOS metadata:
 {
   "DEEPCUBE_MCP_TRANSPORT": "stdio",
   "DEEPCUBE_MCP_ENV_URL": "https://test.deepfos.com/deepfos-server/",
-  "DEEPCUBE_MCP_HEADERS": "{\"app\":\"demo\",\"space\":\"demo\",\"token\":\"...\"}"
+  "DEEPCUBE_MCP_HEADERS": "{\"app\":\"demo\",\"space\":\"demo\",\"token\":\"...\"}",
+  "DEEPCUBE_MCP_DIM_INIT_MAX_CONCURRENCY": "4"
 }
 ```
 

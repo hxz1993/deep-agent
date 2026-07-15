@@ -76,6 +76,7 @@ stdio 模式**不**读 per-request `_meta.headers`，须在环境变量或 DB `c
 | `DEEPCUBE_MCP_DISCOVERY_ENABLED` | `true` / `false` |
 | `DEEPCUBE_MCP_EUREKA` | Eureka 地址 |
 | `DEEPCUBE_MCP_CACHE_*` | 元数据缓存 TTL / 开关 / 上限 |
+| `DEEPCUBE_MCP_DIM_INIT_MAX_CONCURRENCY` | Cube 初始化维度最大并发数；deep-agent 默认 `2` |
 
 未单独提供 env 的 discovery 子项（如 `nacos.cluster`、`take_over`）请写入 `DEEPCUBE_MCP_DISCOVERY` JSON，或依赖上述 `EXPORT_*` 桥接。
 
@@ -86,7 +87,8 @@ DB 配置示例（`mcp_servers.config.env`）：
   "DEEPCUBE_MCP_TRANSPORT": "stdio",
   "DEEPCUBE_MCP_ENV_URL": "https://test.deepfos.com/deepfos-server/",
   "DEEPCUBE_MCP_HEADERS": "{\"app\":\"demo\",\"space\":\"demo\",\"token\":\"...\"}",
-  "DEEPCUBE_MCP_DISCOVERY": "{\"enabled\":true,\"implementation\":\"eureka\",\"take_over\":true,\"eureka\":\"http://eureka:8761/eureka\"}"
+  "DEEPCUBE_MCP_DISCOVERY": "{\"enabled\":true,\"implementation\":\"eureka\",\"take_over\":true,\"eureka\":\"http://eureka:8761/eureka\"}",
+  "DEEPCUBE_MCP_DIM_INIT_MAX_CONCURRENCY": "4"
 }
 ```
 

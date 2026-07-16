@@ -70,6 +70,7 @@ HTTP → deep_agent/api/v1 → AgentRunner → pydantic_ai.Agent → Capabilitie
 | [`docs/sse-protocol.md`](docs/sse-protocol.md) | SSE 事件协议详解 |
 | [`docs/experience/llm-model-modalities.md`](docs/experience/llm-model-modalities.md) | LLM 模型 `input_modalities` 元数据：原则、来源、刷新与离线兜底 |
 | [`docs/experience/ai-title-generator.md`](docs/experience/ai-title-generator.md) | AI 会话标题生成实现经验 |
+| [`docs/experience/mcp-shared-registry-diagnostics.md`](docs/experience/mcp-shared-registry-diagnostics.md) | MCP 共享 Registry 诊断日志目录与事故排障 runbook（基于 2026-07-16 deepcube 全量报错事故） |
 | [`docs/ui-tools.md`](docs/ui-tools.md) | UI 工具扩展（**内部**，改仓库代码） |
 | [`docs/ui-tools-external.md`](docs/ui-tools-external.md) | UI 工具使用（**外部集成方**，不改代码） |
 | [`docs/ui-tools-extension-proposals.md`](docs/ui-tools-extension-proposals.md) | UI 工具扩展能力 — 方案对比（产品/架构） |

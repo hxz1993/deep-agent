@@ -119,6 +119,82 @@ class McpLeaseManagerTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(attempts["count"], 1)
 
+    async def test_lease_retries_ensure_server_timeout(self) -> None:
+        """Transient lock-contention timeouts from ensure_server are retried.
+
+        Simulates the 2026-07-16 10:09 incident pattern: the first ensure_server
+        call times out (worker A held the shared lock), the second succeeds
+        (worker A released by then). The lease must reach the client connect
+        phase rather than surface the timeout to the user.
+        """
+        manager = McpLeaseManager(mcp_acquire_retries=1)
+        ensure_calls = {"count": 0}
+
+        async def flaky_ensure(*_args: object, **_kwargs: object) -> str:
+            ensure_calls["count"] += 1
+            if ensure_calls["count"] == 1:
+                raise TimeoutError(
+                    "Timed out acquiring MCP shared lock for 'text_tools' "
+                    "(/tmp/deep-agent-mcp/builtin-text_tools.lock)"
+                )
+            return "http://127.0.0.1:19001/mcp"
+
+        toolset = AsyncMock()
+        toolset.__aenter__ = AsyncMock(return_value=toolset)
+        toolset.__aexit__ = AsyncMock(return_value=None)
+
+        with (
+            patch.object(
+                manager._shared_registry,
+                "ensure_server",
+                new=AsyncMock(side_effect=flaky_ensure),
+            ),
+            patch.object(manager._shared_registry, "start_touch", new=AsyncMock()),
+            patch.object(manager._shared_registry, "stop_touch", new=AsyncMock()),
+        ):
+            async with manager.lease(
+                "text_tools", "session-a", lambda _url: toolset
+            ) as leased:
+                self.assertIs(leased, toolset)
+
+        self.assertEqual(ensure_calls["count"], 2)
+        toolset.__aexit__.assert_awaited_once()
+
+    async def test_lease_re_raises_ensure_server_timeout_after_exhaustion(self) -> None:
+        """When ensure_server keeps timing out, lease surfaces TimeoutError.
+
+        With ``mcp_acquire_retries=1`` we get 2 attempts total; both fail ⇒
+        bubble up. Retry budget must be respected (not retried forever).
+        """
+        manager = McpLeaseManager(mcp_acquire_retries=1)
+        ensure_calls = {"count": 0}
+
+        async def always_timeout(*_args: object, **_kwargs: object) -> str:
+            ensure_calls["count"] += 1
+            raise TimeoutError(
+                "Timed out acquiring MCP shared lock for 'text_tools'"
+            )
+
+        with (
+            patch.object(
+                manager._shared_registry,
+                "ensure_server",
+                new=AsyncMock(side_effect=always_timeout),
+            ),
+            patch.object(manager._shared_registry, "start_touch", new=AsyncMock()),
+            patch.object(manager._shared_registry, "stop_touch", new=AsyncMock()),
+        ):
+            with self.assertRaises(TimeoutError):
+                async with manager.lease(
+                    "text_tools", "session-a", lambda _url: AsyncMock()
+                ):
+                    pass
+
+        # 2 total attempts (initial + 1 retry); start_touch/stop_touch never called
+        # because ensure_server never returned a URL.
+        self.assertEqual(ensure_calls["count"], 2)
+
+
 
 if __name__ == "__main__":
     unittest.main()

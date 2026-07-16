@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import time
 from collections.abc import AsyncIterator, Callable
 from typing import Any
 
@@ -14,14 +15,15 @@ from deep_agent.options import OPTION
 McpToolsetFactory = Callable[[str], Any]
 
 _ACQUIRE_RETRY_DELAY_SECONDS = 0.5
+# ensure_server 耗时 ≥ 这个阈值才记 INFO；主要用于追踪 spawn 卡顿。
+_ENSURE_SERVER_SLOW_THRESHOLD_SECONDS = 5.0
 
 
 class McpLeaseManager:
     """Worker-local MCP client coordinator for shared-HTTP builtin servers.
 
-    Each lease opens a short-lived HTTP client and closes it on exit. Pod-wide
-    server processes are coordinated via :class:`McpSharedRegistry` (registry
-    touch + in-server TTL watcher).
+    每次 lease 打开一个短链 HTTP client，作用域退出时关闭。Pod 级别的子服务进程由
+    :class:`McpSharedRegistry` 协调（registry touch + 进程内 TTL watcher）。
     """
 
     def __init__(
@@ -46,9 +48,10 @@ class McpLeaseManager:
         *,
         spawn_config: dict[str, Any] | None = None,
     ) -> AsyncIterator[Any]:
-        connect_url = await self._shared_registry.ensure_server(
+        connect_url = await self._ensure_server_with_retry(
             server_name,
             spawn_config,
+            session_id=session_id,
         )
         await self._shared_registry.start_touch(server_name)
         toolset: Any | None = None
@@ -74,6 +77,68 @@ class McpLeaseManager:
             if toolset is not None:
                 await self._close_toolset(server_name, session_id, toolset)
                 await self._shared_registry.stop_touch(server_name)
+
+    async def _ensure_server_with_retry(
+        self,
+        server_name: str,
+        spawn_config: dict[str, Any] | None,
+        *,
+        session_id: str,
+    ) -> str:
+        """对 ensure_server 做瞬时锁竞争 retry。
+
+        复用现有 ``mcp_acquire_retries``（默认 1）作为总尝试次数。
+        预算耗尽仍按原行为抛 TimeoutError。
+        """
+        max_retries = max(0, self._mcp_acquire_retries)
+
+        for attempt in range(max_retries + 1):
+            t0 = time.monotonic()
+            try:
+                url = await self._shared_registry.ensure_server(
+                    server_name,
+                    spawn_config,
+                )
+            except TimeoutError:
+                elapsed = time.monotonic() - t0
+                if attempt >= max_retries:
+                    logger.warning(
+                        "MCP ensure_server exhausted retries for {!r} "
+                        "session={!r} attempts={} last_attempt={:.2f}s",
+                        server_name,
+                        session_id,
+                        max_retries + 1,
+                        elapsed,
+                    )
+                    raise
+                logger.warning(
+                    "MCP ensure_server timeout for {!r} session={!r} "
+                    "attempt={}/{} waited={:.2f}s; retrying in {:.2f}s",
+                    server_name,
+                    session_id,
+                    attempt + 1,
+                    max_retries + 1,
+                    elapsed,
+                    _ACQUIRE_RETRY_DELAY_SECONDS,
+                )
+                await asyncio.sleep(_ACQUIRE_RETRY_DELAY_SECONDS)
+                continue
+
+            elapsed = time.monotonic() - t0
+            if elapsed >= _ENSURE_SERVER_SLOW_THRESHOLD_SECONDS or attempt > 0:
+                logger.info(
+                    "MCP ensure_server {!r} session={!r} attempt={}/{} took {:.2f}s url={}",
+                    server_name,
+                    session_id,
+                    attempt + 1,
+                    max_retries + 1,
+                    elapsed,
+                    url,
+                )
+            return url
+
+        # 不可达：循环只通过内部 return/raise 退出；类型检查 + 防御。
+        raise AssertionError("retry loop fell through")  # pragma: no cover
 
     async def _connect_with_retry(
         self,

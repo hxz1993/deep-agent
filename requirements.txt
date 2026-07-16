@@ -24,6 +24,8 @@ asyncmy
 aiosqlite
 alembic
 filelock>=3.13
+# Cross-platform process liveness checks (MCP shared registry pid probe)
+psutil>=5.9
 
 # deepfos platform
 aiohttp~=3.9.5

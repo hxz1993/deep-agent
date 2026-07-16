@@ -31,19 +31,33 @@ def _optional_value(value: object) -> str | None:
 
 def sync_env() -> None:
     """Map ``OPTION`` discovery settings into ``DEEPCUBE_MCP_*`` when unset."""
+    if ENV_DISCOVERY in os.environ:
+        return
+
+    impl = _optional_value(os.environ.get("EXPORT_SERVICE_DISCOVERY_IMPLEMENTATION"))
+    if impl is None:
+        impl = _optional_value(OPTION.srvdis.implementation)
+
+    # ``local`` bypasses Eureka/Nacos/K8s; reading ``OPTION.srvdis.enabled`` would
+    # run deepfos_platform validation that does not accept ``local`` as a backend.
+    if impl == "local":
+        os.environ.setdefault(ENV_ENV_URL, OPTION.server.base)
+        os.environ[ENV_DISCOVERY] = json.dumps(
+            {"enabled": False, "implementation": "local", "take_over": False},
+            ensure_ascii=False,
+        )
+        return
+
     discovery: dict = {}
 
     discovery["enabled"] = bool(OPTION.srvdis.enabled)
-    impl = _optional_value(OPTION.srvdis.implementation)
     if impl is not None:
         discovery["implementation"] = impl
-        if impl == 'local':
-            os.environ.setdefault(ENV_ENV_URL, OPTION.server.base)
-        elif impl == 'eureka':
+        if impl == "eureka":
             eureka = _optional_value(OPTION.eureka.server)
             if eureka:
                 discovery["eureka"] = eureka
-        elif impl == 'nacos':
+        elif impl == "nacos":
             discovery["nacos"] = nacos = {}
             for value, key in (
                 (OPTION.nacos.server, "server"),
@@ -56,7 +70,7 @@ def sync_env() -> None:
                 val = _optional_value(value)
                 if val is not None:
                     nacos[key] = val
-        elif impl == 'k8s':
+        elif impl == "k8s":
             k8s_ns = _optional_value(OPTION.k8s.namespace)
             if k8s_ns:
                 discovery["k8s"] = {"namespace": k8s_ns}
@@ -68,7 +82,7 @@ def sync_env() -> None:
     # deepcube-mcp currently reads take_over only from DEEPCUBE_MCP_DISCOVERY JSON.
     discovery["take_over"] = True
 
-    if discovery and ENV_DISCOVERY not in os.environ:
+    if discovery:
         os.environ[ENV_DISCOVERY] = json.dumps(discovery, ensure_ascii=False)
 
 

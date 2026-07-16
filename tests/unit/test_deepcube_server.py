@@ -108,6 +108,21 @@ class DeepcubeServerLauncherTests(unittest.TestCase):
                 os.environ["DEEPCUBE_MCP_ENV_URL"],
                 "https://test.deepfos.com/deepfos-server/",
             )
+            discovery = json.loads(os.environ["DEEPCUBE_MCP_DISCOVERY"])
+            self.assertFalse(discovery["enabled"])
+            self.assertFalse(discovery["take_over"])
+            self.assertEqual(discovery["implementation"], "local")
+
+    def test_sync_env_local_from_export_env_skips_enabled_validation(self) -> None:
+        mod = _load_server_module()
+        with patch.dict(
+            os.environ,
+            {"EXPORT_SERVICE_DISCOVERY_IMPLEMENTATION": "local"},
+            clear=True,
+        ):
+            mod.sync_env()
+            discovery = json.loads(os.environ["DEEPCUBE_MCP_DISCOVERY"])
+            self.assertFalse(discovery["enabled"])
 
 
 if __name__ == "__main__":

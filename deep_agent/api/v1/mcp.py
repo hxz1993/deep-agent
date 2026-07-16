@@ -6,28 +6,40 @@ from deep_agent.capabilities.mcp.ui_discovery import discover_and_persist_ui_too
 from deep_agent.db.deps import get_mcp_store, get_ui_tool_store
 from deep_agent.db.stores.mcp import McpServerStoreBase
 from deep_agent.db.stores.ui_tool import UiToolStoreBase
-from deep_agent.schemas.mcp import McpBuiltinConfig, McpServerCreate, McpServerResponse, McpServerUpdate
+from deep_agent.schemas.mcp import McpBuiltinConfig, McpServerCreate, McpServerResponse, McpServerUpdate, McpUrlConfig
 from deep_agent.schemas.ui_tools import UiToolsRefreshResponse
 
 router = APIRouter()
 
 
-def _assert_builtin_row_mutable(row, body: McpServerUpdate) -> None:
-    if row.transport != "builtin":
+def _assert_row_mutable(row, body: McpServerUpdate) -> None:
+    if row.transport == "builtin":
+        if body.transport is not None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Builtin MCP transport cannot be changed via API",
+            )
+        if body.config is not None:
+            try:
+                McpBuiltinConfig.model_validate(body.config)
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=str(exc),
+                ) from exc
         return
-    if body.transport is not None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Builtin MCP transport cannot be changed via API",
-        )
     if body.config is not None:
         try:
-            McpBuiltinConfig.model_validate(body.config)
+            McpUrlConfig.model_validate(body.config)
         except Exception as exc:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=str(exc),
             ) from exc
+
+
+# ponytail: keep old name for call sites
+_assert_builtin_row_mutable = _assert_row_mutable
 
 
 @router.get("/mcp", response_model=list[McpServerResponse])

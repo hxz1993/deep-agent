@@ -53,6 +53,21 @@ class McpSchemaBuiltinGuardTests(unittest.TestCase):
         )
         self.assertEqual(cfg.env, {"DEEPCUBE_MCP_ENV_URL": "https://example.test/"})
 
+    def test_update_allows_config_without_transport_for_builtin_patch(self) -> None:
+        row = McpServerUpdate.model_validate(
+            {
+                "config": {
+                    "env": {
+                        "DEEPCUBE_MCP_ENV_URL": "https://example.test/",
+                        "DEEPCUBE_MCP_DISCOVERY": '{"enabled":false}',
+                    }
+                },
+                "enabled": True,
+            }
+        )
+        self.assertIsNone(row.transport)
+        self.assertIn("env", row.config)
+
 
 if __name__ == "__main__":
     unittest.main()

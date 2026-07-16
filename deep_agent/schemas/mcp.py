@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from typing import TYPE_CHECKING
 
@@ -21,6 +21,8 @@ class McpUrlConfig(BaseModel):
 
 class McpBuiltinConfig(BaseModel):
     """Portable config for repo-shipped servers under ``mcps/<name>/server.py``."""
+
+    model_config = ConfigDict(extra="allow")
 
     env: dict[str, str] | None = Field(default=None, description="Optional environment variables.")
     cwd: str | None = Field(default=None, description="Optional working directory.")
@@ -49,8 +51,9 @@ class McpServerUpdate(BaseModel):
     def validate_config(self) -> McpServerUpdate:
         if self.config is None:
             return self
+        # Builtin rows PATCH config without transport; API validates shape per stored row.
         if self.transport is None:
-            raise ValueError("transport is required when config is updated")
+            return self
         McpUrlConfig.model_validate(self.config)
         return self
 

@@ -18,7 +18,14 @@
     })();
   </script>
   <title>deep-agent · 管理后台</title>
+  <link rel="stylesheet" href="../themes.css" />
   <link rel="stylesheet" href="./admin.css" />
+  <script>
+    (function () {
+      var t = localStorage.getItem("da_theme") || "dark";
+      document.documentElement.setAttribute("data-theme", t);
+    })();
+  </script>
 </head>
 <body>
   <div class="admin-app">
@@ -35,6 +42,10 @@
         <button class="tab" data-tab="ui-tools">UI 工具</button>
       </nav>
       <div class="header-actions">
+        <label class="inline-field">
+          <span>主题</span>
+          <select id="themeSelect" title="切换界面配色"></select>
+        </label>
         <label class="inline-field">
           <span>后端</span>
           <input type="text" id="baseUrlInput" placeholder="http://localhost:8000" />
@@ -524,6 +535,7 @@
   </dialog>
 
   <script src="../request_config.js"></script>
+  <script src="../theme.js"></script>
   <script src="./admin.js"></script>
   <script src="./llm_models.js"></script>
   <script src="./auxiliary_models.js"></script>

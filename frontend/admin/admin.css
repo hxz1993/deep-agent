@@ -1,15 +1,6 @@
+/* 配色变量来自 ../themes.css（html[data-theme]） */
 :root {
-  --bg: #0d1117;
-  --bg-soft: #161b22;
-  --bg-elev: #1c2128;
-  --border: #2d333b;
-  --text: #e6edf3;
-  --text-dim: #8b949e;
-  --accent: #6366f1;
-  --accent-hover: #7c7ff5;
-  --accent-soft: rgba(99, 102, 241, 0.15);
-  --danger: #f85149;
-  --success: #3fb950;
+  --success: var(--conn-ok);
   --radius: 12px;
   --font: "Segoe UI", system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
   --mono: "SF Mono", "Cascadia Code", Consolas, monospace;
@@ -91,13 +82,22 @@ html, body {
   color: var(--text-dim);
 }
 
-.inline-field input {
-  width: 220px;
+.inline-field input,
+.inline-field select {
   background: var(--bg-soft);
   border: 1px solid var(--border);
   color: var(--text);
   border-radius: 8px;
   padding: 6px 10px;
+  font: inherit;
+}
+
+.inline-field input {
+  width: 220px;
+}
+
+.inline-field select {
+  min-width: 120px;
 }
 
 .link-btn {
@@ -109,9 +109,9 @@ html, body {
 .link-btn:hover { color: var(--accent-hover); }
 
 .banner {
-  background: rgba(248, 81, 73, 0.12);
-  border: 1px solid rgba(248, 81, 73, 0.35);
-  color: #ffa198;
+  background: var(--danger-soft);
+  border: 1px solid var(--danger);
+  color: var(--danger-text);
   padding: 12px 16px;
   border-radius: var(--radius);
   margin-bottom: 16px;
@@ -126,7 +126,7 @@ html, body {
   padding: 12px 16px;
   border-radius: var(--radius);
   z-index: 100;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  box-shadow: var(--shadow);
 }
 
 .panel { display: none; }
@@ -174,14 +174,15 @@ html, body {
 .btn.primary {
   background: var(--accent);
   border-color: var(--accent);
-  color: #fff;
+  color: var(--send-fg);
 }
 
 .btn.primary:hover { background: var(--accent-hover); }
 
 .btn.danger {
   color: var(--danger);
-  border-color: rgba(248, 81, 73, 0.4);
+  border-color: var(--danger);
+  opacity: 0.85;
 }
 
 .table-wrap {
@@ -237,7 +238,7 @@ html, body {
   border: 1px solid var(--border);
 }
 
-.badge.on { color: var(--success); border-color: rgba(63, 185, 80, 0.4); }
+.badge.on { color: var(--success); border-color: var(--success); }
 .badge.off { color: var(--text-dim); }
 
 .row-actions {
@@ -651,7 +652,7 @@ html, body {
 
 .cap-switch input:checked + .cap-switch-ui::after {
   transform: translateX(16px);
-  background: #fff;
+  background: var(--send-fg);
 }
 
 .cap-card-tools {

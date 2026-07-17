@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
 
 from deep_agent.options import DEFAULT_MCP_FORWARD_HEADERS, OPTION
 
@@ -27,7 +28,7 @@ class OptionsConvertorTests(unittest.TestCase):
         OPTION.agent.skills_dir = "skills"
         path = OPTION.agent.skills_dir
         self.assertTrue(path.endswith("skills") or path.endswith("skills\\"))
-        self.assertIn(":", path)  # absolute on Windows
+        self.assertTrue(Path(path).is_absolute())
 
     def test_cursor_skills_dir_convertor_resolves_relative_path(self) -> None:
         OPTION.agent.cursor_skills_dir = ".cursor/skills"

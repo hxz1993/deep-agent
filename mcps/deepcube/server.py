@@ -48,9 +48,21 @@ def sync_env() -> None:
         )
         return
 
+    discovery_enabled = bool(OPTION.srvdis.enabled)
+    if not discovery_enabled:
+        os.environ.setdefault(ENV_ENV_URL, OPTION.server.base)
+        discovery = {"enabled": False, "take_over": False}
+        if impl is not None:
+            discovery["implementation"] = impl
+        cache = _optional_value(OPTION.srvdis.cache_strategy)
+        if cache is not None:
+            discovery["cache_strategy"] = cache
+        os.environ[ENV_DISCOVERY] = json.dumps(discovery, ensure_ascii=False)
+        return
+
     discovery: dict = {}
 
-    discovery["enabled"] = bool(OPTION.srvdis.enabled)
+    discovery["enabled"] = discovery_enabled
     if impl is not None:
         discovery["implementation"] = impl
         if impl == "eureka":
@@ -92,4 +104,3 @@ if __name__ == "__main__":
     sync_env()
     finalize_mcp(["--transport", "http"])
     run_fastmcp(mcp, prog="deepcube")
-

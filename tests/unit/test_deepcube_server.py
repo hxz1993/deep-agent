@@ -124,6 +124,21 @@ class DeepcubeServerLauncherTests(unittest.TestCase):
             discovery = json.loads(os.environ["DEEPCUBE_MCP_DISCOVERY"])
             self.assertFalse(discovery["enabled"])
 
+    def test_sync_env_disabled_uses_gateway_without_takeover(self) -> None:
+        option_stub = _build_option_stub()
+        option_stub.srvdis.enabled = False
+        mod = _load_server_module(option_stub)
+        with patch.dict(os.environ, {}, clear=True):
+            mod.sync_env()
+            self.assertEqual(
+                os.environ["DEEPCUBE_MCP_ENV_URL"],
+                "https://test.deepfos.com/deepfos-server/",
+            )
+            discovery = json.loads(os.environ["DEEPCUBE_MCP_DISCOVERY"])
+            self.assertFalse(discovery["enabled"])
+            self.assertFalse(discovery["take_over"])
+            self.assertEqual(discovery["implementation"], "eureka")
+
 
 if __name__ == "__main__":
     unittest.main()

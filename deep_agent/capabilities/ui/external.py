@@ -13,8 +13,18 @@ from deep_agent.capabilities.ui.types import UIToolRecord
 
 
 UI_TOOL_MAX_RETRIES = 1
+_CLARIFY_FIELD_TYPES = frozenset({"select", "text", "textarea", "input"})
+_FIELD_ID_KEYS = ("field", "id", "name", "dimension")
+_OPTION_ID_KEYS = ("value", "code", "name", "label")
 
 ArgsValidator = Callable[..., None]
+
+
+def _non_empty_string(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    return normalized or None
 
 
 def _error_path(error: ValidationError) -> str:
@@ -27,16 +37,33 @@ def _validate_clarify_args(args: dict[str, Any]) -> None:
     if not isinstance(fields, list) or not fields:
         raise ModelRetry("clarify 参数不完整：fields 必须是非空数组，请补全后重新调用。")
 
+    field_ids: set[str] = set()
     for index, field in enumerate(fields):
         if not isinstance(field, dict):
             raise ModelRetry(f"clarify.fields[{index}] 必须是对象，请修正后重新调用。")
-        if not any(field.get(key) for key in ("field", "id", "name", "dimension", "label")):
+        field_id = next(
+            (
+                normalized
+                for key in _FIELD_ID_KEYS
+                if (normalized := _non_empty_string(field.get(key))) is not None
+            ),
+            "",
+        )
+        if not field_id:
             raise ModelRetry(
                 f"clarify.fields[{index}] 缺少稳定字段标识，"
-                "请至少提供 field、id、name、dimension 或 label。"
+                "请至少提供 field、id、name 或 dimension。"
             )
+        if field_id in field_ids:
+            raise ModelRetry(f"clarify.fields[{index}] 的字段标识 {field_id!r} 重复，请修正后重新调用。")
+        field_ids.add(field_id)
 
         field_type = field.get("type")
+        if field_type not in _CLARIFY_FIELD_TYPES:
+            allowed = "、".join(sorted(_CLARIFY_FIELD_TYPES))
+            raise ModelRetry(
+                f"clarify.fields[{index}].type 必须是 {allowed} 之一，请修正后重新调用。"
+            )
         if field_type == "select":
             options = field.get("options")
             if not isinstance(options, list) or not options:
@@ -44,6 +71,14 @@ def _validate_clarify_args(args: dict[str, Any]) -> None:
                     f"clarify.fields[{index}] 的 type=select，但 options 为空，"
                     "请提供候选项或改用 text/textarea/input。"
                 )
+            for option_index, option in enumerate(options):
+                if not isinstance(option, dict) or not any(
+                    _non_empty_string(option.get(key)) for key in _OPTION_ID_KEYS
+                ):
+                    raise ModelRetry(
+                        f"clarify.fields[{index}].options[{option_index}] 缺少有效选项标识，"
+                        "请提供 value、code、name 或 label。"
+                    )
 
 
 def _semantic_validator(record: UIToolRecord, args: dict[str, Any]) -> None:
@@ -56,30 +91,24 @@ def build_args_validator(record: UIToolRecord) -> ArgsValidator:
         validator_class = validator_for(record.parameters_json_schema)
         validator_class.check_schema(record.parameters_json_schema)
         schema_validator = validator_class(record.parameters_json_schema)
-    except SchemaError as exc:
-        logger.warning("Invalid UI tool schema, semantic validation only: {} ({})", record.name, exc)
-        schema_validator = None
+    except (SchemaError, TypeError) as exc:
+        raise ValueError(f"Invalid UI tool schema for {record.name}: {exc}") from exc
 
     def validate(_ctx: Any, **args: Any) -> None:
-        if schema_validator is not None:
-            try:
-                errors = sorted(
-                    schema_validator.iter_errors(args),
-                    key=lambda item: tuple(str(part) for part in item.absolute_path),
-                )
-            except Exception as exc:
-                logger.warning(
-                    "UI tool schema validation failed, semantic validation only: {} ({})",
-                    record.name,
-                    exc,
-                )
-                errors = []
-            if errors:
-                error = errors[0]
-                raise ModelRetry(
-                    f"工具 {record.name} 参数结构不合法：{_error_path(error)}: {error.message}。"
-                    "请按工具参数 schema 修正后重新调用。"
-                )
+        try:
+            errors = sorted(
+                schema_validator.iter_errors(args),
+                key=lambda item: tuple(str(part) for part in item.absolute_path),
+            )
+        except Exception as exc:
+            logger.exception("UI tool schema validation failed: {}", record.name)
+            raise ModelRetry(f"工具 {record.name} 参数校验失败，请重新生成完整参数。") from exc
+        if errors:
+            error = errors[0]
+            raise ModelRetry(
+                f"工具 {record.name} 参数结构不合法：{_error_path(error)}: {error.message}。"
+                "请按工具参数 schema 修正后重新调用。"
+            )
         _semantic_validator(record, args)
 
     return validate

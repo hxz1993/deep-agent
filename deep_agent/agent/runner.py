@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator
 
 from pydantic_ai import Agent, AgentRunResultEvent, DeferredToolRequests, DeferredToolResults
-from pydantic_ai.messages import ModelMessage, ModelRequest, UserContent, UserPromptPart
+from pydantic_ai.messages import FunctionToolCallEvent, ModelMessage, ModelRequest, UserContent, UserPromptPart
 from pydantic_ai.settings import ModelSettings
 from pydantic_ai.usage import UsageLimits
 
@@ -35,6 +35,17 @@ from deep_agent.db.conversation import SessionStore
 from deep_agent.schemas.attachment import AttachmentRef
 
 _STREAM_OUTPUT_TYPE: list[Any] = [str, DeferredToolRequests]
+
+
+def _should_publish_ui_tool_call(
+    event: Any,
+    mapped: dict[str, Any],
+    ui_tool_hints: dict[str, dict[str, Any]],
+) -> bool:
+    """Publish only the post-validation event for an external UI tool call."""
+    if mapped.get("type") != "tool_call" or mapped.get("tool") not in ui_tool_hints:
+        return True
+    return isinstance(event, FunctionToolCallEvent) and event.args_valid is True
 
 
 class AgentRunner:
@@ -424,12 +435,7 @@ class AgentRunner:
                             continue
                         mapped = events.map_event(event)
                         if mapped is not None:
-                            if (
-                                mapped.get("type") == "tool_call"
-                                and mapped.get("tool") in self.ui_tool_hints
-                            ):
-                                # External UI calls are validated after the model event is emitted.
-                                # Publish only the validated call carried by final.pending/deferred.
+                            if not _should_publish_ui_tool_call(event, mapped, self.ui_tool_hints):
                                 continue
                             accumulator.ingest(mapped)
                             try:

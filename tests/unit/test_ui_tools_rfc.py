@@ -4,6 +4,7 @@ import unittest
 from datetime import datetime, timezone
 from typing import Any
 
+from pydantic import ValidationError
 from pydantic_ai import Agent, DeferredToolRequests, ModelRetry
 from pydantic_ai.messages import ModelResponse, ToolCallPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
@@ -28,7 +29,7 @@ from deep_agent.db.models import Base, McpServer, UiToolDefinition
 from deep_agent.db.dialect import DbDialect
 from deep_agent.db.stores.bundle import create_data_stores
 from deep_agent.db.stores.ui_tool import UiToolStoreBase, create_ui_tool_store
-from deep_agent.schemas.ui_tools import UiToolCreate
+from deep_agent.schemas.ui_tools import UiToolCreate, UiToolManifestEntry, UiToolUpdate
 
 
 class MergeDefinitionsTests(unittest.TestCase):
@@ -70,6 +71,26 @@ class ManifestParseTests(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0].name, "acme__pick_date")
         self.assertEqual(rows[0].source, "mcp")
+
+
+class UiToolSchemaValidationTests(unittest.TestCase):
+    def test_create_update_and_manifest_reject_invalid_json_schema(self) -> None:
+        invalid_schema = {"type": 123}
+
+        with self.assertRaises(ValidationError):
+            UiToolCreate(
+                name="demo__invalid",
+                description="invalid",
+                parameters_json_schema=invalid_schema,
+            )
+        with self.assertRaises(ValidationError):
+            UiToolUpdate(parameters_json_schema=invalid_schema)
+        with self.assertRaises(ValidationError):
+            UiToolManifestEntry(
+                name="invalid",
+                description="invalid",
+                parameters_json_schema=invalid_schema,
+            )
 
 
 class UiToolStoreTests(unittest.IsolatedAsyncioTestCase):
@@ -209,6 +230,39 @@ class UiToolStoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(effective.has_dynamic)
         self.assertIsNotNone(toolset)
         self.assertIn("demo__pick_color", hints)
+
+    async def test_prepare_toolset_skips_historical_invalid_schema_only(self) -> None:
+        now = datetime.now(timezone.utc)
+        async with self.session_factory() as db:
+            db.add(
+                UiToolDefinition(
+                    name="demo__invalid",
+                    description="invalid",
+                    parameters_json_schema={"type": 123},
+                    source="manual",
+                    enabled=True,
+                    override=False,
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+            await db.commit()
+
+        spec = AgentSpec(
+            name="demo",
+            model="test",
+            instructions="hi",
+            capabilities=["ui"],
+            agent_id="00000000-0000-4000-8000-000000000001",
+        )
+        toolset, hints = await prepare_ui_toolset_for_spec(self.stores, spec)
+
+        self.assertIsNotNone(toolset)
+        self.assertNotIn("demo__invalid", hints)
+        assert toolset is not None
+        tools = await toolset.get_tools(None)
+        self.assertNotIn("demo__invalid", tools)
+        self.assertIn("confirm_action", tools)
 
 
 class DiscoveryPolicyTests(unittest.TestCase):
@@ -352,7 +406,7 @@ class ExternalToolsetTests(unittest.IsolatedAsyncioTestCase):
         assert isinstance(result.output, DeferredToolRequests)
         self.assertEqual(result.output.calls[0].args, {"message": "继续？"})
 
-    async def test_invalid_schema_is_retried_once_and_then_deferred(self) -> None:
+    async def test_invalid_args_are_retried_once_and_then_deferred(self) -> None:
         calls = 0
 
         def model_function(_messages: list[Any], _info: AgentInfo) -> ModelResponse:
@@ -372,6 +426,18 @@ class ExternalToolsetTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(calls, 2)
         self.assertIsInstance(result.output, DeferredToolRequests)
+
+    def test_invalid_tool_schema_fails_when_toolset_is_built(self) -> None:
+        invalid = UIToolRecord(
+            name="invalid_form",
+            description="invalid",
+            parameters_json_schema={"type": 123},
+            widget="text",
+            source="manual",
+        )
+
+        with self.assertRaises(ValueError):
+            build_external_toolset([invalid])
 
     async def test_invalid_clarify_semantics_are_retried_once(self) -> None:
         clarify = UIToolRecord(
@@ -422,6 +488,73 @@ class ExternalToolsetTests(unittest.IsolatedAsyncioTestCase):
         assert validator is not None
         with self.assertRaises(ModelRetry):
             validator(None, fields=[{"field": "account", "type": "select", "options": []}])
+
+    async def test_clarify_validator_rejects_empty_option_object(self) -> None:
+        clarify = UIToolRecord(
+            name="deep_cube__clarify",
+            description="clarify",
+            parameters_json_schema={"type": "object"},
+            widget="clarify",
+            source="manual",
+        )
+        tools = await build_external_toolset([clarify]).get_tools(None)
+        validator = tools["deep_cube__clarify"].args_validator_func
+        assert validator is not None
+
+        with self.assertRaises(ModelRetry):
+            validator(
+                None,
+                fields=[{"field": "account", "type": "select", "options": [{}]}],
+            )
+
+    async def test_clarify_validator_rejects_missing_type_and_duplicate_id(self) -> None:
+        clarify = UIToolRecord(
+            name="deep_cube__clarify",
+            description="clarify",
+            parameters_json_schema={"type": "object"},
+            widget="clarify",
+            source="manual",
+        )
+        tools = await build_external_toolset([clarify]).get_tools(None)
+        validator = tools["deep_cube__clarify"].args_validator_func
+        assert validator is not None
+
+        with self.assertRaises(ModelRetry):
+            validator(None, fields=[{"field": "account"}])
+        with self.assertRaises(ModelRetry):
+            validator(
+                None,
+                fields=[
+                    {"field": "account", "type": "text"},
+                    {"field": "account", "type": "textarea"},
+                ],
+            )
+
+    async def test_clarify_validator_rejects_object_identifiers(self) -> None:
+        clarify = UIToolRecord(
+            name="deep_cube__clarify",
+            description="clarify",
+            parameters_json_schema={"type": "object"},
+            widget="clarify",
+            source="manual",
+        )
+        tools = await build_external_toolset([clarify]).get_tools(None)
+        validator = tools["deep_cube__clarify"].args_validator_func
+        assert validator is not None
+
+        with self.assertRaises(ModelRetry):
+            validator(None, fields=[{"field": {}, "type": "textarea"}])
+        with self.assertRaises(ModelRetry):
+            validator(
+                None,
+                fields=[
+                    {
+                        "field": "account",
+                        "type": "select",
+                        "options": [{"value": {}}],
+                    }
+                ],
+            )
 
 
 if __name__ == "__main__":

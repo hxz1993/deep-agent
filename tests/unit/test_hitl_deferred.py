@@ -100,7 +100,8 @@ class AgentRunnerDeferredTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(events_out[-1]["status"], "pending")
         self.assertTrue(events_out[-1]["deferred"]["calls"])
         tool_calls = [e for e in events_out if e.get("type") == "tool_call"]
-        self.assertFalse(tool_calls)
+        self.assertEqual(len(tool_calls), 1)
+        self.assertEqual(tool_calls[0]["tool"], "confirm_action")
         self.assertEqual(events_out[-1]["deferred"]["calls"][0]["tool"], "confirm_action")
 
     async def test_run_stream_tool_call_includes_metadata_from_hints(self) -> None:
@@ -132,7 +133,9 @@ class AgentRunnerDeferredTests(unittest.IsolatedAsyncioTestCase):
             events_out.append(ev)
 
         tool_calls = [e for e in events_out if e.get("type") == "tool_call"]
-        self.assertFalse(tool_calls)
+        self.assertEqual(len(tool_calls), 1)
+        self.assertEqual(tool_calls[0]["metadata"], {"form_version": "1"})
+        self.assertEqual(tool_calls[0]["widget"], "text")
         self.assertEqual(events_out[-1]["deferred"]["calls"][0]["metadata"], {"form_version": "1"})
         self.assertEqual(events_out[-1]["deferred"]["calls"][0]["widget"], "text")
 
@@ -186,7 +189,10 @@ class AgentRunnerDeferredTests(unittest.IsolatedAsyncioTestCase):
             events_out.append(ev)
 
         self.assertEqual(model_calls, 2)
-        self.assertFalse([event for event in events_out if event.get("type") == "tool_call"])
+        tool_calls = [event for event in events_out if event.get("type") == "tool_call"]
+        self.assertEqual(len(tool_calls), 1)
+        self.assertEqual(tool_calls[0]["tool_call_id"], "call-2")
+        self.assertEqual(tool_calls[0]["args"]["fields"][0]["field"], "reason")
         deferred_call = events_out[-1]["deferred"]["calls"][0]
         self.assertEqual(deferred_call["tool_call_id"], "call-2")
         self.assertEqual(deferred_call["args"]["fields"][0]["field"], "reason")

@@ -6,6 +6,8 @@ from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
+from jsonschema.exceptions import SchemaError
+from jsonschema.validators import validator_for
 
 from deep_agent.db.models import UiToolDefinition
 
@@ -18,6 +20,18 @@ from deep_agent.capabilities.ui.constants import (
 )
 
 UiToolSource = Literal["builtin", "mcp", "manual"]
+
+
+def _validate_parameters_json_schema(value: dict[str, Any]) -> dict[str, Any]:
+    encoded = json.dumps(value, ensure_ascii=False)
+    if len(encoded.encode("utf-8")) > MAX_SCHEMA_BYTES:
+        raise ValueError(f"parameters_json_schema exceeds {MAX_SCHEMA_BYTES} bytes")
+    try:
+        validator_class = validator_for(value)
+        validator_class.check_schema(value)
+    except (SchemaError, TypeError) as exc:
+        raise ValueError(f"parameters_json_schema is not a valid JSON Schema: {exc}") from exc
+    return value
 
 
 class UiToolManifestEntry(BaseModel):
@@ -37,11 +51,13 @@ class UiToolManifestEntry(BaseModel):
             raise ValueError(f"tool name {value!r} is reserved")
         return value
 
+    @field_validator("parameters_json_schema")
+    @classmethod
+    def validate_parameters_schema(cls, value: dict[str, Any]) -> dict[str, Any]:
+        return _validate_parameters_json_schema(value)
+
     @model_validator(mode="after")
     def validate_schema_size(self) -> UiToolManifestEntry:
-        encoded = json.dumps(self.parameters_json_schema, ensure_ascii=False)
-        if len(encoded.encode("utf-8")) > MAX_SCHEMA_BYTES:
-            raise ValueError(f"parameters_json_schema exceeds {MAX_SCHEMA_BYTES} bytes")
         if len(self.description) > MAX_DESCRIPTION_LEN:
             raise ValueError(f"description exceeds {MAX_DESCRIPTION_LEN} characters")
         return self
@@ -86,11 +102,13 @@ class UiToolCreate(BaseModel):
             raise ValueError(f"name {value!r} is reserved for builtin tools")
         return value
 
+    @field_validator("parameters_json_schema")
+    @classmethod
+    def validate_parameters_schema(cls, value: dict[str, Any]) -> dict[str, Any]:
+        return _validate_parameters_json_schema(value)
+
     @model_validator(mode="after")
     def validate_payload(self) -> UiToolCreate:
-        encoded = json.dumps(self.parameters_json_schema, ensure_ascii=False)
-        if len(encoded.encode("utf-8")) > MAX_SCHEMA_BYTES:
-            raise ValueError(f"parameters_json_schema exceeds {MAX_SCHEMA_BYTES} bytes")
         if len(self.description) > MAX_DESCRIPTION_LEN:
             raise ValueError(f"description exceeds {MAX_DESCRIPTION_LEN} characters")
         return self
@@ -105,6 +123,23 @@ class UiToolUpdate(BaseModel):
     enabled: bool | None = None
     override: bool | None = None
     agent_ids: list[str] | None = None
+
+    @field_validator("parameters_json_schema")
+    @classmethod
+    def validate_parameters_schema(
+        cls,
+        value: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        if value is None:
+            return None
+        return _validate_parameters_json_schema(value)
+
+    @field_validator("description")
+    @classmethod
+    def validate_description(cls, value: str | None) -> str | None:
+        if value is not None and len(value) > MAX_DESCRIPTION_LEN:
+            raise ValueError(f"description exceeds {MAX_DESCRIPTION_LEN} characters")
+        return value
 
 
 class UiToolResponse(BaseModel):

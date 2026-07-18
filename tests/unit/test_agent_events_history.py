@@ -11,6 +11,7 @@ from pydantic_ai.messages import (
     ThinkingPart,
     ThinkingPartDelta,
     ToolCallPart,
+    ToolReturnPart,
     UserPromptPart,
 )
 
@@ -235,15 +236,219 @@ class HistoryThinkingTests(unittest.TestCase):
                     )
                 ]
             ),
+            ModelResponse(
+                parts=[
+                    ToolCallPart(
+                        tool_name="deep_cube__clarify",
+                        args={"fields": [{"field": "reason", "type": "textarea"}]},
+                        tool_call_id="valid-call",
+                    )
+                ]
+            ),
         ]
 
         filtered = filter_ephemeral_agent_messages(messages)
 
-        self.assertEqual(len(filtered), 1)
+        self.assertEqual(len(filtered), 2)
         self.assertIsInstance(filtered[0], ModelResponse)
         self.assertEqual(len(filtered[0].parts), 1)
         self.assertIsInstance(filtered[0].parts[0], TextPart)
         self.assertEqual(filtered[0].parts[0].content, "正在准备表单")
+        self.assertEqual(filtered[1].parts[0].tool_call_id, "valid-call")
+
+    def test_same_tool_call_id_retry_preserves_corrected_call(self) -> None:
+        messages = [
+            ModelResponse(
+                parts=[
+                    ToolCallPart(
+                        tool_name="deep_cube__clarify",
+                        args={},
+                        tool_call_id="same-call",
+                    )
+                ]
+            ),
+            ModelRequest(
+                parts=[
+                    RetryPromptPart(
+                        content="fields must be a non-empty array",
+                        tool_name="deep_cube__clarify",
+                        tool_call_id="same-call",
+                    )
+                ]
+            ),
+            ModelResponse(
+                parts=[
+                    ToolCallPart(
+                        tool_name="deep_cube__clarify",
+                        args={"fields": [{"field": "reason", "type": "textarea"}]},
+                        tool_call_id="same-call",
+                    )
+                ]
+            ),
+        ]
+
+        filtered = filter_ephemeral_agent_messages(messages)
+        history = model_messages_to_history(messages)
+
+        self.assertEqual(len(filtered), 1)
+        self.assertEqual(filtered[0].parts[0].args["fields"][0]["field"], "reason")
+        self.assertEqual(len(history), 1)
+        self.assertEqual(history[0].parts[0].tool_call_id, "same-call")
+        self.assertEqual(history[0].parts[0].args["fields"][0]["field"], "reason")
+
+    def test_missing_tool_call_id_retry_preserves_only_corrected_call(self) -> None:
+        messages = [
+            ModelResponse(
+                parts=[ToolCallPart("deep_cube__clarify", {}, tool_call_id=None)]
+            ),
+            ModelRequest(
+                parts=[
+                    RetryPromptPart(
+                        content="fields must be a non-empty array",
+                        tool_name="deep_cube__clarify",
+                        tool_call_id=None,
+                    )
+                ]
+            ),
+            ModelResponse(
+                parts=[
+                    ToolCallPart(
+                        "deep_cube__clarify",
+                        {"fields": [{"field": "reason", "type": "textarea"}]},
+                        tool_call_id=None,
+                    )
+                ]
+            ),
+        ]
+
+        filtered = filter_ephemeral_agent_messages(messages)
+        history = model_messages_to_history(messages)
+
+        self.assertEqual(len(filtered), 1)
+        self.assertEqual(filtered[0].parts[0].args["fields"][0]["field"], "reason")
+        self.assertEqual(len(history), 1)
+        self.assertEqual(history[0].parts[0].args["fields"][0]["field"], "reason")
+
+    def test_mixed_tool_result_and_retry_preserves_valid_pair(self) -> None:
+        messages = [
+            ModelResponse(
+                parts=[
+                    ToolCallPart("lookup", {"query": "A"}, tool_call_id="lookup-call"),
+                    ToolCallPart("deep_cube__clarify", {}, tool_call_id="clarify-call"),
+                ]
+            ),
+            ModelRequest(
+                parts=[
+                    ToolReturnPart(
+                        tool_name="lookup",
+                        content={"value": "A100"},
+                        tool_call_id="lookup-call",
+                    ),
+                    RetryPromptPart(
+                        content="fields must be a non-empty array",
+                        tool_name="deep_cube__clarify",
+                        tool_call_id="clarify-call",
+                    ),
+                ]
+            ),
+            ModelResponse(
+                parts=[
+                    ToolCallPart(
+                        "deep_cube__clarify",
+                        {"fields": [{"field": "reason", "type": "textarea"}]},
+                        tool_call_id="clarify-call-2",
+                    )
+                ]
+            ),
+        ]
+
+        filtered = filter_ephemeral_agent_messages(messages)
+
+        self.assertEqual(len(filtered), 3)
+        self.assertEqual([part.tool_name for part in filtered[0].parts], ["lookup"])
+        self.assertEqual(len(filtered[1].parts), 1)
+        self.assertIsInstance(filtered[1].parts[0], ToolReturnPart)
+        self.assertEqual(filtered[1].parts[0].tool_call_id, "lookup-call")
+        self.assertEqual(filtered[2].parts[0].tool_call_id, "clarify-call-2")
+
+    def test_terminal_retry_is_preserved_for_deferred_resume_but_hidden_from_history(self) -> None:
+        messages = [
+            ModelResponse(
+                parts=[
+                    ToolCallPart("confirm_action", {"message": "继续？"}, tool_call_id="confirm"),
+                    ToolCallPart("deep_cube__clarify", {}, tool_call_id="clarify"),
+                ]
+            ),
+            ModelRequest(
+                parts=[
+                    RetryPromptPart(
+                        content="fields must be a non-empty array",
+                        tool_name="deep_cube__clarify",
+                        tool_call_id="clarify",
+                    )
+                ]
+            ),
+        ]
+
+        filtered = filter_ephemeral_agent_messages(messages)
+        history = model_messages_to_history(messages)
+
+        self.assertEqual(len(filtered), 2)
+        self.assertEqual(len(filtered[0].parts), 2)
+        self.assertIsInstance(filtered[1].parts[0], RetryPromptPart)
+        self.assertEqual(len(history), 1)
+        self.assertEqual(len(history[0].parts), 1)
+        self.assertEqual(history[0].parts[0].tool_call_id, "confirm")
+
+    def test_reused_old_tool_call_id_only_drops_latest_rejected_call(self) -> None:
+        messages = [
+            ModelResponse(parts=[ToolCallPart("lookup", {"query": "A"}, tool_call_id="same")]),
+            ModelRequest(
+                parts=[
+                    ToolReturnPart(
+                        tool_name="lookup",
+                        content={"value": "A100"},
+                        tool_call_id="same",
+                    )
+                ]
+            ),
+            ModelResponse(
+                parts=[ToolCallPart("deep_cube__clarify", {}, tool_call_id="same")]
+            ),
+            ModelRequest(
+                parts=[
+                    RetryPromptPart(
+                        content="fields must be a non-empty array",
+                        tool_name="deep_cube__clarify",
+                        tool_call_id="same",
+                    )
+                ]
+            ),
+            ModelResponse(
+                parts=[
+                    ToolCallPart(
+                        "deep_cube__clarify",
+                        {"fields": [{"field": "reason", "type": "textarea"}]},
+                        tool_call_id="same",
+                    )
+                ]
+            ),
+        ]
+
+        filtered = filter_ephemeral_agent_messages(messages)
+        history = model_messages_to_history(messages)
+
+        self.assertEqual(len(filtered), 3)
+        self.assertEqual(filtered[0].parts[0].tool_name, "lookup")
+        self.assertIsInstance(filtered[1].parts[0], ToolReturnPart)
+        self.assertEqual(filtered[2].parts[0].tool_name, "deep_cube__clarify")
+        tool_calls = [
+            part
+            for message in history
+            for part in message.parts
+            if part.type == "tool_call"
+        ]
+        self.assertEqual([part.tool for part in tool_calls], ["lookup", "deep_cube__clarify"])
 
 
 if __name__ == "__main__":

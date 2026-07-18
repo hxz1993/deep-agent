@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Any, Literal
 
@@ -165,28 +165,84 @@ def is_user_only_request(message: ModelMessage) -> bool:
     return all(isinstance(part, UserPromptPart) for part in message.parts)
 
 
+@dataclass(frozen=True)
+class _RejectedToolCalls:
+    rejected_positions: dict[int, set[int]]
+    retry_positions: dict[int, set[int]]
+    terminal_rejected_positions: dict[int, set[int]]
+    terminal_retry_positions: dict[int, set[int]]
+
+
+def _rejected_tool_calls(messages: list[ModelMessage]) -> _RejectedToolCalls:
+    """Match retry prompts to preceding calls without relying on globally unique IDs."""
+    unresolved: list[tuple[int, int, str, str | None]] = []
+    rejected: dict[int, set[int]] = {}
+    retries: dict[int, set[int]] = {}
+    terminal_rejected: dict[int, set[int]] = {}
+    terminal_retries: dict[int, set[int]] = {}
+    last_response_index = max(
+        (index for index, message in enumerate(messages) if isinstance(message, ModelResponse)),
+        default=-1,
+    )
+
+    def pop_call(tool_call_id: str | None, tool_name: str | None = None) -> tuple[int, int] | None:
+        for index in range(len(unresolved) - 1, -1, -1):
+            message_index, part_index, candidate_name, candidate_id = unresolved[index]
+            if candidate_id != tool_call_id:
+                continue
+            if tool_name and candidate_name != tool_name:
+                continue
+            unresolved.pop(index)
+            return message_index, part_index
+        return None
+
+    for message_index, message in enumerate(messages):
+        if isinstance(message, ModelResponse):
+            for part_index, part in enumerate(message.parts):
+                if isinstance(part, BaseToolCallPart):
+                    unresolved.append(
+                        (message_index, part_index, part.tool_name, part.tool_call_id)
+                    )
+            continue
+
+        if not isinstance(message, ModelRequest):
+            continue
+        for part_index, part in enumerate(message.parts):
+            if isinstance(part, RetryPromptPart):
+                position = pop_call(part.tool_call_id, part.tool_name)
+                if position is not None:
+                    rejected.setdefault(position[0], set()).add(position[1])
+                    retries.setdefault(message_index, set()).add(part_index)
+                    if message_index >= last_response_index:
+                        terminal_rejected.setdefault(position[0], set()).add(position[1])
+                        terminal_retries.setdefault(message_index, set()).add(part_index)
+            elif isinstance(part, ToolReturnPart):
+                pop_call(part.tool_call_id, part.tool_name)
+
+    return _RejectedToolCalls(
+        rejected_positions=rejected,
+        retry_positions=retries,
+        terminal_rejected_positions=terminal_rejected,
+        terminal_retry_positions=terminal_retries,
+    )
+
+
 def filter_ephemeral_agent_messages(messages: list[ModelMessage]) -> list[ModelMessage]:
     """Drop thinking-only retries and validation prompts from persisted history."""
-    rejected_tool_call_ids = {
-        part.tool_call_id
-        for message in messages
-        if isinstance(message, ModelRequest)
-        for part in message.parts
-        if isinstance(part, RetryPromptPart) and part.tool_call_id
-    }
+    rejected_calls = _rejected_tool_calls(messages)
     filtered: list[ModelMessage] = []
-    for message in messages:
+    for message_index, message in enumerate(messages):
         if isinstance(message, ModelResponse) and is_thinking_only_response(message):
             continue
-        if isinstance(message, ModelResponse) and rejected_tool_call_ids:
+        if isinstance(message, ModelResponse):
+            rejected_parts = (
+                rejected_calls.rejected_positions.get(message_index, set())
+                - rejected_calls.terminal_rejected_positions.get(message_index, set())
+            )
             kept_parts = [
                 part
-                for part in message.parts
-                if not (
-                    isinstance(part, BaseToolCallPart)
-                    and part.tool_call_id
-                    and part.tool_call_id in rejected_tool_call_ids
-                )
+                for part_index, part in enumerate(message.parts)
+                if part_index not in rejected_parts
             ]
             if not kept_parts:
                 continue
@@ -194,8 +250,17 @@ def filter_ephemeral_agent_messages(messages: list[ModelMessage]) -> list[ModelM
                 message = replace(message, parts=kept_parts)
                 if is_thinking_only_response(message):
                     continue
-        if isinstance(message, ModelRequest) and is_retry_only_request(message):
-            continue
+        if isinstance(message, ModelRequest):
+            terminal_retries = rejected_calls.terminal_retry_positions.get(message_index, set())
+            kept_parts = [
+                part
+                for part_index, part in enumerate(message.parts)
+                if not isinstance(part, RetryPromptPart) or part_index in terminal_retries
+            ]
+            if not kept_parts:
+                continue
+            if len(kept_parts) != len(message.parts):
+                message = replace(message, parts=kept_parts)
         filtered.append(message)
     return filtered
 
@@ -274,18 +339,18 @@ def incremental_append_messages(
 def _response_parts(
     response: ModelResponse,
     *,
-    rejected_tool_call_ids: set[str] | None = None,
+    rejected_part_indices: set[int] | None = None,
 ) -> list[HistoryPart]:
     parts: list[HistoryPart] = []
-    rejected_tool_call_ids = rejected_tool_call_ids or set()
-    for part in response.parts:
+    rejected_part_indices = rejected_part_indices or set()
+    for part_index, part in enumerate(response.parts):
+        if part_index in rejected_part_indices:
+            continue
         if isinstance(part, TextPart) and part.content:
             parts.append(HistoryTextPart(content=part.content))
         elif isinstance(part, ThinkingPart) and part.content:
             parts.append(HistoryThinkingPart(content=part.content))
         elif isinstance(part, BaseToolCallPart):
-            if part.tool_call_id and part.tool_call_id in rejected_tool_call_ids:
-                continue
             parts.append(
                 HistoryToolCallPart(
                     tool=part.tool_name,
@@ -370,13 +435,7 @@ def session_activity_timestamps(messages: list[ModelMessage]) -> tuple[datetime 
 
 def model_messages_to_history(messages: list[ModelMessage]) -> list[HistoryMessage]:
     """Convert Pydantic AI message history to a frontend-friendly timeline."""
-    rejected_tool_call_ids = {
-        part.tool_call_id
-        for message in messages
-        if isinstance(message, ModelRequest)
-        for part in message.parts
-        if isinstance(part, RetryPromptPart) and part.tool_call_id
-    }
+    rejected_calls = _rejected_tool_calls(messages)
     history: list[HistoryMessage] = []
     pending_tool_results: list[HistoryPart] = []
     pending_tool_results_timestamp: datetime | None = None
@@ -434,7 +493,7 @@ def model_messages_to_history(messages: list[ModelMessage]) -> list[HistoryMessa
             flush_tool_results()
             parts = _response_parts(
                 message,
-                rejected_tool_call_ids=rejected_tool_call_ids,
+                rejected_part_indices=rejected_calls.rejected_positions.get(idx),
             )
             if parts:
                 history.append(

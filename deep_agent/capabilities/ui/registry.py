@@ -219,7 +219,15 @@ async def prepare_ui_toolset_for_spec(
 ) -> tuple[ExternalToolset | None, dict[str, dict[str, Any]]]:
     await ensure_mcp_ui_tools_discovered(stores, spec, mcp_rows=mcp_rows)
     effective = await load_effective_ui_tools(stores, spec, mcp_rows=mcp_rows)
-    hints = build_tool_hints(effective.definitions)
-    if not effective.definitions:
+    valid_definitions: list[UIToolRecord] = []
+    for definition in effective.definitions:
+        try:
+            build_args_validator(definition)
+        except ValueError as exc:
+            logger.error("Skipping invalid UI tool schema '{}': {}", definition.name, exc)
+            continue
+        valid_definitions.append(definition)
+    hints = build_tool_hints(valid_definitions)
+    if not valid_definitions:
         return None, hints
-    return build_external_toolset(effective.definitions), hints
+    return build_external_toolset(valid_definitions), hints

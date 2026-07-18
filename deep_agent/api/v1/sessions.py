@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from pydantic_ai.messages import ModelMessage
 
 from deep_agent.core.context import AppContextDep
+from deep_agent.api.v1.request_identity import RequestUserDep
 from deep_agent.db.session_list import MAX_LIST_LIMIT, SessionListFilters, SessionSummaryRow
 from deep_agent.db.session_scope import resolve_session
 from deep_agent.agent.history import (
@@ -87,8 +88,8 @@ async def _build_session_info(
 @router.get("/sessions", response_model=SessionListResponse)
 async def list_sessions(
     ctx: AppContextDep,
+    user_id: RequestUserDep,
     agent_id: str | None = Query(default=None, description="Filter by agent id."),
-    user_id: str | None = Query(default=None, description="Filter by user id."),
     limit: int = Query(default=50, ge=1, le=MAX_LIST_LIMIT, description="Page size."),
     offset: int = Query(default=0, ge=0, description="Page offset."),
     updated_after: datetime | None = Query(default=None, description="Only sessions updated at or after this time (UTC)."),
@@ -124,10 +125,16 @@ async def list_sessions(
 @router.get("/sessions/{session_id}", response_model=SessionInfo)
 async def get_session(
     ctx: AppContextDep,
+    user_id: RequestUserDep,
     session_id: str,
     agent_id: str | None = None,
 ) -> SessionInfo:
-    resolved = await resolve_session(ctx.store, session_id, agent_id=agent_id)
+    resolved = await resolve_session(
+        ctx.store,
+        session_id,
+        agent_id=agent_id,
+        user_id=user_id,
+    )
     if resolved is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
     scope, resolved_session_id = resolved
@@ -154,10 +161,16 @@ async def _spec_for_history(ctx: AppContextDep, agent_id: str | None) -> AgentSp
 @router.get("/sessions/{session_id}/history", response_model=SessionHistoryResponse)
 async def get_session_history(
     ctx: AppContextDep,
+    user_id: RequestUserDep,
     session_id: str,
     agent_id: str | None = None,
 ) -> SessionHistoryResponse:
-    resolved = await resolve_session(ctx.store, session_id, agent_id=agent_id)
+    resolved = await resolve_session(
+        ctx.store,
+        session_id,
+        agent_id=agent_id,
+        user_id=user_id,
+    )
     if resolved is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
     scope, resolved_session_id = resolved
@@ -180,10 +193,16 @@ async def get_session_history(
 @router.delete("/sessions/{session_id}", status_code=status.HTTP_200_OK)
 async def delete_session(
     ctx: AppContextDep,
+    user_id: RequestUserDep,
     session_id: str,
     agent_id: str | None = None,
 ) -> None:
-    resolved = await resolve_session(ctx.store, session_id, agent_id=agent_id)
+    resolved = await resolve_session(
+        ctx.store,
+        session_id,
+        agent_id=agent_id,
+        user_id=user_id,
+    )
     if resolved is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
     scope, resolved_session_id = resolved
@@ -206,6 +225,7 @@ class SessionRenameRequest(BaseModel):
 @router.patch("/sessions/{session_id}", response_model=SessionInfo)
 async def rename_session(
     ctx: AppContextDep,
+    user_id: RequestUserDep,
     session_id: str,
     body: SessionRenameRequest,
     agent_id: str | None = None,
@@ -226,7 +246,12 @@ async def rename_session(
             detail="Must specify either 'title' or 'auto'",
         )
 
-    resolved = await resolve_session(ctx.store, session_id, agent_id=agent_id)
+    resolved = await resolve_session(
+        ctx.store,
+        session_id,
+        agent_id=agent_id,
+        user_id=user_id,
+    )
     if resolved is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
     scope, resolved_session_id = resolved

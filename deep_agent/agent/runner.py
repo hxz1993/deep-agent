@@ -278,17 +278,17 @@ class AgentRunner:
     ) -> None:
         """后台生成并持久化会话标题。"""
         try:
-            # 步骤 1：判断是否首次交换
-            history = await self.store.get_history(session_id, agent_id=deps.agent_id)
-            user_count = sum(1 for m in history if isinstance(m, ModelRequest))
-            if not (user_count <= 1):
-                return
+            async with self._session_lock(session_id, agent_id=deps.agent_id):
+                history = await self.store.get_history(session_id, agent_id=deps.agent_id)
+                user_count = sum(1 for m in history if isinstance(m, ModelRequest))
+                if not (user_count <= 1):
+                    return
 
-            user_text = first_user_prompt(history) or ""
-            existing = await self.store.get_session_title(session_id, agent_id=deps.agent_id)
-            # 已有非 seed 标题（AI 或手动）则不再覆盖；seed 与用户首句相同时允许 AI 升级。
-            if existing and (not user_text or existing != user_text):
-                return
+                user_text = first_user_prompt(history) or ""
+                existing = await self.store.get_session_title(session_id, agent_id=deps.agent_id)
+                # 已有非 seed 标题（AI 或手动）则不再覆盖；seed 与用户首句相同时允许 AI 升级。
+                if existing and (not user_text or existing != user_text):
+                    return
 
             assistant_text = _extract_assistant_text(new_messages) or _extract_assistant_text(history)
 
@@ -304,13 +304,28 @@ class AgentRunner:
                 title = user_text
 
             if title:
-                latest = await self.store.get_session_title(session_id, agent_id=deps.agent_id)
-                if latest and (not user_text or latest != user_text):
-                    return
-                await self.store.update_session_title(session_id, deps.agent_id, title)
+                async with self._session_lock(session_id, agent_id=deps.agent_id):
+                    latest = await self.store.get_session_title(session_id, agent_id=deps.agent_id)
+                    if latest and (not user_text or latest != user_text):
+                        return
+                    await self.store.update_session_title(session_id, deps.agent_id, title)
 
         except Exception as e:
             logger.warning("Title generation failed for session {}: {}", session_id, e)
+
+    async def _generate_title_after_persist(
+        self,
+        persister: EventPersister,
+        session_id: str,
+        deps: AgentDeps,
+        new_messages: list[ModelMessage],
+    ) -> None:
+        try:
+            await persister.flush(session_id, agent_id=deps.agent_id)
+        except Exception as exc:  # noqa: BLE001 - background task must not leak failures
+            logger.warning("Title persistence wait failed for session {}: {}", session_id, exc)
+            return
+        await self._maybe_generate_title(session_id, deps, new_messages)
 
     async def run(
         self,
@@ -428,9 +443,14 @@ class AgentRunner:
                     run_published = True
 
                     if branch_from is None:
-                        asyncio.create_task(self._maybe_generate_title(
-                            session_id, deps, result.new_messages(),
-                        ))
+                        asyncio.create_task(
+                            self._generate_title_after_persist(
+                                persister,
+                                session_id,
+                                deps,
+                                result.new_messages(),
+                            )
+                        )
             except asyncio.CancelledError:
                 cancelled = True
             except GeneratorExit:

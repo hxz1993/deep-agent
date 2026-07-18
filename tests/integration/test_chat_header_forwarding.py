@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 from pydantic_ai.models.test import TestModel
 
+from tests.helpers.request_identity import TEST_USER_ID, install_test_user_header
 from tests.integration.helpers.chat import async_echo_chat_app, read_chat_stream, test_chat_client
 
 
@@ -34,6 +35,7 @@ class ChatHeaderForwardingStreamTest(unittest.IsolatedAsyncioTestCase):
             recorded,
             {
                 "authorization": "Bearer stream-token",
+                "user": TEST_USER_ID,
                 "x-tenant-id": "tenant-stream",
             },
         )
@@ -63,11 +65,12 @@ class ChatHeaderForwardingTests(unittest.TestCase):
             recorded,
             {
                 "authorization": "Bearer chat-api-token",
+                "user": TEST_USER_ID,
                 "x-tenant-id": "tenant-chat",
             },
         )
 
-    def test_chat_api_without_request_headers_leaves_mcp_meta_empty(self) -> None:
+    def test_chat_api_forwards_authenticated_user_without_other_headers(self) -> None:
         with test_chat_client() as (client, record_file):
             response = client.post(
                 "/api/v1/chat",
@@ -79,7 +82,7 @@ class ChatHeaderForwardingTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200, response.text)
         recorded = json.loads(record_file.read_text(encoding="utf-8"))
-        self.assertEqual(recorded, {})
+        self.assertEqual(recorded, {"user": TEST_USER_ID})
 
     def test_chat_uses_production_builtin_loader_for_text_tools(self) -> None:
         from fastapi import FastAPI
@@ -104,6 +107,7 @@ class ChatHeaderForwardingTests(unittest.TestCase):
         )
 
         app = FastAPI()
+        install_test_user_header(app)
         app.include_router(api_router)
 
         test_model = TestModel(

@@ -35,7 +35,6 @@ class ChatRequest(BaseModel):
         default=None,
         description="Optional subset of capability names to enable for this run.",
     )
-    user: str | None = Field(default=None, description="Optional user identifier.")
     branch_from: int | None = Field(
         default=None,
         description="branch_point from history; truncates stored messages at this index before run.",

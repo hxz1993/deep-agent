@@ -19,6 +19,7 @@ from deep_agent.api.v1 import api_router
 from deep_agent.capabilities import build_registry
 from deep_agent.capabilities.mcp.lease_manager import McpLeaseManager
 from deep_agent.core.context import AppContext, get_context, init_context, reset_context
+from tests.helpers.request_identity import install_test_user_header
 from tests.helpers.sqlite_stores import make_sqlite_stores
 from tests.integration.helpers.session_seed import load_session_fixture, seed_session_from_fixture
 
@@ -29,6 +30,7 @@ class SessionRenameTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         stores, self._engine, self._session_factory = await make_sqlite_stores()
         self._app = FastAPI()
+        install_test_user_header(self._app)
         self._app.include_router(api_router)
         init_context(
             AppContext.for_testing(

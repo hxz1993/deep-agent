@@ -10,6 +10,7 @@ from deep_agent.agent.deferred import build_deferred_tool_results
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.headers import extract_forward_headers
 from deep_agent.api.v1.deps import build_runner, build_runner_for_agent
+from deep_agent.api.v1.request_identity import RequestUserDep
 from deep_agent.core.context import AppContextDep
 from deep_agent.core.exceptions import AgentNotFoundError, LlmModelNotFoundError
 from deep_agent.db.ids import normalize_agent_id
@@ -33,6 +34,18 @@ def _agent_deps(
         agent_id=agent_id,
         request_headers=extract_forward_headers(request),
     )
+
+
+async def _ensure_session_access(
+    ctx: AppContextDep,
+    session_id: str,
+    *,
+    user: str,
+    agent_id: str | None,
+) -> None:
+    owner = await ctx.store.get_session_owner(session_id, agent_id=agent_id)
+    if owner.exists and owner.user_id != user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
 
 
 def _validate_chat_body(body: ChatRequest | StreamChatRequest) -> None:
@@ -86,9 +99,16 @@ def _deferred_results(body: StreamChatRequest):
 
 
 @router.post("/chat", response_model=ChatResponse)
-async def chat(request: Request, ctx: AppContextDep, body: ChatRequest) -> ChatResponse:
+async def chat(
+    request: Request,
+    ctx: AppContextDep,
+    body: ChatRequest,
+    user: RequestUserDep,
+) -> ChatResponse:
     _validate_chat_body(body)
     session_id = body.session_id or uuid.uuid4().hex
+    if body.session_id is not None:
+        await _ensure_session_access(ctx, session_id, user=user, agent_id=None)
     await _validate_branch_from(ctx, session_id, agent_id=None, branch_from=body.branch_from)
     try:
         runner = await build_runner(
@@ -100,7 +120,7 @@ async def chat(request: Request, ctx: AppContextDep, body: ChatRequest) -> ChatR
         )
     except LlmModelNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    deps = _agent_deps(request, ctx, session_id=session_id, user=body.user)
+    deps = _agent_deps(request, ctx, session_id=session_id, user=user)
     result = await runner.run(
         session_id,
         body.message or "",
@@ -118,7 +138,12 @@ async def chat(request: Request, ctx: AppContextDep, body: ChatRequest) -> ChatR
 
 
 @router.post("/chat/stream")
-async def chat_stream(request: Request, ctx: AppContextDep, body: StreamChatRequest) -> EventSourceResponse:
+async def chat_stream(
+    request: Request,
+    ctx: AppContextDep,
+    body: StreamChatRequest,
+    user: RequestUserDep,
+) -> EventSourceResponse:
     _validate_chat_body(body)
     session_id = body.session_id or uuid.uuid4().hex
     deferred_tool_results = _deferred_results(body)
@@ -136,7 +161,7 @@ async def chat_stream(request: Request, ctx: AppContextDep, body: StreamChatRequ
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
         except LlmModelNotFoundError as exc:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-        deps = _agent_deps(request, ctx, session_id=session_id, user=body.user, agent_id=agent_id)
+        deps = _agent_deps(request, ctx, session_id=session_id, user=user, agent_id=agent_id)
         session_data = {"session_id": session_id, "agent_id": agent_id}
         api_agent_id = agent_id
     else:
@@ -150,10 +175,17 @@ async def chat_stream(request: Request, ctx: AppContextDep, body: StreamChatRequ
             )
         except LlmModelNotFoundError as exc:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-        deps = _agent_deps(request, ctx, session_id=session_id, user=body.user)
+        deps = _agent_deps(request, ctx, session_id=session_id, user=user)
         session_data = {"session_id": session_id}
         api_agent_id = None
 
+    if body.session_id is not None:
+        await _ensure_session_access(
+            ctx,
+            session_id,
+            user=user,
+            agent_id=api_agent_id,
+        )
     await _validate_branch_from(ctx, session_id, agent_id=api_agent_id, branch_from=body.branch_from)
 
     async def event_generator():

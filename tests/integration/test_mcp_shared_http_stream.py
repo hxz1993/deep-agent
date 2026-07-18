@@ -19,6 +19,7 @@ from deep_agent.capabilities.mcp.shared_registry import McpSharedRegistry
 from deep_agent.capabilities.mcp.lease_manager import McpLeaseManager
 from deep_agent.core.context import AppContext, get_context, init_context, reset_context
 from deep_agent.options import OPTION
+from tests.helpers.request_identity import install_test_user_header
 from tests.helpers.sqlite_stores import ensure_title_uses_main_model, make_sqlite_stores
 
 
@@ -92,6 +93,7 @@ class McpSharedHttpStreamTests(unittest.IsolatedAsyncioTestCase):
         )
 
         app = FastAPI()
+        install_test_user_header(app)
         app.include_router(api_router)
         test_model = TestModel(
             call_tools=["text_tools_reverse"],

@@ -32,7 +32,6 @@ class PostgresChatSessionStore(ChatSessionStoreBase):
             index_elements=[ChatSession.agent_id, ChatSession.session_id],
             set_={
                 "updated_at": now,
-                **({"user_id": user_id} if user_id is not None else {}),
                 **({"title": title} if title is not None else {}),
             },
         )

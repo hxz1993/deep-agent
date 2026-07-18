@@ -48,9 +48,10 @@ def _headers_from_http_request(ctx: Context) -> dict[str, str]:
 
 def _filter_forwarded(headers: dict[str, str]) -> dict[str, str]:
     """Keep only headers that deep-agent is expected to forward."""
+    exact = {"authorization", "app", "space", "cookie", "user", "language"}
     out: dict[str, str] = {}
     for key, value in headers.items():
-        if key == "authorization" or key.startswith("x-"):
+        if key in exact or key.startswith("x-"):
             out[key] = value
     return out
 

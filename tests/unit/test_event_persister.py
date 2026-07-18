@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import unittest
 
 from pydantic_ai.messages import ModelMessage, ModelRequest, ModelResponse, TextPart, UserPromptPart
@@ -59,6 +60,38 @@ class EventPersisterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(history), 2)
         users = [m for m in history if is_user_only_request(m)]
         self.assertEqual(len(users), 1)
+
+    async def test_flush_completes_when_terminal_worker_exits_before_marker_is_read(self) -> None:
+        drained = asyncio.Event()
+        release_worker = asyncio.Event()
+
+        class PausingEventPersister(EventPersister):
+            async def _drain_pending(self, *args, **kwargs) -> None:  # type: ignore[no-untyped-def]
+                await super()._drain_pending(*args, **kwargs)
+                drained.set()
+                await release_worker.wait()
+
+        await self.persister.aclose()
+        persister = PausingEventPersister(self.store)
+        self.persister = persister
+        await persister.start()
+        persister.publish(
+            PersistEvent(
+                session_id="s-terminal-race",
+                agent_id=None,
+                user_id=None,
+                kind="run_complete",
+                new_messages=[ModelResponse(parts=[TextPart(content="reply")])],
+            )
+        )
+        await drained.wait()
+        flush_task = asyncio.create_task(persister.flush("s-terminal-race", timeout=0.5))
+        await asyncio.sleep(0)
+        release_worker.set()
+        await flush_task
+
+        history = await self.store.get_history("s-terminal-race")
+        self.assertEqual(len(history), 1)
 
     async def test_run_cancelled_accumulator_partial_text(self) -> None:
         user = ModelRequest(parts=[UserPromptPart(content="hi")])

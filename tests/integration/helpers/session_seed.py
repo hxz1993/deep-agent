@@ -15,6 +15,7 @@ from deep_agent.db.session_scope import normalize_agent_scope
 from deep_agent.db.stores.bundle import DataStores
 from deep_agent.schemas.agent import AgentCreate
 from deep_agent.schemas.llm_model import LlmModelCreate
+from tests.helpers.request_identity import TEST_USER_ID
 
 
 @dataclass(frozen=True)
@@ -118,6 +119,7 @@ async def seed_session_from_fixture(
                 ChatSession(
                     agent_id=scope,
                     session_id=session_id,
+                    user_id=TEST_USER_ID,
                     title=title,
                     created_at=now,
                     updated_at=now,

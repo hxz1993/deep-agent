@@ -17,6 +17,7 @@ from tests.helpers.sqlite_stores import make_sqlite_stores_sync
 
 class SessionListApiTests(unittest.TestCase):
     def setUp(self) -> None:
+        self.user_id = "user-a"
         self.stores, self.engine, self.session_factory = make_sqlite_stores_sync()
         self.app = FastAPI()
         self.app.include_router(api_router)
@@ -28,7 +29,7 @@ class SessionListApiTests(unittest.TestCase):
             db_session_factory=self.session_factory,
         )
         init_context(ctx)
-        self.client = TestClient(self.app)
+        self.client = TestClient(self.app, headers={"user": self.user_id})
 
     def tearDown(self) -> None:
         reset_context()
@@ -43,11 +44,13 @@ class SessionListApiTests(unittest.TestCase):
                 "sess-1",
                 [ModelRequest(parts=[UserPromptPart(content="hello one")])],
                 agent_id="agent-a",
+                user_id=self.user_id,
             )
             await store.append(
                 "sess-2",
                 [ModelRequest(parts=[UserPromptPart(content="hello two")])],
                 agent_id="agent-b",
+                user_id=self.user_id,
             )
 
         asyncio.run(seed())
@@ -70,11 +73,13 @@ class SessionListApiTests(unittest.TestCase):
                 "sess-1",
                 [ModelRequest(parts=[UserPromptPart(content="only a")])],
                 agent_id="agent-a",
+                user_id=self.user_id,
             )
             await store.append(
                 "sess-2",
                 [ModelRequest(parts=[UserPromptPart(content="only b")])],
                 agent_id="agent-b",
+                user_id=self.user_id,
             )
 
         asyncio.run(seed())
@@ -94,6 +99,7 @@ class SessionListApiTests(unittest.TestCase):
             await store.append(
                 "with-messages",
                 [ModelRequest(parts=[UserPromptPart(content="hi")])],
+                user_id=self.user_id,
             )
 
         asyncio.run(seed())
@@ -104,6 +110,33 @@ class SessionListApiTests(unittest.TestCase):
         self.assertEqual(payload["total"], 1)
         self.assertEqual(payload["items"][0]["session_id"], "with-messages")
         self.assertEqual(payload["items"][0]["message_count"], 1)
+
+    def test_list_sessions_requires_user_header(self) -> None:
+        response = self.client.get("/api/v1/sessions", headers={"user": ""})
+        self.assertEqual(response.status_code, 401)
+
+    def test_list_sessions_ignores_user_id_query_and_uses_header(self) -> None:
+        store = get_context().store
+
+        async def seed() -> None:
+            await store.append(
+                "owned",
+                [ModelRequest(parts=[UserPromptPart(content="mine")])],
+                user_id=self.user_id,
+            )
+            await store.append(
+                "other",
+                [ModelRequest(parts=[UserPromptPart(content="not mine")])],
+                user_id="user-b",
+            )
+
+        asyncio.run(seed())
+
+        response = self.client.get("/api/v1/sessions?user_id=user-b")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["total"], 1)
+        self.assertEqual(payload["items"][0]["session_id"], "owned")
 
 
 class SummaryToSessionInfoTests(unittest.TestCase):

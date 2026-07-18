@@ -21,6 +21,7 @@ from deep_agent.core.context import AppContext, get_context, init_context, reset
 from deep_agent.db.stores.bundle import DataStores
 from deep_agent.schemas.mcp import McpServerCreate
 from tests.helpers.sqlite_stores import ensure_title_uses_main_model, make_sqlite_stores, make_sqlite_stores_sync
+from tests.helpers.request_identity import install_test_user_header
 from tests.integration.helpers.mcp import streamable_http_echo_server
 
 ECHO_TOOL_NAME = "echo_echo_request_headers"
@@ -165,6 +166,7 @@ def configure_test_app(
     db_session_factory: Any | None = None,
 ) -> AppContext:
     """Attach sqlite-backed dependencies and MCP rows resolved at use time."""
+    install_test_user_header(app)
     ctx = _build_test_context(
         mcp_url=mcp_url,
         stores=stores,
@@ -186,6 +188,7 @@ async def configure_test_app_async(
     db_session_factory: Any | None = None,
 ) -> AppContext:
     """Async variant for callers already inside a running event loop."""
+    install_test_user_header(app)
     ctx = _build_test_context(
         mcp_url=mcp_url,
         stores=stores,

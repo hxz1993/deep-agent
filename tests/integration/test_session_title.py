@@ -17,6 +17,7 @@ from deep_agent.core.context import AppContext, get_context, init_context, reset
 from deep_agent.schemas.agent import AgentCreate
 from deep_agent.schemas.auxiliary_model import AuxiliaryModelUpdate
 from deep_agent.schemas.llm_model import LlmModelCreate
+from tests.helpers.request_identity import install_test_user_header
 from tests.helpers.sqlite_stores import AUX_TITLE_MODEL_NAME, ensure_title_uses_main_model, make_sqlite_stores, seed_auxiliary_model_configs
 from tests.integration.helpers.chat import mock_request_disconnect, parse_sse_events
 from tests.integration.helpers.live_llm import skip_unless_title_llm, title_llm_configured
@@ -52,6 +53,7 @@ class SessionTitleIntegrationTests(unittest.IsolatedAsyncioTestCase):
             )
         ).id
         self._app = FastAPI()
+        install_test_user_header(self._app)
         self._app.include_router(api_router)
         init_context(
             AppContext.for_testing(
@@ -232,6 +234,7 @@ class AuxiliaryModelApiTests(unittest.IsolatedAsyncioTestCase):
         self._stores = stores
         await stores.auxiliary_model.update("title", AuxiliaryModelUpdate(llm_model_id=None))
         self._app = FastAPI()
+        install_test_user_header(self._app)
         self._app.include_router(api_router)
         init_context(
             AppContext.for_testing(

@@ -1,11 +1,18 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from deep_agent.db.conversation import SessionStore
 
 NO_AGENT_SCOPE = ""
+
+
+@dataclass(frozen=True)
+class SessionOwner:
+    exists: bool
+    user_id: str | None = None
 
 
 def normalize_agent_scope(agent_id: str | None) -> str:
@@ -29,6 +36,7 @@ async def resolve_session(
     session_id: str,
     *,
     agent_id: str | None = None,
+    user_id: str | None = None,
 ) -> tuple[str, str] | None:
     """Resolve API session id to ``(agent_scope, session_id)``."""
-    return await store.resolve_ref(session_id, agent_id=agent_id)
+    return await store.resolve_ref(session_id, agent_id=agent_id, user_id=user_id)

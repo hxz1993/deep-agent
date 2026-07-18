@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from deep_agent.agent.history import first_user_prompt
 from deep_agent.db.session_list import SessionListFilters, SessionSummaryRow
-from deep_agent.db.session_scope import normalize_agent_scope, runtime_session_key
+from deep_agent.db.session_scope import SessionOwner, normalize_agent_scope, runtime_session_key
 from deep_agent.db.stores.chat_session.base import ChatSessionStoreBase
 from deep_agent.db.stores.message.base import MessageStoreBase
 
@@ -67,7 +67,16 @@ class SessionStore(Protocol):
         session_id: str,
         *,
         agent_id: str | None = None,
+        user_id: str | None = None,
     ) -> tuple[str, str] | None:
+        ...
+
+    async def get_session_owner(
+        self,
+        session_id: str,
+        *,
+        agent_id: str | None = None,
+    ) -> SessionOwner:
         ...
 
     async def delete(self, session_id: str, *, agent_id: str | None = None) -> None:
@@ -150,6 +159,9 @@ class SqlConversationCoordinator:
         scope = normalize_agent_scope(agent_id)
         async with self._write() as db:
             now = datetime.now(timezone.utc)
+            owner = await self._chat_sessions._get_owner(db, scope, session_id, for_update=True)
+            if owner.exists and owner.user_id != user_id:
+                raise PermissionError("Session belongs to another user")
             next_sequence = await self._messages._get_max_sequence(db, scope, session_id) + 1
             existing_title = await self._chat_sessions.get_session_title(db, scope, session_id)
             # 仅首轮写入时 seed；避免迁移前无 title 的历史会话在后续轮次被误写。
@@ -166,6 +178,9 @@ class SqlConversationCoordinator:
                 title=title,
                 now=now,
             )
+            stored_owner = await self._chat_sessions._get_owner(db, scope, session_id)
+            if not stored_owner.exists or stored_owner.user_id != user_id:
+                raise PermissionError("Session ownership could not be established")
             await self._messages._append_messages(
                 db,
                 scope,
@@ -222,8 +237,22 @@ class SqlConversationCoordinator:
         session_id: str,
         *,
         agent_id: str | None = None,
+        user_id: str | None = None,
     ) -> tuple[str, str] | None:
-        return await self._chat_sessions.resolve_ref(session_id, agent_id=agent_id)
+        return await self._chat_sessions.resolve_ref(
+            session_id,
+            agent_id=agent_id,
+            user_id=user_id,
+        )
+
+    async def get_session_owner(
+        self,
+        session_id: str,
+        *,
+        agent_id: str | None = None,
+    ) -> SessionOwner:
+        scope = normalize_agent_scope(agent_id)
+        return await self._chat_sessions.get_owner(scope, session_id)
 
     async def get_session_timestamps(
         self,

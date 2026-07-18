@@ -11,6 +11,7 @@ from deep_agent.api.v1 import api_router
 from deep_agent.capabilities import build_registry
 from deep_agent.capabilities.mcp.lease_manager import McpLeaseManager
 from deep_agent.core.context import AppContext, get_context, init_context, reset_context
+from tests.helpers.request_identity import install_test_user_header
 from tests.helpers.sqlite_stores import ensure_title_uses_main_model, make_sqlite_stores
 from tests.integration.helpers.chat import mock_request_disconnect, parse_sse_events
 from tests.integration.helpers.models import build_slow_stream_model, text_only_model, tool_call_model
@@ -51,6 +52,7 @@ class ChatHistoryPersistenceTests(unittest.IsolatedAsyncioTestCase):
         stores, self._engine, session_factory = await make_sqlite_stores()
         await ensure_title_uses_main_model(stores)
         self._app = FastAPI()
+        install_test_user_header(self._app)
         self._app.include_router(api_router)
         init_context(
             AppContext.for_testing(

@@ -126,7 +126,8 @@ def _record_is_live(record: dict[str, Any]) -> bool:
 
 @contextlib.asynccontextmanager
 async def _async_identity_lock(lock_path: Path, timeout: float):
-    lock = FileLock(str(lock_path), timeout=timeout)
+    # acquire/release run through the executor and may use different threads.
+    lock = FileLock(str(lock_path), timeout=timeout, thread_local=False)
     await asyncio.to_thread(lock.acquire)
     try:
         yield

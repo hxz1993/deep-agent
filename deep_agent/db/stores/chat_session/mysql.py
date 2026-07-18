@@ -29,8 +29,6 @@ class MySQLChatSessionStore(ChatSessionStoreBase):
             updated_at=now,
         )
         update_values = {"updated_at": now}
-        if user_id is not None:
-            update_values["user_id"] = user_id
         if title is not None:
             update_values["title"] = title
         stmt = stmt.on_duplicate_key_update(**update_values)

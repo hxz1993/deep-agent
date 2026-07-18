@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime
 from typing import Any, Literal
 
@@ -166,10 +167,33 @@ def is_user_only_request(message: ModelMessage) -> bool:
 
 def filter_ephemeral_agent_messages(messages: list[ModelMessage]) -> list[ModelMessage]:
     """Drop thinking-only retries and validation prompts from persisted history."""
+    rejected_tool_call_ids = {
+        part.tool_call_id
+        for message in messages
+        if isinstance(message, ModelRequest)
+        for part in message.parts
+        if isinstance(part, RetryPromptPart) and part.tool_call_id
+    }
     filtered: list[ModelMessage] = []
     for message in messages:
         if isinstance(message, ModelResponse) and is_thinking_only_response(message):
             continue
+        if isinstance(message, ModelResponse) and rejected_tool_call_ids:
+            kept_parts = [
+                part
+                for part in message.parts
+                if not (
+                    isinstance(part, BaseToolCallPart)
+                    and part.tool_call_id
+                    and part.tool_call_id in rejected_tool_call_ids
+                )
+            ]
+            if not kept_parts:
+                continue
+            if len(kept_parts) != len(message.parts):
+                message = replace(message, parts=kept_parts)
+                if is_thinking_only_response(message):
+                    continue
         if isinstance(message, ModelRequest) and is_retry_only_request(message):
             continue
         filtered.append(message)
@@ -247,14 +271,21 @@ def incremental_append_messages(
     return [message for message in filtered if not is_user_only_request(message)]
 
 
-def _response_parts(response: ModelResponse) -> list[HistoryPart]:
+def _response_parts(
+    response: ModelResponse,
+    *,
+    rejected_tool_call_ids: set[str] | None = None,
+) -> list[HistoryPart]:
     parts: list[HistoryPart] = []
+    rejected_tool_call_ids = rejected_tool_call_ids or set()
     for part in response.parts:
         if isinstance(part, TextPart) and part.content:
             parts.append(HistoryTextPart(content=part.content))
         elif isinstance(part, ThinkingPart) and part.content:
             parts.append(HistoryThinkingPart(content=part.content))
         elif isinstance(part, BaseToolCallPart):
+            if part.tool_call_id and part.tool_call_id in rejected_tool_call_ids:
+                continue
             parts.append(
                 HistoryToolCallPart(
                     tool=part.tool_name,
@@ -339,6 +370,13 @@ def session_activity_timestamps(messages: list[ModelMessage]) -> tuple[datetime 
 
 def model_messages_to_history(messages: list[ModelMessage]) -> list[HistoryMessage]:
     """Convert Pydantic AI message history to a frontend-friendly timeline."""
+    rejected_tool_call_ids = {
+        part.tool_call_id
+        for message in messages
+        if isinstance(message, ModelRequest)
+        for part in message.parts
+        if isinstance(part, RetryPromptPart) and part.tool_call_id
+    }
     history: list[HistoryMessage] = []
     pending_tool_results: list[HistoryPart] = []
     pending_tool_results_timestamp: datetime | None = None
@@ -394,7 +432,10 @@ def model_messages_to_history(messages: list[ModelMessage]) -> list[HistoryMessa
             if is_thinking_only_response(message):
                 continue
             flush_tool_results()
-            parts = _response_parts(message)
+            parts = _response_parts(
+                message,
+                rejected_tool_call_ids=rejected_tool_call_ids,
+            )
             if parts:
                 history.append(
                     HistoryMessage(

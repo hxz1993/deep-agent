@@ -20,6 +20,7 @@ from deep_agent.capabilities.mcp.ui_discovery import (
 )
 from deep_agent.capabilities.ui.builtin import builtin_ui_records
 from deep_agent.capabilities.ui.constants import SOURCE_PRIORITY
+from deep_agent.capabilities.ui.external import RetryableExternalToolset, build_args_validator
 from deep_agent.capabilities.ui.types import UIToolRecord
 from deep_agent.db.models import McpServer
 from deep_agent.db.stores.bundle import DataStores
@@ -89,7 +90,8 @@ def build_external_toolset(definitions: list[UIToolRecord], *, toolset_id: str =
         )
         for item in definitions
     ]
-    return ExternalToolset(tools, id=toolset_id)
+    validators = {item.name: build_args_validator(item) for item in definitions}
+    return RetryableExternalToolset(tools, validators=validators, id=toolset_id)
 
 
 def build_tool_hints(definitions: list[UIToolRecord]) -> dict[str, dict[str, Any]]:
@@ -104,8 +106,7 @@ def build_tool_hints(definitions: list[UIToolRecord]) -> dict[str, dict[str, Any
             payload["source"] = item.source
         if item.mcp_server_name:
             payload["mcp_server_name"] = item.mcp_server_name
-        if payload:
-            hints[item.name] = payload
+        hints[item.name] = payload
     return hints
 
 

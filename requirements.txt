@@ -8,6 +8,7 @@ gunicorn~=26.0.0
 
 # Config & streaming
 pydantic-settings>=2.5
+jsonschema>=4.23,<5
 sse-starlette>=2.1
 Pillow>=10.0
 pypdf>=5.0

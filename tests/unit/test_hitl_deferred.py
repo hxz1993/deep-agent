@@ -4,13 +4,14 @@ import unittest
 
 from pydantic_ai import Agent, DeferredToolRequests, DeferredToolResults
 from pydantic_ai.messages import ToolCallPart
+from pydantic_ai.models.function import AgentInfo, DeltaToolCall, FunctionModel
 
 from deep_agent.agent import events
 from deep_agent.agent.deferred import build_deferred_tool_results, serialize_deferred
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.event_persister import EventPersister
 from deep_agent.agent.runner import AgentRunner
-from deep_agent.capabilities.ui.builtin import build_ui_toolset
+from deep_agent.capabilities.ui.builtin import build_ui_toolset, builtin_ui_records
 from deep_agent.capabilities.ui.registry import build_external_toolset, build_tool_hints
 from deep_agent.capabilities.ui.types import UIToolRecord
 from deep_agent.schemas.chat import DeferredToolResultItem
@@ -79,7 +80,12 @@ class AgentRunnerDeferredTests(unittest.IsolatedAsyncioTestCase):
             toolsets=[build_ui_toolset()],
             output_type=[str, DeferredToolRequests],
         )
-        runner = AgentRunner(agent, self.store, UsageLimits(request_limit=10))
+        runner = AgentRunner(
+            agent,
+            self.store,
+            UsageLimits(request_limit=10),
+            ui_tool_hints=build_tool_hints(builtin_ui_records()),
+        )
 
         events_out: list[dict] = []
         async for ev in runner.run_stream(
@@ -94,8 +100,8 @@ class AgentRunnerDeferredTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(events_out[-1]["status"], "pending")
         self.assertTrue(events_out[-1]["deferred"]["calls"])
         tool_calls = [e for e in events_out if e.get("type") == "tool_call"]
-        self.assertTrue(tool_calls)
-        self.assertEqual(tool_calls[-1]["tool"], "confirm_action")
+        self.assertFalse(tool_calls)
+        self.assertEqual(events_out[-1]["deferred"]["calls"][0]["tool"], "confirm_action")
 
     async def test_run_stream_tool_call_includes_metadata_from_hints(self) -> None:
         manual_tool = UIToolRecord(
@@ -126,10 +132,64 @@ class AgentRunnerDeferredTests(unittest.IsolatedAsyncioTestCase):
             events_out.append(ev)
 
         tool_calls = [e for e in events_out if e.get("type") == "tool_call"]
-        self.assertTrue(tool_calls)
-        self.assertEqual(tool_calls[-1]["metadata"], {"form_version": "1"})
-        self.assertEqual(tool_calls[-1]["widget"], "text")
+        self.assertFalse(tool_calls)
         self.assertEqual(events_out[-1]["deferred"]["calls"][0]["metadata"], {"form_version": "1"})
+        self.assertEqual(events_out[-1]["deferred"]["calls"][0]["widget"], "text")
+
+    async def test_run_stream_only_publishes_validated_external_ui_call(self) -> None:
+        clarify = UIToolRecord(
+            name="deep_cube__clarify",
+            description="clarify",
+            parameters_json_schema={
+                "type": "object",
+                "properties": {"fields": {"type": "array"}},
+            },
+            widget="clarify",
+            source="manual",
+        )
+        model_calls = 0
+
+        async def stream_function(_messages: list, _info: AgentInfo):
+            nonlocal model_calls
+            model_calls += 1
+            args = "{}" if model_calls == 1 else (
+                '{"fields":[{"field":"reason","type":"textarea"}]}'
+            )
+            yield {
+                0: DeltaToolCall(
+                    name="deep_cube__clarify",
+                    json_args=args,
+                    tool_call_id=f"call-{model_calls}",
+                )
+            }
+
+        agent = Agent(
+            FunctionModel(stream_function=stream_function),
+            deps_type=AgentDeps,
+            toolsets=[build_external_toolset([clarify])],
+            output_type=[str, DeferredToolRequests],
+        )
+        runner = AgentRunner(
+            agent,
+            self.store,
+            UsageLimits(request_limit=10),
+            ui_tool_hints=build_tool_hints([clarify]),
+        )
+
+        events_out: list[dict] = []
+        async for ev in runner.run_stream(
+            "sess-retry",
+            "请澄清",
+            AgentDeps(session_id="sess-retry"),
+            persister=self.persister,
+        ):
+            events_out.append(ev)
+
+        self.assertEqual(model_calls, 2)
+        self.assertFalse([event for event in events_out if event.get("type") == "tool_call"])
+        deferred_call = events_out[-1]["deferred"]["calls"][0]
+        self.assertEqual(deferred_call["tool_call_id"], "call-2")
+        self.assertEqual(deferred_call["args"]["fields"][0]["field"], "reason")
 
     async def test_run_stream_resume_completes_after_deferred_result(self) -> None:
         test_model = TestModel(

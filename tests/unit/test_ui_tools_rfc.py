@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import unittest
 from datetime import datetime, timezone
+from typing import Any
 
+from pydantic_ai import Agent, DeferredToolRequests, ModelRetry
+from pydantic_ai.messages import ModelResponse, ToolCallPart
+from pydantic_ai.models.function import AgentInfo, FunctionModel
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from deep_agent.agent.history import HistoryMessage, HistoryToolCallPart, enrich_history_messages
@@ -314,10 +318,110 @@ class HistoryEnrichmentTests(unittest.TestCase):
         self.assertEqual(part.metadata, {"form_version": "1"})
 
 
-class ExternalToolsetTests(unittest.TestCase):
+class ExternalToolsetTests(unittest.IsolatedAsyncioTestCase):
     def test_build_external_toolset_preserves_names(self) -> None:
         toolset = build_external_toolset(builtin_ui_records())
         self.assertEqual(toolset.id, "ui-dynamic")
+
+    async def test_external_ui_tool_allows_one_model_retry(self) -> None:
+        toolset = build_external_toolset(builtin_ui_records())
+        tools = await toolset.get_tools(None)
+        self.assertEqual(tools["confirm_action"].max_retries, 1)
+
+    async def test_invalid_json_is_retried_once_and_then_deferred(self) -> None:
+        calls = 0
+
+        def model_function(_messages: list[Any], _info: AgentInfo) -> ModelResponse:
+            nonlocal calls
+            calls += 1
+            args: str | dict[str, str]
+            args = '{"message":' if calls == 1 else {"message": "继续？"}
+            return ModelResponse(
+                parts=[ToolCallPart("confirm_action", args, tool_call_id=f"call-{calls}")]
+            )
+
+        agent = Agent(
+            FunctionModel(model_function),
+            toolsets=[build_external_toolset(builtin_ui_records())],
+            output_type=[str, DeferredToolRequests],
+        )
+        result = await agent.run("请确认")
+
+        self.assertEqual(calls, 2)
+        self.assertIsInstance(result.output, DeferredToolRequests)
+        assert isinstance(result.output, DeferredToolRequests)
+        self.assertEqual(result.output.calls[0].args, {"message": "继续？"})
+
+    async def test_invalid_schema_is_retried_once_and_then_deferred(self) -> None:
+        calls = 0
+
+        def model_function(_messages: list[Any], _info: AgentInfo) -> ModelResponse:
+            nonlocal calls
+            calls += 1
+            args = {} if calls == 1 else {"message": "继续？"}
+            return ModelResponse(
+                parts=[ToolCallPart("confirm_action", args, tool_call_id=f"call-{calls}")]
+            )
+
+        agent = Agent(
+            FunctionModel(model_function),
+            toolsets=[build_external_toolset(builtin_ui_records())],
+            output_type=[str, DeferredToolRequests],
+        )
+        result = await agent.run("请确认")
+
+        self.assertEqual(calls, 2)
+        self.assertIsInstance(result.output, DeferredToolRequests)
+
+    async def test_invalid_clarify_semantics_are_retried_once(self) -> None:
+        clarify = UIToolRecord(
+            name="deep_cube__clarify",
+            description="clarify",
+            parameters_json_schema={
+                "type": "object",
+                "properties": {
+                    "fields": {"type": "array"},
+                },
+            },
+            widget="clarify",
+            source="manual",
+        )
+        calls = 0
+
+        def model_function(_messages: list[Any], _info: AgentInfo) -> ModelResponse:
+            nonlocal calls
+            calls += 1
+            args = {} if calls == 1 else {
+                "fields": [{"field": "account", "type": "text"}],
+            }
+            return ModelResponse(
+                parts=[ToolCallPart("deep_cube__clarify", args, tool_call_id=f"call-{calls}")]
+            )
+
+        agent = Agent(
+            FunctionModel(model_function),
+            toolsets=[build_external_toolset([clarify])],
+            output_type=[str, DeferredToolRequests],
+        )
+        result = await agent.run("请澄清")
+
+        self.assertEqual(calls, 2)
+        self.assertIsInstance(result.output, DeferredToolRequests)
+
+    async def test_clarify_validator_rejects_select_without_options(self) -> None:
+        clarify = UIToolRecord(
+            name="deep_cube__clarify",
+            description="clarify",
+            parameters_json_schema={"type": "object"},
+            widget="clarify",
+            source="manual",
+        )
+        toolset = build_external_toolset([clarify])
+        tools = await toolset.get_tools(None)
+        validator = tools["deep_cube__clarify"].args_validator_func
+        assert validator is not None
+        with self.assertRaises(ModelRetry):
+            validator(None, fields=[{"field": "account", "type": "select", "options": []}])
 
 
 if __name__ == "__main__":

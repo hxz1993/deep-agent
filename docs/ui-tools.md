@@ -63,6 +63,13 @@ sequenceDiagram
 
 UI 工具必须是 **`ExternalToolset`** 中的 `ToolDefinition`，**不要**写 `@tool` 执行函数。
 
+DeepAgent 会在 `ExternalToolset` 外补充两层保护：
+
+- 按工具的 `parameters_json_schema` 校验模型生成的参数；`clarify` 等表单还会做最低可渲染语义校验。
+- 参数 JSON 无法解析或校验失败时，将错误反馈给模型并允许修正一次；第二次仍失败才终止本轮。
+
+不要依赖 Pydantic AI 原生 `ExternalToolset` 完成上述保护：其默认参数验证器只负责解析参数，且默认重试次数为 `0`。
+
 ### 3.1 示例：新增 `ask_user_text`
 
 在 [`builtin.py`](../deep_agent/capabilities/ui/builtin.py) 中：

@@ -424,6 +424,13 @@ class AgentRunner:
                             continue
                         mapped = events.map_event(event)
                         if mapped is not None:
+                            if (
+                                mapped.get("type") == "tool_call"
+                                and mapped.get("tool") in self.ui_tool_hints
+                            ):
+                                # External UI calls are validated after the model event is emitted.
+                                # Publish only the validated call carried by final.pending/deferred.
+                                continue
                             accumulator.ingest(mapped)
                             try:
                                 yield enrich_tool_event(mapped, self.ui_tool_hints)

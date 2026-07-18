@@ -10,6 +10,7 @@ from pydantic_ai.messages import (
     TextPart,
     ThinkingPart,
     ThinkingPartDelta,
+    ToolCallPart,
     UserPromptPart,
 )
 
@@ -127,6 +128,44 @@ class HistoryThinkingTests(unittest.TestCase):
         self.assertEqual(history[1].parts[0].type, "text")
         self.assertEqual(history[1].parts[0].content, "你好！")
 
+    def test_model_messages_to_history_skips_rejected_tool_call(self) -> None:
+        messages = [
+            ModelResponse(
+                parts=[
+                    ToolCallPart(
+                        tool_name="deep_cube__clarify",
+                        args={},
+                        tool_call_id="invalid-call",
+                    )
+                ]
+            ),
+            ModelRequest(
+                parts=[
+                    RetryPromptPart(
+                        content="fields must be a non-empty array",
+                        tool_name="deep_cube__clarify",
+                        tool_call_id="invalid-call",
+                    )
+                ]
+            ),
+            ModelResponse(
+                parts=[
+                    ToolCallPart(
+                        tool_name="deep_cube__clarify",
+                        args={"fields": [{"id": "reason", "type": "textarea"}]},
+                        tool_call_id="valid-call",
+                    )
+                ]
+            ),
+        ]
+
+        history = model_messages_to_history(messages)
+
+        self.assertEqual(len(history), 1)
+        self.assertEqual(len(history[0].parts), 1)
+        self.assertEqual(history[0].parts[0].type, "tool_call")
+        self.assertEqual(history[0].parts[0].tool_call_id, "valid-call")
+
     def test_filter_ephemeral_agent_messages(self) -> None:
         messages = [
             ModelResponse(parts=[ThinkingPart(content="internal only")]),
@@ -137,6 +176,74 @@ class HistoryThinkingTests(unittest.TestCase):
         self.assertEqual(len(filtered), 1)
         self.assertIsInstance(filtered[0], ModelResponse)
         self.assertEqual(filtered[0].parts[0].content, "hello")
+
+    def test_filter_ephemeral_agent_messages_drops_rejected_tool_call(self) -> None:
+        messages = [
+            ModelResponse(
+                parts=[
+                    ToolCallPart(
+                        tool_name="deep_cube__clarify",
+                        args={},
+                        tool_call_id="invalid-call",
+                    )
+                ]
+            ),
+            ModelRequest(
+                parts=[
+                    RetryPromptPart(
+                        content="fields must be a non-empty array",
+                        tool_name="deep_cube__clarify",
+                        tool_call_id="invalid-call",
+                    )
+                ]
+            ),
+            ModelResponse(
+                parts=[
+                    ToolCallPart(
+                        tool_name="deep_cube__clarify",
+                        args={"fields": [{"id": "reason", "type": "textarea"}]},
+                        tool_call_id="valid-call",
+                    )
+                ]
+            ),
+        ]
+
+        filtered = filter_ephemeral_agent_messages(messages)
+
+        self.assertEqual(len(filtered), 1)
+        self.assertIsInstance(filtered[0], ModelResponse)
+        self.assertEqual(filtered[0].parts[0].tool_call_id, "valid-call")
+
+    def test_filter_ephemeral_agent_messages_preserves_sibling_parts(self) -> None:
+        messages = [
+            ModelResponse(
+                parts=[
+                    TextPart(content="正在准备表单"),
+                    ToolCallPart(
+                        tool_name="deep_cube__clarify",
+                        args={},
+                        tool_call_id="invalid-call",
+                    ),
+                ]
+            ),
+            ModelRequest(
+                parts=[
+                    RetryPromptPart(
+                        content="fields must be a non-empty array",
+                        tool_name="deep_cube__clarify",
+                        tool_call_id="invalid-call",
+                    )
+                ]
+            ),
+        ]
+
+        filtered = filter_ephemeral_agent_messages(messages)
+
+        self.assertEqual(len(filtered), 1)
+        self.assertIsInstance(filtered[0], ModelResponse)
+        self.assertEqual(len(filtered[0].parts), 1)
+        self.assertIsInstance(filtered[0].parts[0], TextPart)
+        self.assertEqual(filtered[0].parts[0].content, "正在准备表单")
 
 
 if __name__ == "__main__":

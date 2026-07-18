@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <script>
+    (function () {
+      var path = location.pathname;
+      if (!path.endsWith("/")) path += "/";
+      var base = document.createElement("base");
+      base.href = path;
+      document.head.appendChild(base);
+      window.__DEEP_AGENT_BASE__ = path;
+      window.__DEEP_AGENT_APP_ROOT__ = path.replace(/console\/$/, "");
+      document.documentElement.setAttribute("data-theme", localStorage.getItem("da_theme") || "dark");
+    })();
+  </script>
+  <title>DeepAgent 一体化控制台</title>
+  <link id="hljsTheme" rel="stylesheet" href="/vendor/highlight-github-dark.min.css" />
+  <link rel="stylesheet" href="../themes.css" />
+  <link rel="stylesheet" href="../styles.css" />
+  <link rel="stylesheet" href="../admin/admin.css" />
+  <link rel="stylesheet" href="./console.css" />
+</head>
+<body>
+  <div class="console-shell">
+    <header class="console-topbar">
+      <div class="console-brand">
+        <span class="brand-mark"><i data-lucide="bot"></i></span>
+        <div><strong>DeepAgent</strong><span>一体化控制台</span></div>
+      </div>
+
+      <nav class="console-nav" aria-label="控制台主导航">
+        <button type="button" class="console-nav-btn active" data-page="workspace">
+          <i data-lucide="message-square-code"></i><span>测试工作台</span>
+        </button>
+        <button type="button" class="console-nav-btn" data-page="configuration">
+          <i data-lucide="sliders-horizontal"></i><span>配置中心</span>
+        </button>
+        <button type="button" class="console-nav-btn" data-page="diagnostics">
+          <i data-lucide="activity"></i><span>诊断中心</span>
+        </button>
+      </nav>
+
+      <div class="console-top-actions">
+        <span class="connection-pill" id="connStatus"><span class="dot"></span><span class="conn-text">连接中</span></span>
+        <button type="button" class="context-summary" id="openContextBtn" title="请求上下文">
+          <i data-lucide="waypoints"></i>
+          <span id="contextSummary">继承平台上下文</span>
+        </button>
+        <div class="theme-switch" aria-label="界面主题">
+          <button type="button" data-console-theme="light" title="明亮"><i data-lucide="sun"></i></button>
+          <button type="button" data-console-theme="paper" title="护眼"><i data-lucide="leaf"></i></button>
+          <button type="button" data-console-theme="dark" title="暗色"><i data-lucide="moon"></i></button>
+          <button type="button" data-console-theme="contrast" title="高对比"><i data-lucide="contrast"></i></button>
+        </div>
+        <button type="button" class="user-pill" id="currentUserBtn" title="当前平台用户">
+          <i data-lucide="circle-user-round"></i><span id="currentUserLabel">识别中</span>
+        </button>
+      </div>
+    </header>
+
+    <div class="console-banner hidden" id="consoleBanner" role="alert"></div>
+
+    <main class="console-main">
+      <section class="console-page active" id="page-workspace" data-page-panel="workspace">
+        <div class="workspace-loading" id="workspaceLoading">
+          <span class="loading-spinner"></span><span>正在加载测试工作台…</span>
+        </div>
+        <div class="workspace-mobile-bar hidden" id="workspaceMobileBar">
+          <button type="button" class="mobile-agent-trigger" data-workspace-drawer="agents"><i data-lucide="bot"></i><span>Agent</span></button>
+          <button type="button" class="mobile-session-trigger" data-workspace-drawer="sessions"><i data-lucide="messages-square"></i><span>会话</span></button>
+          <button type="button" class="mobile-inspector-trigger" data-workspace-drawer="inspector"><i data-lucide="scan-search"></i><span>检查器</span></button>
+        </div>
+        <div class="workspace-grid hidden" id="workspaceGrid">
+          <aside class="agent-pane">
+            <div class="pane-heading">
+              <div><strong>测试 Agent</strong><span id="agentCount">—</span></div>
+              <button type="button" class="icon-action" id="refreshAgentsBtn" title="刷新 Agent"><i data-lucide="refresh-cw"></i></button>
+            </div>
+            <label class="compact-search"><i data-lucide="search"></i><input id="agentSearchInput" type="search" placeholder="搜索 Agent" /></label>
+            <div class="agent-list" id="consoleAgentList"></div>
+          </aside>
+          <div class="workspace-legacy-host" id="workspaceLegacyHost"></div>
+          <aside class="inspector-pane" id="inspectorPane">
+            <div class="pane-heading"><div><strong>运行检查器</strong><span>当前会话</span></div></div>
+            <div class="inspector-tabs">
+              <button type="button" class="active" data-inspector-tab="overview">概览</button>
+              <button type="button" data-inspector-tab="tools">工具链</button>
+              <button type="button" data-inspector-tab="events">事件</button>
+            </div>
+            <div class="inspector-content" id="inspectorContent">
+              <div class="inspector-empty"><i data-lucide="scan-search"></i><p>选择会话后查看真实运行信息</p></div>
+            </div>
+          </aside>
+        </div>
+        <button type="button" class="workspace-drawer-backdrop hidden" id="workspaceDrawerBackdrop" aria-label="关闭侧栏"></button>
+      </section>
+
+      <section class="console-page" id="page-configuration" data-page-panel="configuration">
+        <div class="configuration-shell">
+          <aside class="resource-nav">
+            <div class="resource-title"><strong>配置中心</strong><span>数据库配置</span></div>
+            <button class="tab resource-btn active" data-tab="agents"><i data-lucide="bot"></i><span>Agent</span></button>
+            <button class="tab resource-btn" data-tab="llm-models"><i data-lucide="cpu"></i><span>模型</span></button>
+            <button class="tab resource-btn" data-tab="catalog"><i data-lucide="library"></i><span>模型目录</span></button>
+            <button class="tab resource-btn" data-tab="mcp"><i data-lucide="plug-zap"></i><span>MCP 服务</span></button>
+            <button class="tab resource-btn" data-tab="ui-tools"><i data-lucide="panel-top"></i><span>UI 工具</span></button>
+            <button class="tab resource-btn" data-tab="auxiliary-models"><i data-lucide="brain-circuit"></i><span>辅助模型</span></button>
+          </aside>
+          <section class="configuration-content">
+            <div class="configuration-loading" id="configurationLoading">
+              <span class="loading-spinner"></span><span>正在加载配置中心…</span>
+            </div>
+            <div id="configurationHost"></div>
+          </section>
+        </div>
+      </section>
+
+      <section class="console-page" id="page-diagnostics" data-page-panel="diagnostics">
+        <div class="diagnostics-page">
+          <header class="diagnostics-head">
+            <div><span class="eyebrow">Phase 1</span><h1>诊断中心</h1><p>为一次 Agent 请求提供可追踪、可解释的运行诊断入口。</p></div>
+            <span class="future-badge">能力规划中</span>
+          </header>
+          <div class="diagnostics-band current">
+            <div class="diagnostic-icon"><i data-lucide="history"></i></div>
+            <div><h2>当前已经可用</h2><p>测试工作台可查看会话历史、SSE 事件顺序、模型工具调用、HITL 状态和服务健康。</p></div>
+            <button type="button" data-page-link="workspace">返回测试工作台</button>
+          </div>
+          <div class="diagnostics-grid">
+            <article><i data-lucide="search-code"></i><h3>Request ID 查询</h3><p>未来按 Request ID 定位一次跨服务请求和对应日志。</p><button disabled>暂未开放</button></article>
+            <article><i data-lucide="messages-square"></i><h3>Session 链路</h3><p>未来按 Session ID 汇总模型、MCP、UI 工具和重试过程。</p><button disabled>暂未开放</button></article>
+            <article><i data-lucide="plug-zap"></i><h3>MCP 主动探测</h3><p>未来检查 MCP 工具列表、连通性、延迟和错误响应。</p><button disabled>暂未开放</button></article>
+            <article><i data-lucide="chart-no-axes-combined"></i><h3>运行指标</h3><p>未来展示成功率、失败类型、P95 和服务健康趋势。</p><button disabled>暂未开放</button></article>
+          </div>
+          <div class="diagnostics-note"><i data-lucide="info"></i><span>本阶段不生成演示日志或虚构 Request ID。诊断能力将在后端具备真实链路数据后逐步开放。</span></div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div class="auth-lock hidden" id="authLock">
+    <div class="auth-lock-content"><i data-lucide="shield-alert"></i><h2>未获取到平台登录身份</h2><p>请先登录 DeepFOS，再重新打开一体化控制台。</p><button type="button" id="retryIdentityBtn">重新检查</button></div>
+  </div>
+
+  <div class="drawer-backdrop hidden" id="contextBackdrop"></div>
+  <aside class="context-drawer" id="contextDrawer" aria-hidden="true">
+    <header><div><strong>请求上下文</strong><span>仅影响当前控制台发出的请求</span></div><button type="button" id="closeContextBtn" title="关闭"><i data-lucide="x"></i></button></header>
+    <div class="context-body">
+      <section class="context-section">
+        <h3>连接</h3>
+        <label><span>后端地址</span><input id="baseUrlInput" type="url" placeholder="http://localhost:8000" /></label>
+        <p>线上默认使用当前同源网关地址；本地调试可切换到本机服务。</p>
+      </section>
+      <section class="context-section">
+        <h3>可调试上下文</h3>
+        <label><span>应用 App</span><input id="contextAppInput" autocomplete="off" /></label>
+        <label><span>空间 Space</span><input id="contextSpaceInput" autocomplete="off" /></label>
+        <label><span>语言</span><select id="contextLanguageInput"><option value="">继承平台</option><option value="zh-cn">zh-cn</option><option value="en">en</option></select></label>
+      </section>
+      <section class="context-section readonly-context">
+        <h3>平台身份（只读）</h3>
+        <label><span>当前用户</span><input id="contextUserInput" readonly value="识别中" /></label>
+        <label><span>鉴权状态</span><input id="contextAuthInput" readonly value="检查中" /></label>
+        <p>用户和鉴权由平台登录态及网关决定，不会写入 LocalStorage。</p>
+      </section>
+      <section class="effective-context">
+        <h3>最终生效值</h3><dl id="effectiveContext"></dl>
+      </section>
+    </div>
+    <footer><button type="button" id="resetContextBtn">恢复继承值</button><button type="button" class="primary" id="saveContextBtn">应用上下文</button></footer>
+  </aside>
+
+  <div class="console-toast hidden" id="consoleToast"></div>
+  <div class="hidden" id="consoleRuntimeControls">
+    <select id="agentSelect"></select>
+    <select id="themeSelect"></select>
+    <a id="settingsLink"></a><a id="modelsLink"></a><a id="adminLink"></a>
+  </div>
+
+  <script src="../vendor/lucide.min.js"></script>
+  <script src="./api.js"></script>
+  <script src="./theme.js"></script>
+  <script src="../vendor/marked.min.js"></script>
+  <script src="../vendor/purify.min.js"></script>
+  <script src="../vendor/highlight.min.js"></script>
+  <script type="module" src="./main.js"></script>
+</body>
+</html>

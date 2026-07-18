@@ -1,0 +1,108 @@
+import { initConfiguration } from "./configuration.js";
+import { bindContextControls, refreshIdentity } from "./context.js";
+import { initDiagnostics } from "./diagnostics.js";
+import { initWorkspace } from "./workspace.js";
+
+const VALID_PAGES = new Set(["workspace", "configuration", "diagnostics"]);
+let authenticated = false;
+let toastTimer = null;
+
+function toast(message, isError = false) {
+  const element = document.getElementById("consoleToast");
+  if (!element) return;
+  element.textContent = message;
+  element.classList.toggle("error", isError);
+  element.classList.remove("hidden");
+  window.clearTimeout(toastTimer);
+  toastTimer = window.setTimeout(() => element.classList.add("hidden"), 3600);
+}
+
+function pageFromLocation() {
+  const page = location.hash.replace(/^#\/?/, "");
+  return VALID_PAGES.has(page) ? page : "workspace";
+}
+
+async function showPage(page, { updateHash = true } = {}) {
+  const next = VALID_PAGES.has(page) ? page : "workspace";
+  document.querySelectorAll("[data-page-panel]").forEach((panel) => {
+    panel.classList.toggle("active", panel.dataset.pagePanel === next);
+  });
+  document.querySelectorAll("[data-page]").forEach((button) => {
+    button.classList.toggle("active", button.dataset.page === next);
+  });
+  if (updateHash && location.hash !== `#/${next}`) history.replaceState(null, "", `#/${next}`);
+  if (authenticated && next === "configuration") {
+    await initConfiguration().catch((error) => toast(error.message, true));
+  }
+  window.lucide?.createIcons();
+}
+
+function bindNavigation() {
+  document.querySelectorAll("[data-page]").forEach((button) => {
+    button.addEventListener("click", () => showPage(button.dataset.page));
+  });
+  document.querySelectorAll("[data-page-link]").forEach((button) => {
+    button.addEventListener("click", () => showPage(button.dataset.pageLink));
+  });
+  window.addEventListener("hashchange", () => showPage(pageFromLocation(), { updateHash: false }));
+}
+
+function bindThemes() {
+  const apply = (theme) => {
+    window.DATheme?.apply(theme);
+    const highlightTheme = document.getElementById("hljsTheme");
+    if (highlightTheme) {
+      const root = window.__DEEP_AGENT_APP_ROOT__ || "/";
+      const file = ["light", "paper", "contrast"].includes(theme)
+        ? "highlight-github.min.css"
+        : "highlight-github-dark.min.css";
+      highlightTheme.href = `${root.replace(/\/$/, "")}/vendor/${file}`;
+    }
+    document.querySelectorAll("[data-console-theme]").forEach((button) => {
+      button.classList.toggle("active", button.dataset.consoleTheme === theme);
+    });
+  };
+  document.querySelectorAll("[data-console-theme]").forEach((button) => {
+    button.addEventListener("click", () => apply(button.dataset.consoleTheme));
+  });
+  apply(localStorage.getItem("da_theme") || "dark");
+}
+
+function showApiBanner(status) {
+  const banner = document.getElementById("consoleBanner");
+  if (!banner) return;
+  const messages = {
+    401: "未获取到平台登录身份。请登录 DeepFOS 后重新打开控制台。",
+    403: "当前用户没有执行该操作的权限。",
+    503: "数据库或依赖服务尚未配置，请检查后端环境。",
+  };
+  banner.textContent = messages[status] || `请求失败（HTTP ${status}）`;
+  banner.className = `console-banner status-${status}`;
+}
+
+async function boot() {
+  window.DeepAgentConsole = { showPage, toast };
+  bindNavigation();
+  bindThemes();
+  bindContextControls();
+  initDiagnostics();
+  window.addEventListener("deep-agent-console-api-status", (event) => showApiBanner(event.detail?.status));
+  window.lucide?.createIcons();
+
+  try {
+    authenticated = await refreshIdentity();
+  } catch (error) {
+    showApiBanner(error.status || 500);
+    toast(error.message, true);
+  }
+
+  if (authenticated) {
+    await initWorkspace().catch((error) => {
+      document.getElementById("workspaceLoading").innerHTML = `<span class="configuration-error">${error.message}</span>`;
+      toast(error.message, true);
+    });
+  }
+  await showPage(pageFromLocation(), { updateHash: true });
+}
+
+boot();

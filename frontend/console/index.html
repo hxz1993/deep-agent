@@ -12,7 +12,7 @@
       document.head.appendChild(base);
       window.__DEEP_AGENT_BASE__ = path;
       window.__DEEP_AGENT_APP_ROOT__ = path.replace(/console\/$/, "");
-      document.documentElement.setAttribute("data-theme", localStorage.getItem("da_theme") || "dark");
+      document.documentElement.setAttribute("data-theme", localStorage.getItem("da_theme") || "paper");
     })();
   </script>
   <title>DeepAgent 一体化控制台</title>
@@ -101,12 +101,14 @@
         <div class="configuration-shell">
           <aside class="resource-nav">
             <div class="resource-title"><strong>配置中心</strong><span>数据库配置</span></div>
+            <div class="resource-group-label">配置对象</div>
             <button class="tab resource-btn active" data-tab="agents"><i data-lucide="bot"></i><span>Agent</span></button>
             <button class="tab resource-btn" data-tab="llm-models"><i data-lucide="cpu"></i><span>模型</span></button>
-            <button class="tab resource-btn" data-tab="catalog"><i data-lucide="library"></i><span>模型目录</span></button>
             <button class="tab resource-btn" data-tab="mcp"><i data-lucide="plug-zap"></i><span>MCP 服务</span></button>
             <button class="tab resource-btn" data-tab="ui-tools"><i data-lucide="panel-top"></i><span>UI 工具</span></button>
             <button class="tab resource-btn" data-tab="auxiliary-models"><i data-lucide="brain-circuit"></i><span>辅助模型</span></button>
+            <div class="resource-group-label separated">模型资源</div>
+            <button class="tab resource-btn" data-tab="catalog"><i data-lucide="library"></i><span>模型目录</span></button>
           </aside>
           <section class="configuration-content">
             <div class="configuration-loading" id="configurationLoading">

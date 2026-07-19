@@ -153,6 +153,26 @@ MCP 在请求时由 `resolve_mcp_toolsets` 解析（DB 行 + `mcps/` builtin 兜
 
 `.env` 在仓库根，经 `options.py` → `deepfos_platform.conf.option` 加载。
 
+### 本地 Test 调试入口
+
+生产环境继续启动 `deep_agent.main:app`，只使用平台网关注入的身份。需要从本地浏览器调试 Test 数据和服务时，使用独立入口：
+
+```bash
+python -m deep_agent.local_dev \
+  --config ~/.config/deep-agent/test.env \
+  --port 8000
+```
+
+配置文件必须位于仓库外，且在 macOS/Linux 上执行 `chmod 600`。这个文件作为完整的本地运行 Profile，可同时包含 `DEEP_AGENT_DBMS_*`、`EXPORT_*` 和以下身份项：
+
+```text
+DEEP_AGENT_LOCAL_USER=<平台网关注入的用户 ID>
+DEEP_AGENT_LOCAL_TOKEN=<当前环境的有效 Token>
+DEEP_AGENT_LOCAL_TOKEN_COOKIE=<可选，仅在目标环境要求 Cookie 时填写 Cookie 名>
+```
+
+本地入口只监听 `127.0.0.1`。它会覆盖浏览器提交的 `user / authorization / x-user-token / cookie`，保留控制台调试上下文提交的 `app / space / language`。身份和 Token 不得进入源码、仓库、浏览器存储、日志或测试夹具。
+
 ### Agent（`DEEP_AGENT_` 前缀）
 
 | 变量 | 默认 | 说明 |

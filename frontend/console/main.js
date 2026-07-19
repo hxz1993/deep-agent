@@ -65,7 +65,7 @@ function bindThemes() {
   document.querySelectorAll("[data-console-theme]").forEach((button) => {
     button.addEventListener("click", () => apply(button.dataset.consoleTheme));
   });
-  apply(localStorage.getItem("da_theme") || "dark");
+  apply(localStorage.getItem("da_theme") || "paper");
 }
 
 function showApiBanner(status) {

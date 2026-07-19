@@ -39,20 +39,43 @@ function installLegacyDom(source) {
   }
 
   sidebar.querySelector(".sidebar-footer")?.remove();
-  sidebar.querySelector(".brand-name").textContent = "当前 Agent 会话";
+  const sessionPanelTitle = sidebar.querySelector(".brand-name");
+  if (sessionPanelTitle) {
+    sessionPanelTitle.id = "sessionPanelTitle";
+    sessionPanelTitle.textContent = "Agent 会话";
+  }
+  const sidebarHeader = sidebar.querySelector(".sidebar-header");
+  sidebar.querySelector("#newChatBtn")?.remove();
+  sidebar.querySelector("#newChatBtnWide")?.remove();
+  const sessionPanelSummary = document.createElement("span");
+  sessionPanelSummary.id = "sessionPanelSummary";
+  sessionPanelSummary.className = "session-panel-summary";
+  sessionPanelSummary.textContent = "0 个会话";
+  sidebarHeader?.appendChild(sessionPanelSummary);
   sidebar.querySelector(".sidebar-section.grow")?.classList.add("capabilities-section");
 
   const sessionSection = sidebar.querySelector(".sidebar-section:not(.grow)");
   if (sessionSection) {
+    sessionSection.querySelector(".section-title")?.remove();
+    const toolbar = document.createElement("div");
+    toolbar.className = "session-toolbar";
     const search = document.createElement("label");
     search.className = "compact-search session-search";
     search.innerHTML = '<span aria-hidden="true">⌕</span><input type="search" id="sessionSearchInput" placeholder="搜索当前 Agent 会话" />';
-    sessionSection.insertBefore(search, sessionSection.querySelector("#sessionList"));
+    const newChatButton = document.createElement("button");
+    newChatButton.type = "button";
+    newChatButton.id = "newChatBtn";
+    newChatButton.className = "icon-action session-new-action";
+    newChatButton.dataset.consoleDirectNewChat = "true";
+    newChatButton.title = "为当前 Agent 新建对话";
+    newChatButton.setAttribute("aria-label", "为当前 Agent 新建对话");
+    newChatButton.innerHTML = '<i data-lucide="square-pen"></i>';
+    toolbar.append(search, newChatButton);
+    sessionSection.insertBefore(toolbar, sessionSection.querySelector("#sessionList"));
   }
 
   const host = document.getElementById("workspaceLegacyHost");
   host.replaceChildren(sidebar, chat);
-  document.body.appendChild(menu);
 
   document.getElementById("sessionSearchInput")?.addEventListener("input", filterSessions);
 }
@@ -93,7 +116,7 @@ function renderAgents() {
 
   host.querySelectorAll("[data-agent-id]").forEach((button) => {
     button.addEventListener("click", () => {
-      api.newChat(button.dataset.agentId);
+      api.selectAgent(button.dataset.agentId);
       renderAgents();
       eventRows = [];
       renderInspector();

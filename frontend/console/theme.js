@@ -7,7 +7,7 @@
   ];
 
   function apply(themeId) {
-    const id = THEMES.some((theme) => theme.id === themeId) ? themeId : "dark";
+    const id = THEMES.some((theme) => theme.id === themeId) ? themeId : "paper";
     document.documentElement.setAttribute("data-theme", id);
     localStorage.setItem("da_theme", id);
     const link = document.getElementById("hljsTheme");
@@ -25,11 +25,11 @@
   function initSelect(select) {
     if (!select) return;
     select.innerHTML = THEMES.map((theme) => `<option value="${theme.id}">${theme.label}</option>`).join("");
-    select.value = localStorage.getItem("da_theme") || "dark";
+    select.value = localStorage.getItem("da_theme") || "paper";
     select.addEventListener("change", () => apply(select.value));
   }
 
   window.DATheme = { apply, initSelect, themes: THEMES };
-  apply(localStorage.getItem("da_theme") || "dark");
+  apply(localStorage.getItem("da_theme") || "paper");
   initSelect(document.getElementById("themeSelect"));
 })();

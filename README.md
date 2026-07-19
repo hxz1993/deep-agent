@@ -22,18 +22,46 @@ venv\Scripts\python.exe -m unittest discover -s tests -p "test_*.py" -v
 
 ## 快速开始
 
-**后端**（在 `deep_agent/` 下安装依赖并启动）：
+**后端依赖**（在仓库根目录执行）：
 
 ```bash
-cd deep_agent
-python -m venv venv
-venv\Scripts\activate          # Windows
-pip install -r requirements.txt
-copy .env.example .env
-uvicorn app.main:app --reload
+python -m pip install -r requirements.txt
 ```
 
-后端启动后会挂载仓库根目录的 `frontend/`，访问 http://127.0.0.1:8000/ 即可使用聊天界面。
+部署环境继续使用生产入口，身份和数据库配置由网关及部署环境提供：
+
+```bash
+uvicorn deep_agent.main:app --host 0.0.0.0 --port 8000
+```
+
+本地联调 Test 环境时，使用独立入口和仓库外的私有配置文件：
+
+```bash
+mkdir -p ~/.config/deep-agent
+chmod 700 ~/.config/deep-agent
+$EDITOR ~/.config/deep-agent/test.env
+chmod 600 ~/.config/deep-agent/test.env
+
+python -m deep_agent.local_dev \
+  --config ~/.config/deep-agent/test.env \
+  --port 8000
+```
+
+私有配置文件至少包含：
+
+```dotenv
+DEEP_AGENT_LOCAL_USER=<当前 Test 用户 ID>
+DEEP_AGENT_LOCAL_TOKEN=<当前 Test Token>
+
+# 其余运行配置按目标环境填写，例如 DEEP_AGENT_DBMS_*、EXPORT_*。
+```
+
+本地入口只监听 `127.0.0.1`，固定使用配置文件中的用户和鉴权；控制台仍可切换 `app / space / language`。配置文件必须位于仓库外，不能提交。线上入口不会读取这些本地身份变量。
+
+后端启动后会挂载仓库根目录的 `frontend/`：
+
+- 旧聊天页面：http://127.0.0.1:8000/
+- 一体化控制台：http://127.0.0.1:8000/console/
 
 **前端独立预览**（可选）：
 

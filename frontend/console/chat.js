@@ -330,13 +330,9 @@ function init() {
     updateComposerModelInfo();
   });
 
-  $("newChatBtn").addEventListener("click", (e) => {
-    e.stopPropagation();
-    toggleNewChatMenu(e.currentTarget);
-  });
+  $("newChatBtn").addEventListener("click", handleNewChatControl);
   el.newChatBtnWide?.addEventListener("click", (e) => {
-    e.stopPropagation();
-    toggleNewChatMenu(e.currentTarget);
+    handleNewChatControl(e);
   });
   document.addEventListener("click", (e) => {
     if (el.newChatMenu?.classList.contains("hidden")) return;
@@ -456,6 +452,15 @@ function autoGrow() {
 /* --------------------------- 会话管理 --------------------------- */
 function normalizeAgentId(agentId) {
   return typeof agentId === "string" && agentId ? agentId : null;
+}
+
+function handleNewChatControl(event) {
+  event.stopPropagation();
+  if (event.currentTarget?.dataset.consoleDirectNewChat === "true") {
+    newChat(state.agentId);
+    return;
+  }
+  toggleNewChatMenu(event.currentTarget);
 }
 
 function closeNewChatMenu() {
@@ -647,21 +652,27 @@ function scheduleTitleRefresh() {
 
 function renderSessions() {
   el.sessionList.innerHTML = "";
-  if (state.sessions.length === 0) {
-    el.sessionList.innerHTML = '<li class="session-empty">暂无会话</li>';
+  const activeAgent = state.agents.find((agent) => agent.id === state.agentId);
+  const scopedSessions = state.sessions.filter(
+    (session) => (session.agentId || "") === (state.agentId || ""),
+  );
+  const panelTitle = document.getElementById("sessionPanelTitle");
+  const panelSummary = document.getElementById("sessionPanelSummary");
+  if (panelTitle) panelTitle.textContent = activeAgent?.name || "Agent 会话";
+  if (panelSummary) {
+    panelSummary.textContent = `${scopedSessions.length} 个历史会话`;
+    panelSummary.title = state.sessionId ? "已选择会话" : "尚未选择会话";
+  }
+  if (scopedSessions.length === 0) {
+    el.sessionList.innerHTML = '<li class="session-empty">该 Agent 暂无历史会话</li>';
     return;
   }
-  for (const s of state.sessions) {
+  for (const s of scopedSessions) {
     const li = document.createElement("li");
     li.className =
       "session-item" +
       (s.id === state.sessionId && (s.agentId || "") === (state.agentId || "") ? " active" : "");
-    const agentLabel = s.agentName
-      ? `<span class="session-agent">${escapeHtml(s.agentName)}</span>`
-      : s.agentId
-        ? `<span class="session-agent">${escapeHtml(s.agentId.slice(0, 8))}</span>`
-        : "";
-    li.innerHTML = `<span class="sid" title="${escapeHtml(s.id)}"><span class="session-title">${escapeHtml(s.title)}</span>${agentLabel}</span><span class="session-actions"><span class="rename-btn" title="重命名">✏️</span><span class="auto-rename-btn" title="自动重命名">🔄</span><span class="del" title="删除">✕</span></span>`;
+    li.innerHTML = `<span class="sid" title="${escapeHtml(s.id)}"><span class="session-title">${escapeHtml(s.title)}</span></span><span class="session-actions"><span class="rename-btn" title="重命名">✏️</span><span class="auto-rename-btn" title="自动重命名">🔄</span><span class="del" title="删除">✕</span></span>`;
     li.querySelector(".sid").addEventListener("click", (e) => {
       if (e.target.closest(".session-title-input")) return;
       switchSession(s);
@@ -2204,12 +2215,8 @@ window.DeepAgentConsoleChat = {
   stopStream,
   selectAgent(agentId) {
     if (!agentId || !state.agents.some((agent) => agent.id === agentId)) return;
-    state.agentId = agentId;
-    localStorage.setItem("da_console_agent_id_v1", agentId);
-    if (el.agentSelect) {
-      el.agentSelect.value = agentId;
-      el.agentSelect.dispatchEvent(new Event("change"));
-    }
+    if (state.agentId === agentId) return;
+    newChat(agentId);
   },
 };
 

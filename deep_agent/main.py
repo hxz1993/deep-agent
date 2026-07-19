@@ -43,6 +43,15 @@ app.add_middleware(
 app.include_router(api_router)
 
 
+@app.middleware("http")
+async def disable_console_cache(request: Request, call_next):
+    response = await call_next(request)
+    path = request.url.path
+    if path == "/console" or path.startswith("/console/"):
+        response.headers["Cache-Control"] = "no-store"
+    return response
+
+
 @app.exception_handler(AgentNotFoundError)
 async def agent_not_found_handler(request: Request, exc: AgentNotFoundError) -> JSONResponse:
     return JSONResponse(status_code=404, content={"error": exc.__class__.__name__, "detail": str(exc)})

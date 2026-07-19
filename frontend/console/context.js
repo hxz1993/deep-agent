@@ -35,14 +35,15 @@ function renderContext() {
   }
   if (languageInput) languageInput.value = overrides.language || "";
 
-  document.getElementById("contextUserInput").value = identity?.user || "未认证";
+  const currentUser = identity?.user || "未认证";
+  document.getElementById("contextUserInput").value = currentUser;
   document.getElementById("contextAuthInput").value = identity ? "已通过平台身份校验" : "未认证";
-  document.getElementById("currentUserLabel").textContent = identity?.user || "未认证";
-  document.getElementById("contextSummary").textContent =
-    effectiveContext.app || effectiveContext.space
-      ? `${effectiveContext.app || "—"} / ${effectiveContext.space || "—"}`
-      : "继承平台上下文";
-
+  document.getElementById("currentUserFull").textContent = currentUser;
+  const currentUserButton = document.getElementById("currentUserBtn");
+  if (currentUserButton) {
+    currentUserButton.removeAttribute("title");
+    currentUserButton.setAttribute("aria-label", `当前平台用户：${currentUser}`);
+  }
   const rows = [
     ["App", effectiveContext.app || "未提供"],
     ["Space", effectiveContext.space || "未提供"],
@@ -63,8 +64,17 @@ function setAuthLocked(locked) {
 }
 
 export async function refreshIdentity() {
+  let recoveredBaseUrl = false;
   try {
-    const inherited = await api.requestContext({ inherited: true });
+    let inherited;
+    try {
+      inherited = await api.requestContext({ inherited: true });
+    } catch (error) {
+      if (error.status || !api.canFallbackToInheritedBaseUrl()) throw error;
+      api.clearBaseUrl();
+      inherited = await api.requestContext({ inherited: true });
+      recoveredBaseUrl = true;
+    }
     identity = inherited;
     inheritedContext = {
       app: inherited.app || null,
@@ -73,6 +83,9 @@ export async function refreshIdentity() {
     };
     setAuthLocked(false);
     renderContext();
+    if (recoveredBaseUrl) {
+      window.DeepAgentConsole?.toast("原后端地址不可用，已恢复为当前页面地址");
+    }
     return true;
   } catch (error) {
     identity = null;
@@ -94,6 +107,20 @@ function closeDrawer() {
   document.getElementById("contextDrawer")?.classList.remove("open");
   document.getElementById("contextDrawer")?.setAttribute("aria-hidden", "true");
   document.getElementById("contextBackdrop")?.classList.add("hidden");
+}
+
+function closeUserPopover() {
+  const button = document.getElementById("currentUserBtn");
+  button?.classList.remove("popover-open");
+  button?.setAttribute("aria-expanded", "false");
+}
+
+function toggleUserPopover() {
+  const button = document.getElementById("currentUserBtn");
+  if (!button) return;
+  const open = !button.classList.contains("popover-open");
+  button.classList.toggle("popover-open", open);
+  button.setAttribute("aria-expanded", String(open));
 }
 
 function currentFormContext() {
@@ -135,14 +162,29 @@ function resetContext() {
 }
 
 export function bindContextControls() {
-  document.getElementById("openContextBtn")?.addEventListener("click", openDrawer);
+  document.getElementById("currentUserBtn")?.addEventListener("click", (event) => {
+    event.stopPropagation();
+    toggleUserPopover();
+  });
+  document.addEventListener("click", (event) => {
+    const target = event.target instanceof Element ? event.target : null;
+    if (target?.closest("[data-open-context]")) {
+      closeUserPopover();
+      openDrawer();
+      return;
+    }
+    if (!target?.closest("#currentUserBtn")) closeUserPopover();
+  });
   document.getElementById("closeContextBtn")?.addEventListener("click", closeDrawer);
   document.getElementById("contextBackdrop")?.addEventListener("click", closeDrawer);
   document.getElementById("saveContextBtn")?.addEventListener("click", saveContext);
   document.getElementById("resetContextBtn")?.addEventListener("click", resetContext);
   document.getElementById("retryIdentityBtn")?.addEventListener("click", () => location.reload());
   document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") closeDrawer();
+    if (event.key === "Escape") {
+      closeDrawer();
+      closeUserPopover();
+    }
   });
   renderContext();
 }

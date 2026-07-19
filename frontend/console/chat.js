@@ -1,5 +1,5 @@
-import { normalizeOption, normalizeStructuredFields, validateUiToolCall } from "./hitl.js";
-import { parseSseBlock, readSse } from "./protocol.js";
+import { normalizeOption, normalizeStructuredFields, validateUiToolCall } from "./hitl.js?v=20260720-1";
+import { parseSseBlock, readSse } from "./protocol.js?v=20260720-1";
 
 /* ------------------------------------------------------------------ *
  * deep-agent 前端 —— 适配 FastAPI /api/v1/chat/stream (SSE over POST)
@@ -200,6 +200,35 @@ function sessionSortTime(session) {
   return Date.parse(session.updatedAt || session.createdAt || 0) || 0;
 }
 
+function formatSessionActivity(session) {
+  const value = session.updatedAt || session.createdAt;
+  if (!value) return "时间未知";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "时间未知";
+
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const activityDay = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const diffDays = Math.round((today - activityDay) / 86400000);
+  const time = new Intl.DateTimeFormat("zh-CN", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(date);
+
+  if (diffDays === 0) return `今天 ${time}`;
+  if (diffDays === 1) return `昨天 ${time}`;
+  if (date.getFullYear() === now.getFullYear()) {
+    return `${date.getMonth() + 1}月${date.getDate()}日 ${time}`;
+  }
+  return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日`;
+}
+
+function formatSessionMessageCount(session) {
+  const count = Number(session.messageCount);
+  return Number.isFinite(count) && count > 0 ? `${count} 条消息` : "暂无消息";
+}
+
 function sortSessions() {
   state.sessions.sort((a, b) => sessionSortTime(b) - sessionSortTime(a));
 }
@@ -233,6 +262,7 @@ function currentSessionSnapshot() {
     title: displayTitle,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
+    messageCount: state.modelMessageCount,
   });
 }
 
@@ -247,6 +277,7 @@ function mergeSessionsFromBackend(rows) {
       title,
       createdAt: row.created_at || null,
       updatedAt: row.updated_at || row.created_at || null,
+      messageCount: Number(row.message_count) || 0,
     });
   });
 
@@ -573,6 +604,7 @@ function upsertSession(id, title, agentId, agentName) {
       title: (title || normalized.id.slice(0, 8)).slice(0, 40),
       createdAt: now,
       updatedAt: now,
+      messageCount: state.modelMessageCount,
     });
   }
   sortSessions();
@@ -672,7 +704,7 @@ function renderSessions() {
     li.className =
       "session-item" +
       (s.id === state.sessionId && (s.agentId || "") === (state.agentId || "") ? " active" : "");
-    li.innerHTML = `<span class="sid" title="${escapeHtml(s.id)}"><span class="session-title">${escapeHtml(s.title)}</span></span><span class="session-actions"><span class="rename-btn" title="重命名">✏️</span><span class="auto-rename-btn" title="自动重命名">🔄</span><span class="del" title="删除">✕</span></span>`;
+    li.innerHTML = `<span class="sid" title="${escapeHtml(s.title)}"><span class="session-title">${escapeHtml(s.title)}</span><span class="session-meta"><span>${escapeHtml(formatSessionActivity(s))}</span><span class="session-meta-dot" aria-hidden="true"></span><span>${escapeHtml(formatSessionMessageCount(s))}</span></span></span><span class="session-actions"><span class="rename-btn" title="重命名">✏️</span><span class="auto-rename-btn" title="自动重命名">🔄</span><span class="del" title="删除">✕</span></span>`;
     li.querySelector(".sid").addEventListener("click", (e) => {
       if (e.target.closest(".session-title-input")) return;
       switchSession(s);

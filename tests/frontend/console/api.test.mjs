@@ -5,21 +5,25 @@ import vm from "node:vm";
 
 const source = await readFile(new URL("../../../frontend/console/api.js", import.meta.url), "utf8");
 
-function loadApi(initial = {}) {
+function loadApi(initial = {}, fetchImpl = async () => ({ status: 200 })) {
   const values = new Map(Object.entries(initial));
   const window = {
     __DEEP_AGENT_APP_ROOT__: "/",
     dispatchEvent() {},
   };
   const context = vm.createContext({
+    AbortController,
     CustomEvent: class CustomEvent {},
-    fetch: async () => ({ status: 200 }),
+    clearTimeout,
+    DOMException,
+    fetch: fetchImpl,
     location: { origin: "http://localhost:8000", protocol: "http:" },
     localStorage: {
       getItem(key) { return values.get(key) ?? null; },
       removeItem(key) { values.delete(key); },
       setItem(key, value) { values.set(key, value); },
     },
+    setTimeout,
     window,
   });
   vm.runInContext(source, context);
@@ -66,4 +70,25 @@ test("空白上下文不发送且重置会清除存储", () => {
   assert.deepEqual(JSON.parse(JSON.stringify(api.buildHeaders())), { space: "s1" });
   api.clearContext();
   assert.equal(values.has(api.CONTEXT_KEY), false);
+});
+
+test("不可用的自定义后端地址可以恢复为当前页面地址", () => {
+  const { api, values } = loadApi({
+    da_console_base_url_v1: "http://192.0.2.1:8000",
+  });
+  assert.equal(api.canFallbackToInheritedBaseUrl(), true);
+  assert.equal(api.clearBaseUrl(), "http://localhost:8000");
+  assert.equal(values.has(api.BASE_URL_KEY), false);
+  assert.equal(api.canFallbackToInheritedBaseUrl(), false);
+});
+
+test("身份上下文请求超时后返回可识别错误", async () => {
+  const pendingFetch = (_url, options) => new Promise((_resolve, reject) => {
+    options.signal.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")));
+  });
+  const { api } = loadApi({}, pendingFetch);
+  await assert.rejects(
+    api.requestContext({ timeoutMs: 5 }),
+    (error) => error.code === "request_timeout" && error.message.includes("连接后端超时"),
+  );
 });

@@ -65,6 +65,19 @@
     return (localStorage.getItem(BASE_URL_KEY) || inferBaseUrl()).replace(/\/$/, "");
   }
 
+  function inheritedApiBaseUrl() {
+    return inferBaseUrl().replace(/\/$/, "");
+  }
+
+  function clearBaseUrl() {
+    localStorage.removeItem(BASE_URL_KEY);
+    return inheritedApiBaseUrl();
+  }
+
+  function canFallbackToInheritedBaseUrl() {
+    return defaultApiBaseUrl() !== inheritedApiBaseUrl();
+  }
+
   function saveBaseUrl(value) {
     const normalized = normalizeString(value) || inferBaseUrl();
     localStorage.setItem(BASE_URL_KEY, normalized.replace(/\/$/, ""));
@@ -118,18 +131,32 @@
     }
   }
 
-  async function requestContext({ inherited = false } = {}) {
-    const response = await daFetch(`${defaultApiBaseUrl()}/api/v1/request-context`, {
-      includeContext: !inherited,
-    });
-    const body = await parseJson(response);
-    if (!response.ok) {
-      const detail = body?.detail || body?.message || `HTTP ${response.status}`;
-      const error = new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
-      error.status = response.status;
+  async function requestContext({ inherited = false, baseUrl = defaultApiBaseUrl(), timeoutMs = 5000 } = {}) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const response = await daFetch(`${baseUrl.replace(/\/$/, "")}/api/v1/request-context`, {
+        includeContext: !inherited,
+        signal: controller.signal,
+      });
+      const body = await parseJson(response);
+      if (!response.ok) {
+        const detail = body?.detail || body?.message || `HTTP ${response.status}`;
+        const error = new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
+        error.status = response.status;
+        throw error;
+      }
+      return body;
+    } catch (error) {
+      if (controller.signal.aborted) {
+        const timeoutError = new Error(`连接后端超时（${timeoutMs}ms）：${baseUrl}`);
+        timeoutError.code = "request_timeout";
+        throw timeoutError;
+      }
       throw error;
+    } finally {
+      clearTimeout(timer);
     }
-    return body;
   }
 
   window.defaultApiBaseUrl = defaultApiBaseUrl;
@@ -138,8 +165,11 @@
     CONTEXT_KEY,
     BASE_URL_KEY,
     buildHeaders,
+    canFallbackToInheritedBaseUrl,
+    clearBaseUrl,
     clearContext,
     defaultApiBaseUrl,
+    inheritedApiBaseUrl,
     loadContext,
     requestContext,
     sanitizeContext,

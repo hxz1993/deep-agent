@@ -1,7 +1,7 @@
-import { initConfiguration } from "./configuration.js";
-import { bindContextControls, refreshIdentity } from "./context.js";
-import { initDiagnostics } from "./diagnostics.js";
-import { initWorkspace } from "./workspace.js";
+import { initConfiguration } from "./configuration.js?v=20260720-1";
+import { bindContextControls, refreshIdentity } from "./context.js?v=20260720-1";
+import { initDiagnostics } from "./diagnostics.js?v=20260720-1";
+import { initWorkspace } from "./workspace.js?v=20260720-1";
 
 const VALID_PAGES = new Set(["workspace", "configuration", "diagnostics"]);
 let authenticated = false;
@@ -80,6 +80,20 @@ function showApiBanner(status) {
   banner.className = `console-banner status-${status}`;
 }
 
+function showWorkspaceLoadError(error) {
+  const loading = document.getElementById("workspaceLoading");
+  if (!loading) return;
+  loading.replaceChildren();
+  const message = document.createElement("span");
+  message.className = "configuration-error";
+  message.textContent = error?.message || "测试工作台加载失败";
+  const retry = document.createElement("button");
+  retry.type = "button";
+  retry.textContent = "重新加载";
+  retry.addEventListener("click", () => location.reload());
+  loading.append(message, retry);
+}
+
 async function boot() {
   window.DeepAgentConsole = { showPage, toast };
   bindNavigation();
@@ -93,12 +107,13 @@ async function boot() {
     authenticated = await refreshIdentity();
   } catch (error) {
     showApiBanner(error.status || 500);
+    showWorkspaceLoadError(error);
     toast(error.message, true);
   }
 
   if (authenticated) {
     await initWorkspace().catch((error) => {
-      document.getElementById("workspaceLoading").innerHTML = `<span class="configuration-error">${error.message}</span>`;
+      showWorkspaceLoadError(error);
       toast(error.message, true);
     });
   }

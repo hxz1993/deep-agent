@@ -20,14 +20,15 @@
   <link rel="stylesheet" href="../themes.css" />
   <link rel="stylesheet" href="../styles.css" />
   <link rel="stylesheet" href="../admin/admin.css" />
-  <link rel="stylesheet" href="./console.css" />
+  <link rel="stylesheet" href="./console.css?v=20260720-1" />
 </head>
 <body>
   <div class="console-shell">
     <header class="console-topbar">
       <div class="console-brand">
         <span class="brand-mark"><i data-lucide="bot"></i></span>
-        <div><strong>DeepAgent</strong><span>一体化控制台</span></div>
+        <div class="console-brand-copy"><strong>DeepAgent</strong><span>一体化控制台</span></div>
+        <span class="connection-pill" id="connStatus"><span class="dot"></span><span class="conn-text">连接中</span></span>
       </div>
 
       <nav class="console-nav" aria-label="控制台主导航">
@@ -43,19 +44,15 @@
       </nav>
 
       <div class="console-top-actions">
-        <span class="connection-pill" id="connStatus"><span class="dot"></span><span class="conn-text">连接中</span></span>
-        <button type="button" class="context-summary" id="openContextBtn" title="请求上下文">
-          <i data-lucide="waypoints"></i>
-          <span id="contextSummary">继承平台上下文</span>
-        </button>
         <div class="theme-switch" aria-label="界面主题">
           <button type="button" data-console-theme="light" title="明亮"><i data-lucide="sun"></i></button>
           <button type="button" data-console-theme="paper" title="护眼"><i data-lucide="leaf"></i></button>
           <button type="button" data-console-theme="dark" title="暗色"><i data-lucide="moon"></i></button>
           <button type="button" data-console-theme="contrast" title="高对比"><i data-lucide="contrast"></i></button>
         </div>
-        <button type="button" class="user-pill" id="currentUserBtn" title="当前平台用户">
-          <i data-lucide="circle-user-round"></i><span id="currentUserLabel">识别中</span>
+        <button type="button" class="user-pill" id="currentUserBtn" aria-label="当前平台用户" aria-expanded="false">
+          <i data-lucide="circle-user-round"></i>
+          <span class="user-popover" role="tooltip"><strong id="currentUserFull">识别中</strong></span>
         </button>
       </div>
     </header>
@@ -80,10 +77,12 @@
             </div>
             <label class="compact-search"><i data-lucide="search"></i><input id="agentSearchInput" type="search" placeholder="搜索 Agent" /></label>
             <div class="agent-list" id="consoleAgentList"></div>
+            <button type="button" class="agent-context-action" data-open-context>
+              <i data-lucide="waypoints"></i><span>测试上下文</span>
+            </button>
           </aside>
           <div class="workspace-legacy-host" id="workspaceLegacyHost"></div>
           <aside class="inspector-pane" id="inspectorPane">
-            <div class="pane-heading"><div><strong>运行检查器</strong><span>当前会话</span></div></div>
             <div class="inspector-tabs">
               <button type="button" class="active" data-inspector-tab="overview">概览</button>
               <button type="button" data-inspector-tab="tools">工具链</button>
@@ -182,11 +181,11 @@
   </div>
 
   <script src="../vendor/lucide.min.js"></script>
-  <script src="./api.js"></script>
-  <script src="./theme.js"></script>
+  <script src="./api.js?v=20260720-1"></script>
+  <script src="./theme.js?v=20260720-1"></script>
   <script src="../vendor/marked.min.js"></script>
   <script src="../vendor/purify.min.js"></script>
   <script src="../vendor/highlight.min.js"></script>
-  <script type="module" src="./main.js"></script>
+  <script type="module" src="./main.js?v=20260720-1"></script>
 </body>
 </html>

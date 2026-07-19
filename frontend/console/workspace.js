@@ -74,6 +74,16 @@ function installLegacyDom(source) {
     sessionSection.insertBefore(toolbar, sessionSection.querySelector("#sessionList"));
   }
 
+  const chatActions = chat.querySelector(".chat-actions");
+  if (chatActions) {
+    const contextButton = document.createElement("button");
+    contextButton.type = "button";
+    contextButton.className = "workspace-context-action";
+    contextButton.dataset.openContext = "";
+    contextButton.innerHTML = '<i data-lucide="waypoints"></i><span>测试上下文</span>';
+    chatActions.prepend(contextButton);
+  }
+
   const host = document.getElementById("workspaceLegacyHost");
   host.replaceChildren(sidebar, chat);
 
@@ -260,7 +270,7 @@ export async function initWorkspace() {
   initialized = true;
   const source = await fetchLegacyPage();
   installLegacyDom(source);
-  await import("./chat.js");
+  await import("./chat.js?v=20260720-1");
   bindWorkspaceControls();
   renderAgents();
   renderInspector();

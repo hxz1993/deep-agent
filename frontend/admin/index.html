@@ -19,7 +19,7 @@
   </script>
   <title>deep-agent · 管理后台</title>
   <link rel="stylesheet" href="../themes.css" />
-  <link rel="stylesheet" href="./admin.css" />
+  <link rel="stylesheet" href="./admin.css?v=20260720-4" />
   <script>
     (function () {
       var t = localStorage.getItem("da_theme") || "dark";
@@ -154,6 +154,7 @@
             <tr>
               <th>名称</th>
               <th>传输</th>
+              <th>上下文</th>
               <th>启用</th>
               <th>描述</th>
               <th>更新时间</th>
@@ -161,7 +162,7 @@
             </tr>
           </thead>
           <tbody id="mcpTableBody">
-            <tr><td colspan="6" class="empty-cell">加载中…</td></tr>
+            <tr><td colspan="7" class="empty-cell">加载中…</td></tr>
           </tbody>
         </table>
       </div>
@@ -269,6 +270,7 @@
           <div class="cap-panels" id="agentCapGroups"></div>
         </section>
       </div>
+      <div class="form-error hidden" data-form-error role="alert" aria-live="assertive"></div>
       <div class="modal-footer">
         <button type="button" class="btn" id="cancelAgentBtn">取消</button>
         <button type="submit" class="btn primary">保存</button>
@@ -333,6 +335,7 @@
           </div>
         </div>
       </div>
+      <div class="form-error hidden" data-form-error role="alert" aria-live="assertive"></div>
       <div class="modal-footer">
         <button type="button" class="btn" id="cancelLlmModelBtn">取消</button>
         <button type="submit" class="btn primary">保存</button>
@@ -354,6 +357,7 @@
           <select id="auxiliaryModelSelect" required></select>
         </label>
       </div>
+      <div class="form-error hidden" data-form-error role="alert" aria-live="assertive"></div>
       <div class="modal-footer">
         <button type="button" class="btn" id="cancelAuxiliaryModelBtn">取消</button>
         <button type="submit" class="btn primary">保存</button>
@@ -399,6 +403,20 @@
             <span>Headers JSON（可选）</span>
             <textarea id="mcpHeaders" rows="2" placeholder='{"Authorization": "Bearer ..."}'></textarea>
           </label>
+          <div class="field mcp-context-policy">
+            <span>请求上下文</span>
+            <div class="context-mode-options" role="radiogroup" aria-label="MCP 请求上下文">
+              <label class="radio-field">
+                <input type="radio" name="mcpRequestContextMode" value="isolated" checked />
+                独立
+              </label>
+              <label class="radio-field">
+                <input type="radio" name="mcpRequestContextMode" value="inherit" />
+                继承
+              </label>
+            </div>
+            <p class="field-hint context-mode-description" id="mcpRequestContextDescription"></p>
+          </div>
         </div>
 
         <div id="mcpStdioFields" class="hidden">
@@ -448,6 +466,7 @@
           </label>
         </section>
       </div>
+      <div class="form-error hidden" data-form-error role="alert" aria-live="assertive"></div>
       <div class="modal-footer">
         <button type="button" class="btn" id="cancelMcpBtn">取消</button>
         <button type="submit" class="btn primary">保存</button>
@@ -527,6 +546,7 @@
           <span>允许编辑 Schema</span>
         </label>
       </div>
+      <div class="form-error hidden" data-form-error role="alert" aria-live="assertive"></div>
       <div class="modal-footer">
         <button type="button" class="btn" id="cancelUiToolBtn">取消</button>
         <button type="submit" class="btn primary">保存</button>
@@ -534,14 +554,15 @@
     </form>
   </dialog>
 
-  <script src="../request_config.js"></script>
-  <script src="../theme.js"></script>
-  <script src="./admin.js"></script>
-  <script src="./llm_models.js"></script>
-  <script src="./auxiliary_models.js"></script>
-  <script src="./agents.js"></script>
-  <script src="./mcp.js"></script>
-  <script src="./ui_schema_editor.js"></script>
-  <script src="./ui_tools.js"></script>
+  <script src="../request_config.js?v=20260720-3"></script>
+  <script src="../theme.js?v=20260720-3"></script>
+  <script src="./form_feedback.js?v=20260720-3"></script>
+  <script src="./admin.js?v=20260720-3"></script>
+  <script src="./llm_models.js?v=20260720-3"></script>
+  <script src="./auxiliary_models.js?v=20260720-3"></script>
+  <script src="./agents.js?v=20260720-3"></script>
+  <script src="./mcp.js?v=20260720-3"></script>
+  <script src="./ui_schema_editor.js?v=20260720-3"></script>
+  <script src="./ui_tools.js?v=20260720-3"></script>
 </body>
 </html>

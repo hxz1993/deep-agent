@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 
+from deep_agent.agent.headers import extract_forward_headers
 from deep_agent.capabilities.mcp.ui_discovery import discover_and_persist_ui_tools
 from deep_agent.db.deps import get_mcp_store, get_ui_tool_store
 from deep_agent.db.stores.mcp import McpServerStoreBase
@@ -36,10 +37,6 @@ def _assert_row_mutable(row, body: McpServerUpdate) -> None:
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=str(exc),
             ) from exc
-
-
-# ponytail: keep old name for call sites
-_assert_builtin_row_mutable = _assert_row_mutable
 
 
 @router.get("/mcp", response_model=list[McpServerResponse])
@@ -88,7 +85,7 @@ async def update_mcp_server(
     row = await store.get_by_name(name)
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"MCP server not found: {name}")
-    _assert_builtin_row_mutable(row, body)
+    _assert_row_mutable(row, body)
     updated = await store.update(name, body)
     assert updated is not None
     return McpServerResponse.from_row(updated)
@@ -107,10 +104,16 @@ async def delete_mcp_server(
 @router.post("/mcp/{name}/ui-tools/refresh", response_model=UiToolsRefreshResponse)
 async def refresh_mcp_ui_tools(
     name: str,
+    request: Request,
     mcp_store: McpServerStoreBase = Depends(get_mcp_store),
     ui_tool_store: UiToolStoreBase = Depends(get_ui_tool_store),
 ) -> UiToolsRefreshResponse:
     row = await mcp_store.get_by_name(name)
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"MCP server not found: {name}")
-    return await discover_and_persist_ui_tools(ui_tool_store, row, use_cache_on_error=False)
+    return await discover_and_persist_ui_tools(
+        ui_tool_store,
+        row,
+        use_cache_on_error=False,
+        request_headers=extract_forward_headers(request),
+    )

@@ -30,6 +30,7 @@ async def build_runner(
     model_id: str | None = None,
     temperature: float | None = None,
     capabilities: list[str] | None = None,
+    request_headers: dict[str, str] | None = None,
 ) -> AgentRunner:
     """Assemble a per-request AgentRunner from settings + registry + store."""
     if model_id is not None:
@@ -51,7 +52,7 @@ async def build_runner(
         spec = AgentSpec.from_llm_model(llm_rows[0], temperature=temperature)
     if capabilities is not None:
         spec.capabilities = capabilities
-    return await _build_runner_from_spec(spec, ctx)
+    return await _build_runner_from_spec(spec, ctx, request_headers=request_headers)
 
 
 async def build_runner_for_agent(
@@ -59,6 +60,7 @@ async def build_runner_for_agent(
     agent_id: str,
     *,
     model_id: str | None = None,
+    request_headers: dict[str, str] | None = None,
 ) -> AgentRunner:
     """Assemble a per-request AgentRunner from a database agent configuration."""
     row = await ctx.stores.agent.get_by_id(agent_id)
@@ -71,16 +73,22 @@ async def build_runner_for_agent(
         raise LlmModelNotFoundError(effective_model_id)
 
     spec = AgentSpec.from_row(row, llm_row)
-    return await _build_runner_from_spec(spec, ctx)
+    return await _build_runner_from_spec(spec, ctx, request_headers=request_headers)
 
 
-async def _build_runner_from_spec(spec: AgentSpec, ctx: AppContext) -> AgentRunner:
+async def _build_runner_from_spec(
+    spec: AgentSpec,
+    ctx: AppContext,
+    *,
+    request_headers: dict[str, str] | None = None,
+) -> AgentRunner:
     mcp_rows = await load_mcp_rows(ctx.stores)
 
     dynamic_ui_toolset, ui_tool_hints = await prepare_ui_toolset_for_spec(
         ctx.stores,
         spec,
         mcp_rows=mcp_rows,
+        request_headers=request_headers,
     )
 
     mcp_toolsets = await resolve_mcp_toolsets(ctx.stores, spec, mcp_rows=mcp_rows)

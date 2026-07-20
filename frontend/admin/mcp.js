@@ -4,24 +4,39 @@ const MCP_TRANSPORT_LABELS = {
   builtin: "builtin",
 };
 
+const MCP_CONTEXT_LABELS = {
+  inherit: "继承",
+  isolated: "独立",
+};
+
+function inheritedHeadersTooltip(headers) {
+  return headers?.length
+    ? `允许继承的 Header：${headers.join("、")}`
+    : "允许继承的 Header 由后端白名单控制。";
+}
+
 const mcpAdmin = {
   async refresh() {
     const tbody = document.getElementById("mcpTableBody");
     if (!tbody) return;
-    tbody.innerHTML = `<tr><td colspan="6" class="empty-cell">加载中…</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="7" class="empty-cell">加载中…</td></tr>`;
     try {
       const servers = await apiFetch("/api/v1/mcp");
       showDbBanner(false);
       if (!servers.length) {
-        tbody.innerHTML = `<tr><td colspan="6" class="empty-cell">暂无 MCP 服务</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="7" class="empty-cell">暂无 MCP 服务</td></tr>`;
         return;
       }
+      const inherited = servers.find((item) => item.request_context?.inherited_headers?.length)
+        ?.request_context.inherited_headers;
+      state.mcpInheritedHeaders = inherited || state.mcpInheritedHeaders || [];
       tbody.innerHTML = servers
         .map(
           (s) => `
         <tr>
           <td><strong>${escapeHtml(s.name)}</strong></td>
           <td><span class="badge">${escapeHtml(MCP_TRANSPORT_LABELS[s.transport] || s.transport)}</span></td>
+          <td><span class="badge">${escapeHtml(MCP_CONTEXT_LABELS[s.request_context?.mode] || "继承")}</span></td>
           <td><span class="badge ${s.enabled ? "on" : "off"}">${s.enabled ? "是" : "否"}</span></td>
           <td>${escapeHtml(s.description || "—")}</td>
           <td>${escapeHtml(formatDate(s.updated_at))}</td>
@@ -46,7 +61,7 @@ const mcpAdmin = {
         btn.addEventListener("click", () => this.remove(btn.dataset.delete));
       });
     } catch (err) {
-      tbody.innerHTML = `<tr><td colspan="6" class="empty-cell">${escapeHtml(err.message)}</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="7" class="empty-cell">${escapeHtml(err.message)}</td></tr>`;
     }
   },
 
@@ -64,6 +79,33 @@ const mcpAdmin = {
       mode: document.getElementById("mcpUiToolsMode").value,
       refresh_seconds: Number.isFinite(refresh) && refresh >= 60 ? refresh : 300,
     };
+  },
+
+  readRequestContextMode() {
+    return document.querySelector('input[name="mcpRequestContextMode"]:checked')?.value || "isolated";
+  },
+
+  fillRequestContextFields(server = null) {
+    const mode = server?.request_context?.mode || server?.config?.request_context?.mode || "isolated";
+    const input = document.querySelector(`input[name="mcpRequestContextMode"][value="${mode}"]`);
+    if (input) input.checked = true;
+    const inherited = server?.request_context?.inherited_headers || state.mcpInheritedHeaders || [];
+    this.updateRequestContextDescription(inherited);
+  },
+
+  updateRequestContextDescription(inheritedHeaders = state.mcpInheritedHeaders || []) {
+    const mode = this.readRequestContextMode();
+    const description = document.getElementById("mcpRequestContextDescription");
+    if (description) {
+      description.innerHTML = mode === "inherit"
+        ? `静态 Header 与当前请求上下文合并，请求中的同名值优先。<span class="context-policy-help" data-context-help role="img" tabindex="0" aria-label="查看允许继承的 Header"></span>`
+        : "仅使用该 MCP 自身配置的 Header，不继承当前用户请求。";
+    }
+    document.querySelectorAll("[data-context-help]").forEach((button) => {
+      const tooltip = inheritedHeadersTooltip(inheritedHeaders);
+      button.dataset.tooltip = tooltip;
+      button.title = tooltip;
+    });
   },
 
   async refreshUiTools(name) {
@@ -136,6 +178,7 @@ const mcpAdmin = {
     document.getElementById("mcpEnv").value = "";
     document.getElementById("mcpCwd").value = "";
     this.fillUiToolsFields({});
+    this.fillRequestContextFields();
     this.setTransportSelectMode("create");
     this.toggleTransportFields();
     document.getElementById("mcpModal").showModal();
@@ -182,6 +225,7 @@ const mcpAdmin = {
       }
 
       this.fillUiToolsFields(server.config);
+      this.fillRequestContextFields(server);
       this.setTransportSelectMode(server.transport === "builtin" ? "edit-builtin" : "edit");
       this.toggleTransportFields();
       document.getElementById("mcpModal").showModal();
@@ -194,7 +238,10 @@ const mcpAdmin = {
     const transport = document.getElementById("mcpTransport").value;
     let config;
     if (transport === "url") {
-      config = { url: document.getElementById("mcpUrl").value.trim() };
+      config = {
+        url: document.getElementById("mcpUrl").value.trim(),
+        request_context: { mode: this.readRequestContextMode() },
+      };
       const headers = parseJsonOrEmpty(document.getElementById("mcpHeaders").value);
       if (headers) config.headers = headers;
     } else if (transport === "builtin") {
@@ -219,16 +266,18 @@ const mcpAdmin = {
 
   async save(event) {
     event.preventDefault();
+    const form = event.currentTarget;
+    AdminFormFeedback.clear(form);
     const transport = document.getElementById("mcpTransport").value;
     if (!state.editingMcp && transport === "builtin") {
-      showToast("builtin 类型 MCP 由仓库内置，不能手动新建", true);
+      AdminFormFeedback.show(form, "builtin 类型 MCP 由仓库内置，不能手动新建");
       return;
     }
     let config;
     try {
       config = this.buildConfig();
     } catch (err) {
-      showToast(`配置 JSON 无效: ${err.message}`, true);
+      AdminFormFeedback.show(form, `配置 JSON 无效: ${err.message}`);
       return;
     }
 
@@ -241,6 +290,7 @@ const mcpAdmin = {
       payload.transport = transport;
     }
 
+    AdminFormFeedback.setSubmitting(form, true);
     try {
       if (state.editingMcp) {
         await apiFetch(`/api/v1/mcp/${encodeURIComponent(state.editingMcp)}`, {
@@ -260,7 +310,9 @@ const mcpAdmin = {
       await this.refresh();
       await loadCapabilities();
     } catch (err) {
-      showToast(err.message, true);
+      AdminFormFeedback.show(form, err);
+    } finally {
+      AdminFormFeedback.setSubmitting(form, false);
     }
   },
 
@@ -283,6 +335,9 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("newMcpBtn")?.addEventListener("click", () => mcpAdmin.openCreate());
   document.getElementById("mcpForm")?.addEventListener("submit", (e) => mcpAdmin.save(e));
   document.getElementById("mcpTransport")?.addEventListener("change", () => mcpAdmin.toggleTransportFields());
+  document.querySelectorAll('input[name="mcpRequestContextMode"]').forEach((input) => {
+    input.addEventListener("change", () => mcpAdmin.updateRequestContextDescription());
+  });
   document.getElementById("closeMcpModal")?.addEventListener("click", () => {
     document.getElementById("mcpModal").close();
   });

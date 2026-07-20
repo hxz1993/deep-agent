@@ -364,6 +364,8 @@ const uiToolsAdmin = {
 
   async save(event) {
     event.preventDefault();
+    const form = event.currentTarget;
+    AdminFormFeedback.clear(form);
     let parameters_json_schema;
     let result_schema;
     let metadata;
@@ -372,7 +374,7 @@ const uiToolsAdmin = {
       result_schema = uiSchemaEditor.getResultSchema(this.resultEl());
       metadata = parseJsonOrEmpty(document.getElementById("uiToolMetadata").value);
     } catch (err) {
-      showToast(err.message, true);
+      AdminFormFeedback.show(form, err);
       return;
     }
 
@@ -383,6 +385,7 @@ const uiToolsAdmin = {
     const override = document.getElementById("uiToolOverride").checked;
     const description = document.getElementById("uiToolDescription").value.trim();
 
+    AdminFormFeedback.setSubmitting(form, true);
     try {
       if (this.editingName) {
         const force = document.getElementById("uiToolForceEdit").checked;
@@ -422,7 +425,9 @@ const uiToolsAdmin = {
       await this.refresh();
       await loadCapabilities();
     } catch (err) {
-      showToast(err.message, true);
+      AdminFormFeedback.show(form, err);
+    } finally {
+      AdminFormFeedback.setSubmitting(form, false);
     }
   },
 

@@ -7,6 +7,13 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from typing import TYPE_CHECKING
 
+from deep_agent.mcp_request_context import (
+    McpRequestContextMode,
+    NEW_URL_MCP_REQUEST_CONTEXT_MODE,
+    resolve_mcp_request_context_mode,
+)
+from deep_agent.options import OPTION
+
 if TYPE_CHECKING:
     from deep_agent.db.models import McpServer
 
@@ -14,9 +21,23 @@ McpUserTransport = Literal["url"]
 McpTransport = Literal["url", "builtin"]
 
 
+class McpRequestContextConfig(BaseModel):
+    mode: McpRequestContextMode
+
+
 class McpUrlConfig(BaseModel):
     url: str = Field(..., description="Remote MCP server URL (SSE or streamable HTTP).")
     headers: dict[str, str] | None = Field(default=None, description="Optional HTTP headers.")
+    request_context: McpRequestContextConfig | None = Field(
+        default=None,
+        description="Request context policy. Missing legacy values inherit the current request.",
+    )
+
+
+class McpRequestContextInfo(BaseModel):
+    mode: McpRequestContextMode
+    configurable: bool
+    inherited_headers: list[str]
 
 
 class McpBuiltinConfig(BaseModel):
@@ -38,6 +59,11 @@ class McpServerCreate(BaseModel):
     @model_validator(mode="after")
     def validate_config(self) -> McpServerCreate:
         McpUrlConfig.model_validate(self.config)
+        if "request_context" not in self.config:
+            self.config = {
+                **self.config,
+                "request_context": {"mode": NEW_URL_MCP_REQUEST_CONTEXT_MODE},
+            }
         return self
 
 
@@ -66,9 +92,11 @@ class McpServerResponse(BaseModel):
     enabled: bool
     created_at: datetime
     updated_at: datetime
+    request_context: McpRequestContextInfo
 
     @classmethod
     def from_row(cls, row: McpServer) -> McpServerResponse:
+        mode = resolve_mcp_request_context_mode(row.transport, row.config)
         return cls(
             name=row.name,
             transport=row.transport,  # type: ignore[arg-type]
@@ -77,4 +105,13 @@ class McpServerResponse(BaseModel):
             enabled=row.enabled,
             created_at=row.created_at,
             updated_at=row.updated_at,
+            request_context=McpRequestContextInfo(
+                mode=mode,
+                configurable=row.transport == "url",
+                inherited_headers=(
+                    sorted(OPTION.agent.mcp_forward_request_headers)
+                    if mode == "inherit"
+                    else []
+                ),
+            ),
         )

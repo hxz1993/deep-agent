@@ -84,7 +84,7 @@ async function apiFetch(path, options = {}) {
     } catch {
       /* ignore */
     }
-    throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
+    throw new Error(window.AdminFormFeedback?.formatDetail(detail) || String(detail));
   }
 
   if (resp.status === 204) return null;

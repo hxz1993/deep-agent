@@ -1,8 +1,15 @@
 let initialized = false;
 let loadingPromise = null;
+const CONFIGURATION_ASSET_VERSION = "20260720-3";
+
+function versionedAsset(path) {
+  const url = new URL(path, import.meta.url);
+  url.searchParams.set("v", CONFIGURATION_ASSET_VERSION);
+  return url;
+}
 
 async function fetchDocument(path) {
-  const response = await fetch(new URL(path, import.meta.url));
+  const response = await fetch(versionedAsset(path));
   if (!response.ok) throw new Error(`加载配置结构失败：HTTP ${response.status}`);
   return new DOMParser().parseFromString(await response.text(), "text/html");
 }
@@ -34,7 +41,7 @@ function appendAdminStructure(adminDoc, modelsDoc) {
 function loadClassicScript(src) {
   return new Promise((resolve, reject) => {
     const script = document.createElement("script");
-    script.src = new URL(src, import.meta.url).href;
+    script.src = versionedAsset(src).href;
     script.onload = resolve;
     script.onerror = () => reject(new Error(`脚本加载失败：${src}`));
     document.body.appendChild(script);
@@ -44,6 +51,7 @@ function loadClassicScript(src) {
 async function loadAdminScripts() {
   const scripts = [
     "./configuration-core.js",
+    "../admin/form_feedback.js",
     "../admin/llm_models.js",
     "../admin/auxiliary_models.js",
     "../admin/agents.js",

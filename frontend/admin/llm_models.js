@@ -188,8 +188,7 @@ const llmModelsAdmin = {
     if (mode === "manual") {
       const modalities = readLlmModelModalities();
       if (!modalities.length) {
-        showToast("手动模式请至少选择一种输入模态", true);
-        return false;
+        throw new Error("手动模式请至少选择一种输入模态");
       }
       if (state.editingLlmModelId) {
         payload.modalities_mode = "manual";
@@ -205,17 +204,20 @@ const llmModelsAdmin = {
 
   async save(event) {
     event.preventDefault();
-    const payload = {
-      name: document.getElementById("llmModelName").value.trim(),
-      description: document.getElementById("llmModelDescription").value.trim() || null,
-      model: document.getElementById("llmModelModel").value.trim(),
-      base_url: document.getElementById("llmModelBaseUrl").value.trim() || null,
-    };
-    if (!this.applyModalityPayload(payload)) return;
-    const apiKey = document.getElementById("llmModelApiKey").value.trim();
-    if (apiKey) payload.api_key = apiKey;
+    const form = event.currentTarget;
+    AdminFormFeedback.clear(form);
+    AdminFormFeedback.setSubmitting(form, true);
 
     try {
+      const payload = {
+        name: document.getElementById("llmModelName").value.trim(),
+        description: document.getElementById("llmModelDescription").value.trim() || null,
+        model: document.getElementById("llmModelModel").value.trim(),
+        base_url: document.getElementById("llmModelBaseUrl").value.trim() || null,
+      };
+      this.applyModalityPayload(payload);
+      const apiKey = document.getElementById("llmModelApiKey").value.trim();
+      if (apiKey) payload.api_key = apiKey;
       if (state.editingLlmModelId) {
         await apiFetch(`/api/v1/llm-models/${encodeURIComponent(state.editingLlmModelId)}`, {
           method: "PATCH",
@@ -233,7 +235,9 @@ const llmModelsAdmin = {
       await this.refresh();
       await loadLlmModels();
     } catch (err) {
-      showToast(err.message, true);
+      AdminFormFeedback.show(form, err);
+    } finally {
+      AdminFormFeedback.setSubmitting(form, false);
     }
   },
 

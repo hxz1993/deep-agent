@@ -21,18 +21,18 @@ router = APIRouter()
 
 
 def _agent_deps(
-    request: Request,
     ctx: AppContextDep,
     *,
     session_id: str,
     user: str | None,
     agent_id: str | None = None,
+    request_headers: dict[str, str] | None = None,
 ) -> AgentDeps:
     return AgentDeps(
         session_id=session_id,
         user=user,
         agent_id=agent_id,
-        request_headers=extract_forward_headers(request),
+        request_headers=dict(request_headers or {}),
     )
 
 
@@ -107,6 +107,7 @@ async def chat(
 ) -> ChatResponse:
     _validate_chat_body(body)
     session_id = body.session_id or uuid.uuid4().hex
+    request_headers = extract_forward_headers(request)
     if body.session_id is not None:
         await _ensure_session_access(ctx, session_id, user=user, agent_id=None)
     await _validate_branch_from(ctx, session_id, agent_id=None, branch_from=body.branch_from)
@@ -117,10 +118,16 @@ async def chat(
             model_id=body.model_id,
             temperature=body.temperature,
             capabilities=body.capabilities,
+            request_headers=request_headers,
         )
     except LlmModelNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    deps = _agent_deps(request, ctx, session_id=session_id, user=user)
+    deps = _agent_deps(
+        ctx,
+        session_id=session_id,
+        user=user,
+        request_headers=request_headers,
+    )
     result = await runner.run(
         session_id,
         body.message or "",
@@ -148,6 +155,7 @@ async def chat_stream(
     session_id = body.session_id or uuid.uuid4().hex
     deferred_tool_results = _deferred_results(body)
     message = body.message or ""
+    request_headers = extract_forward_headers(request)
 
     api_agent_id: str | None = None
     if body.agent_id is not None:
@@ -156,12 +164,23 @@ async def chat_stream(
         except ValueError as exc:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
         try:
-            runner = await build_runner_for_agent(ctx, agent_id, model_id=body.model_id)
+            runner = await build_runner_for_agent(
+                ctx,
+                agent_id,
+                model_id=body.model_id,
+                request_headers=request_headers,
+            )
         except AgentNotFoundError as exc:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
         except LlmModelNotFoundError as exc:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-        deps = _agent_deps(request, ctx, session_id=session_id, user=user, agent_id=agent_id)
+        deps = _agent_deps(
+            ctx,
+            session_id=session_id,
+            user=user,
+            agent_id=agent_id,
+            request_headers=request_headers,
+        )
         session_data = {"session_id": session_id, "agent_id": agent_id}
         api_agent_id = agent_id
     else:
@@ -172,10 +191,16 @@ async def chat_stream(
                 model_id=body.model_id,
                 temperature=body.temperature,
                 capabilities=body.capabilities,
+                request_headers=request_headers,
             )
         except LlmModelNotFoundError as exc:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-        deps = _agent_deps(request, ctx, session_id=session_id, user=user)
+        deps = _agent_deps(
+            ctx,
+            session_id=session_id,
+            user=user,
+            request_headers=request_headers,
+        )
         session_data = {"session_id": session_id}
         api_agent_id = None
 

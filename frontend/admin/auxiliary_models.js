@@ -90,12 +90,15 @@ const auxiliaryModelsAdmin = {
   async save(event) {
     event.preventDefault();
     if (!this.editingUseCase) return;
+    const form = event.currentTarget;
+    AdminFormFeedback.clear(form);
     const select = document.getElementById("auxiliaryModelSelect");
     const llmModelId = select.value;
     if (!llmModelId) {
-      showToast("请选择模型配置", true);
+      AdminFormFeedback.show(form, "请选择模型配置");
       return;
     }
+    AdminFormFeedback.setSubmitting(form, true);
     try {
       await apiFetch(`/api/v1/auxiliary-models/${encodeURIComponent(this.editingUseCase)}`, {
         method: "PATCH",
@@ -105,7 +108,9 @@ const auxiliaryModelsAdmin = {
       showToast("辅助模型已更新");
       await this.refresh();
     } catch (err) {
-      showToast(err.message, true);
+      AdminFormFeedback.show(form, err);
+    } finally {
+      AdminFormFeedback.setSubmitting(form, false);
     }
   },
 };

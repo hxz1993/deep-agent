@@ -161,6 +161,7 @@ async def ensure_mcp_ui_tools_discovered(
     spec: AgentSpec,
     *,
     mcp_rows: list[McpServer] | None = None,
+    request_headers: dict[str, str] | None = None,
 ) -> None:
     """Discover MCP UI tools on demand for non-builtin MCP enabled on this agent."""
     if mcp_rows is None:
@@ -170,7 +171,12 @@ async def ensure_mcp_ui_tools_discovered(
     for row in sorted(mcp_rows_for_ui_discovery(scoped), key=lambda item: item.name):
         if not await should_refresh_mcp_ui_tools(stores.ui_tool, row):
             continue
-        await discover_and_persist_ui_tools(stores.ui_tool, row, use_cache_on_error=True)
+        await discover_and_persist_ui_tools(
+            stores.ui_tool,
+            row,
+            use_cache_on_error=True,
+            request_headers=request_headers,
+        )
 
 
 async def load_effective_ui_tools(
@@ -216,8 +222,14 @@ async def prepare_ui_toolset_for_spec(
     spec: AgentSpec,
     *,
     mcp_rows: list[McpServer] | None = None,
+    request_headers: dict[str, str] | None = None,
 ) -> tuple[ExternalToolset | None, dict[str, dict[str, Any]]]:
-    await ensure_mcp_ui_tools_discovered(stores, spec, mcp_rows=mcp_rows)
+    await ensure_mcp_ui_tools_discovered(
+        stores,
+        spec,
+        mcp_rows=mcp_rows,
+        request_headers=request_headers,
+    )
     effective = await load_effective_ui_tools(stores, spec, mcp_rows=mcp_rows)
     valid_definitions: list[UIToolRecord] = []
     for definition in effective.definitions:

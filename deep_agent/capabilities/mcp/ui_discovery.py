@@ -35,9 +35,14 @@ def resolve_ui_tools_config(config: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _discovery_context() -> RunContext[AgentDeps]:
+def _discovery_context(
+    request_headers: dict[str, str] | None = None,
+) -> RunContext[AgentDeps]:
     return RunContext(
-        deps=AgentDeps(session_id="__ui_discovery__"),
+        deps=AgentDeps(
+            session_id="__ui_discovery__",
+            request_headers=dict(request_headers or {}),
+        ),
         model=TestModel(),
         usage=RunUsage(),
     )
@@ -88,7 +93,11 @@ async def should_refresh_mcp_ui_tools(ui_tool_store: UiToolStoreBase, row: McpSe
     return age_seconds >= cfg["refresh_seconds"]
 
 
-async def fetch_ui_tools_manifest(row: McpServer) -> list[UiToolDefinition]:
+async def fetch_ui_tools_manifest(
+    row: McpServer,
+    *,
+    request_headers: dict[str, str] | None = None,
+) -> list[UiToolDefinition]:
     if is_builtin_mcp_row(row.name, row.transport, row.config):
         return []
 
@@ -96,8 +105,13 @@ async def fetch_ui_tools_manifest(row: McpServer) -> list[UiToolDefinition]:
     if not cfg["enabled"] or cfg["mode"] == "none":
         return []
 
-    toolset = build_discovery_toolset(row.name, row.transport, row.config)
-    ctx = _discovery_context()
+    toolset = build_discovery_toolset(
+        row.name,
+        row.transport,
+        row.config,
+        request_headers=request_headers,
+    )
+    ctx = _discovery_context(request_headers)
     active = await toolset.for_run(ctx)
 
     async with active:
@@ -134,6 +148,7 @@ async def discover_and_persist_ui_tools(
     row: McpServer,
     *,
     use_cache_on_error: bool = True,
+    request_headers: dict[str, str] | None = None,
 ) -> UiToolsRefreshResponse:
     if is_builtin_mcp_row(row.name, row.transport, row.config):
         return UiToolsRefreshResponse(
@@ -150,7 +165,7 @@ async def discover_and_persist_ui_tools(
         import asyncio
 
         definitions = await asyncio.wait_for(
-            fetch_ui_tools_manifest(row),
+            fetch_ui_tools_manifest(row, request_headers=request_headers),
             timeout=DISCOVERY_TIMEOUT_SEC,
         )
         upserted, removed = await ui_tool_store.sync_mcp_tools(row.name, definitions)

@@ -321,6 +321,9 @@ const agentsAdmin = {
 
   async save(event) {
     event.preventDefault();
+    const form = event.currentTarget;
+    AdminFormFeedback.clear(form);
+    AdminFormFeedback.setSubmitting(form, true);
     const capabilities = this.getSelectedCapabilities();
     const payload = {
       model_id: document.getElementById("agentModelId").value,
@@ -360,7 +363,9 @@ const agentsAdmin = {
       document.getElementById("agentModal").close();
       await this.refresh();
     } catch (err) {
-      showToast(err.message, true);
+      AdminFormFeedback.show(form, err);
+    } finally {
+      AdminFormFeedback.setSubmitting(form, false);
     }
   },
 

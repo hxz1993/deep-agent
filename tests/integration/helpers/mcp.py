@@ -102,8 +102,15 @@ async def call_echo_tool(toolset: Any, request_headers: dict[str, str]) -> dict[
         raise AssertionError(f"Unexpected tool result type: {type(raw)!r} {raw!r}")
 
 
-def url_echo_toolset(url: str, static_headers: dict[str, str] | None = None):
+def url_echo_toolset(
+    url: str,
+    static_headers: dict[str, str] | None = None,
+    *,
+    request_context_mode: str | None = None,
+):
     config: dict[str, Any] = {"url": url}
     if static_headers:
         config["headers"] = static_headers
+    if request_context_mode:
+        config["request_context"] = {"mode": request_context_mode}
     return build_mcp_toolset("echo", "url", config)

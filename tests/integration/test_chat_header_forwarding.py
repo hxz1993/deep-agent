@@ -84,6 +84,30 @@ class ChatHeaderForwardingTests(unittest.TestCase):
         recorded = json.loads(record_file.read_text(encoding="utf-8"))
         self.assertEqual(recorded, {"user": TEST_USER_ID})
 
+    def test_chat_api_isolated_mcp_keeps_static_identity(self) -> None:
+        with test_chat_client(
+            request_context_mode="isolated",
+            static_headers={"User": "static-mcp-user", "X-MCP-Token": "service-token"},
+        ) as (client, record_file):
+            response = client.post(
+                "/api/v1/chat",
+                json={
+                    "message": "inspect headers",
+                    "capabilities": ["mcp:echo"],
+                },
+                headers={
+                    "Authorization": "Bearer request-token",
+                    "X-Tenant-Id": "tenant-request",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        recorded = json.loads(record_file.read_text(encoding="utf-8"))
+        self.assertEqual(
+            recorded,
+            {"user": "static-mcp-user", "x-mcp-token": "service-token"},
+        )
+
     def test_chat_uses_production_builtin_loader_for_text_tools(self) -> None:
         from fastapi import FastAPI
         from fastapi.testclient import TestClient

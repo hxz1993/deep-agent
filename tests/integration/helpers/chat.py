@@ -90,11 +90,22 @@ class _McpRow:
     enabled: bool = True
 
 
-def echo_mcp_row(url: str) -> _McpRow:
+def echo_mcp_row(
+    url: str,
+    *,
+    request_context_mode: str = "inherit",
+    static_headers: dict[str, str] | None = None,
+) -> _McpRow:
+    config: dict[str, Any] = {
+        "url": url,
+        "request_context": {"mode": request_context_mode},
+    }
+    if static_headers:
+        config["headers"] = static_headers
     return _McpRow(
         name="echo",
         transport="url",
-        config={"url": url},
+        config=config,
         description="Test MCP header echo server.",
     )
 
@@ -254,6 +265,8 @@ def test_chat_client(
     record_path: Path | None = None,
     call_tools: list[str] | None = None,
     stores: DataStores | None = None,
+    request_context_mode: str = "inherit",
+    static_headers: dict[str, str] | None = None,
 ) -> Iterator[tuple[TestClient, Path]]:
     """Yield a TestClient whose agent uses TestModel and the header-echo MCP server."""
     record_file = record_path or Path(tempfile.mkstemp(suffix=".json")[1])
@@ -265,7 +278,15 @@ def test_chat_client(
         app = FastAPI()
         app.include_router(api_router)
         if stores is None:
-            stores, db_engine, db_session_factory = testing_data_stores(mcp_rows=[echo_mcp_row(mcp_url)])
+            stores, db_engine, db_session_factory = testing_data_stores(
+                mcp_rows=[
+                    echo_mcp_row(
+                        mcp_url,
+                        request_context_mode=request_context_mode,
+                        static_headers=static_headers,
+                    )
+                ]
+            )
         else:
             db_engine = None
             db_session_factory = None

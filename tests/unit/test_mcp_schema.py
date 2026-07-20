@@ -37,6 +37,33 @@ class McpSchemaBuiltinGuardTests(unittest.TestCase):
             }
         )
         self.assertEqual(row.transport, "url")
+        self.assertEqual(row.config["request_context"], {"mode": "isolated"})
+
+    def test_create_preserves_explicit_inherit_mode(self) -> None:
+        row = McpServerCreate.model_validate(
+            {
+                "name": "external",
+                "transport": "url",
+                "config": {
+                    "url": "http://127.0.0.1:8765/mcp",
+                    "request_context": {"mode": "inherit"},
+                },
+            }
+        )
+        self.assertEqual(row.config["request_context"], {"mode": "inherit"})
+
+    def test_create_rejects_unknown_request_context_mode(self) -> None:
+        with self.assertRaises(ValidationError):
+            McpServerCreate.model_validate(
+                {
+                    "name": "external",
+                    "transport": "url",
+                    "config": {
+                        "url": "http://127.0.0.1:8765/mcp",
+                        "request_context": {"mode": "custom"},
+                    },
+                }
+            )
 
     def test_update_rejects_builtin_transport(self) -> None:
         with self.assertRaises(ValidationError):

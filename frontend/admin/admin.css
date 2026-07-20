@@ -291,6 +291,17 @@ html, body {
   border-bottom: 1px solid var(--border);
 }
 
+.form-error {
+  margin: 0 16px;
+  padding: 10px 12px;
+  border: 1px solid var(--danger);
+  border-radius: 8px;
+  background: var(--danger-soft);
+  color: var(--danger-text);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
 .modal-footer {
   border-bottom: none;
   border-top: 1px solid var(--border);
@@ -364,6 +375,66 @@ html, body {
 
 .radio-field input {
   margin: 0;
+}
+
+.context-mode-options {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.context-mode-description {
+  margin-top: 2px;
+}
+
+.context-policy-help {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  margin-left: 5px;
+  color: var(--text-dim);
+  cursor: help;
+  vertical-align: -2px;
+}
+
+.context-policy-help::before {
+  content: "";
+  width: 14px;
+  height: 14px;
+  background: currentColor;
+  -webkit-mask: url("./icon-info-qm.svg") center / contain no-repeat;
+  mask: url("./icon-info-qm.svg") center / contain no-repeat;
+}
+
+.context-policy-help::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  z-index: 20;
+  left: 50%;
+  bottom: calc(100% + 8px);
+  width: max-content;
+  max-width: min(420px, 70vw);
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-elev);
+  color: var(--text);
+  box-shadow: var(--shadow);
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: normal;
+  transform: translateX(-50%);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.context-policy-help:hover::after,
+.context-policy-help:focus::after,
+.context-policy-help:focus-visible::after {
+  opacity: 1;
 }
 
 .agent-form-grid {

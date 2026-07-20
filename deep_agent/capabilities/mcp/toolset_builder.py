@@ -8,8 +8,9 @@ from pydantic_ai.toolsets._dynamic import DynamicToolset
 
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.capabilities.mcp.builtin_config import normalize_mcp_config
-from deep_agent.capabilities.mcp.request_context import inject_request_meta, merge_mcp_headers
+from deep_agent.capabilities.mcp.request_context import inject_request_meta
 from deep_agent.capabilities.mcp.run_scoped import RunScopedMcpToolset
+from deep_agent.mcp_request_context import resolve_mcp_headers
 from deep_agent.options import OPTION
 
 
@@ -36,18 +37,24 @@ def build_mcp_toolset(name: str, transport: str, config: dict[str, Any]) -> Any:
     raise ValueError(f"Unsupported MCP transport: {transport!r}")
 
 
-def build_discovery_toolset(name: str, transport: str, config: dict[str, Any]) -> Any:
+def build_discovery_toolset(
+    name: str,
+    transport: str,
+    config: dict[str, Any],
+    *,
+    request_headers: dict[str, str] | None = None,
+) -> Any:
     """Unprefixed MCP toolset for platform discovery calls (ui_tools_list, resources)."""
     transport, config = normalize_mcp_config(name, transport, config)
     if transport != "url":
         raise ValueError(f"UI discovery requires url transport, got {transport!r}")
     url = config["url"]
-    static_headers = dict(config.get("headers") or {})
+    headers = resolve_mcp_headers(transport, config, request_headers)
     init_timeout = resolve_mcp_init_timeout(config)
     return MCPToolset(
         url,
         id=f"discovery:{name}",
-        headers=static_headers,
+        headers=headers,
         init_timeout=init_timeout,
         max_retries=resolve_mcp_max_retries(),
     )
@@ -74,11 +81,10 @@ def build_raw_url_mcp_toolset(
 
 def _build_url_toolset(name: str, config: dict[str, Any]) -> DynamicToolset[AgentDeps]:
     url = config["url"]
-    static_headers = dict(config.get("headers") or {})
     init_timeout = resolve_mcp_init_timeout(config)
 
     def factory(ctx: RunContext[AgentDeps]) -> MCPToolset[AgentDeps]:
-        headers = merge_mcp_headers(static_headers, dict(ctx.deps.request_headers) or None)
+        headers = resolve_mcp_headers("url", config, dict(ctx.deps.request_headers) or None)
         return MCPToolset(
             url,
             id=name,

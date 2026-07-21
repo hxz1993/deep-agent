@@ -78,7 +78,7 @@ refresh_seconds = 300
 相关代码：
 
 - `deep_agent/capabilities/mcp/ui_discovery.py::resolve_ui_tools_config`
-- `frontend/admin/mcp.js::fillUiToolsFields/readUiToolsConfig`
+- `frontend/console/configuration/mcp.js::fillUiToolsFields/readUiToolsConfig`
 
 ### 3.2 发现模式
 
@@ -355,8 +355,8 @@ deep_agent/capabilities/mcp/ui_discovery.py
 deep_agent/capabilities/mcp/toolset_builder.py（仅当补 ui_tools_list 过滤）
 deep_agent/api/v1/mcp.py
 deep_agent/schemas/ui_tools.py（仅当增加明确同步状态）
-frontend/admin/index.html
-frontend/admin/mcp.js
+frontend/console/configuration-template.html
+frontend/console/configuration/mcp.js
 frontend/console/configuration.js
 frontend/console/configuration-core.js
 tests/unit/test_ui_tools_rfc.py

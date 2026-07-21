@@ -321,14 +321,14 @@ uvicorn app.main:app --reload
 ```
 - API 文档：http://127.0.0.1:8000/docs
 - 健康检查：http://127.0.0.1:8000/health
-- **管理后台**：http://127.0.0.1:8000/admin（Agent / MCP 配置 CRUD，需 PostgreSQL）
+- **一体化控制台**：http://127.0.0.1:8000/console/（对话测试与 Agent / MCP 配置，需 PostgreSQL）
 
 ### 前端
 ```bash
 cd frontend
 python -m http.server 5173
 # 浏览器打开 http://localhost:5173
-# 侧边栏「管理后台」链接指向后端 /admin
+# Console 顶部可切换测试工作台与配置中心
 ```
 
 ### 快速测试

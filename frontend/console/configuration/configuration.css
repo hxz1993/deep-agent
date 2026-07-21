@@ -1,4 +1,4 @@
-/* 配色变量来自 ../themes.css（html[data-theme]） */
+/* 配色变量来自 ../themes.css（html[data-theme]）。 */
 :root {
   --success: var(--conn-ok);
   --radius: 12px;

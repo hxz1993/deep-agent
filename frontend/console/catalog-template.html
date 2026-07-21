@@ -1,57 +1,7 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="zh-CN">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <script>
-    (function () {
-      var p = location.pathname;
-      if (!p.endsWith("/")) {
-        var last = p.slice(p.lastIndexOf("/") + 1);
-        p = /\.[A-Za-z0-9]+$/.test(last) ? p.slice(0, p.lastIndexOf("/") + 1) : p + "/";
-      }
-      var b = document.createElement("base");
-      b.href = p;
-      document.head.appendChild(b);
-      window.__DEEP_AGENT_BASE__ = p;
-      window.__DEEP_AGENT_APP_ROOT__ = p.replace(/admin\/$/, "");
-    })();
-  </script>
-  <script>
-    (function () {
-      var t = localStorage.getItem("da_theme") || "dark";
-      document.documentElement.setAttribute("data-theme", t);
-    })();
-  </script>
-  <title>deep-agent · 模型模态目录</title>
-  <link id="hljsTheme" rel="stylesheet" href="./vendor/highlight-github-dark.min.css" />
-  <link rel="stylesheet" href="./styles.css" />
-  <link rel="stylesheet" href="./themes.css" />
-  <script>
-    (function () {
-      var t = localStorage.getItem("da_theme") || "dark";
-      var link = document.getElementById("hljsTheme");
-      if (link && (t === "light" || t === "paper" || t === "contrast")) {
-        link.href = "./vendor/highlight-github.min.css";
-      }
-    })();
-  </script>
-</head>
 <body>
-  <div class="settings-page models-page">
-    <header class="settings-header">
-      <div class="brand">
-        <span class="brand-dot"></span>
-        <span class="brand-name">deep-agent</span>
-      </div>
-      <nav class="settings-nav">
-        <a href="./">返回对话</a>
-        <a href="./settings.html">请求头配置</a>
-        <a href="./admin/">管理后台</a>
-      </nav>
-    </header>
-
-    <main class="settings-card models-card">
+  <main class="settings-card models-card">
       <label class="field settings-theme-field">
         <span>界面主题</span>
         <select id="themeSelect" title="切换界面配色"></select>
@@ -139,11 +89,6 @@
           <li>「已配置」列显示数据库中 model 字符串与本行匹配的预设名称；PDF 列表示 LLM <strong>原生</strong> PDF 输入。</li>
         </ul>
       </details>
-    </main>
-  </div>
-
-  <script src="./request_config.js"></script>
-  <script src="./theme.js"></script>
-  <script src="./models.js"></script>
+  </main>
 </body>
 </html>

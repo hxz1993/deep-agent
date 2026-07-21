@@ -141,7 +141,7 @@ MCP 在请求时由 `resolve_mcp_toolsets` 解析（DB 行 + `mcps/` builtin 兜
 
 开发内置 server → 见 [`../mcps/AGENTS.md`](../mcps/AGENTS.md)。
 
-生产配置 → `POST /api/v1/mcp` 或 `/admin`；`transport`: `url` | `stdio` | `builtin`。
+生产配置 → `POST /api/v1/mcp` 或 `/console/#/configuration`；`transport`: `url` | `stdio` | `builtin`。
 
 ### DB Agent
 
@@ -221,7 +221,7 @@ alembic upgrade head
 | CRUD | `/api/v1/ui-tools` | 是 |
 | GET | `/api/v1/tools` | 否（无 DB 时跳过动态 UI 工具） |
 | | `/api/v1/sessions/*` | 是 |
-| | `/admin` | 是 |
+| | `/console/#/configuration` | 是 |
 
 SSE 协议：[`../docs/sse-protocol.md`](../docs/sse-protocol.md)。前端对接：[`../frontend/AGENTS.md`](../frontend/AGENTS.md)。
 

@@ -155,8 +155,8 @@ title = _clean_title(result.output)
 
 | 路径 | 说明 |
 |------|------|
-| `frontend/app.js` | `title \|\| user_prompt` 展示；🔄 自动重命名；内联编辑标题 |
-| `frontend/admin/auxiliary_models.js` | Admin「辅助模型」配置 UI |
+| `frontend/console/chat.js` | `title \|\| user_prompt` 展示；🔄 自动重命名；内联编辑标题 |
+| `frontend/console/configuration/auxiliary-models.js` | Console「辅助模型」配置 UI |
 
 ### 5.3 测试
 

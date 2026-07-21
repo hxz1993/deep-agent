@@ -82,7 +82,7 @@ Accept: text/event-stream
 - 连接保持打开，服务端按 Agent 执行进度持续推送事件
 - 客户端断开时，服务端停止推送
 
-> **注意**：浏览器原生 `EventSource` 仅支持 GET，因此前端需使用 `fetch` + `ReadableStream` 手动解析 SSE（参见 `frontend/app.js`）。
+> **注意**：浏览器原生 `EventSource` 仅支持 GET，因此前端需使用 `fetch` + `ReadableStream` 手动解析 SSE（参见 `frontend/console/chat.js` 与 `protocol.js`）。
 
 ## 2. SSE 帧格式
 
@@ -471,7 +471,7 @@ data: {"type": "final", "output": "## 平台的 11 种维度类型\n...", "usage
 | `app/api/v1/chat.py` | SSE 端点，`EventSourceResponse` 封装 |
 | `app/agent/events.py` | 事件 dict 构造函数 |
 | `app/agent/runner.py` | Pydantic AI 事件 → SSE 事件映射 |
-| `frontend/app.js` | 参考客户端实现 |
+| `frontend/console/chat.js` | 参考客户端实现 |
 
 ## 9. 版本与兼容性
 

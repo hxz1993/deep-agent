@@ -1,38 +1,5 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="zh-CN">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <script>
-    (function () {
-      var p = location.pathname;
-      if (!p.endsWith("/")) {
-        var last = p.slice(p.lastIndexOf("/") + 1);
-        p = /\.[A-Za-z0-9]+$/.test(last) ? p.slice(0, p.lastIndexOf("/") + 1) : p + "/";
-      }
-      var b = document.createElement("base");
-      b.href = p;
-      document.head.appendChild(b);
-      window.__DEEP_AGENT_BASE__ = p;
-      window.__DEEP_AGENT_APP_ROOT__ = p.replace(/admin\/$/, "");
-    })();
-  </script>
-  <title>deep-agent · 对话</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link id="hljsTheme" rel="stylesheet" href="./vendor/highlight-github-dark.min.css" />
-  <link rel="stylesheet" href="./styles.css" />
-  <link rel="stylesheet" href="./themes.css" />
-  <script>
-    (function () {
-      var t = localStorage.getItem("da_theme") || "dark";
-      document.documentElement.setAttribute("data-theme", t);
-      var link = document.getElementById("hljsTheme");
-      if (link && (t === "light" || t === "paper" || t === "contrast")) {
-        link.href = "./vendor/highlight-github.min.css";
-      }
-    })();
-  </script>
-</head>
 <body>
   <div class="app">
     <!-- 侧边栏 -->
@@ -65,28 +32,6 @@
         </ul>
       </div>
 
-      <div class="sidebar-footer">
-        <label class="field">
-          <span>界面主题</span>
-          <select id="themeSelect" title="切换界面配色"></select>
-        </label>
-        <label class="field">
-          <span>后端地址</span>
-          <input type="text" id="baseUrlInput" placeholder="http://localhost:8000" />
-        </label>
-        <label class="field">
-          <span>Agent</span>
-          <select id="agentSelect">
-            <option value="">加载中…</option>
-          </select>
-        </label>
-        <div class="conn-status" id="connStatus">
-          <span class="dot"></span><span class="conn-text">未连接</span>
-        </div>
-        <a class="admin-link" id="settingsLink" href="./settings.html">请求头配置</a>
-        <a class="admin-link" id="modelsLink" href="./models.html">模型模态</a>
-        <a class="admin-link" id="adminLink" href="http://localhost:8000/admin" target="_blank" rel="noopener">管理后台</a>
-      </div>
     </aside>
 
     <!-- 主聊天区 -->
@@ -147,11 +92,5 @@
 
   <div class="new-chat-menu hidden" id="newChatMenu" role="menu" aria-label="选择 Agent 新建对话"></div>
 
-  <script src="./request_config.js"></script>
-  <script src="./theme.js"></script>
-  <script src="./vendor/marked.min.js"></script>
-  <script src="./vendor/purify.min.js"></script>
-  <script src="./vendor/highlight.min.js"></script>
-  <script src="./app.js"></script>
 </body>
 </html>

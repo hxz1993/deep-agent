@@ -1,0 +1,66 @@
+from __future__ import annotations
+
+import unittest
+from pathlib import Path
+
+from fastapi.testclient import TestClient
+
+from deep_agent.core.paths import REPO_ROOT
+from deep_agent.main import app
+
+
+class ConsoleRoutesTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.client = TestClient(app)
+
+    def test_root_redirects_to_console_workspace(self) -> None:
+        response = self.client.get("/", follow_redirects=False)
+
+        self.assertEqual(response.status_code, 307)
+        self.assertEqual(response.headers["location"], "/console/#/workspace")
+
+    def test_console_vendor_and_api_docs_remain_available(self) -> None:
+        self.assertEqual(self.client.get("/console/").status_code, 200)
+        self.assertEqual(self.client.get("/vendor/lucide.min.js").status_code, 200)
+        self.assertEqual(self.client.get("/docs").status_code, 200)
+        self.assertEqual(self.client.get("/openapi.json").status_code, 200)
+        self.assertEqual(self.client.get("/health").status_code, 200)
+
+    def test_legacy_page_routes_are_removed(self) -> None:
+        for path in ("/settings.html", "/models.html", "/admin", "/admin/"):
+            with self.subTest(path=path):
+                self.assertEqual(self.client.get(path).status_code, 404)
+
+    def test_console_has_no_runtime_dependency_on_legacy_pages(self) -> None:
+        frontend = Path(REPO_ROOT) / "frontend"
+        for path in (
+            "index.html",
+            "app.js",
+            "settings.html",
+            "settings.js",
+            "models.html",
+            "models.js",
+            "request_config.js",
+            "theme.js",
+            "styles.css",
+            "themes.css",
+            "admin",
+        ):
+            with self.subTest(path=path):
+                self.assertFalse((frontend / path).exists())
+
+        console = frontend / "console"
+        runtime_files = [
+            path
+            for path in console.rglob("*")
+            if path.is_file() and path.suffix in {".html", ".css", ".js"}
+        ]
+        runtime_source = "\n".join(path.read_text(encoding="utf-8") for path in runtime_files)
+        for reference in ("../index.html", "../models.html", "../admin/"):
+            with self.subTest(reference=reference):
+                self.assertNotIn(reference, runtime_source)
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -36,7 +36,7 @@ sequenceDiagram
 | **Agent 指令** | 告诉模型何时应调用哪个 UI 工具 |
 
 内置 UI 工具定义在 [`deep_agent/capabilities/ui/builtin.py`](../deep_agent/capabilities/ui/builtin.py)。  
-前端控件在 [`frontend/app.js`](../frontend/app.js) 的 `renderHitlWidget`。
+前端控件在 [`frontend/console/chat.js`](../frontend/console/chat.js) 的 `renderHitlWidget`。
 
 ---
 
@@ -48,14 +48,14 @@ sequenceDiagram
 |---|------|--------|
 | 1 | `deep_agent/capabilities/ui/builtin.py` | 增加 `ToolDefinition`（name、description、JSON Schema） |
 | 2 | 同上 `build_ui_capability()` | 在 `tools=[ToolInfo(...)]` 中登记（供 `/api/v1/tools` 展示） |
-| 3 | `frontend/app.js` → `UI_TOOLS` | 把新工具名加入 Set |
-| 4 | `frontend/app.js` → `renderHitlWidget` | 根据 `tool` 名渲染控件并调用 `onSubmit` |
+| 3 | `frontend/console/chat.js` → `BUILTIN_UI_TOOLS` | 把新工具名加入 Set |
+| 4 | `frontend/console/chat.js` → `renderHitlWidget` | 根据 `tool` 名渲染控件并调用 `onSubmit` |
 
 可选：
 
 - **Agent instructions**：说明何时调用新工具
 - **单元测试**：[`tests/unit/test_hitl_deferred.py`](../tests/unit/test_hitl_deferred.py) 参考 deferred 流程
-- **样式**：[`frontend/styles.css`](../frontend/styles.css) 中 `.hitl-*` 类
+- **样式**：[`frontend/console/workspace.css`](../frontend/console/workspace.css) 中 `.hitl-*` 类
 
 ---
 
@@ -147,7 +147,7 @@ ToolInfo("ask_user_text", "Show a text input and wait for user text."),
 
 ### 4.1 注册工具名
 
-[`frontend/app.js`](../frontend/app.js) 顶部：
+[`frontend/console/chat.js`](../frontend/console/chat.js) 顶部：
 
 ```javascript
 const UI_TOOLS = new Set(["confirm_action", "ask_user_choice", "ask_user_text"]);
@@ -202,7 +202,7 @@ const UI_TOOLS = new Set(["confirm_action", "ask_user_choice", "ask_user_text"])
 
 ### 4.4 历史回放
 
-用户刷新页面后，[`renderHistory`](../frontend/app.js) 会对「有 `tool_call`、无 `tool_result`」的 UI 工具自动调用 `attachHitlWidget`，无需额外处理。  
+用户刷新页面后，[`renderHistory`](../frontend/console/chat.js) 会对「有 `tool_call`、无 `tool_result`」的 UI 工具自动恢复交互控件，无需额外处理。
 新增工具只要加入了 `UI_TOOLS` 并在 `renderHitlWidget` 中实现分支即可。
 
 ---
@@ -338,6 +338,6 @@ UI 工具适合确认、表单、选择器；业务 API 调用仍应使用 MCP�
 | [`deep_agent/agent/deferred.py`](../deep_agent/agent/deferred.py) | 序列化与 `DeferredToolResults` 转换 |
 | [`deep_agent/api/v1/chat.py`](../deep_agent/api/v1/chat.py) | HTTP 入口 |
 | [`deep_agent/schemas/chat.py`](../deep_agent/schemas/chat.py) | `DeferredToolResultItem` |
-| [`frontend/app.js`](../frontend/app.js) | SSE、`renderHitlWidget`、`resumeDeferred` |
+| [`frontend/console/chat.js`](../frontend/console/chat.js) | SSE、`renderHitlWidget`、`resumeDeferred` |
 | [`docs/sse-protocol.md`](sse-protocol.md) | SSE 协议 |
 | [`tests/unit/test_hitl_deferred.py`](../tests/unit/test_hitl_deferred.py) | 单元测试 |

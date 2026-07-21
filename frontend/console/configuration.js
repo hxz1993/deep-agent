@@ -1,6 +1,6 @@
 let initialized = false;
 let loadingPromise = null;
-const CONFIGURATION_ASSET_VERSION = "20260720-3";
+const CONFIGURATION_ASSET_VERSION = "20260721-1";
 
 function versionedAsset(path) {
   const url = new URL(path, import.meta.url);
@@ -50,21 +50,21 @@ function loadClassicScript(src) {
 
 async function loadAdminScripts() {
   const scripts = [
-    "./configuration-core.js",
-    "../admin/form_feedback.js",
-    "../admin/llm_models.js",
-    "../admin/auxiliary_models.js",
-    "../admin/agents.js",
-    "../admin/mcp.js",
-    "../admin/ui_schema_editor.js",
-    "../admin/ui_tools.js",
+    "./configuration/core.js",
+    "./configuration/form-feedback.js",
+    "./configuration/llm-models.js",
+    "./configuration/auxiliary-models.js",
+    "./configuration/agents.js",
+    "./configuration/mcp.js",
+    "./configuration/ui-schema-editor.js",
+    "./configuration/ui-tools.js",
   ];
   for (const script of scripts) await loadClassicScript(script);
 
   // The legacy scripts were loaded after the browser's original DOMContentLoaded.
   // Replaying it once initializes their existing, tested bindings against the new DOM.
   document.dispatchEvent(new Event("DOMContentLoaded"));
-  await import("../models.js");
+  await import("./configuration/catalog.js?v=20260721-1");
   installCatalogActions();
 }
 
@@ -126,6 +126,10 @@ function decorateConfiguration() {
     dialog.classList.add("console-detail-dialog");
   });
   document.getElementById("configurationHost")?.addEventListener("click", (event) => {
+    if (event.target.closest("[data-open-catalog]")) {
+      document.querySelector('[data-tab="catalog"]')?.click();
+      return;
+    }
     const link = event.target.closest("a[href]");
     if (!link) return;
     const url = new URL(link.href, location.href);
@@ -135,10 +139,6 @@ function decorateConfiguration() {
       window.DeepAgentConsoleChat?.selectAgent(agentId);
       window.DeepAgentConsole?.showPage("workspace");
       return;
-    }
-    if (url.pathname.endsWith("/models.html")) {
-      event.preventDefault();
-      document.querySelector('[data-tab="catalog"]')?.click();
     }
   });
   window.lucide?.createIcons();
@@ -159,8 +159,8 @@ export async function initConfiguration() {
   initialized = true;
   loadingPromise = (async () => {
     const [adminDoc, modelsDoc] = await Promise.all([
-      fetchDocument("../admin/index.html"),
-      fetchDocument("../models.html"),
+      fetchDocument("./configuration-template.html"),
+      fetchDocument("./catalog-template.html"),
     ]);
     appendAdminStructure(adminDoc, modelsDoc);
     await loadAdminScripts();

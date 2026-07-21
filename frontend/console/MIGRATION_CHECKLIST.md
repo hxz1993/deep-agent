@@ -1,10 +1,11 @@
 # DeepAgent 一体化控制台迁移矩阵
 
-本矩阵用于确保 `/console/` 在保留旧入口的同时覆盖现有功能。只有自动化与页面联调均通过后，项目才可标记完成。
+本矩阵用于确保 `/console/` 完整覆盖旧页面功能。只有自动化与页面联调均通过后，项目才可标记完成。
 
 ## 页面与上下文
 
-- [x] `/console/`、`/`、`/settings.html`、`/models.html`、`/admin/` 均可访问。
+- [x] `/console/` 可访问，`/` 跳转到 Console；旧 `/settings.html`、`/models.html`、`/admin/` 返回 404。
+- [x] 工作台和配置中心只加载 `frontend/console/` 内部模板、脚本和样式。
 - [x] 平台用户只读；缺少 `user` 时锁定工作台与配置中心。
 - [x] 仅允许覆盖 App、Space、Language，不读取旧 `da_request_headers`。
 - [x] App/Space 切换中止流并清空旧状态；Language 切换保留会话。

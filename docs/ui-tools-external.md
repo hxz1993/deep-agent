@@ -403,7 +403,7 @@ flowchart TD
 2. 优先使用 SSE 事件上的 `widget` / `metadata`，与 DB 定义合并
 3. 内置工具与 `widget=confirm|choice` 可共用一套控件实现
 
-官方内置实现参考：[`frontend/app.js`](../frontend/app.js)（`UI_TOOLS`、`renderHitlWidget`、`resumeDeferred`）——扩展时需放宽 `UI_TOOLS` 白名单或改为 registry 驱动。
+官方内置实现参考：[`frontend/console/chat.js`](../frontend/console/chat.js)（`BUILTIN_UI_TOOLS`、`renderHitlWidget`、`resumeDeferred`）——扩展时需登记内置工具或使用 registry 驱动。
 
 ### 7.5 历史回放与 pending 恢复
 

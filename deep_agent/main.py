@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from deep_agent.api.v1 import api_router
@@ -77,11 +77,19 @@ async def info(ctx: AppContextDep) -> dict[str, object]:
         "docs": "/docs",
     }
 
+
+@app.get("/", include_in_schema=False)
+async def console_redirect() -> RedirectResponse:
+    return RedirectResponse(url="/console/#/workspace", status_code=307)
+
+
 _frontend_dir = REPO_ROOT / "frontend"
-_index_html = _frontend_dir / "index.html"
-if _index_html.is_file():
-    # mount index.html as root
-    app.mount("/", StaticFiles(directory=str(_frontend_dir), html=True), name="frontend")
+_console_dir = _frontend_dir / "console"
+_vendor_dir = _frontend_dir / "vendor"
+if (_console_dir / "index.html").is_file():
+    app.mount("/console", StaticFiles(directory=str(_console_dir), html=True), name="console")
+if _vendor_dir.is_dir():
+    app.mount("/vendor", StaticFiles(directory=str(_vendor_dir)), name="vendor")
 
 
 if __name__ == "__main__":

@@ -2,7 +2,7 @@
 
 > 父索引：[`../AGENTS.md`](../AGENTS.md) · 后端 API：[`../deep_agent/AGENTS.md`](../deep_agent/AGENTS.md)
 
-纯静态 HTML/CSS/JS，**无构建步骤**。后端启动时若存在 `frontend/index.html`，会挂载到 `/`。
+纯静态 HTML/CSS/JS，**无构建步骤**。后端将 `frontend/console/` 挂载到 `/console`，根路径跳转到 Console。
 
 ---
 
@@ -10,18 +10,13 @@
 
 ```
 frontend/
-├── index.html      # 聊天主界面
-├── app.js          # SSE 解析、会话管理、Markdown 渲染
-├── styles.css
-├── console/        # 一体化控制台（测试工作台 / 配置中心 / 诊断中心）
-├── admin/          # Agent / MCP / UI 工具管理后台（需 DB）
+├── console/             # 唯一页面：测试工作台 / 配置中心 / 诊断中心
 │   ├── index.html
-│   ├── admin.js
-│   ├── agents.js
-│   ├── mcp.js
-│   ├── ui_schema_editor.js  # Schema 表单编辑器
-│   └── ui_tools.js
-└── vendor/         # marked、DOMPurify、highlight.js 等预构建库
+│   ├── chat.js          # SSE、会话、附件、HITL
+│   ├── workspace.js
+│   ├── configuration.js
+│   └── configuration/   # Agent / 模型 / MCP / UI 工具管理
+└── vendor/              # marked、DOMPurify、highlight.js 等预构建库
 ```
 
 ---
@@ -38,8 +33,8 @@ frontend/
 | Markdown | marked + DOMPurify + highlight.js |
 | 会话 | `session_id` 由后端 `session` 事件返回；`GET/DELETE /api/v1/sessions`；标题展示 `title \|\| user_prompt`（见 [`../docs/experience/ai-title-generator.md`](../docs/experience/ai-title-generator.md)） |
 | 能力面板 | `GET /api/v1/tools` |
-| 配置 | 后端地址、模型覆盖存 `localStorage` |
-| 一体化控制台 | `/console/`；保留旧页面并集中工作台、配置和诊断入口 |
+| 配置 | 测试上下文与后端地址存 `localStorage`，身份和鉴权只读 |
+| 一体化控制台 | `/console/`；工作台、配置和诊断的唯一入口 |
 
 ## 一体化控制台
 
@@ -50,7 +45,7 @@ frontend/
 - `app` 或 `space` 变化会停止当前流并重新加载页面状态；只切换语言时保留会话。
 - SSE 解析、HITL 参数归一化和 Schema 文本校验分别位于 `protocol.js`、`hitl.js`、`schema-editor.js`，可由 Node 内置测试独立验证。
 - 控制台测试：`node --test tests/frontend/console/*.test.mjs`。
-- 原有 `/`、`/settings.html`、`/models.html`、`/admin/` 仍是兼容入口，不要在迁移完成前删除。
+- `/` 跳转到 `/console/#/workspace`；旧 `/settings.html`、`/models.html`、`/admin/` 返回 404。
 
 ---
 
@@ -70,7 +65,7 @@ frontend/
 
 完整协议（含同 ID 多次推送、生命周期）：[`../docs/sse-protocol.md`](../docs/sse-protocol.md)。
 
-实现参考：`app.js`。
+实现参考：`console/chat.js` 与 `console/protocol.js`。
 
 ---
 
@@ -81,7 +76,7 @@ frontend/
 ```bash
 # 仓库根
 uvicorn deep_agent.main:app --reload
-# → http://127.0.0.1:8000/
+# → http://127.0.0.1:8000/console/
 ```
 
 **独立静态服务**
@@ -89,10 +84,10 @@ uvicorn deep_agent.main:app --reload
 ```bash
 cd frontend
 python -m http.server 5173
-# → http://localhost:5173 （CORS 已放开，可连任意端口后端）
+# → http://localhost:5173/console/
 ```
 
-左下角配置后端地址（默认 `http://<host>:8000`）；顶部绿点表示 `/health` 正常。
+在“测试上下文”中配置后端地址（默认同源）；顶部状态表示 `/health` 是否正常。
 
 ---
 
@@ -100,15 +95,15 @@ python -m http.server 5173
 
 | 改什么 | 看哪里 |
 | --- | --- |
-| 聊天气泡、工具块 UI | `app.js` + `styles.css` |
+| 聊天气泡、工具块 UI | `console/chat.js` + `console/workspace.css` |
 | 新增 HITL UI 工具（改仓库） | [`../docs/ui-tools.md`](../docs/ui-tools.md) |
 | 使用 / 对接 HITL（不改仓库） | [`../docs/ui-tools-external.md`](../docs/ui-tools-external.md) |
-| HITL 渲染与 metadata | `app.js` → `isUiToolCall`、`loadUiTools`、`renderHitlWidget` |
-| 页面布局 | `index.html` |
+| HITL 渲染与 metadata | `console/chat.js` → `isUiToolCall`、`loadUiTools`、`renderHitlWidget` |
+| 页面布局 | `console/index.html` 与两个 Console template |
 | 一体化控制台布局与编排 | `console/index.html`、`console/console.css`、`console/workspace.js`、`console/configuration.js` |
-| Admin CRUD | `admin/` 下各文件（含 **UI 工具** 页 `/admin/` →「UI 工具」标签） |
-| Admin 模型 Meta 刷新 | `admin/llm_models.js` → `POST /api/v1/llm-models/refresh-metadata`；详见 [`../docs/experience/llm-model-modalities.md`](../docs/experience/llm-model-modalities.md) |
-| 模型模态目录 | `models.html` + `models.js` → `GET /api/v1/llm-models/catalog`；浏览 models.dev / 内置 JSON，按 provider / 模态筛选 |
+| 配置 CRUD | `console/configuration/` 下各文件 |
+| 模型 Meta 刷新 | `console/configuration/llm-models.js` → `POST /api/v1/llm-models/refresh-metadata` |
+| 模型目录 | `console/configuration/catalog.js` → `GET /api/v1/llm-models/catalog` |
 | Markdown 主题/安全 | `vendor/`，见 `vendor/README.md` |
 
 历史消息由后端按 `session_id` 维护；切换会话时 `GET /api/v1/sessions/{id}/history` 回放。pending UI 工具的 `tool_call` part 同样经后端 enrichment 附带 `widget` / `metadata`。

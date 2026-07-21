@@ -1,60 +1,7 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="zh-CN">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <script>
-    (function () {
-      var p = location.pathname;
-      if (!p.endsWith("/")) {
-        var last = p.slice(p.lastIndexOf("/") + 1);
-        p = /\.[A-Za-z0-9]+$/.test(last) ? p.slice(0, p.lastIndexOf("/") + 1) : p + "/";
-      }
-      var b = document.createElement("base");
-      b.href = p;
-      document.head.appendChild(b);
-      window.__DEEP_AGENT_BASE__ = p;
-      window.__DEEP_AGENT_APP_ROOT__ = p.replace(/admin\/$/, "");
-    })();
-  </script>
-  <title>deep-agent · 管理后台</title>
-  <link rel="stylesheet" href="../themes.css" />
-  <link rel="stylesheet" href="./admin.css?v=20260720-4" />
-  <script>
-    (function () {
-      var t = localStorage.getItem("da_theme") || "dark";
-      document.documentElement.setAttribute("data-theme", t);
-    })();
-  </script>
-</head>
 <body>
   <div class="admin-app">
-    <header class="admin-header">
-      <div class="brand">
-        <span class="brand-dot"></span>
-        <span class="brand-name">deep-agent 管理后台</span>
-      </div>
-      <nav class="tabs" id="mainTabs">
-        <button class="tab active" data-tab="agents">Agent 配置</button>
-        <button class="tab" data-tab="llm-models">模型配置</button>
-        <button class="tab" data-tab="auxiliary-models">辅助模型</button>
-        <button class="tab" data-tab="mcp">MCP 配置</button>
-        <button class="tab" data-tab="ui-tools">UI 工具</button>
-      </nav>
-      <div class="header-actions">
-        <label class="inline-field">
-          <span>主题</span>
-          <select id="themeSelect" title="切换界面配色"></select>
-        </label>
-        <label class="inline-field">
-          <span>后端</span>
-          <input type="text" id="baseUrlInput" placeholder="http://localhost:8000" />
-        </label>
-        <a class="link-btn" href="../settings.html" id="settingsLink">请求头</a>
-        <a class="link-btn" href="../" id="chatLink">返回对话</a>
-      </div>
-    </header>
-
     <div class="banner hidden" id="dbBanner">
       数据库未配置。请设置 <code>DEEP_AGENT_DATABASE_URL</code> 后重启后端。
     </div>
@@ -89,7 +36,7 @@
       <div class="panel-toolbar">
         <h2>模型配置列表</h2>
         <div class="panel-toolbar-actions">
-          <a class="btn" href="../models.html" target="_blank" rel="noopener">模态总览</a>
+          <button class="btn" type="button" data-open-catalog>模态总览</button>
           <button class="btn" type="button" id="refreshAllLlmModelMetaBtn">刷新全部 Meta</button>
           <button class="btn primary" type="button" id="newLlmModelBtn">＋ 新建模型</button>
         </div>
@@ -549,15 +496,5 @@
     </form>
   </dialog>
 
-  <script src="../request_config.js?v=20260720-3"></script>
-  <script src="../theme.js?v=20260720-3"></script>
-  <script src="./form_feedback.js?v=20260720-3"></script>
-  <script src="./admin.js?v=20260720-3"></script>
-  <script src="./llm_models.js?v=20260720-3"></script>
-  <script src="./auxiliary_models.js?v=20260720-3"></script>
-  <script src="./agents.js?v=20260720-3"></script>
-  <script src="./mcp.js?v=20260720-3"></script>
-  <script src="./ui_schema_editor.js?v=20260720-3"></script>
-  <script src="./ui_tools.js?v=20260720-3"></script>
 </body>
 </html>

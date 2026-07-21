@@ -515,12 +515,11 @@ function positionNewChatMenu(anchor) {
 
 function renderNewChatMenu() {
   if (!el.newChatMenu) return;
-  const adminUrl = `${state.baseUrl}/admin/`;
   if (!state.agents.length) {
     el.newChatMenu.innerHTML = `
       <div class="new-chat-menu-empty">
         暂无可用 Agent。<br />
-        <a href="${escapeHtml(adminUrl)}" target="_blank" rel="noopener">前往管理后台创建</a>
+        <a href="#/configuration">前往配置中心创建</a>
       </div>`;
     return;
   }

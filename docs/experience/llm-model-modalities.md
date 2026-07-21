@@ -133,15 +133,15 @@ refresh_model_modalities(row)
 
 | 路径 | 说明 |
 |------|------|
-| `frontend/models.html` + `models.js` | **模型模态目录**：浏览 models.dev / 内置 JSON；筛选 provider / 模态；分页；「刷新」带 `refresh=true` 清缓存 |
-| `frontend/admin/index.html` | 模型表：输入模态 / 来源列；「刷新全部 Meta」按钮；链到 `models.html` |
-| `frontend/admin/llm_models.js` | 全量 / 单条 refresh；列表展示 |
-| `frontend/admin/admin.css` | `panel-toolbar-actions` 样式 |
+| `frontend/console/catalog-template.html` + `configuration/catalog.js` | **模型模态目录**：浏览 models.dev / 内置 JSON；筛选 provider / 模态；分页；「刷新」带 `refresh=true` 清缓存 |
+| `frontend/console/configuration-template.html` | 模型表：输入模态 / 来源列；「刷新全部 Meta」按钮 |
+| `frontend/console/configuration/llm-models.js` | 全量 / 单条 refresh；列表展示 |
+| `frontend/console/configuration/configuration.css` | `panel-toolbar-actions` 样式 |
 
 入口：
 
-- `/models.html` — 按原生模态挑选模型的只读目录（对话侧栏 / 设置页可进入）
-- `/admin/` → **模型配置** 标签页 — 管理已保存预设与刷新 Meta
+- `/console/#/configuration` → **模型目录**：按原生模态挑选模型。
+- `/console/#/configuration` → **模型**：管理已保存预设与刷新 Meta。
 
 ### 5.3 测试
 
@@ -162,7 +162,7 @@ refresh_model_modalities(row)
 
 | 项 | 说明 |
 |----|------|
-| **页面** | `frontend/models.html` |
+| **页面** | `frontend/console/catalog-template.html` |
 | **API** | `GET /api/v1/llm-models/catalog` |
 | **数据源** | `source=auto`（优先 models.dev，失败回退内置 JSON） / `online` / `bundled` |
 | **筛选** | `provider`、`modality`、`q`（子串搜索） |

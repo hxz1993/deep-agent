@@ -24,8 +24,8 @@ function truncate(value, length = 1200) {
 }
 
 async function fetchLegacyPage() {
-  const response = await fetch(new URL("../index.html", import.meta.url));
-  if (!response.ok) throw new Error(`无法加载旧对话结构：HTTP ${response.status}`);
+  const response = await fetch(new URL("./workspace-template.html", import.meta.url));
+  if (!response.ok) throw new Error(`无法加载工作台结构：HTTP ${response.status}`);
   return new DOMParser().parseFromString(await response.text(), "text/html");
 }
 
@@ -35,7 +35,7 @@ function installLegacyDom(source) {
   const chat = legacyApp?.querySelector(".chat");
   const menu = source.querySelector("#newChatMenu");
   if (!legacyApp || !sidebar || !chat || !menu) {
-    throw new Error("旧对话页面结构不完整");
+    throw new Error("工作台页面结构不完整");
   }
 
   sidebar.querySelector(".sidebar-footer")?.remove();

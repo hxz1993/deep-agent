@@ -62,6 +62,7 @@ textarea {
 .console-nav,
 .console-nav-btn,
 .context-summary,
+.docs-link,
 .user-pill,
 .connection-pill,
 .theme-switch {
@@ -112,6 +113,24 @@ textarea {
   background: transparent;
   cursor: pointer;
   font: inherit;
+}
+
+.docs-link {
+  height: 32px;
+  gap: 7px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text-dim);
+  background: var(--bg-elev);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.docs-link:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+  background: var(--bg-hover);
 }
 
 .console-nav-btn {
@@ -677,6 +696,8 @@ dialog.console-detail-dialog.modal-wide { width: min(980px, calc(100vw - 28px));
   .console-nav { justify-self: center; }
   .console-nav-btn { padding: 0 9px; }
   .console-nav-btn span { display: none; }
+  .docs-link { width: 32px; padding: 0; justify-content: center; }
+  .docs-link span { display: none; }
   .workspace-grid { grid-template-columns: 190px minmax(0, 1fr); }
   .agent-pane { display: none; }
   .workspace-mobile-bar .mobile-agent-trigger { display: inline-flex; }

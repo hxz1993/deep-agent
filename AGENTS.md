@@ -44,7 +44,6 @@ deep-agent/
 ├── tests/                 ← 测试 → tests/AGENTS.md
 ├── docs/                  ← SSE 协议等人读文档
 ├── skills/                ← Python Skill（可选）
-├── .cursor/skills/        ← Cursor SKILL.md → cursor-skill 能力
 └── deepfos_platform/      ← ✗ 排除，勿改
 ```
 

@@ -58,7 +58,7 @@ deep-agent/                      # 仓库根目录
 │   ├── config/mcp.json
 │   ├── mcps/
 │   └── skills/
-└── .cursor/skills/              # Cursor SKILL.md（code-review、commit-helper 等）
+└── .cursor/skills/              # 可选的外部 Cursor SKILL.md 目录
 ```
 
 ## 4. 分层架构
@@ -132,7 +132,6 @@ deps.build_runner_for_agent
 
 当前实际注册能力（推断）：
 - `native`：`get_current_time`、`http_get`
-- `cursor-skill:code-review`、`cursor-skill:commit-helper`
 - `mcp:text_tools`：`word_count`、`char_count`、`slugify`、`reverse`
 - `mcp:cubeQuery`：远程 SSE MCP（`http://172.16.1.23:8080/sse`）
 - `skill:calculator`：**未启用**（`SKILL = ...` 被注释）

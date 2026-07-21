@@ -25,11 +25,11 @@
 
 ## 配置中心
 
-- [x] Agent CRUD、模型/能力/MCP/UI 工具关联和长 Prompt。
+- [x] Agent CRUD、模型/能力/MCP/扩展 UI 工具正向关联和长 Prompt。
 - [x] LLM 模型 CRUD、单条/全量元数据刷新和 API Key 掩码。
 - [x] 模型目录搜索、筛选、分页、刷新和预填模型。
 - [x] MCP CRUD、transport 字段切换、Header JSON 校验和 UI 工具刷新。
-- [x] UI 工具 CRUD、来源筛选、Schema 编辑、模板和 Agent 关联。
+- [x] UI 工具 CRUD、来源筛选、Schema 编辑和模板；Agent 关联统一在 Agent 能力中配置。
 - [x] 辅助模型 use case 映射修改、回读和恢复。
 - [x] 401、403、409、422、500、503 使用明确错误状态。
 

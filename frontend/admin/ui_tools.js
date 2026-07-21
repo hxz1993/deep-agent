@@ -113,7 +113,6 @@ const uiToolsAdmin = {
   editingName: null,
   editingSource: null,
   _schemaReadOnly: false,
-  _agentsCache: null,
 
   paramsEl() {
     return document.getElementById("uiToolParamsEditor");
@@ -172,35 +171,6 @@ const uiToolsAdmin = {
       return custom || null;
     }
     return select.value || null;
-  },
-
-  async populateAgentSelect(selectedIds) {
-    const select = document.getElementById("uiToolAgentSelect");
-    if (!select) return;
-    let agents = [];
-    try {
-      agents = await apiFetch("/api/v1/agents");
-      this._agentsCache = agents;
-    } catch {
-      agents = this._agentsCache || [];
-    }
-    const selected = new Set(selectedIds || []);
-    select.innerHTML = agents
-      .map(
-        (a) =>
-          `<option value="${escapeHtml(a.id)}"${selected.has(a.id) ? " selected" : ""}>${escapeHtml(a.name)} (${escapeHtml(a.id)})</option>`
-      )
-      .join("");
-    if (!agents.length) {
-      select.innerHTML = `<option disabled>暂无 Agent，请先在「Agent 配置」创建</option>`;
-    }
-  },
-
-  getSelectedAgentIds() {
-    const select = document.getElementById("uiToolAgentSelect");
-    if (!select) return null;
-    const ids = Array.from(select.selectedOptions).map((opt) => opt.value).filter(Boolean);
-    return ids.length ? ids : null;
   },
 
   loadSchemas(parametersSchema, resultSchema, { readOnly = false } = {}) {
@@ -324,7 +294,7 @@ const uiToolsAdmin = {
     this.setSchemaReadOnly(readOnly);
   },
 
-  async openCreate() {
+  openCreate() {
     this.editingName = null;
     this.editingSource = "manual";
     document.getElementById("uiToolModalTitle").textContent = "手工注册 UI 工具";
@@ -333,7 +303,6 @@ const uiToolsAdmin = {
     document.getElementById("uiToolOverride").checked = false;
     document.getElementById("uiToolTemplate").value = "confirm";
     this.setFormMode("create");
-    await this.populateAgentSelect(null);
     this.applyTemplate("confirm", { fillName: true });
     document.getElementById("uiToolModal").showModal();
   },
@@ -350,7 +319,6 @@ const uiToolsAdmin = {
       document.getElementById("uiToolMetadata").value = tool.metadata
         ? JSON.stringify(tool.metadata, null, 2)
         : "";
-      await this.populateAgentSelect(tool.agent_ids || null);
       document.getElementById("uiToolEnabled").checked = tool.enabled;
       document.getElementById("uiToolOverride").checked = tool.override;
       const isMcp = tool.source === "mcp";
@@ -378,8 +346,6 @@ const uiToolsAdmin = {
       return;
     }
 
-    let agent_ids = this.getSelectedAgentIds();
-
     const widget = this.getWidgetValue();
     const enabled = document.getElementById("uiToolEnabled").checked;
     const override = document.getElementById("uiToolOverride").checked;
@@ -400,7 +366,6 @@ const uiToolsAdmin = {
             metadata: metadata ?? null,
             enabled,
             override,
-            agent_ids,
           }),
         });
         showToast("已保存");
@@ -416,7 +381,6 @@ const uiToolsAdmin = {
             metadata: metadata ?? null,
             enabled,
             override,
-            agent_ids,
           }),
         });
         showToast("已注册");

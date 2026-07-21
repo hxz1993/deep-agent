@@ -82,7 +82,10 @@ class ChatUiToolMetadataStreamTests(unittest.IsolatedAsyncioTestCase):
                         async with client.stream(
                             "POST",
                             "/api/v1/chat/stream",
-                            json={"message": "请用户填写备注"},
+                            json={
+                                "message": "请用户填写备注",
+                                "capabilities": [f"ui:{tool_name}"],
+                            },
                         ) as response:
                             self.assertEqual(response.status_code, 200)
                             body = "".join([chunk async for chunk in response.aiter_text()])

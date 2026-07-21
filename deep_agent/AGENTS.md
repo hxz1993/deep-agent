@@ -83,7 +83,7 @@ MCP 在请求时由 `resolve_mcp_toolsets` 解析（DB 行 + `mcps/` builtin 兜
 | `mcp/toolset_builder.py` | url / stdio / builtin + header 注入 |
 | `mcp/run_scoped.py` | builtin MCP：按 agent run 租约 HTTP client |
 | `mcp/lease_manager.py` | worker 级 MCP lease + shared registry touch |
-| `ui/registry.py` | UI 工具合并、可见性、`prepare_ui_toolset_for_spec` |
+| `ui/registry.py` | UI 工具合并、`ui:<name>` 正向关联、可见性、`prepare_ui_toolset_for_spec` |
 | `mcp/ui_discovery.py` | MCP manifest 发现 → `UiToolStore.sync_mcp_tools` |
 
 ### `api/v1/`
@@ -173,6 +173,8 @@ DEEP_AGENT_LOCAL_TOKEN_COOKIE=<可选，仅在目标环境要求 Cookie 时填�
 
 本地入口只监听 `127.0.0.1`。它会覆盖浏览器提交的 `user / authorization / x-user-token / cookie`，保留控制台调试上下文提交的 `app / space / language`。身份和 Token 不得进入源码、仓库、浏览器存储、日志或测试夹具。
 
+注意：应用启动会自动执行 Alembic `upgrade head`。本地 Profile 如果连接共享 Test 数据库，新增迁移会随本地服务启动直接应用；涉及删列等不兼容 DDL 时，必须先协调 Test 服务维护窗口，不能直接启动新代码。
+
 ### Agent（`DEEP_AGENT_` 前缀）
 
 | 变量 | 默认 | 说明 |
@@ -204,7 +206,7 @@ Provider Key（`OPENAI_API_KEY` 等）由 Pydantic AI 直接读取。
 alembic upgrade head
 ```
 
-迁移：`alembic/versions/001` … `006`。本地 Postgres：`docker compose up -d`。
+迁移：`alembic/versions/001` … `018`。本地 Postgres：`docker compose up -d`。
 
 ---
 
@@ -232,7 +234,7 @@ SSE 协议：[`../docs/sse-protocol.md`](../docs/sse-protocol.md)。前端对接
    - 多入口共享组装 → `api/v1/deps.py`（变化量留在入口，上下文在 `_build_*` 内统一解包）
 1. 包名 **`deep_agent`**，启动 `deep_agent.main:app`（非 `app.main`）
 2. 扩展优先走路径注册，避免改 `runner.py` 核心
-3. 能力命名：`native` \| `skill:<name>` \| `cursor-skill:<name>` \| `mcp:<name>`
+3. 能力命名：`native` \| `skill:<name>` \| `cursor-skill:<name>` \| `mcp:<name>` \| `ui:<canonical_tool_name>`；扩展 UI 工具由 Agent 正向引用
 4. DB Agent 会话：复合键 `(agent_id, session_id)`；无 agent 时 `agent_id=''`
 5. 同 session 用 `SessionStore.lock()` 串行；多实例 DB 级锁未实现
 

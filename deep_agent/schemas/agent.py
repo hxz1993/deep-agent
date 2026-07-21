@@ -33,7 +33,7 @@ class AgentCreate(BaseModel):
     )
     capabilities: list[str] | None = Field(
         default=None,
-        description="Capability names to enable. Null means all registered capabilities.",
+        description="Capability names to enable. Null uses default capabilities and no extension UI tools.",
     )
     max_requests: int | None = Field(
         default=None,

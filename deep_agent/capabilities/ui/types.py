@@ -19,7 +19,6 @@ class UIToolRecord:
     mcp_server_name: str | None = None
     enabled: bool = True
     override: bool = False
-    agent_ids: list[str] | None = None
     discovered_at: datetime | None = None
 
     @classmethod
@@ -35,6 +34,5 @@ class UIToolRecord:
             mcp_server_name=row.mcp_server_name,
             enabled=row.enabled,
             override=row.override,
-            agent_ids=row.agent_ids,
             discovered_at=row.discovered_at,
         )

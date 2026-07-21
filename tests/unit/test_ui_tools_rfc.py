@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unittest
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from typing import Any
 
 from pydantic import ValidationError
@@ -21,6 +22,7 @@ from deep_agent.capabilities.ui.registry import (
     enrich_tool_event,
     is_tool_visible,
     load_effective_ui_tools,
+    load_selectable_ui_tools,
     merge_definitions,
     prepare_ui_toolset_for_spec,
 )
@@ -30,6 +32,7 @@ from deep_agent.db.dialect import DbDialect
 from deep_agent.db.stores.bundle import create_data_stores
 from deep_agent.db.stores.ui_tool import UiToolStoreBase, create_ui_tool_store
 from deep_agent.schemas.ui_tools import UiToolCreate, UiToolManifestEntry, UiToolUpdate
+from deep_agent.api.v1.tools import list_capabilities
 
 
 class MergeDefinitionsTests(unittest.TestCase):
@@ -92,6 +95,13 @@ class UiToolSchemaValidationTests(unittest.TestCase):
                 parameters_json_schema=invalid_schema,
             )
 
+    def test_ui_tool_api_schemas_do_not_expose_agent_ids(self) -> None:
+        from deep_agent.schemas.ui_tools import UiToolResponse
+
+        self.assertNotIn("agent_ids", UiToolCreate.model_fields)
+        self.assertNotIn("agent_ids", UiToolUpdate.model_fields)
+        self.assertNotIn("agent_ids", UiToolResponse.model_fields)
+
 
 class UiToolStoreTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
@@ -147,43 +157,6 @@ class UiToolStoreTests(unittest.IsolatedAsyncioTestCase):
         names = {row.name for row in rows}
         self.assertEqual(names, {"acme__tool", "demo__manual"})
 
-    async def test_list_all_filters_by_agent_id(self) -> None:
-        agent_a = "00000000-0000-4000-8000-000000000001"
-        agent_b = "00000000-0000-4000-8000-000000000002"
-        now = datetime.now(timezone.utc)
-        async with self.session_factory() as db:
-            db.add_all(
-                [
-                    UiToolDefinition(
-                        name="global__tool",
-                        description="all agents",
-                        parameters_json_schema={"type": "object"},
-                        source="manual",
-                        enabled=True,
-                        created_at=now,
-                        updated_at=now,
-                    ),
-                    UiToolDefinition(
-                        name="scoped__tool",
-                        description="agent a only",
-                        parameters_json_schema={"type": "object"},
-                        source="manual",
-                        enabled=True,
-                        agent_ids=[agent_a],
-                        created_at=now,
-                        updated_at=now,
-                    ),
-                ]
-            )
-            await db.commit()
-
-        rows = await self.store.list_all(enabled=True, agent_id=agent_a)
-        names = {row.name for row in rows}
-        self.assertEqual(names, {"global__tool", "scoped__tool"})
-
-        rows_b = await self.store.list_all(enabled=True, agent_id=agent_b)
-        self.assertEqual({row.name for row in rows_b}, {"global__tool"})
-
     async def test_create_manual_and_list(self) -> None:
         row = await self.store.create_manual(
             UiToolCreate(
@@ -218,7 +191,7 @@ class UiToolStoreTests(unittest.IsolatedAsyncioTestCase):
             name="demo",
             model="test",
             instructions="hi",
-            capabilities=["ui"],
+            capabilities=["ui:demo__pick_color"],
             agent_id="00000000-0000-4000-8000-000000000001",
         )
         effective = await load_effective_ui_tools(self.stores, spec, mcp_enabled_names=set())
@@ -230,6 +203,168 @@ class UiToolStoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(effective.has_dynamic)
         self.assertIsNotNone(toolset)
         self.assertIn("demo__pick_color", hints)
+
+    async def test_effective_tools_require_exact_ui_capability(self) -> None:
+        now = datetime.now(timezone.utc)
+        async with self.session_factory() as db:
+            db.add_all(
+                [
+                    UiToolDefinition(
+                        name="demo__first",
+                        description="first",
+                        parameters_json_schema={"type": "object"},
+                        source="manual",
+                        enabled=True,
+                        created_at=now,
+                        updated_at=now,
+                    ),
+                    UiToolDefinition(
+                        name="demo__second",
+                        description="second",
+                        parameters_json_schema={"type": "object"},
+                        source="manual",
+                        enabled=True,
+                        created_at=now,
+                        updated_at=now,
+                    ),
+                ]
+            )
+            await db.commit()
+
+        spec = AgentSpec(
+            name="demo",
+            model="test",
+            instructions="hi",
+            capabilities=["ui:demo__second", "ui:missing__tool"],
+        )
+        effective = await load_effective_ui_tools(self.stores, spec, mcp_enabled_names=set())
+        names = {item.name for item in effective.definitions}
+        self.assertIn("confirm_action", names)
+        self.assertIn("ask_user_choice", names)
+        self.assertIn("demo__second", names)
+        self.assertNotIn("demo__first", names)
+        self.assertNotIn("missing__tool", names)
+
+    async def test_null_capabilities_do_not_enable_extension_ui_tools(self) -> None:
+        now = datetime.now(timezone.utc)
+        async with self.session_factory() as db:
+            db.add(
+                UiToolDefinition(
+                    name="demo__hidden_by_default",
+                    description="hidden",
+                    parameters_json_schema={"type": "object"},
+                    source="manual",
+                    enabled=True,
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+            await db.commit()
+
+        spec = AgentSpec(name="demo", model="test", instructions="hi", capabilities=None)
+        effective = await load_effective_ui_tools(self.stores, spec, mcp_enabled_names=set())
+        names = {item.name for item in effective.definitions}
+        self.assertEqual(names, {"confirm_action", "ask_user_choice"})
+        self.assertFalse(effective.has_dynamic)
+
+    async def test_disabled_selected_tool_is_ignored(self) -> None:
+        now = datetime.now(timezone.utc)
+        async with self.session_factory() as db:
+            db.add(
+                UiToolDefinition(
+                    name="demo__disabled",
+                    description="disabled",
+                    parameters_json_schema={"type": "object"},
+                    source="manual",
+                    enabled=False,
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+            await db.commit()
+
+        spec = AgentSpec(
+            name="demo",
+            model="test",
+            instructions="hi",
+            capabilities=["ui:demo__disabled"],
+        )
+        effective = await load_effective_ui_tools(self.stores, spec, mcp_enabled_names=set())
+        self.assertNotIn("demo__disabled", {item.name for item in effective.definitions})
+
+    async def test_selectable_tools_and_capability_api_are_one_entry_per_tool(self) -> None:
+        now = datetime.now(timezone.utc)
+        async with self.session_factory() as db:
+            db.add_all(
+                [
+                    UiToolDefinition(
+                        name="demo__first",
+                        description="First form",
+                        parameters_json_schema={"type": "object"},
+                        source="manual",
+                        enabled=True,
+                        created_at=now,
+                        updated_at=now,
+                    ),
+                    UiToolDefinition(
+                        name="demo__disabled",
+                        description="Disabled form",
+                        parameters_json_schema={"type": "object"},
+                        source="manual",
+                        enabled=False,
+                        created_at=now,
+                        updated_at=now,
+                    ),
+                ]
+            )
+            await db.commit()
+
+        selectable = await load_selectable_ui_tools(self.stores, mcp_rows=[])
+        self.assertEqual([record.name for record in selectable], ["demo__first"])
+
+        registry = SimpleNamespace(describe=lambda: [])
+        ctx = SimpleNamespace(stores=self.stores, registry=registry)
+        capabilities = await list_capabilities(ctx)
+        ui_capabilities = [item for item in capabilities if item.kind == "ui-client"]
+        self.assertEqual([item.name for item in ui_capabilities], ["ui:demo__first"])
+        self.assertEqual([tool.name for tool in ui_capabilities[0].tools], ["demo__first"])
+
+    async def test_mcp_tool_is_selectable_only_when_parent_mcp_is_enabled(self) -> None:
+        now = datetime.now(timezone.utc)
+        async with self.session_factory() as db:
+            db.add(
+                UiToolDefinition(
+                    name="acme__review",
+                    description="Review form",
+                    parameters_json_schema={"type": "object"},
+                    source="mcp",
+                    mcp_server_name="acme",
+                    enabled=True,
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+            await db.commit()
+
+        disabled_parent = McpServer(
+            name="acme",
+            transport="url",
+            config={"url": "http://example.invalid/mcp"},
+            enabled=False,
+        )
+        enabled_parent = McpServer(
+            name="acme",
+            transport="url",
+            config={"url": "http://example.invalid/mcp"},
+            enabled=True,
+        )
+
+        self.assertEqual(
+            await load_selectable_ui_tools(self.stores, mcp_rows=[disabled_parent]),
+            [],
+        )
+        selectable = await load_selectable_ui_tools(self.stores, mcp_rows=[enabled_parent])
+        self.assertEqual([record.name for record in selectable], ["acme__review"])
 
     async def test_prepare_toolset_skips_historical_invalid_schema_only(self) -> None:
         now = datetime.now(timezone.utc)
@@ -252,7 +387,7 @@ class UiToolStoreTests(unittest.IsolatedAsyncioTestCase):
             name="demo",
             model="test",
             instructions="hi",
-            capabilities=["ui"],
+            capabilities=["ui:demo__invalid"],
             agent_id="00000000-0000-4000-8000-000000000001",
         )
         toolset, hints = await prepare_ui_toolset_for_spec(self.stores, spec)
@@ -284,7 +419,7 @@ class DiscoveryPolicyTests(unittest.TestCase):
 
 
 class VisibilityTests(unittest.TestCase):
-    def test_mcp_tool_hidden_without_capability(self) -> None:
+    def test_mcp_tool_requires_ui_and_parent_mcp_capabilities(self) -> None:
         record = UIToolRecord(
             name="acme__pick_date",
             description="x",
@@ -296,18 +431,34 @@ class VisibilityTests(unittest.TestCase):
         self.assertFalse(
             is_tool_visible(
                 record,
-                agent_id=None,
-                capabilities=["native"],
+                capabilities=["ui:acme__pick_date"],
                 mcp_enabled_names={"acme"},
             )
         )
         self.assertTrue(
             is_tool_visible(
                 record,
-                agent_id=None,
-                capabilities=["mcp:acme"],
+                capabilities=["mcp:acme", "ui:acme__pick_date"],
                 mcp_enabled_names={"acme"},
             )
+        )
+
+    def test_manual_tool_requires_exact_ui_capability(self) -> None:
+        record = UIToolRecord(
+            name="demo__form",
+            description="x",
+            parameters_json_schema={},
+            source="manual",
+            enabled=True,
+        )
+        self.assertFalse(
+            is_tool_visible(record, capabilities=None, mcp_enabled_names=set())
+        )
+        self.assertFalse(
+            is_tool_visible(record, capabilities=["ui"], mcp_enabled_names=set())
+        )
+        self.assertTrue(
+            is_tool_visible(record, capabilities=["ui:demo__form"], mcp_enabled_names=set())
         )
 
 

@@ -28,7 +28,6 @@ def manifest_entry_to_row(
         mcp_server_name=mcp_server_name,
         enabled=True,
         override=False,
-        agent_ids=None,
         discovered_at=discovered_at,
     )
 

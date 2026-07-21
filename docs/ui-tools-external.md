@@ -13,7 +13,7 @@
 | 使用内置确认框、选项列表 | `confirm_action`、`ask_user_choice`（`kind=ui`） |
 | **通过 MCP 声明 UI 工具** | MCP 实现 `ui_tools_list` 或 Resource `ui://tools/manifest`，平台按需发现并注入模型 |
 | **通过 Admin / API 手工注册** | `POST /api/v1/ui-tools`，适合无 MCP 或运营侧配置 |
-| 配置 Agent 指令、绑定可见范围 | `instructions` + `capabilities` + `agent_ids` |
+| 配置 Agent 指令、绑定可见范围 | `instructions` + `capabilities` 中的 `ui:<name>` |
 | 自建客户端对接 HITL 协议 | `final.pending` + `deferred_tool_results`（见 §6） |
 | 查询已注册 UI 工具定义 | `GET /api/v1/ui-tools`、`GET /api/v1/tools` |
 
@@ -214,8 +214,8 @@ canonical_name = {mcp_server_name}__{tools[].name}
 1. 打开 **Admin → UI 工具 → 手工注册**
 2. 选择**配置模板**（确认 / 选项 / 文本 / 日期 / 空白自定义）或从零编辑参数、结果 Schema
 3. 填写**规范名**（建议 `myapp__tool_name`）、描述、**Widget**、可选 Metadata
-4. **绑定 Agent**：多选下拉；不选表示对所有 Agent 可见
-5. 勾选「覆盖同名 MCP 定义」可在与 MCP 工具同名时以 manual 为准
+4. 勾选「覆盖同名 MCP 定义」可在与 MCP 工具同名时以 manual 为准
+5. 到 **Agent 配置 → 能力 → UI（扩展）**，为目标 Agent 选择该工具
 
 #### API
 
@@ -241,16 +241,15 @@ Content-Type: application/json
   },
   "metadata": { "form_version": "1" },
   "enabled": true,
-  "override": false,
-  "agent_ids": ["550e8400-e29b-41d4-a716-446655440000"]
+  "override": false
 }
 ```
 
 | 接口 | 用途 |
 |------|------|
-| `GET /api/v1/ui-tools` | 列表；支持 `agent_id`、`source`、`mcp_server`、`enabled` 过滤 |
+| `GET /api/v1/ui-tools` | 列表；支持 `source`、`mcp_server`、`enabled` 过滤 |
 | `GET /api/v1/ui-tools/{name}` | 单条详情（含 schema、widget、metadata） |
-| `PATCH /api/v1/ui-tools/{name}` | 更新；`source=mcp` 时默认仅可改 `enabled`、`agent_ids`、`override`（改 schema 需 `?force=true`） |
+| `PATCH /api/v1/ui-tools/{name}` | 更新；`source=mcp` 时默认仅可改 `enabled`、`override`（改 schema 需 `?force=true`） |
 | `DELETE /api/v1/ui-tools/{name}` | 删除 manual；mcp 来源删除后下次发现可再写入 |
 
 `name` 须匹配 `^[a-z][a-z0-9_]{1,120}$`，且不得占用 `confirm_action`、`ask_user_choice`（除非平台另有策略）。
@@ -289,11 +288,11 @@ Content-Type: application/json
 扩展工具要对某 Agent **可见且可调用**，需同时满足：
 
 1. **工具已启用**：`enabled: true`
-2. **Agent 绑定**：`agent_ids` 为空，或包含当前 `agent_id`
-3. **MCP 来源工具**：Agent `capabilities` 含 `mcp:<mcp_server_name>`（manual 来源无此要求）
+2. **Agent 显式引用**：`capabilities` 含 `ui:<canonical_tool_name>`
+3. **MCP 来源工具**：Agent 同时含 `mcp:<mcp_server_name>`，且父 MCP 已启用（manual 来源无此要求）
 4. **instructions**：写明何时调用、参数含义、如何解读 `result`
 
-`capabilities` 为 `null` 时，已启用的 MCP Server 默认参与可见性判断；显式配置时须包含对应 `mcp:<name>`。
+`capabilities` 为 `null` 时只启用默认能力，不自动启用任何扩展 UI 工具。
 
 **instructions 示例**（日期选择）：
 
@@ -312,9 +311,9 @@ GET /api/v1/tools
 ```
 
 - `kind=ui`：内置 `confirm_action`、`ask_user_choice`
-- `kind=ui-client`：MCP / manual 注册的动态工具（存在时才有此项）
+- `kind=ui-client`：MCP / manual 注册的扩展工具，每个工具各自返回一个 `ui:<name>` 能力
 
-动态工具在对话时按 Agent 过滤；管理面查看完整定义请用 `GET /api/v1/ui-tools?agent_id=<uuid>`。
+扩展工具在对话时按 Agent 的 `ui:<name>` 能力过滤；管理面查看完整定义请用 `GET /api/v1/ui-tools`。
 
 ---
 
@@ -434,8 +433,8 @@ flowchart TD
 | 现象 | 可能原因 | 处理 |
 |------|----------|------|
 | 模型从不调用扩展工具 | instructions 未写工具名与场景 | 使用规范名 `mcp__local`，补充 §5.5 类规则 |
-| `GET /tools` 无 `ui-client` | 无 manual/mcp 工具或未配 DB | 注册工具或刷新 MCP UI |
-| 模型看不到 MCP UI 工具 | Agent 未配 `mcp:<name>` | 编辑 Agent capabilities |
+| `GET /tools` 无 `ui:<name>` | 无已启用 manual/mcp 工具或父 MCP 不可用 | 注册工具或刷新 MCP UI |
+| 模型看不到扩展 UI 工具 | Agent 未配 `ui:<name>`；MCP 来源还可能缺父 `mcp:<name>` | 编辑 Agent capabilities |
 | 对话后 DB 仍无 MCP 工具 | 未触发发现；builtin MCP | 使用非 builtin MCP；或手动 `POST .../ui-tools/refresh` |
 | 只有 JSON、没有控件 | 非官方前端且未实现 HITL | 按 §7 实现渲染与续跑 |
 | 续跑 422 | 未带 message 且无 deferred | 续跑只传 `deferred_tool_results` |

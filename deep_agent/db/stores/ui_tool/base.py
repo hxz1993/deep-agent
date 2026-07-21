@@ -9,8 +9,6 @@ from deep_agent.schemas.ui_tools import UiToolCreate, UiToolUpdate
 
 
 class UiToolStoreBase(SessionBoundMixin):
-    _sql_agent_id_filter = False
-
     async def get_by_name(self, name: str) -> UiToolDefinition | None:
         async with self._read() as db:
             return await self._get_by_name(db, name)
@@ -22,7 +20,6 @@ class UiToolStoreBase(SessionBoundMixin):
         mcp_server_name: str | None = None,
         mcp_server_names: set[str] | frozenset[str] | None = None,
         enabled: bool | None = None,
-        agent_id: str | None = None,
     ) -> list[UiToolDefinition]:
         async with self._read() as db:
             return await self._list_all(
@@ -31,7 +28,6 @@ class UiToolStoreBase(SessionBoundMixin):
                 mcp_server_name=mcp_server_name,
                 mcp_server_names=mcp_server_names,
                 enabled=enabled,
-                agent_id=agent_id,
             )
 
     async def create_manual(self, data: UiToolCreate) -> UiToolDefinition:
@@ -47,7 +43,6 @@ class UiToolStoreBase(SessionBoundMixin):
                 mcp_server_name=None,
                 enabled=data.enabled,
                 override=data.override,
-                agent_ids=data.agent_ids,
             )
             db.add(row)
             await db.flush()
@@ -104,20 +99,6 @@ class UiToolStoreBase(SessionBoundMixin):
         result = await db.execute(select(UiToolDefinition).where(UiToolDefinition.name.in_(names)))
         return {row.name: row for row in result.scalars().all()}
 
-    @staticmethod
-    def _agent_id_unrestricted():
-        return or_(
-            UiToolDefinition.agent_ids.is_(None),
-            UiToolDefinition.agent_ids == "[]",
-        )
-
-    def _apply_agent_id_filter(self, stmt, agent_id: str):
-        return stmt
-
-    @staticmethod
-    def _post_filter_agent_id(rows: list[UiToolDefinition], agent_id: str) -> list[UiToolDefinition]:
-        return [row for row in rows if not row.agent_ids or agent_id in row.agent_ids]
-
     async def _list_all(
         self,
         db: AsyncSession,
@@ -126,7 +107,6 @@ class UiToolStoreBase(SessionBoundMixin):
         mcp_server_name: str | None = None,
         mcp_server_names: set[str] | frozenset[str] | None = None,
         enabled: bool | None = None,
-        agent_id: str | None = None,
     ) -> list[UiToolDefinition]:
         stmt = select(UiToolDefinition).order_by(UiToolDefinition.name)
         if source is not None:
@@ -145,13 +125,8 @@ class UiToolStoreBase(SessionBoundMixin):
                 stmt = stmt.where(UiToolDefinition.mcp_server_name.is_(None))
         if enabled is not None:
             stmt = stmt.where(UiToolDefinition.enabled == enabled)
-        if agent_id is not None:
-            stmt = self._apply_agent_id_filter(stmt, agent_id)
         result = await db.execute(stmt)
-        rows = list(result.scalars().all())
-        if agent_id is not None and not self._sql_agent_id_filter:
-            rows = self._post_filter_agent_id(rows, agent_id)
-        return rows
+        return list(result.scalars().all())
 
     async def _sync_mcp_tools(
         self,

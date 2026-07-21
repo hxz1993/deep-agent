@@ -92,11 +92,13 @@ flowchart TB
 
 ```
 tool.enabled == true
-AND (tool.agent_ids 为空 OR 当前 agent_id ∈ tool.agent_ids)
+AND f"ui:{tool.name}" ∈ agent.capabilities
 AND (
   tool.mcp_server_name 为空
-  OR f"mcp:{tool.mcp_server_name}" ∈ agent.capabilities
-  OR agent.capabilities 为空 且 mcp server enabled
+  OR (
+    f"mcp:{tool.mcp_server_name}" ∈ agent.capabilities
+    AND mcp server enabled
+  )
 )
 ```
 
@@ -250,7 +252,6 @@ canonical_name = f"{mcp_server_name}__{tools[].name}"
 | `mcp_server_name` | `VARCHAR(191)` NULL FK → `mcp_servers.name` ON DELETE SET NULL |
 | `enabled` | `BOOLEAN` | 默认 true |
 | `override` | `BOOLEAN` | manual 覆盖同名的 mcp 定义时为 true |
-| `agent_ids` | `JSON` NULL | UUID 字符串数组；null/[] 表示全局 |
 | `discovered_at` | `TIMESTAMPTZ` NULL | MCP 发现时间 |
 | `created_at` | `TIMESTAMPTZ` | |
 | `updated_at` | `TIMESTAMPTZ` | |
@@ -270,7 +271,6 @@ canonical_name = f"{mcp_server_name}__{tools[].name}"
 
 | 参数 | 类型 | 说明 |
 |------|------|------|
-| `agent_id` | uuid? | 过滤对该 Agent 可见的工具 |
 | `mcp_server` | string? | 仅某 MCP 来源 |
 | `source` | enum? | `builtin` \| `mcp` \| `manual` |
 | `enabled` | bool? | 默认 true |
@@ -291,7 +291,6 @@ canonical_name = f"{mcp_server_name}__{tools[].name}"
       "mcp_server_name": "acme",
       "enabled": true,
       "override": false,
-      "agent_ids": null,
       "discovered_at": "2026-06-23T10:00:00Z",
       "created_at": "...",
       "updated_at": "..."
@@ -331,8 +330,7 @@ canonical_name = f"{mcp_server_name}__{tools[].name}"
   },
   "metadata": { "form_version": "1" },
   "enabled": true,
-  "override": false,
-  "agent_ids": ["550e8400-e29b-41d4-a716-446655440000"]
+  "override": false
 }
 ```
 
@@ -349,9 +347,9 @@ canonical_name = f"{mcp_server_name}__{tools[].name}"
 
 #### `PATCH /api/v1/ui-tools/{name}`
 
-可更新：`description`、`parameters_json_schema`、`widget`、`result_schema`、`metadata`、`enabled`、`override`、`agent_ids`。
+可更新：`description`、`parameters_json_schema`、`widget`、`result_schema`、`metadata`、`enabled`、`override`。
 
-- `source=mcp` 的行：默认仅允许改 `enabled`、`agent_ids`、`override`（覆盖开关）；改 schema 需 `force=true` 查询参数（审计用）
+- `source=mcp` 的行：默认仅允许改 `enabled`、`override`（覆盖开关）；改 schema 需 `force=true` 查询参数（审计用）
 - `source=builtin`：禁止 PATCH（501 或 403）
 
 #### `DELETE /api/v1/ui-tools/{name}`
@@ -489,7 +487,7 @@ def _toolsets_for_spec(registry, spec, db, agent_id?) -> list[AbstractToolset]:
 - [ ] `api/v1/ui_tools.py` CRUD
 - [ ] `UIToolRegistry` + `build_agent` 接 DB manual 工具
 - [ ] 扩展 `GET /api/v1/tools`
-- [ ] 单元测试：合并优先级、agent_ids 过滤
+- [ ] 单元测试：合并优先级、`ui:<name>` 精确加载
 
 ### Phase 2 — MCP 发现 A（2 周）
 
@@ -515,6 +513,7 @@ def _toolsets_for_spec(registry, spec, db, agent_id?) -> list[AbstractToolset]:
 |----|------|
 | 内置 `confirm_action` / `ask_user_choice` | 保留代码内置；DB 无行时行为与今日一致 |
 | 现有会话 pending | 无迁移；`tool_call_id` 不变 |
+| UI 工具与 Agent 关联 | Alembic 018 删除 `agent_ids`；在 `agents.capabilities` 中使用 `ui:<name>` |
 | 旧客户端 | 忽略未知 `widget`；对规范名做字符串匹配或 JSON 回退 |
 | MCP 未实现发现 | `ui_tools.enabled=false` 或缺省；仅 server 工具 |
 
@@ -581,12 +580,6 @@ components:
         override:
           type: boolean
           default: false
-        agent_ids:
-          type: array
-          items:
-            type: string
-            format: uuid
-          nullable: true
     UiToolResponse:
       allOf:
         - $ref: '#/components/schemas/UiToolCreate'

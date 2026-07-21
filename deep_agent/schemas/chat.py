@@ -33,7 +33,7 @@ class ChatRequest(BaseModel):
     )
     capabilities: list[str] | None = Field(
         default=None,
-        description="Optional subset of capability names to enable for this run.",
+        description="Optional capability names to enable for this run, including ui:<tool_name> references.",
     )
     branch_from: int | None = Field(
         default=None,

@@ -340,7 +340,7 @@ Builtin 不展示整块 MCP UI 同步设置。Builtin UI 工具的来源和管�
 - 不新增 pending interaction 表。
 - 不处理历史 pending 表单依赖当前 UI 工具定义的问题。
 - 不处理历史请求 App/Space 与后续回答 App/Space 不一致问题。
-- 不调整 `UiToolDefinition.agent_ids` 的反向 Agent 关联。
+- Agent 关联已由独立改造收敛到 `agents.capabilities` 的 `ui:<name>` 正向引用；本同步计划不再维护 `agent_ids`。
 - 不迁移官方 MCP Elicitation。
 - 不迁移 MCP Apps。
 - 不修改复杂表单或电子表格 UI 能力。

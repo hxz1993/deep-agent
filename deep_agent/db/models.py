@@ -118,7 +118,6 @@ class UiToolDefinition(Base):
     mcp_server_name: Mapped[str | None] = mapped_column(KeyText, nullable=True)
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
     override: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
-    agent_ids: Mapped[list[str] | None] = mapped_column(JSONType, nullable=True)
     discovered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(

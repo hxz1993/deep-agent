@@ -15,8 +15,8 @@ DEFAULT_INSTRUCTIONS = (
 class AgentSpec:
     """Declarative description of an agent.
 
-    ``capabilities=None`` means "all registered capabilities"; otherwise it is a
-    list of capability names (e.g. ["native", "skill:calculator"]) to enable.
+    ``capabilities=None`` uses default capabilities and no extension UI tools;
+    otherwise the list may include entries such as ``ui:deep_cube__clarify``.
     """
 
     name: str

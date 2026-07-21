@@ -147,7 +147,6 @@ DELETE /api/v1/ui-tools/{name}
   "widget": "date_picker",
   "result_schema": { ... },
   "enabled": true,
-  "agent_ids": ["uuid-optional"],
   "tenant_id": "optional"
 }
 ```
@@ -156,8 +155,8 @@ DELETE /api/v1/ui-tools/{name}
 
 ### 4.2 与 Agent 绑定
 
-- **全局**：所有 Agent 可见（`agent_ids` 空）
-- **按 Agent**：仅 `capabilities` 含 `ui` 或显式 `ui:*` 时加载
+- **按 Agent**：在 `agents.capabilities` 中使用 `ui:<canonical_tool_name>` 精确引用
+- **默认能力**：`capabilities` 为空时不自动启用扩展 UI 工具
 - **按租户**：多租户场景隔离
 
 ### 4.3 优点 / 缺点

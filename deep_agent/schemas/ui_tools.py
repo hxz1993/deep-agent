@@ -91,7 +91,6 @@ class UiToolCreate(BaseModel):
     metadata: dict[str, Any] | None = None
     enabled: bool = True
     override: bool = False
-    agent_ids: list[str] | None = None
 
     @field_validator("name")
     @classmethod
@@ -122,7 +121,6 @@ class UiToolUpdate(BaseModel):
     metadata: dict[str, Any] | None = None
     enabled: bool | None = None
     override: bool | None = None
-    agent_ids: list[str] | None = None
 
     @field_validator("parameters_json_schema")
     @classmethod
@@ -153,7 +151,6 @@ class UiToolResponse(BaseModel):
     mcp_server_name: str | None = None
     enabled: bool
     override: bool
-    agent_ids: list[str] | None = None
     discovered_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
@@ -172,7 +169,6 @@ class UiToolResponse(BaseModel):
             mcp_server_name=row.mcp_server_name,
             enabled=row.enabled,
             override=row.override,
-            agent_ids=row.agent_ids,
             discovered_at=row.discovered_at,
             created_at=row.created_at,
             updated_at=row.updated_at,

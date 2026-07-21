@@ -16,7 +16,6 @@ _BUILTIN_NAMES = {record.name for record in builtin_ui_records()}
 @router.get("/ui-tools", response_model=UiToolListResponse)
 async def list_ui_tools(
     store: UiToolStoreBase = Depends(get_ui_tool_store),
-    agent_id: str | None = Query(default=None),
     mcp_server: str | None = Query(default=None),
     source: str | None = Query(default=None),
     enabled: bool | None = Query(default=None),
@@ -25,7 +24,6 @@ async def list_ui_tools(
         source=source,
         mcp_server_name=mcp_server,
         enabled=enabled,
-        agent_id=agent_id,
     )
 
     db_records = [UIToolRecord.from_row(row) for row in rows if row.source != "builtin"]
@@ -87,12 +85,12 @@ async def update_ui_tool(
     if row.source == "builtin":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Builtin UI tools cannot be modified")
     if row.source == "mcp" and not force:
-        allowed = {"enabled", "agent_ids", "override"}
+        allowed = {"enabled", "override"}
         updates = body.model_dump(exclude_unset=True)
         if set(updates) - allowed:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="MCP-discovered tools only allow enabled, agent_ids, and override unless force=true",
+                detail="MCP-discovered tools only allow enabled and override unless force=true",
             )
     updated = await store.update(name, body)
     assert updated is not None

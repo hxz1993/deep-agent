@@ -36,21 +36,17 @@ class EffectiveUiTools:
 def is_tool_visible(
     record: UIToolRecord,
     *,
-    agent_id: str | None,
     capabilities: list[str] | None,
     mcp_enabled_names: set[str],
 ) -> bool:
     if not record.enabled:
         return False
-    if record.agent_ids:
-        if agent_id is None or agent_id not in record.agent_ids:
-            return False
+    if capabilities is None or f"ui:{record.name}" not in capabilities:
+        return False
     if record.mcp_server_name:
-        cap = f"mcp:{record.mcp_server_name}"
-        if capabilities is not None:
-            if cap not in capabilities and "ui" not in capabilities:
-                return False
-        elif record.mcp_server_name not in mcp_enabled_names:
+        if record.mcp_server_name not in mcp_enabled_names:
+            return False
+        if f"mcp:{record.mcp_server_name}" not in capabilities:
             return False
     return True
 
@@ -194,7 +190,6 @@ async def load_effective_ui_tools(
 
     db_rows = await stores.ui_tool.list_all(
         enabled=True,
-        agent_id=spec.agent_id,
         mcp_server_names=mcp_enabled_names,
     )
     db_records = [UIToolRecord.from_row(row) for row in db_rows if row.source != "builtin"]
@@ -204,7 +199,6 @@ async def load_effective_ui_tools(
         for record in db_records
         if is_tool_visible(
             record,
-            agent_id=spec.agent_id,
             capabilities=spec.capabilities,
             mcp_enabled_names=mcp_enabled_names,
         )
@@ -215,6 +209,24 @@ async def load_effective_ui_tools(
     if shadowed:
         logger.warning("UI tool name conflicts resolved: {}", shadowed)
     return EffectiveUiTools(definitions=merged, shadowed=shadowed, has_dynamic=has_dynamic)
+
+
+async def load_selectable_ui_tools(
+    stores: DataStores,
+    *,
+    mcp_rows: list[McpServer] | None = None,
+) -> list[UIToolRecord]:
+    """List enabled extension UI tools that can be assigned to an Agent."""
+    if mcp_rows is None:
+        mcp_rows = await stores.mcp.list_all()
+    enabled_mcp_names = {row.name for row in mcp_rows if row.enabled}
+    db_rows = await stores.ui_tool.list_all(
+        enabled=True,
+        mcp_server_names=enabled_mcp_names,
+    )
+    db_records = [UIToolRecord.from_row(row) for row in db_rows if row.source in {"mcp", "manual"}]
+    merged, _ = merge_definitions(builtin_ui_records(), db_records)
+    return [record for record in merged if record.source in {"mcp", "manual"}]
 
 
 async def prepare_ui_toolset_for_spec(

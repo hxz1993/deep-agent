@@ -527,11 +527,6 @@
           <span>Metadata（选填）</span>
           <textarea id="uiToolMetadata" rows="2" class="mono-textarea" placeholder='{"key": "value"}'></textarea>
         </label>
-        <label class="field">
-          <span>绑定 Agent</span>
-          <select id="uiToolAgentSelect" class="agent-multi-select" multiple size="5"></select>
-          <span class="field-hint">不选表示全部 Agent；按住 Ctrl 可多选</span>
-        </label>
         <label class="field checkbox-field">
           <input type="checkbox" id="uiToolEnabled" checked />
           <span>启用</span>
@@ -540,7 +535,7 @@
           <input type="checkbox" id="uiToolOverride" />
           <span>覆盖同名 MCP 定义</span>
         </label>
-        <p class="field-hint hidden" id="uiToolMcpHint">MCP 来源工具默认仅可改启用、绑定与覆盖。</p>
+        <p class="field-hint hidden" id="uiToolMcpHint">MCP 来源工具默认仅可改启用与覆盖；Agent 关联请在 Agent 能力中配置。</p>
         <label class="field checkbox-field hidden" id="uiToolForceWrap">
           <input type="checkbox" id="uiToolForceEdit" />
           <span>允许编辑 Schema</span>

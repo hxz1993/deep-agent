@@ -54,6 +54,28 @@ MCP 在请求时由 `resolve_mcp_toolsets` 解析（DB 行 + `mcps/` builtin 兜
 4. `AgentRunner.run_stream()`：session 锁 → history → `agent.iter()` → SSE 事件 → `append(new_messages)`
 5. `capabilities: null` → 仅 `default_enabled=True`；显式列表按名启用
 
+### 能力装配与模型输入
+
+DeepAgent 自研 `capabilities.registry.Capability` 是配置包装对象，负责把一组 Instructions/Toolset 暴露给 Agent；Pydantic AI 的 `AbstractCapability` 才是可介入模型请求、消息历史、工具准备和事件生命周期的原生扩展点。当前只有 `DeepSeekThinkingRetry` 使用了原生 Capability。
+
+模型每轮直接看到的是：Agent/能力 Instructions、`message_history`、当前用户输入/附件和本轮 Tool Definitions。Toolset 负责列出、准备和调用工具；MCP Resource 与 Prompt 不会自动进入模型工具列表。
+
+运行态 URL 与 Builtin MCP 统一启用 Pydantic AI `MCPToolset(include_instructions=True)`，因此已关联 MCP 在 `initialize` 中返回的 Server Instructions 会随 Toolset 加入 Agent Instructions；未关联 MCP 不会注入。UI 工具发现专用连接不参与对话，不需要启用该选项。
+
+新增横切能力时遵循：
+
+1. 历史裁剪、摘要和上下文预算优先评估 Harness `TieredCompaction`；若采用 Harness，不要再并行维护一套自研 `ProcessHistory` 压缩器。SQL 原始历史继续作为产品事实源，压缩结果应作为派生上下文保存。
+2. 按 App、Space、权限或模态过滤工具优先使用 `PrepareTools`。
+3. 工具达到数十个、Schema 明显占用上下文后再评估 `ToolSearch`。
+4. 生命周期观测优先使用 Hooks/Instrumentation，并先完成 Token、Cookie、文件和工具结果脱敏。
+5. 通用大工具结果治理优先评估 Harness `OverflowingToolOutput`；多实例部署不得直接依赖默认本地文件 Store。
+6. Harness Memory 只保存明确的跨会话笔记，不替代聊天历史；namespace 必须由认证用户、Agent、App 和 Space 生成。
+7. Harness `StepPersistence` 不替代现有 SQL 会话、SSE 和 Deferred/Pending；只有副作用账本、子 Agent 或崩溃恢复成为真实需求时再接入。
+8. Harness 仍为 0.x。引入时必须将 `pydantic-ai-slim` 与 `pydantic-ai-harness` 固定为经过联合回归的准确版本，禁止继续依赖无上限 `>=` 漂移。
+9. 不要通过修改 `AgentRunner` 主循环重复实现 Pydantic AI 已提供的机制。
+
+完整审计见 [`../docs/pydantic-ai-native-capabilities-and-deepagent-usage-audit.md`](../docs/pydantic-ai-native-capabilities-and-deepagent-usage-audit.md)。
+
 ---
 
 ## 模块索引
@@ -68,7 +90,7 @@ MCP 在请求时由 `resolve_mcp_toolsets` 解析（DB 行 + `mcps/` builtin 兜
 | `runner.py` | `run()` / `run_stream()` — 会话锁、history、事件映射 |
 | `deps.py` | `AgentDeps`：session_id、user、agent_id、request_headers |
 | `headers.py` | HTTP → MCP 的 header 白名单提取 |
-| `events.py` | Pydantic AI 事件 → SSE 字典（`singledispatch` 分层映射，见[重构风格规则](../.cursor/rules/python-refactoring.mdc)） |
+| `events.py` | Pydantic AI 事件 → SSE 字典（使用 `singledispatch` 分层映射） |
 
 ### `capabilities/`
 
@@ -97,7 +119,7 @@ MCP 在请求时由 `resolve_mcp_toolsets` 解析（DB 行 + `mcps/` builtin 兜
 | `sessions.py` | 会话列表 / 历史 / 删除 |
 | `auxiliary_models.py` | CRUD `/auxiliary-models` |
 | `tools.py` | `GET /tools` |
-| `deps.py` | `build_runner` / `build_runner_for_agent`（多入口共享组装，见[重构风格规则](../.cursor/rules/python-refactoring.mdc)） |
+| `deps.py` | `build_runner` / `build_runner_for_agent`，统一承接多入口的运行器组装 |
 
 ### `db/`
 
@@ -229,7 +251,7 @@ SSE 协议：[`../docs/sse-protocol.md`](../docs/sse-protocol.md)。前端对接
 
 ## 约定与陷阱
 
-0. **重构风格**：Python 后端重构遵循 [`.cursor/rules/python-refactoring.mdc`](../.cursor/rules/python-refactoring.mdc)
+0. **重构风格**：事件多态映射集中在 `agent/events.py`；多入口共享组装集中在 `api/v1/deps.py`，变化量留在调用入口
    - 事件多态映射 → `agent/events.py`（`singledispatch` 分层）
    - 多入口共享组装 → `api/v1/deps.py`（变化量留在入口，上下文在 `_build_*` 内统一解包）
 1. 包名 **`deep_agent`**，启动 `deep_agent.main:app`（非 `app.main`）

@@ -73,6 +73,7 @@ def build_raw_url_mcp_toolset(
         url,
         id=name,
         headers=headers or None,
+        include_instructions=True,
         process_tool_call=inject_request_meta,
         init_timeout=timeout,
         max_retries=resolve_mcp_max_retries(),
@@ -89,6 +90,7 @@ def _build_url_toolset(name: str, config: dict[str, Any]) -> DynamicToolset[Agen
             url,
             id=name,
             headers=headers,
+            include_instructions=True,
             init_timeout=init_timeout,
             max_retries=resolve_mcp_max_retries(),
         ).prefixed(name)

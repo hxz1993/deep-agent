@@ -83,6 +83,13 @@ async def console_redirect() -> RedirectResponse:
     return RedirectResponse(url="/console/#/workspace", status_code=307)
 
 
+@app.get("/console", include_in_schema=False)
+async def console_trailing_slash_redirect() -> RedirectResponse:
+    # Keep a reverse proxy's public service prefix instead of exposing the
+    # internal Pod host used by StaticFiles' automatic slash redirect.
+    return RedirectResponse(url="./console/", status_code=307)
+
+
 _frontend_dir = REPO_ROOT / "frontend"
 _console_dir = _frontend_dir / "console"
 _vendor_dir = _frontend_dir / "vendor"

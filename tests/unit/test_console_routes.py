@@ -27,6 +27,12 @@ class ConsoleRoutesTest(unittest.TestCase):
         self.assertEqual(self.client.get("/openapi.json").status_code, 200)
         self.assertEqual(self.client.get("/health").status_code, 200)
 
+    def test_console_without_trailing_slash_uses_proxy_safe_redirect(self) -> None:
+        response = self.client.get("/console", follow_redirects=False)
+
+        self.assertEqual(response.status_code, 307)
+        self.assertEqual(response.headers["location"], "./console/")
+
     def test_legacy_page_routes_are_removed(self) -> None:
         for path in ("/settings.html", "/models.html", "/admin", "/admin/"):
             with self.subTest(path=path):

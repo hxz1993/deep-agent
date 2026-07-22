@@ -11,8 +11,8 @@
 | 项 | 内容 |
 | --- | --- |
 | **是什么** | 通用 AI Agent 全栈：FastAPI 后端 + Pydantic AI 运行时 + 静态前端 |
-| **启动** | 仓库根：`venv\Scripts\python.exe -m uvicorn deep_agent.main:app --reload` |
-| **测试** | `venv\Scripts\python.exe -m unittest discover -s tests -p "test_*.py" -v` |
+| **启动** | 仓库根：`python3.12 -m uvicorn deep_agent.main:app --reload`；本地 Test 联调优先使用 `python3.12 -m deep_agent.local_dev --config <仓库外配置> --port 8000` |
+| **测试** | `python3.12 -m unittest discover -s tests -p "test_*.py" -v` |
 | **配置** | 仓库根 `.env`（`DEEP_AGENT_*` / `DEEP_AGENT_DBMS_*` / `DEEP_AGENT_SQLITE_PATH`） |
 
 ---
@@ -56,7 +56,17 @@ HTTP → deep_agent/api/v1 → AgentRunner → pydantic_ai.Agent → Capabilitie
                                       └→ SessionStore (postgres/mysql/sqlite)
 ```
 
-能力来源：`native` | `skill:*` | `cursor-skill:*` | `mcp:*`（DB + `mcps/` 兜底）
+能力来源：`native` | `skill:*` | `cursor-skill:*` | `mcp:*`（DB + `mcps/` 兜底）| `ui:*`
+
+### Pydantic AI 运行边界
+
+- DeepAgent 自研 `Capability` 是产品配置包装，负责选择 Instructions 和 Toolset；不要和 Pydantic AI 的 `AbstractCapability` 混为一谈。
+- 模型直接接收 Instructions、历史、当前输入和 Tool Definitions。MCP Resource/Prompt 不会自动成为模型工具，必须由宿主读取、注入或显式包装。
+- Pydantic AI 负责 Agent loop、参数校验、工具调用、重试、流式事件和 Deferred 原语；DeepAgent 负责 SQL 会话、用户隔离、MCP 配置/Header、HITL、SSE 和 Console。
+- 当前每轮会读取完整会话历史和工具结果。新增工具或附件能力前必须评估上下文体积；上下文裁剪不得破坏 Tool Call/Result 配对、原始历史、分支和 Pending 恢复。
+- 新的运行时横切能力优先评估 Core 的 `PrepareTools`、Hooks、`ToolSearch` 和 Harness 的 Compaction/Overflow；不要默认把逻辑继续写入 `AgentRunner`。
+- Harness 是可选能力库，不是产品平台。会话、身份、配置、HITL、SSE 和 Console 继续由 DeepAgent 负责；引入 Harness 0.x 时必须与 `pydantic-ai-slim` 一起固定准确版本。
+- Provider Usage 是 best effort；OpenAI-compatible 或私有端点返回 0 时可能代表缺失。上下文预算必须结合模型窗口元数据和保守估算，不能只依赖 `result.usage`。
 
 ---
 
@@ -74,3 +84,4 @@ HTTP → deep_agent/api/v1 → AgentRunner → pydantic_ai.Agent → Capabilitie
 | [`docs/ui-tools-external.md`](docs/ui-tools-external.md) | UI 工具使用（**外部集成方**，不改代码） |
 | [`docs/ui-tools-extension-proposals.md`](docs/ui-tools-extension-proposals.md) | UI 工具扩展能力 — 方案对比（产品/架构） |
 | [`docs/rfc/0001-ui-tools-mcp-discovery-and-api.md`](docs/rfc/0001-ui-tools-mcp-discovery-and-api.md) | **RFC**：方案 A+B 详细设计（OpenAPI / MCP 协议） |
+| [`docs/pydantic-ai-native-capabilities-and-deepagent-usage-audit.md`](docs/pydantic-ai-native-capabilities-and-deepagent-usage-audit.md) | Pydantic AI 运行机制、DeepAgent 使用边界和原生能力采用路线 |

@@ -33,6 +33,7 @@ from deep_agent.db.stores.bundle import create_data_stores
 from deep_agent.db.stores.ui_tool import UiToolStoreBase, create_ui_tool_store
 from deep_agent.schemas.ui_tools import UiToolCreate, UiToolManifestEntry, UiToolUpdate
 from deep_agent.api.v1.tools import list_capabilities
+from deep_agent.api.v1.ui_tools import get_ui_tool, list_ui_tools
 
 
 class MergeDefinitionsTests(unittest.TestCase):
@@ -169,6 +170,56 @@ class UiToolStoreTests(unittest.IsolatedAsyncioTestCase):
         rows = await self.store.list_all(source="manual")
         self.assertEqual(row.name, "myapp__custom_form")
         self.assertEqual(len(rows), 1)
+
+    async def test_management_list_includes_read_only_builtin_tools(self) -> None:
+        response = await list_ui_tools(
+            store=self.store,
+            mcp_server=None,
+            source=None,
+            enabled=None,
+        )
+
+        by_name = {item.name: item for item in response.items}
+        self.assertEqual(set(by_name), {"ask_user_choice", "confirm_action"})
+        self.assertTrue(all(item.source == "builtin" for item in by_name.values()))
+        self.assertTrue(all(item.enabled for item in by_name.values()))
+        self.assertTrue(all(item.created_at is None for item in by_name.values()))
+        self.assertTrue(all(item.updated_at is None for item in by_name.values()))
+
+    async def test_management_list_filters_builtin_tools(self) -> None:
+        builtin_response = await list_ui_tools(
+            store=self.store,
+            mcp_server=None,
+            source="builtin",
+            enabled=True,
+        )
+        disabled_response = await list_ui_tools(
+            store=self.store,
+            mcp_server=None,
+            source=None,
+            enabled=False,
+        )
+        mcp_response = await list_ui_tools(
+            store=self.store,
+            mcp_server="demo",
+            source=None,
+            enabled=None,
+        )
+
+        self.assertEqual({item.name for item in builtin_response.items}, {"ask_user_choice", "confirm_action"})
+        self.assertEqual(disabled_response.items, [])
+        self.assertEqual(mcp_response.items, [])
+
+    async def test_management_detail_reads_builtin_without_database_row(self) -> None:
+        response = await get_ui_tool("confirm_action", store=self.store)
+
+        self.assertEqual(response.name, "confirm_action")
+        self.assertEqual(response.source, "builtin")
+        self.assertEqual(response.widget, "confirm")
+        self.assertIsNone(response.result_schema)
+        self.assertIsNone(response.metadata)
+        self.assertIsNone(response.created_at)
+        self.assertIsNone(response.updated_at)
 
     async def test_effective_tools_include_manual_for_agent(self) -> None:
         now = datetime.now(timezone.utc)
@@ -326,8 +377,14 @@ class UiToolStoreTests(unittest.IsolatedAsyncioTestCase):
         ctx = SimpleNamespace(stores=self.stores, registry=registry)
         capabilities = await list_capabilities(ctx)
         ui_capabilities = [item for item in capabilities if item.kind == "ui-client"]
-        self.assertEqual([item.name for item in ui_capabilities], ["ui:demo__first"])
-        self.assertEqual([tool.name for tool in ui_capabilities[0].tools], ["demo__first"])
+        self.assertEqual(
+            [item.name for item in ui_capabilities],
+            ["ui-builtin:confirm_action", "ui-builtin:ask_user_choice", "ui:demo__first"],
+        )
+        self.assertEqual([item.source for item in ui_capabilities], ["builtin", "builtin", "manual"])
+        self.assertEqual([item.locked for item in ui_capabilities], [True, True, False])
+        self.assertEqual([item.default_enabled for item in ui_capabilities], [True, True, False])
+        self.assertEqual([tool.name for tool in ui_capabilities[-1].tools], ["demo__first"])
 
     async def test_mcp_tool_is_selectable_only_when_parent_mcp_is_enabled(self) -> None:
         now = datetime.now(timezone.utc)

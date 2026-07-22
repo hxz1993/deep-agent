@@ -70,4 +70,4 @@ cd frontend
 python -m http.server 5173
 ```
 
-详细说明见 [`deep_agent/README.md`](deep_agent/README.md) 与 [`frontend/README.md`](frontend/README.md)。
+详细说明见 [`deep_agent/AGENTS.md`](deep_agent/AGENTS.md) 与 [`frontend/README.md`](frontend/README.md)。

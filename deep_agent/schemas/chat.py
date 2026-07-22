@@ -93,6 +93,9 @@ class CapabilityDescription(BaseModel):
     kind: str
     description: str = ""
     tools: list[ToolDescription] = Field(default_factory=list)
+    default_enabled: bool = False
+    locked: bool = False
+    source: str | None = None
 
 
 class SessionInfo(BaseModel):

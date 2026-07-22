@@ -42,7 +42,7 @@ deep-agent/
 ├── mcps/                  ← 内置 MCP → mcps/AGENTS.md
 ├── frontend/              ← 静态前端 → frontend/AGENTS.md
 ├── tests/                 ← 测试 → tests/AGENTS.md
-├── docs/                  ← SSE 协议等人读文档
+├── docs/                  ← 说明与设计文档，入口见 docs/README.md
 ├── skills/                ← Python Skill（可选）
 └── deepfos_platform/      ← ✗ 排除，勿改
 ```
@@ -72,16 +72,10 @@ HTTP → deep_agent/api/v1 → AgentRunner → pydantic_ai.Agent → Capabilitie
 
 ## 其他文档
 
-| 文档 | 用途 |
+| 文档 | 类型与用途 |
 | --- | --- |
 | [`README.md`](README.md) | 人类快速开始 |
 | [`PROJECT_OVERVIEW.md`](PROJECT_OVERVIEW.md) | 历史架构总结（部分路径已过时） |
-| [`docs/sse-protocol.md`](docs/sse-protocol.md) | SSE 事件协议详解 |
-| [`docs/experience/llm-model-modalities.md`](docs/experience/llm-model-modalities.md) | LLM 模型 `input_modalities` 元数据：原则、来源、刷新与离线兜底 |
-| [`docs/experience/ai-title-generator.md`](docs/experience/ai-title-generator.md) | AI 会话标题生成实现经验 |
-| [`docs/experience/mcp-shared-registry-diagnostics.md`](docs/experience/mcp-shared-registry-diagnostics.md) | MCP 共享 Registry 诊断日志目录与事故排障 runbook（基于 2026-07-16 deepcube 全量报错事故） |
-| [`docs/ui-tools.md`](docs/ui-tools.md) | UI 工具扩展（**内部**，改仓库代码） |
-| [`docs/ui-tools-external.md`](docs/ui-tools-external.md) | UI 工具使用（**外部集成方**，不改代码） |
-| [`docs/ui-tools-extension-proposals.md`](docs/ui-tools-extension-proposals.md) | UI 工具扩展能力 — 方案对比（产品/架构） |
-| [`docs/rfc/0001-ui-tools-mcp-discovery-and-api.md`](docs/rfc/0001-ui-tools-mcp-discovery-and-api.md) | **RFC**：方案 A+B 详细设计（OpenAPI / MCP 协议） |
-| [`docs/pydantic-ai-native-capabilities-and-deepagent-usage-audit.md`](docs/pydantic-ai-native-capabilities-and-deepagent-usage-audit.md) | Pydantic AI 运行机制、DeepAgent 使用边界和原生能力采用路线 |
+| [`docs/README.md`](docs/README.md) | 文档总入口 |
+| [`docs/guides/README.md`](docs/guides/README.md) | **说明**：协议、使用指南、实现经验和排障记录 |
+| [`docs/design/README.md`](docs/design/README.md) | **设计**：方案、RFC、技术审计、待实施计划和原型 |

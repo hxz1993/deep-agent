@@ -62,4 +62,4 @@ node --test tests/frontend/console/*.test.mjs
 python3.12 -m unittest tests.unit.test_console_routes -v
 ```
 
-完整 SSE 协议见 [`docs/sse-protocol.md`](../docs/sse-protocol.md)。UI 工具见 [`docs/ui-tools-external.md`](../docs/ui-tools-external.md)。
+完整 SSE 协议见 [`docs/guides/sse-protocol.md`](../docs/guides/sse-protocol.md)。UI 工具见 [`docs/guides/ui-tools-external.md`](../docs/guides/ui-tools-external.md)。

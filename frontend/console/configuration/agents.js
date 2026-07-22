@@ -10,7 +10,7 @@ const KIND_LABELS = {
   mcp: "MCP",
   "cursor-skill": "Cursor Skills",
   ui: "UI（内置）",
-  "ui-client": "UI（扩展）",
+  "ui-client": "UI 工具",
 };
 
 const KIND_ORDER = ["native", "ui", "ui-client", "skill", "mcp", "cursor-skill"];
@@ -22,7 +22,22 @@ function capDisplayName(name, kind) {
   if (kind === "ui-client" && name.startsWith("ui:")) {
     return name.slice(3);
   }
+  if (kind === "ui-client" && name.startsWith("ui-builtin:")) {
+    return name.slice(11);
+  }
   return name;
+}
+
+function capKindLabel(cap) {
+  if (cap.kind !== "ui-client") return KIND_LABELS[cap.kind] || cap.kind;
+  if (cap.source === "builtin") return "内置";
+  if (cap.source === "manual") return "MANUAL";
+  if (cap.source === "mcp") return "MCP";
+  return KIND_LABELS[cap.kind];
+}
+
+function isCapabilitySelected(cap, selectedSet) {
+  return Boolean(cap.locked) || selectedSet.has(cap.name);
 }
 
 function groupCapabilities(caps) {
@@ -38,7 +53,7 @@ function groupCapabilities(caps) {
 }
 
 function defaultEnabledCapabilityNames(caps) {
-  return (caps || []).filter((c) => c.default_enabled).map((c) => c.name);
+  return (caps || []).filter((c) => c.default_enabled && !c.locked).map((c) => c.name);
 }
 
 function formatCapabilitiesPreview(capabilities) {
@@ -106,11 +121,12 @@ const agentsAdmin = {
   },
 
   renderCapCard(cap, selectedSet) {
-    const checked = selectedSet.has(cap.name);
+    const checked = isCapabilitySelected(cap, selectedSet);
     const displayName = capDisplayName(cap.name, cap.kind);
-    const kindLabel = KIND_LABELS[cap.kind] || cap.kind;
+    const kindLabel = capKindLabel(cap);
     const toolCount = cap.tools?.length || 0;
     const searchText = `${displayName} ${cap.description || ""} ${cap.name}`.toLowerCase();
+    const locked = Boolean(cap.locked);
 
     const toolsHtml = toolCount
       ? `<details class="cap-card-tools">
@@ -124,15 +140,15 @@ const agentsAdmin = {
         </details>`
       : "";
 
-    return `<article class="cap-card kind-${escapeHtml(cap.kind)}" data-cap-name="${escapeHtml(cap.name)}" data-search="${escapeHtml(searchText)}">
+    return `<article class="cap-card kind-${escapeHtml(cap.kind)}${locked ? " is-locked" : ""}" data-cap-name="${escapeHtml(cap.name)}" data-search="${escapeHtml(searchText)}">
       <div class="cap-card-header">
-        <label class="cap-switch" title="${checked ? "已启用" : "未启用"}">
-          <input type="checkbox" name="cap" value="${escapeHtml(cap.name)}" ${checked ? "checked" : ""} />
+        <label class="cap-switch" title="${locked ? "默认启用，不可关闭" : checked ? "已启用" : "未启用"}">
+          <input type="checkbox" name="cap" value="${escapeHtml(cap.name)}" ${checked ? "checked" : ""} ${locked ? "disabled data-locked=\"true\"" : ""} />
           <span class="cap-switch-ui"></span>
         </label>
         <div class="cap-card-info">
           <div class="cap-card-title">
-            <span class="kind-badge kind-${escapeHtml(cap.kind)}">${escapeHtml(kindLabel)}</span>
+          <span class="kind-badge kind-${escapeHtml(cap.kind)} source-${escapeHtml(cap.source || "unknown")}">${escapeHtml(kindLabel)}</span>
             <span>${escapeHtml(displayName)}</span>
           </div>
           ${cap.description ? `<p class="cap-card-desc">${escapeHtml(cap.description)}</p>` : ""}
@@ -144,7 +160,7 @@ const agentsAdmin = {
 
   countSelectedInKind(kind, selectedSet) {
     const caps = (state.capabilities || []).filter((c) => c.kind === kind);
-    return caps.filter((c) => selectedSet.has(c.name)).length;
+    return caps.filter((c) => isCapabilitySelected(c, selectedSet)).length;
   },
 
   renderCapabilityCheckboxes(selected = null) {
@@ -214,7 +230,7 @@ const agentsAdmin = {
   setCapsInKind(kind, checked) {
     const panel = document.querySelector(`.cap-panel[data-kind-panel="${kind}"]`);
     if (!panel) return;
-    panel.querySelectorAll('input[name="cap"]').forEach((input) => {
+    panel.querySelectorAll('input[name="cap"]:not(:disabled)').forEach((input) => {
       input.checked = checked;
     });
     this.updateCapCounter();
@@ -252,9 +268,12 @@ const agentsAdmin = {
 
     const allBoxes = document.querySelectorAll('#agentCapGroups input[name="cap"]');
     const checked = document.querySelectorAll('#agentCapGroups input[name="cap"]:checked');
+    const configurableChecked = document.querySelectorAll(
+      '#agentCapGroups input[name="cap"]:checked:not(:disabled)'
+    );
     const total = allBoxes.length;
     const selected = checked.length;
-    const selectedSet = new Set(Array.from(checked).map((b) => b.value));
+    const selectedSet = new Set(Array.from(configurableChecked).map((b) => b.value));
 
     if (!total) {
       counter.textContent = "";
@@ -278,9 +297,9 @@ const agentsAdmin = {
   },
 
   getSelectedCapabilities() {
-    const boxes = document.querySelectorAll('#agentCapGroups input[name="cap"]:checked');
+    const boxes = document.querySelectorAll('#agentCapGroups input[name="cap"]:checked:not(:disabled)');
     const selected = Array.from(boxes).map((b) => b.value);
-    const allBoxes = document.querySelectorAll('#agentCapGroups input[name="cap"]');
+    const allBoxes = document.querySelectorAll('#agentCapGroups input[name="cap"]:not(:disabled)');
     if (!allBoxes.length) return null;
     if (selected.length === 0) return [];
     const selectedSet = new Set(selected);

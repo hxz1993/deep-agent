@@ -10,7 +10,12 @@ from deep_agent.db.stores.ui_tool import UiToolStoreBase
 from deep_agent.schemas.ui_tools import UiToolCreate, UiToolListResponse, UiToolResponse, UiToolUpdate
 
 router = APIRouter()
-_BUILTIN_NAMES = {record.name for record in builtin_ui_records()}
+_BUILTIN_RECORDS = {record.name: record for record in builtin_ui_records()}
+_BUILTIN_NAMES = set(_BUILTIN_RECORDS)
+
+
+def _include_builtins(*, source: str | None, mcp_server: str | None, enabled: bool | None) -> bool:
+    return source in {None, "builtin"} and mcp_server is None and enabled is not False
 
 
 @router.get("/ui-tools", response_model=UiToolListResponse)
@@ -26,11 +31,17 @@ async def list_ui_tools(
         enabled=enabled,
     )
 
-    db_records = [UIToolRecord.from_row(row) for row in rows if row.source != "builtin"]
-    merged, _ = merge_definitions(builtin_ui_records(), db_records)
+    rows = [row for row in rows if row.source != "builtin"]
+    builtins = builtin_ui_records() if _include_builtins(source=source, mcp_server=mcp_server, enabled=enabled) else []
+    db_records = [UIToolRecord.from_row(row) for row in rows]
+    merged, _ = merge_definitions(builtins, db_records)
     winners = {record.name: record for record in merged}
 
     items: list[UiToolResponse] = []
+    for record in builtins:
+        winner = winners.get(record.name)
+        shadowed_by = winner.source if winner is not None and winner.source != record.source else None
+        items.append(UiToolResponse.from_record(record, shadowed_by=shadowed_by))
     for row in rows:
         winner = winners.get(row.name)
         shadowed_by = None
@@ -38,6 +49,7 @@ async def list_ui_tools(
             shadowed_by = winner.source
         items.append(UiToolResponse.from_row(row, shadowed_by=shadowed_by))
 
+    items.sort(key=lambda item: (item.name, item.source))
     return UiToolListResponse(items=items, total=len(items))
 
 
@@ -46,6 +58,9 @@ async def get_ui_tool(
     name: str,
     store: UiToolStoreBase = Depends(get_ui_tool_store),
 ) -> UiToolResponse:
+    builtin = _BUILTIN_RECORDS.get(name)
+    if builtin is not None:
+        return UiToolResponse.from_record(builtin)
     row = await store.get_by_name(name)
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"UI tool not found: {name}")

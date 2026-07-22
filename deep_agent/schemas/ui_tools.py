@@ -3,13 +3,16 @@ from __future__ import annotations
 import json
 import re
 from datetime import datetime
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 from jsonschema.exceptions import SchemaError
 from jsonschema.validators import validator_for
 
 from deep_agent.db.models import UiToolDefinition
+
+if TYPE_CHECKING:
+    from deep_agent.capabilities.ui.types import UIToolRecord
 
 from deep_agent.capabilities.ui.constants import (
     MAX_DESCRIPTION_LEN,
@@ -152,8 +155,8 @@ class UiToolResponse(BaseModel):
     enabled: bool
     override: bool
     discovered_at: datetime | None = None
-    created_at: datetime
-    updated_at: datetime
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
     shadowed_by: str | None = None
 
     @classmethod
@@ -172,6 +175,25 @@ class UiToolResponse(BaseModel):
             discovered_at=row.discovered_at,
             created_at=row.created_at,
             updated_at=row.updated_at,
+            shadowed_by=shadowed_by,
+        )
+
+    @classmethod
+    def from_record(cls, record: "UIToolRecord", *, shadowed_by: str | None = None) -> UiToolResponse:
+        return cls(
+            name=record.name,
+            description=record.description,
+            parameters_json_schema=record.parameters_json_schema,
+            widget=record.widget,
+            result_schema=record.result_schema,
+            metadata=record.metadata,
+            source=record.source,
+            mcp_server_name=record.mcp_server_name,
+            enabled=record.enabled,
+            override=record.override,
+            discovered_at=record.discovered_at,
+            created_at=None,
+            updated_at=None,
             shadowed_by=shadowed_by,
         )
 

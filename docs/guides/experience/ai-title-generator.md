@@ -213,7 +213,7 @@ PowerShell 带超时（排查单文件用默认 30s；**全量含 live 标题约
 .\tests\run.ps1 -Target tests -TimeoutSec 300
 ```
 
-流式相关集成测试见 [`tests/integration/README.md`](../../tests/integration/README.md)：`/chat/stream` 须 `httpx.AsyncClient` + `mock_request_disconnect()`，**勿**用 `TestClient.stream()`（会无限阻塞）。
+流式相关集成测试见 [`tests/integration/README.md`](../../../tests/integration/README.md)：`/chat/stream` 须 `httpx.AsyncClient` + `mock_request_disconnect()`，**勿**用 `TestClient.stream()`（会无限阻塞）。
 
 ### 6.4 用例矩阵（集成）
 

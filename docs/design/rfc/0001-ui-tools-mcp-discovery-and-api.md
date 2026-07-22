@@ -4,7 +4,7 @@
 |------|-----|
 | **状态** | Implemented |
 | **作者** | deep-agent 平台组 |
-| **关联** | [ui-tools-extension-proposals.md](../ui-tools-extension-proposals.md)、[ui-tools-external.md](../ui-tools-external.md) |
+| **关联** | [ui-tools-extension-proposals.md](../ui-tools-extension-proposals.md)、[ui-tools-external.md](../../guides/ui-tools-external.md) |
 | **范围** | 方案 A（MCP UI 发现）+ 方案 B（UI 工具配置 API） |
 
 ---
@@ -643,7 +643,7 @@ async def discover_ui_tools(mcp_server: McpServer) -> list[UIToolDefinition]:
 
 | 文档 | 用途 |
 |------|------|
-| [ui-tools-external.md](../ui-tools-external.md) | 集成方使用与续跑协议 |
-| [ui-tools.md](../ui-tools.md) | 平台内部扩展内置工具 |
-| [sse-protocol.md](../sse-protocol.md) | `final.pending` / deferred |
+| [ui-tools-external.md](../../guides/ui-tools-external.md) | 集成方使用与续跑协议 |
+| [ui-tools.md](../../guides/ui-tools.md) | 平台内部扩展内置工具 |
+| [sse-protocol.md](../../guides/sse-protocol.md) | `final.pending` / deferred |
 | [ui-tools-extension-proposals.md](../ui-tools-extension-proposals.md) | 方案对比与决策背景 |

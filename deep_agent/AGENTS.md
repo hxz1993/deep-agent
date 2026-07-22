@@ -74,7 +74,7 @@ DeepAgent 自研 `capabilities.registry.Capability` 是配置包装对象，负�
 8. Harness 仍为 0.x。引入时必须将 `pydantic-ai-slim` 与 `pydantic-ai-harness` 固定为经过联合回归的准确版本，禁止继续依赖无上限 `>=` 漂移。
 9. 不要通过修改 `AgentRunner` 主循环重复实现 Pydantic AI 已提供的机制。
 
-完整审计见 [`../docs/pydantic-ai-native-capabilities-and-deepagent-usage-audit.md`](../docs/pydantic-ai-native-capabilities-and-deepagent-usage-audit.md)。
+完整审计见 [`../docs/design/pydantic-ai-native-capabilities-and-deepagent-usage-audit.md`](../docs/design/pydantic-ai-native-capabilities-and-deepagent-usage-audit.md)。
 
 ---
 
@@ -245,7 +245,7 @@ alembic upgrade head
 | | `/api/v1/sessions/*` | 是 |
 | | `/console/#/configuration` | 是 |
 
-SSE 协议：[`../docs/sse-protocol.md`](../docs/sse-protocol.md)。前端对接：[`../frontend/AGENTS.md`](../frontend/AGENTS.md)。
+SSE 协议：[`../docs/guides/sse-protocol.md`](../docs/guides/sse-protocol.md)。前端对接：[`../frontend/AGENTS.md`](../frontend/AGENTS.md)。
 
 ---
 

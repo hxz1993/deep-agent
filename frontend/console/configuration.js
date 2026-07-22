@@ -1,6 +1,6 @@
 let initialized = false;
 let loadingPromise = null;
-const CONFIGURATION_ASSET_VERSION = "20260721-1";
+const CONFIGURATION_ASSET_VERSION = "20260722-3";
 
 function versionedAsset(path) {
   const url = new URL(path, import.meta.url);

@@ -235,7 +235,7 @@ deps.build_runner_for_agent
 
 ### SSE 事件（/chat/stream）
 
-> 完整协议文档：[docs/sse-protocol.md](docs/sse-protocol.md)
+> 完整协议文档：[docs/guides/sse-protocol.md](docs/guides/sse-protocol.md)
 
 | event | data 内容 |
 |-------|-----------|

@@ -126,6 +126,7 @@
           <span>来源</span>
           <select id="uiToolFilterSource" class="filter-select">
             <option value="">全部</option>
+            <option value="builtin">内置</option>
             <option value="manual">manual</option>
             <option value="mcp">mcp</option>
           </select>
@@ -494,6 +495,20 @@
         <button type="submit" class="btn primary">保存</button>
       </div>
     </form>
+  </dialog>
+
+  <!-- Builtin UI tool details -->
+  <dialog class="modal modal-wide" id="uiToolDetailModal">
+    <div class="modal-header">
+      <h3 id="uiToolDetailTitle">UI 工具详情</h3>
+      <button type="button" class="icon-btn" id="closeUiToolDetailModal">✕</button>
+    </div>
+    <div class="modal-body">
+      <dl class="ui-tool-detail-grid" id="uiToolDetailGrid"></dl>
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="btn" id="dismissUiToolDetailModal">关闭</button>
+    </div>
   </dialog>
 
 </body>

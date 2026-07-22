@@ -3,7 +3,7 @@ import { parseSseBlock, readSse } from "./protocol.js?v=20260720-1";
 
 /* ------------------------------------------------------------------ *
  * deep-agent 前端 —— 适配 FastAPI /api/v1/chat/stream (SSE over POST)
- * 协议详见 docs/sse-protocol.md
+ * 协议详见 docs/guides/sse-protocol.md
  *
  * 后端 SSE 事件 (event: <type>, data: <json>):
  *   session      -> { session_id, agent_id }

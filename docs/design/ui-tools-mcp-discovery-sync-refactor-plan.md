@@ -3,7 +3,7 @@
 > 状态：待后端评审，当前不实施
 > 记录日期：2026-07-20
 > 影响仓库：`deep-agent`
-> 关联文档：`docs/rfc/0001-ui-tools-mcp-discovery-and-api.md`
+> 关联文档：[`rfc/0001-ui-tools-mcp-discovery-and-api.md`](rfc/0001-ui-tools-mcp-discovery-and-api.md)
 
 ## 1. 结论
 

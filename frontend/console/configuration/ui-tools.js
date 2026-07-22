@@ -1,7 +1,18 @@
 const SOURCE_LABELS = {
-  manual: "manual",
+  builtin: "内置",
+  manual: "MANUAL",
   mcp: "mcp",
 };
+
+function uiToolDisplayValue(value) {
+  if (value === null || value === undefined || value === "") return "—";
+  return String(value);
+}
+
+function uiToolJsonValue(value) {
+  if (value === null || value === undefined) return "—";
+  return JSON.stringify(value, null, 2);
+}
 
 const UI_TOOL_TEMPLATES = {
   confirm: {
@@ -242,18 +253,23 @@ const uiToolsAdmin = {
           <td>${escapeHtml(tool.widget || "—")}</td>
           <td><span class="badge ${tool.enabled ? "on" : "off"}">${tool.enabled ? "是" : "否"}</span></td>
           <td>${escapeHtml(tool.mcp_server_name || "—")}</td>
-          <td class="desc-cell" title="${escapeHtml(tool.description)}">${escapeHtml(tool.description)}</td>
+          <td class="desc-cell" title="${escapeHtml(tool.description || "—")}">${escapeHtml(tool.description || "—")}</td>
           <td>${escapeHtml(formatDate(tool.updated_at))}</td>
           <td>
             <div class="row-actions">
-              <button type="button" data-edit="${escapeHtml(tool.name)}">编辑</button>
-              <button type="button" class="danger" data-delete="${escapeHtml(tool.name)}" data-source="${escapeHtml(tool.source)}">删除</button>
+              ${tool.source === "builtin"
+                ? `<button type="button" data-view="${escapeHtml(tool.name)}">查看</button>`
+                : `<button type="button" data-edit="${escapeHtml(tool.name)}">编辑</button>
+                   <button type="button" class="danger" data-delete="${escapeHtml(tool.name)}" data-source="${escapeHtml(tool.source)}">删除</button>`}
             </div>
           </td>
         </tr>`;
         })
         .join("");
 
+      tbody.querySelectorAll("[data-view]").forEach((btn) => {
+        btn.addEventListener("click", () => this.openDetails(btn.dataset.view));
+      });
       tbody.querySelectorAll("[data-edit]").forEach((btn) => {
         btn.addEventListener("click", () => this.openEdit(btn.dataset.edit));
       });
@@ -262,6 +278,37 @@ const uiToolsAdmin = {
       });
     } catch (err) {
       tbody.innerHTML = `<tr><td colspan="8" class="empty-cell">${escapeHtml(err.message)}</td></tr>`;
+    }
+  },
+
+  async openDetails(name) {
+    try {
+      const tool = await apiFetch(`/api/v1/ui-tools/${encodeURIComponent(name)}`);
+      const fields = [
+        ["名称", tool.name],
+        ["来源", SOURCE_LABELS[tool.source] || tool.source],
+        ["Widget", tool.widget],
+        ["启用", tool.enabled ? "是" : "否"],
+        ["覆盖同名定义", tool.override ? "是" : "否"],
+        ["MCP 服务", tool.mcp_server_name],
+        ["描述", tool.description],
+        ["参数 Schema", uiToolJsonValue(tool.parameters_json_schema), "code"],
+        ["结果 Schema", uiToolJsonValue(tool.result_schema), "code"],
+        ["Metadata", uiToolJsonValue(tool.metadata), "code"],
+        ["发现时间", formatDate(tool.discovered_at)],
+        ["创建时间", formatDate(tool.created_at)],
+        ["更新时间", formatDate(tool.updated_at)],
+      ];
+      document.getElementById("uiToolDetailTitle").textContent = `查看 · ${tool.name}`;
+      document.getElementById("uiToolDetailGrid").innerHTML = fields
+        .map(([label, value, kind]) => `
+          <dt>${escapeHtml(label)}</dt>
+          <dd class="${kind === "code" ? "ui-tool-detail-code" : ""}">${escapeHtml(uiToolDisplayValue(value))}</dd>
+        `)
+        .join("");
+      document.getElementById("uiToolDetailModal").showModal();
+    } catch (err) {
+      showToast(err.message, true);
     }
   },
 
@@ -426,5 +473,11 @@ document.addEventListener("DOMContentLoaded", () => {
   });
   document.getElementById("cancelUiToolBtn")?.addEventListener("click", () => {
     document.getElementById("uiToolModal").close();
+  });
+  document.getElementById("closeUiToolDetailModal")?.addEventListener("click", () => {
+    document.getElementById("uiToolDetailModal").close();
+  });
+  document.getElementById("dismissUiToolDetailModal")?.addEventListener("click", () => {
+    document.getElementById("uiToolDetailModal").close();
   });
 });

@@ -300,13 +300,13 @@ deep-agent 构建 toolset 时：
 
 | 模块 | 改动方向 |
 |------|----------|
-| [`capabilities/mcp/db_loader.py`](../deep_agent/capabilities/mcp/db_loader.py) | 注册时拉取 UI 定义或读注解 |
-| [`capabilities/mcp/toolset_builder.py`](../deep_agent/capabilities/mcp/toolset_builder.py) | 拆分 server / client toolsets |
-| [`agent/factory.py`](../deep_agent/agent/factory.py) | 合并内置 ui + 动态 ExternalToolset |
-| [`api/v1/mcp.py`](../deep_agent/api/v1/mcp.py) | 扩展 MCP 配置字段 |
+| [`capabilities/mcp/db_loader.py`](../../deep_agent/capabilities/mcp/db_loader.py) | 注册时拉取 UI 定义或读注解 |
+| [`capabilities/mcp/toolset_builder.py`](../../deep_agent/capabilities/mcp/toolset_builder.py) | 拆分 server / client toolsets |
+| [`agent/factory.py`](../../deep_agent/agent/factory.py) | 合并内置 ui + 动态 ExternalToolset |
+| [`api/v1/mcp.py`](../../deep_agent/api/v1/mcp.py) | 扩展 MCP 配置字段 |
 | 新建 `api/v1/ui_tools.py` | 方案 B CRUD |
-| [`schemas/chat.py`](../deep_agent/schemas/chat.py) | 方案 C 可选字段 |
-| [`docs/ui-tools-external.md`](ui-tools-external.md) | widget 契约、命名、续跑 |
+| [`schemas/chat.py`](../../deep_agent/schemas/chat.py) | 方案 C 可选字段 |
+| [`ui-tools-external.md`](../guides/ui-tools-external.md) | widget 契约、命名、续跑 |
 
 ---
 

@@ -201,7 +201,7 @@ canonical_name = {mcp_server_name}__{tools[].name}
 
 #### 参考实现
 
-仓库内示例：[`mcps/ui_tools_demo/server.py`](../mcps/ui_tools_demo/server.py)（`ui_tools_demo__pick_color`，widget `choice`）。
+仓库内示例：[`mcps/ui_tools_demo/server.py`](../../mcps/ui_tools_demo/server.py)（`ui_tools_demo__pick_color`，widget `choice`）。
 
 ---
 
@@ -403,7 +403,7 @@ flowchart TD
 2. 优先使用 SSE 事件上的 `widget` / `metadata`，与 DB 定义合并
 3. 内置工具与 `widget=confirm|choice` 可共用一套控件实现
 
-官方内置实现参考：[`frontend/console/chat.js`](../frontend/console/chat.js)（`BUILTIN_UI_TOOLS`、`renderHitlWidget`、`resumeDeferred`）——扩展时需登记内置工具或使用 registry 驱动。
+官方内置实现参考：[`frontend/console/chat.js`](../../frontend/console/chat.js)（`BUILTIN_UI_TOOLS`、`renderHitlWidget`、`resumeDeferred`）——扩展时需登记内置工具或使用 registry 驱动。
 
 ### 7.5 历史回放与 pending 恢复
 
@@ -449,7 +449,7 @@ flowchart TD
 | 文档 | 读者 |
 |------|------|
 | [`sse-protocol.md`](sse-protocol.md) | SSE 与 `final.pending` 协议 |
-| [`rfc/0001-ui-tools-mcp-discovery-and-api.md`](rfc/0001-ui-tools-mcp-discovery-and-api.md) | 方案 A+B 完整规范（已实现） |
-| [`ui-tools-extension-proposals.md`](ui-tools-extension-proposals.md) | 方案对比与背景 |
+| [`0001-ui-tools-mcp-discovery-and-api.md`](../design/rfc/0001-ui-tools-mcp-discovery-and-api.md) | 方案 A+B 完整设计 |
+| [`ui-tools-extension-proposals.md`](../design/ui-tools-extension-proposals.md) | 方案对比与背景 |
 | [`ui-tools.md`](ui-tools.md) | 仓库内贡献者：改 builtin / 运行时 |
-| [`README.md`](../README.md) | 部署与快速开始 |
+| [`README.md`](../../README.md) | 部署与快速开始 |

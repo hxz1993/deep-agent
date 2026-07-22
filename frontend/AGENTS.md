@@ -29,9 +29,9 @@ frontend/
 | 附件上传 | `POST /api/v1/uploads`（multipart）→ 发送时 `attachments[]` 引用 |
 | 思考过程 UI | `thinking` 可折叠块，默认折叠；与 `text` 分离 |
 | 工具调用 UI | `tool_call` / `tool_result` 可折叠；同 `tool_call_id` 合并更新 |
-| HITL UI 工具 | 内置 `confirm_action` / `ask_user_choice` + 动态 manual/MCP 工具；SSE / history 携带 `widget` / `metadata`；见 [`../docs/ui-tools-external.md`](../docs/ui-tools-external.md) |
+| HITL UI 工具 | 内置 `confirm_action` / `ask_user_choice` + 动态 manual/MCP 工具；SSE / history 携带 `widget` / `metadata`；见 [`../docs/guides/ui-tools-external.md`](../docs/guides/ui-tools-external.md) |
 | Markdown | marked + DOMPurify + highlight.js |
-| 会话 | `session_id` 由后端 `session` 事件返回；`GET/DELETE /api/v1/sessions`；标题展示 `title \|\| user_prompt`（见 [`../docs/experience/ai-title-generator.md`](../docs/experience/ai-title-generator.md)） |
+| 会话 | `session_id` 由后端 `session` 事件返回；`GET/DELETE /api/v1/sessions`；标题展示 `title \|\| user_prompt`（见 [`../docs/guides/experience/ai-title-generator.md`](../docs/guides/experience/ai-title-generator.md)） |
 | 能力面板 | `GET /api/v1/tools` |
 | 配置 | 测试上下文与后端地址存 `localStorage`，身份和鉴权只读 |
 | 一体化控制台 | `/console/`；工作台、配置和诊断的唯一入口 |
@@ -63,7 +63,7 @@ frontend/
 | `final` | `{ type, status, output, usage, deferred? }`（`deferred.calls[]` 可含 `widget` / `metadata`） |
 | `error` | `{ type, message }` |
 
-完整协议（含同 ID 多次推送、生命周期）：[`../docs/sse-protocol.md`](../docs/sse-protocol.md)。
+完整协议（含同 ID 多次推送、生命周期）：[`../docs/guides/sse-protocol.md`](../docs/guides/sse-protocol.md)。
 
 实现参考：`console/chat.js` 与 `console/protocol.js`。
 
@@ -96,8 +96,8 @@ python -m http.server 5173
 | 改什么 | 看哪里 |
 | --- | --- |
 | 聊天气泡、工具块 UI | `console/chat.js` + `console/workspace.css` |
-| 新增 HITL UI 工具（改仓库） | [`../docs/ui-tools.md`](../docs/ui-tools.md) |
-| 使用 / 对接 HITL（不改仓库） | [`../docs/ui-tools-external.md`](../docs/ui-tools-external.md) |
+| 新增 HITL UI 工具（改仓库） | [`../docs/guides/ui-tools.md`](../docs/guides/ui-tools.md) |
+| 使用 / 对接 HITL（不改仓库） | [`../docs/guides/ui-tools-external.md`](../docs/guides/ui-tools-external.md) |
 | HITL 渲染与 metadata | `console/chat.js` → `isUiToolCall`、`loadUiTools`、`renderHitlWidget` |
 | 页面布局 | `console/index.html` 与两个 Console template |
 | 一体化控制台布局与编排 | `console/index.html`、`console/console.css`、`console/workspace.js`、`console/configuration.js` |

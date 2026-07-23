@@ -1,73 +1,75 @@
-# deep-agent
+# DeepAgent
 
-通用 AI Agent 全栈项目（FastAPI 后端 + 静态前端）。
+DeepAgent 是基于 FastAPI、Pydantic AI 和 SQLAlchemy 的多用户 Agent 服务，并
+随服务发布一体化运维控制台。
 
-## 目录
+## 项目结构
 
-| 路径 | 说明 |
+| 路径 | 职责 |
 | --- | --- |
-| [`deep_agent/`](deep_agent/) | 后端：FastAPI、Pydantic AI、能力层、MCP、数据库迁移 |
-| [`frontend/`](frontend/) | 前端：聊天 UI 与管理后台（静态 HTML/JS） |
-| [`tests/`](tests/README.md) | 自动化测试：单元测试 + 集成测试（HTTP / Agent / MCP） |
+| [`deep_agent/`](deep_agent/AGENTS.md) | API、Agent 运行时、能力装配、会话和数据库 |
+| [`frontend/`](frontend/AGENTS.md) | `/console/` 静态控制台 |
+| [`mcps/`](mcps/AGENTS.md) | 仓库内置 MCP Server |
+| [`skills/`](skills/) | Python Skill |
+| [`deepfos_platform/`](deepfos_platform/README.md) | 平台配置、客户端、服务发现和部署运行时支撑 |
+| [`maintenance/`](maintenance/README.md) | 人工维护程序，不属于 Agent 工具 |
+| [`tests/`](tests/README.md) | Python、接口、MCP 和 Console 测试 |
+| [`docs/`](docs/README.md) | 当前说明、技术设计和交互原型 |
 
-## 运行测试
+完整边界见
+[`docs/guides/project-structure.md`](docs/guides/project-structure.md)。
 
-在仓库根目录（已安装 `deep_agent/requirements.txt` 依赖）：
+## 本地启动
 
-```bash
-venv\Scripts\python.exe -m unittest discover -s tests -p "test_*.py" -v
-```
-
-详见 [`tests/README.md`](tests/README.md)。
-
-## 快速开始
-
-**后端依赖**（在仓库根目录执行）：
+默认使用本机 Python 3.12。安装依赖：
 
 ```bash
-python -m pip install -r requirements.txt
+python3.12 -m pip install -r requirements.txt
 ```
 
-部署环境继续使用生产入口，身份和数据库配置由网关及部署环境提供：
+连接 Test 数据库进行本地联调时，使用仓库外的私有 Profile：
+
+```bash
+python3.12 -m deep_agent.local_dev \
+  --config ~/.config/deep-agent/test.env \
+  --port 8000
+```
+
+Profile 至少包含数据库配置和本地可信身份，权限应设为 `0600`。不要把 Token、
+Cookie、数据库密码或 API Key 提交到仓库。
+
+访问入口：
+
+- Console：<http://127.0.0.1:8000/console/>
+- API 文档：<http://127.0.0.1:8000/docs>
+- 健康检查：<http://127.0.0.1:8000/health>
+
+部署环境使用：
 
 ```bash
 uvicorn deep_agent.main:app --host 0.0.0.0 --port 8000
 ```
 
-本地联调 Test 环境时，使用独立入口和仓库外的私有配置文件：
+`deep_agent.local_dev` 只用于本机回环调试，不用于容器部署。
+
+## 能力类型
+
+DeepAgent 当前支持：
+
+- `native`：进程内基础工具。
+- `skill:<name>`：Python Skill，组合 Instructions 和函数工具。
+- `mcp:<name>`：URL、stdio 或 builtin MCP。
+- `ui:<name>`：Agent 显式关联的手工 UI 工具。
+- 内置 UI 工具：所有 Agent 默认具备的 HITL 工具。
+
+仓库不再注册 Cursor 专属 Skill。未来需要长 Skill 渐进披露时，在通用
+`skill:` 机制内设计。
+
+## 测试
 
 ```bash
-mkdir -p ~/.config/deep-agent
-chmod 700 ~/.config/deep-agent
-$EDITOR ~/.config/deep-agent/test.env
-chmod 600 ~/.config/deep-agent/test.env
-
-python -m deep_agent.local_dev \
-  --config ~/.config/deep-agent/test.env \
-  --port 8000
+python3.12 -m unittest discover -s tests -p 'test_*.py'
+node --test tests/frontend/console/*.test.mjs
 ```
 
-私有配置文件至少包含：
-
-```dotenv
-DEEP_AGENT_LOCAL_USER=<当前 Test 用户 ID>
-DEEP_AGENT_LOCAL_TOKEN=<当前 Test Token>
-
-# 其余运行配置按目标环境填写，例如 DEEP_AGENT_DBMS_*、EXPORT_*。
-```
-
-本地入口只监听 `127.0.0.1`，固定使用配置文件中的用户和鉴权；控制台仍可切换 `app / space / language`。配置文件必须位于仓库外，不能提交。线上入口不会读取这些本地身份变量。
-
-后端启动后会挂载仓库根目录的 `frontend/`：
-
-- 旧聊天页面：http://127.0.0.1:8000/
-- 一体化控制台：http://127.0.0.1:8000/console/
-
-**前端独立预览**（可选）：
-
-```bash
-cd frontend
-python -m http.server 5173
-```
-
-详细说明见 [`deep_agent/AGENTS.md`](deep_agent/AGENTS.md) 与 [`frontend/README.md`](frontend/README.md)。
+具体开发和测试要求见根目录及子目录的 `AGENTS.md`。

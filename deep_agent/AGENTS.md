@@ -29,7 +29,6 @@ HTTP (REST/SSE)
     → CapabilityRegistry.toolsets()
         ├─ native       capabilities/native/builtin.py
         ├─ skill        skills/<name>/（仓库根，见 DEEP_AGENT_SKILLS_DIR）
-        ├─ cursor-skill .cursor/skills/<name>/SKILL.md
         └─ mcp          请求时 `capabilities/mcp/resolver.py`（DB + mcps/ 兜底）
     → SessionStore（`db/conversation.py` 协调器；表 Store 在 `db/stores/`）
 ```
@@ -37,8 +36,8 @@ HTTP (REST/SSE)
 ### 启动生命周期（`main.py` lifespan → `AppContext.bootstrap()`）
 
 1. `configure_logging()` → `AppContext.bootstrap()`（见 `core/context.py`）
-2. `upgrade_database()` → `bootstrap_database()` → 6 个 Store（含 `SqlConversationCoordinator`）
-3. `build_registry(stores=)` — native + skill + cursor-skill（静态能力）；`stores` 预留未来启动期只读配置
+2. `upgrade_database()` → `bootstrap_database()` → 7 个表 Store + `SqlConversationCoordinator`
+3. `build_registry(stores=)` — native + Python Skill（静态能力）；`stores` 预留未来启动期只读配置
 4. `init_context(ctx)` — 路由通过 `Depends(AppContextDep)` 注入
 5. 关闭：`ctx.aclose()` → `reset_context()`
 
@@ -56,7 +55,7 @@ MCP 在请求时由 `resolve_mcp_toolsets` 解析（DB 行 + `mcps/` builtin 兜
 
 ### 能力装配与模型输入
 
-DeepAgent 自研 `capabilities.registry.Capability` 是配置包装对象，负责把一组 Instructions/Toolset 暴露给 Agent；Pydantic AI 的 `AbstractCapability` 才是可介入模型请求、消息历史、工具准备和事件生命周期的原生扩展点。当前只有 `DeepSeekThinkingRetry` 使用了原生 Capability。
+DeepAgent 自研 `capabilities.registry.Capability` 是配置包装对象，负责把一组 Instructions/Toolset 暴露给 Agent；Pydantic AI 的 `AbstractCapability` 才是可介入模型请求、消息历史、工具准备和事件生命周期的原生扩展点。当前只有模型适配目录中的 `DeepSeekThinkingRetry` 使用了原生 Capability。
 
 模型每轮直接看到的是：Agent/能力 Instructions、`message_history`、当前用户输入/附件和本轮 Tool Definitions。Toolset 负责列出、准备和调用工具；MCP Prompt 不会自动进入模型工具列表。MCP Resource 由宿主侧动态代理工具按需读取。
 
@@ -87,6 +86,7 @@ DeepAgent 自研 `capabilities.registry.Capability` 是配置包装对象，负�
 | `spec.py` | `AgentSpec`：`from_row()`、model、instructions、capabilities |
 | `history.py` | `ModelMessage[]` → 前端时间线 |
 | `factory.py` | `build_agent()` — model 字符串或 OpenAI 兼容 endpoint |
+| `models/` | Provider/模型适配、模型目录与 DeepSeek 专属重试能力 |
 | `runner.py` | `run()` / `run_stream()` — 会话锁、history、事件映射 |
 | `deps.py` | `AgentDeps`：session_id、user、agent_id、request_headers |
 | `headers.py` | HTTP → MCP 的 header 白名单提取 |
@@ -99,7 +99,6 @@ DeepAgent 自研 `capabilities.registry.Capability` 是配置包装对象，负�
 | `registry.py` | `Capability` / `CapabilityRegistry` |
 | `native/builtin.py` | `get_current_time`、`http_get` |
 | `skills/loader.py` | 扫描 `skills/<name>/__init__.py` 的 `SKILL` |
-| `cursor_skills/` | SKILL.md → `read_<skill>()` 渐进式披露 |
 | `mcp/db_loader.py` | 从 `mcp_servers` 构建 MCPToolset |
 | `mcp/builtin.py` | 发现 `mcps/<name>/server.py` |
 | `mcp/toolset_builder.py` | url / stdio / builtin + header 注入 |
@@ -154,12 +153,6 @@ DeepAgent 自研 `capabilities.registry.Capability` 是配置包装对象，负�
 2. 参考 `capabilities/skills/base.py`
 3. 注册名：`skill:<name>`
 
-### Cursor Skill
-
-1. `.cursor/skills/<name>/SKILL.md`（YAML frontmatter + 正文）
-2. 注册名：`cursor-skill:<name>`，工具 `read_<name>()`
-3. `disable-model-invocation: true` → `default_enabled=False`，需显式列入 `capabilities`
-
 ### MCP Server
 
 开发内置 server → 见 [`../mcps/AGENTS.md`](../mcps/AGENTS.md)。
@@ -208,7 +201,6 @@ DEEP_AGENT_LOCAL_TOKEN_COOKIE=<可选，仅在目标环境要求 Cookie 时填�
 | `MAX_REQUESTS` | `50` | 全局 loop 上限 |
 | `MAX_TOTAL_TOKENS` | 无限制 | Token 上限 |
 | `SKILLS_DIR` | `skills` | 相对仓库根 |
-| `CURSOR_SKILLS_DIR` | `.cursor/skills` | 相对仓库根 |
 | `MCP_FORWARD_REQUEST_HEADERS` | `authorization,x-tenant-id,x-user-token` | 转发到 MCP |
 | `MCP_STDIO_SESSION_SCOPE` | `true` | stdio MCP 按 session 保活 |
 
@@ -229,7 +221,7 @@ Provider Key（`OPENAI_API_KEY` 等）由 Pydantic AI 直接读取。
 alembic upgrade head
 ```
 
-迁移：`alembic/versions/001` … `018`。本地 Postgres：`docker compose up -d`。
+迁移：`alembic/versions/001` … `020`。本地 Postgres：`docker compose up -d`。
 
 ---
 
@@ -257,12 +249,11 @@ SSE 协议：[`../docs/guides/sse-protocol.md`](../docs/guides/sse-protocol.md)�
    - 多入口共享组装 → `api/v1/deps.py`（变化量留在入口，上下文在 `_build_*` 内统一解包）
 1. 包名 **`deep_agent`**，启动 `deep_agent.main:app`（非 `app.main`）
 2. 扩展优先走路径注册，避免改 `runner.py` 核心
-3. 能力命名：`native` \| `skill:<name>` \| `cursor-skill:<name>` \| `mcp:<name>` \| `ui:<canonical_tool_name>`；扩展 UI 工具由 Agent 正向引用
+3. 能力命名：`native` \| `skill:<name>` \| `mcp:<name>` \| `ui:<canonical_tool_name>`；扩展 UI 工具由 Agent 正向引用
 4. DB Agent 会话：复合键 `(agent_id, session_id)`；无 agent 时 `agent_id=''`
 5. 同 session 用 `SessionStore.lock()` 串行；多实例 DB 级锁未实现
 
 | 现象 | 原因 |
 | --- | --- |
 | MCP 工具为空 | 未配 DB 或 MCP 未 enabled |
-| cursor-skill 不出现 | `default_enabled=False`，需显式指定 |
 | 历史丢失 | 未配 `DEEP_AGENT_DBMS_*` |

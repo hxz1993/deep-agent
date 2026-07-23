@@ -1,6 +1,6 @@
 # Pydantic AI 原生能力与 DeepAgent 当前使用情况审计
 
-> 最后核验：2026-07-22  
+> 最后核验：2026-07-24
 > DeepAgent 本机运行版本：`pydantic-ai-slim 2.12.0`  
 > Harness 审计版本：`pydantic-ai-harness 0.8.0`，仅下载 wheel 解包审计，未安装到 DeepAgent 解释器  
 > 本文只做源码审计和方案判断，不代表已经引入 Harness、修改数据库或改变运行行为
@@ -147,7 +147,6 @@ DeepAgent 自研 `Capability` 是产品配置包装，不参与 Pydantic AI 生�
 | --- | --- | --- |
 | Native Tool | `FunctionToolset` | 看到函数工具定义 |
 | Python Skill | Instructions + `FunctionToolset` | 看到 Skill 指令和工具定义 |
-| Cursor Skill | Instructions 摘要 + `read_<skill>` 函数 | 先看到摘要，需要时读取正文 |
 | MCP Tool | `MCPToolset`，外层增加 MCP 前缀 | 看到 `tools/list` 返回的工具定义 |
 | UI Tool | `ExternalToolset` + Deferred | 看到特殊工具定义，执行由前端用户完成 |
 | MCP Resource | `list_resources/read_resource` | 默认看不到，必须由宿主读取或包装为工具 |
@@ -170,7 +169,7 @@ DeepAgent 自研 `Capability` 是产品配置包装，不参与 Pydantic AI 生�
 | 使用限制 | `UsageLimits` 控制模型请求数和可选总 Token | `deep_agent/api/v1/deps.py` |
 | 延迟工具 | `DeferredToolRequests/Results`、`ToolDenied` | `deep_agent/agent/deferred.py` |
 | 多模态消息 | `BinaryContent`、`TextContent`、`UserPromptPart` | 附件请求链路 |
-| 原生 Capability | `DeepSeekThinkingRetry` | `deep_agent/agent/capabilities/` |
+| 原生 Capability | `DeepSeekThinkingRetry` | `deep_agent/agent/models/` |
 
 当前未使用但值得关注的 Core 能力：
 
@@ -224,10 +223,11 @@ DeepAgent 基于 Pydantic AI Deferred/External Tool 原语，自行实现：
 
 ### 5.4 Skill
 
-- Python Skill：同时贡献 Instructions 和函数工具。
-- Cursor Skill：先暴露摘要，再通过 `read_<skill>` 渐进读取正文。
-
-其目录协议、发现和 Agent 关联由 DeepAgent 实现。Core `ToolSearch` 可改善大工具集发现，但 Harness 0.8.0 没有可直接替换这套机制的已发布 Skills Capability。
+Python Skill 同时贡献 Instructions 和函数工具，其目录协议、发现和 Agent 关联
+由 DeepAgent 实现。历史 Cursor Skill 适配器已移除；其中“先暴露摘要、需要时
+读取正文”的渐进披露思路仍可在后续通用 `skill:` 设计中复用，但不再作为
+Cursor 专属能力类型存在。Core `ToolSearch` 可改善大工具集发现，但 Harness
+0.8.0 没有可直接替换这套机制的已发布 Skills Capability。
 
 ### 5.5 配置和文件能力
 

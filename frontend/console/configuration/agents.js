@@ -8,12 +8,11 @@ const KIND_LABELS = {
   native: "内置",
   skill: "Skills",
   mcp: "MCP",
-  "cursor-skill": "Cursor Skills",
   ui: "UI（内置）",
   "ui-client": "UI 工具",
 };
 
-const KIND_ORDER = ["native", "ui", "ui-client", "skill", "mcp", "cursor-skill"];
+const KIND_ORDER = ["native", "ui", "ui-client", "skill", "mcp"];
 
 function capDisplayName(name, kind) {
   if (kind === "mcp" && name.startsWith("mcp:")) {

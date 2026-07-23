@@ -761,11 +761,6 @@ html, body {
   color: #d2a8ff;
 }
 
-.kind-badge.kind-cursor-skill {
-  background: rgba(210, 153, 34, 0.15);
-  color: #e3b341;
-}
-
 .kind-badge.kind-ui,
 .kind-badge.kind-ui-client {
   background: rgba(99, 102, 241, 0.15);

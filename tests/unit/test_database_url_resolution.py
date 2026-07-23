@@ -25,7 +25,6 @@ def _build_option(*, dbms_name: str) -> SimpleNamespace:
         max_total_tokens=None,
         request_retries=2,
         skills_dir="skills",
-        cursor_skills_dir=".cursor/skills",
         mcp_forward_request_headers="authorization",
         sqlite_path="data/deep-agent.db",
     )

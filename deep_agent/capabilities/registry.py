@@ -23,7 +23,6 @@ class Capability:
       - native:       a ``FunctionToolset`` of in-process Python functions
       - skill:        instructions + a ``FunctionToolset`` loaded from ``skills/``
       - mcp:          an MCP server toolset loaded from ``mcp_servers`` DB rows
-      - cursor-skill: a Cursor ``SKILL.md`` exposed via progressive disclosure
 
     ``toolset`` is any Pydantic AI ``AbstractToolset`` (typed as ``Any`` to avoid
     coupling to internal class paths). Instructions are carried by the toolset
@@ -31,13 +30,12 @@ class Capability:
 
     ``default_enabled`` controls whether the capability is included when an agent
     requests "all" capabilities (``names=None``). Capabilities that should only
-    activate when named explicitly (e.g. a Cursor skill with
-    ``disable-model-invocation: true``) set this to ``False``; they are still
-    usable when listed by name.
+    activate when named explicitly set this to ``False``; they are still usable
+    when listed by name.
     """
 
     name: str
-    kind: str  # "native" | "skill" | "mcp" | "cursor-skill"
+    kind: str  # "native" | "skill" | "mcp"
     toolset: Any
     description: str = ""
     tools: list[ToolInfo] = field(default_factory=list)

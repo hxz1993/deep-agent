@@ -2,7 +2,8 @@
 
 > 面向 AI Agent 的渐进式披露文档。**本文件仅为索引**；具体章节见各子目录下的 `AGENTS.md`。
 >
-> **排除范围**：`deepfos_platform/` 为平台配置依赖，不在本仓库迭代范围内。
+> **边界说明**：`deepfos_platform/` 是随仓库发布的平台运行时支撑包，不是
+> Agent 能力目录；只在平台配置、客户端、服务发现或部署运行时任务中修改。
 
 ---
 
@@ -58,7 +59,7 @@ deep-agent/
 ├── tests/                 ← 测试 → tests/AGENTS.md
 ├── docs/                  ← 说明与设计文档，入口见 docs/README.md
 ├── skills/                ← Python Skill（可选）
-└── deepfos_platform/      ← ✗ 排除，勿改
+└── deepfos_platform/      ← 平台配置、客户端、服务发现和部署运行时支撑
 ```
 
 ---
@@ -70,7 +71,7 @@ HTTP → deep_agent/api/v1 → AgentRunner → pydantic_ai.Agent → Capabilitie
                                       └→ SessionStore (postgres/mysql/sqlite)
 ```
 
-能力来源：`native` | `skill:*` | `cursor-skill:*` | `mcp:*`（DB + `mcps/` 兜底）| `ui:*`
+能力来源：`native` | `skill:*` | `mcp:*`（DB + `mcps/` 兜底）| `ui:*`
 
 ### Pydantic AI 运行边界
 
@@ -89,7 +90,7 @@ HTTP → deep_agent/api/v1 → AgentRunner → pydantic_ai.Agent → Capabilitie
 | 文档 | 类型与用途 |
 | --- | --- |
 | [`README.md`](README.md) | 人类快速开始 |
-| [`PROJECT_OVERVIEW.md`](PROJECT_OVERVIEW.md) | 历史架构总结（部分路径已过时） |
 | [`docs/README.md`](docs/README.md) | 文档总入口 |
+| [`docs/guides/project-structure.md`](docs/guides/project-structure.md) | **说明**：当前目录、运行链路与职责边界 |
 | [`docs/guides/README.md`](docs/guides/README.md) | **说明**：协议、使用指南、实现经验和排障记录 |
 | [`docs/design/README.md`](docs/design/README.md) | **设计**：方案、RFC、技术审计、待实施计划和原型 |

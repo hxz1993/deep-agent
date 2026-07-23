@@ -12,7 +12,7 @@ from pydantic_ai.providers.openai import OpenAIProvider
 
 from deep_agent.agent.factory import _resolve_model, build_agent
 from deep_agent.agent.models import DeepSeekChatModel
-from deep_agent.agent.capabilities.deepseek_thinking_retry import DeepSeekThinkingRetry
+from deep_agent.agent.models.deepseek_thinking_retry import DeepSeekThinkingRetry
 from deep_agent.capabilities.registry import CapabilityRegistry
 from deep_agent.agent.spec import AgentSpec
 from deep_agent.options import OPTION

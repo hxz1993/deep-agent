@@ -115,12 +115,6 @@ class Agent(Category):
         bind_env="SKILLS_DIR",
         convertor=_resolve_repo_path,
     )
-    cursor_skills_dir = Option(
-        _resolve_repo_path(".cursor/skills"),
-        val_type=str,
-        bind_env="CURSOR_SKILLS_DIR",
-        convertor=_resolve_repo_path,
-    )
     mcp_forward_request_headers = Option(
         DEFAULT_MCP_FORWARD_HEADERS,
         val_type=frozenset,

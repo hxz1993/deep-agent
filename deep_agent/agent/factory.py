@@ -13,9 +13,9 @@ from pydantic_ai.providers.deepseek import DeepSeekProvider
 from pydantic_ai.providers.google import GoogleProvider
 from pydantic_ai.providers.openai import OpenAIProvider
 
-from deep_agent.agent.capabilities import DeepSeekThinkingRetry
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.models import DeepSeekChatModel
+from deep_agent.agent.models.deepseek_thinking_retry import DeepSeekThinkingRetry
 from deep_agent.agent.spec import AgentSpec
 from deep_agent.capabilities.registry import CapabilityRegistry
 from deep_agent.options import OPTION

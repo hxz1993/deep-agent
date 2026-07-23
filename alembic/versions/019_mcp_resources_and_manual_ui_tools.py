@@ -34,6 +34,14 @@ def _has_index(bind, table_name: str, index_name: str) -> bool:
     return index_name in {item["name"] for item in sa.inspect(bind).get_indexes(table_name)}
 
 
+def _foreign_keys_for_column(bind, table_name: str, column_name: str) -> list[str]:
+    return [
+        item["name"]
+        for item in sa.inspect(bind).get_foreign_keys(table_name)
+        if item.get("name") and column_name in (item.get("constrained_columns") or [])
+    ]
+
+
 def _load_config(raw: Any) -> dict[str, Any]:
     if isinstance(raw, dict):
         return dict(raw)
@@ -85,15 +93,27 @@ def upgrade() -> None:
 
     op.execute(sa.text("DELETE FROM ui_tool_definitions WHERE source = 'mcp'"))
 
-    index_name = "ix_ui_tool_definitions_mcp_server"
-    if _has_index(bind, "ui_tool_definitions", index_name):
-        op.drop_index(index_name, table_name="ui_tool_definitions")
-
     obsolete_columns = [
         name
         for name in ("mcp_server_name", "override", "discovered_at")
         if has_column(bind, "ui_tool_definitions", name)
     ]
+    if "mcp_server_name" in obsolete_columns and not is_sqlite(bind):
+        for constraint_name in _foreign_keys_for_column(
+            bind,
+            "ui_tool_definitions",
+            "mcp_server_name",
+        ):
+            op.drop_constraint(
+                constraint_name,
+                "ui_tool_definitions",
+                type_="foreignkey",
+            )
+
+    index_name = "ix_ui_tool_definitions_mcp_server"
+    if _has_index(bind, "ui_tool_definitions", index_name):
+        op.drop_index(index_name, table_name="ui_tool_definitions")
+
     if not obsolete_columns:
         return
     if is_sqlite(bind):
@@ -138,6 +158,31 @@ def downgrade() -> None:
         index_name,
     ):
         op.create_index(index_name, "ui_tool_definitions", ["mcp_server_name"])
+
+    if has_column(bind, "ui_tool_definitions", "mcp_server_name") and not _foreign_keys_for_column(
+        bind,
+        "ui_tool_definitions",
+        "mcp_server_name",
+    ):
+        constraint_name = "fk_ui_tool_definitions_mcp_server_name_mcp_servers"
+        if is_sqlite(bind):
+            with op.batch_alter_table("ui_tool_definitions") as batch_op:
+                batch_op.create_foreign_key(
+                    constraint_name,
+                    "mcp_servers",
+                    ["mcp_server_name"],
+                    ["name"],
+                    ondelete="SET NULL",
+                )
+        else:
+            op.create_foreign_key(
+                constraint_name,
+                "ui_tool_definitions",
+                "mcp_servers",
+                ["mcp_server_name"],
+                ["name"],
+                ondelete="SET NULL",
+            )
 
     if has_column(bind, "mcp_servers", "resource_capabilities"):
         op.drop_column("mcp_servers", "resource_capabilities")

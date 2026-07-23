@@ -11,9 +11,23 @@
 | 项 | 内容 |
 | --- | --- |
 | **是什么** | 通用 AI Agent 全栈：FastAPI 后端 + Pydantic AI 运行时 + 静态前端 |
-| **启动** | 仓库根：`python3.12 -m uvicorn deep_agent.main:app --reload`；本地 Test 联调优先使用 `python3.12 -m deep_agent.local_dev --config <仓库外配置> --port 8000` |
+| **启动** | 本地 Test 联调固定使用下方命令；部署入口才使用 `deep_agent.main:app` |
 | **测试** | `python3.12 -m unittest discover -s tests -p "test_*.py" -v` |
 | **配置** | 仓库根 `.env`（`DEEP_AGENT_*` / `DEEP_AGENT_DBMS_*` / `DEEP_AGENT_SQLITE_PATH`） |
+
+### 本地 8000 固定启动命令
+
+用户要求“启动/重启本地 8000”时，在仓库根直接执行：
+
+```bash
+python3.12 -m deep_agent.local_dev \
+  --config ~/.config/deep-agent/test.env \
+  --port 8000
+```
+
+- 该配置连接 Test 数据库，并注入本地可信登录身份。
+- 默认先执行启动命令，再用 `/health` 和 `/console/` 快速验证。
+- 只有端口占用、启动失败、数据库版本不兼容或用户明确要求审计时，才展开额外检查。
 
 ---
 

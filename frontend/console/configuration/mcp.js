@@ -15,16 +15,30 @@ function inheritedHeadersTooltip(headers) {
     : "允许继承的 Header 由后端白名单控制。";
 }
 
+function resourceCapabilitiesLabel(capabilities) {
+  const info = capabilities || { status: "unknown" };
+  if (info.status === "supported") {
+    const parts = [];
+    if (info.resource_count) parts.push(`${info.resource_count} 个资源`);
+    if (info.template_count) parts.push(`${info.template_count} 个模板`);
+    return { text: parts.join("，") || "支持", className: "on", title: "已检测到 MCP Resource 能力" };
+  }
+  if (info.status === "unsupported") {
+    return { text: "无资源", className: "off", title: "MCP 已连接，但未提供 Resource 或 Resource Template" };
+  }
+  return { text: "待检测", className: "", title: info.error || "尚未完成 Resource 能力检测" };
+}
+
 const mcpAdmin = {
   async refresh() {
     const tbody = document.getElementById("mcpTableBody");
     if (!tbody) return;
-    tbody.innerHTML = `<tr><td colspan="7" class="empty-cell">加载中…</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="8" class="empty-cell">加载中…</td></tr>`;
     try {
       const servers = await apiFetch("/api/v1/mcp");
       showDbBanner(false);
       if (!servers.length) {
-        tbody.innerHTML = `<tr><td colspan="7" class="empty-cell">暂无 MCP 服务</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="8" class="empty-cell">暂无 MCP 服务</td></tr>`;
         return;
       }
       const inherited = servers.find((item) => item.request_context?.inherited_headers?.length)
@@ -32,53 +46,41 @@ const mcpAdmin = {
       state.mcpInheritedHeaders = inherited || state.mcpInheritedHeaders || [];
       tbody.innerHTML = servers
         .map(
-          (s) => `
+          (s) => {
+            const resources = resourceCapabilitiesLabel(s.resource_capabilities);
+            return `
         <tr>
           <td><strong>${escapeHtml(s.name)}</strong></td>
           <td><span class="badge">${escapeHtml(MCP_TRANSPORT_LABELS[s.transport] || s.transport)}</span></td>
           <td><span class="badge">${escapeHtml(MCP_CONTEXT_LABELS[s.request_context?.mode] || "继承")}</span></td>
+          <td><span class="badge ${resources.className}" title="${escapeHtml(resources.title)}">${escapeHtml(resources.text)}</span></td>
           <td><span class="badge ${s.enabled ? "on" : "off"}">${s.enabled ? "是" : "否"}</span></td>
           <td>${escapeHtml(s.description || "—")}</td>
           <td>${escapeHtml(formatDate(s.updated_at))}</td>
           <td>
             <div class="row-actions">
-              <button type="button" data-refresh-ui="${escapeHtml(s.name)}" title="拉取 ui_tools_list">刷新 UI</button>
+              ${s.transport === "url" ? `<button type="button" data-probe-resources="${escapeHtml(s.name)}">检测资源</button>` : ""}
               <button type="button" data-edit="${escapeHtml(s.name)}">编辑</button>
               <button type="button" class="danger" data-delete="${escapeHtml(s.name)}">删除</button>
             </div>
           </td>
-        </tr>`
+        </tr>`;
+          }
         )
         .join("");
 
       tbody.querySelectorAll("[data-edit]").forEach((btn) => {
         btn.addEventListener("click", () => this.openEdit(btn.dataset.edit));
       });
-      tbody.querySelectorAll("[data-refresh-ui]").forEach((btn) => {
-        btn.addEventListener("click", () => this.refreshUiTools(btn.dataset.refreshUi));
+      tbody.querySelectorAll("[data-probe-resources]").forEach((btn) => {
+        btn.addEventListener("click", () => this.probeResources(btn.dataset.probeResources));
       });
       tbody.querySelectorAll("[data-delete]").forEach((btn) => {
         btn.addEventListener("click", () => this.remove(btn.dataset.delete));
       });
     } catch (err) {
-      tbody.innerHTML = `<tr><td colspan="7" class="empty-cell">${escapeHtml(err.message)}</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="8" class="empty-cell">${escapeHtml(err.message)}</td></tr>`;
     }
-  },
-
-  fillUiToolsFields(config) {
-    const ui = (config && config.ui_tools) || {};
-    document.getElementById("mcpUiToolsEnabled").checked = ui.enabled !== false;
-    document.getElementById("mcpUiToolsMode").value = ui.mode || "tool";
-    document.getElementById("mcpUiToolsRefresh").value = ui.refresh_seconds || 300;
-  },
-
-  readUiToolsConfig() {
-    const refresh = parseInt(document.getElementById("mcpUiToolsRefresh").value, 10);
-    return {
-      enabled: document.getElementById("mcpUiToolsEnabled").checked,
-      mode: document.getElementById("mcpUiToolsMode").value,
-      refresh_seconds: Number.isFinite(refresh) && refresh >= 60 ? refresh : 300,
-    };
   },
 
   readRequestContextMode() {
@@ -108,23 +110,15 @@ const mcpAdmin = {
     });
   },
 
-  async refreshUiTools(name) {
+  async probeResources(name) {
     try {
       const result = await apiFetch(
-        `/api/v1/mcp/${encodeURIComponent(name)}/ui-tools/refresh`,
+        `/api/v1/mcp/${encodeURIComponent(name)}/resources/probe`,
         { method: "POST" }
       );
-      const errNote = result.errors?.length ? `；${result.errors.join("; ")}` : "";
-      if (result.discovered === 0 && !result.upserted && !result.removed && !errNote) {
-        showToast("内置 MCP 不参与 UI 工具发现");
-        return;
-      }
-      showToast(
-        `UI 发现：${result.discovered} 条，写入 ${result.upserted}，移除 ${result.removed}${errNote}`,
-        Boolean(result.errors?.length)
-      );
-      if (window.uiToolsAdmin) await window.uiToolsAdmin.refresh();
-      await loadCapabilities();
+      const label = resourceCapabilitiesLabel(result);
+      showToast(`Resource 检测：${label.text}${result.error ? `；${result.error}` : ""}`, result.status === "unknown");
+      await this.refresh();
     } catch (err) {
       showToast(err.message, true);
     }
@@ -177,7 +171,6 @@ const mcpAdmin = {
     document.getElementById("mcpArgs").value = "";
     document.getElementById("mcpEnv").value = "";
     document.getElementById("mcpCwd").value = "";
-    this.fillUiToolsFields({});
     this.fillRequestContextFields();
     this.setTransportSelectMode("create");
     this.toggleTransportFields();
@@ -224,7 +217,6 @@ const mcpAdmin = {
         document.getElementById("mcpCwd").value = server.config.cwd || "";
       }
 
-      this.fillUiToolsFields(server.config);
       this.fillRequestContextFields(server);
       this.setTransportSelectMode(server.transport === "builtin" ? "edit-builtin" : "edit");
       this.toggleTransportFields();
@@ -260,7 +252,6 @@ const mcpAdmin = {
       if (env) config.env = env;
       if (cwd) config.cwd = cwd;
     }
-    config.ui_tools = this.readUiToolsConfig();
     return config;
   },
 

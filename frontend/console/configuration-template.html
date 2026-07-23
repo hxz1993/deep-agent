@@ -102,6 +102,7 @@
               <th>名称</th>
               <th>传输</th>
               <th>上下文</th>
+              <th>Resource</th>
               <th>启用</th>
               <th>描述</th>
               <th>更新时间</th>
@@ -109,7 +110,7 @@
             </tr>
           </thead>
           <tbody id="mcpTableBody">
-            <tr><td colspan="7" class="empty-cell">加载中…</td></tr>
+            <tr><td colspan="8" class="empty-cell">加载中…</td></tr>
           </tbody>
         </table>
       </div>
@@ -128,12 +129,7 @@
             <option value="">全部</option>
             <option value="builtin">内置</option>
             <option value="manual">manual</option>
-            <option value="mcp">mcp</option>
           </select>
-        </label>
-        <label class="inline-field">
-          <span>MCP</span>
-          <input type="text" id="uiToolFilterMcp" class="filter-input" placeholder="mcp 名称" />
         </label>
         <label class="inline-field">
           <span>启用</span>
@@ -153,14 +149,13 @@
               <th>来源</th>
               <th>Widget</th>
               <th>启用</th>
-              <th>MCP</th>
               <th>描述</th>
               <th>更新时间</th>
               <th>操作</th>
             </tr>
           </thead>
           <tbody id="uiToolsTableBody">
-            <tr><td colspan="8" class="empty-cell">加载中…</td></tr>
+            <tr><td colspan="7" class="empty-cell">加载中…</td></tr>
           </tbody>
         </table>
       </div>
@@ -393,26 +388,6 @@
           </label>
         </div>
 
-        <section class="ui-discovery-section">
-          <span class="cap-section-title">UI 工具发现（RFC 0001）</span>
-          <p class="field-hint">MCP Server 需实现 <code>ui_tools_list</code> 或 Resource <code>ui://tools/manifest</code>。</p>
-          <label class="field checkbox-field">
-            <input type="checkbox" id="mcpUiToolsEnabled" checked />
-            <span>启用 UI 发现</span>
-          </label>
-          <label class="field">
-            <span>发现模式</span>
-            <select id="mcpUiToolsMode">
-              <option value="tool">tool（ui_tools_list）</option>
-              <option value="resource">resource（ui://tools/manifest）</option>
-              <option value="none">none（不发现）</option>
-            </select>
-          </label>
-          <label class="field">
-            <span>刷新间隔（秒）</span>
-            <input type="number" id="mcpUiToolsRefresh" min="60" value="300" />
-          </label>
-        </section>
       </div>
       <div class="form-error hidden" data-form-error role="alert" aria-live="assertive"></div>
       <div class="modal-footer">
@@ -478,15 +453,6 @@
         <label class="field checkbox-field">
           <input type="checkbox" id="uiToolEnabled" checked />
           <span>启用</span>
-        </label>
-        <label class="field checkbox-field">
-          <input type="checkbox" id="uiToolOverride" />
-          <span>覆盖同名 MCP 定义</span>
-        </label>
-        <p class="field-hint hidden" id="uiToolMcpHint">MCP 来源工具默认仅可改启用与覆盖；Agent 关联请在 Agent 能力中配置。</p>
-        <label class="field checkbox-field hidden" id="uiToolForceWrap">
-          <input type="checkbox" id="uiToolForceEdit" />
-          <span>允许编辑 Schema</span>
         </label>
       </div>
       <div class="form-error hidden" data-form-error role="alert" aria-live="assertive"></div>

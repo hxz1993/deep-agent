@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import re
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -17,12 +16,11 @@ if TYPE_CHECKING:
 from deep_agent.capabilities.ui.constants import (
     MAX_DESCRIPTION_LEN,
     MAX_SCHEMA_BYTES,
-    MAX_UI_TOOLS,
     RESERVED_TOOL_NAMES,
     TOOL_NAME_PATTERN,
 )
 
-UiToolSource = Literal["builtin", "mcp", "manual"]
+UiToolSource = Literal["builtin", "manual"]
 
 
 def _validate_parameters_json_schema(value: dict[str, Any]) -> dict[str, Any]:
@@ -37,54 +35,6 @@ def _validate_parameters_json_schema(value: dict[str, Any]) -> dict[str, Any]:
     return value
 
 
-class UiToolManifestEntry(BaseModel):
-    name: str
-    description: str
-    parameters_json_schema: dict[str, Any]
-    widget: str | None = None
-    result_schema: dict[str, Any] | None = None
-    metadata: dict[str, Any] | None = None
-
-    @field_validator("name")
-    @classmethod
-    def validate_local_name(cls, value: str) -> str:
-        if not re.fullmatch(r"[a-z][a-z0-9_]{0,63}", value):
-            raise ValueError("tool name must match ^[a-z][a-z0-9_]{0,63}$")
-        if value in RESERVED_TOOL_NAMES:
-            raise ValueError(f"tool name {value!r} is reserved")
-        return value
-
-    @field_validator("parameters_json_schema")
-    @classmethod
-    def validate_parameters_schema(cls, value: dict[str, Any]) -> dict[str, Any]:
-        return _validate_parameters_json_schema(value)
-
-    @model_validator(mode="after")
-    def validate_schema_size(self) -> UiToolManifestEntry:
-        if len(self.description) > MAX_DESCRIPTION_LEN:
-            raise ValueError(f"description exceeds {MAX_DESCRIPTION_LEN} characters")
-        return self
-
-
-class UiToolsManifest(BaseModel):
-    protocol_version: str
-    mcp_server: str | None = None
-    tools: list[UiToolManifestEntry] = Field(default_factory=list)
-
-    @field_validator("protocol_version")
-    @classmethod
-    def validate_protocol(cls, value: str) -> str:
-        if value != "1.0":
-            raise ValueError("unsupported protocol_version")
-        return value
-
-    @model_validator(mode="after")
-    def validate_tool_count(self) -> UiToolsManifest:
-        if len(self.tools) > MAX_UI_TOOLS:
-            raise ValueError(f"too many tools (max {MAX_UI_TOOLS})")
-        return self
-
-
 class UiToolCreate(BaseModel):
     name: str
     description: str
@@ -93,7 +43,6 @@ class UiToolCreate(BaseModel):
     result_schema: dict[str, Any] | None = None
     metadata: dict[str, Any] | None = None
     enabled: bool = True
-    override: bool = False
 
     @field_validator("name")
     @classmethod
@@ -123,7 +72,6 @@ class UiToolUpdate(BaseModel):
     result_schema: dict[str, Any] | None = None
     metadata: dict[str, Any] | None = None
     enabled: bool | None = None
-    override: bool | None = None
 
     @field_validator("parameters_json_schema")
     @classmethod
@@ -151,16 +99,12 @@ class UiToolResponse(BaseModel):
     result_schema: dict[str, Any] | None = None
     metadata: dict[str, Any] | None = None
     source: UiToolSource
-    mcp_server_name: str | None = None
     enabled: bool
-    override: bool
-    discovered_at: datetime | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
-    shadowed_by: str | None = None
 
     @classmethod
-    def from_row(cls, row: UiToolDefinition, *, shadowed_by: str | None = None) -> UiToolResponse:
+    def from_row(cls, row: UiToolDefinition) -> UiToolResponse:
         return cls(
             name=row.name,
             description=row.description,
@@ -169,17 +113,13 @@ class UiToolResponse(BaseModel):
             result_schema=row.result_schema,
             metadata=row.metadata_,
             source=row.source,
-            mcp_server_name=row.mcp_server_name,
             enabled=row.enabled,
-            override=row.override,
-            discovered_at=row.discovered_at,
             created_at=row.created_at,
             updated_at=row.updated_at,
-            shadowed_by=shadowed_by,
         )
 
     @classmethod
-    def from_record(cls, record: "UIToolRecord", *, shadowed_by: str | None = None) -> UiToolResponse:
+    def from_record(cls, record: "UIToolRecord") -> UiToolResponse:
         return cls(
             name=record.name,
             description=record.description,
@@ -188,24 +128,12 @@ class UiToolResponse(BaseModel):
             result_schema=record.result_schema,
             metadata=record.metadata,
             source=record.source,
-            mcp_server_name=record.mcp_server_name,
             enabled=record.enabled,
-            override=record.override,
-            discovered_at=record.discovered_at,
             created_at=None,
             updated_at=None,
-            shadowed_by=shadowed_by,
         )
 
 
 class UiToolListResponse(BaseModel):
     items: list[UiToolResponse]
     total: int
-
-
-class UiToolsRefreshResponse(BaseModel):
-    mcp_server: str
-    discovered: int
-    upserted: int
-    removed: int
-    errors: list[str] = Field(default_factory=list)

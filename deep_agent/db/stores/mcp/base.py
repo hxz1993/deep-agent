@@ -45,6 +45,20 @@ class McpServerStoreBase(SessionBoundMixin):
             await db.refresh(row)
             return row
 
+    async def update_resource_capabilities(
+        self,
+        name: str,
+        capabilities: dict,
+    ) -> McpServer | None:
+        async with self._write() as db:
+            row = await self._get_by_name(db, name)
+            if row is None:
+                return None
+            row.resource_capabilities = capabilities
+            await db.flush()
+            await db.refresh(row)
+            return row
+
     async def delete(self, name: str) -> bool:
         async with self._write() as db:
             result = await db.execute(delete(McpServer).where(McpServer.name == name))

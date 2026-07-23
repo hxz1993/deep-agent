@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
 from typing import Any
 
 from deep_agent.db.models import UiToolDefinition
@@ -16,10 +15,7 @@ class UIToolRecord:
     result_schema: dict[str, Any] | None = None
     metadata: dict[str, Any] | None = None
     source: str = "builtin"
-    mcp_server_name: str | None = None
     enabled: bool = True
-    override: bool = False
-    discovered_at: datetime | None = None
 
     @classmethod
     def from_row(cls, row: UiToolDefinition) -> UIToolRecord:
@@ -31,8 +27,5 @@ class UIToolRecord:
             result_schema=row.result_schema,
             metadata=row.metadata_,
             source=row.source,
-            mcp_server_name=row.mcp_server_name,
             enabled=row.enabled,
-            override=row.override,
-            discovered_at=row.discovered_at,
         )

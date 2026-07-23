@@ -1,7 +1,6 @@
 const SOURCE_LABELS = {
   builtin: "内置",
   manual: "MANUAL",
-  mcp: "mcp",
 };
 
 function uiToolDisplayValue(value) {
@@ -220,10 +219,8 @@ const uiToolsAdmin = {
   buildQuery() {
     const params = new URLSearchParams();
     const source = document.getElementById("uiToolFilterSource")?.value;
-    const mcp = document.getElementById("uiToolFilterMcp")?.value.trim();
     const enabled = document.getElementById("uiToolFilterEnabled")?.value;
     if (source) params.set("source", source);
-    if (mcp) params.set("mcp_server", mcp);
     if (enabled) params.set("enabled", enabled);
     const qs = params.toString();
     return qs ? `?${qs}` : "";
@@ -232,27 +229,22 @@ const uiToolsAdmin = {
   async refresh() {
     const tbody = document.getElementById("uiToolsTableBody");
     if (!tbody) return;
-    tbody.innerHTML = `<tr><td colspan="8" class="empty-cell">加载中…</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="7" class="empty-cell">加载中…</td></tr>`;
     try {
       const data = await apiFetch(`/api/v1/ui-tools${this.buildQuery()}`);
       showDbBanner(false);
       const items = data.items || [];
       if (!items.length) {
-        tbody.innerHTML = `<tr><td colspan="8" class="empty-cell">暂无 UI 工具</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="7" class="empty-cell">暂无 UI 工具</td></tr>`;
         return;
       }
       tbody.innerHTML = items
-        .map((tool) => {
-          const shadow = tool.shadowed_by
-            ? `<span class="badge off" title="被 ${escapeHtml(tool.shadowed_by)} 覆盖">shadowed</span>`
-            : "";
-          return `
+        .map((tool) => `
         <tr>
-          <td><strong>${escapeHtml(tool.name)}</strong> ${shadow}</td>
+          <td><strong>${escapeHtml(tool.name)}</strong></td>
           <td><span class="badge source-${escapeHtml(tool.source)}">${escapeHtml(SOURCE_LABELS[tool.source] || tool.source)}</span></td>
           <td>${escapeHtml(tool.widget || "—")}</td>
           <td><span class="badge ${tool.enabled ? "on" : "off"}">${tool.enabled ? "是" : "否"}</span></td>
-          <td>${escapeHtml(tool.mcp_server_name || "—")}</td>
           <td class="desc-cell" title="${escapeHtml(tool.description || "—")}">${escapeHtml(tool.description || "—")}</td>
           <td>${escapeHtml(formatDate(tool.updated_at))}</td>
           <td>
@@ -263,8 +255,7 @@ const uiToolsAdmin = {
                    <button type="button" class="danger" data-delete="${escapeHtml(tool.name)}" data-source="${escapeHtml(tool.source)}">删除</button>`}
             </div>
           </td>
-        </tr>`;
-        })
+        </tr>`)
         .join("");
 
       tbody.querySelectorAll("[data-view]").forEach((btn) => {
@@ -289,13 +280,10 @@ const uiToolsAdmin = {
         ["来源", SOURCE_LABELS[tool.source] || tool.source],
         ["Widget", tool.widget],
         ["启用", tool.enabled ? "是" : "否"],
-        ["覆盖同名定义", tool.override ? "是" : "否"],
-        ["MCP 服务", tool.mcp_server_name],
         ["描述", tool.description],
         ["参数 Schema", uiToolJsonValue(tool.parameters_json_schema), "code"],
         ["结果 Schema", uiToolJsonValue(tool.result_schema), "code"],
         ["Metadata", uiToolJsonValue(tool.metadata), "code"],
-        ["发现时间", formatDate(tool.discovered_at)],
         ["创建时间", formatDate(tool.created_at)],
         ["更新时间", formatDate(tool.updated_at)],
       ];
@@ -314,31 +302,13 @@ const uiToolsAdmin = {
 
   setFormMode(mode) {
     const isCreate = mode === "create";
-    const isMcp = mode === "mcp";
     document.getElementById("uiToolTemplateSection").classList.toggle("hidden", !isCreate);
     document.getElementById("uiToolName").disabled = !isCreate;
-    document.getElementById("uiToolDescription").readOnly = isMcp;
-    document.getElementById("uiToolWidget").disabled = isMcp;
-    document.getElementById("uiToolWidgetCustom").readOnly = isMcp;
-    document.getElementById("uiToolMetadata").readOnly = isMcp;
-    document.getElementById("uiToolMcpHint").classList.toggle("hidden", !isMcp);
-    document.getElementById("uiToolForceWrap").classList.toggle("hidden", !isMcp);
-    if (!isMcp) {
-      document.getElementById("uiToolForceEdit").checked = false;
-      this.setSchemaReadOnly(false);
-    } else {
-      this.setSchemaReadOnly(true);
-    }
-  },
-
-  onForceEditToggle() {
-    const force = document.getElementById("uiToolForceEdit").checked;
-    const readOnly = this.editingSource === "mcp" && !force;
-    document.getElementById("uiToolDescription").readOnly = readOnly;
-    document.getElementById("uiToolWidget").disabled = readOnly;
-    document.getElementById("uiToolWidgetCustom").readOnly = readOnly;
-    document.getElementById("uiToolMetadata").readOnly = readOnly;
-    this.setSchemaReadOnly(readOnly);
+    document.getElementById("uiToolDescription").readOnly = false;
+    document.getElementById("uiToolWidget").disabled = false;
+    document.getElementById("uiToolWidgetCustom").readOnly = false;
+    document.getElementById("uiToolMetadata").readOnly = false;
+    this.setSchemaReadOnly(false);
   },
 
   openCreate() {
@@ -347,7 +317,6 @@ const uiToolsAdmin = {
     document.getElementById("uiToolModalTitle").textContent = "手工注册 UI 工具";
     document.getElementById("uiToolName").value = "";
     document.getElementById("uiToolEnabled").checked = true;
-    document.getElementById("uiToolOverride").checked = false;
     document.getElementById("uiToolTemplate").value = "confirm";
     this.setFormMode("create");
     this.applyTemplate("confirm", { fillName: true });
@@ -367,10 +336,8 @@ const uiToolsAdmin = {
         ? JSON.stringify(tool.metadata, null, 2)
         : "";
       document.getElementById("uiToolEnabled").checked = tool.enabled;
-      document.getElementById("uiToolOverride").checked = tool.override;
-      const isMcp = tool.source === "mcp";
-      this.setFormMode(isMcp ? "mcp" : "edit");
-      this.loadSchemas(tool.parameters_json_schema, tool.result_schema, { readOnly: isMcp });
+      this.setFormMode("edit");
+      this.loadSchemas(tool.parameters_json_schema, tool.result_schema);
       document.getElementById("uiToolModal").showModal();
     } catch (err) {
       showToast(err.message, true);
@@ -395,15 +362,12 @@ const uiToolsAdmin = {
 
     const widget = this.getWidgetValue();
     const enabled = document.getElementById("uiToolEnabled").checked;
-    const override = document.getElementById("uiToolOverride").checked;
     const description = document.getElementById("uiToolDescription").value.trim();
 
     AdminFormFeedback.setSubmitting(form, true);
     try {
       if (this.editingName) {
-        const force = document.getElementById("uiToolForceEdit").checked;
-        const qs = force ? "?force=true" : "";
-        await apiFetch(`/api/v1/ui-tools/${encodeURIComponent(this.editingName)}${qs}`, {
+        await apiFetch(`/api/v1/ui-tools/${encodeURIComponent(this.editingName)}`, {
           method: "PATCH",
           body: JSON.stringify({
             description,
@@ -412,7 +376,6 @@ const uiToolsAdmin = {
             result_schema: result_schema ?? null,
             metadata: metadata ?? null,
             enabled,
-            override,
           }),
         });
         showToast("已保存");
@@ -427,7 +390,6 @@ const uiToolsAdmin = {
             result_schema: result_schema ?? null,
             metadata: metadata ?? null,
             enabled,
-            override,
           }),
         });
         showToast("已注册");
@@ -467,7 +429,6 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("newUiToolBtn")?.addEventListener("click", () => uiToolsAdmin.openCreate());
   document.getElementById("uiToolForm")?.addEventListener("submit", (e) => uiToolsAdmin.save(e));
   document.getElementById("uiToolFilterApply")?.addEventListener("click", () => uiToolsAdmin.refresh());
-  document.getElementById("uiToolForceEdit")?.addEventListener("change", () => uiToolsAdmin.onForceEditToggle());
   document.getElementById("closeUiToolModal")?.addEventListener("click", () => {
     document.getElementById("uiToolModal").close();
   });

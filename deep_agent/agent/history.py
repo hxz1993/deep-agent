@@ -40,7 +40,6 @@ class HistoryToolCallPart(BaseModel):
     widget: str | None = None
     metadata: dict[str, Any] | None = None
     source: str | None = None
-    mcp_server_name: str | None = None
 
 
 class HistoryToolResultPart(BaseModel):

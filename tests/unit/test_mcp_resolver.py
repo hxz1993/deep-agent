@@ -6,8 +6,6 @@ from unittest.mock import AsyncMock, MagicMock
 from deep_agent.agent.spec import AgentSpec
 from deep_agent.capabilities.mcp.resolver import (
     effective_mcp_capability_names,
-    effective_mcp_names_for_ui,
-    effective_mcp_rows_for_discovery,
     load_mcp_capabilities,
     select_mcp_capabilities,
 )
@@ -69,28 +67,6 @@ class McpResolverTests(unittest.IsolatedAsyncioTestCase):
         ]
         spec = AgentSpec(name="t", model="test", instructions="", capabilities=["mcp:echo", "native"])
         self.assertEqual(effective_mcp_capability_names(spec, caps), {"echo"})
-
-    def test_effective_mcp_names_for_ui_uses_all_enabled_when_capabilities_none(self) -> None:
-        caps = [
-            Capability(name="mcp:echo", kind="mcp", toolset=object(), default_enabled=False),
-        ]
-        rows = [unittest.mock.MagicMock(name="echo", enabled=True)]
-        rows[0].name = "echo"
-        rows[0].enabled = True
-        spec = AgentSpec(name="t", model="test", instructions="", capabilities=None)
-        self.assertEqual(effective_mcp_names_for_ui(spec, caps, rows), {"echo"})
-
-    def test_effective_mcp_rows_for_discovery_only_explicit_mcp_capabilities(self) -> None:
-        row_acme = unittest.mock.MagicMock()
-        row_acme.name = "acme"
-        row_acme.enabled = True
-        row_crm = unittest.mock.MagicMock()
-        row_crm.name = "crm"
-        row_crm.enabled = True
-        spec = AgentSpec(name="t", model="test", instructions="", capabilities=["mcp:acme"])
-        scoped = effective_mcp_rows_for_discovery(spec, [row_acme, row_crm])
-        self.assertEqual([row.name for row in scoped], ["acme"])
-
 
 if __name__ == "__main__":
     unittest.main()

@@ -19,6 +19,24 @@ if TYPE_CHECKING:
 
 McpUserTransport = Literal["url"]
 McpTransport = Literal["url", "builtin"]
+McpResourceStatus = Literal["supported", "unsupported", "unknown"]
+
+
+class McpResourceCapabilities(BaseModel):
+    status: McpResourceStatus = "unknown"
+    resource_count: int = 0
+    template_count: int = 0
+    checked_at: datetime | None = None
+    error: str | None = None
+
+    @classmethod
+    def from_value(cls, value: Any) -> "McpResourceCapabilities":
+        if not isinstance(value, dict):
+            return cls()
+        try:
+            return cls.model_validate(value)
+        except Exception:
+            return cls(error="Stored resource capability metadata is invalid")
 
 
 class McpRequestContextConfig(BaseModel):
@@ -93,6 +111,7 @@ class McpServerResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     request_context: McpRequestContextInfo
+    resource_capabilities: McpResourceCapabilities
 
     @classmethod
     def from_row(cls, row: McpServer) -> McpServerResponse:
@@ -113,5 +132,8 @@ class McpServerResponse(BaseModel):
                     if mode == "inherit"
                     else []
                 ),
+            ),
+            resource_capabilities=McpResourceCapabilities.from_value(
+                getattr(row, "resource_capabilities", None)
             ),
         )

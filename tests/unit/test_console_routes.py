@@ -67,6 +67,28 @@ class ConsoleRoutesTest(unittest.TestCase):
             with self.subTest(reference=reference):
                 self.assertNotIn(reference, runtime_source)
 
+    def test_mcp_ui_discovery_surface_is_removed(self) -> None:
+        frontend = Path(REPO_ROOT) / "frontend" / "console"
+        runtime_source = "\n".join(
+            path.read_text(encoding="utf-8")
+            for path in frontend.rglob("*")
+            if path.is_file() and path.suffix in {".html", ".css", ".js"}
+        )
+        for removed in (
+            "ui_tools_list",
+            "ui://tools/manifest",
+            "refresh_seconds",
+            "/ui-tools/refresh",
+            "启用 UI 发现",
+            "刷新 UI",
+        ):
+            with self.subTest(removed=removed):
+                self.assertNotIn(removed, runtime_source)
+
+        paths = self.client.get("/openapi.json").json()["paths"]
+        self.assertNotIn("/api/v1/mcp/{name}/ui-tools/refresh", paths)
+        self.assertIn("/api/v1/mcp/{name}/resources/probe", paths)
+
 
 if __name__ == "__main__":
     unittest.main()

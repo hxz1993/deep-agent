@@ -58,9 +58,9 @@ MCP 在请求时由 `resolve_mcp_toolsets` 解析（DB 行 + `mcps/` builtin 兜
 
 DeepAgent 自研 `capabilities.registry.Capability` 是配置包装对象，负责把一组 Instructions/Toolset 暴露给 Agent；Pydantic AI 的 `AbstractCapability` 才是可介入模型请求、消息历史、工具准备和事件生命周期的原生扩展点。当前只有 `DeepSeekThinkingRetry` 使用了原生 Capability。
 
-模型每轮直接看到的是：Agent/能力 Instructions、`message_history`、当前用户输入/附件和本轮 Tool Definitions。Toolset 负责列出、准备和调用工具；MCP Resource 与 Prompt 不会自动进入模型工具列表。
+模型每轮直接看到的是：Agent/能力 Instructions、`message_history`、当前用户输入/附件和本轮 Tool Definitions。Toolset 负责列出、准备和调用工具；MCP Prompt 不会自动进入模型工具列表。MCP Resource 由宿主侧动态代理工具按需读取。
 
-运行态 URL 与 Builtin MCP 统一启用 Pydantic AI `MCPToolset(include_instructions=True)`，因此已关联 MCP 在 `initialize` 中返回的 Server Instructions 会随 Toolset 加入 Agent Instructions；未关联 MCP 不会注入。UI 工具发现专用连接不参与对话，不需要启用该选项。
+运行态 URL 与 Builtin MCP 统一启用 Pydantic AI `MCPToolset(include_instructions=True)`，因此已关联 MCP 在 `initialize` 中返回的 Server Instructions 会随 Toolset 加入 Agent Instructions；未关联 MCP 不会注入。
 
 新增横切能力时遵循：
 
@@ -103,10 +103,10 @@ DeepAgent 自研 `capabilities.registry.Capability` 是配置包装对象，负�
 | `mcp/db_loader.py` | 从 `mcp_servers` 构建 MCPToolset |
 | `mcp/builtin.py` | 发现 `mcps/<name>/server.py` |
 | `mcp/toolset_builder.py` | url / stdio / builtin + header 注入 |
+| `mcp/resources.py` | URL MCP Resource 探测与模型代理工具 |
 | `mcp/run_scoped.py` | builtin MCP：按 agent run 租约 HTTP client |
 | `mcp/lease_manager.py` | worker 级 MCP lease + shared registry touch |
 | `ui/registry.py` | UI 工具合并、`ui:<name>` 正向关联、可见性、`prepare_ui_toolset_for_spec` |
-| `mcp/ui_discovery.py` | MCP manifest 发现 → `UiToolStore.sync_mcp_tools` |
 
 ### `api/v1/`
 
@@ -114,7 +114,7 @@ DeepAgent 自研 `capabilities.registry.Capability` 是配置包装对象，负�
 | --- | --- |
 | `chat.py` | `POST /chat`, `POST /chat/stream` |
 | `agents.py` | CRUD `/agents` |
-| `mcp.py` | CRUD `/mcp`、UI 工具刷新（写后热重载 registry） |
+| `mcp.py` | CRUD `/mcp`、Resource 探测 `/mcp/{name}/resources/probe` |
 | `ui_tools.py` | CRUD `/ui-tools` |
 | `sessions.py` | 会话列表 / 历史 / 删除 |
 | `auxiliary_models.py` | CRUD `/auxiliary-models` |
@@ -136,8 +136,8 @@ DeepAgent 自研 `capabilities.registry.Capability` 是配置包装对象，负�
 | `agents` | DB Agent（UUID PK，name 唯一） |
 | `llm_models` | LLM 模型预设 |
 | `auxiliary_model_configs` | 辅助模型场景（如标题生成）绑定 |
-| `mcp_servers` | MCP transport + config JSON |
-| `ui_tool_definitions` | UI 工具定义（builtin / mcp / manual） |
+| `mcp_servers` | MCP transport、config JSON、Resource 能力探测结果 |
+| `ui_tool_definitions` | 手工 UI 工具定义；builtin 由代码生成，不写表 |
 | `chat_sessions` | 会话元数据 |
 | `chat_messages` | `ModelMessage` JSONB 历史 |
 

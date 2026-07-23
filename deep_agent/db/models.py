@@ -69,6 +69,7 @@ class McpServer(Base):
     name: Mapped[str] = mapped_column(KeyText, primary_key=True)
     transport: Mapped[str] = mapped_column(Text, nullable=False)
     config: Mapped[dict] = mapped_column(JSONType, nullable=False)
+    resource_capabilities: Mapped[dict | None] = mapped_column(JSONType, nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     enabled: Mapped[bool] = mapped_column(
         Boolean,
@@ -115,10 +116,7 @@ class UiToolDefinition(Base):
     result_schema: Mapped[dict | None] = mapped_column(JSONType, nullable=True)
     metadata_: Mapped[dict | None] = mapped_column("metadata", JSONType, nullable=True)
     source: Mapped[str] = mapped_column(String(16), nullable=False)
-    mcp_server_name: Mapped[str | None] = mapped_column(KeyText, nullable=True)
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
-    override: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
-    discovered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

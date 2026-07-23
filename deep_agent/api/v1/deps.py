@@ -11,6 +11,7 @@ from deep_agent.agent.limits import resolve_agent_max_requests
 from deep_agent.agent.runner import AgentRunner
 from deep_agent.agent.spec import DEFAULT_INSTRUCTIONS, AgentSpec
 from deep_agent.capabilities.mcp.resolver import load_mcp_rows, resolve_mcp_toolsets
+from deep_agent.capabilities.mcp.resources import build_mcp_resource_toolset
 from deep_agent.capabilities.ui.registry import prepare_ui_toolset_for_spec
 from deep_agent.core.context import AppContext
 from deep_agent.core.exceptions import AgentNotFoundError, LlmModelNotFoundError
@@ -87,11 +88,10 @@ async def _build_runner_from_spec(
     dynamic_ui_toolset, ui_tool_hints = await prepare_ui_toolset_for_spec(
         ctx.stores,
         spec,
-        mcp_rows=mcp_rows,
-        request_headers=request_headers,
     )
 
     mcp_toolsets = await resolve_mcp_toolsets(ctx.stores, spec, mcp_rows=mcp_rows)
+    mcp_resource_toolset = build_mcp_resource_toolset(spec, mcp_rows)
 
     spec = replace(spec, instructions=augment_instructions_with_capabilities(spec))
     agent = build_agent(
@@ -100,6 +100,7 @@ async def _build_runner_from_spec(
         request_retries=OPTION.agent.request_retries,
         mcp_toolsets=mcp_toolsets,
         dynamic_ui_toolset=dynamic_ui_toolset,
+        mcp_resource_toolset=mcp_resource_toolset,
     )
     limits = UsageLimits(
         request_limit=resolve_agent_max_requests(spec.max_requests, OPTION.agent.max_requests),

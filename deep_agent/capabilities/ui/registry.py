@@ -8,21 +8,10 @@ from pydantic_ai import ExternalToolset
 from pydantic_ai.tools import ToolDefinition
 
 from deep_agent.agent.spec import AgentSpec
-from deep_agent.capabilities.mcp.resolver import (
-    effective_mcp_names_for_ui,
-    effective_mcp_rows_for_discovery,
-)
-from deep_agent.capabilities.mcp.db_loader import capabilities_from_rows
-from deep_agent.capabilities.mcp.ui_discovery import (
-    discover_and_persist_ui_tools,
-    mcp_rows_for_ui_discovery,
-    should_refresh_mcp_ui_tools,
-)
 from deep_agent.capabilities.ui.builtin import builtin_ui_records
 from deep_agent.capabilities.ui.constants import SOURCE_PRIORITY
 from deep_agent.capabilities.ui.external import RetryableExternalToolset, build_args_validator
 from deep_agent.capabilities.ui.types import UIToolRecord
-from deep_agent.db.models import McpServer
 from deep_agent.db.stores.bundle import DataStores
 
 
@@ -37,17 +26,11 @@ def is_tool_visible(
     record: UIToolRecord,
     *,
     capabilities: list[str] | None,
-    mcp_enabled_names: set[str],
 ) -> bool:
     if not record.enabled:
         return False
     if capabilities is None or f"ui:{record.name}" not in capabilities:
         return False
-    if record.mcp_server_name:
-        if record.mcp_server_name not in mcp_enabled_names:
-            return False
-        if f"mcp:{record.mcp_server_name}" not in capabilities:
-            return False
     return True
 
 
@@ -100,8 +83,6 @@ def build_tool_hints(definitions: list[UIToolRecord]) -> dict[str, dict[str, Any
             payload["metadata"] = item.metadata
         if item.source != "builtin":
             payload["source"] = item.source
-        if item.mcp_server_name:
-            payload["mcp_server_name"] = item.mcp_server_name
         hints[item.name] = payload
     return hints
 
@@ -143,56 +124,19 @@ def enrich_deferred(deferred: dict[str, Any], hints: dict[str, dict[str, Any]]) 
 async def load_ui_tool_hints(
     stores: DataStores,
     spec: AgentSpec,
-    *,
-    mcp_rows: list[McpServer] | None = None,
 ) -> dict[str, dict[str, Any]]:
     if stores.ui_tool is None:
         return {}
-    effective = await load_effective_ui_tools(stores, spec, mcp_rows=mcp_rows)
+    effective = await load_effective_ui_tools(stores, spec)
     return build_tool_hints(effective.definitions)
-
-
-async def ensure_mcp_ui_tools_discovered(
-    stores: DataStores,
-    spec: AgentSpec,
-    *,
-    mcp_rows: list[McpServer] | None = None,
-    request_headers: dict[str, str] | None = None,
-) -> None:
-    """Discover MCP UI tools on demand for non-builtin MCP enabled on this agent."""
-    if mcp_rows is None:
-        mcp_rows = await stores.mcp.list_all()
-
-    scoped = effective_mcp_rows_for_discovery(spec, mcp_rows)
-    for row in sorted(mcp_rows_for_ui_discovery(scoped), key=lambda item: item.name):
-        if not await should_refresh_mcp_ui_tools(stores.ui_tool, row):
-            continue
-        await discover_and_persist_ui_tools(
-            stores.ui_tool,
-            row,
-            use_cache_on_error=True,
-            request_headers=request_headers,
-        )
 
 
 async def load_effective_ui_tools(
     stores: DataStores,
     spec: AgentSpec,
-    *,
-    mcp_enabled_names: set[str] | None = None,
-    mcp_rows: list[McpServer] | None = None,
 ) -> EffectiveUiTools:
-    if mcp_enabled_names is None:
-        if mcp_rows is None:
-            mcp_rows = await stores.mcp.list_all()
-        caps = capabilities_from_rows(mcp_rows)
-        mcp_enabled_names = effective_mcp_names_for_ui(spec, caps, mcp_rows)
-
-    db_rows = await stores.ui_tool.list_all(
-        enabled=True,
-        mcp_server_names=mcp_enabled_names,
-    )
-    db_records = [UIToolRecord.from_row(row) for row in db_rows if row.source != "builtin"]
+    db_rows = await stores.ui_tool.list_all(enabled=True)
+    db_records = [UIToolRecord.from_row(row) for row in db_rows if row.source == "manual"]
 
     visible_db = [
         record
@@ -200,12 +144,11 @@ async def load_effective_ui_tools(
         if is_tool_visible(
             record,
             capabilities=spec.capabilities,
-            mcp_enabled_names=mcp_enabled_names,
         )
     ]
 
     merged, shadowed = merge_definitions(builtin_ui_records(), visible_db)
-    has_dynamic = any(record.source in {"mcp", "manual"} for record in merged)
+    has_dynamic = any(record.source == "manual" for record in merged)
     if shadowed:
         logger.warning("UI tool name conflicts resolved: {}", shadowed)
     return EffectiveUiTools(definitions=merged, shadowed=shadowed, has_dynamic=has_dynamic)
@@ -213,36 +156,19 @@ async def load_effective_ui_tools(
 
 async def load_selectable_ui_tools(
     stores: DataStores,
-    *,
-    mcp_rows: list[McpServer] | None = None,
 ) -> list[UIToolRecord]:
     """List enabled extension UI tools that can be assigned to an Agent."""
-    if mcp_rows is None:
-        mcp_rows = await stores.mcp.list_all()
-    enabled_mcp_names = {row.name for row in mcp_rows if row.enabled}
-    db_rows = await stores.ui_tool.list_all(
-        enabled=True,
-        mcp_server_names=enabled_mcp_names,
-    )
-    db_records = [UIToolRecord.from_row(row) for row in db_rows if row.source in {"mcp", "manual"}]
+    db_rows = await stores.ui_tool.list_all(enabled=True)
+    db_records = [UIToolRecord.from_row(row) for row in db_rows if row.source == "manual"]
     merged, _ = merge_definitions(builtin_ui_records(), db_records)
-    return [record for record in merged if record.source in {"mcp", "manual"}]
+    return [record for record in merged if record.source == "manual"]
 
 
 async def prepare_ui_toolset_for_spec(
     stores: DataStores,
     spec: AgentSpec,
-    *,
-    mcp_rows: list[McpServer] | None = None,
-    request_headers: dict[str, str] | None = None,
 ) -> tuple[ExternalToolset | None, dict[str, dict[str, Any]]]:
-    await ensure_mcp_ui_tools_discovered(
-        stores,
-        spec,
-        mcp_rows=mcp_rows,
-        request_headers=request_headers,
-    )
-    effective = await load_effective_ui_tools(stores, spec, mcp_rows=mcp_rows)
+    effective = await load_effective_ui_tools(stores, spec)
     valid_definitions: list[UIToolRecord] = []
     for definition in effective.definitions:
         try:

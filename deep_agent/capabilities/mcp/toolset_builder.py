@@ -37,23 +37,23 @@ def build_mcp_toolset(name: str, transport: str, config: dict[str, Any]) -> Any:
     raise ValueError(f"Unsupported MCP transport: {transport!r}")
 
 
-def build_discovery_toolset(
+def build_resource_client(
     name: str,
     transport: str,
     config: dict[str, Any],
     *,
     request_headers: dict[str, str] | None = None,
 ) -> Any:
-    """Unprefixed MCP toolset for platform discovery calls (ui_tools_list, resources)."""
+    """Unprefixed MCP client for host-side Resource detection and proxy calls."""
     transport, config = normalize_mcp_config(name, transport, config)
     if transport != "url":
-        raise ValueError(f"UI discovery requires url transport, got {transport!r}")
+        raise ValueError(f"Resource access requires url transport, got {transport!r}")
     url = config["url"]
     headers = resolve_mcp_headers(transport, config, request_headers)
     init_timeout = resolve_mcp_init_timeout(config)
     return MCPToolset(
         url,
-        id=f"discovery:{name}",
+        id=f"resources:{name}",
         headers=headers,
         init_timeout=init_timeout,
         max_retries=resolve_mcp_max_retries(),

@@ -1,6 +1,6 @@
 # MCP UI 工具同步机制评审与后续改造计划
 
-> 状态：待后端评审，当前不实施
+> 状态：**已废弃历史计划**。数据库版本 `019` 已采用更彻底的方案：删除 MCP UI 工具发现、同步和 TTL，仅保留内置与手工 UI 工具。本文只用于追溯原设计，不代表当前行为。
 > 记录日期：2026-07-20
 > 影响仓库：`deep-agent`
 > 关联文档：[`rfc/0001-ui-tools-mcp-discovery-and-api.md`](rfc/0001-ui-tools-mcp-discovery-and-api.md)

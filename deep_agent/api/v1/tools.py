@@ -41,7 +41,7 @@ async def list_capabilities(ctx: AppContextDep) -> list[CapabilityDescription]:
             )
         )
 
-    for tool in await load_selectable_ui_tools(ctx.stores, mcp_rows=mcp_rows):
+    for tool in await load_selectable_ui_tools(ctx.stores):
         caps.append(
             CapabilityDescription(
                 name=f"ui:{tool.name}",

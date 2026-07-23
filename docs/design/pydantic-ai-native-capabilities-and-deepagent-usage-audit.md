@@ -153,7 +153,7 @@ DeepAgent 自研 `Capability` 是产品配置包装，不参与 Pydantic AI 生�
 | MCP Resource | `list_resources/read_resource` | 默认看不到，必须由宿主读取或包装为工具 |
 | MCP Prompt | MCP Prompt API | 默认看不到，必须由宿主选择并注入 |
 
-当前 DeepAgent 只在 MCP UI 工具发现中使用了 `read_resource()`；普通 Agent 尚无通用 Resource 注入机制。
+当前 DeepAgent 已移除 MCP UI 工具发现，并通过宿主动态 Toolset 代理 `list_resources()`、`list_resource_templates()` 和 `read_resource()`；只有 Agent 关联了探测为支持 Resource 的 URL MCP 时，这三个代理工具才进入模型工具列表。
 
 ## 4. 当前已使用的 Pydantic AI Core 能力
 

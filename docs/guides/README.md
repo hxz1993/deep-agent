@@ -9,6 +9,7 @@
 | [`sse-protocol.md`](sse-protocol.md) | 对话 SSE 事件、历史与 Deferred 续跑协议 |
 | [`ui-tools.md`](ui-tools.md) | 仓库贡献者新增和维护 UI 工具的说明 |
 | [`ui-tools-external.md`](ui-tools-external.md) | 集成方使用和配置 UI 工具的说明 |
+| [`mcp-resources.md`](mcp-resources.md) | MCP Resource 探测、代理工具和安全边界 |
 
 ## 实现经验
 

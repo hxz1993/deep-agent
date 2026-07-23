@@ -256,7 +256,6 @@ DB Agent 模式（请求体含 `agent_id`）：
 | `widget` | `string \| null` | 可选；UI 工具渲染提示（来自 DB，**不发给模型**） |
 | `metadata` | `object \| null` | 可选；客户端扩展字段（来自 Admin/MCP 配置，**不发给模型**） |
 | `source` | `string \| null` | 可选；`builtin` \| `manual` \| `mcp` |
-| `mcp_server_name` | `string \| null` | 可选；MCP 来源工具的服务名 |
 
 **事件来源（后端实现）**：
 

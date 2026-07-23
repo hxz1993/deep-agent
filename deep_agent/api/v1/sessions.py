@@ -181,7 +181,7 @@ async def get_session_history(
     messages = model_messages_to_history(raw)
     mcp_rows = await load_mcp_rows(ctx.stores)
     spec = await _spec_for_history(ctx, api_agent_id)
-    hints = await load_ui_tool_hints(ctx.stores, spec, mcp_rows=mcp_rows)
+    hints = await load_ui_tool_hints(ctx.stores, spec)
     messages = enrich_history_messages(messages, hints)
     return SessionHistoryResponse(
         session_id=resolved_session_id,

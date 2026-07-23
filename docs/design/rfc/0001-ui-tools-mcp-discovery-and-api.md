@@ -2,7 +2,7 @@
 
 | 字段 | 值 |
 |------|-----|
-| **状态** | Implemented |
+| **状态** | Deprecated；MCP UI 发现于数据库版本 `019` 移除，仅保留 builtin/manual |
 | **作者** | deep-agent 平台组 |
 | **关联** | [ui-tools-extension-proposals.md](../ui-tools-extension-proposals.md)、[ui-tools-external.md](../../guides/ui-tools-external.md) |
 | **范围** | 方案 A（MCP UI 发现）+ 方案 B（UI 工具配置 API） |

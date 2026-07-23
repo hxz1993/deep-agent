@@ -30,23 +30,6 @@ def effective_mcp_capability_names(spec: AgentSpec, caps: list[Capability]) -> s
     }
 
 
-def effective_mcp_names_for_ui(spec: AgentSpec, caps: list[Capability], rows: list[McpServer]) -> set[str]:
-    """MCP names used for UI tool visibility (scoped when capabilities are explicit)."""
-    if spec.capabilities is not None:
-        return effective_mcp_capability_names(spec, caps)
-    return {row.name for row in rows if row.enabled}
-
-
-def effective_mcp_rows_for_discovery(spec: AgentSpec, rows: list[McpServer]) -> list[McpServer]:
-    """DB rows eligible for on-demand UI discovery for this agent."""
-    from deep_agent.capabilities.mcp.ui_discovery import non_builtin_mcp_names_for_spec
-
-    names = non_builtin_mcp_names_for_spec(spec.capabilities)
-    if not names:
-        return []
-    return [row for row in rows if row.enabled and row.name in names]
-
-
 async def load_mcp_rows(stores: DataStores) -> list[McpServer]:
     return await stores.mcp.list_all()
 

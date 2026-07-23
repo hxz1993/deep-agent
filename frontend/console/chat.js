@@ -36,7 +36,6 @@ function mergeUiToolCall(call) {
     widget: call.widget || def.widget || null,
     metadata: call.metadata ?? def.metadata ?? null,
     source: call.source || def.source || null,
-    mcp_server_name: call.mcp_server_name || def.mcp_server_name || null,
     parameters_json_schema: call.parameters_json_schema || def.parameters_json_schema || null,
     result_schema: call.result_schema || def.result_schema || null,
   };

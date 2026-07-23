@@ -1068,24 +1068,10 @@ html, body {
   max-width: 200px;
 }
 
-.ui-discovery-section {
-  margin-top: 16px;
-  padding-top: 16px;
-  border-top: 1px solid var(--border);
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
 .badge.source-manual {
   color: var(--accent);
   background: transparent;
   border-color: var(--accent);
-}
-
-.badge.source-mcp {
-  color: #79c0ff;
-  border-color: rgba(56, 139, 253, 0.45);
 }
 
 .badge.source-builtin {

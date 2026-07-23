@@ -45,7 +45,7 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
             finally:
                 await engine.dispose()
 
-    async def test_migration_019_removes_mcp_ui_discovery_state(self) -> None:
+    async def test_migrations_remove_mcp_ui_discovery_and_add_inspection(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "migration-018.db"
             url = f"sqlite+aiosqlite:///{db_path.as_posix()}"
@@ -53,9 +53,10 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
             with patch("deep_agent.db.url.get_database_url", return_value=url):
                 with patch("deep_agent.db.migrate.get_database_url", return_value=url):
                     await asyncio.to_thread(upgrade_database_sync)
-                    self.assertEqual(self._revision(db_path), "019")
+                    self.assertEqual(self._revision(db_path), "020")
                     self.assertNotIn("agent_ids", self._columns(db_path, "ui_tool_definitions"))
-                    self.assertIn("resource_capabilities", self._columns(db_path, "mcp_servers"))
+                    self.assertIn("inspection", self._columns(db_path, "mcp_servers"))
+                    self.assertNotIn("resource_capabilities", self._columns(db_path, "mcp_servers"))
 
                     await asyncio.to_thread(command.downgrade, migrate._build_alembic_config(), "018")
                     self.assertEqual(self._revision(db_path), "018")
@@ -63,18 +64,91 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
                     self.assertIn("override", self._columns(db_path, "ui_tool_definitions"))
                     self.assertIn("discovered_at", self._columns(db_path, "ui_tool_definitions"))
                     self.assertNotIn("resource_capabilities", self._columns(db_path, "mcp_servers"))
+                    self.assertNotIn("inspection", self._columns(db_path, "mcp_servers"))
 
                     self._seed_legacy_mcp_ui_state(db_path)
 
                     await asyncio.to_thread(command.upgrade, migrate._build_alembic_config(), "head")
-                    self.assertEqual(self._revision(db_path), "019")
+                    self.assertEqual(self._revision(db_path), "020")
                     columns = self._columns(db_path, "ui_tool_definitions")
                     self.assertNotIn("mcp_server_name", columns)
                     self.assertNotIn("override", columns)
                     self.assertNotIn("discovered_at", columns)
-                    self.assertIn("resource_capabilities", self._columns(db_path, "mcp_servers"))
+                    self.assertIn("inspection", self._columns(db_path, "mcp_servers"))
+                    self.assertNotIn("resource_capabilities", self._columns(db_path, "mcp_servers"))
                     self.assertEqual(self._mcp_ui_tool_count(db_path), 0)
                     self.assertNotIn("ui_tools", self._deepcube_config(db_path))
+
+    async def test_migration_020_preserves_resource_snapshot(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "migration-019.db"
+            url = f"sqlite+aiosqlite:///{db_path.as_posix()}"
+
+            with patch("deep_agent.db.url.get_database_url", return_value=url):
+                with patch("deep_agent.db.migrate.get_database_url", return_value=url):
+                    config = migrate._build_alembic_config()
+                    await asyncio.to_thread(command.upgrade, config, "019")
+                    with sqlite3.connect(db_path) as conn:
+                        conn.execute(
+                            """
+                            UPDATE mcp_servers
+                            SET resource_capabilities = ?
+                            WHERE name = 'deepcube'
+                            """,
+                            (
+                                json.dumps(
+                                    {
+                                        "status": "supported",
+                                        "resource_count": 2,
+                                        "template_count": 1,
+                                        "checked_at": "2026-07-23T10:00:00Z",
+                                    }
+                                ),
+                            ),
+                        )
+                        conn.execute(
+                            """
+                            INSERT INTO mcp_servers (
+                                name, transport, config, resource_capabilities,
+                                enabled, created_at, updated_at
+                            ) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                            """,
+                            (
+                                "remote-docs",
+                                "url",
+                                '{"url":"http://example.test/mcp"}',
+                                json.dumps(
+                                    {
+                                        "status": "supported",
+                                        "resource_count": 2,
+                                        "template_count": 1,
+                                        "checked_at": "2026-07-23T10:00:00Z",
+                                    }
+                                ),
+                                1,
+                            ),
+                        )
+                        conn.commit()
+
+                    await asyncio.to_thread(command.upgrade, config, "020")
+                    inspection = self._mcp_inspection(db_path, "deepcube")
+                    self.assertEqual(inspection["status"], "not_applicable")
+                    inspection = self._mcp_inspection(db_path, "remote-docs")
+                    self.assertEqual(inspection["status"], "unknown")
+                    self.assertEqual(inspection["resources"]["status"], "supported")
+                    self.assertEqual(inspection["resources"]["count"], 2)
+                    self.assertEqual(inspection["resources"]["template_count"], 1)
+
+                    await asyncio.to_thread(command.downgrade, config, "019")
+                    with sqlite3.connect(db_path) as conn:
+                        raw = conn.execute(
+                            "SELECT resource_capabilities FROM mcp_servers "
+                            "WHERE name = 'remote-docs'"
+                        ).fetchone()
+                    assert raw is not None
+                    snapshot = json.loads(str(raw[0]))
+                    self.assertEqual(snapshot["resource_count"], 2)
+                    self.assertEqual(snapshot["template_count"], 1)
 
     @staticmethod
     def _revision(db_path: Path) -> str:
@@ -88,6 +162,16 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
         with sqlite3.connect(db_path) as conn:
             rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
         return {str(row[1]) for row in rows}
+
+    @staticmethod
+    def _mcp_inspection(db_path: Path, name: str) -> dict:
+        with sqlite3.connect(db_path) as conn:
+            row = conn.execute(
+                "SELECT inspection FROM mcp_servers WHERE name = ?",
+                (name,),
+            ).fetchone()
+        assert row is not None
+        return json.loads(str(row[0]))
 
     @staticmethod
     def _seed_legacy_mcp_ui_state(db_path: Path) -> None:

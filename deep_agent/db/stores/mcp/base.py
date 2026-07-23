@@ -45,16 +45,16 @@ class McpServerStoreBase(SessionBoundMixin):
             await db.refresh(row)
             return row
 
-    async def update_resource_capabilities(
+    async def update_inspection(
         self,
         name: str,
-        capabilities: dict,
+        inspection: dict,
     ) -> McpServer | None:
         async with self._write() as db:
             row = await self._get_by_name(db, name)
             if row is None:
                 return None
-            row.resource_capabilities = capabilities
+            row.inspection = inspection
             await db.flush()
             await db.refresh(row)
             return row

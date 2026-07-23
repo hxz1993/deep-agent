@@ -19,24 +19,86 @@ if TYPE_CHECKING:
 
 McpUserTransport = Literal["url"]
 McpTransport = Literal["url", "builtin"]
-McpResourceStatus = Literal["supported", "unsupported", "unknown"]
+McpInspectionStatus = Literal[
+    "healthy",
+    "degraded",
+    "unreachable",
+    "unknown",
+    "stale",
+    "not_applicable",
+]
+McpCapabilityStatus = Literal["supported", "unsupported", "error", "unknown"]
 
 
-class McpResourceCapabilities(BaseModel):
-    status: McpResourceStatus = "unknown"
-    resource_count: int = 0
+class McpInspectionError(BaseModel):
+    stage: str
+    type: str
+    message: str
+
+
+class McpInspectionServer(BaseModel):
+    name: str | None = None
+    version: str | None = None
+    protocol_version: str | None = None
+    instructions_available: bool = False
+
+
+class McpToolsInspection(BaseModel):
+    status: McpCapabilityStatus = "unknown"
+    count: int = 0
+    error: McpInspectionError | None = None
+
+
+class McpResourcesInspection(BaseModel):
+    status: McpCapabilityStatus = "unknown"
+    count: int = 0
     template_count: int = 0
+    error: McpInspectionError | None = None
+
+
+class McpInspection(BaseModel):
+    status: McpInspectionStatus = "unknown"
     checked_at: datetime | None = None
-    error: str | None = None
+    duration_ms: int | None = None
+    previous_success_at: datetime | None = None
+    server: McpInspectionServer = Field(default_factory=McpInspectionServer)
+    tools: McpToolsInspection = Field(default_factory=McpToolsInspection)
+    resources: McpResourcesInspection = Field(default_factory=McpResourcesInspection)
+    error: McpInspectionError | None = None
 
     @classmethod
-    def from_value(cls, value: Any) -> "McpResourceCapabilities":
+    def from_value(cls, value: Any, *, transport: str | None = None) -> "McpInspection":
+        if transport == "builtin":
+            return cls(status="not_applicable")
         if not isinstance(value, dict):
             return cls()
         try:
             return cls.model_validate(value)
         except Exception:
-            return cls(error="Stored resource capability metadata is invalid")
+            return cls(
+                error=McpInspectionError(
+                    stage="stored_value",
+                    type="ValidationError",
+                    message="Stored MCP inspection metadata is invalid",
+                )
+            )
+
+
+class McpValueChange(BaseModel):
+    before: str | int | None
+    after: str | int | None
+
+
+class McpInspectionChanges(BaseModel):
+    status: McpValueChange
+    tool_count: McpValueChange
+    resource_count: McpValueChange
+    template_count: McpValueChange
+
+
+class McpInspectionResult(BaseModel):
+    inspection: McpInspection
+    changes: McpInspectionChanges
 
 
 class McpRequestContextConfig(BaseModel):
@@ -111,7 +173,7 @@ class McpServerResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     request_context: McpRequestContextInfo
-    resource_capabilities: McpResourceCapabilities
+    inspection: McpInspection
 
     @classmethod
     def from_row(cls, row: McpServer) -> McpServerResponse:
@@ -133,7 +195,8 @@ class McpServerResponse(BaseModel):
                     else []
                 ),
             ),
-            resource_capabilities=McpResourceCapabilities.from_value(
-                getattr(row, "resource_capabilities", None)
+            inspection=McpInspection.from_value(
+                getattr(row, "inspection", None),
+                transport=row.transport,
             ),
         )

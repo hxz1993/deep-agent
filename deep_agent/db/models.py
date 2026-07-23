@@ -69,7 +69,7 @@ class McpServer(Base):
     name: Mapped[str] = mapped_column(KeyText, primary_key=True)
     transport: Mapped[str] = mapped_column(Text, nullable=False)
     config: Mapped[dict] = mapped_column(JSONType, nullable=False)
-    resource_capabilities: Mapped[dict | None] = mapped_column(JSONType, nullable=True)
+    inspection: Mapped[dict | None] = mapped_column(JSONType, nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     enabled: Mapped[bool] = mapped_column(
         Boolean,

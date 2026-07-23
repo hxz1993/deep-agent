@@ -240,6 +240,45 @@ html, body {
 
 .badge.on { color: var(--success); border-color: var(--success); }
 .badge.off { color: var(--text-dim); }
+.badge.warn { color: #b7791f; border-color: color-mix(in srgb, #b7791f 55%, var(--border)); }
+
+.mcp-inspection {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+  margin-top: 7px;
+}
+
+.mcp-inspection-summary {
+  color: var(--text-dim);
+  font-size: 12px;
+  white-space: nowrap;
+  text-align: right;
+}
+
+.mcp-description-column,
+.mcp-description-cell {
+  min-width: 340px;
+  width: 38%;
+}
+
+.mcp-description-text {
+  color: var(--text);
+  line-height: 1.45;
+}
+
+.mcp-actions-column,
+.mcp-actions-cell {
+  text-align: right !important;
+  white-space: nowrap;
+}
+
+.mcp-row-actions {
+  justify-content: flex-end;
+  white-space: nowrap;
+}
 
 .row-actions {
   display: flex;

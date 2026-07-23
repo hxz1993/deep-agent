@@ -87,7 +87,8 @@ class ConsoleRoutesTest(unittest.TestCase):
 
         paths = self.client.get("/openapi.json").json()["paths"]
         self.assertNotIn("/api/v1/mcp/{name}/ui-tools/refresh", paths)
-        self.assertIn("/api/v1/mcp/{name}/resources/probe", paths)
+        self.assertNotIn("/api/v1/mcp/{name}/resources/probe", paths)
+        self.assertIn("/api/v1/mcp/{name}/inspect", paths)
 
 
 if __name__ == "__main__":

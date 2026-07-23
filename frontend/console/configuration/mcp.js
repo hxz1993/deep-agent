@@ -15,30 +15,116 @@ function inheritedHeadersTooltip(headers) {
     : "允许继承的 Header 由后端白名单控制。";
 }
 
-function resourceCapabilitiesLabel(capabilities) {
-  const info = capabilities || { status: "unknown" };
-  if (info.status === "supported") {
-    const parts = [];
-    if (info.resource_count) parts.push(`${info.resource_count} 个资源`);
-    if (info.template_count) parts.push(`${info.template_count} 个模板`);
-    return { text: parts.join("，") || "支持", className: "on", title: "已检测到 MCP Resource 能力" };
+function inspectionErrorMessage(error) {
+  return error?.message || "";
+}
+
+function inspectionFailureLabel(error) {
+  if (!error) return "";
+  const stages = {
+    initialize: "MCP 初始化失败",
+    ping: "MCP Ping 失败",
+    "tools/list": "工具清单更新失败",
+    "resources/list": "Resource 清单更新失败",
+    "resources/templates/list": "Resource Template 清单更新失败",
+  };
+  const label = stages[error.stage];
+  return label
+    ? `${label}${error.type ? `（${error.type}）` : ""}`
+    : inspectionErrorMessage(error);
+}
+
+function inspectionView(inspection, transport) {
+  const info = inspection || { status: transport === "builtin" ? "not_applicable" : "unknown" };
+  const labels = {
+    healthy: ["正常", "on"],
+    degraded: ["部分异常", "warn"],
+    unreachable: ["无法连接", "off"],
+    unknown: ["待检测", ""],
+    stale: ["配置已变更", "warn"],
+    not_applicable: ["内置运行时", ""],
+  };
+  const [text, className] = labels[info.status] || labels.unknown;
+  const summary = info.status === "not_applicable"
+    ? "运行时按需启动"
+    : `${info.tools?.count || 0} 工具 · ${info.resources?.count || 0} 资源 · ${info.resources?.template_count || 0} 模板`;
+  const server = [info.server?.name, info.server?.version].filter(Boolean).join(" ");
+  const errors = [
+    inspectionErrorMessage(info.error),
+    inspectionErrorMessage(info.tools?.error),
+    inspectionErrorMessage(info.resources?.error),
+  ].filter(Boolean);
+  const details = [
+    server ? `服务：${server}` : "",
+    info.server?.protocol_version ? `协议：${info.server.protocol_version}` : "",
+    info.server ? `Instructions：${info.server.instructions_available ? "可用" : "无"}` : "",
+    info.checked_at ? `检测时间：${formatDate(info.checked_at)}` : "",
+    Number.isFinite(info.duration_ms) ? `耗时：${info.duration_ms} ms` : "",
+    errors.length ? `错误：${errors.join("；")}` : "",
+  ].filter(Boolean);
+  return {
+    text,
+    className,
+    summary,
+    title: details.join("\n") || (info.status === "not_applicable" ? "Builtin MCP 不参与主动检测" : "尚未检测"),
+  };
+}
+
+function inspectionToast(result) {
+  const inspection = result.inspection || {};
+  const changes = result.changes || {};
+  if (inspection.status === "unreachable") {
+    return {
+      message: `检测失败：${inspectionFailureLabel(inspection.error) || "MCP 无法连接"}`,
+      error: true,
+    };
   }
-  if (info.status === "unsupported") {
-    return { text: "无资源", className: "off", title: "MCP 已连接，但未提供 Resource 或 Resource Template" };
+  if (inspection.status === "degraded") {
+    const detail = inspectionFailureLabel(inspection.tools?.error)
+      || inspectionFailureLabel(inspection.resources?.error)
+      || "部分能力清单更新失败";
+    return { message: `连接成功，但${detail}`, error: true };
   }
-  return { text: "待检测", className: "", title: info.error || "尚未完成 Resource 能力检测" };
+
+  const changed = [];
+  [
+    ["工具", changes.tool_count],
+    ["资源", changes.resource_count],
+    ["模板", changes.template_count],
+  ].forEach(([label, item]) => {
+    if (item && item.before !== item.after) changed.push(`${label} ${item.before ?? 0} → ${item.after ?? 0}`);
+  });
+  if (changed.length) return { message: `检测成功：${changed.join("，")}`, error: false };
+  return {
+    message: `检测完成：无变化，共 ${inspection.tools?.count || 0} 个工具、${inspection.resources?.count || 0} 个资源、${inspection.resources?.template_count || 0} 个模板`,
+    error: false,
+  };
+}
+
+function savedInspectionToast(server, action) {
+  const info = server?.inspection || {};
+  if (server?.transport === "builtin") return { message: `MCP 已${action}，已热重载`, error: false };
+  if (!server?.enabled) return { message: `MCP 已${action}，当前未启用，尚未检测`, error: false };
+  if (info.status === "unreachable") {
+    return {
+      message: `MCP 已${action}，但检测失败：${inspectionFailureLabel(info.error) || "无法连接"}`,
+      error: true,
+    };
+  }
+  if (info.status === "degraded") return { message: `MCP 已${action}，但部分能力更新失败`, error: true };
+  return { message: `MCP 已${action}并完成检测`, error: false };
 }
 
 const mcpAdmin = {
   async refresh() {
     const tbody = document.getElementById("mcpTableBody");
     if (!tbody) return;
-    tbody.innerHTML = `<tr><td colspan="8" class="empty-cell">加载中…</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="7" class="empty-cell">加载中…</td></tr>`;
     try {
       const servers = await apiFetch("/api/v1/mcp");
       showDbBanner(false);
       if (!servers.length) {
-        tbody.innerHTML = `<tr><td colspan="8" class="empty-cell">暂无 MCP 服务</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="7" class="empty-cell">暂无 MCP 服务</td></tr>`;
         return;
       }
       const inherited = servers.find((item) => item.request_context?.inherited_headers?.length)
@@ -47,19 +133,24 @@ const mcpAdmin = {
       tbody.innerHTML = servers
         .map(
           (s) => {
-            const resources = resourceCapabilitiesLabel(s.resource_capabilities);
+            const inspection = inspectionView(s.inspection, s.transport);
             return `
         <tr>
           <td><strong>${escapeHtml(s.name)}</strong></td>
           <td><span class="badge">${escapeHtml(MCP_TRANSPORT_LABELS[s.transport] || s.transport)}</span></td>
           <td><span class="badge">${escapeHtml(MCP_CONTEXT_LABELS[s.request_context?.mode] || "继承")}</span></td>
-          <td><span class="badge ${resources.className}" title="${escapeHtml(resources.title)}">${escapeHtml(resources.text)}</span></td>
           <td><span class="badge ${s.enabled ? "on" : "off"}">${s.enabled ? "是" : "否"}</span></td>
-          <td>${escapeHtml(s.description || "—")}</td>
+          <td class="mcp-description-cell">
+            <div class="mcp-description-text">${escapeHtml(s.description || "—")}</div>
+            <div class="mcp-inspection" title="${escapeHtml(inspection.title)}">
+              <span class="badge ${inspection.className}">${escapeHtml(inspection.text)}</span>
+              <span class="mcp-inspection-summary">${escapeHtml(inspection.summary)}</span>
+            </div>
+          </td>
           <td>${escapeHtml(formatDate(s.updated_at))}</td>
-          <td>
-            <div class="row-actions">
-              ${s.transport === "url" ? `<button type="button" data-probe-resources="${escapeHtml(s.name)}">检测资源</button>` : ""}
+          <td class="mcp-actions-cell">
+            <div class="row-actions mcp-row-actions">
+              ${s.transport === "url" ? `<button type="button" data-inspect-mcp="${escapeHtml(s.name)}">检测并更新</button>` : ""}
               <button type="button" data-edit="${escapeHtml(s.name)}">编辑</button>
               <button type="button" class="danger" data-delete="${escapeHtml(s.name)}">删除</button>
             </div>
@@ -72,14 +163,14 @@ const mcpAdmin = {
       tbody.querySelectorAll("[data-edit]").forEach((btn) => {
         btn.addEventListener("click", () => this.openEdit(btn.dataset.edit));
       });
-      tbody.querySelectorAll("[data-probe-resources]").forEach((btn) => {
-        btn.addEventListener("click", () => this.probeResources(btn.dataset.probeResources));
+      tbody.querySelectorAll("[data-inspect-mcp]").forEach((btn) => {
+        btn.addEventListener("click", () => this.inspect(btn.dataset.inspectMcp, btn));
       });
       tbody.querySelectorAll("[data-delete]").forEach((btn) => {
         btn.addEventListener("click", () => this.remove(btn.dataset.delete));
       });
     } catch (err) {
-      tbody.innerHTML = `<tr><td colspan="8" class="empty-cell">${escapeHtml(err.message)}</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="7" class="empty-cell">${escapeHtml(err.message)}</td></tr>`;
     }
   },
 
@@ -110,17 +201,27 @@ const mcpAdmin = {
     });
   },
 
-  async probeResources(name) {
+  async inspect(name, button) {
+    const originalText = button?.textContent || "检测并更新";
+    if (button) {
+      button.disabled = true;
+      button.textContent = "检测中…";
+    }
     try {
       const result = await apiFetch(
-        `/api/v1/mcp/${encodeURIComponent(name)}/resources/probe`,
+        `/api/v1/mcp/${encodeURIComponent(name)}/inspect`,
         { method: "POST" }
       );
-      const label = resourceCapabilitiesLabel(result);
-      showToast(`Resource 检测：${label.text}${result.error ? `；${result.error}` : ""}`, result.status === "unknown");
+      const toast = inspectionToast(result);
+      showToast(toast.message, toast.error);
       await this.refresh();
     } catch (err) {
       showToast(err.message, true);
+    } finally {
+      if (button?.isConnected) {
+        button.disabled = false;
+        button.textContent = originalText;
+      }
     }
   },
 
@@ -281,21 +382,29 @@ const mcpAdmin = {
       payload.transport = transport;
     }
 
+    const submit = form.querySelector('button[type="submit"]');
+    if (submit) {
+      submit.dataset.submittingLabel = transport === "url" && payload.enabled
+        ? "保存并检测中…"
+        : "保存中…";
+    }
     AdminFormFeedback.setSubmitting(form, true);
     try {
       if (state.editingMcp) {
-        await apiFetch(`/api/v1/mcp/${encodeURIComponent(state.editingMcp)}`, {
+        const server = await apiFetch(`/api/v1/mcp/${encodeURIComponent(state.editingMcp)}`, {
           method: "PATCH",
           body: JSON.stringify(payload),
         });
-        showToast("MCP 已更新，已热重载");
+        const toast = savedInspectionToast(server, "更新");
+        showToast(toast.message, toast.error);
       } else {
         payload.name = document.getElementById("mcpName").value.trim();
-        await apiFetch("/api/v1/mcp", {
+        const server = await apiFetch("/api/v1/mcp", {
           method: "POST",
           body: JSON.stringify(payload),
         });
-        showToast("MCP 已创建，已热重载");
+        const toast = savedInspectionToast(server, "创建");
+        showToast(toast.message, toast.error);
       }
       document.getElementById("mcpModal").close();
       await this.refresh();
@@ -321,6 +430,7 @@ const mcpAdmin = {
 };
 
 window.mcpAdmin = mcpAdmin;
+window.__McpInspectionUI = { inspectionView, inspectionToast, savedInspectionToast };
 
 document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("newMcpBtn")?.addEventListener("click", () => mcpAdmin.openCreate());

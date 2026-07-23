@@ -103,7 +103,8 @@ DeepAgent 自研 `capabilities.registry.Capability` 是配置包装对象，负�
 | `mcp/db_loader.py` | 从 `mcp_servers` 构建 MCPToolset |
 | `mcp/builtin.py` | 发现 `mcps/<name>/server.py` |
 | `mcp/toolset_builder.py` | url / stdio / builtin + header 注入 |
-| `mcp/resources.py` | URL MCP Resource 探测与模型代理工具 |
+| `mcp/inspection.py` | URL MCP initialize、Ping、能力清单检测与快照 |
+| `mcp/resources.py` | 按检测快照开放、运行时实时读取的 Resource 代理工具 |
 | `mcp/run_scoped.py` | builtin MCP：按 agent run 租约 HTTP client |
 | `mcp/lease_manager.py` | worker 级 MCP lease + shared registry touch |
 | `ui/registry.py` | UI 工具合并、`ui:<name>` 正向关联、可见性、`prepare_ui_toolset_for_spec` |
@@ -114,7 +115,7 @@ DeepAgent 自研 `capabilities.registry.Capability` 是配置包装对象，负�
 | --- | --- |
 | `chat.py` | `POST /chat`, `POST /chat/stream` |
 | `agents.py` | CRUD `/agents` |
-| `mcp.py` | CRUD `/mcp`、Resource 探测 `/mcp/{name}/resources/probe` |
+| `mcp.py` | CRUD `/mcp`、统一检测 `/mcp/{name}/inspect` |
 | `ui_tools.py` | CRUD `/ui-tools` |
 | `sessions.py` | 会话列表 / 历史 / 删除 |
 | `auxiliary_models.py` | CRUD `/auxiliary-models` |
@@ -136,7 +137,7 @@ DeepAgent 自研 `capabilities.registry.Capability` 是配置包装对象，负�
 | `agents` | DB Agent（UUID PK，name 唯一） |
 | `llm_models` | LLM 模型预设 |
 | `auxiliary_model_configs` | 辅助模型场景（如标题生成）绑定 |
-| `mcp_servers` | MCP transport、config JSON、Resource 能力探测结果 |
+| `mcp_servers` | MCP transport、config JSON、最近一次 inspection 检测快照 |
 | `ui_tool_definitions` | 手工 UI 工具定义；builtin 由代码生成，不写表 |
 | `chat_sessions` | 会话元数据 |
 | `chat_messages` | `ModelMessage` JSONB 历史 |

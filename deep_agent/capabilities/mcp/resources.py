@@ -1,10 +1,7 @@
 from __future__ import annotations
 
-import asyncio
-from datetime import datetime, timezone
 from typing import Any
 
-from loguru import logger
 from pydantic_ai import FunctionToolset, ModelRetry, RunContext
 from pydantic_ai.messages import BinaryContent
 
@@ -12,64 +9,9 @@ from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.spec import AgentSpec
 from deep_agent.capabilities.mcp.toolset_builder import build_resource_client
 from deep_agent.db.models import McpServer
-from deep_agent.schemas.mcp import McpResourceCapabilities
+from deep_agent.schemas.mcp import McpInspection
 
-RESOURCE_PROBE_TIMEOUT_SECONDS = 10.0
 MAX_RESOURCE_TEXT_BYTES = 256 * 1024
-
-
-def _unknown_capabilities(error: str | None = None) -> McpResourceCapabilities:
-    return McpResourceCapabilities(
-        status="unknown",
-        checked_at=datetime.now(timezone.utc),
-        error=error,
-    )
-
-
-async def probe_mcp_resource_capabilities(
-    row: McpServer,
-    *,
-    request_headers: dict[str, str] | None = None,
-) -> McpResourceCapabilities:
-    """Probe one enabled URL MCP without turning a transient failure into no support."""
-    if row.transport != "url":
-        return _unknown_capabilities("Resource detection is only available for URL MCP servers")
-    if not row.enabled:
-        return _unknown_capabilities("MCP server is disabled")
-
-    try:
-        client = build_resource_client(
-            row.name,
-            row.transport,
-            row.config,
-            request_headers=request_headers,
-        )
-
-        async def _probe() -> tuple[list[Any], list[Any]]:
-            async with client:
-                resources = await client.list_resources()
-                templates = await client.list_resource_templates()
-                return resources, templates
-
-        resources, templates = await asyncio.wait_for(
-            _probe(),
-            timeout=RESOURCE_PROBE_TIMEOUT_SECONDS,
-        )
-    except Exception as exc:
-        logger.warning(
-            "MCP resource detection failed for {!r} ({})",
-            row.name,
-            type(exc).__name__,
-        )
-        return _unknown_capabilities(f"Resource detection failed ({type(exc).__name__})")
-
-    return McpResourceCapabilities(
-        status="supported" if resources or templates else "unsupported",
-        resource_count=len(resources),
-        template_count=len(templates),
-        checked_at=datetime.now(timezone.utc),
-        error=None,
-    )
 
 
 def _selected_resource_rows(spec: AgentSpec, rows: list[McpServer]) -> dict[str, McpServer]:
@@ -78,17 +20,20 @@ def _selected_resource_rows(spec: AgentSpec, rows: list[McpServer]) -> dict[str,
         for capability in (spec.capabilities or [])
         if capability.startswith("mcp:")
     }
-    return {
-        row.name: row
-        for row in rows
-        if row.name in selected
-        and row.enabled
-        and row.transport == "url"
-        and McpResourceCapabilities.from_value(
-            getattr(row, "resource_capabilities", None)
-        ).status
-        == "supported"
-    }
+    eligible: dict[str, McpServer] = {}
+    for row in rows:
+        if row.name not in selected or not row.enabled or row.transport != "url":
+            continue
+        inspection = McpInspection.from_value(
+            getattr(row, "inspection", None),
+            transport=row.transport,
+        )
+        if (
+            inspection.status in {"healthy", "degraded"}
+            and inspection.resources.status == "supported"
+        ):
+            eligible[row.name] = row
+    return eligible
 
 
 def _resource_summary(item: Any, *, template: bool = False) -> dict[str, Any]:

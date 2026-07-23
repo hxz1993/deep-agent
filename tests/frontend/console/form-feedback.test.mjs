@@ -56,4 +56,8 @@ test("弹窗错误保留内容并切换提交按钮状态", () => {
   feedback.setSubmitting(form, false);
   assert.equal(submit.disabled, false);
   assert.equal(submit.textContent, "保存");
+
+  submit.dataset.submittingLabel = "保存并检测中…";
+  feedback.setSubmitting(form, true);
+  assert.equal(submit.textContent, "保存并检测中…");
 });

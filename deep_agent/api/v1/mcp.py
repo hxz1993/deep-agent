@@ -3,12 +3,15 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from deep_agent.agent.headers import extract_forward_headers
-from deep_agent.capabilities.mcp.resources import probe_mcp_resource_capabilities
+from deep_agent.capabilities.mcp.inspection import (
+    inspect_mcp_server,
+    mark_mcp_inspection_stale,
+)
 from deep_agent.db.deps import get_mcp_store
 from deep_agent.db.stores.mcp import McpServerStoreBase
 from deep_agent.schemas.mcp import (
     McpBuiltinConfig,
-    McpResourceCapabilities,
+    McpInspectionResult,
     McpServerCreate,
     McpServerResponse,
     McpServerUpdate,
@@ -18,19 +21,20 @@ from deep_agent.schemas.mcp import (
 router = APIRouter()
 
 
-async def _probe_and_store_resources(
+async def _inspect_and_store(
     store: McpServerStoreBase,
     row,
     request: Request,
 ):
-    capabilities = await probe_mcp_resource_capabilities(
+    result = await inspect_mcp_server(
         row,
         request_headers=extract_forward_headers(request),
     )
-    return await store.update_resource_capabilities(
+    updated = await store.update_inspection(
         row.name,
-        capabilities.model_dump(mode="json"),
+        result.inspection.model_dump(mode="json"),
     )
+    return updated, result
 
 
 def _assert_row_mutable(row, body: McpServerUpdate) -> None:
@@ -59,9 +63,10 @@ def _assert_row_mutable(row, body: McpServerUpdate) -> None:
             ) from exc
 
 
-def _should_reprobe_resources(row, body: McpServerUpdate) -> bool:
+def _should_reinspect(row, body: McpServerUpdate) -> bool:
     effective_transport = body.transport or row.transport
-    return effective_transport == "url" and bool(
+    effective_enabled = body.enabled if body.enabled is not None else row.enabled
+    return effective_transport == "url" and effective_enabled and bool(
         {"transport", "config", "enabled"} & body.model_fields_set
     )
 
@@ -101,10 +106,10 @@ async def create_mcp_server(
         row = await store.create_unique(body)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-    probed = None
-    if row.transport == "url":
-        probed = await _probe_and_store_resources(store, row, request)
-    return McpServerResponse.from_row(probed or row)
+    inspected = None
+    if row.transport == "url" and row.enabled:
+        inspected, _ = await _inspect_and_store(store, row, request)
+    return McpServerResponse.from_row(inspected or row)
 
 
 @router.patch("/mcp/{name}", response_model=McpServerResponse)
@@ -120,8 +125,16 @@ async def update_mcp_server(
     _assert_row_mutable(row, body)
     updated = await store.update(name, body)
     assert updated is not None
-    if _should_reprobe_resources(row, body):
-        updated = await _probe_and_store_resources(store, updated, request) or updated
+    config_changed = bool({"transport", "config"} & body.model_fields_set)
+    if config_changed:
+        stale = mark_mcp_inspection_stale(row)
+        updated = await store.update_inspection(
+            name,
+            stale.model_dump(mode="json"),
+        ) or updated
+    if _should_reinspect(row, body):
+        updated, _ = await _inspect_and_store(store, updated, request)
+        updated = updated or row
     return McpServerResponse.from_row(updated)
 
 
@@ -135,16 +148,14 @@ async def delete_mcp_server(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"MCP server not found: {name}")
 
 
-@router.post("/mcp/{name}/resources/probe", response_model=McpResourceCapabilities)
-async def probe_mcp_resources(
+@router.post("/mcp/{name}/inspect", response_model=McpInspectionResult)
+async def inspect_mcp(
     name: str,
     request: Request,
     store: McpServerStoreBase = Depends(get_mcp_store),
-) -> McpResourceCapabilities:
+) -> McpInspectionResult:
     row = await store.get_by_name(name)
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"MCP server not found: {name}")
-    updated = await _probe_and_store_resources(store, row, request)
-    return McpResourceCapabilities.from_value(
-        (updated or row).resource_capabilities,
-    )
+    _, result = await _inspect_and_store(store, row, request)
+    return result

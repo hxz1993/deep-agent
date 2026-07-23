@@ -91,6 +91,28 @@ async function apiFetch(path, options = {}) {
   return resp.json();
 }
 
+function formatDatabaseSchemaVersion(value) {
+  const revision = String(value ?? "").trim();
+  if (!revision) return "数据库配置版本未知";
+  const displayRevision = /^\d+$/.test(revision)
+    ? String(Number.parseInt(revision, 10))
+    : revision;
+  return `数据库配置版本 V${displayRevision}`;
+}
+
+async function loadDatabaseSchemaVersion() {
+  const target = document.getElementById("databaseSchemaVersion");
+  if (!target) return;
+  try {
+    const info = await apiFetch("/api/v1/database-info");
+    target.textContent = formatDatabaseSchemaVersion(info?.schema_version);
+    target.removeAttribute("title");
+  } catch (error) {
+    target.textContent = "数据库配置版本未知";
+    target.title = error instanceof Error ? error.message : String(error);
+  }
+}
+
 async function loadCapabilities() {
   state.capabilities = await apiFetch("/api/v1/tools");
   return state.capabilities;
@@ -162,6 +184,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const baseInput = document.getElementById("baseUrlInput");
   baseInput?.addEventListener("change", () => {
     saveBaseUrl(baseInput.value);
+    loadDatabaseSchemaVersion();
     if (window.agentsAdmin) window.agentsAdmin.refresh();
     if (window.llmModelsAdmin) window.llmModelsAdmin.refresh();
     if (window.auxiliaryModelsAdmin) window.auxiliaryModelsAdmin.refresh();
@@ -175,6 +198,11 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   initTabs();
+  loadDatabaseSchemaVersion();
   loadCapabilities().catch(() => {});
   loadLlmModels().catch(() => {});
 });
+
+window.__DatabaseSchemaVersionUI = {
+  formatDatabaseSchemaVersion,
+};

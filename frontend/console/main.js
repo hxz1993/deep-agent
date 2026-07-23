@@ -1,4 +1,4 @@
-import { initConfiguration } from "./configuration.js?v=20260722-3";
+import { initConfiguration } from "./configuration.js?v=20260723-1";
 import { bindContextControls, refreshIdentity } from "./context.js?v=20260720-1";
 import { initDiagnostics } from "./diagnostics.js?v=20260720-1";
 import { initWorkspace } from "./workspace.js?v=20260721-1";

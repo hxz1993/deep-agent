@@ -38,7 +38,9 @@
     if (!submit) return;
     if (!submit.dataset.label) submit.dataset.label = submit.textContent;
     submit.disabled = submitting;
-    submit.textContent = submitting ? "保存中…" : submit.dataset.label;
+    submit.textContent = submitting
+      ? (submit.dataset.submittingLabel || "保存中…")
+      : submit.dataset.label;
   }
 
   window.AdminFormFeedback = { formatDetail, clear, show, setSubmitting };

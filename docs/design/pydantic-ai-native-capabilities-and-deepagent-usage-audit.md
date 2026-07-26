@@ -1,9 +1,18 @@
 # Pydantic AI 原生能力与 DeepAgent 当前使用情况审计
 
-> 最后核验：2026-07-24
-> DeepAgent 本机运行版本：`pydantic-ai-slim 2.12.0`  
-> Harness 审计版本：`pydantic-ai-harness 0.8.0`，仅下载 wheel 解包审计，未安装到 DeepAgent 解释器  
+> 最后核验：2026-07-26
+>
+> DeepAgent 本机运行版本：`pydantic-ai-slim 2.12.0`
+>
+> Harness 源码审计版本：`0.8.0`；隔离实测版本：`pydantic-ai-harness 0.10.0` + `pydantic-ai-slim 2.14.1`
+>
 > 本文只做源码审计和方案判断，不代表已经引入 Harness、修改数据库或改变运行行为
+
+配套材料：
+
+- [上下文压缩实施方案](context-compaction-implementation-plan.md)
+- [隔离实验工程](../../../agent-labs/deepagent-context-compaction-evaluation/README.md)
+- [上下文压缩实验结果](../../../agent-labs/deepagent-context-compaction-evaluation/docs/test-results.md)
 
 ## 1. 结论
 
@@ -46,6 +55,43 @@ Guardrails、Instrumentation、ToolSearch 也有价值，但优先级低于上�
 
 如果正式引入，建议把 `pydantic-ai-slim` 和 `pydantic-ai-harness` 作为一组锁定并回归验证。当前 `requirements.txt` 使用 `pydantic-ai-slim[...]>=1.0`，不能保证不同环境仍安装 `2.12.0`；Harness 又处于 0.x，不能继续只用无限制的 `>=`。
 
+### 1.4 2026-07-26 隔离实测后的补充结论
+
+本轮不是只看 API，而是在独立解释器中安装并运行：
+
+```text
+pydantic-ai-slim 2.14.1
+pydantic-ai-harness 0.10.0
+```
+
+主要结果：
+
+1. DeepAgent 当前 Core `2.12.0` 不能直接安装 Harness `0.10.0`；后者要求
+   `pydantic-ai-slim>=2.14.1`，正式引入必须把 Core/Harness 作为一组固定版本升级。
+2. DeepAgent 每轮会装载当前 Session 的全部消息和旧 Tool Result，没有条数、字符数或 Token 预算。
+3. 在 DeepAgent 真实历史夹具上，`ClearToolResults` 将估算 Token 从 `3,893` 降到 `1,524`，
+   减少 `60.9%`；长工具历史样本减少 `74.3%`。
+4. 推荐默认使用 `TieredCompaction`，先运行零模型成本的 Clamp、明确键映射的去重和
+   Clear；前三层仍超预算时才调用 SummarizingCompaction。
+5. Harness 生成的摘要会出现在本轮 `result.all_messages()`，但不会出现在 DeepAgent 当前持久化的
+   `result.new_messages()`。因此需要独立的“LLM 上下文投影/压缩检查点”，不能覆盖产品事实历史。
+6. Harness 默认按约 4 字符估算一个 Token。真实夹具使用 `cl100k_base` 得到的数值比默认估算高
+   约 39%；模型表必须补上下文窗口、输出预留和估算方式，不能使用所有模型统一阈值。
+7. Harness 0.10 默认只把每条旧 Tool Return 的前 500 字符交给摘要模型。财务数据关键事实可能
+   位于尾部，不能把 Summary 当成大型工具结果的完整保存机制。
+8. DeepAgent 在 Core `2.14.1` 下完成全量 Python 回归，共 428 项通过、4 项跳过；正式升级仍需
+   补真实 DeepSeek、MCP 和 HITL 链路。
+
+因此路线应进一步收敛为：
+
+```text
+模型元数据和 Token dry-run
+→ ClampOversizedMessages + ClearToolResults
+→ 压缩投影持久化
+→ Tiered Summary
+→ OverflowingToolOutput 外置大型结果
+```
+
 ## 2. 审计依据与版本边界
 
 ### 2.1 当前实际环境
@@ -66,7 +112,7 @@ pydantic-ai-slim[openai,anthropic,google,mcp]>=1.0
 
 `pydantic-ai-slim` 已包含 Agent、Toolset、Capability、消息、Usage 等核心代码；没有安装 `pydantic-ai` 元包不影响当前能力。元包主要用于一次安装更多可选依赖，不是另一套 Agent 引擎。
 
-### 2.2 Harness 0.8.0 的准确边界
+### 2.2 Harness 版本边界
 
 本次直接检查了 `pydantic-ai-harness 0.8.0` wheel。该版本声明：
 
@@ -78,6 +124,10 @@ pydantic-ai-slim[openai,anthropic,google,mcp]>=1.0
 0.8.0 wheel 已包含 Compaction、Overflowing Tool Output、Memory、StepPersistence、Guardrails、Planning、SubAgents、FileSystem、Shell、CodeMode、Context、DynamicWorkflow 等模块。
 
 需要纠正一个容易误判的点：**Harness 0.8.0 wheel 没有已发布的 Skills 模块**。上游能力矩阵中的 Skills 仍属于持续建设项，不能把它当成当前可替换 DeepAgent Skill 的稳定现成能力。
+
+后续隔离实验使用 Harness `0.10.0`。该版本要求 `pydantic-ai-slim>=2.14.1`，不能直接叠加到
+DeepAgent 当前 Core `2.12.0` 上。实验时同时检查了已发布的 `0.11.0`，其 Compaction 目录与
+`0.10.0` 没有源码差异，但本审计只把 `0.10.0` 视为完整测试基线。
 
 ## 3. DeepAgent 的 Agent 运行机制
 
@@ -599,7 +649,7 @@ tests/unit/ + tests/integration/
 
 建议：
 
-1. 固定 `pydantic-ai-harness==0.8.0` 与已验证的 Core 版本；通过 Feature Flag 只给一个测试 Agent 开启。
+1. 固定 `pydantic-ai-harness==0.10.0` 与 `pydantic-ai-slim==2.14.1`；通过 Feature Flag 只给一个测试 Agent 开启。
 2. 先启用 `ClearToolResults`，保留最近若干 Tool Pair。
 3. 仍超预算时启用 `SummarizingCompaction`。
 4. 摘要模型优先复用现有辅助模型体系，新增 `context_summary` use case；该表本身无需新字段，只需扩展已知 use case 和默认配置。

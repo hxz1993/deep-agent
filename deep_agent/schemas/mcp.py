@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from typing import TYPE_CHECKING
 
@@ -18,7 +19,8 @@ if TYPE_CHECKING:
     from deep_agent.db.models import McpServer
 
 McpUserTransport = Literal["url"]
-McpTransport = Literal["url", "builtin"]
+McpTransport = Literal["url", "builtin", "stdio"]
+MCP_NAME_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,190}$")
 McpInspectionStatus = Literal[
     "healthy",
     "degraded",
@@ -106,12 +108,23 @@ class McpRequestContextConfig(BaseModel):
 
 
 class McpUrlConfig(BaseModel):
-    url: str = Field(..., description="Remote MCP server URL (SSE or streamable HTTP).")
+    model_config = ConfigDict(extra="allow")
+
+    url: AnyHttpUrl = Field(..., description="Remote MCP server URL (SSE or streamable HTTP).")
     headers: dict[str, str] | None = Field(default=None, description="Optional HTTP headers.")
     request_context: McpRequestContextConfig | None = Field(
         default=None,
         description="Request context policy. Missing legacy values inherit the current request.",
     )
+    init_timeout: float | None = Field(
+        default=None,
+        gt=0,
+        description="Optional positive MCP initialization timeout in seconds.",
+    )
+
+
+def normalize_mcp_url_config(config: dict[str, Any]) -> dict[str, Any]:
+    return McpUrlConfig.model_validate(config).model_dump(mode="json", exclude_none=True)
 
 
 class McpRequestContextInfo(BaseModel):
@@ -136,9 +149,17 @@ class McpServerCreate(BaseModel):
     description: str | None = Field(default=None, description="Optional human-readable description.")
     enabled: bool = Field(default=True, description="Whether this server is loaded at runtime.")
 
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value: str) -> str:
+        value = value.strip()
+        if not MCP_NAME_PATTERN.fullmatch(value):
+            raise ValueError("name must match ^[A-Za-z][A-Za-z0-9_-]{0,190}$")
+        return value
+
     @model_validator(mode="after")
     def validate_config(self) -> McpServerCreate:
-        McpUrlConfig.model_validate(self.config)
+        self.config = normalize_mcp_url_config(self.config)
         if "request_context" not in self.config:
             self.config = {
                 **self.config,
@@ -155,12 +176,15 @@ class McpServerUpdate(BaseModel):
 
     @model_validator(mode="after")
     def validate_config(self) -> McpServerUpdate:
+        for field in ("transport", "config", "enabled"):
+            if field in self.model_fields_set and getattr(self, field) is None:
+                raise ValueError(f"{field} cannot be null")
         if self.config is None:
             return self
         # Builtin rows PATCH config without transport; API validates shape per stored row.
         if self.transport is None:
             return self
-        McpUrlConfig.model_validate(self.config)
+        self.config = normalize_mcp_url_config(self.config)
         return self
 
 

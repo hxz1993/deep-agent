@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from deep_agent.schemas.llm_model import LlmModelSummary
 
@@ -14,6 +14,7 @@ if TYPE_CHECKING:
 LEGACY_MAX_REQUESTS_MESSAGE = (
     "max_requests 已改为全局配置，请使用环境变量 DEEP_AGENT_MAX_REQUESTS"
 )
+AGENT_REQUIRED_FIELDS = ("name", "model_id", "prompt")
 
 
 class _RejectLegacyMaxRequests(BaseModel):
@@ -36,7 +37,7 @@ class AgentChatRequest(BaseModel):
 
 
 class AgentCreate(_RejectLegacyMaxRequests):
-    name: str = Field(..., description="Unique agent display name.")
+    name: str = Field(..., max_length=191, description="Unique agent display name.")
     model_id: str = Field(..., description="LLM model preset id.")
     prompt: str = Field(..., description="System prompt / instructions.")
     temperature: float | None = Field(
@@ -50,13 +51,40 @@ class AgentCreate(_RejectLegacyMaxRequests):
         description="Capability names to enable. Null uses default capabilities and no extension UI tools.",
     )
 
+    @field_validator(*AGENT_REQUIRED_FIELDS)
+    @classmethod
+    def normalize_required_text(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("must not be blank")
+        return normalized
+
 
 class AgentUpdate(_RejectLegacyMaxRequests):
-    name: str | None = None
+    name: str | None = Field(default=None, max_length=191)
     model_id: str | None = None
     prompt: str | None = None
     temperature: float | None = Field(default=None, ge=0, le=2)
     capabilities: list[str] | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_null_required_fields(cls, value):
+        if isinstance(value, dict):
+            for field in AGENT_REQUIRED_FIELDS:
+                if field in value and value[field] is None:
+                    raise ValueError(f"{field} cannot be null")
+        return value
+
+    @field_validator(*AGENT_REQUIRED_FIELDS)
+    @classmethod
+    def normalize_required_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("must not be blank")
+        return normalized
 
 
 class AgentResponse(BaseModel):

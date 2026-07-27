@@ -1,5 +1,6 @@
 import { normalizeOption, normalizeStructuredFields, validateUiToolCall } from "./hitl.js?v=20260720-1";
 import { parseSseBlock, readSse } from "./protocol.js?v=20260720-1";
+import { formatSessionIdSubtitle } from "./session-display.js?v=20260728-2";
 
 /* ------------------------------------------------------------------ *
  * deep-agent 前端 —— 适配 FastAPI /api/v1/chat/stream (SSE over POST)
@@ -744,7 +745,6 @@ async function switchSession(s) {
     if (el.agentSelect) el.agentSelect.value = state.agentId;
   }
   restoreSessionModel(session);
-  el.sessionBadge.textContent = session.id.slice(0, 8);
   el.chatTitle.textContent = session.title || "对话";
   updateChatHeader();
   updateAgentSelectState();
@@ -1223,11 +1223,7 @@ function updateComposerModelInfo() {
 }
 
 function updateChatHeader() {
-  if (state.agentId) {
-    el.sessionBadge.textContent = state.sessionId
-      ? state.sessionId.slice(0, 8)
-      : agentNameById(state.agentId);
-  }
+  el.sessionBadge.textContent = formatSessionIdSubtitle(state.sessionId);
   updateComposerModelInfo();
 }
 

@@ -1,7 +1,10 @@
-import { initConfiguration } from "./configuration.js?v=20260727-1";
+import {
+  initConfiguration,
+  restoreConfigurationTab,
+} from "./configuration.js?v=20260728-3";
 import { bindContextControls, refreshIdentity } from "./context.js?v=20260720-1";
 import { initDiagnostics } from "./diagnostics.js?v=20260720-1";
-import { initWorkspace } from "./workspace.js?v=20260721-1";
+import { initWorkspace } from "./workspace.js?v=20260728-2";
 
 const VALID_PAGES = new Set(["workspace", "configuration", "diagnostics"]);
 let authenticated = false;
@@ -33,6 +36,7 @@ async function showPage(page, { updateHash = true } = {}) {
   if (updateHash && location.hash !== `#/${next}`) history.replaceState(null, "", `#/${next}`);
   if (authenticated && next === "configuration") {
     await initConfiguration().catch((error) => toast(error.message, true));
+    restoreConfigurationTab();
   }
   window.lucide?.createIcons();
 }

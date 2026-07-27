@@ -7,7 +7,11 @@ from unittest.mock import patch
 from pydantic_ai.models.test import TestModel
 
 from tests.helpers.request_identity import TEST_USER_ID, install_test_user_header
-from tests.integration.helpers.chat import async_echo_chat_app, read_chat_stream, test_chat_client
+from tests.integration.helpers.chat import (
+    async_echo_chat_app,
+    read_chat_stream,
+    test_chat_client as _test_chat_client,
+)
 
 
 class ChatHeaderForwardingStreamTest(unittest.IsolatedAsyncioTestCase):
@@ -45,7 +49,7 @@ class ChatHeaderForwardingTests(unittest.TestCase):
     """HTTP → AgentRunner → MCP 全链路；见 integration/README.md。"""
 
     def test_chat_api_forwards_request_headers_to_mcp_tool(self) -> None:
-        with test_chat_client() as (client, record_file):
+        with _test_chat_client() as (client, record_file):
             response = client.post(
                 "/api/v1/chat",
                 json={
@@ -71,7 +75,7 @@ class ChatHeaderForwardingTests(unittest.TestCase):
         )
 
     def test_chat_api_forwards_authenticated_user_without_other_headers(self) -> None:
-        with test_chat_client() as (client, record_file):
+        with _test_chat_client() as (client, record_file):
             response = client.post(
                 "/api/v1/chat",
                 json={
@@ -85,7 +89,7 @@ class ChatHeaderForwardingTests(unittest.TestCase):
         self.assertEqual(recorded, {"user": TEST_USER_ID})
 
     def test_chat_api_isolated_mcp_keeps_static_identity(self) -> None:
-        with test_chat_client(
+        with _test_chat_client(
             request_context_mode="isolated",
             static_headers={"User": "static-mcp-user", "X-MCP-Token": "service-token"},
         ) as (client, record_file):

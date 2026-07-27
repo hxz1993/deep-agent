@@ -50,12 +50,20 @@ function loadGlobalSettingsUi() {
   return window.__GlobalSettingsUI;
 }
 
-test("全局配置是配置中心默认页且 Agent 表单不再包含请求上限", () => {
+test("Agent 是配置中心默认页且全局配置保持在辅助模型后", () => {
   assert.match(
+    indexHtml,
+    /class="tab resource-btn active" data-tab="agents"/,
+  );
+  assert.match(templateHtml, /class="panel active" id="panel-agents"/);
+  assert.doesNotMatch(
     indexHtml,
     /class="tab resource-btn active" data-tab="global-settings"/,
   );
-  assert.match(templateHtml, /id="panel-global-settings"/);
+  assert.doesNotMatch(
+    templateHtml,
+    /class="panel active global-settings-panel" id="panel-global-settings"/,
+  );
   assert.match(templateHtml, /当前页面只读；修改环境变量并重启 DeepAgent 后生效/);
   assert.doesNotMatch(templateHtml, /agentMaxRequests|max_requests|最大请求次数（可选）/);
   assert.ok(

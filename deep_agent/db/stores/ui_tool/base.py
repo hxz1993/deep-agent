@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from sqlalchemy import delete, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from deep_agent.db.models import UiToolDefinition
@@ -27,21 +28,24 @@ class UiToolStoreBase(SessionBoundMixin):
             )
 
     async def create_manual(self, data: UiToolCreate) -> UiToolDefinition:
-        async with self._write() as db:
-            row = UiToolDefinition(
-                name=data.name,
-                description=data.description,
-                parameters_json_schema=data.parameters_json_schema,
-                widget=data.widget,
-                result_schema=data.result_schema,
-                metadata_=data.metadata,
-                source="manual",
-                enabled=data.enabled,
-            )
-            db.add(row)
-            await db.flush()
-            await db.refresh(row)
-            return row
+        try:
+            async with self._write() as db:
+                row = UiToolDefinition(
+                    name=data.name,
+                    description=data.description,
+                    parameters_json_schema=data.parameters_json_schema,
+                    widget=data.widget,
+                    result_schema=data.result_schema,
+                    metadata_=data.metadata,
+                    source="manual",
+                    enabled=data.enabled,
+                )
+                db.add(row)
+                await db.flush()
+                await db.refresh(row)
+                return row
+        except IntegrityError as exc:
+            raise ValueError(f"UI tool already exists: {data.name}") from exc
 
     async def update(self, name: str, data: UiToolUpdate) -> UiToolDefinition | None:
         async with self._write() as db:

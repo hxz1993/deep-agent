@@ -1,4 +1,5 @@
 const MAX_EVENTS = 80;
+const WORKSPACE_ASSET_VERSION = "20260728-2";
 
 let initialized = false;
 let eventRows = [];
@@ -24,7 +25,9 @@ function truncate(value, length = 1200) {
 }
 
 async function fetchLegacyPage() {
-  const response = await fetch(new URL("./workspace-template.html", import.meta.url));
+  const url = new URL("./workspace-template.html", import.meta.url);
+  url.searchParams.set("v", WORKSPACE_ASSET_VERSION);
+  const response = await fetch(url);
   if (!response.ok) throw new Error(`无法加载工作台结构：HTTP ${response.status}`);
   return new DOMParser().parseFromString(await response.text(), "text/html");
 }
@@ -270,7 +273,7 @@ export async function initWorkspace() {
   initialized = true;
   const source = await fetchLegacyPage();
   installLegacyDom(source);
-  await import("./chat.js?v=20260720-1");
+  await import(`./chat.js?v=${WORKSPACE_ASSET_VERSION}`);
   bindWorkspaceControls();
   renderAgents();
   renderInspector();

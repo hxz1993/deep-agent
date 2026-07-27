@@ -35,6 +35,14 @@ function inspectionFailureLabel(error) {
 }
 
 function inspectionView(inspection, transport) {
+  if (transport === "stdio") {
+    return {
+      text: "已停止支持",
+      className: "off",
+      summary: "请迁移为 URL MCP",
+      title: "历史 stdio MCP 只能查看或删除",
+    };
+  }
   const info = inspection || { status: transport === "builtin" ? "not_applicable" : "unknown" };
   const labels = {
     healthy: ["正常", "on"],
@@ -115,6 +123,13 @@ function savedInspectionToast(server, action) {
   return { message: `MCP 已${action}并完成检测`, error: false };
 }
 
+function validateMcpConfig(transport, config) {
+  if (transport === "url" && !String(config?.url || "").trim()) {
+    return "MCP URL 不能为空";
+  }
+  return null;
+}
+
 const mcpAdmin = {
   async refresh() {
     const tbody = document.getElementById("mcpTableBody");
@@ -151,7 +166,7 @@ const mcpAdmin = {
           <td class="mcp-actions-cell">
             <div class="row-actions mcp-row-actions">
               ${s.transport === "url" ? `<button type="button" data-inspect-mcp="${escapeHtml(s.name)}">检测并更新</button>` : ""}
-              <button type="button" data-edit="${escapeHtml(s.name)}">编辑</button>
+              ${s.transport === "stdio" ? "" : `<button type="button" data-edit="${escapeHtml(s.name)}">编辑</button>`}
               <button type="button" class="danger" data-delete="${escapeHtml(s.name)}">删除</button>
             </div>
           </td>
@@ -214,7 +229,7 @@ const mcpAdmin = {
       );
       const toast = inspectionToast(result);
       showToast(toast.message, toast.error);
-      await this.refresh();
+      await refreshAfterSuccessfulMutation("MCP 检测已完成", () => this.refresh());
     } catch (err) {
       showToast(err.message, true);
     } finally {
@@ -228,27 +243,36 @@ const mcpAdmin = {
   setTransportSelectMode(mode) {
     const select = document.getElementById("mcpTransport");
     const builtinOption = select?.querySelector('option[value="builtin"]');
-    if (!select || !builtinOption) return;
+    const stdioOption = select?.querySelector('option[value="stdio"]');
+    if (!select || !builtinOption || !stdioOption) return;
 
     if (mode === "create") {
       builtinOption.hidden = true;
       builtinOption.disabled = true;
+      stdioOption.hidden = true;
+      stdioOption.disabled = true;
       select.disabled = false;
       return;
     }
     if (mode === "edit-builtin") {
       builtinOption.hidden = false;
       builtinOption.disabled = false;
+      stdioOption.hidden = true;
+      stdioOption.disabled = true;
       select.disabled = true;
       return;
     }
     builtinOption.hidden = true;
     builtinOption.disabled = true;
+    stdioOption.hidden = true;
+    stdioOption.disabled = true;
     select.disabled = false;
   },
 
   toggleTransportFields() {
     const transport = document.getElementById("mcpTransport").value;
+    const urlInput = document.getElementById("mcpUrl");
+    if (urlInput) urlInput.required = transport === "url";
     document.getElementById("mcpUrlFields").classList.toggle("hidden", transport !== "url");
     document.getElementById("mcpStdioFields").classList.toggle("hidden", transport !== "stdio");
     document.getElementById("mcpBuiltinFields").classList.toggle("hidden", transport !== "builtin");
@@ -372,6 +396,12 @@ const mcpAdmin = {
       AdminFormFeedback.show(form, `配置 JSON 无效: ${err.message}`);
       return;
     }
+    const validationError = validateMcpConfig(transport, config);
+    if (validationError) {
+      AdminFormFeedback.show(form, validationError);
+      document.getElementById("mcpUrl")?.focus();
+      return;
+    }
 
     const payload = {
       config,
@@ -389,6 +419,7 @@ const mcpAdmin = {
         : "保存中…";
     }
     AdminFormFeedback.setSubmitting(form, true);
+    let saved = false;
     try {
       if (state.editingMcp) {
         const server = await apiFetch(`/api/v1/mcp/${encodeURIComponent(state.editingMcp)}`, {
@@ -406,13 +437,18 @@ const mcpAdmin = {
         const toast = savedInspectionToast(server, "创建");
         showToast(toast.message, toast.error);
       }
+      saved = true;
       document.getElementById("mcpModal").close();
-      await this.refresh();
-      await loadCapabilities();
     } catch (err) {
       AdminFormFeedback.show(form, err);
     } finally {
       AdminFormFeedback.setSubmitting(form, false);
+    }
+    if (saved) {
+      await refreshAfterSuccessfulSave("MCP 配置", async () => {
+        await this.refresh();
+        await loadCapabilities();
+      });
     }
   },
 
@@ -421,8 +457,10 @@ const mcpAdmin = {
     try {
       await apiFetch(`/api/v1/mcp/${encodeURIComponent(name)}`, { method: "DELETE" });
       showToast("MCP 已删除，已热重载");
-      await this.refresh();
-      await loadCapabilities();
+      await refreshAfterSuccessfulMutation("MCP 已删除", async () => {
+        await this.refresh();
+        await loadCapabilities();
+      });
     } catch (err) {
       showToast(err.message, true);
     }
@@ -430,7 +468,12 @@ const mcpAdmin = {
 };
 
 window.mcpAdmin = mcpAdmin;
-window.__McpInspectionUI = { inspectionView, inspectionToast, savedInspectionToast };
+window.__McpInspectionUI = {
+  inspectionView,
+  inspectionToast,
+  savedInspectionToast,
+  validateMcpConfig,
+};
 
 document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("newMcpBtn")?.addEventListener("click", () => mcpAdmin.openCreate());

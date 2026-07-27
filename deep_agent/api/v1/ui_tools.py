@@ -5,7 +5,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from deep_agent.capabilities.ui.builtin import builtin_ui_records
 from deep_agent.capabilities.ui.registry import merge_definitions
 from deep_agent.capabilities.ui.types import UIToolRecord
-from deep_agent.db.deps import get_ui_tool_store
+from deep_agent.db.deps import get_agent_store, get_ui_tool_store
+from deep_agent.db.stores.agent import AgentStoreBase
 from deep_agent.db.stores.ui_tool import UiToolStoreBase
 from deep_agent.schemas.ui_tools import UiToolCreate, UiToolListResponse, UiToolResponse, UiToolUpdate
 
@@ -75,7 +76,10 @@ async def create_ui_tool(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"UI tool already exists: {body.name}",
         )
-    row = await store.create_manual(body)
+    try:
+        row = await store.create_manual(body)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     return UiToolResponse.from_row(row)
 
 
@@ -99,10 +103,21 @@ async def update_ui_tool(
 async def delete_ui_tool(
     name: str,
     store: UiToolStoreBase = Depends(get_ui_tool_store),
+    agent_store: AgentStoreBase = Depends(get_agent_store),
 ) -> None:
     row = await store.get_by_name(name)
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"UI tool not found: {name}")
     if row.source == "builtin":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Builtin UI tools cannot be deleted")
+    referenced_by = await agent_store.list_referencing_capability(f"ui:{name}")
+    if referenced_by:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "message": "UI 工具正在被 Agent 引用，不能删除",
+                "resource": name,
+                "referenced_by": [agent.name for agent in referenced_by],
+            },
+        )
     await store.delete(name)

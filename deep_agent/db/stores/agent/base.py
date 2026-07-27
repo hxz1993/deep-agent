@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from sqlalchemy import delete, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from deep_agent.db.models import Agent
@@ -22,36 +23,47 @@ class AgentStoreBase(SessionBoundMixin):
             return await self._list_all(db)
 
     async def create_unique(self, data: AgentCreate) -> Agent:
-        async with self._write() as db:
-            if await self._get_by_name(db, data.name) is not None:
-                raise ValueError(f"Agent already exists: {data.name}")
-            row = Agent(
-                name=data.name,
-                model_id=data.model_id,
-                temperature=data.temperature,
-                capabilities=data.capabilities,
-                prompt=data.prompt,
-            )
-            db.add(row)
-            await db.flush()
-            await db.refresh(row)
-            return row
+        try:
+            async with self._write() as db:
+                if await self._get_by_name(db, data.name) is not None:
+                    raise ValueError(f"Agent already exists: {data.name}")
+                row = Agent(
+                    name=data.name,
+                    model_id=data.model_id,
+                    temperature=data.temperature,
+                    capabilities=data.capabilities,
+                    prompt=data.prompt,
+                )
+                db.add(row)
+                await db.flush()
+                await db.refresh(row)
+                return row
+        except IntegrityError as exc:
+            raise ValueError(f"Agent write conflict: {data.name}") from exc
 
     async def update_unique(self, agent_id: str, data: AgentUpdate) -> Agent | None:
-        async with self._write() as db:
-            row = await self._get_by_id(db, agent_id)
-            if row is None:
-                return None
-            if data.name is not None and data.name != row.name:
-                conflict = await self._get_by_name(db, data.name)
-                if conflict is not None:
-                    raise ValueError(f"Agent already exists: {data.name}")
-            updates = data.model_dump(exclude_unset=True)
-            for field, value in updates.items():
-                setattr(row, field, value)
-            await db.flush()
-            await db.refresh(row)
-            return row
+        try:
+            async with self._write() as db:
+                row = await self._get_by_id(db, agent_id)
+                if row is None:
+                    return None
+                if data.name is not None and data.name != row.name:
+                    conflict = await self._get_by_name(db, data.name)
+                    if conflict is not None:
+                        raise ValueError(f"Agent already exists: {data.name}")
+                updates = data.model_dump(exclude_unset=True)
+                for field, value in updates.items():
+                    setattr(row, field, value)
+                await db.flush()
+                await db.refresh(row)
+                return row
+        except IntegrityError as exc:
+            raise ValueError(f"Agent write conflict: {agent_id}") from exc
+
+    async def list_referencing_capability(self, capability: str) -> list[Agent]:
+        async with self._read() as db:
+            rows = await self._list_all(db)
+            return [row for row in rows if capability in (row.capabilities or [])]
 
     async def delete(self, agent_id: str) -> bool:
         async with self._write() as db:

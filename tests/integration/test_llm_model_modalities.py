@@ -112,6 +112,22 @@ class LlmModelModalitiesIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(body["input_modalities"], ["text", "image"])
         self.assertEqual(body["capabilities_source"], "models_dev")
 
+    async def test_create_succeeds_when_optional_metadata_refresh_fails(self) -> None:
+        with patch(
+            "deep_agent.api.v1.llm_models._row_after_auto_refresh",
+            side_effect=RuntimeError("metadata refresh failed"),
+        ):
+            async with AsyncClient(transport=self._transport, base_url="http://test") as client:
+                response = await client.post(
+                    "/api/v1/llm-models",
+                    json={"name": "saved-before-refresh", "model": "private:model"},
+                )
+
+        self.assertEqual(response.status_code, 201)
+        body = response.json()
+        self.assertEqual(body["name"], "saved-before-refresh")
+        self.assertIsNotNone(await get_context().stores.llm_model.get_by_name("saved-before-refresh"))
+
     @patch(
         "deep_agent.agent.models.models_dev.fetch_models_dev_modalities",
         new=mock_fetch_models_dev_modalities,

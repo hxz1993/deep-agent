@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 from sqlalchemy import delete, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from deep_agent.db.models import McpServer
 from deep_agent.db.stores._session import SessionBoundMixin
 from deep_agent.schemas.mcp import McpServerCreate, McpServerUpdate
+
+_INSPECTION_UNSET = object()
 
 
 class McpServerStoreBase(SessionBoundMixin):
@@ -17,7 +20,12 @@ class McpServerStoreBase(SessionBoundMixin):
         async with self._read() as db:
             return await self._list_all(db)
 
-    async def create_unique(self, data: McpServerCreate) -> McpServer:
+    async def create_unique(
+        self,
+        data: McpServerCreate,
+        *,
+        inspection: dict | None = None,
+    ) -> McpServer:
         async with self._write() as db:
             if await self._get_by_name(db, data.name) is not None:
                 raise ValueError(f"MCP server already exists: {data.name}")
@@ -27,13 +35,23 @@ class McpServerStoreBase(SessionBoundMixin):
                 config=data.config,
                 description=data.description,
                 enabled=data.enabled,
+                inspection=inspection,
             )
             db.add(row)
-            await db.flush()
+            try:
+                await db.flush()
+            except IntegrityError as exc:
+                raise ValueError(f"MCP server already exists: {data.name}") from exc
             await db.refresh(row)
             return row
 
-    async def update(self, name: str, data: McpServerUpdate) -> McpServer | None:
+    async def update(
+        self,
+        name: str,
+        data: McpServerUpdate,
+        *,
+        inspection: dict | None | object = _INSPECTION_UNSET,
+    ) -> McpServer | None:
         async with self._write() as db:
             row = await self._get_by_name(db, name)
             if row is None:
@@ -41,6 +59,8 @@ class McpServerStoreBase(SessionBoundMixin):
             updates = data.model_dump(exclude_unset=True)
             for field, value in updates.items():
                 setattr(row, field, value)
+            if inspection is not _INSPECTION_UNSET:
+                row.inspection = inspection
             await db.flush()
             await db.refresh(row)
             return row

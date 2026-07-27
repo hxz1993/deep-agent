@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -12,6 +13,7 @@ from deep_agent.schemas.llm_model import LlmModelCreate, LlmModelResponse, LlmMo
 from deep_agent.schemas.model_catalog import ModelCatalogItem, ModelCatalogResponse
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 def _parse_model_id(model_id: str) -> str:
@@ -35,6 +37,17 @@ async def _refresh_auto_modalities(store: LlmModelStoreBase, model_id: str) -> N
 async def _row_after_auto_refresh(store: LlmModelStoreBase, model_id: str):
     await _refresh_auto_modalities(store, model_id)
     return await store.get_by_id(model_id)
+
+
+async def _best_effort_row_after_auto_refresh(store: LlmModelStoreBase, row):
+    try:
+        return await _row_after_auto_refresh(store, row.id) or row
+    except Exception:
+        logger.warning(
+            "Model configuration %s was saved; automatic modality refresh failed and was skipped",
+            row.id,
+        )
+        return row
 
 
 @router.get("/llm-models", response_model=list[LlmModelResponse])
@@ -131,9 +144,7 @@ async def create_llm_model(
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     if not body.input_modalities:
-        refreshed = await _row_after_auto_refresh(store, row.id)
-        if refreshed is not None:
-            row = refreshed
+        row = await _best_effort_row_after_auto_refresh(store, row)
     return await _response_for_row(store, row)
 
 
@@ -151,9 +162,7 @@ async def update_llm_model(
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"LLM model not found: {model_id}")
     if body.modalities_mode == "auto":
-        refreshed = await _row_after_auto_refresh(store, normalized_id)
-        if refreshed is not None:
-            row = refreshed
+        row = await _best_effort_row_after_auto_refresh(store, row)
     return await _response_for_row(store, row)
 
 

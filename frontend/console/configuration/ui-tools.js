@@ -363,8 +363,13 @@ const uiToolsAdmin = {
     const widget = this.getWidgetValue();
     const enabled = document.getElementById("uiToolEnabled").checked;
     const description = document.getElementById("uiToolDescription").value.trim();
+    if (!description) {
+      AdminFormFeedback.show(form, "描述不能为空");
+      return;
+    }
 
     AdminFormFeedback.setSubmitting(form, true);
+    let saved = false;
     try {
       if (this.editingName) {
         await apiFetch(`/api/v1/ui-tools/${encodeURIComponent(this.editingName)}`, {
@@ -394,13 +399,18 @@ const uiToolsAdmin = {
         });
         showToast("已注册");
       }
+      saved = true;
       document.getElementById("uiToolModal").close();
-      await this.refresh();
-      await loadCapabilities();
     } catch (err) {
       AdminFormFeedback.show(form, err);
     } finally {
       AdminFormFeedback.setSubmitting(form, false);
+    }
+    if (saved) {
+      await refreshAfterSuccessfulSave("UI 工具配置", async () => {
+        await this.refresh();
+        await loadCapabilities();
+      });
     }
   },
 
@@ -413,8 +423,10 @@ const uiToolsAdmin = {
     try {
       await apiFetch(`/api/v1/ui-tools/${encodeURIComponent(name)}`, { method: "DELETE" });
       showToast("已删除");
-      await this.refresh();
-      await loadCapabilities();
+      await refreshAfterSuccessfulMutation("UI 工具已删除", async () => {
+        await this.refresh();
+        await loadCapabilities();
+      });
     } catch (err) {
       showToast(err.message, true);
     }

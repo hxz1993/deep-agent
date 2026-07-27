@@ -11,7 +11,13 @@ from pydantic_ai.models.test import TestModel
 
 from deep_agent.api.v1 import api_router
 from deep_agent.schemas.ui_tools import UiToolCreate
-from tests.integration.helpers.chat import aclose_test_context, configure_test_app_async, mock_request_disconnect, parse_sse_events, testing_data_stores_async
+from tests.integration.helpers.chat import (
+    aclose_test_context,
+    configure_test_app_async,
+    mock_request_disconnect,
+    parse_sse_events,
+    testing_data_stores_async as _testing_data_stores_async,
+)
 
 
 async def _seed_manual_ui_tool(stores, *, name: str, metadata: dict) -> None:
@@ -43,7 +49,7 @@ async def ui_tool_stream_app(
     metadata: dict,
 ) -> AsyncIterator[tuple[ASGITransport, TestModel]]:
     """AsyncClient transport for /chat/stream; TestClient.stream blocks indefinitely."""
-    stores, engine, session_factory = await testing_data_stores_async(mcp_rows=[])
+    stores, engine, session_factory = await _testing_data_stores_async(mcp_rows=[])
     await _seed_manual_ui_tool(stores, name=tool_name, metadata=metadata)
 
     app = FastAPI()

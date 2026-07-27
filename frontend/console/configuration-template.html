@@ -8,7 +8,7 @@
     <div class="toast hidden" id="toast"></div>
 
     <!-- Read-only global settings panel -->
-    <section class="panel active global-settings-panel" id="panel-global-settings">
+    <section class="panel global-settings-panel" id="panel-global-settings">
       <div class="panel-toolbar">
         <div>
           <h2>全局配置</h2>
@@ -25,7 +25,7 @@
     </section>
 
     <!-- Agent panel -->
-    <section class="panel" id="panel-agents">
+    <section class="panel active" id="panel-agents">
       <div class="panel-toolbar">
         <h2>Agent 列表</h2>
         <button class="btn primary" id="newAgentBtn">＋ 新建 Agent</button>
@@ -182,7 +182,10 @@
   <dialog class="modal modal-agent" id="agentModal">
     <form id="agentForm" method="dialog">
       <div class="modal-header">
-        <h3 id="agentModalTitle">新建 Agent</h3>
+        <div class="modal-title-copy">
+          <h3 id="agentModalTitle">新建 Agent</h3>
+          <span class="modal-entity-id hidden" id="agentModalId"></span>
+        </div>
         <button type="button" class="icon-btn" id="closeAgentModal">✕</button>
       </div>
       <div class="modal-body">
@@ -213,7 +216,7 @@
           <div class="cap-section-header">
             <div>
               <span class="cap-section-title">能力配置</span>
-              <p class="field-hint">不选任何项表示启用所有默认能力。</p>
+              <p class="field-hint">新建时默认勾选系统默认能力；主动全不选表示不启用可选能力。</p>
             </div>
             <div class="cap-section-actions">
               <input type="search" class="cap-search" id="capSearch" placeholder="搜索能力…" />
@@ -259,6 +262,10 @@
         <label class="field">
           <span>API Key（可选，编辑时留空表示不修改）</span>
           <input type="password" id="llmModelApiKey" autocomplete="new-password" />
+        </label>
+        <label class="field checkbox-field hidden" id="llmModelClearApiKeyField">
+          <input type="checkbox" id="llmModelClearApiKey" />
+          <span>清除当前已配置的 API Key</span>
         </label>
         <div class="field">
           <span>输入模态</span>
@@ -335,7 +342,7 @@
           <span>传输类型</span>
           <select id="mcpTransport">
             <option value="url">url（远程 SSE / HTTP）</option>
-            <option value="stdio">stdio（本地子进程）</option>
+            <option value="stdio" hidden disabled>stdio（历史配置，已停止支持）</option>
             <option value="builtin">builtin（仓库内置 mcps/）</option>
           </select>
         </label>

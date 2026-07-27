@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from sqlalchemy import delete, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from deep_agent.db.models import Agent, LlmModel
@@ -29,47 +30,53 @@ class LlmModelStoreBase(SessionBoundMixin):
             return int(result.scalar_one())
 
     async def create_unique(self, data: LlmModelCreate) -> LlmModel:
-        async with self._write() as db:
-            if await self._get_by_name(db, data.name) is not None:
-                raise ValueError(f"LLM model already exists: {data.name}")
-            row = LlmModel(
-                name=data.name,
-                description=data.description,
-                model=data.model,
-                base_url=data.base_url,
-                api_key=data.api_key,
-                input_modalities=data.input_modalities or None,
-                capabilities_source="user" if data.input_modalities else None,
-            )
-            db.add(row)
-            await db.flush()
-            await db.refresh(row)
-            return row
+        try:
+            async with self._write() as db:
+                if await self._get_by_name(db, data.name) is not None:
+                    raise ValueError(f"LLM model already exists: {data.name}")
+                row = LlmModel(
+                    name=data.name,
+                    description=data.description,
+                    model=data.model,
+                    base_url=data.base_url,
+                    api_key=data.api_key,
+                    input_modalities=data.input_modalities or None,
+                    capabilities_source="user" if data.input_modalities else None,
+                )
+                db.add(row)
+                await db.flush()
+                await db.refresh(row)
+                return row
+        except IntegrityError as exc:
+            raise ValueError(f"LLM model write conflict: {data.name}") from exc
 
     async def update_unique(self, model_id: str, data: LlmModelUpdate) -> LlmModel | None:
-        async with self._write() as db:
-            row = await self._get_by_id(db, model_id)
-            if row is None:
-                return None
-            if data.name is not None and data.name != row.name:
-                conflict = await self._get_by_name(db, data.name)
-                if conflict is not None:
-                    raise ValueError(f"LLM model already exists: {data.name}")
-            updates = data.model_dump(exclude_unset=True)
-            modalities_mode = updates.pop("modalities_mode", None)
-            if modalities_mode == "auto":
-                row.input_modalities = None
-                row.capabilities_source = None
-            elif modalities_mode == "manual" and "input_modalities" in updates:
-                row.input_modalities = updates["input_modalities"] or None
-                row.capabilities_source = "user"
-            elif "input_modalities" in updates:
-                row.capabilities_source = "user"
-            for field, value in updates.items():
-                setattr(row, field, value)
-            await db.flush()
-            await db.refresh(row)
-            return row
+        try:
+            async with self._write() as db:
+                row = await self._get_by_id(db, model_id)
+                if row is None:
+                    return None
+                if data.name is not None and data.name != row.name:
+                    conflict = await self._get_by_name(db, data.name)
+                    if conflict is not None:
+                        raise ValueError(f"LLM model already exists: {data.name}")
+                updates = data.model_dump(exclude_unset=True)
+                modalities_mode = updates.pop("modalities_mode", None)
+                if modalities_mode == "auto":
+                    row.input_modalities = None
+                    row.capabilities_source = None
+                elif modalities_mode == "manual" and "input_modalities" in updates:
+                    row.input_modalities = updates["input_modalities"] or None
+                    row.capabilities_source = "user"
+                elif "input_modalities" in updates:
+                    row.capabilities_source = "user"
+                for field, value in updates.items():
+                    setattr(row, field, value)
+                await db.flush()
+                await db.refresh(row)
+                return row
+        except IntegrityError as exc:
+            raise ValueError(f"LLM model write conflict: {model_id}") from exc
 
     async def delete(self, model_id: str) -> bool:
         async with self._write() as db:

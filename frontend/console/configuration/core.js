@@ -63,6 +63,21 @@ function showDbBanner(show) {
   if (el) el.classList.toggle("hidden", !show);
 }
 
+async function refreshAfterSuccessfulMutation(successLabel, refresh) {
+  try {
+    await refresh();
+    return true;
+  } catch (error) {
+    const detail = typeof error?.message === "string" ? error.message : String(error);
+    showToast(`${successLabel}，但页面重新加载失败：${detail}`, true);
+    return false;
+  }
+}
+
+async function refreshAfterSuccessfulSave(label, refresh) {
+  return refreshAfterSuccessfulMutation(`${label}已保存`, refresh);
+}
+
 async function apiFetch(path, options = {}) {
   const { headers: optionHeaders, ...rest } = options;
   const url = `${getBaseUrl()}${path}`;
@@ -209,4 +224,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
 window.__DatabaseSchemaVersionUI = {
   formatDatabaseSchemaVersion,
+};
+window.__ConfigurationSaveUI = {
+  refreshAfterSuccessfulMutation,
+  refreshAfterSuccessfulSave,
 };

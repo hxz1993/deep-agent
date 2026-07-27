@@ -45,7 +45,9 @@ frontend/
 - `app` 或 `space` 变化会停止当前流并重新加载页面状态；只切换语言时保留会话。
 - SSE 解析、HITL 参数归一化和 Schema 文本校验分别位于 `protocol.js`、`hitl.js`、`schema-editor.js`，可由 Node 内置测试独立验证。
 - 控制台测试：`node --test tests/frontend/console/*.test.mjs`。
-- 配置中心默认打开“全局配置”，入口位于“辅助模型”后、模型资源分割线前；通过 `GET /api/v1/global-settings` 展示安全白名单，没有编辑或保存入口。
+- 配置中心默认打开 Agent；“全局配置”仍位于“辅助模型”后、模型资源分割线前，通过 `GET /api/v1/global-settings` 按需展示安全白名单，没有编辑或保存入口。
+- 配置中心左侧页签只在当前前端页面的模块内存中保留；工作台与配置中心之间切换会恢复上次页签，浏览器刷新后重新回到 Agent，不写入 LocalStorage 或后端。
+- Agent 编辑弹窗在标题区显示完整 Agent ID；测试工作台对话标题第二行以 `会话 ID：<完整 ID>` 展示当前会话，不再截取前八位。
 - `/` 跳转到 `/console/#/workspace`；旧 `/settings.html`、`/models.html`、`/admin/` 返回 404。
 
 ---
@@ -116,5 +118,8 @@ python -m http.server 5173
 - `file://` 打开可用但有限制；推荐静态服务器
 - 生产环境应收紧后端 CORS `allow_origins`
 - `tool_call` 首帧 `args` 可能为 `{}`，需按 `tool_call_id` 合并后续帧
+- 配置表单必须区分“主体保存失败”和“保存成功后的列表刷新失败”；后者保留成功结果并提示重新加载，不能让用户按新建模式重复提交。条件字段（如 URL MCP 的 URL）需要前端动态必填和后端 Schema 双重校验。
+- Agent 的 `capabilities: null` 表示使用系统默认能力，`[]` 表示明确不启用任何可选能力；新建表单必须按 `null` 初始化。删除 MCP 或 UI 工具若返回 `detail.referenced_by`，应直接展示引用它的 Agent 名称。
+- MCP 新建页只允许 URL transport；历史 stdio 配置只读且不显示编辑入口，Builtin MCP 继续由仓库内配置管理。
 
 更多说明：[`README.md`](README.md)。

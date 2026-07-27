@@ -1,6 +1,30 @@
 let initialized = false;
 let loadingPromise = null;
-const CONFIGURATION_ASSET_VERSION = "20260727-1";
+const CONFIGURATION_ASSET_VERSION = "20260728-3";
+const CONFIGURATION_TABS = new Set([
+  "agents",
+  "llm-models",
+  "mcp",
+  "ui-tools",
+  "auxiliary-models",
+  "global-settings",
+  "catalog",
+]);
+let activeConfigurationTab = "agents";
+
+export function rememberConfigurationTab(name) {
+  if (CONFIGURATION_TABS.has(name)) activeConfigurationTab = name;
+  return activeConfigurationTab;
+}
+
+export function currentConfigurationTab() {
+  return activeConfigurationTab;
+}
+
+export function restoreConfigurationTab() {
+  const tab = document.querySelector(`[data-tab="${activeConfigurationTab}"]`);
+  if (tab && !tab.classList.contains("active")) tab.click();
+}
 
 function versionedAsset(path) {
   const url = new URL(path, import.meta.url);
@@ -141,6 +165,10 @@ function decorateConfiguration() {
       window.DeepAgentConsole?.showPage("workspace");
       return;
     }
+  });
+  document.querySelector(".resource-nav")?.addEventListener("click", (event) => {
+    const tab = event.target.closest("[data-tab]");
+    if (tab) rememberConfigurationTab(tab.dataset.tab);
   });
   window.lucide?.createIcons();
 }

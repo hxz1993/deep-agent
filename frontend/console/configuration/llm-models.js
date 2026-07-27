@@ -122,8 +122,10 @@ const llmModelsAdmin = {
       const result = await apiFetch("/api/v1/llm-models/refresh-metadata", { method: "POST" });
       const updated = Number(result?.updated ?? 0);
       showToast(`已刷新 ${updated} 条模型 Meta`);
-      await this.refresh();
-      await loadLlmModels();
+      await refreshAfterSuccessfulMutation(`已刷新 ${updated} 条模型 Meta`, async () => {
+        await this.refresh();
+        await loadLlmModels();
+      });
     } catch (err) {
       showToast(err.message, true);
     } finally {
@@ -137,8 +139,10 @@ const llmModelsAdmin = {
         method: "POST",
       });
       showToast(`已刷新模型 Meta：${name}`);
-      await this.refresh();
-      await loadLlmModels();
+      await refreshAfterSuccessfulMutation(`已刷新模型 Meta：${name}`, async () => {
+        await this.refresh();
+        await loadLlmModels();
+      });
     } catch (err) {
       showToast(err.message, true);
     }
@@ -154,6 +158,8 @@ const llmModelsAdmin = {
     document.getElementById("llmModelModel").value = "openai:gpt-4o";
     document.getElementById("llmModelBaseUrl").value = "";
     document.getElementById("llmModelApiKey").value = "";
+    document.getElementById("llmModelClearApiKey").checked = false;
+    document.getElementById("llmModelClearApiKeyField").classList.add("hidden");
     setModalityMode("auto");
     setLlmModelModalities(["text"]);
     const preview = document.getElementById("llmModelAutoModalitiesPreview");
@@ -174,6 +180,10 @@ const llmModelsAdmin = {
       document.getElementById("llmModelModel").value = model.model;
       document.getElementById("llmModelBaseUrl").value = model.base_url || "";
       document.getElementById("llmModelApiKey").value = "";
+      document.getElementById("llmModelClearApiKey").checked = false;
+      document
+        .getElementById("llmModelClearApiKeyField")
+        .classList.toggle("hidden", !model.api_key_set);
       setModalityMode(manual ? "manual" : "auto");
       setLlmModelModalities(manual ? model.input_modalities : ["text"]);
       updateAutoModalityPreview(model.input_modalities, model.capabilities_source);
@@ -208,16 +218,24 @@ const llmModelsAdmin = {
     AdminFormFeedback.clear(form);
     AdminFormFeedback.setSubmitting(form, true);
 
+    let saved = false;
     try {
+      const name = document.getElementById("llmModelName").value.trim();
+      const model = document.getElementById("llmModelModel").value.trim();
+      if (!name || !model) {
+        throw new Error("名称和模型不能为空");
+      }
       const payload = {
-        name: document.getElementById("llmModelName").value.trim(),
+        name,
         description: document.getElementById("llmModelDescription").value.trim() || null,
-        model: document.getElementById("llmModelModel").value.trim(),
+        model,
         base_url: document.getElementById("llmModelBaseUrl").value.trim() || null,
       };
       this.applyModalityPayload(payload);
       const apiKey = document.getElementById("llmModelApiKey").value.trim();
-      if (apiKey) payload.api_key = apiKey;
+      const clearApiKey = document.getElementById("llmModelClearApiKey").checked;
+      if (clearApiKey) payload.api_key = null;
+      else if (apiKey) payload.api_key = apiKey;
       if (state.editingLlmModelId) {
         await apiFetch(`/api/v1/llm-models/${encodeURIComponent(state.editingLlmModelId)}`, {
           method: "PATCH",
@@ -231,13 +249,18 @@ const llmModelsAdmin = {
         });
         showToast("模型配置已创建");
       }
+      saved = true;
       document.getElementById("llmModelModal").close();
-      await this.refresh();
-      await loadLlmModels();
     } catch (err) {
       AdminFormFeedback.show(form, err);
     } finally {
       AdminFormFeedback.setSubmitting(form, false);
+    }
+    if (saved) {
+      await refreshAfterSuccessfulSave("模型配置", async () => {
+        await this.refresh();
+        await loadLlmModels();
+      });
     }
   },
 
@@ -246,8 +269,10 @@ const llmModelsAdmin = {
     try {
       await apiFetch(`/api/v1/llm-models/${encodeURIComponent(modelId)}`, { method: "DELETE" });
       showToast("模型配置已删除");
-      await this.refresh();
-      await loadLlmModels();
+      await refreshAfterSuccessfulMutation("模型配置已删除", async () => {
+        await this.refresh();
+        await loadLlmModels();
+      });
     } catch (err) {
       showToast(err.message, true);
     }

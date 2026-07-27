@@ -35,6 +35,13 @@ def _validate_parameters_json_schema(value: dict[str, Any]) -> dict[str, Any]:
     return value
 
 
+def _validate_metadata_size(value: dict[str, Any]) -> dict[str, Any]:
+    encoded = json.dumps(value, ensure_ascii=False)
+    if len(encoded.encode("utf-8")) > MAX_SCHEMA_BYTES:
+        raise ValueError(f"metadata exceeds {MAX_SCHEMA_BYTES} bytes")
+    return value
+
+
 class UiToolCreate(BaseModel):
     name: str
     description: str
@@ -58,8 +65,31 @@ class UiToolCreate(BaseModel):
     def validate_parameters_schema(cls, value: dict[str, Any]) -> dict[str, Any]:
         return _validate_parameters_json_schema(value)
 
+    @field_validator("result_schema")
+    @classmethod
+    def validate_result_schema(
+        cls,
+        value: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        if value is None:
+            return None
+        return _validate_parameters_json_schema(value)
+
+    @field_validator("metadata")
+    @classmethod
+    def validate_metadata(
+        cls,
+        value: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        if value is None:
+            return None
+        return _validate_metadata_size(value)
+
     @model_validator(mode="after")
     def validate_payload(self) -> UiToolCreate:
+        self.description = self.description.strip()
+        if not self.description:
+            raise ValueError("description must not be blank")
         if len(self.description) > MAX_DESCRIPTION_LEN:
             raise ValueError(f"description exceeds {MAX_DESCRIPTION_LEN} characters")
         return self
@@ -73,6 +103,15 @@ class UiToolUpdate(BaseModel):
     metadata: dict[str, Any] | None = None
     enabled: bool | None = None
 
+    @model_validator(mode="before")
+    @classmethod
+    def reject_null_required_fields(cls, value):
+        if isinstance(value, dict):
+            for field in ("description", "parameters_json_schema", "enabled"):
+                if field in value and value[field] is None:
+                    raise ValueError(f"{field} cannot be null")
+        return value
+
     @field_validator("parameters_json_schema")
     @classmethod
     def validate_parameters_schema(
@@ -83,10 +122,35 @@ class UiToolUpdate(BaseModel):
             return None
         return _validate_parameters_json_schema(value)
 
+    @field_validator("result_schema")
+    @classmethod
+    def validate_result_schema(
+        cls,
+        value: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        if value is None:
+            return None
+        return _validate_parameters_json_schema(value)
+
+    @field_validator("metadata")
+    @classmethod
+    def validate_metadata(
+        cls,
+        value: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        if value is None:
+            return None
+        return _validate_metadata_size(value)
+
     @field_validator("description")
     @classmethod
     def validate_description(cls, value: str | None) -> str | None:
-        if value is not None and len(value) > MAX_DESCRIPTION_LEN:
+        if value is None:
+            return None
+        value = value.strip()
+        if not value:
+            raise ValueError("description must not be blank")
+        if len(value) > MAX_DESCRIPTION_LEN:
             raise ValueError(f"description exceeds {MAX_DESCRIPTION_LEN} characters")
         return value
 

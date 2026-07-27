@@ -51,7 +51,6 @@ class Agent(Base):
     )
     temperature: Mapped[float | None] = mapped_column(Float, nullable=True)
     capabilities: Mapped[list[str] | None] = mapped_column(JSONType, nullable=True)
-    max_requests: Mapped[int | None] = mapped_column(Integer, nullable=True)
     prompt: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(

@@ -315,7 +315,6 @@ const agentsAdmin = {
     document.getElementById("agentTemperature").value = "";
     document.getElementById("agentPrompt").value =
       "You are a helpful assistant. Use available tools when they help answer accurately.";
-    document.getElementById("agentMaxRequests").value = "";
     this.renderCapabilityCheckboxes([]);
     document.getElementById("agentModal").showModal();
   },
@@ -331,8 +330,6 @@ const agentsAdmin = {
       document.getElementById("agentTemperature").value =
         agent.temperature == null ? "" : String(agent.temperature);
       document.getElementById("agentPrompt").value = agent.prompt;
-      document.getElementById("agentMaxRequests").value =
-        agent.max_requests == null ? "" : String(agent.max_requests);
       this.renderCapabilityCheckboxes(agent.capabilities);
       document.getElementById("agentModal").showModal();
     } catch (err) {
@@ -356,13 +353,6 @@ const agentsAdmin = {
       payload.temperature = Number(tempRaw);
     } else if (state.editingAgentId) {
       payload.temperature = null;
-    }
-
-    const maxRequestsRaw = document.getElementById("agentMaxRequests").value.trim();
-    if (maxRequestsRaw) {
-      payload.max_requests = Number(maxRequestsRaw);
-    } else if (state.editingAgentId) {
-      payload.max_requests = null;
     }
 
     try {

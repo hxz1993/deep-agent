@@ -33,7 +33,7 @@ frontend/
 | Markdown | marked + DOMPurify + highlight.js |
 | 会话 | `session_id` 由后端 `session` 事件返回；`GET/DELETE /api/v1/sessions`；标题展示 `title \|\| user_prompt`（见 [`../docs/guides/experience/ai-title-generator.md`](../docs/guides/experience/ai-title-generator.md)） |
 | 能力面板 | `GET /api/v1/tools` |
-| 配置 | 测试上下文与后端地址存 `localStorage`，身份和鉴权只读 |
+| 配置 | 测试上下文与后端地址存 `localStorage`；全局环境配置只读展示，身份和鉴权只读 |
 | 一体化控制台 | `/console/`；工作台、配置和诊断的唯一入口 |
 
 ## 一体化控制台
@@ -45,6 +45,7 @@ frontend/
 - `app` 或 `space` 变化会停止当前流并重新加载页面状态；只切换语言时保留会话。
 - SSE 解析、HITL 参数归一化和 Schema 文本校验分别位于 `protocol.js`、`hitl.js`、`schema-editor.js`，可由 Node 内置测试独立验证。
 - 控制台测试：`node --test tests/frontend/console/*.test.mjs`。
+- 配置中心默认打开“全局配置”，入口位于“辅助模型”后、模型资源分割线前；通过 `GET /api/v1/global-settings` 展示安全白名单，没有编辑或保存入口。
 - `/` 跳转到 `/console/#/workspace`；旧 `/settings.html`、`/models.html`、`/admin/` 返回 404。
 
 ---

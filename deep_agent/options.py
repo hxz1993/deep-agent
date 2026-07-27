@@ -55,6 +55,11 @@ def _ensure_db_module(value):
             raise RuntimeError(f"sqlalchemy_dm模块未安装")
 
 
+def _ensure_positive_int(value: int) -> None:
+    if value < 1:
+        raise ValueError("must be a positive integer")
+
+
 def _resolve_repo_path(value: str) -> str:
     path = Path(value)
     if path.is_absolute():
@@ -106,7 +111,12 @@ class Agent(Category):
     _ENV_PREFIX = "DEEP_AGENT_"
 
     app_name = Option("deep-agent", val_type=str, bind_env="APP_NAME")
-    max_requests = Option(50, val_type=int, bind_env="MAX_REQUESTS")
+    max_requests = Option(
+        30,
+        val_type=int,
+        bind_env="MAX_REQUESTS",
+        extra_check=_ensure_positive_int,
+    )
     max_total_tokens = Option(None, val_type=int, bind_env="MAX_TOTAL_TOKENS")
     request_retries = Option(2, val_type=int, bind_env="REQUEST_RETRIES")
     skills_dir = Option(
@@ -210,3 +220,8 @@ class DeepAgentOptions(GlobalOptions):
 
 
 OPTION = DeepAgentOptions()
+
+
+def validate_runtime_options(options: DeepAgentOptions = OPTION) -> None:
+    """Resolve startup-critical options so invalid environment values fail fast."""
+    _ = options.agent.max_requests

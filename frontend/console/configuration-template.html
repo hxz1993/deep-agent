@@ -7,8 +7,25 @@
     </div>
     <div class="toast hidden" id="toast"></div>
 
+    <!-- Read-only global settings panel -->
+    <section class="panel active global-settings-panel" id="panel-global-settings">
+      <div class="panel-toolbar">
+        <div>
+          <h2>全局配置</h2>
+          <p class="panel-subtitle">当前页面只读；修改环境变量并重启 DeepAgent 后生效。</p>
+        </div>
+        <button class="btn" type="button" id="refreshGlobalSettingsBtn">重新加载</button>
+      </div>
+      <div class="global-settings-notice">
+        仅展示允许公开的运行配置；数据库连接、密钥、Token、代理地址和本地路径不会出现在此页面。
+      </div>
+      <div class="global-settings-groups" id="globalSettingsGroups" aria-live="polite">
+        <div class="global-settings-state">正在加载全局配置…</div>
+      </div>
+    </section>
+
     <!-- Agent panel -->
-    <section class="panel active" id="panel-agents">
+    <section class="panel" id="panel-agents">
       <div class="panel-toolbar">
         <h2>Agent 列表</h2>
         <button class="btn primary" id="newAgentBtn">＋ 新建 Agent</button>
@@ -182,11 +199,6 @@
             <label class="field">
               <span>Temperature（可选）</span>
               <input type="number" id="agentTemperature" min="0" max="2" step="0.1" placeholder="留空使用模型默认" />
-            </label>
-            <label class="field">
-              <span>最大请求次数（可选）</span>
-              <input type="number" id="agentMaxRequests" min="1" placeholder="默认：全局上限的一半" />
-              <span class="field-hint">留空使用默认值，不超过 DEEP_AGENT_MAX_REQUESTS。</span>
             </label>
           </div>
           <div class="agent-form-col">

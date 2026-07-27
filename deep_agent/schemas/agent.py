@@ -3,12 +3,26 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from deep_agent.schemas.llm_model import LlmModelSummary
 
 if TYPE_CHECKING:
     from deep_agent.db.models import Agent, LlmModel
+
+
+LEGACY_MAX_REQUESTS_MESSAGE = (
+    "max_requests 已改为全局配置，请使用环境变量 DEEP_AGENT_MAX_REQUESTS"
+)
+
+
+class _RejectLegacyMaxRequests(BaseModel):
+    @model_validator(mode="before")
+    @classmethod
+    def reject_legacy_max_requests(cls, value):
+        if isinstance(value, dict) and "max_requests" in value:
+            raise ValueError(LEGACY_MAX_REQUESTS_MESSAGE)
+        return value
 
 
 class AgentChatRequest(BaseModel):
@@ -21,7 +35,7 @@ class AgentChatRequest(BaseModel):
     user: str | None = Field(default=None, description="Optional user identifier.")
 
 
-class AgentCreate(BaseModel):
+class AgentCreate(_RejectLegacyMaxRequests):
     name: str = Field(..., description="Unique agent display name.")
     model_id: str = Field(..., description="LLM model preset id.")
     prompt: str = Field(..., description="System prompt / instructions.")
@@ -35,20 +49,14 @@ class AgentCreate(BaseModel):
         default=None,
         description="Capability names to enable. Null uses default capabilities and no extension UI tools.",
     )
-    max_requests: int | None = Field(
-        default=None,
-        ge=1,
-        description="Max model requests per turn. Null uses DEEP_AGENT_MAX_REQUESTS // 2.",
-    )
 
 
-class AgentUpdate(BaseModel):
+class AgentUpdate(_RejectLegacyMaxRequests):
     name: str | None = None
     model_id: str | None = None
     prompt: str | None = None
     temperature: float | None = Field(default=None, ge=0, le=2)
     capabilities: list[str] | None = None
-    max_requests: int | None = Field(default=None, ge=1)
 
 
 class AgentResponse(BaseModel):
@@ -59,10 +67,6 @@ class AgentResponse(BaseModel):
     prompt: str
     temperature: float | None = None
     capabilities: list[str] | None = None
-    max_requests: int | None = Field(
-        default=None,
-        description="Configured max requests per turn. Null means global default (DEEP_AGENT_MAX_REQUESTS // 2).",
-    )
     created_at: datetime
     updated_at: datetime
 
@@ -76,7 +80,6 @@ class AgentResponse(BaseModel):
             prompt=row.prompt,
             temperature=row.temperature,
             capabilities=row.capabilities,
-            max_requests=row.max_requests,
             created_at=row.created_at,
             updated_at=row.updated_at,
         )

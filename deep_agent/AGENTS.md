@@ -200,7 +200,7 @@ DEEP_AGENT_LOCAL_TOKEN_COOKIE=<可选，仅在目标环境要求 Cookie 时填�
 | `MODEL` | `openai:gpt-4o` | `<provider>:<model>` |
 | `MODEL_BASE_URL` / `MODEL_API_KEY` | — | OpenAI 兼容 API |
 | `SYSTEM_PROMPT` | 内置 | 系统指令 |
-| `MAX_REQUESTS` | `50` | 全局 loop 上限 |
+| `MAX_REQUESTS` | `30` | 所有 Agent 共用的单轮模型请求上限 |
 | `MAX_TOTAL_TOKENS` | 无限制 | Token 上限 |
 | `SKILLS_DIR` | `skills` | 相对仓库根 |
 | `MCP_FORWARD_REQUEST_HEADERS` | `authorization,x-tenant-id,x-user-token` | 转发到 MCP |
@@ -223,7 +223,7 @@ Provider Key（`OPENAI_API_KEY` 等）由 Pydantic AI 直接读取。
 alembic upgrade head
 ```
 
-迁移：`alembic/versions/001` … `020`。本地 Postgres：`docker compose up -d`。
+迁移：`alembic/versions/001` … `021`。`021` 删除 Agent 级 `max_requests`；该限制只认全局环境变量。涉及共享数据库时必须按不兼容 DDL 维护窗口发布。本地 Postgres：`docker compose up -d`。
 
 ---
 
@@ -237,6 +237,7 @@ alembic upgrade head
 | CRUD | `/api/v1/mcp` | 是 |
 | CRUD | `/api/v1/ui-tools` | 是 |
 | GET | `/api/v1/tools` | 否（无 DB 时跳过动态 UI 工具） |
+| GET | `/api/v1/global-settings` | 否；无需额外身份依赖，返回安全白名单，只读 |
 | | `/api/v1/sessions/*` | 是 |
 | | `/console/#/configuration` | 是 |
 

@@ -1,6 +1,6 @@
 let initialized = false;
 let loadingPromise = null;
-const CONFIGURATION_ASSET_VERSION = "20260723-1";
+const CONFIGURATION_ASSET_VERSION = "20260727-1";
 
 function versionedAsset(path) {
   const url = new URL(path, import.meta.url);
@@ -52,6 +52,7 @@ async function loadAdminScripts() {
   const scripts = [
     "./configuration/core.js",
     "./configuration/form-feedback.js",
+    "./configuration/global-settings.js",
     "./configuration/llm-models.js",
     "./configuration/auxiliary-models.js",
     "./configuration/agents.js",
@@ -146,6 +147,7 @@ function decorateConfiguration() {
 
 export function refreshCurrentConfiguration() {
   const active = document.querySelector(".resource-btn.active")?.dataset.tab;
+  if (active === "global-settings") return window.globalSettingsAdmin?.refresh();
   if (active === "agents") return window.agentsAdmin?.refresh();
   if (active === "llm-models") return window.llmModelsAdmin?.refresh();
   if (active === "auxiliary-models") return window.auxiliaryModelsAdmin?.refresh();

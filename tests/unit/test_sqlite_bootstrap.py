@@ -53,7 +53,7 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
             with patch("deep_agent.db.url.get_database_url", return_value=url):
                 with patch("deep_agent.db.migrate.get_database_url", return_value=url):
                     await asyncio.to_thread(upgrade_database_sync)
-                    self.assertEqual(self._revision(db_path), "020")
+                    self.assertEqual(self._revision(db_path), "021")
                     self.assertNotIn("agent_ids", self._columns(db_path, "ui_tool_definitions"))
                     self.assertIn("inspection", self._columns(db_path, "mcp_servers"))
                     self.assertNotIn("resource_capabilities", self._columns(db_path, "mcp_servers"))
@@ -69,7 +69,7 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
                     self._seed_legacy_mcp_ui_state(db_path)
 
                     await asyncio.to_thread(command.upgrade, migrate._build_alembic_config(), "head")
-                    self.assertEqual(self._revision(db_path), "020")
+                    self.assertEqual(self._revision(db_path), "021")
                     columns = self._columns(db_path, "ui_tool_definitions")
                     self.assertNotIn("mcp_server_name", columns)
                     self.assertNotIn("override", columns)
@@ -78,6 +78,54 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
                     self.assertNotIn("resource_capabilities", self._columns(db_path, "mcp_servers"))
                     self.assertEqual(self._mcp_ui_tool_count(db_path), 0)
                     self.assertNotIn("ui_tools", self._deepcube_config(db_path))
+
+    async def test_migration_021_removes_agent_request_limit(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "migration-020.db"
+            url = f"sqlite+aiosqlite:///{db_path.as_posix()}"
+
+            with patch("deep_agent.db.url.get_database_url", return_value=url):
+                with patch("deep_agent.db.migrate.get_database_url", return_value=url):
+                    config = migrate._build_alembic_config()
+                    await asyncio.to_thread(command.upgrade, config, "020")
+                    self.assertIn("max_requests", self._columns(db_path, "agents"))
+
+                    with sqlite3.connect(db_path) as conn:
+                        conn.execute(
+                            """
+                            INSERT INTO llm_models (
+                                id, name, model, created_at, updated_at
+                            ) VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                            """,
+                            ("model-021", "model-021", "test:model"),
+                        )
+                        conn.execute(
+                            """
+                            INSERT INTO agents (
+                                id, name, model_id, max_requests, prompt,
+                                created_at, updated_at
+                            ) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                            """,
+                            ("agent-021", "agent-021", "model-021", 12, "test"),
+                        )
+                        conn.commit()
+
+                    await asyncio.to_thread(command.upgrade, config, "021")
+                    self.assertEqual(self._revision(db_path), "021")
+                    self.assertNotIn("max_requests", self._columns(db_path, "agents"))
+
+                    await asyncio.to_thread(command.downgrade, config, "020")
+                    self.assertEqual(self._revision(db_path), "020")
+                    self.assertIn("max_requests", self._columns(db_path, "agents"))
+                    with sqlite3.connect(db_path) as conn:
+                        row = conn.execute(
+                            "SELECT max_requests FROM agents WHERE id = 'agent-021'"
+                        ).fetchone()
+                    self.assertEqual(row, (None,))
+
+                    await asyncio.to_thread(command.upgrade, config, "head")
+                    self.assertEqual(self._revision(db_path), "021")
+                    self.assertNotIn("max_requests", self._columns(db_path, "agents"))
 
     async def test_migration_020_preserves_resource_snapshot(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

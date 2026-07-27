@@ -15,7 +15,7 @@ from loguru import logger
 from deep_agent.db.factory import bootstrap_database, close_db
 from deep_agent.db.stores.bundle import DataStores
 from deep_agent.db.conversation import SessionStore
-from deep_agent.options import OPTION
+from deep_agent.options import OPTION, validate_runtime_options
 
 _context: AppContext | None = None
 
@@ -35,6 +35,7 @@ class AppContext:
 
     @classmethod
     async def bootstrap(cls) -> AppContext:
+        validate_runtime_options()
         mcp_lease_manager = McpLeaseManager(mcp_acquire_retries=OPTION.agent.mcp_acquire_retries)
 
         try:

@@ -41,7 +41,8 @@ tests/
 
 | 文件 | 覆盖 |
 | --- | --- |
-| `test_agent_max_requests.py` | per-agent / 全局 request 上限 |
+| `test_agent_max_requests.py` | 全局 request 上限、旧 Agent 字段 422 兼容提示 |
+| `test_global_settings.py` | 全局配置安全白名单、来源和无需额外身份依赖的只读接口 |
 | `test_builtin_mcp_config.py` | builtin MCP 配置规范化 |
 | `test_database_url_resolution.py` | DSN 构建 |
 | `test_dbms_config.py` | `DEEP_AGENT_DBMS_*` 解析 |

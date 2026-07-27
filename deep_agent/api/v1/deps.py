@@ -7,7 +7,6 @@ from pydantic_ai.usage import UsageLimits
 
 from deep_agent.agent.factory import build_agent
 from deep_agent.agent.input_capabilities import augment_instructions_with_capabilities
-from deep_agent.agent.limits import resolve_agent_max_requests
 from deep_agent.agent.runner import AgentRunner
 from deep_agent.agent.spec import DEFAULT_INSTRUCTIONS, AgentSpec
 from deep_agent.capabilities.mcp.resolver import load_mcp_rows, resolve_mcp_toolsets
@@ -103,7 +102,7 @@ async def _build_runner_from_spec(
         mcp_resource_toolset=mcp_resource_toolset,
     )
     limits = UsageLimits(
-        request_limit=resolve_agent_max_requests(spec.max_requests, OPTION.agent.max_requests),
+        request_limit=OPTION.agent.max_requests,
         total_tokens_limit=OPTION.agent.max_total_tokens,
     )
     return AgentRunner(

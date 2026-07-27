@@ -154,6 +154,9 @@ function initTabs() {
       const name = tab.dataset.tab;
       document.querySelectorAll(".panel").forEach((p) => p.classList.remove("active"));
       document.getElementById(`panel-${name}`)?.classList.add("active");
+      if (name === "global-settings" && window.globalSettingsAdmin) {
+        window.globalSettingsAdmin.refresh();
+      }
       if (name === "agents" && window.agentsAdmin) {
         loadLlmModels().then(() => window.agentsAdmin.refresh());
       }
@@ -185,6 +188,7 @@ document.addEventListener("DOMContentLoaded", () => {
   baseInput?.addEventListener("change", () => {
     saveBaseUrl(baseInput.value);
     loadDatabaseSchemaVersion();
+    if (window.globalSettingsAdmin) window.globalSettingsAdmin.refresh();
     if (window.agentsAdmin) window.agentsAdmin.refresh();
     if (window.llmModelsAdmin) window.llmModelsAdmin.refresh();
     if (window.auxiliaryModelsAdmin) window.auxiliaryModelsAdmin.refresh();

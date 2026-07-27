@@ -4,6 +4,7 @@
 
 | 文档 | 状态与用途 |
 | --- | --- |
+| [`agent-labs-learning-summary.md`](agent-labs-learning-summary.md) | 持续维护；汇总 AI Lab 已验证结论，后续架构讨论优先从这里开始 |
 | [`pydantic-ai-native-capabilities-and-deepagent-usage-audit.md`](pydantic-ai-native-capabilities-and-deepagent-usage-audit.md) | 技术审计；评估 Pydantic AI / Harness 能力采用路线 |
 | [`context-compaction-implementation-plan.md`](context-compaction-implementation-plan.md) | 待评审方案；基于 Harness 0.10 实测设计 DeepAgent 上下文压缩 |
 | [`ui-tools-extension-proposals.md`](ui-tools-extension-proposals.md) | **已废弃历史方案**；MCP UI 发现未继续采用 |

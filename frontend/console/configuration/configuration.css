@@ -150,6 +150,84 @@ html, body {
   font-size: 13px;
 }
 
+.global-settings-notice {
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  border-left: 3px solid var(--accent);
+  background: var(--accent-soft);
+  color: var(--text-dim);
+  line-height: 1.5;
+}
+
+.global-settings-groups {
+  display: grid;
+  gap: 16px;
+}
+
+.global-settings-group h3 {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+
+.global-settings-table {
+  table-layout: fixed;
+}
+
+.global-settings-table th:nth-child(1) { width: 16%; }
+.global-settings-table th:nth-child(2) { width: 14%; }
+.global-settings-table th:nth-child(3) { width: 24%; }
+.global-settings-table th:nth-child(4) { width: 12%; }
+
+.global-settings-table code {
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.global-setting-value {
+  font-family: var(--mono);
+  overflow-wrap: anywhere;
+}
+
+.global-setting-source {
+  display: inline-flex;
+  padding: 2px 7px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-dim);
+  background: var(--bg-elev);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.global-setting-source.source-environment {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  background: var(--accent-soft);
+}
+
+.global-setting-description {
+  color: var(--text-dim);
+  line-height: 1.5;
+}
+
+.global-settings-state {
+  display: flex;
+  min-height: 120px;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 24px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  color: var(--text-dim);
+}
+
+.global-settings-state.error {
+  color: var(--danger-text);
+}
+
 .text-dim {
   color: var(--text-dim);
 }
@@ -418,6 +496,10 @@ html, body {
 }
 
 @media (max-width: 640px) {
+  .global-settings-table {
+    min-width: 840px;
+  }
+
   .ui-tool-detail-grid {
     grid-template-columns: 1fr;
   }

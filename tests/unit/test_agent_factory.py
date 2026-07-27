@@ -26,7 +26,6 @@ def _spec(**kwargs: object) -> AgentSpec:
         "capabilities": None,
         "base_url": None,
         "api_key": None,
-        "max_requests": None,
     }
     defaults.update(kwargs)
     return AgentSpec(**defaults)  # type: ignore[arg-type]

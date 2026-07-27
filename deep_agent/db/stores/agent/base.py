@@ -30,7 +30,6 @@ class AgentStoreBase(SessionBoundMixin):
                 model_id=data.model_id,
                 temperature=data.temperature,
                 capabilities=data.capabilities,
-                max_requests=data.max_requests,
                 prompt=data.prompt,
             )
             db.add(row)

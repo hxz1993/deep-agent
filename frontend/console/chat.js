@@ -17,13 +17,7 @@ import { formatSessionIdSubtitle } from "./session-display.js?v=20260728-2";
  *   error        -> { type:"error", message }
  * ------------------------------------------------------------------ */
 
-function defaultBaseUrl() {
-  if (location.protocol === "file:") return "http://localhost:8000";
-  const root = window.__DEEP_AGENT_APP_ROOT__ || window.__DEEP_AGENT_BASE__ || "/";
-  return `${location.origin}${root.replace(/\/$/, "")}`;
-}
-
-const DEFAULT_BASE_URL = defaultBaseUrl();
+const DEFAULT_BASE_URL = defaultApiBaseUrl();
 
 const BUILTIN_UI_TOOLS = new Set(["confirm_action", "ask_user_choice"]);
 /** @type {Map<string, object>} */
@@ -65,7 +59,7 @@ async function loadUiTools(agentId) {
   try {
     const params = new URLSearchParams({ enabled: "true" });
     if (agentId) params.set("agent_id", agentId);
-    const r = await daFetch(`${state.baseUrl}/api/v1/ui-tools?${params}`);
+    const r = await daFetch(serviceUrl(`api/v1/ui-tools?${params}`));
     if (!r.ok) return;
     const data = await r.json();
     const rows = Array.isArray(data?.items) ? data.items : [];
@@ -187,7 +181,7 @@ function sessionApiUrl(session, suffix = "") {
   const params = new URLSearchParams();
   if (s.agentId) params.set("agent_id", s.agentId);
   const qs = params.toString();
-  return `${state.baseUrl}/api/v1/sessions/${encodeURIComponent(s.id)}${suffix}${qs ? `?${qs}` : ""}`;
+  return serviceUrl(`api/v1/sessions/${encodeURIComponent(s.id)}${suffix}${qs ? `?${qs}` : ""}`);
 }
 
 function sessionLookupKey(session) {
@@ -446,7 +440,7 @@ function init() {
 
 async function syncSessionsFromBackend() {
   try {
-    const r = await daFetch(`${state.baseUrl}/api/v1/sessions?limit=50`);
+    const r = await daFetch(serviceUrl("api/v1/sessions?limit=50"));
     if (!r.ok) return;
     const payload = await r.json();
     const rows = Array.isArray(payload?.items) ? payload.items : [];
@@ -994,7 +988,7 @@ function startInlineEdit(session, titleElement) {
 async function checkHealth() {
   setConn("pending", "检测中…");
   try {
-    const r = await daFetch(`${state.baseUrl}/health`, { method: "GET" });
+    const r = await daFetch(serviceUrl("health"), { method: "GET" });
     if (r.ok) setConn("ok", "已连接");
     else setConn("err", `HTTP ${r.status}`);
   } catch (_) {
@@ -1012,9 +1006,13 @@ async function loadAgents() {
   if (!el.agentSelect) return;
   el.agentSelect.innerHTML = '<option value="">加载中…</option>';
   try {
-    const r = await daFetch(`${state.baseUrl}/api/v1/agents`);
+    const r = await daFetch(serviceUrl("api/v1/agents"));
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    state.agents = await r.json();
+    const agents = await r.json();
+    if (!Array.isArray(agents)) {
+      throw new Error(`Agent 列表响应格式错误：${serviceUrl("api/v1/agents")}`);
+    }
+    state.agents = agents;
     el.agentSelect.innerHTML = "";
     if (!state.agents.length) {
       el.agentSelect.innerHTML = '<option value="">无可用 Agent</option>';
@@ -1099,7 +1097,7 @@ function currentModelInfo() {
 
 async function loadUploadCapabilities() {
   try {
-    const r = await daFetch(`${state.baseUrl}/api/v1/uploads/capabilities`);
+    const r = await daFetch(serviceUrl("api/v1/uploads/capabilities"));
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     state.uploadCapabilities = await r.json();
   } catch (e) {
@@ -1111,7 +1109,7 @@ async function loadUploadCapabilities() {
 
 async function loadLlmModels() {
   try {
-    const r = await daFetch(`${state.baseUrl}/api/v1/llm-models`);
+    const r = await daFetch(serviceUrl("api/v1/llm-models"));
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     state.llmModels = await r.json();
     ensureLlmModelSelected();
@@ -1223,7 +1221,7 @@ function updateAgentSelectState() {
 async function loadCapabilities() {
   el.capList.innerHTML = '<li class="cap-empty">加载中…</li>';
   try {
-    const r = await daFetch(`${state.baseUrl}/api/v1/tools`);
+    const r = await daFetch(serviceUrl("api/v1/tools"));
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const caps = await r.json();
     el.capList.innerHTML = "";
@@ -1343,7 +1341,7 @@ async function runChatStream(payload, assistant) {
   const shouldRefreshTitle = state.pendingTitleRefresh;
   state.pendingTitleRefresh = false;
   try {
-    const resp = await daFetch(`${state.baseUrl}/api/v1/chat/stream`, {
+    const resp = await daFetch(serviceUrl("api/v1/chat/stream"), {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
       body: JSON.stringify(payload),
@@ -1606,7 +1604,7 @@ async function uploadAttachment(file) {
   const form = new FormData();
   form.append("file", file, file.name);
   try {
-    const r = await daFetch(`${state.baseUrl}/api/v1/uploads`, { method: "POST", body: form });
+    const r = await daFetch(serviceUrl("api/v1/uploads"), { method: "POST", body: form });
     if (!r.ok) {
       const detail = await r.text().catch(() => "");
       throw new Error(detail || `HTTP ${r.status}`);

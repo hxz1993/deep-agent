@@ -5,25 +5,36 @@ import vm from "node:vm";
 
 const source = await readFile(new URL("../../../frontend/console/api.js", import.meta.url), "utf8");
 
-function loadApi(initial = {}, fetchImpl = async () => ({ status: 200 })) {
+function loadApi(
+  initial = {},
+  fetchImpl = async () => ({ status: 200 }),
+  pageUrl = "http://localhost:8000/console/",
+) {
   const values = new Map(Object.entries(initial));
+  const parsedUrl = new URL(pageUrl);
   const window = {
-    __DEEP_AGENT_APP_ROOT__: "/",
     dispatchEvent() {},
   };
   const context = vm.createContext({
     AbortController,
     CustomEvent: class CustomEvent {},
     clearTimeout,
+    document: { baseURI: pageUrl },
     DOMException,
     fetch: fetchImpl,
-    location: { origin: "http://localhost:8000", protocol: "http:" },
+    location: {
+      href: pageUrl,
+      origin: parsedUrl.origin,
+      pathname: parsedUrl.pathname,
+      protocol: parsedUrl.protocol,
+    },
     localStorage: {
       getItem(key) { return values.get(key) ?? null; },
       removeItem(key) { values.delete(key); },
       setItem(key, value) { values.set(key, value); },
     },
     setTimeout,
+    URL,
     window,
   });
   vm.runInContext(source, context);
@@ -94,12 +105,62 @@ test("请求固定使用中文且重置会清除 App", () => {
   assert.equal(values.has(api.CONTEXT_KEY), false);
 });
 
-test("后端地址固定为当前同源并清理旧缓存", () => {
+test("本地控制台根据部署位置解析服务根地址并清理旧缓存", () => {
   const { api, values } = loadApi({
     da_console_base_url_v1: "http://192.0.2.1:8000",
   });
   assert.equal(api.defaultApiBaseUrl(), "http://localhost:8000");
+  assert.equal(api.serviceUrl("/api/v1/agents"), "http://localhost:8000/api/v1/agents");
   assert.equal(values.has("da_console_base_url_v1"), false);
+});
+
+test("多级代理部署动态保留完整服务前缀", () => {
+  const { api } = loadApi(
+    {},
+    undefined,
+    "https://test.deepfos.com/deepfos-server/deep-agent-server1-0/console/",
+  );
+
+  assert.equal(
+    api.defaultApiBaseUrl(),
+    "https://test.deepfos.com/deepfos-server/deep-agent-server1-0",
+  );
+  assert.equal(
+    api.serviceUrl("/api/v1/mcp"),
+    "https://test.deepfos.com/deepfos-server/deep-agent-server1-0/api/v1/mcp",
+  );
+  assert.equal(
+    api.consoleUrl("?agent_id=agent-1#/workspace"),
+    "https://test.deepfos.com/deepfos-server/deep-agent-server1-0/console/?agent_id=agent-1#/workspace",
+  );
+});
+
+test("上下文请求与业务请求使用同一个动态服务根地址", async () => {
+  const requested = [];
+  const fetchImpl = async (url) => {
+    requested.push(String(url));
+    return {
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({
+        authenticated: true,
+        user: "user-1",
+        app: "iirjgi005",
+        space: "iirjgi",
+        language: "zh-cn",
+      }),
+    };
+  };
+  const { api } = loadApi(
+    {},
+    fetchImpl,
+    "https://test.deepfos.com/deepfos-server/deep-agent-server1-0/console/",
+  );
+
+  await api.requestContext();
+  assert.deepEqual(requested, [
+    "https://test.deepfos.com/deepfos-server/deep-agent-server1-0/api/v1/request-context",
+  ]);
 });
 
 test("身份上下文请求超时后返回可识别错误", async () => {

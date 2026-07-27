@@ -1,5 +1,5 @@
 const MAX_EVENTS = 80;
-const WORKSPACE_ASSET_VERSION = "20260728-4";
+const WORKSPACE_ASSET_VERSION = "20260728-5";
 
 let initialized = false;
 let eventRows = [];
@@ -196,7 +196,7 @@ function startStateMonitor() {
     const api = window.DeepAgentConsoleChat;
     if (!api) return;
     const key = JSON.stringify({
-      agents: api.state.agents.map((a) => [a.id, a.name]),
+      agents: Array.isArray(api.state.agents) ? api.state.agents.map((a) => [a.id, a.name]) : [],
       agentId: api.state.agentId,
       sessionId: api.state.sessionId,
       llmModelId: api.state.llmModelId,

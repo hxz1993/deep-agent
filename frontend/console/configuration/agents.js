@@ -1,7 +1,5 @@
 function chatUrlForAgent(id) {
-  const base = typeof getBaseUrl === "function" ? getBaseUrl() : "/";
-  const root = base.replace(/\/$/, "");
-  return `${root}/?agent_id=${encodeURIComponent(id)}`;
+  return window.DeepAgentConsoleAPI.consoleUrl(`?agent_id=${encodeURIComponent(id)}#/workspace`);
 }
 
 const KIND_LABELS = {

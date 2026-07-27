@@ -60,7 +60,7 @@ async function parseJsonResponse(r) {
 }
 
 async function apiFetch(path) {
-  const url = `${defaultApiBaseUrl()}${path}`;
+  const url = serviceUrl(path);
   const r = await daFetch(url);
   if (!r.ok) {
     let detail = `HTTP ${r.status}`;

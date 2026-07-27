@@ -1,5 +1,5 @@
 const state = {
-  baseUrl: defaultBaseUrl(),
+  baseUrl: "",
   capabilities: [],
   llmModels: [],
   editingAgentId: null,
@@ -8,14 +8,8 @@ const state = {
   editingMcp: null,
 };
 
-function defaultBaseUrl() {
-  if (location.protocol === "file:") return "http://localhost:8000";
-  const root = window.__DEEP_AGENT_APP_ROOT__ || window.__DEEP_AGENT_BASE__ || "/";
-  return `${location.origin}${root.replace(/\/$/, "")}`;
-}
-
 function getBaseUrl() {
-  return state.baseUrl;
+  return typeof defaultApiBaseUrl === "function" ? defaultApiBaseUrl() : state.baseUrl;
 }
 
 function escapeHtml(text) {
@@ -66,7 +60,7 @@ async function refreshAfterSuccessfulSave(label, refresh) {
 
 async function apiFetch(path, options = {}) {
   const { headers: optionHeaders, ...rest } = options;
-  const url = `${getBaseUrl()}${path}`;
+  const url = typeof serviceUrl === "function" ? serviceUrl(path) : `${getBaseUrl()}${path}`;
   const resp = await daFetch(url, {
     ...rest,
     headers: { "Content-Type": "application/json", ...optionHeaders },

@@ -1,6 +1,6 @@
 let initialized = false;
 let loadingPromise = null;
-const CONFIGURATION_ASSET_VERSION = "20260728-4";
+const CONFIGURATION_ASSET_VERSION = "20260728-5";
 const CONFIGURATION_TABS = new Set([
   "agents",
   "llm-models",
@@ -89,7 +89,7 @@ async function loadAdminScripts() {
   // The legacy scripts were loaded after the browser's original DOMContentLoaded.
   // Replaying it once initializes their existing, tested bindings against the new DOM.
   document.dispatchEvent(new Event("DOMContentLoaded"));
-  await import("./configuration/catalog.js?v=20260721-1");
+  await import("./configuration/catalog.js?v=20260728-5");
   installCatalogActions();
 }
 

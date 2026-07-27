@@ -73,14 +73,21 @@
     localStorage.removeItem(CONTEXT_KEY);
   }
 
-  function inferBaseUrl() {
-    if (location.protocol === "file:") return "http://localhost:8000";
-    const root = window.__DEEP_AGENT_APP_ROOT__ || "/";
-    return `${location.origin}${root.replace(/\/$/, "")}`;
+  function serviceRootUrl() {
+    if (location.protocol === "file:") return new URL("http://localhost:8000/");
+    return new URL("../", document.baseURI);
   }
 
   function defaultApiBaseUrl() {
-    return inferBaseUrl().replace(/\/$/, "");
+    return serviceRootUrl().href.replace(/\/$/, "");
+  }
+
+  function serviceUrl(path = "") {
+    return new URL(String(path).replace(/^\/+/, ""), serviceRootUrl()).href;
+  }
+
+  function consoleUrl(path = "") {
+    return new URL(String(path), document.baseURI).href;
   }
 
   function safeExtraHeaders(headers) {
@@ -135,7 +142,7 @@
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      const response = await daFetch(`${baseUrl.replace(/\/$/, "")}/api/v1/request-context`, {
+      const response = await daFetch(serviceUrl("api/v1/request-context"), {
         includeContext: !inherited,
         signal: controller.signal,
       });
@@ -166,6 +173,7 @@
   }
 
   window.defaultApiBaseUrl = defaultApiBaseUrl;
+  window.serviceUrl = serviceUrl;
   window.daFetch = daFetch;
   window.DeepAgentConsoleAPI = {
     CONTEXT_KEY,
@@ -173,9 +181,11 @@
     buildHeaders,
     clearContext,
     defaultApiBaseUrl,
+    consoleUrl,
     deriveSpaceFromApp,
     loadContext,
     requestContext,
+    serviceUrl,
     sanitizeContext,
     saveContext,
   };

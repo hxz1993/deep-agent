@@ -30,24 +30,43 @@ function loadApi(initial = {}, fetchImpl = async () => ({ status: 200 })) {
   return { api: window.DeepAgentConsoleAPI, values };
 }
 
-test("请求上下文只保存 app、space、language", () => {
+test("请求上下文只保存 app 并清理旧格式缓存", () => {
   const { api, values } = loadApi();
   assert.deepEqual(
     JSON.parse(JSON.stringify(api.saveContext({
-      app: " app-a ",
+      app: " mdxath003 ",
       space: "space-a",
       language: "zh-cn",
       user: "other-user",
       token: "secret",
       cookie: "secret",
     }))),
-    { app: "app-a", space: "space-a", language: "zh-cn" },
+    { app: "mdxath003" },
   );
-  assert.deepEqual(JSON.parse(values.get(api.CONTEXT_KEY)), {
-    app: "app-a",
-    space: "space-a",
-    language: "zh-cn",
+  assert.deepEqual(JSON.parse(values.get(api.CONTEXT_KEY)), { app: "mdxath003" });
+});
+
+test("读取旧上下文时只保留合法 App", () => {
+  const { api, values } = loadApi({
+    da_console_request_context_v1: JSON.stringify({
+      app: "mdxath003",
+      space: "other",
+      language: "en",
+    }),
   });
+
+  assert.deepEqual(JSON.parse(JSON.stringify(api.loadContext())), { app: "mdxath003" });
+  assert.deepEqual(JSON.parse(values.get(api.CONTEXT_KEY)), { app: "mdxath003" });
+});
+
+test("App 推导 Space 并拒绝非法编码", () => {
+  const { api } = loadApi();
+
+  assert.equal(api.deriveSpaceFromApp(" mdxath003 "), "mdxath");
+  assert.throws(
+    () => api.saveContext({ app: "mdxath" }),
+    /Space 编码和三位数字/,
+  );
 });
 
 test("敏感 Header 无法通过大小写变体绕过", () => {
@@ -60,26 +79,27 @@ test("敏感 Header 无法通过大小写变体绕过", () => {
     "X-Debug-Header": "not-allowed",
     "Content-Type": "application/json",
   });
-  assert.deepEqual(JSON.parse(JSON.stringify(headers)), { "Content-Type": "application/json" });
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(headers)),
+    { "Content-Type": "application/json", language: "zh-cn" },
+  );
 });
 
-test("空白上下文不发送且重置会清除存储", () => {
+test("请求固定使用中文且重置会清除 App", () => {
   const { api, values } = loadApi({
     da_console_request_context_v1: JSON.stringify({ app: " ", space: "s1" }),
   });
-  assert.deepEqual(JSON.parse(JSON.stringify(api.buildHeaders())), { space: "s1" });
+  assert.deepEqual(JSON.parse(JSON.stringify(api.buildHeaders())), { language: "zh-cn" });
   api.clearContext();
   assert.equal(values.has(api.CONTEXT_KEY), false);
 });
 
-test("不可用的自定义后端地址可以恢复为当前页面地址", () => {
+test("后端地址固定为当前同源并清理旧缓存", () => {
   const { api, values } = loadApi({
     da_console_base_url_v1: "http://192.0.2.1:8000",
   });
-  assert.equal(api.canFallbackToInheritedBaseUrl(), true);
-  assert.equal(api.clearBaseUrl(), "http://localhost:8000");
-  assert.equal(values.has(api.BASE_URL_KEY), false);
-  assert.equal(api.canFallbackToInheritedBaseUrl(), false);
+  assert.equal(api.defaultApiBaseUrl(), "http://localhost:8000");
+  assert.equal(values.has("da_console_base_url_v1"), false);
 });
 
 test("身份上下文请求超时后返回可识别错误", async () => {

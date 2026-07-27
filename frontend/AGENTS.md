@@ -33,7 +33,7 @@ frontend/
 | Markdown | marked + DOMPurify + highlight.js |
 | 会话 | `session_id` 由后端 `session` 事件返回；`GET/DELETE /api/v1/sessions`；标题展示 `title \|\| user_prompt`（见 [`../docs/guides/experience/ai-title-generator.md`](../docs/guides/experience/ai-title-generator.md)） |
 | 能力面板 | `GET /api/v1/tools` |
-| 配置 | 测试上下文与后端地址存 `localStorage`；全局环境配置只读展示，身份和鉴权只读 |
+| 配置 | `localStorage` 只保存调试 App；全局环境配置只读展示，身份和鉴权由平台提供 |
 | 一体化控制台 | `/console/`；工作台、配置和诊断的唯一入口 |
 
 ## 一体化控制台
@@ -41,8 +41,9 @@ frontend/
 `frontend/console/` 是不依赖构建工具的 ES Modules 页面。它复用现有聊天和配置 API，但不读取旧设置页的 `da_request_headers`：
 
 - 平台用户与鉴权只读，通过 `GET /api/v1/request-context` 获取。
-- 仅允许在当前控制台覆盖 `app`、`space`、`language`，分别参与后续请求 Header。
-- `app` 或 `space` 变化会停止当前流并重新加载页面状态；只切换语言时保留会话。
+- 当前控制台只允许覆盖 `app`；Space 根据标准 App 编码自动去掉末尾三位，Language 固定为 `zh-cn`。
+- 调试 App 变化会停止当前流并重新加载页面状态；旧缓存中的 Space、Language 和自定义后端地址会被清理。
+- 控制台请求固定使用当前同源后端。本地联调直接访问本机 `8000/console/`，不在浏览器中切换后端地址。
 - SSE 解析、HITL 参数归一化和 Schema 文本校验分别位于 `protocol.js`、`hitl.js`、`schema-editor.js`，可由 Node 内置测试独立验证。
 - 控制台测试：`node --test tests/frontend/console/*.test.mjs`。
 - 配置中心默认打开 Agent；“全局配置”仍位于“辅助模型”后、模型资源分割线前，通过 `GET /api/v1/global-settings` 按需展示安全白名单，没有编辑或保存入口。
@@ -90,7 +91,7 @@ python -m http.server 5173
 # → http://localhost:5173/console/
 ```
 
-在“测试上下文”中配置后端地址（默认同源）；顶部状态表示 `/health` 是否正常。
+页面固定请求当前同源后端；顶部状态表示 `/health` 是否正常。
 
 ---
 

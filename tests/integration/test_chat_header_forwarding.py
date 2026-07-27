@@ -39,6 +39,7 @@ class ChatHeaderForwardingStreamTest(unittest.IsolatedAsyncioTestCase):
             recorded,
             {
                 "authorization": "Bearer stream-token",
+                "language": "zh-cn",
                 "user": TEST_USER_ID,
                 "x-tenant-id": "tenant-stream",
             },
@@ -69,6 +70,7 @@ class ChatHeaderForwardingTests(unittest.TestCase):
             recorded,
             {
                 "authorization": "Bearer chat-api-token",
+                "language": "zh-cn",
                 "user": TEST_USER_ID,
                 "x-tenant-id": "tenant-chat",
             },
@@ -86,7 +88,30 @@ class ChatHeaderForwardingTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200, response.text)
         recorded = json.loads(record_file.read_text(encoding="utf-8"))
-        self.assertEqual(recorded, {"user": TEST_USER_ID})
+        self.assertEqual(recorded, {"language": "zh-cn", "user": TEST_USER_ID})
+
+    def test_chat_api_derives_context_from_app_header(self) -> None:
+        with _test_chat_client() as (client, record_file):
+            response = client.post(
+                "/api/v1/chat",
+                json={
+                    "message": "inspect headers",
+                    "capabilities": ["mcp:echo"],
+                },
+                headers={"app": "mdxath003"},
+            )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        recorded = json.loads(record_file.read_text(encoding="utf-8"))
+        self.assertEqual(
+            recorded,
+            {
+                "app": "mdxath003",
+                "language": "zh-cn",
+                "space": "mdxath",
+                "user": TEST_USER_ID,
+            },
+        )
 
     def test_chat_api_isolated_mcp_keeps_static_identity(self) -> None:
         with _test_chat_client(

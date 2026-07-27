@@ -67,8 +67,8 @@ class LocalIdentityAdapterTests(unittest.IsolatedAsyncioTestCase):
         scope = {
             "type": "http",
             "headers": [
-                (b"app", b"app-from-console"),
-                (b"space", b"space-from-console"),
+                (b"app", b"mdxath003"),
+                (b"space", b"mdxath"),
                 (b"language", b"zh-cn"),
             ],
         }
@@ -79,8 +79,8 @@ class LocalIdentityAdapterTests(unittest.IsolatedAsyncioTestCase):
         await adapter(scope, unused, unused)
         headers = header_map(target.scope)
 
-        self.assertEqual(headers["app"], "app-from-console")
-        self.assertEqual(headers["space"], "space-from-console")
+        self.assertEqual(headers["app"], "mdxath003")
+        self.assertEqual(headers["space"], "mdxath")
         self.assertEqual(headers["language"], "zh-cn")
 
     async def test_lifespan_scope_is_not_modified(self) -> None:
@@ -110,8 +110,8 @@ class LocalIdentityRequestContextTests(unittest.TestCase):
                 headers={
                     "user": "spoofed-user",
                     "authorization": "Bearer spoofed-token",
-                    "app": "app-from-console",
-                    "space": "space-from-console",
+                    "app": "mdxath003",
+                    "space": "mdxath",
                     "language": "zh-cn",
                 },
             )
@@ -122,8 +122,8 @@ class LocalIdentityRequestContextTests(unittest.TestCase):
             {
                 "authenticated": True,
                 "user": "configured-user",
-                "app": "app-from-console",
-                "space": "space-from-console",
+                "app": "mdxath003",
+                "space": "mdxath",
                 "language": "zh-cn",
             },
         )

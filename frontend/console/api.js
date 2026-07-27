@@ -2,8 +2,9 @@
 
 (function () {
   const CONTEXT_KEY = "da_console_request_context_v1";
-  const BASE_URL_KEY = "da_console_base_url_v1";
-  const CONTEXT_HEADERS = new Set(["app", "space", "language"]);
+  const LEGACY_BASE_URL_KEY = "da_console_base_url_v1";
+  const DEFAULT_LANGUAGE = "zh-cn";
+  const CONTEXT_HEADERS = new Set(["app"]);
   const SAFE_REQUEST_HEADERS = new Set(["accept", "content-type"]);
   const FORBIDDEN_HEADERS = new Set([
     "authorization",
@@ -33,21 +34,38 @@
     return result;
   }
 
+  function deriveSpaceFromApp(value) {
+    const app = normalizeString(value);
+    if (!app || !/^.+\d{3}$/.test(app)) {
+      throw new Error("应用编码应由 Space 编码和三位数字组成，例如 mdxath003");
+    }
+    return app.slice(0, -3);
+  }
+
+  function persistContext(value) {
+    if (Object.keys(value).length) {
+      localStorage.setItem(CONTEXT_KEY, JSON.stringify(value));
+    } else {
+      localStorage.removeItem(CONTEXT_KEY);
+    }
+  }
+
   function loadContext() {
     try {
-      return sanitizeContext(JSON.parse(localStorage.getItem(CONTEXT_KEY) || "{}"));
+      const sanitized = sanitizeContext(JSON.parse(localStorage.getItem(CONTEXT_KEY) || "{}"));
+      if (sanitized.app) deriveSpaceFromApp(sanitized.app);
+      persistContext(sanitized);
+      return sanitized;
     } catch {
+      localStorage.removeItem(CONTEXT_KEY);
       return {};
     }
   }
 
   function saveContext(value) {
     const sanitized = sanitizeContext(value);
-    if (Object.keys(sanitized).length) {
-      localStorage.setItem(CONTEXT_KEY, JSON.stringify(sanitized));
-    } else {
-      localStorage.removeItem(CONTEXT_KEY);
-    }
+    if (sanitized.app) deriveSpaceFromApp(sanitized.app);
+    persistContext(sanitized);
     return sanitized;
   }
 
@@ -62,26 +80,7 @@
   }
 
   function defaultApiBaseUrl() {
-    return (localStorage.getItem(BASE_URL_KEY) || inferBaseUrl()).replace(/\/$/, "");
-  }
-
-  function inheritedApiBaseUrl() {
     return inferBaseUrl().replace(/\/$/, "");
-  }
-
-  function clearBaseUrl() {
-    localStorage.removeItem(BASE_URL_KEY);
-    return inheritedApiBaseUrl();
-  }
-
-  function canFallbackToInheritedBaseUrl() {
-    return defaultApiBaseUrl() !== inheritedApiBaseUrl();
-  }
-
-  function saveBaseUrl(value) {
-    const normalized = normalizeString(value) || inferBaseUrl();
-    localStorage.setItem(BASE_URL_KEY, normalized.replace(/\/$/, ""));
-    return defaultApiBaseUrl();
   }
 
   function safeExtraHeaders(headers) {
@@ -99,7 +98,7 @@
   function buildHeaders(extra = {}, { includeContext = true } = {}) {
     const headers = safeExtraHeaders(extra);
     if (includeContext) {
-      Object.assign(headers, loadContext());
+      Object.assign(headers, { language: DEFAULT_LANGUAGE }, loadContext());
     }
     return headers;
   }
@@ -131,7 +130,8 @@
     }
   }
 
-  async function requestContext({ inherited = false, baseUrl = defaultApiBaseUrl(), timeoutMs = 5000 } = {}) {
+  async function requestContext({ inherited = false, timeoutMs = 5000 } = {}) {
+    const baseUrl = defaultApiBaseUrl();
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
@@ -159,21 +159,24 @@
     }
   }
 
+  try {
+    localStorage.removeItem(LEGACY_BASE_URL_KEY);
+  } catch {
+    /* LocalStorage may be unavailable in restricted browser contexts. */
+  }
+
   window.defaultApiBaseUrl = defaultApiBaseUrl;
   window.daFetch = daFetch;
   window.DeepAgentConsoleAPI = {
     CONTEXT_KEY,
-    BASE_URL_KEY,
+    DEFAULT_LANGUAGE,
     buildHeaders,
-    canFallbackToInheritedBaseUrl,
-    clearBaseUrl,
     clearContext,
     defaultApiBaseUrl,
-    inheritedApiBaseUrl,
+    deriveSpaceFromApp,
     loadContext,
     requestContext,
     sanitizeContext,
-    saveBaseUrl,
     saveContext,
   };
 })();

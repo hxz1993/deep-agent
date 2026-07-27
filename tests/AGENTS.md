@@ -48,6 +48,7 @@ tests/
 | `test_dbms_config.py` | `DEEP_AGENT_DBMS_*` 解析 |
 | `test_deepcube_server.py` | DeepCube 启动器 argv |
 | `test_forward_headers.py` | MCP header 白名单 |
+| `test_request_context.py` | App 推导 Space、默认中文和上下文接口校验 |
 | `test_mcp_lease_manager.py` | MCP lease 管理 |
 | `test_title_generator.py` | AI 标题清洗与无配置行为 |
 | `test_modality_resolver.py` | 模型 modality bundled 解析与 refresh |

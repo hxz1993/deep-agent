@@ -495,7 +495,7 @@ class McpInspectionApiTests(unittest.IsolatedAsyncioTestCase):
         ):
             response = await inspect_mcp(
                 "docs",
-                _request((b"app", b"app-a")),
+                _request((b"app", b"mdxath003")),
                 store,
             )
 

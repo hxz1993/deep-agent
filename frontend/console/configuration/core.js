@@ -1,7 +1,5 @@
-const STORAGE_KEY = "da_console_base_url_v1";
-
 const state = {
-  baseUrl: "",
+  baseUrl: defaultBaseUrl(),
   capabilities: [],
   llmModels: [],
   editingAgentId: null,
@@ -17,19 +15,7 @@ function defaultBaseUrl() {
 }
 
 function getBaseUrl() {
-  return state.baseUrl || defaultBaseUrl();
-}
-
-function loadSettings() {
-  const saved = localStorage.getItem(STORAGE_KEY);
-  state.baseUrl = saved || defaultBaseUrl();
-  const input = document.getElementById("baseUrlInput");
-  if (input) input.value = state.baseUrl;
-}
-
-function saveBaseUrl(value) {
-  state.baseUrl = value.trim() || defaultBaseUrl();
-  localStorage.setItem(STORAGE_KEY, state.baseUrl);
+  return state.baseUrl;
 }
 
 function escapeHtml(text) {
@@ -197,20 +183,6 @@ function parseArgs(text) {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
-  loadSettings();
-
-  const baseInput = document.getElementById("baseUrlInput");
-  baseInput?.addEventListener("change", () => {
-    saveBaseUrl(baseInput.value);
-    loadDatabaseSchemaVersion();
-    if (window.globalSettingsAdmin) window.globalSettingsAdmin.refresh();
-    if (window.agentsAdmin) window.agentsAdmin.refresh();
-    if (window.llmModelsAdmin) window.llmModelsAdmin.refresh();
-    if (window.auxiliaryModelsAdmin) window.auxiliaryModelsAdmin.refresh();
-    if (window.mcpAdmin) window.mcpAdmin.refresh();
-    if (window.uiToolsAdmin) window.uiToolsAdmin.refresh();
-  });
-
   const chatLink = document.getElementById("chatLink");
   if (chatLink && location.protocol !== "file:") {
     chatLink.href = "/";

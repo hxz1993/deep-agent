@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unittest
 
+from fastapi import HTTPException
 from starlette.requests import Request
 
 from deep_agent.agent.headers import extract_forward_headers
@@ -64,7 +65,7 @@ class ForwardHeaderAllowlistTests(unittest.TestCase):
     def test_extract_forward_headers_is_case_insensitive(self) -> None:
         request = _request(
             [
-                (b"app", b"demo"),
+                (b"app", b"demo001"),
                 (b"LANGUAGE", b"zh-CN"),
                 (b"cookie", b"ignored"),
             ]
@@ -72,10 +73,63 @@ class ForwardHeaderAllowlistTests(unittest.TestCase):
         self.assertEqual(
             extract_forward_headers(request, allowed=frozenset({"app", "language"})),
             {
-                "app": "demo",
-                "LANGUAGE": "zh-CN",
+                "app": "demo001",
+                "language": "zh-CN",
             },
         )
+
+    def test_app_only_context_derives_space_and_defaults_language(self) -> None:
+        request = _request([(b"app", b"mdxath003")])
+
+        self.assertEqual(
+            extract_forward_headers(request),
+            {
+                "app": "mdxath003",
+                "space": "mdxath",
+                "language": "zh-cn",
+            },
+        )
+
+    def test_matching_explicit_context_and_language_remain_supported(self) -> None:
+        request = _request(
+            [
+                (b"app", b"mdxath003"),
+                (b"space", b"mdxath"),
+                (b"language", b"en"),
+            ]
+        )
+
+        self.assertEqual(
+            extract_forward_headers(request),
+            {
+                "app": "mdxath003",
+                "space": "mdxath",
+                "language": "en",
+            },
+        )
+
+    def test_mismatched_space_is_rejected(self) -> None:
+        request = _request(
+            [
+                (b"app", b"mdxath003"),
+                (b"space", b"other"),
+            ]
+        )
+
+        with self.assertRaises(HTTPException) as caught:
+            extract_forward_headers(request)
+
+        self.assertEqual(caught.exception.status_code, 422)
+        self.assertIn("mdxath", str(caught.exception.detail))
+
+    def test_invalid_app_is_rejected(self) -> None:
+        request = _request([(b"app", b"mdxath")])
+
+        with self.assertRaises(HTTPException) as caught:
+            extract_forward_headers(request)
+
+        self.assertEqual(caught.exception.status_code, 422)
+        self.assertIn("三位数字", str(caught.exception.detail))
 
     def test_default_mcp_forward_headers_constant(self) -> None:
         self.assertEqual(OPTION.agent.mcp_forward_request_headers, DEFAULT_MCP_FORWARD_HEADERS)

@@ -10,10 +10,21 @@ function valueOrNull(value) {
 }
 
 function mergedContext(overrides = api.loadContext()) {
+  const app = overrides.app || inheritedContext.app || null;
+  let space = inheritedContext.space || null;
+  if (overrides.app) {
+    space = api.deriveSpaceFromApp(overrides.app);
+  } else if (app && !space) {
+    try {
+      space = api.deriveSpaceFromApp(app);
+    } catch {
+      space = null;
+    }
+  }
   return {
-    app: overrides.app || inheritedContext.app || null,
-    space: overrides.space || inheritedContext.space || null,
-    language: overrides.language || inheritedContext.language || null,
+    app,
+    space,
+    language: api.DEFAULT_LANGUAGE,
   };
 }
 
@@ -23,21 +34,12 @@ function renderContext() {
   window.DeepAgentConsoleContext.effectiveContext = effectiveContext;
 
   const appInput = document.getElementById("contextAppInput");
-  const spaceInput = document.getElementById("contextSpaceInput");
-  const languageInput = document.getElementById("contextLanguageInput");
   if (appInput) {
     appInput.value = overrides.app || "";
     appInput.placeholder = inheritedContext.app || "继承平台";
   }
-  if (spaceInput) {
-    spaceInput.value = overrides.space || "";
-    spaceInput.placeholder = inheritedContext.space || "继承平台";
-  }
-  if (languageInput) languageInput.value = overrides.language || "";
 
   const currentUser = identity?.user || "未认证";
-  document.getElementById("contextUserInput").value = currentUser;
-  document.getElementById("contextAuthInput").value = identity ? "已通过平台身份校验" : "未认证";
   document.getElementById("currentUserFull").textContent = currentUser;
   const currentUserButton = document.getElementById("currentUserBtn");
   if (currentUserButton) {
@@ -53,9 +55,6 @@ function renderContext() {
   document.getElementById("effectiveContext").innerHTML = rows
     .map(([label, value]) => `<dt>${label}</dt><dd>${String(value).replace(/</g, "&lt;")}</dd>`)
     .join("");
-
-  const baseUrl = document.getElementById("baseUrlInput");
-  if (baseUrl && document.activeElement !== baseUrl) baseUrl.value = api.defaultApiBaseUrl();
 }
 
 function setAuthLocked(locked) {
@@ -64,17 +63,8 @@ function setAuthLocked(locked) {
 }
 
 export async function refreshIdentity() {
-  let recoveredBaseUrl = false;
   try {
-    let inherited;
-    try {
-      inherited = await api.requestContext({ inherited: true });
-    } catch (error) {
-      if (error.status || !api.canFallbackToInheritedBaseUrl()) throw error;
-      api.clearBaseUrl();
-      inherited = await api.requestContext({ inherited: true });
-      recoveredBaseUrl = true;
-    }
+    const inherited = await api.requestContext({ inherited: true });
     identity = inherited;
     inheritedContext = {
       app: inherited.app || null,
@@ -83,9 +73,6 @@ export async function refreshIdentity() {
     };
     setAuthLocked(false);
     renderContext();
-    if (recoveredBaseUrl) {
-      window.DeepAgentConsole?.toast("原后端地址不可用，已恢复为当前页面地址");
-    }
     return true;
   } catch (error) {
     identity = null;
@@ -126,30 +113,31 @@ function toggleUserPopover() {
 function currentFormContext() {
   return api.sanitizeContext({
     app: valueOrNull(document.getElementById("contextAppInput")?.value),
-    space: valueOrNull(document.getElementById("contextSpaceInput")?.value),
-    language: valueOrNull(document.getElementById("contextLanguageInput")?.value),
   });
 }
 
 function saveContext() {
   const before = api.loadContext();
-  const beforeBase = api.defaultApiBaseUrl();
-  const next = api.saveContext(currentFormContext());
-  const nextBase = api.saveBaseUrl(document.getElementById("baseUrlInput")?.value);
+  let next;
+  try {
+    next = api.saveContext(currentFormContext());
+  } catch (error) {
+    window.DeepAgentConsole?.toast(error.message, true);
+    return;
+  }
   closeDrawer();
 
-  const hardChange = before.app !== next.app || before.space !== next.space || beforeBase !== nextBase;
-  if (hardChange) {
+  if (before.app !== next.app) {
     window.DeepAgentConsoleChat?.stopStream();
     location.reload();
     return;
   }
   renderContext();
-  window.DeepAgentConsole?.toast("请求上下文已应用，后续请求将使用新语言");
+  window.DeepAgentConsole?.toast("调试上下文已应用");
 }
 
 function resetContext() {
-  const hadScope = Object.keys(api.loadContext()).some((key) => key === "app" || key === "space");
+  const hadScope = Boolean(api.loadContext().app);
   api.clearContext();
   closeDrawer();
   if (hadScope) {

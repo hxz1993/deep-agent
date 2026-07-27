@@ -47,7 +47,7 @@ async function parseJsonResponse(r) {
 
   if (looksLikeHtml) {
     throw new Error(
-      `后端返回了 HTML 而非 JSON。请确认后端已发版/启动，或在对话页侧边栏配置后端地址（当前 ${defaultApiBaseUrl()}）`,
+      "后端返回了 HTML 而非 JSON。请确认当前控制台后端已发版或启动",
     );
   }
 
@@ -169,7 +169,7 @@ function renderTable() {
 
   if (status) {
     const src = state.sourceLabel || state.source;
-    status.textContent = `共 ${state.total} 个模型 · 数据源 ${src} · 后端 ${defaultApiBaseUrl()}`;
+    status.textContent = `共 ${state.total} 个模型 · 数据源 ${src}`;
   }
 
   renderPagination();

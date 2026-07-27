@@ -79,7 +79,7 @@ async function loadUiTools(agentId) {
 }
 
 const state = {
-  baseUrl: localStorage.getItem("da_console_base_url_v1") || DEFAULT_BASE_URL,
+  baseUrl: DEFAULT_BASE_URL,
   agentId: localStorage.getItem("da_console_agent_id_v1") || "",
   agents: [],
   llmModels: [],
@@ -144,7 +144,6 @@ const el = {
   stopBtn: $("stopBtn"),
   sessionList: $("sessionList"),
   capList: $("capList"),
-  baseUrlInput: $("baseUrlInput"),
   agentSelect: $("agentSelect"),
   connStatus: $("connStatus"),
   sessionBadge: $("sessionBadge"),
@@ -330,22 +329,11 @@ function generateSessionId() {
 }
 
 function init() {
-  el.baseUrlInput.value = state.baseUrl;
   updateAdminLink();
 
   const agentFromUrl = new URLSearchParams(location.search).get("agent_id");
   if (agentFromUrl) state.agentId = agentFromUrl;
 
-  el.baseUrlInput.addEventListener("change", () => {
-    state.baseUrl = el.baseUrlInput.value.trim().replace(/\/$/, "") || DEFAULT_BASE_URL;
-    localStorage.setItem("da_console_base_url_v1", state.baseUrl);
-    updateAdminLink();
-    checkHealth();
-    loadCapabilities();
-    loadUploadCapabilities();
-    loadAgents();
-    syncSessionsFromBackend();
-  });
   el.agentSelect?.addEventListener("change", () => {
     state.agentId = el.agentSelect.value;
     localStorage.setItem("da_console_agent_id_v1", state.agentId);

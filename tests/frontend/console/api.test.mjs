@@ -92,7 +92,10 @@ test("敏感 Header 无法通过大小写变体绕过", () => {
   });
   assert.deepEqual(
     JSON.parse(JSON.stringify(headers)),
-    { "Content-Type": "application/json", language: "zh-cn" },
+    {
+      "Content-Type": "application/json",
+      "X-Deep-Agent-Language": "zh-cn",
+    },
   );
 });
 
@@ -100,9 +103,26 @@ test("请求固定使用中文且重置会清除 App", () => {
   const { api, values } = loadApi({
     da_console_request_context_v1: JSON.stringify({ app: " ", space: "s1" }),
   });
-  assert.deepEqual(JSON.parse(JSON.stringify(api.buildHeaders())), { language: "zh-cn" });
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(api.buildHeaders())),
+    { "X-Deep-Agent-Language": "zh-cn" },
+  );
   api.clearContext();
   assert.equal(values.has(api.CONTEXT_KEY), false);
+});
+
+test("调试 App 使用网关安全 Header 而不是平台保留 app Header", () => {
+  const { api } = loadApi({
+    da_console_request_context_v1: JSON.stringify({ app: "iirjgi005" }),
+  });
+
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(api.buildHeaders())),
+    {
+      "X-Deep-Agent-App": "iirjgi005",
+      "X-Deep-Agent-Language": "zh-cn",
+    },
+  );
 });
 
 test("本地控制台根据部署位置解析服务根地址并清理旧缓存", () => {

@@ -4,7 +4,10 @@ from collections.abc import Iterable
 
 from fastapi import HTTPException, Request, status
 
-from deep_agent.agent.request_context import resolve_request_context
+from deep_agent.agent.request_context import (
+    CONSOLE_CONTEXT_HEADER_PREFIX,
+    resolve_request_context_overrides,
+)
 from deep_agent.options import OPTION
 
 
@@ -55,10 +58,22 @@ def extract_forward_headers(
         return selected
 
     try:
-        context = resolve_request_context(
+        context = resolve_request_context_overrides(
             app=_get_header(request, "app"),
             space=_get_header(request, "space"),
             language=_get_header(request, "language"),
+            override_app=_get_header(
+                request,
+                f"{CONSOLE_CONTEXT_HEADER_PREFIX}app",
+            ),
+            override_space=_get_header(
+                request,
+                f"{CONSOLE_CONTEXT_HEADER_PREFIX}space",
+            ),
+            override_language=_get_header(
+                request,
+                f"{CONSOLE_CONTEXT_HEADER_PREFIX}language",
+            ),
         )
     except ValueError as exc:
         raise HTTPException(
@@ -70,6 +85,7 @@ def extract_forward_headers(
         name: value
         for name, value in selected.items()
         if name.lower() not in context_names
+        and not name.lower().startswith(CONSOLE_CONTEXT_HEADER_PREFIX)
     }
     for name in context_names:
         value = getattr(context, name)

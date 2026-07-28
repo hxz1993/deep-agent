@@ -90,6 +90,41 @@ class ForwardHeaderAllowlistTests(unittest.TestCase):
             },
         )
 
+    def test_console_context_avoids_gateway_header_and_forwards_canonical_values(self) -> None:
+        request = _request(
+            [
+                (b"x-deep-agent-app", b"iirjgi005"),
+                (b"x-deep-agent-language", b"zh-cn"),
+            ]
+        )
+
+        self.assertEqual(
+            extract_forward_headers(request),
+            {
+                "app": "iirjgi005",
+                "space": "iirjgi",
+                "language": "zh-cn",
+            },
+        )
+
+    def test_console_app_override_ignores_inherited_platform_space(self) -> None:
+        request = _request(
+            [
+                (b"app", b"platform001"),
+                (b"space", b"platform"),
+                (b"x-deep-agent-app", b"iirjgi005"),
+            ]
+        )
+
+        self.assertEqual(
+            extract_forward_headers(request),
+            {
+                "app": "iirjgi005",
+                "space": "iirjgi",
+                "language": "zh-cn",
+            },
+        )
+
     def test_matching_explicit_context_and_language_remain_supported(self) -> None:
         request = _request(
             [

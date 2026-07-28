@@ -113,6 +113,32 @@ class ChatHeaderForwardingTests(unittest.TestCase):
             },
         )
 
+    def test_chat_api_translates_console_context_header_for_mcp(self) -> None:
+        with _test_chat_client() as (client, record_file):
+            response = client.post(
+                "/api/v1/chat",
+                json={
+                    "message": "inspect headers",
+                    "capabilities": ["mcp:echo"],
+                },
+                headers={
+                    "x-deep-agent-app": "iirjgi005",
+                    "x-deep-agent-language": "zh-cn",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        recorded = json.loads(record_file.read_text(encoding="utf-8"))
+        self.assertEqual(
+            recorded,
+            {
+                "app": "iirjgi005",
+                "language": "zh-cn",
+                "space": "iirjgi",
+                "user": TEST_USER_ID,
+            },
+        )
+
     def test_chat_api_isolated_mcp_keeps_static_identity(self) -> None:
         with _test_chat_client(
             request_context_mode="isolated",

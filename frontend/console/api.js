@@ -5,6 +5,10 @@
   const LEGACY_BASE_URL_KEY = "da_console_base_url_v1";
   const DEFAULT_LANGUAGE = "zh-cn";
   const CONTEXT_HEADERS = new Set(["app"]);
+  const CONTEXT_REQUEST_HEADERS = {
+    app: "X-Deep-Agent-App",
+    language: "X-Deep-Agent-Language",
+  };
   const SAFE_REQUEST_HEADERS = new Set(["accept", "content-type"]);
   const FORBIDDEN_HEADERS = new Set([
     "authorization",
@@ -105,7 +109,11 @@
   function buildHeaders(extra = {}, { includeContext = true } = {}) {
     const headers = safeExtraHeaders(extra);
     if (includeContext) {
-      Object.assign(headers, { language: DEFAULT_LANGUAGE }, loadContext());
+      const context = loadContext();
+      headers[CONTEXT_REQUEST_HEADERS.language] = DEFAULT_LANGUAGE;
+      if (context.app) {
+        headers[CONTEXT_REQUEST_HEADERS.app] = context.app;
+      }
     }
     return headers;
   }

@@ -5,7 +5,7 @@ from typing import Annotated
 from fastapi import APIRouter, Header, HTTPException, status
 from pydantic import BaseModel
 
-from deep_agent.agent.request_context import resolve_request_context
+from deep_agent.agent.request_context import resolve_request_context_overrides
 from deep_agent.api.v1.request_identity import RequestUserDep
 
 
@@ -26,13 +26,28 @@ async def get_request_context(
     app: Annotated[str | None, Header()] = None,
     space: Annotated[str | None, Header()] = None,
     language: Annotated[str | None, Header()] = None,
+    console_app: Annotated[
+        str | None,
+        Header(alias="X-Deep-Agent-App"),
+    ] = None,
+    console_space: Annotated[
+        str | None,
+        Header(alias="X-Deep-Agent-Space"),
+    ] = None,
+    console_language: Annotated[
+        str | None,
+        Header(alias="X-Deep-Agent-Language"),
+    ] = None,
 ) -> RequestContextResponse:
     """Return the non-sensitive platform context effective for this request."""
     try:
-        context = resolve_request_context(
+        context = resolve_request_context_overrides(
             app=app,
             space=space,
             language=language,
+            override_app=console_app,
+            override_space=console_space,
+            override_language=console_language,
         )
     except ValueError as exc:
         raise HTTPException(

@@ -220,3 +220,44 @@ class ChatMessage(Base):
     sequence: Mapped[int] = mapped_column(Integer, nullable=False)
     payload: Mapped[dict] = mapped_column(JSONType, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class ChatContextCheckpoint(Base):
+    """Derived model-input projection; raw chat_messages remain authoritative."""
+
+    __tablename__ = "chat_context_checkpoints"
+    __table_args__ = (PrimaryKeyConstraint("agent_id", "session_id"),)
+
+    agent_id: Mapped[str] = mapped_column(
+        String(AGENT_ID_LENGTH),
+        primary_key=True,
+        default=NO_AGENT_SCOPE,
+    )
+    session_id: Mapped[str] = mapped_column(KeyText, primary_key=True)
+    source_last_sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    source_history_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    payload: Mapped[list[dict]] = mapped_column(JSONType, nullable=False)
+    payload_schema_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    projection_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    estimated_tokens: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    summary_model_id: Mapped[str | None] = mapped_column(
+        String(AGENT_ID_LENGTH),
+        nullable=True,
+    )
+    row_version: Mapped[int] = mapped_column(
+        BigInteger,
+        nullable=False,
+        default=1,
+        server_default="1",
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )

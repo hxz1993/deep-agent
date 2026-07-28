@@ -55,7 +55,7 @@ MCP 在请求时由 `resolve_mcp_toolsets` 解析（DB 行 + `mcps/` builtin 兜
 
 ### 能力装配与模型输入
 
-DeepAgent 自研 `capabilities.registry.Capability` 是配置包装对象，负责把一组 Instructions/Toolset 暴露给 Agent；Pydantic AI 的 `AbstractCapability` 才是可介入模型请求、消息历史、工具准备和事件生命周期的原生扩展点。当前只有模型适配目录中的 `DeepSeekThinkingRetry` 使用了原生 Capability。
+DeepAgent 自研 `capabilities.registry.Capability` 是配置包装对象，负责把一组 Instructions/Toolset 暴露给 Agent；Pydantic AI 的 `AbstractCapability` 才是可介入模型请求、消息历史、工具准备和事件生命周期的原生扩展点。当前 `DeepSeekThinkingRetry` 与 `agent/context/compaction.py` 的 Harness 压缩包装使用原生 Capability。
 
 模型每轮直接看到的是：Agent/能力 Instructions、`message_history`、当前用户输入/附件和本轮 Tool Definitions。Toolset 负责列出、准备和调用工具；MCP Prompt 不会自动进入模型工具列表。MCP Resource 由宿主侧动态代理工具按需读取。
 
@@ -129,7 +129,7 @@ DeepAgent 自研 `capabilities.registry.Capability` 是配置包装对象，负�
 | --- | --- |
 | `deps.py` | `get_*_store(ctx)` Depends |
 | `conversation.py` | `SessionStore` 协议 + SQL/内存协调器（跨表写入、进程锁） |
-| `stores/` | 8 个表 Store（含 `model_catalog/`）+ `bundle.DataStores` |
+| `stores/` | 9 个表 Store（含 `model_catalog/`、`context_checkpoint/`）+ `bundle.DataStores` |
 | `factory.py` / `dialect.py` | `create_engine` / `close_db`、`bootstrap_database()`、方言解析 |
 | `session_scope.py` / `session_list.py` | 会话作用域解析、列表过滤 DTO |
 
@@ -138,11 +138,12 @@ DeepAgent 自研 `capabilities.registry.Capability` 是配置包装对象，负�
 | `agents` | DB Agent（UUID PK，name 唯一） |
 | `llm_models` | LLM 运行时唯一模型事实：连接、模态、上下文、最大输出与 tags |
 | `model_catalog` | models.dev 的 Lab/Model/Provider 数据库快照，只用于浏览和预填 |
-| `auxiliary_model_configs` | 辅助模型场景（如标题生成）绑定 |
+| `auxiliary_model_configs` | 辅助模型场景（标题生成、上下文摘要）绑定 |
 | `mcp_servers` | MCP transport、config JSON、最近一次 inspection 检测快照 |
 | `ui_tool_definitions` | 手工 UI 工具定义；builtin 由代码生成，不写表 |
 | `chat_sessions` | 会话元数据 |
 | `chat_messages` | `ModelMessage` JSONB 历史 |
+| `chat_context_checkpoints` | 脱敏后的模型输入派生投影；不替代原始历史 |
 
 ## 扩展指南
 
@@ -230,7 +231,7 @@ Provider Key（`OPENAI_API_KEY` 等）由 Pydantic AI 直接读取。
 alembic upgrade head
 ```
 
-迁移：`alembic/versions/001` … `022`。`021` 删除 Agent 级 `max_requests`；`022` 新增 `model_catalog` 和模型上下文、最大输出、tags。涉及共享数据库时必须按不兼容 DDL 维护窗口发布。本地 Postgres：`docker compose up -d`。
+迁移：`alembic/versions/001` … `023`。`021` 删除 Agent 级 `max_requests`；`022` 新增 `model_catalog` 和模型上下文、最大输出、tags；`023` 新增上下文压缩 Checkpoint 派生表。涉及共享数据库时必须按维护窗口发布。本地 Postgres：`docker compose up -d`。
 
 ---
 
@@ -245,6 +246,7 @@ alembic upgrade head
 | CRUD | `/api/v1/ui-tools` | 是 |
 | GET | `/api/v1/tools` | 否（无 DB 时跳过动态 UI 工具） |
 | GET | `/api/v1/global-settings` | 否；无需额外身份依赖，返回安全白名单，只读 |
+| GET | `/api/v1/sessions/{id}/context-status` | 是；沿用会话所有权校验 |
 | | `/api/v1/sessions/*` | 是 |
 | | `/console/#/configuration` | 是 |
 
@@ -266,6 +268,8 @@ SSE 协议：[`../docs/guides/sse-protocol.md`](../docs/guides/sse-protocol.md)�
 7. `model_catalog` 不是运行时事实源，目录刷新不得修改已有 `llm_models`。模型名称和 Base URL 不再用于猜测模态；上下文缺失时后续自动压缩必须关闭。
 7. 配置中心必填文本会去除首尾空白并拒绝空值，显式把必填更新字段传为 `null` 返回 422；重复名称返回 409。删除仍被 Agent 引用的 MCP 或 UI 工具返回 409，并在 `detail.referenced_by` 列出引用方。
 8. 请求上下文以 App 为主键：标准 App 必须以三位数字结尾；Space 自动取 `app[:-3]`。App 与显式 Space 不一致时返回 422，Language 缺失时默认 `zh-cn`。
+9. 上下文压缩只由全局环境变量控制。只有实际生成/更新 Summary 才写 Checkpoint；
+   确定性压缩、Pending、取消、失败都不更新。Checkpoint 写入失败不能让已完成对话失败。
 
 | 现象 | 原因 |
 | --- | --- |

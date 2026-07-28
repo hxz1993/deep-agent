@@ -141,6 +141,7 @@ async def chat(
         usage=result["usage"],
         status=result.get("status", "completed"),
         deferred=result.get("deferred"),
+        context=result.get("context"),
     )
 
 

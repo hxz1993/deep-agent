@@ -95,6 +95,7 @@ const state = {
   pendingAttachments: [],
   pendingTitleRefresh: false,
   titlePollGeneration: 0,
+  contextStatus: null,
 };
 
 const TITLE_POLL_TIMEOUT_MS = 30000;
@@ -558,6 +559,7 @@ function newChat(agentId) {
   state.branchFrom = null;
   state.modelMessageCount = 0;
   state.lastUserBranchPoint = null;
+  state.contextStatus = null;
   state.llmModelId = defaultLlmModelId();
   clearMessages();
   showEmptyState();
@@ -750,6 +752,7 @@ async function loadSessionHistory(session) {
     }
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const data = await r.json();
+    await loadContextStatus(normalized);
     if (!data.messages || data.messages.length === 0) {
       showEmptyState();
       state.modelMessageCount = 0;
@@ -760,6 +763,19 @@ async function loadSessionHistory(session) {
     renderHistory(data.messages, data.model_message_count);
   } catch (e) {
     addSystemNote(`加载历史失败：${e.message}`);
+  }
+}
+
+async function loadContextStatus(session) {
+  const lastCompaction = state.contextStatus?.last_compaction;
+  try {
+    const response = await daFetch(sessionApiUrl(session, "/context-status"));
+    state.contextStatus = response.ok ? await response.json() : null;
+    if (state.contextStatus && lastCompaction) {
+      state.contextStatus.last_compaction = lastCompaction;
+    }
+  } catch {
+    if (!lastCompaction) state.contextStatus = null;
   }
 }
 
@@ -1476,6 +1492,16 @@ function handleEvent({ event, data }, assistant) {
       assistant.finalizeText();
       syncHistoryMeta(data);
       if (data.usage) renderUsage(data.usage);
+      if (data.context) {
+        state.contextStatus = {
+          ...(state.contextStatus || {}),
+          ...data.context.budget,
+          compaction_enabled: data.context.budget.enabled,
+          compaction_reason: data.context.budget.reason,
+          last_compaction: data.context.compaction,
+        };
+        if (state.sessionId) void loadContextStatus(state.sessionId);
+      }
       state.skipHistoryRefresh = true;
       if (data.status === "pending" && data.deferred) {
         state.awaitingHitl = true;

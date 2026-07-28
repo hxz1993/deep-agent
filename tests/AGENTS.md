@@ -54,6 +54,7 @@ tests/
 | `test_catalog.py` | models.dev Lab/Model/Provider 标准化、白名单、扩展元数据和数据库视图 |
 | `test_models_dev.py` | models.dev 严格获取与 Lab 可选补充 |
 | `test_llm_models.py` | 模型上下文、最大输出、输入模态与 tags Store/Schema |
+| `test_context_compaction.py` | 动态输出预算、真实 Harness 压缩、原始历史不改写、脱敏 Checkpoint、CAS 与分支失效 |
 | `test_session_model_override.py` | Agent 对话 `model_id` 请求级覆盖（`build_runner_for_agent`） |
 | `test_ui_tools_rfc.py` | builtin/manual UI 工具注册、Agent 显式选择、保留名称、Schema 校验与事件 enrichment |
 

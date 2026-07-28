@@ -81,6 +81,10 @@ class ChatResponse(BaseModel):
         default=None,
         description="Pending tool calls when status is pending.",
     )
+    context: dict[str, Any] | None = Field(
+        default=None,
+        description="Read-only context budget and compaction telemetry for this run.",
+    )
 
 
 class ToolDescription(BaseModel):

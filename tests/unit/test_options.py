@@ -3,7 +3,11 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
-from deep_agent.options import DEFAULT_MCP_FORWARD_HEADERS, OPTION
+from deep_agent.options import (
+    DEFAULT_MCP_FORWARD_HEADERS,
+    OPTION,
+    validate_runtime_options,
+)
 
 
 class OptionsConvertorTests(unittest.TestCase):
@@ -37,6 +41,35 @@ class OptionsConvertorTests(unittest.TestCase):
     def test_forward_headers_convertor_uses_default_for_blank(self) -> None:
         OPTION.agent.mcp_forward_request_headers = ""
         self.assertEqual(OPTION.agent.mcp_forward_request_headers, DEFAULT_MCP_FORWARD_HEADERS)
+
+
+class ContextCompactionOptionTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._original = (
+            OPTION.agent.context_compaction_trigger_ratio,
+            OPTION.agent.context_compaction_target_ratio,
+            OPTION.agent.context_summary_timeout,
+        )
+
+    def tearDown(self) -> None:
+        (
+            OPTION.agent.context_compaction_trigger_ratio,
+            OPTION.agent.context_compaction_target_ratio,
+            OPTION.agent.context_summary_timeout,
+        ) = self._original
+
+    def test_target_must_be_lower_than_trigger(self) -> None:
+        OPTION.agent.context_compaction_trigger_ratio = 0.60
+        OPTION.agent.context_compaction_target_ratio = 0.60
+
+        with self.assertRaisesRegex(ValueError, "TARGET_RATIO"):
+            validate_runtime_options()
+
+    def test_summary_timeout_must_be_positive(self) -> None:
+        OPTION.agent.context_summary_timeout = 0.0
+
+        with self.assertRaisesRegex(ValueError, "SUMMARY_TIMEOUT"):
+            validate_runtime_options()
 
 
 if __name__ == "__main__":

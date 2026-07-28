@@ -12,6 +12,10 @@ const chatSource = await readFile(
   new URL("../../../frontend/console/chat.js", import.meta.url),
   "utf8",
 );
+const workspaceSource = await readFile(
+  new URL("../../../frontend/console/workspace.js", import.meta.url),
+  "utf8",
+);
 
 test("会话标题第二行显示带前缀的完整会话 ID", () => {
   const sessionId = "019f1857-9463-7db3-a9d3-654a4ac24b24";
@@ -26,4 +30,16 @@ test("会话标题第二行显示带前缀的完整会话 ID", () => {
     /sessionBadge\.textContent = formatSessionIdSubtitle\(state\.sessionId\)/,
   );
   assert.doesNotMatch(chatSource, /sessionBadge\.textContent = .*slice\(/);
+});
+
+test("工作台只读展示上下文预算、压缩结果与 Checkpoint 状态", () => {
+  assert.match(chatSource, /\/context-status/);
+  assert.match(chatSource, /last_compaction:\s*data\.context\.compaction/);
+  assert.match(chatSource, /void loadContextStatus\(state\.sessionId\)/);
+  assert.match(workspaceSource, /历史估算/);
+  assert.match(workspaceSource, /上下文窗口/);
+  assert.match(workspaceSource, /输出预估/);
+  assert.match(workspaceSource, /压缩前\/后/);
+  assert.match(workspaceSource, /Checkpoint/);
+  assert.doesNotMatch(workspaceSource, /summary_body|checkpoint\.payload|摘要正文/i);
 });

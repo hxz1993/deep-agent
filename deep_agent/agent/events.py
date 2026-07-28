@@ -41,6 +41,7 @@ def final(
     deferred: dict[str, Any] | None = None,
     model_message_count: int | None = None,
     user_branch_point: int | None = None,
+    context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "type": "final",
@@ -54,6 +55,8 @@ def final(
         payload["model_message_count"] = model_message_count
     if user_branch_point is not None:
         payload["user_branch_point"] = user_branch_point
+    if context is not None:
+        payload["context"] = context
     return payload
 
 

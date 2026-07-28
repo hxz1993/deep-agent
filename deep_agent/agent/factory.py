@@ -5,6 +5,7 @@ from typing import Any
 import httpx
 from loguru import logger
 from pydantic_ai import Agent
+from pydantic_ai.capabilities import AbstractCapability
 from pydantic_ai.models import DEFAULT_HTTP_TIMEOUT, Model, get_user_agent, parse_model_id
 from pydantic_ai.models.anthropic import AnthropicModel
 from pydantic_ai.models.google import GoogleModel
@@ -78,7 +79,7 @@ def _resolve_google(spec: AgentSpec, model_name: str) -> GoogleModel:
     return GoogleModel(model_name, provider=provider)
 
 
-def _resolve_model(spec: AgentSpec) -> str | Model:
+def resolve_model(spec: AgentSpec) -> str | Model:
     """Turn the spec's model string into a model for Pydantic AI.
 
     For ``provider:model`` strings, the provider class comes from
@@ -133,6 +134,11 @@ def _resolve_model(spec: AgentSpec) -> str | Model:
     return spec.model
 
 
+# Backward-compatible internal seam used by the title path and existing tests.
+# New code may import the public ``resolve_model`` name.
+_resolve_model = resolve_model
+
+
 def _toolset_id(toolset: Any) -> str | None:
     toolset_id = getattr(toolset, "id", None)
     if toolset_id is not None:
@@ -176,6 +182,7 @@ def build_agent(
     mcp_toolsets: list[Any] | None = None,
     dynamic_ui_toolset: Any | None = None,
     mcp_resource_toolset: Any | None = None,
+    context_compaction: AbstractCapability[AgentDeps] | None = None,
 ) -> Agent[AgentDeps, str]:
     """Construct a Pydantic AI agent from a spec + the capability registry.
 
@@ -192,12 +199,16 @@ def build_agent(
         dynamic_ui_toolset=dynamic_ui_toolset,
         mcp_resource_toolset=mcp_resource_toolset,
     )
-    capabilities = [DeepSeekThinkingRetry()] if isinstance(model, DeepSeekChatModel) else None
+    capabilities: list[AbstractCapability[AgentDeps]] = []
+    if isinstance(model, DeepSeekChatModel):
+        capabilities.append(DeepSeekThinkingRetry())
+    if context_compaction is not None:
+        capabilities.append(context_compaction)
     return Agent(
         model,
         deps_type=AgentDeps,
         instructions=spec.instructions,
         toolsets=toolsets,
-        capabilities=capabilities,
+        capabilities=capabilities or None,
         retries=request_retries,
     )

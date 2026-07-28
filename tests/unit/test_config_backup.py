@@ -14,6 +14,7 @@ from deep_agent.db.models import (
     Agent,
     AuxiliaryModelConfig,
     Base,
+    ChatContextCheckpoint,
     ChatMessage,
     ChatSession,
     LlmModel,
@@ -58,6 +59,7 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(result.row_counts["agents"], 1)
             self.assertEqual(result.row_counts["chat_sessions"], 0)
             self.assertEqual(result.row_counts["chat_messages"], 0)
+            self.assertEqual(result.row_counts["chat_context_checkpoints"], 0)
 
             with sqlite3.connect(result.path) as connection:
                 tables = {
@@ -127,6 +129,12 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                 )
                 self.assertEqual(
                     connection.execute("SELECT COUNT(*) FROM chat_messages").fetchone(),
+                    (0,),
+                )
+                self.assertEqual(
+                    connection.execute(
+                        "SELECT COUNT(*) FROM chat_context_checkpoints"
+                    ).fetchone(),
                     (0,),
                 )
                 self.assertEqual(
@@ -302,6 +310,20 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                         "session_id": "session-1",
                         "sequence": 1,
                         "payload": {"kind": "request"},
+                    },
+                )
+                await connection.execute(
+                    insert(ChatContextCheckpoint.__table__),
+                    {
+                        "agent_id": "agent-1",
+                        "session_id": "session-1",
+                        "source_last_sequence": 1,
+                        "source_history_hash": "a" * 64,
+                        "payload": [{"kind": "request", "parts": []}],
+                        "payload_schema_version": 1,
+                        "projection_fingerprint": "b" * 64,
+                        "estimated_tokens": 12,
+                        "row_version": 1,
                     },
                 )
         finally:

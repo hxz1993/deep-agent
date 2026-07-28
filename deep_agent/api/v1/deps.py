@@ -5,7 +5,13 @@ from dataclasses import replace
 from pydantic_ai.settings import ModelSettings
 from pydantic_ai.usage import UsageLimits
 
-from deep_agent.agent.factory import build_agent
+from deep_agent.agent.auxiliary_models import (
+    CONTEXT_SUMMARY_USE_CASE,
+    resolve_llm_model_for_use_case,
+)
+from deep_agent.agent.context.compaction import build_context_compaction
+from deep_agent.agent.context.checkpoint import projection_fingerprint
+from deep_agent.agent.factory import build_agent, resolve_model
 from deep_agent.agent.input_capabilities import augment_instructions_with_capabilities
 from deep_agent.agent.runner import AgentRunner
 from deep_agent.agent.spec import DEFAULT_INSTRUCTIONS, AgentSpec
@@ -93,6 +99,25 @@ async def _build_runner_from_spec(
     mcp_resource_toolset = build_mcp_resource_toolset(spec, mcp_rows)
 
     spec = replace(spec, instructions=augment_instructions_with_capabilities(spec))
+    summary_row = None
+    summary_model = None
+    if (
+        OPTION.agent.context_compaction_enabled
+        and spec.context_window_tokens is not None
+        and spec.context_window_tokens > 0
+    ):
+        summary_row = await resolve_llm_model_for_use_case(
+            ctx.stores.auxiliary_model,
+            ctx.stores.llm_model,
+            CONTEXT_SUMMARY_USE_CASE,
+        )
+        if summary_row is not None:
+            summary_model = resolve_model(AgentSpec.from_llm_model(summary_row))
+    context_compaction = build_context_compaction(
+        context_window_tokens=spec.context_window_tokens,
+        max_output_tokens=spec.max_output_tokens,
+        summary_model=summary_model,
+    )
     agent = build_agent(
         spec,
         ctx.registry,
@@ -100,6 +125,7 @@ async def _build_runner_from_spec(
         mcp_toolsets=mcp_toolsets,
         dynamic_ui_toolset=dynamic_ui_toolset,
         mcp_resource_toolset=mcp_resource_toolset,
+        context_compaction=context_compaction,
     )
     limits = UsageLimits(
         request_limit=OPTION.agent.max_requests,
@@ -115,4 +141,23 @@ async def _build_runner_from_spec(
         context_window_tokens=spec.context_window_tokens,
         max_output_tokens=spec.max_output_tokens,
         model_tags=spec.tags,
+        context_compaction=context_compaction,
+        checkpoint_store=(
+            ctx.stores.context_checkpoint
+            if context_compaction is not None
+            else None
+        ),
+        checkpoint_fingerprint=(
+            projection_fingerprint(
+                llm_model_id=spec.llm_model_id,
+                context_window_tokens=spec.context_window_tokens,
+                trigger_ratio=OPTION.agent.context_compaction_trigger_ratio,
+                target_ratio=OPTION.agent.context_compaction_target_ratio,
+                keep_tool_pairs=OPTION.agent.context_keep_tool_pairs,
+                summary_model_id=summary_row.id if summary_row is not None else None,
+            )
+            if context_compaction is not None
+            else None
+        ),
+        summary_model_id=summary_row.id if summary_row is not None else None,
     )

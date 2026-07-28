@@ -15,6 +15,7 @@ from deep_agent.agent.history import first_user_prompt
 from deep_agent.db.session_list import SessionListFilters, SessionSummaryRow
 from deep_agent.db.session_scope import SessionOwner, normalize_agent_scope, runtime_session_key
 from deep_agent.db.stores.chat_session.base import ChatSessionStoreBase
+from deep_agent.db.stores.context_checkpoint.base import ContextCheckpointStoreBase
 from deep_agent.db.stores.message.base import MessageStoreBase
 
 __all__ = [
@@ -110,11 +111,13 @@ class SqlConversationCoordinator:
         *,
         chat_session: ChatSessionStoreBase,
         message: MessageStoreBase,
+        context_checkpoint: ContextCheckpointStoreBase,
     ) -> None:
         self._session_factory = session_factory
         self._locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
         self._chat_sessions = chat_session
         self._messages = message
+        self._context_checkpoints = context_checkpoint
 
     def lock(self, session_id: str, *, agent_id: str | None = None) -> asyncio.Lock:
         return self._locks[runtime_session_key(session_id, agent_id=agent_id)]
@@ -198,6 +201,7 @@ class SqlConversationCoordinator:
     ) -> None:
         scope = normalize_agent_scope(agent_id)
         async with self._write() as db:
+            await self._context_checkpoints._delete(db, scope, session_id)
             await self._messages._truncate_from_sequence(
                 db,
                 scope,
@@ -214,6 +218,7 @@ class SqlConversationCoordinator:
     ) -> None:
         scope = normalize_agent_scope(agent_id)
         async with self._write() as db:
+            await self._context_checkpoints._delete(db, scope, session_id)
             await self._messages._truncate_from_sequence(
                 db,
                 scope,
@@ -265,7 +270,9 @@ class SqlConversationCoordinator:
 
     async def delete(self, session_id: str, *, agent_id: str | None = None) -> None:
         scope = normalize_agent_scope(agent_id)
-        await self._chat_sessions.delete(scope, session_id)
+        async with self._write() as db:
+            await self._context_checkpoints._delete(db, scope, session_id)
+            await self._chat_sessions._delete(db, scope, session_id)
         self._locks.pop(runtime_session_key(session_id, agent_id=agent_id), None)
 
     async def get_session_title(

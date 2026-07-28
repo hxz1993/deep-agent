@@ -178,6 +178,16 @@ function renderInspector() {
 
   const model = state.llmModels.find((item) => item.id === state.llmModelId);
   const context = window.DeepAgentConsoleContext?.effectiveContext || {};
+  const contextStatus = state.contextStatus || {};
+  const compaction = contextStatus.last_compaction || {};
+  const formatTokens = (value) =>
+    Number.isFinite(Number(value)) ? Number(value).toLocaleString("zh-CN") : "—";
+  const strategyLabels = {
+    none: "未触发",
+    tiered_deterministic: "确定性压缩",
+    tiered_summary: "分层摘要",
+    sliding_window_fallback: "滑动窗口兜底",
+  };
   host.innerHTML = `<dl class="inspector-grid">
     <dt>会话</dt><dd class="mono">${escapeHtml(state.sessionId || "尚未创建")}</dd>
     <dt>Agent</dt><dd>${escapeHtml(currentAgentName(state))}</dd>
@@ -185,6 +195,19 @@ function renderInspector() {
     <dt>状态</dt><dd><span class="status-badge ${state.streaming ? "running" : state.awaitingHitl ? "waiting" : "idle"}">${state.streaming ? "生成中" : state.awaitingHitl ? "等待用户" : "空闲"}</span></dd>
     <dt>附件</dt><dd>${state.pendingAttachments.length} 个待发送</dd>
     <dt>工具事件</dt><dd>${eventToolRows().length} 条</dd>
+    <dt>历史估算</dt><dd>${escapeHtml(formatTokens(contextStatus.estimated_history_tokens))} Token</dd>
+    <dt>上下文窗口</dt><dd>${escapeHtml(formatTokens(contextStatus.context_window_tokens))} Token</dd>
+    <dt>输出预估</dt><dd>${escapeHtml(formatTokens(contextStatus.predicted_output_tokens))} Token</dd>
+    <dt>压缩阈值</dt><dd>${escapeHtml(formatTokens(contextStatus.trigger_tokens))} Token</dd>
+    <dt>压缩状态</dt><dd>${escapeHtml(
+      compaction.triggered
+        ? strategyLabels[compaction.strategy] || compaction.strategy
+        : contextStatus.compaction_enabled
+          ? "未触发"
+          : "未启用"
+    )}</dd>
+    <dt>压缩前/后</dt><dd>${escapeHtml(formatTokens(compaction.estimated_tokens_before))} / ${escapeHtml(formatTokens(compaction.estimated_tokens_after))}</dd>
+    <dt>Checkpoint</dt><dd>${contextStatus.checkpoint_exists ? "已生成" : "暂无"}</dd>
     <dt>App</dt><dd class="mono">${escapeHtml(context.app || "继承")}</dd>
     <dt>Space</dt><dd class="mono">${escapeHtml(context.space || "继承")}</dd>
     <dt>Language</dt><dd>${escapeHtml(context.language || "继承")}</dd>
@@ -205,6 +228,7 @@ function startStateMonitor() {
       attachments: api.state.pendingAttachments.length,
       tab: activeInspectorTab,
       eventCount: eventRows.length,
+      contextStatus: api.state.contextStatus,
     });
     if (key === lastRenderKey) return;
     lastRenderKey = key;

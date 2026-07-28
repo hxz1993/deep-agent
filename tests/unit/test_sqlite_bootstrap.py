@@ -53,7 +53,10 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
             with patch("deep_agent.db.url.get_database_url", return_value=url):
                 with patch("deep_agent.db.migrate.get_database_url", return_value=url):
                     await asyncio.to_thread(upgrade_database_sync)
-                    self.assertEqual(self._revision(db_path), "022")
+                    self.assertEqual(self._revision(db_path), "023")
+                    self.assertTrue(
+                        self._table_exists(db_path, "chat_context_checkpoints")
+                    )
                     self.assertNotIn("agent_ids", self._columns(db_path, "ui_tool_definitions"))
                     self.assertIn("inspection", self._columns(db_path, "mcp_servers"))
                     self.assertNotIn("resource_capabilities", self._columns(db_path, "mcp_servers"))
@@ -69,7 +72,7 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
                     self._seed_legacy_mcp_ui_state(db_path)
 
                     await asyncio.to_thread(command.upgrade, migrate._build_alembic_config(), "head")
-                    self.assertEqual(self._revision(db_path), "022")
+                    self.assertEqual(self._revision(db_path), "023")
                     columns = self._columns(db_path, "ui_tool_definitions")
                     self.assertNotIn("mcp_server_name", columns)
                     self.assertNotIn("override", columns)
@@ -128,7 +131,7 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(row, (None,))
 
                     await asyncio.to_thread(command.upgrade, config, "head")
-                    self.assertEqual(self._revision(db_path), "022")
+                    self.assertEqual(self._revision(db_path), "023")
                     self.assertNotIn("max_requests", self._columns(db_path, "agents"))
                     llm_columns = self._columns(db_path, "llm_models")
                     self.assertIn("context_window_tokens", llm_columns)
@@ -136,6 +139,9 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
                     self.assertIn("tags", llm_columns)
                     self.assertNotIn("capabilities_source", llm_columns)
                     self.assertTrue(self._table_exists(db_path, "model_catalog"))
+                    self.assertTrue(
+                        self._table_exists(db_path, "chat_context_checkpoints")
+                    )
                     self.assertIn(
                         "release_date",
                         self._columns(db_path, "model_catalog"),
@@ -149,9 +155,12 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
                     self.assertNotIn("tags", llm_columns)
                     self.assertIn("capabilities_source", llm_columns)
                     self.assertFalse(self._table_exists(db_path, "model_catalog"))
+                    self.assertFalse(
+                        self._table_exists(db_path, "chat_context_checkpoints")
+                    )
 
                     await asyncio.to_thread(command.upgrade, config, "head")
-                    self.assertEqual(self._revision(db_path), "022")
+                    self.assertEqual(self._revision(db_path), "023")
                     self.assertNotIn(
                         "capabilities_source",
                         self._columns(db_path, "llm_models"),

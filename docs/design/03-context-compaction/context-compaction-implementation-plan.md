@@ -1,810 +1,390 @@
 # DeepAgent 上下文压缩实施方案
 
-> 状态：待评审，尚未接入生产代码  
-> 编写日期：2026-07-26  
-> 当前基线：DeepAgent `fix-ruge-0717`，`pydantic-ai-slim 2.12.0`  
-> 隔离实测：`pydantic-ai-slim 2.14.1` + `pydantic-ai-harness 0.10.0`
+> 状态：已在 `fix-ruge-0829-context-compaction` 实施，默认关闭，待部署验证
+> 更新日期：2026-07-29
+> 依赖组合：`pydantic-ai-slim 2.14.1` + `pydantic-ai-harness 0.10.0`
+> 数据库迁移：Alembic `022 → 023`
 
-## 1. 最终建议
+## 1. 结论
 
-DeepAgent 应接入 Pydantic AI Harness Compaction，但不能只在 `Agent(...)` 里加一个 Capability
-就上线。
+DeepAgent 使用 Pydantic AI Harness 做模型输入历史压缩，但继续由 DeepAgent 管理产品会话、
+身份、SSE、HITL 和数据库。
 
-推荐路线：
+核心边界：
 
-```text
-模型上下文元数据与 Token 观测
-  ↓
-ClampOversizedMessages + ClearToolResults 保护层
-  ↓
-LLM 上下文投影/压缩检查点持久化
-  ↓
-TieredCompaction 启用 SummarizingCompaction
-  ↓
-OverflowingToolOutput 外置大型工具结果
-```
+1. `chat_messages` 永远保存完整原始历史，是回放、分支、审计和 Pending 恢复的事实源。
+2. 压缩结果只是一份给模型使用的派生投影，保存在 `chat_context_checkpoints`。
+3. 确定性清理不会单独更新 Checkpoint；只有真正生成或更新 LLM Summary 后才保存。
+4. 模型的 `context_window_tokens` 和 `max_output_tokens` 是容量事实，不是压缩策略。
+5. 输出预留量每轮动态估算。模型最大输出只作为上限，不能直接从总窗口中全额扣除。
+6. 模型没有配置上下文窗口时自动停用压缩，不猜测模型名称，不阻断对话。
+7. 第一版只有全局环境变量，不在 Agent 上增加 `compaction_config`。
 
 默认策略：
 
 ```text
-TieredCompaction
+Harness TieredCompaction
 ├─ ClampOversizedMessages
-├─ DeduplicateFileReads（只对明确映射的读工具）
+├─ DeduplicateFileReads
 ├─ ClearToolResults
-└─ SummarizingCompaction（前三层仍超预算时）
+└─ SummarizingCompaction
+
+Summary 或分层压缩异常
+└─ SlidingWindow 兜底
 ```
 
-不建议：
+功能默认通过 `DEEP_AGENT_CONTEXT_COMPACTION_ENABLED=false` 关闭。完成部署环境验证后再显式开启。
 
-- 只用 SlidingWindow 作为默认策略：简单但会永久丢失旧业务约束。
-- 一达到阈值就总结：成本高，且 Harness 默认只给摘要模型每条 Tool Return 前 500 字符。
-- 直接替换 SQL 原始会话：Console 历史、分支、HITL 和审计都依赖完整消息。
-- 先接 StepPersistence：它不解决当前最直接的上下文预算问题，并与现有 SQL 会话大量重叠。
+## 2. 前因
 
-## 2. 当前运行链路
-
-当前每轮请求：
+原运行链路会在每轮读取当前会话的全部 `chat_messages`，再原样传给 Pydantic AI：
 
 ```text
 MessageStore.get_history()
-  → 查询当前 session 的全部 chat_messages
-  → deserialize_message()
   → AgentRunner._prepare_history()
   → resolve_history_for_llm()
   → Agent.run / run_stream_events(message_history=完整历史)
-  → Pydantic AI Agent Loop
   → result.new_messages()
-  → 只追加本轮新消息到 chat_messages
+  → 追加本轮原始消息
 ```
 
-关键事实：
+长会话的主要风险不是消息条数，而是历史 Token：
 
-1. `get_history()` 无消息数、字符数或 Token 限制。
-2. 所有旧 Tool Return 都原样进入下一次模型请求。
-3. 旧附件引用会转成提取文本或占位；当前轮附件可能加载完整内容。
-4. Usage 只在模型返回后取得，不能阻止当前请求在发送前超限。
-5. `UsageLimits` 当前只设置请求数和可选总 Token，不设置输入/输出上限。
-6. `result.new_messages()` 不包含 Harness 改写后的历史投影。
+- 工具返回可能远大于普通对话。
+- 不同模型的总窗口可能相差数十倍。
+- 模型返回后的 Usage 无法挽救已经超窗的本次请求。
+- 直接覆盖历史会破坏 Console 回放、编辑分支、工具配对、HITL 和审计。
 
-## 3. 为什么需要模型上下文属性
+因此需要在“产品历史”和“模型输入历史”之间增加派生投影。
 
-需要。上下文压缩不能只靠“消息超过 50 条”触发，因为：
+## 3. 模型字段与输出预算
 
-- 不同模型窗口可能是 32K、64K、128K 或更大。
-- 同样 20 条消息，普通聊天和财务模型大结果的体积差异可达数十倍。
-- 需要动态估计本轮输出、Instructions、工具 Schema、附件和 Provider 包装开销。
-- 私有 OpenAI-compatible 模型的窗口不能从 Pydantic AI 自动可靠推导。
+### 3.1 持久化字段
 
-### 3.1 模型级属性
+0.2.2 已在 `llm_models` 保存：
 
-0.2.2 已在 `llm_models` 增加三个运行时事实字段：
-
-```text
-context_window_tokens       BIGINT NULL
-max_output_tokens           BIGINT NULL
-tags                        JSON NULL
-```
-
-语义：
-
-| 字段 | 用途 |
+| 字段 | 语义 |
 | --- | --- |
 | `context_window_tokens` | Provider 声明的输入与输出共享总窗口 |
 | `max_output_tokens` | Provider 声明的单次最大输出能力上限 |
-| `tags` | 推理、工具调用、结构化输出等模型能力标签，与输入模态分开 |
+| `input_modalities` | 文本、图片等输入模态 |
+| `tags` | 推理、工具调用、结构化输出等能力标签 |
 
-这里不持久化 `max_input_tokens`、输出预留值、Tokenizer、估算系数或
-`context_budget_config`。这些都不是模型的稳定属性：
+不新增和不持久化：
 
-- `max_input_tokens` 不能简单等于“总窗口减最大输出”。模型最大可输出 384K，不代表每轮都应为
-  384K 留空，否则 1M 模型会无意义地只剩 616K 输入预算。
-- 实际输出需求取决于当前任务、历史输出分布、请求参数和模型行为，应在每轮请求前动态预测。
-- Tokenizer 与估算校准属于运行算法和观测数据；算法升级不应要求管理员逐模型修改配置。
-- 不保存模型属性来源；目录只是预填入口，`llm_models` 中保存的事实始终可以手工修改。
+- `max_input_tokens`
+- “本轮输出预留”
+- Tokenizer 名称
+- 估算校准系数
+- `context_budget_config`
+- 模型属性来源
 
-0.2.2 只保存事实并透传到 `AgentSpec/AgentRunner`，尚不启用自动压缩。上下文窗口缺失的历史
-模型保持可运行，但后续压缩功能必须自动关闭并给出观测提示。
-
-不应把 `context_window` 塞进 Pydantic AI `ModelProfile`。当前 `ModelProfile` 描述工具、结构化输出、
-Thinking 等协议能力，没有通用上下文窗口字段。
-
-### 3.2 Agent 级策略
-
-模型定义“容量”，Agent 定义“怎么压”。建议为 `agents` 增加一个 nullable JSON：
+这些值不是稳定模型事实。特别是：
 
 ```text
-compaction_config
+总窗口 1M、最大输出 384K
 ```
 
-第一版结构：
+不代表每轮必须预留 384K。如果这样做，普通问答也会无意义地失去 384K 输入空间。
 
-```json
-{
-  "enabled": true,
-  "mode": "tiered",
-  "trigger_ratio": 0.80,
-  "target_ratio": 0.55,
-  "keep_tool_pairs": 3,
-  "min_clear_tokens": 2000,
-  "preserve_first_user_message": true
-}
-```
+### 3.2 首版动态预测
 
-约定：
-
-- `NULL`：使用系统默认。
-- `enabled=false`：明确关闭。
-- `mode=tiered`：推荐默认。
-- `mode=sliding_window`：仅用于可丢弃旧上下文的短任务 Agent。
-- `mode=provider_native`：仅限明确支持且完成验证的供应商模型。
-- `mode=off`：不压缩，只观测和报警。
-
-摘要模型不再新增 Agent 外键。复用现有 `auxiliary_model_configs`，新增 use case：
+本轮输出预估：
 
 ```text
-context_summary
+没有历史 Usage：
+  predicted_output_tokens = 全局输出预估下限
+
+有历史 Usage：
+  predicted_output_tokens = 最近 8 个有效输出样本的上四分位数
+
+最终：
+  predicted_output_tokens = min(预测值, max_output_tokens)
 ```
 
-这样可以为所有 Agent 统一选择便宜、稳定的摘要模型，也可回退到主模型。
+默认输出预估下限为 2048 Token。`max_output_tokens` 只做硬上限。
 
-### 3.3 预算计算
-
-推荐把模型上限与每轮预测分开：
+预算：
 
 ```text
-predicted_output_tokens
-= clamp(
-    基于当前任务与近期输出的预测值,
-    dynamic_output_floor,
-    max_output_tokens
-  )
+safety_margin_tokens
+  = max(1024, context_window_tokens × 5%)
 
-runtime_overhead_tokens
-= estimate(instructions + tool schemas + current input + attachments + provider envelope)
+usable_request_tokens
+  = context_window_tokens
+  - predicted_output_tokens
+  - safety_margin_tokens
 
-usable_history_budget
-= context_window_tokens
-- predicted_output_tokens
-- runtime_overhead_tokens
-- safety_margin_tokens
+trigger_tokens
+  = usable_request_tokens × 0.80
 
-trigger_tokens = usable_history_budget × trigger_ratio
-target_tokens  = usable_history_budget × target_ratio
+target_tokens
+  = usable_request_tokens × 0.55
 ```
 
-首版预测不需要单独训练模型。可以用确定性算法：
+Harness 的 `estimate_token_count()` 采用轻量估算，不能等同于 Provider 的真实计费 Token。
+5% 安全余量用于覆盖 Instructions、工具 Schema、Provider 包装和估算误差。后续应根据真实 Usage
+观测调整，不为输出预测额外调用一个模型。
 
-1. 以系统设定的合理下限作为冷启动值。
-2. 读取当前会话最近若干轮实际 `output_tokens`，采用分位数或 EWMA，避免被一次异常长输出带偏。
-3. 结合当前用户输入长度、是否要求代码/报告、工具链阶段做有限放大。
-4. 最终不超过模型的 `max_output_tokens` 能力上限。
-5. 用 Provider 返回的真实 usage 持续校准估算误差和安全余量。
+## 4. Harness 压缩链
 
-Harness 的 `estimate_token_count(messages)` 只统计消息内容，不包含完整 Tool Schema 和所有 Provider
-包装，不能把它直接等同于真实请求 Token。后续只有实际观测证明规则不足时，再评估专门预测模型；
-默认不应为“估计该留多少输出”额外发起一次 LLM 调用。
-
-## 4. Harness 引包方式
-
-### 4.1 依赖
-
-不能继续使用：
-
-```text
-pydantic-ai-slim[...]>=1.0
-```
-
-建议第一轮固定：
-
-```text
-pydantic-ai-slim[openai,anthropic,google,mcp]==2.14.1
-pydantic-ai-harness==0.10.0
-```
-
-PyPI 已有 Harness 0.11.0。正式开工时应重新审查 Changelog；若升级到 0.11.0，Core/Harness
-要重新跑全部回归，不能只因为“最新版”直接替换。
-
-### 4.2 代码装配
-
-入口应在 `deep_agent/agent/factory.py` 的原生 Capability 列表，而不是塞进 `AgentRunner`：
-
-```python
-from pydantic_ai_harness.compaction import (
-    ClampOversizedMessages,
-    ClearToolResults,
-    DeduplicateFileReads,
-    SummarizingCompaction,
-    TieredCompaction,
-)
-
-capabilities = []
-if isinstance(model, DeepSeekChatModel):
-    capabilities.append(DeepSeekThinkingRetry())
-if compaction is not None:
-    capabilities.append(compaction)
-
-Agent(
-    model,
-    ...,
-    capabilities=capabilities,
-)
-```
-
-新增建议模块：
+入口位于：
 
 ```text
 deep_agent/agent/context/
-├─ __init__.py
-├─ budget.py             模型预算和阈值
-├─ tokenizer.py          Token 估算与校准
-├─ compaction.py         Harness Capability 装配
-├─ checkpoint.py         压缩投影持久化
-├─ file_keys.py          可去重读工具映射
-└─ telemetry.py          压缩指标和脱敏日志
+├─ budget.py
+├─ compaction.py
+├─ checkpoint.py
+└─ file_keys.py
 ```
 
-## 5. 各策略选择
+`DeepAgentContextCompaction` 是 Pydantic AI `AbstractCapability`，由
+`deep_agent/agent/factory.py` 注入 Agent 的原生 Capability 列表。
 
-### 5.1 ClampOversizedMessages
+### 4.1 ClampOversizedMessages
 
-用途：
+- 限制单个异常大的模型消息部分。
+- 单部分上限取目标预算的 40%。
+- 保留头尾各 2000 字符。
+- 不把它当作普通历史裁剪。
 
-- 单条模型输出异常膨胀。
-- 单个 Tool Call 参数异常巨大。
+### 4.2 DeduplicateFileReads
 
-优点：
+只对语义稳定、可明确计算资源 Key 的读取工具启用：
 
-- 零模型调用。
-- 防止“最新一条本身就塞爆下一轮”，其他历史裁剪无法解决这种情况。
+- `read_file`
+- `read_mcp_resource`
 
-边界：
+不对搜索、财务查询、写操作、审批和普通 MCP 工具做名称猜测式去重。
 
-- 不处理 Tool Return。
-- 不应改写用户输入。
-- 只作为异常保险，不是常规上下文管理。
+### 4.3 ClearToolResults
 
-建议：
+- 默认完整保留最近 3 组 Tool Call/Return。
+- 预计回收不足 2000 Token 时不清理，避免无意义破坏 Prompt Cache。
+- 保留 Tool Call/Return 配对。
+- 排除 `builtin__confirm`、`builtin__choice`、`deep_cube__clarify`。
+
+### 4.4 SummarizingCompaction
+
+前三层仍不能把历史压到目标预算时才调用摘要模型。
+
+- 使用 Harness 的结构化摘要提示。
+- 开启增量摘要。
+- 保留首条用户消息。
+- 默认摘要模型来自辅助模型场景 `context_summary`。
+- 未配置辅助模型时复用当前主模型。
+- 摘要调用计入同一轮 Pydantic AI Usage 和请求次数。
+
+### 4.5 SlidingWindow
+
+分层压缩或摘要调用异常时使用。它只保证当前请求能继续，不写新的 Checkpoint。
+
+## 5. Checkpoint 语义
+
+### 5.1 定位
+
+Checkpoint 不是浏览器状态、执行状态或第二份会话：
 
 ```text
-总是启用
-阈值 = usable_input_budget 的 35%～50%
-保留 head/tail 各 1K～2K 字符
+原始产品历史：chat_messages
+派生模型投影：chat_context_checkpoints
 ```
 
-### 5.2 ClearToolResults
+只有 Summary 真正生成或相对旧摘要发生变化时才更新。确定性 Clamp、去重和工具结果清理
+会在需要时重算，不单独持久化。
 
-用途：
+### 5.2 表结构
 
-- 清空旧 Tool Return 内容，但保留 Tool Call/Return 配对和最近几组完整结果。
+Alembic `023` 新增 `chat_context_checkpoints`：
 
-优点：
-
-- 对 DeepAgent 当前真实历史收益最大。
-- 不调用模型。
-- 工具可重新查询时，信息损失可控。
-
-风险：
-
-- 重写旧 Prompt 会破坏 Provider Prompt Cache。
-- 某些工具结果不可重放或包含唯一证据，不能一刀切。
-
-建议：
-
-- 默认保留最近 3 组工具结果。
-- `exclude_tools` 至少包括不可重放、审批、写操作和一次性签名工具。
-- 使用 `min_clear_tokens`，回收太少时不破坏缓存。
-- 对 UI/HITL Deferred 结果谨慎处理；用户确认结果通常很小，应保留。
-
-### 5.3 DeduplicateFileReads
-
-用途：
-
-- 同一文件/Resource 被重复读取，只保留最新结果。
-
-不能按工具名泛化。必须维护稳定映射：
-
-```text
-read_file                 → path
-read_mcp_resource         → server_name + uri
-未来 workspace read       → workspace_id + path + version
-```
-
-以下不能去重：
-
-- 财务模型查询：同一表达式在数据变化后结果不同。
-- 外部搜索：同一关键词结果可能变化。
-- 写操作、审批、HITL。
-
-### 5.4 SlidingWindow
-
-用途：
-
-- 只关心最近几轮的短任务。
-- 摘要模型不可用时的最后兜底。
-
-不建议作为通用默认。它会直接丢弃旧决策、约束和工具证据。
-
-可用于：
-
-- 无业务状态的临时问答 Agent。
-- Summary 失败且下一次请求一定会超窗时的应急 fallback。
-
-### 5.5 SummarizingCompaction
-
-用途：
-
-- 旧目标、决策和当前状态仍重要，但原始历史过大。
-
-优点：
-
-- 压缩比最高。
-- 默认结构包含 Intent、Key decisions、Artifacts、Current state、Next steps、Open questions。
-- 增量模式可基于旧摘要继续扩展。
-
-风险：
-
-1. 摘要调用计入当前 Run 的请求数和 Token。
-2. 默认每条 Tool Return 只进入前 500 字符。
-3. 摘要可能产生事实漂移。
-4. DeepAgent 当前不会跨请求持久化摘要。
-5. 摘要模型失败会让当前请求失败，Harness Tiered 不自动切 SlidingWindow。
-
-启用前置：
-
-- 模型上下文元数据已配置。
-- 有可靠 `context_summary` 辅助模型。
-- 压缩投影可以持久化。
-- 有摘要质量回归数据集。
-- 有 fallback 策略。
-
-### 5.6 TieredCompaction
-
-它不是新压缩算法，而是编排器：
-
-```text
-测量
-→ 运行第一层
-→ 再测量
-→ 达标则停止
-→ 未达标才运行下一层
-```
-
-DeepAgent 的推荐默认，因为真实实验中便宜层已经解决 60%～74% 的历史体积。
-
-### 5.7 LimitWarner
-
-它不是压缩策略，只是在接近请求数、上下文或总 Token 限制时给模型警告。
-
-可用于长任务收尾，但不能防止已有历史超窗。优先级低于真正压缩。
-
-### 5.8 Provider Native Compaction
-
-Pydantic AI Core 支持 OpenAI/Anthropic 等供应商原生压缩能力。适用条件：
-
-- 使用官方 Provider。
-- 指定模型明确支持。
-- 能接受 Provider 特有历史格式。
-
-DeepSeek 和私有 OpenAI-compatible 端点优先使用 Harness 应用侧压缩。不要同时无脑启用
-Provider Native 和 Harness Summary，避免双重摘要。
-
-## 6. 压缩投影持久化设计
-
-### 6.1 为什么不能覆盖 chat_messages
-
-`chat_messages` 是产品事实历史，承载：
-
-- Console 完整回放。
-- 用户消息编辑与 `branch_from`。
-- Tool Call/Result 展示。
-- Pending HITL 恢复。
-- 会话审计。
-
-压缩历史只是“下一次给模型看的投影”，不能替代产品历史。
-
-### 6.2 推荐新表
-
-新增：
-
-```text
-chat_context_checkpoints
-```
-
-建议字段：
-
-```text
-agent_id                 VARCHAR
-session_id               VARCHAR
-source_message_count     INTEGER
-source_last_sequence     INTEGER
-payload                  JSON
-estimated_tokens         INTEGER
-policy_version           VARCHAR(32)
-summary_model_id         VARCHAR NULL
-created_at               TIMESTAMP
-updated_at               TIMESTAMP
-PRIMARY KEY(agent_id, session_id)
-```
-
-`payload` 保存：
-
-- Harness 处理后的模型历史投影。
-- 已有摘要。
-- 保留的最近消息和完整工具配对。
-
-不保存：
-
-- Token、Cookie、Authorization。
-- MCP 静态 Header。
-- 原始附件二进制。
-
-### 6.3 读取流程
-
-```text
-读取完整产品历史元数据
-→ 查 checkpoint
-→ checkpoint 不存在/失效：使用完整历史
-→ checkpoint 有效：
-   反序列化 payload
-   + 加载 source_last_sequence 之后的原始消息
-→ resolve_history_for_llm
-→ Agent Run
-```
-
-### 6.4 写入流程
-
-成功 Run 后：
-
-```text
-result.all_messages()
-→ 提取模型本轮实际使用的压缩投影
-→ 计算 source_last_sequence
-→ 事务内 upsert checkpoint
-→ chat_messages 仍只追加 result.new_messages()
-```
-
-注意：
-
-- `result.all_messages()` 包含压缩投影，`result.new_messages()` 不包含。
-- Streaming 需要在拿到最终 `AgentRunResultEvent` 后写 checkpoint。
-- 取消且没有完整 Result 时不更新 checkpoint。
-- Summary 失败不覆盖上一次有效 checkpoint。
-
-### 6.5 失效规则
-
-以下情况删除或回退 checkpoint：
-
-- 用户从 `branch_from` 编辑的位置早于 `source_last_sequence`。
-- Agent Prompt、能力、模型或压缩策略发生不兼容变化。
-- `policy_version` 不匹配。
-- checkpoint 反序列化失败。
-- Pending HITL 的 Tool Call/Return 与原始历史不一致。
-
-仅新增后续消息时，checkpoint 不失效，直接拼接 tail。
-
-### 6.6 Pending HITL
-
-规则：
-
-- 未返回的 Deferred Tool Call 必须保留在投影尾部。
-- 不把合法 Pending Call 当成待修复的悬空错误。
-- 用户提交 Deferred Result 后，Result 必须与原 call ID 配对，再参与下一次压缩。
-- Pending 状态下可以保存 checkpoint，但第一版更保守：只有 completed run 写 checkpoint，
-  pending 继续使用上一次 checkpoint + 原始 tail。
-
-## 7. Token 观测与校准
-
-### 7.1 发送前
-
-记录：
-
-```text
-raw_message_count
-raw_serialized_chars
-estimated_history_tokens
-estimated_static_reserve
-estimated_total_input
-trigger_tokens
-target_tokens
-strategy_selected
-```
-
-### 7.2 返回后
-
-已有 Pydantic Usage 可提供：
-
-```text
-requests
-input_tokens
-output_tokens
-total_tokens
-cache_read_tokens
-cache_write_tokens
-```
-
-DeepAgent 当前最终响应只暴露 requests/input/output/total。内部观测应保留缓存 Token 和压缩额外请求。
-
-### 7.3 校准
-
-对每个 `llm_model_id` 记录：
-
-```text
-actual_input_tokens / estimated_input_tokens
-```
-
-使用滚动 P50/P95 生成 `token_estimate_multiplier` 建议，不自动覆盖用户配置。中文、JSON、长重复文本
-差异很大，不能只采一条请求。
-
-敏感要求：
-
-- 指标不记录 Prompt、工具参数或结果原文。
-- 只记录数量、策略、耗时、压缩前后体积和模型 ID。
-
-## 8. API 与 Console
-
-### 8.1 模型配置
-
-模型编辑增加“上下文”分组：
-
-- 上下文窗口。
-- 最大输出 Token。
-- Token 估算方式。
-- Tokenizer。
-- 校准系数。
-- 元数据来源。
-
-未知值显示“未配置”，不能假装使用某个默认窗口。
-
-### 8.2 Agent 配置
-
-增加“上下文策略”分组：
-
-- 使用系统默认/关闭/自定义。
-- 模式。
-- 触发比例。
-- 目标比例。
-- 保留工具结果组数。
-
-第一版可以只读展示系统策略，等观测稳定后再开放细调。
-
-### 8.3 运行检查器
-
-建议显示：
-
-```text
-历史消息数
-估算 Token
-模型上下文窗口
-是否触发压缩
-使用策略
-压缩前/后 Token
-摘要请求次数
-checkpoint 时间
-```
-
-不展示摘要原文，不展示被清理的 Tool Result 内容。
-
-## 9. 错误与回退
-
-| 错误 | 行为 |
+| 字段 | 用途 |
 | --- | --- |
-| context_window 未配置 | 不自动摘要；仅观测和单条 Clamp |
-| Tokenizer 不可用 | 使用保守字符估算并记录 degraded |
-| Summary 模型不可用 | 使用上次 checkpoint；必要时 SlidingWindow 兜底 |
-| Summary 超时 | 不覆盖 checkpoint；返回可重试错误或兜底继续 |
-| checkpoint 损坏 | 删除投影，回退完整历史并重新生成 |
-| Tool 配对校验失败 | 禁止写 checkpoint，保留原始产品历史 |
-| Pending HITL | 保留 pending tail，不修复为 synthetic error |
-| 超长当前用户输入 | 不静默截断，返回明确输入过大错误 |
-| 超长 Tool Return | 当前轮可用 OverflowingToolOutput；旧结果由 Clear 处理 |
+| `agent_id` + `session_id` | 联合主键，与会话隔离口径一致 |
+| `source_last_sequence` | 投影覆盖到的最后一条原始消息序号 |
+| `source_history_hash` | 已覆盖原始历史前缀的 SHA-256 |
+| `payload` | 脱敏后的 Pydantic AI 消息投影 |
+| `payload_schema_version` | 投影载荷版本 |
+| `projection_fingerprint` | 模型、预算策略和摘要模型的策略指纹 |
+| `estimated_tokens` | 投影 Token 估算 |
+| `summary_model_id` | 实际选用的摘要模型配置 ID，可空 |
+| `row_version` | CAS 乐观并发版本 |
+| `created_at` / `updated_at` | 创建和更新时间 |
 
-## 10. 预计修改文件
+不保存 `source_message_count`，因为 `source_last_sequence + 1` 已表达覆盖数量。
 
-### 10.1 依赖和数据库
-
-```text
-requirements.txt
-alembic/versions/021_context_compaction.py
-deep_agent/db/models.py
-deep_agent/db/stores/llm_model/base.py
-deep_agent/db/stores/agent/base.py
-deep_agent/db/stores/message/base.py
-deep_agent/db/stores/context_checkpoint/
-```
-
-迁移号以实施时最新 revision 为准，不在本设计中写死。
-
-### 10.2 Schema/API
+### 5.3 读取
 
 ```text
-deep_agent/schemas/llm_model.py
-deep_agent/schemas/agents.py
-deep_agent/api/v1/llm_models.py
-deep_agent/api/v1/agents.py
+读取完整 raw history
+→ 读取 checkpoint
+→ 校验 schema version
+→ 校验 projection fingerprint
+→ 校验 source_last_sequence
+→ 校验 raw 前缀 hash
+→ 反序列化 checkpoint payload
+→ checkpoint projection + raw tail
+→ 发送给模型
 ```
 
-可选新增只读诊断：
+任一校验失败都回退到完整原始历史，派生数据损坏不能阻断对话。
+
+### 5.4 写入
 
 ```text
-GET /api/v1/sessions/{id}/context-status
+模型成功完成且不是 Pending
+→ 本轮 new_messages 先写入 chat_messages
+→ 确认本轮实际生成/更新了 Summary
+→ 对 result.all_messages() 做脱敏、序列化和反序列化校验
+→ 以 row_version 做 CAS 写入 checkpoint
 ```
 
-不返回摘要正文和敏感历史。
+禁止未经处理直接持久化 `result.all_messages()`。Checkpoint 会移除 Provider 元数据，隐藏附件
+内容和临时签名 URL，并对 Token、Cookie、Authorization、API Key 等字段及 Bearer 文本脱敏。
 
-### 10.3 运行时
+### 5.5 失效和删除
+
+以下操作在同一个数据库事务中删除 Checkpoint：
+
+- `branch_from` 截断历史。
+- `replace_history` 修复或替换历史。
+- 删除会话。
+
+模型、窗口、比例、保留工具组数或摘要模型变化时，`projection_fingerprint` 会改变，旧 Checkpoint
+自动失效。只追加新消息时不失效，读取时拼接 raw tail。
+
+### 5.6 失败边界
+
+| 场景 | 原始历史 | Checkpoint |
+| --- | --- | --- |
+| 完成且生成 Summary | 追加完整新消息 | CAS 新建或更新 |
+| 只发生确定性压缩 | 追加完整新消息 | 不更新 |
+| Summary 失败/超时 | 正常完成则追加 | 不覆盖旧值 |
+| Pending HITL | 保存 Pending 原始消息 | 不更新 |
+| 流取消 | 保存已产生的原始部分 | 不更新 |
+| 模型请求失败 | 按既有规则保存用户输入 | 不更新 |
+| Checkpoint 保存失败 | 对话仍成功 | 记录告警 |
+
+## 6. 后端与 Console
+
+### 6.1 全局只读配置
+
+`GET /api/v1/global-settings` 增加“上下文压缩”分组：
+
+- 启用开关
+- 触发比例
+- 目标比例
+- 输出预估下限
+- 保留工具结果组数
+- 最小清理收益
+- 摘要超时
+
+配置仍来自环境变量，修改后重启生效，不写数据库。
+
+### 6.2 辅助模型
+
+`auxiliary_model_configs` 新增内建用途：
 
 ```text
-deep_agent/agent/spec.py
-deep_agent/agent/factory.py
-deep_agent/api/v1/deps.py
-deep_agent/agent/runner.py
-deep_agent/agent/context/*
-deep_agent/agent/event_persister.py
+context_summary：上下文摘要
 ```
 
-### 10.4 Console
+这里只绑定已有 `llm_models`，不新增模型连接字段。
+
+### 6.3 会话观测接口
+
+新增只读接口：
 
 ```text
-frontend/console/configuration/llm-models.js
-frontend/console/configuration/agents.js
-frontend/console/configuration-template.html
-frontend/console/workspace.js
-frontend/console/console.css
+GET /api/v1/sessions/{session_id}/context-status
 ```
 
-## 11. 分阶段实施
+接口沿用会话所有权校验，只返回：
 
-### 阶段 0：固定版本和基线
+- 原始消息数和历史 Token 估算
+- 上下文窗口、最大输出和动态输出预测
+- trigger / target
+- Checkpoint 是否存在、覆盖序号、估算 Token、更新时间和摘要模型 ID
 
-1. 固定 Core/Harness 版本。
-2. 完整运行 Python、Node、MCP、HITL 回归。
-3. 用当前 Test 数据导出会话体积分布，脱敏后形成测试样本。
-4. 不改变运行行为。
+不返回摘要正文或原始历史内容。
 
-验收：升级 Core 后现有功能无回归。
+SSE/普通聊天最终结果增加 `context` 观测对象。Console 请求上下文面板展示预算、是否触发、
+压缩前后 Token 和 Checkpoint 状态。
 
-### 阶段 1：模型预算与 Token 观测
+## 7. 配置
 
-1. 增加模型上下文元数据。
-2. 增加请求前估算。
-3. 增加返回后实际 Usage 记录。
-4. Console 展示只读预算。
-5. 压缩保持关闭。
+```dotenv
+DEEP_AGENT_CONTEXT_COMPACTION_ENABLED=false
+DEEP_AGENT_CONTEXT_COMPACTION_TRIGGER_RATIO=0.80
+DEEP_AGENT_CONTEXT_COMPACTION_TARGET_RATIO=0.55
+DEEP_AGENT_CONTEXT_OUTPUT_TOKEN_FLOOR=2048
+DEEP_AGENT_CONTEXT_KEEP_TOOL_PAIRS=3
+DEEP_AGENT_CONTEXT_MIN_CLEAR_TOKENS=2000
+DEEP_AGENT_CONTEXT_SUMMARY_TIMEOUT=30
+```
 
-验收：能解释每个模型为什么在某个阈值触发。
+启动校验：
 
-### 阶段 2：零 LLM 保护层
+- trigger 和 target 必须在 `(0, 1)`。
+- target 必须小于 trigger。
+- 输出下限必须为正整数。
+- 保留组数和最小清理收益不能为负。
+- 摘要超时必须大于 0。
 
-1. 装配 Clamp。
-2. 装配 ClearToolResults。
-3. 建立 exclude tools。
-4. 不启用 Summary。
-5. 观察 Prompt Cache、成本和回答质量。
+## 8. 迁移与备份
 
-这一阶段可以不建 checkpoint，因为策略是确定性的；但仍应记录压缩前后指标。
+- `023` 只新增 Checkpoint 表，`downgrade` 删除该派生表。
+- 配置备份创建表结构，但不复制 `chat_context_checkpoints` 数据。
+- `chat_sessions`、`chat_messages` 和 Checkpoint 都属于会话数据，不进入配置备份内容。
+- 新版备份 ORM 验证会确认 `ChatContextCheckpoint` 可读取。
+- 本地含 `023` 的代码不得连接仍处于 `022` 的共享 Test 并启动，因为应用会自动执行
+  `alembic upgrade head`。
 
-### 阶段 3：持久化投影
+发布顺序：
 
-1. 新建 checkpoint 表和 Store。
-2. 实现读取、写入和失效。
-3. 保持产品历史完整。
-4. 覆盖分支、取消和 Pending HITL。
+1. 用 `022` 工具备份共享 Test 配置。
+2. 在临时 SQLite 完成 `022 → 023 → 022 → 023`。
+3. 同一版本交付 ORM、Store、Runner、API、Console、备份工具和 Migration。
+4. 部署后确认数据库为 `023`。
+5. 先保持全局开关关闭，检查控制台和既有对话回归。
+6. 配置摘要模型后在 Test 显式开启，验证长工具会话。
+7. 用新版工具再做一次配置备份。
 
-验收：跨请求不会重新从完整历史生成相同摘要。
+## 9. 已验证效果
 
-### 阶段 4：Tiered Summary
-
-1. 配置 `context_summary` 辅助模型。
-2. 启用 Tiered 最后一层。
-3. 增加 summary failure fallback。
-4. 建立摘要质量评测。
-5. 小流量 Agent 试点后扩大。
-
-### 阶段 5：大型工具结果外置
-
-评估 Harness `OverflowingToolOutput`：
-
-- 大结果写入受控 Store。
-- 历史只保留句柄、预览和回读工具。
-- Store key 必须带 user/agent/app/space/session。
-- 设置 TTL、容量、权限和清理。
-
-这比反复压缩已经进入历史的大结果更根本。
-
-## 12. 测试矩阵
-
-### 12.1 单元测试
-
-- 每种策略触发/不触发。
-- Tool Call/Return 配对。
-- Pending Deferred Call。
-- 首个用户目标保留。
-- exclude tools。
-- 估算器和校准系数。
-- Summary 请求计入 UsageLimits。
-- Summary 失败 fallback。
-- checkpoint 序列化、拼接和失效。
-
-### 12.2 DeepAgent 回归
-
-- 普通聊天。
-- SSE 文本/Thinking。
-- MCP 多轮工具调用。
-- MCP Resource。
-- UI/HITL pending、刷新恢复、提交。
-- 取消和部分历史。
-- 历史编辑与 branch_from。
-- 附件、多模态和旧附件引用。
-- 自动标题不读取错误投影。
-- 用户、Agent、App、Space 隔离。
-
-### 12.3 质量评测
-
-固定长会话数据集，比较：
-
-- 最终答案关键约束召回率。
-- 工具参数正确率。
-- 关键数字准确率。
-- Tool Call 次数。
-- 输入/输出 Token。
-- 延迟。
-- Summary 次数。
-- 重复查询次数。
-
-至少包含：
-
-- 多轮财务模型查询。
-- 用户多次补充约束。
-- Pending 澄清表单。
-- 长文件/Resource。
-- 编辑旧消息后重发。
-- 工具结果关键事实位于头部和尾部。
-
-## 13. 上线与回滚
-
-功能开关建议：
+仓库单元集成用例构造 8 组长 Tool Call/Return，并通过真实
+`pydantic-ai-harness 0.10.0` 执行：
 
 ```text
-DEEP_AGENT_COMPACTION_ENABLED=false
-DEEP_AGENT_COMPACTION_DRY_RUN=true
+模型输入压缩前：2481 estimated tokens
+模型输入压缩后： 326 estimated tokens
+压缩比例：       86.9%
 ```
 
-上线顺序：
+验证同时确认：
 
-1. Dry-run 只记录“如果压缩会怎样”。
-2. 开启 Clamp。
-3. 开启 Clear。
-4. 单个测试 Agent 开启 Summary。
-5. 扩大范围。
+- 8 组原始 Tool Return 全部保留在 `chat_messages`。
+- Checkpoint 只保存压缩投影。
+- Bearer Token 不进入 Checkpoint。
+- 投影内 Tool Call/Return 保持配对。
+- 下一轮直接复用 Checkpoint；未生成新 Summary 时 `row_version` 不变化。
+- 分支截断会删除 Checkpoint。
+- 1M 窗口、384K 最大输出的冷启动预算只预留默认 2048 输出 Token，而不是 384K。
 
-回滚：
+## 10. 后续迭代
 
-- 关闭 Capability 即可恢复完整 SQL 历史运行。
-- checkpoint 是派生数据，可以安全删除。
-- 不回滚/删除原始 chat_messages。
+第一版暂不做：
 
-## 14. 待确认问题
+- Agent 级压缩策略。
+- 目录或模型级 Tokenizer 配置。
+- 专门的输出预测模型。
+- Provider Native Compaction。
+- Harness Memory / StepPersistence。
+- 通用大工具结果外置。
 
-实施前需要产品/研发确认：
+后续优先级：
 
-1. 哪些 Agent 可以丢弃旧原始 Tool Result，哪些工具必须排除。
-2. DeepSeek 私有模型的窗口、最大输出和推荐 tokenizer 数据来源。
-3. `context_summary` 使用主模型还是单独低成本模型。
-4. 压缩摘要是否需要在 Console 作为诊断信息可见；建议默认不展示正文。
-5. checkpoint 保留多久，是否需要按会话删除自动级联。
-6. Summary 失败时是“报错重试”还是“SlidingWindow 继续”；建议先报错，稳定后再自动 fallback。
-
-## 15. 当前可直接执行的下一步
-
-建议下一轮只实施“阶段 0 + 阶段 1”：
-
-```text
-固定 Core/Harness
-→ 完整回归
-→ 增加模型上下文元数据
-→ 增加 Token dry-run 观测
-→ 不真正改写历史
-```
-
-它能先把模型窗口、估算误差和真实会话分布测准，再决定触发比例。这样不会一开始就把摘要、DDL、
-HITL、分支和工具结果外置全部绑成一次高风险改造。
+1. 在 Test 收集模型真实 Usage、压缩频率、Summary 耗时和失败率。
+2. 建立摘要质量回归样本，重点验证业务约束、文件路径、待办和 Tool 配对。
+3. 根据真实误差调整输出下限和安全余量。
+4. 若单次 Tool Return 经常超过窗口，再评估 Harness `OverflowingToolOutput` 和共享对象存储。
+5. 只有不同 Agent 确实需要不同策略时，再设计 Agent 级配置。

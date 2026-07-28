@@ -60,6 +60,16 @@ def _ensure_positive_int(value: int) -> None:
         raise ValueError("must be a positive integer")
 
 
+def _ensure_non_negative_int(value: int) -> None:
+    if value < 0:
+        raise ValueError("must be a non-negative integer")
+
+
+def _ensure_ratio(value: float) -> None:
+    if not 0 < value < 1:
+        raise ValueError("must be greater than 0 and less than 1")
+
+
 def _resolve_repo_path(value: str) -> str:
     path = Path(value)
     if path.is_absolute():
@@ -119,6 +129,46 @@ class Agent(Category):
     )
     max_total_tokens = Option(None, val_type=int, bind_env="MAX_TOTAL_TOKENS")
     request_retries = Option(2, val_type=int, bind_env="REQUEST_RETRIES")
+    context_compaction_enabled = Option(
+        False,
+        val_type=bool,
+        bind_env="CONTEXT_COMPACTION_ENABLED",
+    )
+    context_compaction_trigger_ratio = Option(
+        0.80,
+        val_type=float,
+        bind_env="CONTEXT_COMPACTION_TRIGGER_RATIO",
+        extra_check=_ensure_ratio,
+    )
+    context_compaction_target_ratio = Option(
+        0.55,
+        val_type=float,
+        bind_env="CONTEXT_COMPACTION_TARGET_RATIO",
+        extra_check=_ensure_ratio,
+    )
+    context_output_token_floor = Option(
+        2048,
+        val_type=int,
+        bind_env="CONTEXT_OUTPUT_TOKEN_FLOOR",
+        extra_check=_ensure_positive_int,
+    )
+    context_keep_tool_pairs = Option(
+        3,
+        val_type=int,
+        bind_env="CONTEXT_KEEP_TOOL_PAIRS",
+        extra_check=_ensure_non_negative_int,
+    )
+    context_min_clear_tokens = Option(
+        2000,
+        val_type=int,
+        bind_env="CONTEXT_MIN_CLEAR_TOKENS",
+        extra_check=_ensure_non_negative_int,
+    )
+    context_summary_timeout = Option(
+        30.0,
+        val_type=float,
+        bind_env="CONTEXT_SUMMARY_TIMEOUT",
+    )
     skills_dir = Option(
         _resolve_repo_path("skills"),
         val_type=str,
@@ -225,3 +275,12 @@ OPTION = DeepAgentOptions()
 def validate_runtime_options(options: DeepAgentOptions = OPTION) -> None:
     """Resolve startup-critical options so invalid environment values fail fast."""
     _ = options.agent.max_requests
+    trigger_ratio = options.agent.context_compaction_trigger_ratio
+    target_ratio = options.agent.context_compaction_target_ratio
+    if target_ratio >= trigger_ratio:
+        raise ValueError(
+            "DEEP_AGENT_CONTEXT_COMPACTION_TARGET_RATIO must be less than "
+            "DEEP_AGENT_CONTEXT_COMPACTION_TRIGGER_RATIO"
+        )
+    if options.agent.context_summary_timeout <= 0:
+        raise ValueError("DEEP_AGENT_CONTEXT_SUMMARY_TIMEOUT must be positive")

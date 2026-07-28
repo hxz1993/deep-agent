@@ -10,6 +10,7 @@ if TYPE_CHECKING:
     from deep_agent.db.stores.llm_model import LlmModelStoreBase
 
 TITLE_USE_CASE = "title"
+CONTEXT_SUMMARY_USE_CASE = "context_summary"
 
 
 @dataclass(frozen=True)
@@ -24,6 +25,11 @@ AUXILIARY_MODEL_CATALOG: dict[str, AuxiliaryModelUseCase] = {
         use_case=TITLE_USE_CASE,
         label="标题生成",
         description="会话标题",
+    ),
+    CONTEXT_SUMMARY_USE_CASE: AuxiliaryModelUseCase(
+        use_case=CONTEXT_SUMMARY_USE_CASE,
+        label="上下文摘要",
+        description="长会话压缩时生成可继续执行的结构化摘要；未指定时复用当前主模型。",
     ),
 }
 

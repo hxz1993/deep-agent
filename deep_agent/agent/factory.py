@@ -6,9 +6,11 @@ import httpx
 from loguru import logger
 from pydantic_ai import Agent
 from pydantic_ai.models import DEFAULT_HTTP_TIMEOUT, Model, get_user_agent, parse_model_id
+from pydantic_ai.models.anthropic import AnthropicModel
 from pydantic_ai.models.google import GoogleModel
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers import infer_provider_class
+from pydantic_ai.providers.anthropic import AnthropicProvider
 from pydantic_ai.providers.deepseek import DeepSeekProvider
 from pydantic_ai.providers.google import GoogleProvider
 from pydantic_ai.providers.openai import OpenAIProvider
@@ -21,6 +23,7 @@ from deep_agent.capabilities.registry import CapabilityRegistry
 from deep_agent.options import OPTION
 
 _OPENAI_PREFIXES = {"openai", "openai-chat"}
+_ANTHROPIC_PREFIXES = {"anthropic"}
 
 
 def _model_provider_prefix(model: str) -> str | None:
@@ -45,6 +48,14 @@ def _normalize_url(url: str | None) -> str | None:
 def _resolve_openai_compatible(spec: AgentSpec, model_name: str) -> Model:
     provider = OpenAIProvider(base_url=spec.base_url, api_key=spec.api_key)
     return OpenAIChatModel(model_name, provider=provider)
+
+
+def _resolve_anthropic(spec: AgentSpec, model_name: str) -> AnthropicModel:
+    provider = AnthropicProvider(
+        api_key=spec.api_key or None,
+        base_url=_normalize_url(spec.base_url),
+    )
+    return AnthropicModel(model_name, provider=provider)
 
 
 def _gemini_http_client(proxy: str) -> httpx.AsyncClient:
@@ -86,10 +97,25 @@ def _resolve_model(spec: AgentSpec) -> str | Model:
             return _resolve_openai_compatible(spec, spec.model)
         return spec.model
 
-    provider_class = infer_provider_class(provider_name)
+    model_name = _model_name_without_prefix(spec.model)
+    if provider_name in _OPENAI_PREFIXES:
+        if not spec.api_key and not spec.base_url:
+            return spec.model
+        return _resolve_openai_compatible(spec, model_name)
+    if provider_name in _ANTHROPIC_PREFIXES:
+        if not spec.api_key and not spec.base_url:
+            return spec.model
+        return _resolve_anthropic(spec, model_name)
+
+    try:
+        provider_class = infer_provider_class(provider_name)
+    except Exception:
+        if spec.base_url:
+            return _resolve_openai_compatible(spec, model_name)
+        raise
 
     if provider_class is GoogleProvider:
-        return _resolve_google(spec, _model_name_without_prefix(spec.model))
+        return _resolve_google(spec, model_name)
 
     if provider_class is DeepSeekProvider:
         provider = DeepSeekProvider(api_key=spec.api_key)
@@ -97,14 +123,11 @@ def _resolve_model(spec: AgentSpec) -> str | Model:
             not spec.base_url
             or _normalize_url(spec.base_url) == _normalize_url(provider.base_url)
         ):
-            model_name = _model_name_without_prefix(spec.model)
             profile = DeepSeekProvider.model_profile(model_name)
             logger.debug("Resolving {} with DeepSeekChatModel", spec.model)
             return DeepSeekChatModel(model_name, provider=provider, profile=profile)
 
     if spec.base_url:
-        prefix, sep, rest = spec.model.partition(":")
-        model_name = rest if sep and prefix in _OPENAI_PREFIXES else _model_name_without_prefix(spec.model)
         return _resolve_openai_compatible(spec, model_name)
 
     return spec.model

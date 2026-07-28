@@ -30,7 +30,6 @@ class TestInputCapabilities(unittest.TestCase):
             model="deepseek-v4-flash",
             instructions="You are helpful.",
             input_modalities=["text"],
-            capabilities_source="bundled",
         )
         block = build_capability_instruction_block(spec)
         self.assertIn("LLM native input modalities", block)
@@ -45,7 +44,6 @@ class TestInputCapabilities(unittest.TestCase):
             model="deepseek-v4-flash",
             instructions="x",
             input_modalities=["text"],
-            capabilities_source="bundled",
         )
         block = build_capability_instruction_block(spec)
         self.assertIn("does NOT support native image input", block)
@@ -56,7 +54,6 @@ class TestInputCapabilities(unittest.TestCase):
             model="openai:gpt-4o",
             instructions="Base prompt.",
             input_modalities=["text", "image"],
-            capabilities_source="user",
         )
         merged = augment_instructions_with_capabilities(spec)
         self.assertTrue(merged.startswith("Base prompt."))
@@ -72,11 +69,9 @@ class TestInputCapabilities(unittest.TestCase):
                     model="openai:gpt-4o",
                     instructions="Once.",
                     input_modalities=["text"],
-                    capabilities_source="user",
                 )
             ),
             input_modalities=["text"],
-            capabilities_source="user",
         )
         once = augment_instructions_with_capabilities(spec)
         twice = augment_instructions_with_capabilities(
@@ -85,7 +80,6 @@ class TestInputCapabilities(unittest.TestCase):
                 model="openai:gpt-4o",
                 instructions=once,
                 input_modalities=["text"],
-                capabilities_source="user",
             )
         )
         self.assertEqual(once.count("Session input capabilities"), 1)

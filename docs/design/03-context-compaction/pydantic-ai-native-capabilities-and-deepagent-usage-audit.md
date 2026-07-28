@@ -11,8 +11,8 @@
 配套材料：
 
 - [上下文压缩实施方案](context-compaction-implementation-plan.md)
-- [隔离实验工程](../../../agent-labs/deepagent-context-compaction-evaluation/README.md)
-- [上下文压缩实验结果](../../../agent-labs/deepagent-context-compaction-evaluation/docs/test-results.md)
+- [隔离实验工程](../../../../agent-labs/deepagent-context-compaction-evaluation/README.md)
+- [上下文压缩实验结果](../../../../agent-labs/deepagent-context-compaction-evaluation/docs/test-results.md)
 
 ## 1. 结论
 
@@ -400,7 +400,7 @@ total_tokens
 
 ```text
 id / name / description / model / base_url / api_key
-input_modalities / capabilities_source / created_at / updated_at
+input_modalities / created_at / updated_at
 ```
 
 模型元数据刷新只处理输入模态。当前缺少：

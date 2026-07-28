@@ -4,7 +4,8 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.openapi.docs import get_swagger_ui_oauth2_redirect_html
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from deep_agent.api.v1 import api_router
@@ -27,9 +28,11 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="deep-agent",
-    version="0.1.0",
+    version="0.2.2",
     description="General-purpose AI agent backend.",
     lifespan=lifespan,
+    docs_url=None,
+    redoc_url=None,
 )
 
 app.add_middleware(
@@ -76,6 +79,56 @@ async def info(ctx: AppContextDep) -> dict[str, object]:
         "capabilities": capability_names,
         "docs": "/docs",
     }
+
+
+def _deployment_aware_swagger_html() -> HTMLResponse:
+    """Render Swagger UI without assuming that DeepAgent is mounted at `/`."""
+
+    return HTMLResponse(
+        f"""
+<!DOCTYPE html>
+<html>
+<head>
+  <link type="text/css" rel="stylesheet"
+        href="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui.css">
+  <link rel="shortcut icon" href="https://fastapi.tiangolo.com/img/favicon.png">
+  <title>{app.title} - Swagger UI</title>
+</head>
+<body>
+  <div id="swagger-ui"></div>
+  <script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+  <script>
+    const serviceBasePath = window.location.pathname.replace(/\\/docs\\/?$/, "");
+    const ui = SwaggerUIBundle({{
+      url: `${{serviceBasePath}}{app.openapi_url}`,
+      dom_id: "#swagger-ui",
+      layout: "BaseLayout",
+      deepLinking: true,
+      showExtensions: true,
+      showCommonExtensions: true,
+      oauth2RedirectUrl:
+        `${{window.location.origin}}${{serviceBasePath}}{app.swagger_ui_oauth2_redirect_url}`,
+      presets: [
+        SwaggerUIBundle.presets.apis,
+        SwaggerUIBundle.SwaggerUIStandalonePreset
+      ]
+    }});
+  </script>
+</body>
+</html>
+"""
+    )
+
+
+@app.get("/docs", include_in_schema=False)
+@app.get("/docs/", include_in_schema=False)
+async def api_docs() -> HTMLResponse:
+    return _deployment_aware_swagger_html()
+
+
+@app.get(app.swagger_ui_oauth2_redirect_url, include_in_schema=False)
+async def swagger_ui_oauth2_redirect() -> HTMLResponse:
+    return get_swagger_ui_oauth2_redirect_html()
 
 
 @app.get("/", include_in_schema=False)

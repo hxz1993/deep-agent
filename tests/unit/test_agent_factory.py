@@ -80,9 +80,11 @@ class ResolveModelTests(unittest.TestCase):
         self.assertIsInstance(model._provider, OpenAIProvider)
         self.assertEqual(model._provider.base_url.rstrip("/"), "https://api.example.com/v1")
 
-    def test_non_deepseek_prefixed_model_with_api_key_returns_string(self) -> None:
+    def test_openai_prefixed_model_with_api_key_uses_explicit_provider(self) -> None:
         resolved = _resolve_model(_spec(model="openai:gpt-4o", api_key="sk-test"))
-        self.assertEqual(resolved, "openai:gpt-4o")
+        self.assertIsInstance(resolved, OpenAIChatModel)
+        self.assertIsInstance(resolved._provider, OpenAIProvider)
+        self.assertEqual(resolved.model_name, "gpt-4o")
 
     def test_non_deepseek_prefixed_model_with_base_url_uses_openai_provider(self) -> None:
         model = _resolve_model(

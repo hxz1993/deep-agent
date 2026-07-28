@@ -1,65 +1,95 @@
-"""Unit tests for models.dev catalog lookup."""
+"""Unit tests for the strict models.dev refresh client."""
 
 from __future__ import annotations
 
+import json
 import unittest
 
+import httpx
+
 from deep_agent.agent.models.models_dev import (
-    clear_models_dev_cache,
-    lookup_modalities_in_catalog,
+    ModelsDevFetchError,
+    fetch_models_dev_bundle,
+    parse_labs_page,
 )
 
-SAMPLE_CATALOG = {
-    "deepseek": {
-        "models": {
-            "deepseek-v4-flash": {
-                "modalities": {"input": ["text"], "output": ["text"]},
-                "limit": {"context": 1_000_000},
-            }
-        }
-    },
-    "moonshotai": {
-        "models": {
-            "kimi-k2.6": {
-                "modalities": {"input": ["text", "image", "video"], "output": ["text"]},
-                "limit": {"context": 262_144},
-            }
-        }
-    },
-    "openai": {
-        "models": {
-            "gpt-4o": {
-                "modalities": {"input": ["text", "image", "pdf"], "output": ["text"]},
-                "limit": {"context": 128_000},
-            }
-        }
-    },
-}
 
-
-class ModelsDevLookupTests(unittest.TestCase):
-    def tearDown(self) -> None:
-        clear_models_dev_cache()
-
-    def test_lookup_provider_prefixed_model(self) -> None:
-        modalities = lookup_modalities_in_catalog(SAMPLE_CATALOG, "openai:gpt-4o")
-        self.assertEqual(modalities, ["text", "image", "pdf"])
-
-    def test_lookup_bare_model_with_base_url_hint(self) -> None:
-        modalities = lookup_modalities_in_catalog(
-            SAMPLE_CATALOG,
-            "kimi-k2.6",
-            "https://api.moonshot.cn/v1",
+class ModelsDevClientTests(unittest.IsolatedAsyncioTestCase):
+    def test_parse_labs_page_reads_only_lab_entries(self) -> None:
+        payload = [
+            {"type": "lab", "id": "openai", "name": "OpenAI"},
+            {"type": "model", "id": "openai/gpt-test"},
+        ]
+        html = (
+            '<script id="search-index" type="application/json">'
+            f"{json.dumps(payload)}</script>"
         )
-        self.assertEqual(modalities, ["text", "image", "video"])
-
-    def test_lookup_bare_deepseek_model(self) -> None:
-        modalities = lookup_modalities_in_catalog(
-            SAMPLE_CATALOG,
-            "deepseek-v4-flash",
-            "https://api.deepseek.com",
+        self.assertEqual(
+            parse_labs_page(html),
+            [{"type": "lab", "id": "openai", "name": "OpenAI"}],
         )
-        self.assertEqual(modalities, ["text"])
+        self.assertEqual(parse_labs_page("<html></html>"), [])
+
+    async def test_fetches_combined_catalog_and_optional_labs(self) -> None:
+        async def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path == "/catalog.json":
+                return httpx.Response(
+                    200,
+                    json={
+                        "models": {
+                            "openai/gpt-test": {"id": "openai/gpt-test"}
+                        },
+                        "providers": {"openai": {"models": {}}},
+                    },
+                )
+            return httpx.Response(503, text="labs unavailable")
+
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(handler),
+            base_url="https://models.test",
+        ) as client:
+            bundle = await fetch_models_dev_bundle(
+                client=client,
+                catalog_url="/catalog.json",
+                labs_url="/labs",
+            )
+        self.assertIn("openai/gpt-test", bundle.models)
+        self.assertIn("openai", bundle.providers)
+        self.assertEqual(bundle.labs, [])
+
+    async def test_required_catalog_failure_aborts_refresh(self) -> None:
+        async def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path == "/catalog.json":
+                return httpx.Response(502, text="bad gateway")
+            return httpx.Response(503, text="labs unavailable")
+
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(handler),
+            base_url="https://models.test",
+        ) as client:
+            with self.assertRaises(ModelsDevFetchError):
+                await fetch_models_dev_bundle(
+                    client=client,
+                    catalog_url="/catalog.json",
+                    labs_url="/labs",
+                )
+
+    async def test_catalog_requires_models_and_providers_objects(self) -> None:
+        async def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path == "/catalog.json":
+                return httpx.Response(200, json={"models": {}})
+            return httpx.Response(503, text="labs unavailable")
+
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(handler),
+            base_url="https://models.test",
+        ) as client:
+            with self.assertRaisesRegex(ModelsDevFetchError, "providers"):
+                await fetch_models_dev_bundle(
+                    client=client,
+                    catalog_url="/catalog.json",
+                    labs_url="/labs",
+                )
 
 
 if __name__ == "__main__":

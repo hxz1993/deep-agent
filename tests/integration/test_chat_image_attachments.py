@@ -152,10 +152,10 @@ class ChatImageAttachmentTests(unittest.IsolatedAsyncioTestCase):
                 model="kimi-k2.6",
                 base_url="https://api.moonshot.cn",
                 input_modalities=["text"],
+                context_window_tokens=262_144,
+                max_output_tokens=8_192,
             ),
         )
-        self.assertEqual(row.capabilities_source, "user")
-
         events = await self._stream_events(
             model=text_only_model("text only"),
             json_body={
@@ -180,10 +180,10 @@ class ChatImageAttachmentTests(unittest.IsolatedAsyncioTestCase):
                 name="vision-db",
                 model="private:vision-model",
                 input_modalities=["text", "image"],
+                context_window_tokens=128_000,
+                max_output_tokens=8_192,
             ),
         )
-        self.assertEqual(row.capabilities_source, "user")
-
         await self._stream_events(
             model=text_only_model("vision reply"),
             json_body={

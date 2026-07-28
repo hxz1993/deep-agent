@@ -43,10 +43,22 @@ class SessionModelOverrideIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self._transport = ASGITransport(app=self._app)
 
         model_a = await stores.llm_model.create_unique(
-            LlmModelCreate(name="model-a", model="test:model-a"),
+            LlmModelCreate(
+                name="model-a",
+                model="test:model-a",
+                input_modalities=["text"],
+                context_window_tokens=128_000,
+                max_output_tokens=8_192,
+            ),
         )
         model_b = await stores.llm_model.create_unique(
-            LlmModelCreate(name="model-b", model="test:model-b"),
+            LlmModelCreate(
+                name="model-b",
+                model="test:model-b",
+                input_modalities=["text"],
+                context_window_tokens=128_000,
+                max_output_tokens=8_192,
+            ),
         )
         agent = await stores.agent.create_unique(
             AgentCreate(

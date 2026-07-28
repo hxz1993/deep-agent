@@ -2,7 +2,20 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, PrimaryKeyConstraint, String, Text, UniqueConstraint, func
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    PrimaryKeyConstraint,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 from deep_agent.db.ids import AGENT_ID_LENGTH, new_agent_id
@@ -28,7 +41,58 @@ class LlmModel(Base):
     base_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     api_key: Mapped[str | None] = mapped_column(Text, nullable=True)
     input_modalities: Mapped[list[str] | None] = mapped_column(JSONType, nullable=True)
-    capabilities_source: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    context_window_tokens: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    max_output_tokens: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    tags: Mapped[list[str] | None] = mapped_column(JSONType, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+
+class ModelCatalog(Base):
+    __tablename__ = "model_catalog"
+    __table_args__ = (
+        PrimaryKeyConstraint("provider_id", "provider_model_id"),
+        Index("ix_model_catalog_lab_id", "lab_id"),
+        Index("ix_model_catalog_canonical_model_id", "canonical_model_id"),
+        Index("ix_model_catalog_provider_id", "provider_id"),
+        Index("ix_model_catalog_model_label", "model_label"),
+    )
+
+    provider_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    provider_model_id: Mapped[str] = mapped_column(KeyText, nullable=False)
+    provider_label: Mapped[str] = mapped_column(KeyText, nullable=False)
+    provider_npm: Mapped[str | None] = mapped_column(KeyText, nullable=True)
+    provider_api_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    provider_doc_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    lab_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    lab_label: Mapped[str] = mapped_column(KeyText, nullable=False)
+    lab_description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    canonical_model_id: Mapped[str] = mapped_column(KeyText, nullable=False)
+    model_label: Mapped[str] = mapped_column(KeyText, nullable=False)
+    model_description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    family: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    release_date: Mapped[str | None] = mapped_column(String(32), nullable=True)
+
+    canonical_context_window_tokens: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    canonical_max_output_tokens: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    context_window_tokens: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    max_output_tokens: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    input_modalities: Mapped[list[str]] = mapped_column(JSONType, nullable=False)
+    output_modalities: Mapped[list[str]] = mapped_column(JSONType, nullable=False)
+    capabilities: Mapped[dict] = mapped_column(JSONType, nullable=False)
+    status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+
+    lab_metadata: Mapped[dict] = mapped_column(JSONType, nullable=False)
+    model_metadata: Mapped[dict] = mapped_column(JSONType, nullable=False)
+    provider_metadata: Mapped[dict] = mapped_column(JSONType, nullable=False)
+    source: Mapped[str] = mapped_column(String(32), nullable=False)
+    refreshed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

@@ -1,19 +1,32 @@
 from __future__ import annotations
 
-import logging
-from typing import Annotated
+import asyncio
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from deep_agent.agent.models.catalog import CatalogSource
-from deep_agent.db.deps import get_llm_model_store
+from deep_agent.agent.models.catalog import (
+    CatalogValidationError,
+    build_catalog_page,
+    normalize_models_dev_bundle,
+)
+from deep_agent.agent.models.models_dev import ModelsDevFetchError, fetch_models_dev_bundle
+from deep_agent.db.deps import get_llm_model_store, get_model_catalog_store
 from deep_agent.db.ids import normalize_agent_id
-from deep_agent.db.stores.llm_model import LlmModelStoreBase
+from deep_agent.db.stores.llm_model import (
+    LlmModelConflictError,
+    LlmModelStoreBase,
+    LlmModelValidationError,
+)
+from deep_agent.db.stores.model_catalog import ModelCatalogStoreBase
 from deep_agent.schemas.llm_model import LlmModelCreate, LlmModelResponse, LlmModelUpdate
-from deep_agent.schemas.model_catalog import ModelCatalogItem, ModelCatalogResponse
+from deep_agent.schemas.model_catalog import (
+    ModelCatalogRefreshResponse,
+    ModelCatalogResponse,
+)
 
 router = APIRouter()
-logger = logging.getLogger(__name__)
+_catalog_refresh_lock = asyncio.Lock()
 
 
 def _parse_model_id(model_id: str) -> str:
@@ -28,28 +41,6 @@ async def _response_for_row(store: LlmModelStoreBase, row) -> LlmModelResponse:
     return LlmModelResponse.from_row(row, agent_count=agent_count)
 
 
-async def _refresh_auto_modalities(store: LlmModelStoreBase, model_id: str) -> None:
-    from deep_agent.agent.models.modality_resolver import refresh_model_modalities
-
-    await refresh_model_modalities(model_id, store)
-
-
-async def _row_after_auto_refresh(store: LlmModelStoreBase, model_id: str):
-    await _refresh_auto_modalities(store, model_id)
-    return await store.get_by_id(model_id)
-
-
-async def _best_effort_row_after_auto_refresh(store: LlmModelStoreBase, row):
-    try:
-        return await _row_after_auto_refresh(store, row.id) or row
-    except Exception:
-        logger.warning(
-            "Model configuration %s was saved; automatic modality refresh failed and was skipped",
-            row.id,
-        )
-        return row
-
-
 @router.get("/llm-models", response_model=list[LlmModelResponse])
 async def list_llm_models(
     store: LlmModelStoreBase = Depends(get_llm_model_store),
@@ -60,62 +51,72 @@ async def list_llm_models(
 
 @router.get("/llm-models/catalog", response_model=ModelCatalogResponse)
 async def list_model_catalog(
-    source: Annotated[CatalogSource, Query()] = "auto",
-    q: str | None = Query(None, description="Search provider, model id, or key."),
-    provider: str | None = Query(None, description="Filter by provider id."),
-    modality: str | None = Query(None, description="Filter by input modality, e.g. image."),
+    view: Literal["model", "provider"] = Query("model"),
+    q: str | None = Query(None, description="Search Lab, model, or Provider."),
+    lab_id: str | None = Query(None, description="Filter by Lab id."),
+    provider_id: str | None = Query(None, description="Filter by Provider id."),
+    modality: str | None = Query(None, description="Filter by input modality."),
     offset: int = Query(0, ge=0),
-    limit: int = Query(100, ge=1, le=500),
-    refresh: bool = Query(False, description="Bypass in-process catalog caches."),
-    store: LlmModelStoreBase = Depends(get_llm_model_store),
+    limit: int = Query(50, ge=1, le=200),
+    catalog_store: ModelCatalogStoreBase = Depends(get_model_catalog_store),
+    llm_store: LlmModelStoreBase = Depends(get_llm_model_store),
 ) -> ModelCatalogResponse:
-    """Browse models.dev / bundled modality catalog for model selection."""
-    from deep_agent.agent.models.catalog import (
-        build_configured_preset_map,
-        catalog_source_label,
-        filter_catalog_entries,
-        load_catalog_entries,
-        lookup_configured_preset,
-        paginate_catalog,
-    )
-
-    entries, resolved, provider_ids = await load_catalog_entries(
-        source,
-        provider=provider,
-        refresh=refresh,
-    )
-    filtered = filter_catalog_entries(entries, q=q, provider=provider, modality=modality)
-    page, total = paginate_catalog(filtered, offset=offset, limit=limit)
-
-    preset_rows = await store.list_all()
-    preset_map = build_configured_preset_map([(r.name, r.model) for r in preset_rows])
-
-    source_label = catalog_source_label(resolved)
-    if source == "online" and resolved == "bundled":
-        source_label = "内置 modality_data.json（models.dev 不可用，已回退）"
-
-    items = [
-        ModelCatalogItem(
-            key=e.key,
-            provider=e.provider,
-            model_id=e.model_id,
-            provider_label=e.provider_label,
-            input_modalities=e.input_modalities,
-            max_context=e.max_context,
-            source=e.source,
-            configured_preset=lookup_configured_preset(preset_map, e),
+    rows = await catalog_store.list_all()
+    llm_models = await llm_store.list_all()
+    return ModelCatalogResponse.model_validate(
+        build_catalog_page(
+            rows,
+            llm_models,
+            view=view,
+            q=q,
+            lab_id=lab_id,
+            provider_id=provider_id,
+            modality=modality,
+            offset=offset,
+            limit=limit,
         )
-        for e in page
-    ]
+    )
 
-    return ModelCatalogResponse(
-        items=items,
-        total=total,
-        source=resolved,
-        source_label=source_label,
-        offset=offset,
-        limit=limit,
-        providers=provider_ids,
+
+@router.post(
+    "/llm-models/catalog/refresh",
+    response_model=ModelCatalogRefreshResponse,
+)
+async def refresh_model_catalog(
+    catalog_store: ModelCatalogStoreBase = Depends(get_model_catalog_store),
+) -> ModelCatalogRefreshResponse:
+    if _catalog_refresh_lock.locked():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="模型目录正在更新，请稍后重试",
+        )
+
+    async with _catalog_refresh_lock:
+        try:
+            bundle = await fetch_models_dev_bundle()
+            rows, stats = normalize_models_dev_bundle(
+                bundle.models,
+                bundle.providers,
+                bundle.labs,
+            )
+            await catalog_store.replace_all(rows)
+        except ModelsDevFetchError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=str(exc),
+            ) from exc
+        except CatalogValidationError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"models.dev 目录校验失败：{exc}",
+            ) from exc
+
+    return ModelCatalogRefreshResponse(
+        rows=stats.row_count,
+        models=stats.model_count,
+        providers=stats.provider_count,
+        labs=stats.lab_count,
+        refreshed_at=stats.refreshed_at,
     )
 
 
@@ -141,10 +142,8 @@ async def create_llm_model(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"LLM model already exists: {body.name}")
     try:
         row = await store.create_unique(body)
-    except ValueError as exc:
+    except LlmModelConflictError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-    if not body.input_modalities:
-        row = await _best_effort_row_after_auto_refresh(store, row)
     return await _response_for_row(store, row)
 
 
@@ -157,12 +156,15 @@ async def update_llm_model(
     normalized_id = _parse_model_id(model_id)
     try:
         row = await store.update_unique(normalized_id, body)
-    except ValueError as exc:
+    except LlmModelConflictError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except LlmModelValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"LLM model not found: {model_id}")
-    if body.modalities_mode == "auto":
-        row = await _best_effort_row_after_auto_refresh(store, row)
     return await _response_for_row(store, row)
 
 
@@ -182,32 +184,3 @@ async def delete_llm_model(
             detail=f"LLM model is referenced by {agent_count} agent(s)",
         )
     await store.delete(normalized_id)
-
-
-@router.post("/llm-models/{model_id}/refresh-metadata", response_model=LlmModelResponse)
-async def refresh_model_metadata(
-    model_id: str,
-    store: LlmModelStoreBase = Depends(get_llm_model_store),
-) -> LlmModelResponse:
-    """Refresh input modalities for a model from bundled data."""
-    from deep_agent.agent.models.modality_resolver import refresh_model_modalities
-
-    normalized_id = _parse_model_id(model_id)
-    row = await store.get_by_id(normalized_id)
-    if row is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"LLM model not found: {model_id}")
-
-    await refresh_model_modalities(normalized_id, store, force=True)
-    row = await store.get_by_id(normalized_id)
-    return await _response_for_row(store, row)
-
-
-@router.post("/llm-models/refresh-metadata")
-async def refresh_all_metadata(
-    store: LlmModelStoreBase = Depends(get_llm_model_store),
-) -> dict[str, int]:
-    """Batch refresh input modalities for all models from bundled data."""
-    from deep_agent.agent.models.modality_resolver import refresh_all_model_modalities
-
-    count = await refresh_all_model_modalities(store, force=False)
-    return {"updated": count}

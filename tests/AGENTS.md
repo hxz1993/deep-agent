@@ -51,8 +51,9 @@ tests/
 | `test_request_context.py` | App 推导 Space、默认中文和上下文接口校验 |
 | `test_mcp_lease_manager.py` | MCP lease 管理 |
 | `test_title_generator.py` | AI 标题清洗与无配置行为 |
-| `test_modality_resolver.py` | 模型 modality bundled 解析与 refresh |
-| `test_models_dev.py` | models.dev catalog lookup |
+| `test_catalog.py` | models.dev Lab/Model/Provider 标准化、白名单、扩展元数据和数据库视图 |
+| `test_models_dev.py` | models.dev 严格获取与 Lab 可选补充 |
+| `test_llm_models.py` | 模型上下文、最大输出、输入模态与 tags Store/Schema |
 | `test_session_model_override.py` | Agent 对话 `model_id` 请求级覆盖（`build_runner_for_agent`） |
 | `test_ui_tools_rfc.py` | builtin/manual UI 工具注册、Agent 显式选择、保留名称、Schema 校验与事件 enrichment |
 
@@ -66,7 +67,8 @@ tests/
 | `test_mcp_header_forwarding.py` | MCP 层 header 注入 |
 | `test_mcp_run_scoping.py` | builtin MCP 按 run lease 隔离 client |
 | `test_session_title.py` | 标题回显、AI 生成、兜底、DeepCube fixture |
-| `test_llm_model_modalities.py` | 模型 modality CRUD + 解析链 refresh |
+| `test_llm_model_modalities.py` | 模型运行属性 CRUD 与 DB-only 模态 |
+| `test_llm_model_catalog.py` | 目录 DB 查询、两种视图、全量刷新及失败保留旧目录 |
 | `test_session_model_override.py` | Agent 流式对话 `model_id` 覆盖、默认回退、轮次切换 |
 
 公共 fixture：`integration/fixtures/header_echo_server.py`、`pid_echo_server.py`。

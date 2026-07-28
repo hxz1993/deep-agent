@@ -3,7 +3,7 @@
 > **读者**：deep-agent **仓库贡献者**（需修改 `deep_agent/`、`frontend/` 代码）。
 >
 > 若你仅**使用已部署的服务**、自建客户端或配置 Agent，请参阅 [`ui-tools-external.md`](ui-tools-external.md)。  
-若你参与**平台能力规划**（让集成方扩展 UI 工具），请参阅设计文档 [`ui-tools-extension-proposals.md`](../design/ui-tools-extension-proposals.md) 与 RFC [`0001-ui-tools-mcp-discovery-and-api.md`](../design/rfc/0001-ui-tools-mcp-discovery-and-api.md)。
+若你参与**平台能力规划**（让集成方扩展 UI 工具），请参阅设计文档 [`ui-tools-extension-proposals.md`](../design/01-ui-tools/ui-tools-extension-proposals.md) 与 RFC [`0001-ui-tools-mcp-discovery-and-api.md`](../design/01-ui-tools/rfc/0001-ui-tools-mcp-discovery-and-api.md)。
 
 相关协议见 [`sse-protocol.md`](sse-protocol.md) 中 `final.status=pending` 与 `deferred_tool_results`。
 

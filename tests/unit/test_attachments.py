@@ -60,24 +60,9 @@ class TestAttachments(unittest.IsolatedAsyncioTestCase):
         self.assertIn("文件下载失败", parts[0].content)
 
     def test_model_supports_image_input(self) -> None:
-        self.assertTrue(model_supports_image_input("openai:gpt-4o"))
-        self.assertTrue(model_supports_image_input("qwen3-vl-flash"))
-        self.assertTrue(model_supports_image_input("qwen3.7-plus"))
-        self.assertTrue(model_supports_image_input("qwen3.5-omni-plus"))
-        self.assertTrue(model_supports_image_input("kimi-k2.6"))
-        self.assertTrue(model_supports_image_input("kimi-k2.7-code-highspeed"))
-        self.assertTrue(model_supports_image_input("moonshot-v1-8k-vision-preview"))
-        self.assertFalse(model_supports_image_input("deepseek:deepseek-v4-flash"))
-        self.assertFalse(model_supports_image_input("qwen2-vl-7b-instruct"))
-        # Bundled catalog includes qwen-vl-max; DB user override can force text-only.
-        self.assertTrue(model_supports_image_input("qwen-vl-max"))
-        self.assertFalse(
-            model_supports_image_input(
-                "qwen-vl-max",
-                db_modalities=["text"],
-                capabilities_source="user",
-            )
-        )
+        self.assertFalse(model_supports_image_input())
+        self.assertTrue(model_supports_image_input(db_modalities=["text", "image"]))
+        self.assertFalse(model_supports_image_input(db_modalities=["text"]))
 
     def test_attachment_ref_message_roundtrip(self) -> None:
         ref = attachment_ref_dict(

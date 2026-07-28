@@ -2,93 +2,95 @@
 <html lang="zh-CN">
 <body>
   <main class="settings-card models-card">
-      <label class="field settings-theme-field">
-        <span>界面主题</span>
-        <select id="themeSelect" title="切换界面配色"></select>
+    <div class="models-toolbar">
+      <div>
+        <h1 class="catalog-title">
+          模型目录
+          <span class="catalog-info" tabindex="0" aria-label="查看模型目录说明">
+            <i data-lucide="info"></i>
+            <span class="catalog-info-tooltip" role="tooltip">
+              <strong>目录与运行配置的关系</strong>
+              <span>仅展示 DeepAgent 已支持且位于代码白名单中的接入渠道。</span>
+              <span>更新失败时保留旧目录，不会修改已有模型配置。</span>
+              <span>“使用此模型”只预填目录属性；私有模型仍可手工创建。</span>
+            </span>
+          </span>
+        </h1>
+        <p class="settings-desc models-desc">
+          目录由管理员从 <strong>models.dev</strong> 手工更新。目录只用于预填模型配置，
+          Agent 运行时始终读取“模型配置列表”中已保存的属性。
+        </p>
+      </div>
+      <div class="models-toolbar-actions">
+        <button type="button" class="btn" id="catalogReloadBtn">重新加载</button>
+        <button type="button" class="btn primary" id="catalogRefreshBtn">更新模型目录</button>
+      </div>
+    </div>
+
+    <div class="models-filters">
+      <label class="field models-search-field">
+        <span>搜索</span>
+        <input type="search" id="catalogSearchInput" placeholder="模型、Lab 或接入渠道" autocomplete="off" />
       </label>
-
-      <div class="models-toolbar">
-        <div>
-          <h1>模型模态目录</h1>
-          <p class="settings-desc models-desc">
-            浏览 <strong>models.dev</strong> 在线目录与内置 <code>modality_data.json</code> 的<strong>原生输入模态</strong>，
-            便于按能力挑选模型。平台附件抽文本、Agent 工具能力不在此表。
-          </p>
+      <label class="field models-filter-field">
+        <span>接入渠道</span>
+        <select id="catalogProviderSelect">
+          <option value="">全部</option>
+        </select>
+      </label>
+      <label class="field models-filter-field">
+        <span>输入模态</span>
+        <select id="catalogModalitySelect">
+          <option value="">全部</option>
+          <option value="text">文本</option>
+          <option value="image">图像</option>
+          <option value="audio">音频</option>
+          <option value="video">视频</option>
+          <option value="pdf">PDF</option>
+        </select>
+      </label>
+      <div class="field catalog-view-control">
+        <span>查看方式</span>
+        <div class="catalog-view-tabs" role="tablist" aria-label="模型目录查看方式">
+          <button type="button" class="catalog-view-tab active" data-catalog-view="model">按模型</button>
+          <button type="button" class="catalog-view-tab" data-catalog-view="provider">按接入渠道</button>
         </div>
-        <div class="models-toolbar-actions">
-          <button type="button" class="btn" id="refreshBtn">刷新</button>
+      </div>
+    </div>
+
+    <div class="catalog-feedback hidden" id="catalogFeedback" role="alert"></div>
+    <p class="models-status" id="catalogStatusLine">加载中…</p>
+
+    <div class="catalog-browser" id="catalogBrowser">
+      <aside class="catalog-lab-sidebar" id="catalogLabSidebar" aria-label="模型研发方">
+        <button type="button" class="catalog-lab-item active" data-lab-id="">
+          <span>全部 Lab</span><strong>0</strong>
+        </button>
+      </aside>
+
+      <section class="catalog-results">
+        <div class="table-wrap models-table-wrap">
+          <table class="data-table catalog-model-table" id="catalogModelsTable">
+            <thead id="catalogTableHead"></thead>
+            <tbody id="catalogTableBody">
+              <tr><td colspan="6" class="empty-cell">加载中…</td></tr>
+            </tbody>
+          </table>
         </div>
-      </div>
+        <div class="catalog-empty hidden" id="catalogEmptyState">
+          <strong>模型目录尚未更新</strong>
+          <span>点击“更新模型目录”，联网获取并完整校验 models.dev 目录后写入数据库。</span>
+          <button type="button" class="btn primary" data-catalog-refresh>更新模型目录</button>
+        </div>
+      </section>
+    </div>
 
-      <div class="models-filters">
-        <label class="field models-filter-field">
-          <span>数据源</span>
-          <select id="sourceSelect">
-            <option value="auto">自动（优先 models.dev）</option>
-            <option value="online">models.dev 在线</option>
-            <option value="bundled">内置 JSON</option>
-          </select>
-        </label>
-        <label class="field models-filter-field">
-          <span>Provider</span>
-          <select id="providerSelect">
-            <option value="">全部</option>
-          </select>
-        </label>
-        <label class="field models-filter-field">
-          <span>模态</span>
-          <select id="modalitySelect">
-            <option value="">全部</option>
-            <option value="text">文本</option>
-            <option value="image">图像</option>
-            <option value="audio">音频</option>
-            <option value="video">视频</option>
-            <option value="pdf">PDF</option>
-          </select>
-        </label>
-        <label class="field models-search-field">
-          <span>搜索</span>
-          <input type="search" id="searchInput" placeholder="provider / model id / key…" autocomplete="off" />
-        </label>
-      </div>
+    <div class="models-pagination" id="catalogPaginationBar">
+      <button type="button" class="btn btn-sm" id="catalogPrevPageBtn" disabled>上一页</button>
+      <span class="models-page-info" id="catalogPageInfo">—</span>
+      <button type="button" class="btn btn-sm" id="catalogNextPageBtn" disabled>下一页</button>
+    </div>
 
-      <p class="models-status" id="statusLine">加载中…</p>
-
-      <div class="table-wrap models-table-wrap">
-        <table class="data-table models-matrix" id="modelsTable">
-          <thead>
-            <tr>
-              <th>Provider</th>
-              <th>Model</th>
-              <th class="mod-col" title="text">文本</th>
-              <th class="mod-col" title="image">图像</th>
-              <th class="mod-col" title="audio">音频</th>
-              <th class="mod-col" title="video">视频</th>
-              <th class="mod-col" title="pdf">PDF</th>
-              <th>Context</th>
-              <th>已配置</th>
-            </tr>
-          </thead>
-          <tbody id="modelsTableBody">
-            <tr><td colspan="9" class="empty-cell">加载中…</td></tr>
-          </tbody>
-        </table>
-      </div>
-
-      <div class="models-pagination" id="paginationBar">
-        <button type="button" class="btn btn-sm" id="prevPageBtn" disabled>上一页</button>
-        <span class="models-page-info" id="pageInfo">—</span>
-        <button type="button" class="btn btn-sm" id="nextPageBtn" disabled>下一页</button>
-      </div>
-
-      <details class="settings-hint models-hint">
-        <summary>说明</summary>
-        <ul>
-          <li>数据来自 <code>GET /api/v1/llm-models/catalog</code>；「自动」优先拉取 models.dev，离线时回退内置 JSON。</li>
-          <li>在管理后台「模型配置」中创建预设时，可将 <code>model</code> 设为 <code>provider:model-id</code>（如 <code>openai:gpt-4o</code>）。</li>
-          <li>「已配置」列显示数据库中 model 字符串与本行匹配的预设名称；PDF 列表示 LLM <strong>原生</strong> PDF 输入。</li>
-        </ul>
-      </details>
   </main>
 </body>
 </html>

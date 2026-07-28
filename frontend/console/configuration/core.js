@@ -4,7 +4,6 @@ const state = {
   llmModels: [],
   editingAgentId: null,
   editingLlmModelId: null,
-  llmModelInitialModalityMode: "auto",
   editingMcp: null,
 };
 
@@ -159,6 +158,7 @@ function initTabs() {
       if (name === "auxiliary-models" && window.auxiliaryModelsAdmin) window.auxiliaryModelsAdmin.refresh();
       if (name === "mcp" && window.mcpAdmin) window.mcpAdmin.refresh();
       if (name === "ui-tools" && window.uiToolsAdmin) window.uiToolsAdmin.refresh();
+      if (name === "catalog" && window.modelCatalogAdmin) window.modelCatalogAdmin.refresh();
     });
   });
 }

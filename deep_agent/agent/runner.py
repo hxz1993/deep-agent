@@ -68,8 +68,9 @@ class AgentRunner:
         ui_tool_hints: dict[str, dict[str, Any]] | None = None,
         model_settings: ModelSettings | None = None,
         input_modalities: list[str] | None = None,
-        capabilities_source: str | None = None,
-        model_base_url: str | None = None,
+        context_window_tokens: int | None = None,
+        max_output_tokens: int | None = None,
+        model_tags: list[str] | None = None,
     ) -> None:
         self.agent = agent
         self.store = store
@@ -77,8 +78,9 @@ class AgentRunner:
         self.ui_tool_hints = ui_tool_hints or {}
         self.model_settings = model_settings
         self._input_modalities = input_modalities
-        self._capabilities_source = capabilities_source
-        self._model_base_url = model_base_url
+        self._context_window_tokens = context_window_tokens
+        self._max_output_tokens = max_output_tokens
+        self._model_tags = list(model_tags or [])
 
     @asynccontextmanager
     async def _session_lock(self, session_id: str, *, agent_id: str | None) -> AsyncIterator[None]:
@@ -146,13 +148,8 @@ class AgentRunner:
         return history, pre_persisted_user, user_branch_point
 
     def _vision_capable(self) -> bool:
-        model = self.agent.model
-        model_name = getattr(model, "model_name", None) or str(model)
         return model_supports_image_input(
-            model_name,
             db_modalities=self._input_modalities,
-            capabilities_source=self._capabilities_source,
-            base_url=self._model_base_url,
         )
 
     async def _llm_inputs(

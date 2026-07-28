@@ -1,218 +1,96 @@
-"""models.dev metadata client (online refresh with offline snapshot fallback)."""
+"""Strict models.dev client used only by the administrator refresh endpoint."""
 
 from __future__ import annotations
 
+import asyncio
 import json
-import logging
-from pathlib import Path
+import re
+from dataclasses import dataclass
 from typing import Any
 
 import httpx
 
-from deep_agent.agent.models.model_lookup import (
-    build_model_lookup_keys,
-    expand_provider_aliases,
-    infer_providers_from_base_url,
+DEFAULT_MODELS_DEV_CATALOG_URL = "https://models.dev/catalog.json"
+DEFAULT_MODELS_DEV_LABS_URL = "https://models.dev/labs"
+
+_LAB_SEARCH_INDEX = re.compile(
+    r"""<script[^>]*id=["']search-index["'][^>]*>([\s\S]*?)</script>""",
+    re.IGNORECASE,
 )
 
-logger = logging.getLogger(__name__)
 
-_SNAPSHOT_PATH = Path(__file__).parent / "models_dev_snapshot.json"
-_snapshot_cache: dict[str, dict[str, Any]] | None = None
-_catalog_cache: dict[str, Any] | None = None
-
-DEFAULT_MODELS_DEV_CATALOG_URL = "https://models.dev/api.json"
-_MODALITY_KEYS = ("text", "image", "audio", "video", "pdf")
+class ModelsDevFetchError(RuntimeError):
+    pass
 
 
-def _load_snapshot() -> dict[str, dict[str, Any]]:
-    global _snapshot_cache
-    if _snapshot_cache is None:
-        try:
-            _snapshot_cache = json.loads(_SNAPSHOT_PATH.read_text(encoding="utf-8"))
-        except Exception as exc:
-            logger.warning("Failed to load models.dev snapshot: {}", exc)
-            _snapshot_cache = {}
-    return _snapshot_cache
+@dataclass(frozen=True)
+class ModelsDevBundle:
+    models: dict[str, Any]
+    providers: dict[str, Any]
+    labs: object
 
 
-def _extract_modalities(payload: dict[str, Any]) -> list[str] | None:
-    modalities = payload.get("input_modalities")
-    if isinstance(modalities, list) and modalities:
-        return [str(item) for item in modalities]
-
-    nested = payload.get("modalities")
-    if isinstance(nested, dict):
-        input_modalities = nested.get("input")
-        if isinstance(input_modalities, list) and input_modalities:
-            return [str(item) for item in input_modalities]
-        resolved = [key for key in _MODALITY_KEYS if nested.get(key)]
-        if resolved:
-            return resolved
-
-    legacy = payload.get("input")
-    if isinstance(legacy, list) and legacy:
-        return [str(item) for item in legacy]
-    return None
+async def _get_required_json(client: httpx.AsyncClient, url: str, label: str) -> object:
+    try:
+        response = await client.get(url)
+        response.raise_for_status()
+        return response.json()
+    except Exception as exc:
+        raise ModelsDevFetchError(f"获取 models.dev {label}失败：{exc}") from exc
 
 
-def _provider_entry(catalog: dict[str, Any], provider: str) -> dict[str, Any] | None:
-    entry = catalog.get(provider)
-    return entry if isinstance(entry, dict) else None
+def parse_labs_page(html: str) -> list[dict[str, Any]]:
+    """Read the public lab search index without depending on page rendering."""
+    match = _LAB_SEARCH_INDEX.search(html or "")
+    if match is None:
+        return []
+    try:
+        payload = json.loads(match.group(1))
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(payload, list):
+        return []
+    return [
+        dict(item)
+        for item in payload
+        if isinstance(item, dict) and item.get("type") == "lab"
+    ]
 
 
-def _model_entry(catalog: dict[str, Any], provider: str, model_id: str) -> dict[str, Any] | None:
-    provider_data = _provider_entry(catalog, provider)
-    if provider_data is None:
-        return None
-    models = provider_data.get("models")
-    if not isinstance(models, dict):
-        return None
-    model_data = models.get(model_id)
-    return model_data if isinstance(model_data, dict) else None
+async def _get_optional_labs(client: httpx.AsyncClient, url: str) -> object:
+    try:
+        response = await client.get(url)
+        response.raise_for_status()
+        return parse_labs_page(response.text)
+    except Exception:
+        # Lab ids and labels can be derived from canonical model ids. The page
+        # only enriches descriptions and is intentionally not a refresh blocker.
+        return []
 
 
-def _lookup_provider_model(
-    catalog: dict[str, Any],
-    provider: str,
-    model_id: str,
-) -> list[str] | None:
-    for candidate_provider in expand_provider_aliases(provider):
-        model_data = _model_entry(catalog, candidate_provider, model_id)
-        if model_data is None:
-            continue
-        modalities = _extract_modalities(model_data)
-        if modalities:
-            return modalities
-    return None
-
-
-def _lookup_bare_model(
-    catalog: dict[str, Any],
-    model_id: str,
-    *,
-    preferred_providers: list[str],
-) -> list[str] | None:
-    providers_to_try: list[str] = []
-    seen: set[str] = set()
-
-    def add(provider: str) -> None:
-        for alias in expand_provider_aliases(provider):
-            if alias not in seen:
-                seen.add(alias)
-                providers_to_try.append(alias)
-
-    for provider in preferred_providers:
-        add(provider)
-    for provider in catalog:
-        if isinstance(provider, str):
-            add(provider)
-
-    for provider in providers_to_try:
-        modalities = _lookup_provider_model(catalog, provider, model_id)
-        if modalities:
-            return modalities
-    return None
-
-
-def lookup_modalities_in_catalog(
-    catalog: dict[str, Any],
-    model: str,
-    base_url: str | None = None,
-) -> list[str] | None:
-    """Resolve modalities from a models.dev ``api.json`` catalog payload."""
-    preferred_providers = infer_providers_from_base_url(base_url)
-    candidates = build_model_lookup_keys(model, base_url)
-
-    for key in candidates:
-        if "/" not in key:
-            continue
-        provider, model_id = key.split("/", 1)
-        modalities = _lookup_provider_model(catalog, provider, model_id)
-        if modalities:
-            return modalities
-
-    bare_names = [key for key in candidates if "/" not in key and ":" not in key]
-    for bare in bare_names:
-        modalities = _lookup_bare_model(
-            catalog,
-            bare,
-            preferred_providers=preferred_providers,
-        )
-        if modalities:
-            return modalities
-    return None
-
-
-def _lookup_snapshot(model: str, base_url: str | None = None) -> list[str] | None:
-    snapshot = _load_snapshot()
-    for key in build_model_lookup_keys(model, base_url):
-        entry = snapshot.get(key)
-        if isinstance(entry, dict):
-            modalities = _extract_modalities(entry)
-            if modalities:
-                return modalities
-    return None
-
-
-async def fetch_models_dev_catalog(
+async def fetch_models_dev_bundle(
     *,
     client: httpx.AsyncClient | None = None,
     catalog_url: str = DEFAULT_MODELS_DEV_CATALOG_URL,
-    use_cache: bool = True,
-) -> dict[str, Any] | None:
-    """Download the models.dev provider catalog (``api.json``)."""
-    global _catalog_cache
-    if use_cache and _catalog_cache is not None:
-        return _catalog_cache
-
+    labs_url: str = DEFAULT_MODELS_DEV_LABS_URL,
+) -> ModelsDevBundle:
     owns_client = client is None
-    if owns_client:
+    if client is None:
         client = httpx.AsyncClient(timeout=30.0, follow_redirects=True)
-
     try:
-        response = await client.get(catalog_url)
-        response.raise_for_status()
-        catalog = response.json()
+        catalog, labs = await asyncio.gather(
+            _get_required_json(client, catalog_url, "组合目录"),
+            _get_optional_labs(client, labs_url),
+        )
         if not isinstance(catalog, dict):
-            logger.warning("models.dev catalog payload is not an object")
-            return None
-        if use_cache:
-            _catalog_cache = catalog
-        return catalog
-    except Exception as exc:
-        logger.warning("Failed to fetch models.dev catalog: {}", exc)
-        return None
+            raise ModelsDevFetchError("models.dev 组合目录必须是 JSON 对象")
+        models = catalog.get("models")
+        providers = catalog.get("providers")
+        if not isinstance(models, dict):
+            raise ModelsDevFetchError("models.dev 组合目录缺少 models 对象")
+        if not isinstance(providers, dict):
+            raise ModelsDevFetchError("models.dev 组合目录缺少 providers 对象")
+        return ModelsDevBundle(models=models, providers=providers, labs=labs)
     finally:
-        if owns_client and client is not None:
+        if owns_client:
             await client.aclose()
-
-
-async def fetch_models_dev_modalities(
-    model: str,
-    *,
-    base_url: str | None = None,
-    client: httpx.AsyncClient | None = None,
-) -> list[str] | None:
-    """Fetch modalities from models.dev; fall back to bundled snapshot file."""
-    owns_client = client is None
-    if owns_client:
-        client = httpx.AsyncClient(timeout=30.0, follow_redirects=True)
-
-    try:
-        catalog = await fetch_models_dev_catalog(client=client)
-        if catalog is not None:
-            modalities = lookup_modalities_in_catalog(catalog, model, base_url)
-            if modalities:
-                return modalities
-    finally:
-        if owns_client and client is not None:
-            await client.aclose()
-
-    return _lookup_snapshot(model, base_url)
-
-
-def clear_models_dev_cache() -> None:
-    """Reset in-memory catalog cache (mainly for tests)."""
-    global _catalog_cache
-    _catalog_cache = None

@@ -43,7 +43,13 @@ class SessionTitleIntegrationTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         stores, self._engine, self._session_factory = await make_sqlite_stores()
         model_row = await stores.llm_model.create_unique(
-            LlmModelCreate(name="chat-model", model="test:chat-model"),
+            LlmModelCreate(
+                name="chat-model",
+                model="test:chat-model",
+                input_modalities=["text"],
+                context_window_tokens=128_000,
+                max_output_tokens=8_192,
+            ),
         )
         self._model_id = model_row.id
         self._stores = stores

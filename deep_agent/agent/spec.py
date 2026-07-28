@@ -28,7 +28,9 @@ class AgentSpec:
     temperature: float | None = None
     agent_id: str | None = None
     input_modalities: list[str] | None = None
-    capabilities_source: str | None = None
+    context_window_tokens: int | None = None
+    max_output_tokens: int | None = None
+    tags: list[str] | None = None
 
     @classmethod
     def from_row(cls, row: Agent, llm_model: LlmModel) -> AgentSpec:
@@ -42,7 +44,9 @@ class AgentSpec:
             temperature=row.temperature,
             agent_id=row.id,
             input_modalities=llm_model.input_modalities,
-            capabilities_source=llm_model.capabilities_source,
+            context_window_tokens=llm_model.context_window_tokens,
+            max_output_tokens=llm_model.max_output_tokens,
+            tags=llm_model.tags,
         )
 
     @classmethod
@@ -64,7 +68,9 @@ class AgentSpec:
             api_key=llm_model.api_key,
             temperature=temperature,
             input_modalities=llm_model.input_modalities,
-            capabilities_source=llm_model.capabilities_source,
+            context_window_tokens=llm_model.context_window_tokens,
+            max_output_tokens=llm_model.max_output_tokens,
+            tags=llm_model.tags,
         )
 
 

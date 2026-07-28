@@ -13,7 +13,6 @@ from typing import Any
 
 from deep_agent.agent.attachments import model_supports_image_input
 from deep_agent.agent.media_pipeline import allowed_mimes
-from deep_agent.agent.models.modality_resolver import resolve_input_modalities
 from deep_agent.agent.spec import AgentSpec
 
 # MIME → user-facing upload kind (platform text-extraction or image bytes).
@@ -47,13 +46,8 @@ _LLM_MODALITY_LABELS: dict[str, str] = {
 
 
 def resolve_llm_input_modalities(spec: AgentSpec) -> list[str]:
-    """Resolved LLM-native modalities for the active preset."""
-    return resolve_input_modalities(
-        spec.model,
-        user_override=spec.input_modalities,
-        capabilities_source=spec.capabilities_source,
-        base_url=spec.base_url,
-    )
+    """Return only the LLM-native modalities persisted on ``llm_models``."""
+    return list(spec.input_modalities or [])
 
 
 def upload_capability_kinds() -> list[str]:
@@ -82,10 +76,7 @@ def build_capability_instruction_block(spec: AgentSpec) -> str:
     llm_modalities = resolve_llm_input_modalities(spec)
     llm_labels = [_LLM_MODALITY_LABELS.get(m, m) for m in llm_modalities]
     vision = model_supports_image_input(
-        spec.model,
         db_modalities=spec.input_modalities,
-        capabilities_source=spec.capabilities_source,
-        base_url=spec.base_url,
     )
 
     upload_kinds = upload_capability_kinds()

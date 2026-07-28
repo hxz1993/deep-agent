@@ -18,6 +18,7 @@ from deep_agent.db.models import (
     ChatSession,
     LlmModel,
     McpServer,
+    ModelCatalog,
     UiToolDefinition,
 )
 from maintenance.config_backup import (
@@ -47,13 +48,13 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
 
             self.assertEqual(
                 result.path.name,
-                "deep-agent-config-test-v021-20260723-131415.db",
+                "deep-agent-config-test-v022-20260723-131415.db",
             )
             self.assertEqual(
                 [path.resolve() for path in (output_root / "test").iterdir()],
                 [result.path.resolve()],
             )
-            self.assertEqual(result.revision, "021")
+            self.assertEqual(result.revision, "022")
             self.assertEqual(result.row_counts["agents"], 1)
             self.assertEqual(result.row_counts["chat_sessions"], 0)
             self.assertEqual(result.row_counts["chat_messages"], 0)
@@ -75,13 +76,39 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                     connection.execute(
                         "SELECT version_num FROM alembic_version"
                     ).fetchone(),
-                    ("021",),
+                    ("022",),
                 )
                 self.assertEqual(
                     connection.execute(
-                        "SELECT api_key FROM llm_models WHERE id = 'model-1'"
+                        "SELECT api_key, context_window_tokens, max_output_tokens, tags "
+                        "FROM llm_models WHERE id = 'model-1'"
                     ).fetchone(),
-                    ("plain-api-key",),
+                    ("plain-api-key", 128000, 8192, '["reasoning","tool_call"]'),
+                )
+                catalog_row = connection.execute(
+                    "SELECT input_modalities, output_modalities, capabilities, release_date, "
+                    "model_metadata, provider_metadata "
+                    "FROM model_catalog WHERE provider_id = 'openai' "
+                    "AND provider_model_id = 'gpt-test'"
+                ).fetchone()
+                self.assertIsNotNone(catalog_row)
+                self.assertEqual(json.loads(str(catalog_row[0])), ["text", "image"])
+                self.assertEqual(json.loads(str(catalog_row[1])), ["text"])
+                self.assertEqual(
+                    json.loads(str(catalog_row[2])),
+                    {"reasoning": True, "tool_call": True},
+                )
+                self.assertEqual(
+                    catalog_row[3],
+                    "2026-01-01",
+                )
+                self.assertEqual(
+                    json.loads(str(catalog_row[4])),
+                    {"release_date": "2026-01-01"},
+                )
+                self.assertEqual(
+                    json.loads(str(catalog_row[5])),
+                    {"adapter": "openai"},
                 )
                 mcp_config = connection.execute(
                     "SELECT config FROM mcp_servers WHERE name = 'remote'"
@@ -107,7 +134,7 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                         "SELECT environment, source_dialect, alembic_revision, "
                         "git_commit FROM _backup_info"
                     ).fetchone(),
-                    ("test", "sqlite", "021", "abc123"),
+                    ("test", "sqlite", "022", "abc123"),
                 )
 
     async def test_failed_export_removes_partial_database(self) -> None:
@@ -120,7 +147,7 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                     "CREATE TABLE alembic_version (version_num VARCHAR(32))"
                 )
                 connection.execute(
-                    "INSERT INTO alembic_version (version_num) VALUES ('021')"
+                    "INSERT INTO alembic_version (version_num) VALUES ('022')"
                 )
 
             with self.assertRaises(Exception):
@@ -171,7 +198,7 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                 )
                 await connection.execute(
                     text(
-                        "INSERT INTO alembic_version (version_num) VALUES ('021')"
+                        "INSERT INTO alembic_version (version_num) VALUES ('022')"
                     )
                 )
                 await connection.execute(
@@ -182,6 +209,43 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                         "model": "openai:test",
                         "api_key": "plain-api-key",
                         "input_modalities": ["text"],
+                        "context_window_tokens": 128000,
+                        "max_output_tokens": 8192,
+                        "tags": ["reasoning", "tool_call"],
+                    },
+                )
+                await connection.execute(
+                    insert(ModelCatalog.__table__),
+                    {
+                        "provider_id": "openai",
+                        "provider_model_id": "gpt-test",
+                        "provider_label": "OpenAI",
+                        "provider_npm": "@ai-sdk/openai",
+                        "provider_api_url": "https://api.openai.com/v1",
+                        "provider_doc_url": "https://platform.openai.com/docs",
+                        "lab_id": "openai",
+                        "lab_label": "OpenAI",
+                        "lab_description": "OpenAI lab",
+                        "canonical_model_id": "openai/gpt-test",
+                        "model_label": "GPT Test",
+                        "model_description": "Test model",
+                        "family": "gpt",
+                        "release_date": "2026-01-01",
+                        "canonical_context_window_tokens": 128000,
+                        "canonical_max_output_tokens": 8192,
+                        "context_window_tokens": 128000,
+                        "max_output_tokens": 8192,
+                        "input_modalities": ["text", "image"],
+                        "output_modalities": ["text"],
+                        "capabilities": {"reasoning": True, "tool_call": True},
+                        "status": "active",
+                        "lab_metadata": {"country": "US"},
+                        "model_metadata": {"release_date": "2026-01-01"},
+                        "provider_metadata": {"adapter": "openai"},
+                        "source": "models_dev",
+                        "refreshed_at": datetime(
+                            2026, 7, 28, 1, 2, 3, tzinfo=timezone.utc
+                        ),
                     },
                 )
                 await connection.execute(

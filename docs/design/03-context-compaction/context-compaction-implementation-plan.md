@@ -72,42 +72,38 @@ MessageStore.get_history()
 
 - 不同模型窗口可能是 32K、64K、128K 或更大。
 - 同样 20 条消息，普通聊天和财务模型大结果的体积差异可达数十倍。
-- 需要为模型输出、Instructions、工具 Schema、附件和安全余量预留空间。
+- 需要动态估计本轮输出、Instructions、工具 Schema、附件和 Provider 包装开销。
 - 私有 OpenAI-compatible 模型的窗口不能从 Pydantic AI 自动可靠推导。
 
 ### 3.1 模型级属性
 
-当前模型元数据刷新只维护 `input_modalities/capabilities_source`，不含窗口、最大输出或
-Tokenizer，现有字段不能复用。
-
-建议在 `llm_models` 增加两个稳定数值字段和一个可演进 JSON：
+0.2.2 已在 `llm_models` 增加三个运行时事实字段：
 
 ```text
-context_window_tokens       INTEGER NULL
-max_output_tokens           INTEGER NULL
-context_budget_config       JSON NULL
+context_window_tokens       BIGINT NULL
+max_output_tokens           BIGINT NULL
+tags                        JSON NULL
 ```
 
 语义：
 
 | 字段 | 用途 |
 | --- | --- |
-| `context_window_tokens` | 模型输入+输出总窗口 |
-| `max_output_tokens` | 为本轮输出保留的最大预算 |
-| `context_budget_config` | Token 估算模式、Tokenizer、校准系数和元数据来源 |
+| `context_window_tokens` | Provider 声明的输入与输出共享总窗口 |
+| `max_output_tokens` | Provider 声明的单次最大输出能力上限 |
+| `tags` | 推理、工具调用、结构化输出等模型能力标签，与输入模态分开 |
 
-`context_budget_config` 第一版结构：
+这里不持久化 `max_input_tokens`、输出预留值、Tokenizer、估算系数或
+`context_budget_config`。这些都不是模型的稳定属性：
 
-```json
-{
-  "token_count_mode": "conservative_chars",
-  "tokenizer_name": null,
-  "estimate_multiplier": 1.0,
-  "metadata_source": "user"
-}
-```
+- `max_input_tokens` 不能简单等于“总窗口减最大输出”。模型最大可输出 384K，不代表每轮都应为
+  384K 留空，否则 1M 模型会无意义地只剩 616K 输入预算。
+- 实际输出需求取决于当前任务、历史输出分布、请求参数和模型行为，应在每轮请求前动态预测。
+- Tokenizer 与估算校准属于运行算法和观测数据；算法升级不应要求管理员逐模型修改配置。
+- 不保存模型属性来源；目录只是预填入口，`llm_models` 中保存的事实始终可以手工修改。
 
-这样既保留窗口和输出预算的直接类型约束，也避免为仍在实验的估算参数增加四个独立列。
+0.2.2 只保存事实并透传到 `AgentSpec/AgentRunner`，尚不启用自动压缩。上下文窗口缺失的历史
+模型保持可运行，但后续压缩功能必须自动关闭并给出观测提示。
 
 不应把 `context_window` 塞进 Pydantic AI `ModelProfile`。当前 `ModelProfile` 描述工具、结构化输出、
 Thinking 等协议能力，没有通用上下文窗口字段。
@@ -153,29 +149,40 @@ context_summary
 
 ### 3.3 预算计算
 
-推荐：
+推荐把模型上限与每轮预测分开：
 
 ```text
-usable_input_budget
-= context_window_tokens
-- max_output_tokens
-- static_reserve_tokens
+predicted_output_tokens
+= clamp(
+    基于当前任务与近期输出的预测值,
+    dynamic_output_floor,
+    max_output_tokens
+  )
 
-trigger_tokens = usable_input_budget × trigger_ratio
-target_tokens  = usable_input_budget × target_ratio
+runtime_overhead_tokens
+= estimate(instructions + tool schemas + current input + attachments + provider envelope)
+
+usable_history_budget
+= context_window_tokens
+- predicted_output_tokens
+- runtime_overhead_tokens
+- safety_margin_tokens
+
+trigger_tokens = usable_history_budget × trigger_ratio
+target_tokens  = usable_history_budget × target_ratio
 ```
 
-`static_reserve_tokens` 至少覆盖：
+首版预测不需要单独训练模型。可以用确定性算法：
 
-- Agent Instructions。
-- Skill/MCP Instructions。
-- Tool Definitions 和 JSON Schema。
-- 当前用户输入和附件。
-- Provider 包装开销。
-- 安全余量。
+1. 以系统设定的合理下限作为冷启动值。
+2. 读取当前会话最近若干轮实际 `output_tokens`，采用分位数或 EWMA，避免被一次异常长输出带偏。
+3. 结合当前用户输入长度、是否要求代码/报告、工具链阶段做有限放大。
+4. 最终不超过模型的 `max_output_tokens` 能力上限。
+5. 用 Provider 返回的真实 usage 持续校准估算误差和安全余量。
 
 Harness 的 `estimate_token_count(messages)` 只统计消息内容，不包含完整 Tool Schema 和所有 Provider
-包装，不能把它直接等同于真实请求 Token。
+包装，不能把它直接等同于真实请求 Token。后续只有实际观测证明规则不足时，再评估专门预测模型；
+默认不应为“估计该留多少输出”额外发起一次 LLM 调用。
 
 ## 4. Harness 引包方式
 

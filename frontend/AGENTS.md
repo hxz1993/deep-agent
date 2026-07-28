@@ -108,8 +108,8 @@ python -m http.server 5173
 | 页面布局 | `console/index.html` 与两个 Console template |
 | 一体化控制台布局与编排 | `console/index.html`、`console/console.css`、`console/workspace.js`、`console/configuration.js` |
 | 配置 CRUD | `console/configuration/` 下各文件 |
-| 模型 Meta 刷新 | `console/configuration/llm-models.js` → `POST /api/v1/llm-models/refresh-metadata` |
-| 模型目录 | `console/configuration/catalog.js` → `GET /api/v1/llm-models/catalog` |
+| 模型运行属性 | `console/configuration/llm-models.js`；上下文、最大输出、输入模态和 tags 保存到 `llm_models` |
+| 模型目录 | `console/configuration/catalog.js` → DB-only GET 与管理员 POST refresh |
 | Markdown 主题/安全 | `vendor/`，见 `vendor/README.md` |
 
 历史消息由后端按 `session_id` 维护；切换会话时 `GET /api/v1/sessions/{id}/history` 回放。pending UI 工具的 `tool_call` part 同样经后端 enrichment 附带 `widget` / `metadata`。
@@ -125,5 +125,6 @@ python -m http.server 5173
 - Agent 的 `capabilities: null` 表示使用系统默认能力，`[]` 表示明确不启用任何可选能力；新建表单必须按 `null` 初始化。删除 MCP 或 UI 工具若返回 `detail.referenced_by`，应直接展示引用它的 Agent 名称。
 - `builtin__confirm`、`builtin__choice` 是代码内置但非默认启用的普通 `ui:<name>` 能力；Agent 新建和历史回填不得自动勾选。choice 始终提供候选外自由输入，提交结果固定包含 `selected: string[]` 与 `custom_input: string | null`，二者不能同时为空。
 - MCP 新建页只允许 URL transport；历史 stdio 配置只读且不显示编辑入口。Builtin MCP 继续由仓库内程序配置管理，列表保留编辑入口但不显示删除按钮，后端删除接口也会拒绝。
+- 模型目录只由管理员手工刷新 models.dev，保存模型配置不得触发外网请求。目录按 Lab → Model → Provider 展示，仅负责预填；模态与能力 tags 分开，Agent 运行时只认 `llm_models`。
 
 更多说明：[`README.md`](README.md)。

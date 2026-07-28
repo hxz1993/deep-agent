@@ -51,6 +51,8 @@ class ConfigurationCrudContractTests(unittest.IsolatedAsyncioTestCase):
                     "name": "   ",
                     "model": "   ",
                     "input_modalities": ["text"],
+                    "context_window_tokens": 128_000,
+                    "max_output_tokens": 8_192,
                 },
             )
             ui_tool = await client.post(
@@ -95,6 +97,8 @@ class ConfigurationCrudContractTests(unittest.IsolatedAsyncioTestCase):
                     "name": "contract-model",
                     "model": "test:contract",
                     "input_modalities": ["text"],
+                    "context_window_tokens": 128_000,
+                    "max_output_tokens": 8_192,
                 },
             )
             tool_response = await client.post(
@@ -149,6 +153,8 @@ class ConfigurationCrudContractTests(unittest.IsolatedAsyncioTestCase):
                     "model": "test:model",
                     "base_url": "ftp://example.test",
                     "input_modalities": ["text"],
+                    "context_window_tokens": 128_000,
+                    "max_output_tokens": 8_192,
                 },
             )
             tool = await client.post(
@@ -173,6 +179,8 @@ class ConfigurationCrudContractTests(unittest.IsolatedAsyncioTestCase):
                     "model": "test:model",
                     "api_key": "secret",
                     "input_modalities": ["text"],
+                    "context_window_tokens": 128_000,
+                    "max_output_tokens": 8_192,
                 },
             )
             self.assertTrue(created.json()["api_key_set"])
@@ -200,6 +208,8 @@ class ConfigurationCrudContractTests(unittest.IsolatedAsyncioTestCase):
                     "name": "duplicate-model",
                     "model": "test:duplicate",
                     "input_modalities": ["text"],
+                    "context_window_tokens": 128_000,
+                    "max_output_tokens": 8_192,
                 },
             ),
             (

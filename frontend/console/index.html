@@ -16,11 +16,12 @@
     })();
   </script>
   <title>DeepAgent 一体化控制台</title>
+  <link rel="icon" type="image/svg+xml" href="./favicon.svg?v=20260728-1" />
   <link id="hljsTheme" rel="stylesheet" href="/vendor/highlight-github-dark.min.css" />
   <link rel="stylesheet" href="./themes.css?v=20260721-1" />
   <link rel="stylesheet" href="./workspace.css?v=20260728-2" />
   <link rel="stylesheet" href="./configuration/configuration.css?v=20260728-2" />
-  <link rel="stylesheet" href="./console.css?v=20260721-2" />
+  <link rel="stylesheet" href="./console.css?v=20260728-1" />
 </head>
 <body>
   <div class="console-shell">
@@ -104,7 +105,10 @@
           <aside class="resource-nav">
             <div class="resource-title">
               <strong>配置中心</strong>
-              <span id="databaseSchemaVersion">数据库配置版本 —</span>
+              <div class="database-version" title="当前数据库配置结构版本">
+                <span>数据库版本</span>
+                <strong id="databaseSchemaVersion">—</strong>
+              </div>
             </div>
             <div class="resource-group-label">配置对象</div>
             <button class="tab resource-btn active" data-tab="agents"><i data-lucide="bot"></i><span>Agent</span></button>
@@ -181,6 +185,6 @@
   <script src="../vendor/marked.min.js"></script>
   <script src="../vendor/purify.min.js"></script>
   <script src="../vendor/highlight.min.js"></script>
-  <script type="module" src="./main.js?v=20260728-5"></script>
+  <script type="module" src="./main.js?v=20260728-6"></script>
 </body>
 </html>

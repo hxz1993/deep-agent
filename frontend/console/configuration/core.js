@@ -88,11 +88,11 @@ async function apiFetch(path, options = {}) {
 
 function formatDatabaseSchemaVersion(value) {
   const revision = String(value ?? "").trim();
-  if (!revision) return "数据库配置版本未知";
+  if (!revision) return "—";
   const displayRevision = /^\d+$/.test(revision)
     ? String(Number.parseInt(revision, 10))
     : revision;
-  return `数据库配置版本 V${displayRevision}`;
+  return `V${displayRevision}`;
 }
 
 async function loadDatabaseSchemaVersion() {
@@ -103,7 +103,7 @@ async function loadDatabaseSchemaVersion() {
     target.textContent = formatDatabaseSchemaVersion(info?.schema_version);
     target.removeAttribute("title");
   } catch (error) {
-    target.textContent = "数据库配置版本未知";
+    target.textContent = "—";
     target.title = error instanceof Error ? error.message : String(error);
   }
 }

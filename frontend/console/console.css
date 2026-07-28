@@ -570,8 +570,34 @@ textarea {
 }
 
 .resource-title { display: flex; flex-direction: column; gap: 3px; padding: 5px 9px 13px; }
-.resource-title strong { font-size: 14px; }
-.resource-title span { color: var(--text-faint); font-size: 10px; }
+.resource-title > strong { font-size: 14px; }
+.database-version {
+  width: fit-content;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 6px;
+  padding: 4px 5px 4px 8px;
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--border));
+  border-radius: 6px;
+  color: var(--text-dim);
+  background: var(--accent-soft);
+}
+.database-version span {
+  font-size: 10px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.database-version strong {
+  min-width: 34px;
+  padding: 3px 7px;
+  border-radius: 4px;
+  color: var(--send-fg);
+  background: var(--accent);
+  font: 700 12px/1.2 var(--mono);
+  letter-spacing: 0.03em;
+  text-align: center;
+}
 .resource-group-label {
   padding: 5px 10px 3px;
   color: var(--text-faint);

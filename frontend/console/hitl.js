@@ -15,6 +15,23 @@ export function normalizeOption(option) {
   return { value, label: value, description: "" };
 }
 
+export function buildChoiceResult(selectedValues, customInput) {
+  const selected = Array.from(selectedValues || [])
+    .map(text)
+    .filter(Boolean);
+  const custom = text(customInput);
+  if (!selected.length && !custom) {
+    return { ok: false, error: "请至少选择一个候选项或填写其他内容。" };
+  }
+  return {
+    ok: true,
+    result: {
+      selected,
+      custom_input: custom || null,
+    },
+  };
+}
+
 export function normalizeStructuredFields(fields) {
   if (!Array.isArray(fields)) {
     return { ok: false, error: "fields 必须是数组", fields: [] };

@@ -545,6 +545,7 @@ html, body {
 .tool-body pre:last-child { margin-bottom: 0; }
 
 .hitl-widget { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--tool-border); }
+.hitl-title { display: block; margin: 0 0 5px; font-size: 13px; }
 .hitl-prompt { margin: 0 0 10px; line-height: 1.5; }
 .hitl-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .hitl-btn {

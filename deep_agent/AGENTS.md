@@ -108,7 +108,7 @@ DeepAgent 自研 `capabilities.registry.Capability` 是配置包装对象，负�
 | `mcp/resources.py` | 按检测快照开放、运行时实时读取的 Resource 代理工具 |
 | `mcp/run_scoped.py` | builtin MCP：按 agent run 租约 HTTP client |
 | `mcp/lease_manager.py` | worker 级 MCP lease + shared registry touch |
-| `ui/registry.py` | UI 工具合并、`ui:<name>` 正向关联、可见性、`prepare_ui_toolset_for_spec` |
+| `ui/registry.py` | builtin/manual UI 工具合并、`ui:<name>` 正向关联、可见性、`prepare_ui_toolset_for_spec` |
 
 ### `api/v1/`
 
@@ -159,11 +159,17 @@ DeepAgent 自研 `capabilities.registry.Capability` 是配置包装对象，负�
 
 开发内置 server → 见 [`../mcps/AGENTS.md`](../mcps/AGENTS.md)。
 
-生产配置 → `POST /api/v1/mcp` 或 `/console/#/configuration`。用户新建只支持 URL MCP；Builtin 由仓库内 `mcps/` 管理。历史 stdio 行只允许读取或删除，不能新建、修改或运行，需迁移为 URL MCP。
+生产配置 → `POST /api/v1/mcp` 或 `/console/#/configuration`。用户新建只支持 URL MCP；Builtin 由仓库内 `mcps/` 和程序配置管理，可查看、更新允许运行时调整的配置，但不能通过 Console 或删除 API 移除。历史 stdio 行只允许读取或删除，不能新建、修改或运行，需迁移为 URL MCP。
 
 ### DB Agent
 
 `POST /api/v1/agents` 或 Alembic 种子；流式请求带 `agent_id`（UUID）。
+
+### UI 工具
+
+代码内置 `builtin__confirm`、`builtin__choice` 与手工 UI 工具使用相同的 Agent 正向关联规则。只有 `capabilities` 显式包含 `ui:builtin__confirm` 或 `ui:builtin__choice` 时才进入模型工具列表；`null`、空数组、旧 `ui-builtin:*` 引用和未选择的历史 Agent 均不启用。内置定义可通过 `/api/v1/ui-tools` 查看，但不能修改或删除，新名称也保留给代码内置工具。
+
+`builtin__choice` 始终支持候选外自由输入，结果固定为 `{selected: string[], custom_input: string | null}`；单选、多选和自由输入共用这一结构。
 
 ---
 
@@ -252,7 +258,7 @@ SSE 协议：[`../docs/guides/sse-protocol.md`](../docs/guides/sse-protocol.md)�
    - 多入口共享组装 → `api/v1/deps.py`（变化量留在入口，上下文在 `_build_*` 内统一解包）
 1. 包名 **`deep_agent`**，启动 `deep_agent.main:app`（非 `app.main`）
 2. 扩展优先走路径注册，避免改 `runner.py` 核心
-3. 能力命名：`native` \| `skill:<name>` \| `mcp:<name>` \| `ui:<canonical_tool_name>`；扩展 UI 工具由 Agent 正向引用
+3. 能力命名：`native` \| `skill:<name>` \| `mcp:<name>` \| `ui:<canonical_tool_name>`；builtin 和 manual UI 工具都由 Agent 正向引用，均不因代码内置而自动启用
 4. DB Agent 会话：复合键 `(agent_id, session_id)`；无 agent 时 `agent_id=''`
 5. 同 session 用 `SessionStore.lock()` 串行；多实例 DB 级锁未实现
 6. 配置保存先完成 Schema/引用校验，再进入写事务；一次 API 业务变更不要串联多个各自提交的 Store `_write()`。MCP 检测等外部 I/O 先基于候选配置执行，再把配置与检测快照一次性提交；模型 Meta 等可选增强失败不能把已经成功的主体保存伪装成失败。

@@ -1,4 +1,4 @@
-import { normalizeOption, normalizeStructuredFields, validateUiToolCall } from "./hitl.js?v=20260720-1";
+import { buildChoiceResult, normalizeOption, normalizeStructuredFields, validateUiToolCall } from "./hitl.js?v=20260728-2";
 import { parseSseBlock, readSse } from "./protocol.js?v=20260720-1";
 import { formatSessionIdSubtitle } from "./session-display.js?v=20260728-2";
 
@@ -19,7 +19,8 @@ import { formatSessionIdSubtitle } from "./session-display.js?v=20260728-2";
 
 const DEFAULT_BASE_URL = defaultApiBaseUrl();
 
-const BUILTIN_UI_TOOLS = new Set(["confirm_action", "ask_user_choice"]);
+const BUILTIN_UI_TOOLS = new Set(["builtin__confirm", "builtin__choice"]);
+const LEGACY_BUILTIN_UI_TOOLS = new Set(["confirm_action", "ask_user_choice"]);
 /** @type {Map<string, object>} */
 const uiToolsByName = new Map();
 
@@ -39,13 +40,14 @@ function mergeUiToolCall(call) {
 function isUiToolCall(call) {
   if (!call?.tool) return false;
   if (BUILTIN_UI_TOOLS.has(call.tool)) return true;
+  if (LEGACY_BUILTIN_UI_TOOLS.has(call.tool) && !uiToolsByName.has(call.tool)) return false;
   if (call.widget) return true;
   return uiToolsByName.has(call.tool);
 }
 
 function resolveWidgetType(call) {
-  if (call.tool === "confirm_action" || call.widget === "confirm") return "confirm";
-  if (call.tool === "ask_user_choice" || call.widget === "choice") return "choice";
+  if (call.tool === "builtin__confirm" || call.widget === "confirm") return "confirm";
+  if (call.tool === "builtin__choice" || call.widget === "choice") return "choice";
   if (call.widget === "text") return "text";
   if (call.widget === "date_picker") return "date_picker";
   if (["structured", "structured_form", "form"].includes(call.widget) || Array.isArray(call.args?.fields)) {
@@ -1915,6 +1917,7 @@ function renderHitlWidget(block, call, onSubmit) {
   if (widgetType === "confirm") {
     const message = args.message || "确认执行？";
     widgetEl.innerHTML = `
+      ${args.title ? `<strong class="hitl-title">${escapeHtml(args.title)}</strong>` : ""}
       <p class="hitl-prompt">${escapeHtml(message)}</p>
       <div class="hitl-actions">
         <button type="button" class="hitl-btn hitl-confirm">${escapeHtml(args.confirm_label || "确认")}</button>
@@ -1927,12 +1930,15 @@ function renderHitlWidget(block, call, onSubmit) {
       onSubmit([{ tool_call_id: toolCallId, result: { confirmed: false } }]);
     });
   } else if (widgetType === "choice") {
-    const options = args.options.map(normalizeOption);
+    const options = args.options.map(normalizeOption).filter((option) => option.value);
     const allowMultiple = !!args.allow_multiple;
     widgetEl.innerHTML = `
+      ${args.title ? `<strong class="hitl-title">${escapeHtml(args.title)}</strong>` : ""}
       <p class="hitl-prompt">${escapeHtml(args.prompt || "请选择：")}</p>
       <div class="hitl-choices"></div>
-      <button type="button" class="hitl-btn hitl-submit">提交</button>`;
+      <textarea class="hitl-text-input hitl-choice-custom-input" rows="2" placeholder="${escapeHtml(args.custom_placeholder || "请输入其他内容")}"></textarea>
+      <div class="hitl-form-error hidden"></div>
+      <button type="button" class="hitl-btn hitl-submit">${escapeHtml(args.submit_label || "提交")}</button>`;
     const choicesEl = widgetEl.querySelector(".hitl-choices");
     for (const opt of options) {
       const label = document.createElement("label");
@@ -1947,10 +1953,37 @@ function renderHitlWidget(block, call, onSubmit) {
       label.appendChild(copy);
       choicesEl.appendChild(label);
     }
+    const customLabel = document.createElement("label");
+    customLabel.className = "hitl-choice hitl-choice-custom";
+    const customChoice = document.createElement("input");
+    customChoice.type = allowMultiple ? "checkbox" : "radio";
+    customChoice.name = `choice-${toolCallId}`;
+    customChoice.className = "hitl-choice-custom-control";
+    customLabel.appendChild(customChoice);
+    const customCopy = document.createElement("span");
+    customCopy.innerHTML = `<strong>${escapeHtml(args.custom_label || "其他（自行输入）")}</strong>`;
+    customLabel.appendChild(customCopy);
+    choicesEl.appendChild(customLabel);
+    const customInput = widgetEl.querySelector(".hitl-choice-custom-input");
+    customInput.addEventListener("input", () => {
+      if (customInput.value.trim()) customChoice.checked = true;
+    });
     widgetEl.querySelector(".hitl-submit").addEventListener("click", () => {
-      const selected = [...choicesEl.querySelectorAll("input:checked")].map((i) => i.value);
-      const result = allowMultiple ? { selected } : { selected: selected[0] ?? null };
-      onSubmit([{ tool_call_id: toolCallId, result }]);
+      const selected = [...choicesEl.querySelectorAll("input:checked")]
+        .filter((input) => input !== customChoice)
+        .map((input) => input.value);
+      const choiceResult = buildChoiceResult(
+        selected,
+        customChoice.checked ? customInput.value : "",
+      );
+      const error = widgetEl.querySelector(".hitl-form-error");
+      if (!choiceResult.ok) {
+        error.textContent = choiceResult.error;
+        error.classList.remove("hidden");
+        return;
+      }
+      error.classList.add("hidden");
+      onSubmit([{ tool_call_id: toolCallId, result: choiceResult.result }]);
     });
   } else if (widgetType === "text") {
     const rows = args.multiline ? 4 : 1;

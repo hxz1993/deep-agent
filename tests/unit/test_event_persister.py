@@ -125,7 +125,7 @@ class EventPersisterTests(unittest.IsolatedAsyncioTestCase):
         acc.ingest(
             {
                 "type": "tool_call",
-                "tool": "confirm_action",
+                "tool": "builtin__confirm",
                 "tool_call_id": "tc1",
                 "args": {"message": "ok"},
             }
@@ -133,7 +133,7 @@ class EventPersisterTests(unittest.IsolatedAsyncioTestCase):
         acc.ingest(
             {
                 "type": "tool_result",
-                "tool": "confirm_action",
+                "tool": "builtin__confirm",
                 "tool_call_id": "tc1",
                 "result": {"confirmed": True},
             }

@@ -1,5 +1,5 @@
 const MAX_EVENTS = 80;
-const WORKSPACE_ASSET_VERSION = "20260728-5";
+const WORKSPACE_ASSET_VERSION = "20260728-6";
 
 let initialized = false;
 let eventRows = [];

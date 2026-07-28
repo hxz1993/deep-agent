@@ -56,4 +56,4 @@ read_mcp_resource(server_name, uri)
 - 文本 Resource 最大允许 `256 KiB`；超限时要求读取更窄的 URI。
 - 二进制 Resource 只返回媒体类型和大小，不把原始字节放入模型上下文。
 
-Builtin MCP 第一版不主动启动进程做检测，因此管理页显示“内置运行时”，也不会仅因存在本地 MCP 目录而获得 Resource 代理工具。
+Builtin MCP 第一版不主动启动进程做检测，因此管理页显示“内置运行时”，也不会仅因存在本地 MCP 目录而获得 Resource 代理工具。内建 MCP 由程序管理：Console 不显示删除按钮，删除 API 返回 `403`；需要移除时应修改仓库内 MCP 实现及其程序配置后随版本发布。

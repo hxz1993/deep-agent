@@ -56,7 +56,7 @@ class UiToolCreate(BaseModel):
     def validate_name(cls, value: str) -> str:
         if not TOOL_NAME_PATTERN.fullmatch(value):
             raise ValueError("name must match ^[a-z][a-z0-9_]{1,120}$")
-        if value in RESERVED_TOOL_NAMES and value in {"confirm_action", "ask_user_choice"}:
+        if value in RESERVED_TOOL_NAMES:
             raise ValueError(f"name {value!r} is reserved for builtin tools")
         return value
 

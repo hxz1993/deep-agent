@@ -19,9 +19,6 @@ function capDisplayName(name, kind) {
   if (kind === "ui-client" && name.startsWith("ui:")) {
     return name.slice(3);
   }
-  if (kind === "ui-client" && name.startsWith("ui-builtin:")) {
-    return name.slice(11);
-  }
   return name;
 }
 

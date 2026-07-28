@@ -16,13 +16,14 @@ function uiToolJsonValue(value) {
 const UI_TOOL_TEMPLATES = {
   confirm: {
     label: "确认对话框",
-    hint: "二次确认场景：参数含 message（必填）与按钮文案；结果返回 confirmed 布尔值。",
+    hint: "通用继续/取消场景：参数含 title、message（必填）与按钮文案；结果返回 confirmed 布尔值。",
     nameExample: "myapp__confirm_delete",
-    description: "Ask the user to confirm or cancel before proceeding.",
+    description: "向用户展示通用确认界面并等待用户选择继续或取消。",
     widget: "confirm",
     parameters_json_schema: {
       type: "object",
       properties: {
+        title: { type: "string", description: "可选标题" },
         message: { type: "string", description: "确认文案" },
         confirm_label: { type: "string", description: "确认按钮", default: "确认" },
         cancel_label: { type: "string", description: "取消按钮", default: "取消" },
@@ -38,23 +39,57 @@ const UI_TOOL_TEMPLATES = {
   },
   choice: {
     label: "选项列表",
-    hint: "单选/多选场景：参数含 prompt、options 数组；结果返回 selected。",
+    hint: "通用单选/多选场景：始终提供自由输入兜底；结果返回 selected 数组和 custom_input。",
     nameExample: "myapp__pick_plan",
-    description: "Present options and wait for the user to select one or more.",
+    description: "向用户展示通用候选列表，支持单选、多选以及候选外自由输入。",
     widget: "choice",
     parameters_json_schema: {
       type: "object",
       properties: {
+        title: { type: "string", description: "可选标题" },
         prompt: { type: "string", description: "选项说明" },
-        options: { type: "array", items: { type: "string" }, description: "可选项" },
+        options: {
+          type: "array",
+          minItems: 1,
+          items: {
+            oneOf: [
+              { type: "string" },
+              {
+                type: "object",
+                properties: {
+                  value: { type: "string" },
+                  label: { type: "string" },
+                  description: { type: "string" },
+                },
+                required: ["value"],
+                additionalProperties: false,
+              },
+            ],
+          },
+          description: "可选项",
+        },
         allow_multiple: { type: "boolean", description: "允许多选", default: false },
+        custom_label: { type: "string", description: "自由输入选项文案", default: "其他（自行输入）" },
+        custom_placeholder: { type: "string", description: "自由输入提示", default: "请输入其他内容" },
+        submit_label: { type: "string", description: "提交按钮文案", default: "提交" },
       },
       required: ["prompt", "options"],
     },
     result_schema: {
       type: "object",
-      properties: { selected: { type: "string", description: "选中项" } },
-      required: ["selected"],
+      properties: {
+        selected: {
+          type: "array",
+          items: { type: "string" },
+          description: "选中的候选值",
+        },
+        custom_input: {
+          type: ["string", "null"],
+          description: "候选外自由输入",
+        },
+      },
+      required: ["selected", "custom_input"],
+      additionalProperties: false,
     },
     metadata: { template: "choice" },
   },

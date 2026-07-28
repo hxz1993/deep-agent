@@ -38,7 +38,7 @@ class RepairUnprocessedToolCallsTests(unittest.TestCase):
             ModelResponse(
                 parts=[
                     ToolCallPart(
-                        tool_name="confirm_action",
+                        tool_name="builtin__confirm",
                         args={"message": "go?"},
                         tool_call_id="call-1",
                     )
@@ -117,7 +117,7 @@ class RepairUnprocessedToolCallsTests(unittest.TestCase):
             ModelResponse(
                 parts=[
                     ToolCallPart(
-                        tool_name="confirm_action",
+                        tool_name="builtin__confirm",
                         args={},
                         tool_call_id="call-1",
                     )

@@ -98,7 +98,7 @@ DB 配置示例（`mcp_servers.config.env`）：
 
 ## 生产配置（DB 优先）
 
-通过 `POST /api/v1/mcp` 或 `/console/#/configuration` 注册，**同名时 DB 覆盖 builtin 发现**。
+通过 `POST /api/v1/mcp` 或 `/console/#/configuration` 注册，**同名时 DB 覆盖 builtin 发现**。`transport=builtin` 的记录由程序管理，Console 不提供删除入口，`DELETE /api/v1/mcp/{name}` 也会拒绝；移除内建 MCP 必须随代码和程序配置一起发布。
 
 | transport | 用途 |
 | --- | --- |

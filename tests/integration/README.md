@@ -27,10 +27,10 @@ from tests.integration.helpers.models import text_only_model, tool_call_model
 test_model = text_only_model("ok")
 
 # 指定调用的 tool（名称与 registry 一致）
-test_model = tool_call_model("confirm_action", text="done after confirm")
+test_model = tool_call_model("builtin__confirm", text="done after confirm")
 ```
 
-- `TestModel` 默认 `call_tools='all'`，会调用 agent 上挂的**每一个** tool。`capabilities=[]` 时仍会挂载 UI tools，未显式设 `call_tools=[]` 时容易得到 `status=pending` 而非文本回复。
+- `TestModel` 默认 `call_tools='all'`，会调用 Agent 实际挂载的**每一个** tool。内置 UI 工具也必须在 `capabilities` 中显式选择；`capabilities=null`、`[]` 或未包含相应 `ui:<name>` 时不会挂载。
 - `text_only_model` / `tool_call_model`：见 [`helpers/models.py`](helpers/models.py)。
 - `custom_output_text`：tool 执行后的最终回复文本。
 

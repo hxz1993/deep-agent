@@ -65,6 +65,9 @@ test("Builtin 显示内置运行时且不伪装成待检测", () => {
   const view = ui.inspectionView(null, "builtin");
   assert.equal(view.text, "内置运行时");
   assert.equal(view.summary, "运行时按需启动");
+  assert.equal(ui.canDeleteMcp("builtin"), false);
+  assert.equal(ui.canDeleteMcp("url"), true);
+  assert.equal(ui.canDeleteMcp("stdio"), true);
 });
 
 test("历史 stdio MCP 明确显示为停止支持", () => {

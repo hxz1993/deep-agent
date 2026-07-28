@@ -375,7 +375,7 @@ class HistoryThinkingTests(unittest.TestCase):
         messages = [
             ModelResponse(
                 parts=[
-                    ToolCallPart("confirm_action", {"message": "继续？"}, tool_call_id="confirm"),
+                    ToolCallPart("builtin__confirm", {"message": "继续？"}, tool_call_id="confirm"),
                     ToolCallPart("deep_cube__clarify", {}, tool_call_id="clarify"),
                 ]
             ),

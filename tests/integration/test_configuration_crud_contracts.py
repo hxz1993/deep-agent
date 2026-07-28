@@ -299,6 +299,27 @@ class ConfigurationCrudContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(await self.stores.mcp.get_by_name("referenced_mcp"))
         self.assertIsNotNone(await self.stores.ui_tool.get_by_name("referenced_tool"))
 
+    async def test_builtin_mcp_cannot_be_deleted(self) -> None:
+        async with self.stores.mcp._write() as db:
+            db.add(
+                McpServer(
+                    name="builtin_protected",
+                    transport="builtin",
+                    config={},
+                    enabled=True,
+                )
+            )
+
+        async with AsyncClient(transport=self._transport, base_url="http://test") as client:
+            response = await client.delete("/api/v1/mcp/builtin_protected")
+
+        self.assertEqual(response.status_code, 403, response.text)
+        self.assertEqual(
+            response.json()["detail"],
+            "内建 MCP 由程序管理，不能通过 API 删除",
+        )
+        self.assertIsNotNone(await self.stores.mcp.get_by_name("builtin_protected"))
+
     async def test_auxiliary_update_creates_missing_default_row(self) -> None:
         async with self.stores.auxiliary_model._write() as db:
             row = await self.stores.auxiliary_model._get_by_use_case(db, "title")

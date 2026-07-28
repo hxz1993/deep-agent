@@ -260,7 +260,7 @@ class AgentRunnerHistoryTests(unittest.IsolatedAsyncioTestCase):
 
         from deep_agent.capabilities.ui.builtin import build_ui_toolset
 
-        test_model = TestModel(call_tools=["confirm_action"], custom_output_text="continued")
+        test_model = TestModel(call_tools=["builtin__confirm"], custom_output_text="continued")
         agent = Agent(
             test_model,
             deps_type=AgentDeps,

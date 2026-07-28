@@ -54,6 +54,7 @@ tests/
 | `test_modality_resolver.py` | 模型 modality bundled 解析与 refresh |
 | `test_models_dev.py` | models.dev catalog lookup |
 | `test_session_model_override.py` | Agent 对话 `model_id` 请求级覆盖（`build_runner_for_agent`） |
+| `test_ui_tools_rfc.py` | builtin/manual UI 工具注册、Agent 显式选择、保留名称、Schema 校验与事件 enrichment |
 
 ---
 
@@ -86,5 +87,7 @@ tests/
 - 在 `deep_agent/` 子目录运行 discover 会找不到测试；**始终在仓库根**
 - 集成测试可能依赖环境变量；勿把 `.env` 密钥写进测试
 - 改 `capabilities/mcp/` 或 `agent/headers.py` 后跑 integration 相关用例
+- 改内置 UI 工具时同时覆盖：新名称、`default_enabled=false`/非锁定能力、`capabilities=null` 和空数组不加载、分别/同时选择、内置修改删除保护，以及 choice 的单选、多选、自由输入和空提交阻止。
+- `builtin__confirm`、`builtin__choice` 不兼容旧 `confirm_action`、`ask_user_choice` pending 会话；测试夹具和断言不得继续把旧名称当作内置工具。
 
 更多：[`README.md`](README.md)、[`unit/README.md`](unit/README.md)、[`integration/README.md`](integration/README.md)。

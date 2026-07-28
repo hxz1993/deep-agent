@@ -21,6 +21,15 @@ enabled the capability actually runs.
 This is complementary to `config/mcp.json`: use `mcps/` for servers whose code
 lives in this repo, and `config/mcp.json` for external/remote servers.
 
+## Builtin lifecycle
+
+Builtin MCP records use `transport=builtin` and are managed with the program
+that ships their implementation. The Console does not show a delete action for
+them, and `DELETE /api/v1/mcp/{name}` returns `403`. To remove a builtin MCP,
+remove its repository implementation and program configuration together in a
+normal release. A database row using another transport remains an ordinary
+external MCP even when its name matches a builtin directory.
+
 ## Add a builtin server
 
 1. Create `mcps/<name>/server.py`.

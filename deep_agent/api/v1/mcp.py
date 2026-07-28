@@ -181,6 +181,11 @@ async def delete_mcp_server(
     row = await store.get_by_name(name)
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"MCP server not found: {name}")
+    if row.transport == "builtin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="内建 MCP 由程序管理，不能通过 API 删除",
+        )
     referenced_by = await agent_store.list_referencing_capability(f"mcp:{name}")
     if referenced_by:
         raise HTTPException(

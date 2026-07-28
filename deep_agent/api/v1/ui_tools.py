@@ -89,6 +89,8 @@ async def update_ui_tool(
     body: UiToolUpdate,
     store: UiToolStoreBase = Depends(get_ui_tool_store),
 ) -> UiToolResponse:
+    if name in _BUILTIN_NAMES:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Builtin UI tools cannot be modified")
     row = await store.get_by_name(name)
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"UI tool not found: {name}")
@@ -105,6 +107,8 @@ async def delete_ui_tool(
     store: UiToolStoreBase = Depends(get_ui_tool_store),
     agent_store: AgentStoreBase = Depends(get_agent_store),
 ) -> None:
+    if name in _BUILTIN_NAMES:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Builtin UI tools cannot be deleted")
     row = await store.get_by_name(name)
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"UI tool not found: {name}")

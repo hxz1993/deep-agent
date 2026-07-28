@@ -25,7 +25,7 @@ class DeferredSerializationTests(unittest.TestCase):
         requests = DeferredToolRequests(
             calls=[
                 ToolCallPart(
-                    tool_name="confirm_action",
+                    tool_name="builtin__confirm",
                     args={"message": "继续？"},
                     tool_call_id="call-1",
                 )
@@ -34,7 +34,7 @@ class DeferredSerializationTests(unittest.TestCase):
         )
         payload = serialize_deferred(requests)
         self.assertEqual(len(payload["calls"]), 1)
-        self.assertEqual(payload["calls"][0]["tool"], "confirm_action")
+        self.assertEqual(payload["calls"][0]["tool"], "builtin__confirm")
         self.assertEqual(payload["calls"][0]["tool_call_id"], "call-1")
         self.assertEqual(payload["calls"][0]["args"], {"message": "继续？"})
 
@@ -50,7 +50,7 @@ class DeferredSerializationTests(unittest.TestCase):
 
 class FinalEventTests(unittest.TestCase):
     def test_final_pending_includes_deferred(self) -> None:
-        deferred = {"calls": [{"tool": "confirm_action", "args": {}, "tool_call_id": "x"}]}
+        deferred = {"calls": [{"tool": "builtin__confirm", "args": {}, "tool_call_id": "x"}]}
         payload = events.final(None, {"requests": 1}, status="pending", deferred=deferred)
         self.assertEqual(payload["status"], "pending")
         self.assertEqual(payload["deferred"], deferred)
@@ -73,7 +73,7 @@ class AgentRunnerDeferredTests(unittest.IsolatedAsyncioTestCase):
         await self._engine.dispose()
 
     async def test_run_stream_emits_pending_final_for_external_tool(self) -> None:
-        test_model = TestModel(call_tools=["confirm_action"], custom_output_text="done")
+        test_model = TestModel(call_tools=["builtin__confirm"], custom_output_text="done")
         agent = Agent(
             test_model,
             deps_type=AgentDeps,
@@ -101,8 +101,8 @@ class AgentRunnerDeferredTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(events_out[-1]["deferred"]["calls"])
         tool_calls = [e for e in events_out if e.get("type") == "tool_call"]
         self.assertEqual(len(tool_calls), 1)
-        self.assertEqual(tool_calls[0]["tool"], "confirm_action")
-        self.assertEqual(events_out[-1]["deferred"]["calls"][0]["tool"], "confirm_action")
+        self.assertEqual(tool_calls[0]["tool"], "builtin__confirm")
+        self.assertEqual(events_out[-1]["deferred"]["calls"][0]["tool"], "builtin__confirm")
 
     async def test_run_stream_tool_call_includes_metadata_from_hints(self) -> None:
         manual_tool = UIToolRecord(
@@ -199,7 +199,7 @@ class AgentRunnerDeferredTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_run_stream_resume_completes_after_deferred_result(self) -> None:
         test_model = TestModel(
-            call_tools=["confirm_action"],
+            call_tools=["builtin__confirm"],
             custom_output_text="已根据用户确认继续",
         )
         agent = Agent(

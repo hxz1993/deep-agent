@@ -29,7 +29,7 @@ frontend/
 | 附件上传 | `POST /api/v1/uploads`（multipart）→ 发送时 `attachments[]` 引用 |
 | 思考过程 UI | `thinking` 可折叠块，默认折叠；与 `text` 分离 |
 | 工具调用 UI | `tool_call` / `tool_result` 可折叠；同 `tool_call_id` 合并更新 |
-| HITL UI 工具 | 内置 `confirm_action` / `ask_user_choice` + 手工 UI 工具；SSE / history 携带 `widget` / `metadata`；见 [`../docs/guides/ui-tools-external.md`](../docs/guides/ui-tools-external.md) |
+| HITL UI 工具 | 内置 `builtin__confirm` / `builtin__choice` + 手工 UI 工具；都由 Agent 显式选择，SSE / history 携带 `widget` / `metadata`；见 [`../docs/guides/ui-tools-external.md`](../docs/guides/ui-tools-external.md) |
 | Markdown | marked + DOMPurify + highlight.js |
 | 会话 | `session_id` 由后端 `session` 事件返回；`GET/DELETE /api/v1/sessions`；标题展示 `title \|\| user_prompt`（见 [`../docs/guides/experience/ai-title-generator.md`](../docs/guides/experience/ai-title-generator.md)） |
 | 能力面板 | `GET /api/v1/tools` |
@@ -123,6 +123,7 @@ python -m http.server 5173
 - `tool_call` 首帧 `args` 可能为 `{}`，需按 `tool_call_id` 合并后续帧
 - 配置表单必须区分“主体保存失败”和“保存成功后的列表刷新失败”；后者保留成功结果并提示重新加载，不能让用户按新建模式重复提交。条件字段（如 URL MCP 的 URL）需要前端动态必填和后端 Schema 双重校验。
 - Agent 的 `capabilities: null` 表示使用系统默认能力，`[]` 表示明确不启用任何可选能力；新建表单必须按 `null` 初始化。删除 MCP 或 UI 工具若返回 `detail.referenced_by`，应直接展示引用它的 Agent 名称。
-- MCP 新建页只允许 URL transport；历史 stdio 配置只读且不显示编辑入口，Builtin MCP 继续由仓库内配置管理。
+- `builtin__confirm`、`builtin__choice` 是代码内置但非默认启用的普通 `ui:<name>` 能力；Agent 新建和历史回填不得自动勾选。choice 始终提供候选外自由输入，提交结果固定包含 `selected: string[]` 与 `custom_input: string | null`，二者不能同时为空。
+- MCP 新建页只允许 URL transport；历史 stdio 配置只读且不显示编辑入口。Builtin MCP 继续由仓库内程序配置管理，列表保留编辑入口但不显示删除按钮，后端删除接口也会拒绝。
 
 更多说明：[`README.md`](README.md)。

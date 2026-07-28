@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { normalizeOption, normalizeStructuredFields, validateUiToolCall } from "../../../frontend/console/hitl.js";
+import {
+  buildChoiceResult,
+  normalizeOption,
+  normalizeStructuredFields,
+  validateUiToolCall,
+} from "../../../frontend/console/hitl.js";
 
 test("结构化表单兼容 field 和 option.name/description", () => {
   const result = normalizeStructuredFields([
@@ -45,5 +50,30 @@ test("字符串和对象选项归一化为稳定结构", () => {
     value: "A",
     label: "科目A",
     description: "",
+  });
+});
+
+test("choice 统一返回候选数组和独立自由输入", () => {
+  assert.deepEqual(buildChoiceResult(["plan-a"], ""), {
+    ok: true,
+    result: { selected: ["plan-a"], custom_input: null },
+  });
+  assert.deepEqual(buildChoiceResult([], "自定义方案"), {
+    ok: true,
+    result: { selected: [], custom_input: "自定义方案" },
+  });
+  assert.deepEqual(buildChoiceResult(["plan-a", "plan-b"], "补充约束"), {
+    ok: true,
+    result: {
+      selected: ["plan-a", "plan-b"],
+      custom_input: "补充约束",
+    },
+  });
+});
+
+test("choice 候选和自由输入均为空时拒绝提交", () => {
+  assert.deepEqual(buildChoiceResult([], "  "), {
+    ok: false,
+    error: "请至少选择一个候选项或填写其他内容。",
   });
 });

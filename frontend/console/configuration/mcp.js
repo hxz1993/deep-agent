@@ -130,6 +130,10 @@ function validateMcpConfig(transport, config) {
   return null;
 }
 
+function canDeleteMcp(transport) {
+  return transport !== "builtin";
+}
+
 const mcpAdmin = {
   async refresh() {
     const tbody = document.getElementById("mcpTableBody");
@@ -167,7 +171,7 @@ const mcpAdmin = {
             <div class="row-actions mcp-row-actions">
               ${s.transport === "url" ? `<button type="button" data-inspect-mcp="${escapeHtml(s.name)}">检测并更新</button>` : ""}
               ${s.transport === "stdio" ? "" : `<button type="button" data-edit="${escapeHtml(s.name)}">编辑</button>`}
-              <button type="button" class="danger" data-delete="${escapeHtml(s.name)}">删除</button>
+              ${canDeleteMcp(s.transport) ? `<button type="button" class="danger" data-delete="${escapeHtml(s.name)}">删除</button>` : ""}
             </div>
           </td>
         </tr>`;
@@ -473,6 +477,7 @@ window.__McpInspectionUI = {
   inspectionToast,
   savedInspectionToast,
   validateMcpConfig,
+  canDeleteMcp,
 };
 
 document.addEventListener("DOMContentLoaded", () => {

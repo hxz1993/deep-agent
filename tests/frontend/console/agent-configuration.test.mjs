@@ -21,15 +21,33 @@ function loadAgentConfigurationUi() {
   return context;
 }
 
-test("null 能力配置选择系统默认能力", () => {
+test("新建和历史 null 能力配置不选择内置 UI 工具", () => {
   const ui = loadAgentConfigurationUi();
   const selected = ui.buildCapabilitySelectionSet(null, [
     { name: "native", default_enabled: true },
     { name: "skill:optional", default_enabled: false },
-    { name: "ui-builtin:confirm_action", default_enabled: true, locked: true },
+    { name: "ui:builtin__confirm", default_enabled: false, locked: false },
+    { name: "ui:builtin__choice", default_enabled: false, locked: false },
   ]);
 
   assert.deepEqual([...selected], ["native"]);
+});
+
+test("内置 UI 工具与手工 UI 工具使用相同可选能力编码", () => {
+  const ui = loadAgentConfigurationUi();
+  const selected = ui.buildCapabilitySelectionSet(
+    ["ui:builtin__confirm", "ui:demo__form"],
+    [
+      { name: "ui:builtin__confirm", default_enabled: false, locked: false },
+      { name: "ui:builtin__choice", default_enabled: false, locked: false },
+      { name: "ui:demo__form", default_enabled: false, locked: false },
+    ],
+  );
+
+  assert.deepEqual(
+    [...selected],
+    ["ui:builtin__confirm", "ui:demo__form"],
+  );
 });
 
 test("新建 Agent 使用 null 初始化默认能力而不是空数组", () => {

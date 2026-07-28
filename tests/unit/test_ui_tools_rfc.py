@@ -32,21 +32,21 @@ from deep_agent.db.stores.bundle import create_data_stores
 from deep_agent.db.stores.ui_tool import UiToolStoreBase
 from deep_agent.schemas.ui_tools import UiToolCreate, UiToolUpdate
 from deep_agent.api.v1.tools import list_capabilities
-from deep_agent.api.v1.ui_tools import get_ui_tool, list_ui_tools
+from deep_agent.api.v1.ui_tools import delete_ui_tool, get_ui_tool, list_ui_tools, update_ui_tool
 
 
 class MergeDefinitionsTests(unittest.TestCase):
     def test_builtin_wins_over_conflicting_manual_definition(self) -> None:
         manual = UIToolRecord(
-            name="confirm_action",
+            name="builtin__confirm",
             description="manual",
             parameters_json_schema={"type": "object"},
             source="manual",
         )
         merged, shadowed = merge_definitions(builtin_ui_records(), [manual])
-        winner = next(item for item in merged if item.name == "confirm_action")
+        winner = next(item for item in merged if item.name == "builtin__confirm")
         self.assertEqual(winner.source, "builtin")
-        self.assertEqual(shadowed["confirm_action"], "manual")
+        self.assertEqual(shadowed["builtin__confirm"], "manual")
 
 
 class UiToolSchemaValidationTests(unittest.TestCase):
@@ -67,6 +67,23 @@ class UiToolSchemaValidationTests(unittest.TestCase):
         self.assertNotIn("agent_ids", UiToolCreate.model_fields)
         self.assertNotIn("agent_ids", UiToolUpdate.model_fields)
         self.assertNotIn("agent_ids", UiToolResponse.model_fields)
+
+    def test_new_builtin_names_are_reserved_but_legacy_names_are_available(self) -> None:
+        for name in ("builtin__confirm", "builtin__choice"):
+            with self.subTest(name=name), self.assertRaises(ValidationError):
+                UiToolCreate(
+                    name=name,
+                    description="reserved",
+                    parameters_json_schema={"type": "object"},
+                )
+        for name in ("confirm_action", "ask_user_choice"):
+            with self.subTest(name=name):
+                created = UiToolCreate(
+                    name=name,
+                    description="legacy name is no longer builtin",
+                    parameters_json_schema={"type": "object"},
+                )
+                self.assertEqual(created.name, name)
 
 
 class UiToolStoreTests(unittest.IsolatedAsyncioTestCase):
@@ -102,7 +119,7 @@ class UiToolStoreTests(unittest.IsolatedAsyncioTestCase):
         )
 
         by_name = {item.name: item for item in response.items}
-        self.assertEqual(set(by_name), {"ask_user_choice", "confirm_action"})
+        self.assertEqual(set(by_name), {"builtin__choice", "builtin__confirm"})
         self.assertTrue(all(item.source == "builtin" for item in by_name.values()))
         self.assertTrue(all(item.enabled for item in by_name.values()))
         self.assertTrue(all(item.created_at is None for item in by_name.values()))
@@ -120,19 +137,35 @@ class UiToolStoreTests(unittest.IsolatedAsyncioTestCase):
             enabled=False,
         )
 
-        self.assertEqual({item.name for item in builtin_response.items}, {"ask_user_choice", "confirm_action"})
+        self.assertEqual({item.name for item in builtin_response.items}, {"builtin__choice", "builtin__confirm"})
         self.assertEqual(disabled_response.items, [])
 
     async def test_management_detail_reads_builtin_without_database_row(self) -> None:
-        response = await get_ui_tool("confirm_action", store=self.store)
+        response = await get_ui_tool("builtin__confirm", store=self.store)
 
-        self.assertEqual(response.name, "confirm_action")
+        self.assertEqual(response.name, "builtin__confirm")
         self.assertEqual(response.source, "builtin")
         self.assertEqual(response.widget, "confirm")
-        self.assertIsNone(response.result_schema)
+        self.assertEqual(response.result_schema["required"], ["confirmed"])
         self.assertIsNone(response.metadata)
         self.assertIsNone(response.created_at)
         self.assertIsNone(response.updated_at)
+
+    async def test_builtin_tools_cannot_be_updated_or_deleted_without_database_rows(self) -> None:
+        for name in ("builtin__confirm", "builtin__choice"):
+            with self.subTest(name=name):
+                with self.assertRaisesRegex(Exception, "cannot be modified"):
+                    await update_ui_tool(
+                        name,
+                        UiToolUpdate(description="changed"),
+                        store=self.store,
+                    )
+                with self.assertRaisesRegex(Exception, "cannot be deleted"):
+                    await delete_ui_tool(
+                        name,
+                        store=self.store,
+                        agent_store=self.stores.agent,
+                    )
 
     async def test_effective_tools_include_manual_for_agent(self) -> None:
         now = datetime.now(timezone.utc)
@@ -154,14 +187,15 @@ class UiToolStoreTests(unittest.IsolatedAsyncioTestCase):
             name="demo",
             model="test",
             instructions="hi",
-            capabilities=["ui:demo__pick_color"],
+            capabilities=["ui:builtin__confirm", "ui:demo__pick_color"],
             agent_id="00000000-0000-4000-8000-000000000001",
         )
         effective = await load_effective_ui_tools(self.stores, spec)
         toolset, hints = await prepare_ui_toolset_for_spec(self.stores, spec)
 
         names = {item.name for item in effective.definitions}
-        self.assertIn("confirm_action", names)
+        self.assertIn("builtin__confirm", names)
+        self.assertNotIn("builtin__choice", names)
         self.assertIn("demo__pick_color", names)
         self.assertTrue(effective.has_dynamic)
         self.assertIsNotNone(toolset)
@@ -198,12 +232,12 @@ class UiToolStoreTests(unittest.IsolatedAsyncioTestCase):
             name="demo",
             model="test",
             instructions="hi",
-            capabilities=["ui:demo__second", "ui:missing__tool"],
+            capabilities=["ui:builtin__choice", "ui:demo__second", "ui:missing__tool"],
         )
         effective = await load_effective_ui_tools(self.stores, spec)
         names = {item.name for item in effective.definitions}
-        self.assertIn("confirm_action", names)
-        self.assertIn("ask_user_choice", names)
+        self.assertNotIn("builtin__confirm", names)
+        self.assertIn("builtin__choice", names)
         self.assertIn("demo__second", names)
         self.assertNotIn("demo__first", names)
         self.assertNotIn("missing__tool", names)
@@ -227,8 +261,59 @@ class UiToolStoreTests(unittest.IsolatedAsyncioTestCase):
         spec = AgentSpec(name="demo", model="test", instructions="hi", capabilities=None)
         effective = await load_effective_ui_tools(self.stores, spec)
         names = {item.name for item in effective.definitions}
-        self.assertEqual(names, {"confirm_action", "ask_user_choice"})
+        self.assertEqual(names, set())
         self.assertFalse(effective.has_dynamic)
+
+        empty_spec = AgentSpec(name="empty", model="test", instructions="hi", capabilities=[])
+        empty_effective = await load_effective_ui_tools(self.stores, empty_spec)
+        self.assertEqual(empty_effective.definitions, [])
+
+        legacy_spec = AgentSpec(
+            name="legacy",
+            model="test",
+            instructions="hi",
+            capabilities=["ui-builtin:confirm_action", "ui-builtin:ask_user_choice"],
+        )
+        legacy_effective = await load_effective_ui_tools(self.stores, legacy_spec)
+        self.assertEqual(legacy_effective.definitions, [])
+
+    async def test_builtin_model_tool_list_matches_exact_agent_selection(self) -> None:
+        cases = (
+            (None, set()),
+            ([], set()),
+            (["ui:builtin__confirm"], {"builtin__confirm"}),
+            (["ui:builtin__choice"], {"builtin__choice"}),
+            (
+                ["ui:builtin__confirm", "ui:builtin__choice"],
+                {"builtin__confirm", "builtin__choice"},
+            ),
+        )
+        for capabilities, expected in cases:
+            with self.subTest(capabilities=capabilities):
+                spec = AgentSpec(
+                    name="selection",
+                    model="test",
+                    instructions="hi",
+                    capabilities=capabilities,
+                )
+                toolset, hints = await prepare_ui_toolset_for_spec(self.stores, spec)
+                self.assertEqual(set(hints), expected)
+                if not expected:
+                    self.assertIsNone(toolset)
+                    continue
+                assert toolset is not None
+                tools = await toolset.get_tools(None)
+                self.assertEqual(set(tools), expected)
+
+    def test_builtin_choice_schema_supports_general_options_and_custom_input(self) -> None:
+        choice = next(item for item in builtin_ui_records() if item.name == "builtin__choice")
+        properties = choice.parameters_json_schema["properties"]
+        self.assertEqual(choice.parameters_json_schema["required"], ["prompt", "options"])
+        self.assertEqual(properties["options"]["minItems"], 1)
+        self.assertIn("oneOf", properties["options"]["items"])
+        self.assertEqual(properties["custom_label"]["default"], "其他（自行输入）")
+        self.assertEqual(properties["custom_placeholder"]["default"], "请输入其他内容")
+        self.assertEqual(choice.result_schema["required"], ["selected", "custom_input"])
 
     async def test_disabled_selected_tool_is_ignored(self) -> None:
         now = datetime.now(timezone.utc)
@@ -291,11 +376,11 @@ class UiToolStoreTests(unittest.IsolatedAsyncioTestCase):
         ui_capabilities = [item for item in capabilities if item.kind == "ui-client"]
         self.assertEqual(
             [item.name for item in ui_capabilities],
-            ["ui-builtin:confirm_action", "ui-builtin:ask_user_choice", "ui:demo__first"],
+            ["ui:builtin__confirm", "ui:builtin__choice", "ui:demo__first"],
         )
         self.assertEqual([item.source for item in ui_capabilities], ["builtin", "builtin", "manual"])
-        self.assertEqual([item.locked for item in ui_capabilities], [True, True, False])
-        self.assertEqual([item.default_enabled for item in ui_capabilities], [True, True, False])
+        self.assertEqual([item.locked for item in ui_capabilities], [False, False, False])
+        self.assertEqual([item.default_enabled for item in ui_capabilities], [False, False, False])
         self.assertEqual([tool.name for tool in ui_capabilities[-1].tools], ["demo__first"])
 
     async def test_prepare_toolset_skips_historical_invalid_schema_only(self) -> None:
@@ -323,12 +408,8 @@ class UiToolStoreTests(unittest.IsolatedAsyncioTestCase):
         )
         toolset, hints = await prepare_ui_toolset_for_spec(self.stores, spec)
 
-        self.assertIsNotNone(toolset)
+        self.assertIsNone(toolset)
         self.assertNotIn("demo__invalid", hints)
-        assert toolset is not None
-        tools = await toolset.get_tools(None)
-        self.assertNotIn("demo__invalid", tools)
-        self.assertIn("confirm_action", tools)
 
 
 class VisibilityTests(unittest.TestCase):
@@ -348,6 +429,14 @@ class VisibilityTests(unittest.TestCase):
         )
         self.assertTrue(
             is_tool_visible(record, capabilities=["ui:demo__form"])
+        )
+
+    def test_builtin_tool_uses_the_same_exact_ui_capability_rule(self) -> None:
+        record = next(item for item in builtin_ui_records() if item.name == "builtin__confirm")
+        self.assertFalse(is_tool_visible(record, capabilities=None))
+        self.assertFalse(is_tool_visible(record, capabilities=[]))
+        self.assertTrue(
+            is_tool_visible(record, capabilities=["ui:builtin__confirm"])
         )
 
 
@@ -374,9 +463,18 @@ class ToolHintsTests(unittest.TestCase):
         self.assertEqual(enriched["metadata"], {"v": 1})
 
     def test_enrich_tool_event_builtin_without_hints(self) -> None:
-        event = {"type": "tool_call", "tool": "confirm_action", "args": {"message": "ok"}, "tool_call_id": "c1"}
+        event = {"type": "tool_call", "tool": "builtin__confirm", "args": {"message": "ok"}, "tool_call_id": "c1"}
         enriched = enrich_tool_event(event, {})
         self.assertEqual(enriched["widget"], "confirm")
+
+    def test_legacy_builtin_name_is_not_enriched(self) -> None:
+        event = {
+            "type": "tool_call",
+            "tool": "confirm_action",
+            "args": {"message": "old"},
+            "tool_call_id": "legacy",
+        }
+        self.assertEqual(enrich_tool_event(event, {}), event)
 
     def test_enrich_tool_event_ignores_non_tool_call(self) -> None:
         event = {"type": "text", "delta": "hi"}
@@ -420,7 +518,7 @@ class ExternalToolsetTests(unittest.IsolatedAsyncioTestCase):
     async def test_external_ui_tool_allows_one_model_retry(self) -> None:
         toolset = build_external_toolset(builtin_ui_records())
         tools = await toolset.get_tools(None)
-        self.assertEqual(tools["confirm_action"].max_retries, 1)
+        self.assertEqual(tools["builtin__confirm"].max_retries, 1)
 
     async def test_invalid_json_is_retried_once_and_then_deferred(self) -> None:
         calls = 0
@@ -431,7 +529,7 @@ class ExternalToolsetTests(unittest.IsolatedAsyncioTestCase):
             args: str | dict[str, str]
             args = '{"message":' if calls == 1 else {"message": "继续？"}
             return ModelResponse(
-                parts=[ToolCallPart("confirm_action", args, tool_call_id=f"call-{calls}")]
+                parts=[ToolCallPart("builtin__confirm", args, tool_call_id=f"call-{calls}")]
             )
 
         agent = Agent(
@@ -454,7 +552,7 @@ class ExternalToolsetTests(unittest.IsolatedAsyncioTestCase):
             calls += 1
             args = {} if calls == 1 else {"message": "继续？"}
             return ModelResponse(
-                parts=[ToolCallPart("confirm_action", args, tool_call_id=f"call-{calls}")]
+                parts=[ToolCallPart("builtin__confirm", args, tool_call_id=f"call-{calls}")]
             )
 
         agent = Agent(

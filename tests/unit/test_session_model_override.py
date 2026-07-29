@@ -16,7 +16,6 @@ def _agent(*, model_id: str) -> Agent:
     row.prompt = "You are helpful."
     row.capabilities = None
     row.temperature = 0.2
-    row.max_requests = None
     row.llm_model = _llm(model_id, "default-model")
     return row
 

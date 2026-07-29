@@ -1,11 +1,33 @@
 from __future__ import annotations
 
 from sqlalchemy import delete, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from deep_agent.db.models import Agent, LlmModel
 from deep_agent.db.stores._session import SessionBoundMixin
 from deep_agent.schemas.llm_model import LlmModelCreate, LlmModelUpdate
+
+
+class LlmModelConflictError(ValueError):
+    pass
+
+
+class LlmModelValidationError(ValueError):
+    pass
+
+
+def _validate_runtime_metadata(row: LlmModel) -> None:
+    if row.input_modalities is None or not row.input_modalities:
+        raise LlmModelValidationError("input_modalities must contain at least one value")
+    if row.context_window_tokens is None:
+        raise LlmModelValidationError("context_window_tokens is required")
+    if row.max_output_tokens is None:
+        raise LlmModelValidationError("max_output_tokens is required")
+    if row.max_output_tokens > row.context_window_tokens:
+        raise LlmModelValidationError(
+            "max_output_tokens must not exceed context_window_tokens"
+        )
 
 
 class LlmModelStoreBase(SessionBoundMixin):
@@ -29,70 +51,53 @@ class LlmModelStoreBase(SessionBoundMixin):
             return int(result.scalar_one())
 
     async def create_unique(self, data: LlmModelCreate) -> LlmModel:
-        async with self._write() as db:
-            if await self._get_by_name(db, data.name) is not None:
-                raise ValueError(f"LLM model already exists: {data.name}")
-            row = LlmModel(
-                name=data.name,
-                description=data.description,
-                model=data.model,
-                base_url=data.base_url,
-                api_key=data.api_key,
-                input_modalities=data.input_modalities or None,
-                capabilities_source="user" if data.input_modalities else None,
-            )
-            db.add(row)
-            await db.flush()
-            await db.refresh(row)
-            return row
+        try:
+            async with self._write() as db:
+                if await self._get_by_name(db, data.name) is not None:
+                    raise LlmModelConflictError(f"LLM model already exists: {data.name}")
+                row = LlmModel(
+                    name=data.name,
+                    description=data.description,
+                    model=data.model,
+                    base_url=data.base_url,
+                    api_key=data.api_key,
+                    input_modalities=data.input_modalities,
+                    context_window_tokens=data.context_window_tokens,
+                    max_output_tokens=data.max_output_tokens,
+                    tags=data.tags,
+                )
+                db.add(row)
+                await db.flush()
+                await db.refresh(row)
+                return row
+        except IntegrityError as exc:
+            raise LlmModelConflictError(f"LLM model write conflict: {data.name}") from exc
 
     async def update_unique(self, model_id: str, data: LlmModelUpdate) -> LlmModel | None:
-        async with self._write() as db:
-            row = await self._get_by_id(db, model_id)
-            if row is None:
-                return None
-            if data.name is not None and data.name != row.name:
-                conflict = await self._get_by_name(db, data.name)
-                if conflict is not None:
-                    raise ValueError(f"LLM model already exists: {data.name}")
-            updates = data.model_dump(exclude_unset=True)
-            modalities_mode = updates.pop("modalities_mode", None)
-            if modalities_mode == "auto":
-                row.input_modalities = None
-                row.capabilities_source = None
-            elif modalities_mode == "manual" and "input_modalities" in updates:
-                row.input_modalities = updates["input_modalities"] or None
-                row.capabilities_source = "user"
-            elif "input_modalities" in updates:
-                row.capabilities_source = "user"
-            for field, value in updates.items():
-                setattr(row, field, value)
-            await db.flush()
-            await db.refresh(row)
-            return row
+        try:
+            async with self._write() as db:
+                row = await self._get_by_id(db, model_id)
+                if row is None:
+                    return None
+                if data.name is not None and data.name != row.name:
+                    conflict = await self._get_by_name(db, data.name)
+                    if conflict is not None:
+                        raise LlmModelConflictError(f"LLM model already exists: {data.name}")
+                updates = data.model_dump(exclude_unset=True)
+                for field, value in updates.items():
+                    setattr(row, field, value)
+                _validate_runtime_metadata(row)
+                await db.flush()
+                await db.refresh(row)
+                return row
+        except IntegrityError as exc:
+            raise LlmModelConflictError(f"LLM model write conflict: {model_id}") from exc
 
     async def delete(self, model_id: str) -> bool:
         async with self._write() as db:
             result = await db.execute(delete(LlmModel).where(LlmModel.id == model_id))
             await db.flush()
             return result.rowcount > 0
-
-    async def update_metadata(
-        self,
-        model_id: str,
-        *,
-        input_modalities: list[str],
-        capabilities_source: str,
-    ) -> LlmModel | None:
-        async with self._write() as db:
-            row = await self._get_by_id(db, model_id)
-            if row is None:
-                return None
-            row.input_modalities = input_modalities if input_modalities else None
-            row.capabilities_source = capabilities_source
-            await db.flush()
-            await db.refresh(row)
-            return row
 
     async def _get_by_id(self, db: AsyncSession, model_id: str) -> LlmModel | None:
         result = await db.execute(select(LlmModel).where(LlmModel.id == model_id))

@@ -313,6 +313,17 @@ class McpInspectionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.inspection.error.stage, "initialize")
         self.assertNotIn("secret-token", result.inspection.error.message)
 
+    async def test_client_build_failure_is_unreachable_instead_of_escaping(self) -> None:
+        with patch(
+            "deep_agent.capabilities.mcp.inspection.build_resource_client",
+            side_effect=ValueError("invalid url with secret-token"),
+        ):
+            result = await inspect_mcp_server(_row(inspection=None))
+
+        self.assertEqual(result.inspection.status, "unreachable")
+        self.assertEqual(result.inspection.error.stage, "initialize")
+        self.assertNotIn("secret-token", result.inspection.error.message)
+
     async def test_failed_ping_is_unreachable(self) -> None:
         with patch(
             "deep_agent.capabilities.mcp.inspection.build_resource_client",
@@ -342,20 +353,31 @@ class _FakeMcpStore:
     async def get_by_name(self, _name: str) -> McpServer | None:
         return self.row
 
-    async def create_unique(self, data: McpServerCreate) -> McpServer:
+    async def create_unique(
+        self,
+        data: McpServerCreate,
+        *,
+        inspection: dict | None = None,
+    ) -> McpServer:
         self.row = _row(data.name, inspection=None, enabled=data.enabled)
         self.row.config = data.config
         self.row.description = data.description
+        self.row.inspection = inspection
+        self.saved_inspection = inspection
         return self.row
 
     async def update(
         self,
         _name: str,
         data: McpServerUpdate,
+        *,
+        inspection: dict | None = None,
     ) -> McpServer | None:
         assert self.row is not None
         for field, value in data.model_dump(exclude_unset=True).items():
             setattr(self.row, field, value)
+        self.row.inspection = inspection
+        self.saved_inspection = inspection
         return self.row
 
     async def update_inspection(
@@ -427,6 +449,25 @@ class McpInspectionApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.inspection.status, "unknown")
         inspect.assert_not_awaited()
 
+    async def test_create_does_not_persist_when_inspection_pipeline_crashes(self) -> None:
+        store = _FakeMcpStore()
+        with patch(
+            "deep_agent.api.v1.mcp.inspect_mcp_server",
+            new=AsyncMock(side_effect=RuntimeError("unexpected inspection failure")),
+        ):
+            with self.assertRaises(RuntimeError):
+                await create_mcp_server(
+                    McpServerCreate(
+                        name="docs",
+                        transport="url",
+                        config={"url": "http://docs.example/mcp"},
+                    ),
+                    _request(),
+                    store,
+                )
+
+        self.assertIsNone(store.row)
+
     async def test_manual_inspection_persists_result_and_changes(self) -> None:
         store = _FakeMcpStore(_row("docs", inspection=None, enabled=False))
         detected = McpInspectionResult.model_validate(
@@ -454,7 +495,7 @@ class McpInspectionApiTests(unittest.IsolatedAsyncioTestCase):
         ):
             response = await inspect_mcp(
                 "docs",
-                _request((b"app", b"app-a")),
+                _request((b"app", b"mdxath003")),
                 store,
             )
 
@@ -519,6 +560,23 @@ class McpInspectionApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.inspection.status, "healthy")
         self.assertEqual(response.inspection.tools.count, 4)
         inspect.assert_awaited_once()
+
+    async def test_update_does_not_persist_when_inspection_pipeline_crashes(self) -> None:
+        store = _FakeMcpStore(_row("docs", enabled=True))
+        original_config = dict(store.row.config)
+        with patch(
+            "deep_agent.api.v1.mcp.inspect_mcp_server",
+            new=AsyncMock(side_effect=RuntimeError("unexpected inspection failure")),
+        ):
+            with self.assertRaises(RuntimeError):
+                await update_mcp_server(
+                    "docs",
+                    McpServerUpdate(config={"url": "http://new.example/mcp"}),
+                    _request(),
+                    store,
+                )
+
+        self.assertEqual(store.row.config, original_config)
 
     async def test_enabling_url_mcp_triggers_inspection(self) -> None:
         store = _FakeMcpStore(_row("docs", inspection=None, enabled=False))

@@ -1,5 +1,6 @@
-import { normalizeOption, normalizeStructuredFields, validateUiToolCall } from "./hitl.js?v=20260720-1";
+import { buildChoiceResult, normalizeOption, normalizeStructuredFields, validateUiToolCall } from "./hitl.js?v=20260728-2";
 import { parseSseBlock, readSse } from "./protocol.js?v=20260720-1";
+import { formatSessionIdSubtitle } from "./session-display.js?v=20260728-2";
 
 /* ------------------------------------------------------------------ *
  * deep-agent 前端 —— 适配 FastAPI /api/v1/chat/stream (SSE over POST)
@@ -16,15 +17,10 @@ import { parseSseBlock, readSse } from "./protocol.js?v=20260720-1";
  *   error        -> { type:"error", message }
  * ------------------------------------------------------------------ */
 
-function defaultBaseUrl() {
-  if (location.protocol === "file:") return "http://localhost:8000";
-  const root = window.__DEEP_AGENT_APP_ROOT__ || window.__DEEP_AGENT_BASE__ || "/";
-  return `${location.origin}${root.replace(/\/$/, "")}`;
-}
+const DEFAULT_BASE_URL = defaultApiBaseUrl();
 
-const DEFAULT_BASE_URL = defaultBaseUrl();
-
-const BUILTIN_UI_TOOLS = new Set(["confirm_action", "ask_user_choice"]);
+const BUILTIN_UI_TOOLS = new Set(["builtin__confirm", "builtin__choice"]);
+const LEGACY_BUILTIN_UI_TOOLS = new Set(["confirm_action", "ask_user_choice"]);
 /** @type {Map<string, object>} */
 const uiToolsByName = new Map();
 
@@ -44,13 +40,14 @@ function mergeUiToolCall(call) {
 function isUiToolCall(call) {
   if (!call?.tool) return false;
   if (BUILTIN_UI_TOOLS.has(call.tool)) return true;
+  if (LEGACY_BUILTIN_UI_TOOLS.has(call.tool) && !uiToolsByName.has(call.tool)) return false;
   if (call.widget) return true;
   return uiToolsByName.has(call.tool);
 }
 
 function resolveWidgetType(call) {
-  if (call.tool === "confirm_action" || call.widget === "confirm") return "confirm";
-  if (call.tool === "ask_user_choice" || call.widget === "choice") return "choice";
+  if (call.tool === "builtin__confirm" || call.widget === "confirm") return "confirm";
+  if (call.tool === "builtin__choice" || call.widget === "choice") return "choice";
   if (call.widget === "text") return "text";
   if (call.widget === "date_picker") return "date_picker";
   if (["structured", "structured_form", "form"].includes(call.widget) || Array.isArray(call.args?.fields)) {
@@ -64,7 +61,7 @@ async function loadUiTools(agentId) {
   try {
     const params = new URLSearchParams({ enabled: "true" });
     if (agentId) params.set("agent_id", agentId);
-    const r = await daFetch(`${state.baseUrl}/api/v1/ui-tools?${params}`);
+    const r = await daFetch(serviceUrl(`api/v1/ui-tools?${params}`));
     if (!r.ok) return;
     const data = await r.json();
     const rows = Array.isArray(data?.items) ? data.items : [];
@@ -78,7 +75,7 @@ async function loadUiTools(agentId) {
 }
 
 const state = {
-  baseUrl: localStorage.getItem("da_console_base_url_v1") || DEFAULT_BASE_URL,
+  baseUrl: DEFAULT_BASE_URL,
   agentId: localStorage.getItem("da_console_agent_id_v1") || "",
   agents: [],
   llmModels: [],
@@ -143,7 +140,6 @@ const el = {
   stopBtn: $("stopBtn"),
   sessionList: $("sessionList"),
   capList: $("capList"),
-  baseUrlInput: $("baseUrlInput"),
   agentSelect: $("agentSelect"),
   connStatus: $("connStatus"),
   sessionBadge: $("sessionBadge"),
@@ -187,7 +183,7 @@ function sessionApiUrl(session, suffix = "") {
   const params = new URLSearchParams();
   if (s.agentId) params.set("agent_id", s.agentId);
   const qs = params.toString();
-  return `${state.baseUrl}/api/v1/sessions/${encodeURIComponent(s.id)}${suffix}${qs ? `?${qs}` : ""}`;
+  return serviceUrl(`api/v1/sessions/${encodeURIComponent(s.id)}${suffix}${qs ? `?${qs}` : ""}`);
 }
 
 function sessionLookupKey(session) {
@@ -329,22 +325,11 @@ function generateSessionId() {
 }
 
 function init() {
-  el.baseUrlInput.value = state.baseUrl;
   updateAdminLink();
 
   const agentFromUrl = new URLSearchParams(location.search).get("agent_id");
   if (agentFromUrl) state.agentId = agentFromUrl;
 
-  el.baseUrlInput.addEventListener("change", () => {
-    state.baseUrl = el.baseUrlInput.value.trim().replace(/\/$/, "") || DEFAULT_BASE_URL;
-    localStorage.setItem("da_console_base_url_v1", state.baseUrl);
-    updateAdminLink();
-    checkHealth();
-    loadCapabilities();
-    loadUploadCapabilities();
-    loadAgents();
-    syncSessionsFromBackend();
-  });
   el.agentSelect?.addEventListener("change", () => {
     state.agentId = el.agentSelect.value;
     localStorage.setItem("da_console_agent_id_v1", state.agentId);
@@ -457,7 +442,7 @@ function init() {
 
 async function syncSessionsFromBackend() {
   try {
-    const r = await daFetch(`${state.baseUrl}/api/v1/sessions?limit=50`);
+    const r = await daFetch(serviceUrl("api/v1/sessions?limit=50"));
     if (!r.ok) return;
     const payload = await r.json();
     const rows = Array.isArray(payload?.items) ? payload.items : [];
@@ -744,7 +729,6 @@ async function switchSession(s) {
     if (el.agentSelect) el.agentSelect.value = state.agentId;
   }
   restoreSessionModel(session);
-  el.sessionBadge.textContent = session.id.slice(0, 8);
   el.chatTitle.textContent = session.title || "对话";
   updateChatHeader();
   updateAgentSelectState();
@@ -1006,7 +990,7 @@ function startInlineEdit(session, titleElement) {
 async function checkHealth() {
   setConn("pending", "检测中…");
   try {
-    const r = await daFetch(`${state.baseUrl}/health`, { method: "GET" });
+    const r = await daFetch(serviceUrl("health"), { method: "GET" });
     if (r.ok) setConn("ok", "已连接");
     else setConn("err", `HTTP ${r.status}`);
   } catch (_) {
@@ -1024,9 +1008,13 @@ async function loadAgents() {
   if (!el.agentSelect) return;
   el.agentSelect.innerHTML = '<option value="">加载中…</option>';
   try {
-    const r = await daFetch(`${state.baseUrl}/api/v1/agents`);
+    const r = await daFetch(serviceUrl("api/v1/agents"));
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    state.agents = await r.json();
+    const agents = await r.json();
+    if (!Array.isArray(agents)) {
+      throw new Error(`Agent 列表响应格式错误：${serviceUrl("api/v1/agents")}`);
+    }
+    state.agents = agents;
     el.agentSelect.innerHTML = "";
     if (!state.agents.length) {
       el.agentSelect.innerHTML = '<option value="">无可用 Agent</option>';
@@ -1111,7 +1099,7 @@ function currentModelInfo() {
 
 async function loadUploadCapabilities() {
   try {
-    const r = await daFetch(`${state.baseUrl}/api/v1/uploads/capabilities`);
+    const r = await daFetch(serviceUrl("api/v1/uploads/capabilities"));
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     state.uploadCapabilities = await r.json();
   } catch (e) {
@@ -1123,7 +1111,7 @@ async function loadUploadCapabilities() {
 
 async function loadLlmModels() {
   try {
-    const r = await daFetch(`${state.baseUrl}/api/v1/llm-models`);
+    const r = await daFetch(serviceUrl("api/v1/llm-models"));
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     state.llmModels = await r.json();
     ensureLlmModelSelected();
@@ -1223,11 +1211,7 @@ function updateComposerModelInfo() {
 }
 
 function updateChatHeader() {
-  if (state.agentId) {
-    el.sessionBadge.textContent = state.sessionId
-      ? state.sessionId.slice(0, 8)
-      : agentNameById(state.agentId);
-  }
+  el.sessionBadge.textContent = formatSessionIdSubtitle(state.sessionId);
   updateComposerModelInfo();
 }
 
@@ -1239,7 +1223,7 @@ function updateAgentSelectState() {
 async function loadCapabilities() {
   el.capList.innerHTML = '<li class="cap-empty">加载中…</li>';
   try {
-    const r = await daFetch(`${state.baseUrl}/api/v1/tools`);
+    const r = await daFetch(serviceUrl("api/v1/tools"));
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const caps = await r.json();
     el.capList.innerHTML = "";
@@ -1359,7 +1343,7 @@ async function runChatStream(payload, assistant) {
   const shouldRefreshTitle = state.pendingTitleRefresh;
   state.pendingTitleRefresh = false;
   try {
-    const resp = await daFetch(`${state.baseUrl}/api/v1/chat/stream`, {
+    const resp = await daFetch(serviceUrl("api/v1/chat/stream"), {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
       body: JSON.stringify(payload),
@@ -1622,7 +1606,7 @@ async function uploadAttachment(file) {
   const form = new FormData();
   form.append("file", file, file.name);
   try {
-    const r = await daFetch(`${state.baseUrl}/api/v1/uploads`, { method: "POST", body: form });
+    const r = await daFetch(serviceUrl("api/v1/uploads"), { method: "POST", body: form });
     if (!r.ok) {
       const detail = await r.text().catch(() => "");
       throw new Error(detail || `HTTP ${r.status}`);
@@ -1933,6 +1917,7 @@ function renderHitlWidget(block, call, onSubmit) {
   if (widgetType === "confirm") {
     const message = args.message || "确认执行？";
     widgetEl.innerHTML = `
+      ${args.title ? `<strong class="hitl-title">${escapeHtml(args.title)}</strong>` : ""}
       <p class="hitl-prompt">${escapeHtml(message)}</p>
       <div class="hitl-actions">
         <button type="button" class="hitl-btn hitl-confirm">${escapeHtml(args.confirm_label || "确认")}</button>
@@ -1945,12 +1930,15 @@ function renderHitlWidget(block, call, onSubmit) {
       onSubmit([{ tool_call_id: toolCallId, result: { confirmed: false } }]);
     });
   } else if (widgetType === "choice") {
-    const options = args.options.map(normalizeOption);
+    const options = args.options.map(normalizeOption).filter((option) => option.value);
     const allowMultiple = !!args.allow_multiple;
     widgetEl.innerHTML = `
+      ${args.title ? `<strong class="hitl-title">${escapeHtml(args.title)}</strong>` : ""}
       <p class="hitl-prompt">${escapeHtml(args.prompt || "请选择：")}</p>
       <div class="hitl-choices"></div>
-      <button type="button" class="hitl-btn hitl-submit">提交</button>`;
+      <textarea class="hitl-text-input hitl-choice-custom-input" rows="2" placeholder="${escapeHtml(args.custom_placeholder || "请输入其他内容")}"></textarea>
+      <div class="hitl-form-error hidden"></div>
+      <button type="button" class="hitl-btn hitl-submit">${escapeHtml(args.submit_label || "提交")}</button>`;
     const choicesEl = widgetEl.querySelector(".hitl-choices");
     for (const opt of options) {
       const label = document.createElement("label");
@@ -1965,10 +1953,37 @@ function renderHitlWidget(block, call, onSubmit) {
       label.appendChild(copy);
       choicesEl.appendChild(label);
     }
+    const customLabel = document.createElement("label");
+    customLabel.className = "hitl-choice hitl-choice-custom";
+    const customChoice = document.createElement("input");
+    customChoice.type = allowMultiple ? "checkbox" : "radio";
+    customChoice.name = `choice-${toolCallId}`;
+    customChoice.className = "hitl-choice-custom-control";
+    customLabel.appendChild(customChoice);
+    const customCopy = document.createElement("span");
+    customCopy.innerHTML = `<strong>${escapeHtml(args.custom_label || "其他（自行输入）")}</strong>`;
+    customLabel.appendChild(customCopy);
+    choicesEl.appendChild(customLabel);
+    const customInput = widgetEl.querySelector(".hitl-choice-custom-input");
+    customInput.addEventListener("input", () => {
+      if (customInput.value.trim()) customChoice.checked = true;
+    });
     widgetEl.querySelector(".hitl-submit").addEventListener("click", () => {
-      const selected = [...choicesEl.querySelectorAll("input:checked")].map((i) => i.value);
-      const result = allowMultiple ? { selected } : { selected: selected[0] ?? null };
-      onSubmit([{ tool_call_id: toolCallId, result }]);
+      const selected = [...choicesEl.querySelectorAll("input:checked")]
+        .filter((input) => input !== customChoice)
+        .map((input) => input.value);
+      const choiceResult = buildChoiceResult(
+        selected,
+        customChoice.checked ? customInput.value : "",
+      );
+      const error = widgetEl.querySelector(".hitl-form-error");
+      if (!choiceResult.ok) {
+        error.textContent = choiceResult.error;
+        error.classList.remove("hidden");
+        return;
+      }
+      error.classList.add("hidden");
+      onSubmit([{ tool_call_id: toolCallId, result: choiceResult.result }]);
     });
   } else if (widgetType === "text") {
     const rows = args.multiline ? 4 : 1;

@@ -24,8 +24,29 @@ class ConsoleRoutesTest(unittest.TestCase):
         self.assertEqual(self.client.get("/console/").status_code, 200)
         self.assertEqual(self.client.get("/vendor/lucide.min.js").status_code, 200)
         self.assertEqual(self.client.get("/docs").status_code, 200)
+        self.assertEqual(self.client.get("/docs/").status_code, 200)
+        self.assertEqual(
+            self.client.get("/docs/oauth2-redirect").status_code,
+            200,
+        )
         self.assertEqual(self.client.get("/openapi.json").status_code, 200)
         self.assertEqual(self.client.get("/health").status_code, 200)
+
+    def test_api_docs_preserve_a_reverse_proxy_service_prefix(self) -> None:
+        for path in ("/docs", "/docs/"):
+            with self.subTest(path=path):
+                html = self.client.get(path).text
+                self.assertIn(
+                    'window.location.pathname.replace(/\\/docs\\/?$/, "")',
+                    html,
+                )
+                self.assertIn("`${serviceBasePath}/openapi.json`", html)
+                self.assertIn(
+                    "`${window.location.origin}${serviceBasePath}"
+                    "/docs/oauth2-redirect`",
+                    html,
+                )
+                self.assertNotIn("url: '/openapi.json'", html)
 
     def test_console_without_trailing_slash_uses_proxy_safe_redirect(self) -> None:
         response = self.client.get("/console", follow_redirects=False)

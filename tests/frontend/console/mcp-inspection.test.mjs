@@ -25,6 +25,14 @@ function loadInspectionUi() {
   return window.__McpInspectionUI;
 }
 
+test("URL MCP 在提交前拒绝空地址", () => {
+  const ui = loadInspectionUi();
+  assert.equal(ui.validateMcpConfig("url", { url: "" }), "MCP URL 不能为空");
+  assert.equal(ui.validateMcpConfig("url", { url: "   " }), "MCP URL 不能为空");
+  assert.equal(ui.validateMcpConfig("url", { url: "http://example.test/mcp" }), null);
+  assert.equal(ui.validateMcpConfig("builtin", {}), null);
+});
+
 test("检测状态展示能力摘要和完整悬停信息", () => {
   const ui = loadInspectionUi();
   const view = ui.inspectionView(
@@ -57,6 +65,16 @@ test("Builtin 显示内置运行时且不伪装成待检测", () => {
   const view = ui.inspectionView(null, "builtin");
   assert.equal(view.text, "内置运行时");
   assert.equal(view.summary, "运行时按需启动");
+  assert.equal(ui.canDeleteMcp("builtin"), false);
+  assert.equal(ui.canDeleteMcp("url"), true);
+  assert.equal(ui.canDeleteMcp("stdio"), true);
+});
+
+test("历史 stdio MCP 明确显示为停止支持", () => {
+  const ui = loadInspectionUi();
+  const view = ui.inspectionView(null, "stdio");
+  assert.equal(view.text, "已停止支持");
+  assert.equal(view.summary, "请迁移为 URL MCP");
 });
 
 test("检测结果区分变化、无变化、部分异常和无法连接", () => {

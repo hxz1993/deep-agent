@@ -1,6 +1,30 @@
 let initialized = false;
 let loadingPromise = null;
-const CONFIGURATION_ASSET_VERSION = "20260723-1";
+const CONFIGURATION_ASSET_VERSION = "20260729-4";
+const CONFIGURATION_TABS = new Set([
+  "agents",
+  "llm-models",
+  "mcp",
+  "ui-tools",
+  "auxiliary-models",
+  "global-settings",
+  "catalog",
+]);
+let activeConfigurationTab = "agents";
+
+export function rememberConfigurationTab(name) {
+  if (CONFIGURATION_TABS.has(name)) activeConfigurationTab = name;
+  return activeConfigurationTab;
+}
+
+export function currentConfigurationTab() {
+  return activeConfigurationTab;
+}
+
+export function restoreConfigurationTab() {
+  const tab = document.querySelector(`[data-tab="${activeConfigurationTab}"]`);
+  if (tab && !tab.classList.contains("active")) tab.click();
+}
 
 function versionedAsset(path) {
   const url = new URL(path, import.meta.url);
@@ -52,6 +76,7 @@ async function loadAdminScripts() {
   const scripts = [
     "./configuration/core.js",
     "./configuration/form-feedback.js",
+    "./configuration/global-settings.js",
     "./configuration/llm-models.js",
     "./configuration/auxiliary-models.js",
     "./configuration/agents.js",
@@ -64,58 +89,7 @@ async function loadAdminScripts() {
   // The legacy scripts were loaded after the browser's original DOMContentLoaded.
   // Replaying it once initializes their existing, tested bindings against the new DOM.
   document.dispatchEvent(new Event("DOMContentLoaded"));
-  await import("./configuration/catalog.js?v=20260721-1");
-  installCatalogActions();
-}
-
-function installCatalogActions() {
-  const table = document.getElementById("modelsTable");
-  const body = document.getElementById("modelsTableBody");
-  if (!table || !body) return;
-  const header = table.querySelector("thead tr");
-  if (header && !header.querySelector(".console-catalog-action")) {
-    const cell = document.createElement("th");
-    cell.className = "console-catalog-action";
-    cell.textContent = "操作";
-    header.appendChild(cell);
-  }
-
-  const decorateRows = () => {
-    body.querySelectorAll("tr").forEach((row) => {
-      const cells = row.querySelectorAll(":scope > td");
-      if (cells.length === 1 && cells[0].classList.contains("empty-cell")) {
-        cells[0].colSpan = 10;
-        return;
-      }
-      if (cells.length < 9 || row.querySelector(".console-catalog-action")) return;
-      const provider = cells[0].querySelector(".models-sub")?.textContent.trim()
-        || cells[0].querySelector("strong")?.textContent.trim()
-        || "";
-      const modelId = cells[1].textContent.trim();
-      const action = document.createElement("td");
-      action.className = "console-catalog-action";
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "btn btn-sm";
-      button.textContent = "使用此模型";
-      button.addEventListener("click", () => openModelFromCatalog(provider, modelId));
-      action.appendChild(button);
-      row.appendChild(action);
-    });
-  };
-  new MutationObserver(decorateRows).observe(body, { childList: true });
-  decorateRows();
-}
-
-function openModelFromCatalog(provider, modelId) {
-  document.querySelector('[data-tab="llm-models"]')?.click();
-  window.llmModelsAdmin?.openCreate();
-  const normalizedProvider = String(provider || "").trim().toLowerCase();
-  document.getElementById("llmModelName").value = modelId;
-  document.getElementById("llmModelModel").value = normalizedProvider
-    ? `${normalizedProvider}:${modelId}`
-    : modelId;
-  document.getElementById("llmModelDescription").value = `从模型目录选择：${provider || "未知 Provider"}`;
+  await import("./configuration/catalog.js?v=20260729-4");
 }
 
 function decorateConfiguration() {
@@ -141,16 +115,22 @@ function decorateConfiguration() {
       return;
     }
   });
+  document.querySelector(".resource-nav")?.addEventListener("click", (event) => {
+    const tab = event.target.closest("[data-tab]");
+    if (tab) rememberConfigurationTab(tab.dataset.tab);
+  });
   window.lucide?.createIcons();
 }
 
 export function refreshCurrentConfiguration() {
   const active = document.querySelector(".resource-btn.active")?.dataset.tab;
+  if (active === "global-settings") return window.globalSettingsAdmin?.refresh();
   if (active === "agents") return window.agentsAdmin?.refresh();
   if (active === "llm-models") return window.llmModelsAdmin?.refresh();
   if (active === "auxiliary-models") return window.auxiliaryModelsAdmin?.refresh();
   if (active === "mcp") return window.mcpAdmin?.refresh();
   if (active === "ui-tools") return window.uiToolsAdmin?.refresh();
+  if (active === "catalog") return window.modelCatalogAdmin?.refresh();
   return null;
 }
 

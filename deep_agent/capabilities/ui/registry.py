@@ -146,8 +146,16 @@ async def load_effective_ui_tools(
             capabilities=spec.capabilities,
         )
     ]
+    visible_builtins = [
+        record
+        for record in builtin_ui_records()
+        if is_tool_visible(
+            record,
+            capabilities=spec.capabilities,
+        )
+    ]
 
-    merged, shadowed = merge_definitions(builtin_ui_records(), visible_db)
+    merged, shadowed = merge_definitions(visible_builtins, visible_db)
     has_dynamic = any(record.source == "manual" for record in merged)
     if shadowed:
         logger.warning("UI tool name conflicts resolved: {}", shadowed)

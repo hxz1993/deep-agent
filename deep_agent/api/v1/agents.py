@@ -2,13 +2,11 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from deep_agent.agent.limits import validate_agent_max_requests
 from deep_agent.core.context import AppContextDep
 from deep_agent.db.deps import get_agent_store, get_llm_model_store
 from deep_agent.db.ids import normalize_agent_id
 from deep_agent.db.stores.agent import AgentStoreBase
 from deep_agent.db.stores.llm_model import LlmModelStoreBase
-from deep_agent.options import OPTION
 from deep_agent.schemas.agent import AgentCreate, AgentResponse, AgentUpdate
 
 router = APIRouter()
@@ -28,22 +26,16 @@ def _parse_model_id(model_id: str) -> str:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
 
 
-def _check_max_requests(max_requests: int | None) -> None:
-    try:
-        validate_agent_max_requests(max_requests, OPTION.agent.max_requests)
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-
-
 def _agent_response(row) -> AgentResponse:
     return AgentResponse.from_row(row, row.llm_model)
 
 
-async def _ensure_model_exists(model_store: LlmModelStoreBase, model_id: str) -> None:
+async def _ensure_model_exists(model_store: LlmModelStoreBase, model_id: str) -> str:
     normalized_id = _parse_model_id(model_id)
     row = await model_store.get_by_id(normalized_id)
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"LLM model not found: {model_id}")
+    return normalized_id
 
 
 @router.get("/agents", response_model=list[AgentResponse])
@@ -72,8 +64,8 @@ async def create_agent(
     store: AgentStoreBase = Depends(get_agent_store),
     model_store: LlmModelStoreBase = Depends(get_llm_model_store),
 ) -> AgentResponse:
-    _check_max_requests(body.max_requests)
-    await _ensure_model_exists(model_store, body.model_id)
+    normalized_model_id = await _ensure_model_exists(model_store, body.model_id)
+    body = body.model_copy(update={"model_id": normalized_model_id})
     existing = await store.get_by_name(body.name)
     if existing is not None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"Agent already exists: {body.name}")
@@ -91,10 +83,9 @@ async def update_agent(
     store: AgentStoreBase = Depends(get_agent_store),
     model_store: LlmModelStoreBase = Depends(get_llm_model_store),
 ) -> AgentResponse:
-    if "max_requests" in body.model_fields_set:
-        _check_max_requests(body.max_requests)
     if body.model_id is not None:
-        await _ensure_model_exists(model_store, body.model_id)
+        normalized_model_id = await _ensure_model_exists(model_store, body.model_id)
+        body = body.model_copy(update={"model_id": normalized_model_id})
     normalized_id = _parse_agent_id(agent_id)
     try:
         row = await store.update_unique(normalized_id, body)

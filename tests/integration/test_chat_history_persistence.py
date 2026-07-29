@@ -17,6 +17,7 @@ from tests.integration.helpers.chat import mock_request_disconnect, parse_sse_ev
 from tests.integration.helpers.models import build_slow_stream_model, text_only_model, tool_call_model
 
 _CHAT_JSON = {"capabilities": []}
+_CONFIRM_CAPABILITIES = ["ui:builtin__confirm"]
 
 
 def _assistant_texts(history: dict) -> list[str]:
@@ -194,21 +195,35 @@ class ChatHistoryPersistenceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(final["status"], "completed")
         self.assertNotIn("tool_call", {ev.get("type") for ev in events})
 
-    async def test_test_model_default_calls_mounted_tools(self) -> None:
-        """TestModel defaults to call_tools='all'; with UI tools mounted that yields pending HITL."""
+    async def test_test_model_default_has_no_ui_tools_without_selection(self) -> None:
+        events = await self._stream_events(
+            model=TestModel(custom_output_text="plain final"),
+            json_body={"message": "no UI tools selected"},
+        )
+        final = next(ev for ev in reversed(events) if ev.get("type") == "final")
+        self.assertEqual(final["status"], "completed")
+        self.assertEqual(final["output"], "plain final")
+        self.assertNotIn("tool_call", {event.get("type") for event in events})
+
+    async def test_test_model_calls_explicitly_selected_builtin_ui_tools(self) -> None:
         events = await self._stream_events(
             model=TestModel(custom_output_text="never returned as final"),
-            json_body={"message": "triggers tools"},
+            json_body={
+                "message": "triggers selected UI tools",
+                "capabilities": _CONFIRM_CAPABILITIES,
+            },
         )
         final = next(ev for ev in reversed(events) if ev.get("type") == "final")
         self.assertEqual(final["status"], "pending")
-        self.assertIsNone(final.get("output"))
-        self.assertTrue(final.get("deferred", {}).get("calls"))
+        self.assertEqual(
+            [call["tool"] for call in final["deferred"]["calls"]],
+            ["builtin__confirm"],
+        )
 
     async def test_tool_call_model_persists_deferred_tool_call_in_history(self) -> None:
         events = await self._stream_events(
-            model=tool_call_model("confirm_action", text="after confirm"),
-            json_body={"message": "need confirm"},
+            model=tool_call_model("builtin__confirm", text="after confirm"),
+            json_body={"message": "need confirm", "capabilities": _CONFIRM_CAPABILITIES},
         )
         final = next(ev for ev in reversed(events) if ev.get("type") == "final")
         self.assertEqual(final["status"], "pending")
@@ -220,12 +235,12 @@ class ChatHistoryPersistenceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(assistants), 1)
         tool_calls = [p for p in assistants[0]["parts"] if p.get("type") == "tool_call"]
         self.assertEqual(len(tool_calls), 1)
-        self.assertEqual(tool_calls[0]["tool"], "confirm_action")
+        self.assertEqual(tool_calls[0]["tool"], "builtin__confirm")
 
     async def test_hitl_stream_then_history_exactly_one_assistant(self) -> None:
         events = await self._stream_events(
-            model=tool_call_model("confirm_action", text="done after confirm"),
-            json_body={"message": "请确认"},
+            model=tool_call_model("builtin__confirm", text="done after confirm"),
+            json_body={"message": "请确认", "capabilities": _CONFIRM_CAPABILITIES},
         )
         final = next(ev for ev in reversed(events) if ev.get("type") == "final")
         self.assertEqual(final["status"], "pending")
@@ -240,8 +255,8 @@ class ChatHistoryPersistenceTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_hitl_stream_history_resume_deferred_completes(self) -> None:
         events = await self._stream_events(
-            model=tool_call_model("confirm_action", text="time is noon"),
-            json_body={"message": "现在几点"},
+            model=tool_call_model("builtin__confirm", text="time is noon"),
+            json_body={"message": "现在几点", "capabilities": _CONFIRM_CAPABILITIES},
         )
         final = next(ev for ev in reversed(events) if ev.get("type") == "final")
         self.assertEqual(final["status"], "pending")
@@ -252,9 +267,10 @@ class ChatHistoryPersistenceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(_assistant_messages(pending_history)), 1)
 
         resume_events = await self._stream_events(
-            model=tool_call_model("confirm_action", text="time is noon"),
+            model=tool_call_model("builtin__confirm", text="time is noon"),
             json_body={
                 "session_id": session_id,
+                "capabilities": _CONFIRM_CAPABILITIES,
                 "deferred_tool_results": [
                     {"tool_call_id": tool_call_id, "result": {"confirmed": True}},
                 ],

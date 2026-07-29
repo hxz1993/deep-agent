@@ -39,6 +39,41 @@ class McpSchemaBuiltinGuardTests(unittest.TestCase):
         self.assertEqual(row.transport, "url")
         self.assertEqual(row.config["request_context"], {"mode": "isolated"})
 
+    def test_create_rejects_names_that_cannot_be_used_as_capability_ids(self) -> None:
+        for name in ("1external", "external server", "external/server", "外部服务"):
+            with self.subTest(name=name), self.assertRaises(ValidationError):
+                McpServerCreate.model_validate(
+                    {
+                        "name": name,
+                        "transport": "url",
+                        "config": {"url": "http://127.0.0.1:8765/mcp"},
+                    }
+                )
+
+    def test_create_rejects_blank_or_non_http_url(self) -> None:
+        for url in ("", "   ", "ftp://example.test/mcp", "not-a-url"):
+            with self.subTest(url=url), self.assertRaises(ValidationError):
+                McpServerCreate.model_validate(
+                    {
+                        "name": "external",
+                        "transport": "url",
+                        "config": {"url": url},
+                    }
+                )
+
+    def test_create_rejects_non_positive_init_timeout(self) -> None:
+        with self.assertRaises(ValidationError):
+            McpServerCreate.model_validate(
+                {
+                    "name": "external",
+                    "transport": "url",
+                    "config": {
+                        "url": "http://127.0.0.1:8765/mcp",
+                        "init_timeout": 0,
+                    },
+                }
+            )
+
     def test_create_preserves_explicit_inherit_mode(self) -> None:
         row = McpServerCreate.model_validate(
             {
@@ -94,6 +129,11 @@ class McpSchemaBuiltinGuardTests(unittest.TestCase):
         )
         self.assertIsNone(row.transport)
         self.assertIn("env", row.config)
+
+    def test_update_rejects_null_required_fields(self) -> None:
+        for field in ("transport", "config", "enabled"):
+            with self.subTest(field=field), self.assertRaises(ValidationError):
+                McpServerUpdate.model_validate({field: None})
 
 
 if __name__ == "__main__":

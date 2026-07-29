@@ -28,6 +28,18 @@ test("Pydantic 字段错误会格式化为可读信息", () => {
   );
 });
 
+test("被 Agent 引用的资源删除错误会列出引用方", () => {
+  const feedback = loadFeedback();
+  assert.equal(
+    feedback.formatDetail({
+      message: "MCP 正在被 Agent 引用，不能删除",
+      resource: "finance",
+      referenced_by: ["财务助手", "分析助手"],
+    }),
+    "MCP 正在被 Agent 引用，不能删除：财务助手、分析助手",
+  );
+});
+
 test("弹窗错误保留内容并切换提交按钮状态", () => {
   const feedback = loadFeedback();
   const classes = new Set(["hidden"]);

@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 CONFIG_TABLES = (
     "llm_models",
+    "model_catalog",
     "mcp_servers",
     "agents",
     "ui_tool_definitions",
@@ -328,12 +329,13 @@ async def _table_count(connection: Any, table_name: str) -> int:
 
 async def _validate_with_deep_agent(database_url: str) -> None:
     from deep_agent.db.factory import create_engine
-    from deep_agent.db.models import LlmModel
+    from deep_agent.db.models import LlmModel, ModelCatalog
 
     engine, session_factory = create_engine(database_url)
     try:
         async with session_factory() as session:
             await session.execute(select(func.count()).select_from(LlmModel))
+            await session.execute(select(func.count()).select_from(ModelCatalog))
     finally:
         await engine.dispose()
 

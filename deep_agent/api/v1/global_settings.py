@@ -1,0 +1,321 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Literal
+
+from fastapi import APIRouter
+from pydantic import BaseModel
+from sqlalchemy.engine import make_url
+
+from deep_agent.db.url import get_database_url
+from deep_agent.options import OPTION, DeepAgentOptions
+
+
+router = APIRouter()
+
+SettingValue = str | int | float | bool | list[str] | None
+
+
+class GlobalSettingItem(BaseModel):
+    key: str
+    label: str
+    env_name: str
+    value: SettingValue
+    display_value: str
+    source: Literal["environment", "default"]
+    unit: str | None = None
+    description: str
+    restart_required: bool = True
+
+
+class GlobalSettingGroup(BaseModel):
+    key: str
+    label: str
+    items: list[GlobalSettingItem]
+
+
+class GlobalSettingsResponse(BaseModel):
+    groups: list[GlobalSettingGroup]
+
+
+@dataclass(frozen=True)
+class _SettingDefinition:
+    key: str
+    label: str
+    env_name: str
+    category: str
+    option: str
+    description: str
+    unit: str | None = None
+    empty_display: str = "未配置"
+
+
+@dataclass(frozen=True)
+class _SettingGroupDefinition:
+    key: str
+    label: str
+    items: tuple[_SettingDefinition, ...]
+
+
+_SETTING_GROUPS = (
+    _SettingGroupDefinition(
+        key="runtime",
+        label="基础运行",
+        items=(
+            _SettingDefinition(
+                "app_name",
+                "应用名称",
+                "DEEP_AGENT_APP_NAME",
+                "agent",
+                "app_name",
+                "DeepAgent 服务标识。",
+            ),
+            _SettingDefinition(
+                "database_type",
+                "数据库类型",
+                "DEEP_AGENT_DBMS_NAME",
+                "dbms",
+                "name",
+                "当前配置使用的数据库方言，不包含连接信息。",
+            ),
+            _SettingDefinition(
+                "max_requests",
+                "最大模型请求次数",
+                "DEEP_AGENT_MAX_REQUESTS",
+                "agent",
+                "max_requests",
+                "单轮对话允许的模型请求上限，用于阻止失控循环。",
+                "次/轮",
+            ),
+            _SettingDefinition(
+                "max_total_tokens",
+                "最大 Token 数",
+                "DEEP_AGENT_MAX_TOTAL_TOKENS",
+                "agent",
+                "max_total_tokens",
+                "单轮对话累计 Token 上限。",
+                "Token/轮",
+                "未限制",
+            ),
+            _SettingDefinition(
+                "request_retries",
+                "模型请求重试次数",
+                "DEEP_AGENT_REQUEST_RETRIES",
+                "agent",
+                "request_retries",
+                "模型请求失败时允许的重试次数。",
+                "次",
+            ),
+        ),
+    ),
+    _SettingGroupDefinition(
+        key="mcp",
+        label="MCP 运行",
+        items=(
+            _SettingDefinition(
+                "mcp_init_timeout",
+                "初始化超时",
+                "DEEP_AGENT_MCP_INIT_TIMEOUT",
+                "agent",
+                "mcp_init_timeout",
+                "MCP 服务初始化和能力握手的超时时间。",
+                "秒",
+            ),
+            _SettingDefinition(
+                "mcp_acquire_retries",
+                "获取重试次数",
+                "DEEP_AGENT_MCP_ACQUIRE_RETRIES",
+                "agent",
+                "mcp_acquire_retries",
+                "获取共享 MCP 运行实例失败后的重试次数。",
+                "次",
+            ),
+            _SettingDefinition(
+                "mcp_shared_server_ttl",
+                "共享服务 TTL",
+                "DEEP_AGENT_MCP_SHARED_SERVER_TTL",
+                "agent",
+                "mcp_shared_server_ttl",
+                "共享 MCP 服务记录的存活时间。",
+                "秒",
+            ),
+            _SettingDefinition(
+                "mcp_shared_lock_timeout",
+                "共享锁超时",
+                "DEEP_AGENT_MCP_SHARED_LOCK_TIMEOUT",
+                "agent",
+                "mcp_shared_lock_timeout",
+                "等待共享 MCP 启动锁的最大时间。",
+                "秒",
+            ),
+            _SettingDefinition(
+                "mcp_forward_request_headers",
+                "转发请求头名称",
+                "DEEP_AGENT_MCP_FORWARD_REQUEST_HEADERS",
+                "agent",
+                "mcp_forward_request_headers",
+                "允许向 MCP 转发的请求头名称白名单；不展示请求头值。",
+            ),
+        ),
+    ),
+    _SettingGroupDefinition(
+        key="uploads",
+        label="文件上传",
+        items=(
+            _SettingDefinition(
+                "upload_max_size_mb",
+                "单文件大小上限",
+                "DEEP_AGENT_UPLOAD_MAX_SIZE_MB",
+                "agent",
+                "upload_max_size_mb",
+                "单个上传文件允许的最大体积。",
+                "MB",
+            ),
+            _SettingDefinition(
+                "upload_max_count",
+                "单次文件数量",
+                "DEEP_AGENT_UPLOAD_MAX_COUNT",
+                "agent",
+                "upload_max_count",
+                "一次请求允许上传的最大文件数量。",
+                "个",
+            ),
+            _SettingDefinition(
+                "upload_allowed_mimes",
+                "允许的 MIME",
+                "DEEP_AGENT_UPLOAD_ALLOWED_MIMES",
+                "agent",
+                "upload_allowed_mimes",
+                "额外限制的上传 MIME 类型列表。",
+                empty_display="未限制",
+            ),
+            _SettingDefinition(
+                "upload_extract_text_max_chars",
+                "文本提取字符数",
+                "DEEP_AGENT_UPLOAD_EXTRACT_TEXT_MAX_CHARS",
+                "agent",
+                "upload_extract_text_max_chars",
+                "从附件提取并送入模型的最大字符数。",
+                "字符",
+            ),
+        ),
+    ),
+    _SettingGroupDefinition(
+        key="images",
+        label="图片处理",
+        items=(
+            _SettingDefinition(
+                "image_max_dimension",
+                "图片最大边长",
+                "DEEP_AGENT_IMAGE_MAX_DIMENSION",
+                "agent",
+                "image_max_dimension",
+                "进入模型前图片缩放后的最大边长。",
+                "px",
+            ),
+            _SettingDefinition(
+                "image_max_bytes",
+                "图片最大字节数",
+                "DEEP_AGENT_IMAGE_MAX_BYTES",
+                "agent",
+                "image_max_bytes",
+                "进入模型前单张图片允许的最大体积。",
+                "字节",
+            ),
+            _SettingDefinition(
+                "image_jpeg_quality",
+                "JPEG 质量",
+                "DEEP_AGENT_IMAGE_JPEG_QUALITY",
+                "agent",
+                "image_jpeg_quality",
+                "图片转码为 JPEG 时使用的质量参数。",
+            ),
+        ),
+    ),
+    _SettingGroupDefinition(
+        key="titles",
+        label="会话标题",
+        items=(
+            _SettingDefinition(
+                "title_model",
+                "标题模型",
+                "DEEP_AGENT_TITLE_MODEL",
+                "agent",
+                "title_model",
+                "用于生成会话标题的模型名称，不展示地址或密钥。",
+                empty_display="未启用",
+            ),
+            _SettingDefinition(
+                "title_generation_timeout",
+                "标题生成超时",
+                "DEEP_AGENT_TITLE_GENERATION_TIMEOUT",
+                "agent",
+                "title_generation_timeout",
+                "生成会话标题允许的最大等待时间。",
+                "秒",
+            ),
+        ),
+    ),
+)
+
+
+def _json_value(value) -> SettingValue:
+    if isinstance(value, (set, frozenset, tuple, list)):
+        return sorted(str(item) for item in value)
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    return str(value)
+
+
+def _display_value(value: SettingValue, *, empty_display: str) -> str:
+    if value is None or value == "" or value == []:
+        return empty_display
+    if isinstance(value, list):
+        return ", ".join(value)
+    return str(value)
+
+
+def build_global_settings(
+    options: DeepAgentOptions = OPTION,
+) -> GlobalSettingsResponse:
+    groups: list[GlobalSettingGroup] = []
+    for group_definition in _SETTING_GROUPS:
+        items: list[GlobalSettingItem] = []
+        for definition in group_definition.items:
+            category = getattr(options, definition.category)
+            raw_value = (
+                make_url(get_database_url()).get_backend_name()
+                if definition.key == "database_type"
+                else getattr(category, definition.option)
+            )
+            value = _json_value(raw_value)
+            descriptor = category._options[definition.option]
+            items.append(
+                GlobalSettingItem(
+                    key=definition.key,
+                    label=definition.label,
+                    env_name=definition.env_name,
+                    value=value,
+                    display_value=_display_value(
+                        value,
+                        empty_display=definition.empty_display,
+                    ),
+                    source="environment" if descriptor.set_by else "default",
+                    unit=definition.unit,
+                    description=definition.description,
+                )
+            )
+        groups.append(
+            GlobalSettingGroup(
+                key=group_definition.key,
+                label=group_definition.label,
+                items=items,
+            )
+        )
+    return GlobalSettingsResponse(groups=groups)
+
+
+@router.get("/global-settings", response_model=GlobalSettingsResponse)
+async def get_global_settings() -> GlobalSettingsResponse:
+    """Return the Console's safe, read-only runtime settings."""
+    return build_global_settings()

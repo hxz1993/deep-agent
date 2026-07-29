@@ -1,7 +1,5 @@
 function chatUrlForAgent(id) {
-  const base = typeof getBaseUrl === "function" ? getBaseUrl() : "/";
-  const root = base.replace(/\/$/, "");
-  return `${root}/?agent_id=${encodeURIComponent(id)}`;
+  return window.DeepAgentConsoleAPI.consoleUrl(`?agent_id=${encodeURIComponent(id)}#/workspace`);
 }
 
 const KIND_LABELS = {
@@ -20,9 +18,6 @@ function capDisplayName(name, kind) {
   }
   if (kind === "ui-client" && name.startsWith("ui:")) {
     return name.slice(3);
-  }
-  if (kind === "ui-client" && name.startsWith("ui-builtin:")) {
-    return name.slice(11);
   }
   return name;
 }
@@ -309,14 +304,15 @@ const agentsAdmin = {
   openCreate() {
     state.editingAgentId = null;
     document.getElementById("agentModalTitle").textContent = "新建 Agent";
+    document.getElementById("agentModalId").textContent = "";
+    document.getElementById("agentModalId").classList.add("hidden");
     document.getElementById("agentName").disabled = false;
     document.getElementById("agentName").value = "";
     populateAgentModelSelect(state.llmModels[0]?.id || null);
     document.getElementById("agentTemperature").value = "";
     document.getElementById("agentPrompt").value =
       "You are a helpful assistant. Use available tools when they help answer accurately.";
-    document.getElementById("agentMaxRequests").value = "";
-    this.renderCapabilityCheckboxes([]);
+    this.renderCapabilityCheckboxes(null);
     document.getElementById("agentModal").showModal();
   },
 
@@ -325,14 +321,14 @@ const agentsAdmin = {
       const agent = await apiFetch(`/api/v1/agents/${encodeURIComponent(agentId)}`);
       state.editingAgentId = agentId;
       document.getElementById("agentModalTitle").textContent = `编辑 Agent · ${agent.name}`;
+      document.getElementById("agentModalId").textContent = `Agent ID：${agent.id || agentId}`;
+      document.getElementById("agentModalId").classList.remove("hidden");
       document.getElementById("agentName").disabled = false;
       document.getElementById("agentName").value = agent.name;
       populateAgentModelSelect(agent.model_id);
       document.getElementById("agentTemperature").value =
         agent.temperature == null ? "" : String(agent.temperature);
       document.getElementById("agentPrompt").value = agent.prompt;
-      document.getElementById("agentMaxRequests").value =
-        agent.max_requests == null ? "" : String(agent.max_requests);
       this.renderCapabilityCheckboxes(agent.capabilities);
       document.getElementById("agentModal").showModal();
     } catch (err) {
@@ -344,11 +340,18 @@ const agentsAdmin = {
     event.preventDefault();
     const form = event.currentTarget;
     AdminFormFeedback.clear(form);
+    const name = document.getElementById("agentName").value.trim();
+    const modelId = document.getElementById("agentModelId").value.trim();
+    const prompt = document.getElementById("agentPrompt").value.trim();
+    if (!name || !modelId || !prompt) {
+      AdminFormFeedback.show(form, "名称、模型配置和 System Prompt 不能为空");
+      return;
+    }
     AdminFormFeedback.setSubmitting(form, true);
     const capabilities = this.getSelectedCapabilities();
     const payload = {
-      model_id: document.getElementById("agentModelId").value,
-      prompt: document.getElementById("agentPrompt").value,
+      model_id: modelId,
+      prompt,
       capabilities,
     };
     const tempRaw = document.getElementById("agentTemperature").value.trim();
@@ -358,35 +361,32 @@ const agentsAdmin = {
       payload.temperature = null;
     }
 
-    const maxRequestsRaw = document.getElementById("agentMaxRequests").value.trim();
-    if (maxRequestsRaw) {
-      payload.max_requests = Number(maxRequestsRaw);
-    } else if (state.editingAgentId) {
-      payload.max_requests = null;
-    }
-
+    let saved = false;
     try {
       if (state.editingAgentId) {
-        payload.name = document.getElementById("agentName").value.trim();
+        payload.name = name;
         await apiFetch(`/api/v1/agents/${encodeURIComponent(state.editingAgentId)}`, {
           method: "PATCH",
           body: JSON.stringify(payload),
         });
         showToast("Agent 已更新");
       } else {
-        payload.name = document.getElementById("agentName").value.trim();
+        payload.name = name;
         await apiFetch("/api/v1/agents", {
           method: "POST",
           body: JSON.stringify(payload),
         });
         showToast("Agent 已创建");
       }
+      saved = true;
       document.getElementById("agentModal").close();
-      await this.refresh();
     } catch (err) {
       AdminFormFeedback.show(form, err);
     } finally {
       AdminFormFeedback.setSubmitting(form, false);
+    }
+    if (saved) {
+      await refreshAfterSuccessfulSave("Agent", () => this.refresh());
     }
   },
 
@@ -399,7 +399,7 @@ const agentsAdmin = {
     try {
       await apiFetch(`/api/v1/agents/${encodeURIComponent(agentId)}`, { method: "DELETE" });
       showToast("Agent 已删除");
-      await this.refresh();
+      await refreshAfterSuccessfulMutation("Agent 已删除", () => this.refresh());
     } catch (err) {
       showToast(err.message, true);
     }

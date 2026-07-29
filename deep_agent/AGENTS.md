@@ -36,7 +36,7 @@ HTTP (REST/SSE)
 ### 启动生命周期（`main.py` lifespan → `AppContext.bootstrap()`）
 
 1. `configure_logging()` → `AppContext.bootstrap()`（见 `core/context.py`）
-2. `upgrade_database()` → `bootstrap_database()` → 7 个表 Store + `SqlConversationCoordinator`
+2. `upgrade_database()` → `bootstrap_database()` → 8 个表 Store + `SqlConversationCoordinator`
 3. `build_registry(stores=)` — native + Python Skill（静态能力）；`stores` 预留未来启动期只读配置
 4. `init_context(ctx)` — 路由通过 `Depends(AppContextDep)` 注入
 5. 关闭：`ctx.aclose()` → `reset_context()`
@@ -73,7 +73,9 @@ DeepAgent 自研 `capabilities.registry.Capability` 是配置包装对象，负�
 8. Harness 仍为 0.x。引入时必须将 `pydantic-ai-slim` 与 `pydantic-ai-harness` 固定为经过联合回归的准确版本，禁止继续依赖无上限 `>=` 漂移。
 9. 不要通过修改 `AgentRunner` 主循环重复实现 Pydantic AI 已提供的机制。
 
-完整审计见 [`../docs/design/pydantic-ai-native-capabilities-and-deepagent-usage-audit.md`](../docs/design/pydantic-ai-native-capabilities-and-deepagent-usage-audit.md)。
+完整审计见 [`../docs/design/03-context-compaction/pydantic-ai-native-capabilities-and-deepagent-usage-audit.md`](../docs/design/03-context-compaction/pydantic-ai-native-capabilities-and-deepagent-usage-audit.md)；
+上下文压缩的实测结论、数据结构和分阶段方案见
+[`../docs/design/03-context-compaction/context-compaction-implementation-plan.md`](../docs/design/03-context-compaction/context-compaction-implementation-plan.md)。
 
 ---
 
@@ -86,7 +88,7 @@ DeepAgent 自研 `capabilities.registry.Capability` 是配置包装对象，负�
 | `spec.py` | `AgentSpec`：`from_row()`、model、instructions、capabilities |
 | `history.py` | `ModelMessage[]` → 前端时间线 |
 | `factory.py` | `build_agent()` — model 字符串或 OpenAI 兼容 endpoint |
-| `models/` | Provider/模型适配、模型目录与 DeepSeek 专属重试能力 |
+| `models/` | models.dev 管理员刷新、目录标准化、Provider/模型适配与 DeepSeek 专属重试能力 |
 | `runner.py` | `run()` / `run_stream()` — 会话锁、history、事件映射 |
 | `deps.py` | `AgentDeps`：session_id、user、agent_id、request_headers |
 | `headers.py` | HTTP → MCP 的 header 白名单提取 |
@@ -106,7 +108,7 @@ DeepAgent 自研 `capabilities.registry.Capability` 是配置包装对象，负�
 | `mcp/resources.py` | 按检测快照开放、运行时实时读取的 Resource 代理工具 |
 | `mcp/run_scoped.py` | builtin MCP：按 agent run 租约 HTTP client |
 | `mcp/lease_manager.py` | worker 级 MCP lease + shared registry touch |
-| `ui/registry.py` | UI 工具合并、`ui:<name>` 正向关联、可见性、`prepare_ui_toolset_for_spec` |
+| `ui/registry.py` | builtin/manual UI 工具合并、`ui:<name>` 正向关联、可见性、`prepare_ui_toolset_for_spec` |
 
 ### `api/v1/`
 
@@ -127,14 +129,15 @@ DeepAgent 自研 `capabilities.registry.Capability` 是配置包装对象，负�
 | --- | --- |
 | `deps.py` | `get_*_store(ctx)` Depends |
 | `conversation.py` | `SessionStore` 协议 + SQL/内存协调器（跨表写入、进程锁） |
-| `stores/` | 7 个表 Store（`agent/`、`llm_model/`、`auxiliary_model/`、`mcp/`、`ui_tool/`、`chat_session/`、`message/`）+ `bundle.DataStores` |
+| `stores/` | 8 个表 Store（含 `model_catalog/`）+ `bundle.DataStores` |
 | `factory.py` / `dialect.py` | `create_engine` / `close_db`、`bootstrap_database()`、方言解析 |
 | `session_scope.py` / `session_list.py` | 会话作用域解析、列表过滤 DTO |
 
 | 表 | 用途 |
 | --- | --- |
 | `agents` | DB Agent（UUID PK，name 唯一） |
-| `llm_models` | LLM 模型预设 |
+| `llm_models` | LLM 运行时唯一模型事实：连接、模态、上下文、最大输出与 tags |
+| `model_catalog` | models.dev 的 Lab/Model/Provider 数据库快照，只用于浏览和预填 |
 | `auxiliary_model_configs` | 辅助模型场景（如标题生成）绑定 |
 | `mcp_servers` | MCP transport、config JSON、最近一次 inspection 检测快照 |
 | `ui_tool_definitions` | 手工 UI 工具定义；builtin 由代码生成，不写表 |
@@ -157,11 +160,17 @@ DeepAgent 自研 `capabilities.registry.Capability` 是配置包装对象，负�
 
 开发内置 server → 见 [`../mcps/AGENTS.md`](../mcps/AGENTS.md)。
 
-生产配置 → `POST /api/v1/mcp` 或 `/console/#/configuration`；`transport`: `url` | `stdio` | `builtin`。
+生产配置 → `POST /api/v1/mcp` 或 `/console/#/configuration`。用户新建只支持 URL MCP；Builtin 由仓库内 `mcps/` 和程序配置管理，可查看、更新允许运行时调整的配置，但不能通过 Console 或删除 API 移除。历史 stdio 行只允许读取或删除，不能新建、修改或运行，需迁移为 URL MCP。
 
 ### DB Agent
 
 `POST /api/v1/agents` 或 Alembic 种子；流式请求带 `agent_id`（UUID）。
+
+### UI 工具
+
+代码内置 `builtin__confirm`、`builtin__choice` 与手工 UI 工具使用相同的 Agent 正向关联规则。只有 `capabilities` 显式包含 `ui:builtin__confirm` 或 `ui:builtin__choice` 时才进入模型工具列表；`null`、空数组、旧 `ui-builtin:*` 引用和未选择的历史 Agent 均不启用。内置定义可通过 `/api/v1/ui-tools` 查看，但不能修改或删除，新名称也保留给代码内置工具。
+
+`builtin__choice` 始终支持候选外自由输入，结果固定为 `{selected: string[], custom_input: string | null}`；单选、多选和自由输入共用这一结构。
 
 ---
 
@@ -187,7 +196,7 @@ DEEP_AGENT_LOCAL_TOKEN=<当前环境的有效 Token>
 DEEP_AGENT_LOCAL_TOKEN_COOKIE=<可选，仅在目标环境要求 Cookie 时填写 Cookie 名>
 ```
 
-本地入口只监听 `127.0.0.1`。它会覆盖浏览器提交的 `user / authorization / x-user-token / cookie`，保留控制台调试上下文提交的 `app / space / language`。身份和 Token 不得进入源码、仓库、浏览器存储、日志或测试夹具。
+本地入口只监听 `127.0.0.1`。它会覆盖浏览器提交的 `user / authorization / x-user-token / cookie`，保留控制台提交的调试 `app`。后端根据标准平台编码规则从 App 去掉末尾三位得到 Space，并在未显式提供语言时使用 `zh-cn`。身份和 Token 不得进入源码、仓库、浏览器存储、日志或测试夹具。
 
 注意：应用启动会自动执行 Alembic `upgrade head`。本地 Profile 如果连接共享 Test 数据库，新增迁移会随本地服务启动直接应用；涉及删列等不兼容 DDL 时，必须先协调 Test 服务维护窗口，不能直接启动新代码。
 
@@ -198,7 +207,7 @@ DEEP_AGENT_LOCAL_TOKEN_COOKIE=<可选，仅在目标环境要求 Cookie 时填�
 | `MODEL` | `openai:gpt-4o` | `<provider>:<model>` |
 | `MODEL_BASE_URL` / `MODEL_API_KEY` | — | OpenAI 兼容 API |
 | `SYSTEM_PROMPT` | 内置 | 系统指令 |
-| `MAX_REQUESTS` | `50` | 全局 loop 上限 |
+| `MAX_REQUESTS` | `30` | 所有 Agent 共用的单轮模型请求上限 |
 | `MAX_TOTAL_TOKENS` | 无限制 | Token 上限 |
 | `SKILLS_DIR` | `skills` | 相对仓库根 |
 | `MCP_FORWARD_REQUEST_HEADERS` | `authorization,x-tenant-id,x-user-token` | 转发到 MCP |
@@ -221,7 +230,7 @@ Provider Key（`OPENAI_API_KEY` 等）由 Pydantic AI 直接读取。
 alembic upgrade head
 ```
 
-迁移：`alembic/versions/001` … `020`。本地 Postgres：`docker compose up -d`。
+迁移：`alembic/versions/001` … `022`。`021` 删除 Agent 级 `max_requests`；`022` 新增 `model_catalog` 和模型上下文、最大输出、tags。涉及共享数据库时必须按不兼容 DDL 维护窗口发布。本地 Postgres：`docker compose up -d`。
 
 ---
 
@@ -235,6 +244,7 @@ alembic upgrade head
 | CRUD | `/api/v1/mcp` | 是 |
 | CRUD | `/api/v1/ui-tools` | 是 |
 | GET | `/api/v1/tools` | 否（无 DB 时跳过动态 UI 工具） |
+| GET | `/api/v1/global-settings` | 否；无需额外身份依赖，返回安全白名单，只读 |
 | | `/api/v1/sessions/*` | 是 |
 | | `/console/#/configuration` | 是 |
 
@@ -249,9 +259,13 @@ SSE 协议：[`../docs/guides/sse-protocol.md`](../docs/guides/sse-protocol.md)�
    - 多入口共享组装 → `api/v1/deps.py`（变化量留在入口，上下文在 `_build_*` 内统一解包）
 1. 包名 **`deep_agent`**，启动 `deep_agent.main:app`（非 `app.main`）
 2. 扩展优先走路径注册，避免改 `runner.py` 核心
-3. 能力命名：`native` \| `skill:<name>` \| `mcp:<name>` \| `ui:<canonical_tool_name>`；扩展 UI 工具由 Agent 正向引用
+3. 能力命名：`native` \| `skill:<name>` \| `mcp:<name>` \| `ui:<canonical_tool_name>`；builtin 和 manual UI 工具都由 Agent 正向引用，均不因代码内置而自动启用
 4. DB Agent 会话：复合键 `(agent_id, session_id)`；无 agent 时 `agent_id=''`
 5. 同 session 用 `SessionStore.lock()` 串行；多实例 DB 级锁未实现
+6. 配置保存先完成 Schema/引用校验，再进入写事务；一次 API 业务变更不要串联多个各自提交的 Store `_write()`。MCP 检测等外部 I/O 先基于候选配置执行，再把配置与检测快照一次性提交。模型目录联网、解析和完整校验必须在事务前完成，随后单事务全量替换；模型配置保存不得隐式联网。
+7. `model_catalog` 不是运行时事实源，目录刷新不得修改已有 `llm_models`。模型名称和 Base URL 不再用于猜测模态；上下文缺失时后续自动压缩必须关闭。
+7. 配置中心必填文本会去除首尾空白并拒绝空值，显式把必填更新字段传为 `null` 返回 422；重复名称返回 409。删除仍被 Agent 引用的 MCP 或 UI 工具返回 409，并在 `detail.referenced_by` 列出引用方。
+8. 请求上下文以 App 为主键：标准 App 必须以三位数字结尾；Space 自动取 `app[:-3]`。App 与显式 Space 不一致时返回 422，Language 缺失时默认 `zh-cn`。
 
 | 现象 | 原因 |
 | --- | --- |

@@ -7,7 +7,11 @@ from unittest.mock import patch
 from pydantic_ai.models.test import TestModel
 
 from tests.helpers.request_identity import TEST_USER_ID, install_test_user_header
-from tests.integration.helpers.chat import async_echo_chat_app, read_chat_stream, test_chat_client
+from tests.integration.helpers.chat import (
+    async_echo_chat_app,
+    read_chat_stream,
+    test_chat_client as _test_chat_client,
+)
 
 
 class ChatHeaderForwardingStreamTest(unittest.IsolatedAsyncioTestCase):
@@ -35,6 +39,7 @@ class ChatHeaderForwardingStreamTest(unittest.IsolatedAsyncioTestCase):
             recorded,
             {
                 "authorization": "Bearer stream-token",
+                "language": "zh-cn",
                 "user": TEST_USER_ID,
                 "x-tenant-id": "tenant-stream",
             },
@@ -45,7 +50,7 @@ class ChatHeaderForwardingTests(unittest.TestCase):
     """HTTP → AgentRunner → MCP 全链路；见 integration/README.md。"""
 
     def test_chat_api_forwards_request_headers_to_mcp_tool(self) -> None:
-        with test_chat_client() as (client, record_file):
+        with _test_chat_client() as (client, record_file):
             response = client.post(
                 "/api/v1/chat",
                 json={
@@ -65,13 +70,14 @@ class ChatHeaderForwardingTests(unittest.TestCase):
             recorded,
             {
                 "authorization": "Bearer chat-api-token",
+                "language": "zh-cn",
                 "user": TEST_USER_ID,
                 "x-tenant-id": "tenant-chat",
             },
         )
 
     def test_chat_api_forwards_authenticated_user_without_other_headers(self) -> None:
-        with test_chat_client() as (client, record_file):
+        with _test_chat_client() as (client, record_file):
             response = client.post(
                 "/api/v1/chat",
                 json={
@@ -82,10 +88,59 @@ class ChatHeaderForwardingTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200, response.text)
         recorded = json.loads(record_file.read_text(encoding="utf-8"))
-        self.assertEqual(recorded, {"user": TEST_USER_ID})
+        self.assertEqual(recorded, {"language": "zh-cn", "user": TEST_USER_ID})
+
+    def test_chat_api_derives_context_from_app_header(self) -> None:
+        with _test_chat_client() as (client, record_file):
+            response = client.post(
+                "/api/v1/chat",
+                json={
+                    "message": "inspect headers",
+                    "capabilities": ["mcp:echo"],
+                },
+                headers={"app": "mdxath003"},
+            )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        recorded = json.loads(record_file.read_text(encoding="utf-8"))
+        self.assertEqual(
+            recorded,
+            {
+                "app": "mdxath003",
+                "language": "zh-cn",
+                "space": "mdxath",
+                "user": TEST_USER_ID,
+            },
+        )
+
+    def test_chat_api_translates_console_context_header_for_mcp(self) -> None:
+        with _test_chat_client() as (client, record_file):
+            response = client.post(
+                "/api/v1/chat",
+                json={
+                    "message": "inspect headers",
+                    "capabilities": ["mcp:echo"],
+                },
+                headers={
+                    "x-deep-agent-app": "iirjgi005",
+                    "x-deep-agent-language": "zh-cn",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        recorded = json.loads(record_file.read_text(encoding="utf-8"))
+        self.assertEqual(
+            recorded,
+            {
+                "app": "iirjgi005",
+                "language": "zh-cn",
+                "space": "iirjgi",
+                "user": TEST_USER_ID,
+            },
+        )
 
     def test_chat_api_isolated_mcp_keeps_static_identity(self) -> None:
-        with test_chat_client(
+        with _test_chat_client(
             request_context_mode="isolated",
             static_headers={"User": "static-mcp-user", "X-MCP-Token": "service-token"},
         ) as (client, record_file):

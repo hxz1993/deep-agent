@@ -59,7 +59,7 @@ const auxiliaryModelsAdmin = {
         body: JSON.stringify({ llm_model_id: null }),
       });
       showToast("已设为主模型");
-      await this.refresh();
+      await refreshAfterSuccessfulMutation("已设为主模型", () => this.refresh());
     } catch (err) {
       showToast(err.message, true);
     }
@@ -99,6 +99,7 @@ const auxiliaryModelsAdmin = {
       return;
     }
     AdminFormFeedback.setSubmitting(form, true);
+    let saved = false;
     try {
       await apiFetch(`/api/v1/auxiliary-models/${encodeURIComponent(this.editingUseCase)}`, {
         method: "PATCH",
@@ -106,11 +107,14 @@ const auxiliaryModelsAdmin = {
       });
       document.getElementById("auxiliaryModelModal").close();
       showToast("辅助模型已更新");
-      await this.refresh();
+      saved = true;
     } catch (err) {
       AdminFormFeedback.show(form, err);
     } finally {
       AdminFormFeedback.setSubmitting(form, false);
+    }
+    if (saved) {
+      await refreshAfterSuccessfulSave("辅助模型配置", () => this.refresh());
     }
   },
 };

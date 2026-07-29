@@ -11,33 +11,17 @@ ATTACHMENT_REF_KIND = "attachment-ref"
 
 
 def model_supports_image_input(
-    model_name: str,
     db_modalities: list[str] | None = None,
-    capabilities_source: str | None = None,
-    base_url: str | None = None,
 ) -> bool:
     """Return whether the model accepts image attachments.
 
-    Delegates to ``resolve_input_modalities``. When ``db_modalities`` is set and
-    ``capabilities_source`` is ``user``, ``models_dev``, or ``bundled``, the DB
-    value wins; otherwise bundled JSON + name heuristics are used (same chain as
-    refresh, minus the online models.dev fetch).
+    ``llm_models.input_modalities`` is the sole runtime source. The model name,
+    Provider URL, and catalog are intentionally not consulted.
 
     Args:
-        model_name: Model string (e.g. ``openai:gpt-4o`` or bare ``kimi-k2.6``).
         db_modalities: ``input_modalities`` persisted on the ``llm_models`` row.
-        capabilities_source: Provenance of the DB value.
-        base_url: Optional endpoint URL for bare-name provider inference.
     """
-    from deep_agent.agent.models.modality_resolver import resolve_input_modalities
-
-    modalities = resolve_input_modalities(
-        model_name,
-        user_override=db_modalities,
-        capabilities_source=capabilities_source,
-        base_url=base_url,
-    )
-    return "image" in modalities
+    return "image" in (db_modalities or [])
 
 
 class AttachmentDownloadError(Exception):

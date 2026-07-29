@@ -98,13 +98,34 @@ async def inspect_mcp_server(
         )
 
     started = perf_counter()
-    client = build_resource_client(
-        row.name,
-        row.transport,
-        row.config,
-        request_headers=request_headers,
-    )
-    timeout = max(15.0, resolve_mcp_init_timeout(row.config) + 10.0)
+    try:
+        client = build_resource_client(
+            row.name,
+            row.transport,
+            row.config,
+            request_headers=request_headers,
+        )
+        timeout = max(15.0, resolve_mcp_init_timeout(row.config) + 10.0)
+    except Exception as exc:
+        logger.warning(
+            "MCP inspection client build failed for {!r} ({})",
+            row.name,
+            type(exc).__name__,
+        )
+        current = McpInspection(
+            status="unreachable",
+            checked_at=_utcnow(),
+            duration_ms=_duration_ms(started),
+            previous_success_at=_previous_success_at(previous),
+            server=previous.server,
+            tools=previous.tools,
+            resources=previous.resources,
+            error=_safe_error("initialize", exc),
+        )
+        return McpInspectionResult(
+            inspection=current,
+            changes=_changes(previous, current),
+        )
 
     async def _inspect() -> McpInspection:
         try:

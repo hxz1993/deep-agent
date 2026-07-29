@@ -1,8 +1,0 @@
-{
-  "openai/gpt-4o-online": {
-    "input_modalities": ["text", "image", "audio"]
-  },
-  "openai/online-only-model": {
-    "input_modalities": ["text", "image"]
-  }
-}

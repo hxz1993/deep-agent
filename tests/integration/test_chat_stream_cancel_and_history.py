@@ -22,6 +22,7 @@ from tests.integration.helpers.chat import mock_request_disconnect, parse_sse_bu
 from tests.integration.helpers.models import build_slow_stream_model, text_only_model, tool_call_model
 
 _CHAT_JSON = {"capabilities": []}
+_CONFIRM_CAPABILITIES = ["ui:builtin__confirm"]
 
 
 def _last_assistant(history: dict) -> dict | None:
@@ -109,10 +110,13 @@ class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
         return parse_sse_events(body)
 
     async def _run_hitl_pending(self) -> tuple[str, str]:
-        test_model = tool_call_model("confirm_action", text="done after confirm")
+        test_model = tool_call_model("builtin__confirm", text="done after confirm")
         events = await self._stream_events(
             model=test_model,
-            json_body={"message": "请用户确认"},
+            json_body={
+                "message": "请用户确认",
+                "capabilities": _CONFIRM_CAPABILITIES,
+            },
         )
         session_id = events[0]["session_id"]
         final = next(ev for ev in reversed(events) if ev.get("type") == "final")
@@ -241,14 +245,15 @@ class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
         assert assistant is not None
         calls = _tool_call_parts(assistant)
         self.assertEqual(len(calls), 1)
-        self.assertEqual(calls[0]["tool"], "confirm_action")
+        self.assertEqual(calls[0]["tool"], "builtin__confirm")
         self.assertEqual(calls[0]["tool_call_id"], tool_call_id)
 
-        test_model = tool_call_model("confirm_action", text="resumed ok")
+        test_model = tool_call_model("builtin__confirm", text="resumed ok")
         events = await self._stream_events(
             model=test_model,
             json_body={
                 "session_id": session_id,
+                "capabilities": _CONFIRM_CAPABILITIES,
                 "deferred_tool_results": [
                     {
                         "tool_call_id": tool_call_id,

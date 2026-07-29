@@ -105,7 +105,6 @@ async def update_auxiliary_model(
                 detail=f"LLM model not found: {body.llm_model_id}",
             )
 
-    await auxiliary_store.ensure_defaults()
     row = await auxiliary_store.update(use_case, body)
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Use case not found: {use_case}")

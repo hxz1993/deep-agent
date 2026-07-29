@@ -16,6 +16,10 @@ from deep_agent.db.stores.bundle import DataStores
 from deep_agent.schemas.agent import AgentCreate
 from deep_agent.schemas.llm_model import LlmModelCreate
 from tests.helpers.request_identity import TEST_USER_ID
+from tests.helpers.sqlite_stores import (
+    DEFAULT_TEST_CONTEXT_WINDOW,
+    DEFAULT_TEST_MAX_OUTPUT,
+)
 
 
 @dataclass(frozen=True)
@@ -36,16 +40,17 @@ async def seed_llm_model(
     model: str,
     model_id: str | None = None,
     input_modalities: list[str] | None = None,
-    capabilities_source: str | None = None,
 ) -> str:
     row = await stores.llm_model.create_unique(
         LlmModelCreate(
             name=name,
             model=model,
-            input_modalities=input_modalities or [],
+            input_modalities=input_modalities or ["text"],
+            context_window_tokens=DEFAULT_TEST_CONTEXT_WINDOW,
+            max_output_tokens=DEFAULT_TEST_MAX_OUTPUT,
         )
     )
-    if model_id is not None or input_modalities is not None or capabilities_source is not None:
+    if model_id is not None or input_modalities is not None:
         async with stores.llm_model._write() as db:  # noqa: SLF001
             db_row = await stores.llm_model._get_by_id(db, row.id)  # noqa: SLF001
             assert db_row is not None
@@ -53,8 +58,6 @@ async def seed_llm_model(
                 db_row.id = model_id
             if input_modalities is not None:
                 db_row.input_modalities = input_modalities
-            if capabilities_source is not None:
-                db_row.capabilities_source = capabilities_source
             await db.flush()
             await db.refresh(db_row)
             return db_row.id
@@ -102,6 +105,10 @@ async def seed_session_from_fixture(
                     id=resolved_model_id,
                     name=model_name,
                     model=model,
+                    input_modalities=["text"],
+                    context_window_tokens=DEFAULT_TEST_CONTEXT_WINDOW,
+                    max_output_tokens=DEFAULT_TEST_MAX_OUTPUT,
+                    tags=[],
                 )
             )
             db.add(

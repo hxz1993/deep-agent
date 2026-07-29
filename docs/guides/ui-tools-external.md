@@ -10,7 +10,7 @@ UI 工具用于在 Agent 运行过程中暂停并等待用户确认、选择或�
 
 | 来源 | 保存位置 | 配置方式 |
 | --- | --- | --- |
-| `builtin` | DeepAgent 代码 | 系统预置，默认启用，只读 |
+| `builtin` | DeepAgent 代码 | 系统预置、只读，由 Agent 显式选择 |
 | `manual` | `ui_tool_definitions` | Console 手工创建和维护 |
 
 不再支持：
@@ -24,15 +24,45 @@ MCP Resource 是另一项独立能力，用于读取 MCP 暴露的静态上下�
 
 ## 内置工具
 
-### `confirm_action`
+### `builtin__confirm`
 
-请求用户确认或取消。常用参数为 `message`、`confirm_label` 和 `cancel_label`。
+展示通用的继续/取消界面，并暂停运行等待用户操作。它不是后端强制审批或权限校验机制。
 
-### `ask_user_choice`
+参数：
 
-请求用户单选或多选。常用参数为 `prompt`、`options` 和 `allow_multiple`。
+- `message`：必填，需要用户确认的内容。
+- `title`：可选标题。
+- `confirm_label`：确认按钮文案，默认“确认”。
+- `cancel_label`：取消按钮文案，默认“取消”。
 
-内置工具始终随 Agent 可用，Console 中只读展示，不能关闭或删除。
+结果固定为 `{ "confirmed": true }` 或 `{ "confirmed": false }`。
+
+### `builtin__choice`
+
+展示候选列表并暂停运行，支持单选、多选以及候选外自由输入。
+
+参数：
+
+- `prompt`：必填，需要用户回答的问题。
+- `options`：至少一个候选项；支持字符串，或 `{ "value", "label", "description" }` 对象。
+- `title`：可选标题。
+- `allow_multiple`：是否允许多选，默认 `false`。
+- `custom_label`：自由输入项文案，默认“其他（自行输入）”。
+- `custom_placeholder`：自由输入框占位提示，默认“请输入其他内容”。
+- `submit_label`：提交按钮文案，默认“提交”。
+
+自由输入入口始终显示。结果统一为：
+
+```json
+{
+  "selected": ["option-value"],
+  "custom_input": null
+}
+```
+
+仅填写自由输入时，`selected` 为空数组，`custom_input` 保存用户输入；多选模式允许候选项和自由输入同时提交。
+
+两个内置工具在 Console 中只读展示，不能修改或删除；它们不会自动随 Agent 启用。
 
 ## 手工工具
 
@@ -61,9 +91,11 @@ POST /api/v1/ui-tools
 }
 ```
 
-手工工具不会自动对所有 Agent 生效。编辑 Agent 时，在统一能力列表中选择：
+内置和手工工具都不会自动对所有 Agent 生效。编辑 Agent 时，在统一能力列表中选择：
 
 ```text
+ui:builtin__confirm
+ui:builtin__choice
 ui:deep_cube__clarify
 ```
 
@@ -72,7 +104,7 @@ ui:deep_cube__clarify
 1. UI 工具 `enabled=true`。
 2. Agent `capabilities` 包含精确的 `ui:<name>` 引用。
 
-不存在或已停用的引用会被忽略。
+不存在或已停用的引用会被忽略。新建 Agent、`capabilities=null`、`capabilities=[]` 以及未显式包含新 capability 的历史 Agent，均不会加载这两个内置工具；旧的 `ui-builtin:*` 引用也不会被兼容或迁移。
 
 ## 调用与恢复
 

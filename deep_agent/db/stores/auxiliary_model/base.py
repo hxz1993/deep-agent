@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from deep_agent.agent.auxiliary_models import AUXILIARY_MODEL_CATALOG
@@ -19,17 +20,36 @@ class AuxiliaryModelStoreBase(SessionBoundMixin):
             return await self._list_all(db)
 
     async def ensure_defaults(self) -> None:
+        try:
+            await self._ensure_defaults_once()
+        except IntegrityError:
+            # Another request may have seeded the same rows concurrently.
+            await self._ensure_defaults_once()
+
+    async def update(self, use_case: str, data: AuxiliaryModelUpdate) -> AuxiliaryModelConfig | None:
+        try:
+            return await self._update_once(use_case, data)
+        except IntegrityError:
+            # A concurrent first request may have inserted this use case.
+            return await self._update_once(use_case, data)
+
+    async def _ensure_defaults_once(self) -> None:
         async with self._write() as db:
             for use_case in AUXILIARY_MODEL_CATALOG:
                 if await self._get_by_use_case(db, use_case) is None:
                     db.add(AuxiliaryModelConfig(use_case=use_case, llm_model_id=None))
             await db.flush()
 
-    async def update(self, use_case: str, data: AuxiliaryModelUpdate) -> AuxiliaryModelConfig | None:
+    async def _update_once(
+        self,
+        use_case: str,
+        data: AuxiliaryModelUpdate,
+    ) -> AuxiliaryModelConfig:
         async with self._write() as db:
             row = await self._get_by_use_case(db, use_case)
             if row is None:
-                return None
+                row = AuxiliaryModelConfig(use_case=use_case, llm_model_id=None)
+                db.add(row)
             if "llm_model_id" in data.model_fields_set:
                 row.llm_model_id = data.llm_model_id
             await db.flush()

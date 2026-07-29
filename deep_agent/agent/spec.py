@@ -26,10 +26,11 @@ class AgentSpec:
     base_url: str | None = None
     api_key: str | None = None
     temperature: float | None = None
-    max_requests: int | None = None
     agent_id: str | None = None
     input_modalities: list[str] | None = None
-    capabilities_source: str | None = None
+    context_window_tokens: int | None = None
+    max_output_tokens: int | None = None
+    tags: list[str] | None = None
 
     @classmethod
     def from_row(cls, row: Agent, llm_model: LlmModel) -> AgentSpec:
@@ -41,10 +42,11 @@ class AgentSpec:
             base_url=llm_model.base_url,
             api_key=llm_model.api_key,
             temperature=row.temperature,
-            max_requests=row.max_requests,
             agent_id=row.id,
             input_modalities=llm_model.input_modalities,
-            capabilities_source=llm_model.capabilities_source,
+            context_window_tokens=llm_model.context_window_tokens,
+            max_output_tokens=llm_model.max_output_tokens,
+            tags=llm_model.tags,
         )
 
     @classmethod
@@ -56,7 +58,6 @@ class AgentSpec:
         instructions: str | None = None,
         temperature: float | None = None,
         capabilities: list[str] | None = None,
-        max_requests: int | None = None,
     ) -> AgentSpec:
         return cls(
             name=name,
@@ -66,9 +67,10 @@ class AgentSpec:
             base_url=llm_model.base_url,
             api_key=llm_model.api_key,
             temperature=temperature,
-            max_requests=max_requests,
             input_modalities=llm_model.input_modalities,
-            capabilities_source=llm_model.capabilities_source,
+            context_window_tokens=llm_model.context_window_tokens,
+            max_output_tokens=llm_model.max_output_tokens,
+            tags=llm_model.tags,
         )
 
 

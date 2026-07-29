@@ -10,6 +10,23 @@ from deep_agent.schemas.llm_model import LlmModelCreate
 DEFAULT_TEST_LLM_MODEL = "test-default"
 DEFAULT_TEST_LLM_MODEL_STRING = "test"
 AUX_TITLE_MODEL_NAME = "aux-title"
+DEFAULT_TEST_CONTEXT_WINDOW = 128_000
+DEFAULT_TEST_MAX_OUTPUT = 8_192
+
+
+def test_llm_model_create(*, name: str, model: str, **kwargs) -> LlmModelCreate:
+    return LlmModelCreate(
+        name=name,
+        model=model,
+        input_modalities=kwargs.pop("input_modalities", ["text"]),
+        context_window_tokens=kwargs.pop(
+            "context_window_tokens", DEFAULT_TEST_CONTEXT_WINDOW
+        ),
+        max_output_tokens=kwargs.pop(
+            "max_output_tokens", DEFAULT_TEST_MAX_OUTPUT
+        ),
+        **kwargs,
+    )
 
 
 async def seed_default_llm_model(stores: DataStores) -> None:
@@ -17,7 +34,10 @@ async def seed_default_llm_model(stores: DataStores) -> None:
     if await stores.llm_model.list_all():
         return
     await stores.llm_model.create_unique(
-        LlmModelCreate(name=DEFAULT_TEST_LLM_MODEL, model=DEFAULT_TEST_LLM_MODEL_STRING),
+        test_llm_model_create(
+            name=DEFAULT_TEST_LLM_MODEL,
+            model=DEFAULT_TEST_LLM_MODEL_STRING,
+        ),
     )
 
 
@@ -44,7 +64,7 @@ async def seed_auxiliary_model_configs(stores: DataStores) -> None:
             llm_model_id = existing.id
         else:
             row = await stores.llm_model.create_unique(
-                LlmModelCreate(
+                test_llm_model_create(
                     name=AUX_TITLE_MODEL_NAME,
                     model=model_str,
                     base_url=base_url,

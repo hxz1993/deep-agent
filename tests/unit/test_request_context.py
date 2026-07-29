@@ -19,7 +19,7 @@ class RequestContextApiTests(unittest.TestCase):
             "/api/v1/request-context",
             headers={
                 "user": "  test-user  ",
-                "app": " app-a ",
+                "app": " space-a001 ",
                 "space": " space-a ",
                 "language": " zh-cn ",
                 "authorization": "Bearer secret",
@@ -34,7 +34,7 @@ class RequestContextApiTests(unittest.TestCase):
             {
                 "authenticated": True,
                 "user": "test-user",
-                "app": "app-a",
+                "app": "space-a001",
                 "space": "space-a",
                 "language": "zh-cn",
             },
@@ -58,7 +58,62 @@ class RequestContextApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["app"], None)
         self.assertEqual(response.json()["space"], None)
-        self.assertEqual(response.json()["language"], None)
+        self.assertEqual(response.json()["language"], "zh-cn")
+
+    def test_app_only_context_derives_space_and_defaults_language(self) -> None:
+        response = self.client.get(
+            "/api/v1/request-context",
+            headers={"user": "user-a", "app": "mdxath003"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json(),
+            {
+                "authenticated": True,
+                "user": "user-a",
+                "app": "mdxath003",
+                "space": "mdxath",
+                "language": "zh-cn",
+            },
+        )
+
+    def test_console_override_uses_gateway_safe_headers(self) -> None:
+        response = self.client.get(
+            "/api/v1/request-context",
+            headers={
+                "user": "user-a",
+                "app": "platform001",
+                "space": "platform",
+                "x-deep-agent-app": "iirjgi005",
+                "x-deep-agent-language": "zh-cn",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json(),
+            {
+                "authenticated": True,
+                "user": "user-a",
+                "app": "iirjgi005",
+                "space": "iirjgi",
+                "language": "zh-cn",
+            },
+        )
+
+    def test_mismatched_space_is_rejected(self) -> None:
+        response = self.client.get(
+            "/api/v1/request-context",
+            headers={
+                "user": "user-a",
+                "app": "mdxath003",
+                "space": "other",
+            },
+        )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("mdxath", response.json()["detail"])
 
     def test_openapi_exposes_no_sensitive_context_parameters(self) -> None:
         operation = self.client.get("/openapi.json").json()["paths"][
@@ -73,6 +128,9 @@ class RequestContextApiTests(unittest.TestCase):
                 ("app", "header"),
                 ("space", "header"),
                 ("language", "header"),
+                ("x-deep-agent-app", "header"),
+                ("x-deep-agent-space", "header"),
+                ("x-deep-agent-language", "header"),
             },
         )
         for forbidden in ("authorization", "cookie", "token", "x-user-token"):

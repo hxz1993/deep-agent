@@ -3,7 +3,7 @@
 > **读者**：deep-agent **仓库贡献者**（需修改 `deep_agent/`、`frontend/` 代码）。
 >
 > 若你仅**使用已部署的服务**、自建客户端或配置 Agent，请参阅 [`ui-tools-external.md`](ui-tools-external.md)。  
-若你参与**平台能力规划**（让集成方扩展 UI 工具），请参阅设计文档 [`ui-tools-extension-proposals.md`](../design/ui-tools-extension-proposals.md) 与 RFC [`0001-ui-tools-mcp-discovery-and-api.md`](../design/rfc/0001-ui-tools-mcp-discovery-and-api.md)。
+若你参与**平台能力规划**（让集成方扩展 UI 工具），请参阅设计文档 [`ui-tools-extension-proposals.md`](../design/01-ui-tools/ui-tools-extension-proposals.md) 与 RFC [`0001-ui-tools-mcp-discovery-and-api.md`](../design/01-ui-tools/rfc/0001-ui-tools-mcp-discovery-and-api.md)。
 
 相关协议见 [`sse-protocol.md`](sse-protocol.md) 中 `final.status=pending` 与 `deferred_tool_results`。
 
@@ -33,6 +33,7 @@ sequenceDiagram
 |------|------|
 | **后端** | 用 `ExternalToolset` 向模型暴露工具 schema；不实现执行函数 |
 | **前端** | 根据 `tool` 名称渲染控件；收集结果后 `deferred_tool_results` 续跑 |
+| **Agent 配置** | 通过 `ui:<name>` capability 显式决定本 Agent 可使用哪些 UI 工具 |
 | **Agent 指令** | 告诉模型何时应调用哪个 UI 工具 |
 
 内置 UI 工具定义在 [`deep_agent/capabilities/ui/builtin.py`](../../deep_agent/capabilities/ui/builtin.py)。
@@ -47,7 +48,7 @@ sequenceDiagram
 | # | 位置 | 做什么 |
 |---|------|--------|
 | 1 | `deep_agent/capabilities/ui/builtin.py` | 增加 `ToolDefinition`（name、description、JSON Schema） |
-| 2 | 同上 `build_ui_capability()` | 在 `tools=[ToolInfo(...)]` 中登记（供 `/api/v1/tools` 展示） |
+| 2 | `deep_agent/api/v1/tools.py` | 确认新 builtin 以独立的 `ui:<name>` 可选能力展示 |
 | 3 | `frontend/console/chat.js` → `BUILTIN_UI_TOOLS` | 把新工具名加入 Set |
 | 4 | `frontend/console/chat.js` → `renderHitlWidget` | 根据 `tool` 名渲染控件并调用 `onSubmit` |
 
@@ -112,22 +113,22 @@ ToolDefinition(
 ),
 ```
 
-**③ 在 `build_ui_capability()` 中补充 `ToolInfo`**
+**③ 让能力目录展示该工具**
 
-```python
-ToolInfo("ask_user_text", "Show a text input and wait for user text."),
-```
+`GET /api/v1/tools` 会从 `builtin_ui_records()` 生成独立的 `ui:<name>` 能力。新增 builtin 后应确认它是 `default_enabled=false`、`locked=false` 的普通可选项，并在 Agent 中显式选择后才运行。
 
 ### 3.2 注册与注入规则
 
-- `build_registry()` 会 `registry.register(build_ui_capability())`
-- `build_agent()` 通过 `_toolsets_for_spec()` 加载 toolset；即使 DB Agent 的 `capabilities` 列表未写 `ui`，也会**自动注入** UI 工具
+- builtin 和 manual UI 工具统一按 `ui:<canonical_tool_name>` 与 Agent 正向关联。
+- `prepare_ui_toolset_for_spec()` 只加载 `AgentSpec.capabilities` 显式引用且 `enabled=true` 的定义。
+- `capabilities=null`、空数组或未包含对应 `ui:<name>` 时，builtin 也不会进入模型工具列表。
+- 旧的 `ui-builtin:*` capability 不迁移、不兼容，运行时直接忽略。
 
-**注意**：不要在 `factory.py` 里再额外 `build_ui_toolset()`，否则会与 registry 重复注册，触发工具名冲突错误。
+**注意**：不要在 `factory.py` 里无条件注入 `build_ui_toolset()`，否则会绕过 Agent 选择规则，并可能触发工具名冲突。
 
 ### 3.3 Schema 设计建议
 
-- `description` 用英文写清楚「由 UI 执行、需等待用户」——模型靠它决定是否调用
+- `description` 优先用简洁中文写清楚「由 UI 执行、需等待用户」——模型靠它决定是否调用
 - 参数尽量结构化（`options`、`labels`），避免让模型拼 HTML
 - `required` 只放必要字段；可选字段在 description 里说明默认值语义
 - 工具名全局唯一，不与 MCP / native 工具重名
@@ -137,7 +138,7 @@ ToolInfo("ask_user_text", "Show a text input and wait for user text."),
 流式 `tool_call` 与 `final.deferred` 事件上的 `widget`、`metadata` 由 [`registry.py`](../../deep_agent/capabilities/ui/registry.py) 的 `enrich_tool_event` / `enrich_deferred` 注入：
 
 - **DB / MCP 工具**：从 `load_ui_tool_hints()` 加载的 hints 合并进事件。
-- **builtin 工具**（`confirm_action`、`ask_user_choice` 等）：即使 DB 无对应行，也会在 hints 未命中时回退到 `builtin_ui_records()`，保证 SSE 仍带 `widget` 供客户端渲染。
+- **builtin 工具**（当前为 `builtin__confirm`、`builtin__choice`）：即使 DB 无对应行，也会在 hints 未命中时回退到 `builtin_ui_records()`，保证已启用工具的 SSE 仍带 `widget` 供客户端渲染。
 
 详见 [`sse-protocol.md`](sse-protocol.md) 中 `tool_call` 可选字段说明。
 
@@ -150,10 +151,10 @@ ToolInfo("ask_user_text", "Show a text input and wait for user text."),
 [`frontend/console/chat.js`](../../frontend/console/chat.js) 顶部：
 
 ```javascript
-const UI_TOOLS = new Set(["confirm_action", "ask_user_choice", "ask_user_text"]);
+const BUILTIN_UI_TOOLS = new Set(["builtin__confirm", "builtin__choice", "ask_user_text"]);
 ```
 
-未加入 `UI_TOOLS` 的工具在 pending 时只会显示参数 JSON，**不会出现交互控件**。
+未加入 `BUILTIN_UI_TOOLS` 且没有 `widget` 元数据的工具，在 pending 时只会显示参数 JSON，**不会出现交互控件**。
 
 ### 4.2 实现 `renderHitlWidget` 分支
 
@@ -194,16 +195,18 @@ const UI_TOOLS = new Set(["confirm_action", "ask_user_choice", "ask_user_text"])
 
 | 工具 | 建议 `result` 结构 | 模型侧如何使用 |
 |------|-------------------|----------------|
-| `confirm_action` | `{ "confirmed": true \| false }` | 根据布尔值分支 |
-| `ask_user_choice` | `{ "selected": "选项" }` 或 `{ "selected": ["a","b"] }` | 读取选中项 |
+| `builtin__confirm` | `{ "confirmed": true \| false }` | 根据布尔值分支 |
+| `builtin__choice` | `{ "selected": ["选项值"], "custom_input": null }` | 读取选中项与候选外输入 |
 | 自定义 | 由你在 instructions 里约定 | 在 prompt 中说明字段含义 |
 
 `result` 会作为 `ToolReturnPart.content` 回灌模型，保持 JSON 稳定、字段名清晰即可。
 
+`builtin__choice` 的自由输入入口始终显示。单选、多选、仅自由输入，以及“多选 + 自由输入”都使用同一结果结构；前端必须阻止 `selected=[]` 且 `custom_input` 为空的提交。
+
 ### 4.4 历史回放
 
 用户刷新页面后，[`renderHistory`](../../frontend/console/chat.js) 会对「有 `tool_call`、无 `tool_result`」的 UI 工具自动恢复交互控件，无需额外处理。
-新增工具只要加入了 `UI_TOOLS` 并在 `renderHitlWidget` 中实现分支即可。
+新增代码内置工具需要加入 `BUILTIN_UI_TOOLS`，并在 `renderHitlWidget` 中实现分支。
 
 ---
 
@@ -212,9 +215,9 @@ const UI_TOOLS = new Set(["confirm_action", "ask_user_choice", "ask_user_text"])
 模型不会自动知道 UI 工具的存在与用法，需在 Agent **instructions** 中写明，例如：
 
 ```text
-在执行任何有副作用的操作（调用 MCP、修改数据等）之前，必须先调用 confirm_action 获得用户确认。
+需要用户明确决定继续或取消时，调用 builtin__confirm；它是通用交互工具，不代表后端强制审批或权限校验。
 
-需要用户从列表中选择时，使用 ask_user_choice，不要自行假设用户的选择。
+需要用户从候选列表选择或补充候选外答案时，调用 builtin__choice，不要自行假设用户的选择。
 
 需要用户自由输入文字时，使用 ask_user_text。
 
@@ -278,7 +281,7 @@ curl http://127.0.0.1:8000/api/v1/tools
 ### 7.2 对话验证
 
 1. 重启后端
-2. 使用含 UI 工具说明的 Agent
+2. 在 Agent 的 capabilities 中显式选择 `ui:<工具名>`，并写明 UI 工具使用场景
 3. 发送能触发新工具的提示语
 4. 确认出现控件 → 提交 → 模型继续回复
 5. **刷新页面**，从侧边栏重新打开会话，确认控件仍可出现并可续跑
@@ -307,12 +310,13 @@ ExternalToolset 'ui' defines a tool whose name conflicts with ...
 ### 模型不调用 UI 工具
 
 - 检查 instructions 是否说明使用场景
-- 用更直白的测试句：`请调用 confirm_action，message 为「测试」`
-- 确认 `GET /api/v1/tools` 能看到该工具
+- 用更直白的测试句：`请调用 builtin__confirm，message 为「测试」`
+- 确认 `GET /api/v1/tools` 能看到 `ui:builtin__confirm`
+- 确认当前 Agent 的 capabilities 已显式包含对应 `ui:<name>`；仅出现在能力目录不代表运行时已启用
 
 ### 刷新后没有按钮
 
-- 确认工具名在 `UI_TOOLS` 中
+- 确认代码内置工具名在 `BUILTIN_UI_TOOLS` 中，或手工工具定义提供了正确的 `widget`
 - 确认 `renderHitlWidget` 有对应分支
 - 历史里该 `tool_call` 是否已有 `tool_result`（已完成则不再显示控件）
 
@@ -332,8 +336,8 @@ UI 工具适合确认、表单、选择器；业务 API 调用仍应使用 MCP�
 | 文件 | 说明 |
 |------|------|
 | [`deep_agent/capabilities/ui/builtin.py`](../../deep_agent/capabilities/ui/builtin.py) | UI 工具 schema 与 capability |
-| [`deep_agent/capabilities/ui/registry.py`](../../deep_agent/capabilities/ui/registry.py) | UI 工具 DB 注册表；SSE `widget` / `metadata` enrichment（含 builtin 回退） |
-| [`deep_agent/agent/factory.py`](../../deep_agent/agent/factory.py) | `_toolsets_for_spec` 注入 UI |
+| [`deep_agent/capabilities/ui/registry.py`](../../deep_agent/capabilities/ui/registry.py) | UI 工具合并与 Agent 可见性；SSE `widget` / `metadata` enrichment（含 builtin 回退） |
+| [`deep_agent/api/v1/tools.py`](../../deep_agent/api/v1/tools.py) | builtin/manual UI 工具的 Agent 可选能力目录 |
 | [`deep_agent/agent/runner.py`](../../deep_agent/agent/runner.py) | deferred run / pending final |
 | [`deep_agent/agent/deferred.py`](../../deep_agent/agent/deferred.py) | 序列化与 `DeferredToolResults` 转换 |
 | [`deep_agent/api/v1/chat.py`](../../deep_agent/api/v1/chat.py) | HTTP 入口 |

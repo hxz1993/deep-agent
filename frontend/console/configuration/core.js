@@ -1,35 +1,14 @@
-const STORAGE_KEY = "da_console_base_url_v1";
-
 const state = {
   baseUrl: "",
   capabilities: [],
   llmModels: [],
   editingAgentId: null,
   editingLlmModelId: null,
-  llmModelInitialModalityMode: "auto",
   editingMcp: null,
 };
 
-function defaultBaseUrl() {
-  if (location.protocol === "file:") return "http://localhost:8000";
-  const root = window.__DEEP_AGENT_APP_ROOT__ || window.__DEEP_AGENT_BASE__ || "/";
-  return `${location.origin}${root.replace(/\/$/, "")}`;
-}
-
 function getBaseUrl() {
-  return state.baseUrl || defaultBaseUrl();
-}
-
-function loadSettings() {
-  const saved = localStorage.getItem(STORAGE_KEY);
-  state.baseUrl = saved || defaultBaseUrl();
-  const input = document.getElementById("baseUrlInput");
-  if (input) input.value = state.baseUrl;
-}
-
-function saveBaseUrl(value) {
-  state.baseUrl = value.trim() || defaultBaseUrl();
-  localStorage.setItem(STORAGE_KEY, state.baseUrl);
+  return typeof defaultApiBaseUrl === "function" ? defaultApiBaseUrl() : state.baseUrl;
 }
 
 function escapeHtml(text) {
@@ -63,9 +42,24 @@ function showDbBanner(show) {
   if (el) el.classList.toggle("hidden", !show);
 }
 
+async function refreshAfterSuccessfulMutation(successLabel, refresh) {
+  try {
+    await refresh();
+    return true;
+  } catch (error) {
+    const detail = typeof error?.message === "string" ? error.message : String(error);
+    showToast(`${successLabel}，但页面重新加载失败：${detail}`, true);
+    return false;
+  }
+}
+
+async function refreshAfterSuccessfulSave(label, refresh) {
+  return refreshAfterSuccessfulMutation(`${label}已保存`, refresh);
+}
+
 async function apiFetch(path, options = {}) {
   const { headers: optionHeaders, ...rest } = options;
-  const url = `${getBaseUrl()}${path}`;
+  const url = typeof serviceUrl === "function" ? serviceUrl(path) : `${getBaseUrl()}${path}`;
   const resp = await daFetch(url, {
     ...rest,
     headers: { "Content-Type": "application/json", ...optionHeaders },
@@ -93,11 +87,11 @@ async function apiFetch(path, options = {}) {
 
 function formatDatabaseSchemaVersion(value) {
   const revision = String(value ?? "").trim();
-  if (!revision) return "数据库配置版本未知";
+  if (!revision) return "—";
   const displayRevision = /^\d+$/.test(revision)
     ? String(Number.parseInt(revision, 10))
     : revision;
-  return `数据库配置版本 V${displayRevision}`;
+  return `V${displayRevision}`;
 }
 
 async function loadDatabaseSchemaVersion() {
@@ -108,7 +102,7 @@ async function loadDatabaseSchemaVersion() {
     target.textContent = formatDatabaseSchemaVersion(info?.schema_version);
     target.removeAttribute("title");
   } catch (error) {
-    target.textContent = "数据库配置版本未知";
+    target.textContent = "—";
     target.title = error instanceof Error ? error.message : String(error);
   }
 }
@@ -154,6 +148,9 @@ function initTabs() {
       const name = tab.dataset.tab;
       document.querySelectorAll(".panel").forEach((p) => p.classList.remove("active"));
       document.getElementById(`panel-${name}`)?.classList.add("active");
+      if (name === "global-settings" && window.globalSettingsAdmin) {
+        window.globalSettingsAdmin.refresh();
+      }
       if (name === "agents" && window.agentsAdmin) {
         loadLlmModels().then(() => window.agentsAdmin.refresh());
       }
@@ -161,6 +158,7 @@ function initTabs() {
       if (name === "auxiliary-models" && window.auxiliaryModelsAdmin) window.auxiliaryModelsAdmin.refresh();
       if (name === "mcp" && window.mcpAdmin) window.mcpAdmin.refresh();
       if (name === "ui-tools" && window.uiToolsAdmin) window.uiToolsAdmin.refresh();
+      if (name === "catalog" && window.modelCatalogAdmin) window.modelCatalogAdmin.refresh();
     });
   });
 }
@@ -179,19 +177,6 @@ function parseArgs(text) {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
-  loadSettings();
-
-  const baseInput = document.getElementById("baseUrlInput");
-  baseInput?.addEventListener("change", () => {
-    saveBaseUrl(baseInput.value);
-    loadDatabaseSchemaVersion();
-    if (window.agentsAdmin) window.agentsAdmin.refresh();
-    if (window.llmModelsAdmin) window.llmModelsAdmin.refresh();
-    if (window.auxiliaryModelsAdmin) window.auxiliaryModelsAdmin.refresh();
-    if (window.mcpAdmin) window.mcpAdmin.refresh();
-    if (window.uiToolsAdmin) window.uiToolsAdmin.refresh();
-  });
-
   const chatLink = document.getElementById("chatLink");
   if (chatLink && location.protocol !== "file:") {
     chatLink.href = "/";
@@ -205,4 +190,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
 window.__DatabaseSchemaVersionUI = {
   formatDatabaseSchemaVersion,
+};
+window.__ConfigurationSaveUI = {
+  refreshAfterSuccessfulMutation,
+  refreshAfterSuccessfulSave,
 };

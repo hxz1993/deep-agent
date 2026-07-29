@@ -10,7 +10,16 @@
         })
         .join("；");
     }
-    if (detail && typeof detail === "object") return JSON.stringify(detail);
+    if (detail && typeof detail === "object") {
+      const message = detail.message || "";
+      const referencedBy = Array.isArray(detail.referenced_by)
+        ? detail.referenced_by.filter(Boolean)
+        : [];
+      if (message && referencedBy.length) {
+        return `${message}：${referencedBy.join("、")}`;
+      }
+      return message || JSON.stringify(detail);
+    }
     return String(detail || "请求失败");
   }
 

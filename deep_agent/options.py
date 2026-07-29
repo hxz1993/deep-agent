@@ -158,11 +158,6 @@ class Agent(Category):
         val_type=float,
         bind_env="CONTEXT_SUMMARY_TIMEOUT",
     )
-    context_test_scenarios_enabled = Option(
-        False,
-        val_type=bool,
-        bind_env="CONTEXT_TEST_SCENARIOS_ENABLED",
-    )
     skills_dir = Option(
         _resolve_repo_path("skills"),
         val_type=str,

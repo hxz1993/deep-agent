@@ -55,7 +55,7 @@ tests/
 | `test_models_dev.py` | models.dev 严格获取与 Lab 可选补充 |
 | `test_llm_models.py` | 模型上下文、最大输出、输入模态与 tags Store/Schema |
 | `test_context_compaction.py` | 统一 Token 估算、动态输出预测、usage 回读、主模型滚动摘要、SSE 状态、原始历史不改写、脱敏 Checkpoint、CAS 与兜底 |
-| `test_context_test_scenarios.py` | 本地/Test 测试会话场景、实时预算、消息往返序列化、开关与用户归属 |
+| `test_context_test_scenarios.py` | 管理员测试会话场景、实时预算、消息往返序列化、常驻接口与用户归属 |
 | `test_session_model_override.py` | Agent 对话 `model_id` 请求级覆盖（`build_runner_for_agent`） |
 | `test_ui_tools_rfc.py` | builtin/manual UI 工具注册、Agent 显式选择、保留名称、Schema 校验与事件 enrichment |
 

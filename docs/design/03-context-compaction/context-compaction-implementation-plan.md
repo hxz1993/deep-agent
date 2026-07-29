@@ -412,13 +412,9 @@ DEEP_AGENT_CONTEXT_OUTPUT_TOKEN_FLOOR
 为避免人工逐轮输入数十次才能复现压缩，Workspace 在会话搜索框和普通“新建会话”
 按钮之间提供独立的“新建测试会话”入口。普通新建逻辑不变。
 
-入口只在以下条件同时成立时出现：
-
-1. `DEEP_AGENT_CONTEXT_TEST_SCENARIOS_ENABLED=true`。
-2. 当前已选择 Agent。
-3. Agent 使用的模型配置了有效 `context_window_tokens`。
-
-默认值为 `false`，生产环境不应开启。接口关闭时返回 404，Console 不显示入口。
+入口是管理员控制台的常驻功能，不再增加环境变量开关。当前已选择 Agent，且 Agent
+使用的模型配置了有效 `context_window_tokens` 时可以创建测试会话；模型未配置上下文
+窗口时，后端返回明确的 422。
 
 交互链路：
 

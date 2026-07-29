@@ -14,7 +14,6 @@ from deep_agent.agent.context.test_scenarios import (
 )
 from deep_agent.api.v1.request_identity import RequestUserDep
 from deep_agent.core.context import AppContextDep
-from deep_agent.options import OPTION
 from deep_agent.schemas.chat import SessionInfo
 
 router = APIRouter()
@@ -52,14 +51,6 @@ class ContextTestSessionResult(BaseModel):
     expected_behavior: str
 
 
-def _ensure_enabled() -> None:
-    if not OPTION.agent.context_test_scenarios_enabled:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Context test scenarios are disabled.",
-        )
-
-
 async def _agent_and_estimator(ctx: AppContextDep, agent_id: str):
     row = await ctx.stores.agent.get_by_id(agent_id)
     if row is None:
@@ -85,7 +76,6 @@ async def list_context_test_scenarios(
     _user: RequestUserDep,
     agent_id: str = Query(description="Agent used to calculate the live context budget."),
 ) -> ContextTestScenarioList:
-    _ensure_enabled()
     _agent, model, estimator = await _agent_and_estimator(ctx, agent_id)
     budget = build_context_budget(
         [],
@@ -127,7 +117,6 @@ async def create_context_test_session(
     scenario_key: str,
     body: ContextTestSessionCreate,
 ) -> ContextTestSessionResult:
-    _ensure_enabled()
     scenario = get_context_test_scenario(scenario_key)
     if scenario is None:
         raise HTTPException(

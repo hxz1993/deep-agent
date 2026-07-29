@@ -275,8 +275,8 @@ SSE 协议：[`../docs/guides/sse-protocol.md`](../docs/guides/sse-protocol.md)�
 9. 上下文压缩在模型配置有效上下文窗口时自动启用；环境变量只调节全局比例、工具保留量和摘要超时，
    不提供启用开关。只有主模型实际生成/更新 Summary 且复检达标时才写 Checkpoint；
    确定性压缩、Sliding Window、Pending、取消、失败都不更新。Checkpoint 写入失败不能让已完成对话失败。
-10. Console 压缩测试会话只在 `CONTEXT_TEST_SCENARIOS_ENABLED=true` 时提供；后端必须按当前模型
-    实时预算构造可重新反序列化的普通对话历史，不得直接写 Checkpoint，也不得新增测试专用表。
+10. Console 压缩测试会话是管理员控制台的常驻功能；后端必须按当前模型实时预算构造可重新
+    反序列化的普通对话历史，不得直接写 Checkpoint，也不得新增测试专用表。
 
 | 现象 | 原因 |
 | --- | --- |

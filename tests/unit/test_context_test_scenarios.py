@@ -17,7 +17,6 @@ from deep_agent.capabilities import build_registry
 from deep_agent.capabilities.mcp.lease_manager import McpLeaseManager
 from deep_agent.core.context import AppContext, get_context, init_context, reset_context
 from deep_agent.db.serialization import deserialize_message, serialize_message
-from deep_agent.options import OPTION
 from deep_agent.schemas.agent import AgentCreate
 from tests.helpers.sqlite_stores import make_sqlite_stores_sync
 
@@ -59,7 +58,6 @@ class ContextTestScenarioBuilderTests(unittest.TestCase):
 
 class ContextTestScenarioApiTests(unittest.TestCase):
     def setUp(self) -> None:
-        self._enabled = OPTION.agent.context_test_scenarios_enabled
         self.user_id = "context-tester"
         self.stores, self.engine, self.session_factory = make_sqlite_stores_sync()
         app = FastAPI()
@@ -77,7 +75,6 @@ class ContextTestScenarioApiTests(unittest.TestCase):
         self.client = TestClient(app, headers={"user": self.user_id})
 
     def tearDown(self) -> None:
-        OPTION.agent.context_test_scenarios_enabled = self._enabled
         reset_context()
         asyncio.run(self.engine.dispose())
 
@@ -93,16 +90,15 @@ class ContextTestScenarioApiTests(unittest.TestCase):
         )
         return agent.id
 
-    def test_disabled_endpoint_is_not_exposed(self) -> None:
-        OPTION.agent.context_test_scenarios_enabled = False
+    def test_scenario_endpoint_is_available_without_feature_flag(self) -> None:
         response = self.client.get(
             "/api/v1/context-test-scenarios",
             params={"agent_id": self.agent_id},
         )
-        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.json()["scenarios"]), 3)
 
     def test_create_scenario_writes_owned_schema_valid_history(self) -> None:
-        OPTION.agent.context_test_scenarios_enabled = True
         listing = self.client.get(
             "/api/v1/context-test-scenarios",
             params={"agent_id": self.agent_id},

@@ -129,11 +129,6 @@ class Agent(Category):
     )
     max_total_tokens = Option(None, val_type=int, bind_env="MAX_TOTAL_TOKENS")
     request_retries = Option(2, val_type=int, bind_env="REQUEST_RETRIES")
-    context_compaction_enabled = Option(
-        False,
-        val_type=bool,
-        bind_env="CONTEXT_COMPACTION_ENABLED",
-    )
     context_compaction_trigger_ratio = Option(
         0.80,
         val_type=float,
@@ -145,12 +140,6 @@ class Agent(Category):
         val_type=float,
         bind_env="CONTEXT_COMPACTION_TARGET_RATIO",
         extra_check=_ensure_ratio,
-    )
-    context_output_token_floor = Option(
-        2048,
-        val_type=int,
-        bind_env="CONTEXT_OUTPUT_TOKEN_FLOOR",
-        extra_check=_ensure_positive_int,
     )
     context_keep_tool_pairs = Option(
         3,
@@ -168,6 +157,11 @@ class Agent(Category):
         30.0,
         val_type=float,
         bind_env="CONTEXT_SUMMARY_TIMEOUT",
+    )
+    context_test_scenarios_enabled = Option(
+        False,
+        val_type=bool,
+        bind_env="CONTEXT_TEST_SCENARIOS_ENABLED",
     )
     skills_dir = Option(
         _resolve_repo_path("skills"),

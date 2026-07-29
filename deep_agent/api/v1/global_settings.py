@@ -113,14 +113,6 @@ _SETTING_GROUPS = (
         label="上下文压缩",
         items=(
             _SettingDefinition(
-                "context_compaction_enabled",
-                "启用上下文压缩",
-                "DEEP_AGENT_CONTEXT_COMPACTION_ENABLED",
-                "agent",
-                "context_compaction_enabled",
-                "全局开关；模型未配置上下文窗口时仍会自动停用。",
-            ),
-            _SettingDefinition(
                 "context_compaction_trigger_ratio",
                 "压缩触发比例",
                 "DEEP_AGENT_CONTEXT_COMPACTION_TRIGGER_RATIO",
@@ -135,15 +127,6 @@ _SETTING_GROUPS = (
                 "agent",
                 "context_compaction_target_ratio",
                 "触发后将模型输入历史压缩到可用请求预算的该比例附近。",
-            ),
-            _SettingDefinition(
-                "context_output_token_floor",
-                "输出预估下限",
-                "DEEP_AGENT_CONTEXT_OUTPUT_TOKEN_FLOOR",
-                "agent",
-                "context_output_token_floor",
-                "没有历史样本时使用的动态输出预估下限；模型最大输出只作为上限。",
-                "Token",
             ),
             _SettingDefinition(
                 "context_keep_tool_pairs",
@@ -169,7 +152,7 @@ _SETTING_GROUPS = (
                 "DEEP_AGENT_CONTEXT_SUMMARY_TIMEOUT",
                 "agent",
                 "context_summary_timeout",
-                "上下文摘要模型调用的最大等待时间；失败时使用滑动窗口兜底且不更新 Checkpoint。",
+                "主模型单次摘要调用的最大等待时间；失败时使用滑动窗口兜底且不更新 Checkpoint。",
                 "秒",
             ),
         ),

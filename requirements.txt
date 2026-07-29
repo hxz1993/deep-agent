@@ -2,6 +2,7 @@
 # to avoid pulling in every provider SDK (bedrock, cohere, huggingface, ...).
 pydantic-ai-slim[openai,anthropic,google,mcp]==2.14.1
 pydantic-ai-harness==0.10.0
+tiktoken>=0.13,<1
 
 # Web framework
 uvicorn[standard]>=0.30

@@ -1,10 +1,13 @@
 const MAX_EVENTS = 80;
-const WORKSPACE_ASSET_VERSION = "20260728-6";
+const WORKSPACE_ASSET_VERSION = "20260729-2";
 
 let initialized = false;
 let eventRows = [];
 let activeInspectorTab = "overview";
 let lastRenderKey = "";
+let contextTestCatalog = null;
+let contextTestCatalogAgentId = "";
+let contextTestRequestAgentId = "";
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -65,6 +68,13 @@ function installLegacyDom(source) {
     const search = document.createElement("label");
     search.className = "compact-search session-search";
     search.innerHTML = '<span aria-hidden="true">⌕</span><input type="search" id="sessionSearchInput" placeholder="搜索当前 Agent 会话" />';
+    const testChatButton = document.createElement("button");
+    testChatButton.type = "button";
+    testChatButton.id = "contextTestChatBtn";
+    testChatButton.className = "icon-action session-test-action hidden";
+    testChatButton.title = "新建测试会话";
+    testChatButton.setAttribute("aria-label", "新建测试会话");
+    testChatButton.innerHTML = '<i data-lucide="flask-conical"></i>';
     const newChatButton = document.createElement("button");
     newChatButton.type = "button";
     newChatButton.id = "newChatBtn";
@@ -73,7 +83,7 @@ function installLegacyDom(source) {
     newChatButton.title = "为当前 Agent 新建对话";
     newChatButton.setAttribute("aria-label", "为当前 Agent 新建对话");
     newChatButton.innerHTML = '<i data-lucide="square-pen"></i>';
-    toolbar.append(search, newChatButton);
+    toolbar.append(search, testChatButton, newChatButton);
     sessionSection.insertBefore(toolbar, sessionSection.querySelector("#sessionList"));
   }
 
@@ -89,8 +99,158 @@ function installLegacyDom(source) {
 
   const host = document.getElementById("workspaceLegacyHost");
   host.replaceChildren(sidebar, chat);
+  installContextTestDialog();
 
   document.getElementById("sessionSearchInput")?.addEventListener("input", filterSessions);
+}
+
+function installContextTestDialog() {
+  document.getElementById("contextTestDialog")?.remove();
+  const dialog = document.createElement("dialog");
+  dialog.id = "contextTestDialog";
+  dialog.className = "context-test-dialog";
+  dialog.innerHTML = `
+    <form method="dialog">
+      <header>
+        <div><strong>新建测试会话</strong><span>快速初始化一段可触发上下文压缩的合法对话历史</span></div>
+        <button type="button" class="icon-action" data-context-test-close aria-label="关闭"><i data-lucide="x"></i></button>
+      </header>
+      <div class="context-test-body">
+        <div class="context-test-budget" id="contextTestBudget"></div>
+        <div class="context-test-scenarios" id="contextTestScenarios"></div>
+        <div class="context-test-error hidden" id="contextTestError"></div>
+      </div>
+      <footer>
+        <button type="button" data-context-test-close>取消</button>
+        <button type="button" class="primary" id="createContextTestBtn">创建并打开</button>
+      </footer>
+    </form>`;
+  document.body.appendChild(dialog);
+  dialog.querySelectorAll("[data-context-test-close]").forEach((button) => {
+    button.addEventListener("click", () => dialog.close());
+  });
+}
+
+function formatTokens(value) {
+  return Number.isFinite(Number(value)) ? Number(value).toLocaleString("zh-CN") : "—";
+}
+
+function renderContextTestDialog() {
+  if (!contextTestCatalog) return;
+  const budget = document.getElementById("contextTestBudget");
+  const scenarios = document.getElementById("contextTestScenarios");
+  if (!budget || !scenarios) return;
+  budget.innerHTML = `
+    <span>模型 <strong>${escapeHtml(contextTestCatalog.model_name)}</strong></span>
+    <span>窗口 <strong>${escapeHtml(formatTokens(contextTestCatalog.context_window_tokens))}</strong></span>
+    <span>触发线 <strong>${escapeHtml(formatTokens(contextTestCatalog.trigger_tokens))}</strong></span>
+    <span>目标线 <strong>${escapeHtml(formatTokens(contextTestCatalog.target_tokens))}</strong></span>`;
+  scenarios.innerHTML = contextTestCatalog.scenarios
+    .map(
+      (scenario, index) => `
+        <label class="context-test-scenario">
+          <input type="radio" name="contextTestScenario" value="${escapeHtml(scenario.key)}" ${index === 0 ? "checked" : ""} />
+          <span class="context-test-scenario-copy">
+            <strong>${escapeHtml(scenario.title)}</strong>
+            <span>${escapeHtml(scenario.description)}</span>
+            <small>${escapeHtml(scenario.expected_behavior)}</small>
+          </span>
+        </label>`,
+    )
+    .join("");
+}
+
+async function loadContextTestCatalog(agentId) {
+  const button = document.getElementById("contextTestChatBtn");
+  if (!agentId) {
+    button?.classList.add("hidden");
+    return null;
+  }
+  if (contextTestCatalogAgentId === agentId && contextTestCatalog) {
+    button?.classList.remove("hidden");
+    return contextTestCatalog;
+  }
+  if (contextTestRequestAgentId === agentId) return null;
+  button?.classList.add("hidden");
+  contextTestRequestAgentId = agentId;
+  try {
+    const response = await daFetch(
+      serviceUrl(`api/v1/context-test-scenarios?agent_id=${encodeURIComponent(agentId)}`),
+    );
+    if (!response.ok) {
+      if (contextTestRequestAgentId === agentId) button?.classList.add("hidden");
+      return null;
+    }
+    const payload = await response.json();
+    if (contextTestRequestAgentId !== agentId) return null;
+    contextTestCatalog = payload;
+    contextTestCatalogAgentId = agentId;
+    button?.classList.remove("hidden");
+    return payload;
+  } catch {
+    if (contextTestRequestAgentId === agentId) button?.classList.add("hidden");
+    return null;
+  } finally {
+    if (contextTestRequestAgentId === agentId) contextTestRequestAgentId = "";
+  }
+}
+
+async function openContextTestDialog() {
+  const api = window.DeepAgentConsoleChat;
+  const dialog = document.getElementById("contextTestDialog");
+  if (!api?.state.agentId || !dialog) return;
+  const catalog = await loadContextTestCatalog(api.state.agentId);
+  if (!catalog) return;
+  document.getElementById("contextTestError")?.classList.add("hidden");
+  renderContextTestDialog();
+  window.lucide?.createIcons();
+  dialog.showModal();
+}
+
+async function createContextTestSession() {
+  const api = window.DeepAgentConsoleChat;
+  const dialog = document.getElementById("contextTestDialog");
+  const createButton = document.getElementById("createContextTestBtn");
+  const error = document.getElementById("contextTestError");
+  const selected = dialog?.querySelector('input[name="contextTestScenario"]:checked');
+  if (!api?.state.agentId || !selected || !createButton || !error) return;
+  createButton.disabled = true;
+  createButton.textContent = "正在创建…";
+  error.classList.add("hidden");
+  try {
+    const response = await daFetch(
+      serviceUrl(`api/v1/context-test-scenarios/${encodeURIComponent(selected.value)}`),
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ agent_id: api.state.agentId }),
+      },
+    );
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(
+        typeof payload.detail === "string"
+          ? payload.detail
+          : `创建测试会话失败：HTTP ${response.status}`,
+      );
+    }
+    dialog.close();
+    await api.syncSessionsFromBackend();
+    await api.openSession({
+      id: payload.session.session_id,
+      agentId: payload.session.agent_id,
+      agentName: payload.session.agent_name,
+      title: payload.session.title,
+      messageCount: payload.session.message_count,
+    });
+    api.setComposerText(payload.recommended_prompt);
+  } catch (cause) {
+    error.textContent = cause?.message || "创建测试会话失败";
+    error.classList.remove("hidden");
+  } finally {
+    createButton.disabled = false;
+    createButton.textContent = "创建并打开";
+  }
 }
 
 function filterSessions(event) {
@@ -109,6 +269,9 @@ function renderAgents() {
     return !query || text.includes(query);
   });
   const host = document.getElementById("consoleAgentList");
+  if (api.state.agentId && api.state.agentId !== contextTestCatalogAgentId) {
+    void loadContextTestCatalog(api.state.agentId);
+  }
   document.getElementById("agentCount").textContent = `${agents.length} 个`;
   if (!agents.length) {
     host.innerHTML = '<div class="list-empty">没有匹配的 Agent</div>';
@@ -243,6 +406,8 @@ function bindWorkspaceControls() {
     await window.DeepAgentConsoleChat?.loadAgents();
     renderAgents();
   });
+  document.getElementById("contextTestChatBtn")?.addEventListener("click", openContextTestDialog);
+  document.getElementById("createContextTestBtn")?.addEventListener("click", createContextTestSession);
   document.querySelectorAll("[data-inspector-tab]").forEach((button) => {
     button.addEventListener("click", () => {
       document.querySelectorAll("[data-inspector-tab]").forEach((item) => item.classList.toggle("active", item === button));

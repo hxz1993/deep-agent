@@ -21,6 +21,7 @@ from deep_agent.agent.history import (
 )
 from deep_agent.agent.spec import AgentSpec, anonymous_spec
 from deep_agent.agent.context.budget import build_context_budget
+from deep_agent.agent.context.estimator import TokenEstimator
 from deep_agent.capabilities.mcp.resolver import load_mcp_rows
 from deep_agent.capabilities.ui.registry import load_ui_tool_hints
 from deep_agent.schemas.chat import SessionInfo, SessionListResponse
@@ -232,6 +233,12 @@ class SessionContextStatus(BaseModel):
     context_window_tokens: int | None = None
     max_output_tokens: int | None = None
     predicted_output_tokens: int | None = None
+    output_prediction_source: str | None = None
+    output_prediction_sample_count: int = 0
+    provider_sample_count: int = 0
+    estimated_sample_count: int = 0
+    estimator_source: str | None = None
+    estimate_scope: str = "history_only"
     trigger_tokens: int | None = None
     target_tokens: int | None = None
     checkpoint_exists: bool = False
@@ -269,15 +276,26 @@ async def get_session_context_status(
     )
     context_window_tokens: int | None = None
     max_output_tokens: int | None = None
+    model_code: str | None = None
+    model_base_url: str | None = None
     if api_agent_id:
         agent_row = await ctx.stores.agent.get_by_id(api_agent_id)
         if agent_row is not None:
             context_window_tokens = agent_row.llm_model.context_window_tokens
             max_output_tokens = agent_row.llm_model.max_output_tokens
+            model_code = agent_row.llm_model.model
+            model_base_url = agent_row.llm_model.base_url
+    estimator = TokenEstimator.for_model(
+        model_code or "",
+        model_base_url,
+    )
     budget = build_context_budget(
         history,
         context_window_tokens=context_window_tokens,
         max_output_tokens=max_output_tokens,
+        estimator=estimator,
+        output_history=history,
+        estimate_scope="history_only",
     )
     checkpoint = await ctx.stores.context_checkpoint.get(
         resolved_session_id,
@@ -292,6 +310,12 @@ async def get_session_context_status(
         context_window_tokens=context_window_tokens,
         max_output_tokens=max_output_tokens,
         predicted_output_tokens=budget.predicted_output_tokens,
+        output_prediction_source=budget.output_prediction_source,
+        output_prediction_sample_count=budget.output_prediction_sample_count,
+        provider_sample_count=budget.provider_sample_count,
+        estimated_sample_count=budget.estimated_sample_count,
+        estimator_source=budget.estimator_source,
+        estimate_scope=budget.estimate_scope,
         trigger_tokens=budget.trigger_tokens,
         target_tokens=budget.target_tokens,
         checkpoint_exists=checkpoint is not None,

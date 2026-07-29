@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createSseParser, parseSseBlock, reduceToolEvents } from "../../../frontend/console/protocol.js";
+import {
+  contextCompactionPresentation,
+  createSseParser,
+  parseSseBlock,
+  reduceToolEvents,
+} from "../../../frontend/console/protocol.js";
 
 test("SSE 事件可以跨网络 chunk 解析", () => {
   const events = [];
@@ -34,5 +39,23 @@ test("相同 tool_call_id 合并，不同 id 保持独立", () => {
       { tool_call_id: "a", status: "complete", tool: "clarify", args: { title: "确认" }, result: { confirmed: true } },
       { tool_call_id: "b", status: "pending", tool: "search", args: { q: "A" } },
     ],
+  );
+});
+
+test("上下文压缩事件提供短暂状态文案", () => {
+  assert.deepEqual(
+    contextCompactionPresentation({ phase: "started" }),
+    { phase: "started", message: "正在压缩上下文…", active: true },
+  );
+  assert.equal(
+    contextCompactionPresentation({
+      phase: "fallback",
+      message: "已缩减较早上下文，继续生成…",
+    }).message,
+    "已缩减较早上下文，继续生成…",
+  );
+  assert.equal(
+    contextCompactionPresentation({ phase: "ignored" }).active,
+    false,
   );
 });

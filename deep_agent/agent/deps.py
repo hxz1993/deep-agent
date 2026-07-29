@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Mapping
+from typing import TYPE_CHECKING, Mapping
+
+if TYPE_CHECKING:
+    from deep_agent.agent.context.runtime import ContextRunState
 
 
 @dataclass
@@ -20,3 +23,4 @@ class AgentDeps:
     user: str | None = None
     agent_id: str | None = None
     request_headers: Mapping[str, str] = field(default_factory=dict)
+    context_state: "ContextRunState | None" = None

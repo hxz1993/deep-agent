@@ -8,15 +8,14 @@ from typing import Any
 
 from loguru import logger
 from pydantic_ai.messages import ModelMessage
-from pydantic_ai_harness.compaction import estimate_token_count
-
+from deep_agent.agent.context.estimator import TokenEstimator
 from deep_agent.db.serialization import deserialize_message, serialize_message
 from deep_agent.db.stores.context_checkpoint import (
     ContextCheckpointSnapshot,
     ContextCheckpointStoreBase,
 )
 
-PAYLOAD_SCHEMA_VERSION = 1
+PAYLOAD_SCHEMA_VERSION = 2
 _SENSITIVE_KEYS = {
     "authorization",
     "cookie",
@@ -75,15 +74,21 @@ def projection_fingerprint(
     target_ratio: float,
     keep_tool_pairs: int,
     summary_model_id: str | None,
+    max_output_tokens: int | None = None,
+    estimator_source: str | None = None,
 ) -> str:
     payload = {
-        "policy": "deep-agent-tiered-v1",
+        "policy": "deep-agent-tiered-v2",
+        "payload_schema_version": PAYLOAD_SCHEMA_VERSION,
         "llm_model_id": llm_model_id,
         "context_window_tokens": context_window_tokens,
+        "max_output_tokens": max_output_tokens,
         "trigger_ratio": trigger_ratio,
         "target_ratio": target_ratio,
         "keep_tool_pairs": keep_tool_pairs,
         "summary_model_id": summary_model_id,
+        "estimator_source": estimator_source,
+        "summary_policy": "main-model-safe-rolling-v1",
     }
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
@@ -105,7 +110,14 @@ def _sanitize_value(value: Any, *, key: str | None = None) -> Any:
         return [_sanitize_value(item) for item in value]
     if isinstance(value, dict):
         kind = str(value.get("kind") or "")
-        if kind in _MEDIA_KINDS or kind == "attachment-ref":
+        if kind == "attachment-ref":
+            return {
+                "kind": "attachment-ref",
+                "id": str(value.get("id") or ""),
+                "name": value.get("name"),
+                "mime": value.get("mime"),
+            }
+        if kind in _MEDIA_KINDS:
             return {
                 "kind": "text-content",
                 "content": "[附件内容已省略；原始附件仍保留在会话历史中]",
@@ -189,6 +201,7 @@ async def save_projection(
     fingerprint: str,
     expected_row_version: int,
     summary_model_id: str | None,
+    estimator: TokenEstimator | None = None,
 ) -> bool:
     if not raw_history:
         return False
@@ -202,6 +215,8 @@ async def save_projection(
         payload=payload,
         payload_schema_version=PAYLOAD_SCHEMA_VERSION,
         projection_fingerprint=fingerprint,
-        estimated_tokens=estimate_token_count(projected_history),
+        estimated_tokens=(estimator or TokenEstimator.conservative()).messages(
+            projected_history
+        ),
         summary_model_id=summary_model_id,
     )

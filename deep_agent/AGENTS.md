@@ -50,7 +50,7 @@ MCP 在请求时由 `resolve_mcp_toolsets` 解析（DB 行 + `mcps/` builtin 兜
 1. 解析 `StreamChatRequest`；`session_id` 缺省则生成 UUID
 2. **无 `agent_id`**：`build_runner(model?, capabilities?)` → `OPTION` 默认 `AgentSpec`
 3. **有 `agent_id`**：`build_runner_for_agent()` → `agents` 表 → `AgentSpec.from_row()` → 存储 `(agent_id, session_id)`
-4. `AgentRunner.run_stream()`：session 锁 → history → `agent.iter()` → SSE 事件 → `append(new_messages)`
+4. `AgentRunner.run_stream()`：session 锁 → raw history / Checkpoint 投影 → 原生 Capability 预算与压缩 → SSE 事件 → `append(new_messages)`
 5. `capabilities: null` → 仅 `default_enabled=True`；显式列表按名启用
 
 ### 能力装配与模型输入
@@ -72,6 +72,10 @@ DeepAgent 自研 `capabilities.registry.Capability` 是配置包装对象，负�
 7. Harness `StepPersistence` 不替代现有 SQL 会话、SSE 和 Deferred/Pending；只有副作用账本、子 Agent 或崩溃恢复成为真实需求时再接入。
 8. Harness 仍为 0.x。引入时必须将 `pydantic-ai-slim` 与 `pydantic-ai-harness` 固定为经过联合回归的准确版本，禁止继续依赖无上限 `>=` 漂移。
 9. 不要通过修改 `AgentRunner` 主循环重复实现 Pydantic AI 已提供的机制。
+
+当前上下文压缩默认自动启用：模型配置有效 `context_window_tokens` 即启用，否则停用。
+摘要始终复用当前 Agent 主模型，并与正式回答共享 `RunUsage` 和全局 `UsageLimits`；
+`chat_messages` 保持完整事实源，只有摘要成功且复检达到目标线时才覆盖 Checkpoint。
 
 完整审计见 [`../docs/design/03-context-compaction/pydantic-ai-native-capabilities-and-deepagent-usage-audit.md`](../docs/design/03-context-compaction/pydantic-ai-native-capabilities-and-deepagent-usage-audit.md)；
 上下文压缩的实测结论、数据结构和分阶段方案见
@@ -138,7 +142,7 @@ DeepAgent 自研 `capabilities.registry.Capability` 是配置包装对象，负�
 | `agents` | DB Agent（UUID PK，name 唯一） |
 | `llm_models` | LLM 运行时唯一模型事实：连接、模态、上下文、最大输出与 tags |
 | `model_catalog` | models.dev 的 Lab/Model/Provider 数据库快照，只用于浏览和预填 |
-| `auxiliary_model_configs` | 辅助模型场景（标题生成、上下文摘要）绑定 |
+| `auxiliary_model_configs` | 辅助模型场景绑定；当前只用于会话标题生成 |
 | `mcp_servers` | MCP transport、config JSON、最近一次 inspection 检测快照 |
 | `ui_tool_definitions` | 手工 UI 工具定义；builtin 由代码生成，不写表 |
 | `chat_sessions` | 会话元数据 |
@@ -268,8 +272,11 @@ SSE 协议：[`../docs/guides/sse-protocol.md`](../docs/guides/sse-protocol.md)�
 7. `model_catalog` 不是运行时事实源，目录刷新不得修改已有 `llm_models`。模型名称和 Base URL 不再用于猜测模态；上下文缺失时后续自动压缩必须关闭。
 7. 配置中心必填文本会去除首尾空白并拒绝空值，显式把必填更新字段传为 `null` 返回 422；重复名称返回 409。删除仍被 Agent 引用的 MCP 或 UI 工具返回 409，并在 `detail.referenced_by` 列出引用方。
 8. 请求上下文以 App 为主键：标准 App 必须以三位数字结尾；Space 自动取 `app[:-3]`。App 与显式 Space 不一致时返回 422，Language 缺失时默认 `zh-cn`。
-9. 上下文压缩只由全局环境变量控制。只有实际生成/更新 Summary 才写 Checkpoint；
-   确定性压缩、Pending、取消、失败都不更新。Checkpoint 写入失败不能让已完成对话失败。
+9. 上下文压缩在模型配置有效上下文窗口时自动启用；环境变量只调节全局比例、工具保留量和摘要超时，
+   不提供启用开关。只有主模型实际生成/更新 Summary 且复检达标时才写 Checkpoint；
+   确定性压缩、Sliding Window、Pending、取消、失败都不更新。Checkpoint 写入失败不能让已完成对话失败。
+10. Console 压缩测试会话只在 `CONTEXT_TEST_SCENARIOS_ENABLED=true` 时提供；后端必须按当前模型
+    实时预算构造可重新反序列化的普通对话历史，不得直接写 Checkpoint，也不得新增测试专用表。
 
 | 现象 | 原因 |
 | --- | --- |

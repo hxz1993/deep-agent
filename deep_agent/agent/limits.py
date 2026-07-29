@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 
 from pydantic_ai.exceptions import UsageLimitExceeded
+from deep_agent.agent.context.compaction import ContextWindowExceededError
 
 _LIMIT_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (
@@ -36,4 +37,6 @@ def format_stream_error(exc: Exception) -> str:
             match = pattern.search(text)
             if match:
                 return template.format(match.group(1))
+    if isinstance(exc, ContextWindowExceededError):
+        return str(exc)
     return str(exc)

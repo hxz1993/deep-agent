@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -35,6 +35,11 @@ class AuxiliaryModelStoreBase(SessionBoundMixin):
 
     async def _ensure_defaults_once(self) -> None:
         async with self._write() as db:
+            await db.execute(
+                delete(AuxiliaryModelConfig).where(
+                    AuxiliaryModelConfig.use_case == "context_summary"
+                )
+            )
             for use_case in AUXILIARY_MODEL_CATALOG:
                 if await self._get_by_use_case(db, use_case) is None:
                     db.add(AuxiliaryModelConfig(use_case=use_case, llm_model_id=None))

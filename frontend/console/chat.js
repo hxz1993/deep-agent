@@ -1,5 +1,9 @@
 import { buildChoiceResult, normalizeOption, normalizeStructuredFields, validateUiToolCall } from "./hitl.js?v=20260728-2";
-import { parseSseBlock, readSse } from "./protocol.js?v=20260720-1";
+import {
+  contextCompactionPresentation,
+  parseSseBlock,
+  readSse,
+} from "./protocol.js?v=20260729-1";
 import { formatSessionIdSubtitle } from "./session-display.js?v=20260728-2";
 
 /* ------------------------------------------------------------------ *
@@ -8,6 +12,7 @@ import { formatSessionIdSubtitle } from "./session-display.js?v=20260728-2";
  *
  * 后端 SSE 事件 (event: <type>, data: <json>):
  *   session      -> { session_id, agent_id }
+ *   context_compaction -> { type:"context_compaction", phase, message }
  *   text         -> { type:"text", delta }
  *   thinking     -> { type:"thinking", delta }
  *   tool_call    -> { type:"tool_call", tool, args, tool_call_id, widget?, metadata? }
@@ -1386,6 +1391,7 @@ async function runChatStream(payload, assistant) {
       addErrorTo(assistant, `请求失败：${e.message}`);
     }
   } finally {
+    assistant.hideContextCompaction();
     assistant.finalizeThinking();
     assistant.finalizeText();
     setStreaming(false);
@@ -1474,20 +1480,27 @@ function handleEvent({ event, data }, assistant) {
       }
       break;
     }
+    case "context_compaction":
+      assistant.showContextCompaction(data);
+      break;
     case "thinking":
+      assistant.hideContextCompaction();
       assistant.appendThinking(data.delta || "");
       break;
     case "text":
+      assistant.hideContextCompaction();
       assistant.finalizeThinking();
       assistant.appendText(data.delta || "");
       break;
     case "tool_call":
+      assistant.hideContextCompaction();
       assistant.addToolCall(data);
       break;
     case "tool_result":
       assistant.addToolResult(data);
       break;
     case "final":
+      assistant.hideContextCompaction();
       assistant.finalizeThinking();
       assistant.finalizeText();
       syncHistoryMeta(data);
@@ -1516,6 +1529,7 @@ function handleEvent({ event, data }, assistant) {
       updateHitlInputState();
       break;
     case "error":
+      assistant.hideContextCompaction();
       assistant.finalizeThinking();
       assistant.finalizeText();
       syncHistoryMeta(data);
@@ -1527,6 +1541,7 @@ function handleEvent({ event, data }, assistant) {
       });
       break;
     case "cancelled":
+      assistant.hideContextCompaction();
       state.streamCancelled = true;
       assistant.finalizeThinking();
       assistant.finalizeText();
@@ -1752,7 +1767,40 @@ function createAssistantMessage(timestamp, branchPoint) {
   let textBubble = null;
   let thinkingBlock = null;
   let thinkingBuffer = "";
+  let contextCompactionBlock = null;
+  let contextCompactionTimer = null;
+  let pendingContextCompaction = null;
   const toolBlocks = new Map(); // tool_call_id -> element
+
+  function renderContextCompaction(data) {
+    const presentation = contextCompactionPresentation(data);
+    if (!presentation.active) return;
+    if (!contextCompactionBlock) {
+      contextCompactionBlock = document.createElement("div");
+      contextCompactionBlock.className = "context-compaction-status";
+      contextCompactionBlock.innerHTML = `
+        <span class="context-compaction-icon">↻</span>
+        <span class="context-compaction-copy"></span>
+        <span class="spinner"></span>`;
+      wrap.appendChild(contextCompactionBlock);
+    }
+    contextCompactionBlock.dataset.phase = presentation.phase;
+    contextCompactionBlock.querySelector(".context-compaction-copy").textContent =
+      presentation.message;
+    scrollToBottom();
+  }
+
+  function clearContextCompaction() {
+    pendingContextCompaction = null;
+    if (contextCompactionTimer) {
+      clearTimeout(contextCompactionTimer);
+      contextCompactionTimer = null;
+    }
+    if (contextCompactionBlock) {
+      contextCompactionBlock.remove();
+      contextCompactionBlock = null;
+    }
+  }
 
   function ensureThinkingBlock() {
     if (!thinkingBlock) {
@@ -1803,6 +1851,23 @@ function createAssistantMessage(timestamp, branchPoint) {
 
   return {
     row,
+    showContextCompaction(data) {
+      pendingContextCompaction = data;
+      if (contextCompactionBlock) {
+        renderContextCompaction(data);
+        return;
+      }
+      if (contextCompactionTimer) return;
+      contextCompactionTimer = setTimeout(() => {
+        contextCompactionTimer = null;
+        if (pendingContextCompaction) {
+          renderContextCompaction(pendingContextCompaction);
+        }
+      }, 150);
+    },
+    hideContextCompaction() {
+      clearContextCompaction();
+    },
     appendThinking(delta) {
       thinkingBuffer += delta;
       renderThinkingContent();
@@ -2284,6 +2349,14 @@ window.DeepAgentConsoleChat = {
   readSse,
   syncSessionsFromBackend,
   stopStream,
+  async openSession(session) {
+    await switchSession(session);
+  },
+  setComposerText(text) {
+    el.input.value = String(text || "");
+    autoGrow();
+    el.input.focus();
+  },
   selectAgent(agentId) {
     if (!agentId || !state.agents.some((agent) => agent.id === agentId)) return;
     if (state.agentId === agentId) return;

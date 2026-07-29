@@ -50,6 +50,20 @@ export async function readSse(stream, onEvent) {
   parser.flush();
 }
 
+export function contextCompactionPresentation(data = {}) {
+  const phase = data.phase || "started";
+  const defaults = {
+    started: "正在压缩上下文…",
+    completed: "上下文压缩完成，正在生成…",
+    fallback: "已缩减较早上下文，正在生成…",
+  };
+  return {
+    phase,
+    message: data.message || defaults[phase] || "正在处理上下文…",
+    active: ["started", "completed", "fallback"].includes(phase),
+  };
+}
+
 export function reduceToolEvents(events) {
   const calls = new Map();
   for (const event of events) {

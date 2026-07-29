@@ -216,7 +216,7 @@ class SessionModelOverrideIntegrationTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(
             final["context"]["budget"]["reason"],
-            "disabled_by_environment",
+            "enabled",
         )
 
         async with AsyncClient(
@@ -232,7 +232,7 @@ class SessionModelOverrideIntegrationTests(unittest.IsolatedAsyncioTestCase):
         payload = response.json()
         self.assertEqual(payload["context_window_tokens"], 128_000)
         self.assertEqual(payload["max_output_tokens"], 8_192)
-        self.assertFalse(payload["compaction_enabled"])
+        self.assertTrue(payload["compaction_enabled"])
         self.assertFalse(payload["checkpoint_exists"])
 
 

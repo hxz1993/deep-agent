@@ -7,6 +7,10 @@
 > Harness 源码审计版本：`0.8.0`；隔离实测版本：`pydantic-ai-harness 0.10.0` + `pydantic-ai-slim 2.14.1`
 >
 > 本文只做源码审计和方案判断，不代表已经引入 Harness、修改数据库或改变运行行为
+>
+> **2026-07-29 实施说明**：本文保留调研时点和历史备选项。当前最终实现以
+> [上下文压缩实施方案](context-compaction-implementation-plan.md) 为准：压缩默认自动启用，
+> 摘要固定使用 Agent 主模型，不再使用 `context_summary` 辅助模型或启用环境变量。
 
 配套材料：
 
@@ -649,10 +653,10 @@ tests/unit/ + tests/integration/
 
 建议：
 
-1. 固定 `pydantic-ai-harness==0.10.0` 与 `pydantic-ai-slim==2.14.1`；通过 Feature Flag 只给一个测试 Agent 开启。
+1. 固定 `pydantic-ai-harness==0.10.0` 与 `pydantic-ai-slim==2.14.1`；当前实现按模型上下文窗口自动启用。
 2. 先启用 `ClearToolResults`，保留最近若干 Tool Pair。
 3. 仍超预算时启用 `SummarizingCompaction`。
-4. 摘要模型优先复用现有辅助模型体系，新增 `context_summary` use case；该表本身无需新字段，只需扩展已知 use case 和默认配置。
+4. 最终决策为直接复用当前 Agent 主模型，不新增 `context_summary` use case。
 5. 为摘要请求预留 `request_limit`，避免压缩本身把 Agent 提前顶到上限。
 6. 增加派生上下文快照，避免每轮重复压缩完整 SQL 历史。
 7. Provider 原生 `OpenAICompaction` / `AnthropicCompaction` 只对明确支持的模型启用；同一模型不要再叠 Harness 总结压缩。
@@ -727,7 +731,7 @@ tests/unit/ + tests/integration/
 
 1. 第一批启用压缩的 Agent 和模型是哪一个，真实 context window 是多少。
 2. Test/生产 Provider 是否稳定返回 input/output Usage；缺失比例是多少。
-3. 压缩摘要用主模型，还是新增 `context_summary` 辅助模型。
+3. 已决：压缩摘要使用当前 Agent 主模型。
 4. 允许清空哪些工具结果，哪些结果必须永久保留原文供模型使用。
 5. 派生上下文快照是否需要跨环境迁移，还是可随时重建。
 6. 是否已有共享对象存储可承载 Overflow Spill。

@@ -62,6 +62,7 @@ frontend/
 | event | data |
 | --- | --- |
 | `session` | `{ session_id }` 或含 `agent_id` |
+| `context_compaction` | `{ type, phase, message, ... }`（当前请求瞬时状态，不进入历史） |
 | `text` | `{ type, delta }` |
 | `thinking` | `{ type, delta }` |
 | `tool_call` | `{ type, tool, args, tool_call_id, widget?, metadata?, source? }` |
@@ -72,6 +73,9 @@ frontend/
 完整协议（含同 ID 多次推送、生命周期）：[`../docs/guides/sse-protocol.md`](../docs/guides/sse-protocol.md)。
 
 实现参考：`console/chat.js` 与 `console/protocol.js`。
+
+上下文压缩状态延迟 150ms 显示；同一请求只保留一个状态胶囊，收到首个
+`thinking` / `text` / `tool_call` 或结束事件时必须清理。
 
 ---
 
@@ -111,6 +115,7 @@ python -m http.server 5173
 | 模型运行属性 | `console/configuration/llm-models.js`；上下文、最大输出、输入模态和 tags 保存到 `llm_models` |
 | 模型目录 | `console/configuration/catalog.js` → DB-only GET 与管理员 POST refresh |
 | 上下文压缩观测 | `console/chat.js` 拉取 session context-status；`console/workspace.js` 在请求上下文概览展示 |
+| 上下文压缩测试会话 | `console/workspace.js` → 场景弹窗、创建后打开会话并预填验证问题 |
 | Markdown 主题/安全 | `vendor/`，见 `vendor/README.md` |
 
 历史消息由后端按 `session_id` 维护；切换会话时 `GET /api/v1/sessions/{id}/history` 回放。pending UI 工具的 `tool_call` part 同样经后端 enrichment 附带 `widget` / `metadata`。
@@ -127,7 +132,10 @@ python -m http.server 5173
 - `builtin__confirm`、`builtin__choice` 是代码内置但非默认启用的普通 `ui:<name>` 能力；Agent 新建和历史回填不得自动勾选。choice 始终提供候选外自由输入，提交结果固定包含 `selected: string[]` 与 `custom_input: string | null`，二者不能同时为空。
 - MCP 新建页只允许 URL transport；历史 stdio 配置只读且不显示编辑入口。Builtin MCP 继续由仓库内程序配置管理，列表保留编辑入口但不显示删除按钮，后端删除接口也会拒绝。
 - 模型目录只由管理员手工刷新 models.dev，保存模型配置不得触发外网请求。目录按 Lab → Model → Provider 展示，仅负责预填；模态与能力 tags 分开，Agent 运行时只认 `llm_models`。
-- 上下文压缩配置只读且来自环境变量；Console 只展示预算、压缩前后和 Checkpoint 状态，
-  不展示或编辑摘要正文。
+- 上下文压缩在模型配置有效上下文窗口时自动启用；Console 只读展示全局策略、预算、
+  压缩前后和 Checkpoint 状态，不提供启用开关，也不展示或编辑摘要正文。
+- “新建测试会话”是本地/Test 专用入口，必须由后端场景接口是否可用决定显隐；它位于会话
+  搜索框和普通新建按钮之间，不能改变普通新建行为。场景只构造合法历史，不在前端拼接或
+  伪造消息 payload。
 
 更多说明：[`README.md`](README.md)。

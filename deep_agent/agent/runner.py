@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
 from typing import Any, AsyncIterator
 
@@ -18,6 +18,8 @@ from deep_agent.agent.context.checkpoint import (
     save_projection,
 )
 from deep_agent.agent.context.compaction import DeepAgentContextCompaction
+from deep_agent.agent.context.estimator import TokenEstimator
+from deep_agent.agent.context.runtime import ContextRunState
 from deep_agent.agent.attachments import (
     has_user_turn,
     model_supports_image_input,
@@ -93,6 +95,7 @@ class AgentRunner:
         checkpoint_store: ContextCheckpointStoreBase | None = None,
         checkpoint_fingerprint: str | None = None,
         summary_model_id: str | None = None,
+        estimator: TokenEstimator | None = None,
     ) -> None:
         self.agent = agent
         self.store = store
@@ -107,6 +110,7 @@ class AgentRunner:
         self._checkpoint_store = checkpoint_store
         self._checkpoint_fingerprint = checkpoint_fingerprint
         self._summary_model_id = summary_model_id
+        self._estimator = estimator or TokenEstimator.conservative()
 
     @asynccontextmanager
     async def _session_lock(self, session_id: str, *, agent_id: str | None) -> AsyncIterator[None]:
@@ -190,10 +194,15 @@ class AgentRunner:
             user_branch_point=user_branch_point,
         )
 
-    def _context_status(self, history: list[ModelMessage]) -> dict[str, Any]:
+    def _context_status(
+        self,
+        history: list[ModelMessage],
+        deps: AgentDeps | None = None,
+    ) -> dict[str, Any]:
+        state = deps.context_state if deps is not None else None
         budget = (
-            self._context_compaction.last_budget
-            if self._context_compaction is not None
+            state.last_budget
+            if state is not None and state.last_budget is not None
             else None
         )
         if budget is None:
@@ -201,23 +210,49 @@ class AgentRunner:
                 history,
                 context_window_tokens=self._context_window_tokens,
                 max_output_tokens=self._max_output_tokens,
+                estimator=self._estimator,
+                output_history=history,
             )
         telemetry = (
-            self._context_compaction.telemetry.as_dict()
-            if self._context_compaction is not None
+            state.telemetry.as_dict()
+            if state is not None
             else {
                 "triggered": False,
+                "trigger_count": 0,
                 "strategy": "none",
+                "target_met": False,
                 "estimated_tokens_before": budget.estimated_history_tokens,
                 "estimated_tokens_after": budget.estimated_history_tokens,
+                "max_estimated_tokens_before": budget.estimated_history_tokens,
                 "messages_before": len(history),
                 "messages_after": len(history),
+                "reduction_ratio": 0.0,
                 "summary_applied": False,
                 "summary_failed": False,
+                "summary_calls": 0,
+                "summary_chunks": 0,
+                "fallback_reason": None,
                 "failure": None,
             }
         )
         return {"budget": budget.as_dict(), "compaction": telemetry}
+
+    def _prepare_context_state(
+        self,
+        deps: AgentDeps,
+        prepared: _PreparedHistory,
+        *,
+        event_queue: asyncio.Queue[dict[str, Any]] | None = None,
+    ) -> None:
+        if self._context_compaction is None:
+            deps.context_state = None
+            return
+        deps.context_state = ContextRunState(
+            raw_history=list(prepared.raw),
+            estimator=self._estimator,
+            usage_limits=self.usage_limits,
+            event_queue=event_queue,
+        )
 
     async def _maybe_save_checkpoint(
         self,
@@ -231,8 +266,21 @@ class AgentRunner:
             self._checkpoint_store is None
             or self._checkpoint_fingerprint is None
             or self._context_compaction is None
-            or not self._context_compaction.telemetry.summary_applied
-            or self._context_compaction.telemetry.summary_failed
+            or deps.context_state is None
+            or not deps.context_state.telemetry.summary_applied
+            or deps.context_state.telemetry.summary_failed
+            or not deps.context_state.telemetry.target_met
+            or deps.context_state.telemetry.strategy == "sliding_window_fallback"
+        ):
+            return
+        target = (
+            deps.context_state.last_budget.target_tokens
+            if deps.context_state.last_budget is not None
+            else None
+        )
+        if (
+            target is None
+            or deps.context_state.estimator.messages(projected_history) > target
         ):
             return
         try:
@@ -249,6 +297,7 @@ class AgentRunner:
                 fingerprint=self._checkpoint_fingerprint,
                 expected_row_version=expected_row_version,
                 summary_model_id=self._summary_model_id,
+                estimator=deps.context_state.estimator,
             )
             if not saved:
                 logger.warning(
@@ -503,6 +552,7 @@ class AgentRunner:
                 deps,
                 pre_persisted_user=prepared.pre_persisted_user,
             )
+            self._prepare_context_state(deps, prepared)
             result = await self.agent.run(
                 user_prompt,
                 deps=deps,
@@ -531,7 +581,7 @@ class AgentRunner:
                     ),
                 )
         response = _build_run_result(result, self.ui_tool_hints)
-        response["context"] = self._context_status(prepared.projected)
+        response["context"] = self._context_status(prepared.projected, deps)
         return response
 
     async def run_stream(
@@ -564,6 +614,12 @@ class AgentRunner:
                 deps,
                 pre_persisted_user=prepared.pre_persisted_user,
             )
+            compaction_events: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+            self._prepare_context_state(
+                deps,
+                prepared,
+                event_queue=compaction_events,
+            )
             result = None
             cancelled = False
             run_published = False
@@ -579,24 +635,57 @@ class AgentRunner:
                     output_type=_STREAM_OUTPUT_TYPE,
                     model_settings=self.model_settings,
                 ) as stream:
-                    while True:
-                        try:
-                            event = await stream.__anext__()
-                        except StopAsyncIteration:
-                            break
-                        if isinstance(event, AgentRunResultEvent):
-                            result = event.result
-                            continue
-                        mapped = events.map_event(event)
-                        if mapped is not None:
-                            if not _should_publish_ui_tool_call(event, mapped, self.ui_tool_hints):
+                    stream_task: asyncio.Task[Any] | None = asyncio.create_task(
+                        stream.__anext__()
+                    )
+                    status_task: asyncio.Task[Any] | None = asyncio.create_task(
+                        compaction_events.get()
+                    )
+                    try:
+                        while stream_task is not None:
+                            waiters = {stream_task}
+                            if status_task is not None:
+                                waiters.add(status_task)
+                            done, _ = await asyncio.wait(
+                                waiters,
+                                return_when=asyncio.FIRST_COMPLETED,
+                            )
+                            if status_task is not None and status_task in done:
+                                yield status_task.result()
+                                status_task = asyncio.create_task(compaction_events.get())
+                            if stream_task not in done:
                                 continue
-                            accumulator.ingest(mapped)
                             try:
-                                yield enrich_tool_event(mapped, self.ui_tool_hints)
-                            except asyncio.CancelledError:
-                                cancelled = True
+                                event = stream_task.result()
+                            except StopAsyncIteration:
+                                stream_task = None
+                                while not compaction_events.empty():
+                                    yield compaction_events.get_nowait()
                                 break
+                            stream_task = asyncio.create_task(stream.__anext__())
+                            if isinstance(event, AgentRunResultEvent):
+                                result = event.result
+                                continue
+                            mapped = events.map_event(event)
+                            if mapped is not None:
+                                if not _should_publish_ui_tool_call(
+                                    event,
+                                    mapped,
+                                    self.ui_tool_hints,
+                                ):
+                                    continue
+                                accumulator.ingest(mapped)
+                                try:
+                                    yield enrich_tool_event(mapped, self.ui_tool_hints)
+                                except asyncio.CancelledError:
+                                    cancelled = True
+                                    break
+                    finally:
+                        for task in (stream_task, status_task):
+                            if task is not None and not task.done():
+                                task.cancel()
+                                with suppress(asyncio.CancelledError):
+                                    await task
                 if not cancelled and result is not None:
                     deferred_pending = isinstance(result.output, DeferredToolRequests)
                     self._publish_run_complete(
@@ -705,7 +794,7 @@ class AgentRunner:
             self.ui_tool_hints,
             model_message_count=msg_count,
             user_branch_point=branch_pt,
-            context=self._context_status(prepared.projected),
+            context=self._context_status(prepared.projected, deps),
         )
 
 

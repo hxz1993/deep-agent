@@ -54,7 +54,8 @@ tests/
 | `test_catalog.py` | models.dev Lab/Model/Provider 标准化、白名单、扩展元数据和数据库视图 |
 | `test_models_dev.py` | models.dev 严格获取与 Lab 可选补充 |
 | `test_llm_models.py` | 模型上下文、最大输出、输入模态与 tags Store/Schema |
-| `test_context_compaction.py` | 动态输出预算、真实 Harness 压缩、原始历史不改写、脱敏 Checkpoint、CAS 与分支失效 |
+| `test_context_compaction.py` | 统一 Token 估算、动态输出预测、usage 回读、主模型滚动摘要、SSE 状态、原始历史不改写、脱敏 Checkpoint、CAS 与兜底 |
+| `test_context_test_scenarios.py` | 本地/Test 测试会话场景、实时预算、消息往返序列化、开关与用户归属 |
 | `test_session_model_override.py` | Agent 对话 `model_id` 请求级覆盖（`build_runner_for_agent`） |
 | `test_ui_tools_rfc.py` | builtin/manual UI 工具注册、Agent 显式选择、保留名称、Schema 校验与事件 enrichment |
 
@@ -92,5 +93,7 @@ tests/
 - 改 `capabilities/mcp/` 或 `agent/headers.py` 后跑 integration 相关用例
 - 改内置 UI 工具时同时覆盖：新名称、`default_enabled=false`/非锁定能力、`capabilities=null` 和空数组不加载、分别/同时选择、内置修改删除保护，以及 choice 的单选、多选、自由输入和空提交阻止。
 - `builtin__confirm`、`builtin__choice` 不兼容旧 `confirm_action`、`ask_user_choice` pending 会话；测试夹具和断言不得继续把旧名称当作内置工具。
+- 上下文压缩测试场景必须使用正式 Pydantic 消息类型并验证 serialize/deserialize 往返；不要直接
+  插 JSON。场景随当前模型 trigger 动态扩展，断言不能写死消息条数或 Token 值。
 
 更多：[`README.md`](README.md)、[`unit/README.md`](unit/README.md)、[`integration/README.md`](integration/README.md)。

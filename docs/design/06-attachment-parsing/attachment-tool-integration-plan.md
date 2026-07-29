@@ -1,7 +1,7 @@
 # Attachment Tool 合并与运行设计
 
-> 基线：`fix-ruge-0717`  
-> 实施分支：`fix-ruge-0730-attachment-tool`  
+> 基线：`fix-ruge-0717`
+> 实施分支：`fix-ruge-0730-attachment-tool`
 > 数据库：沿用 Alembic `023`，不新增表或迁移
 
 ## 1. 背景与目标
@@ -241,4 +241,3 @@ chat_messages
 3. 文件内容索引、检索式阅读和跨 Run 解析缓存。
 4. 受控的长工具结果外置存储。
 5. 使用态产品页面对“Agent 未开启附件读取”的统一交互提示。
-

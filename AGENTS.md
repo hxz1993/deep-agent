@@ -71,7 +71,7 @@ HTTP → deep_agent/api/v1 → AgentRunner → pydantic_ai.Agent → Capabilitie
                                       └→ SessionStore (postgres/mysql/sqlite)
 ```
 
-能力来源：`native` | `skill:*` | `mcp:*`（DB + `mcps/` 兜底）| `ui:*`
+能力来源：`native` | `attachment` | `skill:*` | `mcp:*`（DB + `mcps/` 兜底）| `ui:*`
 
 ### Pydantic AI 运行边界
 
@@ -84,6 +84,10 @@ HTTP → deep_agent/api/v1 → AgentRunner → pydantic_ai.Agent → Capabilitie
 - 新的运行时横切能力优先评估 Core 的 `PrepareTools`、Hooks、`ToolSearch` 和 Harness 的 Compaction/Overflow；不要默认把逻辑继续写入 `AgentRunner`。
 - Harness 是可选能力库，不是产品平台。会话、身份、配置、HITL、SSE 和 Console 继续由 DeepAgent 负责；引入 Harness 0.x 时必须与 `pydantic-ai-slim` 一起固定准确版本。
 - Provider Usage 是 best effort；OpenAI-compatible 或私有端点返回 0 时可能代表缺失。上下文预算必须结合模型窗口元数据和保守估算，不能只依赖 `result.usage`。
+- 新上传只保存附件引用；默认关闭的 `attachment` 能力通过 1-based
+  `offset/limit`、`has_more/next_offset` 渐进读取 TXT、DOCX、XLSX。合法 `file_id`
+  必须来自当前原始会话，不能从 Checkpoint 推断。详见
+  [`docs/design/06-attachment-parsing/`](docs/design/06-attachment-parsing/)。
 
 ---
 

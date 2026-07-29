@@ -84,7 +84,7 @@ const state = {
   agentId: localStorage.getItem("da_console_agent_id_v1") || "",
   agents: [],
   llmModels: [],
-  uploadCapabilities: { kinds: [], labels: {} },
+  uploadCapabilities: { kinds: [], labels: {}, max_count: 10, max_size_mb: 20 },
   llmModelId: "",
   sessionModelIds: {},
   sessionId: null,
@@ -125,14 +125,16 @@ const LLM_MODALITY_ICONS = {
 /** LLM-native modalities only (Admin ``input_modalities``). */
 const ALL_LLM_MODALITIES = ["text", "image", "audio", "video", "pdf"];
 
-const UPLOAD_KIND_ORDER = ["image", "text_file", "pdf_text", "docx_text", "xlsx_text"];
+const UPLOAD_KIND_ORDER = ["image", "text_file", "pdf", "docx", "xlsx", "audio", "video"];
 
 const UPLOAD_KIND_ICONS = {
   image: "🖼",
-  text_file: "📄",
-  pdf_text: "📄",
-  docx_text: "📝",
-  xlsx_text: "📊",
+  text_file: "📃",
+  pdf: "📄",
+  docx: "📝",
+  xlsx: "📊",
+  audio: "🔊",
+  video: "🎬",
 };
 
 /* ----------------------------- DOM ----------------------------- */
@@ -1123,8 +1125,12 @@ async function loadUploadCapabilities() {
     const r = await daFetch(serviceUrl("api/v1/uploads/capabilities"));
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     state.uploadCapabilities = await r.json();
+    const allowed = Array.isArray(state.uploadCapabilities?.allowed_mimes)
+      ? state.uploadCapabilities.allowed_mimes
+      : [];
+    if (el.fileInput && allowed.length) el.fileInput.accept = allowed.join(",");
   } catch (e) {
-    state.uploadCapabilities = { kinds: [], labels: {} };
+    state.uploadCapabilities = { kinds: [], labels: {}, max_count: 10, max_size_mb: 20 };
     console.warn("[deep-agent] 加载上传能力失败", e);
   }
   updateComposerModelInfo();
@@ -1217,11 +1223,13 @@ function updateComposerModelInfo() {
           let title = `平台上传：${label}`;
           if (key === "image" && !vision) {
             chipClass = "upload-partial";
-            title = `${label}：可上传，但当前模型不支持原生看图`;
+            title = `${label}：当前模型未配置原生图片输入`;
           } else if (key === "image") {
             title = `${label}：可上传，当前模型支持原生看图`;
-          } else if (key.endsWith("_text") || key === "text_file") {
-            title = `${label}：上传后抽文本注入对话（非 LLM 原生多模态）`;
+          } else if (["text_file", "docx", "xlsx"].includes(key)) {
+            title = `${label}：上传后由 Agent 的附件读取工具按需分页读取`;
+          } else if (key === "pdf") {
+            title = `${label}：仅模型配置原生 PDF 输入时可发送，不做本地解析`;
           }
           return `<span class="modality-chip ${chipClass}" title="${escapeHtml(title)}">${icon} ${escapeHtml(label)}</span>`;
         })
@@ -1314,7 +1322,6 @@ async function onSend() {
       id: a.id,
       name: a.name,
       mime: a.mime,
-      extracted_text: a.extracted_text ?? null,
     }));
   }
   if (branchFrom != null) {
@@ -1640,8 +1647,14 @@ async function onPaste(e) {
 }
 
 async function uploadAttachment(file) {
-  if (state.pendingAttachments.length >= 10) {
-    addSystemNote("单次最多 10 个附件。");
+  const maxCount = Number(state.uploadCapabilities?.max_count) || 10;
+  if (state.pendingAttachments.length >= maxCount) {
+    addSystemNote(`单次最多 ${maxCount} 个附件。`);
+    return;
+  }
+  const maxSizeMb = Number(state.uploadCapabilities?.max_size_mb) || 20;
+  if (file.size > maxSizeMb * 1024 * 1024) {
+    addSystemNote(`单个附件不能超过 ${maxSizeMb}MB。`);
     return;
   }
   const form = new FormData();
@@ -1657,7 +1670,6 @@ async function uploadAttachment(file) {
       id: data.id,
       name: data.name,
       mime: data.mime,
-      extracted_text: data.extracted_text,
     });
     renderPendingAttachments();
   } catch (err) {

@@ -17,4 +17,19 @@ def deep_agent_file_key(call: ToolCallPart) -> str | None:
         uri = args.get("uri")
         if isinstance(server, str) and isinstance(uri, str) and server and uri:
             return f"mcp-resource:{server}:{uri}"
+    if call.tool_name in {
+        "read_text_attachment",
+        "read_docx",
+        "read_xlsx",
+    }:
+        file_id = args.get("file_id")
+        if not isinstance(file_id, str) or not file_id:
+            return None
+        offset = args.get("offset", 1)
+        limit = args.get("limit")
+        sheet = args.get("sheet") if call.tool_name == "read_xlsx" else None
+        return (
+            f"attachment:{call.tool_name}:{file_id}:"
+            f"{sheet or ''}:{offset or 1}:{limit or ''}"
+        )
     return None

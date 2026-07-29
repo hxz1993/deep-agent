@@ -376,7 +376,8 @@ count_tokens_before_request
 
 - MCP Tool Result 默认完整持久化、恢复并进入后续模型请求。
 - 内置 `http_get` 单独限制为 4000 字符，但没有通用工具结果上限。
-- 附件提取文本默认每个最多 32,000 字符，每轮最多 10 个附件。
+- 新附件只保存引用；TXT、DOCX、XLSX 由 `attachment` 工具按需分页读取，单页结果再参与
+  通用工具结果治理。历史 `extracted_text` 只用于旧会话兼容。
 - 工具 Schema 也会占用请求上下文，但当前没有统一观测。
 
 ### 7.4 当前 Token 是否可靠

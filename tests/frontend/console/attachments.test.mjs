@@ -1,0 +1,43 @@
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import test from "node:test";
+
+const chatSource = await readFile(
+  new URL("../../../frontend/console/chat.js", import.meta.url),
+  "utf8",
+);
+const agentSource = await readFile(
+  new URL("../../../frontend/console/configuration/agents.js", import.meta.url),
+  "utf8",
+);
+const template = await readFile(
+  new URL("../../../frontend/console/workspace-template.html", import.meta.url),
+  "utf8",
+);
+
+test("附件能力在 Agent 配置中作为普通可选能力展示", () => {
+  assert.match(agentSource, /attachment:\s*"附件读取"/);
+  assert.match(
+    agentSource,
+    /KIND_ORDER\s*=\s*\["native",\s*"attachment",\s*"ui"/,
+  );
+});
+
+test("控制台从后端读取 MIME、数量与大小限制", () => {
+  assert.match(chatSource, /state\.uploadCapabilities\.allowed_mimes/);
+  assert.match(chatSource, /el\.fileInput\.accept = allowed\.join\(","\)/);
+  assert.match(chatSource, /state\.uploadCapabilities\?\.max_count/);
+  assert.match(chatSource, /state\.uploadCapabilities\?\.max_size_mb/);
+  assert.match(chatSource, /file\.size > maxSizeMb \* 1024 \* 1024/);
+});
+
+test("新附件请求不再把前端抽取文本写入聊天载荷", () => {
+  const sendPayloadBlock = chatSource.match(
+    /payload\.attachments = attachments\.map\([\s\S]*?\}\)\);/,
+  )?.[0] || "";
+  assert.ok(sendPayloadBlock);
+  assert.doesNotMatch(sendPayloadBlock, /extracted_text/);
+  assert.match(template, /\.docx/);
+  assert.match(template, /\.xlsx/);
+  assert.match(template, /\.mp4/);
+});

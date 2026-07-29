@@ -147,4 +147,5 @@ async def _build_runner_from_spec(
         ),
         summary_model_id=spec.llm_model_id,
         estimator=estimator,
+        stores=ctx.stores,
     )

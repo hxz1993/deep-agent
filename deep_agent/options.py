@@ -201,18 +201,23 @@ class Agent(Category):
         bind_env="SQLITE_PATH",
         convertor=_resolve_repo_path,
     )
-    upload_max_size_mb = Option(20, val_type=int, bind_env="UPLOAD_MAX_SIZE_MB")
-    upload_max_count = Option(10, val_type=int, bind_env="UPLOAD_MAX_COUNT")
+    upload_max_size_mb = Option(
+        20,
+        val_type=int,
+        bind_env="UPLOAD_MAX_SIZE_MB",
+        extra_check=_ensure_positive_int,
+    )
+    upload_max_count = Option(
+        10,
+        val_type=int,
+        bind_env="UPLOAD_MAX_COUNT",
+        extra_check=_ensure_positive_int,
+    )
     upload_allowed_mimes = Option(
         "",
         val_type=str,
         bind_env="UPLOAD_ALLOWED_MIMES",
         convertor=_strip_optional_str,
-    )
-    upload_extract_text_max_chars = Option(
-        32000,
-        val_type=int,
-        bind_env="UPLOAD_EXTRACT_TEXT_MAX_CHARS",
     )
     image_max_dimension = Option(1568, val_type=int, bind_env="IMAGE_MAX_DIMENSION")
     image_max_bytes = Option(4_194_304, val_type=int, bind_env="IMAGE_MAX_BYTES")
@@ -264,6 +269,8 @@ OPTION = DeepAgentOptions()
 def validate_runtime_options(options: DeepAgentOptions = OPTION) -> None:
     """Resolve startup-critical options so invalid environment values fail fast."""
     _ = options.agent.max_requests
+    _ = options.agent.upload_max_size_mb
+    _ = options.agent.upload_max_count
     trigger_ratio = options.agent.context_compaction_trigger_ratio
     target_ratio = options.agent.context_compaction_target_ratio
     if target_ratio >= trigger_ratio:

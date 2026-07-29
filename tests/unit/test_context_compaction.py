@@ -20,6 +20,7 @@ from pydantic_ai.usage import RequestUsage, UsageLimits
 from pydantic_ai_harness.compaction import estimate_token_count
 
 from deep_agent.agent.context.budget import build_context_budget, predict_output_tokens
+from deep_agent.agent.attachments import attachment_ref_dict
 from deep_agent.agent.context.checkpoint import (
     deserialize_projection,
     history_hash,
@@ -38,11 +39,13 @@ from deep_agent.agent.context.estimator import (
     TokenEstimator,
     conservative_text_tokens,
 )
+from deep_agent.agent.context.file_keys import deep_agent_file_key
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.event_persister import EventPersister
 from deep_agent.agent.runner import AgentRunner
 from deep_agent.db.serialization import deserialize_message, serialize_message
 from deep_agent.options import OPTION
+from deep_agent.schemas.attachment import AttachmentRef
 from tests.helpers.sqlite_stores import make_sqlite_stores
 
 
@@ -80,6 +83,46 @@ def _long_tool_history(*, pairs: int = 8, result_chars: int = 1_200) -> list[Mod
             ]
         )
     return history
+
+
+class AttachmentFileKeyTests(unittest.TestCase):
+    def test_same_attachment_range_has_same_key(self) -> None:
+        first = ToolCallPart(
+            "read_text_attachment",
+            {"file_id": "file-1", "offset": 1, "limit": 500},
+            "call-1",
+        )
+        second = ToolCallPart(
+            "read_text_attachment",
+            {"file_id": "file-1", "offset": 1, "limit": 500},
+            "call-2",
+        )
+        self.assertEqual(deep_agent_file_key(first), deep_agent_file_key(second))
+
+    def test_different_attachment_pages_and_sheets_are_not_deduplicated(self) -> None:
+        page_one = ToolCallPart(
+            "read_xlsx",
+            {"file_id": "file-1", "sheet": "A", "offset": 1, "limit": 100},
+            "call-1",
+        )
+        page_two = ToolCallPart(
+            "read_xlsx",
+            {"file_id": "file-1", "sheet": "A", "offset": 101, "limit": 100},
+            "call-2",
+        )
+        other_sheet = ToolCallPart(
+            "read_xlsx",
+            {"file_id": "file-1", "sheet": "B", "offset": 1, "limit": 100},
+            "call-3",
+        )
+        self.assertNotEqual(
+            deep_agent_file_key(page_one),
+            deep_agent_file_key(page_two),
+        )
+        self.assertNotEqual(
+            deep_agent_file_key(page_one),
+            deep_agent_file_key(other_sheet),
+        )
 
 
 class ContextBudgetTests(unittest.TestCase):
@@ -504,6 +547,69 @@ class ContextCheckpointTests(unittest.IsolatedAsyncioTestCase):
             len(await self.stores.coordinator.get_history("summary-failure")),
             len(raw_before) + 2,
         )
+
+    async def test_attachment_scope_comes_from_raw_history_not_checkpoint_payload(
+        self,
+    ) -> None:
+        session_id = "attachment-checkpoint"
+        raw = [
+            ModelRequest(
+                parts=[
+                    UserPromptPart(
+                        content=[
+                            "读取附件",
+                            attachment_ref_dict(
+                                AttachmentRef(
+                                    id="file-in-raw-history",
+                                    name="history.txt",
+                                    mime="text/plain",
+                                )
+                            ),
+                        ]
+                    )
+                ]
+            ),
+            ModelResponse(parts=[TextPart(content="旧回复")]),
+        ]
+        await self.stores.coordinator.append(
+            session_id,
+            raw,
+            user_id="user-1",
+        )
+        projected = [
+            ModelRequest(
+                parts=[UserPromptPart(content="旧历史摘要，不包含附件引用")]
+            )
+        ]
+        self.assertTrue(
+            await save_projection(
+                self.stores.context_checkpoint,
+                raw_history=raw,
+                projected_history=projected,
+                session_id=session_id,
+                agent_id=None,
+                fingerprint=self._fingerprint(),
+                expected_row_version=0,
+                summary_model_id="summary-model",
+            )
+        )
+        capability = DeepAgentContextCompaction(
+            context_window_tokens=4_000,
+            max_output_tokens=500,
+            summary_timeout=10,
+        )
+        runner = self._runner(capability)
+        deps = AgentDeps(session_id=session_id, user="user-1")
+
+        prepared = await runner._prepare_history(
+            session_id,
+            "继续读取原附件",
+            deps,
+        )
+
+        self.assertTrue(prepared.checkpoint and prepared.checkpoint.used_checkpoint)
+        self.assertIn("file-in-raw-history", deps.attachment_by_id)
+        self.assertNotIn("file-in-raw-history", str(prepared.projected))
 
     async def test_stream_emits_transient_compaction_status_before_model_output(
         self,

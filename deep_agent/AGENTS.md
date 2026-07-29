@@ -93,6 +93,8 @@ DeepAgent 自研 `capabilities.registry.Capability` 是配置包装对象，负�
 | `history.py` | `ModelMessage[]` → 前端时间线 |
 | `factory.py` | `build_agent()` — model 字符串或 OpenAI 兼容 endpoint |
 | `models/` | models.dev 管理员刷新、目录标准化、Provider/模型适配与 DeepSeek 专属重试能力 |
+| `attachment_extractors.py` | 文本、DOCX、XLSX 按需解析、分页与文件安全限制 |
+| `attachments.py` | 会话附件引用、原生模态校验和平台下载 |
 | `runner.py` | `run()` / `run_stream()` — 会话锁、history、事件映射 |
 | `deps.py` | `AgentDeps`：session_id、user、agent_id、request_headers |
 | `headers.py` | HTTP → MCP 的 header 白名单提取 |
@@ -113,6 +115,7 @@ DeepAgent 自研 `capabilities.registry.Capability` 是配置包装对象，负�
 | `mcp/run_scoped.py` | builtin MCP：按 agent run 租约 HTTP client |
 | `mcp/lease_manager.py` | worker 级 MCP lease + shared registry touch |
 | `ui/registry.py` | builtin/manual UI 工具合并、`ui:<name>` 正向关联、可见性、`prepare_ui_toolset_for_spec` |
+| `attachments/` | 默认关闭的 `attachment` 能力；会话内 TXT/DOCX/XLSX 分页读取 |
 
 ### `api/v1/`
 
@@ -176,6 +179,17 @@ DeepAgent 自研 `capabilities.registry.Capability` 是配置包装对象，负�
 代码内置 `builtin__confirm`、`builtin__choice` 与手工 UI 工具使用相同的 Agent 正向关联规则。只有 `capabilities` 显式包含 `ui:builtin__confirm` 或 `ui:builtin__choice` 时才进入模型工具列表；`null`、空数组、旧 `ui-builtin:*` 引用和未选择的历史 Agent 均不启用。内置定义可通过 `/api/v1/ui-tools` 查看，但不能修改或删除，新名称也保留给代码内置工具。
 
 `builtin__choice` 始终支持候选外自由输入，结果固定为 `{selected: string[], custom_input: string | null}`；单选、多选和自由输入共用这一结构。
+
+### 附件工具
+
+`attachment` 是默认关闭的 Agent 能力，只在 `capabilities` 显式包含该名称时加载
+`read_text_attachment`、`read_docx`、`read_xlsx`。工具首次通常只传 `file_id`，随后根据
+`has_more/next_offset` 渐进读取。合法 ID 范围必须从当前消息和当前会话完整
+`chat_messages` 建立，不能从可能被裁剪的 Checkpoint 建立，也不能仅依赖平台下载权限。
+
+图片、音频、视频、PDF 是原生模态，运行时只认 `llm_models.input_modalities`。PDF 当前无
+本地解析/OCR。新上传不抽文本，历史 `extracted_text` 仅为回放兼容。完整设计见
+[`../docs/design/06-attachment-parsing/`](../docs/design/06-attachment-parsing/)。
 
 ---
 

@@ -8,6 +8,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from deep_agent.agent.deferred import build_deferred_tool_results
 from deep_agent.agent.deps import AgentDeps
+from deep_agent.agent.attachments import UnsupportedAttachmentModalityError
 from deep_agent.agent.context.compaction import ContextWindowExceededError
 from deep_agent.agent.headers import extract_forward_headers
 from deep_agent.api.v1.deps import build_runner, build_runner_for_agent
@@ -137,7 +138,7 @@ async def chat(
             attachments=body.attachments,
             branch_from=body.branch_from,
         )
-    except ContextWindowExceededError as exc:
+    except (ContextWindowExceededError, UnsupportedAttachmentModalityError) as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(exc),

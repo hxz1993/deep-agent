@@ -72,5 +72,13 @@ class ContextCompactionOptionTests(unittest.TestCase):
             validate_runtime_options()
 
 
+class UploadOptionTests(unittest.TestCase):
+    def test_upload_limits_are_positive(self) -> None:
+        with self.assertRaisesRegex(Exception, "positive integer"):
+            OPTION.agent.upload_max_size_mb = 0
+        with self.assertRaisesRegex(Exception, "positive integer"):
+            OPTION.agent.upload_max_count = -1
+
+
 if __name__ == "__main__":
     unittest.main()

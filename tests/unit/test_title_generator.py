@@ -6,7 +6,7 @@ from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserProm
 from pydantic_ai.models.test import TestModel
 
 from deep_agent.agent.history import _extract_assistant_text
-from deep_agent.agent.title_generator import _clean_title, generate_title
+from deep_agent.agent.title_generator import _clean_title, _title_snippet, generate_title
 
 
 class TestCleanTitle(unittest.TestCase):
@@ -77,6 +77,18 @@ class TestExtractAssistantText(unittest.TestCase):
             ModelResponse(parts=[TextPart(content="")]),
         ]
         self.assertEqual(_extract_assistant_text(msgs), "")
+
+
+class TestTitleSnippet(unittest.TestCase):
+    def test_extracts_user_content_from_wrapped_prompt(self) -> None:
+        prompt = (
+            "<reference>页面上下文与附件元数据</reference>\n"
+            "<user>\n请总结上传的季度报告\n</user>"
+        )
+        self.assertEqual(_title_snippet(prompt), "请总结上传的季度报告")
+
+    def test_plain_prompt_is_preserved(self) -> None:
+        self.assertEqual(_title_snippet("请解释 Python 装饰器"), "请解释 Python 装饰器")
 
 
 class TestGenerateTitle(unittest.IsolatedAsyncioTestCase):

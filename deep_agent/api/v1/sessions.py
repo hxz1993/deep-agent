@@ -389,6 +389,8 @@ async def rename_session(
             user_text=user_text,
             assistant_text=assistant_text or user_text,
             spec=spec,
+            auxiliary_store=ctx.stores.auxiliary_model,
+            llm_model_store=ctx.stores.llm_model,
         )
 
         # LLM 失败时回退到文本提取

@@ -17,7 +17,7 @@ from pydantic_ai.providers.google import GoogleProvider
 from pydantic_ai.providers.openai import OpenAIProvider
 
 from deep_agent.agent.deps import AgentDeps
-from deep_agent.agent.models import DeepSeekChatModel
+from deep_agent.agent.models import DeepSeekChatModel, OpenAICompatibleVideoChatModel
 from deep_agent.agent.models.deepseek_thinking_retry import DeepSeekThinkingRetry
 from deep_agent.agent.spec import AgentSpec
 from deep_agent.capabilities.registry import CapabilityRegistry
@@ -48,6 +48,8 @@ def _normalize_url(url: str | None) -> str | None:
 
 def _resolve_openai_compatible(spec: AgentSpec, model_name: str) -> Model:
     provider = OpenAIProvider(base_url=spec.base_url, api_key=spec.api_key)
+    if "video" in (spec.input_modalities or []) or "video_url" in (spec.tags or []):
+        return OpenAICompatibleVideoChatModel(model_name, provider=provider)
     return OpenAIChatModel(model_name, provider=provider)
 
 

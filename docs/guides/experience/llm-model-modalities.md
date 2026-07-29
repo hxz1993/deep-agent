@@ -29,10 +29,9 @@ video
 pdf
 ```
 
-`llm_models.tags` 描述其他模型能力：
+`llm_models.tags` 描述其他模型或 Provider 能力：
 
 ```text
-attachment
 reasoning
 tool_call
 structured_output
@@ -41,11 +40,17 @@ open_weights
 interleaved
 ```
 
-这两类标签不能混用。平台上传能力也不等于模型原生模态：
+这两类标签不能混用。Agent 的 `attachment` 能力也不是模型 tag。平台上传能力不等于模型
+原生模态：
 
 - 图片：只有当前模型 `input_modalities` 包含 `image` 时，才把图片字节发送给模型。
-- PDF、DOCX、XLSX、TXT、CSV：平台上传管线可以先抽取文本，再以文本输入模型。
+- 音频、视频、PDF：只有模型声明对应原生模态时才把字节发送给模型；PDF 不做本地解析/OCR。
+- DOCX、XLSX、TXT、CSV、JSON、Markdown、HTML、XML：平台只保存 `file_id`，Agent
+  显式选择 `attachment` 能力后由工具按需分页读取，不在上传时预抽文本。
 - MCP、Skill、UI Tool：属于 Agent 工具能力，不属于模型输入模态。
+
+附件工具和安全边界详见
+[`../../design/06-attachment-parsing/attachment-tool-integration-plan.md`](../../design/06-attachment-parsing/attachment-tool-integration-plan.md)。
 
 ## 3. 模型 Token 属性
 

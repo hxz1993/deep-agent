@@ -11,7 +11,7 @@ from pydantic_ai.providers.google import GoogleProvider
 from pydantic_ai.providers.openai import OpenAIProvider
 
 from deep_agent.agent.factory import _resolve_model, build_agent
-from deep_agent.agent.models import DeepSeekChatModel
+from deep_agent.agent.models import DeepSeekChatModel, OpenAICompatibleVideoChatModel
 from deep_agent.agent.models.deepseek_thinking_retry import DeepSeekThinkingRetry
 from deep_agent.capabilities.registry import CapabilityRegistry
 from deep_agent.agent.spec import AgentSpec
@@ -97,6 +97,28 @@ class ResolveModelTests(unittest.TestCase):
         self.assertIsInstance(model, OpenAIChatModel)
         self.assertIsInstance(model._provider, OpenAIProvider)
         self.assertEqual(model.model_name, "gpt-4o")
+
+    def test_openai_compatible_video_modality_uses_video_adapter(self) -> None:
+        model = _resolve_model(
+            _spec(
+                model="private:video-model",
+                api_key="sk-test",
+                base_url="https://api.example.com/v1",
+                input_modalities=["text", "video"],
+            ),
+        )
+        self.assertIsInstance(model, OpenAICompatibleVideoChatModel)
+
+    def test_openai_compatible_video_tag_uses_video_adapter(self) -> None:
+        model = _resolve_model(
+            _spec(
+                model="private:video-model",
+                api_key="sk-test",
+                base_url="https://api.example.com/v1",
+                tags=["video_url"],
+            ),
+        )
+        self.assertIsInstance(model, OpenAICompatibleVideoChatModel)
 
     def test_prefixed_model_without_api_key_returns_string(self) -> None:
         resolved = _resolve_model(_spec(model="openai:gpt-4o"))

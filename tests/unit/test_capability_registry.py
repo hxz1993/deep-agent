@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 from unittest.mock import MagicMock
 
+from deep_agent.capabilities.attachments import build_attachment_capability
 from deep_agent.capabilities.registry import Capability, CapabilityRegistry
 
 
@@ -57,6 +58,20 @@ class CapabilityRegistryToolsetsTests(unittest.TestCase):
 
         toolsets = registry.toolsets(["mcp:echo"])
         self.assertEqual(toolsets, [mcp_toolset])
+
+    def test_attachment_is_opt_in_for_null_empty_and_explicit_selection(self) -> None:
+        registry = CapabilityRegistry()
+        attachment = build_attachment_capability()
+        registry.register(attachment)
+
+        self.assertEqual(registry.toolsets(None), [])
+        self.assertEqual(registry.toolsets([]), [])
+        self.assertEqual(registry.toolsets(["attachment"]), [attachment.toolset])
+
+        described = registry.describe()
+        self.assertEqual(described[0]["name"], "attachment")
+        self.assertEqual(described[0]["kind"], "attachment")
+        self.assertFalse(described[0]["default_enabled"])
 
 
 if __name__ == "__main__":

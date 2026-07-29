@@ -22,7 +22,7 @@ from deep_agent.agent.context.estimator import TokenEstimator
 from deep_agent.agent.context.runtime import ContextRunState
 from deep_agent.agent.attachments import (
     has_user_turn,
-    model_supports_image_input,
+    index_attachment_refs,
     refs_from_attachments,
     resolve_history_for_llm,
     resolve_user_prompt,
@@ -42,6 +42,7 @@ from deep_agent.capabilities.ui.registry import enrich_deferred, enrich_tool_eve
 from loguru import logger
 
 from deep_agent.db.conversation import SessionStore
+from deep_agent.db.stores.bundle import DataStores
 from deep_agent.db.stores.context_checkpoint import ContextCheckpointStoreBase
 from deep_agent.schemas.attachment import AttachmentRef
 
@@ -96,6 +97,7 @@ class AgentRunner:
         checkpoint_fingerprint: str | None = None,
         summary_model_id: str | None = None,
         estimator: TokenEstimator | None = None,
+        stores: DataStores | None = None,
     ) -> None:
         self.agent = agent
         self.store = store
@@ -111,6 +113,7 @@ class AgentRunner:
         self._checkpoint_fingerprint = checkpoint_fingerprint
         self._summary_model_id = summary_model_id
         self._estimator = estimator or TokenEstimator.conservative()
+        self._stores = stores
 
     @asynccontextmanager
     async def _session_lock(self, session_id: str, *, agent_id: str | None) -> AsyncIterator[None]:
@@ -175,6 +178,11 @@ class AgentRunner:
             history = [*history, user_request]
             pre_persisted_user = True
             user_branch_point = len(history) - 1
+        deps.input_modalities = tuple(self._input_modalities or ())
+        deps.attachment_by_id = index_attachment_refs(
+            attachments=attachments,
+            messages=history,
+        )
         checkpoint_load: ProjectionLoad | None = None
         projected = history
         if self._checkpoint_store is not None and self._checkpoint_fingerprint is not None:
@@ -338,11 +346,6 @@ class AgentRunner:
             expected_row_version=expected_row_version,
         )
 
-    def _vision_capable(self) -> bool:
-        return model_supports_image_input(
-            db_modalities=self._input_modalities,
-        )
-
     async def _llm_inputs(
         self,
         history: list[ModelMessage],
@@ -352,13 +355,12 @@ class AgentRunner:
         *,
         pre_persisted_user: bool,
     ) -> tuple[list[ModelMessage], str | list[UserContent] | None]:
-        vision_capable = self._vision_capable()
         current_user_index = len(history) - 1 if pre_persisted_user else None
         llm_history = await resolve_history_for_llm(
             history,
             current_user_index=current_user_index,
             request_headers=deps.request_headers,
-            vision_capable=vision_capable,
+            input_modalities=self._input_modalities,
         )
         if pre_persisted_user:
             return llm_history, None
@@ -367,7 +369,7 @@ class AgentRunner:
                 message,
                 attachments,
                 deps.request_headers,
-                vision_capable=vision_capable,
+                input_modalities=self._input_modalities,
             )
         return llm_history, message or None
 
@@ -497,6 +499,12 @@ class AgentRunner:
                 user_text=user_text,
                 assistant_text=assistant_text or user_text,
                 main_model=self.agent.model,
+                auxiliary_store=(
+                    self._stores.auxiliary_model if self._stores is not None else None
+                ),
+                llm_model_store=(
+                    self._stores.llm_model if self._stores is not None else None
+                ),
             )
 
             if not title:
@@ -607,13 +615,31 @@ class AgentRunner:
                 deferred_tool_results=deferred_tool_results,
                 persister=persister,
             )
-            llm_history, user_prompt = await self._llm_inputs(
-                prepared.projected,
-                message,
-                attachments,
-                deps,
-                pre_persisted_user=prepared.pre_persisted_user,
-            )
+            try:
+                llm_history, user_prompt = await self._llm_inputs(
+                    prepared.projected,
+                    message,
+                    attachments,
+                    deps,
+                    pre_persisted_user=prepared.pre_persisted_user,
+                )
+            except Exception as exc:  # attachment/media validation before model start
+                logger.warning(
+                    "Agent input preparation failed for session {}: {}",
+                    session_id,
+                    exc,
+                )
+                msg_count, branch_pt = self._stream_history_meta(
+                    prepared.raw,
+                    user_branch_point=prepared.user_branch_point,
+                )
+                yield events.error(
+                    format_stream_error(exc),
+                    history_persisted=prepared.pre_persisted_user,
+                    model_message_count=msg_count,
+                    user_branch_point=branch_pt,
+                )
+                return
             compaction_events: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
             self._prepare_context_state(
                 deps,

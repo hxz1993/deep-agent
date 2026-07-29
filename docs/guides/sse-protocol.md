@@ -26,8 +26,7 @@ Accept: text/event-stream
     {
       "id": "platform-file-id",
       "name": "diagram.png",
-      "mime": "image/png",
-      "extracted_text": null
+      "mime": "image/png"
     }
   ],
   "session_id": "可选，省略则服务端生成",
@@ -36,6 +35,10 @@ Accept: text/event-stream
   "user": "可选用户标识"
 }
 ```
+
+新上传只发送 `id/name/mime`。旧会话中已经保存的 `extracted_text` 仍可读取，但新链路不再
+在上传阶段抽取或截断文档文本。TXT、DOCX 和 XLSX 由 Agent 显式启用的 `attachment`
+能力按需分页读取。
 
 **DB Agent 模式：**
 

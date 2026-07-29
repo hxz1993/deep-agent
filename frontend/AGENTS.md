@@ -26,7 +26,7 @@ frontend/
 | 功能 | 实现 |
 | --- | --- |
 | 流式对话 | `fetch` + `ReadableStream` 手动解析 SSE（非 `EventSource`，因需 POST） |
-| 附件上传 | `POST /api/v1/uploads`（multipart）→ 发送时 `attachments[]` 引用 |
+| 附件上传 | `POST /api/v1/uploads`（multipart）→ 发送时仅传 `attachments[]` 引用；文档由 Agent 可选 `attachment` 工具按需读取 |
 | 思考过程 UI | `thinking` 可折叠块，默认折叠；与 `text` 分离 |
 | 工具调用 UI | `tool_call` / `tool_result` 可折叠；同 `tool_call_id` 合并更新 |
 | HITL UI 工具 | 内置 `builtin__confirm` / `builtin__choice` + 手工 UI 工具；都由 Agent 显式选择，SSE / history 携带 `widget` / `metadata`；见 [`../docs/guides/ui-tools-external.md`](../docs/guides/ui-tools-external.md) |
@@ -134,6 +134,9 @@ python -m http.server 5173
 - 模型目录只由管理员手工刷新 models.dev，保存模型配置不得触发外网请求。目录按 Lab → Model → Provider 展示，仅负责预填；模态与能力 tags 分开，Agent 运行时只认 `llm_models`。
 - 上下文压缩在模型配置有效上下文窗口时自动启用；Console 只读展示全局策略、预算、
   压缩前后和 Checkpoint 状态，不提供启用开关，也不展示或编辑摘要正文。
+- `attachment` 是默认关闭的 Agent 能力。Console 从 `/uploads/capabilities` 读取实际 MIME、
+  单文件大小和单次数量限制；新请求不得再发送 `extracted_text`。工具分页协议和解析边界见
+  [`../docs/design/06-attachment-parsing/`](../docs/design/06-attachment-parsing/)。
 - “新建测试会话”是管理员控制台的常驻入口；它位于会话搜索框和普通新建按钮之间，
   当前 Agent 的模型未配置上下文窗口时不可用，但不能改变普通新建行为。场景只构造合法
   历史，不在前端拼接或伪造消息 payload。

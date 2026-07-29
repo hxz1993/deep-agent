@@ -8,6 +8,11 @@ from pydantic_ai.messages import BinaryContent, ModelMessage, ModelRequest, Text
 from deep_agent.schemas.attachment import AttachmentRef
 
 ATTACHMENT_REF_KIND = "attachment-ref"
+_NATIVE_MEDIA: tuple[tuple[str, str, str], ...] = (
+    ("image/", "image", "图片"),
+    ("audio/", "audio", "音频"),
+    ("video/", "video", "视频"),
+)
 
 
 def model_supports_image_input(
@@ -28,6 +33,10 @@ class AttachmentDownloadError(Exception):
     """Platform file download returned an error payload instead of file bytes."""
 
 
+class UnsupportedAttachmentModalityError(ValueError):
+    """Attached native media is incompatible with the active model."""
+
+
 def attachment_ref_dict(ref: AttachmentRef) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "kind": ATTACHMENT_REF_KIND,
@@ -42,6 +51,50 @@ def attachment_ref_dict(ref: AttachmentRef) -> dict[str, Any]:
 
 def is_attachment_ref(item: Any) -> bool:
     return isinstance(item, dict) and item.get("kind") == ATTACHMENT_REF_KIND
+
+
+def _merge_attachment_ref(
+    existing: AttachmentRef | None,
+    incoming: AttachmentRef,
+) -> AttachmentRef:
+    if existing is None:
+        return incoming
+    return AttachmentRef(
+        id=incoming.id,
+        name=existing.name or incoming.name,
+        mime=existing.mime or incoming.mime,
+        extracted_text=existing.extracted_text or incoming.extracted_text,
+    )
+
+
+def index_attachment_refs(
+    attachments: Sequence[AttachmentRef] | None = None,
+    messages: Sequence[ModelMessage] | None = None,
+) -> dict[str, AttachmentRef]:
+    """Index only attachment ids that belong to the current raw session."""
+    indexed: dict[str, AttachmentRef] = {}
+    for ref in attachments or ():
+        indexed[ref.id] = _merge_attachment_ref(indexed.get(ref.id), ref)
+    for message in messages or ():
+        if not isinstance(message, ModelRequest):
+            continue
+        for part in message.parts:
+            if not isinstance(part, UserPromptPart) or not isinstance(
+                part.content,
+                (list, tuple),
+            ):
+                continue
+            for item in part.content:
+                if not is_attachment_ref(item):
+                    continue
+                ref = AttachmentRef(
+                    id=str(item["id"]),
+                    name=item.get("name"),
+                    mime=item.get("mime"),
+                    extracted_text=item.get("extracted_text"),
+                )
+                indexed[ref.id] = _merge_attachment_ref(indexed.get(ref.id), ref)
+    return indexed
 
 
 def refs_from_attachments(
@@ -72,15 +125,21 @@ async def resolve_user_prompt(
     attachments: Sequence[AttachmentRef] | None,
     request_headers: Mapping[str, str],
     *,
-    vision_capable: bool = True,
+    input_modalities: Sequence[str] | None = None,
 ) -> list[UserContent]:
+    modalities = frozenset(input_modalities or ())
     parts: list[UserContent] = []
     text = message.strip()
     if text:
         parts.append(text)
     for ref in attachments or ():
         parts.extend(
-            await _resolve_ref(ref, request_headers, full=True, vision_capable=vision_capable)
+            await _resolve_ref(
+                ref,
+                request_headers,
+                full=True,
+                modalities=modalities,
+            )
         )
     return parts
 
@@ -90,8 +149,9 @@ async def resolve_history_for_llm(
     *,
     current_user_index: int | None,
     request_headers: Mapping[str, str],
-    vision_capable: bool = True,
+    input_modalities: Sequence[str] | None = None,
 ) -> list[ModelMessage]:
+    modalities = frozenset(input_modalities or ())
     resolved: list[ModelMessage] = []
     for idx, message in enumerate(messages):
         if not isinstance(message, ModelRequest):
@@ -109,7 +169,7 @@ async def resolve_history_for_llm(
                         part.content,
                         request_headers,
                         full=full_turn,
-                        vision_capable=vision_capable,
+                        modalities=modalities,
                     ),
                     timestamp=part.timestamp,
                 )
@@ -143,7 +203,7 @@ async def _resolve_user_prompt_part(
     request_headers: Mapping[str, str],
     *,
     full: bool,
-    vision_capable: bool,
+    modalities: frozenset[str],
 ) -> str | list[UserContent]:
     if isinstance(content, str):
         return content
@@ -164,7 +224,7 @@ async def _resolve_user_prompt_part(
                     ref,
                     request_headers,
                     full=full,
-                    vision_capable=vision_capable,
+                    modalities=modalities,
                 )
             )
             continue
@@ -182,26 +242,43 @@ async def _resolve_ref(
     request_headers: Mapping[str, str],
     *,
     full: bool,
-    vision_capable: bool,
+    modalities: frozenset[str],
 ) -> list[UserContent]:
     mime = (ref.mime or "").split(";", 1)[0].strip().lower()
     name = ref.name or ref.id
     if not full:
         if ref.extracted_text:
             return [TextContent(ref.extracted_text)]
-        return [TextContent(f"[附件: {name}]")]
+        return [
+            TextContent(
+                f"[附件: {name}] (file_id: {ref.id}, mime: {ref.mime or 'unknown'})"
+            )
+        ]
 
-    if mime.startswith("image/"):
-        if not vision_capable:
-            return [TextContent(f"[附件: {name}]（当前模型不支持图片输入）")]
+    native = _native_modality_for_mime(mime)
+    if native is not None:
+        modality, label = native
+        if modality not in modalities:
+            raise UnsupportedAttachmentModalityError(
+                f"当前模型不支持{label}输入（附件: {name}）"
+            )
         try:
             data = await _download_file(ref.id, request_headers)
         except AttachmentDownloadError:
             return [TextContent(f"[附件: {name}]（文件下载失败）")]
         return [BinaryContent(data=data, media_type=mime or "application/octet-stream")]
-    if ref.extracted_text:
-        return [TextContent(ref.extracted_text)]
-    if mime in ("text/plain", "text/csv"):
-        data = await _download_file(ref.id, request_headers)
-        return [TextContent(data.decode("utf-8", errors="replace"))]
-    return [TextContent(f"[附件: {name}]")]
+    return [
+        TextContent(
+            f"[附件: {name}] (file_id: {ref.id}, mime: {ref.mime or 'unknown'})"
+            "（如需读取内容，请调用 attachment 工具）"
+        )
+    ]
+
+
+def _native_modality_for_mime(mime: str) -> tuple[str, str] | None:
+    for prefix, modality, label in _NATIVE_MEDIA:
+        if mime.startswith(prefix):
+            return modality, label
+    if mime == "application/pdf":
+        return "pdf", "PDF"
+    return None

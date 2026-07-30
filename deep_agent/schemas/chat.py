@@ -95,6 +95,7 @@ class ToolDescription(BaseModel):
 class CapabilityDescription(BaseModel):
     name: str
     kind: str
+    label: str | None = None
     description: str = ""
     tools: list[ToolDescription] = Field(default_factory=list)
     default_enabled: bool = False

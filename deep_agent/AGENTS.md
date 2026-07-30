@@ -28,6 +28,7 @@ HTTP (REST/SSE)
     → pydantic_ai.Agent
     → CapabilityRegistry.toolsets()
         ├─ native       capabilities/native/builtin.py
+        ├─ attachment   capabilities/attachments/builtin.py
         ├─ skill        skills/<name>/（仓库根，见 DEEP_AGENT_SKILLS_DIR）
         └─ mcp          请求时 `capabilities/mcp/resolver.py`（DB + mcps/ 兜底）
     → SessionStore（`db/conversation.py` 协调器；表 Store 在 `db/stores/`）
@@ -37,7 +38,7 @@ HTTP (REST/SSE)
 
 1. `configure_logging()` → `AppContext.bootstrap()`（见 `core/context.py`）
 2. `upgrade_database()` → `bootstrap_database()` → 9 个表 Store + `SqlConversationCoordinator`
-3. `build_registry(stores=)` — native + Python Skill（静态能力）；`stores` 预留未来启动期只读配置
+3. `build_registry(stores=)` — native + attachment + Python Skill（静态能力）；`stores` 预留未来启动期只读配置
 4. `init_context(ctx)` — 路由通过 `Depends(AppContextDep)` 注入
 5. 关闭：`ctx.aclose()` → `reset_context()`
 
@@ -106,7 +107,7 @@ DeepAgent 自研 `capabilities.registry.Capability` 是配置包装对象，负�
 | 路径 | 职责 |
 | --- | --- |
 | `registry.py` | `Capability` / `CapabilityRegistry` |
-| `native/builtin.py` | `get_current_time`、`http_get` |
+| `native/builtin.py` | 默认启用的内置“通用工具”，当前提供 `get_current_time` |
 | `skills/loader.py` | 扫描 `skills/<name>/__init__.py` 的 `SKILL` |
 | `mcp/db_loader.py` | 从 `mcp_servers` 构建 MCPToolset |
 | `mcp/builtin.py` | 发现 `mcps/<name>/server.py` |
@@ -157,7 +158,10 @@ DeepAgent 自研 `capabilities.registry.Capability` 是配置包装对象，负�
 
 ### native 工具
 
-在 `capabilities/native/builtin.py` 的 `FunctionToolset` 上装饰函数，类型注解即 schema。
+在 `capabilities/native/builtin.py` 的 `FunctionToolset` 上装饰函数，类型注解即
+schema。产品层把 `native` 与 `attachment` 统一归入“内置工具”，但两个 Capability
+继续独立选择并保持原编码。内置工具由代码随版本发布，不在数据库中注册；配置中心只读
+展示，实际启用仍由 Agent 的 `capabilities` 决定。
 
 ### Python Skill
 
@@ -284,7 +288,7 @@ SSE 协议：[`../docs/guides/sse-protocol.md`](../docs/guides/sse-protocol.md)�
    - 多入口共享组装 → `api/v1/deps.py`（变化量留在入口，上下文在 `_build_*` 内统一解包）
 1. 包名 **`deep_agent`**，启动 `deep_agent.main:app`（非 `app.main`）
 2. 扩展优先走路径注册，避免改 `runner.py` 核心
-3. 能力命名：`native` \| `skill:<name>` \| `mcp:<name>` \| `ui:<canonical_tool_name>`；builtin 和 manual UI 工具都由 Agent 正向引用，均不因代码内置而自动启用
+3. 能力命名：`native` \| `attachment` \| `skill:<name>` \| `mcp:<name>` \| `ui:<canonical_tool_name>`；`native` 保持默认启用，`attachment` 默认关闭；builtin 和 manual UI 工具都由 Agent 正向引用，均不因代码内置而自动启用
 4. DB Agent 会话：复合键 `(agent_id, session_id)`；无 agent 时 `agent_id=''`
 5. 同 session 用 `SessionStore.lock()` 串行；多实例 DB 级锁未实现
 6. 配置保存先完成 Schema/引用校验，再进入写事务；一次 API 业务变更不要串联多个各自提交的 Store `_write()`。MCP 检测等外部 I/O 先基于候选配置执行，再把配置与检测快照一次性提交。模型目录联网、解析和完整校验必须在事务前完成，随后单事务全量替换；模型配置保存不得隐式联网。

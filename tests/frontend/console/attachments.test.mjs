@@ -15,11 +15,16 @@ const template = await readFile(
   "utf8",
 );
 
-test("附件能力在 Agent 配置中作为普通可选能力展示", () => {
-  assert.match(agentSource, /attachment:\s*"附件读取"/);
+test("附件能力与 Native 统一归入内置工具分组", () => {
+  assert.match(agentSource, /builtin:\s*"内置工具"/);
+  assert.match(agentSource, /attachment:\s*"Attachment"/);
   assert.match(
     agentSource,
-    /KIND_ORDER\s*=\s*\["native",\s*"attachment",\s*"ui"/,
+    /if \(\["native", "attachment"\]\.includes\(capability\.kind\)\) return "builtin"/,
+  );
+  assert.match(
+    agentSource,
+    /GROUP_ORDER\s*=\s*\["builtin",\s*"ui",\s*"ui-client",\s*"skill",\s*"mcp"\]/,
   );
 });
 

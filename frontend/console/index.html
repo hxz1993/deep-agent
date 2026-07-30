@@ -20,8 +20,8 @@
   <link id="hljsTheme" rel="stylesheet" href="/vendor/highlight-github-dark.min.css" />
   <link rel="stylesheet" href="./themes.css?v=20260721-1" />
   <link rel="stylesheet" href="./workspace.css?v=20260728-2" />
-  <link rel="stylesheet" href="./configuration/configuration.css?v=20260728-3" />
-  <link rel="stylesheet" href="./console.css?v=20260729-5" />
+  <link rel="stylesheet" href="./configuration/configuration.css?v=20260731-1" />
+  <link rel="stylesheet" href="./console.css?v=20260731-1" />
 </head>
 <body>
   <div class="console-shell">
@@ -29,6 +29,7 @@
       <div class="console-brand">
         <span class="brand-mark"><i data-lucide="bot"></i></span>
         <div class="console-brand-copy"><strong>DeepAgent</strong><span>一体化控制台</span></div>
+        <span class="product-version" id="productVersion" title="正在读取 DeepAgent 产品版本">v—</span>
         <span class="connection-pill" id="connStatus"><span class="dot"></span><span class="conn-text">连接中</span></span>
       </div>
 
@@ -105,14 +106,15 @@
           <aside class="resource-nav">
             <div class="resource-title">
               <strong>配置中心</strong>
-              <div class="database-version" title="当前数据库配置结构版本">
-                <span>数据库版本</span>
+              <div class="database-version" title="当前 Alembic 数据库结构版本">
+                <span>数据库结构</span>
                 <strong id="databaseSchemaVersion">—</strong>
               </div>
             </div>
             <div class="resource-group-label">配置对象</div>
             <button class="tab resource-btn active" data-tab="agents"><i data-lucide="bot"></i><span>Agent</span></button>
             <button class="tab resource-btn" data-tab="llm-models"><i data-lucide="cpu"></i><span>模型</span></button>
+            <button class="tab resource-btn" data-tab="builtin-tools"><i data-lucide="blocks"></i><span>内置工具</span></button>
             <button class="tab resource-btn" data-tab="mcp"><i data-lucide="plug-zap"></i><span>MCP 服务</span></button>
             <button class="tab resource-btn" data-tab="ui-tools"><i data-lucide="panel-top"></i><span>UI 工具</span></button>
             <button class="tab resource-btn" data-tab="auxiliary-models"><i data-lucide="brain-circuit"></i><span>辅助模型</span></button>
@@ -185,6 +187,6 @@
   <script src="../vendor/marked.min.js"></script>
   <script src="../vendor/purify.min.js"></script>
   <script src="../vendor/highlight.min.js"></script>
-  <script type="module" src="./main.js?v=20260730-1"></script>
+  <script type="module" src="./main.js?v=20260731-1"></script>
 </body>
 </html>

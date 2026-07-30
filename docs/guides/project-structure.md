@@ -44,8 +44,8 @@ FastAPI API
 
 | 名称 | 来源 | 用途 |
 | --- | --- | --- |
-| `native` | `deep_agent/capabilities/native/` | 进程内基础函数工具 |
-| `attachment` | `deep_agent/capabilities/attachments/` | Agent 显式启用的会话附件按需读取 |
+| `native` | `deep_agent/capabilities/native/` | 内置“通用工具”，默认启用，当前提供 UTC 时间 |
+| `attachment` | `deep_agent/capabilities/attachments/` | 内置“附件读取”，Agent 显式启用的会话附件按需读取 |
 | `skill:<name>` | `skills/<name>/` | Instructions 与 Python 工具组合 |
 | `mcp:<name>` | 数据库或 `mcps/` | 外部或内置 MCP 工具 |
 | `ui:<name>` | 代码或数据库 | Agent 显式选择的 builtin/manual HITL 工具 |

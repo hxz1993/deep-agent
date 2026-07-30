@@ -1,6 +1,6 @@
 # Pydantic AI 工具体系与 DeepAgent 工具优化设计
 
-> 最后核验：2026-07-29
+> 最后核验：2026-07-31
 >
 > 当前运行基线：`pydantic-ai-slim 2.14.1` + `pydantic-ai-harness 0.10.0`
 >
@@ -299,14 +299,27 @@ Agent 能力选择和 Console 展示；它不等于 Pydantic AI 原生 Capabilit
 
 ## 4. DeepAgent 当前使用情况
 
-### 4.1 Function Tool
+### 4.1 内置 Function Tool
 
-DeepAgent 当前称为 `native` 的能力，实际是进程内 `FunctionToolset`：
+产品层把代码随 DeepAgent 发布、无需管理员注册的后端 Function Tool 统一归入
+“内置工具”，与 MCP 服务同级展示。当前包含两个独立 Capability：
 
-- `get_current_time`
-- `http_get`
+| 前端名称 | Capability 编码 | 默认状态 | 工具 |
+| --- | --- | --- | --- |
+| 通用工具 | `native` | 默认启用 | `get_current_time` |
+| 附件读取 | `attachment` | 默认关闭 | `read_text_attachment`、`read_docx`、`read_xlsx` |
 
-位置：`deep_agent/capabilities/native/builtin.py`。
+两者都由进程内 `FunctionToolset` 执行，但仍保留独立 Capability 编码和 Agent
+开关。配置中心只读展示工具包及工具明细，实际启用由 `agents.capabilities` 决定。
+
+0.2.3 删除了原来 Native 中的 `http_get`。该工具没有目标域名白名单、私网地址保护和
+请求审计，不适合作为所有 Agent 默认获得的通用网络能力；需要联网时应接入边界明确、
+可配置和可审计的 MCP 或业务工具。
+
+位置：
+
+- `deep_agent/capabilities/native/builtin.py`
+- `deep_agent/capabilities/attachments/builtin.py`
 
 Python Skill 同样使用 `FunctionToolset`，由 Skill 同时贡献 Instructions 和函数工具。
 
@@ -316,8 +329,9 @@ MCP Resource 也被包装为宿主 Function Tool：
 - `list_mcp_resource_templates`
 - `read_mcp_resource`
 
-这里建议后续把产品文案中的“原生工具”改成“内置函数工具”，避免与 Provider Native
-Tool 混淆；代码 capability 名 `native` 是否迁移可单独评估兼容成本。
+产品文案统一使用“内置工具”，卡片技术标识保留 Native、Attachment，避免与 Provider
+Native Tool 混淆。代码 capability 名继续保持 `native`、`attachment`，不迁移历史
+Agent 数据。
 
 ### 4.2 MCP Tool
 

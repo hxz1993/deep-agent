@@ -34,6 +34,7 @@ frontend/
 | 会话 | `session_id` 由后端 `session` 事件返回；`GET/DELETE /api/v1/sessions`；标题展示 `title \|\| user_prompt`（见 [`../docs/guides/experience/ai-title-generator.md`](../docs/guides/experience/ai-title-generator.md)） |
 | 能力面板 | `GET /api/v1/tools` |
 | 配置 | `localStorage` 只保存调试 App；全局环境配置只读展示，身份和鉴权由平台提供 |
+| 内置工具目录 | 配置中心只读展示 `native`（通用工具）和 `attachment`（附件读取）；在 Agent 中独立选择 |
 | 一体化控制台 | `/console/`；工作台、配置和诊断的唯一入口 |
 
 ## 一体化控制台
@@ -49,6 +50,10 @@ frontend/
 - SSE 解析、HITL 参数归一化和 Schema 文本校验分别位于 `protocol.js`、`hitl.js`、`schema-editor.js`，可由 Node 内置测试独立验证。
 - 控制台测试：`node --test tests/frontend/console/*.test.mjs`。
 - 配置中心默认打开 Agent；“全局配置”仍位于“辅助模型”后、模型资源分割线前，通过 `GET /api/v1/global-settings` 按需展示安全白名单，没有编辑或保存入口。
+- “内置工具”位于模型之后、MCP 服务之前，只读展示代码随版本发布的 Native 与
+  Attachment 能力包；页面没有注册、编辑、删除或全局启停入口。
+- Console 顶部只展示一处产品版本，通过同源 `GET /info` 读取
+  `deep_agent.__version__`；配置中心的数据库结构 revision 是独立运维信息。
 - 配置中心左侧页签只在当前前端页面的模块内存中保留；工作台与配置中心之间切换会恢复上次页签，浏览器刷新后重新回到 Agent，不写入 LocalStorage 或后端。
 - Agent 编辑弹窗在标题区显示完整 Agent ID；测试工作台对话标题第二行以 `会话 ID：<完整 ID>` 展示当前会话，不再截取前八位。
 - `/` 跳转到 `/console/#/workspace`；旧 `/settings.html`、`/models.html`、`/admin/` 返回 404。

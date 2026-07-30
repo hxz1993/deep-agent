@@ -1,7 +1,7 @@
 import {
   initConfiguration,
   restoreConfigurationTab,
-} from "./configuration.js?v=20260729-4";
+} from "./configuration.js?v=20260731-1";
 import { bindContextControls, refreshIdentity } from "./context.js?v=20260728-5";
 import { initDiagnostics } from "./diagnostics.js?v=20260720-1";
 import { initWorkspace } from "./workspace.js?v=20260730-1";
@@ -9,6 +9,23 @@ import { initWorkspace } from "./workspace.js?v=20260730-1";
 const VALID_PAGES = new Set(["workspace", "configuration", "diagnostics"]);
 let authenticated = false;
 let toastTimer = null;
+
+async function loadProductVersion() {
+  const target = document.getElementById("productVersion");
+  if (!target) return;
+  try {
+    const response = await daFetch(serviceUrl("info"), { includeContext: false });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const info = await response.json();
+    const version = String(info?.version || "").trim().replace(/^v/i, "");
+    if (!version) throw new Error("响应中缺少版本");
+    target.textContent = `v${version}`;
+    target.title = `DeepAgent 产品版本 ${version}`;
+  } catch (error) {
+    target.textContent = "v—";
+    target.title = `版本信息加载失败：${error instanceof Error ? error.message : String(error)}`;
+  }
+}
 
 function toast(message, isError = false) {
   const element = document.getElementById("consoleToast");
@@ -104,6 +121,7 @@ async function boot() {
   bindThemes();
   bindContextControls();
   initDiagnostics();
+  loadProductVersion();
   window.addEventListener("deep-agent-console-api-status", (event) => showApiBanner(event.detail?.status));
   window.lucide?.createIcons();
 
@@ -123,5 +141,7 @@ async function boot() {
   }
   await showPage(pageFromLocation(), { updateHash: true });
 }
+
+window.__ProductVersionUI = { loadProductVersion };
 
 boot();

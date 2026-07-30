@@ -108,6 +108,60 @@ html, body {
 
 .link-btn:hover { color: var(--accent-hover); }
 
+.builtin-tools-table {
+  min-width: 820px;
+}
+
+.builtin-tools-table code {
+  white-space: nowrap;
+}
+
+.builtin-tool-name {
+  display: grid;
+  gap: 3px;
+}
+
+.builtin-tool-name small {
+  color: var(--text-faint);
+  font: 11px var(--mono);
+  text-transform: uppercase;
+}
+
+.builtin-tool-list {
+  min-width: 230px;
+  font-size: 12px;
+}
+
+.builtin-tool-list summary {
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.builtin-tool-list ul {
+  margin: 7px 0 0;
+  padding-left: 17px;
+}
+
+.builtin-tool-list li {
+  margin: 4px 0;
+  line-height: 1.45;
+}
+
+.builtin-default-badge {
+  display: inline-flex;
+  padding: 3px 7px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-dim);
+  background: var(--bg-soft);
+  white-space: nowrap;
+}
+
+.builtin-default-badge.enabled {
+  border-color: color-mix(in srgb, var(--success) 45%, var(--border));
+  color: var(--success);
+}
+
 .banner {
   background: var(--danger-soft);
   border: 1px solid var(--danger);
@@ -840,6 +894,11 @@ html, body {
 .kind-badge.kind-native {
   background: rgba(56, 139, 253, 0.15);
   color: #79c0ff;
+}
+
+.kind-badge.kind-attachment {
+  background: rgba(210, 153, 34, 0.15);
+  color: #d29922;
 }
 
 .kind-badge.kind-skill {

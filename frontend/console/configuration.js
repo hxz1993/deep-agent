@@ -1,9 +1,10 @@
 let initialized = false;
 let loadingPromise = null;
-const CONFIGURATION_ASSET_VERSION = "20260729-4";
+const CONFIGURATION_ASSET_VERSION = "20260731-1";
 const CONFIGURATION_TABS = new Set([
   "agents",
   "llm-models",
+  "builtin-tools",
   "mcp",
   "ui-tools",
   "auxiliary-models",
@@ -80,6 +81,7 @@ async function loadAdminScripts() {
     "./configuration/llm-models.js",
     "./configuration/auxiliary-models.js",
     "./configuration/agents.js",
+    "./configuration/builtin-tools.js",
     "./configuration/mcp.js",
     "./configuration/ui-schema-editor.js",
     "./configuration/ui-tools.js",
@@ -127,6 +129,7 @@ export function refreshCurrentConfiguration() {
   if (active === "global-settings") return window.globalSettingsAdmin?.refresh();
   if (active === "agents") return window.agentsAdmin?.refresh();
   if (active === "llm-models") return window.llmModelsAdmin?.refresh();
+  if (active === "builtin-tools") return window.builtinToolsAdmin?.refresh();
   if (active === "auxiliary-models") return window.auxiliaryModelsAdmin?.refresh();
   if (active === "mcp") return window.mcpAdmin?.refresh();
   if (active === "ui-tools") return window.uiToolsAdmin?.refresh();

@@ -3,15 +3,28 @@ function chatUrlForAgent(id) {
 }
 
 const KIND_LABELS = {
-  native: "内置",
+  native: "Native",
   skill: "Skills",
   mcp: "MCP",
-  attachment: "附件读取",
+  attachment: "Attachment",
   ui: "UI（内置）",
   "ui-client": "UI 工具",
 };
 
-const KIND_ORDER = ["native", "attachment", "ui", "ui-client", "skill", "mcp"];
+const GROUP_LABELS = {
+  builtin: "内置工具",
+  skill: "Skills",
+  mcp: "MCP",
+  ui: "UI（内置）",
+  "ui-client": "UI 工具",
+};
+
+const GROUP_ORDER = ["builtin", "ui", "ui-client", "skill", "mcp"];
+
+function capabilityGroup(capability) {
+  if (["native", "attachment"].includes(capability.kind)) return "builtin";
+  return capability.kind;
+}
 
 function capDisplayName(name, kind) {
   if (kind === "mcp" && name.startsWith("mcp:")) {
@@ -24,6 +37,9 @@ function capDisplayName(name, kind) {
 }
 
 function capKindLabel(cap) {
+  if (["native", "attachment"].includes(cap.kind)) {
+    return KIND_LABELS[cap.kind];
+  }
   if (cap.kind !== "ui-client") return KIND_LABELS[cap.kind] || cap.kind;
   if (cap.source === "builtin") return "内置";
   if (cap.source === "manual") return "MANUAL";
@@ -36,15 +52,16 @@ function isCapabilitySelected(cap, selectedSet) {
 }
 
 function groupCapabilities(caps) {
-  const byKind = {};
+  const byGroup = {};
   for (const c of caps) {
-    (byKind[c.kind] ||= []).push(c);
+    const group = capabilityGroup(c);
+    (byGroup[group] ||= []).push(c);
   }
-  const ordered = KIND_ORDER.filter((k) => byKind[k]?.length);
-  for (const k of Object.keys(byKind)) {
+  const ordered = GROUP_ORDER.filter((k) => byGroup[k]?.length);
+  for (const k of Object.keys(byGroup)) {
     if (!ordered.includes(k)) ordered.push(k);
   }
-  return { byKind, kinds: ordered };
+  return { byGroup, groups: ordered };
 }
 
 function defaultEnabledCapabilityNames(caps) {
@@ -117,7 +134,7 @@ const agentsAdmin = {
 
   renderCapCard(cap, selectedSet) {
     const checked = isCapabilitySelected(cap, selectedSet);
-    const displayName = capDisplayName(cap.name, cap.kind);
+    const displayName = cap.label || capDisplayName(cap.name, cap.kind);
     const kindLabel = capKindLabel(cap);
     const toolCount = cap.tools?.length || 0;
     const searchText = `${displayName} ${cap.description || ""} ${cap.name}`.toLowerCase();
@@ -153,8 +170,8 @@ const agentsAdmin = {
     </article>`;
   },
 
-  countSelectedInKind(kind, selectedSet) {
-    const caps = (state.capabilities || []).filter((c) => c.kind === kind);
+  countSelectedInGroup(group, selectedSet) {
+    const caps = (state.capabilities || []).filter((c) => capabilityGroup(c) === group);
     return caps.filter((c) => isCapabilitySelected(c, selectedSet)).length;
   },
 
@@ -175,33 +192,33 @@ const agentsAdmin = {
     }
 
     const selectedSet = buildCapabilitySelectionSet(selected, caps);
-    const { byKind, kinds } = groupCapabilities(caps);
-    const defaultTab = kinds.find((k) => k !== "mcp") || kinds[0];
+    const { byGroup, groups } = groupCapabilities(caps);
+    const defaultTab = groups.find((group) => group !== "mcp") || groups[0];
 
-    tabsEl.innerHTML = kinds
-      .map((kind) => {
-        const total = byKind[kind].length;
-        const selectedCount = this.countSelectedInKind(kind, selectedSet);
-        const active = kind === defaultTab ? "active" : "";
-        const label = KIND_LABELS[kind] || kind;
-        return `<button type="button" class="cap-tab ${active}" data-kind="${escapeHtml(kind)}">
+    tabsEl.innerHTML = groups
+      .map((group) => {
+        const total = byGroup[group].length;
+        const selectedCount = this.countSelectedInGroup(group, selectedSet);
+        const active = group === defaultTab ? "active" : "";
+        const label = GROUP_LABELS[group] || group;
+        return `<button type="button" class="cap-tab ${active}" data-kind="${escapeHtml(group)}">
           ${escapeHtml(label)}
-          <span class="cap-tab-badge" data-kind-badge="${escapeHtml(kind)}">${selectedCount}/${total}</span>
+          <span class="cap-tab-badge" data-kind-badge="${escapeHtml(group)}">${selectedCount}/${total}</span>
         </button>`;
       })
       .join("");
 
-    container.innerHTML = kinds
-      .map((kind) => {
-        const cards = byKind[kind].map((c) => this.renderCapCard(c, selectedSet)).join("");
-        const hidden = kind !== defaultTab ? "hidden" : "";
-        const label = KIND_LABELS[kind] || kind;
-        return `<div class="cap-panel ${hidden}" data-kind-panel="${escapeHtml(kind)}">
+    container.innerHTML = groups
+      .map((group) => {
+        const cards = byGroup[group].map((c) => this.renderCapCard(c, selectedSet)).join("");
+        const hidden = group !== defaultTab ? "hidden" : "";
+        const label = GROUP_LABELS[group] || group;
+        return `<div class="cap-panel ${hidden}" data-kind-panel="${escapeHtml(group)}">
           <div class="cap-panel-toolbar">
-            <button type="button" class="btn-link cap-select-all" data-kind="${escapeHtml(kind)}">全选 ${escapeHtml(label)}</button>
-            <button type="button" class="btn-link cap-select-none" data-kind="${escapeHtml(kind)}">全不选</button>
+            <button type="button" class="btn-link cap-select-all" data-kind="${escapeHtml(group)}">全选 ${escapeHtml(label)}</button>
+            <button type="button" class="btn-link cap-select-none" data-kind="${escapeHtml(group)}">全不选</button>
           </div>
-          <div class="cap-grid" data-kind-grid="${escapeHtml(kind)}">${cards}</div>
+          <div class="cap-grid" data-kind-grid="${escapeHtml(group)}">${cards}</div>
         </div>`;
       })
       .join("");
@@ -284,10 +301,14 @@ const agentsAdmin = {
     }
 
     document.querySelectorAll("[data-kind-badge]").forEach((badge) => {
-      const kind = badge.dataset.kindBadge;
-      const kindTotal = (state.capabilities || []).filter((c) => c.kind === kind).length;
-      const kindSelected = (state.capabilities || []).filter((c) => c.kind === kind && selectedSet.has(c.name)).length;
-      badge.textContent = `${kindSelected}/${kindTotal}`;
+      const group = badge.dataset.kindBadge;
+      const groupCapabilities = (state.capabilities || []).filter(
+        (capability) => capabilityGroup(capability) === group,
+      );
+      const groupSelected = groupCapabilities.filter((capability) =>
+        selectedSet.has(capability.name),
+      ).length;
+      badge.textContent = `${groupSelected}/${groupCapabilities.length}`;
     });
   },
 

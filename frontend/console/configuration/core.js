@@ -155,6 +155,7 @@ function initTabs() {
         loadLlmModels().then(() => window.agentsAdmin.refresh());
       }
       if (name === "llm-models" && window.llmModelsAdmin) window.llmModelsAdmin.refresh();
+      if (name === "builtin-tools" && window.builtinToolsAdmin) window.builtinToolsAdmin.refresh();
       if (name === "auxiliary-models" && window.auxiliaryModelsAdmin) window.auxiliaryModelsAdmin.refresh();
       if (name === "mcp" && window.mcpAdmin) window.mcpAdmin.refresh();
       if (name === "ui-tools" && window.uiToolsAdmin) window.uiToolsAdmin.refresh();

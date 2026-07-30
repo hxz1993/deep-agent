@@ -414,6 +414,8 @@ def build_attachment_capability() -> Capability:
         name="attachment",
         kind="attachment",
         toolset=toolset,
+        label="附件读取",
+        source="builtin",
         description="按需读取当前会话上传的文本、Word 和 Excel 附件。",
         tools=[
             ToolInfo(

@@ -81,6 +81,33 @@
       </div>
     </section>
 
+    <!-- Read-only built-in tools panel -->
+    <section class="panel builtin-tools-panel" id="panel-builtin-tools">
+      <div class="panel-toolbar">
+        <div>
+          <h2>内置工具</h2>
+          <p class="panel-subtitle">内置工具随 DeepAgent 版本发布，无需注册；请在 Agent 能力配置中选择是否启用。</p>
+        </div>
+        <button class="btn" type="button" id="refreshBuiltinToolsBtn">重新加载</button>
+      </div>
+      <div class="table-wrap">
+        <table class="data-table builtin-tools-table">
+          <thead>
+            <tr>
+              <th>能力包</th>
+              <th>能力编码</th>
+              <th>包含工具</th>
+              <th>默认状态</th>
+              <th>说明</th>
+            </tr>
+          </thead>
+          <tbody id="builtinToolsTableBody">
+            <tr><td colspan="5" class="empty-cell">正在加载内置工具…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
     <!-- Auxiliary models panel -->
     <section class="panel" id="panel-auxiliary-models">
       <div class="panel-toolbar">

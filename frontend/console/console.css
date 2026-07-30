@@ -89,6 +89,15 @@ textarea {
 .console-brand > div { align-items: flex-start; flex-direction: column; line-height: 1.2; }
 .console-brand strong { font-size: 14px; }
 .console-brand-copy > span { color: var(--text-faint); font-size: 11px; }
+.product-version {
+  flex: 0 0 auto;
+  padding: 2px 5px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-faint);
+  background: var(--bg-elev);
+  font: 10px/1.2 var(--mono);
+}
 
 .console-nav {
   justify-content: center;

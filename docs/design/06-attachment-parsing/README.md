@@ -21,3 +21,4 @@
 详细方案与验证口径：
 
 - [附件工具合并与运行设计](attachment-tool-integration-plan.md)
+- [Attachment Tool 分支完整交接](attachment-tool-branch-handoff.md)

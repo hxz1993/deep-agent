@@ -1,8 +1,8 @@
-# Attachment Tool 合并与运行设计
+# DeepAgent 附件解析与按需读取设计
 
-> 基线：`fix-ruge-0717`
-> 实施分支：`fix-ruge-0730-attachment-tool`
-> 数据库：沿用 Alembic `023`，不新增表或迁移
+> 状态：第一版已实现
+>
+> 数据库：沿用 Alembic `023`，不新增附件表或迁移
 
 ## 1. 背景与目标
 
@@ -209,14 +209,51 @@ chat_messages
 因此压缩后模型仍能从原始会话范围重新读取附件，但不会把所有已读文件内容永久堆进每轮
 输入。
 
-## 8. 标题与兼容
+## 8. 数据与 Checkpoint
+
+平台文件服务保存文件字节，DeepAgent 只持久化稳定引用：
+
+```json
+{
+  "kind": "attachment-ref",
+  "id": "file-demo-123",
+  "name": "合同.docx",
+  "mime": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+}
+```
+
+模型的 `tool-call` 和每一页 `tool-return` 继续作为完整原始事件写入
+`chat_messages.payload`。工具结果包含 `file_id`、分页范围、解析文本和继续读取游标。
+
+`chat_context_checkpoints.payload` 只是下一轮模型输入的派生投影：
+
+- 只保留安全附件引用，不保存文件字节。
+- 不保留旧 `extracted_text`。
+- 原生媒体内容替换为“内容已省略”的文本占位。
+- Provider 元数据、认证信息和临时签名 URL 被移除或脱敏。
+- 可靠摘要可保留文件 ID、已读范围和关键结论。
+
+每轮顺序必须是：
+
+```text
+读取完整原始历史
+→ 持久化当前用户附件引用
+→ 从完整历史建立会话附件白名单
+→ 加载 Checkpoint 与其后的原始尾部
+→ 执行压缩和模型调用
+```
+
+不能从 Checkpoint 建附件权限白名单，否则被摘要覆盖的旧附件会失去可读性。Checkpoint 损坏、
+版本不符或哈希不匹配时，可以放弃投影并回退完整原始历史。
+
+## 9. 标题与兼容
 
 - 新消息不再发送 `extracted_text`。
 - 历史消息中已有的 `extracted_text` 仍可反序列化和回放，避免破坏旧会话。
 - 会话标题从 `<user>...</user>` 包装中提取真实用户请求，避免把大段引用上下文当标题。
 - 标题模型解析优先使用运行器已经持有的 Store，减少隐式全局上下文依赖。
 
-## 9. 验证清单
+## 10. 验证边界
 
 - 三个工具默认调用只传 `file_id` 可以成功。
 - `offset/limit/has_more/next_offset` 连续分页正确。
@@ -232,12 +269,34 @@ chat_messages
 - 附件工具结果参与上下文预算，不同页面不被误去重。
 - 完整 Python、Console Node、SQLite Alembic 和 `git diff --check` 通过。
 
-## 10. 后续演进
+## 11. 实现地图
 
-暂不阻塞第一版的后续项：
+| 范围 | 主要路径 |
+| --- | --- |
+| 附件引用、会话索引与原生模态 | `deep_agent/agent/attachments.py` |
+| TXT/DOCX/XLSX 解析和 Office 安全 | `deep_agent/agent/attachment_extractors.py` |
+| 上传处理 | `deep_agent/agent/media_pipeline.py` |
+| 三个读取工具与单 Run 缓存 | `deep_agent/capabilities/attachments/` |
+| Runner 与附件白名单 | `deep_agent/agent/runner.py` |
+| 压缩去重键 | `deep_agent/agent/context/file_keys.py` |
+| 上传 API | `deep_agent/api/v1/uploads.py` |
+| Console 上传与历史展示 | `frontend/console/chat.js` |
 
-1. 统一文档解析服务，覆盖 PDF/OCR、PPTX、复杂 Office、版面和图片锚点。
-2. 超大文件异步解析、沙箱隔离和租户级资源配额。
-3. 文件内容索引、检索式阅读和跨 Run 解析缓存。
-4. 受控的长工具结果外置存储。
-5. 使用态产品页面对“Agent 未开启附件读取”的统一交互提示。
+## 12. 安全与资源边界
+
+后续修改必须守住：
+
+- `file_id` 必须来自当前 Agent 会话完整历史或当前请求。
+- 平台下载只能使用当前用户身份，模型不能传自定义 Header 或 URL。
+- Office 解压和扫描继续受成员数、解压体积、压缩比和单元格数量限制。
+- 三个工具保持统一 `offset/limit/has_more/next_offset` 协议。
+- 同页可以去重，不同页或工作表不能误去重。
+- Tool Call/Result 在裁剪和摘要分块中不能被拆成非法配对。
+- `attachment` 默认关闭，不迁移历史 Agent。
+- 不恢复上传时预抽全文或 `DEEP_AGENT_UPLOAD_EXTRACT_TEXT_MAX_CHARS`。
+
+## 13. 后续方向
+
+后续方向包括统一文档解析服务、PDF/OCR、PPTX、复杂 Office、异步解析、资源隔离、结构
+索引、跨 Run 缓存和长结果外置。优先级和状态统一维护在
+[`../TODO.md`](../TODO.md)，不在本文维护第二份待办。

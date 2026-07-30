@@ -45,10 +45,10 @@ FastAPI API
 | 名称 | 来源 | 用途 |
 | --- | --- | --- |
 | `native` | `deep_agent/capabilities/native/` | 进程内基础函数工具 |
+| `attachment` | `deep_agent/capabilities/attachments/` | Agent 显式启用的会话附件按需读取 |
 | `skill:<name>` | `skills/<name>/` | Instructions 与 Python 工具组合 |
 | `mcp:<name>` | 数据库或 `mcps/` | 外部或内置 MCP 工具 |
-| `ui:<name>` | 数据库 | 可由 Agent 选择的手工 UI 工具 |
-| 内置 UI 工具 | DeepAgent 代码 | 所有 Agent 默认具备的 HITL 工具 |
+| `ui:<name>` | 代码或数据库 | Agent 显式选择的 builtin/manual HITL 工具 |
 
 仓库不再读取 Cursor 的 `.cursor/skills`。原实现只是把 Cursor Markdown Skill
 适配成读取指令工具，与业务 Python Skill 不同。未来若需要长 Skill 按需加载，

@@ -36,7 +36,7 @@ HTTP (REST/SSE)
 ### 启动生命周期（`main.py` lifespan → `AppContext.bootstrap()`）
 
 1. `configure_logging()` → `AppContext.bootstrap()`（见 `core/context.py`）
-2. `upgrade_database()` → `bootstrap_database()` → 8 个表 Store + `SqlConversationCoordinator`
+2. `upgrade_database()` → `bootstrap_database()` → 9 个表 Store + `SqlConversationCoordinator`
 3. `build_registry(stores=)` — native + Python Skill（静态能力）；`stores` 预留未来启动期只读配置
 4. `init_context(ctx)` — 路由通过 `Depends(AppContextDep)` 注入
 5. 关闭：`ctx.aclose()` → `reset_context()`
@@ -77,9 +77,10 @@ DeepAgent 自研 `capabilities.registry.Capability` 是配置包装对象，负�
 摘要始终复用当前 Agent 主模型，并与正式回答共享 `RunUsage` 和全局 `UsageLimits`；
 `chat_messages` 保持完整事实源，只有摘要成功且复检达到目标线时才覆盖 Checkpoint。
 
-完整审计见 [`../docs/design/03-context-compaction/pydantic-ai-native-capabilities-and-deepagent-usage-audit.md`](../docs/design/03-context-compaction/pydantic-ai-native-capabilities-and-deepagent-usage-audit.md)；
-上下文压缩的实测结论、数据结构和分阶段方案见
-[`../docs/design/03-context-compaction/context-compaction-implementation-plan.md`](../docs/design/03-context-compaction/context-compaction-implementation-plan.md)。
+研究依据见
+[`../docs/design/03-context-compaction/context-compaction-research.md`](../docs/design/03-context-compaction/context-compaction-research.md)；
+当前数据结构和运行方案见
+[`../docs/design/03-context-compaction/context-compaction-design.md`](../docs/design/03-context-compaction/context-compaction-design.md)。
 
 ---
 
@@ -202,7 +203,7 @@ DeepAgent 自研 `capabilities.registry.Capability` 是配置包装对象，负�
 生产环境继续启动 `deep_agent.main:app`，只使用平台网关注入的身份。需要从本地浏览器调试 Test 数据和服务时，使用独立入口：
 
 ```bash
-python -m deep_agent.local_dev \
+python3.12 -m deep_agent.local_dev \
   --config ~/.config/deep-agent/test.env \
   --port 8000
 ```
@@ -238,7 +239,7 @@ DEEP_AGENT_LOCAL_TOKEN_COOKIE=<可选，仅在目标环境要求 Cookie 时填�
 | --- | --- |
 | `NAME` | `postgres` \| `mysql`（kingbase/dameng 需额外驱动） |
 | `HOSTNAME` / `PORT` / `USER` / `PASSWORD` / `DATABASE` | 连接信息 |
-| 全部未设置 | 内存 Store；Agent/MCP CRUD → 503 |
+| 全部未设置 | 文件 SQLite，默认 `data/deep-agent.db`；可用 `DEEP_AGENT_SQLITE_PATH` 覆盖 |
 
 Provider Key（`OPENAI_API_KEY` 等）由 Pydantic AI 直接读取。
 
@@ -264,6 +265,10 @@ alembic upgrade head
 | CRUD | `/api/v1/ui-tools` | 是 |
 | GET | `/api/v1/tools` | 否（无 DB 时跳过动态 UI 工具） |
 | GET | `/api/v1/global-settings` | 否；无需额外身份依赖，返回安全白名单，只读 |
+| GET/POST | `/api/v1/llm-models/catalog`、`/api/v1/llm-models/catalog/refresh` | 是；目录只读查询、管理员手工全量刷新 |
+| GET/POST | `/api/v1/context-test-scenarios` | 是；按当前模型预算创建普通测试会话 |
+| GET/POST | `/api/v1/uploads/capabilities`、`/api/v1/uploads` | 否/否；后端仍执行用户与文件限制校验 |
+| GET | `/api/v1/request-context` | 否；返回当前请求上下文最终值 |
 | GET | `/api/v1/sessions/{id}/context-status` | 是；沿用会话所有权校验 |
 | | `/api/v1/sessions/*` | 是 |
 | | `/console/#/configuration` | 是 |
@@ -283,16 +288,16 @@ SSE 协议：[`../docs/guides/sse-protocol.md`](../docs/guides/sse-protocol.md)�
 4. DB Agent 会话：复合键 `(agent_id, session_id)`；无 agent 时 `agent_id=''`
 5. 同 session 用 `SessionStore.lock()` 串行；多实例 DB 级锁未实现
 6. 配置保存先完成 Schema/引用校验，再进入写事务；一次 API 业务变更不要串联多个各自提交的 Store `_write()`。MCP 检测等外部 I/O 先基于候选配置执行，再把配置与检测快照一次性提交。模型目录联网、解析和完整校验必须在事务前完成，随后单事务全量替换；模型配置保存不得隐式联网。
-7. `model_catalog` 不是运行时事实源，目录刷新不得修改已有 `llm_models`。模型名称和 Base URL 不再用于猜测模态；上下文缺失时后续自动压缩必须关闭。
-7. 配置中心必填文本会去除首尾空白并拒绝空值，显式把必填更新字段传为 `null` 返回 422；重复名称返回 409。删除仍被 Agent 引用的 MCP 或 UI 工具返回 409，并在 `detail.referenced_by` 列出引用方。
-8. 请求上下文以 App 为主键：标准 App 必须以三位数字结尾；Space 自动取 `app[:-3]`。App 与显式 Space 不一致时返回 422，Language 缺失时默认 `zh-cn`。
-9. 上下文压缩在模型配置有效上下文窗口时自动启用；环境变量只调节全局比例、工具保留量和摘要超时，
+7. `model_catalog` 不是运行时事实源，目录刷新不得修改已有 `llm_models`。模型名称和 Base URL 不再用于猜测模态；上下文缺失时当前自动压缩保持关闭。
+8. 配置中心必填文本会去除首尾空白并拒绝空值，显式把必填更新字段传为 `null` 返回 422；重复名称返回 409。删除仍被 Agent 引用的 MCP 或 UI 工具返回 409，并在 `detail.referenced_by` 列出引用方。
+9. 请求上下文以 App 为主键：标准 App 必须以三位数字结尾；Space 自动取 `app[:-3]`。App 与显式 Space 不一致时返回 422，Language 缺失时默认 `zh-cn`。
+10. 上下文压缩在模型配置有效上下文窗口时自动启用；环境变量只调节全局比例、工具保留量和摘要超时，
    不提供启用开关。只有主模型实际生成/更新 Summary 且复检达标时才写 Checkpoint；
    确定性压缩、Sliding Window、Pending、取消、失败都不更新。Checkpoint 写入失败不能让已完成对话失败。
-10. Console 压缩测试会话是管理员控制台的常驻功能；后端必须按当前模型实时预算构造可重新
+11. Console 压缩测试会话是管理员控制台的常驻功能；后端必须按当前模型实时预算构造可重新
     反序列化的普通对话历史，不得直接写 Checkpoint，也不得新增测试专用表。
 
 | 现象 | 原因 |
 | --- | --- |
-| MCP 工具为空 | 未配 DB 或 MCP 未 enabled |
-| 历史丢失 | 未配 `DEEP_AGENT_DBMS_*` |
+| MCP 工具为空 | MCP 未 enabled，或 Agent 未选择对应 `mcp:<name>` |
+| 历史不在预期数据库 | 未配置 DBMS 时实际使用默认文件 SQLite；检查 `DEEP_AGENT_SQLITE_PATH` |

@@ -291,8 +291,8 @@ assistant 正文，也不会出现在历史接口中。
 | `args` | `object` | 工具参数；首帧可能为 `{}`，应以同 `tool_call_id` 的后续帧覆盖 |
 | `tool_call_id` | `string \| null` | 调用唯一标识，用于关联 `tool_result` |
 | `widget` | `string \| null` | 可选；UI 工具渲染提示（来自 DB，**不发给模型**） |
-| `metadata` | `object \| null` | 可选；客户端扩展字段（来自 Admin/MCP 配置，**不发给模型**） |
-| `source` | `string \| null` | 可选；`builtin` \| `manual` \| `mcp` |
+| `metadata` | `object \| null` | 可选；客户端扩展字段（来自 builtin/manual 定义，**不发给模型**） |
+| `source` | `string \| null` | 可选；`builtin` \| `manual` |
 
 **事件来源（后端实现）**：
 
@@ -306,7 +306,7 @@ assistant 正文，也不会出现在历史接口中。
 - 以 `tool_call_id` 为键做 **upsert**，不要为每次事件新建 UI 块
 - 当 `args` 为空对象时，可显示「参数接收中…」占位，收到完整参数后更新
 - 不要假设每个 `tool_call_id` 只出现一次
-- UI 工具（manual / MCP）的 `widget` / `metadata` 由后端 enrichment 注入；客户端可优先使用 SSE 字段，或与 `GET /api/v1/ui-tools` 缓存合并
+- UI 工具（builtin/manual）的 `widget` / `metadata` 由后端 enrichment 注入；客户端可优先使用 SSE 字段，或与 `GET /api/v1/ui-tools` 缓存合并
 
 ---
 
@@ -505,9 +505,9 @@ data: {"type": "final", "output": "## 平台的 11 种维度类型\n...", "usage
 
 | 文件 | 职责 |
 |------|------|
-| `app/api/v1/chat.py` | SSE 端点，`EventSourceResponse` 封装 |
-| `app/agent/events.py` | 事件 dict 构造函数 |
-| `app/agent/runner.py` | Pydantic AI 事件 → SSE 事件映射 |
+| `deep_agent/api/v1/chat.py` | SSE 端点，`EventSourceResponse` 封装 |
+| `deep_agent/agent/events.py` | 事件 dict 构造函数 |
+| `deep_agent/agent/runner.py` | Pydantic AI 事件 → SSE 事件映射 |
 | `frontend/console/chat.js` | 参考客户端实现 |
 
 ## 9. 版本与兼容性

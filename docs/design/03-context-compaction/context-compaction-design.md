@@ -1,9 +1,12 @@
-# DeepAgent 上下文压缩实施方案
+# DeepAgent 上下文压缩设计
 
-> 状态：已在 `fix-ruge-0829-context-compaction` 实施，待本地 SQLite 与发布环境验收
-> 更新日期：2026-07-29
+> 状态：已实现并合入主开发分支
+>
+> 更新日期：2026-07-30
+>
 > 依赖组合：`pydantic-ai-slim 2.14.1` + `pydantic-ai-harness 0.10.0`
-> 数据库迁移：沿用 Alembic `023`，本轮不新增迁移
+>
+> 数据库迁移：Alembic `023`
 
 ## 1. 最终口径
 
@@ -461,7 +464,7 @@ Alembic。场景构造器必须通过“序列化后可反序列化、没有工�
 17. 普通请求与 SSE 行为一致。
 18. SSE 压缩状态先于正式模型输出，且不进入历史。
 19. 三类测试场景都能按当前模型预算生成超过触发线的合法纯对话历史。
-20. 测试入口关闭时返回 404，开启后创建的会话归属当前用户和 Agent。
+20. 测试会话归属当前用户和 Agent，并可按普通会话删除。
 
 前端至少覆盖：
 
@@ -472,5 +475,6 @@ Alembic。场景构造器必须通过“序列化后可反序列化、没有工�
 5. 测试入口位于搜索框与普通新建之间，普通新建按钮不变。
 6. 场景确认后创建并打开会话，同时预填推荐验证问题。
 
-完成后运行目标 Python 测试、完整 Python 测试、Console Node 测试、Alembic
-upgrade/downgrade、配置备份测试、`git diff --check`，并保留本地 SQLite 供人工查看。
+实现变更继续要求运行目标 Python 测试、完整 Python 测试、Console Node 测试、Alembic
+upgrade/downgrade、配置备份测试和 `git diff --check`。后续待办见
+[`../TODO.md`](../TODO.md)。

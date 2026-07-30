@@ -1,9 +1,12 @@
-# DeepAgent 0.2.2 模型目录数据库化与运行属性方案
+# DeepAgent 模型目录与运行属性设计
 
-> 状态：已实现，待发布验证
-> 更新日期：2026-07-28
-> 基线：`fix-ruge-0717`，Alembic `021 → 022`
-> 关联方案：[`context-compaction-implementation-plan.md`](../03-context-compaction/context-compaction-implementation-plan.md)
+> 状态：已实现
+>
+> 更新日期：2026-07-30
+>
+> 数据库迁移：Alembic `022`
+>
+> 关联设计：[`上下文压缩`](../03-context-compaction/context-compaction-design.md)
 
 ## 1. 结论与边界
 
@@ -42,8 +45,23 @@ models.dev 的数据不是简单的 Provider × Model 平铺：
 | `https://models.dev/labs` | Lab 名称、描述和公开链接补充 | 否 |
 
 Lab 页面不可用时，可从标准模型 ID 前缀推导 `lab_id/lab_label`；标准模型目录或 Provider
-对象缺失或非法时，整次刷新失败。不再额外请求 `api.json`，避免同一轮刷新混用不同生成时点的两份
-Provider 数据。
+对象缺失或非法时，整次刷新失败。不再额外请求 `api.json`，避免同一轮刷新混用不同生成
+时点的两份 Provider 数据。
+
+标准化顺序为：
+
+```text
+获取完整 catalog
+→ 建立标准 Model 索引
+→ 过滤 Provider 白名单
+→ 解析 Lab / Model / Provider 关系
+→ 排除废弃、非文本聊天模型
+→ 合并 Provider 覆盖值
+→ 校验 Token、模态、能力和主键
+→ 生成数据库行
+```
+
+页面与接口按 `release_date` 倒序展示；日期缺失的模型排在有明确发布日期的模型之后。
 
 ## 3. Provider 白名单
 
@@ -133,7 +151,7 @@ tags                   JSON/TEXT NULL
 - 能力标签：`reasoning/tool_call/structured_output/...`，描述协议或推理能力。
 
 新建与前端编辑要求上下文、最大输出和至少一种输入模态。迁移列保持 nullable，避免升级时为历史
-模型伪造值；历史模型未补齐上下文时继续运行，但后续自动上下文压缩必须关闭。
+模型伪造值；历史模型未补齐上下文时继续运行，但当前自动上下文压缩保持关闭。
 
 不增加：
 
@@ -257,8 +275,8 @@ API Key 永不来自目录，管理员自行填写。保存只写 `llm_models`�
 - 图片附件是否作为原生图片发送，仅判断 `input_modalities` 是否包含 `image`。
 - 不再根据模型名称或 Base URL 猜测模态。
 - 不再读取 `modality_data.json`、`models_dev_snapshot.json`。
-- `AgentSpec/AgentRunner` 接收上下文、最大输出和 tags，为后续压缩留事实来源。
-- 本次不实现 Token 观测、输出预测或自动上下文压缩。
+- `AgentSpec/AgentRunner` 接收上下文、最大输出和 tags，为 Token 预算与上下文压缩提供事实来源。
+- 上下文压缩算法只使用 `llm_models`，不在运行时反查目录。
 
 Provider 工厂使用模型配置保存的 API Key 与 Base URL 构造 OpenAI、Anthropic、Google、
 DeepSeek 或兼容 Provider；目录不参与运行时 Provider 解析。
@@ -340,5 +358,6 @@ auxiliary_model_configs
 - 模态与能力标签分开展示。
 - 保存模型不触发外网请求。
 
-最终运行目标 Python 测试、完整 Python 测试、Console Node 测试、JS 语法检查、
-Alembic 往返、配置备份测试、`git diff --check` 与工作区状态检查。
+变更继续要求运行目标 Python 测试、完整 Python 测试、Console Node 测试、JS 语法检查、
+Alembic 往返、配置备份测试、`git diff --check` 与工作区状态检查。后续事项见
+[`../TODO.md`](../TODO.md)。

@@ -1,4 +1,4 @@
-# 附件解析
+# 06 · 附件解析
 
 > 首次研究：2026-07-30
 > 当前状态：第一版已实现，后续继续补统一文档解析与 PDF/OCR
@@ -18,7 +18,6 @@
 - `chat_messages` 保存原始附件引用和完整工具事件；Checkpoint 只保存模型输入的派生投影。
 - PDF 本轮不增加本地解析或 OCR。文本模型无法读取 PDF 时返回明确错误。
 
-详细方案与验证口径：
-
-- [附件工具合并与运行设计](attachment-tool-integration-plan.md)
-- [Attachment Tool 分支完整交接](attachment-tool-branch-handoff.md)
+详细方案与验证口径见
+[`attachment-parsing-design.md`](attachment-parsing-design.md)。后续统一文档解析、PDF/OCR
+和大文件治理事项统一登记在 [`../TODO.md`](../TODO.md)。

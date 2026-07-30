@@ -2,8 +2,11 @@
 
 > **读者**：deep-agent **仓库贡献者**（需修改 `deep_agent/`、`frontend/` 代码）。
 >
-> 若你仅**使用已部署的服务**、自建客户端或配置 Agent，请参阅 [`ui-tools-external.md`](ui-tools-external.md)。  
-若你参与**平台能力规划**（让集成方扩展 UI 工具），请参阅设计文档 [`ui-tools-extension-proposals.md`](../design/01-ui-tools/ui-tools-extension-proposals.md) 与 RFC [`0001-ui-tools-mcp-discovery-and-api.md`](../design/01-ui-tools/rfc/0001-ui-tools-mcp-discovery-and-api.md)。
+> 若你仅**使用已部署的服务**、自建客户端或配置 Agent，请参阅
+> [`ui-tools-external.md`](ui-tools-external.md)。
+
+MCP 自动发现等历史方案及废弃原因见
+[`UI 工具设计历史`](../design/01-ui-tools/ui-tools-history.md)。
 
 相关协议见 [`sse-protocol.md`](sse-protocol.md) 中 `final.status=pending` 与 `deferred_tool_results`。
 
@@ -137,7 +140,7 @@ ToolDefinition(
 
 流式 `tool_call` 与 `final.deferred` 事件上的 `widget`、`metadata` 由 [`registry.py`](../../deep_agent/capabilities/ui/registry.py) 的 `enrich_tool_event` / `enrich_deferred` 注入：
 
-- **DB / MCP 工具**：从 `load_ui_tool_hints()` 加载的 hints 合并进事件。
+- **manual 工具**：从 `load_ui_tool_hints()` 加载的数据库 hints 合并进事件。
 - **builtin 工具**（当前为 `builtin__confirm`、`builtin__choice`）：即使 DB 无对应行，也会在 hints 未命中时回退到 `builtin_ui_records()`，保证已启用工具的 SSE 仍带 `widget` 供客户端渲染。
 
 详见 [`sse-protocol.md`](sse-protocol.md) 中 `tool_call` 可选字段说明。
@@ -289,7 +292,7 @@ curl http://127.0.0.1:8000/api/v1/tools
 ### 7.3 单元测试
 
 ```bash
-venv\Scripts\python.exe -m unittest tests.unit.test_hitl_deferred -v
+python3.12 -m unittest tests.unit.test_hitl_deferred -v
 ```
 
 可为新工具增加类似用例：TestModel `call_tools=["your_tool"]` → `final.status == "pending"` → 带 `DeferredToolResults` 续跑。

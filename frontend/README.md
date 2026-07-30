@@ -11,7 +11,7 @@ http://127.0.0.1:8000/console/
 ## 功能
 
 - 测试工作台：Agent、会话、SSE 对话、Thinking、工具调用、HITL、附件和模型切换。
-- 测试上下文：只允许覆盖 App、Space、Language；用户和鉴权保持只读。
+- 测试上下文：只允许编辑 App；Space 自动推导、Language 固定为 `zh-cn`，用户和鉴权只读。
 - 配置中心：Agent、LLM 模型、MCP 服务、UI 工具、辅助模型和模型目录。
 - MCP 服务：URL MCP 可创建、编辑和删除；内建 MCP 由程序管理，控制台不提供删除入口。
 - 诊断中心：当前展示已有运行信息和后续诊断能力说明。

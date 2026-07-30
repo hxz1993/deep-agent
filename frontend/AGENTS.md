@@ -93,7 +93,7 @@ uvicorn deep_agent.main:app --reload
 
 ```bash
 cd frontend
-python -m http.server 5173
+python3.12 -m http.server 5173
 # → http://localhost:5173/console/
 ```
 

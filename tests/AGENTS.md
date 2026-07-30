@@ -10,16 +10,16 @@
 
 ```bash
 # 全部
-venv\Scripts\python.exe -m unittest discover -s tests -p "test_*.py" -v
+python3.12 -m unittest discover -s tests -p "test_*.py" -v
 
 # 排查失败：首个报错即停（推荐配合 tests/run.ps1 的 30s 超时）
-venv\Scripts\python.exe -m unittest discover -s tests -p "test_*.py" --failfast -v
+python3.12 -m unittest discover -s tests -p "test_*.py" --failfast -v
 
 # 仅单元（无网络、无外部子进程）
-venv\Scripts\python.exe -m unittest discover -s tests/unit -p "test_*.py" -v
+python3.12 -m unittest discover -s tests/unit -p "test_*.py" -v
 
 # 仅集成（HTTP、MCP 子进程、header 转发）
-venv\Scripts\python.exe -m unittest discover -s tests/integration -p "test_*.py" -v
+python3.12 -m unittest discover -s tests/integration -p "test_*.py" -v
 ```
 
 ---

@@ -57,10 +57,10 @@ uvicorn deep_agent.main:app --host 0.0.0.0 --port 8000
 DeepAgent 当前支持：
 
 - `native`：进程内基础工具。
+- `attachment`：Agent 显式启用的 TXT、DOCX、XLSX 按需读取工具。
 - `skill:<name>`：Python Skill，组合 Instructions 和函数工具。
 - `mcp:<name>`：URL、stdio 或 builtin MCP。
-- `ui:<name>`：Agent 显式关联的手工 UI 工具。
-- 内置 UI 工具：所有 Agent 默认具备的 HITL 工具。
+- `ui:<name>`：Agent 显式关联的 builtin/manual HITL 工具；内置工具也不默认启用。
 
 仓库不再注册 Cursor 专属 Skill。未来需要长 Skill 渐进披露时，在通用
 `skill:` 机制内设计。
@@ -73,3 +73,6 @@ node --test tests/frontend/console/*.test.mjs
 ```
 
 具体开发和测试要求见根目录及子目录的 `AGENTS.md`。
+
+设计课题和后续待办见 [`docs/design/README.md`](docs/design/README.md) 与
+[`docs/design/TODO.md`](docs/design/TODO.md)。

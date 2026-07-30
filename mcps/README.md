@@ -1,94 +1,64 @@
-# mcps/ — builtin MCP servers
+# 仓库内置 MCP
 
-This directory holds **MCP servers that ship with the repo**. They are plain
-stdio MCP servers (their own subprocess), separate from the in-process `native`
-tools and `skills/`.
+`mcps/` 保存随 DeepAgent 一起发布的 MCP Server。它们与进程内 `native`、`attachment`
+和 `skill` 工具不同，运行时仍通过 MCP 协议接入。
 
-## How discovery works
+## 当前内置服务
 
-On startup `load_builtin_mcp_capabilities` (`app/capabilities/mcp/builtin.py`)
-scans this directory. Every immediate subdirectory that contains a `server.py`
-becomes one capability:
+| 目录 | capability | 用途 |
+| --- | --- | --- |
+| `text_tools/` | `mcp:text_tools` | 文本统计和转换示例 |
+| `deepcube/` | `mcp:deepcube` | DeepCube SDK/MCP 薄启动器 |
+| `doc_search/` | `mcp:doc_search` | 文档搜索 |
 
-```
-mcps/<name>/server.py   ->   capability  mcp:<name>   (tools prefixed with <name>_)
-```
+运行时由 `deep_agent/capabilities/mcp/builtin.py` 发现仓库实现，并与数据库
+`mcp_servers` 配置合并。外部 URL MCP 只通过数据库和 Console 配置，不再使用目录 JSON。
 
-The server is launched lazily over stdio with the current Python interpreter
-(`python mcps/<name>/server.py`); no subprocess is spawned until an agent that
-enabled the capability actually runs.
+内置记录使用 `transport=builtin`，由程序管理：
 
-This is complementary to `config/mcp.json`: use `mcps/` for servers whose code
-lives in this repo, and `config/mcp.json` for external/remote servers.
+- Console 不显示删除按钮。
+- `DELETE /api/v1/mcp/{name}` 返回 `403`。
+- 移除内置 MCP 必须同时删除实现和程序配置，并随正式版本发布。
 
-## Builtin lifecycle
+## 新增内置服务
 
-Builtin MCP records use `transport=builtin` and are managed with the program
-that ships their implementation. The Console does not show a delete action for
-them, and `DELETE /api/v1/mcp/{name}` returns `403`. To remove a builtin MCP,
-remove its repository implementation and program configuration together in a
-normal release. A database row using another transport remains an ordinary
-external MCP even when its name matches a builtin directory.
-
-## Add a builtin server
-
-1. Create `mcps/<name>/server.py`.
-2. Build a `FastMCP` instance and register tools.
-3. Run it over stdio in `__main__`.
+1. 创建 `mcps/<name>/server.py`。
+2. 使用 `FastMCP` 注册短工具名。
+3. 保持服务自包含，不导入 `deep_agent` 业务包。
+4. 增加单元与集成测试，并通过 Agent capability 验证实际工具名。
 
 ```python
 from mcp.server.fastmcp import FastMCP
 
 mcp = FastMCP("my-server")
 
+
 @mcp.tool()
 def greet(name: str) -> str:
-    """Say hello."""
+    """返回问候语。"""
     return f"Hello, {name}!"
 
+
 if __name__ == "__main__":
-    mcp.run()  # defaults to stdio transport
+    mcp.run()
 ```
 
-Keep each server **self-contained** — do not import from the `app` package, so
-it can run as an independent subprocess.
-
-## Example
-
-`text_tools/` is a working example with `word_count`, `char_count`, `slugify`
-and `reverse`. Run it directly to sanity-check:
+本地直接运行时，stdio 服务会等待 MCP 客户端连接：
 
 ```bash
-cd deep_agent
-python mcps/text_tools/server.py
+python3.12 mcps/<name>/server.py
 ```
 
-It will wait for MCP stdio traffic (Ctrl+C to quit). Once the app is running it
-shows up as the `mcp:text_tools` capability, e.g. via `GET /api/v1/tools`.
+## DeepCube
 
-## DeepCube (`deepcube/`)
+`mcps/deepcube/server.py` 委托已安装的 `deepcube-mcp` 包。常用配置通过
+`mcp_servers.config.env` 或部署环境注入：
 
-Thin stdio launcher for the installed `deepcube-mcp` package. Capability name:
-`mcp:deepcube` (tools prefixed with `deepcube_`).
+| 变量 | 默认/说明 |
+| --- | --- |
+| `DEEPCUBE_MCP_TRANSPORT` | `stdio` |
+| `DEEPCUBE_MCP_ENV_URL` | DeepFOS 服务基址 |
+| `DEEPCUBE_MCP_HEADERS` | 静态 Header JSON |
+| `DEEPCUBE_MCP_DIM_INIT_MAX_CONCURRENCY` | `4` |
 
-Startup defaults (override via `mcp_servers.config.env`):
-
-| Variable | Default                                                         |
-|----------|-----------------------------------------------------------------|
-| `DEEPCUBE_MCP_TRANSPORT` | `stdio`                                                         |
-| `DEEPCUBE_MCP_ENV_URL` | `https://test.deepfos.com/deepfos-server/`                      |
-| `DEEPCUBE_MCP_HEADERS` | JSON object, e.g. `{"app":"demo","space":"demo","token":"..."}` |
-| `DEEPCUBE_MCP_DIM_INIT_MAX_CONCURRENCY` | `4` (Cube dimension init concurrency)                           |
-
-Example DB `config.env` for live DeepFOS metadata:
-
-```json
-{
-  "DEEPCUBE_MCP_TRANSPORT": "stdio",
-  "DEEPCUBE_MCP_ENV_URL": "https://test.deepfos.com/deepfos-server/",
-  "DEEPCUBE_MCP_HEADERS": "{\"app\":\"demo\",\"space\":\"demo\",\"token\":\"...\"}",
-  "DEEPCUBE_MCP_DIM_INIT_MAX_CONCURRENCY": "4"
-}
-```
-
-Subprocesses are kept alive per chat session when `DEEP_AGENT_MCP_STDIO_SESSION_SCOPE=true` (default).
+凭据、Token 和真实 Header 不得写入仓库示例。详细维护边界见 [`AGENTS.md`](AGENTS.md)。

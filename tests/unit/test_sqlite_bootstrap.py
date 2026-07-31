@@ -20,7 +20,7 @@ from deep_agent.db.factory import create_engine
 
 class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
     async def test_migrate_and_create_stores(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
             db_path = Path(tmpdir) / "bootstrap.db"
             url = f"sqlite+aiosqlite:///{db_path.as_posix()}"
 
@@ -46,7 +46,7 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
                 await engine.dispose()
 
     async def test_migrations_remove_mcp_ui_discovery_and_add_inspection(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
             db_path = Path(tmpdir) / "migration-018.db"
             url = f"sqlite+aiosqlite:///{db_path.as_posix()}"
 
@@ -83,7 +83,7 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
                     self.assertNotIn("ui_tools", self._deepcube_config(db_path))
 
     async def test_migration_021_removes_agent_request_limit(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
             db_path = Path(tmpdir) / "migration-020.db"
             url = f"sqlite+aiosqlite:///{db_path.as_posix()}"
 
@@ -167,7 +167,7 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
                     )
 
     async def test_migration_020_preserves_resource_snapshot(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
             db_path = Path(tmpdir) / "migration-019.db"
             url = f"sqlite+aiosqlite:///{db_path.as_posix()}"
 

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+from abc import ABC, abstractmethod
 from collections.abc import Callable
-from typing import Any, TypeVar
+from dataclasses import dataclass
+from typing import Any, Generic, TypeVar
 
 from pydantic_ai import BinaryContent, FunctionToolset, ModelRetry, RunContext
 from pydantic_ai.messages import ToolReturn
@@ -188,6 +190,262 @@ def _result(
     )
 
 
+@dataclass(frozen=True)
+class _PageSource:
+    items: tuple[str, ...]
+    metadata: dict[str, Any]
+
+
+ParsedT = TypeVar("ParsedT")
+
+
+class _PagedAttachmentReader(ABC, Generic[ParsedT]):
+    """Template method for a paged, on-demand attachment tool."""
+    tool_name: str
+    allowed_mimes: frozenset[str]
+    unit: str
+    default_limit: int
+    max_limit: int
+
+    async def read(
+        self,
+        ctx: RunContext[AgentDeps],
+        file_id: str,
+        *,
+        offset: int | None,
+        limit: int | None,
+    ) -> AttachmentReadResult | ToolReturn:
+        ref = _attachment_ref(ctx, file_id)
+        mime = _require_mime(ref, allowed=self.allowed_mimes, tool_name=self.tool_name,)
+        resolved_offset, resolved_limit = _normalized_range(
+            offset=offset,
+            limit=limit,
+            default_limit=self.default_limit,
+            max_limit=self.max_limit,
+        )
+        data = await _download_cached(ctx, ref)
+        parsed = await _parse_cached(
+            ctx,
+            key=self._cache_key(ref, mime),
+            parser=lambda: self._parse(data, ref=ref, mime=mime),
+        )
+        source = self._page_source(
+            ctx,
+            parsed,
+            offset=resolved_offset,
+        )
+        page = paginate_items(
+            source.items[resolved_offset - 1 : resolved_offset - 1 + resolved_limit],
+            total_count=len(source.items),
+            offset=resolved_offset,
+            limit=resolved_limit,
+        )
+        result = _result(
+            ref=ref,
+            unit=self.unit,
+            offset=resolved_offset,
+            limit=resolved_limit,
+            total_count=len(source.items),
+            page=page,
+            metadata=source.metadata,
+        )
+        return self._wrap_result(ctx, parsed, offset=resolved_offset, result=result,)
+
+    @abstractmethod
+    def _cache_key(self, ref: AttachmentRef, mime: str) -> str: ...
+
+    @abstractmethod
+    def _parse(
+        self,
+        data: bytes,
+        *,
+        ref: AttachmentRef,
+        mime: str,
+    ) -> ParsedT: ...
+
+    @abstractmethod
+    def _page_source(
+        self,
+        ctx: RunContext[AgentDeps],
+        parsed: ParsedT,
+        *,
+        offset: int,
+    ) -> _PageSource: ...
+
+    def _wrap_result(
+        self,
+        ctx: RunContext[AgentDeps],
+        parsed: ParsedT,
+        *,
+        offset: int,
+        result: AttachmentReadResult,
+    ) -> AttachmentReadResult | ToolReturn:
+        return result
+
+
+class _TextReader(_PagedAttachmentReader[tuple[tuple[str, ...], dict[str, Any]]]):
+    tool_name = "read_text_attachment"
+    allowed_mimes = _TEXT_MIMES
+    unit = "line"
+    default_limit = _TEXT_DEFAULT_LIMIT
+    max_limit = _TEXT_MAX_LIMIT
+
+    def _cache_key(self, ref: AttachmentRef, mime: str) -> str:
+        return f"text:{ref.id}:{mime}"
+
+    def _parse(
+        self,
+        data: bytes,
+        *,
+        ref: AttachmentRef,
+        mime: str,
+    ) -> tuple[tuple[str, ...], dict[str, Any]]:
+        return text_document(data, name=ref.name, mime=mime)
+
+    def _page_source(
+        self,
+        _ctx: RunContext[AgentDeps],
+        parsed: tuple[tuple[str, ...], dict[str, Any]],
+        *,
+        offset: int,
+    ) -> _PageSource:
+        lines, metadata = parsed
+        return _PageSource(items=lines, metadata=metadata)
+
+
+class _DocxReader(_PagedAttachmentReader[DocxDocument]):
+    tool_name = "read_docx"
+    allowed_mimes = frozenset({_DOCX_MIME})
+    unit = "block"
+    default_limit = _DOCX_DEFAULT_LIMIT
+    max_limit = _DOCX_MAX_LIMIT
+
+    def _cache_key(self, ref: AttachmentRef, mime: str) -> str:
+        return f"docx:{ref.id}"
+
+    def _parse(
+        self,
+        data: bytes,
+        *,
+        ref: AttachmentRef,
+        mime: str,
+    ) -> DocxDocument:
+        return docx_document(data)
+
+    def _page_source(
+        self,
+        ctx: RunContext[AgentDeps],
+        parsed: DocxDocument,
+        *,
+        offset: int,
+    ) -> _PageSource:
+        include_images = self._include_images(ctx, parsed, offset=offset)
+        return _PageSource(
+            items=parsed.blocks,
+            metadata={
+                **parsed.metadata,
+                "embedded_images_included": include_images,
+                "embedded_images_note": (
+                    "图片按文档级集合返回，不代表它们在正文中的准确位置"
+                    if parsed.images else None
+                ),
+            },
+        )
+
+    def _wrap_result(
+        self,
+        ctx: RunContext[AgentDeps],
+        parsed: DocxDocument,
+        *,
+        offset: int,
+        result: AttachmentReadResult,
+    ) -> AttachmentReadResult | ToolReturn:
+        if not self._include_images(ctx, parsed, offset=offset):
+            return result
+
+        multimodal: list[Any] = [
+            f"以下是附件 {result.name or result.file_id} 中的文档级内嵌图片集合，共 {len(parsed.images)} 张："
+        ]
+        for index, (name, raw) in enumerate(parsed.images, start=1):
+            mime = image_mime(raw, name)
+            if mime == "application/octet-stream":
+                continue
+            try:
+                processed, output_mime, _ = process_image(raw, filename=name, mime=mime,)
+            except AttachmentParseError:
+                processed, output_mime = raw, mime
+            multimodal.append(f"内嵌图片 {index}（{name}）:")
+            multimodal.append(BinaryContent(data=processed, media_type=output_mime))
+        if len(multimodal) == 1:
+            return result
+        return ToolReturn(return_value=result, content=multimodal)
+
+    @staticmethod
+    def _include_images(
+        ctx: RunContext[AgentDeps],
+        document: DocxDocument,
+        *,
+        offset: int,
+    ) -> bool:
+        return (
+            offset == 1
+            and "image" in set(ctx.deps.input_modalities)
+            and bool(document.images)
+        )
+
+
+class _XlsxReader(_PagedAttachmentReader[XlsxWorkbook]):
+    tool_name = "read_xlsx"
+    allowed_mimes = frozenset({_XLSX_MIME})
+    unit = "row"
+    default_limit = _XLSX_DEFAULT_LIMIT
+    max_limit = _XLSX_MAX_LIMIT
+
+    def __init__(self, sheet: str | None) -> None:
+        self._sheet = sheet
+
+    def _cache_key(self, ref: AttachmentRef, mime: str) -> str:
+        return f"xlsx:{ref.id}"
+
+    def _parse(
+        self,
+        data: bytes,
+        *,
+        ref: AttachmentRef,
+        mime: str,
+    ) -> XlsxWorkbook:
+        return xlsx_workbook(data)
+
+    def _page_source(
+        self,
+        _ctx: RunContext[AgentDeps],
+        parsed: XlsxWorkbook,
+        *,
+        offset: int,
+    ) -> _PageSource:
+        try:
+            selected = select_xlsx_sheet(parsed, self._sheet)
+        except AttachmentParseError as exc:
+            raise ModelRetry(str(exc)) from exc
+        return _PageSource(
+            items=selected.rows,
+            metadata={
+                "selected_sheet": selected.name,
+                "sheets": [
+                    {
+                        "name": item.name,
+                        "state": item.state,
+                        "rows": len(item.rows),
+                        "columns": item.columns,
+                        "headers": list(item.headers),
+                    }
+                    for item in parsed.sheets
+                ],
+                "formula_mode": "cached_values_only",
+            },
+        )
+
+
 async def read_text_attachment(
     ctx: RunContext[AgentDeps],
     file_id: str,
@@ -204,40 +462,7 @@ async def read_text_attachment(
         offset: 可选的起始行，1 表示第一行。
         limit: 可选的最大行数；超出内部上限时会自动收紧。
     """
-    ref = _attachment_ref(ctx, file_id)
-    mime = _require_mime(
-        ref,
-        allowed=_TEXT_MIMES,
-        tool_name="read_text_attachment",
-    )
-    resolved_offset, resolved_limit = _normalized_range(
-        offset=offset,
-        limit=limit,
-        default_limit=_TEXT_DEFAULT_LIMIT,
-        max_limit=_TEXT_MAX_LIMIT,
-    )
-    data = await _download_cached(ctx, ref)
-    lines, metadata = await _parse_cached(
-        ctx,
-        key=f"text:{ref.id}:{mime}",
-        parser=lambda: text_document(data, name=ref.name, mime=mime),
-    )
-    start = resolved_offset - 1
-    page = paginate_items(
-        lines[start : start + resolved_limit],
-        total_count=len(lines),
-        offset=resolved_offset,
-        limit=resolved_limit,
-    )
-    return _result(
-        ref=ref,
-        unit="line",
-        offset=resolved_offset,
-        limit=resolved_limit,
-        total_count=len(lines),
-        page=page,
-        metadata=metadata,
-    )
+    return await _TextReader().read(ctx, file_id, offset=offset, limit=limit,)
 
 
 async def read_docx(
@@ -257,74 +482,7 @@ async def read_docx(
         offset: 可选的起始逻辑块，1 表示第一个块。
         limit: 可选的最大逻辑块数量；超出内部上限时会自动收紧。
     """
-    ref = _attachment_ref(ctx, file_id)
-    _require_mime(
-        ref,
-        allowed=frozenset({_DOCX_MIME}),
-        tool_name="read_docx",
-    )
-    resolved_offset, resolved_limit = _normalized_range(
-        offset=offset,
-        limit=limit,
-        default_limit=_DOCX_DEFAULT_LIMIT,
-        max_limit=_DOCX_MAX_LIMIT,
-    )
-    data = await _download_cached(ctx, ref)
-    document: DocxDocument = await _parse_cached(
-        ctx,
-        key=f"docx:{ref.id}",
-        parser=lambda: docx_document(data),
-    )
-    start = resolved_offset - 1
-    page = paginate_items(
-        document.blocks[start : start + resolved_limit],
-        total_count=len(document.blocks),
-        offset=resolved_offset,
-        limit=resolved_limit,
-    )
-    image_capable = "image" in set(ctx.deps.input_modalities)
-    include_images = resolved_offset == 1 and image_capable and bool(document.images)
-    metadata = {
-        **document.metadata,
-        "embedded_images_included": include_images,
-        "embedded_images_note": (
-            "图片按文档级集合返回，不代表它们在正文中的准确位置"
-            if document.images
-            else None
-        ),
-    }
-    result = _result(
-        ref=ref,
-        unit="block",
-        offset=resolved_offset,
-        limit=resolved_limit,
-        total_count=len(document.blocks),
-        page=page,
-        metadata=metadata,
-    )
-    if not include_images:
-        return result
-
-    multimodal: list[Any] = [
-        f"以下是附件 {ref.name or ref.id} 中的文档级内嵌图片集合，共 {len(document.images)} 张："
-    ]
-    for index, (name, raw) in enumerate(document.images, start=1):
-        mime = image_mime(raw, name)
-        if mime == "application/octet-stream":
-            continue
-        try:
-            processed, output_mime, _ = process_image(
-                raw,
-                filename=name,
-                mime=mime,
-            )
-        except AttachmentParseError:
-            processed, output_mime = raw, mime
-        multimodal.append(f"内嵌图片 {index}（{name}）:")
-        multimodal.append(BinaryContent(data=processed, media_type=output_mime))
-    if len(multimodal) == 1:
-        return result
-    return ToolReturn(return_value=result, content=multimodal)
+    return await _DocxReader().read(ctx, file_id, offset=offset, limit=limit,)
 
 
 async def read_xlsx(
@@ -345,59 +503,7 @@ async def read_xlsx(
         offset: 可选起始物理行，1 包含表头行。
         limit: 可选最大行数；超出内部上限时会自动收紧。
     """
-    ref = _attachment_ref(ctx, file_id)
-    _require_mime(
-        ref,
-        allowed=frozenset({_XLSX_MIME}),
-        tool_name="read_xlsx",
-    )
-    resolved_offset, resolved_limit = _normalized_range(
-        offset=offset,
-        limit=limit,
-        default_limit=_XLSX_DEFAULT_LIMIT,
-        max_limit=_XLSX_MAX_LIMIT,
-    )
-    data = await _download_cached(ctx, ref)
-    workbook: XlsxWorkbook = await _parse_cached(
-        ctx,
-        key=f"xlsx:{ref.id}",
-        parser=lambda: xlsx_workbook(data),
-    )
-    try:
-        selected = select_xlsx_sheet(workbook, sheet)
-    except AttachmentParseError as exc:
-        raise ModelRetry(str(exc)) from exc
-
-    start = resolved_offset - 1
-    page = paginate_items(
-        selected.rows[start : start + resolved_limit],
-        total_count=len(selected.rows),
-        offset=resolved_offset,
-        limit=resolved_limit,
-    )
-    sheet_metadata = [
-        {
-            "name": item.name,
-            "state": item.state,
-            "rows": len(item.rows),
-            "columns": item.columns,
-            "headers": list(item.headers),
-        }
-        for item in workbook.sheets
-    ]
-    return _result(
-        ref=ref,
-        unit="row",
-        offset=resolved_offset,
-        limit=resolved_limit,
-        total_count=len(selected.rows),
-        page=page,
-        metadata={
-            "selected_sheet": selected.name,
-            "sheets": sheet_metadata,
-            "formula_mode": "cached_values_only",
-        },
-    )
+    return await _XlsxReader(sheet).read(ctx, file_id, offset=offset, limit=limit,)
 
 
 def build_attachment_capability() -> Capability:

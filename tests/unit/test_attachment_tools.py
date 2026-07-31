@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import io
 import unittest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 from docx import Document
 from openpyxl import Workbook
@@ -11,7 +12,9 @@ from pydantic_ai.messages import ToolReturn
 from pydantic_ai.models.test import TestModel
 from pydantic_ai.usage import RunUsage
 
+from deep_agent.agent.attachments import AttachmentDownloadError
 from deep_agent.agent.deps import AgentDeps
+from deep_agent.capabilities.attachments import builtin
 from deep_agent.capabilities.attachments import build_attachment_capability
 from deep_agent.schemas.attachment import AttachmentRef
 
@@ -54,6 +57,36 @@ class AttachmentToolTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(ModelRetry):
                 await tool.call_func({"file_id": "outside-session"}, _context())
             download.assert_not_awaited()
+
+    async def test_each_tool_rejects_mismatched_mime_before_download(self) -> None:
+        refs_and_tools = (
+            (
+                AttachmentRef(id="text-as-docx", name="note.txt", mime="text/plain"),
+                "read_docx",
+            ),
+            (
+                AttachmentRef(
+                    id="docx-as-text",
+                    name="note.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                ),
+                "read_text_attachment",
+            ),
+            (
+                AttachmentRef(id="text-as-xlsx", name="note.txt", mime="text/plain"),
+                "read_xlsx",
+            ),
+        )
+        with patch(
+            "deep_agent.capabilities.attachments.builtin._download_file",
+            new_callable=AsyncMock,
+        ) as download:
+            for ref, tool_name in refs_and_tools:
+                tool = await self._tool(tool_name)
+                with self.subTest(tool=tool_name):
+                    with self.assertRaises(ModelRetry):
+                        await tool.call_func({"file_id": ref.id}, _context(ref))
+        download.assert_not_awaited()
 
     async def test_text_default_and_followup_use_offset_limit(self) -> None:
         ref = AttachmentRef(id="text-1", name="note.txt", mime="text/plain")
@@ -98,6 +131,43 @@ class AttachmentToolTests(unittest.IsolatedAsyncioTestCase):
                     {"file_id": ref.id, "offset": 0},
                     context,
                 )
+
+    async def test_text_reader_single_flights_download_and_parse(self) -> None:
+        ref = AttachmentRef(id="text-cache", name="note.txt", mime="text/plain")
+        context = _context(ref)
+        tool = await self._tool("read_text_attachment")
+        parser = Mock(wraps=builtin.text_document)
+        with patch(
+            "deep_agent.capabilities.attachments.builtin._download_file",
+            new_callable=AsyncMock,
+            return_value=b"one\ntwo\nthree",
+        ) as download, patch(
+            "deep_agent.capabilities.attachments.builtin.text_document",
+            parser,
+        ):
+            first, second = await asyncio.gather(
+                tool.call_func({"file_id": ref.id, "limit": 1}, context),
+                tool.call_func({"file_id": ref.id, "offset": 2, "limit": 1}, context),
+            )
+        self.assertEqual((first.content, second.content), ("one", "two"))
+        download.assert_awaited_once()
+        parser.assert_called_once()
+
+    async def test_failed_download_is_not_cached(self) -> None:
+        ref = AttachmentRef(id="text-failure", name="note.txt", mime="text/plain")
+        context = _context(ref)
+        tool = await self._tool("read_text_attachment")
+        with patch(
+            "deep_agent.capabilities.attachments.builtin._download_file",
+            new_callable=AsyncMock,
+            side_effect=AttachmentDownloadError("denied"),
+        ) as download:
+            for _ in range(2):
+                with self.assertRaises(ModelRetry):
+                    await tool.call_func({"file_id": ref.id}, context)
+        self.assertEqual(download.await_count, 2)
+        self.assertFalse(context.deps.attachment_bytes)
+        self.assertFalse(context.deps.attachment_download_tasks)
 
     async def test_docx_reads_blocks_and_only_returns_images_on_first_page(self) -> None:
         from PIL import Image
@@ -180,6 +250,29 @@ class AttachmentToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(first.metadata["selected_sheet"], "DATA")
         self.assertEqual(first.content, "name,value\na,1")
         self.assertEqual(second.content, "b,2")
+        download.assert_awaited_once()
+
+    async def test_xlsx_unknown_sheet_retries_after_cached_download(self) -> None:
+        workbook = Workbook()
+        workbook.active.append(["name"])
+        output = io.BytesIO()
+        workbook.save(output)
+        ref = AttachmentRef(
+            id="xlsx-missing-sheet",
+            name="data.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        tool = await self._tool("read_xlsx")
+        with patch(
+            "deep_agent.capabilities.attachments.builtin._download_file",
+            new_callable=AsyncMock,
+            return_value=output.getvalue(),
+        ) as download:
+            with self.assertRaises(ModelRetry):
+                await tool.call_func(
+                    {"file_id": ref.id, "sheet": "missing"},
+                    _context(ref),
+                )
         download.assert_awaited_once()
 
 

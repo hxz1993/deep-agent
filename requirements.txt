@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Core agent runtime. Slim package + only the provider/mcp extras we use,
 # to avoid pulling in every provider SDK (bedrock, cohere, huggingface, ...).
 pydantic-ai-slim[openai,anthropic,google,mcp]==2.14.1

@@ -32,6 +32,16 @@ _TITLE_PROMPT = (
 )
 
 
+def _title_snippet(text: str) -> str:
+    """Extract the human request from exported prompt wrappers when present."""
+    match = re.search(
+        r"<user>\s*(.*?)\s*</user>",
+        text or "",
+        flags=re.DOTALL | re.IGNORECASE,
+    )
+    return (match.group(1) if match else text or "").strip()[:500]
+
+
 async def _resolve_dedicated_title_model(
     auxiliary_store: AuxiliaryModelStoreBase | None = None,
     llm_model_store: LlmModelStoreBase | None = None,
@@ -124,7 +134,7 @@ async def generate_title(
     llm_model_store: LlmModelStoreBase | None = None,
 ) -> Optional[str]:
     """从首轮对话生成标题，失败返回 None。"""
-    user_snippet = (user_text or "")[:500]
+    user_snippet = _title_snippet(user_text)
     assistant_snippet = (assistant_text or "")[:500]
     user_content = f"User: {user_snippet}\n\nAssistant: {assistant_snippet}"
 

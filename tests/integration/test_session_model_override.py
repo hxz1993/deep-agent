@@ -193,6 +193,48 @@ class SessionModelOverrideIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("llm_model_id", payload)
         self.assertGreater(payload.get("model_message_count", 0), 0)
 
+    async def test_context_status_and_final_event_expose_read_only_budget(
+        self,
+    ) -> None:
+        events = await self._stream(
+            {
+                "agent_id": self._agent_id,
+                "session_id": self._session_id,
+                "message": "hello",
+                "capabilities": [],
+            }
+        )
+        await get_context().event_persister.flush(
+            self._session_id,
+            agent_id=self._agent_id,
+        )
+
+        final = next(event for event in events if event.get("type") == "final")
+        self.assertEqual(
+            final["context"]["budget"]["context_window_tokens"],
+            128_000,
+        )
+        self.assertEqual(
+            final["context"]["budget"]["reason"],
+            "enabled",
+        )
+
+        async with AsyncClient(
+            transport=self._transport,
+            base_url="http://test",
+            timeout=30.0,
+        ) as client:
+            response = await client.get(
+                f"/api/v1/sessions/{self._session_id}/context-status",
+                params={"agent_id": self._agent_id},
+            )
+        self.assertEqual(response.status_code, 200, response.text)
+        payload = response.json()
+        self.assertEqual(payload["context_window_tokens"], 128_000)
+        self.assertEqual(payload["max_output_tokens"], 8_192)
+        self.assertTrue(payload["compaction_enabled"])
+        self.assertFalse(payload["checkpoint_exists"])
+
 
 if __name__ == "__main__":
     unittest.main()

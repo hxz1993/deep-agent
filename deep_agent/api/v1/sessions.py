@@ -20,6 +20,8 @@ from deep_agent.agent.history import (
     session_activity_timestamps,
 )
 from deep_agent.agent.spec import AgentSpec, anonymous_spec
+from deep_agent.agent.context.budget import build_context_budget
+from deep_agent.agent.context.estimator import TokenEstimator
 from deep_agent.capabilities.mcp.resolver import load_mcp_rows
 from deep_agent.capabilities.ui.registry import load_ui_tool_hints
 from deep_agent.schemas.chat import SessionInfo, SessionListResponse
@@ -222,6 +224,112 @@ class SessionRenameRequest(BaseModel):
     """是否自动重新生成标题（基于对话内容）。与 title 互斥。"""
 
 
+class SessionContextStatus(BaseModel):
+    session_id: str
+    raw_message_count: int
+    estimated_history_tokens: int
+    compaction_enabled: bool
+    compaction_reason: str
+    context_window_tokens: int | None = None
+    max_output_tokens: int | None = None
+    predicted_output_tokens: int | None = None
+    output_prediction_source: str | None = None
+    output_prediction_sample_count: int = 0
+    provider_sample_count: int = 0
+    estimated_sample_count: int = 0
+    estimator_source: str | None = None
+    estimate_scope: str = "history_only"
+    trigger_tokens: int | None = None
+    target_tokens: int | None = None
+    checkpoint_exists: bool = False
+    checkpoint_source_last_sequence: int | None = None
+    checkpoint_estimated_tokens: int | None = None
+    checkpoint_updated_at: datetime | None = None
+    summary_model_id: str | None = None
+
+
+@router.get(
+    "/sessions/{session_id}/context-status",
+    response_model=SessionContextStatus,
+)
+async def get_session_context_status(
+    ctx: AppContextDep,
+    user_id: RequestUserDep,
+    session_id: str,
+    agent_id: str | None = None,
+) -> SessionContextStatus:
+    resolved = await resolve_session(
+        ctx.store,
+        session_id,
+        agent_id=agent_id,
+        user_id=user_id,
+    )
+    if resolved is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
+    scope, resolved_session_id = resolved
+    from deep_agent.db.session_scope import agent_scope_to_api
+
+    api_agent_id = agent_id or agent_scope_to_api(scope)
+    history = await ctx.store.get_history(
+        resolved_session_id,
+        agent_id=api_agent_id,
+    )
+    context_window_tokens: int | None = None
+    max_output_tokens: int | None = None
+    model_code: str | None = None
+    model_base_url: str | None = None
+    if api_agent_id:
+        agent_row = await ctx.stores.agent.get_by_id(api_agent_id)
+        if agent_row is not None:
+            context_window_tokens = agent_row.llm_model.context_window_tokens
+            max_output_tokens = agent_row.llm_model.max_output_tokens
+            model_code = agent_row.llm_model.model
+            model_base_url = agent_row.llm_model.base_url
+    estimator = TokenEstimator.for_model(
+        model_code or "",
+        model_base_url,
+    )
+    budget = build_context_budget(
+        history,
+        context_window_tokens=context_window_tokens,
+        max_output_tokens=max_output_tokens,
+        estimator=estimator,
+        output_history=history,
+        estimate_scope="history_only",
+    )
+    checkpoint = await ctx.stores.context_checkpoint.get(
+        resolved_session_id,
+        agent_id=api_agent_id,
+    )
+    return SessionContextStatus(
+        session_id=resolved_session_id,
+        raw_message_count=len(history),
+        estimated_history_tokens=budget.estimated_history_tokens,
+        compaction_enabled=budget.enabled,
+        compaction_reason=budget.reason,
+        context_window_tokens=context_window_tokens,
+        max_output_tokens=max_output_tokens,
+        predicted_output_tokens=budget.predicted_output_tokens,
+        output_prediction_source=budget.output_prediction_source,
+        output_prediction_sample_count=budget.output_prediction_sample_count,
+        provider_sample_count=budget.provider_sample_count,
+        estimated_sample_count=budget.estimated_sample_count,
+        estimator_source=budget.estimator_source,
+        estimate_scope=budget.estimate_scope,
+        trigger_tokens=budget.trigger_tokens,
+        target_tokens=budget.target_tokens,
+        checkpoint_exists=checkpoint is not None,
+        checkpoint_source_last_sequence=(
+            checkpoint.source_last_sequence if checkpoint else None
+        ),
+        checkpoint_estimated_tokens=(
+            checkpoint.estimated_tokens if checkpoint else None
+        ),
+        checkpoint_updated_at=checkpoint.updated_at if checkpoint else None,
+        summary_model_id=checkpoint.summary_model_id if checkpoint else None,
+    )
+
+
 @router.patch("/sessions/{session_id}", response_model=SessionInfo)
 async def rename_session(
     ctx: AppContextDep,
@@ -281,6 +389,8 @@ async def rename_session(
             user_text=user_text,
             assistant_text=assistant_text or user_text,
             spec=spec,
+            auxiliary_store=ctx.stores.auxiliary_model,
+            llm_model_store=ctx.stores.llm_model,
         )
 
         # LLM 失败时回退到文本提取

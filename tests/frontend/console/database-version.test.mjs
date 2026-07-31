@@ -57,7 +57,7 @@ test("非数字 revision 保留原始标识，缺失版本显示未知", () => {
 test("数据库版本使用独立醒目徽标", () => {
   assert.match(
     indexHtml,
-    /class="database-version"[\s\S]*数据库版本[\s\S]*id="databaseSchemaVersion"/,
+    /class="database-version"[\s\S]*数据库结构[\s\S]*id="databaseSchemaVersion"/,
   );
   assert.match(consoleCss, /\.database-version strong\s*\{/);
   assert.match(consoleCss, /background:\s*var\(--accent\)/);

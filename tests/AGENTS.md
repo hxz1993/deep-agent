@@ -10,16 +10,16 @@
 
 ```bash
 # 全部
-venv\Scripts\python.exe -m unittest discover -s tests -p "test_*.py" -v
+python3.12 -m unittest discover -s tests -p "test_*.py" -v
 
 # 排查失败：首个报错即停（推荐配合 tests/run.ps1 的 30s 超时）
-venv\Scripts\python.exe -m unittest discover -s tests -p "test_*.py" --failfast -v
+python3.12 -m unittest discover -s tests -p "test_*.py" --failfast -v
 
 # 仅单元（无网络、无外部子进程）
-venv\Scripts\python.exe -m unittest discover -s tests/unit -p "test_*.py" -v
+python3.12 -m unittest discover -s tests/unit -p "test_*.py" -v
 
 # 仅集成（HTTP、MCP 子进程、header 转发）
-venv\Scripts\python.exe -m unittest discover -s tests/integration -p "test_*.py" -v
+python3.12 -m unittest discover -s tests/integration -p "test_*.py" -v
 ```
 
 ---
@@ -54,6 +54,10 @@ tests/
 | `test_catalog.py` | models.dev Lab/Model/Provider 标准化、白名单、扩展元数据和数据库视图 |
 | `test_models_dev.py` | models.dev 严格获取与 Lab 可选补充 |
 | `test_llm_models.py` | 模型上下文、最大输出、输入模态与 tags Store/Schema |
+| `test_context_compaction.py` | 统一 Token 估算、动态输出预测、usage 回读、主模型滚动摘要、SSE 状态、原始历史不改写、脱敏 Checkpoint、CAS 与兜底 |
+| `test_context_test_scenarios.py` | 管理员测试会话场景、实时预算、消息往返序列化、常驻接口与用户归属 |
+| `test_attachment_extractors.py` | 文本编码、DOCX/XLSX 结构读取、分页与 Office 安全 |
+| `test_attachment_tools.py` | 附件工具默认参数、会话范围、缓存、分页和多模态返回 |
 | `test_session_model_override.py` | Agent 对话 `model_id` 请求级覆盖（`build_runner_for_agent`） |
 | `test_ui_tools_rfc.py` | builtin/manual UI 工具注册、Agent 显式选择、保留名称、Schema 校验与事件 enrichment |
 
@@ -70,6 +74,7 @@ tests/
 | `test_llm_model_modalities.py` | 模型运行属性 CRUD 与 DB-only 模态 |
 | `test_llm_model_catalog.py` | 目录 DB 查询、两种视图、全量刷新及失败保留旧目录 |
 | `test_session_model_override.py` | Agent 流式对话 `model_id` 覆盖、默认回退、轮次切换 |
+| `test_chat_attachment_tools.py` | 附件引用 → 模型调用工具 → SSE/历史持久化 → 同会话续读 |
 
 公共 fixture：`integration/fixtures/header_echo_server.py`、`pid_echo_server.py`。
 
@@ -91,5 +96,9 @@ tests/
 - 改 `capabilities/mcp/` 或 `agent/headers.py` 后跑 integration 相关用例
 - 改内置 UI 工具时同时覆盖：新名称、`default_enabled=false`/非锁定能力、`capabilities=null` 和空数组不加载、分别/同时选择、内置修改删除保护，以及 choice 的单选、多选、自由输入和空提交阻止。
 - `builtin__confirm`、`builtin__choice` 不兼容旧 `confirm_action`、`ask_user_choice` pending 会话；测试夹具和断言不得继续把旧名称当作内置工具。
+- 上下文压缩测试场景必须使用正式 Pydantic 消息类型并验证 serialize/deserialize 往返；不要直接
+  插 JSON。场景随当前模型 trigger 动态扩展，断言不能写死消息条数或 Token 值。
+- 附件集成测试必须验证 `file_id` 只来自当前原始会话、同页去重键包含
+  `tool/file/sheet/offset/limit`，并至少用真实生成的 TXT、DOCX、XLSX 字节覆盖解析器。
 
 更多：[`README.md`](README.md)、[`unit/README.md`](unit/README.md)、[`integration/README.md`](integration/README.md)。

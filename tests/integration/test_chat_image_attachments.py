@@ -84,19 +84,27 @@ class ChatImageAttachmentTests(unittest.IsolatedAsyncioTestCase):
         return resp.json()
 
     @patch("deep_agent.agent.attachments._download_file", new_callable=AsyncMock)
-    @patch("deep_agent.agent.runner.model_supports_image_input", return_value=True)
     async def test_image_attachment_history_and_session_list_survive_after_stream(
         self,
-        _mock_vision: object,
         mock_download: AsyncMock,
     ) -> None:
         mock_download.return_value = b"\x89PNG\r\n\x1a\n"
+        row = await get_context().stores.llm_model.create_unique(
+            LlmModelCreate(
+                name="vision-history",
+                model="private:vision-history",
+                input_modalities=["text", "image"],
+                context_window_tokens=128_000,
+                max_output_tokens=8_192,
+            ),
+        )
         reply = "vision reply"
         events = await self._stream_events(
             model=text_only_model(reply),
             json_body={
                 "message": "这张图是什么",
                 "attachments": [_IMAGE_ATTACHMENT],
+                "model_id": row.id,
             },
         )
         final = next(ev for ev in reversed(events) if ev.get("type") == "final")
@@ -116,28 +124,38 @@ class ChatImageAttachmentTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("这张图是什么", sessions["items"][0]["user_prompt"] or "")
 
     @patch("deep_agent.agent.attachments._download_file", new_callable=AsyncMock)
-    @patch("deep_agent.agent.runner.model_supports_image_input", return_value=False)
-    async def test_non_vision_model_image_chat_completes_without_model_error(
+    async def test_non_vision_model_image_chat_returns_clear_error(
         self,
-        _mock_vision: object,
         mock_download: AsyncMock,
     ) -> None:
+        row = await get_context().stores.llm_model.create_unique(
+            LlmModelCreate(
+                name="text-only-error",
+                model="private:text-only-error",
+                input_modalities=["text"],
+                context_window_tokens=128_000,
+                max_output_tokens=8_192,
+            ),
+        )
         mock_download.return_value = b"\x89PNG\r\n\x1a\n"
         events = await self._stream_events(
             model=text_only_model("cannot see images"),
             json_body={
                 "message": "这张图是什么",
                 "attachments": [_IMAGE_ATTACHMENT],
+                "model_id": row.id,
             },
         )
-        self.assertFalse(any(ev.get("type") == "error" for ev in events))
-        final = next(ev for ev in reversed(events) if ev.get("type") == "final")
-        self.assertEqual(final["status"], "completed")
+        error = next(ev for ev in events if ev.get("type") == "error")
+        self.assertIn("不支持图片输入", error["message"])
         mock_download.assert_not_awaited()
 
         session_id = events[0]["session_id"]
         history = await self._history(session_id)
-        self.assertEqual(len([m for m in history["messages"] if m.get("role") == "user"]), 1)
+        self.assertEqual(
+            len([m for m in history["messages"] if m.get("role") == "user"]),
+            1,
+        )
 
     @patch("deep_agent.agent.attachments._download_file", new_callable=AsyncMock)
     async def test_db_text_only_override_skips_image_download(
@@ -164,7 +182,8 @@ class ChatImageAttachmentTests(unittest.IsolatedAsyncioTestCase):
                 "model_id": row.id,
             },
         )
-        self.assertFalse(any(ev.get("type") == "error" for ev in events))
+        error = next(ev for ev in events if ev.get("type") == "error")
+        self.assertIn("不支持图片输入", error["message"])
         mock_download.assert_not_awaited()
 
     @patch("deep_agent.agent.attachments._download_file", new_callable=AsyncMock)

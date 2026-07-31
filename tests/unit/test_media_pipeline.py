@@ -29,10 +29,19 @@ class TestMediaPipeline(unittest.TestCase):
         with self.assertRaises(MediaPipelineError):
             process_upload(data=b"hello", mime="application/zip", filename="a.zip")
 
-    def test_extracts_plain_text(self) -> None:
+    def test_plain_text_is_stored_without_eager_extraction(self) -> None:
         processed = process_upload(
             data=b"hello world",
             mime="text/plain",
             filename="note.txt",
         )
-        self.assertIn("hello world", processed.extracted_text or "")
+        self.assertEqual(processed.data, b"hello world")
+        self.assertIsNone(processed.extracted_text)
+
+    def test_rejects_invalid_office_archive(self) -> None:
+        with self.assertRaises(MediaPipelineError):
+            process_upload(
+                data=b"not-a-zip",
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                filename="bad.docx",
+            )

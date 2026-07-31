@@ -370,9 +370,37 @@ class UiToolStoreTests(unittest.IsolatedAsyncioTestCase):
         selectable = await load_selectable_ui_tools(self.stores)
         self.assertEqual([record.name for record in selectable], ["demo__first"])
 
-        registry = SimpleNamespace(describe=lambda: [])
+        registry = SimpleNamespace(
+            describe=lambda: [
+                {
+                    "name": "attachment",
+                    "kind": "attachment",
+                    "label": "附件读取",
+                    "source": "builtin",
+                    "description": "按需读取附件",
+                    "default_enabled": False,
+                    "tools": [
+                        {
+                            "name": "read_text_attachment",
+                            "description": "按行读取文本",
+                        }
+                    ],
+                }
+            ]
+        )
         ctx = SimpleNamespace(stores=self.stores, registry=registry)
         capabilities = await list_capabilities(ctx)
+        attachment_capability = next(
+            item for item in capabilities if item.name == "attachment"
+        )
+        self.assertEqual(attachment_capability.kind, "attachment")
+        self.assertEqual(attachment_capability.label, "附件读取")
+        self.assertEqual(attachment_capability.source, "builtin")
+        self.assertFalse(attachment_capability.default_enabled)
+        self.assertEqual(
+            [tool.name for tool in attachment_capability.tools],
+            ["read_text_attachment"],
+        )
         ui_capabilities = [item for item in capabilities if item.kind == "ui-client"]
         self.assertEqual(
             [item.name for item in ui_capabilities],

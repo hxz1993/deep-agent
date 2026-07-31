@@ -8,6 +8,8 @@ from sse_starlette.sse import EventSourceResponse
 
 from deep_agent.agent.deferred import build_deferred_tool_results
 from deep_agent.agent.deps import AgentDeps
+from deep_agent.agent.attachments import UnsupportedAttachmentModalityError
+from deep_agent.agent.context.compaction import ContextWindowExceededError
 from deep_agent.agent.headers import extract_forward_headers
 from deep_agent.api.v1.deps import build_runner, build_runner_for_agent
 from deep_agent.api.v1.request_identity import RequestUserDep
@@ -128,19 +130,26 @@ async def chat(
         user=user,
         request_headers=request_headers,
     )
-    result = await runner.run(
-        session_id,
-        body.message or "",
-        deps,
-        attachments=body.attachments,
-        branch_from=body.branch_from,
-    )
+    try:
+        result = await runner.run(
+            session_id,
+            body.message or "",
+            deps,
+            attachments=body.attachments,
+            branch_from=body.branch_from,
+        )
+    except (ContextWindowExceededError, UnsupportedAttachmentModalityError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
     return ChatResponse(
         session_id=session_id,
         output=result["output"],
         usage=result["usage"],
         status=result.get("status", "completed"),
         deferred=result.get("deferred"),
+        context=result.get("context"),
     )
 
 

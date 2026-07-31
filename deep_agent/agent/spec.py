@@ -31,6 +31,7 @@ class AgentSpec:
     context_window_tokens: int | None = None
     max_output_tokens: int | None = None
     tags: list[str] | None = None
+    llm_model_id: str | None = None
 
     @classmethod
     def from_row(cls, row: Agent, llm_model: LlmModel) -> AgentSpec:
@@ -47,6 +48,7 @@ class AgentSpec:
             context_window_tokens=llm_model.context_window_tokens,
             max_output_tokens=llm_model.max_output_tokens,
             tags=llm_model.tags,
+            llm_model_id=llm_model.id,
         )
 
     @classmethod
@@ -71,6 +73,7 @@ class AgentSpec:
             context_window_tokens=llm_model.context_window_tokens,
             max_output_tokens=llm_model.max_output_tokens,
             tags=llm_model.tags,
+            llm_model_id=llm_model.id,
         )
 
 

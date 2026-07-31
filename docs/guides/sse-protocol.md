@@ -26,8 +26,7 @@ Accept: text/event-stream
     {
       "id": "platform-file-id",
       "name": "diagram.png",
-      "mime": "image/png",
-      "extracted_text": null
+      "mime": "image/png"
     }
   ],
   "session_id": "可选，省略则服务端生成",
@@ -36,6 +35,10 @@ Accept: text/event-stream
   "user": "可选用户标识"
 }
 ```
+
+新上传只发送 `id/name/mime`。旧会话中已经保存的 `extracted_text` 仍可读取，但新链路不再
+在上传阶段抽取或截断文档文本。TXT、DOCX 和 XLSX 由 Agent 显式启用的 `attachment`
+能力按需分页读取。
 
 **DB Agent 模式：**
 
@@ -121,6 +124,10 @@ sequenceDiagram
 
     Client->>Server: POST /chat/stream
     Server-->>Client: session
+    opt 上下文超过触发线
+        Server-->>Client: context_compaction (started)
+        Server-->>Client: context_compaction (completed/fallback)
+    end
     loop Agent 推理
         Server-->>Client: thinking (delta, 可选)
         Server-->>Client: text (delta)
@@ -133,6 +140,7 @@ sequenceDiagram
 | 阶段 | 事件 | 说明 |
 |------|------|------|
 | 开始 | `session` | 返回本次会话 ID，客户端应保存用于后续请求 |
+| 上下文治理 | `context_compaction` | 可选；压缩开始、完成或兜底的瞬时状态，不写入历史 |
 | 思考过程 | `thinking` | 模型内部推理增量（reasoning 模型）；与 `text` 分离展示 |
 | 流式输出 | `text` | 模型回复的文本增量 |
 | 工具调用 | `tool_call` | 模型发起工具调用（同一 `tool_call_id` 可能推送多次） |
@@ -173,7 +181,36 @@ DB Agent 模式（请求体含 `agent_id`）：
 
 ---
 
-### 4.2 `text`
+### 4.2 `context_compaction`
+
+上下文超过动态触发线时，服务端会在正式模型输出前发送应用自有状态事件：
+
+```json
+{
+  "type": "context_compaction",
+  "phase": "started",
+  "message": "正在压缩上下文…",
+  "request_index": 1,
+  "estimated_tokens_before": 3252,
+  "target_tokens": 1060
+}
+```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `type` | `"context_compaction"` | 固定值 |
+| `phase` | `"started" \| "completed" \| "fallback"` | 压缩阶段 |
+| `message` | `string` | 面向用户的短状态文案 |
+| `request_index` | `number` | 当前 Agent Run 内模型请求序号 |
+| 其他字段 | `number \| string \| boolean` | 估算、策略、原因与是否达标等观测值，按阶段可选 |
+
+客户端建议延迟约 150ms 显示，避免快速压缩闪烁；同一请求只维护一个瞬时状态。收到首个
+`thinking`、`text`、`tool_call` 或任何结束事件后移除。该事件不属于模型消息，不能加入
+assistant 正文，也不会出现在历史接口中。
+
+---
+
+### 4.3 `text`
 
 模型回复的**文本增量**，客户端按顺序拼接即可得到完整 Markdown 文本。
 
@@ -197,7 +234,7 @@ DB Agent 模式（请求体含 `agent_id`）：
 
 ---
 
-### 4.3 `thinking`
+### 4.4 `thinking`
 
 模型**内部推理**的文本增量（如 DeepSeek reasoning、Claude extended thinking）。与面向用户的 `text` 分离，客户端应单独展示（建议默认折叠）。
 
@@ -222,7 +259,7 @@ DB Agent 模式（请求体含 `agent_id`）：
 
 ---
 
-### 4.4 `tool_call`
+### 4.5 `tool_call`
 
 模型请求调用某个工具。由于底层使用 Pydantic AI 流式 API，**同一 `tool_call_id` 可能收到 2 次** `tool_call` 事件：
 
@@ -254,8 +291,8 @@ DB Agent 模式（请求体含 `agent_id`）：
 | `args` | `object` | 工具参数；首帧可能为 `{}`，应以同 `tool_call_id` 的后续帧覆盖 |
 | `tool_call_id` | `string \| null` | 调用唯一标识，用于关联 `tool_result` |
 | `widget` | `string \| null` | 可选；UI 工具渲染提示（来自 DB，**不发给模型**） |
-| `metadata` | `object \| null` | 可选；客户端扩展字段（来自 Admin/MCP 配置，**不发给模型**） |
-| `source` | `string \| null` | 可选；`builtin` \| `manual` \| `mcp` |
+| `metadata` | `object \| null` | 可选；客户端扩展字段（来自 builtin/manual 定义，**不发给模型**） |
+| `source` | `string \| null` | 可选；`builtin` \| `manual` |
 
 **事件来源（后端实现）**：
 
@@ -269,11 +306,11 @@ DB Agent 模式（请求体含 `agent_id`）：
 - 以 `tool_call_id` 为键做 **upsert**，不要为每次事件新建 UI 块
 - 当 `args` 为空对象时，可显示「参数接收中…」占位，收到完整参数后更新
 - 不要假设每个 `tool_call_id` 只出现一次
-- UI 工具（manual / MCP）的 `widget` / `metadata` 由后端 enrichment 注入；客户端可优先使用 SSE 字段，或与 `GET /api/v1/ui-tools` 缓存合并
+- UI 工具（builtin/manual）的 `widget` / `metadata` 由后端 enrichment 注入；客户端可优先使用 SSE 字段，或与 `GET /api/v1/ui-tools` 缓存合并
 
 ---
 
-### 4.5 `tool_result`
+### 4.6 `tool_result`
 
 工具执行完成后的返回。
 
@@ -301,7 +338,7 @@ DB Agent 模式（请求体含 `agent_id`）：
 
 ---
 
-### 4.6 `final`
+### 4.7 `final`
 
 流正常结束时的汇总事件，**一定在成功路径末尾出现**（在 `session` 锁释放后发出）。
 
@@ -370,7 +407,7 @@ DB Agent 模式（请求体含 `agent_id`）：
 
 ---
 
-### 4.7 `error`
+### 4.8 `error`
 
 Agent 执行过程中抛出未捕获异常时发出，此后流结束，**不会**再发 `final`。
 
@@ -392,7 +429,7 @@ Agent 执行过程中抛出未捕获异常时发出，此后流结束，**不会
 
 ---
 
-### 4.8 `cancelled`
+### 4.9 `cancelled`
 
 客户端断开 SSE 连接（如 `AbortController.abort()`）且服务端检测到断开后发出。此后流结束，**不会**再发 `final`。
 
@@ -451,8 +488,9 @@ data: {"type": "final", "output": "## 平台的 11 种维度类型\n...", "usage
 4. **思考过程**：`thinking.delta` 独立缓冲，可折叠展示，不与 `text` 拼接
 5. **工具调用 upsert**：同 `tool_call_id` 的 `tool_call` 更新而非重复创建
 6. **工具结果关联**：用 `tool_call_id` 匹配并关闭对应工具块
-7. **结束判断**：收到 `final`、`cancelled` 或 `error` 后关闭 loading 状态
-8. **中断**：用户取消时 `AbortController.abort()`；若已收到 `cancelled` 则不必再提示错误
+7. **压缩状态**：`context_compaction` 只做瞬时展示，首个正式输出或结束事件到达后移除
+8. **结束判断**：收到 `final`、`cancelled` 或 `error` 后关闭 loading 状态
+9. **中断**：用户取消时 `AbortController.abort()`；若已收到 `cancelled` 则不必再提示错误
 
 ## 7. 与 REST 接口的关系
 
@@ -467,9 +505,9 @@ data: {"type": "final", "output": "## 平台的 11 种维度类型\n...", "usage
 
 | 文件 | 职责 |
 |------|------|
-| `app/api/v1/chat.py` | SSE 端点，`EventSourceResponse` 封装 |
-| `app/agent/events.py` | 事件 dict 构造函数 |
-| `app/agent/runner.py` | Pydantic AI 事件 → SSE 事件映射 |
+| `deep_agent/api/v1/chat.py` | SSE 端点，`EventSourceResponse` 封装 |
+| `deep_agent/agent/events.py` | 事件 dict 构造函数 |
+| `deep_agent/agent/runner.py` | Pydantic AI 事件 → SSE 事件映射 |
 | `frontend/console/chat.js` | 参考客户端实现 |
 
 ## 9. 版本与兼容性

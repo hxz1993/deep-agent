@@ -267,6 +267,17 @@ class AuxiliaryModelApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(title_row["mode"], "auto")
         self.assertIsNone(title_row["llm_model_id"])
 
+    async def test_ensure_defaults_removes_obsolete_context_summary_row(self) -> None:
+        await self._stores.auxiliary_model.update(
+            "context_summary",
+            AuxiliaryModelUpdate(llm_model_id=None),
+        )
+
+        await self._stores.auxiliary_model.ensure_defaults()
+
+        rows = await self._stores.auxiliary_model.list_all()
+        self.assertEqual([row.use_case for row in rows], ["title"])
+
     async def test_update_title_model_from_env_seed(self) -> None:
         if not os.environ.get("DEEP_AGENT_TITLE_MODEL"):
             self.skipTest("DEEP_AGENT_TITLE_MODEL not set")

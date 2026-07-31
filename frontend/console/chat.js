@@ -1,5 +1,9 @@
 import { buildChoiceResult, normalizeOption, normalizeStructuredFields, validateUiToolCall } from "./hitl.js?v=20260728-2";
-import { parseSseBlock, readSse } from "./protocol.js?v=20260720-1";
+import {
+  contextCompactionPresentation,
+  parseSseBlock,
+  readSse,
+} from "./protocol.js?v=20260729-1";
 import { formatSessionIdSubtitle } from "./session-display.js?v=20260728-2";
 
 /* ------------------------------------------------------------------ *
@@ -8,6 +12,7 @@ import { formatSessionIdSubtitle } from "./session-display.js?v=20260728-2";
  *
  * 后端 SSE 事件 (event: <type>, data: <json>):
  *   session      -> { session_id, agent_id }
+ *   context_compaction -> { type:"context_compaction", phase, message }
  *   text         -> { type:"text", delta }
  *   thinking     -> { type:"thinking", delta }
  *   tool_call    -> { type:"tool_call", tool, args, tool_call_id, widget?, metadata? }
@@ -79,7 +84,7 @@ const state = {
   agentId: localStorage.getItem("da_console_agent_id_v1") || "",
   agents: [],
   llmModels: [],
-  uploadCapabilities: { kinds: [], labels: {} },
+  uploadCapabilities: { kinds: [], labels: {}, max_count: 10, max_size_mb: 20 },
   llmModelId: "",
   sessionModelIds: {},
   sessionId: null,
@@ -95,6 +100,7 @@ const state = {
   pendingAttachments: [],
   pendingTitleRefresh: false,
   titlePollGeneration: 0,
+  contextStatus: null,
 };
 
 const TITLE_POLL_TIMEOUT_MS = 30000;
@@ -119,14 +125,16 @@ const LLM_MODALITY_ICONS = {
 /** LLM-native modalities only (Admin ``input_modalities``). */
 const ALL_LLM_MODALITIES = ["text", "image", "audio", "video", "pdf"];
 
-const UPLOAD_KIND_ORDER = ["image", "text_file", "pdf_text", "docx_text", "xlsx_text"];
+const UPLOAD_KIND_ORDER = ["image", "text_file", "pdf", "docx", "xlsx", "audio", "video"];
 
 const UPLOAD_KIND_ICONS = {
   image: "🖼",
-  text_file: "📄",
-  pdf_text: "📄",
-  docx_text: "📝",
-  xlsx_text: "📊",
+  text_file: "📃",
+  pdf: "📄",
+  docx: "📝",
+  xlsx: "📊",
+  audio: "🔊",
+  video: "🎬",
 };
 
 /* ----------------------------- DOM ----------------------------- */
@@ -558,6 +566,7 @@ function newChat(agentId) {
   state.branchFrom = null;
   state.modelMessageCount = 0;
   state.lastUserBranchPoint = null;
+  state.contextStatus = null;
   state.llmModelId = defaultLlmModelId();
   clearMessages();
   showEmptyState();
@@ -750,6 +759,7 @@ async function loadSessionHistory(session) {
     }
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const data = await r.json();
+    await loadContextStatus(normalized);
     if (!data.messages || data.messages.length === 0) {
       showEmptyState();
       state.modelMessageCount = 0;
@@ -760,6 +770,19 @@ async function loadSessionHistory(session) {
     renderHistory(data.messages, data.model_message_count);
   } catch (e) {
     addSystemNote(`加载历史失败：${e.message}`);
+  }
+}
+
+async function loadContextStatus(session) {
+  const lastCompaction = state.contextStatus?.last_compaction;
+  try {
+    const response = await daFetch(sessionApiUrl(session, "/context-status"));
+    state.contextStatus = response.ok ? await response.json() : null;
+    if (state.contextStatus && lastCompaction) {
+      state.contextStatus.last_compaction = lastCompaction;
+    }
+  } catch {
+    if (!lastCompaction) state.contextStatus = null;
   }
 }
 
@@ -1102,8 +1125,12 @@ async function loadUploadCapabilities() {
     const r = await daFetch(serviceUrl("api/v1/uploads/capabilities"));
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     state.uploadCapabilities = await r.json();
+    const allowed = Array.isArray(state.uploadCapabilities?.allowed_mimes)
+      ? state.uploadCapabilities.allowed_mimes
+      : [];
+    if (el.fileInput && allowed.length) el.fileInput.accept = allowed.join(",");
   } catch (e) {
-    state.uploadCapabilities = { kinds: [], labels: {} };
+    state.uploadCapabilities = { kinds: [], labels: {}, max_count: 10, max_size_mb: 20 };
     console.warn("[deep-agent] 加载上传能力失败", e);
   }
   updateComposerModelInfo();
@@ -1196,11 +1223,13 @@ function updateComposerModelInfo() {
           let title = `平台上传：${label}`;
           if (key === "image" && !vision) {
             chipClass = "upload-partial";
-            title = `${label}：可上传，但当前模型不支持原生看图`;
+            title = `${label}：当前模型未配置原生图片输入`;
           } else if (key === "image") {
             title = `${label}：可上传，当前模型支持原生看图`;
-          } else if (key.endsWith("_text") || key === "text_file") {
-            title = `${label}：上传后抽文本注入对话（非 LLM 原生多模态）`;
+          } else if (["text_file", "docx", "xlsx"].includes(key)) {
+            title = `${label}：上传后由 Agent 的附件读取工具按需分页读取`;
+          } else if (key === "pdf") {
+            title = `${label}：仅模型配置原生 PDF 输入时可发送，不做本地解析`;
           }
           return `<span class="modality-chip ${chipClass}" title="${escapeHtml(title)}">${icon} ${escapeHtml(label)}</span>`;
         })
@@ -1293,7 +1322,6 @@ async function onSend() {
       id: a.id,
       name: a.name,
       mime: a.mime,
-      extracted_text: a.extracted_text ?? null,
     }));
   }
   if (branchFrom != null) {
@@ -1370,6 +1398,7 @@ async function runChatStream(payload, assistant) {
       addErrorTo(assistant, `请求失败：${e.message}`);
     }
   } finally {
+    assistant.hideContextCompaction();
     assistant.finalizeThinking();
     assistant.finalizeText();
     setStreaming(false);
@@ -1458,24 +1487,41 @@ function handleEvent({ event, data }, assistant) {
       }
       break;
     }
+    case "context_compaction":
+      assistant.showContextCompaction(data);
+      break;
     case "thinking":
+      assistant.hideContextCompaction();
       assistant.appendThinking(data.delta || "");
       break;
     case "text":
+      assistant.hideContextCompaction();
       assistant.finalizeThinking();
       assistant.appendText(data.delta || "");
       break;
     case "tool_call":
+      assistant.hideContextCompaction();
       assistant.addToolCall(data);
       break;
     case "tool_result":
       assistant.addToolResult(data);
       break;
     case "final":
+      assistant.hideContextCompaction();
       assistant.finalizeThinking();
       assistant.finalizeText();
       syncHistoryMeta(data);
       if (data.usage) renderUsage(data.usage);
+      if (data.context) {
+        state.contextStatus = {
+          ...(state.contextStatus || {}),
+          ...data.context.budget,
+          compaction_enabled: data.context.budget.enabled,
+          compaction_reason: data.context.budget.reason,
+          last_compaction: data.context.compaction,
+        };
+        if (state.sessionId) void loadContextStatus(state.sessionId);
+      }
       state.skipHistoryRefresh = true;
       if (data.status === "pending" && data.deferred) {
         state.awaitingHitl = true;
@@ -1490,6 +1536,7 @@ function handleEvent({ event, data }, assistant) {
       updateHitlInputState();
       break;
     case "error":
+      assistant.hideContextCompaction();
       assistant.finalizeThinking();
       assistant.finalizeText();
       syncHistoryMeta(data);
@@ -1501,6 +1548,7 @@ function handleEvent({ event, data }, assistant) {
       });
       break;
     case "cancelled":
+      assistant.hideContextCompaction();
       state.streamCancelled = true;
       assistant.finalizeThinking();
       assistant.finalizeText();
@@ -1599,8 +1647,14 @@ async function onPaste(e) {
 }
 
 async function uploadAttachment(file) {
-  if (state.pendingAttachments.length >= 10) {
-    addSystemNote("单次最多 10 个附件。");
+  const maxCount = Number(state.uploadCapabilities?.max_count) || 10;
+  if (state.pendingAttachments.length >= maxCount) {
+    addSystemNote(`单次最多 ${maxCount} 个附件。`);
+    return;
+  }
+  const maxSizeMb = Number(state.uploadCapabilities?.max_size_mb) || 20;
+  if (file.size > maxSizeMb * 1024 * 1024) {
+    addSystemNote(`单个附件不能超过 ${maxSizeMb}MB。`);
     return;
   }
   const form = new FormData();
@@ -1616,7 +1670,6 @@ async function uploadAttachment(file) {
       id: data.id,
       name: data.name,
       mime: data.mime,
-      extracted_text: data.extracted_text,
     });
     renderPendingAttachments();
   } catch (err) {
@@ -1726,7 +1779,40 @@ function createAssistantMessage(timestamp, branchPoint) {
   let textBubble = null;
   let thinkingBlock = null;
   let thinkingBuffer = "";
+  let contextCompactionBlock = null;
+  let contextCompactionTimer = null;
+  let pendingContextCompaction = null;
   const toolBlocks = new Map(); // tool_call_id -> element
+
+  function renderContextCompaction(data) {
+    const presentation = contextCompactionPresentation(data);
+    if (!presentation.active) return;
+    if (!contextCompactionBlock) {
+      contextCompactionBlock = document.createElement("div");
+      contextCompactionBlock.className = "context-compaction-status";
+      contextCompactionBlock.innerHTML = `
+        <span class="context-compaction-icon">↻</span>
+        <span class="context-compaction-copy"></span>
+        <span class="spinner"></span>`;
+      wrap.appendChild(contextCompactionBlock);
+    }
+    contextCompactionBlock.dataset.phase = presentation.phase;
+    contextCompactionBlock.querySelector(".context-compaction-copy").textContent =
+      presentation.message;
+    scrollToBottom();
+  }
+
+  function clearContextCompaction() {
+    pendingContextCompaction = null;
+    if (contextCompactionTimer) {
+      clearTimeout(contextCompactionTimer);
+      contextCompactionTimer = null;
+    }
+    if (contextCompactionBlock) {
+      contextCompactionBlock.remove();
+      contextCompactionBlock = null;
+    }
+  }
 
   function ensureThinkingBlock() {
     if (!thinkingBlock) {
@@ -1777,6 +1863,23 @@ function createAssistantMessage(timestamp, branchPoint) {
 
   return {
     row,
+    showContextCompaction(data) {
+      pendingContextCompaction = data;
+      if (contextCompactionBlock) {
+        renderContextCompaction(data);
+        return;
+      }
+      if (contextCompactionTimer) return;
+      contextCompactionTimer = setTimeout(() => {
+        contextCompactionTimer = null;
+        if (pendingContextCompaction) {
+          renderContextCompaction(pendingContextCompaction);
+        }
+      }, 150);
+    },
+    hideContextCompaction() {
+      clearContextCompaction();
+    },
     appendThinking(delta) {
       thinkingBuffer += delta;
       renderThinkingContent();
@@ -2258,6 +2361,14 @@ window.DeepAgentConsoleChat = {
   readSse,
   syncSessionsFromBackend,
   stopStream,
+  async openSession(session) {
+    await switchSession(session);
+  },
+  setComposerText(text) {
+    el.input.value = String(text || "");
+    autoGrow();
+    el.input.focus();
+  },
   selectAgent(agentId) {
     if (!agentId || !state.agents.some((agent) => agent.id === agentId)) return;
     if (state.agentId === agentId) return;

@@ -1,0 +1,100 @@
+const BUILTIN_TOOL_KINDS = new Set(["native", "attachment"]);
+
+function isManagedBuiltinCapability(capability) {
+  return (
+    capability?.source === "builtin" &&
+    BUILTIN_TOOL_KINDS.has(capability?.kind)
+  );
+}
+
+function builtinToolDetails(capability) {
+  const tools = capability.tools || [];
+  if (!tools.length) return "暂无工具";
+  return `<details class="builtin-tool-list">
+    <summary>${tools.length} 个工具</summary>
+    <ul>${tools
+      .map(
+        (tool) =>
+          `<li><strong>${escapeHtml(tool.name)}</strong>${
+            tool.description ? ` — ${escapeHtml(tool.description)}` : ""
+          }</li>`,
+      )
+      .join("")}</ul>
+  </details>`;
+}
+
+function builtinCapabilityRow(capability) {
+  const label = capability.label || capability.name;
+  const kind = capability.kind === "native" ? "Native" : "Attachment";
+  const defaultLabel = capability.default_enabled ? "默认启用" : "默认关闭";
+  return `<tr>
+    <td>
+      <div class="builtin-tool-name">
+        <strong>${escapeHtml(label)}</strong>
+        <small>${escapeHtml(kind)}</small>
+      </div>
+    </td>
+    <td><code>${escapeHtml(capability.name)}</code></td>
+    <td>${builtinToolDetails(capability)}</td>
+    <td><span class="builtin-default-badge${capability.default_enabled ? " enabled" : ""}">${defaultLabel}</span></td>
+    <td>${escapeHtml(capability.description || "—")}</td>
+  </tr>`;
+}
+
+function renderBuiltinCapabilities(capabilities) {
+  const tbody = document.getElementById("builtinToolsTableBody");
+  if (!tbody) return;
+  const builtins = (capabilities || [])
+    .filter(isManagedBuiltinCapability)
+    .sort(
+      (left, right) =>
+        ["native", "attachment"].indexOf(left.kind) -
+        ["native", "attachment"].indexOf(right.kind),
+    );
+  if (!builtins.length) {
+    tbody.innerHTML = `<tr><td colspan="5" class="empty-cell">暂无可展示的内置工具</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = builtins.map(builtinCapabilityRow).join("");
+}
+
+function renderBuiltinError(message) {
+  const tbody = document.getElementById("builtinToolsTableBody");
+  if (!tbody) return;
+  tbody.innerHTML = `<tr><td colspan="5" class="empty-cell">
+    <span class="configuration-error">${escapeHtml(message || "内置工具加载失败")}</span>
+    <button class="btn" type="button" data-retry-builtin-tools>重新加载</button>
+  </td></tr>`;
+  tbody.querySelector("[data-retry-builtin-tools]")?.addEventListener("click", () => {
+    window.builtinToolsAdmin?.refresh({ reload: true });
+  });
+}
+
+const builtinToolsAdmin = {
+  async refresh({ reload = false } = {}) {
+    const tbody = document.getElementById("builtinToolsTableBody");
+    if (!tbody) return;
+    tbody.innerHTML = `<tr><td colspan="5" class="empty-cell">正在加载内置工具…</td></tr>`;
+    try {
+      if (reload || !(state.capabilities || []).length) {
+        await loadCapabilities();
+      }
+      renderBuiltinCapabilities(state.capabilities);
+    } catch (error) {
+      renderBuiltinError(error instanceof Error ? error.message : String(error));
+    }
+  },
+};
+
+document.addEventListener("DOMContentLoaded", () => {
+  document.getElementById("refreshBuiltinToolsBtn")?.addEventListener("click", () => {
+    builtinToolsAdmin.refresh({ reload: true });
+  });
+});
+
+window.builtinToolsAdmin = builtinToolsAdmin;
+window.__BuiltinToolsUI = {
+  builtinCapabilityRow,
+  isManagedBuiltinCapability,
+  renderBuiltinCapabilities,
+};

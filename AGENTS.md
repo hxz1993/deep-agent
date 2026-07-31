@@ -12,6 +12,7 @@
 | 项 | 内容 |
 | --- | --- |
 | **是什么** | 通用 AI Agent 全栈：FastAPI 后端 + Pydantic AI 运行时 + 静态前端 |
+| **产品版本** | `deep_agent.__version__` 为唯一来源；当前 `0.2.3`，默认发布递增第三位 |
 | **启动** | 本地 Test 联调固定使用下方命令；部署入口才使用 `deep_agent.main:app` |
 | **测试** | `python3.12 -m unittest discover -s tests -p "test_*.py" -v` |
 | **配置** | 仓库根 `.env`（`DEEP_AGENT_*` / `DEEP_AGENT_DBMS_*` / `DEEP_AGENT_SQLITE_PATH`） |
@@ -71,17 +72,23 @@ HTTP → deep_agent/api/v1 → AgentRunner → pydantic_ai.Agent → Capabilitie
                                       └→ SessionStore (postgres/mysql/sqlite)
 ```
 
-能力来源：`native` | `skill:*` | `mcp:*`（DB + `mcps/` 兜底）| `ui:*`
+能力来源：`native` | `attachment` | `skill:*` | `mcp:*`（DB + `mcps/` 兜底）| `ui:*`
 
 ### Pydantic AI 运行边界
 
 - DeepAgent 自研 `Capability` 是产品配置包装，负责选择 Instructions 和 Toolset；不要和 Pydantic AI 的 `AbstractCapability` 混为一谈。
 - 模型直接接收 Instructions、历史、当前输入和 Tool Definitions。MCP Resource/Prompt 不会自动成为模型工具，必须由宿主读取、注入或显式包装。
 - Pydantic AI 负责 Agent loop、参数校验、工具调用、重试、流式事件和 Deferred 原语；DeepAgent 负责 SQL 会话、用户隔离、MCP 配置/Header、HITL、SSE 和 Console。
-- 当前每轮会读取完整会话历史和工具结果。新增工具或附件能力前必须评估上下文体积；上下文裁剪不得破坏 Tool Call/Result 配对、原始历史、分支和 Pending 恢复。
+- 原始 `chat_messages` 始终完整保存；启用全局上下文压缩后，模型输入可复用
+  `chat_context_checkpoints` 派生投影。压缩不得破坏 Tool Call/Result 配对、原始历史、
+  分支和 Pending 恢复；模型未配置上下文窗口时自动停用。
 - 新的运行时横切能力优先评估 Core 的 `PrepareTools`、Hooks、`ToolSearch` 和 Harness 的 Compaction/Overflow；不要默认把逻辑继续写入 `AgentRunner`。
 - Harness 是可选能力库，不是产品平台。会话、身份、配置、HITL、SSE 和 Console 继续由 DeepAgent 负责；引入 Harness 0.x 时必须与 `pydantic-ai-slim` 一起固定准确版本。
 - Provider Usage 是 best effort；OpenAI-compatible 或私有端点返回 0 时可能代表缺失。上下文预算必须结合模型窗口元数据和保守估算，不能只依赖 `result.usage`。
+- 新上传只保存附件引用；默认关闭的 `attachment` 能力通过 1-based
+  `offset/limit`、`has_more/next_offset` 渐进读取 TXT、DOCX、XLSX。合法 `file_id`
+  必须来自当前原始会话，不能从 Checkpoint 推断。详见
+  [`docs/design/06-attachment-parsing/`](docs/design/06-attachment-parsing/)。
 
 ---
 
@@ -93,4 +100,5 @@ HTTP → deep_agent/api/v1 → AgentRunner → pydantic_ai.Agent → Capabilitie
 | [`docs/README.md`](docs/README.md) | 文档总入口 |
 | [`docs/guides/project-structure.md`](docs/guides/project-structure.md) | **说明**：当前目录、运行链路与职责边界 |
 | [`docs/guides/README.md`](docs/guides/README.md) | **说明**：协议、使用指南、实现经验和排障记录 |
-| [`docs/design/README.md`](docs/design/README.md) | **设计**：方案、RFC、技术审计、待实施计划和原型 |
+| [`docs/design/README.md`](docs/design/README.md) | **设计**：当前方案、研究依据、历史决策和原型 |
+| [`docs/design/TODO.md`](docs/design/TODO.md) | **待办**：跨课题唯一待办清单和来源索引 |

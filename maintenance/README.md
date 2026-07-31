@@ -26,7 +26,8 @@ deep-agent-config-<环境>-v<数据库版本>-<时间>.db
 - `auxiliary_model_configs`
 - `alembic_version`
 
-`chat_sessions` 和 `chat_messages` 只保留表结构，不复制会话数据。备份中的
+`chat_sessions`、`chat_messages` 和 `chat_context_checkpoints` 只保留表结构，
+不复制会话或上下文投影数据。Checkpoint 是可重建的派生数据，不属于配置备份。备份中的
 API Key、Token 和 MCP Header 保留原值。命令完成前会自动检查 SQLite
 完整性、各配置表行数、数据库版本和 DeepAgent 数据层连接。
 

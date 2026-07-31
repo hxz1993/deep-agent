@@ -8,6 +8,7 @@ from pydantic_ai.messages import ModelRequest, UserPromptPart
 
 from deep_agent.agent.attachments import (
     attachment_ref_dict,
+    index_attachment_refs,
     model_supports_image_input,
     refs_from_attachments,
     resolve_history_for_llm,
@@ -27,7 +28,7 @@ class TestAttachments(unittest.IsolatedAsyncioTestCase):
             "see this",
             [AttachmentRef(id="platform-file-1", name="a.jpg", mime="image/jpeg")],
             headers,
-            vision_capable=True,
+            input_modalities=["text", "image"],
         )
         self.assertEqual(parts[0], "see this")
         self.assertEqual(parts[1].media_type, "image/jpeg")
@@ -35,15 +36,16 @@ class TestAttachments(unittest.IsolatedAsyncioTestCase):
         mock_download.assert_awaited_once_with("platform-file-1", headers)
 
     @patch("deep_agent.agent.attachments._download_file", new_callable=AsyncMock)
-    async def test_non_vision_model_image_falls_back_to_text(self, mock_download: AsyncMock) -> None:
-        parts = await resolve_user_prompt(
-            "see this",
-            [AttachmentRef(id="platform-file-1", name="a.jpg", mime="image/jpeg")],
-            {},
-            vision_capable=False,
-        )
-        self.assertEqual(parts[0], "see this")
-        self.assertIn("不支持图片输入", parts[1].content)
+    async def test_non_vision_model_image_is_rejected(self, mock_download: AsyncMock) -> None:
+        from deep_agent.agent.attachments import UnsupportedAttachmentModalityError
+
+        with self.assertRaises(UnsupportedAttachmentModalityError):
+            await resolve_user_prompt(
+                "see this",
+                [AttachmentRef(id="platform-file-1", name="a.jpg", mime="image/jpeg")],
+                {},
+                input_modalities=["text"],
+            )
         mock_download.assert_not_awaited()
 
     @patch("deep_agent.agent.attachments._download_file", new_callable=AsyncMock)
@@ -55,7 +57,7 @@ class TestAttachments(unittest.IsolatedAsyncioTestCase):
             "",
             [AttachmentRef(id="bad-id", name="a.jpg", mime="image/jpeg")],
             {},
-            vision_capable=True,
+            input_modalities=["image"],
         )
         self.assertIn("文件下载失败", parts[0].content)
 
@@ -78,19 +80,20 @@ class TestAttachments(unittest.IsolatedAsyncioTestCase):
         assert isinstance(first, UserPromptPart)
         self.assertEqual(first.content, ["hello", ref])
 
-    async def test_resolve_document_uses_extracted_text(self) -> None:
+    async def test_current_document_uses_tool_placeholder_not_legacy_extracted_text(self) -> None:
         ref = AttachmentRef(
             id="doc-1",
-            name="a.pdf",
-            mime="application/pdf",
-            extracted_text="[附件: a.pdf]\nhello",
+            name="a.txt",
+            mime="text/plain",
+            extracted_text="[附件: a.txt]\nhello",
         )
         with patch(
             "deep_agent.agent.attachments._download_file",
             new_callable=AsyncMock,
         ) as mock_download:
             parts = await resolve_user_prompt("", [ref], {})
-            self.assertEqual(parts[0].content, "[附件: a.pdf]\nhello")
+            self.assertIn("file_id: doc-1", parts[0].content)
+            self.assertIn("attachment 工具", parts[0].content)
             mock_download.assert_not_called()
 
     @patch("deep_agent.agent.attachments._download_file", new_callable=AsyncMock)
@@ -109,7 +112,11 @@ class TestAttachments(unittest.IsolatedAsyncioTestCase):
             ),
             ModelRequest(parts=[UserPromptPart(content="new")]),
         ]
-        resolved = await resolve_history_for_llm(history, current_user_index=1, request_headers={})
+        resolved = await resolve_history_for_llm(
+            history,
+            current_user_index=1,
+            request_headers={},
+        )
         first = resolved[0].parts[0]
         assert isinstance(first, UserPromptPart)
         self.assertIn("[附件: old.jpg]", str(first.content))
@@ -130,6 +137,19 @@ class TestAttachments(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(timeline[0].content, "hello")
         self.assertEqual(len(timeline[0].attachments), 1)
         self.assertEqual(timeline[0].attachments[0].id, "f1")
+
+    def test_index_attachment_refs_only_uses_supplied_session_history(self) -> None:
+        current = AttachmentRef(id="current", name="current.txt", mime="text/plain")
+        old = attachment_ref_dict(
+            AttachmentRef(id="old", name="old.txt", mime="text/plain")
+        )
+        indexed = index_attachment_refs(
+            attachments=[current],
+            messages=[
+                ModelRequest(parts=[UserPromptPart(content=[old])]),
+            ],
+        )
+        self.assertEqual(set(indexed), {"current", "old"})
 
     def test_refs_from_attachments_text_only(self) -> None:
         parts = refs_from_attachments("hi", None)

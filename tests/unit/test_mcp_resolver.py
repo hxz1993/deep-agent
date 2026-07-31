@@ -23,6 +23,7 @@ class McpResolverTests(unittest.IsolatedAsyncioTestCase):
         stores = DataStores(
             chat_session=MagicMock(),
             message=MagicMock(),
+            context_checkpoint=MagicMock(),
             coordinator=MagicMock(),
             agent=MagicMock(),
             llm_model=MagicMock(),

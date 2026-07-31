@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from deep_agent.capabilities.attachments import build_attachment_capability
 from deep_agent.capabilities.native import build_native_capability
 from deep_agent.capabilities.registry import Capability, CapabilityRegistry, ToolInfo
 from deep_agent.capabilities.skills import load_skill_capabilities
@@ -30,6 +31,7 @@ def build_registry(*, stores: DataStores | None = None) -> CapabilityRegistry:
     registry = CapabilityRegistry()
 
     registry.register(build_native_capability())
+    registry.register(build_attachment_capability())
 
     for cap in load_skill_capabilities(OPTION.agent.skills_dir):
         registry.register(cap)

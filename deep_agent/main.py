@@ -8,6 +8,7 @@ from fastapi.openapi.docs import get_swagger_ui_oauth2_redirect_html
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
+from deep_agent import __version__
 from deep_agent.api.v1 import api_router
 from deep_agent.capabilities.mcp.resolver import load_mcp_capabilities
 from deep_agent.core.context import AppContext, AppContextDep, reset_context
@@ -28,7 +29,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="deep-agent",
-    version="0.2.2",
+    version=__version__,
     description="General-purpose AI agent backend.",
     lifespan=lifespan,
     docs_url=None,
@@ -75,7 +76,8 @@ async def info(ctx: AppContextDep) -> dict[str, object]:
     mcp_caps = await load_mcp_capabilities(ctx.stores)
     capability_names = ctx.registry.names() + [cap.name for cap in mcp_caps]
     return {
-        "name": OPTION.agent.app_name,
+        "name": "DeepAgent",
+        "version": __version__,
         "capabilities": capability_names,
         "docs": "/docs",
     }

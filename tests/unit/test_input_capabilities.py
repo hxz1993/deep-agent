@@ -15,14 +15,17 @@ class TestInputCapabilities(unittest.TestCase):
     def test_upload_capability_kinds_includes_defaults(self) -> None:
         kinds = upload_capability_kinds()
         self.assertIn("image", kinds)
-        self.assertIn("pdf_text", kinds)
+        self.assertIn("pdf", kinds)
         self.assertIn("text_file", kinds)
+        self.assertIn("docx", kinds)
 
     def test_upload_capabilities_payload_shape(self) -> None:
         payload = upload_capabilities_payload()
         self.assertIn("kinds", payload)
         self.assertIn("labels", payload)
         self.assertIn("allowed_mimes", payload)
+        self.assertEqual(payload["max_count"], 10)
+        self.assertEqual(payload["max_size_mb"], 20)
 
     def test_capability_block_lists_llm_and_upload_separately(self) -> None:
         spec = AgentSpec(
@@ -34,7 +37,7 @@ class TestInputCapabilities(unittest.TestCase):
         block = build_capability_instruction_block(spec)
         self.assertIn("LLM native input modalities", block)
         self.assertIn("Platform upload pipeline", block)
-        self.assertIn("NOT available", block)
+        self.assertIn("not available", block)
         self.assertIn("Do not infer capabilities", block)
         self.assertNotIn("supports PDF/Office/audio/video native", block)
 
@@ -47,6 +50,28 @@ class TestInputCapabilities(unittest.TestCase):
         )
         block = build_capability_instruction_block(spec)
         self.assertIn("does NOT support native image input", block)
+
+    def test_capability_block_only_claims_attachment_tools_when_selected(self) -> None:
+        disabled = build_capability_instruction_block(
+            AgentSpec(
+                name="test",
+                model="test",
+                instructions="",
+                input_modalities=["text"],
+                capabilities=[],
+            )
+        )
+        enabled = build_capability_instruction_block(
+            AgentSpec(
+                name="test",
+                model="test",
+                instructions="",
+                input_modalities=["text"],
+                capabilities=["attachment"],
+            )
+        )
+        self.assertIn("NOT enabled", disabled)
+        self.assertIn("read_text_attachment", enabled)
 
     def test_augment_instructions_appends_block(self) -> None:
         spec = AgentSpec(

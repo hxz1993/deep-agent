@@ -29,10 +29,9 @@ video
 pdf
 ```
 
-`llm_models.tags` 描述其他模型能力：
+`llm_models.tags` 描述其他模型或 Provider 能力：
 
 ```text
-attachment
 reasoning
 tool_call
 structured_output
@@ -41,11 +40,17 @@ open_weights
 interleaved
 ```
 
-这两类标签不能混用。平台上传能力也不等于模型原生模态：
+这两类标签不能混用。Agent 的 `attachment` 能力也不是模型 tag。平台上传能力不等于模型
+原生模态：
 
 - 图片：只有当前模型 `input_modalities` 包含 `image` 时，才把图片字节发送给模型。
-- PDF、DOCX、XLSX、TXT、CSV：平台上传管线可以先抽取文本，再以文本输入模型。
+- 音频、视频、PDF：只有模型声明对应原生模态时才把字节发送给模型；PDF 不做本地解析/OCR。
+- DOCX、XLSX、TXT、CSV、JSON、Markdown、HTML、XML：平台只保存 `file_id`，Agent
+  显式选择 `attachment` 能力后由工具按需分页读取，不在上传时预抽文本。
 - MCP、Skill、UI Tool：属于 Agent 工具能力，不属于模型输入模态。
+
+附件工具和安全边界详见
+[`../../design/06-attachment-parsing/attachment-parsing-design.md`](../../design/06-attachment-parsing/attachment-parsing-design.md)。
 
 ## 3. 模型 Token 属性
 
@@ -60,8 +65,8 @@ max_output_tokens
 - `max_output_tokens` 是 Provider 声明的单次最大输出能力上限，不是每轮固定预留。
 - 最大输出不得超过上下文窗口。
 
-不保存 `max_input_tokens` 或固定输出预留。后续上下文压缩应结合每轮任务和历史 usage 动态预测输出，
-不能简单用“总窗口减最大输出”作为输入预算。
+不保存 `max_input_tokens` 或固定输出预留。当前上下文压缩会结合最近历史 usage 和保守估算
+动态预测本轮输出，不能简单用“总窗口减最大输出”作为输入预算。
 
 ## 4. 模型目录刷新
 
@@ -74,7 +79,7 @@ POST /api/v1/llm-models/catalog/refresh
 流程：
 
 ```text
-获取 models.dev catalog.json + api.json
+获取 models.dev catalog.json
 → 可选补充 labs 页面
 → Provider 白名单过滤
 → 标准化 Lab / Model / Provider

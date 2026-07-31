@@ -24,7 +24,11 @@ CONFIG_TABLES = (
     "ui_tool_definitions",
     "auxiliary_model_configs",
 )
-SESSION_TABLES = ("chat_sessions", "chat_messages")
+SESSION_TABLES = (
+    "chat_sessions",
+    "chat_messages",
+    "chat_context_checkpoints",
+)
 ENVIRONMENT_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
 
 
@@ -329,13 +333,16 @@ async def _table_count(connection: Any, table_name: str) -> int:
 
 async def _validate_with_deep_agent(database_url: str) -> None:
     from deep_agent.db.factory import create_engine
-    from deep_agent.db.models import LlmModel, ModelCatalog
+    from deep_agent.db.models import ChatContextCheckpoint, LlmModel, ModelCatalog
 
     engine, session_factory = create_engine(database_url)
     try:
         async with session_factory() as session:
             await session.execute(select(func.count()).select_from(LlmModel))
             await session.execute(select(func.count()).select_from(ModelCatalog))
+            await session.execute(
+                select(func.count()).select_from(ChatContextCheckpoint)
+            )
     finally:
         await engine.dispose()
 

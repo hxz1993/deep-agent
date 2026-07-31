@@ -3,8 +3,8 @@
 Three layers (do not conflate):
 
 1. **LLM native** — ``input_modalities`` on the preset (text / image / audio / video / pdf).
-2. **Upload pipeline** — files accepted at POST /uploads; non-images become ``extracted_text``.
-3. **Agent tools** — only claim after a tool is registered and enabled (not listed here yet).
+2. **Upload pipeline** — files accepted at POST /uploads by MIME whitelist.
+3. **Agent tools** — ``attachment`` reads text/DOCX/XLSX on demand when selected.
 """
 
 from __future__ import annotations
@@ -14,6 +14,7 @@ from typing import Any
 from deep_agent.agent.attachments import model_supports_image_input
 from deep_agent.agent.media_pipeline import allowed_mimes
 from deep_agent.agent.spec import AgentSpec
+from deep_agent.options import OPTION
 
 # MIME → user-facing upload kind (platform text-extraction or image bytes).
 _MIME_UPLOAD_KIND: dict[str, str] = {
@@ -23,17 +24,28 @@ _MIME_UPLOAD_KIND: dict[str, str] = {
     "image/gif": "image",
     "text/plain": "text_file",
     "text/csv": "text_file",
-    "application/pdf": "pdf_text",
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx_text",
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx_text",
+    "text/markdown": "text_file",
+    "text/html": "text_file",
+    "text/xml": "text_file",
+    "application/xml": "text_file",
+    "application/json": "text_file",
+    "text/json": "text_file",
+    "application/pdf": "pdf",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
+    "audio/mpeg": "audio",
+    "audio/wav": "audio",
+    "video/mp4": "video",
 }
 
 _UPLOAD_KIND_LABELS: dict[str, str] = {
     "image": "图片",
-    "text_file": "TXT / CSV",
-    "pdf_text": "PDF（抽文本）",
-    "docx_text": "DOCX（抽文本）",
-    "xlsx_text": "XLSX（抽文本）",
+    "text_file": "TXT / CSV / JSON / MD / HTML / XML",
+    "pdf": "PDF",
+    "docx": "DOCX",
+    "xlsx": "XLSX",
+    "audio": "音频（MP3 / WAV）",
+    "video": "视频（MP4）",
 }
 
 _LLM_MODALITY_LABELS: dict[str, str] = {
@@ -68,6 +80,8 @@ def upload_capabilities_payload() -> dict[str, Any]:
         "kinds": kinds,
         "labels": {k: _UPLOAD_KIND_LABELS.get(k, k) for k in kinds},
         "allowed_mimes": sorted(allowed_mimes()),
+        "max_size_mb": int(OPTION.agent.upload_max_size_mb),
+        "max_count": int(OPTION.agent.upload_max_count),
     }
 
 
@@ -81,6 +95,9 @@ def build_capability_instruction_block(spec: AgentSpec) -> str:
 
     upload_kinds = upload_capability_kinds()
     upload_labels = [_UPLOAD_KIND_LABELS.get(k, k) for k in upload_kinds]
+    attachment_enabled = (
+        spec.capabilities is not None and "attachment" in spec.capabilities
+    )
 
     lines = [
         "## Session input capabilities (platform-enforced)",
@@ -91,31 +108,45 @@ def build_capability_instruction_block(spec: AgentSpec) -> str:
 
     if upload_labels:
         lines.append(
-            "Platform upload pipeline (NOT LLM-native multimodal — text is injected into the prompt): "
+            "Platform upload pipeline accepts and stores these file types by file_id: "
             + ", ".join(upload_labels)
             + "."
         )
         if "image" in upload_kinds:
             if vision:
                 lines.append(
-                    "User-attached images are sent as native image bytes when the model supports vision."
+                    "User-attached images are sent as native image bytes."
                 )
             else:
                 lines.append(
-                    "This model does NOT support native image input; attached images are not sent as pixels "
-                    "(only a placeholder unless a future vision tool is enabled)."
+                    "This model does NOT support native image input; image attachments are rejected."
                 )
-        lines.append(
-            "PDF / Office uploads are converted to extracted text at upload time, not read as native PDF/Office."
-        )
+        if "pdf" in upload_kinds:
+            if "pdf" in llm_modalities:
+                lines.append("PDF attachments are sent as native PDF bytes.")
+            else:
+                lines.append(
+                    "This model does NOT support native PDF input; PDF attachments are rejected. "
+                    "No PDF parsing/OCR tool is available."
+                )
+        if attachment_enabled:
+            lines.append(
+                "The attachment capability is enabled. Use read_text_attachment, read_docx, "
+                "or read_xlsx with the file_id supplied in the user prompt. Start with only "
+                "file_id; follow next_offset while has_more is true."
+            )
+        else:
+            lines.append(
+                "The attachment capability is NOT enabled. Text, DOCX and XLSX contents "
+                "cannot be read in this session."
+            )
     else:
         lines.append("Platform file upload pipeline: disabled or no MIME types configured.")
 
     lines.extend(
         [
             "",
-            "NOT available in this session unless a dedicated agent tool is later enabled: "
-            "audio (mp3/wav), video (mp4), legacy DOC/PPT/PPTX, and other formats outside the upload list.",
+            "Legacy DOC/PPT/PPTX and formats outside the upload list are not available.",
             "",
             "When the user asks which input types you support, answer ONLY from the lists above. "
             "Do not infer capabilities from your training persona or generic assistant defaults.",

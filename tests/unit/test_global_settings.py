@@ -89,7 +89,7 @@ class GlobalSettingsBuilderTests(unittest.TestCase):
 
         self.assertEqual(
             [group.key for group in settings.groups],
-            ["runtime", "mcp", "uploads", "images", "titles"],
+            ["runtime", "context_compaction", "mcp", "uploads", "images", "titles"],
         )
 
 

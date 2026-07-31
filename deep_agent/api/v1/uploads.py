@@ -34,7 +34,6 @@ async def upload_file(request: Request, file: UploadFile = File(...)) -> UploadR
             file_name=processed.filename,
             file=processed.data,
         )
-        print(f"file uploaded: {uploaded}")
     except Exception as exc:  # noqa: BLE001 - surface platform errors to client
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
@@ -46,5 +45,5 @@ async def upload_file(request: Request, file: UploadFile = File(...)) -> UploadR
         name=uploaded.fileName,
         mime=processed.mime,
         size=uploaded.fileSize,
-        extracted_text=processed.extracted_text,
+        extracted_text=None,
     )

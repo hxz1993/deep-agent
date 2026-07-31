@@ -1,4 +1,4 @@
-# 设计 · DeepAgent 运维控制台交互原型
+# DeepAgent 运维控制台交互原型
 
 打开 `index.html` 可查看并操作原型。该文件用于保留控制台的信息架构、布局和交互参考；正式实现位于 `frontend/console/`。
 

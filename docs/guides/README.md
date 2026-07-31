@@ -2,6 +2,9 @@
 
 本目录记录 DeepAgent 当前可使用、可对接或已验证的行为。
 
+设计背景见 [`../design/README.md`](../design/README.md)，未完成事项见
+[`../design/TODO.md`](../design/TODO.md)。
+
 ## 协议与使用
 
 | 文档 | 用途 |

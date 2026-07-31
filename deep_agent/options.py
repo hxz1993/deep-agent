@@ -60,6 +60,16 @@ def _ensure_positive_int(value: int) -> None:
         raise ValueError("must be a positive integer")
 
 
+def _ensure_non_negative_int(value: int) -> None:
+    if value < 0:
+        raise ValueError("must be a non-negative integer")
+
+
+def _ensure_ratio(value: float) -> None:
+    if not 0 < value < 1:
+        raise ValueError("must be greater than 0 and less than 1")
+
+
 def _resolve_repo_path(value: str) -> str:
     path = Path(value)
     if path.is_absolute():
@@ -119,6 +129,35 @@ class Agent(Category):
     )
     max_total_tokens = Option(None, val_type=int, bind_env="MAX_TOTAL_TOKENS")
     request_retries = Option(2, val_type=int, bind_env="REQUEST_RETRIES")
+    context_compaction_trigger_ratio = Option(
+        0.80,
+        val_type=float,
+        bind_env="CONTEXT_COMPACTION_TRIGGER_RATIO",
+        extra_check=_ensure_ratio,
+    )
+    context_compaction_target_ratio = Option(
+        0.55,
+        val_type=float,
+        bind_env="CONTEXT_COMPACTION_TARGET_RATIO",
+        extra_check=_ensure_ratio,
+    )
+    context_keep_tool_pairs = Option(
+        3,
+        val_type=int,
+        bind_env="CONTEXT_KEEP_TOOL_PAIRS",
+        extra_check=_ensure_non_negative_int,
+    )
+    context_min_clear_tokens = Option(
+        2000,
+        val_type=int,
+        bind_env="CONTEXT_MIN_CLEAR_TOKENS",
+        extra_check=_ensure_non_negative_int,
+    )
+    context_summary_timeout = Option(
+        30.0,
+        val_type=float,
+        bind_env="CONTEXT_SUMMARY_TIMEOUT",
+    )
     skills_dir = Option(
         _resolve_repo_path("skills"),
         val_type=str,
@@ -162,18 +201,23 @@ class Agent(Category):
         bind_env="SQLITE_PATH",
         convertor=_resolve_repo_path,
     )
-    upload_max_size_mb = Option(20, val_type=int, bind_env="UPLOAD_MAX_SIZE_MB")
-    upload_max_count = Option(10, val_type=int, bind_env="UPLOAD_MAX_COUNT")
+    upload_max_size_mb = Option(
+        20,
+        val_type=int,
+        bind_env="UPLOAD_MAX_SIZE_MB",
+        extra_check=_ensure_positive_int,
+    )
+    upload_max_count = Option(
+        10,
+        val_type=int,
+        bind_env="UPLOAD_MAX_COUNT",
+        extra_check=_ensure_positive_int,
+    )
     upload_allowed_mimes = Option(
         "",
         val_type=str,
         bind_env="UPLOAD_ALLOWED_MIMES",
         convertor=_strip_optional_str,
-    )
-    upload_extract_text_max_chars = Option(
-        32000,
-        val_type=int,
-        bind_env="UPLOAD_EXTRACT_TEXT_MAX_CHARS",
     )
     image_max_dimension = Option(1568, val_type=int, bind_env="IMAGE_MAX_DIMENSION")
     image_max_bytes = Option(4_194_304, val_type=int, bind_env="IMAGE_MAX_BYTES")
@@ -225,3 +269,14 @@ OPTION = DeepAgentOptions()
 def validate_runtime_options(options: DeepAgentOptions = OPTION) -> None:
     """Resolve startup-critical options so invalid environment values fail fast."""
     _ = options.agent.max_requests
+    _ = options.agent.upload_max_size_mb
+    _ = options.agent.upload_max_count
+    trigger_ratio = options.agent.context_compaction_trigger_ratio
+    target_ratio = options.agent.context_compaction_target_ratio
+    if target_ratio >= trigger_ratio:
+        raise ValueError(
+            "DEEP_AGENT_CONTEXT_COMPACTION_TARGET_RATIO must be less than "
+            "DEEP_AGENT_CONTEXT_COMPACTION_TRIGGER_RATIO"
+        )
+    if options.agent.context_summary_timeout <= 0:
+        raise ValueError("DEEP_AGENT_CONTEXT_SUMMARY_TIMEOUT must be positive")

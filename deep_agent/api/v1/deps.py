@@ -5,6 +5,9 @@ from dataclasses import replace
 from pydantic_ai.settings import ModelSettings
 from pydantic_ai.usage import UsageLimits
 
+from deep_agent.agent.context.compaction import build_context_compaction
+from deep_agent.agent.context.checkpoint import projection_fingerprint
+from deep_agent.agent.context.estimator import TokenEstimator
 from deep_agent.agent.factory import build_agent
 from deep_agent.agent.input_capabilities import augment_instructions_with_capabilities
 from deep_agent.agent.runner import AgentRunner
@@ -93,6 +96,12 @@ async def _build_runner_from_spec(
     mcp_resource_toolset = build_mcp_resource_toolset(spec, mcp_rows)
 
     spec = replace(spec, instructions=augment_instructions_with_capabilities(spec))
+    estimator = TokenEstimator.for_model(spec.model, spec.base_url)
+    context_compaction = build_context_compaction(
+        context_window_tokens=spec.context_window_tokens,
+        max_output_tokens=spec.max_output_tokens,
+        estimator=estimator,
+    )
     agent = build_agent(
         spec,
         ctx.registry,
@@ -100,6 +109,7 @@ async def _build_runner_from_spec(
         mcp_toolsets=mcp_toolsets,
         dynamic_ui_toolset=dynamic_ui_toolset,
         mcp_resource_toolset=mcp_resource_toolset,
+        context_compaction=context_compaction,
     )
     limits = UsageLimits(
         request_limit=OPTION.agent.max_requests,
@@ -115,4 +125,27 @@ async def _build_runner_from_spec(
         context_window_tokens=spec.context_window_tokens,
         max_output_tokens=spec.max_output_tokens,
         model_tags=spec.tags,
+        context_compaction=context_compaction,
+        checkpoint_store=(
+            ctx.stores.context_checkpoint
+            if context_compaction is not None
+            else None
+        ),
+        checkpoint_fingerprint=(
+            projection_fingerprint(
+                llm_model_id=spec.llm_model_id,
+                context_window_tokens=spec.context_window_tokens,
+                max_output_tokens=spec.max_output_tokens,
+                trigger_ratio=OPTION.agent.context_compaction_trigger_ratio,
+                target_ratio=OPTION.agent.context_compaction_target_ratio,
+                keep_tool_pairs=OPTION.agent.context_keep_tool_pairs,
+                summary_model_id=spec.llm_model_id,
+                estimator_source=estimator.source,
+            )
+            if context_compaction is not None
+            else None
+        ),
+        summary_model_id=spec.llm_model_id,
+        estimator=estimator,
+        stores=ctx.stores,
     )

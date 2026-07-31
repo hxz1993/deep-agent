@@ -1,6 +1,9 @@
+# -*- coding: utf-8 -*-
 # Core agent runtime. Slim package + only the provider/mcp extras we use,
 # to avoid pulling in every provider SDK (bedrock, cohere, huggingface, ...).
-pydantic-ai-slim[openai,anthropic,google,mcp]>=1.0
+pydantic-ai-slim[openai,anthropic,google,mcp]==2.14.1
+pydantic-ai-harness==0.10.0
+tiktoken>=0.13,<1
 
 # Web framework
 uvicorn[standard]>=0.30
@@ -11,8 +14,7 @@ pydantic-settings>=2.5
 jsonschema>=4.23,<5
 sse-starlette>=2.1
 Pillow>=10.0
-pypdf>=5.0
-python-docx>=1.1
+python-docx>=1.2,<2
 openpyxl>=3.1
 
 # Database

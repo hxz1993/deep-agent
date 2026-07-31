@@ -15,6 +15,13 @@ const template = await readFile(
 function loadAgentConfigurationUi() {
   const context = vm.createContext({
     document: { addEventListener() {} },
+    escapeHtml(value) {
+      return String(value ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;");
+    },
     window: {},
   });
   vm.runInContext(source, context);
@@ -55,6 +62,45 @@ test("新建 Agent 使用 null 初始化默认能力而不是空数组", () => {
     source,
     /openCreate\(\)[\s\S]*?renderCapabilityCheckboxes\(null\)/,
   );
+});
+
+test("Native 和 Attachment 合并为内置工具分组但保持独立编码", () => {
+  const ui = loadAgentConfigurationUi();
+  const grouped = ui.groupCapabilities([
+    { name: "native", kind: "native", label: "通用工具" },
+    { name: "attachment", kind: "attachment", label: "附件读取" },
+    { name: "mcp:demo", kind: "mcp" },
+  ]);
+
+  assert.deepEqual([...grouped.groups], ["builtin", "mcp"]);
+  assert.deepEqual(
+    Array.from(grouped.byGroup.builtin, (capability) => capability.name),
+    ["native", "attachment"],
+  );
+  assert.equal(ui.capabilityGroup({ kind: "native" }), "builtin");
+  assert.equal(ui.capabilityGroup({ kind: "attachment" }), "builtin");
+  assert.equal(ui.capabilityGroup({ kind: "mcp" }), "mcp");
+});
+
+test("Agent 内置工具卡片优先展示中文名称和技术类型", () => {
+  const ui = loadAgentConfigurationUi();
+  const card = ui.window.agentsAdmin.renderCapCard(
+    {
+      name: "native",
+      kind: "native",
+      label: "通用工具",
+      source: "builtin",
+      description: "进程内通用工具",
+      default_enabled: true,
+      tools: [{ name: "get_current_time", description: "获取当前 UTC 时间。" }],
+    },
+    new Set(["native"]),
+  );
+
+  assert.match(card, /通用工具/);
+  assert.match(card, /Native/);
+  assert.match(card, /value="native"/);
+  assert.match(card, /get_current_time/);
 });
 
 test("编辑 Agent 时在弹窗标题栏显示完整 Agent ID", () => {

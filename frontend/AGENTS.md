@@ -26,7 +26,7 @@ frontend/
 | 功能 | 实现 |
 | --- | --- |
 | 流式对话 | `fetch` + `ReadableStream` 手动解析 SSE（非 `EventSource`，因需 POST） |
-| 附件上传 | `POST /api/v1/uploads`（multipart）→ 发送时 `attachments[]` 引用 |
+| 附件上传 | `POST /api/v1/uploads`（multipart）→ 发送时仅传 `attachments[]` 引用；文档由 Agent 可选 `attachment` 工具按需读取 |
 | 思考过程 UI | `thinking` 可折叠块，默认折叠；与 `text` 分离 |
 | 工具调用 UI | `tool_call` / `tool_result` 可折叠；同 `tool_call_id` 合并更新 |
 | HITL UI 工具 | 内置 `builtin__confirm` / `builtin__choice` + 手工 UI 工具；都由 Agent 显式选择，SSE / history 携带 `widget` / `metadata`；见 [`../docs/guides/ui-tools-external.md`](../docs/guides/ui-tools-external.md) |
@@ -34,6 +34,7 @@ frontend/
 | 会话 | `session_id` 由后端 `session` 事件返回；`GET/DELETE /api/v1/sessions`；标题展示 `title \|\| user_prompt`（见 [`../docs/guides/experience/ai-title-generator.md`](../docs/guides/experience/ai-title-generator.md)） |
 | 能力面板 | `GET /api/v1/tools` |
 | 配置 | `localStorage` 只保存调试 App；全局环境配置只读展示，身份和鉴权由平台提供 |
+| 内置工具目录 | 配置中心只读展示 `native`（通用工具）和 `attachment`（附件读取）；在 Agent 中独立选择 |
 | 一体化控制台 | `/console/`；工作台、配置和诊断的唯一入口 |
 
 ## 一体化控制台
@@ -49,6 +50,10 @@ frontend/
 - SSE 解析、HITL 参数归一化和 Schema 文本校验分别位于 `protocol.js`、`hitl.js`、`schema-editor.js`，可由 Node 内置测试独立验证。
 - 控制台测试：`node --test tests/frontend/console/*.test.mjs`。
 - 配置中心默认打开 Agent；“全局配置”仍位于“辅助模型”后、模型资源分割线前，通过 `GET /api/v1/global-settings` 按需展示安全白名单，没有编辑或保存入口。
+- “内置工具”位于模型之后、MCP 服务之前，只读展示代码随版本发布的 Native 与
+  Attachment 能力包；页面没有注册、编辑、删除或全局启停入口。
+- Console 顶部只展示一处产品版本，通过同源 `GET /info` 读取
+  `deep_agent.__version__`；配置中心的数据库结构 revision 是独立运维信息。
 - 配置中心左侧页签只在当前前端页面的模块内存中保留；工作台与配置中心之间切换会恢复上次页签，浏览器刷新后重新回到 Agent，不写入 LocalStorage 或后端。
 - Agent 编辑弹窗在标题区显示完整 Agent ID；测试工作台对话标题第二行以 `会话 ID：<完整 ID>` 展示当前会话，不再截取前八位。
 - `/` 跳转到 `/console/#/workspace`；旧 `/settings.html`、`/models.html`、`/admin/` 返回 404。
@@ -62,16 +67,20 @@ frontend/
 | event | data |
 | --- | --- |
 | `session` | `{ session_id }` 或含 `agent_id` |
+| `context_compaction` | `{ type, phase, message, ... }`（当前请求瞬时状态，不进入历史） |
 | `text` | `{ type, delta }` |
 | `thinking` | `{ type, delta }` |
 | `tool_call` | `{ type, tool, args, tool_call_id, widget?, metadata?, source? }` |
 | `tool_result` | `{ type, tool, result, tool_call_id }` |
-| `final` | `{ type, status, output, usage, deferred? }`（`deferred.calls[]` 可含 `widget` / `metadata`） |
+| `final` | `{ type, status, output, usage, deferred?, context? }`（`context` 为预算/压缩观测） |
 | `error` | `{ type, message }` |
 
 完整协议（含同 ID 多次推送、生命周期）：[`../docs/guides/sse-protocol.md`](../docs/guides/sse-protocol.md)。
 
 实现参考：`console/chat.js` 与 `console/protocol.js`。
+
+上下文压缩状态延迟 150ms 显示；同一请求只保留一个状态胶囊，收到首个
+`thinking` / `text` / `tool_call` 或结束事件时必须清理。
 
 ---
 
@@ -89,7 +98,7 @@ uvicorn deep_agent.main:app --reload
 
 ```bash
 cd frontend
-python -m http.server 5173
+python3.12 -m http.server 5173
 # → http://localhost:5173/console/
 ```
 
@@ -110,6 +119,8 @@ python -m http.server 5173
 | 配置 CRUD | `console/configuration/` 下各文件 |
 | 模型运行属性 | `console/configuration/llm-models.js`；上下文、最大输出、输入模态和 tags 保存到 `llm_models` |
 | 模型目录 | `console/configuration/catalog.js` → DB-only GET 与管理员 POST refresh |
+| 上下文压缩观测 | `console/chat.js` 拉取 session context-status；`console/workspace.js` 在请求上下文概览展示 |
+| 上下文压缩测试会话 | `console/workspace.js` → 场景弹窗、创建后打开会话并预填验证问题 |
 | Markdown 主题/安全 | `vendor/`，见 `vendor/README.md` |
 
 历史消息由后端按 `session_id` 维护；切换会话时 `GET /api/v1/sessions/{id}/history` 回放。pending UI 工具的 `tool_call` part 同样经后端 enrichment 附带 `widget` / `metadata`。
@@ -126,5 +137,13 @@ python -m http.server 5173
 - `builtin__confirm`、`builtin__choice` 是代码内置但非默认启用的普通 `ui:<name>` 能力；Agent 新建和历史回填不得自动勾选。choice 始终提供候选外自由输入，提交结果固定包含 `selected: string[]` 与 `custom_input: string | null`，二者不能同时为空。
 - MCP 新建页只允许 URL transport；历史 stdio 配置只读且不显示编辑入口。Builtin MCP 继续由仓库内程序配置管理，列表保留编辑入口但不显示删除按钮，后端删除接口也会拒绝。
 - 模型目录只由管理员手工刷新 models.dev，保存模型配置不得触发外网请求。目录按 Lab → Model → Provider 展示，仅负责预填；模态与能力 tags 分开，Agent 运行时只认 `llm_models`。
+- 上下文压缩在模型配置有效上下文窗口时自动启用；Console 只读展示全局策略、预算、
+  压缩前后和 Checkpoint 状态，不提供启用开关，也不展示或编辑摘要正文。
+- `attachment` 是默认关闭的 Agent 能力。Console 从 `/uploads/capabilities` 读取实际 MIME、
+  单文件大小和单次数量限制；新请求不得再发送 `extracted_text`。工具分页协议和解析边界见
+  [`../docs/design/06-attachment-parsing/`](../docs/design/06-attachment-parsing/)。
+- “新建测试会话”是管理员控制台的常驻入口；它位于会话搜索框和普通新建按钮之间，
+  当前 Agent 的模型未配置上下文窗口时不可用，但不能改变普通新建行为。场景只构造合法
+  历史，不在前端拼接或伪造消息 payload。
 
 更多说明：[`README.md`](README.md)。

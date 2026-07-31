@@ -200,10 +200,10 @@ DEEP_AGENT_TITLE_MODEL_BASE_URL=...   # 视提供商而定
 
 ```bash
 # 单元
-venv\Scripts\python.exe -m unittest tests.unit.test_title_generator -v
+python3.12 -m unittest tests.unit.test_title_generator -v
 
 # 集成（无 LLM 环境会 skip live 用例）
-venv\Scripts\python.exe -m unittest tests.integration.test_session_title -v
+python3.12 -m unittest tests.integration.test_session_title -v
 ```
 
 PowerShell 带超时（排查单文件用默认 30s；**全量含 live 标题约 4 分钟**，需加大）：
@@ -240,16 +240,16 @@ PowerShell 带超时（排查单文件用默认 30s；**全量含 live 标题约
 2. 在仓库根导出（使用当前 `.env` 数据库）：
 
 ```bash
-venv\Scripts\python.exe -m tests.integration.helpers.export_session_fixture ^
-  --session-id <你的-session-id> ^
-  --agent-id <你的-agent-uuid> ^
+python3.12 -m tests.integration.helpers.export_session_fixture \
+  --session-id <你的-session-id> \
+  --agent-id <你的-agent-uuid> \
   --output tests/fixtures/sessions/deepcube_tiered_rebate_full.json
 ```
 
 3. 配置 `DEEP_AGENT_TITLE_MODEL*` 后单独跑 smoke：
 
 ```bash
-venv\Scripts\python.exe -m unittest ^
+python3.12 -m unittest \
   tests.integration.test_session_title.SessionTitleIntegrationTests.test_deepcube_full_fixture_auto_rename_live_smoke -v
 ```
 

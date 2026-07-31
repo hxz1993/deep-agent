@@ -21,6 +21,7 @@ class Capability:
     Every extension point in deep-agent reduces to a Capability that wraps a
     Pydantic AI toolset:
       - native:       a ``FunctionToolset`` of in-process Python functions
+      - attachment:   a ``FunctionToolset`` for session-scoped file readers
       - skill:        instructions + a ``FunctionToolset`` loaded from ``skills/``
       - mcp:          an MCP server toolset loaded from ``mcp_servers`` DB rows
 
@@ -35,8 +36,10 @@ class Capability:
     """
 
     name: str
-    kind: str  # "native" | "skill" | "mcp"
+    kind: str  # "native" | "attachment" | "skill" | "mcp"
     toolset: Any
+    label: str | None = None
+    source: str | None = None
     description: str = ""
     tools: list[ToolInfo] = field(default_factory=list)
     default_enabled: bool = True
@@ -85,6 +88,8 @@ class CapabilityRegistry:
             {
                 "name": c.name,
                 "kind": c.kind,
+                "label": c.label,
+                "source": c.source,
                 "description": c.description,
                 "default_enabled": c.default_enabled,
                 "tools": [{"name": t.name, "description": t.description} for t in c.tools],

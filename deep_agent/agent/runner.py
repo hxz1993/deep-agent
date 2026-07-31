@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
+from dataclasses import dataclass
 from typing import Any, AsyncIterator
 
 from pydantic_ai import Agent, AgentRunResultEvent, DeferredToolRequests, DeferredToolResults
@@ -10,9 +11,18 @@ from pydantic_ai.settings import ModelSettings
 from pydantic_ai.usage import UsageLimits
 
 from deep_agent.agent import events
+from deep_agent.agent.context.budget import build_context_budget
+from deep_agent.agent.context.checkpoint import (
+    ProjectionLoad,
+    load_projection,
+    save_projection,
+)
+from deep_agent.agent.context.compaction import DeepAgentContextCompaction
+from deep_agent.agent.context.estimator import TokenEstimator
+from deep_agent.agent.context.runtime import ContextRunState
 from deep_agent.agent.attachments import (
     has_user_turn,
-    model_supports_image_input,
+    index_attachment_refs,
     refs_from_attachments,
     resolve_history_for_llm,
     resolve_user_prompt,
@@ -32,9 +42,20 @@ from deep_agent.capabilities.ui.registry import enrich_deferred, enrich_tool_eve
 from loguru import logger
 
 from deep_agent.db.conversation import SessionStore
+from deep_agent.db.stores.bundle import DataStores
+from deep_agent.db.stores.context_checkpoint import ContextCheckpointStoreBase
 from deep_agent.schemas.attachment import AttachmentRef
 
 _STREAM_OUTPUT_TYPE: list[Any] = [str, DeferredToolRequests]
+
+
+@dataclass(frozen=True)
+class _PreparedHistory:
+    projected: list[ModelMessage]
+    raw: list[ModelMessage]
+    checkpoint: ProjectionLoad | None
+    pre_persisted_user: bool
+    user_branch_point: int | None
 
 
 def _should_publish_ui_tool_call(
@@ -71,6 +92,12 @@ class AgentRunner:
         context_window_tokens: int | None = None,
         max_output_tokens: int | None = None,
         model_tags: list[str] | None = None,
+        context_compaction: DeepAgentContextCompaction | None = None,
+        checkpoint_store: ContextCheckpointStoreBase | None = None,
+        checkpoint_fingerprint: str | None = None,
+        summary_model_id: str | None = None,
+        estimator: TokenEstimator | None = None,
+        stores: DataStores | None = None,
     ) -> None:
         self.agent = agent
         self.store = store
@@ -81,6 +108,12 @@ class AgentRunner:
         self._context_window_tokens = context_window_tokens
         self._max_output_tokens = max_output_tokens
         self._model_tags = list(model_tags or [])
+        self._context_compaction = context_compaction
+        self._checkpoint_store = checkpoint_store
+        self._checkpoint_fingerprint = checkpoint_fingerprint
+        self._summary_model_id = summary_model_id
+        self._estimator = estimator or TokenEstimator.conservative()
+        self._stores = stores
 
     @asynccontextmanager
     async def _session_lock(self, session_id: str, *, agent_id: str | None) -> AsyncIterator[None]:
@@ -101,7 +134,7 @@ class AgentRunner:
         branch_from: int | None = None,
         deferred_tool_results: DeferredToolResults | None = None,
         persister: EventPersister | None = None,
-    ) -> tuple[list[ModelMessage], bool, int | None]:
+    ) -> _PreparedHistory:
         if branch_from is not None:
             await self.store.truncate_history(
                 session_id,
@@ -145,11 +178,172 @@ class AgentRunner:
             history = [*history, user_request]
             pre_persisted_user = True
             user_branch_point = len(history) - 1
-        return history, pre_persisted_user, user_branch_point
+        deps.input_modalities = tuple(self._input_modalities or ())
+        deps.attachment_by_id = index_attachment_refs(
+            attachments=attachments,
+            messages=history,
+        )
+        checkpoint_load: ProjectionLoad | None = None
+        projected = history
+        if self._checkpoint_store is not None and self._checkpoint_fingerprint is not None:
+            checkpoint_load = await load_projection(
+                self._checkpoint_store,
+                history,
+                session_id=session_id,
+                agent_id=deps.agent_id,
+                fingerprint=self._checkpoint_fingerprint,
+            )
+            projected = checkpoint_load.messages
+        return _PreparedHistory(
+            projected=projected,
+            raw=history,
+            checkpoint=checkpoint_load,
+            pre_persisted_user=pre_persisted_user,
+            user_branch_point=user_branch_point,
+        )
 
-    def _vision_capable(self) -> bool:
-        return model_supports_image_input(
-            db_modalities=self._input_modalities,
+    def _context_status(
+        self,
+        history: list[ModelMessage],
+        deps: AgentDeps | None = None,
+    ) -> dict[str, Any]:
+        state = deps.context_state if deps is not None else None
+        budget = (
+            state.last_budget
+            if state is not None and state.last_budget is not None
+            else None
+        )
+        if budget is None:
+            budget = build_context_budget(
+                history,
+                context_window_tokens=self._context_window_tokens,
+                max_output_tokens=self._max_output_tokens,
+                estimator=self._estimator,
+                output_history=history,
+            )
+        telemetry = (
+            state.telemetry.as_dict()
+            if state is not None
+            else {
+                "triggered": False,
+                "trigger_count": 0,
+                "strategy": "none",
+                "target_met": False,
+                "estimated_tokens_before": budget.estimated_history_tokens,
+                "estimated_tokens_after": budget.estimated_history_tokens,
+                "max_estimated_tokens_before": budget.estimated_history_tokens,
+                "messages_before": len(history),
+                "messages_after": len(history),
+                "reduction_ratio": 0.0,
+                "summary_applied": False,
+                "summary_failed": False,
+                "summary_calls": 0,
+                "summary_chunks": 0,
+                "fallback_reason": None,
+                "failure": None,
+            }
+        )
+        return {"budget": budget.as_dict(), "compaction": telemetry}
+
+    def _prepare_context_state(
+        self,
+        deps: AgentDeps,
+        prepared: _PreparedHistory,
+        *,
+        event_queue: asyncio.Queue[dict[str, Any]] | None = None,
+    ) -> None:
+        if self._context_compaction is None:
+            deps.context_state = None
+            return
+        deps.context_state = ContextRunState(
+            raw_history=list(prepared.raw),
+            estimator=self._estimator,
+            usage_limits=self.usage_limits,
+            event_queue=event_queue,
+        )
+
+    async def _maybe_save_checkpoint(
+        self,
+        session_id: str,
+        deps: AgentDeps,
+        *,
+        projected_history: list[ModelMessage],
+        expected_row_version: int,
+    ) -> None:
+        if (
+            self._checkpoint_store is None
+            or self._checkpoint_fingerprint is None
+            or self._context_compaction is None
+            or deps.context_state is None
+            or not deps.context_state.telemetry.summary_applied
+            or deps.context_state.telemetry.summary_failed
+            or not deps.context_state.telemetry.target_met
+            or deps.context_state.telemetry.strategy == "sliding_window_fallback"
+        ):
+            return
+        target = (
+            deps.context_state.last_budget.target_tokens
+            if deps.context_state.last_budget is not None
+            else None
+        )
+        if (
+            target is None
+            or deps.context_state.estimator.messages(projected_history) > target
+        ):
+            return
+        try:
+            raw_history = await self.store.get_history(
+                session_id,
+                agent_id=deps.agent_id,
+            )
+            saved = await save_projection(
+                self._checkpoint_store,
+                raw_history=raw_history,
+                projected_history=projected_history,
+                session_id=session_id,
+                agent_id=deps.agent_id,
+                fingerprint=self._checkpoint_fingerprint,
+                expected_row_version=expected_row_version,
+                summary_model_id=self._summary_model_id,
+                estimator=deps.context_state.estimator,
+            )
+            if not saved:
+                logger.warning(
+                    "Context checkpoint CAS skipped for {}/{}",
+                    deps.agent_id,
+                    session_id,
+                )
+        except Exception as exc:  # derived-state failure must not fail a completed chat
+            logger.warning(
+                "Context checkpoint save failed for {}/{}: {}",
+                deps.agent_id,
+                session_id,
+                type(exc).__name__,
+            )
+
+    async def _checkpoint_after_persist(
+        self,
+        persister: EventPersister,
+        session_id: str,
+        deps: AgentDeps,
+        *,
+        projected_history: list[ModelMessage],
+        expected_row_version: int,
+    ) -> None:
+        try:
+            await persister.flush(session_id, agent_id=deps.agent_id)
+        except Exception as exc:
+            logger.warning(
+                "Checkpoint persistence wait failed for session {}: {}",
+                session_id,
+                type(exc).__name__,
+            )
+            return
+        await self._maybe_save_checkpoint(
+            session_id,
+            deps,
+            projected_history=projected_history,
+            expected_row_version=expected_row_version,
         )
 
     async def _llm_inputs(
@@ -161,13 +355,12 @@ class AgentRunner:
         *,
         pre_persisted_user: bool,
     ) -> tuple[list[ModelMessage], str | list[UserContent] | None]:
-        vision_capable = self._vision_capable()
         current_user_index = len(history) - 1 if pre_persisted_user else None
         llm_history = await resolve_history_for_llm(
             history,
             current_user_index=current_user_index,
             request_headers=deps.request_headers,
-            vision_capable=vision_capable,
+            input_modalities=self._input_modalities,
         )
         if pre_persisted_user:
             return llm_history, None
@@ -176,7 +369,7 @@ class AgentRunner:
                 message,
                 attachments,
                 deps.request_headers,
-                vision_capable=vision_capable,
+                input_modalities=self._input_modalities,
             )
         return llm_history, message or None
 
@@ -306,6 +499,12 @@ class AgentRunner:
                 user_text=user_text,
                 assistant_text=assistant_text or user_text,
                 main_model=self.agent.model,
+                auxiliary_store=(
+                    self._stores.auxiliary_model if self._stores is not None else None
+                ),
+                llm_model_store=(
+                    self._stores.llm_model if self._stores is not None else None
+                ),
             )
 
             if not title:
@@ -346,7 +545,7 @@ class AgentRunner:
         branch_from: int | None = None,
     ) -> dict[str, Any]:
         async with self._session_lock(session_id, agent_id=deps.agent_id):
-            history, pre_persisted_user, _ = await self._prepare_history(
+            prepared = await self._prepare_history(
                 session_id,
                 message,
                 deps,
@@ -355,12 +554,13 @@ class AgentRunner:
                 deferred_tool_results=deferred_tool_results,
             )
             llm_history, user_prompt = await self._llm_inputs(
-                history,
+                prepared.projected,
                 message,
                 attachments,
                 deps,
-                pre_persisted_user=pre_persisted_user,
+                pre_persisted_user=prepared.pre_persisted_user,
             )
+            self._prepare_context_state(deps, prepared)
             result = await self.agent.run(
                 user_prompt,
                 deps=deps,
@@ -374,10 +574,23 @@ class AgentRunner:
                 session_id,
                 result.new_messages(),
                 deps,
-                pre_persisted_user=pre_persisted_user,
+                pre_persisted_user=prepared.pre_persisted_user,
                 repair_dangling_tool_calls=not isinstance(result.output, DeferredToolRequests),
             )
-        return _build_run_result(result, self.ui_tool_hints)
+            if not isinstance(result.output, DeferredToolRequests):
+                await self._maybe_save_checkpoint(
+                    session_id,
+                    deps,
+                    projected_history=result.all_messages(),
+                    expected_row_version=(
+                        prepared.checkpoint.checkpoint.row_version
+                        if prepared.checkpoint and prepared.checkpoint.checkpoint
+                        else 0
+                    ),
+                )
+        response = _build_run_result(result, self.ui_tool_hints)
+        response["context"] = self._context_status(prepared.projected, deps)
+        return response
 
     async def run_stream(
         self,
@@ -390,8 +603,10 @@ class AgentRunner:
         branch_from: int | None = None,
         persister: EventPersister,
     ) -> AsyncIterator[dict[str, Any]]:
+        checkpoint_projection: list[ModelMessage] | None = None
+        checkpoint_expected_version = 0
         async with self._session_lock(session_id, agent_id=deps.agent_id):
-            history, pre_persisted_user, user_branch_point = await self._prepare_history(
+            prepared = await self._prepare_history(
                 session_id,
                 message,
                 deps,
@@ -400,12 +615,36 @@ class AgentRunner:
                 deferred_tool_results=deferred_tool_results,
                 persister=persister,
             )
-            llm_history, user_prompt = await self._llm_inputs(
-                history,
-                message,
-                attachments,
+            try:
+                llm_history, user_prompt = await self._llm_inputs(
+                    prepared.projected,
+                    message,
+                    attachments,
+                    deps,
+                    pre_persisted_user=prepared.pre_persisted_user,
+                )
+            except Exception as exc:  # attachment/media validation before model start
+                logger.warning(
+                    "Agent input preparation failed for session {}: {}",
+                    session_id,
+                    exc,
+                )
+                msg_count, branch_pt = self._stream_history_meta(
+                    prepared.raw,
+                    user_branch_point=prepared.user_branch_point,
+                )
+                yield events.error(
+                    format_stream_error(exc),
+                    history_persisted=prepared.pre_persisted_user,
+                    model_message_count=msg_count,
+                    user_branch_point=branch_pt,
+                )
+                return
+            compaction_events: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+            self._prepare_context_state(
                 deps,
-                pre_persisted_user=pre_persisted_user,
+                prepared,
+                event_queue=compaction_events,
             )
             result = None
             cancelled = False
@@ -422,24 +661,57 @@ class AgentRunner:
                     output_type=_STREAM_OUTPUT_TYPE,
                     model_settings=self.model_settings,
                 ) as stream:
-                    while True:
-                        try:
-                            event = await stream.__anext__()
-                        except StopAsyncIteration:
-                            break
-                        if isinstance(event, AgentRunResultEvent):
-                            result = event.result
-                            continue
-                        mapped = events.map_event(event)
-                        if mapped is not None:
-                            if not _should_publish_ui_tool_call(event, mapped, self.ui_tool_hints):
+                    stream_task: asyncio.Task[Any] | None = asyncio.create_task(
+                        stream.__anext__()
+                    )
+                    status_task: asyncio.Task[Any] | None = asyncio.create_task(
+                        compaction_events.get()
+                    )
+                    try:
+                        while stream_task is not None:
+                            waiters = {stream_task}
+                            if status_task is not None:
+                                waiters.add(status_task)
+                            done, _ = await asyncio.wait(
+                                waiters,
+                                return_when=asyncio.FIRST_COMPLETED,
+                            )
+                            if status_task is not None and status_task in done:
+                                yield status_task.result()
+                                status_task = asyncio.create_task(compaction_events.get())
+                            if stream_task not in done:
                                 continue
-                            accumulator.ingest(mapped)
                             try:
-                                yield enrich_tool_event(mapped, self.ui_tool_hints)
-                            except asyncio.CancelledError:
-                                cancelled = True
+                                event = stream_task.result()
+                            except StopAsyncIteration:
+                                stream_task = None
+                                while not compaction_events.empty():
+                                    yield compaction_events.get_nowait()
                                 break
+                            stream_task = asyncio.create_task(stream.__anext__())
+                            if isinstance(event, AgentRunResultEvent):
+                                result = event.result
+                                continue
+                            mapped = events.map_event(event)
+                            if mapped is not None:
+                                if not _should_publish_ui_tool_call(
+                                    event,
+                                    mapped,
+                                    self.ui_tool_hints,
+                                ):
+                                    continue
+                                accumulator.ingest(mapped)
+                                try:
+                                    yield enrich_tool_event(mapped, self.ui_tool_hints)
+                                except asyncio.CancelledError:
+                                    cancelled = True
+                                    break
+                    finally:
+                        for task in (stream_task, status_task):
+                            if task is not None and not task.done():
+                                task.cancel()
+                                with suppress(asyncio.CancelledError):
+                                    await task
                 if not cancelled and result is not None:
                     deferred_pending = isinstance(result.output, DeferredToolRequests)
                     self._publish_run_complete(
@@ -447,10 +719,18 @@ class AgentRunner:
                         session_id,
                         deps,
                         result.new_messages(),
-                        pre_persisted_user=pre_persisted_user,
+                        pre_persisted_user=prepared.pre_persisted_user,
                         repair_dangling_tool_calls=not deferred_pending,
                     )
                     run_published = True
+                    if not deferred_pending:
+                        checkpoint_projection = result.all_messages()
+                        checkpoint_expected_version = (
+                            prepared.checkpoint.checkpoint.row_version
+                            if prepared.checkpoint
+                            and prepared.checkpoint.checkpoint
+                            else 0
+                        )
 
                     if branch_from is None:
                         asyncio.create_task(
@@ -469,13 +749,17 @@ class AgentRunner:
             except Exception as exc:  # noqa: BLE001 - surface as an SSE error event
                 logger.exception("Agent stream failed for session {}", session_id)
                 msg_count, branch_pt = self._stream_history_meta(
-                    history,
-                    user_branch_point=user_branch_point if pre_persisted_user else None,
+                    prepared.raw,
+                    user_branch_point=(
+                        prepared.user_branch_point
+                        if prepared.pre_persisted_user
+                        else None
+                    ),
                 )
                 yield events.error(
                     format_stream_error(exc),
-                    history_persisted=pre_persisted_user,
-                    model_message_count=msg_count if pre_persisted_user else None,
+                    history_persisted=prepared.pre_persisted_user,
+                    model_message_count=msg_count if prepared.pre_persisted_user else None,
                     user_branch_point=branch_pt,
                 )
                 return
@@ -485,7 +769,7 @@ class AgentRunner:
                         persister,
                         session_id,
                         deps,
-                        pre_persisted_user=pre_persisted_user,
+                        pre_persisted_user=prepared.pre_persisted_user,
                         result=result,
                         accumulator=accumulator,
                         deferred_tool_results=deferred_tool_results,
@@ -504,29 +788,39 @@ class AgentRunner:
                     )
                 )
                 msg_count, branch_pt = self._stream_history_meta(
-                    history,
-                    user_branch_point=user_branch_point,
+                    prepared.raw,
+                    user_branch_point=prepared.user_branch_point,
                     pending_messages=pending,
-                    pre_persisted_user=pre_persisted_user,
+                    pre_persisted_user=prepared.pre_persisted_user,
                 )
                 yield events.cancelled(
-                    history_persisted=accumulator.has_content() or pre_persisted_user,
+                    history_persisted=accumulator.has_content() or prepared.pre_persisted_user,
                     model_message_count=msg_count,
                     user_branch_point=branch_pt,
                 )
                 return
 
+        if checkpoint_projection is not None:
+            await self._checkpoint_after_persist(
+                persister,
+                session_id,
+                deps,
+                projected_history=checkpoint_projection,
+                expected_row_version=checkpoint_expected_version,
+            )
+
         msg_count, branch_pt = self._stream_history_meta(
-            history,
-            user_branch_point=user_branch_point,
+            prepared.raw,
+            user_branch_point=prepared.user_branch_point,
             pending_messages=result.new_messages() if result is not None else None,
-            pre_persisted_user=pre_persisted_user,
+            pre_persisted_user=prepared.pre_persisted_user,
         )
         yield _final_event(
             result,
             self.ui_tool_hints,
             model_message_count=msg_count,
             user_branch_point=branch_pt,
+            context=self._context_status(prepared.projected, deps),
         )
 
 
@@ -553,6 +847,7 @@ def _final_event(
     *,
     model_message_count: int | None = None,
     user_branch_point: int | None = None,
+    context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     output = result.output
     usage = _usage_dict(result)
@@ -565,6 +860,7 @@ def _final_event(
             deferred=deferred,
             model_message_count=model_message_count,
             user_branch_point=user_branch_point,
+            context=context,
         )
     return events.final(
         _serialize_output(output),
@@ -572,6 +868,7 @@ def _final_event(
         status="completed",
         model_message_count=model_message_count,
         user_branch_point=user_branch_point,
+        context=context,
     )
 
 

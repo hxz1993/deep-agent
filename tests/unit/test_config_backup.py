@@ -28,12 +28,13 @@ from maintenance.config_backup import (
     database_url_from_config,
     default_output_root,
     export_backup,
+    repository_root,
 )
 
 
 class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
     async def test_exports_one_sqlite_database_with_config_only(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
             root = Path(tmpdir)
             source_path = root / "source.db"
             output_root = root / "backups"
@@ -146,7 +147,7 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                 )
 
     async def test_failed_export_removes_partial_database(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
             root = Path(tmpdir)
             source_path = root / "broken.db"
             output_root = root / "backups"
@@ -176,12 +177,12 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
             "deep-agent-config-backups",
         )
         self.assertEqual(
-            default_output_root().parent.name,
-            "deepfos-AI",
+            default_output_root().parent,
+            repository_root().parent,
         )
 
     def test_reads_sqlite_database_from_external_config(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
             root = Path(tmpdir)
             config_path = root / "backup.env"
             config_path.write_text(

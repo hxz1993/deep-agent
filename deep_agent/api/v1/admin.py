@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from loguru import logger
 
 from deep_agent.api.v1.request_identity import RequestUserDep
 from deep_agent.core.context import AppContextDep
@@ -29,6 +30,7 @@ async def resolve_console_admin_access(
             detail="平台登录状态已失效，请重新登录",
         ) from exc
     except ConsoleAdminUnavailableError as exc:
+        logger.exception('暂时无法验证企业管理员权限')
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="暂时无法验证企业管理员权限，请稍后重试",

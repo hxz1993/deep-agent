@@ -8,6 +8,12 @@ from deepfos_platform.conf.option import GlobalOptions, Category, Option, Action
 from deepfos_platform.lib.cipher import maybe_decrypt_pwd
 from deepfos_platform.lib.constants import BOOLEAN_STATES
 from deep_agent.core.paths import DEEP_AGENT_ROOT, REPO_ROOT
+from deep_agent.sandbox.profile import (
+    DEFAULT_SANDBOX_PROFILE,
+    ProfileNotFoundError,
+    ProfileValidationError,
+    load_sandbox_profile,
+)
 
 DEFAULT_MCP_FORWARD_HEADERS = frozenset(
     {
@@ -75,6 +81,23 @@ def _resolve_repo_path(value: str) -> str:
     if path.is_absolute():
         return str(path.resolve())
     return str((REPO_ROOT / value).resolve())
+
+
+def _default_sandbox_python() -> str:
+    if sys.platform == "win32":
+        rel = ".venv-sandbox/Scripts/python.exe"
+    else:
+        rel = ".venv-sandbox/bin/python"
+    # Keep venv symlinks intact; resolve() would collapse to the base interpreter
+    # and lose pyvenv.cfg / site-packages isolation.
+    return str((REPO_ROOT / rel).absolute())
+
+
+def _resolve_sandbox_python(value: str) -> str:
+    path = Path(str(value).strip())
+    if not path.is_absolute():
+        path = REPO_ROOT / path
+    return str(path.absolute())
 
 
 def _strip_optional_str(value: str | None) -> str:
@@ -252,6 +275,56 @@ class Agent(Category):
         val_type=float,
         bind_env="TITLE_GENERATION_TIMEOUT",
     )
+    sandbox_enabled = Option(
+        True,
+        val_type=bool,
+        bind_env="SANDBOX_ENABLED",
+    )
+    sandbox_backend = Option(
+        "subprocess-dev",
+        val_type=str,
+        bind_env="SANDBOX_BACKEND",
+    )
+    sandbox_timeout = Option(
+        30,
+        val_type=int,
+        bind_env="SANDBOX_TIMEOUT",
+        extra_check=_ensure_positive_int,
+    )
+    sandbox_max_concurrency = Option(
+        4,
+        val_type=int,
+        bind_env="SANDBOX_MAX_CONCURRENCY",
+        extra_check=_ensure_positive_int,
+    )
+    sandbox_python = Option(
+        _default_sandbox_python(),
+        val_type=str,
+        bind_env="SANDBOX_PYTHON",
+        convertor=_resolve_sandbox_python,
+    )
+    sandbox_memory_mb = Option(
+        # RSS product budget in megabytes (same semantics as stage-C cgroup memory.max).
+        # subprocess-dev translates to RLIMIT_AS via RLIMIT_AS_PER_RSS_RATIO.
+        512,
+        val_type=int,
+        bind_env="SANDBOX_MEMORY_MB",
+        extra_check=_ensure_positive_int,
+    )
+    sandbox_cpu_seconds = Option(
+        30,
+        val_type=int,
+        bind_env="SANDBOX_CPU_SECONDS",
+        extra_check=_ensure_positive_int,
+    )
+    sandbox_max_pids = Option(
+        # 0 = do not apply RLIMIT_NPROC in subprocess-dev (recommended).
+        # Per-UID NPROC ≠ stage-C cgroup pids.max; enabling can break OpenBLAS / host threads.
+        0,
+        val_type=int,
+        bind_env="SANDBOX_MAX_PIDS",
+        extra_check=_ensure_non_negative_int,
+    )
 
     def __get__(self, instance, owner) -> "Agent":
         """defined to help ide"""
@@ -280,3 +353,8 @@ def validate_runtime_options(options: DeepAgentOptions = OPTION) -> None:
         )
     if options.agent.context_summary_timeout <= 0:
         raise ValueError("DEEP_AGENT_CONTEXT_SUMMARY_TIMEOUT must be positive")
+    if options.agent.sandbox_enabled:
+        try:
+            load_sandbox_profile(DEFAULT_SANDBOX_PROFILE)
+        except (ProfileNotFoundError, ProfileValidationError) as exc:
+            raise ValueError(f"default sandbox profile is invalid: {exc}") from exc

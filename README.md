@@ -32,6 +32,17 @@ DeepAgent 是基于 FastAPI、Pydantic AI 和 SQLAlchemy 的多用户 Agent 服�
 python3.12 -m pip install -r requirements.txt
 ```
 
+若启用 Python Sandbox（默认 `DEEP_AGENT_SANDBOX_ENABLED=true`、backend=`subprocess-dev`），
+还需**独立** sandbox 解释器（与宿主 `venv` 分离，预装 numpy/pandas）。  
+`local_dev` **默认**会在缺解释器时自动执行 setup（可用 `--no-sandbox-env` 关闭）：
+
+```bash
+# 手动创建（可选；local_dev 默认也会补齐）
+bash scripts/sandbox_venv/setup.sh
+```
+
+说明见 [`scripts/sandbox_venv/README.md`](scripts/sandbox_venv/README.md)。
+
 连接 Test 数据库进行本地联调时，使用仓库外的私有 Profile：
 
 ```bash
@@ -41,13 +52,17 @@ python3.12 -m deep_agent.local_dev \
 ```
 
 Profile 至少包含数据库配置和本地可信身份，权限应设为 `0600`。不要把 Token、
-Cookie、数据库密码或 API Key 提交到仓库。
+Cookie、数据库密码或 API Key 提交到仓库。Sandbox 相关项可按需写入同一 Profile，例如
+`DEEP_AGENT_SANDBOX_PYTHON`（默认解析为仓库根 `.venv-sandbox/bin/python`）。
+
+若不想自动建 venv（例如离线环境），加 `--no-sandbox-env`；此时缺解释器会直接退出并提示手动 setup。
 
 访问入口：
 
 - Console：<http://127.0.0.1:8000/console/>
 - API 文档：<http://127.0.0.1:8000/docs>
 - 健康检查：<http://127.0.0.1:8000/health>
+- Sandbox：<http://127.0.0.1:8000/api/v1/health/sandbox>
 
 部署环境使用：
 
@@ -55,7 +70,10 @@ Cookie、数据库密码或 API Key 提交到仓库。
 uvicorn deep_agent.main:app --host 0.0.0.0 --port 8000
 ```
 
-`deep_agent.local_dev` 只用于本机回环调试，不用于容器部署。
+`deep_agent.local_dev` 只用于本机回环调试，不用于容器部署。容器镜像若启用
+`subprocess-dev`，构建阶段同样需要执行 `scripts/sandbox_venv/setup.sh`（或等价步骤），
+并设置 `DEEP_AGENT_SANDBOX_PYTHON`；详见
+[`docs/design/07-python-sandbox/ops-kubernetes-sidecar.md`](docs/design/07-python-sandbox/ops-kubernetes-sidecar.md) §5.3。
 
 ## 能力类型
 

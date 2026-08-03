@@ -7,9 +7,13 @@ from pydantic_ai import RunContext
 from pydantic_ai.models.test import TestModel
 from pydantic_ai.usage import RunUsage
 
+from unittest.mock import AsyncMock
+
+from deep_agent.capabilities import build_registry
 from deep_agent.capabilities.attachments import build_attachment_capability
 from deep_agent.capabilities.native import build_native_capability
 from deep_agent.capabilities.registry import Capability, CapabilityRegistry
+from deep_agent.sandbox.toolset import build_python_sandbox_capability
 
 
 class CapabilityRegistryToolsetsTests(unittest.TestCase):
@@ -105,6 +109,30 @@ class BuiltinCapabilityMetadataTests(unittest.IsolatedAsyncioTestCase):
             {item.name for item in attachment.tools},
             {"read_text_attachment", "read_docx", "read_xlsx"},
         )
+
+
+class PythonSandboxRegistryTests(unittest.TestCase):
+    def test_python_sandbox_is_opt_in_when_backend_present(self) -> None:
+        backend = MagicMock()
+        backend.health = AsyncMock()
+        backend.aclose = AsyncMock()
+        capability = build_python_sandbox_capability(backend, timeout_sec=30.0)
+        registry = CapabilityRegistry()
+        registry.register(capability)
+
+        self.assertEqual(registry.toolsets(None), [])
+        self.assertEqual(registry.toolsets([]), [])
+        self.assertEqual(registry.toolsets(["python-sandbox"]), [capability.toolset])
+
+        described = registry.describe()
+        sandbox_meta = described[0]
+        self.assertEqual(sandbox_meta["name"], "python-sandbox")
+        self.assertEqual(sandbox_meta["kind"], "native")
+        self.assertFalse(sandbox_meta["default_enabled"])
+
+    def test_python_sandbox_absent_without_backend(self) -> None:
+        registry = build_registry()
+        self.assertNotIn("python-sandbox", registry.names())
 
 
 if __name__ == "__main__":

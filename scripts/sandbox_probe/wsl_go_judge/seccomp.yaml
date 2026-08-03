@@ -1,0 +1,54 @@
+# Pin for DeepAgent WSL / sidecar preview (go-judge v1.12.2 + build tag seccomp).
+# Format: github.com/elastic/go-seccomp-bpf Policy (default_action + syscalls).
+#
+# Official Release binaries omit the `seccomp` build tag; this tree uses a binary
+# built with `-tags seccomp,nomsgpack,grpcnotrace` (commit 955585f0 / v1.12.2).
+#
+# Use action "errno" (not kill_thread): blocking socket/connect with kill_thread
+# aborts bare CPython under go-judge (startup path touches those syscalls at libc
+# level). errno lets print/numpy run while ptrace/connect fail with EPERM for probes.
+default_action: allow
+syscalls:
+  - action: errno
+    names:
+      # Tracing / introspection
+      - ptrace
+      - process_vm_readv
+      - process_vm_writev
+      - perf_event_open
+      - userfaultfd
+      # Mount / privileged FS (x86_64 has umount2 only, not umount)
+      - mount
+      - umount2
+      - pivot_root
+      - swapon
+      - swapoff
+      # Kernel modules / reboot
+      - init_module
+      - finit_module
+      - delete_module
+      - kexec_load
+      - kexec_file_load
+      - reboot
+      # Keyring / BPF
+      - add_key
+      - request_key
+      - keyctl
+      - bpf
+      # Network — policy deny (EPERM) for probe; do not use kill_thread here
+      - socket
+      - socketpair
+      - connect
+      - accept
+      - accept4
+      - bind
+      - listen
+      - sendto
+      - sendmsg
+      - sendmmsg
+      - recvfrom
+      - recvmsg
+      - recvmmsg
+      - shutdown
+      - setsockopt
+      - getsockopt

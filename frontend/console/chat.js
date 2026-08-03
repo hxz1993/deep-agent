@@ -101,6 +101,7 @@ const state = {
   pendingTitleRefresh: false,
   titlePollGeneration: 0,
   contextStatus: null,
+  lastRunUsage: null,
 };
 
 const TITLE_POLL_TIMEOUT_MS = 30000;
@@ -567,6 +568,7 @@ function newChat(agentId) {
   state.modelMessageCount = 0;
   state.lastUserBranchPoint = null;
   state.contextStatus = null;
+  state.lastRunUsage = null;
   state.llmModelId = defaultLlmModelId();
   clearMessages();
   showEmptyState();
@@ -732,6 +734,8 @@ async function switchSession(s) {
   state.sessionId = session.id;
   state.branchFrom = null;
   state.lastUserBranchPoint = null;
+  state.lastRunUsage = null;
+  el.usageInfo.textContent = "";
   if (session.agentId) {
     state.agentId = session.agentId;
     localStorage.setItem("da_console_agent_id_v1", state.agentId);
@@ -1191,7 +1195,7 @@ function updateComposerModelInfo() {
     const supported = new Set((info?.modalities || []).map((m) => String(m).toLowerCase()));
     if (!supported.size) {
       el.composerModelModalities.innerHTML =
-        '<span class="composer-modalities-label">模型输入</span><span class="modality-chip">未配置（管理后台可刷新 Meta）</span>';
+        '<span class="composer-modalities-label">模态输入</span><span class="modality-chip">未配置（管理后台可刷新 Meta）</span>';
     } else {
       const chips = ALL_LLM_MODALITIES.map((key) => {
         const on = supported.has(key);
@@ -1200,7 +1204,7 @@ function updateComposerModelInfo() {
         const title = on ? `LLM 原生支持：${label}` : `LLM 原生不支持：${label}`;
         return `<span class="modality-chip ${on ? "supported" : "unsupported"}" title="${escapeHtml(title)}">${icon} ${escapeHtml(label)}</span>`;
       }).join("");
-      el.composerModelModalities.innerHTML = `<span class="composer-modalities-label">模型输入</span>${chips}`;
+      el.composerModelModalities.innerHTML = `<span class="composer-modalities-label">模态输入</span>${chips}`;
     }
   }
 
@@ -1459,11 +1463,6 @@ function syncHistoryMeta({ model_message_count: count, user_branch_point: branch
 
 function handleEvent({ event, data }, assistant) {
   const type = event || data.type;
-  window.dispatchEvent(
-    new CustomEvent("deep-agent-console-event", {
-      detail: { event: type, data },
-    }),
-  );
   switch (type) {
     case "session": {
       const id = data.session_id;
@@ -1512,6 +1511,7 @@ function handleEvent({ event, data }, assistant) {
       assistant.finalizeText();
       syncHistoryMeta(data);
       if (data.usage) renderUsage(data.usage);
+      else state.lastRunUsage = null;
       if (data.context) {
         state.contextStatus = {
           ...(state.contextStatus || {}),
@@ -1561,6 +1561,7 @@ function handleEvent({ event, data }, assistant) {
 }
 
 function renderUsage(usage) {
+  state.lastRunUsage = { ...usage };
   const parts = [];
   if (usage.requests != null) parts.push(`${usage.requests} 次请求`);
   if (usage.input_tokens != null) parts.push(`in ${usage.input_tokens}`);

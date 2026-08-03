@@ -239,6 +239,8 @@ class SessionContextStatus(BaseModel):
     estimated_sample_count: int = 0
     estimator_source: str | None = None
     estimate_scope: str = "history_only"
+    safety_margin_tokens: int | None = None
+    usable_request_tokens: int | None = None
     trigger_tokens: int | None = None
     target_tokens: int | None = None
     checkpoint_exists: bool = False
@@ -316,6 +318,8 @@ async def get_session_context_status(
         estimated_sample_count=budget.estimated_sample_count,
         estimator_source=budget.estimator_source,
         estimate_scope=budget.estimate_scope,
+        safety_margin_tokens=budget.safety_margin_tokens,
+        usable_request_tokens=budget.usable_request_tokens,
         trigger_tokens=budget.trigger_tokens,
         target_tokens=budget.target_tokens,
         checkpoint_exists=checkpoint is not None,

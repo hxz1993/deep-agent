@@ -19,9 +19,9 @@
   <link rel="icon" type="image/svg+xml" href="./favicon.svg?v=20260728-1" />
   <link id="hljsTheme" rel="stylesheet" href="/vendor/highlight-github-dark.min.css" />
   <link rel="stylesheet" href="./themes.css?v=20260721-1" />
-  <link rel="stylesheet" href="./workspace.css?v=20260728-2" />
+  <link rel="stylesheet" href="./workspace.css?v=20260803-4" />
   <link rel="stylesheet" href="./configuration/configuration.css?v=20260731-1" />
-  <link rel="stylesheet" href="./console.css?v=20260731-1" />
+  <link rel="stylesheet" href="./console.css?v=20260803-4" />
 </head>
 <body>
   <div class="console-shell">
@@ -72,29 +72,23 @@
         <div class="workspace-mobile-bar hidden" id="workspaceMobileBar">
           <button type="button" class="mobile-agent-trigger" data-workspace-drawer="agents"><i data-lucide="bot"></i><span>Agent</span></button>
           <button type="button" class="mobile-session-trigger" data-workspace-drawer="sessions"><i data-lucide="messages-square"></i><span>会话</span></button>
-          <button type="button" class="mobile-inspector-trigger" data-workspace-drawer="inspector"><i data-lucide="scan-search"></i><span>检查器</span></button>
         </div>
         <div class="workspace-grid hidden" id="workspaceGrid">
           <aside class="agent-pane">
             <div class="pane-heading">
               <div><strong>测试 Agent</strong><span id="agentCount">—</span></div>
-              <button type="button" class="icon-action" id="refreshAgentsBtn" title="刷新 Agent"><i data-lucide="refresh-cw"></i></button>
+              <div class="pane-heading-actions">
+                <button type="button" class="icon-action" id="refreshAgentsBtn" title="刷新 Agent" aria-label="刷新 Agent"><i data-lucide="refresh-cw"></i></button>
+                <button type="button" class="icon-action pin-agent active" id="unpinAgentPaneBtn" title="取消固定 Agent 列表" aria-label="取消固定 Agent 列表"><i data-lucide="pin-off"></i></button>
+              </div>
             </div>
             <label class="compact-search"><i data-lucide="search"></i><input id="agentSearchInput" type="search" placeholder="搜索 Agent" /></label>
             <div class="agent-list" id="consoleAgentList"></div>
-            <button type="button" class="agent-context-action" data-open-context>
-              <i data-lucide="waypoints"></i><span>测试上下文</span>
-            </button>
           </aside>
           <div class="workspace-legacy-host" id="workspaceLegacyHost"></div>
           <aside class="inspector-pane" id="inspectorPane">
-            <div class="inspector-tabs">
-              <button type="button" class="active" data-inspector-tab="overview">概览</button>
-              <button type="button" data-inspector-tab="tools">工具链</button>
-              <button type="button" data-inspector-tab="events">事件</button>
-            </div>
             <div class="inspector-content" id="inspectorContent">
-              <div class="inspector-empty"><i data-lucide="scan-search"></i><p>选择会话后查看真实运行信息</p></div>
+              <div class="inspector-empty"><i data-lucide="scan-search"></i><p>选择会话后查看会话与上下文信息</p></div>
             </div>
           </aside>
         </div>
@@ -160,7 +154,7 @@
 
   <div class="drawer-backdrop hidden" id="contextBackdrop"></div>
   <aside class="context-drawer" id="contextDrawer" aria-hidden="true">
-    <header><div><strong>请求上下文</strong><span>仅影响当前控制台发出的请求</span></div><button type="button" id="closeContextBtn" title="关闭"><i data-lucide="x"></i></button></header>
+    <header><div><strong>请求Header</strong><span>仅影响当前控制台发出的请求</span></div><button type="button" id="closeContextBtn" title="关闭"><i data-lucide="x"></i></button></header>
     <div class="context-body">
       <section class="context-section">
         <h3>调试上下文</h3>
@@ -187,6 +181,6 @@
   <script src="../vendor/marked.min.js"></script>
   <script src="../vendor/purify.min.js"></script>
   <script src="../vendor/highlight.min.js"></script>
-  <script type="module" src="./main.js?v=20260731-1"></script>
+  <script type="module" src="./main.js?v=20260803-4"></script>
 </body>
 </html>

@@ -1,6 +1,6 @@
 # Pydantic AI 工具体系与 DeepAgent 工具优化设计
 
-> 最后核验：2026-07-31
+> 最后核验：2026-08-03
 >
 > 当前运行基线：`pydantic-ai-slim 2.14.1` + `pydantic-ai-harness 0.10.0`
 >
@@ -23,7 +23,7 @@ DeepAgent 已经使用了 Pydantic AI 最核心的三种工具执行方式：
 - 前端表单操作继续使用 `ExternalToolset + DeferredToolRequests/Results`。
 - 结构化最终输出使用 `ToolOutput` 或 `NativeOutput`，不依赖提示词约定 JSON。
 - Provider Code Execution 作为模型可选能力接入，不作为所有模型默认工具。
-- 超长工具结果优先评估 Harness `OverflowingToolOutput`，旧结果治理与上下文压缩统一设计。
+- Harness 0.10 已用于上下文压缩；超长工具结果后续再评估 `OverflowingToolOutput`，并与现有压缩观测统一设计。
 - Harness 不替代 SQL 会话、SSE、配置中心、HITL 和前端执行器。
 
 ## 2. 三套概念的边界
@@ -302,15 +302,18 @@ Agent 能力选择和 Console 展示；它不等于 Pydantic AI 原生 Capabilit
 ### 4.1 内置 Function Tool
 
 产品层把代码随 DeepAgent 发布、无需管理员注册的后端 Function Tool 统一归入
-“内置工具”，与 MCP 服务同级展示。当前包含两个独立 Capability：
+“内置工具”，与 MCP 服务同级展示。当前包含三个独立 Capability：
 
 | 前端名称 | Capability 编码 | 默认状态 | 工具 |
 | --- | --- | --- | --- |
 | 通用工具 | `native` | 默认启用 | `get_current_time` |
 | 附件读取 | `attachment` | 默认关闭 | `read_text_attachment`、`read_docx`、`read_xlsx` |
+| Python 沙箱 | `python-sandbox` | 默认关闭 | `execute_python` |
 
-两者都由进程内 `FunctionToolset` 执行，但仍保留独立 Capability 编码和 Agent
+三者对模型都表现为 `FunctionToolset`，但仍保留独立 Capability 编码和 Agent
 开关。配置中心只读展示工具包及工具明细，实际启用由 `agents.capabilities` 决定。
+`python-sandbox` 的工具定义位于 DeepAgent 进程，实际代码通过可替换的
+`PythonExecutionBackend` 执行；这不改变它的 Function Tool 类型。
 
 0.2.3 删除了原来 Native 中的 `http_get`。该工具没有目标域名白名单、私网地址保护和
 请求审计，不适合作为所有 Agent 默认获得的通用网络能力；需要联网时应接入边界明确、
@@ -320,6 +323,7 @@ Agent 能力选择和 Console 展示；它不等于 Pydantic AI 原生 Capabilit
 
 - `deep_agent/capabilities/native/builtin.py`
 - `deep_agent/capabilities/attachments/builtin.py`
+- `deep_agent/sandbox/toolset.py`
 
 Python Skill 同样使用 `FunctionToolset`，由 Skill 同时贡献 Instructions 和函数工具。
 
@@ -329,9 +333,8 @@ MCP Resource 也被包装为宿主 Function Tool：
 - `list_mcp_resource_templates`
 - `read_mcp_resource`
 
-产品文案统一使用“内置工具”，卡片技术标识保留 Native、Attachment，避免与 Provider
-Native Tool 混淆。代码 capability 名继续保持 `native`、`attachment`，不迁移历史
-Agent 数据。
+产品文案统一使用“内置工具”，卡片技术标识保留 Native、Attachment、Python Sandbox，
+避免与 Provider Native Tool 混淆。代码 capability 名继续保持稳定，不迁移历史 Agent 数据。
 
 ### 4.2 MCP Tool
 
@@ -396,7 +399,9 @@ DeepAgent 当前没有正式启用：
 - Core `ToolSearch`
 - Core 通用 `PrepareTools`
 - Pydantic AI 原生执行审批
-- `pydantic-ai-harness`
+
+`pydantic-ai-harness 0.10.0` 已用于上下文压缩，但工具结果治理、Memory、StepPersistence、
+SubAgent 和其他 Harness 能力尚未启用，不能把“已安装 Harness”理解成这些能力已经开放。
 
 当前主对话输出仍为：
 
@@ -408,7 +413,7 @@ DeepAgent 当前没有正式启用：
 
 ```mermaid
 flowchart TD
-    A["Agent.capabilities"] --> B["CapabilityRegistry: 内置函数与 Skill"]
+    A["Agent.capabilities"] --> B["CapabilityRegistry: 内置函数、Sandbox 与 Skill"]
     A --> C["请求级解析 MCP"]
     A --> D["请求级解析 UI Tool"]
     C --> E["MCPToolset / DynamicToolset / PrefixedToolset"]
@@ -619,7 +624,17 @@ llm_models.tags 包含 code_execution
 - Usage、费用、超时和错误展示。
 - 数据出境与客户部署边界。
 
-如果要求所有私有模型获得一致 Python 能力，应建设受控 Sandbox MCP，并独立设计：
+DeepAgent 已通过 `python-sandbox` 向私有和 OpenAI-compatible 模型提供统一 Python 能力：
+
+```text
+FunctionToolset(execute_python)
+  → PythonExecutionBackend
+  → subprocess-dev（本地联调）/ 未来生产硬隔离 Backend
+```
+
+该能力不是 MCP，也不依赖 Provider Native Tool。当前已落地无状态执行、独立解释器、超时、
+并发和软防护；生产硬隔离仍需按 [Python Sandbox 课题](../07-python-sandbox/README.md) 完成
+节点资格验证与运维部署。长期继续治理：
 
 - 容器或进程隔离。
 - CPU、内存、时间和磁盘配额。
@@ -657,6 +672,11 @@ llm_models.tags 包含 code_execution
 
 工具权限必须由可信 `AgentDeps` 决定，不允许模型在参数中自选权限 Scope。
 
+附件工具是首个适合落地请求级过滤的场景：当本轮原始会话中没有当前用户可访问的合法附件
+引用时，不向模型暴露 `read_text_attachment`、`read_docx`、`read_xlsx`。过滤依据必须来自
+原始 `chat_messages` 和当前请求附件，不能从 Checkpoint 推断文件归属。该优化只减少无效工具
+Schema 和模型误调用，文件读取时仍需继续执行用户、会话和 `file_id` 权限校验。
+
 ### 8.2 ToolSearch
 
 Tool Search 解决的是“工具太多导致发现困难和 Schema 占用”，不是替代 MCP 或 Toolset。
@@ -671,7 +691,21 @@ Tool Search 解决的是“工具太多导致发现困难和 Schema 占用”，
 
 少量工具直接全部提供，通常比增加一次搜索工具调用更简单可靠。
 
-### 8.3 Tool Return Schema
+`ToolSearch` 属于有潜力的后续能力。达到真实工具数量和 Schema Token 阈值后，结合
+`DeferredLoadingToolset` 试点按需发现；在此之前不为少量工具增加额外搜索步骤。
+
+### 8.3 Toolset 组合与展示命名
+
+`CombinedToolset` 可以把多个 Toolset 合成一个整体，再统一增加过滤、审批或延迟加载。
+当前 Agent 已能接收多个 Toolset，因此暂不为“形式统一”引入；当需要对 Native、Attachment、
+MCP 等一组工具应用同一横切策略时再采用。
+
+`RenamedToolset` 修改的是提供给模型的工具协议名，并会在执行时映射回原工具名。它适合治理
+上游工具名，但不应只为隐藏聊天里的 MCP 前缀而直接使用，否则会影响历史工具事件、Pending
+恢复和模型调用兼容。Console 应将稳定的协议名与中文展示名分离：SSE、历史和工具调用继续
+保留带命名空间的真实名称，聊天界面优先展示独立 `display_name`，必要时再显示协议名详情。
+
+### 8.4 Tool Return Schema
 
 返回 Schema 可以帮助模型理解稳定结果，但不能代替运行时验证：
 
@@ -817,42 +851,41 @@ Invalid request
 以下阶段用于解释依赖顺序，不是独立待办清单。实际优先级和状态统一以
 [`../TODO.md`](../TODO.md) 为准。
 
-### 阶段 1：统一概念和观测
+| 优先级 | 能力 | 落地口径 |
+| --- | --- | --- |
+| P0 | 无附件时隐藏附件工具 | 使用 `PrepareTools`，根据当前请求与原始会话合法附件过滤 Tool Definitions；运行时文件权限校验保持不变 |
+| P0 | 工具协议名与展示名分离 | 模型、SSE、历史继续使用稳定协议名；Console 使用独立中文 `display_name`，不以 `RenamedToolset` 做纯 UI 美化 |
+| P1 | 结构化最终输出 | Agent 增加可选 `output_schema`；未配置时保持字符串输出，配置后默认使用 `ToolOutput + DeferredToolRequests`，后端再次执行 JSON Schema 校验 |
+| P1 | 高风险工具审批 | 先建立风险和副作用元数据；接入 `ApprovalRequiredToolset` 时同时设计持久化、TTL、操作人、幂等、权限复检和执行审计 |
+| P2 | `ToolSearch` | 先观测工具数量和 Schema Token；达到数十个真实工具后，结合 `DeferredLoadingToolset` 试点按需发现 |
+| P2 | `CombinedToolset` | 不作为独立产品功能；仅在多个工具包需要共享过滤、审批或延迟加载策略时用于运行时装配 |
+| P3 | Provider `CodeExecutionTool` | 不作为通用代码执行；继续使用自建 `python-sandbox`，未来仅给明确支持的托管模型作为增强能力 |
+| P3 | Provider `FileSearchTool` | 不替代附件读取或企业知识库；先建设 Provider 无关的 RAG/MCP 抽象，再把托管 File Search 作为可选实现 |
 
-- 产品文案区分“内置函数工具”和“Provider Native Tool”。
-- 统计每轮工具数量、Schema 体积、调用次数、重试率、结果大小和耗时。
-- 为 UI Tool 增加服务端 `result_schema` 校验。
-- 建立工具只读/写入/高风险分类。
-- 保持现有 Agent Loop 不变。
+### 第一批：工具名称和可见性
 
-### 阶段 2：工具名称和可见性
+- 落地附件请求级过滤。
+- 分离工具稳定协议名和 Console 展示名。
+- 同步补充每轮工具数量和 Schema 体积观测，为后续 Tool Search 提供数据。
 
-- 形成 MCP 单层命名空间规范。
-- 按兼容计划处理重复前缀。
-- 使用 Core `PrepareTools` 统一请求级过滤。
-- 工具少时继续直接提供，不急于引入 Tool Search。
+### 第二批：结构化最终输出
 
-### 阶段 3：前端表单操作
+- 首版默认使用 `ToolOutput`，兼容私有 OpenAI-compatible 模型。
+- 要求严格结构化时，输出类型只保留 `ToolOutput(...)` 与 `DeferredToolRequests`，不同时允许 `str` 绕过结构约束。
+- 固定业务结构优先使用 Pydantic Model；Agent 动态 JSON Schema 使用 `StructuredDict` 时，DeepAgent 必须补服务端校验和有限重试。
+- 中间 Thinking、普通工具和 Pending 继续流式；结构化结果第一版在 `final.output` 一次性返回，不把终止输出工具渲染成普通工具卡片。
 
-- 定义通用 Form Operation Schema。
-- 建立宿主前端 Form Adapter。
-- 绑定当前用户、App、Space、页面和表单实例。
-- 增加预览、确认、冲突和部分成功处理。
-- 首版只修改浏览器未保存状态；正式保存仍走业务 API。
+### 第三批：高风险工具审批
 
-### 阶段 4：结构化输出和 Provider Native Tool
+- 工具元数据标识只读、写入、删除、外发和代码执行等风险。
+- 审批通过后由 Pydantic AI 执行原后端工具，再把真实工具结果交给模型；它与用户直接完成 External UI Tool 的语义不同。
+- 没有真实写入、删除或外发工具前，不为只读工具增加审批复杂度。
 
-- 先在辅助任务或专用 API 试点 `ToolOutput`。
-- 不直接改变当前自由文本聊天协议。
-- 选择一个明确支持的 Provider/模型试点 Code Execution。
-- 补齐 Native Tool SSE、历史、文件和 Usage。
+### 第四批：大工具集和 Provider 增强
 
-### 阶段 5：大工具集和大工具结果
-
-- 工具达到真实规模后试点 `ToolSearch`。
-- 先要求业务工具分页和摘要。
-- 再评估 Harness `OverflowingToolOutput`。
-- 与上下文压缩使用同一 Token、结果大小和安全观测。
+- 达到真实工具规模后试点 `ToolSearch + DeferredLoadingToolset`，需要跨工具包统一策略时再引入 `CombinedToolset`。
+- 业务工具先支持分页和摘要，再评估 Harness `OverflowingToolOutput`。
+- Provider Native Code Execution/File Search 只作为特定 Provider 增强，不作为 DeepAgent 跨模型公共能力。
 
 ## 12. 测试与验收
 

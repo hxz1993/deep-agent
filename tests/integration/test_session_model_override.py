@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, patch
 
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import text
 
 from deep_agent.api.v1 import deps as api_deps
 from deep_agent.api.v1 import api_router
@@ -232,8 +233,54 @@ class SessionModelOverrideIntegrationTests(unittest.IsolatedAsyncioTestCase):
         payload = response.json()
         self.assertEqual(payload["context_window_tokens"], 128_000)
         self.assertEqual(payload["max_output_tokens"], 8_192)
+        self.assertIsInstance(payload["safety_margin_tokens"], int)
+        self.assertIsInstance(payload["usable_request_tokens"], int)
+        self.assertGreater(payload["safety_margin_tokens"], 0)
+        self.assertGreater(payload["usable_request_tokens"], 0)
         self.assertTrue(payload["compaction_enabled"])
         self.assertFalse(payload["checkpoint_exists"])
+
+    async def test_context_status_keeps_budget_fields_null_when_window_is_unknown(
+        self,
+    ) -> None:
+        await self._stream(
+            {
+                "agent_id": self._agent_id,
+                "session_id": self._session_id,
+                "message": "hello",
+                "capabilities": [],
+            }
+        )
+        await get_context().event_persister.flush(
+            self._session_id,
+            agent_id=self._agent_id,
+        )
+        async with self._engine.begin() as connection:
+            await connection.execute(
+                text(
+                    "UPDATE llm_models "
+                    "SET context_window_tokens = NULL, max_output_tokens = NULL "
+                    "WHERE id = :model_id"
+                ),
+                {"model_id": self._model_a_id},
+            )
+
+        async with AsyncClient(
+            transport=self._transport,
+            base_url="http://test",
+            timeout=30.0,
+        ) as client:
+            response = await client.get(
+                f"/api/v1/sessions/{self._session_id}/context-status",
+                params={"agent_id": self._agent_id},
+            )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        payload = response.json()
+        self.assertIsNone(payload["safety_margin_tokens"])
+        self.assertIsNone(payload["usable_request_tokens"])
+        self.assertFalse(payload["compaction_enabled"])
+        self.assertEqual(payload["compaction_reason"], "context_window_unknown")
 
 
 if __name__ == "__main__":

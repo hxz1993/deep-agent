@@ -377,7 +377,10 @@ Console：
 - 不把状态写入会话历史，刷新后不会回放。
 
 `GET /api/v1/sessions/{session_id}/context-status` 继续提供只读 Checkpoint 与预算状态，不返回
-摘要正文或原始历史。
+摘要正文或原始历史。该接口以 `estimate_scope=history_only` 标识会话历史快照，并直接返回
+后端预算器计算的 `safety_margin_tokens` 与 `usable_request_tokens`；模型窗口未知时二者为
+`null`。Console 只能展示这些值，不得重新实现动态输出预测或安全余量算法。实际完成 Run 的
+预算和压缩结果仍以 SSE `final.context` 为准。
 
 ## 8. 配置
 

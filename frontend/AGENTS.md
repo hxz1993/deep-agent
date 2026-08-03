@@ -34,8 +34,19 @@ frontend/
 | 会话 | `session_id` 由后端 `session` 事件返回；`GET/DELETE /api/v1/sessions`；标题展示 `title \|\| user_prompt`（见 [`../docs/guides/experience/ai-title-generator.md`](../docs/guides/experience/ai-title-generator.md)） |
 | 能力面板 | `GET /api/v1/tools` |
 | 配置 | `localStorage` 只保存调试 App；全局环境配置只读展示，身份和鉴权由平台提供 |
-| 内置工具目录 | 配置中心只读展示 `native`（通用工具）和 `attachment`（附件读取）；在 Agent 中独立选择 |
+| 内置工具目录 | 配置中心只读展示 `native`、`attachment` 及运行时可用的 `python-sandbox`；在 Agent 中独立选择 |
 | 一体化控制台 | `/console/`；工作台、配置和诊断的唯一入口 |
+
+工作台默认在会话栏顶部用 Agent 下拉框切换；管理员可在当前页面内临时固定左侧 Agent
+列表。下拉模式只在下拉框右侧保留固定操作；固定模式把刷新/取消固定集中在 Agent 标题栏。
+测试 Header 和会话详情统一位于对话标题栏右侧。该状态不写 LocalStorage。窄屏必须退化为
+可访问的下拉或抽屉，不能同时隐藏两种入口。
+
+右侧会话详情不设页签，在一个连续泳道中展示会话、请求 Header、预算、最近一次 Run Usage、
+压缩和 Checkpoint。工具过程由对话区负责，Console 不再额外缓存或展示 SSE 事件列表。
+`context-status` 返回的是 `estimate_scope=history_only` 的会话历史快照；最近一次 Run Usage
+来自当前页面收到的 `final.usage`。前端只格式化和计算展示比例，不复制后端 Token 估算、
+输出预测或安全余量算法。
 
 ## 一体化控制台
 
@@ -119,7 +130,7 @@ python3.12 -m http.server 5173
 | 配置 CRUD | `console/configuration/` 下各文件 |
 | 模型运行属性 | `console/configuration/llm-models.js`；上下文、最大输出、输入模态和 tags 保存到 `llm_models` |
 | 模型目录 | `console/configuration/catalog.js` → DB-only GET 与管理员 POST refresh |
-| 上下文压缩观测 | `console/chat.js` 拉取 session context-status；`console/workspace.js` 在请求上下文概览展示 |
+| 上下文压缩观测 | `console/chat.js` 拉取 session context-status；`console/workspace.js` 在右侧会话详情泳道展示 |
 | 上下文压缩测试会话 | `console/workspace.js` → 场景弹窗、创建后打开会话并预填验证问题 |
 | Markdown 主题/安全 | `vendor/`，见 `vendor/README.md` |
 

@@ -18,6 +18,8 @@
 | `TOOL-001` | 工具优化 | 增加工具定义数量、Schema 字节、调用/重试/失败、耗时和结果大小观测 | 可实施 | 先统一指标口径，不新增计费账本 | [工具质量契约](05-tool-optimization/tool-optimization-design.md#10-工具质量统一契约) |
 | `TOOL-002` | UI 工具 | Deferred UI 续跑前，后端按 `result_schema` 校验用户实际提交结果 | 可实施 | Schema 定义校验已存在；需补实际结果校验和错误响应 | [UI 工具历史与边界](01-ui-tools/ui-tools-history.md#仍需补齐的边界) |
 | `TOOL-003` | 工具优化 | 建立风险、外部副作用和权限要求的统一元数据契约 | 待设计 | 需同时覆盖 Function、MCP、UI 和附件工具 | [工具质量契约](05-tool-optimization/tool-optimization-design.md#10-工具质量统一契约) |
+| `TOOL-103` | 工具优化 | 无合法会话附件时隐藏附件读取工具 | 可实施 | `TOOL-102` 的首个落地子场景；从原始会话和当前请求判断，读取时仍执行文件权限校验 | [附件请求级过滤](05-tool-optimization/tool-optimization-design.md#81-preparetools) |
+| `TOOL-104` | 工具优化 | 分离 MCP 工具协议名与聊天展示名 | 可实施 | 保留稳定命名空间和历史兼容；Console 使用独立 `display_name` 隐藏冗长前缀 | [Toolset 展示命名](05-tool-optimization/tool-optimization-design.md#83-toolset-组合与展示命名) |
 | `ATT-001` | 附件解析 | 固化真实附件读取、上下文压缩和 Checkpoint 更新的端到端测试 | 可实施 | 覆盖上传、分页读取、SSE、历史恢复与压缩 | [验证边界](06-attachment-parsing/attachment-parsing-design.md#10-验证边界) |
 | `ART-001` | Artifact 交互 | Artifact 最小语义（登记/元数据/TTL/权限；可不接外部 sink） | 待设计 | 合法 id 不得从 Checkpoint 猜造；存储落点待决 | [08 分期 A0](08-artifact-export/README.md#建议分期先语义后-sink) |
 | `ART-001b` | Artifact 交互 | 可选 sink：下载中心 publish（upload + business.save） | 待设计 | 依赖 ART-001；非唯一成功标准 | [设计纲要 S0](08-artifact-export/artifact-export-design.md#32-可选-sink下载中心s0) |
@@ -28,6 +30,8 @@
 | --- | --- | --- | --- | --- | --- |
 | `TOOL-101` | 工具优化 | 收敛 MCP 单层命名空间并兼容重复前缀 | 待设计 | 不能破坏已有 Agent capability 与历史工具事件 | [MCP 命名](05-tool-optimization/tool-optimization-design.md#5-mcp-工具命名优化) |
 | `TOOL-102` | 工具优化 | 使用 `PrepareTools` 做请求级工具过滤 | 待设计 | 先完成工具风险元数据和可观测性 | [请求级过滤](05-tool-optimization/tool-optimization-design.md#81-preparetools) |
+| `TOOL-105` | 工具优化 | 增加 Agent 可选结构化最终输出 | 待设计 | 默认 `ToolOutput`；兼容 Deferred；动态 Schema 需服务端校验和有限重试 | [结构化输出](05-tool-optimization/tool-optimization-design.md#第二批结构化最终输出) |
+| `TOOL-106` | 工具优化 | 为高风险后端工具增加执行前审批 | 待设计 | 依赖风险元数据；覆盖持久化、TTL、权限复检、幂等与审计 | [执行审批](05-tool-optimization/tool-optimization-design.md#第三批高风险工具审批) |
 | `ATT-101` | 附件解析 | 设计统一文档解析服务，覆盖 PDF/OCR/PPTX 和复杂 Office | 待设计 | 需要评估独立服务、开源解析器和资源隔离 | [后续方向](06-attachment-parsing/attachment-parsing-design.md#13-后续方向) |
 | `ART-101` | Artifact 交互 | 沙箱大结果晋升为 Artifact（与 07 workdir 合同） | 待设计 | 依赖 ART-001 与 07 阶段 A | [交叉合同](08-artifact-export/README.md#与-07-的交叉合同必须对齐) |
 | `ART-102` | Artifact 交互 | （已并入 ART-101）沙箱 `result` 产出 artifact_id | 待设计 | 同 ART-101 | [设计纲要](08-artifact-export/artifact-export-design.md#31-语义主干a0a1) |
@@ -40,13 +44,14 @@
 | `ATT-202` | 附件解析 | 文件结构索引、跨 Run 缓存和超大结果外置 | 暂缓 | 第一版继续使用单 Run 缓存与上下文压缩；**出站大结果见 `ART-*`** | [后续方向](06-attachment-parsing/attachment-parsing-design.md#13-后续方向) |
 | `ART-201` | Artifact 交互 | 配额、审计、共享存储与 Harness Spill 对照 | 暂缓 | 多实例与运维就绪后 | [分期 G0](08-artifact-export/README.md#建议分期先语义后-sink) |
 | `UI-201` | UI 工具 | 增加前端表单操作工具 | 待决策 | 需先明确宿主页面、动作协议和权限边界 | [表单操作](05-tool-optimization/tool-optimization-design.md#6-前端表单工具设计) |
+| `TOOL-201` | 工具优化 | 评估 `ToolSearch`、`DeferredLoadingToolset` 和 `OverflowingToolOutput` | 暂缓 | 有潜力；达到真实工具数量、Schema Token 和结果溢出阈值后试点 | [ToolSearch](05-tool-optimization/tool-optimization-design.md#82-toolsearch) |
+| `TOOL-202` | 工具优化 | 评估以 `CombinedToolset` 统一包装跨来源工具 | 暂缓 | 仅在多个工具包需要共享过滤、审批或延迟加载策略时采用 | [Toolset 组合](05-tool-optimization/tool-optimization-design.md#83-toolset-组合与展示命名) |
 
 ## P3
 
 | ID | 课题 | 事项 | 状态 | 依赖与验收 | 来源 |
 | --- | --- | --- | --- | --- | --- |
-| `TOOL-301` | 工具优化 | 评估结构化输出和 Provider Native Code Execution | 暂缓 | 仅在出现明确业务场景后接入 | [Provider 能力](05-tool-optimization/tool-optimization-design.md#7-code-execution-的接入边界) |
-| `TOOL-302` | 工具优化 | 评估 ToolSearch 启用阈值和 `OverflowingToolOutput` | 暂缓 | 以真实工具数量和结果溢出数据为依据 | [Harness 治理](05-tool-optimization/tool-optimization-design.md#9-pydantic-ai-harness-与工具治理) |
+| `TOOL-301` | 工具优化 | 评估 Provider Native Code Execution 与 File Search | 暂缓 | 仅作为明确支持的托管 Provider 增强，不替代公共 Sandbox/RAG 能力 | [Provider 能力](05-tool-optimization/tool-optimization-design.md#7-code-execution-的接入边界) |
 | `CTX-301` | 上下文压缩 | 评估 Memory、Usage Ledger 与 StepPersistence | 暂缓 | 仅在出现跨会话记忆、计费或断点恢复产品需求后启动 | [研究结论](03-context-compaction/context-compaction-research.md#暂不引入的能力) |
 
 ## 已关闭

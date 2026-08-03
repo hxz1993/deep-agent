@@ -29,6 +29,7 @@ HTTP (REST/SSE)
     → CapabilityRegistry.toolsets()
         ├─ native       capabilities/native/builtin.py
         ├─ attachment   capabilities/attachments/builtin.py
+        ├─ python-sandbox  可选无状态 Python FunctionToolset
         ├─ skill        skills/<name>/（仓库根，见 DEEP_AGENT_SKILLS_DIR）
         └─ mcp          请求时 `capabilities/mcp/resolver.py`（DB + mcps/ 兜底）
     → SessionStore（`db/conversation.py` 协调器；表 Store 在 `db/stores/`）
@@ -38,7 +39,7 @@ HTTP (REST/SSE)
 
 1. `configure_logging()` → `AppContext.bootstrap()`（见 `core/context.py`）
 2. `upgrade_database()` → `bootstrap_database()` → 9 个表 Store + `SqlConversationCoordinator`
-3. `build_registry(stores=)` — native + attachment + Python Skill（静态能力）；`stores` 预留未来启动期只读配置
+3. `build_registry(stores=)` — native + attachment + 可用时的 Python Sandbox + Python Skill（静态能力）；`stores` 预留未来启动期只读配置
 4. `init_context(ctx)` — 路由通过 `Depends(AppContextDep)` 注入
 5. 关闭：`ctx.aclose()` → `reset_context()`
 
@@ -118,6 +119,7 @@ DeepAgent 自研 `capabilities.registry.Capability` 是配置包装对象，负�
 | `mcp/lease_manager.py` | worker 级 MCP lease + shared registry touch |
 | `ui/registry.py` | builtin/manual UI 工具合并、`ui:<name>` 正向关联、可见性、`prepare_ui_toolset_for_spec` |
 | `attachments/` | 默认关闭的 `attachment` 能力；会话内 TXT/DOCX/XLSX 分页读取 |
+| `../sandbox/toolset.py` | 默认关闭的 `python-sandbox` 能力；以 FunctionToolset 代理 PythonExecutionBackend |
 
 ### `api/v1/`
 
@@ -195,6 +197,13 @@ schema。产品层把 `native` 与 `attachment` 统一归入“内置工具”�
 图片、音频、视频、PDF 是原生模态，运行时只认 `llm_models.input_modalities`。PDF 当前无
 本地解析/OCR。新上传不抽文本，历史 `extracted_text` 仅为回放兼容。完整设计见
 [`../docs/design/06-attachment-parsing/`](../docs/design/06-attachment-parsing/)。
+
+### Python Sandbox
+
+`python-sandbox` 是默认关闭的内置 FunctionToolset，只有 Agent 显式选择后才暴露
+`execute_python`。工具协议与执行 Backend 解耦：本地联调使用 `subprocess-dev`，生产硬隔离
+仍按 [`../docs/design/07-python-sandbox/`](../docs/design/07-python-sandbox/) 推进。它不是 MCP，
+也不等同于 Provider 托管的 `CodeExecutionTool`。
 
 ---
 

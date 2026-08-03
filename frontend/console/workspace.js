@@ -1,9 +1,6 @@
-const MAX_EVENTS = 80;
-const WORKSPACE_ASSET_VERSION = "20260730-1";
+const WORKSPACE_ASSET_VERSION = "20260803-4";
 
 let initialized = false;
-let eventRows = [];
-let activeInspectorTab = "overview";
 let lastRenderKey = "";
 let contextTestCatalog = null;
 let contextTestCatalogAgentId = "";
@@ -15,16 +12,6 @@ function escapeHtml(value) {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
-}
-
-function truncate(value, length = 1200) {
-  let text;
-  try {
-    text = typeof value === "string" ? value : JSON.stringify(value, null, 2);
-  } catch {
-    text = String(value);
-  }
-  return text.length > length ? `${text.slice(0, length)}\n…` : text;
 }
 
 async function fetchLegacyPage() {
@@ -45,19 +32,23 @@ function installLegacyDom(source) {
   }
 
   sidebar.querySelector(".sidebar-footer")?.remove();
-  const sessionPanelTitle = sidebar.querySelector(".brand-name");
-  if (sessionPanelTitle) {
-    sessionPanelTitle.id = "sessionPanelTitle";
-    sessionPanelTitle.textContent = "Agent 会话";
-  }
   const sidebarHeader = sidebar.querySelector(".sidebar-header");
+  const agentSwitcher = document.createElement("div");
+  agentSwitcher.className = "agent-switcher";
+  agentSwitcher.innerHTML = `
+    <label class="agent-select-field">
+      <i data-lucide="bot" aria-hidden="true"></i>
+      <select id="workspaceAgentSelect" aria-label="选择测试 Agent">
+        <option value="">正在加载 Agent…</option>
+      </select>
+    </label>
+    <button type="button" class="icon-action pin-agent" id="pinAgentPaneBtn" title="固定 Agent 列表到左侧" aria-label="固定 Agent 列表到左侧" aria-pressed="false">
+      <i data-lucide="pin"></i>
+    </button>`;
+  sidebar.insertBefore(agentSwitcher, sidebarHeader);
+  sidebarHeader?.remove();
   sidebar.querySelector("#newChatBtn")?.remove();
   sidebar.querySelector("#newChatBtnWide")?.remove();
-  const sessionPanelSummary = document.createElement("span");
-  sessionPanelSummary.id = "sessionPanelSummary";
-  sessionPanelSummary.className = "session-panel-summary";
-  sessionPanelSummary.textContent = "0 个会话";
-  sidebarHeader?.appendChild(sessionPanelSummary);
   sidebar.querySelector(".sidebar-section.grow")?.classList.add("capabilities-section");
 
   const sessionSection = sidebar.querySelector(".sidebar-section:not(.grow)");
@@ -85,16 +76,6 @@ function installLegacyDom(source) {
     newChatButton.innerHTML = '<i data-lucide="square-pen"></i>';
     toolbar.append(search, testChatButton, newChatButton);
     sessionSection.insertBefore(toolbar, sessionSection.querySelector("#sessionList"));
-  }
-
-  const chatActions = chat.querySelector(".chat-actions");
-  if (chatActions) {
-    const contextButton = document.createElement("button");
-    contextButton.type = "button";
-    contextButton.className = "workspace-context-action";
-    contextButton.dataset.openContext = "";
-    contextButton.innerHTML = '<i data-lucide="waypoints"></i><span>测试上下文</span>';
-    chatActions.prepend(contextButton);
   }
 
   const host = document.getElementById("workspaceLegacyHost");
@@ -268,6 +249,7 @@ function renderAgents() {
     const text = `${agent.name || ""} ${agent.id || ""} ${agent.description || ""}`.toLowerCase();
     return !query || text.includes(query);
   });
+  renderAgentSwitcher(api.state);
   const host = document.getElementById("consoleAgentList");
   if (api.state.agentId && api.state.agentId !== contextTestCatalogAgentId) {
     void loadContextTestCatalog(api.state.agentId);
@@ -292,20 +274,94 @@ function renderAgents() {
 
   host.querySelectorAll("[data-agent-id]").forEach((button) => {
     button.addEventListener("click", () => {
-      api.selectAgent(button.dataset.agentId);
-      renderAgents();
-      eventRows = [];
-      renderInspector();
+      selectWorkspaceAgent(button.dataset.agentId);
     });
   });
 }
 
-function currentAgentName(state) {
-  return state.agents.find((agent) => agent.id === state.agentId)?.name || state.agentId || "—";
+function renderAgentSwitcher(state) {
+  const select = document.getElementById("workspaceAgentSelect");
+  if (!select) return;
+  const optionKey = state.agents.map((agent) => `${agent.id}:${agent.name}`).join("|");
+  if (select.dataset.optionKey !== optionKey) {
+    select.dataset.optionKey = optionKey;
+    select.replaceChildren();
+    if (!state.agents.length) {
+      const option = document.createElement("option");
+      option.value = "";
+      option.textContent = "无可用 Agent";
+      select.appendChild(option);
+    } else {
+      state.agents.forEach((agent) => {
+        const option = document.createElement("option");
+        option.value = agent.id;
+        option.textContent = agent.name;
+        select.appendChild(option);
+      });
+    }
+  }
+  select.value = state.agentId || "";
+  select.disabled = !state.agents.length;
+  select.title = currentAgentName(state);
 }
 
-function eventToolRows() {
-  return eventRows.filter((row) => row.event === "tool_call" || row.event === "tool_result");
+function setAgentPanePinned(pinned) {
+  const grid = document.getElementById("workspaceGrid");
+  const pinButton = document.getElementById("pinAgentPaneBtn");
+  const unpinButton = document.getElementById("unpinAgentPaneBtn");
+  if (!grid || !pinButton || !unpinButton) return;
+  grid.classList.toggle("agent-pinned", pinned);
+  pinButton.classList.toggle("active", pinned);
+  pinButton.setAttribute("aria-pressed", String(pinned));
+  unpinButton.setAttribute("aria-pressed", String(pinned));
+  closeWorkspaceDrawers();
+}
+
+function inspectorUsesDrawer() {
+  return matchMedia("(max-width: 1260px)").matches;
+}
+
+function syncInspectorToggle() {
+  const grid = document.getElementById("workspaceGrid");
+  const inspector = document.getElementById("inspectorPane");
+  const button = document.getElementById("toggleInspectorPaneBtn");
+  if (!grid || !inspector || !button) return;
+  const visible = inspectorUsesDrawer()
+    ? inspector.classList.contains("mobile-open")
+    : !grid.classList.contains("inspector-hidden");
+  button.classList.toggle("active", visible);
+  button.setAttribute("aria-pressed", String(visible));
+  button.title = visible ? "隐藏会话详情" : "显示会话详情";
+}
+
+function toggleInspectorPane() {
+  const grid = document.getElementById("workspaceGrid");
+  const inspector = document.getElementById("inspectorPane");
+  if (!grid || !inspector) return;
+  if (inspectorUsesDrawer()) {
+    const shouldOpen = !inspector.classList.contains("mobile-open");
+    closeWorkspaceDrawers();
+    if (shouldOpen) {
+      inspector.classList.add("mobile-open");
+      document.getElementById("workspaceDrawerBackdrop")?.classList.remove("hidden");
+    }
+  } else {
+    grid.classList.toggle("inspector-hidden");
+  }
+  syncInspectorToggle();
+}
+
+function selectWorkspaceAgent(agentId) {
+  const api = window.DeepAgentConsoleChat;
+  if (!api || !agentId || agentId === api.state.agentId) return;
+  api.selectAgent(agentId);
+  lastRenderKey = "";
+  renderAgents();
+  renderInspector();
+}
+
+function currentAgentName(state) {
+  return state.agents.find((agent) => agent.id === state.agentId)?.name || state.agentId || "—";
 }
 
 function renderInspector() {
@@ -314,33 +370,9 @@ function renderInspector() {
   if (!api || !host) return;
   const state = api.state;
 
-  if (activeInspectorTab === "events") {
-    host.innerHTML = eventRows.length
-      ? `<div class="event-list">${eventRows
-          .slice()
-          .reverse()
-          .map((row) => `<details><summary><span>${escapeHtml(row.time)}</span><strong>${escapeHtml(row.event)}</strong></summary><pre>${escapeHtml(truncate(row.data))}</pre></details>`)
-          .join("")}</div>`
-      : '<div class="inspector-empty"><p>本次页面运行还没有 SSE 事件</p></div>';
-    return;
-  }
-
-  if (activeInspectorTab === "tools") {
-    const tools = eventToolRows();
-    host.innerHTML = tools.length
-      ? `<div class="tool-timeline">${tools
-          .map((row) => {
-            const name = row.data?.tool || "未命名工具";
-            const id = row.data?.tool_call_id || "—";
-            return `<article class="${row.event === "tool_result" ? "complete" : "running"}"><span></span><div><strong>${escapeHtml(name)}</strong><small>${escapeHtml(row.event)} · ${escapeHtml(id)}</small></div></article>`;
-          })
-          .join("")}</div>`
-      : '<div class="inspector-empty"><p>当前会话没有工具调用</p></div>';
-    return;
-  }
-
   const model = state.llmModels.find((item) => item.id === state.llmModelId);
   const context = window.DeepAgentConsoleContext?.effectiveContext || {};
+  const identity = window.DeepAgentConsoleContext?.identity || {};
   const contextStatus = state.contextStatus || {};
   const compaction = contextStatus.last_compaction || {};
   const formatTokens = (value) =>
@@ -351,30 +383,72 @@ function renderInspector() {
     tiered_summary: "分层摘要",
     sliding_window_fallback: "滑动窗口兜底",
   };
-  host.innerHTML = `<dl class="inspector-grid">
-    <dt>会话</dt><dd class="mono">${escapeHtml(state.sessionId || "尚未创建")}</dd>
-    <dt>Agent</dt><dd>${escapeHtml(currentAgentName(state))}</dd>
-    <dt>模型</dt><dd>${escapeHtml(model?.name || model?.model || "—")}</dd>
-    <dt>状态</dt><dd><span class="status-badge ${state.streaming ? "running" : state.awaitingHitl ? "waiting" : "idle"}">${state.streaming ? "生成中" : state.awaitingHitl ? "等待用户" : "空闲"}</span></dd>
-    <dt>附件</dt><dd>${state.pendingAttachments.length} 个待发送</dd>
-    <dt>工具事件</dt><dd>${eventToolRows().length} 条</dd>
-    <dt>历史估算</dt><dd>${escapeHtml(formatTokens(contextStatus.estimated_history_tokens))} Token</dd>
-    <dt>上下文窗口</dt><dd>${escapeHtml(formatTokens(contextStatus.context_window_tokens))} Token</dd>
-    <dt>输出预估</dt><dd>${escapeHtml(formatTokens(contextStatus.predicted_output_tokens))} Token</dd>
-    <dt>压缩阈值</dt><dd>${escapeHtml(formatTokens(contextStatus.trigger_tokens))} Token</dd>
-    <dt>压缩状态</dt><dd>${escapeHtml(
-      compaction.triggered
-        ? strategyLabels[compaction.strategy] || compaction.strategy
-        : contextStatus.compaction_enabled
-          ? "未触发"
-          : "未启用"
-    )}</dd>
-    <dt>压缩前/后</dt><dd>${escapeHtml(formatTokens(compaction.estimated_tokens_before))} / ${escapeHtml(formatTokens(compaction.estimated_tokens_after))}</dd>
-    <dt>Checkpoint</dt><dd>${contextStatus.checkpoint_exists ? "已生成" : "暂无"}</dd>
-    <dt>App</dt><dd class="mono">${escapeHtml(context.app || "继承")}</dd>
-    <dt>Space</dt><dd class="mono">${escapeHtml(context.space || "继承")}</dd>
-    <dt>Language</dt><dd>${escapeHtml(context.language || "继承")}</dd>
-  </dl>`;
+  const statusText = state.streaming ? "生成中" : state.awaitingHitl ? "等待用户" : "空闲";
+  const statusClass = state.streaming ? "running" : state.awaitingHitl ? "waiting" : "idle";
+  const usage = state.lastRunUsage || {};
+  const compactionState = compaction.triggered
+    ? strategyLabels[compaction.strategy] || compaction.strategy
+    : contextStatus.compaction_enabled
+      ? "未触发"
+      : "未启用";
+  const triggerTokens = Number(contextStatus.trigger_tokens);
+  const historyTokens = Number(contextStatus.estimated_history_tokens || 0);
+  const budgetPercent = triggerTokens > 0
+    ? Math.min(100, Math.round((historyTokens / triggerTokens) * 100))
+    : 0;
+
+  host.innerHTML = `
+    <section class="inspector-section inspector-session-group">
+      <header><strong>当前会话</strong><span class="status-badge ${statusClass}">${statusText}</span></header>
+      <dl class="inspector-grid">
+        <dt>会话 ID</dt><dd class="mono">${escapeHtml(state.sessionId || "尚未创建")}</dd>
+        <dt>Agent</dt><dd>${escapeHtml(currentAgentName(state))}</dd>
+        <dt>Agent ID</dt><dd class="mono">${escapeHtml(state.agentId || "—")}</dd>
+        <dt>模型</dt><dd>${escapeHtml(model?.name || model?.model || "—")}</dd>
+        <dt>原始消息</dt><dd>${escapeHtml(contextStatus.raw_message_count ?? state.modelMessageCount ?? 0)} 条</dd>
+        <dt>待发附件</dt><dd>${state.pendingAttachments.length} 个</dd>
+      </dl>
+      <header class="inspector-subheading"><strong>请求Header</strong><span>自动推导</span></header>
+      <dl class="inspector-grid">
+        <dt>App</dt><dd class="mono">${escapeHtml(context.app || "继承")}</dd>
+        <dt>Space</dt><dd class="mono">${escapeHtml(context.space || "继承")}</dd>
+        <dt>Language</dt><dd>${escapeHtml(context.language || "继承")}</dd>
+        <dt>User ID</dt><dd class="mono">${escapeHtml(identity.user || "未认证")}</dd>
+      </dl>
+    </section>
+    <section class="inspector-section inspector-budget-section">
+        <div class="budget-meter" title="原始历史估算占压缩触发线的比例"><span style="width:${budgetPercent}%"></span></div>
+        <header><strong>上下文预算</strong><span>历史快照</span></header>
+        <dl class="inspector-grid">
+          <dt>原始历史估算</dt><dd>${escapeHtml(formatTokens(contextStatus.estimated_history_tokens))} Token</dd>
+          <dt>上下文窗口</dt><dd>${escapeHtml(formatTokens(contextStatus.context_window_tokens))} Token</dd>
+          <dt>动态输出预估</dt><dd>${escapeHtml(formatTokens(contextStatus.predicted_output_tokens))} Token</dd>
+          <dt>安全余量</dt><dd>${escapeHtml(formatTokens(contextStatus.safety_margin_tokens))} Token</dd>
+          <dt>可用输入预算</dt><dd>${escapeHtml(formatTokens(contextStatus.usable_request_tokens))} Token</dd>
+          <dt>压缩触发线</dt><dd>${escapeHtml(formatTokens(contextStatus.trigger_tokens))} Token</dd>
+          <dt>压缩目标线</dt><dd>${escapeHtml(formatTokens(contextStatus.target_tokens))} Token</dd>
+        </dl>
+        <p class="inspector-help">预算值全部由后端统一计算。这里是完整原始会话历史的只读快照，不等同于某次 Run 的最终模型请求载荷。</p>
+      </section>
+      <section class="inspector-section">
+        <header><strong>本轮模型调用</strong><span>当前页面最近一次 Run</span></header>
+        <dl class="inspector-grid">
+          <dt>请求次数</dt><dd>${escapeHtml(usage.requests ?? "—")}</dd>
+          <dt>输入 Token</dt><dd>${escapeHtml(formatTokens(usage.input_tokens))}</dd>
+          <dt>输出 Token</dt><dd>${escapeHtml(formatTokens(usage.output_tokens))}</dd>
+          <dt>合计 Token</dt><dd>${escapeHtml(formatTokens(usage.total_tokens))}</dd>
+        </dl>
+      </section>
+      <section class="inspector-section">
+        <header><strong>压缩与 Checkpoint</strong><span>${escapeHtml(compactionState)}</span></header>
+        <dl class="inspector-grid">
+          <dt>本轮压缩前/后</dt><dd>${escapeHtml(formatTokens(compaction.estimated_tokens_before))} / ${escapeHtml(formatTokens(compaction.estimated_tokens_after))}</dd>
+          <dt>Checkpoint</dt><dd>${contextStatus.checkpoint_exists ? "已生成" : "暂无"}</dd>
+          <dt>Checkpoint Token</dt><dd>${escapeHtml(formatTokens(contextStatus.checkpoint_estimated_tokens))}</dd>
+          <dt>估算范围</dt><dd>${escapeHtml(contextStatus.estimate_scope || "—")}</dd>
+          <dt>估算器</dt><dd>${escapeHtml(contextStatus.estimator_source || "—")}</dd>
+        </dl>
+    </section>`;
 }
 
 function startStateMonitor() {
@@ -389,9 +463,8 @@ function startStateMonitor() {
       streaming: api.state.streaming,
       awaitingHitl: api.state.awaitingHitl,
       attachments: api.state.pendingAttachments.length,
-      tab: activeInspectorTab,
-      eventCount: eventRows.length,
       contextStatus: api.state.contextStatus,
+      lastRunUsage: api.state.lastRunUsage,
     });
     if (key === lastRenderKey) return;
     lastRenderKey = key;
@@ -401,6 +474,16 @@ function startStateMonitor() {
 }
 
 function bindWorkspaceControls() {
+  document.getElementById("workspaceAgentSelect")?.addEventListener("change", (event) => {
+    selectWorkspaceAgent(event.target.value);
+  });
+  document.getElementById("pinAgentPaneBtn")?.addEventListener("click", () => {
+    const pinned = document.getElementById("workspaceGrid")?.classList.contains("agent-pinned");
+    setAgentPanePinned(!pinned);
+  });
+  document.getElementById("unpinAgentPaneBtn")?.addEventListener("click", () => {
+    setAgentPanePinned(false);
+  });
   document.getElementById("agentSearchInput")?.addEventListener("input", renderAgents);
   document.getElementById("refreshAgentsBtn")?.addEventListener("click", async () => {
     await window.DeepAgentConsoleChat?.loadAgents();
@@ -408,22 +491,7 @@ function bindWorkspaceControls() {
   });
   document.getElementById("contextTestChatBtn")?.addEventListener("click", openContextTestDialog);
   document.getElementById("createContextTestBtn")?.addEventListener("click", createContextTestSession);
-  document.querySelectorAll("[data-inspector-tab]").forEach((button) => {
-    button.addEventListener("click", () => {
-      document.querySelectorAll("[data-inspector-tab]").forEach((item) => item.classList.toggle("active", item === button));
-      activeInspectorTab = button.dataset.inspectorTab;
-      renderInspector();
-    });
-  });
-  window.addEventListener("deep-agent-console-event", (event) => {
-    eventRows.push({
-      event: event.detail?.event || "event",
-      data: event.detail?.data ?? null,
-      time: new Date().toLocaleTimeString("zh-CN", { hour12: false }),
-    });
-    if (eventRows.length > MAX_EVENTS) eventRows = eventRows.slice(-MAX_EVENTS);
-    renderInspector();
-  });
+  document.getElementById("toggleInspectorPaneBtn")?.addEventListener("click", toggleInspectorPane);
   document.querySelectorAll("[data-workspace-drawer]").forEach((button) => {
     button.addEventListener("click", () => toggleWorkspaceDrawer(button.dataset.workspaceDrawer));
   });
@@ -441,6 +509,7 @@ function closeWorkspaceDrawers() {
   document.querySelector("#workspaceLegacyHost > .sidebar")?.classList.remove("mobile-open");
   document.getElementById("inspectorPane")?.classList.remove("mobile-open");
   document.getElementById("workspaceDrawerBackdrop")?.classList.add("hidden");
+  syncInspectorToggle();
 }
 
 function toggleWorkspaceDrawer(name) {
@@ -455,6 +524,7 @@ function toggleWorkspaceDrawer(name) {
   if (!shouldOpen) return;
   target.classList.add("mobile-open");
   document.getElementById("workspaceDrawerBackdrop")?.classList.remove("hidden");
+  syncInspectorToggle();
 }
 
 export async function initWorkspace() {
@@ -464,6 +534,9 @@ export async function initWorkspace() {
   installLegacyDom(source);
   await import(`./chat.js?v=${WORKSPACE_ASSET_VERSION}`);
   bindWorkspaceControls();
+  setAgentPanePinned(false);
+  syncInspectorToggle();
+  window.addEventListener("resize", syncInspectorToggle);
   renderAgents();
   renderInspector();
   startStateMonitor();

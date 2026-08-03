@@ -15,7 +15,7 @@ from pydantic_ai.usage import RunUsage
 from deep_agent.agent.attachments import AttachmentDownloadError
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.capabilities.attachments import builtin
-from deep_agent.capabilities.attachments import build_attachment_capability
+from deep_agent.capabilities.attachments import build_attachment_tool_package
 from deep_agent.schemas.attachment import AttachmentRef
 
 
@@ -36,12 +36,12 @@ def _context(
 
 class AttachmentToolTests(unittest.IsolatedAsyncioTestCase):
     async def _tool(self, name: str):
-        capability = build_attachment_capability()
-        tools = await capability.toolset.get_tools(_context())
+        capability = build_attachment_tool_package()
+        tools = await capability.toolsets[0].get_tools(_context())
         return tools[name]
 
     async def test_capability_is_opt_in_with_three_tools(self) -> None:
-        capability = build_attachment_capability()
+        capability = build_attachment_tool_package()
         self.assertFalse(capability.default_enabled)
         self.assertEqual(
             {item.name for item in capability.tools},

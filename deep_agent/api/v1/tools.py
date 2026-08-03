@@ -1,57 +1,98 @@
 from __future__ import annotations
 
-import itertools
-
 from fastapi import APIRouter
 
-from deep_agent.capabilities.mcp.resolver import describe_mcp_capabilities
+from deep_agent.capabilities.mcp.builtin import load_builtin_mcp_tool_packages
+from deep_agent.capabilities.registry import describe_tool_package
 from deep_agent.capabilities.ui.builtin import builtin_ui_records
-from deep_agent.capabilities.ui.registry import load_selectable_ui_tools
+from deep_agent.capabilities.ui.types import UIToolRecord
 from deep_agent.core.context import AppContextDep
-from deep_agent.schemas.chat import CapabilityDescription, ToolDescription
+from deep_agent.core.paths import DEEP_AGENT_ROOT
+from deep_agent.schemas.chat import ToolPackageDescription
+from deep_agent.schemas.mcp import McpInspection
 
 router = APIRouter()
 
 
-@router.get("/tools", response_model=list[CapabilityDescription])
-async def list_capabilities(ctx: AppContextDep) -> list[CapabilityDescription]:
-    """List all registered capabilities (native / skill / mcp / ui) and their tools."""
+def _ui_tool_payload(record: UIToolRecord) -> dict:
+    return {
+        "name": record.name,
+        "display_name": str((record.metadata or {}).get("display_name") or record.name),
+        "description": record.description,
+        "execution_type": "external",
+        "enabled": record.enabled,
+    }
+
+
+@router.get("/tools", response_model=list[ToolPackageDescription])
+async def list_tool_packages(ctx: AppContextDep) -> list[ToolPackageDescription]:
+    """Return the product tool-package directory used by Agent configuration."""
+    payloads = list(ctx.registry.describe())
+
     mcp_rows = await ctx.stores.mcp.list_all()
-    mcp_caps = await describe_mcp_capabilities(ctx.stores, mcp_rows=mcp_rows)
-    caps = [
-        CapabilityDescription(**cap) for cap in
-        itertools.chain(mcp_caps, ctx.registry.describe())
-    ]
+    db_names = {row.name for row in mcp_rows}
+    for row in mcp_rows:
+        inspection = McpInspection.from_value(row.inspection, transport=row.transport)
+        payloads.append(
+            {
+                "code": f"mcp:{row.name}",
+                "category": "mcp",
+                "label": row.name,
+                "source": "builtin" if row.transport == "builtin" else "database",
+                "description": row.description or f"MCP 服务 {row.name}",
+                "enabled": row.enabled,
+                "default_enabled": False,
+                "tool_count": inspection.tools.count,
+                "tool_catalog_status": "count_only",
+                "tools": [],
+            }
+        )
+    for package in load_builtin_mcp_tool_packages(str(DEEP_AGENT_ROOT / "mcps")):
+        if package.code.removeprefix("mcp:") in db_names:
+            continue
+        payload = describe_tool_package(package)
+        payload["tool_catalog_status"] = "count_only"
+        payloads.append(payload)
 
-    for tool in builtin_ui_records():
-        caps.append(
-            CapabilityDescription(
-                name=f"ui:{tool.name}",
-                kind="ui-client",
-                source="builtin",
-                description=tool.description,
-                tools=[
-                    ToolDescription(
-                        name=tool.name,
-                        description=tool.description,
-                    )
-                ],
-            )
+    builtin_records = builtin_ui_records()
+    payloads.append(
+        {
+            "code": "ui:builtin",
+            "category": "ui",
+            "label": "通用交互",
+            "source": "builtin",
+            "description": "代码内置的确认与候选选择交互。",
+            "enabled": True,
+            "default_enabled": False,
+            "tool_count": len(builtin_records),
+            "tool_catalog_status": "complete",
+            "tools": [_ui_tool_payload(record) for record in builtin_records],
+        }
+    )
+
+    manual_rows = await ctx.stores.ui_tool.list_all()
+    manual_by_package: dict[str, list[UIToolRecord]] = {}
+    for row in manual_rows:
+        if row.source != "manual":
+            continue
+        record = UIToolRecord.from_row(row)
+        manual_by_package.setdefault(record.package_code, []).append(record)
+    for package in await ctx.stores.ui_tool_package.list_all():
+        records = sorted(manual_by_package.get(package.code, []), key=lambda item: item.name)
+        payloads.append(
+            {
+                "code": package.code,
+                "category": "ui",
+                "label": package.label,
+                "source": package.source,
+                "description": package.description or "",
+                "enabled": package.enabled,
+                "default_enabled": False,
+                "tool_count": len(records),
+                "tool_catalog_status": "complete" if records else "empty",
+                "tools": [_ui_tool_payload(record) for record in records],
+            }
         )
 
-    for tool in await load_selectable_ui_tools(ctx.stores):
-        caps.append(
-            CapabilityDescription(
-                name=f"ui:{tool.name}",
-                kind="ui-client",
-                source=tool.source,
-                description=tool.description,
-                tools=[
-                    ToolDescription(
-                        name=tool.name,
-                        description=tool.description,
-                    )
-                ],
-            )
-        )
-    return caps
+    payloads.sort(key=lambda item: (item["category"], item["code"]))
+    return [ToolPackageDescription(**payload) for payload in payloads]

@@ -318,7 +318,7 @@ DeepAgent 原有自研 `Capability` 只是产品配置包装，却与 Pydantic A
 
 两包中的后端函数对模型都表现为 `FunctionToolset`。配置中心只读展示工具包及工具明细，
 实际启用仍由 `agents.capabilities` 中的工具包编码决定；本轮不提供包内逐工具开关。
-`python-sandbox` 的工具定义位于 DeepAgent 进程，实际代码通过可替换的
+`execute_python` 的工具定义位于 DeepAgent 进程，实际代码通过可替换的
 `PythonExecutionBackend` 执行；这不改变它的 Function Tool 类型。
 
 0.2.3 删除了原来 Native 中的 `http_get`。该工具没有目标域名白名单、私网地址保护和
@@ -652,7 +652,7 @@ llm_models.tags 包含 code_execution
 - Usage、费用、超时和错误展示。
 - 数据出境与客户部署边界。
 
-DeepAgent 已通过 `python-sandbox` 向私有和 OpenAI-compatible 模型提供统一 Python 能力：
+DeepAgent 已通过 `builtin:general` 中的 `execute_python` 向私有和 OpenAI-compatible 模型提供统一 Python 能力：
 
 ```text
 FunctionToolset(execute_python)
@@ -887,7 +887,7 @@ Invalid request
 | P1 | 高风险工具审批 | 先建立风险和副作用元数据；接入 `ApprovalRequiredToolset` 时同时设计持久化、TTL、操作人、幂等、权限复检和执行审计 |
 | P2 | `ToolSearch` | 先观测工具数量和 Schema Token；达到数十个真实工具后，结合 `DeferredLoadingToolset` 试点按需发现 |
 | P2 | `CombinedToolset` | 不作为独立产品功能；仅在多个工具包需要共享过滤、审批或延迟加载策略时用于运行时装配 |
-| P3 | Provider `CodeExecutionTool` | 不作为通用代码执行；继续使用自建 `python-sandbox`，未来仅给明确支持的托管模型作为增强能力 |
+| P3 | Provider `CodeExecutionTool` | 不作为通用代码执行；继续使用自建 `execute_python`，未来仅给明确支持的托管模型作为增强能力 |
 | P3 | Provider `FileSearchTool` | 不替代附件读取或企业知识库；先建设 Provider 无关的 RAG/MCP 抽象，再把托管 File Search 作为可选实现 |
 
 ### 第一批：工具名称和可见性

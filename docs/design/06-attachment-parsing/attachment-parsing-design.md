@@ -18,7 +18,7 @@
 ```text
 平台上传文件
   → 会话只保存 file_id/name/mime 引用
-  → Agent 明确启用 attachment 能力
+  → Agent 明确启用 builtin:attachment 工具包
   → 模型按需调用对应读取工具
   → 工具返回安全大小的一页和继续读取游标
 ```
@@ -27,25 +27,25 @@
 `next_offset` 继续读。这与 Pi Agent、Hermes、OpenCode 等工具型 Agent 的渐进式文件读取方向
 一致：工具提供合理默认页，不让模型在首次调用时承担文件规模判断。
 
-## 2. 能力与默认行为
+## 2. 工具包与默认行为
 
 能力目录新增：
 
 ```text
-name: attachment
-kind: attachment
+code: builtin:attachment
+category: builtin
 default_enabled: false
 ```
 
-它和 MCP、Skill、UI 工具一样由 Agent 的 `capabilities` 显式选择：
+它和 MCP、Skill、UI 工具包一样由 Agent 的 `capabilities` 显式选择：
 
 - `capabilities=null`：不启用附件工具。
 - `capabilities=[]`：不启用附件工具。
-- 包含 `attachment`：加载三个读取工具。
-- 不迁移历史 Agent，也不自动启用。
+- 包含 `builtin:attachment`：加载三个读取工具。
+- Alembic `002` 将旧 `attachment` 编码一次性改为新包编码；运行时不保留旧编码。
 
-Console 只把它显示为普通的“附件读取”能力，不增加复杂的上传阻断流程。管理员负责给需要
-读取文档的 Agent 勾选能力。
+Console 只把它显示为普通的“附件读取”工具包，不增加复杂的上传阻断流程。管理员负责给需要
+读取文档的 Agent 勾选工具包。
 
 ## 3. 工具协议
 
@@ -263,7 +263,7 @@ chat_messages
 - XLSX 首个可见工作表、显式 sheet 和分页正确。
 - UTF-16、UTF-8、GB18030 和 JSON 文本正确。
 - Office 损坏、加密、路径穿越和压缩异常给出稳定错误。
-- Agent 未选择 `attachment` 时工具列表为空；选择后仅加载本能力。
+- Agent 未选择 `builtin:attachment` 时工具列表为空；选择后加载包内三个工具。
 - 图片/音频/视频/PDF 只服从模型原生模态。
 - 真实文件解析、API → Tool → SSE → 持久化 → 会话续读链路通过。
 - 附件工具结果参与上下文预算，不同页面不被误去重。
@@ -292,7 +292,7 @@ chat_messages
 - 三个工具保持统一 `offset/limit/has_more/next_offset` 协议。
 - 同页可以去重，不同页或工作表不能误去重。
 - Tool Call/Result 在裁剪和摘要分块中不能被拆成非法配对。
-- `attachment` 默认关闭，不迁移历史 Agent。
+- `builtin:attachment` 默认关闭；旧编码只在 `002` 迁移中转换。
 - 不恢复上传时预抽全文或 `DEEP_AGENT_UPLOAD_EXTRACT_TEXT_MAX_CHARS`。
 
 ## 13. 后续方向

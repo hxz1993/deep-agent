@@ -11,7 +11,7 @@ UI 工具用于在 Agent 运行过程中暂停并等待用户确认、选择或�
 | 来源 | 保存位置 | 配置方式 |
 | --- | --- | --- |
 | `builtin` | DeepAgent 代码 | 系统预置、只读，由 Agent 显式选择 |
-| `manual` | `ui_tool_definitions` | Console 手工创建和维护 |
+| `manual` | `ui_tool_packages` + `ui_tool_definitions` | Console 手工创建包并在包内维护工具 |
 
 不再支持：
 
@@ -62,11 +62,30 @@ MCP Resource 是另一项独立能力，用于读取 MCP 暴露的静态上下�
 
 仅填写自由输入时，`selected` 为空数组，`custom_input` 保存用户输入；多选模式允许候选项和自由输入同时提交。
 
-两个内置工具在 Console 中只读展示，不能修改或删除；它们不会自动随 Agent 启用。
+两个内置工具同属 `ui:builtin`。该包和工具在 Console 中只读展示，不能修改或删除；
+它们不会自动随 Agent 启用。
 
 ## 手工工具
 
-在 Console 的“配置中心 → UI 工具”创建，或调用：
+先在 Console 的“配置中心 → UI 工具”创建手工工具包，再在包内创建工具。对应接口为：
+
+```http
+POST /api/v1/ui-tool-packages
+POST /api/v1/ui-tools
+```
+
+工具包示例：
+
+```json
+{
+  "code": "ui:deepcube",
+  "label": "DeepCube 助手",
+  "description": "DeepCube 专用交互",
+  "enabled": true
+}
+```
+
+工具示例：
 
 ```http
 POST /api/v1/ui-tools
@@ -77,6 +96,7 @@ POST /api/v1/ui-tools
 ```json
 {
   "name": "deep_cube__clarify",
+  "package_code": "ui:deepcube",
   "description": "向用户展示澄清表单并等待填写",
   "parameters_json_schema": {
     "type": "object",
@@ -91,20 +111,21 @@ POST /api/v1/ui-tools
 }
 ```
 
-内置和手工工具都不会自动对所有 Agent 生效。编辑 Agent 时，在统一能力列表中选择：
+内置和手工工具都不会自动对所有 Agent 生效。编辑 Agent 时，在统一工具包列表中选择：
 
 ```text
-ui:builtin__confirm
-ui:builtin__choice
-ui:deep_cube__clarify
+ui:builtin
+ui:deepcube
 ```
 
 运行时只有同时满足以下条件才会进入模型工具列表：
 
-1. UI 工具 `enabled=true`。
-2. Agent `capabilities` 包含精确的 `ui:<name>` 引用。
+1. UI 工具包和工具均为 `enabled=true`。
+2. Agent `capabilities` 包含精确的 `ui:<package>` 工具包编码。
+3. 工具 Schema 有效。
 
-不存在或已停用的引用会被忽略。新建 Agent、`capabilities=null`、`capabilities=[]` 以及未显式包含新 capability 的历史 Agent，均不会加载这两个内置工具；旧的 `ui-builtin:*` 引用也不会被兼容或迁移。
+创建和更新 Agent 时，不存在或已停用的包编码返回 422。`capabilities=null`、空数组或未选择
+UI 包时不加载 UI 工具。旧的单工具编码只在 Alembic `002` 中一次性转换，运行时不保留兼容分支。
 
 ## 调用与恢复
 
@@ -124,11 +145,15 @@ ui:deep_cube__clarify
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
+| `GET/POST` | `/api/v1/ui-tool-packages` | 列出或创建 UI 工具包 |
+| `GET/PATCH/DELETE` | `/api/v1/ui-tool-packages/{code}` | 查看、修改或删除手工包；内置包只读 |
 | `GET` | `/api/v1/ui-tools` | 列出内置和手工 UI 工具 |
 | `GET` | `/api/v1/ui-tools/{name}` | 查看详情 |
 | `POST` | `/api/v1/ui-tools` | 创建手工工具 |
 | `PATCH` | `/api/v1/ui-tools/{name}` | 修改手工工具 |
 | `DELETE` | `/api/v1/ui-tools/{name}` | 删除手工工具 |
-| `GET` | `/api/v1/tools` | 查看 Agent 可配置能力 |
+| `GET` | `/api/v1/tools` | 查看 Agent 可配置工具包目录 |
 
-内置工具不能通过修改或删除接口变更。工具名称、描述和参数 Schema 会进入模型上下文，应保持精确、简短，并避免包含敏感信息。
+内置包和工具不能通过修改或删除接口变更。手工包包含工具或被 Agent 引用时不能删除；
+被 Agent 引用包中的工具也不能删除。工具名称、描述和参数 Schema 会进入模型上下文，应保持
+精确、简短，并避免包含敏感信息。

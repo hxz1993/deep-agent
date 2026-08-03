@@ -5,11 +5,11 @@ from pathlib import Path
 
 from loguru import logger
 
-from deep_agent.capabilities.registry import Capability
+from deep_agent.capabilities.registry import ToolPackage
 from deep_agent.capabilities.skills.base import Skill
 
 
-def load_skill_capabilities(skills_dir: str) -> list[Capability]:
+def load_skill_tool_packages(skills_dir: str) -> list[ToolPackage]:
     """Discover skills under ``skills_dir``.
 
     Each immediate subdirectory that is an importable package and defines a
@@ -23,7 +23,7 @@ def load_skill_capabilities(skills_dir: str) -> list[Capability]:
         return []
 
     package_name = base.name
-    capabilities: list[Capability] = []
+    packages: list[ToolPackage] = []
 
     for entry in sorted(base.iterdir()):
         if not entry.is_dir() or entry.name.startswith((".", "_")):
@@ -40,7 +40,7 @@ def load_skill_capabilities(skills_dir: str) -> list[Capability]:
             logger.warning("Module {!r} has no module-level SKILL: Skill; skipping.", module_name)
             continue
 
-        capabilities.append(skill.to_capability())
+        packages.append(skill.to_tool_package())
         logger.info("Loaded skill {!r}", skill.name)
 
-    return capabilities
+    return packages

@@ -116,6 +116,18 @@ html, body {
   white-space: nowrap;
 }
 
+.ui-tool-packages-wrap {
+  margin-bottom: 12px;
+}
+
+#uiToolPackagesTableBody tr[data-select-package] {
+  cursor: pointer;
+}
+
+#uiToolPackagesTableBody tr.is-selected td {
+  background: color-mix(in srgb, var(--accent) 8%, var(--panel));
+}
+
 .builtin-tool-name {
   display: grid;
   gap: 3px;

@@ -31,13 +31,13 @@ Accept: text/event-stream
   ],
   "session_id": "可选，省略则服务端生成",
   "model": "可选，如 openai:gpt-4o",
-  "capabilities": ["native", "mcp:doc_search"],
+  "capabilities": ["builtin:general", "mcp:doc_search"],
   "user": "可选用户标识"
 }
 ```
 
 新上传只发送 `id/name/mime`。旧会话中已经保存的 `extracted_text` 仍可读取，但新链路不再
-在上传阶段抽取或截断文档文本。TXT、DOCX 和 XLSX 由 Agent 显式启用的 `attachment`
+在上传阶段抽取或截断文档文本。TXT、DOCX 和 XLSX 由 Agent 显式启用的 `builtin:attachment`
 能力按需分页读取。
 
 **DB Agent 模式：**
@@ -287,7 +287,7 @@ assistant 正文，也不会出现在历史接口中。
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | `type` | `"tool_call"` | 固定值 |
-| `tool` | `string` | 工具名称（含 capability 前缀时如 `doc_search_doc_search`） |
+| `tool` | `string` | 稳定工具协议名（MCP 前缀示例 `doc_search_doc_search`）；与工具包编码不同 |
 | `args` | `object` | 工具参数；首帧可能为 `{}`，应以同 `tool_call_id` 的后续帧覆盖 |
 | `tool_call_id` | `string \| null` | 调用唯一标识，用于关联 `tool_result` |
 | `widget` | `string \| null` | 可选；UI 工具渲染提示（来自 DB，**不发给模型**） |

@@ -1,5 +1,7 @@
 # DeepAgent 工具包与工具目录设计
 
+> 实施状态：v0.3.2 已按本文完成，数据库 revision 为 002。
+
 ## 1. 目标与边界
 
 本方案解决三个长期混淆：产品页面展示什么、Agent 保存什么、Pydantic AI 最终运行什么。
@@ -182,6 +184,9 @@ Agent 能力页直接按后端 `category` 分组，不再通过旧 `kind` 猜测
 - Console 分类、整包回填、无工具级复选框。
 - Function、附件、Sandbox、MCP、UI 的 Tool Call/Result 配对与上下文压缩、Checkpoint、SSE。
 - 完整 Python、Console Node、配置备份、静态检查和浏览器四主题/窄屏。
+
+上述验证已在隔离 SQLite 上完成；共享 Test 的 001 数据库仍应按“先旧版备份、
+再部署并升级 002、最后新版备份”的顺序发布。
 
 ## 12. 后续演进
 

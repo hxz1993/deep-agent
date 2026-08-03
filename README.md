@@ -3,7 +3,7 @@
 DeepAgent 是基于 FastAPI、Pydantic AI 和 SQLAlchemy 的多用户 Agent 服务，并
 随服务发布一体化运维控制台。
 
-当前产品版本为 `0.3.1`。`deep_agent.__version__` 是唯一代码版本来源，FastAPI、
+当前产品版本为 `0.3.2`。`deep_agent.__version__` 是唯一代码版本来源，FastAPI、
 `GET /info` 和 Console 顶部版本徽标均读取该值。后续正式发布默认递增
 `MAJOR.MINOR.PATCH` 的第三位，只有明确规划重大版本时才调整前两位。产品版本不通过
 环境变量或数据库覆盖，也不等同于 Alembic 数据库结构 revision。
@@ -84,17 +84,21 @@ v0.3.0 将发布前的 Alembic `001`～`023` 历史压缩为唯一基线 `001`�
 `stamp --purge 001` 重设版本。完整备份和切换命令见
 [`maintenance/README.md`](maintenance/README.md)。
 
-## 能力类型
+## 工具包类型
 
 DeepAgent 当前支持：
 
 - 内置工具：
-  - `native`（通用工具）：默认启用的进程内基础工具，当前提供 `get_current_time`。
-  - `attachment`（附件读取）：Agent 显式启用的 TXT、DOCX、XLSX 按需读取工具。
-  - `python-sandbox`（Python 沙箱）：Agent 显式启用的无状态 Python 数据计算工具。
+  - `builtin:general`（通用工具）：默认启用，包含 `get_current_time` 和 `execute_python`。
+  - `builtin:attachment`（附件读取）：默认关闭，包含 TXT、DOCX、XLSX 按需读取工具。
 - `skill:<name>`：Python Skill，组合 Instructions 和函数工具。
 - `mcp:<name>`：URL、stdio 或 builtin MCP。
-- `ui:<name>`：Agent 显式关联的 builtin/manual HITL 工具；内置工具也不默认启用。
+- `ui:builtin`：代码内置的确认和候选选择交互，默认关闭。
+- `ui:<package>`：数据库管理的手工 UI 工具包，Agent 按包启用。
+
+产品配置单位是 Tool Package，Pydantic AI 运行对象仍是 Toolset。Agent 的
+`capabilities` 字段保存工具包编码；当前不提供包内逐工具授权。Output Tool 是最终输出契约，
+不属于工具包，也不进入 `capabilities`。
 
 仓库不再注册 Cursor 专属 Skill。未来需要长 Skill 渐进披露时，在通用
 `skill:` 机制内设计。

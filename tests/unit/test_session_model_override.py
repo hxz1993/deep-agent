@@ -72,7 +72,7 @@ class BuildRunnerForAgentTests(unittest.IsolatedAsyncioTestCase):
         default = _llm("00000000-0000-4000-8000-000000000010", "gpt-a")
         override = _llm("00000000-0000-4000-8000-000000000011", "gpt-b")
         agent = _agent(model_id=default.id)
-        agent.capabilities = ["native", "skill:calculator"]
+        agent.capabilities = ["builtin:general", "skill:calculator"]
         ctx = AsyncMock()
         ctx.stores.agent.get_by_id = AsyncMock(return_value=agent)
         ctx.stores.llm_model.get_by_id = AsyncMock(return_value=override)
@@ -83,7 +83,7 @@ class BuildRunnerForAgentTests(unittest.IsolatedAsyncioTestCase):
             spec = build.call_args.args[0]
             self.assertEqual(spec.model, "openai:gpt-b")
             self.assertEqual(spec.instructions, "You are helpful.")
-            self.assertEqual(spec.capabilities, ["native", "skill:calculator"])
+            self.assertEqual(spec.capabilities, ["builtin:general", "skill:calculator"])
 
 
 class ChatSessionModelColumnTests(unittest.TestCase):

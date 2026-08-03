@@ -36,7 +36,7 @@ sequenceDiagram
 |------|------|
 | **后端** | 用 `ExternalToolset` 向模型暴露工具 schema；不实现执行函数 |
 | **前端** | 根据 `tool` 名称渲染控件；收集结果后 `deferred_tool_results` 续跑 |
-| **Agent 配置** | 通过 `ui:<name>` capability 显式决定本 Agent 可使用哪些 UI 工具 |
+| **Agent 配置** | 通过 `ui:<package>` 工具包编码决定本 Agent 可使用哪组 UI 工具 |
 | **Agent 指令** | 告诉模型何时应调用哪个 UI 工具 |
 
 内置 UI 工具定义在 [`deep_agent/capabilities/ui/builtin.py`](../../deep_agent/capabilities/ui/builtin.py)。
@@ -46,14 +46,13 @@ sequenceDiagram
 
 ## 2. 扩展检查清单
 
-新增一个 UI 工具通常需要改 **4 处**（前后端各 2 处）：
+向代码内置 `ui:builtin` 增加 UI 工具通常需要改 **3 处**：
 
 | # | 位置 | 做什么 |
 |---|------|--------|
-| 1 | `deep_agent/capabilities/ui/builtin.py` | 增加 `ToolDefinition`（name、description、JSON Schema） |
-| 2 | `deep_agent/api/v1/tools.py` | 确认新 builtin 以独立的 `ui:<name>` 可选能力展示 |
-| 3 | `frontend/console/chat.js` → `BUILTIN_UI_TOOLS` | 把新工具名加入 Set |
-| 4 | `frontend/console/chat.js` → `renderHitlWidget` | 根据 `tool` 名渲染控件并调用 `onSubmit` |
+| 1 | `deep_agent/capabilities/ui/builtin.py` | 增加 `UIToolRecord`（name、description、JSON Schema、widget） |
+| 2 | `frontend/console/chat.js` → `BUILTIN_UI_TOOLS` | 把新工具名加入 Set |
+| 3 | `frontend/console/chat.js` → `renderHitlWidget` | 根据 `tool` 名渲染控件并调用 `onSubmit` |
 
 可选：
 
@@ -103,38 +102,44 @@ _ASK_USER_TEXT_SCHEMA = {
 }
 ```
 
-**② 加入 `build_ui_toolset()` 的列表**
+**② 加入 `builtin_ui_records()` 的列表**
 
 ```python
-ToolDefinition(
+UIToolRecord(
     name="ask_user_text",
+    package_code="ui:builtin",
     description=(
         "Show a text input and wait for the user to type a response. "
         "Execution happens in the UI."
     ),
     parameters_json_schema=_ASK_USER_TEXT_SCHEMA,
+    widget="text",
+    source="builtin",
 ),
 ```
 
-**③ 让能力目录展示该工具**
+**③ 让工具包目录展示该工具**
 
-`GET /api/v1/tools` 会从 `builtin_ui_records()` 生成独立的 `ui:<name>` 能力。新增 builtin 后应确认它是 `default_enabled=false`、`locked=false` 的普通可选项，并在 Agent 中显式选择后才运行。
+`GET /api/v1/tools` 会从 `builtin_ui_records()` 生成一个 `ui:builtin` 工具包。新增 builtin
+后应确认包的 `tool_count` 和 `tools` 已更新；Agent 选择 `ui:builtin` 后包内全部内置工具都
+对模型可见。
 
 ### 3.2 注册与注入规则
 
-- builtin 和 manual UI 工具统一按 `ui:<canonical_tool_name>` 与 Agent 正向关联。
-- `prepare_ui_toolset_for_spec()` 只加载 `AgentSpec.capabilities` 显式引用且 `enabled=true` 的定义。
-- `capabilities=null`、空数组或未包含对应 `ui:<name>` 时，builtin 也不会进入模型工具列表。
-- 旧的 `ui-builtin:*` capability 不迁移、不兼容，运行时直接忽略。
+- builtin 和 manual UI 工具都按所属 `package_code` 与 Agent 正向关联。
+- `prepare_ui_toolsets_for_spec()` 只加载 Agent 已选、工具包已启用、工具已启用且 Schema 有效的定义。
+- `capabilities=null`、空数组或未包含对应 `ui:<package>` 时，该包不进入模型工具列表。
+- Alembic `002` 一次性把旧单工具引用转换为包编码，运行时不保留旧编码兼容。
 
-**注意**：不要在 `factory.py` 里无条件注入 `build_ui_toolset()`，否则会绕过 Agent 选择规则，并可能触发工具名冲突。
+**注意**：不要在 `factory.py` 里无条件注入 `build_ui_toolset()`，否则会绕过 `ui:builtin`
+的包选择规则，并可能触发工具名冲突。
 
 ### 3.3 Schema 设计建议
 
 - `description` 优先用简洁中文写清楚「由 UI 执行、需等待用户」——模型靠它决定是否调用
 - 参数尽量结构化（`options`、`labels`），避免让模型拼 HTML
 - `required` 只放必要字段；可选字段在 description 里说明默认值语义
-- 工具名全局唯一，不与 MCP / native 工具重名
+- 工具名全局唯一，不与 MCP / Function 工具重名
 
 ### 3.4 SSE 上的 `widget` / `metadata`（builtin 回退）
 
@@ -279,12 +284,12 @@ Content-Type: application/json
 curl http://127.0.0.1:8000/api/v1/tools
 ```
 
-响应中应有 `ui` 能力及新工具名。
+响应中应有 `category=ui` 的工具包及新工具名。
 
 ### 7.2 对话验证
 
 1. 重启后端
-2. 在 Agent 的 capabilities 中显式选择 `ui:<工具名>`，并写明 UI 工具使用场景
+2. 在 Agent 的 capabilities 中显式选择 `ui:<package>`，并写明 UI 工具使用场景
 3. 发送能触发新工具的提示语
 4. 确认出现控件 → 提交 → 模型继续回复
 5. **刷新页面**，从侧边栏重新打开会话，确认控件仍可出现并可续跑
@@ -307,15 +312,15 @@ python3.12 -m unittest tests.unit.test_hitl_deferred -v
 ExternalToolset 'ui' defines a tool whose name conflicts with ...
 ```
 
-原因：`ui` toolset 被注册了两次（例如 `registry.register` + `factory` 里又 `build_ui_toolset()`）。  
-解决：只保留 registry 注册 + `_toolsets_for_spec` 注入。
+原因：同一个 UI 工具包被请求级装配和 `factory` 无条件装配两次。
+解决：只保留 `prepare_ui_toolsets_for_spec()` 的按包装配。
 
 ### 模型不调用 UI 工具
 
 - 检查 instructions 是否说明使用场景
 - 用更直白的测试句：`请调用 builtin__confirm，message 为「测试」`
-- 确认 `GET /api/v1/tools` 能看到 `ui:builtin__confirm`
-- 确认当前 Agent 的 capabilities 已显式包含对应 `ui:<name>`；仅出现在能力目录不代表运行时已启用
+- 确认 `GET /api/v1/tools` 的 `ui:builtin` 包能看到 `builtin__confirm`
+- 确认当前 Agent 的 capabilities 已显式包含对应 `ui:<package>`；仅出现在目录不代表运行时已启用
 
 ### 刷新后没有按钮
 
@@ -323,11 +328,11 @@ ExternalToolset 'ui' defines a tool whose name conflicts with ...
 - 确认 `renderHitlWidget` 有对应分支
 - 历史里该 `tool_call` 是否已有 `tool_result`（已完成则不再显示控件）
 
-### 与 MCP / native 工具的区别
+### 与 MCP / Function 工具的区别
 
 | 类型 | 执行位置 | 注册方式 |
 |------|----------|----------|
-| native / MCP | 后端进程 | `FunctionToolset` / `MCPToolset` |
+| Function / MCP | 后端进程 | `FunctionToolset` / `MCPToolset` |
 | **UI 工具** | 浏览器 | `ExternalToolset` + 前端 widget |
 
 UI 工具适合确认、表单、选择器；业务 API 调用仍应使用 MCP。
@@ -338,9 +343,10 @@ UI 工具适合确认、表单、选择器；业务 API 调用仍应使用 MCP�
 
 | 文件 | 说明 |
 |------|------|
-| [`deep_agent/capabilities/ui/builtin.py`](../../deep_agent/capabilities/ui/builtin.py) | UI 工具 schema 与 capability |
-| [`deep_agent/capabilities/ui/registry.py`](../../deep_agent/capabilities/ui/registry.py) | UI 工具合并与 Agent 可见性；SSE `widget` / `metadata` enrichment（含 builtin 回退） |
-| [`deep_agent/api/v1/tools.py`](../../deep_agent/api/v1/tools.py) | builtin/manual UI 工具的 Agent 可选能力目录 |
+| [`deep_agent/capabilities/ui/builtin.py`](../../deep_agent/capabilities/ui/builtin.py) | `ui:builtin` 工具 schema |
+| [`deep_agent/capabilities/ui/registry.py`](../../deep_agent/capabilities/ui/registry.py) | UI 工具按包筛选、Toolset 组装与 SSE enrichment |
+| [`deep_agent/api/v1/tools.py`](../../deep_agent/api/v1/tools.py) | Agent 可选工具包目录 |
+| [`deep_agent/api/v1/ui_tool_packages.py`](../../deep_agent/api/v1/ui_tool_packages.py) | UI 工具包 CRUD 与引用保护 |
 | [`deep_agent/agent/runner.py`](../../deep_agent/agent/runner.py) | deferred run / pending final |
 | [`deep_agent/agent/deferred.py`](../../deep_agent/agent/deferred.py) | 序列化与 `DeferredToolResults` 转换 |
 | [`deep_agent/api/v1/chat.py`](../../deep_agent/api/v1/chat.py) | HTTP 入口 |

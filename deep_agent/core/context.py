@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from deep_agent.agent.event_persister import EventPersister
 from deep_agent.capabilities import build_registry
 from deep_agent.capabilities.mcp.lease_manager import McpLeaseManager
-from deep_agent.capabilities.registry import CapabilityRegistry
+from deep_agent.capabilities.registry import ToolPackageRegistry
 from deep_agent.sandbox.backend import PythonExecutionBackend
 from deep_agent.sandbox.factory import SandboxInterpreterError, build_sandbox_backend
 from deep_agent.sandbox.venv import ensure_sandbox_interpreter_for_startup
@@ -33,7 +33,7 @@ _context: AppContext | None = None
 
 @dataclass
 class AppContext:
-    registry: CapabilityRegistry
+    registry: ToolPackageRegistry
     stores: DataStores
     mcp_lease_manager: McpLeaseManager
     event_persister: EventPersister
@@ -124,7 +124,7 @@ class AppContext:
     def for_testing(
         cls,
         *,
-        registry: CapabilityRegistry | None = None,
+        registry: ToolPackageRegistry | None = None,
         stores: DataStores | None = None,
         mcp_lease_manager: McpLeaseManager | None = None,
         mcp_acquire_retries: int | None = None,
@@ -155,7 +155,7 @@ class AppContext:
                     sandbox_profile=sandbox_profile,
                 )
             else:
-                resolved_registry = CapabilityRegistry()
+                resolved_registry = ToolPackageRegistry()
 
         return cls(
             registry=resolved_registry,

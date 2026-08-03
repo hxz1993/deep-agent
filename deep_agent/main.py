@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 
 from deep_agent import __version__
 from deep_agent.api.v1 import api_router
-from deep_agent.capabilities.mcp.resolver import load_mcp_capabilities
+from deep_agent.capabilities.catalog import selectable_tool_package_codes
 from deep_agent.core.context import AppContext, AppContextDep, reset_context
 from deep_agent.core.exceptions import AgentNotFoundError, DeepAgentError
 from deep_agent.core.logging import configure_logging
@@ -73,12 +73,14 @@ async def health() -> dict[str, str]:
 
 @app.get("/info", tags=["meta"])
 async def info(ctx: AppContextDep) -> dict[str, object]:
-    mcp_caps = await load_mcp_capabilities(ctx.stores)
-    capability_names = ctx.registry.names() + [cap.name for cap in mcp_caps]
+    tool_package_codes = sorted(
+        await selectable_tool_package_codes(ctx.registry, ctx.stores)
+    )
     return {
         "name": "DeepAgent",
         "version": __version__,
-        "capabilities": capability_names,
+        # Keep the public key for compatibility; values are product ToolPackage codes.
+        "capabilities": tool_package_codes,
         "docs": "/docs",
     }
 

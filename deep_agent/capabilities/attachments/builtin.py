@@ -26,7 +26,7 @@ from deep_agent.agent.attachments import AttachmentDownloadError, _download_file
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.media_pipeline import max_upload_bytes
 from deep_agent.capabilities.attachments.schema import AttachmentReadResult
-from deep_agent.capabilities.registry import Capability, ToolInfo
+from deep_agent.capabilities.registry import ToolInfo, ToolPackage
 from deep_agent.schemas.attachment import AttachmentRef
 
 _TEXT_MIMES = frozenset(
@@ -506,7 +506,7 @@ async def read_xlsx(
     return await _XlsxReader(sheet).read(ctx, file_id, offset=offset, limit=limit,)
 
 
-def build_attachment_capability() -> Capability:
+def build_attachment_tool_package() -> ToolPackage:
     toolset = FunctionToolset(
         instructions=(
             "用户上传的文本、DOCX、XLSX 只以 file_id 告知模型，需要时使用对应附件工具读取。"
@@ -516,24 +516,27 @@ def build_attachment_capability() -> Capability:
         ),
         tools=[read_text_attachment, read_docx, read_xlsx],
     )
-    return Capability(
-        name="attachment",
-        kind="attachment",
-        toolset=toolset,
+    return ToolPackage(
+        code="builtin:attachment",
+        category="builtin",
+        toolsets=[toolset],
         label="附件读取",
         source="builtin",
         description="按需读取当前会话上传的文本、Word 和 Excel 附件。",
         tools=[
             ToolInfo(
                 "read_text_attachment",
+                "读取文本附件",
                 "按行分页读取 TXT、CSV、JSON、Markdown、HTML 或 XML。",
             ),
             ToolInfo(
                 "read_docx",
+                "读取 Word 文档",
                 "按逻辑块分页读取 DOCX 的页眉、正文、表格、页脚和批注。",
             ),
             ToolInfo(
                 "read_xlsx",
+                "读取 Excel 工作簿",
                 "按物理行分页读取 XLSX，可指定工作表。",
             ),
         ],

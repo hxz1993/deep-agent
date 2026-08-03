@@ -297,6 +297,7 @@ llm_models
 model_catalog
 mcp_servers
 agents
+ui_tool_packages
 ui_tool_definitions
 auxiliary_model_configs
 ```

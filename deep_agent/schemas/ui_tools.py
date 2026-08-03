@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from jsonschema.exceptions import SchemaError
 from jsonschema.validators import validator_for
 
-from deep_agent.db.models import UiToolDefinition
+from deep_agent.db.models import UiToolDefinition, UiToolPackage
 
 if TYPE_CHECKING:
     from deep_agent.capabilities.ui.types import UIToolRecord
@@ -21,6 +21,7 @@ from deep_agent.capabilities.ui.constants import (
 )
 
 UiToolSource = Literal["builtin", "manual"]
+UI_PACKAGE_CODE_PATTERN = r"^ui:[a-z][a-z0-9_-]{1,120}$"
 
 
 def _validate_parameters_json_schema(value: dict[str, Any]) -> dict[str, Any]:
@@ -44,6 +45,7 @@ def _validate_metadata_size(value: dict[str, Any]) -> dict[str, Any]:
 
 class UiToolCreate(BaseModel):
     name: str
+    package_code: str = Field(pattern=UI_PACKAGE_CODE_PATTERN)
     description: str
     parameters_json_schema: dict[str, Any]
     widget: str | None = Field(default=None, max_length=64)
@@ -96,6 +98,7 @@ class UiToolCreate(BaseModel):
 
 
 class UiToolUpdate(BaseModel):
+    package_code: str | None = Field(default=None, pattern=UI_PACKAGE_CODE_PATTERN)
     description: str | None = None
     parameters_json_schema: dict[str, Any] | None = None
     widget: str | None = Field(default=None, max_length=64)
@@ -107,7 +110,7 @@ class UiToolUpdate(BaseModel):
     @classmethod
     def reject_null_required_fields(cls, value):
         if isinstance(value, dict):
-            for field in ("description", "parameters_json_schema", "enabled"):
+            for field in ("package_code", "description", "parameters_json_schema", "enabled"):
                 if field in value and value[field] is None:
                     raise ValueError(f"{field} cannot be null")
         return value
@@ -157,6 +160,7 @@ class UiToolUpdate(BaseModel):
 
 class UiToolResponse(BaseModel):
     name: str
+    package_code: str
     description: str
     parameters_json_schema: dict[str, Any]
     widget: str | None = None
@@ -171,6 +175,7 @@ class UiToolResponse(BaseModel):
     def from_row(cls, row: UiToolDefinition) -> UiToolResponse:
         return cls(
             name=row.name,
+            package_code=row.package_code,
             description=row.description,
             parameters_json_schema=row.parameters_json_schema,
             widget=row.widget,
@@ -186,6 +191,7 @@ class UiToolResponse(BaseModel):
     def from_record(cls, record: "UIToolRecord") -> UiToolResponse:
         return cls(
             name=record.name,
+            package_code=record.package_code,
             description=record.description,
             parameters_json_schema=record.parameters_json_schema,
             widget=record.widget,
@@ -200,4 +206,79 @@ class UiToolResponse(BaseModel):
 
 class UiToolListResponse(BaseModel):
     items: list[UiToolResponse]
+    total: int
+
+
+class UiToolPackageCreate(BaseModel):
+    code: str = Field(pattern=UI_PACKAGE_CODE_PATTERN)
+    label: str = Field(min_length=1, max_length=191)
+    description: str | None = Field(default=None, max_length=4000)
+    enabled: bool = True
+
+    @model_validator(mode="after")
+    def normalize_text(self) -> UiToolPackageCreate:
+        self.label = self.label.strip()
+        if not self.label:
+            raise ValueError("label must not be blank")
+        if self.description is not None:
+            self.description = self.description.strip() or None
+        return self
+
+
+class UiToolPackageUpdate(BaseModel):
+    label: str | None = Field(default=None, max_length=191)
+    description: str | None = Field(default=None, max_length=4000)
+    enabled: bool | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_null_required_package_fields(cls, value):
+        if isinstance(value, dict):
+            for field in ("label", "enabled"):
+                if field in value and value[field] is None:
+                    raise ValueError(f"{field} cannot be null")
+        return value
+
+    @field_validator("label")
+    @classmethod
+    def normalize_label(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        if not value:
+            raise ValueError("label must not be blank")
+        return value
+
+
+class UiToolPackageResponse(BaseModel):
+    code: str
+    label: str
+    description: str | None = None
+    source: UiToolSource
+    enabled: bool
+    tool_count: int = 0
+    tools: list[str] = Field(default_factory=list)
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+    @classmethod
+    def from_row(
+        cls, row: UiToolPackage, *, tools: list[str] | None = None
+    ) -> UiToolPackageResponse:
+        names = tools or []
+        return cls(
+            code=row.code,
+            label=row.label,
+            description=row.description,
+            source=row.source,
+            enabled=row.enabled,
+            tool_count=len(names),
+            tools=names,
+            created_at=row.created_at,
+            updated_at=row.updated_at,
+        )
+
+
+class UiToolPackageListResponse(BaseModel):
+    items: list[UiToolPackageResponse]
     total: int

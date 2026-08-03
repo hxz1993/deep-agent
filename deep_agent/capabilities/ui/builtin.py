@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from pydantic_ai import ExternalToolset
 
-from deep_agent.capabilities.registry import Capability, ToolInfo
 from deep_agent.capabilities.ui.types import UIToolRecord
 
 _CONFIRM_ACTION_SCHEMA = {
@@ -130,6 +129,7 @@ def builtin_ui_records() -> list[UIToolRecord]:
     return [
         UIToolRecord(
             name="builtin__confirm",
+            package_code="ui:builtin",
             description=(
                 "向用户展示通用确认界面并暂停当前运行，等待用户选择继续或取消。"
                 "适用于确认一个明确步骤，不代表后端强制审批或权限校验。"
@@ -141,6 +141,7 @@ def builtin_ui_records() -> list[UIToolRecord]:
         ),
         UIToolRecord(
             name="builtin__choice",
+            package_code="ui:builtin",
             description=(
                 "向用户展示通用候选列表并暂停当前运行，支持单选、多选以及候选外自由输入。"
             ),
@@ -153,22 +154,9 @@ def builtin_ui_records() -> list[UIToolRecord]:
 
 
 def build_ui_toolset() -> ExternalToolset:
-    """Frontend-executed tools; calls are deferred until the user responds."""
+    """Build the code-owned builtin UI package's external toolset."""
     from deep_agent.capabilities.ui.registry import build_external_toolset
 
-    return build_external_toolset(builtin_ui_records(), toolset_id="ui")
-
-
-def build_ui_capability() -> Capability:
-    toolset = build_ui_toolset()
-    return Capability(
-        name="ui",
-        kind="ui",
-        toolset=toolset,
-        description="按 Agent 选择的通用人机交互 UI 工具。",
-        tools=[
-            ToolInfo("builtin__confirm", "展示通用确认界面。"),
-            ToolInfo("builtin__choice", "展示支持自由输入的通用候选列表。"),
-        ],
-        default_enabled=False,
+    return build_external_toolset(
+        builtin_ui_records(), toolset_id="ui-package:ui:builtin"
     )

@@ -1,9 +1,7 @@
-const BUILTIN_TOOL_KINDS = new Set(["native", "attachment"]);
-
 function isManagedBuiltinCapability(capability) {
   return (
     capability?.source === "builtin" &&
-    BUILTIN_TOOL_KINDS.has(capability?.kind)
+    capability?.category === "builtin"
   );
 }
 
@@ -24,17 +22,16 @@ function builtinToolDetails(capability) {
 }
 
 function builtinCapabilityRow(capability) {
-  const label = capability.label || capability.name;
-  const kind = capability.kind === "native" ? "Native" : "Attachment";
+  const label = capability.label || capability.code;
   const defaultLabel = capability.default_enabled ? "默认启用" : "默认关闭";
   return `<tr>
     <td>
       <div class="builtin-tool-name">
         <strong>${escapeHtml(label)}</strong>
-        <small>${escapeHtml(kind)}</small>
+        <small>内置工具包</small>
       </div>
     </td>
-    <td><code>${escapeHtml(capability.name)}</code></td>
+    <td><code>${escapeHtml(capability.code)}</code></td>
     <td>${builtinToolDetails(capability)}</td>
     <td><span class="builtin-default-badge${capability.default_enabled ? " enabled" : ""}">${defaultLabel}</span></td>
     <td>${escapeHtml(capability.description || "—")}</td>
@@ -46,11 +43,7 @@ function renderBuiltinCapabilities(capabilities) {
   if (!tbody) return;
   const builtins = (capabilities || [])
     .filter(isManagedBuiltinCapability)
-    .sort(
-      (left, right) =>
-        ["native", "attachment"].indexOf(left.kind) -
-        ["native", "attachment"].indexOf(right.kind),
-    );
+    .sort((left, right) => left.code.localeCompare(right.code));
   if (!builtins.length) {
     tbody.innerHTML = `<tr><td colspan="5" class="empty-cell">暂无可展示的内置工具</td></tr>`;
     return;

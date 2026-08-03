@@ -30,7 +30,7 @@ test_model = text_only_model("ok")
 test_model = tool_call_model("builtin__confirm", text="done after confirm")
 ```
 
-- `TestModel` 默认 `call_tools='all'`，会调用 Agent 实际挂载的**每一个** tool。内置 UI 工具也必须在 `capabilities` 中显式选择；`capabilities=null`、`[]` 或未包含相应 `ui:<name>` 时不会挂载。
+- `TestModel` 默认 `call_tools='all'`，会调用 Agent 实际挂载的**每一个** tool。UI 工具必须通过 `capabilities` 选择所属工具包，例如 `ui:builtin` 或 `ui:deepcube`；`null`只使用默认包，`[]` 不挂载任何可选包。
 - `text_only_model` / `tool_call_model`：见 [`helpers/models.py`](helpers/models.py)。
 - `custom_output_text`：tool 执行后的最终回复文本。
 
@@ -160,5 +160,5 @@ python3.12 -m unittest discover -s tests/integration -p "test_*.py" -v
 - [ ] LLM 使用 `text_only_model` / `tool_call_model`，勿裸用 `TestModel()`（默认 `call_tools='all'`）
 - [ ] HTTP 测试用 `TestClient` 的 `headers=` 传白名单内 header
 - [ ] MCP 断言在 **server 侧**（落盘 / 返回值），不只断言 HTTP 200
-- [ ] 至少一条负例（无 header / 错误 capability）
+- [ ] 至少一条负例（无 header / 错误 Tool Package 编码）
 - [ ] 若测 stream，override `get_db` 并消费 SSE

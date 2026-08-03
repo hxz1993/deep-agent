@@ -20,7 +20,7 @@ from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.models import DeepSeekChatModel, OpenAICompatibleVideoChatModel
 from deep_agent.agent.models.deepseek_thinking_retry import DeepSeekThinkingRetry
 from deep_agent.agent.spec import AgentSpec
-from deep_agent.capabilities.registry import CapabilityRegistry
+from deep_agent.capabilities.registry import ToolPackageRegistry
 from deep_agent.options import OPTION
 
 _OPENAI_PREFIXES = {"openai", "openai-chat"}
@@ -141,56 +141,41 @@ def resolve_model(spec: AgentSpec) -> str | Model:
 _resolve_model = resolve_model
 
 
-def _toolset_id(toolset: Any) -> str | None:
-    toolset_id = getattr(toolset, "id", None)
-    if toolset_id is not None:
-        return str(toolset_id)
-    wrapped = getattr(toolset, "wrapped", None)
-    if wrapped is not None:
-        return _toolset_id(wrapped)
-    return None
-
-
 def _toolsets_for_spec(
-    registry: CapabilityRegistry,
+    registry: ToolPackageRegistry,
     spec: AgentSpec,
     *,
     mcp_toolsets: list[Any] | None = None,
-    dynamic_ui_toolset: Any | None = None,
+    dynamic_ui_toolsets: list[Any] | None = None,
     mcp_resource_toolset: Any | None = None,
 ) -> list[Any]:
-    """Resolve capability toolsets and include UI tools for HITL."""
+    """Resolve selected product tool packages into Pydantic AI toolsets."""
     toolsets = list(registry.toolsets(spec.capabilities))
     if mcp_toolsets:
         toolsets.extend(mcp_toolsets)
     if mcp_resource_toolset is not None:
         toolsets.append(mcp_resource_toolset)
 
-    if dynamic_ui_toolset is not None:
-        toolsets = [toolset for toolset in toolsets if _toolset_id(toolset) != "ui"]
-        toolsets.append(dynamic_ui_toolset)
-        return toolsets
-
-    if spec.capabilities is not None and "ui" not in spec.capabilities and "ui" in registry.names():
-        toolsets.append(registry.get("ui").toolset)
+    if dynamic_ui_toolsets:
+        toolsets.extend(dynamic_ui_toolsets)
     return toolsets
 
 
 def build_agent(
     spec: AgentSpec,
-    registry: CapabilityRegistry,
+    registry: ToolPackageRegistry,
     *,
     request_retries: int = 2,
     mcp_toolsets: list[Any] | None = None,
-    dynamic_ui_toolset: Any | None = None,
+    dynamic_ui_toolsets: list[Any] | None = None,
     mcp_resource_toolset: Any | None = None,
     context_compaction: AbstractCapability[AgentDeps] | None = None,
 ) -> Agent[AgentDeps, str]:
-    """Construct a Pydantic AI agent from a spec + the capability registry.
+    """Construct a Pydantic AI agent from a spec + the tool package registry.
 
     The model string (e.g. "openai:gpt-4o") selects the provider, so switching
     providers needs only a config change. Set ``base_url``/``api_key`` on the
-    spec to target an OpenAI-compatible endpoint. Capability instructions ride
+    spec to target an OpenAI-compatible endpoint. Tool-package instructions ride
     along with their toolsets and are injected automatically when enabled.
     """
     model = _resolve_model(spec)
@@ -198,7 +183,7 @@ def build_agent(
         registry,
         spec,
         mcp_toolsets=mcp_toolsets,
-        dynamic_ui_toolset=dynamic_ui_toolset,
+        dynamic_ui_toolsets=dynamic_ui_toolsets,
         mcp_resource_toolset=mcp_resource_toolset,
     )
     capabilities: list[AbstractCapability[AgentDeps]] = []

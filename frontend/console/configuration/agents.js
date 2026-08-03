@@ -2,53 +2,42 @@ function chatUrlForAgent(id) {
   return window.DeepAgentConsoleAPI.consoleUrl(`?agent_id=${encodeURIComponent(id)}#/workspace`);
 }
 
-const KIND_LABELS = {
-  native: "Native",
+const CATEGORY_LABELS = {
+  builtin: "内置",
   skill: "Skills",
   mcp: "MCP",
-  attachment: "Attachment",
-  ui: "UI（内置）",
-  "ui-client": "UI 工具",
+  ui: "UI 工具",
 };
 
 const GROUP_LABELS = {
   builtin: "内置工具",
   skill: "Skills",
   mcp: "MCP",
-  ui: "UI（内置）",
-  "ui-client": "UI 工具",
+  ui: "UI 工具",
 };
 
-const GROUP_ORDER = ["builtin", "ui", "ui-client", "skill", "mcp"];
+const GROUP_ORDER = ["builtin", "mcp", "ui", "skill"];
 
-function capabilityGroup(capability) {
-  if (["native", "attachment"].includes(capability.kind)) return "builtin";
-  return capability.kind;
+function capabilityGroup(toolPackage) {
+  return toolPackage.category;
 }
 
-function capDisplayName(name, kind) {
-  if (kind === "mcp" && name.startsWith("mcp:")) {
-    return name.slice(4);
+function capDisplayName(code, category) {
+  if (category === "mcp" && code.startsWith("mcp:")) {
+    return code.slice(4);
   }
-  if (kind === "ui-client" && name.startsWith("ui:")) {
-    return name.slice(3);
+  if (category === "ui" && code.startsWith("ui:")) {
+    return code.slice(3);
   }
-  return name;
+  return code;
 }
 
 function capKindLabel(cap) {
-  if (["native", "attachment"].includes(cap.kind)) {
-    return KIND_LABELS[cap.kind];
-  }
-  if (cap.kind !== "ui-client") return KIND_LABELS[cap.kind] || cap.kind;
-  if (cap.source === "builtin") return "内置";
-  if (cap.source === "manual") return "MANUAL";
-  if (cap.source === "mcp") return "MCP";
-  return KIND_LABELS[cap.kind];
+  return CATEGORY_LABELS[cap.category] || cap.category;
 }
 
 function isCapabilitySelected(cap, selectedSet) {
-  return Boolean(cap.locked) || selectedSet.has(cap.name);
+  return selectedSet.has(cap.code);
 }
 
 function groupCapabilities(caps) {
@@ -65,7 +54,7 @@ function groupCapabilities(caps) {
 }
 
 function defaultEnabledCapabilityNames(caps) {
-  return (caps || []).filter((c) => c.default_enabled && !c.locked).map((c) => c.name);
+  return (caps || []).filter((c) => c.default_enabled && c.enabled !== false).map((c) => c.code);
 }
 
 function formatCapabilitiesPreview(capabilities) {
@@ -134,11 +123,11 @@ const agentsAdmin = {
 
   renderCapCard(cap, selectedSet) {
     const checked = isCapabilitySelected(cap, selectedSet);
-    const displayName = cap.label || capDisplayName(cap.name, cap.kind);
+    const displayName = cap.label || capDisplayName(cap.code, cap.category);
     const kindLabel = capKindLabel(cap);
     const toolCount = cap.tools?.length || 0;
-    const searchText = `${displayName} ${cap.description || ""} ${cap.name}`.toLowerCase();
-    const locked = Boolean(cap.locked);
+    const searchText = `${displayName} ${cap.description || ""} ${cap.code}`.toLowerCase();
+    const disabled = cap.enabled === false;
 
     const toolsHtml = toolCount
       ? `<details class="cap-card-tools">
@@ -152,15 +141,15 @@ const agentsAdmin = {
         </details>`
       : "";
 
-    return `<article class="cap-card kind-${escapeHtml(cap.kind)}${locked ? " is-locked" : ""}" data-cap-name="${escapeHtml(cap.name)}" data-search="${escapeHtml(searchText)}">
+    return `<article class="cap-card kind-${escapeHtml(cap.category)}${disabled ? " is-locked" : ""}" data-cap-name="${escapeHtml(cap.code)}" data-search="${escapeHtml(searchText)}">
       <div class="cap-card-header">
-        <label class="cap-switch" title="${locked ? "默认启用，不可关闭" : checked ? "已启用" : "未启用"}">
-          <input type="checkbox" name="cap" value="${escapeHtml(cap.name)}" ${checked ? "checked" : ""} ${locked ? "disabled data-locked=\"true\"" : ""} />
+        <label class="cap-switch" title="${disabled ? "工具包已停用" : checked ? "已启用" : "未启用"}">
+          <input type="checkbox" name="cap" value="${escapeHtml(cap.code)}" ${checked ? "checked" : ""} ${disabled ? "disabled" : ""} />
           <span class="cap-switch-ui"></span>
         </label>
         <div class="cap-card-info">
           <div class="cap-card-title">
-          <span class="kind-badge kind-${escapeHtml(cap.kind)} source-${escapeHtml(cap.source || "unknown")}">${escapeHtml(kindLabel)}</span>
+          <span class="kind-badge kind-${escapeHtml(cap.category)} source-${escapeHtml(cap.source || "unknown")}">${escapeHtml(kindLabel)}</span>
             <span>${escapeHtml(displayName)}</span>
           </div>
           ${cap.description ? `<p class="cap-card-desc">${escapeHtml(cap.description)}</p>` : ""}
@@ -306,7 +295,7 @@ const agentsAdmin = {
         (capability) => capabilityGroup(capability) === group,
       );
       const groupSelected = groupCapabilities.filter((capability) =>
-        selectedSet.has(capability.name),
+        selectedSet.has(capability.code),
       ).length;
       badge.textContent = `${groupSelected}/${groupCapabilities.length}`;
     });

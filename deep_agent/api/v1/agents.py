@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from deep_agent.core.context import AppContextDep
+from deep_agent.capabilities.catalog import invalid_tool_package_codes
 from deep_agent.db.deps import get_agent_store, get_llm_model_store
 from deep_agent.db.ids import normalize_agent_id
 from deep_agent.db.stores.agent import AgentStoreBase
@@ -38,6 +39,21 @@ async def _ensure_model_exists(model_store: LlmModelStoreBase, model_id: str) ->
     return normalized_id
 
 
+async def _validate_tool_packages(
+    capabilities: list[str] | None,
+    ctx: AppContextDep,
+) -> None:
+    invalid = await invalid_tool_package_codes(capabilities, ctx.registry, ctx.stores)
+    if invalid:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "message": "Agent 包含未知、禁用或不存在的工具包",
+                "invalid_tool_packages": invalid,
+            },
+        )
+
+
 @router.get("/agents", response_model=list[AgentResponse])
 async def list_agents(
     store: AgentStoreBase = Depends(get_agent_store),
@@ -61,9 +77,11 @@ async def get_agent(
 @router.post("/agents", response_model=AgentResponse, status_code=status.HTTP_201_CREATED)
 async def create_agent(
     body: AgentCreate,
+    ctx: AppContextDep,
     store: AgentStoreBase = Depends(get_agent_store),
     model_store: LlmModelStoreBase = Depends(get_llm_model_store),
 ) -> AgentResponse:
+    await _validate_tool_packages(body.capabilities, ctx)
     normalized_model_id = await _ensure_model_exists(model_store, body.model_id)
     body = body.model_copy(update={"model_id": normalized_model_id})
     existing = await store.get_by_name(body.name)
@@ -80,9 +98,12 @@ async def create_agent(
 async def update_agent(
     agent_id: str,
     body: AgentUpdate,
+    ctx: AppContextDep,
     store: AgentStoreBase = Depends(get_agent_store),
     model_store: LlmModelStoreBase = Depends(get_llm_model_store),
 ) -> AgentResponse:
+    if "capabilities" in body.model_fields_set:
+        await _validate_tool_packages(body.capabilities, ctx)
     if body.model_id is not None:
         normalized_model_id = await _ensure_model_exists(model_store, body.model_id)
         body = body.model_copy(update={"model_id": normalized_model_id})

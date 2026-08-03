@@ -31,29 +31,27 @@ function loadAgentConfigurationUi() {
 test("新建和历史 null 能力配置不选择内置 UI 工具", () => {
   const ui = loadAgentConfigurationUi();
   const selected = ui.buildCapabilitySelectionSet(null, [
-    { name: "native", default_enabled: true },
-    { name: "skill:optional", default_enabled: false },
-    { name: "ui:builtin__confirm", default_enabled: false, locked: false },
-    { name: "ui:builtin__choice", default_enabled: false, locked: false },
+    { code: "builtin:general", default_enabled: true, enabled: true },
+    { code: "skill:optional", default_enabled: false, enabled: true },
+    { code: "ui:builtin", default_enabled: false, enabled: true },
   ]);
 
-  assert.deepEqual([...selected], ["native"]);
+  assert.deepEqual([...selected], ["builtin:general"]);
 });
 
 test("内置 UI 工具与手工 UI 工具使用相同可选能力编码", () => {
   const ui = loadAgentConfigurationUi();
   const selected = ui.buildCapabilitySelectionSet(
-    ["ui:builtin__confirm", "ui:demo__form"],
+    ["ui:builtin", "ui:demo"],
     [
-      { name: "ui:builtin__confirm", default_enabled: false, locked: false },
-      { name: "ui:builtin__choice", default_enabled: false, locked: false },
-      { name: "ui:demo__form", default_enabled: false, locked: false },
+      { code: "ui:builtin", default_enabled: false, enabled: true },
+      { code: "ui:demo", default_enabled: false, enabled: true },
     ],
   );
 
   assert.deepEqual(
     [...selected],
-    ["ui:builtin__confirm", "ui:demo__form"],
+    ["ui:builtin", "ui:demo"],
   );
 });
 
@@ -64,42 +62,41 @@ test("新建 Agent 使用 null 初始化默认能力而不是空数组", () => {
   );
 });
 
-test("Native 和 Attachment 合并为内置工具分组但保持独立编码", () => {
+test("后端 category 直接驱动工具包分组", () => {
   const ui = loadAgentConfigurationUi();
   const grouped = ui.groupCapabilities([
-    { name: "native", kind: "native", label: "通用工具" },
-    { name: "attachment", kind: "attachment", label: "附件读取" },
-    { name: "mcp:demo", kind: "mcp" },
+    { code: "builtin:general", category: "builtin", label: "通用工具" },
+    { code: "builtin:attachment", category: "builtin", label: "附件读取" },
+    { code: "mcp:demo", category: "mcp" },
   ]);
 
   assert.deepEqual([...grouped.groups], ["builtin", "mcp"]);
   assert.deepEqual(
-    Array.from(grouped.byGroup.builtin, (capability) => capability.name),
-    ["native", "attachment"],
+    Array.from(grouped.byGroup.builtin, (toolPackage) => toolPackage.code),
+    ["builtin:general", "builtin:attachment"],
   );
-  assert.equal(ui.capabilityGroup({ kind: "native" }), "builtin");
-  assert.equal(ui.capabilityGroup({ kind: "attachment" }), "builtin");
-  assert.equal(ui.capabilityGroup({ kind: "mcp" }), "mcp");
+  assert.equal(ui.capabilityGroup({ category: "builtin" }), "builtin");
+  assert.equal(ui.capabilityGroup({ category: "mcp" }), "mcp");
 });
 
 test("Agent 内置工具卡片优先展示中文名称和技术类型", () => {
   const ui = loadAgentConfigurationUi();
   const card = ui.window.agentsAdmin.renderCapCard(
     {
-      name: "native",
-      kind: "native",
+      code: "builtin:general",
+      category: "builtin",
       label: "通用工具",
       source: "builtin",
       description: "进程内通用工具",
       default_enabled: true,
       tools: [{ name: "get_current_time", description: "获取当前 UTC 时间。" }],
     },
-    new Set(["native"]),
+    new Set(["builtin:general"]),
   );
 
   assert.match(card, /通用工具/);
-  assert.match(card, /Native/);
-  assert.match(card, /value="native"/);
+  assert.match(card, /内置/);
+  assert.match(card, /value="builtin:general"/);
   assert.match(card, /get_current_time/);
 });
 

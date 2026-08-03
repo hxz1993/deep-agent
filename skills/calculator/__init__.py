@@ -57,5 +57,5 @@ SKILL = Skill(
     name="calculator",
     description="Safe arithmetic expression evaluation.",
     toolset=_toolset,
-    tools=[ToolInfo("calculate", "Evaluate an arithmetic expression.")],
+    tools=[ToolInfo("calculate", "计算表达式", "Evaluate an arithmetic expression.")],
 )

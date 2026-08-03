@@ -165,9 +165,32 @@
     <section class="panel" id="panel-ui-tools">
       <div class="panel-toolbar">
         <h2>UI 工具（HITL）</h2>
-        <button class="btn primary" id="newUiToolBtn">＋ 手工注册</button>
+        <div class="row-actions">
+          <button class="btn" id="newUiToolPackageBtn">＋ 新建工具包</button>
+          <button class="btn primary" id="newUiToolBtn">＋ 新建工具</button>
+        </div>
+      </div>
+      <p class="panel-subtitle">先管理工具包，再在选中的手工工具包中维护 UI 工具；Agent 按工具包整体启用。</p>
+      <div class="table-wrap ui-tool-packages-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>工具包</th>
+              <th>编码</th>
+              <th>来源</th>
+              <th>状态</th>
+              <th>工具数</th>
+              <th>说明</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="uiToolPackagesTableBody">
+            <tr><td colspan="7" class="empty-cell">加载中…</td></tr>
+          </tbody>
+        </table>
       </div>
       <div class="filter-bar" id="uiToolsFilters">
+        <strong id="selectedUiToolPackageLabel">全部工具</strong>
         <label class="inline-field">
           <span>来源</span>
           <select id="uiToolFilterSource" class="filter-select">
@@ -191,6 +214,7 @@
           <thead>
             <tr>
               <th>名称</th>
+              <th>所属工具包</th>
               <th>来源</th>
               <th>Widget</th>
               <th>启用</th>
@@ -200,7 +224,7 @@
             </tr>
           </thead>
           <tbody id="uiToolsTableBody">
-            <tr><td colspan="7" class="empty-cell">加载中…</td></tr>
+            <tr><td colspan="8" class="empty-cell">加载中…</td></tr>
           </tbody>
         </table>
       </div>
@@ -466,6 +490,39 @@
     </form>
   </dialog>
 
+  <!-- UI tool package modal -->
+  <dialog class="modal" id="uiToolPackageModal">
+    <form id="uiToolPackageForm" method="dialog">
+      <div class="modal-header">
+        <h3 id="uiToolPackageModalTitle">新建 UI 工具包</h3>
+        <button type="button" class="icon-btn" id="closeUiToolPackageModal">✕</button>
+      </div>
+      <div class="modal-body">
+        <label class="field">
+          <span>工具包编码</span>
+          <input type="text" id="uiToolPackageEditCode" required pattern="ui:[a-z][a-z0-9_-]{1,120}" placeholder="ui:spreadsheet" />
+        </label>
+        <label class="field">
+          <span>显示名称</span>
+          <input type="text" id="uiToolPackageLabel" required />
+        </label>
+        <label class="field">
+          <span>说明</span>
+          <textarea id="uiToolPackageDescription" rows="3"></textarea>
+        </label>
+        <label class="field checkbox-field">
+          <input type="checkbox" id="uiToolPackageEnabled" checked />
+          <span>启用</span>
+        </label>
+      </div>
+      <div class="form-error hidden" data-form-error role="alert" aria-live="assertive"></div>
+      <div class="modal-footer">
+        <button type="button" class="btn" id="cancelUiToolPackageBtn">取消</button>
+        <button type="submit" class="btn primary">保存</button>
+      </div>
+    </form>
+  </dialog>
+
   <!-- UI tool modal -->
   <dialog class="modal modal-wide" id="uiToolModal">
     <form id="uiToolForm" method="dialog">
@@ -485,6 +542,10 @@
         <label class="field">
           <span>名称</span>
           <input type="text" id="uiToolName" required pattern="[a-z][a-z0-9_]{1,120}" placeholder="myapp__ask_confirm" />
+        </label>
+        <label class="field">
+          <span>所属工具包</span>
+          <select id="uiToolPackageCode" required></select>
         </label>
         <label class="field">
           <span>描述</span>

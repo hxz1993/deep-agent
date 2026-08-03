@@ -12,20 +12,23 @@ class ProductVersionTests(unittest.IsolatedAsyncioTestCase):
     async def test_package_fastapi_and_info_share_one_version(self) -> None:
         ctx = SimpleNamespace(
             stores=object(),
-            registry=SimpleNamespace(names=lambda: ["native", "attachment"]),
+            registry=SimpleNamespace(codes=lambda: ["builtin:general", "builtin:attachment"]),
         )
         with patch(
-            "deep_agent.main.load_mcp_capabilities",
+            "deep_agent.main.selectable_tool_package_codes",
             new_callable=AsyncMock,
-            return_value=[],
+            return_value={"builtin:general", "builtin:attachment", "ui:builtin"},
         ):
             payload = await info(ctx)
 
-        self.assertEqual(__version__, "0.3.1")
+        self.assertEqual(__version__, "0.3.2")
         self.assertEqual(app.version, __version__)
         self.assertEqual(payload["name"], "DeepAgent")
         self.assertEqual(payload["version"], __version__)
-        self.assertEqual(payload["capabilities"], ["native", "attachment"])
+        self.assertEqual(
+            payload["capabilities"],
+            ["builtin:attachment", "builtin:general", "ui:builtin"],
+        )
 
 
 if __name__ == "__main__":

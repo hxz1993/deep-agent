@@ -10,6 +10,8 @@ from deep_agent.capabilities import build_registry
 from deep_agent.capabilities.mcp.lease_manager import McpLeaseManager
 from deep_agent.core.context import AppContext, get_context, init_context, reset_context
 from deep_agent.db.models import McpServer
+from deep_agent.schemas.mcp import McpServerUpdate
+from deep_agent.schemas.ui_tools import UiToolPackageCreate
 from tests.helpers.sqlite_stores import make_sqlite_stores
 
 
@@ -29,6 +31,13 @@ class ConfigurationCrudContractTests(unittest.IsolatedAsyncioTestCase):
         )
         self._transport = ASGITransport(app=self._app, raise_app_exceptions=False)
         self._model_id = (await self.stores.llm_model.list_all())[0].id
+        await self.stores.ui_tool_package.create_manual(
+            UiToolPackageCreate(
+                code="ui:contracts",
+                label="Contract tools",
+                description="Integration-test UI tool package",
+            )
+        )
 
     async def asyncTearDown(self) -> None:
         await get_context().event_persister.aclose()
@@ -59,6 +68,7 @@ class ConfigurationCrudContractTests(unittest.IsolatedAsyncioTestCase):
                 "/api/v1/ui-tools",
                 json={
                     "name": "audit_blank",
+                    "package_code": "ui:contracts",
                     "description": "   ",
                     "parameters_json_schema": {"type": "object"},
                 },
@@ -105,6 +115,7 @@ class ConfigurationCrudContractTests(unittest.IsolatedAsyncioTestCase):
                 "/api/v1/ui-tools",
                 json={
                     "name": "contract_tool",
+                    "package_code": "ui:contracts",
                     "description": "keep description",
                     "parameters_json_schema": {"type": "object"},
                     "enabled": True,
@@ -161,6 +172,7 @@ class ConfigurationCrudContractTests(unittest.IsolatedAsyncioTestCase):
                 "/api/v1/ui-tools",
                 json={
                     "name": "invalid_result",
+                    "package_code": "ui:contracts",
                     "description": "invalid result",
                     "parameters_json_schema": {"type": "object"},
                     "result_schema": {"type": 123},
@@ -225,6 +237,7 @@ class ConfigurationCrudContractTests(unittest.IsolatedAsyncioTestCase):
                 "/api/v1/ui-tools",
                 {
                     "name": "duplicate_tool",
+                    "package_code": "ui:contracts",
                     "description": "duplicate",
                     "parameters_json_schema": {"type": "object"},
                 },
@@ -237,6 +250,30 @@ class ConfigurationCrudContractTests(unittest.IsolatedAsyncioTestCase):
                     duplicate = await client.post(path, json=payload)
                     self.assertEqual(created.status_code, 201, created.text)
                     self.assertEqual(duplicate.status_code, 409, duplicate.text)
+
+    async def test_agent_rejects_unknown_and_disabled_tool_packages(self) -> None:
+        async with AsyncClient(transport=self._transport, base_url="http://test") as client:
+            disabled = await client.post(
+                "/api/v1/ui-tool-packages",
+                json={"code": "ui:disabled", "label": "Disabled", "enabled": False},
+            )
+            self.assertEqual(disabled.status_code, 201, disabled.text)
+            for code in ("ui:missing", "ui:disabled"):
+                with self.subTest(code=code):
+                    response = await client.post(
+                        "/api/v1/agents",
+                        json={
+                            "name": f"invalid-{code.split(':')[-1]}",
+                            "model_id": self._model_id,
+                            "prompt": "invalid package",
+                            "capabilities": [code],
+                        },
+                    )
+                    self.assertEqual(response.status_code, 422, response.text)
+                    self.assertEqual(
+                        response.json()["detail"]["invalid_tool_packages"],
+                        [code],
+                    )
 
     async def test_historical_stdio_mcp_is_readable_but_cannot_be_updated(self) -> None:
         async with self.stores.mcp._write() as db:
@@ -279,9 +316,14 @@ class ConfigurationCrudContractTests(unittest.IsolatedAsyncioTestCase):
                 "/api/v1/ui-tools",
                 json={
                     "name": "referenced_tool",
+                    "package_code": "ui:contracts",
                     "description": "referenced",
                     "parameters_json_schema": {"type": "object"},
                 },
+            )
+            await self.stores.mcp.update(
+                "referenced_mcp",
+                McpServerUpdate(enabled=True),
             )
             agent = await client.post(
                 "/api/v1/agents",
@@ -291,7 +333,7 @@ class ConfigurationCrudContractTests(unittest.IsolatedAsyncioTestCase):
                     "prompt": "owner",
                     "capabilities": [
                         "mcp:referenced_mcp",
-                        "ui:referenced_tool",
+                        "ui:contracts",
                     ],
                 },
             )

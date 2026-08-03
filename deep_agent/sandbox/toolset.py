@@ -5,12 +5,12 @@ import uuid
 from pydantic_ai import FunctionToolset, ModelRetry, RunContext
 
 from deep_agent.agent.deps import AgentDeps
-from deep_agent.capabilities.registry import Capability, ToolInfo
+from deep_agent.capabilities.registry import ToolInfo, ToolPackage
 from deep_agent.sandbox.backend import PythonExecutionBackend
 from deep_agent.sandbox.profile import ResolvedSandboxProfile, format_profile_tool_instructions
 from deep_agent.sandbox.types import ExecuteRequest, JsonValue
 
-__all__ = ["build_python_sandbox_capability"]
+__all__ = ["build_python_sandbox_tool_package"]
 
 _FALLBACK_INSTRUCTIONS = (
     "每次调用 execute_python 都会启动全新的 Python 执行环境，不保留变量、"
@@ -20,12 +20,12 @@ _FALLBACK_INSTRUCTIONS = (
 )
 
 
-def build_python_sandbox_capability(
+def build_python_sandbox_tool_package(
     backend: PythonExecutionBackend,
     *,
     timeout_sec: float,
     sandbox_profile: ResolvedSandboxProfile | None = None,
-) -> Capability:
+) -> ToolPackage:
     timeout_ms = int(timeout_sec * 1000)
 
     async def execute_python(
@@ -62,16 +62,17 @@ def build_python_sandbox_capability(
         tools=[execute_python],
     )
 
-    return Capability(
-        name="python-sandbox",
-        kind="native",
-        toolset=toolset,
-        label="Python 沙箱",
+    return ToolPackage(
+        code="builtin:general",
+        category="builtin",
+        toolsets=[toolset],
+        label="通用工具",
         source="builtin",
         description="在无状态 Python 环境中执行数据计算代码。",
         tools=[
             ToolInfo(
                 "execute_python",
+                "执行 Python",
                 "执行一次性 Python 代码；最后一行表达式进入 result，print 仅进入 stdout。",
             ),
         ],

@@ -15,7 +15,7 @@ DeepAgent 向模型暴露 `execute_python`：每次 Tool Call 在**全新**完�
 
 | 阶段 | 状态 | 内容 |
 | --- | --- | --- |
-| **A** · `subprocess-dev` | **完成** | 契约、Worker、Capability、health、独立 sandbox venv、`pydata`、rlimit、启用硬门槛、soft guardrails（seccomp 禁网 + Landlock 可写收束）；仍 `security_level=none` |
+| **A** · `subprocess-dev` | **完成** | 契约、Worker、Toolset、health、独立 sandbox venv、`pydata`、rlimit、启用硬门槛、soft guardrails（seccomp 禁网 + Landlock 可写收束）；仍 `security_level=none` |
 | **B** · 安全 Backend 资格 | **探针代码已交付**；WSL 宿主预演 `selection_eligible=true`（见 [`wsl-prequalification.md`](wsl-prequalification.md)）；**目标 K8s 节点签字未完成** |
 | **C** · 安全 Backend | **阻塞于 B** | go-judge（首选）或 NsJail Adapter |
 
@@ -36,7 +36,7 @@ curl -s http://127.0.0.1:8000/api/v1/health/sandbox
 
 | 项 | 决策 |
 | --- | --- |
-| Capability | `python-sandbox`，`default_enabled=false`，Agent **显式勾选** |
+| 工具包 | v0.3.2 起并入 `builtin:general`，与 `get_current_time` 整包默认启用 |
 | 平台默认 | `SANDBOX_ENABLED=true`，`BACKEND=subprocess-dev` |
 | 安全 Backend 失败 | 返回 `BACKEND_UNAVAILABLE`，**禁止**自动降到 `subprocess-dev` |
 
@@ -90,7 +90,7 @@ curl -s http://127.0.0.1:8000/api/v1/health/sandbox
 ## 4. 当前实现语义
 
 ```text
-模型 → python-sandbox → execute_python(code, inputs)
+模型 → builtin:general → execute_python(code, inputs)
      → PythonExecutionBackend
           ├─ SubprocessBackend     ← 现状（联调默认）
           └─ SecureLinuxBackend    ← 阶段 C（未实现）
@@ -145,7 +145,7 @@ venv 创建：`bash scripts/sandbox_venv/setup.sh`。Profile：`deep_agent/sandb
 | `deep_agent/sandbox/types.py` · `backend.py` | 契约 / Protocol |
 | `framing.py` · `worker.py` · `serialization.py` | 单 frame JSON · 一次性执行 · singledispatch 序列化 |
 | `subprocess_dev/` | 子进程生命周期 · rlimit · soft seccomp/Landlock |
-| `toolset.py` · `factory.py` · `profile.py` | Capability · 工厂 · Profile |
+| `toolset.py` · `factory.py` · `profile.py` | Toolset 片段 · 工厂 · Profile |
 | `api/v1/sandbox.py` | `GET /api/v1/health/sandbox` |
 
 ---
@@ -155,7 +155,7 @@ venv 创建：`bash scripts/sandbox_venv/setup.sh`。Profile：`deep_agent/sandb
 ### 5.1 前置
 
 1. health：`enabled` / `smoke_ok` / `profile_ok` 为 true。
-2. Agent 能力勾选 **`python-sandbox`**（`capabilities: null` 不会加载）。
+2. Agent 启用 **`builtin:general`**；`capabilities: null` 会按默认规则加载该包。
 3. 建议系统指令要点：每次全新环境；表数据进 `inputs`；**最后一行用表达式**，勿用 `print` 收尾。
 
 排障：`ImportError: pandas` → 查 sandbox venv / health `missing_packages`；`result=null` 且有 stdout → 多半是 `print` 结尾；`security_level=none` 表示当前为开发 Backend。

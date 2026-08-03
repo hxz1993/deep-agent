@@ -48,7 +48,7 @@ class AgentCreate(_RejectLegacyMaxRequests):
     )
     capabilities: list[str] | None = Field(
         default=None,
-        description="Capability names to enable. Null uses default capabilities and no extension UI tools.",
+        description="Tool package codes to enable. Null uses default packages.",
     )
 
     @field_validator(*AGENT_REQUIRED_FIELDS)

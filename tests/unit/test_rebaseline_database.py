@@ -74,7 +74,7 @@ class RebaselineDatabaseTests(unittest.IsolatedAsyncioTestCase):
                 await asyncio.to_thread(
                     command.upgrade,
                     migrate._build_alembic_config(),
-                    "head",
+                    "001",
                 )
 
     @staticmethod

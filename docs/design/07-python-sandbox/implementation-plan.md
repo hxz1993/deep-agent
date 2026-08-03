@@ -10,7 +10,7 @@
 
 | 阶段 | 状态 | 备注 |
 | --- | --- | --- |
-| A · `subprocess-dev` | **完成** | 契约、Worker、Capability、health、独立 venv、`pydata`、rlimit、硬门槛、soft guardrails |
+| A · `subprocess-dev` | **完成** | 契约、Worker、Toolset、health、独立 venv、`pydata`、rlimit、硬门槛、soft guardrails |
 | B · 资格验证 | **探针代码完成**；WSL 预演 **通过**；K8s 节点签字 **未完成** | `scripts/sandbox_probe/` · [`wsl-prequalification.md`](wsl-prequalification.md) |
 | C · 安全 Backend | **阻塞于 B（K8s 签字）** | 凭 B 报告定 Adapter，禁止臆测实现 |
 
@@ -38,7 +38,7 @@
 | `deep_agent/sandbox/types.py` · `backend.py` | 请求/结果/错误/health · Protocol |
 | `framing.py` · `worker.py` · `serialization.py` | 单 frame · 一次性执行 · singledispatch 序列化 |
 | `subprocess_dev/` | 子进程 + rlimit + soft seccomp/Landlock |
-| `toolset.py` · `factory.py` · `profile.py` · `profiles/pydata.json` | Capability · 工厂 · Profile |
+| `toolset.py` · `factory.py` · `profile.py` · `profiles/pydata.json` | Toolset 片段 · 工厂 · Profile |
 | `options.py` · `core/context.py` · `capabilities/__init__.py` | 配置 · bootstrap 硬门槛 · 注册 |
 | `api/v1/sandbox.py` | health |
 | `scripts/sandbox_venv/` | 独立 venv 安装 |
@@ -55,7 +55,7 @@
 
 - frozen 契约与限额；无 runtime 生命周期 API；单 frame JSON；Worker 每调用一进程。
 - `SubprocessBackend`：白名单 env、临时目录、timeout/取消杀进程组、semaphore、health=`none`。
-- `python-sandbox` 默认关闭；显式勾选才暴露 `execute_python`；Tool Call/Result 进原始历史。
+- v0.3.2 起 `execute_python` 并入默认启用的 `builtin:general`；Tool Call/Result 仍进入原始历史。
 - 独立 sandbox 解释器（`SANDBOX_PYTHON`）；Profile `pydata`：`numpy>=1.26,<2` + `pandas`。
 - 资源帽：RSS→`RLIMIT_AS`（×3）、CPU；`MAX_PIDS` 默认 0；输出截断；health 含 `resource_limits`。
 - 启用时缺 venv/包 → bootstrap 失败；soft guardrails 仅本 Backend `preexec`，失败降级。

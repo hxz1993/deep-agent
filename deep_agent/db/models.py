@@ -169,10 +169,35 @@ class ChatSession(Base):
     )
 
 
+class UiToolPackage(Base):
+    __tablename__ = "ui_tool_packages"
+
+    code: Mapped[str] = mapped_column(KeyText, primary_key=True)
+    label: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source: Mapped[str] = mapped_column(String(16), nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+
 class UiToolDefinition(Base):
     __tablename__ = "ui_tool_definitions"
+    __table_args__ = (Index("ix_ui_tool_definitions_package_code", "package_code"),)
 
     name: Mapped[str] = mapped_column(KeyText, primary_key=True)
+    package_code: Mapped[str] = mapped_column(
+        KeyText,
+        ForeignKey("ui_tool_packages.code", ondelete="RESTRICT"),
+        nullable=False,
+    )
     description: Mapped[str] = mapped_column(Text, nullable=False)
     parameters_json_schema: Mapped[dict] = mapped_column(JSONType, nullable=False)
     widget: Mapped[str | None] = mapped_column(String(64), nullable=True)
@@ -187,6 +212,7 @@ class UiToolDefinition(Base):
         onupdate=func.now(),
         nullable=False,
     )
+    package: Mapped[UiToolPackage] = relationship("UiToolPackage", lazy="joined")
 
 
 class AuxiliaryModelConfig(Base):

@@ -29,7 +29,7 @@ def is_tool_visible(
 ) -> bool:
     if not record.enabled:
         return False
-    if capabilities is None or f"ui:{record.name}" not in capabilities:
+    if capabilities is None or record.package_code not in capabilities:
         return False
     return True
 
@@ -136,11 +136,16 @@ async def load_effective_ui_tools(
     spec: AgentSpec,
 ) -> EffectiveUiTools:
     db_rows = await stores.ui_tool.list_all(enabled=True)
+    enabled_packages = {
+        package.code
+        for package in await stores.ui_tool_package.list_all(enabled=True)
+    }
     db_records = [UIToolRecord.from_row(row) for row in db_rows if row.source == "manual"]
 
     visible_db = [
         record
         for record in db_records
+        if record.package_code in enabled_packages
         if is_tool_visible(
             record,
             capabilities=spec.capabilities,
@@ -172,10 +177,10 @@ async def load_selectable_ui_tools(
     return [record for record in merged if record.source == "manual"]
 
 
-async def prepare_ui_toolset_for_spec(
+async def prepare_ui_toolsets_for_spec(
     stores: DataStores,
     spec: AgentSpec,
-) -> tuple[ExternalToolset | None, dict[str, dict[str, Any]]]:
+) -> tuple[list[ExternalToolset], dict[str, dict[str, Any]]]:
     effective = await load_effective_ui_tools(stores, spec)
     valid_definitions: list[UIToolRecord] = []
     for definition in effective.definitions:
@@ -186,6 +191,11 @@ async def prepare_ui_toolset_for_spec(
             continue
         valid_definitions.append(definition)
     hints = build_tool_hints(valid_definitions)
-    if not valid_definitions:
-        return None, hints
-    return build_external_toolset(valid_definitions), hints
+    grouped: dict[str, list[UIToolRecord]] = {}
+    for definition in valid_definitions:
+        grouped.setdefault(definition.package_code, []).append(definition)
+    toolsets = [
+        build_external_toolset(definitions, toolset_id=f"ui-package:{package_code}")
+        for package_code, definitions in sorted(grouped.items())
+    ]
+    return toolsets, hints

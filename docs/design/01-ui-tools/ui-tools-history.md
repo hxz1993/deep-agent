@@ -6,8 +6,8 @@
 
 DeepAgent UI 工具最终只保留两种来源：
 
-- `builtin`：代码内置、只读、不可删除，但需要 Agent 通过 `ui:<name>` 显式选择。
-- `manual`：管理员在 Console 创建和维护，同样由 Agent 显式选择。
+- `builtin`：代码内置、只读、不可删除，归入 `ui:builtin` 工具包。
+- `manual`：管理员在 Console 创建包和包内工具，由 Agent 按包选择。
 
 当前内置工具为 `builtin__confirm` 和 `builtin__choice`。两者不是全局默认能力，
 未选择时不会进入模型工具列表。

@@ -10,10 +10,10 @@ from pydantic_ai.usage import RunUsage
 
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.capabilities import build_registry
-from deep_agent.capabilities.registry import CapabilityRegistry
+from deep_agent.capabilities.registry import ToolPackageRegistry
 from deep_agent.options import OPTION
 from deep_agent.sandbox.factory import SandboxInterpreterError, build_sandbox_backend
-from deep_agent.sandbox.toolset import build_python_sandbox_capability
+from deep_agent.sandbox.toolset import build_python_sandbox_tool_package
 from deep_agent.sandbox.types import (
     ExecuteRequest,
     ExecuteResult,
@@ -164,7 +164,7 @@ class SandboxBootstrapHardGateTests(unittest.IsolatedAsyncioTestCase):
                     "deep_agent.core.context.DefaultProfileVerifier.verify_strict",
                     new=AsyncMock(side_effect=ProfileMismatchError(probe)),
                 ),
-                patch("deep_agent.core.context.build_registry", return_value=CapabilityRegistry()),
+                patch("deep_agent.core.context.build_registry", return_value=ToolPackageRegistry()),
                 patch("deep_agent.core.context.EventPersister"),
             ):
                 with self.assertRaises(RuntimeError) as ctx:
@@ -200,7 +200,7 @@ class SandboxBootstrapHardGateTests(unittest.IsolatedAsyncioTestCase):
                 ) as verify,
                 patch(
                     "deep_agent.core.context.build_registry",
-                    return_value=CapabilityRegistry(),
+                    return_value=ToolPackageRegistry(),
                 ),
                 patch(
                     "deep_agent.core.context.EventPersister",
@@ -219,38 +219,44 @@ class SandboxBootstrapHardGateTests(unittest.IsolatedAsyncioTestCase):
 class SandboxRegistryTests(unittest.TestCase):
     def test_registry_excludes_capability_when_backend_missing(self) -> None:
         registry = build_registry()
-        self.assertNotIn("python-sandbox", registry.names())
+        self.assertEqual(
+            {item.name for item in registry.get("builtin:general").tools},
+            {"get_current_time"},
+        )
 
     def test_registry_includes_capability_when_backend_present(self) -> None:
         registry = build_registry(sandbox_backend=FakeSandboxBackend())
-        self.assertIn("python-sandbox", registry.names())
+        self.assertEqual(
+            {item.name for item in registry.get("builtin:general").tools},
+            {"get_current_time", "execute_python"},
+        )
 
 
 class SandboxCapabilityTests(unittest.IsolatedAsyncioTestCase):
     async def _tool(self, backend: FakeSandboxBackend):
-        capability = build_python_sandbox_capability(backend, timeout_sec=30.0)
-        tools = await capability.toolset.get_tools(_context())
-        return tools["execute_python"], capability
+        package = build_python_sandbox_tool_package(backend, timeout_sec=30.0)
+        tools = await package.toolsets[0].get_tools(_context())
+        return tools["execute_python"], package
 
     async def test_capability_metadata(self) -> None:
         backend = FakeSandboxBackend()
-        capability = build_python_sandbox_capability(backend, timeout_sec=30.0)
+        capability = build_python_sandbox_tool_package(backend, timeout_sec=30.0)
 
-        self.assertEqual(capability.name, "python-sandbox")
-        self.assertEqual(capability.kind, "native")
+        self.assertEqual(capability.code, "builtin:general")
+        self.assertEqual(capability.category, "builtin")
         self.assertFalse(capability.default_enabled)
         self.assertEqual(capability.source, "builtin")
         self.assertEqual({item.name for item in capability.tools}, {"execute_python"})
 
     async def test_only_explicit_selection_loads_tool(self) -> None:
         backend = FakeSandboxBackend()
-        capability = build_python_sandbox_capability(backend, timeout_sec=30.0)
-        registry = CapabilityRegistry()
+        capability = build_python_sandbox_tool_package(backend, timeout_sec=30.0)
+        registry = ToolPackageRegistry()
         registry.register(capability)
 
         self.assertEqual(registry.toolsets(None), [])
         self.assertEqual(registry.toolsets([]), [])
-        self.assertEqual(registry.toolsets(["python-sandbox"]), [capability.toolset])
+        self.assertEqual(registry.toolsets(["builtin:general"]), capability.toolsets)
 
     async def test_tool_signature_only_code_and_inputs(self) -> None:
         backend = FakeSandboxBackend()

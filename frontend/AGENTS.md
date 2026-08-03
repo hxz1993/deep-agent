@@ -26,15 +26,15 @@ frontend/
 | 功能 | 实现 |
 | --- | --- |
 | 流式对话 | `fetch` + `ReadableStream` 手动解析 SSE（非 `EventSource`，因需 POST） |
-| 附件上传 | `POST /api/v1/uploads`（multipart）→ 发送时仅传 `attachments[]` 引用；文档由 Agent 可选 `attachment` 工具按需读取 |
+| 附件上传 | `POST /api/v1/uploads`（multipart）→ 发送时仅传 `attachments[]` 引用；文档由 Agent 可选 `builtin:attachment` 工具包按需读取 |
 | 思考过程 UI | `thinking` 可折叠块，默认折叠；与 `text` 分离 |
 | 工具调用 UI | `tool_call` / `tool_result` 可折叠；同 `tool_call_id` 合并更新 |
-| HITL UI 工具 | 内置 `builtin__confirm` / `builtin__choice` + 手工 UI 工具；都由 Agent 显式选择，SSE / history 携带 `widget` / `metadata`；见 [`../docs/guides/ui-tools-external.md`](../docs/guides/ui-tools-external.md) |
+| HITL UI 工具 | `ui:builtin` + 数据库手工 UI 工具包；Agent 按包选择，SSE / history 仍使用稳定工具协议名并携带 `widget` / `metadata`；见 [`../docs/guides/ui-tools-external.md`](../docs/guides/ui-tools-external.md) |
 | Markdown | marked + DOMPurify + highlight.js |
 | 会话 | `session_id` 由后端 `session` 事件返回；`GET/DELETE /api/v1/sessions`；标题展示 `title \|\| user_prompt`（见 [`../docs/guides/experience/ai-title-generator.md`](../docs/guides/experience/ai-title-generator.md)） |
 | 能力面板 | `GET /api/v1/tools` |
 | 配置 | `localStorage` 只保存调试 App；全局环境配置只读展示，身份和鉴权由平台提供 |
-| 内置工具目录 | 配置中心只读展示 `native`、`attachment` 及运行时可用的 `python-sandbox`；在 Agent 中独立选择 |
+| 内置工具目录 | 配置中心只读展示 `builtin:general`、`builtin:attachment`；Agent 按包选择 |
 | 一体化控制台 | `/console/`；工作台、配置和诊断的唯一入口 |
 
 工作台默认在会话栏顶部用 Agent 下拉框切换；管理员可在当前页面内临时固定左侧 Agent
@@ -61,8 +61,8 @@ frontend/
 - SSE 解析、HITL 参数归一化和 Schema 文本校验分别位于 `protocol.js`、`hitl.js`、`schema-editor.js`，可由 Node 内置测试独立验证。
 - 控制台测试：`node --test tests/frontend/console/*.test.mjs`。
 - 配置中心默认打开 Agent；“全局配置”仍位于“辅助模型”后、模型资源分割线前，通过 `GET /api/v1/global-settings` 按需展示安全白名单，没有编辑或保存入口。
-- “内置工具”位于模型之后、MCP 服务之前，只读展示代码随版本发布的 Native 与
-  Attachment 能力包；页面没有注册、编辑、删除或全局启停入口。
+- “内置工具”位于模型之后、MCP 服务之前，只读展示代码随版本发布的通用工具与
+  附件读取工具包；页面没有注册、编辑、删除或全局启停入口。
 - Console 顶部只展示一处产品版本，通过同源 `GET /info` 读取
   `deep_agent.__version__`；配置中心的数据库结构 revision 是独立运维信息。
 - 配置中心左侧页签只在当前前端页面的模块内存中保留；工作台与配置中心之间切换会恢复上次页签，浏览器刷新后重新回到 Agent，不写入 LocalStorage 或后端。
@@ -144,13 +144,13 @@ python3.12 -m http.server 5173
 - 生产环境应收紧后端 CORS `allow_origins`
 - `tool_call` 首帧 `args` 可能为 `{}`，需按 `tool_call_id` 合并后续帧
 - 配置表单必须区分“主体保存失败”和“保存成功后的列表刷新失败”；后者保留成功结果并提示重新加载，不能让用户按新建模式重复提交。条件字段（如 URL MCP 的 URL）需要前端动态必填和后端 Schema 双重校验。
-- Agent 的 `capabilities: null` 表示使用系统默认能力，`[]` 表示明确不启用任何可选能力；新建表单必须按 `null` 初始化。删除 MCP 或 UI 工具若返回 `detail.referenced_by`，应直接展示引用它的 Agent 名称。
-- `builtin__confirm`、`builtin__choice` 是代码内置但非默认启用的普通 `ui:<name>` 能力；Agent 新建和历史回填不得自动勾选。choice 始终提供候选外自由输入，提交结果固定包含 `selected: string[]` 与 `custom_input: string | null`，二者不能同时为空。
+- Agent 的 `capabilities: null` 表示使用默认工具包，`[]` 表示明确不启用任何工具包；新建表单必须按 `null` 初始化。删除 MCP、UI 工具包或 UI 工具若返回 `detail.referenced_by`，应直接展示引用它的 Agent 名称。
+- `builtin__confirm`、`builtin__choice` 同属非默认启用的 `ui:builtin` 工具包；Agent 新建和历史回填不得自动勾选。choice 始终提供候选外自由输入，提交结果固定包含 `selected: string[]` 与 `custom_input: string | null`，二者不能同时为空。
 - MCP 新建页只允许 URL transport；历史 stdio 配置只读且不显示编辑入口。Builtin MCP 继续由仓库内程序配置管理，列表保留编辑入口但不显示删除按钮，后端删除接口也会拒绝。
 - 模型目录只由管理员手工刷新 models.dev，保存模型配置不得触发外网请求。目录按 Lab → Model → Provider 展示，仅负责预填；模态与能力 tags 分开，Agent 运行时只认 `llm_models`。
 - 上下文压缩在模型配置有效上下文窗口时自动启用；Console 只读展示全局策略、预算、
   压缩前后和 Checkpoint 状态，不提供启用开关，也不展示或编辑摘要正文。
-- `attachment` 是默认关闭的 Agent 能力。Console 从 `/uploads/capabilities` 读取实际 MIME、
+- `builtin:attachment` 是默认关闭的 Agent 工具包。Console 从 `/uploads/capabilities` 读取实际 MIME、
   单文件大小和单次数量限制；新请求不得再发送 `extracted_text`。工具分页协议和解析边界见
   [`../docs/design/06-attachment-parsing/`](../docs/design/06-attachment-parsing/)。
 - “新建测试会话”是管理员控制台的常驻入口；它位于会话搜索框和普通新建按钮之间，

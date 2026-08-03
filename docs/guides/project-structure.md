@@ -22,9 +22,9 @@ deep-agent/
 ```text
 FastAPI API
   -> 请求身份和上下文
-  -> AgentSpec 与能力解析
+  -> AgentSpec 与工具包解析
   -> Pydantic AI Agent
-  -> Native / Python Skill / MCP / UI Tool
+  -> ToolPackage 选择 -> Function / MCP / External Toolset
   -> SQL 会话与事件持久化
   -> SSE / JSON 响应
 ```
@@ -33,22 +33,26 @@ FastAPI API
 
 - `api/`：HTTP 接口和依赖组装。
 - `agent/`：模型、运行器、消息、附件和事件处理。
-- `capabilities/`：Native、Python Skill、MCP 和 UI Tool 适配。
+- `capabilities/`：工具包目录以及 Native、Python Skill、MCP、UI Toolset 适配。
 - `db/`：ORM、Store、会话协调和数据库连接。
 - `schemas/`：API 输入输出结构。
 - `core/`：应用上下文、日志和通用异常。
 
-## 能力边界
+## 工具包边界
 
-当前能力来源只有：
+当前工具包来源只有：
 
 | 名称 | 来源 | 用途 |
 | --- | --- | --- |
-| `native` | `deep_agent/capabilities/native/` | 内置“通用工具”，默认启用，当前提供 UTC 时间 |
-| `attachment` | `deep_agent/capabilities/attachments/` | 内置“附件读取”，Agent 显式启用的会话附件按需读取 |
+| `builtin:general` | `deep_agent/capabilities/native/` + `deep_agent/sandbox/` | 内置“通用工具”，默认启用，提供 UTC 时间和 Python 计算 |
+| `builtin:attachment` | `deep_agent/capabilities/attachments/` | 内置“附件读取”，Agent 显式启用的会话附件按需读取 |
 | `skill:<name>` | `skills/<name>/` | Instructions 与 Python 工具组合 |
 | `mcp:<name>` | 数据库或 `mcps/` | 外部或内置 MCP 工具 |
-| `ui:<name>` | 代码或数据库 | Agent 显式选择的 builtin/manual HITL 工具 |
+| `ui:builtin` | 代码 | 确认和候选选择 HITL 工具包 |
+| `ui:<package>` | `ui_tool_packages` + `ui_tool_definitions` | Agent 显式选择的手工 HITL 工具包 |
+
+分类只是 ToolPackage 的 `category` 字段；ToolPackage 是 Agent 配置单位，Toolset 是运行时
+交给 Pydantic AI 的对象。一个包可以贡献多个 Toolset，当前不提供包内逐工具授权。
 
 仓库不再读取 Cursor 的 `.cursor/skills`。原实现只是把 Cursor Markdown Skill
 适配成读取指令工具，与业务 Python Skill 不同。未来若需要长 Skill 按需加载，

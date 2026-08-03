@@ -6,15 +6,15 @@ from pathlib import Path
 from loguru import logger
 
 from deep_agent.capabilities.mcp.builtin_config import SERVER_FILENAME
-from deep_agent.capabilities.registry import Capability
+from deep_agent.capabilities.registry import ToolPackage
 
 
 @functools.lru_cache(maxsize=None)
-def load_builtin_mcp_capabilities(mcps_dir: str) -> list[Capability]:
+def load_builtin_mcp_tool_packages(mcps_dir: str) -> list[ToolPackage]:
     """Discover builtin MCP servers shipped under ``mcps/``.
 
     Each immediate subdirectory containing a ``server.py`` becomes one MCP
-    capability, launched lazily as a shared HTTP server in the pod.
+    tool package, launched lazily as a shared HTTP server in the pod.
     Tool names are prefixed with the directory name to avoid collisions. No subprocess
     is spawned here; the agent opens
     the connection on demand (``async with agent``).
@@ -26,7 +26,7 @@ def load_builtin_mcp_capabilities(mcps_dir: str) -> list[Capability]:
 
     from deep_agent.capabilities.mcp.toolset_builder import build_mcp_toolset
 
-    capabilities: list[Capability] = []
+    packages: list[ToolPackage] = []
     for entry in sorted(root.iterdir()):
         server_file = entry / SERVER_FILENAME
         if not (entry.is_dir() and server_file.is_file()):
@@ -34,11 +34,13 @@ def load_builtin_mcp_capabilities(mcps_dir: str) -> list[Capability]:
 
         name = entry.name
         server = build_mcp_toolset(name, "builtin", {})
-        capabilities.append(
-            Capability(
-                name=f"mcp:{name}",
-                kind="mcp",
-                toolset=server,
+        packages.append(
+            ToolPackage(
+                code=f"mcp:{name}",
+                category="mcp",
+                toolsets=[server],
+                label=name,
+                source="builtin",
                 description=f"Builtin MCP server '{name}'. Tools are prefixed with '{name}_'.",
                 tools=[],
                 default_enabled=False,
@@ -46,4 +48,4 @@ def load_builtin_mcp_capabilities(mcps_dir: str) -> list[Capability]:
         )
         logger.info("Loaded builtin MCP server {!r} ({})", name, server_file)
 
-    return capabilities
+    return packages

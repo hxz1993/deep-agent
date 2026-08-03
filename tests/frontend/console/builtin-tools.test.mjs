@@ -57,23 +57,19 @@ test("内置工具页位于模型之后和 MCP 之前", () => {
   assert.match(templateHtml, /内置工具随 DeepAgent 版本发布，无需注册/);
 });
 
-test("内置工具页只接受 Native 和 Attachment 后端能力", () => {
+test("内置工具页只接受后端 builtin 分类工具包", () => {
   const ui = loadBuiltinToolsUi();
 
   assert.equal(
-    ui.isManagedBuiltinCapability({ source: "builtin", kind: "native" }),
+    ui.isManagedBuiltinCapability({ source: "builtin", category: "builtin" }),
     true,
   );
   assert.equal(
-    ui.isManagedBuiltinCapability({ source: "builtin", kind: "attachment" }),
-    true,
-  );
-  assert.equal(
-    ui.isManagedBuiltinCapability({ source: "builtin", kind: "ui-client" }),
+    ui.isManagedBuiltinCapability({ source: "builtin", category: "ui" }),
     false,
   );
   assert.equal(
-    ui.isManagedBuiltinCapability({ source: null, kind: "mcp" }),
+    ui.isManagedBuiltinCapability({ source: null, category: "builtin" }),
     false,
   );
 });
@@ -81,8 +77,8 @@ test("内置工具页只接受 Native 和 Attachment 后端能力", () => {
 test("内置工具列表展示能力、工具和默认状态且没有管理操作", () => {
   const ui = loadBuiltinToolsUi();
   const row = ui.builtinCapabilityRow({
-    name: "native",
-    kind: "native",
+    code: "builtin:general",
+    category: "builtin",
     label: "通用工具",
     source: "builtin",
     description: "进程内通用工具。",
@@ -91,7 +87,8 @@ test("内置工具列表展示能力、工具和默认状态且没有管理操�
   });
 
   assert.match(row, /通用工具/);
-  assert.match(row, /Native/);
+  assert.match(row, /内置工具包/);
+  assert.match(row, /builtin:general/);
   assert.match(row, /get_current_time/);
   assert.match(row, /默认启用/);
   assert.doesNotMatch(row, /编辑|删除|保存|checkbox|switch/);

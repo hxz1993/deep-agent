@@ -17,7 +17,7 @@ from tests.integration.helpers.chat import mock_request_disconnect, parse_sse_ev
 from tests.integration.helpers.models import build_slow_stream_model, text_only_model, tool_call_model
 
 _CHAT_JSON = {"capabilities": []}
-_CONFIRM_CAPABILITIES = ["ui:builtin__confirm"]
+_CONFIRM_CAPABILITIES = ["ui:builtin"]
 
 
 def _assistant_texts(history: dict) -> list[str]:
@@ -217,7 +217,7 @@ class ChatHistoryPersistenceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(final["status"], "pending")
         self.assertEqual(
             [call["tool"] for call in final["deferred"]["calls"]],
-            ["builtin__confirm"],
+            ["builtin__choice", "builtin__confirm"],
         )
 
     async def test_tool_call_model_persists_deferred_tool_call_in_history(self) -> None:

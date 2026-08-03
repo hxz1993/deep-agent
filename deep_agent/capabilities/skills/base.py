@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from deep_agent.capabilities.registry import Capability, ToolInfo
+from deep_agent.capabilities.registry import ToolInfo, ToolPackage
 
 
 @dataclass
@@ -24,11 +24,13 @@ class Skill:
     toolset: Any  # pydantic_ai.FunctionToolset
     tools: list[ToolInfo] = field(default_factory=list)
 
-    def to_capability(self) -> Capability:
-        return Capability(
-            name=f"skill:{self.name}",
-            kind="skill",
-            toolset=self.toolset,
+    def to_tool_package(self) -> ToolPackage:
+        return ToolPackage(
+            code=f"skill:{self.name}",
+            category="skill",
+            toolsets=[self.toolset],
+            label=self.name,
+            source="skill",
             description=self.description,
             tools=self.tools,
         )

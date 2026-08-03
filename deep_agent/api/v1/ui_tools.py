@@ -3,11 +3,11 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from deep_agent.capabilities.ui.builtin import builtin_ui_records
-from deep_agent.capabilities.ui.registry import merge_definitions
 from deep_agent.capabilities.ui.types import UIToolRecord
-from deep_agent.db.deps import get_agent_store, get_ui_tool_store
+from deep_agent.db.deps import get_agent_store, get_ui_tool_package_store, get_ui_tool_store
 from deep_agent.db.stores.agent import AgentStoreBase
 from deep_agent.db.stores.ui_tool import UiToolStoreBase
+from deep_agent.db.stores.ui_tool_package import UiToolPackageStoreBase
 from deep_agent.schemas.ui_tools import UiToolCreate, UiToolListResponse, UiToolResponse, UiToolUpdate
 
 router = APIRouter()
@@ -30,11 +30,12 @@ async def list_ui_tools(
         enabled=enabled,
     )
 
-    rows = [row for row in rows if row.source != "builtin"]
+    rows = [
+        row
+        for row in rows
+        if row.source != "builtin" and row.name not in _BUILTIN_NAMES
+    ]
     builtins = builtin_ui_records() if _include_builtins(source=source, enabled=enabled) else []
-    db_records = [UIToolRecord.from_row(row) for row in rows]
-    merged, _ = merge_definitions(builtins, db_records)
-    winners = {record.name: record for record in merged}
 
     items: list[UiToolResponse] = []
     for record in builtins:
@@ -64,6 +65,7 @@ async def get_ui_tool(
 async def create_ui_tool(
     body: UiToolCreate,
     store: UiToolStoreBase = Depends(get_ui_tool_store),
+    package_store: UiToolPackageStoreBase = Depends(get_ui_tool_package_store),
 ) -> UiToolResponse:
     if body.name in _BUILTIN_NAMES:
         raise HTTPException(
@@ -76,6 +78,9 @@ async def create_ui_tool(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"UI tool already exists: {body.name}",
         )
+    package = await package_store.get_by_code(body.package_code)
+    if package is None or package.source != "manual":
+        raise HTTPException(status_code=422, detail="Manual UI tool package does not exist")
     try:
         row = await store.create_manual(body)
     except ValueError as exc:
@@ -88,6 +93,7 @@ async def update_ui_tool(
     name: str,
     body: UiToolUpdate,
     store: UiToolStoreBase = Depends(get_ui_tool_store),
+    package_store: UiToolPackageStoreBase = Depends(get_ui_tool_package_store),
 ) -> UiToolResponse:
     if name in _BUILTIN_NAMES:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Builtin UI tools cannot be modified")
@@ -96,6 +102,10 @@ async def update_ui_tool(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"UI tool not found: {name}")
     if row.source == "builtin":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Builtin UI tools cannot be modified")
+    if body.package_code is not None:
+        package = await package_store.get_by_code(body.package_code)
+        if package is None or package.source != "manual":
+            raise HTTPException(status_code=422, detail="Manual UI tool package does not exist")
     updated = await store.update(name, body)
     assert updated is not None
     return UiToolResponse.from_row(updated)
@@ -114,7 +124,7 @@ async def delete_ui_tool(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"UI tool not found: {name}")
     if row.source == "builtin":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Builtin UI tools cannot be deleted")
-    referenced_by = await agent_store.list_referencing_capability(f"ui:{name}")
+    referenced_by = await agent_store.list_referencing_capability(row.package_code)
     if referenced_by:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,

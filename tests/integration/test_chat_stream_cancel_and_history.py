@@ -22,7 +22,7 @@ from tests.integration.helpers.chat import mock_request_disconnect, parse_sse_bu
 from tests.integration.helpers.models import build_slow_stream_model, text_only_model, tool_call_model
 
 _CHAT_JSON = {"capabilities": []}
-_CONFIRM_CAPABILITIES = ["ui:builtin__confirm"]
+_CONFIRM_CAPABILITIES = ["ui:builtin"]
 
 
 def _last_assistant(history: dict) -> dict | None:

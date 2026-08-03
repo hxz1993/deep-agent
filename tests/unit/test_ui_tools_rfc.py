@@ -23,22 +23,35 @@ from deep_agent.capabilities.ui.registry import (
     load_effective_ui_tools,
     load_selectable_ui_tools,
     merge_definitions,
-    prepare_ui_toolset_for_spec,
+    prepare_ui_toolsets_for_spec,
 )
 from deep_agent.capabilities.ui.types import UIToolRecord
-from deep_agent.db.models import Base, UiToolDefinition
+from deep_agent.db.models import Base, McpServer, UiToolDefinition, UiToolPackage
 from deep_agent.db.dialect import DbDialect
 from deep_agent.db.stores.bundle import create_data_stores
 from deep_agent.db.stores.ui_tool import UiToolStoreBase
-from deep_agent.schemas.ui_tools import UiToolCreate, UiToolUpdate
-from deep_agent.api.v1.tools import list_capabilities
+from deep_agent.schemas.ui_tools import (
+    UiToolCreate,
+    UiToolPackageCreate,
+    UiToolPackageUpdate,
+    UiToolUpdate,
+)
+from deep_agent.capabilities import build_registry
+from deep_agent.api.v1.tools import list_tool_packages
 from deep_agent.api.v1.ui_tools import delete_ui_tool, get_ui_tool, list_ui_tools, update_ui_tool
+from deep_agent.api.v1.ui_tool_packages import (
+    create_ui_tool_package,
+    delete_ui_tool_package,
+    list_ui_tool_packages,
+    update_ui_tool_package,
+)
 
 
 class MergeDefinitionsTests(unittest.TestCase):
     def test_builtin_wins_over_conflicting_manual_definition(self) -> None:
         manual = UIToolRecord(
             name="builtin__confirm",
+            package_code="ui:demo",
             description="manual",
             parameters_json_schema={"type": "object"},
             source="manual",
@@ -56,6 +69,7 @@ class UiToolSchemaValidationTests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             UiToolCreate(
                 name="demo__invalid",
+                package_code="ui:demo",
                 description="invalid",
                 parameters_json_schema=invalid_schema,
             )
@@ -73,6 +87,7 @@ class UiToolSchemaValidationTests(unittest.TestCase):
             with self.subTest(name=name), self.assertRaises(ValidationError):
                 UiToolCreate(
                     name=name,
+                    package_code="ui:demo",
                     description="reserved",
                     parameters_json_schema={"type": "object"},
                 )
@@ -80,6 +95,7 @@ class UiToolSchemaValidationTests(unittest.TestCase):
             with self.subTest(name=name):
                 created = UiToolCreate(
                     name=name,
+                    package_code="ui:demo",
                     description="legacy name is no longer builtin",
                     parameters_json_schema={"type": "object"},
                 )
@@ -94,6 +110,17 @@ class UiToolStoreTests(unittest.IsolatedAsyncioTestCase):
         self.session_factory = async_sessionmaker(self.engine, expire_on_commit=False)
         self.stores = create_data_stores(DbDialect.SQLITE, self.session_factory)
         self.store: UiToolStoreBase = self.stores.ui_tool
+        async with self.session_factory() as db:
+            db.add(
+                UiToolPackage(
+                    code="ui:demo",
+                    label="Demo",
+                    description="Demo UI package",
+                    source="manual",
+                    enabled=True,
+                )
+            )
+            await db.commit()
 
     async def asyncTearDown(self) -> None:
         await self.engine.dispose()
@@ -102,6 +129,7 @@ class UiToolStoreTests(unittest.IsolatedAsyncioTestCase):
         row = await self.store.create_manual(
             UiToolCreate(
                 name="myapp__custom_form",
+                package_code="ui:demo",
                 description="Custom form",
                 parameters_json_schema={"type": "object", "properties": {}},
                 widget="custom",
@@ -110,6 +138,62 @@ class UiToolStoreTests(unittest.IsolatedAsyncioTestCase):
         rows = await self.store.list_all(source="manual")
         self.assertEqual(row.name, "myapp__custom_form")
         self.assertEqual(len(rows), 1)
+
+    async def test_ui_tool_package_crud_and_builtin_protection(self) -> None:
+        listed = await list_ui_tool_packages(store=self.stores.ui_tool_package)
+        self.assertEqual([item.code for item in listed.items], ["ui:builtin", "ui:demo"])
+
+        created = await create_ui_tool_package(
+            UiToolPackageCreate(
+                code="ui:spreadsheet",
+                label="Spreadsheet",
+                description="Spreadsheet interactions",
+            ),
+            store=self.stores.ui_tool_package,
+        )
+        self.assertEqual(created.code, "ui:spreadsheet")
+        updated = await update_ui_tool_package(
+            "ui:spreadsheet",
+            UiToolPackageUpdate(label="电子表格", enabled=False),
+            store=self.stores.ui_tool_package,
+        )
+        self.assertEqual(updated.label, "电子表格")
+        self.assertFalse(updated.enabled)
+        await delete_ui_tool_package(
+            "ui:spreadsheet",
+            store=self.stores.ui_tool_package,
+            agent_store=self.stores.agent,
+        )
+        self.assertIsNone(await self.stores.ui_tool_package.get_by_code("ui:spreadsheet"))
+
+        with self.assertRaisesRegex(Exception, "cannot be modified"):
+            await update_ui_tool_package(
+                "ui:builtin",
+                UiToolPackageUpdate(label="changed"),
+                store=self.stores.ui_tool_package,
+            )
+        with self.assertRaisesRegex(Exception, "cannot be deleted"):
+            await delete_ui_tool_package(
+                "ui:builtin",
+                store=self.stores.ui_tool_package,
+                agent_store=self.stores.agent,
+            )
+
+    async def test_ui_tool_package_with_tools_cannot_be_deleted(self) -> None:
+        await self.store.create_manual(
+            UiToolCreate(
+                name="demo__protected",
+                package_code="ui:demo",
+                description="Protected",
+                parameters_json_schema={"type": "object"},
+            )
+        )
+        with self.assertRaisesRegex(Exception, "contains tools|包含工具"):
+            await delete_ui_tool_package(
+                "ui:demo",
+                store=self.stores.ui_tool_package,
+                agent_store=self.stores.agent,
+            )
 
     async def test_management_list_includes_read_only_builtin_tools(self) -> None:
         response = await list_ui_tools(
@@ -159,6 +243,7 @@ class UiToolStoreTests(unittest.IsolatedAsyncioTestCase):
                         name,
                         UiToolUpdate(description="changed"),
                         store=self.store,
+                        package_store=self.stores.ui_tool_package,
                     )
                 with self.assertRaisesRegex(Exception, "cannot be deleted"):
                     await delete_ui_tool(
@@ -171,8 +256,9 @@ class UiToolStoreTests(unittest.IsolatedAsyncioTestCase):
         now = datetime.now(timezone.utc)
         async with self.session_factory() as db:
             db.add(
-                UiToolDefinition(
-                    name="demo__pick_color",
+                    UiToolDefinition(
+                        name="demo__pick_color",
+                        package_code="ui:demo",
                     description="Pick color",
                     parameters_json_schema={"type": "object", "properties": {}},
                     source="manual",
@@ -187,18 +273,18 @@ class UiToolStoreTests(unittest.IsolatedAsyncioTestCase):
             name="demo",
             model="test",
             instructions="hi",
-            capabilities=["ui:builtin__confirm", "ui:demo__pick_color"],
+            capabilities=["ui:builtin", "ui:demo"],
             agent_id="00000000-0000-4000-8000-000000000001",
         )
         effective = await load_effective_ui_tools(self.stores, spec)
-        toolset, hints = await prepare_ui_toolset_for_spec(self.stores, spec)
+        toolsets, hints = await prepare_ui_toolsets_for_spec(self.stores, spec)
 
         names = {item.name for item in effective.definitions}
         self.assertIn("builtin__confirm", names)
-        self.assertNotIn("builtin__choice", names)
+        self.assertIn("builtin__choice", names)
         self.assertIn("demo__pick_color", names)
         self.assertTrue(effective.has_dynamic)
-        self.assertIsNotNone(toolset)
+        self.assertTrue(toolsets)
         self.assertIn("demo__pick_color", hints)
 
     async def test_effective_tools_require_exact_ui_capability(self) -> None:
@@ -208,6 +294,7 @@ class UiToolStoreTests(unittest.IsolatedAsyncioTestCase):
                 [
                     UiToolDefinition(
                         name="demo__first",
+                        package_code="ui:demo",
                         description="first",
                         parameters_json_schema={"type": "object"},
                         source="manual",
@@ -217,6 +304,7 @@ class UiToolStoreTests(unittest.IsolatedAsyncioTestCase):
                     ),
                     UiToolDefinition(
                         name="demo__second",
+                        package_code="ui:demo",
                         description="second",
                         parameters_json_schema={"type": "object"},
                         source="manual",
@@ -232,14 +320,14 @@ class UiToolStoreTests(unittest.IsolatedAsyncioTestCase):
             name="demo",
             model="test",
             instructions="hi",
-            capabilities=["ui:builtin__choice", "ui:demo__second", "ui:missing__tool"],
+            capabilities=["ui:builtin", "ui:demo", "ui:missing"],
         )
         effective = await load_effective_ui_tools(self.stores, spec)
         names = {item.name for item in effective.definitions}
-        self.assertNotIn("builtin__confirm", names)
+        self.assertIn("builtin__confirm", names)
         self.assertIn("builtin__choice", names)
         self.assertIn("demo__second", names)
-        self.assertNotIn("demo__first", names)
+        self.assertIn("demo__first", names)
         self.assertNotIn("missing__tool", names)
 
     async def test_null_capabilities_do_not_enable_extension_ui_tools(self) -> None:
@@ -248,6 +336,7 @@ class UiToolStoreTests(unittest.IsolatedAsyncioTestCase):
             db.add(
                 UiToolDefinition(
                     name="demo__hidden_by_default",
+                    package_code="ui:demo",
                     description="hidden",
                     parameters_json_schema={"type": "object"},
                     source="manual",
@@ -281,12 +370,7 @@ class UiToolStoreTests(unittest.IsolatedAsyncioTestCase):
         cases = (
             (None, set()),
             ([], set()),
-            (["ui:builtin__confirm"], {"builtin__confirm"}),
-            (["ui:builtin__choice"], {"builtin__choice"}),
-            (
-                ["ui:builtin__confirm", "ui:builtin__choice"],
-                {"builtin__confirm", "builtin__choice"},
-            ),
+            (["ui:builtin"], {"builtin__confirm", "builtin__choice"}),
         )
         for capabilities, expected in cases:
             with self.subTest(capabilities=capabilities):
@@ -296,13 +380,13 @@ class UiToolStoreTests(unittest.IsolatedAsyncioTestCase):
                     instructions="hi",
                     capabilities=capabilities,
                 )
-                toolset, hints = await prepare_ui_toolset_for_spec(self.stores, spec)
+                toolsets, hints = await prepare_ui_toolsets_for_spec(self.stores, spec)
                 self.assertEqual(set(hints), expected)
                 if not expected:
-                    self.assertIsNone(toolset)
+                    self.assertEqual(toolsets, [])
                     continue
-                assert toolset is not None
-                tools = await toolset.get_tools(None)
+                self.assertTrue(toolsets)
+                tools = await toolsets[0].get_tools(None)
                 self.assertEqual(set(tools), expected)
 
     def test_builtin_choice_schema_supports_general_options_and_custom_input(self) -> None:
@@ -321,6 +405,7 @@ class UiToolStoreTests(unittest.IsolatedAsyncioTestCase):
             db.add(
                 UiToolDefinition(
                     name="demo__disabled",
+                    package_code="ui:demo",
                     description="disabled",
                     parameters_json_schema={"type": "object"},
                     source="manual",
@@ -335,18 +420,19 @@ class UiToolStoreTests(unittest.IsolatedAsyncioTestCase):
             name="demo",
             model="test",
             instructions="hi",
-            capabilities=["ui:demo__disabled"],
+            capabilities=["ui:demo"],
         )
         effective = await load_effective_ui_tools(self.stores, spec)
         self.assertNotIn("demo__disabled", {item.name for item in effective.definitions})
 
-    async def test_selectable_tools_and_capability_api_are_one_entry_per_tool(self) -> None:
+    async def test_tool_package_directory_groups_ui_and_reports_mcp_count_only(self) -> None:
         now = datetime.now(timezone.utc)
         async with self.session_factory() as db:
             db.add_all(
                 [
                     UiToolDefinition(
                         name="demo__first",
+                        package_code="ui:demo",
                         description="First form",
                         parameters_json_schema={"type": "object"},
                         source="manual",
@@ -356,12 +442,23 @@ class UiToolStoreTests(unittest.IsolatedAsyncioTestCase):
                     ),
                     UiToolDefinition(
                         name="demo__disabled",
+                        package_code="ui:demo",
                         description="Disabled form",
                         parameters_json_schema={"type": "object"},
                         source="manual",
                         enabled=False,
                         created_at=now,
                         updated_at=now,
+                    ),
+                    McpServer(
+                        name="remote_catalog",
+                        transport="url",
+                        config={"url": "http://127.0.0.1:8765/mcp"},
+                        inspection={
+                            "status": "healthy",
+                            "tools": {"status": "supported", "count": 7},
+                        },
+                        enabled=True,
                     ),
                 ]
             )
@@ -370,46 +467,31 @@ class UiToolStoreTests(unittest.IsolatedAsyncioTestCase):
         selectable = await load_selectable_ui_tools(self.stores)
         self.assertEqual([record.name for record in selectable], ["demo__first"])
 
-        registry = SimpleNamespace(
-            describe=lambda: [
-                {
-                    "name": "attachment",
-                    "kind": "attachment",
-                    "label": "附件读取",
-                    "source": "builtin",
-                    "description": "按需读取附件",
-                    "default_enabled": False,
-                    "tools": [
-                        {
-                            "name": "read_text_attachment",
-                            "description": "按行读取文本",
-                        }
-                    ],
-                }
-            ]
-        )
+        registry = build_registry()
         ctx = SimpleNamespace(stores=self.stores, registry=registry)
-        capabilities = await list_capabilities(ctx)
+        capabilities = await list_tool_packages(ctx)
         attachment_capability = next(
-            item for item in capabilities if item.name == "attachment"
+            item for item in capabilities if item.code == "builtin:attachment"
         )
-        self.assertEqual(attachment_capability.kind, "attachment")
+        self.assertEqual(attachment_capability.category, "builtin")
         self.assertEqual(attachment_capability.label, "附件读取")
         self.assertEqual(attachment_capability.source, "builtin")
         self.assertFalse(attachment_capability.default_enabled)
         self.assertEqual(
             [tool.name for tool in attachment_capability.tools],
-            ["read_text_attachment"],
+            ["read_text_attachment", "read_docx", "read_xlsx"],
         )
-        ui_capabilities = [item for item in capabilities if item.kind == "ui-client"]
-        self.assertEqual(
-            [item.name for item in ui_capabilities],
-            ["ui:builtin__confirm", "ui:builtin__choice", "ui:demo__first"],
+        ui_packages = [item for item in capabilities if item.category == "ui"]
+        self.assertEqual([item.code for item in ui_packages], ["ui:builtin", "ui:demo"])
+        self.assertEqual([item.source for item in ui_packages], ["builtin", "manual"])
+        self.assertEqual([tool.name for tool in ui_packages[-1].tools], ["demo__disabled", "demo__first"])
+        mcp_package = next(
+            item for item in capabilities if item.code == "mcp:remote_catalog"
         )
-        self.assertEqual([item.source for item in ui_capabilities], ["builtin", "builtin", "manual"])
-        self.assertEqual([item.locked for item in ui_capabilities], [False, False, False])
-        self.assertEqual([item.default_enabled for item in ui_capabilities], [False, False, False])
-        self.assertEqual([tool.name for tool in ui_capabilities[-1].tools], ["demo__first"])
+        self.assertEqual(mcp_package.category, "mcp")
+        self.assertEqual(mcp_package.tool_count, 7)
+        self.assertEqual(mcp_package.tool_catalog_status, "count_only")
+        self.assertEqual(mcp_package.tools, [])
 
     async def test_prepare_toolset_skips_historical_invalid_schema_only(self) -> None:
         now = datetime.now(timezone.utc)
@@ -417,6 +499,7 @@ class UiToolStoreTests(unittest.IsolatedAsyncioTestCase):
             db.add(
                 UiToolDefinition(
                     name="demo__invalid",
+                    package_code="ui:demo",
                     description="invalid",
                     parameters_json_schema={"type": 123},
                     source="manual",
@@ -431,12 +514,12 @@ class UiToolStoreTests(unittest.IsolatedAsyncioTestCase):
             name="demo",
             model="test",
             instructions="hi",
-            capabilities=["ui:demo__invalid"],
+            capabilities=["ui:demo"],
             agent_id="00000000-0000-4000-8000-000000000001",
         )
-        toolset, hints = await prepare_ui_toolset_for_spec(self.stores, spec)
+        toolsets, hints = await prepare_ui_toolsets_for_spec(self.stores, spec)
 
-        self.assertIsNone(toolset)
+        self.assertEqual(toolsets, [])
         self.assertNotIn("demo__invalid", hints)
 
 
@@ -444,6 +527,7 @@ class VisibilityTests(unittest.TestCase):
     def test_manual_tool_requires_exact_ui_capability(self) -> None:
         record = UIToolRecord(
             name="demo__form",
+            package_code="ui:demo",
             description="x",
             parameters_json_schema={},
             source="manual",
@@ -456,7 +540,7 @@ class VisibilityTests(unittest.TestCase):
             is_tool_visible(record, capabilities=["ui"])
         )
         self.assertTrue(
-            is_tool_visible(record, capabilities=["ui:demo__form"])
+            is_tool_visible(record, capabilities=["ui:demo"])
         )
 
     def test_builtin_tool_uses_the_same_exact_ui_capability_rule(self) -> None:
@@ -464,7 +548,7 @@ class VisibilityTests(unittest.TestCase):
         self.assertFalse(is_tool_visible(record, capabilities=None))
         self.assertFalse(is_tool_visible(record, capabilities=[]))
         self.assertTrue(
-            is_tool_visible(record, capabilities=["ui:builtin__confirm"])
+            is_tool_visible(record, capabilities=["ui:builtin"])
         )
 
 
@@ -472,6 +556,7 @@ class ToolHintsTests(unittest.TestCase):
     def test_build_tool_hints_includes_metadata(self) -> None:
         record = UIToolRecord(
             name="myapp__form",
+            package_code="ui:demo",
             description="form",
             parameters_json_schema={"type": "object"},
             widget="text",
@@ -596,6 +681,7 @@ class ExternalToolsetTests(unittest.IsolatedAsyncioTestCase):
     def test_invalid_tool_schema_fails_when_toolset_is_built(self) -> None:
         invalid = UIToolRecord(
             name="invalid_form",
+            package_code="ui:demo",
             description="invalid",
             parameters_json_schema={"type": 123},
             widget="text",
@@ -608,6 +694,7 @@ class ExternalToolsetTests(unittest.IsolatedAsyncioTestCase):
     async def test_invalid_clarify_semantics_are_retried_once(self) -> None:
         clarify = UIToolRecord(
             name="deep_cube__clarify",
+            package_code="ui:deepcube",
             description="clarify",
             parameters_json_schema={
                 "type": "object",
@@ -643,6 +730,7 @@ class ExternalToolsetTests(unittest.IsolatedAsyncioTestCase):
     async def test_clarify_validator_rejects_select_without_options(self) -> None:
         clarify = UIToolRecord(
             name="deep_cube__clarify",
+            package_code="ui:deepcube",
             description="clarify",
             parameters_json_schema={"type": "object"},
             widget="clarify",
@@ -658,6 +746,7 @@ class ExternalToolsetTests(unittest.IsolatedAsyncioTestCase):
     async def test_clarify_validator_rejects_empty_option_object(self) -> None:
         clarify = UIToolRecord(
             name="deep_cube__clarify",
+            package_code="ui:deepcube",
             description="clarify",
             parameters_json_schema={"type": "object"},
             widget="clarify",
@@ -676,6 +765,7 @@ class ExternalToolsetTests(unittest.IsolatedAsyncioTestCase):
     async def test_clarify_validator_rejects_missing_type_and_duplicate_id(self) -> None:
         clarify = UIToolRecord(
             name="deep_cube__clarify",
+            package_code="ui:deepcube",
             description="clarify",
             parameters_json_schema={"type": "object"},
             widget="clarify",
@@ -699,6 +789,7 @@ class ExternalToolsetTests(unittest.IsolatedAsyncioTestCase):
     async def test_clarify_validator_rejects_object_identifiers(self) -> None:
         clarify = UIToolRecord(
             name="deep_cube__clarify",
+            package_code="ui:deepcube",
             description="clarify",
             parameters_json_schema={"type": "object"},
             widget="clarify",

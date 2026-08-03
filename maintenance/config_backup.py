@@ -23,6 +23,7 @@ CONFIG_TABLES = (
     "model_catalog",
     "mcp_servers",
     "agents",
+    "ui_tool_packages",
     "ui_tool_definitions",
     "auxiliary_model_configs",
 )
@@ -31,7 +32,7 @@ SESSION_TABLES = (
     "chat_messages",
     "chat_context_checkpoints",
 )
-CURRENT_BASELINE_REVISION = "001"
+CURRENT_SCHEMA_REVISION = "002"
 ENVIRONMENT_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
 
 
@@ -225,6 +226,7 @@ async def _clear_seed_configuration(engine: AsyncEngine) -> None:
         "auxiliary_model_configs",
         "agents",
         "ui_tool_definitions",
+        "ui_tool_packages",
         "mcp_servers",
         "model_catalog",
         "llm_models",
@@ -278,9 +280,9 @@ async def _write_backup_metadata(
     revision: str,
     git_commit: str,
 ) -> None:
-    if revision != CURRENT_BASELINE_REVISION:
+    if revision != CURRENT_SCHEMA_REVISION:
         raise ValueError(
-            f"Backup source revision must be {CURRENT_BASELINE_REVISION}, got {revision}"
+            f"Backup source revision must be {CURRENT_SCHEMA_REVISION}, got {revision}"
         )
     async with engine.begin() as connection:
         await connection.execute(
@@ -356,13 +358,19 @@ async def _table_count(connection: Any, table_name: str) -> int:
 
 async def _validate_with_deep_agent(database_url: str) -> None:
     from deep_agent.db.factory import create_engine
-    from deep_agent.db.models import ChatContextCheckpoint, LlmModel, ModelCatalog
+    from deep_agent.db.models import (
+        ChatContextCheckpoint,
+        LlmModel,
+        ModelCatalog,
+        UiToolPackage,
+    )
 
     engine, session_factory = create_engine(database_url)
     try:
         async with session_factory() as session:
             await session.execute(select(func.count()).select_from(LlmModel))
             await session.execute(select(func.count()).select_from(ModelCatalog))
+            await session.execute(select(func.count()).select_from(UiToolPackage))
             await session.execute(
                 select(func.count()).select_from(ChatContextCheckpoint)
             )

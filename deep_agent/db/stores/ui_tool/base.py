@@ -32,6 +32,7 @@ class UiToolStoreBase(SessionBoundMixin):
             async with self._write() as db:
                 row = UiToolDefinition(
                     name=data.name,
+                    package_code=data.package_code,
                     description=data.description,
                     parameters_json_schema=data.parameters_json_schema,
                     widget=data.widget,

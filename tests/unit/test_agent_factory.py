@@ -13,7 +13,7 @@ from pydantic_ai.providers.openai import OpenAIProvider
 from deep_agent.agent.factory import _resolve_model, build_agent
 from deep_agent.agent.models import DeepSeekChatModel, OpenAICompatibleVideoChatModel
 from deep_agent.agent.models.deepseek_thinking_retry import DeepSeekThinkingRetry
-from deep_agent.capabilities.registry import CapabilityRegistry
+from deep_agent.capabilities.registry import ToolPackageRegistry
 from deep_agent.agent.spec import AgentSpec
 from deep_agent.options import OPTION
 
@@ -167,7 +167,7 @@ class ResolveModelTests(unittest.TestCase):
     def test_deepseek_registers_thinking_retry_capability(self) -> None:
         agent = build_agent(
             _spec(model="deepseek:deepseek-v4-flash", api_key="sk-test"),
-            CapabilityRegistry(),
+            ToolPackageRegistry(),
         )
         caps = [c for c in agent.root_capability.capabilities if isinstance(c, DeepSeekThinkingRetry)]
         self.assertEqual(len(caps), 1)
@@ -179,7 +179,7 @@ class ResolveModelTests(unittest.TestCase):
                 api_key="sk-test",
                 base_url="https://gateway.example.com/v1",
             ),
-            CapabilityRegistry(),
+            ToolPackageRegistry(),
         )
         caps = [c for c in agent.root_capability.capabilities if isinstance(c, DeepSeekThinkingRetry)]
         self.assertEqual(len(caps), 0)

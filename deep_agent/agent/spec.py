@@ -16,7 +16,8 @@ class AgentSpec:
     """Declarative description of an agent.
 
     ``capabilities=None`` uses default capabilities and no extension UI tools;
-    otherwise the list may include entries such as ``ui:deep_cube__clarify``.
+    otherwise the list contains product tool-package codes such as
+    ``builtin:general`` or ``ui:deepcube``.
     """
 
     name: str

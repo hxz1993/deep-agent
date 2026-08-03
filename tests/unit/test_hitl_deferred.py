@@ -107,6 +107,7 @@ class AgentRunnerDeferredTests(unittest.IsolatedAsyncioTestCase):
     async def test_run_stream_tool_call_includes_metadata_from_hints(self) -> None:
         manual_tool = UIToolRecord(
             name="myapp__form",
+            package_code="ui:demo",
             description="form",
             parameters_json_schema={"type": "object", "properties": {}},
             widget="text",
@@ -142,6 +143,7 @@ class AgentRunnerDeferredTests(unittest.IsolatedAsyncioTestCase):
     async def test_run_stream_only_publishes_validated_external_ui_call(self) -> None:
         clarify = UIToolRecord(
             name="deep_cube__clarify",
+            package_code="ui:deepcube",
             description="clarify",
             parameters_json_schema={
                 "type": "object",

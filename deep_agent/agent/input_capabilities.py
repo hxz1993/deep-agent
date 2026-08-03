@@ -4,7 +4,7 @@ Three layers (do not conflate):
 
 1. **LLM native** — ``input_modalities`` on the preset (text / image / audio / video / pdf).
 2. **Upload pipeline** — files accepted at POST /uploads by MIME whitelist.
-3. **Agent tools** — ``attachment`` reads text/DOCX/XLSX on demand when selected.
+3. **Agent tools** — ``builtin:attachment`` reads text/DOCX/XLSX on demand when selected.
 """
 
 from __future__ import annotations
@@ -96,7 +96,7 @@ def build_capability_instruction_block(spec: AgentSpec) -> str:
     upload_kinds = upload_capability_kinds()
     upload_labels = [_UPLOAD_KIND_LABELS.get(k, k) for k in upload_kinds]
     attachment_enabled = (
-        spec.capabilities is not None and "attachment" in spec.capabilities
+        spec.capabilities is not None and "builtin:attachment" in spec.capabilities
     )
 
     lines = [
@@ -131,13 +131,13 @@ def build_capability_instruction_block(spec: AgentSpec) -> str:
                 )
         if attachment_enabled:
             lines.append(
-                "The attachment capability is enabled. Use read_text_attachment, read_docx, "
+                "The builtin:attachment tool package is enabled. Use read_text_attachment, read_docx, "
                 "or read_xlsx with the file_id supplied in the user prompt. Start with only "
                 "file_id; follow next_offset while has_more is true."
             )
         else:
             lines.append(
-                "The attachment capability is NOT enabled. Text, DOCX and XLSX contents "
+                "The builtin:attachment tool package is NOT enabled. Text, DOCX and XLSX contents "
                 "cannot be read in this session."
             )
     else:

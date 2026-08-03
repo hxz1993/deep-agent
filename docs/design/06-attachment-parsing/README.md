@@ -11,7 +11,7 @@
 - 图片、音频、视频和 PDF 属于模型原生输入，是否发送只认
   `llm_models.input_modalities`。
 - TXT、CSV、JSON、Markdown、HTML、XML、DOCX 和 XLSX 由 Agent 显式选择
-  `attachment` 能力后按需读取。
+  `builtin:attachment` 工具包后按需读取。
 - 工具首次调用通常只传 `file_id`；返回 `has_more` 和 `next_offset` 后，模型再决定是否读取
   下一页。
 - 新上传不再预抽文本，也不再使用 `DEEP_AGENT_UPLOAD_EXTRACT_TEXT_MAX_CHARS`。

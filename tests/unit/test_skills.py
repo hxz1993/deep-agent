@@ -2,17 +2,17 @@ from __future__ import annotations
 
 import unittest
 
-from deep_agent.capabilities.skills import load_skill_capabilities
+from deep_agent.capabilities.skills import load_skill_tool_packages
 from deep_agent.core.paths import REPO_ROOT
 from skills.calculator import calculate
 
 
 class SkillLoadingTests(unittest.TestCase):
     def test_calculator_skill_is_discovered_with_tool_metadata(self) -> None:
-        capabilities = load_skill_capabilities(str(REPO_ROOT / "skills"))
+        packages = load_skill_tool_packages(str(REPO_ROOT / "skills"))
 
-        calculator = next(cap for cap in capabilities if cap.name == "skill:calculator")
-        self.assertEqual(calculator.kind, "skill")
+        calculator = next(package for package in packages if package.code == "skill:calculator")
+        self.assertEqual(calculator.category, "skill")
         self.assertEqual([tool.name for tool in calculator.tools], ["calculate"])
 
     def test_calculator_evaluates_supported_arithmetic(self) -> None:

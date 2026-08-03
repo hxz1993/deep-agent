@@ -56,8 +56,8 @@ publish_to_download_center(artifact_id, file_name?)
 
 | 现有表面 | 角色 | 本课题 |
 | --- | --- | --- |
-| `POST /uploads` + `attachment` | **入站**会话附件 | 不合并；对照 `file_id` 纪律 |
-| `python-sandbox` | 无状态计算 | 大结果只增加晋升 → Artifact |
+| `POST /uploads` + `builtin:attachment` | **入站**会话附件 | 不合并；对照 `file_id` 纪律 |
+| `builtin:general/execute_python` | 无状态计算 | 大结果只增加晋升 → Artifact |
 | deepfos `export_file_for_download` | 脚本侧下载中心两步 | **仅作 S0 参考实现**，非课题必达 |
 | Harness Spill | 大 tool 结果外置 | 概念对照；对象层是否共用待决 |
 

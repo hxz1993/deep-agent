@@ -5,33 +5,35 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 from deep_agent.capabilities.mcp.toolset_builder import build_mcp_toolset
-from deep_agent.capabilities.registry import Capability
+from deep_agent.capabilities.registry import ToolPackage
 
 if TYPE_CHECKING:
     from deep_agent.db.models import McpServer
 
 
-def capability_from_row(row: McpServer) -> Capability:
-    """Build one MCP capability from a database row."""
+def tool_package_from_row(row: McpServer) -> ToolPackage:
+    """Build one MCP tool package from a database row."""
     toolset = build_mcp_toolset(row.name, row.transport, row.config)
     description = row.description or f"MCP server '{row.name}'. Tools are prefixed with '{row.name}_'."
-    return Capability(
-        name=f"mcp:{row.name}",
-        kind="mcp",
-        toolset=toolset,
+    return ToolPackage(
+        code=f"mcp:{row.name}",
+        category="mcp",
+        toolsets=[toolset],
+        label=row.name,
+        source="builtin" if row.transport == "builtin" else "database",
         description=description,
         tools=[],
         default_enabled=False,
     )
 
 
-def capabilities_from_rows(rows: list[McpServer]) -> list[Capability]:
-    caps: list[Capability] = []
+def tool_packages_from_rows(rows: list[McpServer]) -> list[ToolPackage]:
+    packages: list[ToolPackage] = []
     for row in rows:
         if not row.enabled:
             continue
         try:
-            caps.append(capability_from_row(row))
+            packages.append(tool_package_from_row(row))
         except Exception:
             logger.exception("Failed to load MCP server {!r} from database", row.name)
-    return caps
+    return packages

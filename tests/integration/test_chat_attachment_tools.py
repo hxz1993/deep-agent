@@ -36,7 +36,7 @@ class ChatAttachmentToolIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 name="attachment-agent",
                 model_id=model.id,
                 prompt="读取用户附件并回答。",
-                capabilities=["attachment"],
+                capabilities=["builtin:attachment"],
             )
         )
         self.app = FastAPI()

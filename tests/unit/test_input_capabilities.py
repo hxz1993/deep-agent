@@ -67,7 +67,7 @@ class TestInputCapabilities(unittest.TestCase):
                 model="test",
                 instructions="",
                 input_modalities=["text"],
-                capabilities=["attachment"],
+                capabilities=["builtin:attachment"],
             )
         )
         self.assertIn("NOT enabled", disabled)

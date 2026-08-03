@@ -10,7 +10,7 @@ from httpx import ASGITransport, AsyncClient
 from pydantic_ai.models.test import TestModel
 
 from deep_agent.api.v1 import api_router
-from deep_agent.schemas.ui_tools import UiToolCreate
+from deep_agent.schemas.ui_tools import UiToolCreate, UiToolPackageCreate
 from tests.integration.helpers.chat import (
     aclose_test_context,
     configure_test_app_async,
@@ -21,9 +21,17 @@ from tests.integration.helpers.chat import (
 
 
 async def _seed_manual_ui_tool(stores, *, name: str, metadata: dict) -> None:
+    await stores.ui_tool_package.create_manual(
+        UiToolPackageCreate(
+            code="ui:myapp",
+            label="My App",
+            description="Integration test package",
+        )
+    )
     await stores.ui_tool.create_manual(
         UiToolCreate(
             name=name,
+            package_code="ui:myapp",
             description="Collect user input via client UI.",
             parameters_json_schema={
                 "type": "object",
@@ -90,7 +98,7 @@ class ChatUiToolMetadataStreamTests(unittest.IsolatedAsyncioTestCase):
                             "/api/v1/chat/stream",
                             json={
                                 "message": "请用户填写备注",
-                                "capabilities": [f"ui:{tool_name}"],
+                                "capabilities": ["ui:myapp"],
                             },
                         ) as response:
                             self.assertEqual(response.status_code, 200)

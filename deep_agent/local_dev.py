@@ -110,63 +110,6 @@ def _repository_root() -> Path:
     return Path(__file__).resolve().parents[1]
 
 
-def _sandbox_setup_script() -> Path:
-    return _repository_root() / "scripts" / "sandbox_venv" / "setup.sh"
-
-
-def ensure_sandbox_venv(*, python: str | None = None) -> Path:
-    """Create or refresh `.venv-sandbox` via scripts/sandbox_venv/setup.sh."""
-    import subprocess
-
-    script = _sandbox_setup_script()
-    if not script.is_file():
-        raise FileNotFoundError(f"Sandbox venv setup script missing: {script}")
-    cmd = ["bash", str(script)]
-    if python:
-        cmd.append(python)
-    completed = subprocess.run(cmd, cwd=_repository_root(), check=False)
-    if completed.returncode != 0:
-        raise RuntimeError(
-            f"sandbox venv setup failed with exit code {completed.returncode}; "
-            f"see {script}"
-        )
-    from deep_agent.options import OPTION
-
-    python_path = Path(OPTION.agent.sandbox_python)
-    if not python_path.is_file():
-        raise FileNotFoundError(
-            f"sandbox interpreter still missing after setup: {python_path}"
-        )
-    return python_path
-
-
-def preflight_sandbox_interpreter(*, ensure: bool = False) -> None:
-    """Fail fast before uvicorn if subprocess-dev interpreter is missing."""
-    from deep_agent.options import OPTION
-
-    if not OPTION.agent.sandbox_enabled:
-        return
-    if str(OPTION.agent.sandbox_backend).strip() != "subprocess-dev":
-        return
-
-    python_path = Path(OPTION.agent.sandbox_python)
-    if python_path.is_file():
-        return
-    if ensure:
-        ensure_sandbox_venv()
-        return
-
-    raise SystemExit(
-        "Sandbox interpreter missing for subprocess-dev:\n"
-        f"  {python_path}\n"
-        "Create it first:\n"
-        "  bash scripts/sandbox_venv/setup.sh\n"
-        "Or re-run local_dev without --no-sandbox-env "
-        "(auto-setup is on by default).\n"
-        "To skip sandbox entirely, set DEEP_AGENT_SANDBOX_ENABLED=false in the Profile."
-    )
-
-
 def _validate_config_file(path: str | Path) -> Path:
     resolved = Path(path).expanduser().resolve()
     if not resolved.is_file():
@@ -234,6 +177,8 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> None:
+    from deep_agent.sandbox.venv import preflight_sandbox_interpreter
+
     args = _parser().parse_args(argv)
     local_app = build_local_app(args.config)
     preflight_sandbox_interpreter(ensure=not args.no_sandbox_env)

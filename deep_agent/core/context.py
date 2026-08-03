@@ -12,6 +12,7 @@ from deep_agent.capabilities.mcp.lease_manager import McpLeaseManager
 from deep_agent.capabilities.registry import CapabilityRegistry
 from deep_agent.sandbox.backend import PythonExecutionBackend
 from deep_agent.sandbox.factory import SandboxInterpreterError, build_sandbox_backend
+from deep_agent.sandbox.venv import ensure_sandbox_interpreter_for_startup
 from deep_agent.sandbox.profile import (
     DEFAULT_SANDBOX_PROFILE,
     DefaultProfileVerifier,
@@ -63,6 +64,7 @@ class AppContext:
         )
 
         try:
+            ensure_sandbox_interpreter_for_startup()
             sandbox_backend = build_sandbox_backend()
         except SandboxInterpreterError:
             logger.exception("Startup aborted: sandbox interpreter unavailable")

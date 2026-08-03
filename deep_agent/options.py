@@ -303,6 +303,11 @@ class Agent(Category):
         bind_env="SANDBOX_PYTHON",
         convertor=_resolve_sandbox_python,
     )
+    sandbox_ensure_venv = Option(
+        False,
+        val_type=bool,
+        bind_env="SANDBOX_ENSURE_VENV",
+    )
     sandbox_memory_mb = Option(
         # RSS product budget in megabytes (same semantics as stage-C cgroup memory.max).
         # subprocess-dev translates to RLIMIT_AS via RLIMIT_AS_PER_RSS_RATIO.

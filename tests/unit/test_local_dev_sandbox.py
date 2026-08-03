@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from deep_agent.local_dev import preflight_sandbox_interpreter
+from deep_agent.sandbox.venv import preflight_sandbox_interpreter
 from deep_agent.options import OPTION
 
 

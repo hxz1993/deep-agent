@@ -37,7 +37,7 @@ Pod
 | 容器 | 仅应用 | 应用 + go-judge |
 | Backend | `subprocess-dev` | B：sidecar 供探针；C：可切 go-judge |
 | 探针 | **不跑** | 必跑并归档 JSON |
-| Jenkins | 现有流水线；**须打入 sandbox venv**（§4） | 两条独立流水线（§3） |
+| Jenkins | 现有流水线；镜像内 venv **或** `SANDBOX_ENSURE_VENV=true`（§4） | 两条独立流水线（§3） |
 
 签字前禁止：给 test Pod 加 sidecar、在 test 启用 `BACKEND=go-judge`、用探针失败阻塞产品发版。
 
@@ -189,7 +189,9 @@ python3 scripts/sandbox_probe/go_judge.py \
 
 ## 4. 应用镜像：sandbox venv（与 sidecar 正交）
 
-凡启用 `subprocess-dev` 的环境（含 **test**），镜像内须有独立解释器，例如：
+凡启用 `subprocess-dev` 的环境（含 **test**），须有独立解释器。二选一：
+
+### 4.1 构建时打入镜像
 
 ```dockerfile
 COPY scripts/sandbox_venv/ /tmp/sandbox_venv/
@@ -199,8 +201,18 @@ RUN python3 -m venv /app/.venv-sandbox \
 ENV DEEP_AGENT_SANDBOX_PYTHON=/app/.venv-sandbox/bin/python
 ```
 
+### 4.2 启动时创建（固定镜像 + 临时 venv，推荐 test）
+
+```properties
+DEEP_AGENT_SANDBOX_ENSURE_VENV=true
+DEEP_AGENT_SANDBOX_PYTHON=/tmp/.venv-sandbox/bin/python
+```
+
+gunicorn 主进程在 `on_starting`（fork worker 前）执行一次 `scripts/sandbox_venv/setup.sh`，
+避免多 worker 并发创建；Pod 重启即重建 venv，**无需**为 pydata 依赖跟分支重建镜像。
+
 - 勿与应用 venv / DeepCube 宿主包合并；NumPy 保持 `<2`。
-- Profile 变更须**重建镜像**；只改 ConfigMap 不够。
+- Profile / `requirements.txt` 变更后下次 Pod 启动自动生效；构建时打入路径则须重建镜像。
 - `SANDBOX_ENABLED=false` 时可不校验 venv。
 
 ---

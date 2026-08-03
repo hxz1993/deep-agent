@@ -225,7 +225,7 @@ _SETTING_GROUPS = (
                 "DEEP_AGENT_SANDBOX_BACKEND",
                 "agent",
                 "sandbox_backend",
-                "沙箱执行后端标识；联调默认 subprocess-dev，生产使用 go-judge 等安全 Backend。",
+                "沙箱执行后端标识。",
             ),
             _SettingDefinition(
                 "sandbox_timeout",
@@ -252,6 +252,15 @@ _SETTING_GROUPS = (
                 "sandbox_python",
                 "沙箱专用 Python 解释器；不展示具体路径。",
                 empty_display="未配置",
+            ),
+            _SettingDefinition(
+                "sandbox_ensure_venv",
+                "启动时创建 venv",
+                "DEEP_AGENT_SANDBOX_ENSURE_VENV",
+                "agent",
+                "sandbox_ensure_venv",
+                "gunicorn 主进程在 fork worker 前自动执行 sandbox venv setup；"
+                "适用于固定镜像、临时 venv 目录的 test 部署。",
             ),
             _SettingDefinition(
                 "sandbox_memory_mb",

@@ -8,6 +8,9 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 VENV_DIR="${DEEP_AGENT_SANDBOX_VENV_DIR:-$ROOT/.venv-sandbox}"
 REQ_FILE="$ROOT/scripts/sandbox_venv/requirements.txt"
+# Keep in sync with deep_agent/options.py DEFAULT_SANDBOX_PIP_* .
+DEEP_AGENT_SANDBOX_PIP_INDEX_URL="${DEEP_AGENT_SANDBOX_PIP_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}"
+DEEP_AGENT_SANDBOX_PIP_TRUSTED_HOST="${DEEP_AGENT_SANDBOX_PIP_TRUSTED_HOST:-pypi.tuna.tsinghua.edu.cn}"
 
 if [[ $# -ge 1 ]]; then
   PYTHON_BIN="$1"
@@ -26,8 +29,18 @@ echo "Creating sandbox venv at $VENV_DIR using $PYTHON_BIN"
 "$PYTHON_BIN" -m venv "$VENV_DIR"
 # shellcheck disable=SC1091
 source "$VENV_DIR/bin/activate"
-python -m pip install --upgrade pip
-python -m pip install -r "$REQ_FILE"
+
+PIP_EXTRA_ARGS=()
+if [[ -n "${DEEP_AGENT_SANDBOX_PIP_INDEX_URL:-}" ]]; then
+  PIP_EXTRA_ARGS+=(-i "$DEEP_AGENT_SANDBOX_PIP_INDEX_URL")
+  if [[ -n "${DEEP_AGENT_SANDBOX_PIP_TRUSTED_HOST:-}" ]]; then
+    PIP_EXTRA_ARGS+=(--trusted-host "$DEEP_AGENT_SANDBOX_PIP_TRUSTED_HOST")
+  fi
+  echo "Using pip index: ${DEEP_AGENT_SANDBOX_PIP_INDEX_URL}"
+fi
+
+python -m pip install "${PIP_EXTRA_ARGS[@]}" --upgrade pip
+python -m pip install "${PIP_EXTRA_ARGS[@]}" -r "$REQ_FILE"
 
 python - <<'PY'
 import numpy

@@ -45,6 +45,15 @@ DEEP_AGENT_SANDBOX_ENSURE_VENV=true
 DEEP_AGENT_SANDBOX_PYTHON=/tmp/.venv-sandbox/bin/python
 ```
 
+默认使用清华源（`pypi.tuna.tsinghua.edu.cn`）；可覆盖：
+
+```text
+DEEP_AGENT_SANDBOX_PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
+DEEP_AGENT_SANDBOX_PIP_TRUSTED_HOST=mirrors.aliyun.com
+```
+
+设 `SANDBOX_PIP_INDEX_URL=` 为空可改回官方 PyPI。`TRUSTED_HOST` 留空时从 index URL 自动解析。
+
 gunicorn 主进程在 `on_starting`（fork worker 前）执行一次 `setup.sh`，避免多 worker 并发创建。
 `local_dev` 仍默认自动 setup（`--no-sandbox-env` 可关），不依赖该开关。
 

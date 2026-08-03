@@ -3,10 +3,12 @@ from __future__ import annotations
 import os
 import subprocess
 from pathlib import Path
+from urllib.parse import urlparse
 
 from deep_agent.core.paths import REPO_ROOT
 
 __all__ = [
+    "build_sandbox_setup_env",
     "ensure_sandbox_interpreter_for_startup",
     "ensure_sandbox_venv",
     "preflight_sandbox_interpreter",
@@ -33,6 +35,24 @@ def _sandbox_venv_dir() -> Path:
     return Path(OPTION.agent.sandbox_python).parent.parent
 
 
+def build_sandbox_setup_env(venv_dir: Path) -> dict[str, str]:
+    """Environment for scripts/sandbox_venv/setup.sh (venv dir + optional pip mirror)."""
+    from deep_agent.options import OPTION
+
+    env = os.environ.copy()
+    env["DEEP_AGENT_SANDBOX_VENV_DIR"] = str(venv_dir)
+    index_url = str(OPTION.agent.sandbox_pip_index_url).strip()
+    if not index_url:
+        return env
+    env["DEEP_AGENT_SANDBOX_PIP_INDEX_URL"] = index_url
+    trusted_host = str(OPTION.agent.sandbox_pip_trusted_host).strip()
+    if not trusted_host:
+        trusted_host = urlparse(index_url).hostname or ""
+    if trusted_host:
+        env["DEEP_AGENT_SANDBOX_PIP_TRUSTED_HOST"] = trusted_host
+    return env
+
+
 def ensure_sandbox_venv(*, python: str | None = None) -> Path:
     """Create or refresh the sandbox venv via scripts/sandbox_venv/setup.sh."""
     from deep_agent.options import OPTION
@@ -55,8 +75,7 @@ def ensure_sandbox_venv(*, python: str | None = None) -> Path:
         if python_path.is_file():
             return python_path
 
-        env = os.environ.copy()
-        env["DEEP_AGENT_SANDBOX_VENV_DIR"] = str(venv_dir)
+        env = build_sandbox_setup_env(venv_dir)
         cmd = ["bash", str(script)]
         if python:
             cmd.append(python)

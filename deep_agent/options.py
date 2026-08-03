@@ -140,6 +140,10 @@ class DBMS(Category):
 
 
 
+DEFAULT_SANDBOX_PIP_INDEX_URL = "https://pypi.tuna.tsinghua.edu.cn/simple"
+DEFAULT_SANDBOX_PIP_TRUSTED_HOST = "pypi.tuna.tsinghua.edu.cn"
+
+
 class Agent(Category):
     _ENV_PREFIX = "DEEP_AGENT_"
 
@@ -307,6 +311,18 @@ class Agent(Category):
         False,
         val_type=bool,
         bind_env="SANDBOX_ENSURE_VENV",
+    )
+    sandbox_pip_index_url = Option(
+        DEFAULT_SANDBOX_PIP_INDEX_URL,
+        val_type=str,
+        bind_env="SANDBOX_PIP_INDEX_URL",
+        convertor=_strip_optional_str,
+    )
+    sandbox_pip_trusted_host = Option(
+        DEFAULT_SANDBOX_PIP_TRUSTED_HOST,
+        val_type=str,
+        bind_env="SANDBOX_PIP_TRUSTED_HOST",
+        convertor=_strip_optional_str,
     )
     sandbox_memory_mb = Option(
         # RSS product budget in megabytes (same semantics as stage-C cgroup memory.max).

@@ -69,6 +69,46 @@ class SandboxVenvEnsureTests(unittest.TestCase):
         finally:
             OPTION.agent.sandbox_python = previous_python
 
+    def test_build_setup_env_uses_tsinghua_mirror_by_default(self) -> None:
+        env = sandbox_venv.build_sandbox_setup_env(Path("/tmp/.venv-sandbox"))
+        self.assertEqual(
+            env["DEEP_AGENT_SANDBOX_PIP_INDEX_URL"],
+            "https://pypi.tuna.tsinghua.edu.cn/simple",
+        )
+        self.assertEqual(
+            env["DEEP_AGENT_SANDBOX_PIP_TRUSTED_HOST"],
+            "pypi.tuna.tsinghua.edu.cn",
+        )
+
+    def test_build_setup_env_derives_trusted_host_when_cleared(self) -> None:
+        previous_index = OPTION.agent.sandbox_pip_index_url
+        previous_trusted = OPTION.agent.sandbox_pip_trusted_host
+        OPTION.agent.sandbox_pip_index_url = "https://mirrors.aliyun.com/pypi/simple/"
+        OPTION.agent.sandbox_pip_trusted_host = ""
+        try:
+            env = sandbox_venv.build_sandbox_setup_env(Path("/tmp/.venv-sandbox"))
+            self.assertEqual(
+                env["DEEP_AGENT_SANDBOX_PIP_INDEX_URL"],
+                "https://mirrors.aliyun.com/pypi/simple/",
+            )
+            self.assertEqual(env["DEEP_AGENT_SANDBOX_PIP_TRUSTED_HOST"], "mirrors.aliyun.com")
+        finally:
+            OPTION.agent.sandbox_pip_index_url = previous_index
+            OPTION.agent.sandbox_pip_trusted_host = previous_trusted
+
+    def test_build_setup_env_omits_mirror_when_index_cleared(self) -> None:
+        previous_index = OPTION.agent.sandbox_pip_index_url
+        previous_trusted = OPTION.agent.sandbox_pip_trusted_host
+        OPTION.agent.sandbox_pip_index_url = ""
+        OPTION.agent.sandbox_pip_trusted_host = ""
+        try:
+            env = sandbox_venv.build_sandbox_setup_env(Path("/tmp/.venv-sandbox"))
+            self.assertNotIn("DEEP_AGENT_SANDBOX_PIP_INDEX_URL", env)
+            self.assertNotIn("DEEP_AGENT_SANDBOX_PIP_TRUSTED_HOST", env)
+        finally:
+            OPTION.agent.sandbox_pip_index_url = previous_index
+            OPTION.agent.sandbox_pip_trusted_host = previous_trusted
+
     def test_missing_interpreter_exits_with_gunicorn_hint(self) -> None:
         previous_enabled = OPTION.agent.sandbox_enabled
         previous_backend = OPTION.agent.sandbox_backend

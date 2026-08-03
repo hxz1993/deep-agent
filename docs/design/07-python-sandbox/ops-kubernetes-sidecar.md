@@ -208,6 +208,8 @@ DEEP_AGENT_SANDBOX_ENSURE_VENV=true
 DEEP_AGENT_SANDBOX_PYTHON=/tmp/.venv-sandbox/bin/python
 ```
 
+pip 默认走清华源（`DEEP_AGENT_SANDBOX_PIP_INDEX_URL` / `SANDBOX_PIP_TRUSTED_HOST` 可覆盖）。
+
 gunicorn 主进程在 `on_starting`（fork worker 前）执行一次 `scripts/sandbox_venv/setup.sh`，
 避免多 worker 并发创建；Pod 重启即重建 venv，**无需**为 pydata 依赖跟分支重建镜像。
 

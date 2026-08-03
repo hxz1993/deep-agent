@@ -4,7 +4,7 @@
 >
 > 更新日期：2026-07-30
 >
-> 数据库迁移：Alembic `022`
+> 数据库迁移：v0.3.0 完整基线 Alembic `001`
 >
 > 关联设计：[`上下文压缩`](../03-context-compaction/context-compaction-design.md)
 
@@ -129,7 +129,7 @@ provider_id + provider_model_id
 
 ### 4.2 `llm_models`
 
-Alembic `022` 增加：
+完整基线 `001` 包含：
 
 ```text
 context_window_tokens  BIGINT NULL
@@ -283,32 +283,10 @@ DeepSeek 或兼容 Provider；目录不参与运行时 Provider 解析。
 
 ## 9. Alembic 与发布安全
 
-新 revision：
-
-```text
-022_model_catalog_and_llm_runtime_metadata.py
-down_revision = 021
-```
-
-升级：
-
-- 为 `llm_models` 增加三个 nullable 字段。
-- 创建 `model_catalog` 与 Lab、标准模型、Provider、模型名称索引。
-
-降级：
-
-- 删除 `model_catalog`。
-- 删除 `llm_models` 三个新增字段。
-- SQLite 使用 `batch_alter_table`。
-
-共享 Test 安全门：
-
-1. 不使用含 `022` 的代码直接启动并连接仍为 `021` 的共享 Test。
-2. 发布前使用 `021` 对应维护工具备份一次。
-3. 在临时 SQLite 验证 `021 → 022 → 021 → 022`。
-4. 部署并升级共享 Test。
-5. 管理员手工更新目录。
-6. 使用 `022` 新版维护工具再备份一次。
+v0.3.0 已将发布前迁移历史压缩为完整基线 `001_initial_schema.py`。该基线一次性创建
+`model_catalog`、`llm_models` 运行属性及全部当前表、约束和索引。新数据库从空库升级；
+旧 `023` 数据库必须在备份和物理结构校验后使用 Alembic `stamp --purge 001`，不能重放
+或手工伪造迁移状态。共享环境的具体安全门和校验命令见 `maintenance/README.md`。
 
 ## 10. 配置备份
 
@@ -346,7 +324,7 @@ auxiliary_model_configs
 
 数据库与运维：
 
-- 临时 SQLite 完成 `021 → 022 → 021 → 022`。
+- 临时 SQLite 完成 `001 → base → 001`，并验证单一 base/head。
 - 配置备份包含目录表及全部新增字段和 JSON。
 - 会话数据不进入备份。
 

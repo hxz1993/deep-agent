@@ -208,6 +208,80 @@ _SETTING_GROUPS = (
         ),
     ),
     _SettingGroupDefinition(
+        key="sandbox",
+        label="Python 沙箱",
+        items=(
+            _SettingDefinition(
+                "sandbox_enabled",
+                "启用沙箱",
+                "DEEP_AGENT_SANDBOX_ENABLED",
+                "agent",
+                "sandbox_enabled",
+                "是否启动 Python 沙箱后端；关闭后 `execute_python` 能力不可用。",
+            ),
+            _SettingDefinition(
+                "sandbox_backend",
+                "沙箱后端",
+                "DEEP_AGENT_SANDBOX_BACKEND",
+                "agent",
+                "sandbox_backend",
+                "沙箱执行后端标识；联调默认 subprocess-dev，生产使用 go-judge 等安全 Backend。",
+            ),
+            _SettingDefinition(
+                "sandbox_timeout",
+                "执行超时",
+                "DEEP_AGENT_SANDBOX_TIMEOUT",
+                "agent",
+                "sandbox_timeout",
+                "单次 execute_python 调用的最大等待时间。",
+                "秒",
+            ),
+            _SettingDefinition(
+                "sandbox_max_concurrency",
+                "最大并发",
+                "DEEP_AGENT_SANDBOX_MAX_CONCURRENCY",
+                "agent",
+                "sandbox_max_concurrency",
+                "同时执行的沙箱请求上限。",
+            ),
+            _SettingDefinition(
+                "sandbox_python",
+                "解释器路径",
+                "DEEP_AGENT_SANDBOX_PYTHON",
+                "agent",
+                "sandbox_python",
+                "沙箱专用 Python 解释器；不展示具体路径。",
+                empty_display="未配置",
+            ),
+            _SettingDefinition(
+                "sandbox_memory_mb",
+                "内存预算",
+                "DEEP_AGENT_SANDBOX_MEMORY_MB",
+                "agent",
+                "sandbox_memory_mb",
+                "RSS 产品预算；subprocess-dev 会按比例映射为 RLIMIT_AS。",
+                "MB",
+            ),
+            _SettingDefinition(
+                "sandbox_cpu_seconds",
+                "CPU 时间上限",
+                "DEEP_AGENT_SANDBOX_CPU_SECONDS",
+                "agent",
+                "sandbox_cpu_seconds",
+                "单次执行允许的 CPU 时间上限。",
+                "秒",
+            ),
+            _SettingDefinition(
+                "sandbox_max_pids",
+                "进程数上限",
+                "DEEP_AGENT_SANDBOX_MAX_PIDS",
+                "agent",
+                "sandbox_max_pids",
+                "RLIMIT_NPROC 上限；0 表示不施加（subprocess-dev 推荐）。",
+            ),
+        ),
+    ),
+    _SettingGroupDefinition(
         key="uploads",
         label="文件上传",
         items=(
@@ -323,12 +397,25 @@ def build_global_settings(
         items: list[GlobalSettingItem] = []
         for definition in group_definition.items:
             category = getattr(options, definition.category)
-            raw_value = (
-                make_url(get_database_url()).get_backend_name()
-                if definition.key == "database_type"
-                else getattr(category, definition.option)
-            )
-            value = _json_value(raw_value)
+            if definition.key == "database_type":
+                raw_value = make_url(get_database_url()).get_backend_name()
+                value = _json_value(raw_value)
+                display_value = _display_value(
+                    value,
+                    empty_display=definition.empty_display,
+                )
+            elif definition.key == "sandbox_python":
+                raw_value = getattr(category, definition.option)
+                configured = bool(str(raw_value).strip())
+                value = configured
+                display_value = "已配置" if configured else definition.empty_display
+            else:
+                raw_value = getattr(category, definition.option)
+                value = _json_value(raw_value)
+                display_value = _display_value(
+                    value,
+                    empty_display=definition.empty_display,
+                )
             descriptor = category._options[definition.option]
             items.append(
                 GlobalSettingItem(
@@ -336,10 +423,7 @@ def build_global_settings(
                     label=definition.label,
                     env_name=definition.env_name,
                     value=value,
-                    display_value=_display_value(
-                        value,
-                        empty_display=definition.empty_display,
-                    ),
+                    display_value=display_value,
                     source="environment" if descriptor.set_by else "default",
                     unit=definition.unit,
                     description=definition.description,

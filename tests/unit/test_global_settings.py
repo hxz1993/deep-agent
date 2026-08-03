@@ -89,8 +89,34 @@ class GlobalSettingsBuilderTests(unittest.TestCase):
 
         self.assertEqual(
             [group.key for group in settings.groups],
-            ["runtime", "context_compaction", "mcp", "uploads", "images", "titles"],
+            [
+                "runtime",
+                "context_compaction",
+                "mcp",
+                "sandbox",
+                "uploads",
+                "images",
+                "titles",
+            ],
         )
+
+    def test_sandbox_python_does_not_expose_interpreter_path(self) -> None:
+        settings = build_global_settings()
+        item = _find_item(settings, "sandbox_python")
+        payload = settings.model_dump_json().lower()
+        self.assertIn("deep_agent_sandbox_python", payload)
+        self.assertEqual(item.display_value, "已配置")
+        self.assertEqual(item.value, True)
+        self.assertNotIn("/bin/", payload)
+        self.assertNotIn("scripts/python", payload)
+
+    def test_sandbox_memory_budget_displays_megabytes(self) -> None:
+        settings = build_global_settings()
+        item = _find_item(settings, "sandbox_memory_mb")
+        self.assertEqual(item.unit, "MB")
+        self.assertEqual(item.display_value, "512")
+        self.assertEqual(item.value, 512)
+        self.assertEqual(item.env_name, "DEEP_AGENT_SANDBOX_MEMORY_MB")
 
 
 class GlobalSettingsApiTests(unittest.TestCase):

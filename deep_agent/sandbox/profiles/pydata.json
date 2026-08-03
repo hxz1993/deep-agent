@@ -1,0 +1,25 @@
+{
+  "id": "pydata",
+  "description": "DeepAgent 默认数据计算 Profile（numpy、pandas、pydantic）",
+  "packages": [
+    {
+      "import_name": "numpy",
+      "display_name": "numpy",
+      "version_note": ">=1.26,<2"
+    },
+    {
+      "import_name": "pandas",
+      "display_name": "pandas"
+    },
+    {
+      "import_name": "pydantic",
+      "display_name": "pydantic",
+      "version_note": ">=2,<3"
+    }
+  ],
+  "model_notes": [
+    "不支持 pip install；未列出的三方库会 ModuleNotFoundError。",
+    "标准库可用。",
+    "每次调用都是全新环境；未在 inputs 或 code 中提供的变量不得假设仍存在。"
+  ]
+}

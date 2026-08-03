@@ -10,8 +10,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+from alembic import command
+from alembic.config import Config
 from dotenv import dotenv_values
-from sqlalchemy import MetaData, Table, func, insert, select, text
+from sqlalchemy import MetaData, Table, delete, func, insert, select, text
 from sqlalchemy.engine import URL
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
@@ -29,6 +31,7 @@ SESSION_TABLES = (
     "chat_messages",
     "chat_context_checkpoints",
 )
+CURRENT_BASELINE_REVISION = "001"
 ENVIRONMENT_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
 
 
@@ -132,9 +135,10 @@ async def export_backup(
         )
         partial_path.unlink(missing_ok=True)
         target_url = f"sqlite+aiosqlite:///{partial_path.as_posix()}"
+        await asyncio.to_thread(_upgrade_target_schema, target_url)
         target_engine = create_async_engine(target_url)
-
-        await _create_target_schema(target_engine)
+        await _create_backup_info_table(target_engine)
+        await _clear_seed_configuration(target_engine)
         row_counts: dict[str, int] = {}
         for table_name in CONFIG_TABLES:
             row_counts[table_name] = await _copy_table(
@@ -191,17 +195,15 @@ async def _source_revision(engine: AsyncEngine) -> str:
     return str(revision)
 
 
-async def _create_target_schema(engine: AsyncEngine) -> None:
-    from deep_agent.db.models import Base
+def _upgrade_target_schema(database_url: str) -> None:
+    config = Config(str(repository_root() / "alembic.ini"))
+    config.set_main_option("script_location", str(repository_root() / "alembic"))
+    config.attributes["database_url"] = database_url
+    command.upgrade(config, "head")
 
+
+async def _create_backup_info_table(engine: AsyncEngine) -> None:
     async with engine.begin() as connection:
-        await connection.run_sync(Base.metadata.create_all)
-        await connection.execute(
-            text(
-                "CREATE TABLE alembic_version "
-                "(version_num VARCHAR(32) NOT NULL PRIMARY KEY)"
-            )
-        )
         await connection.execute(
             text(
                 """
@@ -216,6 +218,27 @@ async def _create_target_schema(engine: AsyncEngine) -> None:
                 """
             )
         )
+
+
+async def _clear_seed_configuration(engine: AsyncEngine) -> None:
+    delete_order = (
+        "auxiliary_model_configs",
+        "agents",
+        "ui_tool_definitions",
+        "mcp_servers",
+        "model_catalog",
+        "llm_models",
+    )
+    async with engine.begin() as connection:
+        for table_name in delete_order:
+            table = await connection.run_sync(
+                lambda sync_connection, name=table_name: Table(
+                    name,
+                    MetaData(),
+                    autoload_with=sync_connection,
+                )
+            )
+            await connection.execute(delete(table))
 
 
 async def _reflect_table(engine: AsyncEngine, table_name: str) -> Table:
@@ -255,11 +278,11 @@ async def _write_backup_metadata(
     revision: str,
     git_commit: str,
 ) -> None:
-    async with engine.begin() as connection:
-        await connection.execute(
-            text("INSERT INTO alembic_version (version_num) VALUES (:revision)"),
-            {"revision": revision},
+    if revision != CURRENT_BASELINE_REVISION:
+        raise ValueError(
+            f"Backup source revision must be {CURRENT_BASELINE_REVISION}, got {revision}"
         )
+    async with engine.begin() as connection:
         await connection.execute(
             text(
                 """

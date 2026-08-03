@@ -1,0 +1,8 @@
+  # WSL host preview: site-packages staged under HOST_DIR (bind from $HOME is denied).
+  - type: tmpfs
+    target: /sandbox
+    data: size=256m,nr_inodes=8k
+  - type: bind
+    source: @HOST_DIR@/site-packages
+    target: /sandbox/site-packages
+    readonly: true

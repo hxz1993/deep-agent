@@ -6,7 +6,7 @@
 >
 > 依赖组合：`pydantic-ai-slim 2.14.1` + `pydantic-ai-harness 0.10.0`
 >
-> 数据库迁移：Alembic `023`
+> 数据库迁移：v0.3.0 完整基线 Alembic `001`
 
 ## 1. 最终口径
 
@@ -403,7 +403,7 @@ DEEP_AGENT_CONTEXT_OUTPUT_TOKEN_FLOOR
 
 ## 9. 数据库与发布
 
-- `023` 已提供 `chat_context_checkpoints`，本轮不新增 Alembic。
+- 完整基线 `001` 已包含 `chat_context_checkpoints`；后续优化不新增迁移。
 - `summary_model_id` 继续记录本轮主模型配置 ID，不再表示辅助摘要模型。
 - 辅助模型目录只保留 `title`；读取辅助模型配置时会删除旧版遗留的 `context_summary` 行。
 - 配置备份只创建 Checkpoint 表结构，不复制会话或 Checkpoint 数据。

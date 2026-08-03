@@ -3,7 +3,7 @@
 DeepAgent 是基于 FastAPI、Pydantic AI 和 SQLAlchemy 的多用户 Agent 服务，并
 随服务发布一体化运维控制台。
 
-当前产品版本为 `0.2.3`。`deep_agent.__version__` 是唯一代码版本来源，FastAPI、
+当前产品版本为 `0.3.0`。`deep_agent.__version__` 是唯一代码版本来源，FastAPI、
 `GET /info` 和 Console 顶部版本徽标均读取该值。后续正式发布默认递增
 `MAJOR.MINOR.PATCH` 的第三位，只有明确规划重大版本时才调整前两位。产品版本不通过
 环境变量或数据库覆盖，也不等同于 Alembic 数据库结构 revision。
@@ -74,6 +74,14 @@ uvicorn deep_agent.main:app --host 0.0.0.0 --port 8000
 `subprocess-dev`，构建阶段同样需要执行 `scripts/sandbox_venv/setup.sh`（或等价步骤），
 并设置 `DEEP_AGENT_SANDBOX_PYTHON`；详见
 [`docs/design/07-python-sandbox/ops-kubernetes-sidecar.md`](docs/design/07-python-sandbox/ops-kubernetes-sidecar.md) §5.3。
+
+## 数据库基线
+
+v0.3.0 将发布前的 Alembic `001`～`023` 历史压缩为唯一基线 `001`。新数据库直接
+执行 `alembic upgrade head`；已有旧库不能重放迁移，必须先使用
+`python3.12 -m maintenance.rebaseline_database` 校验最终结构，再通过 Alembic
+`stamp --purge 001` 重设版本。完整备份和切换命令见
+[`maintenance/README.md`](maintenance/README.md)。
 
 ## 能力类型
 

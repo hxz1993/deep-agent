@@ -17,6 +17,7 @@ from deep_agent.sandbox.profile import (
     probe_sandbox_profile,
     resolve_sandbox_profile,
 )
+from deep_agent.sandbox.subprocess_dev.rlimit import rlimit_as_supported
 from deep_agent.sandbox.types import BackendHealth, ExecuteResult, TruncationMetadata
 from tests.helpers.sandbox import sandbox_test_python
 from tests.helpers.sqlite_stores import make_sqlite_stores
@@ -100,8 +101,10 @@ class SandboxHealthEndpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(payload.get("resource_limits"))
         limits = payload["resource_limits"]
         self.assertEqual(limits["memory_bytes"], 512 * 1024 * 1024)
-        self.assertEqual(limits["memory_enforcement"], "rlimit_as")
-        self.assertEqual(limits["memory_as_bytes"], 1536 * 1024 * 1024)
+        expected_enforcement = "rlimit_as" if rlimit_as_supported() else "none"
+        expected_as = 1536 * 1024 * 1024 if rlimit_as_supported() else None
+        self.assertEqual(limits["memory_enforcement"], expected_enforcement)
+        self.assertEqual(limits["memory_as_bytes"], expected_as)
         self.assertEqual(limits["cpu_seconds"], 30)
         self.assertIsNone(limits["max_pids"])
         self.assertNotIn(".venv-sandbox", str(payload).lower())

@@ -139,7 +139,7 @@ OpenRouter、Azure、Bedrock、Vertex 和长尾 Gateway 暂不进入目录。白
 | API | `deep_agent/api/v1/llm_models.py` |
 | 运行时模态 | `deep_agent/agent/attachments.py`、`input_capabilities.py` |
 | Console | `frontend/console/configuration/catalog.js`、`llm-models.js` |
-| 迁移 | `alembic/versions/022_model_catalog_and_llm_runtime_metadata.py` |
+| 迁移 | v0.3.0 完整基线 `alembic/versions/001_initial_schema.py` |
 | 配置备份 | `maintenance/config_backup.py` |
 
 ## 8. 验证清单

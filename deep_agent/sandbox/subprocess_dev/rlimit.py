@@ -1,7 +1,20 @@
 from __future__ import annotations
 
+import sys
+
 # Product config is RSS-intent (aligns with stage-C cgroup memory.max).
 RLIMIT_AS_PER_RSS_RATIO = 3
+
+
+def rlimit_as_supported() -> bool:
+    """Whether the current platform can enforce a finite RLIMIT_AS.
+
+    Darwin exposes ``RLIMIT_AS`` through ``resource`` but rejects finite values
+    with ``EINVAL``. Treating it as supported makes every sandbox worker fail in
+    ``preexec_fn`` before Python starts.
+    """
+
+    return sys.platform != "darwin"
 
 
 def rss_bytes_to_rlimit_as(
@@ -26,7 +39,11 @@ def apply_rlimits(
     """Apply POSIX rlimits in the child preexec. No-op when all limits are unset."""
     import resource
 
-    if memory_as_bytes is not None and memory_as_bytes > 0:
+    if (
+        rlimit_as_supported()
+        and memory_as_bytes is not None
+        and memory_as_bytes > 0
+    ):
         resource.setrlimit(resource.RLIMIT_AS, (memory_as_bytes, memory_as_bytes))
     if cpu_seconds is not None and cpu_seconds > 0:
         resource.setrlimit(resource.RLIMIT_CPU, (cpu_seconds, cpu_seconds))

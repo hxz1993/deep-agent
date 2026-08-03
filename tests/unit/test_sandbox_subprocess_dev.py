@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import resource
 import signal
 import subprocess
 import sys
@@ -14,7 +15,10 @@ from deep_agent.sandbox.subprocess_dev.backend import SubprocessBackend
 from deep_agent.sandbox.subprocess_dev.env import build_worker_env, repo_root
 from deep_agent.sandbox.subprocess_dev.preexec import build_subprocess_preexec
 from deep_agent.sandbox.subprocess_dev.protocol import BACKEND_NAME
-from deep_agent.sandbox.subprocess_dev.rlimit import rss_bytes_to_rlimit_as
+from deep_agent.sandbox.subprocess_dev.rlimit import (
+    rlimit_as_supported,
+    rss_bytes_to_rlimit_as,
+)
 from deep_agent.sandbox.types import ExecuteRequest
 from tests.helpers.sandbox import FAKE_SANDBOX_PYTHON, sandbox_test_python
 
@@ -92,8 +96,10 @@ class SubprocessBackendTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(health.resource_limits)
         assert health.resource_limits is not None
         self.assertEqual(health.resource_limits.memory_bytes, 512 * 1024 * 1024)
-        self.assertEqual(health.resource_limits.memory_enforcement, "rlimit_as")
-        self.assertEqual(health.resource_limits.memory_as_bytes, 1536 * 1024 * 1024)
+        expected_enforcement = "rlimit_as" if rlimit_as_supported() else "none"
+        expected_as = 1536 * 1024 * 1024 if rlimit_as_supported() else None
+        self.assertEqual(health.resource_limits.memory_enforcement, expected_enforcement)
+        self.assertEqual(health.resource_limits.memory_as_bytes, expected_as)
         self.assertEqual(health.resource_limits.cpu_seconds, 30)
         self.assertIsNone(health.resource_limits.max_pids)
 
@@ -167,11 +173,14 @@ class SubprocessBackendTests(unittest.IsolatedAsyncioTestCase):
         stdout, _ = await proc.communicate()
         self.assertEqual(proc.returncode, 0)
         as_limit, cpu_limit, nproc_limit = stdout.decode().splitlines()
-        self.assertEqual(int(as_limit), 64 * 1024 * 1024)
+        expected_as = 64 * 1024 * 1024 if rlimit_as_supported() else resource.RLIM_INFINITY
+        self.assertEqual(int(as_limit), expected_as)
         self.assertEqual(int(cpu_limit), 5)
         self.assertEqual(int(nproc_limit), 16)
 
     async def test_rlimit_kill_maps_to_execution_failed_not_memory_limit(self) -> None:
+        if not rlimit_as_supported():
+            self.skipTest("finite RLIMIT_AS is not supported on this platform")
         backend = SubprocessBackend(
             python_executable=sandbox_test_python(),
             max_concurrency=1,
@@ -318,7 +327,9 @@ class SubprocessBackendTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotEqual(first_lines[1], second_lines[1])
         for line in (first_lines[1], second_lines[1]):
             self.assertIn("deep-agent-sandbox-", line)
-            self.assertTrue(line.startswith(tempfile.gettempdir()))
+            self.assertTrue(
+                os.path.realpath(line).startswith(os.path.realpath(tempfile.gettempdir()))
+            )
 
     async def test_successful_expression(self) -> None:
         result = await self.backend.execute(

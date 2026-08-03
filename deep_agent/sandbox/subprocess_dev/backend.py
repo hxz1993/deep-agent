@@ -19,7 +19,10 @@ from deep_agent.sandbox.subprocess_dev.protocol import (
     error_result,
     result_from_frame,
 )
-from deep_agent.sandbox.subprocess_dev.rlimit import rss_bytes_to_rlimit_as
+from deep_agent.sandbox.subprocess_dev.rlimit import (
+    rlimit_as_supported,
+    rss_bytes_to_rlimit_as,
+)
 from deep_agent.sandbox.types import (
     BackendHealth,
     ExecuteRequest,
@@ -69,10 +72,11 @@ class SubprocessBackend:
         return rss_bytes_to_rlimit_as(self._memory_limit_bytes)
 
     def resource_limits_summary(self) -> ResourceLimitsSummary:
+        memory_as_bytes = self._memory_as_bytes() if rlimit_as_supported() else None
         return ResourceLimitsSummary(
             memory_bytes=self._memory_limit_bytes,
-            memory_enforcement="rlimit_as",
-            memory_as_bytes=self._memory_as_bytes(),
+            memory_enforcement="rlimit_as" if memory_as_bytes is not None else "none",
+            memory_as_bytes=memory_as_bytes,
             cpu_seconds=self._cpu_limit_seconds,
             # 0 / None => not applied (RLIMIT_NPROC is a poor stand-in for cgroup pids.max).
             max_pids=self._max_pids if self._max_pids else None,

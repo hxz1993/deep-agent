@@ -218,6 +218,9 @@ agent = Agent(
 
 ### 3.6 Output Tool 与结构化输出
 
+> 本节只保留工具体系概览。完整运行语义、多结构方案、Deferred 协同、AI Labs 参考与业务
+> 适用边界见 [`../09-structured-output/structured-output-design.md`](../09-structured-output/structured-output-design.md)。
+
 `ToolOutput` 通过工具调用协议让模型生成并校验最终结果：
 
 ```python
@@ -284,9 +287,9 @@ MCPToolset
 
 最终仍是 MCP Tool，只是经过命名和过滤。
 
-### 3.8 Capability 不是 Tool
+### 3.8 AbstractCapability、Tool Package 与 Toolset 不是同一层
 
-Pydantic AI Capability 可以提供：
+Pydantic AI `AbstractCapability` 可以提供：
 
 - Toolset 或 Native Tool。
 - `PrepareTools`、`ToolSearch`。
@@ -294,24 +297,27 @@ Pydantic AI Capability 可以提供：
 - Hooks、Instrumentation。
 - 模型设置、Thinking 和输出处理。
 
-DeepAgent 自研的 `deep_agent.capabilities.registry.Capability` 只是产品配置包装，负责
-Agent 能力选择和 Console 展示；它不等于 Pydantic AI 原生 Capability。
+DeepAgent 原有自研 `Capability` 只是产品配置包装，却与 Pydantic AI 的
+`AbstractCapability` 同名，容易把产品授权和运行扩展混为一谈。v0.3.2 将它改名为
+`ToolPackage`：负责 Agent 选择、Console 目录和一组工具元数据；Pydantic AI `Toolset` 仍是
+真正交给 Agent 的运行对象。一个 Tool Package 可以预置一个或多个 Toolset，也可以在请求时
+按 MCP 或数据库 UI 定义动态创建 Toolset。完整定义见
+[`../11-tool-packages/tool-packages-design.md`](../11-tool-packages/tool-packages-design.md)。
 
 ## 4. DeepAgent 当前使用情况
 
 ### 4.1 内置 Function Tool
 
 产品层把代码随 DeepAgent 发布、无需管理员注册的后端 Function Tool 统一归入
-“内置工具”，与 MCP 服务同级展示。当前包含三个独立 Capability：
+“内置工具”，与 MCP 服务同级展示。v0.3.2 收敛为两个 Tool Package：
 
-| 前端名称 | Capability 编码 | 默认状态 | 工具 |
+| 前端名称 | Tool Package 编码 | 默认状态 | 工具 |
 | --- | --- | --- | --- |
-| 通用工具 | `native` | 默认启用 | `get_current_time` |
-| 附件读取 | `attachment` | 默认关闭 | `read_text_attachment`、`read_docx`、`read_xlsx` |
-| Python 沙箱 | `python-sandbox` | 默认关闭 | `execute_python` |
+| 通用工具 | `builtin:general` | 默认启用 | `get_current_time`、`execute_python` |
+| 附件读取 | `builtin:attachment` | 默认关闭 | `read_text_attachment`、`read_docx`、`read_xlsx` |
 
-三者对模型都表现为 `FunctionToolset`，但仍保留独立 Capability 编码和 Agent
-开关。配置中心只读展示工具包及工具明细，实际启用由 `agents.capabilities` 决定。
+两包中的后端函数对模型都表现为 `FunctionToolset`。配置中心只读展示工具包及工具明细，
+实际启用仍由 `agents.capabilities` 中的工具包编码决定；本轮不提供包内逐工具开关。
 `python-sandbox` 的工具定义位于 DeepAgent 进程，实际代码通过可替换的
 `PythonExecutionBackend` 执行；这不改变它的 Function Tool 类型。
 
@@ -333,8 +339,9 @@ MCP Resource 也被包装为宿主 Function Tool：
 - `list_mcp_resource_templates`
 - `read_mcp_resource`
 
-产品文案统一使用“内置工具”，卡片技术标识保留 Native、Attachment、Python Sandbox，
-避免与 Provider Native Tool 混淆。代码 capability 名继续保持稳定，不迁移历史 Agent 数据。
+产品文案统一使用“内置工具”，工具目录仍标注具体执行类型，避免与 Provider Native Tool
+混淆。旧 `native`、`python-sandbox`、`attachment` 编码由 Alembic 002 一次性迁移，运行时
+不保留旧分支。
 
 ### 4.2 MCP Tool
 
@@ -371,7 +378,7 @@ UiToolDefinition / builtin record
   → DeferredToolResults
 ```
 
-当前已有：
+v0.3.2 之前已有：
 
 - Agent 显式选择 `ui:<tool_name>`。
 - 参数 JSON Schema 校验。
@@ -380,12 +387,33 @@ UiToolDefinition / builtin record
 - Pending 刷新和历史恢复。
 - Confirm、Choice、Text、Date、Structured、Custom Widget。
 
+v0.3.2 将定义和选择颗粒度明确分为两层：
+
+```text
+UI Tool Definition
+  → 稳定工具协议名、参数 Schema、Widget、结果 Schema
+
+UI Tool Package
+  → Agent 选择单元，例如 ui:deepcube
+  → 展开为一个或多个 UI Tool Definition
+```
+
+Agent 本轮只选择整个包，不继续保留 `ui:<tool_name>` 单工具授权。代码内置交互归入
+`ui:builtin`，现有 DeepCube 两个手工工具归入 `ui:deepcube`；模型工具名、SSE、Pending 和历史
+协议保持不变，只调整 Agent 配置如何展开工具集合。未来确有细粒度授权需求时扩展独立的选择结构，
+不再让工具协议名兼任授权主键。
+
+Output Tool 不属于 UI Tool Package，也不加入 `agents.capabilities`。多个互斥 Output Tool 应由
+独立的输出契约组统一选择，例如 `deepcube.v1` 内包含 answer、code、config 和 mixed 四种终止
+结构。详见 [`../09-structured-output/structured-output-design.md`](../09-structured-output/structured-output-design.md)。
+
 仍需补强：
 
 - 后端按 `result_schema` 校验前端返回结果。
 - 工具执行权限和当前 App/页面/表单实例绑定。
 - 对修改型 UI Tool 区分预览、确认、执行和失败。
 - 工具结果增加版本冲突、部分成功和拒绝语义。
+- UI Tool 定义与 Agent 选择颗粒度解耦；v0.3.2 使用 Tool Package 整包选择，旧逐工具引用只在迁移中转换。
 
 ### 4.4 当前没有使用的能力
 
@@ -413,7 +441,7 @@ SubAgent 和其他 Harness 能力尚未启用，不能把“已安装 Harness”
 
 ```mermaid
 flowchart TD
-    A["Agent.capabilities"] --> B["CapabilityRegistry: 内置函数、Sandbox 与 Skill"]
+    A["Agent.capabilities: Tool Package 编码"] --> B["ToolPackageRegistry: 内置函数与 Skill"]
     A --> C["请求级解析 MCP"]
     A --> D["请求级解析 UI Tool"]
     C --> E["MCPToolset / DynamicToolset / PrefixedToolset"]
@@ -432,7 +460,7 @@ flowchart TD
 - `deep_agent/api/v1/deps.py`：加载 Agent、模型、MCP、Resource 和 UI Toolset。
 - `deep_agent/agent/factory.py`：合并 Toolset 并构造 Agent。
 - `deep_agent/agent/runner.py`：运行、SSE、消息持久化和 Deferred 恢复。
-- `deep_agent/capabilities/registry.py`：DeepAgent 产品能力注册表。
+- `deep_agent/capabilities/registry.py`：DeepAgent 产品工具包注册表。
 
 ## 5. MCP 工具命名优化
 
@@ -869,6 +897,9 @@ Invalid request
 - 同步补充每轮工具数量和 Schema 体积观测，为后续 Tool Search 提供数据。
 
 ### 第二批：结构化最终输出
+
+详细设计和测试边界见
+[`../09-structured-output/structured-output-design.md`](../09-structured-output/structured-output-design.md)。
 
 - 首版默认使用 `ToolOutput`，兼容私有 OpenAI-compatible 模型。
 - 要求严格结构化时，输出类型只保留 `ToolOutput(...)` 与 `DeferredToolRequests`，不同时允许 `str` 绕过结构约束。

@@ -23,6 +23,7 @@
 | `ATT-001` | 附件解析 | 固化真实附件读取、上下文压缩和 Checkpoint 更新的端到端测试 | 可实施 | 覆盖上传、分页读取、SSE、历史恢复与压缩 | [验证边界](06-attachment-parsing/attachment-parsing-design.md#10-验证边界) |
 | `ART-001` | Artifact 交互 | Artifact 最小语义（登记/元数据/TTL/权限；可不接外部 sink） | 待设计 | 合法 id 不得从 Checkpoint 猜造；存储落点待决 | [08 分期 A0](08-artifact-export/README.md#建议分期先语义后-sink) |
 | `ART-001b` | Artifact 交互 | 可选 sink：下载中心 publish（upload + business.save） | 待设计 | 依赖 ART-001；非唯一成功标准 | [设计纲要 S0](08-artifact-export/artifact-export-design.md#32-可选-sink下载中心s0) |
+| `CTXREF-001` | 上下文引用 | 实施 `context_refs` 公共协议、持久化、历史返回和模型 Prompt 格式化 | 可实施 | 不新增数据库表；公共外壳严格、payload 宽松、metadata 不发模型 | [上下文引用设计](10-context-reference-and-commands/context-reference-and-commands-design.md) |
 
 ## P1
 
@@ -30,11 +31,14 @@
 | --- | --- | --- | --- | --- | --- |
 | `TOOL-101` | 工具优化 | 收敛 MCP 单层命名空间并兼容重复前缀 | 待设计 | 不能破坏已有 Agent capability 与历史工具事件 | [MCP 命名](05-tool-optimization/tool-optimization-design.md#5-mcp-工具命名优化) |
 | `TOOL-102` | 工具优化 | 使用 `PrepareTools` 做请求级工具过滤 | 待设计 | 先完成工具风险元数据和可观测性 | [请求级过滤](05-tool-optimization/tool-optimization-design.md#81-preparetools) |
-| `TOOL-105` | 工具优化 | 增加 Agent 可选结构化最终输出 | 待设计 | 默认 `ToolOutput`；兼容 Deferred；动态 Schema 需服务端校验和有限重试 | [结构化输出](05-tool-optimization/tool-optimization-design.md#第二批结构化最终输出) |
+| `TOOL-105` | 结构化最终输出 | 增加 Agent 可选结构化最终输出 | 已完成设计 | 默认 `ToolOutput`；兼容 Deferred；动态 Schema 需服务端校验和有限重试 | [结构化最终输出设计](09-structured-output/structured-output-design.md) |
 | `TOOL-106` | 工具优化 | 为高风险后端工具增加执行前审批 | 待设计 | 依赖风险元数据；覆盖持久化、TTL、权限复检、幂等与审计 | [执行审批](05-tool-optimization/tool-optimization-design.md#第三批高风险工具审批) |
+| `TOOL-107` | 工具包 | 统一 Tool Package 目录并支持 UI 工具包 | 实施中 | v0.3.2 整包选择；旧编码仅由 Alembic 002 一次迁移，运行时不保留兼容分支 | [工具包与工具目录](11-tool-packages/tool-packages-design.md) |
+| `TOOL-108` | 工具包 | 支持 Agent 在工具包内逐工具授权 | 暂缓 | 先完成整包语义和目录统一；未来扩展选择结构，不复用稳定工具协议名作为授权主键 | [后续演进](11-tool-packages/tool-packages-design.md#12-后续演进) |
 | `ATT-101` | 附件解析 | 设计统一文档解析服务，覆盖 PDF/OCR/PPTX 和复杂 Office | 待设计 | 需要评估独立服务、开源解析器和资源隔离 | [后续方向](06-attachment-parsing/attachment-parsing-design.md#13-后续方向) |
 | `ART-101` | Artifact 交互 | 沙箱大结果晋升为 Artifact（与 07 workdir 合同） | 待设计 | 依赖 ART-001 与 07 阶段 A | [交叉合同](08-artifact-export/README.md#与-07-的交叉合同必须对齐) |
 | `ART-102` | Artifact 交互 | （已并入 ART-101）沙箱 `result` 产出 artifact_id | 待设计 | 同 ART-101 | [设计纲要](08-artifact-export/artifact-export-design.md#31-语义主干a0a1) |
+| `CTXREF-101` | 上下文引用 | 迁移 DeepCube 与 DeepTable 前端，并补齐对应 Agent 业务 Prompt | 可实施 | 先交付 CTXREF-001；DeepTable 不再使用 DeepCube 助手做业务验收 | [实施阶段](10-context-reference-and-commands/context-reference-and-commands-design.md#18-建议实施阶段) |
 
 ## P2
 

@@ -13,6 +13,9 @@
 | `06` | [`附件解析`](06-attachment-parsing/README.md)       | 2026-07 | 第一版按需读取与压缩协同已落地 |
 | `07` | [`Python Sandbox`](07-python-sandbox/README.md) | 2026-07 起 | A 已落地（subprocess-dev + soft guardrails）；B 探针代码已有、节点选型未完成；C 阻塞于 B |
 | `08` | [`Artifact 交互语义`](08-artifact-export/README.md) | 2026-08 | 骨架：句柄语义为主；下载中心等为可选 sink |
+| `09` | [`结构化最终输出`](09-structured-output/README.md) | 2026-08 | 完成 Output、Deferred、Harness 与业务 Tool Result 边界梳理；尚未实施 |
+| `10` | [`上下文引用与快捷命令`](10-context-reference-and-commands/README.md) | 2026-08 | 完成 Context Reference 公共协议、Prompt 分层和命令边界设计；尚未实施 |
+| `11` | [`工具包与工具目录`](11-tool-packages/README.md) | 2026-08 | 完成产品工具包、运行 Toolset、数据库与 Console 统一设计；进入 v0.3.2 实施 |
 
 ## 文档命名
 

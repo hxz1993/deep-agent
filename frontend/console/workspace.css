@@ -787,18 +787,80 @@ html, body {
 .send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .stop-btn { background: var(--danger); }
 .stop-square { width: 12px; height: 12px; background: var(--send-fg); border-radius: 3px; }
-.attach-btn {
+.composer-icon-btn {
   flex-shrink: 0;
-  width: 34px;
-  height: 34px;
-  border: none;
-  border-radius: 10px;
+  width: 32px;
+  height: 32px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 4px;
   background: transparent;
   cursor: pointer;
-  font-size: 18px;
   color: var(--text-muted);
+  padding: 0;
+  transition: color .15s, background .15s, border-color .15s, opacity .15s;
 }
-.attach-btn:hover { background: var(--bg-hover); color: var(--text); }
+.composer-icon-btn svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.composer-icon-btn:hover:not(:disabled) { background: var(--bg-hover); color: var(--text); border-color: var(--border-soft); }
+.composer-icon-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.composer-icon-btn:disabled { opacity: .38; cursor: not-allowed; }
+.compact-context-btn.compacting svg { animation: context-compact-spin 1s linear infinite; }
+@keyframes context-compact-spin { to { transform: rotate(360deg); } }
+.context-budget-badge {
+  flex-shrink: 0;
+  min-width: 78px;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-faint);
+  font: 11px/1 var(--font);
+  cursor: help;
+}
+.context-budget-badge.reminder { color: #b7791f; border-color: color-mix(in srgb, #b7791f 45%, var(--border)); }
+.context-budget-badge.warning { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 48%, var(--border)); }
+.context-compaction-row,
+.context-checkpoint-marker {
+  width: min(780px, calc(100% - 38px));
+  margin: 10px auto;
+  color: var(--text-faint);
+  font-size: 12px;
+  text-align: center;
+}
+.context-compaction-row {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 4px;
+  background: var(--bg-soft);
+}
+.context-compaction-row .spinner {
+  width: 14px;
+  height: 14px;
+  border: 1.5px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: context-compact-spin .8s linear infinite;
+}
+.context-compaction-row.failed { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 38%, var(--border)); }
+.context-compaction-row button { border: 0; background: transparent; color: var(--accent); cursor: pointer; }
+.context-checkpoint-marker { display: flex; align-items: center; gap: 9px; }
+.context-checkpoint-marker::before,
+.context-checkpoint-marker::after { content: ""; height: 1px; flex: 1; background: var(--border); }
+.context-checkpoint-marker span { white-space: nowrap; }
 .attachment-preview {
   display: flex;
   flex-wrap: wrap;

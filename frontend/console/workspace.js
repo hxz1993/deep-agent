@@ -420,7 +420,7 @@ function renderInspector() {
         <div class="budget-meter" title="原始历史估算占压缩触发线的比例"><span style="width:${budgetPercent}%"></span></div>
         <header><strong>上下文预算</strong><span>历史快照</span></header>
         <dl class="inspector-grid">
-          <dt>原始历史估算</dt><dd>${escapeHtml(formatTokens(contextStatus.estimated_history_tokens))} Token</dd>
+          <dt>当前历史估算</dt><dd>${escapeHtml(formatTokens(contextStatus.estimated_history_tokens))} Token</dd>
           <dt>上下文窗口</dt><dd>${escapeHtml(formatTokens(contextStatus.context_window_tokens))} Token</dd>
           <dt>动态输出预估</dt><dd>${escapeHtml(formatTokens(contextStatus.predicted_output_tokens))} Token</dd>
           <dt>安全余量</dt><dd>${escapeHtml(formatTokens(contextStatus.safety_margin_tokens))} Token</dd>

@@ -12,7 +12,7 @@
 | 项 | 内容 |
 | --- | --- |
 | **是什么** | 通用 AI Agent 全栈：FastAPI 后端 + Pydantic AI 运行时 + 静态前端 |
-| **产品版本** | `deep_agent.__version__` 为唯一来源；当前 `0.3.3`，默认发布递增第三位 |
+| **产品版本** | `deep_agent.__version__` 为唯一来源；当前 `0.3.4`，默认发布递增第三位 |
 | **启动** | 本地 Test 联调固定使用下方命令；部署入口才使用 `deep_agent.main:app` |
 | **测试** | `python3.12 -m unittest discover -s tests -p "test_*.py" -v` |
 | **配置** | 仓库根 `.env`（`DEEP_AGENT_*` / `DEEP_AGENT_DBMS_*` / `DEEP_AGENT_SQLITE_PATH`） |
@@ -85,7 +85,9 @@ HTTP → deep_agent/api/v1 → AgentRunner → pydantic_ai.Agent → Toolsets
 - 模型直接接收 Instructions、历史、当前输入和 Tool Definitions。MCP Resource/Prompt 不会自动成为模型工具，必须由宿主读取、注入或显式包装。
 - Pydantic AI 负责 Agent loop、参数校验、工具调用、重试、流式事件和 Deferred 原语；DeepAgent 负责 SQL 会话、用户隔离、MCP 配置/Header、HITL、SSE 和 Console。
 - 原始 `chat_messages` 始终完整保存；启用全局上下文压缩后，模型输入可复用
-  `chat_context_checkpoints` 派生投影。压缩不得破坏 Tool Call/Result 配对、原始历史、
+  `chat_context_checkpoints` 派生投影。v0.3.4 增加独立主动压缩接口；主动入口不受自动阈值、
+  历史长度或现有 Checkpoint 限制，无实际收益时由后端返回 `noop`，
+  Console 只展示当前有效压缩边界，不保存压缩审计列表。压缩不得破坏 Tool Call/Result 配对、原始历史、
   分支和 Pending 恢复；模型未配置上下文窗口时自动停用。
 - 新的运行时横切能力优先评估 Core 的 `PrepareTools`、Hooks、`ToolSearch` 和 Harness 的 Compaction/Overflow；不要默认把逻辑继续写入 `AgentRunner`。
 - Harness 是可选能力库，不是产品平台。会话、身份、配置、HITL、SSE 和 Console 继续由 DeepAgent 负责；引入 Harness 0.x 时必须与 `pydantic-ai-slim` 一起固定准确版本。

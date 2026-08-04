@@ -54,13 +54,16 @@ export function contextCompactionPresentation(data = {}) {
   const phase = data.phase || "started";
   const defaults = {
     started: "正在压缩上下文…",
+    deterministic: "正在整理旧工具结果…",
+    summarizing: "正在生成上下文摘要…",
+    saving: "正在保存新的 Checkpoint…",
     completed: "上下文压缩完成，正在生成…",
     fallback: "已缩减较早上下文，正在生成…",
   };
   return {
     phase,
     message: data.message || defaults[phase] || "正在处理上下文…",
-    active: ["started", "completed", "fallback"].includes(phase),
+    active: ["started", "deterministic", "summarizing", "saving", "completed", "fallback"].includes(phase),
   };
 }
 

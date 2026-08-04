@@ -467,6 +467,96 @@ class DeepAgentContextCompaction(AbstractCapability[Any]):
             )
         return request_context
 
+    async def compact_manually(
+        self,
+        ctx: RunContext[Any],
+        request_context: "ModelRequestContext",
+        *,
+        state: ContextRunState,
+        target_tokens: int,
+    ) -> list[ModelMessage]:
+        """Build a persistent manual projection without running a chat turn.
+
+        Manual compaction deliberately has no sliding-window fallback: a user
+        requested checkpoint is saved only when the main model produced a
+        summary and the resulting projection meets the requested target.
+        """
+
+        messages = list(request_context.messages)
+        telemetry = state.telemetry
+        before = _request_estimate(state.estimator, messages, request_context)
+        telemetry.triggered = True
+        telemetry.trigger_count += 1
+        telemetry.estimated_tokens_before = before
+        telemetry.estimated_tokens_after = before
+        telemetry.max_estimated_tokens_before = before
+        telemetry.messages_before = len(messages)
+        telemetry.messages_after = len(messages)
+        state.emit(
+            "started",
+            "正在分析上下文…",
+            mode="manual",
+            estimated_tokens_before=before,
+            target_tokens=target_tokens,
+        )
+
+        # The first user task and the most recent turn are protected context.
+        # With no previous summary and fewer than two user turns there is no
+        # older semantic prefix to summarize.  Keep the manual endpoint
+        # callable, but report a truthful no-op without spending a model call.
+        user_turns = sum(
+            1
+            for message in messages
+            if isinstance(message, ModelRequest)
+            and any(isinstance(part, UserPromptPart) for part in message.parts)
+        )
+        if not _summary_contents(messages) and user_turns < 2:
+            raise SummaryUnavailable("no_safe_summary_prefix")
+
+        compacted = await self._deterministic_compaction(
+            messages,
+            ctx,
+            request_context,
+            target_tokens,
+            state.estimator,
+        )
+        state.emit(
+            "deterministic",
+            "正在整理较早消息和工具结果…",
+            mode="manual",
+            estimated_tokens_after=_request_estimate(
+                state.estimator,
+                compacted,
+                request_context,
+            ),
+            target_tokens=target_tokens,
+        )
+
+        # A durable checkpoint always contains a semantic summary.  Even when
+        # deterministic tiers already fit, do not persist a lossy projection
+        # made only from clamping/clearing tool results.
+        compacted = await self._summarize_to_target(
+            compacted,
+            ctx,
+            request_context,
+            target_tokens,
+            state,
+        )
+        after = _request_estimate(state.estimator, compacted, request_context)
+        if after > target_tokens:
+            raise SummaryUnavailable("target_not_met")
+
+        summary_after = _summary_contents(compacted)
+        if not summary_after:
+            raise SummaryUnavailable("summary_not_applied")
+        telemetry.summary_applied = True
+        telemetry.target_met = True
+        telemetry.strategy = "manual_summary"
+        telemetry.estimated_tokens_after = after
+        telemetry.messages_after = len(compacted)
+        telemetry.reduction_ratio = max(0.0, 1 - (after / max(1, before)))
+        return compacted
+
     async def after_model_request(
         self,
         ctx: RunContext[Any],
@@ -677,6 +767,12 @@ class DeepAgentContextCompaction(AbstractCapability[Any]):
                 raise SummaryUnavailable("summary_unit_too_large")
 
             prompt = _summary_prompt(chunk, rolling)
+            state.emit(
+                "summarizing",
+                f"正在生成第 {chunks + 1} 段摘要…",
+                summary_call=state.telemetry.summary_calls + 1,
+                summary_chunk=chunks + 1,
+            )
             try:
                 async with asyncio.timeout(self.summary_timeout):
                     summary_agent: Agent[None, str] = Agent(

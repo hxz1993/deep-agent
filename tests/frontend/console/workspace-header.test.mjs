@@ -103,6 +103,31 @@ test("输入区按模型与模态输入双列展示并移除冗余提示", () =>
   assert.doesNotMatch(template, /deep-agent 可能会出错|composer-hint/);
 });
 
+test("输入框提供线性附件、主动压缩按钮和后端预算百分比", () => {
+  assert.match(template, /id="attachBtn"[\s\S]*?<svg/);
+  assert.match(template, /id="compactContextBtn"[\s\S]*?<svg/);
+  assert.match(template, /id="contextBudgetBadge"[\s\S]*上下文 —/);
+  assert.doesNotMatch(template, /📎/);
+  assert.doesNotMatch(chatSource, /📎/);
+  assert.match(chatSource, /estimated_history_tokens/);
+  assert.match(chatSource, /usable_request_tokens/);
+  assert.match(chatSource, /manual_compaction_available/);
+  assert.match(chatSource, /\/compact/);
+  assert.match(chatSource, /context_compaction_result/);
+  assert.match(chatSource, /本次压缩未产生明显效果/);
+  assert.match(chatSource, /可再次压缩，重复压缩可能损失部分细节/);
+  assert.doesNotMatch(chatSource, /already_compacted|insufficient_new_history/);
+  assert.doesNotMatch(chatSource, /context_compaction_target_ratio|safety_margin\s*=|predict.*output/i);
+});
+
+test("当前有效 Checkpoint 作为历史分隔标记而非聊天消息渲染", () => {
+  assert.match(chatSource, /data\.context_checkpoint/);
+  assert.match(chatSource, /addContextCheckpointMarker/);
+  assert.match(chatSource, /上下文已压缩 · 原始约/);
+  assert.match(chatSource, /msg\.branch_point > boundary/);
+  assert.doesNotMatch(chatSource, /addMessage\([^\n]*context_checkpoint/);
+});
+
 test("0803 不带入 0802 的对话消息与滚动重构", () => {
   assert.doesNotMatch(chatSource, /message-expand-btn|scrollBottomBtn|appendAssistantCopyAction/);
   assert.doesNotMatch(chatSource, /tool-block open running/);

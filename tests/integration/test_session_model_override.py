@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, patch
 
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
+from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, ToolCallPart, UserPromptPart
 from sqlalchemy import text
 
 from deep_agent.api.v1 import deps as api_deps
@@ -239,6 +240,9 @@ class SessionModelOverrideIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreater(payload["usable_request_tokens"], 0)
         self.assertTrue(payload["compaction_enabled"])
         self.assertFalse(payload["checkpoint_exists"])
+        self.assertFalse(payload["checkpoint_active"])
+        self.assertTrue(payload["manual_compaction_available"])
+        self.assertEqual(payload["manual_compaction_reason"], "available")
 
     async def test_context_status_keeps_budget_fields_null_when_window_is_unknown(
         self,
@@ -281,6 +285,162 @@ class SessionModelOverrideIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(payload["usable_request_tokens"])
         self.assertFalse(payload["compaction_enabled"])
         self.assertEqual(payload["compaction_reason"], "context_window_unknown")
+        self.assertFalse(payload["manual_compaction_available"])
+        self.assertEqual(payload["manual_compaction_reason"], "context_window_unknown")
+
+        with patch(
+            "deep_agent.agent.factory._resolve_model",
+            return_value=text_only_model("unused"),
+        ):
+            async with AsyncClient(
+                transport=self._transport,
+                base_url="http://test",
+                timeout=30.0,
+            ) as client:
+                compact = await client.post(
+                    f"/api/v1/sessions/{self._session_id}/compact",
+                    params={"agent_id": self._agent_id},
+                    json={},
+                )
+        self.assertEqual(compact.status_code, 422)
+        self.assertEqual(compact.json()["detail"]["code"], "context_window_unknown")
+
+    async def test_manual_compaction_stream_updates_status_and_history_marker(self) -> None:
+        history = []
+        for turn in range(3):
+            history.extend(
+                [
+                    ModelRequest(
+                        parts=[
+                            UserPromptPart(
+                                content=f"第 {turn} 轮项目记录：" + "必须保留这项背景。" * 500
+                            )
+                        ]
+                    ),
+                    ModelResponse(
+                        parts=[TextPart(content=f"第 {turn} 轮决定：" + "确认当前方案。" * 500)]
+                    ),
+                ]
+            )
+        await get_context().store.append(
+            self._session_id,
+            history,
+            agent_id=self._agent_id,
+            user_id="integration-test-user",
+        )
+
+        with patch(
+            "deep_agent.agent.factory._resolve_model",
+            return_value=text_only_model("保留既有决定、约束与未决事项。"),
+        ):
+            with mock_request_disconnect():
+                async with AsyncClient(
+                    transport=self._transport,
+                    base_url="http://test",
+                    timeout=30.0,
+                ) as client:
+                    response = await client.post(
+                        f"/api/v1/sessions/{self._session_id}/compact",
+                        params={"agent_id": self._agent_id},
+                        json={"model_id": self._model_b_id},
+                    )
+        self.assertEqual(response.status_code, 200, response.text)
+        events = parse_sse_events(response.text)
+        result = events[-1]
+        self.assertEqual(result["type"], "context_compaction_result")
+        self.assertEqual(result["status"], "completed", result)
+        self.assertTrue(result["context_status"]["checkpoint_active"])
+        self.assertTrue(result["context_status"]["manual_compaction_available"])
+        self.assertEqual(
+            result["context_status"]["manual_compaction_reason"],
+            "available",
+        )
+
+        async with AsyncClient(
+            transport=self._transport,
+            base_url="http://test",
+            timeout=30.0,
+        ) as client:
+            history_response = await client.get(
+                f"/api/v1/sessions/{self._session_id}/history",
+                params={
+                    "agent_id": self._agent_id,
+                    "model_id": self._model_b_id,
+                },
+            )
+        self.assertEqual(history_response.status_code, 200, history_response.text)
+        payload = history_response.json()
+        self.assertEqual(payload["model_message_count"], len(history))
+        self.assertIsNotNone(payload["context_checkpoint"])
+        self.assertEqual(payload["context_checkpoint"]["row_version"], 1)
+
+        with patch(
+            "deep_agent.agent.factory._resolve_model",
+            return_value=text_only_model("不会再次调用"),
+        ):
+            with mock_request_disconnect():
+                async with AsyncClient(
+                    transport=self._transport,
+                    base_url="http://test",
+                    timeout=30.0,
+                ) as client:
+                    repeated = await client.post(
+                        f"/api/v1/sessions/{self._session_id}/compact",
+                        params={"agent_id": self._agent_id},
+                        json={"model_id": self._model_b_id},
+                    )
+        repeated_result = parse_sse_events(repeated.text)[-1]
+        self.assertEqual(repeated_result["status"], "noop")
+        self.assertEqual(repeated_result["reason"], "no_reduction")
+        self.assertTrue(
+            repeated_result["context_status"]["manual_compaction_available"]
+        )
+
+        async with AsyncClient(
+            transport=self._transport,
+            base_url="http://test",
+            timeout=30.0,
+        ) as client:
+            other_model_history = await client.get(
+                f"/api/v1/sessions/{self._session_id}/history",
+                params={"agent_id": self._agent_id},
+            )
+        self.assertIsNone(other_model_history.json()["context_checkpoint"])
+
+    async def test_manual_compaction_rejects_pending_tool_interaction(self) -> None:
+        await get_context().store.append(
+            "manual-pending",
+            [
+                ModelRequest(parts=[UserPromptPart(content="请确认")]),
+                ModelResponse(
+                    parts=[
+                        ToolCallPart(
+                            "builtin__confirm",
+                            {"message": "继续？"},
+                            tool_call_id="pending-confirm",
+                        )
+                    ]
+                ),
+            ],
+            agent_id=self._agent_id,
+            user_id="integration-test-user",
+        )
+        with patch(
+            "deep_agent.agent.factory._resolve_model",
+            return_value=text_only_model("unused"),
+        ):
+            async with AsyncClient(
+                transport=self._transport,
+                base_url="http://test",
+                timeout=30.0,
+            ) as client:
+                response = await client.post(
+                    "/api/v1/sessions/manual-pending/compact",
+                    params={"agent_id": self._agent_id},
+                    json={},
+                )
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["detail"]["code"], "pending_deferred")
 
 
 if __name__ == "__main__":

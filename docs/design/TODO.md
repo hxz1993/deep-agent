@@ -63,6 +63,6 @@
 | ID | 课题 | 结论 | 状态 | 来源 |
 | --- | --- | --- | --- | --- |
 | `MODEL-CATALOG` | 模型目录 | 数据库目录、手工全量刷新和模型运行属性已落地 | 已关闭 | [模型目录设计](04-model-catalog/model-catalog-design.md) |
-| `CTX-COMPACTION` | 上下文压缩 | 主模型摘要、确定性裁剪、Checkpoint 与测试会话已落地 | 已关闭 | [上下文压缩设计](03-context-compaction/context-compaction-design.md) |
+| `CTX-COMPACTION` | 上下文压缩 | 自动/主动主模型摘要、可重复主动尝试、确定性裁剪、Checkpoint、历史标记与测试会话已落地 | 已关闭 | [上下文压缩设计](03-context-compaction/context-compaction-design.md) |
 | `ATT-V1` | 附件解析 | TXT/DOCX/XLSX 按需分页读取与会话附件限制已落地 | 已关闭 | [附件解析设计](06-attachment-parsing/attachment-parsing-design.md) |
 | `UI-MCP-DISCOVERY` | UI 工具 | 不采用 MCP UI 自动发现和同步；保留 builtin/manual 两类 | 已关闭 | [UI 工具历史](01-ui-tools/ui-tools-history.md) |

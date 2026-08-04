@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import AsyncMock, patch
 
 from pydantic_ai import Agent
 from pydantic_ai.messages import (
@@ -752,6 +753,299 @@ class ContextCheckpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(events[-1]["type"], "final")
         persisted = await self.stores.coordinator.get_history("compact-stream")
         self.assertNotIn("context_compaction", str(persisted))
+
+    async def test_manual_compaction_writes_checkpoint_without_rewriting_history(
+        self,
+    ) -> None:
+        raw: list[ModelMessage] = []
+        for turn in range(3):
+            raw.extend(
+                [
+                    ModelRequest(
+                        parts=[
+                            UserPromptPart(
+                                content=f"第 {turn} 轮约束：" + ("需要保留的中文背景。" * 80)
+                            )
+                        ]
+                    ),
+                    ModelResponse(
+                        parts=[TextPart(content=f"第 {turn} 轮结论：" + ("确认当前决定。" * 80))]
+                    ),
+                ]
+            )
+        await self.stores.coordinator.append(
+            "manual-compact",
+            raw,
+            user_id="user-1",
+        )
+        capability = DeepAgentContextCompaction(
+            context_window_tokens=4_000,
+            max_output_tokens=500,
+            summary_timeout=10,
+        )
+        runner = self._runner(capability)
+
+        events = [
+            event
+            async for event in runner.run_manual_compaction(
+                "manual-compact",
+                AgentDeps(session_id="manual-compact", user="user-1"),
+            )
+        ]
+
+        self.assertIn("started", [e.get("phase") for e in events])
+        self.assertIn("deterministic", [e.get("phase") for e in events])
+        self.assertIn("summarizing", [e.get("phase") for e in events])
+        self.assertIn("saving", [e.get("phase") for e in events])
+        result = events[-1]
+        self.assertEqual(result["type"], "context_compaction_result")
+        self.assertEqual(result["status"], "completed", result)
+        self.assertGreater(result["usage"]["requests"], 0)
+        self.assertLess(result["after_tokens"], result["before_tokens"])
+
+        self.assertEqual(
+            history_hash(await self.stores.coordinator.get_history("manual-compact")),
+            history_hash(raw),
+        )
+        checkpoint = await self.stores.context_checkpoint.get("manual-compact")
+        self.assertIsNotNone(checkpoint)
+        assert checkpoint is not None
+        self.assertEqual(checkpoint.row_version, 1)
+
+        repeated = [
+            event
+            async for event in runner.run_manual_compaction(
+                "manual-compact",
+                AgentDeps(session_id="manual-compact", user="user-1"),
+            )
+        ]
+        self.assertEqual(repeated[-1]["status"], "noop")
+        self.assertEqual(repeated[-1]["reason"], "no_reduction")
+        unchanged = await self.stores.context_checkpoint.get("manual-compact")
+        self.assertIsNotNone(unchanged)
+        assert unchanged is not None
+        self.assertEqual(unchanged.row_version, 1)
+
+        tail = [
+            ModelRequest(
+                parts=[UserPromptPart(content="新增约束：" + "保留新增中文背景。" * 100)]
+            ),
+            ModelResponse(
+                parts=[TextPart(content="新增结论：" + "确认新增决定。" * 100)]
+            ),
+        ]
+        await self.stores.coordinator.append(
+            "manual-compact",
+            tail,
+            user_id="user-1",
+        )
+        refreshed = [
+            event
+            async for event in runner.run_manual_compaction(
+                "manual-compact",
+                AgentDeps(session_id="manual-compact", user="user-1"),
+            )
+        ]
+        self.assertEqual(refreshed[-1]["status"], "completed", refreshed[-1])
+        updated = await self.stores.context_checkpoint.get("manual-compact")
+        self.assertIsNotNone(updated)
+        assert updated is not None
+        self.assertEqual(updated.row_version, 2)
+        self.assertEqual(updated.source_last_sequence, len(raw) + len(tail) - 1)
+
+    async def test_manual_compaction_can_replace_checkpoint_without_new_messages(
+        self,
+    ) -> None:
+        raw = [
+            ModelRequest(parts=[UserPromptPart(content="原始任务" + "背景" * 200)]),
+            ModelResponse(parts=[TextPart(content="原始结论" + "决定" * 200)]),
+            ModelRequest(parts=[UserPromptPart(content="继续处理" + "约束" * 200)]),
+            ModelResponse(parts=[TextPart(content="继续结论" + "状态" * 200)]),
+        ]
+        await self.stores.coordinator.append(
+            "manual-recompact",
+            raw,
+            user_id="user-1",
+        )
+        capability = DeepAgentContextCompaction(
+            context_window_tokens=4_000,
+            max_output_tokens=500,
+            summary_timeout=10,
+        )
+        runner = self._runner(capability)
+        projections = [
+            [
+                ModelRequest(parts=[UserPromptPart(content="摘要：保留原始任务和约束")]),
+                ModelResponse(parts=[TextPart(content="最近结论")]),
+            ],
+            [
+                ModelRequest(parts=[UserPromptPart(content="摘要：任务与约束")]),
+                ModelResponse(parts=[TextPart(content="结论")]),
+            ],
+        ]
+        with patch.object(
+            capability,
+            "compact_manually",
+            new=AsyncMock(side_effect=projections),
+        ):
+            first = [
+                event
+                async for event in runner.run_manual_compaction(
+                    "manual-recompact",
+                    AgentDeps(session_id="manual-recompact", user="user-1"),
+                )
+            ]
+            second = [
+                event
+                async for event in runner.run_manual_compaction(
+                    "manual-recompact",
+                    AgentDeps(session_id="manual-recompact", user="user-1"),
+                )
+            ]
+
+        self.assertEqual(first[-1]["status"], "completed")
+        self.assertEqual(second[-1]["status"], "completed")
+        checkpoint = await self.stores.context_checkpoint.get("manual-recompact")
+        self.assertIsNotNone(checkpoint)
+        assert checkpoint is not None
+        self.assertEqual(checkpoint.row_version, 2)
+        self.assertEqual(checkpoint.source_last_sequence, len(raw) - 1)
+        self.assertEqual(
+            history_hash(await self.stores.coordinator.get_history("manual-recompact")),
+            history_hash(raw),
+        )
+
+    async def test_manual_compaction_empty_and_short_history_are_noop(self) -> None:
+        capability = DeepAgentContextCompaction(
+            context_window_tokens=4_000,
+            max_output_tokens=500,
+            summary_timeout=10,
+        )
+        runner = self._runner(capability)
+        empty = [
+            event
+            async for event in runner.run_manual_compaction(
+                "manual-empty",
+                AgentDeps(session_id="manual-empty", user="user-1"),
+            )
+        ]
+        self.assertEqual(empty[-1]["status"], "noop")
+        self.assertEqual(empty[-1]["reason"], "empty_history")
+
+        await self.stores.coordinator.append(
+            "manual-short",
+            [
+                ModelRequest(parts=[UserPromptPart(content="你好")]),
+                ModelResponse(parts=[TextPart(content="你好")]),
+            ],
+            user_id="user-1",
+        )
+        short = [
+            event
+            async for event in runner.run_manual_compaction(
+                "manual-short",
+                AgentDeps(session_id="manual-short", user="user-1"),
+            )
+        ]
+        self.assertEqual(short[-1]["status"], "noop")
+        self.assertEqual(short[-1]["reason"], "insufficient_history")
+        self.assertEqual(short[-1]["usage"]["requests"], 0)
+
+    async def test_manual_compaction_failure_and_cas_conflict_preserve_history(
+        self,
+    ) -> None:
+        def long_history() -> list[ModelMessage]:
+            messages: list[ModelMessage] = []
+            for turn in range(3):
+                messages.extend(
+                    [
+                        ModelRequest(
+                            parts=[
+                                UserPromptPart(
+                                    content=f"第 {turn} 轮背景：" + "保留约束。" * 120
+                                )
+                            ]
+                        ),
+                        ModelResponse(
+                            parts=[TextPart(content=f"第 {turn} 轮结论：" + "确认决定。" * 120)]
+                        ),
+                    ]
+                )
+            return messages
+
+        def fail_summary(
+            messages: list[ModelMessage],
+            _info: AgentInfo,
+        ) -> ModelResponse:
+            if "<history>" in str(messages):
+                raise RuntimeError("provider unavailable")
+            return ModelResponse(parts=[TextPart(content="unused")])
+
+        failed_raw = long_history()
+        await self.stores.coordinator.append(
+            "manual-provider-failure",
+            failed_raw,
+            user_id="user-1",
+        )
+        capability = DeepAgentContextCompaction(
+            context_window_tokens=4_000,
+            max_output_tokens=500,
+            summary_timeout=10,
+        )
+        failed = [
+            event
+            async for event in self._runner(
+                capability,
+                model=FunctionModel(fail_summary),
+            ).run_manual_compaction(
+                "manual-provider-failure",
+                AgentDeps(session_id="manual-provider-failure", user="user-1"),
+            )
+        ]
+        self.assertEqual(failed[-1]["status"], "failed")
+        self.assertEqual(failed[-1]["reason"], "summary_provider_error")
+        self.assertIsNone(
+            await self.stores.context_checkpoint.get("manual-provider-failure")
+        )
+        self.assertEqual(
+            history_hash(
+                await self.stores.coordinator.get_history("manual-provider-failure")
+            ),
+            history_hash(failed_raw),
+        )
+
+        cas_raw = long_history()
+        await self.stores.coordinator.append(
+            "manual-cas-conflict",
+            cas_raw,
+            user_id="user-1",
+        )
+        with patch(
+            "deep_agent.agent.runner.save_projection",
+            new=AsyncMock(return_value=False),
+        ):
+            conflicted = [
+                event
+                async for event in self._runner(
+                    DeepAgentContextCompaction(
+                        context_window_tokens=4_000,
+                        max_output_tokens=500,
+                        summary_timeout=10,
+                    )
+                ).run_manual_compaction(
+                    "manual-cas-conflict",
+                    AgentDeps(session_id="manual-cas-conflict", user="user-1"),
+                )
+            ]
+        self.assertEqual(conflicted[-1]["status"], "failed")
+        self.assertEqual(conflicted[-1]["reason"], "session_changed")
+        self.assertIsNone(
+            await self.stores.context_checkpoint.get("manual-cas-conflict")
+        )
+        self.assertEqual(
+            history_hash(await self.stores.coordinator.get_history("manual-cas-conflict")),
+            history_hash(cas_raw),
+        )
 
     async def test_model_response_usage_survives_database_serialization(
         self,

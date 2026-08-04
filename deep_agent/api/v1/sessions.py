@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
 from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import BaseModel
@@ -13,6 +13,7 @@ from deep_agent.db.session_list import MAX_LIST_LIMIT, SessionListFilters, Sessi
 from deep_agent.db.session_scope import resolve_session
 from deep_agent.agent.history import (
     SessionHistoryResponse,
+    HistoryContextCheckpoint,
     _extract_assistant_text,
     enrich_history_messages,
     first_user_prompt,
@@ -21,10 +22,13 @@ from deep_agent.agent.history import (
 )
 from deep_agent.agent.spec import AgentSpec, anonymous_spec
 from deep_agent.agent.context.budget import build_context_budget
+from deep_agent.agent.context.checkpoint import load_projection, projection_fingerprint
 from deep_agent.agent.context.estimator import TokenEstimator
+from deep_agent.agent.context.manual import manual_compaction_availability
 from deep_agent.capabilities.mcp.resolver import load_mcp_rows
 from deep_agent.capabilities.ui.registry import load_ui_tool_hints
 from deep_agent.schemas.chat import SessionInfo, SessionListResponse
+from deep_agent.options import OPTION
 
 router = APIRouter()
 
@@ -166,6 +170,7 @@ async def get_session_history(
     user_id: RequestUserDep,
     session_id: str,
     agent_id: str | None = None,
+    model_id: str | None = None,
 ) -> SessionHistoryResponse:
     resolved = await resolve_session(
         ctx.store,
@@ -185,10 +190,18 @@ async def get_session_history(
     spec = await _spec_for_history(ctx, api_agent_id)
     hints = await load_ui_tool_hints(ctx.stores, spec)
     messages = enrich_history_messages(messages, hints)
+    context_data = await _build_context_data(
+        ctx,
+        resolved_session_id,
+        api_agent_id,
+        raw,
+        model_id=model_id,
+    )
     return SessionHistoryResponse(
         session_id=resolved_session_id,
         messages=messages,
         model_message_count=len(raw),
+        context_checkpoint=context_data["history_checkpoint"],
     )
 
 
@@ -244,10 +257,131 @@ class SessionContextStatus(BaseModel):
     trigger_tokens: int | None = None
     target_tokens: int | None = None
     checkpoint_exists: bool = False
+    checkpoint_active: bool = False
+    checkpoint_invalid_reason: str | None = None
     checkpoint_source_last_sequence: int | None = None
     checkpoint_estimated_tokens: int | None = None
     checkpoint_updated_at: datetime | None = None
     summary_model_id: str | None = None
+    checkpoint: HistoryContextCheckpoint | None = None
+    manual_compaction_available: bool = False
+    manual_compaction_reason: str = "context_window_unknown"
+
+
+async def _context_model(
+    ctx: AppContextDep,
+    agent_id: str | None,
+    model_id: str | None,
+):
+    effective_model_id = model_id
+    if effective_model_id is None and agent_id:
+        agent_row = await ctx.stores.agent.get_by_id(agent_id)
+        if agent_row is not None:
+            effective_model_id = agent_row.model_id
+    if effective_model_id is None:
+        return None
+    row = await ctx.stores.llm_model.get_by_id(effective_model_id)
+    if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"LLM model not found: {effective_model_id}",
+        )
+    return row
+
+
+async def _build_context_data(
+    ctx: AppContextDep,
+    session_id: str,
+    agent_id: str | None,
+    history: list[ModelMessage],
+    *,
+    model_id: str | None,
+) -> dict[str, Any]:
+    model = await _context_model(ctx, agent_id, model_id)
+    context_window_tokens = model.context_window_tokens if model is not None else None
+    max_output_tokens = model.max_output_tokens if model is not None else None
+    estimator = TokenEstimator.for_model(
+        model.model if model is not None else "",
+        model.base_url if model is not None else None,
+    )
+    budget = build_context_budget(
+        history,
+        context_window_tokens=context_window_tokens,
+        max_output_tokens=max_output_tokens,
+        estimator=estimator,
+        output_history=history,
+        estimate_scope="history_only",
+    )
+    checkpoint = await ctx.stores.context_checkpoint.get(
+        session_id,
+        agent_id=agent_id,
+    )
+    fingerprint = projection_fingerprint(
+        llm_model_id=model.id if model is not None else None,
+        context_window_tokens=context_window_tokens,
+        max_output_tokens=max_output_tokens,
+        trigger_ratio=OPTION.agent.context_compaction_trigger_ratio,
+        target_ratio=OPTION.agent.context_compaction_target_ratio,
+        keep_tool_pairs=OPTION.agent.context_keep_tool_pairs,
+        summary_model_id=model.id if model is not None else None,
+        estimator_source=estimator.source,
+    )
+    projection = await load_projection(
+        ctx.stores.context_checkpoint,
+        history,
+        session_id=session_id,
+        agent_id=agent_id,
+        fingerprint=fingerprint,
+    )
+    availability_budget = build_context_budget(
+        projection.messages,
+        context_window_tokens=context_window_tokens,
+        max_output_tokens=max_output_tokens,
+        estimator=estimator,
+        output_history=history,
+        estimate_scope="history_only",
+    )
+    availability = manual_compaction_availability(
+        history,
+        availability_budget,
+    )
+
+    checkpoint_view: dict[str, Any] | None = None
+    history_checkpoint: dict[str, Any] | None = None
+    if projection.used_checkpoint and checkpoint is not None:
+        source_count = checkpoint.source_last_sequence + 1
+        source_tokens = estimator.messages(history[:source_count])
+        projected_tokens = checkpoint.estimated_tokens
+        reduction_ratio = (
+            max(0.0, 1.0 - projected_tokens / source_tokens)
+            if source_tokens > 0
+            else 0.0
+        )
+        checkpoint_view = {
+            "source_last_sequence": checkpoint.source_last_sequence,
+            "covered_model_message_count": source_count,
+            "source_estimated_tokens": source_tokens,
+            "projected_estimated_tokens": projected_tokens,
+            "reduction_ratio": reduction_ratio,
+            "new_message_count": max(0, len(history) - source_count),
+            "summary_model_id": checkpoint.summary_model_id,
+            "row_version": checkpoint.row_version,
+            "updated_at": checkpoint.updated_at,
+        }
+        history_checkpoint = dict(checkpoint_view)
+
+    return {
+        "budget": availability_budget if projection.used_checkpoint else budget,
+        "context_window_tokens": context_window_tokens,
+        "max_output_tokens": max_output_tokens,
+        "checkpoint": checkpoint,
+        "checkpoint_active": projection.used_checkpoint,
+        "checkpoint_invalid_reason": projection.invalid_reason,
+        "checkpoint_view": checkpoint_view,
+        "history_checkpoint": history_checkpoint,
+        "manual_compaction_available": availability.available,
+        "manual_compaction_reason": availability.reason,
+    }
 
 
 @router.get(
@@ -259,6 +393,7 @@ async def get_session_context_status(
     user_id: RequestUserDep,
     session_id: str,
     agent_id: str | None = None,
+    model_id: str | None = None,
 ) -> SessionContextStatus:
     resolved = await resolve_session(
         ctx.store,
@@ -276,41 +411,23 @@ async def get_session_context_status(
         resolved_session_id,
         agent_id=api_agent_id,
     )
-    context_window_tokens: int | None = None
-    max_output_tokens: int | None = None
-    model_code: str | None = None
-    model_base_url: str | None = None
-    if api_agent_id:
-        agent_row = await ctx.stores.agent.get_by_id(api_agent_id)
-        if agent_row is not None:
-            context_window_tokens = agent_row.llm_model.context_window_tokens
-            max_output_tokens = agent_row.llm_model.max_output_tokens
-            model_code = agent_row.llm_model.model
-            model_base_url = agent_row.llm_model.base_url
-    estimator = TokenEstimator.for_model(
-        model_code or "",
-        model_base_url,
-    )
-    budget = build_context_budget(
-        history,
-        context_window_tokens=context_window_tokens,
-        max_output_tokens=max_output_tokens,
-        estimator=estimator,
-        output_history=history,
-        estimate_scope="history_only",
-    )
-    checkpoint = await ctx.stores.context_checkpoint.get(
+    context_data = await _build_context_data(
+        ctx,
         resolved_session_id,
-        agent_id=api_agent_id,
+        api_agent_id,
+        history,
+        model_id=model_id,
     )
+    budget = context_data["budget"]
+    checkpoint = context_data["checkpoint"]
     return SessionContextStatus(
         session_id=resolved_session_id,
         raw_message_count=len(history),
         estimated_history_tokens=budget.estimated_history_tokens,
         compaction_enabled=budget.enabled,
         compaction_reason=budget.reason,
-        context_window_tokens=context_window_tokens,
-        max_output_tokens=max_output_tokens,
+        context_window_tokens=context_data["context_window_tokens"],
+        max_output_tokens=context_data["max_output_tokens"],
         predicted_output_tokens=budget.predicted_output_tokens,
         output_prediction_source=budget.output_prediction_source,
         output_prediction_sample_count=budget.output_prediction_sample_count,
@@ -323,6 +440,8 @@ async def get_session_context_status(
         trigger_tokens=budget.trigger_tokens,
         target_tokens=budget.target_tokens,
         checkpoint_exists=checkpoint is not None,
+        checkpoint_active=context_data["checkpoint_active"],
+        checkpoint_invalid_reason=context_data["checkpoint_invalid_reason"],
         checkpoint_source_last_sequence=(
             checkpoint.source_last_sequence if checkpoint else None
         ),
@@ -331,6 +450,9 @@ async def get_session_context_status(
         ),
         checkpoint_updated_at=checkpoint.updated_at if checkpoint else None,
         summary_model_id=checkpoint.summary_model_id if checkpoint else None,
+        checkpoint=context_data["checkpoint_view"],
+        manual_compaction_available=context_data["manual_compaction_available"],
+        manual_compaction_reason=context_data["manual_compaction_reason"],
     )
 
 

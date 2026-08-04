@@ -41,6 +41,11 @@ frontend/
 
 Console 使用原生 HTML、CSS 和 JavaScript ES Modules，不需要 npm 构建。
 
+工作台输入框的附件与主动压缩入口使用线性 SVG。上下文百分比、主动压缩可用性和历史
+Checkpoint 标记全部读取 session API；前端不实现 Token 估算或压缩策略。主动压缩期间保留
+草稿与待上传附件，只暂时锁定发送和附件操作。历史较短、已有 Checkpoint 或没有新增消息时
+入口仍可使用；是否有效由后端 `completed/noop/failed` 结果决定。
+
 ## 运行
 
 在仓库根目录启动后端：

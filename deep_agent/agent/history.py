@@ -81,12 +81,28 @@ class HistoryMessage(BaseModel):
     )
 
 
+class HistoryContextCheckpoint(BaseModel):
+    source_last_sequence: int
+    covered_model_message_count: int
+    source_estimated_tokens: int
+    projected_estimated_tokens: int
+    reduction_ratio: float
+    new_message_count: int
+    summary_model_id: str | None = None
+    row_version: int
+    updated_at: datetime
+
+
 class SessionHistoryResponse(BaseModel):
     session_id: str
     messages: list[HistoryMessage]
     model_message_count: int = Field(
         default=0,
         description="Raw ModelMessage count; use as branch_from to append at end.",
+    )
+    context_checkpoint: HistoryContextCheckpoint | None = Field(
+        default=None,
+        description="Current active context checkpoint; not a chat message.",
     )
 
 
@@ -321,6 +337,22 @@ def repair_unprocessed_tool_calls(messages: list[ModelMessage]) -> list[ModelMes
     if len(repaired) == len(messages):
         return messages
     return repaired
+
+
+def has_unprocessed_tool_calls(messages: list[ModelMessage]) -> bool:
+    """Return whether persisted history is waiting for a tool/deferred result."""
+
+    pending: set[str] = set()
+    for message in messages:
+        if isinstance(message, ModelResponse):
+            for part in message.parts:
+                if isinstance(part, BaseToolCallPart) and part.tool_call_id:
+                    pending.add(part.tool_call_id)
+        elif isinstance(message, ModelRequest):
+            for part in message.parts:
+                if isinstance(part, (ToolReturnPart, RetryPromptPart)) and part.tool_call_id:
+                    pending.discard(part.tool_call_id)
+    return bool(pending)
 
 
 def incremental_append_messages(

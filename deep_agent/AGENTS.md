@@ -79,6 +79,9 @@ DeepAgent 自研 `capabilities.registry.ToolPackage` 是产品配置单位，包
 当前上下文压缩默认自动启用：模型配置有效 `context_window_tokens` 即启用，否则停用。
 摘要始终复用当前 Agent 主模型，并与正式回答共享 `RunUsage` 和全局 `UsageLimits`；
 `chat_messages` 保持完整事实源，只有摘要成功且复检达到目标线时才覆盖 Checkpoint。
+v0.3.4 同时提供独立的 session 主动压缩 SSE 接口；它跳过自动触发线，也不因历史较短、
+已经生成 Checkpoint 或没有新增消息而拒绝用户操作。后端仍要求安全前缀、目标复检、历史 Hash
+与 Checkpoint CAS 全部通过；无有效收益返回 `noop`，失败时不得用 Sliding Window 冒充成功。
 
 研究依据见
 [`../docs/design/03-context-compaction/context-compaction-research.md`](../docs/design/03-context-compaction/context-compaction-research.md)；

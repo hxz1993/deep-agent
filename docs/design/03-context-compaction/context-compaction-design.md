@@ -358,7 +358,7 @@ chat_messages.payload.usage
 ```json
 {
   "type": "context_compaction",
-  "phase": "started | completed | fallback",
+  "phase": "started | deterministic | summarizing | saving | completed | fallback",
   "message": "正在压缩上下文…"
 }
 ```
@@ -386,6 +386,32 @@ Console：
 后端预算器计算的 `safety_margin_tokens` 与 `usable_request_tokens`；模型窗口未知时二者为
 `null`。Console 只能展示这些值，不得重新实现动态输出预测或安全余量算法。实际完成 Run 的
 预算和压缩结果仍以 SSE `final.context` 为准。
+
+### 7.1 主动压缩
+
+v0.3.4 新增独立接口：
+
+```http
+POST /api/v1/sessions/{session_id}/compact?agent_id={agent_id}
+Accept: text/event-stream
+```
+
+它不创建用户消息或助手回复，也不支持 `/compact` 文本命令。接口跳过 80% 自动触发判断；
+历史较短、已经压缩或 Checkpoint 后没有新增消息都不构成入口限制。已有 Checkpoint 时以当前
+投影再次尝试压缩，成功后覆盖同一行并增加 `row_version`。确定性整理、滚动摘要、目标复检、
+原始历史 Hash 和 Checkpoint CAS 全部成功后，才整体覆盖当前会话唯一 Checkpoint。主动压缩
+失败不使用 Sliding Window 冒充成功。
+
+空历史返回 `noop/empty_history`；无安全摘要前缀返回 `noop/insufficient_history`；摘要没有明显
+减少 Token、未形成新摘要或未达目标时返回 `noop/no_reduction`。`noop` 不覆盖现有 Checkpoint，
+若此前已经调用模型则 usage 仍如实返回。模型没有 `context_window_tokens` 时返回 422；未完成
+Deferred/UI Tool 时返回 409。原始 `chat_messages` 始终不变。Console 只在无会话、运行中、
+压缩中或等待 Deferred 等技术冲突状态禁用入口，不根据内容价值替用户做决定。
+
+`context-status` 增加 `checkpoint_active`、当前有效 Checkpoint 摘要信息以及
+`manual_compaction_available/reason`。历史接口只返回当前模型与策略下有效的
+`context_checkpoint`，Console 在覆盖边界渲染轻量分隔线，不把它伪装成聊天消息。旧
+Checkpoint 被覆盖后只展示新边界；失败、noop 和临时 Sliding Window 不进入历史。
 
 ## 8. 配置
 
@@ -473,6 +499,10 @@ Alembic。场景构造器必须通过“序列化后可反序列化、没有工�
 18. SSE 压缩状态先于正式模型输出，且不进入历史。
 19. 三类测试场景都能按当前模型预算生成超过触发线的合法纯对话历史。
 20. 测试会话归属当前用户和 Agent，并可按普通会话删除。
+21. 主动压缩在低于自动触发线时也能生成 Checkpoint，且不改写原始消息。
+22. 连续主动压缩只覆盖一条 Checkpoint，并正确增加 `row_version`。
+23. 空、短、无新增或无收益的主动尝试返回明确 `noop`，且不覆盖有效 Checkpoint。
+24. 未知窗口、Pending、Provider 失败和 CAS 冲突均不覆盖有效 Checkpoint。
 
 前端至少覆盖：
 
@@ -482,6 +512,8 @@ Alembic。场景构造器必须通过“序列化后可反序列化、没有工�
 4. 既有 SSE、HITL、取消和历史回放不回归。
 5. 测试入口位于搜索框与普通新建之间，普通新建按钮不变。
 6. 场景确认后创建并打开会话，同时预填推荐验证问题。
+7. 附件与压缩使用线性 SVG；压缩按钮禁用原因、过程、noop、失败重试和成功提示明确。
+8. 输入框上下文百分比只使用后端预算字段，刷新后恢复当前有效 Checkpoint 分隔标记。
 
 实现变更继续要求运行目标 Python 测试、完整 Python 测试、Console Node 测试、Alembic
 upgrade/downgrade、配置备份测试和 `git diff --check`。后续待办见

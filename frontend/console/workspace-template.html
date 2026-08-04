@@ -77,13 +77,19 @@
           <span class="composer-modalities" id="composerUploadCapabilities"></span>
         </div>
         <div class="composer-inner">
-          <button type="button" class="attach-btn" id="attachBtn" title="添加附件">📎</button>
+          <button type="button" class="composer-icon-btn attach-btn" id="attachBtn" title="添加附件" aria-label="添加附件">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21.4 11.6 12 21a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5"/></svg>
+          </button>
+          <button type="button" class="composer-icon-btn compact-context-btn" id="compactContextBtn" title="当前没有可压缩的会话历史" aria-label="压缩上下文" disabled>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3v5H3M16 3v5h5M8 21v-5H3M16 21v-5h5"/><path d="m3 8 5-5m13 5-5-5M3 16l5 5m13-5-5 5"/></svg>
+          </button>
           <input type="file" id="fileInput" class="hidden" multiple accept="image/*,.pdf,.docx,.xlsx,.txt,.csv,.json,.md,.html,.xml,.mp3,.wav,.mp4" />
           <textarea
             id="input"
             rows="1"
             placeholder="给 Agent 发送消息…（Enter 发送，Shift+Enter 换行）"
           ></textarea>
+          <button type="button" class="context-budget-badge" id="contextBudgetBadge" title="历史上下文估算尚不可用" aria-label="历史上下文估算">上下文 —</button>
           <button class="send-btn" id="sendBtn" title="发送">
             <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
           </button>

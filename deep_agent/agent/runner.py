@@ -5,20 +5,39 @@ from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
 from typing import Any, AsyncIterator
 
-from pydantic_ai import Agent, AgentRunResultEvent, DeferredToolRequests, DeferredToolResults
-from pydantic_ai.messages import FunctionToolCallEvent, ModelMessage, ModelRequest, UserContent, UserPromptPart
+from pydantic_ai import (
+    Agent,
+    AgentRunResultEvent,
+    DeferredToolRequests,
+    DeferredToolResults,
+    RunContext,
+)
+from pydantic_ai.messages import (
+    FunctionToolCallEvent,
+    ModelMessage,
+    ModelRequest,
+    ModelResponse,
+    UserContent,
+    UserPromptPart,
+)
 from pydantic_ai.settings import ModelSettings
-from pydantic_ai.usage import UsageLimits
+from pydantic_ai.models import ModelRequestContext, ModelRequestParameters
+from pydantic_ai.usage import RunUsage, UsageLimits
 
 from deep_agent.agent import events
 from deep_agent.agent.context.budget import build_context_budget
 from deep_agent.agent.context.checkpoint import (
     ProjectionLoad,
+    history_hash,
     load_projection,
     save_projection,
 )
-from deep_agent.agent.context.compaction import DeepAgentContextCompaction
+from deep_agent.agent.context.compaction import (
+    DeepAgentContextCompaction,
+    SummaryUnavailable,
+)
 from deep_agent.agent.context.estimator import TokenEstimator
+from deep_agent.agent.context.manual import manual_compaction_availability
 from deep_agent.agent.context.runtime import ContextRunState
 from deep_agent.agent.attachments import (
     has_user_turn,
@@ -45,6 +64,7 @@ from deep_agent.db.conversation import SessionStore
 from deep_agent.db.stores.bundle import DataStores
 from deep_agent.db.stores.context_checkpoint import ContextCheckpointStoreBase
 from deep_agent.schemas.attachment import AttachmentRef
+from deep_agent.options import OPTION
 
 _STREAM_OUTPUT_TYPE: list[Any] = [str, DeferredToolRequests]
 
@@ -123,6 +143,234 @@ class AgentRunner:
                 yield
         else:
             yield
+
+    @property
+    def manual_compaction_enabled(self) -> bool:
+        return (
+            self._context_compaction is not None
+            and self._checkpoint_store is not None
+            and self._checkpoint_fingerprint is not None
+        )
+
+    async def run_manual_compaction(
+        self,
+        session_id: str,
+        deps: AgentDeps,
+    ) -> AsyncIterator[dict[str, Any]]:
+        """Force a semantic checkpoint refresh without appending a chat turn."""
+
+        if not self.manual_compaction_enabled:
+            yield _manual_compaction_result("failed", "context_window_unknown")
+            return
+        assert self._context_compaction is not None
+        assert self._checkpoint_store is not None
+        assert self._checkpoint_fingerprint is not None
+
+        async with self._session_lock(session_id, agent_id=deps.agent_id):
+            raw = await self.store.get_history(session_id, agent_id=deps.agent_id)
+            if not raw:
+                yield _manual_compaction_result("noop", "empty_history")
+                return
+            loaded = await load_projection(
+                self._checkpoint_store,
+                raw,
+                session_id=session_id,
+                agent_id=deps.agent_id,
+                fingerprint=self._checkpoint_fingerprint,
+            )
+            projected = list(loaded.messages)
+            checkpoint = loaded.checkpoint
+            budget = build_context_budget(
+                projected,
+                context_window_tokens=self._context_window_tokens,
+                max_output_tokens=self._max_output_tokens,
+                estimator=self._estimator,
+                output_history=raw,
+                estimate_scope="history_only",
+            )
+            availability = manual_compaction_availability(
+                raw,
+                budget,
+            )
+            if not availability.available:
+                outcome = (
+                    "failed"
+                    if availability.reason in {"context_window_unknown", "pending_deferred"}
+                    else "noop"
+                )
+                yield _manual_compaction_result(outcome, availability.reason)
+                return
+
+            configured_target = budget.target_tokens or budget.estimated_history_tokens
+            target_tokens = max(
+                1,
+                min(
+                    configured_target,
+                    int(
+                        budget.estimated_history_tokens
+                        * OPTION.agent.context_compaction_target_ratio
+                    ),
+                ),
+            )
+            original_hash = history_hash(raw)
+            expected_version = checkpoint.row_version if checkpoint is not None else 0
+            usage = RunUsage()
+            event_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+            state = ContextRunState(
+                raw_history=list(raw),
+                estimator=self._estimator,
+                usage_limits=self.usage_limits,
+                event_queue=event_queue,
+            )
+            deps.context_state = state
+            deps.input_modalities = tuple(self._input_modalities or ())
+            deps.attachment_by_id = index_attachment_refs(messages=raw)
+            request_context = ModelRequestContext(
+                model=self.agent.model,
+                messages=projected,
+                model_settings=self.model_settings,
+                model_request_parameters=ModelRequestParameters(),
+            )
+            run_context = RunContext(
+                deps=deps,
+                model=self.agent.model,
+                usage=usage,
+                usage_limits=self.usage_limits,
+                agent=self.agent,
+                messages=projected,
+                model_settings=self.model_settings,
+            )
+            task = asyncio.create_task(
+                self._context_compaction.compact_manually(
+                    run_context,
+                    request_context,
+                    state=state,
+                    target_tokens=target_tokens,
+                )
+            )
+            queue_task: asyncio.Task[Any] | None = asyncio.create_task(event_queue.get())
+            try:
+                while not task.done():
+                    done, _ = await asyncio.wait(
+                        {task, queue_task},
+                        return_when=asyncio.FIRST_COMPLETED,
+                    )
+                    if queue_task in done:
+                        yield queue_task.result()
+                        queue_task = asyncio.create_task(event_queue.get())
+                while not event_queue.empty():
+                    yield event_queue.get_nowait()
+                compacted = task.result()
+            except SummaryUnavailable as exc:
+                reason = exc.reason
+                insufficient_reasons = {
+                    "no_safe_summary_prefix",
+                    "no_safe_summary_units",
+                    "summary_unit_too_large",
+                }
+                no_reduction_reasons = {
+                    "no_new_summary_content",
+                    "summary_not_applied",
+                    "target_not_met",
+                }
+                status_name = (
+                    "noop"
+                    if reason in insufficient_reasons | no_reduction_reasons
+                    else "failed"
+                )
+                result_reason = (
+                    "insufficient_history"
+                    if reason in insufficient_reasons
+                    else "no_reduction"
+                    if reason in no_reduction_reasons
+                    else reason
+                )
+                yield _manual_compaction_result(
+                    status_name,
+                    result_reason,
+                    usage=usage,
+                    telemetry=state.telemetry.as_dict(),
+                    target_tokens=target_tokens,
+                )
+                return
+            except asyncio.CancelledError:
+                task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await task
+                raise
+            except Exception as exc:  # provider errors must preserve the old checkpoint
+                yield _manual_compaction_result(
+                    "failed",
+                    type(exc).__name__,
+                    usage=usage,
+                    telemetry=state.telemetry.as_dict(),
+                    target_tokens=target_tokens,
+                )
+                return
+            finally:
+                if queue_task is not None and not queue_task.done():
+                    queue_task.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await queue_task
+
+            current_raw = await self.store.get_history(session_id, agent_id=deps.agent_id)
+            if history_hash(current_raw) != original_hash:
+                yield _manual_compaction_result(
+                    "failed",
+                    "session_changed",
+                    usage=usage,
+                    telemetry=state.telemetry.as_dict(),
+                    target_tokens=target_tokens,
+                )
+                return
+            yield {
+                "type": "context_compaction",
+                "phase": "saving",
+                "mode": "manual",
+                "message": "正在保存新的 Checkpoint…",
+            }
+            saved = await save_projection(
+                self._checkpoint_store,
+                raw_history=raw,
+                projected_history=compacted,
+                session_id=session_id,
+                agent_id=deps.agent_id,
+                fingerprint=self._checkpoint_fingerprint,
+                expected_row_version=expected_version,
+                summary_model_id=self._summary_model_id,
+                estimator=self._estimator,
+            )
+            if not saved:
+                yield _manual_compaction_result(
+                    "failed",
+                    "session_changed",
+                    usage=usage,
+                    telemetry=state.telemetry.as_dict(),
+                    target_tokens=target_tokens,
+                )
+                return
+            saved_checkpoint = await self._checkpoint_store.get(
+                session_id,
+                agent_id=deps.agent_id,
+            )
+            yield _manual_compaction_result(
+                "completed",
+                None,
+                usage=usage,
+                telemetry=state.telemetry.as_dict(),
+                target_tokens=target_tokens,
+                checkpoint=(
+                    {
+                        "source_last_sequence": saved_checkpoint.source_last_sequence,
+                        "projected_estimated_tokens": saved_checkpoint.estimated_tokens,
+                        "summary_model_id": saved_checkpoint.summary_model_id,
+                        "row_version": saved_checkpoint.row_version,
+                        "updated_at": saved_checkpoint.updated_at.isoformat(),
+                    }
+                    if saved_checkpoint is not None
+                    else None
+                ),
+            )
 
     async def _prepare_history(
         self,
@@ -889,4 +1137,41 @@ def _usage_dict(result: Any) -> dict[str, Any]:
         "input_tokens": getattr(usage, "input_tokens", getattr(usage, "request_tokens", None)),
         "output_tokens": getattr(usage, "output_tokens", getattr(usage, "response_tokens", None)),
         "total_tokens": getattr(usage, "total_tokens", None),
+    }
+
+
+def _run_usage_dict(usage: RunUsage | None) -> dict[str, Any]:
+    if usage is None:
+        return {}
+    return {
+        "requests": usage.requests,
+        "input_tokens": usage.input_tokens,
+        "output_tokens": usage.output_tokens,
+        "total_tokens": usage.total_tokens,
+    }
+
+
+def _manual_compaction_result(
+    status_name: str,
+    reason: str | None,
+    *,
+    usage: RunUsage | None = None,
+    telemetry: dict[str, Any] | None = None,
+    target_tokens: int | None = None,
+    checkpoint: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    telemetry = dict(telemetry or {})
+    return {
+        "type": "context_compaction_result",
+        "status": status_name,
+        "reason": reason,
+        "before_tokens": telemetry.get("estimated_tokens_before", 0),
+        "after_tokens": telemetry.get("estimated_tokens_after", 0),
+        "target_tokens": target_tokens,
+        "reduction_ratio": telemetry.get("reduction_ratio", 0.0),
+        "summary_calls": telemetry.get("summary_calls", 0),
+        "summary_chunks": telemetry.get("summary_chunks", 0),
+        "usage": _run_usage_dict(usage),
+        "checkpoint": checkpoint,
+        "context_status": None,
     }

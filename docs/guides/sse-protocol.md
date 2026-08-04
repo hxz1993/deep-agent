@@ -199,7 +199,7 @@ DB Agent 模式（请求体含 `agent_id`）：
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | `type` | `"context_compaction"` | 固定值 |
-| `phase` | `"started" \| "completed" \| "fallback"` | 压缩阶段 |
+| `phase` | `"started" \| "deterministic" \| "summarizing" \| "saving" \| "completed" \| "fallback"` | 压缩阶段 |
 | `message` | `string` | 面向用户的短状态文案 |
 | `request_index` | `number` | 当前 Agent Run 内模型请求序号 |
 | 其他字段 | `number \| string \| boolean` | 估算、策略、原因与是否达标等观测值，按阶段可选 |
@@ -207,6 +207,16 @@ DB Agent 模式（请求体含 `agent_id`）：
 客户端建议延迟约 150ms 显示，避免快速压缩闪烁；同一请求只维护一个瞬时状态。收到首个
 `thinking`、`text`、`tool_call` 或任何结束事件后移除。该事件不属于模型消息，不能加入
 assistant 正文，也不会出现在历史接口中。
+
+#### 主动压缩流
+
+`POST /api/v1/sessions/{session_id}/compact?agent_id=...` 使用同一
+`context_compaction` 过程事件，并以 `context_compaction_result` 结束。请求体只允许可选的
+`model_id`；没有 `agent_id` 时必须提供它。`completed` 包含压缩前后估算、摘要调用 usage、
+当前 Checkpoint 和刷新后的 `context_status`；`noop` 表示本次未产生可保存的压缩结果，可能
+是空历史、无安全摘要前缀或没有明显 Token 收益，不能据此假定模型一定未被调用；`failed`
+表示旧 Checkpoint 保持不变。该接口不产生普通 `text/final` 助手回复，也不因已有 Checkpoint
+或缺少新增消息而拒绝再次尝试。
 
 ---
 

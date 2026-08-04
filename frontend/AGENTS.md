@@ -83,6 +83,7 @@ frontend/
 | --- | --- |
 | `session` | `{ session_id }` 或含 `agent_id` |
 | `context_compaction` | `{ type, phase, message, ... }`（当前请求瞬时状态，不进入历史） |
+| `context_compaction_result` | 主动压缩最终结果；成功、无需压缩或失败，不作为聊天消息 |
 | `text` | `{ type, delta }` |
 | `thinking` | `{ type, delta }` |
 | `tool_call` | `{ type, tool, args, tool_call_id, widget?, metadata?, source? }` |
@@ -96,6 +97,12 @@ frontend/
 
 上下文压缩状态延迟 150ms 显示；同一请求只保留一个状态胶囊，收到首个
 `thinking` / `text` / `tool_call` 或结束事件时必须清理。
+
+v0.3.4 的输入框在附件线性图标旁提供主动压缩线性图标。按钮状态、上下文百分比和 tooltip
+只读取后端 `context-status`，不得在前端复制 Token 估算、动态输出预测或安全余量算法。
+前端不得因历史较短、已有 Checkpoint 或没有新增消息禁用主动入口；这些情况发给后端并展示
+`noop` 结果。只在无会话、当前 Run/压缩进行中或等待 Deferred 等技术冲突时禁用。
+历史中的压缩边界来自 `history.context_checkpoint`，使用分隔标记展示，不渲染成消息气泡。
 
 ---
 

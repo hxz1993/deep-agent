@@ -7,7 +7,7 @@
 |------|-------------------------------------------------| --- | --- |
 | `01` | [`UI 工具`](01-ui-tools/README.md)                | 2026-06 | builtin/manual 已落地；MCP 自动发现方案已关闭 |
 | `02` | [`运维控制台`](02-operations-console/README.md)      | 2026-07 | 一体化 Console 已落地，保留交互原型 |
-| `03` | [`上下文压缩`](03-context-compaction/README.md)      | 2026-07 | 主模型压缩链路已落地，结构并入 v0.3.0 基线 001 |
+| `03` | [`上下文压缩`](03-context-compaction/README.md)      | 2026-07 | 自动与主动主模型压缩已落地；当前有效 Checkpoint 可在 Console 恢复 |
 | `04` | [`模型目录`](04-model-catalog/README.md)            | 2026-07 | 数据库目录与手工刷新已落地，结构并入 v0.3.0 基线 001 |
 | `05` | [`工具优化`](05-tool-optimization/README.md)        | 2026-07 | 完成工具体系映射；首批可见性与展示命名待实施 |
 | `06` | [`附件解析`](06-attachment-parsing/README.md)       | 2026-07 | 第一版按需读取与压缩协同已落地 |

@@ -241,6 +241,11 @@ S1 + 第二块 → 临时摘要 S2
 S2 + 第三块 → 最终摘要 S3
 ```
 
+即使模型声明了超大上下文窗口，单次摘要输入也不能直接吃满整个窗口。DeepAgent 根据压缩目标
+动态限制摘要块，并把单块估算输入封顶在 192K Token；该值属于内部算法保护，不增加模型字段、
+环境变量或 Console 配置。这样 1M 窗口的测试历史会滚动生成多个摘要，而不是一次提交接近触发
+线的超大摘要请求，降低私有 OpenAI-compatible Provider 超时或 503 后连续多轮兜底的概率。
+
 - 单次摘要不拆散 Tool Call/Result。
 - 单轮最多 4 个摘要块、最多 5 次摘要请求。
 - 摘要输出上限由目标预算动态计算，最多 4096 Token，并受模型 `max_output_tokens` 限制。
@@ -391,7 +396,7 @@ DEEP_AGENT_CONTEXT_COMPACTION_TRIGGER_RATIO=0.80
 DEEP_AGENT_CONTEXT_COMPACTION_TARGET_RATIO=0.55
 DEEP_AGENT_CONTEXT_KEEP_TOOL_PAIRS=3
 DEEP_AGENT_CONTEXT_MIN_CLEAR_TOKENS=2000
-DEEP_AGENT_CONTEXT_SUMMARY_TIMEOUT=30
+DEEP_AGENT_CONTEXT_SUMMARY_TIMEOUT=60
 ```
 
 已删除且不得恢复：

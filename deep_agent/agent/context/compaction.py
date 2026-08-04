@@ -53,6 +53,8 @@ _SUMMARY_TEMPLATE = """请压缩下面的会话历史。输出紧凑的 Markdown
 """
 _MAX_SUMMARY_CHUNKS = 4
 _MAX_SUMMARY_CALLS = 5
+_MIN_SUMMARY_INPUT_TOKENS = 16_384
+_MAX_SUMMARY_INPUT_TOKENS = 196_608
 
 
 class ContextWindowExceededError(ValueError):
@@ -251,6 +253,19 @@ def _summary_output_limit(
     )
 
 
+def _summary_input_limit(target_tokens: int, context_window_tokens: int) -> int:
+    """Bound summary chunks even when a provider advertises a huge window."""
+
+    return max(
+        1,
+        min(
+            context_window_tokens,
+            _MAX_SUMMARY_INPUT_TOKENS,
+            max(_MIN_SUMMARY_INPUT_TOKENS, math.floor(target_tokens * 0.50)),
+        ),
+    )
+
+
 def _request_estimate(
     estimator: TokenEstimator,
     messages: list[ModelMessage],
@@ -281,7 +296,7 @@ class DeepAgentContextCompaction(AbstractCapability[Any]):
     context_window_tokens: int
     max_output_tokens: int | None
     estimator: TokenEstimator = field(default_factory=TokenEstimator.conservative)
-    summary_timeout: float = 30.0
+    summary_timeout: float = 60.0
     telemetry: CompactionTelemetry = field(default_factory=CompactionTelemetry, init=False)
     last_budget: ContextBudget | None = field(default=None, init=False)
 
@@ -377,7 +392,9 @@ class DeepAgentContextCompaction(AbstractCapability[Any]):
                 request_context,
             )
             if after_deterministic > target:
-                async with asyncio.timeout(min(120.0, self.summary_timeout * 5)):
+                async with asyncio.timeout(
+                    min(300.0, self.summary_timeout * _MAX_SUMMARY_CALLS)
+                ):
                     compacted = await self._summarize_to_target(
                         compacted,
                         ctx,
@@ -616,6 +633,7 @@ class DeepAgentContextCompaction(AbstractCapability[Any]):
         if not units:
             raise SummaryUnavailable("no_safe_summary_units")
         output_limit = _summary_output_limit(target, self.max_output_tokens)
+        input_limit = _summary_input_limit(target, self.context_window_tokens)
         remaining = list(units)
         rolling = previous_summary
         chunks = 0
@@ -648,7 +666,10 @@ class DeepAgentContextCompaction(AbstractCapability[Any]):
                         * (0.05 if estimator.source == "model_tokenizer" else 0.10)
                     ),
                 )
-                if prompt_tokens + output_limit + safety > self.context_window_tokens:
+                if (
+                    prompt_tokens > input_limit
+                    or prompt_tokens + output_limit + safety > self.context_window_tokens
+                ):
                     break
                 chunk = candidate
                 consumed += 1

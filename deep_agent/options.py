@@ -181,7 +181,7 @@ class Agent(Category):
         extra_check=_ensure_non_negative_int,
     )
     context_summary_timeout = Option(
-        30.0,
+        60.0,
         val_type=float,
         bind_env="CONTEXT_SUMMARY_TIMEOUT",
     )

@@ -32,12 +32,17 @@ from deep_agent.agent.context.compaction import (
     ContextWindowExceededError,
     DeepAgentContextCompaction,
     _logical_units,
+    _summary_input_limit,
     _summary_prompt,
     _strip_summary_and_system,
 )
 from deep_agent.agent.context.estimator import (
     TokenEstimator,
     conservative_text_tokens,
+)
+from deep_agent.agent.context.test_scenarios import (
+    CONTEXT_TEST_SCENARIOS,
+    build_context_test_history,
 )
 from deep_agent.agent.context.file_keys import deep_agent_file_key
 from deep_agent.agent.deps import AgentDeps
@@ -210,6 +215,11 @@ class ContextBudgetTests(unittest.TestCase):
 
 
 class ContextCompactionAlgorithmTests(unittest.TestCase):
+    def test_large_context_summary_uses_bounded_dynamic_input_chunks(self) -> None:
+        self.assertEqual(_summary_input_limit(501_890, 1_000_000), 196_608)
+        self.assertEqual(_summary_input_limit(900_000, 1_000_000), 196_608)
+        self.assertEqual(_summary_input_limit(2_000, 4_000), 4_000)
+
     def test_old_summary_appears_once_in_incremental_summary_prompt(self) -> None:
         old_summary = "旧摘要唯一标记"
         first_user = ModelRequest(parts=[UserPromptPart(content="最初任务")])
@@ -439,6 +449,101 @@ class ContextCheckpointTests(unittest.IsolatedAsyncioTestCase):
             unchanged.source_last_sequence,
             checkpoint.source_last_sequence,
         )
+
+    async def test_large_window_history_uses_rolling_summary_then_reuses_checkpoint(
+        self,
+    ) -> None:
+        context_window = 40_000
+        max_output = 4_000
+        estimator = TokenEstimator.conservative()
+        built = build_context_test_history(
+            CONTEXT_TEST_SCENARIOS[0],
+            context_window_tokens=context_window,
+            max_output_tokens=max_output,
+            estimator=estimator,
+        )
+        await self.stores.coordinator.append(
+            "large-window-rolling-summary",
+            built.messages,
+            user_id="user-1",
+        )
+        summary_prompt_tokens: list[int] = []
+
+        def respond(messages: list[ModelMessage], _info: AgentInfo) -> ModelResponse:
+            if "<history>" in str(messages):
+                prompt_tokens = sum(
+                    estimator.text(str(getattr(part, "content", "")))
+                    for message in messages
+                    for part in message.parts
+                )
+                summary_prompt_tokens.append(prompt_tokens)
+                return ModelResponse(parts=[TextPart(content="滚动摘要：保留目标与约束。")])
+            return ModelResponse(parts=[TextPart(content="done")])
+
+        capability = DeepAgentContextCompaction(
+            context_window_tokens=context_window,
+            max_output_tokens=max_output,
+            summary_timeout=10,
+        )
+        fingerprint = projection_fingerprint(
+            llm_model_id="main-model",
+            context_window_tokens=context_window,
+            max_output_tokens=max_output,
+            trigger_ratio=OPTION.agent.context_compaction_trigger_ratio,
+            target_ratio=OPTION.agent.context_compaction_target_ratio,
+            keep_tool_pairs=OPTION.agent.context_keep_tool_pairs,
+            summary_model_id="main-model",
+            estimator_source=estimator.source,
+        )
+        runner = AgentRunner(
+            Agent(
+                FunctionModel(respond),
+                deps_type=AgentDeps,
+                capabilities=[capability],
+            ),
+            self.stores.coordinator,
+            UsageLimits(request_limit=20),
+            context_window_tokens=context_window,
+            max_output_tokens=max_output,
+            context_compaction=capability,
+            checkpoint_store=self.stores.context_checkpoint,
+            checkpoint_fingerprint=fingerprint,
+            summary_model_id="main-model",
+            estimator=estimator,
+        )
+
+        first = await runner.run(
+            "large-window-rolling-summary",
+            "总结并继续",
+            AgentDeps(session_id="large-window-rolling-summary", user="user-1"),
+        )
+        self.assertGreaterEqual(first["context"]["compaction"]["summary_chunks"], 2)
+        self.assertGreaterEqual(len(summary_prompt_tokens), 2)
+        self.assertTrue(
+            all(
+                tokens <= _summary_input_limit(
+                    first["context"]["budget"]["target_tokens"],
+                    context_window,
+                )
+                for tokens in summary_prompt_tokens
+            ),
+            summary_prompt_tokens,
+        )
+        checkpoint = await self.stores.context_checkpoint.get(
+            "large-window-rolling-summary"
+        )
+        self.assertIsNotNone(checkpoint)
+
+        second = await runner.run(
+            "large-window-rolling-summary",
+            "继续",
+            AgentDeps(session_id="large-window-rolling-summary", user="user-1"),
+        )
+        self.assertFalse(second["context"]["compaction"]["triggered"])
+        unchanged = await self.stores.context_checkpoint.get(
+            "large-window-rolling-summary"
+        )
+        self.assertEqual(unchanged.row_version, checkpoint.row_version)
 
     async def test_checkpoint_cas_hash_and_branch_invalidation(self) -> None:
         raw = [

@@ -43,6 +43,28 @@ class ToolPackageMigrationDialectTests(unittest.TestCase):
             self.assertIsInstance(migration._json_type(), Text)
             self.assertEqual(str(migration._true_default()), "1")
 
+    def test_package_codes_upgrade_and_downgrade_independently(self) -> None:
+        cases = (
+            (["native"], ["builtin:general"]),
+            (["python-sandbox"], ["builtin:sandbox"]),
+            (
+                ["native", "python-sandbox"],
+                ["builtin:general", "builtin:sandbox"],
+            ),
+            ([], []),
+        )
+        for legacy, expected in cases:
+            with self.subTest(legacy=legacy):
+                upgraded = migration._upgrade_capabilities(legacy)
+                self.assertEqual(upgraded, expected)
+                self.assertEqual(
+                    migration._downgrade_capabilities(upgraded, {}),
+                    legacy,
+                )
+
+    def test_null_capabilities_remain_null(self) -> None:
+        self.assertIsNone(migration._as_capabilities(None))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -89,14 +89,15 @@ v0.3.0 将发布前的 Alembic `001`～`023` 历史压缩为唯一基线 `001`�
 DeepAgent 当前支持：
 
 - 内置工具：
-  - `builtin:general`（通用工具）：默认启用，包含 `get_current_time` 和 `execute_python`。
+  - `builtin:general`（通用工具）：默认启用，只包含 `get_current_time`。
+  - `builtin:sandbox`（Python 沙箱）：默认关闭，只包含 `execute_python`。
   - `builtin:attachment`（附件读取）：默认关闭，包含 TXT、DOCX、XLSX 按需读取工具。
 - `skill:<name>`：Python Skill，组合 Instructions 和函数工具。
 - `mcp:<name>`：URL、stdio 或 builtin MCP。
 - `ui:builtin`：代码内置的确认和候选选择交互，默认关闭。
 - `ui:<package>`：数据库管理的手工 UI 工具包，Agent 按包启用。
 
-产品配置单位是 Tool Package，Pydantic AI 运行对象仍是 Toolset。Agent 的
+产品配置单位是 Tool Package，每个包严格包装一个 Pydantic AI Toolset。Agent 的
 `capabilities` 字段保存工具包编码；当前不提供包内逐工具授权。Output Tool 是最终输出契约，
 不属于工具包，也不进入 `capabilities`。
 

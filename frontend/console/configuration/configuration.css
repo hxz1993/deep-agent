@@ -116,16 +116,187 @@ html, body {
   white-space: nowrap;
 }
 
-.ui-tool-packages-wrap {
-  margin-bottom: 12px;
+.ui-tools-workspace {
+  display: grid;
+  grid-template-columns: 248px minmax(0, 1fr);
+  min-height: 540px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
 }
 
-#uiToolPackagesTableBody tr[data-select-package] {
+.ui-tool-package-pane {
+  min-width: 0;
+  border-right: 1px solid var(--border);
+  background: var(--bg-soft);
+}
+
+.ui-tool-pane-header,
+.ui-tool-selected-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 52px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.ui-tool-package-tree {
+  padding: 8px;
+}
+
+.ui-tool-tree-group + .ui-tool-tree-group {
+  margin-top: 12px;
+}
+
+.ui-tool-tree-group-title {
+  padding: 4px 8px 6px;
+  color: var(--text-faint);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.ui-tool-tree-node {
+  width: 100%;
+  margin: 0 0 4px;
+  padding: 9px 10px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
   cursor: pointer;
 }
 
-#uiToolPackagesTableBody tr.is-selected td {
-  background: color-mix(in srgb, var(--accent) 8%, var(--panel));
+.ui-tool-tree-node:hover {
+  background: var(--bg-elev);
+}
+
+.ui-tool-tree-node.is-selected {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  background: color-mix(in srgb, var(--accent) 9%, var(--panel));
+}
+
+.ui-tool-tree-node-main,
+.ui-tool-tree-node-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.ui-tool-tree-node-main strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ui-tool-tree-node-meta {
+  margin-top: 4px;
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+.ui-tool-tree-node-meta code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ui-tool-tree-state {
+  padding: 28px 12px;
+  color: var(--text-dim);
+  text-align: center;
+}
+
+.ui-tool-tree-state .btn {
+  margin-top: 10px;
+}
+
+.ui-tool-content-pane {
+  min-width: 0;
+}
+
+.ui-tool-selected-header {
+  align-items: flex-start;
+  min-height: 90px;
+}
+
+.ui-tool-selected-copy {
+  min-width: 0;
+}
+
+.ui-tool-selected-title {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ui-tool-selected-copy p {
+  margin: 6px 0;
+  color: var(--text-dim);
+  line-height: 1.45;
+}
+
+.ui-tool-selected-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ui-tool-filter-bar {
+  margin: 0;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.ui-tool-search-field {
+  flex: 1;
+}
+
+.ui-tool-search-field input {
+  width: min(360px, 100%);
+}
+
+.ui-tool-table-wrap {
+  border: 0;
+  border-radius: 0;
+}
+
+@media (max-width: 860px) {
+  .ui-tools-workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .ui-tool-package-pane {
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .ui-tool-package-tree {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .ui-tool-tree-group + .ui-tool-tree-group {
+    margin-top: 0;
+  }
+}
+
+@media (max-width: 560px) {
+  .ui-tool-package-tree {
+    grid-template-columns: 1fr;
+  }
+
+  .ui-tool-selected-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
 }
 
 .builtin-tool-name {

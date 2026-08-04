@@ -300,8 +300,8 @@ Pydantic AI `AbstractCapability` 可以提供：
 DeepAgent 原有自研 `Capability` 只是产品配置包装，却与 Pydantic AI 的
 `AbstractCapability` 同名，容易把产品授权和运行扩展混为一谈。v0.3.2 将它改名为
 `ToolPackage`：负责 Agent 选择、Console 目录和一组工具元数据；Pydantic AI `Toolset` 仍是
-真正交给 Agent 的运行对象。一个 Tool Package 可以预置一个或多个 Toolset，也可以在请求时
-按 MCP 或数据库 UI 定义动态创建 Toolset。完整定义见
+真正交给 Agent 的运行对象。一个 Tool Package 严格包装一个 Toolset；该 Toolset 既可预定义，
+也可在请求时按 MCP 或数据库 UI 定义动态创建。完整定义见
 [`../11-tool-packages/tool-packages-design.md`](../11-tool-packages/tool-packages-design.md)。
 
 ## 4. DeepAgent 当前使用情况
@@ -309,11 +309,12 @@ DeepAgent 原有自研 `Capability` 只是产品配置包装，却与 Pydantic A
 ### 4.1 内置 Function Tool
 
 产品层把代码随 DeepAgent 发布、无需管理员注册的后端 Function Tool 统一归入
-“内置工具”，与 MCP 服务同级展示。v0.3.2 收敛为两个 Tool Package：
+“内置工具”，与 MCP 服务同级展示。v0.3.2 收敛为三个 Tool Package：
 
 | 前端名称 | Tool Package 编码 | 默认状态 | 工具 |
 | --- | --- | --- | --- |
-| 通用工具 | `builtin:general` | 默认启用 | `get_current_time`、`execute_python` |
+| 通用工具 | `builtin:general` | 默认启用 | `get_current_time` |
+| Python 沙箱 | `builtin:sandbox` | 默认关闭 | `execute_python` |
 | 附件读取 | `builtin:attachment` | 默认关闭 | `read_text_attachment`、`read_docx`、`read_xlsx` |
 
 两包中的后端函数对模型都表现为 `FunctionToolset`。配置中心只读展示工具包及工具明细，
@@ -652,7 +653,7 @@ llm_models.tags 包含 code_execution
 - Usage、费用、超时和错误展示。
 - 数据出境与客户部署边界。
 
-DeepAgent 已通过 `builtin:general` 中的 `execute_python` 向私有和 OpenAI-compatible 模型提供统一 Python 能力：
+DeepAgent 已通过 `builtin:sandbox` 中的 `execute_python` 向私有和 OpenAI-compatible 模型提供统一 Python 能力：
 
 ```text
 FunctionToolset(execute_python)

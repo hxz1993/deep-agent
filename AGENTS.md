@@ -76,12 +76,12 @@ HTTP → deep_agent/api/v1 → AgentRunner → pydantic_ai.Agent → Toolsets
                                       └→ SessionStore (postgres/mysql/sqlite)
 ```
 
-工具包来源：`builtin:general` | `builtin:attachment` | `skill:*` | `mcp:*`
+工具包来源：`builtin:general` | `builtin:sandbox` | `builtin:attachment` | `skill:*` | `mcp:*`
 （DB + `mcps/` 兜底）| `ui:builtin` | `ui:<package>`。
 
 ### Pydantic AI 运行边界
 
-- DeepAgent 自研 `ToolPackage` 是产品配置单位，负责把分类、展示元数据和一个或多个 Toolset 组织起来；Pydantic AI 的 `AbstractCapability` 只表示压缩、重试等运行扩展，二者不能混用。
+- DeepAgent 自研 `ToolPackage` 是产品配置单位，负责把分类、展示元数据和恰好一个 Toolset 组织起来；Pydantic AI 的 `AbstractCapability` 只表示压缩、重试等运行扩展，二者不能混用。
 - 模型直接接收 Instructions、历史、当前输入和 Tool Definitions。MCP Resource/Prompt 不会自动成为模型工具，必须由宿主读取、注入或显式包装。
 - Pydantic AI 负责 Agent loop、参数校验、工具调用、重试、流式事件和 Deferred 原语；DeepAgent 负责 SQL 会话、用户隔离、MCP 配置/Header、HITL、SSE 和 Console。
 - 原始 `chat_messages` 始终完整保存；启用全局上下文压缩后，模型输入可复用

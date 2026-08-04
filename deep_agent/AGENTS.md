@@ -27,7 +27,8 @@ HTTP (REST/SSE)
     → AgentRunner（agent/runner.py，与 FastAPI 解耦）
     → pydantic_ai.Agent
     → ToolPackageRegistry.toolsets()
-        ├─ builtin:general  UTC 时间 + 无状态 Python FunctionToolset
+        ├─ builtin:general  UTC 时间 FunctionToolset
+        ├─ builtin:sandbox  无状态 Python FunctionToolset
         ├─ builtin:attachment  TXT/DOCX/XLSX 读取
         ├─ skill        skills/<name>/（仓库根，见 DEEP_AGENT_SKILLS_DIR）
         ├─ mcp          请求时 `capabilities/mcp/resolver.py`（DB + mcps/ 兜底）
@@ -39,7 +40,7 @@ HTTP (REST/SSE)
 
 1. `configure_logging()` → `AppContext.bootstrap()`（见 `core/context.py`）
 2. `upgrade_database()` → `bootstrap_database()` → 10 个表 Store + `SqlConversationCoordinator`
-3. `build_registry(stores=)` — 通用、附件与 Python Skill 静态工具包；可用的 Python Sandbox 合并进 `builtin:general`
+3. `build_registry(stores=)` — 通用、Sandbox、附件与 Python Skill 静态工具包；Sandbox Backend 可用时注册独立 `builtin:sandbox`
 4. `init_context(ctx)` — 路由通过 `Depends(AppContextDep)` 注入
 5. 关闭：`ctx.aclose()` → `reset_context()`
 
@@ -57,7 +58,7 @@ MCP 在请求时由 `resolve_mcp_toolsets` 解析（DB 行 + `mcps/` builtin 兜
 
 ### 能力装配与模型输入
 
-DeepAgent 自研 `capabilities.registry.ToolPackage` 是产品配置单位，包含分类、展示元数据、工具目录和一个或多个 Toolset；Pydantic AI 的 `AbstractCapability` 才是可介入模型请求、消息历史、工具准备和事件生命周期的原生扩展点。当前 `DeepSeekThinkingRetry` 与 `agent/context/compaction.py` 的 Harness 压缩包装使用后者。
+DeepAgent 自研 `capabilities.registry.ToolPackage` 是产品配置单位，包含分类、展示元数据、工具目录和恰好一个 Toolset；Pydantic AI 的 `AbstractCapability` 才是可介入模型请求、消息历史、工具准备和事件生命周期的原生扩展点。当前 `DeepSeekThinkingRetry` 与 `agent/context/compaction.py` 的 Harness 压缩包装使用后者。
 
 模型每轮直接看到的是：Agent/能力 Instructions、`message_history`、当前用户输入/附件和本轮 Tool Definitions。Toolset 负责列出、准备和调用工具；MCP Prompt 不会自动进入模型工具列表。MCP Resource 由宿主侧动态代理工具按需读取。
 
@@ -117,9 +118,9 @@ DeepAgent 自研 `capabilities.registry.ToolPackage` 是产品配置单位，包
 | `mcp/resources.py` | 按检测快照开放、运行时实时读取的 Resource 代理工具 |
 | `mcp/run_scoped.py` | builtin MCP：按 agent run 租约 HTTP client |
 | `mcp/lease_manager.py` | worker 级 MCP lease + shared registry touch |
-| `ui/registry.py` | builtin/manual UI 工具按包筛选、合并和 `prepare_ui_toolsets_for_spec` |
+| `ui/registry.py` | builtin/manual UI 工具按包筛选、合并和 `prepare_ui_tool_packages_for_spec` |
 | `attachments/` | 默认关闭的 `builtin:attachment` 包；会话内 TXT/DOCX/XLSX 分页读取 |
-| `../sandbox/toolset.py` | `builtin:general` 的 Python FunctionToolset 片段；代理 PythonExecutionBackend |
+| `../sandbox/toolset.py` | 默认关闭的 `builtin:sandbox`；代理 PythonExecutionBackend |
 
 ### `api/v1/`
 
@@ -162,8 +163,8 @@ DeepAgent 自研 `capabilities.registry.ToolPackage` 是产品配置单位，包
 
 ### 内置工具包
 
-`builtin:general` 由 `capabilities/native/builtin.py` 和 `sandbox/toolset.py` 共同贡献
-Toolset，整体默认启用；`builtin:attachment` 独立且默认关闭。内置包由代码随版本发布，
+`builtin:general` 只提供当前时间且默认启用；`builtin:sandbox` 只提供 Python 执行，
+`builtin:attachment` 提供附件读取，两者默认关闭。每个包严格包装一个 Toolset。内置包由代码随版本发布，
 不在数据库注册；配置中心只读展示，Agent 仍按整包选择。
 
 ### Python Skill
@@ -204,7 +205,7 @@ Toolset，整体默认启用；`builtin:attachment` 独立且默认关闭。内�
 
 ### Python Sandbox
 
-`execute_python` 属于默认启用的 `builtin:general`，与 `get_current_time` 整包选择。工具协议
+`execute_python` 属于默认关闭的 `builtin:sandbox`，与时间工具分开整包选择。工具协议
 与执行 Backend 解耦：本地联调使用 `subprocess-dev`，生产硬隔离
 仍按 [`../docs/design/07-python-sandbox/`](../docs/design/07-python-sandbox/) 推进。它不是 MCP，
 也不等同于 Provider 托管的 `CodeExecutionTool`。
@@ -301,7 +302,7 @@ SSE 协议：[`../docs/guides/sse-protocol.md`](../docs/guides/sse-protocol.md)�
    - 多入口共享组装 → `api/v1/deps.py`（变化量留在入口，上下文在 `_build_*` 内统一解包）
 1. 包名 **`deep_agent`**，启动 `deep_agent.main:app`（非 `app.main`）
 2. 扩展优先走路径注册，避免改 `runner.py` 核心
-3. 工具包命名：`builtin:general` \| `builtin:attachment` \| `skill:<name>` \| `mcp:<name>` \| `ui:<package>`；Agent 按包选择，工具协议名不随包编码变化
+3. 工具包命名：`builtin:general` \| `builtin:sandbox` \| `builtin:attachment` \| `skill:<name>` \| `mcp:<name>` \| `ui:<package>`；一个包严格包装一个 Toolset，Agent 按包选择，工具协议名不随包编码变化
 4. DB Agent 会话：复合键 `(agent_id, session_id)`；无 agent 时 `agent_id=''`
 5. 同 session 用 `SessionStore.lock()` 串行；多实例 DB 级锁未实现
 6. 配置保存先完成 Schema/引用校验，再进入写事务；一次 API 业务变更不要串联多个各自提交的 Store `_write()`。MCP 检测等外部 I/O 先基于候选配置执行，再把配置与检测快照一次性提交。模型目录联网、解析和完整校验必须在事务前完成，随后单事务全量替换；模型配置保存不得隐式联网。

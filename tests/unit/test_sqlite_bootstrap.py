@@ -134,6 +134,7 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
                         capabilities,
                         [
                             "builtin:general",
+                            "builtin:sandbox",
                             "builtin:attachment",
                             "ui:deepcube",
                             "ui:builtin",

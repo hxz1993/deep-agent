@@ -39,18 +39,16 @@ def build_registry(
     _ = stores
     registry = ToolPackageRegistry()
 
-    general = build_native_tool_package()
+    registry.register(build_native_tool_package())
 
     if sandbox_backend is not None:
-        sandbox = build_python_sandbox_tool_package(
-            sandbox_backend,
-            timeout_sec=float(OPTION.agent.sandbox_timeout),
-            sandbox_profile=sandbox_profile,
+        registry.register(
+            build_python_sandbox_tool_package(
+                sandbox_backend,
+                timeout_sec=float(OPTION.agent.sandbox_timeout),
+                sandbox_profile=sandbox_profile,
+            )
         )
-        general.toolsets.extend(sandbox.toolsets)
-        general.tools.extend(sandbox.tools)
-
-    registry.register(general)
     registry.register(build_attachment_tool_package())
 
     for package in load_skill_tool_packages(OPTION.agent.skills_dir):

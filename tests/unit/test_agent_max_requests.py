@@ -154,7 +154,7 @@ class AgentRunnerGlobalRequestLimitTests(unittest.IsolatedAsyncioTestCase):
                     new=AsyncMock(return_value=[]),
                 ),
                 patch(
-                    "deep_agent.api.v1.deps.prepare_ui_toolsets_for_spec",
+                    "deep_agent.api.v1.deps.prepare_ui_tool_packages_for_spec",
                     new=AsyncMock(return_value=([], {})),
                 ),
                 patch(

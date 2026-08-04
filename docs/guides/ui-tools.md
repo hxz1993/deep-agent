@@ -127,7 +127,7 @@ UIToolRecord(
 ### 3.2 注册与注入规则
 
 - builtin 和 manual UI 工具都按所属 `package_code` 与 Agent 正向关联。
-- `prepare_ui_toolsets_for_spec()` 只加载 Agent 已选、工具包已启用、工具已启用且 Schema 有效的定义。
+- `prepare_ui_tool_packages_for_spec()` 只加载 Agent 已选、工具包已启用、工具已启用且 Schema 有效的定义，并保证每个包只生成一个 `ExternalToolset`。
 - `capabilities=null`、空数组或未包含对应 `ui:<package>` 时，该包不进入模型工具列表。
 - Alembic `002` 一次性把旧单工具引用转换为包编码，运行时不保留旧编码兼容。
 
@@ -313,7 +313,7 @@ ExternalToolset 'ui' defines a tool whose name conflicts with ...
 ```
 
 原因：同一个 UI 工具包被请求级装配和 `factory` 无条件装配两次。
-解决：只保留 `prepare_ui_toolsets_for_spec()` 的按包装配。
+解决：只保留 `prepare_ui_tool_packages_for_spec()` 的按包装配。
 
 ### 模型不调用 UI 工具
 

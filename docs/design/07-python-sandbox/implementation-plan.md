@@ -55,7 +55,7 @@
 
 - frozen 契约与限额；无 runtime 生命周期 API；单 frame JSON；Worker 每调用一进程。
 - `SubprocessBackend`：白名单 env、临时目录、timeout/取消杀进程组、semaphore、health=`none`。
-- v0.3.2 起 `execute_python` 并入默认启用的 `builtin:general`；Tool Call/Result 仍进入原始历史。
+- v0.3.2 起 `execute_python` 归入默认关闭的独立 `builtin:sandbox`；Tool Call/Result 仍进入原始历史。
 - 独立 sandbox 解释器（`SANDBOX_PYTHON`）；Profile `pydata`：`numpy>=1.26,<2` + `pandas`。
 - 资源帽：RSS→`RLIMIT_AS`（×3）、CPU；`MAX_PIDS` 默认 0；输出截断；health 含 `resource_limits`。
 - 启用时缺 venv/包 → bootstrap 失败；soft guardrails 仅本 Backend `preexec`，失败降级。

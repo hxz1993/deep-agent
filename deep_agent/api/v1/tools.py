@@ -4,7 +4,8 @@ from fastapi import APIRouter
 
 from deep_agent.capabilities.mcp.builtin import load_builtin_mcp_tool_packages
 from deep_agent.capabilities.registry import describe_tool_package
-from deep_agent.capabilities.ui.builtin import builtin_ui_records
+from deep_agent.capabilities.ui.builtin import build_builtin_ui_tool_package
+from deep_agent.capabilities.ui.external import build_args_validator
 from deep_agent.capabilities.ui.types import UIToolRecord
 from deep_agent.core.context import AppContextDep
 from deep_agent.core.paths import DEEP_AGENT_ROOT
@@ -54,21 +55,7 @@ async def list_tool_packages(ctx: AppContextDep) -> list[ToolPackageDescription]
         payload["tool_catalog_status"] = "count_only"
         payloads.append(payload)
 
-    builtin_records = builtin_ui_records()
-    payloads.append(
-        {
-            "code": "ui:builtin",
-            "category": "ui",
-            "label": "通用交互",
-            "source": "builtin",
-            "description": "代码内置的确认与候选选择交互。",
-            "enabled": True,
-            "default_enabled": False,
-            "tool_count": len(builtin_records),
-            "tool_catalog_status": "complete",
-            "tools": [_ui_tool_payload(record) for record in builtin_records],
-        }
-    )
+    payloads.append(describe_tool_package(build_builtin_ui_tool_package()))
 
     manual_rows = await ctx.stores.ui_tool.list_all()
     manual_by_package: dict[str, list[UIToolRecord]] = {}
@@ -79,6 +66,21 @@ async def list_tool_packages(ctx: AppContextDep) -> list[ToolPackageDescription]
         manual_by_package.setdefault(record.package_code, []).append(record)
     for package in await ctx.stores.ui_tool_package.list_all():
         records = sorted(manual_by_package.get(package.code, []), key=lambda item: item.name)
+        enabled_records = [record for record in records if record.enabled]
+        invalid_enabled_count = 0
+        for record in enabled_records:
+            try:
+                build_args_validator(record)
+            except ValueError:
+                invalid_enabled_count += 1
+        if not enabled_records:
+            catalog_status = "empty"
+        elif invalid_enabled_count == len(enabled_records):
+            catalog_status = "invalid"
+        elif invalid_enabled_count:
+            catalog_status = "partial"
+        else:
+            catalog_status = "complete"
         payloads.append(
             {
                 "code": package.code,
@@ -89,7 +91,7 @@ async def list_tool_packages(ctx: AppContextDep) -> list[ToolPackageDescription]
                 "enabled": package.enabled,
                 "default_enabled": False,
                 "tool_count": len(records),
-                "tool_catalog_status": "complete" if records else "empty",
+                "tool_catalog_status": catalog_status,
                 "tools": [_ui_tool_payload(record) for record in records],
             }
         )

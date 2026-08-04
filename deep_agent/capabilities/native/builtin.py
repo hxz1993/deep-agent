@@ -25,7 +25,7 @@ def build_native_tool_package() -> ToolPackage:
     return ToolPackage(
         code="builtin:general",
         category="builtin",
-        toolsets=[toolset],
+        toolset=toolset,
         label="通用工具",
         source="builtin",
         description="随 DeepAgent 发布的进程内通用工具。",

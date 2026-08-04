@@ -165,68 +165,66 @@
     <section class="panel" id="panel-ui-tools">
       <div class="panel-toolbar">
         <h2>UI 工具（HITL）</h2>
-        <div class="row-actions">
-          <button class="btn" id="newUiToolPackageBtn">＋ 新建工具包</button>
-          <button class="btn primary" id="newUiToolBtn">＋ 新建工具</button>
-        </div>
       </div>
       <p class="panel-subtitle">先管理工具包，再在选中的手工工具包中维护 UI 工具；Agent 按工具包整体启用。</p>
-      <div class="table-wrap ui-tool-packages-wrap">
-        <table class="data-table">
-          <thead>
-            <tr>
-              <th>工具包</th>
-              <th>编码</th>
-              <th>来源</th>
-              <th>状态</th>
-              <th>工具数</th>
-              <th>说明</th>
-              <th>操作</th>
-            </tr>
-          </thead>
-          <tbody id="uiToolPackagesTableBody">
-            <tr><td colspan="7" class="empty-cell">加载中…</td></tr>
-          </tbody>
-        </table>
-      </div>
-      <div class="filter-bar" id="uiToolsFilters">
-        <strong id="selectedUiToolPackageLabel">全部工具</strong>
-        <label class="inline-field">
-          <span>来源</span>
-          <select id="uiToolFilterSource" class="filter-select">
-            <option value="">全部</option>
-            <option value="builtin">内置</option>
-            <option value="manual">manual</option>
-          </select>
-        </label>
-        <label class="inline-field">
-          <span>启用</span>
-          <select id="uiToolFilterEnabled" class="filter-select">
-            <option value="">全部</option>
-            <option value="true">是</option>
-            <option value="false">否</option>
-          </select>
-        </label>
-        <button type="button" class="btn" id="uiToolFilterApply">筛选</button>
-      </div>
-      <div class="table-wrap">
-        <table class="data-table">
-          <thead>
-            <tr>
-              <th>名称</th>
-              <th>所属工具包</th>
-              <th>来源</th>
-              <th>Widget</th>
-              <th>启用</th>
-              <th>描述</th>
-              <th>更新时间</th>
-              <th>操作</th>
-            </tr>
-          </thead>
-          <tbody id="uiToolsTableBody">
-            <tr><td colspan="8" class="empty-cell">加载中…</td></tr>
-          </tbody>
-        </table>
+      <div class="ui-tools-workspace">
+        <aside class="ui-tool-package-pane">
+          <div class="ui-tool-pane-header">
+            <strong>工具包</strong>
+            <button class="btn" id="newUiToolPackageBtn">＋ 新建</button>
+          </div>
+          <div class="ui-tool-package-tree" id="uiToolPackageTree">
+            <div class="ui-tool-tree-state">加载中…</div>
+          </div>
+        </aside>
+        <section class="ui-tool-content-pane">
+          <header class="ui-tool-selected-header" id="uiToolSelectedPackageHeader">
+            <div class="ui-tool-selected-copy">
+              <div class="ui-tool-selected-title">
+                <strong id="selectedUiToolPackageLabel">请选择工具包</strong>
+                <code id="selectedUiToolPackageCode"></code>
+              </div>
+              <p id="selectedUiToolPackageDescription">从左侧选择工具包后查看工具。</p>
+              <div class="ui-tool-selected-meta" id="selectedUiToolPackageMeta"></div>
+            </div>
+            <div class="row-actions">
+              <button class="btn hidden" id="editUiToolPackageBtn">编辑工具包</button>
+              <button class="btn danger hidden" id="deleteUiToolPackageBtn">删除工具包</button>
+              <button class="btn primary" id="newUiToolBtn" disabled>＋ 新建工具</button>
+            </div>
+          </header>
+          <div class="filter-bar ui-tool-filter-bar" id="uiToolsFilters">
+            <label class="inline-field ui-tool-search-field">
+              <span>搜索</span>
+              <input type="search" id="uiToolFilterSearch" placeholder="名称或描述" />
+            </label>
+            <label class="inline-field">
+              <span>状态</span>
+              <select id="uiToolFilterEnabled" class="filter-select">
+                <option value="">全部</option>
+                <option value="true">启用</option>
+                <option value="false">停用</option>
+              </select>
+            </label>
+          </div>
+          <div class="table-wrap ui-tool-table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>名称</th>
+                  <th>Widget</th>
+                  <th>状态</th>
+                  <th>描述</th>
+                  <th>更新时间</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody id="uiToolsTableBody">
+                <tr><td colspan="6" class="empty-cell">请选择左侧工具包</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
       </div>
     </section>
   </div>

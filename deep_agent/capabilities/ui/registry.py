@@ -8,6 +8,7 @@ from pydantic_ai import ExternalToolset
 from pydantic_ai.tools import ToolDefinition
 
 from deep_agent.agent.spec import AgentSpec
+from deep_agent.capabilities.registry import ToolInfo, ToolPackage
 from deep_agent.capabilities.ui.builtin import builtin_ui_records
 from deep_agent.capabilities.ui.constants import SOURCE_PRIORITY
 from deep_agent.capabilities.ui.external import RetryableExternalToolset, build_args_validator
@@ -71,6 +72,39 @@ def build_external_toolset(definitions: list[UIToolRecord], *, toolset_id: str =
     ]
     validators = {item.name: build_args_validator(item) for item in definitions}
     return RetryableExternalToolset(tools, validators=validators, id=toolset_id)
+
+
+def build_ui_tool_package(
+    definitions: list[UIToolRecord],
+    *,
+    code: str,
+    label: str,
+    source: str,
+    description: str = "",
+) -> ToolPackage:
+    """Wrap one package of validated UI definitions in one ExternalToolset."""
+    return ToolPackage(
+        code=code,
+        category="ui",
+        toolset=build_external_toolset(
+            definitions,
+            toolset_id=f"ui-package:{code}",
+        ),
+        label=label,
+        source=source,
+        description=description,
+        tools=[
+            ToolInfo(
+                name=item.name,
+                display_name=str((item.metadata or {}).get("display_name") or item.name),
+                description=item.description,
+                execution_type="external",
+                enabled=item.enabled,
+            )
+            for item in definitions
+        ],
+        default_enabled=False,
+    )
 
 
 def build_tool_hints(definitions: list[UIToolRecord]) -> dict[str, dict[str, Any]]:
@@ -177,10 +211,10 @@ async def load_selectable_ui_tools(
     return [record for record in merged if record.source == "manual"]
 
 
-async def prepare_ui_toolsets_for_spec(
+async def prepare_ui_tool_packages_for_spec(
     stores: DataStores,
     spec: AgentSpec,
-) -> tuple[list[ExternalToolset], dict[str, dict[str, Any]]]:
+) -> tuple[list[ToolPackage], dict[str, dict[str, Any]]]:
     effective = await load_effective_ui_tools(stores, spec)
     valid_definitions: list[UIToolRecord] = []
     for definition in effective.definitions:
@@ -194,8 +228,53 @@ async def prepare_ui_toolsets_for_spec(
     grouped: dict[str, list[UIToolRecord]] = {}
     for definition in valid_definitions:
         grouped.setdefault(definition.package_code, []).append(definition)
-    toolsets = [
-        build_external_toolset(definitions, toolset_id=f"ui-package:{package_code}")
-        for package_code, definitions in sorted(grouped.items())
-    ]
-    return toolsets, hints
+    package_rows = {
+        package.code: package
+        for package in await stores.ui_tool_package.list_all(enabled=True)
+    }
+    packages: list[ToolPackage] = []
+    for package_code, definitions in sorted(grouped.items()):
+        if package_code == "ui:builtin":
+            packages.append(
+                build_ui_tool_package(
+                    definitions,
+                    code=package_code,
+                    label="通用交互",
+                    source="builtin",
+                    description="代码内置的确认与候选选择交互。",
+                )
+            )
+            continue
+        row = package_rows.get(package_code)
+        if row is None:
+            logger.error("Skipping UI tool package '{}' because it is unavailable", package_code)
+            continue
+        packages.append(
+            build_ui_tool_package(
+                definitions,
+                code=package_code,
+                label=row.label,
+                source=row.source,
+                description=row.description or "",
+            )
+        )
+    return packages, hints
+
+
+async def runnable_ui_tool_package_codes(stores: DataStores) -> set[str]:
+    """Return UI package codes that can resolve to a non-empty valid Toolset."""
+    enabled_packages = {
+        package.code
+        for package in await stores.ui_tool_package.list_all(enabled=True)
+    }
+    valid_codes = {"ui:builtin"}
+    for row in await stores.ui_tool.list_all(enabled=True):
+        if row.source != "manual" or row.package_code not in enabled_packages:
+            continue
+        record = UIToolRecord.from_row(row)
+        try:
+            build_args_validator(record)
+        except ValueError:
+            continue
+        valid_codes.add(record.package_code)
+    return valid_codes

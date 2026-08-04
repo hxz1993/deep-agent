@@ -223,26 +223,31 @@ class SandboxRegistryTests(unittest.TestCase):
             {item.name for item in registry.get("builtin:general").tools},
             {"get_current_time"},
         )
+        self.assertNotIn("builtin:sandbox", registry.codes())
 
     def test_registry_includes_capability_when_backend_present(self) -> None:
         registry = build_registry(sandbox_backend=FakeSandboxBackend())
         self.assertEqual(
             {item.name for item in registry.get("builtin:general").tools},
-            {"get_current_time", "execute_python"},
+            {"get_current_time"},
+        )
+        self.assertEqual(
+            {item.name for item in registry.get("builtin:sandbox").tools},
+            {"execute_python"},
         )
 
 
 class SandboxCapabilityTests(unittest.IsolatedAsyncioTestCase):
     async def _tool(self, backend: FakeSandboxBackend):
         package = build_python_sandbox_tool_package(backend, timeout_sec=30.0)
-        tools = await package.toolsets[0].get_tools(_context())
+        tools = await package.toolset.get_tools(_context())
         return tools["execute_python"], package
 
     async def test_capability_metadata(self) -> None:
         backend = FakeSandboxBackend()
         capability = build_python_sandbox_tool_package(backend, timeout_sec=30.0)
 
-        self.assertEqual(capability.code, "builtin:general")
+        self.assertEqual(capability.code, "builtin:sandbox")
         self.assertEqual(capability.category, "builtin")
         self.assertFalse(capability.default_enabled)
         self.assertEqual(capability.source, "builtin")
@@ -256,7 +261,7 @@ class SandboxCapabilityTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(registry.toolsets(None), [])
         self.assertEqual(registry.toolsets([]), [])
-        self.assertEqual(registry.toolsets(["builtin:general"]), capability.toolsets)
+        self.assertEqual(registry.toolsets(["builtin:sandbox"]), [capability.toolset])
 
     async def test_tool_signature_only_code_and_inputs(self) -> None:
         backend = FakeSandboxBackend()

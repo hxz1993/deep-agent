@@ -18,7 +18,7 @@ def tool_package_from_row(row: McpServer) -> ToolPackage:
     return ToolPackage(
         code=f"mcp:{row.name}",
         category="mcp",
-        toolsets=[toolset],
+        toolset=toolset,
         label=row.name,
         source="builtin" if row.transport == "builtin" else "database",
         description=description,

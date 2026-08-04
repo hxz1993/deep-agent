@@ -62,7 +62,7 @@ async def resolve_mcp_toolsets(
     packages = select_mcp_tool_packages(
         await load_mcp_tool_packages(stores, rows=mcp_rows), spec
     )
-    return [toolset for package in packages for toolset in package.toolsets]
+    return [package.toolset for package in packages]
 
 
 async def describe_mcp_tool_packages(

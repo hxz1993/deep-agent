@@ -44,7 +44,8 @@ FastAPI API
 
 | 名称 | 来源 | 用途 |
 | --- | --- | --- |
-| `builtin:general` | `deep_agent/capabilities/native/` + `deep_agent/sandbox/` | 内置“通用工具”，默认启用，提供 UTC 时间和 Python 计算 |
+| `builtin:general` | `deep_agent/capabilities/native/` | 内置“通用工具”，默认启用，提供 UTC 时间 |
+| `builtin:sandbox` | `deep_agent/sandbox/` | 内置“Python 沙箱”，默认关闭，提供无状态 Python 计算 |
 | `builtin:attachment` | `deep_agent/capabilities/attachments/` | 内置“附件读取”，Agent 显式启用的会话附件按需读取 |
 | `skill:<name>` | `skills/<name>/` | Instructions 与 Python 工具组合 |
 | `mcp:<name>` | 数据库或 `mcps/` | 外部或内置 MCP 工具 |
@@ -52,7 +53,8 @@ FastAPI API
 | `ui:<package>` | `ui_tool_packages` + `ui_tool_definitions` | Agent 显式选择的手工 HITL 工具包 |
 
 分类只是 ToolPackage 的 `category` 字段；ToolPackage 是 Agent 配置单位，Toolset 是运行时
-交给 Pydantic AI 的对象。一个包可以贡献多个 Toolset，当前不提供包内逐工具授权。
+交给 Pydantic AI 的对象。一个包严格包装一个 Toolset，当前不提供包内逐工具授权；未来可在
+该 Toolset 上使用过滤包装器实现包内工具选择。
 
 仓库不再读取 Cursor 的 `.cursor/skills`。原实现只是把 Cursor Markdown Skill
 适配成读取指令工具，与业务 Python Skill 不同。未来若需要长 Skill 按需加载，

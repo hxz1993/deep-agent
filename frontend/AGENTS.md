@@ -34,7 +34,7 @@ frontend/
 | 会话 | `session_id` 由后端 `session` 事件返回；`GET/DELETE /api/v1/sessions`；标题展示 `title \|\| user_prompt`（见 [`../docs/guides/experience/ai-title-generator.md`](../docs/guides/experience/ai-title-generator.md)） |
 | 能力面板 | `GET /api/v1/tools` |
 | 配置 | `localStorage` 只保存调试 App；全局环境配置只读展示，身份和鉴权由平台提供 |
-| 内置工具目录 | 配置中心只读展示 `builtin:general`、`builtin:attachment`；Agent 按包选择 |
+| 内置工具目录 | 配置中心只读展示 `builtin:general`、`builtin:sandbox`、`builtin:attachment`；Agent 按包选择 |
 | 一体化控制台 | `/console/`；工作台、配置和诊断的唯一入口 |
 
 工作台默认在会话栏顶部用 Agent 下拉框切换；管理员可在当前页面内临时固定左侧 Agent
@@ -47,6 +47,10 @@ frontend/
 `context-status` 返回的是 `estimate_scope=history_only` 的会话历史快照；最近一次 Run Usage
 来自当前页面收到的 `final.usage`。前端只格式化和计算展示比例，不复制后端 Token 估算、
 输出预测或安全余量算法。
+
+配置中心 UI 工具页使用“左侧工具包树 + 右侧当前包工具表”：来源只用于左树分组，右表不再
+重复显示所属包；窄屏改为上下布局，但仍必须先选包再维护工具。Builtin 包只读，只有选中手工包
+时才开放新建工具。
 
 ## 一体化控制台
 

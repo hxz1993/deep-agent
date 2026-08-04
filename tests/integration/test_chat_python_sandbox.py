@@ -92,7 +92,7 @@ class ChatPythonSandboxIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 name="sandbox-agent",
                 model_id=model.id,
                 prompt="使用 Python 沙箱完成计算。",
-                capabilities=["builtin:general"],
+                capabilities=["builtin:sandbox"],
             )
         )
         self.backend = SubprocessBackend(

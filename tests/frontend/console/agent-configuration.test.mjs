@@ -32,6 +32,7 @@ test("新建和历史 null 能力配置不选择内置 UI 工具", () => {
   const ui = loadAgentConfigurationUi();
   const selected = ui.buildCapabilitySelectionSet(null, [
     { code: "builtin:general", default_enabled: true, enabled: true },
+    { code: "builtin:sandbox", default_enabled: false, enabled: true },
     { code: "skill:optional", default_enabled: false, enabled: true },
     { code: "ui:builtin", default_enabled: false, enabled: true },
   ]);
@@ -66,6 +67,7 @@ test("后端 category 直接驱动工具包分组", () => {
   const ui = loadAgentConfigurationUi();
   const grouped = ui.groupCapabilities([
     { code: "builtin:general", category: "builtin", label: "通用工具" },
+    { code: "builtin:sandbox", category: "builtin", label: "Python 沙箱" },
     { code: "builtin:attachment", category: "builtin", label: "附件读取" },
     { code: "mcp:demo", category: "mcp" },
   ]);
@@ -73,10 +75,30 @@ test("后端 category 直接驱动工具包分组", () => {
   assert.deepEqual([...grouped.groups], ["builtin", "mcp"]);
   assert.deepEqual(
     Array.from(grouped.byGroup.builtin, (toolPackage) => toolPackage.code),
-    ["builtin:general", "builtin:attachment"],
+    ["builtin:general", "builtin:sandbox", "builtin:attachment"],
   );
   assert.equal(ui.capabilityGroup({ category: "builtin" }), "builtin");
   assert.equal(ui.capabilityGroup({ category: "mcp" }), "mcp");
+});
+
+test("Agent 能力页提交独立 Sandbox 工具包编码", () => {
+  const ui = loadAgentConfigurationUi();
+  const card = ui.window.agentsAdmin.renderCapCard(
+    {
+      code: "builtin:sandbox",
+      category: "builtin",
+      label: "Python 沙箱",
+      source: "builtin",
+      description: "执行受控 Python 代码",
+      default_enabled: false,
+      tools: [{ name: "execute_python", description: "执行 Python。" }],
+    },
+    new Set(["builtin:sandbox"]),
+  );
+
+  assert.match(card, /Python 沙箱/);
+  assert.match(card, /value="builtin:sandbox"/);
+  assert.match(card, /execute_python/);
 });
 
 test("Agent 内置工具卡片优先展示中文名称和技术类型", () => {

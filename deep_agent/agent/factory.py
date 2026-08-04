@@ -20,7 +20,7 @@ from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.models import DeepSeekChatModel, OpenAICompatibleVideoChatModel
 from deep_agent.agent.models.deepseek_thinking_retry import DeepSeekThinkingRetry
 from deep_agent.agent.spec import AgentSpec
-from deep_agent.capabilities.registry import ToolPackageRegistry
+from deep_agent.capabilities.registry import ToolPackage, ToolPackageRegistry
 from deep_agent.options import OPTION
 
 _OPENAI_PREFIXES = {"openai", "openai-chat"}
@@ -146,7 +146,7 @@ def _toolsets_for_spec(
     spec: AgentSpec,
     *,
     mcp_toolsets: list[Any] | None = None,
-    dynamic_ui_toolsets: list[Any] | None = None,
+    dynamic_ui_packages: list[ToolPackage] | None = None,
     mcp_resource_toolset: Any | None = None,
 ) -> list[Any]:
     """Resolve selected product tool packages into Pydantic AI toolsets."""
@@ -156,8 +156,8 @@ def _toolsets_for_spec(
     if mcp_resource_toolset is not None:
         toolsets.append(mcp_resource_toolset)
 
-    if dynamic_ui_toolsets:
-        toolsets.extend(dynamic_ui_toolsets)
+    if dynamic_ui_packages:
+        toolsets.extend(package.toolset for package in dynamic_ui_packages)
     return toolsets
 
 
@@ -167,7 +167,7 @@ def build_agent(
     *,
     request_retries: int = 2,
     mcp_toolsets: list[Any] | None = None,
-    dynamic_ui_toolsets: list[Any] | None = None,
+    dynamic_ui_packages: list[ToolPackage] | None = None,
     mcp_resource_toolset: Any | None = None,
     context_compaction: AbstractCapability[AgentDeps] | None = None,
 ) -> Agent[AgentDeps, str]:
@@ -183,7 +183,7 @@ def build_agent(
         registry,
         spec,
         mcp_toolsets=mcp_toolsets,
-        dynamic_ui_toolsets=dynamic_ui_toolsets,
+        dynamic_ui_packages=dynamic_ui_packages,
         mcp_resource_toolset=mcp_resource_toolset,
     )
     capabilities: list[AbstractCapability[AgentDeps]] = []

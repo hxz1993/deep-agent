@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-from pydantic_ai import ExternalToolset
-
+from deep_agent.capabilities.registry import ToolPackage
 from deep_agent.capabilities.ui.types import UIToolRecord
 
 _CONFIRM_ACTION_SCHEMA = {
@@ -153,10 +152,19 @@ def builtin_ui_records() -> list[UIToolRecord]:
     ]
 
 
-def build_ui_toolset() -> ExternalToolset:
-    """Build the code-owned builtin UI package's external toolset."""
-    from deep_agent.capabilities.ui.registry import build_external_toolset
+def build_builtin_ui_tool_package() -> ToolPackage:
+    """Build the code-owned builtin UI package and its single toolset."""
+    from deep_agent.capabilities.ui.registry import build_ui_tool_package
 
-    return build_external_toolset(
-        builtin_ui_records(), toolset_id="ui-package:ui:builtin"
+    return build_ui_tool_package(
+        builtin_ui_records(),
+        code="ui:builtin",
+        label="通用交互",
+        source="builtin",
+        description="代码内置的确认与候选选择交互。",
     )
+
+
+def build_ui_toolset():
+    """Return the builtin package's Toolset for direct Pydantic AI tests."""
+    return build_builtin_ui_tool_package().toolset

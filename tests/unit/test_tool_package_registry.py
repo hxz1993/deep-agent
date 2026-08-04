@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock
 
 from pydantic_ai import RunContext
@@ -21,7 +22,7 @@ class ToolPackageRegistryTests(unittest.TestCase):
             ToolPackage(
                 code="builtin:general",
                 category="builtin",
-                toolsets=[object()],
+                toolset=object(),
                 default_enabled=True,
             )
         )
@@ -35,7 +36,7 @@ class ToolPackageRegistryTests(unittest.TestCase):
             ToolPackage(
                 code="builtin:general",
                 category="builtin",
-                toolsets=[general],
+                toolset=general,
                 default_enabled=True,
             )
         )
@@ -43,24 +44,25 @@ class ToolPackageRegistryTests(unittest.TestCase):
             ToolPackage(
                 code="mcp:echo",
                 category="mcp",
-                toolsets=[mcp],
+                toolset=mcp,
                 default_enabled=False,
             )
         )
         self.assertEqual(registry.toolsets(None), [general])
         self.assertEqual(registry.toolsets(["mcp:echo"]), [mcp])
 
-    def test_one_package_can_contribute_multiple_toolsets(self) -> None:
+    def test_one_package_contributes_exactly_one_toolset(self) -> None:
         registry = ToolPackageRegistry()
-        first, second = object(), object()
+        toolset = object()
         registry.register(
             ToolPackage(
                 code="builtin:general",
                 category="builtin",
-                toolsets=[first, second],
+                toolset=toolset,
             )
         )
-        self.assertEqual(registry.toolsets(None), [first, second])
+        self.assertEqual(registry.toolsets(None), [toolset])
+        self.assertFalse(hasattr(registry.get("builtin:general"), "toolsets"))
 
     def test_attachment_is_opt_in(self) -> None:
         registry = ToolPackageRegistry()
@@ -69,7 +71,7 @@ class ToolPackageRegistryTests(unittest.TestCase):
         self.assertEqual(registry.toolsets(None), [])
         self.assertEqual(registry.toolsets([]), [])
         self.assertEqual(
-            registry.toolsets(["builtin:attachment"]), attachment.toolsets
+            registry.toolsets(["builtin:attachment"]), [attachment.toolset]
         )
         described = registry.describe()[0]
         self.assertEqual(described["code"], "builtin:attachment")
@@ -80,13 +82,14 @@ class ToolPackageRegistryTests(unittest.TestCase):
 class BuiltinToolPackageMetadataTests(unittest.IsolatedAsyncioTestCase):
     async def test_general_package_contains_current_time(self) -> None:
         package = build_native_tool_package()
-        tools = await package.toolsets[0].get_tools(
-            RunContext(deps=None, model=TestModel(), usage=RunUsage())
-        )
+        context = RunContext(deps=None, model=TestModel(), usage=RunUsage())
+        tools = await package.toolset.get_tools(context)
         self.assertEqual(package.code, "builtin:general")
         self.assertEqual(package.category, "builtin")
         self.assertTrue(package.default_enabled)
         self.assertEqual(set(tools), {"get_current_time"})
+        current_time = await tools["get_current_time"].call_func({}, context)
+        self.assertIsNotNone(datetime.fromisoformat(current_time))
 
     async def test_attachment_remains_opt_in(self) -> None:
         package = build_attachment_tool_package()
@@ -98,23 +101,32 @@ class BuiltinToolPackageMetadataTests(unittest.IsolatedAsyncioTestCase):
 
 
 class PythonSandboxPackageTests(unittest.TestCase):
-    def test_sandbox_fragment_uses_general_package_code(self) -> None:
+    def test_sandbox_has_independent_package_code(self) -> None:
         backend = MagicMock()
         backend.health = AsyncMock()
         backend.aclose = AsyncMock()
         package = build_python_sandbox_tool_package(backend, timeout_sec=30.0)
-        self.assertEqual(package.code, "builtin:general")
+        self.assertEqual(package.code, "builtin:sandbox")
+        self.assertFalse(package.default_enabled)
         self.assertEqual({item.name for item in package.tools}, {"execute_python"})
 
-    def test_registry_merges_sandbox_into_general_when_backend_present(self) -> None:
+    def test_registry_keeps_general_and_sandbox_separate(self) -> None:
         backend = MagicMock()
         registry = build_registry(sandbox_backend=backend)
         general = registry.get("builtin:general")
+        sandbox = registry.get("builtin:sandbox")
         self.assertEqual(
             {item.name for item in general.tools},
-            {"get_current_time", "execute_python"},
+            {"get_current_time"},
         )
-        self.assertEqual(len(general.toolsets), 2)
+        self.assertEqual({item.name for item in sandbox.tools}, {"execute_python"})
+        default_toolsets = registry.toolsets(None)
+        self.assertIn(general.toolset, default_toolsets)
+        self.assertNotIn(sandbox.toolset, default_toolsets)
+        self.assertEqual(
+            registry.toolsets(["builtin:sandbox"]),
+            [sandbox.toolset],
+        )
 
     def test_registry_general_only_contains_time_without_backend(self) -> None:
         registry = build_registry()

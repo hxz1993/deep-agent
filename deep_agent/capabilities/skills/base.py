@@ -28,7 +28,7 @@ class Skill:
         return ToolPackage(
             code=f"skill:{self.name}",
             category="skill",
-            toolsets=[self.toolset],
+            toolset=self.toolset,
             label=self.name,
             source="skill",
             description=self.description,

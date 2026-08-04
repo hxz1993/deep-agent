@@ -15,7 +15,7 @@ from deep_agent.agent.spec import DEFAULT_INSTRUCTIONS, AgentSpec
 from deep_agent.capabilities.mcp.resolver import load_mcp_rows, resolve_mcp_toolsets
 from deep_agent.capabilities.catalog import invalid_tool_package_codes
 from deep_agent.capabilities.mcp.resources import build_mcp_resource_toolset
-from deep_agent.capabilities.ui.registry import prepare_ui_toolsets_for_spec
+from deep_agent.capabilities.ui.registry import prepare_ui_tool_packages_for_spec
 from deep_agent.core.context import AppContext
 from deep_agent.core.exceptions import AgentNotFoundError, LlmModelNotFoundError
 from deep_agent.options import OPTION
@@ -97,7 +97,7 @@ async def _build_runner_from_spec(
         )
     mcp_rows = await load_mcp_rows(ctx.stores)
 
-    dynamic_ui_toolsets, ui_tool_hints = await prepare_ui_toolsets_for_spec(
+    dynamic_ui_packages, ui_tool_hints = await prepare_ui_tool_packages_for_spec(
         ctx.stores,
         spec,
     )
@@ -117,7 +117,7 @@ async def _build_runner_from_spec(
         ctx.registry,
         request_retries=OPTION.agent.request_retries,
         mcp_toolsets=mcp_toolsets,
-        dynamic_ui_toolsets=dynamic_ui_toolsets,
+        dynamic_ui_packages=dynamic_ui_packages,
         mcp_resource_toolset=mcp_resource_toolset,
         context_compaction=context_compaction,
     )

@@ -11,8 +11,8 @@
 ```text
 category（分类属性）
   → Tool Package（产品配置和 Agent 选择单位）
-    → Tool（模型看到并调用的稳定协议）
-      → Toolset（Pydantic AI 运行对象，可静态或请求级创建）
+    → Toolset（Pydantic AI 运行对象，可静态或请求级创建）
+      → Tool（模型看到并调用的稳定协议）
 ```
 
 分类只用于目录分组，不新增分类类或数据库表。Agent 在 v0.3.2 仍然选择整个工具包，不提供包内
@@ -29,7 +29,7 @@ DeepAgent 产品概念，承担：
 - 默认启用状态和包级可用状态。
 - Console 目录与 Agent 配置选择。
 - 工具数量及可用工具目录。
-- 一个或多个预定义 Toolset，或请求级 Toolset 创建所需的元数据。
+- 恰好一个预定义 Toolset，或请求级创建该 Toolset 所需的元数据。
 
 原自研 `Capability`/`CapabilityRegistry` 改名为 `ToolPackage`/`ToolPackageRegistry`，避免与
 Pydantic AI 同名概念混淆。
@@ -37,8 +37,8 @@ Pydantic AI 同名概念混淆。
 ### 2.2 Toolset
 
 Pydantic AI 运行对象，负责把工具定义交给模型并执行或转发调用。它既可以在启动时定义，也可以
-根据当前 Agent、MCP 配置、用户 Header 或 UI 数据库成员在请求时创建。一个 Tool Package 可以
-贡献多个 Toolset；AgentFactory 只负责汇总所选包贡献的 Toolset。
+根据当前 Agent、MCP 配置、用户 Header 或 UI 数据库成员在请求时创建。一个 Tool Package
+严格包装一个 Toolset；AgentFactory 只负责汇总所选包各自的单个 Toolset。
 
 ### 2.3 AbstractCapability
 
@@ -49,15 +49,16 @@ Pydantic AI 的运行扩展，负责 History Processor、Hook、重试、模型�
 
 | category | code | label | 来源 | 默认 | 工具 |
 | --- | --- | --- | --- | --- | --- |
-| `builtin` | `builtin:general` | 通用工具 | code | 开 | `get_current_time`、`execute_python` |
+| `builtin` | `builtin:general` | 通用工具 | code | 开 | `get_current_time` |
+| `builtin` | `builtin:sandbox` | Python 沙箱 | code | 关 | `execute_python` |
 | `builtin` | `builtin:attachment` | 附件读取 | code | 关 | `read_text_attachment`、`read_docx`、`read_xlsx` |
 | `mcp` | `mcp:<name>` | MCP 配置名称 | builtin/database | 关 | 运行时发现 |
 | `ui` | `ui:builtin` | 通用交互 | code | 关 | `builtin__confirm`、`builtin__choice` |
 | `ui` | `ui:deepcube` | DeepCube 助手 | database | 关 | `deep_cube__clarify`、`deep_cube__config_fill` |
 | `skill` | `skill:<name>` | Skill 名称 | code/filesystem | 保持现状 | Skill 函数工具 |
 
-`builtin:general` 是一个包级开关。Python Sandbox 后端不可用时，目录仍保留包和可用工具，
-`execute_python` 不进入运行 Toolset，并记录诊断；不暴露空或不可执行工具定义。
+`builtin:general` 和 `builtin:sandbox` 是两个独立包级开关。Python Sandbox 后端不可用时，
+`builtin:sandbox` 不进入可选目录，也不暴露空或不可执行工具定义。
 
 ## 4. 编码和稳定协议
 
@@ -92,7 +93,8 @@ Pydantic AI 的运行扩展，负责 History Processor、Hook、重试、模型�
 3. 检查不存在未归包工具、未知 UI 引用或错误外键。
 4. 将 `package_code` 改为非空并建立外键和索引。
 5. 一次性重写 Agent 配置：
-   - `native` 或 `python-sandbox` → `builtin:general`。
+   - `native` → `builtin:general`。
+   - `python-sandbox` → `builtin:sandbox`。
    - `attachment` → `builtin:attachment`。
    - 两个 DeepCube 单工具引用 → `ui:deepcube`。
    - confirm/choice 单工具引用 → `ui:builtin`。
@@ -111,14 +113,14 @@ flowchart LR
     B --> E["FunctionToolset / Skill Toolset"]
     C --> F["MCPToolset"]
     D --> G["ExternalToolset"]
-    E --> H["AgentFactory 汇总"]
+    E --> H["AgentFactory 汇总每包唯一 Toolset"]
     F --> H
     G --> H
     H --> I["Pydantic AI Agent"]
 ```
 
 不新增统一 Resolver 抽象。沿用现有构建过程：静态包从 Registry 取 Toolset，MCP 按配置创建，
-UI 按数据库包成员创建，最后由 AgentFactory 展平。UI 包无启用且 Schema 有效的成员时不向模型
+UI 按数据库包成员创建，最后由 AgentFactory 汇总。UI 包无启用且 Schema 有效的成员时不向模型
 暴露空工具，并记录诊断。
 
 ## 8. API
@@ -134,7 +136,7 @@ UI 按数据库包成员创建，最后由 AgentFactory 展平。UI 包无启用
   "description": "...",
   "enabled": true,
   "default_enabled": true,
-  "tool_count": 2,
+  "tool_count": 1,
   "tool_catalog_status": "complete",
   "tools": [
     {
@@ -162,9 +164,9 @@ Agent 能力页直接按后端 `category` 分组，不再通过旧 `kind` 猜测
 
 配置中心结构：
 
-- 内置工具：只读展示通用工具、附件读取。
+- 内置工具：只读展示通用工具、Python 沙箱、附件读取。
 - MCP：继续展示 Server 检测状态和工具数量。
-- UI 工具：包列表与包内工具两级；手工包 CRUD，内置包只读；工具编辑必须选择包。
+- UI 工具：左侧按来源展示工具包树，右侧只展示当前包的工具表；手工包 CRUD，内置包只读；工具编辑必须选择包。
 - Skills：保持现有包级选择。
 
 页面错误、空包、无有效工具、引用冲突和保存后刷新失败沿用现有反馈规范。
@@ -191,5 +193,6 @@ Agent 能力页直接按后端 `category` 分组，不再通过旧 `kind` 猜测
 ## 12. 后续演进
 
 只有真实 MCP 或业务包出现部分授权需求后，才设计包内工具选择结构。该结构应把包编码与工具稳定
-协议名分开存储，并明确默认、禁用工具、目录刷新和历史工具消失的语义；不在 v0.3.2 提前增加
-复杂字段。ToolSearch、审批和 CombinedToolset 继续按 [`../TODO.md`](../TODO.md) 的阈值推进。
+协议名分开存储，并明确默认、禁用工具、目录刷新和历史工具消失的语义；运行时可在包的唯一
+Toolset 上增加 `filtered()` / PreparedToolset 过滤，不改变一包一 Toolset 的边界。v0.3.2
+不提前增加复杂字段。ToolSearch、审批和 CombinedToolset 继续按 [`../TODO.md`](../TODO.md) 的阈值推进。

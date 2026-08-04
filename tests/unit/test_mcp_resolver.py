@@ -17,7 +17,7 @@ def _package(code: str) -> ToolPackage:
     return ToolPackage(
         code=code,
         category="mcp",
-        toolsets=[object()],
+        toolset=object(),
         default_enabled=False,
     )
 

@@ -73,8 +73,10 @@ def _deduplicate(values: Iterable[str]) -> list[str]:
 def _upgrade_capabilities(values: list[str]) -> list[str]:
     result: list[str] = []
     for value in values:
-        if value in {"native", "python-sandbox"}:
+        if value == "native":
             result.append("builtin:general")
+        elif value == "python-sandbox":
+            result.append("builtin:sandbox")
         elif value == "attachment":
             result.append("builtin:attachment")
         elif value in BUILTIN_UI_REFERENCES:
@@ -97,7 +99,9 @@ def _downgrade_capabilities(
     result: list[str] = []
     for value in values:
         if value == "builtin:general":
-            result.extend(["native", "python-sandbox"])
+            result.append("native")
+        elif value == "builtin:sandbox":
+            result.append("python-sandbox")
         elif value == "builtin:attachment":
             result.append("attachment")
         elif value == "ui:builtin":

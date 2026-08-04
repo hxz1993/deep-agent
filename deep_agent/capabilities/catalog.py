@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from deep_agent.capabilities.mcp.resolver import load_mcp_tool_packages
 from deep_agent.capabilities.registry import ToolPackageRegistry
+from deep_agent.capabilities.ui.registry import runnable_ui_tool_package_codes
 from deep_agent.db.stores.bundle import DataStores
 
 
@@ -19,11 +20,7 @@ async def selectable_tool_package_codes(
         for package in await load_mcp_tool_packages(stores)
         if package.enabled
     )
-    codes.add("ui:builtin")
-    codes.update(
-        package.code
-        for package in await stores.ui_tool_package.list_all(enabled=True)
-    )
+    codes.update(await runnable_ui_tool_package_codes(stores))
     return codes
 
 

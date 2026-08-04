@@ -519,7 +519,7 @@ def build_attachment_tool_package() -> ToolPackage:
     return ToolPackage(
         code="builtin:attachment",
         category="builtin",
-        toolsets=[toolset],
+        toolset=toolset,
         label="附件读取",
         source="builtin",
         description="按需读取当前会话上传的文本、Word 和 Excel 附件。",

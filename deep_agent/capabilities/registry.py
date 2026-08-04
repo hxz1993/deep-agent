@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from pydantic_ai.toolsets import AbstractToolset
+
 from deep_agent.core.exceptions import ToolPackageError
 
 
@@ -19,11 +21,11 @@ class ToolInfo:
 
 @dataclass
 class ToolPackage:
-    """Product-level selection unit that contributes Pydantic AI toolsets."""
+    """Product metadata wrapped around exactly one Pydantic AI toolset."""
 
     code: str
     category: str
-    toolsets: list[Any] = field(default_factory=list)
+    toolset: AbstractToolset[Any]
     label: str | None = None
     source: str | None = None
     description: str = ""
@@ -61,7 +63,7 @@ class ToolPackageRegistry:
             raise ToolPackageError(f"Unknown tool package: {code}")
         return self._packages[code]
 
-    def toolsets(self, codes: list[str] | None = None) -> list[Any]:
+    def toolsets(self, codes: list[str] | None = None) -> list[AbstractToolset[Any]]:
         if codes is None:
             packages = [
                 package
@@ -74,7 +76,7 @@ class ToolPackageRegistry:
                 for code in codes
                 if code in self._packages and self._packages[code].enabled
             ]
-        return [toolset for package in packages for toolset in package.toolsets]
+        return [package.toolset for package in packages]
 
     def describe(self) -> list[dict[str, Any]]:
         return [describe_tool_package(package) for package in self._packages.values()]

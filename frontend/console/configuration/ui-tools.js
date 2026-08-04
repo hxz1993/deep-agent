@@ -274,59 +274,77 @@ const uiToolsAdmin = {
   },
 
   renderPackages() {
-    const tbody = document.getElementById("uiToolPackagesTableBody");
-    if (!tbody) return;
+    const tree = document.getElementById("uiToolPackageTree");
+    if (!tree) return;
     if (!this.packages.length) {
-      tbody.innerHTML = `<tr><td colspan="7" class="empty-cell">暂无 UI 工具包</td></tr>`;
+      tree.innerHTML = `<div class="ui-tool-tree-state">暂无 UI 工具包</div>`;
       return;
     }
-    tbody.innerHTML = this.packages
-      .map((item) => {
-        const selected = item.code === this.selectedPackageCode ? " class=\"is-selected\"" : "";
-        return `<tr${selected} data-select-package="${escapeHtml(item.code)}">
-          <td><strong>${escapeHtml(item.label)}</strong></td>
-          <td><code>${escapeHtml(item.code)}</code></td>
-          <td><span class="badge source-${escapeHtml(item.source)}">${escapeHtml(SOURCE_LABELS[item.source] || item.source)}</span></td>
-          <td><span class="badge ${item.enabled ? "on" : "off"}">${item.enabled ? "启用" : "停用"}</span></td>
-          <td>${escapeHtml(String(item.tool_count || 0))}</td>
-          <td class="desc-cell" title="${escapeHtml(item.description || "—")}">${escapeHtml(item.description || "—")}</td>
-          <td><div class="row-actions">
-            <button type="button" data-package-view="${escapeHtml(item.code)}">查看工具</button>
-            ${item.source === "manual" ? `<button type="button" data-package-edit="${escapeHtml(item.code)}">编辑</button><button type="button" class="danger" data-package-delete="${escapeHtml(item.code)}">删除</button>` : ""}
-          </div></td>
-        </tr>`;
-      })
+    const groups = [
+      ["代码内置", this.packages.filter((item) => item.source === "builtin")],
+      ["手工工具包", this.packages.filter((item) => item.source === "manual")],
+    ];
+    tree.innerHTML = groups
+      .filter(([, items]) => items.length)
+      .map(([label, items]) => `
+        <section class="ui-tool-tree-group">
+          <div class="ui-tool-tree-group-title">${escapeHtml(label)}</div>
+          ${items.map((item) => `
+            <button type="button" class="ui-tool-tree-node ${item.code === this.selectedPackageCode ? "is-selected" : ""}" data-select-package="${escapeHtml(item.code)}">
+              <span class="ui-tool-tree-node-main">
+                <strong>${escapeHtml(item.label)}</strong>
+                <span class="badge ${item.enabled ? "on" : "off"}">${item.enabled ? item.tool_count : "停用"}</span>
+              </span>
+              <span class="ui-tool-tree-node-meta">
+                <code>${escapeHtml(item.code)}</code>
+                <span>${escapeHtml(String(item.tool_count || 0))} 个工具</span>
+              </span>
+            </button>`).join("")}
+        </section>`)
       .join("");
-    tbody.querySelectorAll("[data-package-view]").forEach((button) => {
-      button.addEventListener("click", (event) => {
-        event.stopPropagation();
-        this.selectPackage(button.dataset.packageView);
-      });
-    });
-    tbody.querySelectorAll("[data-package-edit]").forEach((button) => {
-      button.addEventListener("click", (event) => {
-        event.stopPropagation();
-        this.openPackageEdit(button.dataset.packageEdit);
-      });
-    });
-    tbody.querySelectorAll("[data-package-delete]").forEach((button) => {
-      button.addEventListener("click", (event) => {
-        event.stopPropagation();
-        this.removePackage(button.dataset.packageDelete);
-      });
-    });
-    tbody.querySelectorAll("[data-select-package]").forEach((row) => {
-      row.addEventListener("click", () => this.selectPackage(row.dataset.selectPackage));
+    tree.querySelectorAll("[data-select-package]").forEach((node) => {
+      node.addEventListener("click", () => this.selectPackage(node.dataset.selectPackage));
     });
   },
 
   selectPackage(code) {
-    this.selectedPackageCode = this.selectedPackageCode === code ? null : code;
-    const selected = this.packages.find((item) => item.code === this.selectedPackageCode);
-    const label = document.getElementById("selectedUiToolPackageLabel");
-    if (label) label.textContent = selected ? `${selected.label} · 工具` : "全部工具";
+    if (!this.packages.some((item) => item.code === code)) return;
+    this.selectedPackageCode = code;
+    this.renderSelectedPackage();
     this.renderPackages();
     this.renderTools(this._lastTools || []);
+  },
+
+  renderSelectedPackage() {
+    const selected = this.packages.find((item) => item.code === this.selectedPackageCode);
+    const label = document.getElementById("selectedUiToolPackageLabel");
+    const code = document.getElementById("selectedUiToolPackageCode");
+    const description = document.getElementById("selectedUiToolPackageDescription");
+    const meta = document.getElementById("selectedUiToolPackageMeta");
+    const editButton = document.getElementById("editUiToolPackageBtn");
+    const deleteButton = document.getElementById("deleteUiToolPackageBtn");
+    const newToolButton = document.getElementById("newUiToolBtn");
+    if (!selected) {
+      label.textContent = "请选择工具包";
+      code.textContent = "";
+      description.textContent = "从左侧选择工具包后查看工具。";
+      meta.innerHTML = "";
+      editButton.classList.add("hidden");
+      deleteButton.classList.add("hidden");
+      newToolButton.disabled = true;
+      return;
+    }
+    label.textContent = selected.label;
+    code.textContent = selected.code;
+    description.textContent = selected.description || "暂无说明";
+    meta.innerHTML = `
+      <span class="badge source-${escapeHtml(selected.source)}">${escapeHtml(SOURCE_LABELS[selected.source] || selected.source)}</span>
+      <span class="badge ${selected.enabled ? "on" : "off"}">${selected.enabled ? "启用" : "停用"}</span>
+      <span class="badge">${escapeHtml(String(selected.tool_count || 0))} 个工具</span>`;
+    const manual = selected.source === "manual";
+    editButton.classList.toggle("hidden", !manual);
+    deleteButton.classList.toggle("hidden", !manual);
+    newToolButton.disabled = !manual;
   },
 
   openPackageCreate() {
@@ -372,6 +390,7 @@ const uiToolsAdmin = {
     }
     AdminFormFeedback.setSubmitting(form, true);
     let saved = false;
+    let savedCode = this.editingPackageCode;
     try {
       if (this.editingPackageCode) {
         await apiFetch(`/api/v1/ui-tool-packages/${encodeURIComponent(this.editingPackageCode)}`, {
@@ -380,6 +399,7 @@ const uiToolsAdmin = {
         });
       } else {
         payload.code = document.getElementById("uiToolPackageEditCode").value.trim();
+        savedCode = payload.code;
         await apiFetch("/api/v1/ui-tool-packages", {
           method: "POST",
           body: JSON.stringify(payload),
@@ -393,7 +413,10 @@ const uiToolsAdmin = {
     } finally {
       AdminFormFeedback.setSubmitting(form, false);
     }
-    if (saved) await refreshAfterSuccessfulSave("UI 工具包", () => this.refresh());
+    if (saved) {
+      this.selectedPackageCode = savedCode;
+      await refreshAfterSuccessfulSave("UI 工具包", () => this.refresh());
+    }
   },
 
   async removePackage(code) {
@@ -411,32 +434,29 @@ const uiToolsAdmin = {
     }
   },
 
-  buildQuery() {
-    const params = new URLSearchParams();
-    const source = document.getElementById("uiToolFilterSource")?.value;
-    const enabled = document.getElementById("uiToolFilterEnabled")?.value;
-    if (source) params.set("source", source);
-    if (enabled) params.set("enabled", enabled);
-    const qs = params.toString();
-    return qs ? `?${qs}` : "";
-  },
-
   renderTools(items) {
     const tbody = document.getElementById("uiToolsTableBody");
     if (!tbody) return;
-    const filtered = this.selectedPackageCode
-      ? items.filter((item) => item.package_code === this.selectedPackageCode)
-      : items;
+    if (!this.selectedPackageCode) {
+      tbody.innerHTML = `<tr><td colspan="6" class="empty-cell">请选择左侧工具包</td></tr>`;
+      return;
+    }
+    const query = document.getElementById("uiToolFilterSearch")?.value.trim().toLowerCase() || "";
+    const enabled = document.getElementById("uiToolFilterEnabled")?.value || "";
+    const filtered = items.filter((item) => {
+      if (item.package_code !== this.selectedPackageCode) return false;
+      if (enabled && String(item.enabled) !== enabled) return false;
+      if (!query) return true;
+      return `${item.name} ${item.description || ""} ${item.widget || ""}`.toLowerCase().includes(query);
+    });
     if (!filtered.length) {
-      tbody.innerHTML = `<tr><td colspan="8" class="empty-cell">当前工具包暂无 UI 工具</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="6" class="empty-cell">当前工具包暂无匹配的 UI 工具</td></tr>`;
       return;
     }
     tbody.innerHTML = filtered
       .map((tool) => `
       <tr>
         <td><strong>${escapeHtml(tool.name)}</strong></td>
-        <td><code>${escapeHtml(tool.package_code)}</code></td>
-        <td><span class="badge source-${escapeHtml(tool.source)}">${escapeHtml(SOURCE_LABELS[tool.source] || tool.source)}</span></td>
         <td>${escapeHtml(tool.widget || "—")}</td>
         <td><span class="badge ${tool.enabled ? "on" : "off"}">${tool.enabled ? "是" : "否"}</span></td>
         <td class="desc-cell" title="${escapeHtml(tool.description || "—")}">${escapeHtml(tool.description || "—")}</td>
@@ -455,26 +475,29 @@ const uiToolsAdmin = {
 
   async refresh() {
     const tbody = document.getElementById("uiToolsTableBody");
-    const packageBody = document.getElementById("uiToolPackagesTableBody");
-    if (!tbody || !packageBody) return;
-    tbody.innerHTML = `<tr><td colspan="8" class="empty-cell">加载中…</td></tr>`;
-    packageBody.innerHTML = `<tr><td colspan="7" class="empty-cell">加载中…</td></tr>`;
+    const tree = document.getElementById("uiToolPackageTree");
+    if (!tbody || !tree) return;
+    tbody.innerHTML = `<tr><td colspan="6" class="empty-cell">加载中…</td></tr>`;
+    tree.innerHTML = `<div class="ui-tool-tree-state">加载中…</div>`;
     try {
       const [packageData, data] = await Promise.all([
         apiFetch("/api/v1/ui-tool-packages"),
-        apiFetch(`/api/v1/ui-tools${this.buildQuery()}`),
+        apiFetch("/api/v1/ui-tools"),
       ]);
       showDbBanner(false);
       this.packages = packageData.items || [];
       const items = data.items || [];
       this._lastTools = items;
       if (this.selectedPackageCode && !this.packages.some((item) => item.code === this.selectedPackageCode)) this.selectedPackageCode = null;
+      if (!this.selectedPackageCode && this.packages.length) this.selectedPackageCode = this.packages[0].code;
       this.renderPackages();
+      this.renderSelectedPackage();
       this.renderTools(items);
-      this.populatePackageSelect();
+      this.populatePackageSelect(this.selectedPackageCode);
     } catch (err) {
-      packageBody.innerHTML = `<tr><td colspan="7" class="empty-cell">${escapeHtml(err.message)}</td></tr>`;
-      tbody.innerHTML = `<tr><td colspan="8" class="empty-cell">加载失败</td></tr>`;
+      tree.innerHTML = `<div class="ui-tool-tree-state">${escapeHtml(err.message)}<br /><button type="button" class="btn" data-ui-tools-retry>重新加载</button></div>`;
+      tbody.innerHTML = `<tr><td colspan="6" class="empty-cell">加载失败</td></tr>`;
+      tree.querySelector("[data-ui-tools-retry]")?.addEventListener("click", () => this.refresh());
     }
   },
 
@@ -519,9 +542,9 @@ const uiToolsAdmin = {
   },
 
   openCreate() {
-    const packages = this.manualPackages();
-    if (!packages.length) {
-      showToast("请先新建手工 UI 工具包", true);
+    const selected = this.packages.find((item) => item.code === this.selectedPackageCode);
+    if (!selected || selected.source !== "manual") {
+      showToast("请先在左侧选择一个手工 UI 工具包", true);
       return;
     }
     this.editingName = null;
@@ -531,7 +554,7 @@ const uiToolsAdmin = {
     document.getElementById("uiToolEnabled").checked = true;
     document.getElementById("uiToolTemplate").value = "confirm";
     this.setFormMode("create");
-    this.populatePackageSelect(this.selectedPackageCode || packages[0].code);
+    this.populatePackageSelect(selected.code);
     this.applyTemplate("confirm", { fillName: true });
     document.getElementById("uiToolModal").showModal();
   },
@@ -657,9 +680,12 @@ document.addEventListener("DOMContentLoaded", () => {
   uiToolsAdmin.initWidgetPicker();
   document.getElementById("newUiToolPackageBtn")?.addEventListener("click", () => uiToolsAdmin.openPackageCreate());
   document.getElementById("newUiToolBtn")?.addEventListener("click", () => uiToolsAdmin.openCreate());
+  document.getElementById("editUiToolPackageBtn")?.addEventListener("click", () => uiToolsAdmin.openPackageEdit(uiToolsAdmin.selectedPackageCode));
+  document.getElementById("deleteUiToolPackageBtn")?.addEventListener("click", () => uiToolsAdmin.removePackage(uiToolsAdmin.selectedPackageCode));
   document.getElementById("uiToolPackageForm")?.addEventListener("submit", (e) => uiToolsAdmin.savePackage(e));
   document.getElementById("uiToolForm")?.addEventListener("submit", (e) => uiToolsAdmin.save(e));
-  document.getElementById("uiToolFilterApply")?.addEventListener("click", () => uiToolsAdmin.refresh());
+  document.getElementById("uiToolFilterSearch")?.addEventListener("input", () => uiToolsAdmin.renderTools(uiToolsAdmin._lastTools || []));
+  document.getElementById("uiToolFilterEnabled")?.addEventListener("change", () => uiToolsAdmin.renderTools(uiToolsAdmin._lastTools || []));
   document.getElementById("closeUiToolModal")?.addEventListener("click", () => {
     document.getElementById("uiToolModal").close();
   });

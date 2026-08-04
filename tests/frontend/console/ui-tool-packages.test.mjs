@@ -11,12 +11,22 @@ const template = await readFile(
   "utf8",
 );
 
-test("UI 工具页提供工具包与工具两级目录", () => {
-  assert.match(template, /id="uiToolPackagesTableBody"/);
+test("UI 工具页使用左侧工具包树和右侧单一工具表", () => {
+  assert.match(template, /id="uiToolPackageTree"/);
   assert.match(template, /id="uiToolsTableBody"/);
+  assert.doesNotMatch(template, /id="uiToolPackagesTableBody"/);
+  assert.equal((template.match(/id="uiToolsTableBody"/g) || []).length, 1);
   assert.match(template, /Agent 按工具包整体启用/);
   assert.match(source, /api\/v1\/ui-tool-packages/);
-  assert.match(source, /item\.package_code === this\.selectedPackageCode/);
+  assert.match(source, /item\.package_code !== this\.selectedPackageCode/);
+  assert.match(source, /代码内置/);
+  assert.match(source, /手工工具包/);
+});
+
+test("工具创建入口依赖当前选中的手工工具包", () => {
+  assert.match(source, /selected\.source !== "manual"/);
+  assert.match(source, /请先在左侧选择一个手工 UI 工具包/);
+  assert.match(source, /this\.populatePackageSelect\(selected\.code\)/);
 });
 
 test("手工 UI 工具保存时必须提交所属工具包", () => {

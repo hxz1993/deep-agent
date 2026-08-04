@@ -36,7 +36,7 @@ curl -s http://127.0.0.1:8000/api/v1/health/sandbox
 
 | 项 | 决策 |
 | --- | --- |
-| 工具包 | v0.3.2 起并入 `builtin:general`，与 `get_current_time` 整包默认启用 |
+| 工具包 | v0.3.2 起为独立 `builtin:sandbox`，整包默认关闭 |
 | 平台默认 | `SANDBOX_ENABLED=true`，`BACKEND=subprocess-dev` |
 | 安全 Backend 失败 | 返回 `BACKEND_UNAVAILABLE`，**禁止**自动降到 `subprocess-dev` |
 
@@ -90,7 +90,7 @@ curl -s http://127.0.0.1:8000/api/v1/health/sandbox
 ## 4. 当前实现语义
 
 ```text
-模型 → builtin:general → execute_python(code, inputs)
+模型 → builtin:sandbox → execute_python(code, inputs)
      → PythonExecutionBackend
           ├─ SubprocessBackend     ← 现状（联调默认）
           └─ SecureLinuxBackend    ← 阶段 C（未实现）
@@ -155,7 +155,7 @@ venv 创建：`bash scripts/sandbox_venv/setup.sh`。Profile：`deep_agent/sandb
 ### 5.1 前置
 
 1. health：`enabled` / `smoke_ok` / `profile_ok` 为 true。
-2. Agent 启用 **`builtin:general`**；`capabilities: null` 会按默认规则加载该包。
+2. Agent 显式启用 **`builtin:sandbox`**；`capabilities: null` 不会加载该默认关闭包。
 3. 建议系统指令要点：每次全新环境；表数据进 `inputs`；**最后一行用表达式**，勿用 `print` 收尾。
 
 排障：`ImportError: pandas` → 查 sandbox venv / health `missing_packages`；`result=null` 且有 stdout → 多半是 `print` 结尾；`security_level=none` 表示当前为开发 Backend。

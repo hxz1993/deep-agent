@@ -4,6 +4,7 @@ import unittest
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import MagicMock
 
 from pydantic import ValidationError
 from pydantic_ai import Agent, DeferredToolRequests, ModelRetry
@@ -23,7 +24,7 @@ from deep_agent.capabilities.ui.registry import (
     load_effective_ui_tools,
     load_selectable_ui_tools,
     merge_definitions,
-    prepare_ui_toolsets_for_spec,
+    prepare_ui_tool_packages_for_spec,
 )
 from deep_agent.capabilities.ui.types import UIToolRecord
 from deep_agent.db.models import Base, McpServer, UiToolDefinition, UiToolPackage
@@ -37,6 +38,7 @@ from deep_agent.schemas.ui_tools import (
     UiToolUpdate,
 )
 from deep_agent.capabilities import build_registry
+from deep_agent.capabilities.catalog import invalid_tool_package_codes
 from deep_agent.api.v1.tools import list_tool_packages
 from deep_agent.api.v1.ui_tools import delete_ui_tool, get_ui_tool, list_ui_tools, update_ui_tool
 from deep_agent.api.v1.ui_tool_packages import (
@@ -277,14 +279,15 @@ class UiToolStoreTests(unittest.IsolatedAsyncioTestCase):
             agent_id="00000000-0000-4000-8000-000000000001",
         )
         effective = await load_effective_ui_tools(self.stores, spec)
-        toolsets, hints = await prepare_ui_toolsets_for_spec(self.stores, spec)
+        packages, hints = await prepare_ui_tool_packages_for_spec(self.stores, spec)
 
         names = {item.name for item in effective.definitions}
         self.assertIn("builtin__confirm", names)
         self.assertIn("builtin__choice", names)
         self.assertIn("demo__pick_color", names)
         self.assertTrue(effective.has_dynamic)
-        self.assertTrue(toolsets)
+        self.assertTrue(packages)
+        self.assertEqual({package.code for package in packages}, {"ui:builtin", "ui:demo"})
         self.assertIn("demo__pick_color", hints)
 
     async def test_effective_tools_require_exact_ui_capability(self) -> None:
@@ -380,13 +383,13 @@ class UiToolStoreTests(unittest.IsolatedAsyncioTestCase):
                     instructions="hi",
                     capabilities=capabilities,
                 )
-                toolsets, hints = await prepare_ui_toolsets_for_spec(self.stores, spec)
+                packages, hints = await prepare_ui_tool_packages_for_spec(self.stores, spec)
                 self.assertEqual(set(hints), expected)
                 if not expected:
-                    self.assertEqual(toolsets, [])
+                    self.assertEqual(packages, [])
                     continue
-                self.assertTrue(toolsets)
-                tools = await toolsets[0].get_tools(None)
+                self.assertEqual(len(packages), 1)
+                tools = await packages[0].toolset.get_tools(None)
                 self.assertEqual(set(tools), expected)
 
     def test_builtin_choice_schema_supports_general_options_and_custom_input(self) -> None:
@@ -467,9 +470,24 @@ class UiToolStoreTests(unittest.IsolatedAsyncioTestCase):
         selectable = await load_selectable_ui_tools(self.stores)
         self.assertEqual([record.name for record in selectable], ["demo__first"])
 
-        registry = build_registry()
+        registry = build_registry(sandbox_backend=MagicMock())
         ctx = SimpleNamespace(stores=self.stores, registry=registry)
         capabilities = await list_tool_packages(ctx)
+        general_package = next(
+            item for item in capabilities if item.code == "builtin:general"
+        )
+        sandbox_package = next(
+            item for item in capabilities if item.code == "builtin:sandbox"
+        )
+        self.assertEqual(
+            [tool.name for tool in general_package.tools],
+            ["get_current_time"],
+        )
+        self.assertEqual(
+            [tool.name for tool in sandbox_package.tools],
+            ["execute_python"],
+        )
+        self.assertFalse(sandbox_package.default_enabled)
         attachment_capability = next(
             item for item in capabilities if item.code == "builtin:attachment"
         )
@@ -517,10 +535,36 @@ class UiToolStoreTests(unittest.IsolatedAsyncioTestCase):
             capabilities=["ui:demo"],
             agent_id="00000000-0000-4000-8000-000000000001",
         )
-        toolsets, hints = await prepare_ui_toolsets_for_spec(self.stores, spec)
+        packages, hints = await prepare_ui_tool_packages_for_spec(self.stores, spec)
 
-        self.assertEqual(toolsets, [])
+        self.assertEqual(packages, [])
         self.assertNotIn("demo__invalid", hints)
+
+        registry = build_registry()
+        self.assertEqual(
+            await invalid_tool_package_codes(
+                ["ui:demo"],
+                registry,
+                self.stores,
+            ),
+            ["ui:demo"],
+        )
+
+    async def test_empty_ui_package_is_visible_but_not_selectable(self) -> None:
+        registry = build_registry()
+        ctx = SimpleNamespace(stores=self.stores, registry=registry)
+        catalog = await list_tool_packages(ctx)
+        package = next(item for item in catalog if item.code == "ui:demo")
+        self.assertEqual(package.tool_catalog_status, "empty")
+        self.assertEqual(package.tool_count, 0)
+        self.assertEqual(
+            await invalid_tool_package_codes(
+                ["ui:demo"],
+                registry,
+                self.stores,
+            ),
+            ["ui:demo"],
+        )
 
 
 class VisibilityTests(unittest.TestCase):

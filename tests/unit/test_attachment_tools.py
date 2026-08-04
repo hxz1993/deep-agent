@@ -37,7 +37,7 @@ def _context(
 class AttachmentToolTests(unittest.IsolatedAsyncioTestCase):
     async def _tool(self, name: str):
         capability = build_attachment_tool_package()
-        tools = await capability.toolsets[0].get_tools(_context())
+        tools = await capability.toolset.get_tools(_context())
         return tools[name]
 
     async def test_capability_is_opt_in_with_three_tools(self) -> None:

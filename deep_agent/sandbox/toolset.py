@@ -63,10 +63,10 @@ def build_python_sandbox_tool_package(
     )
 
     return ToolPackage(
-        code="builtin:general",
+        code="builtin:sandbox",
         category="builtin",
-        toolsets=[toolset],
-        label="通用工具",
+        toolset=toolset,
+        label="Python 沙箱",
         source="builtin",
         description="在无状态 Python 环境中执行数据计算代码。",
         tools=[

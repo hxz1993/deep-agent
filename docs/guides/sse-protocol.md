@@ -57,6 +57,32 @@ Accept: text/event-stream
 
 > 带 `agent_id` 时，会话存储键为 `{agent_id}:{session_id}`，与默认模式的裸 `session_id` 隔离。
 
+#### 结构化上下文引用（v0.3.5）
+
+普通与流式请求都可增加 `context_refs`：
+
+```json
+{
+  "message": "分析当前选区",
+  "context_refs": [
+    {
+      "key": "current_selection",
+      "type": "deeptable.selection",
+      "schema_version": "2.0",
+      "label": "销售预算!B2:C4",
+      "payload": {"selection": {}, "dataList": []},
+      "metadata": {"source": "element-deep-table"}
+    }
+  ]
+}
+```
+
+- `context_refs` 可以与文字、附件及 `branch_from` 同时使用，也可以单独形成用户轮次。
+- `context_refs` 与 `deferred_tool_results` 互斥；恢复 Deferred 时由 Tool Result 携带新数据。
+- 原始 `payload/metadata` 随历史保存；模型只收到排除 `metadata` 的安全派生投影。
+- 单请求最多 16 个引用，单个完整引用最多 256 KiB，总计最多 512 KiB，JSON 嵌套最多 32 层。
+- 主动压缩接口不接收 `context_refs`；只有已经发送并持久化的引用进入自动或主动压缩。
+
 #### 编辑续聊（`branch_from`）
 
 从已有会话的指定位置截断历史并继续对话：
@@ -73,7 +99,12 @@ Accept: text/event-stream
   "session_id": "abc",
   "model_message_count": 4,
   "messages": [
-    { "role": "user", "content": "你好", "branch_point": 0 },
+    {
+      "role": "user",
+      "content": "你好",
+      "context_refs": [],
+      "branch_point": 0
+    },
     { "role": "assistant", "parts": [...], "branch_point": 1 }
   ]
 }

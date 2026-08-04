@@ -19,7 +19,12 @@ from pydantic_ai.messages import (
 )
 
 from deep_agent.agent.attachments import is_attachment_ref
+from deep_agent.agent.context_references import (
+    context_reference_title,
+    context_references_from_content,
+)
 from deep_agent.agent.events import _to_jsonable
+from deep_agent.schemas.context_reference import ContextReference
 
 
 class HistoryTextPart(BaseModel):
@@ -73,6 +78,10 @@ class HistoryMessage(BaseModel):
         default_factory=list,
         description="User-uploaded files attached to this turn.",
     )
+    context_refs: list[ContextReference] = Field(
+        default_factory=list,
+        description="Structured context snapshots attached to this user turn.",
+    )
     parts: list[HistoryPart] = Field(default_factory=list, description="Assistant message parts in order.")
     timestamp: datetime | None = Field(default=None, description="Message time (UTC).")
     branch_point: int | None = Field(
@@ -125,6 +134,10 @@ def _user_prompt_attachments(part: UserPromptPart) -> list[HistoryAttachmentPart
             )
         )
     return attachments
+
+
+def _user_prompt_context_refs(part: UserPromptPart) -> list[ContextReference]:
+    return context_references_from_content(part.content)
 
 
 def _user_prompt_text(part: UserPromptPart) -> str:
@@ -424,6 +437,8 @@ def first_user_prompt(messages: list[ModelMessage]) -> str | None:
             if item.attachments:
                 names = [a.name or a.id for a in item.attachments]
                 return "[附件] " + ", ".join(names)
+            if item.context_refs:
+                return context_reference_title(item.context_refs)
     return None
 
 
@@ -494,20 +509,23 @@ def model_messages_to_history(messages: list[ModelMessage]) -> list[HistoryMessa
     for idx, message in enumerate(messages):
         if isinstance(message, ModelRequest):
             user_attachments: list[HistoryAttachmentPart] = []
+            user_context_refs: list[ContextReference] = []
             for part in message.parts:
                 if isinstance(part, UserPromptPart):
                     user_attachments.extend(_user_prompt_attachments(part))
+                    user_context_refs.extend(_user_prompt_context_refs(part))
             user_texts = [_user_prompt_text(p) for p in message.parts if isinstance(p, UserPromptPart)]
             user_text = "\n".join(t for t in user_texts if t).strip() or None
             tool_results = _request_tool_returns(message)
 
-            if user_text or user_attachments:
+            if user_text or user_attachments or user_context_refs:
                 flush_tool_results()
                 history.append(
                     HistoryMessage(
                         role="user",
                         content=user_text,
                         attachments=user_attachments,
+                        context_refs=user_context_refs,
                         timestamp=_request_timestamp(message),
                         branch_point=idx,
                     )

@@ -1,11 +1,19 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from typing import Any, Mapping, Sequence
 
 from pydantic_ai.messages import BinaryContent, ModelMessage, ModelRequest, TextContent, UserContent, UserPromptPart
 
+from deep_agent.agent.context_references import (
+    context_reference_dict,
+    context_references_from_content,
+    format_context_reference_prompt,
+    is_context_reference,
+)
 from deep_agent.schemas.attachment import AttachmentRef
+from deep_agent.schemas.context_reference import ContextReference
 
 ATTACHMENT_REF_KIND = "attachment-ref"
 _NATIVE_MEDIA: tuple[tuple[str, str, str], ...] = (
@@ -100,8 +108,11 @@ def index_attachment_refs(
 def refs_from_attachments(
     message: str,
     attachments: Sequence[AttachmentRef] | None,
+    context_refs: Sequence[ContextReference] | None = None,
 ) -> str | list[str | dict[str, Any]]:
     parts: list[str | dict[str, Any]] = []
+    for ref in context_refs or ():
+        parts.append(context_reference_dict(ref))
     text = message.strip()
     if text:
         parts.append(text)
@@ -114,10 +125,14 @@ def refs_from_attachments(
     return parts
 
 
-def has_user_turn(message: str, attachments: Sequence[AttachmentRef] | None) -> bool:
+def has_user_turn(
+    message: str,
+    attachments: Sequence[AttachmentRef] | None,
+    context_refs: Sequence[ContextReference] | None = None,
+) -> bool:
     if message.strip():
         return True
-    return bool(attachments)
+    return bool(attachments or context_refs)
 
 
 async def resolve_user_prompt(
@@ -125,12 +140,15 @@ async def resolve_user_prompt(
     attachments: Sequence[AttachmentRef] | None,
     request_headers: Mapping[str, str],
     *,
+    context_refs: Sequence[ContextReference] | None = None,
     input_modalities: Sequence[str] | None = None,
 ) -> list[UserContent]:
     modalities = frozenset(input_modalities or ())
     parts: list[UserContent] = []
     text = message.strip()
-    if text:
+    if context_refs:
+        parts.append(format_context_reference_prompt(context_refs, text))
+    elif text:
         parts.append(text)
     for ref in attachments or ():
         parts.extend(
@@ -164,17 +182,17 @@ async def resolve_history_for_llm(
                 new_parts.append(part)
                 continue
             new_parts.append(
-                UserPromptPart(
+                replace(
+                    part,
                     content=await _resolve_user_prompt_part(
                         part.content,
                         request_headers,
                         full=full_turn,
                         modalities=modalities,
                     ),
-                    timestamp=part.timestamp,
                 )
             )
-        resolved.append(ModelRequest(parts=new_parts, timestamp=message.timestamp))
+        resolved.append(replace(message, parts=new_parts))
     return resolved
 
 
@@ -208,9 +226,24 @@ async def _resolve_user_prompt_part(
     if isinstance(content, str):
         return content
     resolved: list[UserContent] = []
+    context_refs = context_references_from_content(content)
+    text_chunks: list[str] = []
     for item in content:
         if isinstance(item, str):
-            resolved.append(item)
+            text_chunks.append(item)
+        elif isinstance(item, dict) and item.get("kind") == "text-content":
+            text_chunks.append(str(item.get("content", "")))
+    if context_refs:
+        resolved.append(
+            format_context_reference_prompt(
+                context_refs,
+                "\n".join(chunk for chunk in text_chunks if chunk),
+            )
+        )
+    else:
+        resolved.extend(chunk for chunk in text_chunks if chunk)
+    for item in content:
+        if isinstance(item, str) or is_context_reference(item):
             continue
         if is_attachment_ref(item):
             ref = AttachmentRef(
@@ -229,7 +262,7 @@ async def _resolve_user_prompt_part(
             )
             continue
         if isinstance(item, dict) and item.get("kind") == "text-content":
-            resolved.append(str(item.get("content", "")))
+            continue
     if not resolved:
         return ""
     if len(resolved) == 1 and isinstance(resolved[0], str):

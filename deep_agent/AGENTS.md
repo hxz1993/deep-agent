@@ -83,6 +83,10 @@ v0.3.4 同时提供独立的 session 主动压缩 SSE 接口；它跳过自动�
 已经生成 Checkpoint 或没有新增消息而拒绝用户操作。后端仍要求安全前缀、目标复检、历史 Hash
 与 Checkpoint CAS 全部通过；无有效收益返回 `noop`，失败时不得用 Sliding Window 冒充成功。
 
+v0.3.5 的普通与流式聊天支持结构化 `context_refs`。公共外壳在 Schema 层严格校验；原始
+`payload/metadata` 随消息保存，模型、Token 估算、自动/主动压缩只使用排除 `metadata` 的
+XML + JSON 投影。业务字段语义仍由具体 Agent Prompt 负责。
+
 研究依据见
 [`../docs/design/03-context-compaction/context-compaction-research.md`](../docs/design/03-context-compaction/context-compaction-research.md)；
 当前数据结构和运行方案见

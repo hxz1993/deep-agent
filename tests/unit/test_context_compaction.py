@@ -37,6 +37,7 @@ from deep_agent.agent.context.compaction import (
     _summary_prompt,
     _strip_summary_and_system,
 )
+from deep_agent.agent.context_references import context_reference_dict
 from deep_agent.agent.context.estimator import (
     TokenEstimator,
     conservative_text_tokens,
@@ -52,6 +53,7 @@ from deep_agent.agent.runner import AgentRunner
 from deep_agent.db.serialization import deserialize_message, serialize_message
 from deep_agent.options import OPTION
 from deep_agent.schemas.attachment import AttachmentRef
+from deep_agent.schemas.context_reference import ContextReference
 from tests.helpers.sqlite_stores import make_sqlite_stores
 
 
@@ -451,6 +453,57 @@ class ContextCheckpointTests(unittest.IsolatedAsyncioTestCase):
             checkpoint.source_last_sequence,
         )
 
+    async def test_automatic_compaction_projects_context_refs_without_metadata(
+        self,
+    ) -> None:
+        ref = ContextReference(
+            key="selection",
+            type="deeptable.selection",
+            schema_version="2.0",
+            label="预算!B2:C4",
+            payload={"cells": [{"address": "B2", "value": 42}]},
+            metadata={"history_only_secret": "must-stay-out-of-checkpoint"},
+        )
+        raw = _long_tool_history()
+        first = raw[0]
+        assert isinstance(first, ModelRequest)
+        raw[0] = ModelRequest(
+            parts=[
+                UserPromptPart(
+                    content=[
+                        context_reference_dict(ref),
+                        "请持续完成最初的任务",
+                    ]
+                )
+            ]
+        )
+        await self.stores.coordinator.append(
+            "context-ref-auto-compact",
+            raw,
+            user_id="user-1",
+        )
+        capability = DeepAgentContextCompaction(
+            context_window_tokens=4_000,
+            max_output_tokens=500,
+            summary_timeout=10,
+        )
+
+        result = await self._runner(capability).run(
+            "context-ref-auto-compact",
+            "继续",
+            AgentDeps(session_id="context-ref-auto-compact", user="user-1"),
+        )
+
+        self.assertTrue(result["context"]["compaction"]["summary_applied"])
+        stored = await self.stores.coordinator.get_history("context-ref-auto-compact")
+        self.assertIn("must-stay-out-of-checkpoint", str(serialize_message(stored[0])))
+        checkpoint = await self.stores.context_checkpoint.get(
+            "context-ref-auto-compact"
+        )
+        self.assertIsNotNone(checkpoint)
+        assert checkpoint is not None
+        self.assertNotIn("must-stay-out-of-checkpoint", str(checkpoint.payload))
+
     async def test_large_window_history_uses_rolling_summary_then_reuses_checkpoint(
         self,
     ) -> None:
@@ -757,15 +810,28 @@ class ContextCheckpointTests(unittest.IsolatedAsyncioTestCase):
     async def test_manual_compaction_writes_checkpoint_without_rewriting_history(
         self,
     ) -> None:
+        ref = ContextReference(
+            key="selection",
+            type="deeptable.selection",
+            schema_version="2.0",
+            payload={"selection": "B2:C4"},
+            metadata={"history_only_secret": "manual-metadata"},
+        )
         raw: list[ModelMessage] = []
         for turn in range(3):
+            prompt: str | list[object] = (
+                [
+                    context_reference_dict(ref),
+                    f"第 {turn} 轮约束：" + ("需要保留的中文背景。" * 80),
+                ]
+                if turn == 0
+                else f"第 {turn} 轮约束：" + ("需要保留的中文背景。" * 80)
+            )
             raw.extend(
                 [
                     ModelRequest(
                         parts=[
-                            UserPromptPart(
-                                content=f"第 {turn} 轮约束：" + ("需要保留的中文背景。" * 80)
-                            )
+                            UserPromptPart(content=prompt)
                         ]
                     ),
                     ModelResponse(
@@ -811,6 +877,7 @@ class ContextCheckpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(checkpoint)
         assert checkpoint is not None
         self.assertEqual(checkpoint.row_version, 1)
+        self.assertNotIn("manual-metadata", str(checkpoint.payload))
 
         repeated = [
             event
@@ -1091,6 +1158,33 @@ class ContextCheckpointTests(unittest.IsolatedAsyncioTestCase):
             "oversized-current-input"
         )
         self.assertEqual(len(raw), 1)
+
+    async def test_single_context_reference_over_window_is_explicit_error(self) -> None:
+        capability = DeepAgentContextCompaction(
+            context_window_tokens=4_000,
+            max_output_tokens=500,
+            summary_timeout=10,
+        )
+        ref = ContextReference(
+            key="large_selection",
+            type="deeptable.selection",
+            schema_version="2.0",
+            label="超大选区",
+            payload={"cells": "中" * 6_000},
+            metadata={"debug": "not-visible"},
+        )
+
+        with self.assertRaises(ContextWindowExceededError):
+            await self._runner(capability).run(
+                "oversized-context-ref",
+                "",
+                AgentDeps(session_id="oversized-context-ref", user="user-1"),
+                context_refs=[ref],
+            )
+
+        raw = await self.stores.coordinator.get_history("oversized-context-ref")
+        self.assertEqual(len(raw), 1)
+        self.assertIn("not-visible", str(serialize_message(raw[0])))
 
 
 if __name__ == "__main__":

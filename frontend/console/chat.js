@@ -1020,8 +1020,22 @@ function renderHistory(messages, modelMessageCount, contextCheckpoint = null) {
         lastDayKey = dayKey;
       }
     }
-    if (msg.role === "user" && (msg.content || (msg.attachments && msg.attachments.length))) {
-      addMessage("user", msg.content || "", ts, msg.branch_point, msg.attachments);
+    if (
+      msg.role === "user"
+      && (
+        msg.content
+        || (msg.attachments && msg.attachments.length)
+        || (msg.context_refs && msg.context_refs.length)
+      )
+    ) {
+      addMessage(
+        "user",
+        msg.content || "",
+        ts,
+        msg.branch_point,
+        msg.attachments,
+        msg.context_refs,
+      );
       continue;
     }
     if (msg.role === "assistant" && msg.parts && msg.parts.length) {
@@ -1795,7 +1809,7 @@ function renderUsage(usage) {
 }
 
 /* --------------------------- 消息渲染 --------------------------- */
-function addMessage(role, text, timestamp, branchPoint, attachments) {
+function addMessage(role, text, timestamp, branchPoint, attachments, contextRefs) {
   const row = document.createElement("div");
   row.className = `msg-row ${role}`;
   if (branchPoint != null) row.dataset.branchPoint = String(branchPoint);
@@ -1814,7 +1828,10 @@ function addMessage(role, text, timestamp, branchPoint, attachments) {
   if (attachments?.length) {
     renderMessageAttachments(bubble, attachments);
   }
-  if (role === "user") {
+  if (contextRefs?.length) {
+    renderMessageContextRefs(bubble, contextRefs);
+  }
+  if (role === "user" && !contextRefs?.length) {
     const actions = document.createElement("div");
     actions.className = "msg-actions";
     const editBtn = document.createElement("button");
@@ -1829,6 +1846,19 @@ function addMessage(role, text, timestamp, branchPoint, attachments) {
   el.messages.appendChild(row);
   scrollToBottom();
   return row;
+}
+
+function renderMessageContextRefs(container, contextRefs) {
+  const wrap = document.createElement("div");
+  wrap.className = "msg-context-refs";
+  for (const ref of contextRefs) {
+    const chip = document.createElement("div");
+    chip.className = "context-ref-chip";
+    chip.textContent = `上下文 · ${ref.label || ref.type || "引用"}`;
+    chip.title = `${ref.type || "上下文引用"}@${ref.schema_version || "—"}`;
+    wrap.appendChild(chip);
+  }
+  container.appendChild(wrap);
 }
 
 function renderMessageAttachments(container, attachments) {

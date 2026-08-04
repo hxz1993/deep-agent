@@ -1,10 +1,10 @@
-# DeepAgent 上下文引用与快捷命令设计
+# DeepAgent 结构化上下文引用设计
 
 > 首次研究：2026-08-03
 >
-> 当前产品基线：DeepAgent `0.3.2`，Alembic `002`
+> 实施版本：DeepAgent `0.3.5`，Alembic `002`
 >
-> 状态：设计结论；当前接口尚无 `context_refs`，DeepCube 和电子表格仍由前端拼接旧文本信封
+> 状态：DeepAgent 公共协议已实施；DeepCube 和电子表格客户端迁移仍为后续跨仓任务
 
 ## 1. 结论
 
@@ -34,7 +34,7 @@ deferred_tool_results
 6. 原始 `chat_messages` 保存结构化引用，不保存前端生成的 XML 作为唯一事实；模型调用前才形成文本投影。
 7. 历史接口返回结构化引用，前端不需要从用户正文中解析 XML 或 JSON。
 8. 前端决定是否在本轮附加上下文。DeepAgent 首版不做重复检测、活动上下文状态、按 key 自动复用或自动补发。
-9. `[/explain]`、`[/fix]`、`[/alias]` 等命令继续保留在 `message` 中；同一句可以包含多个命令，顺序和周围自然语言不得被拆散。
+9. 快捷命令不进入本次功能：确定性动作继续调用 API，业务命令仍作为普通 `message` 文本由对应 Agent Prompt 解释。
 10. 本设计不新增数据库列或表；可复用当前 `UserPromptPart.content` 中结构化引用的持久化模式。
 
 ## 2. 背景与当前问题
@@ -104,7 +104,7 @@ selection
 
 因此当前电子表格属于“前端采集和传输链路已搭建，DeepAgent 结构化接口和 Agent 业务 Prompt 尚未闭环”。模型可能依据字段名猜测，但不能把这种猜测视为稳定协议。
 
-### 2.3 DeepAgent 当前接口
+### 2.3 v0.3.5 之前的 DeepAgent 接口
 
 当前 `ChatRequest` 主要包含：
 
@@ -125,7 +125,7 @@ agent_id
 deferred_tool_results
 ```
 
-当前没有 `context_refs`。附件已经使用结构化引用：
+v0.3.5 之前没有 `context_refs`。附件已经使用结构化引用：
 
 ```json
 {
@@ -146,7 +146,7 @@ DeepAgent 将附件引用保存在原始消息中，模型调用前再解析成�
 - 请求校验、消息持久化、历史恢复和模型输入格式化。
 - 公共 Instructions 与业务 Agent Prompt 的职责分层。
 - DeepCube、DeepTable 两类上下文的迁移示例。
-- 快捷命令的传输、Prompt 和历史边界。
+- 快捷命令沿用现状的边界说明；本课题不实施命令框架。
 - 与附件、分支、Checkpoint、上下文压缩和 Deferred 的协同。
 
 本课题不负责：
@@ -156,7 +156,7 @@ DeepAgent 将附件引用保存在原始消息中，模型调用前再解析成�
 - 根据 key 自动从历史、Checkpoint 或其他会话补齐 payload。
 - 后端上下文去重、Hash 比较或自动刷新。
 - 把电子表格业务字段写入 DeepAgent 公共代码。
-- 把业务快捷命令升级为工具、工作流或 Harness 节点。
+- 新增命令字段、注册表、解析器或 Harness 命令节点。
 - 用 Context Reference 代替附件、MCP 查询、UI Tool 或 Output Tool。
 - 解决超大工作簿的远程引用、按需读取或 Artifact 外置问题。
 
@@ -365,9 +365,10 @@ class ContextReference(BaseModel):
 规则：
 
 - `context_refs` 可省略或为空数组。
-- 可以只有 context_refs 而没有 message，但首版是否开放“纯上下文发送”应与附件现有输入校验统一；推荐至少有 message、attachments、context_refs 或 deferred 结果之一。
-- Deferred 恢复请求默认不重复附加上下文；若恢复后的业务动作必须校验当前页面快照，由对应 UI Tool 结果或本轮显式 context_refs 提供，不从 Checkpoint 猜造。
+- 可以只有 `context_refs` 而没有 message；纯上下文会话使用 label 生成安全标题，无 label 时使用“上下文会话”。
+- `context_refs` 与 `deferred_tool_results` 首版互斥并返回 `422`。Deferred 所需的新数据由 Tool Result 携带，不从 Checkpoint 猜造。
 - `branch_from` 与 context_refs 不冲突；分支点之后新请求的 Context Reference 只属于新分支。
+- 主动压缩使用独立 session 接口，不接收未发送的 `context_refs`；只有已经进入会话历史的引用参与压缩。
 
 ### 5.5 推荐通用限制
 
@@ -380,7 +381,7 @@ class ContextReference(BaseModel):
 | `schema_version` | 32 字符 |
 | `label` | 256 字符 |
 | JSON 嵌套深度 | 32 |
-| 单个 payload 序列化体积 | 256 KiB |
+| 单个完整引用序列化体积 | 256 KiB |
 | 单请求 context_refs 总体积 | 512 KiB |
 
 超限返回明确 `422`，不得静默截断为可能改变业务语义的非法快照。业务前端可以设置更严格的限制，例如电子表格当前最多 240 格。
@@ -671,27 +672,32 @@ Agent Prompt 还必须规定：
 
 ### 9.3 历史接口
 
-建议增加历史 part：
+历史接口在用户消息上增加 `context_refs`：
 
 ```json
 {
-  "type": "context_ref",
-  "key": "current_selection",
-  "context_type": "deeptable.selection",
-  "schema_version": "2.0",
-  "label": "销售预算!B2:C4",
-  "payload": {...},
-  "metadata": {...}
+  "role": "user",
+  "content": "解释当前区域",
+  "context_refs": [
+    {
+      "key": "current_selection",
+      "type": "deeptable.selection",
+      "schema_version": "2.0",
+      "label": "销售预算!B2:C4",
+      "payload": {...},
+      "metadata": {...}
+    }
+  ]
 }
 ```
 
-不复用 `type` 同时表示 HistoryPart 类型和业务 Context 类型，因此历史接口将业务类型命名为 `context_type`。浏览器按 `context_type` 选择专用卡片；未知类型使用通用 JSON 详情，不丢弃数据。
+DeepAgent Console 只显示 label/type 的中性只读标签，不提供 JSON 编辑器或业务详情。DeepCube、DeepTable 等业务前端按 `type` 选择自己的详情组件。
 
 ### 9.4 会话标题和列表摘要
 
-- 会话标题只使用用户 `message`，不得把 payload 或 XML 拼入标题生成输入。
-- 会话列表 `user_prompt` 返回剥离后的真实文本。
-- Context Reference 可用 label 显示“本轮附加 1 个上下文”，不把完整 JSON 放进列表。
+- 有文字时，会话标题和列表摘要只使用用户 `message`，不得把 payload 或 XML 拼入标题生成输入。
+- 纯引用时使用 label；无 label 时统一使用“上下文会话”。
+- 标题链路永远不读取 payload 或 metadata。
 - 旧 `<reference>` 消息在迁移期继续使用现有剥离逻辑。
 
 ### 9.5 分支、编辑和重试
@@ -753,11 +759,11 @@ Provider 请求通常无状态；DeepAgent发送会话历史时，之前用户�
 
 Context Reference 不授予工具权限。payload 中即使写着 `editable=true`，后端工具执行时仍须使用真实用户身份和业务服务重新校验权限。
 
-## 12. 快捷命令设计
+## 12. 快捷命令边界（本轮不实施）
 
 ### 12.1 结论
 
-首版不增加：
+DeepAgent v0.3.5 不增加：
 
 ```json
 {
@@ -907,18 +913,16 @@ context_refs[0].payload 包含不可序列化值
 
 ### 15.1 输入区
 
-- Context Reference 显示为独立 Chip，至少展示 label 和类型图标。
-- 支持查看详情、移除和替换。
-- 多个上下文保持明确顺序。
-- 快捷命令 Chip 与 Context Chip 视觉上区分：命令属于 message，Context 属于 context_refs。
-- 发送前只检查前端可知的业务完整性；后端仍做公共 Schema 和大小校验。
+- DeepAgent Console 不提供 Context Reference 构造器或业务 JSON 编辑器。
+- DeepCube、DeepTable 等业务前端显示自己的 Chip，并负责查看详情、移除、替换和顺序。
+- 发送前只检查前端可知的业务完整性；DeepAgent 后端仍做公共 Schema 和大小校验。
 
 ### 15.2 历史
 
 - 用户消息正文只显示 message。
-- Context Reference 在消息旁展示“已附加上下文”，点击查看结构化详情。
-- 未知 context_type 使用通用 JSON 查看器。
-- metadata 可用于回跳页面，但回跳能力失败不影响历史文本阅读。
+- DeepAgent Console 在消息旁展示 label/type 的中性只读标签，不展示 payload 或 metadata。
+- 含引用的 Console 历史消息不提供会静默丢失引用的编辑操作。
+- 业务前端可以按 type 展示详情，并用 metadata 实现回跳；回跳失败不影响历史文本阅读。
 - 旧文本信封继续使用旧剥离逻辑，直到历史兼容期结束。
 
 ### 15.3 重复控制
@@ -954,8 +958,8 @@ context_refs[0].payload 包含不可序列化值
 
 1. `chat_messages.payload` 保存完整结构化引用和 metadata。
 2. 序列化、反序列化和数据库重载后数据一致。
-3. 历史接口返回 `context_ref` part，正文不包含 XML。
-4. 会话标题只使用用户真实文本。
+3. 历史接口在用户消息的 `context_refs` 字段返回原始引用，正文不包含 XML。
+4. 有文字时标题只使用用户真实文本；纯引用时只使用 label 或“上下文会话”。
 5. 分支、编辑、重试、取消、Pending 恢复后引用不丢失或串线。
 6. 旧文本信封历史仍能正常展示。
 
@@ -988,21 +992,21 @@ context_refs[0].payload 包含不可序列化值
 
 ### 17.1 DeepAgent 后端
 
-预计涉及：
+v0.3.5 已实施：
 
 - `deep_agent/schemas/chat.py`：ContextReference Schema 与 `context_refs`。
 - `deep_agent/api/v1/chat.py`：输入判定、限制和 Runner 传参。
 - `deep_agent/agent/runner.py`：构造结构化 UserPromptPart，注入公共 Instructions。
 - 新建 Context Reference 解析/格式化模块，避免塞进附件模块。
 - `deep_agent/db/serialization.py`：结构化引用序列化和反序列化。
-- `deep_agent/agent/history.py`：HistoryContextReferencePart。
+- `deep_agent/agent/history.py`：用户历史消息的 `context_refs`。
 - 上下文 TokenEstimator、Checkpoint 脱敏与标题生成链路。
 - OpenAPI 与接口测试。
 
 ### 17.2 DeepAgent Console
 
-- 调试请求可选构造 context_refs，首版不必提供复杂业务编辑器。
-- 历史消息展示通用 Context Chip 和 JSON 详情。
+- 不提供 context_refs 构造入口，避免 Console 承担业务页面职责。
+- 历史消息展示通用只读标签，不展示或编辑业务 JSON。
 - 请求上下文 Header 与业务 Context Reference 不混在同一面板概念中。
 
 ### 17.3 Python / DeepCube 前端
@@ -1023,7 +1027,7 @@ context_refs[0].payload 包含不可序列化值
 
 ## 18. 建议实施阶段
 
-### 阶段 A：DeepAgent 公共协议
+### 阶段 A：DeepAgent 公共协议（v0.3.5 已完成）
 
 - ContextReference Schema。
 - API、Runner、序列化、历史和通用 Prompt。
@@ -1075,8 +1079,6 @@ context_refs[0].payload 包含不可序列化值
 
 ### 尚未实施
 
-- DeepAgent API、持久化、历史和 Prompt 格式化。
 - DeepCube 前端与 Prompt 迁移。
 - DeepTable 正式 Agent Prompt 和接口迁移。
-- Console 通用 Context Chip。
-- 端到端、压缩和历史兼容测试。
+- 跨仓的业务端到端与旧文本信封清理。

@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import json
 import uuid
+from collections.abc import Awaitable, Callable
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, HTTPException, Request, Response, status
+from fastapi.routing import APIRoute
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from sse_starlette.sse import EventSourceResponse
 
 from deep_agent.agent.deferred import build_deferred_tool_results
@@ -19,7 +22,34 @@ from deep_agent.db.ids import normalize_agent_id
 from deep_agent.options import OPTION
 from deep_agent.schemas.chat import ChatRequest, ChatResponse, StreamChatRequest
 
-router = APIRouter()
+
+class _ChatBodyValidationRoute(APIRoute):
+    """Normalize malformed/non-UTF-8 chat JSON to the API's 422 contract."""
+
+    def get_route_handler(self) -> Callable[[Request], Awaitable[Response]]:
+        original = super().get_route_handler()
+
+        async def handler(request: Request) -> Response:
+            try:
+                return await original(request)
+            except StarletteHTTPException as exc:
+                if (
+                    exc.status_code == status.HTTP_400_BAD_REQUEST
+                    and exc.detail == "There was an error parsing the body"
+                ):
+                    raise HTTPException(
+                        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                        detail={
+                            "code": "invalid_json_encoding",
+                            "message": "请求体必须是有效的 UTF-8 JSON。",
+                        },
+                    ) from exc
+                raise
+
+        return handler
+
+
+router = APIRouter(route_class=_ChatBodyValidationRoute)
 
 
 def _agent_deps(
@@ -53,12 +83,13 @@ async def _ensure_session_access(
 def _validate_chat_body(body: ChatRequest | StreamChatRequest) -> None:
     has_message = bool(body.message and body.message.strip())
     has_attachments = bool(body.attachments)
+    has_context_refs = bool(body.context_refs)
     deferred = getattr(body, "deferred_tool_results", None)
     has_deferred = bool(deferred)
-    if not has_message and not has_attachments and not has_deferred:
+    if not has_message and not has_attachments and not has_context_refs and not has_deferred:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Either message, attachments, or deferred_tool_results is required.",
+            detail="Either message, attachments, context_refs, or deferred_tool_results is required.",
         )
     if body.attachments and len(body.attachments) > OPTION.agent.upload_max_count:
         raise HTTPException(
@@ -69,6 +100,11 @@ def _validate_chat_body(body: ChatRequest | StreamChatRequest) -> None:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="branch_from and deferred_tool_results are mutually exclusive.",
+        )
+    if has_context_refs and has_deferred:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="context_refs and deferred_tool_results are mutually exclusive.",
         )
     if body.branch_from is not None and body.branch_from < 0:
         raise HTTPException(
@@ -136,6 +172,7 @@ async def chat(
             body.message or "",
             deps,
             attachments=body.attachments,
+            context_refs=body.context_refs,
             branch_from=body.branch_from,
         )
     except (ContextWindowExceededError, UnsupportedAttachmentModalityError) as exc:
@@ -230,6 +267,7 @@ async def chat_stream(
                 message,
                 deps,
                 attachments=body.attachments,
+                context_refs=body.context_refs,
                 deferred_tool_results=deferred_tool_results,
                 branch_from=body.branch_from,
                 persister=ctx.event_persister,

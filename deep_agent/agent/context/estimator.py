@@ -18,6 +18,13 @@ from pydantic_ai.messages import (
     UserPromptPart,
 )
 
+from deep_agent.agent.context_references import (
+    context_reference_from_dict,
+    context_references_from_content,
+    format_context_reference_prompt,
+    is_context_reference,
+)
+
 try:
     import tiktoken
 except ImportError:  # pragma: no cover - production requirements include it
@@ -152,6 +159,15 @@ class TokenEstimator:
 
     def value(self, value: Any) -> int:
         if isinstance(value, dict):
+            if is_context_reference(value):
+                try:
+                    return self.text(
+                        format_context_reference_prompt(
+                            [context_reference_from_dict(value)]
+                        )
+                    )
+                except ValueError:
+                    return self.text(value)
             kind = str(value.get("kind") or value.get("part_kind") or "")
             if kind in {
                 "audio-url",
@@ -164,6 +180,24 @@ class TokenEstimator:
                 return MEDIA_CONTENT_TOKENS
             return self.text(value)
         if isinstance(value, (list, tuple)):
+            refs = context_references_from_content(value)
+            if refs:
+                text_chunks: list[str] = []
+                remaining: list[Any] = []
+                for item in value:
+                    if isinstance(item, str):
+                        text_chunks.append(item)
+                    elif isinstance(item, dict) and item.get("kind") == "text-content":
+                        text_chunks.append(str(item.get("content", "")))
+                    elif not is_context_reference(item):
+                        remaining.append(item)
+                projected = format_context_reference_prompt(
+                    refs,
+                    "\n".join(chunk for chunk in text_chunks if chunk),
+                )
+                return self.text(projected) + sum(
+                    self.value(item) for item in remaining
+                )
             return sum(self.value(item) for item in value)
         return self.text(value)
 

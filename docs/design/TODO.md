@@ -23,7 +23,6 @@
 | `ATT-001` | 附件解析 | 固化真实附件读取、上下文压缩和 Checkpoint 更新的端到端测试 | 可实施 | 覆盖上传、分页读取、SSE、历史恢复与压缩 | [验证边界](06-attachment-parsing/attachment-parsing-design.md#10-验证边界) |
 | `ART-001` | Artifact 交互 | Artifact 最小语义（登记/元数据/TTL/权限；可不接外部 sink） | 待设计 | 合法 id 不得从 Checkpoint 猜造；存储落点待决 | [08 分期 A0](08-artifact-export/README.md#建议分期先语义后-sink) |
 | `ART-001b` | Artifact 交互 | 可选 sink：下载中心 publish（upload + business.save） | 待设计 | 依赖 ART-001；非唯一成功标准 | [设计纲要 S0](08-artifact-export/artifact-export-design.md#32-可选-sink下载中心s0) |
-| `CTXREF-001` | 上下文引用 | 实施 `context_refs` 公共协议、持久化、历史返回和模型 Prompt 格式化 | 可实施 | 不新增数据库表；公共外壳严格、payload 宽松、metadata 不发模型 | [上下文引用设计](10-context-reference-and-commands/context-reference-and-commands-design.md) |
 
 ## P1
 
@@ -38,7 +37,7 @@
 | `ATT-101` | 附件解析 | 设计统一文档解析服务，覆盖 PDF/OCR/PPTX 和复杂 Office | 待设计 | 需要评估独立服务、开源解析器和资源隔离 | [后续方向](06-attachment-parsing/attachment-parsing-design.md#13-后续方向) |
 | `ART-101` | Artifact 交互 | 沙箱大结果晋升为 Artifact（与 07 workdir 合同） | 待设计 | 依赖 ART-001 与 07 阶段 A | [交叉合同](08-artifact-export/README.md#与-07-的交叉合同必须对齐) |
 | `ART-102` | Artifact 交互 | （已并入 ART-101）沙箱 `result` 产出 artifact_id | 待设计 | 同 ART-101 | [设计纲要](08-artifact-export/artifact-export-design.md#31-语义主干a0a1) |
-| `CTXREF-101` | 上下文引用 | 迁移 DeepCube 与 DeepTable 前端，并补齐对应 Agent 业务 Prompt | 可实施 | 先交付 CTXREF-001；DeepTable 不再使用 DeepCube 助手做业务验收 | [实施阶段](10-context-reference-and-commands/context-reference-and-commands-design.md#18-建议实施阶段) |
+| `CTXREF-101` | 上下文引用 | 迁移 DeepCube 与 DeepTable 前端，并补齐对应 Agent 业务 Prompt | 可实施 | DeepAgent v0.3.5 公共协议已交付；DeepTable 不再使用 DeepCube 助手做业务验收 | [实施阶段](10-context-reference/context-reference-design.md#18-建议实施阶段) |
 
 ## P2
 
@@ -62,6 +61,7 @@
 
 | ID | 课题 | 结论 | 状态 | 来源 |
 | --- | --- | --- | --- | --- |
+| `CTXREF-001` | 上下文引用 | v0.3.5 已完成 `context_refs` 协议、持久化、模型投影、历史返回和压缩协同 | 已关闭 | [上下文引用设计](10-context-reference/context-reference-design.md) |
 | `MODEL-CATALOG` | 模型目录 | 数据库目录、手工全量刷新和模型运行属性已落地 | 已关闭 | [模型目录设计](04-model-catalog/model-catalog-design.md) |
 | `CTX-COMPACTION` | 上下文压缩 | 自动/主动主模型摘要、可重复主动尝试、确定性裁剪、Checkpoint、历史标记与测试会话已落地 | 已关闭 | [上下文压缩设计](03-context-compaction/context-compaction-design.md) |
 | `ATT-V1` | 附件解析 | TXT/DOCX/XLSX 按需分页读取与会话附件限制已落地 | 已关闭 | [附件解析设计](06-attachment-parsing/attachment-parsing-design.md) |

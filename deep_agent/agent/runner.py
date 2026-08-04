@@ -38,6 +38,10 @@ from deep_agent.agent.context.compaction import (
 )
 from deep_agent.agent.context.estimator import TokenEstimator
 from deep_agent.agent.context.manual import manual_compaction_availability
+from deep_agent.agent.context_references import (
+    history_has_context_references,
+    project_context_references_in_history,
+)
 from deep_agent.agent.context.runtime import ContextRunState
 from deep_agent.agent.attachments import (
     has_user_turn,
@@ -64,6 +68,7 @@ from deep_agent.db.conversation import SessionStore
 from deep_agent.db.stores.bundle import DataStores
 from deep_agent.db.stores.context_checkpoint import ContextCheckpointStoreBase
 from deep_agent.schemas.attachment import AttachmentRef
+from deep_agent.schemas.context_reference import ContextReference
 from deep_agent.options import OPTION
 
 _STREAM_OUTPUT_TYPE: list[Any] = [str, DeferredToolRequests]
@@ -178,7 +183,8 @@ class AgentRunner:
                 agent_id=deps.agent_id,
                 fingerprint=self._checkpoint_fingerprint,
             )
-            projected = list(loaded.messages)
+            deps.has_context_references = history_has_context_references(loaded.messages)
+            projected = project_context_references_in_history(loaded.messages)
             checkpoint = loaded.checkpoint
             budget = build_context_budget(
                 projected,
@@ -379,6 +385,7 @@ class AgentRunner:
         deps: AgentDeps,
         *,
         attachments: list[AttachmentRef] | None = None,
+        context_refs: list[ContextReference] | None = None,
         branch_from: int | None = None,
         deferred_tool_results: DeferredToolResults | None = None,
         persister: EventPersister | None = None,
@@ -403,8 +410,8 @@ class AgentRunner:
                 history = repaired
         pre_persisted_user = False
         user_branch_point: int | None = None
-        if has_user_turn(message, attachments):
-            content = refs_from_attachments(message, attachments)
+        if has_user_turn(message, attachments, context_refs):
+            content = refs_from_attachments(message, attachments, context_refs)
             user_request = ModelRequest(parts=[UserPromptPart(content=content)])
             if persister is not None:
                 persister.publish(
@@ -442,6 +449,7 @@ class AgentRunner:
                 fingerprint=self._checkpoint_fingerprint,
             )
             projected = checkpoint_load.messages
+        deps.has_context_references = history_has_context_references(projected)
         return _PreparedHistory(
             projected=projected,
             raw=history,
@@ -599,6 +607,7 @@ class AgentRunner:
         history: list[ModelMessage],
         message: str,
         attachments: list[AttachmentRef] | None,
+        context_refs: list[ContextReference] | None,
         deps: AgentDeps,
         *,
         pre_persisted_user: bool,
@@ -612,11 +621,12 @@ class AgentRunner:
         )
         if pre_persisted_user:
             return llm_history, None
-        if has_user_turn(message, attachments):
+        if has_user_turn(message, attachments, context_refs):
             return llm_history, await resolve_user_prompt(
                 message,
                 attachments,
                 deps.request_headers,
+                context_refs=context_refs,
                 input_modalities=self._input_modalities,
             )
         return llm_history, message or None
@@ -789,6 +799,7 @@ class AgentRunner:
         deps: AgentDeps,
         *,
         attachments: list[AttachmentRef] | None = None,
+        context_refs: list[ContextReference] | None = None,
         deferred_tool_results: DeferredToolResults | None = None,
         branch_from: int | None = None,
     ) -> dict[str, Any]:
@@ -798,6 +809,7 @@ class AgentRunner:
                 message,
                 deps,
                 attachments=attachments,
+                context_refs=context_refs,
                 branch_from=branch_from,
                 deferred_tool_results=deferred_tool_results,
             )
@@ -805,6 +817,7 @@ class AgentRunner:
                 prepared.projected,
                 message,
                 attachments,
+                context_refs,
                 deps,
                 pre_persisted_user=prepared.pre_persisted_user,
             )
@@ -847,6 +860,7 @@ class AgentRunner:
         deps: AgentDeps,
         *,
         attachments: list[AttachmentRef] | None = None,
+        context_refs: list[ContextReference] | None = None,
         deferred_tool_results: DeferredToolResults | None = None,
         branch_from: int | None = None,
         persister: EventPersister,
@@ -859,6 +873,7 @@ class AgentRunner:
                 message,
                 deps,
                 attachments=attachments,
+                context_refs=context_refs,
                 branch_from=branch_from,
                 deferred_tool_results=deferred_tool_results,
                 persister=persister,
@@ -868,6 +883,7 @@ class AgentRunner:
                     prepared.projected,
                     message,
                     attachments,
+                    context_refs,
                     deps,
                     pre_persisted_user=prepared.pre_persisted_user,
                 )

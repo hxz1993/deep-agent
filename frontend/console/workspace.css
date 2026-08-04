@@ -885,6 +885,7 @@ html, body {
   color: var(--text-muted);
 }
 .msg-attachments { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.msg-context-refs { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 .attachment-chip {
   display: inline-flex;
   align-items: center;
@@ -893,6 +894,20 @@ html, body {
   border-radius: 8px;
   background: var(--attach-chip-bg);
   font-size: 12px;
+}
+.context-ref-chip {
+  display: inline-flex;
+  align-items: center;
+  max-width: 260px;
+  padding: 6px 10px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 7%, var(--bg-soft));
+  color: var(--text-muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .attachment-name { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 

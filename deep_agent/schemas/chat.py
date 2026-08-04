@@ -3,9 +3,10 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from deep_agent.schemas.attachment import AttachmentRef
+from deep_agent.schemas.context_reference import ContextReference, validate_context_references
 
 
 class ChatRequest(BaseModel):
@@ -43,6 +44,18 @@ class ChatRequest(BaseModel):
         default=None,
         description="Uploaded file references from POST /api/v1/uploads.",
     )
+    context_refs: list[ContextReference] | None = Field(
+        default=None,
+        description="Structured page/business context snapshots for this user turn.",
+    )
+
+    @field_validator("context_refs")
+    @classmethod
+    def _validate_context_refs(
+        cls,
+        value: list[ContextReference] | None,
+    ) -> list[ContextReference] | None:
+        return validate_context_references(value)
 
 
 class StreamChatRequest(ChatRequest):

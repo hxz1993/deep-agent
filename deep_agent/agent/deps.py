@@ -27,6 +27,7 @@ class AgentDeps:
     agent_id: str | None = None
     request_headers: Mapping[str, str] = field(default_factory=dict)
     context_state: "ContextRunState | None" = None
+    has_context_references: bool = False
     input_modalities: Sequence[str] = field(default_factory=tuple)
     attachment_by_id: dict[str, AttachmentRef] = field(default_factory=dict)
     attachment_bytes: dict[str, bytes] = field(default_factory=dict)

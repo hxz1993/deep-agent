@@ -17,6 +17,7 @@ from pydantic_ai.providers.google import GoogleProvider
 from pydantic_ai.providers.openai import OpenAIProvider
 
 from deep_agent.agent.deps import AgentDeps
+from deep_agent.agent.context_references import context_reference_instructions
 from deep_agent.agent.models import DeepSeekChatModel, OpenAICompatibleVideoChatModel
 from deep_agent.agent.models.deepseek_thinking_retry import DeepSeekThinkingRetry
 from deep_agent.agent.spec import AgentSpec
@@ -191,10 +192,14 @@ def build_agent(
         capabilities.append(DeepSeekThinkingRetry())
     if context_compaction is not None:
         capabilities.append(context_compaction)
+    instructions: list[Any] = []
+    if spec.instructions:
+        instructions.append(spec.instructions)
+    instructions.append(context_reference_instructions)
     return Agent(
         model,
         deps_type=AgentDeps,
-        instructions=spec.instructions,
+        instructions=instructions,
         toolsets=toolsets,
         capabilities=capabilities or None,
         retries=request_retries,

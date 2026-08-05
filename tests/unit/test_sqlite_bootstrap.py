@@ -195,6 +195,49 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
                     self.assertNotIn("ui_tool_packages", self._business_tables(db_path))
                     self.assertNotIn("package_code", self._columns(db_path, "ui_tool_definitions"))
 
+    async def test_002_accepts_pre_release_package_codes_in_001_data(self) -> None:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+            db_path = Path(tmpdir) / "pre-release-package-codes.db"
+            url = f"sqlite+aiosqlite:///{db_path.as_posix()}"
+            with patch("deep_agent.db.url.get_database_url", return_value=url):
+                with patch("deep_agent.db.migrate.get_database_url", return_value=url):
+                    config = migrate._build_alembic_config()
+                    await asyncio.to_thread(command.upgrade, config, "001")
+                    with sqlite3.connect(db_path) as connection:
+                        for name in ("deep_cube__clarify", "deep_cube__config_fill"):
+                            connection.execute(
+                                "INSERT INTO ui_tool_definitions "
+                                "(name, description, parameters_json_schema, source, enabled) "
+                                "VALUES (?, 'DeepCube', '{}', 'manual', 1)",
+                                (name,),
+                            )
+                        expected = [
+                            "builtin:general",
+                            "builtin:sandbox",
+                            "ui:deepcube",
+                            "ui:builtin",
+                            "mcp:deepcube",
+                        ]
+                        connection.execute(
+                            "UPDATE agents SET capabilities = ? WHERE name = 'default'",
+                            (json.dumps(expected),),
+                        )
+                        connection.commit()
+
+                    await asyncio.to_thread(command.upgrade, config, "002")
+
+                    self.assertEqual(self._revision(db_path), "002")
+                    capabilities = json.loads(
+                        str(
+                            self._scalar(
+                                db_path,
+                                "SELECT capabilities FROM agents WHERE name = 'default'",
+                            )
+                        )
+                    )
+                    self.assertEqual(capabilities, expected)
+                    self.assertEqual(self._row_count(db_path, "ui_tool_packages"), 1)
+
     def _assert_current_baseline(self, db_path: Path) -> None:
         self.assertEqual(self._revision(db_path), "002")
         self.assertEqual(self._business_tables(db_path), EXPECTED_TABLES)

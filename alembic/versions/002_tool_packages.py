@@ -24,6 +24,7 @@ depends_on: Union[str, Sequence[str], None] = None
 
 DEEPCUBE_PACKAGE = "ui:deepcube"
 DEEPCUBE_TOOLS = {"deep_cube__clarify", "deep_cube__config_fill"}
+CURRENT_UI_PACKAGES = {"ui:builtin", DEEPCUBE_PACKAGE}
 BUILTIN_UI_REFERENCES = {
     "ui:builtin__confirm": "ui:builtin",
     "ui:builtin__choice": "ui:builtin",
@@ -81,6 +82,11 @@ def _upgrade_capabilities(values: list[str]) -> list[str]:
             result.append("builtin:attachment")
         elif value in BUILTIN_UI_REFERENCES:
             result.append(BUILTIN_UI_REFERENCES[value])
+        elif value in CURRENT_UI_PACKAGES:
+            # Some pre-release databases already persisted the package-level
+            # codes before the 002 schema revision was applied. Keep those
+            # values idempotent while the migration creates the package table.
+            result.append(value)
         elif value.startswith("ui:"):
             tool_name = value.removeprefix("ui:")
             if tool_name not in DEEPCUBE_TOOLS:
@@ -168,6 +174,14 @@ def _validate_upgrade_data() -> set[str]:
         if capabilities is not None:
             for value in capabilities:
                 if value in BUILTIN_UI_REFERENCES or not value.startswith("ui:"):
+                    continue
+                if value == "ui:builtin":
+                    continue
+                if value == DEEPCUBE_PACKAGE:
+                    if not manual_names:
+                        raise RuntimeError(
+                            "Agent references ui:deepcube but no DeepCube UI tools exist"
+                        )
                     continue
                 tool_name = value.removeprefix("ui:")
                 if tool_name in DEEPCUBE_TOOLS and tool_name not in manual_names:

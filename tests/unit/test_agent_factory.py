@@ -10,10 +10,10 @@ from pydantic_ai.providers.deepseek import DeepSeekProvider
 from pydantic_ai.providers.google import GoogleProvider
 from pydantic_ai.providers.openai import OpenAIProvider
 
-from deep_agent.agent.factory import _resolve_model, build_agent
+from deep_agent.agent.factory import _resolve_model, _toolsets_for_spec, build_agent
 from deep_agent.agent.models import DeepSeekChatModel, OpenAICompatibleVideoChatModel
 from deep_agent.agent.models.deepseek_thinking_retry import DeepSeekThinkingRetry
-from deep_agent.capabilities.registry import ToolPackageRegistry
+from deep_agent.capabilities.registry import ToolPackage, ToolPackageRegistry
 from deep_agent.agent.spec import AgentSpec
 from deep_agent.options import OPTION
 
@@ -183,6 +183,83 @@ class ResolveModelTests(unittest.TestCase):
         )
         caps = [c for c in agent.root_capability.capabilities if isinstance(c, DeepSeekThinkingRetry)]
         self.assertEqual(len(caps), 0)
+
+
+class ToolsetAssemblyTests(unittest.TestCase):
+    def test_selected_packages_preserve_all_runtime_toolset_layers(self) -> None:
+        registry = ToolPackageRegistry()
+        general = object()
+        sandbox = object()
+        attachment = object()
+        for code, toolset in (
+            ("builtin:general", general),
+            ("builtin:sandbox", sandbox),
+            ("builtin:attachment", attachment),
+        ):
+            registry.register(
+                ToolPackage(
+                    code=code,
+                    category="builtin",
+                    toolset=toolset,
+                    default_enabled=code == "builtin:general",
+                )
+            )
+
+        mcp = object()
+        resources = object()
+        ui = object()
+        spec = _spec(
+            capabilities=[
+                "builtin:general",
+                "builtin:sandbox",
+                "builtin:attachment",
+                "mcp:deepcube",
+                "ui:deepcube",
+            ]
+        )
+        assembled = _toolsets_for_spec(
+            registry,
+            spec,
+            mcp_toolsets=[mcp],
+            mcp_resource_toolset=resources,
+            dynamic_ui_packages=[
+                ToolPackage(
+                    code="ui:deepcube",
+                    category="ui",
+                    toolset=ui,
+                    default_enabled=False,
+                )
+            ],
+        )
+
+        self.assertEqual(
+            assembled,
+            [general, sandbox, attachment, mcp, resources, ui],
+        )
+
+    def test_null_and_empty_selection_keep_original_default_semantics(self) -> None:
+        registry = ToolPackageRegistry()
+        general = object()
+        attachment = object()
+        registry.register(
+            ToolPackage(
+                code="builtin:general",
+                category="builtin",
+                toolset=general,
+                default_enabled=True,
+            )
+        )
+        registry.register(
+            ToolPackage(
+                code="builtin:attachment",
+                category="builtin",
+                toolset=attachment,
+                default_enabled=False,
+            )
+        )
+
+        self.assertEqual(_toolsets_for_spec(registry, _spec(capabilities=None)), [general])
+        self.assertEqual(_toolsets_for_spec(registry, _spec(capabilities=[])), [])
 
 
 if __name__ == "__main__":

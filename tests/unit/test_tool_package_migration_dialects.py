@@ -62,6 +62,14 @@ class ToolPackageMigrationDialectTests(unittest.TestCase):
                     legacy,
                 )
 
+    def test_upgrade_accepts_pre_release_package_codes_idempotently(self) -> None:
+        self.assertEqual(
+            migration._upgrade_capabilities(
+                ["builtin:general", "builtin:sandbox", "ui:deepcube", "ui:builtin"]
+            ),
+            ["builtin:general", "builtin:sandbox", "ui:deepcube", "ui:builtin"],
+        )
+
     def test_null_capabilities_remain_null(self) -> None:
         self.assertIsNone(migration._as_capabilities(None))
 

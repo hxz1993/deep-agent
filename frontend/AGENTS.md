@@ -64,7 +64,7 @@ frontend/
 - 控制台请求固定使用当前同源后端。本地联调直接访问本机 `8000/console/`，不在浏览器中切换后端地址。
 - SSE 解析、HITL 参数归一化和 Schema 文本校验分别位于 `protocol.js`、`hitl.js`、`schema-editor.js`，可由 Node 内置测试独立验证。
 - 控制台测试：`node --test tests/frontend/console/*.test.mjs`。
-- 配置中心默认打开 Agent；“全局配置”仍位于“辅助模型”后、模型资源分割线前，通过 `GET /api/v1/global-settings` 按需展示安全白名单，没有编辑或保存入口。
+- 配置中心按“Agent 设置 / 系统设置 / 辅助资源”分组；系统设置包含辅助模型、全局配置和只读数据库连接。数据库连接页通过 `GET /api/v1/database-info` 只展示类型、主机、端口、库名或 SQLite 文件名，不返回凭据、连接参数或本地完整路径。
 - “内置工具”位于模型之后、MCP 服务之前，只读展示代码随版本发布的通用工具与
   附件读取工具包；页面没有注册、编辑、删除或全局启停入口。
 - Console 顶部只展示一处产品版本，通过同源 `GET /info` 读取
@@ -95,8 +95,9 @@ frontend/
 
 实现参考：`console/chat.js` 与 `console/protocol.js`。
 
-上下文压缩状态延迟 150ms 显示；同一请求只保留一个状态胶囊，收到首个
-`thinking` / `text` / `tool_call` 或结束事件时必须清理。
+自动和主动上下文压缩复用消息区中的同一套独立过程条，不挂在助手消息内部。状态延迟
+150ms 显示；成功写入 Checkpoint 后立即刷新历史，并与重新打开会话一样展示当前有效的
+压缩分隔标记。临时 Sliding Window、失败和无持久化结果只显示瞬时过程条，不伪造历史标记。
 
 v0.3.4 的输入框在附件线性图标旁提供主动压缩线性图标。按钮状态、上下文百分比和 tooltip
 只读取后端 `context-status`，不得在前端复制 Token 估算、动态输出预测或安全余量算法。

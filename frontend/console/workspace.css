@@ -509,33 +509,6 @@ html, body {
   overflow: auto;
 }
 
-/* 压缩状态只属于当前请求，首个模型输出到达后立即移除。 */
-.context-compaction-status {
-  align-self: flex-start;
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  min-height: 30px;
-  padding: 5px 10px;
-  border: 1px solid var(--thinking-border);
-  border-radius: 999px;
-  background: var(--thinking-bg);
-  color: var(--text-faint);
-  font-size: 12px;
-}
-.context-compaction-icon {
-  color: var(--accent);
-  font-size: 15px;
-  animation: context-compaction-spin 1.2s linear infinite;
-}
-.context-compaction-status[data-phase="completed"] .context-compaction-icon,
-.context-compaction-status[data-phase="fallback"] .context-compaction-icon {
-  animation: none;
-}
-@keyframes context-compaction-spin {
-  to { transform: rotate(360deg); }
-}
-
 /* 工具调用块 */
 .tool-block {
   border: 1px solid var(--tool-border);

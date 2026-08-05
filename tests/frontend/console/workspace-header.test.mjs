@@ -133,16 +133,16 @@ test("0803 不带入 0802 的对话消息与滚动重构", () => {
   assert.doesNotMatch(chatSource, /tool-block open running/);
 });
 
-test("工作台压缩状态延迟显示并在正式输出或结束时清理", () => {
-  assert.match(chatSource, /case "context_compaction":\s*assistant\.showContextCompaction/);
-  assert.match(chatSource, /setTimeout\(\(\) => \{[\s\S]*\}, 150\)/);
-  for (const eventType of ["thinking", "text", "tool_call", "final", "error", "cancelled"]) {
-    assert.match(
-      chatSource,
-      new RegExp(`case "${eventType}":[\\s\\S]{0,100}hideContextCompaction`),
-    );
-  }
-  assert.match(chatSource, /finally \{[\s\S]{0,100}assistant\.hideContextCompaction\(\)/);
+test("自动和主动压缩复用独立过程条并在成功后刷新历史标记", () => {
+  assert.match(chatSource, /function createContextCompactionRow\(beforeNode = null\)/);
+  assert.match(chatSource, /function setContextCompactionRow\(/);
+  assert.match(chatSource, /case "context_compaction":\s*showAutomaticContextCompaction\(data, assistant\.row\)/);
+  assert.match(chatSource, /automaticCompactionTimer = window\.setTimeout\([\s\S]*?, 150\)/);
+  assert.match(chatSource, /finalizeAutomaticContextCompaction\(data\.context, data\.status\)/);
+  assert.match(chatSource, /state\.skipHistoryRefresh = !refreshCompactionHistory/);
+  assert.match(chatSource, /本轮临时缩减，未更新 Checkpoint/);
+  assert.doesNotMatch(chatSource, /assistant\.showContextCompaction|assistant\.hideContextCompaction/);
+  assert.doesNotMatch(chatSource, /className = "context-compaction-status"/);
 });
 
 test("搜索框与普通新建之间提供独立的测试会话入口", () => {

@@ -399,6 +399,7 @@ class ContextCheckpointTests(unittest.IsolatedAsyncioTestCase):
         telemetry = result["context"]["compaction"]
         self.assertTrue(telemetry["triggered"])
         self.assertTrue(telemetry["summary_applied"], telemetry)
+        self.assertTrue(telemetry["checkpoint_saved"], telemetry)
         self.assertEqual(telemetry["strategy"], "tiered_summary")
         self.assertLess(
             telemetry["estimated_tokens_after"],
@@ -850,6 +851,7 @@ class ContextCheckpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(telemetry["triggered"])
         self.assertTrue(telemetry["summary_failed"])
         self.assertFalse(telemetry["summary_applied"])
+        self.assertIsNone(telemetry["checkpoint_saved"])
         self.assertEqual(telemetry["strategy"], "sliding_window_fallback")
         self.assertIsNone(
             await self.stores.context_checkpoint.get("summary-failure")
@@ -1046,6 +1048,7 @@ class ContextCheckpointTests(unittest.IsolatedAsyncioTestCase):
             ),
         )
         self.assertEqual(events[-1]["type"], "final")
+        self.assertTrue(events[-1]["context"]["compaction"]["checkpoint_saved"])
         persisted = await self.stores.coordinator.get_history("compact-stream")
         self.assertNotIn("context_compaction", str(persisted))
 

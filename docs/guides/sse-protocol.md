@@ -235,9 +235,13 @@ DB Agent 模式（请求体含 `agent_id`）：
 | `request_index` | `number` | 当前 Agent Run 内模型请求序号 |
 | 其他字段 | `number \| string \| boolean` | 估算、策略、原因与是否达标等观测值，按阶段可选 |
 
-客户端建议延迟约 150ms 显示，避免快速压缩闪烁；同一请求只维护一个瞬时状态。收到首个
-`thinking`、`text`、`tool_call` 或任何结束事件后移除。该事件不属于模型消息，不能加入
-assistant 正文，也不会出现在历史接口中。
+客户端建议延迟约 150ms 显示，避免快速压缩闪烁；同一请求只维护一个独立过程条，并与主动
+压缩复用同一视觉组件。该事件不属于模型消息，不能加入 assistant 正文。自动压缩成功写入
+Checkpoint 后，应重新读取历史并展示 `context_checkpoint` 分隔标记；临时 Sliding Window、
+失败或未持久化结果只保留瞬时过程条，不会出现在历史接口中。
+
+`final.context.compaction.checkpoint_saved` 明确表示自动压缩的派生投影是否已经持久化：`true`
+才可展示成功并刷新历史，`false` 表示生成了摘要但保存失败，`null` 表示本轮没有尝试保存。
 
 v0.3.6 中 `summarizing` 表示一次语义摘要，不代表分块序号。遇到 429、502、503、504、连接
 重置或超时时，服务端可用完全相同的摘要请求重试一次，并发送“模型暂时不可用，正在重试摘要”；
@@ -534,7 +538,7 @@ data: {"type": "final", "output": "## 平台的 11 种维度类型\n...", "usage
 4. **思考过程**：`thinking.delta` 独立缓冲，可折叠展示，不与 `text` 拼接
 5. **工具调用 upsert**：同 `tool_call_id` 的 `tool_call` 更新而非重复创建
 6. **工具结果关联**：用 `tool_call_id` 匹配并关闭对应工具块
-7. **压缩状态**：`context_compaction` 只做瞬时展示，首个正式输出或结束事件到达后移除
+7. **压缩状态**：自动和主动 `context_compaction` 复用独立过程条；成功后以历史 Checkpoint 标记收口
 8. **结束判断**：收到 `final`、`cancelled` 或 `error` 后关闭 loading 状态
 9. **中断**：用户取消时 `AbortController.abort()`；若已收到 `cancelled` 则不必再提示错误
 

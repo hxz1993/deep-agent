@@ -24,6 +24,20 @@
       </div>
     </section>
 
+    <!-- Read-only database connection panel -->
+    <section class="panel database-connection-panel" id="panel-database-connection">
+      <div class="panel-toolbar">
+        <div>
+          <h2>数据库连接</h2>
+          <p class="panel-subtitle">查看当前 DeepAgent 进程实际使用的数据库；用户名、密码、连接参数和本地完整路径不会展示。</p>
+        </div>
+        <button class="btn" type="button" id="refreshDatabaseConnectionBtn">重新加载</button>
+      </div>
+      <div class="database-connection-content" id="databaseConnectionContent" aria-live="polite">
+        <div class="global-settings-state">正在加载数据库连接…</div>
+      </div>
+    </section>
+
     <!-- Agent panel -->
     <section class="panel active" id="panel-agents">
       <div class="panel-toolbar">

@@ -534,7 +534,7 @@ class AgentRunner:
         *,
         projected_history: list[ModelMessage],
         expected_row_version: int,
-    ) -> None:
+    ) -> bool | None:
         if (
             self._checkpoint_store is None
             or self._checkpoint_fingerprint is None
@@ -545,7 +545,7 @@ class AgentRunner:
             or not deps.context_state.telemetry.target_met
             or deps.context_state.telemetry.strategy == "sliding_window_fallback"
         ):
-            return
+            return None
         target = (
             deps.context_state.last_budget.target_tokens
             if deps.context_state.last_budget is not None
@@ -555,7 +555,7 @@ class AgentRunner:
             target is None
             or deps.context_state.estimator.messages(projected_history) > target
         ):
-            return
+            return None
         try:
             raw_history = await self.store.get_history(
                 session_id,
@@ -578,6 +578,7 @@ class AgentRunner:
                     deps.agent_id,
                     session_id,
                 )
+            return saved
         except Exception as exc:  # derived-state failure must not fail a completed chat
             logger.warning(
                 "Context checkpoint save failed for {}/{}: {}",
@@ -585,6 +586,7 @@ class AgentRunner:
                 session_id,
                 type(exc).__name__,
             )
+            return False
 
     async def _checkpoint_after_persist(
         self,
@@ -594,7 +596,7 @@ class AgentRunner:
         *,
         projected_history: list[ModelMessage],
         expected_row_version: int,
-    ) -> None:
+    ) -> bool | None:
         try:
             await persister.flush(session_id, agent_id=deps.agent_id)
         except Exception as exc:
@@ -603,8 +605,8 @@ class AgentRunner:
                 session_id,
                 type(exc).__name__,
             )
-            return
-        await self._maybe_save_checkpoint(
+            return False
+        return await self._maybe_save_checkpoint(
             session_id,
             deps,
             projected_history=projected_history,
@@ -847,8 +849,9 @@ class AgentRunner:
                 pre_persisted_user=prepared.pre_persisted_user,
                 repair_dangling_tool_calls=not isinstance(result.output, DeferredToolRequests),
             )
+            checkpoint_saved: bool | None = None
             if not isinstance(result.output, DeferredToolRequests):
-                await self._maybe_save_checkpoint(
+                checkpoint_saved = await self._maybe_save_checkpoint(
                     session_id,
                     deps,
                     projected_history=result.all_messages(),
@@ -860,6 +863,7 @@ class AgentRunner:
                 )
         response = _build_run_result(result, self.ui_tool_hints)
         response["context"] = self._context_status(prepared.projected, deps)
+        response["context"]["compaction"]["checkpoint_saved"] = checkpoint_saved
         return response
 
     async def run_stream(
@@ -1073,8 +1077,9 @@ class AgentRunner:
                 )
                 return
 
+        checkpoint_saved: bool | None = None
         if checkpoint_projection is not None:
-            await self._checkpoint_after_persist(
+            checkpoint_saved = await self._checkpoint_after_persist(
                 persister,
                 session_id,
                 deps,
@@ -1088,12 +1093,14 @@ class AgentRunner:
             pending_messages=result.new_messages() if result is not None else None,
             pre_persisted_user=prepared.pre_persisted_user,
         )
+        final_context = self._context_status(prepared.projected, deps)
+        final_context["compaction"]["checkpoint_saved"] = checkpoint_saved
         yield _final_event(
             result,
             self.ui_tool_hints,
             model_message_count=msg_count,
             user_branch_point=branch_pt,
-            context=self._context_status(prepared.projected, deps),
+            context=final_context,
         )
 
 

@@ -50,7 +50,7 @@ function loadGlobalSettingsUi() {
   return window.__GlobalSettingsUI;
 }
 
-test("Agent 是配置中心默认页且全局配置保持在辅助模型后", () => {
+test("Agent 是配置中心默认页且全局配置位于系统设置分组", () => {
   assert.match(
     indexHtml,
     /class="tab resource-btn active" data-tab="agents"/,
@@ -71,8 +71,12 @@ test("Agent 是配置中心默认页且全局配置保持在辅助模型后", ()
       indexHtml.indexOf('data-tab="global-settings"'),
   );
   assert.ok(
+    indexHtml.indexOf("系统设置") <
+      indexHtml.indexOf('data-tab="global-settings"'),
+  );
+  assert.ok(
     indexHtml.indexOf('data-tab="global-settings"') <
-      indexHtml.indexOf('<div class="resource-group-label separated">'),
+      indexHtml.indexOf('data-tab="database-connection"'),
   );
 });
 

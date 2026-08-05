@@ -465,6 +465,72 @@ html, body {
   color: var(--danger-text);
 }
 
+.database-connection-content {
+  max-width: 760px;
+}
+
+.database-connection-card {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-elev);
+}
+
+.database-connection-badge {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-soft);
+}
+
+.database-connection-badge > svg {
+  width: 22px;
+  height: 22px;
+  color: var(--accent);
+}
+
+.database-connection-badge > div {
+  display: grid;
+  gap: 2px;
+}
+
+.database-connection-badge strong { font-size: 14px; }
+.database-connection-badge span { color: var(--text-faint); font-size: 11px; }
+
+.database-connection-grid {
+  display: grid;
+  grid-template-columns: 130px minmax(0, 1fr);
+  margin: 0;
+}
+
+.database-connection-grid dt,
+.database-connection-grid dd {
+  margin: 0;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.database-connection-grid dt {
+  color: var(--text-faint);
+  background: var(--bg-soft);
+  font-size: 11px;
+}
+
+.database-connection-grid dd {
+  overflow-wrap: anywhere;
+  color: var(--text-dim);
+  font: 12px/1.5 var(--mono);
+}
+
+.database-connection-note {
+  margin: 0;
+  padding: 12px 14px;
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
 .text-dim {
   color: var(--text-dim);
 }

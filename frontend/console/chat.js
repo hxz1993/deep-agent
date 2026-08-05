@@ -105,6 +105,10 @@ const state = {
   lastRunUsage: null,
   manualCompacting: false,
   manualCompactionController: null,
+  automaticCompactionRow: null,
+  automaticCompactionTimer: null,
+  pendingAutomaticCompaction: null,
+  automaticCompactionAnchor: null,
 };
 
 const TITLE_POLL_TIMEOUT_MS = 30000;
@@ -260,6 +264,7 @@ function showEmptyState() {
 }
 
 function clearMessages() {
+  clearAutomaticCompactionState();
   el.messages.innerHTML = "";
 }
 
@@ -884,17 +889,21 @@ function updateComposerContextControls() {
   if (el.attachBtn) el.attachBtn.disabled = busy;
 }
 
-function createManualCompactionRow() {
+function createContextCompactionRow(beforeNode = null) {
   hideEmptyState();
   const row = document.createElement("div");
   row.className = "context-compaction-row";
   row.innerHTML = '<span class="spinner" aria-hidden="true"></span><span class="status-text">正在分析上下文…</span>';
-  el.messages.appendChild(row);
+  if (beforeNode?.parentNode === el.messages) {
+    el.messages.insertBefore(row, beforeNode);
+  } else {
+    el.messages.appendChild(row);
+  }
   scrollToBottom();
   return row;
 }
 
-function setManualCompactionRow(row, message, { failed = false, retry = false, active = true } = {}) {
+function setContextCompactionRow(row, message, { failed = false, retry = false, active = true } = {}) {
   if (!row) return;
   row.classList.toggle("failed", failed);
   row.innerHTML = `${active && !failed ? '<span class="spinner" aria-hidden="true"></span>' : ""}<span class="status-text"></span>`;
@@ -912,6 +921,124 @@ function setManualCompactionRow(row, message, { failed = false, retry = false, a
   scrollToBottom();
 }
 
+function clearAutomaticCompactionState({ remove = false } = {}) {
+  state.pendingAutomaticCompaction = null;
+  if (state.automaticCompactionTimer) {
+    window.clearTimeout(state.automaticCompactionTimer);
+    state.automaticCompactionTimer = null;
+  }
+  if (remove) state.automaticCompactionRow?.remove();
+  state.automaticCompactionRow = null;
+  state.automaticCompactionAnchor = null;
+}
+
+function showAutomaticContextCompaction(data, beforeNode) {
+  state.pendingAutomaticCompaction = data;
+  state.automaticCompactionAnchor = beforeNode || state.automaticCompactionAnchor;
+  if (state.automaticCompactionRow) {
+    setContextCompactionRow(
+      state.automaticCompactionRow,
+      contextCompactionPresentation(data).message,
+    );
+    return;
+  }
+  if (state.automaticCompactionTimer) return;
+  state.automaticCompactionTimer = window.setTimeout(() => {
+    state.automaticCompactionTimer = null;
+    if (!state.pendingAutomaticCompaction) return;
+    state.automaticCompactionRow = createContextCompactionRow(
+      state.automaticCompactionAnchor,
+    );
+    setContextCompactionRow(
+      state.automaticCompactionRow,
+      contextCompactionPresentation(state.pendingAutomaticCompaction).message,
+    );
+  }, 150);
+}
+
+function finalizeAutomaticContextCompaction(context, runStatus) {
+  const compaction = context?.compaction;
+  if (!compaction?.triggered && !state.pendingAutomaticCompaction) {
+    clearAutomaticCompactionState({ remove: true });
+    return false;
+  }
+  if (!state.automaticCompactionRow) {
+    state.automaticCompactionRow = createContextCompactionRow(
+      state.automaticCompactionAnchor,
+    );
+  }
+  const row = state.automaticCompactionRow;
+  if (runStatus === "pending") {
+    setContextCompactionRow(
+      row,
+      "本轮上下文已整理，完成工具交互后再更新 Checkpoint",
+      { active: false },
+    );
+    state.automaticCompactionRow = null;
+    state.pendingAutomaticCompaction = null;
+    state.automaticCompactionAnchor = null;
+    window.setTimeout(() => row.remove(), 2500);
+    return false;
+  }
+  if (
+    compaction?.summary_applied
+    && !compaction?.summary_failed
+    && compaction?.target_met
+    && compaction?.strategy !== "sliding_window_fallback"
+    && compaction?.checkpoint_saved === true
+  ) {
+    setContextCompactionRow(
+      row,
+      `上下文已压缩：${compactTokenLabel(compaction.estimated_tokens_before)} → ${compactTokenLabel(compaction.estimated_tokens_after)} Token`,
+      { active: false },
+    );
+    clearAutomaticCompactionState();
+    return true;
+  }
+  if (
+    compaction?.summary_applied
+    && compaction?.target_met
+    && compaction?.checkpoint_saved === false
+  ) {
+    setContextCompactionRow(
+      row,
+      "上下文已压缩，但 Checkpoint 保存失败",
+      { failed: true, active: false },
+    );
+    state.automaticCompactionRow = null;
+    state.pendingAutomaticCompaction = null;
+    state.automaticCompactionAnchor = null;
+    window.setTimeout(() => row.remove(), 3500);
+    return false;
+  }
+  const temporary = compaction?.strategy === "sliding_window_fallback";
+  setContextCompactionRow(
+    row,
+    temporary
+      ? "本轮临时缩减，未更新 Checkpoint"
+      : "本轮上下文已整理，未生成新的 Checkpoint",
+    { active: false },
+  );
+  state.automaticCompactionRow = null;
+  state.pendingAutomaticCompaction = null;
+  state.automaticCompactionAnchor = null;
+  window.setTimeout(() => row.remove(), 2500);
+  return false;
+}
+
+function failAutomaticContextCompaction(message) {
+  if (!state.pendingAutomaticCompaction && !state.automaticCompactionRow) return;
+  if (!state.automaticCompactionRow) {
+    state.automaticCompactionRow = createContextCompactionRow(
+      state.automaticCompactionAnchor,
+    );
+  }
+  const row = state.automaticCompactionRow;
+  setContextCompactionRow(row, message, { failed: true, active: false });
+  clearAutomaticCompactionState();
+  window.setTimeout(() => row.remove(), 2500);
+}
+
 function showConsoleToast(message, isError = false) {
   if (window.DeepAgentConsole?.toast) window.DeepAgentConsole.toast(message, isError);
 }
@@ -920,7 +1047,7 @@ async function compactCurrentContext() {
   if (!state.sessionId || state.manualCompacting || state.streaming || state.awaitingHitl) return;
   if (!state.contextStatus?.manual_compaction_available) return;
   const session = { id: state.sessionId, agentId: state.agentId };
-  const row = createManualCompactionRow();
+  const row = createContextCompactionRow();
   state.manualCompacting = true;
   state.manualCompactionController = new AbortController();
   updateComposerContextControls();
@@ -939,7 +1066,7 @@ async function compactCurrentContext() {
     }
     await readSse(response.body, ({ event, data }) => {
       if (event === "context_compaction") {
-        setManualCompactionRow(row, data.message || "正在处理上下文…");
+        setContextCompactionRow(row, data.message || "正在处理上下文…");
       } else if (event === "context_compaction_result") {
         result = data;
       }
@@ -947,26 +1074,26 @@ async function compactCurrentContext() {
     if (!result) throw new Error("压缩流未返回最终结果");
     if (result.status === "completed") {
       const message = `上下文已压缩：${compactTokenLabel(result.before_tokens)} → ${compactTokenLabel(result.after_tokens)} Token`;
-      setManualCompactionRow(row, message, { active: false });
+      setContextCompactionRow(row, message, { active: false });
       state.contextStatus = result.context_status || state.contextStatus;
       showConsoleToast(message);
       await refreshCurrentHistory();
     } else if (result.status === "noop") {
       const message = MANUAL_COMPACTION_REASON_LABELS[result.reason]
         || "本次压缩未产生明显效果";
-      setManualCompactionRow(row, message, { active: false });
+      setContextCompactionRow(row, message, { active: false });
       state.contextStatus = result.context_status || state.contextStatus;
       showConsoleToast(message);
       updateComposerContextControls();
       window.setTimeout(() => row.remove(), 2500);
     } else {
       const message = MANUAL_COMPACTION_REASON_LABELS[result.reason] || `压缩失败：${result.reason || "未知错误"}`;
-      setManualCompactionRow(row, message, { failed: true, retry: true });
+      setContextCompactionRow(row, message, { failed: true, retry: true });
       showConsoleToast(message, true);
     }
   } catch (error) {
     const message = error.name === "AbortError" ? "上下文压缩已取消" : `上下文压缩失败：${error.message}`;
-    setManualCompactionRow(row, message, { failed: true, retry: error.name !== "AbortError" });
+    setContextCompactionRow(row, message, { failed: true, retry: error.name !== "AbortError" });
     showConsoleToast(message, true);
   } finally {
     state.manualCompacting = false;
@@ -1623,6 +1750,7 @@ async function runChatStream(payload, assistant) {
   } catch (e) {
     if (e.name === "AbortError") {
       stoppedByUser = true;
+      failAutomaticContextCompaction("上下文压缩已取消，未更新 Checkpoint");
       assistant.finalizeThinking();
       assistant.finalizeText();
       if (!state.streamCancelled) {
@@ -1630,10 +1758,10 @@ async function runChatStream(payload, assistant) {
       }
     } else {
       setConn("err", "请求失败");
+      failAutomaticContextCompaction("上下文压缩后续请求失败，未更新 Checkpoint");
       addErrorTo(assistant, `请求失败：${e.message}`);
     }
   } finally {
-    assistant.hideContextCompaction();
     assistant.finalizeThinking();
     assistant.finalizeText();
     setStreaming(false);
@@ -1725,26 +1853,22 @@ function handleEvent({ event, data }, assistant) {
       break;
     }
     case "context_compaction":
-      assistant.showContextCompaction(data);
+      showAutomaticContextCompaction(data, assistant.row);
       break;
     case "thinking":
-      assistant.hideContextCompaction();
       assistant.appendThinking(data.delta || "");
       break;
     case "text":
-      assistant.hideContextCompaction();
       assistant.finalizeThinking();
       assistant.appendText(data.delta || "");
       break;
     case "tool_call":
-      assistant.hideContextCompaction();
       assistant.addToolCall(data);
       break;
     case "tool_result":
       assistant.addToolResult(data);
       break;
     case "final":
-      assistant.hideContextCompaction();
       assistant.finalizeThinking();
       assistant.finalizeText();
       syncHistoryMeta(data);
@@ -1760,7 +1884,8 @@ function handleEvent({ event, data }, assistant) {
         };
         if (state.sessionId) void loadContextStatus(state.sessionId);
       }
-      state.skipHistoryRefresh = true;
+      const refreshCompactionHistory = finalizeAutomaticContextCompaction(data.context, data.status);
+      state.skipHistoryRefresh = !refreshCompactionHistory;
       if (data.status === "pending" && data.deferred) {
         state.awaitingHitl = true;
         setStreaming(false);
@@ -1774,7 +1899,7 @@ function handleEvent({ event, data }, assistant) {
       updateHitlInputState();
       break;
     case "error":
-      assistant.hideContextCompaction();
+      failAutomaticContextCompaction("上下文压缩后续请求失败，未更新 Checkpoint");
       assistant.finalizeThinking();
       assistant.finalizeText();
       syncHistoryMeta(data);
@@ -1786,7 +1911,7 @@ function handleEvent({ event, data }, assistant) {
       });
       break;
     case "cancelled":
-      assistant.hideContextCompaction();
+      failAutomaticContextCompaction("上下文压缩已取消，未更新 Checkpoint");
       state.streamCancelled = true;
       assistant.finalizeThinking();
       assistant.finalizeText();
@@ -2034,40 +2159,7 @@ function createAssistantMessage(timestamp, branchPoint) {
   let textBubble = null;
   let thinkingBlock = null;
   let thinkingBuffer = "";
-  let contextCompactionBlock = null;
-  let contextCompactionTimer = null;
-  let pendingContextCompaction = null;
   const toolBlocks = new Map(); // tool_call_id -> element
-
-  function renderContextCompaction(data) {
-    const presentation = contextCompactionPresentation(data);
-    if (!presentation.active) return;
-    if (!contextCompactionBlock) {
-      contextCompactionBlock = document.createElement("div");
-      contextCompactionBlock.className = "context-compaction-status";
-      contextCompactionBlock.innerHTML = `
-        <span class="context-compaction-icon">↻</span>
-        <span class="context-compaction-copy"></span>
-        <span class="spinner"></span>`;
-      wrap.appendChild(contextCompactionBlock);
-    }
-    contextCompactionBlock.dataset.phase = presentation.phase;
-    contextCompactionBlock.querySelector(".context-compaction-copy").textContent =
-      presentation.message;
-    scrollToBottom();
-  }
-
-  function clearContextCompaction() {
-    pendingContextCompaction = null;
-    if (contextCompactionTimer) {
-      clearTimeout(contextCompactionTimer);
-      contextCompactionTimer = null;
-    }
-    if (contextCompactionBlock) {
-      contextCompactionBlock.remove();
-      contextCompactionBlock = null;
-    }
-  }
 
   function ensureThinkingBlock() {
     if (!thinkingBlock) {
@@ -2118,23 +2210,6 @@ function createAssistantMessage(timestamp, branchPoint) {
 
   return {
     row,
-    showContextCompaction(data) {
-      pendingContextCompaction = data;
-      if (contextCompactionBlock) {
-        renderContextCompaction(data);
-        return;
-      }
-      if (contextCompactionTimer) return;
-      contextCompactionTimer = setTimeout(() => {
-        contextCompactionTimer = null;
-        if (pendingContextCompaction) {
-          renderContextCompaction(pendingContextCompaction);
-        }
-      }, 150);
-    },
-    hideContextCompaction() {
-      clearContextCompaction();
-    },
     appendThinking(delta) {
       thinkingBuffer += delta;
       renderThinkingContent();

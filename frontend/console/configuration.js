@@ -1,6 +1,6 @@
 let initialized = false;
 let loadingPromise = null;
-const CONFIGURATION_ASSET_VERSION = "20260731-1";
+const CONFIGURATION_ASSET_VERSION = "20260805-1";
 const CONFIGURATION_TABS = new Set([
   "agents",
   "llm-models",
@@ -9,6 +9,7 @@ const CONFIGURATION_TABS = new Set([
   "ui-tools",
   "auxiliary-models",
   "global-settings",
+  "database-connection",
   "catalog",
 ]);
 let activeConfigurationTab = "agents";
@@ -78,6 +79,7 @@ async function loadAdminScripts() {
     "./configuration/core.js",
     "./configuration/form-feedback.js",
     "./configuration/global-settings.js",
+    "./configuration/database-connection.js",
     "./configuration/llm-models.js",
     "./configuration/auxiliary-models.js",
     "./configuration/agents.js",
@@ -127,6 +129,7 @@ function decorateConfiguration() {
 export function refreshCurrentConfiguration() {
   const active = document.querySelector(".resource-btn.active")?.dataset.tab;
   if (active === "global-settings") return window.globalSettingsAdmin?.refresh();
+  if (active === "database-connection") return window.databaseConnectionAdmin?.refresh();
   if (active === "agents") return window.agentsAdmin?.refresh();
   if (active === "llm-models") return window.llmModelsAdmin?.refresh();
   if (active === "builtin-tools") return window.builtinToolsAdmin?.refresh();

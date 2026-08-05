@@ -151,6 +151,9 @@ function initTabs() {
       if (name === "global-settings" && window.globalSettingsAdmin) {
         window.globalSettingsAdmin.refresh();
       }
+      if (name === "database-connection" && window.databaseConnectionAdmin) {
+        window.databaseConnectionAdmin.refresh();
+      }
       if (name === "agents" && window.agentsAdmin) {
         loadLlmModels().then(() => window.agentsAdmin.refresh());
       }

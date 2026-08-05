@@ -239,6 +239,10 @@ DB Agent 模式（请求体含 `agent_id`）：
 `thinking`、`text`、`tool_call` 或任何结束事件后移除。该事件不属于模型消息，不能加入
 assistant 正文，也不会出现在历史接口中。
 
+v0.3.6 中 `summarizing` 表示一次语义摘要，不代表分块序号。遇到 429、502、503、504、连接
+重置或超时时，服务端可用完全相同的摘要请求重试一次，并发送“模型暂时不可用，正在重试摘要”；
+这仍是一份摘要，兼容字段 `summary_chunks` 固定为 `1`。
+
 #### 主动压缩流
 
 `POST /api/v1/sessions/{session_id}/compact?agent_id=...` 使用同一
@@ -247,7 +251,8 @@ assistant 正文，也不会出现在历史接口中。
 当前 Checkpoint 和刷新后的 `context_status`；`noop` 表示本次未产生可保存的压缩结果，可能
 是空历史、无安全摘要前缀或没有明显 Token 收益，不能据此假定模型一定未被调用；`failed`
 表示旧 Checkpoint 保持不变。该接口不产生普通 `text/final` 助手回复，也不因已有 Checkpoint
-或缺少新增消息而拒绝再次尝试。
+或缺少新增消息而拒绝入口操作；但当前有效 Checkpoint 已覆盖全部原始历史时，不会反复只压缩
+旧摘要，而是返回 `noop/no_reduction`。
 
 ---
 

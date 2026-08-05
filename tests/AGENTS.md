@@ -54,7 +54,7 @@ tests/
 | `test_catalog.py` | models.dev Lab/Model/Provider 标准化、白名单、扩展元数据和数据库视图 |
 | `test_models_dev.py` | models.dev 严格获取与 Lab 可选补充 |
 | `test_llm_models.py` | 模型上下文、最大输出、输入模态与 tags Store/Schema |
-| `test_context_compaction.py` | 统一 Token 估算、动态输出预测、usage 回读、主模型滚动摘要、SSE 状态、原始历史不改写、脱敏 Checkpoint、CAS 与兜底 |
+| `test_context_compaction.py` | 统一 Token 估算、动态输出预测、usage 回读、主模型单次摘要、同输入瞬时错误重试、SSE 状态、原始历史不改写、脱敏 Checkpoint、CAS 与兜底 |
 | `test_context_test_scenarios.py` | 管理员测试会话场景、实时预算、消息往返序列化、常驻接口与用户归属 |
 | `test_attachment_extractors.py` | 文本编码、DOCX/XLSX 结构读取、分页与 Office 安全 |
 | `test_attachment_tools.py` | 附件工具默认参数、会话范围、缓存、分页和多模态返回 |

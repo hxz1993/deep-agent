@@ -41,7 +41,7 @@ Pydantic AI Core 与现有产品层，选择性吸收上游的上下文治理机
 - Harness 摘要不会自动成为 DeepAgent 原始历史的一部分。
 - Tool Call/Result 配对、Pending HITL、分支和取消必须由 DeepAgent 补齐。
 
-因此采用“确定性裁剪优先、主模型滚动摘要、Sliding Window 仅失败兜底”的组合，并把结果
+因此采用“确定性裁剪优先、主模型单次摘要、Sliding Window 仅自动链路失败兜底”的组合，并把结果
 保存为独立 Checkpoint 投影。
 
 ## 为什么不能只依赖 Provider usage

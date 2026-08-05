@@ -51,10 +51,9 @@ _SUMMARY_TEMPLATE = """请压缩下面的会话历史。输出紧凑的 Markdown
 </history>
 {previous_summary}
 """
-_MAX_SUMMARY_CHUNKS = 4
-_MAX_SUMMARY_CALLS = 5
-_MIN_SUMMARY_INPUT_TOKENS = 16_384
-_MAX_SUMMARY_INPUT_TOKENS = 196_608
+_MAX_SUMMARY_ATTEMPTS = 2
+_SUMMARY_RETRY_DELAY_SECONDS = 1.0
+_TRANSIENT_STATUS_CODES = frozenset({429, 502, 503, 504})
 
 
 class ContextWindowExceededError(ValueError):
@@ -253,17 +252,46 @@ def _summary_output_limit(
     )
 
 
-def _summary_input_limit(target_tokens: int, context_window_tokens: int) -> int:
-    """Bound summary chunks even when a provider advertises a huge window."""
+def _summary_safety_tokens(estimator: TokenEstimator, prompt_tokens: int) -> int:
+    ratio = 0.05 if estimator.source == "model_tokenizer" else 0.10
+    return max(1_024, math.ceil(prompt_tokens * ratio))
 
-    return max(
-        1,
-        min(
-            context_window_tokens,
-            _MAX_SUMMARY_INPUT_TOKENS,
-            max(_MIN_SUMMARY_INPUT_TOKENS, math.floor(target_tokens * 0.50)),
-        ),
+
+def _status_code(exc: BaseException) -> int | None:
+    current: BaseException | None = exc
+    visited: set[int] = set()
+    while current is not None and id(current) not in visited:
+        visited.add(id(current))
+        status = getattr(current, "status_code", None)
+        if isinstance(status, int):
+            return status
+        response = getattr(current, "response", None)
+        status = getattr(response, "status_code", None)
+        if isinstance(status, int):
+            return status
+        current = current.__cause__ or current.__context__
+    return None
+
+
+def _is_transient_summary_error(exc: BaseException) -> bool:
+    status = _status_code(exc)
+    if status is not None:
+        return status in _TRANSIENT_STATUS_CODES
+    if isinstance(exc, (TimeoutError, ConnectionError)):
+        return True
+    message = f"{type(exc).__name__}: {exc}".lower()
+    transient_markers = (
+        "connection reset",
+        "connection aborted",
+        "connection refused",
+        "server disconnected",
+        "read timeout",
+        "connect timeout",
+        "timed out",
+        "temporarily unavailable",
+        "temporary failure",
     )
+    return any(marker in message for marker in transient_markers)
 
 
 def _request_estimate(
@@ -392,16 +420,14 @@ class DeepAgentContextCompaction(AbstractCapability[Any]):
                 request_context,
             )
             if after_deterministic > target:
-                async with asyncio.timeout(
-                    min(300.0, self.summary_timeout * _MAX_SUMMARY_CALLS)
-                ):
-                    compacted = await self._summarize_to_target(
-                        compacted,
-                        ctx,
-                        request_context,
-                        target,
-                        state,
-                    )
+                compacted = await self._summarize_to_target(
+                    compacted,
+                    ctx,
+                    request_context,
+                    target,
+                    state,
+                    reserve_answer_request=True,
+                )
             final_estimate = _request_estimate(
                 state.estimator,
                 compacted,
@@ -415,12 +441,24 @@ class DeepAgentContextCompaction(AbstractCapability[Any]):
             telemetry.summary_failed = True
             telemetry.failure = type(exc).__name__
             telemetry.fallback_reason = reason
-            compacted = self._sliding_window(
-                messages,
-                request_context,
-                target,
-                state.estimator,
-            )
+            try:
+                compacted = self._sliding_window(
+                    messages,
+                    request_context,
+                    target,
+                    state.estimator,
+                )
+            except ContextWindowExceededError:
+                # The 55% target is an optimization goal, not the model's hard
+                # input ceiling. Keep the request answerable when protected
+                # context fits the usable window but cannot fit the target.
+                fallback_limit = budget.usable_request_tokens or target
+                compacted = self._sliding_window(
+                    messages,
+                    request_context,
+                    fallback_limit,
+                    state.estimator,
+                )
             telemetry.strategy = "sliding_window_fallback"
             telemetry.target_met = (
                 _request_estimate(state.estimator, compacted, request_context)
@@ -541,6 +579,7 @@ class DeepAgentContextCompaction(AbstractCapability[Any]):
             request_context,
             target_tokens,
             state,
+            reserve_answer_request=False,
         )
         after = _request_estimate(state.estimator, compacted, request_context)
         if after > target_tokens:
@@ -642,61 +681,58 @@ class DeepAgentContextCompaction(AbstractCapability[Any]):
         request_context: "ModelRequestContext",
         target: int,
         state: ContextRunState,
+        *,
+        reserve_answer_request: bool,
     ) -> list[ModelMessage]:
-        first = await self._summarize_projection(
+        compacted = await self._summarize_projection(
             messages,
             ctx,
+            request_context,
             target,
-            keep_ratio=0.45,
             state=state,
+            reserve_answer_request=reserve_answer_request,
         )
-        if _request_estimate(state.estimator, first, request_context) <= target:
-            return first
-        if state.telemetry.summary_calls >= _MAX_SUMMARY_CALLS:
+        if _request_estimate(state.estimator, compacted, request_context) > target:
             raise SummaryUnavailable("target_not_met")
-        tighter = await self._summarize_projection(
-            messages,
-            ctx,
-            target,
-            keep_ratio=0.30,
-            state=state,
-        )
-        if _request_estimate(state.estimator, tighter, request_context) > target:
-            raise SummaryUnavailable("target_not_met")
-        return tighter
+        return compacted
 
     async def _summarize_projection(
         self,
         messages: list[ModelMessage],
         ctx: RunContext[Any],
+        request_context: "ModelRequestContext",
         target: int,
         *,
-        keep_ratio: float,
         state: ContextRunState,
+        reserve_answer_request: bool,
     ) -> list[ModelMessage]:
         estimator = state.estimator
-        cutoff = _safe_tail_cutoff(
-            messages,
-            keep_tokens=max(1, int(target * keep_ratio)),
-            estimator=estimator,
-        )
-        if cutoff <= 0:
-            raise SummaryUnavailable("no_safe_summary_prefix")
         previous = _summary_contents(messages)
         previous_summary = previous[-1] if previous else None
         first_user = _first_user_message(messages)
+        output_limit = _summary_output_limit(target, self.max_output_tokens)
+        cutoff = self._single_summary_cutoff(
+            messages,
+            request_context,
+            target=target,
+            output_limit=output_limit,
+            previous_summary=previous_summary,
+            first_user=first_user,
+            estimator=estimator,
+        )
         to_summarize = _strip_summary_and_system(
             messages[:cutoff],
             first_user=first_user,
         )
         if not to_summarize:
             raise SummaryUnavailable("no_new_summary_content")
-        summary = await self._rolling_summary(
+        summary = await self._single_summary(
             to_summarize,
             previous_summary,
             ctx,
-            target,
+            output_limit,
             state,
+            reserve_answer_request=reserve_answer_request,
         )
         summary_message = ModelRequest(
             parts=[
@@ -710,101 +746,153 @@ class DeepAgentContextCompaction(AbstractCapability[Any]):
             first_messages.append(first_user)
         return [summary_message, *first_messages, *preserved]
 
-    async def _rolling_summary(
+    def _single_summary_cutoff(
+        self,
+        messages: list[ModelMessage],
+        request_context: "ModelRequestContext",
+        *,
+        target: int,
+        output_limit: int,
+        previous_summary: str | None,
+        first_user: ModelRequest | None,
+        estimator: TokenEstimator,
+    ) -> int:
+        """Pick one safe prefix while preserving as much recent history as possible."""
+
+        saw_summary_content = False
+        for cutoff in _safe_boundaries(messages):
+            if cutoff <= 0:
+                continue
+            to_summarize = _strip_summary_and_system(
+                messages[:cutoff],
+                first_user=first_user,
+            )
+            if not to_summarize:
+                continue
+            saw_summary_content = True
+            preserved = list(messages[cutoff:])
+            first_messages: list[ModelMessage] = []
+            if first_user is not None and first_user not in preserved:
+                first_messages.append(first_user)
+            summary_shell = ModelRequest(
+                parts=[
+                    *_system_parts(messages),
+                    SystemPromptPart(content=_SUMMARY_PREFIX),
+                ]
+            )
+            projected_without_summary = [
+                summary_shell,
+                *first_messages,
+                *preserved,
+            ]
+            projected_tokens = _request_estimate(
+                estimator,
+                projected_without_summary,
+                request_context,
+            )
+            if projected_tokens + output_limit > target:
+                continue
+
+            prompt = _summary_prompt(to_summarize, previous_summary)
+            prompt_tokens = (
+                estimator.text(_SUMMARY_INSTRUCTIONS)
+                + estimator.text(prompt)
+            )
+            safety = _summary_safety_tokens(estimator, prompt_tokens)
+            if (
+                prompt_tokens + output_limit + safety
+                <= self.context_window_tokens
+            ):
+                return cutoff
+
+        if saw_summary_content:
+            raise SummaryUnavailable("summary_input_too_large")
+        raise SummaryUnavailable("no_safe_summary_prefix")
+
+    async def _single_summary(
         self,
         messages: list[ModelMessage],
         previous_summary: str | None,
         ctx: RunContext[Any],
-        target: int,
+        output_limit: int,
         state: ContextRunState,
+        *,
+        reserve_answer_request: bool,
     ) -> str:
         estimator = state.estimator
-        units = _logical_units(messages)
-        if not units:
-            raise SummaryUnavailable("no_safe_summary_units")
-        output_limit = _summary_output_limit(target, self.max_output_tokens)
-        input_limit = _summary_input_limit(target, self.context_window_tokens)
-        remaining = list(units)
-        rolling = previous_summary
-        chunks = 0
-        while remaining:
-            if chunks >= _MAX_SUMMARY_CHUNKS:
-                raise SummaryUnavailable("summary_chunk_limit")
-            if state.telemetry.summary_calls >= _MAX_SUMMARY_CALLS:
-                raise SummaryUnavailable("summary_call_limit")
+        prompt = _summary_prompt(messages, previous_summary)
+        prompt_tokens = estimator.text(_SUMMARY_INSTRUCTIONS) + estimator.text(prompt)
+        safety = _summary_safety_tokens(estimator, prompt_tokens)
+        if prompt_tokens + output_limit + safety > self.context_window_tokens:
+            raise SummaryUnavailable("summary_input_too_large")
+
+        summary_agent: Agent[None, str] = Agent(
+            ctx.model,
+            instructions=_SUMMARY_INSTRUCTIONS,
+        )
+        for attempt in range(_MAX_SUMMARY_ATTEMPTS):
             request_limit = (
                 state.usage_limits.request_limit
                 if state.usage_limits is not None
                 else None
             )
+            reserve = 1 if reserve_answer_request else 0
             if (
                 request_limit is not None
-                and ctx.usage.requests >= max(0, request_limit - 1)
+                and ctx.usage.requests >= max(0, request_limit - reserve)
             ):
                 raise SummaryUnavailable("request_limit_reserved")
-
-            chunk: list[ModelMessage] = []
-            consumed = 0
-            for unit in remaining:
-                candidate = [*chunk, *unit]
-                prompt = _summary_prompt(candidate, rolling)
-                prompt_tokens = estimator.text(_SUMMARY_INSTRUCTIONS) + estimator.text(prompt)
-                safety = max(
-                    1_024,
-                    math.ceil(
-                        prompt_tokens
-                        * (0.05 if estimator.source == "model_tokenizer" else 0.10)
-                    ),
+            if attempt == 0:
+                state.emit(
+                    "summarizing",
+                    "正在生成上下文摘要…",
+                    summary_call=1,
+                    summary_chunk=1,
                 )
-                if (
-                    prompt_tokens > input_limit
-                    or prompt_tokens + output_limit + safety > self.context_window_tokens
-                ):
-                    break
-                chunk = candidate
-                consumed += 1
-            if not chunk:
-                raise SummaryUnavailable("summary_unit_too_large")
-
-            prompt = _summary_prompt(chunk, rolling)
-            state.emit(
-                "summarizing",
-                f"正在生成第 {chunks + 1} 段摘要…",
-                summary_call=state.telemetry.summary_calls + 1,
-                summary_chunk=chunks + 1,
-            )
+            else:
+                state.emit(
+                    "summarizing",
+                    "模型暂时不可用，正在重试摘要…",
+                    summary_call=2,
+                    summary_chunk=1,
+                    retry=True,
+                )
+            state.telemetry.summary_calls += 1
+            state.telemetry.summary_chunks = 1
+            usage_requests_before_attempt = ctx.usage.requests
             try:
                 async with asyncio.timeout(self.summary_timeout):
-                    summary_agent: Agent[None, str] = Agent(
-                        ctx.model,
-                        instructions=_SUMMARY_INSTRUCTIONS,
-                    )
                     result = await summary_agent.run(
                         prompt,
                         usage=ctx.usage,
                         usage_limits=state.usage_limits,
                         model_settings=ModelSettings(max_tokens=output_limit),
                     )
-            except TimeoutError as exc:
-                raise SummaryUnavailable("summary_timeout") from exc
             except Exception as exc:
+                if ctx.usage.requests == usage_requests_before_attempt:
+                    # Pydantic AI can only merge Provider usage after a response.
+                    # A transport/status failure is still a real model request and
+                    # must consume the shared global request allowance.
+                    ctx.usage.requests += 1
                 logger.warning(
                     "Context summary model request failed: {}: {}",
                     type(exc).__name__,
                     str(exc)[:200],
                 )
-                raise SummaryUnavailable("summary_provider_error") from exc
-            rolling = str(result.output).strip()
-            if not rolling:
+                if attempt == 0 and _is_transient_summary_error(exc):
+                    await asyncio.sleep(_SUMMARY_RETRY_DELAY_SECONDS)
+                    continue
+                reason = (
+                    "summary_timeout"
+                    if isinstance(exc, TimeoutError)
+                    else "summary_provider_error"
+                )
+                raise SummaryUnavailable(reason) from exc
+            summary = str(result.output).strip()
+            if not summary:
                 raise SummaryUnavailable("summary_empty")
-            state.telemetry.summary_calls += 1
-            chunks += 1
-            state.telemetry.summary_chunks = max(
-                state.telemetry.summary_chunks,
-                chunks,
-            )
-            remaining = remaining[consumed:]
-        return rolling or ""
+            return summary
+        raise SummaryUnavailable("summary_provider_error")
 
     def _sliding_window(
         self,

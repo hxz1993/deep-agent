@@ -206,6 +206,15 @@ class AgentRunner:
                 )
                 yield _manual_compaction_result(outcome, availability.reason)
                 return
+            if (
+                loaded.used_checkpoint
+                and checkpoint is not None
+                and checkpoint.source_last_sequence == len(raw) - 1
+            ):
+                # Re-summarizing only the current derived projection compounds
+                # information loss without incorporating any new source facts.
+                yield _manual_compaction_result("noop", "no_reduction")
+                return
 
             configured_target = budget.target_tokens or budget.estimated_history_tokens
             target_tokens = max(

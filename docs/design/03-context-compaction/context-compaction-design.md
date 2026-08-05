@@ -155,7 +155,7 @@ target_tokens  = usable_request_tokens × 0.55
    ├─ ClampOversizedMessages
    ├─ DeduplicateFileReads
    ├─ ClearToolResults
-   ├─ 主模型安全滚动摘要
+   ├─ 主模型安全单次摘要
    └─ Sliding Window 失败兜底
 → 每层后重新估算
 → 低于 55% 目标线立即停止
@@ -187,7 +187,7 @@ target_tokens  = usable_request_tokens × 0.55
 - 不拆散 Tool Call/Result 配对。
 - 排除 `builtin__confirm`、`builtin__choice`、`deep_cube__clarify`。
 
-### 4.4 主模型安全滚动摘要
+### 4.4 主模型安全单次摘要
 
 确定性压缩仍高于目标线时才摘要。摘要模型就是本轮主模型。
 
@@ -226,31 +226,30 @@ S1 = summarize(S0 + 新纳入摘要的旧历史)
 
 ### 4.5 防止摘要请求自身超窗
 
-每次摘要单独计算预算：
+摘要调用前单独计算预算：
 
 ```text
-摘要请求 = 摘要系统指令 + 旧摘要 + 当前历史块 + 格式化标签
+摘要请求 = 摘要系统指令 + 旧摘要 + 待摘要前缀 + 格式化标签
 可用范围 = 模型总窗口 - 动态摘要输出上限 - 安全余量
 ```
 
-待摘要内容过大时，按安全消息边界滚动：
+DeepAgent 遍历 Tool Call/Result 配对安全边界，寻找同时满足下面两项、并保留最近历史最多的
+唯一切分点：
 
-```text
-S0 + 第一块 → 临时摘要 S1
-S1 + 第二块 → 临时摘要 S2
-S2 + 第三块 → 最终摘要 S3
-```
+1. `摘要最大输出 + 首条任务 + 最近尾部 + 工具定义` 不超过压缩目标。
+2. `摘要指令 + 旧摘要 + 待摘要前缀 + 摘要最大输出 + 安全余量` 不超过模型上下文窗口。
 
-即使模型声明了超大上下文窗口，单次摘要输入也不能直接吃满整个窗口。DeepAgent 根据压缩目标
-动态限制摘要块，并把单块估算输入封顶在 192K Token；该值属于内部算法保护，不增加模型字段、
-环境变量或 Console 配置。这样 1M 窗口的测试历史会滚动生成多个摘要，而不是一次提交接近触发
-线的超大摘要请求，降低私有 OpenAI-compatible Provider 超时或 503 后连续多轮兜底的概率。
+使用模型 tokenizer 时安全余量取摘要请求估算的 5%，保守估算器取 10%，且至少 1024 Token。
+不再设置 192K 固定输入封顶；真实上限由当前模型的 `context_window_tokens` 决定。找不到两项
+条件的交集时，不截断摘要源，也不拆成多段逐步归纳：自动压缩只为当前回答使用 Sliding Window，
+主动压缩返回 `failed/summary_input_too_large`，均保留旧 Checkpoint。
 
-- 单次摘要不拆散 Tool Call/Result。
-- 单轮最多 4 个摘要块、最多 5 次摘要请求。
+- 一次压缩只生成一份摘要，不拆散 Tool Call/Result。
 - 摘要输出上限由目标预算动态计算，最多 4096 Token，并受模型 `max_output_tokens` 限制。
 - 摘要调用前为正式回答保留至少一次全局请求额度。
-- 摘要超时、Provider 异常、块过大或次数不足时进入 Sliding Window。
+- 429、502、503、504、连接重置或超时可使用完全相同的 Prompt 等待 1 秒后重试一次；认证、
+  权限、参数、Schema 和明确超窗错误不重试。
+- `summary_calls` 记录实际请求数，正常为 1，重试成功为 2；兼容字段 `summary_chunks` 固定为 1。
 
 ### 4.6 摘要后复检
 
@@ -259,7 +258,7 @@ target_met = estimated_tokens_after <= target_tokens
 reduction_ratio = 1 - after / before
 ```
 
-第一次摘要未达标时会用更短保留尾部再尝试一次。仍不达标则：
+摘要未达标时不再用更短尾部发起第二轮语义摘要，而是：
 
 1. 本轮使用 Sliding Window。
 2. 标记 `target_met=false` 或记录兜底结果。
@@ -348,7 +347,7 @@ chat_messages.payload.usage
 - 输出预测值、样本数、Provider/估算样本数和来源。
 - estimator 来源。
 - trigger、target、压缩前后 Token、缩减比例和策略。
-- 摘要次数、分块数、失败原因和是否达标。
+- 摘要实际请求次数、兼容分块字段（单次摘要固定为 1）、失败原因和是否达标。
 - Provider input usage 与估算误差（Provider 提供时）。
 
 ## 7. SSE 与 Console
@@ -398,7 +397,7 @@ Accept: text/event-stream
 
 它不创建用户消息或助手回复，也不支持 `/compact` 文本命令。接口跳过 80% 自动触发判断；
 历史较短、已经压缩或 Checkpoint 后没有新增消息都不构成入口限制。已有 Checkpoint 时以当前
-投影再次尝试压缩，成功后覆盖同一行并增加 `row_version`。确定性整理、滚动摘要、目标复检、
+投影再次尝试压缩，成功后覆盖同一行并增加 `row_version`。确定性整理、单次摘要、目标复检、
 原始历史 Hash 和 Checkpoint CAS 全部成功后，才整体覆盖当前会话唯一 Checkpoint。主动压缩
 失败不使用 Sliding Window 冒充成功。
 
@@ -488,8 +487,8 @@ Alembic。场景构造器必须通过“序列化后可反序列化、没有工�
 7. 私有 OpenAI Compatible 模型使用保守回退。
 8. Provider usage 落库、恢复与最近 8 个输出样本。
 9. 摘要请求始终低于模型窗口。
-10. 超大待摘要历史安全分块。
-11. 分块不拆 Tool Call/Result。
+10. 超大待摘要历史无法安全装入一次请求时不调用模型、不丢弃历史且不写 Checkpoint。
+11. 单次摘要切分不拆 Tool Call/Result。
 12. 摘要输出具有内部动态上限。
 13. 摘要后重新验证 `target_met`。
 14. 摘要失败、超时或未达目标时兜底且不写 Checkpoint。

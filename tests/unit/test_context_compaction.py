@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from pydantic_ai import Agent
@@ -17,7 +18,8 @@ from pydantic_ai.messages import (
 from pydantic_ai.models.test import TestModel
 from pydantic_ai.models.function import FunctionModel
 from pydantic_ai.models.function import AgentInfo
-from pydantic_ai.usage import RequestUsage, UsageLimits
+from pydantic_ai.tools import RunContext
+from pydantic_ai.usage import RequestUsage, RunUsage, UsageLimits
 from pydantic_ai_harness.compaction import estimate_token_count
 
 from deep_agent.agent.context.budget import build_context_budget, predict_output_tokens
@@ -32,9 +34,11 @@ from deep_agent.agent.context.checkpoint import (
 from deep_agent.agent.context.compaction import (
     ContextWindowExceededError,
     DeepAgentContextCompaction,
+    SummaryUnavailable,
+    _is_transient_summary_error,
     _logical_units,
-    _summary_input_limit,
     _summary_prompt,
+    _summary_safety_tokens,
     _strip_summary_and_system,
 )
 from deep_agent.agent.context_references import context_reference_dict
@@ -47,6 +51,7 @@ from deep_agent.agent.context.test_scenarios import (
     build_context_test_history,
 )
 from deep_agent.agent.context.file_keys import deep_agent_file_key
+from deep_agent.agent.context.runtime import ContextRunState
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.event_persister import EventPersister
 from deep_agent.agent.runner import AgentRunner
@@ -218,10 +223,25 @@ class ContextBudgetTests(unittest.TestCase):
 
 
 class ContextCompactionAlgorithmTests(unittest.TestCase):
-    def test_large_context_summary_uses_bounded_dynamic_input_chunks(self) -> None:
-        self.assertEqual(_summary_input_limit(501_890, 1_000_000), 196_608)
-        self.assertEqual(_summary_input_limit(900_000, 1_000_000), 196_608)
-        self.assertEqual(_summary_input_limit(2_000, 4_000), 4_000)
+    def test_summary_safety_uses_estimator_specific_margin(self) -> None:
+        conservative = TokenEstimator.conservative()
+        tokenizer = TokenEstimator(
+            source="model_tokenizer",
+            _counter=lambda text: conservative.text(text),
+        )
+        self.assertEqual(_summary_safety_tokens(conservative, 20_000), 2_000)
+        self.assertEqual(_summary_safety_tokens(tokenizer, 20_000), 1_024)
+
+    def test_only_transient_provider_errors_are_retried(self) -> None:
+        class ProviderError(RuntimeError):
+            def __init__(self, status_code: int) -> None:
+                self.status_code = status_code
+                super().__init__(f"HTTP {status_code}")
+
+        self.assertTrue(_is_transient_summary_error(ProviderError(503)))
+        self.assertTrue(_is_transient_summary_error(TimeoutError("timed out")))
+        self.assertFalse(_is_transient_summary_error(ProviderError(401)))
+        self.assertFalse(_is_transient_summary_error(ValueError("bad schema")))
 
     def test_old_summary_appears_once_in_incremental_summary_prompt(self) -> None:
         old_summary = "旧摘要唯一标记"
@@ -504,7 +524,7 @@ class ContextCheckpointTests(unittest.IsolatedAsyncioTestCase):
         assert checkpoint is not None
         self.assertNotIn("must-stay-out-of-checkpoint", str(checkpoint.payload))
 
-    async def test_large_window_history_uses_rolling_summary_then_reuses_checkpoint(
+    async def test_large_window_history_uses_one_summary_then_reuses_checkpoint(
         self,
     ) -> None:
         context_window = 40_000
@@ -517,7 +537,7 @@ class ContextCheckpointTests(unittest.IsolatedAsyncioTestCase):
             estimator=estimator,
         )
         await self.stores.coordinator.append(
-            "large-window-rolling-summary",
+            "large-window-single-summary",
             built.messages,
             user_id="user-1",
         )
@@ -531,7 +551,7 @@ class ContextCheckpointTests(unittest.IsolatedAsyncioTestCase):
                     for part in message.parts
                 )
                 summary_prompt_tokens.append(prompt_tokens)
-                return ModelResponse(parts=[TextPart(content="滚动摘要：保留目标与约束。")])
+                return ModelResponse(parts=[TextPart(content="单次摘要：保留目标与约束。")])
             return ModelResponse(parts=[TextPart(content="done")])
 
         capability = DeepAgentContextCompaction(
@@ -567,37 +587,169 @@ class ContextCheckpointTests(unittest.IsolatedAsyncioTestCase):
         )
 
         first = await runner.run(
-            "large-window-rolling-summary",
+            "large-window-single-summary",
             "总结并继续",
             AgentDeps(session_id="large-window-rolling-summary", user="user-1"),
         )
-        self.assertGreaterEqual(first["context"]["compaction"]["summary_chunks"], 2)
-        self.assertGreaterEqual(len(summary_prompt_tokens), 2)
-        self.assertTrue(
-            all(
-                tokens <= _summary_input_limit(
-                    first["context"]["budget"]["target_tokens"],
-                    context_window,
-                )
-                for tokens in summary_prompt_tokens
-            ),
-            summary_prompt_tokens,
+        self.assertEqual(first["context"]["compaction"]["summary_calls"], 1)
+        self.assertEqual(first["context"]["compaction"]["summary_chunks"], 1)
+        self.assertEqual(len(summary_prompt_tokens), 1)
+        prompt_tokens = summary_prompt_tokens[0]
+        output_limit = min(
+            max_output,
+            4_096,
+            max(256, int(first["context"]["budget"]["target_tokens"] * 0.10)),
+        )
+        self.assertLessEqual(
+            prompt_tokens
+            + output_limit
+            + _summary_safety_tokens(estimator, prompt_tokens),
+            context_window,
         )
         checkpoint = await self.stores.context_checkpoint.get(
-            "large-window-rolling-summary"
+            "large-window-single-summary"
         )
         self.assertIsNotNone(checkpoint)
 
         second = await runner.run(
-            "large-window-rolling-summary",
+            "large-window-single-summary",
             "继续",
             AgentDeps(session_id="large-window-rolling-summary", user="user-1"),
         )
         self.assertFalse(second["context"]["compaction"]["triggered"])
         unchanged = await self.stores.context_checkpoint.get(
-            "large-window-rolling-summary"
+            "large-window-single-summary"
         )
         self.assertEqual(unchanged.row_version, checkpoint.row_version)
+
+    async def test_transient_summary_failure_retries_the_identical_prompt_once(
+        self,
+    ) -> None:
+        capability = DeepAgentContextCompaction(
+            context_window_tokens=8_000,
+            max_output_tokens=500,
+            summary_timeout=10,
+        )
+        state = ContextRunState(
+            raw_history=[],
+            estimator=TokenEstimator.conservative(),
+            usage_limits=UsageLimits(request_limit=5),
+        )
+        context = RunContext(
+            deps=None,
+            model=TestModel(),
+            usage=RunUsage(),
+        )
+        messages = [
+            ModelResponse(parts=[TextPart(content="需要压缩的旧历史")]),
+            ModelRequest(parts=[UserPromptPart(content="继续")]),
+        ]
+
+        with (
+            patch(
+                "deep_agent.agent.context.compaction.Agent.run",
+                new=AsyncMock(
+                    side_effect=[
+                        TimeoutError("provider timed out"),
+                        SimpleNamespace(output="重试后摘要"),
+                    ]
+                ),
+            ) as run,
+            patch(
+                "deep_agent.agent.context.compaction.asyncio.sleep",
+                new=AsyncMock(),
+            ) as sleep,
+        ):
+            summary = await capability._single_summary(
+                messages,
+                None,
+                context,
+                500,
+                state,
+                reserve_answer_request=True,
+            )
+
+        self.assertEqual(summary, "重试后摘要")
+        self.assertEqual(run.await_count, 2)
+        self.assertEqual(
+            run.await_args_list[0].args[0],
+            run.await_args_list[1].args[0],
+        )
+        sleep.assert_awaited_once_with(1.0)
+        self.assertEqual(state.telemetry.summary_calls, 2)
+        self.assertEqual(state.telemetry.summary_chunks, 1)
+
+    async def test_two_transient_summary_failures_stop_after_two_identical_calls(
+        self,
+    ) -> None:
+        capability = DeepAgentContextCompaction(
+            context_window_tokens=8_000,
+            max_output_tokens=500,
+            summary_timeout=10,
+        )
+        state = ContextRunState(
+            raw_history=[],
+            estimator=TokenEstimator.conservative(),
+            usage_limits=UsageLimits(request_limit=5),
+        )
+        context = RunContext(deps=None, model=TestModel(), usage=RunUsage())
+        run = AsyncMock(
+            side_effect=[
+                TimeoutError("first timeout"),
+                TimeoutError("second timeout"),
+            ]
+        )
+        with (
+            patch("deep_agent.agent.context.compaction.Agent.run", new=run),
+            patch(
+                "deep_agent.agent.context.compaction.asyncio.sleep",
+                new=AsyncMock(),
+            ),
+        ):
+            with self.assertRaises(SummaryUnavailable) as raised:
+                await capability._single_summary(
+                    [ModelResponse(parts=[TextPart(content="旧历史")])],
+                    None,
+                    context,
+                    500,
+                    state,
+                    reserve_answer_request=True,
+                )
+
+        self.assertEqual(raised.exception.reason, "summary_timeout")
+        self.assertEqual(run.await_count, 2)
+        self.assertEqual(run.await_args_list[0].args[0], run.await_args_list[1].args[0])
+        self.assertEqual(state.telemetry.summary_calls, 2)
+        self.assertEqual(state.telemetry.summary_chunks, 1)
+
+    async def test_automatic_summary_reserves_one_request_for_the_answer(self) -> None:
+        capability = DeepAgentContextCompaction(
+            context_window_tokens=8_000,
+            max_output_tokens=500,
+            summary_timeout=10,
+        )
+        state = ContextRunState(
+            raw_history=[],
+            estimator=TokenEstimator.conservative(),
+            usage_limits=UsageLimits(request_limit=1),
+        )
+        context = RunContext(deps=None, model=TestModel(), usage=RunUsage())
+        with patch(
+            "deep_agent.agent.context.compaction.Agent.run",
+            new=AsyncMock(),
+        ) as run:
+            with self.assertRaises(SummaryUnavailable) as raised:
+                await capability._single_summary(
+                    [ModelResponse(parts=[TextPart(content="旧历史")])],
+                    None,
+                    context,
+                    500,
+                    state,
+                    reserve_answer_request=True,
+                )
+
+        self.assertEqual(raised.exception.reason, "request_limit_reserved")
+        run.assert_not_awaited()
 
     async def test_checkpoint_cas_hash_and_branch_invalidation(self) -> None:
         raw = [
@@ -705,6 +857,96 @@ class ContextCheckpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             len(await self.stores.coordinator.get_history("summary-failure")),
             len(raw_before) + 2,
+        )
+
+    async def test_no_single_request_intersection_uses_sliding_without_summary_call(
+        self,
+    ) -> None:
+        summary_calls = 0
+
+        def respond(messages: list[ModelMessage], _info: AgentInfo) -> ModelResponse:
+            nonlocal summary_calls
+            if "<history>" in str(messages):
+                summary_calls += 1
+            return ModelResponse(parts=[TextPart(content="done")])
+
+        raw = [
+            ModelRequest(parts=[UserPromptPart(content="首条任务" * 220)]),
+            ModelResponse(parts=[TextPart(content="早期结论" * 220)]),
+            ModelRequest(parts=[UserPromptPart(content="中段约束" * 220)]),
+            ModelResponse(parts=[TextPart(content="中段结论" * 220)]),
+        ]
+        await self.stores.coordinator.append(
+            "no-safe-intersection-auto",
+            raw,
+            user_id="user-1",
+        )
+        capability = DeepAgentContextCompaction(
+            context_window_tokens=4_000,
+            max_output_tokens=500,
+            summary_timeout=10,
+        )
+
+        result = await self._runner(
+            capability,
+            model=FunctionModel(respond),
+        ).run(
+            "no-safe-intersection-auto",
+            "当前问题" * 220,
+            AgentDeps(session_id="no-safe-intersection-auto", user="user-1"),
+        )
+
+        telemetry = result["context"]["compaction"]
+        self.assertEqual(summary_calls, 0)
+        self.assertEqual(telemetry["strategy"], "sliding_window_fallback")
+        self.assertFalse(telemetry["summary_applied"])
+        self.assertIsNone(
+            await self.stores.context_checkpoint.get("no-safe-intersection-auto")
+        )
+
+    async def test_manual_input_too_large_does_not_call_model_or_write_checkpoint(
+        self,
+    ) -> None:
+        summary_calls = 0
+
+        def respond(messages: list[ModelMessage], _info: AgentInfo) -> ModelResponse:
+            nonlocal summary_calls
+            if "<history>" in str(messages):
+                summary_calls += 1
+            return ModelResponse(parts=[TextPart(content="unused")])
+
+        raw = [
+            ModelRequest(parts=[UserPromptPart(content="首条任务" * 220)]),
+            ModelResponse(parts=[TextPart(content="早期结论" * 220)]),
+            ModelRequest(parts=[UserPromptPart(content="当前问题" * 220)]),
+            ModelResponse(parts=[TextPart(content="当前结论" * 220)]),
+        ]
+        await self.stores.coordinator.append(
+            "no-safe-intersection-manual",
+            raw,
+            user_id="user-1",
+        )
+        capability = DeepAgentContextCompaction(
+            context_window_tokens=4_000,
+            max_output_tokens=500,
+            summary_timeout=10,
+        )
+        events = [
+            event
+            async for event in self._runner(
+                capability,
+                model=FunctionModel(respond),
+            ).run_manual_compaction(
+                "no-safe-intersection-manual",
+                AgentDeps(session_id="no-safe-intersection-manual", user="user-1"),
+            )
+        ]
+
+        self.assertEqual(events[-1]["status"], "failed")
+        self.assertEqual(events[-1]["reason"], "summary_input_too_large")
+        self.assertEqual(summary_calls, 0)
+        self.assertIsNone(
+            await self.stores.context_checkpoint.get("no-safe-intersection-manual")
         )
 
     async def test_attachment_scope_comes_from_raw_history_not_checkpoint_payload(
@@ -819,13 +1061,14 @@ class ContextCheckpointTests(unittest.IsolatedAsyncioTestCase):
         )
         raw: list[ModelMessage] = []
         for turn in range(3):
+            repeats = 100 if turn == 1 else 20
             prompt: str | list[object] = (
                 [
                     context_reference_dict(ref),
-                    f"第 {turn} 轮约束：" + ("需要保留的中文背景。" * 80),
+                    f"第 {turn} 轮约束：" + ("需要保留的中文背景。" * repeats),
                 ]
                 if turn == 0
-                else f"第 {turn} 轮约束：" + ("需要保留的中文背景。" * 80)
+                else f"第 {turn} 轮约束：" + ("需要保留的中文背景。" * repeats)
             )
             raw.extend(
                 [
@@ -835,7 +1078,7 @@ class ContextCheckpointTests(unittest.IsolatedAsyncioTestCase):
                         ]
                     ),
                     ModelResponse(
-                        parts=[TextPart(content=f"第 {turn} 轮结论：" + ("确认当前决定。" * 80))]
+                        parts=[TextPart(content=f"第 {turn} 轮结论：" + ("确认当前决定。" * repeats))]
                     ),
                 ]
             )
@@ -920,7 +1163,7 @@ class ContextCheckpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(updated.row_version, 2)
         self.assertEqual(updated.source_last_sequence, len(raw) + len(tail) - 1)
 
-    async def test_manual_compaction_can_replace_checkpoint_without_new_messages(
+    async def test_manual_compaction_does_not_resummarize_checkpoint_without_new_messages(
         self,
     ) -> None:
         raw = [
@@ -971,11 +1214,12 @@ class ContextCheckpointTests(unittest.IsolatedAsyncioTestCase):
             ]
 
         self.assertEqual(first[-1]["status"], "completed")
-        self.assertEqual(second[-1]["status"], "completed")
+        self.assertEqual(second[-1]["status"], "noop")
+        self.assertEqual(second[-1]["reason"], "no_reduction")
         checkpoint = await self.stores.context_checkpoint.get("manual-recompact")
         self.assertIsNotNone(checkpoint)
         assert checkpoint is not None
-        self.assertEqual(checkpoint.row_version, 2)
+        self.assertEqual(checkpoint.row_version, 1)
         self.assertEqual(checkpoint.source_last_sequence, len(raw) - 1)
         self.assertEqual(
             history_hash(await self.stores.coordinator.get_history("manual-recompact")),
@@ -1024,17 +1268,18 @@ class ContextCheckpointTests(unittest.IsolatedAsyncioTestCase):
         def long_history() -> list[ModelMessage]:
             messages: list[ModelMessage] = []
             for turn in range(3):
+                repeats = 100 if turn == 1 else 20
                 messages.extend(
                     [
                         ModelRequest(
                             parts=[
                                 UserPromptPart(
-                                    content=f"第 {turn} 轮背景：" + "保留约束。" * 120
+                                    content=f"第 {turn} 轮背景：" + "保留约束。" * repeats
                                 )
                             ]
                         ),
                         ModelResponse(
-                            parts=[TextPart(content=f"第 {turn} 轮结论：" + "确认决定。" * 120)]
+                            parts=[TextPart(content=f"第 {turn} 轮结论：" + "确认决定。" * repeats)]
                         ),
                     ]
                 )

@@ -88,7 +88,7 @@ def projection_fingerprint(
         "keep_tool_pairs": keep_tool_pairs,
         "summary_model_id": summary_model_id,
         "estimator_source": estimator_source,
-        "summary_policy": "main-model-safe-rolling-v1",
+        "summary_policy": "main-model-single-summary-v1",
     }
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()

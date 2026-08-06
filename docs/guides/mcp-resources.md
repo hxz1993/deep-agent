@@ -33,6 +33,22 @@ POST /api/v1/mcp/{name}/inspect
 
 系统不做定时检测。检测快照只服务于管理页面和 Resource 代理工具开放判断；普通 MCP 工具仍在每次 Agent Run 中由 Pydantic AI 实时获取，Resource 正文也始终实时读取。
 
+## URL MCP 重命名
+
+数据库管理的 URL MCP 可通过 Console 独立“重命名”操作或以下接口修改名称：
+
+```http
+POST /api/v1/mcp/{old_name}/rename
+Content-Type: application/json
+
+{"new_name": "new_name"}
+```
+
+名称同时决定 Agent 工具包编码 `mcp:<name>`、后续模型工具前缀 `<name>_` 和 Resource
+Server 名称。后端会在一个事务内更新 MCP 名称和所有 Agent 引用，失败时整体回滚。URL、
+Header、启用状态及检测快照保持不变，因此无需重启或重新检测。Builtin 和历史 stdio MCP
+不可重命名；历史 Tool Call/Result、Checkpoint 与正在执行的 Run 也不会被改写。
+
 ## 模型工具
 
 Agent 至少关联一个 `enabled=true`、整体检测状态为 `healthy/degraded` 且 Resource 状态为 `supported` 的 URL MCP 时，DeepAgent 才动态加入三个宿主代理工具：

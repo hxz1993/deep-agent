@@ -134,6 +134,15 @@ function canDeleteMcp(transport) {
   return transport !== "builtin";
 }
 
+function canRenameMcp(transport) {
+  return transport === "url";
+}
+
+function renameSuccessMessage(updatedAgents) {
+  const count = Array.isArray(updatedAgents) ? updatedAgents.length : 0;
+  return `MCP 已重命名，已同步更新 ${count} 个 Agent`;
+}
+
 const mcpAdmin = {
   async refresh() {
     const tbody = document.getElementById("mcpTableBody");
@@ -170,6 +179,7 @@ const mcpAdmin = {
           <td class="mcp-actions-cell">
             <div class="row-actions mcp-row-actions">
               ${s.transport === "url" ? `<button type="button" data-inspect-mcp="${escapeHtml(s.name)}">检测并更新</button>` : ""}
+              ${canRenameMcp(s.transport) ? `<button type="button" data-rename-mcp="${escapeHtml(s.name)}">重命名</button>` : ""}
               ${s.transport === "stdio" ? "" : `<button type="button" data-edit="${escapeHtml(s.name)}">编辑</button>`}
               ${canDeleteMcp(s.transport) ? `<button type="button" class="danger" data-delete="${escapeHtml(s.name)}">删除</button>` : ""}
             </div>
@@ -184,6 +194,9 @@ const mcpAdmin = {
       });
       tbody.querySelectorAll("[data-inspect-mcp]").forEach((btn) => {
         btn.addEventListener("click", () => this.inspect(btn.dataset.inspectMcp, btn));
+      });
+      tbody.querySelectorAll("[data-rename-mcp]").forEach((btn) => {
+        btn.addEventListener("click", () => this.openRename(btn.dataset.renameMcp));
       });
       tbody.querySelectorAll("[data-delete]").forEach((btn) => {
         btn.addEventListener("click", () => this.remove(btn.dataset.delete));
@@ -289,8 +302,11 @@ const mcpAdmin = {
   openCreate() {
     state.editingMcp = null;
     document.getElementById("mcpModalTitle").textContent = "新建 MCP";
-    document.getElementById("mcpName").disabled = false;
-    document.getElementById("mcpName").value = "";
+    const nameInput = document.getElementById("mcpName");
+    nameInput.readOnly = false;
+    nameInput.classList.remove("mcp-name-readonly");
+    nameInput.value = "";
+    document.getElementById("mcpNameReadOnlyHint")?.classList.add("hidden");
     document.getElementById("mcpTransport").value = "url";
     document.getElementById("mcpDescription").value = "";
     document.getElementById("mcpEnabled").checked = true;
@@ -311,8 +327,11 @@ const mcpAdmin = {
       const server = await apiFetch(`/api/v1/mcp/${encodeURIComponent(name)}`);
       state.editingMcp = name;
       document.getElementById("mcpModalTitle").textContent = `编辑 MCP · ${name}`;
-      document.getElementById("mcpName").disabled = true;
-      document.getElementById("mcpName").value = server.name;
+      const nameInput = document.getElementById("mcpName");
+      nameInput.readOnly = true;
+      nameInput.classList.add("mcp-name-readonly");
+      nameInput.value = server.name;
+      document.getElementById("mcpNameReadOnlyHint")?.classList.remove("hidden");
       document.getElementById("mcpTransport").value = server.transport;
       document.getElementById("mcpDescription").value = server.description || "";
       document.getElementById("mcpEnabled").checked = server.enabled;
@@ -352,6 +371,54 @@ const mcpAdmin = {
       document.getElementById("mcpModal").showModal();
     } catch (err) {
       showToast(err.message, true);
+    }
+  },
+
+  openRename(name) {
+    state.renamingMcp = name;
+    document.getElementById("mcpRenameCurrentName").value = name;
+    document.getElementById("mcpRenameNewName").value = name;
+    const form = document.getElementById("mcpRenameForm");
+    AdminFormFeedback.clear(form);
+    document.getElementById("mcpRenameModal").showModal();
+    requestAnimationFrame(() => {
+      const input = document.getElementById("mcpRenameNewName");
+      input.focus();
+      input.select();
+    });
+  },
+
+  async rename(event) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    AdminFormFeedback.clear(form);
+    const oldName = state.renamingMcp;
+    const newName = document.getElementById("mcpRenameNewName").value.trim();
+    if (!oldName) {
+      AdminFormFeedback.show(form, "缺少待重命名的 MCP");
+      return;
+    }
+
+    AdminFormFeedback.setSubmitting(form, true);
+    let result = null;
+    try {
+      result = await apiFetch(`/api/v1/mcp/${encodeURIComponent(oldName)}/rename`, {
+        method: "POST",
+        body: JSON.stringify({ new_name: newName }),
+      });
+      document.getElementById("mcpRenameModal").close();
+      state.renamingMcp = null;
+      showToast(renameSuccessMessage(result.updated_agents));
+    } catch (err) {
+      AdminFormFeedback.show(form, err);
+    } finally {
+      AdminFormFeedback.setSubmitting(form, false);
+    }
+    if (result) {
+      await refreshAfterSuccessfulMutation("MCP 已重命名", async () => {
+        await this.refresh();
+        await loadCapabilities();
+      });
     }
   },
 
@@ -478,11 +545,14 @@ window.__McpInspectionUI = {
   savedInspectionToast,
   validateMcpConfig,
   canDeleteMcp,
+  canRenameMcp,
+  renameSuccessMessage,
 };
 
 document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("newMcpBtn")?.addEventListener("click", () => mcpAdmin.openCreate());
   document.getElementById("mcpForm")?.addEventListener("submit", (e) => mcpAdmin.save(e));
+  document.getElementById("mcpRenameForm")?.addEventListener("submit", (e) => mcpAdmin.rename(e));
   document.getElementById("mcpTransport")?.addEventListener("change", () => mcpAdmin.toggleTransportFields());
   document.querySelectorAll('input[name="mcpRequestContextMode"]').forEach((input) => {
     input.addEventListener("change", () => mcpAdmin.updateRequestContextDescription());
@@ -492,5 +562,13 @@ document.addEventListener("DOMContentLoaded", () => {
   });
   document.getElementById("cancelMcpBtn")?.addEventListener("click", () => {
     document.getElementById("mcpModal").close();
+  });
+  document.getElementById("closeMcpRenameModal")?.addEventListener("click", () => {
+    state.renamingMcp = null;
+    document.getElementById("mcpRenameModal").close();
+  });
+  document.getElementById("cancelMcpRenameBtn")?.addEventListener("click", () => {
+    state.renamingMcp = null;
+    document.getElementById("mcpRenameModal").close();
   });
 });

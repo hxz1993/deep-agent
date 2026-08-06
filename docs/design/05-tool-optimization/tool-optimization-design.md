@@ -514,6 +514,12 @@ Server 原始工具短名：list_cubes
 - Deferred Pending 会话。
 - 测试夹具和前端展示。
 
+MCP 配置名称本身同时参与工具包编码 `mcp:<name>`、模型工具前缀 `<name>_` 和
+Resource Server 名称。数据库 URL MCP 如需改名，必须使用独立重命名事务：更新
+`mcp_servers.name` 的同时，原位替换全部 Agent 中的 `mcp:<old_name>` 引用。该操作不重新
+检测远端 MCP，也不修改已经持久化的历史 Tool Call/Result；当前正在执行的 Run 继续使用其
+创建时的工具列表，后续 Run 才使用新名称。Builtin 与已停止支持的 stdio MCP 不开放重命名。
+
 ## 6. 前端表单工具设计
 
 ### 6.1 两种表单场景

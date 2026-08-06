@@ -4,7 +4,12 @@ import unittest
 
 from pydantic import ValidationError
 
-from deep_agent.schemas.mcp import McpBuiltinConfig, McpServerCreate, McpServerUpdate
+from deep_agent.schemas.mcp import (
+    McpBuiltinConfig,
+    McpServerCreate,
+    McpServerRenameRequest,
+    McpServerUpdate,
+)
 
 
 class McpSchemaBuiltinGuardTests(unittest.TestCase):
@@ -49,6 +54,14 @@ class McpSchemaBuiltinGuardTests(unittest.TestCase):
                         "config": {"url": "http://127.0.0.1:8765/mcp"},
                     }
                 )
+
+    def test_rename_reuses_create_name_rules_and_trims_value(self) -> None:
+        body = McpServerRenameRequest.model_validate({"new_name": "  renamed_mcp  "})
+        self.assertEqual(body.new_name, "renamed_mcp")
+
+        for name in ("1renamed", "renamed server", "renamed/server", "重命名"):
+            with self.subTest(name=name), self.assertRaises(ValidationError):
+                McpServerRenameRequest.model_validate({"new_name": name})
 
     def test_create_rejects_blank_or_non_http_url(self) -> None:
         for url in ("", "   ", "ftp://example.test/mcp", "not-a-url"):

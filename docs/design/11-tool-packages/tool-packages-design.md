@@ -65,6 +65,8 @@ Pydantic AI 的运行扩展，负责 History Processor、Hook、重试、模型�
 - 包编码只用于 Agent 配置和目录：`builtin:*`、`mcp:*`、`ui:*`、`skill:*`。
 - 工具协议名继续用于模型调用、SSE、历史、Pending 与恢复。
 - Console 展示名是独立元数据，不使用 `RenamedToolset` 做纯 UI 美化。
+- URL MCP 名称是可维护的稳定编码，但不能作为普通字段直接修改。独立重命名操作在同一事务中
+  迁移 MCP 主键和全部 Agent 工具包引用；不改写历史工具协议名，也不重新检测远端服务。
 - 不保留旧 `native`、`python-sandbox`、`attachment`、`ui:<tool_name>` 运行兼容分支。
 - 旧数据只由 Alembic 002 一次转换；未知 UI 引用必须阻止迁移。
 

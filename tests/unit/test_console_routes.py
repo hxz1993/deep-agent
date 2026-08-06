@@ -110,6 +110,7 @@ class ConsoleRoutesTest(unittest.TestCase):
         self.assertNotIn("/api/v1/mcp/{name}/ui-tools/refresh", paths)
         self.assertNotIn("/api/v1/mcp/{name}/resources/probe", paths)
         self.assertIn("/api/v1/mcp/{name}/inspect", paths)
+        self.assertIn("/api/v1/mcp/{name}/rename", paths)
 
 
 if __name__ == "__main__":

@@ -32,6 +32,15 @@ McpInspectionStatus = Literal[
 McpCapabilityStatus = Literal["supported", "unsupported", "error", "unknown"]
 
 
+def normalize_mcp_name(value: str, *, field_name: str = "name") -> str:
+    normalized = value.strip()
+    if not MCP_NAME_PATTERN.fullmatch(normalized):
+        raise ValueError(
+            f"{field_name} must match ^[A-Za-z][A-Za-z0-9_-]{{0,190}}$"
+        )
+    return normalized
+
+
 class McpInspectionError(BaseModel):
     stage: str
     type: str
@@ -152,10 +161,7 @@ class McpServerCreate(BaseModel):
     @field_validator("name")
     @classmethod
     def validate_name(cls, value: str) -> str:
-        value = value.strip()
-        if not MCP_NAME_PATTERN.fullmatch(value):
-            raise ValueError("name must match ^[A-Za-z][A-Za-z0-9_-]{0,190}$")
-        return value
+        return normalize_mcp_name(value)
 
     @model_validator(mode="after")
     def validate_config(self) -> McpServerCreate:
@@ -186,6 +192,15 @@ class McpServerUpdate(BaseModel):
             return self
         self.config = normalize_mcp_url_config(self.config)
         return self
+
+
+class McpServerRenameRequest(BaseModel):
+    new_name: str = Field(..., description="New unique MCP server identifier.")
+
+    @field_validator("new_name")
+    @classmethod
+    def validate_new_name(cls, value: str) -> str:
+        return normalize_mcp_name(value, field_name="new_name")
 
 
 class McpServerResponse(BaseModel):
@@ -224,3 +239,10 @@ class McpServerResponse(BaseModel):
                 transport=row.transport,
             ),
         )
+
+
+class McpServerRenameResponse(BaseModel):
+    old_name: str
+    new_name: str
+    updated_agents: list[str]
+    mcp: McpServerResponse

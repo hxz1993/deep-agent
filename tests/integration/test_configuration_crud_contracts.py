@@ -6,11 +6,14 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
 from deep_agent.api.v1 import api_router
+from deep_agent.agent.spec import AgentSpec
 from deep_agent.capabilities import build_registry
 from deep_agent.capabilities.mcp.lease_manager import McpLeaseManager
+from deep_agent.capabilities.mcp.resources import build_mcp_resource_toolset
 from deep_agent.core.context import AppContext, get_context, init_context, reset_context
 from deep_agent.db.models import McpServer
-from deep_agent.schemas.mcp import McpServerUpdate
+from deep_agent.schemas.agent import AgentCreate
+from deep_agent.schemas.mcp import McpServerCreate, McpServerUpdate
 from deep_agent.schemas.ui_tools import UiToolPackageCreate
 from tests.helpers.sqlite_stores import make_sqlite_stores
 
@@ -300,6 +303,180 @@ class ConfigurationCrudContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(fetched.json()["transport"], "stdio")
         self.assertEqual(updated.status_code, 409, updated.text)
         self.assertIsNone((await self.stores.mcp.get_by_name("historical_stdio")).description)
+
+    async def test_url_mcp_rename_migrates_agent_references_and_tool_directory(self) -> None:
+        async with AsyncClient(transport=self._transport, base_url="http://test") as client:
+            created = await client.post(
+                "/api/v1/mcp",
+                json={
+                    "name": "rename_old",
+                    "transport": "url",
+                    "config": {"url": "http://example.test/mcp"},
+                    "description": "keep description",
+                    "enabled": False,
+                },
+            )
+        self.assertEqual(created.status_code, 201, created.text)
+        await self.stores.mcp.update(
+            "rename_old",
+            McpServerUpdate(enabled=True),
+            inspection={
+                "status": "healthy",
+                "tools": {"status": "supported", "count": 2},
+                "resources": {"status": "supported", "count": 1, "template_count": 0},
+            },
+        )
+        first = await self.stores.agent.create_unique(
+            AgentCreate(
+                name="rename-agent-a",
+                model_id=self._model_id,
+                prompt="rename A",
+                capabilities=["builtin:general", "mcp:rename_old", "ui:contracts"],
+            )
+        )
+        second = await self.stores.agent.create_unique(
+            AgentCreate(
+                name="rename-agent-b",
+                model_id=self._model_id,
+                prompt="rename B",
+                capabilities=["mcp:rename_old", "builtin:attachment"],
+            )
+        )
+        untouched_null = await self.stores.agent.create_unique(
+            AgentCreate(
+                name="rename-agent-null",
+                model_id=self._model_id,
+                prompt="null",
+                capabilities=None,
+            )
+        )
+        untouched_empty = await self.stores.agent.create_unique(
+            AgentCreate(
+                name="rename-agent-empty",
+                model_id=self._model_id,
+                prompt="empty",
+                capabilities=[],
+            )
+        )
+
+        async with AsyncClient(transport=self._transport, base_url="http://test") as client:
+            response = await client.post(
+                "/api/v1/mcp/rename_old/rename",
+                json={"new_name": "rename_new"},
+            )
+            old_row = await client.get("/api/v1/mcp/rename_old")
+            new_row = await client.get("/api/v1/mcp/rename_new")
+            tools = await client.get("/api/v1/tools")
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["old_name"], "rename_old")
+        self.assertEqual(response.json()["new_name"], "rename_new")
+        self.assertEqual(
+            response.json()["updated_agents"],
+            ["rename-agent-a", "rename-agent-b"],
+        )
+        self.assertEqual(response.json()["mcp"]["description"], "keep description")
+        self.assertEqual(response.json()["mcp"]["inspection"]["tools"]["count"], 2)
+        self.assertEqual(old_row.status_code, 404, old_row.text)
+        self.assertEqual(new_row.status_code, 200, new_row.text)
+        self.assertEqual(
+            (await self.stores.agent.get_by_id(first.id)).capabilities,
+            ["builtin:general", "mcp:rename_new", "ui:contracts"],
+        )
+        self.assertEqual(
+            (await self.stores.agent.get_by_id(second.id)).capabilities,
+            ["mcp:rename_new", "builtin:attachment"],
+        )
+        self.assertIsNone((await self.stores.agent.get_by_id(untouched_null.id)).capabilities)
+        self.assertEqual((await self.stores.agent.get_by_id(untouched_empty.id)).capabilities, [])
+        tool_codes = {item["code"] for item in tools.json()}
+        self.assertIn("mcp:rename_new", tool_codes)
+        self.assertNotIn("mcp:rename_old", tool_codes)
+        renamed_row = await self.stores.mcp.get_by_name("rename_new")
+        self.assertIsNotNone(
+            build_mcp_resource_toolset(
+                AgentSpec(
+                    name="resource-new",
+                    model="test",
+                    instructions="",
+                    capabilities=["mcp:rename_new"],
+                ),
+                [renamed_row],
+            )
+        )
+        self.assertIsNone(
+            build_mcp_resource_toolset(
+                AgentSpec(
+                    name="resource-old",
+                    model="test",
+                    instructions="",
+                    capabilities=["mcp:rename_old"],
+                ),
+                [renamed_row],
+            )
+        )
+
+    async def test_mcp_rename_contract_errors_and_protected_transports(self) -> None:
+        await self.stores.mcp.create_unique(
+            McpServerCreate(
+                name="rename_source",
+                transport="url",
+                config={"url": "http://source.example.test/mcp"},
+                enabled=False,
+            )
+        )
+        await self.stores.mcp.create_unique(
+            McpServerCreate(
+                name="rename_taken",
+                transport="url",
+                config={"url": "http://taken.example.test/mcp"},
+                enabled=False,
+            )
+        )
+        async with self.stores.mcp._write() as db:
+            db.add_all(
+                [
+                    McpServer(name="rename_builtin", transport="builtin", config={}, enabled=True),
+                    McpServer(
+                        name="rename_stdio",
+                        transport="stdio",
+                        config={"command": "python", "args": ["server.py"]},
+                        enabled=False,
+                    ),
+                ]
+            )
+
+        async with AsyncClient(transport=self._transport, base_url="http://test") as client:
+            conflict = await client.post(
+                "/api/v1/mcp/rename_source/rename",
+                json={"new_name": "rename_taken"},
+            )
+            invalid = await client.post(
+                "/api/v1/mcp/rename_source/rename",
+                json={"new_name": "invalid name"},
+            )
+            missing = await client.post(
+                "/api/v1/mcp/rename_missing/rename",
+                json={"new_name": "valid_name"},
+            )
+            builtin = await client.post(
+                "/api/v1/mcp/rename_builtin/rename",
+                json={"new_name": "builtin_new"},
+            )
+            stdio = await client.post(
+                "/api/v1/mcp/rename_stdio/rename",
+                json={"new_name": "stdio_new"},
+            )
+
+        self.assertEqual(conflict.status_code, 409, conflict.text)
+        self.assertEqual(invalid.status_code, 422, invalid.text)
+        self.assertEqual(missing.status_code, 404, missing.text)
+        self.assertEqual(builtin.status_code, 403, builtin.text)
+        self.assertEqual(stdio.status_code, 403, stdio.text)
+        self.assertIsNotNone(await self.stores.mcp.get_by_name("rename_source"))
+        self.assertIsNotNone(await self.stores.mcp.get_by_name("rename_taken"))
+        self.assertIsNotNone(await self.stores.mcp.get_by_name("rename_builtin"))
+        self.assertIsNotNone(await self.stores.mcp.get_by_name("rename_stdio"))
 
     async def test_referenced_mcp_and_ui_tool_cannot_be_deleted(self) -> None:
         async with AsyncClient(transport=self._transport, base_url="http://test") as client:

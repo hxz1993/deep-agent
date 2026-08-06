@@ -16,6 +16,8 @@ from deep_agent.schemas.mcp import (
     McpBuiltinConfig,
     McpInspectionResult,
     McpServerCreate,
+    McpServerRenameRequest,
+    McpServerRenameResponse,
     McpServerResponse,
     McpServerUpdate,
     normalize_mcp_url_config,
@@ -170,6 +172,37 @@ async def update_mcp_server(
     updated = await store.update(name, body, inspection=inspection)
     assert updated is not None
     return McpServerResponse.from_row(updated)
+
+
+@router.post("/mcp/{name}/rename", response_model=McpServerRenameResponse)
+async def rename_mcp_server(
+    name: str,
+    body: McpServerRenameRequest,
+    store: McpServerStoreBase = Depends(get_mcp_store),
+) -> McpServerRenameResponse:
+    try:
+        result = await store.rename_with_agent_references(name, body.new_name)
+    except PermissionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(exc),
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
+    if result is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"MCP server not found: {name}",
+        )
+    return McpServerRenameResponse(
+        old_name=name,
+        new_name=result.row.name,
+        updated_agents=result.updated_agent_names,
+        mcp=McpServerResponse.from_row(result.row),
+    )
 
 
 @router.delete("/mcp/{name}", status_code=status.HTTP_200_OK)

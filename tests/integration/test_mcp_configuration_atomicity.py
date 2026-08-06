@@ -5,12 +5,14 @@ from unittest.mock import AsyncMock, patch
 
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from deep_agent.api.v1 import api_router
 from deep_agent.capabilities import build_registry
 from deep_agent.capabilities.mcp.lease_manager import McpLeaseManager
 from deep_agent.core.context import AppContext, get_context, init_context, reset_context
 from deep_agent.schemas.mcp import McpServerCreate
+from deep_agent.schemas.agent import AgentCreate
 from tests.helpers.sqlite_stores import make_sqlite_stores
 
 
@@ -95,6 +97,44 @@ class McpConfigurationAtomicityTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(row)
         self.assertEqual(row.config["url"], "http://old.example.test/mcp")
         self.assertEqual(row.inspection["status"], "healthy")
+
+    async def test_rename_write_failure_rolls_back_mcp_and_agent_references(self) -> None:
+        await self.stores.mcp.create_unique(
+            McpServerCreate(
+                name="atomic-rename-old",
+                transport="url",
+                config={"url": "http://old.example.test/mcp"},
+                enabled=False,
+            )
+        )
+        model_id = (await self.stores.llm_model.list_all())[0].id
+        agent = await self.stores.agent.create_unique(
+            AgentCreate(
+                name="atomic-rename-agent",
+                model_id=model_id,
+                prompt="keep capability",
+                capabilities=["builtin:general", "mcp:atomic-rename-old"],
+            )
+        )
+
+        with patch.object(
+            AsyncSession,
+            "flush",
+            new=AsyncMock(side_effect=RuntimeError("forced rename failure")),
+        ):
+            async with AsyncClient(transport=self._transport, base_url="http://test") as client:
+                response = await client.post(
+                    "/api/v1/mcp/atomic-rename-old/rename",
+                    json={"new_name": "atomic-rename-new"},
+                )
+
+        self.assertEqual(response.status_code, 500, response.text)
+        self.assertIsNotNone(await self.stores.mcp.get_by_name("atomic-rename-old"))
+        self.assertIsNone(await self.stores.mcp.get_by_name("atomic-rename-new"))
+        self.assertEqual(
+            (await self.stores.agent.get_by_id(agent.id)).capabilities,
+            ["builtin:general", "mcp:atomic-rename-old"],
+        )
 
 
 if __name__ == "__main__":

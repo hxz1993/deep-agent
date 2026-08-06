@@ -96,6 +96,8 @@ class BuildUrlMcpToolsetTests(unittest.IsolatedAsyncioTestCase):
 
             _, kwargs = mcp_toolset_cls.call_args
             self.assertIs(kwargs["include_instructions"], True)
+            mcp_toolset_cls.return_value.prefixed.assert_called_once_with("biz")
+            self.assertEqual(toolset.id, "mcp:biz")
 
 
 if __name__ == "__main__":

@@ -423,7 +423,8 @@
       <div class="modal-body">
         <label class="field">
           <span>名称</span>
-          <input type="text" id="mcpName" required pattern="[a-zA-Z][a-zA-Z0-9_-]*" />
+          <input type="text" id="mcpName" required maxlength="191" pattern="[a-zA-Z][a-zA-Z0-9_-]*" />
+          <small class="field-hint hidden" id="mcpNameReadOnlyHint">名称用于能力编码和模型工具前缀；请通过列表中的“重命名”操作修改。</small>
         </label>
         <label class="field">
           <span>传输类型</span>
@@ -498,6 +499,32 @@
       <div class="modal-footer">
         <button type="button" class="btn" id="cancelMcpBtn">取消</button>
         <button type="submit" class="btn primary">保存</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- MCP rename modal -->
+  <dialog class="modal modal-compact" id="mcpRenameModal">
+    <form id="mcpRenameForm" method="dialog">
+      <div class="modal-header">
+        <h3>重命名 MCP</h3>
+        <button type="button" class="icon-btn" id="closeMcpRenameModal">✕</button>
+      </div>
+      <div class="modal-body">
+        <label class="field">
+          <span>当前名称</span>
+          <input type="text" id="mcpRenameCurrentName" class="mcp-name-readonly" readonly />
+        </label>
+        <label class="field">
+          <span>新名称</span>
+          <input type="text" id="mcpRenameNewName" required maxlength="191" pattern="[a-zA-Z][a-zA-Z0-9_-]*" />
+        </label>
+        <p class="mcp-rename-impact">重命名会同步更新引用该 MCP 的 Agent，并改变后续模型工具前缀；历史工具调用不会被修改。</p>
+      </div>
+      <div class="form-error hidden" data-form-error role="alert" aria-live="assertive"></div>
+      <div class="modal-footer">
+        <button type="button" class="btn" id="cancelMcpRenameBtn">取消</button>
+        <button type="submit" class="btn primary">确认重命名</button>
       </div>
     </form>
   </dialog>

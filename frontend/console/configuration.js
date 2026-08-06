@@ -1,6 +1,6 @@
 let initialized = false;
 let loadingPromise = null;
-const CONFIGURATION_ASSET_VERSION = "20260806-1";
+const CONFIGURATION_ASSET_VERSION = "20260806-2";
 const CONFIGURATION_TABS = new Set([
   "agents",
   "llm-models",

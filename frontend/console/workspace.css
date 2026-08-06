@@ -65,8 +65,10 @@ html, body {
 }
 .new-chat:hover,
 .new-chat[aria-expanded="true"] { background: var(--accent-soft); border-color: var(--accent); }
-.new-chat-label { flex: 1; text-align: left; }
-.new-chat-chevron { font-size: 11px; color: var(--text-faint); }
+.new-chat-label { flex: 1; display: inline-flex; align-items: center; gap: 6px; text-align: left; }
+.new-chat-label svg,
+.new-chat-chevron svg { width: 14px; height: 14px; display: block; }
+.new-chat-chevron { color: var(--text-faint); }
 
 .new-chat-menu {
   position: fixed;
@@ -197,14 +199,17 @@ html, body {
 .session-item .rename-btn,
 .session-item .auto-rename-btn,
 .session-item .del {
-  padding: 2px 4px;
-  font-size: 12px;
+  width: 24px;
+  height: 24px;
+  display: inline-grid;
+  place-items: center;
   color: var(--text-faint);
   cursor: pointer;
   border-radius: 4px;
   transition: color 0.12s, background 0.12s;
   line-height: 1;
 }
+.session-item .session-actions svg { width: 13px; height: 13px; display: block; }
 .session-item .rename-btn:hover,
 .session-item .auto-rename-btn:hover { color: var(--accent-hover); background: var(--accent-soft); }
 .session-item .del:hover { color: var(--danger); background: var(--danger-soft); }
@@ -330,13 +335,15 @@ html, body {
 .icon-btn:hover { background: var(--accent-soft); }
 .icon-btn.ghost { border-color: transparent; background: transparent; }
 .icon-btn.ghost:hover { background: var(--bg-elev); }
+.icon-btn svg { width: 16px; height: 16px; display: block; }
 .link-btn { background: none; border: none; color: var(--accent-hover); cursor: pointer; font-size: 11px; }
 
 /* ---------- 消息 ---------- */
 .messages { flex: 1; overflow-y: auto; padding: 24px 0; scroll-behavior: smooth; }
 
 .empty-state { max-width: 640px; margin: 8vh auto 0; text-align: center; padding: 0 20px; }
-.empty-logo { font-size: 48px; }
+.empty-logo { color: var(--accent); }
+.empty-logo svg { width: 44px; height: 44px; display: block; margin: 0 auto; stroke-width: 1.5; }
 .empty-state h1 { font-size: 26px; margin: 12px 0 6px; }
 .empty-state p { color: var(--text-dim); margin: 0 0 24px; }
 .suggestions { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
@@ -388,10 +395,12 @@ html, body {
   border-radius: 8px;
   flex-shrink: 0;
   display: grid; place-items: center;
-  font-size: 16px;
+  font-size: 14px;
   font-weight: 600;
 }
-.avatar.assistant { background: linear-gradient(135deg, var(--accent), var(--brand-accent-2)); }
+.avatar svg { width: 17px; height: 17px; display: block; }
+.avatar.assistant { background: var(--accent-soft); color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border)); }
+.avatar.system-avatar { background: var(--bg-soft); color: var(--text-dim); border-color: var(--border); }
 .avatar.user { background: var(--user-bubble); }
 
 .bubble-wrap { display: flex; flex-direction: column; gap: 8px; min-width: 0; max-width: 100%; }
@@ -491,10 +500,16 @@ html, body {
   cursor: pointer;
   user-select: none;
 }
-.thinking-head .thinking-icon { font-size: 14px; }
+.thinking-head .thinking-icon,
+.tool-head .tool-icon { display: inline-grid; place-items: center; color: var(--text-faint); }
+.thinking-head .thinking-icon svg,
+.tool-head .tool-icon svg { width: 14px; height: 14px; display: block; }
 .thinking-head .thinking-title { font-weight: 600; color: var(--text-faint); }
 .thinking-head .thinking-status { margin-left: auto; font-size: 11px; color: var(--text-faint); }
-.thinking-head .chevron { transition: transform 0.15s; color: var(--text-faint); }
+.thinking-head .chevron,
+.tool-head .chevron { display: inline-grid; place-items: center; transition: transform 0.15s; color: var(--text-faint); }
+.thinking-head .chevron svg,
+.tool-head .chevron svg { width: 13px; height: 13px; display: block; }
 .thinking-block.open .chevron { transform: rotate(90deg); }
 .thinking-body { display: none; border-top: 1px solid var(--thinking-border); padding: 10px 12px; }
 .thinking-block.open .thinking-body { display: block; }
@@ -525,11 +540,11 @@ html, body {
   cursor: pointer;
   user-select: none;
 }
-.tool-head .tool-icon { font-size: 14px; }
 .tool-head .tool-name { font-weight: 600; font-family: var(--mono); }
 .tool-head .tool-status { margin-left: auto; font-size: 11px; color: var(--text-faint); }
-.tool-head .chevron { transition: transform 0.15s; color: var(--text-faint); }
 .tool-block.open .chevron { transform: rotate(90deg); }
+.tool-status-complete { display: inline-flex; align-items: center; gap: 3px; color: var(--accent); }
+.tool-status-complete svg { width: 12px; height: 12px; display: block; }
 .tool-body { display: none; border-top: 1px solid var(--tool-border); padding: 10px 12px; }
 .tool-block.open .tool-body { display: block; }
 .tool-body .label { font-size: 11px; color: var(--text-faint); text-transform: uppercase; margin-bottom: 4px; }
@@ -601,12 +616,16 @@ html, body {
 @keyframes spin { to { transform: rotate(360deg); } }
 
 .error-bubble {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
   border: 1px solid var(--danger);
   background: var(--danger-soft);
   color: var(--danger-text);
   padding: 11px 15px;
   border-radius: var(--radius);
 }
+.error-bubble svg { width: 15px; height: 15px; flex: 0 0 15px; margin-top: 2px; }
 
 .msg-actions {
   display: flex;
@@ -713,6 +732,7 @@ html, body {
   border: 1px solid var(--border-soft);
   color: var(--text-muted);
 }
+.modality-chip svg { width: 12px; height: 12px; display: block; stroke-width: 1.8; }
 .modality-chip.supported { border-color: color-mix(in srgb, var(--accent) 35%, var(--border)); color: var(--text); }
 .modality-chip.unsupported { opacity: 0.45; }
 .modality-chip.upload-partial {
@@ -857,6 +877,8 @@ html, body {
   cursor: pointer;
   color: var(--text-muted);
 }
+.pending-attachment button svg { width: 13px; height: 13px; display: block; }
+.attachment-thumb svg { width: 15px; height: 15px; display: block; }
 .msg-attachments { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 .msg-context-refs { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 .attachment-chip {

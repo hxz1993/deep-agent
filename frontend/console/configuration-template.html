@@ -42,7 +42,7 @@
     <section class="panel active" id="panel-agents">
       <div class="panel-toolbar">
         <h2>Agent 列表</h2>
-        <button class="btn primary" id="newAgentBtn">＋ 新建 Agent</button>
+        <button class="btn primary" id="newAgentBtn"><i data-lucide="plus"></i>新建 Agent</button>
       </div>
       <div class="table-wrap">
         <table class="data-table">
@@ -71,7 +71,7 @@
         </div>
         <div class="panel-toolbar-actions">
           <button class="btn" type="button" data-open-catalog>从模型目录选择</button>
-          <button class="btn primary" type="button" id="newLlmModelBtn">＋ 新建模型</button>
+          <button class="btn primary" type="button" id="newLlmModelBtn"><i data-lucide="plus"></i>新建模型</button>
         </div>
       </div>
       <div class="table-wrap">
@@ -153,7 +153,7 @@
     <section class="panel" id="panel-mcp">
       <div class="panel-toolbar">
         <h2>MCP 服务列表</h2>
-        <button class="btn primary" id="newMcpBtn">＋ 新建 MCP</button>
+        <button class="btn primary" id="newMcpBtn"><i data-lucide="plus"></i>新建 MCP</button>
       </div>
       <div class="table-wrap">
         <table class="data-table">
@@ -185,7 +185,7 @@
         <aside class="ui-tool-package-pane">
           <div class="ui-tool-pane-header">
             <strong>工具包</strong>
-            <button class="btn" id="newUiToolPackageBtn">＋ 新建</button>
+            <button class="btn" id="newUiToolPackageBtn"><i data-lucide="plus"></i>新建</button>
           </div>
           <div class="ui-tool-package-tree" id="uiToolPackageTree">
             <div class="ui-tool-tree-state">加载中…</div>
@@ -204,7 +204,7 @@
             <div class="row-actions">
               <button class="btn hidden" id="editUiToolPackageBtn">编辑工具包</button>
               <button class="btn danger hidden" id="deleteUiToolPackageBtn">删除工具包</button>
-              <button class="btn primary" id="newUiToolBtn" disabled>＋ 新建工具</button>
+              <button class="btn primary" id="newUiToolBtn" disabled><i data-lucide="plus"></i>新建工具</button>
             </div>
           </header>
           <div class="filter-bar ui-tool-filter-bar" id="uiToolsFilters">
@@ -251,7 +251,7 @@
           <h3 id="agentModalTitle">新建 Agent</h3>
           <span class="modal-entity-id hidden" id="agentModalId"></span>
         </div>
-        <button type="button" class="icon-btn" id="closeAgentModal">✕</button>
+        <button type="button" class="icon-btn" id="closeAgentModal" aria-label="关闭"><i data-lucide="x"></i></button>
       </div>
       <div class="modal-body">
         <div class="agent-form-grid">
@@ -305,7 +305,7 @@
     <form id="llmModelForm" method="dialog">
       <div class="modal-header">
         <h3 id="llmModelModalTitle">新建模型配置</h3>
-        <button type="button" class="icon-btn" id="closeLlmModelModal">✕</button>
+        <button type="button" class="icon-btn" id="closeLlmModelModal" aria-label="关闭"><i data-lucide="x"></i></button>
       </div>
       <div class="modal-body">
         <label class="field">
@@ -396,7 +396,7 @@
     <form id="auxiliaryModelForm" method="dialog">
       <div class="modal-header">
         <h3 id="auxiliaryModelModalTitle">更改辅助模型</h3>
-        <button type="button" class="icon-btn" id="closeAuxiliaryModelModal">✕</button>
+        <button type="button" class="icon-btn" id="closeAuxiliaryModelModal" aria-label="关闭"><i data-lucide="x"></i></button>
       </div>
       <div class="modal-body">
         <p class="field-hint" id="auxiliaryModelModalHint"></p>
@@ -418,7 +418,7 @@
     <form id="mcpForm" method="dialog">
       <div class="modal-header">
         <h3 id="mcpModalTitle">新建 MCP</h3>
-        <button type="button" class="icon-btn" id="closeMcpModal">✕</button>
+        <button type="button" class="icon-btn" id="closeMcpModal" aria-label="关闭"><i data-lucide="x"></i></button>
       </div>
       <div class="modal-body">
         <label class="field">
@@ -508,7 +508,7 @@
     <form id="mcpRenameForm" method="dialog">
       <div class="modal-header">
         <h3>重命名 MCP</h3>
-        <button type="button" class="icon-btn" id="closeMcpRenameModal">✕</button>
+        <button type="button" class="icon-btn" id="closeMcpRenameModal" aria-label="关闭"><i data-lucide="x"></i></button>
       </div>
       <div class="modal-body">
         <label class="field">
@@ -534,7 +534,7 @@
     <form id="uiToolPackageForm" method="dialog">
       <div class="modal-header">
         <h3 id="uiToolPackageModalTitle">新建 UI 工具包</h3>
-        <button type="button" class="icon-btn" id="closeUiToolPackageModal">✕</button>
+        <button type="button" class="icon-btn" id="closeUiToolPackageModal" aria-label="关闭"><i data-lucide="x"></i></button>
       </div>
       <div class="modal-body">
         <label class="field">
@@ -567,7 +567,7 @@
     <form id="uiToolForm" method="dialog">
       <div class="modal-header">
         <h3 id="uiToolModalTitle">注册 UI 工具</h3>
-        <button type="button" class="icon-btn" id="closeUiToolModal">✕</button>
+        <button type="button" class="icon-btn" id="closeUiToolModal" aria-label="关闭"><i data-lucide="x"></i></button>
       </div>
       <div class="modal-body">
         <section class="ui-tool-template-section" id="uiToolTemplateSection">
@@ -636,7 +636,7 @@
   <dialog class="modal modal-wide" id="uiToolDetailModal">
     <div class="modal-header">
       <h3 id="uiToolDetailTitle">UI 工具详情</h3>
-      <button type="button" class="icon-btn" id="closeUiToolDetailModal">✕</button>
+      <button type="button" class="icon-btn" id="closeUiToolDetailModal" aria-label="关闭"><i data-lucide="x"></i></button>
     </div>
     <div class="modal-body">
       <dl class="ui-tool-detail-grid" id="uiToolDetailGrid"></dl>

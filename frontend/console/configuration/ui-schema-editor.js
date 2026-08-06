@@ -6,6 +6,10 @@ const uiSchemaEditor = (() => {
   const ALL_TYPES = [...SCALAR_TYPES, "object"];
   let _uid = 0;
 
+  function refreshIcons() {
+    window.requestAnimationFrame(() => window.lucide?.createIcons());
+  }
+
   function nextId() {
     _uid += 1;
     return `sf-${_uid}`;
@@ -136,11 +140,11 @@ const uiSchemaEditor = (() => {
           <option value="no"${field.required ? "" : " selected"}>否</option>
           <option value="yes"${field.required ? " selected" : ""}>是</option>
         </select>
-        <button type="button" class="schema-remove icon-btn" title="删除"${readOnly ? " disabled" : ""}>×</button>
+        <button type="button" class="schema-remove icon-btn" title="删除" aria-label="删除字段"${readOnly ? " disabled" : ""}><i data-lucide="trash-2" aria-hidden="true"></i></button>
       </div>
       <div class="schema-children${field.type === "object" ? "" : " hidden"}">
         <div class="schema-fields"></div>
-        <button type="button" class="btn schema-add-btn schema-add-btn-nested"${readOnly ? " disabled hidden" : ""}>＋ 添加字段</button>
+        <button type="button" class="btn schema-add-btn schema-add-btn-nested"${readOnly ? " disabled hidden" : ""}><i data-lucide="plus" aria-hidden="true"></i>添加字段</button>
       </div>
     `;
 
@@ -177,6 +181,7 @@ const uiSchemaEditor = (() => {
       children: [],
     };
     fieldsEl.appendChild(renderFieldRow(field, depth, { showDefault, readOnly }));
+    refreshIcons();
   }
 
   function mountFieldsBlock(fieldsEl, fields, depth, { showDefault, readOnly }, addBtn) {
@@ -187,6 +192,7 @@ const uiSchemaEditor = (() => {
       addBtn.addEventListener("click", () => appendField(fieldsEl, depth, { showDefault, readOnly }));
       addBtn.classList.toggle("hidden", readOnly);
     }
+    refreshIcons();
   }
 
   function renderParamsEditor(container, schema, { readOnly = false } = {}) {
@@ -201,7 +207,7 @@ const uiSchemaEditor = (() => {
         <span>列名</span><span>类型</span><span>描述</span><span>默认值</span><span>必填</span><span></span>
       </div>
       <div class="schema-fields"></div>
-      <button type="button" class="btn schema-add-btn"${readOnly ? " disabled hidden" : ""}>＋ 添加字段</button>
+      <button type="button" class="btn schema-add-btn"${readOnly ? " disabled hidden" : ""}><i data-lucide="plus" aria-hidden="true"></i>添加字段</button>
     `;
     container.appendChild(wrap);
 
@@ -237,7 +243,7 @@ const uiSchemaEditor = (() => {
           <span>列名</span><span>类型</span><span>描述</span><span>必填</span><span></span>
         </div>
         <div class="schema-fields"></div>
-        <button type="button" class="btn schema-add-btn"${readOnly ? " disabled hidden" : ""}>＋ 添加字段</button>
+        <button type="button" class="btn schema-add-btn"${readOnly ? " disabled hidden" : ""}><i data-lucide="plus" aria-hidden="true"></i>添加字段</button>
       </div>
     `;
     container.appendChild(wrap);

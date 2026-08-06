@@ -29,6 +29,15 @@ const LEGACY_BUILTIN_UI_TOOLS = new Set(["confirm_action", "ask_user_choice"]);
 /** @type {Map<string, object>} */
 const uiToolsByName = new Map();
 
+function lucideIcon(name, className = "") {
+  const classAttr = className ? ` class="${className}"` : "";
+  return `<i data-lucide="${name}"${classAttr} aria-hidden="true"></i>`;
+}
+
+function refreshLucideIcons() {
+  window.requestAnimationFrame(() => window.lucide?.createIcons());
+}
+
 function mergeUiToolCall(call) {
   const def = uiToolsByName.get(call.tool);
   if (!def) return call;
@@ -123,11 +132,11 @@ const LLM_MODALITY_LABELS = {
 };
 
 const LLM_MODALITY_ICONS = {
-  text: "T",
-  image: "🖼",
-  audio: "🔊",
-  video: "🎬",
-  pdf: "📄",
+  text: "type",
+  image: "image",
+  audio: "audio-lines",
+  video: "video",
+  pdf: "file-text",
 };
 
 /** LLM-native modalities only (Admin ``input_modalities``). */
@@ -136,13 +145,13 @@ const ALL_LLM_MODALITIES = ["text", "image", "audio", "video", "pdf"];
 const UPLOAD_KIND_ORDER = ["image", "text_file", "pdf", "docx", "xlsx", "audio", "video"];
 
 const UPLOAD_KIND_ICONS = {
-  image: "🖼",
-  text_file: "📃",
-  pdf: "📄",
-  docx: "📝",
-  xlsx: "📊",
-  audio: "🔊",
-  video: "🎬",
+  image: "image",
+  text_file: "file-text",
+  pdf: "file",
+  docx: "file-text",
+  xlsx: "table-2",
+  audio: "audio-lines",
+  video: "video",
 };
 
 /* ----------------------------- DOM ----------------------------- */
@@ -721,7 +730,7 @@ function renderSessions() {
     li.className =
       "session-item" +
       (s.id === state.sessionId && (s.agentId || "") === (state.agentId || "") ? " active" : "");
-    li.innerHTML = `<span class="sid" title="${escapeHtml(s.title)}"><span class="session-title">${escapeHtml(s.title)}</span><span class="session-meta"><span>${escapeHtml(formatSessionActivity(s))}</span><span class="session-meta-dot" aria-hidden="true"></span><span>${escapeHtml(formatSessionMessageCount(s))}</span></span></span><span class="session-actions"><span class="rename-btn" title="重命名">✏️</span><span class="auto-rename-btn" title="自动重命名">🔄</span><span class="del" title="删除">✕</span></span>`;
+    li.innerHTML = `<span class="sid" title="${escapeHtml(s.title)}"><span class="session-title">${escapeHtml(s.title)}</span><span class="session-meta"><span>${escapeHtml(formatSessionActivity(s))}</span><span class="session-meta-dot" aria-hidden="true"></span><span>${escapeHtml(formatSessionMessageCount(s))}</span></span></span><span class="session-actions"><span class="rename-btn" title="重命名" aria-label="重命名">${lucideIcon("pencil")}</span><span class="auto-rename-btn" title="自动重命名" aria-label="自动重命名">${lucideIcon("refresh-cw")}</span><span class="del" title="删除" aria-label="删除">${lucideIcon("trash-2")}</span></span>`;
     li.querySelector(".sid").addEventListener("click", (e) => {
       if (e.target.closest(".session-title-input")) return;
       switchSession(s);
@@ -747,6 +756,7 @@ function renderSessions() {
     });
     el.sessionList.appendChild(li);
   }
+  refreshLucideIcons();
 }
 
 async function switchSession(s) {
@@ -1558,9 +1568,9 @@ function updateComposerModelInfo() {
       const chips = ALL_LLM_MODALITIES.map((key) => {
         const on = supported.has(key);
         const label = LLM_MODALITY_LABELS[key] || key;
-        const icon = LLM_MODALITY_ICONS[key] || "";
+        const icon = LLM_MODALITY_ICONS[key] || "circle";
         const title = on ? `LLM 原生支持：${label}` : `LLM 原生不支持：${label}`;
-        return `<span class="modality-chip ${on ? "supported" : "unsupported"}" title="${escapeHtml(title)}">${icon} ${escapeHtml(label)}</span>`;
+        return `<span class="modality-chip ${on ? "supported" : "unsupported"}" title="${escapeHtml(title)}">${lucideIcon(icon)}<span>${escapeHtml(label)}</span></span>`;
       }).join("");
       el.composerModelModalities.innerHTML = `<span class="composer-modalities-label">模态输入</span>${chips}`;
     }
@@ -1580,7 +1590,7 @@ function updateComposerModelInfo() {
       const chips = ordered
         .map((key) => {
           const label = labels[key] || key;
-          const icon = UPLOAD_KIND_ICONS[key] || "";
+          const icon = UPLOAD_KIND_ICONS[key] || "file";
           let chipClass = "supported";
           let title = `平台上传：${label}`;
           if (key === "image" && !vision) {
@@ -1593,12 +1603,13 @@ function updateComposerModelInfo() {
           } else if (key === "pdf") {
             title = `${label}：仅模型配置原生 PDF 输入时可发送，不做本地解析`;
           }
-          return `<span class="modality-chip ${chipClass}" title="${escapeHtml(title)}">${icon} ${escapeHtml(label)}</span>`;
+          return `<span class="modality-chip ${chipClass}" title="${escapeHtml(title)}">${lucideIcon(icon)}<span>${escapeHtml(label)}</span></span>`;
         })
         .join("");
       el.composerUploadCapabilities.innerHTML = `<span class="composer-modalities-label">附件</span>${chips}`;
     }
   }
+  refreshLucideIcons();
 }
 
 function updateChatHeader() {
@@ -1939,7 +1950,7 @@ function addMessage(role, text, timestamp, branchPoint, attachments, contextRefs
   row.className = `msg-row ${role}`;
   if (branchPoint != null) row.dataset.branchPoint = String(branchPoint);
   row.innerHTML = `
-    <div class="avatar ${role}">${role === "user" ? "你" : "🤖"}</div>
+    <div class="avatar ${role}">${role === "user" ? "你" : lucideIcon("bot")}</div>
     <div class="bubble-wrap"><div class="bubble"></div></div>`;
   const wrap = row.querySelector(".bubble-wrap");
   if (timestamp) prependMsgTime(wrap, timestamp);
@@ -1969,6 +1980,7 @@ function addMessage(role, text, timestamp, branchPoint, attachments, contextRefs
     wrap.appendChild(actions);
   }
   el.messages.appendChild(row);
+  refreshLucideIcons();
   scrollToBottom();
   return row;
 }
@@ -1993,12 +2005,7 @@ function renderMessageContextRefs(container, contextRefs, branchPoint) {
       "aria-pressed",
       window.DeepAgentConsoleWorkspace?.isContextReferenceSelected(ref, branchPoint) ? "true" : "false",
     );
-    info.innerHTML = `
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <circle cx="12" cy="12" r="9"></circle>
-        <path d="M12 11v5"></path>
-        <path d="M12 8h.01"></path>
-      </svg>`;
+    info.innerHTML = lucideIcon("circle-info");
     info.addEventListener("click", (event) => {
       event.stopPropagation();
       window.DeepAgentConsoleWorkspace?.toggleContextReferenceInspector(ref, branchPoint);
@@ -2019,7 +2026,7 @@ function renderMessageAttachments(container, attachments) {
     if (mime.startsWith("image/")) {
       const img = document.createElement("div");
       img.className = "attachment-thumb";
-      img.textContent = "🖼";
+      img.innerHTML = lucideIcon("image");
       chip.appendChild(img);
     }
     const label = document.createElement("span");
@@ -2029,6 +2036,7 @@ function renderMessageAttachments(container, attachments) {
     wrap.appendChild(chip);
   }
   container.appendChild(wrap);
+  refreshLucideIcons();
 }
 
 async function onFilesSelected(e) {
@@ -2092,13 +2100,14 @@ function renderPendingAttachments() {
   for (const att of state.pendingAttachments) {
     const chip = document.createElement("div");
     chip.className = "pending-attachment";
-    chip.innerHTML = `<span>${escapeHtml(att.name || att.id)}</span><button type="button" title="移除">×</button>`;
+    chip.innerHTML = `<span>${escapeHtml(att.name || att.id)}</span><button type="button" title="移除" aria-label="移除附件">${lucideIcon("x")}</button>`;
     chip.querySelector("button").addEventListener("click", () => {
       state.pendingAttachments = state.pendingAttachments.filter((a) => a.id !== att.id);
       renderPendingAttachments();
     });
     el.attachmentPreview.appendChild(chip);
   }
+  refreshLucideIcons();
 }
 
 function clearPendingAttachments() {
@@ -2160,9 +2169,10 @@ function prependMsgTime(wrap, iso) {
 function addSystemNote(text) {
   const row = document.createElement("div");
   row.className = "msg-row assistant";
-  row.innerHTML = `<div class="avatar assistant">ℹ️</div><div class="bubble-wrap"><div class="bubble" style="opacity:.7;font-size:13px"></div></div>`;
+  row.innerHTML = `<div class="avatar assistant system-avatar">${lucideIcon("circle-info")}</div><div class="bubble-wrap"><div class="bubble" style="opacity:.7;font-size:13px"></div></div>`;
   row.querySelector(".bubble").textContent = text;
   el.messages.appendChild(row);
+  refreshLucideIcons();
   scrollToBottom();
 }
 
@@ -2171,11 +2181,12 @@ function createAssistantMessage(timestamp, branchPoint) {
   row.className = "msg-row assistant";
   if (branchPoint != null) row.dataset.branchPoint = String(branchPoint);
   row.innerHTML = `
-    <div class="avatar assistant">🤖</div>
+    <div class="avatar assistant">${lucideIcon("bot")}</div>
     <div class="bubble-wrap"></div>`;
   const wrap = row.querySelector(".bubble-wrap");
   if (timestamp) prependMsgTime(wrap, timestamp);
   el.messages.appendChild(row);
+  refreshLucideIcons();
   scrollToBottom();
 
   let textBuffer = "";
@@ -2190,8 +2201,8 @@ function createAssistantMessage(timestamp, branchPoint) {
       thinkingBlock.className = "thinking-block";
       thinkingBlock.innerHTML = `
         <div class="thinking-head">
-          <span class="chevron">▶</span>
-          <span class="thinking-icon">💭</span>
+          <span class="chevron">${lucideIcon("chevron-right")}</span>
+          <span class="thinking-icon">${lucideIcon("brain-circuit")}</span>
           <span class="thinking-title">思考中…</span>
           <span class="thinking-status"><span class="spinner"></span></span>
         </div>
@@ -2200,6 +2211,7 @@ function createAssistantMessage(timestamp, branchPoint) {
         thinkingBlock.classList.toggle("open");
       });
       wrap.appendChild(thinkingBlock);
+      refreshLucideIcons();
     }
     return thinkingBlock;
   }
@@ -2283,8 +2295,8 @@ function createAssistantMessage(timestamp, branchPoint) {
         : `<pre class="args args-pending">参数接收中…</pre>`;
       block.innerHTML = `
         <div class="tool-head">
-          <span class="chevron">▶</span>
-          <span class="tool-icon">🛠️</span>
+          <span class="chevron">${lucideIcon("chevron-right")}</span>
+          <span class="tool-icon">${lucideIcon("wrench")}</span>
           <span class="tool-name">${escapeHtml(merged.tool || "tool")}</span>
           <span class="tool-status"><span class="spinner"></span></span>
         </div>
@@ -2294,6 +2306,7 @@ function createAssistantMessage(timestamp, branchPoint) {
         </div>`;
       block.querySelector(".tool-head").addEventListener("click", () => block.classList.toggle("open"));
       wrap.appendChild(block);
+      refreshLucideIcons();
       toolBlocks.set(key, block);
       maybeAttachHitlWidget(block, merged);
       // 工具调用后开启新文本段；先封存当前气泡，避免多个 streaming 光标并存
@@ -2311,7 +2324,8 @@ function createAssistantMessage(timestamp, branchPoint) {
       if (!block) return;
       block.dataset.done = "1";
       block.classList.remove("hitl-pending");
-      block.querySelector(".tool-status").innerHTML = '<span style="color:#3fb950">✓ 完成</span>';
+      block.querySelector(".tool-status").innerHTML = `<span class="tool-status-complete">${lucideIcon("check")}完成</span>`;
+      refreshLucideIcons();
       const body = block.querySelector(".tool-body");
       const existingWidget = body.querySelector(".hitl-widget");
       if (existingWidget) existingWidget.remove();
@@ -2574,7 +2588,7 @@ function addErrorTo(assistant, message, retryOpts) {
   const wrap = assistant.row.querySelector(".bubble-wrap");
   const div = document.createElement("div");
   div.className = "error-bubble";
-  div.textContent = "⚠ " + message;
+  div.innerHTML = `${lucideIcon("triangle-alert")}<span>${escapeHtml(message)}</span>`;
   wrap.appendChild(div);
   if (retryOpts && retryOpts.branchFrom != null && retryOpts.message) {
     const btn = document.createElement("button");
@@ -2584,6 +2598,7 @@ function addErrorTo(assistant, message, retryOpts) {
     btn.addEventListener("click", () => retryFromBranch(retryOpts));
     wrap.appendChild(btn);
   }
+  refreshLucideIcons();
   scrollToBottom();
 }
 

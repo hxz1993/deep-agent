@@ -1,4 +1,4 @@
-const WORKSPACE_ASSET_VERSION = "20260806-1";
+const WORKSPACE_ASSET_VERSION = "20260806-2";
 
 let initialized = false;
 let lastRenderKey = "";
@@ -59,7 +59,7 @@ function installLegacyDom(source) {
     toolbar.className = "session-toolbar";
     const search = document.createElement("label");
     search.className = "compact-search session-search";
-    search.innerHTML = '<span aria-hidden="true">⌕</span><input type="search" id="sessionSearchInput" placeholder="搜索当前 Agent 会话" />';
+    search.innerHTML = '<i data-lucide="search" aria-hidden="true"></i><input type="search" id="sessionSearchInput" placeholder="搜索当前 Agent 会话" />';
     const testChatButton = document.createElement("button");
     testChatButton.type = "button";
     testChatButton.id = "contextTestChatBtn";

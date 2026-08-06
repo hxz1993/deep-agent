@@ -104,8 +104,8 @@ test("输入区按模型与模态输入双列展示并移除冗余提示", () =>
 });
 
 test("输入框提供线性附件、主动压缩按钮和后端预算百分比", () => {
-  assert.match(template, /id="attachBtn"[\s\S]*?<svg/);
-  assert.match(template, /id="compactContextBtn"[\s\S]*?<svg/);
+  assert.match(template, /id="attachBtn"[\s\S]*?data-lucide="paperclip"/);
+  assert.match(template, /id="compactContextBtn"[\s\S]*?data-lucide="minimize-2"/);
   assert.match(template, /id="contextBudgetBadge"[\s\S]*上下文 —/);
   assert.doesNotMatch(template, /📎/);
   assert.doesNotMatch(chatSource, /📎/);

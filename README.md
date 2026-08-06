@@ -3,7 +3,7 @@
 DeepAgent 是基于 FastAPI、Pydantic AI 和 SQLAlchemy 的多用户 Agent 服务，并
 随服务发布一体化运维控制台。
 
-当前产品版本为 `0.3.7`。`deep_agent.__version__` 是唯一代码版本来源，FastAPI、
+当前产品版本为 `0.3.8`。`deep_agent.__version__` 是唯一代码版本来源，FastAPI、
 `GET /info` 和 Console 顶部版本徽标均读取该值。后续正式发布默认递增
 `MAJOR.MINOR.PATCH` 的第三位，只有明确规划重大版本时才调整前两位。产品版本不通过
 环境变量或数据库覆盖，也不等同于 Alembic 数据库结构 revision。
@@ -23,6 +23,9 @@ v0.3.6 将上下文语义压缩收敛为单次摘要：在一个安全消息边�
 v0.3.7 统一自动与主动压缩的实时过程条、Checkpoint 保存结果和历史压缩标记；配置中心按
 “Agent 设置 / 系统设置 / 辅助资源”重新分组，并增加不暴露凭据和本地完整路径的只读数据库
 连接摘要。
+
+v0.3.8 将 Console 工作台、配置中心、动态会话和工具过程中的字符及 emoji 图标统一为
+随仓库发布的 Lucide 线性 SVG，并补齐动态渲染、主题尺寸和无障碍标签。
 
 ## 项目结构
 

@@ -4,6 +4,10 @@
 
 纯静态 HTML/CSS/JS，**无构建步骤**。后端将 `frontend/console/` 挂载到 `/console`，根路径跳转到 Console。
 
+Console 图标统一使用仓库内 `frontend/vendor/lucide.min.js` 的线性 SVG。静态模板使用
+`data-lucide`，动态插入 DOM 的图标必须在插入后调用 `window.lucide.createIcons()`；不要重新
+引入 emoji、字符图标、外部 CDN 或第二套图标库。
+
 ---
 
 ## 文件结构

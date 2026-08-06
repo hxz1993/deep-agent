@@ -1069,6 +1069,20 @@ dialog.console-detail-dialog.modal-wide { width: min(980px, calc(100vw - 28px));
 .inspector-grid dt,
 .inspector-grid dd { padding: 7px 8px; font-size: 11px; }
 .inspector-help { margin: 8px 2px 0; color: var(--text-faint); font-size: 10px; line-height: 1.55; }
+.context-reference-inspector .inspector-grid { margin-bottom: 10px; }
+.inspector-json {
+  max-height: calc(100vh - 300px);
+  margin: 0;
+  padding: 10px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text-dim);
+  font: 11px/1.55 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
 .budget-meter { height: 1px; margin: 0 0 8px; overflow: hidden; border-radius: 0; background: var(--border); }
 .budget-meter span { display: block; height: 100%; background: var(--accent); transition: width .2s; }
 

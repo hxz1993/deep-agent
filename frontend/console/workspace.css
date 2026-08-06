@@ -871,17 +871,41 @@ html, body {
 .context-ref-chip {
   display: inline-flex;
   align-items: center;
-  max-width: 260px;
-  padding: 6px 10px;
-  overflow: hidden;
+  gap: 4px;
+  max-width: 360px;
+  padding: 3px 4px 3px 10px;
   border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border));
   border-radius: 8px;
   background: color-mix(in srgb, var(--accent) 7%, var(--bg-soft));
   color: var(--text-muted);
   font-size: 12px;
+}
+.context-ref-label {
+  min-width: 0;
+  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.context-ref-info {
+  width: 24px;
+  height: 24px;
+  flex: 0 0 24px;
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+}
+.context-ref-info:hover,
+.context-ref-info[aria-pressed="true"] {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+}
+.context-ref-info:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.context-ref-info svg { width: 17px; height: 17px; display: block; }
 .attachment-name { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .hidden { display: none !important; }

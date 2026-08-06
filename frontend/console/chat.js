@@ -1954,7 +1954,7 @@ function addMessage(role, text, timestamp, branchPoint, attachments, contextRefs
     renderMessageAttachments(bubble, attachments);
   }
   if (contextRefs?.length) {
-    renderMessageContextRefs(bubble, contextRefs);
+    renderMessageContextRefs(bubble, contextRefs, branchPoint);
   }
   if (role === "user" && !contextRefs?.length) {
     const actions = document.createElement("div");
@@ -1973,14 +1973,37 @@ function addMessage(role, text, timestamp, branchPoint, attachments, contextRefs
   return row;
 }
 
-function renderMessageContextRefs(container, contextRefs) {
+function renderMessageContextRefs(container, contextRefs, branchPoint) {
   const wrap = document.createElement("div");
   wrap.className = "msg-context-refs";
   for (const ref of contextRefs) {
     const chip = document.createElement("div");
     chip.className = "context-ref-chip";
-    chip.textContent = `上下文 · ${ref.label || ref.type || "引用"}`;
     chip.title = `${ref.type || "上下文引用"}@${ref.schema_version || "—"}`;
+    const label = document.createElement("span");
+    label.className = "context-ref-label";
+    label.textContent = `上下文 · ${ref.label || ref.type || "引用"}`;
+    const info = document.createElement("button");
+    info.type = "button";
+    info.className = "context-ref-info";
+    info.title = "查看上下文 JSON";
+    info.setAttribute("aria-label", `查看 ${ref.label || ref.type || "上下文引用"} JSON`);
+    info.dataset.contextRefId = [branchPoint ?? "live", ref.key || "", ref.type || ""].join(":");
+    info.setAttribute(
+      "aria-pressed",
+      window.DeepAgentConsoleWorkspace?.isContextReferenceSelected(ref, branchPoint) ? "true" : "false",
+    );
+    info.innerHTML = `
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="9"></circle>
+        <path d="M12 11v5"></path>
+        <path d="M12 8h.01"></path>
+      </svg>`;
+    info.addEventListener("click", (event) => {
+      event.stopPropagation();
+      window.DeepAgentConsoleWorkspace?.toggleContextReferenceInspector(ref, branchPoint);
+    });
+    chip.append(label, info);
     wrap.appendChild(chip);
   }
   container.appendChild(wrap);

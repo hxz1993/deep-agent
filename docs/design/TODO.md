@@ -46,6 +46,7 @@
 | `ATT-201` | 附件解析 | 大文件异步解析、隔离执行和租户级配额 | 待设计 | 依赖统一文档解析服务 | [安全与资源](06-attachment-parsing/attachment-parsing-design.md#12-安全与资源边界) |
 | `ATT-202` | 附件解析 | 文件结构索引、跨 Run 缓存和超大结果外置 | 暂缓 | 第一版继续使用单 Run 缓存与上下文压缩；**出站大结果见 `ART-*`** | [后续方向](06-attachment-parsing/attachment-parsing-design.md#13-后续方向) |
 | `ART-201` | Artifact 交互 | 配额、审计、共享存储与 Harness Spill 对照 | 暂缓 | 多实例与运维就绪后 | [分期 G0](08-artifact-export/README.md#建议分期先语义后-sink) |
+| `CONSOLE-201` | 运维控制台 | 增加工作台消息检查模式，在右侧按选中对象查看 Markdown 原文、历史结构、上下文引用、工具参数/结果和当前 Run 的 SSE 事件帧 | 待设计 | 历史只读数据与当前 Run 内存事件必须分开；第一版不把完整 SSE 流持久化到数据库，不暴露敏感 Provider 请求 | [运行检查器](02-operations-console/operations-console-design.md#运行检查器) |
 | `UI-201` | UI 工具 | 增加前端表单操作工具 | 待决策 | 需先明确宿主页面、动作协议和权限边界 | [表单操作](05-tool-optimization/tool-optimization-design.md#6-前端表单工具设计) |
 | `TOOL-201` | 工具优化 | 评估 `ToolSearch`、`DeferredLoadingToolset` 和 `OverflowingToolOutput` | 暂缓 | 有潜力；达到真实工具数量、Schema Token 和结果溢出阈值后试点 | [ToolSearch](05-tool-optimization/tool-optimization-design.md#82-toolsearch) |
 | `TOOL-202` | 工具优化 | 评估以 `CombinedToolset` 统一包装跨来源工具 | 暂缓 | 仅在多个工具包需要共享过滤、审批或延迟加载策略时采用 | [Toolset 组合](05-tool-optimization/tool-optimization-design.md#83-toolset-组合与展示命名) |

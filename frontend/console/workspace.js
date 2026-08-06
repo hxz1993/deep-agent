@@ -1,10 +1,11 @@
-const WORKSPACE_ASSET_VERSION = "20260803-4";
+const WORKSPACE_ASSET_VERSION = "20260806-1";
 
 let initialized = false;
 let lastRenderKey = "";
 let contextTestCatalog = null;
 let contextTestCatalogAgentId = "";
 let contextTestRequestAgentId = "";
+let selectedContextReference = null;
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -329,15 +330,24 @@ function syncInspectorToggle() {
   const visible = inspectorUsesDrawer()
     ? inspector.classList.contains("mobile-open")
     : !grid.classList.contains("inspector-hidden");
-  button.classList.toggle("active", visible);
-  button.setAttribute("aria-pressed", String(visible));
-  button.title = visible ? "隐藏会话详情" : "显示会话详情";
+  const sessionDetailsActive = visible && !selectedContextReference;
+  button.classList.toggle("active", sessionDetailsActive);
+  button.setAttribute("aria-pressed", String(sessionDetailsActive));
+  button.title = sessionDetailsActive ? "隐藏会话详情" : "显示会话详情";
 }
 
 function toggleInspectorPane() {
   const grid = document.getElementById("workspaceGrid");
   const inspector = document.getElementById("inspectorPane");
   if (!grid || !inspector) return;
+  if (selectedContextReference) {
+    selectedContextReference = null;
+    lastRenderKey = "";
+    syncContextReferenceButtons();
+    openInspectorPane();
+    renderInspector();
+    return;
+  }
   if (inspectorUsesDrawer()) {
     const shouldOpen = !inspector.classList.contains("mobile-open");
     closeWorkspaceDrawers();
@@ -364,11 +374,82 @@ function currentAgentName(state) {
   return state.agents.find((agent) => agent.id === state.agentId)?.name || state.agentId || "—";
 }
 
+function contextReferenceSelectionId(reference, branchPoint) {
+  return [branchPoint ?? "live", reference?.key || "", reference?.type || ""].join(":");
+}
+
+function isContextReferenceSelected(reference, branchPoint) {
+  return selectedContextReference?.id === contextReferenceSelectionId(reference, branchPoint);
+}
+
+function syncContextReferenceButtons() {
+  document.querySelectorAll(".context-ref-info").forEach((button) => {
+    button.setAttribute(
+      "aria-pressed",
+      button.dataset.contextRefId === selectedContextReference?.id ? "true" : "false",
+    );
+  });
+}
+
+function openInspectorPane() {
+  const grid = document.getElementById("workspaceGrid");
+  const inspector = document.getElementById("inspectorPane");
+  if (!grid || !inspector) return;
+  if (inspectorUsesDrawer()) {
+    closeWorkspaceDrawers();
+    inspector.classList.add("mobile-open");
+    document.getElementById("workspaceDrawerBackdrop")?.classList.remove("hidden");
+  } else {
+    grid.classList.remove("inspector-hidden");
+  }
+  syncInspectorToggle();
+}
+
+function toggleContextReferenceInspector(reference, branchPoint) {
+  const id = contextReferenceSelectionId(reference, branchPoint);
+  if (selectedContextReference?.id !== id) {
+    selectedContextReference = {
+      id,
+      sessionId: window.DeepAgentConsoleChat?.state.sessionId || null,
+      reference: JSON.parse(JSON.stringify(reference)),
+    };
+  }
+  openInspectorPane();
+  lastRenderKey = "";
+  syncContextReferenceButtons();
+  renderInspector();
+}
+
+function renderContextReferenceInspector(host, state) {
+  if (!selectedContextReference) return false;
+  if (selectedContextReference.sessionId !== (state.sessionId || null)) {
+    selectedContextReference = null;
+    syncContextReferenceButtons();
+    return false;
+  }
+  const reference = selectedContextReference.reference;
+  const rawJson = JSON.stringify(reference, null, 2);
+  host.innerHTML = `
+    <section class="inspector-section context-reference-inspector">
+      <header><strong>上下文引用</strong><span>只读 JSON</span></header>
+      <dl class="inspector-grid">
+        <dt>名称</dt><dd>${escapeHtml(reference.label || "—")}</dd>
+        <dt>Key</dt><dd class="mono">${escapeHtml(reference.key || "—")}</dd>
+        <dt>类型</dt><dd class="mono">${escapeHtml(reference.type || "—")}</dd>
+        <dt>版本</dt><dd>${escapeHtml(reference.schema_version || "—")}</dd>
+      </dl>
+      <pre class="inspector-json" aria-label="上下文引用 JSON">${escapeHtml(rawJson)}</pre>
+      <p class="inspector-help">这是会话历史保存的完整上下文引用。metadata 只用于系统和前端，不会进入模型输入。点击对话标题栏的“会话详情”可切回会话信息。</p>
+    </section>`;
+  return true;
+}
+
 function renderInspector() {
   const api = window.DeepAgentConsoleChat;
   const host = document.getElementById("inspectorContent");
   if (!api || !host) return;
   const state = api.state;
+  if (renderContextReferenceInspector(host, state)) return;
 
   const model = state.llmModels.find((item) => item.id === state.llmModelId);
   const context = window.DeepAgentConsoleContext?.effectiveContext || {};
@@ -526,6 +607,11 @@ function toggleWorkspaceDrawer(name) {
   document.getElementById("workspaceDrawerBackdrop")?.classList.remove("hidden");
   syncInspectorToggle();
 }
+
+window.DeepAgentConsoleWorkspace = {
+  isContextReferenceSelected,
+  toggleContextReferenceInspector,
+};
 
 export async function initWorkspace() {
   if (initialized) return;

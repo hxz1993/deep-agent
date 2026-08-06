@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from datetime import datetime, timedelta, timezone
 
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
@@ -477,6 +478,59 @@ class ConfigurationCrudContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(await self.stores.mcp.get_by_name("rename_taken"))
         self.assertIsNotNone(await self.stores.mcp.get_by_name("rename_builtin"))
         self.assertIsNotNone(await self.stores.mcp.get_by_name("rename_stdio"))
+
+    async def test_mcp_admin_list_prioritizes_custom_then_newest(self) -> None:
+        now = datetime.now(timezone.utc)
+        async with self.stores.mcp._write() as db:
+            db.add_all(
+                [
+                    McpServer(
+                        name="custom_old",
+                        transport="url",
+                        config={"url": "http://old.example.test/mcp"},
+                        enabled=False,
+                        created_at=now - timedelta(days=2),
+                        updated_at=now - timedelta(days=2),
+                    ),
+                    McpServer(
+                        name="custom_new",
+                        transport="url",
+                        config={"url": "http://new.example.test/mcp"},
+                        enabled=False,
+                        created_at=now,
+                        updated_at=now,
+                    ),
+                    McpServer(
+                        name="builtin_old",
+                        transport="builtin",
+                        config={},
+                        enabled=True,
+                        created_at=now - timedelta(days=3),
+                        updated_at=now - timedelta(days=3),
+                    ),
+                    McpServer(
+                        name="builtin_new",
+                        transport="builtin",
+                        config={},
+                        enabled=True,
+                        created_at=now - timedelta(days=1),
+                        updated_at=now - timedelta(days=1),
+                    ),
+                ]
+            )
+
+        async with AsyncClient(transport=self._transport, base_url="http://test") as client:
+            response = await client.get("/api/v1/mcp")
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(
+            [item["name"] for item in response.json()],
+            ["custom_new", "custom_old", "builtin_new", "builtin_old"],
+        )
+        self.assertEqual(
+            [row.name for row in await self.stores.mcp.list_all()],
+            ["builtin_new", "builtin_old", "custom_new", "custom_old"],
+        )
 
     async def test_referenced_mcp_and_ui_tool_cannot_be_deleted(self) -> None:
         async with AsyncClient(transport=self._transport, base_url="http://test") as client:

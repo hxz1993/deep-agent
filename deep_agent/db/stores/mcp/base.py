@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from sqlalchemy import delete, select
+from sqlalchemy import case, delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,6 +27,18 @@ class McpServerStoreBase(SessionBoundMixin):
     async def list_all(self) -> list[McpServer]:
         async with self._read() as db:
             return await self._list_all(db)
+
+    async def list_for_admin(self) -> list[McpServer]:
+        """List user-managed MCPs first without changing runtime tool ordering."""
+        async with self._read() as db:
+            result = await db.execute(
+                select(McpServer).order_by(
+                    case((McpServer.transport == "builtin", 1), else_=0),
+                    McpServer.created_at.desc(),
+                    McpServer.name,
+                )
+            )
+            return list(result.scalars().all())
 
     async def create_unique(
         self,

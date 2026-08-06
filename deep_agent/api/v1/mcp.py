@@ -98,7 +98,7 @@ def _should_reinspect(row, body: McpServerUpdate) -> bool:
 async def list_mcp_servers(
     store: McpServerStoreBase = Depends(get_mcp_store),
 ) -> list[McpServerResponse]:
-    rows = await store.list_all()
+    rows = await store.list_for_admin()
     return [McpServerResponse.from_row(row) for row in rows]
 
 

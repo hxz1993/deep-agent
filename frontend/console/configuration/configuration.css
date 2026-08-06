@@ -769,6 +769,23 @@ html, body {
 
 .field span { color: var(--text-dim); font-size: 13px; }
 
+.field .field-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.field .prompt-estimate {
+  color: var(--text-faint);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 400;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
 .field input,
 .field textarea,
 .field select {

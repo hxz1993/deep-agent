@@ -708,9 +708,10 @@ FunctionToolset(execute_python)
 工具权限必须由可信 `AgentDeps` 决定，不允许模型在参数中自选权限 Scope。
 
 附件工具是首个适合落地请求级过滤的场景：当本轮原始会话中没有当前用户可访问的合法附件
-引用时，不向模型暴露 `read_text_attachment`、`read_docx`、`read_xlsx`。过滤依据必须来自
-原始 `chat_messages` 和当前请求附件，不能从 Checkpoint 推断文件归属。该优化只减少无效工具
-Schema 和模型误调用，文件读取时仍需继续执行用户、会话和 `file_id` 权限校验。
+引用时，不向模型暴露整个附件读取 Toolset；只要当前请求或原始会话存在合法附件，就暴露现有
+三个读取工具，不再按 TXT、DOCX、XLSX 后缀细分。过滤依据必须来自原始 `chat_messages` 和当前
+请求附件，不能从 Checkpoint 推断文件归属。该优化只减少无效工具 Schema 和模型误调用，文件
+读取时仍需继续执行用户、会话和 `file_id` 权限校验。
 
 ### 8.2 ToolSearch
 
@@ -726,8 +727,18 @@ Tool Search 解决的是“工具太多导致发现困难和 Schema 占用”，
 
 少量工具直接全部提供，通常比增加一次搜索工具调用更简单可靠。
 
-`ToolSearch` 属于有潜力的后续能力。达到真实工具数量和 Schema Token 阈值后，结合
-`DeferredLoadingToolset` 试点按需发现；在此之前不为少量工具增加额外搜索步骤。
+2026-08-06 Test 实测已经达到启动 Tool Search 设计的条件：一个 DeepFOS MCP 包包含 24 个工具，
+纯工具 Schema 的保守估算约为 36k Token；Agent 全部 35 个可见函数的请求参数定义保守估算约
+66k Token。Provider 实际计数会因 tokenizer 和缓存口径更低，现有预算字段也混合了 Instructions，
+因此这些数字不能直接当作精确账单，但足以证明“每轮完整披露所有 MCP Schema”已经是主要成本。
+
+推荐分层处理：
+
+- Agent 选择 ToolPackage 仍表示授权上限，不改成逐工具配置。
+- 大型 MCP 使用一个稳定的搜索/发现入口，在已授权 MCP 包内检索，再按需加载候选 Tool Definitions。
+- 少量 Function、附件和 UI 工具继续直接披露或做简单条件过滤，不强行经过搜索。
+- 搜索结果必须受用户、Agent、App、Space 和 MCP 包权限约束，不能把未授权工具“搜出来”。
+- 第一版先解决 Schema 披露，不把普通工具结果溢出治理混在同一个功能中。
 
 ### 8.3 Toolset 组合与展示命名
 
@@ -888,11 +899,11 @@ Invalid request
 
 | 优先级 | 能力 | 落地口径 |
 | --- | --- | --- |
-| P0 | 无附件时隐藏附件工具 | 使用 `PrepareTools`，根据当前请求与原始会话合法附件过滤 Tool Definitions；运行时文件权限校验保持不变 |
+| P0 | 无附件时隐藏附件工具 | 根据当前请求与原始会话是否存在合法附件过滤整个附件 Toolset；不按后缀细分，运行时文件权限校验保持不变 |
 | P0 | 工具协议名与展示名分离 | 模型、SSE、历史继续使用稳定协议名；Console 使用独立中文 `display_name`，不以 `RenamedToolset` 做纯 UI 美化 |
-| P1 | 结构化最终输出 | Agent 增加可选 `output_schema`；未配置时保持字符串输出，配置后默认使用 `ToolOutput + DeferredToolRequests`，后端再次执行 JSON Schema 校验 |
+| P0 | MCP `ToolSearch` | Test 已证明大包 Schema 成本明显；在 ToolPackage 授权范围内按需检索和披露，不增加管理员逐工具选择 |
+| P0 | 结构化最终输出 | Agent 关联输出契约组和多种 Output Tool；默认仍允许普通文本，显式严格模式才禁止文本绕过，后端再次执行 JSON Schema 校验 |
 | P1 | 高风险工具审批 | 先建立风险和副作用元数据；接入 `ApprovalRequiredToolset` 时同时设计持久化、TTL、操作人、幂等、权限复检和执行审计 |
-| P2 | `ToolSearch` | 先观测工具数量和 Schema Token；达到数十个真实工具后，结合 `DeferredLoadingToolset` 试点按需发现 |
 | P2 | `CombinedToolset` | 不作为独立产品功能；仅在多个工具包需要共享过滤、审批或延迟加载策略时用于运行时装配 |
 | P3 | Provider `CodeExecutionTool` | 不作为通用代码执行；继续使用自建 `execute_python`，未来仅给明确支持的托管模型作为增强能力 |
 | P3 | Provider `FileSearchTool` | 不替代附件读取或企业知识库；先建设 Provider 无关的 RAG/MCP 抽象，再把托管 File Search 作为可选实现 |

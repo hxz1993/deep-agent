@@ -87,6 +87,17 @@ class AgentUpdate(_RejectLegacyMaxRequests):
         return normalized
 
 
+class AgentPromptEstimateRequest(BaseModel):
+    model_id: str = Field(..., description="LLM model preset used for token estimation.")
+    prompt: str = Field(..., description="System prompt text to estimate.")
+
+
+class AgentPromptEstimateResponse(BaseModel):
+    character_count: int = Field(ge=0)
+    estimated_tokens: int = Field(ge=0)
+    estimator_source: str
+
+
 class AgentResponse(BaseModel):
     id: str
     name: str

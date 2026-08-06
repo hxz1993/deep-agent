@@ -2,13 +2,20 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
+from deep_agent.agent.context.estimator import TokenEstimator
 from deep_agent.core.context import AppContextDep
 from deep_agent.capabilities.catalog import invalid_tool_package_codes
 from deep_agent.db.deps import get_agent_store, get_llm_model_store
 from deep_agent.db.ids import normalize_agent_id
 from deep_agent.db.stores.agent import AgentStoreBase
 from deep_agent.db.stores.llm_model import LlmModelStoreBase
-from deep_agent.schemas.agent import AgentCreate, AgentResponse, AgentUpdate
+from deep_agent.schemas.agent import (
+    AgentCreate,
+    AgentPromptEstimateRequest,
+    AgentPromptEstimateResponse,
+    AgentResponse,
+    AgentUpdate,
+)
 
 router = APIRouter()
 
@@ -60,6 +67,31 @@ async def list_agents(
 ) -> list[AgentResponse]:
     rows = await store.list_all()
     return [_agent_response(row) for row in rows]
+
+
+@router.post(
+    "/agents/prompt-estimate",
+    response_model=AgentPromptEstimateResponse,
+)
+async def estimate_agent_prompt(
+    body: AgentPromptEstimateRequest,
+    model_store: LlmModelStoreBase = Depends(get_llm_model_store),
+) -> AgentPromptEstimateResponse:
+    normalized_model_id = _parse_model_id(body.model_id)
+    model = await model_store.get_by_id(normalized_model_id)
+    if model is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"LLM model not found: {body.model_id}",
+        )
+
+    prompt = body.prompt.strip()
+    estimator = TokenEstimator.for_model(model.model, model.base_url)
+    return AgentPromptEstimateResponse(
+        character_count=len(prompt),
+        estimated_tokens=estimator.text(prompt),
+        estimator_source=estimator.source,
+    )
 
 
 @router.get("/agents/{agent_id}", response_model=AgentResponse)

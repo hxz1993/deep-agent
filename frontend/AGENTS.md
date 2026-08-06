@@ -56,6 +56,10 @@ frontend/
 重复显示所属包；窄屏改为上下布局，但仍必须先选包再维护工具。Builtin 包只读，只有选中手工包
 时才开放新建工具。
 
+Agent 编辑弹窗的系统提示词标题栏显示“字符数 / 预估 Token”。字符数和 Token 估算统一调用
+后端 `POST /api/v1/agents/prompt-estimate`，由当前模型对应的 `TokenEstimator` 计算；前端只做
+防抖、紧凑格式和 tooltip 展示，不维护另一套字符比例算法。
+
 ## 一体化控制台
 
 `frontend/console/` 是不依赖构建工具的 ES Modules 页面。它复用现有聊天和配置 API，但不读取旧设置页的 `da_request_headers`：

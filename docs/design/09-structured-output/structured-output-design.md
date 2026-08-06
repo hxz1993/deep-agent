@@ -19,8 +19,8 @@ DeepAgent 应把三类结构化数据分开：
 当前推荐：
 
 1. 首版结构化最终输出使用 Pydantic AI Core `ToolOutput`，不修改 Pydantic AI 源码。
-2. 普通 Agent 保持 `[str, DeferredToolRequests]`；只有明确配置输出契约的 Agent 才增加 Output Tool。
-3. 严格结构化模式不得同时允许 `str`，否则模型可以用普通文本绕过输出契约。
+2. 普通 Agent 保持 `[str, DeferredToolRequests]`；明确配置输出契约组后，可以同时提供多种 Output Tool。
+3. 默认的可选模式仍允许 `str`，模型可按任务需要选择普通文本或某个 Output Tool；只有显式严格模式才移除 `str`，避免绕过结构化契约。
 4. 固定业务结构优先使用 Pydantic Model；动态 JSON Schema 必须由 DeepAgent 再执行一次完整校验。
 5. 多种互斥结果优先注册为多个小型 Output Tool，不使用一个塞满 Optional 字段的宽松结构。
 6. Output Tool 与 UI Deferred 可以存在于同一个 Agent，但不能合并成同一种运行语义。
@@ -343,17 +343,21 @@ Harness 的 `OverflowingToolOutput` / Tool Output Limits 管理的是普通工�
 
 ### 10.1 输出契约来源
 
-首版推荐支持 Agent 固定契约：
+首版推荐支持 Agent 固定契约组，并区分可选和严格两种模式：
 
 ```text
 Agent 未配置 output_schema
   → output_type=[str, DeferredToolRequests]
 
-Agent 配置 output_schema
+Agent 配置 output_contract，mode=optional
+  → output_type=[str, ToolOutput(...), DeferredToolRequests]
+
+Agent 配置 output_contract，mode=strict
   → output_type=[ToolOutput(...), DeferredToolRequests]
 ```
 
-适合固定工作型 Agent，例如分类、审批材料提取和固定报告生成。普通自由聊天 Agent 不配置。
+可选模式适合同时承担自由问答和格式化成果的业务 Agent；严格模式适合分类、审批材料提取和
+固定 API 响应。完全自由聊天的 Agent 可以不配置输出契约。
 
 后续可增加：
 
@@ -413,8 +417,10 @@ deepcube_config：运行参数、数据范围、元素信息和风险
 deepcube_mixed：配置、脚本、说明和风险
 ```
 
-严格模式不保留 `str`，否则模型仍可继续输出旧 Markdown 绕过契约。`deep_cube__clarify` 继续作为
-UI Deferred Tool：信息不足时先 Pending，用户提交后恢复模型，最后再调用上述 Output Tool。
+DeepCube 助手默认采用可选模式：普通解释可以继续输出文本，需要交付脚本、配置或组合成果时
+调用对应 Output Tool。只有业务前端通过独立“生成严格成果”动作明确要求机器可读结果时，才切换
+严格模式并移除 `str`。`deep_cube__clarify` 继续作为 UI Deferred Tool：信息不足时先 Pending，
+用户提交后恢复模型，最后再选择普通文本或上述 Output Tool。
 
 Output Tool 只返回待应用成果，不直接修改 Python 页面。填充配置、插入脚本和覆盖脚本仍由业务
 前端按钮执行；前端也继续负责当前 Cube 维度、Scope 表达式、中文占位和页面版本等环境语义校验。

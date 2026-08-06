@@ -17,6 +17,22 @@ const GROUP_LABELS = {
 };
 
 const GROUP_ORDER = ["builtin", "mcp", "ui", "skill"];
+let promptEstimateTimer = null;
+let promptEstimateRequestId = 0;
+
+function formatCompactCount(value) {
+  const count = Number(value);
+  if (!Number.isFinite(count) || count < 0) return "—";
+  if (count < 1_000) return String(Math.round(count));
+  const divisor = count >= 1_000_000 ? 1_000_000 : 1_000;
+  const suffix = count >= 1_000_000 ? "M" : "K";
+  const scaled = count / divisor;
+  return `${scaled >= 100 ? Math.round(scaled) : scaled.toFixed(1).replace(/\.0$/, "")}${suffix}`;
+}
+
+function estimatorSourceLabel(source) {
+  return source === "model_tokenizer" ? "模型 Tokenizer" : "保守估算器";
+}
 
 function capabilityGroup(toolPackage) {
   return toolPackage.category;
@@ -80,6 +96,56 @@ function selectionMatchesDefaults(selectedSet, caps) {
 }
 
 const agentsAdmin = {
+  async updatePromptEstimate() {
+    const output = document.getElementById("agentPromptEstimate");
+    const promptInput = document.getElementById("agentPrompt");
+    const modelInput = document.getElementById("agentModelId");
+    if (!output || !promptInput || !modelInput) return;
+
+    const requestId = ++promptEstimateRequestId;
+    const prompt = promptInput.value.trim();
+    const localCharacterCount = Array.from(prompt).length;
+    const modelId = modelInput.value.trim();
+    if (!modelId) {
+      output.textContent = `${formatCompactCount(localCharacterCount)} 字 / — Token`;
+      output.title = "请先选择模型配置";
+      return;
+    }
+
+    output.textContent = `${formatCompactCount(localCharacterCount)} 字 / 估算中…`;
+    try {
+      const result = await apiFetch("/api/v1/agents/prompt-estimate", {
+        method: "POST",
+        body: JSON.stringify({ model_id: modelId, prompt }),
+      });
+      if (requestId !== promptEstimateRequestId) return;
+      output.textContent = `${formatCompactCount(result.character_count)} 字 / ${formatCompactCount(result.estimated_tokens)} Token`;
+      output.title = `${Number(result.character_count).toLocaleString("zh-CN")} 字 / 约 ${Number(result.estimated_tokens).toLocaleString("zh-CN")} Token · ${estimatorSourceLabel(result.estimator_source)}`;
+    } catch (error) {
+      if (requestId !== promptEstimateRequestId) return;
+      output.textContent = `${formatCompactCount(localCharacterCount)} 字 / — Token`;
+      output.title = `Token 估算失败：${error instanceof Error ? error.message : String(error)}`;
+    }
+  },
+
+  schedulePromptEstimate(immediate = false) {
+    clearTimeout(promptEstimateTimer);
+    if (immediate) {
+      this.updatePromptEstimate();
+      return;
+    }
+    promptEstimateTimer = setTimeout(() => this.updatePromptEstimate(), 300);
+  },
+
+  initPromptEstimate() {
+    const promptInput = document.getElementById("agentPrompt");
+    const modelInput = document.getElementById("agentModelId");
+    if (!promptInput || !modelInput || promptInput.dataset.estimateBound) return;
+    promptInput.dataset.estimateBound = "1";
+    promptInput.addEventListener("input", () => this.schedulePromptEstimate());
+    modelInput.addEventListener("change", () => this.schedulePromptEstimate(true));
+  },
+
   async refresh() {
     const tbody = document.getElementById("agentsTableBody");
     if (!tbody) return;
@@ -325,6 +391,7 @@ const agentsAdmin = {
       "You are a helpful assistant. Use available tools when they help answer accurately.";
     this.renderCapabilityCheckboxes(null);
     document.getElementById("agentModal").showModal();
+    this.schedulePromptEstimate(true);
   },
 
   async openEdit(agentId) {
@@ -342,6 +409,7 @@ const agentsAdmin = {
       document.getElementById("agentPrompt").value = agent.prompt;
       this.renderCapabilityCheckboxes(agent.capabilities);
       document.getElementById("agentModal").showModal();
+      this.schedulePromptEstimate(true);
     } catch (err) {
       showToast(err.message, true);
     }
@@ -452,6 +520,7 @@ window.agentsAdmin = agentsAdmin;
 
 document.addEventListener("DOMContentLoaded", () => {
   agentsAdmin.initCapSection();
+  agentsAdmin.initPromptEstimate();
   document.getElementById("newAgentBtn")?.addEventListener("click", () => agentsAdmin.openCreate());
   document.getElementById("agentForm")?.addEventListener("submit", (e) => agentsAdmin.save(e));
   document.getElementById("closeAgentModal")?.addEventListener("click", () => {

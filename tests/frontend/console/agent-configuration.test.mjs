@@ -130,3 +130,17 @@ test("编辑 Agent 时在弹窗标题栏显示完整 Agent ID", () => {
   );
   assert.doesNotMatch(template, /<th>Agent ID<\/th>/);
 });
+
+test("System Prompt 标题栏展示统一后端估算的字符和 Token", () => {
+  const ui = loadAgentConfigurationUi();
+
+  assert.match(template, /id="agentPromptEstimate"/);
+  assert.match(template, /0 字 \/ 0 Token/);
+  assert.match(source, /apiFetch\("\/api\/v1\/agents\/prompt-estimate"/);
+  assert.match(source, /model_id: modelId, prompt/);
+  assert.match(source, /schedulePromptEstimate\(true\)/);
+  assert.equal(ui.formatCompactCount(999), "999");
+  assert.equal(ui.formatCompactCount(12_600), "12.6K");
+  assert.equal(ui.formatCompactCount(200_000), "200K");
+  assert.equal(ui.formatCompactCount(1_250_000), "1.3M");
+});

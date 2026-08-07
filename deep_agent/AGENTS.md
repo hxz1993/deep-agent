@@ -74,6 +74,7 @@ Pending 时没有活动 Run，其表单取消仍通过 `DeferredToolResults` 处
 - MySQL 引擎使用 `pool_pre_ping=True` 和 `pool_recycle=90`，在 Test 默认 120 秒空闲超时前主动换新连接。
 - 仅 pre-ping 阶段的 asyncmy `TCPTransport closed=True` / `handler is closed` RuntimeError 会被标记为断链并交给 SQLAlchemy 重连。
 - 不对已经开始执行的业务 SQL 做通用重试，避免写请求被重复执行；SQLite 和 PostgreSQL 不使用 MySQL 的 90 秒回收策略。
+- 排障、环境取值和未来配置项约定见 [`../docs/guides/mysql-idle-connection-timeout.md`](../docs/guides/mysql-idle-connection-timeout.md)。
 
 ### 能力装配与模型输入
 

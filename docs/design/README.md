@@ -9,7 +9,7 @@
 | `02` | [`运维控制台`](02-operations-console/README.md)      | 2026-07 | 一体化 Console 已落地，保留交互原型 |
 | `03` | [`上下文压缩`](03-context-compaction/README.md)      | 2026-07 | 自动与主动主模型压缩已落地；当前有效 Checkpoint 可在 Console 恢复 |
 | `04` | [`模型目录`](04-model-catalog/README.md)            | 2026-07 | 数据库目录与手工刷新已落地，结构并入 v0.3.0 基线 001 |
-| `05` | [`工具优化`](05-tool-optimization/README.md)        | 2026-07 | 完成工具体系映射；MCP 工具检索已满足启动条件 |
+| `05` | [`工具优化`](05-tool-optimization/README.md)        | 2026-07 | 完成工具体系映射；大型 MCP 检索拆入 13 课题 |
 | `06` | [`附件解析`](06-attachment-parsing/README.md)       | 2026-07 | 第一版按需读取与压缩协同已落地 |
 | `07` | [`Python Sandbox`](07-python-sandbox/README.md) | 2026-07 起 | A 已落地（subprocess-dev + soft guardrails）；B 探针代码已有、节点选型未完成；C 阻塞于 B |
 | `08` | [`Artifact 交互语义`](08-artifact-export/README.md) | 2026-08 | 骨架：句柄语义为主；下载中心等为可选 sink |
@@ -17,6 +17,7 @@
 | `10` | [`上下文引用`](10-context-reference/README.md) | 2026-08 | v0.3.5 已完成 DeepAgent 公共协议；业务前端迁移待后续跨仓实施 |
 | `11` | [`工具包与工具目录`](11-tool-packages/README.md) | 2026-08 | v0.3.2 已完成工具包目录、UI 工具包、运行 Toolset 与 Console 统一改造 |
 | `12` | [`Agent Skill`](12-agent-skills/README.md) | 2026-08 | 当前仅有最小 Python Skill；线上安装、素材与渐进披露待设计实施 |
+| `13` | [`工具检索与渐进披露`](13-tool-discovery/README.md) | 2026-08 | 完成跨框架调研和本地检索验证；语义后端待决策 |
 
 ## 文档命名
 

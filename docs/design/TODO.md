@@ -32,7 +32,7 @@ Output Tool，Skill 同期完成协议设计后分阶段落地。
 | `TOOL-103` | 工具优化 | 无合法会话附件时隐藏整个附件读取工具包 | 可实施 | 不按文件后缀细分：当前请求或原始会话存在合法附件时暴露三个读取工具，否则全部隐藏；读取时仍执行文件权限校验 | [附件请求级过滤](05-tool-optimization/tool-optimization-design.md#81-preparetools) |
 | `TOOL-104` | 工具优化 | 分离 MCP 工具协议名与聊天展示名 | 可实施 | 保留稳定命名空间和历史兼容；Console 使用独立 `display_name` 隐藏冗长前缀 | [Toolset 展示命名](05-tool-optimization/tool-optimization-design.md#83-toolset-组合与展示命名) |
 | `TOOL-105` | 结构化最终输出 | 实施 Agent 可选的多种 Output Tool | 可实施 | 默认允许普通文本；输出契约组包含多种终止结构，严格模式需显式选择；覆盖普通工具、Deferred 与 Output 同响应校验 | [结构化最终输出设计](09-structured-output/structured-output-design.md) |
-| `TOOL-201` | 工具检索 | 实施 MCP 工具检索与渐进披露机制 | 待设计 | 已满足启动条件：Agent 仍按 ToolPackage 授权；只在已授权 MCP 包内检索。Test 实测单包 24 个工具、纯 Schema 保守估算约 36k Token，不增加逐工具配置负担 | [ToolSearch](05-tool-optimization/tool-optimization-design.md#82-toolsearch) |
+| `TOOL-201` | 工具检索 | 实施 MCP 工具检索与渐进披露机制 | 待决策 | 方案已完成：ToolPackage 作为授权上限，附件做条件过滤，大型 MCP 使用混合语义预选和 Pydantic AI ToolSearch；待确定 Embedding 部署方式、首轮 Top K 和发现状态周期 | [工具检索设计](13-tool-discovery/tool-discovery-design.md) |
 | `SKILL-001` | Skill | 设计并实施线上 Skill 安装、版本管理与渐进披露 | 待设计 | 兼容第三方目录式 Skill；覆盖 Instructions、References、Assets、可选工具、来源信任和执行隔离 | [Skill 体系](12-agent-skills/skill-system-design.md) |
 | `ATT-001` | 附件解析 | 固化真实附件读取、上下文压缩和 Checkpoint 更新的端到端测试 | 可实施 | 覆盖上传、分页读取、SSE、历史恢复与压缩 | [验证边界](06-attachment-parsing/attachment-parsing-design.md#10-验证边界) |
 | `ART-001` | Artifact 交互 | Artifact 最小语义（登记/元数据/TTL/权限；可不接外部 sink） | 待设计 | 合法 id 不得从 Checkpoint 猜造；存储落点待决 | [08 分期 A0](08-artifact-export/README.md#建议分期先语义后-sink) |

@@ -740,6 +740,17 @@ Tool Search 解决的是“工具太多导致发现困难和 Schema 占用”，
 - 搜索结果必须受用户、Agent、App、Space 和 MCP 包权限约束，不能把未授权工具“搜出来”。
 - 第一版先解决 Schema 披露，不把普通工具结果溢出治理混在同一个功能中。
 
+完整研究和当前推荐方案已经拆为第 13 个课题：
+
+- [框架与 AI Labs 对比、Pydantic AI 中文黑盒验证](../13-tool-discovery/tool-discovery-research.md)
+- [DeepAgent 工具检索与渐进披露设计](../13-tool-discovery/tool-discovery-design.md)
+- [离线评估、真实模型和灰度验收](../13-tool-discovery/tool-discovery-evaluation.md)
+
+当前结论是复用 Pydantic AI Deferred Loading / ToolSearch 状态机，但不用其默认 ASCII 关键词
+回退作为 DeepAgent 检索器。大型 MCP 推荐“中文 BM25 + 多语言 Embedding”的混合召回，首轮
+自动预选少量工具，同时保留 `search_tools` 让模型继续发现。语义 Embedding 的本地或远程部署
+方式仍需决策。
+
 ### 8.3 Toolset 组合与展示命名
 
 `CombinedToolset` 可以把多个 Toolset 合成一个整体，再统一增加过滤、审批或延迟加载。

@@ -11,8 +11,7 @@ from pydantic_ai.providers.google import GoogleProvider
 from pydantic_ai.providers.openai import OpenAIProvider
 
 from deep_agent.agent.factory import _resolve_model, _toolsets_for_spec, build_agent
-from deep_agent.agent.models import DeepSeekChatModel, OpenAICompatibleVideoChatModel
-from deep_agent.agent.models.deepseek_thinking_retry import DeepSeekThinkingRetry
+from deep_agent.agent.models import OpenAICompatibleVideoChatModel
 from deep_agent.capabilities.registry import ToolPackage, ToolPackageRegistry
 from deep_agent.agent.spec import AgentSpec
 from deep_agent.options import OPTION
@@ -36,7 +35,7 @@ class ResolveModelTests(unittest.TestCase):
         model = _resolve_model(
             _spec(model="deepseek:deepseek-v4-flash", api_key="sk-test"),
         )
-        self.assertIsInstance(model, DeepSeekChatModel)
+        self.assertIsInstance(model, OpenAIChatModel)
         self.assertIsInstance(model._provider, DeepSeekProvider)
         self.assertEqual(model.profile["openai_chat_thinking_field"], "reasoning_content")
         self.assertEqual(model.profile["openai_chat_send_back_thinking_parts"], "field")
@@ -49,7 +48,7 @@ class ResolveModelTests(unittest.TestCase):
                 base_url="https://api.deepseek.com/",
             ),
         )
-        self.assertIsInstance(model, DeepSeekChatModel)
+        self.assertIsInstance(model, OpenAIChatModel)
         self.assertIsInstance(model._provider, DeepSeekProvider)
 
     def test_deepseek_with_custom_base_url_falls_back_to_openai_provider(self) -> None:
@@ -127,7 +126,7 @@ class ResolveModelTests(unittest.TestCase):
     def test_deepseek_without_spec_api_key_uses_deepseek_env_key(self) -> None:
         with mock.patch.dict(os.environ, {"DEEPSEEK_API_KEY": "sk-env"}, clear=False):
             model = _resolve_model(_spec(model="deepseek:deepseek-v4-flash"))
-        self.assertIsInstance(model, DeepSeekChatModel)
+        self.assertIsInstance(model, OpenAIChatModel)
         self.assertIsInstance(model._provider, DeepSeekProvider)
 
     def test_gemini_without_prefix_returns_string_without_google_prefix(self) -> None:
@@ -164,25 +163,18 @@ class ResolveModelTests(unittest.TestCase):
         finally:
             OPTION.agent.gemini_proxy = prev
 
-    def test_deepseek_registers_thinking_retry_capability(self) -> None:
+    def test_deepseek_uses_only_standard_capabilities(self) -> None:
         agent = build_agent(
             _spec(model="deepseek:deepseek-v4-flash", api_key="sk-test"),
             ToolPackageRegistry(),
         )
-        caps = [c for c in agent.root_capability.capabilities if isinstance(c, DeepSeekThinkingRetry)]
-        self.assertEqual(len(caps), 1)
-
-    def test_non_deepseek_has_no_thinking_retry_capability(self) -> None:
-        agent = build_agent(
-            _spec(
-                model="deepseek:deepseek-v4-flash",
-                api_key="sk-test",
-                base_url="https://gateway.example.com/v1",
-            ),
-            ToolPackageRegistry(),
+        capability_modules = {
+            capability.__class__.__module__
+            for capability in agent.root_capability.capabilities
+        }
+        self.assertFalse(
+            any(module.startswith("deep_agent.agent.models") for module in capability_modules)
         )
-        caps = [c for c in agent.root_capability.capabilities if isinstance(c, DeepSeekThinkingRetry)]
-        self.assertEqual(len(caps), 0)
 
 
 class ToolsetAssemblyTests(unittest.TestCase):

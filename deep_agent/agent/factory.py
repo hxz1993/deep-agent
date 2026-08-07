@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import Any
 
 import httpx
-from loguru import logger
 from pydantic_ai import Agent
 from pydantic_ai.capabilities import AbstractCapability
 from pydantic_ai.models import DEFAULT_HTTP_TIMEOUT, Model, get_user_agent, parse_model_id
@@ -18,8 +17,7 @@ from pydantic_ai.providers.openai import OpenAIProvider
 
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.context_references import context_reference_instructions
-from deep_agent.agent.models import DeepSeekChatModel, OpenAICompatibleVideoChatModel
-from deep_agent.agent.models.deepseek_thinking_retry import DeepSeekThinkingRetry
+from deep_agent.agent.models import OpenAICompatibleVideoChatModel
 from deep_agent.agent.spec import AgentSpec
 from deep_agent.capabilities.registry import ToolPackage, ToolPackageRegistry
 from deep_agent.options import OPTION
@@ -127,9 +125,7 @@ def resolve_model(spec: AgentSpec) -> str | Model:
             not spec.base_url
             or _normalize_url(spec.base_url) == _normalize_url(provider.base_url)
         ):
-            profile = DeepSeekProvider.model_profile(model_name)
-            logger.debug("Resolving {} with DeepSeekChatModel", spec.model)
-            return DeepSeekChatModel(model_name, provider=provider, profile=profile)
+            return OpenAIChatModel(model_name, provider=provider)
 
     if spec.base_url:
         return _resolve_openai_compatible(spec, model_name)
@@ -188,8 +184,6 @@ def build_agent(
         mcp_resource_toolset=mcp_resource_toolset,
     )
     capabilities: list[AbstractCapability[AgentDeps]] = []
-    if isinstance(model, DeepSeekChatModel):
-        capabilities.append(DeepSeekThinkingRetry())
     if context_compaction is not None:
         capabilities.append(context_compaction)
     instructions: list[Any] = []

@@ -8,6 +8,7 @@ tiktoken>=0.13,<1
 # Web framework
 uvicorn[standard]>=0.30
 gunicorn~=26.0.0
+uvloop==0.22.1; sys_platform != "win32"
 
 # Config & streaming
 pydantic-settings>=2.5
@@ -18,9 +19,9 @@ python-docx>=1.2,<2
 openpyxl>=3.1
 
 # Database
-sqlalchemy[asyncio]>=2.0
+sqlalchemy[asyncio]==2.0.51
 asyncpg
-asyncmy
+asyncmy==0.2.11
 aiosqlite
 alembic
 filelock>=3.13

@@ -3,7 +3,7 @@
 DeepAgent 是基于 FastAPI、Pydantic AI 和 SQLAlchemy 的多用户 Agent 服务，并
 随服务发布一体化运维控制台。
 
-当前产品版本为 `0.3.10`。`deep_agent.__version__` 是唯一代码版本来源，FastAPI、
+当前产品版本为 `0.3.11`。`deep_agent.__version__` 是唯一代码版本来源，FastAPI、
 `GET /info` 和 Console 顶部版本徽标均读取该值。后续正式发布默认递增
 `MAJOR.MINOR.PATCH` 的第三位，只有明确规划重大版本时才调整前两位。产品版本不通过
 环境变量或数据库覆盖，也不等同于 Alembic 数据库结构 revision。
@@ -33,6 +33,10 @@ v0.3.9 将 Pydantic AI 升级到 2.26.0，DeepSeek V4 Flash/Pro 改由官方
 v0.3.10 将停止生成收敛为正式取消链路：客户端调用 session 取消接口后继续读取原 SSE，
 直到 Pydantic AI 返回真实 `RunCancelled`；部分回答、实际 usage 与 `state=interrupted` 历史
 由后端持久化。用户停止不再由前端断流、定时器或本地伪造消息实现，断开连接只负责异常资源清理。
+
+v0.3.11 针对 MySQL 短空闲超时增加连接池保护：连接使用前继续执行 pre-ping，且仅
+MySQL 连接在 90 秒后主动换新；asyncmy/uvloop 在 pre-ping 阶段报告已关闭 Transport
+时会被识别为断链并由 SQLAlchemy 重建连接，不重试已经开始执行的业务 SQL。
 
 ## 项目结构
 

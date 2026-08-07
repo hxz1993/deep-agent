@@ -63,7 +63,6 @@ from deep_agent.agent.history import (
     incremental_append_messages,
     repair_unprocessed_tool_calls,
 )
-from deep_agent.agent.stream_accumulator import StreamAccumulator
 from deep_agent.capabilities.ui.registry import enrich_deferred, enrich_tool_event
 from loguru import logger
 
@@ -716,45 +715,19 @@ class AgentRunner:
         deps: AgentDeps,
         *,
         pre_persisted_user: bool,
-        result: Any | None,
-        accumulator: StreamAccumulator,
-        deferred_tool_results: DeferredToolResults | None,
-        official_messages: list[ModelMessage] | None = None,
+        official_messages: list[ModelMessage],
     ) -> None:
-        if official_messages:
-            persister.publish(
-                PersistEvent(
-                    session_id=session_id,
-                    agent_id=deps.agent_id,
-                    user_id=deps.user,
-                    kind="run_cancelled",
-                    result_messages=official_messages,
-                    skip_user_prompt=pre_persisted_user,
-                )
+        persister.publish(
+            PersistEvent(
+                session_id=session_id,
+                agent_id=deps.agent_id,
+                user_id=deps.user,
+                kind="run_cancelled",
+                result_messages=official_messages,
+                skip_user_prompt=pre_persisted_user,
+                repair_dangling_tool_calls=False,
             )
-        elif result is not None:
-            persister.publish(
-                PersistEvent(
-                    session_id=session_id,
-                    agent_id=deps.agent_id,
-                    user_id=deps.user,
-                    kind="run_cancelled",
-                    result_messages=result.new_messages(),
-                    skip_user_prompt=pre_persisted_user,
-                )
-            )
-        elif accumulator.has_content():
-            persister.publish(
-                PersistEvent(
-                    session_id=session_id,
-                    agent_id=deps.agent_id,
-                    user_id=deps.user,
-                    kind="run_cancelled",
-                    accumulator=accumulator,
-                    skip_user_prompt=pre_persisted_user,
-                    include_tool_calls=deferred_tool_results is None,
-                )
-            )
+        )
 
 
     async def _maybe_generate_title(
@@ -897,6 +870,7 @@ class AgentRunner:
     ) -> AsyncIterator[dict[str, Any]]:
         checkpoint_projection: list[ModelMessage] | None = None
         checkpoint_expected_version = 0
+        cancelled_run: RunCancelled | None = None
         async with self._session_lock(session_id, agent_id=deps.agent_id):
             prepared = await self._prepare_history(
                 session_id,
@@ -941,17 +915,12 @@ class AgentRunner:
                 event_queue=compaction_events,
             )
             result = None
-            cancelled = False
             run_published = False
-            accumulator = StreamAccumulator()
-            official_cancelled_messages: list[ModelMessage] | None = None
             active_run = self._active_runs.register(
                 agent_id=deps.agent_id,
                 session_id=session_id,
                 user_id=deps.user,
             )
-            stream = None
-
             try:
                 async with self.agent.run_stream_events(
                     user_prompt,
@@ -1002,19 +971,14 @@ class AgentRunner:
                                     self.ui_tool_hints,
                                 ):
                                     continue
-                                accumulator.ingest(mapped)
-                                try:
-                                    yield enrich_tool_event(mapped, self.ui_tool_hints)
-                                except asyncio.CancelledError:
-                                    cancelled = True
-                                    break
+                                yield enrich_tool_event(mapped, self.ui_tool_hints)
                     finally:
                         for task in (stream_task, status_task):
                             if task is not None and not task.done():
                                 task.cancel()
                                 with suppress(asyncio.CancelledError):
                                     await task
-                if not cancelled and result is not None:
+                if result is not None:
                     deferred_pending = isinstance(result.output, DeferredToolRequests)
                     self._publish_run_complete(
                         persister,
@@ -1043,16 +1007,13 @@ class AgentRunner:
                                 result.new_messages(),
                             )
                         )
-            except RunCancelled:
-                cancelled = True
-                if stream is not None:
-                    with suppress(Exception):
-                        official_cancelled_messages = list(stream.new_messages())
-            except asyncio.CancelledError:
-                cancelled = True
+            except RunCancelled as exc:
+                cancelled_run = exc
+            except asyncio.CancelledError as exc:
                 active_run.cancellation_token.cancel()
+                cancelled_run = RunCancelled.from_cancellation(exc)
+                raise
             except GeneratorExit:
-                cancelled = True
                 active_run.cancellation_token.cancel()
                 raise
             except Exception as exc:  # noqa: BLE001 - surface as an SSE error event
@@ -1073,48 +1034,42 @@ class AgentRunner:
                 )
                 return
             finally:
-                if cancelled and not run_published:
+                if cancelled_run is not None and not run_published:
                     self._publish_run_cancelled(
                         persister,
                         session_id,
                         deps,
                         pre_persisted_user=prepared.pre_persisted_user,
-                        result=result,
-                        accumulator=accumulator,
-                        deferred_tool_results=deferred_tool_results,
-                        official_messages=official_cancelled_messages,
+                        official_messages=cancelled_run.new_messages(),
                     )
                 self._active_runs.unregister(active_run)
 
-            if cancelled:
-                pending = (
-                    official_cancelled_messages
-                    or (
-                        result.new_messages()
-                        if result is not None
-                        else (
-                            accumulator.to_model_messages(
-                                include_tool_calls=deferred_tool_results is None,
-                            )
-                            if accumulator.has_content()
-                            else None
-                        )
-                    )
+        if cancelled_run is not None:
+            pending = cancelled_run.new_messages()
+            history_persisted = False
+            try:
+                # The runner's session lock is released before the persister acquires it.
+                await persister.flush(session_id, agent_id=deps.agent_id)
+                history_persisted = bool(pending) or prepared.pre_persisted_user
+            except Exception as exc:  # noqa: BLE001 - surface persistence state in SSE
+                logger.exception(
+                    "Cancelled history persistence failed for session {}: {}",
+                    session_id,
+                    exc,
                 )
-                msg_count, branch_pt = self._stream_history_meta(
-                    prepared.raw,
-                    user_branch_point=prepared.user_branch_point,
-                    pending_messages=pending,
-                    pre_persisted_user=prepared.pre_persisted_user,
-                )
-                yield events.cancelled(
-                    history_persisted=bool(official_cancelled_messages)
-                    or accumulator.has_content()
-                    or prepared.pre_persisted_user,
-                    model_message_count=msg_count,
-                    user_branch_point=branch_pt,
-                )
-                return
+            msg_count, branch_pt = self._stream_history_meta(
+                prepared.raw,
+                user_branch_point=prepared.user_branch_point,
+                pending_messages=pending,
+                pre_persisted_user=prepared.pre_persisted_user,
+            )
+            yield events.cancelled(
+                history_persisted=history_persisted,
+                model_message_count=msg_count,
+                user_branch_point=branch_pt,
+                usage=_run_usage_dict(cancelled_run.usage),
+            )
+            return
 
         checkpoint_saved: bool | None = None
         if checkpoint_projection is not None:

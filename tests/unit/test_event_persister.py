@@ -3,11 +3,17 @@ from __future__ import annotations
 import asyncio
 import unittest
 
-from pydantic_ai.messages import ModelMessage, ModelRequest, ModelResponse, TextPart, UserPromptPart
+from pydantic_ai.messages import (
+    ModelMessage,
+    ModelRequest,
+    ModelResponse,
+    TextPart,
+    ToolCallPart,
+    UserPromptPart,
+)
 
 from deep_agent.agent.event_persister import EventPersister, PersistEvent
 from deep_agent.agent.history import is_user_only_request
-from deep_agent.agent.stream_accumulator import StreamAccumulator
 from tests.helpers.sqlite_stores import make_sqlite_stores
 
 
@@ -93,19 +99,24 @@ class EventPersisterTests(unittest.IsolatedAsyncioTestCase):
         history = await self.store.get_history("s-terminal-race")
         self.assertEqual(len(history), 1)
 
-    async def test_run_cancelled_accumulator_partial_text(self) -> None:
+    async def test_run_cancelled_persists_official_partial_text(self) -> None:
         user = ModelRequest(parts=[UserPromptPart(content="hi")])
         await self.store.append("s3", [user])
-        acc = StreamAccumulator()
-        acc.ingest({"type": "text", "delta": "partial-"})
         self.persister.publish(
             PersistEvent(
                 session_id="s3",
                 agent_id=None,
                 user_id=None,
                 kind="run_cancelled",
-                accumulator=acc,
+                result_messages=[
+                    user,
+                    ModelResponse(
+                        parts=[TextPart(content="partial-")],
+                        state="interrupted",
+                    ),
+                ],
                 skip_user_prompt=True,
+                repair_dangling_tool_calls=False,
             )
         )
         await self.persister.flush("s3")
@@ -113,30 +124,19 @@ class EventPersisterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(history), 2)
         self.assertIsInstance(history[-1], ModelResponse)
         self.assertEqual(history[-1].parts[0].content, "partial-")
+        self.assertEqual(history[-1].state, "interrupted")
 
-    async def test_run_cancelled_deferred_omits_tool_calls(self) -> None:
+    async def test_run_cancelled_keeps_official_interrupted_tool_call(self) -> None:
         user = ModelRequest(parts=[UserPromptPart(content="hi")])
-        assistant = ModelResponse(
-            parts=[],
+        interrupted = ModelResponse(
+            parts=[
+                ToolCallPart(
+                    tool_name="builtin__confirm",
+                    tool_call_id="tc1",
+                    args={"message": "ok"},
+                )
+            ],
             state="interrupted",
-        )
-        await self.store.append("s4", [user, assistant])
-        acc = StreamAccumulator()
-        acc.ingest(
-            {
-                "type": "tool_call",
-                "tool": "builtin__confirm",
-                "tool_call_id": "tc1",
-                "args": {"message": "ok"},
-            }
-        )
-        acc.ingest(
-            {
-                "type": "tool_result",
-                "tool": "builtin__confirm",
-                "tool_call_id": "tc1",
-                "result": {"confirmed": True},
-            }
         )
         self.persister.publish(
             PersistEvent(
@@ -144,9 +144,9 @@ class EventPersisterTests(unittest.IsolatedAsyncioTestCase):
                 agent_id=None,
                 user_id=None,
                 kind="run_cancelled",
-                accumulator=acc,
+                result_messages=[user, interrupted],
                 skip_user_prompt=True,
-                include_tool_calls=False,
+                repair_dangling_tool_calls=False,
             )
         )
         await self.persister.flush("s4")
@@ -158,7 +158,8 @@ class EventPersisterTests(unittest.IsolatedAsyncioTestCase):
             for p in m.parts
             if getattr(p, "tool_name", None)
         ]
-        self.assertEqual(len(tool_calls), 0)
+        self.assertEqual(len(tool_calls), 1)
+        self.assertEqual(history[-1].state, "interrupted")
 
 
 if __name__ == "__main__":

@@ -82,14 +82,19 @@ def cancelled(
     history_persisted: bool = True,
     model_message_count: int | None = None,
     user_branch_point: int | None = None,
+    usage: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    payload: dict[str, Any] = {"type": "cancelled", "status": "cancelled"}
-    if history_persisted:
-        payload["history_persisted"] = history_persisted
+    payload: dict[str, Any] = {
+        "type": "cancelled",
+        "status": "cancelled",
+        "history_persisted": history_persisted,
+    }
     if model_message_count is not None:
         payload["model_message_count"] = model_message_count
     if user_branch_point is not None:
         payload["user_branch_point"] = user_branch_point
+    if usage is not None:
+        payload["usage"] = usage
     return payload
 
 

@@ -839,6 +839,27 @@ dialog.console-detail-dialog.modal-wide { width: min(980px, calc(100vw - 28px));
 .console-toast { position: fixed; right: 18px; bottom: 18px; z-index: 120; max-width: 420px; padding: 10px 13px; border: 1px solid var(--border); border-radius: 6px; color: var(--text); background: var(--bg-elev); box-shadow: var(--shadow); }
 .console-toast.error { border-color: var(--danger); color: var(--danger-text); }
 
+.message-run-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  width: fit-content;
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 20px;
+}
+
+.message-run-status svg {
+  width: 14px;
+  height: 14px;
+  stroke-width: 1.8;
+}
+
+.message-run-status.interrupted {
+  color: var(--warning-text, #9a6700);
+}
+
 .hitl-choice > span { display: flex; min-width: 0; flex-direction: column; gap: 2px; }
 .hitl-choice > span small { color: var(--text-faint); font-size: 10px; line-height: 1.4; }
 .hitl-format-error, .hitl-form-error { margin-top: 9px; padding: 8px 10px; border-left: 3px solid var(--danger); color: var(--danger-text); background: color-mix(in srgb, var(--danger) 9%, transparent); font-size: 11px; }

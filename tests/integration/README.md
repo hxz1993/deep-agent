@@ -108,7 +108,7 @@ stdio 读 `ctx.request_context.meta.headers`；HTTP MCP 读连接上的 request 
 | [`fixtures/header_echo_server.py`](fixtures/header_echo_server.py) | 测试用 MCP server |
 | [`test_chat_header_forwarding.py`](test_chat_header_forwarding.py) | **推荐模板**：完整 HTTP → MCP |
 | [`test_chat_history_persistence.py`](test_chat_history_persistence.py) | **正常对话**：流式/同步完成后 history 含 assistant |
-| [`test_chat_stream_cancel_and_history.py`](test_chat_stream_cancel_and_history.py) | 停止流、HITL 续聊、部分持久化 |
+| [`test_chat_stream_cancel_and_history.py`](test_chat_stream_cancel_and_history.py) | 正式取消、官方中断历史与 usage、HITL 续聊 |
 | [`test_mcp_header_forwarding.py`](test_mcp_header_forwarding.py) | MCP toolset 层（stdio / HTTP） |
 | [`test_mcp_shared_registry_runtime.py`](test_mcp_shared_registry_runtime.py) | MCP shared registry 真实子进程集成：pid 存活检测、死 pid 自动重登、跨 registry 单例、lease manager 重试（Windows 跳过 filelock 竞争测试；生产用 Linux fcntl.flock） |
 

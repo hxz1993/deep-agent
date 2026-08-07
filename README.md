@@ -3,7 +3,7 @@
 DeepAgent 是基于 FastAPI、Pydantic AI 和 SQLAlchemy 的多用户 Agent 服务，并
 随服务发布一体化运维控制台。
 
-当前产品版本为 `0.3.9`。`deep_agent.__version__` 是唯一代码版本来源，FastAPI、
+当前产品版本为 `0.3.10`。`deep_agent.__version__` 是唯一代码版本来源，FastAPI、
 `GET /info` 和 Console 顶部版本徽标均读取该值。后续正式发布默认递增
 `MAJOR.MINOR.PATCH` 的第三位，只有明确规划重大版本时才调整前两位。产品版本不通过
 环境变量或数据库覆盖，也不等同于 Alembic 数据库结构 revision。
@@ -28,8 +28,11 @@ v0.3.8 将 Console 工作台、配置中心、动态会话和工具过程中的�
 随仓库发布的 Lucide 线性 SVG，并补齐动态渲染、主题尺寸和无障碍标签。
 
 v0.3.9 将 Pydantic AI 升级到 2.26.0，DeepSeek V4 Flash/Pro 改由官方
-`DeepSeekProvider` 与 Profile 处理，并删除本项目的模型消息兼容层。流式对话增加正式的
-session 取消接口；Console 停止生成会先取消服务端 Agent Run，断开本地 SSE 只作为兜底。
+`DeepSeekProvider` 与 Profile 处理，并删除本项目的模型消息兼容层。
+
+v0.3.10 将停止生成收敛为正式取消链路：客户端调用 session 取消接口后继续读取原 SSE，
+直到 Pydantic AI 返回真实 `RunCancelled`；部分回答、实际 usage 与 `state=interrupted` 历史
+由后端持久化。用户停止不再由前端断流、定时器或本地伪造消息实现，断开连接只负责异常资源清理。
 
 ## 项目结构
 

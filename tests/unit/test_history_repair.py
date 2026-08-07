@@ -15,6 +15,18 @@ from deep_agent.agent.history import repair_unprocessed_tool_calls
 
 
 class RepairUnprocessedToolCallsTests(unittest.TestCase):
+    def test_official_interrupted_tool_call_is_not_repaired(self) -> None:
+        interrupted = ModelResponse(
+            parts=[ToolCallPart(tool_name="slow_tool", args={}, tool_call_id="c1")],
+            state="interrupted",
+        )
+        messages = [ModelRequest(parts=[UserPromptPart(content="hi")]), interrupted]
+
+        repaired = repair_unprocessed_tool_calls(messages)
+
+        self.assertIs(repaired, messages)
+        self.assertEqual(len(repaired), 2)
+
     def test_no_op_when_balanced(self) -> None:
         messages = [
             ModelRequest(parts=[UserPromptPart(content="hi")]),

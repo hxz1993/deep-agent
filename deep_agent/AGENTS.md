@@ -56,6 +56,19 @@ MCP 在请求时由 `resolve_mcp_toolsets` 解析（DB 行 + `mcps/` builtin 兜
 4. `AgentRunner.run_stream()`：session 锁 → raw history / Checkpoint 投影 → Pydantic AI `AbstractCapability` 预算与压缩 → SSE 事件 → `append(new_messages)`
 5. `capabilities: null` → 仅 `default_enabled=True` 的工具包；显式列表按工具包编码启用
 
+### 正式取消（v0.3.10）
+
+停止按钮调用 `POST /api/v1/sessions/{session_id}/cancel`，由进程级 `ActiveRunRegistry` 找到
+Pydantic AI `CancellationToken`。Runner 捕获 `RunCancelled` 后只持久化
+`RunCancelled.new_messages()` 并返回真实 `cancelled` SSE（含 `usage`）；不再探测其他 result、
+拼接流式文本、手工补 `ToolDenied` 或生成前端假事件。官方中断响应以 `state=interrupted`
+保存，History API 映射为 `assistant.status=interrupted`；下一轮的悬空 Tool Call 由 Pydantic AI
+自动补 `outcome=interrupted`。
+
+页面关闭或网络断开只触发 Token 清理无人消费的 Run，不是正常停止入口。UI Deferred 已经
+Pending 时没有活动 Run，其表单取消仍通过 `DeferredToolResults` 处理。当前注册表只在单进程
+内有效，多 Pod 发布必须使用会话粘性，或后续增加共享取消协调器。
+
 ### 能力装配与模型输入
 
 DeepAgent 自研 `capabilities.registry.ToolPackage` 是产品配置单位，包含分类、展示元数据、工具目录和恰好一个 Toolset；Pydantic AI 的 `AbstractCapability` 才是可介入模型请求、消息历史、工具准备和事件生命周期的原生扩展点。当前上下文压缩使用这一层；DeepSeek V4 已交由 Pydantic AI 官方 Provider/Profile，不再注册项目自定义重试能力。
@@ -142,7 +155,7 @@ XML + JSON 投影。业务字段语义仍由具体 Agent Prompt 负责。
 | `mcp.py` | CRUD `/mcp`、统一检测 `/mcp/{name}/inspect` |
 | `ui_tools.py` | CRUD `/ui-tools`；工具必须归属手工 UI 工具包 |
 | `ui_tool_packages.py` | CRUD `/ui-tool-packages`；代码内置包只读 |
-| `sessions.py` | 会话列表 / 历史 / 删除 |
+| `sessions.py` | 会话列表 / 历史 / 删除 / 正式取消当前 Run |
 | `auxiliary_models.py` | CRUD `/auxiliary-models` |
 | `tools.py` | `GET /tools` |
 | `deps.py` | `build_runner` / `build_runner_for_agent`，统一承接多入口的运行器组装 |

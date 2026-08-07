@@ -149,8 +149,8 @@ class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
         text_parts = [p for p in assistant["parts"] if p.get("type") == "text"]
         self.assertEqual(text_parts[0]["content"], "hello from integration")
 
-    async def test_e1_http_abort_persists_partial_assistant_history(self) -> None:
-        """Client closes SSE; history must retain streamed assistant text."""
+    async def test_e1_http_abort_cleans_up_run_and_keeps_user_history(self) -> None:
+        """Transport disconnect is cleanup, not the product stop/history path."""
         chunks = ["chunk-one-", "chunk-two-", "chunk-three-", "chunk-four-", "chunk-five-"]
         model, tracker = build_slow_stream_model(chunks=chunks, delay_s=0.25)
 
@@ -187,19 +187,13 @@ class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
 
                 self.assertIsNotNone(session_id)
                 self.assertGreater(tracker.yielded_chunks, 0)
-                self.assertGreaterEqual(
-                    data["model_message_count"],
-                    2,
-                    msg="history must include assistant after stream stop (not user-only)",
+                self.assertGreaterEqual(data["model_message_count"], 1)
+                self.assertEqual(data["messages"][0]["role"], "user")
+                self.assertIsNone(
+                    get_context().active_runs.get(agent_id=None, session_id=session_id)
                 )
-                assistant = _last_assistant(data)
-                self.assertIsNotNone(assistant)
-                assert assistant is not None
-                text_parts = [p for p in assistant["parts"] if p.get("type") == "text"]
-                self.assertTrue(text_parts)
-                self.assertIn("chunk-one", text_parts[0]["content"])
 
-    async def test_e1_runner_cancel_persists_partial_history(self) -> None:
+    async def test_e1_generator_close_is_cleanup_not_synthetic_cancel_history(self) -> None:
         chunks = ["chunk-one-", "chunk-two-", "chunk-three-", "chunk-four-", "chunk-five-"]
         model, tracker = build_slow_stream_model(chunks=chunks, delay_s=0.25)
         session_id = "e1-cancel-session"
@@ -228,13 +222,11 @@ class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
                 self.assertNotIn("final", {ev.get("type") for ev in events})
 
             data = await self._history(session_id)
-            self.assertGreaterEqual(data["model_message_count"], 2)
-            assistant = _last_assistant(data)
-            self.assertIsNotNone(assistant)
-            assert assistant is not None
-            text_parts = [p for p in assistant["parts"] if p.get("type") == "text"]
-            self.assertTrue(text_parts)
-            self.assertIn("chunk-one", text_parts[0]["content"])
+            self.assertGreaterEqual(data["model_message_count"], 1)
+            self.assertEqual(data["messages"][0]["role"], "user")
+            self.assertIsNone(
+                get_context().active_runs.get(agent_id=None, session_id=session_id)
+            )
 
     async def test_e1_cancel_endpoint_uses_official_token_and_is_idempotent(self) -> None:
         chunks = ["first-", "second-", "third-", "fourth-", "fifth-"]
@@ -282,6 +274,10 @@ class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
 
             self.assertIn("cancelled", {event.get("type") for event in streamed})
             self.assertNotIn("final", {event.get("type") for event in streamed})
+            cancelled = next(event for event in streamed if event.get("type") == "cancelled")
+            self.assertTrue(cancelled["history_persisted"])
+            self.assertIn("usage", cancelled)
+            self.assertGreaterEqual(cancelled["usage"]["requests"], 1)
             self.assertLess(tracker.yielded_chunks, tracker.total_chunks)
             self.assertIsNone(
                 get_context().active_runs.get(agent_id=None, session_id=session_id)
@@ -289,6 +285,8 @@ class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
             history = await self._history(session_id)
             assistant = _last_assistant(history)
             self.assertIsNotNone(assistant)
+            assert assistant is not None
+            self.assertEqual(assistant["status"], "interrupted")
 
     async def test_cancel_endpoint_rejects_malformed_agent_id(self) -> None:
         async with AsyncClient(transport=self._transport, base_url="http://test") as client:
@@ -297,6 +295,40 @@ class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
                 params={"agent_id": "not-a-uuid"},
             )
         self.assertEqual(response.status_code, 422)
+
+    async def test_cancel_before_first_model_response_keeps_only_user_message(self) -> None:
+        model, _tracker = build_slow_stream_model(chunks=["late"], delay_s=1.0)
+        session_id = "cancel-before-first-response"
+
+        with patch("deep_agent.agent.factory._resolve_model", return_value=model):
+            runner = await build_runner(get_context(), capabilities=[])
+            deps = AgentDeps(session_id=session_id, user=TEST_USER_ID)
+            streamed: list[dict] = []
+
+            async def consume() -> None:
+                async for event in runner.run_stream(
+                    session_id,
+                    "keep this question",
+                    deps,
+                    persister=get_context().event_persister,
+                ):
+                    streamed.append(event)
+
+            task = asyncio.create_task(consume())
+            for _ in range(100):
+                if get_context().active_runs.get(agent_id=None, session_id=session_id):
+                    break
+                await asyncio.sleep(0.01)
+
+            async with AsyncClient(transport=self._transport, base_url="http://test") as client:
+                response = await client.post(f"/api/v1/sessions/{session_id}/cancel")
+            self.assertEqual(response.json()["status"], "cancel_requested")
+            await asyncio.wait_for(task, timeout=3)
+
+        self.assertIn("cancelled", {event.get("type") for event in streamed})
+        history = await self._history(session_id)
+        self.assertEqual([message["role"] for message in history["messages"]], ["user"])
+        self.assertEqual(history["messages"][0]["content"], "keep this question")
 
     async def test_e2_deferred_tool_call_persists_in_history_and_resumes(self) -> None:
         session_id, tool_call_id = await self._run_hitl_pending()

@@ -30,6 +30,7 @@ frontend/
 | 功能 | 实现 |
 | --- | --- |
 | 流式对话 | `fetch` + `ReadableStream` 手动解析 SSE（非 `EventSource`，因需 POST） |
+| 停止生成 | `POST /sessions/{id}/cancel` 后等待真实 `cancelled`；History 的 `assistant.status=interrupted` 恢复“已停止”，不以 Abort 或本地假事件代替 |
 | 附件上传 | `POST /api/v1/uploads`（multipart）→ 发送时仅传 `attachments[]` 引用；文档由 Agent 可选 `builtin:attachment` 工具包按需读取 |
 | 思考过程 UI | `thinking` 可折叠块，默认折叠；与 `text` 分离 |
 | 工具调用 UI | `tool_call` / `tool_result` 可折叠；同 `tool_call_id` 合并更新 |
@@ -98,6 +99,7 @@ Agent 编辑弹窗的系统提示词标题栏显示“字符数 / 预估 Token�
 | `tool_result` | `{ type, tool, result, tool_call_id }` |
 | `final` | `{ type, status, output, usage, deferred?, context? }`（`context` 为预算/压缩观测） |
 | `error` | `{ type, message }` |
+| `cancelled` | `{ type, status, usage, history_persisted, model_message_count, user_branch_point }`；收到后刷新 History |
 
 完整协议（含同 ID 多次推送、生命周期）：[`../docs/guides/sse-protocol.md`](../docs/guides/sse-protocol.md)。
 
@@ -115,6 +117,10 @@ v0.3.4 的输入框在附件线性图标旁提供主动压缩线性图标。按�
 
 v0.3.5 Console 只兼容展示历史 `context_refs` 的 label/type，不提供业务 JSON 构造或编辑器；
 含引用的历史消息不允许用旧文本编辑动作重试，避免静默丢失引用。业务 Chip 和详情由宿主前端实现。
+
+v0.3.10 起停止按钮只调用 session 取消接口。`cancel_requested` 后继续消费原 SSE，收到真实
+`cancelled` 才结束运行态并刷新历史；失败允许重试，`not_running` 不伪造成功。AbortController
+只用于页面卸载或网络资源清理。首条 `session` 事件到达前停止按钮保持禁用。
 
 ---
 

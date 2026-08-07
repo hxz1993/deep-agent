@@ -105,7 +105,12 @@ Accept: text/event-stream
       "context_refs": [],
       "branch_point": 0
     },
-    { "role": "assistant", "parts": [...], "branch_point": 1 }
+    {
+      "role": "assistant",
+      "status": "completed",
+      "parts": [...],
+      "branch_point": 1
+    }
   ]
 }
 ```
@@ -114,21 +119,51 @@ Accept: text/event-stream
 
 - `Content-Type: text/event-stream`
 - 连接保持打开，服务端按 Agent 执行进度持续推送事件
-- 客户端应优先调用 session 取消接口终止服务端 Agent Run；断开 SSE 仅作为网络异常兜底
+- 客户端停止生成必须调用 session 取消接口，并继续读取原 SSE 直到收到真实 `cancelled`
 
 > **注意**：浏览器原生 `EventSource` 仅支持 GET，因此前端需使用 `fetch` + `ReadableStream` 手动解析 SSE（参见 `frontend/console/chat.js` 与 `protocol.js`）。
 
-### 正式取消（v0.3.9）
+### 正式取消（v0.3.10）
 
 ```http
 POST /api/v1/sessions/{session_id}/cancel?agent_id={optional}
 ```
 
 接口使用 Pydantic AI 2.26 `CancellationToken` 终止当前 Pod 内正在运行的流，返回
-`cancel_requested` 或幂等的 `not_running`。收到 `cancel_requested` 后继续读取 SSE，直到
-`cancelled`；超时或请求失败时客户端才断开本地流。UI Deferred 已经进入 Pending 后不存在
-活动 Run，因此返回 `not_running`。当前注册表是进程级，多 Pod 请求未命中原实例时仍可能返回
-`not_running`，客户端断流兜底必须保留。
+`cancel_requested` 或幂等的 `not_running`。收到 `cancel_requested` 后客户端必须继续读取同一条
+SSE，直到服务端捕获 `RunCancelled` 并返回唯一的 `cancelled`；取消后不再返回 `final`。
+
+`cancelled` 携带本轮实际 `usage`、历史计数和分支点。服务端只持久化
+`RunCancelled.new_messages()`，其中部分模型响应保留 `state=interrupted`；下一轮复用历史时，
+Pydantic AI 会为未完成工具调用自动补充 `outcome=interrupted`，DeepAgent 不再手工拼接文本或
+生成 `ToolDenied`。
+
+取消请求失败时客户端应提示失败并允许重试，不能断开 SSE 或伪造停止成功。`not_running` 也不
+等于已取消：它可能表示 Run 已经自然结束，客户端仍等待原流的真实终态。浏览器关闭或网络中断
+时可以 Abort 本地请求，服务端会取消并清理无人消费的 Run，但该路径不向已断开的客户端伪造
+事件，也不是停止按钮的产品语义。
+
+UI Deferred 已经进入 Pending 后不存在活动 Run，因此返回 `not_running`；表单取消由
+`DeferredToolResults` 表达，不调用会话取消接口。当前注册表是进程级，多 Pod 必须依赖会话
+粘性或后续共享取消协调器，不能用客户端假事件掩盖未命中实例的问题。
+
+`cancelled` 示例：
+
+```json
+{
+  "type": "cancelled",
+  "status": "cancelled",
+  "history_persisted": true,
+  "model_message_count": 8,
+  "user_branch_point": 6,
+  "usage": {
+    "requests": 1,
+    "input_tokens": 1200,
+    "output_tokens": 96,
+    "total_tokens": 1296
+  }
+}
+```
 
 ## 2. SSE 帧格式
 
@@ -554,7 +589,7 @@ data: {"type": "final", "output": "## 平台的 11 种维度类型\n...", "usage
 6. **工具结果关联**：用 `tool_call_id` 匹配并关闭对应工具块
 7. **压缩状态**：自动和主动 `context_compaction` 复用独立过程条；成功后以历史 Checkpoint 标记收口
 8. **结束判断**：收到 `final`、`cancelled` 或 `error` 后关闭 loading 状态
-9. **中断**：用户停止时先调用 `/sessions/{id}/cancel`，等待 `cancelled`；接口失败、未命中运行实例或超时才 `AbortController.abort()`
+9. **中断**：用户停止时只调用 `/sessions/{id}/cancel` 并等待真实 `cancelled`；失败或 `not_running` 不得断流或伪造成功，`AbortController` 只用于页面卸载和网络资源清理
 
 ## 7. 与 REST 接口的关系
 
@@ -562,6 +597,7 @@ data: {"type": "final", "output": "## 平台的 11 种维度类型\n...", "usage
 |------|------|
 | `POST /api/v1/chat` | 非流式，直接返回 `{ session_id, output, usage }` |
 | `POST /api/v1/chat/stream` | 流式（`StreamChatRequest`），支持默认 Agent 与 DB Agent 两种请求体，事件语义与上表一致 |
+| `POST /api/v1/sessions/{id}/cancel` | 请求取消当前实例内的活动 Run；客户端继续消费原 SSE，直到收到 `cancelled` |
 | `GET /api/v1/sessions/{id}` | 查询会话元信息（消息条数等），不返回 SSE |
 | `DELETE /api/v1/sessions/{id}` | 删除会话历史 |
 

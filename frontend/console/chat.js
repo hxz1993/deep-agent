@@ -102,7 +102,7 @@ const state = {
   awaitingHitl: false,
   abortController: null,
   stopRequested: false,
-  cancelFallbackTimer: null,
+  streamSessionConfirmed: false,
   streamCancelled: false,
   skipHistoryRefresh: false,
   branchFrom: null,
@@ -581,7 +581,10 @@ function toggleNewChatMenu(anchor) {
 function newChat(agentId) {
   const id = normalizeAgentId(agentId);
   closeNewChatMenu();
-  if (state.streaming) stopStream();
+  if (state.streaming) {
+    showConsoleToast("请先停止当前生成，再新建会话", true);
+    return;
+  }
   state.manualCompactionController?.abort();
   cancelTitlePoll();
   state.pendingTitleRefresh = false;
@@ -762,7 +765,10 @@ function renderSessions() {
 }
 
 async function switchSession(s) {
-  if (state.streaming) stopStream();
+  if (state.streaming) {
+    showConsoleToast("请先停止当前生成，再切换会话", true);
+    return;
+  }
   state.manualCompactionController?.abort();
   cancelTitlePoll();
   state.pendingTitleRefresh = false;
@@ -1206,6 +1212,7 @@ function renderHistory(messages, modelMessageCount, contextCheckpoint = null) {
       }
       assistant.finalizeThinking();
       assistant.finalizeText();
+      if (msg.status === "interrupted") assistant.markInterrupted();
     }
   }
   if (!checkpointInserted && Number.isInteger(boundary)) {
@@ -1713,12 +1720,8 @@ async function onSend() {
 async function resumeDeferred(deferredResults) {
   if (!state.sessionId) return;
   if (state.streaming) {
-    stopStream();
-    const deadline = Date.now() + 2000;
-    while (state.streaming && Date.now() < deadline) {
-      await new Promise((r) => setTimeout(r, 50));
-    }
-    if (state.streaming) return;
+    showConsoleToast("当前会话仍在生成，请先停止后再提交交互结果", true);
+    return;
   }
   state.awaitingHitl = false;
   updateHitlInputState();
@@ -1742,9 +1745,9 @@ async function runChatStream(payload, assistant) {
   const streamController = new AbortController();
   state.abortController = streamController;
   state.stopRequested = false;
+  state.streamSessionConfirmed = false;
   state.streamCancelled = false;
   state.skipHistoryRefresh = false;
-  let stoppedByUser = false;
   const shouldRefreshTitle = state.pendingTitleRefresh;
   state.pendingTitleRefresh = false;
   try {
@@ -1764,13 +1767,9 @@ async function runChatStream(payload, assistant) {
     await readSse(resp.body, (evt) => handleEvent(evt, assistant));
   } catch (e) {
     if (e.name === "AbortError") {
-      stoppedByUser = true;
-      failAutomaticContextCompaction("上下文压缩已取消，未更新 Checkpoint");
+      // Transport cleanup (page unload/network teardown), not a user stop result.
       assistant.finalizeThinking();
       assistant.finalizeText();
-      if (!state.streamCancelled) {
-        addErrorTo(assistant, "（已停止生成）");
-      }
     } else {
       setConn("err", "请求失败");
       failAutomaticContextCompaction("上下文压缩后续请求失败，未更新 Checkpoint");
@@ -1780,14 +1779,11 @@ async function runChatStream(payload, assistant) {
     assistant.finalizeThinking();
     assistant.finalizeText();
     setStreaming(false);
-    clearCancelFallback();
     if (state.abortController === streamController) state.abortController = null;
     state.stopRequested = false;
+    state.streamSessionConfirmed = false;
     if (state.sessionId) {
       if (!state.skipHistoryRefresh) {
-        if (stoppedByUser || state.streamCancelled) {
-          await new Promise((r) => setTimeout(r, 250));
-        }
         await refreshCurrentHistory();
       }
       await syncSessionsFromBackend();
@@ -1798,7 +1794,6 @@ async function runChatStream(payload, assistant) {
       if (
         shouldRefreshTitle &&
         !state.awaitingHitl &&
-        !stoppedByUser &&
         !state.streamCancelled
       ) {
         scheduleTitleRefresh();
@@ -1821,40 +1816,40 @@ function updateHitlInputState() {
   updateComposerContextControls();
 }
 
-function clearCancelFallback() {
-  if (state.cancelFallbackTimer) clearTimeout(state.cancelFallbackTimer);
-  state.cancelFallbackTimer = null;
-}
-
 async function stopStream() {
-  const controller = state.abortController;
-  if (!controller || state.stopRequested) return;
+  if (!state.streaming || state.stopRequested || !state.streamSessionConfirmed) return;
   const sessionId = state.sessionId;
   const agentId = state.agentId;
+  if (!sessionId) return;
   state.stopRequested = true;
   el.stopBtn.disabled = true;
   el.stopBtn.title = "正在停止…";
   el.stopBtn.setAttribute("aria-label", "正在停止");
 
-  const abortFallback = () => {
-    if (!controller.signal.aborted) controller.abort();
-  };
-  clearCancelFallback();
-  state.cancelFallbackTimer = setTimeout(abortFallback, 1500);
-
-  if (!sessionId) {
-    abortFallback();
-    return;
-  }
   try {
     const response = await daFetch(
       sessionApiUrl({ id: sessionId, agentId }, "/cancel"),
       { method: "POST" },
     );
     const body = await response.json().catch(() => ({}));
-    if (!response.ok || body.status !== "cancel_requested") abortFallback();
-  } catch {
-    abortFallback();
+    if (!response.ok) {
+      throw new Error(body.detail || `HTTP ${response.status}`);
+    }
+    if (body.status === "cancel_requested") {
+      showConsoleToast("正在停止当前生成…");
+      return;
+    }
+    state.stopRequested = false;
+    el.stopBtn.disabled = false;
+    el.stopBtn.title = "未找到运行中的会话，可重试";
+    el.stopBtn.setAttribute("aria-label", "停止生成");
+    showConsoleToast("当前实例未找到运行中的会话，仍在等待流的真实终态", true);
+  } catch (error) {
+    state.stopRequested = false;
+    el.stopBtn.disabled = false;
+    el.stopBtn.title = "停止失败，可重试";
+    el.stopBtn.setAttribute("aria-label", "停止生成");
+    showConsoleToast(`停止失败，可重试：${error.message}`, true);
   }
 }
 
@@ -1862,7 +1857,14 @@ function setStreaming(v) {
   state.streaming = v;
   el.sendBtn.classList.toggle("hidden", v);
   el.stopBtn.classList.toggle("hidden", !v);
-  if (!v) {
+  if (v) {
+    el.stopBtn.disabled = !state.streamSessionConfirmed;
+    el.stopBtn.title = state.streamSessionConfirmed ? "停止生成" : "正在建立会话";
+    el.stopBtn.setAttribute(
+      "aria-label",
+      state.streamSessionConfirmed ? "停止生成" : "正在建立会话",
+    );
+  } else {
     el.stopBtn.disabled = false;
     el.stopBtn.title = "停止生成";
     el.stopBtn.setAttribute("aria-label", "停止生成");
@@ -1889,6 +1891,7 @@ function handleEvent({ event, data }, assistant) {
       const id = data.session_id;
       if (id) {
         state.sessionId = id;
+        state.streamSessionConfirmed = true;
         if (data.agent_id) {
           state.agentId = data.agent_id;
           localStorage.setItem("da_console_agent_id_v1", state.agentId);
@@ -1904,6 +1907,11 @@ function handleEvent({ event, data }, assistant) {
           el.chatTitle.textContent = (title || id.slice(0, 8)).slice(0, 40);
         }
         updateAgentSelectState();
+        if (state.streaming && !state.stopRequested) {
+          el.stopBtn.disabled = false;
+          el.stopBtn.title = "停止生成";
+          el.stopBtn.setAttribute("aria-label", "停止生成");
+        }
       }
       break;
     }
@@ -1968,10 +1976,11 @@ function handleEvent({ event, data }, assistant) {
     case "cancelled":
       failAutomaticContextCompaction("上下文压缩已取消，未更新 Checkpoint");
       state.streamCancelled = true;
-      clearCancelFallback();
       assistant.finalizeThinking();
       assistant.finalizeText();
+      assistant.markInterrupted();
       syncHistoryMeta(data);
+      if (data.usage) renderUsage(data.usage);
       break;
     default:
       break;
@@ -2238,6 +2247,7 @@ function createAssistantMessage(timestamp, branchPoint) {
   let textBubble = null;
   let thinkingBlock = null;
   let thinkingBuffer = "";
+  let interruptedStatus = null;
   const toolBlocks = new Map(); // tool_call_id -> element
 
   function ensureThinkingBlock() {
@@ -2309,6 +2319,15 @@ function createAssistantMessage(timestamp, branchPoint) {
     },
     finalizeText() {
       sealTextBubble();
+    },
+    markInterrupted() {
+      if (interruptedStatus) return;
+      interruptedStatus = document.createElement("div");
+      interruptedStatus.className = "message-run-status interrupted";
+      interruptedStatus.innerHTML = `${lucideIcon("circle-stop")}<span>已停止</span>`;
+      wrap.appendChild(interruptedStatus);
+      row.classList.add("interrupted");
+      refreshLucideIcons();
     },
     addToolCall(data) {
       finalizeThinkingBlock();
@@ -2785,6 +2804,10 @@ window.DeepAgentConsoleChat = {
   selectAgent(agentId) {
     if (!agentId || !state.agents.some((agent) => agent.id === agentId)) return;
     if (state.agentId === agentId) return;
+    if (state.streaming) {
+      showConsoleToast("请先停止当前生成，再切换 Agent", true);
+      return;
+    }
     newChat(agentId);
   },
 };

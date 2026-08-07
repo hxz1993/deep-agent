@@ -73,6 +73,10 @@ HistoryPart = (
 
 class HistoryMessage(BaseModel):
     role: Literal["user", "assistant"]
+    status: Literal["completed", "interrupted"] | None = Field(
+        default=None,
+        description="Assistant response state; omitted for user turns and synthetic result groups.",
+    )
     content: str | None = Field(default=None, description="User message text.")
     attachments: list[HistoryAttachmentPart] = Field(
         default_factory=list,
@@ -297,11 +301,12 @@ _USER_CANCELLED_TOOL_MESSAGE = "User cancelled"
 
 
 def repair_unprocessed_tool_calls(messages: list[ModelMessage]) -> list[ModelMessage]:
-    """Close dangling tool_call turns in message order for LLM API validation.
+    """Close legacy dangling tool calls without touching official interrupted turns.
 
     Synthetic tool returns are inserted immediately after the assistant turn they
-    belong to, not only at history tail. This fixes histories where a later
-    assistant message or user turn appeared before all tool_call_ids were answered.
+    belong to, not only at history tail. Pydantic AI 2.26 owns the repair of
+    ``state='interrupted'`` responses and synthesizes ``outcome='interrupted'``
+    when that history is reused, so those responses must remain unchanged.
     """
     if not messages:
         return messages
@@ -329,6 +334,8 @@ def repair_unprocessed_tool_calls(messages: list[ModelMessage]) -> list[ModelMes
         if isinstance(message, ModelResponse):
             flush_pending()
             repaired.append(message)
+            if message.state == "interrupted":
+                continue
             for part in message.parts:
                 if isinstance(part, BaseToolCallPart) and part.tool_call_id:
                     pending[part.tool_call_id] = part.tool_name
@@ -548,6 +555,11 @@ def model_messages_to_history(messages: list[ModelMessage]) -> list[HistoryMessa
                 history.append(
                     HistoryMessage(
                         role="assistant",
+                        status=(
+                            "interrupted"
+                            if message.state == "interrupted"
+                            else "completed"
+                        ),
                         parts=parts,
                         timestamp=message.timestamp,
                         branch_point=idx,

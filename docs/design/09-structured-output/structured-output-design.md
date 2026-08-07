@@ -2,7 +2,7 @@
 
 > 首次研究：2026-08-03
 >
-> 当前运行基线：`pydantic-ai-slim 2.14.1` + `pydantic-ai-harness 0.10.0`
+> 当前运行基线：`pydantic-ai-slim 2.26.0` + `pydantic-ai-harness 0.10.0`
 >
 > 状态：设计结论；当前 DeepAgent 尚未启用 `ToolOutput`、`NativeOutput` 或 `PromptedOutput`
 

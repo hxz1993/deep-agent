@@ -120,6 +120,14 @@ test("输入框提供线性附件、主动压缩按钮和后端预算百分比",
   assert.doesNotMatch(chatSource, /context_compaction_target_ratio|safety_margin\s*=|predict.*output/i);
 });
 
+test("停止生成先请求正式取消接口并以断开 SSE 兜底", () => {
+  assert.match(chatSource, /sessionApiUrl\(\{ id: sessionId, agentId \}, "\/cancel"\)/);
+  assert.match(chatSource, /body\.status !== "cancel_requested"/);
+  assert.match(chatSource, /setTimeout\(abortFallback, 1500\)/);
+  assert.match(chatSource, /case "cancelled":[\s\S]*clearCancelFallback\(\)/);
+  assert.match(chatSource, /state\.stopRequested/);
+});
+
 test("当前有效 Checkpoint 作为历史分隔标记而非聊天消息渲染", () => {
   assert.match(chatSource, /data\.context_checkpoint/);
   assert.match(chatSource, /addContextCheckpointMarker/);

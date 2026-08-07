@@ -11,6 +11,7 @@ from deep_agent.core.context import AppContextDep
 from deep_agent.api.v1.request_identity import RequestUserDep
 from deep_agent.db.session_list import MAX_LIST_LIMIT, SessionListFilters, SessionSummaryRow
 from deep_agent.db.session_scope import resolve_session
+from deep_agent.db.ids import normalize_agent_id
 from deep_agent.agent.history import (
     SessionHistoryResponse,
     HistoryContextCheckpoint,
@@ -31,6 +32,12 @@ from deep_agent.schemas.chat import SessionInfo, SessionListResponse
 from deep_agent.options import OPTION
 
 router = APIRouter()
+
+
+class SessionCancelResponse(BaseModel):
+    status: Literal["cancel_requested", "not_running"]
+    session_id: str
+    agent_id: str | None = None
 
 
 async def _resolve_agent_name(ctx: AppContextDep, agent_id: str | None) -> str | None:
@@ -153,6 +160,60 @@ async def get_session(
         resolved_session_id,
         agent_id=api_agent_id,
         history=history,
+    )
+
+
+@router.post("/sessions/{session_id}/cancel", response_model=SessionCancelResponse)
+async def cancel_session_run(
+    ctx: AppContextDep,
+    user_id: RequestUserDep,
+    session_id: str,
+    agent_id: str | None = None,
+) -> SessionCancelResponse:
+    normalized_agent_id = agent_id
+    if agent_id is not None:
+        try:
+            normalized_agent_id = normalize_agent_id(agent_id)
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="agent_id must be a valid UUID",
+            ) from exc
+
+    # The stream registers before asynchronous user-message persistence is
+    # guaranteed to finish. Allow its owner to cancel during that short window.
+    if ctx.active_runs.request_cancel(
+        agent_id=normalized_agent_id,
+        session_id=session_id,
+        user_id=user_id,
+    ):
+        return SessionCancelResponse(
+            status="cancel_requested",
+            session_id=session_id,
+            agent_id=normalized_agent_id,
+        )
+
+    resolved = await resolve_session(
+        ctx.store,
+        session_id,
+        agent_id=normalized_agent_id,
+        user_id=user_id,
+    )
+    if resolved is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
+    scope, resolved_session_id = resolved
+    from deep_agent.db.session_scope import agent_scope_to_api
+
+    api_agent_id = agent_scope_to_api(scope)
+    requested = ctx.active_runs.request_cancel(
+        agent_id=api_agent_id,
+        session_id=resolved_session_id,
+        user_id=user_id,
+    )
+    return SessionCancelResponse(
+        status="cancel_requested" if requested else "not_running",
+        session_id=resolved_session_id,
+        agent_id=api_agent_id,
     )
 
 

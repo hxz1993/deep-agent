@@ -114,9 +114,21 @@ Accept: text/event-stream
 
 - `Content-Type: text/event-stream`
 - 连接保持打开，服务端按 Agent 执行进度持续推送事件
-- 客户端断开时，服务端停止推送
+- 客户端应优先调用 session 取消接口终止服务端 Agent Run；断开 SSE 仅作为网络异常兜底
 
 > **注意**：浏览器原生 `EventSource` 仅支持 GET，因此前端需使用 `fetch` + `ReadableStream` 手动解析 SSE（参见 `frontend/console/chat.js` 与 `protocol.js`）。
+
+### 正式取消（v0.3.9）
+
+```http
+POST /api/v1/sessions/{session_id}/cancel?agent_id={optional}
+```
+
+接口使用 Pydantic AI 2.26 `CancellationToken` 终止当前 Pod 内正在运行的流，返回
+`cancel_requested` 或幂等的 `not_running`。收到 `cancel_requested` 后继续读取 SSE，直到
+`cancelled`；超时或请求失败时客户端才断开本地流。UI Deferred 已经进入 Pending 后不存在
+活动 Run，因此返回 `not_running`。当前注册表是进程级，多 Pod 请求未命中原实例时仍可能返回
+`not_running`，客户端断流兜底必须保留。
 
 ## 2. SSE 帧格式
 
@@ -177,7 +189,7 @@ sequenceDiagram
 | 工具调用 | `tool_call` | 模型发起工具调用（同一 `tool_call_id` 可能推送多次） |
 | 工具结果 | `tool_result` | 工具执行完毕的返回 |
 | 结束 | `final` | 完整输出与 token 用量 |
-| 用户停止 | `cancelled` | 客户端断开连接；已产出内容部分持久化 |
+| 用户停止 | `cancelled` | 正式取消或客户端断流；已产出内容部分持久化 |
 | 异常 | `error` | 流中错误（出现后流通常结束） |
 
 ## 4. 事件类型详解
@@ -481,7 +493,9 @@ Agent 执行过程中抛出未捕获异常时发出，此后流结束，**不会
 
 ### 4.9 `cancelled`
 
-客户端断开 SSE 连接（如 `AbortController.abort()`）且服务端检测到断开后发出。此后流结束，**不会**再发 `final`。
+正式取消接口触发 Pydantic AI `CancellationToken`，或客户端异常断开 SSE 后发出。此后流结束，
+**不会**再发 `final`。Pydantic AI 2.26 提供的中断消息状态优先用于持久化；若 Provider 尚未
+形成完整消息，DeepAgent 才使用已发送的流式片段补齐部分历史。
 
 ```json
 {
@@ -540,7 +554,7 @@ data: {"type": "final", "output": "## 平台的 11 种维度类型\n...", "usage
 6. **工具结果关联**：用 `tool_call_id` 匹配并关闭对应工具块
 7. **压缩状态**：自动和主动 `context_compaction` 复用独立过程条；成功后以历史 Checkpoint 标记收口
 8. **结束判断**：收到 `final`、`cancelled` 或 `error` 后关闭 loading 状态
-9. **中断**：用户取消时 `AbortController.abort()`；若已收到 `cancelled` 则不必再提示错误
+9. **中断**：用户停止时先调用 `/sessions/{id}/cancel`，等待 `cancelled`；接口失败、未命中运行实例或超时才 `AbortController.abort()`
 
 ## 7. 与 REST 接口的关系
 

@@ -236,6 +236,68 @@ class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(text_parts)
             self.assertIn("chunk-one", text_parts[0]["content"])
 
+    async def test_e1_cancel_endpoint_uses_official_token_and_is_idempotent(self) -> None:
+        chunks = ["first-", "second-", "third-", "fourth-", "fifth-"]
+        model, tracker = build_slow_stream_model(chunks=chunks, delay_s=0.25)
+        session_id = "e1-official-cancel-session"
+
+        with patch("deep_agent.agent.factory._resolve_model", return_value=model):
+            runner = await build_runner(get_context(), capabilities=[])
+            deps = AgentDeps(session_id=session_id, user=TEST_USER_ID)
+            streamed: list[dict] = []
+
+            async def consume() -> None:
+                async for event in runner.run_stream(
+                    session_id,
+                    "generate slowly",
+                    deps,
+                    persister=get_context().event_persister,
+                ):
+                    streamed.append(event)
+
+            task = asyncio.create_task(consume())
+            for _ in range(100):
+                if get_context().active_runs.get(agent_id=None, session_id=session_id):
+                    break
+                await asyncio.sleep(0.01)
+            self.assertIsNotNone(
+                get_context().active_runs.get(agent_id=None, session_id=session_id)
+            )
+            for _ in range(100):
+                if any(event.get("type") == "text" for event in streamed):
+                    break
+                await asyncio.sleep(0.01)
+            self.assertTrue(any(event.get("type") == "text" for event in streamed))
+
+            async with AsyncClient(transport=self._transport, base_url="http://test") as client:
+                response = await client.post(f"/api/v1/sessions/{session_id}/cancel")
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.json()["status"], "cancel_requested")
+
+                await asyncio.wait_for(task, timeout=5)
+                await get_context().event_persister.flush(session_id)
+                repeated = await client.post(f"/api/v1/sessions/{session_id}/cancel")
+                self.assertEqual(repeated.status_code, 200)
+                self.assertEqual(repeated.json()["status"], "not_running")
+
+            self.assertIn("cancelled", {event.get("type") for event in streamed})
+            self.assertNotIn("final", {event.get("type") for event in streamed})
+            self.assertLess(tracker.yielded_chunks, tracker.total_chunks)
+            self.assertIsNone(
+                get_context().active_runs.get(agent_id=None, session_id=session_id)
+            )
+            history = await self._history(session_id)
+            assistant = _last_assistant(history)
+            self.assertIsNotNone(assistant)
+
+    async def test_cancel_endpoint_rejects_malformed_agent_id(self) -> None:
+        async with AsyncClient(transport=self._transport, base_url="http://test") as client:
+            response = await client.post(
+                "/api/v1/sessions/missing/cancel",
+                params={"agent_id": "not-a-uuid"},
+            )
+        self.assertEqual(response.status_code, 422)
+
     async def test_e2_deferred_tool_call_persists_in_history_and_resumes(self) -> None:
         session_id, tool_call_id = await self._run_hitl_pending()
 

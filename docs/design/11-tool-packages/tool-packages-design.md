@@ -43,7 +43,8 @@ Pydantic AI 运行对象，负责把工具定义交给模型并执行或转发�
 ### 2.3 AbstractCapability
 
 Pydantic AI 的运行扩展，负责 History Processor、Hook、重试、模型设置等横切行为。DeepAgent
-上下文压缩和 DeepSeek 重试继续使用这一层，不进入工具目录，也不因本次产品改名而改变。
+上下文压缩继续使用这一层，不进入工具目录，也不因本次产品改名而改变。DeepSeek V4 已在
+v0.3.9 改由 Pydantic AI 官方 Provider/Profile 处理，不再保留项目自定义重试能力。
 
 ## 3. 工具包目录
 

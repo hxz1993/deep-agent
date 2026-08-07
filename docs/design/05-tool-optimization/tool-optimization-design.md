@@ -2,7 +2,7 @@
 
 > 最后核验：2026-08-03
 >
-> 当前运行基线：`pydantic-ai-slim 2.14.1` + `pydantic-ai-harness 0.10.0`
+> 当前运行基线：`pydantic-ai-slim 2.26.0` + `pydantic-ai-harness 0.10.0`
 >
 > 状态：设计梳理，不代表已引入新的 Native Tool、Output Tool 或 Harness 能力
 
@@ -187,7 +187,7 @@ sequenceDiagram
 
 Provider Native Tool 由模型 Provider 执行，不在 DeepAgent Pod 中运行。
 
-当前 Pydantic AI 2.14.1 暴露的原生工具定义包括：
+当前 Pydantic AI 2.26.0 暴露的原生工具定义包括：
 
 - `WebSearchTool`
 - `WebFetchTool`

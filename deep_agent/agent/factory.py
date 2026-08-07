@@ -52,6 +52,14 @@ def _resolve_openai_compatible(spec: AgentSpec, model_name: str) -> Model:
     return OpenAIChatModel(model_name, provider=provider)
 
 
+def _resolve_official_deepseek(spec: AgentSpec, model_name: str) -> OpenAIChatModel | None:
+    """Use the native profile when a catalog row points at DeepSeek's API."""
+    provider = DeepSeekProvider(api_key=spec.api_key)
+    if _normalize_url(spec.base_url) == _normalize_url(provider.base_url):
+        return OpenAIChatModel(model_name, provider=provider)
+    return None
+
+
 def _resolve_anthropic(spec: AgentSpec, model_name: str) -> AnthropicModel:
     provider = AnthropicProvider(
         api_key=spec.api_key or None,
@@ -96,6 +104,9 @@ def resolve_model(spec: AgentSpec) -> str | Model:
         if parsed_provider == "google":
             return _resolve_google(spec, model_name)
         if spec.base_url:
+            deepseek_model = _resolve_official_deepseek(spec, spec.model)
+            if deepseek_model is not None:
+                return deepseek_model
             return _resolve_openai_compatible(spec, spec.model)
         return spec.model
 
@@ -120,12 +131,14 @@ def resolve_model(spec: AgentSpec) -> str | Model:
         return _resolve_google(spec, model_name)
 
     if provider_class is DeepSeekProvider:
-        provider = DeepSeekProvider(api_key=spec.api_key)
-        if (
-            not spec.base_url
-            or _normalize_url(spec.base_url) == _normalize_url(provider.base_url)
-        ):
-            return OpenAIChatModel(model_name, provider=provider)
+        if not spec.base_url:
+            return OpenAIChatModel(
+                model_name,
+                provider=DeepSeekProvider(api_key=spec.api_key),
+            )
+        deepseek_model = _resolve_official_deepseek(spec, model_name)
+        if deepseek_model is not None:
+            return deepseek_model
 
     if spec.base_url:
         return _resolve_openai_compatible(spec, model_name)

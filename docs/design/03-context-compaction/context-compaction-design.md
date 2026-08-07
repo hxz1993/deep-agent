@@ -4,7 +4,7 @@
 >
 > 更新日期：2026-07-30
 >
-> 依赖组合：`pydantic-ai-slim 2.14.1` + `pydantic-ai-harness 0.10.0`
+> 依赖组合：`pydantic-ai-slim 2.26.0` + `pydantic-ai-harness 0.10.0`
 >
 > 数据库迁移：v0.3.0 完整基线 Alembic `001`
 

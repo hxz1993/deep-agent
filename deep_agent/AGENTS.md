@@ -58,7 +58,7 @@ MCP 在请求时由 `resolve_mcp_toolsets` 解析（DB 行 + `mcps/` builtin 兜
 
 ### 能力装配与模型输入
 
-DeepAgent 自研 `capabilities.registry.ToolPackage` 是产品配置单位，包含分类、展示元数据、工具目录和恰好一个 Toolset；Pydantic AI 的 `AbstractCapability` 才是可介入模型请求、消息历史、工具准备和事件生命周期的原生扩展点。当前 `DeepSeekThinkingRetry` 与 `agent/context/compaction.py` 的 Harness 压缩包装使用后者。
+DeepAgent 自研 `capabilities.registry.ToolPackage` 是产品配置单位，包含分类、展示元数据、工具目录和恰好一个 Toolset；Pydantic AI 的 `AbstractCapability` 才是可介入模型请求、消息历史、工具准备和事件生命周期的原生扩展点。当前上下文压缩使用这一层；DeepSeek V4 已交由 Pydantic AI 官方 Provider/Profile，不再注册项目自定义重试能力。
 
 模型每轮直接看到的是：Agent/能力 Instructions、`message_history`、当前用户输入/附件和本轮 Tool Definitions。Toolset 负责列出、准备和调用工具；MCP Prompt 不会自动进入模型工具列表。MCP Resource 由宿主侧动态代理工具按需读取。
 
@@ -107,7 +107,7 @@ XML + JSON 投影。业务字段语义仍由具体 Agent Prompt 负责。
 | `spec.py` | `AgentSpec`：`from_row()`、model、instructions、capabilities |
 | `history.py` | `ModelMessage[]` → 前端时间线 |
 | `factory.py` | `build_agent()` — model 字符串或 OpenAI 兼容 endpoint |
-| `models/` | models.dev 管理员刷新、目录标准化、Provider/模型适配与 DeepSeek 专属重试能力 |
+| `models/` | models.dev 管理员刷新、目录标准化和 Provider/模型适配 |
 | `attachment_extractors.py` | 文本、DOCX、XLSX 按需解析、分页与文件安全限制 |
 | `attachments.py` | 会话附件引用、原生模态校验和平台下载 |
 | `runner.py` | `run()` / `run_stream()` — 会话锁、history、事件映射 |

@@ -8,10 +8,12 @@ from typing import Any, AsyncIterator
 from pydantic_ai import (
     Agent,
     AgentRunResultEvent,
+    CancellationToken,
     DeferredToolRequests,
     DeferredToolResults,
     RunContext,
 )
+from pydantic_ai.exceptions import RunCancelled
 from pydantic_ai.messages import (
     FunctionToolCallEvent,
     ModelMessage,
@@ -25,6 +27,7 @@ from pydantic_ai.models import ModelRequestContext, ModelRequestParameters
 from pydantic_ai.usage import RunUsage, UsageLimits
 
 from deep_agent.agent import events
+from deep_agent.agent.active_runs import ActiveRunRegistry
 from deep_agent.agent.context.budget import build_context_budget
 from deep_agent.agent.context.checkpoint import (
     ProjectionLoad,
@@ -123,6 +126,7 @@ class AgentRunner:
         summary_model_id: str | None = None,
         estimator: TokenEstimator | None = None,
         stores: DataStores | None = None,
+        active_runs: ActiveRunRegistry | None = None,
     ) -> None:
         self.agent = agent
         self.store = store
@@ -139,6 +143,7 @@ class AgentRunner:
         self._summary_model_id = summary_model_id
         self._estimator = estimator or TokenEstimator.conservative()
         self._stores = stores
+        self._active_runs = active_runs or ActiveRunRegistry()
 
     @asynccontextmanager
     async def _session_lock(self, session_id: str, *, agent_id: str | None) -> AsyncIterator[None]:
@@ -714,8 +719,20 @@ class AgentRunner:
         result: Any | None,
         accumulator: StreamAccumulator,
         deferred_tool_results: DeferredToolResults | None,
+        official_messages: list[ModelMessage] | None = None,
     ) -> None:
-        if result is not None:
+        if official_messages:
+            persister.publish(
+                PersistEvent(
+                    session_id=session_id,
+                    agent_id=deps.agent_id,
+                    user_id=deps.user,
+                    kind="run_cancelled",
+                    result_messages=official_messages,
+                    skip_user_prompt=pre_persisted_user,
+                )
+            )
+        elif result is not None:
             persister.publish(
                 PersistEvent(
                     session_id=session_id,
@@ -927,6 +944,13 @@ class AgentRunner:
             cancelled = False
             run_published = False
             accumulator = StreamAccumulator()
+            official_cancelled_messages: list[ModelMessage] | None = None
+            active_run = self._active_runs.register(
+                agent_id=deps.agent_id,
+                session_id=session_id,
+                user_id=deps.user,
+            )
+            stream = None
 
             try:
                 async with self.agent.run_stream_events(
@@ -937,6 +961,7 @@ class AgentRunner:
                     deferred_tool_results=deferred_tool_results,
                     output_type=_STREAM_OUTPUT_TYPE,
                     model_settings=self.model_settings,
+                    cancellation_token=active_run.cancellation_token,
                 ) as stream:
                     stream_task: asyncio.Task[Any] | None = asyncio.create_task(
                         stream.__anext__()
@@ -1018,10 +1043,17 @@ class AgentRunner:
                                 result.new_messages(),
                             )
                         )
+            except RunCancelled:
+                cancelled = True
+                if stream is not None:
+                    with suppress(Exception):
+                        official_cancelled_messages = list(stream.new_messages())
             except asyncio.CancelledError:
                 cancelled = True
+                active_run.cancellation_token.cancel()
             except GeneratorExit:
                 cancelled = True
+                active_run.cancellation_token.cancel()
                 raise
             except Exception as exc:  # noqa: BLE001 - surface as an SSE error event
                 logger.exception("Agent stream failed for session {}", session_id)
@@ -1050,18 +1082,23 @@ class AgentRunner:
                         result=result,
                         accumulator=accumulator,
                         deferred_tool_results=deferred_tool_results,
+                        official_messages=official_cancelled_messages,
                     )
+                self._active_runs.unregister(active_run)
 
             if cancelled:
                 pending = (
-                    result.new_messages()
-                    if result is not None
-                    else (
-                        accumulator.to_model_messages(
-                            include_tool_calls=deferred_tool_results is None,
+                    official_cancelled_messages
+                    or (
+                        result.new_messages()
+                        if result is not None
+                        else (
+                            accumulator.to_model_messages(
+                                include_tool_calls=deferred_tool_results is None,
+                            )
+                            if accumulator.has_content()
+                            else None
                         )
-                        if accumulator.has_content()
-                        else None
                     )
                 )
                 msg_count, branch_pt = self._stream_history_meta(
@@ -1071,7 +1108,9 @@ class AgentRunner:
                     pre_persisted_user=prepared.pre_persisted_user,
                 )
                 yield events.cancelled(
-                    history_persisted=accumulator.has_content() or prepared.pre_persisted_user,
+                    history_persisted=bool(official_cancelled_messages)
+                    or accumulator.has_content()
+                    or prepared.pre_persisted_user,
                     model_message_count=msg_count,
                     user_branch_point=branch_pt,
                 )

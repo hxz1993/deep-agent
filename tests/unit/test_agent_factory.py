@@ -51,6 +51,18 @@ class ResolveModelTests(unittest.TestCase):
         self.assertIsInstance(model, OpenAIChatModel)
         self.assertIsInstance(model._provider, DeepSeekProvider)
 
+    def test_unprefixed_catalog_model_at_official_url_uses_deepseek_provider(self) -> None:
+        model = _resolve_model(
+            _spec(
+                model="deepseek-v4-flash",
+                api_key="sk-test",
+                base_url="https://api.deepseek.com",
+            ),
+        )
+        self.assertIsInstance(model, OpenAIChatModel)
+        self.assertIsInstance(model._provider, DeepSeekProvider)
+        self.assertEqual(model.model_name, "deepseek-v4-flash")
+
     def test_deepseek_with_custom_base_url_falls_back_to_openai_provider(self) -> None:
         model = _resolve_model(
             _spec(

@@ -101,6 +101,8 @@ const state = {
   streaming: false,
   awaitingHitl: false,
   abortController: null,
+  stopRequested: false,
+  cancelFallbackTimer: null,
   streamCancelled: false,
   skipHistoryRefresh: false,
   branchFrom: null,
@@ -1737,7 +1739,9 @@ async function resumeDeferred(deferredResults) {
 }
 
 async function runChatStream(payload, assistant) {
-  state.abortController = new AbortController();
+  const streamController = new AbortController();
+  state.abortController = streamController;
+  state.stopRequested = false;
   state.streamCancelled = false;
   state.skipHistoryRefresh = false;
   let stoppedByUser = false;
@@ -1748,7 +1752,7 @@ async function runChatStream(payload, assistant) {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
       body: JSON.stringify(payload),
-      signal: state.abortController.signal,
+      signal: streamController.signal,
     });
 
     if (!resp.ok || !resp.body) {
@@ -1776,7 +1780,9 @@ async function runChatStream(payload, assistant) {
     assistant.finalizeThinking();
     assistant.finalizeText();
     setStreaming(false);
-    state.abortController = null;
+    clearCancelFallback();
+    if (state.abortController === streamController) state.abortController = null;
+    state.stopRequested = false;
     if (state.sessionId) {
       if (!state.skipHistoryRefresh) {
         if (stoppedByUser || state.streamCancelled) {
@@ -1815,14 +1821,52 @@ function updateHitlInputState() {
   updateComposerContextControls();
 }
 
-function stopStream() {
-  if (state.abortController) state.abortController.abort();
+function clearCancelFallback() {
+  if (state.cancelFallbackTimer) clearTimeout(state.cancelFallbackTimer);
+  state.cancelFallbackTimer = null;
+}
+
+async function stopStream() {
+  const controller = state.abortController;
+  if (!controller || state.stopRequested) return;
+  const sessionId = state.sessionId;
+  const agentId = state.agentId;
+  state.stopRequested = true;
+  el.stopBtn.disabled = true;
+  el.stopBtn.title = "正在停止…";
+  el.stopBtn.setAttribute("aria-label", "正在停止");
+
+  const abortFallback = () => {
+    if (!controller.signal.aborted) controller.abort();
+  };
+  clearCancelFallback();
+  state.cancelFallbackTimer = setTimeout(abortFallback, 1500);
+
+  if (!sessionId) {
+    abortFallback();
+    return;
+  }
+  try {
+    const response = await daFetch(
+      sessionApiUrl({ id: sessionId, agentId }, "/cancel"),
+      { method: "POST" },
+    );
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok || body.status !== "cancel_requested") abortFallback();
+  } catch {
+    abortFallback();
+  }
 }
 
 function setStreaming(v) {
   state.streaming = v;
   el.sendBtn.classList.toggle("hidden", v);
   el.stopBtn.classList.toggle("hidden", !v);
+  if (!v) {
+    el.stopBtn.disabled = false;
+    el.stopBtn.title = "停止生成";
+    el.stopBtn.setAttribute("aria-label", "停止生成");
+  }
   updateAgentSelectState();
   updateHitlInputState();
   updateComposerContextControls();
@@ -1924,6 +1968,7 @@ function handleEvent({ event, data }, assistant) {
     case "cancelled":
       failAutomaticContextCompaction("上下文压缩已取消，未更新 Checkpoint");
       state.streamCancelled = true;
+      clearCancelFallback();
       assistant.finalizeThinking();
       assistant.finalizeText();
       syncHistoryMeta(data);

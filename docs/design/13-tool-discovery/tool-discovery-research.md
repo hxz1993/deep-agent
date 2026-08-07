@@ -38,13 +38,15 @@ Pydantic AI 的 `ToolSearch` / `DeferredLoadingToolset` 把工具分为：
 当前安装版本：
 
 ```text
-pydantic-ai-slim    2.14.1
+pydantic-ai-slim    2.26.0
 pydantic-ai-harness 0.10.0
 ```
 
 ### 2.2 自带本地算法不是语义搜索
 
-Pydantic AI 2.14.1 的跨 Provider 默认回退实现为：
+下述跨 Provider 关键词回退是 2.14.1 阶段的黑盒基线；DeepAgent 已升级到 2.26.0，后续
+`TOOL-201` 实施前必须重新验证 2.26 的 Tool Search、Deferred Loading、Provider 原生路径和
+本地回退，不直接照搬旧版本结论：
 
 ```text
 query → 正则 [a-z0-9]+ 分词

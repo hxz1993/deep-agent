@@ -7,6 +7,7 @@ from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from deep_agent.agent.event_persister import EventPersister
+from deep_agent.agent.active_runs import ActiveRunRegistry
 from deep_agent.capabilities import build_registry
 from deep_agent.capabilities.mcp.lease_manager import McpLeaseManager
 from deep_agent.capabilities.registry import ToolPackageRegistry
@@ -39,6 +40,7 @@ class AppContext:
     event_persister: EventPersister
     db_engine: AsyncEngine
     db_session_factory: async_sessionmaker[AsyncSession]
+    active_runs: ActiveRunRegistry
     sandbox_backend: PythonExecutionBackend | None = None
     sandbox_profile: ResolvedSandboxProfile | None = None
 
@@ -111,6 +113,7 @@ class AppContext:
             stores=bundle.stores,
             mcp_lease_manager=mcp_lease_manager,
             event_persister=EventPersister(bundle.stores.coordinator),
+            active_runs=ActiveRunRegistry(),
             db_engine=bundle.engine,
             db_session_factory=bundle.session_factory,
             sandbox_backend=sandbox_backend,
@@ -133,6 +136,7 @@ class AppContext:
         db_session_factory: async_sessionmaker[AsyncSession] | None = None,
         sandbox_backend: PythonExecutionBackend | None = None,
         sandbox_profile: ResolvedSandboxProfile | None = None,
+        active_runs: ActiveRunRegistry | None = None,
     ) -> AppContext:
         if mcp_lease_manager is None:
             retries = (
@@ -162,6 +166,7 @@ class AppContext:
             stores=stores,
             mcp_lease_manager=mcp_lease_manager,
             event_persister=event_persister,
+            active_runs=active_runs or ActiveRunRegistry(),
             db_engine=db_engine,
             db_session_factory=db_session_factory,
             sandbox_backend=sandbox_backend,
@@ -169,6 +174,7 @@ class AppContext:
         )
 
     async def aclose(self) -> None:
+        self.active_runs.cancel_all()
         await self.mcp_lease_manager.close_all()
         if self.sandbox_backend is not None:
             await self.sandbox_backend.aclose()

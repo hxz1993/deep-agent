@@ -47,9 +47,10 @@ Checkpoint 标记全部读取 session API；前端不实现 Token 估算或压�
 入口仍可使用；是否有效由后端 `completed/noop/failed` 结果决定。
 
 停止生成使用 `POST /api/v1/sessions/{session_id}/cancel`。接口接受取消后，Console 继续读取
-当前 SSE，直到收到服务端真实 `cancelled`，再刷新历史并通过
-`assistant.status=interrupted` 恢复部分回答与“已停止”标记。停止失败不会 Abort 流或在本地
-伪造成功；页面卸载和网络清理仍可单独关闭本地请求。
+当前 SSE，直到收到服务端真实 `cancelled`。当前页面保留已经流出的回答和工具过程，直接标记
+“已停止”，不立即重载整段历史；重新打开会话时再通过持久化的
+`assistant.status=interrupted` 恢复相同状态。停止失败不会 Abort 流或在本地伪造成功；页面卸载
+和网络清理仍可单独关闭本地请求。
 
 ## 运行
 

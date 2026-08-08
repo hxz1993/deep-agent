@@ -8,14 +8,17 @@ from unittest.mock import AsyncMock, patch
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from pydantic_ai.models.test import TestModel
+from starlette.requests import Request
 
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.api.v1 import api_router
+from deep_agent.api.v1.chat import chat_stream
 from deep_agent.api.v1.deps import build_runner
 from deep_agent.core.context import get_context
 from deep_agent.capabilities import build_registry
 from deep_agent.capabilities.mcp.lease_manager import McpLeaseManager
 from deep_agent.core.context import AppContext, init_context, reset_context
+from deep_agent.schemas.chat import StreamChatRequest
 from tests.helpers.request_identity import TEST_USER_ID, install_test_user_header
 from tests.helpers.sqlite_stores import ensure_title_uses_main_model, make_sqlite_stores
 from tests.integration.helpers.chat import mock_request_disconnect, parse_sse_buffer, parse_sse_events
@@ -288,6 +291,54 @@ class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
             assert assistant is not None
             self.assertEqual(assistant["status"], "interrupted")
 
+    async def test_cancel_is_registered_before_session_event_is_published(self) -> None:
+        """The first SSE event must never expose an uncancellable session id."""
+        session_id = "cancel-immediately-after-session-event"
+        request = Request(
+            {
+                "type": "http",
+                "method": "POST",
+                "path": "/api/v1/chat/stream",
+                "headers": [],
+            }
+        )
+        body = StreamChatRequest(
+            message="stop before input preparation",
+            session_id=session_id,
+            capabilities=[],
+        )
+
+        with patch(
+            "deep_agent.api.v1.chat.build_runner",
+            new_callable=AsyncMock,
+        ) as build:
+            build.return_value = object()
+            response = await chat_stream(
+                request,
+                get_context(),
+                body,
+                TEST_USER_ID,
+            )
+            iterator = response.body_iterator
+            first_event = await anext(iterator)
+            self.assertEqual(first_event["event"], "session")
+            self.assertIsNotNone(
+                get_context().active_runs.get(agent_id=None, session_id=session_id)
+            )
+
+            async with AsyncClient(
+                transport=self._transport,
+                base_url="http://test",
+            ) as client:
+                cancel = await client.post(f"/api/v1/sessions/{session_id}/cancel")
+            self.assertEqual(cancel.status_code, 200)
+            self.assertEqual(cancel.json()["status"], "cancel_requested")
+            await iterator.aclose()
+
+        self.assertIsNone(
+            get_context().active_runs.get(agent_id=None, session_id=session_id)
+        )
+
     async def test_cancel_endpoint_rejects_malformed_agent_id(self) -> None:
         async with AsyncClient(transport=self._transport, base_url="http://test") as client:
             response = await client.post(
@@ -329,6 +380,38 @@ class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
         history = await self._history(session_id)
         self.assertEqual([message["role"] for message in history["messages"]], ["user"])
         self.assertEqual(history["messages"][0]["content"], "keep this question")
+
+    async def test_pre_cancelled_run_does_not_start_model_tasks(self) -> None:
+        model, tracker = build_slow_stream_model(chunks=["must-not-start"], delay_s=1.0)
+        session_id = "cancelled-before-runner-start"
+
+        with patch("deep_agent.agent.factory._resolve_model", return_value=model):
+            runner = await build_runner(get_context(), capabilities=[])
+            deps = AgentDeps(session_id=session_id, user=TEST_USER_ID)
+            active_run = get_context().active_runs.register(
+                agent_id=None,
+                session_id=session_id,
+                user_id=TEST_USER_ID,
+            )
+            active_run.cancellation_token.cancel()
+            streamed = [
+                event
+                async for event in runner.run_stream(
+                    session_id,
+                    "keep the user question only",
+                    deps,
+                    persister=get_context().event_persister,
+                    active_run=active_run,
+                )
+            ]
+
+        self.assertEqual(tracker.yielded_chunks, 0)
+        self.assertEqual([event["type"] for event in streamed], ["cancelled"])
+        history = await self._history(session_id)
+        self.assertEqual([message["role"] for message in history["messages"]], ["user"])
+        self.assertIsNone(
+            get_context().active_runs.get(agent_id=None, session_id=session_id)
+        )
 
     async def test_e2_deferred_tool_call_persists_in_history_and_resumes(self) -> None:
         session_id, tool_call_id = await self._run_hitl_pending()

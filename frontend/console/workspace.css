@@ -544,7 +544,9 @@ html, body {
 .tool-head .tool-status { margin-left: auto; font-size: 11px; color: var(--text-faint); }
 .tool-block.open .chevron { transform: rotate(90deg); }
 .tool-status-complete { display: inline-flex; align-items: center; gap: 3px; color: var(--accent); }
-.tool-status-complete svg { width: 12px; height: 12px; display: block; }
+.tool-status-interrupted { display: inline-flex; align-items: center; gap: 3px; color: var(--danger); }
+.tool-status-complete svg,
+.tool-status-interrupted svg { width: 12px; height: 12px; display: block; }
 .tool-body { display: none; border-top: 1px solid var(--tool-border); padding: 10px 12px; }
 .tool-block.open .tool-body { display: block; }
 .tool-body .label { font-size: 11px; color: var(--text-faint); text-transform: uppercase; margin-bottom: 4px; }

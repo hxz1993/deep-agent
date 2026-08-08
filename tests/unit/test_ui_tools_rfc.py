@@ -12,7 +12,12 @@ from pydantic_ai.messages import ModelResponse, ToolCallPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from deep_agent.agent.history import HistoryMessage, HistoryToolCallPart, enrich_history_messages
+from deep_agent.agent.history import (
+    HistoryMessage,
+    HistoryToolCallPart,
+    HistoryToolResultPart,
+    enrich_history_messages,
+)
 from deep_agent.agent.spec import AgentSpec
 from deep_agent.capabilities.ui.builtin import builtin_ui_records
 from deep_agent.capabilities.ui.registry import (
@@ -665,6 +670,70 @@ class HistoryEnrichmentTests(unittest.TestCase):
         assert isinstance(part, HistoryToolCallPart)
         self.assertEqual(part.widget, "text")
         self.assertEqual(part.metadata, {"form_version": "1"})
+
+    def test_dangling_function_tool_is_projected_as_interrupted(self) -> None:
+        messages = [
+            HistoryMessage(
+                role="assistant",
+                status="completed",
+                parts=[
+                    HistoryToolCallPart(
+                        tool="execute_python",
+                        args={"code": "sleep(30)"},
+                        tool_call_id="function-call",
+                    )
+                ],
+            )
+        ]
+
+        enriched = enrich_history_messages(messages, {})
+
+        self.assertEqual(enriched[0].status, "interrupted")
+        self.assertEqual(messages[0].status, "completed")
+
+    def test_completed_function_tool_stays_completed(self) -> None:
+        messages = [
+            HistoryMessage(
+                role="assistant",
+                status="completed",
+                parts=[
+                    HistoryToolCallPart(
+                        tool="execute_python",
+                        tool_call_id="function-call",
+                    ),
+                    HistoryToolResultPart(
+                        tool="execute_python",
+                        tool_call_id="function-call",
+                        result={"ok": True},
+                    ),
+                ],
+            )
+        ]
+
+        enriched = enrich_history_messages(messages, {})
+
+        self.assertEqual(enriched[0].status, "completed")
+
+    def test_pending_ui_tool_stays_pending_not_interrupted(self) -> None:
+        messages = [
+            HistoryMessage(
+                role="assistant",
+                status="completed",
+                parts=[
+                    HistoryToolCallPart(
+                        tool="myapp__form",
+                        tool_call_id="ui-call",
+                    )
+                ],
+            )
+        ]
+
+        enriched = enrich_history_messages(
+            messages,
+            {"myapp__form": {"widget": "text"}},
+        )
+
+        self.assertEqual(enriched[0].status, "completed")
 
 
 class ExternalToolsetTests(unittest.IsolatedAsyncioTestCase):

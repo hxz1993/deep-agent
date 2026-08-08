@@ -65,6 +65,10 @@ Pydantic AI `CancellationToken`。Runner 捕获 `RunCancelled` 后只持久化
 保存，History API 映射为 `assistant.status=interrupted`；下一轮的悬空 Tool Call 由 Pydantic AI
 自动补 `outcome=interrupted`。
 
+流式接口必须先把 Active Run 注册到 Registry，再发布首条 `session` SSE，并将同一个
+`CancellationToken` 传入 Runner。否则客户端刚拿到 `session_id` 就停止时，会在用户消息尚未
+持久化的窗口内误报 `404 Session not found`。
+
 页面关闭或网络断开只触发 Token 清理无人消费的 Run，不是正常停止入口。UI Deferred 已经
 Pending 时没有活动 Run，其表单取消仍通过 `DeferredToolResults` 处理。当前注册表只在单进程
 内有效，多 Pod 发布必须使用会话粘性，或后续增加共享取消协调器。

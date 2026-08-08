@@ -124,7 +124,13 @@ test("停止生成只请求正式取消接口并等待真实 cancelled 事件", 
   assert.match(chatSource, /sessionApiUrl\(\{ id: sessionId, agentId \}, "\/cancel"\)/);
   assert.match(chatSource, /body\.status === "cancel_requested"/);
   assert.match(chatSource, /case "cancelled":[\s\S]*assistant\.markInterrupted\(\)/);
+  assert.match(
+    chatSource,
+    /case "cancelled":[\s\S]*state\.skipHistoryRefresh = true;[\s\S]*break;/,
+  );
   assert.match(chatSource, /case "cancelled":[\s\S]*renderUsage\(data\.usage\)/);
+  assert.match(chatSource, /markInterrupted\(\)[\s\S]*for \(const block of toolBlocks\.values\(\)\)/);
+  assert.match(chatSource, /tool-status-interrupted/);
   assert.match(chatSource, /state\.stopRequested/);
   assert.doesNotMatch(chatSource, /cancelFallbackTimer|abortFallback|setTimeout\(abortFallback/);
   assert.doesNotMatch(chatSource, /streamCancelled[\s\S]{0,120}setTimeout/);

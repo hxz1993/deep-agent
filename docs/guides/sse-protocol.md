@@ -132,6 +132,8 @@ POST /api/v1/sessions/{session_id}/cancel?agent_id={optional}
 接口使用 Pydantic AI 2.26 `CancellationToken` 终止当前 Pod 内正在运行的流，返回
 `cancel_requested` 或幂等的 `not_running`。收到 `cancel_requested` 后客户端必须继续读取同一条
 SSE，直到服务端捕获 `RunCancelled` 并返回唯一的 `cancelled`；取消后不再返回 `final`。
+服务端会在发布首条 `session` SSE 前注册 Active Run，因此客户端一旦拿到 `session_id` 就可以
+安全启用停止操作，不需要等待第一段 thinking、文本或工具事件。
 
 `cancelled` 携带本轮实际 `usage`、历史计数和分支点。服务端只持久化
 `RunCancelled.new_messages()`，其中部分模型响应保留 `state=interrupted`；下一轮复用历史时，

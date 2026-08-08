@@ -574,9 +574,17 @@ def enrich_history_messages(
     messages: list[HistoryMessage],
     hints: dict[str, dict[str, Any]],
 ) -> list[HistoryMessage]:
-    """Merge UI tool widget/metadata into history tool_call parts (API-layer only)."""
-    if not hints:
-        return messages
+    """Enrich UI calls and project cancelled tool execution for history display.
+
+    Pydantic AI keeps a response ``completed`` when the model finished choosing
+    a function tool and cancellation happened while that tool was executing.
+    It adds the official ``outcome='interrupted'`` return when history is reused,
+    but before the next run the Console still needs to distinguish that dangling
+    function call from a completed one. Persisted model messages are not changed.
+
+    Deferred UI tools are left pending because their missing result means
+    "waiting for user input", not "run was stopped".
+    """
     enriched: list[HistoryMessage] = []
     for msg in messages:
         if msg.role != "assistant":
@@ -590,4 +598,28 @@ def enrich_history_messages(
             else:
                 parts.append(part)
         enriched.append(msg.model_copy(update={"parts": parts}))
-    return enriched
+
+    unresolved: list[tuple[str, int, str]] = []
+    for message_index, msg in enumerate(enriched):
+        if msg.role != "assistant":
+            continue
+        for part in msg.parts:
+            if isinstance(part, HistoryToolCallPart) and part.tool_call_id:
+                unresolved.append((part.tool_call_id, message_index, part.tool))
+            elif isinstance(part, HistoryToolResultPart) and part.tool_call_id:
+                for index in range(len(unresolved) - 1, -1, -1):
+                    if unresolved[index][0] == part.tool_call_id:
+                        unresolved.pop(index)
+                        break
+
+    interrupted_indices = {
+        message_index
+        for _, message_index, tool_name in unresolved
+        if tool_name not in hints
+    }
+    return [
+        msg.model_copy(update={"status": "interrupted"})
+        if index in interrupted_indices and msg.status == "completed"
+        else msg
+        for index, msg in enumerate(enriched)
+    ]

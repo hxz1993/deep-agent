@@ -99,7 +99,7 @@ Agent 编辑弹窗的系统提示词标题栏显示“字符数 / 预估 Token�
 | `tool_result` | `{ type, tool, result, tool_call_id }` |
 | `final` | `{ type, status, output, usage, deferred?, context? }`（`context` 为预算/压缩观测） |
 | `error` | `{ type, message }` |
-| `cancelled` | `{ type, status, usage, history_persisted, model_message_count, user_branch_point }`；收到后刷新 History |
+| `cancelled` | `{ type, status, usage, history_persisted, model_message_count, user_branch_point }`；保留当前流式内容并标记中断，重新打开会话时再由 History 校准 |
 
 完整协议（含同 ID 多次推送、生命周期）：[`../docs/guides/sse-protocol.md`](../docs/guides/sse-protocol.md)。
 
@@ -119,8 +119,9 @@ v0.3.5 Console 只兼容展示历史 `context_refs` 的 label/type，不提供�
 含引用的历史消息不允许用旧文本编辑动作重试，避免静默丢失引用。业务 Chip 和详情由宿主前端实现。
 
 v0.3.10 起停止按钮只调用 session 取消接口。`cancel_requested` 后继续消费原 SSE，收到真实
-`cancelled` 才结束运行态并刷新历史；失败允许重试，`not_running` 不伪造成功。AbortController
-只用于页面卸载或网络资源清理。首条 `session` 事件到达前停止按钮保持禁用。
+`cancelled` 才结束运行态；当前页面保留部分回答和工具过程，不立即重载整段历史，重新打开
+会话时再由持久化的 `interrupted` 状态校准。失败允许重试，`not_running` 不伪造成功。
+AbortController 只用于页面卸载或网络资源清理。首条 `session` 事件到达前停止按钮保持禁用。
 
 ---
 

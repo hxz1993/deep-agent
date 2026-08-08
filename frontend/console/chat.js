@@ -1976,6 +1976,10 @@ function handleEvent({ event, data }, assistant) {
     case "cancelled":
       failAutomaticContextCompaction("上下文压缩已取消，未更新 Checkpoint");
       state.streamCancelled = true;
+      // Keep the current streamed conversation in place. The official
+      // interrupted history remains the source of truth when the session is
+      // reopened, but re-rendering it here causes a disruptive visual reload.
+      state.skipHistoryRefresh = true;
       assistant.finalizeThinking();
       assistant.finalizeText();
       assistant.markInterrupted();
@@ -2322,6 +2326,16 @@ function createAssistantMessage(timestamp, branchPoint) {
     },
     markInterrupted() {
       if (interruptedStatus) return;
+      for (const block of toolBlocks.values()) {
+        if (block.dataset.done) continue;
+        block.dataset.done = "1";
+        block.classList.remove("hitl-pending");
+        block.querySelector(".hitl-widget")?.remove();
+        const status = block.querySelector(".tool-status");
+        if (status) {
+          status.innerHTML = `<span class="tool-status-interrupted">${lucideIcon("circle-stop")}已中断</span>`;
+        }
+      }
       interruptedStatus = document.createElement("div");
       interruptedStatus.className = "message-run-status interrupted";
       interruptedStatus.innerHTML = `${lucideIcon("circle-stop")}<span>已停止</span>`;

@@ -180,8 +180,9 @@ async def cancel_session_run(
                 detail="agent_id must be a valid UUID",
             ) from exc
 
-    # The stream registers before asynchronous user-message persistence is
-    # guaranteed to finish. Allow its owner to cancel during that short window.
+    # The stream registers before publishing its session SSE event and before
+    # asynchronous user-message persistence is guaranteed to finish. Allow its
+    # owner to cancel during that startup window without requiring a DB row.
     if ctx.active_runs.request_cancel(
         agent_id=normalized_agent_id,
         session_id=session_id,

@@ -27,7 +27,7 @@ from pydantic_ai.models import ModelRequestContext, ModelRequestParameters
 from pydantic_ai.usage import RunUsage, UsageLimits
 
 from deep_agent.agent import events
-from deep_agent.agent.active_runs import ActiveRunRegistry
+from deep_agent.agent.active_runs import ActiveRun, ActiveRunRegistry
 from deep_agent.agent.context.budget import build_context_budget
 from deep_agent.agent.context.checkpoint import (
     ProjectionLoad,
@@ -867,6 +867,7 @@ class AgentRunner:
         deferred_tool_results: DeferredToolResults | None = None,
         branch_from: int | None = None,
         persister: EventPersister,
+        active_run: ActiveRun | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
         checkpoint_projection: list[ModelMessage] | None = None
         checkpoint_expected_version = 0
@@ -916,12 +917,21 @@ class AgentRunner:
             )
             result = None
             run_published = False
-            active_run = self._active_runs.register(
+            active_run = active_run or self._active_runs.register(
                 agent_id=deps.agent_id,
                 session_id=session_id,
                 user_id=deps.user,
             )
             try:
+                if active_run.cancellation_token.cancelled:
+                    # The client can cancel immediately after the session SSE,
+                    # before Pydantic AI has started a model run. Do not create
+                    # background capability/model tasks for an already-cancelled
+                    # token; there is no assistant response to recover yet.
+                    raise RunCancelled(
+                        "Run cancelled before model start",
+                        usage=RunUsage(),
+                    )
                 async with self.agent.run_stream_events(
                     user_prompt,
                     deps=deps,

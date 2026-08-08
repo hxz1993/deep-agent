@@ -260,7 +260,15 @@ async def chat_stream(
     await _validate_branch_from(ctx, session_id, agent_id=api_agent_id, branch_from=body.branch_from)
 
     async def event_generator():
+        active_run = ctx.active_runs.register(
+            agent_id=deps.agent_id,
+            session_id=session_id,
+            user_id=deps.user,
+        )
         try:
+            # The client may expose its stop action as soon as this event arrives.
+            # Register the cancellable run first so an immediate stop cannot race
+            # asynchronous history/input preparation and incorrectly return 404.
             yield {"event": "session", "data": json.dumps(session_data)}
             async for ev in runner.run_stream(
                 session_id,
@@ -271,9 +279,12 @@ async def chat_stream(
                 deferred_tool_results=deferred_tool_results,
                 branch_from=body.branch_from,
                 persister=ctx.event_persister,
+                active_run=active_run,
             ):
                 yield {"event": ev["type"], "data": json.dumps(ev, ensure_ascii=False)}
         finally:
+            active_run.cancellation_token.cancel()
+            ctx.active_runs.unregister(active_run)
             # Ensure background persistence finishes before the client refreshes session list.
             await ctx.event_persister.flush(session_id, agent_id=api_agent_id)
 

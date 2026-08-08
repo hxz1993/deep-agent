@@ -52,6 +52,14 @@ function capKindLabel(cap) {
   return CATEGORY_LABELS[cap.category] || cap.category;
 }
 
+function capabilityDisclosureLabel(cap) {
+  if (cap.disclosure_mode === "conditional") return "有附件时可用";
+  if (cap.disclosure_mode === "search") {
+    return `自动预选 Top ${cap.preselect_limit || 3} · 搜索 Top ${cap.search_result_limit || 5}`;
+  }
+  return "始终可用";
+}
+
 function isCapabilitySelected(cap, selectedSet) {
   return selectedSet.has(cap.code);
 }
@@ -191,7 +199,7 @@ const agentsAdmin = {
     const checked = isCapabilitySelected(cap, selectedSet);
     const displayName = cap.label || capDisplayName(cap.code, cap.category);
     const kindLabel = capKindLabel(cap);
-    const toolCount = cap.tools?.length || 0;
+    const toolCount = Number(cap.tool_count ?? cap.tools?.length ?? 0);
     const searchText = `${displayName} ${cap.description || ""} ${cap.code}`.toLowerCase();
     const disabled = cap.enabled === false;
 
@@ -217,6 +225,7 @@ const agentsAdmin = {
           <div class="cap-card-title">
           <span class="kind-badge kind-${escapeHtml(cap.category)} source-${escapeHtml(cap.source || "unknown")}">${escapeHtml(kindLabel)}</span>
             <span>${escapeHtml(displayName)}</span>
+            <span class="kind-badge disclosure-badge">${escapeHtml(capabilityDisclosureLabel(cap))}</span>
           </div>
           ${cap.description ? `<p class="cap-card-desc">${escapeHtml(cap.description)}</p>` : ""}
         </div>

@@ -532,6 +532,11 @@ html, body {
   overflow: hidden;
   font-size: 13px;
 }
+
+.tool-search-block {
+  background: var(--tool-bg);
+  border-style: dashed;
+}
 .tool-head {
   display: flex;
   align-items: center;

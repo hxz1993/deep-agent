@@ -1196,12 +1196,14 @@ function renderHistory(messages, modelMessageCount, contextCheckpoint = null) {
             tool: part.tool,
             args: part.args,
             tool_call_id: part.tool_call_id,
+            source: part.source,
           });
         } else if (part.type === "tool_result") {
           assistant.addToolResult({
             tool: part.tool,
             result: part.result,
             tool_call_id: part.tool_call_id,
+            source: part.source,
           });
         }
       }
@@ -2364,7 +2366,9 @@ function createAssistantMessage(timestamp, branchPoint) {
 
       // 工具调用开始后，文本若在流式中先固定，避免后续文本拼接错乱
       const block = document.createElement("div");
-      block.className = "tool-block open";
+      const isToolSearch =
+        merged.source === "tool_search" || ["search_tools", "tool_search"].includes(merged.tool);
+      block.className = `tool-block${isToolSearch ? " tool-search-block" : " open"}`;
       block.dataset.toolCallId = key;
       if (merged.widget) block.dataset.widget = merged.widget;
       if (merged.metadata) block.dataset.metadata = JSON.stringify(merged.metadata);
@@ -2374,8 +2378,8 @@ function createAssistantMessage(timestamp, branchPoint) {
       block.innerHTML = `
         <div class="tool-head">
           <span class="chevron">${lucideIcon("chevron-right")}</span>
-          <span class="tool-icon">${lucideIcon("wrench")}</span>
-          <span class="tool-name">${escapeHtml(merged.tool || "tool")}</span>
+          <span class="tool-icon">${lucideIcon(isToolSearch ? "search" : "wrench")}</span>
+          <span class="tool-name">${escapeHtml(isToolSearch ? "正在查找可用工具" : (merged.tool || "tool"))}</span>
           <span class="tool-status"><span class="spinner"></span></span>
         </div>
         <div class="tool-body">

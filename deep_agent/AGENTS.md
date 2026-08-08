@@ -92,7 +92,7 @@ DeepAgent 自研 `capabilities.registry.ToolPackage` 是产品配置单位，包
 
 1. 历史裁剪、摘要和上下文预算优先评估 Harness `TieredCompaction`；若采用 Harness，不要再并行维护一套自研 `ProcessHistory` 压缩器。SQL 原始历史继续作为产品事实源，压缩结果应作为派生上下文保存。
 2. 按 App、Space、权限或模态过滤工具优先使用 `PrepareTools`。
-3. 工具达到数十个、Schema 明显占用上下文后再评估 `ToolSearch`。
+3. v0.3.12 起，已授权 MCP 候选超过 3 个时统一进入 `DeferredLoadingToolset`，由本地词法检索预选 Top 3、模型 `search_tools` 返回 Top 5；小型 MCP 全量直接披露。首版不使用 Embedding，不持久化索引。
 4. 生命周期观测优先使用 Hooks/Instrumentation，并先完成 Token、Cookie、文件和工具结果脱敏。
 5. 通用大工具结果治理优先评估 Harness `OverflowingToolOutput`；多实例部署不得直接依赖默认本地文件 Store。
 6. Harness Memory 只保存明确的跨会话笔记，不替代聊天历史；namespace 必须由认证用户、Agent、App 和 Space 生成。

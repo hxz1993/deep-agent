@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -119,6 +119,10 @@ class ToolPackageDescription(BaseModel):
     source: str | None = None
     tool_count: int = 0
     tool_catalog_status: str = "complete"
+    disclosure_mode: Literal["direct", "conditional", "search"] = "direct"
+    disclosure_condition: str | None = None
+    preselect_limit: int | None = None
+    search_result_limit: int | None = None
 
 
 class SessionInfo(BaseModel):

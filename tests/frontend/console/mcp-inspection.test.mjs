@@ -53,11 +53,27 @@ test("检测状态展示能力摘要和完整悬停信息", () => {
   );
 
   assert.equal(view.text, "正常");
-  assert.equal(view.summary, "10 工具 · 2 资源 · 1 模板");
+  assert.equal(
+    view.summary,
+    "10 工具 · 自动预选 Top 3 / 搜索 Top 5 · 2 资源 · 1 模板",
+  );
   assert.match(view.title, /服务：mcp-biz-go 1.0.0/);
   assert.match(view.title, /协议：2025-06-18/);
   assert.match(view.title, /Instructions：可用/);
   assert.match(view.title, /耗时：428 ms/);
+});
+
+test("小型 MCP 直接披露全部工具", () => {
+  const ui = loadInspectionUi();
+  const view = ui.inspectionView(
+    {
+      status: "healthy",
+      tools: { count: 2 },
+      resources: { count: 0, template_count: 0 },
+    },
+    "url",
+  );
+  assert.equal(view.summary, "2 工具 · 全部直接披露 · 0 资源 · 0 模板");
 });
 
 test("Builtin 显示内置运行时且不伪装成待检测", () => {

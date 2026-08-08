@@ -53,9 +53,11 @@ function inspectionView(inspection, transport) {
     not_applicable: ["内置运行时", ""],
   };
   const [text, className] = labels[info.status] || labels.unknown;
+  const toolCount = Number(info.tools?.count || 0);
+  const disclosure = toolCount > 3 ? "自动预选 Top 3 / 搜索 Top 5" : "全部直接披露";
   const summary = info.status === "not_applicable"
     ? "运行时按需启动"
-    : `${info.tools?.count || 0} 工具 · ${info.resources?.count || 0} 资源 · ${info.resources?.template_count || 0} 模板`;
+    : `${toolCount} 工具 · ${disclosure} · ${info.resources?.count || 0} 资源 · ${info.resources?.template_count || 0} 模板`;
   const server = [info.server?.name, info.server?.version].filter(Boolean).join(" ");
   const errors = [
     inspectionErrorMessage(info.error),

@@ -42,6 +42,8 @@ frontend/
 | 内置工具目录 | 配置中心只读展示 `builtin:general`、`builtin:sandbox`、`builtin:attachment`；Agent 按包选择 |
 | 一体化控制台 | `/console/`；工作台、配置和诊断的唯一入口 |
 
+v0.3.12 的配置卡只读展示工具披露策略：附件包为“有附件时可用”，大型 MCP 为“自动预选 Top 3 / 搜索 Top 5”。聊天中的 `search_tools` 是运行诊断过程，默认折叠显示为“正在查找可用工具”，不伪装成业务 MCP 工具。
+
 工作台默认在会话栏顶部用 Agent 下拉框切换；管理员可在当前页面内临时固定左侧 Agent
 列表。下拉模式只在下拉框右侧保留固定操作；固定模式把刷新/取消固定集中在 Agent 标题栏。
 测试 Header 和会话详情统一位于对话标题栏右侧。该状态不写 LocalStorage。窄屏必须退化为

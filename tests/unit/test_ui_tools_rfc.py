@@ -500,6 +500,11 @@ class UiToolStoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(attachment_capability.label, "附件读取")
         self.assertEqual(attachment_capability.source, "builtin")
         self.assertFalse(attachment_capability.default_enabled)
+        self.assertEqual(attachment_capability.disclosure_mode, "conditional")
+        self.assertEqual(
+            attachment_capability.disclosure_condition,
+            "session_has_attachment",
+        )
         self.assertEqual(
             [tool.name for tool in attachment_capability.tools],
             ["read_text_attachment", "read_docx", "read_xlsx"],
@@ -514,6 +519,9 @@ class UiToolStoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(mcp_package.category, "mcp")
         self.assertEqual(mcp_package.tool_count, 7)
         self.assertEqual(mcp_package.tool_catalog_status, "count_only")
+        self.assertEqual(mcp_package.disclosure_mode, "search")
+        self.assertEqual(mcp_package.preselect_limit, 3)
+        self.assertEqual(mcp_package.search_result_limit, 5)
         self.assertEqual(mcp_package.tools, [])
 
     async def test_prepare_toolset_skips_historical_invalid_schema_only(self) -> None:

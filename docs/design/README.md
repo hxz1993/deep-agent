@@ -17,7 +17,7 @@
 | `10` | [`上下文引用`](10-context-reference/README.md) | 2026-08 | v0.3.5 已完成 DeepAgent 公共协议；业务前端迁移待后续跨仓实施 |
 | `11` | [`工具包与工具目录`](11-tool-packages/README.md) | 2026-08 | v0.3.2 已完成工具包目录、UI 工具包、运行 Toolset 与 Console 统一改造 |
 | `12` | [`Agent Skill`](12-agent-skills/README.md) | 2026-08 | 当前仅有最小 Python Skill；线上安装、素材与渐进披露待设计实施 |
-| `13` | [`工具检索与渐进披露`](13-tool-discovery/README.md) | 2026-08 | 完成跨框架调研和本地检索验证；语义后端待决策 |
+| `13` | [`工具检索与渐进披露`](13-tool-discovery/README.md) | 2026-08 | v0.3.12 已完成词法 Top 3/Top 5、附件条件过滤和 Pydantic AI 渐进披露 |
 
 ## 文档命名
 

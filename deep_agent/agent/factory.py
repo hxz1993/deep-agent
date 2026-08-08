@@ -5,6 +5,7 @@ from typing import Any
 import httpx
 from pydantic_ai import Agent
 from pydantic_ai.capabilities import AbstractCapability
+from pydantic_ai.capabilities import ToolSearch
 from pydantic_ai.models import DEFAULT_HTTP_TIMEOUT, Model, get_user_agent, parse_model_id
 from pydantic_ai.models.anthropic import AnthropicModel
 from pydantic_ai.models.google import GoogleModel
@@ -14,11 +15,18 @@ from pydantic_ai.providers.anthropic import AnthropicProvider
 from pydantic_ai.providers.deepseek import DeepSeekProvider
 from pydantic_ai.providers.google import GoogleProvider
 from pydantic_ai.providers.openai import OpenAIProvider
+from pydantic_ai.toolsets import PreparedToolset
 
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.context_references import context_reference_instructions
 from deep_agent.agent.models import OpenAICompatibleVideoChatModel
 from deep_agent.agent.spec import AgentSpec
+from deep_agent.agent.context.estimator import TokenEstimator
+from deep_agent.agent.tool_discovery import (
+    MCP_SEARCH_RESULT_LIMIT,
+    build_mcp_discovery_toolset,
+    search_deferred_tools,
+)
 from deep_agent.capabilities.registry import ToolPackage, ToolPackageRegistry
 from deep_agent.options import OPTION
 
@@ -158,11 +166,27 @@ def _toolsets_for_spec(
     mcp_toolsets: list[Any] | None = None,
     dynamic_ui_packages: list[ToolPackage] | None = None,
     mcp_resource_toolset: Any | None = None,
+    mcp_server_names: list[str] | None = None,
+    estimator: TokenEstimator | None = None,
 ) -> list[Any]:
     """Resolve selected product tool packages into Pydantic AI toolsets."""
-    toolsets = list(registry.toolsets(spec.capabilities))
+    toolsets: list[Any] = []
+    for package in registry.selected(spec.capabilities):
+        toolset = package.toolset
+        if package.code == "builtin:attachment":
+            toolset = PreparedToolset(
+                toolset,
+                lambda ctx, tools: tools if ctx.deps.attachment_by_id else [],
+            )
+        toolsets.append(toolset)
     if mcp_toolsets:
-        toolsets.extend(mcp_toolsets)
+        discovery = build_mcp_discovery_toolset(
+            mcp_toolsets,
+            server_names=mcp_server_names or (),
+            estimator=estimator or TokenEstimator.conservative(),
+        )
+        if discovery is not None:
+            toolsets.append(discovery)
     if mcp_resource_toolset is not None:
         toolsets.append(mcp_resource_toolset)
 
@@ -180,6 +204,8 @@ def build_agent(
     dynamic_ui_packages: list[ToolPackage] | None = None,
     mcp_resource_toolset: Any | None = None,
     context_compaction: AbstractCapability[AgentDeps] | None = None,
+    mcp_server_names: list[str] | None = None,
+    estimator: TokenEstimator | None = None,
 ) -> Agent[AgentDeps, str]:
     """Construct a Pydantic AI agent from a spec + the tool package registry.
 
@@ -195,10 +221,24 @@ def build_agent(
         mcp_toolsets=mcp_toolsets,
         dynamic_ui_packages=dynamic_ui_packages,
         mcp_resource_toolset=mcp_resource_toolset,
+        mcp_server_names=mcp_server_names,
+        estimator=estimator,
     )
     capabilities: list[AbstractCapability[AgentDeps]] = []
     if context_compaction is not None:
         capabilities.append(context_compaction)
+    if mcp_toolsets:
+        capabilities.append(
+            ToolSearch(
+                strategy=search_deferred_tools,
+                max_results=MCP_SEARCH_RESULT_LIMIT,
+                tool_description=(
+                    "按用途查找当前 Agent 已授权但尚未披露参数的 MCP 工具。"
+                    "返回匹配工具后，下一次模型请求会获得这些工具的完整参数。"
+                ),
+                parameter_description="一个或多个简短用途，例如“查询财务模型成员”。",
+            )
+        )
     instructions: list[Any] = []
     if spec.instructions:
         instructions.append(spec.instructions)

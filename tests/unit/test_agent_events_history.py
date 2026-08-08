@@ -6,12 +6,16 @@ from datetime import datetime, timezone
 from pydantic_ai.messages import (
     ModelRequest,
     ModelResponse,
+    NativeToolSearchCallPart,
+    NativeToolSearchReturnPart,
     RetryPromptPart,
     TextPart,
     ThinkingPart,
     ThinkingPartDelta,
     ToolCallPart,
     ToolReturnPart,
+    ToolSearchCallPart,
+    ToolSearchReturnPart,
     UserPromptPart,
 )
 
@@ -38,6 +42,28 @@ class AgentEventsThinkingTests(unittest.TestCase):
     def test_map_text_part_unchanged(self) -> None:
         result = events.map_part(TextPart(content="hello"))
         self.assertEqual(result, {"type": "text", "delta": "hello"})
+
+    def test_local_and_native_tool_search_events_share_diagnostic_source(self) -> None:
+        local_call = events.map_part(
+            ToolSearchCallPart(args={"queries": ["财务模型"]}, tool_call_id="local")
+        )
+        local_return = events.map_part(
+            ToolSearchReturnPart(content={"tools": []}, tool_call_id="local")
+        )
+        native_call = events.map_part(
+            NativeToolSearchCallPart(
+                args={"queries": ["财务模型"]},
+                tool_call_id="native",
+            )
+        )
+        native_return = events.map_part(
+            NativeToolSearchReturnPart(content={"tools": []}, tool_call_id="native")
+        )
+
+        self.assertEqual(local_call["source"], "tool_search")
+        self.assertEqual(local_return["source"], "tool_search")
+        self.assertEqual(native_call["source"], "tool_search")
+        self.assertEqual(native_return["source"], "tool_search")
 
 
 class HistoryThinkingTests(unittest.TestCase):
@@ -110,6 +136,31 @@ class HistoryThinkingTests(unittest.TestCase):
         self.assertEqual(len(history), 1)
         self.assertEqual(history[0].parts[0].type, "text")
         self.assertEqual(history[0].parts[0].content, "hello")
+
+    def test_tool_search_history_is_marked_as_diagnostic(self) -> None:
+        messages = [
+            ModelResponse(
+                parts=[
+                    ToolSearchCallPart(
+                        args={"queries": ["财务模型"]},
+                        tool_call_id="search-1",
+                    )
+                ]
+            ),
+            ModelRequest(
+                parts=[
+                    ToolSearchReturnPart(
+                        content={"tools": []},
+                        tool_call_id="search-1",
+                    )
+                ]
+            ),
+        ]
+
+        history = model_messages_to_history(messages)
+
+        self.assertEqual(history[0].parts[0].source, "tool_search")
+        self.assertEqual(history[0].parts[1].source, "tool_search")
 
     def test_model_messages_to_history_skips_thinking_only_retry(self) -> None:
         ts = datetime(2025, 6, 22, 10, 45, tzinfo=timezone.utc)

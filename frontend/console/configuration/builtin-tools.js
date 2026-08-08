@@ -24,6 +24,9 @@ function builtinToolDetails(capability) {
 function builtinCapabilityRow(capability) {
   const label = capability.label || capability.code;
   const defaultLabel = capability.default_enabled ? "默认启用" : "默认关闭";
+  const disclosureLabel = capability.disclosure_mode === "conditional"
+    ? "有附件时可用"
+    : "始终可用";
   return `<tr>
     <td>
       <div class="builtin-tool-name">
@@ -34,7 +37,7 @@ function builtinCapabilityRow(capability) {
     <td><code>${escapeHtml(capability.code)}</code></td>
     <td>${builtinToolDetails(capability)}</td>
     <td><span class="builtin-default-badge${capability.default_enabled ? " enabled" : ""}">${defaultLabel}</span></td>
-    <td>${escapeHtml(capability.description || "—")}</td>
+    <td><span class="builtin-default-badge">${escapeHtml(disclosureLabel)}</span> ${escapeHtml(capability.description || "—")}</td>
   </tr>`;
 }
 

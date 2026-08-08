@@ -14,6 +14,8 @@ from pydantic_ai.messages import (
     ThinkingPartDelta,
     ToolCallPart,
     ToolReturnPart,
+    NativeToolSearchCallPart,
+    NativeToolSearchReturnPart,
 )
 
 
@@ -26,11 +28,17 @@ def thinking_delta(delta: str) -> dict[str, Any]:
 
 
 def tool_call(tool: str, args: Any, tool_call_id: str | None = None) -> dict[str, Any]:
-    return {"type": "tool_call", "tool": tool, "args": args, "tool_call_id": tool_call_id}
+    payload = {"type": "tool_call", "tool": tool, "args": args, "tool_call_id": tool_call_id}
+    if tool in {"search_tools", "tool_search"}:
+        payload["source"] = "tool_search"
+    return payload
 
 
 def tool_result(tool: str, result: Any, tool_call_id: str | None = None) -> dict[str, Any]:
-    return {"type": "tool_result", "tool": tool, "result": result, "tool_call_id": tool_call_id}
+    payload = {"type": "tool_result", "tool": tool, "result": result, "tool_call_id": tool_call_id}
+    if tool in {"search_tools", "tool_search"}:
+        payload["source"] = "tool_search"
+    return payload
 
 
 def final(
@@ -132,6 +140,16 @@ def _map_tool_return_part(part: ToolReturnPart) -> dict[str, Any] | None:
         _to_jsonable(part.content),
         part.tool_call_id,
     )
+
+
+@map_part.register(NativeToolSearchCallPart)
+def _map_native_tool_search_call(part: NativeToolSearchCallPart) -> dict[str, Any]:
+    return tool_call(part.tool_name, part.args_as_dict(), part.tool_call_id)
+
+
+@map_part.register(NativeToolSearchReturnPart)
+def _map_native_tool_search_return(part: NativeToolSearchReturnPart) -> dict[str, Any]:
+    return tool_result(part.tool_name, _to_jsonable(part.content), part.tool_call_id)
 
 
 @map_part.register(TextPartDelta)

@@ -11,11 +11,11 @@
 - `暂缓`：当前明确不进入近期版本。
 - `已关闭`：已实现或已确认不做。
 
-## 近期三条主线（v0.3.10 后）
+## 近期三条主线（v0.3.12 后）
 
 近期研发集中在三件事，优先级均高于一般体验优化：
 
-1. **工具检索机制**：ToolPackage 继续作为 Agent 的授权上限；大型 MCP 工具包在授权范围内按需检索和披露，不要求管理员逐个勾选工具。
+1. **工具检索增强**：v0.3.12 已交付首版词法检索与渐进披露；后续根据真实召回数据评估 Embedding、Provider Native Search 和发现状态治理。
 2. **Output Tool**：让一个 Agent 可配置多种终止输出结构；默认仍允许普通文本，只有显式选择严格模式时才强制结构化契约。
 3. **Skill**：把当前“Instructions + FunctionToolset”的最小 Python Skill 扩展为适合线上安装、版本管理和渐进披露的完整能力包。
 
@@ -29,10 +29,10 @@ Output Tool，Skill 同期完成协议设计后分阶段落地。
 | `TOOL-001` | 工具优化 | 增加工具定义数量、Schema 字节、调用/重试/失败、耗时和结果大小观测 | 可实施 | 先统一指标口径，不新增计费账本 | [工具质量契约](05-tool-optimization/tool-optimization-design.md#10-工具质量统一契约) |
 | `TOOL-002` | UI 工具 | Deferred UI 续跑前，后端按 `result_schema` 校验用户实际提交结果 | 可实施 | Schema 定义校验已存在；需补实际结果校验和错误响应 | [UI 工具历史与边界](01-ui-tools/ui-tools-history.md#仍需补齐的边界) |
 | `TOOL-003` | 工具优化 | 建立风险、外部副作用和权限要求的统一元数据契约 | 待设计 | 需同时覆盖 Function、MCP、UI 和附件工具 | [工具质量契约](05-tool-optimization/tool-optimization-design.md#10-工具质量统一契约) |
-| `TOOL-103` | 工具优化 | 无合法会话附件时隐藏整个附件读取工具包 | 可实施 | 不按文件后缀细分：当前请求或原始会话存在合法附件时暴露三个读取工具，否则全部隐藏；读取时仍执行文件权限校验 | [附件请求级过滤](05-tool-optimization/tool-optimization-design.md#81-preparetools) |
+| `TOOL-103` | 工具优化 | 无合法会话附件时隐藏整个附件读取工具包 | 已关闭 | v0.3.12 已实施；有合法附件时整包披露三个读取工具，调用时仍执行文件权限校验 | [附件请求级过滤](05-tool-optimization/tool-optimization-design.md#81-preparetools) |
 | `TOOL-104` | 工具优化 | 分离 MCP 工具协议名与聊天展示名 | 可实施 | 保留稳定命名空间和历史兼容；Console 使用独立 `display_name` 隐藏冗长前缀 | [Toolset 展示命名](05-tool-optimization/tool-optimization-design.md#83-toolset-组合与展示命名) |
 | `TOOL-105` | 结构化最终输出 | 实施 Agent 可选的多种 Output Tool | 可实施 | 默认允许普通文本；输出契约组包含多种终止结构，严格模式需显式选择；覆盖普通工具、Deferred 与 Output 同响应校验 | [结构化最终输出设计](09-structured-output/structured-output-design.md) |
-| `TOOL-201` | 工具检索 | 实施 MCP 工具检索与渐进披露机制 | 待决策 | 方案已完成：ToolPackage 作为授权上限，附件做条件过滤，大型 MCP 使用混合语义预选和 Pydantic AI ToolSearch；待确定 Embedding 部署方式、首轮 Top K 和发现状态周期 | [工具检索设计](13-tool-discovery/tool-discovery-design.md) |
+| `TOOL-201` | 工具检索 | 实施 MCP 工具检索与渐进披露机制 | 已关闭 | v0.3.12 已实施：授权不变；超过 3 个候选时词法 Top 3 预选、ToolSearch Top 5、延迟工具名称目录；首版无 Embedding | [工具检索设计](13-tool-discovery/tool-discovery-design.md) |
 | `SKILL-001` | Skill | 设计并实施线上 Skill 安装、版本管理与渐进披露 | 待设计 | 兼容第三方目录式 Skill；覆盖 Instructions、References、Assets、可选工具、来源信任和执行隔离 | [Skill 体系](12-agent-skills/skill-system-design.md) |
 | `ATT-001` | 附件解析 | 固化真实附件读取、上下文压缩和 Checkpoint 更新的端到端测试 | 可实施 | 覆盖上传、分页读取、SSE、历史恢复与压缩 | [验证边界](06-attachment-parsing/attachment-parsing-design.md#10-验证边界) |
 | `ART-001` | Artifact 交互 | Artifact 最小语义（登记/元数据/TTL/权限；可不接外部 sink） | 待设计 | 合法 id 不得从 Checkpoint 猜造；存储落点待决 | [08 分期 A0](08-artifact-export/README.md#建议分期先语义后-sink) |
@@ -51,7 +51,7 @@ Output Tool，Skill 同期完成协议设计后分阶段落地。
 | `ART-101` | Artifact 交互 | 沙箱大结果晋升为 Artifact（与 07 workdir 合同） | 待设计 | 依赖 ART-001 与 07 阶段 A | [交叉合同](08-artifact-export/README.md#与-07-的交叉合同必须对齐) |
 | `ART-102` | Artifact 交互 | （已并入 ART-101）沙箱 `result` 产出 artifact_id | 待设计 | 同 ART-101 | [设计纲要](08-artifact-export/artifact-export-design.md#31-语义主干a0a1) |
 | `CTXREF-101` | 上下文引用 | 迁移 DeepCube 与 DeepTable 前端，并补齐对应 Agent 业务 Prompt | 可实施 | DeepAgent v0.3.5 公共协议已交付；DeepTable 不再使用 DeepCube 助手做业务验收 | [实施阶段](10-context-reference/context-reference-design.md#18-建议实施阶段) |
-| `CTX-101` | 上下文压缩 | 基于 Pydantic AI 2.26 重新审查窗口预算、摘要请求保护、中断历史修复及自动/主动压缩一致性 | 可实施 | 本轮只完成运行时升级与正式取消；下轮需验证工具 Schema Token、官方中断消息和摘要窗口共同计入预算，保持原始历史与 Checkpoint 边界不变 | [上下文压缩设计](03-context-compaction/context-compaction-design.md) |
+| `CTX-101` | 上下文压缩 | 基于 Pydantic AI 2.26 重新审查窗口预算、摘要请求保护、中断历史修复及自动/主动压缩一致性 | 已关闭 | v0.3.12 已补齐 Local/Native ToolSearch 配对、interrupted 历史和 Provider CompactionPart 防空壳策略；仍保持单次摘要与原始历史边界 | [上下文压缩设计](03-context-compaction/context-compaction-design.md) |
 
 ## P2
 

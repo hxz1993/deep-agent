@@ -391,7 +391,7 @@ v0.3.6 中 `summarizing` 表示一次语义摘要，不代表分块序号。遇�
 | `tool_call_id` | `string \| null` | 调用唯一标识，用于关联 `tool_result` |
 | `widget` | `string \| null` | 可选；UI 工具渲染提示（来自 DB，**不发给模型**） |
 | `metadata` | `object \| null` | 可选；客户端扩展字段（来自 builtin/manual 定义，**不发给模型**） |
-| `source` | `string \| null` | 可选；`builtin` \| `manual` |
+| `source` | `string \| null` | 可选；`builtin` \| `manual` \| `tool_search`；Tool Search 是运行诊断，不是业务工具 |
 
 **事件来源（后端实现）**：
 

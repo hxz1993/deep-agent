@@ -46,6 +46,11 @@ async def list_tool_packages(ctx: AppContextDep) -> list[ToolPackageDescription]
                 "tool_count": inspection.tools.count,
                 "tool_catalog_status": "count_only",
                 "tools": [],
+                "disclosure_mode": (
+                    "search" if inspection.tools.count > 3 else "direct"
+                ),
+                "preselect_limit": 3 if inspection.tools.count > 3 else None,
+                "search_result_limit": 5 if inspection.tools.count > 3 else None,
             }
         )
     for package in load_builtin_mcp_tool_packages(str(DEEP_AGENT_ROOT / "mcps")):
@@ -53,6 +58,12 @@ async def list_tool_packages(ctx: AppContextDep) -> list[ToolPackageDescription]
             continue
         payload = describe_tool_package(package)
         payload["tool_catalog_status"] = "count_only"
+        if payload["tool_count"] > 3:
+            payload.update(
+                disclosure_mode="search",
+                preselect_limit=3,
+                search_result_limit=5,
+            )
         payloads.append(payload)
 
     payloads.append(describe_tool_package(build_builtin_ui_tool_package()))

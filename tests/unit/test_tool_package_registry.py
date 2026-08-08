@@ -77,6 +77,11 @@ class ToolPackageRegistryTests(unittest.TestCase):
         self.assertEqual(described["code"], "builtin:attachment")
         self.assertEqual(described["category"], "builtin")
         self.assertEqual(described["tool_count"], 3)
+        self.assertEqual(described["disclosure_mode"], "conditional")
+        self.assertEqual(
+            described["disclosure_condition"],
+            "session_has_attachment",
+        )
 
 
 class BuiltinToolPackageMetadataTests(unittest.IsolatedAsyncioTestCase):

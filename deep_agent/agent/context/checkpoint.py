@@ -109,7 +109,15 @@ def _sanitize_value(value: Any, *, key: str | None = None) -> Any:
     if isinstance(value, list):
         return [_sanitize_value(item) for item in value]
     if isinstance(value, dict):
-        kind = str(value.get("kind") or "")
+        kind = str(value.get("kind") or value.get("part_kind") or "")
+        if (
+            kind == "compaction"
+            and value.get("content") is None
+            and value.get("provider_details")
+        ):
+            raise ValueError(
+                "Opaque provider-native compaction cannot be stored in a DeepAgent checkpoint"
+            )
         if kind == "attachment-ref":
             return {
                 "kind": "attachment-ref",

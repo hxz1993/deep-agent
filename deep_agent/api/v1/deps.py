@@ -120,6 +120,12 @@ async def _build_runner_from_spec(
         dynamic_ui_packages=dynamic_ui_packages,
         mcp_resource_toolset=mcp_resource_toolset,
         context_compaction=context_compaction,
+        mcp_server_names=[
+            code.removeprefix("mcp:")
+            for code in (spec.capabilities or [])
+            if code.startswith("mcp:")
+        ],
+        estimator=estimator,
     )
     limits = UsageLimits(
         request_limit=OPTION.agent.max_requests,

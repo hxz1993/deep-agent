@@ -33,6 +33,10 @@ class ToolPackage:
     default_enabled: bool = True
     enabled: bool = True
     tool_catalog_status: str = "complete"
+    disclosure_mode: str = "direct"
+    disclosure_condition: str | None = None
+    preselect_limit: int | None = None
+    search_result_limit: int | None = None
 
 
 class ToolPackageRegistry:
@@ -64,6 +68,9 @@ class ToolPackageRegistry:
         return self._packages[code]
 
     def toolsets(self, codes: list[str] | None = None) -> list[AbstractToolset[Any]]:
+        return [package.toolset for package in self.selected(codes)]
+
+    def selected(self, codes: list[str] | None = None) -> list[ToolPackage]:
         if codes is None:
             packages = [
                 package
@@ -76,7 +83,7 @@ class ToolPackageRegistry:
                 for code in codes
                 if code in self._packages and self._packages[code].enabled
             ]
-        return [package.toolset for package in packages]
+        return packages
 
     def describe(self) -> list[dict[str, Any]]:
         return [describe_tool_package(package) for package in self._packages.values()]
@@ -93,6 +100,10 @@ def describe_tool_package(package: ToolPackage) -> dict[str, Any]:
         "default_enabled": package.default_enabled,
         "tool_count": len(package.tools),
         "tool_catalog_status": package.tool_catalog_status,
+        "disclosure_mode": package.disclosure_mode,
+        "disclosure_condition": package.disclosure_condition,
+        "preselect_limit": package.preselect_limit,
+        "search_result_limit": package.search_result_limit,
         "tools": [
             {
                 "name": tool.name,

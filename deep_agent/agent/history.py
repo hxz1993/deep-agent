@@ -16,6 +16,7 @@ from pydantic_ai.messages import (
     ThinkingPart,
     ToolReturnPart,
     UserPromptPart,
+    NativeToolSearchReturnPart,
 )
 
 from deep_agent.agent.attachments import is_attachment_ref
@@ -52,6 +53,7 @@ class HistoryToolResultPart(BaseModel):
     tool: str | None = None
     result: Any = None
     tool_call_id: str | None = None
+    source: str | None = None
 
 
 class HistoryAttachmentPart(BaseModel):
@@ -365,6 +367,8 @@ def has_unprocessed_tool_calls(messages: list[ModelMessage]) -> bool:
     pending: set[str] = set()
     for message in messages:
         if isinstance(message, ModelResponse):
+            if message.state == "interrupted":
+                continue
             for part in message.parts:
                 if isinstance(part, BaseToolCallPart) and part.tool_call_id:
                     pending.add(part.tool_call_id)
@@ -407,6 +411,20 @@ def _response_parts(
                     tool=part.tool_name,
                     args=_tool_call_args(part),
                     tool_call_id=part.tool_call_id,
+                    source=(
+                        "tool_search"
+                        if part.tool_name in {"search_tools", "tool_search"}
+                        else None
+                    ),
+                )
+            )
+        elif isinstance(part, NativeToolSearchReturnPart):
+            parts.append(
+                HistoryToolResultPart(
+                    tool=part.tool_name,
+                    result=_to_jsonable(part.content),
+                    tool_call_id=part.tool_call_id,
+                    source="tool_search",
                 )
             )
     return parts
@@ -421,6 +439,11 @@ def _request_tool_returns(request: ModelRequest) -> list[HistoryPart]:
                     tool=part.tool_name,
                     result=_to_jsonable(part.content),
                     tool_call_id=part.tool_call_id,
+                    source=(
+                        "tool_search"
+                        if part.tool_name in {"search_tools", "tool_search"}
+                        else None
+                    ),
                 )
             )
     return parts

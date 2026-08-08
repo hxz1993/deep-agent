@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, patch
 
 from pydantic_ai import Agent
 from pydantic_ai.messages import (
+    CompactionPart,
     ModelMessage,
     ModelRequest,
     ModelResponse,
@@ -14,6 +15,8 @@ from pydantic_ai.messages import (
     ToolCallPart,
     ToolReturnPart,
     UserPromptPart,
+    NativeToolSearchCallPart,
+    NativeToolSearchReturnPart,
 )
 from pydantic_ai.models.test import TestModel
 from pydantic_ai.models.function import FunctionModel
@@ -30,6 +33,7 @@ from deep_agent.agent.context.checkpoint import (
     load_projection,
     projection_fingerprint,
     save_projection,
+    serialize_sanitized_projection,
 )
 from deep_agent.agent.context.compaction import (
     ContextWindowExceededError,
@@ -37,6 +41,7 @@ from deep_agent.agent.context.compaction import (
     SummaryUnavailable,
     _is_transient_summary_error,
     _logical_units,
+    _safe_boundaries,
     _summary_prompt,
     _summary_safety_tokens,
     _strip_summary_and_system,
@@ -53,6 +58,7 @@ from deep_agent.agent.context.test_scenarios import (
 from deep_agent.agent.context.file_keys import deep_agent_file_key
 from deep_agent.agent.context.runtime import ContextRunState
 from deep_agent.agent.deps import AgentDeps
+from deep_agent.agent.history import has_unprocessed_tool_calls
 from deep_agent.agent.event_persister import EventPersister
 from deep_agent.agent.runner import AgentRunner
 from deep_agent.db.serialization import deserialize_message, serialize_message
@@ -136,6 +142,36 @@ class AttachmentFileKeyTests(unittest.TestCase):
             deep_agent_file_key(page_one),
             deep_agent_file_key(other_sheet),
         )
+
+
+class ToolSearchCompactionBoundaryTests(unittest.TestCase):
+    def test_native_tool_search_call_and_return_close_same_boundary(self) -> None:
+        messages = [
+            ModelRequest(parts=[UserPromptPart(content="查找工具")]),
+            ModelResponse(
+                parts=[
+                    NativeToolSearchCallPart(args={"queries": ["财务模型"]}, tool_call_id="search-1"),
+                    NativeToolSearchReturnPart(
+                        content={"matches": []},
+                        tool_call_id="search-1",
+                    ),
+                ]
+            ),
+            ModelRequest(parts=[UserPromptPart(content="继续")]),
+        ]
+
+        self.assertEqual(_safe_boundaries(messages), [0, 1, 2, 3])
+
+    def test_interrupted_response_is_not_pending_deferred_work(self) -> None:
+        messages = [
+            ModelRequest(parts=[UserPromptPart(content="开始")]),
+            ModelResponse(
+                parts=[ToolCallPart("slow_tool", {}, "tool-1")],
+                state="interrupted",
+            ),
+        ]
+
+        self.assertFalse(has_unprocessed_tool_calls(messages))
 
 
 class ContextBudgetTests(unittest.TestCase):
@@ -372,6 +408,40 @@ class ContextCheckpointTests(unittest.IsolatedAsyncioTestCase):
             checkpoint_fingerprint=self._fingerprint(),
             summary_model_id="summary-model",
         )
+
+    def test_opaque_provider_compaction_fails_closed_before_checkpoint_save(self) -> None:
+        history = [
+            ModelResponse(
+                parts=[
+                    CompactionPart(
+                        content=None,
+                        provider_name="openai",
+                        provider_details={"opaque": "provider-state"},
+                    )
+                ]
+            )
+        ]
+
+        with self.assertRaisesRegex(ValueError, "Opaque provider-native compaction"):
+            serialize_sanitized_projection(history)
+
+    def test_text_provider_compaction_can_be_sanitized_without_provider_details(self) -> None:
+        history = [
+            ModelResponse(
+                parts=[
+                    CompactionPart(
+                        content="safe summary",
+                        provider_name="openai",
+                        provider_details={"opaque": "provider-state"},
+                    )
+                ]
+            )
+        ]
+
+        payload = serialize_sanitized_projection(history)
+
+        self.assertEqual(payload[0]["parts"][0]["content"], "safe summary")
+        self.assertNotIn("provider_details", payload[0]["parts"][0])
 
     async def test_harness_compacts_projection_without_rewriting_raw_history(
         self,

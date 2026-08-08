@@ -541,4 +541,6 @@ def build_attachment_tool_package() -> ToolPackage:
             ),
         ],
         default_enabled=False,
+        disclosure_mode="conditional",
+        disclosure_condition="session_has_attachment",
     )

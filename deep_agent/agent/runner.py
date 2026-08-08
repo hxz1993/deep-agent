@@ -512,7 +512,10 @@ class AgentRunner:
                 "failure": None,
             }
         )
-        return {"budget": budget.as_dict(), "compaction": telemetry}
+        result = {"budget": budget.as_dict(), "compaction": telemetry}
+        if deps is not None and deps.tool_discovery is not None:
+            result["tool_discovery"] = deps.tool_discovery.as_dict()
+        return result
 
     def _prepare_context_state(
         self,

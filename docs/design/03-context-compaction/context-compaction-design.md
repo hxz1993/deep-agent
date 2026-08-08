@@ -502,6 +502,9 @@ Alembic。场景构造器必须通过“序列化后可反序列化、没有工�
 22. 连续主动压缩只覆盖一条 Checkpoint，并正确增加 `row_version`。
 23. 空、短、无新增或无收益的主动尝试返回明确 `noop`，且不覆盖有效 Checkpoint。
 24. 未知窗口、Pending、Provider 失败和 CAS 冲突均不覆盖有效 Checkpoint。
+25. Pydantic AI 2.26 的 Local/Native Tool Search Call/Return 都形成安全配对边界。
+26. `state=interrupted` 的官方取消历史不被误判为 Pending Deferred。
+27. 只存在不透明 `provider_details` 的 Provider `CompactionPart` 不保存为空 Checkpoint 壳；当前不启用 Provider Native Compaction。
 
 前端至少覆盖：
 

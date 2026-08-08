@@ -122,6 +122,30 @@ test("Agent 内置工具卡片优先展示中文名称和技术类型", () => {
   assert.match(card, /get_current_time/);
 });
 
+test("Agent 工具包卡片展示后端披露策略且不提供工具级复选框", () => {
+  const ui = loadAgentConfigurationUi();
+  const card = ui.window.agentsAdmin.renderCapCard(
+    {
+      code: "mcp:deepfos",
+      category: "mcp",
+      label: "deepfos",
+      source: "database",
+      description: "DeepFOS 平台工具",
+      default_enabled: false,
+      tool_count: 24,
+      disclosure_mode: "search",
+      preselect_limit: 3,
+      search_result_limit: 5,
+      tools: [],
+    },
+    new Set(["mcp:deepfos"]),
+  );
+
+  assert.match(card, /自动预选 Top 3 · 搜索 Top 5/);
+  assert.match(card, /value="mcp:deepfos"/);
+  assert.doesNotMatch(card, /tool-checkbox|name="tools"/);
+});
+
 test("编辑 Agent 时在弹窗标题栏显示完整 Agent ID", () => {
   assert.match(template, /id="agentModalId"/);
   assert.match(

@@ -111,3 +111,25 @@ test("Python 沙箱作为独立且默认关闭的内置工具包展示", () => {
   assert.match(row, /execute_python/);
   assert.match(row, /默认关闭/);
 });
+
+test("附件工具包展示有附件时可用的管理员标签", () => {
+  const ui = loadBuiltinToolsUi();
+  const row = ui.builtinCapabilityRow({
+    code: "builtin:attachment",
+    category: "builtin",
+    label: "附件读取",
+    source: "builtin",
+    description: "读取当前会话附件。",
+    default_enabled: false,
+    disclosure_mode: "conditional",
+    disclosure_condition: "session_has_attachment",
+    tools: [
+      { name: "read_text_attachment", description: "读取文本附件。" },
+      { name: "read_docx", description: "读取 Word 附件。" },
+      { name: "read_xlsx", description: "读取 Excel 附件。" },
+    ],
+  });
+
+  assert.match(row, /有附件时可用/);
+  assert.match(row, /read_text_attachment/);
+});

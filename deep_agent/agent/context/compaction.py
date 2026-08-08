@@ -15,6 +15,7 @@ from pydantic_ai.messages import (
     SystemPromptPart,
     ToolReturnPart,
     UserPromptPart,
+    NativeToolSearchReturnPart,
 )
 from pydantic_ai.settings import ModelSettings
 from pydantic_ai.tools import RunContext
@@ -126,6 +127,8 @@ def _safe_boundaries(messages: list[ModelMessage]) -> list[int]:
             for part in message.parts:
                 if isinstance(part, BaseToolCallPart) and part.tool_call_id:
                     open_calls.add(part.tool_call_id)
+                if isinstance(part, NativeToolSearchReturnPart) and part.tool_call_id:
+                    open_calls.discard(part.tool_call_id)
         elif isinstance(message, ModelRequest):
             for part in message.parts:
                 if isinstance(part, ToolReturnPart) and part.tool_call_id:

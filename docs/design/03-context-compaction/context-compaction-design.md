@@ -443,6 +443,24 @@ DEEP_AGENT_CONTEXT_OUTPUT_TOKEN_FLOOR
 - 本地验证只连接保留的 SQLite，不连接共享 Test。
 - 发布时 ORM、Runner、API、Console 和文档必须同版本交付。
 
+### 9.1 Pydantic AI 2.26 的复用边界
+
+v0.3.13 完成以下兼容收口：
+
+- 正式回答与内部摘要共享同一个官方 `CancellationToken`。摘要阶段收到 `RunCancelled` 时
+  立即终止整个 Run，不进入摘要重试，也不能用 Sliding Window 继续生成回答。
+- 安全切分、悬空工具判断和旧历史修复统一识别 `BaseToolCallPart` 与
+  `BaseToolReturnPart`，同时覆盖 Local Tool Search、Provider Native Tool Search 以及后续
+  具名的原生工具类型。
+- Pydantic AI 官方 `ProcessHistory` 适合无持久化要求的单次请求历史变换，但不能表达
+  DeepAgent 的主动压缩 SSE、动态完整请求预算、Checkpoint Hash/CAS 和历史边界。
+- Harness `SummarizingCompaction` 同样不替代产品 Checkpoint；现有实现只复用 Harness 的
+  Clamp、重复文件读取去重和旧工具结果清理，语义摘要仍保持一次请求与目标复检。
+- Provider 原生 OpenAI/Anthropic Compaction 依赖特定 Provider 协议。当前 DeepSeek Chat
+  和通用 OpenAI-compatible 链路继续使用 Provider 无关的 DeepAgent Checkpoint；两种压缩
+  不在同一个 Agent 上叠加。仅含不透明 `provider_details` 的 `CompactionPart` 拒绝写入
+  Checkpoint，避免恢复为空壳消息。
+
 ## 10. Console 测试会话
 
 为避免人工逐轮输入数十次才能复现压缩，Workspace 在会话搜索框和普通“新建会话”
@@ -505,6 +523,8 @@ Alembic。场景构造器必须通过“序列化后可反序列化、没有工�
 25. Pydantic AI 2.26 的 Local/Native Tool Search Call/Return 都形成安全配对边界。
 26. `state=interrupted` 的官方取消历史不被误判为 Pending Deferred。
 27. 只存在不透明 `provider_details` 的 Provider `CompactionPart` 不保存为空 Checkpoint 壳；当前不启用 Provider Native Compaction。
+28. 取消发生在内部摘要阶段时，嵌套摘要与外层 Run 使用同一个官方 Token，并且不执行 Sliding Window 兜底。
+29. 普通、Tool Search 和 Provider Native 工具返回都能关闭对应调用，不产生错误 Pending 或合成拒绝结果。
 
 前端至少覆盖：
 

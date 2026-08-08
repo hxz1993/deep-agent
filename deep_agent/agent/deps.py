@@ -4,6 +4,8 @@ import asyncio
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Mapping, Sequence
 
+from pydantic_ai import CancellationToken
+
 from deep_agent.schemas.attachment import AttachmentRef
 
 if TYPE_CHECKING:
@@ -29,6 +31,7 @@ class AgentDeps:
     request_headers: Mapping[str, str] = field(default_factory=dict)
     context_state: "ContextRunState | None" = None
     tool_discovery: "ToolDiscoveryTelemetry | None" = None
+    cancellation_token: CancellationToken | None = field(default=None, repr=False)
     has_context_references: bool = False
     input_modalities: Sequence[str] = field(default_factory=tuple)
     attachment_by_id: dict[str, AttachmentRef] = field(default_factory=dict)

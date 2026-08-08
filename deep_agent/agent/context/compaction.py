@@ -7,15 +7,15 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic_ai import Agent
 from pydantic_ai.capabilities import AbstractCapability
+from pydantic_ai.exceptions import RunCancelled
 from pydantic_ai.messages import (
     BaseToolCallPart,
+    BaseToolReturnPart,
     ModelMessage,
     ModelRequest,
     ModelResponse,
     SystemPromptPart,
-    ToolReturnPart,
     UserPromptPart,
-    NativeToolSearchReturnPart,
 )
 from pydantic_ai.settings import ModelSettings
 from pydantic_ai.tools import RunContext
@@ -123,16 +123,15 @@ def _safe_boundaries(messages: list[ModelMessage]) -> list[int]:
     boundaries = [0]
     open_calls: set[str] = set()
     for index, message in enumerate(messages, start=1):
-        if isinstance(message, ModelResponse):
-            for part in message.parts:
-                if isinstance(part, BaseToolCallPart) and part.tool_call_id:
-                    open_calls.add(part.tool_call_id)
-                if isinstance(part, NativeToolSearchReturnPart) and part.tool_call_id:
-                    open_calls.discard(part.tool_call_id)
-        elif isinstance(message, ModelRequest):
-            for part in message.parts:
-                if isinstance(part, ToolReturnPart) and part.tool_call_id:
-                    open_calls.discard(part.tool_call_id)
+        # Pydantic AI 2.26 can place provider-native call and return parts in
+        # the same ModelResponse.  Process calls before returns so both local
+        # and native tools close at the same safe boundary.
+        for part in message.parts:
+            if isinstance(part, BaseToolCallPart) and part.tool_call_id:
+                open_calls.add(part.tool_call_id)
+        for part in message.parts:
+            if isinstance(part, BaseToolReturnPart) and part.tool_call_id:
+                open_calls.discard(part.tool_call_id)
         if not open_calls:
             boundaries.append(index)
     return sorted(set(boundaries))
@@ -203,7 +202,7 @@ def _formatted_history(messages: list[ModelMessage]) -> str:
                         "tool_call_id": part.tool_call_id,
                     }
                 )
-            elif isinstance(part, ToolReturnPart):
+            elif isinstance(part, BaseToolReturnPart):
                 parts.append(
                     {
                         "kind": "tool_result",
@@ -439,6 +438,8 @@ class DeepAgentContextCompaction(AbstractCapability[Any]):
             if final_estimate > target:
                 raise SummaryUnavailable("target_not_met")
             telemetry.target_met = True
+        except RunCancelled:
+            raise
         except Exception as exc:  # noqa: BLE001 - current request must still have a safe fallback
             reason = exc.reason if isinstance(exc, SummaryUnavailable) else type(exc).__name__
             telemetry.summary_failed = True
@@ -870,7 +871,17 @@ class DeepAgentContextCompaction(AbstractCapability[Any]):
                         usage=ctx.usage,
                         usage_limits=state.usage_limits,
                         model_settings=ModelSettings(max_tokens=output_limit),
+                        cancellation_token=getattr(
+                            ctx.deps,
+                            "cancellation_token",
+                            None,
+                        ),
                     )
+            except RunCancelled:
+                # Use the official Pydantic AI cancellation path all the way
+                # through nested summary runs.  Falling back to a sliding
+                # window here would incorrectly continue a cancelled chat.
+                raise
             except Exception as exc:
                 if ctx.usage.requests == usage_requests_before_attempt:
                     # Pydantic AI can only merge Provider usage after a response.

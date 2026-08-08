@@ -925,6 +925,7 @@ class AgentRunner:
                 session_id=session_id,
                 user_id=deps.user,
             )
+            deps.cancellation_token = active_run.cancellation_token
             try:
                 if active_run.cancellation_token.cancelled:
                     # The client can cancel immediately after the session SSE,

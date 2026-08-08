@@ -90,7 +90,7 @@ DeepAgent 自研 `capabilities.registry.ToolPackage` 是产品配置单位，包
 
 新增横切能力时遵循：
 
-1. 历史裁剪、摘要和上下文预算优先评估 Harness `TieredCompaction`；若采用 Harness，不要再并行维护一套自研 `ProcessHistory` 压缩器。SQL 原始历史继续作为产品事实源，压缩结果应作为派生上下文保存。
+1. 确定性历史整理优先复用 Harness 的 Clamp、Deduplicate 和 Clear tiers。DeepAgent 的动态窗口预算、主动压缩 SSE、Checkpoint Hash/CAS 与目标复检属于产品语义，不能直接用通用 `ProcessHistory` 或 Harness `SummarizingCompaction` 替代。
 2. 按 App、Space、权限或模态过滤工具优先使用 `PrepareTools`。
 3. v0.3.12 起，已授权 MCP 候选超过 3 个时统一进入 `DeferredLoadingToolset`，由本地词法检索预选 Top 3、模型 `search_tools` 返回 Top 5；小型 MCP 全量直接披露。首版不使用 Embedding，不持久化索引。
 4. 生命周期观测优先使用 Hooks/Instrumentation，并先完成 Token、Cookie、文件和工具结果脱敏。
@@ -110,6 +110,12 @@ v0.3.4 同时提供独立的 session 主动压缩 SSE 接口；它跳过自动�
 v0.3.6 的摘要链路只允许一次语义摘要。压缩器同时校验最终投影目标和摘要请求窗口，保留最近
 历史最多的安全切分点；不再使用 192K 固定封顶、滚动分块或第二次更激进摘要。429、502、
 503、504、连接重置和超时可用同一 Prompt 重试一次，自动链路还必须为正式回答保留一次请求。
+
+v0.3.13 起，自动压缩的内部摘要复用正式 Run 的 Pydantic AI `CancellationToken`；用户停止时
+摘要调用与外层 Run 一起取消，`RunCancelled` 不得转成 Sliding Window 继续回答。工具边界和
+历史待处理判断使用 2.26 的 `BaseToolCallPart` / `BaseToolReturnPart`，同时覆盖 Local Tool、
+Tool Search 和 Provider Native Tool。Provider 原生 OpenAI/Anthropic Compaction 暂不与
+DeepAgent Checkpoint 混用；只有不透明 `provider_details` 的 `CompactionPart` 继续拒绝落盘。
 
 v0.3.5 的普通与流式聊天支持结构化 `context_refs`。公共外壳在 Schema 层严格校验；原始
 `payload/metadata` 随消息保存，模型、Token 估算、自动/主动压缩只使用排除 `metadata` 的

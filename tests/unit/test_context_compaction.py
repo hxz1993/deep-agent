@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import unittest
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import AsyncMock, patch
 
-from pydantic_ai import Agent
+from pydantic_ai import Agent, CancellationToken
+from pydantic_ai.exceptions import RunCancelled
 from pydantic_ai.messages import (
     CompactionPart,
     ModelMessage,
@@ -17,10 +20,13 @@ from pydantic_ai.messages import (
     UserPromptPart,
     NativeToolSearchCallPart,
     NativeToolSearchReturnPart,
+    NativeToolCallPart,
+    NativeToolReturnPart,
 )
 from pydantic_ai.models.test import TestModel
 from pydantic_ai.models.function import FunctionModel
 from pydantic_ai.models.function import AgentInfo
+from pydantic_ai.models import ModelRequestContext, ModelRequestParameters
 from pydantic_ai.tools import RunContext
 from pydantic_ai.usage import RequestUsage, RunUsage, UsageLimits
 from pydantic_ai_harness.compaction import estimate_token_count
@@ -161,6 +167,21 @@ class ToolSearchCompactionBoundaryTests(unittest.TestCase):
         ]
 
         self.assertEqual(_safe_boundaries(messages), [0, 1, 2, 3])
+
+    def test_generic_native_tool_call_and_return_close_same_boundary(self) -> None:
+        messages = [
+            ModelRequest(parts=[UserPromptPart(content="执行原生工具")]),
+            ModelResponse(
+                parts=[
+                    NativeToolCallPart("native_lookup", {"query": "预算"}, "native-1"),
+                    NativeToolReturnPart("native_lookup", {"ok": True}, "native-1"),
+                ]
+            ),
+            ModelRequest(parts=[UserPromptPart(content="继续")]),
+        ]
+
+        self.assertEqual(_safe_boundaries(messages), [0, 1, 2, 3])
+        self.assertFalse(has_unprocessed_tool_calls(messages))
 
     def test_interrupted_response_is_not_pending_deferred_work(self) -> None:
         messages = [
@@ -793,6 +814,90 @@ class ContextCheckpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(state.telemetry.summary_calls, 2)
         self.assertEqual(state.telemetry.summary_chunks, 1)
 
+    async def test_nested_summary_uses_official_run_cancellation_token(self) -> None:
+        capability = DeepAgentContextCompaction(
+            context_window_tokens=8_000,
+            max_output_tokens=500,
+            summary_timeout=10,
+        )
+        token = CancellationToken()
+        state = ContextRunState(
+            raw_history=[],
+            estimator=TokenEstimator.conservative(),
+            usage_limits=UsageLimits(request_limit=5),
+        )
+        context = RunContext(
+            deps=AgentDeps(
+                session_id="cancel-summary",
+                cancellation_token=token,
+            ),
+            model=TestModel(),
+            usage=RunUsage(),
+        )
+        cancelled = RunCancelled("summary cancelled", usage=RunUsage())
+
+        with patch(
+            "deep_agent.agent.context.compaction.Agent.run",
+            new=AsyncMock(side_effect=cancelled),
+        ) as run:
+            with self.assertRaises(RunCancelled):
+                await capability._single_summary(
+                    [ModelResponse(parts=[TextPart(content="需要压缩的旧历史")])],
+                    None,
+                    context,
+                    500,
+                    state,
+                    reserve_answer_request=True,
+                )
+
+        self.assertIs(run.await_args.kwargs["cancellation_token"], token)
+        self.assertEqual(run.await_count, 1)
+        self.assertEqual(state.telemetry.summary_calls, 1)
+
+    async def test_cancelled_automatic_summary_never_uses_sliding_fallback(self) -> None:
+        capability = DeepAgentContextCompaction(
+            context_window_tokens=4_000,
+            max_output_tokens=100,
+            summary_timeout=10,
+        )
+        state = ContextRunState(
+            raw_history=[],
+            estimator=TokenEstimator.conservative(),
+            usage_limits=UsageLimits(request_limit=5),
+        )
+        deps = AgentDeps(session_id="cancel-before-request", context_state=state)
+        model = TestModel()
+        context = RunContext(deps=deps, model=model, usage=RunUsage())
+        request_context = ModelRequestContext(
+            model=model,
+            messages=[
+                ModelRequest(parts=[UserPromptPart(content="最初任务")]),
+                ModelResponse(parts=[TextPart(content="旧历史" * 2_000)]),
+                ModelRequest(parts=[UserPromptPart(content="继续")]),
+            ],
+            model_settings=None,
+            model_request_parameters=ModelRequestParameters(),
+        )
+        cancelled = RunCancelled("summary cancelled", usage=RunUsage())
+
+        with (
+            patch.object(
+                capability,
+                "_deterministic_compaction",
+                new=AsyncMock(return_value=request_context.messages),
+            ),
+            patch.object(
+                capability,
+                "_summarize_to_target",
+                new=AsyncMock(side_effect=cancelled),
+            ),
+            patch.object(capability, "_sliding_window") as sliding,
+        ):
+            with self.assertRaises(RunCancelled):
+                await capability.before_model_request(context, request_context)
+
+        sliding.assert_not_called()
+
     async def test_automatic_summary_reserves_one_request_for_the_answer(self) -> None:
         capability = DeepAgentContextCompaction(
             context_window_tokens=8_000,
@@ -1121,6 +1226,67 @@ class ContextCheckpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(events[-1]["context"]["compaction"]["checkpoint_saved"])
         persisted = await self.stores.coordinator.get_history("compact-stream")
         self.assertNotIn("context_compaction", str(persisted))
+
+    async def test_stream_cancel_during_nested_summary_uses_outer_history(self) -> None:
+        summary_started = asyncio.Event()
+        summary_cancelled = asyncio.Event()
+
+        async def respond(
+            messages: list[ModelMessage],
+            _info: AgentInfo,
+        ) -> ModelResponse:
+            if "<history>" in str(messages):
+                summary_started.set()
+                try:
+                    await asyncio.sleep(30)
+                except asyncio.CancelledError:
+                    summary_cancelled.set()
+                    raise
+            return ModelResponse(parts=[TextPart(content="不应完成")])
+
+        raw_before = _long_tool_history()
+        session_id = "cancel-nested-summary"
+        await self.stores.coordinator.append(
+            session_id,
+            raw_before,
+            user_id="user-1",
+        )
+        capability = DeepAgentContextCompaction(
+            context_window_tokens=4_000,
+            max_output_tokens=500,
+            summary_timeout=30,
+        )
+        runner = self._runner(capability, model=FunctionModel(respond))
+        deps = AgentDeps(session_id=session_id, user="user-1")
+        events: list[dict[str, Any]] = []
+
+        async def consume() -> None:
+            async for event in runner.run_stream(
+                session_id,
+                "继续",
+                deps,
+                persister=self.persister,
+            ):
+                events.append(event)
+
+        task = asyncio.create_task(consume())
+        await asyncio.wait_for(summary_started.wait(), timeout=3)
+        self.assertTrue(
+            runner._active_runs.request_cancel(
+                agent_id=None,
+                session_id=session_id,
+                user_id="user-1",
+            )
+        )
+        await asyncio.wait_for(task, timeout=3)
+
+        self.assertTrue(summary_cancelled.is_set())
+        self.assertIn("cancelled", {event.get("type") for event in events})
+        self.assertNotIn("final", {event.get("type") for event in events})
+        self.assertIsNone(await self.stores.context_checkpoint.get(session_id))
+        persisted = await self.stores.coordinator.get_history(session_id)
+        self.assertEqual(len(persisted), len(raw_before) + 1)
+        self.assertNotIn("<history>", str(persisted))
 
     async def test_manual_compaction_writes_checkpoint_without_rewriting_history(
         self,

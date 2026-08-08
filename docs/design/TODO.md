@@ -11,7 +11,7 @@
 - `暂缓`：当前明确不进入近期版本。
 - `已关闭`：已实现或已确认不做。
 
-## 近期三条主线（v0.3.12 后）
+## 近期三条主线（v0.3.13 后）
 
 近期研发集中在三件事，优先级均高于一般体验优化：
 
@@ -51,7 +51,7 @@ Output Tool，Skill 同期完成协议设计后分阶段落地。
 | `ART-101` | Artifact 交互 | 沙箱大结果晋升为 Artifact（与 07 workdir 合同） | 待设计 | 依赖 ART-001 与 07 阶段 A | [交叉合同](08-artifact-export/README.md#与-07-的交叉合同必须对齐) |
 | `ART-102` | Artifact 交互 | （已并入 ART-101）沙箱 `result` 产出 artifact_id | 待设计 | 同 ART-101 | [设计纲要](08-artifact-export/artifact-export-design.md#31-语义主干a0a1) |
 | `CTXREF-101` | 上下文引用 | 迁移 DeepCube 与 DeepTable 前端，并补齐对应 Agent 业务 Prompt | 可实施 | DeepAgent v0.3.5 公共协议已交付；DeepTable 不再使用 DeepCube 助手做业务验收 | [实施阶段](10-context-reference/context-reference-design.md#18-建议实施阶段) |
-| `CTX-101` | 上下文压缩 | 基于 Pydantic AI 2.26 重新审查窗口预算、摘要请求保护、中断历史修复及自动/主动压缩一致性 | 已关闭 | v0.3.12 已补齐 Local/Native ToolSearch 配对、interrupted 历史和 Provider CompactionPart 防空壳策略；仍保持单次摘要与原始历史边界 | [上下文压缩设计](03-context-compaction/context-compaction-design.md) |
+| `CTX-101` | 上下文压缩 | 基于 Pydantic AI 2.26 重新审查窗口预算、摘要请求保护、中断历史修复及自动/主动压缩一致性 | 已关闭 | v0.3.13 已让官方 CancellationToken 覆盖嵌套摘要，并用 Call/Return 基类统一 Local/Native 工具配对；Provider CompactionPart 防空壳、单次摘要与原始历史边界保持不变 | [上下文压缩设计](03-context-compaction/context-compaction-design.md) |
 
 ## P2
 

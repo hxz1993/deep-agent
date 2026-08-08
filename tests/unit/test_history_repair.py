@@ -6,6 +6,8 @@ from pydantic_ai import ToolDenied
 from pydantic_ai.messages import (
     ModelRequest,
     ModelResponse,
+    NativeToolCallPart,
+    NativeToolReturnPart,
     ToolCallPart,
     ToolReturnPart,
     UserPromptPart,
@@ -43,6 +45,21 @@ class RepairUnprocessedToolCallsTests(unittest.TestCase):
         ]
         repaired = repair_unprocessed_tool_calls(messages)
         self.assertEqual(repaired, messages)
+
+    def test_native_call_and_return_in_same_response_are_not_repaired(self) -> None:
+        messages = [
+            ModelRequest(parts=[UserPromptPart(content="查找")]),
+            ModelResponse(
+                parts=[
+                    NativeToolCallPart("native_lookup", {"query": "预算"}, "native-1"),
+                    NativeToolReturnPart("native_lookup", {"ok": True}, "native-1"),
+                ]
+            ),
+        ]
+
+        repaired = repair_unprocessed_tool_calls(messages)
+
+        self.assertIs(repaired, messages)
 
     def test_appends_tool_denied_for_dangling_call(self) -> None:
         messages = [

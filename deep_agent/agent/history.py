@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 from pydantic_ai import ToolDenied
 from pydantic_ai.messages import (
     BaseToolCallPart,
+    BaseToolReturnPart,
     ModelMessage,
     ModelRequest,
     ModelResponse,
@@ -237,6 +238,9 @@ def _rejected_tool_calls(messages: list[ModelMessage]) -> _RejectedToolCalls:
                     unresolved.append(
                         (message_index, part_index, part.tool_name, part.tool_call_id)
                     )
+            for part in message.parts:
+                if isinstance(part, BaseToolReturnPart):
+                    pop_call(part.tool_call_id, part.tool_name)
             continue
 
         if not isinstance(message, ModelRequest):
@@ -250,7 +254,7 @@ def _rejected_tool_calls(messages: list[ModelMessage]) -> _RejectedToolCalls:
                     if message_index >= last_response_index:
                         terminal_rejected.setdefault(position[0], set()).add(position[1])
                         terminal_retries.setdefault(message_index, set()).add(part_index)
-            elif isinstance(part, ToolReturnPart):
+            elif isinstance(part, BaseToolReturnPart):
                 pop_call(part.tool_call_id, part.tool_name)
 
     return _RejectedToolCalls(
@@ -334,6 +338,13 @@ def repair_unprocessed_tool_calls(messages: list[ModelMessage]) -> list[ModelMes
 
     for message in messages:
         if isinstance(message, ModelResponse):
+            returned_ids = {
+                part.tool_call_id
+                for part in message.parts
+                if isinstance(part, BaseToolReturnPart) and part.tool_call_id
+            }
+            for tool_call_id in returned_ids:
+                pending.pop(tool_call_id, None)
             flush_pending()
             repaired.append(message)
             if message.state == "interrupted":
@@ -341,6 +352,8 @@ def repair_unprocessed_tool_calls(messages: list[ModelMessage]) -> list[ModelMes
             for part in message.parts:
                 if isinstance(part, BaseToolCallPart) and part.tool_call_id:
                     pending[part.tool_call_id] = part.tool_name
+            for tool_call_id in returned_ids:
+                pending.pop(tool_call_id, None)
             continue
 
         if isinstance(message, ModelRequest):
@@ -348,7 +361,7 @@ def repair_unprocessed_tool_calls(messages: list[ModelMessage]) -> list[ModelMes
                 flush_pending()
             repaired.append(message)
             for part in message.parts:
-                if isinstance(part, ToolReturnPart) and part.tool_call_id:
+                if isinstance(part, BaseToolReturnPart) and part.tool_call_id:
                     pending.pop(part.tool_call_id, None)
             continue
 
@@ -372,9 +385,12 @@ def has_unprocessed_tool_calls(messages: list[ModelMessage]) -> bool:
             for part in message.parts:
                 if isinstance(part, BaseToolCallPart) and part.tool_call_id:
                     pending.add(part.tool_call_id)
+            for part in message.parts:
+                if isinstance(part, BaseToolReturnPart) and part.tool_call_id:
+                    pending.discard(part.tool_call_id)
         elif isinstance(message, ModelRequest):
             for part in message.parts:
-                if isinstance(part, (ToolReturnPart, RetryPromptPart)) and part.tool_call_id:
+                if isinstance(part, (BaseToolReturnPart, RetryPromptPart)) and part.tool_call_id:
                     pending.discard(part.tool_call_id)
     return bool(pending)
 

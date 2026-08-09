@@ -42,6 +42,20 @@ test("相同 tool_call_id 合并，不同 id 保持独立", () => {
   );
 });
 
+test("工具调用撤销后不再保留实时工具卡状态", () => {
+  assert.deepEqual(
+    reduceToolEvents([
+      { event: "tool_call", data: { tool_call_id: "retry-1", tool: "workbook_get", args: {} } },
+      { event: "tool_call_removed", data: { tool_call_id: "retry-1", reason: "model_retry" } },
+      { event: "tool_call", data: { tool_call_id: "valid-2", tool: "workbook_get", args: { path: "/a" } } },
+      { event: "tool_result", data: { tool_call_id: "valid-2", result: { ok: true } } },
+    ]),
+    [
+      { tool_call_id: "valid-2", status: "complete", tool: "workbook_get", args: { path: "/a" }, result: { ok: true } },
+    ],
+  );
+});
+
 test("上下文压缩事件提供短暂状态文案", () => {
   assert.deepEqual(
     contextCompactionPresentation({ phase: "started" }),

@@ -161,6 +161,30 @@ class EventPersisterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(tool_calls), 1)
         self.assertEqual(history[-1].state, "interrupted")
 
+    async def test_run_cancelled_marks_partial_completed_response_interrupted(self) -> None:
+        user = ModelRequest(parts=[UserPromptPart(content="hi")])
+        await self.store.append("s5", [user])
+        self.persister.publish(
+            PersistEvent(
+                session_id="s5",
+                agent_id=None,
+                user_id=None,
+                kind="run_cancelled",
+                result_messages=[
+                    user,
+                    ModelResponse(parts=[TextPart(content="partial")]),
+                ],
+                skip_user_prompt=True,
+                repair_dangling_tool_calls=False,
+            )
+        )
+
+        await self.persister.flush("s5")
+        history = await self.store.get_history("s5")
+
+        self.assertEqual(len(history), 2)
+        self.assertEqual(history[-1].state, "interrupted")
+
 
 if __name__ == "__main__":
     unittest.main()

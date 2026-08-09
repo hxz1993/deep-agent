@@ -270,7 +270,11 @@ def filter_ephemeral_agent_messages(messages: list[ModelMessage]) -> list[ModelM
     rejected_calls = _rejected_tool_calls(messages)
     filtered: list[ModelMessage] = []
     for message_index, message in enumerate(messages):
-        if isinstance(message, ModelResponse) and is_thinking_only_response(message):
+        if (
+            isinstance(message, ModelResponse)
+            and message.state != "interrupted"
+            and is_thinking_only_response(message)
+        ):
             continue
         if isinstance(message, ModelResponse):
             rejected_parts = (
@@ -286,7 +290,7 @@ def filter_ephemeral_agent_messages(messages: list[ModelMessage]) -> list[ModelM
                 continue
             if len(kept_parts) != len(message.parts):
                 message = replace(message, parts=kept_parts)
-                if is_thinking_only_response(message):
+                if message.state != "interrupted" and is_thinking_only_response(message):
                     continue
         if isinstance(message, ModelRequest):
             terminal_retries = rejected_calls.terminal_retry_positions.get(message_index, set())
@@ -301,6 +305,26 @@ def filter_ephemeral_agent_messages(messages: list[ModelMessage]) -> list[ModelM
                 message = replace(message, parts=kept_parts)
         filtered.append(message)
     return filtered
+
+
+def mark_cancelled_response_interrupted(messages: list[ModelMessage]) -> list[ModelMessage]:
+    """Mark the final retained assistant response as interrupted after a real cancel.
+
+    Pydantic AI can cancel while a function is executing and return a partial
+    response whose state remains ``complete``.  DeepAgent's History contract is
+    run-oriented, so any retained assistant content from that cancelled run must
+    remain distinguishable from a normally completed answer.
+    """
+    for index in range(len(messages) - 1, -1, -1):
+        message = messages[index]
+        if not isinstance(message, ModelResponse) or not message.parts:
+            continue
+        if message.state == "interrupted":
+            return messages
+        updated = list(messages)
+        updated[index] = replace(message, state="interrupted")
+        return updated
+    return messages
 
 
 _USER_CANCELLED_TOOL_MESSAGE = "User cancelled"
@@ -583,7 +607,7 @@ def model_messages_to_history(messages: list[ModelMessage]) -> list[HistoryMessa
                 pending_tool_results.extend(tool_results)
 
         elif isinstance(message, ModelResponse):
-            if is_thinking_only_response(message):
+            if message.state != "interrupted" and is_thinking_only_response(message):
                 continue
             flush_tool_results()
             parts = _response_parts(

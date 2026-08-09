@@ -62,6 +62,7 @@ from deep_agent.agent.history import (
     _extract_assistant_text,
     first_user_prompt,
     incremental_append_messages,
+    mark_cancelled_response_interrupted,
     repair_unprocessed_tool_calls,
 )
 from deep_agent.capabilities.ui.registry import enrich_deferred, enrich_tool_event
@@ -654,6 +655,31 @@ class AgentRunner:
             )
         return llm_history, message or None
 
+    @staticmethod
+    def _set_tool_discovery_inputs(
+        deps: AgentDeps,
+        message: str,
+        context_refs: list[ContextReference] | None,
+    ) -> None:
+        """Keep raw user intent separate from the model-facing context projection."""
+        primary = message.strip()
+        if primary:
+            deps.tool_discovery_inputs_explicit = True
+            deps.tool_discovery_primary_query = primary
+            deps.tool_discovery_supplemental_query = ""
+            return
+        if context_refs:
+            deps.tool_discovery_inputs_explicit = True
+            deps.tool_discovery_primary_query = ""
+            deps.tool_discovery_supplemental_query = "\n".join(
+                " ".join(filter(None, (ref.type, ref.label or ""))).strip()
+                for ref in context_refs
+            )
+            return
+        deps.tool_discovery_inputs_explicit = False
+        deps.tool_discovery_primary_query = ""
+        deps.tool_discovery_supplemental_query = ""
+
     def _stream_history_meta(
         self,
         history: list[ModelMessage],
@@ -812,6 +838,7 @@ class AgentRunner:
         deferred_tool_results: DeferredToolResults | None = None,
         branch_from: int | None = None,
     ) -> dict[str, Any]:
+        self._set_tool_discovery_inputs(deps, message, context_refs)
         async with self._session_lock(session_id, agent_id=deps.agent_id):
             prepared = await self._prepare_history(
                 session_id,
@@ -880,6 +907,9 @@ class AgentRunner:
         checkpoint_projection: list[ModelMessage] | None = None
         checkpoint_expected_version = 0
         cancelled_run: RunCancelled | None = None
+        cancelled_messages: list[ModelMessage] = []
+        published_tool_calls: dict[str, str] = {}
+        self._set_tool_discovery_inputs(deps, message, context_refs)
         async with self._session_lock(session_id, agent_id=deps.agent_id):
             prepared = await self._prepare_history(
                 session_id,
@@ -989,6 +1019,16 @@ class AgentRunner:
                                     mapped,
                                 ):
                                     continue
+                                event_type = mapped.get("type")
+                                tool_call_id = mapped.get("tool_call_id")
+                                if event_type == "tool_call_removed":
+                                    if not tool_call_id or tool_call_id not in published_tool_calls:
+                                        continue
+                                    published_tool_calls.pop(tool_call_id, None)
+                                elif event_type == "tool_call" and tool_call_id:
+                                    published_tool_calls[tool_call_id] = str(mapped.get("tool") or "tool")
+                                elif event_type == "tool_result" and tool_call_id:
+                                    published_tool_calls.pop(tool_call_id, None)
                                 yield enrich_tool_event(mapped, self.ui_tool_hints)
                     finally:
                         for task in (stream_task, status_task):
@@ -1053,17 +1093,20 @@ class AgentRunner:
                 return
             finally:
                 if cancelled_run is not None and not run_published:
+                    cancelled_messages = mark_cancelled_response_interrupted(
+                        cancelled_run.new_messages()
+                    )
                     self._publish_run_cancelled(
                         persister,
                         session_id,
                         deps,
                         pre_persisted_user=prepared.pre_persisted_user,
-                        official_messages=cancelled_run.new_messages(),
+                        official_messages=cancelled_messages,
                     )
                 self._active_runs.unregister(active_run)
 
         if cancelled_run is not None:
-            pending = cancelled_run.new_messages()
+            pending = cancelled_messages
             history_persisted = False
             try:
                 # The runner's session lock is released before the persister acquires it.
@@ -1081,6 +1124,20 @@ class AgentRunner:
                 pending_messages=pending,
                 pre_persisted_user=prepared.pre_persisted_user,
             )
+            retained_call_ids = {
+                part.tool_call_id
+                for message in pending
+                if isinstance(message, ModelResponse)
+                for part in message.parts
+                if isinstance(part, ToolCallPart) and part.tool_call_id
+            }
+            for tool_call_id, tool_name in list(published_tool_calls.items()):
+                if tool_call_id not in retained_call_ids:
+                    yield events.tool_call_removed(
+                        tool_name,
+                        tool_call_id,
+                        reason="cancelled",
+                    )
             yield events.cancelled(
                 history_persisted=history_persisted,
                 model_message_count=msg_count,

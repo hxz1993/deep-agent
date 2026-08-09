@@ -8,7 +8,11 @@ from typing import Any, Literal
 from loguru import logger
 from pydantic_ai.messages import ModelMessage, ModelRequest
 
-from deep_agent.agent.history import incremental_append_messages, repair_unprocessed_tool_calls
+from deep_agent.agent.history import (
+    incremental_append_messages,
+    mark_cancelled_response_interrupted,
+    repair_unprocessed_tool_calls,
+)
 from deep_agent.db.conversation import SessionStore
 from deep_agent.db.session_scope import runtime_session_key
 
@@ -194,7 +198,7 @@ class EventPersister:
 
         if ev.kind == "run_cancelled":
             to_append = incremental_append_messages(
-                ev.result_messages or [],
+                mark_cancelled_response_interrupted(ev.result_messages or []),
                 skip_user_prompt=ev.skip_user_prompt,
             )
             if to_append:

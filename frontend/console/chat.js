@@ -16,6 +16,7 @@ import { formatSessionIdSubtitle } from "./session-display.js?v=20260728-2";
  *   text         -> { type:"text", delta }
  *   thinking     -> { type:"thinking", delta }
  *   tool_call    -> { type:"tool_call", tool, args, tool_call_id, widget?, metadata? }
+ *   tool_call_removed -> { type:"tool_call_removed", tool, tool_call_id, reason }
  *   tool_result  -> { type:"tool_result", tool, result, tool_call_id }
  *   final        -> { type:"final", status, output, usage, deferred? }
  *   cancelled    -> { type:"cancelled", status, model_message_count?, user_branch_point? }
@@ -1928,6 +1929,9 @@ function handleEvent({ event, data }, assistant) {
     case "tool_call":
       assistant.addToolCall(data);
       break;
+    case "tool_call_removed":
+      assistant.removeToolCall(data);
+      break;
     case "tool_result":
       assistant.addToolResult(data);
       break;
@@ -2412,6 +2416,14 @@ function createAssistantMessage(timestamp, branchPoint) {
       const res = document.createElement("div");
       res.innerHTML = `<div class="label" style="margin-top:8px">结果 result</div>${renderToolResult(data.result)}`;
       body.appendChild(res);
+    },
+    removeToolCall(data) {
+      const key = data.tool_call_id;
+      if (!key) return;
+      const block = toolBlocks.get(key);
+      if (!block) return;
+      block.remove();
+      toolBlocks.delete(key);
     },
     attachHitlWidget(call) {
       const merged = mergeUiToolCall(call);

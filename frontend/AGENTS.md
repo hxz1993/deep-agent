@@ -33,7 +33,7 @@ frontend/
 | 停止生成 | `POST /sessions/{id}/cancel` 后等待真实 `cancelled`；History 的 `assistant.status=interrupted` 恢复“已停止”，不以 Abort 或本地假事件代替 |
 | 附件上传 | `POST /api/v1/uploads`（multipart）→ 发送时仅传 `attachments[]` 引用；文档由 Agent 可选 `builtin:attachment` 工具包按需读取 |
 | 思考过程 UI | `thinking` 可折叠块，默认折叠；与 `text` 分离 |
-| 工具调用 UI | `tool_call` / `tool_result` 可折叠；同 `tool_call_id` 合并更新 |
+| 工具调用 UI | `tool_call` / `tool_result` 可折叠；同 `tool_call_id` 合并更新；`tool_call_removed` 删除被 ModelRetry 或取消撤回的临时卡片 |
 | HITL UI 工具 | `ui:builtin` + 数据库手工 UI 工具包；Agent 按包选择，SSE / history 仍使用稳定工具协议名并携带 `widget` / `metadata`；见 [`../docs/guides/ui-tools-external.md`](../docs/guides/ui-tools-external.md) |
 | Markdown | marked + DOMPurify + highlight.js |
 | 会话 | `session_id` 由后端 `session` 事件返回；`GET/DELETE /api/v1/sessions`；标题展示 `title \|\| user_prompt`（见 [`../docs/guides/experience/ai-title-generator.md`](../docs/guides/experience/ai-title-generator.md)） |
@@ -99,6 +99,7 @@ Agent 编辑弹窗的系统提示词标题栏显示“字符数 / 预估 Token�
 | `thinking` | `{ type, delta }` |
 | `tool_call` | `{ type, tool, args, tool_call_id, widget?, metadata?, source? }` |
 | `tool_result` | `{ type, tool, result, tool_call_id }` |
+| `tool_call_removed` | `{ type, tool, tool_call_id, reason }`；删除对应实时工具块，不写入 History |
 | `final` | `{ type, status, output, usage, deferred?, context? }`（`context` 为预算/压缩观测） |
 | `error` | `{ type, message }` |
 | `cancelled` | `{ type, status, usage, history_persisted, model_message_count, user_branch_point }`；保留当前流式内容并标记中断，重新打开会话时再由 History 校准 |

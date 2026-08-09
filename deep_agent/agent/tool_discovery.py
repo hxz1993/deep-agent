@@ -333,6 +333,11 @@ def _visible_prompt_search_text(value: Any) -> tuple[str, str]:
 
 
 def search_inputs_for_run(ctx: RunContext[AgentDeps]) -> tuple[str, str]:
+    if ctx.deps.tool_discovery_inputs_explicit:
+        return (
+            ctx.deps.tool_discovery_primary_query,
+            ctx.deps.tool_discovery_supplemental_query,
+        )
     primary, supplemental = _visible_prompt_search_text(ctx.prompt)
     if primary.strip() or supplemental.strip():
         return primary, supplemental

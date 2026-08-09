@@ -136,7 +136,8 @@ SSE，直到服务端捕获 `RunCancelled` 并返回唯一的 `cancelled`；取�
 安全启用停止操作，不需要等待第一段 thinking、文本或工具事件。
 
 `cancelled` 携带本轮实际 `usage`、历史计数和分支点。服务端只持久化
-`RunCancelled.new_messages()`，其中部分模型响应保留 `state=interrupted`；下一轮复用历史时，
+`RunCancelled.new_messages()`；若 Provider 返回的部分响应仍错误标记为 `complete`，DeepAgent 会把
+本轮最后一个非空部分响应规范化为 `state=interrupted`。下一轮复用历史时，
 Pydantic AI 会为未完成工具调用自动补充 `outcome=interrupted`，DeepAgent 不再手工拼接文本或
 生成 `ToolDenied`。
 
@@ -394,7 +395,8 @@ Provider Native Tool 使用对应的原生 Call/Return 事件，不经过普通 
 **客户端处理建议（重要）**：
 
 - 仍以 `tool_call_id` 为键做 **upsert**，兼容重连、历史恢复和未来 Provider 差异
-- 只有已验证的普通工具调用才创建业务工具块，避免实时页面出现但最终历史不存在的悬空工具
+- 只有已验证的普通工具调用才创建业务工具块；若工具随后返回 `ModelRetry`，或取消后该调用未进入
+  官方中断历史，服务端会发送 `tool_call_removed`，客户端必须删除对应临时工具块
 - UI 工具（builtin/manual）的 `widget` / `metadata` 由后端 enrichment 注入；客户端可优先使用 SSE 字段，或与 `GET /api/v1/ui-tools` 缓存合并
 
 ---
@@ -424,6 +426,26 @@ Provider Native Tool 使用对应的原生 Call/Return 事件，不经过普通 
 - 通过 `tool_call_id` 找到对应的 `tool_call` UI 块并标记完成
 - 若 `result` 为字符串且含 Markdown，建议渲染为富文本
 - 若 `tool_call_id` 缺失，可回退到「最近一个未完成的工具块」
+
+---
+
+### 4.6.1 `tool_call_removed`
+
+已经发布的工具调用被 Pydantic AI 正式撤回时发送。当前包括两类情况：业务工具返回
+`ModelRetry`，模型需要修正参数后重试；Run 被取消且该调用没有进入官方中断历史。
+
+```json
+{
+  "type": "tool_call_removed",
+  "tool": "deepfos_deeptable_workbook_get",
+  "tool_call_id": "call_workbook_1",
+  "reason": "model_retry"
+}
+```
+
+客户端必须按 `tool_call_id` 删除对应的实时工具块；它不是工具失败结果，也不进入最终 History。
+后续修正后的调用会使用新的 `tool_call_id` 正常发送 `tool_call` / `tool_result`。`reason` 当前为
+`model_retry` 或 `cancelled`。
 
 ---
 
@@ -522,7 +544,9 @@ Agent 执行过程中抛出未捕获异常时发出，此后流结束，**不会
 
 正式取消接口触发 Pydantic AI `CancellationToken`，或客户端异常断开 SSE 后发出。此后流结束，
 **不会**再发 `final`。Pydantic AI 2.26 提供的中断消息状态优先用于持久化；若 Provider 尚未
-形成完整消息，DeepAgent 才使用已发送的流式片段补齐部分历史。
+形成完整消息时，DeepAgent 仅保存官方返回的部分消息，并把最后一个非空响应规范化为
+`interrupted`；不会用前端累积内容拼造历史。已经发布但未进入该官方中断历史的工具调用，会先
+收到 `tool_call_removed`，随后才收到 `cancelled`。
 
 ```json
 {
@@ -578,7 +602,7 @@ data: {"type": "final", "output": "## 平台的 11 种维度类型\n...", "usage
 3. **文本流**：`text.delta` 顺序拼接，支持 Markdown 渲染
 4. **思考过程**：`thinking.delta` 独立缓冲，可折叠展示，不与 `text` 拼接
 5. **工具调用 upsert**：同 `tool_call_id` 的 `tool_call` 更新而非重复创建
-6. **工具结果关联**：用 `tool_call_id` 匹配并关闭对应工具块
+6. **工具结果与撤回**：`tool_result` 关闭对应工具块；`tool_call_removed` 删除对应临时工具块
 7. **压缩状态**：自动和主动 `context_compaction` 复用独立过程条；成功后以历史 Checkpoint 标记收口
 8. **结束判断**：收到 `final`、`cancelled` 或 `error` 后关闭 loading 状态
 9. **中断**：用户停止时只调用 `/sessions/{id}/cancel` 并等待真实 `cancelled`；失败或 `not_running` 不得断流或伪造成功，`AbortController` 只用于页面卸载和网络资源清理

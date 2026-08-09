@@ -8,6 +8,7 @@ from pydantic_ai.messages import (
     FunctionToolResultEvent,
     PartDeltaEvent,
     PartStartEvent,
+    RetryPromptPart,
     TextPart,
     TextPartDelta,
     ThinkingPart,
@@ -39,6 +40,20 @@ def tool_result(tool: str, result: Any, tool_call_id: str | None = None) -> dict
     if tool in {"search_tools", "tool_search"}:
         payload["source"] = "tool_search"
     return payload
+
+
+def tool_call_removed(
+    tool: str | None,
+    tool_call_id: str | None,
+    *,
+    reason: str,
+) -> dict[str, Any]:
+    return {
+        "type": "tool_call_removed",
+        "tool": tool,
+        "tool_call_id": tool_call_id,
+        "reason": reason,
+    }
 
 
 def final(
@@ -180,10 +195,20 @@ def map_event(event: Any) -> dict[str, Any] | None:
 
 @map_event.register(PartStartEvent)
 @map_event.register(FunctionToolCallEvent)
-@map_event.register(FunctionToolResultEvent)
 def _map_part_event(
-    event: PartStartEvent | FunctionToolCallEvent | FunctionToolResultEvent,
+    event: PartStartEvent | FunctionToolCallEvent,
 ) -> dict[str, Any] | None:
+    return map_part(event.part)
+
+
+@map_event.register(FunctionToolResultEvent)
+def _map_function_tool_result(event: FunctionToolResultEvent) -> dict[str, Any] | None:
+    if isinstance(event.part, RetryPromptPart):
+        return tool_call_removed(
+            event.part.tool_name,
+            event.part.tool_call_id,
+            reason="model_retry",
+        )
     return map_part(event.part)
 
 

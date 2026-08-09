@@ -139,6 +139,17 @@ test("停止生成只请求正式取消接口并等待真实 cancelled 事件", 
   assert.doesNotMatch(chatSource, /addErrorTo\(assistant, "（已停止生成）"\)/);
 });
 
+test("业务重试或取消撤回工具调用时删除实时工具卡", () => {
+  assert.match(
+    chatSource,
+    /case "tool_call_removed":[\s\S]*assistant\.removeToolCall\(data\)/,
+  );
+  assert.match(
+    chatSource,
+    /removeToolCall\(data\)[\s\S]*toolBlocks\.get\(key\)[\s\S]*block\.remove\(\)[\s\S]*toolBlocks\.delete\(key\)/,
+  );
+});
+
 test("历史中的 interrupted 助手消息恢复已停止标记", () => {
   assert.match(chatSource, /msg\.status === "interrupted"/);
   assert.match(chatSource, /message-run-status interrupted/);

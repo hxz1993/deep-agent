@@ -31,6 +31,9 @@ class AgentDeps:
     request_headers: Mapping[str, str] = field(default_factory=dict)
     context_state: "ContextRunState | None" = None
     tool_discovery: "ToolDiscoveryTelemetry | None" = None
+    tool_discovery_inputs_explicit: bool = False
+    tool_discovery_primary_query: str = ""
+    tool_discovery_supplemental_query: str = ""
     cancellation_token: CancellationToken | None = field(default=None, repr=False)
     has_context_references: bool = False
     input_modalities: Sequence[str] = field(default_factory=tuple)

@@ -1,15 +1,18 @@
 from __future__ import annotations
 
+import json
 import unittest
 
-from pydantic_ai import Agent, DeferredToolRequests, DeferredToolResults
+from pydantic_ai import Agent, DeferredToolRequests, DeferredToolResults, ModelRetry
 from pydantic_ai.messages import (
     FunctionToolCallEvent,
+    ModelResponse,
     NativeToolSearchCallPart,
     PartStartEvent,
     ToolCallPart,
 )
 from pydantic_ai.models.function import AgentInfo, DeltaToolCall, FunctionModel
+from pydantic_ai.toolsets import FunctionToolset
 
 from deep_agent.agent import events
 from deep_agent.agent.deferred import build_deferred_tool_results, serialize_deferred
@@ -178,6 +181,77 @@ class AgentRunnerDeferredTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(tool_calls[0]["widget"], "text")
         self.assertEqual(events_out[-1]["deferred"]["calls"][0]["metadata"], {"form_version": "1"})
         self.assertEqual(events_out[-1]["deferred"]["calls"][0]["widget"], "text")
+
+    async def test_business_model_retry_retracts_published_tool_call(self) -> None:
+        attempts = 0
+
+        async def workbook_get(name: str, detail: str) -> dict[str, str]:
+            """读取电子表格工作簿。"""
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                raise ModelRetry("存在重名工作簿，请提供 path 或 folder")
+            return {"name": name, "detail": detail}
+
+        model_calls = 0
+
+        async def model_function(_messages: list, _info: AgentInfo):
+            nonlocal model_calls
+            model_calls += 1
+            if model_calls <= 2:
+                yield {
+                    0: DeltaToolCall(
+                        name="workbook_get",
+                        json_args=json.dumps(
+                            {"name": "B020101_copy", "detail": "summary"}
+                        ),
+                        tool_call_id=f"workbook-{model_calls}",
+                    )
+                }
+            else:
+                yield "done"
+
+        agent = Agent(
+            FunctionModel(stream_function=model_function),
+            deps_type=AgentDeps,
+            toolsets=[FunctionToolset(tools=[workbook_get])],
+        )
+        runner = AgentRunner(agent, self.store, UsageLimits(request_limit=5))
+
+        events_out = [
+            event
+            async for event in runner.run_stream(
+                "sess-business-retry",
+                "读取工作簿",
+                AgentDeps(session_id="sess-business-retry"),
+                persister=self.persister,
+            )
+        ]
+
+        lifecycle = [
+            (event.get("type"), event.get("tool_call_id"))
+            for event in events_out
+            if event.get("type") in {"tool_call", "tool_call_removed", "tool_result"}
+        ]
+        self.assertEqual(
+            lifecycle,
+            [
+                ("tool_call", "workbook-1"),
+                ("tool_call_removed", "workbook-1"),
+                ("tool_call", "workbook-2"),
+                ("tool_result", "workbook-2"),
+            ],
+        )
+        await self.persister.flush("sess-business-retry")
+        history = await self.store.get_history("sess-business-retry")
+        call_ids = [
+            part.tool_call_id
+            for message in history
+            if isinstance(message, ModelResponse)
+            for part in message.parts
+            if isinstance(part, ToolCallPart)
+        ]
+        self.assertEqual(call_ids, ["workbook-2"])
 
     async def test_run_stream_only_publishes_validated_external_ui_call(self) -> None:
         clarify = UIToolRecord(

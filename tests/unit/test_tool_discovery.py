@@ -116,6 +116,39 @@ class ToolDiscoveryTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(ranked, ["deepfos_search_financial_model"])
 
+    async def test_run_read_only_policy_filters_later_side_effect_searches(self) -> None:
+        ctx = self._ctx(
+            "对比当前财务模型，不要创建、保存、刷新缓存、上传、发布、同步、导入或修改"
+        )
+        toolset = FunctionToolset(
+            tools=[
+                search_financial_model,
+                refresh_financial_model_cache,
+                generate_financial_model_report,
+                upload_financial_model_template,
+            ]
+        ).prefixed("deepfos")
+        wrapper = build_mcp_discovery_toolset(
+            [toolset],
+            server_names=["deepfos"],
+            estimator=TokenEstimator.conservative(),
+        )
+        assert wrapper is not None
+
+        tools = await wrapper.get_tools(ctx)
+        search_result = search_deferred_tools(
+            ctx,
+            ["上传模板、创建报表、刷新缓存"],
+            [item.tool_def for item in tools.values()],
+        )
+
+        self.assertTrue(ctx.deps.tool_discovery.read_only_intent)
+        direct = {
+            name for name, item in tools.items() if not item.tool_def.defer_loading
+        }
+        self.assertEqual(direct, {"deepfos_search_financial_model"})
+        self.assertEqual(search_result, [])
+
     async def test_context_reference_search_uses_only_type_and_label(self) -> None:
         ctx = self._ctx("")
         ctx.prompt = [
@@ -210,6 +243,38 @@ class ToolDiscoveryTests(unittest.IsolatedAsyncioTestCase):
             ctx.deps.tool_discovery.preselected_tools,
         )
 
+    async def test_nonempty_unmatched_question_does_not_fallback_to_context_label(self) -> None:
+        ctx = self._ctx("")
+        ctx.prompt = [
+            {"kind": "text-content", "content": "对比 Actual 与 Budget 的差异"},
+            {
+                "kind": "context-ref",
+                "key": "page",
+                "type": "deeptable.selection",
+                "schema_version": "2.0",
+                "label": "电子表格输入表 B020101_copy",
+                "payload": {},
+            },
+        ]
+        toolset = FunctionToolset(
+            tools=[
+                search_financial_model,
+                list_cube_dimensions,
+                resolve_members,
+                deeptable_workbook_get,
+            ]
+        ).prefixed("deepfos")
+        wrapper = build_mcp_discovery_toolset(
+            [toolset],
+            server_names=["deepfos"],
+            estimator=TokenEstimator.conservative(),
+        )
+        assert wrapper is not None
+
+        await wrapper.get_tools(ctx)
+
+        self.assertEqual(ctx.deps.tool_discovery.preselected_tools, [])
+
     async def test_more_than_three_tools_preselects_and_defers_globally(self) -> None:
         ctx = self._ctx("查询财务模型和预算")
         wrapper = build_mcp_discovery_toolset(
@@ -253,7 +318,7 @@ class ToolDiscoveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(ctx.deps.tool_discovery.deferred_count, 0)
 
     async def test_multiple_mcp_servers_share_one_global_preselection_limit(self) -> None:
-        ctx = self._ctx("查询维度成员")
+        ctx = self._ctx("搜索维度成员并更新配置")
         finance = FunctionToolset(
             tools=[search_financial_model, resolve_members]
         ).prefixed("finance")
@@ -290,7 +355,7 @@ class ToolDiscoveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(all(item.tool_def.defer_loading for item in tools.values()))
         self.assertEqual(ctx.deps.tool_discovery.preselected_tools, [])
 
-    async def test_retriever_failure_discloses_the_authorized_catalog(self) -> None:
+    async def test_retriever_failure_preserves_read_only_policy(self) -> None:
         ctx = self._ctx("查询财务模型")
         wrapper = build_mcp_discovery_toolset(
             [self._toolset()],
@@ -305,8 +370,9 @@ class ToolDiscoveryTests(unittest.IsolatedAsyncioTestCase):
         ):
             tools = await wrapper.get_tools(ctx)
 
+        self.assertNotIn("deepfos_delete_financial_model", tools)
         self.assertTrue(all(not item.tool_def.defer_loading for item in tools.values()))
-        self.assertEqual(ctx.deps.tool_discovery.direct_count, 4)
+        self.assertEqual(ctx.deps.tool_discovery.direct_count, 3)
         self.assertEqual(ctx.deps.tool_discovery.fallback_reason, "RuntimeError")
 
     async def test_small_mcp_catalog_does_not_expose_search_tools(self) -> None:
@@ -442,7 +508,7 @@ class ToolDiscoveryTests(unittest.IsolatedAsyncioTestCase):
         )
 
         result = await agent.run(
-            "查询财务模型预算",
+            "搜索维度成员并更新配置",
             deps=AgentDeps(session_id="session", agent_id="agent"),
         )
 

@@ -363,18 +363,10 @@ Checkpoint 已保存后因状态查询延迟而让流无法收口。`noop` 表�
 
 ### 4.5 `tool_call`
 
-模型请求调用某个工具。由于底层使用 Pydantic AI 流式 API，**同一 `tool_call_id` 可能收到 2 次** `tool_call` 事件：
+模型请求调用某个工具。DeepAgent 只在 Pydantic AI 完成参数校验后发布普通 Function、MCP
+和 UI 工具调用；模型流中尚未校验的临时 `ToolCallPart` 不会形成业务 `tool_call` 事件：
 
 ```json
-// 第 1 次：工具调用开始，参数尚未解析完成
-{
-  "type": "tool_call",
-  "tool": "doc_search_doc_search",
-  "args": {},
-  "tool_call_id": "call_00_evdBG0xFNRn5Q8IlwgZW4217"
-}
-
-// 第 2 次：参数就绪，即将执行（UI 工具可能附带 widget / metadata）
 {
   "type": "tool_call",
   "tool": "myapp__pick_date",
@@ -390,24 +382,19 @@ Checkpoint 已保存后因状态查询延迟而让流无法收口。`noop` 表�
 |------|------|------|
 | `type` | `"tool_call"` | 固定值 |
 | `tool` | `string` | 稳定工具协议名（MCP 前缀示例 `doc_search_doc_search`）；与工具包编码不同 |
-| `args` | `object` | 工具参数；首帧可能为 `{}`，应以同 `tool_call_id` 的后续帧覆盖 |
+| `args` | `object` | 已通过工具 Schema 校验的完整参数 |
 | `tool_call_id` | `string \| null` | 调用唯一标识，用于关联 `tool_result` |
 | `widget` | `string \| null` | 可选；UI 工具渲染提示（来自 DB，**不发给模型**） |
 | `metadata` | `object \| null` | 可选；客户端扩展字段（来自 builtin/manual 定义，**不发给模型**） |
 | `source` | `string \| null` | 可选；`builtin` \| `manual` \| `tool_search`；Tool Search 是运行诊断，不是业务工具 |
 
-**事件来源（后端实现）**：
-
-| 次序 | 来源 | `args` 状态 |
-|------|------|-------------|
-| 较早 | `PartStartEvent` + `ToolCallPart`（模型流） | 通常为空 `{}` |
-| 较晚 | `FunctionToolCallEvent`（工具执行前） | 完整参数 |
+Provider Native Tool 使用对应的原生 Call/Return 事件，不经过普通 Function Tool 参数校验链路；
+后端仍保持其原生流式事件。
 
 **客户端处理建议（重要）**：
 
-- 以 `tool_call_id` 为键做 **upsert**，不要为每次事件新建 UI 块
-- 当 `args` 为空对象时，可显示「参数接收中…」占位，收到完整参数后更新
-- 不要假设每个 `tool_call_id` 只出现一次
+- 仍以 `tool_call_id` 为键做 **upsert**，兼容重连、历史恢复和未来 Provider 差异
+- 只有已验证的普通工具调用才创建业务工具块，避免实时页面出现但最终历史不存在的悬空工具
 - UI 工具（builtin/manual）的 `widget` / `metadata` 由后端 enrichment 注入；客户端可优先使用 SSE 字段，或与 `GET /api/v1/ui-tools` 缓存合并
 
 ---
@@ -620,4 +607,4 @@ data: {"type": "final", "output": "## 平台的 11 种维度类型\n...", "usage
 - 当前协议版本：**v1**（随 `/api/v1` 路径发布）
 - 新增事件类型时，`event` 与 `data.type` 将保持一致
 - 客户端对未知 `event` 应忽略，避免硬崩溃
-- `tool_call` 的「同 ID 多次推送」为当前版本的**既定行为**，不是 bug；客户端必须兼容
+- 普通 Function、MCP 和 UI 工具只发布参数校验后的调用；客户端仍应按 `tool_call_id` 幂等处理

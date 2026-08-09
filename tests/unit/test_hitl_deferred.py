@@ -3,14 +3,19 @@ from __future__ import annotations
 import unittest
 
 from pydantic_ai import Agent, DeferredToolRequests, DeferredToolResults
-from pydantic_ai.messages import ToolCallPart
+from pydantic_ai.messages import (
+    FunctionToolCallEvent,
+    NativeToolSearchCallPart,
+    PartStartEvent,
+    ToolCallPart,
+)
 from pydantic_ai.models.function import AgentInfo, DeltaToolCall, FunctionModel
 
 from deep_agent.agent import events
 from deep_agent.agent.deferred import build_deferred_tool_results, serialize_deferred
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.event_persister import EventPersister
-from deep_agent.agent.runner import AgentRunner
+from deep_agent.agent.runner import AgentRunner, _should_publish_tool_call
 from deep_agent.capabilities.ui.builtin import build_ui_toolset, builtin_ui_records
 from deep_agent.capabilities.ui.registry import build_external_toolset, build_tool_hints
 from deep_agent.capabilities.ui.types import UIToolRecord
@@ -59,6 +64,40 @@ class FinalEventTests(unittest.TestCase):
         payload = events.final("hello", {})
         self.assertEqual(payload["status"], "completed")
         self.assertEqual(payload["output"], "hello")
+
+
+class ToolCallPublicationTests(unittest.TestCase):
+    def test_plain_tool_call_waits_for_validated_event(self) -> None:
+        part = ToolCallPart("deepfos_workbook_get", {"id": "demo"}, "call-1")
+        mapped = events.tool_call(part.tool_name, part.args_as_dict(), part.tool_call_id)
+
+        self.assertFalse(
+            _should_publish_tool_call(PartStartEvent(index=0, part=part), mapped)
+        )
+        self.assertFalse(
+            _should_publish_tool_call(
+                FunctionToolCallEvent(part, args_valid=False),
+                mapped,
+            )
+        )
+        self.assertTrue(
+            _should_publish_tool_call(
+                FunctionToolCallEvent(part, args_valid=True),
+                mapped,
+            )
+        )
+
+    def test_provider_native_tool_call_keeps_native_stream_event(self) -> None:
+        part = NativeToolSearchCallPart(
+            args={"queries": ["财务模型"]},
+            tool_call_id="native-search",
+        )
+        mapped = events.map_part(part)
+
+        self.assertIsNotNone(mapped)
+        self.assertTrue(
+            _should_publish_tool_call(PartStartEvent(index=0, part=part), mapped)
+        )
 
 
 class AgentRunnerDeferredTests(unittest.IsolatedAsyncioTestCase):

@@ -19,6 +19,7 @@ from pydantic_ai.messages import (
     ModelMessage,
     ModelRequest,
     ModelResponse,
+    ToolCallPart,
     UserContent,
     UserPromptPart,
 )
@@ -85,15 +86,19 @@ class _PreparedHistory:
     user_branch_point: int | None
 
 
-def _should_publish_ui_tool_call(
+def _should_publish_tool_call(
     event: Any,
     mapped: dict[str, Any],
-    ui_tool_hints: dict[str, dict[str, Any]],
 ) -> bool:
-    """Publish only the post-validation event for an external UI tool call."""
-    if mapped.get("type") != "tool_call" or mapped.get("tool") not in ui_tool_hints:
+    """Publish function calls only after Pydantic AI has validated their arguments."""
+    if mapped.get("type") != "tool_call":
         return True
-    return isinstance(event, FunctionToolCallEvent) and event.args_valid is True
+    if isinstance(event, FunctionToolCallEvent):
+        return event.args_valid is True
+    # Provider-native calls are not FunctionToolCallEvent instances and retain
+    # their native PartStartEvent stream. Plain ToolCallPart starts are only a
+    # provisional model emission; a validated FunctionToolCallEvent follows.
+    return not isinstance(getattr(event, "part", None), ToolCallPart)
 
 
 class AgentRunner:
@@ -979,10 +984,9 @@ class AgentRunner:
                                 continue
                             mapped = events.map_event(event)
                             if mapped is not None:
-                                if not _should_publish_ui_tool_call(
+                                if not _should_publish_tool_call(
                                     event,
                                     mapped,
-                                    self.ui_tool_hints,
                                 ):
                                     continue
                                 yield enrich_tool_event(mapped, self.ui_tool_hints)

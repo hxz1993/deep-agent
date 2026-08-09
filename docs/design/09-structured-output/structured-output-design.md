@@ -2,7 +2,7 @@
 
 > 首次研究：2026-08-03
 >
-> 当前运行基线：`pydantic-ai-slim 2.26.0` + `pydantic-ai-harness 0.10.0`
+> 当前运行基线：`pydantic-ai-slim 2.26.0` + `pydantic-ai-harness 0.18.0`
 >
 > 状态：设计结论；当前 DeepAgent 尚未启用 `ToolOutput`、`NativeOutput` 或 `PromptedOutput`
 
@@ -25,7 +25,7 @@ DeepAgent 应把三类结构化数据分开：
 5. 多种互斥结果优先注册为多个小型 Output Tool，不使用一个塞满 Optional 字段的宽松结构。
 6. Output Tool 与 UI Deferred 可以存在于同一个 Agent，但不能合并成同一种运行语义。
 7. MCP 已经返回完整权威结构时，前端直接渲染 `tool_result`；不得让模型通过 Output Tool 重写事实。
-8. Harness 0.10 可补充最终结果业务校验，但不替代 Core 的结构化输出能力，也不是首版前置依赖。
+8. Harness 0.18 可补充最终结果业务校验，但不替代 Core 的结构化输出能力，也不是首版前置依赖。
 9. Output Tool 不是 Agent 可选执行能力，不加入现有 `agents.capabilities` 或 `/tools` 工具目录；
    Agent 通过独立的输出契约选择一组互斥终止类型。
 
@@ -313,10 +313,10 @@ DeepAgent 实施时必须：
 
 ## 9. Pydantic AI Harness 的边界
 
-`pydantic-ai-harness 0.10.0` 没有另一套结构化输出机制。结构化结果仍由 Pydantic AI Core 的
+`pydantic-ai-harness 0.18.0` 没有另一套结构化输出机制。结构化结果仍由 Pydantic AI Core 的
 `ToolOutput`、`NativeOutput` 和 `PromptedOutput` 负责。
 
-Harness 0.10 的 `OutputGuard` 可以在最终结果形成后增加业务规则：
+Harness Guardrail 可以在最终结果形成后增加业务规则：
 
 ```text
 ToolOutput 校验结构
@@ -327,12 +327,12 @@ ToolOutput 校验结构
       └─ retry
 ```
 
-但 0.10 存在明确的流式限制：
+流式链路仍有明确边界：
 
 - 只检查最终输出，已经通过 SSE 发出的文本无法撤回。
 - 流式模式不支持 OutputGuard 输出重试。
 
-因此首版不为结构化输出升级 Harness，也不把 Harness 作为前置依赖。首版可使用 Pydantic AI
+因此不把 Harness 作为结构化输出的前置依赖。首版可使用 Pydantic AI
 输出校验、DeepAgent `jsonschema` 二次校验和有限重试；需要引用、合规或敏感信息检查时再评估
 Harness Guardrail。
 
@@ -390,6 +390,37 @@ Agent 配置 output_contract，mode=strict
 
 是否为 Agent 增加独立数据库字段、复用配置 JSON，需在实施计划中结合检索、版本化和迁移要求
 单独决策，本文不提前锁定 DDL。
+
+### 10.3 0805 实验实现的归档结论
+
+`feat-ruge-0805@9f528b8` 曾在旧基线上完整实现一次固定输出契约。该分支不合并代码，但以下
+结果是后续重新实施的有效证据：
+
+已验证可行：
+
+1. 独立 `Output Contract → 多个 Output Definition` 的建模可以和 ToolPackage 分离。
+2. 动态 JSON Schema 可通过 `StructuredDict` 提供给模型，并由 DeepAgent 使用 `jsonschema`
+   二次校验和有限 `ModelRetry`。
+3. `final.output/output_type`、原始 ModelResponse、历史 `structured_output` 和 Console 通用只读卡片
+   可以保持同一份结构化结果。
+4. UI Deferred 可以先 Pending，恢复模型后再由 Output Tool 结束本轮；两者不需要合并状态机。
+5. Output Call/acknowledgement 可以作为完整配对参与安全切分；契约与 Schema 指纹可以让不兼容的
+   Checkpoint 失效，而不改写原始历史。
+
+不应沿用：
+
+1. 实验把 Agent 固定为一个严格契约并移除 `str`，无法覆盖同一 Agent 的普通解释、图表、建议、
+   配置等不同终止形态；正式方案必须支持契约组内多种输出，并默认允许普通文本。
+2. 实验采用 `end_strategy=early`：模型若在同一响应同时调用普通/UI 工具和 Output Tool，只接受
+   Output，其他调用不会执行。它能避免副作用，但也可能让最终结果引用尚未执行的工具，因此正式
+   实现必须确定性拒绝这种混合响应并让模型重试，不能静默忽略。
+3. 实验的 Alembic `003` 建立在旧迁移链上；当前数据库 head 仍为 `002`。以后若实施，必须重新
+   设计新的 migration，不能复制或 stamp 旧 `003`。
+4. 实验对直连 DeepSeek 的 thinking/tool_choice 做过特殊处理。当前已升级为 Pydantic AI 官方
+   DeepSeek Provider，这条兼容结论只能作为回归用例，不能直接恢复旧适配代码。
+
+因此当前结论是“技术路径已验证，产品配置与混合调用规则未完全锁定，暂缓实施”。删除 0805
+分支不会丢失上述证据，也不代表把实验数据库结构认定为当前方案。
 
 ## 11. 典型适用案例：DeepCube 助手
 

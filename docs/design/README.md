@@ -13,10 +13,10 @@
 | `06` | [`附件解析`](06-attachment-parsing/README.md)       | 2026-07 | 第一版按需读取与压缩协同已落地 |
 | `07` | [`Python Sandbox`](07-python-sandbox/README.md) | 2026-07 起 | A 已落地（subprocess-dev + soft guardrails）；B 探针代码已有、节点选型未完成；C 阻塞于 B |
 | `08` | [`Artifact 交互语义`](08-artifact-export/README.md) | 2026-08 | 骨架：句柄语义为主；下载中心等为可选 sink |
-| `09` | [`结构化最终输出`](09-structured-output/README.md) | 2026-08 | 完成 Output、Deferred、Harness 与业务 Tool Result 边界梳理；尚未实施 |
+| `09` | [`结构化最终输出`](09-structured-output/README.md) | 2026-08 | 0805 实验实现已归档；产品边界未锁定，当前暂缓正式实施 |
 | `10` | [`上下文引用`](10-context-reference/README.md) | 2026-08 | v0.3.5 已完成 DeepAgent 公共协议；业务前端迁移待后续跨仓实施 |
 | `11` | [`工具包与工具目录`](11-tool-packages/README.md) | 2026-08 | v0.3.2 已完成工具包目录、UI 工具包、运行 Toolset 与 Console 统一改造 |
-| `12` | [`Agent Skill`](12-agent-skills/README.md) | 2026-08 | 当前仅有最小 Python Skill；线上安装、素材与渐进披露待设计实施 |
+| `12` | [`Agent Skill`](12-agent-skills/README.md) | 2026-08 | 当前仅有最小 Python Skill；选定 Harness 0.18 渐进披露基础，线上安装与素材治理待实施 |
 | `13` | [`工具检索与渐进披露`](13-tool-discovery/README.md) | 2026-08 | v0.3.12 已完成词法 Top 3/Top 5、附件条件过滤和 Pydantic AI 渐进披露 |
 
 ## 文档命名

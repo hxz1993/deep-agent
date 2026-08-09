@@ -11,16 +11,16 @@
 - `暂缓`：当前明确不进入近期版本。
 - `已关闭`：已实现或已确认不做。
 
-## 近期三条主线（v0.3.14 后）
+## 近期主线（v0.3.14 后）
 
-近期研发集中在三件事，优先级均高于一般体验优化：
+近期研发集中在以下方向：
 
 1. **工具检索增强**：v0.3.12 已交付首版词法检索与渐进披露；后续根据真实召回数据评估 Embedding、Provider Native Search 和发现状态治理。
-2. **Output Tool**：让一个 Agent 可配置多种终止输出结构；默认仍允许普通文本，只有显式选择严格模式时才强制结构化契约。
-3. **Skill**：把当前“Instructions + FunctionToolset”的最小 Python Skill 扩展为适合线上安装、版本管理和渐进披露的完整能力包。
+2. **Skill**：以 Harness 0.18 的 `Skills` 渐进披露作为 Instructions 基础，把当前“Instructions + FunctionToolset”的最小 Python Skill 扩展为适合线上安装、版本管理和素材治理的完整能力包。
+3. **Output Tool（暂缓）**：0805 实验结论已归档；待多输出组合、普通文本与混合工具调用规则完成产品决策后再重新实施。
 
-三条主线可以独立设计和验证；建议先解决已经产生明显上下文成本的 MCP 工具检索，再实施
-Output Tool，Skill 同期完成协议设计后分阶段落地。
+工具检索首版已经落地。下一阶段优先收敛 Skill 协议与渐进披露；Output Tool 保留完整设计和实验
+证据，但不进入近期代码计划。
 
 ## P0
 
@@ -31,9 +31,9 @@ Output Tool，Skill 同期完成协议设计后分阶段落地。
 | `TOOL-003` | 工具优化 | 建立风险、外部副作用和权限要求的统一元数据契约 | 待设计 | 需同时覆盖 Function、MCP、UI 和附件工具 | [工具质量契约](05-tool-optimization/tool-optimization-design.md#10-工具质量统一契约) |
 | `TOOL-103` | 工具优化 | 无合法会话附件时隐藏整个附件读取工具包 | 已关闭 | v0.3.12 已实施；有合法附件时整包披露三个读取工具，调用时仍执行文件权限校验 | [附件请求级过滤](05-tool-optimization/tool-optimization-design.md#81-preparetools) |
 | `TOOL-104` | 工具优化 | 分离 MCP 工具协议名与聊天展示名 | 可实施 | 保留稳定命名空间和历史兼容；Console 使用独立 `display_name` 隐藏冗长前缀 | [Toolset 展示命名](05-tool-optimization/tool-optimization-design.md#83-toolset-组合与展示命名) |
-| `TOOL-105` | 结构化最终输出 | 实施 Agent 可选的多种 Output Tool | 可实施 | 默认允许普通文本；输出契约组包含多种终止结构，严格模式需显式选择；覆盖普通工具、Deferred 与 Output 同响应校验 | [结构化最终输出设计](09-structured-output/structured-output-design.md) |
+| `TOOL-105` | 结构化最终输出 | 实施 Agent 可选的多种 Output Tool | 暂缓 | 0805 实验已归档；重新实施前需锁定可选/严格模式、多输出组合和混合调用确定性重试规则 | [结构化最终输出设计](09-structured-output/structured-output-design.md#103-0805-实验实现的归档结论) |
 | `TOOL-201` | 工具检索 | 实施 MCP 工具检索与渐进披露机制 | 已关闭 | v0.3.12 已实施；v0.3.14 补齐用户问题优先、只读副作用过滤、已披露排除和单 Run 重复搜索去重；跨 Run 发现状态继续遵循 Pydantic AI | [工具检索设计](13-tool-discovery/tool-discovery-design.md) |
-| `SKILL-001` | Skill | 设计并实施线上 Skill 安装、版本管理与渐进披露 | 待设计 | 兼容第三方目录式 Skill；覆盖 Instructions、References、Assets、可选工具、来源信任和执行隔离 | [Skill 体系](12-agent-skills/skill-system-design.md) |
+| `SKILL-001` | Skill | 设计并实施线上 Skill 安装、版本管理与渐进披露 | 可实施 | Harness `Skills` 负责 SKILL.md 正文渐进披露；DeepAgent 负责授权、版本、References、Assets、工具与执行隔离 | [Skill 体系](12-agent-skills/skill-system-design.md) |
 | `ATT-001` | 附件解析 | 固化真实附件读取、上下文压缩和 Checkpoint 更新的端到端测试 | 可实施 | 覆盖上传、分页读取、SSE、历史恢复与压缩 | [验证边界](06-attachment-parsing/attachment-parsing-design.md#10-验证边界) |
 | `ART-001` | Artifact 交互 | Artifact 最小语义（登记/元数据/TTL/权限；可不接外部 sink） | 待设计 | 合法 id 不得从 Checkpoint 猜造；存储落点待决 | [08 分期 A0](08-artifact-export/README.md#建议分期先语义后-sink) |
 | `ART-001b` | Artifact 交互 | 可选 sink：下载中心 publish（upload + business.save） | 待设计 | 依赖 ART-001；非唯一成功标准 | [设计纲要 S0](08-artifact-export/artifact-export-design.md#32-可选-sink下载中心s0) |

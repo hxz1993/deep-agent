@@ -2,7 +2,7 @@
 
 > 状态：持续维护的研究依据
 >
-> 当前运行基线：Pydantic AI 2.26.0、Pydantic AI Harness 0.10.0
+> 当前运行基线：Pydantic AI 2.26.0、Pydantic AI Harness 0.18.0
 
 ## 总体判断
 

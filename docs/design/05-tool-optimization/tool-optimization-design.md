@@ -2,7 +2,7 @@
 
 > 最后核验：2026-08-03
 >
-> 当前运行基线：`pydantic-ai-slim 2.26.0` + `pydantic-ai-harness 0.10.0`
+> 当前运行基线：`pydantic-ai-slim 2.26.0` + `pydantic-ai-harness 0.18.0`
 >
 > 状态：设计梳理，不代表已引入新的 Native Tool、Output Tool 或 Harness 能力
 
@@ -23,7 +23,7 @@ DeepAgent 已经使用了 Pydantic AI 最核心的三种工具执行方式：
 - 前端表单操作继续使用 `ExternalToolset + DeferredToolRequests/Results`。
 - 结构化最终输出使用 `ToolOutput` 或 `NativeOutput`，不依赖提示词约定 JSON。
 - Provider Code Execution 作为模型可选能力接入，不作为所有模型默认工具。
-- Harness 0.10 已用于上下文压缩；超长工具结果后续再评估 `OverflowingToolOutput`，并与现有压缩观测统一设计。
+- Harness 0.18 已用于上下文压缩；超长工具结果后续再评估 `OverflowingToolOutput`，并与现有压缩观测统一设计。
 - Harness 不替代 SQL 会话、SSE、配置中心、HITL 和前端执行器。
 
 ## 2. 三套概念的边界
@@ -53,6 +53,21 @@ Pydantic AI Core 是当前 Agent 运行时，负责：
 
 它不是一套新的模型循环，也不提供 DeepAgent 的配置中心、用户隔离、会话页面或
 SSE 协议。
+
+#### 2.2.1 升级到 0.18 后的采用判断
+
+| 0.12～0.18 能力 | 是否值得做 | DeepAgent 结论 |
+| --- | --- | --- |
+| `Skills` 渐进披露 | 是，优先 | 作为 `SKILL.md` Instructions 延迟加载基础；安装、权限、References、Assets、scripts 仍由 DeepAgent 负责 |
+| Tool Guardrail / Guard Chain | 是，依赖前置 | 待工具风险元数据统一后用于参数、结果、审批和敏感信息治理，不先堆零散规则 |
+| Compaction receipts、`pin`、`keep_user_messages` | 部分吸收 | 用于补充观测和回归思路；不替换当前单次摘要、完整 SQL 历史和 Checkpoint |
+| Spend Limits | 是，中期 | 适合请求级成本保护；先与现有 `UsageLimits`、全局请求上限和错误协议统一 |
+| 大文本外置 / Tool Output Limits | 是，中期 | 先要求业务工具分页；共享 Store、TTL、租户隔离准备好后再做 Spill |
+| StepPersistence + ConversationSearch | 暂不做 | 现有 SQL 会话是事实源；除非出现崩溃恢复、子 Agent 或跨压缩历史搜索需求，否则会形成第二套历史 |
+| Planning / Advisor / SubAgent | 按业务需求 | 只有长任务、可审计计划和专业分工形成明确产品场景后再启用 |
+| BrowserUse | 当前不做 | 浏览器执行权限和网络边界过大，不作为通用线上 Agent 默认能力 |
+
+升级依赖不等于启用上述能力。每一项仍需单独的产品边界、权限设计和目标测试。
 
 ### 2.3 Harness Engineering
 
@@ -429,7 +444,7 @@ DeepAgent 当前没有正式启用：
 - Core 通用 `PrepareTools`
 - Pydantic AI 原生执行审批
 
-`pydantic-ai-harness 0.10.0` 已用于上下文压缩，但工具结果治理、Memory、StepPersistence、
+`pydantic-ai-harness 0.18.0` 已用于上下文压缩，但工具结果治理、Memory、StepPersistence、
 SubAgent 和其他 Harness 能力尚未启用，不能把“已安装 Harness”理解成这些能力已经开放。
 
 当前主对话输出仍为：

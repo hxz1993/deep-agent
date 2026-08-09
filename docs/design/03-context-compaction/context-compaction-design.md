@@ -4,7 +4,7 @@
 >
 > 更新日期：2026-07-30
 >
-> 依赖组合：`pydantic-ai-slim 2.26.0` + `pydantic-ai-harness 0.10.0`
+> 依赖组合：`pydantic-ai-slim 2.26.0` + `pydantic-ai-harness 0.18.0`
 >
 > 数据库迁移：v0.3.0 完整基线 Alembic `001`
 
@@ -32,7 +32,8 @@ chat_messages
 4. 压缩默认自动启用，不提供环境变量、Agent 或数据库开关。
 5. 模型没有配置 `context_window_tokens` 时不启用压缩，也不按模型名称猜窗口。
 6. 摘要始终使用当前 Agent 主模型，不再提供 `context_summary` 辅助模型用途。
-7. Harness 暂不升级；当前版本已支持自定义 tokenizer。
+7. Harness 已固定升级到 0.18.0；现有链路仍只复用确定性 Clamp、Deduplicate 和 Clear tiers，
+   不用 Harness 通用摘要替换 DeepAgent 的单次摘要、Checkpoint、Hash/CAS 和主动压缩语义。
 8. `context_window_tokens` 和 `max_output_tokens` 是模型事实；本轮输出预留和安全余量是内部算法，
    不新增配置字段。
 9. 摘要调用与正式回答共用本轮 `RunUsage` 和全局 `UsageLimits`，计入请求次数与 Token。

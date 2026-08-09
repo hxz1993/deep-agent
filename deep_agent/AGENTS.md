@@ -100,6 +100,7 @@ DeepAgent 自研 `capabilities.registry.ToolPackage` 是产品配置单位，包
 7. Harness `StepPersistence` 不替代现有 SQL 会话、SSE 和 Deferred/Pending；只有副作用账本、子 Agent 或崩溃恢复成为真实需求时再接入。
 8. Harness 仍为 0.x。引入时必须将 `pydantic-ai-slim` 与 `pydantic-ai-harness` 固定为经过联合回归的准确版本，禁止继续依赖无上限 `>=` 漂移。
 9. 不要通过修改 `AgentRunner` 主循环重复实现 Pydantic AI 已提供的机制。
+10. Harness 0.18 `Skills` 只负责延迟披露 `SKILL.md` 正文，不读取或执行 references、assets、scripts；第三方 Skill 的安装、版本、权限、素材读取和脚本隔离仍由 DeepAgent 产品层负责。
 
 当前上下文压缩默认自动启用：模型配置有效 `context_window_tokens` 即启用，否则停用。
 摘要始终复用当前 Agent 主模型，并与正式回答共享 `RunUsage` 和全局 `UsageLimits`；

@@ -44,14 +44,42 @@ skill-package/
 登记，以表达租户、版本、来源、签名/摘要、启用状态、权限、资源限额和安装状态。YAML 是包格式，
 数据库是线上管理和查询事实源，两者职责不同。
 
-## 4. 渐进披露
+## 4. Harness 0.18 与渐进披露
+
+Harness 0.18 提供 `Skills` Capability：扫描每个一级目录的 `SKILL.md`，首次只让模型看到 Skill
+名称和描述；模型选择后再加载 Markdown 正文。这正好可以作为 DeepAgent Skill Instructions 的
+基础实现，避免自行维护第二套“发现 Skill → 注入正文”的状态机。
+
+它的边界也很明确：
+
+- 不读取 `references/` 或 `assets/`。
+- 不执行 `scripts/`，也没有 `read_skill_resource` 或 `run_skill_script`。
+- 不负责安装、版本、租户权限、来源信任、签名和更新回滚。
+- Harness `Capability` 是运行时延迟内容；DeepAgent `ToolPackage` 仍是产品配置与授权单位。
+
+因此推荐的关系是：
+
+```text
+Agent.capabilities 选择 skill:<name>
+  → DeepAgent 校验安装状态、版本和权限
+  → Harness Skills 延迟披露 SKILL.md 正文
+  → DeepAgent ToolPackage 提供该 Skill 已授权的 Toolset
+  → DeepAgent 资源工具按需读取 references/assets
+  → scripts 只能进入 Sandbox/受控 Backend
+```
+
+当前 `SKILL = Skill(...)` 把 Instructions 和 FunctionToolset 绑在 Python 模块里，适合作为最小示例，
+但不能作为第三方线上 Skill 格式。后续重构应让目录式内容成为事实源，Python 工具成为可选、显式
+授权的执行扩展；迁移期可以保留现有 Python Skill 适配器，不再增加新的这种格式。
+
+### 4.1 渐进披露层级
 
 Skill 不应在每轮请求中完整塞入所有长文档和资产：
 
-1. 初始只向模型提供已授权 Skill 的名称、简短说明和适用条件。
-2. 模型或确定性路由判断相关后，再读取完整 `SKILL.md`。
-3. References 和 Assets 按引用加载，避免重复占用上下文。
-4. Skill 自带的大型工具集继续使用工具检索；少量工具可直接披露。
+1. Harness 初始只向模型提供已授权 Skill 的名称和简短说明。
+2. 模型选择后由 Harness 加载完整 `SKILL.md` 正文。
+3. References 和 Assets 由 DeepAgent 的只读资源工具按引用加载，避免重复占用上下文。
+4. Skill 自带的大型工具集复用 Tool Search；少量工具可直接披露。
 
 检索只在 Agent 已授权的 `skill:*` 包内工作。渐进披露解决上下文成本，不替代管理员授权、用户
 权限或脚本执行隔离。
@@ -86,8 +114,8 @@ Skill 不应在每轮请求中完整塞入所有长文档和资产：
 
 ### C. 渐进披露
 
-- 初始只披露摘要。
-- 按需加载 Instructions、References 和 Assets。
+- 使用 Harness `Skills` 初始只披露名称和摘要，选择后加载 Instructions。
+- DeepAgent 增加受权限约束的 References/Assets 读取能力，不把长素材一次性注入。
 - 与 MCP Tool Search 共用观测口径，但不混用授权逻辑。
 
 ### D. 第三方生态
@@ -103,4 +131,6 @@ Skill 不应在每轮请求中完整塞入所有长文档和资产：
 - 不允许 Skill 绕过 ToolPackage、用户权限或 Sandbox。
 - 不要求 Agent 管理员逐个选择 Skill 内的文件或工具。
 
-实施入口统一登记在 [`../TODO.md`](../TODO.md) 的 `SKILL-001`。
+实施入口统一登记在 [`../TODO.md`](../TODO.md) 的 `SKILL-001`。建议下一轮先完成 A+C 的只读
+目录和 Instructions 渐进披露，再设计数据库安装、脚本执行和第三方生态；不要一次性把所有安全
+问题绑成一个版本。

@@ -2,7 +2,7 @@
 
 > 首次研究：2026-08-07
 >
-> 当前状态：现有最小 Python Skill 已运行；线上安装、素材管理和渐进披露待设计实施
+> 当前状态：现有最小 Python Skill 已运行；已选定 Harness 0.18 `Skills` 作为 Instructions 渐进披露基础，线上安装与素材管理待实施
 
 本课题讨论线上 DeepAgent 如何安装、管理和使用可复用 Skill。Skill 不只是普通工具的别名，
 它可以同时包含任务说明、参考资料、资产和可选执行工具，并在相关任务出现时按需披露。
@@ -13,4 +13,6 @@
 - [`../11-tool-packages/tool-packages-design.md`](../11-tool-packages/tool-packages-design.md)：ToolPackage 配置与授权模型。
 - [`../TODO.md`](../TODO.md)：跨课题唯一待办入口，Skill 主线登记为 `SKILL-001`。
 
-本轮只完成课题建档，不新增数据库、安装接口或运行时代码。
+Harness 只解决 `SKILL.md` 正文的延迟加载，不会读取或执行 `references/`、`assets/`、`scripts/`。
+这些线上产品能力仍由 DeepAgent 设计、授权和审计，不能因为升级 Harness 就宣称已经支持第三方
+Skill 安装。

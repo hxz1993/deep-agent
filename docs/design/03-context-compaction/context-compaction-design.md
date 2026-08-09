@@ -461,6 +461,11 @@ v0.3.13 完成以下兼容收口：
   不在同一个 Agent 上叠加。仅含不透明 `provider_details` 的 `CompactionPart` 拒绝写入
   Checkpoint，避免恢复为空壳消息。
 
+v0.3.14 进一步收口两个运行边界：每个 Pod 固定一个异步 Gunicorn Worker，确保自动摘要期间的
+取消请求能命中持有同一 `CancellationToken` 的进程；主动压缩在 Checkpoint 保存后立即返回
+`context_compaction_result` 并关闭 SSE，history 与 `context-status` 由客户端随后分别刷新。
+多个 Pod 横向扩容仍需会话粘性或共享取消协调器。
+
 ## 10. Console 测试会话
 
 为避免人工逐轮输入数十次才能复现压缩，Workspace 在会话搜索框和普通“新建会话”

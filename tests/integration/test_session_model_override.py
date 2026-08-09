@@ -349,12 +349,7 @@ class SessionModelOverrideIntegrationTests(unittest.IsolatedAsyncioTestCase):
         result = events[-1]
         self.assertEqual(result["type"], "context_compaction_result")
         self.assertEqual(result["status"], "completed", result)
-        self.assertTrue(result["context_status"]["checkpoint_active"])
-        self.assertTrue(result["context_status"]["manual_compaction_available"])
-        self.assertEqual(
-            result["context_status"]["manual_compaction_reason"],
-            "available",
-        )
+        self.assertNotIn("context_status", result)
 
         async with AsyncClient(
             transport=self._transport,
@@ -368,7 +363,19 @@ class SessionModelOverrideIntegrationTests(unittest.IsolatedAsyncioTestCase):
                     "model_id": self._model_b_id,
                 },
             )
+            context_status_response = await client.get(
+                f"/api/v1/sessions/{self._session_id}/context-status",
+                params={
+                    "agent_id": self._agent_id,
+                    "model_id": self._model_b_id,
+                },
+            )
         self.assertEqual(history_response.status_code, 200, history_response.text)
+        self.assertEqual(context_status_response.status_code, 200, context_status_response.text)
+        context_status = context_status_response.json()
+        self.assertTrue(context_status["checkpoint_active"])
+        self.assertTrue(context_status["manual_compaction_available"])
+        self.assertEqual(context_status["manual_compaction_reason"], "available")
         payload = history_response.json()
         self.assertEqual(payload["model_message_count"], len(history))
         self.assertIsNotNone(payload["context_checkpoint"])
@@ -392,9 +399,7 @@ class SessionModelOverrideIntegrationTests(unittest.IsolatedAsyncioTestCase):
         repeated_result = parse_sse_events(repeated.text)[-1]
         self.assertEqual(repeated_result["status"], "noop")
         self.assertEqual(repeated_result["reason"], "no_reduction")
-        self.assertTrue(
-            repeated_result["context_status"]["manual_compaction_available"]
-        )
+        self.assertNotIn("context_status", repeated_result)
 
         async with AsyncClient(
             transport=self._transport,

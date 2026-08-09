@@ -71,7 +71,8 @@ Pydantic AI `CancellationToken`。Runner 捕获 `RunCancelled` 后只持久化
 
 页面关闭或网络断开只触发 Token 清理无人消费的 Run，不是正常停止入口。UI Deferred 已经
 Pending 时没有活动 Run，其表单取消仍通过 `DeferredToolResults` 处理。当前注册表只在单进程
-内有效，多 Pod 发布必须使用会话粘性，或后续增加共享取消协调器。
+内有效。v0.3.14 起每个 Pod 固定一个异步 Gunicorn Worker；多 Pod 发布仍必须使用会话粘性，
+或后续增加共享取消协调器。
 
 ### MySQL 空闲连接（v0.3.11）
 
@@ -116,6 +117,11 @@ v0.3.13 起，自动压缩的内部摘要复用正式 Run 的 Pydantic AI `Cance
 历史待处理判断使用 2.26 的 `BaseToolCallPart` / `BaseToolReturnPart`，同时覆盖 Local Tool、
 Tool Search 和 Provider Native Tool。Provider 原生 OpenAI/Anthropic Compaction 暂不与
 DeepAgent Checkpoint 混用；只有不透明 `provider_details` 的 `CompactionPart` 继续拒绝落盘。
+
+v0.3.14 起部署入口固定每个 Pod 一个异步 Gunicorn Worker，使 session 取消请求与进程内
+`ActiveRunRegistry` 一致命中。主动压缩的 `context_compaction_result` 不再等待二次
+`context-status` 查询，客户端收到终态后分别刷新 history 与 context-status。多个 Pod 的正式
+取消仍需要会话粘性或共享取消协调器，不能依赖随机网关路由。
 
 v0.3.5 的普通与流式聊天支持结构化 `context_refs`。公共外壳在 Schema 层严格校验；原始
 `payload/metadata` 随消息保存，模型、Token 估算、自动/主动压缩只使用排除 `metadata` 的

@@ -39,8 +39,11 @@ _ACTION_GROUPS = {
     },
     "write": {
         "write", "save", "create", "update", "set", "insert", "run", "execute",
-        "start", "stop", "cancel", "保存", "写入", "创建", "更新", "设置", "新增",
-        "运行", "执行", "启动", "停止", "取消",
+        "start", "stop", "cancel", "modify", "refresh", "reload", "rebuild",
+        "generate", "upload", "publish", "sync", "import", "submit", "approve",
+        "trigger", "保存", "写入", "创建", "更新", "设置", "新增", "修改", "刷新",
+        "重载", "重建", "生成", "上传", "发布", "同步", "导入", "提交", "审批",
+        "触发", "运行", "执行", "启动", "停止", "取消",
     },
     "delete": {"delete", "remove", "drop", "clear", "删除", "移除", "清除"},
 }
@@ -79,6 +82,7 @@ class ToolDiscoveryTelemetry:
     retrieval_ms: float = 0.0
     fallback_reason: str | None = None
     candidate_tools: list[str] = field(default_factory=list, repr=False)
+    seen_search_queries: set[str] = field(default_factory=set, repr=False)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -195,20 +199,38 @@ def _bm25_field(tokens: tuple[str, ...], query_tokens: set[str], idf: dict[str, 
 
 
 def _is_read_only_query(query_text: str, query_tokens: set[str]) -> bool:
-    if "query" not in query_tokens:
+    explicit_read_only = "只读" in query_text or bool(
+        re.search(r"\b(?:read\s*only|readonly)\b", query_text)
+    )
+    if "query" not in query_tokens and not explicit_read_only:
         return False
-    if re.search(
-        r"\b(?:write|save|create|update|set|insert|delete|remove|drop|clear|stop|cancel)\b",
+    affirmative_text = re.sub(
+        r"(?:不要|不需要|无需|禁止|不得|不可)[^，。；\n]*",
+        " ",
         query_text,
+    )
+    affirmative_text = re.sub(
+        r"\b(?:do\s+not|don't|without|never)\b[^,.;\n]*",
+        " ",
+        affirmative_text,
+    )
+    if re.search(
+        r"\b(?:write|save|create|update|set|insert|delete|remove|drop|clear|stop|cancel|"
+        r"modify|refresh|reload|rebuild|generate|upload|publish|sync|import|submit|approve|trigger)\b",
+        affirmative_text,
     ) or any(
-        term in query_text
-        for term in ("保存", "写入", "创建", "更新", "设置", "新增", "删除", "移除", "清除", "停止", "取消")
+        term in affirmative_text
+        for term in (
+            "保存", "写入", "创建", "更新", "设置", "新增", "修改", "刷新", "重载",
+            "重建", "生成", "上传", "发布", "同步", "导入", "提交", "审批", "触发",
+            "删除", "移除", "清除", "停止", "取消",
+        )
     ):
         return False
     run_terms = {"run", "execute", "start", "运行", "执行", "启动"}
     readback_terms = {"status", "result", "log", "detail", "状态", "结果", "日志", "详情"}
-    if any(term in query_text for term in run_terms) and not any(
-        term in query_text for term in readback_terms
+    if any(term in affirmative_text for term in run_terms) and not any(
+        term in affirmative_text for term in readback_terms
     ):
         return False
     return True
@@ -266,30 +288,48 @@ def _context_ref_search_text(value: dict[str, Any]) -> str:
 
 
 def _visible_prompt_text(value: Any) -> str:
+    primary, supplemental = _visible_prompt_search_text(value)
+    return "\n".join(filter(None, (primary, supplemental)))
+
+
+def _visible_prompt_search_text(value: Any) -> tuple[str, str]:
     if isinstance(value, str):
-        return value
+        return value, ""
     if isinstance(value, dict):
         if value.get("kind") == "text-content":
-            return str(value.get("content") or "")
-        return _context_ref_search_text(value)
+            return str(value.get("content") or ""), ""
+        return "", _context_ref_search_text(value)
     if isinstance(value, (list, tuple)):
-        return "\n".join(filter(None, (_visible_prompt_text(item) for item in value)))
-    return ""
+        primary: list[str] = []
+        supplemental: list[str] = []
+        for item in value:
+            item_primary, item_supplemental = _visible_prompt_search_text(item)
+            if item_primary:
+                primary.append(item_primary)
+            if item_supplemental:
+                supplemental.append(item_supplemental)
+        return "\n".join(primary), "\n".join(supplemental)
+    return "", ""
 
 
-def search_text_for_run(ctx: RunContext[AgentDeps]) -> str:
-    prompt = _visible_prompt_text(ctx.prompt)
-    if prompt.strip():
-        return prompt
+def search_inputs_for_run(ctx: RunContext[AgentDeps]) -> tuple[str, str]:
+    primary, supplemental = _visible_prompt_search_text(ctx.prompt)
+    if primary.strip() or supplemental.strip():
+        return primary, supplemental
     for message in reversed(ctx.messages):
         if not isinstance(message, ModelRequest):
             continue
         for part in reversed(message.parts):
             if isinstance(part, UserPromptPart):
-                prompt = _visible_prompt_text(part.content)
-                if prompt.strip():
-                    return prompt
-    return ""
+                primary, supplemental = _visible_prompt_search_text(part.content)
+                if primary.strip() or supplemental.strip():
+                    return primary, supplemental
+    return "", ""
+
+
+def search_text_for_run(ctx: RunContext[AgentDeps]) -> str:
+    primary, supplemental = search_inputs_for_run(ctx)
+    return "\n".join(filter(None, (primary, supplemental)))
 
 
 def _tool_tokens(estimator: TokenEstimator, tool: ToolDefinition) -> int:
@@ -330,15 +370,24 @@ class McpDiscoveryToolset(WrapperToolset[AgentDeps]):
                 definitions,
                 server_names=self.server_names,
             )
-            query = search_text_for_run(ctx)
             if len(definitions) <= MCP_PRESELECT_LIMIT:
                 selected = [tool.name for tool in definitions]
             else:
+                primary_query, supplemental_query = search_inputs_for_run(ctx)
                 selected = rank_tool_documents(
-                    query,
+                    primary_query,
                     documents,
                     limit=MCP_PRESELECT_LIMIT,
                 )
+                if not selected and supplemental_query.strip():
+                    supplemental_selected = rank_tool_documents(
+                        supplemental_query,
+                        documents,
+                        limit=MCP_PRESELECT_LIMIT,
+                    )
+                    selected = list(
+                        dict.fromkeys([*selected, *supplemental_selected])
+                    )[:MCP_PRESELECT_LIMIT]
             selected_set = set(selected)
             prepared = [
                 replace(tool, defer_loading=False)
@@ -451,17 +500,35 @@ def search_deferred_tools(
     ctx.deps.tool_discovery = telemetry
     started = time.perf_counter()
     telemetry.search_calls += 1
+    query_text = "\n".join(query for query in queries if query.strip())
+    query_fingerprint = " ".join(sorted(set(lexical_tokens(query_text)))) or _normalize_text(
+        query_text
+    )
+    if query_fingerprint in telemetry.seen_search_queries:
+        logger.info(
+            "MCP tool search catalog={} call={} skipped_duplicate_query=true",
+            telemetry.catalog_hash,
+            telemetry.search_calls,
+        )
+        return []
+    telemetry.seen_search_queries.add(query_fingerprint)
+    excluded_names = (
+        set(ctx.discovered_tool_names)
+        | set(telemetry.discovered_tools)
+        | set(telemetry.preselected_tools)
+    )
+    searchable_tools = [tool for tool in tools if tool.name not in excluded_names]
     try:
-        documents = build_search_documents(tools)
+        documents = build_search_documents(searchable_tools)
         ranked = rank_tool_documents(
-            "\n".join(query for query in queries if query.strip()),
+            query_text,
             documents,
             limit=MCP_SEARCH_RESULT_LIMIT,
         )
     except Exception as exc:  # reveal the authorized corpus instead of dropping access
         telemetry.fallback_reason = type(exc).__name__
         logger.exception("MCP tool search failed; returning the authorized deferred catalog")
-        ranked = sorted(tool.name for tool in tools)[:MCP_SEARCH_RESULT_LIMIT]
+        ranked = sorted(tool.name for tool in searchable_tools)[:MCP_SEARCH_RESULT_LIMIT]
     finally:
         telemetry.retrieval_ms += (time.perf_counter() - started) * 1_000
     telemetry.discovered_tools = list(

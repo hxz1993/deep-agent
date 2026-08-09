@@ -1213,5 +1213,4 @@ def _manual_compaction_result(
         "summary_chunks": telemetry.get("summary_chunks", 0),
         "usage": _run_usage_dict(usage),
         "checkpoint": checkpoint,
-        "context_status": None,
     }

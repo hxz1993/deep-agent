@@ -114,6 +114,8 @@ test("输入框提供线性附件、主动压缩按钮和后端预算百分比",
   assert.match(chatSource, /manual_compaction_available/);
   assert.match(chatSource, /\/compact/);
   assert.match(chatSource, /context_compaction_result/);
+  assert.doesNotMatch(chatSource, /result\.context_status/);
+  assert.match(chatSource, /status === "noop"[\s\S]*?await loadContextStatus\(session\)/);
   assert.match(chatSource, /本次压缩未产生明显效果/);
   assert.match(chatSource, /可再次压缩，重复压缩可能损失部分细节/);
   assert.doesNotMatch(chatSource, /already_compacted|insufficient_new_history/);

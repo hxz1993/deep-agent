@@ -11,7 +11,6 @@ from deep_agent.agent.headers import extract_forward_headers
 from deep_agent.agent.history import has_unprocessed_tool_calls
 from deep_agent.api.v1.deps import build_runner, build_runner_for_agent
 from deep_agent.api.v1.request_identity import RequestUserDep
-from deep_agent.api.v1.sessions import get_session_context_status
 from deep_agent.core.context import AppContextDep
 from deep_agent.core.exceptions import AgentNotFoundError, LlmModelNotFoundError
 from deep_agent.db.ids import normalize_agent_id
@@ -110,15 +109,6 @@ async def compact_session_context(
 
     async def event_generator():
         async for event in runner.run_manual_compaction(resolved_session_id, deps):
-            if event.get("type") == "context_compaction_result":
-                context_status = await get_session_context_status(
-                    ctx,
-                    user_id,
-                    resolved_session_id,
-                    agent_id=api_agent_id,
-                    model_id=body.model_id,
-                )
-                event["context_status"] = context_status.model_dump(mode="json")
             yield {
                 "event": event["type"],
                 "data": json.dumps(event, ensure_ascii=False, default=str),

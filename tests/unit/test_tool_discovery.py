@@ -15,6 +15,7 @@ from deep_agent.agent.context.estimator import TokenEstimator
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.tool_discovery import (
     MCP_SEARCH_RESULT_LIMIT,
+    ToolDiscoveryTelemetry,
     build_mcp_discovery_toolset,
     build_search_documents,
     rank_tool_documents,
@@ -41,6 +42,26 @@ def resolve_members(dimension: str, keywords: str) -> list[str]:
 def delete_financial_model(model_name: str) -> bool:
     """永久删除财务模型。"""
     return True
+
+
+def refresh_financial_model_cache(model_name: str) -> bool:
+    """刷新财务模型缓存。"""
+    return True
+
+
+def generate_financial_model_report(model_name: str) -> str:
+    """生成财务模型报表。"""
+    return model_name
+
+
+def upload_financial_model_template(model_name: str) -> str:
+    """上传财务模型模板。"""
+    return model_name
+
+
+def deeptable_workbook_get(workbook_name: str) -> str:
+    """读取电子表格输入表和工作簿。"""
+    return workbook_name
 
 
 class ToolDiscoveryTests(unittest.IsolatedAsyncioTestCase):
@@ -75,6 +96,26 @@ class ToolDiscoveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(ranked[0], "deepfos_search_financial_model")
         self.assertNotIn("deepfos_delete_financial_model", ranked)
 
+    async def test_read_only_negations_do_not_preselect_side_effect_tools(self) -> None:
+        ctx = self._ctx("查询当前财务模型，只读即可，不要刷新、生成或上传任何内容")
+        toolset = FunctionToolset(
+            tools=[
+                search_financial_model,
+                refresh_financial_model_cache,
+                generate_financial_model_report,
+                upload_financial_model_template,
+            ]
+        ).prefixed("deepfos")
+        tools = list((await toolset.get_tools(ctx)).values())
+
+        ranked = rank_tool_documents(
+            ctx.prompt or "",
+            build_search_documents([item.tool_def for item in tools]),
+            limit=5,
+        )
+
+        self.assertEqual(ranked, ["deepfos_search_financial_model"])
+
     async def test_context_reference_search_uses_only_type_and_label(self) -> None:
         ctx = self._ctx("")
         ctx.prompt = [
@@ -95,6 +136,79 @@ class ToolDiscoveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("销售预算 B2:C4", visible)
         self.assertNotIn("secret_fact", visible)
         self.assertNotIn("token", visible)
+
+    async def test_user_question_precedes_context_reference_labels_for_preselection(self) -> None:
+        ctx = self._ctx("")
+        ctx.prompt = [
+            {"kind": "text-content", "content": "查询财务模型的维度成员和预算工作版"},
+            {
+                "kind": "context-ref",
+                "key": "page",
+                "type": "deeptable.selection",
+                "schema_version": "2.0",
+                "label": "电子表格输入表 B020101_copy",
+                "payload": {},
+            },
+        ]
+        toolset = FunctionToolset(
+            tools=[
+                search_financial_model,
+                list_cube_dimensions,
+                resolve_members,
+                deeptable_workbook_get,
+            ]
+        ).prefixed("deepfos")
+        wrapper = build_mcp_discovery_toolset(
+            [toolset],
+            server_names=["deepfos"],
+            estimator=TokenEstimator.conservative(),
+        )
+        assert wrapper is not None
+
+        await wrapper.get_tools(ctx)
+
+        self.assertNotIn(
+            "deepfos_deeptable_workbook_get",
+            ctx.deps.tool_discovery.preselected_tools,
+        )
+        self.assertIn(
+            "deepfos_search_financial_model",
+            ctx.deps.tool_discovery.preselected_tools,
+        )
+
+    async def test_context_only_prompt_uses_reference_label_as_fallback(self) -> None:
+        ctx = self._ctx("")
+        ctx.prompt = [
+            {
+                "kind": "context-ref",
+                "key": "page",
+                "type": "deeptable.selection",
+                "schema_version": "2.0",
+                "label": "电子表格输入表 B020101_copy",
+                "payload": {},
+            }
+        ]
+        toolset = FunctionToolset(
+            tools=[
+                search_financial_model,
+                list_cube_dimensions,
+                resolve_members,
+                deeptable_workbook_get,
+            ]
+        ).prefixed("deepfos")
+        wrapper = build_mcp_discovery_toolset(
+            [toolset],
+            server_names=["deepfos"],
+            estimator=TokenEstimator.conservative(),
+        )
+        assert wrapper is not None
+
+        await wrapper.get_tools(ctx)
+
+        self.assertIn(
+            "deepfos_deeptable_workbook_get",
+            ctx.deps.tool_discovery.preselected_tools,
+        )
 
     async def test_more_than_three_tools_preselects_and_defers_globally(self) -> None:
         ctx = self._ctx("查询财务模型和预算")
@@ -243,6 +357,37 @@ class ToolDiscoveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("deepfos_resolve_members", result)
         self.assertEqual(ctx.deps.tool_discovery.search_calls, 1)
         self.assertEqual(ctx.deps.tool_discovery.discovered_tools, result)
+
+    async def test_search_excludes_preselected_and_already_discovered_tools(self) -> None:
+        ctx = self._ctx("")
+        ctx.discovered_tool_names.add("deepfos_resolve_members")
+        ctx.deps.tool_discovery = None
+        tools = [
+            item.tool_def
+            for item in (await self._toolset().get_tools(ctx)).values()
+        ]
+        ctx.deps.tool_discovery = ToolDiscoveryTelemetry(
+            preselected_tools=["deepfos_list_cube_dimensions"]
+        )
+
+        result = search_deferred_tools(ctx, ["查询维度成员"], tools)
+
+        self.assertNotIn("deepfos_resolve_members", result)
+        self.assertNotIn("deepfos_list_cube_dimensions", result)
+
+    async def test_repeated_equivalent_search_query_is_deduplicated_per_run(self) -> None:
+        ctx = self._ctx("")
+        tools = [
+            item.tool_def
+            for item in (await self._toolset().get_tools(ctx)).values()
+        ]
+
+        first = search_deferred_tools(ctx, ["搜索维度成员"], tools)
+        second = search_deferred_tools(ctx, ["搜索维度成员"], tools)
+
+        self.assertTrue(first)
+        self.assertEqual(second, [])
+        self.assertEqual(ctx.deps.tool_discovery.search_calls, 2)
 
     async def test_pydantic_tool_search_reveals_schema_before_execution(self) -> None:
         seen_tools: list[list[str]] = []

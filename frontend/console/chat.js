@@ -1093,16 +1093,14 @@ async function compactCurrentContext() {
     if (result.status === "completed") {
       const message = `上下文已压缩：${compactTokenLabel(result.before_tokens)} → ${compactTokenLabel(result.after_tokens)} Token`;
       setContextCompactionRow(row, message, { active: false });
-      state.contextStatus = result.context_status || state.contextStatus;
       showConsoleToast(message);
       await refreshCurrentHistory();
     } else if (result.status === "noop") {
       const message = MANUAL_COMPACTION_REASON_LABELS[result.reason]
         || "本次压缩未产生明显效果";
       setContextCompactionRow(row, message, { active: false });
-      state.contextStatus = result.context_status || state.contextStatus;
       showConsoleToast(message);
-      updateComposerContextControls();
+      await loadContextStatus(session);
       window.setTimeout(() => row.remove(), 2500);
     } else {
       const message = MANUAL_COMPACTION_REASON_LABELS[result.reason] || `压缩失败：${result.reason || "未知错误"}`;

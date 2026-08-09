@@ -1,6 +1,6 @@
 # DeepAgent MCP 工具检索与渐进披露设计
 
-> 实施版本：v0.3.12；Pydantic AI 2.26；Alembic 002 不变。
+> 实施版本：v0.3.12；v0.3.14 完成真实联调边界修复；Pydantic AI 2.26；Alembic 002 不变。
 
 ## 1. 稳定边界
 
@@ -71,13 +71,16 @@ MCP Server 名称
 1. Unicode NFKC、大小写和空白归一化。
 2. Snake Case、Kebab Case、Camel Case、英文与数字切词。
 3. 中文双字片段匹配。
-4. 查询、写入、删除等少量通用动作归一化。
+4. 查询、写入、删除、刷新、生成、上传等通用动作归一化；否定式“不要创建/刷新”不会被
+   误判为写入意图。
 5. 分字段 BM25 风格排序：协议名/工具名权重 4，参数名权重 2，描述权重 1。
 6. 只读问题不自动预选明显写入或删除工具。
 7. 同分按协议名排序，保证不同 Worker 结果一致。
 
-自动预选优先使用本轮模型可见用户问题；Deferred 恢复时回退有效历史中的最近用户任务。结构化
-`context_refs` 只使用 `type` 和 `label`，不使用 `payload`、`metadata`、附件正文或工具结果。
+自动预选优先使用本轮模型可见用户问题；只有用户问题无正相关结果时，才使用结构化
+`context_refs` 的 `type` 和 `label` 回退，避免页面名、输入表等标签挤占业务问题的 Top 3。
+Deferred 恢复时回退有效历史中的最近用户任务。检索不使用 `payload`、`metadata`、附件正文
+或工具结果。
 
 模型主动搜索直接使用 `search_tools.queries`，与首轮预选复用同一检索器。
 
@@ -94,9 +97,11 @@ MCP Server 名称
 
 - Tool Search Call/Result 使用 Pydantic AI 类型化消息并随原始历史保存。
 - 同一 Run 中，已发现工具在后续模型步骤继续可见。
+- 模型主动搜索排除已预选、已发现和同一 Run 已返回的工具；相同规范化查询在同一 Run 中只
+  执行一次，避免重复请求消耗。模型修改查询词后仍可继续搜索。
 - 新 Run 仍按新问题增加首轮 Top 3；Pydantic AI 可从有效历史恢复已发现工具。
 - 如果压缩移除旧搜索交换，工具重新回到延迟状态，可再次搜索。
-- 第一版不增加自定义过期状态，先通过运行观测确认长会话累积情况。
+- 不增加自定义过期或清空状态；跨 Run 的已发现工具仍完全遵循 Pydantic AI 2.26 历史恢复语义。
 
 历史与压缩的安全边界同时识别 Local 和 Provider Native Tool Search Call/Return；正式取消产生的
 `ModelResponse.state="interrupted"` 不被误判为 Pending Deferred。Provider `CompactionPart` 如果仅在

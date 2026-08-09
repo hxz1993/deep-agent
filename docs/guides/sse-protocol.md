@@ -148,6 +148,8 @@ Pydantic AI 会为未完成工具调用自动补充 `outcome=interrupted`，Deep
 UI Deferred 已经进入 Pending 后不存在活动 Run，因此返回 `not_running`；表单取消由
 `DeferredToolResults` 表达，不调用会话取消接口。当前注册表是进程级，多 Pod 必须依赖会话
 粘性或后续共享取消协调器，不能用客户端假事件掩盖未命中实例的问题。
+v0.3.14 起部署入口固定每个 Pod 一个异步 Gunicorn Worker，避免同一 Pod 内请求命中不同
+Registry；异步 Worker 仍可并发处理 I/O。该设置不解决多 Pod 随机路由。
 
 `cancelled` 示例：
 
@@ -300,8 +302,9 @@ v0.3.6 中 `summarizing` 表示一次语义摘要，不代表分块序号。遇�
 
 `POST /api/v1/sessions/{session_id}/compact?agent_id=...` 使用同一
 `context_compaction` 过程事件，并以 `context_compaction_result` 结束。请求体只允许可选的
-`model_id`；没有 `agent_id` 时必须提供它。`completed` 包含压缩前后估算、摘要调用 usage、
-当前 Checkpoint 和刷新后的 `context_status`；`noop` 表示本次未产生可保存的压缩结果，可能
+`model_id`；没有 `agent_id` 时必须提供它。`completed` 包含压缩前后估算、摘要调用 usage 和
+当前 Checkpoint，并立即关闭 SSE；客户端随后独立刷新 history 与 `context-status`，避免
+Checkpoint 已保存后因状态查询延迟而让流无法收口。`noop` 表示本次未产生可保存的压缩结果，可能
 是空历史、无安全摘要前缀或没有明显 Token 收益，不能据此假定模型一定未被调用；`failed`
 表示旧 Checkpoint 保持不变。该接口不产生普通 `text/final` 助手回复，也不因已有 Checkpoint
 或缺少新增消息而拒绝入口操作；但当前有效 Checkpoint 已覆盖全部原始历史时，不会反复只压缩

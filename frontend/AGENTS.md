@@ -116,6 +116,9 @@ v0.3.4 的输入框在附件线性图标旁提供主动压缩线性图标。按�
 前端不得因历史较短、已有 Checkpoint 或没有新增消息禁用主动入口；这些情况发给后端并展示
 `noop` 结果。只在无会话、当前 Run/压缩进行中或等待 Deferred 等技术冲突时禁用。
 历史中的压缩边界来自 `history.context_checkpoint`，使用分隔标记展示，不渲染成消息气泡。
+v0.3.14 起主动压缩的终态不内嵌刷新后的 `context_status`：客户端收到
+`context_compaction_result` 后先结束压缩流，再分别刷新 history 与 context-status，避免
+Checkpoint 已成功保存但状态查询延迟时让 SSE 长时间不关闭。
 
 v0.3.5 Console 只兼容展示历史 `context_refs` 的 label/type，不提供业务 JSON 构造或编辑器；
 含引用的历史消息不允许用旧文本编辑动作重试，避免静默丢失引用。业务 Chip 和详情由宿主前端实现。

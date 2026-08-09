@@ -11,7 +11,7 @@
 - `暂缓`：当前明确不进入近期版本。
 - `已关闭`：已实现或已确认不做。
 
-## 近期三条主线（v0.3.13 后）
+## 近期三条主线（v0.3.14 后）
 
 近期研发集中在三件事，优先级均高于一般体验优化：
 
@@ -32,7 +32,7 @@ Output Tool，Skill 同期完成协议设计后分阶段落地。
 | `TOOL-103` | 工具优化 | 无合法会话附件时隐藏整个附件读取工具包 | 已关闭 | v0.3.12 已实施；有合法附件时整包披露三个读取工具，调用时仍执行文件权限校验 | [附件请求级过滤](05-tool-optimization/tool-optimization-design.md#81-preparetools) |
 | `TOOL-104` | 工具优化 | 分离 MCP 工具协议名与聊天展示名 | 可实施 | 保留稳定命名空间和历史兼容；Console 使用独立 `display_name` 隐藏冗长前缀 | [Toolset 展示命名](05-tool-optimization/tool-optimization-design.md#83-toolset-组合与展示命名) |
 | `TOOL-105` | 结构化最终输出 | 实施 Agent 可选的多种 Output Tool | 可实施 | 默认允许普通文本；输出契约组包含多种终止结构，严格模式需显式选择；覆盖普通工具、Deferred 与 Output 同响应校验 | [结构化最终输出设计](09-structured-output/structured-output-design.md) |
-| `TOOL-201` | 工具检索 | 实施 MCP 工具检索与渐进披露机制 | 已关闭 | v0.3.12 已实施：授权不变；超过 3 个候选时词法 Top 3 预选、ToolSearch Top 5、延迟工具名称目录；首版无 Embedding | [工具检索设计](13-tool-discovery/tool-discovery-design.md) |
+| `TOOL-201` | 工具检索 | 实施 MCP 工具检索与渐进披露机制 | 已关闭 | v0.3.12 已实施；v0.3.14 补齐用户问题优先、只读副作用过滤、已披露排除和单 Run 重复搜索去重；跨 Run 发现状态继续遵循 Pydantic AI | [工具检索设计](13-tool-discovery/tool-discovery-design.md) |
 | `SKILL-001` | Skill | 设计并实施线上 Skill 安装、版本管理与渐进披露 | 待设计 | 兼容第三方目录式 Skill；覆盖 Instructions、References、Assets、可选工具、来源信任和执行隔离 | [Skill 体系](12-agent-skills/skill-system-design.md) |
 | `ATT-001` | 附件解析 | 固化真实附件读取、上下文压缩和 Checkpoint 更新的端到端测试 | 可实施 | 覆盖上传、分页读取、SSE、历史恢复与压缩 | [验证边界](06-attachment-parsing/attachment-parsing-design.md#10-验证边界) |
 | `ART-001` | Artifact 交互 | Artifact 最小语义（登记/元数据/TTL/权限；可不接外部 sink） | 待设计 | 合法 id 不得从 Checkpoint 猜造；存储落点待决 | [08 分期 A0](08-artifact-export/README.md#建议分期先语义后-sink) |

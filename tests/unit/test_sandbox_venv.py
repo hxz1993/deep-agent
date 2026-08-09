@@ -129,6 +129,11 @@ class SandboxVenvEnsureTests(unittest.TestCase):
 
 
 class GunicornSandboxStartupTests(unittest.TestCase):
+    def test_deep_agent_uses_one_worker_for_process_local_run_cancellation(self) -> None:
+        gunicorn_conf = _load_gunicorn_conf()
+
+        self.assertEqual(gunicorn_conf.workers, 1)
+
     def test_on_starting_runs_sandbox_ensure_before_platform_hook(self) -> None:
         gunicorn_conf = _load_gunicorn_conf()
         calls: list[str] = []

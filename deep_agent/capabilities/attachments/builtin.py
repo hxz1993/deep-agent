@@ -6,7 +6,13 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Generic, TypeVar
 
-from pydantic_ai import BinaryContent, FunctionToolset, ModelRetry, RunContext
+from pydantic_ai import (
+    BinaryContent,
+    FunctionToolset,
+    ModelRetry,
+    RunContext,
+    ToolFailed,
+)
 from pydantic_ai.messages import ToolReturn
 
 from deep_agent.agent.attachment_extractors import (
@@ -119,16 +125,16 @@ async def _download_cached(
     try:
         data = await task
     except AttachmentDownloadError as exc:
-        raise ModelRetry(f"附件 {ref.name or ref.id} 下载失败: {exc}") from exc
+        raise ToolFailed(f"附件 {ref.name or ref.id} 下载失败: {exc}") from exc
     except Exception as exc:
-        raise ModelRetry(
+        raise ToolFailed(
             f"附件 {ref.name or ref.id} 下载失败: {type(exc).__name__}"
         ) from exc
     finally:
         ctx.deps.attachment_download_tasks.pop(ref.id, None)
 
     if len(data) > max_upload_bytes():
-        raise ModelRetry(
+        raise ToolFailed(
             f"附件 {ref.name or ref.id} 超过当前 {max_upload_bytes()} 字节读取上限"
         )
     ctx.deps.attachment_bytes[ref.id] = data
@@ -154,9 +160,9 @@ async def _parse_cached(
     try:
         parsed = await task
     except AttachmentParseError as exc:
-        raise ModelRetry(str(exc)) from exc
+        raise ToolFailed(str(exc)) from exc
     except Exception as exc:
-        raise ModelRetry(f"附件解析失败: {type(exc).__name__}: {exc}") from exc
+        raise ToolFailed(f"附件解析失败: {type(exc).__name__}: {exc}") from exc
     finally:
         ctx.deps.attachment_parse_tasks.pop(key, None)
     ctx.deps.attachment_parsed[key] = parsed

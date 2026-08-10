@@ -3,7 +3,7 @@
 DeepAgent 是基于 FastAPI、Pydantic AI 和 SQLAlchemy 的多用户 Agent 服务，并
 随服务发布一体化运维控制台。
 
-当前产品版本为 `0.3.14`。`deep_agent.__version__` 是唯一代码版本来源，FastAPI、
+当前产品版本为 `0.3.15`。`deep_agent.__version__` 是唯一代码版本来源，FastAPI、
 `GET /info` 和 Console 顶部版本徽标均读取该值。后续正式发布默认递增
 `MAJOR.MINOR.PATCH` 的第三位，只有明确规划重大版本时才调整前两位。产品版本不通过
 环境变量或数据库覆盖，也不等同于 Alembic 数据库结构 revision。
@@ -53,6 +53,10 @@ v0.3.14 修复压缩与工具检索联调边界：每个 Pod 固定一个异步 
 MCP 预选以用户问题为主、Context Reference 标签仅作无命中回退，同时识别否定式只读表达，
 过滤明显副作用工具，并在单次 Run 内排除已披露工具和重复搜索。Pydantic AI 的跨 Run 工具
 发现历史恢复语义保持不变。
+
+v0.3.15 让模型目录的 `max_output_tokens` 真正作为普通与流式请求的模型输出上限生效；同时
+区分模型可纠正的 `ModelRetry` 与已经终止的 `ToolFailed`。附件下载、损坏、解析、超限和
+MCP Resource 上游失败不再无意义消耗工具重试次数，工具协议、SSE 和历史结构保持不变。
 
 ## 项目结构
 

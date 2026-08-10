@@ -6,7 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from mcp.types import Resource, ResourceTemplate, Tool
-from pydantic_ai import ModelRetry, RunContext
+from pydantic_ai import ModelRetry, RunContext, ToolFailed
 from pydantic_ai.messages import BinaryContent
 from pydantic_ai.models.test import TestModel
 from pydantic_ai.usage import RunUsage
@@ -706,6 +706,24 @@ class McpResourceToolsetTests(unittest.IsolatedAsyncioTestCase):
                     "deepfos://secret",
                 )
         build_client.assert_not_called()
+
+    async def test_upstream_resource_failures_are_terminal(self) -> None:
+        toolset = build_mcp_resource_toolset(_spec("mcp:docs"), [_row("docs")])
+        assert toolset is not None
+        failures = (
+            ("list_mcp_resources", "resources", ("docs",)),
+            ("list_mcp_resource_templates", "templates", ("docs",)),
+            ("read_mcp_resource", "read", ("docs", "deepfos://guide")),
+        )
+        for tool_name, stage, args in failures:
+            with self.subTest(tool=tool_name), patch(
+                "deep_agent.capabilities.mcp.resources.build_resource_client",
+                return_value=_FakeInspectionClient(
+                    errors={stage: RuntimeError("offline")}
+                ),
+            ):
+                with self.assertRaises(ToolFailed):
+                    await toolset.tools[tool_name].function(_ctx(), *args)
 
     async def test_binary_and_oversized_resources_are_not_injected(self) -> None:
         toolset = build_mcp_resource_toolset(_spec("mcp:docs"), [_row("docs")])

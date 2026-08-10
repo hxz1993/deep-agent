@@ -22,9 +22,14 @@ from deep_agent.options import OPTION
 
 
 def _model_settings_for_spec(spec: AgentSpec) -> ModelSettings | None:
-    if spec.temperature is None:
+    values: ModelSettings = {}
+    if spec.temperature is not None:
+        values["temperature"] = spec.temperature
+    if spec.max_output_tokens is not None:
+        values["max_tokens"] = spec.max_output_tokens
+    if not values:
         return None
-    return ModelSettings(temperature=spec.temperature)
+    return values
 
 
 async def build_runner(

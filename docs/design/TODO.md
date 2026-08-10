@@ -11,13 +11,13 @@
 - `暂缓`：当前明确不进入近期版本。
 - `已关闭`：已实现或已确认不做。
 
-## 近期主线（v0.3.14 后）
+## 近期主线（v0.3.15 后）
 
 近期研发集中在以下方向：
 
-1. **原生请求正确性**：先实施 `MODEL-001` 和 `TOOL-004`，让目录输出上限真正进入模型请求，并停止把明确终止错误误当成模型可纠正重试。
-2. **工具检索增强**：v0.3.12 已交付首版词法检索与渐进披露；后续根据真实召回数据评估 Embedding、Provider Native Search 和发现状态治理。
-3. **Skill**：以 Harness 0.18 的 `Skills` 渐进披露作为 Instructions 基础，把当前“Instructions + FunctionToolset”的最小 Python Skill 扩展为适合线上安装、版本管理和素材治理的完整能力包。
+1. **工具检索增强**：v0.3.12 已交付首版词法检索与渐进披露；后续根据真实召回数据评估 Embedding、Provider Native Search 和发现状态治理。
+2. **Skill**：以 Harness 0.18 的 `Skills` 渐进披露作为 Instructions 基础，把当前“Instructions + FunctionToolset”的最小 Python Skill 扩展为适合线上安装、版本管理和素材治理的完整能力包。
+3. **工具治理**：先建立跨 Function、MCP、UI 和附件工具的风险、副作用与权限元数据，再推进审批、Guardrail 和结果外置。
 4. **Output Tool（暂缓）**：0805 实验结论已归档；待多输出组合、普通文本与混合工具调用规则完成产品决策后再重新实施。
 
 工具检索首版已经落地。下一阶段优先收敛 Skill 协议与渐进披露；Output Tool 保留完整设计和实验
@@ -28,16 +28,16 @@
 | ID | 课题 | 事项 | 状态 | 依赖与验收 | 来源 |
 | --- | --- | --- | --- | --- | --- |
 | `TOOL-001` | 工具优化 | 增加工具定义数量、Schema 字节、调用/重试/失败、耗时和结果大小观测 | 可实施 | 先统一指标口径，不新增计费账本 | [工具质量契约](05-tool-optimization/tool-optimization-design.md#10-工具质量统一契约) |
-| `TOOL-002` | UI 工具 | Deferred UI 续跑前，后端按 `result_schema` 校验用户实际提交结果 | 可实施 | Schema 定义校验已存在；需补实际结果校验和错误响应 | [UI 工具历史与边界](01-ui-tools/ui-tools-history.md#仍需补齐的边界) |
+| `TOOL-002` | UI 工具 | Deferred UI 续跑前是否由公共层按 `result_schema` 强制校验结果 | 已关闭 | v0.3.15 决定不做公共层强校验；`result_schema` 用于前端渲染与协议说明，严格业务结果由业务恢复逻辑校验，副作用参数必须由真正后端工具复检 | [UI 工具历史与边界](01-ui-tools/ui-tools-history.md#结果-schema-边界) |
 | `TOOL-003` | 工具优化 | 建立风险、外部副作用和权限要求的统一元数据契约 | 待设计 | 需同时覆盖 Function、MCP、UI 和附件工具，并作为 `ToolGuardrail` 参数复检、结果清理与审批策略的统一输入 | [工具质量契约](05-tool-optimization/tool-optimization-design.md#10-工具质量统一契约) |
-| `TOOL-004` | 工具错误 | 按“模型可纠正”与“本次执行已终止”区分 `ModelRetry` 和 `ToolFailed` | 可实施 | 参数、工具选择等可修正错误继续 `ModelRetry`；下载失败、文件损坏、明确权限拒绝等终止错误改用 `ToolFailed`，避免模型盲目重试 | [工具质量契约](05-tool-optimization/tool-optimization-design.md#10-工具质量统一契约) |
+| `TOOL-004` | 工具错误 | 按“模型可纠正”与“本次执行已终止”区分 `ModelRetry` 和 `ToolFailed` | 已关闭 | v0.3.15 已收口附件下载、损坏、解析、超限和 MCP Resource 上游失败；UI、Sandbox 与普通 MCP Tool 保持原语义 | [工具质量契约](05-tool-optimization/tool-optimization-design.md#10-工具质量统一契约) |
 | `TOOL-103` | 工具优化 | 无合法会话附件时隐藏整个附件读取工具包 | 已关闭 | v0.3.12 已实施；有合法附件时整包披露三个读取工具，调用时仍执行文件权限校验 | [附件请求级过滤](05-tool-optimization/tool-optimization-design.md#81-preparetools) |
 | `TOOL-104` | 工具优化 | 分离 MCP 工具协议名与聊天展示名 | 可实施 | 保留稳定命名空间和历史兼容；Console 使用独立 `display_name` 隐藏冗长前缀 | [Toolset 展示命名](05-tool-optimization/tool-optimization-design.md#83-toolset-组合与展示命名) |
 | `TOOL-105` | 结构化最终输出 | 实施 Agent 可选的多种 Output Tool | 暂缓 | 0805 实验已归档；重新实施前需锁定可选/严格模式、多输出组合和混合调用确定性重试规则 | [结构化最终输出设计](09-structured-output/structured-output-design.md#103-0805-实验实现的归档结论) |
 | `TOOL-201` | 工具检索 | 实施 MCP 工具检索与渐进披露机制 | 已关闭 | v0.3.12 已实施；v0.3.14 补齐用户问题优先、只读副作用过滤、已披露排除和单 Run 重复搜索去重；跨 Run 发现状态继续遵循 Pydantic AI | [工具检索设计](13-tool-discovery/tool-discovery-design.md) |
 | `SKILL-001` | Skill | 设计并实施线上 Skill 安装、版本管理与渐进披露 | 可实施 | Harness `Skills` 负责 SKILL.md 正文渐进披露；DeepAgent 负责授权、版本、References、Assets、工具与执行隔离 | [Skill 体系](12-agent-skills/skill-system-design.md) |
-| `ATT-001` | 附件解析 | 固化真实附件读取、上下文压缩和 Checkpoint 更新的端到端测试 | 可实施 | 覆盖上传、分页读取、SSE、历史恢复与压缩 | [验证边界](06-attachment-parsing/attachment-parsing-design.md#10-验证边界) |
-| `MODEL-001` | 模型请求 | 将模型目录的 `max_output_tokens` 通过 Pydantic AI `ModelSettings.max_tokens` 应用于普通和流式请求 | 可实施 | 不能只用于预算和摘要；验证 DeepSeek、OpenAI-compatible、Anthropic 和 Google 的参数映射及未配置时的兼容行为 | [模型目录设计](04-model-catalog/model-catalog-design.md) |
+| `ATT-001` | 附件解析 | 固化真实附件读取、上下文压缩和 Checkpoint 更新的端到端测试 | 已关闭 | v0.3.15 目标回归覆盖 TXT/DOCX/XLSX 分页、条件披露、SSE、历史以及附件与 Checkpoint 原始历史边界 | [验证边界](06-attachment-parsing/attachment-parsing-design.md#10-验证边界) |
+| `MODEL-001` | 模型请求 | 将模型目录的 `max_output_tokens` 通过 Pydantic AI `ModelSettings.max_tokens` 应用于普通和流式请求 | 已关闭 | v0.3.15 已实施；未配置时保持 Provider 默认，摘要继续使用独立动态上限 | [模型目录设计](04-model-catalog/model-catalog-design.md) |
 | `ART-001` | Artifact 交互 | Artifact 最小语义（登记/元数据/TTL/权限；可不接外部 sink） | 待设计 | 合法 id 不得从 Checkpoint 猜造；存储落点待决 | [08 分期 A0](08-artifact-export/README.md#建议分期先语义后-sink) |
 | `ART-001b` | Artifact 交互 | 可选 sink：下载中心 publish（upload + business.save） | 待设计 | 依赖 ART-001；非唯一成功标准 | [设计纲要 S0](08-artifact-export/artifact-export-design.md#32-可选-sink下载中心s0) |
 

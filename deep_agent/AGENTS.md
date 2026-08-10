@@ -71,6 +71,10 @@ Pydantic AI `CancellationToken`。Runner 捕获 `RunCancelled` 后只持久化
 `RetryPromptPart` 必须映射为 `tool_call_removed(reason=model_retry)`。客户端按
 `tool_call_id` 删除临时卡片，修正后的新调用再按新的 ID 正常展示。
 
+工具错误需按可纠正性分类：参数、对象选择或工具选择错误使用 `ModelRetry`；同样参数重试也
+不会成功的下载、文件损坏、解析、大小上限或明确上游失败使用 `ToolFailed`。两者都由
+Pydantic AI 形成合法 Tool Result，但只有 `ModelRetry` 消耗工具重试预算并要求模型纠正。
+
 流式接口必须先把 Active Run 注册到 Registry，再发布首条 `session` SSE，并将同一个
 `CancellationToken` 传入 Runner。否则客户端刚拿到 `session_id` 就停止时，会在用户消息尚未
 持久化的窗口内误报 `404 Session not found`。

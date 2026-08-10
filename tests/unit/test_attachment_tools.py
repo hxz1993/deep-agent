@@ -7,8 +7,15 @@ from unittest.mock import AsyncMock, Mock, patch
 
 from docx import Document
 from openpyxl import Workbook
-from pydantic_ai import ModelRetry, RunContext
-from pydantic_ai.messages import ToolReturn
+from pydantic_ai import Agent, ModelRetry, RunContext, ToolFailed
+from pydantic_ai.messages import (
+    ModelResponse,
+    TextPart,
+    ToolCallPart,
+    ToolReturn,
+    ToolReturnPart,
+)
+from pydantic_ai.models.function import AgentInfo, FunctionModel
 from pydantic_ai.models.test import TestModel
 from pydantic_ai.usage import RunUsage
 
@@ -153,7 +160,7 @@ class AttachmentToolTests(unittest.IsolatedAsyncioTestCase):
         download.assert_awaited_once()
         parser.assert_called_once()
 
-    async def test_failed_download_is_not_cached(self) -> None:
+    async def test_failed_download_is_terminal_and_not_cached(self) -> None:
         ref = AttachmentRef(id="text-failure", name="note.txt", mime="text/plain")
         context = _context(ref)
         tool = await self._tool("read_text_attachment")
@@ -163,11 +170,84 @@ class AttachmentToolTests(unittest.IsolatedAsyncioTestCase):
             side_effect=AttachmentDownloadError("denied"),
         ) as download:
             for _ in range(2):
-                with self.assertRaises(ModelRetry):
+                with self.assertRaises(ToolFailed):
                     await tool.call_func({"file_id": ref.id}, context)
         self.assertEqual(download.await_count, 2)
         self.assertFalse(context.deps.attachment_bytes)
         self.assertFalse(context.deps.attachment_download_tasks)
+
+    async def test_oversized_download_is_terminal(self) -> None:
+        ref = AttachmentRef(id="text-large", name="large.txt", mime="text/plain")
+        tool = await self._tool("read_text_attachment")
+        with patch(
+            "deep_agent.capabilities.attachments.builtin._download_file",
+            new_callable=AsyncMock,
+            return_value=b"too-large",
+        ), patch(
+            "deep_agent.capabilities.attachments.builtin.max_upload_bytes",
+            return_value=4,
+        ):
+            with self.assertRaises(ToolFailed):
+                await tool.call_func({"file_id": ref.id}, _context(ref))
+
+    async def test_corrupt_docx_is_terminal(self) -> None:
+        ref = AttachmentRef(
+            id="docx-corrupt",
+            name="broken.docx",
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
+        tool = await self._tool("read_docx")
+        with patch(
+            "deep_agent.capabilities.attachments.builtin._download_file",
+            new_callable=AsyncMock,
+            return_value=b"not-a-docx",
+        ):
+            with self.assertRaises(ToolFailed):
+                await tool.call_func({"file_id": ref.id}, _context(ref))
+
+    async def test_tool_failed_becomes_tool_result_and_model_can_continue(self) -> None:
+        ref = AttachmentRef(id="text-terminal", name="note.txt", mime="text/plain")
+        responses = 0
+
+        def respond(messages, _info: AgentInfo) -> ModelResponse:
+            nonlocal responses
+            responses += 1
+            if responses == 1:
+                return ModelResponse(
+                    parts=[
+                        ToolCallPart(
+                            "read_text_attachment",
+                            {"file_id": ref.id},
+                            "attachment-failed",
+                        )
+                    ]
+                )
+            return ModelResponse(parts=[TextPart(content="附件不可用，已向用户说明。")])
+
+        package = build_attachment_tool_package()
+        agent = Agent(
+            FunctionModel(respond),
+            deps_type=AgentDeps,
+            toolsets=[package.toolset],
+        )
+        deps = _context(ref).deps
+        with patch(
+            "deep_agent.capabilities.attachments.builtin._download_file",
+            new_callable=AsyncMock,
+            side_effect=AttachmentDownloadError("offline"),
+        ):
+            result = await agent.run("读取附件", deps=deps)
+
+        self.assertEqual(result.output, "附件不可用，已向用户说明。")
+        tool_results = [
+            part
+            for message in result.all_messages()
+            for part in message.parts
+            if isinstance(part, ToolReturnPart)
+        ]
+        self.assertEqual(len(tool_results), 1)
+        self.assertEqual(tool_results[0].tool_name, "read_text_attachment")
+        self.assertIn("下载失败", str(tool_results[0].content))
 
     async def test_docx_reads_blocks_and_only_returns_images_on_first_page(self) -> None:
         from PIL import Image

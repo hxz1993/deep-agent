@@ -11,14 +11,43 @@ from pydantic_ai.settings import ModelSettings
 
 
 class ModelSettingsHelperTests(unittest.TestCase):
-    def test_none_when_temperature_unset(self) -> None:
-        self.assertIsNone(_model_settings_for_spec(AgentSpec(name="t", model="x", instructions="")))
+    def test_none_when_temperature_and_output_limit_unset(self) -> None:
+        self.assertIsNone(
+            _model_settings_for_spec(AgentSpec(name="t", model="x", instructions=""))
+        )
 
-    def test_builds_settings_when_temperature_set(self) -> None:
+    def test_builds_settings_with_temperature_only(self) -> None:
         spec = AgentSpec(name="t", model="x", instructions="", temperature=0.7)
         settings = _model_settings_for_spec(spec)
         self.assertIsNotNone(settings)
         self.assertEqual(settings["temperature"], 0.7)
+        self.assertNotIn("max_tokens", settings)
+
+    def test_builds_settings_with_output_limit_only(self) -> None:
+        spec = AgentSpec(
+            name="t",
+            model="x",
+            instructions="",
+            max_output_tokens=2048,
+        )
+        settings = _model_settings_for_spec(spec)
+        self.assertIsNotNone(settings)
+        self.assertEqual(settings["max_tokens"], 2048)
+        self.assertNotIn("temperature", settings)
+
+    def test_merges_temperature_and_output_limit(self) -> None:
+        spec = AgentSpec(
+            name="t",
+            model="x",
+            instructions="",
+            temperature=0.4,
+            max_output_tokens=4096,
+        )
+        settings = _model_settings_for_spec(spec)
+        self.assertEqual(
+            settings,
+            ModelSettings(temperature=0.4, max_tokens=4096),
+        )
 
 
 class BuildRunnerTests(unittest.IsolatedAsyncioTestCase):

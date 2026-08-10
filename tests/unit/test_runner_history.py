@@ -17,6 +17,7 @@ from pydantic_ai.messages import (
 )
 from pydantic_ai.models.function import FunctionModel
 from pydantic_ai.models.test import TestModel
+from pydantic_ai.settings import ModelSettings
 from pydantic_ai.usage import UsageLimits
 
 from deep_agent.agent.deps import AgentDeps
@@ -90,6 +91,35 @@ class AgentRunnerHistoryTests(unittest.IsolatedAsyncioTestCase):
         history = await self.store.get_history("sess-ok")
         user_messages = [m for m in history if is_user_only_request(m)]
         self.assertEqual(len(user_messages), 1)
+
+    async def test_run_stream_passes_merged_model_settings(self) -> None:
+        agent = Agent(TestModel(), deps_type=AgentDeps)
+        settings = ModelSettings(temperature=0.2, max_tokens=1024)
+        runner = AgentRunner(
+            agent,
+            self.store,
+            UsageLimits(request_limit=10),
+            model_settings=settings,
+        )
+        deps = AgentDeps(session_id="sess-model-settings")
+
+        with patch.object(
+            agent,
+            "run_stream_events",
+            wraps=agent.run_stream_events,
+        ) as run_stream_events:
+            async for _ in runner.run_stream(
+                "sess-model-settings",
+                "hello",
+                deps,
+                persister=self.persister,
+            ):
+                pass
+
+        self.assertEqual(
+            run_stream_events.call_args.kwargs["model_settings"],
+            settings,
+        )
 
     async def test_branch_from_truncates_and_restarts(self) -> None:
         agent = Agent(TestModel(), deps_type=AgentDeps)

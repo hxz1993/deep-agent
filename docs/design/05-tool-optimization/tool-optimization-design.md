@@ -426,7 +426,7 @@ Output Tool 不属于 UI Tool Package，也不加入 `agents.capabilities`。多
 
 仍需补强：
 
-- 后端按 `result_schema` 校验前端返回结果。
+- 严格业务 UI Tool 在自己的恢复逻辑中校验结果；公共层不按 `result_schema` 强制拒绝提交。
 - 工具执行权限和当前 App/页面/表单实例绑定。
 - 对修改型 UI Tool 区分预览、确认、执行和失败。
 - 工具结果增加版本冲突、部分成功和拒绝语义。
@@ -947,8 +947,12 @@ Invalid request
 - `ToolFailed`：明确权限拒绝、文件损坏、下载失败或上游已经确定终止等，本次执行已经失败；继续让
   模型使用相同工具盲目重试只会增加请求和 Token。
 
-该分类不改变稳定工具协议名和历史主结构，但 REST/SSE/History 必须保留可解释的失败原因，不能把
-`ToolFailed` 持久化为正常完成。
+该分类不改变稳定工具协议名和历史主结构。`ToolFailed` 会成为带失败原因的合法 Tool Result，
+模型仍可据此继续回答；REST/SSE/History 不能丢弃失败语义或把该次工具执行伪装成成功。
+
+v0.3.15 首批只改无歧义路径：附件下载、损坏、解析和读取上限，以及 MCP Resource 已发起的
+list/read 上游失败使用 `ToolFailed`；文件 ID、MIME、分页范围、Resource Server 选择等模型可
+修正错误继续使用 `ModelRetry`。UI Tool 参数、Sandbox 和普通 MCP Tool 暂不扩大调整范围。
 
 ## 11. 设计优先级参考
 
@@ -1009,7 +1013,7 @@ Invalid request
 - Agent 未选择时工具不可见。
 - 参数不完整时不向前端发布可操作组件。
 - Pending 刷新后可恢复。
-- `result_schema` 服务端验证。
+- `result_schema` 用于前端渲染和协议说明；严格业务校验在业务恢复层完成。
 - `tool_call_id`、用户、会话和页面实例绑定。
 - 重复提交幂等。
 - 取消、拒绝、冲突和超时可恢复。

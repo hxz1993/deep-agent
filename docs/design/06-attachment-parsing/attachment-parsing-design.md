@@ -263,6 +263,7 @@ chat_messages
 - XLSX 首个可见工作表、显式 sheet 和分页正确。
 - UTF-16、UTF-8、GB18030 和 JSON 文本正确。
 - Office 损坏、加密、路径穿越和压缩异常给出稳定错误。
+- 文件 ID、MIME 和分页范围错误使用 `ModelRetry`；下载失败、文件损坏、解析失败和超过读取上限使用 `ToolFailed`。
 - Agent 未选择 `builtin:attachment` 时工具列表为空；选择后加载包内三个工具。
 - 图片/音频/视频/PDF 只服从模型原生模态。
 - 真实文件解析、API → Tool → SSE → 持久化 → 会话续读链路通过。

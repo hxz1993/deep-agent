@@ -767,6 +767,10 @@ class ContextCheckpointTests(unittest.IsolatedAsyncioTestCase):
             run.await_args_list[0].args[0],
             run.await_args_list[1].args[0],
         )
+        self.assertEqual(
+            run.await_args_list[0].kwargs["model_settings"]["max_tokens"],
+            500,
+        )
         sleep.assert_awaited_once_with(1.0)
         self.assertEqual(state.telemetry.summary_calls, 2)
         self.assertEqual(state.telemetry.summary_chunks, 1)

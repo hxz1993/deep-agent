@@ -1,0 +1,2 @@
+# Development-only test tooling. Production images continue to install requirements.txt.
+coverage==7.10.6

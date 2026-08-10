@@ -129,6 +129,12 @@ v0.3.13 起，自动压缩的内部摘要复用正式 Run 的 Pydantic AI `Cance
 Tool Search 和 Provider Native Tool。Provider 原生 OpenAI/Anthropic Compaction 暂不与
 DeepAgent Checkpoint 混用；只有不透明 `provider_details` 的 `CompactionPart` 继续拒绝落盘。
 
+v0.3.16 起，自动与主动压缩必须调用同一个“确定性整理 → 单次摘要 → 目标复检”内部投影流程。
+摘要输出固定为任务目标与约束、关键决策及理由、事实/文件/标识和工具结论、当前状态、下一步、未决问题
+与阻塞六段；旧摘要只作为一次锚点更新。运行压缩相关改动时执行
+`python3.12 tests/check_context_compaction_coverage.py`，核心行覆盖率不得低于 95%，分支覆盖率
+不得低于 85%。
+
 v0.3.14 起部署入口固定每个 Pod 一个异步 Gunicorn Worker，使 session 取消请求与进程内
 `ActiveRunRegistry` 一致命中。主动压缩的 `context_compaction_result` 不再等待二次
 `context-status` 查询，客户端收到终态后分别刷新 history 与 context-status。多个 Pod 的正式

@@ -3,7 +3,7 @@
 DeepAgent 是基于 FastAPI、Pydantic AI 和 SQLAlchemy 的多用户 Agent 服务，并
 随服务发布一体化运维控制台。
 
-当前产品版本为 `0.3.15`。`deep_agent.__version__` 是唯一代码版本来源，FastAPI、
+当前产品版本为 `0.3.16`。`deep_agent.__version__` 是唯一代码版本来源，FastAPI、
 `GET /info` 和 Console 顶部版本徽标均读取该值。后续正式发布默认递增
 `MAJOR.MINOR.PATCH` 的第三位，只有明确规划重大版本时才调整前两位。产品版本不通过
 环境变量或数据库覆盖，也不等同于 Alembic 数据库结构 revision。
@@ -57,6 +57,10 @@ MCP 预选以用户问题为主、Context Reference 标签仅作无命中回退�
 v0.3.15 让模型目录的 `max_output_tokens` 真正作为普通与流式请求的模型输出上限生效；同时
 区分模型可纠正的 `ModelRetry` 与已经终止的 `ToolFailed`。附件下载、损坏、解析、超限和
 MCP Resource 上游失败不再无意义消耗工具重试次数，工具协议、SSE 和历史结构保持不变。
+
+v0.3.16 将自动和主动压缩收敛到同一内部投影流程，并以固定六段结构更新摘要；旧摘要作为
+单一锚点合并新事实，不累积摘要列表。自动阈值、主动接口、SSE、Checkpoint 和失败兜底语义
+保持不变，压缩核心通过独立覆盖率门槛检查。
 
 ## 项目结构
 
@@ -159,6 +163,10 @@ DeepAgent 当前支持：
 ```bash
 python3.12 -m unittest discover -s tests -p 'test_*.py'
 node --test tests/frontend/console/*.test.mjs
+
+# 压缩核心覆盖率门槛（开发依赖，不进入生产镜像）
+python3.12 -m pip install -r requirements-dev.txt
+python3.12 tests/check_context_compaction_coverage.py
 ```
 
 具体开发和测试要求见根目录及子目录的 `AGENTS.md`。

@@ -91,11 +91,12 @@ Run 外接收一组 `ModelMessage`，调用同一个摘要策略并返回压缩�
   Sliding Window 均不得覆盖旧 Checkpoint。
 - Context Reference 的 `metadata` 不能进入摘要，模型或策略变化要让旧投影失效。
 
-因此最合理的复用方式不是再叠一层 Capability，而是把 `compact_now(SummarizingCompaction)` 放到
-现有 Checkpoint 事务内部，只替换“单次生成摘要并重组模型历史”这一步；DeepAgent 继续负责外层预算、
-脱敏、目标复检、CAS、SSE 和持久化。正式采用前要用同一批真实历史做差异黑盒测试，确认工具配对、
-旧摘要只进入一次、首条任务保留、Context Reference 脱敏和摘要后 Token 目标均不退化。若不能通过
-公开 API 实现这些约束，就继续保留当前摘要内核，不调用 Harness 私有函数。
+v0.3.16 的最终结论是不整体接入 `compact_now(SummarizingCompaction)`：公开 API 虽能生成摘要，
+但仍不具备工具 Schema 完整请求预算、动态摘要输出上限、DeepAgent 主动压缩 SSE、目标复检以及
+Checkpoint Hash/CAS 事务语义。为了避免“框架摘要 + 产品事务”形成两层难以验证的控制流，当前
+继续复用 Harness 的 Clamp、文件读取去重和工具结果清理等公开确定性 tiers；语义摘要保留在
+DeepAgent 内部，并将自动/主动入口收敛到同一投影流程。若 Harness 后续公开接口能覆盖上述差异，
+再以黑盒等价测试重新评估，不调用其私有函数。
 
 ### Harness 0.18 后续采用项
 

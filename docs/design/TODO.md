@@ -12,7 +12,7 @@
 - `暂缓`：当前明确不进入近期版本。
 - `已关闭`：已实现或已确认不做。
 
-## 近期主线（v0.3.15 后）
+## 近期主线（v0.3.16 后）
 
 近期研发集中在以下方向：
 
@@ -74,7 +74,7 @@
 | `ART-201` | Artifact 交互 | 配额、审计、共享存储与 Harness Spill 对照 | 暂缓 | 多实例与运维就绪后 | [分期 G0](08-artifact-export/README.md#建议分期先语义后-sink) |
 | `CONSOLE-201` | 运维控制台 | 增加工作台消息检查模式，在右侧按选中对象查看 Markdown 原文、历史结构、上下文引用、工具参数/结果和当前 Run 的 SSE 事件帧 | 待设计 | 历史只读数据与当前 Run 内存事件必须分开；第一版不把完整 SSE 流持久化到数据库，不暴露敏感 Provider 请求 | [运行检查器](02-operations-console/operations-console-design.md#运行检查器) |
 | `CTX-102` | 历史检索 | 基于现有 SQL 会话接入 Harness `ConversationSearch` | 待设计 | 实现读取 `chat_messages` 的自定义 `HistorySource`，不启用第二套 `StepPersistence`；默认只检索当前会话，跨会话必须显式设计 user/App/Space 权限与审计 | [Harness 0.18 后续采用项](03-context-compaction/context-compaction-research.md#harness-018-后续采用项) |
-| `CTX-103` | 上下文压缩 | 评估以 Harness `SummarizingCompaction` 作为摘要内核 | 待设计 | 仅替换“生成摘要与重组模型历史”步骤；补齐其工具 Schema 未计入触发预算、摘要无输出上限的差异，保留主动压缩 SSE、目标复检、Checkpoint Hash/CAS 和原始 SQL 历史，先完成黑盒测试 | [Harness 原生压缩复用边界](03-context-compaction/context-compaction-research.md#harness-018-原生压缩复用边界) |
+| `CTX-103` | 上下文压缩 | 评估以 Harness `SummarizingCompaction` 作为摘要内核 | 已关闭 | v0.3.16 确认不整体迁移：继续复用公开确定性 tiers，自动/主动共用内部投影流程并采用六段增量摘要；Harness 当前缺少工具 Schema 预算、摘要输出上限和 DeepAgent Checkpoint 事务语义，待其接口成熟后重新评估 | [Harness 原生压缩复用边界](03-context-compaction/context-compaction-research.md#harness-018-原生压缩复用边界) |
 | `MODEL-201` | 模型请求 | 评估 Agent 显式配置 Pydantic AI `FallbackModel` | 暂缓 | 只能由 Agent 明确选择候选模型，并先锁定成本、数据出境、能力差异和失败切换口径；禁止平台静默全局回退 | [Pydantic AI 2.26 原生能力采用项](03-context-compaction/context-compaction-research.md#pydantic-ai-226-原生能力采用项) |
 | `MODEL-202` | Thinking | 评估 Pydantic AI 原生 Thinking 配置统一跨 Provider 推理参数 | 待设计 | 需与模型目录能力、Console 配置、历史/SSE 展示一起设计；不得重新引入 DeepSeek 专用兼容模型 | [Pydantic AI 2.26 原生能力采用项](03-context-compaction/context-compaction-research.md#pydantic-ai-226-原生能力采用项) |
 | `TOOL-203` | 工具结果 | 按工具选择性评估 `IncludeToolReturnSchemas` | 暂缓 | 只用于模型确实需要理解返回结构的少量工具；先测 Schema Token 增量，不对全部 MCP/Function Tool 开启 | [工具质量契约](05-tool-optimization/tool-optimization-design.md#10-工具质量统一契约) |

@@ -45,11 +45,18 @@ from deep_agent.agent.context.compaction import (
     ContextWindowExceededError,
     DeepAgentContextCompaction,
     SummaryUnavailable,
+    _first_user_message,
+    _formatted_history,
     _is_transient_summary_error,
+    _last_user_message,
     _logical_units,
+    _protected_messages,
     _safe_boundaries,
+    _safe_tail_cutoff,
+    _status_code,
     _summary_prompt,
     _summary_safety_tokens,
+    _system_parts,
     _strip_summary_and_system,
 )
 from deep_agent.agent.context_references import context_reference_dict
@@ -280,6 +287,78 @@ class ContextBudgetTests(unittest.TestCase):
 
 
 class ContextCompactionAlgorithmTests(unittest.TestCase):
+    def test_projection_helpers_cover_empty_duplicate_and_mixed_parts(self) -> None:
+        summary = SystemPromptPart(content="Summary of previous conversation:\n\n旧摘要")
+        shared = SystemPromptPart(content="公共系统规则")
+        first = ModelRequest(
+            parts=[shared, shared, summary, UserPromptPart(content="首个任务")]
+        )
+        last = ModelRequest(parts=[UserPromptPart(content="当前问题")])
+        messages = [
+            ModelResponse(parts=[]),
+            first,
+            ModelResponse(parts=[TextPart(content="中间结论")]),
+            last,
+        ]
+
+        self.assertEqual(_system_parts(messages), [shared])
+        self.assertIs(_first_user_message(messages), first)
+        self.assertIs(_last_user_message(messages), last)
+        self.assertIsNone(_first_user_message([ModelResponse(parts=[])]))
+        self.assertIsNone(_last_user_message([ModelResponse(parts=[])]))
+        self.assertEqual(
+            _protected_messages(messages),
+            [ModelRequest(parts=[shared]), first, last],
+        )
+
+        formatted = _formatted_history(messages)
+        self.assertIn('"kind":"text"', formatted)
+        self.assertIn("旧摘要", formatted)
+
+    def test_safe_tail_cutoff_keeps_largest_tail_within_budget(self) -> None:
+        estimator = TokenEstimator(
+            source="unit_counter",
+            _counter=lambda text: len(text),
+        )
+        messages = [
+            ModelRequest(parts=[UserPromptPart(content="a" * 30)]),
+            ModelResponse(parts=[TextPart(content="b" * 30)]),
+            ModelRequest(parts=[UserPromptPart(content="c")]),
+        ]
+
+        cutoff = _safe_tail_cutoff(messages, keep_tokens=60, estimator=estimator)
+
+        self.assertGreater(cutoff, 0)
+        self.assertLessEqual(estimator.messages(messages[cutoff:]), 200)
+
+    def test_status_code_follows_response_and_exception_chain(self) -> None:
+        response_error = RuntimeError("response status")
+        response_error.response = SimpleNamespace(status_code=503)  # type: ignore[attr-defined]
+        self.assertEqual(_status_code(response_error), 503)
+
+        outer = RuntimeError("outer")
+        outer.__cause__ = response_error
+        self.assertEqual(_status_code(outer), 503)
+        self.assertIsNone(_status_code(ValueError("no status")))
+
+    def test_summary_prompt_uses_stable_continuation_sections(self) -> None:
+        prompt = _summary_prompt(
+            [ModelRequest(parts=[UserPromptPart(content="继续交付当前任务")])],
+            None,
+        )
+
+        for heading in (
+            "## 任务目标与约束",
+            "## 关键决策及理由",
+            "## 事实、文件、标识和工具结论",
+            "## 当前状态",
+            "## 下一步",
+            "## 未决问题与阻塞",
+        ):
+            self.assertIn(heading, prompt)
+        self.assertIn("不要添加前言或代码围栏", prompt)
+        self.assertNotIn("上一次压缩形成的锚点摘要", prompt)
+
     def test_summary_safety_uses_estimator_specific_margin(self) -> None:
         conservative = TokenEstimator.conservative()
         tokenizer = TokenEstimator(
@@ -325,6 +404,9 @@ class ContextCompactionAlgorithmTests(unittest.TestCase):
         self.assertNotIn("最初任务", prompt)
         self.assertIn("旧回答", prompt)
         self.assertIn("新增问题", prompt)
+        self.assertIn("保留仍然成立的内容", prompt)
+        self.assertIn("删除已经过时的状态", prompt)
+        self.assertIn("不要累计重复条目", prompt)
 
     def test_summary_units_keep_tool_call_and_result_together(self) -> None:
         messages = [
@@ -369,6 +451,227 @@ class ContextCompactionAlgorithmTests(unittest.TestCase):
                 for part in message.parts
             )
         )
+
+
+class ContextCompactionDefensiveBranchTests(unittest.IsolatedAsyncioTestCase):
+    @staticmethod
+    def _request_context(messages: list[ModelMessage]) -> ModelRequestContext:
+        model = TestModel()
+        return ModelRequestContext(
+            model=model,
+            messages=messages,
+            model_settings=None,
+            model_request_parameters=ModelRequestParameters(),
+        )
+
+    async def test_before_run_initializes_state_and_disabled_budget_returns_unchanged(
+        self,
+    ) -> None:
+        capability = DeepAgentContextCompaction(
+            context_window_tokens=0,
+            max_output_tokens=None,
+        )
+        deps = AgentDeps(session_id="disabled-context")
+        ctx = RunContext(deps=deps, model=TestModel(), usage=RunUsage())
+        request_context = self._request_context(
+            [ModelRequest(parts=[UserPromptPart(content="你好")])]
+        )
+
+        await capability.before_run(ctx)
+        returned = await capability.before_model_request(ctx, request_context)
+
+        self.assertIs(returned, request_context)
+        self.assertIsNotNone(deps.context_state)
+        self.assertFalse(deps.context_state.last_budget.enabled)  # type: ignore[union-attr]
+
+    async def test_after_model_request_records_estimated_and_provider_usage(self) -> None:
+        capability = DeepAgentContextCompaction(
+            context_window_tokens=4_000,
+            max_output_tokens=500,
+        )
+        state = ContextRunState(
+            raw_history=[],
+            estimator=TokenEstimator.conservative(),
+        )
+        state.pending_request_estimate = 200
+        ctx = RunContext(
+            deps=AgentDeps(session_id="usage", context_state=state),
+            model=TestModel(),
+            usage=RunUsage(),
+        )
+        request_context = self._request_context([])
+
+        estimated_response = ModelResponse(
+            parts=[TextPart(content="需要估算的回复")],
+            usage=RequestUsage(),
+        )
+        await capability.after_model_request(
+            ctx,
+            request_context=request_context,
+            response=estimated_response,
+        )
+        provider_response = ModelResponse(
+            parts=[TextPart(content="provider usage")],
+            usage=RequestUsage(input_tokens=100, output_tokens=20),
+        )
+        await capability.after_model_request(
+            ctx,
+            request_context=request_context,
+            response=provider_response,
+        )
+
+        self.assertEqual(
+            [sample.usage_source for sample in state.output_samples],
+            ["estimated", "provider"],
+        )
+        self.assertEqual(state.telemetry.estimation_error_ratio, 1.0)
+
+    async def test_projection_reports_target_and_summary_contract_failures(self) -> None:
+        capability = DeepAgentContextCompaction(
+            context_window_tokens=4_000,
+            max_output_tokens=500,
+        )
+        state = ContextRunState(
+            raw_history=[],
+            estimator=TokenEstimator.conservative(),
+        )
+        ctx = RunContext(deps=None, model=TestModel(), usage=RunUsage())
+        request_context = self._request_context(
+            [ModelRequest(parts=[UserPromptPart(content="需要压缩" * 50)])]
+        )
+
+        with (
+            patch.object(
+                capability,
+                "_deterministic_compaction",
+                new=AsyncMock(return_value=request_context.messages),
+            ),
+            patch.object(
+                capability,
+                "_summarize_projection",
+                new=AsyncMock(return_value=request_context.messages),
+            ),
+        ):
+            with self.assertRaises(SummaryUnavailable) as target_failure:
+                await capability._compact_projection(
+                    request_context.messages,
+                    ctx,
+                    request_context,
+                    1,
+                    state,
+                    require_summary=False,
+                    emit_deterministic=True,
+                    reserve_answer_request=False,
+                )
+        self.assertEqual(target_failure.exception.reason, "target_not_met")
+
+        short = [ModelRequest(parts=[UserPromptPart(content="短历史")])]
+        short_context = self._request_context(short)
+        with (
+            patch.object(
+                capability,
+                "_deterministic_compaction",
+                new=AsyncMock(return_value=short),
+            ),
+            patch.object(
+                capability,
+                "_summarize_projection",
+                new=AsyncMock(return_value=short),
+            ),
+        ):
+            with self.assertRaises(SummaryUnavailable) as summary_failure:
+                await capability._compact_projection(
+                    short,
+                    ctx,
+                    short_context,
+                    10_000,
+                    state,
+                    require_summary=True,
+                    emit_deterministic=False,
+                    reserve_answer_request=False,
+                )
+        self.assertEqual(summary_failure.exception.reason, "summary_not_applied")
+
+        with patch.object(
+            capability,
+            "_deterministic_compaction",
+            new=AsyncMock(return_value=short),
+        ):
+            compacted, estimated = await capability._compact_projection(
+                short,
+                ctx,
+                short_context,
+                10_000,
+                state,
+                require_summary=False,
+                emit_deterministic=False,
+                reserve_answer_request=True,
+            )
+        self.assertEqual(compacted, short)
+        self.assertLess(estimated, 10_000)
+
+    async def test_single_summary_rejects_empty_output(self) -> None:
+        capability = DeepAgentContextCompaction(
+            context_window_tokens=8_000,
+            max_output_tokens=500,
+        )
+        state = ContextRunState(
+            raw_history=[],
+            estimator=TokenEstimator.conservative(),
+            usage_limits=UsageLimits(request_limit=5),
+        )
+        ctx = RunContext(deps=None, model=TestModel(), usage=RunUsage())
+        result = SimpleNamespace(output="   ")
+
+        with patch(
+            "deep_agent.agent.context.compaction.Agent.run",
+            new=AsyncMock(return_value=result),
+        ):
+            with self.assertRaises(SummaryUnavailable) as raised:
+                await capability._single_summary(
+                    [ModelResponse(parts=[TextPart(content="旧历史")])],
+                    None,
+                    ctx,
+                    500,
+                    state,
+                    reserve_answer_request=False,
+                )
+
+        self.assertEqual(raised.exception.reason, "summary_empty")
+
+    def test_sliding_window_preserves_system_and_reports_hard_overflow(self) -> None:
+        capability = DeepAgentContextCompaction(
+            context_window_tokens=4_000,
+            max_output_tokens=500,
+        )
+        estimator = TokenEstimator.conservative()
+        messages = [
+            ModelRequest(
+                parts=[
+                    SystemPromptPart(content="系统规则"),
+                    UserPromptPart(content="首条任务"),
+                ]
+            ),
+            ModelResponse(parts=[TextPart(content="旧内容" * 50)]),
+            ModelRequest(parts=[UserPromptPart(content="最近问题")]),
+        ]
+        request_context = self._request_context(messages)
+
+        compacted = capability._sliding_window(
+            messages,
+            request_context,
+            500,
+            estimator,
+        )
+        self.assertIn("系统规则", str(compacted))
+
+        with self.assertRaises(ContextWindowExceededError):
+            capability._sliding_window(
+                messages,
+                request_context,
+                1,
+                estimator,
+            )
 
 
 class ContextCheckpointTests(unittest.IsolatedAsyncioTestCase):
@@ -887,12 +1190,7 @@ class ContextCheckpointTests(unittest.IsolatedAsyncioTestCase):
         with (
             patch.object(
                 capability,
-                "_deterministic_compaction",
-                new=AsyncMock(return_value=request_context.messages),
-            ),
-            patch.object(
-                capability,
-                "_summarize_to_target",
+                "_compact_projection",
                 new=AsyncMock(side_effect=cancelled),
             ),
             patch.object(capability, "_sliding_window") as sliding,

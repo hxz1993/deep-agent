@@ -19,6 +19,9 @@ env/
 
 # Tooling
 .pytest_cache/
+.coverage
+coverage.json
+htmlcov/
 .ruff_cache/
 .mypy_cache/
 .idea/

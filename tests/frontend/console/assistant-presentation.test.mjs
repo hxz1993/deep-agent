@@ -16,6 +16,10 @@ const workspaceCss = await readFile(
   new URL("../../../frontend/console/workspace.css", import.meta.url),
   "utf8",
 );
+const themesCss = await readFile(
+  new URL("../../../frontend/console/themes.css", import.meta.url),
+  "utf8",
+);
 
 test("连续 assistant 历史按 user turn 合并为一个可视回答", () => {
   const items = buildHistoryVisualItems([
@@ -118,6 +122,36 @@ test("思考过程是独立的二级折叠，默认关闭且正文不受影响",
   );
   assert.doesNotMatch(chatSource, /thinkingBlock\.classList\.add\("open"\)/);
   assert.match(chatSource, /finalContent\.className = "assistant-final markdown streaming"/);
+});
+
+test("方案 A 使用线性文档层级并移除对话中的装饰性色块", () => {
+  assert.match(workspaceCss, /\.msg-row\.user > \.avatar \{ display: none; \}/);
+  assert.match(
+    workspaceCss,
+    /\.msg-row\.user \.bubble \{[\s\S]*?color: var\(--text\);[\s\S]*?border: 1px solid var\(--border-soft\);[\s\S]*?border-radius: 12px 12px 4px 12px;/,
+  );
+  assert.match(
+    workspaceCss,
+    /\.assistant-process \{[\s\S]*?margin: 1px 0 16px;[\s\S]*?border-bottom: 1px solid var\(--border-soft\);/,
+  );
+  assert.match(workspaceCss, /\.assistant-process-icon \{ display: none; \}/);
+  assert.match(workspaceCss, /\.tool-search-block \{[\s\S]*?border-style: solid;/);
+  assert.match(
+    workspaceCss,
+    /\.tool-status-complete \{[^}]*color: var\(--text-faint\);/,
+  );
+  assert.match(
+    workspaceCss,
+    /\.context-ref-chip \{[\s\S]*?border: 1px solid var\(--border\);[\s\S]*?background: var\(--bg-soft\);/,
+  );
+  assert.doesNotMatch(
+    themesCss,
+    /--user-bubble: #(1f6feb|0969da|0b6e99|0047ab);/,
+  );
+  assert.doesNotMatch(
+    themesCss,
+    /--(tool|thinking)-bg: #(16241f|f0fff4|e8f5e9|f0fff0|1a1829|f3f0ff|ede9fe|f0f0ff);/,
+  );
 });
 
 test("实时 deferred 续跑复用同一可视回答且 removed 即时删除工具卡", () => {

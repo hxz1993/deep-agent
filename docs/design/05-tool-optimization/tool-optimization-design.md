@@ -63,7 +63,8 @@ SSE 协议。
 | Compaction receipts、`pin`、`keep_user_messages` | 部分吸收 | 用于补充观测和回归思路；不替换当前单次摘要、完整 SQL 历史和 Checkpoint |
 | Spend Limits | 是，中期 | 适合请求级成本保护；先与现有 `UsageLimits`、全局请求上限和错误协议统一 |
 | 大文本外置 / Tool Output Limits | 是，中期 | 先要求业务工具分页；共享 Store、TTL、租户隔离准备好后再做 Spill |
-| StepPersistence + ConversationSearch | 暂不做 | 现有 SQL 会话是事实源；除非出现崩溃恢复、子 Agent 或跨压缩历史搜索需求，否则会形成第二套历史 |
+| ConversationSearch | 后续评估 | 用自定义 `HistorySource` 读取现有 SQL `chat_messages`，不为搜索启用第二套 StepPersistence；默认只查当前会话 |
+| StepPersistence | 暂不做 | 现有 SQL 会话是事实源；除非出现崩溃恢复或子 Agent 持久化需求，否则会形成第二套历史 |
 | Planning / Advisor / SubAgent | 按业务需求 | 只有长任务、可审计计划和专业分工形成明确产品场景后再启用 |
 | BrowserUse | 当前不做 | 浏览器执行权限和网络边界过大，不作为通用线上 Agent 默认能力 |
 
@@ -803,9 +804,10 @@ MCP 等一组工具应用同一横切策略时再采用。
 - [上下文压缩设计](../03-context-compaction/context-compaction-design.md)
 - [上下文治理研究结论](../03-context-compaction/context-compaction-research.md)
 
-### 9.2 OverflowingToolOutput
+### 9.2 ToolOutputLimits / OverflowingToolOutput
 
-该能力直接治理工具刚产生的大结果，支持：
+Harness 0.18 优先使用 `ToolOutputLimits` 在工具结果刚产生时治理大结果，避免完整结果进入模型历史后
+每轮重复付出 Token。旧 `OverflowingToolOutput` 的设计目标相同，落地时以当前公开 API 为准。治理模式包括：
 
 - `Truncate`：有损截断。
 - `Summarize`：模型摘要。
@@ -827,6 +829,11 @@ DeepAgent 不能在多 Pod 生产环境直接依赖本地文件 Store。Spill St
 - environment/user/agent/app/space 隔离。
 - 句柄不可猜测。
 - 读取范围和审计。
+
+还必须保持两种视图分离：模型历史只接收短引用和必要摘要；原始完整结果进入共享 Store，History API
+在重新校验 user/App/Space 后仍可按需读取，Console 显示“内容已外置，点击查看”。不能把外置后的
+短引用误当作完整历史事实，也不能让 Checkpoint 成为恢复完整结果的唯一来源。对象模型优先复用
+[`ART-*`](../08-artifact-export/README.md)，不另建一套只服务 Harness 的文件协议。
 
 ### 9.3 Memory
 
@@ -854,6 +861,22 @@ Harness Memory 可能向模型提供读写、搜索 Notebook 的工具，但不�
 - 最终结构化结果校验。
 
 Guardrail 不替代业务服务自身权限，也不能撤回已经通过 SSE 发出的流式文本。
+
+Harness `ToolGuardrail` 可同时介入工具调用两侧：执行前读取已经校验的参数，执行后读取尚未进入模型的
+原始结果。DeepAgent 的采用顺序应固定为：
+
+```text
+统一风险元数据（TOOL-003）
+  → 执行前按可信 deps 复检 user/App/Space、参数范围和副作用
+  → 必要时进入 Deferred 审批（TOOL-106）
+  → 工具真实执行
+  → 结果敏感信息清理（TOOL-110）
+  → ToolOutputLimits 截断或外置（TOOL-109）
+  → 模型、SSE 与历史
+```
+
+审批原语只能解决“本轮是否允许执行”，正式产品仍需持久化审批记录、TTL、操作人、幂等和执行审计。
+UI Tool 的 Deferred Result 是用户提交业务结果，不等同于批准后由后端执行原工具。
 
 ### 9.5 StepPersistence
 
@@ -917,6 +940,15 @@ company_code 不在当前表单允许字段中。
 ```text
 Invalid request
 ```
+
+工具异常必须按模型是否能够修正来分类：
+
+- `ModelRetry`：参数缺失、枚举错误、对象歧义或选错工具等，模型修改参数或重新选工具后可能成功。
+- `ToolFailed`：明确权限拒绝、文件损坏、下载失败或上游已经确定终止等，本次执行已经失败；继续让
+  模型使用相同工具盲目重试只会增加请求和 Token。
+
+该分类不改变稳定工具协议名和历史主结构，但 REST/SSE/History 必须保留可解释的失败原因，不能把
+`ToolFailed` 持久化为正常完成。
 
 ## 11. 设计优先级参考
 

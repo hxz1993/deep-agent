@@ -16,7 +16,7 @@
 | `09` | [`结构化最终输出`](09-structured-output/README.md) | 2026-08 | 0805 实验实现已归档；产品边界未锁定，当前暂缓正式实施 |
 | `10` | [`上下文引用`](10-context-reference/README.md) | 2026-08 | v0.3.5 已完成公共协议；DeepCube/DeepTable业务前端已迁移并验证 |
 | `11` | [`工具包与工具目录`](11-tool-packages/README.md) | 2026-08 | v0.3.2 已完成工具包目录、UI 工具包、运行 Toolset 与 Console 统一改造 |
-| `12` | [`Agent Skill`](12-agent-skills/README.md) | 2026-08 | 当前仅有最小 Python Skill；选定 Harness 0.18 渐进披露基础，线上安装与素材治理待实施 |
+| `12` | [`Agent Skill`](12-agent-skills/README.md) | 2026-08 | v0.3.18 已完成 ToolPackage 分离、上传安装、Harness 渐进披露与资源治理 |
 | `13` | [`工具检索与渐进披露`](13-tool-discovery/README.md) | 2026-08 | v0.3.12 已完成词法 Top 3/Top 5、附件条件过滤和 Pydantic AI 渐进披露 |
 | `14` | [`框架能力采用基线`](14-framework-capabilities/README.md) | 2026-08 | 固定审计 Pydantic AI 2.26 与 Harness 0.18；v0.3.17 已落地最小运行观测与选择性 Return Schema |
 | `15` | [`浏览器与页面操作`](15-browser-and-page-actions/README.md) | 2026-08 | 区分当前页面 UI Tool、Harness BrowserUse 与 Provider Computer Use；旧 Web 分支不整体合并 |

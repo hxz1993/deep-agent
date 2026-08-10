@@ -13,6 +13,7 @@
 | [`ui-tools.md`](ui-tools.md) | 仓库贡献者新增和维护 UI 工具的说明 |
 | [`ui-tools-external.md`](ui-tools-external.md) | 集成方使用和配置 UI 工具的说明 |
 | [`mcp-resources.md`](mcp-resources.md) | MCP Resource 探测、代理工具和安全边界 |
+| [`skills.md`](skills.md) | Skill 安装、Agent 授权、渐进披露、迁移与发布复测 |
 | [`project-structure.md`](project-structure.md) | 当前项目目录、运行链路和职责边界 |
 
 ## 实现经验

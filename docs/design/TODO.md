@@ -25,17 +25,15 @@
 
 ## 待实现
 
-当前只保留三条可直接进入计划的主线。其中观测和评估按“先建立可关联的事实，后计算质量结论”
+当前只保留两条可直接进入计划的主线。其中观测和评估按“先建立可关联的事实，后计算质量结论”
 顺序实施，不能先做一个脱离真实 Run 数据的评分页面。
 
 | ID | 主线 | 采用方案 | DeepAgent 补充边界 | 验收重点 | 来源 |
 | --- | --- | --- | --- | --- | --- |
-| `SKILL-001` | 线上 Skill 与渐进披露 | 使用 Harness 0.18 `Skills` 延迟披露 `SKILL.md` 正文 | 安装、版本、来源、权限、References、Assets、脚本隔离和 Agent 整包授权 | 纯 Instructions Skill、带素材 Skill、现有 Python Skill 迁移、第三方包拒绝路径 | [Skill 体系](12-agent-skills/skill-system-design.md) |
 | `CONSOLE-301` | Console 诊断中心 | 基于 `OBS-101` 的 run/trace 数据提供只读查询，不解析 Pod 文本日志，不在聊天消息中伪造诊断内容 | 首版展示 Run 时间线、模型请求、Token/缓存、工具搜索与调用、压缩、取消、错误；观测后端未选定前只定义查询契约和结构化日志字段 | 可以从 session/run/trace 相互定位；敏感内容默认不展示；诊断数据缺失不能影响聊天主链路 | [框架能力台账](14-framework-capabilities/framework-capabilities-baseline.md#42-下一步优先采用) |
 | `EVAL-001` | Agent 回复与工具调用质量评估 | 在 `OBS-101` 的真实 Trace 之上建立离线评估集、规则评估和可选模型评审，不把 Evaluation 误写成 Evolution | 分开评估最终回答正确性/完整性、工具选择、工具参数、调用结果利用、无副作用约束和成本效率；记录评估器、数据集、Prompt/Agent版本及评分依据 | 首版离线或抽样运行，不同步阻塞用户请求；评分不是聊天事实，不写入 `chat_messages`；诊断中心只展示结果和证据摘要 | [框架能力台账](14-framework-capabilities/framework-capabilities-baseline.md#42-下一步优先采用) |
 
-推荐顺序：`SKILL-001` 作为下一条完整产品主线实施；选定 OTLP 观测后端后再做
-`CONSOLE-301`；`EVAL-001` 复用同一批 Trace 建立离线评估。
+推荐顺序：选定 OTLP 观测后端后再做 `CONSOLE-301`；`EVAL-001` 复用同一批 Trace 建立离线评估。
 
 ## 有潜力
 
@@ -50,6 +48,7 @@
 | `TOOL-105` | 可选结构化最终输出 | Pydantic AI `ToolOutput`/`NativeOutput`/`PromptedOutput` | 产品锁定普通文本与多输出组合、混合工具调用和严格模式规则 | Output 不是 ToolPackage；权威 MCP 事实不由模型重写 | [结构化最终输出](09-structured-output/structured-output-design.md) |
 | `TOOL-108` | Agent 包内逐工具授权 | Core `FilteredToolset` 或 Prepared Toolset | 出现明确的“同包内部分工具禁止使用”权限需求 | 授权主键不能直接依赖可重命名的协议名 | [工具包后续演进](11-tool-packages/tool-packages-design.md#12-后续演进) |
 | `TOOL-301` | Provider Native Code/File/Web/Computer 等工具 | Core Provider Native Capability | 某托管 Provider 能力、模型和执行环境成为明确产品功能 | 必须显式启用并按 Provider 治理；不替代公共 MCP、Sandbox、附件、RAG 或当前页面 UI Tool | [浏览器与页面操作](15-browser-and-page-actions/browser-and-page-actions-design.md#23-provider-原生-computer-use) |
+| `SKILL-101` | Skill 版本修订、签名、Marketplace、便携导出与脚本执行 | Harness `Skills` 继续负责渐进披露；产品层独立治理安装与执行 | 出现回滚、跨环境迁移或可信脚本执行的明确需求，并具备隔离运行环境 | 不预埋半套 Revision；脚本默认不可读不可执行；便携导出需包含平台原包而非仅 File ID | [Skill 后续边界](12-agent-skills/skill-system-design.md#9-后续不属于-v0318) |
 
 ### 上下文、记忆和执行恢复
 
@@ -132,9 +131,10 @@
 | `CONSOLE-101` | 单个用户轮次聚合连续 Assistant/工具循环，过程默认折叠、最终答案常显 | v0.3.16，[运维控制台](02-operations-console/operations-console-design.md) |
 | `OBS-101` / `TOOL-001` | 官方 Conversation/Run 标识、脱敏结构化生命周期日志、Usage/缓存 Token 和 Console 当前 Run 指标 | v0.3.17，[框架能力台账](14-framework-capabilities/framework-capabilities-baseline.md#41-已经采用) |
 | `TOOL-203` | `cube_query_data` 与 `dimension_query_members` 选择性披露可信 Return Schema；延迟工具加载前零额外成本 | v0.3.17，[工具返回 Schema](05-tool-optimization/tool-optimization-design.md#84-tool-return-schema) |
+| `SKILL-001` | Skill 与 ToolPackage 分离；上传安装、Agent 授权、Harness `load_capability` 渐进披露、References/Assets 分页读取和脚本隔离 | v0.3.18，[Skill 体系](12-agent-skills/skill-system-design.md) |
 | Harness 确定性压缩 tiers | `ClampOversizedMessages`、`ClearToolResults`、`DeduplicateFileReads` 已复用 | 当前基线，[压缩研究](03-context-compaction/context-compaction-research.md#harness-实验结论) |
 | 官方 DeepSeek Provider | 使用 Pydantic AI 官方 Provider/Profile，不保留自定义模型循环 | v0.3.9+，[框架能力台账](14-framework-capabilities/framework-capabilities-baseline.md#41-已经采用) |
 
 ## 当前明确不排期
 
-“有潜力”和“暂缓”都不是积压任务。除上述五条“待实现”外，本文件中的其他事项当前都不应进入开发排期。
+“有潜力”和“暂缓”都不是积压任务。除上述两条“待实现”外，本文件中的其他事项当前都不应进入开发排期。

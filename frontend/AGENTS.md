@@ -27,7 +27,7 @@ frontend/
 │   ├── chat.js          # SSE、会话、附件、HITL
 │   ├── workspace.js
 │   ├── configuration.js
-│   └── configuration/   # Agent / 模型 / MCP / UI 工具管理
+│   └── configuration/   # Agent / 模型 / MCP / Skill / UI 工具管理
 └── vendor/              # marked、DOMPurify、highlight.js 等预构建库
 ```
 
@@ -48,6 +48,7 @@ frontend/
 | 能力面板 | `GET /api/v1/tools` |
 | 配置 | `localStorage` 只保存调试 App；全局环境配置只读展示，身份和鉴权由平台提供 |
 | 内置工具目录 | 配置中心只读展示 `builtin:general`、`builtin:sandbox`、`builtin:attachment`；Agent 按包选择 |
+| Skill | 独立 Skill 列表与详情；上传包安装/替换/启停/下载/删除；Agent 使用独立 `skills` 列表选择 |
 | 一体化控制台 | `/console/`；工作台、配置和诊断的唯一入口 |
 
 v0.3.12 的配置卡只读展示工具披露策略：附件包为“有附件时可用”，大型 MCP 为“自动预选 Top 3 / 搜索 Top 5”。聊天中的 `search_tools` 是运行诊断过程，默认折叠显示为“正在查找可用工具”，不伪装成业务 MCP 工具。
@@ -66,6 +67,10 @@ v0.3.12 的配置卡只读展示工具披露策略：附件包为“有附件时
 配置中心 UI 工具页使用“左侧工具包树 + 右侧当前包工具表”：来源只用于左树分组，右表不再
 重复显示所属包；窄屏改为上下布局，但仍必须先选包再维护工具。Builtin 包只读，只有选中手工包
 时才开放新建工具。
+
+配置中心 Skill 页不是工具包页：Builtin Skill 只读，上传 Skill 可安装、替换、启停、下载和删除；
+详情只展示安全资源索引和 Manifest，`scripts/`/`tools/` 仅提示“不可执行”。Agent 编辑弹窗将
+Skill 与工具包分区保存；停用 Skill 的既有引用保留并标记不可用，不静默从 Agent 配置删除。
 
 Agent 编辑弹窗的系统提示词标题栏显示“字符数 / 预估 Token”。字符数和 Token 估算统一调用
 后端 `POST /api/v1/agents/prompt-estimate`，由当前模型对应的 `TokenEstimator` 计算；前端只做

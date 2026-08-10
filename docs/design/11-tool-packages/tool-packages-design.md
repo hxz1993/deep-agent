@@ -1,6 +1,6 @@
 # DeepAgent 工具包与工具目录设计
 
-> 实施状态：v0.3.2 已按本文完成，数据库 revision 为 002。
+> 实施状态：v0.3.2 已按本文完成；v0.3.18 起 Skill 已从 ToolPackage 分离，当前数据库 head 为 003。
 
 ## 1. 目标与边界
 
@@ -56,14 +56,13 @@ v0.3.9 改由 Pydantic AI 官方 Provider/Profile 处理，不再保留项目自
 | `mcp` | `mcp:<name>` | MCP 配置名称 | builtin/database | 关 | 运行时发现 |
 | `ui` | `ui:builtin` | 通用交互 | code | 关 | `builtin__confirm`、`builtin__choice` |
 | `ui` | `ui:deepcube` | DeepCube 助手 | database | 关 | `deep_cube__clarify`、`deep_cube__config_fill` |
-| `skill` | `skill:<name>` | Skill 名称 | code/filesystem | 保持现状 | Skill 函数工具 |
 
 `builtin:general` 和 `builtin:sandbox` 是两个独立包级开关。Python Sandbox 后端不可用时，
 `builtin:sandbox` 不进入可选目录，也不暴露空或不可执行工具定义。
 
 ## 4. 编码和稳定协议
 
-- 包编码只用于 Agent 配置和目录：`builtin:*`、`mcp:*`、`ui:*`、`skill:*`。
+- 包编码只用于 Agent 配置和目录：`builtin:*`、`mcp:*`、`ui:*`。
 - 工具协议名继续用于模型调用、SSE、历史、Pending 与恢复。
 - Console 展示名是独立元数据，不使用 `RenamedToolset` 做纯 UI 美化。
 - URL MCP 名称是可维护的稳定编码，但不能作为普通字段直接修改。独立重命名操作在同一事务中
@@ -101,7 +100,8 @@ v0.3.9 改由 Pydantic AI 官方 Provider/Profile 处理，不再保留项目自
    - `attachment` → `builtin:attachment`。
    - 两个 DeepCube 单工具引用 → `ui:deepcube`。
    - confirm/choice 单工具引用 → `ui:builtin`。
-   - `mcp:*`、`skill:*`、`null` 和 `[]` 保持语义。
+   - `mcp:*`、`skill:*`、`null` 和 `[]` 在 002 中保持语义；003 会在迁移前拒绝遗留
+     `skill:*`，由管理员先明确迁移到独立 `agents.skills`。
 
 降级时先按当前包成员展开旧工具引用，再删除外键、字段和包表。迁移覆盖 SQLite、MySQL、
 PostgreSQL；共享 Test 必须先用 001 工具备份，部署 002 后再用新版工具备份。
@@ -113,7 +113,7 @@ flowchart LR
     A["Agent.capabilities"] --> B["ToolPackageRegistry"]
     A --> C["MCP 包请求级创建"]
     A --> D["UI 包请求级创建"]
-    B --> E["FunctionToolset / Skill Toolset"]
+    B --> E["FunctionToolset"]
     C --> F["MCPToolset"]
     D --> G["ExternalToolset"]
     E --> H["AgentFactory 汇总每包唯一 Toolset"]

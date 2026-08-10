@@ -59,7 +59,7 @@ tests/
 | `test_attachment_extractors.py` | 文本编码、DOCX/XLSX 结构读取、分页与 Office 安全 |
 | `test_attachment_tools.py` | 附件工具默认参数、会话范围、缓存、分页和多模态返回 |
 | `test_tool_package_registry.py` | ToolPackage Registry 的整包选择、默认和空列表语义 |
-| `test_sqlite_bootstrap.py` | Alembic 001/002 结构、工具包数据迁移、降级展开与失败前校验 |
+| `test_sqlite_bootstrap.py` | Alembic 001/002/003 结构、工具包与 Skill 数据迁移、降级展开与失败前校验 |
 | `test_tool_package_migration_dialects.py` | SQLite、MySQL、PostgreSQL 的 002 DDL 分支 |
 | `test_session_model_override.py` | Agent 对话 `model_id` 请求级覆盖（`build_runner_for_agent`） |
 | `test_ui_tools_rfc.py` | builtin/manual UI 工具包、工具归属、Agent 整包选择、Schema 校验与 Deferred |

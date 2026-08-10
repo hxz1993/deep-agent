@@ -17,6 +17,7 @@ from deep_agent.db.stores.llm_model import LlmModelStoreBase, create_llm_model_s
 from deep_agent.db.stores.mcp import McpServerStoreBase, create_mcp_store
 from deep_agent.db.stores.message import MessageStoreBase, create_message_store
 from deep_agent.db.stores.model_catalog import ModelCatalogStoreBase, create_model_catalog_store
+from deep_agent.db.stores.skill_package import SkillPackageStoreBase, create_skill_package_store
 from deep_agent.db.stores.ui_tool import UiToolStoreBase, create_ui_tool_store
 from deep_agent.db.stores.ui_tool_package import (
     UiToolPackageStoreBase,
@@ -39,6 +40,7 @@ class DataStores:
     mcp: McpServerStoreBase
     ui_tool: UiToolStoreBase
     ui_tool_package: UiToolPackageStoreBase
+    skill_package: SkillPackageStoreBase
 
 
 def create_data_stores(
@@ -66,4 +68,5 @@ def create_data_stores(
         mcp=create_mcp_store(dialect, session_factory),
         ui_tool=create_ui_tool_store(dialect, session_factory),
         ui_tool_package=create_ui_tool_package_store(dialect, session_factory),
+        skill_package=create_skill_package_store(dialect, session_factory),
     )

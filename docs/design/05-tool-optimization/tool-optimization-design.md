@@ -348,7 +348,8 @@ DeepAgent 原有自研 `Capability` 只是产品配置包装，却与 Pydantic A
 - `deep_agent/capabilities/attachments/builtin.py`
 - `deep_agent/sandbox/toolset.py`
 
-Python Skill 同样使用 `FunctionToolset`，由 Skill 同时贡献 Instructions 和函数工具。
+v0.3.18 起 Skill 不再使用 `FunctionToolset`，也不属于 ToolPackage。Skill 通过 Harness
+`load_capability` 渐进披露说明，实际工具权限仍来自 Agent 独立选择的 ToolPackage。
 
 MCP Resource 也被包装为宿主 Function Tool：
 
@@ -458,7 +459,8 @@ SubAgent 和其他 Harness 能力尚未启用，不能把“已安装 Harness”
 
 ```mermaid
 flowchart TD
-    A["Agent.capabilities: Tool Package 编码"] --> B["ToolPackageRegistry: 内置函数与 Skill"]
+    A["Agent.capabilities: Tool Package 编码"] --> B["ToolPackageRegistry: 内置函数"]
+    K["Agent.skills: Skill 编码"] --> L["Harness Skills: 渐进披露"]
     A --> C["请求级解析 MCP"]
     A --> D["请求级解析 UI Tool"]
     C --> E["MCPToolset / DynamicToolset / PrefixedToolset"]
@@ -469,6 +471,7 @@ flowchart TD
     F --> I
     G --> I
     H --> I
+    L --> I
     I --> J["Pydantic AI 每次模型请求准备 Tool Definitions"]
 ```
 

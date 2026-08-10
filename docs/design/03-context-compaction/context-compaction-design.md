@@ -6,7 +6,7 @@
 >
 > 依赖组合：`pydantic-ai-slim 2.26.0` + `pydantic-ai-harness 0.18.0`
 >
-> 数据库迁移：当前 Alembic head `002`；v0.3.16 不新增迁移
+> 数据库迁移：本课题在 v0.3.16 不新增迁移；当前仓库 head 因 v0.3.18 Skill 重构为 `003`
 
 ## 1. 最终口径
 

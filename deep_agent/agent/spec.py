@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from deep_agent.db.models import Agent, LlmModel
 
@@ -24,6 +24,7 @@ class AgentSpec:
     model: str
     instructions: str
     capabilities: list[str] | None = None
+    skills: list[str] = field(default_factory=list)
     base_url: str | None = None
     api_key: str | None = None
     temperature: float | None = None
@@ -41,6 +42,7 @@ class AgentSpec:
             model=llm_model.model,
             instructions=row.prompt,
             capabilities=row.capabilities,
+            skills=list(row.skills or []),
             base_url=llm_model.base_url,
             api_key=llm_model.api_key,
             temperature=row.temperature,
@@ -61,12 +63,14 @@ class AgentSpec:
         instructions: str | None = None,
         temperature: float | None = None,
         capabilities: list[str] | None = None,
+        skills: list[str] | None = None,
     ) -> AgentSpec:
         return cls(
             name=name,
             model=llm_model.model,
             instructions=instructions or DEFAULT_INSTRUCTIONS,
             capabilities=capabilities,
+            skills=list(skills or []),
             base_url=llm_model.base_url,
             api_key=llm_model.api_key,
             temperature=temperature,

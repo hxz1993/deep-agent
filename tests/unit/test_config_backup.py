@@ -20,6 +20,7 @@ from deep_agent.db.models import (
     LlmModel,
     McpServer,
     ModelCatalog,
+    SkillPackage,
     UiToolDefinition,
     UiToolPackage,
 )
@@ -51,13 +52,13 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
 
             self.assertEqual(
                 result.path.name,
-                "deep-agent-config-test-v002-20260723-131415.db",
+                "deep-agent-config-test-v003-20260723-131415.db",
             )
             self.assertEqual(
                 [path.resolve() for path in (output_root / "test").iterdir()],
                 [result.path.resolve()],
             )
-            self.assertEqual(result.revision, "002")
+            self.assertEqual(result.revision, "003")
             self.assertEqual(result.row_counts["agents"], 1)
             self.assertEqual(result.row_counts["chat_sessions"], 0)
             self.assertEqual(result.row_counts["chat_messages"], 0)
@@ -80,7 +81,7 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                     connection.execute(
                         "SELECT version_num FROM alembic_version"
                     ).fetchone(),
-                    ("002",),
+                    ("003",),
                 )
                 self.assertEqual(
                     connection.execute(
@@ -144,7 +145,7 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                         "SELECT environment, source_dialect, alembic_revision, "
                         "git_commit FROM _backup_info"
                     ).fetchone(),
-                    ("test", "sqlite", "002", "abc123"),
+                    ("test", "sqlite", "003", "abc123"),
                 )
 
     async def test_failed_export_removes_partial_database(self) -> None:
@@ -157,7 +158,7 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                     "CREATE TABLE alembic_version (version_num VARCHAR(32))"
                 )
                 connection.execute(
-                    "INSERT INTO alembic_version (version_num) VALUES ('002')"
+                    "INSERT INTO alembic_version (version_num) VALUES ('003')"
                 )
 
             with self.assertRaises(Exception):
@@ -208,7 +209,7 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                 )
                 await connection.execute(
                     text(
-                        "INSERT INTO alembic_version (version_num) VALUES ('002')"
+                        "INSERT INTO alembic_version (version_num) VALUES ('003')"
                     )
                 )
                 await connection.execute(
@@ -277,7 +278,27 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                         "name": "agent",
                         "model_id": "model-1",
                         "capabilities": ["mcp:remote"],
+                        "skills": ["uploaded-skill"],
                         "prompt": "test",
+                    },
+                )
+                await connection.execute(
+                    insert(SkillPackage.__table__),
+                    {
+                        "code": "uploaded-skill",
+                        "label": "Uploaded Skill",
+                        "description": "Stored outside the database",
+                        "version": "1.0.0",
+                        "schema_version": "1.0",
+                        "source": "upload",
+                        "enabled": True,
+                        "platform_file_id": "platform-file-1",
+                        "file_name": "uploaded-skill.zip",
+                        "file_size": 1234,
+                        "content_hash": "c" * 64,
+                        "manifest": {"code": "uploaded-skill"},
+                        "resource_index": [],
+                        "contains_scripts": False,
                     },
                 )
                 await connection.execute(

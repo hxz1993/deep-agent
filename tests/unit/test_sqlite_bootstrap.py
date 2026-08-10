@@ -27,6 +27,7 @@ EXPECTED_TABLES = {
     "llm_models",
     "mcp_servers",
     "model_catalog",
+    "skill_packages",
     "ui_tool_definitions",
     "ui_tool_packages",
 }
@@ -51,6 +52,7 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIsNotNone(stores.mcp)
                 self.assertIsNotNone(stores.ui_tool)
                 self.assertIsNotNone(stores.context_checkpoint)
+                self.assertIsNotNone(stores.skill_package)
 
                 await stores.coordinator.append(
                     "sess-bootstrap",
@@ -238,13 +240,72 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(capabilities, expected)
                     self.assertEqual(self._row_count(db_path, "ui_tool_packages"), 1)
 
+    async def test_003_rejects_legacy_skill_capabilities_before_ddl(self) -> None:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+            db_path = Path(tmpdir) / "legacy-skill.db"
+            url = f"sqlite+aiosqlite:///{db_path.as_posix()}"
+            with patch("deep_agent.db.url.get_database_url", return_value=url):
+                with patch("deep_agent.db.migrate.get_database_url", return_value=url):
+                    config = migrate._build_alembic_config()
+                    await asyncio.to_thread(command.upgrade, config, "002")
+                    with sqlite3.connect(db_path) as connection:
+                        connection.execute(
+                            "UPDATE agents SET capabilities = ? WHERE name = 'default'",
+                            (json.dumps(["builtin:general", "skill:calculator"]),),
+                        )
+                        connection.commit()
+                    with self.assertRaisesRegex(RuntimeError, "legacy skill"):
+                        await asyncio.to_thread(command.upgrade, config, "003")
+                    self.assertEqual(self._revision(db_path), "002")
+                    self.assertNotIn("skills", self._columns(db_path, "agents"))
+                    self.assertNotIn("skill_packages", self._business_tables(db_path))
+
+    async def test_003_downgrade_refuses_non_empty_skill_state(self) -> None:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+            db_path = Path(tmpdir) / "skill-downgrade.db"
+            url = f"sqlite+aiosqlite:///{db_path.as_posix()}"
+            with patch("deep_agent.db.url.get_database_url", return_value=url):
+                with patch("deep_agent.db.migrate.get_database_url", return_value=url):
+                    config = migrate._build_alembic_config()
+                    await asyncio.to_thread(command.upgrade, config, "003")
+                    with sqlite3.connect(db_path) as connection:
+                        connection.execute(
+                            "UPDATE agents SET skills = ? WHERE name = 'default'",
+                            (json.dumps(["deepagent-diagnostics"]),),
+                        )
+                        connection.commit()
+                    with self.assertRaisesRegex(RuntimeError, "agents.skills"):
+                        await asyncio.to_thread(command.downgrade, config, "002")
+                    self.assertEqual(self._revision(db_path), "003")
+
+                    with sqlite3.connect(db_path) as connection:
+                        connection.execute(
+                            "UPDATE agents SET skills = '[]' WHERE name = 'default'"
+                        )
+                        connection.execute(
+                            "INSERT INTO skill_packages "
+                            "(code,label,description,schema_version,source,enabled,platform_file_id,"
+                            "file_name,file_size,content_hash,manifest,resource_index,contains_scripts) "
+                            "VALUES ('x','X','X','1.0','upload',1,'f','x.zip',1,?, '{}','[]',0)",
+                            ("a" * 64,),
+                        )
+                        connection.commit()
+                    with self.assertRaisesRegex(RuntimeError, "skill_packages"):
+                        await asyncio.to_thread(command.downgrade, config, "002")
+                    self.assertEqual(self._revision(db_path), "003")
+
     def _assert_current_baseline(self, db_path: Path) -> None:
-        self.assertEqual(self._revision(db_path), "002")
+        self.assertEqual(self._revision(db_path), "003")
         self.assertEqual(self._business_tables(db_path), EXPECTED_TABLES)
         self.assertNotIn("max_requests", self._columns(db_path, "agents"))
         self.assertNotIn("capabilities_source", self._columns(db_path, "llm_models"))
         self.assertNotIn("resource_capabilities", self._columns(db_path, "mcp_servers"))
         self.assertIn("package_code", self._columns(db_path, "ui_tool_definitions"))
+        self.assertIn("skills", self._columns(db_path, "agents"))
+        self.assertEqual(
+            json.loads(str(self._scalar(db_path, "SELECT skills FROM agents WHERE name = 'default'"))),
+            [],
+        )
         self.assertEqual(
             self._primary_key(db_path, "chat_context_checkpoints"),
             ["agent_id", "session_id"],

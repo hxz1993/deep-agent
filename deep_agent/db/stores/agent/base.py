@@ -32,6 +32,7 @@ class AgentStoreBase(SessionBoundMixin):
                     model_id=data.model_id,
                     temperature=data.temperature,
                     capabilities=data.capabilities,
+                    skills=data.skills,
                     prompt=data.prompt,
                 )
                 db.add(row)
@@ -64,6 +65,11 @@ class AgentStoreBase(SessionBoundMixin):
         async with self._read() as db:
             rows = await self._list_all(db)
             return [row for row in rows if capability in (row.capabilities or [])]
+
+    async def list_referencing_skill(self, skill_code: str) -> list[Agent]:
+        async with self._read() as db:
+            rows = await self._list_all(db)
+            return [row for row in rows if skill_code in (row.skills or [])]
 
     async def delete(self, agent_id: str) -> bool:
         async with self._write() as db:

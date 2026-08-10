@@ -96,7 +96,8 @@ test("过程、工具和 HITL 默认折叠且等待操作标题清晰", () => {
   assert.equal(processDisclosureLabel({ running: true }), "处理过程 · 处理中");
   assert.equal(processDisclosureLabel({ pending: true }), "处理过程 · 等待操作");
   assert.match(chatSource, /processBlock\.className = "assistant-process hidden"/);
-  assert.match(chatSource, /block\.className = `tool-block\$\{isToolSearch \? " tool-search-block" : ""\}`/);
+  assert.match(chatSource, /isSkillLoad = merged\.tool === "load_capability"/);
+  assert.match(chatSource, /isSkillLoad \? "正在加载 Skill"/);
   assert.match(chatSource, /block\.classList\.add\("hitl-pending"\)/);
   assert.doesNotMatch(chatSource, /block\.classList\.add\("open", "hitl-pending"\)/);
   assert.match(chatSource, /textContent = `等待操作 · \$\{defaultTitle\}`/);

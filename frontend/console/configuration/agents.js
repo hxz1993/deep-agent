@@ -4,19 +4,17 @@ function chatUrlForAgent(id) {
 
 const CATEGORY_LABELS = {
   builtin: "内置",
-  skill: "Skills",
   mcp: "MCP",
   ui: "UI 工具",
 };
 
 const GROUP_LABELS = {
   builtin: "内置工具",
-  skill: "Skills",
   mcp: "MCP",
   ui: "UI 工具",
 };
 
-const GROUP_ORDER = ["builtin", "mcp", "ui", "skill"];
+const GROUP_ORDER = ["builtin", "mcp", "ui"];
 let promptEstimateTimer = null;
 let promptEstimateRequestId = 0;
 
@@ -85,6 +83,11 @@ function formatCapabilitiesPreview(capabilities) {
   if (capabilities == null) return "（全部默认）";
   if (!capabilities.length) return "（无）";
   return capabilities.join(", ");
+}
+
+function formatSkillsPreview(skills) {
+  if (!skills?.length) return "无 Skill";
+  return skills.join(", ");
 }
 
 function buildCapabilitySelectionSet(selected, caps) {
@@ -171,7 +174,10 @@ const agentsAdmin = {
         <tr>
           <td><strong>${escapeHtml(a.name)}</strong></td>
           <td>${escapeHtml(a.model?.name || "—")}</td>
-          <td><div class="cap-preview">${escapeHtml(formatCapabilitiesPreview(a.capabilities))}</div></td>
+          <td>
+            <div class="cap-preview">${escapeHtml(formatCapabilitiesPreview(a.capabilities))}</div>
+            <div class="skill-preview">Skill：${escapeHtml(formatSkillsPreview(a.skills))}</div>
+          </td>
           <td>${escapeHtml(formatDate(a.updated_at))}</td>
           <td>
             <div class="row-actions">
@@ -387,6 +393,59 @@ const agentsAdmin = {
     return selected;
   },
 
+  renderSkillChoices(selected = []) {
+    const container = document.getElementById("agentSkillChoices");
+    const counter = document.getElementById("agentSkillCounter");
+    if (!container || !counter) return;
+    const selectedSet = new Set(selected || []);
+    const known = new Set((state.skills || []).map((skill) => skill.code));
+    const unavailable = Array.from(selectedSet).filter((code) => !known.has(code));
+    const skills = [
+      ...(state.skills || []),
+      ...unavailable.map((code) => ({
+        code,
+        label: code,
+        description: "该 Skill 当前不存在，保存时将保留原引用。",
+        source: "unknown",
+        enabled: false,
+        reference_count: 0,
+        asset_count: 0,
+      })),
+    ];
+    if (!skills.length) {
+      container.innerHTML = `<div class="cap-empty">暂无可配置 Skill</div>`;
+      counter.textContent = "未选择";
+      return;
+    }
+    container.innerHTML = skills.map((skill) => {
+      const checked = selectedSet.has(skill.code);
+      const disabled = skill.enabled === false;
+      const source = skill.source === "builtin" ? "内置" : skill.source === "upload" ? "上传" : "不可用";
+      return `<label class="agent-skill-card${disabled ? " is-disabled" : ""}">
+        <input type="checkbox" name="agentSkill" value="${escapeHtml(skill.code)}" ${checked ? "checked" : ""} ${disabled ? "disabled" : ""} />
+        <span class="agent-skill-card-copy">
+          <span class="agent-skill-card-title">${escapeHtml(skill.label)} <small>${escapeHtml(source)}</small></span>
+          <span>${escapeHtml(skill.description || "暂无说明")}</span>
+          <span class="agent-skill-card-meta">${Number(skill.reference_count || 0)} References · ${Number(skill.asset_count || 0)} Assets${disabled ? " · 当前不可用" : ""}</span>
+        </span>
+      </label>`;
+    }).join("");
+    this.updateSkillCounter();
+  },
+
+  updateSkillCounter() {
+    const counter = document.getElementById("agentSkillCounter");
+    if (!counter) return;
+    const selected = document.querySelectorAll('#agentSkillChoices input[name="agentSkill"]:checked').length;
+    counter.textContent = selected ? `已选 ${selected}` : "未选择";
+  },
+
+  getSelectedSkills() {
+    return Array.from(
+      document.querySelectorAll('#agentSkillChoices input[name="agentSkill"]:checked'),
+    ).map((input) => input.value);
+  },
+
   openCreate() {
     state.editingAgentId = null;
     document.getElementById("agentModalTitle").textContent = "新建 Agent";
@@ -399,6 +458,7 @@ const agentsAdmin = {
     document.getElementById("agentPrompt").value =
       "You are a helpful assistant. Use available tools when they help answer accurately.";
     this.renderCapabilityCheckboxes(null);
+    this.renderSkillChoices([]);
     document.getElementById("agentModal").showModal();
     this.schedulePromptEstimate(true);
   },
@@ -417,6 +477,7 @@ const agentsAdmin = {
         agent.temperature == null ? "" : String(agent.temperature);
       document.getElementById("agentPrompt").value = agent.prompt;
       this.renderCapabilityCheckboxes(agent.capabilities);
+      this.renderSkillChoices(agent.skills || []);
       document.getElementById("agentModal").showModal();
       this.schedulePromptEstimate(true);
     } catch (err) {
@@ -441,6 +502,7 @@ const agentsAdmin = {
       model_id: modelId,
       prompt,
       capabilities,
+      skills: this.getSelectedSkills(),
     };
     const tempRaw = document.getElementById("agentTemperature").value.trim();
     if (tempRaw) {
@@ -522,6 +584,7 @@ const agentsAdmin = {
     });
 
     document.getElementById("capSearch")?.addEventListener("input", () => this.filterCaps());
+    document.getElementById("agentSkillChoices")?.addEventListener("change", () => this.updateSkillCounter());
   },
 };
 

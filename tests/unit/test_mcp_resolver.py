@@ -41,6 +41,7 @@ class McpResolverTests(unittest.IsolatedAsyncioTestCase):
             mcp=mcp_store,
             ui_tool=MagicMock(),
             ui_tool_package=MagicMock(),
+            skill_package=MagicMock(),
         )
         with patch(
             "deep_agent.capabilities.mcp.resolver.tool_packages_from_rows",

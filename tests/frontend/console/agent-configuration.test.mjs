@@ -146,6 +146,14 @@ test("Agent 工具包卡片展示后端披露策略且不提供工具级复选�
   assert.doesNotMatch(card, /tool-checkbox|name="tools"/);
 });
 
+test("Agent 将 Skill 与工具包分开配置", () => {
+  assert.doesNotMatch(source, /skill:\s*"Skills"/);
+  assert.match(template, /id="agentSkillChoices"/);
+  assert.match(source, /skills: this\.getSelectedSkills\(\)/);
+  assert.match(source, /input type="checkbox" name="agentSkill"/);
+  assert.match(source, /该 Skill 当前不存在，保存时将保留原引用/);
+});
+
 test("编辑 Agent 时在弹窗标题栏显示完整 Agent ID", () => {
   assert.match(template, /id="agentModalId"/);
   assert.match(

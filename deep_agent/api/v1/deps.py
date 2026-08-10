@@ -16,6 +16,8 @@ from deep_agent.capabilities.mcp.resolver import load_mcp_rows, resolve_mcp_tool
 from deep_agent.capabilities.catalog import invalid_tool_package_codes
 from deep_agent.capabilities.mcp.resources import build_mcp_resource_toolset
 from deep_agent.capabilities.ui.registry import prepare_ui_tool_packages_for_spec
+from deep_agent.skills.runtime import SkillUnavailableError, resolve_skills_for_run
+from deep_agent.skills.tools import build_skill_resource_toolset
 from deep_agent.core.context import AppContext
 from deep_agent.core.exceptions import AgentNotFoundError, LlmModelNotFoundError
 from deep_agent.options import OPTION
@@ -109,6 +111,17 @@ async def _build_runner_from_spec(
 
     mcp_toolsets = await resolve_mcp_toolsets(ctx.stores, spec, mcp_rows=mcp_rows)
     mcp_resource_toolset = build_mcp_resource_toolset(spec, mcp_rows)
+    try:
+        resolved_skills = await resolve_skills_for_run(
+            ctx.stores,
+            spec.skills,
+            request_headers=request_headers or {},
+        )
+    except SkillUnavailableError as exc:
+        from deep_agent.core.exceptions import ToolPackageError
+
+        raise ToolPackageError(str(exc)) from exc
+    skill_resource_toolset = build_skill_resource_toolset(resolved_skills.resources)
 
     spec = replace(spec, instructions=augment_instructions_with_capabilities(spec))
     estimator = TokenEstimator.for_model(spec.model, spec.base_url)
@@ -124,6 +137,8 @@ async def _build_runner_from_spec(
         mcp_toolsets=mcp_toolsets,
         dynamic_ui_packages=dynamic_ui_packages,
         mcp_resource_toolset=mcp_resource_toolset,
+        skill_resource_toolset=skill_resource_toolset,
+        skill_capability=resolved_skills.capability,
         context_compaction=context_compaction,
         mcp_server_names=[
             code.removeprefix("mcp:")

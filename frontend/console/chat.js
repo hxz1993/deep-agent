@@ -2519,8 +2519,11 @@ function createAssistantMessage(timestamp, branchPoint) {
       const block = document.createElement("div");
       const isToolSearch =
         merged.source === "tool_search" || ["search_tools", "tool_search"].includes(merged.tool);
-      const defaultTitle = isToolSearch ? "查找可用工具" : (merged.tool || "tool");
-      block.className = `tool-block${isToolSearch ? " tool-search-block" : ""}`;
+      const isSkillLoad = merged.tool === "load_capability";
+      const defaultTitle = isToolSearch
+        ? "查找可用工具"
+        : isSkillLoad ? "正在加载 Skill" : (merged.tool || "tool");
+      block.className = `tool-block${isToolSearch ? " tool-search-block" : ""}${isSkillLoad ? " skill-load-block" : ""}`;
       block.dataset.toolCallId = key;
       block.dataset.defaultTitle = defaultTitle;
       if (merged.widget) block.dataset.widget = merged.widget;
@@ -2531,7 +2534,7 @@ function createAssistantMessage(timestamp, branchPoint) {
       block.innerHTML = `
         <div class="tool-head">
           <span class="chevron">${lucideIcon("chevron-right")}</span>
-          <span class="tool-icon">${lucideIcon(isToolSearch ? "search" : "wrench")}</span>
+          <span class="tool-icon">${lucideIcon(isToolSearch ? "search" : isSkillLoad ? "book-open-check" : "wrench")}</span>
           <span class="tool-name">${escapeHtml(defaultTitle)}</span>
           <span class="tool-status"><span class="spinner"></span></span>
         </div>

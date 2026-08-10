@@ -414,8 +414,9 @@ Agent 配置 output_contract，mode=strict
 2. 实验采用 `end_strategy=early`：模型若在同一响应同时调用普通/UI 工具和 Output Tool，只接受
    Output，其他调用不会执行。它能避免副作用，但也可能让最终结果引用尚未执行的工具，因此正式
    实现必须确定性拒绝这种混合响应并让模型重试，不能静默忽略。
-3. 实验的 Alembic `003` 建立在旧迁移链上；当前数据库 head 仍为 `002`。以后若实施，必须重新
-   设计新的 migration，不能复制或 stamp 旧 `003`。
+3. 实验分支曾使用的 Alembic `003` 建立在旧迁移链上，该编号现已由 v0.3.18 Skill 重构正式使用。
+   Output Tool 以后若实施，必须基于当前 head 重新编号并重新设计 migration，不能复制或 stamp
+   实验分支的旧 `003`。
 4. 实验对直连 DeepSeek 的 thinking/tool_choice 做过特殊处理。当前已升级为 Pydantic AI 官方
    DeepSeek Provider，这条兼容结论只能作为回归用例，不能直接恢复旧适配代码。
 

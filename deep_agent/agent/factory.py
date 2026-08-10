@@ -166,6 +166,7 @@ def _toolsets_for_spec(
     mcp_toolsets: list[Any] | None = None,
     dynamic_ui_packages: list[ToolPackage] | None = None,
     mcp_resource_toolset: Any | None = None,
+    skill_resource_toolset: Any | None = None,
     mcp_server_names: list[str] | None = None,
     estimator: TokenEstimator | None = None,
 ) -> list[Any]:
@@ -189,6 +190,8 @@ def _toolsets_for_spec(
             toolsets.append(discovery)
     if mcp_resource_toolset is not None:
         toolsets.append(mcp_resource_toolset)
+    if skill_resource_toolset is not None:
+        toolsets.append(skill_resource_toolset)
 
     if dynamic_ui_packages:
         toolsets.extend(package.toolset for package in dynamic_ui_packages)
@@ -203,6 +206,8 @@ def build_agent(
     mcp_toolsets: list[Any] | None = None,
     dynamic_ui_packages: list[ToolPackage] | None = None,
     mcp_resource_toolset: Any | None = None,
+    skill_resource_toolset: Any | None = None,
+    skill_capability: AbstractCapability[AgentDeps] | None = None,
     context_compaction: AbstractCapability[AgentDeps] | None = None,
     mcp_server_names: list[str] | None = None,
     estimator: TokenEstimator | None = None,
@@ -221,12 +226,15 @@ def build_agent(
         mcp_toolsets=mcp_toolsets,
         dynamic_ui_packages=dynamic_ui_packages,
         mcp_resource_toolset=mcp_resource_toolset,
+        skill_resource_toolset=skill_resource_toolset,
         mcp_server_names=mcp_server_names,
         estimator=estimator,
     )
     capabilities: list[AbstractCapability[AgentDeps]] = []
     if context_compaction is not None:
         capabilities.append(context_compaction)
+    if skill_capability is not None:
+        capabilities.append(skill_capability)
     if mcp_toolsets:
         capabilities.append(
             ToolSearch(

@@ -6,7 +6,7 @@
 
 - `pydantic-ai-slim[openai,anthropic,google,mcp]==2.26.0`
 - `pydantic-ai-harness==0.18.0`
-- DeepAgent `v0.3.17` 当前实现
+- DeepAgent `v0.3.18` 当前实现
 
 证据顺序为：固定版本源码与公开 API、官方文档、DeepAgent 源码和测试。Harness 仍是 `0.x`，
 本文不把尚未固定依赖的新版本能力当成当前事实。
@@ -83,6 +83,7 @@ Tool Call/Return 配对或 Deferred 协议。
 | `BaseToolCallPart/ReturnPart` | Local、Tool Search、Provider Native 历史配对 | 已采用 |
 | `conversation_id` / `run_id` / `RunUsage` | 同一 Session 的多次发送关联、每次 Run 独立标识和 Provider Usage | v0.3.17 已贯通 SSE、History、脱敏日志和 Console 当前 Run；不另建运行表 |
 | `IncludeToolReturnSchemas` | 只为两个复杂查询 MCP 工具披露可信返回结构 | v0.3.17 已按 MCP 原始工具名白名单启用；只在工具直接披露或搜索加载后增加 Token |
+| Harness `Skills` | 已授权 Skill 只先披露名称/简介，按需加载 `SKILL.md` | v0.3.18 已采用；安装、授权、素材与脚本隔离仍由 DeepAgent 负责 |
 | Output API | 已完成 `ToolOutput` 等黑盒研究 | 尚未启用，归入有潜力而非重新造 Output 状态机 |
 
 ### 4.2 下一步优先采用
@@ -131,14 +132,8 @@ cache hit/miss Token，没有数据时保持 unknown。它不等于启用缓存�
 | `DeduplicateFileReads` | 去除重复附件读取内容 | 保持，不改变原始历史 |
 | `estimate_token_count` | 作为估算实现的一部分 | 保持统一 `TokenEstimator` 封装，不让 Console复制算法 |
 
-### 5.2 下一步优先采用
-
-| 官方能力 | 推荐用途 | DeepAgent 只需补充 |
-| --- | --- | --- |
-| `Skills` | 已授权 Skill 的名称/描述先披露，选择后加载 `SKILL.md` 正文 | 安装、版本、来源、权限、References、Assets 和脚本隔离 |
-
-Harness `Skills` 不读取 references/assets，也不执行 scripts。它是线上 Skill 的渐进披露内核，
-不是完整 Skill 商店或安装系统。
+Harness `Skills` 不读取 references/assets，也不执行 scripts。v0.3.18 直接使用它作为线上 Skill 的
+渐进披露内核；DeepAgent 负责安装、权限、References/Assets 读取和脚本隔离。
 
 ### 5.3 有潜力，按需求触发
 

@@ -20,8 +20,9 @@ test("附件读取与通用工具由后端 category 统一归入内置工具", (
   assert.match(agentSource, /return toolPackage\.category/);
   assert.match(
     agentSource,
-    /GROUP_ORDER\s*=\s*\["builtin",\s*"mcp",\s*"ui",\s*"skill"\]/,
+    /GROUP_ORDER\s*=\s*\["builtin",\s*"mcp",\s*"ui"\]/,
   );
+  assert.doesNotMatch(agentSource, /GROUP_ORDER[^;]*"skill"/);
 });
 
 test("控制台从后端读取 MIME、数量与大小限制", () => {

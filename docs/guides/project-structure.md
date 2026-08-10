@@ -9,7 +9,6 @@ deep-agent/
 ├── deep_agent/       DeepAgent 产品后端
 ├── frontend/         后端随包发布的一体化 Console
 ├── mcps/             仓库内置 MCP 启动入口
-├── skills/           Python Skill 扩展
 ├── deepfos_platform/ 平台配置、客户端、发现和部署运行时支撑
 ├── alembic/          数据库结构迁移
 ├── maintenance/      人工执行的维护程序，不进入 Agent 工具列表
@@ -33,7 +32,9 @@ FastAPI API
 
 - `api/`：HTTP 接口和依赖组装。
 - `agent/`：模型、运行器、消息、附件和事件处理。
-- `capabilities/`：工具包目录以及 Native、Python Skill、MCP、UI Toolset 适配。
+- `capabilities/`：工具包目录以及 Native、MCP、UI Toolset 适配。
+- `skills/`：线上 Skill 包校验、目录、运行时物化和只读资源工具。
+- `builtin_skills/`：随代码发布、只读的内置 Skill 包。
 - `db/`：ORM、Store、会话协调和数据库连接。
 - `schemas/`：API 输入输出结构。
 - `core/`：应用上下文、日志和通用异常。
@@ -47,7 +48,6 @@ FastAPI API
 | `builtin:general` | `deep_agent/capabilities/native/` | 内置“通用工具”，默认启用，提供 UTC 时间 |
 | `builtin:sandbox` | `deep_agent/sandbox/` | 内置“Python 沙箱”，默认关闭，提供无状态 Python 计算 |
 | `builtin:attachment` | `deep_agent/capabilities/attachments/` | 内置“附件读取”，Agent 显式启用的会话附件按需读取 |
-| `skill:<name>` | `skills/<name>/` | Instructions 与 Python 工具组合 |
 | `mcp:<name>` | 数据库或 `mcps/` | 外部或内置 MCP 工具 |
 | `ui:builtin` | 代码 | 确认和候选选择 HITL 工具包 |
 | `ui:<package>` | `ui_tool_packages` + `ui_tool_definitions` | Agent 显式选择的手工 HITL 工具包 |
@@ -56,9 +56,9 @@ FastAPI API
 交给 Pydantic AI 的对象。一个包严格包装一个 Toolset，当前不提供包内逐工具授权；未来可在
 该 Toolset 上使用过滤包装器实现包内工具选择。
 
-仓库不再读取 Cursor 的 `.cursor/skills`。原实现只是把 Cursor Markdown Skill
-适配成读取指令工具，与业务 Python Skill 不同。未来若需要长 Skill 按需加载，
-应在通用 `skill:` 机制中设计渐进披露，而不是重新引入 Cursor 专属能力类型。
+Skill 不属于工具包，也不进入 `agents.capabilities`。Agent 使用独立 `agents.skills` 选择
+Builtin 或上传 Skill；Harness 只先披露名称和简介，模型按需调用 `load_capability` 加载正文。
+Skill 不能扩大 MCP 或其他工具授权。
 
 ## 容易混淆的目录
 
@@ -72,10 +72,10 @@ DeepAgent 已经依赖的配置、平台客户端、服务发现和部署适配�
 只供开发或运维人员从命令行执行。例如配置数据库备份。这里的程序不会注册为
 Pydantic AI Tool，也不会出现在 Console 的 Agent 能力列表。
 
-### `mcps/` 与 `skills/`
+### `mcps/` 与 `deep_agent/skills/`
 
 - `mcps/` 是 MCP Server 的本地实现或启动入口，运行时仍通过 MCP 协议接入。
-- `skills/` 是 DeepAgent 进程内加载的 Python 扩展，可同时提供 Instructions
-  和 `FunctionToolset`。
+- `deep_agent/skills/` 是线上 Skill 管理和运行适配；Skill 只提供任务方法、References 和 Assets，
+  不注册 Python 工具，不执行包内脚本。
 
-两者都能向模型提供工具，但生命周期、协议和部署方式不同，不应混放。
+MCP 提供可执行工具；Skill 提供渐进披露的说明和素材。两者生命周期、权限和协议不同，不应混放。

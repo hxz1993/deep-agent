@@ -10,6 +10,7 @@ from ..options import OPTION
 __all__ = ['PlatformAPI']
 
 FILE_TYPE_ATTACHMENT = "DL"
+FILE_TYPE_SKILL_PACKAGE = "UPL"
 
 
 class PlatformAPI(BaseAPI):
@@ -46,3 +47,7 @@ class File(ComponentAPI):
     @get('download', content_type=ContentType.bytes, data_wrapped=False)
     def download(self, file_id: str):
         return {'param': {'id': file_id}}
+
+    @post('delete/file')
+    def delete_file(self, file_id: str):
+        return {'body': {'id': file_id}}

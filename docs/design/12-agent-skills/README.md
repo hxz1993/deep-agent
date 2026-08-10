@@ -1,18 +1,14 @@
 # 12 · Agent Skill
 
 > 首次研究：2026-08-07
->
-> 当前状态：现有最小 Python Skill 已运行；已选定 Harness 0.18 `Skills` 作为 Instructions 渐进披露基础，线上安装与素材管理待实施
+> 实施状态：v0.3.18 已完成线上安装、Agent 授权、Harness 渐进披露和资源读取；Alembic 003
 
-本课题讨论线上 DeepAgent 如何安装、管理和使用可复用 Skill。Skill 不只是普通工具的别名，
-它可以同时包含任务说明、参考资料、资产和可选执行工具，并在相关任务出现时按需披露。
+本课题记录 DeepAgent 线上 Skill 的最终边界：Skill 是任务方法与素材包，不属于 ToolPackage，
+也不自动授予工具权限。上传包原 ZIP 保存于平台文件服务，数据库保存元数据和资源索引；
+Harness 0.18 `Skills` 负责按需加载 `SKILL.md`。
 
-- [`skill-system-design.md`](skill-system-design.md)：当前实现、目标模型、安全边界和建议阶段。
-- [`../05-tool-optimization/tool-optimization-design.md`](../05-tool-optimization/tool-optimization-design.md)：工具与 Toolset 总体运行边界。
-- [`../13-tool-discovery/README.md`](../13-tool-discovery/README.md)：大型 Skill 工具集可复用的检索和渐进披露机制。
+- [`skill-system-design.md`](skill-system-design.md)：已实施架构、包格式、API、迁移、安全与发布复测。
+- [`../05-tool-optimization/tool-optimization-design.md`](../05-tool-optimization/tool-optimization-design.md)：Skill 与工具检索、工具授权的关系。
+- [`../13-tool-discovery/README.md`](../13-tool-discovery/README.md)：MCP Tool Search，不用于替代 Skill 加载。
 - [`../11-tool-packages/tool-packages-design.md`](../11-tool-packages/tool-packages-design.md)：ToolPackage 配置与授权模型。
-- [`../TODO.md`](../TODO.md)：跨课题唯一待办入口，Skill 主线登记为 `SKILL-001`。
-
-Harness 只解决 `SKILL.md` 正文的延迟加载，不会读取或执行 `references/`、`assets/`、`scripts/`。
-这些线上产品能力仍由 DeepAgent 设计、授权和审计，不能因为升级 Harness 就宣称已经支持第三方
-Skill 安装。
+- [`../TODO.md`](../TODO.md)：Revision、脚本、签名、Marketplace 和便携备份等后续状态。

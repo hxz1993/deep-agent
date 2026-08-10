@@ -1,167 +1,182 @@
 # DeepAgent 线上 Skill 体系设计
 
-## 1. 当前实现
+> 实施版本：v0.3.18
+> 运行时：Pydantic AI 2.26 + Pydantic AI Harness 0.18
+> 数据库：Alembic 003
 
-DeepAgent 当前会扫描仓库 `skills/<name>/`，导入模块级 `SKILL = Skill(...)`，再转换成：
+## 1. 结论
+
+Skill 已与 ToolPackage 分离：
 
 ```text
-skill:<name> ToolPackage
-  → 一份 FunctionToolset
-  → 可选 Instructions
-  → 工具目录元数据
+Agent.capabilities → 工具包授权
+Agent.skills       → 任务方法、References 和 Assets 授权
 ```
 
-目前只有 `calculator` 最小示例。它能证明 Skill 可以按 Agent 整包启用，并把 Instructions 与
-Python 工具一起交给 Pydantic AI，但还不是完整的线上 Skill 系统：没有安装、版本、来源、更新、
-References、Assets、渐进披露和第三方包安全边界。
+ToolPackage 决定模型能调用哪些工具；Skill 只提供如何完成任务的说明和素材。Skill 文档提到某个
+MCP 工具，不代表 Agent 自动获得该工具。未被 Agent 选择的 Skill 不进入模型目录，也不能读取资源。
 
-## 2. 概念边界
+旧 `skills/<name>/__init__.py`、Python `Skill` 对象和 `skill:<name>` ToolPackage 已删除；运行时不保留
+旧编码兼容分支。Alembic 003 若发现历史 `agents.capabilities` 中存在 `skill:*`，会在 DDL 前明确失败。
 
-| 概念 | 作用 |
+## 2. 产品数据模型
+
+上传安装的当前版本保存在 `skill_packages`：
+
+| 字段 | 语义 |
 | --- | --- |
-| ToolPackage | DeepAgent 的配置和授权单位，决定 Agent 允许使用哪组能力 |
-| Toolset | Pydantic AI 的运行对象，包含模型可见工具和可选 Instructions |
-| Skill | 可复用的任务方法与素材包，可贡献 Instructions、References、Assets 和可选 Toolset |
-| Tool Search | 大工具集的运行时发现机制，不等于 Skill 安装或授权 |
+| `code` | 稳定编码，主键 |
+| `label/description` | 管理员展示信息 |
+| `version` | 包声明版本，可为空；不用于历史固定 |
+| `schema_version` | DeepAgent Skill 包格式版本，当前 `1.0` |
+| `source` | 当前固定为 `upload`；Builtin 不写表 |
+| `enabled` | 全局启停；停用不清理 Agent 引用 |
+| `platform_file_id` | 平台文件服务中原始 ZIP 的 ID |
+| `file_name/file_size/content_hash` | 原包校验和展示信息 |
+| `manifest` | Manifest 与 SKILL frontmatter 的解析结果 |
+| `resource_index` | 资源路径、类别、MIME、大小、Hash 与可读状态，不含正文 |
+| `contains_scripts` | 包含 `scripts/` 或 `tools/` 的安全提示 |
 
-Skill 可以最终映射成一个 `skill:<name>` ToolPackage，但不能因此把 Skill 简化成普通函数集合。
-没有执行工具的纯知识/流程 Skill 也应当成立；有工具的 Skill 仍必须服从 Agent 授权和运行隔离。
+`agents.skills` 是非空 JSON 列表，默认 `[]`。新建和更新规则：
 
-## 3. 建议的 Skill 内容
+- 新建只能选择存在且启用的 Builtin/上传 Skill。
+- 更新未携带 `skills` 时保持原值；显式 `null` 返回 422。
+- Skill 停用后已有引用保留，Agent 运行时给出明确不可用诊断；重新启用后自动恢复。
+- 编辑旧 Agent 时允许原样保留已停用引用，但不能把已停用 Skill 新增给其他 Agent。
+- 删除仍被 Agent 引用的上传 Skill 返回 409 和 Agent 名称列表。
 
-为了兼容常见的目录式第三方 Skill，第一版设计应允许一个 Skill 包含：
+首版只有当前安装版本，不建 Revision 表。替换包时更新 File ID、Hash、Manifest 和资源索引；相同
+Hash 返回 `noop`。Agent 不固定历史版本，也没有数据库内回滚。
 
-```text
-skill-package/
-├── SKILL.md              # 名称、摘要、适用条件和主要 Instructions
-├── manifest.yaml         # 稳定编码、版本、来源、兼容性和权限声明
-├── references/           # 按需读取的长参考资料
-├── assets/               # 模板、示例或静态资源
-└── tools/ 或 scripts/    # 可选执行能力；不能默认信任和直接运行
-```
-
-`SKILL.md` 可以作为跨产品可迁移的内容入口，但线上 DeepAgent仍需要自己的 manifest 和数据库
-登记，以表达租户、版本、来源、签名/摘要、启用状态、权限、资源限额和安装状态。YAML 是包格式，
-数据库是线上管理和查询事实源，两者职责不同。
-
-## 4. Harness 0.18 与渐进披露
-
-Harness 0.18 提供 `Skills` Capability：扫描每个一级目录的 `SKILL.md`，首次只让模型看到 Skill
-名称和描述；模型选择后再加载 Markdown 正文。这正好可以作为 DeepAgent Skill Instructions 的
-基础实现，避免自行维护第二套“发现 Skill → 注入正文”的状态机。
-
-它的边界也很明确：
-
-- 不读取 `references/` 或 `assets/`。
-- 不执行 `scripts/`，也没有 `read_skill_resource` 或 `run_skill_script`。
-- 不负责安装、版本、租户权限、来源信任、签名和更新回滚。
-- Harness `Capability` 是运行时延迟内容；DeepAgent `ToolPackage` 仍是产品配置与授权单位。
-
-因此推荐的关系是：
+## 3. 包格式与安全
 
 ```text
-Agent.capabilities 选择 skill:<name>
-  → DeepAgent 校验安装状态、版本和权限
-  → Harness Skills 延迟披露 SKILL.md 正文
-  → DeepAgent ToolPackage 提供该 Skill 已授权的 Toolset
-  → DeepAgent 资源工具按需读取 references/assets
-  → scripts 只能进入 Sandbox/受控 Backend
+skill.zip
+├── SKILL.md              必需，含 name/description frontmatter
+├── manifest.yaml         可选，code/version/schema_version/label
+├── references/           可按需读取的文本资料
+├── assets/               文本、图片或模板资产
+└── scripts/ 或 tools/    可保存，当前禁止模型读取和执行
 ```
 
-当前 `SKILL = Skill(...)` 把 Instructions 和 FunctionToolset 绑在 Python 模块里，适合作为最小示例，
-但不能作为第三方线上 Skill 格式。后续重构应让目录式内容成为事实源，Python 工具成为可选、显式
-授权的执行扩展；迁移期可以保留现有 Python Skill 适配器，不再增加新的这种格式。
+安装器执行：
 
-### 4.1 渐进披露层级
+- ZIP 最大 10 MiB，解压后最大 50 MiB、256 个文件、8 层目录。
+- 拒绝绝对路径、`..`、符号链接、加密 ZIP、重复路径、损坏包和声明超限的压缩包。
+- `SKILL.md` 必须是 UTF-8，name 使用小写字母/数字/单连字符并兼容 Harness 目录规则。
+- 模型可读文本单文件最大 2 MiB；读取时单次最多 32 KiB。
+- References 支持 Markdown/文本/JSON/YAML/CSV/HTML/XML。
+- Assets 还允许常见图片和 DOCX/XLSX/PPTX/PDF 模板；二进制只展示索引，不做 Base64 注入。
+- `scripts/`、`tools/` 只记为脚本资源；Console 明确标识“不可执行”，运行时目录和资源工具均隐藏。
 
-Skill 不应在每轮请求中完整塞入所有长文档和资产：
+Skill 内容始终是低于系统 Prompt 和 Agent Prompt 的数据，不能覆盖权限或上层约束。真正写入或
+产生副作用的参数仍由实际业务工具重新校验。
 
-1. Harness 初始只向模型提供已授权 Skill 的名称和简短说明。
-2. 模型选择后由 Harness 加载完整 `SKILL.md` 正文。
-3. References 和 Assets 由 DeepAgent 的只读资源工具按引用加载，避免重复占用上下文。
-4. Skill 自带的大型工具集复用 Tool Search；少量工具可直接披露。
+## 4. 存储与事务补偿
 
-检索只在 Agent 已授权的 `skill:*` 包内工作。渐进披露解决上下文成本，不替代管理员授权、用户
-权限或脚本执行隔离。
+```text
+Console 上传 ZIP
+→ DeepAgent 在内存/临时目录校验
+→ 平台文件服务以 UPL 类型保存原 ZIP
+→ skill_packages 保存 File ID 与解析索引
+```
 
-## 5. 线上安装与安全
+数据库不保存二进制或解压正文。运行时按 `platform_file_id` 下载，校验 SHA-256 后安全物化到
+Pod 临时缓存；缓存键是内容 Hash，最多保留 32 个目录。多 Pod 共享平台原文件，各自缓存可随时
+重建。
 
-第三方 Skill 安装至少需要：
+事务边界：
 
-- 稳定包编码、语义版本、来源 URL/仓库和内容摘要。
-- 安装、更新、停用、卸载以及版本回滚状态。
-- manifest、文件路径、压缩包体积和内容类型校验。
-- Instructions、References 与 Assets 的大小和敏感信息限制。
-- Python、Shell、网络和文件能力的显式权限声明与人工/策略审核。
-- 第三方脚本进入 Sandbox 或受控 Backend，禁止以导入 Skill 为由在主服务进程任意执行。
-- 更新后不静默扩大权限；Agent 对 Skill 的选择和版本变化可追溯。
+- 安装：平台上传成功但数据库插入失败时，尽力删除新文件。
+- 更新：新文件上传并完成数据库切换后再尽力删除旧文件；旧文件清理失败只记录告警。
+- 删除：先确认无 Agent 引用并删除配置，再尽力删除平台文件；清理失败不恢复已删除配置。
 
-第一版不承诺任何互联网上的 Skill 都能无审查安装。优先兼容内容结构，再逐步开放受控执行能力。
+配置备份包含 `skill_packages` 和 `agents.skills`，但只保存 File ID 与元数据，不包含平台 ZIP，因而
+不是跨环境自包含的 Skill 迁移包。
 
-### 5.1 Agent 如何选择 Skill
+## 5. Harness 渐进披露
 
-Skill 先安装到当前 DeepAgent 管理范围，再由每个 Agent 像选择其他 ToolPackage 一样显式选择
-`skill:<code>`。未被 Agent 选择的 Skill 不进入该 Agent 的名称目录，也不能被渐进加载；被选择只代表
-授权可用，模型仍根据本轮任务决定是否加载其正文。第一版不要求管理员逐个选择 Skill 内的文件、
-Reference 或工具，也不默认把所有已安装 Skill 开放给所有 Agent。
+每次 Run 只装配当前 Agent 选择且启用的 Skill：
 
-Agent 配置只引用稳定的 `skill:<code>`，默认解析该 Skill 当前启用的内容。是否允许 Agent 固定到某个
-历史版本属于后续可复现性增强，不应在第一版安装协议尚未跑通时提前增加配置复杂度。
+```text
+Agent.skills
+→ 解析 Builtin/上传包
+→ Harness Skills 初始目录（name + description）
+→ 模型调用 load_capability(id=...)
+→ Harness 返回完整 SKILL.md
+→ References/Assets 继续按需 List/Read
+```
 
-### 5.2 版本与数据库结构不是同一个决定
+DeepAgent 直接使用 Harness 公开 `Skills` Capability，不自研加载状态机。`load_capability` 使用
+Pydantic AI 官方 typed Call/Return，进入原始 History，并与 Tool Search、普通工具一样受 Cancel、
+压缩安全边界和历史恢复约束。正文被摘要移除后，模型仍可按 Harness 历史语义重新加载。
 
-线上 Skill 需要记录当前内容的版本、包格式版本和内容 Hash，但这并不等于第一版必须建立独立的
-`skill_package_revisions` 表。数据库首版可以只维护当前已安装内容；只有产品明确需要历史回滚、
-灰度发布、旧 Run 精确复现或 Agent 固定版本时，才增加不可变 Revision 记录。
+DeepAgent 只补两个受 Agent 授权约束的只读工具：
 
-因此实施前需在迁移设计中二选一并以真实需求验收：
+- `list_skill_resources(skill_code)`：列出 Reference/Asset 路径、MIME、大小、可读状态和 Hash。
+- `read_skill_resource(skill_code, path, offset, limit)`：读取索引内的 UTF-8 文本并分页。
 
-1. **当前版本模型**：一张 Skill 包表保存当前 `version/schema_version/content_hash/storage_uri`，更新时
-   替换当前内容；实现最小，但不提供数据库内回滚。
-2. **不可变 Revision 模型**：稳定 Skill 身份指向一个活动 Revision，每次发布形成不可变快照；支持
-   回滚和精确复现，但多一套状态、清理和升级语义。
+没有可用资源时不披露这两个工具；未选择、停用和未知 Skill 均不可访问。二进制返回
+`binary_resource_not_readable`，脚本不出现在列表。
 
-在回滚和版本固定需求未确认前，本文不锁定第二张 Revision 表，也不为“其他平台有版本”直接推导
-DeepAgent 必须采用相同物理表结构。
+## 6. Builtin Skill
 
-## 6. 建议实施阶段
+Builtin Skill 位于 `deep_agent/builtin_skills/`，随代码发布、不写数据库、在 `/skills` 与上传包合并
+展示且只读：
 
-### A. 协议与只读目录
+- `deepagent-diagnostics`：排查会话、模型、工具、压缩和取消；不读取服务器日志、不执行 Shell。
+- `deepfos-readonly-analysis`：指导 DeepFOS 只读问数、成员确认和结果核验；仍需 Agent 独立启用
+  对应 MCP ToolPackage。
 
-- 定义 manifest、`SKILL.md`、References 和 Assets 约束。
-- 将现有 Python Skill 适配到统一目录模型。
-- Console 展示来源、版本、素材和是否包含执行工具。
+两个包都包含 SKILL.md、References 与 JSON Asset，用于回归名称目录、正文加载、资源分页、MCP
+授权隔离、Cancel 和压缩。
 
-### B. 本地/管理员安装
+## 7. API 与 Console
 
-- 管理员上传或指定受信来源。
-- 完成校验、版本登记、启停和更新。
-- Agent 继续整包选择 `skill:<name>`。
+API：
 
-### C. 渐进披露
+```text
+GET    /api/v1/skills
+GET    /api/v1/skills/{code}
+POST   /api/v1/skills                         multipart ZIP
+PUT    /api/v1/skills/{code}/package          multipart ZIP
+PATCH  /api/v1/skills/{code}
+DELETE /api/v1/skills/{code}
+GET    /api/v1/skills/{code}/resources
+GET    /api/v1/skills/{code}/resources/{path}
+GET    /api/v1/skills/{code}/package
+```
 
-- 使用 Harness `Skills` 初始只披露名称和摘要，选择后加载 Instructions。
-- DeepAgent 增加受权限约束的 References/Assets 读取能力，不把长素材一次性注入。
-- 与 MCP Tool Search 共用观测口径，但不混用授权逻辑。
+Console 配置中心提供独立 Skill 页面：列表、详情、资源树、Manifest、安装、替换、启停、下载和删除；
+Builtin 标识为“代码内置、只读”。Agent 编辑弹窗将 Skill 与工具包分区，保存独立编码列表。
+聊天中 `load_capability` 显示为默认折叠的“正在加载 Skill”，资源工具按普通只读工具展示。
 
-### D. 第三方生态
+DeepCube、DeepTable 不需要新增 SSE 或 History 协议适配。
 
-- 来源信任、签名、审核和兼容性报告。
-- 受控脚本执行和依赖隔离。
-- 安装失败、更新回滚和运维审计。
+## 8. 迁移、测试和发布边界
 
-## 7. 本轮不做
+Alembic 003：
 
-- 不新增 Skill 数据库表或安装 API。
-- 不把当前 Python 包扫描伪装成完整第三方 Skill 支持。
-- 不允许 Skill 绕过 ToolPackage、用户权限或 Sandbox。
-- 不要求 Agent 管理员逐个选择 Skill 内的文件或工具。
+- upgrade 在 DDL 前拒绝旧 `skill:*` 引用。
+- downgrade 仅在 `skill_packages` 为空且所有 `agents.skills=[]` 时允许。
+- SQLite 做真实 `002 → 003 → 002 → 003`；MySQL/PostgreSQL 做方言和 DDL 路径测试。
 
-实施入口统一登记在 [`../TODO.md`](../TODO.md) 的 `SKILL-001`。建议下一轮先完成 A+C 的只读
-目录和 Instructions 渐进披露，再设计数据库安装、脚本执行和第三方生态；不要一次性把所有安全
-问题绑成一个版本。
+本轮 Test MySQL 不可用，开发和浏览器验收只使用隔离 SQLite。发布前必须补测：
 
-框架采用边界以
-[`../14-framework-capabilities/framework-capabilities-baseline.md`](../14-framework-capabilities/framework-capabilities-baseline.md)
-为准：Harness `Skills` 是下一步应直接复用的渐进披露内核；`CapabilityCreation`、主服务
-`FileSystem`/`Shell` 和默认 `CodeMode` 已明确不作为线上 Skill 安装或脚本执行方案。
+1. 用 v0.3.17 工具备份 Test 的 002 配置。
+2. 查询所有 Agent，确认没有旧 `skill:*` 引用。
+3. 验证平台文件服务允许 `.zip` 的 UPL 上传、下载和删除。
+4. 在隔离 Test 副本升级 003，再验证真实 MySQL 的 Agent Skill 保存、CRUD 和配置备份。
+5. 使用真实 DeepFOS MCP 与 DeepSeek 完成一次 Skill 加载、资源读取和安全只读调用。
+
+以上项目完成前，禁止让未发布的 v0.3.18 连接共享 Test。
+
+## 9. 后续，不属于 v0.3.18
+
+- 不可变 Skill Revision、回滚和 Agent 固定版本。
+- 第三方签名、来源信任、Marketplace 和自动升级。
+- 可迁移的自包含 Skill 导出包。
+- 脚本查看、执行、依赖安装和网络权限。
+- Skill 内逐文件授权。
+
+这些能力只有在出现真实产品需求和隔离执行环境后再打开，不在当前结构中预埋半套实现。

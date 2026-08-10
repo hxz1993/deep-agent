@@ -22,6 +22,7 @@ deep-agent-config-<环境>-v<数据库版本>-<时间>.db
 - `llm_models`
 - `model_catalog`
 - `mcp_servers`
+- `skill_packages`
 - `ui_tool_packages`
 - `ui_tool_definitions`
 - `auxiliary_model_configs`
@@ -38,6 +39,10 @@ API Key、Token 和 MCP Header 保留原值。命令完成前会自动检查 SQL
 
 v0.3.2 起备份同时保存 UI 工具包及每个手工 UI 工具的 `package_code`，因此恢复后 Agent 的
 整包选择、包内工具目录和引用保护可以保持一致。
+
+v0.3.18 起备份同时保存 `skill_packages` 与 `agents.skills`。其中上传 Skill 只备份平台 File ID、
+Hash、Manifest 和资源索引，不包含平台文件服务中的原始 ZIP，因此配置备份不是跨环境自包含的
+Skill 迁移包。恢复或跨环境发布前必须另行确认对应 File ID 在目标平台可下载。
 
 备份工具只负责备份，不提供恢复或跨环境迁移命令。
 
@@ -77,3 +82,13 @@ Alembic `002` 新增 `ui_tool_packages`，给 `ui_tool_definitions` 增加非空
 迁移只接受已知的两个 DeepCube 手工 UI 工具及可映射的旧 Agent 引用。发现未归包手工工具、
 不存在的 UI 工具引用或异常数据时会在 DDL 前失败，要求管理员先明确归属，不会静默删除。
 部署期间不要让未发布的 `002` 本地代码连接共享 Test 数据库。
+
+## v0.3.18 Skill 迁移
+
+Alembic `003` 新增 `skill_packages`，并给 `agents` 增加非空 `skills` JSON。部署前先使用
+v0.3.17 备份仍位于 `002` 的配置，并确认 `agents.capabilities` 不存在遗留 `skill:*`；迁移发现
+旧引用会在任何 DDL 前失败，避免静默丢失授权。
+
+`003` 降级只允许 `skill_packages` 为空且所有 `agents.skills=[]`。上传 Skill 的 ZIP 位于平台文件
+服务，不包含在配置 SQLite 备份中；跨环境恢复需要同时迁移或重新上传平台原包。Test MySQL和
+平台文件服务验收步骤见 [`../docs/guides/skills.md`](../docs/guides/skills.md)。

@@ -6,6 +6,7 @@ from deep_agent.db.stores.auxiliary_model import AuxiliaryModelStoreBase
 from deep_agent.db.stores.llm_model import LlmModelStoreBase
 from deep_agent.db.stores.mcp import McpServerStoreBase
 from deep_agent.db.stores.model_catalog import ModelCatalogStoreBase
+from deep_agent.db.stores.skill_package import SkillPackageStoreBase
 from deep_agent.db.stores.ui_tool import UiToolStoreBase
 from deep_agent.db.stores.ui_tool_package import UiToolPackageStoreBase
 
@@ -36,3 +37,7 @@ def get_ui_tool_store(ctx: AppContextDep) -> UiToolStoreBase:
 
 def get_ui_tool_package_store(ctx: AppContextDep) -> UiToolPackageStoreBase:
     return ctx.stores.ui_tool_package
+
+
+def get_skill_package_store(ctx: AppContextDep) -> SkillPackageStoreBase:
+    return ctx.stores.skill_package

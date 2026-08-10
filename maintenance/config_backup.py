@@ -23,6 +23,7 @@ CONFIG_TABLES = (
     "model_catalog",
     "mcp_servers",
     "agents",
+    "skill_packages",
     "ui_tool_packages",
     "ui_tool_definitions",
     "auxiliary_model_configs",
@@ -32,7 +33,7 @@ SESSION_TABLES = (
     "chat_messages",
     "chat_context_checkpoints",
 )
-CURRENT_SCHEMA_REVISION = "002"
+CURRENT_SCHEMA_REVISION = "003"
 ENVIRONMENT_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
 
 
@@ -225,6 +226,7 @@ async def _clear_seed_configuration(engine: AsyncEngine) -> None:
     delete_order = (
         "auxiliary_model_configs",
         "agents",
+        "skill_packages",
         "ui_tool_definitions",
         "ui_tool_packages",
         "mcp_servers",
@@ -363,6 +365,7 @@ async def _validate_with_deep_agent(database_url: str) -> None:
         LlmModel,
         ModelCatalog,
         UiToolPackage,
+        SkillPackage,
     )
 
     engine, session_factory = create_engine(database_url)
@@ -371,6 +374,7 @@ async def _validate_with_deep_agent(database_url: str) -> None:
             await session.execute(select(func.count()).select_from(LlmModel))
             await session.execute(select(func.count()).select_from(ModelCatalog))
             await session.execute(select(func.count()).select_from(UiToolPackage))
+            await session.execute(select(func.count()).select_from(SkillPackage))
             await session.execute(
                 select(func.count()).select_from(ChatContextCheckpoint)
             )

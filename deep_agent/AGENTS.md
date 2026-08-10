@@ -30,17 +30,17 @@ HTTP (REST/SSE)
         ├─ builtin:general  UTC 时间 FunctionToolset
         ├─ builtin:sandbox  无状态 Python FunctionToolset
         ├─ builtin:attachment  TXT/DOCX/XLSX 读取
-        ├─ skill        skills/<name>/（仓库根，见 DEEP_AGENT_SKILLS_DIR）
         ├─ mcp          请求时 `capabilities/mcp/resolver.py`（DB + mcps/ 兜底）
         └─ ui           代码内置或数据库工具包 → ExternalToolset
+    → Agent.skills → Harness Skills（SKILL.md 渐进披露）
     → SessionStore（`db/conversation.py` 协调器；表 Store 在 `db/stores/`）
 ```
 
 ### 启动生命周期（`main.py` lifespan → `AppContext.bootstrap()`）
 
 1. `configure_logging()` → `AppContext.bootstrap()`（见 `core/context.py`）
-2. `upgrade_database()` → `bootstrap_database()` → 10 个表 Store + `SqlConversationCoordinator`
-3. `build_registry(stores=)` — 通用、Sandbox、附件与 Python Skill 静态工具包；Sandbox Backend 可用时注册独立 `builtin:sandbox`
+2. `upgrade_database()` → `bootstrap_database()` → 表 Store + `SqlConversationCoordinator`
+3. `build_registry(stores=)` — 通用、Sandbox 与附件工具包；Sandbox Backend 可用时注册独立 `builtin:sandbox`
 4. `init_context(ctx)` — 路由通过 `Depends(AppContextDep)` 注入
 5. 关闭：`ctx.aclose()` → `reset_context()`
 
@@ -165,7 +165,7 @@ XML + JSON 投影。业务字段语义仍由具体 Agent Prompt 负责。
 
 | 文件 | 职责 |
 | --- | --- |
-| `spec.py` | `AgentSpec`：`from_row()`、model、instructions、capabilities |
+| `spec.py` | `AgentSpec`：`from_row()`、model、instructions、capabilities、skills |
 | `history.py` | `ModelMessage[]` → 前端时间线 |
 | `factory.py` | `build_agent()` — model 字符串或 OpenAI 兼容 endpoint |
 | `models/` | models.dev 管理员刷新、目录标准化和 Provider/模型适配 |
@@ -182,7 +182,6 @@ XML + JSON 投影。业务字段语义仍由具体 Agent Prompt 负责。
 | --- | --- |
 | `registry.py` | `ToolInfo` / `ToolPackage` / `ToolPackageRegistry` |
 | `native/builtin.py` | 默认启用的内置“通用工具”，当前提供 `get_current_time` |
-| `skills/loader.py` | 扫描 `skills/<name>/__init__.py` 的 `SKILL` |
 | `mcp/db_loader.py` | 从 `mcp_servers` 构建 MCPToolset |
 | `mcp/builtin.py` | 发现 `mcps/<name>/server.py` |
 | `mcp/toolset_builder.py` | url / stdio / builtin + header 注入 |
@@ -194,6 +193,15 @@ XML + JSON 投影。业务字段语义仍由具体 Agent Prompt 负责。
 | `attachments/` | 默认关闭的 `builtin:attachment` 包；会话内 TXT/DOCX/XLSX 分页读取 |
 | `../sandbox/toolset.py` | 默认关闭的 `builtin:sandbox`；代理 PythonExecutionBackend |
 
+### `skills/`
+
+| 文件 | 职责 |
+| --- | --- |
+| `catalog.py` | 合并代码内置与数据库上传 Skill 目录 |
+| `package.py` | ZIP、Frontmatter、Manifest 与资源索引安全校验 |
+| `runtime.py` | 平台 ZIP 下载、Hash 校验、临时物化和 Harness `Skills` 装配 |
+| `tools.py` | 已授权 Reference/Asset 的只读 List/Read 工具 |
+
 ### `api/v1/`
 
 | 文件 | 路由 |
@@ -203,6 +211,7 @@ XML + JSON 投影。业务字段语义仍由具体 Agent Prompt 负责。
 | `mcp.py` | CRUD `/mcp`、统一检测 `/mcp/{name}/inspect` |
 | `ui_tools.py` | CRUD `/ui-tools`；工具必须归属手工 UI 工具包 |
 | `ui_tool_packages.py` | CRUD `/ui-tool-packages`；代码内置包只读 |
+| `skills.py` | Skill 目录、安装、替换、启停、资源和原包下载 |
 | `sessions.py` | 会话列表 / 历史 / 删除 / 正式取消当前 Run |
 | `auxiliary_models.py` | CRUD `/auxiliary-models` |
 | `tools.py` | `GET /tools` |
@@ -214,7 +223,7 @@ XML + JSON 投影。业务字段语义仍由具体 Agent Prompt 负责。
 | --- | --- |
 | `deps.py` | `get_*_store(ctx)` Depends |
 | `conversation.py` | `SessionStore` 协议 + SQL/内存协调器（跨表写入、进程锁） |
-| `stores/` | 10 个表 Store（含 `model_catalog/`、`ui_tool_package/`、`context_checkpoint/`）+ `bundle.DataStores` |
+| `stores/` | 表 Store（含 `model_catalog/`、`skill_package/`、`ui_tool_package/`、`context_checkpoint/`）+ `bundle.DataStores` |
 | `factory.py` / `dialect.py` | `create_engine` / `close_db`、`bootstrap_database()`、方言解析 |
 | `session_scope.py` / `session_list.py` | 会话作用域解析、列表过滤 DTO |
 
@@ -225,6 +234,7 @@ XML + JSON 投影。业务字段语义仍由具体 Agent Prompt 负责。
 | `model_catalog` | models.dev 的 Lab/Model/Provider 数据库快照，只用于浏览和预填 |
 | `auxiliary_model_configs` | 辅助模型场景绑定；当前只用于会话标题生成 |
 | `mcp_servers` | MCP transport、config JSON、最近一次 inspection 检测快照 |
+| `skill_packages` | 上传 Skill 当前安装版本的元数据、平台 File ID、Manifest 与资源索引 |
 | `ui_tool_packages` | 手工 UI 工具包；代码内置 `ui:builtin` 不写表 |
 | `ui_tool_definitions` | 手工 UI 工具定义及所属包；builtin 由代码生成，不写表 |
 | `chat_sessions` | 会话元数据 |
@@ -239,11 +249,14 @@ XML + JSON 投影。业务字段语义仍由具体 Agent Prompt 负责。
 `builtin:attachment` 提供附件读取，两者默认关闭。每个包严格包装一个 Toolset。内置包由代码随版本发布，
 不在数据库注册；配置中心只读展示，Agent 仍按整包选择。
 
-### Python Skill
+### Skill
 
-1. `skills/<name>/__init__.py` 导出 `SKILL = Skill(...)`
-2. 参考 `capabilities/skills/base.py`
-3. 注册名：`skill:<name>`
+- Skill 不属于 ToolPackage，Agent 通过 `agents.skills` 独立选择。
+- 代码内置只读包位于 `builtin_skills/<code>/SKILL.md`。
+- 上传包由 `/api/v1/skills` 校验后保存到平台文件服务，`skill_packages` 只存 File ID 和索引。
+- Harness 0.18 `Skills` 负责 `load_capability` 渐进披露；DeepAgent 只补授权资源 List/Read。
+- `scripts/`、`tools/` 可以随包保存，但当前禁止模型读取和执行。
+- 完整边界见 [`../docs/design/12-agent-skills/skill-system-design.md`](../docs/design/12-agent-skills/skill-system-design.md)。
 
 ### MCP Server
 
@@ -374,7 +387,7 @@ SSE 协议：[`../docs/guides/sse-protocol.md`](../docs/guides/sse-protocol.md)�
    - 多入口共享组装 → `api/v1/deps.py`（变化量留在入口，上下文在 `_build_*` 内统一解包）
 1. 包名 **`deep_agent`**，启动 `deep_agent.main:app`（非 `app.main`）
 2. 扩展优先走路径注册，避免改 `runner.py` 核心
-3. 工具包命名：`builtin:general` \| `builtin:sandbox` \| `builtin:attachment` \| `skill:<name>` \| `mcp:<name>` \| `ui:<package>`；一个包严格包装一个 Toolset，Agent 按包选择，工具协议名不随包编码变化
+3. 工具包命名：`builtin:general` \| `builtin:sandbox` \| `builtin:attachment` \| `mcp:<name>` \| `ui:<package>`；一个包严格包装一个 Toolset，Agent 按包选择，工具协议名不随包编码变化。Skill 使用独立 `agents.skills`，不得重新塞回 ToolPackage
 4. DB Agent 会话：复合键 `(agent_id, session_id)`；无 agent 时 `agent_id=''`
 5. 同 session 用 `SessionStore.lock()` 串行；多实例 DB 级锁未实现
 6. 配置保存先完成 Schema/引用校验，再进入写事务；一次 API 业务变更不要串联多个各自提交的 Store `_write()`。MCP 检测等外部 I/O 先基于候选配置执行，再把配置与检测快照一次性提交。模型目录联网、解析和完整校验必须在事务前完成，随后单事务全量替换；模型配置保存不得隐式联网。

@@ -24,7 +24,8 @@ test("结构化上下文可以单独形成可见的用户历史轮次", () => {
 
 test("上下文引用使用线性信息图标在右侧栏切换只读 JSON", () => {
   assert.match(chatSource, /className = "context-ref-info"/);
-  assert.match(chatSource, /info\.innerHTML = lucideIcon\("circle-info"\)/);
+  assert.match(chatSource, /info\.innerHTML = lucideIcon\("info"\)/);
+  assert.doesNotMatch(chatSource, /info\.innerHTML = lucideIcon\("circle-info"\)/);
   assert.match(chatSource, /refreshLucideIcons\(\)/);
   assert.match(chatSource, /toggleContextReferenceInspector\(ref, branchPoint\)/);
   assert.match(workspaceSource, /function toggleContextReferenceInspector/);

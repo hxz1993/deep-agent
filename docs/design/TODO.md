@@ -16,13 +16,12 @@
 
 近期研发集中在以下方向：
 
-1. **Console 对话呈现**：独立前端任务正在实施“一轮用户输入对应一轮 Assistant 展示”、过程总折叠、工具默认折叠和最终答案常显；不改变后端 SSE/History 契约。
-2. **工具观测**：先完成 `TOOL-001`，为后续风险治理、检索优化和结果外置提供真实指标。
-3. **Skill**：以 Harness 0.18 的 `Skills` 渐进披露作为 Instructions 基础，把当前“Instructions + FunctionToolset”的最小 Python Skill 扩展为适合线上安装、版本管理和素材治理的完整能力包。
-4. **工具治理**：先建立跨 Function、MCP、UI 和附件工具的风险、副作用与权限元数据，再推进审批、Guardrail 和结果外置。
-5. **Output Tool（暂缓）**：0805 实验结论已归档；待多输出组合、普通文本与混合工具调用规则完成产品决策后再重新实施。
+1. **工具观测**：先完成 `TOOL-001`，为后续风险治理、检索优化和结果外置提供真实指标。
+2. **Skill**：以 Harness 0.18 的 `Skills` 渐进披露作为 Instructions 基础，把当前“Instructions + FunctionToolset”的最小 Python Skill 扩展为适合线上安装、版本管理和素材治理的完整能力包。
+3. **工具治理**：先建立跨 Function、MCP、UI 和附件工具的风险、副作用与权限元数据，再推进审批、Guardrail 和结果外置。
+4. **Output Tool（暂缓）**：0805 实验结论已归档；待多输出组合、普通文本与混合工具调用规则完成产品决策后再重新实施。
 
-工具检索首版已经落地。下一阶段先完成 Console 对话呈现验收和工具观测，再进入 Skill 协议与
+工具检索和 Console 对话呈现首版已经落地。下一阶段先完成工具观测，再进入 Skill 协议与
 渐进披露；Output Tool 保留完整设计和实验证据，但不进入近期代码计划。
 
 ## P0
@@ -30,7 +29,7 @@
 | ID | 课题 | 事项 | 状态 | 依赖与验收 | 来源 |
 | --- | --- | --- | --- | --- | --- |
 | `TOOL-001` | 工具优化 | 增加工具定义数量、Schema 字节、调用/重试/失败、耗时和结果大小观测 | 可实施 | 先统一指标口径，不新增计费账本 | [工具质量契约](05-tool-optimization/tool-optimization-design.md#10-工具质量统一契约) |
-| `CONSOLE-101` | 运维控制台 | 将连续 Assistant 历史和单次流式工具循环聚合为一个可视回答，过程与工具默认折叠，最终答案常显 | 进行中 | 独立 Console UI 任务实施；保持 no-build 架构，不修改后端 SSE/History，UI Deferred 等待状态仍需可发现和展开操作 | [运维控制台](02-operations-console/operations-console-design.md) |
+| `CONSOLE-101` | 运维控制台 | 将连续 Assistant 历史和单次流式工具循环聚合为一个可视回答，过程与工具默认折叠，最终答案常显 | 已关闭 | v0.3.16 已合入；保持 no-build 架构和既有 SSE/History 契约，UI Deferred 等待状态仍可发现并展开操作 | [运维控制台](02-operations-console/operations-console-design.md) |
 | `TOOL-002` | UI 工具 | Deferred UI 续跑前是否由公共层按 `result_schema` 强制校验结果 | 已关闭 | v0.3.15 决定不做公共层强校验；`result_schema` 用于前端渲染与协议说明，严格业务结果由业务恢复逻辑校验，副作用参数必须由真正后端工具复检 | [UI 工具历史与边界](01-ui-tools/ui-tools-history.md#结果-schema-边界) |
 | `TOOL-003` | 工具优化 | 建立风险、外部副作用和权限要求的统一元数据契约 | 待设计 | 需同时覆盖 Function、MCP、UI 和附件工具，并作为 `ToolGuardrail` 参数复检、结果清理与审批策略的统一输入 | [工具质量契约](05-tool-optimization/tool-optimization-design.md#10-工具质量统一契约) |
 | `TOOL-004` | 工具错误 | 按“模型可纠正”与“本次执行已终止”区分 `ModelRetry` 和 `ToolFailed` | 已关闭 | v0.3.15 已收口附件下载、损坏、解析、超限和 MCP Resource 上游失败；UI、Sandbox 与普通 MCP Tool 保持原语义 | [工具质量契约](05-tool-optimization/tool-optimization-design.md#10-工具质量统一契约) |

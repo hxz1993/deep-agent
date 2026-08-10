@@ -8,6 +8,14 @@ Console 图标统一使用仓库内 `frontend/vendor/lucide.min.js` 的线性 SV
 `data-lucide`，动态插入 DOM 的图标必须在插入后调用 `window.lucide.createIcons()`；不要重新
 引入 emoji、字符图标、外部 CDN 或第二套图标库。
 
+## Console UI 常驻 worktree
+
+`deep-agent-console-ui-0810-TMP_to_delete` 作为 DeepAgent bundled Console UI 的常驻调试入口，
+除非用户明确要求，不要自行删除该 worktree。后续每批 UI 需求开始前必须先确认工作区干净，
+再同步最新 `feat-ruge-0803` 基线；修改范围继续限定在 `frontend/console/**`、
+`tests/frontend/console/**`，必要时可同步本前端说明。若需求实际需要后端 API、SSE、History
+或持久化契约变化，应停止前端假设并回报主任务，不跨边界修改 `deep_agent/**`。
+
 ---
 
 ## 文件结构

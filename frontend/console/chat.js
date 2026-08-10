@@ -5,6 +5,11 @@ import {
   readSse,
 } from "./protocol.js?v=20260729-1";
 import { formatSessionIdSubtitle } from "./session-display.js?v=20260728-2";
+import {
+  buildHistoryVisualItems,
+  processDisclosureLabel,
+  splitAssistantHistoryRecords,
+} from "./assistant-presentation.js?v=20260810-1";
 
 /* ------------------------------------------------------------------ *
  * deep-agent 前端 —— 适配 FastAPI /api/v1/chat/stream (SSE over POST)
@@ -121,6 +126,7 @@ const state = {
   automaticCompactionTimer: null,
   pendingAutomaticCompaction: null,
   automaticCompactionAnchor: null,
+  assistantPresenter: null,
 };
 
 const TITLE_POLL_TIMEOUT_MS = 30000;
@@ -277,6 +283,7 @@ function showEmptyState() {
 
 function clearMessages() {
   clearAutomaticCompactionState();
+  state.assistantPresenter = null;
   el.messages.innerHTML = "";
 }
 
@@ -1144,18 +1151,16 @@ async function refreshCurrentHistory() {
 function renderHistory(messages, modelMessageCount, contextCheckpoint = null) {
   state.modelMessageCount = modelMessageCount ?? 0;
   let lastDayKey = null;
-  let checkpointInserted = false;
-  const boundary = Number(contextCheckpoint?.source_last_sequence);
-  for (const msg of messages) {
-    if (
-      !checkpointInserted &&
-      Number.isInteger(boundary) &&
-      Number.isInteger(msg.branch_point) &&
-      msg.branch_point > boundary
-    ) {
+  state.assistantPresenter = null;
+  const visualItems = buildHistoryVisualItems(messages, contextCheckpoint);
+
+  for (const item of visualItems) {
+    if (item.type === "checkpoint") {
       addContextCheckpointMarker(contextCheckpoint);
-      checkpointInserted = true;
+      continue;
     }
+
+    const msg = item.type === "assistant" ? item.records[0] : item.message;
     const ts = msg.timestamp || null;
     if (ts) {
       const dayKey = localDayKey(ts);
@@ -1164,32 +1169,35 @@ function renderHistory(messages, modelMessageCount, contextCheckpoint = null) {
         lastDayKey = dayKey;
       }
     }
-    if (
-      msg.role === "user"
-      && (
+    if (item.type === "user") {
+      if (
         msg.content
         || (msg.attachments && msg.attachments.length)
         || (msg.context_refs && msg.context_refs.length)
-      )
-    ) {
-      addMessage(
-        "user",
-        msg.content || "",
-        ts,
-        msg.branch_point,
-        msg.attachments,
-        msg.context_refs,
-      );
+      ) {
+        addMessage(
+          "user",
+          msg.content || "",
+          ts,
+          msg.branch_point,
+          msg.attachments,
+          msg.context_refs,
+        );
+      }
       continue;
     }
-    if (msg.role === "assistant" && msg.parts && msg.parts.length) {
+
+    if (item.type === "assistant") {
+      const records = item.records;
+      const presentation = splitAssistantHistoryRecords(records);
       const assistant = createAssistantMessage(ts, msg.branch_point);
-      const completedToolIds = collectCompletedToolIds(msg.parts);
-      for (const part of msg.parts) {
+      const allParts = records.flatMap((record) => record.parts || []);
+      const completedToolIds = collectCompletedToolIds(allParts);
+      for (const part of presentation.processParts) {
         if (part.type === "thinking" && part.content) {
           assistant.addThinkingBlock(part.content);
         } else if (part.type === "text" && part.content) {
-          assistant.appendText(part.content);
+          assistant.addProcessText(part.content);
         } else if (part.type === "tool_call") {
           assistant.addToolCall({
             tool: part.tool,
@@ -1206,20 +1214,19 @@ function renderHistory(messages, modelMessageCount, contextCheckpoint = null) {
           });
         }
       }
-      for (const part of msg.parts) {
+      if (presentation.finalText) assistant.setFinalText(presentation.finalText);
+      for (const part of allParts) {
         if (isPendingUiToolCall(part, completedToolIds)) {
           assistant.attachHitlWidget(mergeUiToolCall(part));
         }
       }
       assistant.finalizeThinking();
       assistant.finalizeText();
-      if (msg.status === "interrupted") assistant.markInterrupted();
+      if (presentation.interrupted) assistant.markInterrupted();
+      state.assistantPresenter = assistant;
     }
   }
-  if (!checkpointInserted && Number.isInteger(boundary)) {
-    addContextCheckpointMarker(contextCheckpoint);
-  }
-  state.awaitingHitl = findResumablePendingUiCall(messages) !== null;
+  state.awaitingHitl = findResumablePendingUiCall(messages, contextCheckpoint) !== null;
   updateHitlInputState();
   updateComposerContextControls();
   scrollToBottom();
@@ -1245,18 +1252,19 @@ function isPendingUiToolCall(part, completedToolIds) {
 }
 
 /** Pending UI tool call at the end of history (safe to resume). */
-function findResumablePendingUiCall(messages) {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const msg = messages[i];
-    if (msg.role === "user") return null;
-    if (msg.role !== "assistant" || !msg.parts?.length) continue;
-    const completedToolIds = collectCompletedToolIds(msg.parts);
-    for (const part of msg.parts) {
-      if (isPendingUiToolCall(part, completedToolIds)) {
-        return part;
-      }
-    }
-    return null;
+function findResumablePendingUiCall(messages, contextCheckpoint = null) {
+  const items = buildHistoryVisualItems(messages, contextCheckpoint);
+  let last = null;
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    if (items[index].type === "checkpoint") continue;
+    last = items[index];
+    break;
+  }
+  if (last?.type !== "assistant") return null;
+  const parts = last.records.flatMap((record) => record.parts || []);
+  const completedToolIds = collectCompletedToolIds(parts);
+  for (const part of parts) {
+    if (isPendingUiToolCall(part, completedToolIds)) return part;
   }
   return null;
 }
@@ -1687,6 +1695,7 @@ async function onSend() {
   state.lastUserBranchPoint = userBranchPoint;
 
   const assistant = createAssistantMessage();
+  state.assistantPresenter = assistant;
   setStreaming(true);
   updateAgentSelectState();
 
@@ -1727,7 +1736,10 @@ async function resumeDeferred(deferredResults) {
   state.awaitingHitl = false;
   updateHitlInputState();
 
-  const assistant = createAssistantMessage();
+  const assistant = state.assistantPresenter?.row?.isConnected
+    ? state.assistantPresenter
+    : createAssistantMessage();
+  state.assistantPresenter = assistant;
   setStreaming(true);
   updateAgentSelectState();
 
@@ -1936,8 +1948,7 @@ function handleEvent({ event, data }, assistant) {
       assistant.addToolResult(data);
       break;
     case "final":
-      assistant.finalizeThinking();
-      assistant.finalizeText();
+      assistant.complete(data.output);
       syncHistoryMeta(data);
       if (data.usage) renderUsage(data.usage);
       else state.lastRunUsage = null;
@@ -2067,7 +2078,7 @@ function renderMessageContextRefs(container, contextRefs, branchPoint) {
       "aria-pressed",
       window.DeepAgentConsoleWorkspace?.isContextReferenceSelected(ref, branchPoint) ? "true" : "false",
     );
-    info.innerHTML = lucideIcon("circle-info");
+    info.innerHTML = lucideIcon("info");
     info.addEventListener("click", (event) => {
       event.stopPropagation();
       window.DeepAgentConsoleWorkspace?.toggleContextReferenceInspector(ref, branchPoint);
@@ -2240,41 +2251,113 @@ function addSystemNote(text) {
 
 function createAssistantMessage(timestamp, branchPoint) {
   const row = document.createElement("div");
-  row.className = "msg-row assistant";
+  row.className = "msg-row assistant assistant-answer";
   if (branchPoint != null) row.dataset.branchPoint = String(branchPoint);
-  row.innerHTML = `
-    <div class="avatar assistant">${lucideIcon("bot")}</div>
-    <div class="bubble-wrap"></div>`;
+  row.innerHTML = `<div class="bubble-wrap assistant-message"></div>`;
   const wrap = row.querySelector(".bubble-wrap");
   if (timestamp) prependMsgTime(wrap, timestamp);
+
+  const processBlock = document.createElement("div");
+  processBlock.className = "assistant-process hidden";
+  processBlock.innerHTML = `
+    <button type="button" class="assistant-process-summary" aria-expanded="false">
+      <span class="chevron">${lucideIcon("chevron-right")}</span>
+      <span class="assistant-process-icon">${lucideIcon("activity")}</span>
+      <span class="assistant-process-title">处理过程</span>
+    </button>
+    <div class="assistant-process-body"></div>`;
+  wrap.appendChild(processBlock);
+  const processSummary = processBlock.querySelector(".assistant-process-summary");
+  const processTitle = processBlock.querySelector(".assistant-process-title");
+  const processBody = processBlock.querySelector(".assistant-process-body");
+
   el.messages.appendChild(row);
   refreshLucideIcons();
   scrollToBottom();
 
   let textBuffer = "";
-  let textBubble = null;
+  let finalContent = null;
   let thinkingBlock = null;
   let thinkingBuffer = "";
   let interruptedStatus = null;
   const toolBlocks = new Map(); // tool_call_id -> element
 
+  function updateProcessDisclosure() {
+    const hasProcess = processBody.children.length > 0;
+    const pending = Boolean(processBody.querySelector(".tool-block.hitl-pending"));
+    const running = Boolean(thinkingBlock) || [...toolBlocks.values()].some((block) => !block.dataset.done);
+    processBlock.classList.toggle("hidden", !hasProcess);
+    processTitle.textContent = processDisclosureLabel({ pending, running });
+    processSummary.title = pending
+      ? "展开并完成等待中的操作"
+      : processBlock.classList.contains("open") ? "收起处理过程" : "展开处理过程";
+  }
+
+  processSummary.addEventListener("click", () => {
+    const open = !processBlock.classList.contains("open");
+    processBlock.classList.toggle("open", open);
+    processSummary.setAttribute("aria-expanded", String(open));
+    if (open) {
+      processBody.querySelectorAll(".tool-block.hitl-pending").forEach((block) => {
+        block.classList.add("open");
+      });
+    }
+    updateProcessDisclosure();
+  });
+
+  function ensureFinalContent() {
+    if (!finalContent) {
+      finalContent = document.createElement("div");
+      finalContent.className = "assistant-final markdown streaming";
+      wrap.appendChild(finalContent);
+    }
+    return finalContent;
+  }
+
+  function addProcessText(content) {
+    const value = String(content || "");
+    if (!value) return;
+    const text = document.createElement("div");
+    text.className = "assistant-process-text markdown";
+    text.innerHTML = renderMarkdownBody(value);
+    processBody.appendChild(text);
+    updateProcessDisclosure();
+  }
+
+  function promoteFinalToProcess() {
+    if (!textBuffer) return;
+    addProcessText(textBuffer);
+    finalContent?.remove();
+    finalContent = null;
+    textBuffer = "";
+  }
+
   function ensureThinkingBlock() {
     if (!thinkingBlock) {
       thinkingBlock = document.createElement("div");
-      thinkingBlock.className = "thinking-block";
+      thinkingBlock.className = "assistant-thinking";
       thinkingBlock.innerHTML = `
-        <div class="thinking-head">
-          <span class="chevron">${lucideIcon("chevron-right")}</span>
+        <button type="button" class="assistant-thinking-head" aria-expanded="false">
+          <span class="thinking-chevron">${lucideIcon("chevron-right")}</span>
           <span class="thinking-icon">${lucideIcon("brain-circuit")}</span>
           <span class="thinking-title">思考中…</span>
           <span class="thinking-status"><span class="spinner"></span></span>
-        </div>
-        <div class="thinking-body"><pre class="thinking-content"></pre></div>`;
-      thinkingBlock.querySelector(".thinking-head").addEventListener("click", () => {
-        thinkingBlock.classList.toggle("open");
+        </button>
+        <div class="assistant-thinking-body">
+          <pre class="thinking-content"></pre>
+        </div>`;
+      const block = thinkingBlock;
+      const thinkingHead = block.querySelector(".assistant-thinking-head");
+      thinkingHead.addEventListener("click", () => {
+        const open = !block.classList.contains("open");
+        block.classList.toggle("open", open);
+        thinkingHead.setAttribute("aria-expanded", String(open));
+        thinkingHead.title = open ? "收起思考过程" : "展开思考过程";
       });
-      wrap.appendChild(thinkingBlock);
+      thinkingHead.title = "展开思考过程";
+      processBody.appendChild(thinkingBlock);
       refreshLucideIcons();
+      updateProcessDisclosure();
     }
     return thinkingBlock;
   }
@@ -2288,45 +2371,59 @@ function createAssistantMessage(timestamp, branchPoint) {
     if (!thinkingBlock) return;
     thinkingBlock.querySelector(".thinking-title").textContent = "思考过程";
     thinkingBlock.querySelector(".thinking-status").innerHTML = "";
-    thinkingBlock.classList.remove("open");
+    thinkingBlock = null;
+    thinkingBuffer = "";
+    updateProcessDisclosure();
   }
 
-  function ensureTextBubble() {
-    if (!textBubble) {
-      textBubble = document.createElement("div");
-      textBubble.className = "bubble markdown streaming";
-      wrap.appendChild(textBubble);
-    }
-    return textBubble;
+  function sealFinalContent() {
+    if (!finalContent) return;
+    finalContent.classList.remove("streaming");
+    finalContent.innerHTML = renderMarkdownBody(textBuffer);
   }
 
-  function sealTextBubble() {
-    if (!textBubble) return;
-    textBubble.classList.remove("streaming");
-    textBubble.innerHTML = renderMarkdownBody(textBuffer);
-  }
-
-  return {
+  const presenter = {
     row,
     appendThinking(delta) {
+      promoteFinalToProcess();
       thinkingBuffer += delta;
       renderThinkingContent();
+      updateProcessDisclosure();
       scrollToBottom();
     },
     finalizeThinking() {
       finalizeThinkingBlock();
     },
     addThinkingBlock(content) {
-      thinkingBuffer = content;
+      if (thinkingBlock) finalizeThinkingBlock();
+      thinkingBuffer = String(content || "");
       renderThinkingContent();
       finalizeThinkingBlock();
     },
+    addProcessText,
     appendText(delta) {
       textBuffer += delta;
-      ensureTextBubble().innerHTML = renderMarkdownBody(textBuffer);
+      ensureFinalContent().innerHTML = renderMarkdownBody(textBuffer);
+    },
+    setFinalText(content) {
+      const output = typeof content === "string"
+        ? content
+        : content == null ? "" : pretty(content);
+      if (!output) return;
+      if (textBuffer && textBuffer !== output && !output.startsWith(textBuffer)) {
+        promoteFinalToProcess();
+      }
+      textBuffer = output;
+      ensureFinalContent().innerHTML = renderMarkdownBody(textBuffer);
     },
     finalizeText() {
-      sealTextBubble();
+      sealFinalContent();
+    },
+    complete(output) {
+      finalizeThinkingBlock();
+      if (output != null) this.setFinalText(output);
+      sealFinalContent();
+      updateProcessDisclosure();
     },
     markInterrupted() {
       if (interruptedStatus) return;
@@ -2335,6 +2432,8 @@ function createAssistantMessage(timestamp, branchPoint) {
         block.dataset.done = "1";
         block.classList.remove("hitl-pending");
         block.querySelector(".hitl-widget")?.remove();
+        const title = block.querySelector(".tool-name");
+        if (title && block.dataset.defaultTitle) title.textContent = block.dataset.defaultTitle;
         const status = block.querySelector(".tool-status");
         if (status) {
           status.innerHTML = `<span class="tool-status-interrupted">${lucideIcon("circle-stop")}已中断</span>`;
@@ -2345,10 +2444,12 @@ function createAssistantMessage(timestamp, branchPoint) {
       interruptedStatus.innerHTML = `${lucideIcon("circle-stop")}<span>已停止</span>`;
       wrap.appendChild(interruptedStatus);
       row.classList.add("interrupted");
+      updateProcessDisclosure();
       refreshLucideIcons();
     },
     addToolCall(data) {
       finalizeThinkingBlock();
+      promoteFinalToProcess();
       const merged = mergeUiToolCall(data);
       const key = merged.tool_call_id || `${merged.tool}-${toolBlocks.size}`;
       const hasArgs = hasNonEmptyArgs(merged.args);
@@ -2362,16 +2463,18 @@ function createAssistantMessage(timestamp, branchPoint) {
         if (merged.widget) existing.dataset.widget = merged.widget;
         if (merged.metadata) existing.dataset.metadata = JSON.stringify(merged.metadata);
         maybeAttachHitlWidget(existing, merged);
+        updateProcessDisclosure();
         scrollToBottom();
         return;
       }
 
-      // 工具调用开始后，文本若在流式中先固定，避免后续文本拼接错乱
       const block = document.createElement("div");
       const isToolSearch =
         merged.source === "tool_search" || ["search_tools", "tool_search"].includes(merged.tool);
-      block.className = `tool-block${isToolSearch ? " tool-search-block" : " open"}`;
+      const defaultTitle = isToolSearch ? "查找可用工具" : (merged.tool || "tool");
+      block.className = `tool-block${isToolSearch ? " tool-search-block" : ""}`;
       block.dataset.toolCallId = key;
+      block.dataset.defaultTitle = defaultTitle;
       if (merged.widget) block.dataset.widget = merged.widget;
       if (merged.metadata) block.dataset.metadata = JSON.stringify(merged.metadata);
       const argsHtml = hasArgs
@@ -2381,7 +2484,7 @@ function createAssistantMessage(timestamp, branchPoint) {
         <div class="tool-head">
           <span class="chevron">${lucideIcon("chevron-right")}</span>
           <span class="tool-icon">${lucideIcon(isToolSearch ? "search" : "wrench")}</span>
-          <span class="tool-name">${escapeHtml(isToolSearch ? "正在查找可用工具" : (merged.tool || "tool"))}</span>
+          <span class="tool-name">${escapeHtml(defaultTitle)}</span>
           <span class="tool-status"><span class="spinner"></span></span>
         </div>
         <div class="tool-body">
@@ -2389,17 +2492,15 @@ function createAssistantMessage(timestamp, branchPoint) {
           ${argsHtml}
         </div>`;
       block.querySelector(".tool-head").addEventListener("click", () => block.classList.toggle("open"));
-      wrap.appendChild(block);
+      processBody.appendChild(block);
       refreshLucideIcons();
       toolBlocks.set(key, block);
       maybeAttachHitlWidget(block, merged);
-      // 工具调用后开启新文本段；先封存当前气泡，避免多个 streaming 光标并存
-      sealTextBubble();
-      textBubble = null;
-      textBuffer = "";
+      updateProcessDisclosure();
       scrollToBottom();
     },
     addToolResult(data) {
+      promoteFinalToProcess();
       const key = data.tool_call_id;
       let block = key && toolBlocks.get(key);
       if (!block) {
@@ -2408,14 +2509,19 @@ function createAssistantMessage(timestamp, branchPoint) {
       if (!block) return;
       block.dataset.done = "1";
       block.classList.remove("hitl-pending");
+      const title = block.querySelector(".tool-name");
+      if (title && block.dataset.defaultTitle) title.textContent = block.dataset.defaultTitle;
       block.querySelector(".tool-status").innerHTML = `<span class="tool-status-complete">${lucideIcon("check")}完成</span>`;
       refreshLucideIcons();
       const body = block.querySelector(".tool-body");
       const existingWidget = body.querySelector(".hitl-widget");
       if (existingWidget) existingWidget.remove();
+      body.querySelector("[data-tool-result]")?.remove();
       const res = document.createElement("div");
+      res.dataset.toolResult = "1";
       res.innerHTML = `<div class="label" style="margin-top:8px">结果 result</div>${renderToolResult(data.result)}`;
       body.appendChild(res);
+      updateProcessDisclosure();
     },
     removeToolCall(data) {
       const key = data.tool_call_id;
@@ -2424,6 +2530,7 @@ function createAssistantMessage(timestamp, branchPoint) {
       if (!block) return;
       block.remove();
       toolBlocks.delete(key);
+      updateProcessDisclosure();
     },
     attachHitlWidget(call) {
       const merged = mergeUiToolCall(call);
@@ -2435,8 +2542,10 @@ function createAssistantMessage(timestamp, branchPoint) {
       }
       if (!block || !isUiToolCall(merged)) return;
       renderHitlWidget(block, merged, resumeDeferred);
+      updateProcessDisclosure();
     },
   };
+  return presenter;
 }
 
 function maybeAttachHitlWidget(block, call) {
@@ -2460,12 +2569,15 @@ function renderHitlWidget(block, call, onSubmit) {
   const body = block.querySelector(".tool-body");
   if (!body || body.querySelector(".hitl-widget")) return;
 
-  block.classList.add("open", "hitl-pending");
+  block.classList.add("hitl-pending");
   if (merged.widget) block.dataset.widget = merged.widget;
   if (metadata && Object.keys(metadata).length) {
     block.dataset.metadata = JSON.stringify(metadata);
   }
-  block.querySelector(".tool-status").innerHTML = '<span style="color:#d29922">等待操作</span>';
+  const defaultTitle = block.dataset.defaultTitle || tool || "工具";
+  block.dataset.defaultTitle = defaultTitle;
+  block.querySelector(".tool-name").textContent = `等待操作 · ${defaultTitle}`;
+  block.querySelector(".tool-status").innerHTML = '<span class="tool-status-pending">等待操作</span>';
 
   const widgetEl = document.createElement("div");
   widgetEl.className = "hitl-widget";
@@ -2600,6 +2712,8 @@ function renderHitlError(block, message) {
   const body = block.querySelector(".tool-body");
   if (!body || body.querySelector(".hitl-format-error")) return;
   block.classList.remove("hitl-pending");
+  const title = block.querySelector(".tool-name");
+  if (title && block.dataset.defaultTitle) title.textContent = block.dataset.defaultTitle;
   block.querySelector(".tool-status").innerHTML = '<span style="color:#f85149">参数无效</span>';
   const error = document.createElement("div");
   error.className = "hitl-format-error";

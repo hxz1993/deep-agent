@@ -151,7 +151,7 @@ test("业务重试或取消撤回工具调用时删除实时工具卡", () => {
 });
 
 test("历史中的 interrupted 助手消息恢复已停止标记", () => {
-  assert.match(chatSource, /msg\.status === "interrupted"/);
+  assert.match(chatSource, /presentation\.interrupted/);
   assert.match(chatSource, /message-run-status interrupted/);
   assert.match(chatSource, /circle-stop/);
 });
@@ -160,7 +160,7 @@ test("当前有效 Checkpoint 作为历史分隔标记而非聊天消息渲染",
   assert.match(chatSource, /data\.context_checkpoint/);
   assert.match(chatSource, /addContextCheckpointMarker/);
   assert.match(chatSource, /上下文已压缩 · 原始约/);
-  assert.match(chatSource, /msg\.branch_point > boundary/);
+  assert.match(chatSource, /buildHistoryVisualItems\(messages, contextCheckpoint\)/);
   assert.doesNotMatch(chatSource, /addMessage\([^\n]*context_checkpoint/);
 });
 

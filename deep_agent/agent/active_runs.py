@@ -14,6 +14,8 @@ class ActiveRun:
     user_id: str | None
     cancellation_token: CancellationToken
     started_at: datetime
+    conversation_id: str | None = None
+    run_id: str | None = None
     status: str = "running"
 
 
@@ -30,6 +32,8 @@ class ActiveRunRegistry:
         agent_id: str | None,
         session_id: str,
         user_id: str | None,
+        conversation_id: str | None = None,
+        run_id: str | None = None,
     ) -> ActiveRun:
         key = (agent_id, session_id)
         entry = ActiveRun(
@@ -38,6 +42,8 @@ class ActiveRunRegistry:
             user_id=user_id,
             cancellation_token=CancellationToken(),
             started_at=datetime.now(timezone.utc),
+            conversation_id=conversation_id,
+            run_id=run_id,
         )
         with self._lock:
             if key in self._runs:

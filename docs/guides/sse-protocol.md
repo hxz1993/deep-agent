@@ -97,6 +97,7 @@ Accept: text/event-stream
 ```json
 {
   "session_id": "abc",
+  "conversation_id": "deepagent:agent-id:abc",
   "model_message_count": 4,
   "messages": [
     {
@@ -108,6 +109,7 @@ Accept: text/event-stream
     {
       "role": "assistant",
       "status": "completed",
+      "run_id": "run-id",
       "parts": [...],
       "branch_point": 1
     }
@@ -120,6 +122,8 @@ Accept: text/event-stream
 - `Content-Type: text/event-stream`
 - 连接保持打开，服务端按 Agent 执行进度持续推送事件
 - 客户端停止生成必须调用 session 取消接口，并继续读取原 SSE 直到收到真实 `cancelled`
+- 首条 `session` 事件包含稳定 `conversation_id` 和本次独立 `run_id`；同一 Session 的 Deferred
+  恢复和后续发送复用 Conversation ID，但每次都生成新 Run ID
 
 > **注意**：浏览器原生 `EventSource` 仅支持 GET，因此前端需使用 `fetch` + `ReadableStream` 手动解析 SSE（参见 `frontend/console/chat.js` 与 `protocol.js`）。
 
@@ -158,6 +162,8 @@ Registry；异步 Worker 仍可并发处理 I/O。该设置不解决多 Pod 随�
 {
   "type": "cancelled",
   "status": "cancelled",
+  "conversation_id": "deepagent:agent-id:session-id",
+  "run_id": "run-id",
   "history_persisted": true,
   "model_message_count": 8,
   "user_branch_point": 6,
@@ -166,6 +172,15 @@ Registry；异步 Worker 仍可并发处理 I/O。该设置不解决多 Pod 随�
     "input_tokens": 1200,
     "output_tokens": 96,
     "total_tokens": 1296
+  },
+  "run_metrics": {
+    "status": "cancelled",
+    "duration_ms": 1820,
+    "cache_read_tokens": null,
+    "cache_write_tokens": null,
+    "tool_calls": 1,
+    "tool_search_calls": 0,
+    "compaction": "none"
   }
 }
 ```
@@ -309,7 +324,9 @@ Checkpoint 已保存后因状态查询延迟而让流无法收口。`noop` 表�
 是空历史、无安全摘要前缀或没有明显 Token 收益，不能据此假定模型一定未被调用；`failed`
 表示旧 Checkpoint 保持不变。该接口不产生普通 `text/final` 助手回复，也不因已有 Checkpoint
 或缺少新增消息而拒绝入口操作；但当前有效 Checkpoint 已覆盖全部原始历史时，不会反复只压缩
-旧摘要，而是返回 `noop/no_reduction`。
+旧摘要，而是返回 `noop/no_reduction`。主动压缩使用同一稳定 `conversation_id`，但生成独立
+`run_id`；终态 `context_compaction_result` 携带二者和 `run_metrics`。自动压缩属于当前聊天 Run
+的子阶段，不生成第二个 Run ID。
 
 ---
 
@@ -501,6 +518,9 @@ Provider Native Tool 使用对应的原生 Call/Return 事件，不经过普通 
 | `usage` | `object` | Token 与请求次数统计 |
 | `model_message_count` | `integer` | 可选；持久化后原始 `ModelMessage` 条数，供客户端同步编辑锚点 |
 | `user_branch_point` | `integer` | 可选；本轮用户消息下标，与 `messages[].branch_point` 一致 |
+| `conversation_id` | `string` | 当前 Agent + Session 的稳定 Pydantic AI Conversation ID |
+| `run_id` | `string` | 本次发送、Deferred恢复或重试的独立 Pydantic AI Run ID |
+| `run_metrics` | `object` | 当前页面可用的临时运行指标；完整指标不写入聊天历史 |
 
 `usage` 字段：
 
@@ -510,6 +530,10 @@ Provider Native Tool 使用对应的原生 Call/Return 事件，不经过普通 
 | `input_tokens` | `number \| null` | 输入 token |
 | `output_tokens` | `number \| null` | 输出 token |
 | `total_tokens` | `number \| null` | 总 token |
+
+`run_metrics.cache_read_tokens/cache_write_tokens` 只读取 Provider Usage。Provider 未报告时为
+`null`，不能解释为零命中；详细运行指标当前只存在于终态 SSE 和脱敏结构化日志，页面刷新后
+History 仅恢复 `conversation_id/run_id/status`。
 
 **客户端处理建议**：
 
@@ -552,6 +576,8 @@ Agent 执行过程中抛出未捕获异常时发出，此后流结束，**不会
 {
   "type": "cancelled",
   "status": "cancelled",
+  "conversation_id": "deepagent:agent-id:session-id",
+  "run_id": "run-id",
   "history_persisted": true,
   "model_message_count": 3,
   "user_branch_point": 0
@@ -565,6 +591,9 @@ Agent 执行过程中抛出未捕获异常时发出，此后流结束，**不会
 | `history_persisted` | `boolean` | 是否已写入部分 assistant 内容 |
 | `model_message_count` | `integer` | 可选；当前会话 `ModelMessage` 条数 |
 | `user_branch_point` | `integer` | 可选；本轮 user 消息的 `branch_point` |
+| `conversation_id` | `string` | 与首条 `session` 事件一致 |
+| `run_id` | `string` | 与被取消的活动 Run 一致 |
+| `run_metrics` | `object` | 本次取消前已发生的 Usage、耗时、工具和压缩指标 |
 
 ## 5. 完整示例
 
@@ -572,7 +601,7 @@ Agent 执行过程中抛出未捕获异常时发出，此后流结束，**不会
 
 ```
 event: session
-data: {"session_id": "3eff69967bee4a809c46a47c19e113ff"}
+data: {"session_id":"3eff69967bee4a809c46a47c19e113ff","conversation_id":"deepagent:anonymous:3eff69967bee4a809c46a47c19e113ff","run_id":"run-id"}
 
 event: text
 data: {"type": "text", "delta": "让我先搜索一下文档中关于\"维度类型\"的相关内容。"}

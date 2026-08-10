@@ -104,30 +104,36 @@ DeepAgent 内部，并将自动/主动入口收敛到同一投影流程。若 Ha
   让模型在摘要遗漏精确路径、ID 或决定时使用 `search_conversation_history` 拉回片段；不启用
   `SnapshotHistorySource + StepPersistence` 第二套历史。默认只查当前会话，跨会话必须另做
   user/App/Space 授权和审计。
-- **SpendLimits**：登记为 `USAGE-101`。Run 级 Token 硬上限优先使用 Pydantic AI `UsageLimits`；
-  会话级 Token 上限和 80% 告警评估 Harness `SpendLimits`。私有 DeepSeek 的美元价格不可靠，第一版
-  不按美元阻断；跨 Worker、用户/App/Space 日预算需要 Redis 或同等级共享计数 Store。
-- **原生摘要内核评估**：登记为 `CTX-103`。目标是减少自研摘要逻辑，而不是移除产品 Checkpoint。
+- **SpendLimits**：登记为 `USAGE-101` 的长期潜力项。当前已有 Run 级请求次数上限和可选
+  累计 Token 上限，暂不再增加 80% 告警、工具调用硬上限或会话累计阻断。未来出现明确
+  配额治理需求时，再统一设计跨 Worker 的用户/App/Space 周期配额、共享计数 Store 和告警口径；
+  私有 DeepSeek 不按美元价格作通用硬阻断。
+- **原生摘要内核评估**：`CTX-103` 已关闭。当前继续复用确定性 tiers，不整体迁移摘要内核；
+  只有 Harness 公开接口能够覆盖工具 Schema 预算、动态摘要上限、主动 SSE、目标复检和
+  Checkpoint 事务时才重新打开。
 
 ### Pydantic AI 2.26 原生能力采用项
 
 - **请求输出上限**：`MODEL-001` 优先实施。把 `llm_models.max_output_tokens` 映射到普通与流式请求的
   `ModelSettings.max_tokens`，目录字段才能从“预算参考”变成真实 Provider 请求约束；未配置时保持
   Provider 默认行为。
-- **UsageLimits**：`USAGE-101` 同时评估 `tool_calls_limit` 和
-  `per_request_input_tokens_limit`。它们分别阻止单 Run 工具循环失控和单次超大输入，但不能替代
-  DeepAgent 包含工具 Schema、输出预留和安全余量的前置窗口预算。
+- **UsageLimits**：当前保留 `tool_calls_limit` 和 `per_request_input_tokens_limit` 的原生能力记录，
+  但不进入近期实施。如未来启用，仍不能替代 DeepAgent 包含工具 Schema、输出预留和
+  安全余量的前置窗口预算。
 - **运行关联与观测**：`OBS-101` 使用稳定、作用域化的 `conversation_id` 关联同一 Agent Session，
-  每次发送或 Deferred 续跑使用独立 `run_id`；只有接入脱敏后的 Instrumentation 导出端才有价值，
+  每次发送或 Deferred 续跑使用独立 `run_id`。v0.3.17 已将二者接入 Pydantic AI官方 Run、SSE、
+  History、脱敏结构化日志和 Console 当前 Run；后续 OTLP/Instrumentation 继续复用这些标识，
   不能把 ID 当作历史托管、业务审计或多 Pod Cancel 协调。
-- **Provider 特性**：`MODEL-101` 仅对明确支持的 Provider 使用 Prompt Cache / `CachePoint`；
-  `MODEL-102` 评估 `RaiseContentFilterError`，把安全拦截与正常空回答区分；二者均需统一 REST、SSE、
-  History 和 Console 语义。
+- **Provider 特性**：`MODEL-101` 当前暂缓；DeepSeek 等自动缓存只观测 Provider 已返回的命中数据，
+  仅在具体模型明确支持且收益可测时才使用 Prompt Cache / `CachePoint`。
+  `MODEL-102` 已决定不实施：当前没有真实 `content_filter` 误判证据，不为了采用
+  `RaiseContentFilterError` 而额外增加 REST、SSE、History 和 Console 分支。
 - **显式后备与 Thinking**：`MODEL-201` 的 `FallbackModel` 只能由 Agent 明确配置，不能静默跨模型、
   跨地域回退；`MODEL-202` 以后用 Core 的统一 Thinking 设置替换零散 Provider 参数，但仍需模型目录
   能力声明与前端/历史协议配套。
-- **工具返回 Schema**：`TOOL-203` 只对模型确需理解复杂返回结构的少量工具评估
-  `IncludeToolReturnSchemas`；它会增加 Schema Token，不能对全量 MCP 工具启用。
+- **工具返回 Schema**：`TOOL-203` 首版只按最终协议名精确白名单，为模型确需理解复杂返回结构的
+  少量工具启用 `IncludeToolReturnSchemas`；无可信 Schema 时使用少量受测映射。它会增加 Schema
+  Token，不能用 `query` 模糊匹配或对全量 MCP 工具启用。
 
 ## 配置管理结论
 
@@ -135,16 +141,18 @@ DeepAgent 内部，并将自动/主动入口收敛到同一投影流程。若 Ha
 Checkpoint 属于运行状态，继续持久化到数据库。上下文压缩默认开启，只在模型没有
 `context_window_tokens` 时关闭，不增加功能开关。
 
-## 暂不引入的能力
+## 采用状态归档
 
-- Memory：只有形成明确跨会话记忆产品边界后再设计范围、审计和删除。
-- Usage Ledger：只有成本、计费或跨会话统计需求出现时再建调用账本。
-- StepPersistence：现有 SQL 会话与 Pending 恢复仍是事实源；ConversationSearch 通过自定义
-  `HistorySource` 读取该事实源，不为搜索复制一套快照。
-- Planning/SubAgent：等待长任务与专业分工场景稳定。
-- Artifact：应作为 DeepFOS 业务实体独立设计，不塞进压缩摘要。
+- `ConversationSearch`、Memory、Usage/Spend、StepPersistence、Planning/SubAgent 和 Artifact
+  均保留为有触发条件的潜力项，不是近期压缩待办。
+- `StepPersistence` 不替代现有 SQL 会话与 Pending 恢复；ConversationSearch 通过自定义
+  `HistorySource` 读取现有事实源。
+- Harness `SummarizingCompaction` 整体替换、Provider 原生压缩与 DeepAgent Checkpoint 双重启用
+  已明确关闭。
 
-这些方向登记在 [`../TODO.md`](../TODO.md)，不在当前压缩链路中预埋半成品。
+统一状态与重新打开条件见 [`../TODO.md`](../TODO.md)；完整框架能力依据见
+[`../14-framework-capabilities/framework-capabilities-baseline.md`](../14-framework-capabilities/framework-capabilities-baseline.md)。
+当前压缩链路不预埋这些潜力能力。
 
 ## 证据入口
 

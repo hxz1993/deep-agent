@@ -28,6 +28,8 @@ class AgentDeps:
     session_id: str
     user: str | None = None
     agent_id: str | None = None
+    conversation_id: str | None = None
+    run_id: str | None = None
     request_headers: Mapping[str, str] = field(default_factory=dict)
     context_state: "ContextRunState | None" = None
     tool_discovery: "ToolDiscoveryTelemetry | None" = None

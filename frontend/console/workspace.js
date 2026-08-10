@@ -114,6 +114,7 @@ function installContextTestDialog() {
 }
 
 function formatTokens(value) {
+  if (value === null || value === undefined || value === "") return "—";
   return Number.isFinite(Number(value)) ? Number(value).toLocaleString("zh-CN") : "—";
 }
 
@@ -456,8 +457,6 @@ function renderInspector() {
   const identity = window.DeepAgentConsoleContext?.identity || {};
   const contextStatus = state.contextStatus || {};
   const compaction = contextStatus.last_compaction || {};
-  const formatTokens = (value) =>
-    Number.isFinite(Number(value)) ? Number(value).toLocaleString("zh-CN") : "—";
   const strategyLabels = {
     none: "未触发",
     tiered_deterministic: "确定性压缩",
@@ -467,6 +466,7 @@ function renderInspector() {
   const statusText = state.streaming ? "生成中" : state.awaitingHitl ? "等待用户" : "空闲";
   const statusClass = state.streaming ? "running" : state.awaitingHitl ? "waiting" : "idle";
   const usage = state.lastRunUsage || {};
+  const run = state.lastRunMetrics || {};
   const compactionState = compaction.triggered
     ? strategyLabels[compaction.strategy] || compaction.strategy
     : contextStatus.compaction_enabled
@@ -512,12 +512,22 @@ function renderInspector() {
         <p class="inspector-help">预算值全部由后端统一计算。这里是完整原始会话历史的只读快照，不等同于某次 Run 的最终模型请求载荷。</p>
       </section>
       <section class="inspector-section">
-        <header><strong>本轮模型调用</strong><span>当前页面最近一次 Run</span></header>
+        <header><strong>当前 Run</strong><span>${run.detailed === false ? "详细指标请查看运行日志" : "当前页面最近一次"}</span></header>
         <dl class="inspector-grid">
-          <dt>请求次数</dt><dd>${escapeHtml(usage.requests ?? "—")}</dd>
-          <dt>输入 Token</dt><dd>${escapeHtml(formatTokens(usage.input_tokens))}</dd>
-          <dt>输出 Token</dt><dd>${escapeHtml(formatTokens(usage.output_tokens))}</dd>
-          <dt>合计 Token</dt><dd>${escapeHtml(formatTokens(usage.total_tokens))}</dd>
+          <dt>Conversation ID</dt><dd class="mono">${escapeHtml(state.conversationId || run.conversation_id || "—")}</dd>
+          <dt>Run ID</dt><dd class="mono">${escapeHtml(run.run_id || "—")}</dd>
+          <dt>终态</dt><dd>${escapeHtml(run.status || "—")}</dd>
+          <dt>模型</dt><dd>${escapeHtml(run.model_id || model?.name || model?.model || "—")}</dd>
+          <dt>请求次数</dt><dd>${escapeHtml(run.requests ?? usage.requests ?? "—")}</dd>
+          <dt>输入 Token</dt><dd>${escapeHtml(formatTokens(run.input_tokens ?? usage.input_tokens))}</dd>
+          <dt>输出 Token</dt><dd>${escapeHtml(formatTokens(run.output_tokens ?? usage.output_tokens))}</dd>
+          <dt>合计 Token</dt><dd>${escapeHtml(formatTokens(run.total_tokens ?? usage.total_tokens))}</dd>
+          <dt>缓存读取</dt><dd>${escapeHtml(formatTokens(run.cache_read_tokens))}</dd>
+          <dt>缓存写入</dt><dd>${escapeHtml(formatTokens(run.cache_write_tokens))}</dd>
+          <dt>工具调用</dt><dd>${escapeHtml(run.tool_calls ?? usage.tool_calls ?? "—")}</dd>
+          <dt>Tool Search</dt><dd>${escapeHtml(run.tool_search_calls ?? "—")}</dd>
+          <dt>耗时</dt><dd>${Number.isFinite(Number(run.duration_ms)) ? `${Number(run.duration_ms).toLocaleString("zh-CN")} ms` : "—"}</dd>
+          <dt>压缩</dt><dd>${escapeHtml(run.compaction || "—")}</dd>
         </dl>
       </section>
       <section class="inspector-section">
@@ -546,6 +556,8 @@ function startStateMonitor() {
       attachments: api.state.pendingAttachments.length,
       contextStatus: api.state.contextStatus,
       lastRunUsage: api.state.lastRunUsage,
+      lastRunMetrics: api.state.lastRunMetrics,
+      conversationId: api.state.conversationId,
     });
     if (key === lastRenderKey) return;
     lastRenderKey = key;

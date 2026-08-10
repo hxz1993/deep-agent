@@ -167,6 +167,7 @@ async def _build_runner_from_spec(
             else None
         ),
         summary_model_id=spec.llm_model_id,
+        model_id=spec.llm_model_id or spec.model,
         estimator=estimator,
         stores=ctx.stores,
         active_runs=getattr(ctx, "active_runs", None),

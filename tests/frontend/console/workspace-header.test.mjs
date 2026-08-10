@@ -64,6 +64,17 @@ test("会话详情合并会话和上下文且不再重复展示工具与事件",
   assert.match(workspaceSource, /inspector-session-group[\s\S]*<strong>请求Header<\/strong>/);
   assert.match(workspaceSource, /<dt>User ID<\/dt>[\s\S]*identity\.user/);
   assert.match(workspaceSource, /<strong>上下文预算<\/strong>/);
+  assert.match(workspaceSource, /<strong>当前 Run<\/strong>/);
+  assert.match(workspaceSource, /Conversation ID/);
+  assert.match(workspaceSource, /Run ID/);
+  assert.match(workspaceSource, /缓存读取/);
+  assert.match(workspaceSource, /缓存写入/);
+  assert.match(workspaceSource, /Tool Search/);
+  assert.match(workspaceSource, /详细指标请查看运行日志/);
+  assert.match(workspaceSource, /value === null \|\| value === undefined/);
+  assert.match(workspaceSource, /state\.lastRunMetrics/);
+  assert.match(chatSource, /conversation_id/);
+  assert.match(chatSource, /run_metrics/);
   assert.match(workspaceSource, /inspector-budget-section[\s\S]*budget-meter[\s\S]*<strong>上下文预算<\/strong>/);
   assert.doesNotMatch(consoleIndex, /data-inspector-tab|>工具<|>事件</);
   assert.doesNotMatch(workspaceSource, /activeInspectorTab|eventRows|eventToolRows/);

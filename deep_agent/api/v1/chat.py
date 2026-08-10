@@ -14,6 +14,7 @@ from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.attachments import UnsupportedAttachmentModalityError
 from deep_agent.agent.context.compaction import ContextWindowExceededError
 from deep_agent.agent.headers import extract_forward_headers
+from deep_agent.agent.run_identity import conversation_id_for, new_run_id
 from deep_agent.api.v1.deps import build_runner, build_runner_for_agent
 from deep_agent.api.v1.request_identity import RequestUserDep
 from deep_agent.core.context import AppContextDep
@@ -60,10 +61,13 @@ def _agent_deps(
     agent_id: str | None = None,
     request_headers: dict[str, str] | None = None,
 ) -> AgentDeps:
+    conversation_id = conversation_id_for(agent_id, session_id)
     return AgentDeps(
         session_id=session_id,
         user=user,
         agent_id=agent_id,
+        conversation_id=conversation_id,
+        run_id=new_run_id(),
         request_headers=dict(request_headers or {}),
     )
 
@@ -182,11 +186,14 @@ async def chat(
         ) from exc
     return ChatResponse(
         session_id=session_id,
+        conversation_id=deps.conversation_id,
+        run_id=deps.run_id,
         output=result["output"],
         usage=result["usage"],
         status=result.get("status", "completed"),
         deferred=result.get("deferred"),
         context=result.get("context"),
+        run_metrics=result.get("run_metrics"),
     )
 
 
@@ -227,7 +234,12 @@ async def chat_stream(
             agent_id=agent_id,
             request_headers=request_headers,
         )
-        session_data = {"session_id": session_id, "agent_id": agent_id}
+        session_data = {
+            "session_id": session_id,
+            "agent_id": agent_id,
+            "conversation_id": deps.conversation_id,
+            "run_id": deps.run_id,
+        }
         api_agent_id = agent_id
     else:
         try:
@@ -247,7 +259,11 @@ async def chat_stream(
             user=user,
             request_headers=request_headers,
         )
-        session_data = {"session_id": session_id}
+        session_data = {
+            "session_id": session_id,
+            "conversation_id": deps.conversation_id,
+            "run_id": deps.run_id,
+        }
         api_agent_id = None
 
     if body.session_id is not None:
@@ -264,6 +280,8 @@ async def chat_stream(
             agent_id=deps.agent_id,
             session_id=session_id,
             user_id=deps.user,
+            conversation_id=deps.conversation_id,
+            run_id=deps.run_id,
         )
         try:
             # The client may expose its stop action as soon as this event arrives.

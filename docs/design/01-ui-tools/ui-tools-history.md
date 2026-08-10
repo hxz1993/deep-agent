@@ -49,4 +49,4 @@ DeepAgent UI 工具最终只保留两种来源：
 后端继续校验 `result_schema` 定义本身，但不在公共 Deferred 续跑层强制校验用户提交结果。
 `result_schema` 用于前端生成表单、类型提示和管理员说明；需要严格结果的业务 UI Tool 在自己的
 恢复逻辑中校验。涉及写入或其他副作用时，真正的后端工具必须重新校验参数、权限和当前状态，
-不能直接信任 UI Tool Result。该结论见 [`../TODO.md`](../TODO.md#p0) 的 `TOOL-002`。
+不能直接信任 UI Tool Result。该结论见 [`../TODO.md`](../TODO.md#已关闭) 的 `TOOL-002`。

@@ -95,6 +95,10 @@ class HistoryMessage(BaseModel):
         default=None,
         description="Index in raw ModelMessage list; truncate here to branch.",
     )
+    run_id: str | None = Field(
+        default=None,
+        description="Pydantic AI run that produced this assistant response.",
+    )
 
 
 class HistoryContextCheckpoint(BaseModel):
@@ -111,6 +115,7 @@ class HistoryContextCheckpoint(BaseModel):
 
 class SessionHistoryResponse(BaseModel):
     session_id: str
+    conversation_id: str
     messages: list[HistoryMessage]
     model_message_count: int = Field(
         default=0,
@@ -626,6 +631,7 @@ def model_messages_to_history(messages: list[ModelMessage]) -> list[HistoryMessa
                         parts=parts,
                         timestamp=message.timestamp,
                         branch_point=idx,
+                        run_id=message.run_id,
                     )
                 )
 

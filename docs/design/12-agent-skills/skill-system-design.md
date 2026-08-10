@@ -98,6 +98,32 @@ Skill 不应在每轮请求中完整塞入所有长文档和资产：
 
 第一版不承诺任何互联网上的 Skill 都能无审查安装。优先兼容内容结构，再逐步开放受控执行能力。
 
+### 5.1 Agent 如何选择 Skill
+
+Skill 先安装到当前 DeepAgent 管理范围，再由每个 Agent 像选择其他 ToolPackage 一样显式选择
+`skill:<code>`。未被 Agent 选择的 Skill 不进入该 Agent 的名称目录，也不能被渐进加载；被选择只代表
+授权可用，模型仍根据本轮任务决定是否加载其正文。第一版不要求管理员逐个选择 Skill 内的文件、
+Reference 或工具，也不默认把所有已安装 Skill 开放给所有 Agent。
+
+Agent 配置只引用稳定的 `skill:<code>`，默认解析该 Skill 当前启用的内容。是否允许 Agent 固定到某个
+历史版本属于后续可复现性增强，不应在第一版安装协议尚未跑通时提前增加配置复杂度。
+
+### 5.2 版本与数据库结构不是同一个决定
+
+线上 Skill 需要记录当前内容的版本、包格式版本和内容 Hash，但这并不等于第一版必须建立独立的
+`skill_package_revisions` 表。数据库首版可以只维护当前已安装内容；只有产品明确需要历史回滚、
+灰度发布、旧 Run 精确复现或 Agent 固定版本时，才增加不可变 Revision 记录。
+
+因此实施前需在迁移设计中二选一并以真实需求验收：
+
+1. **当前版本模型**：一张 Skill 包表保存当前 `version/schema_version/content_hash/storage_uri`，更新时
+   替换当前内容；实现最小，但不提供数据库内回滚。
+2. **不可变 Revision 模型**：稳定 Skill 身份指向一个活动 Revision，每次发布形成不可变快照；支持
+   回滚和精确复现，但多一套状态、清理和升级语义。
+
+在回滚和版本固定需求未确认前，本文不锁定第二张 Revision 表，也不为“其他平台有版本”直接推导
+DeepAgent 必须采用相同物理表结构。
+
 ## 6. 建议实施阶段
 
 ### A. 协议与只读目录
@@ -134,3 +160,8 @@ Skill 不应在每轮请求中完整塞入所有长文档和资产：
 实施入口统一登记在 [`../TODO.md`](../TODO.md) 的 `SKILL-001`。建议下一轮先完成 A+C 的只读
 目录和 Instructions 渐进披露，再设计数据库安装、脚本执行和第三方生态；不要一次性把所有安全
 问题绑成一个版本。
+
+框架采用边界以
+[`../14-framework-capabilities/framework-capabilities-baseline.md`](../14-framework-capabilities/framework-capabilities-baseline.md)
+为准：Harness `Skills` 是下一步应直接复用的渐进披露内核；`CapabilityCreation`、主服务
+`FileSystem`/`Shell` 和默认 `CodeMode` 已明确不作为线上 Skill 安装或脚本执行方案。

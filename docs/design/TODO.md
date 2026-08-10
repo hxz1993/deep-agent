@@ -1,98 +1,140 @@
-# DeepAgent 设计待办
+# DeepAgent 设计与研发台账
 
-本文件是设计课题的唯一跨主题待办入口。已实现能力保留在对应设计文档中，不再以未完成
-清单形式重复出现。
+本文件是跨课题事项的唯一状态入口。它不再使用 P0～P3 堆积候选功能，只保留五类决策：
 
-状态说明：
+1. **待实现**：已有需求、边界、框架采用路径和验收，可以进入近期计划。
+2. **有潜力**：未来可能有价值，但当前不排期；必须满足触发条件后再打开。
+3. **暂缓**：价值存在，但当前缺少产品时机、Provider 条件或投入产出依据；不进入近期计划。
+4. **已关闭**：明确不做、已被替代或已合并，不再重复调研。
+5. **已实现**：已经交付并有版本或测试依据。
 
-- `可实施`：边界已明确，可进入开发计划。
-- `进行中`：已经进入独立开发任务，尚未完成验收和合并。
-- `待设计`：方向明确，仍需补接口或数据方案。
-- `待决策`：依赖产品或平台选择。
-- `暂缓`：当前明确不进入近期版本。
-- `已关闭`：已实现或已确认不做。
+框架采用的完整依据见
+[`14-framework-capabilities/framework-capabilities-baseline.md`](14-framework-capabilities/framework-capabilities-baseline.md)。
+以后升级 Pydantic AI 或 Harness 时，先增量更新该台账，再决定是否调整本文件。
 
-## 近期主线（v0.3.16 后）
+## 维护规则
 
-近期研发集中在以下方向：
+- “框架有这个类”不等于需要开发。
+- “待实现”必须写清首版范围和验收，不能顺带扩成平台级重构。
+- “有潜力”必须写明触发条件，未触发前不得直接排期或预埋半成品。
+- “暂缓”保留已确认价值和重新启动条件，避免下一轮重复调研。
+- “已关闭”只有关闭条件发生变化才能重新打开。
+- “已实现”不重复写成待办；后续缺陷使用新的、可验收的问题描述。
+- 新能力优先复用 Pydantic AI Core，其次复用 Harness 公开 API，最后才由 DeepAgent 实现最小产品逻辑。
+- 涉及 user、Agent、App、Space、SQL 历史、SSE、Checkpoint、MCP 配置和 UI Pending 的部分始终需要产品层边界。
 
-1. **工具观测**：先完成 `TOOL-001`，为后续风险治理、检索优化和结果外置提供真实指标。
-2. **Skill**：以 Harness 0.18 的 `Skills` 渐进披露作为 Instructions 基础，把当前“Instructions + FunctionToolset”的最小 Python Skill 扩展为适合线上安装、版本管理和素材治理的完整能力包。
-3. **工具治理**：先建立跨 Function、MCP、UI 和附件工具的风险、副作用与权限元数据，再推进审批、Guardrail 和结果外置。
-4. **Output Tool（暂缓）**：0805 实验结论已归档；待多输出组合、普通文本与混合工具调用规则完成产品决策后再重新实施。
+## 待实现
 
-工具检索和 Console 对话呈现首版已经落地。下一阶段先完成工具观测，再进入 Skill 协议与
-渐进披露；Output Tool 保留完整设计和实验证据，但不进入近期代码计划。
+当前只保留三条可直接进入计划的主线。其中观测和评估按“先建立可关联的事实，后计算质量结论”
+顺序实施，不能先做一个脱离真实 Run 数据的评分页面。
 
-## P0
-
-| ID | 课题 | 事项 | 状态 | 依赖与验收 | 来源 |
+| ID | 主线 | 采用方案 | DeepAgent 补充边界 | 验收重点 | 来源 |
 | --- | --- | --- | --- | --- | --- |
-| `TOOL-001` | 工具优化 | 增加工具定义数量、Schema 字节、调用/重试/失败、耗时和结果大小观测 | 可实施 | 先统一指标口径，不新增计费账本 | [工具质量契约](05-tool-optimization/tool-optimization-design.md#10-工具质量统一契约) |
-| `CONSOLE-101` | 运维控制台 | 将连续 Assistant 历史和单次流式工具循环聚合为一个可视回答，过程与工具默认折叠，最终答案常显 | 已关闭 | v0.3.16 已合入；保持 no-build 架构和既有 SSE/History 契约，UI Deferred 等待状态仍可发现并展开操作 | [运维控制台](02-operations-console/operations-console-design.md) |
-| `TOOL-002` | UI 工具 | Deferred UI 续跑前是否由公共层按 `result_schema` 强制校验结果 | 已关闭 | v0.3.15 决定不做公共层强校验；`result_schema` 用于前端渲染与协议说明，严格业务结果由业务恢复逻辑校验，副作用参数必须由真正后端工具复检 | [UI 工具历史与边界](01-ui-tools/ui-tools-history.md#结果-schema-边界) |
-| `TOOL-003` | 工具优化 | 建立风险、外部副作用和权限要求的统一元数据契约 | 待设计 | 需同时覆盖 Function、MCP、UI 和附件工具，并作为 `ToolGuardrail` 参数复检、结果清理与审批策略的统一输入 | [工具质量契约](05-tool-optimization/tool-optimization-design.md#10-工具质量统一契约) |
-| `TOOL-004` | 工具错误 | 按“模型可纠正”与“本次执行已终止”区分 `ModelRetry` 和 `ToolFailed` | 已关闭 | v0.3.15 已收口附件下载、损坏、解析、超限和 MCP Resource 上游失败；UI、Sandbox 与普通 MCP Tool 保持原语义 | [工具质量契约](05-tool-optimization/tool-optimization-design.md#10-工具质量统一契约) |
-| `TOOL-103` | 工具优化 | 无合法会话附件时隐藏整个附件读取工具包 | 已关闭 | v0.3.12 已实施；有合法附件时整包披露三个读取工具，调用时仍执行文件权限校验 | [附件请求级过滤](05-tool-optimization/tool-optimization-design.md#81-preparetools) |
-| `TOOL-104` | 工具优化 | 分离 MCP 工具协议名与聊天展示名 | 可实施 | 保留稳定命名空间和历史兼容；Console 使用独立 `display_name` 隐藏冗长前缀 | [Toolset 展示命名](05-tool-optimization/tool-optimization-design.md#83-toolset-组合与展示命名) |
-| `TOOL-105` | 结构化最终输出 | 实施 Agent 可选的多种 Output Tool | 暂缓 | 0805 实验已归档；重新实施前需锁定可选/严格模式、多输出组合和混合调用确定性重试规则 | [结构化最终输出设计](09-structured-output/structured-output-design.md#103-0805-实验实现的归档结论) |
-| `TOOL-201` | 工具检索 | 实施 MCP 工具检索与渐进披露机制 | 已关闭 | v0.3.12 已实施；v0.3.14 补齐用户问题优先、只读副作用过滤、已披露排除和单 Run 重复搜索去重；跨 Run 发现状态继续遵循 Pydantic AI | [工具检索设计](13-tool-discovery/tool-discovery-design.md) |
-| `SKILL-001` | Skill | 设计并实施线上 Skill 安装、版本管理与渐进披露 | 可实施 | Harness `Skills` 负责 SKILL.md 正文渐进披露；DeepAgent 负责授权、版本、References、Assets、工具与执行隔离 | [Skill 体系](12-agent-skills/skill-system-design.md) |
-| `ATT-001` | 附件解析 | 固化真实附件读取、上下文压缩和 Checkpoint 更新的端到端测试 | 已关闭 | v0.3.15 目标回归覆盖 TXT/DOCX/XLSX 分页、条件披露、SSE、历史以及附件与 Checkpoint 原始历史边界 | [验证边界](06-attachment-parsing/attachment-parsing-design.md#10-验证边界) |
-| `MODEL-001` | 模型请求 | 将模型目录的 `max_output_tokens` 通过 Pydantic AI `ModelSettings.max_tokens` 应用于普通和流式请求 | 已关闭 | v0.3.15 已实施；未配置时保持 Provider 默认，摘要继续使用独立动态上限 | [模型目录设计](04-model-catalog/model-catalog-design.md) |
-| `ART-001` | Artifact 交互 | Artifact 最小语义（登记/元数据/TTL/权限；可不接外部 sink） | 待设计 | 合法 id 不得从 Checkpoint 猜造；存储落点待决 | [08 分期 A0](08-artifact-export/README.md#建议分期先语义后-sink) |
-| `ART-001b` | Artifact 交互 | 可选 sink：下载中心 publish（upload + business.save） | 待设计 | 依赖 ART-001；非唯一成功标准 | [设计纲要 S0](08-artifact-export/artifact-export-design.md#32-可选-sink下载中心s0) |
+| `SKILL-001` | 线上 Skill 与渐进披露 | 使用 Harness 0.18 `Skills` 延迟披露 `SKILL.md` 正文 | 安装、版本、来源、权限、References、Assets、脚本隔离和 Agent 整包授权 | 纯 Instructions Skill、带素材 Skill、现有 Python Skill 迁移、第三方包拒绝路径 | [Skill 体系](12-agent-skills/skill-system-design.md) |
+| `CONSOLE-301` | Console 诊断中心 | 基于 `OBS-101` 的 run/trace 数据提供只读查询，不解析 Pod 文本日志，不在聊天消息中伪造诊断内容 | 首版展示 Run 时间线、模型请求、Token/缓存、工具搜索与调用、压缩、取消、错误；观测后端未选定前只定义查询契约和结构化日志字段 | 可以从 session/run/trace 相互定位；敏感内容默认不展示；诊断数据缺失不能影响聊天主链路 | [框架能力台账](14-framework-capabilities/framework-capabilities-baseline.md#42-下一步优先采用) |
+| `EVAL-001` | Agent 回复与工具调用质量评估 | 在 `OBS-101` 的真实 Trace 之上建立离线评估集、规则评估和可选模型评审，不把 Evaluation 误写成 Evolution | 分开评估最终回答正确性/完整性、工具选择、工具参数、调用结果利用、无副作用约束和成本效率；记录评估器、数据集、Prompt/Agent版本及评分依据 | 首版离线或抽样运行，不同步阻塞用户请求；评分不是聊天事实，不写入 `chat_messages`；诊断中心只展示结果和证据摘要 | [框架能力台账](14-framework-capabilities/framework-capabilities-baseline.md#42-下一步优先采用) |
 
-## P1
+推荐顺序：`SKILL-001` 作为下一条完整产品主线实施；选定 OTLP 观测后端后再做
+`CONSOLE-301`；`EVAL-001` 复用同一批 Trace 建立离线评估。
 
-| ID | 课题 | 事项 | 状态 | 依赖与验收 | 来源 |
+## 有潜力
+
+以下事项不是近期承诺。只有“触发条件”真实发生后，才重新检查固定框架版本和产品边界。
+
+### 工具治理与输出
+
+| ID | 潜力方向 | 优先复用 | 触发条件 | 当前边界 | 来源 |
 | --- | --- | --- | --- | --- | --- |
-| `TOOL-101` | 工具优化 | 收敛 MCP 单层命名空间并兼容重复前缀 | 待设计 | 不能破坏已有 Agent capability 与历史工具事件 | [MCP 命名](05-tool-optimization/tool-optimization-design.md#5-mcp-工具命名优化) |
-| `TOOL-102` | 工具优化 | 使用 `PrepareTools` 做请求级工具过滤 | 待设计 | 先完成工具风险元数据和可观测性 | [请求级过滤](05-tool-optimization/tool-optimization-design.md#81-preparetools) |
-| `TOOL-106` | 工具优化 | 为高风险后端工具增加执行前审批 | 待设计 | 依赖 `TOOL-003`；优先复用 Harness `ToolGuardrail` / Pydantic AI Deferred 审批原语，同时补齐持久化、TTL、操作人、权限复检、幂等与执行审计 | [执行审批](05-tool-optimization/tool-optimization-design.md#第三批高风险工具审批) |
-| `TOOL-107` | 工具包 | 统一 Tool Package 目录并支持 UI 工具包 | 已完成 | v0.3.2 整包选择；旧编码仅由 Alembic 002 一次迁移，运行时不保留兼容分支 | [工具包与工具目录](11-tool-packages/tool-packages-design.md) |
-| `TOOL-108` | 工具包 | 支持 Agent 在工具包内逐工具授权 | 暂缓 | 先完成整包语义和目录统一；未来扩展选择结构，不复用稳定工具协议名作为授权主键 | [后续演进](11-tool-packages/tool-packages-design.md#12-后续演进) |
-| `TOOL-109` | 工具结果 | 使用 Harness `ToolOutputLimits` 外置超长工具结果 | 待设计 | 排在 Skill 之后；先复用 `ART-*` 建立跨 Pod 共享 Store、不可猜句柄、user/App/Space 权限、TTL/清理和审计；History 可授权读取完整结果，Console 显示“内容已外置” | [大工具结果治理](05-tool-optimization/tool-optimization-design.md#92-tooloutputlimits--overflowingtooloutput) |
-| `TOOL-110` | 工具治理 | 使用 Harness `ToolGuardrail` 统一工具参数与结果策略 | 待设计 | 依赖 `TOOL-003`；执行前按可信 deps 复检 user/App/Space 与副作用策略，执行后先做敏感信息清理再进入模型、历史或 Spill；审批流程见 `TOOL-106` | [Guardrails](05-tool-optimization/tool-optimization-design.md#94-guardrails) |
-| `USAGE-101` | 用量治理 | 增加 Run 与会话 Token 上限和 80% 预警 | 待设计 | Run 优先使用 Pydantic AI `UsageLimits` 的请求数、工具调用数和单请求输入上限；动态窗口预算与压缩仍是上下文事实源；私有模型暂不按美元阻断，用户/App/Space 日预算待 Redis 配额方案 | [Harness 0.18 后续采用项](03-context-compaction/context-compaction-research.md#harness-018-后续采用项) |
-| `OBS-101` | 原生观测 | 接入 Pydantic AI `conversation_id`、`run_id` 和可选 Instrumentation | 待设计 | `conversation_id` 使用 Agent/Session 作用域化稳定标识，每次执行生成独立 `run_id`；`include_content=false`，先设计脱敏与导出端；只用于链路关联，不替代 SessionStore、SSE 或业务审计 | [Pydantic AI 2.26 原生能力采用项](03-context-compaction/context-compaction-research.md#pydantic-ai-226-原生能力采用项) |
-| `MODEL-101` | 模型请求 | 按 Provider 能力评估原生 Prompt Cache / `CachePoint` | 待设计 | 仅对明确支持且可观测命中率的模型启用；不得对 DeepSeek 或私有 OpenAI-compatible 端点全局假设支持 | [Pydantic AI 2.26 原生能力采用项](03-context-compaction/context-compaction-research.md#pydantic-ai-226-原生能力采用项) |
-| `MODEL-102` | 模型请求 | 使用原生内容过滤异常区分“被安全策略拦截”和“正常空响应” | 待设计 | 评估 `RaiseContentFilterError` 及各 Provider 映射，统一 REST/SSE 错误协议和 Console 提示，不把过滤结果持久化成正常完成 | [Pydantic AI 2.26 原生能力采用项](03-context-compaction/context-compaction-research.md#pydantic-ai-226-原生能力采用项) |
-| `ATT-101` | 附件解析 | 设计统一文档解析服务，覆盖 PDF/OCR/PPTX 和复杂 Office | 待设计 | 需要评估独立服务、开源解析器和资源隔离 | [后续方向](06-attachment-parsing/attachment-parsing-design.md#13-后续方向) |
-| `ART-101` | Artifact 交互 | 沙箱大结果晋升为 Artifact（与 07 workdir 合同） | 待设计 | 依赖 ART-001 与 07 阶段 A | [交叉合同](08-artifact-export/README.md#与-07-的交叉合同必须对齐) |
-| `ART-102` | Artifact 交互 | （已并入 ART-101）沙箱 `result` 产出 artifact_id | 待设计 | 同 ART-101 | [设计纲要](08-artifact-export/artifact-export-design.md#31-语义主干a0a1) |
-| `CTXREF-101` | 上下文引用 | 迁移 DeepCube 与 DeepTable 前端，并补齐对应 Agent 业务 Prompt | 可实施 | DeepAgent v0.3.5 公共协议已交付；DeepTable 不再使用 DeepCube 助手做业务验收 | [实施阶段](10-context-reference/context-reference-design.md#18-建议实施阶段) |
-| `CTX-101` | 上下文压缩 | 基于 Pydantic AI 2.26 重新审查窗口预算、摘要请求保护、中断历史修复及自动/主动压缩一致性 | 已关闭 | v0.3.13 已让官方 CancellationToken 覆盖嵌套摘要，并用 Call/Return 基类统一 Local/Native 工具配对；Provider CompactionPart 防空壳、单次摘要与原始历史边界保持不变 | [上下文压缩设计](03-context-compaction/context-compaction-design.md) |
+| `TOOL-003` / `TOOL-106` / `TOOL-110` | 工具风险元数据、执行审批和参数/结果 Guardrail | Core `ApprovalRequiredToolset`、Harness `ToolGuardrail`、Core Deferred | 出现真实写入、删除、外发或高风险代码执行工具 | 业务服务权限、审批记录、TTL、操作人、幂等和审计仍由 DeepAgent/业务系统负责 | [工具治理](05-tool-optimization/tool-optimization-design.md#94-guardrails) |
+| `TOOL-109` / `ART-001` / `ART-001b` / `ART-101` / `ART-201` | 大工具结果外置与 Artifact | Harness `ToolOutputLimits`、`OverflowStore`、`MediaStore` | 大结果稳定重复占用上下文，且跨 Pod 共享 Store 已选定 | 句柄不可猜、user/App/Space 授权、TTL、清理、History 查看与 Console 提示必须完整 | [大工具结果治理](05-tool-optimization/tool-optimization-design.md#92-tooloutputlimits-overflowingtooloutput) |
+| `TOOL-105` | 可选结构化最终输出 | Pydantic AI `ToolOutput`/`NativeOutput`/`PromptedOutput` | 产品锁定普通文本与多输出组合、混合工具调用和严格模式规则 | Output 不是 ToolPackage；权威 MCP 事实不由模型重写 | [结构化最终输出](09-structured-output/structured-output-design.md) |
+| `TOOL-108` | Agent 包内逐工具授权 | Core `FilteredToolset` 或 Prepared Toolset | 出现明确的“同包内部分工具禁止使用”权限需求 | 授权主键不能直接依赖可重命名的协议名 | [工具包后续演进](11-tool-packages/tool-packages-design.md#12-后续演进) |
+| `TOOL-301` | Provider Native Code/File/Web/Computer 等工具 | Core Provider Native Capability | 某托管 Provider 能力、模型和执行环境成为明确产品功能 | 必须显式启用并按 Provider 治理；不替代公共 MCP、Sandbox、附件、RAG 或当前页面 UI Tool | [浏览器与页面操作](15-browser-and-page-actions/browser-and-page-actions-design.md#23-provider-原生-computer-use) |
 
-## P2
+### 上下文、记忆和执行恢复
 
-| ID | 课题 | 事项 | 状态 | 依赖与验收 | 来源 |
+| ID | 潜力方向 | 优先复用 | 触发条件 | 当前边界 | 来源 |
 | --- | --- | --- | --- | --- | --- |
-| `ATT-201` | 附件解析 | 大文件异步解析、隔离执行和租户级配额 | 待设计 | 依赖统一文档解析服务 | [安全与资源](06-attachment-parsing/attachment-parsing-design.md#12-安全与资源边界) |
-| `ATT-202` | 附件解析 | 文件结构索引、跨 Run 缓存和超大结果外置 | 暂缓 | 第一版继续使用单 Run 缓存与上下文压缩；**出站大结果见 `ART-*`** | [后续方向](06-attachment-parsing/attachment-parsing-design.md#13-后续方向) |
-| `ART-201` | Artifact 交互 | 配额、审计、共享存储与 Harness Spill 对照 | 暂缓 | 多实例与运维就绪后 | [分期 G0](08-artifact-export/README.md#建议分期先语义后-sink) |
-| `CONSOLE-201` | 运维控制台 | 增加工作台消息检查模式，在右侧按选中对象查看 Markdown 原文、历史结构、上下文引用、工具参数/结果和当前 Run 的 SSE 事件帧 | 待设计 | 历史只读数据与当前 Run 内存事件必须分开；第一版不把完整 SSE 流持久化到数据库，不暴露敏感 Provider 请求 | [运行检查器](02-operations-console/operations-console-design.md#运行检查器) |
-| `CTX-102` | 历史检索 | 基于现有 SQL 会话接入 Harness `ConversationSearch` | 待设计 | 实现读取 `chat_messages` 的自定义 `HistorySource`，不启用第二套 `StepPersistence`；默认只检索当前会话，跨会话必须显式设计 user/App/Space 权限与审计 | [Harness 0.18 后续采用项](03-context-compaction/context-compaction-research.md#harness-018-后续采用项) |
-| `CTX-103` | 上下文压缩 | 评估以 Harness `SummarizingCompaction` 作为摘要内核 | 已关闭 | v0.3.16 确认不整体迁移：继续复用公开确定性 tiers，自动/主动共用内部投影流程并采用六段增量摘要；Harness 当前缺少工具 Schema 预算、摘要输出上限和 DeepAgent Checkpoint 事务语义，待其接口成熟后重新评估 | [Harness 原生压缩复用边界](03-context-compaction/context-compaction-research.md#harness-018-原生压缩复用边界) |
-| `MODEL-201` | 模型请求 | 评估 Agent 显式配置 Pydantic AI `FallbackModel` | 暂缓 | 只能由 Agent 明确选择候选模型，并先锁定成本、数据出境、能力差异和失败切换口径；禁止平台静默全局回退 | [Pydantic AI 2.26 原生能力采用项](03-context-compaction/context-compaction-research.md#pydantic-ai-226-原生能力采用项) |
-| `MODEL-202` | Thinking | 评估 Pydantic AI 原生 Thinking 配置统一跨 Provider 推理参数 | 待设计 | 需与模型目录能力、Console 配置、历史/SSE 展示一起设计；不得重新引入 DeepSeek 专用兼容模型 | [Pydantic AI 2.26 原生能力采用项](03-context-compaction/context-compaction-research.md#pydantic-ai-226-原生能力采用项) |
-| `TOOL-203` | 工具结果 | 按工具选择性评估 `IncludeToolReturnSchemas` | 暂缓 | 只用于模型确实需要理解返回结构的少量工具；先测 Schema Token 增量，不对全部 MCP/Function Tool 开启 | [工具质量契约](05-tool-optimization/tool-optimization-design.md#10-工具质量统一契约) |
-| `UI-201` | UI 工具 | 增加前端表单操作工具 | 待决策 | 需先明确宿主页面、动作协议和权限边界 | [表单操作](05-tool-optimization/tool-optimization-design.md#6-前端表单工具设计) |
-| `TOOL-202` | 工具优化 | 评估以 `CombinedToolset` 统一包装跨来源工具 | 暂缓 | 仅在多个工具包需要共享过滤、审批或延迟加载策略时采用 | [Toolset 组合](05-tool-optimization/tool-optimization-design.md#83-toolset-组合与展示命名) |
+| `CTX-102` | 压缩后搜索原始会话 | Harness `ConversationSearch` + 自定义 `HistorySource` | 摘要后确实出现路径、ID、决定无法恢复的问题 | 只读现有 `chat_messages`；不启用第二套 `StepPersistence` 历史 | [Harness 后续采用项](03-context-compaction/context-compaction-research.md#harness-018-后续采用项) |
+| `CTX-201` | 跨会话长期记忆 | Harness `Memory` + 产品 Store | 产品明确需要可查看、可编辑、可删除的长期笔记 | namespace 不是授权；必须补 user/Agent/App/Space、审计和删除 | [框架能力台账](14-framework-capabilities/framework-capabilities-baseline.md#53-有潜力按需求触发) |
+| `RUN-201` | 长任务崩溃恢复与副作用账本 | Harness `StepPersistence` 或 Core Durable Execution | 长工具/工作流需要进程崩溃后继续且业务幂等已定义 | 不替代 SQL Session/History、SSE 或 Deferred Pending | [框架能力台账](14-framework-capabilities/framework-capabilities-baseline.md#53-有潜力按需求触发) |
+| `RUN-202` | 结构化计划、子 Agent 与动态工作流 | Harness `Planning`、`SubAgents`、`DynamicWorkflow` | 出现稳定长任务分工、计划 UI 或并行执行需求 | 子 Run 隔离、用量、工具继承、权限和结果展示必须先设计 | [框架能力台账](14-framework-capabilities/framework-capabilities-baseline.md#53-有潜力按需求触发) |
+| `RUN-203` | 长 Run 指令淡化修复 | Harness `SystemReminders` | 有测试证据表明长工具循环稳定遗忘关键系统约束 | 只重申少量规则，不用于掩盖 Prompt 或工具设计问题 | [框架能力台账](14-framework-capabilities/framework-capabilities-baseline.md#53-有潜力按需求触发) |
 
-## P3
+### 模型、用量和平台能力
 
-| ID | 课题 | 事项 | 状态 | 依赖与验收 | 来源 |
+| ID | 潜力方向 | 优先复用 | 触发条件 | 当前边界 | 来源 |
 | --- | --- | --- | --- | --- | --- |
-| `TOOL-301` | 工具优化 | 评估 Provider Native Code Execution 与 File Search | 暂缓 | 仅作为明确支持的托管 Provider 增强，不替代公共 Sandbox/RAG 能力 | [Provider 能力](05-tool-optimization/tool-optimization-design.md#7-code-execution-的接入边界) |
-| `CTX-301` | 上下文压缩 | 评估 Memory、Usage Ledger 与 StepPersistence | 暂缓 | 仅在出现跨会话记忆、计费或断点恢复产品需求后启动 | [研究结论](03-context-compaction/context-compaction-research.md#暂不引入的能力) |
+| `USAGE-101` | 用户/App/Space 周期配额与收费 | Core `UsageLimits` + Harness `SpendLimits` + 共享计数 Store | 出现正式配额、套餐或计费需求 | 当前 Run 请求数/Token 上限继续保留；不加 80% 预警；私有模型可按 Token/调用量而非美元 | [框架能力台账](14-framework-capabilities/framework-capabilities-baseline.md#53-有潜力按需求触发) |
+| `MODEL-201` | Agent 显式模型回退 | Core `FallbackModel`/模型选择 | 有明确 SLA、候选模型和数据出境策略 | 禁止平台静默全局回退 | [框架能力台账](14-framework-capabilities/framework-capabilities-baseline.md#43-有潜力按需求触发) |
+| `MODEL-202` | 跨 Provider Thinking 统一配置 | Core `Thinking` + `ModelProfile` | 至少两个 Provider 需要统一可配置推理等级 | 同步模型目录、SSE、History 和 Console；不重建 DeepSeek 特例 | [框架能力台账](14-framework-capabilities/framework-capabilities-baseline.md#43-有潜力按需求触发) |
+| `MODEL-203` | 辅助模型复核 | Harness `Advisor` + 现有辅助模型配置 | 出现明确复核流程、预算和候选模型 | 不允许模型自由选择未授权外部模型 | [框架能力台账](14-framework-capabilities/framework-capabilities-baseline.md#53-有潜力按需求触发) |
+| `OBS-201` | OTLP Trace 导出和跨实例运行查询 | Core `Instrumentation`/OpenTelemetry + 选定观测后端 | 开发确认 OTLP 后端、保留周期和访问控制 | 复用 v0.3.17 的 conversation/run 字段；不把高频 Span 写入业务 MySQL，不记录 Prompt、Header 或完整工具结果 | [框架能力台账](14-framework-capabilities/framework-capabilities-baseline.md#42-下一步优先采用) |
+
+### 附件、Console 和业务 UI
+
+| ID | 潜力方向 | 触发条件 | 当前边界 | 来源 |
+| --- | --- | --- | --- | --- |
+| `ATT-101` / `ATT-201` / `ATT-202` | PDF/OCR/PPTX、异步解析、结构索引和缓存 | 真实业务附件超出现有 TXT/DOCX/XLSX 能力 | 需要独立解析资源隔离、租户配额和大结果外置，不塞进当前同步读取工具 | [附件解析后续方向](06-attachment-parsing/attachment-parsing-design.md#13-后续方向) |
+| `UI-201` | 当前 DeepFOS 页面动态业务工具 | 至少两个业务页面需要按请求声明工具，且静态 UI 包无法合理配置 | 复用 `ExternalToolset` + Deferred；只允许 `web__` 白名单业务动作，不开放 CSS Selector、任意脚本或第二套聊天事实源 | [浏览器与页面操作](15-browser-and-page-actions/browser-and-page-actions-design.md#51-deepfos-页面操作沿用-ui-tool) |
+| `WEB-101` | 外部或未知网站自主浏览 | 出现明确外部网站任务，并锁定域名、登录态、资源和审批边界 | 优先复用 Harness `BrowserUse`；默认关闭、首版只读、隔离 Chromium，不连接用户当前浏览器 | [浏览器与页面操作](15-browser-and-page-actions/browser-and-page-actions-design.md#52-外部网站独立-browseruse-能力) |
+
+## 暂缓
+
+这些事项已有价值判断和技术结论，但当前不值得进入近期开发。重新启动时只复核触发条件，不再从头调研。
+
+| ID | 暂缓事项 | 已确认结论 | 重新启动条件 | 来源 |
+| --- | --- | --- | --- | --- |
+| `CONSOLE-201` | 只读运行检查器剩余能力 | Console 已能查看 Context Reference 安全 JSON；Markdown 原文、原始 SSE、History 对照和工具详情主要服务 UI/协议调试 | 调试渲染或 SSE/History 一致性成为高频工作，并能锁定最小只读范围 | [运行检查器](02-operations-console/operations-console-design.md#运行检查器) |
+| `MODEL-101` | 显式 Provider Prompt Cache | DeepSeek 自动缓存无需改请求，命中观测并入 `OBS-101`；`CachePoint`、cache key、TTL 均是 Provider 专属配置，不存在跨 Provider 通用开关 | 模型目录中的某个 Provider 明确支持显式缓存，且能观测成本或首 Token 延迟收益 | [Pydantic AI 采用项](03-context-compaction/context-compaction-research.md#pydantic-ai-226-原生能力采用项) |
 
 ## 已关闭
 
-| ID | 课题 | 结论 | 状态 | 来源 |
-| --- | --- | --- | --- | --- |
-| `CTXREF-001` | 上下文引用 | v0.3.5 已完成 `context_refs` 协议、持久化、模型投影、历史返回和压缩协同 | 已关闭 | [上下文引用设计](10-context-reference/context-reference-design.md) |
-| `MODEL-CATALOG` | 模型目录 | 数据库目录、手工全量刷新和模型运行属性已落地 | 已关闭 | [模型目录设计](04-model-catalog/model-catalog-design.md) |
-| `CTX-COMPACTION` | 上下文压缩 | 自动/主动主模型摘要、可重复主动尝试、确定性裁剪、Checkpoint、历史标记与测试会话已落地 | 已关闭 | [上下文压缩设计](03-context-compaction/context-compaction-design.md) |
-| `ATT-V1` | 附件解析 | TXT/DOCX/XLSX 按需分页读取与会话附件限制已落地 | 已关闭 | [附件解析设计](06-attachment-parsing/attachment-parsing-design.md) |
-| `UI-MCP-DISCOVERY` | UI 工具 | 不采用 MCP UI 自动发现和同步；保留 builtin/manual 两类 | 已关闭 | [UI 工具历史](01-ui-tools/ui-tools-history.md) |
+这些结论不再作为开发候选。重新打开时必须先说明哪个关闭条件已经改变。
+
+| ID/主题 | 关闭结论 | 重新打开条件 | 来源 |
+| --- | --- | --- | --- |
+| `TOOL-002` | 不在公共层强制校验 UI Deferred `result_schema` | 业务出现必须统一强约束且无法在恢复层校验的真实需求 | [UI 工具边界](01-ui-tools/ui-tools-history.md#结果-schema-边界) |
+| `TOOL-101` | 不为美化名称重写 MCP 工具命名空间 | 上游确有重复/非法协议名且能提供完整迁移方案 | [MCP 命名](05-tool-optimization/tool-optimization-design.md#5-mcp-工具命名优化) |
+| `TOOL-102` | 不把通用 `PrepareTools` 当独立产品项目 | 具体过滤需求出现时直接在该功能内使用 Core/Prepared Toolset | [请求级过滤](05-tool-optimization/tool-optimization-design.md#81-preparetools) |
+| `TOOL-104` | 不给 MCP 虚构 `display_name`，模型、SSE、History、Console 原样展示最终协议名 | MCP 标准新增可靠展示字段且产品明确要展示 | [Toolset 命名](05-tool-optimization/tool-optimization-design.md#83-toolset-组合与展示命名) |
+| `TOOL-202` | 不把 `CombinedToolset` 做成产品概念 | 无；它继续作为运行时组合实现细节按需使用 | [Toolset 组合](05-tool-optimization/tool-optimization-design.md#83-toolset-组合与展示命名) |
+| `MODEL-102` | 不接入 `RaiseContentFilterError` | 真实 Provider 出现 `content_filter` 被误保存为正常完成 | [框架能力台账](14-framework-capabilities/framework-capabilities-baseline.md#44-明确不采用或不默认采用) |
+| `CTX-103` | Harness `SummarizingCompaction` 不整体替换 DeepAgent 压缩器 | 公开 API 能覆盖工具 Schema 预算、摘要上限、主动 SSE、目标复检和 Checkpoint 事务 | [压缩复用边界](03-context-compaction/context-compaction-research.md#harness-018-原生压缩复用边界) |
+| `ART-102` | 已并入 Artifact/大工具结果主题，不保留重复任务 | 无 | [Artifact 设计](08-artifact-export/artifact-export-design.md) |
+| `UI-MCP-DISCOVERY` | 不从 MCP 自动生成 DeepAgent UI Tool | MCP 出现稳定、可验证且满足产品权限的 UI 标准 | [UI 工具历史](01-ui-tools/ui-tools-history.md) |
+| `WEB-LEGACY` | 不整体合并远端 `feat/web-capabilities` | 不重新打开；只允许按真实需求提取请求级声明、命名空间、审批等单个思想 | [旧 Web 分支审查](15-browser-and-page-actions/browser-and-page-actions-design.md#4-远端-featweb-capabilities-审查) |
+| Provider 原生压缩叠加 Checkpoint | 两层历史改写禁止同时启用 | 未来选择完全替换且通过黑盒等价验证 | [框架能力台账](14-framework-capabilities/framework-capabilities-baseline.md#44-明确不采用或不默认采用) |
+| Harness `StepPersistence` 替换 SQL History | 禁止建立第二个聊天事实源 | 无；只允许未来用于执行恢复/副作用账本 | [框架能力台账](14-framework-capabilities/framework-capabilities-baseline.md#54-明确不采用或不作为平台默认能力) |
+| Harness `CapabilityCreation` | 不允许模型在主服务写入并导入 Python 能力 | 无；第三方扩展必须走受审安装和隔离执行 | [框架能力台账](14-framework-capabilities/framework-capabilities-baseline.md#54-明确不采用或不作为平台默认能力) |
+| Harness `CodeMode`、`FileSystem`、`Shell` 作为默认能力 | 不扩大主服务代码/文件/命令执行面 | 新建独立隔离 Backend 并形成明确产品需求 | [框架能力台账](14-framework-capabilities/framework-capabilities-baseline.md#54-明确不采用或不作为平台默认能力) |
+| Harness `ManagedPrompt` 替换 Agent Prompt | 不建立数据库以外的第二个 Prompt 事实源 | 未来整体迁移 Prompt 配置治理 | [框架能力台账](14-framework-capabilities/framework-capabilities-baseline.md#54-明确不采用或不作为平台默认能力) |
+| 静默全局模型回退 | 禁止自动跨模型、跨地域和跨成本回退 | 只允许重新设计为 Agent 显式配置 | [框架能力台账](14-framework-capabilities/framework-capabilities-baseline.md#44-明确不采用或不默认采用) |
+| Run Token 80% 告警 | 不增加缺少明确用户动作的阈值告警 | 若未来配额产品定义了明确通知和处置动作 | [用量治理](14-framework-capabilities/framework-capabilities-baseline.md#53-有潜力按需求触发) |
+
+## 已实现
+
+这里只记录稳定能力和关键版本，不再把它们混入未完成清单。
+
+| ID/能力 | 已实现结论 | 版本/依据 |
+| --- | --- | --- |
+| `MODEL-CATALOG` | 数据库模型目录、刷新、上下文窗口和最大输出配置 | v0.3.0+，[模型目录](04-model-catalog/model-catalog-design.md) |
+| `TOOL-107` | ToolPackage 目录、UI 工具包、运行 Toolset 和 Console 概念统一 | v0.3.2，[工具包设计](11-tool-packages/tool-packages-design.md) |
+| `CTXREF-001` | `context_refs` 协议、持久化、模型投影、历史和压缩协同 | v0.3.5，[上下文引用](10-context-reference/context-reference-design.md) |
+| `CTXREF-101` | DeepCube `deepcube.editor_context@1` 与 DeepTable Page/Range Context 已迁移结构化 `context_refs`，历史恢复和业务 Prompt 已适配 | 2026-08 跨仓代码与测试核验，[上下文引用实施阶段](10-context-reference/context-reference-design.md#18-建议实施阶段) |
+| `CTX-COMPACTION` / `CTX-101` | 自动/主动单次摘要、Checkpoint、Hash/CAS、取消、Local/Native 工具配对和六段摘要 | v0.3.16，[上下文压缩](03-context-compaction/context-compaction-design.md) |
+| `ATT-V1` / `ATT-001` | TXT/DOCX/XLSX 分页读取、会话附件限制、历史和压缩回归 | v0.3.15，[附件解析](06-attachment-parsing/attachment-parsing-design.md) |
+| `TOOL-103` | 无合法附件时隐藏附件 Toolset | v0.3.12，[请求级过滤](05-tool-optimization/tool-optimization-design.md#81-preparetools) |
+| `TOOL-201` | Pydantic AI Tool Search、MCP Top 3/Top 5 渐进披露、只读过滤和搜索去重 | v0.3.12～v0.3.14，[工具检索](13-tool-discovery/tool-discovery-design.md) |
+| `RUNTIME-CANCEL` | Core `CancellationToken`/`RunCancelled` 正式停止、interrupted History 和 SSE 一致性 | v0.3.10～v0.3.14，[后端运行说明](../../deep_agent/AGENTS.md#正式取消v0310) |
+| `MODEL-001` | 模型目录 `max_output_tokens` 进入普通与流式 `ModelSettings.max_tokens` | v0.3.15，[模型目录](04-model-catalog/model-catalog-design.md) |
+| `TOOL-004` | 附件和 MCP Resource 的 `ModelRetry`/`ToolFailed` 语义收口 | v0.3.15，[工具质量契约](05-tool-optimization/tool-optimization-design.md#10-工具质量统一契约) |
+| `CONSOLE-101` | 单个用户轮次聚合连续 Assistant/工具循环，过程默认折叠、最终答案常显 | v0.3.16，[运维控制台](02-operations-console/operations-console-design.md) |
+| `OBS-101` / `TOOL-001` | 官方 Conversation/Run 标识、脱敏结构化生命周期日志、Usage/缓存 Token 和 Console 当前 Run 指标 | v0.3.17，[框架能力台账](14-framework-capabilities/framework-capabilities-baseline.md#41-已经采用) |
+| `TOOL-203` | `cube_query_data` 与 `dimension_query_members` 选择性披露可信 Return Schema；延迟工具加载前零额外成本 | v0.3.17，[工具返回 Schema](05-tool-optimization/tool-optimization-design.md#84-tool-return-schema) |
+| Harness 确定性压缩 tiers | `ClampOversizedMessages`、`ClearToolResults`、`DeduplicateFileReads` 已复用 | 当前基线，[压缩研究](03-context-compaction/context-compaction-research.md#harness-实验结论) |
+| 官方 DeepSeek Provider | 使用 Pydantic AI 官方 Provider/Profile，不保留自定义模型循环 | v0.3.9+，[框架能力台账](14-framework-capabilities/framework-capabilities-baseline.md#41-已经采用) |
+
+## 当前明确不排期
+
+“有潜力”和“暂缓”都不是积压任务。除上述五条“待实现”外，本文件中的其他事项当前都不应进入开发排期。

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
 from typing import Any, AsyncIterator
@@ -58,6 +59,14 @@ from deep_agent.agent.deferred import serialize_deferred
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.event_persister import EventPersister, PersistEvent
 from deep_agent.agent.limits import format_stream_error
+from deep_agent.agent.observability import (
+    cache_usage_available,
+    log_event,
+    log_model_requests,
+    run_metrics,
+    usage_dict,
+)
+from deep_agent.agent.run_identity import conversation_id_for, new_run_id
 from deep_agent.agent.history import (
     _extract_assistant_text,
     first_user_prompt,
@@ -129,6 +138,7 @@ class AgentRunner:
         checkpoint_store: ContextCheckpointStoreBase | None = None,
         checkpoint_fingerprint: str | None = None,
         summary_model_id: str | None = None,
+        model_id: str | None = None,
         estimator: TokenEstimator | None = None,
         stores: DataStores | None = None,
         active_runs: ActiveRunRegistry | None = None,
@@ -146,9 +156,30 @@ class AgentRunner:
         self._checkpoint_store = checkpoint_store
         self._checkpoint_fingerprint = checkpoint_fingerprint
         self._summary_model_id = summary_model_id
+        self._model_id = model_id or summary_model_id
         self._estimator = estimator or TokenEstimator.conservative()
         self._stores = stores
         self._active_runs = active_runs or ActiveRunRegistry()
+
+    @staticmethod
+    def _start_run_identity(
+        session_id: str,
+        deps: AgentDeps,
+        *,
+        run_id: str | None = None,
+    ) -> None:
+        if deps.conversation_id is None:
+            deps.conversation_id = conversation_id_for(deps.agent_id, session_id)
+        # A fresh Pydantic run id is required for every send/resume/retry.  The
+        # streaming API may pre-mint one so it can publish it in the first SSE.
+        deps.run_id = run_id or new_run_id()
+
+    @staticmethod
+    def _compaction_name(deps: AgentDeps) -> str:
+        state = deps.context_state
+        if state is None or not state.telemetry.triggered:
+            return "none"
+        return state.telemetry.strategy
 
     @asynccontextmanager
     async def _session_lock(self, session_id: str, *, agent_id: str | None) -> AsyncIterator[None]:
@@ -174,8 +205,58 @@ class AgentRunner:
     ) -> AsyncIterator[dict[str, Any]]:
         """Force a semantic checkpoint refresh without appending a chat turn."""
 
+        self._start_run_identity(session_id, deps)
+        started_at = time.perf_counter()
+
+        def manual_result(
+            status_name: str,
+            reason: str | None,
+            *,
+            usage: RunUsage | None = None,
+            telemetry: dict[str, Any] | None = None,
+            target_tokens: int | None = None,
+            checkpoint: dict[str, Any] | None = None,
+        ) -> dict[str, Any]:
+            metrics = run_metrics(
+                status=status_name,
+                started_at=started_at,
+                model_id=self._model_id,
+                usage=usage,
+                compaction="manual",
+            )
+            payload = _manual_compaction_result(
+                status_name,
+                reason,
+                usage=usage,
+                telemetry=telemetry,
+                target_tokens=target_tokens,
+                checkpoint=checkpoint,
+                conversation_id=deps.conversation_id,
+                run_id=deps.run_id,
+                run_metrics=metrics,
+            )
+            log_event(
+                "manual_compaction_completed",
+                conversation_id=deps.conversation_id,
+                run_id=deps.run_id,
+                agent_id=deps.agent_id,
+                session_id=session_id,
+                reason=reason,
+                **metrics,
+            )
+            return payload
+
+        log_event(
+            "manual_compaction_started",
+            conversation_id=deps.conversation_id,
+            run_id=deps.run_id,
+            agent_id=deps.agent_id,
+            session_id=session_id,
+            model_id=self._model_id,
+        )
+
         if not self.manual_compaction_enabled:
-            yield _manual_compaction_result("failed", "context_window_unknown")
+            yield manual_result("failed", "context_window_unknown")
             return
         assert self._context_compaction is not None
         assert self._checkpoint_store is not None
@@ -184,7 +265,7 @@ class AgentRunner:
         async with self._session_lock(session_id, agent_id=deps.agent_id):
             raw = await self.store.get_history(session_id, agent_id=deps.agent_id)
             if not raw:
-                yield _manual_compaction_result("noop", "empty_history")
+                yield manual_result("noop", "empty_history")
                 return
             loaded = await load_projection(
                 self._checkpoint_store,
@@ -214,7 +295,7 @@ class AgentRunner:
                     if availability.reason in {"context_window_unknown", "pending_deferred"}
                     else "noop"
                 )
-                yield _manual_compaction_result(outcome, availability.reason)
+                yield manual_result(outcome, availability.reason)
                 return
             if (
                 loaded.used_checkpoint
@@ -223,7 +304,7 @@ class AgentRunner:
             ):
                 # Re-summarizing only the current derived projection compounds
                 # information loss without incorporating any new source facts.
-                yield _manual_compaction_result("noop", "no_reduction")
+                yield manual_result("noop", "no_reduction")
                 return
 
             configured_target = budget.target_tokens or budget.estimated_history_tokens
@@ -310,7 +391,7 @@ class AgentRunner:
                     if reason in no_reduction_reasons
                     else reason
                 )
-                yield _manual_compaction_result(
+                yield manual_result(
                     status_name,
                     result_reason,
                     usage=usage,
@@ -324,7 +405,7 @@ class AgentRunner:
                     await task
                 raise
             except Exception as exc:  # provider errors must preserve the old checkpoint
-                yield _manual_compaction_result(
+                yield manual_result(
                     "failed",
                     type(exc).__name__,
                     usage=usage,
@@ -340,7 +421,7 @@ class AgentRunner:
 
             current_raw = await self.store.get_history(session_id, agent_id=deps.agent_id)
             if history_hash(current_raw) != original_hash:
-                yield _manual_compaction_result(
+                yield manual_result(
                     "failed",
                     "session_changed",
                     usage=usage,
@@ -366,7 +447,7 @@ class AgentRunner:
                 estimator=self._estimator,
             )
             if not saved:
-                yield _manual_compaction_result(
+                yield manual_result(
                     "failed",
                     "session_changed",
                     usage=usage,
@@ -378,7 +459,7 @@ class AgentRunner:
                 session_id,
                 agent_id=deps.agent_id,
             )
-            yield _manual_compaction_result(
+            yield manual_result(
                 "completed",
                 None,
                 usage=usage,
@@ -838,6 +919,17 @@ class AgentRunner:
         deferred_tool_results: DeferredToolResults | None = None,
         branch_from: int | None = None,
     ) -> dict[str, Any]:
+        self._start_run_identity(session_id, deps)
+        started_at = time.perf_counter()
+        log_event(
+            "agent_run_started",
+            conversation_id=deps.conversation_id,
+            run_id=deps.run_id,
+            agent_id=deps.agent_id,
+            session_id=session_id,
+            model_id=self._model_id,
+            mode="non_stream",
+        )
         self._set_tool_discovery_inputs(deps, message, context_refs)
         async with self._session_lock(session_id, agent_id=deps.agent_id):
             prepared = await self._prepare_history(
@@ -866,6 +958,8 @@ class AgentRunner:
                 deferred_tool_results=deferred_tool_results,
                 output_type=_STREAM_OUTPUT_TYPE,
                 model_settings=self.model_settings,
+                conversation_id=deps.conversation_id,
+                run_id=deps.run_id,
             )
             await self._persist_run_messages(
                 session_id,
@@ -887,8 +981,34 @@ class AgentRunner:
                     ),
                 )
         response = _build_run_result(result, self.ui_tool_hints)
+        response["conversation_id"] = result.conversation_id or deps.conversation_id
+        response["run_id"] = result.run_id or deps.run_id
+        response["run_metrics"] = run_metrics(
+            status=response["status"],
+            started_at=started_at,
+            model_id=self._model_id,
+            usage=result.usage,
+            tool_search_calls=(deps.tool_discovery.search_calls if deps.tool_discovery else 0),
+            compaction=self._compaction_name(deps),
+            cache_metrics_available=cache_usage_available(result.new_messages()),
+        )
         response["context"] = self._context_status(prepared.projected, deps)
         response["context"]["compaction"]["checkpoint_saved"] = checkpoint_saved
+        log_model_requests(
+            result.new_messages(),
+            conversation_id=deps.conversation_id,
+            run_id=deps.run_id,
+            agent_id=deps.agent_id,
+            session_id=session_id,
+        )
+        log_event(
+            "agent_run_completed",
+            conversation_id=deps.conversation_id,
+            run_id=deps.run_id,
+            agent_id=deps.agent_id,
+            session_id=session_id,
+            **response["run_metrics"],
+        )
         return response
 
     async def run_stream(
@@ -904,6 +1024,21 @@ class AgentRunner:
         persister: EventPersister,
         active_run: ActiveRun | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
+        self._start_run_identity(
+            session_id,
+            deps,
+            run_id=active_run.run_id if active_run is not None else None,
+        )
+        started_at = time.perf_counter()
+        log_event(
+            "agent_run_started",
+            conversation_id=deps.conversation_id,
+            run_id=deps.run_id,
+            agent_id=deps.agent_id,
+            session_id=session_id,
+            model_id=self._model_id,
+            mode="stream",
+        )
         checkpoint_projection: list[ModelMessage] | None = None
         checkpoint_expected_version = 0
         cancelled_run: RunCancelled | None = None
@@ -959,6 +1094,8 @@ class AgentRunner:
                 agent_id=deps.agent_id,
                 session_id=session_id,
                 user_id=deps.user,
+                conversation_id=deps.conversation_id,
+                run_id=deps.run_id,
             )
             deps.cancellation_token = active_run.cancellation_token
             try:
@@ -980,6 +1117,8 @@ class AgentRunner:
                     output_type=_STREAM_OUTPUT_TYPE,
                     model_settings=self.model_settings,
                     cancellation_token=active_run.cancellation_token,
+                    conversation_id=deps.conversation_id,
+                    run_id=deps.run_id,
                 ) as stream:
                     stream_task: asyncio.Task[Any] | None = asyncio.create_task(
                         stream.__anext__()
@@ -997,7 +1136,17 @@ class AgentRunner:
                                 return_when=asyncio.FIRST_COMPLETED,
                             )
                             if status_task is not None and status_task in done:
-                                yield status_task.result()
+                                status_event = status_task.result()
+                                log_event(
+                                    "context_compaction_phase",
+                                    conversation_id=deps.conversation_id,
+                                    run_id=deps.run_id,
+                                    agent_id=deps.agent_id,
+                                    session_id=session_id,
+                                    phase=status_event.get("phase"),
+                                    mode=status_event.get("mode", "automatic"),
+                                )
+                                yield status_event
                                 status_task = asyncio.create_task(compaction_events.get())
                             if stream_task not in done:
                                 continue
@@ -1029,6 +1178,22 @@ class AgentRunner:
                                     published_tool_calls[tool_call_id] = str(mapped.get("tool") or "tool")
                                 elif event_type == "tool_result" and tool_call_id:
                                     published_tool_calls.pop(tool_call_id, None)
+                                if event_type in {
+                                    "tool_call",
+                                    "tool_result",
+                                    "tool_call_removed",
+                                }:
+                                    log_event(
+                                        "agent_tool_event",
+                                        conversation_id=deps.conversation_id,
+                                        run_id=deps.run_id,
+                                        agent_id=deps.agent_id,
+                                        session_id=session_id,
+                                        phase=event_type,
+                                        tool=mapped.get("tool"),
+                                        tool_call_id=tool_call_id,
+                                        source=mapped.get("source") or "tool",
+                                    )
                                 yield enrich_tool_event(mapped, self.ui_tool_hints)
                     finally:
                         for task in (stream_task, status_task):
@@ -1076,6 +1241,17 @@ class AgentRunner:
                 raise
             except Exception as exc:  # noqa: BLE001 - surface as an SSE error event
                 logger.exception("Agent stream failed for session {}", session_id)
+                log_event(
+                    "agent_run_failed",
+                    conversation_id=deps.conversation_id,
+                    run_id=deps.run_id,
+                    agent_id=deps.agent_id,
+                    session_id=session_id,
+                    model_id=self._model_id,
+                    status="failed",
+                    duration_ms=max(0, round((time.perf_counter() - started_at) * 1_000)),
+                    error_type=type(exc).__name__,
+                )
                 msg_count, branch_pt = self._stream_history_meta(
                     prepared.raw,
                     user_branch_point=(
@@ -1143,6 +1319,44 @@ class AgentRunner:
                 model_message_count=msg_count,
                 user_branch_point=branch_pt,
                 usage=_run_usage_dict(cancelled_run.usage),
+                conversation_id=deps.conversation_id,
+                run_id=deps.run_id,
+                run_metrics=run_metrics(
+                    status="cancelled",
+                    started_at=started_at,
+                    model_id=self._model_id,
+                    usage=cancelled_run.usage,
+                    tool_search_calls=(
+                        deps.tool_discovery.search_calls if deps.tool_discovery else 0
+                    ),
+                    compaction=self._compaction_name(deps),
+                    cache_metrics_available=cache_usage_available(pending),
+                ),
+            )
+            log_model_requests(
+                pending,
+                conversation_id=deps.conversation_id,
+                run_id=deps.run_id,
+                agent_id=deps.agent_id,
+                session_id=session_id,
+            )
+            log_event(
+                "agent_run_cancelled",
+                conversation_id=deps.conversation_id,
+                run_id=deps.run_id,
+                agent_id=deps.agent_id,
+                session_id=session_id,
+                **run_metrics(
+                    status="cancelled",
+                    started_at=started_at,
+                    model_id=self._model_id,
+                    usage=cancelled_run.usage,
+                    tool_search_calls=(
+                        deps.tool_discovery.search_calls if deps.tool_discovery else 0
+                    ),
+                    compaction=self._compaction_name(deps),
+                    cache_metrics_available=cache_usage_available(pending),
+                ),
             )
             return
 
@@ -1164,12 +1378,46 @@ class AgentRunner:
         )
         final_context = self._context_status(prepared.projected, deps)
         final_context["compaction"]["checkpoint_saved"] = checkpoint_saved
+        metrics = run_metrics(
+            status=(
+                "pending"
+                if result is not None and isinstance(result.output, DeferredToolRequests)
+                else "completed"
+            ),
+            started_at=started_at,
+            model_id=self._model_id,
+            usage=result.usage if result is not None else None,
+            tool_search_calls=(deps.tool_discovery.search_calls if deps.tool_discovery else 0),
+            compaction=self._compaction_name(deps),
+            cache_metrics_available=(
+                cache_usage_available(result.new_messages()) if result is not None else False
+            ),
+        )
+        if result is not None:
+            log_model_requests(
+                result.new_messages(),
+                conversation_id=deps.conversation_id,
+                run_id=deps.run_id,
+                agent_id=deps.agent_id,
+                session_id=session_id,
+            )
+        log_event(
+            "agent_run_completed",
+            conversation_id=deps.conversation_id,
+            run_id=deps.run_id,
+            agent_id=deps.agent_id,
+            session_id=session_id,
+            **metrics,
+        )
         yield _final_event(
             result,
             self.ui_tool_hints,
             model_message_count=msg_count,
             user_branch_point=branch_pt,
             context=final_context,
+            conversation_id=deps.conversation_id,
+            run_id=deps.run_id,
+            run_metrics=metrics,
         )
 
 
@@ -1197,6 +1445,9 @@ def _final_event(
     model_message_count: int | None = None,
     user_branch_point: int | None = None,
     context: dict[str, Any] | None = None,
+    conversation_id: str | None = None,
+    run_id: str | None = None,
+    run_metrics: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     output = result.output
     usage = _usage_dict(result)
@@ -1210,6 +1461,9 @@ def _final_event(
             model_message_count=model_message_count,
             user_branch_point=user_branch_point,
             context=context,
+            conversation_id=conversation_id,
+            run_id=run_id,
+            run_metrics=run_metrics,
         )
     return events.final(
         _serialize_output(output),
@@ -1218,6 +1472,9 @@ def _final_event(
         model_message_count=model_message_count,
         user_branch_point=user_branch_point,
         context=context,
+        conversation_id=conversation_id,
+        run_id=run_id,
+        run_metrics=run_metrics,
     )
 
 
@@ -1230,26 +1487,11 @@ def _serialize_output(output: Any) -> Any:
 
 
 def _usage_dict(result: Any) -> dict[str, Any]:
-    usage = result.usage
-    if usage is None:
-        return {}
-    return {
-        "requests": getattr(usage, "requests", None),
-        "input_tokens": getattr(usage, "input_tokens", getattr(usage, "request_tokens", None)),
-        "output_tokens": getattr(usage, "output_tokens", getattr(usage, "response_tokens", None)),
-        "total_tokens": getattr(usage, "total_tokens", None),
-    }
+    return usage_dict(result.usage)
 
 
 def _run_usage_dict(usage: RunUsage | None) -> dict[str, Any]:
-    if usage is None:
-        return {}
-    return {
-        "requests": usage.requests,
-        "input_tokens": usage.input_tokens,
-        "output_tokens": usage.output_tokens,
-        "total_tokens": usage.total_tokens,
-    }
+    return usage_dict(usage)
 
 
 def _manual_compaction_result(
@@ -1260,6 +1502,9 @@ def _manual_compaction_result(
     telemetry: dict[str, Any] | None = None,
     target_tokens: int | None = None,
     checkpoint: dict[str, Any] | None = None,
+    conversation_id: str | None = None,
+    run_id: str | None = None,
+    run_metrics: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     telemetry = dict(telemetry or {})
     return {
@@ -1274,4 +1519,7 @@ def _manual_compaction_result(
         "summary_chunks": telemetry.get("summary_chunks", 0),
         "usage": _run_usage_dict(usage),
         "checkpoint": checkpoint,
+        "conversation_id": conversation_id,
+        "run_id": run_id,
+        "run_metrics": run_metrics,
     }

@@ -4,7 +4,7 @@ import unittest
 from unittest.mock import patch
 
 from pydantic_ai import Agent, RunContext
-from pydantic_ai.capabilities import ToolSearch
+from pydantic_ai.capabilities import IncludeToolReturnSchemas, ToolSearch
 from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 from pydantic_ai.models.test import TestModel
@@ -17,7 +17,9 @@ from deep_agent.agent.tool_discovery import (
     MCP_SEARCH_RESULT_LIMIT,
     ToolDiscoveryTelemetry,
     build_mcp_discovery_toolset,
+    build_return_schema_selector,
     build_search_documents,
+    mcp_original_tool_name,
     rank_tool_documents,
     search_deferred_tools,
     search_text_for_run,
@@ -64,6 +66,21 @@ def deeptable_workbook_get(workbook_name: str) -> str:
     return workbook_name
 
 
+def cube_query_data(cube: str) -> dict[str, list[dict[str, int]]]:
+    """查询 Cube 数据。"""
+    return {"rows": []}
+
+
+def dimension_query_members(dimension: str) -> dict[str, list[str]]:
+    """查询维度成员。"""
+    return {"members": []}
+
+
+def cube_describe(cube: str) -> dict[str, str]:
+    """查看 Cube 定义。"""
+    return {"name": cube}
+
+
 class ToolDiscoveryTests(unittest.IsolatedAsyncioTestCase):
     def _ctx(self, prompt: str) -> RunContext[AgentDeps]:
         return RunContext(
@@ -95,6 +112,92 @@ class ToolDiscoveryTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(ranked[0], "deepfos_search_financial_model")
         self.assertNotIn("deepfos_delete_financial_model", ranked)
+
+    async def test_return_schema_allowlist_uses_original_mcp_name(self) -> None:
+        from pydantic_ai.tools import ToolDefinition
+
+        ctx = self._ctx("查询财务模型")
+        selector = build_return_schema_selector(
+            server_names=["renamed_server"],
+        )
+        selected = ToolDefinition(
+            name="renamed_server_cube_query_data",
+            parameters_json_schema={"type": "object", "properties": {}},
+            return_schema={"type": "object", "properties": {"rows": {"type": "array"}}},
+        )
+        other = ToolDefinition(
+            name="renamed_server_cube_describe",
+            parameters_json_schema={"type": "object", "properties": {}},
+            return_schema={"type": "object"},
+        )
+
+        self.assertTrue(await selector(ctx, selected))
+        self.assertFalse(await selector(ctx, other))
+        self.assertEqual(
+            mcp_original_tool_name(selected.name, ["renamed_server"]),
+            "cube_query_data",
+        )
+
+    async def test_return_schema_allowlist_does_not_invent_missing_schema(self) -> None:
+        from pydantic_ai.tools import ToolDefinition
+
+        ctx = self._ctx("查询成员")
+        selector = build_return_schema_selector(
+            server_names=["deepfos"],
+        )
+        missing = ToolDefinition(
+            name="deepfos_dimension_query_members",
+            parameters_json_schema={"type": "object", "properties": {}},
+        )
+
+        self.assertFalse(await selector(ctx, missing))
+
+    async def test_return_schema_is_only_injected_for_disclosed_allowlist_tool(self) -> None:
+        seen: dict[str, str] = {}
+
+        def model_function(_messages, info: AgentInfo) -> ModelResponse:
+            seen.update({tool.name: tool.description or "" for tool in info.function_tools})
+            return ModelResponse(parts=[TextPart(content="done")])
+
+        toolset = FunctionToolset(
+            tools=[cube_query_data, dimension_query_members, cube_describe, search_financial_model]
+        ).prefixed("renamed_server")
+        wrapper = build_mcp_discovery_toolset(
+            [toolset],
+            server_names=["renamed_server"],
+            estimator=TokenEstimator.conservative(),
+        )
+        assert wrapper is not None
+        agent = Agent(
+            FunctionModel(model_function),
+            deps_type=AgentDeps,
+            toolsets=[wrapper],
+            capabilities=[
+                ToolSearch(strategy=search_deferred_tools, max_results=MCP_SEARCH_RESULT_LIMIT),
+                IncludeToolReturnSchemas(
+                    tools=build_return_schema_selector(
+                        server_names=["renamed_server"],
+                    )
+                ),
+            ],
+        )
+        deps = AgentDeps(
+            session_id="schema-session",
+            agent_id="agent",
+            tool_discovery_inputs_explicit=True,
+            tool_discovery_primary_query="查询 cube 数据并查看定义",
+        )
+
+        await agent.run("查询 cube 数据并查看定义", deps=deps)
+
+        self.assertIn("Return schema:", seen["renamed_server_cube_query_data"])
+        self.assertNotIn("Return schema:", seen["renamed_server_cube_describe"])
+        self.assertNotIn("renamed_server_dimension_query_members", seen)
+        self.assertEqual(
+            deps.tool_discovery.return_schema_tools,
+            ["renamed_server_cube_query_data"],
+        )
+        self.assertGreater(deps.tool_discovery.estimated_return_schema_tokens, 0)
 
     async def test_read_only_negations_do_not_preselect_side_effect_tools(self) -> None:
         ctx = self._ctx("查询当前财务模型，只读即可，不要刷新、生成或上传任何内容")

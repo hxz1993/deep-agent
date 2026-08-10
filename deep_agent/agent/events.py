@@ -65,6 +65,9 @@ def final(
     model_message_count: int | None = None,
     user_branch_point: int | None = None,
     context: dict[str, Any] | None = None,
+    conversation_id: str | None = None,
+    run_id: str | None = None,
+    run_metrics: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "type": "final",
@@ -80,6 +83,12 @@ def final(
         payload["user_branch_point"] = user_branch_point
     if context is not None:
         payload["context"] = context
+    if conversation_id is not None:
+        payload["conversation_id"] = conversation_id
+    if run_id is not None:
+        payload["run_id"] = run_id
+    if run_metrics is not None:
+        payload["run_metrics"] = run_metrics
     return payload
 
 
@@ -106,6 +115,9 @@ def cancelled(
     model_message_count: int | None = None,
     user_branch_point: int | None = None,
     usage: dict[str, Any] | None = None,
+    conversation_id: str | None = None,
+    run_id: str | None = None,
+    run_metrics: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "type": "cancelled",
@@ -118,6 +130,12 @@ def cancelled(
         payload["user_branch_point"] = user_branch_point
     if usage is not None:
         payload["usage"] = usage
+    if conversation_id is not None:
+        payload["conversation_id"] = conversation_id
+    if run_id is not None:
+        payload["run_id"] = run_id
+    if run_metrics is not None:
+        payload["run_metrics"] = run_metrics
     return payload
 
 

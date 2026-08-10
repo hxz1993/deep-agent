@@ -4,8 +4,7 @@ from typing import Any
 
 import httpx
 from pydantic_ai import Agent
-from pydantic_ai.capabilities import AbstractCapability
-from pydantic_ai.capabilities import ToolSearch
+from pydantic_ai.capabilities import AbstractCapability, IncludeToolReturnSchemas, ToolSearch
 from pydantic_ai.models import DEFAULT_HTTP_TIMEOUT, Model, get_user_agent, parse_model_id
 from pydantic_ai.models.anthropic import AnthropicModel
 from pydantic_ai.models.google import GoogleModel
@@ -24,6 +23,7 @@ from deep_agent.agent.spec import AgentSpec
 from deep_agent.agent.context.estimator import TokenEstimator
 from deep_agent.agent.tool_discovery import (
     MCP_SEARCH_RESULT_LIMIT,
+    build_return_schema_selector,
     build_mcp_discovery_toolset,
     search_deferred_tools,
 )
@@ -237,6 +237,13 @@ def build_agent(
                     "返回匹配工具后，下一次模型请求会获得这些工具的完整参数。"
                 ),
                 parameter_description="一个或多个简短用途，例如“查询财务模型成员”。",
+            )
+        )
+        capabilities.append(
+            IncludeToolReturnSchemas(
+                tools=build_return_schema_selector(
+                    server_names=mcp_server_names or (),
+                )
             )
         )
     instructions: list[Any] = []

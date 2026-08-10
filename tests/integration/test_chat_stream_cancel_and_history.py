@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import unittest
 from unittest.mock import AsyncMock, patch
 
@@ -281,15 +282,26 @@ class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(cancelled["history_persisted"])
             self.assertIn("usage", cancelled)
             self.assertGreaterEqual(cancelled["usage"]["requests"], 1)
+            self.assertEqual(
+                cancelled["conversation_id"],
+                f"deepagent:anonymous:{session_id}",
+            )
+            self.assertTrue(cancelled["run_id"])
+            self.assertEqual(cancelled["run_metrics"]["status"], "cancelled")
             self.assertLess(tracker.yielded_chunks, tracker.total_chunks)
             self.assertIsNone(
                 get_context().active_runs.get(agent_id=None, session_id=session_id)
             )
             history = await self._history(session_id)
+            self.assertEqual(
+                history["conversation_id"],
+                f"deepagent:anonymous:{session_id}",
+            )
             assistant = _last_assistant(history)
             self.assertIsNotNone(assistant)
             assert assistant is not None
             self.assertEqual(assistant["status"], "interrupted")
+            self.assertEqual(assistant["run_id"], cancelled["run_id"])
 
     async def test_cancel_is_registered_before_session_event_is_published(self) -> None:
         """The first SSE event must never expose an uncancellable session id."""
@@ -322,9 +334,19 @@ class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
             iterator = response.body_iterator
             first_event = await anext(iterator)
             self.assertEqual(first_event["event"], "session")
+            session_payload = json.loads(first_event["data"])
+            self.assertEqual(
+                session_payload["conversation_id"],
+                f"deepagent:anonymous:{session_id}",
+            )
+            self.assertTrue(session_payload["run_id"])
             self.assertIsNotNone(
                 get_context().active_runs.get(agent_id=None, session_id=session_id)
             )
+            active = get_context().active_runs.get(agent_id=None, session_id=session_id)
+            assert active is not None
+            self.assertEqual(active.run_id, session_payload["run_id"])
+            self.assertEqual(active.conversation_id, session_payload["conversation_id"])
 
             async with AsyncClient(
                 transport=self._transport,

@@ -3,7 +3,7 @@
 DeepAgent 是基于 FastAPI、Pydantic AI 和 SQLAlchemy 的多用户 Agent 服务，并
 随服务发布一体化运维控制台。
 
-当前产品版本为 `0.3.16`。`deep_agent.__version__` 是唯一代码版本来源，FastAPI、
+当前产品版本为 `0.3.17`。`deep_agent.__version__` 是唯一代码版本来源，FastAPI、
 `GET /info` 和 Console 顶部版本徽标均读取该值。后续正式发布默认递增
 `MAJOR.MINOR.PATCH` 的第三位，只有明确规划重大版本时才调整前两位。产品版本不通过
 环境变量或数据库覆盖，也不等同于 Alembic 数据库结构 revision。
@@ -61,6 +61,12 @@ MCP Resource 上游失败不再无意义消耗工具重试次数，工具协议�
 v0.3.16 将自动和主动压缩收敛到同一内部投影流程，并以固定六段结构更新摘要；旧摘要作为
 单一锚点合并新事实，不累积摘要列表。自动阈值、主动接口、SSE、Checkpoint 和失败兜底语义
 保持不变，压缩核心通过独立覆盖率门槛检查。
+
+v0.3.17 为每个 Session 建立稳定 `conversation_id`，为每次发送、Deferred 续跑和压缩生成独立
+`run_id`；SSE、History、结构化日志和 Console 会话详情使用同一组标识关联运行。日志只记录
+脱敏生命周期、Usage、缓存 Token 和工具次数；Provider 未报告缓存指标时保持未知。MCP 仅为
+`cube_query_data` 与 `dimension_query_members` 两个复杂查询工具选择性披露可信返回 Schema，
+并且只在工具实际直接披露或经 Tool Search 加载后产生额外 Token。
 
 ## 项目结构
 

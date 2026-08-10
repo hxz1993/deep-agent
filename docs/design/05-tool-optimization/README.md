@@ -2,18 +2,23 @@
 
 > 首次研究：2026-07-29
 >
-> 当前状态：完成 Pydantic AI Core/Harness 工具能力映射与 v0.3.2 工具包统一；大型 MCP 工具检索已拆为独立课题
+> 当前状态：完成工具能力映射、v0.3.2 工具包统一、v0.3.12 MCP检索及 v0.3.17 选择性 Return Schema
 
 [`tool-optimization-design.md`](tool-optimization-design.md) 统一说明 Function、MCP、
 External/Deferred、Provider Native、Output Tool 和 Toolset 的边界，以及 DeepAgent 当前
 实现和推荐演进顺序。
 
-当前最高优先级是大型 MCP 工具包的检索与渐进披露。Agent 仍按 ToolPackage 授权，检索只能在
+大型 MCP 工具包的检索与渐进披露已落地。Agent 仍按 ToolPackage 授权，检索只能在
 已授权包内工作，不要求管理员逐个选择工具。少量内置工具采用更直接的条件过滤：会话没有合法
 附件时隐藏整个附件读取包，有附件时暴露现有三个读取工具，不再按后缀拆分可见性。实际待办、
 优先级和状态只维护在 [`../TODO.md`](../TODO.md)。框架对比、中文检索黑盒验证、混合语义算法、
 渐进披露链路和待决策项见
 [`../13-tool-discovery/README.md`](../13-tool-discovery/README.md)。
+
+v0.3.17 仅对 `cube_query_data`、`dimension_query_members` 两个具有可信 Output Schema 的复杂查询
+工具启用 Pydantic AI `IncludeToolReturnSchemas`。Schema只随工具实际披露，不会让延迟目录提前
+承担 Token成本；未提供 Output Schema 时不伪造。详细口径见
+[`tool-optimization-design.md#84-tool-return-schema`](tool-optimization-design.md#84-tool-return-schema)。
 
 产品配置统一采用“分类属性 → 工具包 → 工具”。Agent 在 v0.3.2 仍然整包选择，UI 工具也不再
 按 `ui:<tool_name>` 单项分配；旧编码只由 Alembic 002 一次性迁移。工具协议名、SSE、Pending

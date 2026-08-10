@@ -27,6 +27,7 @@ from deep_agent.agent.deps import AgentDeps
 MCP_PRESELECT_LIMIT = 3
 MCP_SEARCH_RESULT_LIMIT = 5
 TOOL_DISCOVERY_RETRIEVER = "lexical_v1"
+MCP_RETURN_SCHEMA_TOOLS = frozenset({"cube_query_data", "dimension_query_members"})
 
 _ASCII_PART_RE = re.compile(r"[a-z0-9]+")
 _CAMEL_BOUNDARY_RE = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
@@ -81,6 +82,9 @@ class ToolDiscoveryTelemetry:
     catalog_hash: str | None = None
     retrieval_ms: float = 0.0
     fallback_reason: str | None = None
+    return_schema_tools: list[str] = field(default_factory=list)
+    return_schema_unavailable: list[str] = field(default_factory=list)
+    estimated_return_schema_tokens: int = 0
     read_only_intent: bool = field(default=False, repr=False)
     candidate_tools: list[str] = field(default_factory=list, repr=False)
     seen_search_queries: set[str] = field(default_factory=set, repr=False)
@@ -97,6 +101,9 @@ class ToolDiscoveryTelemetry:
             "estimated_disclosed_schema_tokens": self.estimated_disclosed_schema_tokens,
             "estimated_saved_schema_tokens": self.estimated_saved_schema_tokens,
             "retriever": self.retriever,
+            "return_schema_tools": list(self.return_schema_tools),
+            "return_schema_unavailable": list(self.return_schema_unavailable),
+            "estimated_return_schema_tokens": self.estimated_return_schema_tokens,
         }
 
 
@@ -142,6 +149,29 @@ def _schema_properties(schema: dict[str, Any]) -> tuple[tuple[str, ...], tuple[s
 def _server_for_tool(name: str, server_names: Sequence[str]) -> str:
     matches = [server for server in server_names if name.startswith(f"{server}_")]
     return max(matches, key=len) if matches else "mcp"
+
+
+def mcp_original_tool_name(name: str, server_names: Sequence[str]) -> str | None:
+    """Recover an MCP tool's original protocol name from its runtime prefix."""
+
+    matches = [server for server in server_names if name.startswith(f"{server}_")]
+    if not matches:
+        return None
+    server = max(matches, key=len)
+    return name[len(server) + 1 :]
+
+
+def build_return_schema_selector(
+    *,
+    server_names: Sequence[str],
+):
+    """Select the small evidence-backed MCP output-schema allowlist."""
+
+    async def selector(ctx: RunContext[AgentDeps], tool: ToolDefinition) -> bool:
+        original_name = mcp_original_tool_name(tool.name, server_names)
+        return original_name in MCP_RETURN_SCHEMA_TOOLS and bool(tool.return_schema)
+
+    return selector
 
 
 def build_search_documents(
@@ -358,7 +388,36 @@ def search_text_for_run(ctx: RunContext[AgentDeps]) -> str:
 
 
 def _tool_tokens(estimator: TokenEstimator, tool: ToolDefinition) -> int:
-    return TOOL_DEFINITION_OVERHEAD_TOKENS + estimator.text(tool)
+    return TOOL_DEFINITION_OVERHEAD_TOKENS + estimator.text(
+        {
+            "name": tool.name,
+            "description": tool.description,
+            "parameters": tool.parameters_json_schema,
+        }
+    )
+
+
+def _return_schema_telemetry(
+    tools: Sequence[ToolDefinition],
+    *,
+    disclosed_names: set[str],
+    server_names: Sequence[str],
+    estimator: TokenEstimator,
+) -> tuple[list[str], list[str], int]:
+    selected: list[str] = []
+    unavailable: list[str] = []
+    tokens = 0
+    for tool in tools:
+        if tool.name not in disclosed_names:
+            continue
+        if mcp_original_tool_name(tool.name, server_names) not in MCP_RETURN_SCHEMA_TOOLS:
+            continue
+        if not tool.return_schema:
+            unavailable.append(tool.name)
+            continue
+        selected.append(tool.name)
+        tokens += estimator.text({"Return schema": tool.return_schema})
+    return selected, unavailable, tokens
 
 
 def _catalog_hash(tools: Sequence[ToolDefinition]) -> str:
@@ -433,6 +492,12 @@ class McpDiscoveryToolset(WrapperToolset[AgentDeps]):
                 for tool in definitions
             ]
             full_tokens = sum(_tool_tokens(self.estimator, tool) for tool in definitions)
+            full_tokens += _return_schema_telemetry(
+                definitions,
+                disclosed_names={tool.name for tool in definitions},
+                server_names=self.server_names,
+                estimator=self.estimator,
+            )[2]
             candidate_names = {tool.name for tool in definitions}
             discovered_names = set(ctx.discovered_tool_names) & candidate_names
             disclosed_names = selected_set | discovered_names
@@ -441,6 +506,17 @@ class McpDiscoveryToolset(WrapperToolset[AgentDeps]):
                 for tool in prepared
                 if not tool.defer_loading or tool.name in disclosed_names
             )
+            (
+                telemetry.return_schema_tools,
+                telemetry.return_schema_unavailable,
+                telemetry.estimated_return_schema_tokens,
+            ) = _return_schema_telemetry(
+                prepared,
+                disclosed_names=disclosed_names,
+                server_names=self.server_names,
+                estimator=self.estimator,
+            )
+            direct_tokens += telemetry.estimated_return_schema_tokens
             telemetry.candidate_count = len(definitions)
             telemetry.candidate_tools = [tool.name for tool in definitions]
             telemetry.direct_count = len(disclosed_names)

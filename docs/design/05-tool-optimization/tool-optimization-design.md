@@ -4,7 +4,7 @@
 >
 > 当前运行基线：`pydantic-ai-slim 2.26.0` + `pydantic-ai-harness 0.18.0`
 >
-> 状态：设计梳理，不代表已引入新的 Native Tool、Output Tool 或 Harness 能力
+> 状态：v0.3.17 已选择性接入 Tool Return Schema；Native Tool、Output Tool 和其他 Harness 能力仍按本文边界评估
 
 ## 1. 结论
 
@@ -775,8 +775,9 @@ MCP 等一组工具应用同一横切策略时再采用。
 
 `RenamedToolset` 修改的是提供给模型的工具协议名，并会在执行时映射回原工具名。它适合治理
 上游工具名，但不应只为隐藏聊天里的 MCP 前缀而直接使用，否则会影响历史工具事件、Pending
-恢复和模型调用兼容。Console 应将稳定的协议名与中文展示名分离：SSE、历史和工具调用继续
-保留带命名空间的真实名称，聊天界面优先展示独立 `display_name`，必要时再显示协议名详情。
+恢复和模型调用兼容。MCP 工具在 Console 中直接展示模型实际收到的最终协议名，不由 DeepAgent
+虚构或维护另一套 `display_name` 映射。DeepAgent 自定义的 UI 工具可继续使用产品元数据中的展示名，
+但该概念不扩展到通用第三方 MCP 协议。
 
 ### 8.4 Tool Return Schema
 
@@ -786,7 +787,31 @@ MCP 等一组工具应用同一横切策略时再采用。
 - 返回结果仍可能包含业务错误。
 - 大型动态查询结果不适合声明完整列级 Schema。
 
-优先对确认、选择、表单操作和稳定写入结果启用。
+v0.3.17 直接使用 Pydantic AI 2.26 `IncludeToolReturnSchemas`，首版只匹配 MCP 原始工具名：
+
+- `cube_query_data`
+- `dimension_query_members`
+
+匹配发生在模型请求前。MCP Server 即使重命名，最终协议名的前缀变化也不会让白名单失效；
+若 MCP 未提供合法 `outputSchema`，DeepAgent 不伪造结构，只在本轮工具发现遥测中记录
+`return_schema_unavailable`。未直接披露的延迟工具不产生返回 Schema Token，只有 Top 3 预选或
+`search_tools` 发现后才随完整 Tool Definition进入下一次模型请求。
+
+```text
+延迟阶段：
+  名称目录含 deepfos_cube_query_data
+  模型未看到 input/output Schema
+
+披露阶段：
+  deepfos_cube_query_data(input_schema + return_schema)
+  tool_discovery.estimated_return_schema_tokens 计入实际披露预算
+
+执行阶段：
+  Tool Result仍只是本次真实 JSON，不会重复附加 return_schema
+```
+
+该能力解决“模型调用前不知道稳定返回字段”问题；结果本身过大、空字段多或需分页仍属于
+Tool Output/Artifact治理。禁止按名称包含 `query` 等模糊规则全量开启，后续扩充必须有真实失败样本。
 
 ## 9. Pydantic AI Harness 与工具治理
 
@@ -954,29 +979,29 @@ v0.3.15 首批只改无歧义路径：附件下载、损坏、解析和读取上
 list/read 上游失败使用 `ToolFailed`；文件 ID、MIME、分页范围、Resource Server 选择等模型可
 修正错误继续使用 `ModelRetry`。UI Tool 参数、Sandbox 和普通 MCP Tool 暂不扩大调整范围。
 
-## 11. 设计优先级参考
+## 11. 已完成阶段与后续触发条件
 
-以下阶段用于解释依赖顺序，不是独立待办清单。实际优先级和状态统一以
-[`../TODO.md`](../TODO.md) 为准。
+以下表格保留工具体系形成过程，不再表示当前 P0～P3 优先级。当前状态统一以
+[`../TODO.md`](../TODO.md) 的“待实现、有潜力、暂缓、已关闭、已实现”五组为准；框架采用依据见
+[`../14-framework-capabilities/framework-capabilities-baseline.md`](../14-framework-capabilities/framework-capabilities-baseline.md)。
 
-| 优先级 | 能力 | 落地口径 |
+| 能力 | 当前状态 | 落地或重新打开条件 |
 | --- | --- | --- |
-| P0 | 无附件时隐藏附件工具 | 根据当前请求与原始会话是否存在合法附件过滤整个附件 Toolset；不按后缀细分，运行时文件权限校验保持不变 |
-| P0 | 工具协议名与展示名分离 | 模型、SSE、历史继续使用稳定协议名；Console 使用独立中文 `display_name`，不以 `RenamedToolset` 做纯 UI 美化 |
-| P0 | MCP `ToolSearch` | Test 已证明大包 Schema 成本明显；在 ToolPackage 授权范围内按需检索和披露，不增加管理员逐工具选择 |
-| P0 | 结构化最终输出 | Agent 关联输出契约组和多种 Output Tool；默认仍允许普通文本，显式严格模式才禁止文本绕过，后端再次执行 JSON Schema 校验 |
-| P1 | 高风险工具审批 | 先建立风险和副作用元数据；接入 `ApprovalRequiredToolset` 时同时设计持久化、TTL、操作人、幂等、权限复检和执行审计 |
-| P2 | `CombinedToolset` | 不作为独立产品功能；仅在多个工具包需要共享过滤、审批或延迟加载策略时用于运行时装配 |
-| P3 | Provider `CodeExecutionTool` | 不作为通用代码执行；继续使用自建 `execute_python`，未来仅给明确支持的托管模型作为增强能力 |
-| P3 | Provider `FileSearchTool` | 不替代附件读取或企业知识库；先建设 Provider 无关的 RAG/MCP 抽象，再把托管 File Search 作为可选实现 |
+| 无附件时隐藏附件工具 | 已实现 | 根据当前请求与原始会话是否存在合法附件过滤整个附件 Toolset；运行时权限校验保持不变 |
+| MCP 工具名原样展示 | 已关闭额外映射 | 模型、SSE、历史和 Console 统一使用最终稳定协议名，不增加 MCP `display_name` |
+| MCP `ToolSearch` | 已实现 | 在 ToolPackage 授权范围内 Top 3 预选、Top 5 搜索和渐进披露 |
+| 结构化最终输出 | 有潜力 | 产品锁定普通文本、多输出组合、严格模式和混合工具调用规则后重新实施 |
+| 高风险工具审批 | 有潜力 | 出现真实副作用工具并完成风险元数据、审计、TTL、幂等和权限复检设计后打开 |
+| `CombinedToolset` | 已关闭为独立事项 | 继续作为运行时组合实现细节按需使用，不成为产品概念 |
+| Provider Native 工具 | 有潜力 | 只在特定托管 Provider 能力成为明确产品功能时接入，不替代公共能力 |
 
-### 第一批：工具名称和可见性
+### 已完成：工具可见性
 
 - 落地附件请求级过滤。
-- 分离工具稳定协议名和 Console 展示名。
+- MCP 工具保持最终协议名原样展示，不增加另一套名称映射。
 - 同步补充每轮工具数量和 Schema 体积观测，为后续 Tool Search 提供数据。
 
-### 第二批：结构化最终输出
+### 有潜力：结构化最终输出
 
 详细设计和测试边界见
 [`../09-structured-output/structured-output-design.md`](../09-structured-output/structured-output-design.md)。
@@ -986,13 +1011,13 @@ list/read 上游失败使用 `ToolFailed`；文件 ID、MIME、分页范围、Re
 - 固定业务结构优先使用 Pydantic Model；Agent 动态 JSON Schema 使用 `StructuredDict` 时，DeepAgent 必须补服务端校验和有限重试。
 - 中间 Thinking、普通工具和 Pending 继续流式；结构化结果第一版在 `final.output` 一次性返回，不把终止输出工具渲染成普通工具卡片。
 
-### 第三批：高风险工具审批
+### 有潜力：高风险工具审批
 
 - 工具元数据标识只读、写入、删除、外发和代码执行等风险。
 - 审批通过后由 Pydantic AI 执行原后端工具，再把真实工具结果交给模型；它与用户直接完成 External UI Tool 的语义不同。
 - 没有真实写入、删除或外发工具前，不为只读工具增加审批复杂度。
 
-### 第四批：大工具集和 Provider 增强
+### 已实现与有潜力：大工具集和 Provider 增强
 
 - 达到真实工具规模后试点 `ToolSearch + DeferredLoadingToolset`，需要跨工具包统一策略时再引入 `CombinedToolset`。
 - 业务工具先支持分页和摘要，再评估 Harness `OverflowingToolOutput`。

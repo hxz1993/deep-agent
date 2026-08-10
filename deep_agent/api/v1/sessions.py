@@ -21,6 +21,7 @@ from deep_agent.agent.history import (
     model_messages_to_history,
     session_activity_timestamps,
 )
+from deep_agent.agent.run_identity import conversation_id_for
 from deep_agent.agent.spec import AgentSpec, anonymous_spec
 from deep_agent.agent.context.budget import build_context_budget
 from deep_agent.agent.context.checkpoint import load_projection, projection_fingerprint
@@ -261,6 +262,7 @@ async def get_session_history(
     )
     return SessionHistoryResponse(
         session_id=resolved_session_id,
+        conversation_id=conversation_id_for(api_agent_id, resolved_session_id),
         messages=messages,
         model_message_count=len(raw),
         context_checkpoint=context_data["history_checkpoint"],

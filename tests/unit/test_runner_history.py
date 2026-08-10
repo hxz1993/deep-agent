@@ -223,6 +223,38 @@ class AgentRunnerHistoryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(final["type"], "final")
         self.assertEqual(final["model_message_count"], 2)
         self.assertEqual(final["user_branch_point"], 0)
+        self.assertEqual(final["conversation_id"], "deepagent:anonymous:sess-meta")
+        self.assertEqual(final["run_id"], deps.run_id)
+        self.assertEqual(final["run_metrics"]["status"], "completed")
+        self.assertIn("cache_read_tokens", final["usage"])
+
+        history = await self.store.get_history("sess-meta")
+        assistant = next(message for message in history if isinstance(message, ModelResponse))
+        self.assertEqual(assistant.run_id, final["run_id"])
+        projected = model_messages_to_history(history)
+        self.assertEqual(projected[-1].run_id, final["run_id"])
+
+    async def test_each_send_gets_a_new_run_id_in_same_conversation(self) -> None:
+        agent = Agent(TestModel(), deps_type=AgentDeps)
+        runner = AgentRunner(agent, self.store, UsageLimits(request_limit=10))
+        deps = AgentDeps(session_id="sess-run-ids")
+
+        first = [
+            event
+            async for event in runner.run_stream(
+                "sess-run-ids", "first", deps, persister=self.persister
+            )
+        ][-1]
+        await self._flush("sess-run-ids")
+        second = [
+            event
+            async for event in runner.run_stream(
+                "sess-run-ids", "second", deps, persister=self.persister
+            )
+        ][-1]
+
+        self.assertEqual(first["conversation_id"], second["conversation_id"])
+        self.assertNotEqual(first["run_id"], second["run_id"])
 
     async def test_transport_close_keeps_user_without_synthetic_partial_response(self) -> None:
         from tests.integration.helpers.models import build_slow_stream_model

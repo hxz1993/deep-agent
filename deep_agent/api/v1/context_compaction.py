@@ -9,6 +9,7 @@ from sse_starlette.sse import EventSourceResponse
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.headers import extract_forward_headers
 from deep_agent.agent.history import has_unprocessed_tool_calls
+from deep_agent.agent.run_identity import conversation_id_for, new_run_id
 from deep_agent.api.v1.deps import build_runner, build_runner_for_agent
 from deep_agent.api.v1.request_identity import RequestUserDep
 from deep_agent.core.context import AppContextDep
@@ -104,6 +105,8 @@ async def compact_session_context(
         session_id=resolved_session_id,
         user=user_id,
         agent_id=api_agent_id,
+        conversation_id=conversation_id_for(api_agent_id, resolved_session_id),
+        run_id=new_run_id(),
         request_headers=request_headers,
     )
 

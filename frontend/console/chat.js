@@ -103,6 +103,7 @@ const state = {
   llmModelId: "",
   sessionModelIds: {},
   sessionId: null,
+  conversationId: null,
   sessions: [], // [{id, agentId, agentName, title}] — 仅来自 GET /api/v1/sessions
   streaming: false,
   awaitingHitl: false,
@@ -120,6 +121,7 @@ const state = {
   contextStatus: null,
   historyCheckpoint: null,
   lastRunUsage: null,
+  lastRunMetrics: null,
   manualCompacting: false,
   manualCompactionController: null,
   automaticCompactionRow: null,
@@ -607,12 +609,14 @@ function newChat(agentId) {
   }
   loadUiTools(state.agentId);
   state.sessionId = null;
+  state.conversationId = null;
   state.branchFrom = null;
   state.modelMessageCount = 0;
   state.lastUserBranchPoint = null;
   state.contextStatus = null;
   state.historyCheckpoint = null;
   state.lastRunUsage = null;
+  state.lastRunMetrics = null;
   state.llmModelId = defaultLlmModelId();
   clearMessages();
   showEmptyState();
@@ -785,6 +789,7 @@ async function switchSession(s) {
   state.branchFrom = null;
   state.lastUserBranchPoint = null;
   state.lastRunUsage = null;
+  state.lastRunMetrics = null;
   el.usageInfo.textContent = "";
   if (session.agentId) {
     state.agentId = session.agentId;
@@ -815,6 +820,17 @@ async function loadSessionHistory(session) {
     }
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const data = await r.json();
+    state.conversationId = data.conversation_id || null;
+    const latestAssistant = [...(data.messages || [])]
+      .reverse()
+      .find((message) => message.role === "assistant" && message.run_id);
+    state.lastRunMetrics = latestAssistant
+      ? {
+          run_id: latestAssistant.run_id,
+          status: latestAssistant.status || "completed",
+          detailed: false,
+        }
+      : null;
     state.historyCheckpoint = data.context_checkpoint || null;
     await loadContextStatus(normalized);
     if (!data.messages || data.messages.length === 0) {
@@ -1095,6 +1111,15 @@ async function compactCurrentContext() {
         setContextCompactionRow(row, data.message || "正在处理上下文…");
       } else if (event === "context_compaction_result") {
         result = data;
+        state.conversationId = data.conversation_id || state.conversationId;
+        state.lastRunMetrics = {
+          ...(data.run_metrics || {}),
+          conversation_id: state.conversationId,
+          run_id: data.run_id || null,
+          status: data.status || "completed",
+          detailed: true,
+        };
+        if (data.usage) renderUsage(data.usage);
       }
     });
     if (!result) throw new Error("压缩流未返回最终结果");
@@ -1904,6 +1929,13 @@ function handleEvent({ event, data }, assistant) {
       const id = data.session_id;
       if (id) {
         state.sessionId = id;
+        state.conversationId = data.conversation_id || state.conversationId;
+        state.lastRunMetrics = {
+          conversation_id: state.conversationId,
+          run_id: data.run_id || null,
+          status: "running",
+          detailed: true,
+        };
         state.streamSessionConfirmed = true;
         if (data.agent_id) {
           state.agentId = data.agent_id;
@@ -1952,6 +1984,14 @@ function handleEvent({ event, data }, assistant) {
       syncHistoryMeta(data);
       if (data.usage) renderUsage(data.usage);
       else state.lastRunUsage = null;
+      state.conversationId = data.conversation_id || state.conversationId;
+      state.lastRunMetrics = {
+        ...(data.run_metrics || {}),
+        conversation_id: state.conversationId,
+        run_id: data.run_id || data.run_metrics?.run_id || state.lastRunMetrics?.run_id || null,
+        status: data.status || data.run_metrics?.status || "completed",
+        detailed: true,
+      };
       if (data.context) {
         state.contextStatus = {
           ...(state.contextStatus || {}),
@@ -2000,6 +2040,14 @@ function handleEvent({ event, data }, assistant) {
       assistant.markInterrupted();
       syncHistoryMeta(data);
       if (data.usage) renderUsage(data.usage);
+      state.conversationId = data.conversation_id || state.conversationId;
+      state.lastRunMetrics = {
+        ...(data.run_metrics || {}),
+        conversation_id: state.conversationId,
+        run_id: data.run_id || state.lastRunMetrics?.run_id || null,
+        status: "cancelled",
+        detailed: true,
+      };
       break;
     default:
       break;

@@ -87,6 +87,8 @@ class DeferredToolResultItem(BaseModel):
 
 class ChatResponse(BaseModel):
     session_id: str
+    conversation_id: str | None = None
+    run_id: str | None = None
     output: Any
     usage: dict[str, Any] = Field(default_factory=dict)
     status: str = Field(default="completed", description="completed or pending (awaiting UI input).")
@@ -97,6 +99,10 @@ class ChatResponse(BaseModel):
     context: dict[str, Any] | None = Field(
         default=None,
         description="Read-only context budget and compaction telemetry for this run.",
+    )
+    run_metrics: dict[str, Any] | None = Field(
+        default=None,
+        description="Ephemeral metrics for the just-completed run.",
     )
 
 

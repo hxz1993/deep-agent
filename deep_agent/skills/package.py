@@ -114,6 +114,14 @@ def _archive_root(names: list[PurePosixPath]) -> PurePosixPath:
     if PurePosixPath("SKILL.md") in files:
         return PurePosixPath(".")
     top = {name.parts[0] for name in files if name.parts}
+    skill_roots = sorted(
+        name for name in top if PurePosixPath(name) / "SKILL.md" in files
+    )
+    if len(skill_roots) > 1:
+        raise SkillPackageError(
+            "ZIP contains multiple Skills "
+            f"({', '.join(skill_roots)}); split the Library into one ZIP per Skill"
+        )
     if len(top) == 1:
         root = PurePosixPath(next(iter(top)))
         if root / "SKILL.md" in files:

@@ -16,7 +16,7 @@ from deep_agent.capabilities.mcp.resolver import load_mcp_rows, resolve_mcp_tool
 from deep_agent.capabilities.catalog import invalid_tool_package_codes
 from deep_agent.capabilities.mcp.resources import build_mcp_resource_toolset
 from deep_agent.capabilities.ui.registry import prepare_ui_tool_packages_for_spec
-from deep_agent.skills.runtime import SkillUnavailableError, resolve_skills_for_run
+from deep_agent.skills.runtime import resolve_skills_for_run
 from deep_agent.skills.tools import build_skill_resource_toolset
 from deep_agent.core.context import AppContext
 from deep_agent.core.exceptions import AgentNotFoundError, LlmModelNotFoundError
@@ -111,19 +111,26 @@ async def _build_runner_from_spec(
 
     mcp_toolsets = await resolve_mcp_toolsets(ctx.stores, spec, mcp_rows=mcp_rows)
     mcp_resource_toolset = build_mcp_resource_toolset(spec, mcp_rows)
-    try:
-        resolved_skills = await resolve_skills_for_run(
-            ctx.stores,
-            spec.skills,
-            request_headers=request_headers or {},
-        )
-    except SkillUnavailableError as exc:
-        from deep_agent.core.exceptions import ToolPackageError
-
-        raise ToolPackageError(str(exc)) from exc
+    resolved_skills = await resolve_skills_for_run(
+        ctx.stores,
+        spec.skills,
+        runtime=ctx.skill_runtime,
+        request_headers=request_headers or {},
+    )
     skill_resource_toolset = build_skill_resource_toolset(resolved_skills.resources)
 
     spec = replace(spec, instructions=augment_instructions_with_capabilities(spec))
+    if resolved_skills.unavailable:
+        unavailable = ", ".join(item.code for item in resolved_skills.unavailable)
+        spec = replace(
+            spec,
+            instructions=(
+                f"{spec.instructions}\n\n"
+                "The following configured Skills are temporarily unavailable in this "
+                f"runtime: {unavailable}. Do not claim that you loaded or used them. "
+                "Continue with the available Skills and tools."
+            ),
+        )
     estimator = TokenEstimator.for_model(spec.model, spec.base_url)
     context_compaction = build_context_compaction(
         context_window_tokens=spec.context_window_tokens,
@@ -186,4 +193,5 @@ async def _build_runner_from_spec(
         estimator=estimator,
         stores=ctx.stores,
         active_runs=getattr(ctx, "active_runs", None),
+        skill_runtime_context=resolved_skills.as_context(),
     )

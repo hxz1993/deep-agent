@@ -36,6 +36,8 @@ class AgentDeps:
     tool_discovery_inputs_explicit: bool = False
     tool_discovery_primary_query: str = ""
     tool_discovery_supplemental_query: str = ""
+    skill_runtime: dict[str, Any] | None = None
+    loaded_skill_codes: list[str] = field(default_factory=list)
     cancellation_token: CancellationToken | None = field(default=None, repr=False)
     has_context_references: bool = False
     input_modalities: Sequence[str] = field(default_factory=tuple)

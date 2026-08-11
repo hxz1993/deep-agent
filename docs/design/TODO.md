@@ -48,7 +48,9 @@
 | `TOOL-105` | 可选结构化最终输出 | Pydantic AI `ToolOutput`/`NativeOutput`/`PromptedOutput` | 产品锁定普通文本与多输出组合、混合工具调用和严格模式规则 | Output 不是 ToolPackage；权威 MCP 事实不由模型重写 | [结构化最终输出](09-structured-output/structured-output-design.md) |
 | `TOOL-108` | Agent 包内逐工具授权 | Core `FilteredToolset` 或 Prepared Toolset | 出现明确的“同包内部分工具禁止使用”权限需求 | 授权主键不能直接依赖可重命名的协议名 | [工具包后续演进](11-tool-packages/tool-packages-design.md#12-后续演进) |
 | `TOOL-301` | Provider Native Code/File/Web/Computer 等工具 | Core Provider Native Capability | 某托管 Provider 能力、模型和执行环境成为明确产品功能 | 必须显式启用并按 Provider 治理；不替代公共 MCP、Sandbox、附件、RAG 或当前页面 UI Tool | [浏览器与页面操作](15-browser-and-page-actions/browser-and-page-actions-design.md#23-provider-原生-computer-use) |
-| `SKILL-101` | Skill 版本修订、签名、Marketplace、便携导出与脚本执行 | Harness `Skills` 继续负责渐进披露；产品层独立治理安装与执行 | 出现回滚、跨环境迁移或可信脚本执行的明确需求，并具备隔离运行环境 | 不预埋半套 Revision；脚本默认不可读不可执行；便携导出需包含平台原包而非仅 File ID | [Skill 后续边界](12-agent-skills/skill-system-design.md#9-后续不属于-v0318) |
+| `SKILL-101` | Skill 修订、签名、Marketplace 与便携导出 | Harness `Skills` 继续负责渐进披露；产品层独立治理安装、来源与迁移 | 出现回滚、跨环境迁移、第三方签名或 Marketplace 的明确需求 | 不预埋半套 Revision；便携导出需包含平台原包而非仅 File ID | [Skill 后续边界](12-agent-skills/skill-system-design.md#10-后续不属于-v0320) |
+| `SKILL-102` | Skill 脚本的可控读取与隔离执行 | 复用 DeepAgent Sandbox Backend 的超时、资源和取消契约；Harness `Skills` 仍只负责披露 `SKILL.md` | Skill 文件生命周期收口后，使用真实业务包中的 `scripts/validate_dynamic_blueprint.py` 验证脚本需求，并完成生产隔离 Backend 签字 | 不在 DeepAgent 主进程执行；不默认开网或安装依赖；只能访问当前 Agent 已授权 Skill 的脚本和明确输入；需记录状态、超时、截断和取消 | [Skill 后续边界](12-agent-skills/skill-system-design.md#10-后续不属于-v0320) |
+| `SKILL-103` | 附件与 Skill 二进制 Asset 的通用文件读取 | 复用现有 TXT/DOCX/XLSX 解析与分页内核；模型工具以明确来源区分会话 `file_id` 和已授权 `skill_code/path` | 真实 Skill 需要读取 `assets/动态表蓝图模板.xlsx` 等二进制模板，且结构化读取对任务有实际价值 | 不为 Skill 重写 Excel 解析器；两种来源分别校验 Session ownership 和 Agent Skill 授权；二进制不直接注入 Prompt；复制或生成新文件另走 Sandbox/Artifact 边界 | [Skill 后续边界](12-agent-skills/skill-system-design.md#10-后续不属于-v0320) |
 
 ### 上下文、记忆和执行恢复
 
@@ -132,7 +134,7 @@
 | `CONSOLE-101` | 单个用户轮次聚合连续 Assistant/工具循环，过程默认折叠、最终答案常显 | v0.3.16，[运维控制台](02-operations-console/operations-console-design.md) |
 | `OBS-101` / `TOOL-001` | 官方 Conversation/Run 标识、脱敏结构化生命周期日志、Usage/缓存 Token 和 Console 当前 Run 指标 | v0.3.17，[框架能力台账](14-framework-capabilities/framework-capabilities-baseline.md#41-已经采用) |
 | `TOOL-203` | `cube_query_data` 与 `dimension_query_members` 选择性披露可信 Return Schema；延迟工具加载前零额外成本 | v0.3.17，[工具返回 Schema](05-tool-optimization/tool-optimization-design.md#84-tool-return-schema) |
-| `SKILL-001` | Skill 与 ToolPackage 分离；上传安装、Agent 授权、Harness `load_capability` 渐进披露、References/Assets 分页读取和脚本隔离 | v0.3.18，[Skill 体系](12-agent-skills/skill-system-design.md) |
+| `SKILL-001` | Skill 与 ToolPackage 分离；上传安装、Agent 授权、Harness `load_capability` 渐进披露、References/Assets 分页读取和脚本隔离；每个 Pod仅保留按 code组织的一份当前运行目录，管理操作同步、普通 Run本地读取、单 Skill故障隔离 | v0.3.18～v0.3.20，[Skill 体系](12-agent-skills/skill-system-design.md) |
 | `MCP-SNAPSHOT` | URL MCP 检测保存完整工具快照，聊天按快照披露并在首次真实调用时建连；缺快照不阻塞 Run，单 Server 连接失败转为 `ToolFailed` | v0.3.19，[工具检索](13-tool-discovery/tool-discovery-design.md) |
 | Harness 确定性压缩 tiers | `ClampOversizedMessages`、`ClearToolResults`、`DeduplicateFileReads` 已复用 | 当前基线，[压缩研究](03-context-compaction/context-compaction-research.md#harness-实验结论) |
 | 官方 DeepSeek Provider | 使用 Pydantic AI 官方 Provider/Profile，不保留自定义模型循环 | v0.3.9+，[框架能力台账](14-framework-capabilities/framework-capabilities-baseline.md#41-已经采用) |

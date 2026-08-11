@@ -27,6 +27,10 @@ test("Skill 页面区分内置和上传包的可操作边界", () => {
   assert.match(source, /上传安装/);
   assert.match(source, /替换 ZIP/);
   assert.match(source, /下载原包/);
+  assert.match(source, /重新加载/);
+  assert.match(source, /\/skills\/\$\{encodeURIComponent\(skill\.code\)\}\/reload/);
+  assert.match(source, /运行文件已就绪/);
+  assert.match(source, /运行文件同步失败/);
   assert.match(source, /当前版本只保存，不向模型披露、读取或执行/);
 });
 
@@ -35,4 +39,6 @@ test("Skill 上传使用 multipart 且资源按安全 API 读取", () => {
   assert.match(source, /form\.append\("file", file\)/);
   assert.match(source, /\/resources\/\$\{path\.split/);
   assert.match(source, /仅展示前 32 KiB/);
+  assert.match(source, /二进制 Asset，当前不可由模型读取/);
+  assert.match(source, /已保存，当前不可读取或执行/);
 });

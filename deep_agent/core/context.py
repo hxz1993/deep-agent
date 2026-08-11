@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import tempfile
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Annotated
 
 from fastapi import Depends
@@ -28,6 +30,7 @@ from deep_agent.db.factory import bootstrap_database, close_db
 from deep_agent.db.stores.bundle import DataStores
 from deep_agent.db.conversation import SessionStore
 from deep_agent.options import OPTION, validate_runtime_options
+from deep_agent.skills.runtime import SkillRuntimeLibrary
 
 _context: AppContext | None = None
 
@@ -41,6 +44,7 @@ class AppContext:
     db_engine: AsyncEngine
     db_session_factory: async_sessionmaker[AsyncSession]
     active_runs: ActiveRunRegistry
+    skill_runtime: SkillRuntimeLibrary
     sandbox_backend: PythonExecutionBackend | None = None
     sandbox_profile: ResolvedSandboxProfile | None = None
 
@@ -104,6 +108,15 @@ class AppContext:
                 list(resolved_profile.package_display_names),
             )
 
+        skill_runtime = SkillRuntimeLibrary()
+        try:
+            await skill_runtime.reconcile(bundle.stores)
+        except Exception as exc:  # noqa: BLE001 - Skill files must not block service startup
+            logger.warning(
+                "Skill runtime startup reconcile failed error_type={}",
+                type(exc).__name__,
+            )
+
         ctx = cls(
             registry=build_registry(
                 stores=bundle.stores,
@@ -114,6 +127,7 @@ class AppContext:
             mcp_lease_manager=mcp_lease_manager,
             event_persister=EventPersister(bundle.stores.coordinator),
             active_runs=ActiveRunRegistry(),
+            skill_runtime=skill_runtime,
             db_engine=bundle.engine,
             db_session_factory=bundle.session_factory,
             sandbox_backend=sandbox_backend,
@@ -137,6 +151,7 @@ class AppContext:
         sandbox_backend: PythonExecutionBackend | None = None,
         sandbox_profile: ResolvedSandboxProfile | None = None,
         active_runs: ActiveRunRegistry | None = None,
+        skill_runtime: SkillRuntimeLibrary | None = None,
     ) -> AppContext:
         if mcp_lease_manager is None:
             retries = (
@@ -167,6 +182,10 @@ class AppContext:
             mcp_lease_manager=mcp_lease_manager,
             event_persister=event_persister,
             active_runs=active_runs or ActiveRunRegistry(),
+            skill_runtime=skill_runtime
+            or SkillRuntimeLibrary(
+                Path(tempfile.mkdtemp(prefix="deep-agent-runtime-skills-TMP_to_delete-"))
+            ),
             db_engine=db_engine,
             db_session_factory=db_session_factory,
             sandbox_backend=sandbox_backend,

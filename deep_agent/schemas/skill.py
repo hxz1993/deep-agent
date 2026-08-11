@@ -71,6 +71,9 @@ class SkillSummary(BaseModel):
     file_name: str | None = None
     file_size: int | None = None
     content_hash: str | None = None
+    runtime_status: str = "missing"
+    runtime_error_code: str | None = None
+    runtime_synced_at: datetime | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
@@ -83,6 +86,13 @@ class SkillDetail(SkillSummary):
 class SkillInstallResult(BaseModel):
     status: str
     skill: SkillDetail
+
+
+class SkillReloadResult(BaseModel):
+    code: str
+    runtime_status: str
+    runtime_error_code: str | None = None
+    runtime_synced_at: datetime | None = None
 
 
 class SkillResourceContent(BaseModel):

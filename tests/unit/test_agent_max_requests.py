@@ -144,6 +144,7 @@ class AgentRunnerGlobalRequestLimitTests(unittest.IsolatedAsyncioTestCase):
             stores=MagicMock(),
             registry=MagicMock(),
             store=MagicMock(),
+            skill_runtime=MagicMock(),
         )
         previous_limit = OPTION.agent.max_requests
         OPTION.agent.max_requests = 37

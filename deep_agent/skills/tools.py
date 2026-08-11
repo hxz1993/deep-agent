@@ -43,6 +43,8 @@ def build_skill_resource_toolset(
         instructions=(
             "Skill references and assets are optional supporting material. "
             "List resources before reading one, and read only the pages needed for the task. "
+            "Scripts are intentionally omitted from the resource list and cannot be read or executed; "
+            "a nonzero script_count means the installed package contains stored scripts. "
             f"Authorized Skills with resources: {names}."
         ),
     )
@@ -71,7 +73,16 @@ def build_skill_resource_toolset(
             for entry in item.resource_index
             if entry.get("category") != "script"
         ]
-        return {"skill_code": skill_code, "resources": entries}
+        script_count = sum(
+            1 for entry in item.resource_index if entry.get("category") == "script"
+        )
+        return {
+            "skill_code": skill_code,
+            "resources": entries,
+            "script_count": script_count,
+            "scripts_readable": False,
+            "scripts_executable": False,
+        }
 
     @toolset.tool_plain
     async def read_skill_resource(

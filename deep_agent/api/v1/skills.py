@@ -18,12 +18,13 @@ from deep_agent.schemas.skill import (
     SkillPackageRecord,
     SkillResource,
     SkillResourceContent,
+    SkillReloadResult,
     SkillSummary,
     SkillUpdate,
 )
 from deep_agent.skills.catalog import SkillDescriptor, get_builtin_skill, list_builtin_skills
 from deep_agent.skills.package import MAX_ZIP_BYTES, ParsedSkillPackage, SkillPackageError, parse_skill_zip
-from deep_agent.skills.runtime import materialize_uploaded_skill
+from deep_agent.skills.runtime import RUNTIME_ERROR, RUNTIME_READY, SkillRuntimeLibrary
 from deepfos_platform.client.platform import FILE_TYPE_SKILL_PACKAGE, PlatformAPI
 
 
@@ -52,14 +53,16 @@ def _builtin_detail(item: SkillDescriptor) -> SkillDetail:
         asset_count=assets,
         script_count=scripts,
         contains_scripts=item.contains_scripts,
+        runtime_status=RUNTIME_READY,
         manifest=item.manifest,
         resources=[SkillResource.model_validate(entry) for entry in item.resource_index],
     )
 
 
-def _row_detail(row: SkillPackage) -> SkillDetail:
+def _row_detail(row: SkillPackage, runtime: SkillRuntimeLibrary) -> SkillDetail:
     index = [dict(item) for item in (row.resource_index or [])]
     references, assets, scripts = _counts(index)
+    runtime_state = runtime.state_for(row)
     return SkillDetail(
         code=row.code,
         label=row.label,
@@ -75,6 +78,9 @@ def _row_detail(row: SkillPackage) -> SkillDetail:
         file_name=row.file_name,
         file_size=row.file_size,
         content_hash=row.content_hash,
+        runtime_status=runtime_state.status,
+        runtime_error_code=runtime_state.error_code,
+        runtime_synced_at=runtime_state.synced_at,
         created_at=row.created_at,
         updated_at=row.updated_at,
         manifest=dict(row.manifest or {}),
@@ -172,7 +178,10 @@ async def _best_effort_delete(api: PlatformAPI, file_id: str, *, context: str) -
 @router.get("/skills", response_model=list[SkillSummary])
 async def list_skills(ctx: AppContextDep) -> list[SkillSummary]:
     details = [_builtin_detail(item) for item in list_builtin_skills()]
-    details.extend(_row_detail(row) for row in await ctx.stores.skill_package.list_all())
+    details.extend(
+        _row_detail(row, ctx.skill_runtime)
+        for row in await ctx.stores.skill_package.list_all()
+    )
     return [_summary(item) for item in sorted(details, key=lambda value: (value.source != "builtin", value.label, value.code))]
 
 
@@ -181,7 +190,7 @@ async def get_skill(code: str, ctx: AppContextDep) -> SkillDetail:
     builtin = get_builtin_skill(code)
     if builtin is not None:
         return _builtin_detail(builtin)
-    return _row_detail(await _row_or_404(ctx, code))
+    return _row_detail(await _row_or_404(ctx, code), ctx.skill_runtime)
 
 
 @router.post("/skills", response_model=SkillInstallResult, status_code=status.HTTP_201_CREATED)
@@ -212,7 +221,15 @@ async def install_skill(
         except Exception:
             await _best_effort_delete(api, uploaded.id, context="install-compensation")
             raise
-        return SkillInstallResult(status="installed", skill=_row_detail(row))
+        await ctx.skill_runtime.materialize(
+            row,
+            request_headers=extract_forward_headers(request),
+            payload=raw,
+        )
+        return SkillInstallResult(
+            status="installed",
+            skill=_row_detail(row, ctx.skill_runtime),
+        )
     except SkillPackageError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
     except ValueError as exc:
@@ -241,7 +258,15 @@ async def replace_skill_package(
                 detail=f"Replacement package code must remain {code!r}",
             )
         if parsed.content_hash == current.content_hash:
-            return SkillInstallResult(status="noop", skill=_row_detail(current))
+            await ctx.skill_runtime.materialize(
+                current,
+                request_headers=extract_forward_headers(request),
+                payload=raw,
+            )
+            return SkillInstallResult(
+                status="noop",
+                skill=_row_detail(current, ctx.skill_runtime),
+            )
         api, uploaded = await _upload_platform(request, raw=raw, file_name=filename)
         try:
             replacement = _record(
@@ -257,7 +282,16 @@ async def replace_skill_package(
             await _best_effort_delete(api, uploaded.id, context="update-compensation")
             raise
         await _best_effort_delete(api, current.platform_file_id, context="update-old-file")
-        return SkillInstallResult(status="updated", skill=_row_detail(row))
+        await ctx.skill_runtime.materialize(
+            row,
+            request_headers=extract_forward_headers(request),
+            payload=raw,
+            force=True,
+        )
+        return SkillInstallResult(
+            status="updated",
+            skill=_row_detail(row, ctx.skill_runtime),
+        )
     except SkillPackageError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
     finally:
@@ -266,12 +300,24 @@ async def replace_skill_package(
 
 
 @router.patch("/skills/{code}", response_model=SkillDetail)
-async def update_skill(code: str, body: SkillUpdate, ctx: AppContextDep) -> SkillDetail:
+async def update_skill(
+    code: str,
+    body: SkillUpdate,
+    request: Request,
+    ctx: AppContextDep,
+) -> SkillDetail:
     _reject_builtin(code)
     row = await ctx.stores.skill_package.update(code, body)
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Skill not found: {code}")
-    return _row_detail(row)
+    if body.enabled is False:
+        await ctx.skill_runtime.remove(code, status="disabled")
+    elif body.enabled is True:
+        await ctx.skill_runtime.materialize(
+            row,
+            request_headers=extract_forward_headers(request),
+        )
+    return _row_detail(row, ctx.skill_runtime)
 
 
 @router.delete("/skills/{code}")
@@ -288,9 +334,40 @@ async def delete_skill(code: str, request: Request, ctx: AppContextDep) -> dict:
             },
         )
     await ctx.stores.skill_package.delete(code)
+    await ctx.skill_runtime.remove(code)
     api = PlatformAPI(header=extract_forward_headers(request))
     await _best_effort_delete(api, row.platform_file_id, context="delete")
     return {"status": "deleted", "code": code}
+
+
+@router.post("/skills/{code}/reload", response_model=SkillReloadResult)
+async def reload_skill(code: str, request: Request, ctx: AppContextDep) -> SkillReloadResult:
+    _reject_builtin(code)
+    row = await _row_or_404(ctx, code)
+    if not row.enabled:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Disabled Skill cannot be reloaded: {code}",
+        )
+    runtime_state = await ctx.skill_runtime.materialize(
+        row,
+        request_headers=extract_forward_headers(request),
+        force=True,
+    )
+    if runtime_state.status == RUNTIME_ERROR:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={
+                "message": "Skill runtime reload failed",
+                "error_code": runtime_state.error_code,
+            },
+        )
+    return SkillReloadResult(
+        code=code,
+        runtime_status=runtime_state.status,
+        runtime_error_code=runtime_state.error_code,
+        runtime_synced_at=runtime_state.synced_at,
+    )
 
 
 @router.get("/skills/{code}/resources", response_model=list[SkillResource])
@@ -324,15 +401,24 @@ async def _resource_root(code: str, request: Request, ctx: AppContextDep) -> tup
         return builtin.package_root, builtin.resource_index
     row = await _row_or_404(ctx, code)
     try:
-        resolved = await materialize_uploaded_skill(
+        resolved = await ctx.skill_runtime.resolve(
             row,
-            extract_forward_headers(request),
+            request_headers=extract_forward_headers(request),
         )
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"Could not materialize Skill package: {type(exc).__name__}",
         ) from exc
+    if resolved is None:
+        runtime_state = ctx.skill_runtime.state(code, enabled=row.enabled)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={
+                "message": "Skill runtime files are unavailable",
+                "error_code": runtime_state.error_code or runtime_state.status,
+            },
+        )
     return resolved.package_root, resolved.resource_index
 
 

@@ -76,6 +76,11 @@ class SkillApiTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(installed.status_code, 201, installed.text)
             self.assertEqual(installed.json()["status"], "installed")
             self.assertEqual(installed.json()["skill"]["source"], "upload")
+            self.assertEqual(installed.json()["skill"]["runtime_status"], "ready")
+
+            reloaded = await client.post("/api/v1/skills/example-skill/reload")
+            self.assertEqual(reloaded.status_code, 200, reloaded.text)
+            self.assertEqual(reloaded.json()["runtime_status"], "ready")
 
             listed = await client.get("/api/v1/skills")
             self.assertEqual(listed.status_code, 200)
@@ -138,6 +143,9 @@ class SkillApiTests(unittest.IsolatedAsyncioTestCase):
                 json={"enabled": False},
             )
             self.assertEqual(disabled.status_code, 200)
+            self.assertEqual(disabled.json()["runtime_status"], "disabled")
+            disabled_reload = await client.post("/api/v1/skills/example-skill/reload")
+            self.assertEqual(disabled_reload.status_code, 409)
             model_id = (await self.stores.llm_model.list_all())[0].id
             rejected = await client.post(
                 "/api/v1/agents",

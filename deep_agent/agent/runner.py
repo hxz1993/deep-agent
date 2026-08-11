@@ -17,6 +17,8 @@ from pydantic_ai import (
 from pydantic_ai.exceptions import RunCancelled
 from pydantic_ai.messages import (
     FunctionToolCallEvent,
+    LoadCapabilityCallPart,
+    LoadCapabilityReturnPart,
     ModelMessage,
     ModelRequest,
     ModelResponse,
@@ -142,6 +144,7 @@ class AgentRunner:
         estimator: TokenEstimator | None = None,
         stores: DataStores | None = None,
         active_runs: ActiveRunRegistry | None = None,
+        skill_runtime_context: dict[str, Any] | None = None,
     ) -> None:
         self.agent = agent
         self.store = store
@@ -160,6 +163,7 @@ class AgentRunner:
         self._estimator = estimator or TokenEstimator.conservative()
         self._stores = stores
         self._active_runs = active_runs or ActiveRunRegistry()
+        self._skill_runtime_context = skill_runtime_context
 
     @staticmethod
     def _start_run_identity(
@@ -173,6 +177,44 @@ class AgentRunner:
         # A fresh Pydantic run id is required for every send/resume/retry.  The
         # streaming API may pre-mint one so it can publish it in the first SSE.
         deps.run_id = run_id or new_run_id()
+
+    def _prepare_skill_runtime(self, deps: AgentDeps) -> None:
+        context = self._skill_runtime_context
+        if context is None:
+            deps.skill_runtime = None
+            deps.loaded_skill_codes = []
+            return
+        deps.skill_runtime = {
+            "configured": list(context.get("configured", [])),
+            "available": list(context.get("available", [])),
+            "loaded": [],
+            "unavailable": [dict(item) for item in context.get("unavailable", [])],
+        }
+        deps.loaded_skill_codes = []
+
+    @staticmethod
+    def _record_loaded_skills(
+        deps: AgentDeps,
+        messages: list[ModelMessage],
+    ) -> None:
+        calls: dict[str, str] = {}
+        loaded: list[str] = []
+        for message in messages:
+            for part in message.parts:
+                if isinstance(part, LoadCapabilityCallPart):
+                    capability_id = part.capability_id
+                    if capability_id:
+                        calls[part.tool_call_id] = capability_id
+                elif (
+                    isinstance(part, LoadCapabilityReturnPart)
+                    and part.outcome == "success"
+                ):
+                    capability_id = calls.get(part.tool_call_id)
+                    if capability_id and capability_id not in loaded:
+                        loaded.append(capability_id)
+        deps.loaded_skill_codes = loaded
+        if deps.skill_runtime is not None:
+            deps.skill_runtime["loaded"] = list(loaded)
 
     @staticmethod
     def _compaction_name(deps: AgentDeps) -> str:
@@ -206,6 +248,7 @@ class AgentRunner:
         """Force a semantic checkpoint refresh without appending a chat turn."""
 
         self._start_run_identity(session_id, deps)
+        self._prepare_skill_runtime(deps)
         started_at = time.perf_counter()
 
         def manual_result(
@@ -602,6 +645,15 @@ class AgentRunner:
         result = {"budget": budget.as_dict(), "compaction": telemetry}
         if deps is not None and deps.tool_discovery is not None:
             result["tool_discovery"] = deps.tool_discovery.as_dict()
+        if deps is not None and deps.skill_runtime is not None:
+            result["skills"] = {
+                "configured": list(deps.skill_runtime.get("configured", [])),
+                "available": list(deps.skill_runtime.get("available", [])),
+                "loaded": list(deps.loaded_skill_codes),
+                "unavailable": [
+                    dict(item) for item in deps.skill_runtime.get("unavailable", [])
+                ],
+            }
         return result
 
     def _prepare_context_state(
@@ -920,6 +972,7 @@ class AgentRunner:
         branch_from: int | None = None,
     ) -> dict[str, Any]:
         self._start_run_identity(session_id, deps)
+        self._prepare_skill_runtime(deps)
         started_at = time.perf_counter()
         log_event(
             "agent_run_started",
@@ -961,6 +1014,7 @@ class AgentRunner:
                 conversation_id=deps.conversation_id,
                 run_id=deps.run_id,
             )
+            self._record_loaded_skills(deps, result.all_messages())
             await self._persist_run_messages(
                 session_id,
                 result.new_messages(),
@@ -1029,6 +1083,7 @@ class AgentRunner:
             deps,
             run_id=active_run.run_id if active_run is not None else None,
         )
+        self._prepare_skill_runtime(deps)
         started_at = time.perf_counter()
         log_event(
             "agent_run_started",
@@ -1360,6 +1415,8 @@ class AgentRunner:
             )
             return
 
+        if result is not None:
+            self._record_loaded_skills(deps, result.all_messages())
         checkpoint_saved: bool | None = None
         if checkpoint_projection is not None:
             checkpoint_saved = await self._checkpoint_after_persist(

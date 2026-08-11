@@ -89,6 +89,20 @@ class SkillPackageTests(unittest.TestCase):
         with self.assertRaisesRegex(SkillPackageError, "Unsupported reference type"):
             parse_skill_zip(buffer.getvalue())
 
+    def test_library_with_multiple_skills_requires_split_packages(self) -> None:
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w") as archive:
+            for name in ("skill-one", "skill-two"):
+                archive.writestr(
+                    f"{name}/SKILL.md",
+                    f"---\nname: {name}\ndescription: {name}\n---\n",
+                )
+        with self.assertRaisesRegex(
+            SkillPackageError,
+            "contains multiple Skills.*one ZIP per Skill",
+        ):
+            parse_skill_zip(buffer.getvalue())
+
     def test_builtin_skills_are_valid_harness_packages(self) -> None:
         skills = list_builtin_skills()
         self.assertEqual(

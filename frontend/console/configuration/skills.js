@@ -33,10 +33,11 @@ const skillsAdmin = {
     pane.innerHTML = state.skills.map((skill) => {
       const selected = skill.code === this.selectedCode;
       const source = skill.source === "builtin" ? "内置" : "上传";
+      const runtime = this.runtimeLabel(skill);
       return `<button type="button" class="skill-list-item${selected ? " active" : ""}" data-skill-code="${escapeHtml(skill.code)}">
         <span class="skill-list-title"><strong>${escapeHtml(skill.label)}</strong><span class="badge source-${escapeHtml(skill.source)}">${source}</span></span>
         <code>${escapeHtml(skill.code)}</code>
-        <span class="skill-list-meta">${skill.enabled ? "已启用" : "已停用"} · ${Number(skill.reference_count || 0)} References · ${Number(skill.asset_count || 0)} Assets</span>
+        <span class="skill-list-meta">${runtime.label} · ${Number(skill.reference_count || 0)} References · ${Number(skill.asset_count || 0)} Assets</span>
       </button>`;
     }).join("");
     pane.querySelectorAll("[data-skill-code]").forEach((button) => {
@@ -73,6 +74,7 @@ const skillsAdmin = {
     const detail = document.getElementById("skillDetailPane");
     if (!detail) return;
     const isBuiltin = skill.source === "builtin";
+    const runtime = this.runtimeLabel(skill);
     const resources = skill.resources || [];
     const resourceRows = resources.length
       ? resources.map((resource) => {
@@ -82,21 +84,22 @@ const skillsAdmin = {
           return `<li class="skill-resource-row${isScript ? " is-script" : ""}">
             <span><i data-lucide="${isScript ? "file-code-2" : resource.category === "reference" ? "file-text" : "file"}"></i><code>${escapeHtml(resource.path)}</code></span>
             <span class="skill-resource-meta">${category} · ${escapeHtml(resource.mime)} · ${this.formatBytes(resource.size)}</span>
-            ${canRead ? `<button class="btn-link" type="button" data-read-resource="${escapeHtml(resource.path)}">查看</button>` : `<span class="skill-resource-lock">${isScript ? "禁止执行" : "仅可下载原包"}</span>`}
+            ${canRead ? `<button class="btn-link" type="button" data-read-resource="${escapeHtml(resource.path)}">查看</button>` : `<span class="skill-resource-lock">${isScript ? "已保存，当前不可读取或执行" : "二进制 Asset，当前不可由模型读取"}</span>`}
           </li>`;
         }).join("")
       : `<li class="skill-resource-empty">该 Skill 没有附加资源</li>`;
     detail.innerHTML = `
       <header class="skill-detail-header">
         <div>
-          <div class="skill-detail-title"><h3>${escapeHtml(skill.label)}</h3><span class="badge source-${escapeHtml(skill.source)}">${isBuiltin ? "代码内置 · 只读" : "上传安装"}</span>${skill.enabled ? "" : `<span class="badge is-disabled">已停用</span>`}</div>
+          <div class="skill-detail-title"><h3>${escapeHtml(skill.label)}</h3><span class="badge source-${escapeHtml(skill.source)}">${isBuiltin ? "代码内置 · 只读" : "上传安装"}</span><span class="badge runtime-${escapeHtml(skill.runtime_status || "missing")}">${escapeHtml(runtime.label)}</span></div>
           <code>${escapeHtml(skill.code)}</code>
         </div>
         <div class="row-actions">
-          ${isBuiltin ? "" : `<button class="btn" type="button" data-skill-action="edit">编辑</button><button class="btn" type="button" data-skill-action="replace">替换 ZIP</button><button class="btn" type="button" data-skill-action="download">下载原包</button><button class="btn" type="button" data-skill-action="toggle">${skill.enabled ? "停用" : "启用"}</button><button class="btn danger" type="button" data-skill-action="delete">删除</button>`}
+          ${isBuiltin ? "" : `<button class="btn" type="button" data-skill-action="edit">编辑</button><button class="btn" type="button" data-skill-action="replace">替换 ZIP</button><button class="btn" type="button" data-skill-action="download">下载原包</button>${skill.enabled ? `<button class="btn" type="button" data-skill-action="reload">重新加载</button>` : ""}<button class="btn" type="button" data-skill-action="toggle">${skill.enabled ? "停用" : "启用"}</button><button class="btn danger" type="button" data-skill-action="delete">删除</button>`}
         </div>
       </header>
       <p class="skill-detail-description">${escapeHtml(skill.description)}</p>
+      ${skill.runtime_status === "error" || skill.runtime_status === "missing" ? `<div class="skill-security-note"><i data-lucide="circle-alert"></i><span>${escapeHtml(runtime.detail)}</span></div>` : ""}
       <dl class="skill-facts">
         <div><dt>版本</dt><dd>${escapeHtml(skill.version || "未声明")}</dd></div>
         <div><dt>包格式</dt><dd>${escapeHtml(skill.schema_version)}</dd></div>
@@ -123,6 +126,17 @@ const skillsAdmin = {
     if (bytes < 1024) return `${bytes} B`;
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`;
     return `${(bytes / 1024 / 1024).toFixed(1)} MiB`;
+  },
+
+  runtimeLabel(skill) {
+    const labels = {
+      ready: { label: "运行文件已就绪", detail: "当前 Pod 已加载该 Skill 的运行文件。" },
+      missing: { label: "运行文件未加载", detail: "当前 Pod 缺少运行文件，请使用“重新加载”。" },
+      syncing: { label: "运行文件同步中", detail: "正在同步 Skill 运行文件。" },
+      error: { label: "运行文件同步失败", detail: `运行文件不可用（${skill.runtime_error_code || "unknown"}），普通对话和其他 Skill 不受影响。` },
+      disabled: { label: "已停用", detail: "Skill 已停用。" },
+    };
+    return labels[skill.runtime_status] || labels.missing;
   },
 
   async readResource(code, path) {
@@ -158,6 +172,16 @@ const skillsAdmin = {
         anchor.click();
         anchor.remove();
         URL.revokeObjectURL(blobUrl);
+      } catch (error) {
+        showToast(error.message, true);
+      }
+      return;
+    }
+    if (action === "reload") {
+      try {
+        await apiFetch(`/api/v1/skills/${encodeURIComponent(skill.code)}/reload`, { method: "POST" });
+        showToast("Skill 运行文件已重新加载");
+        await this.refresh();
       } catch (error) {
         showToast(error.message, true);
       }

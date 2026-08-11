@@ -255,8 +255,13 @@ XML + JSON 投影。业务字段语义仍由具体 Agent Prompt 负责。
 - Skill 不属于 ToolPackage，Agent 通过 `agents.skills` 独立选择。
 - 代码内置只读包位于 `builtin_skills/<code>/SKILL.md`。
 - 上传包由 `/api/v1/skills` 校验后保存到平台文件服务，`skill_packages` 只存 File ID 和索引。
+- 当前 Pod 只保留 `runtime-skills/<code>/` 一份上传 Skill 运行副本；启动、安装、替换、启用和
+  `POST /api/v1/skills/{code}/reload` 负责同步，普通 Run 不访问平台文件服务。Hash 只用于完整性
+  和过期判断，不代表产品版本，也不保留历史目录。
 - Harness 0.18 `Skills` 负责 `load_capability` 渐进披露；DeepAgent 只补授权资源 List/Read。
 - `scripts/`、`tools/` 可以随包保存，但当前禁止模型读取和执行。
+- 单个上传 Skill 文件缺失或同步失败时，本轮跳过该 Skill 并继续运行；不得让它阻塞其他 Skill、
+  MCP 或普通回答。诊断进入 `/skills` 的派生状态与 `final.context.skills`，不写数据库状态字段。
 - 完整边界见 [`../docs/design/12-agent-skills/skill-system-design.md`](../docs/design/12-agent-skills/skill-system-design.md)。
 
 ### MCP Server

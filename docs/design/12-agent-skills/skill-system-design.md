@@ -1,6 +1,6 @@
 # DeepAgent 线上 Skill 体系设计
 
-> 实施版本：v0.3.18
+> 实施版本：v0.3.18；运行目录收口：v0.3.20
 > 运行时：Pydantic AI 2.26 + Pydantic AI Harness 0.18
 > 数据库：Alembic 003
 
@@ -81,9 +81,24 @@ Console 上传 ZIP
 → skill_packages 保存 File ID 与解析索引
 ```
 
-数据库不保存二进制或解压正文。运行时按 `platform_file_id` 下载，校验 SHA-256 后安全物化到
-Pod 临时缓存；缓存键是内容 Hash，最多保留 32 个目录。多 Pod 共享平台原文件，各自缓存可随时
-重建。
+数据库不保存二进制或解压正文。平台文件服务和 `skill_packages` 是事实源；每个 Pod 只维护一份
+可重建的当前运行副本：
+
+```text
+runtime-skills/
+├── budget-dimension-modeling/
+├── excel-to-dynamic-report/
+└── quick-create-budget-poc/
+```
+
+服务启动时清理数据库已删除/停用的孤儿目录，并按 `platform_file_id` 下载缺失或 Hash 不一致的
+当前包。安装和替换直接复用本次已校验的上传字节原子更新 `<code>/`；启用和管理员手工重载会
+重新物化，停用和删除立即清理目录。普通 Agent Run 只读取本地目录，不访问平台文件服务、
+不重新解压，也不保留按 Hash 区分的历史版本。Hash 仅用于完整性和判断运行副本是否过期。
+
+单个 Skill 同步失败不会阻止应用启动，也不会阻塞其他 Skill 或普通回答。运行目录意外丢失时，
+本进程只兜底同步一次；失败后保持错误状态，直到重载、启停或服务重启，不在每轮 Run 重复下载。
+多 Pod 共享平台原包，但各自维护一份当前运行目录。
 
 事务边界：
 
@@ -100,7 +115,7 @@ Pod 临时缓存；缓存键是内容 Hash，最多保留 32 个目录。多 Pod
 
 ```text
 Agent.skills
-→ 解析 Builtin/上传包
+→ 解析 Builtin/当前 Pod 已就绪的上传包
 → Harness Skills 初始目录（name + description）
 → 模型调用 load_capability(id=...)
 → Harness 返回完整 SKILL.md
@@ -113,11 +128,16 @@ Pydantic AI 官方 typed Call/Return，进入原始 History，并与 Tool Search
 
 DeepAgent 只补两个受 Agent 授权约束的只读工具：
 
-- `list_skill_resources(skill_code)`：列出 Reference/Asset 路径、MIME、大小、可读状态和 Hash。
+- `list_skill_resources(skill_code)`：列出 Reference/Asset 路径、MIME、大小、可读状态和 Hash；仅返回
+  脚本数量与不可读/不可执行标识，不暴露脚本路径或内容。
 - `read_skill_resource(skill_code, path, offset, limit)`：读取索引内的 UTF-8 文本并分页。
 
 没有可用资源时不披露这两个工具；未选择、停用和未知 Skill 均不可访问。二进制返回
 `binary_resource_not_readable`，脚本不出现在列表。
+
+上传 Skill 文件暂时不可用时，本轮把它从 Harness Library 中移除，并给模型一条短说明，禁止
+假装已经加载。`final.context.skills` 返回 configured、available、loaded 和 unavailable；这是
+当前 Run 的只读诊断，不改变数据库中的 Agent Skill 配置。
 
 ## 6. Builtin Skill
 
@@ -142,18 +162,37 @@ POST   /api/v1/skills                         multipart ZIP
 PUT    /api/v1/skills/{code}/package          multipart ZIP
 PATCH  /api/v1/skills/{code}
 DELETE /api/v1/skills/{code}
+POST   /api/v1/skills/{code}/reload
 GET    /api/v1/skills/{code}/resources
 GET    /api/v1/skills/{code}/resources/{path}
 GET    /api/v1/skills/{code}/package
 ```
 
-Console 配置中心提供独立 Skill 页面：列表、详情、资源树、Manifest、安装、替换、启停、下载和删除；
+`GET /skills` 和详情额外返回当前 Pod 派生的 `runtime_status/runtime_error_code/runtime_synced_at`，
+不写入数据库。重载只重新下载和替换本地目录，不修改 Skill 配置或创建版本。
+
+Console 配置中心提供独立 Skill 页面：列表、详情、资源树、Manifest、安装、替换、启停、重载、下载和删除；
 Builtin 标识为“代码内置、只读”。Agent 编辑弹窗将 Skill 与工具包分区，保存独立编码列表。
 聊天中 `load_capability` 显示为默认折叠的“正在加载 Skill”，资源工具按普通只读工具展示。
 
 DeepCube、DeepTable 不需要新增 SSE 或 History 协议适配。
 
-## 8. 迁移、测试和发布边界
+## 8. Library 包与真实业务 Skill
+
+安装接口始终坚持“一个 ZIP 对应一个 Skill”。如果 ZIP 根下同时包含多个 `SKILL.md`，返回 422 并
+提示拆分；不把 Harness 的 Library 目录概念变成数据库中的批量安装单位。
+
+v0.3.20 使用 `DeepFOS-Skill培训包-20260811.zip` 做真实格式验收，拆为三个不提交 Git 的包：
+
+- `budget-dimension-modeling`（预算维度建模）。
+- `excel-to-dynamic-report`（动态表生成），保留 XLSX Asset 和 Python Script，但当前不可读/执行。
+- `quick-create-budget-poc`（预算概念验证快速创建），保留 Markdown Reference 和 HTML Asset，
+  跨 Skill 依赖改为显式 `load_capability(id=...)`。
+
+运行时这些 Skill 位于同一上传 Library 根目录下并列存放；Agent 仍按编码逐个授权，资源工具不得
+通过相对路径跨到相邻 Skill。
+
+## 9. 迁移、测试和发布边界
 
 Alembic 003：
 
@@ -161,17 +200,15 @@ Alembic 003：
 - downgrade 仅在 `skill_packages` 为空且所有 `agents.skills=[]` 时允许。
 - SQLite 做真实 `002 → 003 → 002 → 003`；MySQL/PostgreSQL 做方言和 DDL 路径测试。
 
-本轮 Test MySQL 不可用，开发和浏览器验收只使用隔离 SQLite。发布前必须补测：
+v0.3.20 本地开发继续使用隔离 SQLite，Alembic不新增 revision。发布后再在 Test 003执行：
 
-1. 用 v0.3.17 工具备份 Test 的 002 配置。
-2. 查询所有 Agent，确认没有旧 `skill:*` 引用。
-3. 验证平台文件服务允许 `.zip` 的 UPL 上传、下载和删除。
-4. 在隔离 Test 副本升级 003，再验证真实 MySQL 的 Agent Skill 保存、CRUD 和配置备份。
-5. 使用真实 DeepFOS MCP 与 DeepSeek 完成一次 Skill 加载、资源读取和安全只读调用。
+1. 备份当前 Test 003配置数据库。
+2. 安装三个真实业务 Skill，验证平台原包、数据库元数据和当前 Pod运行状态均正常。
+3. 新建临时验收 Agent，确认名称目录、`load_capability`、文本资源 List/Read 和跨 Skill加载。
+4. 确认 XLSX和脚本只能识别存在，不会读取、执行或伪造结果。
+5. 确认首轮同步完成后，后续 Run不再下载平台文件。
 
-以上项目完成前，禁止让未发布的 v0.3.18 连接共享 Test。
-
-## 9. 后续，不属于 v0.3.18
+## 10. 后续，不属于 v0.3.20
 
 - 不可变 Skill Revision、回滚和 Agent 固定版本。
 - 第三方签名、来源信任、Marketplace 和自动升级。

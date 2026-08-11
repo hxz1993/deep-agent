@@ -25,7 +25,6 @@ from deepfos_platform.options import OPTION as PLATFORM_OPTION
 
 SKILL_RUNTIME_ROOT = Path(tempfile.gettempdir()) / "deep-agent-runtime-skills"
 SKILL_RUNTIME_MARKER = ".deepagent-runtime.json"
-SKILL_PLATFORM_SPACE_KEY = "_deepagent_platform_space"
 SKILL_STARTUP_SYNC_TIMEOUT_SECONDS = 30
 SKILL_DOWNLOAD_TIMEOUT_SECONDS = 15
 SKILL_SYNC_CONCURRENCY = 4
@@ -102,48 +101,29 @@ def _row_resource_index(row: SkillPackage) -> list[dict]:
     return [dict(item) for item in (row.resource_index or [])]
 
 
-def skill_manifest_with_platform_space(
-    manifest: Mapping[str, object],
-    request_headers: Mapping[str, str],
-) -> dict[str, object]:
-    """Persist only the Space needed to locate a platform file after restart."""
+def skill_platform_file_headers(
+    request_headers: Mapping[str, str] | None = None,
+) -> dict[str, str]:
+    """Build identity headers for a system-level Skill file operation.
 
-    result = dict(manifest)
-    space = request_headers.get("space")
-    if isinstance(space, str) and space.strip():
-        result[SKILL_PLATFORM_SPACE_KEY] = space
-    else:
-        result.pop(SKILL_PLATFORM_SPACE_KEY, None)
-    return result
+    Uploaded Skill packages are shared configuration, not Space-owned business
+    files. Preserve the caller/service identity but deliberately strip the
+    App/Space/Language business context so upload, restart recovery and
+    Run-time fallback all address the same system-level file.
+    """
 
-
-def skill_public_manifest(manifest: Mapping[str, object] | None) -> dict[str, object]:
-    """Hide DeepAgent's platform locator from the public Skill manifest."""
-
-    return {
-        key: value
-        for key, value in (manifest or {}).items()
-        if key != SKILL_PLATFORM_SPACE_KEY
-    }
-
-
-def _service_headers(row: SkillPackage) -> dict[str, str]:
-    headers: dict[str, str] = {}
-    space = (row.manifest or {}).get(SKILL_PLATFORM_SPACE_KEY)
-    if isinstance(space, str) and space.strip():
-        headers["space"] = space
+    headers = dict(request_headers or {})
+    for name in tuple(headers):
+        if name.lower() in {
+            "app",
+            "space",
+            "language",
+            INTERNAL_TOKEN_HEADER.lower(),
+        }:
+            headers.pop(name, None)
     token = PLATFORM_OPTION.general.internal_token
     if token:
         headers[INTERNAL_TOKEN_HEADER] = token
-    return headers
-
-
-def _download_headers(
-    row: SkillPackage,
-    request_headers: Mapping[str, str] | None,
-) -> dict[str, str]:
-    headers = _service_headers(row)
-    headers.update(dict(request_headers or {}))
     return headers
 
 
@@ -273,7 +253,7 @@ class SkillRuntimeLibrary:
     ) -> bytes:
         return await self._download_package(
             row,
-            _download_headers(row, request_headers),
+            skill_platform_file_headers(request_headers),
         )
 
     def _install_payload(self, row: SkillPackage, payload: bytes) -> None:
@@ -486,10 +466,6 @@ class SkillRuntimeLibrary:
             sync_one(by_code[code])
             for code in sorted(enabled)
             if not self._ready_from_disk(by_code[code])
-            and isinstance(
-                (by_code[code].manifest or {}).get(SKILL_PLATFORM_SPACE_KEY),
-                str,
-            )
         ]
         if not pending:
             return

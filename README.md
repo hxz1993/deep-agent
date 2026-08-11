@@ -85,9 +85,9 @@ v0.3.20 将上传 Skill 的运行副本收敛为每个 Pod 的 `runtime-skills/<
 不会阻塞其他 Skill、工具和普通回答；Console 与 `final.context.skills` 提供脱敏诊断。Alembic
 仍为 `003`。
 
-平台 ZIP 按 DeepFOS Space 保存。安装和替换必须携带有效 `space`；DeepAgent 只持久化非敏感的
-Space 编码供 Pod 重启后恢复文件，不保存用户 Token、Cookie 或完整 Header，
-也不会把这段内部上下文返回到 Skill Manifest API。
+平台 ZIP 是系统级配置文件，不属于业务 App/Space。上传使用可无 Space 回读的 `INF` 文件类型；
+安装、替换、Pod 启动恢复、管理员下载和 Run 兜底均保留调用身份但主动去掉
+`app/space/language`业务上下文。数据库不保存请求上下文、Token、Cookie 或完整 Header。
 
 v0.3.21 在 Console 增加独立只读的“系统工具”目录，按 Skill、MCP 工具发现和 MCP Resource
 展示运行时自动注入工具的来源与触发条件，但不把它们加入 Agent 能力配置或数据库。Python

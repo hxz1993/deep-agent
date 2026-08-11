@@ -96,11 +96,11 @@ runtime-skills/
 重新物化，停用和删除立即清理目录。普通 Agent Run 只读取本地目录，不访问平台文件服务、
 不重新解压，也不保留按 Hash 区分的历史版本。Hash 仅用于完整性和判断运行副本是否过期。
 
-平台文件记录按 DeepFOS Space 隔离。安装或替换上传包时必须携带当前 `space`。DeepAgent 只把
-这个非敏感 Space 编码保存到 Manifest 的内部扩展中，Token、Cookie 和完整 Header 均不落库；
-Skill API 返回 Manifest 时会隐藏该内部扩展。服务启动时使用内部服务身份和
-已保存 Space 下载当前包。历史记录没有保存 Space 时，启动阶段不盲目下载，由首次带有效请求
-上下文的 Run 或管理员“重新加载”完成同步。
+平台 ZIP 是系统级配置文件，不属于业务 Space。平台上传使用 `INF` 文件类型；Space 级用户上传
+类型 `UPL` 不得用于 Skill，否则无 Space 回读会得到不可用 File ID。安装、替换、服务启动恢复、
+管理员下载和 Run 兜底下载均保留调用身份但主动去掉 `app/space/language`业务上下文，确保
+同一 File ID 始终按系统级语义访问。数据库只保存 File ID、Hash 和包元数据，不保存请求上下文、
+Token、Cookie 或完整 Header。
 
 单个 Skill 同步失败不会阻止应用启动，也不会阻塞其他 Skill 或普通回答。运行目录意外丢失时，
 本进程只兜底同步一次；失败后保持错误状态，直到重载、启停或服务重启，不在每轮 Run 重复下载。

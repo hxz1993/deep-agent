@@ -61,17 +61,6 @@ class SkillPackageStoreBase(SessionBoundMixin):
             await db.refresh(row)
             return row
 
-    async def update_manifest(self, code: str, manifest: dict) -> SkillPackage | None:
-        async with self._write() as db:
-            result = await db.execute(select(SkillPackage).where(SkillPackage.code == code))
-            row = result.scalar_one_or_none()
-            if row is None:
-                return None
-            row.manifest = manifest
-            await db.flush()
-            await db.refresh(row)
-            return row
-
     async def delete(self, code: str) -> bool:
         async with self._write() as db:
             result = await db.execute(delete(SkillPackage).where(SkillPackage.code == code))

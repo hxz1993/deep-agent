@@ -17,8 +17,10 @@ from tests.unit.test_skill_packages import skill_zip
 class _FakePlatformFiles:
     blobs: dict[str, bytes] = {}
     deleted: list[str] = []
+    uploaded_types: list[str] = []
 
     async def upload(self, *, file_type: str, file_name: str, file: bytes):
+        self.uploaded_types.append(file_type)
         file_id = f"file-{len(self.blobs) + 1}"
         self.blobs[file_id] = bytes(file)
         return SimpleNamespace(id=file_id, fileName=file_name, fileSize=len(file))
@@ -32,8 +34,11 @@ class _FakePlatformFiles:
 
 
 class _FakePlatformAPI:
+    headers: list[dict | None] = []
+
     def __init__(self, header=None):
         self.header = header
+        type(self).headers.append(header)
         self.file = _FakePlatformFiles()
 
 
@@ -41,6 +46,8 @@ class SkillApiTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         _FakePlatformFiles.blobs = {}
         _FakePlatformFiles.deleted = []
+        _FakePlatformFiles.uploaded_types = []
+        _FakePlatformAPI.headers = []
         self.stores, self.engine, session_factory = await make_sqlite_stores()
         self.app = FastAPI()
         self.app.include_router(api_router)
@@ -82,13 +89,26 @@ class SkillApiTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(installed.json()["status"], "installed")
             self.assertEqual(installed.json()["skill"]["source"], "upload")
             self.assertEqual(installed.json()["skill"]["runtime_status"], "ready")
-            self.assertNotIn("_deepagent_platform_space", installed.json()["skill"]["manifest"])
+            self.assertEqual(_FakePlatformFiles.uploaded_types, ["INF"])
             stored = await self.stores.skill_package.get_by_code("example-skill")
-            self.assertEqual(stored.manifest["_deepagent_platform_space"], "iirjgi")
+            self.assertNotIn("_deepagent_platform_space", stored.manifest)
+            self.assertFalse(
+                {"app", "space", "language"} & set(_FakePlatformAPI.headers[0])
+            )
 
             reloaded = await client.post("/api/v1/skills/example-skill/reload")
             self.assertEqual(reloaded.status_code, 200, reloaded.text)
             self.assertEqual(reloaded.json()["runtime_status"], "ready")
+            self.assertFalse(
+                {"app", "space", "language"} & set(_FakePlatformAPI.headers[-1])
+            )
+
+            package = await client.get("/api/v1/skills/example-skill/package")
+            self.assertEqual(package.status_code, 200, package.text)
+            self.assertTrue(package.content.startswith(b"PK"))
+            self.assertFalse(
+                {"app", "space", "language"} & set(_FakePlatformAPI.headers[-1])
+            )
 
             listed = await client.get("/api/v1/skills")
             self.assertEqual(listed.status_code, 200)
@@ -250,15 +270,15 @@ class SkillApiTests(unittest.IsolatedAsyncioTestCase):
                 )
                 self.assertEqual(response.status_code, 422, (field, response.text))
 
-    async def test_install_requires_platform_space_before_upload(self) -> None:
+    async def test_install_without_space_uses_system_scoped_platform_file(self) -> None:
         async with AsyncClient(transport=self.transport, base_url="http://test") as client:
             response = await client.post(
                 "/api/v1/skills",
                 files={"file": ("example.zip", skill_zip(), "application/zip")},
             )
-        self.assertEqual(response.status_code, 422, response.text)
-        self.assertEqual(response.json()["detail"]["code"], "missing_platform_space")
-        self.assertEqual(_FakePlatformFiles.blobs, {})
+        self.assertEqual(response.status_code, 201, response.text)
+        self.assertNotIn("space", _FakePlatformAPI.headers[0])
+        self.assertEqual(len(_FakePlatformFiles.blobs), 1)
 
 
 if __name__ == "__main__":

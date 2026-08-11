@@ -24,10 +24,11 @@ from deep_agent.schemas.skill import (
 )
 from deep_agent.skills.catalog import SkillDescriptor, get_builtin_skill, list_builtin_skills
 from deep_agent.skills.package import MAX_ZIP_BYTES, ParsedSkillPackage, SkillPackageError, parse_skill_zip
-from deep_agent.skills.runtime import RUNTIME_ERROR, RUNTIME_READY, SkillRuntimeLibrary
 from deep_agent.skills.runtime import (
-    skill_manifest_with_platform_space,
-    skill_public_manifest,
+    RUNTIME_ERROR,
+    RUNTIME_READY,
+    SkillRuntimeLibrary,
+    skill_platform_file_headers,
 )
 from deepfos_platform.client.platform import FILE_TYPE_SKILL_PACKAGE, PlatformAPI
 
@@ -87,7 +88,7 @@ def _row_detail(row: SkillPackage, runtime: SkillRuntimeLibrary) -> SkillDetail:
         runtime_synced_at=runtime_state.synced_at,
         created_at=row.created_at,
         updated_at=row.updated_at,
-        manifest=skill_public_manifest(row.manifest),
+        manifest=dict(row.manifest or {}),
         resources=[SkillResource.model_validate(entry) for entry in index],
     )
 
@@ -127,7 +128,6 @@ def _record(
     platform_file_id: str,
     file_name: str,
     file_size: int,
-    request_headers: dict[str, str],
 ) -> SkillPackageRecord:
     return SkillPackageRecord(
         code=parsed.code,
@@ -141,7 +141,7 @@ def _record(
         file_name=file_name,
         file_size=file_size,
         content_hash=parsed.content_hash,
-        manifest=skill_manifest_with_platform_space(parsed.manifest, request_headers),
+        manifest=parsed.manifest,
         resource_index=parsed.resource_index,
         contains_scripts=parsed.contains_scripts,
     )
@@ -153,7 +153,9 @@ async def _upload_platform(
     raw: bytes,
     file_name: str,
 ):
-    api = PlatformAPI(header=extract_forward_headers(request))
+    api = PlatformAPI(
+        header=skill_platform_file_headers(extract_forward_headers(request))
+    )
     try:
         uploaded = await api.file.upload(
             file_type=FILE_TYPE_SKILL_PACKAGE,
@@ -166,30 +168,6 @@ async def _upload_platform(
             detail=f"Platform Skill upload failed: {type(exc).__name__}",
         ) from exc
     return api, uploaded
-
-
-def _require_platform_context(request_headers: dict[str, str]) -> None:
-    if request_headers.get("space"):
-        return
-    raise HTTPException(
-        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-        detail={
-            "code": "missing_platform_space",
-            "message": "安装或替换上传 Skill 时必须提供当前 DeepFOS Space 上下文。",
-        },
-    )
-
-
-async def _persist_runtime_context(
-    ctx: AppContextDep,
-    row: SkillPackage,
-    request_headers: dict[str, str],
-) -> SkillPackage:
-    manifest = skill_manifest_with_platform_space(row.manifest or {}, request_headers)
-    if manifest == (row.manifest or {}):
-        return row
-    updated = await ctx.stores.skill_package.update_manifest(row.code, manifest)
-    return updated or row
 
 
 async def _best_effort_delete(api: PlatformAPI, file_id: str, *, context: str) -> None:
@@ -238,7 +216,6 @@ async def install_skill(
                 detail=f"Skill already exists: {parsed.code}",
             )
         request_headers = extract_forward_headers(request)
-        _require_platform_context(request_headers)
         api, uploaded = await _upload_platform(request, raw=raw, file_name=filename)
         try:
             row = await ctx.stores.skill_package.create(
@@ -247,7 +224,6 @@ async def install_skill(
                     platform_file_id=uploaded.id,
                     file_name=uploaded.fileName or filename,
                     file_size=int(uploaded.fileSize or len(raw)),
-                    request_headers=request_headers,
                 )
             )
         except Exception:
@@ -290,9 +266,7 @@ async def replace_skill_package(
                 detail=f"Replacement package code must remain {code!r}",
             )
         request_headers = extract_forward_headers(request)
-        _require_platform_context(request_headers)
         if parsed.content_hash == current.content_hash:
-            current = await _persist_runtime_context(ctx, current, request_headers)
             await ctx.skill_runtime.materialize(
                 current,
                 request_headers=request_headers,
@@ -309,7 +283,6 @@ async def replace_skill_package(
                 platform_file_id=uploaded.id,
                 file_name=uploaded.fileName or filename,
                 file_size=int(uploaded.fileSize or len(raw)),
-                request_headers=request_headers,
             ).model_copy(update={"enabled": current.enabled})
             row = await ctx.stores.skill_package.replace_package(code, replacement)
             if row is None:
@@ -350,12 +323,10 @@ async def update_skill(
         await ctx.skill_runtime.remove(code, status="disabled")
     elif body.enabled is True:
         request_headers = extract_forward_headers(request)
-        runtime_state = await ctx.skill_runtime.materialize(
+        await ctx.skill_runtime.materialize(
             row,
             request_headers=request_headers,
         )
-        if runtime_state.status == RUNTIME_READY:
-            row = await _persist_runtime_context(ctx, row, request_headers)
     return _row_detail(row, ctx.skill_runtime)
 
 
@@ -374,7 +345,9 @@ async def delete_skill(code: str, request: Request, ctx: AppContextDep) -> dict:
         )
     await ctx.stores.skill_package.delete(code)
     await ctx.skill_runtime.remove(code)
-    api = PlatformAPI(header=extract_forward_headers(request))
+    api = PlatformAPI(
+        header=skill_platform_file_headers(extract_forward_headers(request))
+    )
     await _best_effort_delete(api, row.platform_file_id, context="delete")
     return {"status": "deleted", "code": code}
 
@@ -402,7 +375,6 @@ async def reload_skill(code: str, request: Request, ctx: AppContextDep) -> Skill
                 "error_code": runtime_state.error_code,
             },
         )
-    await _persist_runtime_context(ctx, row, request_headers)
     return SkillReloadResult(
         code=code,
         runtime_status=runtime_state.status,

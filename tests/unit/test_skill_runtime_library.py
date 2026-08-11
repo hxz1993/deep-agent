@@ -131,12 +131,6 @@ class SkillRuntimeLibraryTests(unittest.IsolatedAsyncioTestCase):
     async def test_startup_reconcile_cleans_orphans_and_downloads_once(self) -> None:
         payload = skill_zip()
         row = await self._create(payload)
-        await self.stores.skill_package.update_manifest(
-            row.code,
-            {**row.manifest, "_deepagent_platform_space": "test-space"},
-        )
-        row = await self.stores.skill_package.get_by_code(row.code)
-        assert row is not None
         (self.root / "orphan-skill").mkdir(parents=True)
 
         await self.runtime.reconcile(self.stores)
@@ -144,7 +138,7 @@ class SkillRuntimeLibraryTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse((self.root / "orphan-skill").exists())
         self.assertTrue((self.root / row.code / "SKILL.md").is_file())
         self.assertEqual(_Files.downloads, 1)
-        self.assertEqual(_PlatformAPI.headers[0]["space"], "test-space")
+        self.assertNotIn("space", _PlatformAPI.headers[0])
         self.assertEqual(self.runtime.state(row.code).status, RUNTIME_READY)
 
         restarted = SkillRuntimeLibrary(self.root)
@@ -152,20 +146,28 @@ class SkillRuntimeLibraryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(_Files.downloads, 1)
         self.assertEqual(restarted.state(row.code).status, RUNTIME_READY)
 
-    async def test_startup_without_stored_space_defers_download_until_run(self) -> None:
+    async def test_run_space_is_removed_from_fallback_download(self) -> None:
         payload = skill_zip()
         row = await self._create(payload)
 
-        await self.runtime.reconcile(self.stores)
-
-        self.assertEqual(_Files.downloads, 0)
         resolved = await self.runtime.resolve(
             row,
-            request_headers={"space": "run-space"},
+            request_headers={
+                "app": "run-app",
+                "space": "run-space",
+                "language": "zh_CN",
+                "x-deepfos-internal-key": "untrusted-value",
+            },
         )
         self.assertIsNotNone(resolved)
         self.assertEqual(_Files.downloads, 1)
-        self.assertEqual(_PlatformAPI.headers[0]["space"], "run-space")
+        self.assertFalse(
+            {"app", "space", "language"} & set(_PlatformAPI.headers[0])
+        )
+        self.assertNotEqual(
+            _PlatformAPI.headers[0].get("x-deepfos-internal-key"),
+            "untrusted-value",
+        )
 
     async def test_platform_json_error_is_reported_as_missing_file(self) -> None:
         payload = skill_zip()

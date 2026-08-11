@@ -10,7 +10,10 @@ from ..options import OPTION
 __all__ = ['PlatformAPI']
 
 FILE_TYPE_ATTACHMENT = "DL"
-FILE_TYPE_SKILL_PACKAGE = "UPL"
+# Skill packages are system configuration imports.  UPL is a Space-scoped
+# user-upload type and can return an ID that is not downloadable without the
+# originating Space; INF supports the required system-level ID round trip.
+FILE_TYPE_SKILL_PACKAGE = "INF"
 
 
 class PlatformAPI(BaseAPI):

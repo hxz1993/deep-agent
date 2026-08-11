@@ -110,7 +110,7 @@ URL 与 Builtin MCP 的运行态不同：URL MCP 在管理员检测时保存 Too
 7. Harness `StepPersistence` 不替代现有 SQL 会话、SSE 和 Deferred/Pending；只有副作用账本、子 Agent 或崩溃恢复成为真实需求时再接入。
 8. Harness 仍为 0.x。引入时必须将 `pydantic-ai-slim` 与 `pydantic-ai-harness` 固定为经过联合回归的准确版本，禁止继续依赖无上限 `>=` 漂移。
 9. 不要通过修改 `AgentRunner` 主循环重复实现 Pydantic AI 已提供的机制。
-10. Harness 0.18 `Skills` 只负责延迟披露 `SKILL.md` 正文，不读取或执行 references、assets、scripts；第三方 Skill 的安装、版本、权限、素材读取和脚本隔离仍由 DeepAgent 产品层负责。
+10. Harness 0.18 `Skills` 只负责延迟披露 `SKILL.md` 正文；第三方 Skill 的安装、版本、权限、素材读取和脚本隔离仍由 DeepAgent 产品层负责。v0.3.22 的素材读取复用附件解析内核，脚本执行只复用 Sandbox Backend 契约，不能把它们误写成 Harness 能力。
 11. `IncludeToolReturnSchemas` 发生在模型请求前的 Tool Definition 准备阶段，不是工具执行后给真实结果追加 Schema。首版只允许按最终稳定协议名的明确白名单启用，并要求存在可信、稳定的返回 Schema；不得通过名称包含 `query` 等模糊规则自动扩大范围。延迟 MCP 工具只有被 Tool Search 披露时才携带其返回 Schema，并必须观测新增 Schema Token。真实结果过大或空字段过多继续由分页、投影或 `ToolOutputLimits`/Artifact 治理。
 12. Prompt Cache 不是跨 Provider 的统一 DeepAgent 缓存。DeepSeek 等 Provider 的自动缓存只读取其 Usage 命中/未命中数据，不改写请求；显式 `CachePoint`、cache key 和 TTL 只能在模型目录确认具体 Provider 支持后启用。统一观测可以归一化指标，不能伪造统一缓存协议。
 13. v0.3.17 使用 Pydantic AI 官方 `conversation_id/run_id` 贯通运行：`conversation_id=deepagent:{agent_id}:{session_id}` 在同一 Session 内稳定，每次发送、Deferred 恢复、重试或主动压缩使用新的 `run_id`。第一阶段只输出脱敏结构化日志和当前页面 Run 指标，不把高频运行数据写入业务 MySQL；后续 OTLP/Instrumentation 不得建立第二套 Agent 生命周期。
@@ -200,8 +200,9 @@ XML + JSON 投影。业务字段语义仍由具体 Agent Prompt 负责。
 | --- | --- |
 | `catalog.py` | 合并代码内置与数据库上传 Skill 目录 |
 | `package.py` | ZIP、Frontmatter、Manifest 与资源索引安全校验 |
-| `runtime.py` | 平台 ZIP 下载、Hash 校验、临时物化和 Harness `Skills` 装配 |
-| `tools.py` | 已授权 Reference/Asset 的只读 List/Read 工具 |
+| `runtime.py` | 平台 ZIP 下载、Hash 校验、当前目录物化和 Harness `Skills` 装配 |
+| `resource_reader.py` · `tools.py` | 已授权文本、DOCX、XLSX Reference/Asset 的统一分页读取 |
+| `script_tool.py` | 安全 Backend 可用时，组装已授权 Skill 脚本执行工具 |
 
 ### `api/v1/`
 
@@ -246,7 +247,7 @@ XML + JSON 投影。业务字段语义仍由具体 Agent Prompt 负责。
 
 ### 内置工具包
 
-`builtin:general` 只提供当前时间且默认启用；`builtin:sandbox` 只提供 Python 执行，
+`builtin:general` 只提供当前时间且默认启用；`builtin:sandbox` 提供 Python 计算和条件式 Skill 脚本执行，
 `builtin:attachment` 提供附件读取，两者默认关闭。每个包严格包装一个 Toolset。内置包由代码随版本发布，
 不在数据库注册；配置中心只读展示，Agent 仍按整包选择。
 
@@ -265,8 +266,9 @@ MCP Resource 分组说明工具来源与自动注入条件。该接口不读取�
 - 当前 Pod 只保留 `runtime-skills/<code>/` 一份上传 Skill 运行副本；启动、安装、替换、启用和
   `POST /api/v1/skills/{code}/reload` 负责同步，普通 Run 不访问平台文件服务。Hash 只用于完整性
   和过期判断，不代表产品版本，也不保留历史目录。
-- Harness 0.18 `Skills` 负责 `load_capability` 渐进披露；DeepAgent 只补授权资源 List/Read。
-- `scripts/`、`tools/` 可以随包保存，但当前禁止模型读取和执行。
+- Harness 0.18 `Skills` 负责 `load_capability` 渐进披露；DeepAgent 补充授权资源 List/Read。
+- 文本、DOCX 和 XLSX 根据索引中的路径、MIME 与后缀按字符、逻辑块或物理行分页；PDF、PPTX、图片仍只展示元数据。历史安装包不需要为 XLSX 重新生成索引。
+- `scripts/`、`tools/` 可以随包保存并列出路径，但不能通过资源工具读取。脚本执行要求同一 Agent 选择该 Skill、启用 `builtin:sandbox`，且 Backend health 明确 `production_ready=true`；否则 `execute_skill_script` 不进入模型工具列表。
 - 单个上传 Skill 文件缺失或同步失败时，本轮跳过该 Skill 并继续运行；不得让它阻塞其他 Skill、
   MCP 或普通回答。诊断进入 `/skills` 的派生状态与 `final.context.skills`，不写数据库状态字段。
 - 完整边界见 [`../docs/design/12-agent-skills/skill-system-design.md`](../docs/design/12-agent-skills/skill-system-design.md)。
@@ -303,7 +305,10 @@ MCP Resource 分组说明工具来源与自动注入条件。该接口不读取�
 
 ### Python Sandbox
 
-`execute_python` 属于默认关闭的 `builtin:sandbox`，与时间工具分开整包选择。工具协议
+`execute_python` 属于默认关闭的 `builtin:sandbox`，与时间工具分开整包选择。v0.3.22 的
+`execute_skill_script` 复用同一 Backend，但只接受已索引的 UTF-8 `.py`、JSON inputs、显式参数和
+最多 16 个同 Skill 授权资源；正式结果只从 `outputs/result.json` 读取。`subprocess-dev` 的
+`production_ready=false`，因此它只验证内部协议，不向模型披露脚本工具。工具协议
 与执行 Backend 解耦：本地联调使用 `subprocess-dev`，生产硬隔离
 仍按 [`../docs/design/07-python-sandbox/`](../docs/design/07-python-sandbox/) 推进。它不是 MCP，
 也不等同于 Provider 托管的 `CodeExecutionTool`。

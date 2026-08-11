@@ -251,7 +251,10 @@ class SandboxCapabilityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(capability.category, "builtin")
         self.assertFalse(capability.default_enabled)
         self.assertEqual(capability.source, "builtin")
-        self.assertEqual({item.name for item in capability.tools}, {"execute_python"})
+        self.assertEqual(
+            {item.name for item in capability.tools},
+            {"execute_python"},
+        )
         self.assertEqual(
             capability.tools[0].description,
             "在全新的无状态 Python 环境中执行一次数据计算。",
@@ -312,7 +315,21 @@ class SandboxCapabilityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(request.inputs, {"a": 1})
         self.assertEqual(request.timeout_ms, 30_000)
         payload: dict[str, Any] = request.model_dump()
-        self.assertEqual(set(payload.keys()), {"request_id", "code", "inputs", "timeout_ms"})
+        self.assertEqual(
+            set(payload.keys()),
+            {
+                "request_id",
+                "mode",
+                "code",
+                "arguments",
+                "inputs",
+                "files",
+                "timeout_ms",
+            },
+        )
+        self.assertEqual(payload["mode"], "expression")
+        self.assertEqual(payload["arguments"], ())
+        self.assertEqual(payload["files"], ())
 
     async def test_backend_result_is_plain_dict(self) -> None:
         backend = FakeSandboxBackend()

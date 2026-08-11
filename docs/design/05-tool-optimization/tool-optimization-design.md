@@ -330,13 +330,14 @@ DeepAgent 原有自研 `Capability` 只是产品配置包装，却与 Pydantic A
 | 前端名称 | Tool Package 编码 | 默认状态 | 工具 |
 | --- | --- | --- | --- |
 | 通用工具 | `builtin:general` | 默认启用 | `get_current_time` |
-| Python 沙箱 | `builtin:sandbox` | 默认关闭 | `execute_python` |
+| Python 沙箱 | `builtin:sandbox` | 默认关闭 | `execute_python`、条件式 `execute_skill_script` |
 | 附件读取 | `builtin:attachment` | 默认关闭 | `read_text_attachment`、`read_docx`、`read_xlsx` |
 
 两包中的后端函数对模型都表现为 `FunctionToolset`。配置中心只读展示工具包及工具明细，
 实际启用仍由 `agents.capabilities` 中的工具包编码决定；本轮不提供包内逐工具开关。
 `execute_python` 的工具定义位于 DeepAgent 进程，实际代码通过可替换的
-`PythonExecutionBackend` 执行；这不改变它的 Function Tool 类型。
+`PythonExecutionBackend` 执行；这不改变它的 Function Tool 类型。Skill脚本复用同一Backend，
+但只在安全Backend生产就绪、Agent启用Sandbox且选择含脚本Skill时动态追加，不扩大包级授权。
 
 0.2.3 删除了原来 Native 中的 `http_get`。该工具没有目标域名白名单、私网地址保护和
 请求审计，不适合作为所有 Agent 默认获得的通用网络能力；需要联网时应接入边界明确、
@@ -688,6 +689,10 @@ FunctionToolset(execute_python)
   → PythonExecutionBackend
   → subprocess-dev（本地联调）/ 未来生产硬隔离 Backend
 ```
+
+v0.3.22 同一Backend内部增加Skill脚本模式：宿主只复制已授权脚本、JSON inputs和同Skill资源，
+固定读取 `outputs/result.json`。`subprocess-dev` 仅验证协议且不会向模型披露脚本工具；生产开放仍
+取决于目标K8s节点隔离探针。
 
 该能力不是 MCP，也不依赖 Provider Native Tool。当前已落地无状态执行、独立解释器、超时、
 并发和软防护；生产硬隔离仍需按 [Python Sandbox 课题](../07-python-sandbox/README.md) 完成

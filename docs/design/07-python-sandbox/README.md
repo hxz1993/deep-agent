@@ -1,6 +1,6 @@
 # 无状态 Python Sandbox
 
-DeepAgent 向模型暴露 `execute_python`：每次 Tool Call 在**全新**完整 CPython 进程里跑完即毁，无跨调用状态。联调默认 `subprocess-dev`；生产级硬隔离走阶段 C（阻塞于节点资格验证）。
+DeepAgent 向模型暴露 `execute_python`：每次 Tool Call 在**全新**完整 CPython 进程里跑完即毁，无跨调用状态。v0.3.22 同一 Backend 契约增加受控 Skill 脚本请求，但只有生产就绪的安全 Backend 才向模型披露 `execute_skill_script`。联调默认 `subprocess-dev`；生产级硬隔离走阶段 C（阻塞于节点资格验证）。
 
 | 文档 | 用途 |
 | --- | --- |
@@ -15,7 +15,7 @@ DeepAgent 向模型暴露 `execute_python`：每次 Tool Call 在**全新**完�
 
 | 阶段 | 状态 | 内容 |
 | --- | --- | --- |
-| **A** · `subprocess-dev` | **完成** | 契约、Worker、Toolset、health、独立 sandbox venv、`pydata`、rlimit、启用硬门槛、soft guardrails（seccomp 禁网 + Landlock 可写收束）；仍 `security_level=none` |
+| **A** · `subprocess-dev` | **完成** | 表达式与Skill脚本内部协议、Worker、Toolset、health、独立 sandbox venv、`pydata`、rlimit、启用硬门槛、soft guardrails（seccomp 禁网 + Landlock 可写收束）；仍 `security_level=none`，脚本工具不向模型披露 |
 | **B** · 安全 Backend 资格 | **探针代码已交付**；WSL 宿主预演 `selection_eligible=true`（见 [`wsl-prequalification.md`](wsl-prequalification.md)）；**目标 K8s 节点签字未完成** |
 | **C** · 安全 Backend | **阻塞于 B** | go-judge（首选）或 NsJail Adapter |
 
@@ -30,7 +30,7 @@ curl -s http://127.0.0.1:8000/api/v1/health/sandbox
 
 ## 2. 产品目标与边界
 
-**要做：** 模型显式调用的完整 CPython 数据计算；JSON `inputs` 进、stdout/stderr/异常/`result` 出；Profile 预装包（当前 `numpy<2` + `pandas`）；无运行时 pip。
+**要做：** 模型显式调用的完整 CPython 数据计算；JSON `inputs` 进、stdout/stderr/异常/`result` 出；Profile 预装包（当前 `numpy<2`、`pandas`、`pydantic`）；无运行时 pip。安全 Backend 后续还可执行已授权Skill中的固定Python脚本，输入文件和正式结果路径由宿主控制。真实培训包中的 `validate_dynamic_blueprint.py` 只使用Python标准库，已在同一独立venv中跑通，不依赖未安装的 `openpyxl`或 `PyYAML`。
 
 **不做：** 会话级变量 / Jupyter Kernel / Runtime TTL；Shell/Git/自定义 OCI；本课题内的 Artifact 出站与任意出网（Artifact 见 [`../08-artifact-export/`](../08-artifact-export/README.md)）。
 
@@ -97,6 +97,10 @@ curl -s http://127.0.0.1:8000/api/v1/health/sandbox
      → ExecuteResult → 原始聊天历史
 ```
 
+Skill脚本使用同一 Backend 的内部 `mode=script` 请求：宿主只复制已授权 `.py`、`inputs.json` 和
+同Skill显式资源，固定从 `outputs/result.json` 读取正式结果。`execute_python` 的模型参数不变；
+`subprocess-dev.production_ready=false`，因此只用于协议测试，不能让模型执行Skill脚本。
+
 ### 4.1 执行模型
 
 - 每次 `execute`：**新** `python -m deep_agent.sandbox.worker`；临时 cwd；结束后删目录；超时/取消 `SIGKILL` 进程组。
@@ -142,7 +146,7 @@ venv 创建：`bash scripts/sandbox_venv/setup.sh`。Profile：`deep_agent/sandb
 
 | 路径 | 职责 |
 | --- | --- |
-| `deep_agent/sandbox/types.py` · `backend.py` | 契约 / Protocol |
+| `deep_agent/sandbox/types.py` · `backend.py` | 表达式/脚本请求、受控输入文件、结果与 health 契约 |
 | `framing.py` · `worker.py` · `serialization.py` | 单 frame JSON · 一次性执行 · singledispatch 序列化 |
 | `subprocess_dev/` | 子进程生命周期 · rlimit · soft seccomp/Landlock |
 | `toolset.py` · `factory.py` · `profile.py` | Toolset 片段 · 工厂 · Profile |

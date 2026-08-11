@@ -51,14 +51,15 @@ v0.3.9 改由 Pydantic AI 官方 Provider/Profile 处理，不再保留项目自
 | category | code | label | 来源 | 默认 | 工具 |
 | --- | --- | --- | --- | --- | --- |
 | `builtin` | `builtin:general` | 通用工具 | code | 开 | `get_current_time` |
-| `builtin` | `builtin:sandbox` | Python 沙箱 | code | 关 | `execute_python` |
+| `builtin` | `builtin:sandbox` | Python 沙箱 | code | 关 | `execute_python`、条件式 `execute_skill_script` |
 | `builtin` | `builtin:attachment` | 附件读取 | code | 关 | `read_text_attachment`、`read_docx`、`read_xlsx` |
 | `mcp` | `mcp:<name>` | MCP 配置名称 | builtin/database | 关 | URL 检测快照 / Builtin 运行时发现 |
 | `ui` | `ui:builtin` | 通用交互 | code | 关 | `builtin__confirm`、`builtin__choice` |
 | `ui` | `ui:deepcube` | DeepCube 助手 | database | 关 | `deep_cube__clarify`、`deep_cube__config_fill` |
 
 `builtin:general` 和 `builtin:sandbox` 是两个独立包级开关。Python Sandbox 后端不可用时，
-`builtin:sandbox` 不进入可选目录，也不暴露空或不可执行工具定义。
+`builtin:sandbox` 不进入可选目录。`execute_skill_script` 只作为管理员可见的条件式工具元数据；
+运行时还必须选择含脚本Skill且Backend生产就绪才注入模型。
 
 ## 4. 编码和稳定协议
 

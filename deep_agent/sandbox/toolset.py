@@ -62,7 +62,7 @@ def build_python_sandbox_tool_package(
         toolset=toolset,
         label="Python 沙箱",
         source="builtin",
-        description="在无状态 Python 环境中执行数据计算代码。",
+        description="在无状态 Python 环境中执行数据计算。",
         tools=[
             ToolInfo(
                 "execute_python",

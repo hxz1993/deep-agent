@@ -78,7 +78,15 @@ class ResolvedSkills:
         return {
             item.code: item
             for item in self.items
-            if any(entry.get("category") != "script" for entry in item.resource_index)
+            if item.resource_index
+        }
+
+    @property
+    def scripts(self) -> dict[str, ResolvedSkill]:
+        return {
+            item.code: item
+            for item in self.items
+            if any(entry.get("category") == "script" for entry in item.resource_index)
         }
 
     @property

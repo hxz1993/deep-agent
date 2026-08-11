@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+import asyncio
 import shutil
-from contextlib import suppress
 from pathlib import Path
 from urllib.parse import quote
 
@@ -24,6 +24,11 @@ from deep_agent.schemas.skill import (
 )
 from deep_agent.skills.catalog import SkillDescriptor, get_builtin_skill, list_builtin_skills
 from deep_agent.skills.package import MAX_ZIP_BYTES, ParsedSkillPackage, SkillPackageError, parse_skill_zip
+from deep_agent.skills.resource_reader import (
+    SkillResourceReadError,
+    present_resource_entry,
+    read_resource_page,
+)
 from deep_agent.skills.runtime import (
     RUNTIME_ERROR,
     RUNTIME_READY,
@@ -60,11 +65,17 @@ def _builtin_detail(item: SkillDescriptor) -> SkillDetail:
         contains_scripts=item.contains_scripts,
         runtime_status=RUNTIME_READY,
         manifest=item.manifest,
-        resources=[SkillResource.model_validate(entry) for entry in item.resource_index],
+        resources=[
+            SkillResource.model_validate(present_resource_entry(entry))
+            for entry in item.resource_index
+        ],
     )
 
 
-def _row_detail(row: SkillPackage, runtime: SkillRuntimeLibrary) -> SkillDetail:
+def _row_detail(
+    row: SkillPackage,
+    runtime: SkillRuntimeLibrary,
+) -> SkillDetail:
     index = [dict(item) for item in (row.resource_index or [])]
     references, assets, scripts = _counts(index)
     runtime_state = runtime.state_for(row)
@@ -89,7 +100,10 @@ def _row_detail(row: SkillPackage, runtime: SkillRuntimeLibrary) -> SkillDetail:
         created_at=row.created_at,
         updated_at=row.updated_at,
         manifest=dict(row.manifest or {}),
-        resources=[SkillResource.model_validate(entry) for entry in index],
+        resources=[
+            SkillResource.model_validate(present_resource_entry(entry))
+            for entry in index
+        ],
     )
 
 
@@ -386,7 +400,7 @@ async def reload_skill(code: str, request: Request, ctx: AppContextDep) -> Skill
 @router.get("/skills/{code}/resources", response_model=list[SkillResource])
 async def list_skill_resources(code: str, ctx: AppContextDep) -> list[SkillResource]:
     detail = await get_skill(code, ctx)
-    return [item for item in detail.resources if item.category != "script"]
+    return detail.resources
 
 
 @router.get("/skills/{code}/package")
@@ -443,35 +457,44 @@ async def read_skill_resource(
     path: str,
     request: Request,
     ctx: AppContextDep,
-    offset: int = 0,
-    limit: int = 32 * 1024,
+    offset: int | None = None,
+    limit: int | None = None,
+    sheet: str | None = None,
 ) -> SkillResourceContent:
-    if offset < 0 or limit < 1 or limit > 32 * 1024:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid pagination")
     root, index = await _resource_root(code, request, ctx)
     entry = next((item for item in index if item.get("path") == path and item.get("category") != "script"), None)
     if entry is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Skill resource not found")
-    if not entry.get("readable"):
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="binary_resource_not_readable",
-        )
     target = (root / path).resolve()
     resolved_root = root.resolve()
-    if resolved_root not in target.parents or not target.is_file():
+    if (target != resolved_root and resolved_root not in target.parents) or not target.is_file():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Skill resource not found")
-    with suppress(UnicodeError):
-        content = target.read_text("utf-8")
-        page = content[offset : offset + limit]
-        next_offset = offset + len(page)
-        return SkillResourceContent(
-            skill_code=code,
-            path=path,
-            content=page,
+    try:
+        page = await asyncio.to_thread(
+            read_resource_page,
+            entry,
+            target,
             offset=offset,
-            next_offset=next_offset,
-            has_more=next_offset < len(content),
-            content_hash=str(entry["content_hash"]),
+            limit=limit,
+            sheet=sheet,
         )
-    raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Resource is not UTF-8")
+    except SkillResourceReadError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+    return SkillResourceContent(
+        skill_code=code,
+        path=path,
+        format=page.format,
+        unit=page.unit,
+        content=page.content,
+        metadata=page.metadata,
+        offset=page.offset,
+        next_offset=page.next_offset,
+        has_more=page.has_more,
+        returned_count=page.returned_count,
+        total_count=page.total_count,
+        truncated_by=page.truncated_by,
+        content_hash=str(entry["content_hash"]),
+    )

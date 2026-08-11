@@ -12,6 +12,8 @@ class SkillResource(BaseModel):
     size: int = Field(ge=0)
     content_hash: str
     readable: bool = False
+    read_format: str | None = None
+    read_unit: str | None = None
 
 
 class SkillPackageRecord(BaseModel):
@@ -98,10 +100,16 @@ class SkillReloadResult(BaseModel):
 class SkillResourceContent(BaseModel):
     skill_code: str
     path: str
+    format: str
+    unit: str
     content: str
+    metadata: dict = Field(default_factory=dict)
     offset: int
-    next_offset: int
+    next_offset: int | None
     has_more: bool
+    returned_count: int
+    total_count: int
+    truncated_by: str | None = None
     content_hash: str
 
 

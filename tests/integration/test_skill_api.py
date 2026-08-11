@@ -83,7 +83,13 @@ class SkillApiTests(unittest.IsolatedAsyncioTestCase):
         ) as client:
             installed = await client.post(
                 "/api/v1/skills",
-                files={"file": ("example-skill.zip", skill_zip(), "application/zip")},
+                files={
+                    "file": (
+                        "example-skill.zip",
+                        skill_zip(scripts=True, office=True),
+                        "application/zip",
+                    )
+                },
             )
             self.assertEqual(installed.status_code, 201, installed.text)
             self.assertEqual(installed.json()["status"], "installed")
@@ -116,16 +122,37 @@ class SkillApiTests(unittest.IsolatedAsyncioTestCase):
                 {item["code"] for item in listed.json()},
                 {"deepagent-diagnostics", "deepfos-readonly-analysis", "example-skill"},
             )
+            self.assertTrue(
+                all("script_execution_status" not in item for item in listed.json())
+            )
 
             resources = await client.get("/api/v1/skills/example-skill/resources")
             self.assertEqual(resources.status_code, 200)
-            self.assertNotIn("script", {item["category"] for item in resources.json()})
+            self.assertIn("script", {item["category"] for item in resources.json()})
+            by_path = {item["path"]: item for item in resources.json()}
+            self.assertEqual(by_path["references/guide.docx"]["read_format"], "docx")
+            self.assertEqual(by_path["assets/template.xlsx"]["read_format"], "xlsx")
+            self.assertFalse(by_path["scripts/run.py"]["readable"])
             text = await client.get(
                 "/api/v1/skills/example-skill/resources/references/guide.md",
                 params={"limit": 8},
             )
             self.assertEqual(text.status_code, 200, text.text)
             self.assertTrue(text.json()["has_more"])
+            docx = await client.get(
+                "/api/v1/skills/example-skill/resources/references/guide.docx",
+                params={"offset": 1, "limit": 1},
+            )
+            self.assertEqual(docx.status_code, 200, docx.text)
+            self.assertEqual(docx.json()["format"], "docx")
+            self.assertEqual(docx.json()["content"], "Skill Word 第一段")
+            xlsx = await client.get(
+                "/api/v1/skills/example-skill/resources/assets/template.xlsx",
+                params={"offset": 1, "limit": 2},
+            )
+            self.assertEqual(xlsx.status_code, 200, xlsx.text)
+            self.assertEqual(xlsx.json()["format"], "xlsx")
+            self.assertEqual(xlsx.json()["content"], "名称,值\n甲,1")
 
             model_id = (await self.stores.llm_model.list_all())[0].id
             agent = await client.post(

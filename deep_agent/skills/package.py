@@ -147,7 +147,10 @@ def _validate_member(info: zipfile.ZipInfo) -> PurePosixPath:
 def _resource_entry(path: Path, relative: str, *, category: str) -> dict[str, Any]:
     data = path.read_bytes()
     suffix = path.suffix.lower()
-    readable = suffix in READABLE_SUFFIXES and len(data) <= MAX_MODEL_TEXT_BYTES
+    readable = category != "script" and (
+        (suffix in READABLE_SUFFIXES and len(data) <= MAX_MODEL_TEXT_BYTES)
+        or suffix in {".docx", ".xlsx"}
+    )
     if suffix in READABLE_SUFFIXES and len(data) > MAX_MODEL_TEXT_BYTES:
         raise SkillPackageError(
             f"Model-readable resource exceeds {MAX_MODEL_TEXT_BYTES} bytes: {relative}"
@@ -209,7 +212,7 @@ def inspect_skill_directory(
             contains_scripts = True
             resources.append(_resource_entry(path, relative, category="script"))
         elif top == "references":
-            if path.suffix.lower() not in READABLE_SUFFIXES:
+            if path.suffix.lower() not in READABLE_SUFFIXES | {".docx", ".xlsx"}:
                 raise SkillPackageError(f"Unsupported reference type: {relative}")
             resources.append(_resource_entry(path, relative, category="reference"))
         elif top == "assets":

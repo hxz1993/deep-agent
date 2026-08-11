@@ -113,7 +113,10 @@ class PythonSandboxPackageTests(unittest.TestCase):
         package = build_python_sandbox_tool_package(backend, timeout_sec=30.0)
         self.assertEqual(package.code, "builtin:sandbox")
         self.assertFalse(package.default_enabled)
-        self.assertEqual({item.name for item in package.tools}, {"execute_python"})
+        self.assertEqual(
+            {item.name for item in package.tools},
+            {"execute_python"},
+        )
 
     def test_registry_keeps_general_and_sandbox_separate(self) -> None:
         backend = MagicMock()
@@ -124,7 +127,10 @@ class PythonSandboxPackageTests(unittest.TestCase):
             {item.name for item in general.tools},
             {"get_current_time"},
         )
-        self.assertEqual({item.name for item in sandbox.tools}, {"execute_python"})
+        self.assertEqual(
+            {item.name for item in sandbox.tools},
+            {"execute_python"},
+        )
         default_toolsets = registry.toolsets(None)
         self.assertIn(general.toolset, default_toolsets)
         self.assertNotIn(sandbox.toolset, default_toolsets)

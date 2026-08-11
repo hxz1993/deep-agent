@@ -31,14 +31,16 @@ test("Skill 页面区分内置和上传包的可操作边界", () => {
   assert.match(source, /\/skills\/\$\{encodeURIComponent\(skill\.code\)\}\/reload/);
   assert.match(source, /运行文件已就绪/);
   assert.match(source, /运行文件同步失败/);
-  assert.match(source, /当前版本只保存，不向模型披露、读取或执行/);
+  assert.doesNotMatch(source, /script_execution_status/);
 });
 
 test("Skill 上传使用 multipart 且资源按安全 API 读取", () => {
   assert.match(source, /const form = new FormData\(\)/);
   assert.match(source, /form\.append\("file", file\)/);
   assert.match(source, /\/resources\/\$\{path\.split/);
-  assert.match(source, /仅展示前 32 KiB/);
-  assert.match(source, /二进制 Asset，当前不可由模型读取/);
-  assert.match(source, /已保存，当前不可读取或执行/);
+  assert.match(source, /Word 可读/);
+  assert.match(source, /Excel 可读/);
+  assert.doesNotMatch(source, /等待安全 Backend/);
+  assert.doesNotMatch(source, /可执行，但 Agent 需启用 Python 沙箱/);
+  assert.doesNotMatch(source, /已保存，当前不可读取或执行/);
 });

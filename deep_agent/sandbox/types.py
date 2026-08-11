@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import base64
+import binascii
 import json
+from pathlib import PurePosixPath
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 JsonValue = Any
 
@@ -24,9 +27,14 @@ SandboxErrorCode = Literal[
 SecurityLevel = Literal["none", "linux-isolated"]
 ExecuteStatus = Literal["ok", "error"]
 StateScope = Literal["request"]
+ExecuteMode = Literal["expression", "script"]
 
 MAX_CODE_BYTES = 64 * 1024
 MAX_INPUTS_JSON_BYTES = 2 * 1024 * 1024
+MAX_SCRIPT_RESOURCE_FILES = 16
+MAX_SCRIPT_RESOURCE_BYTES = 2 * 1024 * 1024
+MAX_SCRIPT_ARGUMENTS = 64
+MAX_SCRIPT_ARGUMENT_BYTES = 4 * 1024
 MAX_STDOUT_BYTES = 64 * 1024
 MAX_STDERR_BYTES = 64 * 1024
 MAX_TRACEBACK_BYTES = 32 * 1024
@@ -68,6 +76,48 @@ class SandboxError(BaseModel):
         return value
 
 
+class SandboxInputFile(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    path: str
+    content_base64: str
+
+    @field_validator("path")
+    @classmethod
+    def validate_path(cls, value: str) -> str:
+        normalized = value.replace("\\", "/").strip()
+        path = PurePosixPath(normalized)
+        if (
+            not normalized
+            or normalized.startswith("/")
+            or path.is_absolute()
+            or not path.parts
+            or ".." in path.parts
+            or path.parts[0] in {"outputs", "inputs.json", "main.py"}
+        ):
+            raise ValueError("sandbox input file path is unsafe")
+        return path.as_posix()
+
+    @field_validator("content_base64")
+    @classmethod
+    def validate_base64(cls, value: str) -> str:
+        try:
+            base64.b64decode(value.encode("ascii"), validate=True)
+        except (UnicodeEncodeError, binascii.Error) as exc:
+            raise ValueError("sandbox input file is not valid base64") from exc
+        return value
+
+    @classmethod
+    def from_bytes(cls, path: str, content: bytes) -> SandboxInputFile:
+        return cls(
+            path=path,
+            content_base64=base64.b64encode(content).decode("ascii"),
+        )
+
+    def decoded(self) -> bytes:
+        return base64.b64decode(self.content_base64.encode("ascii"), validate=True)
+
+
 class ExecuteRequest(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -75,6 +125,9 @@ class ExecuteRequest(BaseModel):
     code: str
     inputs: dict[str, JsonValue] = Field(default_factory=dict)
     timeout_ms: int = Field(default=DEFAULT_TIMEOUT_MS, gt=0)
+    mode: ExecuteMode = "expression"
+    arguments: tuple[str, ...] = ()
+    files: tuple[SandboxInputFile, ...] = ()
 
     @field_validator("code")
     @classmethod
@@ -89,6 +142,30 @@ class ExecuteRequest(BaseModel):
         if _json_utf8_byte_length(value) > MAX_INPUTS_JSON_BYTES:
             raise ValueError(f"inputs JSON exceeds {MAX_INPUTS_JSON_BYTES} bytes")
         return value
+
+    @field_validator("arguments")
+    @classmethod
+    def validate_arguments(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        if len(value) > MAX_SCRIPT_ARGUMENTS:
+            raise ValueError(f"arguments exceed {MAX_SCRIPT_ARGUMENTS} items")
+        for item in value:
+            if "\x00" in item or _utf8_byte_length(item) > MAX_SCRIPT_ARGUMENT_BYTES:
+                raise ValueError("script argument is invalid or too large")
+        return value
+
+    @model_validator(mode="after")
+    def validate_mode_files(self) -> ExecuteRequest:
+        if self.mode == "expression" and (self.arguments or self.files):
+            raise ValueError("expression mode does not accept arguments or files")
+        if len(self.files) > MAX_SCRIPT_RESOURCE_FILES:
+            raise ValueError(f"files exceed {MAX_SCRIPT_RESOURCE_FILES} items")
+        paths = [item.path for item in self.files]
+        if len(paths) != len(set(paths)):
+            raise ValueError("sandbox input file paths must be unique")
+        total = sum(len(item.decoded()) for item in self.files)
+        if total > MAX_SCRIPT_RESOURCE_BYTES:
+            raise ValueError(f"sandbox input files exceed {MAX_SCRIPT_RESOURCE_BYTES} bytes")
+        return self
 
 
 class ExecuteResult(BaseModel):

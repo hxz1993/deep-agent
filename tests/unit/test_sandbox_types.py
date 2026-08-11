@@ -9,7 +9,9 @@ from deep_agent.sandbox.types import (
     ExecuteResult,
     MAX_CODE_BYTES,
     MAX_INPUTS_JSON_BYTES,
+    MAX_SCRIPT_RESOURCE_BYTES,
     MAX_STDOUT_BYTES,
+    SandboxInputFile,
     SandboxError,
     TruncationMetadata,
 )
@@ -43,6 +45,42 @@ class SandboxTypesTests(unittest.TestCase):
         )
         self.assertEqual(request.timeout_ms, DEFAULT_TIMEOUT_MS)
         self.assertEqual(DEFAULT_TIMEOUT_MS, 30_000)
+
+    def test_script_request_accepts_only_controlled_relative_files(self) -> None:
+        request = ExecuteRequest(
+            request_id="script-1",
+            mode="script",
+            code="pass",
+            arguments=("--input", "inputs.json"),
+            files=(SandboxInputFile.from_bytes("assets/input.txt", b"ok"),),
+        )
+        self.assertEqual(request.files[0].decoded(), b"ok")
+        with self.assertRaises(ValueError):
+            SandboxInputFile.from_bytes("../secret", b"bad")
+        with self.assertRaises(ValueError):
+            SandboxInputFile.from_bytes("outputs/result.json", b"bad")
+
+    def test_expression_mode_rejects_script_inputs(self) -> None:
+        with self.assertRaises(ValueError):
+            ExecuteRequest(
+                request_id="expression-files",
+                code="pass",
+                files=(SandboxInputFile.from_bytes("assets/input.txt", b"ok"),),
+            )
+
+    def test_script_request_rejects_oversized_resource_payload(self) -> None:
+        with self.assertRaises(ValueError):
+            ExecuteRequest(
+                request_id="script-files",
+                mode="script",
+                code="pass",
+                files=(
+                    SandboxInputFile.from_bytes(
+                        "assets/input.bin",
+                        b"x" * (MAX_SCRIPT_RESOURCE_BYTES + 1),
+                    ),
+                ),
+            )
 
     def test_execute_result_rejects_oversized_stdout(self) -> None:
         with self.assertRaises(ValueError):

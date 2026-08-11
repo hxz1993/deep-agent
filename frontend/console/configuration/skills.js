@@ -81,10 +81,20 @@ const skillsAdmin = {
           const isScript = resource.category === "script";
           const canRead = resource.readable && !isScript;
           const category = resource.category === "reference" ? "Reference" : resource.category === "asset" ? "Asset" : "Script";
+          const readLabels = {
+            text: "文本可读",
+            docx: "Word 可读",
+            xlsx: "Excel 可读",
+          };
+          const unreadableStatus = resource.path?.toLowerCase().endsWith(".pdf")
+            ? "PDF 暂不可读"
+            : resource.path?.toLowerCase().endsWith(".pptx")
+              ? "PPTX 暂不可读"
+              : "当前暂不可读";
           return `<li class="skill-resource-row${isScript ? " is-script" : ""}">
             <span><i data-lucide="${isScript ? "file-code-2" : resource.category === "reference" ? "file-text" : "file"}"></i><code>${escapeHtml(resource.path)}</code></span>
             <span class="skill-resource-meta">${category} · ${escapeHtml(resource.mime)} · ${this.formatBytes(resource.size)}</span>
-            ${canRead ? `<button class="btn-link" type="button" data-read-resource="${escapeHtml(resource.path)}">查看</button>` : `<span class="skill-resource-lock">${isScript ? "已保存，当前不可读取或执行" : "二进制 Asset，当前不可由模型读取"}</span>`}
+            ${canRead ? `<span class="skill-resource-access">${escapeHtml(readLabels[resource.read_format] || "可读")}</span><button class="btn-link" type="button" data-read-resource="${escapeHtml(resource.path)}">查看</button>` : isScript ? "" : `<span class="skill-resource-lock">${escapeHtml(unreadableStatus)}</span>`}
           </li>`;
         }).join("")
       : `<li class="skill-resource-empty">该 Skill 没有附加资源</li>`;
@@ -105,10 +115,9 @@ const skillsAdmin = {
         <div><dt>包格式</dt><dd>${escapeHtml(skill.schema_version)}</dd></div>
         <div><dt>References</dt><dd>${Number(skill.reference_count || 0)}</dd></div>
         <div><dt>Assets</dt><dd>${Number(skill.asset_count || 0)}</dd></div>
-        <div><dt>脚本</dt><dd>${Number(skill.script_count || 0)}${skill.contains_scripts ? "（不可执行）" : ""}</dd></div>
+        <div><dt>脚本</dt><dd>${Number(skill.script_count || 0)}</dd></div>
         <div><dt>更新时间</dt><dd>${escapeHtml(formatDate(skill.updated_at))}</dd></div>
       </dl>
-      ${skill.contains_scripts ? `<div class="skill-security-note"><i data-lucide="shield-alert"></i><span>包内含脚本；当前版本只保存，不向模型披露、读取或执行。</span></div>` : ""}
       <section class="skill-detail-section"><h4>资源</h4><ul class="skill-resource-list">${resourceRows}</ul></section>
       <details class="skill-manifest"><summary>Manifest</summary><pre>${escapeHtml(JSON.stringify(skill.manifest || {}, null, 2))}</pre></details>
       <section class="skill-resource-preview hidden" id="skillResourcePreview"></section>`;
@@ -145,8 +154,9 @@ const skillsAdmin = {
     preview.classList.remove("hidden");
     preview.innerHTML = `<div class="skill-list-state"><span class="loading-spinner"></span>正在读取资源…</div>`;
     try {
-      const page = await apiFetch(`/api/v1/skills/${encodeURIComponent(code)}/resources/${path.split("/").map(encodeURIComponent).join("/")}?limit=32768`);
-      preview.innerHTML = `<header><strong>${escapeHtml(path)}</strong><button class="icon-btn" type="button" aria-label="关闭资源预览"><i data-lucide="x"></i></button></header><pre>${escapeHtml(page.content)}</pre>${page.has_more ? `<p>内容较长，仅展示前 32 KiB。</p>` : ""}`;
+      const page = await apiFetch(`/api/v1/skills/${encodeURIComponent(code)}/resources/${path.split("/").map(encodeURIComponent).join("/")}`);
+      const unitLabels = { character: "字符", block: "逻辑块", row: "行" };
+      preview.innerHTML = `<header><strong>${escapeHtml(path)}</strong><button class="icon-btn" type="button" aria-label="关闭资源预览"><i data-lucide="x"></i></button></header><p class="field-hint">${escapeHtml(page.format.toUpperCase())} · ${Number(page.returned_count || 0)} ${escapeHtml(unitLabels[page.unit] || page.unit)}</p><pre>${escapeHtml(page.content)}</pre>${page.has_more ? `<p>内容较长，可由 Agent 使用 next_offset=${escapeHtml(page.next_offset)} 继续分页读取。</p>` : ""}`;
       preview.querySelector("button")?.addEventListener("click", () => preview.classList.add("hidden"));
       window.lucide?.createIcons();
     } catch (error) {

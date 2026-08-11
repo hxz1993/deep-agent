@@ -3,7 +3,7 @@
 DeepAgent 是基于 FastAPI、Pydantic AI 和 SQLAlchemy 的多用户 Agent 服务，并
 随服务发布一体化运维控制台。
 
-当前产品版本为 `0.3.21`。`deep_agent.__version__` 是唯一代码版本来源，FastAPI、
+当前产品版本为 `0.3.22`。`deep_agent.__version__` 是唯一代码版本来源，FastAPI、
 `GET /info` 和 Console 顶部版本徽标均读取该值。后续正式发布默认递增
 `MAJOR.MINOR.PATCH` 的第三位，只有明确规划重大版本时才调整前两位。产品版本不通过
 环境变量或数据库覆盖，也不等同于 Alembic 数据库结构 revision。
@@ -71,7 +71,7 @@ v0.3.17 为每个 Session 建立稳定 `conversation_id`，为每次发送、Def
 v0.3.18 将 Skill 与 ToolPackage 分离，新增 Alembic 003 的 `skill_packages` 和 `agents.skills`。
 上传 ZIP 原包保存在平台文件服务，数据库只保存 File ID、Manifest 和资源索引；Harness 0.18
 初始仅披露 Skill 名称与描述，模型调用 `load_capability` 后才加载完整 `SKILL.md`。References 与
-Assets 通过只读分页工具按需访问，包内脚本只保存且禁止模型读取或执行。
+Assets 通过授权分页工具按需访问；脚本正文不能读取，只有生产就绪的隔离 Backend 才能执行。
 
 v0.3.19 将 URL MCP 的“发现”和“执行”拆开：管理员检测时把工具定义保存到现有 inspection
 快照，聊天 Run 直接使用快照完成 Tool Search 和 Schema 披露，只有模型真实调用工具时才按
@@ -93,6 +93,13 @@ v0.3.21 在 Console 增加独立只读的“系统工具”目录，按 Skill、
 展示运行时自动注入工具的来源与触发条件，但不把它们加入 Agent 能力配置或数据库。Python
 沙箱说明同步收口：预装三方包从当前 Sandbox Profile 动态生成，明确完整 `code/inputs`、最后
 一行结构化返回和大表摘要规则，并提供可直接参考的最小代码示例。Alembic 仍为 `003`。
+
+v0.3.22 复用会话附件解析内核，让已授权 Skill 的文本、DOCX 和 XLSX 资源通过统一分页工具按需
+读取；历史安装包无需重装即可按路径和 MIME 识别 Office 资源。Sandbox 内部增加受控脚本请求
+协议，只允许显式选择同一 Skill 的 Python 脚本、输入和资源，并只从 `outputs/result.json`读取
+正式结构化结果。当前 `subprocess-dev` 仍为非生产 Backend，模型不会看到脚本执行工具；只有
+安全 Backend 报告 `production_ready=true` 且 Agent 同时启用目标 Skill 与 `builtin:sandbox`
+时才条件注入。Alembic 仍为 `003`。
 
 ## 项目结构
 

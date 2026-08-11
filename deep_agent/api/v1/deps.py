@@ -16,7 +16,8 @@ from deep_agent.capabilities.mcp.resolver import load_mcp_rows, resolve_mcp_tool
 from deep_agent.capabilities.catalog import invalid_tool_package_codes
 from deep_agent.capabilities.mcp.resources import build_mcp_resource_toolset
 from deep_agent.capabilities.ui.registry import prepare_ui_tool_packages_for_spec
-from deep_agent.skills.runtime import resolve_skills_for_run
+from deep_agent.skills.runtime import ResolvedSkills, resolve_skills_for_run
+from deep_agent.skills.script_tool import build_skill_script_toolset
 from deep_agent.skills.tools import build_skill_resource_toolset
 from deep_agent.core.context import AppContext
 from deep_agent.core.exceptions import AgentNotFoundError, LlmModelNotFoundError
@@ -32,6 +33,24 @@ def _model_settings_for_spec(spec: AgentSpec) -> ModelSettings | None:
     if not values:
         return None
     return values
+
+
+def _skill_script_execution_available(
+    spec: AgentSpec,
+    ctx: AppContext,
+    resolved_skills: ResolvedSkills,
+) -> bool:
+    sandbox_selected = any(
+        package.code == "builtin:sandbox"
+        for package in ctx.registry.selected(spec.capabilities)
+    )
+    return bool(
+        sandbox_selected
+        and ctx.sandbox_backend is not None
+        and ctx.sandbox_health is not None
+        and ctx.sandbox_health.production_ready
+        and resolved_skills.scripts
+    )
 
 
 async def build_runner(
@@ -117,7 +136,24 @@ async def _build_runner_from_spec(
         runtime=ctx.skill_runtime,
         request_headers=request_headers or {},
     )
-    skill_resource_toolset = build_skill_resource_toolset(resolved_skills.resources)
+    script_execution_available = _skill_script_execution_available(
+        spec,
+        ctx,
+        resolved_skills,
+    )
+    skill_resource_toolset = build_skill_resource_toolset(
+        resolved_skills.resources,
+        scripts_executable=script_execution_available,
+    )
+    skill_script_toolset = (
+        build_skill_script_toolset(
+            resolved_skills.scripts,
+            backend=ctx.sandbox_backend,
+            timeout_sec=float(OPTION.agent.sandbox_timeout),
+        )
+        if script_execution_available and ctx.sandbox_backend is not None
+        else None
+    )
 
     spec = replace(spec, instructions=augment_instructions_with_capabilities(spec))
     if resolved_skills.unavailable:
@@ -145,6 +181,7 @@ async def _build_runner_from_spec(
         dynamic_ui_packages=dynamic_ui_packages,
         mcp_resource_toolset=mcp_resource_toolset,
         skill_resource_toolset=skill_resource_toolset,
+        skill_script_toolset=skill_script_toolset,
         skill_capability=resolved_skills.capability,
         context_compaction=context_compaction,
         mcp_server_names=[

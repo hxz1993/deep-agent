@@ -10,11 +10,12 @@
 
 | 阶段 | 状态 | 备注 |
 | --- | --- | --- |
-| A · `subprocess-dev` | **完成** | 契约、Worker、Toolset、health、独立 venv、`pydata`、rlimit、硬门槛、soft guardrails |
+| A · `subprocess-dev` | **完成** | 表达式与Skill脚本内部协议、Worker、Toolset、health、独立 venv、`pydata`、rlimit、硬门槛、soft guardrails；脚本工具保持不披露 |
 | B · 资格验证 | **探针代码完成**；WSL 预演 **通过**；K8s 节点签字 **未完成** | `scripts/sandbox_probe/` · [`wsl-prequalification.md`](wsl-prequalification.md) |
-| C · 安全 Backend | **阻塞于 B（K8s 签字）** | 凭 B 报告定 Adapter，禁止臆测实现 |
+| C · 安全 Backend | **阻塞于 B（K8s 签字）** | 凭 B 报告实现 go-judge Adapter并开放Skill脚本，禁止臆测实现 |
 
-**下一步：** 在目标 K8s dev sidecar Pod 跑探针 → 归档 JSON → 选型 → 再开 C。
+**下一步：** 在目标 K8s dev sidecar Pod 跑探针 → 归档 `selection_eligible=true` JSON → 实现
+`GoJudgeBackend` → 同时承载 `execute_python` 与Skill脚本。任何故障不得回退 `subprocess-dev`。
 
 ---
 

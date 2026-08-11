@@ -6,6 +6,9 @@ import stat
 import unittest
 import zipfile
 
+from docx import Document
+from openpyxl import Workbook
+
 from deep_agent.skills.catalog import list_builtin_skills
 from deep_agent.skills.package import SkillPackageError, parse_skill_zip
 
@@ -15,6 +18,7 @@ def skill_zip(
     name: str = "example-skill",
     wrapper: bool = True,
     scripts: bool = False,
+    office: bool = False,
 ) -> bytes:
     buffer = io.BytesIO()
     prefix = f"{name}/" if wrapper else ""
@@ -29,6 +33,21 @@ def skill_zip(
             prefix + "assets/image.png",
             b"\x89PNG\r\n\x1a\n",
         )
+        if office:
+            document = Document()
+            document.add_paragraph("Skill Word 第一段")
+            document.add_paragraph("Skill Word 第二段")
+            docx_output = io.BytesIO()
+            document.save(docx_output)
+            archive.writestr(prefix + "references/guide.docx", docx_output.getvalue())
+
+            workbook = Workbook()
+            workbook.active.title = "数据"
+            workbook.active.append(["名称", "值"])
+            workbook.active.append(["甲", 1])
+            xlsx_output = io.BytesIO()
+            workbook.save(xlsx_output)
+            archive.writestr(prefix + "assets/template.xlsx", xlsx_output.getvalue())
         if scripts:
             archive.writestr(prefix + "scripts/run.py", "raise SystemExit('never execute')")
     return buffer.getvalue()

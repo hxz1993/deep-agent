@@ -48,6 +48,7 @@ frontend/
 | 能力面板 | `GET /api/v1/tools` |
 | 配置 | `localStorage` 只保存调试 App；全局环境配置只读展示，身份和鉴权由平台提供 |
 | 内置工具目录 | 配置中心只读展示 `builtin:general`、`builtin:sandbox`、`builtin:attachment`；Agent 按包选择 |
+| 系统工具目录 | 配置中心按 Skill、MCP 工具发现、MCP Resource 分组展示自动注入工具；不参与 Agent 配置 |
 | Skill | 独立 Skill 列表与详情；上传包安装/替换/启停/下载/删除；Agent 使用独立 `skills` 列表选择 |
 | 一体化控制台 | `/console/`；工作台、配置和诊断的唯一入口 |
 
@@ -89,8 +90,9 @@ Agent 编辑弹窗的系统提示词标题栏显示“字符数 / 预估 Token�
 - SSE 解析、HITL 参数归一化和 Schema 文本校验分别位于 `protocol.js`、`hitl.js`、`schema-editor.js`，可由 Node 内置测试独立验证。
 - 控制台测试：`node --test tests/frontend/console/*.test.mjs`。
 - 配置中心按“Agent 设置 / 系统设置 / 辅助资源”分组；系统设置包含辅助模型、全局配置和只读数据库连接。数据库连接页通过 `GET /api/v1/database-info` 只展示类型、主机、端口、库名或 SQLite 文件名，不返回凭据、连接参数或本地完整路径。
-- “内置工具”位于模型之后、MCP 服务之前，只读展示代码随版本发布的通用工具与
-  附件读取工具包；页面没有注册、编辑、删除或全局启停入口。
+- “内置工具”位于模型之后，只读展示代码随版本发布的通用工具与附件读取工具包；紧随其后的
+  “系统工具”只读展示运行时自动注入工具的来源和条件。两个页面都没有注册、编辑、删除或全局
+  启停入口，系统工具也不得进入 Agent 能力勾选。
 - Console 顶部只展示一处产品版本，通过同源 `GET /info` 读取
   `deep_agent.__version__`；配置中心的数据库结构 revision 是独立运维信息。
 - 配置中心左侧页签只在当前前端页面的模块内存中保留；工作台与配置中心之间切换会恢复上次页签，浏览器刷新后重新回到 Agent，不写入 LocalStorage 或后端。

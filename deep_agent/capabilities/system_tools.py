@@ -1,0 +1,77 @@
+from __future__ import annotations
+
+from deep_agent.schemas.system_tool import SystemToolDescription, SystemToolDomain
+
+__all__ = ["list_system_tool_domains"]
+
+
+_SYSTEM_TOOL_DOMAINS = (
+    SystemToolDomain(
+        code="runtime:skill",
+        label="Skill",
+        description="按需加载 Agent 已授权的 Skill 说明和资源。",
+        tools=(
+            SystemToolDescription(
+                name="load_capability",
+                source="Pydantic AI Harness",
+                injection_condition="Agent 已配置至少一个当前可用的 Skill",
+                description="按需加载一个已授权 Skill 的完整 SKILL.md 说明。",
+            ),
+            SystemToolDescription(
+                name="list_skill_resources",
+                source="DeepAgent",
+                injection_condition="Agent 已配置至少一个含 Reference 或 Asset 的可用 Skill",
+                description="列出已授权 Skill 可供模型读取的 Reference 和 Asset。",
+            ),
+            SystemToolDescription(
+                name="read_skill_resource",
+                source="DeepAgent",
+                injection_condition="Agent 已配置至少一个含 Reference 或 Asset 的可用 Skill",
+                description="分页读取已授权 Skill 中允许访问的文本资源。",
+            ),
+        ),
+    ),
+    SystemToolDomain(
+        code="runtime:mcp-tool-search",
+        label="MCP 工具发现",
+        description="在已授权但延迟披露的 MCP 工具中查找当前任务需要的工具。",
+        tools=(
+            SystemToolDescription(
+                name="search_tools",
+                source="Pydantic AI",
+                injection_condition="已授权 MCP 存在尚未完整披露的工具",
+                description="搜索延迟披露的 MCP 工具，并在后续模型请求中加载命中工具。",
+            ),
+        ),
+    ),
+    SystemToolDomain(
+        code="runtime:mcp-resource",
+        label="MCP Resource",
+        description="按需访问已授权 URL MCP 提供的 Resource 和 Resource Template。",
+        tools=(
+            SystemToolDescription(
+                name="list_mcp_resources",
+                source="DeepAgent",
+                injection_condition="Agent 已选择检测到 Resource 能力的可用 URL MCP",
+                description="列出指定 MCP Server 当前提供的 Resource。",
+            ),
+            SystemToolDescription(
+                name="list_mcp_resource_templates",
+                source="DeepAgent",
+                injection_condition="Agent 已选择检测到 Resource 能力的可用 URL MCP",
+                description="列出指定 MCP Server 当前提供的 Resource Template。",
+            ),
+            SystemToolDescription(
+                name="read_mcp_resource",
+                source="DeepAgent",
+                injection_condition="Agent 已选择检测到 Resource 能力的可用 URL MCP",
+                description="读取指定 MCP Server 中的 Resource 内容。",
+            ),
+        ),
+    ),
+)
+
+
+def list_system_tool_domains() -> tuple[SystemToolDomain, ...]:
+    """Return the ordered, code-owned runtime system-tool catalog."""
+    return _SYSTEM_TOOL_DOMAINS

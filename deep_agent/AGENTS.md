@@ -250,6 +250,13 @@ XML + JSON 投影。业务字段语义仍由具体 Agent Prompt 负责。
 `builtin:attachment` 提供附件读取，两者默认关闭。每个包严格包装一个 Toolset。内置包由代码随版本发布，
 不在数据库注册；配置中心只读展示，Agent 仍按整包选择。
 
+### 系统工具目录
+
+`GET /api/v1/system-tools` 返回由代码维护的只读运行时目录，按 Skill、MCP Tool Search 和
+MCP Resource 分组说明工具来源与自动注入条件。该接口不读取数据库、不构造 Agent Run；
+`runtime:*` 仅是 Console 展示编码，不得注册到 ToolPackage Registry、`/tools` 或
+`agents.capabilities`。
+
 ### Skill
 
 - Skill 不属于 ToolPackage，Agent 通过 `agents.skills` 独立选择。

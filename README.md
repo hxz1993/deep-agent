@@ -3,7 +3,7 @@
 DeepAgent 是基于 FastAPI、Pydantic AI 和 SQLAlchemy 的多用户 Agent 服务，并
 随服务发布一体化运维控制台。
 
-当前产品版本为 `0.3.20`。`deep_agent.__version__` 是唯一代码版本来源，FastAPI、
+当前产品版本为 `0.3.21`。`deep_agent.__version__` 是唯一代码版本来源，FastAPI、
 `GET /info` 和 Console 顶部版本徽标均读取该值。后续正式发布默认递增
 `MAJOR.MINOR.PATCH` 的第三位，只有明确规划重大版本时才调整前两位。产品版本不通过
 环境变量或数据库覆盖，也不等同于 Alembic 数据库结构 revision。
@@ -84,6 +84,11 @@ v0.3.20 将上传 Skill 的运行副本收敛为每个 Pod 的 `runtime-skills/<
 内容 Hash保留多份目录或逐轮访问平台文件服务。单个 Skill 同步失败只会让该 Skill 暂时不可用，
 不会阻塞其他 Skill、工具和普通回答；Console 与 `final.context.skills` 提供脱敏诊断。Alembic
 仍为 `003`。
+
+v0.3.21 在 Console 增加独立只读的“系统工具”目录，按 Skill、MCP 工具发现和 MCP Resource
+展示运行时自动注入工具的来源与触发条件，但不把它们加入 Agent 能力配置或数据库。Python
+沙箱说明同步收口：预装三方包从当前 Sandbox Profile 动态生成，明确完整 `code/inputs`、最后
+一行结构化返回和大表摘要规则，并提供可直接参考的最小代码示例。Alembic 仍为 `003`。
 
 ## 项目结构
 
@@ -172,6 +177,8 @@ DeepAgent 当前支持：
   - `builtin:general`（通用工具）：默认启用，只包含 `get_current_time`。
   - `builtin:sandbox`（Python 沙箱）：默认关闭，只包含 `execute_python`。
   - `builtin:attachment`（附件读取）：默认关闭，包含 TXT、DOCX、XLSX 按需读取工具。
+- 系统工具不是 ToolPackage。`load_capability`、Skill Resource、`search_tools` 和 MCP Resource
+  由运行时按 Agent/Run 条件自动注入，只在 Console 的只读“系统工具”目录中说明。
 - Skill 不再属于 ToolPackage。Agent 通过独立 `skills` 列表选择，Harness 按需加载 `SKILL.md`；
   Skill 不能绕过 `capabilities` 获得 MCP 或其他工具。
 - `mcp:<name>`：URL、stdio 或 builtin MCP。

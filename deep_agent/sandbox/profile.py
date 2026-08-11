@@ -30,6 +30,7 @@ __all__ = [
     "ResolvedSandboxProfile",
     "SandboxProfileManifest",
     "build_profile_probe_code",
+    "format_python_tool_instructions",
     "format_profile_tool_instructions",
     "load_sandbox_profile",
     "probe_sandbox_profile",
@@ -167,18 +168,24 @@ def resolve_sandbox_profile(
     return ResolvedSandboxProfile(manifest=manifest, probe=probe)
 
 
-def format_profile_tool_instructions(resolved: ResolvedSandboxProfile) -> str:
-    packages = ", ".join(resolved.package_display_names)
-    notes = "\n".join(f"- {line}" for line in resolved.manifest.model_notes)
+def format_python_tool_instructions(package_names: tuple[str, ...]) -> str:
+    packages = "、".join(package_names) if package_names else "当前 Profile 声明的三方包"
     return (
-        "每次调用 execute_python 都会启动全新的 Python 执行环境，不保留变量、"
-        "函数或 import。需要继续计算时，必须再次传入完整代码和 inputs。\n"
-        f"当前 Profile（{resolved.manifest.id}）预装三方库：{packages}。"
-        "未列出的三方库会 ModuleNotFoundError；不支持 pip install。标准库可用。\n"
-        f"{notes}\n"
-        "结构化返回值必须写在代码最后一行作为表达式，pandas DataFrame/Series 同样以表达式结尾，"
-        "沙箱会把预览写入 result。"
+        "在全新的 Python 环境中执行数据计算。每次调用需提供完整 code 和 inputs。"
+        f"预装 {packages}，常用标准库可用，不支持 pip install。"
+        "请将正式结果作为最后一行表达式返回到 result；print 仅用于少量 stdout 诊断。"
+        "优先返回 dict/list 等结构化结果，大表返回汇总或必要预览。\n\n"
+        "示例：\n"
+        "```python\n"
+        'values = inputs["values"]\n'
+        'print(f"共 {len(values)} 项")\n'
+        '{"count": len(values), "total": sum(values)}\n'
+        "```"
     )
+
+
+def format_profile_tool_instructions(resolved: ResolvedSandboxProfile) -> str:
+    return format_python_tool_instructions(resolved.package_display_names)
 
 
 class ProfileMismatchError(RuntimeError):

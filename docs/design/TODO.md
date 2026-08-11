@@ -87,7 +87,6 @@
 | ID | 暂缓事项 | 已确认结论 | 重新启动条件 | 来源 |
 | --- | --- | --- | --- | --- |
 | `CONSOLE-201` | 只读运行检查器剩余能力 | Console 已能查看 Context Reference 安全 JSON；Markdown 原文、原始 SSE、History 对照和工具详情主要服务 UI/协议调试 | 调试渲染或 SSE/History 一致性成为高频工作，并能锁定最小只读范围 | [运行检查器](02-operations-console/operations-console-design.md#运行检查器) |
-| `CONSOLE-202` | 只读运行时系统工具目录 | `load_capability`、Skill Resource、MCP Resource 和 `search_tools` 属于按 Agent/Run 条件自动注入的系统能力，不是可配置的 `builtin:*` ToolPackage；未来只在 Console “内置工具”中增加独立只读分组，可使用 `runtime:*` 展示编码，但不得进入 Agent 勾选、权限或持久化结构 | 管理员需要稳定查看模型实际可能获得的系统工具、触发条件和来源，且该信息能明显改善工具披露或 Token 排查 | [工具包 Console](11-tool-packages/tool-packages-design.md#9-console) |
 | `MODEL-101` | 显式 Provider Prompt Cache | DeepSeek 自动缓存无需改请求，命中观测并入 `OBS-101`；`CachePoint`、cache key、TTL 均是 Provider 专属配置，不存在跨 Provider 通用开关 | 模型目录中的某个 Provider 明确支持显式缓存，且能观测成本或首 Token 延迟收益 | [Pydantic AI 采用项](03-context-compaction/context-compaction-research.md#pydantic-ai-226-原生能力采用项) |
 
 ## 已关闭
@@ -136,6 +135,7 @@
 | `TOOL-203` | `cube_query_data` 与 `dimension_query_members` 选择性披露可信 Return Schema；延迟工具加载前零额外成本 | v0.3.17，[工具返回 Schema](05-tool-optimization/tool-optimization-design.md#84-tool-return-schema) |
 | `SKILL-001` | Skill 与 ToolPackage 分离；上传安装、Agent 授权、Harness `load_capability` 渐进披露、References/Assets 分页读取和脚本隔离；每个 Pod仅保留按 code组织的一份当前运行目录，管理操作同步、普通 Run本地读取、单 Skill故障隔离 | v0.3.18～v0.3.20，[Skill 体系](12-agent-skills/skill-system-design.md) |
 | `MCP-SNAPSHOT` | URL MCP 检测保存完整工具快照，聊天按快照披露并在首次真实调用时建连；缺快照不阻塞 Run，单 Server 连接失败转为 `ToolFailed` | v0.3.19，[工具检索](13-tool-discovery/tool-discovery-design.md) |
+| `CONSOLE-202` | 独立只读系统工具目录按 Skill、MCP 工具发现和 MCP Resource 展示来源、自动注入条件与说明；`runtime:*` 只作展示，不进入 Agent 能力或数据库 | v0.3.21，[工具包 Console](11-tool-packages/tool-packages-design.md#9-console) |
 | Harness 确定性压缩 tiers | `ClampOversizedMessages`、`ClearToolResults`、`DeduplicateFileReads` 已复用 | 当前基线，[压缩研究](03-context-compaction/context-compaction-research.md#harness-实验结论) |
 | 官方 DeepSeek Provider | 使用 Pydantic AI 官方 Provider/Profile，不保留自定义模型循环 | v0.3.9+，[框架能力台账](14-framework-capabilities/framework-capabilities-baseline.md#41-已经采用) |
 

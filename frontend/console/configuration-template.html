@@ -145,6 +145,20 @@
       </div>
     </section>
 
+    <!-- Read-only runtime system tools panel -->
+    <section class="panel system-tools-panel" id="panel-system-tools">
+      <div class="panel-toolbar">
+        <div>
+          <h2>系统工具</h2>
+          <p class="panel-subtitle">系统工具由 DeepAgent 按当前 Agent 和 Run 条件自动注入，不参与 Agent 能力配置。</p>
+        </div>
+        <button class="btn" type="button" id="refreshSystemToolsBtn"><i data-lucide="refresh-cw"></i>重新加载</button>
+      </div>
+      <div class="system-tool-domains" id="systemToolDomains" aria-live="polite">
+        <div class="system-tools-state">正在加载系统工具…</div>
+      </div>
+    </section>
+
     <!-- Auxiliary models panel -->
     <section class="panel" id="panel-auxiliary-models">
       <div class="panel-toolbar">

@@ -252,6 +252,22 @@ class SandboxCapabilityTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(capability.default_enabled)
         self.assertEqual(capability.source, "builtin")
         self.assertEqual({item.name for item in capability.tools}, {"execute_python"})
+        self.assertEqual(
+            capability.tools[0].description,
+            "在全新的无状态 Python 环境中执行一次数据计算。",
+        )
+
+    async def test_model_instructions_are_concise_and_include_fixed_example(self) -> None:
+        backend = FakeSandboxBackend()
+        capability = build_python_sandbox_tool_package(backend, timeout_sec=30.0)
+        instruction_parts = await capability.toolset.get_instructions(_context())
+        instructions = "\n".join(part.content for part in instruction_parts)
+
+        self.assertIn("预装 numpy、pandas、pydantic", instructions)
+        self.assertIn('values = inputs["values"]', instructions)
+        self.assertIn('{"count": len(values), "total": sum(values)}', instructions)
+        self.assertNotIn("stderr", instructions)
+        self.assertNotIn("truncated", instructions)
 
     async def test_only_explicit_selection_loads_tool(self) -> None:
         backend = FakeSandboxBackend()

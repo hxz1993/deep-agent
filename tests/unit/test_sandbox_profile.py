@@ -128,6 +128,12 @@ class SandboxProfileInstructionsTests(unittest.TestCase):
         self.assertNotIn("duckdb", text)
         self.assertIn("pip install", text)
         self.assertIn("全新", text)
+        self.assertIn('values = inputs["values"]', text)
+        self.assertIn('print(f"共 {len(values)} 项")', text)
+        self.assertIn('{"count": len(values), "total": sum(values)}', text)
+        self.assertIn("最后一行表达式返回到 result", text)
+        self.assertNotIn("stderr", text)
+        self.assertNotIn("truncated", text)
 
 
 if __name__ == "__main__":

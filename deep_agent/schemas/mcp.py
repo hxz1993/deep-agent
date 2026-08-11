@@ -30,6 +30,7 @@ McpInspectionStatus = Literal[
     "not_applicable",
 ]
 McpCapabilityStatus = Literal["supported", "unsupported", "error", "unknown"]
+McpToolSnapshotStatus = Literal["ready", "missing", "stale"]
 
 
 def normalize_mcp_name(value: str, *, field_name: str = "name") -> str:
@@ -54,10 +55,35 @@ class McpInspectionServer(BaseModel):
     instructions_available: bool = False
 
 
+class McpToolSnapshotDefinition(BaseModel):
+    """One raw MCP tool definition captured during explicit inspection."""
+
+    name: str
+    description: str | None = None
+    input_schema: dict[str, Any] = Field(default_factory=dict)
+    output_schema: dict[str, Any] | None = None
+    annotations: dict[str, Any] | None = None
+    task_support: Literal["forbidden", "optional", "required"] | None = None
+
+
+class McpToolSnapshot(BaseModel):
+    """Storage-only tool catalog used to disclose URL MCP tools without connecting."""
+
+    schema_version: Literal["1.0"] = "1.0"
+    server_instructions: str | None = None
+    definitions: list[McpToolSnapshotDefinition] = Field(default_factory=list)
+
+
 class McpToolsInspection(BaseModel):
     status: McpCapabilityStatus = "unknown"
     count: int = 0
     error: McpInspectionError | None = None
+    snapshot_status: McpToolSnapshotStatus = "missing"
+    snapshot_at: datetime | None = None
+    snapshot_hash: str | None = None
+    # Persisted inside ``mcp_servers.inspection`` but deliberately excluded from
+    # normal API serialization so the Console never downloads large schemas.
+    snapshot: McpToolSnapshot | None = Field(default=None, exclude=True)
 
 
 class McpResourcesInspection(BaseModel):
@@ -76,6 +102,13 @@ class McpInspection(BaseModel):
     tools: McpToolsInspection = Field(default_factory=McpToolsInspection)
     resources: McpResourcesInspection = Field(default_factory=McpResourcesInspection)
     error: McpInspectionError | None = None
+
+    def to_storage_value(self) -> dict[str, Any]:
+        """Serialize public inspection metadata plus the storage-only tool snapshot."""
+        value = self.model_dump(mode="json")
+        if self.tools.snapshot is not None:
+            value["tools"]["snapshot"] = self.tools.snapshot.model_dump(mode="json")
+        return value
 
     @classmethod
     def from_value(cls, value: Any, *, transport: str | None = None) -> "McpInspection":

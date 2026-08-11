@@ -37,7 +37,7 @@ async def _inspect_and_store(
     )
     updated = await store.update_inspection(
         row.name,
-        result.inspection.model_dump(mode="json"),
+        result.inspection.to_storage_value(),
     )
     return updated, result
 
@@ -139,7 +139,7 @@ async def create_mcp_server(
             candidate,
             request_headers=extract_forward_headers(request),
         )
-        inspection = result.inspection.model_dump(mode="json")
+        inspection = result.inspection.to_storage_value()
     try:
         row = await store.create_unique(body, inspection=inspection)
     except ValueError as exc:
@@ -161,14 +161,14 @@ async def update_mcp_server(
     candidate = _candidate_row(row, body)
     config_changed = bool({"transport", "config"} & body.model_fields_set)
     if config_changed:
-        candidate.inspection = mark_mcp_inspection_stale(row).model_dump(mode="json")
+        candidate.inspection = mark_mcp_inspection_stale(row).to_storage_value()
     inspection = candidate.inspection
     if _should_reinspect(row, body):
         result = await inspect_mcp_server(
             candidate,
             request_headers=extract_forward_headers(request),
         )
-        inspection = result.inspection.model_dump(mode="json")
+        inspection = result.inspection.to_storage_value()
     updated = await store.update(name, body, inspection=inspection)
     assert updated is not None
     return McpServerResponse.from_row(updated)

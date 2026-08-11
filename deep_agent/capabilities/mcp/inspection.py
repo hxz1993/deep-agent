@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 from datetime import datetime, timezone
 from time import perf_counter
 from typing import Any
@@ -19,6 +21,8 @@ from deep_agent.schemas.mcp import (
     McpInspectionResult,
     McpInspectionServer,
     McpResourcesInspection,
+    McpToolSnapshot,
+    McpToolSnapshotDefinition,
     McpToolsInspection,
     McpValueChange,
 )
@@ -47,6 +51,33 @@ def _previous_success_at(previous: McpInspection) -> datetime | None:
     return previous.previous_success_at
 
 
+def _tool_snapshot(tool_items: list[Any], *, instructions: str | None) -> tuple[McpToolSnapshot, str]:
+    definitions: list[McpToolSnapshotDefinition] = []
+    for tool in tool_items:
+        task_support = tool.execution.taskSupport if tool.execution else None
+        definitions.append(
+            McpToolSnapshotDefinition(
+                name=tool.name,
+                description=tool.description,
+                input_schema=tool.inputSchema,
+                output_schema=tool.outputSchema,
+                annotations=(tool.annotations.model_dump(mode="json") if tool.annotations else None),
+                task_support=task_support,
+            )
+        )
+    snapshot = McpToolSnapshot(
+        server_instructions=instructions or None,
+        definitions=definitions,
+    )
+    canonical = json.dumps(
+        snapshot.model_dump(mode="json"),
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return snapshot, hashlib.sha256(canonical).hexdigest()
+
+
 def mark_mcp_inspection_stale(row: McpServer) -> McpInspection:
     previous = McpInspection.from_value(
         getattr(row, "inspection", None),
@@ -56,6 +87,14 @@ def mark_mcp_inspection_stale(row: McpServer) -> McpInspection:
         update={
             "status": "stale",
             "previous_success_at": _previous_success_at(previous),
+            "tools": previous.tools.model_copy(
+                update={
+                    "snapshot_status": "stale",
+                    "snapshot_at": None,
+                    "snapshot_hash": None,
+                    "snapshot": None,
+                }
+            ),
             "error": None,
         }
     )
@@ -155,23 +194,43 @@ async def inspect_mcp_server(
                         error=error,
                     )
 
-                tools = McpToolsInspection(status="unsupported")
+                inspected_at = _utcnow()
+                empty_snapshot, empty_snapshot_hash = _tool_snapshot(
+                    [],
+                    instructions=client.instructions,
+                )
+                tools = McpToolsInspection(
+                    status="unsupported",
+                    snapshot_status="ready",
+                    snapshot_at=inspected_at,
+                    snapshot_hash=empty_snapshot_hash,
+                    snapshot=empty_snapshot,
+                )
                 resources = McpResourcesInspection(status="unsupported")
                 degraded = False
 
                 if client.capabilities.tools:
                     try:
                         tool_items = await client.list_tools()
+                        snapshot, snapshot_hash = _tool_snapshot(
+                            tool_items,
+                            instructions=client.instructions,
+                        )
                         tools = McpToolsInspection(
                             status="supported",
                             count=len(tool_items),
+                            snapshot_status="ready",
+                            snapshot_at=inspected_at,
+                            snapshot_hash=snapshot_hash,
+                            snapshot=snapshot,
                         )
                     except Exception as exc:
                         degraded = True
-                        tools = McpToolsInspection(
-                            status="error",
-                            count=previous.tools.count,
-                            error=_safe_error("tools/list", exc),
+                        tools = previous.tools.model_copy(
+                            update={
+                                "status": "error",
+                                "error": _safe_error("tools/list", exc),
+                            }
                         )
 
                 if client.capabilities.resources:
@@ -219,7 +278,7 @@ async def inspect_mcp_server(
 
                 return McpInspection(
                     status="degraded" if degraded else "healthy",
-                    checked_at=_utcnow(),
+                    checked_at=inspected_at,
                     duration_ms=_duration_ms(started),
                     previous_success_at=_previous_success_at(previous),
                     server=server,

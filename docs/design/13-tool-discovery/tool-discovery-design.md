@@ -53,7 +53,8 @@ Agent.capabilities
 
 ## 3. 通用词法检索
 
-每次 Run 复用 MCP `tools/list` 已获得的定义，构造纯内存文档：
+v0.3.19 起，URL MCP 在管理员“检测并更新”时执行 `tools/list`，把不含 Header、Token、Cookie
+和 MCP `_meta` 的定义保存到 `mcp_servers.inspection`。每次 Run 直接复用该快照构造纯内存文档：
 
 ```text
 MCP Server 名称
@@ -63,8 +64,8 @@ MCP Server 名称
 顶层参数描述
 ```
 
-不使用管理员自定义别名、业务标签或历史聊天生成标签，因此普通第三方 MCP 可以直接接入。Run 结束后
-文档释放，不产生 SQLite、向量库或跨 Worker 缓存。
+不使用管理员自定义别名、业务标签或历史聊天生成标签，因此普通第三方 MCP 可以直接接入。检索文档
+仍按 Run 构造并释放；数据库只保存检测事实，不增加向量库或跨 Worker 检索索引。
 
 第一版 `lexical_v1`：
 
@@ -124,7 +125,9 @@ Deferred 恢复时回退有效历史中的最近用户任务。检索不使用 `
 }
 ```
 
-MCP 配置页继续使用检测快照中的工具数量，不为展示额外连接远程 MCP。Agent 仍整包选择。
+MCP 配置页继续使用检测快照中的工具数量，不为展示额外连接远程 MCP。快照同时保存原始名称、说明、
+输入/返回 Schema、Annotations、Task Support 和 Server Instructions；公开列表只返回状态、时间、Hash
+和数量，不返回完整 Schema。Agent 仍整包选择。
 
 Console 展示“始终可用”“有附件时可用”“自动预选 Top 3 / 搜索 Top 5”。`search_tools` 在聊天中显示
 为默认折叠的“正在查找可用工具”，不是业务 MCP 卡片。
@@ -140,6 +143,10 @@ Console 展示“始终可用”“有附件时可用”“自动预选 Top 3 / 
 - Retriever 异常时恢复当前已授权 MCP 全量披露并记录诊断；不静默丢工具。
 - 全量披露本身超窗时沿用现有明确超窗错误。
 - 工具执行继续通过原 Toolset 的权限、Header、连接和错误处理。
+- URL MCP 只在首次真实工具调用时 initialize 并按当前请求注入 Header，同一 Run 内复用连接；初始化、
+  网络或 503 失败转换为脱敏 `ToolFailed`，本 Run 不重复等待。取消继续向外传播，不能被转成工具失败。
+- 历史 MCP 只有数量而没有定义快照时不进入工具目录；配置 URL/Header/请求上下文后旧快照立即失效，
+  重新检测成功前保持隐藏。检测同一配置失败时可以沿用上次成功快照。
 - 工具检索不替代高风险审批。
 
 ## 8. 评估与后续

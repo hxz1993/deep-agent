@@ -133,6 +133,7 @@
 | `OBS-101` / `TOOL-001` | 官方 Conversation/Run 标识、脱敏结构化生命周期日志、Usage/缓存 Token 和 Console 当前 Run 指标 | v0.3.17，[框架能力台账](14-framework-capabilities/framework-capabilities-baseline.md#41-已经采用) |
 | `TOOL-203` | `cube_query_data` 与 `dimension_query_members` 选择性披露可信 Return Schema；延迟工具加载前零额外成本 | v0.3.17，[工具返回 Schema](05-tool-optimization/tool-optimization-design.md#84-tool-return-schema) |
 | `SKILL-001` | Skill 与 ToolPackage 分离；上传安装、Agent 授权、Harness `load_capability` 渐进披露、References/Assets 分页读取和脚本隔离 | v0.3.18，[Skill 体系](12-agent-skills/skill-system-design.md) |
+| `MCP-SNAPSHOT` | URL MCP 检测保存完整工具快照，聊天按快照披露并在首次真实调用时建连；缺快照不阻塞 Run，单 Server 连接失败转为 `ToolFailed` | v0.3.19，[工具检索](13-tool-discovery/tool-discovery-design.md) |
 | Harness 确定性压缩 tiers | `ClampOversizedMessages`、`ClearToolResults`、`DeduplicateFileReads` 已复用 | 当前基线，[压缩研究](03-context-compaction/context-compaction-research.md#harness-实验结论) |
 | 官方 DeepSeek Provider | 使用 Pydantic AI 官方 Provider/Profile，不保留自定义模型循环 | v0.3.9+，[框架能力台账](14-framework-capabilities/framework-capabilities-baseline.md#41-已经采用) |
 

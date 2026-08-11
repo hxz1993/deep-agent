@@ -3,7 +3,7 @@
 DeepAgent 是基于 FastAPI、Pydantic AI 和 SQLAlchemy 的多用户 Agent 服务，并
 随服务发布一体化运维控制台。
 
-当前产品版本为 `0.3.18`。`deep_agent.__version__` 是唯一代码版本来源，FastAPI、
+当前产品版本为 `0.3.19`。`deep_agent.__version__` 是唯一代码版本来源，FastAPI、
 `GET /info` 和 Console 顶部版本徽标均读取该值。后续正式发布默认递增
 `MAJOR.MINOR.PATCH` 的第三位，只有明确规划重大版本时才调整前两位。产品版本不通过
 环境变量或数据库覆盖，也不等同于 Alembic 数据库结构 revision。
@@ -72,6 +72,12 @@ v0.3.18 将 Skill 与 ToolPackage 分离，新增 Alembic 003 的 `skill_package
 上传 ZIP 原包保存在平台文件服务，数据库只保存 File ID、Manifest 和资源索引；Harness 0.18
 初始仅披露 Skill 名称与描述，模型调用 `load_capability` 后才加载完整 `SKILL.md`。References 与
 Assets 通过只读分页工具按需访问，包内脚本只保存且禁止模型读取或执行。
+
+v0.3.19 将 URL MCP 的“发现”和“执行”拆开：管理员检测时把工具定义保存到现有 inspection
+快照，聊天 Run 直接使用快照完成 Tool Search 和 Schema 披露，只有模型真实调用工具时才按
+当前请求 Header 建立远程连接。同一 Run 复用连接；单个远程 MCP 暂时不可用时返回
+`ToolFailed`，不阻塞其他工具或普通回答。历史 MCP 缺少明细快照时不会进入模型工具列表，需在
+Console 执行“检测并更新”。Alembic head 仍为 `003`。
 
 ## 项目结构
 

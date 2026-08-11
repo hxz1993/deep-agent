@@ -46,7 +46,12 @@ test("检测状态展示能力摘要和完整悬停信息", () => {
         protocol_version: "2025-06-18",
         instructions_available: true,
       },
-      tools: { count: 10 },
+      tools: {
+        count: 10,
+        snapshot_status: "ready",
+        snapshot_at: "2026-07-23T10:00:00Z",
+        snapshot_hash: "1234567890abcdef",
+      },
       resources: { count: 2, template_count: 1 },
     },
     "url",
@@ -55,7 +60,7 @@ test("检测状态展示能力摘要和完整悬停信息", () => {
   assert.equal(view.text, "正常");
   assert.equal(
     view.summary,
-    "10 工具 · 自动预选 Top 3 / 搜索 Top 5 · 2 资源 · 1 模板",
+    "工具快照可用 · 10 工具 · 自动预选 Top 3 / 搜索 Top 5 · 2 资源 · 1 模板",
   );
   assert.match(view.title, /服务：mcp-biz-go 1.0.0/);
   assert.match(view.title, /协议：2025-06-18/);
@@ -68,12 +73,34 @@ test("小型 MCP 直接披露全部工具", () => {
   const view = ui.inspectionView(
     {
       status: "healthy",
-      tools: { count: 2 },
+      tools: { count: 2, snapshot_status: "ready" },
       resources: { count: 0, template_count: 0 },
     },
     "url",
   );
-  assert.equal(view.summary, "2 工具 · 全部直接披露 · 0 资源 · 0 模板");
+  assert.equal(view.summary, "工具快照可用 · 2 工具 · 全部直接披露 · 0 资源 · 0 模板");
+});
+
+test("URL MCP 明确展示缺失、失效和沿用快照状态", () => {
+  const ui = loadInspectionUi();
+  assert.match(
+    ui.inspectionView({ status: "healthy", tools: { count: 7 } }, "url").summary,
+    /缺少工具快照，请检测并更新/,
+  );
+  assert.match(
+    ui.inspectionView(
+      { status: "stale", tools: { count: 7, snapshot_status: "stale" } },
+      "url",
+    ).summary,
+    /配置已变更，需重新检测/,
+  );
+  assert.match(
+    ui.inspectionView(
+      { status: "unreachable", tools: { count: 7, snapshot_status: "ready" } },
+      "url",
+    ).summary,
+    /当前无法连接，沿用上次快照/,
+  );
 });
 
 test("Builtin 显示内置运行时且不伪装成待检测", () => {
@@ -108,7 +135,7 @@ test("检测结果区分变化、无变化、部分异常和无法连接", () =>
         template_count: { before: 0, after: 1 },
       },
     }).message,
-    "检测成功：工具 10 → 12，资源 0 → 2，模板 0 → 1",
+    "检测成功并保存 12 个工具快照：工具 10 → 12，资源 0 → 2，模板 0 → 1",
   );
   assert.match(
     ui.inspectionToast({

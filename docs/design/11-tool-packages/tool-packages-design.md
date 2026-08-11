@@ -53,7 +53,7 @@ v0.3.9 改由 Pydantic AI 官方 Provider/Profile 处理，不再保留项目自
 | `builtin` | `builtin:general` | 通用工具 | code | 开 | `get_current_time` |
 | `builtin` | `builtin:sandbox` | Python 沙箱 | code | 关 | `execute_python` |
 | `builtin` | `builtin:attachment` | 附件读取 | code | 关 | `read_text_attachment`、`read_docx`、`read_xlsx` |
-| `mcp` | `mcp:<name>` | MCP 配置名称 | builtin/database | 关 | 运行时发现 |
+| `mcp` | `mcp:<name>` | MCP 配置名称 | builtin/database | 关 | URL 检测快照 / Builtin 运行时发现 |
 | `ui` | `ui:builtin` | 通用交互 | code | 关 | `builtin__confirm`、`builtin__choice` |
 | `ui` | `ui:deepcube` | DeepCube 助手 | database | 关 | `deep_cube__clarify`、`deep_cube__config_fill` |
 

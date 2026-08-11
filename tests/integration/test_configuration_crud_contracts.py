@@ -323,7 +323,19 @@ class ConfigurationCrudContractTests(unittest.IsolatedAsyncioTestCase):
             McpServerUpdate(enabled=True),
             inspection={
                 "status": "healthy",
-                "tools": {"status": "supported", "count": 2},
+                "tools": {
+                    "status": "supported",
+                    "count": 2,
+                    "snapshot_status": "ready",
+                    "snapshot_hash": "rename-snapshot",
+                    "snapshot": {
+                        "schema_version": "1.0",
+                        "definitions": [
+                            {"name": "query", "input_schema": {"type": "object"}},
+                            {"name": "list", "input_schema": {"type": "object"}},
+                        ],
+                    },
+                },
                 "resources": {"status": "supported", "count": 1, "template_count": 0},
             },
         )
@@ -378,6 +390,11 @@ class ConfigurationCrudContractTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(response.json()["mcp"]["description"], "keep description")
         self.assertEqual(response.json()["mcp"]["inspection"]["tools"]["count"], 2)
+        self.assertEqual(
+            response.json()["mcp"]["inspection"]["tools"]["snapshot_hash"],
+            "rename-snapshot",
+        )
+        self.assertNotIn("snapshot", response.json()["mcp"]["inspection"]["tools"])
         self.assertEqual(old_row.status_code, 404, old_row.text)
         self.assertEqual(new_row.status_code, 200, new_row.text)
         self.assertEqual(

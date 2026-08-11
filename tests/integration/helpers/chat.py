@@ -88,6 +88,7 @@ class _McpRow:
     config: dict[str, Any]
     description: str | None = None
     enabled: bool = True
+    inspection: dict[str, Any] | None = None
 
 
 def echo_mcp_row(
@@ -107,6 +108,25 @@ def echo_mcp_row(
         transport="url",
         config=config,
         description="Test MCP header echo server.",
+        inspection={
+            "status": "healthy",
+            "tools": {
+                "status": "supported",
+                "count": 1,
+                "snapshot_status": "ready",
+                "snapshot_hash": "echo-fixture",
+                "snapshot": {
+                    "schema_version": "1.0",
+                    "definitions": [
+                        {
+                            "name": "echo_request_headers",
+                            "description": "Return selected request headers.",
+                            "input_schema": {"type": "object"},
+                        }
+                    ],
+                },
+            },
+        },
     )
 
 
@@ -119,7 +139,8 @@ async def _seed_mcp_rows(stores: DataStores, rows: list[_McpRow]) -> None:
                 config=row.config,
                 description=row.description,
                 enabled=row.enabled,
-            )
+            ),
+            inspection=row.inspection,
         )
 
 

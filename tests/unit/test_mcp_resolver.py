@@ -1,24 +1,27 @@
 from __future__ import annotations
 
 import unittest
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from deep_agent.agent.spec import AgentSpec
 from deep_agent.capabilities.mcp.resolver import (
     effective_mcp_capability_names,
     load_mcp_tool_packages,
+    resolve_mcp_toolsets,
     select_mcp_tool_packages,
 )
 from deep_agent.capabilities.registry import ToolPackage
 from deep_agent.db.stores.bundle import DataStores
 
 
-def _package(code: str) -> ToolPackage:
+def _package(code: str, *, source: str | None = None) -> ToolPackage:
     return ToolPackage(
         code=code,
         category="mcp",
         toolset=object(),
         default_enabled=False,
+        source=source,
     )
 
 
@@ -75,6 +78,60 @@ class McpResolverTests(unittest.IsolatedAsyncioTestCase):
             capabilities=["mcp:echo", "builtin:general"],
         )
         self.assertEqual(effective_mcp_capability_names(spec, packages), {"echo"})
+
+    async def test_runtime_hides_url_mcp_without_snapshot(self) -> None:
+        package = _package("mcp:echo", source="database")
+        spec = AgentSpec(
+            name="t", model="test", instructions="", capabilities=["mcp:echo"]
+        )
+        row = SimpleNamespace(
+            name="echo",
+            transport="url",
+            inspection={"tools": {"status": "supported", "count": 2}},
+        )
+        with patch(
+            "deep_agent.capabilities.mcp.resolver.load_mcp_tool_packages",
+            new=AsyncMock(return_value=[package]),
+        ):
+            resolved = await resolve_mcp_toolsets(
+                MagicMock(),
+                spec,
+                mcp_rows=[row],
+            )
+        self.assertEqual(resolved, [])
+
+    async def test_runtime_uses_url_mcp_with_ready_snapshot(self) -> None:
+        package = _package("mcp:echo", source="database")
+        spec = AgentSpec(
+            name="t", model="test", instructions="", capabilities=["mcp:echo"]
+        )
+        row = SimpleNamespace(
+            name="echo",
+            transport="url",
+            inspection={
+                "tools": {
+                    "status": "supported",
+                    "count": 1,
+                    "snapshot_status": "ready",
+                    "snapshot": {
+                        "schema_version": "1.0",
+                        "definitions": [
+                            {"name": "query", "input_schema": {"type": "object"}}
+                        ],
+                    },
+                }
+            },
+        )
+        with patch(
+            "deep_agent.capabilities.mcp.resolver.load_mcp_tool_packages",
+            new=AsyncMock(return_value=[package]),
+        ):
+            resolved = await resolve_mcp_toolsets(
+                MagicMock(),
+                spec,
+                mcp_rows=[row],
+            )
+        self.assertEqual(resolved, [package.toolset])
 
 
 if __name__ == "__main__":

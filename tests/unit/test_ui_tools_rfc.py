@@ -518,7 +518,7 @@ class UiToolStoreTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(mcp_package.category, "mcp")
         self.assertEqual(mcp_package.tool_count, 7)
-        self.assertEqual(mcp_package.tool_catalog_status, "count_only")
+        self.assertEqual(mcp_package.tool_catalog_status, "missing")
         self.assertEqual(mcp_package.disclosure_mode, "search")
         self.assertEqual(mcp_package.preselect_limit, 3)
         self.assertEqual(mcp_package.search_result_limit, 5)

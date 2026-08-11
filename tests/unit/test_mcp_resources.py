@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import json
 import unittest
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from mcp.types import Resource, ResourceTemplate, Tool
+from mcp.types import Resource, ResourceTemplate, Tool, ToolAnnotations, ToolExecution
 from pydantic_ai import ModelRetry, RunContext, ToolFailed
 from pydantic_ai.messages import BinaryContent
 from pydantic_ai.models.test import TestModel
@@ -100,10 +101,29 @@ def _inspection(
     resource_count: int = 1,
     template_count: int = 0,
 ) -> dict:
+    definitions = [
+        {
+            "name": f"tool_{index}",
+            "description": "Test tool",
+            "input_schema": {"type": "object"},
+        }
+        for index in range(tool_count)
+    ]
     return {
         "status": status,
         "checked_at": datetime.now(timezone.utc).isoformat(),
-        "tools": {"status": "supported", "count": tool_count},
+        "tools": {
+            "status": "supported",
+            "count": tool_count,
+            "snapshot_status": "ready",
+            "snapshot_at": datetime.now(timezone.utc).isoformat(),
+            "snapshot_hash": "test-snapshot",
+            "snapshot": {
+                "schema_version": "1.0",
+                "server_instructions": "Use test tools.",
+                "definitions": definitions,
+            },
+        },
         "resources": {
             "status": resource_status,
             "count": resource_count,
@@ -169,7 +189,17 @@ def _request(*headers: tuple[bytes, bytes]) -> Request:
 class McpInspectionTests(unittest.IsolatedAsyncioTestCase):
     async def test_inspection_collects_server_tools_and_resources(self) -> None:
         client = _FakeInspectionClient(
-            tools=[Tool(name="query", inputSchema={"type": "object"})],
+            tools=[
+                Tool(
+                    name="query",
+                    description="Query the catalog.",
+                    inputSchema={"type": "object"},
+                    outputSchema={"type": "object", "properties": {"rows": {"type": "array"}}},
+                    annotations=ToolAnnotations(readOnlyHint=True),
+                    execution=ToolExecution(taskSupport="optional"),
+                    _meta={"authorization": "secret-token"},
+                )
+            ],
             resources=[
                 Resource(
                     name="guide",
@@ -199,6 +229,27 @@ class McpInspectionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.inspection.server.protocol_version, "2025-06-18")
         self.assertTrue(result.inspection.server.instructions_available)
         self.assertEqual(result.inspection.tools.count, 1)
+        self.assertEqual(result.inspection.tools.snapshot_status, "ready")
+        self.assertEqual(
+            result.inspection.tools.snapshot.definitions[0].name,
+            "query",
+        )
+        definition = result.inspection.tools.snapshot.definitions[0]
+        self.assertEqual(definition.output_schema["type"], "object")
+        self.assertTrue(definition.annotations["readOnlyHint"])
+        self.assertEqual(definition.task_support, "optional")
+        self.assertEqual(
+            result.inspection.tools.snapshot.server_instructions,
+            "Use this MCP carefully.",
+        )
+        public_value = result.inspection.model_dump(mode="json")
+        self.assertNotIn("snapshot", public_value["tools"])
+        stored_value = result.inspection.to_storage_value()
+        self.assertEqual(
+            stored_value["tools"]["snapshot"]["definitions"][0]["name"],
+            "query",
+        )
+        self.assertNotIn("secret-token", json.dumps(stored_value))
         self.assertEqual(result.inspection.resources.count, 1)
         self.assertEqual(result.inspection.resources.template_count, 1)
         self.assertEqual(
@@ -216,6 +267,8 @@ class McpInspectionTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result.inspection.status, "healthy")
         self.assertEqual(result.inspection.tools.status, "unsupported")
+        self.assertEqual(result.inspection.tools.snapshot_status, "ready")
+        self.assertEqual(result.inspection.tools.snapshot.definitions, [])
         self.assertEqual(result.inspection.resources.status, "unsupported")
 
     async def test_empty_resource_capability_does_not_enable_resource_tools(self) -> None:
@@ -274,6 +327,24 @@ class McpInspectionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.inspection.resources.status, "supported")
         self.assertEqual(result.inspection.resources.count, 1)
 
+    async def test_tool_list_failure_keeps_previous_successful_tool_snapshot(self) -> None:
+        client = _FakeInspectionClient(
+            errors={"tools": RuntimeError("secret-token")},
+        )
+        with patch(
+            "deep_agent.capabilities.mcp.inspection.build_resource_client",
+            return_value=client,
+        ):
+            result = await inspect_mcp_server(
+                _row(inspection=_inspection(tool_count=2))
+            )
+
+        self.assertEqual(result.inspection.status, "degraded")
+        self.assertEqual(result.inspection.tools.status, "error")
+        self.assertEqual(result.inspection.tools.snapshot_status, "ready")
+        self.assertEqual(len(result.inspection.tools.snapshot.definitions), 2)
+        self.assertEqual(result.inspection.tools.snapshot_hash, "test-snapshot")
+
     async def test_list_failure_is_degraded_and_preserves_previous_count(self) -> None:
         client = _FakeInspectionClient(
             errors={"resources": RuntimeError("secret-token")},
@@ -309,6 +380,8 @@ class McpInspectionTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result.inspection.status, "unreachable")
         self.assertEqual(result.inspection.tools.count, 7)
+        self.assertEqual(result.inspection.tools.snapshot_status, "ready")
+        self.assertEqual(len(result.inspection.tools.snapshot.definitions), 7)
         self.assertEqual(result.inspection.resources.count, 2)
         self.assertEqual(result.inspection.error.stage, "initialize")
         self.assertNotIn("secret-token", result.inspection.error.message)
@@ -474,7 +547,19 @@ class McpInspectionApiTests(unittest.IsolatedAsyncioTestCase):
             {
                 "inspection": {
                     "status": "healthy",
-                    "tools": {"status": "supported", "count": 2},
+                    "tools": {
+                        "status": "supported",
+                        "count": 2,
+                        "snapshot_status": "ready",
+                        "snapshot_hash": "manual-snapshot",
+                        "snapshot": {
+                            "schema_version": "1.0",
+                            "definitions": [
+                                {"name": "first", "input_schema": {"type": "object"}},
+                                {"name": "second", "input_schema": {"type": "object"}},
+                            ],
+                        },
+                    },
                     "resources": {
                         "status": "supported",
                         "count": 1,
@@ -502,6 +587,11 @@ class McpInspectionApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.inspection.status, "healthy")
         self.assertEqual(response.changes.tool_count.after, 2)
         self.assertEqual(store.saved_inspection["resources"]["count"], 1)
+        self.assertEqual(
+            store.saved_inspection["tools"]["snapshot"]["definitions"][0]["name"],
+            "first",
+        )
+        self.assertNotIn("snapshot", response.inspection.model_dump(mode="json")["tools"])
 
     async def test_disabled_config_update_marks_snapshot_stale_without_connecting(self) -> None:
         store = _FakeMcpStore(_row("docs", enabled=False))
@@ -519,7 +609,10 @@ class McpInspectionApiTests(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertEqual(response.inspection.status, "stale")
+        self.assertEqual(response.inspection.tools.snapshot_status, "stale")
+        self.assertIsNone(response.inspection.tools.snapshot)
         self.assertEqual(store.saved_inspection["status"], "stale")
+        self.assertNotIn("snapshot", store.saved_inspection["tools"])
         inspect.assert_not_awaited()
 
     async def test_enabled_config_update_marks_stale_then_reinspects(self) -> None:

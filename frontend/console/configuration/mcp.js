@@ -54,10 +54,21 @@ function inspectionView(inspection, transport) {
   };
   const [text, className] = labels[info.status] || labels.unknown;
   const toolCount = Number(info.tools?.count || 0);
+  const snapshotStatus = info.tools?.snapshot_status || "missing";
   const disclosure = toolCount > 3 ? "自动预选 Top 3 / 搜索 Top 5" : "全部直接披露";
+  let snapshotLabel = "";
+  if (transport === "url") {
+    if (snapshotStatus === "stale") snapshotLabel = "配置已变更，需重新检测";
+    else if (snapshotStatus !== "ready") snapshotLabel = "缺少工具快照，请检测并更新";
+    else if (info.status === "unreachable") snapshotLabel = "当前无法连接，沿用上次快照";
+    else snapshotLabel = "工具快照可用";
+  }
   const summary = info.status === "not_applicable"
     ? "运行时按需启动"
-    : `${toolCount} 工具 · ${disclosure} · ${info.resources?.count || 0} 资源 · ${info.resources?.template_count || 0} 模板`;
+    : [
+        snapshotLabel,
+        `${toolCount} 工具 · ${disclosure} · ${info.resources?.count || 0} 资源 · ${info.resources?.template_count || 0} 模板`,
+      ].filter(Boolean).join(" · ");
   const server = [info.server?.name, info.server?.version].filter(Boolean).join(" ");
   const errors = [
     inspectionErrorMessage(info.error),
@@ -69,6 +80,8 @@ function inspectionView(inspection, transport) {
     info.server?.protocol_version ? `协议：${info.server.protocol_version}` : "",
     info.server ? `Instructions：${info.server.instructions_available ? "可用" : "无"}` : "",
     info.checked_at ? `检测时间：${formatDate(info.checked_at)}` : "",
+    info.tools?.snapshot_at ? `快照时间：${formatDate(info.tools.snapshot_at)}` : "",
+    info.tools?.snapshot_hash ? `快照：${info.tools.snapshot_hash.slice(0, 12)}` : "",
     Number.isFinite(info.duration_ms) ? `耗时：${info.duration_ms} ms` : "",
     errors.length ? `错误：${errors.join("；")}` : "",
   ].filter(Boolean);
@@ -104,9 +117,15 @@ function inspectionToast(result) {
   ].forEach(([label, item]) => {
     if (item && item.before !== item.after) changed.push(`${label} ${item.before ?? 0} → ${item.after ?? 0}`);
   });
-  if (changed.length) return { message: `检测成功：${changed.join("，")}`, error: false };
+  const savedCount = inspection.tools?.count || 0;
+  if (changed.length) {
+    return {
+      message: `检测成功并保存 ${savedCount} 个工具快照：${changed.join("，")}`,
+      error: false,
+    };
+  }
   return {
-    message: `检测完成：无变化，共 ${inspection.tools?.count || 0} 个工具、${inspection.resources?.count || 0} 个资源、${inspection.resources?.template_count || 0} 个模板`,
+    message: `检测完成并保存 ${savedCount} 个工具快照：无变化，共 ${inspection.resources?.count || 0} 个资源、${inspection.resources?.template_count || 0} 个模板`,
     error: false,
   };
 }

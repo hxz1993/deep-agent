@@ -97,7 +97,7 @@ DeepAgent 自研 `capabilities.registry.ToolPackage` 是产品配置单位，包
 
 模型每轮直接看到的是：Agent/能力 Instructions、`message_history`、当前用户输入/附件和本轮 Tool Definitions。Toolset 负责列出、准备和调用工具；MCP Prompt 不会自动进入模型工具列表。MCP Resource 由宿主侧动态代理工具按需读取。
 
-运行态 URL 与 Builtin MCP 统一启用 Pydantic AI `MCPToolset(include_instructions=True)`，因此已关联 MCP 在 `initialize` 中返回的 Server Instructions 会随 Toolset 加入 Agent Instructions；未关联 MCP 不会注入。
+URL 与 Builtin MCP 的运行态不同：URL MCP 在管理员检测时保存 Tool Definitions 和 Server Instructions，Run 只读快照，首次真实调用时才创建官方 `MCPToolset`；Builtin MCP 仍由 Run-scoped Client 按需启动。两者最终工具名都由 `PrefixedToolset` 统一加 Server 前缀。缺少或配置失效的 URL 快照不披露工具，也不会因远端不可达阻塞普通聊天。
 
 新增横切能力时遵循：
 
@@ -182,10 +182,11 @@ XML + JSON 投影。业务字段语义仍由具体 Agent Prompt 负责。
 | --- | --- |
 | `registry.py` | `ToolInfo` / `ToolPackage` / `ToolPackageRegistry` |
 | `native/builtin.py` | 默认启用的内置“通用工具”，当前提供 `get_current_time` |
-| `mcp/db_loader.py` | 从 `mcp_servers` 构建 MCPToolset |
+| `mcp/db_loader.py` | 从 `mcp_servers` 构建 MCP ToolPackage 与快照 Toolset |
 | `mcp/builtin.py` | 发现 `mcps/<name>/server.py` |
 | `mcp/toolset_builder.py` | url / stdio / builtin + header 注入 |
 | `mcp/inspection.py` | URL MCP initialize、Ping、能力清单检测与快照 |
+| `mcp/snapshot_toolset.py` | URL MCP 纯内存工具目录、首次调用建连与 Run 内连接复用 |
 | `mcp/resources.py` | 按检测快照开放、运行时实时读取的 Resource 代理工具 |
 | `mcp/run_scoped.py` | builtin MCP：按 agent run 租约 HTTP client |
 | `mcp/lease_manager.py` | worker 级 MCP lease + shared registry touch |

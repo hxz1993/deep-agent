@@ -365,15 +365,18 @@ MCP Resource 也被包装为宿主 Function Tool：
 
 Agent 选择 `mcp:<server_name>` 后，请求级加载 MCP 配置并构造 Toolset：
 
-- URL MCP 使用 `DynamicToolset`，按当前 `AgentDeps` 计算 Header。
+- URL MCP 在“检测并更新”时保存完整工具快照；请求级使用快照 Toolset 披露定义，首次真实调用时才按
+  当前 `AgentDeps` 计算 Header、初始化官方 `MCPToolset`，并在本 Run 内复用连接。
 - Builtin MCP 使用 Run-scoped Client。
 - Toolset 外层使用 `PrefixedToolset`。
-- Server Instructions 通过 `include_instructions=True` 加入 Agent Instructions。
+- URL Server Instructions 来自同一检测快照；Builtin Instructions 仍由运行时 initialize 获取。
+- 缺快照或配置变更后的 URL MCP 当前 Run 不披露工具；远端调用失败只终止该工具，不阻塞其他 Toolset。
 
 关键位置：
 
 - `deep_agent/capabilities/mcp/resolver.py`
 - `deep_agent/capabilities/mcp/toolset_builder.py`
+- `deep_agent/capabilities/mcp/snapshot_toolset.py`
 - `deep_agent/capabilities/mcp/run_scoped.py`
 
 ### 4.3 UI External Tool

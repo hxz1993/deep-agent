@@ -38,8 +38,11 @@ class _Files:
 
 
 class _PlatformAPI:
+    headers: list[dict | None] = []
+
     def __init__(self, header=None):
         self.header = header
+        type(self).headers.append(header)
         self.file = _Files()
 
 
@@ -74,6 +77,7 @@ class SkillRuntimeLibraryTests(unittest.IsolatedAsyncioTestCase):
         _Files.blobs = {}
         _Files.downloads = 0
         _Files.fail = False
+        _PlatformAPI.headers = []
         self.platform_patch = patch(
             "deep_agent.skills.runtime.PlatformAPI",
             _PlatformAPI,
@@ -127,6 +131,12 @@ class SkillRuntimeLibraryTests(unittest.IsolatedAsyncioTestCase):
     async def test_startup_reconcile_cleans_orphans_and_downloads_once(self) -> None:
         payload = skill_zip()
         row = await self._create(payload)
+        await self.stores.skill_package.update_manifest(
+            row.code,
+            {**row.manifest, "_deepagent_platform_space": "test-space"},
+        )
+        row = await self.stores.skill_package.get_by_code(row.code)
+        assert row is not None
         (self.root / "orphan-skill").mkdir(parents=True)
 
         await self.runtime.reconcile(self.stores)
@@ -134,12 +144,43 @@ class SkillRuntimeLibraryTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse((self.root / "orphan-skill").exists())
         self.assertTrue((self.root / row.code / "SKILL.md").is_file())
         self.assertEqual(_Files.downloads, 1)
+        self.assertEqual(_PlatformAPI.headers[0]["space"], "test-space")
         self.assertEqual(self.runtime.state(row.code).status, RUNTIME_READY)
 
         restarted = SkillRuntimeLibrary(self.root)
         await restarted.reconcile(self.stores)
         self.assertEqual(_Files.downloads, 1)
         self.assertEqual(restarted.state(row.code).status, RUNTIME_READY)
+
+    async def test_startup_without_stored_space_defers_download_until_run(self) -> None:
+        payload = skill_zip()
+        row = await self._create(payload)
+
+        await self.runtime.reconcile(self.stores)
+
+        self.assertEqual(_Files.downloads, 0)
+        resolved = await self.runtime.resolve(
+            row,
+            request_headers={"space": "run-space"},
+        )
+        self.assertIsNotNone(resolved)
+        self.assertEqual(_Files.downloads, 1)
+        self.assertEqual(_PlatformAPI.headers[0]["space"], "run-space")
+
+    async def test_platform_json_error_is_reported_as_missing_file(self) -> None:
+        payload = skill_zip()
+        row = await self._create(payload)
+        _Files.blobs[row.platform_file_id] = (
+            b'{"status":false,"data":null,"message":"file path not found"}'
+        )
+
+        state = await self.runtime.materialize(
+            row,
+            request_headers={"space": "run-space"},
+        )
+
+        self.assertEqual(state.status, RUNTIME_ERROR)
+        self.assertEqual(state.error_code, "platform_file_missing")
 
     async def test_concurrent_missing_directory_uses_one_download(self) -> None:
         payload = skill_zip()

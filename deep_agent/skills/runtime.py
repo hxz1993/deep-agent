@@ -25,6 +25,7 @@ from deepfos_platform.options import OPTION as PLATFORM_OPTION
 
 SKILL_RUNTIME_ROOT = Path(tempfile.gettempdir()) / "deep-agent-runtime-skills"
 SKILL_RUNTIME_MARKER = ".deepagent-runtime.json"
+SKILL_PLATFORM_SPACE_KEY = "_deepagent_platform_space"
 SKILL_STARTUP_SYNC_TIMEOUT_SECONDS = 30
 SKILL_DOWNLOAD_TIMEOUT_SECONDS = 15
 SKILL_SYNC_CONCURRENCY = 4
@@ -101,9 +102,64 @@ def _row_resource_index(row: SkillPackage) -> list[dict]:
     return [dict(item) for item in (row.resource_index or [])]
 
 
-def _service_headers() -> dict[str, str]:
+def skill_manifest_with_platform_space(
+    manifest: Mapping[str, object],
+    request_headers: Mapping[str, str],
+) -> dict[str, object]:
+    """Persist only the Space needed to locate a platform file after restart."""
+
+    result = dict(manifest)
+    space = request_headers.get("space")
+    if isinstance(space, str) and space.strip():
+        result[SKILL_PLATFORM_SPACE_KEY] = space
+    else:
+        result.pop(SKILL_PLATFORM_SPACE_KEY, None)
+    return result
+
+
+def skill_public_manifest(manifest: Mapping[str, object] | None) -> dict[str, object]:
+    """Hide DeepAgent's platform locator from the public Skill manifest."""
+
+    return {
+        key: value
+        for key, value in (manifest or {}).items()
+        if key != SKILL_PLATFORM_SPACE_KEY
+    }
+
+
+def _service_headers(row: SkillPackage) -> dict[str, str]:
+    headers: dict[str, str] = {}
+    space = (row.manifest or {}).get(SKILL_PLATFORM_SPACE_KEY)
+    if isinstance(space, str) and space.strip():
+        headers["space"] = space
     token = PLATFORM_OPTION.general.internal_token
-    return {INTERNAL_TOKEN_HEADER: token} if token else {}
+    if token:
+        headers[INTERNAL_TOKEN_HEADER] = token
+    return headers
+
+
+def _download_headers(
+    row: SkillPackage,
+    request_headers: Mapping[str, str] | None,
+) -> dict[str, str]:
+    headers = _service_headers(row)
+    headers.update(dict(request_headers or {}))
+    return headers
+
+
+def _raise_platform_download_error(payload: bytes) -> None:
+    stripped = payload.lstrip()
+    if not stripped.startswith(b"{"):
+        return
+    try:
+        body = json.loads(stripped.decode("utf-8"))
+    except (UnicodeError, ValueError):
+        return
+    if isinstance(body, dict) and body.get("status") is False:
+        message = str(body.get("message") or "platform file download failed")
+        if "路径为空" in message or "not found" in message.lower():
+            raise KeyError(message)
+        raise SkillUnavailableError(message)
 
 
 def _runtime_error_code(exc: BaseException) -> str:
@@ -199,7 +255,26 @@ class SkillRuntimeLibrary:
             raise SkillUnavailableError(
                 f"Platform file for Skill {row.code!r} did not return bytes"
             )
-        return bytes(payload)
+        raw = bytes(payload)
+        _raise_platform_download_error(raw)
+        actual_hash = hashlib.sha256(raw).hexdigest()
+        if actual_hash != row.content_hash:
+            raise SkillUnavailableError(
+                f"Skill {row.code!r} package hash mismatch: "
+                f"expected {row.content_hash}, got {actual_hash}"
+            )
+        return raw
+
+    async def download_package(
+        self,
+        row: SkillPackage,
+        *,
+        request_headers: Mapping[str, str] | None = None,
+    ) -> bytes:
+        return await self._download_package(
+            row,
+            _download_headers(row, request_headers),
+        )
 
     def _install_payload(self, row: SkillPackage, payload: bytes) -> None:
         actual_hash = hashlib.sha256(payload).hexdigest()
@@ -280,9 +355,9 @@ class SkillRuntimeLibrary:
             try:
                 raw = payload
                 if raw is None:
-                    raw = await self._download_package(
+                    raw = await self.download_package(
                         row,
-                        request_headers if request_headers is not None else _service_headers(),
+                        request_headers=request_headers,
                     )
                 await asyncio.to_thread(self._install_payload, row, raw)
             except asyncio.CancelledError:
@@ -411,6 +486,10 @@ class SkillRuntimeLibrary:
             sync_one(by_code[code])
             for code in sorted(enabled)
             if not self._ready_from_disk(by_code[code])
+            and isinstance(
+                (by_code[code].manifest or {}).get(SKILL_PLATFORM_SPACE_KEY),
+                str,
+            )
         ]
         if not pending:
             return

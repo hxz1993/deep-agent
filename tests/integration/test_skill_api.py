@@ -59,6 +59,7 @@ class SkillApiTests(unittest.IsolatedAsyncioTestCase):
             "deep_agent.skills.runtime.PlatformAPI", _FakePlatformAPI
         )
         self.runtime_platform_patch.start()
+        self.client_headers = {"app": "iirjgi005", "space": "iirjgi"}
 
     async def asyncTearDown(self) -> None:
         self.platform_patch.stop()
@@ -68,7 +69,11 @@ class SkillApiTests(unittest.IsolatedAsyncioTestCase):
         await self.engine.dispose()
 
     async def test_install_configure_read_and_delete_protection(self) -> None:
-        async with AsyncClient(transport=self.transport, base_url="http://test") as client:
+        async with AsyncClient(
+            transport=self.transport,
+            base_url="http://test",
+            headers=self.client_headers,
+        ) as client:
             installed = await client.post(
                 "/api/v1/skills",
                 files={"file": ("example-skill.zip", skill_zip(), "application/zip")},
@@ -77,6 +82,9 @@ class SkillApiTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(installed.json()["status"], "installed")
             self.assertEqual(installed.json()["skill"]["source"], "upload")
             self.assertEqual(installed.json()["skill"]["runtime_status"], "ready")
+            self.assertNotIn("_deepagent_platform_space", installed.json()["skill"]["manifest"])
+            stored = await self.stores.skill_package.get_by_code("example-skill")
+            self.assertEqual(stored.manifest["_deepagent_platform_space"], "iirjgi")
 
             reloaded = await client.post("/api/v1/skills/example-skill/reload")
             self.assertEqual(reloaded.status_code, 200, reloaded.text)
@@ -126,7 +134,11 @@ class SkillApiTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(_FakePlatformFiles.deleted)
 
     async def test_builtin_is_read_only_and_disabled_upload_cannot_be_selected(self) -> None:
-        async with AsyncClient(transport=self.transport, base_url="http://test") as client:
+        async with AsyncClient(
+            transport=self.transport,
+            base_url="http://test",
+            headers=self.client_headers,
+        ) as client:
             forbidden = await client.patch(
                 "/api/v1/skills/deepagent-diagnostics",
                 json={"enabled": False},
@@ -160,7 +172,11 @@ class SkillApiTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(rejected.json()["detail"]["invalid_skills"], ["example-skill"])
 
     async def test_existing_disabled_skill_reference_can_be_preserved_but_not_added(self) -> None:
-        async with AsyncClient(transport=self.transport, base_url="http://test") as client:
+        async with AsyncClient(
+            transport=self.transport,
+            base_url="http://test",
+            headers=self.client_headers,
+        ) as client:
             installed = await client.post(
                 "/api/v1/skills",
                 files={"file": ("example.zip", skill_zip(), "application/zip")},
@@ -198,7 +214,11 @@ class SkillApiTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_same_hash_update_is_noop_without_new_upload(self) -> None:
         payload = skill_zip()
-        async with AsyncClient(transport=self.transport, base_url="http://test") as client:
+        async with AsyncClient(
+            transport=self.transport,
+            base_url="http://test",
+            headers=self.client_headers,
+        ) as client:
             await client.post(
                 "/api/v1/skills",
                 files={"file": ("example.zip", payload, "application/zip")},
@@ -213,7 +233,11 @@ class SkillApiTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(_FakePlatformFiles.blobs, before)
 
     async def test_patch_rejects_explicit_null(self) -> None:
-        async with AsyncClient(transport=self.transport, base_url="http://test") as client:
+        async with AsyncClient(
+            transport=self.transport,
+            base_url="http://test",
+            headers=self.client_headers,
+        ) as client:
             installed = await client.post(
                 "/api/v1/skills",
                 files={"file": ("example.zip", skill_zip(), "application/zip")},
@@ -225,6 +249,16 @@ class SkillApiTests(unittest.IsolatedAsyncioTestCase):
                     json={field: None},
                 )
                 self.assertEqual(response.status_code, 422, (field, response.text))
+
+    async def test_install_requires_platform_space_before_upload(self) -> None:
+        async with AsyncClient(transport=self.transport, base_url="http://test") as client:
+            response = await client.post(
+                "/api/v1/skills",
+                files={"file": ("example.zip", skill_zip(), "application/zip")},
+            )
+        self.assertEqual(response.status_code, 422, response.text)
+        self.assertEqual(response.json()["detail"]["code"], "missing_platform_space")
+        self.assertEqual(_FakePlatformFiles.blobs, {})
 
 
 if __name__ == "__main__":

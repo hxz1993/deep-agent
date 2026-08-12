@@ -47,4 +47,13 @@ def deep_agent_file_key(call: ToolCallPart) -> str | None:
         uri = args.get("uri")
         if isinstance(server, str) and isinstance(uri, str) and server and uri:
             return f"mcp-resource:{server}:{uri}"
+    if call.tool_name == "read_tool_result":
+        handle = args.get("handle")
+        if not isinstance(handle, str) or not handle:
+            return None
+        return (
+            f"tool-result:{handle}:{args.get('offset') or 0}:"
+            f"{args.get('limit') or 200}:{bool(args.get('from_end', False))}:"
+            f"{args.get('pattern') or ''}"
+        )
     return None

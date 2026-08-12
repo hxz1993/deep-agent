@@ -11,6 +11,7 @@ from deep_agent.agent.context.estimator import TokenEstimator
 from deep_agent.agent.factory import build_agent
 from deep_agent.agent.input_capabilities import augment_instructions_with_capabilities
 from deep_agent.agent.runner import AgentRunner
+from deep_agent.agent.tool_output_limits import build_tool_output_limits
 from deep_agent.agent.spec import DEFAULT_INSTRUCTIONS, AgentSpec
 from deep_agent.capabilities.mcp.resolver import load_mcp_rows, resolve_mcp_toolsets
 from deep_agent.capabilities.catalog import invalid_tool_package_codes
@@ -170,6 +171,12 @@ async def _build_runner_from_spec(
         max_output_tokens=spec.max_output_tokens,
         estimator=estimator,
     )
+    tool_output_limits, tool_output_store = build_tool_output_limits(
+        request_headers=request_headers or {},
+        context_window_tokens=spec.context_window_tokens,
+        max_output_tokens=spec.max_output_tokens,
+        estimator=estimator,
+    )
     agent = build_agent(
         spec,
         ctx.registry,
@@ -182,6 +189,7 @@ async def _build_runner_from_spec(
         skill_script_toolset=skill_script_toolset,
         skill_capability=resolved_skills.capability,
         context_compaction=context_compaction,
+        tool_output_limits=tool_output_limits,
         mcp_server_names=[
             code.removeprefix("mcp:")
             for code in (spec.capabilities or [])
@@ -228,4 +236,5 @@ async def _build_runner_from_spec(
         stores=ctx.stores,
         active_runs=getattr(ctx, "active_runs", None),
         skill_runtime_context=resolved_skills.as_context(),
+        tool_output_store=tool_output_store,
     )

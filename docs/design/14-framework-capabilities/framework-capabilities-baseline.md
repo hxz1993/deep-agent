@@ -131,6 +131,7 @@ cache hit/miss Token，没有数据时保持 unknown。它不等于启用缓存�
 | `ClearToolResults` | 压缩旧工具结果 | 保持，Checkpoint 前仍由 DeepAgent 复检 |
 | `DeduplicateFileReads` | 去除重复文件读取内容 | 保持，不改变原始历史；运行时字节/解析复用由 `read_file`的Run级缓存负责 |
 | `estimate_token_count` | 作为估算实现的一部分 | 保持统一 `TokenEstimator` 封装，不让 Console复制算法 |
+| `ToolOutputLimits` / `Spill` | 超大工具结果在进入History前外置 | v0.4.0适配平台文件服务；保留Harness原生 `read_tool_result`，不使用本地Store或自研读取状态机 |
 
 Harness `Skills` 不读取 references/assets，也不执行 scripts。v0.3.18 直接使用它作为线上 Skill 的
 渐进披露内核；DeepAgent 负责安装、权限、References/Assets 读取和脚本隔离。
@@ -140,7 +141,6 @@ Harness `Skills` 不读取 references/assets，也不执行 scripts。v0.3.18 �
 | 官方能力 | 触发条件 | 采用边界 |
 | --- | --- | --- |
 | `ConversationSearch` | 摘要后确实出现路径、ID、决策难以恢复 | 自定义 `HistorySource` 读取现有 `chat_messages`；不启用第二套历史 |
-| `ToolOutputLimits` | 大工具结果反复占用上下文成为稳定问题 | 需要跨 Pod `OverflowStore`、授权、TTL、History 查看和 Artifact 句柄 |
 | `ToolGuardrail` | 工具风险元数据和真实副作用工具就绪 | 执行前权限复检、执行后脱敏；不替代业务服务权限 |
 | `SpendLimits` | 出现用户/App/Space 配额或收费需求 | 需要共享计数 Store 和价格口径；私有模型可按 Token/调用量而非美元 |
 | `Memory` | 产品明确需要跨会话、可查看和可删除的长期笔记 | namespace 由应用计算，但授权、审计、删除和 Store 仍由 DeepAgent 负责 |
@@ -177,7 +177,7 @@ Harness `Skills` 不读取 references/assets，也不执行 scripts。v0.3.18 �
 | 正式取消 | Core `CancellationToken`/`RunCancelled` | 已使用 Core；不再通过断 SSE 模拟停止 |
 | 工具生命周期埋点 | Core Run 信息/Usage，后续 Instrumentation/Hooks | v0.3.17 已建立最小脱敏日志；等官方 Hook 能覆盖产品阶段后再迁移，不重复保留两套埋点 |
 | Skill Instructions | Harness `Skills` | 下一步采用；安装、版本、素材和执行权限仍由 DeepAgent 管理 |
-| 大工具结果 | Harness `ToolOutputLimits` | 有真实规模问题和共享 Store 后采用 |
+| 大工具结果 | Harness `ToolOutputLimits` | v0.4.0已采用；平台File ID即会话句柄，权限从原始History恢复，不新增Artifact表 |
 | 工具审批/脱敏 | Core Approval + Harness `ToolGuardrail` | 风险元数据成熟后采用，不自行写通用拦截状态机 |
 | 跨会话记忆 | Harness `Memory` | 产品需求出现后采用 Store 接口，不把聊天历史伪装成 Memory |
 

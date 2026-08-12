@@ -97,6 +97,18 @@ test("Skill 三个工具归 Skill，read_file 独立归文件领域", () => {
   assert.match(fileHtml, /read_file/);
 });
 
+test("大工具结果读取作为独立系统工具只读展示", () => {
+  const ui = loadSystemToolsUi();
+  const html = ui.systemToolDomain({
+    code: "runtime:tool-result",
+    label: "工具结果",
+    tools: [{ name: "read_tool_result", source: "Pydantic AI Harness" }],
+  });
+  assert.match(html, /runtime:tool-result/);
+  assert.match(html, /read_tool_result/);
+  assert.match(html, /Pydantic AI Harness/);
+});
+
 test("系统工具页面具备加载、失败重试和窄屏可横向查看的结构", () => {
   assert.match(source, /正在加载系统工具/);
   assert.match(source, /data-retry-system-tools/);

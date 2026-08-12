@@ -16,13 +16,20 @@ class SystemToolCatalogTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(
             [domain.code for domain in domains],
-            ["runtime:skill", "runtime:file", "runtime:mcp-tool-search", "runtime:mcp-resource"],
+            [
+                "runtime:skill",
+                "runtime:file",
+                "runtime:tool-result",
+                "runtime:mcp-tool-search",
+                "runtime:mcp-resource",
+            ],
         )
         self.assertEqual(
             [[tool.name for tool in domain.tools] for domain in domains],
             [
                 ["load_capability", "list_skill_resources", "execute_skill_script"],
                 ["read_file"],
+                ["read_tool_result"],
                 ["search_tools"],
                 [
                     "list_mcp_resources",

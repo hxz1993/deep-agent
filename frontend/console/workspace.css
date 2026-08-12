@@ -511,6 +511,19 @@ html, body {
   color: var(--text-faint);
   font-style: italic;
 }
+.tool-result-artifact {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: var(--text-muted);
+  background: var(--surface-soft);
+  font-size: 12px;
+}
+.tool-result-artifact svg { width: 14px; height: 14px; flex: none; }
 
 /* Assistant 直接排版；过程统一收进一层大折叠。 */
 .assistant-process {

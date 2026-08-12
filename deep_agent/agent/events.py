@@ -18,6 +18,7 @@ from pydantic_ai.messages import (
     NativeToolSearchCallPart,
     NativeToolSearchReturnPart,
 )
+from deep_agent.agent.tool_output_limits import tool_result_artifacts
 
 
 def text_delta(delta: str) -> dict[str, Any]:
@@ -35,8 +36,16 @@ def tool_call(tool: str, args: Any, tool_call_id: str | None = None) -> dict[str
     return payload
 
 
-def tool_result(tool: str, result: Any, tool_call_id: str | None = None) -> dict[str, Any]:
+def tool_result(
+    tool: str,
+    result: Any,
+    tool_call_id: str | None = None,
+    *,
+    artifacts: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     payload = {"type": "tool_result", "tool": tool, "result": result, "tool_call_id": tool_call_id}
+    if artifacts:
+        payload["artifacts"] = artifacts
     if tool in {"search_tools", "tool_search"}:
         payload["source"] = "tool_search"
     return payload
@@ -172,6 +181,7 @@ def _map_tool_return_part(part: ToolReturnPart) -> dict[str, Any] | None:
         part.tool_name,
         _to_jsonable(part.content),
         part.tool_call_id,
+        artifacts=tool_result_artifacts(part),
     )
 
 

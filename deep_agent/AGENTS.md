@@ -105,7 +105,9 @@ URL 与 Builtin MCP 的运行态不同：URL MCP 在管理员检测时保存 Too
 2. 按 App、Space、权限或模态过滤工具优先使用 `PrepareTools`。
 3. v0.3.12 起，已授权 MCP 候选超过 3 个时统一进入 `DeferredLoadingToolset`，由本地词法检索预选 Top 3、模型 `search_tools` 返回 Top 5；小型 MCP 全量直接披露。首版不使用 Embedding，不持久化索引。
 4. 生命周期观测优先使用 Hooks/Instrumentation，并先完成 Token、Cookie、文件和工具结果脱敏。
-5. 通用大工具结果治理优先评估 Harness `OverflowingToolOutput`；多实例部署不得直接依赖默认本地文件 Store。
+5. v0.4.0 起，通用大工具结果使用 Harness `ToolOutputLimits` + `Spill`，Store适配现有平台文件服务，
+   不使用Harness默认本地文件Store。平台File ID同时作为当前会话的工具结果Artifact句柄；权限只能
+   从原始 `chat_messages`中的Tool Return元数据恢复，不能从Checkpoint或模型参数扩权。
 6. Harness Memory 只保存明确的跨会话笔记，不替代聊天历史；namespace 必须由认证用户、Agent、App 和 Space 生成。
 7. Harness `StepPersistence` 不替代现有 SQL 会话、SSE 和 Deferred/Pending；只有副作用账本、子 Agent 或崩溃恢复成为真实需求时再接入。
 8. Harness 仍为 0.x。引入时必须将 `pydantic-ai-slim` 与 `pydantic-ai-harness` 固定为经过联合回归的准确版本，禁止继续依赖无上限 `>=` 漂移。
@@ -256,8 +258,9 @@ XML + JSON 投影。业务字段语义仍由具体 Agent Prompt 负责。
 
 ### 系统工具目录
 
-`GET /api/v1/system-tools` 返回由代码维护的只读运行时目录，按 Skill、文件、MCP Tool Search 和
-MCP Resource 分组说明工具来源与自动注入条件。该接口不读取数据库、不构造 Agent Run；
+`GET /api/v1/system-tools` 返回由代码维护的只读运行时目录，按 Skill、文件、工具结果、MCP Tool
+Search和MCP Resource分组说明工具来源与自动注入条件。`read_tool_result`由Harness
+`ToolOutputLimits`自动注入，用于回读当前会话已外置的大工具结果。该接口不读取数据库、不构造Agent Run；
 `runtime:*` 仅是 Console 展示编码，不得注册到 ToolPackage Registry、`/tools` 或
 `agents.capabilities`。
 
@@ -316,6 +319,19 @@ Skill路径必须属于当前 Agent已选择、启用且运行目录就绪的资
 单独建设文档解析工具，不并入普通文件工具。新上传不抽文本，
 历史 `extracted_text` 仅为回放兼容。完整设计见
 [`../docs/design/06-attachment-parsing/`](../docs/design/06-attachment-parsing/)。
+
+### 大工具结果
+
+普通Function、MCP、Sandbox和MCP Resource工具的返回在进入模型历史前经过Harness
+`ToolOutputLimits`。阈值为模型可用输入窗口的20%，并限制在4K～24K Token；没有有效窗口时使用
+24K。超过阈值时，完整UTF-8结果上传为平台 `DL` 文件，历史只保存受限预览和
+`ToolReturnPart.metadata.overflow_handle`。`read_file`、`read_tool_result`、Skill加载和Tool Search
+不再次进入该治理链路，避免递归外置。
+
+平台File ID就是当前会话的 `artifact_id`，不增加Artifact表。新Run只从当前会话完整原始History
+索引允许的句柄；Checkpoint会脱敏metadata，只用于模型投影，不能作为授权事实源。同一Run回读
+复用 `AgentDeps.file_bytes`，并发下载使用single-flight。上传失败回退8K字符截断；取消必须原样传播。
+SSE/History可选输出 `artifacts`元数据，但不得在日志记录句柄、完整结果、Header或请求内容。
 
 ### Python Sandbox
 

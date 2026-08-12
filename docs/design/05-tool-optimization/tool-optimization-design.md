@@ -23,7 +23,8 @@ DeepAgent 已经使用了 Pydantic AI 最核心的三种工具执行方式：
 - 前端表单操作继续使用 `ExternalToolset + DeferredToolRequests/Results`。
 - 结构化最终输出使用 `ToolOutput` 或 `NativeOutput`，不依赖提示词约定 JSON。
 - Provider Code Execution 作为模型可选能力接入，不作为所有模型默认工具。
-- Harness 0.18 已用于上下文压缩；超长工具结果后续再评估 `OverflowingToolOutput`，并与现有压缩观测统一设计。
+- Harness 0.18 已用于上下文压缩和大工具结果治理；v0.4.0使用公开的
+  `ToolOutputLimits` + `Spill`，不再引用旧 `OverflowingToolOutput`方案。
 - Harness 不替代 SQL 会话、SSE、配置中心、HITL 和前端执行器。
 
 ## 2. 三套概念的边界
@@ -62,7 +63,7 @@ SSE 协议。
 | Tool Guardrail / Guard Chain | 是，依赖前置 | 待工具风险元数据统一后用于参数、结果、审批和敏感信息治理，不先堆零散规则 |
 | Compaction receipts、`pin`、`keep_user_messages` | 部分吸收 | 用于补充观测和回归思路；不替换当前单次摘要、完整 SQL 历史和 Checkpoint |
 | Spend Limits | 是，中期 | 适合请求级成本保护；先与现有 `UsageLimits`、全局请求上限和错误协议统一 |
-| 大文本外置 / Tool Output Limits | 是，中期 | 先要求业务工具分页；共享 Store、TTL、租户隔离准备好后再做 Spill |
+| 大文本外置 / Tool Output Limits | 已采用 | v0.4.0 使用平台文件 Store 完成会话内 Spill；TTL、孤儿治理和通用 Artifact 平台不作为前置条件 |
 | ConversationSearch | 后续评估 | 用自定义 `HistorySource` 读取现有 SQL `chat_messages`，不为搜索启用第二套 StepPersistence；默认只查当前会话 |
 | StepPersistence | 暂不做 | 现有 SQL 会话是事实源；除非出现崩溃恢复或子 Agent 持久化需求，否则会形成第二套历史 |
 | Planning / Advisor / SubAgent | 按业务需求 | 只有长任务、可审计计划和专业分工形成明确产品场景后再启用 |
@@ -838,36 +839,46 @@ Tool Output/Artifact治理。禁止按名称包含 `query` 等模糊规则全量
 - [上下文压缩设计](../03-context-compaction/context-compaction-design.md)
 - [上下文治理研究结论](../03-context-compaction/context-compaction-research.md)
 
-### 9.2 ToolOutputLimits / OverflowingToolOutput
+### 9.2 ToolOutputLimits 与大工具结果外置
 
-Harness 0.18 优先使用 `ToolOutputLimits` 在工具结果刚产生时治理大结果，避免完整结果进入模型历史后
-每轮重复付出 Token。旧 `OverflowingToolOutput` 的设计目标相同，落地时以当前公开 API 为准。治理模式包括：
-
-- `Truncate`：有损截断。
-- `Summarize`：模型摘要。
-- `Spill`：完整结果外置并返回读取句柄。
-
-推荐顺序：
+v0.4.0 已直接采用Harness 0.18公开的 `ToolOutputLimits`。它在工具执行完成后、结果进入下一次模型
+请求与持久化History前运行，避免一个超大结果在后续每次模型请求中重复占用上下文。
 
 ```text
-业务工具自身分页和摘要
-  → 通用大小观测
-  → 受控 Truncate
-  → 有共享存储后再使用 Spill
+普通 Function / MCP / Sandbox / MCP Resource 返回
+  → 统一Token估算
+  → 小于阈值：保持原结果
+  → 超过阈值：Harness Spill
+      → 完整UTF-8结果上传DeepFOS平台文件服务
+      → 平台File ID作为artifact_id / overflow handle
+      → Tool Return只保留首尾预览、结构草图和读取说明
+      → 模型按需调用Harness read_tool_result分页或关键词读取
+  → Tool Return进入SSE、原始History与后续模型请求
 ```
 
-DeepAgent 不能在多 Pod 生产环境直接依赖本地文件 Store。Spill Store 必须提供：
+阈值不增加数据库字段或环境变量，固定为：
 
-- 共享存储。
-- TTL 和清理。
-- environment/user/agent/app/space 隔离。
-- 句柄不可猜测。
-- 读取范围和审计。
+```text
+available_input = context_window_tokens - max_output_tokens
+threshold = clamp(available_input × 20%, 4K, 24K Token)
+无有效context_window_tokens时使用24K Token
+```
 
-还必须保持两种视图分离：模型历史只接收短引用和必要摘要；原始完整结果进入共享 Store，History API
-在重新校验 user/App/Space 后仍可按需读取，Console 显示“内容已外置，点击查看”。不能把外置后的
-短引用误当作完整历史事实，也不能让 Checkpoint 成为恢复完整结果的唯一来源。对象模型优先复用
-[`ART-*`](../08-artifact-export/README.md)，不另建一套只服务 Harness 的文件协议。
+第一版只解决安全兜底，不把它扩成通用文件或Artifact平台：
+
+- Store仅适配现有平台文件服务，不使用Harness默认本地文件Store。
+- 平台File ID同时就是会话内 `artifact_id`，不增加Artifact表和第二层ID映射。
+- 句柄权限只从当前Session完整原始 `chat_messages`中的Tool Return metadata恢复；模型猜测、其他会话
+  和经过脱敏的Checkpoint均不能增加权限。
+- 同一Run首次读取后复用内存缓存，并发读取使用single-flight；下一Run重新按原始History授权和下载。
+- `read_file`、`read_tool_result`、`load_capability`和Tool Search排除在治理外，防止读取结果再次外置。
+- 上传失败时回退到最多8K字符的有损截断，保证Run仍可继续；不伪造外置成功。
+- SSE和History只附加脱敏的 `artifacts`元数据；日志仅记录数量、字节数、耗时/失败，不记录句柄、
+  工具参数、完整Schema、完整结果、Header或凭据。
+- Console提示“完整结果已外置”，当前只展示受限预览；不新增下载中心按钮。
+
+当前没有TTL、孤儿文件清理、全平台Artifact列表、独立CRUD或统计表。这些只有出现真实治理需求后，
+才作为平台文件生命周期课题另行设计，不影响本轮“大结果不再挤占模型上下文”的目标。
 
 ### 9.3 Memory
 
@@ -1028,8 +1039,10 @@ list/read 上游失败使用 `ToolFailed`；文件 ID、MIME、分页范围、Re
 
 ### 已实现与有潜力：大工具集和 Provider 增强
 
-- 达到真实工具规模后试点 `ToolSearch + DeferredLoadingToolset`，需要跨工具包统一策略时再引入 `CombinedToolset`。
-- 业务工具先支持分页和摘要，再评估 Harness `OverflowingToolOutput`。
+- v0.3.12已用 `ToolSearch + DeferredLoadingToolset`完成MCP渐进披露，并在Run内使用
+  `CombinedToolset`统一Top 3/Top 5检索。
+- v0.4.0已用Harness `ToolOutputLimits` + 平台File Store完成大工具结果外置；业务工具仍可优先
+  提供领域分页和摘要，两者互补。
 - Provider Native Code Execution/File Search 只作为特定 Provider 增强，不作为 DeepAgent 跨模型公共能力。
 
 ## 12. 测试与验收

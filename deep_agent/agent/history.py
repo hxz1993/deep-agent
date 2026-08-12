@@ -26,6 +26,7 @@ from deep_agent.agent.context_references import (
     context_references_from_content,
 )
 from deep_agent.agent.events import _to_jsonable
+from deep_agent.agent.tool_output_limits import tool_result_artifacts
 from deep_agent.schemas.context_reference import ContextReference
 
 
@@ -55,6 +56,7 @@ class HistoryToolResultPart(BaseModel):
     result: Any = None
     tool_call_id: str | None = None
     source: str | None = None
+    artifacts: list[dict[str, Any]] | None = None
 
 
 class HistoryAttachmentPart(BaseModel):
@@ -489,6 +491,7 @@ def _request_tool_returns(request: ModelRequest) -> list[HistoryPart]:
                         if part.tool_name in {"search_tools", "tool_search"}
                         else None
                     ),
+                    artifacts=tool_result_artifacts(part) or None,
                 )
             )
     return parts

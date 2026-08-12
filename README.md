@@ -3,7 +3,7 @@
 DeepAgent 是基于 FastAPI、Pydantic AI 和 SQLAlchemy 的多用户 Agent 服务，并
 随服务发布一体化运维控制台。
 
-当前产品版本为 `0.3.24`。`deep_agent.__version__` 是唯一代码版本来源，FastAPI、
+当前产品版本为 `0.4.0`。`deep_agent.__version__` 是唯一代码版本来源，FastAPI、
 `GET /info` 和 Console 顶部版本徽标均读取该值。后续正式发布默认递增
 `MAJOR.MINOR.PATCH` 的第三位，只有明确规划重大版本时才调整前两位。产品版本不通过
 环境变量或数据库覆盖，也不等同于 Alembic 数据库结构 revision。
@@ -98,7 +98,8 @@ DeepAgent 当前支持：
 - 内置工具：
   - `builtin:general`（通用工具）：默认启用，只包含 `get_current_time`。
   - `builtin:sandbox`（Python 沙箱）：默认关闭，只包含 `execute_python`。
-- 系统工具不是 ToolPackage。`load_capability`、Skill Resource、`read_file`、`search_tools` 和 MCP Resource
+- 系统工具不是 ToolPackage。`load_capability`、Skill Resource、`read_file`、`read_tool_result`、
+  `search_tools` 和 MCP Resource
   由运行时按 Agent/Run 条件自动注入，只在 Console 的只读“系统工具”目录中说明。
 - Skill 不再属于 ToolPackage。Agent 通过独立 `skills` 列表选择，Harness 按需加载 `SKILL.md`；
   Skill 不能绕过 `capabilities` 获得 MCP 或其他工具。
@@ -112,6 +113,14 @@ DeepAgent 当前支持：
 
 Skill 管理接口和包格式见
 [`docs/design/12-agent-skills/skill-system-design.md`](docs/design/12-agent-skills/skill-system-design.md)。
+
+## 大工具结果
+
+v0.4.0 使用 Harness `ToolOutputLimits` 在工具执行后、结果进入下一次模型请求前识别超大结果。
+完整内容保存到平台文件服务，模型历史只保留首尾预览、结构草图和平台 File ID；模型需要细节时
+通过系统工具 `read_tool_result` 按行或关键词读取。该机制不增加 Artifact 表或数据库迁移，句柄
+权限只从当前会话的原始 `chat_messages`恢复，Checkpoint 不能扩大访问范围。完整边界见
+[`docs/design/05-tool-optimization/tool-optimization-design.md`](docs/design/05-tool-optimization/tool-optimization-design.md#92-tooloutputlimits-与大工具结果外置)。
 
 ## 测试
 

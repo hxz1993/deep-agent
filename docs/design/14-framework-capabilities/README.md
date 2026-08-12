@@ -26,7 +26,10 @@
   UI Deferred 持久化和多租户边界。
 - v0.3.17 已完成最小运行观测：官方 Conversation/Run 标识、脱敏结构化日志、缓存 Usage和
   Console 当前 Run；OTLP 后端、正式诊断中心和 Evaluation 仍按独立需求推进。
-- 当前下一条完整产品主线是线上 Skill 体系。其余能力按触发条件放入“有潜力”，不预埋半成品。
+- v0.4.0 已采用Harness `ToolOutputLimits` + `Spill`，通过平台文件Store外置大工具结果，并保留
+  原生 `read_tool_result`；没有复制读取状态机，也没有新增Artifact表。
+- 当前下一条重点课题是压缩后搜索原始会话；仍需真实丢失样本触发。其余能力按条件保留，
+  不预埋半成品。
 
 完整清单见
 [`framework-capabilities-baseline.md`](framework-capabilities-baseline.md)，实施状态见

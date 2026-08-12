@@ -1,82 +1,73 @@
-# Artifact 交互语义 — 设计纲要
+# Artifact 与出站产物设计
 
-> 日期：2026-08-02  
-> 状态：骨架（非实施计划）  
-> 入口：[`README.md`](README.md)
+> 更新：2026-08-13
+> 状态：工具结果Artifact已实施；通用计算产物待真实需求触发
 
-## 1. 核心对象
+## 1. 已实现对象
 
-**Artifact** = 宿主托管的不透明字节对象 + 元数据，供 Agent 用短句柄引用。
+v0.4.0 的 `artifact_id`就是DeepFOS平台文件服务返回的File ID，不再增加一层内部ID或映射表。
+该对象只表示“当前会话里某次工具调用被外置的完整文本结果”。
 
-| 字段（示意） | 含义 |
+| 信息 | 保存位置 |
 | --- | --- |
-| `artifact_id` | 不透明 id |
-| `byte_size` / `content_type` / `filename?` | 元数据 |
-| `scope` | `request` \| `session`（第一版偏短寿命） |
-| `created_by` | `sandbox_execute` \| `agent_register` \| … |
-| TTL | 过期删除 |
+| 完整UTF-8结果 | 平台DL文件 |
+| `artifact_id`、原始字节数、角色 | 原始Tool Return metadata |
+| 模型可见预览与结构草图 | Tool Return content |
+| Console展示元数据 | SSE/History的可选 `artifacts` |
 
-合法 id：当前会话原始历史或宿主登记表——**不能**仅从 Checkpoint 推断。
+不建立Artifact表。当前会话的Artifact数量很少，读取授权通过扫描该Session完整原始History即可，
+避免多一次数据库索引和File ID映射。
 
-## 2. 交互语义（与后接无关）
-
-建议 Agent 可见能力（名称可改），默认关闭的独立 Capability：
-
-| 意图 | 示意 |
-| --- | --- |
-| 登记 | 小内容直接 `register_artifact(bytes|text, meta)` → `artifact_id`（可不经沙箱） |
-| 发现 | 沙箱 `result.artifacts[]` 带 id；或 `describe_artifact(id)` |
-| 使用 | 下游 tool 只收 `artifact_id`，由宿主读字节再做事 |
-
-**不规定**「使用」必须等于「上传下载中心」。
-
-## 3. 链路
-
-### 3.1 语义主干（A0/A1）
+## 2. 写入与读取链路
 
 ```text
-来源 A：execute_python 大产物 → 晋升 → artifact_id 进 result
-来源 B：模型/tool 直接 register 小内容 → artifact_id
-        ↓
-后续任意消费者（另一 tool / sink / 前端）只认 artifact_id
+Harness ToolOutputLimits.after_tool_execute
+  → Token超过动态阈值
+  → PlatformToolResultStore.write
+  → 平台DL上传
+  → Harness生成预览并把File ID写入ToolReturn.metadata
+  → Pydantic AI持久化缩短后的Tool Return
+
+模型调用 read_tool_result(handle, offset, limit, from_end, pattern)
+  → Store确认handle存在于当前Session原始History
+  → 同Run缓存命中则直接读取
+  → 否则平台下载一次并缓存
+  → Harness按行/尾部/字面关键词返回受限切片
 ```
 
-### 3.2 可选 sink：下载中心（S0）
+`read_tool_result`保留Harness原生实现。DeepAgent只实现 `OverflowStore.write/read`适配器，因此不复制
+分页、关键词、单次行数和字符上限逻辑。
 
-```text
-publish_to_download_center(artifact_id, file_name?)
-  → 宿主读 Artifact
-  → PlatformAPI.file.upload(DL) + SpaceAPI.business.save
-  → 返回 { file_id, ... }（平台侧引用，可与 artifact_id 并存）
-```
+## 3. 权限与压缩
 
-其他 sink 同构：`publish_*(artifact_id) → 外部句柄`。
+- `chat_messages`是Artifact授权事实源。
+- Checkpoint会删除Tool Return metadata，只保存模型需要的预览投影；它不能恢复或扩大Artifact权限。
+- 分支会话只在新Session原始History确实复制了对应Tool Return时获得句柄。
+- 平台下载仍携带当前Run可信转发Header；句柄本身不能绕过Session归属检查。
+- 日志不记录句柄和完整内容。
 
-## 4. 与现有表面的分工
+## 4. 失败语义
 
-| 现有表面 | 角色 | 本课题 |
-| --- | --- | --- |
-| `POST /uploads` + 系统工具 `read_file` | **入站**会话附件/Skill素材 | 不合并；对照来源授权与 `file_id`纪律 |
-| `builtin:sandbox/execute_python` | 无状态计算 | 大结果只增加晋升 → Artifact |
-| deepfos `export_file_for_download` | 脚本侧下载中心两步 | **仅作 S0 参考实现**，非课题必达 |
-| Harness Spill | 大 tool 结果外置 | 概念对照；对象层是否共用待决 |
+| 场景 | 行为 |
+| --- | --- |
+| 平台上传失败 | Harness回退到8K字符截断，不生成Artifact |
+| 模型猜测句柄 | `read_tool_result`返回无可用结果提示，不访问平台 |
+| 平台文件已丢失 | 返回结果不可用提示，Run可继续或重跑原工具 |
+| 取消写入/读取 | 原样传播取消，终止当前Run |
+| 同Run并发读取 | single-flight，只下载一次 |
 
-## 5. 与 07 workdir cleanup
+## 5. 当前非目标
 
-见 README「交叉合同」。硬规则：`result` 中的 `artifact_id` 必须在 workdir 删除前完成晋升；晋升失败则不得留下半引用。
+- 通用下载中心、Artifact列表或CRUD。
+- 独立Artifact数据库表、版本或File ID映射表。
+- TTL、孤儿文件清理、平台级配额和统计。
+- 沙箱输出文件自动晋升。
+- MCP直接返回二进制Artifact。
 
-## 6. 开放问题
+这些能力只有出现真实业务需求后再设计，不能为了“完整Artifact平台”扩大v0.4.0的安全兜底范围。
 
-1. 存储：单实例本地 vs 多实例共享。  
-2. A0 是否提供宿主内 `read_artifact` 分页（给模型），还是只允许 sink 读。  
-3. 第一版是否上 S0，还是只交付句柄语义。  
-4. `artifact_id` 与平台 `file_id` 是否允许在 publish 后建立映射表。  
-5. 与 Spill / `OverflowingToolOutput` 是否共用 Store。  
-6. MCP 是否允许直接产出 Artifact（可后置）。
+## 6. 未来通用计算产物
 
-## 7. 非目标
-
-- 沙箱网络白名单  
-- 把下载中心当成唯一成功标准  
-- 用 stdout/`result` 分片传大二进制  
-- 替代 06 入站附件产品  
+未来若要求Python/Skill脚本输出Excel、图片或压缩包，应在宿主层把受控workdir中的文件上传到平台，
+再向前端返回可下载元数据。该链路可以继续复用平台File ID，但必须另行确定文件归属、保留周期、
+下载权限和清理策略；不会把二进制内容塞入 `read_tool_result`。

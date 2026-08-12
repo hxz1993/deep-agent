@@ -209,6 +209,7 @@ def build_agent(
     skill_script_toolset: Any | None = None,
     skill_capability: AbstractCapability[AgentDeps] | None = None,
     context_compaction: AbstractCapability[AgentDeps] | None = None,
+    tool_output_limits: AbstractCapability[AgentDeps] | None = None,
     mcp_server_names: list[str] | None = None,
     estimator: TokenEstimator | None = None,
 ) -> Agent[AgentDeps, str]:
@@ -237,6 +238,8 @@ def build_agent(
         capabilities.append(context_compaction)
     if skill_capability is not None:
         capabilities.append(skill_capability)
+    if tool_output_limits is not None:
+        capabilities.append(tool_output_limits)
     if mcp_toolsets:
         capabilities.append(
             ToolSearch(

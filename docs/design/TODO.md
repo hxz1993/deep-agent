@@ -39,14 +39,9 @@
 
 ### 下一步重点课题（尚未进入实施）
 
-以下两项是当前从“有潜力”中选出的优先讨论方向，但尚未锁定产品边界和实施计划，仍保留在
-“有潜力”分组：
+大工具结果治理已在v0.4.0以最小边界实施并移入“已实现”。当前重点讨论方向只剩：
 
-1. `TOOL-109 / ART-001 / ART-001b / ART-101 / ART-201`：大工具结果治理。先收集真实大结果样本，
-   区分“结果本身很大”“重复进入后续上下文”和“History/Console仍需查看完整内容”三类问题，
-   再评估 Harness `ToolOutputLimits`、`OverflowStore`、`MediaStore` 与DeepAgent共享存储、授权、TTL
-   和回读协议的组合。
-2. `CTX-102`：压缩后搜索原始会话。先用真实长会话验证摘要后是否会丢失精确路径、ID、历史决定
+1. `CTX-102`：压缩后搜索原始会话。先用真实长会话验证摘要后是否会丢失精确路径、ID、历史决定
    或工具结论，再评估 Harness `ConversationSearch`接入现有 `chat_messages`的只读查询方式；不建立
    第二套History，也不改变现有Checkpoint和压缩链路。
 
@@ -61,7 +56,6 @@
 | ID | 潜力方向 | 优先复用 | 触发条件 | 当前边界 | 来源 |
 | --- | --- | --- | --- | --- | --- |
 | `TOOL-003` / `TOOL-106` / `TOOL-110` | 工具风险元数据、执行审批和参数/结果 Guardrail | Core `ApprovalRequiredToolset`、Harness `ToolGuardrail`、Core Deferred | 出现真实写入、删除、外发或高风险代码执行工具 | 业务服务权限、审批记录、TTL、操作人、幂等和审计仍由 DeepAgent/业务系统负责 | [工具治理](05-tool-optimization/tool-optimization-design.md#94-guardrails) |
-| `TOOL-109` / `ART-001` / `ART-001b` / `ART-101` / `ART-201` | **下一步重点**：大工具结果外置与 Artifact | Harness `ToolOutputLimits`、`OverflowStore`、`MediaStore` | 大结果稳定重复占用上下文，且跨 Pod 共享 Store 已选定 | 先收集真实样本再定方案；句柄不可猜、user/App/Space 授权、TTL、清理、History 查看与 Console 提示必须完整 | [大工具结果治理](05-tool-optimization/tool-optimization-design.md#92-tooloutputlimits-overflowingtooloutput) |
 | `TOOL-105` | 可选结构化最终输出 | Pydantic AI `ToolOutput`/`NativeOutput`/`PromptedOutput` | 产品锁定普通文本与多输出组合、混合工具调用和严格模式规则 | Output 不是 ToolPackage；权威 MCP 事实不由模型重写 | [结构化最终输出](09-structured-output/structured-output-design.md) |
 | `TOOL-108` | Agent 包内逐工具授权 | Core `FilteredToolset` 或 Prepared Toolset | 出现明确的“同包内部分工具禁止使用”权限需求 | 授权主键不能直接依赖可重命名的协议名 | [工具包后续演进](11-tool-packages/tool-packages-design.md#12-后续演进) |
 | `TOOL-301` | Provider Native Code/File/Web/Computer 等工具 | Core Provider Native Capability | 某托管 Provider 能力、模型和执行环境成为明确产品功能 | 必须显式启用并按 Provider 治理；不替代公共 MCP、Sandbox、附件、RAG 或当前页面 UI Tool | [浏览器与页面操作](15-browser-and-page-actions/browser-and-page-actions-design.md#23-provider-原生-computer-use) |
@@ -152,15 +146,17 @@
 | `TOOL-203` | `cube_query_data` 与 `dimension_query_members` 选择性披露可信 Return Schema；延迟工具加载前零额外成本 | v0.3.17，[工具返回 Schema](05-tool-optimization/tool-optimization-design.md#84-tool-return-schema) |
 | `SKILL-001` | Skill 与 ToolPackage 分离；上传安装、Agent 授权、Harness `load_capability` 渐进披露、References/Assets 分页读取和脚本隔离；每个 Pod仅保留按 code组织的一份当前运行目录；同 Hash替换可恢复丢失的平台原包；管理操作同步、普通 Run本地读取、单 Skill故障隔离 | v0.3.18～v0.3.23；2026-08-12 Test 004真实验收，[Skill 体系](12-agent-skills/skill-system-design.md) |
 | `MCP-SNAPSHOT` | URL MCP 检测保存完整工具快照，聊天按快照披露并在首次真实调用时建连；缺快照不阻塞 Run，单 Server 连接失败转为 `ToolFailed` | v0.3.19，[工具检索](13-tool-discovery/tool-discovery-design.md) |
-| `CONSOLE-202` | 独立只读系统工具目录按 Skill、文件、MCP工具发现和MCP Resource展示来源、自动注入条件与说明；`runtime:*`只作展示，不进入Agent能力或数据库 | v0.3.21～v0.3.23，[工具包 Console](11-tool-packages/tool-packages-design.md#9-console) |
+| `CONSOLE-202` | 独立只读系统工具目录按Skill、文件、工具结果、MCP工具发现和MCP Resource展示来源、自动注入条件与说明；`runtime:*`只作展示，不进入Agent能力或数据库 | v0.3.21～v0.4.0，[工具包 Console](11-tool-packages/tool-packages-design.md#9-console) |
 | `SKILL-102A` | Skill脚本执行：只允许已授权 `.py`、显式JSON inputs/arguments/同Skill资源，固定读取 `outputs/result.json`；选择含脚本Skill并启用 `builtin:sandbox`后，与 `execute_python`共用当前Sandbox | v0.3.22～v0.3.24，[Skill 脚本边界](12-agent-skills/skill-system-design.md#10-skill脚本执行) |
 | `FILE-001` / `SKILL-103` | 系统工具 `read_file`统一读取会话附件与Skill文件；只处理文本、DOCX和XLSX，同一Run字节与解析single-flight缓存；图片严格走当前轮原生多模态附件 | v0.3.23～v0.3.24，[附件解析](06-attachment-parsing/attachment-parsing-design.md)、[Skill体系](12-agent-skills/skill-system-design.md) |
+| `TOOL-109` / `ART-001` | 大工具结果安全兜底：Harness `ToolOutputLimits`按模型窗口动态计算阈值，`Spill`把完整结果保存到平台文件服务；平台File ID作为会话内Artifact句柄，原始History授权，`read_tool_result`按需回读，Console显示外置提示 | v0.4.0，[大工具结果治理](05-tool-optimization/tool-optimization-design.md#92-tooloutputlimits-与大工具结果外置) |
 | Harness 确定性压缩 tiers | `ClampOversizedMessages`、`ClearToolResults`、`DeduplicateFileReads` 已复用 | 当前基线，[压缩研究](03-context-compaction/context-compaction-research.md#harness-实验结论) |
 | 官方 DeepSeek Provider | 使用 Pydantic AI 官方 Provider/Profile，不保留自定义模型循环 | v0.3.9+，[框架能力台账](14-framework-capabilities/framework-capabilities-baseline.md#41-已经采用) |
 
 ## 当前排期结论
 
 - 近期明确动作是等待三个业务Skill完成内容修改后执行 `SKILL-VAL-001`整体验收。
-- 大工具结果治理和压缩后搜索原始会话是下一步重点课题，但当前先做样本与边界确认，不直接实施。
+- 大工具结果治理已在v0.4.0完成第一版；通用下载中心、Artifact表、TTL和孤儿治理没有真实需求，
+  不作为当前待办。压缩后搜索原始会话是下一步重点课题，但仍需先验证真实缺失样本。
 - 其余“有潜力”事项维持原分组，本轮不考虑不等于暂缓或关闭。
 - “暂缓”事项仍只按各自重新启动条件恢复，不因本次优先级调整而改变。

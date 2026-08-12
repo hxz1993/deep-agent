@@ -11,6 +11,7 @@ from deep_agent.schemas.attachment import AttachmentRef
 if TYPE_CHECKING:
     from deep_agent.agent.context.runtime import ContextRunState
     from deep_agent.agent.tool_discovery import ToolDiscoveryTelemetry
+    from deep_agent.agent.tool_output_limits import ToolOutputTelemetry
 
 
 @dataclass
@@ -33,6 +34,7 @@ class AgentDeps:
     request_headers: Mapping[str, str] = field(default_factory=dict)
     context_state: "ContextRunState | None" = None
     tool_discovery: "ToolDiscoveryTelemetry | None" = None
+    tool_output_limits: "ToolOutputTelemetry | None" = None
     tool_discovery_inputs_explicit: bool = False
     tool_discovery_primary_query: str = ""
     tool_discovery_supplemental_query: str = ""

@@ -69,6 +69,7 @@ from deep_agent.agent.observability import (
     usage_dict,
 )
 from deep_agent.agent.run_identity import conversation_id_for, new_run_id
+from deep_agent.agent.tool_output_limits import PlatformToolResultStore
 from deep_agent.agent.history import (
     _extract_assistant_text,
     first_user_prompt,
@@ -144,6 +145,7 @@ class AgentRunner:
         stores: DataStores | None = None,
         active_runs: ActiveRunRegistry | None = None,
         skill_runtime_context: dict[str, Any] | None = None,
+        tool_output_store: PlatformToolResultStore | None = None,
     ) -> None:
         self.agent = agent
         self.store = store
@@ -162,6 +164,15 @@ class AgentRunner:
         self._stores = stores
         self._active_runs = active_runs or ActiveRunRegistry()
         self._skill_runtime_context = skill_runtime_context
+        self._tool_output_store = tool_output_store
+
+    def _bind_tool_output_store(
+        self,
+        deps: AgentDeps,
+        raw_history: list[ModelMessage],
+    ) -> None:
+        if self._tool_output_store is not None:
+            self._tool_output_store.bind(deps, raw_history)
 
     @staticmethod
     def _start_run_identity(
@@ -650,6 +661,8 @@ class AgentRunner:
                     dict(item) for item in deps.skill_runtime.get("unavailable", [])
                 ],
             }
+        if deps is not None and deps.tool_output_limits is not None:
+            result["tool_output_limits"] = deps.tool_output_limits.as_dict()
         return result
 
     def _prepare_context_state(
@@ -988,6 +1001,7 @@ class AgentRunner:
                 branch_from=branch_from,
                 deferred_tool_results=deferred_tool_results,
             )
+            self._bind_tool_output_store(deps, prepared.raw)
             llm_history, user_prompt = await self._llm_inputs(
                 prepared.projected,
                 message,
@@ -1105,6 +1119,7 @@ class AgentRunner:
                 deferred_tool_results=deferred_tool_results,
                 persister=persister,
             )
+            self._bind_tool_output_store(deps, prepared.raw)
             try:
                 llm_history, user_prompt = await self._llm_inputs(
                     prepared.projected,

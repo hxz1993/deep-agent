@@ -22,7 +22,7 @@ import {
  *   thinking     -> { type:"thinking", delta }
  *   tool_call    -> { type:"tool_call", tool, args, tool_call_id, widget?, metadata? }
  *   tool_call_removed -> { type:"tool_call_removed", tool, tool_call_id, reason }
- *   tool_result  -> { type:"tool_result", tool, result, tool_call_id }
+ *   tool_result  -> { type:"tool_result", tool, result, tool_call_id, artifacts? }
  *   final        -> { type:"final", status, output, usage, deferred? }
  *   cancelled    -> { type:"cancelled", status, model_message_count?, user_branch_point? }
  *   error        -> { type:"error", message }
@@ -1233,6 +1233,7 @@ function renderHistory(messages, modelMessageCount, contextCheckpoint = null) {
             result: part.result,
             tool_call_id: part.tool_call_id,
             source: part.source,
+            artifacts: part.artifacts,
           });
         }
       }
@@ -2565,8 +2566,9 @@ function createAssistantMessage(timestamp, branchPoint) {
       body.querySelector("[data-tool-result]")?.remove();
       const res = document.createElement("div");
       res.dataset.toolResult = "1";
-      res.innerHTML = `<div class="label" style="margin-top:8px">结果 result</div>${renderToolResult(data.result)}`;
+      res.innerHTML = `${renderToolResultArtifacts(data.artifacts)}<div class="label" style="margin-top:8px">结果 result</div>${renderToolResult(data.result)}`;
       body.appendChild(res);
+      refreshLucideIcons();
       updateProcessDisclosure();
     },
     removeToolCall(data) {
@@ -2904,6 +2906,24 @@ function renderToolResult(result) {
     return `<div class="md-content tool-result-md markdown-body">${renderMarkdown(result)}</div>`;
   }
   return `<pre>${escapeHtml(pretty(result))}</pre>`;
+}
+
+function renderToolResultArtifacts(artifacts) {
+  if (!Array.isArray(artifacts) || artifacts.length === 0) return "";
+  const totalBytes = artifacts.reduce(
+    (total, item) => total + (Number.isFinite(Number(item?.byte_size)) ? Number(item.byte_size) : 0),
+    0,
+  );
+  const size = totalBytes > 0 ? ` · ${formatArtifactBytes(totalBytes)}` : "";
+  return `<div class="tool-result-artifact">${lucideIcon("archive")}<span>完整结果已外置${escapeHtml(size)}，当前展示预览；Agent 可按需读取。</span></div>`;
+}
+
+function formatArtifactBytes(value) {
+  const bytes = Number(value);
+  if (!Number.isFinite(bytes) || bytes <= 0) return "";
+  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
+  if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KiB`;
+  return `${Math.round(bytes)} B`;
 }
 
 function escapeHtml(s) {

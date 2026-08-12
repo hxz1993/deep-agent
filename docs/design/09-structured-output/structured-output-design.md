@@ -336,8 +336,8 @@ ToolOutput 校验结构
 输出校验、DeepAgent `jsonschema` 二次校验和有限重试；需要引用、合规或敏感信息检查时再评估
 Harness Guardrail。
 
-Harness 的 `OverflowingToolOutput` / Tool Output Limits 管理的是普通工具结果过大，不是 Agent
-最终结构化输出，两个概念不得混用。
+Harness `ToolOutputLimits`已在v0.4.0管理普通工具结果过大，不是Agent最终结构化输出，两个概念
+不得混用。
 
 ## 10. DeepAgent 推荐运行设计
 

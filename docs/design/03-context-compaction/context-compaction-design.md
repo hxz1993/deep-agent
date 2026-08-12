@@ -532,6 +532,17 @@ v0.3.14 进一步收口两个运行边界：每个 Pod 固定一个异步 Gunico
 `context_compaction_result` 并关闭 SSE，history 与 `context-status` 由客户端随后分别刷新。
 多个 Pod 横向扩容仍需会话粘性或共享取消协调器。
 
+### 9.2 大工具结果与Checkpoint
+
+v0.4.0在压缩之前先用Harness `ToolOutputLimits`治理大工具结果。完整结果不会先进入History再等待
+压缩，而是在工具执行完成后立即上传平台文件；模型历史只保留受限预览和读取说明。因此压缩器继续
+处理的是合法、受控大小的Tool Return。
+
+Checkpoint脱敏会删除Tool Return metadata中的平台句柄，这是有意边界：Checkpoint是派生的模型
+投影，不是Artifact授权事实源。`read_tool_result`的合法句柄始终从当前Session完整原始
+`chat_messages`恢复。压缩安全切分仍把原工具Call/Return作为一对处理；对
+`read_tool_result`的重复同页读取使用现有 `DeduplicateFileReads`键去重，不拆散调用和结果。
+
 ## 10. Console 测试会话
 
 为避免人工逐轮输入数十次才能复现压缩，Workspace 在会话搜索框和普通“新建会话”

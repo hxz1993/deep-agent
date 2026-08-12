@@ -203,7 +203,12 @@ class ChatHistoryPersistenceTests(unittest.IsolatedAsyncioTestCase):
         final = next(ev for ev in reversed(events) if ev.get("type") == "final")
         self.assertEqual(final["status"], "completed")
         self.assertEqual(final["output"], "plain final")
-        self.assertNotIn("tool_call", {event.get("type") for event in events})
+        called_tools = {
+            event.get("tool")
+            for event in events
+            if event.get("type") == "tool_call"
+        }
+        self.assertTrue(called_tools.isdisjoint({"builtin__choice", "builtin__confirm"}))
 
     async def test_test_model_calls_explicitly_selected_builtin_ui_tools(self) -> None:
         events = await self._stream_events(

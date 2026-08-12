@@ -168,3 +168,10 @@ test("实时 deferred 续跑复用同一可视回答且 removed 即时删除工�
   assert.match(chatSource, /case "cancelled":[\s\S]*assistant\.markInterrupted\(\)/);
   assert.match(chatSource, /case "error":[\s\S]*addErrorTo\(assistant/);
 });
+
+test("大工具结果显示外置提示并保留预览", () => {
+  assert.match(chatSource, /renderToolResultArtifacts\(data\.artifacts\)/);
+  assert.match(chatSource, /完整结果已外置/);
+  assert.match(chatSource, /Agent 可按需读取/);
+  assert.match(workspaceCss, /\.tool-result-artifact/);
+});

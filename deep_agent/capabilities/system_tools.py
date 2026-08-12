@@ -45,6 +45,19 @@ _SYSTEM_TOOL_DOMAINS = (
         ),
     ),
     SystemToolDomain(
+        code="runtime:tool-result",
+        label="工具结果",
+        description="按需读取已外置到平台文件服务的完整工具结果。",
+        tools=(
+            SystemToolDescription(
+                name="read_tool_result",
+                source="Pydantic AI Harness",
+                injection_condition="Agent Run启用大工具结果治理",
+                description="按行分页或关键词读取本会话已外置的完整工具结果。",
+            ),
+        ),
+    ),
+    SystemToolDomain(
         code="runtime:mcp-tool-search",
         label="MCP 工具发现",
         description="在已授权但延迟披露的 MCP 工具中查找当前任务需要的工具。",

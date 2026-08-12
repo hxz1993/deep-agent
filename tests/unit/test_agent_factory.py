@@ -10,6 +10,7 @@ from pydantic_ai.providers.deepseek import DeepSeekProvider
 from pydantic_ai.providers.google import GoogleProvider
 from pydantic_ai.providers.openai import OpenAIProvider
 from pydantic_ai.toolsets import FunctionToolset
+from pydantic_ai_harness.tool_output_limits import ToolOutputLimits
 
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.factory import _resolve_model, _toolsets_for_spec, build_agent
@@ -190,6 +191,15 @@ class ResolveModelTests(unittest.TestCase):
         self.assertFalse(
             any(module.startswith("deep_agent.agent.models") for module in capability_modules)
         )
+
+    def test_harness_tool_output_limits_can_be_added_as_standard_capability(self) -> None:
+        capability = ToolOutputLimits()
+        agent = build_agent(
+            _spec(model="test"),
+            ToolPackageRegistry(),
+            tool_output_limits=capability,
+        )
+        self.assertIn(capability, agent.root_capability.capabilities)
 
 
 class ToolsetAssemblyTests(unittest.TestCase):

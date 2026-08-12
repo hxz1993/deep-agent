@@ -427,7 +427,15 @@ Provider Native Tool 使用对应的原生 Call/Return 事件，不经过普通 
   "type": "tool_result",
   "tool": "doc_search_doc_search",
   "result": "### 维度管理\n...(markdown 文本)...",
-  "tool_call_id": "call_00_evdBG0xFNRn5Q8IlwgZW4217"
+  "tool_call_id": "call_00_evdBG0xFNRn5Q8IlwgZW4217",
+  "artifacts": [
+    {
+      "artifact_id": "platform-file-id",
+      "kind": "tool_result_overflow",
+      "role": "return_value",
+      "byte_size": 1048576
+    }
+  ]
 }
 ```
 
@@ -437,11 +445,14 @@ Provider Native Tool 使用对应的原生 Call/Return 事件，不经过普通 
 | `tool` | `string` | 工具名称 |
 | `result` | `string \| number \| boolean \| object \| array \| null` | 工具返回值，经 `_to_jsonable` 序列化 |
 | `tool_call_id` | `string \| null` | 对应 `tool_call` 的 ID |
+| `artifacts` | `array \| null` | 可选；完整结果已外置时的脱敏句柄元数据，当前 `artifact_id`即平台File ID |
 
 **客户端处理建议**：
 
 - 通过 `tool_call_id` 找到对应的 `tool_call` UI 块并标记完成
 - 若 `result` 为字符串且含 Markdown，建议渲染为富文本
+- `artifacts`非空时，`result`是受限预览而非完整结果；客户端显示“完整结果已外置”，模型会通过
+  系统工具 `read_tool_result`按需读取，客户端不需要代替模型回读
 - 若 `tool_call_id` 缺失，可回退到「最近一个未完成的工具块」
 
 ---
@@ -521,6 +532,7 @@ Provider Native Tool 使用对应的原生 Call/Return 事件，不经过普通 
 | `conversation_id` | `string` | 当前 Agent + Session 的稳定 Pydantic AI Conversation ID |
 | `run_id` | `string` | 本次发送、Deferred恢复或重试的独立 Pydantic AI Run ID |
 | `run_metrics` | `object` | 当前页面可用的临时运行指标；完整指标不写入聊天历史 |
+| `context.tool_output_limits` | `object` | 可选；大工具结果阈值、外置次数/字节数、回读、下载和外置失败计数 |
 
 `usage` 字段：
 
@@ -534,6 +546,19 @@ Provider Native Tool 使用对应的原生 Call/Return 事件，不经过普通 
 `run_metrics.cache_read_tokens/cache_write_tokens` 只读取 Provider Usage。Provider 未报告时为
 `null`，不能解释为零命中；详细运行指标当前只存在于终态 SSE 和脱敏结构化日志，页面刷新后
 History 仅恢复 `conversation_id/run_id/status`。
+
+`context.tool_output_limits`只报告数字，不包含Artifact句柄、工具参数、完整结果或平台Header。例如：
+
+```json
+{
+  "threshold_tokens": 24000,
+  "spill_count": 1,
+  "spilled_bytes": 1048576,
+  "read_calls": 2,
+  "platform_downloads": 1,
+  "spill_failures": 0
+}
+```
 
 **客户端处理建议**：
 

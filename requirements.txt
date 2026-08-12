@@ -2,6 +2,9 @@
 # Core agent runtime. Slim package + only the provider/mcp extras we use,
 # to avoid pulling in every provider SDK (bedrock, cohere, huggingface, ...).
 pydantic-ai-slim[openai,anthropic,google,mcp]==2.26.0
+# OpenAI 3.x imports an aiohttp transport that requires aiohttp>=3.14.1,
+# while the bundled DeepFOS platform runtime remains on aiohttp 3.9.x.
+openai==2.46.0
 pydantic-ai-harness[skills]==0.18.0
 tiktoken>=0.13,<1
 

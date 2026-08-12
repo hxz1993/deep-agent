@@ -110,6 +110,7 @@ HTTP → deep_agent/api/v1 → AgentRunner → pydantic_ai.Agent → Toolsets
 - v0.3.23 起附件与 Skill 文件统一由自动注入的系统工具 `read_file`读取：文本按行、DOCX按逻辑块、XLSX按物理行分页，支持图片输入的模型可读图片。同一 Run只下载或读盘一次、完整解析一次；缓存随 Run释放。旧 `builtin:attachment`、三个附件读取工具和 `read_skill_resource`不再注册。脚本路径不能作为文件正文读取；`execute_skill_script`只有当前 Agent同时选择含脚本 Skill、启用 Sandbox，且 Backend明确 `production_ready=true`才注入。
 - v0.3.14 起每个 Pod 固定一个异步 Gunicorn Worker，保证进程内 `ActiveRunRegistry` 与取消请求一致命中；横向扩容多个 Pod 前必须提供会话粘性或共享取消协调器。工具检索以用户问题为主，Context Reference 标签仅在问题无检索结果时回退，并在单次 Run 内排除已披露工具和重复搜索；不得清空 Pydantic AI 的跨 Run 发现历史。
 - Harness 是可选能力库，不是产品平台。会话、身份、配置、HITL、SSE 和 Console 继续由 DeepAgent 负责；引入 Harness 0.x 时必须与 `pydantic-ai-slim` 一起固定准确版本。
+- `pydantic-ai-slim 2.26` 的 OpenAI extra 只有 SDK 下限。当前必须同时固定 `openai==2.46.0`，以兼容 DeepFOS平台运行时的 `aiohttp 3.9.x`；升级 OpenAI 3.x 前必须先联合验证平台 aiohttp，不能让干净构建自动漂移。
 - Provider Usage 是 best effort；OpenAI-compatible 或私有端点返回 0 时可能代表缺失。上下文预算必须结合模型窗口元数据和保守估算，不能只依赖 `result.usage`。
 - 新上传只保存附件引用；运行时 `read_file`通过 1-based `offset/limit`、
   `has_more/next_offset`渐进读取 TXT、DOCX、XLSX。合法 `file_id`

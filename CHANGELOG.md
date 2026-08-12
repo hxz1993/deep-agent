@@ -11,6 +11,10 @@ Run内缓存并使用 single-flight，下一轮重新加载。旧的三个附件
 可配置的 `builtin:attachment`均已删除；Alembic `004`只从显式 Agent能力列表中清理旧编码。
 `execute_python`仍属于可配置的 `builtin:sandbox`，Skill脚本执行仍要求生产安全Backend。
 
+依赖热修复：将 OpenAI Python SDK 固定为 `2.46.0`。Pydantic AI 2.26 对 OpenAI SDK 只声明
+`>=2.45.0`，干净构建曾自动解析到 OpenAI 3.0，而该版本的异步传输要求 `aiohttp>=3.14.1`，
+与 DeepFOS平台运行时的 `aiohttp 3.9.x`不兼容。固定版本避免同一提交因上游发布而构建漂移。
+
 ## v0.3.22
 
 复用会话附件解析内核，让已授权 Skill 的文本、DOCX 和 XLSX 资源通过统一分页工具按需

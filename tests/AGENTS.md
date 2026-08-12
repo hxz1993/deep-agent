@@ -61,6 +61,7 @@ tests/
 | `test_tool_package_registry.py` | ToolPackage Registry 的整包选择、默认和空列表语义 |
 | `test_sqlite_bootstrap.py` | Alembic 001/002/003/004 结构、工具包、Skill和旧附件能力清理、降级与失败前校验 |
 | `test_tool_package_migration_dialects.py` | SQLite、MySQL、PostgreSQL 的 002 DDL 分支 |
+| `test_runtime_dependencies.py` | OpenAI SDK/aiohttp兼容锁定与Pydantic AI OpenAI模型导入 |
 | `test_session_model_override.py` | Agent 对话 `model_id` 请求级覆盖（`build_runner_for_agent`） |
 | `test_ui_tools_rfc.py` | builtin/manual UI 工具包、工具归属、Agent 整包选择、Schema 校验与 Deferred |
 

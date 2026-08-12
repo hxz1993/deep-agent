@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 
 from docx import Document
 from openpyxl import Workbook
-from pydantic_ai import ModelRetry, RunContext, ToolFailed
+from pydantic_ai import RunContext
 from pydantic_ai.models.test import TestModel
 from pydantic_ai.usage import RunUsage
 
@@ -54,20 +54,20 @@ def _entry(path: str, *, category: str = "asset", readable: bool = False) -> dic
 
 
 class SkillResourceReadingTests(unittest.IsolatedAsyncioTestCase):
-    def test_text_keeps_zero_based_character_pagination(self) -> None:
+    def test_text_uses_one_based_line_pagination(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "guide.md"
-            target.write_text("abcdef", encoding="utf-8")
+            target.write_text("a\nb\nc\nd", encoding="utf-8")
             page = read_resource_page(
                 _entry("guide.md", category="reference", readable=True),
                 target,
                 offset=2,
-                limit=3,
+                limit=2,
             )
         self.assertEqual(page.format, "text")
-        self.assertEqual(page.unit, "character")
-        self.assertEqual(page.content, "cde")
-        self.assertEqual(page.next_offset, 5)
+        self.assertEqual(page.unit, "line")
+        self.assertEqual(page.content, "b\nc")
+        self.assertEqual(page.next_offset, 4)
 
     def test_docx_reuses_block_parser(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -128,12 +128,9 @@ class SkillResourceReadingTests(unittest.IsolatedAsyncioTestCase):
             script = next(entry for entry in listed["resources"] if entry["category"] == "script")
             self.assertEqual(script["path"], "scripts/run.py")
             self.assertTrue(script["executable"])
-            with self.assertRaises(ModelRetry):
-                await tools["read_skill_resource"].call_func(
-                    {"skill_code": "demo", "path": "scripts/run.py"}, ctx
-                )
+            self.assertEqual(set(tools), {"list_skill_resources"})
 
-    async def test_missing_indexed_file_is_terminal_tool_failure(self) -> None:
+    async def test_resource_toolset_only_lists_resources(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             item = ResolvedSkill(
@@ -152,10 +149,7 @@ class SkillResourceReadingTests(unittest.IsolatedAsyncioTestCase):
                 usage=RunUsage(),
             )
             tools = await toolset.get_tools(ctx)
-            with self.assertRaises(ToolFailed):
-                await tools["read_skill_resource"].call_func(
-                    {"skill_code": "demo", "path": "references/missing.md"}, ctx
-                )
+            self.assertEqual(set(tools), {"list_skill_resources"})
 
 
 if __name__ == "__main__":

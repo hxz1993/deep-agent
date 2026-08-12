@@ -10,15 +10,15 @@ from deep_agent.agent.attachment_extractors import (
     normalize_range,
     paginate_items,
     select_xlsx_sheet,
+    text_document,
     xlsx_workbook,
 )
-from deep_agent.skills.package import READABLE_SUFFIXES
+from deep_agent.skills.package import IMAGE_SUFFIXES, READABLE_SUFFIXES
 
 
-SkillResourceFormat = Literal["text", "docx", "xlsx"]
-SkillResourceUnit = Literal["character", "block", "row"]
+SkillResourceFormat = Literal["text", "docx", "xlsx", "image"]
+SkillResourceUnit = Literal["line", "block", "row", "image"]
 
-MAX_TEXT_PAGE = 32 * 1024
 DEFAULT_OFFICE_PAGE = 100
 MAX_OFFICE_PAGE = 500
 
@@ -52,6 +52,13 @@ def resource_format(entry: dict[str, Any]) -> SkillResourceFormat | None:
         return "docx"
     if suffix == ".xlsx" or mime == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
         return "xlsx"
+    if suffix in IMAGE_SUFFIXES - {".svg"} or mime in {
+        "image/jpeg",
+        "image/png",
+        "image/gif",
+        "image/webp",
+    }:
+        return "image"
     if bool(entry.get("readable")) or suffix in READABLE_SUFFIXES:
         return "text"
     return None
@@ -60,11 +67,13 @@ def resource_format(entry: dict[str, Any]) -> SkillResourceFormat | None:
 def resource_unit(entry: dict[str, Any]) -> SkillResourceUnit | None:
     kind = resource_format(entry)
     if kind == "text":
-        return "character"
+        return "line"
     if kind == "docx":
         return "block"
     if kind == "xlsx":
         return "row"
+    if kind == "image":
+        return "image"
     return None
 
 
@@ -89,41 +98,40 @@ def _read_bytes(path: Path) -> bytes:
 
 
 def _text_page(path: Path, *, offset: int | None, limit: int | None) -> SkillResourcePage:
-    resolved_offset = 0 if offset is None else int(offset)
-    resolved_limit = MAX_TEXT_PAGE if limit is None else int(limit)
-    if resolved_offset < 0:
-        raise SkillResourceReadError("offset must be non-negative for text resources", correctable=True)
-    if resolved_limit < 1 or resolved_limit > MAX_TEXT_PAGE:
-        raise SkillResourceReadError(
-            f"limit must be between 1 and {MAX_TEXT_PAGE} for text resources",
-            correctable=True,
-        )
     try:
-        content = path.read_text("utf-8")
-    except UnicodeError as exc:
-        raise SkillResourceReadError(
-            f"Skill text resource is not valid UTF-8: {path.name}",
-            correctable=False,
-        ) from exc
+        resolved_offset, resolved_limit = normalize_range(
+            offset=offset,
+            limit=limit,
+            default_limit=500,
+            max_limit=2_000,
+        )
+    except AttachmentParseError as exc:
+        raise SkillResourceReadError(str(exc), correctable=True) from exc
+    try:
+        data = path.read_bytes()
     except OSError as exc:
         raise SkillResourceReadError(
             f"Skill resource could not be read: {path.name}",
             correctable=False,
         ) from exc
-    page = content[resolved_offset : resolved_offset + resolved_limit]
-    next_offset = resolved_offset + len(page)
-    has_more = next_offset < len(content)
+    lines, metadata = text_document(data, name=path.name, mime=None)
+    page = paginate_items(
+        lines[resolved_offset - 1 : resolved_offset - 1 + resolved_limit],
+        total_count=len(lines),
+        offset=resolved_offset,
+        limit=resolved_limit,
+    )
     return SkillResourcePage(
         format="text",
-        unit="character",
-        content=page,
-        metadata={"encoding": "utf-8", "total_characters": len(content)},
+        unit="line",
+        content=page.content,
+        metadata=metadata,
         offset=resolved_offset,
-        next_offset=next_offset if has_more else None,
-        has_more=has_more,
-        returned_count=len(page),
-        total_count=len(content),
-        truncated_by="limit" if has_more else None,
+        next_offset=page.next_offset,
+        has_more=page.has_more,
+        returned_count=page.returned_count,
+        total_count=len(lines),
+        truncated_by=page.truncated_by,
     )
 
 
@@ -234,6 +242,11 @@ def read_resource_page(
     if kind is None:
         raise SkillResourceReadError(
             f"binary_resource_not_readable: {entry.get('path')!r}",
+            correctable=True,
+        )
+    if kind == "image":
+        raise SkillResourceReadError(
+            "image_resource_requires_read_file",
             correctable=True,
         )
     if sheet is not None and kind != "xlsx":

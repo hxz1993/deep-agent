@@ -51,8 +51,8 @@ class TestInputCapabilities(unittest.TestCase):
         block = build_capability_instruction_block(spec)
         self.assertIn("does NOT support native image input", block)
 
-    def test_capability_block_only_claims_attachment_tools_when_selected(self) -> None:
-        disabled = build_capability_instruction_block(
+    def test_capability_block_claims_automatic_read_file_independent_of_packages(self) -> None:
+        empty = build_capability_instruction_block(
             AgentSpec(
                 name="test",
                 model="test",
@@ -61,17 +61,19 @@ class TestInputCapabilities(unittest.TestCase):
                 capabilities=[],
             )
         )
-        enabled = build_capability_instruction_block(
+        selected = build_capability_instruction_block(
             AgentSpec(
                 name="test",
                 model="test",
                 instructions="",
                 input_modalities=["text"],
-                capabilities=["builtin:attachment"],
+                capabilities=["builtin:sandbox"],
             )
         )
-        self.assertIn("NOT enabled", disabled)
-        self.assertIn("read_text_attachment", enabled)
+        self.assertIn("read_file system tool", empty)
+        self.assertIn("read_file system tool", selected)
+        self.assertNotIn("builtin:attachment", empty)
+        self.assertNotIn("read_text_attachment", selected)
 
     def test_augment_instructions_appends_block(self) -> None:
         spec = AgentSpec(

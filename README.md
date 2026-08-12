@@ -3,7 +3,7 @@
 DeepAgent 是基于 FastAPI、Pydantic AI 和 SQLAlchemy 的多用户 Agent 服务，并
 随服务发布一体化运维控制台。
 
-当前产品版本为 `0.3.22`。`deep_agent.__version__` 是唯一代码版本来源，FastAPI、
+当前产品版本为 `0.3.23`。`deep_agent.__version__` 是唯一代码版本来源，FastAPI、
 `GET /info` 和 Console 顶部版本徽标均读取该值。后续正式发布默认递增
 `MAJOR.MINOR.PATCH` 的第三位，只有明确规划重大版本时才调整前两位。产品版本不通过
 环境变量或数据库覆盖，也不等同于 Alembic 数据库结构 revision。
@@ -101,6 +101,12 @@ v0.3.22 复用会话附件解析内核，让已授权 Skill 的文本、DOCX 和
 安全 Backend 报告 `production_ready=true` 且 Agent 同时启用目标 Skill 与 `builtin:sandbox`
 时才条件注入。Alembic 仍为 `003`。
 
+v0.3.23 将会话附件与 Skill 文件收口为运行时系统工具 `read_file`：文本按行、DOCX按逻辑块、
+XLSX按物理行分页，支持图片输入的模型还可读取图片。文件字节和完整解析结果只在一次用户
+Run内缓存并使用 single-flight，下一轮重新加载。旧的三个附件工具、`read_skill_resource`和
+可配置的 `builtin:attachment`均已删除；Alembic `004`只从显式 Agent能力列表中清理旧编码。
+`execute_python`仍属于可配置的 `builtin:sandbox`，Skill脚本执行仍要求生产安全Backend。
+
 ## 项目结构
 
 | 路径 | 职责 |
@@ -177,8 +183,9 @@ v0.3.0 将发布前的 Alembic `001`～`023` 历史压缩为唯一基线 `001`�
 `stamp --purge 001` 重设版本。完整备份和切换命令见
 [`maintenance/README.md`](maintenance/README.md)。
 
-当前 Alembic head 为 `003`：`002` 统一 ToolPackage 与 UI 工具包；`003` 将线上 Skill 与
-ToolPackage 分离。升级 003 前必须确认 `agents.capabilities` 不存在历史 `skill:*` 引用。
+当前 Alembic head 为 `004`：`002` 统一 ToolPackage 与 UI 工具包；`003` 将线上 Skill 与
+ToolPackage 分离；`004` 从显式 Agent能力列表中清理已废弃的 `builtin:attachment`。升级
+`003` 前仍必须确认 `agents.capabilities` 不存在历史 `skill:*` 引用。
 
 ## 工具包类型
 
@@ -187,8 +194,7 @@ DeepAgent 当前支持：
 - 内置工具：
   - `builtin:general`（通用工具）：默认启用，只包含 `get_current_time`。
   - `builtin:sandbox`（Python 沙箱）：默认关闭，只包含 `execute_python`。
-  - `builtin:attachment`（附件读取）：默认关闭，包含 TXT、DOCX、XLSX 按需读取工具。
-- 系统工具不是 ToolPackage。`load_capability`、Skill Resource、`search_tools` 和 MCP Resource
+- 系统工具不是 ToolPackage。`load_capability`、Skill Resource、`read_file`、`search_tools` 和 MCP Resource
   由运行时按 Agent/Run 条件自动注入，只在 Console 的只读“系统工具”目录中说明。
 - Skill 不再属于 ToolPackage。Agent 通过独立 `skills` 列表选择，Harness 按需加载 `SKILL.md`；
   Skill 不能绕过 `capabilities` 获得 MCP 或其他工具。

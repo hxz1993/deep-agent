@@ -493,22 +493,7 @@ class UiToolStoreTests(unittest.IsolatedAsyncioTestCase):
             ["execute_python"],
         )
         self.assertFalse(sandbox_package.default_enabled)
-        attachment_capability = next(
-            item for item in capabilities if item.code == "builtin:attachment"
-        )
-        self.assertEqual(attachment_capability.category, "builtin")
-        self.assertEqual(attachment_capability.label, "附件读取")
-        self.assertEqual(attachment_capability.source, "builtin")
-        self.assertFalse(attachment_capability.default_enabled)
-        self.assertEqual(attachment_capability.disclosure_mode, "conditional")
-        self.assertEqual(
-            attachment_capability.disclosure_condition,
-            "session_has_attachment",
-        )
-        self.assertEqual(
-            [tool.name for tool in attachment_capability.tools],
-            ["read_text_attachment", "read_docx", "read_xlsx"],
-        )
+        self.assertNotIn("builtin:attachment", [item.code for item in capabilities])
         ui_packages = [item for item in capabilities if item.category == "ui"]
         self.assertEqual([item.code for item in ui_packages], ["ui:builtin", "ui:demo"])
         self.assertEqual([item.source for item in ui_packages], ["builtin", "manual"])

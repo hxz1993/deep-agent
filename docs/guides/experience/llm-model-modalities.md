@@ -40,13 +40,13 @@ open_weights
 interleaved
 ```
 
-这两类标签不能混用。Agent 的 `builtin:attachment` 工具包也不是模型 tag。平台上传能力不等于模型
+这两类标签不能混用。自动注入的系统工具 `read_file` 也不是模型 tag。平台上传能力不等于模型
 原生模态：
 
 - 图片：只有当前模型 `input_modalities` 包含 `image` 时，才把图片字节发送给模型。
 - 音频、视频、PDF：只有模型声明对应原生模态时才把字节发送给模型；PDF 不做本地解析/OCR。
-- DOCX、XLSX、TXT、CSV、JSON、Markdown、HTML、XML：平台只保存 `file_id`，Agent
-  显式选择 `builtin:attachment` 工具包后由工具按需分页读取，不在上传时预抽文本。
+- DOCX、XLSX、TXT、CSV、JSON、Markdown、HTML、XML：平台只保存 `file_id`；合法附件存在时
+  `read_file`自动注入并按需分页读取，不在上传时预抽文本，也不要求Agent额外选择工具包。
 - MCP、Skill、UI Tool：属于 Agent 工具能力，不属于模型输入模态。
 
 附件工具和安全边界详见

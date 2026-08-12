@@ -6,6 +6,7 @@ DeepAgent 向模型暴露 `execute_python`：每次 Tool Call 在**全新**完�
 | --- | --- |
 | 本文 | 目标、选型、当前语义与进度 |
 | [`implementation-plan.md`](implementation-plan.md) | 阶段任务与代码落点 |
+| [`go-judge-backend-design.md`](go-judge-backend-design.md) | Stage C生产Backend的开发、协议、安全与验收方案 |
 | [`ops-kubernetes-sidecar.md`](ops-kubernetes-sidecar.md) | go-judge Sidecar / Jenkins / Rancher |
 | [`wsl-prequalification.md`](wsl-prequalification.md) | WSL 宿主预演结果与踩坑（**非 K8s 签字**） |
 

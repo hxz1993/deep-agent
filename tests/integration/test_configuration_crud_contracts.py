@@ -352,7 +352,7 @@ class ConfigurationCrudContractTests(unittest.IsolatedAsyncioTestCase):
                 name="rename-agent-b",
                 model_id=self._model_id,
                 prompt="rename B",
-                capabilities=["mcp:rename_old", "builtin:attachment"],
+                capabilities=["mcp:rename_old", "builtin:sandbox"],
             )
         )
         untouched_null = await self.stores.agent.create_unique(
@@ -403,7 +403,7 @@ class ConfigurationCrudContractTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(
             (await self.stores.agent.get_by_id(second.id)).capabilities,
-            ["mcp:rename_new", "builtin:attachment"],
+            ["mcp:rename_new", "builtin:sandbox"],
         )
         self.assertIsNone((await self.stores.agent.get_by_id(untouched_null.id)).capabilities)
         self.assertEqual((await self.stores.agent.get_by_id(untouched_empty.id)).capabilities, [])

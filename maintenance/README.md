@@ -92,3 +92,10 @@ v0.3.17 备份仍位于 `002` 的配置，并确认 `agents.capabilities` 不存
 `003` 降级只允许 `skill_packages` 为空且所有 `agents.skills=[]`。上传 Skill 的 ZIP 位于平台文件
 服务，不包含在配置 SQLite 备份中；跨环境恢复需要同时迁移或重新上传平台原包。Test MySQL和
 平台文件服务验收步骤见 [`../docs/guides/skills.md`](../docs/guides/skills.md)。
+
+## v0.3.23 文件工具配置清理
+
+Alembic `004` 不增加表或字段，只从显式 `agents.capabilities`列表中移除已废弃的
+`builtin:attachment`。它保留其余能力顺序，并保持 `null`和空列表语义；已保存历史中的旧工具
+调用不会重写。由于降级无法可靠判断旧Agent是否曾主动选择附件包，`004 → 003`只回退revision，
+不会凭空补回该编码。部署前后分别生成配置备份，并在升级后确认Agent的其他能力未变化。

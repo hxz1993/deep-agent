@@ -57,9 +57,9 @@ tests/
 | `test_context_compaction.py` | 统一 Token 估算、动态输出预测、usage 回读、六段增量单次摘要、同输入瞬时错误重试、SSE 状态、原始历史不改写、脱敏 Checkpoint、CAS 与兜底；覆盖率门槛由 `tests/check_context_compaction_coverage.py` 执行 |
 | `test_context_test_scenarios.py` | 管理员测试会话场景、实时预算、消息往返序列化、常驻接口与用户归属 |
 | `test_attachment_extractors.py` | 文本编码、DOCX/XLSX 结构读取、分页与 Office 安全 |
-| `test_attachment_tools.py` | 附件工具默认参数、会话范围、缓存、分页和多模态返回 |
+| `test_file_tools.py` | 附件与 Skill统一文件工具的来源参数、权限、Run缓存、single-flight、分页和多模态返回 |
 | `test_tool_package_registry.py` | ToolPackage Registry 的整包选择、默认和空列表语义 |
-| `test_sqlite_bootstrap.py` | Alembic 001/002/003 结构、工具包与 Skill 数据迁移、降级展开与失败前校验 |
+| `test_sqlite_bootstrap.py` | Alembic 001/002/003/004 结构、工具包、Skill和旧附件能力清理、降级与失败前校验 |
 | `test_tool_package_migration_dialects.py` | SQLite、MySQL、PostgreSQL 的 002 DDL 分支 |
 | `test_session_model_override.py` | Agent 对话 `model_id` 请求级覆盖（`build_runner_for_agent`） |
 | `test_ui_tools_rfc.py` | builtin/manual UI 工具包、工具归属、Agent 整包选择、Schema 校验与 Deferred |

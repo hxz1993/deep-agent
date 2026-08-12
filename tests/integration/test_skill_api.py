@@ -135,10 +135,12 @@ class SkillApiTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(by_path["scripts/run.py"]["readable"])
             text = await client.get(
                 "/api/v1/skills/example-skill/resources/references/guide.md",
-                params={"limit": 8},
+                params={"limit": 1},
             )
             self.assertEqual(text.status_code, 200, text.text)
             self.assertTrue(text.json()["has_more"])
+            self.assertEqual(text.json()["unit"], "line")
+            self.assertEqual(text.json()["next_offset"], 2)
             docx = await client.get(
                 "/api/v1/skills/example-skill/resources/references/guide.docx",
                 params={"offset": 1, "limit": 1},

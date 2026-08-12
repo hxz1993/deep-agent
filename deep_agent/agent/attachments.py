@@ -303,7 +303,7 @@ async def _resolve_ref(
     return [
         TextContent(
             f"[附件: {name}] (file_id: {ref.id}, mime: {ref.mime or 'unknown'})"
-            "（如需读取内容，请调用 attachment 工具）"
+            "（如需读取内容，请调用 read_file 系统工具）"
         )
     ]
 

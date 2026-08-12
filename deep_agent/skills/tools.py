@@ -1,38 +1,12 @@
 from __future__ import annotations
 
-import asyncio
-from pathlib import Path
 from typing import Any
 
-from pydantic_ai import FunctionToolset, ModelRetry, ToolFailed
+from pydantic_ai import FunctionToolset, ModelRetry
 
 from deep_agent.agent.deps import AgentDeps
-from deep_agent.skills.resource_reader import (
-    SkillResourceReadError,
-    present_resource_entry,
-    read_resource_page,
-)
+from deep_agent.skills.resource_reader import present_resource_entry
 from deep_agent.skills.runtime import ResolvedSkill
-
-
-def _safe_resource_path(item: ResolvedSkill, path: str) -> tuple[dict[str, Any], Path]:
-    entry = next(
-        (
-            candidate
-            for candidate in item.resource_index
-            if candidate.get("path") == path and candidate.get("category") != "script"
-        ),
-        None,
-    )
-    if entry is None:
-        raise ModelRetry(f"Unknown resource {path!r} for Skill {item.code!r}")
-    target = (item.package_root / path).resolve()
-    root = item.package_root.resolve()
-    if target != root and root not in target.parents:
-        raise ModelRetry("Skill resource path is outside the installed package")
-    if not target.is_file():
-        raise ToolFailed(f"Skill resource is missing: {path}")
-    return entry, target
 
 
 def build_skill_resource_toolset(
@@ -52,8 +26,9 @@ def build_skill_resource_toolset(
         id="skill-resources",
         instructions=(
             "Skill references and assets are optional supporting material. "
-            "List resources before reading one, and read only the pages needed for the task. "
-            "Script paths may be listed for discovery but cannot be read with read_skill_resource. "
+            "Use list_skill_resources to discover exact paths, then use the system read_file tool "
+            "with type=skill to read only the pages needed for the task. "
+            "Script paths may be listed for discovery but cannot be read with read_file. "
             f"{script_instruction}"
             f"Authorized Skills with resources: {names}."
         ),
@@ -98,46 +73,6 @@ def build_skill_resource_toolset(
             "script_count": script_count,
             "scripts_readable": False,
             "scripts_executable": scripts_executable,
-        }
-
-    @toolset.tool_plain
-    async def read_skill_resource(
-        skill_code: str,
-        path: str,
-        offset: int | None = None,
-        limit: int | None = None,
-        sheet: str | None = None,
-    ) -> dict[str, Any]:
-        """Read an authorized text, DOCX or XLSX Skill resource using typed pagination."""
-        item = _item(skill_code)
-        entry, target = _safe_resource_path(item, path)
-        try:
-            page = await asyncio.to_thread(
-                read_resource_page,
-                entry,
-                target,
-                offset=offset,
-                limit=limit,
-                sheet=sheet,
-            )
-        except SkillResourceReadError as exc:
-            if exc.correctable:
-                raise ModelRetry(str(exc)) from exc
-            raise ToolFailed(str(exc)) from exc
-        return {
-            "skill_code": skill_code,
-            "path": path,
-            "format": page.format,
-            "unit": page.unit,
-            "content": page.content,
-            "metadata": page.metadata,
-            "offset": page.offset,
-            "next_offset": page.next_offset,
-            "has_more": page.has_more,
-            "returned_count": page.returned_count,
-            "total_count": page.total_count,
-            "truncated_by": page.truncated_by,
-            "content_hash": entry["content_hash"],
         }
 
     return toolset

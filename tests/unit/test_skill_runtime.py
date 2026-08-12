@@ -18,6 +18,7 @@ from deep_agent.skills.runtime import (
     resolve_skills_for_run,
     validate_skill_codes,
 )
+from deep_agent.files import build_file_toolset
 from deep_agent.skills.tools import build_skill_resource_toolset
 from tests.helpers.sqlite_stores import make_sqlite_stores
 
@@ -101,8 +102,9 @@ class SkillRuntimeTests(unittest.IsolatedAsyncioTestCase):
             runtime=self.runtime,
             request_headers={},
         )
-        toolset = build_skill_resource_toolset(resolved.resources)
-        self.assertIsNotNone(toolset)
+        resource_toolset = build_skill_resource_toolset(resolved.resources)
+        file_toolset = build_file_toolset(resolved.resources)
+        self.assertIsNotNone(resource_toolset)
         responses = 0
 
         def respond(_messages, _info: AgentInfo) -> ModelResponse:
@@ -122,11 +124,14 @@ class SkillRuntimeTests(unittest.IsolatedAsyncioTestCase):
                 return ModelResponse(
                     parts=[
                         ToolCallPart(
-                            "read_skill_resource",
+                            "read_file",
                             {
-                                "skill_code": "deepagent-diagnostics",
-                                "path": "references/diagnostic-checklist.md",
-                                "offset": 0,
+                                "resource": {
+                                    "type": "skill",
+                                    "skill_code": "deepagent-diagnostics",
+                                    "path": "references/diagnostic-checklist.md",
+                                },
+                                "offset": 1,
                                 "limit": 32,
                             },
                             "read-1",
@@ -138,7 +143,7 @@ class SkillRuntimeTests(unittest.IsolatedAsyncioTestCase):
         agent = Agent(
             FunctionModel(respond),
             deps_type=AgentDeps,
-            toolsets=[toolset],
+            toolsets=[resource_toolset, file_toolset],
         )
         result = await agent.run("Read the checklist", deps=AgentDeps(session_id="session"))
         returns = [
@@ -147,7 +152,7 @@ class SkillRuntimeTests(unittest.IsolatedAsyncioTestCase):
             for part in message.parts
             if isinstance(part, ToolReturnPart)
         ]
-        self.assertEqual([part.tool_name for part in returns], ["list_skill_resources", "read_skill_resource"])
+        self.assertEqual([part.tool_name for part in returns], ["list_skill_resources", "read_file"])
         self.assertNotIn("scripts/", str(returns[0].content))
         self.assertIn("scripts_executable", str(returns[0].content))
         self.assertIn("content_hash", str(returns[1].content))

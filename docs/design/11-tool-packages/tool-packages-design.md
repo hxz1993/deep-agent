@@ -1,6 +1,6 @@
 # DeepAgent 工具包与工具目录设计
 
-> 实施状态：v0.3.2 已按本文完成；v0.3.18 起 Skill 已从 ToolPackage 分离，当前数据库 head 为 003。
+> 实施状态：v0.3.2 已按本文完成；v0.3.18 起 Skill 已从 ToolPackage 分离；v0.3.23 起文件读取是自动注入的系统工具，当前数据库 head 为 004。
 
 ## 1. 目标与边界
 
@@ -52,12 +52,12 @@ v0.3.9 改由 Pydantic AI 官方 Provider/Profile 处理，不再保留项目自
 | --- | --- | --- | --- | --- | --- |
 | `builtin` | `builtin:general` | 通用工具 | code | 开 | `get_current_time` |
 | `builtin` | `builtin:sandbox` | Python 沙箱 | code | 关 | `execute_python`、条件式 `execute_skill_script` |
-| `builtin` | `builtin:attachment` | 附件读取 | code | 关 | `read_text_attachment`、`read_docx`、`read_xlsx` |
 | `mcp` | `mcp:<name>` | MCP 配置名称 | builtin/database | 关 | URL 检测快照 / Builtin 运行时发现 |
 | `ui` | `ui:builtin` | 通用交互 | code | 关 | `builtin__confirm`、`builtin__choice` |
 | `ui` | `ui:deepcube` | DeepCube 助手 | database | 关 | `deep_cube__clarify`、`deep_cube__config_fill` |
 
-`builtin:general` 和 `builtin:sandbox` 是两个独立包级开关。Python Sandbox 后端不可用时，
+`builtin:general` 和 `builtin:sandbox` 是两个独立包级开关。文件读取不属于 ToolPackage；
+`read_file` 根据当前会话附件或 Agent 已选 Skill 自动注入。Python Sandbox 后端不可用时，
 `builtin:sandbox` 不进入可选目录。`execute_skill_script` 只作为管理员可见的条件式工具元数据；
 运行时还必须选择含脚本Skill且Backend生产就绪才注入模型。
 
@@ -69,7 +69,8 @@ v0.3.9 改由 Pydantic AI 官方 Provider/Profile 处理，不再保留项目自
 - URL MCP 名称是可维护的稳定编码，但不能作为普通字段直接修改。独立重命名操作在同一事务中
   迁移 MCP 主键和全部 Agent 工具包引用；不改写历史工具协议名，也不重新检测远端服务。
 - 不保留旧 `native`、`python-sandbox`、`attachment`、`ui:<tool_name>` 运行兼容分支。
-- 旧数据只由 Alembic 002 一次转换；未知 UI 引用必须阻止迁移。
+- 旧数据由 Alembic 002完成工具包转换，004从显式 Agent能力中删除已废弃的
+  `builtin:attachment`；未知 UI 引用必须阻止002迁移。
 
 ## 5. 数据库
 

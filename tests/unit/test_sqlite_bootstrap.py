@@ -294,8 +294,99 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
                         await asyncio.to_thread(command.downgrade, config, "002")
                     self.assertEqual(self._revision(db_path), "003")
 
+    async def test_004_removes_only_explicit_attachment_package_and_roundtrips(self) -> None:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+            db_path = Path(tmpdir) / "remove-attachment.db"
+            url = f"sqlite+aiosqlite:///{db_path.as_posix()}"
+            with patch("deep_agent.db.url.get_database_url", return_value=url):
+                with patch("deep_agent.db.migrate.get_database_url", return_value=url):
+                    config = migrate._build_alembic_config()
+                    await asyncio.to_thread(command.upgrade, config, "003")
+                    with sqlite3.connect(db_path) as connection:
+                        connection.execute(
+                            "UPDATE agents SET capabilities = ? WHERE name = 'default'",
+                            (
+                                json.dumps(
+                                    [
+                                        "builtin:general",
+                                        "builtin:attachment",
+                                        "mcp:text_tools",
+                                        "builtin:attachment",
+                                    ]
+                                ),
+                            ),
+                        )
+                        connection.execute(
+                            "INSERT INTO agents (id,name,model_id,temperature,capabilities,skills,prompt) "
+                            "VALUES ('null-agent','null-agent',?,NULL,NULL,'[]','test')",
+                            (
+                                self._scalar(
+                                    db_path,
+                                    "SELECT id FROM llm_models WHERE name = 'openai:gpt-4o'",
+                                ),
+                            ),
+                        )
+                        connection.execute(
+                            "INSERT INTO agents (id,name,model_id,temperature,capabilities,skills,prompt) "
+                            "VALUES ('empty-agent','empty-agent',?,NULL,'[]','[]','test')",
+                            (
+                                self._scalar(
+                                    db_path,
+                                    "SELECT id FROM llm_models WHERE name = 'openai:gpt-4o'",
+                                ),
+                            ),
+                        )
+                        connection.commit()
+
+                    await asyncio.to_thread(command.upgrade, config, "004")
+                    self.assertEqual(self._revision(db_path), "004")
+                    self.assertEqual(
+                        json.loads(
+                            str(
+                                self._scalar(
+                                    db_path,
+                                    "SELECT capabilities FROM agents WHERE name = 'default'",
+                                )
+                            )
+                        ),
+                        ["builtin:general", "mcp:text_tools"],
+                    )
+                    self.assertIsNone(
+                        self._scalar(
+                            db_path,
+                            "SELECT capabilities FROM agents WHERE name = 'null-agent'",
+                        )
+                    )
+                    self.assertEqual(
+                        json.loads(
+                            str(
+                                self._scalar(
+                                    db_path,
+                                    "SELECT capabilities FROM agents WHERE name = 'empty-agent'",
+                                )
+                            )
+                        ),
+                        [],
+                    )
+
+                    await asyncio.to_thread(command.downgrade, config, "003")
+                    self.assertEqual(self._revision(db_path), "003")
+                    await asyncio.to_thread(command.upgrade, config, "004")
+                    self.assertEqual(self._revision(db_path), "004")
+                    self.assertEqual(
+                        json.loads(
+                            str(
+                                self._scalar(
+                                    db_path,
+                                    "SELECT capabilities FROM agents WHERE name = 'default'",
+                                )
+                            )
+                        ),
+                        ["builtin:general", "mcp:text_tools"],
+                    )
+
     def _assert_current_baseline(self, db_path: Path) -> None:
-        self.assertEqual(self._revision(db_path), "003")
+        self.assertEqual(self._revision(db_path), "004")
         self.assertEqual(self._business_tables(db_path), EXPECTED_TABLES)
         self.assertNotIn("max_requests", self._columns(db_path, "agents"))
         self.assertNotIn("capabilities_source", self._columns(db_path, "llm_models"))

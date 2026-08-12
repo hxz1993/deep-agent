@@ -39,7 +39,7 @@ def _context(
             user=user,
             request_headers=headers or {"authorization": "Bearer secret", "cookie": "sid=1"},
             attachment_by_id=refs,
-            attachment_bytes=attachment_bytes or {},
+            file_bytes={f"attachment:{key}": value for key, value in (attachment_bytes or {}).items()},
             context_state=MagicMock(),
         ),
         model=TestModel(),

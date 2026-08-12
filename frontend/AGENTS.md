@@ -39,7 +39,7 @@ frontend/
 | --- | --- |
 | 流式对话 | `fetch` + `ReadableStream` 手动解析 SSE（非 `EventSource`，因需 POST） |
 | 停止生成 | `POST /sessions/{id}/cancel` 后等待真实 `cancelled`；History 的 `assistant.status=interrupted` 恢复“已停止”，不以 Abort 或本地假事件代替 |
-| 附件上传 | `POST /api/v1/uploads`（multipart）→ 发送时仅传 `attachments[]` 引用；文档由 Agent 可选 `builtin:attachment` 工具包按需读取 |
+| 附件上传 | `POST /api/v1/uploads`（multipart）→ 发送时仅传 `attachments[]` 引用；可读文档由系统 `read_file`按需读取 |
 | 思考过程 UI | `thinking` 可折叠块，默认折叠；与 `text` 分离 |
 | 工具调用 UI | `tool_call` / `tool_result` 可折叠；同 `tool_call_id` 合并更新；`tool_call_removed` 删除被 ModelRetry 或取消撤回的临时卡片 |
 | HITL UI 工具 | `ui:builtin` + 数据库手工 UI 工具包；Agent 按包选择，SSE / history 仍使用稳定工具协议名并携带 `widget` / `metadata`；见 [`../docs/guides/ui-tools-external.md`](../docs/guides/ui-tools-external.md) |
@@ -47,8 +47,8 @@ frontend/
 | 会话 | `session_id` 由后端 `session` 事件返回；`GET/DELETE /api/v1/sessions`；标题展示 `title \|\| user_prompt`（见 [`../docs/guides/experience/ai-title-generator.md`](../docs/guides/experience/ai-title-generator.md)） |
 | 能力面板 | `GET /api/v1/tools` |
 | 配置 | `localStorage` 只保存调试 App；全局环境配置只读展示，身份和鉴权由平台提供 |
-| 内置工具目录 | 配置中心只读展示 `builtin:general`、`builtin:sandbox`、`builtin:attachment`；Agent 按包选择 |
-| 系统工具目录 | 配置中心按 Skill、MCP 工具发现、MCP Resource 分组展示自动注入工具；不参与 Agent 配置 |
+| 内置工具目录 | 配置中心只读展示 `builtin:general`、`builtin:sandbox`；Agent 按包选择 |
+| 系统工具目录 | 配置中心按 Skill、文件、MCP 工具发现、MCP Resource 分组展示自动注入工具；不参与 Agent 配置 |
 | Skill | 独立 Skill 列表与详情；上传包安装/替换/启停/下载/删除；文本、Word、Excel 资源可预览，脚本只列包内路径和数量，不展示可执行性判断；Agent 使用独立 `skills` 列表选择 |
 | 一体化控制台 | `/console/`；工作台、配置和诊断的唯一入口 |
 
@@ -91,7 +91,7 @@ Agent 编辑弹窗的系统提示词标题栏显示“字符数 / 预估 Token�
 - SSE 解析、HITL 参数归一化和 Schema 文本校验分别位于 `protocol.js`、`hitl.js`、`schema-editor.js`，可由 Node 内置测试独立验证。
 - 控制台测试：`node --test tests/frontend/console/*.test.mjs`。
 - 配置中心按“Agent 设置 / 系统设置 / 辅助资源”分组；系统设置包含辅助模型、全局配置和只读数据库连接。数据库连接页通过 `GET /api/v1/database-info` 只展示类型、主机、端口、库名或 SQLite 文件名，不返回凭据、连接参数或本地完整路径。
-- “内置工具”位于模型之后，只读展示代码随版本发布的通用工具与附件读取工具包；紧随其后的
+- “内置工具”位于模型之后，只读展示代码随版本发布、由Agent显式配置的通用工具和Python沙箱；紧随其后的
   “系统工具”只读展示运行时自动注入工具的来源和条件。两个页面都没有注册、编辑、删除或全局
   启停入口，系统工具也不得进入 Agent 能力勾选。
 - Console 顶部只展示一处产品版本，通过同源 `GET /info` 读取
@@ -204,8 +204,9 @@ python3.12 -m http.server 5173
 - 模型目录只由管理员手工刷新 models.dev，保存模型配置不得触发外网请求。目录按 Lab → Model → Provider 展示，仅负责预填；模态与能力 tags 分开，Agent 运行时只认 `llm_models`。
 - 上下文压缩在模型配置有效上下文窗口时自动启用；Console 只读展示全局策略、预算、
   压缩前后和 Checkpoint 状态，不提供启用开关，也不展示或编辑摘要正文。
-- `builtin:attachment` 是默认关闭的 Agent 工具包。Console 从 `/uploads/capabilities` 读取实际 MIME、
-  单文件大小和单次数量限制；新请求不得再发送 `extracted_text`。工具分页协议和解析边界见
+- Console 从 `/uploads/capabilities`读取实际 MIME、单文件大小和单次数量限制；新请求不得再发送
+  `extracted_text`。附件与 Skill正文统一由系统 `read_file`读取，前端只展示普通 Tool Call/Result，
+  无需配置或新增专属事件。工具分页协议和解析边界见
   [`../docs/design/06-attachment-parsing/`](../docs/design/06-attachment-parsing/)。
 - “新建测试会话”是管理员控制台的常驻入口；它位于会话搜索框和普通新建按钮之间，
   当前 Agent 的模型未配置上下文窗口时不可用，但不能改变普通新建行为。场景只构造合法

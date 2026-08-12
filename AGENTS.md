@@ -12,7 +12,7 @@
 | 项 | 内容 |
 | --- | --- |
 | **是什么** | 通用 AI Agent 全栈：FastAPI 后端 + Pydantic AI 运行时 + 静态前端 |
-| **产品版本** | `deep_agent.__version__` 为唯一来源；当前 `0.3.22`，默认发布递增第三位 |
+| **产品版本** | `deep_agent.__version__` 为唯一来源；当前 `0.3.23`，默认发布递增第三位 |
 | **启动** | 本地 Test 联调固定使用下方命令；部署入口才使用 `deep_agent.main:app` |
 | **测试** | `python3.12 -m unittest discover -s tests -p "test_*.py" -v` |
 | **配置** | 仓库根 `.env`（`DEEP_AGENT_*` / `DEEP_AGENT_DBMS_*` / `DEEP_AGENT_SQLITE_PATH`） |
@@ -76,7 +76,7 @@ HTTP → deep_agent/api/v1 → AgentRunner → pydantic_ai.Agent → Toolsets
                                       └→ SessionStore (postgres/mysql/sqlite)
 ```
 
-工具包来源：`builtin:general` | `builtin:sandbox` | `builtin:attachment` | `mcp:*`
+工具包来源：`builtin:general` | `builtin:sandbox` | `mcp:*`
 （DB + `mcps/` 兜底）| `ui:builtin` | `ui:<package>`。Skill 与 ToolPackage 分离，Agent 通过
 `agents.skills` 显式选择，上传包元数据位于 `skill_packages`。
 
@@ -96,7 +96,7 @@ HTTP → deep_agent/api/v1 → AgentRunner → pydantic_ai.Agent → Toolsets
   完全相同的 Prompt 重试一次，无法安全放入单次请求时自动链路仅临时 Sliding Window，主动
   链路直接失败，二者均不写入 Checkpoint。
 - 新的运行时横切能力优先评估 Core 的 `PrepareTools`、Hooks、`ToolSearch` 和 Harness 的 Compaction/Overflow；不要默认把逻辑继续写入 `AgentRunner`。
-- v0.3.12 对已授权 MCP 使用 Pydantic AI ToolSearch 渐进披露：超过 3 个候选时词法预选最多 3 个完整 Schema，其余只列稳定协议名并可搜索加载；检索不扩大 ToolPackage 权限。无合法会话附件时，整个附件 Toolset 不向模型披露。
+- v0.3.12 对已授权 MCP 使用 Pydantic AI ToolSearch 渐进披露：超过 3 个候选时词法预选最多 3 个完整 Schema，其余只列稳定协议名并可搜索加载；检索不扩大 ToolPackage 权限。
 - Tool Search 首轮预选只使用聊天 API 的原始非空 `message`；`context_refs.type/label` 仅在纯上下文请求时回退，不能让 Page/Range 标签覆盖用户问题。实时工具若被 `ModelRetry` 或取消撤回，SSE 用 `tool_call_removed` 通知客户端删除临时卡片；取消后的非空部分回答必须以 `assistant.status=interrupted` 恢复。
 - 模型目录的 `max_output_tokens` 同时约束普通和流式回答；工具错误只有在模型修改参数或改选工具后可能成功时使用 `ModelRetry`，已确定的下载、解析或上游失败使用 `ToolFailed`，避免消耗工具重试预算。
 - v0.3.13 将正式 Run 的官方 `CancellationToken` 传给内部摘要 Agent；取消摘要直接终止 Run，不能转成 Sliding Window 后继续回答。Local/Native 工具配对统一使用 Pydantic AI 2.26 的 Call/Return 基类。
@@ -106,13 +106,13 @@ HTTP → deep_agent/api/v1 → AgentRunner → pydantic_ai.Agent → Toolsets
 - v0.3.19 起 URL MCP 只在显式检测时执行 initialize/tools-list 并保存无敏感信息的工具快照；聊天 Run 用快照完成工具披露，真实调用时才按当前请求 Header 建连。同一 Run 复用连接，缺少或配置失效的快照不进入模型工具列表，必须重新“检测并更新”。Builtin MCP 和 Resource 代理保持原链路。
 - v0.3.20 起上传 Skill 在每个 Pod 只保留 `runtime-skills/<code>/` 一份当前运行文件。服务启动、安装、替换、启用和手工重载负责同步；普通 Run 只读本地目录。单个 Skill 文件不可用时跳过该 Skill并继续回答，状态通过 `/skills`、Console 和 `final.context.skills` 诊断。
 - 上传 Skill 的平台 ZIP 是系统级配置文件，不属于业务 App/Space。平台文件使用可无 Space 回读的 `INF` 类型；安装、替换、启动恢复、管理员下载和 Run 兜底均保留调用身份但主动去掉 `app/space/language`业务上下文，保证同一 File ID 始终按系统级语义访问。不得改用 Space 级 `UPL`，数据库也不得保存请求上下文、Token、Cookie 或完整 Header。
-- v0.3.21 起 `/api/v1/system-tools` 只读说明 Skill、MCP Tool Search 和 MCP Resource 的运行时工具来源与注入条件；这些 `runtime:*` 展示编码不得进入 Capability Registry、Agent 配置或数据库。Python Sandbox 完整说明由当前 Profile 的包清单动态生成，Function Tool Definition 保持一行。
-- v0.3.22 起 Skill 的文本、DOCX 和 XLSX 资源复用附件解析内核并按字符、逻辑块或物理行分页；脚本路径可以列出但不能作为资源正文读取。`execute_skill_script` 属于 `builtin:sandbox` 的条件式运行工具，只有当前 Agent 同时选择含脚本 Skill、启用 Sandbox，且启动时缓存的 Backend health 明确 `production_ready=true` 才注入；`subprocess-dev` 永远不得向模型披露该工具。
+- v0.3.21 起 `/api/v1/system-tools` 只读说明 Skill、文件、MCP Tool Search 和 MCP Resource 的运行时工具来源与注入条件；这些 `runtime:*` 展示编码不得进入 Capability Registry、Agent 配置或数据库。Python Sandbox 完整说明由当前 Profile 的包清单动态生成，Function Tool Definition 保持一行。
+- v0.3.23 起附件与 Skill 文件统一由自动注入的系统工具 `read_file`读取：文本按行、DOCX按逻辑块、XLSX按物理行分页，支持图片输入的模型可读图片。同一 Run只下载或读盘一次、完整解析一次；缓存随 Run释放。旧 `builtin:attachment`、三个附件读取工具和 `read_skill_resource`不再注册。脚本路径不能作为文件正文读取；`execute_skill_script`只有当前 Agent同时选择含脚本 Skill、启用 Sandbox，且 Backend明确 `production_ready=true`才注入。
 - v0.3.14 起每个 Pod 固定一个异步 Gunicorn Worker，保证进程内 `ActiveRunRegistry` 与取消请求一致命中；横向扩容多个 Pod 前必须提供会话粘性或共享取消协调器。工具检索以用户问题为主，Context Reference 标签仅在问题无检索结果时回退，并在单次 Run 内排除已披露工具和重复搜索；不得清空 Pydantic AI 的跨 Run 发现历史。
 - Harness 是可选能力库，不是产品平台。会话、身份、配置、HITL、SSE 和 Console 继续由 DeepAgent 负责；引入 Harness 0.x 时必须与 `pydantic-ai-slim` 一起固定准确版本。
 - Provider Usage 是 best effort；OpenAI-compatible 或私有端点返回 0 时可能代表缺失。上下文预算必须结合模型窗口元数据和保守估算，不能只依赖 `result.usage`。
-- 新上传只保存附件引用；默认关闭的 `builtin:attachment` 工具包通过 1-based
-  `offset/limit`、`has_more/next_offset` 渐进读取 TXT、DOCX、XLSX。合法 `file_id`
+- 新上传只保存附件引用；运行时 `read_file`通过 1-based `offset/limit`、
+  `has_more/next_offset`渐进读取 TXT、DOCX、XLSX。合法 `file_id`
   必须来自当前原始会话，不能从 Checkpoint 推断。详见
   [`docs/design/06-attachment-parsing/`](docs/design/06-attachment-parsing/)。
 

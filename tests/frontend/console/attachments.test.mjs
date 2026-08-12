@@ -15,7 +15,7 @@ const template = await readFile(
   "utf8",
 );
 
-test("附件读取与通用工具由后端 category 统一归入内置工具", () => {
+test("附件上传不再要求可配置的附件工具包", () => {
   assert.match(agentSource, /builtin:\s*"内置工具"/);
   assert.match(agentSource, /return toolPackage\.category/);
   assert.match(
@@ -23,6 +23,8 @@ test("附件读取与通用工具由后端 category 统一归入内置工具", (
     /GROUP_ORDER\s*=\s*\["builtin",\s*"mcp",\s*"ui"\]/,
   );
   assert.doesNotMatch(agentSource, /GROUP_ORDER[^;]*"skill"/);
+  assert.match(chatSource, /read_file 系统工具按需分页读取/);
+  assert.doesNotMatch(agentSource, /builtin:attachment/);
 });
 
 test("控制台从后端读取 MIME、数量与大小限制", () => {

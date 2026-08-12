@@ -24,10 +24,23 @@ _SYSTEM_TOOL_DOMAINS = (
                 description="列出已授权 Skill 可供模型读取的 Reference 和 Asset。",
             ),
             SystemToolDescription(
-                name="read_skill_resource",
+                name="execute_skill_script",
                 source="DeepAgent",
-                injection_condition="Agent 已配置至少一个含 Reference 或 Asset 的可用 Skill",
-                description="分页读取已授权 Skill 中允许访问的文本资源。",
+                injection_condition="Agent 已配置含脚本 Skill、启用 Python 沙箱且安全 Backend 可用于生产",
+                description="在隔离 Python 沙箱中执行已授权 Skill 的固定脚本。",
+            ),
+        ),
+    ),
+    SystemToolDomain(
+        code="runtime:file",
+        label="文件",
+        description="按需读取当前会话附件或 Agent 已授权 Skill 中的文件。",
+        tools=(
+            SystemToolDescription(
+                name="read_file",
+                source="DeepAgent",
+                injection_condition="当前会话存在可读附件，或 Agent 已配置含可读资源的 Skill",
+                description="统一分页读取文本、Word、Excel 和模型支持的图片文件。",
             ),
         ),
     ),

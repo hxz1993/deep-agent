@@ -1,7 +1,7 @@
 # DeepAgent Skill 安装与运行指南
 
-DeepAgent v0.3.18 将 Skill 与 ToolPackage 分离，v0.3.20 收口上传 Skill 的运行文件，v0.3.22
-增加DOCX/XLSX读取与安全脚本协议。Agent 的 `capabilities` 继续控制可执行工具，
+DeepAgent v0.3.18 将 Skill 与 ToolPackage 分离，v0.3.20 收口上传 Skill 的运行文件，v0.3.23
+将Skill文件与会话附件统一到 `read_file`。Agent 的 `capabilities` 继续控制可执行工具，
 `skills` 只控制任务说明、References 和 Assets；选择 Skill 不会自动授予 MCP 或其他工具权限。
 
 ## 管理入口
@@ -32,8 +32,9 @@ skill.zip
 ```
 
 ZIP 最大 10 MiB，解压后最大 50 MiB、最多 256 个文件、目录深度最多 8 层。安装器拒绝路径穿越、
-绝对路径、符号链接、加密 ZIP、重复路径和压缩炸弹。模型可分页读取索引内的UTF-8文本、DOCX
-逻辑块和XLSX物理行；PDF、PPTX和图片只展示元数据。脚本可以列出路径，但不能通过资源工具读取。
+绝对路径、符号链接、加密 ZIP、重复路径和压缩炸弹。模型可分页读取索引内的文本、DOCX逻辑块
+和XLSX物理行；支持图片输入的模型也可读取图片。PDF和PPTX只展示元数据。脚本可以列出路径，
+但不能通过文件工具读取源码。
 
 一个 ZIP只能包含一个 Skill。培训 Library或第三方合集包如果包含多个同级 `SKILL.md`，需要先拆成
 多个 ZIP分别安装；API会返回 422而不是隐式创建多条配置。
@@ -71,7 +72,8 @@ Agent.skills
 → 初始只披露 Skill 名称和简介
 → 模型按需调用 load_capability
 → Harness 返回完整 SKILL.md
-→ list_skill_resources/read_skill_resource 按需读取素材
+→ list_skill_resources 获得精确路径
+→ read_file(resource={type: skill, skill_code, path}) 按需读取素材
 → 安全 Backend 可用且 Agent 同时启用 builtin:sandbox 时，才可 execute_skill_script
 ```
 
@@ -83,7 +85,8 @@ Skill是否已就绪及本轮实际加载了哪些正文。该状态不写数据
 
 ## 数据库升级和备份
 
-Alembic 003 创建 `skill_packages`，并给 `agents` 增加非空 `skills` JSON。升级前必须确认
+Alembic 003 创建 `skill_packages`，并给 `agents` 增加非空 `skills` JSON；004只清理显式
+Agent能力中的旧 `builtin:attachment`编码。升级003前必须确认
 `agents.capabilities` 不存在旧 `skill:*` 引用；迁移遇到此类数据会在 DDL 前失败。降级只允许
 `skill_packages` 为空且所有 Agent 的 `skills=[]`。
 
@@ -115,11 +118,12 @@ Skill的 `.py`、显式JSON inputs、参数和同Skill资源，并只从 `output
 Skill若引入Profile之外的第三方包，执行会明确失败；不得在运行时 `pip install`。需要新增包时，
 必须同步更新Sandbox Profile、独立venv、安全Backend镜像和回归测试。
 
-## v0.3.22 发布后复测
+## v0.3.23 发布后复测
 
-1. 备份 Test revision 003配置。
+1. 备份 Test revision 004配置。
 2. 安装拆分后的三个培训 Skill，确认运行状态为“运行文件已就绪”。
-3. 用专用临时 Agent验证 `load_capability`、Markdown/HTML/DOCX/XLSX资源读取和跨 Skill加载。
+3. 用专用临时 Agent验证 `load_capability`、`list_skill_resources`、`read_file`对
+   Markdown/HTML/DOCX/XLSX的读取和跨 Skill加载。
 4. 确认 XLSX Asset可按工作表读取；Skill详情只列脚本路径和数量，不展示可执行性判断；当前非生产
    Backend下模型看不到 `execute_skill_script`。
 5. 确认普通后续 Run不重复访问平台文件服务；重载失败只影响对应 Skill。

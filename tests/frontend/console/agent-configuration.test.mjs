@@ -68,14 +68,13 @@ test("后端 category 直接驱动工具包分组", () => {
   const grouped = ui.groupCapabilities([
     { code: "builtin:general", category: "builtin", label: "通用工具" },
     { code: "builtin:sandbox", category: "builtin", label: "Python 沙箱" },
-    { code: "builtin:attachment", category: "builtin", label: "附件读取" },
     { code: "mcp:demo", category: "mcp" },
   ]);
 
   assert.deepEqual([...grouped.groups], ["builtin", "mcp"]);
   assert.deepEqual(
     Array.from(grouped.byGroup.builtin, (toolPackage) => toolPackage.code),
-    ["builtin:general", "builtin:sandbox", "builtin:attachment"],
+    ["builtin:general", "builtin:sandbox"],
   );
   assert.equal(ui.capabilityGroup({ category: "builtin" }), "builtin");
   assert.equal(ui.capabilityGroup({ category: "mcp" }), "mcp");

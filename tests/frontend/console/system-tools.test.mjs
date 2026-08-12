@@ -74,6 +74,29 @@ test("系统工具按领域展示来源、条件和说明", () => {
   assert.doesNotMatch(html, /编辑|删除|启用|checkbox|switch/);
 });
 
+test("Skill 三个工具归 Skill，read_file 独立归文件领域", () => {
+  const ui = loadSystemToolsUi();
+  const skillHtml = ui.systemToolDomain({
+    code: "runtime:skill",
+    label: "Skill",
+    tools: [
+      { name: "load_capability" },
+      { name: "list_skill_resources" },
+      { name: "execute_skill_script" },
+    ],
+  });
+  const fileHtml = ui.systemToolDomain({
+    code: "runtime:file",
+    label: "文件",
+    tools: [{ name: "read_file" }],
+  });
+  assert.match(skillHtml, /load_capability/);
+  assert.match(skillHtml, /list_skill_resources/);
+  assert.match(skillHtml, /execute_skill_script/);
+  assert.doesNotMatch(skillHtml, /read_file/);
+  assert.match(fileHtml, /read_file/);
+});
+
 test("系统工具页面具备加载、失败重试和窄屏可横向查看的结构", () => {
   assert.match(source, /正在加载系统工具/);
   assert.match(source, /data-retry-system-tools/);

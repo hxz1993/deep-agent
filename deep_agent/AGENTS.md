@@ -29,10 +29,10 @@ HTTP (REST/SSE)
     → ToolPackageRegistry.toolsets()
         ├─ builtin:general  UTC 时间 FunctionToolset
         ├─ builtin:sandbox  无状态 Python FunctionToolset
-        ├─ builtin:attachment  TXT/DOCX/XLSX 读取
         ├─ mcp          请求时 `capabilities/mcp/resolver.py`（DB + mcps/ 兜底）
         └─ ui           代码内置或数据库工具包 → ExternalToolset
     → Agent.skills → Harness Skills（SKILL.md 渐进披露）
+    → runtime system tools（文件、Skill、MCP发现与Resource，按请求条件注入）
     → SessionStore（`db/conversation.py` 协调器；表 Store 在 `db/stores/`）
 ```
 
@@ -40,7 +40,7 @@ HTTP (REST/SSE)
 
 1. `configure_logging()` → `AppContext.bootstrap()`（见 `core/context.py`）
 2. `upgrade_database()` → `bootstrap_database()` → 表 Store + `SqlConversationCoordinator`
-3. `build_registry(stores=)` — 通用、Sandbox 与附件工具包；Sandbox Backend 可用时注册独立 `builtin:sandbox`
+3. `build_registry(stores=)` — 通用与Sandbox工具包；Sandbox Backend 可用时注册独立 `builtin:sandbox`
 4. `init_context(ctx)` — 路由通过 `Depends(AppContextDep)` 注入
 5. 关闭：`ctx.aclose()` → `reset_context()`
 
@@ -110,7 +110,7 @@ URL 与 Builtin MCP 的运行态不同：URL MCP 在管理员检测时保存 Too
 7. Harness `StepPersistence` 不替代现有 SQL 会话、SSE 和 Deferred/Pending；只有副作用账本、子 Agent 或崩溃恢复成为真实需求时再接入。
 8. Harness 仍为 0.x。引入时必须将 `pydantic-ai-slim` 与 `pydantic-ai-harness` 固定为经过联合回归的准确版本，禁止继续依赖无上限 `>=` 漂移。
 9. 不要通过修改 `AgentRunner` 主循环重复实现 Pydantic AI 已提供的机制。
-10. Harness 0.18 `Skills` 只负责延迟披露 `SKILL.md` 正文；第三方 Skill 的安装、版本、权限、素材读取和脚本隔离仍由 DeepAgent 产品层负责。v0.3.22 的素材读取复用附件解析内核，脚本执行只复用 Sandbox Backend 契约，不能把它们误写成 Harness 能力。
+10. Harness 0.18 `Skills` 只负责延迟披露 `SKILL.md` 正文；第三方 Skill 的安装、版本、权限、素材读取和脚本隔离仍由 DeepAgent 产品层负责。v0.3.23 的系统工具 `read_file` 统一读取会话附件与 Skill 素材，脚本执行只复用 Sandbox Backend 契约，不能把它们误写成 Harness 能力。
 11. `IncludeToolReturnSchemas` 发生在模型请求前的 Tool Definition 准备阶段，不是工具执行后给真实结果追加 Schema。首版只允许按最终稳定协议名的明确白名单启用，并要求存在可信、稳定的返回 Schema；不得通过名称包含 `query` 等模糊规则自动扩大范围。延迟 MCP 工具只有被 Tool Search 披露时才携带其返回 Schema，并必须观测新增 Schema Token。真实结果过大或空字段过多继续由分页、投影或 `ToolOutputLimits`/Artifact 治理。
 12. Prompt Cache 不是跨 Provider 的统一 DeepAgent 缓存。DeepSeek 等 Provider 的自动缓存只读取其 Usage 命中/未命中数据，不改写请求；显式 `CachePoint`、cache key 和 TTL 只能在模型目录确认具体 Provider 支持后启用。统一观测可以归一化指标，不能伪造统一缓存协议。
 13. v0.3.17 使用 Pydantic AI 官方 `conversation_id/run_id` 贯通运行：`conversation_id=deepagent:{agent_id}:{session_id}` 在同一 Session 内稳定，每次发送、Deferred 恢复、重试或主动压缩使用新的 `run_id`。第一阶段只输出脱敏结构化日志和当前页面 Run 指标，不把高频运行数据写入业务 MySQL；后续 OTLP/Instrumentation 不得建立第二套 Agent 生命周期。
@@ -191,8 +191,10 @@ XML + JSON 投影。业务字段语义仍由具体 Agent Prompt 负责。
 | `mcp/run_scoped.py` | builtin MCP：按 agent run 租约 HTTP client |
 | `mcp/lease_manager.py` | worker 级 MCP lease + shared registry touch |
 | `ui/registry.py` | builtin/manual UI 工具按包筛选、合并和 `prepare_ui_tool_packages_for_spec` |
-| `attachments/` | 默认关闭的 `builtin:attachment` 包；会话内 TXT/DOCX/XLSX 分页读取 |
 | `../sandbox/toolset.py` | 默认关闭的 `builtin:sandbox`；代理 PythonExecutionBackend |
+
+`../files/`不是 ToolPackage：它按当前会话附件和已授权 Skill资源自动注入统一 `read_file`，
+并负责来源隔离、分页、图片返回、同一 Run 的字节/解析缓存和并发 single-flight。
 
 ### `skills/`
 
@@ -201,7 +203,7 @@ XML + JSON 投影。业务字段语义仍由具体 Agent Prompt 负责。
 | `catalog.py` | 合并代码内置与数据库上传 Skill 目录 |
 | `package.py` | ZIP、Frontmatter、Manifest 与资源索引安全校验 |
 | `runtime.py` | 平台 ZIP 下载、Hash 校验、当前目录物化和 Harness `Skills` 装配 |
-| `resource_reader.py` · `tools.py` | 已授权文本、DOCX、XLSX Reference/Asset 的统一分页读取 |
+| `resource_reader.py` · `tools.py` | Skill管理预览和模型侧资源目录；正文统一转 `read_file` |
 | `script_tool.py` | 安全 Backend 可用时，组装已授权 Skill 脚本执行工具 |
 
 ### `api/v1/`
@@ -248,12 +250,12 @@ XML + JSON 投影。业务字段语义仍由具体 Agent Prompt 负责。
 ### 内置工具包
 
 `builtin:general` 只提供当前时间且默认启用；`builtin:sandbox` 提供 Python 计算和条件式 Skill 脚本执行，
-`builtin:attachment` 提供附件读取，两者默认关闭。每个包严格包装一个 Toolset。内置包由代码随版本发布，
+且默认关闭。每个包严格包装一个 Toolset。内置包由代码随版本发布，
 不在数据库注册；配置中心只读展示，Agent 仍按整包选择。
 
 ### 系统工具目录
 
-`GET /api/v1/system-tools` 返回由代码维护的只读运行时目录，按 Skill、MCP Tool Search 和
+`GET /api/v1/system-tools` 返回由代码维护的只读运行时目录，按 Skill、文件、MCP Tool Search 和
 MCP Resource 分组说明工具来源与自动注入条件。该接口不读取数据库、不构造 Agent Run；
 `runtime:*` 仅是 Console 展示编码，不得注册到 ToolPackage Registry、`/tools` 或
 `agents.capabilities`。
@@ -266,8 +268,10 @@ MCP Resource 分组说明工具来源与自动注入条件。该接口不读取�
 - 当前 Pod 只保留 `runtime-skills/<code>/` 一份上传 Skill 运行副本；启动、安装、替换、启用和
   `POST /api/v1/skills/{code}/reload` 负责同步，普通 Run 不访问平台文件服务。Hash 只用于完整性
   和过期判断，不代表产品版本，也不保留历史目录。
-- Harness 0.18 `Skills` 负责 `load_capability` 渐进披露；DeepAgent 补充授权资源 List/Read。
-- 文本、DOCX 和 XLSX 根据索引中的路径、MIME 与后缀按字符、逻辑块或物理行分页；PDF、PPTX、图片仍只展示元数据。历史安装包不需要为 XLSX 重新生成索引。
+- Harness 0.18 `Skills` 负责 `load_capability` 渐进披露；DeepAgent通过 `list_skill_resources`
+  提供授权目录，通过系统 `read_file`读取正文。
+- 文本、DOCX 和 XLSX 根据索引中的路径、MIME 与后缀按行、逻辑块或物理行分页；图片仅在模型
+  支持图片输入时读取，PDF/PPTX仍只展示元数据。历史安装包不需要为 XLSX 重新生成索引。
 - `scripts/`、`tools/` 可以随包保存并列出路径，但不能通过资源工具读取。脚本执行要求同一 Agent 选择该 Skill、启用 `builtin:sandbox`，且 Backend health 明确 `production_ready=true`；否则 `execute_skill_script` 不进入模型工具列表。
 - 单个上传 Skill 文件缺失或同步失败时，本轮跳过该 Skill 并继续运行；不得让它阻塞其他 Skill、
   MCP 或普通回答。诊断进入 `/skills` 的派生状态与 `final.context.skills`，不写数据库状态字段。
@@ -292,12 +296,15 @@ MCP Resource 分组说明工具来源与自动注入条件。该接口不读取�
 
 `builtin__choice` 始终支持候选外自由输入，结果固定为 `{selected: string[], custom_input: string | null}`；单选、多选和自由输入共用这一结构。
 
-### 附件工具
+### 文件系统工具
 
-`builtin:attachment` 是默认关闭的 Agent 工具包，只在 `capabilities` 显式包含该编码时加载
-`read_text_attachment`、`read_docx`、`read_xlsx`。工具首次通常只传 `file_id`，随后根据
-`has_more/next_offset` 渐进读取。合法 ID 范围必须从当前消息和当前会话完整
+`read_file`是按来源条件自动注入的系统工具，不属于 Agent能力配置。附件使用
+`resource={type: attachment, file_id}`，Skill使用
+`resource={type: skill, skill_code, path}`。工具首次通常只传来源，随后根据
+`has_more/next_offset`渐进读取。合法附件ID范围必须从当前消息和当前会话完整
 `chat_messages` 建立，不能从可能被裁剪的 Checkpoint 建立，也不能仅依赖平台下载权限。
+Skill路径必须属于当前 Agent已选择、启用且运行目录就绪的资源索引。字节和解析结果只缓存到
+本次用户消息对应的完整 Run终态，不跨Run、进程或数据库保存。
 
 图片、音频、视频、PDF 是原生模态，运行时只认 `llm_models.input_modalities`。PDF 当前无
 本地解析/OCR。新上传不抽文本，历史 `extracted_text` 仅为回放兼容。完整设计见
@@ -405,7 +412,7 @@ SSE 协议：[`../docs/guides/sse-protocol.md`](../docs/guides/sse-protocol.md)�
    - 多入口共享组装 → `api/v1/deps.py`（变化量留在入口，上下文在 `_build_*` 内统一解包）
 1. 包名 **`deep_agent`**，启动 `deep_agent.main:app`（非 `app.main`）
 2. 扩展优先走路径注册，避免改 `runner.py` 核心
-3. 工具包命名：`builtin:general` \| `builtin:sandbox` \| `builtin:attachment` \| `mcp:<name>` \| `ui:<package>`；一个包严格包装一个 Toolset，Agent 按包选择，工具协议名不随包编码变化。Skill 使用独立 `agents.skills`，不得重新塞回 ToolPackage
+3. 工具包命名：`builtin:general` \| `builtin:sandbox` \| `mcp:<name>` \| `ui:<package>`；一个包严格包装一个 Toolset，Agent 按包选择，工具协议名不随包编码变化。Skill 使用独立 `agents.skills`，`runtime:*`系统工具不得塞回 ToolPackage
 4. DB Agent 会话：复合键 `(agent_id, session_id)`；无 agent 时 `agent_id=''`
 5. 同 session 用 `SessionStore.lock()` 串行；多实例 DB 级锁未实现
 6. 配置保存先完成 Schema/引用校验，再进入写事务；一次 API 业务变更不要串联多个各自提交的 Store `_write()`。MCP 检测等外部 I/O 先基于候选配置执行，再把配置与检测快照一次性提交。模型目录联网、解析和完整校验必须在事务前完成，随后单事务全量替换；模型配置保存不得隐式联网。

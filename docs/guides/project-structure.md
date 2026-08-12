@@ -33,6 +33,7 @@ FastAPI API
 - `api/`：HTTP 接口和依赖组装。
 - `agent/`：模型、运行器、消息、附件和事件处理。
 - `capabilities/`：工具包目录以及 Native、MCP、UI Toolset 适配。
+- `files/`：附件与 Skill 文件统一读取、权限校验、分页和 Run内缓存。
 - `skills/`：线上 Skill 包校验、目录、运行时物化和只读资源工具。
 - `builtin_skills/`：随代码发布、只读的内置 Skill 包。
 - `db/`：ORM、Store、会话协调和数据库连接。
@@ -47,7 +48,6 @@ FastAPI API
 | --- | --- | --- |
 | `builtin:general` | `deep_agent/capabilities/native/` | 内置“通用工具”，默认启用，提供 UTC 时间 |
 | `builtin:sandbox` | `deep_agent/sandbox/` | 内置“Python 沙箱”，默认关闭，提供无状态 Python 计算 |
-| `builtin:attachment` | `deep_agent/capabilities/attachments/` | 内置“附件读取”，Agent 显式启用的会话附件按需读取 |
 | `mcp:<name>` | 数据库或 `mcps/` | 外部或内置 MCP 工具 |
 | `ui:builtin` | 代码 | 确认和候选选择 HITL 工具包 |
 | `ui:<package>` | `ui_tool_packages` + `ui_tool_definitions` | Agent 显式选择的手工 HITL 工具包 |
@@ -59,6 +59,9 @@ FastAPI API
 Skill 不属于工具包，也不进入 `agents.capabilities`。Agent 使用独立 `agents.skills` 选择
 Builtin 或上传 Skill；Harness 只先披露名称和简介，模型按需调用 `load_capability` 加载正文。
 Skill 不能扩大 MCP 或其他工具授权。
+
+`read_file`等系统工具也不属于 ToolPackage。它们按本轮附件、已选 Skill或 MCP能力自动注入，
+只在 Console“系统工具”目录中只读展示，不能写入 `agents.capabilities`。
 
 ## 容易混淆的目录
 

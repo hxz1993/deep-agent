@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from deep_agent.capabilities.attachments import build_attachment_tool_package
 from deep_agent.capabilities.native import build_native_tool_package
 from deep_agent.capabilities.registry import ToolInfo, ToolPackage, ToolPackageRegistry
 from deep_agent.options import OPTION
@@ -48,7 +47,5 @@ def build_registry(
                 sandbox_profile=sandbox_profile,
             )
         )
-    registry.register(build_attachment_tool_package())
-
     logger.info("Registered tool packages: {}", ", ".join(registry.codes()))
     return registry

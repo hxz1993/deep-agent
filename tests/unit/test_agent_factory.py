@@ -5,14 +5,11 @@ import unittest
 from unittest import mock
 
 from pydantic_ai.models.google import GoogleModel
-from pydantic_ai import RunContext
 from pydantic_ai.models.openai import OpenAIChatModel
-from pydantic_ai.models.test import TestModel
 from pydantic_ai.providers.deepseek import DeepSeekProvider
 from pydantic_ai.providers.google import GoogleProvider
 from pydantic_ai.providers.openai import OpenAIProvider
-from pydantic_ai.toolsets import FunctionToolset, PreparedToolset
-from pydantic_ai.usage import RunUsage
+from pydantic_ai.toolsets import FunctionToolset
 
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.factory import _resolve_model, _toolsets_for_spec, build_agent
@@ -21,7 +18,6 @@ from deep_agent.capabilities.registry import ToolPackage, ToolPackageRegistry
 from deep_agent.agent.spec import AgentSpec
 from deep_agent.agent.tool_discovery import McpDiscoveryToolset
 from deep_agent.options import OPTION
-from deep_agent.schemas.attachment import AttachmentRef
 
 
 def _spec(**kwargs: object) -> AgentSpec:
@@ -201,11 +197,9 @@ class ToolsetAssemblyTests(unittest.TestCase):
         registry = ToolPackageRegistry()
         general = object()
         sandbox = object()
-        attachment = object()
         for code, toolset in (
             ("builtin:general", general),
             ("builtin:sandbox", sandbox),
-            ("builtin:attachment", attachment),
         ):
             registry.register(
                 ToolPackage(
@@ -223,7 +217,6 @@ class ToolsetAssemblyTests(unittest.TestCase):
             capabilities=[
                 "builtin:general",
                 "builtin:sandbox",
-                "builtin:attachment",
                 "mcp:deepcube",
                 "ui:deepcube",
             ]
@@ -233,6 +226,7 @@ class ToolsetAssemblyTests(unittest.TestCase):
             spec,
             mcp_toolsets=[mcp],
             mcp_resource_toolset=resources,
+            file_toolset="file-toolset",
             dynamic_ui_packages=[
                 ToolPackage(
                     code="ui:deepcube",
@@ -246,16 +240,14 @@ class ToolsetAssemblyTests(unittest.TestCase):
         self.assertEqual(len(assembled), 6)
         self.assertIs(assembled[0], general)
         self.assertIs(assembled[1], sandbox)
-        self.assertIsInstance(assembled[2], PreparedToolset)
-        self.assertIs(assembled[2].wrapped, attachment)
-        self.assertIsInstance(assembled[3], McpDiscoveryToolset)
-        self.assertIs(assembled[4], resources)
+        self.assertIsInstance(assembled[2], McpDiscoveryToolset)
+        self.assertIs(assembled[3], resources)
+        self.assertEqual(assembled[4], "file-toolset")
         self.assertIs(assembled[5], ui)
 
     def test_null_and_empty_selection_keep_original_default_semantics(self) -> None:
         registry = ToolPackageRegistry()
         general = object()
-        attachment = object()
         registry.register(
             ToolPackage(
                 code="builtin:general",
@@ -264,82 +256,8 @@ class ToolsetAssemblyTests(unittest.TestCase):
                 default_enabled=True,
             )
         )
-        registry.register(
-            ToolPackage(
-                code="builtin:attachment",
-                category="builtin",
-                toolset=attachment,
-                default_enabled=False,
-            )
-        )
-
         self.assertEqual(_toolsets_for_spec(registry, _spec(capabilities=None)), [general])
         self.assertEqual(_toolsets_for_spec(registry, _spec(capabilities=[])), [])
-
-
-class ConditionalAttachmentToolsetTests(unittest.IsolatedAsyncioTestCase):
-    async def test_attachment_package_is_hidden_without_session_attachment(self) -> None:
-        registry = ToolPackageRegistry()
-
-        def read_attachment() -> str:
-            return "ok"
-
-        attachment = FunctionToolset(tools=[read_attachment])
-        registry.register(
-            ToolPackage(
-                code="builtin:attachment",
-                category="builtin",
-                toolset=attachment,
-                default_enabled=False,
-            )
-        )
-        prepared = _toolsets_for_spec(
-            registry,
-            _spec(capabilities=["builtin:attachment"]),
-        )[0]
-        ctx = RunContext(
-            deps=AgentDeps(session_id="session"),
-            model=TestModel(),
-            usage=RunUsage(),
-        )
-
-        self.assertEqual(await prepared.get_tools(ctx), {})
-
-    async def test_attachment_package_is_visible_for_current_or_historical_attachment(self) -> None:
-        registry = ToolPackageRegistry()
-
-        def read_attachment() -> str:
-            return "ok"
-
-        attachment = FunctionToolset(tools=[read_attachment])
-        registry.register(
-            ToolPackage(
-                code="builtin:attachment",
-                category="builtin",
-                toolset=attachment,
-                default_enabled=False,
-            )
-        )
-        prepared = _toolsets_for_spec(
-            registry,
-            _spec(capabilities=["builtin:attachment"]),
-        )[0]
-        ctx = RunContext(
-            deps=AgentDeps(
-                session_id="session",
-                attachment_by_id={
-                    "history-file": AttachmentRef(
-                        id="history-file",
-                        name="history.txt",
-                        mime="text/plain",
-                    )
-                },
-            ),
-            model=TestModel(),
-            usage=RunUsage(),
-        )
-
-        self.assertEqual(set(await prepared.get_tools(ctx)), {"read_attachment"})
 
 
 if __name__ == "__main__":

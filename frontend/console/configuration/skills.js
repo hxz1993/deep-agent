@@ -79,14 +79,17 @@ const skillsAdmin = {
     const resourceRows = resources.length
       ? resources.map((resource) => {
           const isScript = resource.category === "script";
-          const canRead = resource.readable && !isScript;
+          const canRead = ["text", "docx", "xlsx"].includes(resource.read_format) && !isScript;
           const category = resource.category === "reference" ? "Reference" : resource.category === "asset" ? "Asset" : "Script";
           const readLabels = {
             text: "文本可读",
             docx: "Word 可读",
             xlsx: "Excel 可读",
+            image: "图片可读",
           };
-          const unreadableStatus = resource.path?.toLowerCase().endsWith(".pdf")
+          const unreadableStatus = resource.read_format === "image"
+            ? "支持图片输入的模型可读"
+            : resource.path?.toLowerCase().endsWith(".pdf")
             ? "PDF 暂不可读"
             : resource.path?.toLowerCase().endsWith(".pptx")
               ? "PPTX 暂不可读"
@@ -155,7 +158,7 @@ const skillsAdmin = {
     preview.innerHTML = `<div class="skill-list-state"><span class="loading-spinner"></span>正在读取资源…</div>`;
     try {
       const page = await apiFetch(`/api/v1/skills/${encodeURIComponent(code)}/resources/${path.split("/").map(encodeURIComponent).join("/")}`);
-      const unitLabels = { character: "字符", block: "逻辑块", row: "行" };
+      const unitLabels = { line: "行", block: "逻辑块", row: "行" };
       preview.innerHTML = `<header><strong>${escapeHtml(path)}</strong><button class="icon-btn" type="button" aria-label="关闭资源预览"><i data-lucide="x"></i></button></header><p class="field-hint">${escapeHtml(page.format.toUpperCase())} · ${Number(page.returned_count || 0)} ${escapeHtml(unitLabels[page.unit] || page.unit)}</p><pre>${escapeHtml(page.content)}</pre>${page.has_more ? `<p>内容较长，可由 Agent 使用 next_offset=${escapeHtml(page.next_offset)} 继续分页读取。</p>` : ""}`;
       preview.querySelector("button")?.addEventListener("click", () => preview.classList.add("hidden"));
       window.lucide?.createIcons();

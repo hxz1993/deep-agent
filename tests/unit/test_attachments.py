@@ -93,7 +93,7 @@ class TestAttachments(unittest.IsolatedAsyncioTestCase):
         ) as mock_download:
             parts = await resolve_user_prompt("", [ref], {})
             self.assertIn("file_id: doc-1", parts[0].content)
-            self.assertIn("attachment 工具", parts[0].content)
+            self.assertIn("read_file 系统工具", parts[0].content)
             mock_download.assert_not_called()
 
     @patch("deep_agent.agent.attachments._download_file", new_callable=AsyncMock)

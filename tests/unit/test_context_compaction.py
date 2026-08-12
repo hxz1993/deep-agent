@@ -120,31 +120,31 @@ def _long_tool_history(*, pairs: int = 8, result_chars: int = 1_200) -> list[Mod
 class AttachmentFileKeyTests(unittest.TestCase):
     def test_same_attachment_range_has_same_key(self) -> None:
         first = ToolCallPart(
-            "read_text_attachment",
-            {"file_id": "file-1", "offset": 1, "limit": 500},
+            "read_file",
+            {"resource": {"type": "attachment", "file_id": "file-1"}, "offset": 1, "limit": 500},
             "call-1",
         )
         second = ToolCallPart(
-            "read_text_attachment",
-            {"file_id": "file-1", "offset": 1, "limit": 500},
+            "read_file",
+            {"resource": {"type": "attachment", "file_id": "file-1"}, "offset": 1, "limit": 500},
             "call-2",
         )
         self.assertEqual(deep_agent_file_key(first), deep_agent_file_key(second))
 
     def test_different_attachment_pages_and_sheets_are_not_deduplicated(self) -> None:
         page_one = ToolCallPart(
-            "read_xlsx",
-            {"file_id": "file-1", "sheet": "A", "offset": 1, "limit": 100},
+            "read_file",
+            {"resource": {"type": "attachment", "file_id": "file-1"}, "sheet": "A", "offset": 1, "limit": 100},
             "call-1",
         )
         page_two = ToolCallPart(
-            "read_xlsx",
-            {"file_id": "file-1", "sheet": "A", "offset": 101, "limit": 100},
+            "read_file",
+            {"resource": {"type": "attachment", "file_id": "file-1"}, "sheet": "A", "offset": 101, "limit": 100},
             "call-2",
         )
         other_sheet = ToolCallPart(
-            "read_xlsx",
-            {"file_id": "file-1", "sheet": "B", "offset": 1, "limit": 100},
+            "read_file",
+            {"resource": {"type": "attachment", "file_id": "file-1"}, "sheet": "B", "offset": 1, "limit": 100},
             "call-3",
         )
         self.assertNotEqual(
@@ -155,6 +155,26 @@ class AttachmentFileKeyTests(unittest.TestCase):
             deep_agent_file_key(page_one),
             deep_agent_file_key(other_sheet),
         )
+
+    def test_legacy_attachment_history_remains_deduplicatable(self) -> None:
+        first = ToolCallPart(
+            "read_xlsx",
+            {"file_id": "file-1", "sheet": "A", "offset": 1, "limit": 100},
+            "call-1",
+        )
+        second = ToolCallPart(
+            "read_xlsx",
+            {"file_id": "file-1", "sheet": "A", "offset": 1, "limit": 100},
+            "call-2",
+        )
+        next_page = ToolCallPart(
+            "read_xlsx",
+            {"file_id": "file-1", "sheet": "A", "offset": 101, "limit": 100},
+            "call-3",
+        )
+
+        self.assertEqual(deep_agent_file_key(first), deep_agent_file_key(second))
+        self.assertNotEqual(deep_agent_file_key(first), deep_agent_file_key(next_page))
 
 
 class ToolSearchCompactionBoundaryTests(unittest.TestCase):

@@ -324,14 +324,13 @@ DeepAgent 原有自研 `Capability` 只是产品配置包装，却与 Pydantic A
 
 ### 4.1 内置 Function Tool
 
-产品层把代码随 DeepAgent 发布、无需管理员注册的后端 Function Tool 统一归入
-“内置工具”，与 MCP 服务同级展示。v0.3.2 收敛为三个 Tool Package：
+产品层把代码随 DeepAgent 发布、无需管理员注册的可配置后端 Function Tool 归入
+“内置工具”，与 MCP 服务同级展示。v0.3.23 保留两个 Tool Package：
 
 | 前端名称 | Tool Package 编码 | 默认状态 | 工具 |
 | --- | --- | --- | --- |
 | 通用工具 | `builtin:general` | 默认启用 | `get_current_time` |
 | Python 沙箱 | `builtin:sandbox` | 默认关闭 | `execute_python`、条件式 `execute_skill_script` |
-| 附件读取 | `builtin:attachment` | 默认关闭 | `read_text_attachment`、`read_docx`、`read_xlsx` |
 
 两包中的后端函数对模型都表现为 `FunctionToolset`。配置中心只读展示工具包及工具明细，
 实际启用仍由 `agents.capabilities` 中的工具包编码决定；本轮不提供包内逐工具开关。
@@ -343,10 +342,11 @@ DeepAgent 原有自研 `Capability` 只是产品配置包装，却与 Pydantic A
 请求审计，不适合作为所有 Agent 默认获得的通用网络能力；需要联网时应接入边界明确、
 可配置和可审计的 MCP 或业务工具。
 
-位置：
+附件和Skill文件由自动注入的系统工具 `read_file`统一读取，不进入内置工具包或
+`agents.capabilities`。位置：
 
 - `deep_agent/capabilities/native/builtin.py`
-- `deep_agent/capabilities/attachments/builtin.py`
+- `deep_agent/files/toolset.py`
 - `deep_agent/sandbox/toolset.py`
 
 v0.3.18 起 Skill 不再使用 `FunctionToolset`，也不属于 ToolPackage。Skill 通过 Harness

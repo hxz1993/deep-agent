@@ -14,8 +14,6 @@ from pydantic_ai.providers.anthropic import AnthropicProvider
 from pydantic_ai.providers.deepseek import DeepSeekProvider
 from pydantic_ai.providers.google import GoogleProvider
 from pydantic_ai.providers.openai import OpenAIProvider
-from pydantic_ai.toolsets import PreparedToolset
-
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.context_references import context_reference_instructions
 from deep_agent.agent.models import OpenAICompatibleVideoChatModel
@@ -166,6 +164,7 @@ def _toolsets_for_spec(
     mcp_toolsets: list[Any] | None = None,
     dynamic_ui_packages: list[ToolPackage] | None = None,
     mcp_resource_toolset: Any | None = None,
+    file_toolset: Any | None = None,
     skill_resource_toolset: Any | None = None,
     skill_script_toolset: Any | None = None,
     mcp_server_names: list[str] | None = None,
@@ -174,13 +173,7 @@ def _toolsets_for_spec(
     """Resolve selected product tool packages into Pydantic AI toolsets."""
     toolsets: list[Any] = []
     for package in registry.selected(spec.capabilities):
-        toolset = package.toolset
-        if package.code == "builtin:attachment":
-            toolset = PreparedToolset(
-                toolset,
-                lambda ctx, tools: tools if ctx.deps.attachment_by_id else [],
-            )
-        toolsets.append(toolset)
+        toolsets.append(package.toolset)
     if mcp_toolsets:
         discovery = build_mcp_discovery_toolset(
             mcp_toolsets,
@@ -191,6 +184,8 @@ def _toolsets_for_spec(
             toolsets.append(discovery)
     if mcp_resource_toolset is not None:
         toolsets.append(mcp_resource_toolset)
+    if file_toolset is not None:
+        toolsets.append(file_toolset)
     if skill_resource_toolset is not None:
         toolsets.append(skill_resource_toolset)
     if skill_script_toolset is not None:
@@ -209,6 +204,7 @@ def build_agent(
     mcp_toolsets: list[Any] | None = None,
     dynamic_ui_packages: list[ToolPackage] | None = None,
     mcp_resource_toolset: Any | None = None,
+    file_toolset: Any | None = None,
     skill_resource_toolset: Any | None = None,
     skill_script_toolset: Any | None = None,
     skill_capability: AbstractCapability[AgentDeps] | None = None,
@@ -230,6 +226,7 @@ def build_agent(
         mcp_toolsets=mcp_toolsets,
         dynamic_ui_packages=dynamic_ui_packages,
         mcp_resource_toolset=mcp_resource_toolset,
+        file_toolset=file_toolset,
         skill_resource_toolset=skill_resource_toolset,
         skill_script_toolset=skill_script_toolset,
         mcp_server_names=mcp_server_names,

@@ -1642,7 +1642,7 @@ function updateComposerModelInfo() {
           } else if (key === "image") {
             title = `${label}：可上传，当前模型支持原生看图`;
           } else if (["text_file", "docx", "xlsx"].includes(key)) {
-            title = `${label}：上传后由 Agent 的附件读取工具按需分页读取`;
+            title = `${label}：上传后由 Agent 的 read_file 系统工具按需分页读取`;
           } else if (key === "pdf") {
             title = `${label}：仅模型配置原生 PDF 输入时可发送，不做本地解析`;
           }

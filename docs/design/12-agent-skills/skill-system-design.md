@@ -1,6 +1,6 @@
 # DeepAgent 线上 Skill 体系设计
 
-> 实施版本：v0.3.18；运行目录收口：v0.3.20；资产读取与脚本协议：v0.3.22
+> 实施版本：v0.3.18；运行目录收口：v0.3.20；脚本协议：v0.3.22；统一文件读取：v0.3.23；Alembic head：004
 > 运行时：Pydantic AI 2.26 + Pydantic AI Harness 0.18
 > 数据库：Alembic 003
 
@@ -127,25 +127,27 @@ Agent.skills
 → Harness Skills 初始目录（name + description）
 → 模型调用 load_capability(id=...)
 → Harness 返回完整 SKILL.md
-→ References/Assets 继续按需 List/Read
+→ References/Assets 先 List，再由系统工具 read_file 按需读取
 ```
 
 DeepAgent 直接使用 Harness 公开 `Skills` Capability，不自研加载状态机。`load_capability` 使用
 Pydantic AI 官方 typed Call/Return，进入原始 History，并与 Tool Search、普通工具一样受 Cancel、
 压缩安全边界和历史恢复约束。正文被摘要移除后，模型仍可按 Harness 历史语义重新加载。
 
-DeepAgent 补两个受 Agent 授权约束的只读工具：
+DeepAgent提供一个Skill资源目录工具和一个跨来源文件工具：
 
-- `list_skill_resources(skill_code)`：列出 Reference、Asset 与 Script 的路径、MIME、大小、Hash、
+- `list_skill_resources(skill_code)`：属于“Skill”系统工具，列出 Reference、Asset 与 Script 的路径、MIME、大小、Hash、
   读取格式和当前可执行状态；不会返回任何正文。
-- `read_skill_resource(skill_code, path, offset, limit, sheet)`：文本按 0-based 字符分页；DOCX 与
-  XLSX 复用会话附件解析内核，按 1-based 逻辑块或物理行分页。XLSX未指定 `sheet` 时选择第一个
-  可见工作表。
+- `read_file(resource={type: "skill", skill_code, path}, offset, limit, sheet)`：属于“文件”系统工具，
+  与会话附件共用入口；文本按1-based逻辑行、DOCX按逻辑块、XLSX按物理行分页。XLSX未指定
+  `sheet`时选择第一个可见工作表；支持图片输入的模型还可读取图片。
 
-没有可用资源时不披露这两个工具；未选择、停用和未知 Skill 均不可访问。PDF、PPTX、图片等
-当前不解析的二进制返回 `binary_resource_not_readable`；Script可以列出但资源读取工具始终拒绝。
+没有可用资源时不披露 `read_file`；目录工具在选择含资源的Skill时披露。未选择、停用和未知
+Skill均不可访问。PDF、PPTX等当前不解析的二进制只出现在目录；Script可以列出但 `read_file`
+始终拒绝。
 路径错误使用 `ModelRetry`，索引内文件缺失、损坏或解析失败使用 `ToolFailed`。运行时根据路径、
-MIME和后缀派生读取模式，v0.3.20已安装的 XLSX无需重装。
+MIME和后缀派生读取模式，v0.3.20已安装的XLSX无需重装。同一Run内字节读取和Office完整解析
+只发生一次；并发同文件读取使用single-flight，Run终态后缓存随 `AgentDeps`释放。
 
 上传 Skill 文件暂时不可用时，本轮把它从 Harness Library 中移除，并给模型一条短说明，禁止
 假装已经加载。`final.context.skills` 返回 configured、available、loaded 和 unavailable；这是
@@ -209,17 +211,17 @@ v0.3.20 使用 `DeepFOS-Skill培训包-20260811.zip` 做真实格式验收，拆
 
 ## 9. 迁移、测试和发布边界
 
-Alembic 003：
+Alembic 003建立Skill表和Agent引用；004只删除显式Agent能力中的旧 `builtin:attachment`：
 
 - upgrade 在 DDL 前拒绝旧 `skill:*` 引用。
 - downgrade 仅在 `skill_packages` 为空且所有 `agents.skills=[]` 时允许。
-- SQLite 做真实 `002 → 003 → 002 → 003`；MySQL/PostgreSQL 做方言和 DDL 路径测试。
+- SQLite做真实 `003 → 004 → 003 → 004`；MySQL/PostgreSQL覆盖JSON配置清理方言路径。
 
-v0.3.22 继续使用 Alembic 003，不新增 revision。发布后在 Test 003执行：
+v0.3.23 发布后在Test 004执行：
 
 1. 备份当前 Test 003配置数据库。
 2. 安装三个真实业务 Skill，验证平台原包、数据库元数据和当前 Pod运行状态均正常。
-3. 新建临时验收 Agent，确认名称目录、`load_capability`、文本资源 List/Read 和跨 Skill加载。
+3. 新建临时验收Agent，确认名称目录、`load_capability`、资源List、`read_file`和跨Skill加载。
 4. 确认 XLSX可按工作表和物理行读取；非生产 Backend 下模型仍看不到脚本执行工具。
 5. 确认首轮同步完成后，后续 Run不再下载平台文件。
 
@@ -257,7 +259,7 @@ health始终为 `security_level=none, production_ready=false`，所以生产运�
 当前Sandbox Profile只承诺 `numpy/pandas/pydantic`。后续Skill脚本若依赖其他三方包，必须显式
 更新Profile、独立venv、安全Backend镜像和测试；不允许运行时 `pip install`或依赖宿主主进程环境。
 
-v0.3.23 只有在目标K8s节点使用最终securityContext/cgroup/seccomp和固定自编go-judge制品运行
+v0.3.24 只有在目标K8s节点使用最终securityContext/cgroup/seccomp和固定自编go-judge制品运行
 完整攻击探针，且报告 `selection_eligible=true` 后才开始。届时安全Backend不可用必须返回
 `BACKEND_UNAVAILABLE`，绝不回退 `subprocess-dev`。
 
@@ -266,7 +268,7 @@ v0.3.23 只有在目标K8s节点使用最终securityContext/cgroup/seccomp和固
 - 不可变 Skill Revision、回滚和 Agent 固定版本。
 - 第三方签名、来源信任、Marketplace 和自动升级。
 - 可迁移的自包含 Skill 导出包。
-- go-judge安全Backend和K8s节点签字（见v0.3.23门槛）。
+- go-judge安全Backend和K8s节点签字（见v0.3.24门槛）。
 - Skill脚本依赖扩展、网络权限和输出文件Artifact。
 - Skill 内逐文件授权。
 

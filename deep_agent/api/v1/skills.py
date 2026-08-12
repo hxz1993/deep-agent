@@ -280,16 +280,31 @@ async def replace_skill_package(
                 detail=f"Replacement package code must remain {code!r}",
             )
         request_headers = extract_forward_headers(request)
-        if parsed.content_hash == current.content_hash:
-            await ctx.skill_runtime.materialize(
-                current,
-                request_headers=request_headers,
-                payload=raw,
-            )
-            return SkillInstallResult(
-                status="noop",
-                skill=_row_detail(current, ctx.skill_runtime),
-            )
+        same_content = parsed.content_hash == current.content_hash
+        if same_content:
+            try:
+                await ctx.skill_runtime.download_package(
+                    current,
+                    request_headers=request_headers,
+                )
+            except Exception as exc:  # noqa: BLE001 - explicit replacement repairs a missing source file
+                logger.warning(
+                    "Skill same-hash replacement will repair platform source "
+                    "code={} error_type={}",
+                    code,
+                    type(exc).__name__,
+                )
+            else:
+                await ctx.skill_runtime.materialize(
+                    current,
+                    request_headers=request_headers,
+                    payload=raw,
+                )
+                return SkillInstallResult(
+                    status="noop",
+                    skill=_row_detail(current, ctx.skill_runtime),
+                )
+
         api, uploaded = await _upload_platform(request, raw=raw, file_name=filename)
         try:
             replacement = _record(
@@ -297,7 +312,19 @@ async def replace_skill_package(
                 platform_file_id=uploaded.id,
                 file_name=uploaded.fileName or filename,
                 file_size=int(uploaded.fileSize or len(raw)),
-            ).model_copy(update={"enabled": current.enabled})
+            ).model_copy(
+                update={
+                    "enabled": current.enabled,
+                    **(
+                        {
+                            "label": current.label,
+                            "description": current.description,
+                        }
+                        if same_content
+                        else {}
+                    ),
+                }
+            )
             row = await ctx.stores.skill_package.replace_package(code, replacement)
             if row is None:
                 raise RuntimeError(f"Skill disappeared during package update: {code}")
@@ -312,7 +339,7 @@ async def replace_skill_package(
             force=True,
         )
         return SkillInstallResult(
-            status="updated",
+            status="repaired" if same_content else "updated",
             skill=_row_detail(row, ctx.skill_runtime),
         )
     except SkillPackageError as exc:

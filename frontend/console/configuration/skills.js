@@ -256,7 +256,7 @@ const skillsAdmin = {
       }
       const result = await response.json();
       this.selectedCode = result.skill.code;
-      showToast(result.status === "noop" ? "Skill 包内容没有变化" : replacing ? "Skill 包已替换" : "Skill 已安装");
+      showToast(result.status === "noop" ? "Skill 包内容没有变化" : result.status === "repaired" ? "Skill 原包与运行文件已恢复" : replacing ? "Skill 包已替换" : "Skill 已安装");
       await this.refresh();
     } catch (error) {
       showToast(error.message, true);

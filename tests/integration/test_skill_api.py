@@ -281,6 +281,37 @@ class SkillApiTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(response.json()["status"], "noop")
             self.assertEqual(_FakePlatformFiles.blobs, before)
 
+    async def test_same_hash_update_repairs_missing_platform_file(self) -> None:
+        payload = skill_zip()
+        async with AsyncClient(
+            transport=self.transport,
+            base_url="http://test",
+            headers=self.client_headers,
+        ) as client:
+            installed = await client.post(
+                "/api/v1/skills",
+                files={"file": ("example.zip", payload, "application/zip")},
+            )
+            self.assertEqual(installed.status_code, 201, installed.text)
+            original = await self.stores.skill_package.get_by_code("example-skill")
+            _FakePlatformFiles.blobs.pop(original.platform_file_id)
+            _FakePlatformFiles.blobs["unrelated-file"] = b"unrelated"
+
+            response = await client.put(
+                "/api/v1/skills/example-skill/package",
+                files={"file": ("example.zip", payload, "application/zip")},
+            )
+
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(response.json()["status"], "repaired")
+            self.assertEqual(response.json()["skill"]["runtime_status"], "ready")
+            repaired = await self.stores.skill_package.get_by_code("example-skill")
+            self.assertNotEqual(repaired.platform_file_id, original.platform_file_id)
+            self.assertEqual(
+                _FakePlatformFiles.blobs[repaired.platform_file_id],
+                payload,
+            )
+
     async def test_patch_rejects_explicit_null(self) -> None:
         async with AsyncClient(
             transport=self.transport,

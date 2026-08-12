@@ -44,3 +44,8 @@ test("Skill 上传使用 multipart 且资源按安全 API 读取", () => {
   assert.doesNotMatch(source, /可执行，但 Agent 需启用 Python 沙箱/);
   assert.doesNotMatch(source, /已保存，当前不可读取或执行/);
 });
+
+test("同内容包在平台原文件丢失后会提示恢复而不是误报无变化", () => {
+  assert.match(source, /result\.status === "repaired"/);
+  assert.match(source, /Skill 原包与运行文件已恢复/);
+});

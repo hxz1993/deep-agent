@@ -30,10 +30,27 @@
 
 ### 近期动作（非功能开发）
 
-1. 下次 Test Pod真正重启或滚动发布后，确认三个上传 Skill无需人工 `reload`即为 `ready`，且原
-   ZIP仍可下载；这是对 v0.3.23恢复链路的部署复核，不创建新版本需求。
+1. `SKILL-VAL-001`：等待当前三个业务 Skill 的内容修改完成后，执行一次完整业务验收。验收覆盖
+   Skill选择与渐进披露、`load_capability`、Reference/XLSX读取、受控脚本执行、所需MCP Tool
+   Search与只读调用、最终业务答案，以及刷新后的History一致性。当前只登记验收，不提前改动
+   Skill内容或DeepAgent框架；测试发现稳定问题时，再分别归因到Skill内容、脚本、MCP或框架。
 2. 在真实 DeepCube/DeepTable业务中继续观察 `read_file`、Skill渐进披露和MCP快照；只有出现可稳定
    复现的语义、成本或可靠性问题，才新建可验收缺陷，不再为边缘猜测预埋兼容分支。
+
+### 下一步重点课题（尚未进入实施）
+
+以下两项是当前从“有潜力”中选出的优先讨论方向，但尚未锁定产品边界和实施计划，仍保留在
+“有潜力”分组：
+
+1. `TOOL-109 / ART-001 / ART-001b / ART-101 / ART-201`：大工具结果治理。先收集真实大结果样本，
+   区分“结果本身很大”“重复进入后续上下文”和“History/Console仍需查看完整内容”三类问题，
+   再评估 Harness `ToolOutputLimits`、`OverflowStore`、`MediaStore` 与DeepAgent共享存储、授权、TTL
+   和回读协议的组合。
+2. `CTX-102`：压缩后搜索原始会话。先用真实长会话验证摘要后是否会丢失精确路径、ID、历史决定
+   或工具结论，再评估 Harness `ConversationSearch`接入现有 `chat_messages`的只读查询方式；不建立
+   第二套History，也不改变现有Checkpoint和压缩链路。
+
+其余“有潜力”事项只是本轮不考虑，状态保持不变，不因此移入“暂缓”。
 
 ## 有潜力
 
@@ -44,7 +61,7 @@
 | ID | 潜力方向 | 优先复用 | 触发条件 | 当前边界 | 来源 |
 | --- | --- | --- | --- | --- | --- |
 | `TOOL-003` / `TOOL-106` / `TOOL-110` | 工具风险元数据、执行审批和参数/结果 Guardrail | Core `ApprovalRequiredToolset`、Harness `ToolGuardrail`、Core Deferred | 出现真实写入、删除、外发或高风险代码执行工具 | 业务服务权限、审批记录、TTL、操作人、幂等和审计仍由 DeepAgent/业务系统负责 | [工具治理](05-tool-optimization/tool-optimization-design.md#94-guardrails) |
-| `TOOL-109` / `ART-001` / `ART-001b` / `ART-101` / `ART-201` | 大工具结果外置与 Artifact | Harness `ToolOutputLimits`、`OverflowStore`、`MediaStore` | 大结果稳定重复占用上下文，且跨 Pod 共享 Store 已选定 | 句柄不可猜、user/App/Space 授权、TTL、清理、History 查看与 Console 提示必须完整 | [大工具结果治理](05-tool-optimization/tool-optimization-design.md#92-tooloutputlimits-overflowingtooloutput) |
+| `TOOL-109` / `ART-001` / `ART-001b` / `ART-101` / `ART-201` | **下一步重点**：大工具结果外置与 Artifact | Harness `ToolOutputLimits`、`OverflowStore`、`MediaStore` | 大结果稳定重复占用上下文，且跨 Pod 共享 Store 已选定 | 先收集真实样本再定方案；句柄不可猜、user/App/Space 授权、TTL、清理、History 查看与 Console 提示必须完整 | [大工具结果治理](05-tool-optimization/tool-optimization-design.md#92-tooloutputlimits-overflowingtooloutput) |
 | `TOOL-105` | 可选结构化最终输出 | Pydantic AI `ToolOutput`/`NativeOutput`/`PromptedOutput` | 产品锁定普通文本与多输出组合、混合工具调用和严格模式规则 | Output 不是 ToolPackage；权威 MCP 事实不由模型重写 | [结构化最终输出](09-structured-output/structured-output-design.md) |
 | `TOOL-108` | Agent 包内逐工具授权 | Core `FilteredToolset` 或 Prepared Toolset | 出现明确的“同包内部分工具禁止使用”权限需求 | 授权主键不能直接依赖可重命名的协议名 | [工具包后续演进](11-tool-packages/tool-packages-design.md#12-后续演进) |
 | `TOOL-301` | Provider Native Code/File/Web/Computer 等工具 | Core Provider Native Capability | 某托管 Provider 能力、模型和执行环境成为明确产品功能 | 必须显式启用并按 Provider 治理；不替代公共 MCP、Sandbox、附件、RAG 或当前页面 UI Tool | [浏览器与页面操作](15-browser-and-page-actions/browser-and-page-actions-design.md#23-provider-原生-computer-use) |
@@ -54,7 +71,7 @@
 
 | ID | 潜力方向 | 优先复用 | 触发条件 | 当前边界 | 来源 |
 | --- | --- | --- | --- | --- | --- |
-| `CTX-102` | 压缩后搜索原始会话 | Harness `ConversationSearch` + 自定义 `HistorySource` | 摘要后确实出现路径、ID、决定无法恢复的问题 | 只读现有 `chat_messages`；不启用第二套 `StepPersistence` 历史 | [Harness 后续采用项](03-context-compaction/context-compaction-research.md#harness-018-后续采用项) |
+| `CTX-102` | **下一步重点**：压缩后搜索原始会话 | Harness `ConversationSearch` + 自定义 `HistorySource` | 摘要后确实出现路径、ID、决定无法恢复的问题 | 先用真实长会话验证缺失样本；只读现有 `chat_messages`，不启用第二套 `StepPersistence` 历史 | [Harness 后续采用项](03-context-compaction/context-compaction-research.md#harness-018-后续采用项) |
 | `CTX-201` | 跨会话长期记忆 | Harness `Memory` + 产品 Store | 产品明确需要可查看、可编辑、可删除的长期笔记 | namespace 不是授权；必须补 user/Agent/App/Space、审计和删除 | [框架能力台账](14-framework-capabilities/framework-capabilities-baseline.md#53-有潜力按需求触发) |
 | `RUN-201` | 长任务崩溃恢复与副作用账本 | Harness `StepPersistence` 或 Core Durable Execution | 长工具/工作流需要进程崩溃后继续且业务幂等已定义 | 不替代 SQL Session/History、SSE 或 Deferred Pending | [框架能力台账](14-framework-capabilities/framework-capabilities-baseline.md#53-有潜力按需求触发) |
 | `RUN-202` | 结构化计划、子 Agent 与动态工作流 | Harness `Planning`、`SubAgents`、`DynamicWorkflow` | 出现稳定长任务分工、计划 UI 或并行执行需求 | 子 Run 隔离、用量、工具继承、权限和结果展示必须先设计 | [框架能力台账](14-framework-capabilities/framework-capabilities-baseline.md#53-有潜力按需求触发) |
@@ -141,7 +158,9 @@
 | Harness 确定性压缩 tiers | `ClampOversizedMessages`、`ClearToolResults`、`DeduplicateFileReads` 已复用 | 当前基线，[压缩研究](03-context-compaction/context-compaction-research.md#harness-实验结论) |
 | 官方 DeepSeek Provider | 使用 Pydantic AI 官方 Provider/Profile，不保留自定义模型循环 | v0.3.9+，[框架能力台账](14-framework-capabilities/framework-capabilities-baseline.md#41-已经采用) |
 
-## 当前明确不排期
+## 当前排期结论
 
-“有潜力”和“暂缓”都不是积压任务。当前“待实现”为空，因此本文件没有可脱离外部条件直接进入
-开发的下一项主线；下一轮应先由真实需求或重新启动条件选题，不因框架存在能力而继续堆功能。
+- 近期明确动作是等待三个业务Skill完成内容修改后执行 `SKILL-VAL-001`整体验收。
+- 大工具结果治理和压缩后搜索原始会话是下一步重点课题，但当前先做样本与边界确认，不直接实施。
+- 其余“有潜力”事项维持原分组，本轮不考虑不等于暂缓或关闭。
+- “暂缓”事项仍只按各自重新启动条件恢复，不因本次优先级调整而改变。

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Mapping, Sequence
+from typing import TYPE_CHECKING, Any, Mapping
 
 from pydantic_ai import CancellationToken
 
@@ -40,7 +40,6 @@ class AgentDeps:
     loaded_skill_codes: list[str] = field(default_factory=list)
     cancellation_token: CancellationToken | None = field(default=None, repr=False)
     has_context_references: bool = False
-    input_modalities: Sequence[str] = field(default_factory=tuple)
     attachment_by_id: dict[str, AttachmentRef] = field(default_factory=dict)
     file_bytes: dict[str, bytes] = field(default_factory=dict)
     file_parsed: dict[str, Any] = field(default_factory=dict)

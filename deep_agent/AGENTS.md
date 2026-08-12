@@ -194,7 +194,8 @@ XML + JSON 投影。业务字段语义仍由具体 Agent Prompt 负责。
 | `../sandbox/toolset.py` | 默认关闭的 `builtin:sandbox`；代理 PythonExecutionBackend |
 
 `../files/`不是 ToolPackage：它按当前会话附件和已授权 Skill资源自动注入统一 `read_file`，
-并负责来源隔离、分页、图片返回、同一 Run 的字节/解析缓存和并发 single-flight。
+并负责来源隔离、文本/Word/Excel分页、同一 Run 的字节/解析缓存和并发 single-flight。图片不经过
+`read_file`，仅作为当前轮原生多模态附件送给支持 `image` 的模型。
 
 ### `skills/`
 
@@ -204,7 +205,7 @@ XML + JSON 投影。业务字段语义仍由具体 Agent Prompt 负责。
 | `package.py` | ZIP、Frontmatter、Manifest 与资源索引安全校验 |
 | `runtime.py` | 平台 ZIP 下载、Hash 校验、当前目录物化和 Harness `Skills` 装配 |
 | `resource_reader.py` · `tools.py` | Skill管理预览和模型侧资源目录；正文统一转 `read_file` |
-| `script_tool.py` | 安全 Backend 可用时，组装已授权 Skill 脚本执行工具 |
+| `script_tool.py` | Agent选择含脚本Skill和Sandbox时，组装已授权Skill脚本执行工具 |
 
 ### `api/v1/`
 
@@ -268,11 +269,14 @@ MCP Resource 分组说明工具来源与自动注入条件。该接口不读取�
 - 当前 Pod 只保留 `runtime-skills/<code>/` 一份上传 Skill 运行副本；启动、安装、替换、启用和
   `POST /api/v1/skills/{code}/reload` 负责同步，普通 Run 不访问平台文件服务。Hash 只用于完整性
   和过期判断，不代表产品版本，也不保留历史目录。
+- 同 Hash包替换必须先验证平台原 ZIP：可下载时返回 `noop`；原 File ID失效时重新上传原包、
+  原子更新记录并返回 `repaired`。不得只用请求字节恢复当前 Pod而让后续重启再次失败。
 - Harness 0.18 `Skills` 负责 `load_capability` 渐进披露；DeepAgent通过 `list_skill_resources`
   提供授权目录，通过系统 `read_file`读取正文。
-- 文本、DOCX 和 XLSX 根据索引中的路径、MIME 与后缀按行、逻辑块或物理行分页；图片仅在模型
-  支持图片输入时读取，PDF/PPTX仍只展示元数据。历史安装包不需要为 XLSX 重新生成索引。
-- `scripts/`、`tools/` 可以随包保存并列出路径，但不能通过资源工具读取。脚本执行要求同一 Agent 选择该 Skill、启用 `builtin:sandbox`，且 Backend health 明确 `production_ready=true`；否则 `execute_skill_script` 不进入模型工具列表。
+- 文本、DOCX 和 XLSX 根据索引中的路径、MIME 与后缀按行、逻辑块或物理行分页；图片和其他
+  二进制只展示元数据，不经文件工具读取。历史安装包不需要为XLSX重新生成索引。
+- `scripts/`、`tools/` 可以随包保存并列出路径，但不能通过资源工具读取。Agent选择该Skill并启用
+  `builtin:sandbox`时，`execute_skill_script`与 `execute_python`共用当前Python沙箱Backend。
 - 单个上传 Skill 文件缺失或同步失败时，本轮跳过该 Skill 并继续运行；不得让它阻塞其他 Skill、
   MCP 或普通回答。诊断进入 `/skills` 的派生状态与 `final.context.skills`，不写数据库状态字段。
 - 完整边界见 [`../docs/design/12-agent-skills/skill-system-design.md`](../docs/design/12-agent-skills/skill-system-design.md)。
@@ -306,8 +310,11 @@ MCP Resource 分组说明工具来源与自动注入条件。该接口不读取�
 Skill路径必须属于当前 Agent已选择、启用且运行目录就绪的资源索引。字节和解析结果只缓存到
 本次用户消息对应的完整 Run终态，不跨Run、进程或数据库保存。
 
-图片、音频、视频、PDF 是原生模态，运行时只认 `llm_models.input_modalities`。PDF 当前无
-本地解析/OCR。新上传不抽文本，历史 `extracted_text` 仅为回放兼容。完整设计见
+图片、音频和视频不进入 `read_file`。当前轮媒体附件直接作为原生多模态内容交给Provider；
+`llm_models.input_modalities`用于目录和管理员说明，不在DeepAgent本地建立第二层拒绝判断，所选模型
+不接受时由Provider正常返回错误。历史媒体和Skill媒体不读取。PDF和PPT/PPTX若未来需要读取，
+单独建设文档解析工具，不并入普通文件工具。新上传不抽文本，
+历史 `extracted_text` 仅为回放兼容。完整设计见
 [`../docs/design/06-attachment-parsing/`](../docs/design/06-attachment-parsing/)。
 
 ### Python Sandbox
@@ -315,10 +322,10 @@ Skill路径必须属于当前 Agent已选择、启用且运行目录就绪的资
 `execute_python` 属于默认关闭的 `builtin:sandbox`，与时间工具分开整包选择。v0.3.22 的
 `execute_skill_script` 复用同一 Backend，但只接受已索引的 UTF-8 `.py`、JSON inputs、显式参数和
 最多 16 个同 Skill 授权资源；正式结果只从 `outputs/result.json` 读取。`subprocess-dev` 的
-`production_ready=false`，因此它只验证内部协议，不向模型披露脚本工具。工具协议
-与执行 Backend 解耦：本地联调使用 `subprocess-dev`，生产硬隔离
-仍按 [`../docs/design/07-python-sandbox/`](../docs/design/07-python-sandbox/) 推进。它不是 MCP，
-也不等同于 Provider 托管的 `CodeExecutionTool`。
+二者都通过当前 `SubprocessBackend`启动全新的 `.venv-sandbox` Python子进程；结束后销毁进程和
+临时目录，不跨调用保留状态。脚本工具的额外权限来自Agent选择的Skill。
+它不是MCP，也不等同于Provider托管的 `CodeExecutionTool`。完整边界见
+[`../docs/design/07-python-sandbox/`](../docs/design/07-python-sandbox/)。
 
 ---
 

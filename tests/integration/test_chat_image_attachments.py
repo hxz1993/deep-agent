@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, patch
 
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
+from pydantic_ai.models.function import FunctionModel
 from pydantic_ai.models.test import TestModel
 
 from deep_agent.api.v1 import api_router
@@ -124,7 +125,7 @@ class ChatImageAttachmentTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("这张图是什么", sessions["items"][0]["user_prompt"] or "")
 
     @patch("deep_agent.agent.attachments._download_file", new_callable=AsyncMock)
-    async def test_non_vision_model_image_chat_returns_clear_error(
+    async def test_text_only_catalog_does_not_block_image_forwarding(
         self,
         mock_download: AsyncMock,
     ) -> None:
@@ -146,9 +147,9 @@ class ChatImageAttachmentTests(unittest.IsolatedAsyncioTestCase):
                 "model_id": row.id,
             },
         )
-        error = next(ev for ev in events if ev.get("type") == "error")
-        self.assertIn("不支持图片输入", error["message"])
-        mock_download.assert_not_awaited()
+        final = next(ev for ev in events if ev.get("type") == "final")
+        self.assertEqual(final["status"], "completed")
+        mock_download.assert_awaited_once()
 
         session_id = events[0]["session_id"]
         history = await self._history(session_id)
@@ -158,11 +159,11 @@ class ChatImageAttachmentTests(unittest.IsolatedAsyncioTestCase):
         )
 
     @patch("deep_agent.agent.attachments._download_file", new_callable=AsyncMock)
-    async def test_db_text_only_override_skips_image_download(
+    async def test_db_text_only_metadata_still_forwards_image_to_provider(
         self,
         mock_download: AsyncMock,
     ) -> None:
-        """DB user override text-only should win over name heuristics (e.g. kimi-k2.6)."""
+        """Catalog metadata is descriptive and must not create a local image gate."""
         stores = get_context().stores
         row = await stores.llm_model.create_unique(
             LlmModelCreate(
@@ -174,6 +175,7 @@ class ChatImageAttachmentTests(unittest.IsolatedAsyncioTestCase):
                 max_output_tokens=8_192,
             ),
         )
+        mock_download.return_value = b"\x89PNG\r\n\x1a\n"
         events = await self._stream_events(
             model=text_only_model("text only"),
             json_body={
@@ -182,16 +184,53 @@ class ChatImageAttachmentTests(unittest.IsolatedAsyncioTestCase):
                 "model_id": row.id,
             },
         )
-        error = next(ev for ev in events if ev.get("type") == "error")
-        self.assertIn("不支持图片输入", error["message"])
-        mock_download.assert_not_awaited()
+        final = next(ev for ev in events if ev.get("type") == "final")
+        self.assertEqual(final["status"], "completed")
+        mock_download.assert_awaited_once()
 
     @patch("deep_agent.agent.attachments._download_file", new_callable=AsyncMock)
-    async def test_db_vision_modalities_enable_image_download(
+    async def test_provider_rejection_after_image_forwarding_returns_error(
         self,
         mock_download: AsyncMock,
     ) -> None:
-        """DB modalities with image should download bytes for image attachments."""
+        async def reject_image(_messages, _info):
+            if False:  # pragma: no cover - keep an async generator shape
+                yield ""
+            raise RuntimeError("provider model does not accept image content")
+
+        row = await get_context().stores.llm_model.create_unique(
+            LlmModelCreate(
+                name="provider-rejects-image",
+                model="private:provider-rejects-image",
+                input_modalities=["text"],
+                context_window_tokens=128_000,
+                max_output_tokens=8_192,
+            ),
+        )
+        mock_download.return_value = b"\x89PNG\r\n\x1a\n"
+        events = await self._stream_events(
+            model=FunctionModel(stream_function=reject_image),
+            json_body={
+                "message": "这张图是什么",
+                "attachments": [_IMAGE_ATTACHMENT],
+                "model_id": row.id,
+            },
+        )
+        self.assertEqual(events[-1]["type"], "error")
+        mock_download.assert_awaited_once()
+
+        history = await self._history(events[0]["session_id"])
+        self.assertEqual(
+            len([m for m in history["messages"] if m.get("role") == "user"]),
+            1,
+        )
+
+    @patch("deep_agent.agent.attachments._download_file", new_callable=AsyncMock)
+    async def test_db_image_metadata_also_forwards_image(
+        self,
+        mock_download: AsyncMock,
+    ) -> None:
+        """Image metadata remains descriptive while the Provider receives the same input."""
         mock_download.return_value = b"\x89PNG\r\n\x1a\n"
         stores = get_context().stores
         row = await stores.llm_model.create_unique(

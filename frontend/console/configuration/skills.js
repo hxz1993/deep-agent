@@ -85,13 +85,8 @@ const skillsAdmin = {
             text: "文本可读",
             docx: "Word 可读",
             xlsx: "Excel 可读",
-            image: "图片可读",
           };
-          const unreadableStatus = resource.read_format === "image"
-            ? "支持图片输入的模型可读"
-            : resource.path?.toLowerCase().endsWith(".pdf")
-            ? "PDF 暂不可读"
-            : resource.path?.toLowerCase().endsWith(".pptx")
+          const unreadableStatus = resource.path?.toLowerCase().endsWith(".pptx")
               ? "PPTX 暂不可读"
               : "当前暂不可读";
           return `<li class="skill-resource-row${isScript ? " is-script" : ""}">

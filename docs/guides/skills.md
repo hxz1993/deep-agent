@@ -10,7 +10,7 @@ Console 配置中心的“Skill”页面提供：
 
 - 查看代码内置与上传 Skill。
 - 上传 ZIP 安装、替换当前包、启用/禁用、重新加载、下载原包和删除。
-- 查看 Manifest、Reference/Asset 索引和脚本安全提示。
+- 查看 Manifest、Reference/Asset 和脚本索引。
 - 在 Agent 编辑弹窗的独立 Skill 区域选择允许使用的 Skill。
 
 Builtin Skill 随代码发布，只读且不能替换或删除。上传包保存在平台文件服务，数据库
@@ -19,6 +19,10 @@ Builtin Skill 随代码发布，只读且不能替换或删除。上传包保存
 上传包在每个 Pod 只生成 `runtime-skills/<code>/` 一份当前运行副本。服务启动、安装、替换、启用
 和手工“重新加载”负责同步；普通 Run 只读本地目录，不访问平台文件服务。运行副本丢失或同步
 失败时，该 Skill 暂时跳过，其他 Skill、工具和普通回答继续工作。
+
+替换当前包时，即使 ZIP内容 Hash没有变化，后端也会先检查平台原包：原包正常返回 `noop`；
+原 File ID已经失效则重新上传、更新数据库 File ID、恢复当前运行目录并返回 `repaired`。因此
+管理员可以直接重新提交手头相同 ZIP恢复原包，不需要修改 Skill版本或伪造内容变化。
 
 ## 包格式
 
@@ -33,8 +37,9 @@ skill.zip
 
 ZIP 最大 10 MiB，解压后最大 50 MiB、最多 256 个文件、目录深度最多 8 层。安装器拒绝路径穿越、
 绝对路径、符号链接、加密 ZIP、重复路径和压缩炸弹。模型可分页读取索引内的文本、DOCX逻辑块
-和XLSX物理行；支持图片输入的模型也可读取图片。PDF和PPTX只展示元数据。脚本可以列出路径，
-但不能通过文件工具读取源码。
+和XLSX物理行。图片、PDF和PPT/PPTX只展示元数据，不通过文件工具读取；PDF与演示文稿未来如需
+理解页面、图片和版面，将使用独立文档解析工具。脚本可以列出路径，但不能
+通过文件工具读取源码。
 
 一个 ZIP只能包含一个 Skill。培训 Library或第三方合集包如果包含多个同级 `SKILL.md`，需要先拆成
 多个 ZIP分别安装；API会返回 422而不是隐式创建多条配置。
@@ -74,7 +79,7 @@ Agent.skills
 → Harness 返回完整 SKILL.md
 → list_skill_resources 获得精确路径
 → read_file(resource={type: skill, skill_code, path}) 按需读取素材
-→ 安全 Backend 可用且 Agent 同时启用 builtin:sandbox 时，才可 execute_skill_script
+→ Agent同时启用 builtin:sandbox 时，可 execute_skill_script
 ```
 
 `load_capability` 使用 Pydantic AI 官方 Tool Call/Return，正常进入 History，并参与取消和上下文
@@ -91,13 +96,13 @@ Agent能力中的旧 `builtin:attachment`编码。升级003前必须确认
 `skill_packages` 为空且所有 Agent 的 `skills=[]`。
 
 配置备份包含 Skill 元数据和 Agent 引用，但不复制平台文件服务中的 ZIP，所以不是可跨环境独立
-恢复的 Skill 安装包。发布到新环境前必须确认平台 File ID 可用，或重新上传原 ZIP。
+恢复的 Skill 安装包。发布到新环境前必须确认平台 File ID 可用；若原包已丢失，在 Console替换
+同一 ZIP会走 `repaired`恢复共享原包和当前 Pod运行目录。
 
-脚本执行不发生在DeepAgent主进程。Skill管理接口和Console只展示脚本路径、数量等包内容，不判断、
-返回或展示脚本当前是否可执行。真正执行时，Agent运行时才检查目标Skill、`builtin:sandbox`和Backend
-生产安全状态；条件不满足时不组装 `execute_skill_script`。未来安全Backend只接收当前Agent已选择
-Skill的 `.py`、显式JSON inputs、参数和同Skill资源，并只从 `outputs/result.json`读取正式结构化
-结果。脚本源码始终不通过资源工具披露给模型。
+脚本执行不发生在DeepAgent主进程。Agent同时选择含脚本Skill和 `builtin:sandbox`时，运行时组装
+`execute_skill_script`；它与 `execute_python`共用当前Python Sandbox Backend。只接收当前Agent
+已选择Skill的 `.py`、显式JSON inputs、参数和同Skill资源，并只从 `outputs/result.json`读取正式
+结构化结果。脚本源码始终不通过资源工具披露给模型。
 
 ### 培训包脚本依赖核验
 
@@ -114,19 +119,15 @@ Skill的 `.py`、显式JSON inputs、参数和同Skill资源，并只从 `output
 使用 `.venv-sandbox`中的真实解释器、真实 `动态表蓝图模板.xlsx`和原脚本跑通：脚本能生成
 `outputs/result.json`，模板不完整时也能保留结构化校验问题。
 
-这个结果只证明“脚本依赖和执行协议兼容”，不代表 `subprocess-dev`具备生产安全隔离。以后安装的
-Skill若引入Profile之外的第三方包，执行会明确失败；不得在运行时 `pip install`。需要新增包时，
-必须同步更新Sandbox Profile、独立venv、安全Backend镜像和回归测试。
+以后安装的Skill若引入Profile之外的第三方包，执行会明确失败；不得在运行时 `pip install`。
+需要新增包时，必须同步更新Sandbox Profile、独立venv和回归测试。
 
-## v0.3.23 发布后复测
+## v0.3.23 Test 验收结果
 
-1. 备份 Test revision 004配置。
-2. 安装拆分后的三个培训 Skill，确认运行状态为“运行文件已就绪”。
-3. 用专用临时 Agent验证 `load_capability`、`list_skill_resources`、`read_file`对
-   Markdown/HTML/DOCX/XLSX的读取和跨 Skill加载。
-4. 确认 XLSX Asset可按工作表读取；Skill详情只列脚本路径和数量，不展示可执行性判断；当前非生产
-   Backend下模型看不到 `execute_skill_script`。
-5. 确认普通后续 Run不重复访问平台文件服务；重载失败只影响对应 Skill。
+2026-08-12 已在 Test MySQL revision 004验证：三个培训 Skill原包均可下载、运行状态均为
+`ready`；历史失效 File ID可通过同 Hash ZIP替换得到 `repaired`；真实 `deepseek-v4-flash`
+完成 `load_capability → list_skill_resources → read_file(XLSX)`，SSE正常结束且History工具调用成对。
+当前仅剩一次后续 Pod重启后的自动恢复复核，不需要客户端适配。
 
 完整设计和安全边界见
 [`../design/12-agent-skills/skill-system-design.md`](../design/12-agent-skills/skill-system-design.md)。

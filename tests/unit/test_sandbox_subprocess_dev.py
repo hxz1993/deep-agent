@@ -92,7 +92,6 @@ class SubprocessBackendTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(health.backend, BACKEND_NAME)
         self.assertEqual(health.state_scope, "request")
         self.assertEqual(health.security_level, "none")
-        self.assertFalse(health.production_ready)
         self.assertIsNotNone(health.resource_limits)
         assert health.resource_limits is not None
         self.assertEqual(health.resource_limits.memory_bytes, 512 * 1024 * 1024)

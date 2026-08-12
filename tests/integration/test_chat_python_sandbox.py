@@ -25,7 +25,6 @@ from deep_agent.sandbox.profile import (
 )
 from deep_agent.sandbox import SubprocessBackend
 from deep_agent.sandbox.types import (
-    BackendHealth,
     ExecuteRequest,
     ExecuteResult,
     SandboxError,
@@ -53,7 +52,6 @@ class UnavailableSandboxBackend:
                     "backend": "unavailable",
                     "state_scope": "request",
                     "security_level": "none",
-                    "production_ready": False,
                 },
             )()
         )
@@ -227,7 +225,7 @@ class ChatPythonSandboxIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(tool_returns), 1)
         self.assertEqual(tool_returns[0].content["result"], 2)
 
-    async def test_safe_backend_exposes_authorized_skill_script_and_persists_pair(self) -> None:
+    async def test_subprocess_backend_exposes_authorized_skill_script_and_persists_pair(self) -> None:
         buffer = io.BytesIO()
         with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
             archive.writestr(
@@ -265,13 +263,6 @@ class ChatPythonSandboxIntegrationTests(unittest.IsolatedAsyncioTestCase):
             shutil.rmtree(parsed.package_root.parent, ignore_errors=True)
         current = get_context()
         await current.skill_runtime.materialize(row, request_headers={}, payload=raw)
-        safe_health = BackendHealth(
-            enabled=True,
-            backend="secure-test",
-            state_scope="request",
-            security_level="linux-isolated",
-            production_ready=True,
-        )
         init_context(
             AppContext.for_testing(
                 registry=build_registry(
@@ -285,7 +276,6 @@ class ChatPythonSandboxIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 db_session_factory=current.db_session_factory,
                 sandbox_backend=self.backend,
                 sandbox_profile=self.sandbox_profile,
-                sandbox_health=safe_health,
                 skill_runtime=current.skill_runtime,
             )
         )

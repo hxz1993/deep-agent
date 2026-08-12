@@ -139,7 +139,6 @@ const LLM_MODALITY_LABELS = {
   image: "图像",
   audio: "音频",
   video: "视频",
-  pdf: "PDF（原生）",
 };
 
 const LLM_MODALITY_ICONS = {
@@ -147,18 +146,16 @@ const LLM_MODALITY_ICONS = {
   image: "image",
   audio: "audio-lines",
   video: "video",
-  pdf: "file-text",
 };
 
 /** LLM-native modalities only (Admin ``input_modalities``). */
-const ALL_LLM_MODALITIES = ["text", "image", "audio", "video", "pdf"];
+const ALL_LLM_MODALITIES = ["text", "image", "audio", "video"];
 
-const UPLOAD_KIND_ORDER = ["image", "text_file", "pdf", "docx", "xlsx", "audio", "video"];
+const UPLOAD_KIND_ORDER = ["image", "text_file", "docx", "xlsx", "audio", "video"];
 
 const UPLOAD_KIND_ICONS = {
   image: "image",
   text_file: "file-text",
-  pdf: "file",
   docx: "file-text",
   xlsx: "table-2",
   audio: "audio-lines",
@@ -1643,8 +1640,6 @@ function updateComposerModelInfo() {
             title = `${label}：可上传，当前模型支持原生看图`;
           } else if (["text_file", "docx", "xlsx"].includes(key)) {
             title = `${label}：上传后由 Agent 的 read_file 系统工具按需分页读取`;
-          } else if (key === "pdf") {
-            title = `${label}：仅模型配置原生 PDF 输入时可发送，不做本地解析`;
           }
           return `<span class="modality-chip ${chipClass}" title="${escapeHtml(title)}">${lucideIcon(icon)}<span>${escapeHtml(label)}</span></span>`;
         })

@@ -9,6 +9,16 @@ DEFAULT_INSTRUCTIONS = (
     "Use the available tools when they help you answer accurately. "
     "Be concise and explain your reasoning when it is useful."
 )
+_SUPPORTED_INPUT_MODALITIES = {"text", "image", "audio", "video"}
+
+
+def _input_modalities(llm_model: LlmModel) -> list[str]:
+    """Ignore retired modality values that may remain in historical rows."""
+    return [
+        value
+        for value in (llm_model.input_modalities or [])
+        if value in _SUPPORTED_INPUT_MODALITIES
+    ]
 
 
 @dataclass
@@ -47,7 +57,7 @@ class AgentSpec:
             api_key=llm_model.api_key,
             temperature=row.temperature,
             agent_id=row.id,
-            input_modalities=llm_model.input_modalities,
+            input_modalities=_input_modalities(llm_model),
             context_window_tokens=llm_model.context_window_tokens,
             max_output_tokens=llm_model.max_output_tokens,
             tags=llm_model.tags,
@@ -74,7 +84,7 @@ class AgentSpec:
             base_url=llm_model.base_url,
             api_key=llm_model.api_key,
             temperature=temperature,
-            input_modalities=llm_model.input_modalities,
+            input_modalities=_input_modalities(llm_model),
             context_window_tokens=llm_model.context_window_tokens,
             max_output_tokens=llm_model.max_output_tokens,
             tags=llm_model.tags,

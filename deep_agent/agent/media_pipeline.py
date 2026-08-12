@@ -15,7 +15,6 @@ _DEFAULT_ALLOWED_MIMES = frozenset(
         "image/png",
         "image/webp",
         "image/gif",
-        "application/pdf",
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         "text/plain",
@@ -72,8 +71,6 @@ def validate_upload(*, data: bytes, mime: str, filename: str) -> None:
             validate_office_archive(data)
         except AttachmentParseError as exc:
             raise MediaPipelineError(str(exc)) from exc
-    if normalized == "application/pdf" and not data.startswith(b"%PDF-"):
-        raise MediaPipelineError("PDF 文件结构无效")
 
 
 def process_upload(*, data: bytes, mime: str, filename: str) -> ProcessedUpload:

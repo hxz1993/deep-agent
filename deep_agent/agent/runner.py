@@ -132,7 +132,6 @@ class AgentRunner:
         *,
         ui_tool_hints: dict[str, dict[str, Any]] | None = None,
         model_settings: ModelSettings | None = None,
-        input_modalities: list[str] | None = None,
         context_window_tokens: int | None = None,
         max_output_tokens: int | None = None,
         model_tags: list[str] | None = None,
@@ -151,7 +150,6 @@ class AgentRunner:
         self.usage_limits = usage_limits
         self.ui_tool_hints = ui_tool_hints or {}
         self.model_settings = model_settings
-        self._input_modalities = input_modalities
         self._context_window_tokens = context_window_tokens
         self._max_output_tokens = max_output_tokens
         self._model_tags = list(model_tags or [])
@@ -372,7 +370,6 @@ class AgentRunner:
                 event_queue=event_queue,
             )
             deps.context_state = state
-            deps.input_modalities = tuple(self._input_modalities or ())
             deps.attachment_by_id = index_attachment_refs(messages=raw)
             request_context = ModelRequestContext(
                 model=self.agent.model,
@@ -576,7 +573,6 @@ class AgentRunner:
             history = [*history, user_request]
             pre_persisted_user = True
             user_branch_point = len(history) - 1
-        deps.input_modalities = tuple(self._input_modalities or ())
         deps.attachment_by_id = index_attachment_refs(
             attachments=attachments,
             messages=history,
@@ -774,7 +770,6 @@ class AgentRunner:
             history,
             current_user_index=current_user_index,
             request_headers=deps.request_headers,
-            input_modalities=self._input_modalities,
         )
         if pre_persisted_user:
             return llm_history, None
@@ -784,7 +779,6 @@ class AgentRunner:
                 attachments,
                 deps.request_headers,
                 context_refs=context_refs,
-                input_modalities=self._input_modalities,
             )
         return llm_history, message or None
 

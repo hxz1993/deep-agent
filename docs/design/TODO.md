@@ -25,8 +25,15 @@
 
 ## 待实现
 
-当前没有可以脱离外部条件直接进入开发的主线。Skill 安全 Backend、诊断中心、OTLP 和 Evaluation
-均已移入“暂缓”，必须先满足各自的重新启动条件。
+当前没有可以脱离外部条件直接进入开发的主线。诊断中心、OTLP 和 Evaluation均已移入“暂缓”，
+必须先满足各自的重新启动条件。
+
+### 近期动作（非功能开发）
+
+1. 下次 Test Pod真正重启或滚动发布后，确认三个上传 Skill无需人工 `reload`即为 `ready`，且原
+   ZIP仍可下载；这是对 v0.3.23恢复链路的部署复核，不创建新版本需求。
+2. 在真实 DeepCube/DeepTable业务中继续观察 `read_file`、Skill渐进披露和MCP快照；只有出现可稳定
+   复现的语义、成本或可靠性问题，才新建可验收缺陷，不再为边缘猜测预埋兼容分支。
 
 ## 有潜力
 
@@ -66,7 +73,7 @@
 
 | ID | 潜力方向 | 触发条件 | 当前边界 | 来源 |
 | --- | --- | --- | --- | --- |
-| `ATT-101` / `ATT-201` / `ATT-202` | PDF/OCR/PPTX、异步解析、结构索引和缓存 | 真实业务附件超出现有 TXT/DOCX/XLSX 能力 | 需要独立解析资源隔离、租户配额和大结果外置，不塞进当前同步读取工具 | [附件解析后续方向](06-attachment-parsing/attachment-parsing-design.md#13-后续方向) |
+| `ATT-201` / `ATT-202` | PDF/PPT/PPTX专用文档解析、异步解析、结构索引和缓存 | 出现需要理解页面、幻灯片、图片与复杂版面的真实业务需求 | 单独建设文档解析工具和结果协议；不塞进普通 `read_file`，也不伪装成模型原生模态；需要资源隔离、租户配额和大结果外置 | [附件解析后续方向](06-attachment-parsing/attachment-parsing-design.md#13-后续方向) |
 | `UI-201` | 当前 DeepFOS 页面动态业务工具 | 至少两个业务页面需要按请求声明工具，且静态 UI 包无法合理配置 | 复用 `ExternalToolset` + Deferred；只允许 `web__` 白名单业务动作，不开放 CSS Selector、任意脚本或第二套聊天事实源 | [浏览器与页面操作](15-browser-and-page-actions/browser-and-page-actions-design.md#51-deepfos-页面操作沿用-ui-tool) |
 | `WEB-101` | 外部或未知网站自主浏览 | 出现明确外部网站任务，并锁定域名、登录态、资源和审批边界 | 优先复用 Harness `BrowserUse`；默认关闭、首版只读、隔离 Chromium，不连接用户当前浏览器 | [浏览器与页面操作](15-browser-and-page-actions/browser-and-page-actions-design.md#52-外部网站独立-browseruse-能力) |
 
@@ -78,7 +85,6 @@
 | --- | --- | --- | --- | --- |
 | `CONSOLE-201` | 只读运行检查器剩余能力 | Console 已能查看 Context Reference 安全 JSON；Markdown 原文、原始 SSE、History 对照和工具详情主要服务 UI/协议调试 | 调试渲染或 SSE/History 一致性成为高频工作，并能锁定最小只读范围 | [运行检查器](02-operations-console/operations-console-design.md#运行检查器) |
 | `MODEL-101` | 显式 Provider Prompt Cache | DeepSeek 自动缓存无需改请求，命中观测并入 `OBS-101`；`CachePoint`、cache key、TTL 均是 Provider 专属配置，不存在跨 Provider 通用开关 | 模型目录中的某个 Provider 明确支持显式缓存，且能观测成本或首 Token 延迟收益 | [Pydantic AI 采用项](03-context-compaction/context-compaction-research.md#pydantic-ai-226-原生能力采用项) |
-| `SKILL-102B` | go-judge 生产隔离 Backend（目标v0.3.24） | v0.3.22 已完成Skill脚本受控输入/结果协议和本地验证；v0.3.23不实施生产Backend，不允许回退 `subprocess-dev` | 目标K8s节点在最终securityContext、cgroup、seccomp和自编go-judge制品下跑完整攻击探针，报告 `selection_eligible=true` | [Skill 脚本边界](12-agent-skills/skill-system-design.md#10-v0322-资产读取与脚本协议) |
 | `OBS-201` / `CONSOLE-301` | OTLP Trace 与 Console 诊断中心 | v0.3.17 已有统一 conversation/run ID 和脱敏结构化日志；在线诊断需要公司观测平台，不把高频 Span 塞入业务 MySQL | 公司确认 OTLP 后端、保留周期、权限和跨实例查询接口 | [框架能力台账](14-framework-capabilities/framework-capabilities-baseline.md#42-下一步优先采用) |
 | `EVAL-001` | Agent 回复与工具调用质量评估 | 评估应建立在可查询的真实 Trace 上，分开回答质量、工具选择、参数、结果利用、副作用和成本，不同步阻塞用户请求 | OTLP/诊断数据源确定，并明确首批离线评估集、评分责任和抽样策略 | [框架能力台账](14-framework-capabilities/framework-capabilities-baseline.md#42-下一步优先采用) |
 
@@ -94,6 +100,7 @@
 | `TOOL-104` | 不给 MCP 虚构 `display_name`，模型、SSE、History、Console 原样展示最终协议名 | MCP 标准新增可靠展示字段且产品明确要展示 | [Toolset 命名](05-tool-optimization/tool-optimization-design.md#83-toolset-组合与展示命名) |
 | `TOOL-202` | 不把 `CombinedToolset` 做成产品概念 | 无；它继续作为运行时组合实现细节按需使用 | [Toolset 组合](05-tool-optimization/tool-optimization-design.md#83-toolset-组合与展示命名) |
 | `MODEL-102` | 不接入 `RaiseContentFilterError` | 真实 Provider 出现 `content_filter` 被误保存为正常完成 | [框架能力台账](14-framework-capabilities/framework-capabilities-baseline.md#44-明确不采用或不默认采用) |
+| 图片文件工具 | 图片只走当前轮Provider原生多模态附件，不进入 `read_file`；历史和Skill图片不读取 | 无；PDF/PPT/PPTX专用解析已单列为潜力方向 | [附件解析](06-attachment-parsing/attachment-parsing-design.md) |
 | `CTX-103` | Harness `SummarizingCompaction` 不整体替换 DeepAgent 压缩器 | 公开 API 能覆盖工具 Schema 预算、摘要上限、主动 SSE、目标复检和 Checkpoint 事务 | [压缩复用边界](03-context-compaction/context-compaction-research.md#harness-018-原生压缩复用边界) |
 | `ART-102` | 已并入 Artifact/大工具结果主题，不保留重复任务 | 无 | [Artifact 设计](08-artifact-export/artifact-export-design.md) |
 | `UI-MCP-DISCOVERY` | 不从 MCP 自动生成 DeepAgent UI Tool | MCP 出现稳定、可验证且满足产品权限的 UI 标准 | [UI 工具历史](01-ui-tools/ui-tools-history.md) |
@@ -118,7 +125,7 @@
 | `CTXREF-101` | DeepCube `deepcube.editor_context@1` 与 DeepTable Page/Range Context 已迁移结构化 `context_refs`，历史恢复和业务 Prompt 已适配 | 2026-08 跨仓代码与测试核验，[上下文引用实施阶段](10-context-reference/context-reference-design.md#18-建议实施阶段) |
 | `CTX-COMPACTION` / `CTX-101` | 自动/主动单次摘要、Checkpoint、Hash/CAS、取消、Local/Native 工具配对和六段摘要 | v0.3.16，[上下文压缩](03-context-compaction/context-compaction-design.md) |
 | `ATT-V1` / `ATT-001` | TXT/DOCX/XLSX 分页读取、会话附件限制、历史和压缩回归 | v0.3.15，[附件解析](06-attachment-parsing/attachment-parsing-design.md) |
-| `TOOL-103` | 无合法附件时隐藏附件 Toolset | v0.3.12，[请求级过滤](05-tool-optimization/tool-optimization-design.md#81-preparetools) |
+| `TOOL-103` | 请求级文件工具可见性已演进为统一 `read_file`：有合法会话附件或已选可读 Skill资源时自动注入，无来源时不注入 | v0.3.12首次过滤、v0.3.23统一入口，[请求级过滤](05-tool-optimization/tool-optimization-design.md#81-preparetools) |
 | `TOOL-201` | Pydantic AI Tool Search、MCP Top 3/Top 5 渐进披露、只读过滤和搜索去重 | v0.3.12～v0.3.14，[工具检索](13-tool-discovery/tool-discovery-design.md) |
 | `RUNTIME-CANCEL` | Core `CancellationToken`/`RunCancelled` 正式停止、interrupted History 和 SSE 一致性 | v0.3.10～v0.3.14，[后端运行说明](../../deep_agent/AGENTS.md#正式取消v0310) |
 | `MODEL-001` | 模型目录 `max_output_tokens` 进入普通与流式 `ModelSettings.max_tokens` | v0.3.15，[模型目录](04-model-catalog/model-catalog-design.md) |
@@ -126,14 +133,15 @@
 | `CONSOLE-101` | 单个用户轮次聚合连续 Assistant/工具循环，过程默认折叠、最终答案常显 | v0.3.16，[运维控制台](02-operations-console/operations-console-design.md) |
 | `OBS-101` / `TOOL-001` | 官方 Conversation/Run 标识、脱敏结构化生命周期日志、Usage/缓存 Token 和 Console 当前 Run 指标 | v0.3.17，[框架能力台账](14-framework-capabilities/framework-capabilities-baseline.md#41-已经采用) |
 | `TOOL-203` | `cube_query_data` 与 `dimension_query_members` 选择性披露可信 Return Schema；延迟工具加载前零额外成本 | v0.3.17，[工具返回 Schema](05-tool-optimization/tool-optimization-design.md#84-tool-return-schema) |
-| `SKILL-001` | Skill 与 ToolPackage 分离；上传安装、Agent 授权、Harness `load_capability` 渐进披露、References/Assets 分页读取和脚本隔离；每个 Pod仅保留按 code组织的一份当前运行目录，管理操作同步、普通 Run本地读取、单 Skill故障隔离 | v0.3.18～v0.3.20，[Skill 体系](12-agent-skills/skill-system-design.md) |
+| `SKILL-001` | Skill 与 ToolPackage 分离；上传安装、Agent 授权、Harness `load_capability` 渐进披露、References/Assets 分页读取和脚本隔离；每个 Pod仅保留按 code组织的一份当前运行目录；同 Hash替换可恢复丢失的平台原包；管理操作同步、普通 Run本地读取、单 Skill故障隔离 | v0.3.18～v0.3.23；2026-08-12 Test 004真实验收，[Skill 体系](12-agent-skills/skill-system-design.md) |
 | `MCP-SNAPSHOT` | URL MCP 检测保存完整工具快照，聊天按快照披露并在首次真实调用时建连；缺快照不阻塞 Run，单 Server 连接失败转为 `ToolFailed` | v0.3.19，[工具检索](13-tool-discovery/tool-discovery-design.md) |
-| `CONSOLE-202` | 独立只读系统工具目录按 Skill、MCP 工具发现和 MCP Resource 展示来源、自动注入条件与说明；`runtime:*` 只作展示，不进入 Agent 能力或数据库 | v0.3.21，[工具包 Console](11-tool-packages/tool-packages-design.md#9-console) |
-| `SKILL-102A` | Skill 脚本执行内部协议：只允许已授权 `.py`、显式 JSON inputs/arguments/同 Skill资源，固定读取 `outputs/result.json`；仅生产就绪 Backend 可向模型披露 | v0.3.22，[Skill 脚本边界](12-agent-skills/skill-system-design.md#10-v0322-资产读取与脚本协议) |
-| `FILE-001` / `SKILL-103` | 系统工具 `read_file`统一读取会话附件与Skill文件；文本按逻辑行、DOCX按逻辑块、XLSX按物理行分页，图片按模型模态返回；同一Run字节与解析single-flight缓存；旧安装索引无需重装 | v0.3.23，[附件解析](06-attachment-parsing/attachment-parsing-design.md)、[Skill体系](12-agent-skills/skill-system-design.md) |
+| `CONSOLE-202` | 独立只读系统工具目录按 Skill、文件、MCP工具发现和MCP Resource展示来源、自动注入条件与说明；`runtime:*`只作展示，不进入Agent能力或数据库 | v0.3.21～v0.3.23，[工具包 Console](11-tool-packages/tool-packages-design.md#9-console) |
+| `SKILL-102A` | Skill脚本执行：只允许已授权 `.py`、显式JSON inputs/arguments/同Skill资源，固定读取 `outputs/result.json`；选择含脚本Skill并启用 `builtin:sandbox`后，与 `execute_python`共用当前Sandbox | v0.3.22～v0.3.24，[Skill 脚本边界](12-agent-skills/skill-system-design.md#10-skill脚本执行) |
+| `FILE-001` / `SKILL-103` | 系统工具 `read_file`统一读取会话附件与Skill文件；只处理文本、DOCX和XLSX，同一Run字节与解析single-flight缓存；图片严格走当前轮原生多模态附件 | v0.3.23～v0.3.24，[附件解析](06-attachment-parsing/attachment-parsing-design.md)、[Skill体系](12-agent-skills/skill-system-design.md) |
 | Harness 确定性压缩 tiers | `ClampOversizedMessages`、`ClearToolResults`、`DeduplicateFileReads` 已复用 | 当前基线，[压缩研究](03-context-compaction/context-compaction-research.md#harness-实验结论) |
 | 官方 DeepSeek Provider | 使用 Pydantic AI 官方 Provider/Profile，不保留自定义模型循环 | v0.3.9+，[框架能力台账](14-framework-capabilities/framework-capabilities-baseline.md#41-已经采用) |
 
 ## 当前明确不排期
 
-“有潜力”和“暂缓”都不是积压任务。除上述两条“待实现”外，本文件中的其他事项当前都不应进入开发排期。
+“有潜力”和“暂缓”都不是积压任务。当前“待实现”为空，因此本文件没有可脱离外部条件直接进入
+开发的下一项主线；下一轮应先由真实需求或重新启动条件选题，不因框架存在能力而继续堆功能。

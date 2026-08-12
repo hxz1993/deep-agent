@@ -18,7 +18,6 @@ function formatList(values) {
     image: "图像",
     audio: "音频",
     video: "视频",
-    pdf: "PDF",
   };
   return values
     .map((item) => `<span class="badge">${escapeHtml(labels[item] || item)}</span>`)

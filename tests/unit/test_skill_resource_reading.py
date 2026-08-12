@@ -112,9 +112,7 @@ class SkillResourceReadingTests(unittest.IsolatedAsyncioTestCase):
                     _entry("scripts/run.py", category="script"),
                 ],
             )
-            toolset = build_skill_resource_toolset(
-                {"demo": item}, scripts_executable=True
-            )
+            toolset = build_skill_resource_toolset({"demo": item})
             assert toolset is not None
             ctx = RunContext(
                 deps=AgentDeps(session_id="skill-resource", user="user"),
@@ -127,7 +125,6 @@ class SkillResourceReadingTests(unittest.IsolatedAsyncioTestCase):
             )
             script = next(entry for entry in listed["resources"] if entry["category"] == "script")
             self.assertEqual(script["path"], "scripts/run.py")
-            self.assertTrue(script["executable"])
             self.assertEqual(set(tools), {"list_skill_resources"})
 
     async def test_resource_toolset_only_lists_resources(self) -> None:

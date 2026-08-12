@@ -1,9 +1,8 @@
-"""Best-effort soft guardrails for subprocess-dev only.
+"""Best-effort guardrails applied to each sandbox subprocess.
 
-Applies in the child ``preexec_fn`` after fork and before exec. Failures are
-swallowed so Local/Test keeps running (e.g. missing libseccomp, old kernels,
-restricted WSL/container profiles). This is **not** stage-C isolation:
-``security_level`` stays ``none``.
+They run in the child ``preexec_fn`` after fork and before exec. Failures are
+swallowed so the sandbox remains portable across macOS, Linux and restricted
+container environments.
 """
 
 from __future__ import annotations

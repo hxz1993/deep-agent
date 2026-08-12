@@ -13,11 +13,9 @@ DEFAULT_ENVIRONMENT = "development"
 DEFAULT_MAX_CONCURRENCY = 4
 DEFAULT_MEMORY_RSS_BYTES = 512 * 1024 * 1024
 DEFAULT_CPU_SECONDS = 30
-# RLIMIT_NPROC is per-UID (not per-sandbox). Default off for subprocess-dev;
-# stage-C cgroup pids.max is the real per-execution PID cap.
+# RLIMIT_NPROC is per-UID rather than per execution, so it remains disabled by default.
 DEFAULT_MAX_PIDS = None
 
-# Isolation-class codes must never be emitted by subprocess-dev (stage A′).
 FORBIDDEN_SUBPROCESS_ERROR_CODES = frozenset(
     {
         "MEMORY_LIMIT",

@@ -59,7 +59,7 @@ v0.3.9 改由 Pydantic AI 官方 Provider/Profile 处理，不再保留项目自
 `builtin:general` 和 `builtin:sandbox` 是两个独立包级开关。文件读取不属于 ToolPackage；
 `read_file` 根据当前会话附件或 Agent 已选 Skill 自动注入。Python Sandbox 后端不可用时，
 `builtin:sandbox` 不进入可选目录。`execute_skill_script` 只作为管理员可见的条件式工具元数据；
-运行时还必须选择含脚本Skill且Backend生产就绪才注入模型。
+运行时还必须选择含脚本Skill并启用 `builtin:sandbox`才注入模型。
 
 ## 4. 编码和稳定协议
 
@@ -155,8 +155,9 @@ UI 按数据库包成员创建，最后由 AgentFactory 汇总。UI 包无启用
 }
 ```
 
-MCP 不在本轮缓存工具目录，只从检测快照返回数量与状态，标记
-`tool_catalog_status=count_only`，不伪造名称。
+v0.3.19 起 URL MCP的检测快照保存完整工具定义，运行时据此完成 Tool Search和Schema披露；
+`GET /tools`与Console仍只返回管理员需要的数量、快照状态和披露方式，不把大Schema传给页面。
+Builtin MCP继续按其运行时目录生成工具定义。
 
 新增 `/api/v1/ui-tool-packages` CRUD。`ui:builtin` 可查询但不可修改或删除；手工工具创建必须
 选择手工包，允许更新时移动。包含工具或被 Agent 引用时禁止删除；工具所属包被 Agent 引用时
@@ -169,10 +170,11 @@ Agent 能力页直接按后端 `category` 分组，不再通过旧 `kind` 猜测
 
 配置中心结构：
 
-- 内置工具：只读展示通用工具、Python 沙箱、附件读取。
-- MCP：继续展示 Server 检测状态和工具数量。
+- 内置工具：只读展示通用工具和Python沙箱。
+- 系统工具：按 Skill、文件、MCP工具发现、MCP Resource展示来源和自动注入条件；不可配置。
+- Skill：独立列表、安装和Agent选择，不属于工具包。
+- MCP服务：展示Server检测状态、工具快照状态和数量；通过“检测并更新”刷新快照。
 - UI 工具：左侧按来源展示工具包树，右侧只展示当前包的工具表；手工包 CRUD，内置包只读；工具编辑必须选择包。
-- Skills：保持现有包级选择。
 
 页面错误、空包、无有效工具、引用冲突和保存后刷新失败沿用现有反馈规范。
 
@@ -186,14 +188,15 @@ Agent 能力页直接按后端 `category` 分组，不再通过旧 `kind` 猜测
 - `001 → 002 → 001 → 002`，以及真实 v001 配置快照迁移。
 - 未归包工具、未知 UI 引用和错误外键明确失败。
 - Registry 的 `null` 默认、显式列表与 `[]` 语义。
-- 每个内置 Function、附件、Sandbox、UI Deferred 和 MCP 安全只读调用。
+- 每个内置 Function、系统 `read_file`、Sandbox、UI Deferred 和 MCP 安全只读调用。
 - 工具包 CRUD、Agent 422、Builtin 403 和引用 409。
 - Console 分类、整包回填、无工具级复选框。
-- Function、附件、Sandbox、MCP、UI 的 Tool Call/Result 配对与上下文压缩、Checkpoint、SSE。
+- Function、文件、Sandbox、MCP、UI 的 Tool Call/Result 配对与上下文压缩、Checkpoint、SSE。
 - 完整 Python、Console Node、配置备份、静态检查和浏览器四主题/窄屏。
 
-上述验证已在隔离 SQLite 上完成；共享 Test 的 001 数据库仍应按“先旧版备份、
-再部署并升级 002、最后新版备份”的顺序发布。
+002的历史迁移验证已在隔离 SQLite完成。当前共享 Test 已运行 revision 004；后续发布应始终按
+“源版本备份 → 部署并自动升级 → 核对revision和物理结构 → 新版本备份”执行，不再使用旧001/002
+发布步骤描述当前环境。
 
 ## 12. 后续演进
 

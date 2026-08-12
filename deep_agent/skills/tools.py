@@ -11,17 +11,10 @@ from deep_agent.skills.runtime import ResolvedSkill
 
 def build_skill_resource_toolset(
     resources: dict[str, ResolvedSkill],
-    *,
-    scripts_executable: bool = False,
 ) -> FunctionToolset[AgentDeps] | None:
     if not resources:
         return None
     names = ", ".join(sorted(resources))
-    script_instruction = (
-        "Use execute_skill_script when an authorized stored script is required. "
-        if scripts_executable
-        else "Stored scripts are not executable in the current runtime. "
-    )
     toolset = FunctionToolset[AgentDeps](
         id="skill-resources",
         instructions=(
@@ -29,7 +22,6 @@ def build_skill_resource_toolset(
             "Use list_skill_resources to discover exact paths, then use the system read_file tool "
             "with type=skill to read only the pages needed for the task. "
             "Script paths may be listed for discovery but cannot be read with read_file. "
-            f"{script_instruction}"
             f"Authorized Skills with resources: {names}."
         ),
     )
@@ -58,9 +50,6 @@ def build_skill_resource_toolset(
                     "readable": bool(entry.get("readable")),
                     "read_format": entry.get("read_format"),
                     "read_unit": entry.get("read_unit"),
-                    "executable": bool(
-                        entry.get("category") == "script" and scripts_executable
-                    ),
                     "content_hash": entry["content_hash"],
                 }
             )
@@ -72,7 +61,6 @@ def build_skill_resource_toolset(
             "resources": entries,
             "script_count": script_count,
             "scripts_readable": False,
-            "scripts_executable": scripts_executable,
         }
 
     return toolset

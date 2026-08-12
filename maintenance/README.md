@@ -42,7 +42,9 @@ v0.3.2 起备份同时保存 UI 工具包及每个手工 UI 工具的 `package_c
 
 v0.3.18 起备份同时保存 `skill_packages` 与 `agents.skills`。其中上传 Skill 只备份平台 File ID、
 Hash、Manifest 和资源索引，不包含平台文件服务中的原始 ZIP，因此配置备份不是跨环境自包含的
-Skill 迁移包。恢复或跨环境发布前必须另行确认对应 File ID 在目标平台可下载。
+Skill 迁移包。恢复或跨环境发布前必须另行确认对应 File ID 在目标平台可下载。若当前环境中的
+File ID已经失效，在 Skill管理页重新提交相同 ZIP会重新上传原包、更新 File ID并返回
+`repaired`；它不会创建 Skill历史版本。
 
 备份工具只负责备份，不提供恢复或跨环境迁移命令。
 

@@ -34,7 +34,6 @@ class SandboxHealthEnabledResponse(BaseModel):
     missing_packages: list[str]
     state_scope: StateScope
     security_level: SecurityLevel
-    production_ready: bool
     smoke_ok: bool
     resource_limits: ResourceLimitsSummary | None = None
 
@@ -80,7 +79,6 @@ async def build_sandbox_health_response(
         missing_packages=missing_packages,
         state_scope=health.state_scope,
         security_level=health.security_level,
-        production_ready=health.production_ready,
         smoke_ok=smoke_ok,
         resource_limits=health.resource_limits,
     )
@@ -97,10 +95,9 @@ async def sandbox_health(
     )
     if isinstance(response, SandboxHealthEnabledResponse):
         logger.info(
-            "Sandbox health backend={} probe_ok={} profile_ok={} production_ready={}",
+            "Sandbox health backend={} probe_ok={} profile_ok={}",
             response.backend,
             response.smoke_ok,
             response.profile_ok,
-            response.production_ready,
         )
     return response

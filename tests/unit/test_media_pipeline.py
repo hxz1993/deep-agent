@@ -45,3 +45,11 @@ class TestMediaPipeline(unittest.TestCase):
                 mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                 filename="bad.docx",
             )
+
+    def test_pdf_is_not_accepted_by_upload_pipeline(self) -> None:
+        with self.assertRaises(MediaPipelineError):
+            process_upload(
+                data=b"%PDF-1.7\n",
+                mime="application/pdf",
+                filename="legacy.pdf",
+            )

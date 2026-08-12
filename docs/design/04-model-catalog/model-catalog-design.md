@@ -147,7 +147,7 @@ tags                   JSON/TEXT NULL
 
 `input_modalities` 与 `tags` 必须分开：
 
-- 模态：`text/image/audio/video/pdf`，描述模型原生输入类型。
+- 模态：`text/image/audio/video`，描述模型原生输入类型。
 - 能力标签：`reasoning/tool_call/structured_output/...`，描述协议或推理能力。
 
 新建与前端编辑要求上下文、最大输出和至少一种输入模态。迁移列保持 nullable，避免升级时为历史
@@ -277,7 +277,8 @@ API Key 永不来自目录，管理员自行填写。保存只写 `llm_models`�
 
 运行时只读 `llm_models`：
 
-- 图片附件是否作为原生图片发送，仅判断 `input_modalities` 是否包含 `image`。
+- `input_modalities`描述目录和管理员预期能力，不作为DeepAgent本地媒体拒绝开关；当前轮图片附件
+  统一交给Provider，所选模型不接受时由Provider正常返回错误。
 - 不再根据模型名称或 Base URL 猜测模态。
 - 不再读取 `modality_data.json`、`models_dev_snapshot.json`。
 - `AgentSpec/AgentRunner` 接收上下文、最大输出和 tags，为 Token 预算与上下文压缩提供事实来源。

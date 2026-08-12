@@ -76,7 +76,7 @@ Tool Call/Return 配对或 Deferred 协议。
 | `UsageLimits` | Run 级请求数和可选累计 Token 限制 | 已采用；窗口预算仍由 DeepAgent 前置估算 |
 | Toolset 体系 | Function、MCP、External、Dynamic、Prepared、Combined 等运行装配 | 已采用；ToolPackage 只是产品元数据包装 |
 | `ToolSearch` + `DeferredLoadingToolset` | MCP Top 3 预选、Top 5 搜索和渐进披露 | 已采用；检索算法由 DeepAgent 提供 |
-| `PrepareTools`/Prepared Toolset | 无附件时隐藏附件工具等请求级过滤 | 已采用；权限仍在执行时复检 |
+| `PrepareTools`/Prepared Toolset | 按附件、Skill资源、任务和授权条件准备本轮工具 | 已采用；系统 `read_file`等只在有来源时注入，权限仍在执行时复检 |
 | `DeferredToolRequests/Results` | UI Tool Pending 与恢复 | 已采用；数据库恢复和前端协议由 DeepAgent 提供 |
 | `CancellationToken`、`RunCancelled` | 正式停止 Run，持久化官方 interrupted 历史 | 已采用；多 Pod 路由仍是部署责任 |
 | `ModelRetry`、`ToolFailed` | 区分模型可纠正错误和终止性工具错误 | 已采用 |
@@ -129,7 +129,7 @@ cache hit/miss Token，没有数据时保持 unknown。它不等于启用缓存�
 | --- | --- | --- |
 | `ClampOversizedMessages` | 确定性限制异常大消息 | 保持公开 API |
 | `ClearToolResults` | 压缩旧工具结果 | 保持，Checkpoint 前仍由 DeepAgent 复检 |
-| `DeduplicateFileReads` | 去除重复附件读取内容 | 保持，不改变原始历史 |
+| `DeduplicateFileReads` | 去除重复文件读取内容 | 保持，不改变原始历史；运行时字节/解析复用由 `read_file`的Run级缓存负责 |
 | `estimate_token_count` | 作为估算实现的一部分 | 保持统一 `TokenEstimator` 封装，不让 Console复制算法 |
 
 Harness `Skills` 不读取 references/assets，也不执行 scripts。v0.3.18 直接使用它作为线上 Skill 的

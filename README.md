@@ -3,7 +3,7 @@
 DeepAgent 是基于 FastAPI、Pydantic AI 和 SQLAlchemy 的多用户 Agent 服务，并
 随服务发布一体化运维控制台。
 
-当前产品版本为 `0.3.23`。`deep_agent.__version__` 是唯一代码版本来源，FastAPI、
+当前产品版本为 `0.3.24`。`deep_agent.__version__` 是唯一代码版本来源，FastAPI、
 `GET /info` 和 Console 顶部版本徽标均读取该值。后续正式发布默认递增
 `MAJOR.MINOR.PATCH` 的第三位，只有明确规划重大版本时才调整前两位。产品版本不通过
 环境变量或数据库覆盖，也不等同于 Alembic 数据库结构 revision。
@@ -77,7 +77,7 @@ uvicorn deep_agent.main:app --host 0.0.0.0 --port 8000
 `deep_agent.local_dev` 只用于本机回环调试，不用于容器部署。容器镜像若启用
 `subprocess-dev`，构建阶段同样需要执行 `scripts/sandbox_venv/setup.sh`（或等价步骤），
 并设置 `DEEP_AGENT_SANDBOX_PYTHON`；详见
-[`docs/design/07-python-sandbox/ops-kubernetes-sidecar.md`](docs/design/07-python-sandbox/ops-kubernetes-sidecar.md) §5.3。
+[`scripts/sandbox_venv/README.md`](scripts/sandbox_venv/README.md)。
 
 ## 数据库基线
 
@@ -102,7 +102,7 @@ DeepAgent 当前支持：
   由运行时按 Agent/Run 条件自动注入，只在 Console 的只读“系统工具”目录中说明。
 - Skill 不再属于 ToolPackage。Agent 通过独立 `skills` 列表选择，Harness 按需加载 `SKILL.md`；
   Skill 不能绕过 `capabilities` 获得 MCP 或其他工具。
-- `mcp:<name>`：URL、stdio 或 builtin MCP。
+- `mcp:<name>`：URL或Builtin MCP；历史stdio记录只允许查看/删除，不能新建、修改或运行。
 - `ui:builtin`：代码内置的确认和候选选择交互，默认关闭。
 - `ui:<package>`：数据库管理的手工 UI 工具包，Agent 按包启用。
 

@@ -42,5 +42,4 @@ def build_sandbox_backend(
             max_pids=agent.sandbox_max_pids or None,
         )
 
-    # Stage C: go-judge backend will be registered here.
     raise ValueError(f"Unknown sandbox backend: {backend_name}")

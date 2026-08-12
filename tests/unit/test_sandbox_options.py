@@ -89,7 +89,6 @@ class SandboxHealthEndpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["backend"], "subprocess-dev")
         self.assertEqual(payload["state_scope"], "request")
         self.assertEqual(payload["security_level"], "none")
-        self.assertFalse(payload["production_ready"])
         self.assertEqual(payload["expected_profile"], DEFAULT_SANDBOX_PROFILE)
         self.assertTrue(payload["profile_ok"])
         self.assertIn("numpy", payload["package_names"])
@@ -156,7 +155,6 @@ class SandboxHealthEndpointTests(unittest.IsolatedAsyncioTestCase):
                 backend="fake",
                 state_scope="request",
                 security_level="none",
-                production_ready=False,
             )
         )
         backend.execute = AsyncMock(

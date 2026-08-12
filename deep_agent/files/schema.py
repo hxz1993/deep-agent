@@ -31,8 +31,8 @@ class FileReadResult(BaseModel):
     resource: AttachmentFileRef | SkillFileRef
     name: str
     mime: str | None = None
-    format: Literal["text", "docx", "xlsx", "image"]
-    unit: Literal["line", "block", "row", "image"]
+    format: Literal["text", "docx", "xlsx"]
+    unit: Literal["line", "block", "row"]
     content: str
     metadata: dict[str, Any] = Field(default_factory=dict)
     offset: int = Field(ge=1)

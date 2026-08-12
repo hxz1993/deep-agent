@@ -42,7 +42,7 @@
 | 小摘要 | 仍可用 stdout/`result` 给模型看 | 用多轮 result 拼大二进制 |
 | Sink | 可选适配器（下载中心、仅返回可读 URL、…） | 第一版就绑定全部平台产品形态 |
 | 与文件读取 | 计算产物工具包独立；默认关闭 | 与入站系统工具 `read_file` 合并 |
-| 与 07 | 晋升合同；07 继续禁网 | 把 Artifact 实现塞进 go-judge 主路径当唯一交付 |
+| 与 07 | 晋升合同；Sandbox继续禁网 | 把Artifact实现塞进Python执行主路径当唯一交付 |
 | Harness Spill | 概念对照；评估是否共用对象层 | 未共享存储前把 Spill 当已交付 |
 
 ## 与 07 的交叉合同（必须对齐）
@@ -56,7 +56,7 @@ execute 开始 → 创建请求级 workdir
   → 后续 tool / sink 只认 artifact_id
 ```
 
-未晋升的文件随 workdir 删除。阶段 C 须同一晋升语义。
+未晋升的文件随workdir删除。未来实现任何Artifact Sink时都必须保持同一晋升语义。
 
 ## 建议分期（先语义，后 sink）
 

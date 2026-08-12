@@ -3,13 +3,24 @@
 本文件记录 DeepAgent 的产品版本变化，按新版本到旧版本排列。当前代码版本以
 `deep_agent.__version__` 为准；数据库结构版本以 Alembic head 为准，两者互不替代。
 
+## v0.3.24
+
+收口文件与脚本执行语义：`read_file`只读取文本、DOCX和XLSX；图片不再作为文件工具分支，
+当前轮图片附件直接作为原生多模态输入交给Provider，DeepAgent不再根据模型目录预先拒绝，
+不支持图片的模型由Provider正常报错；历史图片和Skill图片均不读取。删除PDF上传和模型模态配置，
+PDF与PPT/PPTX保留为未来独立文档解析工具的产品方向，不并入 `read_file`。
+
+`execute_skill_script`与 `execute_python`明确共用当前 `SubprocessBackend`。Agent选择含脚本Skill并
+启用 `builtin:sandbox`时即可执行固定脚本。仓库删除未实施的隔离探针、Sidecar方案和相关待办，
+只保留当前一次性Python子进程、资源上限、取消和临时目录清理等真实运行链路。Alembic保持 `004`。
+
 ## v0.3.23
 
 将会话附件与 Skill 文件收口为运行时系统工具 `read_file`：文本按行、DOCX按逻辑块、
-XLSX按物理行分页，支持图片输入的模型还可读取图片。文件字节和完整解析结果只在一次用户
+XLSX按物理行分页。文件字节和完整解析结果只在一次用户
 Run内缓存并使用 single-flight，下一轮重新加载。旧的三个附件工具、`read_skill_resource`和
 可配置的 `builtin:attachment`均已删除；Alembic `004`只从显式 Agent能力列表中清理旧编码。
-`execute_python`仍属于可配置的 `builtin:sandbox`，Skill脚本执行仍要求生产安全Backend。
+`execute_python`仍属于可配置的 `builtin:sandbox`。
 
 依赖热修复：将 OpenAI Python SDK 固定为 `2.46.0`。Pydantic AI 2.26 对 OpenAI SDK 只声明
 `>=2.45.0`，干净构建曾自动解析到 OpenAI 3.0，而该版本的异步传输要求 `aiohttp>=3.14.1`，
@@ -24,9 +35,7 @@ Skill恢复修复：上传与当前内容Hash相同的ZIP时，先核验平台�
 复用会话附件解析内核，让已授权 Skill 的文本、DOCX 和 XLSX 资源通过统一分页工具按需
 读取；历史安装包无需重装即可按路径和 MIME 识别 Office 资源。Sandbox 内部增加受控脚本请求
 协议，只允许显式选择同一 Skill 的 Python 脚本、输入和资源，并只从 `outputs/result.json`读取
-正式结构化结果。当前 `subprocess-dev` 仍为非生产 Backend，模型不会看到脚本执行工具；只有
-安全 Backend 报告 `production_ready=true` 且 Agent 同时启用目标 Skill 与 `builtin:sandbox`
-时才条件注入。Alembic 仍为 `003`。
+正式结构化结果。该协议后续由当前Sandbox直接对模型开放；Alembic仍为 `003`。
 
 ## v0.3.21
 
@@ -60,7 +69,7 @@ Console 执行“检测并更新”。Alembic head 仍为 `003`。
 将 Skill 与 ToolPackage 分离，新增 Alembic 003 的 `skill_packages` 和 `agents.skills`。
 上传 ZIP 原包保存在平台文件服务，数据库只保存 File ID、Manifest 和资源索引；Harness 0.18
 初始仅披露 Skill 名称与描述，模型调用 `load_capability` 后才加载完整 `SKILL.md`。References 与
-Assets 通过授权分页工具按需访问；脚本正文不能读取，只有生产就绪的隔离 Backend 才能执行。
+Assets 通过授权分页工具按需访问；脚本正文不能读取，只能通过受控脚本工具执行。
 
 ## v0.3.17
 

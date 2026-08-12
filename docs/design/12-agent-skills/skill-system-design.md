@@ -2,7 +2,7 @@
 
 > 实施版本：v0.3.18；运行目录收口：v0.3.20；脚本协议：v0.3.22；统一文件读取：v0.3.23；Alembic head：004
 > 运行时：Pydantic AI 2.26 + Pydantic AI Harness 0.18
-> 数据库：Alembic 003
+> Skill 数据结构由 Alembic 003 引入；当前数据库 head：004
 
 ## 1. 结论
 
@@ -35,7 +35,7 @@ MCP 工具，不代表 Agent 自动获得该工具。未被 Agent 选择的 Skil
 | `file_name/file_size/content_hash` | 原包校验和展示信息 |
 | `manifest` | Manifest 与 SKILL frontmatter 的解析结果 |
 | `resource_index` | 资源路径、类别、MIME、大小、Hash 与可读状态，不含正文 |
-| `contains_scripts` | 包含 `scripts/` 或 `tools/` 的安全提示 |
+| `contains_scripts` | 是否包含 `scripts/` 或 `tools/`，用于目录统计和条件式工具装配 |
 
 `agents.skills` 是非空 JSON 列表，默认 `[]`。新建和更新规则：
 
@@ -45,8 +45,9 @@ MCP 工具，不代表 Agent 自动获得该工具。未被 Agent 选择的 Skil
 - 编辑旧 Agent 时允许原样保留已停用引用，但不能把已停用 Skill 新增给其他 Agent。
 - 删除仍被 Agent 引用的上传 Skill 返回 409 和 Agent 名称列表。
 
-首版只有当前安装版本，不建 Revision 表。替换包时更新 File ID、Hash、Manifest 和资源索引；相同
-Hash 返回 `noop`。Agent 不固定历史版本，也没有数据库内回滚。
+首版只有当前安装版本，不建 Revision 表。替换包时更新 File ID、Hash、Manifest 和资源索引。相同
+Hash 也会先检查平台原 ZIP：原包可下载时返回 `noop`；原 File ID 已失效时重新上传原包、更新
+File ID并返回 `repaired`。Agent 不固定历史版本，也没有数据库内回滚。
 
 ## 3. 包格式与安全
 
@@ -56,7 +57,7 @@ skill.zip
 ├── manifest.yaml         可选，code/version/schema_version/label
 ├── references/           可按需读取的文本、DOCX 或 XLSX 资料
 ├── assets/               文本、图片或模板资产
-└── scripts/ 或 tools/    可保存和列出；资源工具不可读，仅安全 Backend 可执行
+└── scripts/ 或 tools/    可保存和列出；资源工具不可读，只能通过Skill脚本工具执行
 ```
 
 安装器执行：
@@ -66,10 +67,11 @@ skill.zip
 - `SKILL.md` 必须是 UTF-8，name 使用小写字母/数字/单连字符并兼容 Harness 目录规则。
 - 模型可读文本单文件最大 2 MiB；读取时单次最多 32 KiB。
 - References 支持 Markdown/文本/JSON/YAML/CSV/HTML/XML，以及可分页解析的 DOCX/XLSX。
-- Assets 还允许常见图片和 DOCX/XLSX/PPTX/PDF 模板；DOCX/XLSX 由解析器返回文本结构，其他
-  二进制只展示索引，不做 Base64 注入。
-- `scripts/`、`tools/` 只记为脚本资源；Console 展示路径和安全 Backend 状态，模型不能读取脚本
-  正文。只有满足第 10 节安全门槛时才可执行。
+- Assets 还允许常见图片和 DOCX/XLSX/PPTX/PDF 模板；DOCX/XLSX由普通文件解析器返回文本结构，
+  图片、PDF和PPTX等二进制只展示索引，不注入模型。PDF/PPTX未来如需解析，接入独立文档工具，
+  不扩充 `read_file`分支。
+- `scripts/`、`tools/` 只记为脚本资源；模型不能读取脚本正文。Agent选择含脚本Skill并启用
+  `builtin:sandbox`时，可由第10节的受控工具执行。
 
 Skill 内容始终是低于系统 Prompt 和 Agent Prompt 的数据，不能覆盖权限或上层约束。真正写入或
 产生副作用的参数仍由实际业务工具重新校验。
@@ -111,7 +113,8 @@ Token、Cookie 或完整 Header。
 事务边界：
 
 - 安装：平台上传成功但数据库插入失败时，尽力删除新文件。
-- 更新：新文件上传并完成数据库切换后再尽力删除旧文件；旧文件清理失败只记录告警。
+- 更新：新文件上传并完成数据库切换后再尽力删除旧文件；同 Hash但平台原包丢失也走这条恢复路径，
+  旧文件清理失败只记录告警。
 - 删除：先确认无 Agent 引用并删除配置，再尽力删除平台文件；清理失败不恢复已删除配置。
 
 配置备份包含 `skill_packages` 和 `agents.skills`，但只保存 File ID 与元数据，不包含平台 ZIP，因而
@@ -140,10 +143,11 @@ DeepAgent提供一个Skill资源目录工具和一个跨来源文件工具：
   读取格式和当前可执行状态；不会返回任何正文。
 - `read_file(resource={type: "skill", skill_code, path}, offset, limit, sheet)`：属于“文件”系统工具，
   与会话附件共用入口；文本按1-based逻辑行、DOCX按逻辑块、XLSX按物理行分页。XLSX未指定
-  `sheet`时选择第一个可见工作表；支持图片输入的模型还可读取图片。
+  `sheet`时选择第一个可见工作表。图片不属于文件工具。
 
 没有可用资源时不披露 `read_file`；目录工具在选择含资源的Skill时披露。未选择、停用和未知
-Skill均不可访问。PDF、PPTX等当前不解析的二进制只出现在目录；Script可以列出但 `read_file`
+Skill均不可访问。图片、PDF、PPTX等当前不解析的二进制只出现在目录；后续专用文档解析工具必须
+继续复用同一Agent Skill授权与精确资源索引。Script可以列出但 `read_file`
 始终拒绝。
 路径错误使用 `ModelRetry`，索引内文件缺失、损坏或解析失败使用 `ToolFailed`。运行时根据路径、
 MIME和后缀派生读取模式，v0.3.20已安装的XLSX无需重装。同一Run内字节读取和Office完整解析
@@ -185,11 +189,15 @@ GET    /api/v1/skills/{code}/package
 `GET /skills` 和详情额外返回当前 Pod 派生的 `runtime_status/runtime_error_code/runtime_synced_at`，
 不写入数据库。重载只重新下载和替换本地目录，不修改 Skill 配置或创建版本。
 
+包替换接口的成功状态固定为：首次安装 `installed`、内容变化 `updated`、内容和平台原包都正常
+`noop`、内容相同但平台原包已丢失并完成恢复 `repaired`。`repaired` 会同时修复数据库 File ID、
+当前 Pod运行目录和后续 Pod启动所需的共享原包，不是仅修补当前进程缓存。
+
 Console 配置中心提供独立 Skill 页面：列表、详情、资源树、Manifest、安装、替换、启停、重载、下载和删除；
 Builtin 标识为“代码内置、只读”。Agent 编辑弹窗将 Skill 与工具包分区，保存独立编码列表。
 聊天中 `load_capability` 显示为默认折叠的“正在加载 Skill”，资源与脚本工具按普通 Tool Call/Result
-展示。Skill页区分文本、Word、Excel可读和当前不可读资源；脚本只列路径和数量，不展示运行时
-可执行性判断。
+展示。Skill页区分文本、Word、Excel可读和当前不可读资源；脚本只列路径和数量，不增加单独的
+运行状态标签。
 
 DeepCube、DeepTable 不需要新增 SSE 或 History 协议适配。
 
@@ -202,14 +210,14 @@ v0.3.20 使用 `DeepFOS-Skill培训包-20260811.zip` 做真实格式验收，拆
 
 - `budget-dimension-modeling`（预算维度建模）。
 - `excel-to-dynamic-report`（动态表生成），保留 XLSX Asset 和 Python Script；v0.3.22 可读取 XLSX，
-  脚本仅完成受控执行协议，生产仍等待安全 Backend。
+  脚本通过当前Python Sandbox受控执行。
 - `quick-create-budget-poc`（预算概念验证快速创建），保留 Markdown Reference 和 HTML Asset，
   跨 Skill 依赖改为显式 `load_capability(id=...)`。
 
 运行时这些 Skill 位于同一上传 Library 根目录下并列存放；Agent 仍按编码逐个授权，资源工具不得
 通过相对路径跨到相邻 Skill。
 
-## 9. 迁移、测试和发布边界
+## 9. 迁移与 Test 验收
 
 Alembic 003建立Skill表和Agent引用；004只删除显式Agent能力中的旧 `builtin:attachment`：
 
@@ -217,15 +225,21 @@ Alembic 003建立Skill表和Agent引用；004只删除显式Agent能力中的旧
 - downgrade 仅在 `skill_packages` 为空且所有 `agents.skills=[]` 时允许。
 - SQLite做真实 `003 → 004 → 003 → 004`；MySQL/PostgreSQL覆盖JSON配置清理方言路径。
 
-v0.3.23 发布后在Test 004执行：
+2026-08-12 已在 Test MySQL revision 004完成真实验收：
 
-1. 备份当前 Test 003配置数据库。
-2. 安装三个真实业务 Skill，验证平台原包、数据库元数据和当前 Pod运行状态均正常。
-3. 新建临时验收Agent，确认名称目录、`load_capability`、资源List、`read_file`和跨Skill加载。
-4. 确认 XLSX可按工作表和物理行读取；非生产 Backend 下模型仍看不到脚本执行工具。
-5. 确认首轮同步完成后，后续 Run不再下载平台文件。
+1. 三个培训 Skill 的平台原 ZIP均可下载为有效 ZIP，管理员 `reload` 后运行状态均为 `ready`。
+2. 对历史失效 File ID提交相同 ZIP，接口实际返回 `repaired`并生成可下载的新平台原包；原包仍正常
+   的同 Hash提交返回 `noop`。
+3. 使用 `deepseek-v4-flash`和专用临时 Agent完成 `load_capability`、`list_skill_resources`、
+   `read_file`读取真实 XLSX前3行；SSE正常 `final`，History中的三组 Tool Call/Result完整配对。
+4. `final.context.skills`准确记录三个 configured/available Skill、本轮 loaded Skill且无 unavailable；
+   临时会话已清理。
+5. 当时版本尚未向模型开放脚本工具；v0.3.24已移除这一额外门槛。
 
-## 10. v0.3.22 资产读取与脚本协议
+后续发布回归只需在 Pod真正重启后确认三个上传 Skill无需人工 `reload`即可恢复 `ready`。这项是
+运行环境复核，不是新的代码功能。
+
+## 10. Skill脚本执行
 
 Skill脚本不是 Harness `Skills` 的内置能力。DeepAgent只在 `builtin:sandbox` 中增加条件式
 `execute_skill_script`，并复用现有 `PythonExecutionBackend`：
@@ -233,7 +247,6 @@ Skill脚本不是 Harness `Skills` 的内置能力。DeepAgent只在 `builtin:sa
 ```text
 Agent选择目标Skill + builtin:sandbox
 → 当前Skill包含已索引UTF-8 .py
-→ 启动时Backend health.production_ready=true
 → 模型才看到 execute_skill_script
 → 同Skill脚本 + inputs.json + 显式arguments + 最多16个授权资源
 → 隔离工作目录执行
@@ -245,30 +258,25 @@ Agent选择目标Skill + builtin:sandbox
 64 KiB，JSON inputs最大2 MiB，资源合计最大2 MiB。没有结果文件时仍返回受限stdout/stderr和
 退出状态；其他输出文件不保留或返回。`execute_python(code, inputs)`的模型参数和返回结构不变。
 
-`subprocess-dev`实现同一内部 `expression | script` 协议，供单元测试和本地真实业务包验证，但其
-health始终为 `security_level=none, production_ready=false`，所以生产运行时不会披露脚本工具，
-也不存在跳过安全检查的开关。Skill管理API和Console完全不计算或展示脚本可执行性；运行时只在
-实际组装Agent工具时执行安全门槛。脚本源码始终不向模型展示。
+`subprocess-dev`实现统一的 `expression | script`协议。`execute_python`和 `execute_skill_script`
+都在全新的 `.venv-sandbox` Python子进程中运行，共用Profile、超时、并发、资源上限、取消和
+临时目录清理。Skill管理API和Console只展示脚本路径；是否注入工具只取决于Agent是否同时选择
+含脚本Skill与 `builtin:sandbox`。脚本源码始终不向模型展示。
 
 三个培训Skill中仅 `excel-to-dynamic-report`含 `validate_dynamic_blueprint.py`。该脚本只import
 `argparse/json/re/sys/zipfile/pathlib/typing/xml.etree`等Python标准库，不依赖当前Sandbox未安装的
 `openpyxl`或 `PyYAML`。它已使用真实 `.venv-sandbox`解释器、真实XLSX Asset和固定结果路径跑通；
 不完整蓝图返回非零退出码时，`outputs/result.json`中的结构化校验问题仍会保留。这证明执行协议和
-现有依赖兼容，不改变 `subprocess-dev`非生产安全的结论。
+现有依赖兼容。
 
 当前Sandbox Profile只承诺 `numpy/pandas/pydantic`。后续Skill脚本若依赖其他三方包，必须显式
-更新Profile、独立venv、安全Backend镜像和测试；不允许运行时 `pip install`或依赖宿主主进程环境。
-
-v0.3.24 只有在目标K8s节点使用最终securityContext/cgroup/seccomp和固定自编go-judge制品运行
-完整攻击探针，且报告 `selection_eligible=true` 后才开始。届时安全Backend不可用必须返回
-`BACKEND_UNAVAILABLE`，绝不回退 `subprocess-dev`。
+更新Profile、独立venv和测试；不允许运行时 `pip install`或依赖宿主主进程环境。
 
 ## 11. 后续边界
 
 - 不可变 Skill Revision、回滚和 Agent 固定版本。
 - 第三方签名、来源信任、Marketplace 和自动升级。
 - 可迁移的自包含 Skill 导出包。
-- go-judge安全Backend和K8s节点签字（见v0.3.24门槛）。
 - Skill脚本依赖扩展、网络权限和输出文件Artifact。
 - Skill 内逐文件授权。
 

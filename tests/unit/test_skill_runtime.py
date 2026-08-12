@@ -154,7 +154,7 @@ class SkillRuntimeTests(unittest.IsolatedAsyncioTestCase):
         ]
         self.assertEqual([part.tool_name for part in returns], ["list_skill_resources", "read_file"])
         self.assertNotIn("scripts/", str(returns[0].content))
-        self.assertIn("scripts_executable", str(returns[0].content))
+        self.assertIn("scripts_readable", str(returns[0].content))
         self.assertIn("content_hash", str(returns[1].content))
 
     async def test_unselected_and_duplicate_skills_are_rejected(self) -> None:

@@ -7,7 +7,6 @@ import unittest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
-from deep_agent.agent.attachments import model_supports_image_input
 from deep_agent.agent.context.estimator import TokenEstimator
 from deep_agent.api.v1 import api_router
 from deep_agent.capabilities import build_registry
@@ -75,11 +74,7 @@ class LlmModelRuntimeFactsIntegrationTests(unittest.IsolatedAsyncioTestCase):
             )
             self.assertEqual(patch_response.status_code, 200)
             patched = patch_response.json()
-            self.assertFalse(
-                model_supports_image_input(
-                    db_modalities=patched["input_modalities"],
-                )
-            )
+            self.assertEqual(patched["input_modalities"], ["text"])
 
     async def test_create_requires_modalities_context_and_output(self) -> None:
         async with AsyncClient(transport=self._transport, base_url="http://test") as client:

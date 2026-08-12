@@ -13,11 +13,11 @@ from deep_agent.agent.attachment_extractors import (
     text_document,
     xlsx_workbook,
 )
-from deep_agent.skills.package import IMAGE_SUFFIXES, READABLE_SUFFIXES
+from deep_agent.skills.package import READABLE_SUFFIXES
 
 
-SkillResourceFormat = Literal["text", "docx", "xlsx", "image"]
-SkillResourceUnit = Literal["line", "block", "row", "image"]
+SkillResourceFormat = Literal["text", "docx", "xlsx"]
+SkillResourceUnit = Literal["line", "block", "row"]
 
 DEFAULT_OFFICE_PAGE = 100
 MAX_OFFICE_PAGE = 500
@@ -52,13 +52,6 @@ def resource_format(entry: dict[str, Any]) -> SkillResourceFormat | None:
         return "docx"
     if suffix == ".xlsx" or mime == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
         return "xlsx"
-    if suffix in IMAGE_SUFFIXES - {".svg"} or mime in {
-        "image/jpeg",
-        "image/png",
-        "image/gif",
-        "image/webp",
-    }:
-        return "image"
     if bool(entry.get("readable")) or suffix in READABLE_SUFFIXES:
         return "text"
     return None
@@ -72,8 +65,6 @@ def resource_unit(entry: dict[str, Any]) -> SkillResourceUnit | None:
         return "block"
     if kind == "xlsx":
         return "row"
-    if kind == "image":
-        return "image"
     return None
 
 
@@ -163,15 +154,7 @@ def _docx_page(path: Path, *, offset: int | None, limit: int | None) -> SkillRes
         format="docx",
         unit="block",
         content=page.content,
-        metadata={
-            **document.metadata,
-            "embedded_images_included": False,
-            "embedded_images_note": (
-                "Skill DOCX 读取当前只返回文本块，不把内嵌图片注入模型上下文"
-                if document.images
-                else None
-            ),
-        },
+        metadata=document.metadata,
         offset=resolved_offset,
         next_offset=page.next_offset,
         has_more=page.has_more,
@@ -242,11 +225,6 @@ def read_resource_page(
     if kind is None:
         raise SkillResourceReadError(
             f"binary_resource_not_readable: {entry.get('path')!r}",
-            correctable=True,
-        )
-    if kind == "image":
-        raise SkillResourceReadError(
-            "image_resource_requires_read_file",
             correctable=True,
         )
     if sheet is not None and kind != "xlsx":

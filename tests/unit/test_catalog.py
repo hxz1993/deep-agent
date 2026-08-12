@@ -280,6 +280,21 @@ class CatalogViewTests(unittest.TestCase):
             ["2026-01-01", "2025-01-01"],
         )
 
+    def test_historical_pdf_modality_is_hidden_from_catalog_response(self) -> None:
+        self.rows[0].input_modalities = ["text", "image", "pdf"]
+        page = build_catalog_page(
+            self.rows,
+            [],
+            view="model",
+            q=None,
+            lab_id=None,
+            provider_id=None,
+            modality=None,
+            offset=0,
+            limit=50,
+        )
+        self.assertNotIn("pdf", str(page["items"]))
+
     def test_provider_view_groups_models(self) -> None:
         page = build_catalog_page(
             self.rows,

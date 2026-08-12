@@ -234,5 +234,4 @@ class BackendHealth(BaseModel):
     backend: str
     state_scope: StateScope
     security_level: SecurityLevel
-    production_ready: bool
     resource_limits: ResourceLimitsSummary | None = None

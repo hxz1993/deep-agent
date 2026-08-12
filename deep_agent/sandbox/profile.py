@@ -1,9 +1,4 @@
-"""Sandbox Profile manifest loading, probing, and model instruction formatting.
-
-Stage B ``scripts/sandbox_probe/common.py`` should call ``DefaultProfileVerifier``
-for ``checks.python_profile``. Stage C secure Backend may extend manifest schema
-when isolation backend is selected.
-"""
+"""Sandbox Profile manifest loading, probing, and model instruction formatting."""
 
 from __future__ import annotations
 

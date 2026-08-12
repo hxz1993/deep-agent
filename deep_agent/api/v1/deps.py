@@ -48,8 +48,6 @@ def _skill_script_execution_available(
     return bool(
         sandbox_selected
         and ctx.sandbox_backend is not None
-        and ctx.sandbox_health is not None
-        and ctx.sandbox_health.production_ready
         and resolved_skills.scripts
     )
 
@@ -142,10 +140,7 @@ async def _build_runner_from_spec(
         ctx,
         resolved_skills,
     )
-    skill_resource_toolset = build_skill_resource_toolset(
-        resolved_skills.resources,
-        scripts_executable=script_execution_available,
-    )
+    skill_resource_toolset = build_skill_resource_toolset(resolved_skills.resources)
     file_toolset = build_file_toolset(resolved_skills.resources)
     skill_script_toolset = (
         build_skill_script_toolset(
@@ -204,7 +199,6 @@ async def _build_runner_from_spec(
         limits,
         ui_tool_hints=ui_tool_hints,
         model_settings=_model_settings_for_spec(spec),
-        input_modalities=spec.input_modalities,
         context_window_tokens=spec.context_window_tokens,
         max_output_tokens=spec.max_output_tokens,
         model_tags=spec.tags,

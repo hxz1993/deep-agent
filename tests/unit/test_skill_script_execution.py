@@ -26,16 +26,15 @@ from deep_agent.skills.script_tool import build_skill_script_toolset
 from tests.helpers.sandbox import sandbox_test_python
 
 
-class SecureRecordingBackend:
+class RecordingBackend:
     def __init__(self) -> None:
         self.requests: list[ExecuteRequest] = []
         self.health = AsyncMock(
             return_value=BackendHealth(
                 enabled=True,
-                backend="secure-test",
+                backend="test",
                 state_scope="request",
-                security_level="linux-isolated",
-                production_ready=True,
+                security_level="none",
             )
         )
         self.aclose = AsyncMock()
@@ -51,9 +50,9 @@ class SecureRecordingBackend:
             result={"valid": True},
             error=None,
             duration_ms=1,
-            backend="secure-test",
+            backend="test",
             environment="test",
-            security_level="linux-isolated",
+            security_level="none",
             memory_peak_bytes=None,
             truncated=TruncationMetadata(),
         )
@@ -68,7 +67,7 @@ def _context(*, user: str | None = "user") -> RunContext[AgentDeps]:
 
 
 class SkillScriptProtocolTests(unittest.IsolatedAsyncioTestCase):
-    def test_disclosure_requires_package_script_and_production_backend(self) -> None:
+    def test_disclosure_requires_selected_sandbox_and_script(self) -> None:
         item = ResolvedSkill(
             code="demo",
             source="upload",
@@ -87,19 +86,9 @@ class SkillScriptProtocolTests(unittest.IsolatedAsyncioTestCase):
         ctx = MagicMock()
         ctx.registry.selected.return_value = [package]
         ctx.sandbox_backend = MagicMock()
-        ctx.sandbox_health = BackendHealth(
-            enabled=True,
-            backend="secure",
-            state_scope="request",
-            security_level="linux-isolated",
-            production_ready=True,
-        )
         spec = AgentSpec(name="demo", model="test", instructions="", capabilities=["builtin:sandbox"])
         self.assertTrue(_skill_script_execution_available(spec, ctx, resolved))
 
-        ctx.sandbox_health = ctx.sandbox_health.model_copy(update={"production_ready": False})
-        self.assertFalse(_skill_script_execution_available(spec, ctx, resolved))
-        ctx.sandbox_health = ctx.sandbox_health.model_copy(update={"production_ready": True})
         ctx.registry.selected.return_value = []
         self.assertFalse(_skill_script_execution_available(spec, ctx, resolved))
         ctx.registry.selected.return_value = [package]
@@ -189,7 +178,7 @@ class SkillScriptProtocolTests(unittest.IsolatedAsyncioTestCase):
             await backend.aclose()
 
     async def test_model_tool_builds_controlled_script_request(self) -> None:
-        backend = SecureRecordingBackend()
+        backend = RecordingBackend()
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             (root / "scripts").mkdir()
@@ -247,7 +236,7 @@ class SkillScriptProtocolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(request.timeout_ms, 12_000)
 
     async def test_cross_skill_and_script_as_resource_are_rejected(self) -> None:
-        backend = SecureRecordingBackend()
+        backend = RecordingBackend()
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             (root / "scripts").mkdir()

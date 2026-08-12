@@ -11,8 +11,13 @@ if TYPE_CHECKING:
 
 _HTTP_URL_ADAPTER = TypeAdapter(AnyHttpUrl)
 _TAG_PATTERN = re.compile(r"^[a-z][a-z0-9_:-]{0,63}$")
-_ALLOWED_MODALITIES = {"text", "image", "audio", "video", "pdf"}
+_ALLOWED_MODALITIES = {"text", "image", "audio", "video"}
 LLM_REQUIRED_FIELDS = ("name", "model")
+
+
+def _supported_modalities(values: list[str] | None) -> list[str]:
+    """Hide retired modality values from historical database rows."""
+    return [value for value in (values or []) if value in _ALLOWED_MODALITIES]
 
 
 def _normalize_list(values: list[str], *, field_name: str) -> list[str]:
@@ -50,7 +55,7 @@ class LlmModelCreate(BaseModel):
     input_modalities: list[str] = Field(
         ...,
         min_length=1,
-        description="LLM-native input modalities only: text, image, audio, video, or pdf.",
+        description="LLM-native input modalities only: text, image, audio, or video.",
     )
     context_window_tokens: int = Field(
         ...,
@@ -202,7 +207,7 @@ class LlmModelResponse(BaseModel):
             model=row.model,
             base_url=row.base_url,
             api_key_set=bool(row.api_key),
-            input_modalities=row.input_modalities or [],
+            input_modalities=_supported_modalities(row.input_modalities),
             context_window_tokens=row.context_window_tokens,
             max_output_tokens=row.max_output_tokens,
             tags=row.tags or [],
@@ -227,7 +232,7 @@ class LlmModelSummary(BaseModel):
             id=row.id,
             name=row.name,
             model=row.model,
-            input_modalities=row.input_modalities or [],
+            input_modalities=_supported_modalities(row.input_modalities),
             context_window_tokens=row.context_window_tokens,
             max_output_tokens=row.max_output_tokens,
             tags=row.tags or [],

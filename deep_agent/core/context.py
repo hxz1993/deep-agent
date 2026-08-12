@@ -24,7 +24,6 @@ from deep_agent.sandbox.profile import (
     load_sandbox_profile,
     resolve_sandbox_profile,
 )
-from deep_agent.sandbox.types import BackendHealth
 from loguru import logger
 
 from deep_agent.db.factory import bootstrap_database, close_db
@@ -48,7 +47,6 @@ class AppContext:
     skill_runtime: SkillRuntimeLibrary
     sandbox_backend: PythonExecutionBackend | None = None
     sandbox_profile: ResolvedSandboxProfile | None = None
-    sandbox_health: BackendHealth | None = None
 
     @property
     def store(self) -> SessionStore:
@@ -79,9 +77,7 @@ class AppContext:
             raise
 
         resolved_profile = None
-        sandbox_health = None
         if sandbox_backend is not None:
-            sandbox_health = await sandbox_backend.health()
             manifest = load_sandbox_profile(DEFAULT_SANDBOX_PROFILE)
             verifier = DefaultProfileVerifier()
             try:
@@ -135,7 +131,6 @@ class AppContext:
             db_session_factory=bundle.session_factory,
             sandbox_backend=sandbox_backend,
             sandbox_profile=resolved_profile,
-            sandbox_health=sandbox_health,
         )
         await ctx.event_persister.start()
         init_context(ctx)
@@ -154,7 +149,6 @@ class AppContext:
         db_session_factory: async_sessionmaker[AsyncSession] | None = None,
         sandbox_backend: PythonExecutionBackend | None = None,
         sandbox_profile: ResolvedSandboxProfile | None = None,
-        sandbox_health: BackendHealth | None = None,
         active_runs: ActiveRunRegistry | None = None,
         skill_runtime: SkillRuntimeLibrary | None = None,
     ) -> AppContext:
@@ -195,7 +189,6 @@ class AppContext:
             db_session_factory=db_session_factory,
             sandbox_backend=sandbox_backend,
             sandbox_profile=sandbox_profile,
-            sandbox_health=sandbox_health,
         )
 
     async def aclose(self) -> None:

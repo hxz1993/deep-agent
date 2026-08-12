@@ -40,8 +40,6 @@ test("Skill 上传使用 multipart 且资源按安全 API 读取", () => {
   assert.match(source, /\/resources\/\$\{path\.split/);
   assert.match(source, /Word 可读/);
   assert.match(source, /Excel 可读/);
-  assert.doesNotMatch(source, /等待安全 Backend/);
-  assert.doesNotMatch(source, /可执行，但 Agent 需启用 Python 沙箱/);
   assert.doesNotMatch(source, /已保存，当前不可读取或执行/);
 });
 

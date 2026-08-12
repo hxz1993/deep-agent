@@ -93,7 +93,6 @@ class SubprocessBackend:
             backend=BACKEND_NAME,
             state_scope="request",
             security_level="none",
-            production_ready=False,
             resource_limits=self.resource_limits_summary(),
         )
 

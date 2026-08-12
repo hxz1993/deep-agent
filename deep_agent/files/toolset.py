@@ -8,8 +8,7 @@ from pathlib import Path
 from typing import Any, TypeVar
 
 from pydantic import TypeAdapter, ValidationError
-from pydantic_ai import BinaryContent, FunctionToolset, ModelRetry, RunContext, ToolFailed
-from pydantic_ai.messages import ToolReturn
+from pydantic_ai import FunctionToolset, ModelRetry, RunContext, ToolFailed
 from pydantic_ai.toolsets import PreparedToolset
 
 from deep_agent.agent.attachment_extractors import (
@@ -17,10 +16,8 @@ from deep_agent.agent.attachment_extractors import (
     DocxDocument,
     XlsxWorkbook,
     docx_document,
-    image_mime,
     normalize_range,
     paginate_items,
-    process_image,
     select_xlsx_sheet,
     text_document,
     xlsx_workbook,
@@ -35,7 +32,7 @@ from deep_agent.files.schema import (
     SkillFileRef,
 )
 from deep_agent.schemas.attachment import AttachmentRef
-from deep_agent.skills.package import IMAGE_SUFFIXES, READABLE_SUFFIXES
+from deep_agent.skills.package import READABLE_SUFFIXES
 from deep_agent.skills.runtime import ResolvedSkill
 
 _TEXT_MIMES = frozenset(
@@ -55,7 +52,6 @@ _TEXT_MIMES = frozenset(
 )
 _DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 _XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-_IMAGE_MIMES = frozenset({"image/jpeg", "image/png", "image/gif", "image/webp"})
 
 _TEXT_DEFAULT_LIMIT = 500
 _TEXT_MAX_LIMIT = 2_000
@@ -90,8 +86,6 @@ def _attachment_format(ref: AttachmentRef) -> str | None:
         return "docx"
     if mime == _XLSX_MIME:
         return "xlsx"
-    if mime in _IMAGE_MIMES:
-        return "image"
     return None
 
 
@@ -105,8 +99,6 @@ def _skill_format(entry: dict[str, Any]) -> str | None:
         return "docx"
     if suffix == ".xlsx" or mime == _XLSX_MIME:
         return "xlsx"
-    if suffix in IMAGE_SUFFIXES - {".svg"} or mime in _IMAGE_MIMES:
-        return "image"
     if bool(entry.get("readable")) or suffix in READABLE_SUFFIXES or mime in _TEXT_MIMES:
         return "text"
     return None
@@ -114,23 +106,18 @@ def _skill_format(entry: dict[str, Any]) -> str | None:
 
 def has_readable_skill_resources(
     resources: dict[str, ResolvedSkill],
-    *,
-    image_supported: bool,
 ) -> bool:
     return any(
-        kind is not None and (kind != "image" or image_supported)
+        _skill_format(entry) is not None
         for item in resources.values()
         for entry in item.resource_index
-        for kind in (_skill_format(entry),)
     )
 
 
 def _has_readable_attachment(ctx: RunContext[AgentDeps]) -> bool:
-    image_supported = "image" in set(ctx.deps.input_modalities)
     return any(
-        kind is not None and (kind != "image" or image_supported)
+        _attachment_format(ref) is not None
         for ref in ctx.deps.attachment_by_id.values()
-        for kind in (_attachment_format(ref),)
     )
 
 
@@ -264,7 +251,8 @@ async def _resolve_file(
         kind = _attachment_format(ref)
         if kind is None:
             raise ModelRetry(
-                f"read_file 不支持 MIME 为 {ref.mime or 'unknown'} 的附件；PDF、音频和视频使用模型原生输入"
+                f"read_file 不支持 MIME 为 {ref.mime or 'unknown'} 的附件；"
+                "图片、音频和视频只在当前轮作为模型原生附件提交，PDF和PPT/PPTX需要专用解析工具"
             )
 
         async def load_attachment() -> bytes:
@@ -346,7 +334,7 @@ async def _read_paged(
     limit: int | None,
     sheet: str | None,
     content_hash: str,
-) -> FileReadResult | ToolReturn:
+) -> FileReadResult:
     if resolved.format == "text":
         if sheet is not None:
             raise ModelRetry("sheet 仅适用于 XLSX 文件")
@@ -398,11 +386,6 @@ async def _read_paged(
             parser=lambda: docx_document(data),
             failure_label=resolved.name,
         )
-        include_images = (
-            start == 1
-            and "image" in set(ctx.deps.input_modalities)
-            and bool(document.images)
-        )
         page = paginate_items(
             document.blocks[start - 1 : start - 1 + page_limit],
             total_count=len(document.blocks),
@@ -413,15 +396,7 @@ async def _read_paged(
             resolved,
             unit="block",
             content=page.content,
-            metadata={
-                **document.metadata,
-                "embedded_images_included": include_images,
-                "embedded_images_note": (
-                    "图片按文档级集合返回，不代表它们在正文中的准确位置"
-                    if document.images
-                    else None
-                ),
-            },
+            metadata=document.metadata,
             offset=start,
             limit=page_limit,
             returned_count=page.returned_count,
@@ -431,30 +406,7 @@ async def _read_paged(
             truncated_by=page.truncated_by,
             content_hash=content_hash,
         )
-        if not include_images:
-            return result
-        multimodal: list[Any] = [
-            f"以下是 {resolved.name} 中的文档级内嵌图片集合，共 {len(document.images)} 张："
-        ]
-        for index, (name, raw) in enumerate(document.images, start=1):
-            mime = image_mime(raw, name)
-            if mime == "application/octet-stream":
-                continue
-            try:
-                processed, output_mime, _ = process_image(
-                    raw,
-                    filename=name,
-                    mime=mime,
-                )
-            except AttachmentParseError:
-                processed, output_mime = raw, mime
-            multimodal.extend(
-                [
-                    f"内嵌图片 {index}（{name}）:",
-                    BinaryContent(data=processed, media_type=output_mime),
-                ]
-            )
-        return ToolReturn(return_value=result, content=multimodal) if len(multimodal) > 1 else result
+        return result
 
     start, page_limit = _normalized_range(
         offset=offset,
@@ -507,52 +459,6 @@ async def _read_paged(
     )
 
 
-async def _read_image(
-    ctx: RunContext[AgentDeps],
-    resolved: _ResolvedFile,
-    *,
-    data: bytes,
-    offset: int | None,
-    limit: int | None,
-    sheet: str | None,
-    content_hash: str,
-) -> ToolReturn:
-    if "image" not in set(ctx.deps.input_modalities):
-        raise ModelRetry("当前模型不支持图片输入，无法读取该图片")
-    if offset not in (None, 1) or limit not in (None, 1) or sheet is not None:
-        raise ModelRetry("图片不支持分页或 sheet 参数")
-    detected = image_mime(data, resolved.name)
-    if detected == "application/octet-stream":
-        raise ToolFailed(f"图片格式无法识别: {resolved.name}")
-    try:
-        processed, output_mime, output_name = await _parse_cached(
-            ctx,
-            key=f"{resolved.cache_key}:image",
-            parser=lambda: process_image(data, filename=resolved.name, mime=detected),
-            failure_label=resolved.name,
-        )
-    except ToolFailed:
-        raise
-    result = _result(
-        resolved,
-        unit="image",
-        content="",
-        metadata={"output_name": output_name, "output_mime": output_mime},
-        offset=1,
-        limit=1,
-        returned_count=1,
-        total_count=1,
-        next_offset=None,
-        has_more=False,
-        truncated_by=None,
-        content_hash=content_hash,
-    )
-    return ToolReturn(
-        return_value=result,
-        content=[f"文件 {resolved.name} 的图片内容：", BinaryContent(data=processed, media_type=output_mime)],
-    )
-
-
 def build_file_toolset(
     resources: dict[str, ResolvedSkill] | None = None,
 ) -> PreparedToolset[AgentDeps]:
@@ -573,7 +479,7 @@ def build_file_toolset(
         offset: int | None = None,
         limit: int | None = None,
         sheet: str | None = None,
-    ) -> FileReadResult | ToolReturn:
+    ) -> FileReadResult:
         """按需读取当前会话附件或已授权 Skill 文件；有下一页时使用 next_offset 继续。"""
         resolved = await _resolve_file(ctx, resource, authorized)
         data = await _load_cached(
@@ -585,16 +491,6 @@ def build_file_toolset(
             expected_hash=resolved.content_hash,
         )
         content_hash = resolved.content_hash or hashlib.sha256(data).hexdigest()
-        if resolved.format == "image":
-            return await _read_image(
-                ctx,
-                resolved,
-                data=data,
-                offset=offset,
-                limit=limit,
-                sheet=sheet,
-                content_hash=content_hash,
-            )
         return await _read_paged(
             ctx,
             resolved,
@@ -606,11 +502,7 @@ def build_file_toolset(
         )
 
     async def prepare(ctx: RunContext[AgentDeps], tools: dict[str, Any]) -> dict[str, Any]:
-        image_supported = "image" in set(ctx.deps.input_modalities)
-        if _has_readable_attachment(ctx) or has_readable_skill_resources(
-            authorized,
-            image_supported=image_supported,
-        ):
+        if _has_readable_attachment(ctx) or has_readable_skill_resources(authorized):
             return tools
         return {}
 

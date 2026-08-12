@@ -6,6 +6,7 @@ from pydantic import ValidationError
 from sqlalchemy import Text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from deep_agent.agent.spec import AgentSpec
 from deep_agent.db.dialect import DbDialect
 from deep_agent.db.models import Agent, Base, LlmModel
 from deep_agent.db.stores.agent import create_agent_store
@@ -15,7 +16,11 @@ from deep_agent.db.stores.llm_model import (
 )
 from deep_agent.db.types import JSONType
 from deep_agent.schemas.agent import AgentCreate
-from deep_agent.schemas.llm_model import LlmModelCreate, LlmModelUpdate
+from deep_agent.schemas.llm_model import (
+    LlmModelCreate,
+    LlmModelResponse,
+    LlmModelUpdate,
+)
 
 
 def model_create(name: str = "gpt-4o", **overrides) -> LlmModelCreate:
@@ -70,6 +75,16 @@ class LlmModelStoreTests(unittest.IsolatedAsyncioTestCase):
         assert updated is not None
         self.assertEqual(updated.tags, ["reasoning"])
         self.assertEqual(updated.max_output_tokens, 8_192)
+
+    async def test_historical_pdf_modality_is_hidden_from_runtime_and_api(self) -> None:
+        row = await self.store.create_unique(model_create())
+        row.input_modalities = ["text", "image", "pdf"]
+
+        self.assertEqual(AgentSpec.from_llm_model(row).input_modalities, ["text", "image"])
+        self.assertEqual(
+            LlmModelResponse.from_row(row).input_modalities,
+            ["text", "image"],
+        )
 
     async def test_update_rejects_invalid_merged_token_pair(self) -> None:
         row = await self.store.create_unique(model_create())

@@ -9,9 +9,7 @@ from unittest.mock import AsyncMock, Mock, patch
 
 from docx import Document
 from openpyxl import Workbook
-from PIL import Image
 from pydantic_ai import ModelRetry, RunContext, ToolFailed
-from pydantic_ai.messages import ToolReturn
 from pydantic_ai.models.test import TestModel
 from pydantic_ai.usage import RunUsage
 
@@ -23,14 +21,10 @@ from deep_agent.schemas.attachment import AttachmentRef
 from deep_agent.skills.runtime import ResolvedSkill
 
 
-def _context(
-    *refs: AttachmentRef,
-    modalities: tuple[str, ...] = (),
-) -> RunContext[AgentDeps]:
+def _context(*refs: AttachmentRef) -> RunContext[AgentDeps]:
     return RunContext(
         deps=AgentDeps(
             session_id="file-test",
-            input_modalities=modalities,
             attachment_by_id={ref.id: ref for ref in refs},
         ),
         model=TestModel(),
@@ -205,13 +199,9 @@ class UnifiedFileToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(context.deps.file_load_tasks)
         self.assertFalse(context.deps.file_parse_tasks)
 
-    async def test_docx_returns_blocks_and_images_only_to_image_model(self) -> None:
+    async def test_docx_returns_text_blocks_only(self) -> None:
         document = Document()
         document.add_paragraph("正文")
-        image = Image.new("RGB", (8, 8), "red")
-        raw_image = io.BytesIO()
-        image.save(raw_image, format="PNG")
-        document.add_paragraph().add_run().add_picture(io.BytesIO(raw_image.getvalue()))
         raw_docx = io.BytesIO()
         document.save(raw_docx)
         ref = AttachmentRef(
@@ -219,7 +209,7 @@ class UnifiedFileToolTests(unittest.IsolatedAsyncioTestCase):
             name="example.docx",
             mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         )
-        context = _context(ref, modalities=("text", "image"))
+        context = _context(ref)
         tool = await _tool(ctx=context)
         assert tool is not None
         with patch(
@@ -231,9 +221,8 @@ class UnifiedFileToolTests(unittest.IsolatedAsyncioTestCase):
                 {"resource": {"type": "attachment", "file_id": ref.id}},
                 context,
             )
-        self.assertIsInstance(result, ToolReturn)
-        assert isinstance(result, ToolReturn)
-        self.assertTrue(result.return_value.metadata["embedded_images_included"])
+        self.assertEqual(result.content, "正文")
+        self.assertNotIn("embedded_images", result.metadata)
 
     async def test_xlsx_defaults_to_first_visible_sheet_and_paginates(self) -> None:
         workbook = Workbook()
@@ -360,24 +349,9 @@ class UnifiedFileToolTests(unittest.IsolatedAsyncioTestCase):
                     _context(),
                 )
 
-    async def test_image_requires_model_support(self) -> None:
-        raw = io.BytesIO()
-        Image.new("RGB", (4, 4), "blue").save(raw, format="PNG")
+    async def test_image_never_injects_read_file(self) -> None:
         ref = AttachmentRef(id="image", name="a.png", mime="image/png")
         self.assertIsNone(await _tool(ctx=_context(ref)))
-        context = _context(ref, modalities=("text", "image"))
-        tool = await _tool(ctx=context)
-        assert tool is not None
-        with patch(
-            "deep_agent.files.toolset._download_file",
-            new_callable=AsyncMock,
-            return_value=raw.getvalue(),
-        ):
-            result = await tool.call_func(
-                {"resource": {"type": "attachment", "file_id": ref.id}},
-                context,
-            )
-        self.assertIsInstance(result, ToolReturn)
 
 
 if __name__ == "__main__":

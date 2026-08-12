@@ -336,7 +336,7 @@ DeepAgent 原有自研 `Capability` 只是产品配置包装，却与 Pydantic A
 实际启用仍由 `agents.capabilities` 中的工具包编码决定；本轮不提供包内逐工具开关。
 `execute_python` 的工具定义位于 DeepAgent 进程，实际代码通过可替换的
 `PythonExecutionBackend` 执行；这不改变它的 Function Tool 类型。Skill脚本复用同一Backend，
-但只在安全Backend生产就绪、Agent启用Sandbox且选择含脚本Skill时动态追加，不扩大包级授权。
+在Agent启用Sandbox且选择含脚本Skill时动态追加，不扩大包级授权。
 
 0.2.3 删除了原来 Native 中的 `http_get`。该工具没有目标域名白名单、私网地址保护和
 请求审计，不适合作为所有 Agent 默认获得的通用网络能力；需要联网时应接入边界明确、
@@ -687,16 +687,15 @@ DeepAgent 已通过 `builtin:sandbox` 中的 `execute_python` 向私有和 OpenA
 ```text
 FunctionToolset(execute_python)
   → PythonExecutionBackend
-  → subprocess-dev（本地联调）/ 未来生产硬隔离 Backend
+  → subprocess-dev
 ```
 
 v0.3.22 同一Backend内部增加Skill脚本模式：宿主只复制已授权脚本、JSON inputs和同Skill资源，
-固定读取 `outputs/result.json`。`subprocess-dev` 仅验证协议且不会向模型披露脚本工具；生产开放仍
-取决于目标K8s节点隔离探针。
+固定读取 `outputs/result.json`。Agent选择含脚本Skill并启用 `builtin:sandbox`时，模型可直接调用
+`execute_skill_script`。
 
 该能力不是 MCP，也不依赖 Provider Native Tool。当前已落地无状态执行、独立解释器、超时、
-并发和软防护；生产硬隔离仍需按 [Python Sandbox 课题](../07-python-sandbox/README.md) 完成
-节点资格验证与运维部署。长期继续治理：
+并发和软防护。当前执行语义见 [Python Sandbox 课题](../07-python-sandbox/README.md)。长期按真实需求继续治理：
 
 - 容器或进程隔离。
 - CPU、内存、时间和磁盘配额。
@@ -734,11 +733,10 @@ v0.3.22 同一Backend内部增加Skill脚本模式：宿主只复制已授权脚
 
 工具权限必须由可信 `AgentDeps` 决定，不允许模型在参数中自选权限 Scope。
 
-附件工具是首个适合落地请求级过滤的场景：当本轮原始会话中没有当前用户可访问的合法附件
-引用时，不向模型暴露整个附件读取 Toolset；只要当前请求或原始会话存在合法附件，就暴露现有
-三个读取工具，不再按 TXT、DOCX、XLSX 后缀细分。过滤依据必须来自原始 `chat_messages` 和当前
-请求附件，不能从 Checkpoint 推断文件归属。该优化只减少无效工具 Schema 和模型误调用，文件
-读取时仍需继续执行用户、会话和 `file_id` 权限校验。
+文件工具是已落地的请求级准备场景：当前请求或原始 `chat_messages` 存在合法附件，或者 Agent
+选择了可读且运行目录就绪的 Skill资源时，才注入统一系统工具 `read_file`；没有任何文件来源时
+不注入。附件归属不能从 Checkpoint推断，Skill路径必须命中已授权资源索引。该优化只减少无效
+Schema和误调用，实际读取仍需复检用户、会话、`file_id`、Skill选择和路径权限。
 
 ### 8.2 ToolSearch
 
@@ -998,7 +996,7 @@ list/read 上游失败使用 `ToolFailed`；文件 ID、MIME、分页范围、Re
 
 | 能力 | 当前状态 | 落地或重新打开条件 |
 | --- | --- | --- |
-| 无附件时隐藏附件工具 | 已实现 | 根据当前请求与原始会话是否存在合法附件过滤整个附件 Toolset；运行时权限校验保持不变 |
+| 按来源条件注入统一文件工具 | 已实现 | 当前请求/原始会话有合法附件，或 Agent有可读 Skill资源时注入系统 `read_file`；无来源时不注入，执行时继续复检权限 |
 | MCP 工具名原样展示 | 已关闭额外映射 | 模型、SSE、历史和 Console 统一使用最终稳定协议名，不增加 MCP `display_name` |
 | MCP `ToolSearch` | 已实现 | 在 ToolPackage 授权范围内 Top 3 预选、Top 5 搜索和渐进披露 |
 | 结构化最终输出 | 有潜力 | 产品锁定普通文本、多输出组合、严格模式和混合工具调用规则后重新实施 |
@@ -1008,7 +1006,7 @@ list/read 上游失败使用 `ToolFailed`；文件 ID、MIME、分页范围、Re
 
 ### 已完成：工具可见性
 
-- 落地附件请求级过滤。
+- 落地附件与 Skill资源统一的 `read_file`条件注入。
 - MCP 工具保持最终协议名原样展示，不增加另一套名称映射。
 - 同步补充每轮工具数量和 Schema 体积观测，为后续 Tool Search 提供数据。
 

@@ -79,6 +79,7 @@ Pydantic AI Tool，也不会出现在 Console 的 Agent 能力列表。
 
 - `mcps/` 是 MCP Server 的本地实现或启动入口，运行时仍通过 MCP 协议接入。
 - `deep_agent/skills/` 是线上 Skill 管理和运行适配；Skill 只提供任务方法、References 和 Assets，
-  不注册 Python 工具，不执行包内脚本。
+  不自动授予工具权限；Agent同时启用含脚本Skill和 `builtin:sandbox`时，可以通过条件式系统工具
+  `execute_skill_script`执行已索引脚本。
 
 MCP 提供可执行工具；Skill 提供渐进披露的说明和素材。两者生命周期、权限和协议不同，不应混放。

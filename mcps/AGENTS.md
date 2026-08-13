@@ -57,7 +57,6 @@ python3.12 mcps/<name>/server.py
 | 目录 | capability | 说明 |
 | --- | --- | --- |
 | `deepcube/` | `mcp:deepcube` | 启动已安装的 `deepcube-mcp` 包 |
-| `doc_search/` | `mcp:doc_search` | 文档搜索 |
 
 ---
 

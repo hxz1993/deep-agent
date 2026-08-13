@@ -31,7 +31,7 @@ Accept: text/event-stream
   ],
   "session_id": "可选，省略则服务端生成",
   "model": "可选，如 openai:gpt-4o",
-  "capabilities": ["builtin:general", "mcp:doc_search"],
+  "capabilities": ["builtin:general", "mcp:deepfos"],
   "user": "可选用户标识"
 }
 ```
@@ -399,7 +399,7 @@ Checkpoint 已保存后因状态查询延迟而让流无法收口。`noop` 表�
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | `type` | `"tool_call"` | 固定值 |
-| `tool` | `string` | 稳定工具协议名（MCP 前缀示例 `doc_search_doc_search`）；与工具包编码不同 |
+| `tool` | `string` | 稳定工具协议名（MCP 前缀示例 `deepfos_platform_folder_list`）；与工具包编码不同 |
 | `args` | `object` | 已通过工具 Schema 校验的完整参数 |
 | `tool_call_id` | `string \| null` | 调用唯一标识，用于关联 `tool_result` |
 | `widget` | `string \| null` | 可选；UI 工具渲染提示（来自 DB，**不发给模型**） |
@@ -425,8 +425,8 @@ Provider Native Tool 使用对应的原生 Call/Return 事件，不经过普通 
 ```json
 {
   "type": "tool_result",
-  "tool": "doc_search_doc_search",
-  "result": "### 维度管理\n...(markdown 文本)...",
+  "tool": "deepfos_platform_folder_list",
+  "result": {"items": []},
   "tool_call_id": "call_00_evdBG0xFNRn5Q8IlwgZW4217",
   "artifacts": [
     {
@@ -629,22 +629,22 @@ event: session
 data: {"session_id":"3eff69967bee4a809c46a47c19e113ff","conversation_id":"deepagent:anonymous:3eff69967bee4a809c46a47c19e113ff","run_id":"run-id"}
 
 event: text
-data: {"type": "text", "delta": "让我先搜索一下文档中关于\"维度类型\"的相关内容。"}
+data: {"type": "text", "delta": "我先查看目标目录。"}
 
 event: tool_call
-data: {"type": "tool_call", "tool": "doc_search_doc_search", "args": {}, "tool_call_id": "call_00_evdBG0xFNRn5Q8IlwgZW4217"}
+data: {"type": "tool_call", "tool": "deepfos_platform_folder_list", "args": {}, "tool_call_id": "call_00_evdBG0xFNRn5Q8IlwgZW4217"}
 
 event: tool_call
-data: {"type": "tool_call", "tool": "doc_search_doc_search", "args": {"query": "维度类型"}, "tool_call_id": "call_00_evdBG0xFNRn5Q8IlwgZW4217"}
+data: {"type": "tool_call", "tool": "deepfos_platform_folder_list", "args": {"path": "/"}, "tool_call_id": "call_00_evdBG0xFNRn5Q8IlwgZW4217"}
 
 event: tool_result
-data: {"type": "tool_result", "tool": "doc_search_doc_search", "result": "### 维度管理\n...", "tool_call_id": "call_00_evdBG0xFNRn5Q8IlwgZW4217"}
+data: {"type": "tool_result", "tool": "deepfos_platform_folder_list", "result": {"items": []}, "tool_call_id": "call_00_evdBG0xFNRn5Q8IlwgZW4217"}
 
 event: text
-data: {"type": "text", "delta": "让我查看维度概览文档..."}
+data: {"type": "text", "delta": "目录读取完成。"}
 
 event: final
-data: {"type": "final", "output": "## 平台的 11 种维度类型\n...", "usage": {"requests": 4, "input_tokens": 18079, "output_tokens": 1012, "total_tokens": 19091}}
+data: {"type": "final", "output": "根目录当前没有子元素。", "usage": {"requests": 2, "input_tokens": 4096, "output_tokens": 128, "total_tokens": 4224}}
 ```
 
 ## 6. 客户端实现清单

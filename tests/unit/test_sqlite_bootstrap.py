@@ -106,7 +106,7 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
                                         "attachment",
                                         "ui:deep_cube__clarify",
                                         "ui:builtin__confirm",
-                                        "mcp:doc_search",
+                                        "mcp:deepcube",
                                     ]
                                 ),
                             ),
@@ -140,7 +140,7 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
                             "builtin:attachment",
                             "ui:deepcube",
                             "ui:builtin",
-                            "mcp:doc_search",
+                            "mcp:deepcube",
                         ],
                     )
 
@@ -163,7 +163,7 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
                             "ui:deep_cube__config_fill",
                             "ui:builtin__confirm",
                             "ui:builtin__choice",
-                            "mcp:doc_search",
+                            "mcp:deepcube",
                         ],
                     )
                     await asyncio.to_thread(command.upgrade, config, "002")
@@ -310,7 +310,7 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
                                     [
                                         "builtin:general",
                                         "builtin:attachment",
-                                        "mcp:doc_search",
+                                        "mcp:deepcube",
                                         "builtin:attachment",
                                     ]
                                 ),
@@ -349,7 +349,7 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
                                 )
                             )
                         ),
-                        ["builtin:general", "mcp:doc_search"],
+                        ["builtin:general", "mcp:deepcube"],
                     )
                     self.assertIsNone(
                         self._scalar(
@@ -382,7 +382,7 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
                                 )
                             )
                         ),
-                        ["builtin:general", "mcp:doc_search"],
+                        ["builtin:general", "mcp:deepcube"],
                     )
 
     async def test_005_removes_text_tools_server_and_agent_references(self) -> None:
@@ -408,7 +408,7 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
                                         "mcp:text_tools",
                                         "builtin:general",
                                         "mcp:text_tools",
-                                        "mcp:doc_search",
+                                        "mcp:deepcube",
                                     ]
                                 ),
                             ),
@@ -442,7 +442,7 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
                                 )
                             )
                         ),
-                        ["builtin:general", "mcp:doc_search"],
+                        ["builtin:general", "mcp:deepcube"],
                     )
                     self.assertIsNone(
                         self._scalar(
@@ -485,8 +485,108 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
                     await asyncio.to_thread(command.upgrade, config, "005")
                     self.assertEqual(self._revision(db_path), "005")
 
+    async def test_006_removes_doc_search_server_and_agent_references(self) -> None:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+            db_path = Path(tmpdir) / "remove-doc-search.db"
+            url = f"sqlite+aiosqlite:///{db_path.as_posix()}"
+            with patch("deep_agent.db.url.get_database_url", return_value=url):
+                with patch("deep_agent.db.migrate.get_database_url", return_value=url):
+                    config = migrate._build_alembic_config()
+                    await asyncio.to_thread(command.upgrade, config, "005")
+                    with sqlite3.connect(db_path) as connection:
+                        connection.execute(
+                            "INSERT INTO mcp_servers "
+                            "(name,transport,config,inspection,description,enabled) "
+                            "VALUES ('doc_search','builtin','{}','{\"status\":\"not_applicable\"}',"
+                            "'retired fixture',1)"
+                        )
+                        connection.execute(
+                            "UPDATE agents SET capabilities = ? WHERE name = 'default'",
+                            (
+                                json.dumps(
+                                    [
+                                        "mcp:doc_search",
+                                        "builtin:general",
+                                        "mcp:doc_search",
+                                        "mcp:deepcube",
+                                    ]
+                                ),
+                            ),
+                        )
+                        model_id = self._scalar(
+                            db_path,
+                            "SELECT id FROM llm_models WHERE name = 'openai:gpt-4o'",
+                        )
+                        connection.execute(
+                            "INSERT INTO agents "
+                            "(id,name,model_id,temperature,capabilities,skills,prompt) "
+                            "VALUES ('null-agent-006','null-agent-006',?,NULL,NULL,'[]','test')",
+                            (model_id,),
+                        )
+                        connection.execute(
+                            "INSERT INTO agents "
+                            "(id,name,model_id,temperature,capabilities,skills,prompt) "
+                            "VALUES ('empty-agent-006','empty-agent-006',?,NULL,'[]','[]','test')",
+                            (model_id,),
+                        )
+                        connection.commit()
+
+                    await asyncio.to_thread(command.upgrade, config, "006")
+                    self.assertEqual(self._revision(db_path), "006")
+                    self.assertEqual(
+                        json.loads(
+                            str(
+                                self._scalar(
+                                    db_path,
+                                    "SELECT capabilities FROM agents WHERE name = 'default'",
+                                )
+                            )
+                        ),
+                        ["builtin:general", "mcp:deepcube"],
+                    )
+                    self.assertIsNone(
+                        self._scalar(
+                            db_path,
+                            "SELECT capabilities FROM agents WHERE name = 'null-agent-006'",
+                        )
+                    )
+                    self.assertEqual(
+                        json.loads(
+                            str(
+                                self._scalar(
+                                    db_path,
+                                    "SELECT capabilities FROM agents WHERE name = 'empty-agent-006'",
+                                )
+                            )
+                        ),
+                        [],
+                    )
+                    self.assertEqual(
+                        self._row_count_where(
+                            db_path,
+                            "mcp_servers",
+                            "name = ?",
+                            ("doc_search",),
+                        ),
+                        0,
+                    )
+
+                    await asyncio.to_thread(command.downgrade, config, "005")
+                    self.assertEqual(self._revision(db_path), "005")
+                    self.assertEqual(
+                        self._row_count_where(
+                            db_path,
+                            "mcp_servers",
+                            "name = ?",
+                            ("doc_search",),
+                        ),
+                        0,
+                    )
+                    await asyncio.to_thread(command.upgrade, config, "006")
+                    self.assertEqual(self._revision(db_path), "006")
+
     def _assert_current_baseline(self, db_path: Path) -> None:
-        self.assertEqual(self._revision(db_path), "005")
+        self.assertEqual(self._revision(db_path), "006")
         self.assertEqual(self._business_tables(db_path), EXPECTED_TABLES)
         self.assertNotIn("max_requests", self._columns(db_path, "agents"))
         self.assertNotIn("capabilities_source", self._columns(db_path, "llm_models"))
@@ -507,7 +607,7 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(self._row_count(db_path, "llm_models"), 1)
         self.assertEqual(self._row_count(db_path, "agents"), 1)
-        self.assertEqual(self._row_count(db_path, "mcp_servers"), 2)
+        self.assertEqual(self._row_count(db_path, "mcp_servers"), 1)
         self.assertEqual(self._row_count(db_path, "auxiliary_model_configs"), 1)
         self.assertEqual(
             self._scalar(
@@ -519,7 +619,7 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
                 "SELECT id FROM llm_models WHERE name = 'openai:gpt-4o'",
             ),
         )
-        for name in ("deepcube", "doc_search"):
+        for name in ("deepcube",):
             raw = self._scalar(
                 db_path,
                 "SELECT inspection FROM mcp_servers WHERE name = ?",

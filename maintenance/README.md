@@ -115,3 +115,9 @@ Alembic `005`不增加表或字段。升级会删除已下线的预制演示MCP�
 `agents.capabilities`列表中移除对应能力引用；其他能力顺序、`null`和空列表语义保持不变。
 历史会话中的旧Tool Call/Result不重写。`005 → 004`只回退revision，不恢复Server记录或Agent授权。
 旧版本配置备份作为隔离SQLite启动时，会先升级到当前head再完成同样清理。
+
+## v0.4.5 预制文档MCP清理
+
+Alembic `006`继续执行纯数据清理：删除已下线的预制文档MCP记录，并从显式
+`agents.capabilities`中移除对应引用。迁移保持其他能力顺序以及`null`、空列表语义；降级只回退
+revision，不恢复已经删除的Server和授权。历史会话及其中已有的Tool Call/Result保持原样。

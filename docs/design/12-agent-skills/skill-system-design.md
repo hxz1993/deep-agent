@@ -1,8 +1,8 @@
 # DeepAgent 线上 Skill 体系设计
 
-> 实施版本：v0.3.18；运行目录收口：v0.3.20；脚本协议：v0.3.22；统一文件读取：v0.3.23；Alembic head：005
+> 实施版本：v0.3.18；运行目录收口：v0.3.20；脚本协议：v0.3.22；统一文件读取：v0.3.23；Alembic head：006
 > 运行时：Pydantic AI 2.26 + Pydantic AI Harness 0.18
-> Skill 数据结构由 Alembic 003 引入；当前数据库 head：005
+> Skill 数据结构由 Alembic 003 引入；当前数据库 head：006
 
 ## 1. 结论
 

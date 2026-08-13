@@ -8,7 +8,6 @@ Skill不同，运行时仍通过MCP协议接入。
 | 目录 | capability | 用途 |
 | --- | --- | --- |
 | `deepcube/` | `mcp:deepcube` | DeepCube SDK/MCP 薄启动器 |
-| `doc_search/` | `mcp:doc_search` | 文档搜索 |
 
 运行时由 `deep_agent/capabilities/mcp/builtin.py` 发现仓库实现，并与数据库
 `mcp_servers` 配置合并。外部 URL MCP 只通过数据库和 Console 配置，不再使用目录 JSON。

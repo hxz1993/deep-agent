@@ -1,6 +1,6 @@
 # DeepAgent 工具包与工具目录设计
 
-> 实施状态：v0.3.2已按本文完成；v0.3.18起Skill已从ToolPackage分离；v0.3.23起文件读取是自动注入的系统工具；v0.4.4删除已下线的预制演示MCP，当前数据库head为005。
+> 实施状态：v0.3.2已按本文完成；v0.3.18起Skill已从ToolPackage分离；v0.3.23起文件读取是自动注入的系统工具；v0.4.4～v0.4.5删除已下线的预制MCP，当前数据库head为006。
 
 ## 1. 目标与边界
 
@@ -71,7 +71,7 @@ v0.3.9 改由 Pydantic AI 官方 Provider/Profile 处理，不再保留项目自
 - 不保留旧 `native`、`python-sandbox`、`attachment`、`ui:<tool_name>` 运行兼容分支。
 - 旧数据由 Alembic 002完成工具包转换，004从显式 Agent能力中删除已废弃的
   `builtin:attachment`；未知 UI 引用必须阻止002迁移。
-- Alembic 005删除已下线的预制演示MCP Server记录及对应能力引用，不改写历史工具调用。
+- Alembic 005和006依次删除已下线的预制MCP Server记录及对应能力引用，不改写历史工具调用。
 
 ## 5. 数据库
 
@@ -196,7 +196,7 @@ Agent 能力页直接按后端 `category` 分组，不再通过旧 `kind` 猜测
 - 完整 Python、Console Node、配置备份、静态检查和浏览器四主题/窄屏。
 
 002的历史迁移验证已在隔离 SQLite完成；共享 Test曾完成 revision 004真实验收。当前仓库head为
-005，后续发布应始终按“源版本备份 → 部署并自动升级 → 核对revision和物理结构 → 新版本备份”
+006，后续发布应始终按“源版本备份 → 部署并自动升级 → 核对revision和物理结构 → 新版本备份”
 执行，不再使用旧001/002发布步骤描述当前环境。
 
 ## 12. 后续演进

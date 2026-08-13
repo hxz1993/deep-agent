@@ -66,6 +66,23 @@ class SystemToolCatalogTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertFalse(any(item.code.startswith("runtime:") for item in packages))
 
+    async def test_tool_package_api_exposes_only_current_product_builtin_mcp(self) -> None:
+        ctx = SimpleNamespace(
+            registry=build_registry(),
+            stores=SimpleNamespace(
+                mcp=SimpleNamespace(list_all=AsyncMock(return_value=[])),
+                ui_tool=SimpleNamespace(list_all=AsyncMock(return_value=[])),
+                ui_tool_package=SimpleNamespace(list_all=AsyncMock(return_value=[])),
+            ),
+        )
+
+        packages = await list_tool_packages(ctx)
+        mcp_codes = [item.code for item in packages if item.category == "mcp"]
+        retired_code = "mcp:" + "_".join(("doc", "search"))
+
+        self.assertEqual(mcp_codes, ["mcp:deepcube"])
+        self.assertNotIn(retired_code, mcp_codes)
+
 
 if __name__ == "__main__":
     unittest.main()

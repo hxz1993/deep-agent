@@ -3,6 +3,15 @@
 本文件记录 DeepAgent 的产品版本变化，按新版本到旧版本排列。当前代码版本以
 `deep_agent.__version__` 为准；数据库结构版本以 Alembic head 为准，两者互不替代。
 
+## v0.4.5
+
+- 删除内置Doc Search MCP实现、初始种子和现行产品文档入口；当前新数据库只预置DeepCube，
+  但管理员仍可按通用URL MCP机制自行创建同名服务。
+- Alembic `006`删除已有`mcp_servers.name=doc_search`预制记录，并从显式Agent能力列表中移除
+  所有`mcp:doc_search`引用；保持其他能力顺序以及`null`、空列表语义，降级不恢复已删除授权。
+- 历史会话及其中已有的旧Tool Call/Result保持原样；Console随运行目录自动移除对应卡片和选项，
+  并通过后端目录、API和前端防残留测试锁定删除结果。
+
 ## v0.4.4
 
 - 删除仅用于演示的内置Text Tools MCP实现、初始种子、Console示例和现行产品文档入口；MCP通用机制、协议与历史会话保持不变。

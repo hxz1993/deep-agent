@@ -15,7 +15,7 @@ from tests.helpers.builtin_mcp_fixture import TEST_MCPS_DIR
 
 class BuiltinMcpConfigTests(unittest.TestCase):
     def test_product_builtin_catalog_contains_only_shipped_servers(self) -> None:
-        self.assertEqual(list_builtin_server_names(), ["deepcube", "doc_search"])
+        self.assertEqual(list_builtin_server_names(), ["deepcube"])
 
     def test_resolve_builtin_spawn_config_uses_current_interpreter(self) -> None:
         with (

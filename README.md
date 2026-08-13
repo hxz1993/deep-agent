@@ -3,7 +3,7 @@
 DeepAgent 是基于 FastAPI、Pydantic AI 和 SQLAlchemy 的多用户 Agent 服务，并
 随服务发布一体化运维控制台。
 
-当前产品版本为 `0.4.3`。`deep_agent.__version__` 是唯一代码版本来源，FastAPI、
+当前产品版本为 `0.4.4`。`deep_agent.__version__` 是唯一代码版本来源，FastAPI、
 `GET /info` 和 Console 顶部版本徽标均读取该值。后续正式发布默认递增
 `MAJOR.MINOR.PATCH` 的第三位，只有明确规划重大版本时才调整前两位。产品版本不通过
 环境变量或数据库覆盖，也不等同于 Alembic 数据库结构 revision。
@@ -87,8 +87,9 @@ v0.3.0 将发布前的 Alembic `001`～`023` 历史压缩为唯一基线 `001`�
 `stamp --purge 001` 重设版本。完整备份和切换命令见
 [`maintenance/README.md`](maintenance/README.md)。
 
-当前 Alembic head 为 `004`：`002` 统一 ToolPackage 与 UI 工具包；`003` 将线上 Skill 与
-ToolPackage 分离；`004` 从显式 Agent能力列表中清理已废弃的 `builtin:attachment`。升级
+当前 Alembic head 为 `005`：`002` 统一 ToolPackage 与 UI 工具包；`003` 将线上 Skill 与
+ToolPackage 分离；`004`清理已废弃的`builtin:attachment`；`005`删除已下线的预制演示MCP记录并
+从显式Agent能力列表中清理对应引用。升级
 `003` 前仍必须确认 `agents.capabilities` 不存在历史 `skill:*` 引用。
 
 配置备份会复制全部配置表并只保留会话表结构；上传Skill的原始ZIP不塞入数据库备份。需要完整

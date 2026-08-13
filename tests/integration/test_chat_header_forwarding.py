@@ -163,7 +163,7 @@ class ChatHeaderForwardingTests(unittest.TestCase):
             {"user": "static-mcp-user", "x-mcp-token": "service-token"},
         )
 
-    def test_chat_uses_production_builtin_loader_for_text_tools(self) -> None:
+    def test_chat_uses_test_builtin_loader_for_echo_fixture(self) -> None:
         from fastapi import FastAPI
         from fastapi.testclient import TestClient
 
@@ -172,6 +172,7 @@ class ChatHeaderForwardingTests(unittest.TestCase):
         from deep_agent.capabilities.mcp.lease_manager import McpLeaseManager
         from deep_agent.core.context import AppContext, init_context, reset_context
         from tests.integration.helpers.chat import testing_data_stores
+        from tests.helpers.builtin_mcp_fixture import use_test_builtin_mcp
 
         manager = McpLeaseManager()
         stores, engine, session_factory = testing_data_stores(mcp_rows=[])
@@ -190,21 +191,23 @@ class ChatHeaderForwardingTests(unittest.TestCase):
         app.include_router(api_router)
 
         test_model = TestModel(
-            call_tools=["text_tools_reverse"],
+            call_tools=["echo_fixture_reverse"],
             custom_output_text="ok",
         )
         try:
-            with patch("deep_agent.agent.factory._resolve_model", return_value=test_model):
+            with use_test_builtin_mcp(), patch(
+                "deep_agent.agent.factory._resolve_model", return_value=test_model
+            ):
                 with TestClient(app) as client:
                     response = client.post(
                         "/api/v1/chat",
                         json={
                             "message": "reverse abc",
-                            "capabilities": ["mcp:text_tools"],
+                            "capabilities": ["mcp:echo_fixture"],
                         },
                         headers={
-                            "Authorization": "Bearer text-tools-token",
-                            "X-Tenant-Id": "tenant-text-tools",
+                            "Authorization": "Bearer echo-fixture-token",
+                            "X-Tenant-Id": "tenant-echo-fixture",
                         },
                     )
         finally:

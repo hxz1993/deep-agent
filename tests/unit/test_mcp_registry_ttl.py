@@ -13,7 +13,7 @@ from mcps._run import should_exit_on_registry_ttl
 class RegistryTtlWatcherTests(unittest.TestCase):
     def test_should_exit_when_mtime_is_stale(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            record = Path(tmpdir) / "builtin-text_tools.json"
+            record = Path(tmpdir) / "builtin-echo_fixture.json"
             record.write_text("{}", encoding="utf-8")
             old = time.time() - 10_000
             os.utime(record, (old, old))
@@ -29,7 +29,7 @@ class RegistryTtlWatcherTests(unittest.TestCase):
 
     def test_should_not_exit_when_mtime_is_fresh(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            record = Path(tmpdir) / "builtin-text_tools.json"
+            record = Path(tmpdir) / "builtin-echo_fixture.json"
             record.write_text("{}", encoding="utf-8")
             with mock.patch.dict(
                 os.environ,

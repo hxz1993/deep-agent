@@ -59,7 +59,7 @@ tests/
 | `test_attachment_extractors.py` | 文本编码、DOCX/XLSX 结构读取、分页与 Office 安全 |
 | `test_file_tools.py` | 附件与 Skill统一文件工具的来源参数、权限、Run缓存、single-flight、分页和多模态返回 |
 | `test_tool_package_registry.py` | ToolPackage Registry 的整包选择、默认和空列表语义 |
-| `test_sqlite_bootstrap.py` | Alembic 001/002/003/004 结构、工具包、Skill和旧附件能力清理、降级与失败前校验 |
+| `test_sqlite_bootstrap.py` | Alembic 001～005结构、工具包、Skill、旧附件能力与预制演示MCP清理、降级和失败前校验 |
 | `test_tool_package_migration_dialects.py` | SQLite、MySQL、PostgreSQL 的 002 DDL 分支 |
 | `test_runtime_dependencies.py` | OpenAI SDK/aiohttp兼容锁定与Pydantic AI OpenAI模型导入 |
 | `test_session_model_override.py` | Agent 对话 `model_id` 请求级覆盖（`build_runner_for_agent`） |
@@ -80,7 +80,8 @@ tests/
 | `test_session_model_override.py` | Agent 流式对话 `model_id` 覆盖、默认回退、轮次切换 |
 | `test_chat_attachment_tools.py` | 附件引用 → 模型调用工具 → SSE/历史持久化 → 同会话续读 |
 
-公共 fixture：`integration/fixtures/header_echo_server.py`、`pid_echo_server.py`。
+公共fixture：`integration/fixtures/header_echo_server.py`、`pid_echo_server.py`；真实Builtin进程测试使用
+`tests/fixtures/mcps/echo_fixture/`，该目录不会被生产Builtin扫描。
 
 ---
 

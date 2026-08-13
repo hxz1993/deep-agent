@@ -106,7 +106,7 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
                                         "attachment",
                                         "ui:deep_cube__clarify",
                                         "ui:builtin__confirm",
-                                        "mcp:text_tools",
+                                        "mcp:doc_search",
                                     ]
                                 ),
                             ),
@@ -140,7 +140,7 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
                             "builtin:attachment",
                             "ui:deepcube",
                             "ui:builtin",
-                            "mcp:text_tools",
+                            "mcp:doc_search",
                         ],
                     )
 
@@ -163,7 +163,7 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
                             "ui:deep_cube__config_fill",
                             "ui:builtin__confirm",
                             "ui:builtin__choice",
-                            "mcp:text_tools",
+                            "mcp:doc_search",
                         ],
                     )
                     await asyncio.to_thread(command.upgrade, config, "002")
@@ -310,7 +310,7 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
                                     [
                                         "builtin:general",
                                         "builtin:attachment",
-                                        "mcp:text_tools",
+                                        "mcp:doc_search",
                                         "builtin:attachment",
                                     ]
                                 ),
@@ -349,7 +349,7 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
                                 )
                             )
                         ),
-                        ["builtin:general", "mcp:text_tools"],
+                        ["builtin:general", "mcp:doc_search"],
                     )
                     self.assertIsNone(
                         self._scalar(
@@ -382,11 +382,111 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
                                 )
                             )
                         ),
-                        ["builtin:general", "mcp:text_tools"],
+                        ["builtin:general", "mcp:doc_search"],
                     )
 
+    async def test_005_removes_text_tools_server_and_agent_references(self) -> None:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+            db_path = Path(tmpdir) / "remove-text-tools.db"
+            url = f"sqlite+aiosqlite:///{db_path.as_posix()}"
+            with patch("deep_agent.db.url.get_database_url", return_value=url):
+                with patch("deep_agent.db.migrate.get_database_url", return_value=url):
+                    config = migrate._build_alembic_config()
+                    await asyncio.to_thread(command.upgrade, config, "004")
+                    with sqlite3.connect(db_path) as connection:
+                        connection.execute(
+                            "INSERT INTO mcp_servers "
+                            "(name,transport,config,inspection,description,enabled) "
+                            "VALUES ('text_tools','builtin','{}','{\"status\":\"not_applicable\"}',"
+                            "'retired fixture',1)"
+                        )
+                        connection.execute(
+                            "UPDATE agents SET capabilities = ? WHERE name = 'default'",
+                            (
+                                json.dumps(
+                                    [
+                                        "mcp:text_tools",
+                                        "builtin:general",
+                                        "mcp:text_tools",
+                                        "mcp:doc_search",
+                                    ]
+                                ),
+                            ),
+                        )
+                        model_id = self._scalar(
+                            db_path,
+                            "SELECT id FROM llm_models WHERE name = 'openai:gpt-4o'",
+                        )
+                        connection.execute(
+                            "INSERT INTO agents "
+                            "(id,name,model_id,temperature,capabilities,skills,prompt) "
+                            "VALUES ('null-agent','null-agent',?,NULL,NULL,'[]','test')",
+                            (model_id,),
+                        )
+                        connection.execute(
+                            "INSERT INTO agents "
+                            "(id,name,model_id,temperature,capabilities,skills,prompt) "
+                            "VALUES ('empty-agent','empty-agent',?,NULL,'[]','[]','test')",
+                            (model_id,),
+                        )
+                        connection.commit()
+
+                    await asyncio.to_thread(command.upgrade, config, "005")
+                    self.assertEqual(self._revision(db_path), "005")
+                    self.assertEqual(
+                        json.loads(
+                            str(
+                                self._scalar(
+                                    db_path,
+                                    "SELECT capabilities FROM agents WHERE name = 'default'",
+                                )
+                            )
+                        ),
+                        ["builtin:general", "mcp:doc_search"],
+                    )
+                    self.assertIsNone(
+                        self._scalar(
+                            db_path,
+                            "SELECT capabilities FROM agents WHERE name = 'null-agent'",
+                        )
+                    )
+                    self.assertEqual(
+                        json.loads(
+                            str(
+                                self._scalar(
+                                    db_path,
+                                    "SELECT capabilities FROM agents WHERE name = 'empty-agent'",
+                                )
+                            )
+                        ),
+                        [],
+                    )
+                    self.assertEqual(
+                        self._row_count_where(
+                            db_path,
+                            "mcp_servers",
+                            "name = ?",
+                            ("text_tools",),
+                        ),
+                        0,
+                    )
+
+                    await asyncio.to_thread(command.downgrade, config, "004")
+                    self.assertEqual(self._revision(db_path), "004")
+                    self.assertEqual(
+                        self._row_count_where(
+                            db_path,
+                            "mcp_servers",
+                            "name = ?",
+                            ("text_tools",),
+                        ),
+                        0,
+                    )
+                    await asyncio.to_thread(command.upgrade, config, "005")
+                    self.assertEqual(self._revision(db_path), "005")
+
     def _assert_current_baseline(self, db_path: Path) -> None:
-        self.assertEqual(self._revision(db_path), "004")
+        self.assertEqual(self._revision(db_path), "005")
         self.assertEqual(self._business_tables(db_path), EXPECTED_TABLES)
         self.assertNotIn("max_requests", self._columns(db_path, "agents"))
         self.assertNotIn("capabilities_source", self._columns(db_path, "llm_models"))
@@ -407,7 +507,7 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(self._row_count(db_path, "llm_models"), 1)
         self.assertEqual(self._row_count(db_path, "agents"), 1)
-        self.assertEqual(self._row_count(db_path, "mcp_servers"), 3)
+        self.assertEqual(self._row_count(db_path, "mcp_servers"), 2)
         self.assertEqual(self._row_count(db_path, "auxiliary_model_configs"), 1)
         self.assertEqual(
             self._scalar(
@@ -419,7 +519,7 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
                 "SELECT id FROM llm_models WHERE name = 'openai:gpt-4o'",
             ),
         )
-        for name in ("deepcube", "doc_search", "text_tools"):
+        for name in ("deepcube", "doc_search"):
             raw = self._scalar(
                 db_path,
                 "SELECT inspection FROM mcp_servers WHERE name = ?",
@@ -468,6 +568,21 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
     def _row_count(db_path: Path, table_name: str) -> int:
         with sqlite3.connect(db_path) as connection:
             row = connection.execute(f"SELECT COUNT(*) FROM {table_name}").fetchone()
+        assert row is not None
+        return int(row[0])
+
+    @staticmethod
+    def _row_count_where(
+        db_path: Path,
+        table_name: str,
+        where: str,
+        parameters: tuple[object, ...],
+    ) -> int:
+        with sqlite3.connect(db_path) as connection:
+            row = connection.execute(
+                f"SELECT COUNT(*) FROM {table_name} WHERE {where}",
+                parameters,
+            ).fetchone()
         assert row is not None
         return int(row[0])
 

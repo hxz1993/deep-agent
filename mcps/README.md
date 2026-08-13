@@ -1,13 +1,12 @@
 # 仓库内置 MCP
 
-`mcps/` 保存随 DeepAgent 一起发布的 MCP Server。它们与进程内 `native`、`attachment`
-和 `skill` 工具不同，运行时仍通过 MCP 协议接入。
+`mcps/` 保存随 DeepAgent 一起发布的 MCP Server。它们与进程内工具、运行时文件工具和
+Skill不同，运行时仍通过MCP协议接入。
 
 ## 当前内置服务
 
 | 目录 | capability | 用途 |
 | --- | --- | --- |
-| `text_tools/` | `mcp:text_tools` | 文本统计和转换示例 |
 | `deepcube/` | `mcp:deepcube` | DeepCube SDK/MCP 薄启动器 |
 | `doc_search/` | `mcp:doc_search` | 文档搜索 |
 

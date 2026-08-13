@@ -1,6 +1,6 @@
 # DeepAgent 工具包与工具目录设计
 
-> 实施状态：v0.3.2 已按本文完成；v0.3.18 起 Skill 已从 ToolPackage 分离；v0.3.23 起文件读取是自动注入的系统工具，当前数据库 head 为 004。
+> 实施状态：v0.3.2已按本文完成；v0.3.18起Skill已从ToolPackage分离；v0.3.23起文件读取是自动注入的系统工具；v0.4.4删除已下线的预制演示MCP，当前数据库head为005。
 
 ## 1. 目标与边界
 
@@ -71,6 +71,7 @@ v0.3.9 改由 Pydantic AI 官方 Provider/Profile 处理，不再保留项目自
 - 不保留旧 `native`、`python-sandbox`、`attachment`、`ui:<tool_name>` 运行兼容分支。
 - 旧数据由 Alembic 002完成工具包转换，004从显式 Agent能力中删除已废弃的
   `builtin:attachment`；未知 UI 引用必须阻止002迁移。
+- Alembic 005删除已下线的预制演示MCP Server记录及对应能力引用，不改写历史工具调用。
 
 ## 5. 数据库
 

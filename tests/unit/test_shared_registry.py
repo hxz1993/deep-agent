@@ -27,13 +27,13 @@ class SharedRegistryTests(unittest.TestCase):
         self._tmpdir.cleanup()
 
     def test_identity_paths(self) -> None:
-        identity, json_path, lock_path = self.registry._paths("text_tools")
-        self.assertEqual(identity, "builtin-text_tools")
-        self.assertTrue(str(json_path).endswith("builtin-text_tools.json"))
-        self.assertTrue(str(lock_path).endswith("builtin-text_tools.lock"))
+        identity, json_path, lock_path = self.registry._paths("echo_fixture")
+        self.assertEqual(identity, "builtin-echo_fixture")
+        self.assertTrue(str(json_path).endswith("builtin-echo_fixture.json"))
+        self.assertTrue(str(lock_path).endswith("builtin-echo_fixture.lock"))
 
     def test_drop_stale_record_removes_dead_server_entry(self) -> None:
-        identity = shared_mcp_identity("text_tools")
+        identity = shared_mcp_identity("echo_fixture")
         json_path = Path(self._tmpdir.name) / f"{identity}.json"
         json_path.write_text(
             json.dumps({"host": "127.0.0.1", "port": 19999, "pid": 1}),

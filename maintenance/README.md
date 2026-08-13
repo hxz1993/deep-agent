@@ -108,3 +108,10 @@ Alembic `004` 不增加表或字段，只从显式 `agents.capabilities`列表�
 `builtin:attachment`。它保留其余能力顺序，并保持 `null`和空列表语义；已保存历史中的旧工具
 调用不会重写。由于降级无法可靠判断旧Agent是否曾主动选择附件包，`004 → 003`只回退revision，
 不会凭空补回该编码。部署前后分别生成配置备份，并在升级后确认Agent的其他能力未变化。
+
+## v0.4.4 预制演示MCP清理
+
+Alembic `005`不增加表或字段。升级会删除已下线的预制演示MCP配置记录，并从所有显式
+`agents.capabilities`列表中移除对应能力引用；其他能力顺序、`null`和空列表语义保持不变。
+历史会话中的旧Tool Call/Result不重写。`005 → 004`只回退revision，不恢复Server记录或Agent授权。
+旧版本配置备份作为隔离SQLite启动时，会先升级到当前head再完成同样清理。

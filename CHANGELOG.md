@@ -3,6 +3,12 @@
 本文件记录 DeepAgent 的产品版本变化，按新版本到旧版本排列。当前代码版本以
 `deep_agent.__version__` 为准；数据库结构版本以 Alembic head 为准，两者互不替代。
 
+## v0.4.4
+
+- 删除仅用于演示的内置Text Tools MCP实现、初始种子、Console示例和现行产品文档入口；MCP通用机制、协议与历史会话保持不变。
+- Alembic `005`删除已有`mcp_servers.name=text_tools`预制记录，并从显式Agent能力列表中移除所有`mcp:text_tools`引用；保持其他能力顺序以及`null`、空列表语义，降级不恢复已删除授权。
+- 真实共享MCP进程、租约、TTL、并发和聊天回归改用`tests/fixtures/`下的测试专用Echo MCP，Fixture不会被生产内置目录扫描。
+
 ## v0.4.3
 
 - Console Skill页面支持导出单个上传Skill和导出全部上传Skill。单个导出返回平台保存的原始ZIP，

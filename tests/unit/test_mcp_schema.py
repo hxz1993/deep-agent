@@ -17,7 +17,7 @@ class McpSchemaBuiltinGuardTests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             McpServerCreate.model_validate(
                 {
-                    "name": "text_tools",
+                    "name": "echo_fixture",
                     "transport": "builtin",
                     "config": {},
                 }

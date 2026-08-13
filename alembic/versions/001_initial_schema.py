@@ -142,14 +142,6 @@ def _seed_initial_configuration() -> None:
                 "description": "Builtin MCP server 'doc_search'.",
                 "enabled": True,
             },
-            {
-                "name": "text_tools",
-                "transport": "builtin",
-                "config": "{}",
-                "inspection": '{"status":"not_applicable"}',
-                "description": "Builtin MCP server 'text_tools'.",
-                "enabled": True,
-            },
         ],
     )
     bind.execute(

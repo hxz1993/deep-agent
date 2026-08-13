@@ -39,9 +39,9 @@ class McpRunScopingTests(unittest.IsolatedAsyncioTestCase):
         ):
             with patch.object(manager._shared_registry, "start_touch", new=AsyncMock()):
                 with patch.object(manager._shared_registry, "stop_touch", new=AsyncMock()):
-                    async with manager.lease("text_tools", "reuse-session", factory, spawn_config={}):
+                    async with manager.lease("echo_fixture", "reuse-session", factory, spawn_config={}):
                         first = created[-1]
-                        async with manager.lease("text_tools", "reuse-session", factory, spawn_config={}):
+                        async with manager.lease("echo_fixture", "reuse-session", factory, spawn_config={}):
                             second = created[-1]
 
         self.assertIsNot(first, second)
@@ -63,9 +63,9 @@ class McpRunScopingTests(unittest.IsolatedAsyncioTestCase):
         ):
             with patch.object(manager._shared_registry, "start_touch", new=AsyncMock()):
                 with patch.object(manager._shared_registry, "stop_touch", new=AsyncMock()):
-                    async with manager.lease("text_tools", "session-a", factory, spawn_config={}):
+                    async with manager.lease("echo_fixture", "session-a", factory, spawn_config={}):
                         client_a = created[-1]
-                    async with manager.lease("text_tools", "session-b", factory, spawn_config={}):
+                    async with manager.lease("echo_fixture", "session-b", factory, spawn_config={}):
                         client_b = created[-1]
 
         self.assertIsNot(client_a, client_b)
@@ -87,9 +87,9 @@ class McpRunScopingTests(unittest.IsolatedAsyncioTestCase):
         ):
             with patch.object(manager._shared_registry, "start_touch", new=AsyncMock()):
                 with patch.object(manager._shared_registry, "stop_touch", new=AsyncMock()):
-                    async with manager.lease("text_tools", "idle-session", factory, spawn_config={}):
+                    async with manager.lease("echo_fixture", "idle-session", factory, spawn_config={}):
                         pass
-                    async with manager.lease("text_tools", "idle-session", factory, spawn_config={}):
+                    async with manager.lease("echo_fixture", "idle-session", factory, spawn_config={}):
                         pass
 
         self.assertEqual(len(created), 2)

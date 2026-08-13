@@ -21,6 +21,8 @@ from deep_agent.agent.spec import AgentSpec
 from deep_agent.agent.context.estimator import TokenEstimator
 from deep_agent.agent.tool_discovery import (
     MCP_SEARCH_RESULT_LIMIT,
+    TOOL_SEARCH_DESCRIPTION,
+    TOOL_SEARCH_PARAMETER_DESCRIPTION,
     build_return_schema_selector,
     build_mcp_discovery_toolset,
     search_deferred_tools,
@@ -245,11 +247,8 @@ def build_agent(
             ToolSearch(
                 strategy=search_deferred_tools,
                 max_results=MCP_SEARCH_RESULT_LIMIT,
-                tool_description=(
-                    "按用途查找当前 Agent 已授权但尚未披露参数的 MCP 工具。"
-                    "返回匹配工具后，下一次模型请求会获得这些工具的完整参数。"
-                ),
-                parameter_description="一个或多个简短用途，例如“查询财务模型成员”。",
+                tool_description=TOOL_SEARCH_DESCRIPTION,
+                parameter_description=TOOL_SEARCH_PARAMETER_DESCRIPTION,
             )
         )
         capabilities.append(

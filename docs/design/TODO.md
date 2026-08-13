@@ -59,7 +59,6 @@
 | `TOOL-105` | 可选结构化最终输出 | Pydantic AI `ToolOutput`/`NativeOutput`/`PromptedOutput` | 产品锁定普通文本与多输出组合、混合工具调用和严格模式规则 | Output 不是 ToolPackage；权威 MCP 事实不由模型重写 | [结构化最终输出](09-structured-output/structured-output-design.md) |
 | `TOOL-108` | Agent 包内逐工具授权 | Core `FilteredToolset` 或 Prepared Toolset | 出现明确的“同包内部分工具禁止使用”权限需求 | 授权主键不能直接依赖可重命名的协议名 | [工具包后续演进](11-tool-packages/tool-packages-design.md#12-后续演进) |
 | `TOOL-301` | Provider Native Code/File/Web/Computer 等工具 | Core Provider Native Capability | 某托管 Provider 能力、模型和执行环境成为明确产品功能 | 必须显式启用并按 Provider 治理；不替代公共 MCP、Sandbox、附件、RAG 或当前页面 UI Tool | [浏览器与页面操作](15-browser-and-page-actions/browser-and-page-actions-design.md#23-provider-原生-computer-use) |
-| `TOOL-302` | MCP Tool Search 跨语言查询兜底 | Pydantic AI `ToolSearch` 自定义参数说明 + 现有 `lexical_v2` | 纯英文第三方 MCP 在中文真实问题中稳定检索失败，且双语查询实测能提升 Top 1/Top 3 命中率 | 模型传入原语言与简洁英文两条同义查询；不在 DeepAgent 维护 DeepFOS 业务翻译词典，不改 MCP 协议名，也不替代服务端提供标准 `title/description` | [工具检索](13-tool-discovery/tool-discovery-design.md) |
 | `SKILL-101` | Skill 修订、签名、Marketplace 与便携导出 | Harness `Skills` 继续负责渐进披露；产品层独立治理安装、来源与迁移 | 出现回滚、跨环境迁移、第三方签名或 Marketplace 的明确需求 | 不预埋半套 Revision；便携导出需包含平台原包而非仅 File ID | [Skill 后续边界](12-agent-skills/skill-system-design.md#11-后续边界) |
 
 ### 上下文、记忆和执行恢复
@@ -139,6 +138,7 @@
 | `ATT-V1` / `ATT-001` | TXT/DOCX/XLSX 分页读取、会话附件限制、历史和压缩回归 | v0.3.15，[附件解析](06-attachment-parsing/attachment-parsing-design.md) |
 | `TOOL-103` | 请求级文件工具可见性已演进为统一 `read_file`：有合法会话附件或已选可读 Skill资源时自动注入，无来源时不注入 | v0.3.12首次过滤、v0.3.23统一入口，[请求级过滤](05-tool-optimization/tool-optimization-design.md#81-preparetools) |
 | `TOOL-201` | Pydantic AI Tool Search、MCP Top 3/Top 5 渐进披露、只读过滤和搜索去重 | v0.3.12～v0.3.14，[工具检索](13-tool-discovery/tool-discovery-design.md) |
+| `TOOL-302` | 本地 Tool Search 跨语言查询兜底：模型一次提供原始语言、简洁英文和可选协议名，后端最多采用3条并复用 `lexical_v2`；不增加翻译服务、业务词典或Embedding | v0.4.2，[工具检索](13-tool-discovery/tool-discovery-design.md) |
 | `RUNTIME-CANCEL` | Core `CancellationToken`/`RunCancelled` 正式停止、interrupted History 和 SSE 一致性 | v0.3.10～v0.3.14，[后端运行说明](../../deep_agent/AGENTS.md#正式取消v0310) |
 | `MODEL-001` | 模型目录 `max_output_tokens` 进入普通与流式 `ModelSettings.max_tokens` | v0.3.15，[模型目录](04-model-catalog/model-catalog-design.md) |
 | `TOOL-004` | 附件和 MCP Resource 的 `ModelRetry`/`ToolFailed` 语义收口 | v0.3.15，[工具质量契约](05-tool-optimization/tool-optimization-design.md#10-工具质量统一契约) |

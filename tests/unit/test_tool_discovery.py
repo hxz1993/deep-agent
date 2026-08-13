@@ -16,6 +16,8 @@ from deep_agent.agent.context.estimator import TokenEstimator
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.tool_discovery import (
     MCP_SEARCH_RESULT_LIMIT,
+    TOOL_SEARCH_DESCRIPTION,
+    TOOL_SEARCH_PARAMETER_DESCRIPTION,
     ToolDiscoveryTelemetry,
     build_mcp_discovery_toolset,
     build_return_schema_selector,
@@ -80,6 +82,16 @@ def dimension_query_members(dimension: str) -> dict[str, list[str]]:
 def cube_describe(cube: str) -> dict[str, str]:
     """查看 Cube 定义。"""
     return {"name": cube}
+
+
+def platform_folder_list(path: str = "/") -> list[str]:
+    """List child folders under a platform directory."""
+    return [path]
+
+
+def platform_element_search(query: str) -> list[str]:
+    """Search platform elements by keyword."""
+    return [query]
 
 
 class ToolDiscoveryTests(unittest.IsolatedAsyncioTestCase):
@@ -476,8 +488,8 @@ class ToolDiscoveryTests(unittest.IsolatedAsyncioTestCase):
         instructions = await wrapper.get_instructions(ctx)
         instruction_text = "\n".join(instructions or [])
         self.assertIn("deepfos_delete_financial_model", instruction_text)
-        self.assertIn("优先复制下方完整协议名", instruction_text)
-        self.assertIn("不要反复翻译", instruction_text)
+        self.assertIn("用户原始语言和简洁英文能力描述", instruction_text)
+        self.assertIn("协议名必须原样复制", instruction_text)
 
     async def test_three_or_fewer_mcp_tools_are_all_direct(self) -> None:
         ctx = self._ctx("任意问题")
@@ -603,6 +615,94 @@ class ToolDiscoveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("deepfos_resolve_members", result)
         self.assertEqual(ctx.deps.tool_discovery.search_calls, 1)
         self.assertEqual(ctx.deps.tool_discovery.discovered_tools, result)
+
+    async def test_complementary_queries_bridge_language_with_protocol_name(self) -> None:
+        ctx = self._ctx("")
+        toolset = FunctionToolset(
+            tools=[platform_folder_list, platform_element_search]
+        ).prefixed("deepfos")
+        tools = [item.tool_def for item in (await toolset.get_tools(ctx)).values()]
+        ctx.deps.tool_discovery = ToolDiscoveryTelemetry(server_names=("deepfos",))
+
+        chinese_only = search_deferred_tools(
+            ctx,
+            ["列出平台根目录文件夹"],
+            tools,
+        )
+        result = search_deferred_tools(
+            ctx,
+            [
+                "列出平台根目录文件夹",
+                "list folders in the platform root directory",
+                "platform_folder_list",
+            ],
+            tools,
+        )
+
+        self.assertEqual(chinese_only, [])
+        self.assertEqual(result, ["deepfos_platform_folder_list"])
+        self.assertEqual(ctx.deps.tool_discovery.search_calls, 2)
+
+    async def test_tool_search_definition_requests_complementary_queries(self) -> None:
+        seen: dict[str, ToolDefinition] = {}
+
+        def model_function(_messages, info: AgentInfo) -> ModelResponse:
+            seen.update({tool.name: tool for tool in info.function_tools})
+            return ModelResponse(parts=[TextPart(content="done")])
+
+        wrapper = build_mcp_discovery_toolset(
+            [self._toolset()],
+            server_names=["deepfos"],
+            estimator=TokenEstimator.conservative(),
+        )
+        assert wrapper is not None
+        agent = Agent(
+            FunctionModel(model_function),
+            deps_type=AgentDeps,
+            toolsets=[wrapper],
+            capabilities=[
+                ToolSearch(
+                    strategy=search_deferred_tools,
+                    max_results=MCP_SEARCH_RESULT_LIMIT,
+                    tool_description=TOOL_SEARCH_DESCRIPTION,
+                    parameter_description=TOOL_SEARCH_PARAMETER_DESCRIPTION,
+                )
+            ],
+        )
+
+        await agent.run(
+            "查询财务模型",
+            deps=AgentDeps(session_id="session", agent_id="agent"),
+        )
+
+        search_tool = seen["search_tools"]
+        self.assertIn("用户原始语言和简洁英文能力描述", search_tool.description or "")
+        query_description = search_tool.parameters_json_schema["properties"]["queries"][
+            "description"
+        ]
+        self.assertIn("2～3 个互补查询", query_description)
+        self.assertIn("目录协议名", query_description)
+
+    async def test_tool_search_uses_at_most_three_queries(self) -> None:
+        ctx = self._ctx("")
+        toolset = FunctionToolset(
+            tools=[platform_folder_list, platform_element_search]
+        ).prefixed("deepfos")
+        tools = [item.tool_def for item in (await toolset.get_tools(ctx)).values()]
+        ctx.deps.tool_discovery = ToolDiscoveryTelemetry(server_names=("deepfos",))
+
+        result = search_deferred_tools(
+            ctx,
+            [
+                "unmatched-first",
+                "unmatched-second",
+                "platform_folder_list",
+                "platform_element_search",
+            ],
+            tools,
+        )
+
+        self.assertEqual(result, ["deepfos_platform_folder_list"])
 
     async def test_search_excludes_preselected_and_already_discovered_tools(self) -> None:
         ctx = self._ctx("")

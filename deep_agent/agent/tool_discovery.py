@@ -33,8 +33,19 @@ from deep_agent.search import (
 
 MCP_PRESELECT_LIMIT = 3
 MCP_SEARCH_RESULT_LIMIT = 5
+MCP_SEARCH_QUERY_LIMIT = 3
 TOOL_DISCOVERY_RETRIEVER = "lexical_v2"
 MCP_RETURN_SCHEMA_TOOLS = frozenset({"cube_query_data", "dimension_query_members"})
+TOOL_SEARCH_DESCRIPTION = (
+    "搜索当前 Agent 已授权但尚未披露参数的 MCP 工具。"
+    "通常在一次调用中同时提供用户原始语言和简洁英文能力描述；"
+    "若名称目录中存在疑似工具，再增加该协议名。"
+    "返回匹配工具后，下一次模型请求会获得这些工具的完整参数。"
+)
+TOOL_SEARCH_PARAMETER_DESCRIPTION = (
+    "提供 2～3 个互补查询：用户原始语言的能力描述、简洁英文能力描述，"
+    "以及可选的目录协议名；不要只重复改写同一表达。"
+)
 
 _ACTION_GROUPS = {
     "query": {
@@ -538,8 +549,10 @@ class McpDiscoveryToolset(WrapperToolset[AgentDeps]):
                 grouped[_server_for_tool(name, self.server_names)].append(name)
             rows = [
                 "以下 MCP 工具当前仅提供名称；需要其完整参数时调用 search_tools，"
-                "不要猜测未披露工具的参数。搜索时优先复制下方完整协议名，或只去掉明确的 MCP "
-                "Server 前缀；不要反复翻译、改写协议名："
+                "不要猜测未披露工具的参数。第三方 MCP 的名称和说明可能只使用英文；"
+                "调用 search_tools 时，通常在一次调用中同时提供用户原始语言和简洁英文能力描述。"
+                "若下方存在疑似工具，再复制完整协议名，或只去掉明确的 MCP Server 前缀；"
+                "协议名必须原样复制，不要翻译或猜写："
             ]
             for server in sorted(grouped):
                 rows.append(f"- {server}: {', '.join(sorted(grouped[server]))}")
@@ -576,7 +589,12 @@ def search_deferred_tools(
     ctx.deps.tool_discovery = telemetry
     started = time.perf_counter()
     telemetry.search_calls += 1
-    query_text = "\n".join(query for query in queries if query.strip())
+    effective_queries = [
+        query.strip()
+        for query in queries
+        if query.strip()
+    ][:MCP_SEARCH_QUERY_LIMIT]
+    query_text = "\n".join(effective_queries)
     query_fingerprint = " ".join(sorted(set(lexical_tokens(query_text)))) or normalize_text(
         query_text
     )

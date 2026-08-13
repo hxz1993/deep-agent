@@ -195,9 +195,9 @@ Agent 能力页直接按后端 `category` 分组，不再通过旧 `kind` 猜测
 - Function、文件、Sandbox、MCP、UI 的 Tool Call/Result 配对与上下文压缩、Checkpoint、SSE。
 - 完整 Python、Console Node、配置备份、静态检查和浏览器四主题/窄屏。
 
-002的历史迁移验证已在隔离 SQLite完成。当前共享 Test 已运行 revision 004；后续发布应始终按
-“源版本备份 → 部署并自动升级 → 核对revision和物理结构 → 新版本备份”执行，不再使用旧001/002
-发布步骤描述当前环境。
+002的历史迁移验证已在隔离 SQLite完成；共享 Test曾完成 revision 004真实验收。当前仓库head为
+005，后续发布应始终按“源版本备份 → 部署并自动升级 → 核对revision和物理结构 → 新版本备份”
+执行，不再使用旧001/002发布步骤描述当前环境。
 
 ## 12. 后续演进
 

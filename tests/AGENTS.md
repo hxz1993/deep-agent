@@ -104,5 +104,7 @@ tests/
   插 JSON。场景随当前模型 trigger 动态扩展，断言不能写死消息条数或 Token 值。
 - 附件集成测试必须验证 `file_id` 只来自当前原始会话、同页去重键包含
   `tool/file/sheet/offset/limit`，并至少用真实生成的 TXT、DOCX、XLSX 字节覆盖解析器。
+- 新增或删除ORM业务表时必须更新配置备份分类及`test_config_backup.py`；每张表只能属于“复制配置
+  数据”或“只保留结构”之一，不能依靠备份成功后人工发现漏表。
 
 更多：[`README.md`](README.md)、[`unit/README.md`](unit/README.md)、[`integration/README.md`](integration/README.md)。

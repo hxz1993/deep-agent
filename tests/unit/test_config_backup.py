@@ -25,8 +25,11 @@ from deep_agent.db.models import (
     UiToolPackage,
 )
 from maintenance.config_backup import (
+    BACKUP_SCOPE_SCHEMA_VERSION,
     CONFIG_TABLES,
     SESSION_TABLES,
+    _backup_scope_manifest,
+    _validate_table_classification,
     database_url_from_config,
     default_output_root,
     export_backup,
@@ -147,6 +150,30 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                     ).fetchone(),
                     ("test", "sqlite", "004", "abc123"),
                 )
+                scope_manifest = json.loads(
+                    str(
+                        connection.execute(
+                            "SELECT scope_manifest FROM _backup_info"
+                        ).fetchone()[0]
+                    )
+                )
+                self.assertEqual(scope_manifest, _backup_scope_manifest())
+                self.assertEqual(
+                    scope_manifest["schema_version"],
+                    BACKUP_SCOPE_SCHEMA_VERSION,
+                )
+                self.assertEqual(
+                    scope_manifest["external_files"],
+                    [
+                        {
+                            "kind": "uploaded_skill_packages",
+                            "included": False,
+                            "locator_table": "skill_packages",
+                            "locator_column": "platform_file_id",
+                            "export_api": "/api/v1/skills/export",
+                        }
+                    ],
+                )
 
     async def test_failed_export_removes_partial_database(self) -> None:
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
@@ -181,6 +208,13 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             default_output_root().parent,
             repository_root().parent,
+        )
+
+    def test_every_orm_table_has_an_explicit_backup_classification(self) -> None:
+        _validate_table_classification()
+        self.assertEqual(
+            set(CONFIG_TABLES) | set(SESSION_TABLES),
+            set(Base.metadata.tables),
         )
 
     def test_reads_sqlite_database_from_external_config(self) -> None:

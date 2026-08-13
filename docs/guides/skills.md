@@ -9,7 +9,8 @@ DeepAgent v0.3.18 将 Skill 与 ToolPackage 分离，v0.3.20 收口上传 Skill 
 Console 配置中心的“Skill”页面提供：
 
 - 查看代码内置与上传 Skill。
-- 上传 ZIP 安装、替换当前包、启用/禁用、重新加载、下载原包和删除。
+- 上传 ZIP 安装、替换当前包、启用/禁用、重新加载、导出和删除。
+- 单个上传Skill可直接导出原始ZIP；“导出全部”生成包含清单和全部上传Skill独立ZIP的集合包。
 - 查看 Manifest、Reference/Asset 和脚本索引。
 - 在 Agent 编辑弹窗的独立 Skill 区域选择允许使用的 Skill。
 
@@ -23,6 +24,27 @@ Builtin Skill 随代码发布，只读且不能替换或删除。上传包保存
 替换当前包时，即使 ZIP内容 Hash没有变化，后端也会先检查平台原包：原包正常返回 `noop`；
 原 File ID已经失效则重新上传、更新数据库 File ID、恢复当前运行目录并返回 `repaired`。因此
 管理员可以直接重新提交手头相同 ZIP恢复原包，不需要修改 Skill版本或伪造内容变化。
+
+Skill覆盖以稳定`code`为准，不以显示名称为准：
+
+- “上传安装”不会自动覆盖。同`code`已存在时返回409。
+- “替换ZIP”是显式覆盖入口；新包`code`必须与当前路径中的`code`完全一致，否则返回422。
+- 内容Hash相同时返回`noop`；若平台原包已丢失，则同Hash替换会修复原包并返回`repaired`。
+- 显示名称相同但`code`不同，是两个独立Skill。
+
+单个“导出”返回平台保存的原始ZIP，可在另一环境直接使用“上传安装”。“导出全部”返回：
+
+```text
+deepagent-skills-export-*.zip
+├── manifest.json
+└── skills/
+    ├── first-skill.zip
+    └── second-skill.zip
+```
+
+每个子ZIP都是可独立安装的原包。集合包不包含代码内置Skill、Agent绑定关系、平台File ID或会话；
+也不作为一个多Skill包直接安装，目标环境仍逐个上传其中的Skill ZIP，遇到同`code`时由管理员明确
+选择是否替换。
 
 ## 包格式
 
@@ -48,6 +70,7 @@ ZIP 最大 10 MiB，解压后最大 50 MiB、最多 256 个文件、目录深度
 
 ```text
 GET    /api/v1/skills
+GET    /api/v1/skills/export
 GET    /api/v1/skills/{code}
 POST   /api/v1/skills                         multipart: file=<zip>
 PUT    /api/v1/skills/{code}/package          multipart: file=<zip>
@@ -96,8 +119,10 @@ Agent能力中的旧 `builtin:attachment`编码。升级003前必须确认
 `skill_packages` 为空且所有 Agent 的 `skills=[]`。
 
 配置备份包含 Skill 元数据和 Agent 引用，但不复制平台文件服务中的 ZIP，所以不是可跨环境独立
-恢复的 Skill 安装包。发布到新环境前必须确认平台 File ID 可用；若原包已丢失，在 Console替换
-同一 ZIP会走 `repaired`恢复共享原包和当前 Pod运行目录。
+恢复的 Skill 安装包。跨环境迁移上传Skill应使用单个或全部导出；Agent绑定仍由目标环境配置。
+若原包已丢失，在 Console替换同一 ZIP会走 `repaired`恢复共享原包和当前 Pod运行目录。
+配置备份文件的`_backup_info.scope_manifest`会明确标记Skill原包属于未内嵌的外部文件，并指向
+`/api/v1/skills/export`；它只用于核对备份范围，不保存平台凭证或Skill内容。
 
 脚本执行不发生在DeepAgent主进程。Agent同时选择含脚本Skill和 `builtin:sandbox`时，运行时组装
 `execute_skill_script`；它与 `execute_python`共用当前Python Sandbox Backend。只接收当前Agent

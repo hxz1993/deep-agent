@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import io
+import json
 import shutil
+import zipfile
+from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import quote
 
@@ -204,6 +208,71 @@ async def list_skills(ctx: AppContextDep) -> list[SkillSummary]:
         for row in await ctx.stores.skill_package.list_all()
     )
     return [_summary(item) for item in sorted(details, key=lambda value: (value.source != "builtin", value.label, value.code))]
+
+
+@router.get("/skills/export")
+async def export_uploaded_skills(request: Request, ctx: AppContextDep) -> Response:
+    rows = sorted(await ctx.stores.skill_package.list_all(), key=lambda row: row.code)
+    if not rows:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No uploaded Skills to export",
+        )
+
+    exported_at = datetime.now(UTC)
+    request_headers = extract_forward_headers(request)
+    packages: list[tuple[SkillPackage, bytes]] = []
+    for row in rows:
+        try:
+            raw = await ctx.skill_runtime.download_package(
+                row,
+                request_headers=request_headers,
+            )
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail={
+                    "message": "Platform Skill export failed",
+                    "skill_code": row.code,
+                    "error_type": type(exc).__name__,
+                },
+            ) from exc
+        packages.append((row, raw))
+
+    manifest = {
+        "format": "deepagent-skill-export",
+        "schema_version": "1.0",
+        "exported_at": exported_at.isoformat(),
+        "skills": [
+            {
+                "code": row.code,
+                "label": row.label,
+                "description": row.description,
+                "version": row.version,
+                "schema_version": row.schema_version,
+                "enabled": row.enabled,
+                "package_file": f"skills/{row.code}.zip",
+                "content_hash": row.content_hash,
+                "original_file_name": row.file_name,
+            }
+            for row, _raw in packages
+        ],
+    }
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_STORED) as archive:
+        archive.writestr(
+            "manifest.json",
+            json.dumps(manifest, ensure_ascii=False, indent=2).encode("utf-8"),
+        )
+        for row, raw in packages:
+            archive.writestr(f"skills/{row.code}.zip", raw)
+
+    filename = f"deepagent-skills-export-{exported_at.strftime('%Y%m%dT%H%M%SZ')}.zip"
+    return Response(
+        content=output.getvalue(),
+        media_type="application/zip",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
 
 
 @router.get("/skills/{code}", response_model=SkillDetail)

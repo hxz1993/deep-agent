@@ -64,7 +64,7 @@ SSE 协议。
 | Compaction receipts、`pin`、`keep_user_messages` | 部分吸收 | 用于补充观测和回归思路；不替换当前单次摘要、完整 SQL 历史和 Checkpoint |
 | Spend Limits | 是，中期 | 适合请求级成本保护；先与现有 `UsageLimits`、全局请求上限和错误协议统一 |
 | 大文本外置 / Tool Output Limits | 已采用 | v0.4.0 使用平台文件 Store 完成会话内 Spill；TTL、孤儿治理和通用 Artifact 平台不作为前置条件 |
-| ConversationSearch | 后续评估 | 用自定义 `HistorySource` 读取现有 SQL `chat_messages`，不为搜索启用第二套 StepPersistence；默认只查当前会话 |
+| ConversationSearch | 暂缓 | 当前没有真实摘要缺失样本，中文历史检索质量也未验证；仅在长程任务确实无法找回关键事实时，才用自定义 `HistorySource` 读取现有 SQL `chat_messages`，不启用第二套 StepPersistence |
 | StepPersistence | 暂不做 | 现有 SQL 会话是事实源；除非出现崩溃恢复或子 Agent 持久化需求，否则会形成第二套历史 |
 | Planning / Advisor / SubAgent | 按业务需求 | 只有长任务、可审计计划和专业分工形成明确产品场景后再启用 |
 | BrowserUse | 当前不做 | 浏览器执行权限和网络边界过大，不作为通用线上 Agent 默认能力 |

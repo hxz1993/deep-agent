@@ -140,7 +140,6 @@ Harness `Skills` 不读取 references/assets，也不执行 scripts。v0.3.18 �
 
 | 官方能力 | 触发条件 | 采用边界 |
 | --- | --- | --- |
-| `ConversationSearch` | 摘要后确实出现路径、ID、决策难以恢复 | 自定义 `HistorySource` 读取现有 `chat_messages`；不启用第二套历史 |
 | `ToolGuardrail` | 工具风险元数据和真实副作用工具就绪 | 执行前权限复检、执行后脱敏；不替代业务服务权限 |
 | `SpendLimits` | 出现用户/App/Space 配额或收费需求 | 需要共享计数 Store 和价格口径；私有模型可按 Token/调用量而非美元 |
 | `Memory` | 产品明确需要跨会话、可查看和可删除的长期笔记 | namespace 由应用计算，但授权、审计、删除和 Store 仍由 DeepAgent 负责 |
@@ -151,6 +150,12 @@ Harness `Skills` 不读取 references/assets，也不执行 scripts。v0.3.18 �
 | `MediaStore` | Artifact/附件需要内容寻址、去重和共享对象存储 | user/App/Space 授权和对象生命周期仍由产品层负责 |
 | `WarnOnCacheBusts` | 已启用且可观测 Provider Prompt Cache | 与 CachePoint 同步试点，不单独实施 |
 | `Advisor` | 明确需要辅助模型复核且已有预算策略 | 应接现有辅助模型配置，不让模型自由选择任意外部模型 |
+
+### 5.3.1 暂缓采用
+
+| 官方能力 | 暂缓原因 | 重新启动条件 |
+| --- | --- | --- |
+| `ConversationSearch` | 当前没有真实长程任务证明摘要后无法恢复关键事实，中文历史检索的召回和排序也缺少可靠样本 | 出现可稳定复现的摘要缺失且继续任务确实需要原文；届时用自定义 `HistorySource` 读取现有 `chat_messages`，不启用第二套历史 |
 
 ### 5.4 明确不采用或不作为平台默认能力
 

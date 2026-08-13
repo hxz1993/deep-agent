@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import io
+import json
 import unittest
+import zipfile
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -181,6 +184,82 @@ class SkillApiTests(unittest.IsolatedAsyncioTestCase):
             deleted = await client.delete("/api/v1/skills/example-skill")
             self.assertEqual(deleted.status_code, 200)
             self.assertTrue(_FakePlatformFiles.deleted)
+
+    async def test_export_one_and_all_uploaded_skills_as_installable_packages(self) -> None:
+        first = skill_zip(name="first-skill")
+        second = skill_zip(name="second-skill", scripts=True)
+        async with AsyncClient(
+            transport=self.transport,
+            base_url="http://test",
+            headers=self.client_headers,
+        ) as client:
+            for name, payload in (("first-skill", first), ("second-skill", second)):
+                installed = await client.post(
+                    "/api/v1/skills",
+                    files={"file": (f"{name}.zip", payload, "application/zip")},
+                )
+                self.assertEqual(installed.status_code, 201, installed.text)
+
+            single = await client.get("/api/v1/skills/first-skill/package")
+            self.assertEqual(single.status_code, 200, single.text)
+            self.assertEqual(single.content, first)
+
+            exported = await client.get("/api/v1/skills/export")
+            self.assertEqual(exported.status_code, 200, exported.text)
+            self.assertEqual(exported.headers["content-type"], "application/zip")
+
+        with zipfile.ZipFile(io.BytesIO(exported.content)) as archive:
+            self.assertEqual(
+                sorted(archive.namelist()),
+                ["manifest.json", "skills/first-skill.zip", "skills/second-skill.zip"],
+            )
+            manifest = json.loads(archive.read("manifest.json"))
+            self.assertEqual(manifest["format"], "deepagent-skill-export")
+            self.assertEqual(manifest["schema_version"], "1.0")
+            self.assertEqual(
+                [item["code"] for item in manifest["skills"]],
+                ["first-skill", "second-skill"],
+            )
+            self.assertEqual(archive.read("skills/first-skill.zip"), first)
+            self.assertEqual(archive.read("skills/second-skill.zip"), second)
+
+    async def test_export_all_requires_uploaded_skills(self) -> None:
+        async with AsyncClient(transport=self.transport, base_url="http://test") as client:
+            response = await client.get("/api/v1/skills/export")
+        self.assertEqual(response.status_code, 404, response.text)
+        self.assertEqual(response.json()["detail"], "No uploaded Skills to export")
+
+    async def test_install_same_code_conflicts_and_replace_requires_same_code(self) -> None:
+        async with AsyncClient(
+            transport=self.transport,
+            base_url="http://test",
+            headers=self.client_headers,
+        ) as client:
+            installed = await client.post(
+                "/api/v1/skills",
+                files={"file": ("example.zip", skill_zip(), "application/zip")},
+            )
+            self.assertEqual(installed.status_code, 201, installed.text)
+
+            duplicate = await client.post(
+                "/api/v1/skills",
+                files={"file": ("example.zip", skill_zip(), "application/zip")},
+            )
+            self.assertEqual(duplicate.status_code, 409, duplicate.text)
+            self.assertIn("Skill already exists", duplicate.json()["detail"])
+
+            wrong_code = await client.put(
+                "/api/v1/skills/example-skill/package",
+                files={
+                    "file": (
+                        "different.zip",
+                        skill_zip(name="different-skill"),
+                        "application/zip",
+                    )
+                },
+            )
+            self.assertEqual(wrong_code.status_code, 422, wrong_code.text)
+            self.assertIn("must remain 'example-skill'", wrong_code.json()["detail"])
 
     async def test_builtin_is_read_only_and_disabled_upload_cannot_be_selected(self) -> None:
         async with AsyncClient(

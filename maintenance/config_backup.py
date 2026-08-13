@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import os
 import re
 import subprocess
@@ -16,6 +17,8 @@ from dotenv import dotenv_values
 from sqlalchemy import MetaData, Table, delete, func, insert, select, text
 from sqlalchemy.engine import URL
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
+
+from deep_agent.db.models import Base
 
 
 CONFIG_TABLES = (
@@ -35,6 +38,7 @@ SESSION_TABLES = (
 )
 CURRENT_SCHEMA_REVISION = "004"
 ENVIRONMENT_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
+BACKUP_SCOPE_SCHEMA_VERSION = "1.0"
 
 
 @dataclass(frozen=True)
@@ -116,6 +120,7 @@ async def export_backup(
             "Environment may contain only letters, numbers, underscores, and hyphens"
         )
 
+    _validate_table_classification()
     source_engine = create_async_engine(source_database_url, pool_pre_ping=True)
     target_engine: AsyncEngine | None = None
     partial_path: Path | None = None
@@ -215,7 +220,8 @@ async def _create_backup_info_table(engine: AsyncEngine) -> None:
                     exported_at VARCHAR(64) NOT NULL,
                     source_dialect VARCHAR(32) NOT NULL,
                     alembic_revision VARCHAR(32) NOT NULL,
-                    git_commit VARCHAR(64) NOT NULL
+                    git_commit VARCHAR(64) NOT NULL,
+                    scope_manifest TEXT NOT NULL
                 )
                 """
             )
@@ -292,10 +298,10 @@ async def _write_backup_metadata(
                 """
                 INSERT INTO _backup_info (
                     id, environment, exported_at, source_dialect,
-                    alembic_revision, git_commit
+                    alembic_revision, git_commit, scope_manifest
                 ) VALUES (
                     1, :environment, :exported_at, :source_dialect,
-                    :revision, :git_commit
+                    :revision, :git_commit, :scope_manifest
                 )
                 """
             ),
@@ -305,6 +311,11 @@ async def _write_backup_metadata(
                 "source_dialect": source_dialect,
                 "revision": revision,
                 "git_commit": git_commit,
+                "scope_manifest": json.dumps(
+                    _backup_scope_manifest(),
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                ),
             },
         )
 
@@ -343,12 +354,55 @@ async def _validate_backup(
             await connection.execute(
                 text(
                     "SELECT environment, exported_at, source_dialect, "
-                    "alembic_revision, git_commit FROM _backup_info WHERE id = 1"
+                    "alembic_revision, git_commit, scope_manifest "
+                    "FROM _backup_info WHERE id = 1"
                 )
             )
         ).mappings().one()
         if not all(info.values()) or info["alembic_revision"] != revision:
             raise ValueError("Backup metadata is incomplete")
+        scope_manifest = json.loads(str(info["scope_manifest"]))
+        if scope_manifest != _backup_scope_manifest():
+            raise ValueError("Backup scope manifest does not match the current contract")
+
+
+def _backup_scope_manifest() -> dict[str, Any]:
+    return {
+        "schema_version": BACKUP_SCOPE_SCHEMA_VERSION,
+        "copied_tables": list(CONFIG_TABLES),
+        "structure_only_tables": list(SESSION_TABLES),
+        "external_files": [
+            {
+                "kind": "uploaded_skill_packages",
+                "included": False,
+                "locator_table": "skill_packages",
+                "locator_column": "platform_file_id",
+                "export_api": "/api/v1/skills/export",
+            }
+        ],
+    }
+
+
+def _validate_table_classification() -> None:
+    configured = set(CONFIG_TABLES)
+    structure_only = set(SESSION_TABLES)
+    overlap = configured & structure_only
+    if overlap:
+        raise ValueError(
+            "Backup table classification overlaps: " + ", ".join(sorted(overlap))
+        )
+
+    model_tables = set(Base.metadata.tables)
+    classified = configured | structure_only
+    missing = model_tables - classified
+    unknown = classified - model_tables
+    if missing or unknown:
+        details: list[str] = []
+        if missing:
+            details.append("unclassified=" + ",".join(sorted(missing)))
+        if unknown:
+            details.append("unknown=" + ",".join(sorted(unknown)))
+        raise ValueError("Backup table classification is stale: " + "; ".join(details))
 
 
 async def _table_count(connection: Any, table_name: str) -> int:
@@ -430,6 +484,10 @@ def main(argv: Sequence[str] | None = None) -> None:
     print(f"Backup created: {result.path}")
     print(f"Alembic revision: {result.revision}")
     print(f"Rows: {counts}")
+    print(
+        "External Skill ZIP files are not embedded; use Console Skill > "
+        "Export all for a portable companion package."
+    )
 
 
 if __name__ == "__main__":

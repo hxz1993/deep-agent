@@ -103,7 +103,7 @@ const skillsAdmin = {
           <code>${escapeHtml(skill.code)}</code>
         </div>
         <div class="row-actions">
-          ${isBuiltin ? "" : `<button class="btn" type="button" data-skill-action="edit">编辑</button><button class="btn" type="button" data-skill-action="replace">替换 ZIP</button><button class="btn" type="button" data-skill-action="download">下载原包</button>${skill.enabled ? `<button class="btn" type="button" data-skill-action="reload">重新加载</button>` : ""}<button class="btn" type="button" data-skill-action="toggle">${skill.enabled ? "停用" : "启用"}</button><button class="btn danger" type="button" data-skill-action="delete">删除</button>`}
+          ${isBuiltin ? "" : `<button class="btn" type="button" data-skill-action="edit">编辑</button><button class="btn" type="button" data-skill-action="replace">替换 ZIP</button><button class="btn" type="button" data-skill-action="download">导出</button>${skill.enabled ? `<button class="btn" type="button" data-skill-action="reload">重新加载</button>` : ""}<button class="btn" type="button" data-skill-action="toggle">${skill.enabled ? "停用" : "启用"}</button><button class="btn danger" type="button" data-skill-action="delete">删除</button>`}
         </div>
       </header>
       <p class="skill-detail-description">${escapeHtml(skill.description)}</p>
@@ -162,6 +162,29 @@ const skillsAdmin = {
     }
   },
 
+  async download(path, fallbackName) {
+    const response = await daFetch(serviceUrl(path));
+    if (!response.ok) {
+      let detail = `导出 Skill 失败（HTTP ${response.status}）`;
+      try {
+        const body = await response.json();
+        detail = window.AdminFormFeedback?.formatDetail(body.detail || body.message) || detail;
+      } catch { /* ignore */ }
+      throw new Error(detail);
+    }
+    const blobUrl = URL.createObjectURL(await response.blob());
+    try {
+      const anchor = document.createElement("a");
+      anchor.href = blobUrl;
+      anchor.download = fallbackName;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+    } finally {
+      URL.revokeObjectURL(blobUrl);
+    }
+  },
+
   async handleAction(action, skill) {
     if (action === "replace") {
       this.uploadMode = "replace";
@@ -170,16 +193,10 @@ const skillsAdmin = {
     }
     if (action === "download") {
       try {
-        const response = await daFetch(serviceUrl(`/api/v1/skills/${encodeURIComponent(skill.code)}/package`));
-        if (!response.ok) throw new Error(`下载 Skill 失败（HTTP ${response.status}）`);
-        const blobUrl = URL.createObjectURL(await response.blob());
-        const anchor = document.createElement("a");
-        anchor.href = blobUrl;
-        anchor.download = skill.file_name || `${skill.code}.zip`;
-        document.body.appendChild(anchor);
-        anchor.click();
-        anchor.remove();
-        URL.revokeObjectURL(blobUrl);
+        await this.download(
+          `/api/v1/skills/${encodeURIComponent(skill.code)}/package`,
+          skill.file_name || `${skill.code}.zip`,
+        );
       } catch (error) {
         showToast(error.message, true);
       }
@@ -264,6 +281,13 @@ const skillsAdmin = {
 
   init() {
     document.getElementById("refreshSkillsBtn")?.addEventListener("click", () => this.refresh());
+    document.getElementById("exportAllSkillsBtn")?.addEventListener("click", async () => {
+      try {
+        await this.download("/api/v1/skills/export", "deepagent-skills-export.zip");
+      } catch (error) {
+        showToast(error.message, true);
+      }
+    });
     document.getElementById("installSkillBtn")?.addEventListener("click", () => {
       this.uploadMode = "install";
       document.getElementById("skillPackageInput")?.click();

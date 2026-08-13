@@ -26,7 +26,9 @@ test("Skill 页面区分内置和上传包的可操作边界", () => {
   assert.match(source, /代码内置 · 只读/);
   assert.match(source, /上传安装/);
   assert.match(source, /替换 ZIP/);
-  assert.match(source, /下载原包/);
+  assert.match(source, /data-skill-action="download">导出/);
+  assert.match(template, /id="exportAllSkillsBtn"/);
+  assert.match(source, /"\/api\/v1\/skills\/export"/);
   assert.match(source, /重新加载/);
   assert.match(source, /\/skills\/\$\{encodeURIComponent\(skill\.code\)\}\/reload/);
   assert.match(source, /运行文件已就绪/);

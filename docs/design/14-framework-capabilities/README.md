@@ -28,8 +28,8 @@
   Console 当前 Run；OTLP 后端、正式诊断中心和 Evaluation 仍按独立需求推进。
 - v0.4.0 已采用Harness `ToolOutputLimits` + `Spill`，通过平台文件Store外置大工具结果，并保留
   原生 `read_tool_result`；没有复制读取状态机，也没有新增Artifact表。
-- 当前下一条重点课题是压缩后搜索原始会话；仍需真实丢失样本触发。其余能力按条件保留，
-  不预埋半成品。
+- 压缩后搜索原始会话已暂缓；只有真实长程任务出现摘要后关键事实无法找回时才重新启动。
+  其余能力按条件保留，不预埋半成品。
 
 完整清单见
 [`framework-capabilities-baseline.md`](framework-capabilities-baseline.md)，实施状态见

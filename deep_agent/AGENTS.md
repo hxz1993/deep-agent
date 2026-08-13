@@ -248,6 +248,10 @@ XML + JSON 投影。业务字段语义仍由具体 Agent Prompt 负责。
 | `chat_messages` | `ModelMessage` JSONB 历史 |
 | `chat_context_checkpoints` | 脱敏后的模型输入派生投影；不替代原始历史 |
 
+配置备份必须在`maintenance/config_backup.py`中把每张ORM业务表明确归类为复制配置数据或只保留
+结构；新增表未归类时备份应失败。上传Skill原ZIP属于平台外部文件，不进入SQLite配置备份，完整
+留存需另外执行Skill“导出全部”。
+
 ## 扩展指南
 
 ### 内置工具包

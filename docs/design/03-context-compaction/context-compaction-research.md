@@ -100,10 +100,10 @@ DeepAgent 内部，并将自动/主动入口收敛到同一投影流程。若 Ha
 
 ### Harness 0.18 后续采用项
 
-- **ConversationSearch**：登记为 `CTX-102`。实现读取现有 `chat_messages` 的自定义 `HistorySource`，
-  让模型在摘要遗漏精确路径、ID 或决定时使用 `search_conversation_history` 拉回片段；不启用
-  `SnapshotHistorySource + StepPersistence` 第二套历史。默认只查当前会话，跨会话必须另做
-  user/App/Space 授权和审计。
+- **ConversationSearch**：`CTX-102` 已暂缓。当前没有真实长程任务证明摘要后无法恢复精确路径、
+  ID 或决定，中文历史检索质量也缺少可靠样本。只有出现可稳定复现的缺失后，才评估读取现有
+  `chat_messages` 的自定义 `HistorySource`；仍不启用 `SnapshotHistorySource + StepPersistence`
+  第二套历史。
 - **SpendLimits**：登记为 `USAGE-101` 的长期潜力项。当前已有 Run 级请求次数上限和可选
   累计 Token 上限，暂不再增加 80% 告警、工具调用硬上限或会话累计阻断。未来出现明确
   配额治理需求时，再统一设计跨 Worker 的用户/App/Space 周期配额、共享计数 Store 和告警口径；
@@ -143,10 +143,10 @@ Checkpoint 属于运行状态，继续持久化到数据库。上下文压缩默
 
 ## 采用状态归档
 
-- `ConversationSearch`、Memory、Usage/Spend、StepPersistence、Planning/SubAgent 和 Artifact
-  均保留为有触发条件的潜力项，不是近期压缩待办。
-- `StepPersistence` 不替代现有 SQL 会话与 Pending 恢复；ConversationSearch 通过自定义
-  `HistorySource` 读取现有事实源。
+- `ConversationSearch` 已移入暂缓；Memory、Usage/Spend、StepPersistence、Planning/SubAgent 和
+  Artifact 仍保留为有触发条件的潜力项，不是近期压缩待办。
+- `StepPersistence` 不替代现有 SQL 会话与 Pending 恢复；若未来重新启动 ConversationSearch，
+  也只能通过自定义 `HistorySource` 读取现有事实源。
 - Harness `SummarizingCompaction` 整体替换、Provider 原生压缩与 DeepAgent Checkpoint 双重启用
   已明确关闭。
 

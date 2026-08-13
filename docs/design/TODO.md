@@ -28,22 +28,27 @@
 当前没有可以脱离外部条件直接进入开发的主线。诊断中心、OTLP 和 Evaluation均已移入“暂缓”，
 必须先满足各自的重新启动条件。
 
-### 近期动作（非功能开发）
+### 近期验证结论（非功能开发）
 
-1. `SKILL-VAL-001`：等待当前三个业务 Skill 的内容修改完成后，执行一次完整业务验收。验收覆盖
-   Skill选择与渐进披露、`load_capability`、Reference/XLSX读取、受控脚本执行、所需MCP Tool
-   Search与只读调用、最终业务答案，以及刷新后的History一致性。当前只登记验收，不提前改动
-   Skill内容或DeepAgent框架；测试发现稳定问题时，再分别归因到Skill内容、脚本、MCP或框架。
-2. 在真实 DeepCube/DeepTable业务中继续观察 `read_file`、Skill渐进披露和MCP快照；只有出现可稳定
+1. `SKILL-VAL-001`：三个业务 Skill 的核心线上验收已于2026-08-13完成。Test上的普通用户式
+   建模会话证明：Agent会按需调用`load_capability(budget-dimension-modeling)`、读取Skill Reference
+   和XLSX附件、搜索MCP工具，并自行创建目录、维度、成员、标准月度Period和财务模型，刷新后的
+   History仍保留完整Call/Result；未创建电子表格、动态报表、数据流或业务数据。该记录只证明
+   DeepAgent的Skill披露、文件、MCP和History机制，不把模板占位词识别、业务建模规则或回答质量
+   继续登记为DeepAgent框架待办；这些内容由业务Skill维护方独立迭代。
+2. `SKILL-VAL-002`：中立脚本机制线上验收已于2026-08-13完成。Test安装了只含一个确定性汇总脚本
+   的`script-mechanism-validation`，专用Agent只启用该Skill和`builtin:sandbox`。首轮真实链路为
+   `load_capability → list_skill_resources → execute_skill_script → outputs/result.json → final`；同一
+   Session续跑可直接恢复已加载Skill并再次执行脚本。两轮均返回结构化结果，刷新后的History中
+   所有Call/Result按ID完整配对。测试Skill、Agent和Session均以`TMP_to_delete`标记并保留供复看。
+3. 在真实 DeepCube/DeepTable业务中继续观察 `read_file`、Skill渐进披露和MCP快照；只有出现可稳定
    复现的语义、成本或可靠性问题，才新建可验收缺陷，不再为边缘猜测预埋兼容分支。
 
 ### 下一步重点课题（尚未进入实施）
 
-大工具结果治理已在v0.4.0以最小边界实施并移入“已实现”。当前重点讨论方向只剩：
-
-1. `CTX-102`：压缩后搜索原始会话。先用真实长会话验证摘要后是否会丢失精确路径、ID、历史决定
-   或工具结论，再评估 Harness `ConversationSearch`接入现有 `chat_messages`的只读查询方式；不建立
-   第二套History，也不改变现有Checkpoint和压缩链路。
+大工具结果治理已在v0.4.0以最小边界实施并移入“已实现”。当前没有已确认需要立即实施的重点课题。
+`CTX-102`已移入“暂缓”：现阶段没有真实长程任务证明压缩摘要后无法恢复关键事实，而且中文历史检索
+本身仍需要独立验证质量，不提前增加搜索工具和链路。
 
 其余“有潜力”事项只是本轮不考虑，状态保持不变，不因此移入“暂缓”。
 
@@ -59,13 +64,12 @@
 | `TOOL-105` | 可选结构化最终输出 | Pydantic AI `ToolOutput`/`NativeOutput`/`PromptedOutput` | 产品锁定普通文本与多输出组合、混合工具调用和严格模式规则 | Output 不是 ToolPackage；权威 MCP 事实不由模型重写 | [结构化最终输出](09-structured-output/structured-output-design.md) |
 | `TOOL-108` | Agent 包内逐工具授权 | Core `FilteredToolset` 或 Prepared Toolset | 出现明确的“同包内部分工具禁止使用”权限需求 | 授权主键不能直接依赖可重命名的协议名 | [工具包后续演进](11-tool-packages/tool-packages-design.md#12-后续演进) |
 | `TOOL-301` | Provider Native Code/File/Web/Computer 等工具 | Core Provider Native Capability | 某托管 Provider 能力、模型和执行环境成为明确产品功能 | 必须显式启用并按 Provider 治理；不替代公共 MCP、Sandbox、附件、RAG 或当前页面 UI Tool | [浏览器与页面操作](15-browser-and-page-actions/browser-and-page-actions-design.md#23-provider-原生-computer-use) |
-| `SKILL-101` | Skill 修订、签名、Marketplace 与便携导出 | Harness `Skills` 继续负责渐进披露；产品层独立治理安装、来源与迁移 | 出现回滚、跨环境迁移、第三方签名或 Marketplace 的明确需求 | 不预埋半套 Revision；便携导出需包含平台原包而非仅 File ID | [Skill 后续边界](12-agent-skills/skill-system-design.md#11-后续边界) |
+| `SKILL-101` | Skill修订、签名与Marketplace | Harness `Skills`继续负责渐进披露；产品层独立治理安装、来源与版本 | 出现回滚、Agent固定历史版本、第三方签名或Marketplace的明确需求 | 不预埋半套Revision；跨环境原包导出已由`SKILL-104`完成 | [Skill 后续边界](12-agent-skills/skill-system-design.md#11-后续边界) |
 
 ### 上下文、记忆和执行恢复
 
 | ID | 潜力方向 | 优先复用 | 触发条件 | 当前边界 | 来源 |
 | --- | --- | --- | --- | --- | --- |
-| `CTX-102` | **下一步重点**：压缩后搜索原始会话 | Harness `ConversationSearch` + 自定义 `HistorySource` | 摘要后确实出现路径、ID、决定无法恢复的问题 | 先用真实长会话验证缺失样本；只读现有 `chat_messages`，不启用第二套 `StepPersistence` 历史 | [Harness 后续采用项](03-context-compaction/context-compaction-research.md#harness-018-后续采用项) |
 | `CTX-201` | 跨会话长期记忆 | Harness `Memory` + 产品 Store | 产品明确需要可查看、可编辑、可删除的长期笔记 | namespace 不是授权；必须补 user/Agent/App/Space、审计和删除 | [框架能力台账](14-framework-capabilities/framework-capabilities-baseline.md#53-有潜力按需求触发) |
 | `RUN-201` | 长任务崩溃恢复与副作用账本 | Harness `StepPersistence` 或 Core Durable Execution | 长工具/工作流需要进程崩溃后继续且业务幂等已定义 | 不替代 SQL Session/History、SSE 或 Deferred Pending | [框架能力台账](14-framework-capabilities/framework-capabilities-baseline.md#53-有潜力按需求触发) |
 | `RUN-202` | 结构化计划、子 Agent 与动态工作流 | Harness `Planning`、`SubAgents`、`DynamicWorkflow` | 出现稳定长任务分工、计划 UI 或并行执行需求 | 子 Run 隔离、用量、工具继承、权限和结果展示必须先设计 | [框架能力台账](14-framework-capabilities/framework-capabilities-baseline.md#53-有潜力按需求触发) |
@@ -94,6 +98,7 @@
 
 | ID | 暂缓事项 | 已确认结论 | 重新启动条件 | 来源 |
 | --- | --- | --- | --- | --- |
+| `CTX-102` | 压缩后搜索原始会话 | 当前没有真实长程任务证明六段摘要和Checkpoint无法恢复关键路径、ID、决定或工具结论；中文历史检索的召回和排序也尚无可靠样本，不提前增加搜索工具 | 出现可稳定复现的长程任务：摘要遗漏关键事实，且继续执行确实必须回查原始会话；届时再评估 Harness `ConversationSearch` + 自定义 `HistorySource` | [Harness 后续采用项](03-context-compaction/context-compaction-research.md#harness-018-后续采用项) |
 | `CONSOLE-201` | 只读运行检查器剩余能力 | Console 已能查看 Context Reference 安全 JSON；Markdown 原文、原始 SSE、History 对照和工具详情主要服务 UI/协议调试 | 调试渲染或 SSE/History 一致性成为高频工作，并能锁定最小只读范围 | [运行检查器](02-operations-console/operations-console-design.md#运行检查器) |
 | `MODEL-101` | 显式 Provider Prompt Cache | DeepSeek 自动缓存无需改请求，命中观测并入 `OBS-101`；`CachePoint`、cache key、TTL 均是 Provider 专属配置，不存在跨 Provider 通用开关 | 模型目录中的某个 Provider 明确支持显式缓存，且能观测成本或首 Token 延迟收益 | [Pydantic AI 采用项](03-context-compaction/context-compaction-research.md#pydantic-ai-226-原生能力采用项) |
 | `OBS-201` / `CONSOLE-301` | OTLP Trace 与 Console 诊断中心 | v0.3.17 已有统一 conversation/run ID 和脱敏结构化日志；在线诊断需要公司观测平台，不把高频 Span 塞入业务 MySQL | 公司确认 OTLP 后端、保留周期、权限和跨实例查询接口 | [框架能力台账](14-framework-capabilities/framework-capabilities-baseline.md#42-下一步优先采用) |
@@ -145,10 +150,11 @@
 | `CONSOLE-101` | 单个用户轮次聚合连续 Assistant/工具循环，过程默认折叠、最终答案常显 | v0.3.16，[运维控制台](02-operations-console/operations-console-design.md) |
 | `OBS-101` / `TOOL-001` | 官方 Conversation/Run 标识、脱敏结构化生命周期日志、Usage/缓存 Token 和 Console 当前 Run 指标 | v0.3.17，[框架能力台账](14-framework-capabilities/framework-capabilities-baseline.md#41-已经采用) |
 | `TOOL-203` | `cube_query_data` 与 `dimension_query_members` 选择性披露可信 Return Schema；延迟工具加载前零额外成本 | v0.3.17，[工具返回 Schema](05-tool-optimization/tool-optimization-design.md#84-tool-return-schema) |
-| `SKILL-001` | Skill 与 ToolPackage 分离；上传安装、Agent 授权、Harness `load_capability` 渐进披露、References/Assets 分页读取和脚本隔离；每个 Pod仅保留按 code组织的一份当前运行目录；同 Hash替换可恢复丢失的平台原包；管理操作同步、普通 Run本地读取、单 Skill故障隔离 | v0.3.18～v0.3.23；2026-08-12 Test 004真实验收，[Skill 体系](12-agent-skills/skill-system-design.md) |
+| `SKILL-001` | Skill 与 ToolPackage 分离；上传安装、Agent 授权、Harness `load_capability` 渐进披露、References/Assets 分页读取和脚本隔离；每个 Pod仅保留按 code组织的一份当前运行目录；同 Hash替换可恢复丢失的平台原包；管理操作同步、普通 Run本地读取、单 Skill故障隔离。2026-08-13普通用户式线上建模再次确认Skill正文实际进入模型上下文；具体模板内容、业务规则和回答质量由业务Skill维护方负责，不再作为DeepAgent机制待办 | v0.3.18～v0.3.23；2026-08-12～13 Test 004真实验收，[Skill 体系](12-agent-skills/skill-system-design.md) |
 | `MCP-SNAPSHOT` | URL MCP 检测保存完整工具快照，聊天按快照披露并在首次真实调用时建连；缺快照不阻塞 Run，单 Server 连接失败转为 `ToolFailed` | v0.3.19，[工具检索](13-tool-discovery/tool-discovery-design.md) |
 | `CONSOLE-202` | 独立只读系统工具目录按Skill、文件、工具结果、MCP工具发现和MCP Resource展示来源、自动注入条件与说明；`runtime:*`只作展示，不进入Agent能力或数据库 | v0.3.21～v0.4.0，[工具包 Console](11-tool-packages/tool-packages-design.md#9-console) |
-| `SKILL-102A` | Skill脚本执行：只允许已授权 `.py`、显式JSON inputs/arguments/同Skill资源，固定读取 `outputs/result.json`；选择含脚本Skill并启用 `builtin:sandbox`后，与 `execute_python`共用当前Sandbox | v0.3.22～v0.3.24，[Skill 脚本边界](12-agent-skills/skill-system-design.md#10-skill脚本执行) |
+| `SKILL-102A` | Skill脚本执行：只允许已授权 `.py`、显式JSON inputs/arguments/同Skill资源，固定读取 `outputs/result.json`；选择含脚本Skill并启用 `builtin:sandbox`后，与 `execute_python`共用当前Sandbox；中立测试Skill已在线完成首次加载、续跑、结构化结果和History配对验收 | v0.3.22～v0.3.24；2026-08-13 `SKILL-VAL-002` Test验收，[Skill 脚本边界](12-agent-skills/skill-system-design.md#10-skill脚本执行) |
+| `SKILL-104` | 上传Skill支持单个原包导出和全部集合导出；每个导出子ZIP可用现有安装接口直接导入，集合清单不包含平台File ID或Agent绑定 | v0.4.3，[Skill安装与运行](../guides/skills.md) |
 | `FILE-001` / `SKILL-103` | 系统工具 `read_file`统一读取会话附件与Skill文件；只处理文本、DOCX和XLSX，同一Run字节与解析single-flight缓存；图片严格走当前轮原生多模态附件 | v0.3.23～v0.3.24，[附件解析](06-attachment-parsing/attachment-parsing-design.md)、[Skill体系](12-agent-skills/skill-system-design.md) |
 | `TOOL-109` / `ART-001` | 大工具结果安全兜底：Harness `ToolOutputLimits`按模型窗口动态计算阈值，`Spill`把完整结果保存到平台文件服务；平台File ID作为会话内Artifact句柄，原始History授权，`read_tool_result`按需回读，Console显示外置提示 | v0.4.0，[大工具结果治理](05-tool-optimization/tool-optimization-design.md#92-tooloutputlimits-与大工具结果外置) |
 | Harness 确定性压缩 tiers | `ClampOversizedMessages`、`ClearToolResults`、`DeduplicateFileReads` 已复用 | 当前基线，[压缩研究](03-context-compaction/context-compaction-research.md#harness-实验结论) |
@@ -156,8 +162,10 @@
 
 ## 当前排期结论
 
-- 近期明确动作是等待三个业务Skill完成内容修改后执行 `SKILL-VAL-001`整体验收。
+- `SKILL-VAL-001`业务场景机制验收与`SKILL-VAL-002`中立脚本机制验收均已通过。DeepAgent的
+  Skill主链路当前没有待修缺陷；业务Skill内容、模板样例和建模口径由业务Skill维护方继续迭代，
+  不增加DeepAgent系统提示词、数据库字段或框架兼容分支。
 - 大工具结果治理已在v0.4.0完成第一版；通用下载中心、Artifact表、TTL和孤儿治理没有真实需求，
-  不作为当前待办。压缩后搜索原始会话是下一步重点课题，但仍需先验证真实缺失样本。
+  不作为当前待办。压缩后搜索原始会话已暂缓，只有真实长程任务出现关键事实无法找回时才重新启动。
 - 其余“有潜力”事项维持原分组，本轮不考虑不等于暂缓或关闭。
 - “暂缓”事项仍只按各自重新启动条件恢复，不因本次优先级调整而改变。

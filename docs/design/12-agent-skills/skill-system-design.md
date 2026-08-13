@@ -118,7 +118,9 @@ Token、Cookie 或完整 Header。
 - 删除：先确认无 Agent 引用并删除配置，再尽力删除平台文件；清理失败不恢复已删除配置。
 
 配置备份包含 `skill_packages` 和 `agents.skills`，但只保存 File ID 与元数据，不包含平台 ZIP，因而
-不是跨环境自包含的 Skill 迁移包。
+不是跨环境自包含的 Skill 迁移包。备份内的脱敏范围清单会显式记录这一外部文件边界。v0.4.3增加
+独立导出：单个导出返回可直接安装的原ZIP；全部导出
+返回清单和多个独立Skill ZIP，不复制Agent绑定，也不建立Revision表或批量安装协议。
 
 ## 5. Harness 渐进披露
 
@@ -236,6 +238,20 @@ Alembic 003建立Skill表和Agent引用；004只删除显式Agent能力中的旧
    临时会话已清理。
 5. 当时版本尚未向模型开放脚本工具；v0.3.24已移除这一额外门槛。
 
+2026-08-13又补充了两类线上证据，验证范围严格区分为“框架机制”和“业务Skill内容”：
+
+1. 普通用户式预算建模证明Skill渐进披露、Reference/XLSX读取、MCP调用和History恢复能够组合工作；
+   模板样例是否应创建为真实成员、业务建模规则是否完整等问题归业务Skill维护方，不作为DeepAgent
+   框架缺陷或系统提示词补丁。
+2. 为避免业务内容干扰，另安装中立测试Skill `script-mechanism-validation`，并创建只选择该Skill与
+   `builtin:sandbox`的专用Agent。首轮依次完成`load_capability`、`list_skill_resources`、
+   `execute_skill_script`，脚本从`inputs.json`读取`[12, 18, 30, 40]`并将汇总写入
+   `outputs/result.json`，返回`count=4`、`sum=100`、`average=25.0`、`minimum=12`、`maximum=40`。
+   同一Session第二轮无需重新加载正文即可再次执行，输入`[5, 15, 20]`返回`sum=40`。两轮均有
+   `final`，刷新后的History保留全部Skill加载、资源目录和脚本Call/Result配对。
+
+本次验收对象均带`TMP_to_delete`标记并保留在Test供人工复看；中立Skill不调用MCP、不修改业务数据。
+
 后续发布回归只需在 Pod真正重启后确认三个上传 Skill无需人工 `reload`即可恢复 `ready`。这项是
 运行环境复核，不是新的代码功能。
 
@@ -276,7 +292,6 @@ Agent选择目标Skill + builtin:sandbox
 
 - 不可变 Skill Revision、回滚和 Agent 固定版本。
 - 第三方签名、来源信任、Marketplace 和自动升级。
-- 可迁移的自包含 Skill 导出包。
 - Skill脚本依赖扩展、网络权限和输出文件Artifact。
 - Skill 内逐文件授权。
 

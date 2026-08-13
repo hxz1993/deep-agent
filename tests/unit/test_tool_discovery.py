@@ -9,6 +9,7 @@ from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 from pydantic_ai.models.test import TestModel
 from pydantic_ai.toolsets import FunctionToolset
+from pydantic_ai.tools import ToolDefinition
 from pydantic_ai.usage import RunUsage
 
 from deep_agent.agent.context.estimator import TokenEstimator
@@ -113,9 +114,84 @@ class ToolDiscoveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(ranked[0], "deepfos_search_financial_model")
         self.assertNotIn("deepfos_delete_financial_model", ranked)
 
-    async def test_return_schema_allowlist_uses_original_mcp_name(self) -> None:
-        from pydantic_ai.tools import ToolDefinition
+    def test_chinese_query_does_not_invent_cross_language_synonyms(self) -> None:
+        tools = [
+            ToolDefinition(
+                name="deepfos_platform_folder_list",
+                description=(
+                    "List compact shared fields for the direct child folders and elements "
+                    "in one DeepFOS folder by folder_id or path."
+                ),
+                parameters_json_schema={
+                    "type": "object",
+                    "properties": {
+                        "folder_id": {"type": "string", "description": "Optional folder ID."},
+                        "path": {"type": "string", "description": "Optional folder path."},
+                    },
+                },
+            ),
+            ToolDefinition(
+                name="deepfos_platform_element_search",
+                description="Search DeepFOS elements by name, type, path, or folder.",
+                parameters_json_schema={
+                    "type": "object",
+                    "properties": {"query": {"type": "string"}},
+                },
+            ),
+            ToolDefinition(
+                name="deepfos_dimension_get",
+                description="Get a dimension definition.",
+                parameters_json_schema={"type": "object", "properties": {}},
+            ),
+        ]
+        documents = build_search_documents(tools, server_names=["deepfos"])
 
+        self.assertEqual(rank_tool_documents("列出平台文件夹结构", documents, limit=3), [])
+
+    def test_explicit_protocol_identifier_returns_only_exact_tool(self) -> None:
+        tools = [
+            ToolDefinition(
+                name="deepfos_platform_folder_list",
+                description="List folders and elements.",
+                parameters_json_schema={"type": "object", "properties": {}},
+            ),
+            ToolDefinition(
+                name="deepfos_platform_element_search",
+                description="Search platform elements.",
+                parameters_json_schema={"type": "object", "properties": {}},
+            ),
+            ToolDefinition(
+                name="deepfos_platform_element_get",
+                description="Get platform element details.",
+                parameters_json_schema={"type": "object", "properties": {}},
+            ),
+        ]
+
+        ranked = rank_tool_documents(
+            "platform_folder_list 平台文件夹列表",
+            build_search_documents(tools, server_names=["deepfos"]),
+            limit=5,
+        )
+
+        self.assertEqual(ranked, ["deepfos_platform_folder_list"])
+
+    def test_mcp_standard_title_is_used_as_alias(self) -> None:
+        tool = ToolDefinition(
+            name="deepfos_platform_folder_list",
+            description="List folders and elements.",
+            parameters_json_schema={"type": "object", "properties": {}},
+            metadata={"title": "平台文件夹列表"},
+        )
+
+        ranked = rank_tool_documents(
+            "平台文件夹列表",
+            build_search_documents([tool], server_names=["deepfos"]),
+            limit=3,
+        )
+
+        self.assertEqual(ranked, ["deepfos_platform_folder_list"])
+
+    async def test_return_schema_allowlist_uses_original_mcp_name(self) -> None:
         ctx = self._ctx("查询财务模型")
         selector = build_return_schema_selector(
             server_names=["renamed_server"],
@@ -139,8 +215,6 @@ class ToolDiscoveryTests(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_return_schema_allowlist_does_not_invent_missing_schema(self) -> None:
-        from pydantic_ai.tools import ToolDefinition
-
         ctx = self._ctx("查询成员")
         selector = build_return_schema_selector(
             server_names=["deepfos"],
@@ -185,13 +259,13 @@ class ToolDiscoveryTests(unittest.IsolatedAsyncioTestCase):
             session_id="schema-session",
             agent_id="agent",
             tool_discovery_inputs_explicit=True,
-            tool_discovery_primary_query="查询 cube 数据并查看定义",
+            tool_discovery_primary_query="renamed_server_cube_query_data",
         )
 
-        await agent.run("查询 cube 数据并查看定义", deps=deps)
+        await agent.run("renamed_server_cube_query_data", deps=deps)
 
         self.assertIn("Return schema:", seen["renamed_server_cube_query_data"])
-        self.assertNotIn("Return schema:", seen["renamed_server_cube_describe"])
+        self.assertNotIn("renamed_server_cube_describe", seen)
         self.assertNotIn("renamed_server_dimension_query_members", seen)
         self.assertEqual(
             deps.tool_discovery.return_schema_tools,
@@ -400,7 +474,10 @@ class ToolDiscoveryTests(unittest.IsolatedAsyncioTestCase):
             0,
         )
         instructions = await wrapper.get_instructions(ctx)
-        self.assertIn("deepfos_delete_financial_model", "\n".join(instructions or []))
+        instruction_text = "\n".join(instructions or [])
+        self.assertIn("deepfos_delete_financial_model", instruction_text)
+        self.assertIn("优先复制下方完整协议名", instruction_text)
+        self.assertIn("不要反复翻译", instruction_text)
 
     async def test_three_or_fewer_mcp_tools_are_all_direct(self) -> None:
         ctx = self._ctx("任意问题")

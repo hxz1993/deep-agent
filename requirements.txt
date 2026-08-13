@@ -7,6 +7,7 @@ pydantic-ai-slim[openai,anthropic,google,mcp]==2.26.0
 openai==2.46.0
 pydantic-ai-harness[skills]==0.18.0
 tiktoken>=0.13,<1
+pypinyin>=0.55,<1
 
 # Web framework
 uvicorn[standard]>=0.30

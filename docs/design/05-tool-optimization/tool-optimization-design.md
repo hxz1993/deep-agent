@@ -772,10 +772,11 @@ Tool Search 解决的是“工具太多导致发现困难和 Schema 占用”，
 - [DeepAgent 工具检索与渐进披露设计](../13-tool-discovery/tool-discovery-design.md)
 - [离线评估、真实模型和灰度验收](../13-tool-discovery/tool-discovery-evaluation.md)
 
-v0.3.12 已复用 Pydantic AI Deferred Loading / ToolSearch 状态机，并使用 DeepAgent 通用
-`lexical_v1` 词法检索器。已授权 MCP 候选超过 3 个时首轮预选最多 Top 3，模型主动搜索最多
-返回 Top 5；首版不部署 Embedding。后续只有真实召回数据证明词法方案不足时才评估多语言
-Embedding，不把它作为当前运行依赖。
+v0.3.12 已复用 Pydantic AI Deferred Loading / ToolSearch 状态机；v0.4.1 将具体检索实现收敛到
+DeepAgent独立的 `lexical_v2` 字段化词法内核。它优先匹配协议名、标准 `title`和参数名，再对描述
+做BM25，低置信结果才进入拼音或受限错字回退。已授权 MCP候选超过3个时首轮预选最多Top 3，
+模型主动搜索最多返回Top 5；本轮不部署Embedding，也不通过硬编码词典伪装跨语言语义。后续只有
+真实召回数据证明词法方案不足时才评估多语言Embedding。
 
 ### 8.3 Toolset 组合与展示命名
 

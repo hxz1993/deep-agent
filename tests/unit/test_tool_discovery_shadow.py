@@ -16,7 +16,7 @@ class ToolDiscoveryShadowTests(unittest.TestCase):
 
         report = evaluate_fixture(fixture)
 
-        self.assertEqual(report.case_count, 10)
+        self.assertEqual(report.case_count, 14)
         self.assertEqual(report.recall_at_5, 1.0)
         self.assertGreaterEqual(report.recall_at_3, 0.9)
         self.assertEqual(report.forbidden_at_3, 0)

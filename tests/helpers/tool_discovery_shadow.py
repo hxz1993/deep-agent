@@ -35,6 +35,7 @@ def _definitions(payload: dict[str, Any]) -> list[ToolDefinition]:
         ToolDefinition(
             name=item["name"],
             description=item.get("description"),
+            metadata={"title": item["title"]} if item.get("title") else None,
             parameters_json_schema={
                 "type": "object",
                 "properties": {

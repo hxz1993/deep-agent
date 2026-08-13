@@ -59,6 +59,7 @@ class McpToolSnapshotDefinition(BaseModel):
     """One raw MCP tool definition captured during explicit inspection."""
 
     name: str
+    title: str | None = None
     description: str | None = None
     input_schema: dict[str, Any] = Field(default_factory=dict)
     output_schema: dict[str, Any] | None = None

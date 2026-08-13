@@ -1,11 +1,9 @@
 from __future__ import annotations
 
 import hashlib
-import math
 import re
 import time
-import unicodedata
-from collections import Counter, defaultdict
+from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from typing import Any
@@ -23,20 +21,26 @@ from deep_agent.agent.context.estimator import (
     canonical_json,
 )
 from deep_agent.agent.deps import AgentDeps
+from deep_agent.search import (
+    FieldRole,
+    SearchConfig,
+    SearchDocument,
+    SearchField,
+    SearchIndex,
+    normalize_text,
+    tokenize,
+)
 
 MCP_PRESELECT_LIMIT = 3
 MCP_SEARCH_RESULT_LIMIT = 5
-TOOL_DISCOVERY_RETRIEVER = "lexical_v1"
+TOOL_DISCOVERY_RETRIEVER = "lexical_v2"
 MCP_RETURN_SCHEMA_TOOLS = frozenset({"cube_query_data", "dimension_query_members"})
 
-_ASCII_PART_RE = re.compile(r"[a-z0-9]+")
-_CAMEL_BOUNDARY_RE = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
-_CJK_RE = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]+")
 _ACTION_GROUPS = {
     "query": {
         "query", "search", "find", "get", "fetch", "lookup", "list", "read", "check",
-        "validate", "verify", "查询", "搜索", "查找", "获取", "读取", "列表",
-        "检查", "校验", "验证",
+        "validate", "verify", "view", "browse", "查询", "搜索",
+        "查找", "获取", "读取", "列出", "列表", "查看", "浏览", "检查", "校验", "验证",
     },
     "write": {
         "write", "save", "create", "update", "set", "insert", "run", "execute",
@@ -53,18 +57,8 @@ _ACTION_ALIASES = {
     for canonical, aliases in _ACTION_GROUPS.items()
     for alias in aliases
 }
-
-
-@dataclass(frozen=True)
-class ToolSearchDocument:
-    name: str
-    server: str
-    description: str
-    parameter_names: tuple[str, ...]
-    parameter_descriptions: tuple[str, ...]
-    name_tokens: tuple[str, ...]
-    parameter_tokens: tuple[str, ...]
-    description_tokens: tuple[str, ...]
+_SEARCH_CONFIG = SearchConfig(token_aliases=_ACTION_ALIASES)
+ToolSearchDocument = SearchDocument
 
 
 @dataclass
@@ -88,6 +82,7 @@ class ToolDiscoveryTelemetry:
     read_only_intent: bool = field(default=False, repr=False)
     candidate_tools: list[str] = field(default_factory=list, repr=False)
     seen_search_queries: set[str] = field(default_factory=set, repr=False)
+    server_names: tuple[str, ...] = field(default_factory=tuple, repr=False)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -107,43 +102,22 @@ class ToolDiscoveryTelemetry:
         }
 
 
-def _normalize_text(value: str) -> str:
-    value = unicodedata.normalize("NFKC", value or "")
-    value = _CAMEL_BOUNDARY_RE.sub(" ", value)
-    return re.sub(r"\s+", " ", value.replace("_", " ").replace("-", " ")).strip().lower()
-
-
 def lexical_tokens(value: str) -> tuple[str, ...]:
     """Stable Chinese/English tokens for run-local tool retrieval."""
-    normalized = _normalize_text(value)
-    tokens: list[str] = []
-    for token in _ASCII_PART_RE.findall(normalized):
-        tokens.append(_ACTION_ALIASES.get(token, token))
-    for segment in _CJK_RE.findall(normalized):
-        chars = list(segment)
-        if len(chars) == 1:
-            tokens.append(_ACTION_ALIASES.get(chars[0], chars[0]))
-        tokens.extend(
-            _ACTION_ALIASES.get(chars[index] + chars[index + 1], chars[index] + chars[index + 1])
-            for index in range(len(chars) - 1)
-        )
-        for alias, canonical in _ACTION_ALIASES.items():
-            if any(ord(char) > 127 for char in alias) and alias in segment:
-                tokens.append(canonical)
-    return tuple(token for token in tokens if token)
+    return tokenize(value, _ACTION_ALIASES)
 
 
-def _schema_properties(schema: dict[str, Any]) -> tuple[tuple[str, ...], tuple[str, ...]]:
+def _schema_properties(schema: dict[str, Any]) -> tuple[tuple[str, str], ...]:
     properties = schema.get("properties")
     if not isinstance(properties, dict):
-        return (), ()
-    names: list[str] = []
-    descriptions: list[str] = []
+        return ()
+    fields: list[tuple[str, str]] = []
     for name, definition in properties.items():
-        names.append(str(name))
-        if isinstance(definition, dict) and definition.get("description"):
-            descriptions.append(str(definition["description"]))
-    return tuple(names), tuple(descriptions)
+        description = ""
+        if isinstance(definition, dict):
+            description = str(definition.get("description") or "")
+        fields.append((str(name), description))
+    return tuple(fields)
 
 
 def _server_for_tool(name: str, server_names: Sequence[str]) -> str:
@@ -181,52 +155,39 @@ def build_search_documents(
 ) -> list[ToolSearchDocument]:
     documents: list[ToolSearchDocument] = []
     for tool in tools:
-        parameter_names, parameter_descriptions = _schema_properties(
-            dict(tool.parameters_json_schema or {})
-        )
+        properties = _schema_properties(dict(tool.parameters_json_schema or {}))
         description = tool.description or ""
         server = _server_for_tool(tool.name, server_names)
+        original_name = mcp_original_tool_name(tool.name, server_names)
+        metadata = tool.metadata or {}
+        annotations = metadata.get("annotations")
+        title = str(metadata.get("title") or "")
+        if not title and isinstance(annotations, dict):
+            title = str(annotations.get("title") or "")
+        fields = [SearchField("protocol_name", tool.name, FieldRole.CODE)]
+        if original_name and original_name != tool.name:
+            fields.append(SearchField("original_protocol_name", original_name, FieldRole.CODE))
+        if title:
+            fields.append(SearchField("title", title, FieldRole.ALIAS))
+        fields.extend(
+            SearchField(f"parameter:{name}", name, FieldRole.ATTRIBUTE)
+            for name, _description in properties
+        )
+        if description:
+            fields.append(SearchField("description", description, FieldRole.TEXT))
+        fields.extend(
+            SearchField(f"parameter_description:{name}", value, FieldRole.TEXT)
+            for name, value in properties
+            if value
+        )
         documents.append(
             ToolSearchDocument(
-                name=tool.name,
-                server=server,
-                description=description,
-                parameter_names=parameter_names,
-                parameter_descriptions=parameter_descriptions,
-                name_tokens=lexical_tokens(f"{server} {tool.name}"),
-                parameter_tokens=lexical_tokens(" ".join(parameter_names)),
-                description_tokens=lexical_tokens(
-                    " ".join((description, *parameter_descriptions))
-                ),
+                id=tool.name,
+                group=server,
+                fields=tuple(fields),
             )
         )
     return documents
-
-
-def _idf(documents: Sequence[ToolSearchDocument], query_tokens: set[str]) -> dict[str, float]:
-    count = len(documents)
-    result: dict[str, float] = {}
-    for token in query_tokens:
-        frequency = sum(
-            token in set((*doc.name_tokens, *doc.parameter_tokens, *doc.description_tokens))
-            for doc in documents
-        )
-        result[token] = math.log(1 + (count - frequency + 0.5) / (frequency + 0.5))
-    return result
-
-
-def _bm25_field(tokens: tuple[str, ...], query_tokens: set[str], idf: dict[str, float]) -> float:
-    if not tokens:
-        return 0.0
-    frequencies = Counter(tokens)
-    length = max(1, len(tokens))
-    score = 0.0
-    for token in query_tokens:
-        tf = frequencies.get(token, 0)
-        if not tf:
-            continue
-        score += idf[token] * (tf * 2.2) / (tf + 1.2 * (0.25 + 0.75 * length / 12))
-    return score
 
 
 def _is_read_only_query(query_text: str, query_tokens: set[str]) -> bool:
@@ -283,7 +244,14 @@ def _is_read_only_query(query_text: str, query_tokens: set[str]) -> bool:
 
 
 def _document_has_side_effect(document: ToolSearchDocument) -> bool:
-    return bool(set(document.name_tokens) & {"write", "delete"})
+    # Preserve the existing product rule: side effects are inferred from the
+    # stable protocol identifier, never from descriptive prose that may mention
+    # an operation only to deny or contrast it.
+    return any(
+        bool(set(tokenize(field.value, _ACTION_ALIASES)) & {"write", "delete"})
+        for field in document.fields
+        if field.role is FieldRole.CODE
+    )
 
 
 def rank_tool_documents(
@@ -293,40 +261,23 @@ def rank_tool_documents(
     limit: int,
     enforce_read_only: bool = False,
 ) -> list[str]:
-    query_text = _normalize_text(query)
+    query_text = normalize_text(query)
     query_tokens = set(lexical_tokens(query_text))
     if not query_tokens or not documents:
         return []
-    idf = _idf(documents, query_tokens)
     read_only_intent = enforce_read_only or _is_read_only_query(query_text, query_tokens)
-    subject_tokens = query_tokens - {"query", "write", "delete"}
-    scored: list[tuple[float, str]] = []
-    for document in documents:
-        all_document_tokens = set(
-            (*document.name_tokens, *document.parameter_tokens, *document.description_tokens)
-        )
-        if read_only_intent and _document_has_side_effect(document):
-            continue
-        normalized_name = _normalize_text(document.name)
-        name_match = bool(
-            query_text
-            and (query_text == normalized_name or query_text in normalized_name or normalized_name in query_text)
-        )
-        if subject_tokens and not (subject_tokens & all_document_tokens) and not name_match:
-            continue
-        score = (
-            4 * _bm25_field(document.name_tokens, query_tokens, idf)
-            + 2 * _bm25_field(document.parameter_tokens, query_tokens, idf)
-            + _bm25_field(document.description_tokens, query_tokens, idf)
-        )
-        if query_text and query_text == normalized_name:
-            score += 20
-        elif query_text and (query_text in normalized_name or normalized_name in query_text):
-            score += 8
-        if score > 0:
-            scored.append((score, document.name))
-    scored.sort(key=lambda item: (-item[0], item[1]))
-    return [name for _score, name in scored[:limit]]
+    eligible_documents = [
+        document
+        for document in documents
+        if not (read_only_intent and _document_has_side_effect(document))
+    ]
+    result = SearchIndex(eligible_documents, _SEARCH_CONFIG).search(
+        query_text,
+        top_k=max(limit, len(eligible_documents)),
+    )
+    if result.hits and result.hits[0].rank_tier >= 920:
+        return [hit.document_id for hit in result.hits if hit.rank_tier >= 920][:limit]
+    return [hit.document_id for hit in result.hits[:limit]]
 
 
 def _context_ref_search_text(value: dict[str, Any]) -> str:
@@ -449,9 +400,10 @@ class McpDiscoveryToolset(WrapperToolset[AgentDeps]):
         started = time.perf_counter()
         telemetry = ctx.deps.tool_discovery or ToolDiscoveryTelemetry()
         ctx.deps.tool_discovery = telemetry
+        telemetry.server_names = self.server_names
         try:
             primary_query, supplemental_query = search_inputs_for_run(ctx)
-            primary_text = _normalize_text(primary_query)
+            primary_text = normalize_text(primary_query)
             telemetry.read_only_intent = _is_read_only_query(
                 primary_text,
                 set(lexical_tokens(primary_text)),
@@ -586,7 +538,8 @@ class McpDiscoveryToolset(WrapperToolset[AgentDeps]):
                 grouped[_server_for_tool(name, self.server_names)].append(name)
             rows = [
                 "以下 MCP 工具当前仅提供名称；需要其完整参数时调用 search_tools，"
-                "不要猜测未披露工具的参数："
+                "不要猜测未披露工具的参数。搜索时优先复制下方完整协议名，或只去掉明确的 MCP "
+                "Server 前缀；不要反复翻译、改写协议名："
             ]
             for server in sorted(grouped):
                 rows.append(f"- {server}: {', '.join(sorted(grouped[server]))}")
@@ -624,7 +577,7 @@ def search_deferred_tools(
     started = time.perf_counter()
     telemetry.search_calls += 1
     query_text = "\n".join(query for query in queries if query.strip())
-    query_fingerprint = " ".join(sorted(set(lexical_tokens(query_text)))) or _normalize_text(
+    query_fingerprint = " ".join(sorted(set(lexical_tokens(query_text)))) or normalize_text(
         query_text
     )
     if query_fingerprint in telemetry.seen_search_queries:
@@ -642,7 +595,10 @@ def search_deferred_tools(
     )
     searchable_tools = [tool for tool in tools if tool.name not in excluded_names]
     try:
-        documents = build_search_documents(searchable_tools)
+        documents = build_search_documents(
+            searchable_tools,
+            server_names=telemetry.server_names,
+        )
         ranked = rank_tool_documents(
             query_text,
             documents,

@@ -58,6 +58,7 @@ def _tool_snapshot(tool_items: list[Any], *, instructions: str | None) -> tuple[
         definitions.append(
             McpToolSnapshotDefinition(
                 name=tool.name,
+                title=getattr(tool, "title", None),
                 description=tool.description,
                 input_schema=tool.inputSchema,
                 output_schema=tool.outputSchema,

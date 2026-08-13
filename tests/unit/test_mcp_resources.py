@@ -192,6 +192,7 @@ class McpInspectionTests(unittest.IsolatedAsyncioTestCase):
             tools=[
                 Tool(
                     name="query",
+                    title="查询目录",
                     description="Query the catalog.",
                     inputSchema={"type": "object"},
                     outputSchema={"type": "object", "properties": {"rows": {"type": "array"}}},
@@ -235,6 +236,7 @@ class McpInspectionTests(unittest.IsolatedAsyncioTestCase):
             "query",
         )
         definition = result.inspection.tools.snapshot.definitions[0]
+        self.assertEqual(definition.title, "查询目录")
         self.assertEqual(definition.output_schema["type"], "object")
         self.assertTrue(definition.annotations["readOnlyHint"])
         self.assertEqual(definition.task_support, "optional")

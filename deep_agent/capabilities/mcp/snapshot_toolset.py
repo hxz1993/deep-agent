@@ -90,6 +90,7 @@ class SnapshotMcpToolset(AbstractToolset[AgentDeps]):
                 parameters_json_schema=item.input_schema,
                 return_schema=item.output_schema,
                 metadata={
+                    "title": item.title,
                     "annotations": item.annotations,
                     "task": item.task_support in {"optional", "required"},
                 },

@@ -20,6 +20,7 @@ from pydantic_ai.messages import (
 )
 
 from deep_agent.agent import events
+from deep_agent.agent.planning import PLAN_METADATA_KEY
 from deep_agent.agent.history import (
     filter_ephemeral_agent_messages,
     model_messages_to_history,
@@ -161,6 +162,38 @@ class HistoryThinkingTests(unittest.TestCase):
 
         self.assertEqual(history[0].parts[0].source, "tool_search")
         self.assertEqual(history[0].parts[1].source, "tool_search")
+
+    def test_planning_return_exposes_only_plan_snapshot(self) -> None:
+        snapshot = {
+            "items": [{"id": "step-1", "content": "读取输入", "status": "completed"}],
+            "total": 1,
+            "completed": 1,
+        }
+        call = ToolCallPart(
+            tool_name="write_plan",
+            args={"items": []},
+            tool_call_id="plan-1",
+        )
+        result = ToolReturnPart(
+            tool_name="write_plan",
+            content={"ok": True},
+            tool_call_id="plan-1",
+            metadata={PLAN_METADATA_KEY: snapshot, "private": "hidden"},
+        )
+
+        self.assertEqual(events.map_part(call)["source"], "planning")
+        mapped = events.map_part(result)
+        self.assertEqual(mapped["source"], "planning")
+        self.assertEqual(mapped["plan"], snapshot)
+        self.assertNotIn("private", mapped)
+
+        history = model_messages_to_history([
+            ModelResponse(parts=[call]),
+            ModelRequest(parts=[result]),
+        ])
+        self.assertEqual(history[0].parts[0].source, "planning")
+        self.assertEqual(history[0].parts[1].source, "planning")
+        self.assertEqual(history[0].parts[1].plan, snapshot)
 
     def test_model_messages_to_history_skips_thinking_only_retry(self) -> None:
         ts = datetime(2025, 6, 22, 10, 45, tzinfo=timezone.utc)

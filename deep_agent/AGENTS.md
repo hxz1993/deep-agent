@@ -174,6 +174,7 @@ XML + JSON 投影。业务字段语义仍由具体 Agent Prompt 负责。
 | `attachment_extractors.py` | 文本、DOCX、XLSX 按需解析、分页与文件安全限制 |
 | `attachments.py` | 会话附件引用、原生模态校验和平台下载 |
 | `runner.py` | `run()` / `run_stream()` — 会话锁、history、事件映射 |
+| `planning.py` | Harness `Planning`装配、每Run Store和Tool Result计划快照 |
 | `deps.py` | `AgentDeps`：session_id、user、agent_id、request_headers |
 | `headers.py` | HTTP → MCP 的 header 白名单提取 |
 | `events.py` | Pydantic AI 事件 → SSE 字典（使用 `singledispatch` 分层映射） |
@@ -262,11 +263,16 @@ XML + JSON 投影。业务字段语义仍由具体 Agent Prompt 负责。
 
 ### 系统工具目录
 
-`GET /api/v1/system-tools` 返回由代码维护的只读运行时目录，按 Skill、文件、工具结果、MCP Tool
+`GET /api/v1/system-tools` 返回由代码维护的只读运行时目录，按任务规划、Skill、文件、工具结果、MCP Tool
 Search和MCP Resource分组说明工具来源与自动注入条件。`read_tool_result`由Harness
 `ToolOutputLimits`自动注入，用于回读当前会话已外置的大工具结果。该接口不读取数据库、不构造Agent Run；
 `runtime:*` 仅是 Console 展示编码，不得注册到 ToolPackage Registry、`/tools` 或
 `agents.capabilities`。
+
+任务规划使用Harness 0.18默认的`write_plan`、`read_plan`、`add_task`、
+`update_task_status`、`update_task_statuses`和`remove_task`。每个Runner Run开始时创建独立
+`InMemoryPlanStore`；成功的规划Tool Return从Store读取快照写入Part metadata，SSE/History仅映射
+该快照。不得把计划Reminder持久化成用户消息，也不得为单轮计划新增表、跨轮Store或自研状态机。
 
 ### Skill
 

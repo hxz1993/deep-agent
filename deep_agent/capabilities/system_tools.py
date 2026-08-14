@@ -7,6 +7,49 @@ __all__ = ["list_system_tool_domains"]
 
 _SYSTEM_TOOL_DOMAINS = (
     SystemToolDomain(
+        code="runtime:planning",
+        label="任务规划",
+        description="由模型按需创建和维护当前单轮任务的执行计划。",
+        tools=(
+            SystemToolDescription(
+                name="write_plan",
+                source="Pydantic AI Harness",
+                injection_condition="所有 Agent Run自动注入；复杂任务由模型自行决定是否调用",
+                description="创建或整体替换当前Run的有序任务计划。",
+            ),
+            SystemToolDescription(
+                name="read_plan",
+                source="Pydantic AI Harness",
+                injection_condition="所有 Agent Run自动注入",
+                description="读取当前Run的计划步骤、稳定ID和完成进度。",
+            ),
+            SystemToolDescription(
+                name="add_task",
+                source="Pydantic AI Harness",
+                injection_condition="所有 Agent Run自动注入",
+                description="向当前计划追加一个待处理步骤。",
+            ),
+            SystemToolDescription(
+                name="update_task_status",
+                source="Pydantic AI Harness",
+                injection_condition="所有 Agent Run自动注入",
+                description="按步骤ID更新一个任务的状态。",
+            ),
+            SystemToolDescription(
+                name="update_task_statuses",
+                source="Pydantic AI Harness",
+                injection_condition="所有 Agent Run自动注入",
+                description="以原子批次更新多个任务状态。",
+            ),
+            SystemToolDescription(
+                name="remove_task",
+                source="Pydantic AI Harness",
+                injection_condition="所有 Agent Run自动注入",
+                description="删除不再需要或误建的计划步骤。",
+            ),
+        ),
+    ),
+    SystemToolDomain(
         code="runtime:skill",
         label="Skill",
         description="按需加载 Agent 已授权的 Skill 说明和资源。",

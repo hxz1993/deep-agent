@@ -17,6 +17,7 @@ from pydantic_ai.providers.openai import OpenAIProvider
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.context_references import context_reference_instructions
 from deep_agent.agent.models import OpenAICompatibleVideoChatModel
+from deep_agent.agent.planning import build_planning_capability
 from deep_agent.agent.spec import AgentSpec
 from deep_agent.agent.context.estimator import TokenEstimator
 from deep_agent.agent.tool_discovery import (
@@ -258,6 +259,7 @@ def build_agent(
                 )
             )
         )
+    capabilities.append(build_planning_capability())
     instructions: list[Any] = []
     if spec.instructions:
         instructions.append(spec.instructions)

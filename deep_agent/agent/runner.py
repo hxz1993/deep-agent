@@ -17,12 +17,14 @@ from pydantic_ai import (
 from pydantic_ai.exceptions import RunCancelled
 from pydantic_ai.messages import (
     FunctionToolCallEvent,
+    FunctionToolResultEvent,
     LoadCapabilityCallPart,
     LoadCapabilityReturnPart,
     ModelMessage,
     ModelRequest,
     ModelResponse,
     ToolCallPart,
+    ToolReturnPart,
     UserContent,
     UserPromptPart,
 )
@@ -67,6 +69,13 @@ from deep_agent.agent.observability import (
     log_model_requests,
     run_metrics,
     usage_dict,
+)
+from deep_agent.agent.planning import (
+    attach_known_plan_snapshots,
+    attach_plan_snapshot,
+    current_plan_snapshot,
+    is_planning_tool,
+    prepare_plan_store,
 )
 from deep_agent.agent.run_identity import conversation_id_for, new_run_id
 from deep_agent.agent.tool_output_limits import PlatformToolResultStore
@@ -186,6 +195,35 @@ class AgentRunner:
         # A fresh Pydantic run id is required for every send/resume/retry.  The
         # streaming API may pre-mint one so it can publish it in the first SSE.
         deps.run_id = run_id or new_run_id()
+        prepare_plan_store(deps)
+        deps.plan_snapshots = {}
+
+    @staticmethod
+    async def _capture_planning_result(event: Any, deps: AgentDeps) -> None:
+        """Attach a confirmed Store snapshot to an accepted Planning result."""
+
+        if not isinstance(event, FunctionToolResultEvent):
+            return
+        part = event.part
+        if not isinstance(part, ToolReturnPart) or not is_planning_tool(part.tool_name):
+            return
+        snapshot = await current_plan_snapshot(deps)
+        attach_plan_snapshot(part, snapshot)
+        if part.tool_call_id:
+            deps.plan_snapshots[part.tool_call_id] = snapshot
+
+    @staticmethod
+    async def _attach_final_plan_snapshot(
+        messages: list[ModelMessage],
+        deps: AgentDeps,
+    ) -> None:
+        """Guarantee a final snapshot for non-streaming and terminal persistence."""
+
+        attach_known_plan_snapshots(
+            messages,
+            deps.plan_snapshots,
+            final_snapshot=await current_plan_snapshot(deps),
+        )
 
     def _prepare_skill_runtime(self, deps: AgentDeps) -> None:
         context = self._skill_runtime_context
@@ -1022,10 +1060,12 @@ class AgentRunner:
                 conversation_id=deps.conversation_id,
                 run_id=deps.run_id,
             )
+            new_messages = result.new_messages()
+            await self._attach_final_plan_snapshot(new_messages, deps)
             self._record_loaded_skills(deps, result.all_messages())
             await self._persist_run_messages(
                 session_id,
-                result.new_messages(),
+                new_messages,
                 deps,
                 pre_persisted_user=prepared.pre_persisted_user,
                 repair_dangling_tool_calls=not isinstance(result.output, DeferredToolRequests),
@@ -1225,6 +1265,7 @@ class AgentRunner:
                             if isinstance(event, AgentRunResultEvent):
                                 result = event.result
                                 continue
+                            await self._capture_planning_result(event, deps)
                             mapped = events.map_event(event)
                             if mapped is not None:
                                 if not _should_publish_tool_call(
@@ -1267,11 +1308,13 @@ class AgentRunner:
                                     await task
                 if result is not None:
                     deferred_pending = isinstance(result.output, DeferredToolRequests)
+                    new_messages = result.new_messages()
+                    await self._attach_final_plan_snapshot(new_messages, deps)
                     self._publish_run_complete(
                         persister,
                         session_id,
                         deps,
-                        result.new_messages(),
+                        new_messages,
                         pre_persisted_user=prepared.pre_persisted_user,
                         repair_dangling_tool_calls=not deferred_pending,
                     )
@@ -1291,7 +1334,7 @@ class AgentRunner:
                                 persister,
                                 session_id,
                                 deps,
-                                result.new_messages(),
+                                new_messages,
                             )
                         )
             except RunCancelled as exc:
@@ -1336,6 +1379,7 @@ class AgentRunner:
                     cancelled_messages = mark_cancelled_response_interrupted(
                         cancelled_run.new_messages()
                     )
+                    await self._attach_final_plan_snapshot(cancelled_messages, deps)
                     self._publish_run_cancelled(
                         persister,
                         session_id,

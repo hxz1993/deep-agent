@@ -439,12 +439,33 @@ Provider Native Tool 使用对应的原生 Call/Return 事件，不经过普通 
 }
 ```
 
+规划工具结果使用同一事件，只额外带快照：
+
+```json
+{
+  "type": "tool_result",
+  "tool": "update_task_status",
+  "tool_call_id": "plan-call-2",
+  "source": "planning",
+  "result": "Updated step status to completed.",
+  "plan": {
+    "items": [
+      {"id": "step-1", "content": "读取输入", "active_form": "正在读取输入", "status": "completed"}
+    ],
+    "total": 1,
+    "completed": 1
+  }
+}
+```
+
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | `type` | `"tool_result"` | 固定值 |
 | `tool` | `string` | 工具名称 |
 | `result` | `string \| number \| boolean \| object \| array \| null` | 工具返回值，经 `_to_jsonable` 序列化 |
 | `tool_call_id` | `string \| null` | 对应 `tool_call` 的 ID |
+| `source` | `string \| null` | 可选诊断来源；规划工具固定为`planning` |
+| `plan` | `object \| null` | 仅规划工具结果可选；包含`items/total/completed`快照 |
 | `artifacts` | `array \| null` | 可选；完整结果已外置时的脱敏句柄元数据，当前 `artifact_id`即平台File ID |
 
 **客户端处理建议**：
@@ -454,6 +475,8 @@ Provider Native Tool 使用对应的原生 Call/Return 事件，不经过普通 
 - `artifacts`非空时，`result`是受限预览而非完整结果；客户端显示“完整结果已外置”，模型会通过
   系统工具 `read_tool_result`按需读取，客户端不需要代替模型回读
 - 若 `tool_call_id` 缺失，可回退到「最近一个未完成的工具块」
+- `source=planning`时，客户端应按`tool_call_id`消费原始事件，并可把六个规划工具聚合成一张计划卡；
+  `plan`只表示该Tool Result成功返回后的已确认状态，不能把尚未返回的调用伪造成完成
 
 ---
 

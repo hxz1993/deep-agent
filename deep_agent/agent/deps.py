@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from deep_agent.agent.context.runtime import ContextRunState
     from deep_agent.agent.tool_discovery import ToolDiscoveryTelemetry
     from deep_agent.agent.tool_output_limits import ToolOutputTelemetry
+    from pydantic_ai_harness.planning import InMemoryPlanStore
 
 
 @dataclass
@@ -35,6 +36,8 @@ class AgentDeps:
     context_state: "ContextRunState | None" = None
     tool_discovery: "ToolDiscoveryTelemetry | None" = None
     tool_output_limits: "ToolOutputTelemetry | None" = None
+    plan_store: "InMemoryPlanStore | None" = field(default=None, repr=False)
+    plan_snapshots: dict[str, dict[str, Any]] = field(default_factory=dict, repr=False)
     tool_discovery_inputs_explicit: bool = False
     tool_discovery_primary_query: str = ""
     tool_discovery_supplemental_query: str = ""

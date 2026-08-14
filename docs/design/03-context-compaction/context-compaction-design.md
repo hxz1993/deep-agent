@@ -6,7 +6,7 @@
 >
 > 依赖组合：`pydantic-ai-slim 2.26.0` + `pydantic-ai-harness 0.18.0`
 >
-> 数据库迁移：本课题在v0.3.16不新增迁移；当前仓库head因v0.4.5内置MCP清理为`006`
+> 数据库迁移：本课题在v0.3.16不新增迁移；当前v0.4.6仓库head仍为`006`
 
 ## 1. 最终口径
 
@@ -542,6 +542,11 @@ Checkpoint脱敏会删除Tool Return metadata中的平台句柄，这是有意�
 投影，不是Artifact授权事实源。`read_tool_result`的合法句柄始终从当前Session完整原始
 `chat_messages`恢复。压缩安全切分仍把原工具Call/Return作为一对处理；对
 `read_tool_result`的重复同页读取使用现有 `DeduplicateFileReads`键去重，不拆散调用和结果。
+
+v0.4.6的单轮计划仍是普通Tool Call/Return。压缩器按相同安全边界保留`write_plan`、状态更新等
+调用与结果配对；计划快照只随Tool Return metadata进入原始History。Harness注入的当前计划Reminder
+是本次模型请求的临时尾部提示，不作为用户消息或Checkpoint事实单独持久化。若旧计划交换已被摘要
+覆盖，下一轮Run不会恢复该内存计划，模型按当前任务决定是否重新规划。
 
 ## 10. Console 测试会话
 

@@ -19,6 +19,7 @@ from pydantic_ai.messages import (
     NativeToolSearchReturnPart,
 )
 from deep_agent.agent.tool_output_limits import tool_result_artifacts
+from deep_agent.agent.planning import is_planning_tool, plan_snapshot_from_part
 
 
 def text_delta(delta: str) -> dict[str, Any]:
@@ -33,6 +34,8 @@ def tool_call(tool: str, args: Any, tool_call_id: str | None = None) -> dict[str
     payload = {"type": "tool_call", "tool": tool, "args": args, "tool_call_id": tool_call_id}
     if tool in {"search_tools", "tool_search"}:
         payload["source"] = "tool_search"
+    elif is_planning_tool(tool):
+        payload["source"] = "planning"
     return payload
 
 
@@ -42,12 +45,17 @@ def tool_result(
     tool_call_id: str | None = None,
     *,
     artifacts: list[dict[str, Any]] | None = None,
+    plan: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     payload = {"type": "tool_result", "tool": tool, "result": result, "tool_call_id": tool_call_id}
     if artifacts:
         payload["artifacts"] = artifacts
+    if plan is not None:
+        payload["plan"] = plan
     if tool in {"search_tools", "tool_search"}:
         payload["source"] = "tool_search"
+    elif is_planning_tool(tool):
+        payload["source"] = "planning"
     return payload
 
 
@@ -182,6 +190,7 @@ def _map_tool_return_part(part: ToolReturnPart) -> dict[str, Any] | None:
         _to_jsonable(part.content),
         part.tool_call_id,
         artifacts=tool_result_artifacts(part),
+        plan=plan_snapshot_from_part(part),
     )
 
 

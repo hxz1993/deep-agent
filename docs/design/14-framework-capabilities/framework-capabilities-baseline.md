@@ -132,6 +132,7 @@ cache hit/miss Token，没有数据时保持 unknown。它不等于启用缓存�
 | `DeduplicateFileReads` | 去除重复文件读取内容 | 保持，不改变原始历史；运行时字节/解析复用由 `read_file`的Run级缓存负责 |
 | `estimate_token_count` | 作为估算实现的一部分 | 保持统一 `TokenEstimator` 封装，不让 Console复制算法 |
 | `ToolOutputLimits` / `Spill` | 超大工具结果在进入History前外置 | v0.4.0适配平台文件服务；保留Harness原生 `read_tool_result`，不使用本地Store或自研读取状态机 |
+| `Planning` | 模型在复杂任务中维护单轮结构化计划 | v0.4.6采用默认六工具与`InMemoryPlanStore`；DeepAgent只附加展示快照，不新增任务引擎或计划表 |
 
 Harness `Skills` 不读取 references/assets，也不执行 scripts。v0.3.18 直接使用它作为线上 Skill 的
 渐进披露内核；DeepAgent 负责安装、权限、References/Assets 读取和脚本隔离。
@@ -144,7 +145,7 @@ Harness `Skills` 不读取 references/assets，也不执行 scripts。v0.3.18 �
 | `SpendLimits` | 出现用户/App/Space 配额或收费需求 | 需要共享计数 Store 和价格口径；私有模型可按 Token/调用量而非美元 |
 | `Memory` | 产品明确需要跨会话、可查看和可删除的长期笔记 | namespace 由应用计算，但授权、审计、删除和 Store 仍由 DeepAgent 负责 |
 | `StepPersistence` | 长工具或副作用流程需要崩溃恢复与 effect ledger | 不替代聊天历史；只记录可恢复步骤和副作用幂等信息 |
-| `Planning` | Agent 需要可持久、可展示的长任务计划 | 需先定义计划与会话、权限和 UI 的产品关系 |
+| Planning跨Run持久化/计划模式 | 用户需要跨消息继续计划或人工只做计划 | 当前单轮计划不升级为第二套会话事实源；需另行定义恢复、编辑和权限边界 |
 | `SubAgents`/`DynamicWorkflow` | 出现稳定的专业分工或并行长任务 | 子 Run 隔离、用量、工具继承和结果展示必须显式设计 |
 | `SystemReminders` | 长工具循环出现真实 instruction fade | 只注入少量稳定规则，不作为修复差 Prompt 的常规手段 |
 | `MediaStore` | Artifact/附件需要内容寻址、去重和共享对象存储 | user/App/Space 授权和对象生命周期仍由产品层负责 |

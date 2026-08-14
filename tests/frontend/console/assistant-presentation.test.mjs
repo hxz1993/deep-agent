@@ -4,6 +4,9 @@ import test from "node:test";
 
 import {
   buildHistoryVisualItems,
+  isPlanningToolEvent,
+  normalizePlanSnapshot,
+  planDisclosureState,
   processDisclosureLabel,
   splitAssistantHistoryRecords,
 } from "../../../frontend/console/assistant-presentation.js";
@@ -174,4 +177,39 @@ test("大工具结果显示外置提示并保留预览", () => {
   assert.match(chatSource, /完整结果已外置/);
   assert.match(chatSource, /Agent 可按需读取/);
   assert.match(workspaceCss, /\.tool-result-artifact/);
+});
+
+test("规划工具聚合为单一卡片并保留实时与历史快照", () => {
+  assert.equal(isPlanningToolEvent({ source: "planning", tool: "anything" }), true);
+  assert.equal(isPlanningToolEvent({ tool: "write_plan" }), true);
+  assert.equal(isPlanningToolEvent({ tool: "execute_python" }), false);
+
+  const running = normalizePlanSnapshot({
+    items: [
+      { id: "1", content: "读取输入", active_form: "正在读取输入", status: "in_progress" },
+      { id: "2", content: "生成结果", status: "pending" },
+    ],
+  });
+  assert.deepEqual(planDisclosureState(running), {
+    plan: running,
+    allCompleted: false,
+    expanded: true,
+    label: "0/2",
+  });
+
+  const completed = normalizePlanSnapshot({
+    items: [
+      { id: "1", content: "读取输入", status: "completed" },
+      { id: "2", content: "生成结果", status: "completed" },
+    ],
+  });
+  assert.equal(planDisclosureState(completed).expanded, false);
+  assert.equal(planDisclosureState(completed).label, "2/2 已完成");
+  assert.equal(normalizePlanSnapshot({ items: [] }), null);
+
+  assert.match(chatSource, /wrap\.insertBefore\(planBlock, processBlock\)/);
+  assert.match(chatSource, /if \(isPlanningToolEvent\(merged\)\)/);
+  assert.match(chatSource, /if \(data\.plan\) renderPlan\(data\.plan\)/);
+  assert.match(chatSource, /plan: part\.plan/);
+  assert.match(workspaceCss, /\.assistant-plan\.open \.assistant-plan-items \{ display: grid; \}/);
 });

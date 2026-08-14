@@ -583,6 +583,58 @@ html, body {
   background: transparent;
   border-left: 1px solid var(--border);
 }
+
+/* Harness 任务计划：独立于普通工具处理过程。 */
+.assistant-plan {
+  width: 100%;
+  margin: 1px 0 12px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-soft);
+}
+.assistant-plan-summary {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  min-height: 36px;
+  padding: 7px 10px;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+}
+.assistant-plan-summary:hover,
+.assistant-plan-summary:focus-visible { background: var(--bg-hover); outline: none; }
+.assistant-plan-chevron,
+.assistant-plan-icon,
+.assistant-plan-status { display: inline-grid; place-items: center; color: var(--text-faint); }
+.assistant-plan-chevron { transition: transform 0.15s ease; }
+.assistant-plan :is(.assistant-plan-chevron, .assistant-plan-icon, .assistant-plan-status) svg {
+  width: 14px;
+  height: 14px;
+}
+.assistant-plan.open .assistant-plan-chevron { transform: rotate(90deg); }
+.assistant-plan-title { font-size: 13px; font-weight: 600; }
+.assistant-plan-progress { margin-left: auto; color: var(--text-faint); font-size: 12px; }
+.assistant-plan-items {
+  display: none;
+  gap: 7px;
+  margin: 0;
+  padding: 0 12px 10px 36px;
+  list-style: none;
+}
+.assistant-plan.open .assistant-plan-items { display: grid; }
+.assistant-plan-item { display: flex; align-items: flex-start; gap: 8px; color: var(--text-dim); font-size: 13px; line-height: 1.5; }
+.assistant-plan-item.status-in_progress { color: var(--text); font-weight: 600; }
+.assistant-plan-item.status-in_progress .assistant-plan-status { color: var(--accent); }
+.assistant-plan-item.status-in_progress .assistant-plan-status svg { animation: spin 1s linear infinite; }
+.assistant-plan-item.status-completed { color: var(--text-faint); }
+.assistant-plan-item.status-completed .assistant-plan-status { color: var(--conn-ok); }
+.assistant-plan.interrupted { border-color: color-mix(in srgb, var(--danger) 45%, var(--border)); }
 .assistant-thinking {
   color: var(--text-faint);
   background: var(--thinking-bg);

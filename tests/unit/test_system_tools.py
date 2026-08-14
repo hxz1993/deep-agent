@@ -17,6 +17,7 @@ class SystemToolCatalogTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             [domain.code for domain in domains],
             [
+                "runtime:planning",
                 "runtime:skill",
                 "runtime:file",
                 "runtime:tool-result",
@@ -27,6 +28,14 @@ class SystemToolCatalogTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             [[tool.name for tool in domain.tools] for domain in domains],
             [
+                [
+                    "write_plan",
+                    "read_plan",
+                    "add_task",
+                    "update_task_status",
+                    "update_task_statuses",
+                    "remove_task",
+                ],
                 ["load_capability", "list_skill_resources", "execute_skill_script"],
                 ["read_file"],
                 ["read_tool_result"],

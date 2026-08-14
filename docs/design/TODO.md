@@ -72,7 +72,7 @@
 | --- | --- | --- | --- | --- | --- |
 | `CTX-201` | 跨会话长期记忆 | Harness `Memory` + 产品 Store | 产品明确需要可查看、可编辑、可删除的长期笔记 | namespace 不是授权；必须补 user/Agent/App/Space、审计和删除 | [框架能力台账](14-framework-capabilities/framework-capabilities-baseline.md#53-有潜力按需求触发) |
 | `RUN-201` | 长任务崩溃恢复与副作用账本 | Harness `StepPersistence` 或 Core Durable Execution | 长工具/工作流需要进程崩溃后继续且业务幂等已定义 | 不替代 SQL Session/History、SSE 或 Deferred Pending | [框架能力台账](14-framework-capabilities/framework-capabilities-baseline.md#53-有潜力按需求触发) |
-| `RUN-202` | 结构化计划、子 Agent 与动态工作流 | Harness `Planning`、`SubAgents`、`DynamicWorkflow` | 出现稳定长任务分工、计划 UI 或并行执行需求 | 子 Run 隔离、用量、工具继承、权限和结果展示必须先设计 | [框架能力台账](14-framework-capabilities/framework-capabilities-baseline.md#53-有潜力按需求触发) |
+| `RUN-202` | 计划模式、跨Run计划、子 Agent 与动态工作流 | Harness持久Plan Store、`SubAgents`、`DynamicWorkflow` | 用户需要跨消息编辑/继续计划，或出现稳定长任务分工与并行执行需求 | v0.4.6仅实现单轮内存计划；恢复、子Run隔离、用量、工具继承、权限和结果展示必须另行设计 | [框架能力台账](14-framework-capabilities/framework-capabilities-baseline.md#53-有潜力按需求触发) |
 | `RUN-203` | 长 Run 指令淡化修复 | Harness `SystemReminders` | 有测试证据表明长工具循环稳定遗忘关键系统约束 | 只重申少量规则，不用于掩盖 Prompt 或工具设计问题 | [框架能力台账](14-framework-capabilities/framework-capabilities-baseline.md#53-有潜力按需求触发) |
 
 ### 模型、用量和平台能力
@@ -153,6 +153,7 @@
 | `SKILL-001` | Skill 与 ToolPackage 分离；上传安装、Agent 授权、Harness `load_capability` 渐进披露、References/Assets 分页读取和脚本隔离；每个 Pod仅保留按 code组织的一份当前运行目录；同 Hash替换可恢复丢失的平台原包；管理操作同步、普通 Run本地读取、单 Skill故障隔离。2026-08-13普通用户式线上建模再次确认Skill正文实际进入模型上下文；具体模板内容、业务规则和回答质量由业务Skill维护方负责，不再作为DeepAgent机制待办 | v0.3.18～v0.3.23；2026-08-12～13 Test 004真实验收，[Skill 体系](12-agent-skills/skill-system-design.md) |
 | `MCP-SNAPSHOT` | URL MCP 检测保存完整工具快照，聊天按快照披露并在首次真实调用时建连；缺快照不阻塞 Run，单 Server 连接失败转为 `ToolFailed` | v0.3.19，[工具检索](13-tool-discovery/tool-discovery-design.md) |
 | `CONSOLE-202` | 独立只读系统工具目录按Skill、文件、工具结果、MCP工具发现和MCP Resource展示来源、自动注入条件与说明；`runtime:*`只作展示，不进入Agent能力或数据库 | v0.3.21～v0.4.0，[工具包 Console](11-tool-packages/tool-packages-design.md#9-console) |
+| `RUN-204` | Harness `Planning()`单轮结构化计划：默认六工具、每Run独立内存Store、SSE/History快照和Console聚合计划卡；简单任务可不规划，不增加数据库或Agent配置 | v0.4.6，[框架能力台账](14-framework-capabilities/framework-capabilities-baseline.md#51-已经采用) |
 | `SKILL-102A` | Skill脚本执行：只允许已授权 `.py`、显式JSON inputs/arguments/同Skill资源，固定读取 `outputs/result.json`；选择含脚本Skill并启用 `builtin:sandbox`后，与 `execute_python`共用当前Sandbox；中立测试Skill已在线完成首次加载、续跑、结构化结果和History配对验收 | v0.3.22～v0.3.24；2026-08-13 `SKILL-VAL-002` Test验收，[Skill 脚本边界](12-agent-skills/skill-system-design.md#10-skill脚本执行) |
 | `SKILL-104` | 上传Skill支持单个原包导出和全部集合导出；每个导出子ZIP可用现有安装接口直接导入，集合清单不包含平台File ID或Agent绑定 | v0.4.3，[Skill安装与运行](../guides/skills.md) |
 | `FILE-001` / `SKILL-103` | 系统工具 `read_file`统一读取会话附件与Skill文件；只处理文本、DOCX和XLSX，同一Run字节与解析single-flight缓存；图片严格走当前轮原生多模态附件 | v0.3.23～v0.3.24，[附件解析](06-attachment-parsing/attachment-parsing-design.md)、[Skill体系](12-agent-skills/skill-system-design.md) |

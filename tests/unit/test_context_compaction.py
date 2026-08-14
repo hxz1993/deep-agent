@@ -178,6 +178,33 @@ class AttachmentFileKeyTests(unittest.TestCase):
 
 
 class ToolSearchCompactionBoundaryTests(unittest.TestCase):
+    def test_planning_call_and_return_remain_a_safe_pair(self) -> None:
+        messages = [
+            ModelRequest(parts=[UserPromptPart(content="完成复杂任务")]),
+            ModelResponse(
+                parts=[
+                    ToolCallPart(
+                        "write_plan",
+                        {"items": [{"id": "step-1", "content": "读取输入"}]},
+                        "plan-1",
+                    )
+                ]
+            ),
+            ModelRequest(
+                parts=[
+                    ToolReturnPart(
+                        "write_plan",
+                        "Plan updated: 1 step(s).",
+                        "plan-1",
+                    )
+                ]
+            ),
+            ModelResponse(parts=[TextPart(content="继续执行")]),
+        ]
+
+        self.assertEqual(_safe_boundaries(messages), [0, 1, 3, 4])
+        self.assertFalse(has_unprocessed_tool_calls(messages))
+
     def test_native_tool_search_call_and_return_close_same_boundary(self) -> None:
         messages = [
             ModelRequest(parts=[UserPromptPart(content="查找工具")]),

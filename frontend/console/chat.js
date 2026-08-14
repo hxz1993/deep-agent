@@ -7,9 +7,12 @@ import {
 import { formatSessionIdSubtitle } from "./session-display.js?v=20260728-2";
 import {
   buildHistoryVisualItems,
+  isPlanningToolEvent,
+  normalizePlanSnapshot,
+  planDisclosureState,
   processDisclosureLabel,
   splitAssistantHistoryRecords,
-} from "./assistant-presentation.js?v=20260810-1";
+} from "./assistant-presentation.js?v=20260815-1";
 
 /* ------------------------------------------------------------------ *
  * deep-agent 前端 —— 适配 FastAPI /api/v1/chat/stream (SSE over POST)
@@ -1234,6 +1237,7 @@ function renderHistory(messages, modelMessageCount, contextCheckpoint = null) {
             tool_call_id: part.tool_call_id,
             source: part.source,
             artifacts: part.artifacts,
+            plan: part.plan,
           });
         }
       }
@@ -2325,6 +2329,63 @@ function createAssistantMessage(timestamp, branchPoint) {
   let thinkingBuffer = "";
   let interruptedStatus = null;
   const toolBlocks = new Map(); // tool_call_id -> element
+  const planningCallIds = new Set();
+  let planBlock = null;
+  let planSnapshot = null;
+
+  function ensurePlanBlock() {
+    if (planBlock) return planBlock;
+    planBlock = document.createElement("section");
+    planBlock.className = "assistant-plan open";
+    planBlock.innerHTML = `
+      <button type="button" class="assistant-plan-summary" aria-expanded="true">
+        <span class="assistant-plan-chevron">${lucideIcon("chevron-right")}</span>
+        <span class="assistant-plan-icon">${lucideIcon("list-checks")}</span>
+        <span class="assistant-plan-title">任务计划</span>
+        <span class="assistant-plan-progress">正在制定…</span>
+      </button>
+      <ol class="assistant-plan-items"></ol>`;
+    planBlock.querySelector(".assistant-plan-summary").addEventListener("click", () => {
+      const open = !planBlock.classList.contains("open");
+      planBlock.classList.toggle("open", open);
+      planBlock.querySelector(".assistant-plan-summary")
+        .setAttribute("aria-expanded", String(open));
+    });
+    wrap.insertBefore(planBlock, processBlock);
+    refreshLucideIcons();
+    return planBlock;
+  }
+
+  function renderPlan(snapshot) {
+    const state = planDisclosureState(snapshot);
+    if (!state) {
+      planSnapshot = null;
+      planBlock?.remove();
+      planBlock = null;
+      return;
+    }
+    planSnapshot = state.plan;
+    const block = ensurePlanBlock();
+    const summary = block.querySelector(".assistant-plan-summary");
+    block.querySelector(".assistant-plan-progress").textContent = state.label;
+    block.classList.toggle("complete", state.allCompleted);
+    block.classList.toggle("open", state.expanded);
+    summary.setAttribute("aria-expanded", String(state.expanded));
+    const items = block.querySelector(".assistant-plan-items");
+    items.innerHTML = state.plan.items.map((item) => {
+      const display = item.status === "in_progress" && item.active_form
+        ? item.active_form
+        : item.content;
+      const icon = item.status === "completed"
+        ? "circle-check"
+        : item.status === "in_progress" ? "loader-circle" : "circle";
+      return `<li class="assistant-plan-item status-${escapeHtml(item.status)}">
+        <span class="assistant-plan-status">${lucideIcon(icon)}</span>
+        <span>${escapeHtml(display)}</span>
+      </li>`;
+    }).join("");
+    refreshLucideIcons();
+  }
 
   function updateProcessDisclosure() {
     const hasProcess = processBody.children.length > 0;
@@ -2488,6 +2549,10 @@ function createAssistantMessage(timestamp, branchPoint) {
       interruptedStatus.innerHTML = `${lucideIcon("circle-stop")}<span>已停止</span>`;
       wrap.appendChild(interruptedStatus);
       row.classList.add("interrupted");
+      if (planBlock && planSnapshot?.completed !== planSnapshot?.total) {
+        planBlock.classList.add("interrupted", "open");
+        planBlock.querySelector(".assistant-plan-summary")?.setAttribute("aria-expanded", "true");
+      }
       updateProcessDisclosure();
       refreshLucideIcons();
     },
@@ -2496,6 +2561,12 @@ function createAssistantMessage(timestamp, branchPoint) {
       promoteFinalToProcess();
       const merged = mergeUiToolCall(data);
       const key = merged.tool_call_id || `${merged.tool}-${toolBlocks.size}`;
+      if (isPlanningToolEvent(merged)) {
+        planningCallIds.add(key);
+        ensurePlanBlock();
+        scrollToBottom();
+        return;
+      }
       const hasArgs = hasNonEmptyArgs(merged.args);
       const existing = toolBlocks.get(key);
 
@@ -2549,6 +2620,12 @@ function createAssistantMessage(timestamp, branchPoint) {
     addToolResult(data) {
       promoteFinalToProcess();
       const key = data.tool_call_id;
+      if (isPlanningToolEvent(data) || (key && planningCallIds.has(key))) {
+        if (key) planningCallIds.delete(key);
+        if (data.plan) renderPlan(data.plan);
+        scrollToBottom();
+        return;
+      }
       let block = key && toolBlocks.get(key);
       if (!block) {
         block = [...toolBlocks.values()].reverse().find((b) => !b.dataset.done);
@@ -2574,6 +2651,13 @@ function createAssistantMessage(timestamp, branchPoint) {
     removeToolCall(data) {
       const key = data.tool_call_id;
       if (!key) return;
+      if (planningCallIds.delete(key)) {
+        if (!planSnapshot && planningCallIds.size === 0) {
+          planBlock?.remove();
+          planBlock = null;
+        }
+        return;
+      }
       const block = toolBlocks.get(key);
       if (!block) return;
       block.remove();

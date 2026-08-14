@@ -3,6 +3,15 @@
 本文件记录 DeepAgent 的产品版本变化，按新版本到旧版本排列。当前代码版本以
 `deep_agent.__version__` 为准；数据库结构版本以 Alembic head 为准，两者互不替代。
 
+## v0.4.6
+
+- 全局接入Pydantic AI Harness 0.18 `Planning()`默认六工具。模型可自行判断复杂任务是否需要计划；
+  每次Run使用独立`InMemoryPlanStore`，不增加Agent配置、数据库迁移或跨轮任务状态。
+- 规划工具继续使用标准Tool Call/Return；SSE和History以`source=planning`标识，并在已确认的
+  Tool Result上附带结构化计划快照。取消、失败、Pending和上下文压缩继续遵循现有消息配对语义。
+- Console把六个规划工具聚合成一张“任务计划”卡：执行期间展开，全部完成后自动收起，刷新History
+  后可恢复最终计划；系统工具目录新增只读“任务规划”分组。Alembic保持`006`。
+
 ## v0.4.5
 
 - 删除内置Doc Search MCP实现、初始种子和现行产品文档入口；当前新数据库只预置DeepCube，

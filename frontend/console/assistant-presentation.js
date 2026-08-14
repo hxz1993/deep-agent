@@ -89,3 +89,45 @@ export function processDisclosureLabel({ pending = false, running = false } = {}
   if (running) return "处理过程 · 处理中";
   return "处理过程";
 }
+
+export const PLANNING_TOOL_NAMES = new Set([
+  "write_plan",
+  "read_plan",
+  "add_task",
+  "update_task_status",
+  "update_task_statuses",
+  "remove_task",
+]);
+
+export function isPlanningToolEvent(event = {}) {
+  return event.source === "planning" || PLANNING_TOOL_NAMES.has(event.tool);
+}
+
+export function normalizePlanSnapshot(snapshot) {
+  if (!snapshot || !Array.isArray(snapshot.items)) return null;
+  const items = snapshot.items
+    .filter((item) => item && typeof item === "object")
+    .map((item, index) => ({
+      id: String(item.id || `plan-item-${index + 1}`),
+      content: String(item.content || "未命名任务"),
+      active_form: item.active_form ? String(item.active_form) : null,
+      status: String(item.status || "pending"),
+    }));
+  if (!items.length) return null;
+  const completed = items.filter((item) => item.status === "completed").length;
+  return { items, total: items.length, completed };
+}
+
+export function planDisclosureState(snapshot) {
+  const plan = normalizePlanSnapshot(snapshot);
+  if (!plan) return null;
+  const allCompleted = plan.completed === plan.total;
+  return {
+    plan,
+    allCompleted,
+    expanded: !allCompleted,
+    label: allCompleted
+      ? `${plan.completed}/${plan.total} 已完成`
+      : `${plan.completed}/${plan.total}`,
+  };
+}

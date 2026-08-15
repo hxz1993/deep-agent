@@ -9,7 +9,6 @@ from pydantic_ai.messages import ModelRequest, UserPromptPart
 from deep_agent.agent.attachments import (
     attachment_ref_dict,
     index_attachment_refs,
-    model_supports_image_input,
     refs_from_attachments,
     resolve_history_for_llm,
     resolve_user_prompt,
@@ -28,7 +27,6 @@ class TestAttachments(unittest.IsolatedAsyncioTestCase):
             "see this",
             [AttachmentRef(id="platform-file-1", name="a.jpg", mime="image/jpeg")],
             headers,
-            input_modalities=["text", "image"],
         )
         self.assertEqual(parts[0], "see this")
         self.assertEqual(parts[1].media_type, "image/jpeg")
@@ -36,17 +34,15 @@ class TestAttachments(unittest.IsolatedAsyncioTestCase):
         mock_download.assert_awaited_once_with("platform-file-1", headers)
 
     @patch("deep_agent.agent.attachments._download_file", new_callable=AsyncMock)
-    async def test_non_vision_model_image_is_rejected(self, mock_download: AsyncMock) -> None:
-        from deep_agent.agent.attachments import UnsupportedAttachmentModalityError
-
-        with self.assertRaises(UnsupportedAttachmentModalityError):
-            await resolve_user_prompt(
-                "see this",
-                [AttachmentRef(id="platform-file-1", name="a.jpg", mime="image/jpeg")],
-                {},
-                input_modalities=["text"],
-            )
-        mock_download.assert_not_awaited()
+    async def test_image_is_forwarded_without_local_model_gate(self, mock_download: AsyncMock) -> None:
+        mock_download.return_value = b"img-bytes"
+        parts = await resolve_user_prompt(
+            "see this",
+            [AttachmentRef(id="platform-file-1", name="a.jpg", mime="image/jpeg")],
+            {},
+        )
+        self.assertEqual(parts[1].media_type, "image/jpeg")
+        mock_download.assert_awaited_once()
 
     @patch("deep_agent.agent.attachments._download_file", new_callable=AsyncMock)
     async def test_image_download_error_falls_back_to_text(self, mock_download: AsyncMock) -> None:
@@ -57,14 +53,8 @@ class TestAttachments(unittest.IsolatedAsyncioTestCase):
             "",
             [AttachmentRef(id="bad-id", name="a.jpg", mime="image/jpeg")],
             {},
-            input_modalities=["image"],
         )
         self.assertIn("文件下载失败", parts[0].content)
-
-    def test_model_supports_image_input(self) -> None:
-        self.assertFalse(model_supports_image_input())
-        self.assertTrue(model_supports_image_input(db_modalities=["text", "image"]))
-        self.assertFalse(model_supports_image_input(db_modalities=["text"]))
 
     def test_attachment_ref_message_roundtrip(self) -> None:
         ref = attachment_ref_dict(
@@ -93,7 +83,7 @@ class TestAttachments(unittest.IsolatedAsyncioTestCase):
         ) as mock_download:
             parts = await resolve_user_prompt("", [ref], {})
             self.assertIn("file_id: doc-1", parts[0].content)
-            self.assertIn("attachment 工具", parts[0].content)
+            self.assertIn("read_file 系统工具", parts[0].content)
             mock_download.assert_not_called()
 
     @patch("deep_agent.agent.attachments._download_file", new_callable=AsyncMock)

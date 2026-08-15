@@ -1,6 +1,6 @@
 """Real-subprocess integration tests for McpSharedRegistry + McpLeaseManager.
 
-Each test spawns the actual ``text_tools`` builtin MCP server via
+Each test spawns the actual ``echo_fixture`` builtin MCP server via
 ``ensure_server`` (no mocks of ``filelock`` / ``asyncio.create_subprocess_exec``)
 and exercises the code paths that backed the 2026-07-16 incident fix:
 
@@ -43,6 +43,8 @@ from deep_agent.capabilities.mcp.shared_registry import (
     _record_is_live,
     shared_mcp_identity,
 )
+from tests.helpers.builtin_mcp_fixture import TEST_MCPS_DIR
+from unittest.mock import patch
 
 
 def _terminate_pid(pid: int, timeout: float = 5.0) -> None:
@@ -118,12 +120,18 @@ class McpSharedRegistryRuntimeTests(unittest.IsolatedAsyncioTestCase):
         # manager) — the latter's ``_rmtree`` on Windows trips PermissionError
         # when a FileLock file lingers after a fast kill.
         self._runtime = Path(tempfile.mkdtemp(prefix="mcp-runtime-"))
+        self._fixture_patch = patch(
+            "deep_agent.capabilities.mcp.builtin_config.MCPS_DIR",
+            TEST_MCPS_DIR,
+        )
+        self._fixture_patch.start()
 
     async def asyncTearDown(self) -> None:
         _kill_all_in_runtime(self._runtime)
         # ignore_errors swallows any leftover FileLock/windows quirk
         # after terminate + wait.
         shutil.rmtree(self._runtime, ignore_errors=True)
+        self._fixture_patch.stop()
 
     # ------------------------------------------------------------------
     # Path 1: pid-aliveness drives automatic respawn after subprocess death.
@@ -138,8 +146,8 @@ class McpSharedRegistryRuntimeTests(unittest.IsolatedAsyncioTestCase):
             lock_timeout=self._LOCK_TIMEOUT,
         )
         try:
-            url1 = await registry.ensure_server("text_tools", {})
-            record1 = _read_registry(self._runtime, "text_tools")
+            url1 = await registry.ensure_server("echo_fixture", {})
+            record1 = _read_registry(self._runtime, "echo_fixture")
             assert record1 is not None
             pid1 = int(record1["pid"])
             port1 = int(record1["port"])
@@ -161,8 +169,8 @@ class McpSharedRegistryRuntimeTests(unittest.IsolatedAsyncioTestCase):
 
             # Second ensure_server: drop_stale_record path runs, port likely
             # still in TIME_WAIT but allocated fresh, new subprocess comes up.
-            url2 = await registry.ensure_server("text_tools", {})
-            record2 = _read_registry(self._runtime, "text_tools")
+            url2 = await registry.ensure_server("echo_fixture", {})
+            record2 = _read_registry(self._runtime, "echo_fixture")
             assert record2 is not None
             pid2 = int(record2["pid"])
             self.assertNotEqual(pid1, pid2,
@@ -195,8 +203,8 @@ class McpSharedRegistryRuntimeTests(unittest.IsolatedAsyncioTestCase):
             lock_timeout=self._LOCK_TIMEOUT,
         )
         try:
-            url_a = await reg_a.ensure_server("text_tools", {})
-            url_b = await reg_b.ensure_server("text_tools", {})
+            url_a = await reg_a.ensure_server("echo_fixture", {})
+            url_b = await reg_b.ensure_server("echo_fixture", {})
 
             self.assertEqual(
                 url_a, url_b,
@@ -204,7 +212,7 @@ class McpSharedRegistryRuntimeTests(unittest.IsolatedAsyncioTestCase):
             )
 
             # Exactly one record file, one subprocess.
-            record_files = list(self._runtime.glob("builtin-text_tools.json"))
+            record_files = list(self._runtime.glob("builtin-echo_fixture.json"))
             self.assertEqual(len(record_files), 1)
             record = json.loads(record_files[0].read_text(encoding="utf-8"))
             self.assertTrue(_tcp_open("127.0.0.1", int(record["port"])))
@@ -233,7 +241,7 @@ class McpSharedRegistryRuntimeTests(unittest.IsolatedAsyncioTestCase):
             # 4 callers: enough to exercise the queue without dominating a
             # Windows CI run. Adjust upward once the suite is on Linux CI.
             urls = await asyncio.gather(
-                *[registry.ensure_server("text_tools", {}) for _ in range(4)]
+                *[registry.ensure_server("echo_fixture", {}) for _ in range(4)]
             )
 
             # All callers observe the same URL — proves single-flight.
@@ -242,7 +250,7 @@ class McpSharedRegistryRuntimeTests(unittest.IsolatedAsyncioTestCase):
             )
 
             # Exactly one record file and it's the live one.
-            record_files = list(self._runtime.glob("builtin-text_tools.json"))
+            record_files = list(self._runtime.glob("builtin-echo_fixture.json"))
             self.assertEqual(len(record_files), 1)
             record = json.loads(record_files[0].read_text(encoding="utf-8"))
             self.assertTrue(_tcp_open("127.0.0.1", int(record["port"])))
@@ -267,7 +275,7 @@ class McpSharedRegistryRuntimeTests(unittest.IsolatedAsyncioTestCase):
         "production uses Linux fcntl.flock.",
     )
     async def test_lease_retries_ensure_server_after_lock_released(self) -> None:
-        lock_path = self._runtime / "builtin-text_tools.lock"
+        lock_path = self._runtime / "builtin-echo_fixture.lock"
         external_lock = FileLock(str(lock_path), timeout=5.0)
 
         async def hold_external_lock() -> None:
@@ -308,7 +316,7 @@ class McpSharedRegistryRuntimeTests(unittest.IsolatedAsyncioTestCase):
         try:
             t0 = time.monotonic()
             async with manager.lease(
-                "text_tools", "retry-session", _factory
+                "echo_fixture", "retry-session", _factory
             ):
                 pass
             elapsed = time.monotonic() - t0
@@ -319,7 +327,7 @@ class McpSharedRegistryRuntimeTests(unittest.IsolatedAsyncioTestCase):
         # The retry path must end with a connected client and one URL.
         self.assertEqual(len(toolsets), 1, "only one toolset should be opened")
         self.assertEqual(len(seen_urls), 1)
-        record = _read_registry(self._runtime, "text_tools")
+        record = _read_registry(self._runtime, "echo_fixture")
         assert record is not None
         self.assertTrue(
             _tcp_open("127.0.0.1", int(record["port"])),

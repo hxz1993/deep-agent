@@ -26,7 +26,6 @@ text
 image
 audio
 video
-pdf
 ```
 
 `llm_models.tags` 描述其他模型或 Provider 能力：
@@ -40,13 +39,17 @@ open_weights
 interleaved
 ```
 
-这两类标签不能混用。Agent 的 `builtin:attachment` 工具包也不是模型 tag。平台上传能力不等于模型
+这两类标签不能混用。自动注入的系统工具 `read_file` 也不是模型 tag。平台上传能力不等于模型
 原生模态：
 
-- 图片：只有当前模型 `input_modalities` 包含 `image` 时，才把图片字节发送给模型。
-- 音频、视频、PDF：只有模型声明对应原生模态时才把字节发送给模型；PDF 不做本地解析/OCR。
-- DOCX、XLSX、TXT、CSV、JSON、Markdown、HTML、XML：平台只保存 `file_id`，Agent
-  显式选择 `builtin:attachment` 工具包后由工具按需分页读取，不在上传时预抽文本。
+- 当前轮图片、音频和视频：直接作为原生多模态内容送给Provider。模型目录的
+  `input_modalities`用于管理员识别预期能力，不作为DeepAgent本地拒绝开关；所选模型不支持时，
+  由Provider返回拒绝说明或接口错误。
+- PDF和PPT/PPTX不是当前模型模态或上传类型，也没有本地解析能力；未来如有需求，使用独立文档
+  解析工具，不并入 `read_file`。
+- DOCX、XLSX、TXT、CSV、JSON、Markdown、HTML、XML：平台只保存 `file_id`；合法附件存在时
+  `read_file`自动注入并按需分页读取，不在上传时预抽文本，也不要求Agent额外选择工具包。
+- 图片不通过 `read_file`；当前轮图片直接作为多模态输入，历史图片和Skill图片不读取。
 - MCP、Skill、UI Tool：属于 Agent 工具能力，不属于模型输入模态。
 
 附件工具和安全边界详见
@@ -149,5 +152,5 @@ OpenRouter、Azure、Bedrock、Vertex 和长尾 Gateway 暂不进入目录。白
 - 目录为空时有明确空状态。
 - models.dev 刷新失败时旧目录仍可查询。
 - “使用此模型”仅预填，不自动覆盖已有模型配置。
-- 文本模型不会因名称包含 `vision/vl/omni` 被误判为图片模型。
+- 模型名称不会触发图片兼容性猜测；当前轮图片统一交给Provider判断。
 - 配置备份包含 `model_catalog` 和 `llm_models` 新增字段。

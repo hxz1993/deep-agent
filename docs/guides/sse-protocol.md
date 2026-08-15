@@ -31,14 +31,14 @@ Accept: text/event-stream
   ],
   "session_id": "可选，省略则服务端生成",
   "model": "可选，如 openai:gpt-4o",
-  "capabilities": ["builtin:general", "mcp:doc_search"],
+  "capabilities": ["builtin:general", "mcp:deepfos"],
   "user": "可选用户标识"
 }
 ```
 
 新上传只发送 `id/name/mime`。旧会话中已经保存的 `extracted_text` 仍可读取，但新链路不再
-在上传阶段抽取或截断文档文本。TXT、DOCX 和 XLSX 由 Agent 显式启用的 `builtin:attachment`
-能力按需分页读取。
+在上传阶段抽取或截断文档文本。只要当前或历史会话存在可读附件，运行时系统工具 `read_file`
+就会自动注入；TXT、DOCX 和 XLSX按需分页读取，无需 Agent配置附件工具包。
 
 **DB Agent 模式：**
 
@@ -97,6 +97,7 @@ Accept: text/event-stream
 ```json
 {
   "session_id": "abc",
+  "conversation_id": "deepagent:agent-id:abc",
   "model_message_count": 4,
   "messages": [
     {
@@ -105,7 +106,13 @@ Accept: text/event-stream
       "context_refs": [],
       "branch_point": 0
     },
-    { "role": "assistant", "parts": [...], "branch_point": 1 }
+    {
+      "role": "assistant",
+      "status": "completed",
+      "run_id": "run-id",
+      "parts": [...],
+      "branch_point": 1
+    }
   ]
 }
 ```
@@ -114,9 +121,69 @@ Accept: text/event-stream
 
 - `Content-Type: text/event-stream`
 - 连接保持打开，服务端按 Agent 执行进度持续推送事件
-- 客户端断开时，服务端停止推送
+- 客户端停止生成必须调用 session 取消接口，并继续读取原 SSE 直到收到真实 `cancelled`
+- 首条 `session` 事件包含稳定 `conversation_id` 和本次独立 `run_id`；同一 Session 的 Deferred
+  恢复和后续发送复用 Conversation ID，但每次都生成新 Run ID
 
 > **注意**：浏览器原生 `EventSource` 仅支持 GET，因此前端需使用 `fetch` + `ReadableStream` 手动解析 SSE（参见 `frontend/console/chat.js` 与 `protocol.js`）。
+
+### 正式取消（v0.3.10）
+
+```http
+POST /api/v1/sessions/{session_id}/cancel?agent_id={optional}
+```
+
+接口使用 Pydantic AI 2.31 `CancellationToken` 终止当前 Pod 内正在运行的流，返回
+`cancel_requested` 或幂等的 `not_running`。收到 `cancel_requested` 后客户端必须继续读取同一条
+SSE，直到服务端捕获 `RunCancelled` 并返回唯一的 `cancelled`；取消后不再返回 `final`。
+服务端会在发布首条 `session` SSE 前注册 Active Run，因此客户端一旦拿到 `session_id` 就可以
+安全启用停止操作，不需要等待第一段 thinking、文本或工具事件。
+
+`cancelled` 携带本轮实际 `usage`、历史计数和分支点。服务端只持久化
+`RunCancelled.new_messages()`；若 Provider 返回的部分响应仍错误标记为 `complete`，DeepAgent 会把
+本轮最后一个非空部分响应规范化为 `state=interrupted`。下一轮复用历史时，
+Pydantic AI 会为未完成工具调用自动补充 `outcome=interrupted`，DeepAgent 不再手工拼接文本或
+生成 `ToolDenied`。
+
+取消请求失败时客户端应提示失败并允许重试，不能断开 SSE 或伪造停止成功。`not_running` 也不
+等于已取消：它可能表示 Run 已经自然结束，客户端仍等待原流的真实终态。浏览器关闭或网络中断
+时可以 Abort 本地请求，服务端会取消并清理无人消费的 Run，但该路径不向已断开的客户端伪造
+事件，也不是停止按钮的产品语义。
+
+UI Deferred 已经进入 Pending 后不存在活动 Run，因此返回 `not_running`；表单取消由
+`DeferredToolResults` 表达，不调用会话取消接口。当前注册表是进程级，多 Pod 必须依赖会话
+粘性或后续共享取消协调器，不能用客户端假事件掩盖未命中实例的问题。
+v0.3.14 起部署入口固定每个 Pod 一个异步 Gunicorn Worker，避免同一 Pod 内请求命中不同
+Registry；异步 Worker 仍可并发处理 I/O。该设置不解决多 Pod 随机路由。
+
+`cancelled` 示例：
+
+```json
+{
+  "type": "cancelled",
+  "status": "cancelled",
+  "conversation_id": "deepagent:agent-id:session-id",
+  "run_id": "run-id",
+  "history_persisted": true,
+  "model_message_count": 8,
+  "user_branch_point": 6,
+  "usage": {
+    "requests": 1,
+    "input_tokens": 1200,
+    "output_tokens": 96,
+    "total_tokens": 1296
+  },
+  "run_metrics": {
+    "status": "cancelled",
+    "duration_ms": 1820,
+    "cache_read_tokens": null,
+    "cache_write_tokens": null,
+    "tool_calls": 1,
+    "tool_search_calls": 0,
+    "compaction": "none"
+  }
+}
+```
 
 ## 2. SSE 帧格式
 
@@ -177,7 +244,7 @@ sequenceDiagram
 | 工具调用 | `tool_call` | 模型发起工具调用（同一 `tool_call_id` 可能推送多次） |
 | 工具结果 | `tool_result` | 工具执行完毕的返回 |
 | 结束 | `final` | 完整输出与 token 用量 |
-| 用户停止 | `cancelled` | 客户端断开连接；已产出内容部分持久化 |
+| 用户停止 | `cancelled` | 正式取消或客户端断流；已产出内容部分持久化 |
 | 异常 | `error` | 流中错误（出现后流通常结束） |
 
 ## 4. 事件类型详解
@@ -251,12 +318,15 @@ v0.3.6 中 `summarizing` 表示一次语义摘要，不代表分块序号。遇�
 
 `POST /api/v1/sessions/{session_id}/compact?agent_id=...` 使用同一
 `context_compaction` 过程事件，并以 `context_compaction_result` 结束。请求体只允许可选的
-`model_id`；没有 `agent_id` 时必须提供它。`completed` 包含压缩前后估算、摘要调用 usage、
-当前 Checkpoint 和刷新后的 `context_status`；`noop` 表示本次未产生可保存的压缩结果，可能
+`model_id`；没有 `agent_id` 时必须提供它。`completed` 包含压缩前后估算、摘要调用 usage 和
+当前 Checkpoint，并立即关闭 SSE；客户端随后独立刷新 history 与 `context-status`，避免
+Checkpoint 已保存后因状态查询延迟而让流无法收口。`noop` 表示本次未产生可保存的压缩结果，可能
 是空历史、无安全摘要前缀或没有明显 Token 收益，不能据此假定模型一定未被调用；`failed`
 表示旧 Checkpoint 保持不变。该接口不产生普通 `text/final` 助手回复，也不因已有 Checkpoint
 或缺少新增消息而拒绝入口操作；但当前有效 Checkpoint 已覆盖全部原始历史时，不会反复只压缩
-旧摘要，而是返回 `noop/no_reduction`。
+旧摘要，而是返回 `noop/no_reduction`。主动压缩使用同一稳定 `conversation_id`，但生成独立
+`run_id`；终态 `context_compaction_result` 携带二者和 `run_metrics`。自动压缩属于当前聊天 Run
+的子阶段，不生成第二个 Run ID。
 
 ---
 
@@ -311,18 +381,10 @@ v0.3.6 中 `summarizing` 表示一次语义摘要，不代表分块序号。遇�
 
 ### 4.5 `tool_call`
 
-模型请求调用某个工具。由于底层使用 Pydantic AI 流式 API，**同一 `tool_call_id` 可能收到 2 次** `tool_call` 事件：
+模型请求调用某个工具。DeepAgent 只在 Pydantic AI 完成参数校验后发布普通 Function、MCP
+和 UI 工具调用；模型流中尚未校验的临时 `ToolCallPart` 不会形成业务 `tool_call` 事件：
 
 ```json
-// 第 1 次：工具调用开始，参数尚未解析完成
-{
-  "type": "tool_call",
-  "tool": "doc_search_doc_search",
-  "args": {},
-  "tool_call_id": "call_00_evdBG0xFNRn5Q8IlwgZW4217"
-}
-
-// 第 2 次：参数就绪，即将执行（UI 工具可能附带 widget / metadata）
 {
   "type": "tool_call",
   "tool": "myapp__pick_date",
@@ -337,25 +399,21 @@ v0.3.6 中 `summarizing` 表示一次语义摘要，不代表分块序号。遇�
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | `type` | `"tool_call"` | 固定值 |
-| `tool` | `string` | 稳定工具协议名（MCP 前缀示例 `doc_search_doc_search`）；与工具包编码不同 |
-| `args` | `object` | 工具参数；首帧可能为 `{}`，应以同 `tool_call_id` 的后续帧覆盖 |
+| `tool` | `string` | 稳定工具协议名（MCP 前缀示例 `deepfos_platform_folder_list`）；与工具包编码不同 |
+| `args` | `object` | 已通过工具 Schema 校验的完整参数 |
 | `tool_call_id` | `string \| null` | 调用唯一标识，用于关联 `tool_result` |
 | `widget` | `string \| null` | 可选；UI 工具渲染提示（来自 DB，**不发给模型**） |
 | `metadata` | `object \| null` | 可选；客户端扩展字段（来自 builtin/manual 定义，**不发给模型**） |
-| `source` | `string \| null` | 可选；`builtin` \| `manual` |
+| `source` | `string \| null` | 可选；`builtin` \| `manual` \| `tool_search`；Tool Search 是运行诊断，不是业务工具 |
 
-**事件来源（后端实现）**：
-
-| 次序 | 来源 | `args` 状态 |
-|------|------|-------------|
-| 较早 | `PartStartEvent` + `ToolCallPart`（模型流） | 通常为空 `{}` |
-| 较晚 | `FunctionToolCallEvent`（工具执行前） | 完整参数 |
+Provider Native Tool 使用对应的原生 Call/Return 事件，不经过普通 Function Tool 参数校验链路；
+后端仍保持其原生流式事件。
 
 **客户端处理建议（重要）**：
 
-- 以 `tool_call_id` 为键做 **upsert**，不要为每次事件新建 UI 块
-- 当 `args` 为空对象时，可显示「参数接收中…」占位，收到完整参数后更新
-- 不要假设每个 `tool_call_id` 只出现一次
+- 仍以 `tool_call_id` 为键做 **upsert**，兼容重连、历史恢复和未来 Provider 差异
+- 只有已验证的普通工具调用才创建业务工具块；若工具随后返回 `ModelRetry`，或取消后该调用未进入
+  官方中断历史，服务端会发送 `tool_call_removed`，客户端必须删除对应临时工具块
 - UI 工具（builtin/manual）的 `widget` / `metadata` 由后端 enrichment 注入；客户端可优先使用 SSE 字段，或与 `GET /api/v1/ui-tools` 缓存合并
 
 ---
@@ -367,9 +425,36 @@ v0.3.6 中 `summarizing` 表示一次语义摘要，不代表分块序号。遇�
 ```json
 {
   "type": "tool_result",
-  "tool": "doc_search_doc_search",
-  "result": "### 维度管理\n...(markdown 文本)...",
-  "tool_call_id": "call_00_evdBG0xFNRn5Q8IlwgZW4217"
+  "tool": "deepfos_platform_folder_list",
+  "result": {"items": []},
+  "tool_call_id": "call_00_evdBG0xFNRn5Q8IlwgZW4217",
+  "artifacts": [
+    {
+      "artifact_id": "platform-file-id",
+      "kind": "tool_result_overflow",
+      "role": "return_value",
+      "byte_size": 1048576
+    }
+  ]
+}
+```
+
+规划工具结果使用同一事件，只额外带快照：
+
+```json
+{
+  "type": "tool_result",
+  "tool": "update_task_status",
+  "tool_call_id": "plan-call-2",
+  "source": "planning",
+  "result": "Updated step status to completed.",
+  "plan": {
+    "items": [
+      {"id": "step-1", "content": "读取输入", "active_form": "正在读取输入", "status": "completed"}
+    ],
+    "total": 1,
+    "completed": 1
+  }
 }
 ```
 
@@ -379,12 +464,40 @@ v0.3.6 中 `summarizing` 表示一次语义摘要，不代表分块序号。遇�
 | `tool` | `string` | 工具名称 |
 | `result` | `string \| number \| boolean \| object \| array \| null` | 工具返回值，经 `_to_jsonable` 序列化 |
 | `tool_call_id` | `string \| null` | 对应 `tool_call` 的 ID |
+| `source` | `string \| null` | 可选诊断来源；规划工具固定为`planning` |
+| `plan` | `object \| null` | 仅规划工具结果可选；包含`items/total/completed`快照 |
+| `artifacts` | `array \| null` | 可选；完整结果已外置时的脱敏句柄元数据，当前 `artifact_id`即平台File ID |
 
 **客户端处理建议**：
 
 - 通过 `tool_call_id` 找到对应的 `tool_call` UI 块并标记完成
 - 若 `result` 为字符串且含 Markdown，建议渲染为富文本
+- `artifacts`非空时，`result`是受限预览而非完整结果；客户端显示“完整结果已外置”，模型会通过
+  系统工具 `read_tool_result`按需读取，客户端不需要代替模型回读
 - 若 `tool_call_id` 缺失，可回退到「最近一个未完成的工具块」
+- `source=planning`时，客户端应按`tool_call_id`消费原始事件，并可把六个规划工具聚合成一张计划面板；
+  Console只显示当前最新Run的最后一份未完成快照，全部完成后隐藏。`plan`只表示该Tool Result成功
+  返回后的已确认状态，不能把尚未返回的调用伪造成完成
+
+---
+
+### 4.6.1 `tool_call_removed`
+
+已经发布的工具调用被 Pydantic AI 正式撤回时发送。当前包括两类情况：业务工具返回
+`ModelRetry`，模型需要修正参数后重试；Run 被取消且该调用没有进入官方中断历史。
+
+```json
+{
+  "type": "tool_call_removed",
+  "tool": "deepfos_deeptable_workbook_get",
+  "tool_call_id": "call_workbook_1",
+  "reason": "model_retry"
+}
+```
+
+客户端必须按 `tool_call_id` 删除对应的实时工具块；它不是工具失败结果，也不进入最终 History。
+后续修正后的调用会使用新的 `tool_call_id` 正常发送 `tool_call` / `tool_result`。`reason` 当前为
+`model_retry` 或 `cancelled`。
 
 ---
 
@@ -440,6 +553,10 @@ v0.3.6 中 `summarizing` 表示一次语义摘要，不代表分块序号。遇�
 | `usage` | `object` | Token 与请求次数统计 |
 | `model_message_count` | `integer` | 可选；持久化后原始 `ModelMessage` 条数，供客户端同步编辑锚点 |
 | `user_branch_point` | `integer` | 可选；本轮用户消息下标，与 `messages[].branch_point` 一致 |
+| `conversation_id` | `string` | 当前 Agent + Session 的稳定 Pydantic AI Conversation ID |
+| `run_id` | `string` | 本次发送、Deferred恢复或重试的独立 Pydantic AI Run ID |
+| `run_metrics` | `object` | 当前页面可用的临时运行指标；完整指标不写入聊天历史 |
+| `context.tool_output_limits` | `object` | 可选；大工具结果阈值、外置次数/字节数、回读、下载和外置失败计数 |
 
 `usage` 字段：
 
@@ -449,6 +566,23 @@ v0.3.6 中 `summarizing` 表示一次语义摘要，不代表分块序号。遇�
 | `input_tokens` | `number \| null` | 输入 token |
 | `output_tokens` | `number \| null` | 输出 token |
 | `total_tokens` | `number \| null` | 总 token |
+
+`run_metrics.cache_read_tokens/cache_write_tokens` 只读取 Provider Usage。Provider 未报告时为
+`null`，不能解释为零命中；详细运行指标当前只存在于终态 SSE 和脱敏结构化日志，页面刷新后
+History 仅恢复 `conversation_id/run_id/status`。
+
+`context.tool_output_limits`只报告数字，不包含Artifact句柄、工具参数、完整结果或平台Header。例如：
+
+```json
+{
+  "threshold_tokens": 24000,
+  "spill_count": 1,
+  "spilled_bytes": 1048576,
+  "read_calls": 2,
+  "platform_downloads": 1,
+  "spill_failures": 0
+}
+```
 
 **客户端处理建议**：
 
@@ -481,12 +615,18 @@ Agent 执行过程中抛出未捕获异常时发出，此后流结束，**不会
 
 ### 4.9 `cancelled`
 
-客户端断开 SSE 连接（如 `AbortController.abort()`）且服务端检测到断开后发出。此后流结束，**不会**再发 `final`。
+正式取消接口触发 Pydantic AI `CancellationToken`，或客户端异常断开 SSE 后发出。此后流结束，
+**不会**再发 `final`。Pydantic AI 2.31 提供的中断消息状态优先用于持久化；若 Provider 尚未
+形成完整消息时，DeepAgent 仅保存官方返回的部分消息，并把最后一个非空响应规范化为
+`interrupted`；不会用前端累积内容拼造历史。已经发布但未进入该官方中断历史的工具调用，会先
+收到 `tool_call_removed`，随后才收到 `cancelled`。
 
 ```json
 {
   "type": "cancelled",
   "status": "cancelled",
+  "conversation_id": "deepagent:agent-id:session-id",
+  "run_id": "run-id",
   "history_persisted": true,
   "model_message_count": 3,
   "user_branch_point": 0
@@ -500,6 +640,9 @@ Agent 执行过程中抛出未捕获异常时发出，此后流结束，**不会
 | `history_persisted` | `boolean` | 是否已写入部分 assistant 内容 |
 | `model_message_count` | `integer` | 可选；当前会话 `ModelMessage` 条数 |
 | `user_branch_point` | `integer` | 可选；本轮 user 消息的 `branch_point` |
+| `conversation_id` | `string` | 与首条 `session` 事件一致 |
+| `run_id` | `string` | 与被取消的活动 Run 一致 |
+| `run_metrics` | `object` | 本次取消前已发生的 Usage、耗时、工具和压缩指标 |
 
 ## 5. 完整示例
 
@@ -507,25 +650,25 @@ Agent 执行过程中抛出未捕获异常时发出，此后流结束，**不会
 
 ```
 event: session
-data: {"session_id": "3eff69967bee4a809c46a47c19e113ff"}
+data: {"session_id":"3eff69967bee4a809c46a47c19e113ff","conversation_id":"deepagent:anonymous:3eff69967bee4a809c46a47c19e113ff","run_id":"run-id"}
 
 event: text
-data: {"type": "text", "delta": "让我先搜索一下文档中关于\"维度类型\"的相关内容。"}
+data: {"type": "text", "delta": "我先查看目标目录。"}
 
 event: tool_call
-data: {"type": "tool_call", "tool": "doc_search_doc_search", "args": {}, "tool_call_id": "call_00_evdBG0xFNRn5Q8IlwgZW4217"}
+data: {"type": "tool_call", "tool": "deepfos_platform_folder_list", "args": {}, "tool_call_id": "call_00_evdBG0xFNRn5Q8IlwgZW4217"}
 
 event: tool_call
-data: {"type": "tool_call", "tool": "doc_search_doc_search", "args": {"query": "维度类型"}, "tool_call_id": "call_00_evdBG0xFNRn5Q8IlwgZW4217"}
+data: {"type": "tool_call", "tool": "deepfos_platform_folder_list", "args": {"path": "/"}, "tool_call_id": "call_00_evdBG0xFNRn5Q8IlwgZW4217"}
 
 event: tool_result
-data: {"type": "tool_result", "tool": "doc_search_doc_search", "result": "### 维度管理\n...", "tool_call_id": "call_00_evdBG0xFNRn5Q8IlwgZW4217"}
+data: {"type": "tool_result", "tool": "deepfos_platform_folder_list", "result": {"items": []}, "tool_call_id": "call_00_evdBG0xFNRn5Q8IlwgZW4217"}
 
 event: text
-data: {"type": "text", "delta": "让我查看维度概览文档..."}
+data: {"type": "text", "delta": "目录读取完成。"}
 
 event: final
-data: {"type": "final", "output": "## 平台的 11 种维度类型\n...", "usage": {"requests": 4, "input_tokens": 18079, "output_tokens": 1012, "total_tokens": 19091}}
+data: {"type": "final", "output": "根目录当前没有子元素。", "usage": {"requests": 2, "input_tokens": 4096, "output_tokens": 128, "total_tokens": 4224}}
 ```
 
 ## 6. 客户端实现清单
@@ -537,10 +680,10 @@ data: {"type": "final", "output": "## 平台的 11 种维度类型\n...", "usage
 3. **文本流**：`text.delta` 顺序拼接，支持 Markdown 渲染
 4. **思考过程**：`thinking.delta` 独立缓冲，可折叠展示，不与 `text` 拼接
 5. **工具调用 upsert**：同 `tool_call_id` 的 `tool_call` 更新而非重复创建
-6. **工具结果关联**：用 `tool_call_id` 匹配并关闭对应工具块
+6. **工具结果与撤回**：`tool_result` 关闭对应工具块；`tool_call_removed` 删除对应临时工具块
 7. **压缩状态**：自动和主动 `context_compaction` 复用独立过程条；成功后以历史 Checkpoint 标记收口
 8. **结束判断**：收到 `final`、`cancelled` 或 `error` 后关闭 loading 状态
-9. **中断**：用户取消时 `AbortController.abort()`；若已收到 `cancelled` 则不必再提示错误
+9. **中断**：用户停止时只调用 `/sessions/{id}/cancel` 并等待真实 `cancelled`；失败或 `not_running` 不得断流或伪造成功，`AbortController` 只用于页面卸载和网络资源清理
 
 ## 7. 与 REST 接口的关系
 
@@ -548,6 +691,7 @@ data: {"type": "final", "output": "## 平台的 11 种维度类型\n...", "usage
 |------|------|
 | `POST /api/v1/chat` | 非流式，直接返回 `{ session_id, output, usage }` |
 | `POST /api/v1/chat/stream` | 流式（`StreamChatRequest`），支持默认 Agent 与 DB Agent 两种请求体，事件语义与上表一致 |
+| `POST /api/v1/sessions/{id}/cancel` | 请求取消当前实例内的活动 Run；客户端继续消费原 SSE，直到收到 `cancelled` |
 | `GET /api/v1/sessions/{id}` | 查询会话元信息（消息条数等），不返回 SSE |
 | `DELETE /api/v1/sessions/{id}` | 删除会话历史 |
 
@@ -565,4 +709,4 @@ data: {"type": "final", "output": "## 平台的 11 种维度类型\n...", "usage
 - 当前协议版本：**v1**（随 `/api/v1` 路径发布）
 - 新增事件类型时，`event` 与 `data.type` 将保持一致
 - 客户端对未知 `event` 应忽略，避免硬崩溃
-- `tool_call` 的「同 ID 多次推送」为当前版本的**既定行为**，不是 bug；客户端必须兼容
+- 普通 Function、MCP 和 UI 工具只发布参数校验后的调用；客户端仍应按 `tool_call_id` 幂等处理

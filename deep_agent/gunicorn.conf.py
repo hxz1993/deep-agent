@@ -5,6 +5,13 @@ _confs = load_gunicorn_configs(
     env_prefix="DEEP_AGENT_",
 )
 
+# Active Agent runs and their official Pydantic AI CancellationToken live in the
+# application process. Multiple Gunicorn workers behind one Pod would let the
+# cancel request reach a different registry and incorrectly report not_running.
+# Keep one async worker per Pod; scale with Pods only when routing is sticky or a
+# shared cancellation coordinator replaces the process-local registry.
+_confs["workers"] = 1
+
 _original_on_starting = _confs.get("on_starting")
 
 

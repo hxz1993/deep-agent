@@ -117,6 +117,10 @@ function currentFormContext() {
 }
 
 function saveContext() {
+  if (window.DeepAgentConsoleChat?.state?.streaming) {
+    window.DeepAgentConsole?.toast("请先停止当前生成，再修改测试 Header", true);
+    return;
+  }
   const before = api.loadContext();
   let next;
   try {
@@ -128,7 +132,6 @@ function saveContext() {
   closeDrawer();
 
   if (before.app !== next.app) {
-    window.DeepAgentConsoleChat?.stopStream();
     location.reload();
     return;
   }
@@ -137,11 +140,14 @@ function saveContext() {
 }
 
 function resetContext() {
+  if (window.DeepAgentConsoleChat?.state?.streaming) {
+    window.DeepAgentConsole?.toast("请先停止当前生成，再重置测试 Header", true);
+    return;
+  }
   const hadScope = Boolean(api.loadContext().app);
   api.clearContext();
   closeDrawer();
   if (hadScope) {
-    window.DeepAgentConsoleChat?.stopStream();
     location.reload();
     return;
   }

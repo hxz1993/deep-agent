@@ -21,6 +21,7 @@ from deep_agent.core.context import AppContext, get_context, init_context, reset
 from deep_agent.options import OPTION
 from tests.helpers.request_identity import install_test_user_header
 from tests.helpers.sqlite_stores import ensure_title_uses_main_model, make_sqlite_stores
+from tests.helpers.builtin_mcp_fixture import use_test_builtin_mcp
 
 
 def _parse_sse_events(raw: str) -> list[dict]:
@@ -77,7 +78,7 @@ class McpSharedHttpStreamTests(unittest.IsolatedAsyncioTestCase):
         self._tmpdir.cleanup()
         reset_context()
 
-    async def test_chat_stream_completes_with_shared_http_text_tools(self) -> None:
+    async def test_chat_stream_completes_with_shared_http_echo_fixture(self) -> None:
         registry = McpSharedRegistry(runtime_dir=Path(self._tmpdir.name))
         manager = McpLeaseManager(shared_registry=registry)
         stores, engine, session_factory = await make_sqlite_stores()
@@ -96,11 +97,13 @@ class McpSharedHttpStreamTests(unittest.IsolatedAsyncioTestCase):
         install_test_user_header(app)
         app.include_router(api_router)
         test_model = TestModel(
-            call_tools=["text_tools_reverse"],
+            call_tools=["echo_fixture_reverse"],
             custom_output_text="shared-http-ok",
         )
 
-        with patch("deep_agent.agent.factory._resolve_model", return_value=test_model):
+        with use_test_builtin_mcp(), patch(
+            "deep_agent.agent.factory._resolve_model", return_value=test_model
+        ):
             from tests.integration.helpers.chat import mock_request_disconnect
 
             self._no_title = patch(
@@ -116,7 +119,7 @@ class McpSharedHttpStreamTests(unittest.IsolatedAsyncioTestCase):
                         "/api/v1/chat/stream",
                         json={
                             "message": "reverse abc",
-                            "capabilities": ["mcp:text_tools"],
+                            "capabilities": ["mcp:echo_fixture"],
                         },
                     ) as response:
                         self.assertEqual(response.status_code, 200)
@@ -135,7 +138,7 @@ class McpSharedHttpStreamTests(unittest.IsolatedAsyncioTestCase):
         await get_context().event_persister.aclose()
         await engine.dispose()
 
-        registry_json = Path(self._tmpdir.name) / "builtin-text_tools.json"
+        registry_json = Path(self._tmpdir.name) / "builtin-echo_fixture.json"
         self.assertTrue(registry_json.is_file(), "shared MCP registry file should exist")
         record = json.loads(registry_json.read_text(encoding="utf-8"))
         self.assertIn("/mcp", record["url"])

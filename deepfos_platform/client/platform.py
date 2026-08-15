@@ -10,6 +10,10 @@ from ..options import OPTION
 __all__ = ['PlatformAPI']
 
 FILE_TYPE_ATTACHMENT = "DL"
+# Skill packages are system configuration imports.  UPL is a Space-scoped
+# user-upload type and can return an ID that is not downloadable without the
+# originating Space; INF supports the required system-level ID round trip.
+FILE_TYPE_SKILL_PACKAGE = "INF"
 
 
 class PlatformAPI(BaseAPI):
@@ -46,3 +50,7 @@ class File(ComponentAPI):
     @get('download', content_type=ContentType.bytes, data_wrapped=False)
     def download(self, file_id: str):
         return {'param': {'id': file_id}}
+
+    @post('delete/file')
+    def delete_file(self, file_id: str):
+        return {'body': {'id': file_id}}

@@ -1,0 +1,10 @@
+{
+  "scope": {"agent_id": null, "session_id": null, "run_id": null},
+  "symptom": "",
+  "evidence": [],
+  "layer": "client|deepagent|provider|mcp|database|unknown",
+  "root_cause": "",
+  "confidence": "low|medium|high",
+  "minimal_fix": "",
+  "regression_case": ""
+}

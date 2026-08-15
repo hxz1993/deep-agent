@@ -115,6 +115,7 @@ class Agent(Base):
     )
     temperature: Mapped[float | None] = mapped_column(Float, nullable=True)
     capabilities: Mapped[list[str] | None] = mapped_column(JSONType, nullable=True)
+    skills: Mapped[list[str]] = mapped_column(JSONType, nullable=False, default=list)
     prompt: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
@@ -124,6 +125,31 @@ class Agent(Base):
         nullable=False,
     )
     llm_model: Mapped[LlmModel] = relationship("LlmModel", lazy="joined")
+
+
+class SkillPackage(Base):
+    __tablename__ = "skill_packages"
+
+    code: Mapped[str] = mapped_column(KeyText, primary_key=True)
+    label: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    version: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    schema_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    source: Mapped[str] = mapped_column(String(16), nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
+    platform_file_id: Mapped[str] = mapped_column(KeyText, nullable=False)
+    file_name: Mapped[str] = mapped_column(Text, nullable=False)
+    file_size: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    manifest: Mapped[dict] = mapped_column(JSONType, nullable=False)
+    resource_index: Mapped[list[dict]] = mapped_column(JSONType, nullable=False)
+    contains_scripts: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
 
 
 class McpServer(Base):

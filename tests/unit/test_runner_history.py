@@ -6,11 +6,22 @@ from contextlib import asynccontextmanager
 from unittest.mock import patch
 
 from pydantic_ai import Agent
-from pydantic_ai.messages import ModelMessage, ModelRequest, ModelResponse, TextPart, UserPromptPart
+from pydantic_ai.messages import (
+    ModelMessage,
+    ModelRequest,
+    ModelResponse,
+    TextPart,
+    ToolCallPart,
+    ToolReturnPart,
+    UserPromptPart,
+)
+from pydantic_ai.models.function import FunctionModel
 from pydantic_ai.models.test import TestModel
+from pydantic_ai.settings import ModelSettings
 from pydantic_ai.usage import UsageLimits
 
 from deep_agent.agent.deps import AgentDeps
+from deep_agent.agent.active_runs import ActiveRunRegistry
 from deep_agent.agent.event_persister import EventPersister
 from deep_agent.agent.history import is_user_only_request, model_messages_to_history
 from deep_agent.agent.runner import AgentRunner
@@ -80,6 +91,35 @@ class AgentRunnerHistoryTests(unittest.IsolatedAsyncioTestCase):
         history = await self.store.get_history("sess-ok")
         user_messages = [m for m in history if is_user_only_request(m)]
         self.assertEqual(len(user_messages), 1)
+
+    async def test_run_stream_passes_merged_model_settings(self) -> None:
+        agent = Agent(TestModel(), deps_type=AgentDeps)
+        settings = ModelSettings(temperature=0.2, max_tokens=1024)
+        runner = AgentRunner(
+            agent,
+            self.store,
+            UsageLimits(request_limit=10),
+            model_settings=settings,
+        )
+        deps = AgentDeps(session_id="sess-model-settings")
+
+        with patch.object(
+            agent,
+            "run_stream_events",
+            wraps=agent.run_stream_events,
+        ) as run_stream_events:
+            async for _ in runner.run_stream(
+                "sess-model-settings",
+                "hello",
+                deps,
+                persister=self.persister,
+            ):
+                pass
+
+        self.assertEqual(
+            run_stream_events.call_args.kwargs["model_settings"],
+            settings,
+        )
 
     async def test_branch_from_truncates_and_restarts(self) -> None:
         agent = Agent(TestModel(), deps_type=AgentDeps)
@@ -183,8 +223,40 @@ class AgentRunnerHistoryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(final["type"], "final")
         self.assertEqual(final["model_message_count"], 2)
         self.assertEqual(final["user_branch_point"], 0)
+        self.assertEqual(final["conversation_id"], "deepagent:anonymous:sess-meta")
+        self.assertEqual(final["run_id"], deps.run_id)
+        self.assertEqual(final["run_metrics"]["status"], "completed")
+        self.assertIn("cache_read_tokens", final["usage"])
 
-    async def test_run_stream_cancel_persists_partial_text(self) -> None:
+        history = await self.store.get_history("sess-meta")
+        assistant = next(message for message in history if isinstance(message, ModelResponse))
+        self.assertEqual(assistant.run_id, final["run_id"])
+        projected = model_messages_to_history(history)
+        self.assertEqual(projected[-1].run_id, final["run_id"])
+
+    async def test_each_send_gets_a_new_run_id_in_same_conversation(self) -> None:
+        agent = Agent(TestModel(), deps_type=AgentDeps)
+        runner = AgentRunner(agent, self.store, UsageLimits(request_limit=10))
+        deps = AgentDeps(session_id="sess-run-ids")
+
+        first = [
+            event
+            async for event in runner.run_stream(
+                "sess-run-ids", "first", deps, persister=self.persister
+            )
+        ][-1]
+        await self._flush("sess-run-ids")
+        second = [
+            event
+            async for event in runner.run_stream(
+                "sess-run-ids", "second", deps, persister=self.persister
+            )
+        ][-1]
+
+        self.assertEqual(first["conversation_id"], second["conversation_id"])
+        self.assertNotEqual(first["run_id"], second["run_id"])
+
+    async def test_transport_close_keeps_user_without_synthetic_partial_response(self) -> None:
         from tests.integration.helpers.models import build_slow_stream_model
 
         chunks = ["alpha-", "beta-", "gamma-", "delta-", "omega"]
@@ -205,13 +277,10 @@ class AgentRunnerHistoryTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertLess(tracker.yielded_chunks, tracker.total_chunks)
         history = await self.store.get_history("sess-cancel")
-        self.assertGreaterEqual(len(history), 2)
-        last = history[-1]
-        self.assertIsInstance(last, ModelResponse)
-        text = last.parts[0].content if last.parts else ""
-        self.assertTrue(str(text).startswith("alpha"))
+        self.assertEqual(len(history), 1)
+        self.assertIsInstance(history[0], ModelRequest)
 
-    async def test_run_stream_persists_partial_when_consumer_closes_mid_yield(self) -> None:
+    async def test_consumer_close_does_not_fabricate_cancelled_assistant(self) -> None:
         from tests.integration.helpers.models import build_slow_stream_model
 
         chunks = ["part-a-", "part-b-", "part-c-"]
@@ -231,11 +300,106 @@ class AgentRunnerHistoryTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreater(tracker.yielded_chunks, 0)
         self.assertLess(tracker.yielded_chunks, tracker.total_chunks)
         history = await self.store.get_history("sess-close")
-        self.assertGreaterEqual(len(history), 2)
-        last = history[-1]
-        self.assertIsInstance(last, ModelResponse)
-        text = last.parts[0].content if last.parts else ""
-        self.assertIn("part-a", str(text))
+        self.assertEqual(len(history), 1)
+        self.assertIsInstance(history[0], ModelRequest)
+
+    async def test_official_interrupted_tool_call_is_repaired_by_pydantic_next_run(self) -> None:
+        captured: list[ModelMessage] = []
+
+        async def respond(messages, _info):
+            captured.extend(messages)
+            return ModelResponse(parts=[TextPart(content="continued")])
+
+        await self.store.append(
+            "sess-interrupted-next-run",
+            [
+                ModelRequest(parts=[UserPromptPart(content="start")]),
+                ModelResponse(
+                    parts=[
+                        ToolCallPart(
+                            tool_name="slow_tool",
+                            args={},
+                            tool_call_id="interrupted-call",
+                        )
+                    ],
+                    state="interrupted",
+                ),
+            ],
+        )
+        agent = Agent(FunctionModel(respond), deps_type=AgentDeps)
+        runner = AgentRunner(agent, self.store, UsageLimits(request_limit=10))
+        deps = AgentDeps(session_id="sess-interrupted-next-run")
+
+        result = await runner.run(
+            "sess-interrupted-next-run",
+            "continue",
+            deps,
+        )
+        self.assertEqual(result["status"], "completed")
+
+        interrupted_results = [
+            part
+            for message in captured
+            if isinstance(message, ModelRequest)
+            for part in message.parts
+            if isinstance(part, ToolReturnPart)
+            and part.tool_call_id == "interrupted-call"
+        ]
+        self.assertEqual(len(interrupted_results), 1)
+        self.assertEqual(interrupted_results[0].outcome, "interrupted")
+        self.assertIn("interrupted", str(interrupted_results[0].content).lower())
+
+    async def test_formal_cancel_stops_running_function_tool(self) -> None:
+        tool_started = asyncio.Event()
+        tool_cancelled = asyncio.Event()
+        registry = ActiveRunRegistry()
+        agent = Agent(
+            TestModel(call_tools=["slow_tool"], custom_output_text="should not finish"),
+            deps_type=AgentDeps,
+        )
+
+        @agent.tool_plain
+        async def slow_tool() -> str:
+            tool_started.set()
+            try:
+                await asyncio.sleep(30)
+            except asyncio.CancelledError:
+                tool_cancelled.set()
+                raise
+            return "unexpected"
+
+        runner = AgentRunner(
+            agent,
+            self.store,
+            UsageLimits(request_limit=10),
+            active_runs=registry,
+        )
+        deps = AgentDeps(session_id="sess-cancel-tool")
+        events_out: list[dict] = []
+
+        async def consume() -> None:
+            async for event in runner.run_stream(
+                "sess-cancel-tool",
+                "run tool",
+                deps,
+                persister=self.persister,
+            ):
+                events_out.append(event)
+
+        task = asyncio.create_task(consume())
+        await asyncio.wait_for(tool_started.wait(), timeout=3)
+        self.assertTrue(
+            registry.request_cancel(
+                agent_id=None,
+                session_id="sess-cancel-tool",
+                user_id=None,
+            )
+        )
+        await asyncio.wait_for(task, timeout=3)
+
+        self.assertTrue(tool_cancelled.is_set())
+        self.assertIn("cancelled", {event.get("type") for event in events_out})
+        self.assertNotIn("final", {event.get("type") for event in events_out})
 
     async def test_run_stream_normal_complete_does_not_snapshot_after_full_persist(self) -> None:
         from tests.integration.helpers.models import build_slow_stream_model

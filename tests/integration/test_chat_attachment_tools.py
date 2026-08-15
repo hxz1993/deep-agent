@@ -36,7 +36,7 @@ class ChatAttachmentToolIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 name="attachment-agent",
                 model_id=model.id,
                 prompt="读取用户附件并回答。",
-                capabilities=["builtin:attachment"],
+                capabilities=[],
             )
         )
         self.app = FastAPI()
@@ -73,8 +73,11 @@ class ChatAttachmentToolIntegrationTests(unittest.IsolatedAsyncioTestCase):
             if calls == 1:
                 yield {
                     0: DeltaToolCall(
-                        name="read_text_attachment",
-                        json_args=f'{{"file_id":"{file_id}","limit":2}}',
+                        name="read_file",
+                        json_args=(
+                            '{"resource":{"type":"attachment",'
+                            f'"file_id":"{file_id}"}},"limit":2}}'
+                        ),
                         tool_call_id="attachment-read",
                     )
                 }
@@ -107,7 +110,7 @@ class ChatAttachmentToolIntegrationTests(unittest.IsolatedAsyncioTestCase):
         return parse_sse_events(raw)
 
     @patch(
-        "deep_agent.capabilities.attachments.builtin._download_file",
+        "deep_agent.files.toolset._download_file",
         new_callable=AsyncMock,
         return_value=b"first line\nsecond line\nthird line",
     )
@@ -147,7 +150,7 @@ class ChatAttachmentToolIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(
             any(
                 isinstance(part, ToolReturnPart)
-                and part.tool_name == "read_text_attachment"
+                and part.tool_name == "read_file"
                 for message in raw_history
                 for part in message.parts
             )

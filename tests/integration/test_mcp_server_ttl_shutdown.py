@@ -12,6 +12,7 @@ from deep_agent.capabilities.mcp.shared_registry import (
     _record_is_live,
     shared_mcp_identity,
 )
+from tests.helpers.builtin_mcp_fixture import use_test_builtin_mcp
 
 
 class McpServerTtlShutdownTests(unittest.IsolatedAsyncioTestCase):
@@ -22,8 +23,9 @@ class McpServerTtlShutdownTests(unittest.IsolatedAsyncioTestCase):
                 server_ttl=3.0,
                 connect_timeout=20.0,
             )
-            await registry.ensure_server("text_tools", {})
-            identity = shared_mcp_identity("text_tools")
+            with use_test_builtin_mcp():
+                await registry.ensure_server("echo_fixture", {})
+            identity = shared_mcp_identity("echo_fixture")
             record = json.loads((Path(tmpdir) / f"{identity}.json").read_text(encoding="utf-8"))
 
             deadline = time.monotonic() + 15.0

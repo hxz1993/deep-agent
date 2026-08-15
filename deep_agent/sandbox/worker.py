@@ -3,14 +3,18 @@ from __future__ import annotations
 import ast
 import contextlib
 import io
+import json
+import runpy
 import sys
 import traceback
+from pathlib import Path
 from typing import Any, Iterator
 
 from deep_agent.sandbox.framing import FramingError, read_frame, write_frame
 from deep_agent.sandbox.serialization import serialize_result, truncate_utf8
 from deep_agent.sandbox.types import (
     ExecuteRequest,
+    MAX_RESULT_BYTES,
     MAX_STDERR_BYTES,
     MAX_STDOUT_BYTES,
     MAX_TRACEBACK_BYTES,
@@ -119,6 +123,66 @@ def execute_code(code: str, inputs: dict[str, Any]) -> tuple[str, str, Any | Non
     return stdout, stderr, result if status == "ok" else None, error, truncated
 
 
+def execute_script(
+    arguments: tuple[str, ...],
+) -> tuple[
+    str,
+    str,
+    Any | None,
+    SandboxErrorPayload | None,
+    TruncationMetadata,
+    int,
+]:
+    truncated = TruncationMetadata()
+    error: SandboxErrorPayload | None = None
+    result: Any | None = None
+    exit_code = 0
+    original_argv = list(sys.argv)
+
+    with capture_stdio() as (stdout_capture, stderr_capture):
+        try:
+            sys.argv = ["main.py", *arguments]
+            try:
+                runpy.run_path("main.py", run_name="__main__")
+            except SystemExit as exc:
+                if exc.code not in (None, 0):
+                    exit_code = int(exc.code) if isinstance(exc.code, int) else 1
+                    error = _exception_payload(
+                        RuntimeError(f"script exited with status {exit_code}")
+                    )
+        except Exception as exc:
+            if exit_code == 0:
+                exit_code = 1
+            error = _exception_payload(exc)
+        finally:
+            sys.argv = original_argv
+
+        try:
+            result_path = Path("outputs/result.json")
+            if result_path.is_file():
+                raw = result_path.read_bytes()
+                if len(raw) > MAX_RESULT_BYTES:
+                    raise ValueError(f"outputs/result.json exceeds {MAX_RESULT_BYTES} bytes")
+                parsed = json.loads(raw.decode("utf-8"))
+                result, result_truncated = serialize_result(parsed)
+                truncated = TruncationMetadata(result=result_truncated)
+        except Exception as exc:
+            if exit_code == 0:
+                exit_code = 1
+            if error is None:
+                error = _exception_payload(exc)
+
+    stdout, stdout_truncated = truncate_utf8(stdout_capture.getvalue(), MAX_STDOUT_BYTES)
+    stderr, stderr_truncated = truncate_utf8(stderr_capture.getvalue(), MAX_STDERR_BYTES)
+    truncated = TruncationMetadata(
+        stdout=stdout_truncated,
+        stderr=stderr_truncated,
+        traceback=truncated.traceback,
+        result=truncated.result,
+    )
+    return stdout, stderr, result, error, truncated, exit_code
+
+
 def _error_response(
     request_id: str,
     *,
@@ -157,18 +221,25 @@ def handle_request(frame: dict[str, Any]) -> dict[str, Any]:
             message=str(exc),
         )
 
-    stdout, stderr, result, error, truncated = execute_code(
-        request.code,
-        dict(request.inputs),
-    )
+    if request.mode == "script":
+        stdout, stderr, result, error, truncated, exit_code = execute_script(
+            request.arguments,
+        )
+    else:
+        stdout, stderr, result, error, truncated = execute_code(
+            request.code,
+            dict(request.inputs),
+        )
+        exit_code = 0
     if error is not None:
         return {
             "request_id": request.request_id,
             "status": "error",
             "stdout": stdout,
             "stderr": stderr,
-            "result": None,
+            "result": result,
             "error": error,
+            "exit_code": exit_code,
             "truncated": truncated.model_dump(),
         }
     return {
@@ -178,6 +249,7 @@ def handle_request(frame: dict[str, Any]) -> dict[str, Any]:
         "stderr": stderr,
         "result": result,
         "error": None,
+        "exit_code": exit_code,
         "truncated": truncated.model_dump(),
     }
 

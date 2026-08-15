@@ -68,14 +68,13 @@ test("后端 category 直接驱动工具包分组", () => {
   const grouped = ui.groupCapabilities([
     { code: "builtin:general", category: "builtin", label: "通用工具" },
     { code: "builtin:sandbox", category: "builtin", label: "Python 沙箱" },
-    { code: "builtin:attachment", category: "builtin", label: "附件读取" },
     { code: "mcp:demo", category: "mcp" },
   ]);
 
   assert.deepEqual([...grouped.groups], ["builtin", "mcp"]);
   assert.deepEqual(
     Array.from(grouped.byGroup.builtin, (toolPackage) => toolPackage.code),
-    ["builtin:general", "builtin:sandbox", "builtin:attachment"],
+    ["builtin:general", "builtin:sandbox"],
   );
   assert.equal(ui.capabilityGroup({ category: "builtin" }), "builtin");
   assert.equal(ui.capabilityGroup({ category: "mcp" }), "mcp");
@@ -122,6 +121,38 @@ test("Agent 内置工具卡片优先展示中文名称和技术类型", () => {
   assert.match(card, /get_current_time/);
 });
 
+test("Agent 工具包卡片展示后端披露策略且不提供工具级复选框", () => {
+  const ui = loadAgentConfigurationUi();
+  const card = ui.window.agentsAdmin.renderCapCard(
+    {
+      code: "mcp:deepfos",
+      category: "mcp",
+      label: "deepfos",
+      source: "database",
+      description: "DeepFOS 平台工具",
+      default_enabled: false,
+      tool_count: 24,
+      disclosure_mode: "search",
+      preselect_limit: 3,
+      search_result_limit: 5,
+      tools: [],
+    },
+    new Set(["mcp:deepfos"]),
+  );
+
+  assert.match(card, /自动预选 Top 3 · 搜索 Top 5/);
+  assert.match(card, /value="mcp:deepfos"/);
+  assert.doesNotMatch(card, /tool-checkbox|name="tools"/);
+});
+
+test("Agent 将 Skill 与工具包分开配置", () => {
+  assert.doesNotMatch(source, /skill:\s*"Skills"/);
+  assert.match(template, /id="agentSkillChoices"/);
+  assert.match(source, /skills: this\.getSelectedSkills\(\)/);
+  assert.match(source, /input type="checkbox" name="agentSkill"/);
+  assert.match(source, /该 Skill 当前不存在，保存时将保留原引用/);
+});
+
 test("编辑 Agent 时在弹窗标题栏显示完整 Agent ID", () => {
   assert.match(template, /id="agentModalId"/);
   assert.match(
@@ -129,4 +160,18 @@ test("编辑 Agent 时在弹窗标题栏显示完整 Agent ID", () => {
     /agentModalId"\)\.textContent = `Agent ID：\$\{agent\.id \|\| agentId\}`/,
   );
   assert.doesNotMatch(template, /<th>Agent ID<\/th>/);
+});
+
+test("System Prompt 标题栏展示统一后端估算的字符和 Token", () => {
+  const ui = loadAgentConfigurationUi();
+
+  assert.match(template, /id="agentPromptEstimate"/);
+  assert.match(template, /0 字 \/ 0 Token/);
+  assert.match(source, /apiFetch\("\/api\/v1\/agents\/prompt-estimate"/);
+  assert.match(source, /model_id: modelId, prompt/);
+  assert.match(source, /schedulePromptEstimate\(true\)/);
+  assert.equal(ui.formatCompactCount(999), "999");
+  assert.equal(ui.formatCompactCount(12_600), "12.6K");
+  assert.equal(ui.formatCompactCount(200_000), "200K");
+  assert.equal(ui.formatCompactCount(1_250_000), "1.3M");
 });

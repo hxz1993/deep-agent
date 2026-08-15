@@ -16,6 +16,8 @@ from deep_agent.schemas.mcp import (
     McpBuiltinConfig,
     McpInspectionResult,
     McpServerCreate,
+    McpServerRenameRequest,
+    McpServerRenameResponse,
     McpServerResponse,
     McpServerUpdate,
     normalize_mcp_url_config,
@@ -35,7 +37,7 @@ async def _inspect_and_store(
     )
     updated = await store.update_inspection(
         row.name,
-        result.inspection.model_dump(mode="json"),
+        result.inspection.to_storage_value(),
     )
     return updated, result
 
@@ -96,7 +98,7 @@ def _should_reinspect(row, body: McpServerUpdate) -> bool:
 async def list_mcp_servers(
     store: McpServerStoreBase = Depends(get_mcp_store),
 ) -> list[McpServerResponse]:
-    rows = await store.list_all()
+    rows = await store.list_for_admin()
     return [McpServerResponse.from_row(row) for row in rows]
 
 
@@ -137,7 +139,7 @@ async def create_mcp_server(
             candidate,
             request_headers=extract_forward_headers(request),
         )
-        inspection = result.inspection.model_dump(mode="json")
+        inspection = result.inspection.to_storage_value()
     try:
         row = await store.create_unique(body, inspection=inspection)
     except ValueError as exc:
@@ -159,17 +161,48 @@ async def update_mcp_server(
     candidate = _candidate_row(row, body)
     config_changed = bool({"transport", "config"} & body.model_fields_set)
     if config_changed:
-        candidate.inspection = mark_mcp_inspection_stale(row).model_dump(mode="json")
+        candidate.inspection = mark_mcp_inspection_stale(row).to_storage_value()
     inspection = candidate.inspection
     if _should_reinspect(row, body):
         result = await inspect_mcp_server(
             candidate,
             request_headers=extract_forward_headers(request),
         )
-        inspection = result.inspection.model_dump(mode="json")
+        inspection = result.inspection.to_storage_value()
     updated = await store.update(name, body, inspection=inspection)
     assert updated is not None
     return McpServerResponse.from_row(updated)
+
+
+@router.post("/mcp/{name}/rename", response_model=McpServerRenameResponse)
+async def rename_mcp_server(
+    name: str,
+    body: McpServerRenameRequest,
+    store: McpServerStoreBase = Depends(get_mcp_store),
+) -> McpServerRenameResponse:
+    try:
+        result = await store.rename_with_agent_references(name, body.new_name)
+    except PermissionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(exc),
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
+    if result is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"MCP server not found: {name}",
+        )
+    return McpServerRenameResponse(
+        old_name=name,
+        new_name=result.row.name,
+        updated_agents=result.updated_agent_names,
+        mcp=McpServerResponse.from_row(result.row),
+    )
 
 
 @router.delete("/mcp/{name}", status_code=status.HTTP_200_OK)

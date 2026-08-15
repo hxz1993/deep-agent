@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import io
 import json
+import shutil
 import unittest
 import uuid
+import zipfile
 from unittest.mock import AsyncMock, patch
 
 from fastapi import FastAPI
@@ -29,6 +32,8 @@ from deep_agent.sandbox.types import (
 )
 from deep_agent.schemas.agent import AgentCreate
 from deep_agent.schemas.llm_model import LlmModelCreate
+from deep_agent.schemas.skill import SkillPackageRecord
+from deep_agent.skills.package import parse_skill_zip
 from tests.helpers.request_identity import install_test_user_header
 from tests.helpers.sandbox import sandbox_test_python
 from tests.helpers.sqlite_stores import make_sqlite_stores
@@ -47,7 +52,6 @@ class UnavailableSandboxBackend:
                     "backend": "unavailable",
                     "state_scope": "request",
                     "security_level": "none",
-                    "production_ready": False,
                 },
             )()
         )
@@ -220,6 +224,108 @@ class ChatPythonSandboxIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(tool_calls), 1)
         self.assertEqual(len(tool_returns), 1)
         self.assertEqual(tool_returns[0].content["result"], 2)
+
+    async def test_subprocess_backend_exposes_authorized_skill_script_and_persists_pair(self) -> None:
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr(
+                "script-test/SKILL.md",
+                "---\nname: script-test\ndescription: Test script execution.\n---\n",
+            )
+            archive.writestr(
+                "script-test/scripts/run.py",
+                "import json\nfrom pathlib import Path\n"
+                "values=json.loads(Path('inputs.json').read_text())['values']\n"
+                "Path('outputs/result.json').write_text(json.dumps({'total':sum(values)}))\n",
+            )
+        raw = buffer.getvalue()
+        parsed = parse_skill_zip(raw)
+        try:
+            row = await get_context().stores.skill_package.create(
+                SkillPackageRecord(
+                    code=parsed.code,
+                    label=parsed.label,
+                    description=parsed.description,
+                    version=parsed.version,
+                    schema_version=parsed.schema_version,
+                    source="upload",
+                    enabled=True,
+                    platform_file_id="test-script-file",
+                    file_name="script-test.zip",
+                    file_size=len(raw),
+                    content_hash=parsed.content_hash,
+                    manifest=parsed.manifest,
+                    resource_index=parsed.resource_index,
+                    contains_scripts=True,
+                )
+            )
+        finally:
+            shutil.rmtree(parsed.package_root.parent, ignore_errors=True)
+        current = get_context()
+        await current.skill_runtime.materialize(row, request_headers={}, payload=raw)
+        init_context(
+            AppContext.for_testing(
+                registry=build_registry(
+                    sandbox_backend=self.backend,
+                    sandbox_profile=self.sandbox_profile,
+                ),
+                stores=current.stores,
+                mcp_lease_manager=current.mcp_lease_manager,
+                event_persister=current.event_persister,
+                db_engine=self._engine,
+                db_session_factory=current.db_session_factory,
+                sandbox_backend=self.backend,
+                sandbox_profile=self.sandbox_profile,
+                skill_runtime=current.skill_runtime,
+            )
+        )
+        script_agent = await get_context().stores.agent.create_unique(
+            AgentCreate(
+                name="skill-script-agent",
+                model_id=self.agent.model_id,
+                prompt="Run the selected Skill script when requested.",
+                capabilities=["builtin:sandbox"],
+                skills=["script-test"],
+            )
+        )
+        events = await self._stream(
+            {"agent_id": script_agent.id, "message": "计算总数"},
+            model=self._model(
+                [
+                    {
+                        "tool": "execute_skill_script",
+                        "args": {
+                            "skill_code": "script-test",
+                            "script_path": "scripts/run.py",
+                            "inputs": {"values": [2, 3, 5]},
+                        },
+                        "tool_call_id": "skill-script-run",
+                    },
+                    {"text": "总数是 10"},
+                ]
+            ),
+        )
+        session_id = events[0]["session_id"]
+        await get_context().event_persister.flush(session_id, agent_id=script_agent.id)
+        history = await get_context().store.get_history(
+            session_id,
+            agent_id=script_agent.id,
+        )
+        calls = [
+            part
+            for message in history
+            for part in message.parts
+            if isinstance(part, ToolCallPart) and part.tool_name == "execute_skill_script"
+        ]
+        returns = [
+            part
+            for message in history
+            for part in message.parts
+            if isinstance(part, ToolReturnPart) and part.tool_name == "execute_skill_script"
+        ]
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(len(returns), 1)
+        self.assertEqual(returns[0].content["result"], {"total": 10})
 
     async def test_second_call_cannot_see_first_call_variables(self) -> None:
         session_id = str(uuid.uuid4())

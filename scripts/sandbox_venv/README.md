@@ -69,4 +69,5 @@ test / dev 应用镜像若保持 `SANDBOX_ENABLED=true` + `subprocess-dev`，可
    `DEEP_AGENT_SANDBOX_PYTHON`（如 `/tmp/.venv-sandbox/bin/python`）；gunicorn 主进程在 fork worker
    前自动执行 setup，无需为 pydata 依赖重建镜像。
 
-详见 [`docs/design/07-python-sandbox/ops-kubernetes-sidecar.md`](../../docs/design/07-python-sandbox/ops-kubernetes-sidecar.md) §4。
+两个工具的运行语义和边界见
+[`docs/design/07-python-sandbox/README.md`](../../docs/design/07-python-sandbox/README.md)。

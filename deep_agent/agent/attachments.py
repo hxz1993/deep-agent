@@ -16,33 +16,11 @@ from deep_agent.schemas.attachment import AttachmentRef
 from deep_agent.schemas.context_reference import ContextReference
 
 ATTACHMENT_REF_KIND = "attachment-ref"
-_NATIVE_MEDIA: tuple[tuple[str, str, str], ...] = (
-    ("image/", "image", "图片"),
-    ("audio/", "audio", "音频"),
-    ("video/", "video", "视频"),
-)
-
-
-def model_supports_image_input(
-    db_modalities: list[str] | None = None,
-) -> bool:
-    """Return whether the model accepts image attachments.
-
-    ``llm_models.input_modalities`` is the sole runtime source. The model name,
-    Provider URL, and catalog are intentionally not consulted.
-
-    Args:
-        db_modalities: ``input_modalities`` persisted on the ``llm_models`` row.
-    """
-    return "image" in (db_modalities or [])
+_NATIVE_MEDIA_PREFIXES = ("image/", "audio/", "video/")
 
 
 class AttachmentDownloadError(Exception):
     """Platform file download returned an error payload instead of file bytes."""
-
-
-class UnsupportedAttachmentModalityError(ValueError):
-    """Attached native media is incompatible with the active model."""
 
 
 def attachment_ref_dict(ref: AttachmentRef) -> dict[str, Any]:
@@ -141,9 +119,7 @@ async def resolve_user_prompt(
     request_headers: Mapping[str, str],
     *,
     context_refs: Sequence[ContextReference] | None = None,
-    input_modalities: Sequence[str] | None = None,
 ) -> list[UserContent]:
-    modalities = frozenset(input_modalities or ())
     parts: list[UserContent] = []
     text = message.strip()
     if context_refs:
@@ -156,7 +132,6 @@ async def resolve_user_prompt(
                 ref,
                 request_headers,
                 full=True,
-                modalities=modalities,
             )
         )
     return parts
@@ -167,9 +142,7 @@ async def resolve_history_for_llm(
     *,
     current_user_index: int | None,
     request_headers: Mapping[str, str],
-    input_modalities: Sequence[str] | None = None,
 ) -> list[ModelMessage]:
-    modalities = frozenset(input_modalities or ())
     resolved: list[ModelMessage] = []
     for idx, message in enumerate(messages):
         if not isinstance(message, ModelRequest):
@@ -188,7 +161,6 @@ async def resolve_history_for_llm(
                         part.content,
                         request_headers,
                         full=full_turn,
-                        modalities=modalities,
                     ),
                 )
             )
@@ -221,7 +193,6 @@ async def _resolve_user_prompt_part(
     request_headers: Mapping[str, str],
     *,
     full: bool,
-    modalities: frozenset[str],
 ) -> str | list[UserContent]:
     if isinstance(content, str):
         return content
@@ -257,7 +228,6 @@ async def _resolve_user_prompt_part(
                     ref,
                     request_headers,
                     full=full,
-                    modalities=modalities,
                 )
             )
             continue
@@ -275,7 +245,6 @@ async def _resolve_ref(
     request_headers: Mapping[str, str],
     *,
     full: bool,
-    modalities: frozenset[str],
 ) -> list[UserContent]:
     mime = (ref.mime or "").split(";", 1)[0].strip().lower()
     name = ref.name or ref.id
@@ -288,13 +257,7 @@ async def _resolve_ref(
             )
         ]
 
-    native = _native_modality_for_mime(mime)
-    if native is not None:
-        modality, label = native
-        if modality not in modalities:
-            raise UnsupportedAttachmentModalityError(
-                f"当前模型不支持{label}输入（附件: {name}）"
-            )
+    if _is_native_media(mime):
         try:
             data = await _download_file(ref.id, request_headers)
         except AttachmentDownloadError:
@@ -303,15 +266,10 @@ async def _resolve_ref(
     return [
         TextContent(
             f"[附件: {name}] (file_id: {ref.id}, mime: {ref.mime or 'unknown'})"
-            "（如需读取内容，请调用 attachment 工具）"
+            "（如需读取内容，请调用 read_file 系统工具）"
         )
     ]
 
 
-def _native_modality_for_mime(mime: str) -> tuple[str, str] | None:
-    for prefix, modality, label in _NATIVE_MEDIA:
-        if mime.startswith(prefix):
-            return modality, label
-    if mime == "application/pdf":
-        return "pdf", "PDF"
-    return None
+def _is_native_media(mime: str) -> bool:
+    return mime.startswith(_NATIVE_MEDIA_PREFIXES)

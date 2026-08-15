@@ -3,35 +3,22 @@
 DeepAgent 是基于 FastAPI、Pydantic AI 和 SQLAlchemy 的多用户 Agent 服务，并
 随服务发布一体化运维控制台。
 
-当前产品版本为 `0.3.7`。`deep_agent.__version__` 是唯一代码版本来源，FastAPI、
+当前产品版本为 `0.4.9`。`deep_agent.__version__` 是唯一代码版本来源，FastAPI、
 `GET /info` 和 Console 顶部版本徽标均读取该值。后续正式发布默认递增
 `MAJOR.MINOR.PATCH` 的第三位，只有明确规划重大版本时才调整前两位。产品版本不通过
 环境变量或数据库覆盖，也不等同于 Alembic 数据库结构 revision。
 
-v0.3.4 在原有自动上下文压缩之外增加 session 级主动压缩 SSE 接口。Console 可在输入框旁
-随时尝试压缩当前历史，并展示后端估算的上下文占用与当前有效 Checkpoint；原始聊天历史
-仍完整保留。空、短或无明显压缩收益的历史由后端返回 `noop`，前端不替用户禁用入口。
-
-v0.3.5 为普通和流式聊天增加结构化 `context_refs`。原始引用及 `metadata` 随会话历史保存，
-模型只接收去掉 `metadata` 的 XML + JSON 派生投影；纯引用会话、分支、标题和上下文压缩
-使用同一原始事实源，不新增数据库表或迁移。
-
-v0.3.6 将上下文语义压缩收敛为单次摘要：在一个安全消息边界上选择待摘要前缀与最近尾部，
-一次生成并复检 Checkpoint。429、502、503、504、网络重置或超时只允许使用完全相同的摘要
-请求重试一次；无法安全装入模型窗口时不拆段归纳，也不覆盖已有 Checkpoint。
-
-v0.3.7 统一自动与主动压缩的实时过程条、Checkpoint 保存结果和历史压缩标记；配置中心按
-“Agent 设置 / 系统设置 / 辅助资源”重新分组，并增加不暴露凭据和本地完整路径的只读数据库
-连接摘要。
+各版本功能变更与迁移说明见 [`CHANGELOG.md`](CHANGELOG.md)。
 
 ## 项目结构
 
 | 路径 | 职责 |
 | --- | --- |
+| [`CHANGELOG.md`](CHANGELOG.md) | 产品版本更新记录与迁移摘要 |
 | [`deep_agent/`](deep_agent/AGENTS.md) | API、Agent 运行时、能力装配、会话和数据库 |
 | [`frontend/`](frontend/AGENTS.md) | `/console/` 静态控制台 |
 | [`mcps/`](mcps/AGENTS.md) | 仓库内置 MCP Server |
-| [`skills/`](skills/) | Python Skill |
+| [`deep_agent/builtin_skills/`](deep_agent/builtin_skills/) | 代码内置只读 Skill；上传 Skill 由平台文件服务保存原包 |
 | [`deepfos_platform/`](deepfos_platform/README.md) | 平台配置、客户端、服务发现和部署运行时支撑 |
 | [`maintenance/`](maintenance/README.md) | 人工维护程序，不属于 Agent 工具 |
 | [`tests/`](tests/README.md) | Python、接口、MCP 和 Console 测试 |
@@ -90,7 +77,7 @@ uvicorn deep_agent.main:app --host 0.0.0.0 --port 8000
 `deep_agent.local_dev` 只用于本机回环调试，不用于容器部署。容器镜像若启用
 `subprocess-dev`，构建阶段同样需要执行 `scripts/sandbox_venv/setup.sh`（或等价步骤），
 并设置 `DEEP_AGENT_SANDBOX_PYTHON`；详见
-[`docs/design/07-python-sandbox/ops-kubernetes-sidecar.md`](docs/design/07-python-sandbox/ops-kubernetes-sidecar.md) §5.3。
+[`scripts/sandbox_venv/README.md`](scripts/sandbox_venv/README.md)。
 
 ## 数据库基线
 
@@ -100,6 +87,15 @@ v0.3.0 将发布前的 Alembic `001`～`023` 历史压缩为唯一基线 `001`�
 `stamp --purge 001` 重设版本。完整备份和切换命令见
 [`maintenance/README.md`](maintenance/README.md)。
 
+当前 Alembic head 为 `006`：`002` 统一 ToolPackage 与 UI 工具包；`003` 将线上 Skill 与
+ToolPackage 分离；`004`清理已废弃的`builtin:attachment`；`005`和`006`依次删除已下线的
+预制MCP记录，并从显式Agent能力列表中清理对应引用。升级
+`003` 前仍必须确认 `agents.capabilities` 不存在历史 `skill:*` 引用。
+
+配置备份会复制全部配置表并只保留会话表结构；上传Skill的原始ZIP不塞入数据库备份。需要完整
+留存或跨环境迁移时，同时在Console Skill页面执行“导出全部”。备份程序会校验每张ORM业务表都已
+明确归类，避免后续新增表时静默漏备份；完整边界见[`maintenance/README.md`](maintenance/README.md)。
+
 ## 工具包类型
 
 DeepAgent 当前支持：
@@ -107,9 +103,17 @@ DeepAgent 当前支持：
 - 内置工具：
   - `builtin:general`（通用工具）：默认启用，只包含 `get_current_time`。
   - `builtin:sandbox`（Python 沙箱）：默认关闭，只包含 `execute_python`。
-  - `builtin:attachment`（附件读取）：默认关闭，包含 TXT、DOCX、XLSX 按需读取工具。
-- `skill:<name>`：Python Skill，组合 Instructions 和函数工具。
-- `mcp:<name>`：URL、stdio 或 builtin MCP。
+- 系统工具不是 ToolPackage。Harness任务规划、`load_capability`、Skill Resource、`read_file`、`read_tool_result`、
+  `search_tools` 和 MCP Resource
+  由运行时按 Agent/Run 条件自动注入，只在 Console 的只读“系统工具”目录中说明。
+- 每个Run均可使用Harness `Planning`的六个官方工具；模型只在复杂任务需要时创建计划，计划在
+  本轮内存中维护，SSE与History携带展示快照，下一轮重新开始，不新增计划表。Console只在
+  消息区底部以轻量浮层显示当前最新Run的未完成计划，全部完成后自动隐藏。
+- MCP Tool Search使用字段化词法检索：标准协议名、MCP `title`、参数和描述提供召回依据；支持
+  拼音与有限错字纠正，但不把词法匹配伪装成任意中英文语义翻译。
+- Skill 不再属于 ToolPackage。Agent 通过独立 `skills` 列表选择，Harness 按需加载 `SKILL.md`；
+  Skill 不能绕过 `capabilities` 获得 MCP 或其他工具。
+- `mcp:<name>`：URL或Builtin MCP；历史stdio记录只允许查看/删除，不能新建、修改或运行。
 - `ui:builtin`：代码内置的确认和候选选择交互，默认关闭。
 - `ui:<package>`：数据库管理的手工 UI 工具包，Agent 按包启用。
 
@@ -117,14 +121,26 @@ DeepAgent 当前支持：
 `capabilities` 字段保存工具包编码；当前不提供包内逐工具授权。Output Tool 是最终输出契约，
 不属于工具包，也不进入 `capabilities`。
 
-仓库不再注册 Cursor 专属 Skill。未来需要长 Skill 渐进披露时，在通用
-`skill:` 机制内设计。
+Skill 管理接口和包格式见
+[`docs/design/12-agent-skills/skill-system-design.md`](docs/design/12-agent-skills/skill-system-design.md)。
+
+## 大工具结果
+
+v0.4.0 使用 Harness `ToolOutputLimits` 在工具执行后、结果进入下一次模型请求前识别超大结果。
+完整内容保存到平台文件服务，模型历史只保留首尾预览、结构草图和平台 File ID；模型需要细节时
+通过系统工具 `read_tool_result` 按行或关键词读取。该机制不增加 Artifact 表或数据库迁移，句柄
+权限只从当前会话的原始 `chat_messages`恢复，Checkpoint 不能扩大访问范围。完整边界见
+[`docs/design/05-tool-optimization/tool-optimization-design.md`](docs/design/05-tool-optimization/tool-optimization-design.md#92-tooloutputlimits-与大工具结果外置)。
 
 ## 测试
 
 ```bash
 python3.12 -m unittest discover -s tests -p 'test_*.py'
 node --test tests/frontend/console/*.test.mjs
+
+# 压缩核心覆盖率门槛（开发依赖，不进入生产镜像）
+python3.12 -m pip install -r requirements-dev.txt
+python3.12 tests/check_context_compaction_coverage.py
 ```
 
 具体开发和测试要求见根目录及子目录的 `AGENTS.md`。

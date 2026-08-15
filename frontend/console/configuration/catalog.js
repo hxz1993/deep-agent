@@ -6,7 +6,6 @@ const MODALITY_LABELS = {
   image: "图像",
   audio: "音频",
   video: "视频",
-  pdf: "PDF",
 };
 const TAG_LABELS = {
   attachment: "附件",

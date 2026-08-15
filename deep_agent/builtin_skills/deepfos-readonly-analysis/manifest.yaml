@@ -1,0 +1,4 @@
+code: deepfos-readonly-analysis
+label: DeepFOS 只读分析
+version: "1.0.0"
+schema_version: "1.0"

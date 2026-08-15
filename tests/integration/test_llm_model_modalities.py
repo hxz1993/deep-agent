@@ -7,7 +7,7 @@ import unittest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
-from deep_agent.agent.attachments import model_supports_image_input
+from deep_agent.agent.context.estimator import TokenEstimator
 from deep_agent.api.v1 import api_router
 from deep_agent.capabilities import build_registry
 from deep_agent.capabilities.mcp.lease_manager import McpLeaseManager
@@ -74,11 +74,7 @@ class LlmModelRuntimeFactsIntegrationTests(unittest.IsolatedAsyncioTestCase):
             )
             self.assertEqual(patch_response.status_code, 200)
             patched = patch_response.json()
-            self.assertFalse(
-                model_supports_image_input(
-                    db_modalities=patched["input_modalities"],
-                )
-            )
+            self.assertEqual(patched["input_modalities"], ["text"])
 
     async def test_create_requires_modalities_context_and_output(self) -> None:
         async with AsyncClient(transport=self._transport, base_url="http://test") as client:
@@ -115,6 +111,47 @@ class LlmModelRuntimeFactsIntegrationTests(unittest.IsolatedAsyncioTestCase):
             batch = await client.post("/api/v1/llm-models/refresh-metadata")
         self.assertIn(one.status_code, {404, 405})
         self.assertIn(batch.status_code, {404, 405, 422})
+
+    async def test_agent_prompt_estimate_reuses_model_token_estimator(self) -> None:
+        prompt = "分析 2026 年预算差异，并返回关键风险。"
+        async with AsyncClient(transport=self._transport, base_url="http://test") as client:
+            create_response = await client.post(
+                "/api/v1/llm-models",
+                json=model_payload(name="estimate-model"),
+            )
+            model = create_response.json()
+            response = await client.post(
+                "/api/v1/agents/prompt-estimate",
+                json={"model_id": model["id"], "prompt": prompt},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        estimator = TokenEstimator.for_model("private:my-model")
+        self.assertEqual(data["character_count"], len(prompt))
+        self.assertEqual(data["estimated_tokens"], estimator.text(prompt))
+        self.assertEqual(data["estimator_source"], estimator.source)
+
+    async def test_agent_prompt_estimate_handles_empty_and_missing_model(self) -> None:
+        async with AsyncClient(transport=self._transport, base_url="http://test") as client:
+            create_response = await client.post(
+                "/api/v1/llm-models",
+                json=model_payload(name="empty-estimate-model"),
+            )
+            model_id = create_response.json()["id"]
+            empty = await client.post(
+                "/api/v1/agents/prompt-estimate",
+                json={"model_id": model_id, "prompt": "   "},
+            )
+            missing = await client.post(
+                "/api/v1/agents/prompt-estimate",
+                json={"model_id": "0" * 32, "prompt": "hello"},
+            )
+
+        self.assertEqual(empty.status_code, 200)
+        self.assertEqual(empty.json()["character_count"], 0)
+        self.assertEqual(empty.json()["estimated_tokens"], 0)
+        self.assertEqual(missing.status_code, 404)
 
 
 if __name__ == "__main__":

@@ -2,13 +2,21 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
+from deep_agent.agent.context.estimator import TokenEstimator
 from deep_agent.core.context import AppContextDep
 from deep_agent.capabilities.catalog import invalid_tool_package_codes
 from deep_agent.db.deps import get_agent_store, get_llm_model_store
 from deep_agent.db.ids import normalize_agent_id
 from deep_agent.db.stores.agent import AgentStoreBase
 from deep_agent.db.stores.llm_model import LlmModelStoreBase
-from deep_agent.schemas.agent import AgentCreate, AgentResponse, AgentUpdate
+from deep_agent.schemas.agent import (
+    AgentCreate,
+    AgentPromptEstimateRequest,
+    AgentPromptEstimateResponse,
+    AgentResponse,
+    AgentUpdate,
+)
+from deep_agent.skills.runtime import validate_skill_codes
 
 router = APIRouter()
 
@@ -54,12 +62,56 @@ async def _validate_tool_packages(
         )
 
 
+async def _validate_skills(
+    skills: list[str],
+    ctx: AppContextDep,
+    *,
+    allow_disabled: set[str] | None = None,
+) -> None:
+    invalid = await validate_skill_codes(ctx.stores, skills)
+    if allow_disabled:
+        invalid = [code for code in invalid if code not in allow_disabled]
+    if invalid:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "message": "Agent 包含未知、禁用或重复的 Skill",
+                "invalid_skills": invalid,
+            },
+        )
+
+
 @router.get("/agents", response_model=list[AgentResponse])
 async def list_agents(
     store: AgentStoreBase = Depends(get_agent_store),
 ) -> list[AgentResponse]:
     rows = await store.list_all()
     return [_agent_response(row) for row in rows]
+
+
+@router.post(
+    "/agents/prompt-estimate",
+    response_model=AgentPromptEstimateResponse,
+)
+async def estimate_agent_prompt(
+    body: AgentPromptEstimateRequest,
+    model_store: LlmModelStoreBase = Depends(get_llm_model_store),
+) -> AgentPromptEstimateResponse:
+    normalized_model_id = _parse_model_id(body.model_id)
+    model = await model_store.get_by_id(normalized_model_id)
+    if model is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"LLM model not found: {body.model_id}",
+        )
+
+    prompt = body.prompt.strip()
+    estimator = TokenEstimator.for_model(model.model, model.base_url)
+    return AgentPromptEstimateResponse(
+        character_count=len(prompt),
+        estimated_tokens=estimator.text(prompt),
+        estimator_source=estimator.source,
+    )
 
 
 @router.get("/agents/{agent_id}", response_model=AgentResponse)
@@ -82,6 +134,7 @@ async def create_agent(
     model_store: LlmModelStoreBase = Depends(get_llm_model_store),
 ) -> AgentResponse:
     await _validate_tool_packages(body.capabilities, ctx)
+    await _validate_skills(body.skills, ctx)
     normalized_model_id = await _ensure_model_exists(model_store, body.model_id)
     body = body.model_copy(update={"model_id": normalized_model_id})
     existing = await store.get_by_name(body.name)
@@ -102,12 +155,24 @@ async def update_agent(
     store: AgentStoreBase = Depends(get_agent_store),
     model_store: LlmModelStoreBase = Depends(get_llm_model_store),
 ) -> AgentResponse:
+    normalized_id = _parse_agent_id(agent_id)
+    current = await store.get_by_id(normalized_id)
+    if current is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Agent not found: {agent_id}")
     if "capabilities" in body.model_fields_set:
         await _validate_tool_packages(body.capabilities, ctx)
+    if "skills" in body.model_fields_set:
+        # A disabled Skill remains visible in existing Agent configuration. Allow an
+        # unrelated edit to preserve that reference, while still rejecting newly
+        # selected disabled or unknown Skills.
+        await _validate_skills(
+            body.skills or [],
+            ctx,
+            allow_disabled=set(current.skills or []),
+        )
     if body.model_id is not None:
         normalized_model_id = await _ensure_model_exists(model_store, body.model_id)
         body = body.model_copy(update={"model_id": normalized_model_id})
-    normalized_id = _parse_agent_id(agent_id)
     try:
         row = await store.update_unique(normalized_id, body)
     except ValueError as exc:

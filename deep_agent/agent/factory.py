@@ -3,9 +3,8 @@ from __future__ import annotations
 from typing import Any
 
 import httpx
-from loguru import logger
 from pydantic_ai import Agent
-from pydantic_ai.capabilities import AbstractCapability
+from pydantic_ai.capabilities import AbstractCapability, IncludeToolReturnSchemas, ToolSearch
 from pydantic_ai.models import DEFAULT_HTTP_TIMEOUT, Model, get_user_agent, parse_model_id
 from pydantic_ai.models.anthropic import AnthropicModel
 from pydantic_ai.models.google import GoogleModel
@@ -15,12 +14,20 @@ from pydantic_ai.providers.anthropic import AnthropicProvider
 from pydantic_ai.providers.deepseek import DeepSeekProvider
 from pydantic_ai.providers.google import GoogleProvider
 from pydantic_ai.providers.openai import OpenAIProvider
-
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.context_references import context_reference_instructions
-from deep_agent.agent.models import DeepSeekChatModel, OpenAICompatibleVideoChatModel
-from deep_agent.agent.models.deepseek_thinking_retry import DeepSeekThinkingRetry
+from deep_agent.agent.models import OpenAICompatibleVideoChatModel
+from deep_agent.agent.planning import build_planning_capability
 from deep_agent.agent.spec import AgentSpec
+from deep_agent.agent.context.estimator import TokenEstimator
+from deep_agent.agent.tool_discovery import (
+    MCP_SEARCH_RESULT_LIMIT,
+    TOOL_SEARCH_DESCRIPTION,
+    TOOL_SEARCH_PARAMETER_DESCRIPTION,
+    build_return_schema_selector,
+    build_mcp_discovery_toolset,
+    search_deferred_tools,
+)
 from deep_agent.capabilities.registry import ToolPackage, ToolPackageRegistry
 from deep_agent.options import OPTION
 
@@ -52,6 +59,14 @@ def _resolve_openai_compatible(spec: AgentSpec, model_name: str) -> Model:
     if "video" in (spec.input_modalities or []) or "video_url" in (spec.tags or []):
         return OpenAICompatibleVideoChatModel(model_name, provider=provider)
     return OpenAIChatModel(model_name, provider=provider)
+
+
+def _resolve_official_deepseek(spec: AgentSpec, model_name: str) -> OpenAIChatModel | None:
+    """Use the native profile when a catalog row points at DeepSeek's API."""
+    provider = DeepSeekProvider(api_key=spec.api_key)
+    if _normalize_url(spec.base_url) == _normalize_url(provider.base_url):
+        return OpenAIChatModel(model_name, provider=provider)
+    return None
 
 
 def _resolve_anthropic(spec: AgentSpec, model_name: str) -> AnthropicModel:
@@ -98,6 +113,9 @@ def resolve_model(spec: AgentSpec) -> str | Model:
         if parsed_provider == "google":
             return _resolve_google(spec, model_name)
         if spec.base_url:
+            deepseek_model = _resolve_official_deepseek(spec, spec.model)
+            if deepseek_model is not None:
+                return deepseek_model
             return _resolve_openai_compatible(spec, spec.model)
         return spec.model
 
@@ -122,14 +140,14 @@ def resolve_model(spec: AgentSpec) -> str | Model:
         return _resolve_google(spec, model_name)
 
     if provider_class is DeepSeekProvider:
-        provider = DeepSeekProvider(api_key=spec.api_key)
-        if (
-            not spec.base_url
-            or _normalize_url(spec.base_url) == _normalize_url(provider.base_url)
-        ):
-            profile = DeepSeekProvider.model_profile(model_name)
-            logger.debug("Resolving {} with DeepSeekChatModel", spec.model)
-            return DeepSeekChatModel(model_name, provider=provider, profile=profile)
+        if not spec.base_url:
+            return OpenAIChatModel(
+                model_name,
+                provider=DeepSeekProvider(api_key=spec.api_key),
+            )
+        deepseek_model = _resolve_official_deepseek(spec, model_name)
+        if deepseek_model is not None:
+            return deepseek_model
 
     if spec.base_url:
         return _resolve_openai_compatible(spec, model_name)
@@ -149,13 +167,32 @@ def _toolsets_for_spec(
     mcp_toolsets: list[Any] | None = None,
     dynamic_ui_packages: list[ToolPackage] | None = None,
     mcp_resource_toolset: Any | None = None,
+    file_toolset: Any | None = None,
+    skill_resource_toolset: Any | None = None,
+    skill_script_toolset: Any | None = None,
+    mcp_server_names: list[str] | None = None,
+    estimator: TokenEstimator | None = None,
 ) -> list[Any]:
     """Resolve selected product tool packages into Pydantic AI toolsets."""
-    toolsets = list(registry.toolsets(spec.capabilities))
+    toolsets: list[Any] = []
+    for package in registry.selected(spec.capabilities):
+        toolsets.append(package.toolset)
     if mcp_toolsets:
-        toolsets.extend(mcp_toolsets)
+        discovery = build_mcp_discovery_toolset(
+            mcp_toolsets,
+            server_names=mcp_server_names or (),
+            estimator=estimator or TokenEstimator.conservative(),
+        )
+        if discovery is not None:
+            toolsets.append(discovery)
     if mcp_resource_toolset is not None:
         toolsets.append(mcp_resource_toolset)
+    if file_toolset is not None:
+        toolsets.append(file_toolset)
+    if skill_resource_toolset is not None:
+        toolsets.append(skill_resource_toolset)
+    if skill_script_toolset is not None:
+        toolsets.append(skill_script_toolset)
 
     if dynamic_ui_packages:
         toolsets.extend(package.toolset for package in dynamic_ui_packages)
@@ -170,7 +207,14 @@ def build_agent(
     mcp_toolsets: list[Any] | None = None,
     dynamic_ui_packages: list[ToolPackage] | None = None,
     mcp_resource_toolset: Any | None = None,
+    file_toolset: Any | None = None,
+    skill_resource_toolset: Any | None = None,
+    skill_script_toolset: Any | None = None,
+    skill_capability: AbstractCapability[AgentDeps] | None = None,
     context_compaction: AbstractCapability[AgentDeps] | None = None,
+    tool_output_limits: AbstractCapability[AgentDeps] | None = None,
+    mcp_server_names: list[str] | None = None,
+    estimator: TokenEstimator | None = None,
 ) -> Agent[AgentDeps, str]:
     """Construct a Pydantic AI agent from a spec + the tool package registry.
 
@@ -186,12 +230,36 @@ def build_agent(
         mcp_toolsets=mcp_toolsets,
         dynamic_ui_packages=dynamic_ui_packages,
         mcp_resource_toolset=mcp_resource_toolset,
+        file_toolset=file_toolset,
+        skill_resource_toolset=skill_resource_toolset,
+        skill_script_toolset=skill_script_toolset,
+        mcp_server_names=mcp_server_names,
+        estimator=estimator,
     )
     capabilities: list[AbstractCapability[AgentDeps]] = []
-    if isinstance(model, DeepSeekChatModel):
-        capabilities.append(DeepSeekThinkingRetry())
     if context_compaction is not None:
         capabilities.append(context_compaction)
+    if skill_capability is not None:
+        capabilities.append(skill_capability)
+    if tool_output_limits is not None:
+        capabilities.append(tool_output_limits)
+    if mcp_toolsets:
+        capabilities.append(
+            ToolSearch(
+                strategy=search_deferred_tools,
+                max_results=MCP_SEARCH_RESULT_LIMIT,
+                tool_description=TOOL_SEARCH_DESCRIPTION,
+                parameter_description=TOOL_SEARCH_PARAMETER_DESCRIPTION,
+            )
+        )
+        capabilities.append(
+            IncludeToolReturnSchemas(
+                tools=build_return_schema_selector(
+                    server_names=mcp_server_names or (),
+                )
+            )
+        )
+    capabilities.append(build_planning_capability())
     instructions: list[Any] = []
     if spec.instructions:
         instructions.append(spec.instructions)

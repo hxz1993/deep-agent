@@ -111,3 +111,7 @@ test("Python 沙箱作为独立且默认关闭的内置工具包展示", () => {
   assert.match(row, /execute_python/);
   assert.match(row, /默认关闭/);
 });
+
+test("附件读取不再作为可配置内置工具包", () => {
+  assert.doesNotMatch(source, /builtin:attachment|read_text_attachment|read_docx|read_xlsx/);
+});

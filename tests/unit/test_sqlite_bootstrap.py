@@ -27,6 +27,7 @@ EXPECTED_TABLES = {
     "llm_models",
     "mcp_servers",
     "model_catalog",
+    "skill_packages",
     "ui_tool_definitions",
     "ui_tool_packages",
 }
@@ -51,6 +52,7 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIsNotNone(stores.mcp)
                 self.assertIsNotNone(stores.ui_tool)
                 self.assertIsNotNone(stores.context_checkpoint)
+                self.assertIsNotNone(stores.skill_package)
 
                 await stores.coordinator.append(
                     "sess-bootstrap",
@@ -104,7 +106,7 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
                                         "attachment",
                                         "ui:deep_cube__clarify",
                                         "ui:builtin__confirm",
-                                        "mcp:text_tools",
+                                        "mcp:deepcube",
                                     ]
                                 ),
                             ),
@@ -138,7 +140,7 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
                             "builtin:attachment",
                             "ui:deepcube",
                             "ui:builtin",
-                            "mcp:text_tools",
+                            "mcp:deepcube",
                         ],
                     )
 
@@ -161,7 +163,7 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
                             "ui:deep_cube__config_fill",
                             "ui:builtin__confirm",
                             "ui:builtin__choice",
-                            "mcp:text_tools",
+                            "mcp:deepcube",
                         ],
                     )
                     await asyncio.to_thread(command.upgrade, config, "002")
@@ -238,13 +240,363 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(capabilities, expected)
                     self.assertEqual(self._row_count(db_path, "ui_tool_packages"), 1)
 
+    async def test_003_rejects_legacy_skill_capabilities_before_ddl(self) -> None:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+            db_path = Path(tmpdir) / "legacy-skill.db"
+            url = f"sqlite+aiosqlite:///{db_path.as_posix()}"
+            with patch("deep_agent.db.url.get_database_url", return_value=url):
+                with patch("deep_agent.db.migrate.get_database_url", return_value=url):
+                    config = migrate._build_alembic_config()
+                    await asyncio.to_thread(command.upgrade, config, "002")
+                    with sqlite3.connect(db_path) as connection:
+                        connection.execute(
+                            "UPDATE agents SET capabilities = ? WHERE name = 'default'",
+                            (json.dumps(["builtin:general", "skill:calculator"]),),
+                        )
+                        connection.commit()
+                    with self.assertRaisesRegex(RuntimeError, "legacy skill"):
+                        await asyncio.to_thread(command.upgrade, config, "003")
+                    self.assertEqual(self._revision(db_path), "002")
+                    self.assertNotIn("skills", self._columns(db_path, "agents"))
+                    self.assertNotIn("skill_packages", self._business_tables(db_path))
+
+    async def test_003_downgrade_refuses_non_empty_skill_state(self) -> None:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+            db_path = Path(tmpdir) / "skill-downgrade.db"
+            url = f"sqlite+aiosqlite:///{db_path.as_posix()}"
+            with patch("deep_agent.db.url.get_database_url", return_value=url):
+                with patch("deep_agent.db.migrate.get_database_url", return_value=url):
+                    config = migrate._build_alembic_config()
+                    await asyncio.to_thread(command.upgrade, config, "003")
+                    with sqlite3.connect(db_path) as connection:
+                        connection.execute(
+                            "UPDATE agents SET skills = ? WHERE name = 'default'",
+                            (json.dumps(["deepagent-diagnostics"]),),
+                        )
+                        connection.commit()
+                    with self.assertRaisesRegex(RuntimeError, "agents.skills"):
+                        await asyncio.to_thread(command.downgrade, config, "002")
+                    self.assertEqual(self._revision(db_path), "003")
+
+                    with sqlite3.connect(db_path) as connection:
+                        connection.execute(
+                            "UPDATE agents SET skills = '[]' WHERE name = 'default'"
+                        )
+                        connection.execute(
+                            "INSERT INTO skill_packages "
+                            "(code,label,description,schema_version,source,enabled,platform_file_id,"
+                            "file_name,file_size,content_hash,manifest,resource_index,contains_scripts) "
+                            "VALUES ('x','X','X','1.0','upload',1,'f','x.zip',1,?, '{}','[]',0)",
+                            ("a" * 64,),
+                        )
+                        connection.commit()
+                    with self.assertRaisesRegex(RuntimeError, "skill_packages"):
+                        await asyncio.to_thread(command.downgrade, config, "002")
+                    self.assertEqual(self._revision(db_path), "003")
+
+    async def test_004_removes_only_explicit_attachment_package_and_roundtrips(self) -> None:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+            db_path = Path(tmpdir) / "remove-attachment.db"
+            url = f"sqlite+aiosqlite:///{db_path.as_posix()}"
+            with patch("deep_agent.db.url.get_database_url", return_value=url):
+                with patch("deep_agent.db.migrate.get_database_url", return_value=url):
+                    config = migrate._build_alembic_config()
+                    await asyncio.to_thread(command.upgrade, config, "003")
+                    with sqlite3.connect(db_path) as connection:
+                        connection.execute(
+                            "UPDATE agents SET capabilities = ? WHERE name = 'default'",
+                            (
+                                json.dumps(
+                                    [
+                                        "builtin:general",
+                                        "builtin:attachment",
+                                        "mcp:deepcube",
+                                        "builtin:attachment",
+                                    ]
+                                ),
+                            ),
+                        )
+                        connection.execute(
+                            "INSERT INTO agents (id,name,model_id,temperature,capabilities,skills,prompt) "
+                            "VALUES ('null-agent','null-agent',?,NULL,NULL,'[]','test')",
+                            (
+                                self._scalar(
+                                    db_path,
+                                    "SELECT id FROM llm_models WHERE name = 'openai:gpt-4o'",
+                                ),
+                            ),
+                        )
+                        connection.execute(
+                            "INSERT INTO agents (id,name,model_id,temperature,capabilities,skills,prompt) "
+                            "VALUES ('empty-agent','empty-agent',?,NULL,'[]','[]','test')",
+                            (
+                                self._scalar(
+                                    db_path,
+                                    "SELECT id FROM llm_models WHERE name = 'openai:gpt-4o'",
+                                ),
+                            ),
+                        )
+                        connection.commit()
+
+                    await asyncio.to_thread(command.upgrade, config, "004")
+                    self.assertEqual(self._revision(db_path), "004")
+                    self.assertEqual(
+                        json.loads(
+                            str(
+                                self._scalar(
+                                    db_path,
+                                    "SELECT capabilities FROM agents WHERE name = 'default'",
+                                )
+                            )
+                        ),
+                        ["builtin:general", "mcp:deepcube"],
+                    )
+                    self.assertIsNone(
+                        self._scalar(
+                            db_path,
+                            "SELECT capabilities FROM agents WHERE name = 'null-agent'",
+                        )
+                    )
+                    self.assertEqual(
+                        json.loads(
+                            str(
+                                self._scalar(
+                                    db_path,
+                                    "SELECT capabilities FROM agents WHERE name = 'empty-agent'",
+                                )
+                            )
+                        ),
+                        [],
+                    )
+
+                    await asyncio.to_thread(command.downgrade, config, "003")
+                    self.assertEqual(self._revision(db_path), "003")
+                    await asyncio.to_thread(command.upgrade, config, "004")
+                    self.assertEqual(self._revision(db_path), "004")
+                    self.assertEqual(
+                        json.loads(
+                            str(
+                                self._scalar(
+                                    db_path,
+                                    "SELECT capabilities FROM agents WHERE name = 'default'",
+                                )
+                            )
+                        ),
+                        ["builtin:general", "mcp:deepcube"],
+                    )
+
+    async def test_005_removes_text_tools_server_and_agent_references(self) -> None:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+            db_path = Path(tmpdir) / "remove-text-tools.db"
+            url = f"sqlite+aiosqlite:///{db_path.as_posix()}"
+            with patch("deep_agent.db.url.get_database_url", return_value=url):
+                with patch("deep_agent.db.migrate.get_database_url", return_value=url):
+                    config = migrate._build_alembic_config()
+                    await asyncio.to_thread(command.upgrade, config, "004")
+                    with sqlite3.connect(db_path) as connection:
+                        connection.execute(
+                            "INSERT INTO mcp_servers "
+                            "(name,transport,config,inspection,description,enabled) "
+                            "VALUES ('text_tools','builtin','{}','{\"status\":\"not_applicable\"}',"
+                            "'retired fixture',1)"
+                        )
+                        connection.execute(
+                            "UPDATE agents SET capabilities = ? WHERE name = 'default'",
+                            (
+                                json.dumps(
+                                    [
+                                        "mcp:text_tools",
+                                        "builtin:general",
+                                        "mcp:text_tools",
+                                        "mcp:deepcube",
+                                    ]
+                                ),
+                            ),
+                        )
+                        model_id = self._scalar(
+                            db_path,
+                            "SELECT id FROM llm_models WHERE name = 'openai:gpt-4o'",
+                        )
+                        connection.execute(
+                            "INSERT INTO agents "
+                            "(id,name,model_id,temperature,capabilities,skills,prompt) "
+                            "VALUES ('null-agent','null-agent',?,NULL,NULL,'[]','test')",
+                            (model_id,),
+                        )
+                        connection.execute(
+                            "INSERT INTO agents "
+                            "(id,name,model_id,temperature,capabilities,skills,prompt) "
+                            "VALUES ('empty-agent','empty-agent',?,NULL,'[]','[]','test')",
+                            (model_id,),
+                        )
+                        connection.commit()
+
+                    await asyncio.to_thread(command.upgrade, config, "005")
+                    self.assertEqual(self._revision(db_path), "005")
+                    self.assertEqual(
+                        json.loads(
+                            str(
+                                self._scalar(
+                                    db_path,
+                                    "SELECT capabilities FROM agents WHERE name = 'default'",
+                                )
+                            )
+                        ),
+                        ["builtin:general", "mcp:deepcube"],
+                    )
+                    self.assertIsNone(
+                        self._scalar(
+                            db_path,
+                            "SELECT capabilities FROM agents WHERE name = 'null-agent'",
+                        )
+                    )
+                    self.assertEqual(
+                        json.loads(
+                            str(
+                                self._scalar(
+                                    db_path,
+                                    "SELECT capabilities FROM agents WHERE name = 'empty-agent'",
+                                )
+                            )
+                        ),
+                        [],
+                    )
+                    self.assertEqual(
+                        self._row_count_where(
+                            db_path,
+                            "mcp_servers",
+                            "name = ?",
+                            ("text_tools",),
+                        ),
+                        0,
+                    )
+
+                    await asyncio.to_thread(command.downgrade, config, "004")
+                    self.assertEqual(self._revision(db_path), "004")
+                    self.assertEqual(
+                        self._row_count_where(
+                            db_path,
+                            "mcp_servers",
+                            "name = ?",
+                            ("text_tools",),
+                        ),
+                        0,
+                    )
+                    await asyncio.to_thread(command.upgrade, config, "005")
+                    self.assertEqual(self._revision(db_path), "005")
+
+    async def test_006_removes_doc_search_server_and_agent_references(self) -> None:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+            db_path = Path(tmpdir) / "remove-doc-search.db"
+            url = f"sqlite+aiosqlite:///{db_path.as_posix()}"
+            with patch("deep_agent.db.url.get_database_url", return_value=url):
+                with patch("deep_agent.db.migrate.get_database_url", return_value=url):
+                    config = migrate._build_alembic_config()
+                    await asyncio.to_thread(command.upgrade, config, "005")
+                    with sqlite3.connect(db_path) as connection:
+                        connection.execute(
+                            "INSERT INTO mcp_servers "
+                            "(name,transport,config,inspection,description,enabled) "
+                            "VALUES ('doc_search','builtin','{}','{\"status\":\"not_applicable\"}',"
+                            "'retired fixture',1)"
+                        )
+                        connection.execute(
+                            "UPDATE agents SET capabilities = ? WHERE name = 'default'",
+                            (
+                                json.dumps(
+                                    [
+                                        "mcp:doc_search",
+                                        "builtin:general",
+                                        "mcp:doc_search",
+                                        "mcp:deepcube",
+                                    ]
+                                ),
+                            ),
+                        )
+                        model_id = self._scalar(
+                            db_path,
+                            "SELECT id FROM llm_models WHERE name = 'openai:gpt-4o'",
+                        )
+                        connection.execute(
+                            "INSERT INTO agents "
+                            "(id,name,model_id,temperature,capabilities,skills,prompt) "
+                            "VALUES ('null-agent-006','null-agent-006',?,NULL,NULL,'[]','test')",
+                            (model_id,),
+                        )
+                        connection.execute(
+                            "INSERT INTO agents "
+                            "(id,name,model_id,temperature,capabilities,skills,prompt) "
+                            "VALUES ('empty-agent-006','empty-agent-006',?,NULL,'[]','[]','test')",
+                            (model_id,),
+                        )
+                        connection.commit()
+
+                    await asyncio.to_thread(command.upgrade, config, "006")
+                    self.assertEqual(self._revision(db_path), "006")
+                    self.assertEqual(
+                        json.loads(
+                            str(
+                                self._scalar(
+                                    db_path,
+                                    "SELECT capabilities FROM agents WHERE name = 'default'",
+                                )
+                            )
+                        ),
+                        ["builtin:general", "mcp:deepcube"],
+                    )
+                    self.assertIsNone(
+                        self._scalar(
+                            db_path,
+                            "SELECT capabilities FROM agents WHERE name = 'null-agent-006'",
+                        )
+                    )
+                    self.assertEqual(
+                        json.loads(
+                            str(
+                                self._scalar(
+                                    db_path,
+                                    "SELECT capabilities FROM agents WHERE name = 'empty-agent-006'",
+                                )
+                            )
+                        ),
+                        [],
+                    )
+                    self.assertEqual(
+                        self._row_count_where(
+                            db_path,
+                            "mcp_servers",
+                            "name = ?",
+                            ("doc_search",),
+                        ),
+                        0,
+                    )
+
+                    await asyncio.to_thread(command.downgrade, config, "005")
+                    self.assertEqual(self._revision(db_path), "005")
+                    self.assertEqual(
+                        self._row_count_where(
+                            db_path,
+                            "mcp_servers",
+                            "name = ?",
+                            ("doc_search",),
+                        ),
+                        0,
+                    )
+                    await asyncio.to_thread(command.upgrade, config, "006")
+                    self.assertEqual(self._revision(db_path), "006")
+
     def _assert_current_baseline(self, db_path: Path) -> None:
-        self.assertEqual(self._revision(db_path), "002")
+        self.assertEqual(self._revision(db_path), "006")
         self.assertEqual(self._business_tables(db_path), EXPECTED_TABLES)
         self.assertNotIn("max_requests", self._columns(db_path, "agents"))
         self.assertNotIn("capabilities_source", self._columns(db_path, "llm_models"))
         self.assertNotIn("resource_capabilities", self._columns(db_path, "mcp_servers"))
         self.assertIn("package_code", self._columns(db_path, "ui_tool_definitions"))
+        self.assertIn("skills", self._columns(db_path, "agents"))
+        self.assertEqual(
+            json.loads(str(self._scalar(db_path, "SELECT skills FROM agents WHERE name = 'default'"))),
+            [],
+        )
         self.assertEqual(
             self._primary_key(db_path, "chat_context_checkpoints"),
             ["agent_id", "session_id"],
@@ -255,7 +607,7 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(self._row_count(db_path, "llm_models"), 1)
         self.assertEqual(self._row_count(db_path, "agents"), 1)
-        self.assertEqual(self._row_count(db_path, "mcp_servers"), 3)
+        self.assertEqual(self._row_count(db_path, "mcp_servers"), 1)
         self.assertEqual(self._row_count(db_path, "auxiliary_model_configs"), 1)
         self.assertEqual(
             self._scalar(
@@ -267,7 +619,7 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
                 "SELECT id FROM llm_models WHERE name = 'openai:gpt-4o'",
             ),
         )
-        for name in ("deepcube", "doc_search", "text_tools"):
+        for name in ("deepcube",):
             raw = self._scalar(
                 db_path,
                 "SELECT inspection FROM mcp_servers WHERE name = ?",
@@ -316,6 +668,21 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
     def _row_count(db_path: Path, table_name: str) -> int:
         with sqlite3.connect(db_path) as connection:
             row = connection.execute(f"SELECT COUNT(*) FROM {table_name}").fetchone()
+        assert row is not None
+        return int(row[0])
+
+    @staticmethod
+    def _row_count_where(
+        db_path: Path,
+        table_name: str,
+        where: str,
+        parameters: tuple[object, ...],
+    ) -> int:
+        with sqlite3.connect(db_path) as connection:
+            row = connection.execute(
+                f"SELECT COUNT(*) FROM {table_name} WHERE {where}",
+                parameters,
+            ).fetchone()
         assert row is not None
         return int(row[0])
 

@@ -11,20 +11,46 @@ from deep_agent.agent.context.estimator import TokenEstimator
 from deep_agent.agent.factory import build_agent
 from deep_agent.agent.input_capabilities import augment_instructions_with_capabilities
 from deep_agent.agent.runner import AgentRunner
+from deep_agent.agent.tool_output_limits import build_tool_output_limits
 from deep_agent.agent.spec import DEFAULT_INSTRUCTIONS, AgentSpec
 from deep_agent.capabilities.mcp.resolver import load_mcp_rows, resolve_mcp_toolsets
 from deep_agent.capabilities.catalog import invalid_tool_package_codes
 from deep_agent.capabilities.mcp.resources import build_mcp_resource_toolset
 from deep_agent.capabilities.ui.registry import prepare_ui_tool_packages_for_spec
+from deep_agent.skills.runtime import ResolvedSkills, resolve_skills_for_run
+from deep_agent.skills.script_tool import build_skill_script_toolset
+from deep_agent.skills.tools import build_skill_resource_toolset
+from deep_agent.files import build_file_toolset
 from deep_agent.core.context import AppContext
 from deep_agent.core.exceptions import AgentNotFoundError, LlmModelNotFoundError
 from deep_agent.options import OPTION
 
 
 def _model_settings_for_spec(spec: AgentSpec) -> ModelSettings | None:
-    if spec.temperature is None:
+    values: ModelSettings = {}
+    if spec.temperature is not None:
+        values["temperature"] = spec.temperature
+    if spec.max_output_tokens is not None:
+        values["max_tokens"] = spec.max_output_tokens
+    if not values:
         return None
-    return ModelSettings(temperature=spec.temperature)
+    return values
+
+
+def _skill_script_execution_available(
+    spec: AgentSpec,
+    ctx: AppContext,
+    resolved_skills: ResolvedSkills,
+) -> bool:
+    sandbox_selected = any(
+        package.code == "builtin:sandbox"
+        for package in ctx.registry.selected(spec.capabilities)
+    )
+    return bool(
+        sandbox_selected
+        and ctx.sandbox_backend is not None
+        and resolved_skills.scripts
+    )
 
 
 async def build_runner(
@@ -104,10 +130,49 @@ async def _build_runner_from_spec(
 
     mcp_toolsets = await resolve_mcp_toolsets(ctx.stores, spec, mcp_rows=mcp_rows)
     mcp_resource_toolset = build_mcp_resource_toolset(spec, mcp_rows)
+    resolved_skills = await resolve_skills_for_run(
+        ctx.stores,
+        spec.skills,
+        runtime=ctx.skill_runtime,
+        request_headers=request_headers or {},
+    )
+    script_execution_available = _skill_script_execution_available(
+        spec,
+        ctx,
+        resolved_skills,
+    )
+    skill_resource_toolset = build_skill_resource_toolset(resolved_skills.resources)
+    file_toolset = build_file_toolset(resolved_skills.resources)
+    skill_script_toolset = (
+        build_skill_script_toolset(
+            resolved_skills.scripts,
+            backend=ctx.sandbox_backend,
+            timeout_sec=float(OPTION.agent.sandbox_timeout),
+        )
+        if script_execution_available and ctx.sandbox_backend is not None
+        else None
+    )
 
     spec = replace(spec, instructions=augment_instructions_with_capabilities(spec))
+    if resolved_skills.unavailable:
+        unavailable = ", ".join(item.code for item in resolved_skills.unavailable)
+        spec = replace(
+            spec,
+            instructions=(
+                f"{spec.instructions}\n\n"
+                "The following configured Skills are temporarily unavailable in this "
+                f"runtime: {unavailable}. Do not claim that you loaded or used them. "
+                "Continue with the available Skills and tools."
+            ),
+        )
     estimator = TokenEstimator.for_model(spec.model, spec.base_url)
     context_compaction = build_context_compaction(
+        context_window_tokens=spec.context_window_tokens,
+        max_output_tokens=spec.max_output_tokens,
+        estimator=estimator,
+    )
+    tool_output_limits, tool_output_store = build_tool_output_limits(
+        request_headers=request_headers or {},
         context_window_tokens=spec.context_window_tokens,
         max_output_tokens=spec.max_output_tokens,
         estimator=estimator,
@@ -119,7 +184,18 @@ async def _build_runner_from_spec(
         mcp_toolsets=mcp_toolsets,
         dynamic_ui_packages=dynamic_ui_packages,
         mcp_resource_toolset=mcp_resource_toolset,
+        file_toolset=file_toolset,
+        skill_resource_toolset=skill_resource_toolset,
+        skill_script_toolset=skill_script_toolset,
+        skill_capability=resolved_skills.capability,
         context_compaction=context_compaction,
+        tool_output_limits=tool_output_limits,
+        mcp_server_names=[
+            code.removeprefix("mcp:")
+            for code in (spec.capabilities or [])
+            if code.startswith("mcp:")
+        ],
+        estimator=estimator,
     )
     limits = UsageLimits(
         request_limit=OPTION.agent.max_requests,
@@ -131,7 +207,6 @@ async def _build_runner_from_spec(
         limits,
         ui_tool_hints=ui_tool_hints,
         model_settings=_model_settings_for_spec(spec),
-        input_modalities=spec.input_modalities,
         context_window_tokens=spec.context_window_tokens,
         max_output_tokens=spec.max_output_tokens,
         model_tags=spec.tags,
@@ -156,6 +231,10 @@ async def _build_runner_from_spec(
             else None
         ),
         summary_model_id=spec.llm_model_id,
+        model_id=spec.llm_model_id or spec.model,
         estimator=estimator,
         stores=ctx.stores,
+        active_runs=getattr(ctx, "active_runs", None),
+        skill_runtime_context=resolved_skills.as_context(),
+        tool_output_store=tool_output_store,
     )

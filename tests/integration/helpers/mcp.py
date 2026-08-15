@@ -113,4 +113,27 @@ def url_echo_toolset(
         config["headers"] = static_headers
     if request_context_mode:
         config["request_context"] = {"mode": request_context_mode}
-    return build_mcp_toolset("echo", "url", config)
+    return build_mcp_toolset(
+        "echo",
+        "url",
+        config,
+        inspection={
+            "status": "healthy",
+            "tools": {
+                "status": "supported",
+                "count": 1,
+                "snapshot_status": "ready",
+                "snapshot_hash": "echo-fixture",
+                "snapshot": {
+                    "schema_version": "1.0",
+                    "definitions": [
+                        {
+                            "name": "echo_request_headers",
+                            "description": "Return selected request headers.",
+                            "input_schema": {"type": "object"},
+                        }
+                    ],
+                },
+            },
+        },
+    )

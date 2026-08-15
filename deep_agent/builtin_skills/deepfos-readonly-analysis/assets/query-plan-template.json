@@ -1,0 +1,16 @@
+{
+  "question": "",
+  "object": {"type": "", "id": null, "name": null},
+  "slice": {
+    "organization": [],
+    "period": [],
+    "scenario": [],
+    "version": [],
+    "account": [],
+    "other_dimensions": {}
+  },
+  "required_tools": [],
+  "validation": [],
+  "result": null,
+  "unresolved": []
+}

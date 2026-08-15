@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import tempfile
 import time
+from pathlib import Path
 from typing import Any, Callable
 
 from deep_agent.sandbox.framing import FramingError, read_frame_async, write_frame_async
@@ -91,7 +93,6 @@ class SubprocessBackend:
             backend=BACKEND_NAME,
             state_scope="request",
             security_level="none",
-            production_ready=False,
             resource_limits=self.resource_limits_summary(),
         )
 
@@ -115,7 +116,8 @@ class SubprocessBackend:
         proc: asyncio.subprocess.Process | None = None
         try:
             work_dir = tempfile.mkdtemp(prefix="deep-agent-sandbox-")
-            proc = await self._spawn_worker(work_dir, request)
+            worker_request = self._prepare_work_dir(Path(work_dir), request)
+            proc = await self._spawn_worker(work_dir, worker_request)
             return await self._read_worker_response(
                 proc,
                 request,
@@ -125,6 +127,14 @@ class SubprocessBackend:
             if proc is not None:
                 await terminate_process_group(proc)
             raise
+        except Exception as exc:
+            return error_result(
+                request.request_id,
+                code="EXECUTION_FAILED",
+                message=f"sandbox work directory preparation failed: {type(exc).__name__}",
+                duration_ms=int((time.monotonic() - started) * 1000),
+                environment=self._environment,
+            )
         finally:
             await self._finalize(proc, work_dir)
 
@@ -182,6 +192,35 @@ class SubprocessBackend:
         proc.stdin.close()
         await proc.stdin.wait_closed()
         return proc
+
+    @staticmethod
+    def _prepare_work_dir(work_dir: Path, request: ExecuteRequest) -> ExecuteRequest:
+        if request.mode != "script":
+            return request
+
+        script_path = work_dir / "main.py"
+        script_path.write_text(request.code, encoding="utf-8")
+        script_path.chmod(0o600)
+        inputs_path = work_dir / "inputs.json"
+        inputs_path.write_text(
+            json.dumps(request.inputs, ensure_ascii=False, separators=(",", ":")),
+            encoding="utf-8",
+        )
+        inputs_path.chmod(0o600)
+        (work_dir / "outputs").mkdir(mode=0o700)
+
+        resolved_root = work_dir.resolve()
+        for item in request.files:
+            target = (work_dir / item.path).resolve()
+            if resolved_root not in target.parents:
+                raise ValueError("sandbox input file escaped the work directory")
+            target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            target.write_bytes(item.decoded())
+            target.chmod(0o600)
+
+        # The development worker reads files from its isolated cwd. Keeping the
+        # bytes out of the framed child request avoids sending binary payloads twice.
+        return request.model_copy(update={"files": ()})
 
     async def _read_worker_response(
         self,

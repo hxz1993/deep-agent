@@ -6,16 +6,21 @@ from datetime import datetime, timezone
 from pydantic_ai.messages import (
     ModelRequest,
     ModelResponse,
+    NativeToolSearchCallPart,
+    NativeToolSearchReturnPart,
     RetryPromptPart,
     TextPart,
     ThinkingPart,
     ThinkingPartDelta,
     ToolCallPart,
     ToolReturnPart,
+    ToolSearchCallPart,
+    ToolSearchReturnPart,
     UserPromptPart,
 )
 
 from deep_agent.agent import events
+from deep_agent.agent.planning import PLAN_METADATA_KEY
 from deep_agent.agent.history import (
     filter_ephemeral_agent_messages,
     model_messages_to_history,
@@ -38,6 +43,28 @@ class AgentEventsThinkingTests(unittest.TestCase):
     def test_map_text_part_unchanged(self) -> None:
         result = events.map_part(TextPart(content="hello"))
         self.assertEqual(result, {"type": "text", "delta": "hello"})
+
+    def test_local_and_native_tool_search_events_share_diagnostic_source(self) -> None:
+        local_call = events.map_part(
+            ToolSearchCallPart(args={"queries": ["财务模型"]}, tool_call_id="local")
+        )
+        local_return = events.map_part(
+            ToolSearchReturnPart(content={"tools": []}, tool_call_id="local")
+        )
+        native_call = events.map_part(
+            NativeToolSearchCallPart(
+                args={"queries": ["财务模型"]},
+                tool_call_id="native",
+            )
+        )
+        native_return = events.map_part(
+            NativeToolSearchReturnPart(content={"tools": []}, tool_call_id="native")
+        )
+
+        self.assertEqual(local_call["source"], "tool_search")
+        self.assertEqual(local_return["source"], "tool_search")
+        self.assertEqual(native_call["source"], "tool_search")
+        self.assertEqual(native_return["source"], "tool_search")
 
 
 class HistoryThinkingTests(unittest.TestCase):
@@ -110,6 +137,63 @@ class HistoryThinkingTests(unittest.TestCase):
         self.assertEqual(len(history), 1)
         self.assertEqual(history[0].parts[0].type, "text")
         self.assertEqual(history[0].parts[0].content, "hello")
+
+    def test_tool_search_history_is_marked_as_diagnostic(self) -> None:
+        messages = [
+            ModelResponse(
+                parts=[
+                    ToolSearchCallPart(
+                        args={"queries": ["财务模型"]},
+                        tool_call_id="search-1",
+                    )
+                ]
+            ),
+            ModelRequest(
+                parts=[
+                    ToolSearchReturnPart(
+                        content={"tools": []},
+                        tool_call_id="search-1",
+                    )
+                ]
+            ),
+        ]
+
+        history = model_messages_to_history(messages)
+
+        self.assertEqual(history[0].parts[0].source, "tool_search")
+        self.assertEqual(history[0].parts[1].source, "tool_search")
+
+    def test_planning_return_exposes_only_plan_snapshot(self) -> None:
+        snapshot = {
+            "items": [{"id": "step-1", "content": "读取输入", "status": "completed"}],
+            "total": 1,
+            "completed": 1,
+        }
+        call = ToolCallPart(
+            tool_name="write_plan",
+            args={"items": []},
+            tool_call_id="plan-1",
+        )
+        result = ToolReturnPart(
+            tool_name="write_plan",
+            content={"ok": True},
+            tool_call_id="plan-1",
+            metadata={PLAN_METADATA_KEY: snapshot, "private": "hidden"},
+        )
+
+        self.assertEqual(events.map_part(call)["source"], "planning")
+        mapped = events.map_part(result)
+        self.assertEqual(mapped["source"], "planning")
+        self.assertEqual(mapped["plan"], snapshot)
+        self.assertNotIn("private", mapped)
+
+        history = model_messages_to_history([
+            ModelResponse(parts=[call]),
+            ModelRequest(parts=[result]),
+        ])
+        self.assertEqual(history[0].parts[0].source, "planning")
+        self.assertEqual(history[0].parts[1].source, "planning")
+        self.assertEqual(history[0].parts[1].plan, snapshot)
 
     def test_model_messages_to_history_skips_thinking_only_retry(self) -> None:
         ts = datetime(2025, 6, 22, 10, 45, tzinfo=timezone.utc)

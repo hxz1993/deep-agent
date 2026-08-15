@@ -147,11 +147,16 @@ tags                   JSON/TEXT NULL
 
 `input_modalities` 与 `tags` 必须分开：
 
-- 模态：`text/image/audio/video/pdf`，描述模型原生输入类型。
+- 模态：`text/image/audio/video`，描述模型原生输入类型。
 - 能力标签：`reasoning/tool_call/structured_output/...`，描述协议或推理能力。
 
 新建与前端编辑要求上下文、最大输出和至少一种输入模态。迁移列保持 nullable，避免升级时为历史
 模型伪造值；历史模型未补齐上下文时继续运行，但当前自动上下文压缩保持关闭。
+
+v0.3.15 起，运行时将 `max_output_tokens` 映射为 Pydantic AI
+`ModelSettings.max_tokens`，普通和流式请求使用同一设置；未配置时不发送该设置，保留 Provider
+默认行为。上下文摘要不复用普通回答上限，而是继续根据摘要输入和窗口预算计算独立的动态
+`max_tokens`，最高仍受现有摘要保护限制。
 
 不增加：
 
@@ -272,7 +277,8 @@ API Key 永不来自目录，管理员自行填写。保存只写 `llm_models`�
 
 运行时只读 `llm_models`：
 
-- 图片附件是否作为原生图片发送，仅判断 `input_modalities` 是否包含 `image`。
+- `input_modalities`描述目录和管理员预期能力，不作为DeepAgent本地媒体拒绝开关；当前轮图片附件
+  统一交给Provider，所选模型不接受时由Provider正常返回错误。
 - 不再根据模型名称或 Base URL 猜测模态。
 - 不再读取 `modality_data.json`、`models_dev_snapshot.json`。
 - `AgentSpec/AgentRunner` 接收上下文、最大输出和 tags，为 Token 预算与上下文压缩提供事实来源。

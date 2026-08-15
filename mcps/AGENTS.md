@@ -56,9 +56,7 @@ python3.12 mcps/<name>/server.py
 
 | 目录 | capability | 说明 |
 | --- | --- | --- |
-| `text_tools/` | `mcp:text_tools` | 示例：`word_count`、`char_count`、`slugify`、`reverse` |
 | `deepcube/` | `mcp:deepcube` | 启动已安装的 `deepcube-mcp` 包 |
-| `doc_search/` | `mcp:doc_search` | 文档搜索 |
 
 ---
 

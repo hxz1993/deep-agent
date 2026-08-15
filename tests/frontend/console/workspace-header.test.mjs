@@ -64,6 +64,17 @@ test("会话详情合并会话和上下文且不再重复展示工具与事件",
   assert.match(workspaceSource, /inspector-session-group[\s\S]*<strong>请求Header<\/strong>/);
   assert.match(workspaceSource, /<dt>User ID<\/dt>[\s\S]*identity\.user/);
   assert.match(workspaceSource, /<strong>上下文预算<\/strong>/);
+  assert.match(workspaceSource, /<strong>当前 Run<\/strong>/);
+  assert.match(workspaceSource, /Conversation ID/);
+  assert.match(workspaceSource, /Run ID/);
+  assert.match(workspaceSource, /缓存读取/);
+  assert.match(workspaceSource, /缓存写入/);
+  assert.match(workspaceSource, /Tool Search/);
+  assert.match(workspaceSource, /详细指标请查看运行日志/);
+  assert.match(workspaceSource, /value === null \|\| value === undefined/);
+  assert.match(workspaceSource, /state\.lastRunMetrics/);
+  assert.match(chatSource, /conversation_id/);
+  assert.match(chatSource, /run_metrics/);
   assert.match(workspaceSource, /inspector-budget-section[\s\S]*budget-meter[\s\S]*<strong>上下文预算<\/strong>/);
   assert.doesNotMatch(consoleIndex, /data-inspector-tab|>工具<|>事件</);
   assert.doesNotMatch(workspaceSource, /activeInspectorTab|eventRows|eventToolRows/);
@@ -104,8 +115,8 @@ test("输入区按模型与模态输入双列展示并移除冗余提示", () =>
 });
 
 test("输入框提供线性附件、主动压缩按钮和后端预算百分比", () => {
-  assert.match(template, /id="attachBtn"[\s\S]*?<svg/);
-  assert.match(template, /id="compactContextBtn"[\s\S]*?<svg/);
+  assert.match(template, /id="attachBtn"[\s\S]*?data-lucide="paperclip"/);
+  assert.match(template, /id="compactContextBtn"[\s\S]*?data-lucide="minimize-2"/);
   assert.match(template, /id="contextBudgetBadge"[\s\S]*上下文 —/);
   assert.doesNotMatch(template, /📎/);
   assert.doesNotMatch(chatSource, /📎/);
@@ -114,17 +125,53 @@ test("输入框提供线性附件、主动压缩按钮和后端预算百分比",
   assert.match(chatSource, /manual_compaction_available/);
   assert.match(chatSource, /\/compact/);
   assert.match(chatSource, /context_compaction_result/);
+  assert.doesNotMatch(chatSource, /result\.context_status/);
+  assert.match(chatSource, /status === "noop"[\s\S]*?await loadContextStatus\(session\)/);
   assert.match(chatSource, /本次压缩未产生明显效果/);
   assert.match(chatSource, /可再次压缩，重复压缩可能损失部分细节/);
   assert.doesNotMatch(chatSource, /already_compacted|insufficient_new_history/);
   assert.doesNotMatch(chatSource, /context_compaction_target_ratio|safety_margin\s*=|predict.*output/i);
 });
 
+test("停止生成只请求正式取消接口并等待真实 cancelled 事件", () => {
+  assert.match(chatSource, /sessionApiUrl\(\{ id: sessionId, agentId \}, "\/cancel"\)/);
+  assert.match(chatSource, /body\.status === "cancel_requested"/);
+  assert.match(chatSource, /case "cancelled":[\s\S]*assistant\.markInterrupted\(\)/);
+  assert.match(
+    chatSource,
+    /case "cancelled":[\s\S]*state\.skipHistoryRefresh = true;[\s\S]*break;/,
+  );
+  assert.match(chatSource, /case "cancelled":[\s\S]*renderUsage\(data\.usage\)/);
+  assert.match(chatSource, /markInterrupted\(\)[\s\S]*for \(const block of toolBlocks\.values\(\)\)/);
+  assert.match(chatSource, /tool-status-interrupted/);
+  assert.match(chatSource, /state\.stopRequested/);
+  assert.doesNotMatch(chatSource, /cancelFallbackTimer|abortFallback|setTimeout\(abortFallback/);
+  assert.doesNotMatch(chatSource, /streamCancelled[\s\S]{0,120}setTimeout/);
+  assert.doesNotMatch(chatSource, /addErrorTo\(assistant, "（已停止生成）"\)/);
+});
+
+test("业务重试或取消撤回工具调用时删除实时工具卡", () => {
+  assert.match(
+    chatSource,
+    /case "tool_call_removed":[\s\S]*assistant\.removeToolCall\(data\)/,
+  );
+  assert.match(
+    chatSource,
+    /removeToolCall\(data\)[\s\S]*toolBlocks\.get\(key\)[\s\S]*block\.remove\(\)[\s\S]*toolBlocks\.delete\(key\)/,
+  );
+});
+
+test("历史中的 interrupted 助手消息恢复已停止标记", () => {
+  assert.match(chatSource, /presentation\.interrupted/);
+  assert.match(chatSource, /message-run-status interrupted/);
+  assert.match(chatSource, /circle-stop/);
+});
+
 test("当前有效 Checkpoint 作为历史分隔标记而非聊天消息渲染", () => {
   assert.match(chatSource, /data\.context_checkpoint/);
   assert.match(chatSource, /addContextCheckpointMarker/);
   assert.match(chatSource, /上下文已压缩 · 原始约/);
-  assert.match(chatSource, /msg\.branch_point > boundary/);
+  assert.match(chatSource, /buildHistoryVisualItems\(messages, contextCheckpoint\)/);
   assert.doesNotMatch(chatSource, /addMessage\([^\n]*context_checkpoint/);
 });
 

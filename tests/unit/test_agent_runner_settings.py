@@ -12,7 +12,7 @@ from pydantic_ai.usage import UsageLimits
 
 
 class AgentRunnerModelSettingsTests(unittest.IsolatedAsyncioTestCase):
-    async def test_run_passes_temperature_via_model_settings(self) -> None:
+    async def test_run_passes_merged_model_settings(self) -> None:
         captured: dict[str, object] = {}
 
         class _CapturingAgent(Agent):
@@ -25,12 +25,13 @@ class AgentRunnerModelSettingsTests(unittest.IsolatedAsyncioTestCase):
             agent,
             store=_NoopStore(),
             usage_limits=UsageLimits(request_limit=5),
-            model_settings=ModelSettings(temperature=0.3),
+            model_settings=ModelSettings(temperature=0.3, max_tokens=2048),
         )
         await runner.run("sess", "hi", AgentDeps(session_id="sess"))
         settings = captured.get("model_settings")
         self.assertIsNotNone(settings)
         self.assertEqual(settings["temperature"], 0.3)
+        self.assertEqual(settings["max_tokens"], 2048)
 
 
 class _NoopStore:

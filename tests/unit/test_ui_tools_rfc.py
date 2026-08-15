@@ -12,7 +12,12 @@ from pydantic_ai.messages import ModelResponse, ToolCallPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from deep_agent.agent.history import HistoryMessage, HistoryToolCallPart, enrich_history_messages
+from deep_agent.agent.history import (
+    HistoryMessage,
+    HistoryToolCallPart,
+    HistoryToolResultPart,
+    enrich_history_messages,
+)
 from deep_agent.agent.spec import AgentSpec
 from deep_agent.capabilities.ui.builtin import builtin_ui_records
 from deep_agent.capabilities.ui.registry import (
@@ -488,17 +493,7 @@ class UiToolStoreTests(unittest.IsolatedAsyncioTestCase):
             ["execute_python"],
         )
         self.assertFalse(sandbox_package.default_enabled)
-        attachment_capability = next(
-            item for item in capabilities if item.code == "builtin:attachment"
-        )
-        self.assertEqual(attachment_capability.category, "builtin")
-        self.assertEqual(attachment_capability.label, "附件读取")
-        self.assertEqual(attachment_capability.source, "builtin")
-        self.assertFalse(attachment_capability.default_enabled)
-        self.assertEqual(
-            [tool.name for tool in attachment_capability.tools],
-            ["read_text_attachment", "read_docx", "read_xlsx"],
-        )
+        self.assertNotIn("builtin:attachment", [item.code for item in capabilities])
         ui_packages = [item for item in capabilities if item.category == "ui"]
         self.assertEqual([item.code for item in ui_packages], ["ui:builtin", "ui:demo"])
         self.assertEqual([item.source for item in ui_packages], ["builtin", "manual"])
@@ -508,7 +503,10 @@ class UiToolStoreTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(mcp_package.category, "mcp")
         self.assertEqual(mcp_package.tool_count, 7)
-        self.assertEqual(mcp_package.tool_catalog_status, "count_only")
+        self.assertEqual(mcp_package.tool_catalog_status, "missing")
+        self.assertEqual(mcp_package.disclosure_mode, "search")
+        self.assertEqual(mcp_package.preselect_limit, 3)
+        self.assertEqual(mcp_package.search_result_limit, 5)
         self.assertEqual(mcp_package.tools, [])
 
     async def test_prepare_toolset_skips_historical_invalid_schema_only(self) -> None:
@@ -665,6 +663,70 @@ class HistoryEnrichmentTests(unittest.TestCase):
         assert isinstance(part, HistoryToolCallPart)
         self.assertEqual(part.widget, "text")
         self.assertEqual(part.metadata, {"form_version": "1"})
+
+    def test_dangling_function_tool_is_projected_as_interrupted(self) -> None:
+        messages = [
+            HistoryMessage(
+                role="assistant",
+                status="completed",
+                parts=[
+                    HistoryToolCallPart(
+                        tool="execute_python",
+                        args={"code": "sleep(30)"},
+                        tool_call_id="function-call",
+                    )
+                ],
+            )
+        ]
+
+        enriched = enrich_history_messages(messages, {})
+
+        self.assertEqual(enriched[0].status, "interrupted")
+        self.assertEqual(messages[0].status, "completed")
+
+    def test_completed_function_tool_stays_completed(self) -> None:
+        messages = [
+            HistoryMessage(
+                role="assistant",
+                status="completed",
+                parts=[
+                    HistoryToolCallPart(
+                        tool="execute_python",
+                        tool_call_id="function-call",
+                    ),
+                    HistoryToolResultPart(
+                        tool="execute_python",
+                        tool_call_id="function-call",
+                        result={"ok": True},
+                    ),
+                ],
+            )
+        ]
+
+        enriched = enrich_history_messages(messages, {})
+
+        self.assertEqual(enriched[0].status, "completed")
+
+    def test_pending_ui_tool_stays_pending_not_interrupted(self) -> None:
+        messages = [
+            HistoryMessage(
+                role="assistant",
+                status="completed",
+                parts=[
+                    HistoryToolCallPart(
+                        tool="myapp__form",
+                        tool_call_id="ui-call",
+                    )
+                ],
+            )
+        ]
+
+        enriched = enrich_history_messages(
+            messages,
+            {"myapp__form": {"widget": "text"}},
+        )
+
+        self.assertEqual(enriched[0].status, "completed")
 
 
 class ExternalToolsetTests(unittest.IsolatedAsyncioTestCase):

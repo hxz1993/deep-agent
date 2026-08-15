@@ -18,7 +18,6 @@ MAX_OFFICE_MEMBER_BYTES = 64 * 1024 * 1024
 MAX_OFFICE_COMPRESSION_RATIO = 200
 MAX_XLSX_CELLS = 2_000_000
 MAX_CELL_CHARS = 4_000
-MAX_DOCX_INLINE_IMAGES = 5
 
 
 class AttachmentParseError(ValueError):
@@ -38,7 +37,6 @@ class DocumentPage:
 class DocxDocument:
     blocks: tuple[str, ...]
     metadata: dict[str, Any]
-    images: tuple[tuple[str, bytes], ...]
 
 
 @dataclass(frozen=True)
@@ -278,7 +276,6 @@ def docx_document(data: bytes) -> DocxDocument:
             f"[批注 {comment_id}，作者 {author}{timestamp_text}]\n{text}"
         )
 
-    images = tuple(extract_docx_images(data))
     return DocxDocument(
         blocks=tuple(blocks),
         metadata={
@@ -287,10 +284,7 @@ def docx_document(data: bytes) -> DocxDocument:
             "body_paragraphs": body_paragraphs,
             "body_tables": body_tables,
             "comments": comment_count,
-            "embedded_image_count": len(images),
-            "image_positioning": "document_level_only",
         },
-        images=images,
     )
 
 
@@ -335,24 +329,6 @@ def _table_blocks(table: Any, *, label: str) -> list[str]:
     if label:
         return [label, *rows]
     return rows
-
-
-def extract_docx_images(data: bytes) -> list[tuple[str, bytes]]:
-    validate_office_archive(data)
-    images: list[tuple[str, bytes]] = []
-    with zipfile.ZipFile(io.BytesIO(data)) as archive:
-        names = sorted(
-            info.filename
-            for info in archive.infolist()
-            if info.filename.startswith("word/media/") and not info.is_dir()
-        )
-        for name in names:
-            if len(images) >= MAX_DOCX_INLINE_IMAGES:
-                break
-            payload = archive.read(name)
-            if _looks_like_raster_image(name, payload):
-                images.append((name.rsplit("/", 1)[-1], payload))
-    return images
 
 
 def xlsx_workbook(data: bytes) -> XlsxWorkbook:
@@ -495,31 +471,6 @@ def _swap_ext(filename: str, extension: str) -> str:
     if "." in filename:
         return filename.rsplit(".", 1)[0] + extension
     return filename + extension
-
-
-def _looks_like_raster_image(name: str, data: bytes) -> bool:
-    lowered = name.lower()
-    if lowered.endswith((".emf", ".wmf", ".svg")):
-        return False
-    return (
-        data.startswith(b"\x89PNG")
-        or data.startswith(b"\xff\xd8\xff")
-        or data.startswith((b"GIF87a", b"GIF89a"))
-        or (len(data) > 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP")
-    )
-
-
-def image_mime(data: bytes, name: str = "") -> str:
-    lowered = name.lower()
-    if data.startswith(b"\x89PNG") or lowered.endswith(".png"):
-        return "image/png"
-    if data.startswith(b"\xff\xd8\xff") or lowered.endswith((".jpg", ".jpeg")):
-        return "image/jpeg"
-    if data.startswith((b"GIF87a", b"GIF89a")) or lowered.endswith(".gif"):
-        return "image/gif"
-    if len(data) > 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":
-        return "image/webp"
-    return "application/octet-stream"
 
 
 def _is_json_document(*, name: str | None, mime: str | None) -> bool:

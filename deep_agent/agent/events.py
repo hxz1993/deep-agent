@@ -8,13 +8,18 @@ from pydantic_ai.messages import (
     FunctionToolResultEvent,
     PartDeltaEvent,
     PartStartEvent,
+    RetryPromptPart,
     TextPart,
     TextPartDelta,
     ThinkingPart,
     ThinkingPartDelta,
     ToolCallPart,
     ToolReturnPart,
+    NativeToolSearchCallPart,
+    NativeToolSearchReturnPart,
 )
+from deep_agent.agent.tool_output_limits import tool_result_artifacts
+from deep_agent.agent.planning import is_planning_tool, plan_snapshot_from_part
 
 
 def text_delta(delta: str) -> dict[str, Any]:
@@ -26,11 +31,46 @@ def thinking_delta(delta: str) -> dict[str, Any]:
 
 
 def tool_call(tool: str, args: Any, tool_call_id: str | None = None) -> dict[str, Any]:
-    return {"type": "tool_call", "tool": tool, "args": args, "tool_call_id": tool_call_id}
+    payload = {"type": "tool_call", "tool": tool, "args": args, "tool_call_id": tool_call_id}
+    if tool in {"search_tools", "tool_search"}:
+        payload["source"] = "tool_search"
+    elif is_planning_tool(tool):
+        payload["source"] = "planning"
+    return payload
 
 
-def tool_result(tool: str, result: Any, tool_call_id: str | None = None) -> dict[str, Any]:
-    return {"type": "tool_result", "tool": tool, "result": result, "tool_call_id": tool_call_id}
+def tool_result(
+    tool: str,
+    result: Any,
+    tool_call_id: str | None = None,
+    *,
+    artifacts: list[dict[str, Any]] | None = None,
+    plan: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    payload = {"type": "tool_result", "tool": tool, "result": result, "tool_call_id": tool_call_id}
+    if artifacts:
+        payload["artifacts"] = artifacts
+    if plan is not None:
+        payload["plan"] = plan
+    if tool in {"search_tools", "tool_search"}:
+        payload["source"] = "tool_search"
+    elif is_planning_tool(tool):
+        payload["source"] = "planning"
+    return payload
+
+
+def tool_call_removed(
+    tool: str | None,
+    tool_call_id: str | None,
+    *,
+    reason: str,
+) -> dict[str, Any]:
+    return {
+        "type": "tool_call_removed",
+        "tool": tool,
+        "tool_call_id": tool_call_id,
+        "reason": reason,
+    }
 
 
 def final(
@@ -42,6 +82,9 @@ def final(
     model_message_count: int | None = None,
     user_branch_point: int | None = None,
     context: dict[str, Any] | None = None,
+    conversation_id: str | None = None,
+    run_id: str | None = None,
+    run_metrics: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "type": "final",
@@ -57,6 +100,12 @@ def final(
         payload["user_branch_point"] = user_branch_point
     if context is not None:
         payload["context"] = context
+    if conversation_id is not None:
+        payload["conversation_id"] = conversation_id
+    if run_id is not None:
+        payload["run_id"] = run_id
+    if run_metrics is not None:
+        payload["run_metrics"] = run_metrics
     return payload
 
 
@@ -82,14 +131,28 @@ def cancelled(
     history_persisted: bool = True,
     model_message_count: int | None = None,
     user_branch_point: int | None = None,
+    usage: dict[str, Any] | None = None,
+    conversation_id: str | None = None,
+    run_id: str | None = None,
+    run_metrics: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    payload: dict[str, Any] = {"type": "cancelled", "status": "cancelled"}
-    if history_persisted:
-        payload["history_persisted"] = history_persisted
+    payload: dict[str, Any] = {
+        "type": "cancelled",
+        "status": "cancelled",
+        "history_persisted": history_persisted,
+    }
     if model_message_count is not None:
         payload["model_message_count"] = model_message_count
     if user_branch_point is not None:
         payload["user_branch_point"] = user_branch_point
+    if usage is not None:
+        payload["usage"] = usage
+    if conversation_id is not None:
+        payload["conversation_id"] = conversation_id
+    if run_id is not None:
+        payload["run_id"] = run_id
+    if run_metrics is not None:
+        payload["run_metrics"] = run_metrics
     return payload
 
 
@@ -126,7 +189,19 @@ def _map_tool_return_part(part: ToolReturnPart) -> dict[str, Any] | None:
         part.tool_name,
         _to_jsonable(part.content),
         part.tool_call_id,
+        artifacts=tool_result_artifacts(part),
+        plan=plan_snapshot_from_part(part),
     )
+
+
+@map_part.register(NativeToolSearchCallPart)
+def _map_native_tool_search_call(part: NativeToolSearchCallPart) -> dict[str, Any]:
+    return tool_call(part.tool_name, part.args_as_dict(), part.tool_call_id)
+
+
+@map_part.register(NativeToolSearchReturnPart)
+def _map_native_tool_search_return(part: NativeToolSearchReturnPart) -> dict[str, Any]:
+    return tool_result(part.tool_name, _to_jsonable(part.content), part.tool_call_id)
 
 
 @map_part.register(TextPartDelta)
@@ -157,10 +232,20 @@ def map_event(event: Any) -> dict[str, Any] | None:
 
 @map_event.register(PartStartEvent)
 @map_event.register(FunctionToolCallEvent)
-@map_event.register(FunctionToolResultEvent)
 def _map_part_event(
-    event: PartStartEvent | FunctionToolCallEvent | FunctionToolResultEvent,
+    event: PartStartEvent | FunctionToolCallEvent,
 ) -> dict[str, Any] | None:
+    return map_part(event.part)
+
+
+@map_event.register(FunctionToolResultEvent)
+def _map_function_tool_result(event: FunctionToolResultEvent) -> dict[str, Any] | None:
+    if isinstance(event.part, RetryPromptPart):
+        return tool_call_removed(
+            event.part.tool_name,
+            event.part.tool_call_id,
+            reason="model_retry",
+        )
     return map_part(event.part)
 
 

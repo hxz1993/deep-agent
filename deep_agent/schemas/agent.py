@@ -50,6 +50,10 @@ class AgentCreate(_RejectLegacyMaxRequests):
         default=None,
         description="Tool package codes to enable. Null uses default packages.",
     )
+    skills: list[str] = Field(
+        default_factory=list,
+        description="Skill package codes explicitly enabled for this agent.",
+    )
 
     @field_validator(*AGENT_REQUIRED_FIELDS)
     @classmethod
@@ -59,6 +63,16 @@ class AgentCreate(_RejectLegacyMaxRequests):
             raise ValueError("must not be blank")
         return normalized
 
+    @field_validator("skills")
+    @classmethod
+    def validate_skills(cls, value: list[str]) -> list[str]:
+        normalized = [item.strip() for item in value]
+        if any(not item for item in normalized):
+            raise ValueError("skills cannot contain blank values")
+        if len(set(normalized)) != len(normalized):
+            raise ValueError("skills must be unique")
+        return normalized
+
 
 class AgentUpdate(_RejectLegacyMaxRequests):
     name: str | None = Field(default=None, max_length=191)
@@ -66,6 +80,7 @@ class AgentUpdate(_RejectLegacyMaxRequests):
     prompt: str | None = None
     temperature: float | None = Field(default=None, ge=0, le=2)
     capabilities: list[str] | None = None
+    skills: list[str] | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -74,6 +89,8 @@ class AgentUpdate(_RejectLegacyMaxRequests):
             for field in AGENT_REQUIRED_FIELDS:
                 if field in value and value[field] is None:
                     raise ValueError(f"{field} cannot be null")
+            if "skills" in value and value["skills"] is None:
+                raise ValueError("skills cannot be null")
         return value
 
     @field_validator(*AGENT_REQUIRED_FIELDS)
@@ -86,6 +103,29 @@ class AgentUpdate(_RejectLegacyMaxRequests):
             raise ValueError("must not be blank")
         return normalized
 
+    @field_validator("skills")
+    @classmethod
+    def validate_skills(cls, value: list[str] | None) -> list[str] | None:
+        if value is None:
+            return None
+        normalized = [item.strip() for item in value]
+        if any(not item for item in normalized):
+            raise ValueError("skills cannot contain blank values")
+        if len(set(normalized)) != len(normalized):
+            raise ValueError("skills must be unique")
+        return normalized
+
+
+class AgentPromptEstimateRequest(BaseModel):
+    model_id: str = Field(..., description="LLM model preset used for token estimation.")
+    prompt: str = Field(..., description="System prompt text to estimate.")
+
+
+class AgentPromptEstimateResponse(BaseModel):
+    character_count: int = Field(ge=0)
+    estimated_tokens: int = Field(ge=0)
+    estimator_source: str
+
 
 class AgentResponse(BaseModel):
     id: str
@@ -95,6 +135,7 @@ class AgentResponse(BaseModel):
     prompt: str
     temperature: float | None = None
     capabilities: list[str] | None = None
+    skills: list[str] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
 
@@ -108,6 +149,7 @@ class AgentResponse(BaseModel):
             prompt=row.prompt,
             temperature=row.temperature,
             capabilities=row.capabilities,
+            skills=row.skills or [],
             created_at=row.created_at,
             updated_at=row.updated_at,
         )

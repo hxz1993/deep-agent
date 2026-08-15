@@ -9,12 +9,15 @@ from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.deepseek import DeepSeekProvider
 from pydantic_ai.providers.google import GoogleProvider
 from pydantic_ai.providers.openai import OpenAIProvider
+from pydantic_ai.toolsets import FunctionToolset
+from pydantic_ai_harness.tool_output_limits import ToolOutputLimits
 
+from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.factory import _resolve_model, _toolsets_for_spec, build_agent
-from deep_agent.agent.models import DeepSeekChatModel, OpenAICompatibleVideoChatModel
-from deep_agent.agent.models.deepseek_thinking_retry import DeepSeekThinkingRetry
+from deep_agent.agent.models import OpenAICompatibleVideoChatModel
 from deep_agent.capabilities.registry import ToolPackage, ToolPackageRegistry
 from deep_agent.agent.spec import AgentSpec
+from deep_agent.agent.tool_discovery import McpDiscoveryToolset
 from deep_agent.options import OPTION
 
 
@@ -36,7 +39,7 @@ class ResolveModelTests(unittest.TestCase):
         model = _resolve_model(
             _spec(model="deepseek:deepseek-v4-flash", api_key="sk-test"),
         )
-        self.assertIsInstance(model, DeepSeekChatModel)
+        self.assertIsInstance(model, OpenAIChatModel)
         self.assertIsInstance(model._provider, DeepSeekProvider)
         self.assertEqual(model.profile["openai_chat_thinking_field"], "reasoning_content")
         self.assertEqual(model.profile["openai_chat_send_back_thinking_parts"], "field")
@@ -49,8 +52,20 @@ class ResolveModelTests(unittest.TestCase):
                 base_url="https://api.deepseek.com/",
             ),
         )
-        self.assertIsInstance(model, DeepSeekChatModel)
+        self.assertIsInstance(model, OpenAIChatModel)
         self.assertIsInstance(model._provider, DeepSeekProvider)
+
+    def test_unprefixed_catalog_model_at_official_url_uses_deepseek_provider(self) -> None:
+        model = _resolve_model(
+            _spec(
+                model="deepseek-v4-flash",
+                api_key="sk-test",
+                base_url="https://api.deepseek.com",
+            ),
+        )
+        self.assertIsInstance(model, OpenAIChatModel)
+        self.assertIsInstance(model._provider, DeepSeekProvider)
+        self.assertEqual(model.model_name, "deepseek-v4-flash")
 
     def test_deepseek_with_custom_base_url_falls_back_to_openai_provider(self) -> None:
         model = _resolve_model(
@@ -127,7 +142,7 @@ class ResolveModelTests(unittest.TestCase):
     def test_deepseek_without_spec_api_key_uses_deepseek_env_key(self) -> None:
         with mock.patch.dict(os.environ, {"DEEPSEEK_API_KEY": "sk-env"}, clear=False):
             model = _resolve_model(_spec(model="deepseek:deepseek-v4-flash"))
-        self.assertIsInstance(model, DeepSeekChatModel)
+        self.assertIsInstance(model, OpenAIChatModel)
         self.assertIsInstance(model._provider, DeepSeekProvider)
 
     def test_gemini_without_prefix_returns_string_without_google_prefix(self) -> None:
@@ -164,25 +179,27 @@ class ResolveModelTests(unittest.TestCase):
         finally:
             OPTION.agent.gemini_proxy = prev
 
-    def test_deepseek_registers_thinking_retry_capability(self) -> None:
+    def test_deepseek_uses_only_standard_capabilities(self) -> None:
         agent = build_agent(
             _spec(model="deepseek:deepseek-v4-flash", api_key="sk-test"),
             ToolPackageRegistry(),
         )
-        caps = [c for c in agent.root_capability.capabilities if isinstance(c, DeepSeekThinkingRetry)]
-        self.assertEqual(len(caps), 1)
-
-    def test_non_deepseek_has_no_thinking_retry_capability(self) -> None:
-        agent = build_agent(
-            _spec(
-                model="deepseek:deepseek-v4-flash",
-                api_key="sk-test",
-                base_url="https://gateway.example.com/v1",
-            ),
-            ToolPackageRegistry(),
+        capability_modules = {
+            capability.__class__.__module__
+            for capability in agent.root_capability.capabilities
+        }
+        self.assertFalse(
+            any(module.startswith("deep_agent.agent.models") for module in capability_modules)
         )
-        caps = [c for c in agent.root_capability.capabilities if isinstance(c, DeepSeekThinkingRetry)]
-        self.assertEqual(len(caps), 0)
+
+    def test_harness_tool_output_limits_can_be_added_as_standard_capability(self) -> None:
+        capability = ToolOutputLimits()
+        agent = build_agent(
+            _spec(model="test"),
+            ToolPackageRegistry(),
+            tool_output_limits=capability,
+        )
+        self.assertIn(capability, agent.root_capability.capabilities)
 
 
 class ToolsetAssemblyTests(unittest.TestCase):
@@ -190,11 +207,9 @@ class ToolsetAssemblyTests(unittest.TestCase):
         registry = ToolPackageRegistry()
         general = object()
         sandbox = object()
-        attachment = object()
         for code, toolset in (
             ("builtin:general", general),
             ("builtin:sandbox", sandbox),
-            ("builtin:attachment", attachment),
         ):
             registry.register(
                 ToolPackage(
@@ -212,7 +227,6 @@ class ToolsetAssemblyTests(unittest.TestCase):
             capabilities=[
                 "builtin:general",
                 "builtin:sandbox",
-                "builtin:attachment",
                 "mcp:deepcube",
                 "ui:deepcube",
             ]
@@ -222,6 +236,7 @@ class ToolsetAssemblyTests(unittest.TestCase):
             spec,
             mcp_toolsets=[mcp],
             mcp_resource_toolset=resources,
+            file_toolset="file-toolset",
             dynamic_ui_packages=[
                 ToolPackage(
                     code="ui:deepcube",
@@ -232,15 +247,17 @@ class ToolsetAssemblyTests(unittest.TestCase):
             ],
         )
 
-        self.assertEqual(
-            assembled,
-            [general, sandbox, attachment, mcp, resources, ui],
-        )
+        self.assertEqual(len(assembled), 6)
+        self.assertIs(assembled[0], general)
+        self.assertIs(assembled[1], sandbox)
+        self.assertIsInstance(assembled[2], McpDiscoveryToolset)
+        self.assertIs(assembled[3], resources)
+        self.assertEqual(assembled[4], "file-toolset")
+        self.assertIs(assembled[5], ui)
 
     def test_null_and_empty_selection_keep_original_default_semantics(self) -> None:
         registry = ToolPackageRegistry()
         general = object()
-        attachment = object()
         registry.register(
             ToolPackage(
                 code="builtin:general",
@@ -249,15 +266,6 @@ class ToolsetAssemblyTests(unittest.TestCase):
                 default_enabled=True,
             )
         )
-        registry.register(
-            ToolPackage(
-                code="builtin:attachment",
-                category="builtin",
-                toolset=attachment,
-                default_enabled=False,
-            )
-        )
-
         self.assertEqual(_toolsets_for_spec(registry, _spec(capabilities=None)), [general])
         self.assertEqual(_toolsets_for_spec(registry, _spec(capabilities=[])), [])
 

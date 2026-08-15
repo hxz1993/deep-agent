@@ -4,19 +4,33 @@ function chatUrlForAgent(id) {
 
 const CATEGORY_LABELS = {
   builtin: "内置",
-  skill: "Skills",
   mcp: "MCP",
   ui: "UI 工具",
 };
 
 const GROUP_LABELS = {
   builtin: "内置工具",
-  skill: "Skills",
   mcp: "MCP",
   ui: "UI 工具",
 };
 
-const GROUP_ORDER = ["builtin", "mcp", "ui", "skill"];
+const GROUP_ORDER = ["builtin", "mcp", "ui"];
+let promptEstimateTimer = null;
+let promptEstimateRequestId = 0;
+
+function formatCompactCount(value) {
+  const count = Number(value);
+  if (!Number.isFinite(count) || count < 0) return "—";
+  if (count < 1_000) return String(Math.round(count));
+  const divisor = count >= 1_000_000 ? 1_000_000 : 1_000;
+  const suffix = count >= 1_000_000 ? "M" : "K";
+  const scaled = count / divisor;
+  return `${scaled >= 100 ? Math.round(scaled) : scaled.toFixed(1).replace(/\.0$/, "")}${suffix}`;
+}
+
+function estimatorSourceLabel(source) {
+  return source === "model_tokenizer" ? "模型 Tokenizer" : "保守估算器";
+}
 
 function capabilityGroup(toolPackage) {
   return toolPackage.category;
@@ -34,6 +48,14 @@ function capDisplayName(code, category) {
 
 function capKindLabel(cap) {
   return CATEGORY_LABELS[cap.category] || cap.category;
+}
+
+function capabilityDisclosureLabel(cap) {
+  if (cap.disclosure_mode === "conditional") return "有附件时可用";
+  if (cap.disclosure_mode === "search") {
+    return `自动预选 Top ${cap.preselect_limit || 3} · 搜索 Top ${cap.search_result_limit || 5}`;
+  }
+  return "始终可用";
 }
 
 function isCapabilitySelected(cap, selectedSet) {
@@ -63,6 +85,11 @@ function formatCapabilitiesPreview(capabilities) {
   return capabilities.join(", ");
 }
 
+function formatSkillsPreview(skills) {
+  if (!skills?.length) return "无 Skill";
+  return skills.join(", ");
+}
+
 function buildCapabilitySelectionSet(selected, caps) {
   if (selected === null) {
     return new Set(defaultEnabledCapabilityNames(caps));
@@ -80,6 +107,56 @@ function selectionMatchesDefaults(selectedSet, caps) {
 }
 
 const agentsAdmin = {
+  async updatePromptEstimate() {
+    const output = document.getElementById("agentPromptEstimate");
+    const promptInput = document.getElementById("agentPrompt");
+    const modelInput = document.getElementById("agentModelId");
+    if (!output || !promptInput || !modelInput) return;
+
+    const requestId = ++promptEstimateRequestId;
+    const prompt = promptInput.value.trim();
+    const localCharacterCount = Array.from(prompt).length;
+    const modelId = modelInput.value.trim();
+    if (!modelId) {
+      output.textContent = `${formatCompactCount(localCharacterCount)} 字 / — Token`;
+      output.title = "请先选择模型配置";
+      return;
+    }
+
+    output.textContent = `${formatCompactCount(localCharacterCount)} 字 / 估算中…`;
+    try {
+      const result = await apiFetch("/api/v1/agents/prompt-estimate", {
+        method: "POST",
+        body: JSON.stringify({ model_id: modelId, prompt }),
+      });
+      if (requestId !== promptEstimateRequestId) return;
+      output.textContent = `${formatCompactCount(result.character_count)} 字 / ${formatCompactCount(result.estimated_tokens)} Token`;
+      output.title = `${Number(result.character_count).toLocaleString("zh-CN")} 字 / 约 ${Number(result.estimated_tokens).toLocaleString("zh-CN")} Token · ${estimatorSourceLabel(result.estimator_source)}`;
+    } catch (error) {
+      if (requestId !== promptEstimateRequestId) return;
+      output.textContent = `${formatCompactCount(localCharacterCount)} 字 / — Token`;
+      output.title = `Token 估算失败：${error instanceof Error ? error.message : String(error)}`;
+    }
+  },
+
+  schedulePromptEstimate(immediate = false) {
+    clearTimeout(promptEstimateTimer);
+    if (immediate) {
+      this.updatePromptEstimate();
+      return;
+    }
+    promptEstimateTimer = setTimeout(() => this.updatePromptEstimate(), 300);
+  },
+
+  initPromptEstimate() {
+    const promptInput = document.getElementById("agentPrompt");
+    const modelInput = document.getElementById("agentModelId");
+    if (!promptInput || !modelInput || promptInput.dataset.estimateBound) return;
+    promptInput.dataset.estimateBound = "1";
+    promptInput.addEventListener("input", () => this.schedulePromptEstimate());
+    modelInput.addEventListener("change", () => this.schedulePromptEstimate(true));
+  },
+
   async refresh() {
     const tbody = document.getElementById("agentsTableBody");
     if (!tbody) return;
@@ -97,7 +174,10 @@ const agentsAdmin = {
         <tr>
           <td><strong>${escapeHtml(a.name)}</strong></td>
           <td>${escapeHtml(a.model?.name || "—")}</td>
-          <td><div class="cap-preview">${escapeHtml(formatCapabilitiesPreview(a.capabilities))}</div></td>
+          <td>
+            <div class="cap-preview">${escapeHtml(formatCapabilitiesPreview(a.capabilities))}</div>
+            <div class="skill-preview">Skill：${escapeHtml(formatSkillsPreview(a.skills))}</div>
+          </td>
           <td>${escapeHtml(formatDate(a.updated_at))}</td>
           <td>
             <div class="row-actions">
@@ -125,7 +205,7 @@ const agentsAdmin = {
     const checked = isCapabilitySelected(cap, selectedSet);
     const displayName = cap.label || capDisplayName(cap.code, cap.category);
     const kindLabel = capKindLabel(cap);
-    const toolCount = cap.tools?.length || 0;
+    const toolCount = Number(cap.tool_count ?? cap.tools?.length ?? 0);
     const searchText = `${displayName} ${cap.description || ""} ${cap.code}`.toLowerCase();
     const disabled = cap.enabled === false;
 
@@ -151,6 +231,7 @@ const agentsAdmin = {
           <div class="cap-card-title">
           <span class="kind-badge kind-${escapeHtml(cap.category)} source-${escapeHtml(cap.source || "unknown")}">${escapeHtml(kindLabel)}</span>
             <span>${escapeHtml(displayName)}</span>
+            <span class="kind-badge disclosure-badge">${escapeHtml(capabilityDisclosureLabel(cap))}</span>
           </div>
           ${cap.description ? `<p class="cap-card-desc">${escapeHtml(cap.description)}</p>` : ""}
         </div>
@@ -312,6 +393,59 @@ const agentsAdmin = {
     return selected;
   },
 
+  renderSkillChoices(selected = []) {
+    const container = document.getElementById("agentSkillChoices");
+    const counter = document.getElementById("agentSkillCounter");
+    if (!container || !counter) return;
+    const selectedSet = new Set(selected || []);
+    const known = new Set((state.skills || []).map((skill) => skill.code));
+    const unavailable = Array.from(selectedSet).filter((code) => !known.has(code));
+    const skills = [
+      ...(state.skills || []),
+      ...unavailable.map((code) => ({
+        code,
+        label: code,
+        description: "该 Skill 当前不存在，保存时将保留原引用。",
+        source: "unknown",
+        enabled: false,
+        reference_count: 0,
+        asset_count: 0,
+      })),
+    ];
+    if (!skills.length) {
+      container.innerHTML = `<div class="cap-empty">暂无可配置 Skill</div>`;
+      counter.textContent = "未选择";
+      return;
+    }
+    container.innerHTML = skills.map((skill) => {
+      const checked = selectedSet.has(skill.code);
+      const disabled = skill.enabled === false;
+      const source = skill.source === "builtin" ? "内置" : skill.source === "upload" ? "上传" : "不可用";
+      return `<label class="agent-skill-card${disabled ? " is-disabled" : ""}">
+        <input type="checkbox" name="agentSkill" value="${escapeHtml(skill.code)}" ${checked ? "checked" : ""} ${disabled ? "disabled" : ""} />
+        <span class="agent-skill-card-copy">
+          <span class="agent-skill-card-title">${escapeHtml(skill.label)} <small>${escapeHtml(source)}</small></span>
+          <span>${escapeHtml(skill.description || "暂无说明")}</span>
+          <span class="agent-skill-card-meta">${Number(skill.reference_count || 0)} References · ${Number(skill.asset_count || 0)} Assets${disabled ? " · 当前不可用" : ""}</span>
+        </span>
+      </label>`;
+    }).join("");
+    this.updateSkillCounter();
+  },
+
+  updateSkillCounter() {
+    const counter = document.getElementById("agentSkillCounter");
+    if (!counter) return;
+    const selected = document.querySelectorAll('#agentSkillChoices input[name="agentSkill"]:checked').length;
+    counter.textContent = selected ? `已选 ${selected}` : "未选择";
+  },
+
+  getSelectedSkills() {
+    return Array.from(
+      document.querySelectorAll('#agentSkillChoices input[name="agentSkill"]:checked'),
+    ).map((input) => input.value);
+  },
+
   openCreate() {
     state.editingAgentId = null;
     document.getElementById("agentModalTitle").textContent = "新建 Agent";
@@ -324,7 +458,9 @@ const agentsAdmin = {
     document.getElementById("agentPrompt").value =
       "You are a helpful assistant. Use available tools when they help answer accurately.";
     this.renderCapabilityCheckboxes(null);
+    this.renderSkillChoices([]);
     document.getElementById("agentModal").showModal();
+    this.schedulePromptEstimate(true);
   },
 
   async openEdit(agentId) {
@@ -341,7 +477,9 @@ const agentsAdmin = {
         agent.temperature == null ? "" : String(agent.temperature);
       document.getElementById("agentPrompt").value = agent.prompt;
       this.renderCapabilityCheckboxes(agent.capabilities);
+      this.renderSkillChoices(agent.skills || []);
       document.getElementById("agentModal").showModal();
+      this.schedulePromptEstimate(true);
     } catch (err) {
       showToast(err.message, true);
     }
@@ -364,6 +502,7 @@ const agentsAdmin = {
       model_id: modelId,
       prompt,
       capabilities,
+      skills: this.getSelectedSkills(),
     };
     const tempRaw = document.getElementById("agentTemperature").value.trim();
     if (tempRaw) {
@@ -445,6 +584,7 @@ const agentsAdmin = {
     });
 
     document.getElementById("capSearch")?.addEventListener("input", () => this.filterCaps());
+    document.getElementById("agentSkillChoices")?.addEventListener("change", () => this.updateSkillCounter());
   },
 };
 
@@ -452,6 +592,7 @@ window.agentsAdmin = agentsAdmin;
 
 document.addEventListener("DOMContentLoaded", () => {
   agentsAdmin.initCapSection();
+  agentsAdmin.initPromptEstimate();
   document.getElementById("newAgentBtn")?.addEventListener("click", () => agentsAdmin.openCreate());
   document.getElementById("agentForm")?.addEventListener("submit", (e) => agentsAdmin.save(e));
   document.getElementById("closeAgentModal")?.addEventListener("click", () => {

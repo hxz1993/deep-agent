@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from deep_agent.db.models import Agent, LlmModel
 
@@ -9,6 +9,16 @@ DEFAULT_INSTRUCTIONS = (
     "Use the available tools when they help you answer accurately. "
     "Be concise and explain your reasoning when it is useful."
 )
+_SUPPORTED_INPUT_MODALITIES = {"text", "image", "audio", "video"}
+
+
+def _input_modalities(llm_model: LlmModel) -> list[str]:
+    """Ignore retired modality values that may remain in historical rows."""
+    return [
+        value
+        for value in (llm_model.input_modalities or [])
+        if value in _SUPPORTED_INPUT_MODALITIES
+    ]
 
 
 @dataclass
@@ -24,6 +34,7 @@ class AgentSpec:
     model: str
     instructions: str
     capabilities: list[str] | None = None
+    skills: list[str] = field(default_factory=list)
     base_url: str | None = None
     api_key: str | None = None
     temperature: float | None = None
@@ -41,11 +52,12 @@ class AgentSpec:
             model=llm_model.model,
             instructions=row.prompt,
             capabilities=row.capabilities,
+            skills=list(row.skills or []),
             base_url=llm_model.base_url,
             api_key=llm_model.api_key,
             temperature=row.temperature,
             agent_id=row.id,
-            input_modalities=llm_model.input_modalities,
+            input_modalities=_input_modalities(llm_model),
             context_window_tokens=llm_model.context_window_tokens,
             max_output_tokens=llm_model.max_output_tokens,
             tags=llm_model.tags,
@@ -61,16 +73,18 @@ class AgentSpec:
         instructions: str | None = None,
         temperature: float | None = None,
         capabilities: list[str] | None = None,
+        skills: list[str] | None = None,
     ) -> AgentSpec:
         return cls(
             name=name,
             model=llm_model.model,
             instructions=instructions or DEFAULT_INSTRUCTIONS,
             capabilities=capabilities,
+            skills=list(skills or []),
             base_url=llm_model.base_url,
             api_key=llm_model.api_key,
             temperature=temperature,
-            input_modalities=llm_model.input_modalities,
+            input_modalities=_input_modalities(llm_model),
             context_window_tokens=llm_model.context_window_tokens,
             max_output_tokens=llm_model.max_output_tokens,
             tags=llm_model.tags,

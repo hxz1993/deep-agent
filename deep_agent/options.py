@@ -185,12 +185,6 @@ class Agent(Category):
         val_type=float,
         bind_env="CONTEXT_SUMMARY_TIMEOUT",
     )
-    skills_dir = Option(
-        _resolve_repo_path("skills"),
-        val_type=str,
-        bind_env="SKILLS_DIR",
-        convertor=_resolve_repo_path,
-    )
     mcp_forward_request_headers = Option(
         DEFAULT_MCP_FORWARD_HEADERS,
         val_type=frozenset,

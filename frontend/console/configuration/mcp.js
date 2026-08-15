@@ -53,9 +53,22 @@ function inspectionView(inspection, transport) {
     not_applicable: ["内置运行时", ""],
   };
   const [text, className] = labels[info.status] || labels.unknown;
+  const toolCount = Number(info.tools?.count || 0);
+  const snapshotStatus = info.tools?.snapshot_status || "missing";
+  const disclosure = toolCount > 5 ? "自动预选 Top 3 / 搜索 Top 5" : "全部直接披露";
+  let snapshotLabel = "";
+  if (transport === "url") {
+    if (snapshotStatus === "stale") snapshotLabel = "配置已变更，需重新检测";
+    else if (snapshotStatus !== "ready") snapshotLabel = "缺少工具快照，请检测并更新";
+    else if (info.status === "unreachable") snapshotLabel = "当前无法连接，沿用上次快照";
+    else snapshotLabel = "工具快照可用";
+  }
   const summary = info.status === "not_applicable"
     ? "运行时按需启动"
-    : `${info.tools?.count || 0} 工具 · ${info.resources?.count || 0} 资源 · ${info.resources?.template_count || 0} 模板`;
+    : [
+        snapshotLabel,
+        `${toolCount} 工具 · ${disclosure} · ${info.resources?.count || 0} 资源 · ${info.resources?.template_count || 0} 模板`,
+      ].filter(Boolean).join(" · ");
   const server = [info.server?.name, info.server?.version].filter(Boolean).join(" ");
   const errors = [
     inspectionErrorMessage(info.error),
@@ -67,6 +80,8 @@ function inspectionView(inspection, transport) {
     info.server?.protocol_version ? `协议：${info.server.protocol_version}` : "",
     info.server ? `Instructions：${info.server.instructions_available ? "可用" : "无"}` : "",
     info.checked_at ? `检测时间：${formatDate(info.checked_at)}` : "",
+    info.tools?.snapshot_at ? `快照时间：${formatDate(info.tools.snapshot_at)}` : "",
+    info.tools?.snapshot_hash ? `快照：${info.tools.snapshot_hash.slice(0, 12)}` : "",
     Number.isFinite(info.duration_ms) ? `耗时：${info.duration_ms} ms` : "",
     errors.length ? `错误：${errors.join("；")}` : "",
   ].filter(Boolean);
@@ -102,9 +117,15 @@ function inspectionToast(result) {
   ].forEach(([label, item]) => {
     if (item && item.before !== item.after) changed.push(`${label} ${item.before ?? 0} → ${item.after ?? 0}`);
   });
-  if (changed.length) return { message: `检测成功：${changed.join("，")}`, error: false };
+  const savedCount = inspection.tools?.count || 0;
+  if (changed.length) {
+    return {
+      message: `检测成功并保存 ${savedCount} 个工具快照：${changed.join("，")}`,
+      error: false,
+    };
+  }
   return {
-    message: `检测完成：无变化，共 ${inspection.tools?.count || 0} 个工具、${inspection.resources?.count || 0} 个资源、${inspection.resources?.template_count || 0} 个模板`,
+    message: `检测完成并保存 ${savedCount} 个工具快照：无变化，共 ${inspection.resources?.count || 0} 个资源、${inspection.resources?.template_count || 0} 个模板`,
     error: false,
   };
 }
@@ -132,6 +153,15 @@ function validateMcpConfig(transport, config) {
 
 function canDeleteMcp(transport) {
   return transport !== "builtin";
+}
+
+function canRenameMcp(transport) {
+  return transport === "url";
+}
+
+function renameSuccessMessage(updatedAgents) {
+  const count = Array.isArray(updatedAgents) ? updatedAgents.length : 0;
+  return `MCP 已重命名，已同步更新 ${count} 个 Agent`;
 }
 
 const mcpAdmin = {
@@ -170,6 +200,7 @@ const mcpAdmin = {
           <td class="mcp-actions-cell">
             <div class="row-actions mcp-row-actions">
               ${s.transport === "url" ? `<button type="button" data-inspect-mcp="${escapeHtml(s.name)}">检测并更新</button>` : ""}
+              ${canRenameMcp(s.transport) ? `<button type="button" data-rename-mcp="${escapeHtml(s.name)}">重命名</button>` : ""}
               ${s.transport === "stdio" ? "" : `<button type="button" data-edit="${escapeHtml(s.name)}">编辑</button>`}
               ${canDeleteMcp(s.transport) ? `<button type="button" class="danger" data-delete="${escapeHtml(s.name)}">删除</button>` : ""}
             </div>
@@ -184,6 +215,9 @@ const mcpAdmin = {
       });
       tbody.querySelectorAll("[data-inspect-mcp]").forEach((btn) => {
         btn.addEventListener("click", () => this.inspect(btn.dataset.inspectMcp, btn));
+      });
+      tbody.querySelectorAll("[data-rename-mcp]").forEach((btn) => {
+        btn.addEventListener("click", () => this.openRename(btn.dataset.renameMcp));
       });
       tbody.querySelectorAll("[data-delete]").forEach((btn) => {
         btn.addEventListener("click", () => this.remove(btn.dataset.delete));
@@ -289,8 +323,11 @@ const mcpAdmin = {
   openCreate() {
     state.editingMcp = null;
     document.getElementById("mcpModalTitle").textContent = "新建 MCP";
-    document.getElementById("mcpName").disabled = false;
-    document.getElementById("mcpName").value = "";
+    const nameInput = document.getElementById("mcpName");
+    nameInput.readOnly = false;
+    nameInput.classList.remove("mcp-name-readonly");
+    nameInput.value = "";
+    document.getElementById("mcpNameReadOnlyHint")?.classList.add("hidden");
     document.getElementById("mcpTransport").value = "url";
     document.getElementById("mcpDescription").value = "";
     document.getElementById("mcpEnabled").checked = true;
@@ -311,8 +348,11 @@ const mcpAdmin = {
       const server = await apiFetch(`/api/v1/mcp/${encodeURIComponent(name)}`);
       state.editingMcp = name;
       document.getElementById("mcpModalTitle").textContent = `编辑 MCP · ${name}`;
-      document.getElementById("mcpName").disabled = true;
-      document.getElementById("mcpName").value = server.name;
+      const nameInput = document.getElementById("mcpName");
+      nameInput.readOnly = true;
+      nameInput.classList.add("mcp-name-readonly");
+      nameInput.value = server.name;
+      document.getElementById("mcpNameReadOnlyHint")?.classList.remove("hidden");
       document.getElementById("mcpTransport").value = server.transport;
       document.getElementById("mcpDescription").value = server.description || "";
       document.getElementById("mcpEnabled").checked = server.enabled;
@@ -352,6 +392,54 @@ const mcpAdmin = {
       document.getElementById("mcpModal").showModal();
     } catch (err) {
       showToast(err.message, true);
+    }
+  },
+
+  openRename(name) {
+    state.renamingMcp = name;
+    document.getElementById("mcpRenameCurrentName").value = name;
+    document.getElementById("mcpRenameNewName").value = name;
+    const form = document.getElementById("mcpRenameForm");
+    AdminFormFeedback.clear(form);
+    document.getElementById("mcpRenameModal").showModal();
+    requestAnimationFrame(() => {
+      const input = document.getElementById("mcpRenameNewName");
+      input.focus();
+      input.select();
+    });
+  },
+
+  async rename(event) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    AdminFormFeedback.clear(form);
+    const oldName = state.renamingMcp;
+    const newName = document.getElementById("mcpRenameNewName").value.trim();
+    if (!oldName) {
+      AdminFormFeedback.show(form, "缺少待重命名的 MCP");
+      return;
+    }
+
+    AdminFormFeedback.setSubmitting(form, true);
+    let result = null;
+    try {
+      result = await apiFetch(`/api/v1/mcp/${encodeURIComponent(oldName)}/rename`, {
+        method: "POST",
+        body: JSON.stringify({ new_name: newName }),
+      });
+      document.getElementById("mcpRenameModal").close();
+      state.renamingMcp = null;
+      showToast(renameSuccessMessage(result.updated_agents));
+    } catch (err) {
+      AdminFormFeedback.show(form, err);
+    } finally {
+      AdminFormFeedback.setSubmitting(form, false);
+    }
+    if (result) {
+      await refreshAfterSuccessfulMutation("MCP 已重命名", async () => {
+        await this.refresh();
+        await loadCapabilities();
+      });
     }
   },
 
@@ -478,11 +566,14 @@ window.__McpInspectionUI = {
   savedInspectionToast,
   validateMcpConfig,
   canDeleteMcp,
+  canRenameMcp,
+  renameSuccessMessage,
 };
 
 document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("newMcpBtn")?.addEventListener("click", () => mcpAdmin.openCreate());
   document.getElementById("mcpForm")?.addEventListener("submit", (e) => mcpAdmin.save(e));
+  document.getElementById("mcpRenameForm")?.addEventListener("submit", (e) => mcpAdmin.rename(e));
   document.getElementById("mcpTransport")?.addEventListener("change", () => mcpAdmin.toggleTransportFields());
   document.querySelectorAll('input[name="mcpRequestContextMode"]').forEach((input) => {
     input.addEventListener("change", () => mcpAdmin.updateRequestContextDescription());
@@ -492,5 +583,13 @@ document.addEventListener("DOMContentLoaded", () => {
   });
   document.getElementById("cancelMcpBtn")?.addEventListener("click", () => {
     document.getElementById("mcpModal").close();
+  });
+  document.getElementById("closeMcpRenameModal")?.addEventListener("click", () => {
+    state.renamingMcp = null;
+    document.getElementById("mcpRenameModal").close();
+  });
+  document.getElementById("cancelMcpRenameBtn")?.addEventListener("click", () => {
+    state.renamingMcp = null;
+    document.getElementById("mcpRenameModal").close();
   });
 });

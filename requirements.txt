@@ -1,13 +1,18 @@
 # -*- coding: utf-8 -*-
 # Core agent runtime. Slim package + only the provider/mcp extras we use,
 # to avoid pulling in every provider SDK (bedrock, cohere, huggingface, ...).
-pydantic-ai-slim[openai,anthropic,google,mcp]==2.14.1
-pydantic-ai-harness==0.10.0
+pydantic-ai-slim[openai,anthropic,google,mcp]==2.31.0
+# OpenAI 3.x imports an aiohttp transport that requires aiohttp>=3.14.1,
+# while the bundled DeepFOS platform runtime remains on aiohttp 3.9.x.
+openai==2.46.0
+pydantic-ai-harness[skills]==0.21.0
 tiktoken>=0.13,<1
+pypinyin>=0.55,<1
 
 # Web framework
 uvicorn[standard]>=0.30
 gunicorn~=26.0.0
+uvloop==0.22.1; sys_platform != "win32"
 
 # Config & streaming
 pydantic-settings>=2.5
@@ -18,9 +23,9 @@ python-docx>=1.2,<2
 openpyxl>=3.1
 
 # Database
-sqlalchemy[asyncio]>=2.0
+sqlalchemy[asyncio]==2.0.51
 asyncpg
-asyncmy
+asyncmy==0.2.11
 aiosqlite
 alembic
 filelock>=3.13

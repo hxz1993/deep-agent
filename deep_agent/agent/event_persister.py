@@ -8,8 +8,11 @@ from typing import Any, Literal
 from loguru import logger
 from pydantic_ai.messages import ModelMessage, ModelRequest
 
-from deep_agent.agent.history import incremental_append_messages, repair_unprocessed_tool_calls
-from deep_agent.agent.stream_accumulator import StreamAccumulator
+from deep_agent.agent.history import (
+    incremental_append_messages,
+    mark_cancelled_response_interrupted,
+    repair_unprocessed_tool_calls,
+)
 from deep_agent.db.conversation import SessionStore
 from deep_agent.db.session_scope import runtime_session_key
 
@@ -30,9 +33,7 @@ class PersistEvent:
     user_message: ModelRequest | None = None
     new_messages: list[ModelMessage] | None = None
     skip_user_prompt: bool = False
-    accumulator: StreamAccumulator | None = None
     result_messages: list[ModelMessage] | None = None
-    include_tool_calls: bool = True
     repair_dangling_tool_calls: bool = True
 
 
@@ -196,20 +197,10 @@ class EventPersister:
             return
 
         if ev.kind == "run_cancelled":
-            if ev.result_messages:
-                to_append = incremental_append_messages(
-                    ev.result_messages,
-                    skip_user_prompt=ev.skip_user_prompt,
-                )
-            elif ev.accumulator is not None:
-                to_append = incremental_append_messages(
-                    ev.accumulator.to_model_messages(include_tool_calls=ev.include_tool_calls),
-                    skip_user_prompt=ev.skip_user_prompt,
-                )
-            else:
-                to_append = []
-            if ev.repair_dangling_tool_calls:
-                to_append = repair_unprocessed_tool_calls(to_append)
+            to_append = incremental_append_messages(
+                mark_cancelled_response_interrupted(ev.result_messages or []),
+                skip_user_prompt=ev.skip_user_prompt,
+            )
             if to_append:
                 await self._store.append(
                     session_id,

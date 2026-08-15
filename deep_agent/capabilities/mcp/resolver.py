@@ -9,6 +9,7 @@ from deep_agent.capabilities.registry import ToolPackage, describe_tool_package
 from deep_agent.core.paths import DEEP_AGENT_ROOT
 from deep_agent.db.models import McpServer
 from deep_agent.db.stores.bundle import DataStores
+from deep_agent.schemas.mcp import McpInspection
 
 
 def effective_mcp_capability_names(spec: AgentSpec, packages: list[ToolPackage]) -> set[str]:
@@ -59,10 +60,27 @@ async def resolve_mcp_toolsets(
     *,
     mcp_rows: list[McpServer] | None = None,
 ) -> list[Any]:
+    if mcp_rows is None:
+        mcp_rows = await stores.mcp.list_all()
     packages = select_mcp_tool_packages(
         await load_mcp_tool_packages(stores, rows=mcp_rows), spec
     )
-    return [package.toolset for package in packages]
+    rows_by_name = {row.name: row for row in mcp_rows}
+    resolved: list[Any] = []
+    for package in packages:
+        if package.source == "builtin":
+            resolved.append(package.toolset)
+            continue
+        row = rows_by_name.get(package.code.removeprefix("mcp:"))
+        if row is None or row.transport != "url":
+            continue
+        inspection = McpInspection.from_value(row.inspection, transport=row.transport)
+        snapshot = inspection.tools.snapshot
+        if inspection.tools.snapshot_status != "ready" or snapshot is None:
+            continue
+        if snapshot.definitions:
+            resolved.append(package.toolset)
+    return resolved
 
 
 async def describe_mcp_tool_packages(

@@ -2,7 +2,7 @@
 
 > 状态：持续维护的研究依据
 >
-> 当前运行基线：Pydantic AI 2.14.1、Pydantic AI Harness 0.10.0
+> 当前运行基线：Pydantic AI 2.31.0、Pydantic AI Harness 0.21.0
 
 ## 总体判断
 
@@ -67,21 +67,92 @@ Provider usage 在模型响应后才产生，无法阻止当前请求超窗。�
 “本轮预计输出”“安全余量”“摘要输出上限”和“可用输入预算”都是动态算法值，不要求
 管理员配置，也不持久化。总窗口 1M、最大输出 384K 不等于每次都预留 384K。
 
+## Harness原生压缩复用边界
+
+Harness `SummarizingCompaction` 不是只能作为 Agent 内 Capability 使用。公开的 `compact_now()` 可以在
+Run 外接收一组 `ModelMessage`，调用同一个摘要策略并返回压缩后的消息，因此它具备成为 DeepAgent
+“摘要内核”的条件。0.18 还提供了几项已经解决真实问题的语义：
+
+- `incremental=True`：把上一份摘要作为锚点，只合并新事实，避免每次从头重写造成递减失真。
+- `preserve_first_user_message` / `keep_user_messages`：保留原始任务或受预算约束的近期用户问题。
+- `pin()`：标记压缩后仍必须保留的小型持久状态。
+- `receipts`：在被改写的模型历史中记录压缩发生过。
+- `compact_now()`：让 `/compact` 一类 Run 外入口复用相同策略。
+
+但它不能直接整体替换 DeepAgent 当前压缩器。Harness 的职责是改写“本次模型将看到的消息历史”，
+并不知道 DeepAgent 的以下产品约束：
+
+- `chat_messages` 是完整原始事实源，Checkpoint 只是可失效、可覆盖的派生投影。
+- 自动和主动压缩要共用包含 Instructions、工具 Schema、输出预留和安全余量的完整请求预算。
+- Harness 0.18 的压缩触发 Token 读数尚不包含工具 Schema，`SummarizingCompaction` 也不为摘要调用
+  设置输出上限；DeepAgent 必须继续计算真实 MCP Schema 成本并保留动态摘要输出上限。
+- 主动压缩要提供阶段 SSE、`noop/failed/completed` 结果和历史边界展示。
+- Checkpoint 保存前必须完成目标复检、原始历史 Hash 与 `row_version` CAS；Pending、取消、失败和
+  Sliding Window 均不得覆盖旧 Checkpoint。
+- Context Reference 的 `metadata` 不能进入摘要，模型或策略变化要让旧投影失效。
+
+v0.3.16 的最终结论是不整体接入 `compact_now(SummarizingCompaction)`：公开 API 虽能生成摘要，
+但仍不具备工具 Schema 完整请求预算、动态摘要输出上限、DeepAgent 主动压缩 SSE、目标复检以及
+Checkpoint Hash/CAS 事务语义。为了避免“框架摘要 + 产品事务”形成两层难以验证的控制流，当前
+继续复用 Harness 的 Clamp、文件读取去重和工具结果清理等公开确定性 tiers；语义摘要保留在
+DeepAgent 内部，并将自动/主动入口收敛到同一投影流程。若 Harness 后续公开接口能覆盖上述差异，
+再以黑盒等价测试重新评估，不调用其私有函数。
+
+### Harness后续采用项
+
+- **ConversationSearch**：`CTX-102` 已暂缓。当前没有真实长程任务证明摘要后无法恢复精确路径、
+  ID 或决定，中文历史检索质量也缺少可靠样本。只有出现可稳定复现的缺失后，才评估读取现有
+  `chat_messages` 的自定义 `HistorySource`；仍不启用 `SnapshotHistorySource + StepPersistence`
+  第二套历史。
+- **SpendLimits**：登记为 `USAGE-101` 的长期潜力项。当前已有 Run 级请求次数上限和可选
+  累计 Token 上限，暂不再增加 80% 告警、工具调用硬上限或会话累计阻断。未来出现明确
+  配额治理需求时，再统一设计跨 Worker 的用户/App/Space 周期配额、共享计数 Store 和告警口径；
+  私有 DeepSeek 不按美元价格作通用硬阻断。
+- **原生摘要内核评估**：`CTX-103` 已关闭。当前继续复用确定性 tiers，不整体迁移摘要内核；
+  只有 Harness 公开接口能够覆盖工具 Schema 预算、动态摘要上限、主动 SSE、目标复检和
+  Checkpoint 事务时才重新打开。
+
+### Pydantic AI Core原生能力采用项
+
+- **请求输出上限**：`MODEL-001` 优先实施。把 `llm_models.max_output_tokens` 映射到普通与流式请求的
+  `ModelSettings.max_tokens`，目录字段才能从“预算参考”变成真实 Provider 请求约束；未配置时保持
+  Provider 默认行为。
+- **UsageLimits**：当前保留 `tool_calls_limit` 和 `per_request_input_tokens_limit` 的原生能力记录，
+  但不进入近期实施。如未来启用，仍不能替代 DeepAgent 包含工具 Schema、输出预留和
+  安全余量的前置窗口预算。
+- **运行关联与观测**：`OBS-101` 使用稳定、作用域化的 `conversation_id` 关联同一 Agent Session，
+  每次发送或 Deferred 续跑使用独立 `run_id`。v0.3.17 已将二者接入 Pydantic AI官方 Run、SSE、
+  History、脱敏结构化日志和 Console 当前 Run；后续 OTLP/Instrumentation 继续复用这些标识，
+  不能把 ID 当作历史托管、业务审计或多 Pod Cancel 协调。
+- **Provider 特性**：`MODEL-101` 当前暂缓；DeepSeek 等自动缓存只观测 Provider 已返回的命中数据，
+  仅在具体模型明确支持且收益可测时才使用 Prompt Cache / `CachePoint`。
+  `MODEL-102` 已决定不实施：当前没有真实 `content_filter` 误判证据，不为了采用
+  `RaiseContentFilterError` 而额外增加 REST、SSE、History 和 Console 分支。
+- **显式后备与 Thinking**：`MODEL-201` 的 `FallbackModel` 只能由 Agent 明确配置，不能静默跨模型、
+  跨地域回退；`MODEL-202` 以后用 Core 的统一 Thinking 设置替换零散 Provider 参数，但仍需模型目录
+  能力声明与前端/历史协议配套。
+- **工具返回 Schema**：`TOOL-203` 首版只按最终协议名精确白名单，为模型确需理解复杂返回结构的
+  少量工具启用 `IncludeToolReturnSchemas`；无可信 Schema 时使用少量受测映射。它会增加 Schema
+  Token，不能用 `query` 模糊匹配或对全量 MCP 工具启用。
+
 ## 配置管理结论
 
 全局运行策略仍使用环境变量和现有配置加载机制，不新增在线编辑数据库表。会话、消息和
 Checkpoint 属于运行状态，继续持久化到数据库。上下文压缩默认开启，只在模型没有
 `context_window_tokens` 时关闭，不增加功能开关。
 
-## 暂不引入的能力
+## 采用状态归档
 
-- Memory：只有形成明确跨会话记忆产品边界后再设计范围、审计和删除。
-- Usage Ledger：只有成本、计费或跨会话统计需求出现时再建调用账本。
-- StepPersistence：现有 SQL 会话与 Pending 恢复仍是事实源。
-- Planning/SubAgent：等待长任务与专业分工场景稳定。
-- Artifact：应作为 DeepFOS 业务实体独立设计，不塞进压缩摘要。
+- `ConversationSearch` 已移入暂缓；Memory、Usage/Spend、StepPersistence、Planning/SubAgent 和
+  Artifact 仍保留为有触发条件的潜力项，不是近期压缩待办。
+- `StepPersistence` 不替代现有 SQL 会话与 Pending 恢复；若未来重新启动 ConversationSearch，
+  也只能通过自定义 `HistorySource` 读取现有事实源。
+- Harness `SummarizingCompaction` 整体替换、Provider 原生压缩与 DeepAgent Checkpoint 双重启用
+  已明确关闭。
 
-这些方向登记在 [`../TODO.md`](../TODO.md)，不在当前压缩链路中预埋半成品。
+统一状态与重新打开条件见 [`../TODO.md`](../TODO.md)；完整框架能力依据见
+[`../14-framework-capabilities/framework-capabilities-baseline.md`](../14-framework-capabilities/framework-capabilities-baseline.md)。
+当前压缩链路不预埋这些潜力能力。
 
 ## 证据入口
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic_ai import FunctionToolset, ModelRetry, RunContext
+from pydantic_ai import FunctionToolset, ModelRetry, RunContext, ToolFailed
 from pydantic_ai.messages import BinaryContent
 
 from deep_agent.agent.deps import AgentDeps
@@ -129,7 +129,7 @@ def build_mcp_resource_toolset(
         except ModelRetry:
             raise
         except Exception as exc:
-            raise ModelRetry(
+            raise ToolFailed(
                 f"Could not list resources from {server_name!r} ({type(exc).__name__})."
             ) from exc
         return {
@@ -148,7 +148,7 @@ def build_mcp_resource_toolset(
         except ModelRetry:
             raise
         except Exception as exc:
-            raise ModelRetry(
+            raise ToolFailed(
                 f"Could not list resource templates from {server_name!r} ({type(exc).__name__})."
             ) from exc
         return {
@@ -171,7 +171,7 @@ def build_mcp_resource_toolset(
         except ModelRetry:
             raise
         except Exception as exc:
-            raise ModelRetry(
+            raise ToolFailed(
                 f"Could not read resource {uri!r} from {server_name!r} "
                 f"({type(exc).__name__})."
             ) from exc

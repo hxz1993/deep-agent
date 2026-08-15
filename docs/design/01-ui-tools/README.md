@@ -13,3 +13,7 @@
 MCP 发现 RFC 和同步机制评审，只用于解释为什么最终没有采用 MCP 自动发现。
 
 后续事项统一登记在 [`../TODO.md`](../TODO.md)。
+
+当前页面业务工具、Harness `BrowserUse` 和 Provider Computer Use 的区别及旧
+`feat/web-capabilities` 分支取舍，见
+[`15 · 浏览器与页面操作`](../15-browser-and-page-actions/README.md)。

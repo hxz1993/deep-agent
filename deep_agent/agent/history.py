@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 from pydantic_ai import ToolDenied
 from pydantic_ai.messages import (
     BaseToolCallPart,
+    BaseToolReturnPart,
     ModelMessage,
     ModelRequest,
     ModelResponse,
@@ -16,6 +17,7 @@ from pydantic_ai.messages import (
     ThinkingPart,
     ToolReturnPart,
     UserPromptPart,
+    NativeToolSearchReturnPart,
 )
 
 from deep_agent.agent.attachments import is_attachment_ref
@@ -24,6 +26,8 @@ from deep_agent.agent.context_references import (
     context_references_from_content,
 )
 from deep_agent.agent.events import _to_jsonable
+from deep_agent.agent.tool_output_limits import tool_result_artifacts
+from deep_agent.agent.planning import is_planning_tool, plan_snapshot_from_part
 from deep_agent.schemas.context_reference import ContextReference
 
 
@@ -52,6 +56,9 @@ class HistoryToolResultPart(BaseModel):
     tool: str | None = None
     result: Any = None
     tool_call_id: str | None = None
+    source: str | None = None
+    artifacts: list[dict[str, Any]] | None = None
+    plan: dict[str, Any] | None = None
 
 
 class HistoryAttachmentPart(BaseModel):
@@ -73,6 +80,10 @@ HistoryPart = (
 
 class HistoryMessage(BaseModel):
     role: Literal["user", "assistant"]
+    status: Literal["completed", "interrupted"] | None = Field(
+        default=None,
+        description="Assistant response state; omitted for user turns and synthetic result groups.",
+    )
     content: str | None = Field(default=None, description="User message text.")
     attachments: list[HistoryAttachmentPart] = Field(
         default_factory=list,
@@ -87,6 +98,10 @@ class HistoryMessage(BaseModel):
     branch_point: int | None = Field(
         default=None,
         description="Index in raw ModelMessage list; truncate here to branch.",
+    )
+    run_id: str | None = Field(
+        default=None,
+        description="Pydantic AI run that produced this assistant response.",
     )
 
 
@@ -104,6 +119,7 @@ class HistoryContextCheckpoint(BaseModel):
 
 class SessionHistoryResponse(BaseModel):
     session_id: str
+    conversation_id: str
     messages: list[HistoryMessage]
     model_message_count: int = Field(
         default=0,
@@ -231,6 +247,9 @@ def _rejected_tool_calls(messages: list[ModelMessage]) -> _RejectedToolCalls:
                     unresolved.append(
                         (message_index, part_index, part.tool_name, part.tool_call_id)
                     )
+            for part in message.parts:
+                if isinstance(part, BaseToolReturnPart):
+                    pop_call(part.tool_call_id, part.tool_name)
             continue
 
         if not isinstance(message, ModelRequest):
@@ -244,7 +263,7 @@ def _rejected_tool_calls(messages: list[ModelMessage]) -> _RejectedToolCalls:
                     if message_index >= last_response_index:
                         terminal_rejected.setdefault(position[0], set()).add(position[1])
                         terminal_retries.setdefault(message_index, set()).add(part_index)
-            elif isinstance(part, ToolReturnPart):
+            elif isinstance(part, BaseToolReturnPart):
                 pop_call(part.tool_call_id, part.tool_name)
 
     return _RejectedToolCalls(
@@ -260,7 +279,11 @@ def filter_ephemeral_agent_messages(messages: list[ModelMessage]) -> list[ModelM
     rejected_calls = _rejected_tool_calls(messages)
     filtered: list[ModelMessage] = []
     for message_index, message in enumerate(messages):
-        if isinstance(message, ModelResponse) and is_thinking_only_response(message):
+        if (
+            isinstance(message, ModelResponse)
+            and message.state != "interrupted"
+            and is_thinking_only_response(message)
+        ):
             continue
         if isinstance(message, ModelResponse):
             rejected_parts = (
@@ -276,7 +299,7 @@ def filter_ephemeral_agent_messages(messages: list[ModelMessage]) -> list[ModelM
                 continue
             if len(kept_parts) != len(message.parts):
                 message = replace(message, parts=kept_parts)
-                if is_thinking_only_response(message):
+                if message.state != "interrupted" and is_thinking_only_response(message):
                     continue
         if isinstance(message, ModelRequest):
             terminal_retries = rejected_calls.terminal_retry_positions.get(message_index, set())
@@ -293,15 +316,36 @@ def filter_ephemeral_agent_messages(messages: list[ModelMessage]) -> list[ModelM
     return filtered
 
 
+def mark_cancelled_response_interrupted(messages: list[ModelMessage]) -> list[ModelMessage]:
+    """Mark the final retained assistant response as interrupted after a real cancel.
+
+    Pydantic AI can cancel while a function is executing and return a partial
+    response whose state remains ``complete``.  DeepAgent's History contract is
+    run-oriented, so any retained assistant content from that cancelled run must
+    remain distinguishable from a normally completed answer.
+    """
+    for index in range(len(messages) - 1, -1, -1):
+        message = messages[index]
+        if not isinstance(message, ModelResponse) or not message.parts:
+            continue
+        if message.state == "interrupted":
+            return messages
+        updated = list(messages)
+        updated[index] = replace(message, state="interrupted")
+        return updated
+    return messages
+
+
 _USER_CANCELLED_TOOL_MESSAGE = "User cancelled"
 
 
 def repair_unprocessed_tool_calls(messages: list[ModelMessage]) -> list[ModelMessage]:
-    """Close dangling tool_call turns in message order for LLM API validation.
+    """Close legacy dangling tool calls without touching official interrupted turns.
 
     Synthetic tool returns are inserted immediately after the assistant turn they
-    belong to, not only at history tail. This fixes histories where a later
-    assistant message or user turn appeared before all tool_call_ids were answered.
+    belong to, not only at history tail. Pydantic AI 2.31 owns the repair of
+    ``state='interrupted'`` responses and synthesizes ``outcome='interrupted'``
+    when that history is reused, so those responses must remain unchanged.
     """
     if not messages:
         return messages
@@ -327,11 +371,22 @@ def repair_unprocessed_tool_calls(messages: list[ModelMessage]) -> list[ModelMes
 
     for message in messages:
         if isinstance(message, ModelResponse):
+            returned_ids = {
+                part.tool_call_id
+                for part in message.parts
+                if isinstance(part, BaseToolReturnPart) and part.tool_call_id
+            }
+            for tool_call_id in returned_ids:
+                pending.pop(tool_call_id, None)
             flush_pending()
             repaired.append(message)
+            if message.state == "interrupted":
+                continue
             for part in message.parts:
                 if isinstance(part, BaseToolCallPart) and part.tool_call_id:
                     pending[part.tool_call_id] = part.tool_name
+            for tool_call_id in returned_ids:
+                pending.pop(tool_call_id, None)
             continue
 
         if isinstance(message, ModelRequest):
@@ -339,7 +394,7 @@ def repair_unprocessed_tool_calls(messages: list[ModelMessage]) -> list[ModelMes
                 flush_pending()
             repaired.append(message)
             for part in message.parts:
-                if isinstance(part, ToolReturnPart) and part.tool_call_id:
+                if isinstance(part, BaseToolReturnPart) and part.tool_call_id:
                     pending.pop(part.tool_call_id, None)
             continue
 
@@ -358,12 +413,17 @@ def has_unprocessed_tool_calls(messages: list[ModelMessage]) -> bool:
     pending: set[str] = set()
     for message in messages:
         if isinstance(message, ModelResponse):
+            if message.state == "interrupted":
+                continue
             for part in message.parts:
                 if isinstance(part, BaseToolCallPart) and part.tool_call_id:
                     pending.add(part.tool_call_id)
+            for part in message.parts:
+                if isinstance(part, BaseToolReturnPart) and part.tool_call_id:
+                    pending.discard(part.tool_call_id)
         elif isinstance(message, ModelRequest):
             for part in message.parts:
-                if isinstance(part, (ToolReturnPart, RetryPromptPart)) and part.tool_call_id:
+                if isinstance(part, (BaseToolReturnPart, RetryPromptPart)) and part.tool_call_id:
                     pending.discard(part.tool_call_id)
     return bool(pending)
 
@@ -400,6 +460,20 @@ def _response_parts(
                     tool=part.tool_name,
                     args=_tool_call_args(part),
                     tool_call_id=part.tool_call_id,
+                    source=(
+                        "tool_search"
+                        if part.tool_name in {"search_tools", "tool_search"}
+                        else "planning" if is_planning_tool(part.tool_name) else None
+                    ),
+                )
+            )
+        elif isinstance(part, NativeToolSearchReturnPart):
+            parts.append(
+                HistoryToolResultPart(
+                    tool=part.tool_name,
+                    result=_to_jsonable(part.content),
+                    tool_call_id=part.tool_call_id,
+                    source="tool_search",
                 )
             )
     return parts
@@ -414,6 +488,13 @@ def _request_tool_returns(request: ModelRequest) -> list[HistoryPart]:
                     tool=part.tool_name,
                     result=_to_jsonable(part.content),
                     tool_call_id=part.tool_call_id,
+                    source=(
+                        "tool_search"
+                        if part.tool_name in {"search_tools", "tool_search"}
+                        else "planning" if is_planning_tool(part.tool_name) else None
+                    ),
+                    artifacts=tool_result_artifacts(part) or None,
+                    plan=plan_snapshot_from_part(part),
                 )
             )
     return parts
@@ -537,7 +618,7 @@ def model_messages_to_history(messages: list[ModelMessage]) -> list[HistoryMessa
                 pending_tool_results.extend(tool_results)
 
         elif isinstance(message, ModelResponse):
-            if is_thinking_only_response(message):
+            if message.state != "interrupted" and is_thinking_only_response(message):
                 continue
             flush_tool_results()
             parts = _response_parts(
@@ -548,9 +629,15 @@ def model_messages_to_history(messages: list[ModelMessage]) -> list[HistoryMessa
                 history.append(
                     HistoryMessage(
                         role="assistant",
+                        status=(
+                            "interrupted"
+                            if message.state == "interrupted"
+                            else "completed"
+                        ),
                         parts=parts,
                         timestamp=message.timestamp,
                         branch_point=idx,
+                        run_id=message.run_id,
                     )
                 )
 
@@ -562,9 +649,17 @@ def enrich_history_messages(
     messages: list[HistoryMessage],
     hints: dict[str, dict[str, Any]],
 ) -> list[HistoryMessage]:
-    """Merge UI tool widget/metadata into history tool_call parts (API-layer only)."""
-    if not hints:
-        return messages
+    """Enrich UI calls and project cancelled tool execution for history display.
+
+    Pydantic AI keeps a response ``completed`` when the model finished choosing
+    a function tool and cancellation happened while that tool was executing.
+    It adds the official ``outcome='interrupted'`` return when history is reused,
+    but before the next run the Console still needs to distinguish that dangling
+    function call from a completed one. Persisted model messages are not changed.
+
+    Deferred UI tools are left pending because their missing result means
+    "waiting for user input", not "run was stopped".
+    """
     enriched: list[HistoryMessage] = []
     for msg in messages:
         if msg.role != "assistant":
@@ -578,4 +673,28 @@ def enrich_history_messages(
             else:
                 parts.append(part)
         enriched.append(msg.model_copy(update={"parts": parts}))
-    return enriched
+
+    unresolved: list[tuple[str, int, str]] = []
+    for message_index, msg in enumerate(enriched):
+        if msg.role != "assistant":
+            continue
+        for part in msg.parts:
+            if isinstance(part, HistoryToolCallPart) and part.tool_call_id:
+                unresolved.append((part.tool_call_id, message_index, part.tool))
+            elif isinstance(part, HistoryToolResultPart) and part.tool_call_id:
+                for index in range(len(unresolved) - 1, -1, -1):
+                    if unresolved[index][0] == part.tool_call_id:
+                        unresolved.pop(index)
+                        break
+
+    interrupted_indices = {
+        message_index
+        for _, message_index, tool_name in unresolved
+        if tool_name not in hints
+    }
+    return [
+        msg.model_copy(update={"status": "interrupted"})
+        if index in interrupted_indices and msg.status == "completed"
+        else msg
+        for index, msg in enumerate(enriched)
+    ]

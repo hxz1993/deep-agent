@@ -20,12 +20,16 @@ from deep_agent.db.models import (
     LlmModel,
     McpServer,
     ModelCatalog,
+    SkillPackage,
     UiToolDefinition,
     UiToolPackage,
 )
 from maintenance.config_backup import (
+    BACKUP_SCOPE_SCHEMA_VERSION,
     CONFIG_TABLES,
     SESSION_TABLES,
+    _backup_scope_manifest,
+    _validate_table_classification,
     database_url_from_config,
     default_output_root,
     export_backup,
@@ -51,13 +55,13 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
 
             self.assertEqual(
                 result.path.name,
-                "deep-agent-config-test-v002-20260723-131415.db",
+                "deep-agent-config-test-v006-20260723-131415.db",
             )
             self.assertEqual(
                 [path.resolve() for path in (output_root / "test").iterdir()],
                 [result.path.resolve()],
             )
-            self.assertEqual(result.revision, "002")
+            self.assertEqual(result.revision, "006")
             self.assertEqual(result.row_counts["agents"], 1)
             self.assertEqual(result.row_counts["chat_sessions"], 0)
             self.assertEqual(result.row_counts["chat_messages"], 0)
@@ -80,7 +84,7 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                     connection.execute(
                         "SELECT version_num FROM alembic_version"
                     ).fetchone(),
-                    ("002",),
+                    ("006",),
                 )
                 self.assertEqual(
                     connection.execute(
@@ -144,7 +148,31 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                         "SELECT environment, source_dialect, alembic_revision, "
                         "git_commit FROM _backup_info"
                     ).fetchone(),
-                    ("test", "sqlite", "002", "abc123"),
+                    ("test", "sqlite", "006", "abc123"),
+                )
+                scope_manifest = json.loads(
+                    str(
+                        connection.execute(
+                            "SELECT scope_manifest FROM _backup_info"
+                        ).fetchone()[0]
+                    )
+                )
+                self.assertEqual(scope_manifest, _backup_scope_manifest())
+                self.assertEqual(
+                    scope_manifest["schema_version"],
+                    BACKUP_SCOPE_SCHEMA_VERSION,
+                )
+                self.assertEqual(
+                    scope_manifest["external_files"],
+                    [
+                        {
+                            "kind": "uploaded_skill_packages",
+                            "included": False,
+                            "locator_table": "skill_packages",
+                            "locator_column": "platform_file_id",
+                            "export_api": "/api/v1/skills/export",
+                        }
+                    ],
                 )
 
     async def test_failed_export_removes_partial_database(self) -> None:
@@ -157,7 +185,7 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                     "CREATE TABLE alembic_version (version_num VARCHAR(32))"
                 )
                 connection.execute(
-                    "INSERT INTO alembic_version (version_num) VALUES ('002')"
+                    "INSERT INTO alembic_version (version_num) VALUES ('006')"
                 )
 
             with self.assertRaises(Exception):
@@ -180,6 +208,13 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             default_output_root().parent,
             repository_root().parent,
+        )
+
+    def test_every_orm_table_has_an_explicit_backup_classification(self) -> None:
+        _validate_table_classification()
+        self.assertEqual(
+            set(CONFIG_TABLES) | set(SESSION_TABLES),
+            set(Base.metadata.tables),
         )
 
     def test_reads_sqlite_database_from_external_config(self) -> None:
@@ -208,7 +243,7 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                 )
                 await connection.execute(
                     text(
-                        "INSERT INTO alembic_version (version_num) VALUES ('002')"
+                        "INSERT INTO alembic_version (version_num) VALUES ('006')"
                     )
                 )
                 await connection.execute(
@@ -277,7 +312,27 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                         "name": "agent",
                         "model_id": "model-1",
                         "capabilities": ["mcp:remote"],
+                        "skills": ["uploaded-skill"],
                         "prompt": "test",
+                    },
+                )
+                await connection.execute(
+                    insert(SkillPackage.__table__),
+                    {
+                        "code": "uploaded-skill",
+                        "label": "Uploaded Skill",
+                        "description": "Stored outside the database",
+                        "version": "1.0.0",
+                        "schema_version": "1.0",
+                        "source": "upload",
+                        "enabled": True,
+                        "platform_file_id": "platform-file-1",
+                        "file_name": "uploaded-skill.zip",
+                        "file_size": 1234,
+                        "content_hash": "c" * 64,
+                        "manifest": {"code": "uploaded-skill"},
+                        "resource_index": [],
+                        "contains_scripts": False,
                     },
                 )
                 await connection.execute(

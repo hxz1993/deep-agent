@@ -2,12 +2,17 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Mapping, Sequence
+from typing import TYPE_CHECKING, Any, Mapping
+
+from pydantic_ai import CancellationToken
 
 from deep_agent.schemas.attachment import AttachmentRef
 
 if TYPE_CHECKING:
     from deep_agent.agent.context.runtime import ContextRunState
+    from deep_agent.agent.tool_discovery import ToolDiscoveryTelemetry
+    from deep_agent.agent.tool_output_limits import ToolOutputTelemetry
+    from pydantic_ai_harness.planning import InMemoryPlanStore
 
 
 @dataclass
@@ -25,18 +30,29 @@ class AgentDeps:
     session_id: str
     user: str | None = None
     agent_id: str | None = None
+    conversation_id: str | None = None
+    run_id: str | None = None
     request_headers: Mapping[str, str] = field(default_factory=dict)
     context_state: "ContextRunState | None" = None
+    tool_discovery: "ToolDiscoveryTelemetry | None" = None
+    tool_output_limits: "ToolOutputTelemetry | None" = None
+    plan_store: "InMemoryPlanStore | None" = field(default=None, repr=False)
+    plan_snapshots: dict[str, dict[str, Any]] = field(default_factory=dict, repr=False)
+    tool_discovery_inputs_explicit: bool = False
+    tool_discovery_primary_query: str = ""
+    tool_discovery_supplemental_query: str = ""
+    skill_runtime: dict[str, Any] | None = None
+    loaded_skill_codes: list[str] = field(default_factory=list)
+    cancellation_token: CancellationToken | None = field(default=None, repr=False)
     has_context_references: bool = False
-    input_modalities: Sequence[str] = field(default_factory=tuple)
     attachment_by_id: dict[str, AttachmentRef] = field(default_factory=dict)
-    attachment_bytes: dict[str, bytes] = field(default_factory=dict)
-    attachment_parsed: dict[str, Any] = field(default_factory=dict)
-    attachment_download_tasks: dict[str, asyncio.Task[bytes]] = field(
+    file_bytes: dict[str, bytes] = field(default_factory=dict)
+    file_parsed: dict[str, Any] = field(default_factory=dict)
+    file_load_tasks: dict[str, asyncio.Task[bytes]] = field(
         default_factory=dict,
         repr=False,
     )
-    attachment_parse_tasks: dict[str, asyncio.Task[Any]] = field(
+    file_parse_tasks: dict[str, asyncio.Task[Any]] = field(
         default_factory=dict,
         repr=False,
     )

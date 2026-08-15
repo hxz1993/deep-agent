@@ -5,8 +5,21 @@ from unittest.mock import AsyncMock, patch
 
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
-from pydantic_ai.models.function import FunctionModel
+from pydantic_ai import Agent
+from pydantic_ai.capabilities import ToolSearch
+from pydantic_ai.messages import ModelResponse, TextPart
+from pydantic_ai.models.function import AgentInfo, FunctionModel
+from pydantic_ai.toolsets import FunctionToolset
+from pydantic_ai.usage import UsageLimits
 
+from deep_agent.agent.context.estimator import TokenEstimator
+from deep_agent.agent.deps import AgentDeps
+from deep_agent.agent.runner import AgentRunner
+from deep_agent.agent.tool_discovery import (
+    MCP_SEARCH_RESULT_LIMIT,
+    build_mcp_discovery_toolset,
+    search_deferred_tools,
+)
 from deep_agent.api.v1 import api_router
 from deep_agent.capabilities import build_registry
 from deep_agent.capabilities.mcp.lease_manager import McpLeaseManager
@@ -31,6 +44,26 @@ def _context_ref(
         "payload": {"cells": [{"address": "B2", "value": 42}]},
         "metadata": {"source": "browser", "secret": "history-only"},
     }
+
+
+def cube_query_data(cube_name: str, query: str) -> str:
+    """查询财务模型 Cube 数据与期间趋势。"""
+    return f"{cube_name}:{query}"
+
+
+def deeptable_workbook_get(name: str) -> str:
+    """读取电子表格页面和输入表工作簿。"""
+    return name
+
+
+def deeptable_dynamic_report_create(name: str) -> str:
+    """为电子表格页面创建动态报表。"""
+    return name
+
+
+def deeptable_report_template_generate(name: str) -> str:
+    """为电子表格输入表生成报表模板。"""
+    return name
 
 
 class ChatContextReferenceIntegrationTests(unittest.IsolatedAsyncioTestCase):
@@ -76,6 +109,113 @@ class ChatContextReferenceIntegrationTests(unittest.IsolatedAsyncioTestCase):
             response = await client.get(f"/api/v1/sessions/{session_id}/history")
         self.assertEqual(response.status_code, 200)
         return response.json()
+
+    def _discovery_runner(self) -> AgentRunner:
+        async def answer(_messages: list, _info: AgentInfo):
+            yield "done"
+
+        mcp = FunctionToolset(
+            tools=[
+                cube_query_data,
+                deeptable_workbook_get,
+                deeptable_dynamic_report_create,
+                deeptable_report_template_generate,
+            ]
+        ).prefixed("deepfos")
+        discovery = build_mcp_discovery_toolset(
+            [mcp],
+            server_names=["deepfos"],
+            estimator=TokenEstimator.conservative(),
+        )
+        assert discovery is not None
+        agent = Agent(
+            FunctionModel(stream_function=answer),
+            deps_type=AgentDeps,
+            toolsets=[discovery],
+            capabilities=[
+                ToolSearch(
+                    strategy=search_deferred_tools,
+                    max_results=MCP_SEARCH_RESULT_LIMIT,
+                )
+            ],
+        )
+        return AgentRunner(
+            agent,
+            get_context().store,
+            UsageLimits(request_limit=5),
+            estimator=TokenEstimator.conservative(),
+        )
+
+    async def test_stream_tool_preselection_uses_message_not_page_context_label(self) -> None:
+        runner = self._discovery_runner()
+        page_ref = {
+            **_context_ref(label="电子表格输入表 B020101_copy"),
+            "type": "deeptable.page",
+        }
+        with patch(
+            "deep_agent.api.v1.chat.build_runner",
+            new_callable=AsyncMock,
+            return_value=runner,
+        ):
+            with mock_request_disconnect():
+                async with AsyncClient(
+                    transport=self._transport,
+                    base_url="http://test",
+                    timeout=30.0,
+                ) as client:
+                    async with client.stream(
+                        "POST",
+                        "/api/v1/chat/stream",
+                        json={
+                            "message": "火星气象温度是多少？不要调用工具；不知道就说不知道。",
+                            "context_refs": [page_ref],
+                        },
+                    ) as response:
+                        self.assertEqual(response.status_code, 200)
+                        raw = "".join([chunk async for chunk in response.aiter_text()])
+
+        final = next(
+            event for event in parse_sse_events(raw) if event.get("type") == "final"
+        )
+        discovery = final["context"]["tool_discovery"]
+        self.assertEqual(discovery["preselected_tools"], [])
+
+    async def test_stream_financial_question_ignores_page_label_for_preselection(self) -> None:
+        page_ref = {
+            **_context_ref(label="电子表格输入表 B020101_copy"),
+            "type": "deeptable.range",
+        }
+        question = "2026年预算工作版下，当前财务模型1至3月已售房数有什么趋势？"
+        observed: list[list[str]] = []
+        for context_refs in (None, [page_ref]):
+            with patch(
+                "deep_agent.api.v1.chat.build_runner",
+                new_callable=AsyncMock,
+                return_value=self._discovery_runner(),
+            ):
+                with mock_request_disconnect():
+                    async with AsyncClient(
+                        transport=self._transport,
+                        base_url="http://test",
+                        timeout=30.0,
+                    ) as client:
+                        body = {"message": question}
+                        if context_refs is not None:
+                            body["context_refs"] = context_refs
+                        async with client.stream(
+                            "POST",
+                            "/api/v1/chat/stream",
+                            json=body,
+                        ) as response:
+                            self.assertEqual(response.status_code, 200)
+                            raw = "".join([chunk async for chunk in response.aiter_text()])
+            final = next(
+                event for event in parse_sse_events(raw) if event.get("type") == "final"
+            )
+            observed.append(final["context"]["tool_discovery"]["preselected_tools"])
+
+        self.assertIn("deepfos_cube_query_data", observed[0])
+        self.assertEqual(observed[1], observed[0])
 
     async def test_context_only_stream_persists_structured_history_and_safe_title(self) -> None:
         with patch(

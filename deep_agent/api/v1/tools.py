@@ -2,6 +2,11 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
+from deep_agent.agent.tool_discovery import (
+    MCP_DIRECT_DISCLOSURE_LIMIT,
+    MCP_PRESELECT_LIMIT,
+    MCP_SEARCH_RESULT_LIMIT,
+)
 from deep_agent.capabilities.mcp.builtin import load_builtin_mcp_tool_packages
 from deep_agent.capabilities.registry import describe_tool_package
 from deep_agent.capabilities.ui.builtin import build_builtin_ui_tool_package
@@ -34,6 +39,11 @@ async def list_tool_packages(ctx: AppContextDep) -> list[ToolPackageDescription]
     db_names = {row.name for row in mcp_rows}
     for row in mcp_rows:
         inspection = McpInspection.from_value(row.inspection, transport=row.transport)
+        catalog_status = (
+            "count_only"
+            if row.transport == "builtin" or inspection.tools.snapshot_status == "ready"
+            else inspection.tools.snapshot_status
+        )
         payloads.append(
             {
                 "code": f"mcp:{row.name}",
@@ -44,8 +54,23 @@ async def list_tool_packages(ctx: AppContextDep) -> list[ToolPackageDescription]
                 "enabled": row.enabled,
                 "default_enabled": False,
                 "tool_count": inspection.tools.count,
-                "tool_catalog_status": "count_only",
+                "tool_catalog_status": catalog_status,
                 "tools": [],
+                "disclosure_mode": (
+                    "search"
+                    if inspection.tools.count > MCP_DIRECT_DISCLOSURE_LIMIT
+                    else "direct"
+                ),
+                "preselect_limit": (
+                    MCP_PRESELECT_LIMIT
+                    if inspection.tools.count > MCP_DIRECT_DISCLOSURE_LIMIT
+                    else None
+                ),
+                "search_result_limit": (
+                    MCP_SEARCH_RESULT_LIMIT
+                    if inspection.tools.count > MCP_DIRECT_DISCLOSURE_LIMIT
+                    else None
+                ),
             }
         )
     for package in load_builtin_mcp_tool_packages(str(DEEP_AGENT_ROOT / "mcps")):
@@ -53,6 +78,12 @@ async def list_tool_packages(ctx: AppContextDep) -> list[ToolPackageDescription]
             continue
         payload = describe_tool_package(package)
         payload["tool_catalog_status"] = "count_only"
+        if payload["tool_count"] > MCP_DIRECT_DISCLOSURE_LIMIT:
+            payload.update(
+                disclosure_mode="search",
+                preselect_limit=MCP_PRESELECT_LIMIT,
+                search_result_limit=MCP_SEARCH_RESULT_LIMIT,
+            )
         payloads.append(payload)
 
     payloads.append(describe_tool_package(build_builtin_ui_tool_package()))

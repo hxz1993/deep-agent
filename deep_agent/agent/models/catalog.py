@@ -72,7 +72,7 @@ CAPABILITY_KEYS = (
     "open_weights",
     "interleaved",
 )
-MODALITIES = {"text", "image", "audio", "video", "pdf"}
+MODALITIES = {"text", "image", "audio", "video"}
 _METADATA_EXCLUDED_KEYS = {"cost"}
 _CATALOG_DATE_PATTERN = re.compile(r"^\d{4}(?:-\d{2})?(?:-\d{2})?$")
 
@@ -505,6 +505,11 @@ def _row_tags(row: ModelCatalog) -> list[str]:
     return capability_tags(row.capabilities or {})
 
 
+def _row_modalities(values: list[str] | None) -> list[str]:
+    """Hide retired values from catalog rows refreshed by older releases."""
+    return [value for value in (values or []) if value in MODALITIES]
+
+
 def _provider_option(
     row: ModelCatalog,
     configured: Mapping[tuple[str, str], str],
@@ -526,8 +531,8 @@ def _provider_option(
         "runtime_model": runtime_model,
         "context_window_tokens": row.context_window_tokens,
         "max_output_tokens": row.max_output_tokens,
-        "input_modalities": row.input_modalities or [],
-        "output_modalities": row.output_modalities or [],
+        "input_modalities": _row_modalities(row.input_modalities),
+        "output_modalities": _row_modalities(row.output_modalities),
         "tags": _row_tags(row),
         "status": row.status,
         "configured_preset": configured.get(
@@ -549,7 +554,7 @@ def _matches(
         return False
     if provider_id and row.provider_id.lower() != provider_id:
         return False
-    if modality and modality not in {item.lower() for item in row.input_modalities or []}:
+    if modality and modality not in {item.lower() for item in _row_modalities(row.input_modalities)}:
         return False
     if not q:
         return True
@@ -642,7 +647,7 @@ def build_catalog_page(
                     "release_date": row.release_date,
                     "context_window_tokens": row.context_window_tokens,
                     "max_output_tokens": row.max_output_tokens,
-                    "input_modalities": row.input_modalities or [],
+                    "input_modalities": _row_modalities(row.input_modalities),
                     "tags": _row_tags(row),
                 }
                 for row in sorted(
@@ -698,8 +703,8 @@ def build_catalog_page(
                     "release_date": first.release_date,
                     "context_window_tokens": first.canonical_context_window_tokens,
                     "max_output_tokens": first.canonical_max_output_tokens,
-                    "input_modalities": first.input_modalities or [],
-                    "output_modalities": first.output_modalities or [],
+                    "input_modalities": _row_modalities(first.input_modalities),
+                    "output_modalities": _row_modalities(first.output_modalities),
                     "tags": _row_tags(first),
                     "provider_count": len(providers),
                     "providers": providers,

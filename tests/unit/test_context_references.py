@@ -144,7 +144,6 @@ class ContextReferenceProjectionTests(unittest.IsolatedAsyncioTestCase):
             history,
             current_user_index=None,
             request_headers={},
-            input_modalities=["text"],
         )
         visible = str(resolved[0].parts[0].content)
         self.assertIn("current_selection", visible)

@@ -5,6 +5,14 @@ import {
   readSse,
 } from "./protocol.js?v=20260729-1";
 import { formatSessionIdSubtitle } from "./session-display.js?v=20260728-2";
+import {
+  buildHistoryVisualItems,
+  isPlanningToolEvent,
+  latestAssistantRunPlan,
+  planPanelState,
+  processDisclosureLabel,
+  splitAssistantHistoryRecords,
+} from "./assistant-presentation.js?v=20260815-2";
 
 /* ------------------------------------------------------------------ *
  * deep-agent 前端 —— 适配 FastAPI /api/v1/chat/stream (SSE over POST)
@@ -16,7 +24,8 @@ import { formatSessionIdSubtitle } from "./session-display.js?v=20260728-2";
  *   text         -> { type:"text", delta }
  *   thinking     -> { type:"thinking", delta }
  *   tool_call    -> { type:"tool_call", tool, args, tool_call_id, widget?, metadata? }
- *   tool_result  -> { type:"tool_result", tool, result, tool_call_id }
+ *   tool_call_removed -> { type:"tool_call_removed", tool, tool_call_id, reason }
+ *   tool_result  -> { type:"tool_result", tool, result, tool_call_id, artifacts? }
  *   final        -> { type:"final", status, output, usage, deferred? }
  *   cancelled    -> { type:"cancelled", status, model_message_count?, user_branch_point? }
  *   error        -> { type:"error", message }
@@ -28,6 +37,15 @@ const BUILTIN_UI_TOOLS = new Set(["builtin__confirm", "builtin__choice"]);
 const LEGACY_BUILTIN_UI_TOOLS = new Set(["confirm_action", "ask_user_choice"]);
 /** @type {Map<string, object>} */
 const uiToolsByName = new Map();
+
+function lucideIcon(name, className = "") {
+  const classAttr = className ? ` class="${className}"` : "";
+  return `<i data-lucide="${name}"${classAttr} aria-hidden="true"></i>`;
+}
+
+function refreshLucideIcons() {
+  window.requestAnimationFrame(() => window.lucide?.createIcons());
+}
 
 function mergeUiToolCall(call) {
   const def = uiToolsByName.get(call.tool);
@@ -88,10 +106,13 @@ const state = {
   llmModelId: "",
   sessionModelIds: {},
   sessionId: null,
+  conversationId: null,
   sessions: [], // [{id, agentId, agentName, title}] — 仅来自 GET /api/v1/sessions
   streaming: false,
   awaitingHitl: false,
   abortController: null,
+  stopRequested: false,
+  streamSessionConfirmed: false,
   streamCancelled: false,
   skipHistoryRefresh: false,
   branchFrom: null,
@@ -103,12 +124,17 @@ const state = {
   contextStatus: null,
   historyCheckpoint: null,
   lastRunUsage: null,
+  lastRunMetrics: null,
   manualCompacting: false,
   manualCompactionController: null,
   automaticCompactionRow: null,
   automaticCompactionTimer: null,
   pendingAutomaticCompaction: null,
   automaticCompactionAnchor: null,
+  assistantPresenter: null,
+  planSnapshot: null,
+  planTerminalStatus: null,
+  planningCallIds: new Set(),
 };
 
 const TITLE_POLL_TIMEOUT_MS = 30000;
@@ -119,30 +145,27 @@ const LLM_MODALITY_LABELS = {
   image: "图像",
   audio: "音频",
   video: "视频",
-  pdf: "PDF（原生）",
 };
 
 const LLM_MODALITY_ICONS = {
-  text: "T",
-  image: "🖼",
-  audio: "🔊",
-  video: "🎬",
-  pdf: "📄",
+  text: "type",
+  image: "image",
+  audio: "audio-lines",
+  video: "video",
 };
 
 /** LLM-native modalities only (Admin ``input_modalities``). */
-const ALL_LLM_MODALITIES = ["text", "image", "audio", "video", "pdf"];
+const ALL_LLM_MODALITIES = ["text", "image", "audio", "video"];
 
-const UPLOAD_KIND_ORDER = ["image", "text_file", "pdf", "docx", "xlsx", "audio", "video"];
+const UPLOAD_KIND_ORDER = ["image", "text_file", "docx", "xlsx", "audio", "video"];
 
 const UPLOAD_KIND_ICONS = {
-  image: "🖼",
-  text_file: "📃",
-  pdf: "📄",
-  docx: "📝",
-  xlsx: "📊",
-  audio: "🔊",
-  video: "🎬",
+  image: "image",
+  text_file: "file-text",
+  docx: "file-text",
+  xlsx: "table-2",
+  audio: "audio-lines",
+  video: "video",
 };
 
 /* ----------------------------- DOM ----------------------------- */
@@ -169,6 +192,10 @@ const el = {
   fileInput: $("fileInput"),
   attachmentPreview: $("attachmentPreview"),
   composerMeta: $("composerMeta"),
+  composerPlan: $("composerPlan"),
+  composerPlanSummary: $("composerPlanSummary"),
+  composerPlanProgress: $("composerPlanProgress"),
+  composerPlanItems: $("composerPlanItems"),
   modelSelect: $("modelSelect"),
   composerModelModalities: $("composerModelModalities"),
   composerUploadCapabilities: $("composerUploadCapabilities"),
@@ -265,7 +292,77 @@ function showEmptyState() {
 
 function clearMessages() {
   clearAutomaticCompactionState();
+  state.assistantPresenter = null;
+  clearComposerPlan();
   el.messages.innerHTML = "";
+}
+
+function clearComposerPlan() {
+  state.planSnapshot = null;
+  state.planTerminalStatus = null;
+  state.planningCallIds.clear();
+  if (!el.composerPlan) return;
+  el.composerPlan.classList.add("hidden");
+  el.composerPlan.classList.remove("interrupted", "error", "pending");
+  el.composerPlanProgress.textContent = "";
+  el.composerPlanItems.innerHTML = "";
+}
+
+function setComposerPlanExpanded(expanded) {
+  if (!el.composerPlan) return;
+  el.composerPlan.classList.toggle("open", expanded);
+  el.composerPlanSummary?.setAttribute("aria-expanded", String(expanded));
+}
+
+function showComposerPlanPlaceholder(toolCallId) {
+  if (toolCallId) state.planningCallIds.add(toolCallId);
+  if (!el.composerPlan || state.planSnapshot) return;
+  const wasHidden = el.composerPlan.classList.contains("hidden");
+  el.composerPlan.classList.remove("hidden", "interrupted", "error", "pending");
+  el.composerPlanProgress.textContent = "正在制定…";
+  el.composerPlanItems.innerHTML = "";
+  if (wasHidden) setComposerPlanExpanded(true);
+  refreshLucideIcons();
+}
+
+function renderComposerPlan(snapshot, { terminalStatus = null } = {}) {
+  const presentation = planPanelState(snapshot, terminalStatus);
+  if (!presentation) {
+    clearComposerPlan();
+    return;
+  }
+  const wasHidden = el.composerPlan.classList.contains("hidden");
+  state.planSnapshot = presentation.plan;
+  state.planTerminalStatus = presentation.terminalStatus;
+  el.composerPlan.classList.remove("hidden", "interrupted", "error", "pending");
+  if (presentation.terminalStatus) {
+    el.composerPlan.classList.add(presentation.terminalStatus);
+  }
+  el.composerPlanProgress.textContent = presentation.label;
+  el.composerPlanItems.innerHTML = presentation.plan.items.map((item) => {
+    const display = item.status === "in_progress" && item.active_form
+      ? item.active_form
+      : item.content;
+    const icon = item.status === "completed"
+      ? "circle-check"
+      : item.status === "in_progress" ? "loader-circle" : "circle";
+    return `<li class="composer-plan-item status-${escapeHtml(item.status)}">
+      <span class="composer-plan-status">${lucideIcon(icon)}</span>
+      <span>${escapeHtml(display)}</span>
+    </li>`;
+  }).join("");
+  if (wasHidden) setComposerPlanExpanded(true);
+  refreshLucideIcons();
+}
+
+function markComposerPlanTerminal(status) {
+  if (!state.planSnapshot) return;
+  renderComposerPlan(state.planSnapshot, { terminalStatus: status });
+}
+
+function removePlanningCall(toolCallId) {
+  if (!toolCallId || !state.planningCallIds.delete(toolCallId)) return;
+  if (!state.planSnapshot && state.planningCallIds.size === 0) clearComposerPlan();
 }
 
 function currentSessionSnapshot() {
@@ -389,6 +486,9 @@ function init() {
   $("refreshCapsBtn").addEventListener("click", loadCapabilities);
   el.sendBtn.addEventListener("click", onSend);
   el.stopBtn.addEventListener("click", stopStream);
+  el.composerPlanSummary?.addEventListener("click", () => {
+    setComposerPlanExpanded(!el.composerPlan.classList.contains("open"));
+  });
 
   el.input.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -570,7 +670,10 @@ function toggleNewChatMenu(anchor) {
 function newChat(agentId) {
   const id = normalizeAgentId(agentId);
   closeNewChatMenu();
-  if (state.streaming) stopStream();
+  if (state.streaming) {
+    showConsoleToast("请先停止当前生成，再新建会话", true);
+    return;
+  }
   state.manualCompactionController?.abort();
   cancelTitlePoll();
   state.pendingTitleRefresh = false;
@@ -585,12 +688,14 @@ function newChat(agentId) {
   }
   loadUiTools(state.agentId);
   state.sessionId = null;
+  state.conversationId = null;
   state.branchFrom = null;
   state.modelMessageCount = 0;
   state.lastUserBranchPoint = null;
   state.contextStatus = null;
   state.historyCheckpoint = null;
   state.lastRunUsage = null;
+  state.lastRunMetrics = null;
   state.llmModelId = defaultLlmModelId();
   clearMessages();
   showEmptyState();
@@ -721,7 +826,7 @@ function renderSessions() {
     li.className =
       "session-item" +
       (s.id === state.sessionId && (s.agentId || "") === (state.agentId || "") ? " active" : "");
-    li.innerHTML = `<span class="sid" title="${escapeHtml(s.title)}"><span class="session-title">${escapeHtml(s.title)}</span><span class="session-meta"><span>${escapeHtml(formatSessionActivity(s))}</span><span class="session-meta-dot" aria-hidden="true"></span><span>${escapeHtml(formatSessionMessageCount(s))}</span></span></span><span class="session-actions"><span class="rename-btn" title="重命名">✏️</span><span class="auto-rename-btn" title="自动重命名">🔄</span><span class="del" title="删除">✕</span></span>`;
+    li.innerHTML = `<span class="sid" title="${escapeHtml(s.title)}"><span class="session-title">${escapeHtml(s.title)}</span><span class="session-meta"><span>${escapeHtml(formatSessionActivity(s))}</span><span class="session-meta-dot" aria-hidden="true"></span><span>${escapeHtml(formatSessionMessageCount(s))}</span></span></span><span class="session-actions"><span class="rename-btn" title="重命名" aria-label="重命名">${lucideIcon("pencil")}</span><span class="auto-rename-btn" title="自动重命名" aria-label="自动重命名">${lucideIcon("refresh-cw")}</span><span class="del" title="删除" aria-label="删除">${lucideIcon("trash-2")}</span></span>`;
     li.querySelector(".sid").addEventListener("click", (e) => {
       if (e.target.closest(".session-title-input")) return;
       switchSession(s);
@@ -747,10 +852,14 @@ function renderSessions() {
     });
     el.sessionList.appendChild(li);
   }
+  refreshLucideIcons();
 }
 
 async function switchSession(s) {
-  if (state.streaming) stopStream();
+  if (state.streaming) {
+    showConsoleToast("请先停止当前生成，再切换会话", true);
+    return;
+  }
   state.manualCompactionController?.abort();
   cancelTitlePoll();
   state.pendingTitleRefresh = false;
@@ -759,6 +868,7 @@ async function switchSession(s) {
   state.branchFrom = null;
   state.lastUserBranchPoint = null;
   state.lastRunUsage = null;
+  state.lastRunMetrics = null;
   el.usageInfo.textContent = "";
   if (session.agentId) {
     state.agentId = session.agentId;
@@ -789,6 +899,17 @@ async function loadSessionHistory(session) {
     }
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const data = await r.json();
+    state.conversationId = data.conversation_id || null;
+    const latestAssistant = [...(data.messages || [])]
+      .reverse()
+      .find((message) => message.role === "assistant" && message.run_id);
+    state.lastRunMetrics = latestAssistant
+      ? {
+          run_id: latestAssistant.run_id,
+          status: latestAssistant.status || "completed",
+          detailed: false,
+        }
+      : null;
     state.historyCheckpoint = data.context_checkpoint || null;
     await loadContextStatus(normalized);
     if (!data.messages || data.messages.length === 0) {
@@ -1069,22 +1190,29 @@ async function compactCurrentContext() {
         setContextCompactionRow(row, data.message || "正在处理上下文…");
       } else if (event === "context_compaction_result") {
         result = data;
+        state.conversationId = data.conversation_id || state.conversationId;
+        state.lastRunMetrics = {
+          ...(data.run_metrics || {}),
+          conversation_id: state.conversationId,
+          run_id: data.run_id || null,
+          status: data.status || "completed",
+          detailed: true,
+        };
+        if (data.usage) renderUsage(data.usage);
       }
     });
     if (!result) throw new Error("压缩流未返回最终结果");
     if (result.status === "completed") {
       const message = `上下文已压缩：${compactTokenLabel(result.before_tokens)} → ${compactTokenLabel(result.after_tokens)} Token`;
       setContextCompactionRow(row, message, { active: false });
-      state.contextStatus = result.context_status || state.contextStatus;
       showConsoleToast(message);
       await refreshCurrentHistory();
     } else if (result.status === "noop") {
       const message = MANUAL_COMPACTION_REASON_LABELS[result.reason]
         || "本次压缩未产生明显效果";
       setContextCompactionRow(row, message, { active: false });
-      state.contextStatus = result.context_status || state.contextStatus;
       showConsoleToast(message);
-      updateComposerContextControls();
+      await loadContextStatus(session);
       window.setTimeout(() => row.remove(), 2500);
     } else {
       const message = MANUAL_COMPACTION_REASON_LABELS[result.reason] || `压缩失败：${result.reason || "未知错误"}`;
@@ -1127,18 +1255,16 @@ async function refreshCurrentHistory() {
 function renderHistory(messages, modelMessageCount, contextCheckpoint = null) {
   state.modelMessageCount = modelMessageCount ?? 0;
   let lastDayKey = null;
-  let checkpointInserted = false;
-  const boundary = Number(contextCheckpoint?.source_last_sequence);
-  for (const msg of messages) {
-    if (
-      !checkpointInserted &&
-      Number.isInteger(boundary) &&
-      Number.isInteger(msg.branch_point) &&
-      msg.branch_point > boundary
-    ) {
+  state.assistantPresenter = null;
+  const visualItems = buildHistoryVisualItems(messages, contextCheckpoint);
+
+  for (const item of visualItems) {
+    if (item.type === "checkpoint") {
       addContextCheckpointMarker(contextCheckpoint);
-      checkpointInserted = true;
+      continue;
     }
+
+    const msg = item.type === "assistant" ? item.records[0] : item.message;
     const ts = msg.timestamp || null;
     if (ts) {
       const dayKey = localDayKey(ts);
@@ -1147,59 +1273,73 @@ function renderHistory(messages, modelMessageCount, contextCheckpoint = null) {
         lastDayKey = dayKey;
       }
     }
-    if (
-      msg.role === "user"
-      && (
+    if (item.type === "user") {
+      if (
         msg.content
         || (msg.attachments && msg.attachments.length)
         || (msg.context_refs && msg.context_refs.length)
-      )
-    ) {
-      addMessage(
-        "user",
-        msg.content || "",
-        ts,
-        msg.branch_point,
-        msg.attachments,
-        msg.context_refs,
-      );
+      ) {
+        addMessage(
+          "user",
+          msg.content || "",
+          ts,
+          msg.branch_point,
+          msg.attachments,
+          msg.context_refs,
+        );
+      }
       continue;
     }
-    if (msg.role === "assistant" && msg.parts && msg.parts.length) {
+
+    if (item.type === "assistant") {
+      const records = item.records;
+      const presentation = splitAssistantHistoryRecords(records);
       const assistant = createAssistantMessage(ts, msg.branch_point);
-      const completedToolIds = collectCompletedToolIds(msg.parts);
-      for (const part of msg.parts) {
+      const allParts = records.flatMap((record) => record.parts || []);
+      const completedToolIds = collectCompletedToolIds(allParts);
+      for (const part of presentation.processParts) {
+        if (isPlanningToolEvent(part)) continue;
         if (part.type === "thinking" && part.content) {
           assistant.addThinkingBlock(part.content);
         } else if (part.type === "text" && part.content) {
-          assistant.appendText(part.content);
+          assistant.addProcessText(part.content);
         } else if (part.type === "tool_call") {
           assistant.addToolCall({
             tool: part.tool,
             args: part.args,
             tool_call_id: part.tool_call_id,
+            source: part.source,
           });
         } else if (part.type === "tool_result") {
           assistant.addToolResult({
             tool: part.tool,
             result: part.result,
             tool_call_id: part.tool_call_id,
+            source: part.source,
+            artifacts: part.artifacts,
+            plan: part.plan,
           });
         }
       }
-      for (const part of msg.parts) {
+      if (presentation.finalText) assistant.setFinalText(presentation.finalText);
+      for (const part of allParts) {
         if (isPendingUiToolCall(part, completedToolIds)) {
           assistant.attachHitlWidget(mergeUiToolCall(part));
         }
       }
       assistant.finalizeThinking();
       assistant.finalizeText();
+      if (presentation.interrupted) assistant.markInterrupted();
+      state.assistantPresenter = assistant;
     }
   }
-  if (!checkpointInserted && Number.isInteger(boundary)) {
-    addContextCheckpointMarker(contextCheckpoint);
+  state.awaitingHitl = findResumablePendingUiCall(messages, contextCheckpoint) !== null;
+  const latestPlan = latestAssistantRunPlan(messages);
+  if (latestPlan) {
+    renderComposerPlan(latestPlan.snapshot, { terminalStatus: latestPlan.terminalStatus });
+  } else {
+    clearComposerPlan();
   }
-  state.awaitingHitl = findResumablePendingUiCall(messages) !== null;
   updateHitlInputState();
   updateComposerContextControls();
   scrollToBottom();
@@ -1225,18 +1365,19 @@ function isPendingUiToolCall(part, completedToolIds) {
 }
 
 /** Pending UI tool call at the end of history (safe to resume). */
-function findResumablePendingUiCall(messages) {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const msg = messages[i];
-    if (msg.role === "user") return null;
-    if (msg.role !== "assistant" || !msg.parts?.length) continue;
-    const completedToolIds = collectCompletedToolIds(msg.parts);
-    for (const part of msg.parts) {
-      if (isPendingUiToolCall(part, completedToolIds)) {
-        return part;
-      }
-    }
-    return null;
+function findResumablePendingUiCall(messages, contextCheckpoint = null) {
+  const items = buildHistoryVisualItems(messages, contextCheckpoint);
+  let last = null;
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    if (items[index].type === "checkpoint") continue;
+    last = items[index];
+    break;
+  }
+  if (last?.type !== "assistant") return null;
+  const parts = last.records.flatMap((record) => record.parts || []);
+  const completedToolIds = collectCompletedToolIds(parts);
+  for (const part of parts) {
+    if (isPendingUiToolCall(part, completedToolIds)) return part;
   }
   return null;
 }
@@ -1558,9 +1699,9 @@ function updateComposerModelInfo() {
       const chips = ALL_LLM_MODALITIES.map((key) => {
         const on = supported.has(key);
         const label = LLM_MODALITY_LABELS[key] || key;
-        const icon = LLM_MODALITY_ICONS[key] || "";
+        const icon = LLM_MODALITY_ICONS[key] || "circle";
         const title = on ? `LLM 原生支持：${label}` : `LLM 原生不支持：${label}`;
-        return `<span class="modality-chip ${on ? "supported" : "unsupported"}" title="${escapeHtml(title)}">${icon} ${escapeHtml(label)}</span>`;
+        return `<span class="modality-chip ${on ? "supported" : "unsupported"}" title="${escapeHtml(title)}">${lucideIcon(icon)}<span>${escapeHtml(label)}</span></span>`;
       }).join("");
       el.composerModelModalities.innerHTML = `<span class="composer-modalities-label">模态输入</span>${chips}`;
     }
@@ -1580,7 +1721,7 @@ function updateComposerModelInfo() {
       const chips = ordered
         .map((key) => {
           const label = labels[key] || key;
-          const icon = UPLOAD_KIND_ICONS[key] || "";
+          const icon = UPLOAD_KIND_ICONS[key] || "file";
           let chipClass = "supported";
           let title = `平台上传：${label}`;
           if (key === "image" && !vision) {
@@ -1589,16 +1730,15 @@ function updateComposerModelInfo() {
           } else if (key === "image") {
             title = `${label}：可上传，当前模型支持原生看图`;
           } else if (["text_file", "docx", "xlsx"].includes(key)) {
-            title = `${label}：上传后由 Agent 的附件读取工具按需分页读取`;
-          } else if (key === "pdf") {
-            title = `${label}：仅模型配置原生 PDF 输入时可发送，不做本地解析`;
+            title = `${label}：上传后由 Agent 的 read_file 系统工具按需分页读取`;
           }
-          return `<span class="modality-chip ${chipClass}" title="${escapeHtml(title)}">${icon} ${escapeHtml(label)}</span>`;
+          return `<span class="modality-chip ${chipClass}" title="${escapeHtml(title)}">${lucideIcon(icon)}<span>${escapeHtml(label)}</span></span>`;
         })
         .join("");
       el.composerUploadCapabilities.innerHTML = `<span class="composer-modalities-label">附件</span>${chips}`;
     }
   }
+  refreshLucideIcons();
 }
 
 function updateChatHeader() {
@@ -1662,10 +1802,12 @@ async function onSend() {
 
   const userBranchPoint = branchFrom != null ? branchFrom : state.modelMessageCount;
   const isFirstTurn = branchFrom == null && state.modelMessageCount === 0;
+  clearComposerPlan();
   addMessage("user", text, null, userBranchPoint, attachments);
   state.lastUserBranchPoint = userBranchPoint;
 
   const assistant = createAssistantMessage();
+  state.assistantPresenter = assistant;
   setStreaming(true);
   updateAgentSelectState();
 
@@ -1700,17 +1842,17 @@ async function onSend() {
 async function resumeDeferred(deferredResults) {
   if (!state.sessionId) return;
   if (state.streaming) {
-    stopStream();
-    const deadline = Date.now() + 2000;
-    while (state.streaming && Date.now() < deadline) {
-      await new Promise((r) => setTimeout(r, 50));
-    }
-    if (state.streaming) return;
+    showConsoleToast("当前会话仍在生成，请先停止后再提交交互结果", true);
+    return;
   }
   state.awaitingHitl = false;
   updateHitlInputState();
+  clearComposerPlan();
 
-  const assistant = createAssistantMessage();
+  const assistant = state.assistantPresenter?.row?.isConnected
+    ? state.assistantPresenter
+    : createAssistantMessage();
+  state.assistantPresenter = assistant;
   setStreaming(true);
   updateAgentSelectState();
 
@@ -1726,10 +1868,12 @@ async function resumeDeferred(deferredResults) {
 }
 
 async function runChatStream(payload, assistant) {
-  state.abortController = new AbortController();
+  const streamController = new AbortController();
+  state.abortController = streamController;
+  state.stopRequested = false;
+  state.streamSessionConfirmed = false;
   state.streamCancelled = false;
   state.skipHistoryRefresh = false;
-  let stoppedByUser = false;
   const shouldRefreshTitle = state.pendingTitleRefresh;
   state.pendingTitleRefresh = false;
   try {
@@ -1737,7 +1881,7 @@ async function runChatStream(payload, assistant) {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
       body: JSON.stringify(payload),
-      signal: state.abortController.signal,
+      signal: streamController.signal,
     });
 
     if (!resp.ok || !resp.body) {
@@ -1749,28 +1893,24 @@ async function runChatStream(payload, assistant) {
     await readSse(resp.body, (evt) => handleEvent(evt, assistant));
   } catch (e) {
     if (e.name === "AbortError") {
-      stoppedByUser = true;
-      failAutomaticContextCompaction("上下文压缩已取消，未更新 Checkpoint");
+      // Transport cleanup (page unload/network teardown), not a user stop result.
       assistant.finalizeThinking();
       assistant.finalizeText();
-      if (!state.streamCancelled) {
-        addErrorTo(assistant, "（已停止生成）");
-      }
     } else {
       setConn("err", "请求失败");
       failAutomaticContextCompaction("上下文压缩后续请求失败，未更新 Checkpoint");
+      markComposerPlanTerminal("error");
       addErrorTo(assistant, `请求失败：${e.message}`);
     }
   } finally {
     assistant.finalizeThinking();
     assistant.finalizeText();
     setStreaming(false);
-    state.abortController = null;
+    if (state.abortController === streamController) state.abortController = null;
+    state.stopRequested = false;
+    state.streamSessionConfirmed = false;
     if (state.sessionId) {
       if (!state.skipHistoryRefresh) {
-        if (stoppedByUser || state.streamCancelled) {
-          await new Promise((r) => setTimeout(r, 250));
-        }
         await refreshCurrentHistory();
       }
       await syncSessionsFromBackend();
@@ -1781,7 +1921,6 @@ async function runChatStream(payload, assistant) {
       if (
         shouldRefreshTitle &&
         !state.awaitingHitl &&
-        !stoppedByUser &&
         !state.streamCancelled
       ) {
         scheduleTitleRefresh();
@@ -1804,14 +1943,59 @@ function updateHitlInputState() {
   updateComposerContextControls();
 }
 
-function stopStream() {
-  if (state.abortController) state.abortController.abort();
+async function stopStream() {
+  if (!state.streaming || state.stopRequested || !state.streamSessionConfirmed) return;
+  const sessionId = state.sessionId;
+  const agentId = state.agentId;
+  if (!sessionId) return;
+  state.stopRequested = true;
+  el.stopBtn.disabled = true;
+  el.stopBtn.title = "正在停止…";
+  el.stopBtn.setAttribute("aria-label", "正在停止");
+
+  try {
+    const response = await daFetch(
+      sessionApiUrl({ id: sessionId, agentId }, "/cancel"),
+      { method: "POST" },
+    );
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(body.detail || `HTTP ${response.status}`);
+    }
+    if (body.status === "cancel_requested") {
+      showConsoleToast("正在停止当前生成…");
+      return;
+    }
+    state.stopRequested = false;
+    el.stopBtn.disabled = false;
+    el.stopBtn.title = "未找到运行中的会话，可重试";
+    el.stopBtn.setAttribute("aria-label", "停止生成");
+    showConsoleToast("当前实例未找到运行中的会话，仍在等待流的真实终态", true);
+  } catch (error) {
+    state.stopRequested = false;
+    el.stopBtn.disabled = false;
+    el.stopBtn.title = "停止失败，可重试";
+    el.stopBtn.setAttribute("aria-label", "停止生成");
+    showConsoleToast(`停止失败，可重试：${error.message}`, true);
+  }
 }
 
 function setStreaming(v) {
   state.streaming = v;
   el.sendBtn.classList.toggle("hidden", v);
   el.stopBtn.classList.toggle("hidden", !v);
+  if (v) {
+    el.stopBtn.disabled = !state.streamSessionConfirmed;
+    el.stopBtn.title = state.streamSessionConfirmed ? "停止生成" : "正在建立会话";
+    el.stopBtn.setAttribute(
+      "aria-label",
+      state.streamSessionConfirmed ? "停止生成" : "正在建立会话",
+    );
+  } else {
+    el.stopBtn.disabled = false;
+    el.stopBtn.title = "停止生成";
+    el.stopBtn.setAttribute("aria-label", "停止生成");
+  }
   updateAgentSelectState();
   updateHitlInputState();
   updateComposerContextControls();
@@ -1834,6 +2018,14 @@ function handleEvent({ event, data }, assistant) {
       const id = data.session_id;
       if (id) {
         state.sessionId = id;
+        state.conversationId = data.conversation_id || state.conversationId;
+        state.lastRunMetrics = {
+          conversation_id: state.conversationId,
+          run_id: data.run_id || null,
+          status: "running",
+          detailed: true,
+        };
+        state.streamSessionConfirmed = true;
         if (data.agent_id) {
           state.agentId = data.agent_id;
           localStorage.setItem("da_console_agent_id_v1", state.agentId);
@@ -1849,6 +2041,11 @@ function handleEvent({ event, data }, assistant) {
           el.chatTitle.textContent = (title || id.slice(0, 8)).slice(0, 40);
         }
         updateAgentSelectState();
+        if (state.streaming && !state.stopRequested) {
+          el.stopBtn.disabled = false;
+          el.stopBtn.title = "停止生成";
+          el.stopBtn.setAttribute("aria-label", "停止生成");
+        }
       }
       break;
     }
@@ -1863,17 +2060,40 @@ function handleEvent({ event, data }, assistant) {
       assistant.appendText(data.delta || "");
       break;
     case "tool_call":
-      assistant.addToolCall(data);
+      if (isPlanningToolEvent(data)) {
+        showComposerPlanPlaceholder(data.tool_call_id);
+      } else {
+        assistant.addToolCall(data);
+      }
+      break;
+    case "tool_call_removed":
+      if (isPlanningToolEvent(data) || state.planningCallIds.has(data.tool_call_id)) {
+        removePlanningCall(data.tool_call_id);
+      } else {
+        assistant.removeToolCall(data);
+      }
       break;
     case "tool_result":
-      assistant.addToolResult(data);
+      if (isPlanningToolEvent(data) || state.planningCallIds.has(data.tool_call_id)) {
+        if (data.tool_call_id) state.planningCallIds.delete(data.tool_call_id);
+        if (data.plan) renderComposerPlan(data.plan);
+      } else {
+        assistant.addToolResult(data);
+      }
       break;
     case "final":
-      assistant.finalizeThinking();
-      assistant.finalizeText();
+      assistant.complete(data.output);
       syncHistoryMeta(data);
       if (data.usage) renderUsage(data.usage);
       else state.lastRunUsage = null;
+      state.conversationId = data.conversation_id || state.conversationId;
+      state.lastRunMetrics = {
+        ...(data.run_metrics || {}),
+        conversation_id: state.conversationId,
+        run_id: data.run_id || data.run_metrics?.run_id || state.lastRunMetrics?.run_id || null,
+        status: data.status || data.run_metrics?.status || "completed",
+        detailed: true,
+      };
       if (data.context) {
         state.contextStatus = {
           ...(state.contextStatus || {}),
@@ -1886,6 +2106,7 @@ function handleEvent({ event, data }, assistant) {
       }
       const refreshCompactionHistory = finalizeAutomaticContextCompaction(data.context, data.status);
       state.skipHistoryRefresh = !refreshCompactionHistory;
+      markComposerPlanTerminal(data.status === "pending" ? "pending" : "completed");
       if (data.status === "pending" && data.deferred) {
         state.awaitingHitl = true;
         setStreaming(false);
@@ -1909,13 +2130,29 @@ function handleEvent({ event, data }, assistant) {
         branchFrom: state.lastUserBranchPoint,
         message: lastUserText(),
       });
+      markComposerPlanTerminal("error");
       break;
     case "cancelled":
       failAutomaticContextCompaction("上下文压缩已取消，未更新 Checkpoint");
       state.streamCancelled = true;
+      // Keep the current streamed conversation in place. The official
+      // interrupted history remains the source of truth when the session is
+      // reopened, but re-rendering it here causes a disruptive visual reload.
+      state.skipHistoryRefresh = true;
       assistant.finalizeThinking();
       assistant.finalizeText();
+      assistant.markInterrupted();
+      markComposerPlanTerminal("interrupted");
       syncHistoryMeta(data);
+      if (data.usage) renderUsage(data.usage);
+      state.conversationId = data.conversation_id || state.conversationId;
+      state.lastRunMetrics = {
+        ...(data.run_metrics || {}),
+        conversation_id: state.conversationId,
+        run_id: data.run_id || state.lastRunMetrics?.run_id || null,
+        status: "cancelled",
+        detailed: true,
+      };
       break;
     default:
       break;
@@ -1939,7 +2176,7 @@ function addMessage(role, text, timestamp, branchPoint, attachments, contextRefs
   row.className = `msg-row ${role}`;
   if (branchPoint != null) row.dataset.branchPoint = String(branchPoint);
   row.innerHTML = `
-    <div class="avatar ${role}">${role === "user" ? "你" : "🤖"}</div>
+    <div class="avatar ${role}">${role === "user" ? "你" : lucideIcon("bot")}</div>
     <div class="bubble-wrap"><div class="bubble"></div></div>`;
   const wrap = row.querySelector(".bubble-wrap");
   if (timestamp) prependMsgTime(wrap, timestamp);
@@ -1954,7 +2191,7 @@ function addMessage(role, text, timestamp, branchPoint, attachments, contextRefs
     renderMessageAttachments(bubble, attachments);
   }
   if (contextRefs?.length) {
-    renderMessageContextRefs(bubble, contextRefs);
+    renderMessageContextRefs(bubble, contextRefs, branchPoint);
   }
   if (role === "user" && !contextRefs?.length) {
     const actions = document.createElement("div");
@@ -1969,18 +2206,37 @@ function addMessage(role, text, timestamp, branchPoint, attachments, contextRefs
     wrap.appendChild(actions);
   }
   el.messages.appendChild(row);
+  refreshLucideIcons();
   scrollToBottom();
   return row;
 }
 
-function renderMessageContextRefs(container, contextRefs) {
+function renderMessageContextRefs(container, contextRefs, branchPoint) {
   const wrap = document.createElement("div");
   wrap.className = "msg-context-refs";
   for (const ref of contextRefs) {
     const chip = document.createElement("div");
     chip.className = "context-ref-chip";
-    chip.textContent = `上下文 · ${ref.label || ref.type || "引用"}`;
     chip.title = `${ref.type || "上下文引用"}@${ref.schema_version || "—"}`;
+    const label = document.createElement("span");
+    label.className = "context-ref-label";
+    label.textContent = `上下文 · ${ref.label || ref.type || "引用"}`;
+    const info = document.createElement("button");
+    info.type = "button";
+    info.className = "context-ref-info";
+    info.title = "查看上下文 JSON";
+    info.setAttribute("aria-label", `查看 ${ref.label || ref.type || "上下文引用"} JSON`);
+    info.dataset.contextRefId = [branchPoint ?? "live", ref.key || "", ref.type || ""].join(":");
+    info.setAttribute(
+      "aria-pressed",
+      window.DeepAgentConsoleWorkspace?.isContextReferenceSelected(ref, branchPoint) ? "true" : "false",
+    );
+    info.innerHTML = lucideIcon("info");
+    info.addEventListener("click", (event) => {
+      event.stopPropagation();
+      window.DeepAgentConsoleWorkspace?.toggleContextReferenceInspector(ref, branchPoint);
+    });
+    chip.append(label, info);
     wrap.appendChild(chip);
   }
   container.appendChild(wrap);
@@ -1996,7 +2252,7 @@ function renderMessageAttachments(container, attachments) {
     if (mime.startsWith("image/")) {
       const img = document.createElement("div");
       img.className = "attachment-thumb";
-      img.textContent = "🖼";
+      img.innerHTML = lucideIcon("image");
       chip.appendChild(img);
     }
     const label = document.createElement("span");
@@ -2006,6 +2262,7 @@ function renderMessageAttachments(container, attachments) {
     wrap.appendChild(chip);
   }
   container.appendChild(wrap);
+  refreshLucideIcons();
 }
 
 async function onFilesSelected(e) {
@@ -2069,13 +2326,14 @@ function renderPendingAttachments() {
   for (const att of state.pendingAttachments) {
     const chip = document.createElement("div");
     chip.className = "pending-attachment";
-    chip.innerHTML = `<span>${escapeHtml(att.name || att.id)}</span><button type="button" title="移除">×</button>`;
+    chip.innerHTML = `<span>${escapeHtml(att.name || att.id)}</span><button type="button" title="移除" aria-label="移除附件">${lucideIcon("x")}</button>`;
     chip.querySelector("button").addEventListener("click", () => {
       state.pendingAttachments = state.pendingAttachments.filter((a) => a.id !== att.id);
       renderPendingAttachments();
     });
     el.attachmentPreview.appendChild(chip);
   }
+  refreshLucideIcons();
 }
 
 function clearPendingAttachments() {
@@ -2137,46 +2395,122 @@ function prependMsgTime(wrap, iso) {
 function addSystemNote(text) {
   const row = document.createElement("div");
   row.className = "msg-row assistant";
-  row.innerHTML = `<div class="avatar assistant">ℹ️</div><div class="bubble-wrap"><div class="bubble" style="opacity:.7;font-size:13px"></div></div>`;
+  row.innerHTML = `<div class="avatar assistant system-avatar">${lucideIcon("circle-info")}</div><div class="bubble-wrap"><div class="bubble" style="opacity:.7;font-size:13px"></div></div>`;
   row.querySelector(".bubble").textContent = text;
   el.messages.appendChild(row);
+  refreshLucideIcons();
   scrollToBottom();
 }
 
 function createAssistantMessage(timestamp, branchPoint) {
   const row = document.createElement("div");
-  row.className = "msg-row assistant";
+  row.className = "msg-row assistant assistant-answer";
   if (branchPoint != null) row.dataset.branchPoint = String(branchPoint);
-  row.innerHTML = `
-    <div class="avatar assistant">🤖</div>
-    <div class="bubble-wrap"></div>`;
+  row.innerHTML = `<div class="bubble-wrap assistant-message"></div>`;
   const wrap = row.querySelector(".bubble-wrap");
   if (timestamp) prependMsgTime(wrap, timestamp);
+
+  const processBlock = document.createElement("div");
+  processBlock.className = "assistant-process hidden";
+  processBlock.innerHTML = `
+    <button type="button" class="assistant-process-summary" aria-expanded="false">
+      <span class="chevron">${lucideIcon("chevron-right")}</span>
+      <span class="assistant-process-icon">${lucideIcon("activity")}</span>
+      <span class="assistant-process-title">处理过程</span>
+    </button>
+    <div class="assistant-process-body"></div>`;
+  wrap.appendChild(processBlock);
+  const processSummary = processBlock.querySelector(".assistant-process-summary");
+  const processTitle = processBlock.querySelector(".assistant-process-title");
+  const processBody = processBlock.querySelector(".assistant-process-body");
+
   el.messages.appendChild(row);
+  refreshLucideIcons();
   scrollToBottom();
 
   let textBuffer = "";
-  let textBubble = null;
+  let finalContent = null;
   let thinkingBlock = null;
   let thinkingBuffer = "";
+  let interruptedStatus = null;
   const toolBlocks = new Map(); // tool_call_id -> element
+
+  function updateProcessDisclosure() {
+    const hasProcess = processBody.children.length > 0;
+    const pending = Boolean(processBody.querySelector(".tool-block.hitl-pending"));
+    const running = Boolean(thinkingBlock) || [...toolBlocks.values()].some((block) => !block.dataset.done);
+    processBlock.classList.toggle("hidden", !hasProcess);
+    processTitle.textContent = processDisclosureLabel({ pending, running });
+    processSummary.title = pending
+      ? "展开并完成等待中的操作"
+      : processBlock.classList.contains("open") ? "收起处理过程" : "展开处理过程";
+  }
+
+  processSummary.addEventListener("click", () => {
+    const open = !processBlock.classList.contains("open");
+    processBlock.classList.toggle("open", open);
+    processSummary.setAttribute("aria-expanded", String(open));
+    if (open) {
+      processBody.querySelectorAll(".tool-block.hitl-pending").forEach((block) => {
+        block.classList.add("open");
+      });
+    }
+    updateProcessDisclosure();
+  });
+
+  function ensureFinalContent() {
+    if (!finalContent) {
+      finalContent = document.createElement("div");
+      finalContent.className = "assistant-final markdown streaming";
+      wrap.appendChild(finalContent);
+    }
+    return finalContent;
+  }
+
+  function addProcessText(content) {
+    const value = String(content || "");
+    if (!value) return;
+    const text = document.createElement("div");
+    text.className = "assistant-process-text markdown";
+    text.innerHTML = renderMarkdownBody(value);
+    processBody.appendChild(text);
+    updateProcessDisclosure();
+  }
+
+  function promoteFinalToProcess() {
+    if (!textBuffer) return;
+    addProcessText(textBuffer);
+    finalContent?.remove();
+    finalContent = null;
+    textBuffer = "";
+  }
 
   function ensureThinkingBlock() {
     if (!thinkingBlock) {
       thinkingBlock = document.createElement("div");
-      thinkingBlock.className = "thinking-block";
+      thinkingBlock.className = "assistant-thinking";
       thinkingBlock.innerHTML = `
-        <div class="thinking-head">
-          <span class="chevron">▶</span>
-          <span class="thinking-icon">💭</span>
+        <button type="button" class="assistant-thinking-head" aria-expanded="false">
+          <span class="thinking-chevron">${lucideIcon("chevron-right")}</span>
+          <span class="thinking-icon">${lucideIcon("brain-circuit")}</span>
           <span class="thinking-title">思考中…</span>
           <span class="thinking-status"><span class="spinner"></span></span>
-        </div>
-        <div class="thinking-body"><pre class="thinking-content"></pre></div>`;
-      thinkingBlock.querySelector(".thinking-head").addEventListener("click", () => {
-        thinkingBlock.classList.toggle("open");
+        </button>
+        <div class="assistant-thinking-body">
+          <pre class="thinking-content"></pre>
+        </div>`;
+      const block = thinkingBlock;
+      const thinkingHead = block.querySelector(".assistant-thinking-head");
+      thinkingHead.addEventListener("click", () => {
+        const open = !block.classList.contains("open");
+        block.classList.toggle("open", open);
+        thinkingHead.setAttribute("aria-expanded", String(open));
+        thinkingHead.title = open ? "收起思考过程" : "展开思考过程";
       });
-      wrap.appendChild(thinkingBlock);
+      thinkingHead.title = "展开思考过程";
+      processBody.appendChild(thinkingBlock);
+      refreshLucideIcons();
+      updateProcessDisclosure();
     }
     return thinkingBlock;
   }
@@ -2190,50 +2524,88 @@ function createAssistantMessage(timestamp, branchPoint) {
     if (!thinkingBlock) return;
     thinkingBlock.querySelector(".thinking-title").textContent = "思考过程";
     thinkingBlock.querySelector(".thinking-status").innerHTML = "";
-    thinkingBlock.classList.remove("open");
+    thinkingBlock = null;
+    thinkingBuffer = "";
+    updateProcessDisclosure();
   }
 
-  function ensureTextBubble() {
-    if (!textBubble) {
-      textBubble = document.createElement("div");
-      textBubble.className = "bubble markdown streaming";
-      wrap.appendChild(textBubble);
-    }
-    return textBubble;
+  function sealFinalContent() {
+    if (!finalContent) return;
+    finalContent.classList.remove("streaming");
+    finalContent.innerHTML = renderMarkdownBody(textBuffer);
   }
 
-  function sealTextBubble() {
-    if (!textBubble) return;
-    textBubble.classList.remove("streaming");
-    textBubble.innerHTML = renderMarkdownBody(textBuffer);
-  }
-
-  return {
+  const presenter = {
     row,
     appendThinking(delta) {
+      promoteFinalToProcess();
       thinkingBuffer += delta;
       renderThinkingContent();
+      updateProcessDisclosure();
       scrollToBottom();
     },
     finalizeThinking() {
       finalizeThinkingBlock();
     },
     addThinkingBlock(content) {
-      thinkingBuffer = content;
+      if (thinkingBlock) finalizeThinkingBlock();
+      thinkingBuffer = String(content || "");
       renderThinkingContent();
       finalizeThinkingBlock();
     },
+    addProcessText,
     appendText(delta) {
       textBuffer += delta;
-      ensureTextBubble().innerHTML = renderMarkdownBody(textBuffer);
+      ensureFinalContent().innerHTML = renderMarkdownBody(textBuffer);
+    },
+    setFinalText(content) {
+      const output = typeof content === "string"
+        ? content
+        : content == null ? "" : pretty(content);
+      if (!output) return;
+      if (textBuffer && textBuffer !== output && !output.startsWith(textBuffer)) {
+        promoteFinalToProcess();
+      }
+      textBuffer = output;
+      ensureFinalContent().innerHTML = renderMarkdownBody(textBuffer);
     },
     finalizeText() {
-      sealTextBubble();
+      sealFinalContent();
+    },
+    complete(output) {
+      finalizeThinkingBlock();
+      if (output != null) this.setFinalText(output);
+      sealFinalContent();
+      updateProcessDisclosure();
+    },
+    markInterrupted() {
+      if (interruptedStatus) return;
+      for (const block of toolBlocks.values()) {
+        if (block.dataset.done) continue;
+        block.dataset.done = "1";
+        block.classList.remove("hitl-pending");
+        block.querySelector(".hitl-widget")?.remove();
+        const title = block.querySelector(".tool-name");
+        if (title && block.dataset.defaultTitle) title.textContent = block.dataset.defaultTitle;
+        const status = block.querySelector(".tool-status");
+        if (status) {
+          status.innerHTML = `<span class="tool-status-interrupted">${lucideIcon("circle-stop")}已中断</span>`;
+        }
+      }
+      interruptedStatus = document.createElement("div");
+      interruptedStatus.className = "message-run-status interrupted";
+      interruptedStatus.innerHTML = `${lucideIcon("circle-stop")}<span>已停止</span>`;
+      wrap.appendChild(interruptedStatus);
+      row.classList.add("interrupted");
+      updateProcessDisclosure();
+      refreshLucideIcons();
     },
     addToolCall(data) {
       finalizeThinkingBlock();
+      promoteFinalToProcess();
       const merged = mergeUiToolCall(data);
       const key = merged.tool_call_id || `${merged.tool}-${toolBlocks.size}`;
+      if (isPlanningToolEvent(merged)) return;
       const hasArgs = hasNonEmptyArgs(merged.args);
       const existing = toolBlocks.get(key);
 
@@ -2245,14 +2617,21 @@ function createAssistantMessage(timestamp, branchPoint) {
         if (merged.widget) existing.dataset.widget = merged.widget;
         if (merged.metadata) existing.dataset.metadata = JSON.stringify(merged.metadata);
         maybeAttachHitlWidget(existing, merged);
+        updateProcessDisclosure();
         scrollToBottom();
         return;
       }
 
-      // 工具调用开始后，文本若在流式中先固定，避免后续文本拼接错乱
       const block = document.createElement("div");
-      block.className = "tool-block open";
+      const isToolSearch =
+        merged.source === "tool_search" || ["search_tools", "tool_search"].includes(merged.tool);
+      const isSkillLoad = merged.tool === "load_capability";
+      const defaultTitle = isToolSearch
+        ? "查找可用工具"
+        : isSkillLoad ? "正在加载 Skill" : (merged.tool || "tool");
+      block.className = `tool-block${isToolSearch ? " tool-search-block" : ""}${isSkillLoad ? " skill-load-block" : ""}`;
       block.dataset.toolCallId = key;
+      block.dataset.defaultTitle = defaultTitle;
       if (merged.widget) block.dataset.widget = merged.widget;
       if (merged.metadata) block.dataset.metadata = JSON.stringify(merged.metadata);
       const argsHtml = hasArgs
@@ -2260,9 +2639,9 @@ function createAssistantMessage(timestamp, branchPoint) {
         : `<pre class="args args-pending">参数接收中…</pre>`;
       block.innerHTML = `
         <div class="tool-head">
-          <span class="chevron">▶</span>
-          <span class="tool-icon">🛠️</span>
-          <span class="tool-name">${escapeHtml(merged.tool || "tool")}</span>
+          <span class="chevron">${lucideIcon("chevron-right")}</span>
+          <span class="tool-icon">${lucideIcon(isToolSearch ? "search" : isSkillLoad ? "book-open-check" : "wrench")}</span>
+          <span class="tool-name">${escapeHtml(defaultTitle)}</span>
           <span class="tool-status"><span class="spinner"></span></span>
         </div>
         <div class="tool-body">
@@ -2270,17 +2649,17 @@ function createAssistantMessage(timestamp, branchPoint) {
           ${argsHtml}
         </div>`;
       block.querySelector(".tool-head").addEventListener("click", () => block.classList.toggle("open"));
-      wrap.appendChild(block);
+      processBody.appendChild(block);
+      refreshLucideIcons();
       toolBlocks.set(key, block);
       maybeAttachHitlWidget(block, merged);
-      // 工具调用后开启新文本段；先封存当前气泡，避免多个 streaming 光标并存
-      sealTextBubble();
-      textBubble = null;
-      textBuffer = "";
+      updateProcessDisclosure();
       scrollToBottom();
     },
     addToolResult(data) {
+      promoteFinalToProcess();
       const key = data.tool_call_id;
+      if (isPlanningToolEvent(data)) return;
       let block = key && toolBlocks.get(key);
       if (!block) {
         block = [...toolBlocks.values()].reverse().find((b) => !b.dataset.done);
@@ -2288,13 +2667,30 @@ function createAssistantMessage(timestamp, branchPoint) {
       if (!block) return;
       block.dataset.done = "1";
       block.classList.remove("hitl-pending");
-      block.querySelector(".tool-status").innerHTML = '<span style="color:#3fb950">✓ 完成</span>';
+      const title = block.querySelector(".tool-name");
+      if (title && block.dataset.defaultTitle) title.textContent = block.dataset.defaultTitle;
+      block.querySelector(".tool-status").innerHTML = `<span class="tool-status-complete">${lucideIcon("check")}完成</span>`;
+      refreshLucideIcons();
       const body = block.querySelector(".tool-body");
       const existingWidget = body.querySelector(".hitl-widget");
       if (existingWidget) existingWidget.remove();
+      body.querySelector("[data-tool-result]")?.remove();
       const res = document.createElement("div");
-      res.innerHTML = `<div class="label" style="margin-top:8px">结果 result</div>${renderToolResult(data.result)}`;
+      res.dataset.toolResult = "1";
+      res.innerHTML = `${renderToolResultArtifacts(data.artifacts)}<div class="label" style="margin-top:8px">结果 result</div>${renderToolResult(data.result)}`;
       body.appendChild(res);
+      refreshLucideIcons();
+      updateProcessDisclosure();
+    },
+    removeToolCall(data) {
+      const key = data.tool_call_id;
+      if (!key) return;
+      if (isPlanningToolEvent(data)) return;
+      const block = toolBlocks.get(key);
+      if (!block) return;
+      block.remove();
+      toolBlocks.delete(key);
+      updateProcessDisclosure();
     },
     attachHitlWidget(call) {
       const merged = mergeUiToolCall(call);
@@ -2306,8 +2702,10 @@ function createAssistantMessage(timestamp, branchPoint) {
       }
       if (!block || !isUiToolCall(merged)) return;
       renderHitlWidget(block, merged, resumeDeferred);
+      updateProcessDisclosure();
     },
   };
+  return presenter;
 }
 
 function maybeAttachHitlWidget(block, call) {
@@ -2331,12 +2729,15 @@ function renderHitlWidget(block, call, onSubmit) {
   const body = block.querySelector(".tool-body");
   if (!body || body.querySelector(".hitl-widget")) return;
 
-  block.classList.add("open", "hitl-pending");
+  block.classList.add("hitl-pending");
   if (merged.widget) block.dataset.widget = merged.widget;
   if (metadata && Object.keys(metadata).length) {
     block.dataset.metadata = JSON.stringify(metadata);
   }
-  block.querySelector(".tool-status").innerHTML = '<span style="color:#d29922">等待操作</span>';
+  const defaultTitle = block.dataset.defaultTitle || tool || "工具";
+  block.dataset.defaultTitle = defaultTitle;
+  block.querySelector(".tool-name").textContent = `等待操作 · ${defaultTitle}`;
+  block.querySelector(".tool-status").innerHTML = '<span class="tool-status-pending">等待操作</span>';
 
   const widgetEl = document.createElement("div");
   widgetEl.className = "hitl-widget";
@@ -2471,6 +2872,8 @@ function renderHitlError(block, message) {
   const body = block.querySelector(".tool-body");
   if (!body || body.querySelector(".hitl-format-error")) return;
   block.classList.remove("hitl-pending");
+  const title = block.querySelector(".tool-name");
+  if (title && block.dataset.defaultTitle) title.textContent = block.dataset.defaultTitle;
   block.querySelector(".tool-status").innerHTML = '<span style="color:#f85149">参数无效</span>';
   const error = document.createElement("div");
   error.className = "hitl-format-error";
@@ -2551,7 +2954,7 @@ function addErrorTo(assistant, message, retryOpts) {
   const wrap = assistant.row.querySelector(".bubble-wrap");
   const div = document.createElement("div");
   div.className = "error-bubble";
-  div.textContent = "⚠ " + message;
+  div.innerHTML = `${lucideIcon("triangle-alert")}<span>${escapeHtml(message)}</span>`;
   wrap.appendChild(div);
   if (retryOpts && retryOpts.branchFrom != null && retryOpts.message) {
     const btn = document.createElement("button");
@@ -2561,6 +2964,7 @@ function addErrorTo(assistant, message, retryOpts) {
     btn.addEventListener("click", () => retryFromBranch(retryOpts));
     wrap.appendChild(btn);
   }
+  refreshLucideIcons();
   scrollToBottom();
 }
 
@@ -2614,6 +3018,24 @@ function renderToolResult(result) {
     return `<div class="md-content tool-result-md markdown-body">${renderMarkdown(result)}</div>`;
   }
   return `<pre>${escapeHtml(pretty(result))}</pre>`;
+}
+
+function renderToolResultArtifacts(artifacts) {
+  if (!Array.isArray(artifacts) || artifacts.length === 0) return "";
+  const totalBytes = artifacts.reduce(
+    (total, item) => total + (Number.isFinite(Number(item?.byte_size)) ? Number(item.byte_size) : 0),
+    0,
+  );
+  const size = totalBytes > 0 ? ` · ${formatArtifactBytes(totalBytes)}` : "";
+  return `<div class="tool-result-artifact">${lucideIcon("archive")}<span>完整结果已外置${escapeHtml(size)}，当前展示预览；Agent 可按需读取。</span></div>`;
+}
+
+function formatArtifactBytes(value) {
+  const bytes = Number(value);
+  if (!Number.isFinite(bytes) || bytes <= 0) return "";
+  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
+  if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KiB`;
+  return `${Math.round(bytes)} B`;
 }
 
 function escapeHtml(s) {
@@ -2702,6 +3124,10 @@ window.DeepAgentConsoleChat = {
   selectAgent(agentId) {
     if (!agentId || !state.agents.some((agent) => agent.id === agentId)) return;
     if (state.agentId === agentId) return;
+    if (state.streaming) {
+      showConsoleToast("请先停止当前生成，再切换 Agent", true);
+      return;
+    }
     newChat(agentId);
   },
 };

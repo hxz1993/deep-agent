@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -87,6 +87,8 @@ class DeferredToolResultItem(BaseModel):
 
 class ChatResponse(BaseModel):
     session_id: str
+    conversation_id: str | None = None
+    run_id: str | None = None
     output: Any
     usage: dict[str, Any] = Field(default_factory=dict)
     status: str = Field(default="completed", description="completed or pending (awaiting UI input).")
@@ -97,6 +99,10 @@ class ChatResponse(BaseModel):
     context: dict[str, Any] | None = Field(
         default=None,
         description="Read-only context budget and compaction telemetry for this run.",
+    )
+    run_metrics: dict[str, Any] | None = Field(
+        default=None,
+        description="Ephemeral metrics for the just-completed run.",
     )
 
 
@@ -119,6 +125,10 @@ class ToolPackageDescription(BaseModel):
     source: str | None = None
     tool_count: int = 0
     tool_catalog_status: str = "complete"
+    disclosure_mode: Literal["direct", "conditional", "search"] = "direct"
+    disclosure_condition: str | None = None
+    preselect_limit: int | None = None
+    search_result_limit: int | None = None
 
 
 class SessionInfo(BaseModel):

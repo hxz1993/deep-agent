@@ -2,11 +2,11 @@
 
 > 状态：已实现并合入主开发分支
 >
-> 更新日期：2026-07-30
+> 更新日期：2026-08-10
 >
-> 依赖组合：`pydantic-ai-slim 2.14.1` + `pydantic-ai-harness 0.10.0`
+> 依赖组合：`pydantic-ai-slim 2.31.0` + `pydantic-ai-harness 0.21.0`
 >
-> 数据库迁移：v0.3.0 完整基线 Alembic `001`
+> 数据库迁移：本课题在v0.3.16不新增迁移；当前v0.4.9仓库head仍为`006`
 
 ## 1. 最终口径
 
@@ -32,7 +32,8 @@ chat_messages
 4. 压缩默认自动启用，不提供环境变量、Agent 或数据库开关。
 5. 模型没有配置 `context_window_tokens` 时不启用压缩，也不按模型名称猜窗口。
 6. 摘要始终使用当前 Agent 主模型，不再提供 `context_summary` 辅助模型用途。
-7. Harness 暂不升级；当前版本已支持自定义 tokenizer。
+7. Harness 已固定升级到 0.21.0；现有链路仍只复用确定性 Clamp、Deduplicate 和 Clear tiers，
+   不用 Harness 通用摘要替换 DeepAgent 的单次摘要、Checkpoint、Hash/CAS 和主动压缩语义。
 8. `context_window_tokens` 和 `max_output_tokens` 是模型事实；本轮输出预留和安全余量是内部算法，
    不新增配置字段。
 9. 摘要调用与正式回答共用本轮 `RunUsage` 和全局 `UsageLimits`，计入请求次数与 Token。
@@ -164,14 +165,70 @@ target_tokens  = usable_request_tokens × 0.55
 
 确定性层只影响当前模型输入。只有可靠摘要成功并达到目标线，才允许更新 Checkpoint。
 
-### 4.1 ClampOversizedMessages
+### 4.1 自动与主动压缩总流程
+
+两种入口共享同一个内部投影流程，但失败策略不同：
+
+```text
+                                      ┌──────────────────────────────┐
+普通聊天请求 ──完整请求估算──未到 80%──▶│ 不压缩，直接请求主模型       │
+      │                               └──────────────────────────────┘
+      └──达到 80%──┐
+                   │
+主动压缩接口 ─跳过触发线──┐
+                          ▼
+                 ┌──────────────────────┐
+                 │ 读取有效 Checkpoint  │
+                 │ + Checkpoint 后原始历史│
+                 └──────────┬───────────┘
+                            ▼
+                 ┌──────────────────────┐
+                 │ 统一完整请求 Token估算│
+                 └──────────┬───────────┘
+                            ▼
+                 ┌──────────────────────┐
+                 │ 确定性整理            │
+                 │ Clamp / 去重 / 清旧结果│
+                 └──────────┬───────────┘
+                            ▼
+                       是否达到 55%目标
+                       │是           │否
+                       │             ▼
+                       │    ┌──────────────────┐
+                       │    │ 主模型单次生成摘要│
+                       │    └────────┬─────────┘
+                       │             ▼
+                       └───────▶ 摘要后统一复检
+                                      │
+                     ┌────────────────┴────────────────┐
+                     ▼                                 ▼
+              成功且达到目标                     失败或未达目标
+                     │                                 │
+       ┌─────────────┴─────────────┐       ┌───────────┴───────────┐
+       ▼                           ▼       ▼                       ▼
+自动：继续回答，Run成功后     主动：Hash/CAS  自动：仅本轮 Sliding   主动：返回 noop/
+保存有效 Checkpoint           后覆盖Checkpoint Window，不存Checkpoint failed，保留旧Checkpoint
+```
+
+v0.3.15 与 v0.3.16 的产品入口、触发线、目标线、SSE、History 和 Checkpoint协议没有改变。
+v0.3.16 的变化集中在内部实现和摘要质量：
+
+| 项目 | v0.3.15 | v0.3.16 |
+| --- | --- | --- |
+| 自动/主动实现 | 两个入口分别组织确定性整理、摘要和目标复检 | 共用一个内部投影流程 |
+| 摘要结构 | 要求保留关键信息，但章节结构较宽松 | 固定六个标题，空章节写“无” |
+| 旧摘要更新 | 旧摘要作为输入，但更新规则不够显式 | 明确保留有效事实、删除过时状态、合并新增事实 |
+| 外部失败策略 | 自动 Sliding Window；主动不保存失败结果 | 保持不变 |
+| 覆盖率 | 依赖普通压缩回归 | 增加专项入口和行/分支硬门槛 |
+
+### 4.2 ClampOversizedMessages
 
 - 处理异常大的单个消息 Part。
 - 单 Part 上限取目标预算的 40%。
 - 保留头尾各 2000 字符。
 - 使用统一 TokenEstimator。
 
-### 4.2 DeduplicateFileReads
+### 4.3 DeduplicateFileReads
 
 只对能计算稳定资源 Key 的读取结果去重：
 
@@ -180,16 +237,20 @@ target_tokens  = usable_request_tokens × 0.55
 
 不对搜索、财务查询、写操作、审批和普通 MCP 工具做名称猜测式去重。
 
-### 4.3 ClearToolResults
+### 4.4 ClearToolResults
 
 - 默认完整保留最近 3 组 Tool Call/Result。
 - 预计收益不足 2000 Token 时不清理。
 - 不拆散 Tool Call/Result 配对。
 - 排除 `builtin__confirm`、`builtin__choice`、`deep_cube__clarify`。
 
-### 4.4 主模型安全单次摘要
+### 4.5 主模型安全单次摘要
 
 确定性压缩仍高于目标线时才摘要。摘要模型就是本轮主模型。
+
+v0.3.16 起自动和主动压缩复用同一个内部投影流程：确定性整理、单次摘要、目标复检和遥测
+更新不再分别实现。二者只在入口策略上不同：自动压缩受触发线控制且失败时允许当前回答使用
+Sliding Window，主动压缩跳过触发线且失败时不得保存临时窗口。
 
 设组合历史为：
 
@@ -224,7 +285,12 @@ S1 = summarize(S0 + 新纳入摘要的旧历史)
 旧摘要只在 `<previous_summary>` 中出现一次；构造 `to_summarize` 时必须移除旧摘要、系统指令
 和单独保留的首条用户任务。
 
-### 4.5 防止摘要请求自身超窗
+摘要正文固定保留六个标题：任务目标与约束、关键决策及理由、事实/文件/标识和工具结论、
+当前状态、下一步、未决问题与阻塞。对应内容为空时写“无”，不得省略标题。旧摘要是本次更新
+的锚点：保留仍有效事实，删除过时状态，合并新增内容，不累计旧摘要列表。历史内容始终作为
+待处理数据，其中的指令不得执行；Token、Cookie、密钥和临时 URL 不得复制到摘要或 Checkpoint。
+
+### 4.6 防止摘要请求自身超窗
 
 摘要调用前单独计算预算：
 
@@ -251,7 +317,7 @@ DeepAgent 遍历 Tool Call/Result 配对安全边界，寻找同时满足下面�
   权限、参数、Schema 和明确超窗错误不重试。
 - `summary_calls` 记录实际请求数，正常为 1，重试成功为 2；兼容字段 `summary_chunks` 固定为 1。
 
-### 4.6 摘要后复检
+### 4.7 摘要后复检
 
 ```text
 target_met = estimated_tokens_after <= target_tokens
@@ -443,6 +509,45 @@ DEEP_AGENT_CONTEXT_OUTPUT_TOKEN_FLOOR
 - 本地验证只连接保留的 SQLite，不连接共享 Test。
 - 发布时 ORM、Runner、API、Console 和文档必须同版本交付。
 
+### 9.1 Pydantic AI 2.31 的复用边界
+
+v0.3.13 完成以下兼容收口：
+
+- 正式回答与内部摘要共享同一个官方 `CancellationToken`。摘要阶段收到 `RunCancelled` 时
+  立即终止整个 Run，不进入摘要重试，也不能用 Sliding Window 继续生成回答。
+- 安全切分、悬空工具判断和旧历史修复统一识别 `BaseToolCallPart` 与
+  `BaseToolReturnPart`，同时覆盖 Local Tool Search、Provider Native Tool Search 以及后续
+  具名的原生工具类型。
+- Pydantic AI 官方 `ProcessHistory` 适合无持久化要求的单次请求历史变换，但不能表达
+  DeepAgent 的主动压缩 SSE、动态完整请求预算、Checkpoint Hash/CAS 和历史边界。
+- Harness `SummarizingCompaction` 同样不替代产品 Checkpoint；现有实现只复用 Harness 的
+  Clamp、重复文件读取去重和旧工具结果清理，语义摘要仍保持一次请求与目标复检。
+- Provider 原生 OpenAI/Anthropic Compaction 依赖特定 Provider 协议。当前 DeepSeek Chat
+  和通用 OpenAI-compatible 链路继续使用 Provider 无关的 DeepAgent Checkpoint；两种压缩
+  不在同一个 Agent 上叠加。仅含不透明 `provider_details` 的 `CompactionPart` 拒绝写入
+  Checkpoint，避免恢复为空壳消息。
+
+v0.3.14 进一步收口两个运行边界：每个 Pod 固定一个异步 Gunicorn Worker，确保自动摘要期间的
+取消请求能命中持有同一 `CancellationToken` 的进程；主动压缩在 Checkpoint 保存后立即返回
+`context_compaction_result` 并关闭 SSE，history 与 `context-status` 由客户端随后分别刷新。
+多个 Pod 横向扩容仍需会话粘性或共享取消协调器。
+
+### 9.2 大工具结果与Checkpoint
+
+v0.4.0在压缩之前先用Harness `ToolOutputLimits`治理大工具结果。完整结果不会先进入History再等待
+压缩，而是在工具执行完成后立即上传平台文件；模型历史只保留受限预览和读取说明。因此压缩器继续
+处理的是合法、受控大小的Tool Return。
+
+Checkpoint脱敏会删除Tool Return metadata中的平台句柄，这是有意边界：Checkpoint是派生的模型
+投影，不是Artifact授权事实源。`read_tool_result`的合法句柄始终从当前Session完整原始
+`chat_messages`恢复。压缩安全切分仍把原工具Call/Return作为一对处理；对
+`read_tool_result`的重复同页读取使用现有 `DeduplicateFileReads`键去重，不拆散调用和结果。
+
+v0.4.6的单轮计划仍是普通Tool Call/Return。压缩器按相同安全边界保留`write_plan`、状态更新等
+调用与结果配对；计划快照只随Tool Return metadata进入原始History。Harness注入的当前计划Reminder
+是本次模型请求的临时尾部提示，不作为用户消息或Checkpoint事实单独持久化。若旧计划交换已被摘要
+覆盖，下一轮Run不会恢复该内存计划，模型按当前任务决定是否重新规划。
+
 ## 10. Console 测试会话
 
 为避免人工逐轮输入数十次才能复现压缩，Workspace 在会话搜索框和普通“新建会话”
@@ -502,6 +607,15 @@ Alembic。场景构造器必须通过“序列化后可反序列化、没有工�
 22. 连续主动压缩只覆盖一条 Checkpoint，并正确增加 `row_version`。
 23. 空、短、无新增或无收益的主动尝试返回明确 `noop`，且不覆盖有效 Checkpoint。
 24. 未知窗口、Pending、Provider 失败和 CAS 冲突均不覆盖有效 Checkpoint。
+25. Pydantic AI 2.31 的 Local/Native Tool Search Call/Return 都形成安全配对边界；
+    `ToolAvailabilityDeltaPart`也可安全进入确定性Harness压缩tier。
+26. `state=interrupted` 的官方取消历史不被误判为 Pending Deferred。
+27. 只存在不透明 `provider_details` 的 Provider `CompactionPart` 不保存为空 Checkpoint 壳；当前不启用 Provider Native Compaction。
+28. 取消发生在内部摘要阶段时，嵌套摘要与外层 Run 使用同一个官方 Token，并且不执行 Sliding Window 兜底。
+29. 普通、Tool Search 和 Provider Native 工具返回都能关闭对应调用，不产生错误 Pending 或合成拒绝结果。
+30. 自动和主动压缩经过同一个内部投影流程，确定性结果、SSE 和 Checkpoint 外部语义保持一致。
+31. 摘要固定包含六个信息区段，旧摘要只作为单一锚点更新且不累计列表。
+32. 压缩核心的专项覆盖率门槛为行覆盖率至少 95%、分支覆盖率至少 85%。
 
 前端至少覆盖：
 

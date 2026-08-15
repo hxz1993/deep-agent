@@ -40,9 +40,9 @@ class McpLeaseManagerTests(unittest.IsolatedAsyncioTestCase):
             return toolset
 
         with _mock_shared_registry(manager):
-            async with manager.lease("text_tools", "session-a", factory):
+            async with manager.lease("echo_fixture", "session-a", factory):
                 first = created[-1]
-            async with manager.lease("text_tools", "session-a", factory):
+            async with manager.lease("echo_fixture", "session-a", factory):
                 second = created[-1]
 
         self.assertIsNot(first, second)
@@ -62,9 +62,9 @@ class McpLeaseManagerTests(unittest.IsolatedAsyncioTestCase):
             return toolset
 
         with _mock_shared_registry(manager):
-            async with manager.lease("text_tools", "session-a", factory):
+            async with manager.lease("echo_fixture", "session-a", factory):
                 first = seen[-1]
-            async with manager.lease("text_tools", "session-b", factory):
+            async with manager.lease("echo_fixture", "session-b", factory):
                 second = seen[-1]
 
         self.assertIsNot(first, second)
@@ -76,7 +76,7 @@ class McpLeaseManagerTests(unittest.IsolatedAsyncioTestCase):
         toolset.__aexit__ = AsyncMock(return_value=None)
 
         with _mock_shared_registry(manager):
-            async with manager.lease("text_tools", "session-a", lambda _url: toolset):
+            async with manager.lease("echo_fixture", "session-a", lambda _url: toolset):
                 pass
 
         toolset.__aexit__.assert_awaited_once()
@@ -96,7 +96,7 @@ class McpLeaseManagerTests(unittest.IsolatedAsyncioTestCase):
             return toolset
 
         with _mock_shared_registry(manager):
-            async with manager.lease("text_tools", "session-a", factory) as toolset:
+            async with manager.lease("echo_fixture", "session-a", factory) as toolset:
                 self.assertIsNotNone(toolset)
 
         self.assertEqual(attempts["count"], 2)
@@ -114,7 +114,7 @@ class McpLeaseManagerTests(unittest.IsolatedAsyncioTestCase):
 
         with _mock_shared_registry(manager):
             with self.assertRaises(ValueError):
-                async with manager.lease("text_tools", "session-a", factory):
+                async with manager.lease("echo_fixture", "session-a", factory):
                     pass
 
         self.assertEqual(attempts["count"], 1)
@@ -134,8 +134,8 @@ class McpLeaseManagerTests(unittest.IsolatedAsyncioTestCase):
             ensure_calls["count"] += 1
             if ensure_calls["count"] == 1:
                 raise TimeoutError(
-                    "Timed out acquiring MCP shared lock for 'text_tools' "
-                    "(/tmp/deep-agent-mcp/builtin-text_tools.lock)"
+                    "Timed out acquiring MCP shared lock for 'echo_fixture' "
+                    "(/tmp/deep-agent-mcp/builtin-echo_fixture.lock)"
                 )
             return "http://127.0.0.1:19001/mcp"
 
@@ -153,7 +153,7 @@ class McpLeaseManagerTests(unittest.IsolatedAsyncioTestCase):
             patch.object(manager._shared_registry, "stop_touch", new=AsyncMock()),
         ):
             async with manager.lease(
-                "text_tools", "session-a", lambda _url: toolset
+                "echo_fixture", "session-a", lambda _url: toolset
             ) as leased:
                 self.assertIs(leased, toolset)
 
@@ -172,7 +172,7 @@ class McpLeaseManagerTests(unittest.IsolatedAsyncioTestCase):
         async def always_timeout(*_args: object, **_kwargs: object) -> str:
             ensure_calls["count"] += 1
             raise TimeoutError(
-                "Timed out acquiring MCP shared lock for 'text_tools'"
+                "Timed out acquiring MCP shared lock for 'echo_fixture'"
             )
 
         with (
@@ -186,7 +186,7 @@ class McpLeaseManagerTests(unittest.IsolatedAsyncioTestCase):
         ):
             with self.assertRaises(TimeoutError):
                 async with manager.lease(
-                    "text_tools", "session-a", lambda _url: AsyncMock()
+                    "echo_fixture", "session-a", lambda _url: AsyncMock()
                 ):
                     pass
 

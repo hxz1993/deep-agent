@@ -13,11 +13,9 @@ DEFAULT_ENVIRONMENT = "development"
 DEFAULT_MAX_CONCURRENCY = 4
 DEFAULT_MEMORY_RSS_BYTES = 512 * 1024 * 1024
 DEFAULT_CPU_SECONDS = 30
-# RLIMIT_NPROC is per-UID (not per-sandbox). Default off for subprocess-dev;
-# stage-C cgroup pids.max is the real per-execution PID cap.
+# RLIMIT_NPROC is per-UID rather than per execution, so it remains disabled by default.
 DEFAULT_MAX_PIDS = None
 
-# Isolation-class codes must never be emitted by subprocess-dev (stage A′).
 FORBIDDEN_SUBPROCESS_ERROR_CODES = frozenset(
     {
         "MEMORY_LIMIT",
@@ -86,6 +84,17 @@ def result_from_frame(
             exit_code=exit_code,
         )
 
+    reported_exit_code = frame.get("exit_code", exit_code)
+    if reported_exit_code is not None and not isinstance(reported_exit_code, int):
+        return error_result(
+            request_id,
+            code="BACKEND_PROTOCOL_ERROR",
+            message="invalid execution exit_code",
+            duration_ms=duration_ms,
+            environment=environment,
+            exit_code=exit_code,
+        )
+
     error_payload = frame.get("error")
     error: SandboxError | None = None
     if error_payload is not None:
@@ -133,7 +142,7 @@ def result_from_frame(
         return ExecuteResult(
             request_id=request_id,
             status=status,
-            exit_code=exit_code,
+            exit_code=reported_exit_code,
             stdout=str(frame.get("stdout", "")),
             stderr=str(frame.get("stderr", "")),
             result=frame.get("result"),

@@ -2,9 +2,9 @@
 
 > 最后核验：2026-08-03
 >
-> 当前运行基线：`pydantic-ai-slim 2.14.1` + `pydantic-ai-harness 0.10.0`
+> 当前运行基线：`pydantic-ai-slim 2.31.0` + `pydantic-ai-harness 0.21.0`
 >
-> 状态：设计梳理，不代表已引入新的 Native Tool、Output Tool 或 Harness 能力
+> 状态：v0.3.17 已选择性接入 Tool Return Schema；Native Tool、Output Tool 和其他 Harness 能力仍按本文边界评估
 
 ## 1. 结论
 
@@ -23,7 +23,8 @@ DeepAgent 已经使用了 Pydantic AI 最核心的三种工具执行方式：
 - 前端表单操作继续使用 `ExternalToolset + DeferredToolRequests/Results`。
 - 结构化最终输出使用 `ToolOutput` 或 `NativeOutput`，不依赖提示词约定 JSON。
 - Provider Code Execution 作为模型可选能力接入，不作为所有模型默认工具。
-- Harness 0.10 已用于上下文压缩；超长工具结果后续再评估 `OverflowingToolOutput`，并与现有压缩观测统一设计。
+- Harness 0.21 已用于上下文压缩和大工具结果治理；v0.4.0使用公开的
+  `ToolOutputLimits` + `Spill`，不再引用旧 `OverflowingToolOutput`方案。
 - Harness 不替代 SQL 会话、SSE、配置中心、HITL 和前端执行器。
 
 ## 2. 三套概念的边界
@@ -53,6 +54,23 @@ Pydantic AI Core 是当前 Agent 运行时，负责：
 
 它不是一套新的模型循环，也不提供 DeepAgent 的配置中心、用户隔离、会话页面或
 SSE 协议。
+
+#### 2.2.1 升级到0.21后的采用判断
+
+| 0.12～0.21 能力 | 是否值得做 | DeepAgent 结论 |
+| --- | --- | --- |
+| `Skills` 渐进披露 | 是，优先 | 作为 `SKILL.md` Instructions 延迟加载基础；安装、权限、References、Assets、scripts 仍由 DeepAgent 负责 |
+| Tool Guardrail / Guard Chain | 是，依赖前置 | 待工具风险元数据统一后用于参数、结果、审批和敏感信息治理，不先堆零散规则 |
+| Compaction receipts、`pin`、`keep_user_messages` | 部分吸收 | 用于补充观测和回归思路；不替换当前单次摘要、完整 SQL 历史和 Checkpoint |
+| Spend Limits | 是，中期 | 适合请求级成本保护；先与现有 `UsageLimits`、全局请求上限和错误协议统一 |
+| 大文本外置 / Tool Output Limits | 已采用 | v0.4.0 使用平台文件 Store 完成会话内 Spill；TTL、孤儿治理和通用 Artifact 平台不作为前置条件 |
+| ConversationSearch | 暂缓 | 当前没有真实摘要缺失样本，中文历史检索质量也未验证；仅在长程任务确实无法找回关键事实时，才用自定义 `HistorySource` 读取现有 SQL `chat_messages`，不启用第二套 StepPersistence |
+| StepPersistence | 暂不做 | 现有 SQL 会话是事实源；除非出现崩溃恢复或子 Agent 持久化需求，否则会形成第二套历史 |
+| Planning | 已采用 | v0.4.6启用Harness单轮计划，v0.4.7收口Console悬浮面板；不扩展为跨Run任务引擎 |
+| Advisor / SubAgent | 按业务需求 | 只有专业分工形成明确产品场景后再启用 |
+| BrowserUse | 当前不做 | 浏览器执行权限和网络边界过大，不作为通用线上 Agent 默认能力 |
+
+升级依赖不等于启用上述能力。每一项仍需单独的产品边界、权限设计和目标测试。
 
 ### 2.3 Harness Engineering
 
@@ -187,7 +205,7 @@ sequenceDiagram
 
 Provider Native Tool 由模型 Provider 执行，不在 DeepAgent Pod 中运行。
 
-当前 Pydantic AI 2.14.1 暴露的原生工具定义包括：
+当前 Pydantic AI 2.31.0 暴露的原生工具定义包括：
 
 - `WebSearchTool`
 - `WebFetchTool`
@@ -308,31 +326,33 @@ DeepAgent 原有自研 `Capability` 只是产品配置包装，却与 Pydantic A
 
 ### 4.1 内置 Function Tool
 
-产品层把代码随 DeepAgent 发布、无需管理员注册的后端 Function Tool 统一归入
-“内置工具”，与 MCP 服务同级展示。v0.3.2 收敛为三个 Tool Package：
+产品层把代码随 DeepAgent 发布、无需管理员注册的可配置后端 Function Tool 归入
+“内置工具”，与 MCP 服务同级展示。v0.3.23 保留两个 Tool Package：
 
 | 前端名称 | Tool Package 编码 | 默认状态 | 工具 |
 | --- | --- | --- | --- |
 | 通用工具 | `builtin:general` | 默认启用 | `get_current_time` |
-| Python 沙箱 | `builtin:sandbox` | 默认关闭 | `execute_python` |
-| 附件读取 | `builtin:attachment` | 默认关闭 | `read_text_attachment`、`read_docx`、`read_xlsx` |
+| Python 沙箱 | `builtin:sandbox` | 默认关闭 | `execute_python`、条件式 `execute_skill_script` |
 
 两包中的后端函数对模型都表现为 `FunctionToolset`。配置中心只读展示工具包及工具明细，
 实际启用仍由 `agents.capabilities` 中的工具包编码决定；本轮不提供包内逐工具开关。
 `execute_python` 的工具定义位于 DeepAgent 进程，实际代码通过可替换的
-`PythonExecutionBackend` 执行；这不改变它的 Function Tool 类型。
+`PythonExecutionBackend` 执行；这不改变它的 Function Tool 类型。Skill脚本复用同一Backend，
+在Agent启用Sandbox且选择含脚本Skill时动态追加，不扩大包级授权。
 
 0.2.3 删除了原来 Native 中的 `http_get`。该工具没有目标域名白名单、私网地址保护和
 请求审计，不适合作为所有 Agent 默认获得的通用网络能力；需要联网时应接入边界明确、
 可配置和可审计的 MCP 或业务工具。
 
-位置：
+附件和Skill文件由自动注入的系统工具 `read_file`统一读取，不进入内置工具包或
+`agents.capabilities`。位置：
 
 - `deep_agent/capabilities/native/builtin.py`
-- `deep_agent/capabilities/attachments/builtin.py`
+- `deep_agent/files/toolset.py`
 - `deep_agent/sandbox/toolset.py`
 
-Python Skill 同样使用 `FunctionToolset`，由 Skill 同时贡献 Instructions 和函数工具。
+v0.3.18 起 Skill 不再使用 `FunctionToolset`，也不属于 ToolPackage。Skill 通过 Harness
+`load_capability` 渐进披露说明，实际工具权限仍来自 Agent 独立选择的 ToolPackage。
 
 MCP Resource 也被包装为宿主 Function Tool：
 
@@ -348,15 +368,18 @@ MCP Resource 也被包装为宿主 Function Tool：
 
 Agent 选择 `mcp:<server_name>` 后，请求级加载 MCP 配置并构造 Toolset：
 
-- URL MCP 使用 `DynamicToolset`，按当前 `AgentDeps` 计算 Header。
+- URL MCP 在“检测并更新”时保存完整工具快照；请求级使用快照 Toolset 披露定义，首次真实调用时才按
+  当前 `AgentDeps` 计算 Header、初始化官方 `MCPToolset`，并在本 Run 内复用连接。
 - Builtin MCP 使用 Run-scoped Client。
 - Toolset 外层使用 `PrefixedToolset`。
-- Server Instructions 通过 `include_instructions=True` 加入 Agent Instructions。
+- URL Server Instructions 来自同一检测快照；Builtin Instructions 仍由运行时 initialize 获取。
+- 缺快照或配置变更后的 URL MCP 当前 Run 不披露工具；远端调用失败只终止该工具，不阻塞其他 Toolset。
 
 关键位置：
 
 - `deep_agent/capabilities/mcp/resolver.py`
 - `deep_agent/capabilities/mcp/toolset_builder.py`
+- `deep_agent/capabilities/mcp/snapshot_toolset.py`
 - `deep_agent/capabilities/mcp/run_scoped.py`
 
 ### 4.3 UI External Tool
@@ -410,7 +433,7 @@ Output Tool 不属于 UI Tool Package，也不加入 `agents.capabilities`。多
 
 仍需补强：
 
-- 后端按 `result_schema` 校验前端返回结果。
+- 严格业务 UI Tool 在自己的恢复逻辑中校验结果；公共层不按 `result_schema` 强制拒绝提交。
 - 工具执行权限和当前 App/页面/表单实例绑定。
 - 对修改型 UI Tool 区分预览、确认、执行和失败。
 - 工具结果增加版本冲突、部分成功和拒绝语义。
@@ -429,7 +452,7 @@ DeepAgent 当前没有正式启用：
 - Core 通用 `PrepareTools`
 - Pydantic AI 原生执行审批
 
-`pydantic-ai-harness 0.10.0` 已用于上下文压缩，但工具结果治理、Memory、StepPersistence、
+`pydantic-ai-harness 0.21.0` 已用于上下文压缩和工具结果治理，但Memory、StepPersistence、
 SubAgent 和其他 Harness 能力尚未启用，不能把“已安装 Harness”理解成这些能力已经开放。
 
 当前主对话输出仍为：
@@ -442,7 +465,8 @@ SubAgent 和其他 Harness 能力尚未启用，不能把“已安装 Harness”
 
 ```mermaid
 flowchart TD
-    A["Agent.capabilities: Tool Package 编码"] --> B["ToolPackageRegistry: 内置函数与 Skill"]
+    A["Agent.capabilities: Tool Package 编码"] --> B["ToolPackageRegistry: 内置函数"]
+    K["Agent.skills: Skill 编码"] --> L["Harness Skills: 渐进披露"]
     A --> C["请求级解析 MCP"]
     A --> D["请求级解析 UI Tool"]
     C --> E["MCPToolset / DynamicToolset / PrefixedToolset"]
@@ -453,6 +477,7 @@ flowchart TD
     F --> I
     G --> I
     H --> I
+    L --> I
     I --> J["Pydantic AI 每次模型请求准备 Tool Definitions"]
 ```
 
@@ -513,6 +538,12 @@ Server 原始工具短名：list_cubes
 - 历史 Tool Call/Return。
 - Deferred Pending 会话。
 - 测试夹具和前端展示。
+
+MCP 配置名称本身同时参与工具包编码 `mcp:<name>`、模型工具前缀 `<name>_` 和
+Resource Server 名称。数据库 URL MCP 如需改名，必须使用独立重命名事务：更新
+`mcp_servers.name` 的同时，原位替换全部 Agent 中的 `mcp:<old_name>` 引用。该操作不重新
+检测远端 MCP，也不修改已经持久化的历史 Tool Call/Result；当前正在执行的 Run 继续使用其
+创建时的工具列表，后续 Run 才使用新名称。Builtin 与已停止支持的 stdio MCP 不开放重命名。
 
 ## 6. 前端表单工具设计
 
@@ -658,12 +689,15 @@ DeepAgent 已通过 `builtin:sandbox` 中的 `execute_python` 向私有和 OpenA
 ```text
 FunctionToolset(execute_python)
   → PythonExecutionBackend
-  → subprocess-dev（本地联调）/ 未来生产硬隔离 Backend
+  → subprocess-dev
 ```
 
+v0.3.22 同一Backend内部增加Skill脚本模式：宿主只复制已授权脚本、JSON inputs和同Skill资源，
+固定读取 `outputs/result.json`。Agent选择含脚本Skill并启用 `builtin:sandbox`时，模型可直接调用
+`execute_skill_script`。
+
 该能力不是 MCP，也不依赖 Provider Native Tool。当前已落地无状态执行、独立解释器、超时、
-并发和软防护；生产硬隔离仍需按 [Python Sandbox 课题](../07-python-sandbox/README.md) 完成
-节点资格验证与运维部署。长期继续治理：
+并发和软防护。当前执行语义见 [Python Sandbox 课题](../07-python-sandbox/README.md)。长期按真实需求继续治理：
 
 - 容器或进程隔离。
 - CPU、内存、时间和磁盘配额。
@@ -701,10 +735,10 @@ FunctionToolset(execute_python)
 
 工具权限必须由可信 `AgentDeps` 决定，不允许模型在参数中自选权限 Scope。
 
-附件工具是首个适合落地请求级过滤的场景：当本轮原始会话中没有当前用户可访问的合法附件
-引用时，不向模型暴露 `read_text_attachment`、`read_docx`、`read_xlsx`。过滤依据必须来自
-原始 `chat_messages` 和当前请求附件，不能从 Checkpoint 推断文件归属。该优化只减少无效工具
-Schema 和模型误调用，文件读取时仍需继续执行用户、会话和 `file_id` 权限校验。
+文件工具是已落地的请求级准备场景：当前请求或原始 `chat_messages` 存在合法附件，或者 Agent
+选择了可读且运行目录就绪的 Skill资源时，才注入统一系统工具 `read_file`；没有任何文件来源时
+不注入。附件归属不能从 Checkpoint推断，Skill路径必须命中已授权资源索引。该优化只减少无效
+Schema和误调用，实际读取仍需复检用户、会话、`file_id`、Skill选择和路径权限。
 
 ### 8.2 ToolSearch
 
@@ -720,8 +754,30 @@ Tool Search 解决的是“工具太多导致发现困难和 Schema 占用”，
 
 少量工具直接全部提供，通常比增加一次搜索工具调用更简单可靠。
 
-`ToolSearch` 属于有潜力的后续能力。达到真实工具数量和 Schema Token 阈值后，结合
-`DeferredLoadingToolset` 试点按需发现；在此之前不为少量工具增加额外搜索步骤。
+2026-08-06 Test 实测已经达到启动 Tool Search 设计的条件：一个 DeepFOS MCP 包包含 24 个工具，
+纯工具 Schema 的保守估算约为 36k Token；Agent 全部 35 个可见函数的请求参数定义保守估算约
+66k Token。Provider 实际计数会因 tokenizer 和缓存口径更低，现有预算字段也混合了 Instructions，
+因此这些数字不能直接当作精确账单，但足以证明“每轮完整披露所有 MCP Schema”已经是主要成本。
+
+推荐分层处理：
+
+- Agent 选择 ToolPackage 仍表示授权上限，不改成逐工具配置。
+- 大型 MCP 使用一个稳定的搜索/发现入口，在已授权 MCP 包内检索，再按需加载候选 Tool Definitions。
+- 少量 Function、附件和 UI 工具继续直接披露或做简单条件过滤，不强行经过搜索。
+- 搜索结果必须受用户、Agent、App、Space 和 MCP 包权限约束，不能把未授权工具“搜出来”。
+- 第一版先解决 Schema 披露，不把普通工具结果溢出治理混在同一个功能中。
+
+完整研究和当前推荐方案已经拆为第 13 个课题：
+
+- [框架与 AI Labs 对比、Pydantic AI 中文黑盒验证](../13-tool-discovery/tool-discovery-research.md)
+- [DeepAgent 工具检索与渐进披露设计](../13-tool-discovery/tool-discovery-design.md)
+- [离线评估、真实模型和灰度验收](../13-tool-discovery/tool-discovery-evaluation.md)
+
+v0.3.12 已复用 Pydantic AI Deferred Loading / ToolSearch 状态机；v0.4.1 将具体检索实现收敛到
+DeepAgent独立的 `lexical_v2` 字段化词法内核。它优先匹配协议名、标准 `title`和参数名，再对描述
+做BM25，低置信结果才进入拼音或受限错字回退。已授权 MCP候选超过5个时首轮预选最多Top 3，
+模型主动搜索最多返回Top 5；本轮不部署Embedding，也不通过硬编码词典伪装跨语言语义。后续只有
+真实召回数据证明词法方案不足时才评估多语言Embedding。
 
 ### 8.3 Toolset 组合与展示命名
 
@@ -731,8 +787,9 @@ MCP 等一组工具应用同一横切策略时再采用。
 
 `RenamedToolset` 修改的是提供给模型的工具协议名，并会在执行时映射回原工具名。它适合治理
 上游工具名，但不应只为隐藏聊天里的 MCP 前缀而直接使用，否则会影响历史工具事件、Pending
-恢复和模型调用兼容。Console 应将稳定的协议名与中文展示名分离：SSE、历史和工具调用继续
-保留带命名空间的真实名称，聊天界面优先展示独立 `display_name`，必要时再显示协议名详情。
+恢复和模型调用兼容。MCP 工具在 Console 中直接展示模型实际收到的最终协议名，不由 DeepAgent
+虚构或维护另一套 `display_name` 映射。DeepAgent 自定义的 UI 工具可继续使用产品元数据中的展示名，
+但该概念不扩展到通用第三方 MCP 协议。
 
 ### 8.4 Tool Return Schema
 
@@ -742,7 +799,31 @@ MCP 等一组工具应用同一横切策略时再采用。
 - 返回结果仍可能包含业务错误。
 - 大型动态查询结果不适合声明完整列级 Schema。
 
-优先对确认、选择、表单操作和稳定写入结果启用。
+v0.3.17 直接使用 Pydantic AI 2.26 `IncludeToolReturnSchemas`，首版只匹配 MCP 原始工具名：
+
+- `cube_query_data`
+- `dimension_query_members`
+
+匹配发生在模型请求前。MCP Server 即使重命名，最终协议名的前缀变化也不会让白名单失效；
+若 MCP 未提供合法 `outputSchema`，DeepAgent 不伪造结构，只在本轮工具发现遥测中记录
+`return_schema_unavailable`。未直接披露的延迟工具不产生返回 Schema Token，只有 Top 3 预选或
+`search_tools` 发现后才随完整 Tool Definition进入下一次模型请求。
+
+```text
+延迟阶段：
+  名称目录含 deepfos_cube_query_data
+  模型未看到 input/output Schema
+
+披露阶段：
+  deepfos_cube_query_data(input_schema + return_schema)
+  tool_discovery.estimated_return_schema_tokens 计入实际披露预算
+
+执行阶段：
+  Tool Result仍只是本次真实 JSON，不会重复附加 return_schema
+```
+
+该能力解决“模型调用前不知道稳定返回字段”问题；结果本身过大、空字段多或需分页仍属于
+Tool Output/Artifact治理。禁止按名称包含 `query` 等模糊规则全量开启，后续扩充必须有真实失败样本。
 
 ## 9. Pydantic AI Harness 与工具治理
 
@@ -760,30 +841,46 @@ MCP 等一组工具应用同一横切策略时再采用。
 - [上下文压缩设计](../03-context-compaction/context-compaction-design.md)
 - [上下文治理研究结论](../03-context-compaction/context-compaction-research.md)
 
-### 9.2 OverflowingToolOutput
+### 9.2 ToolOutputLimits 与大工具结果外置
 
-该能力直接治理工具刚产生的大结果，支持：
-
-- `Truncate`：有损截断。
-- `Summarize`：模型摘要。
-- `Spill`：完整结果外置并返回读取句柄。
-
-推荐顺序：
+v0.4.0 已直接采用Harness 0.18公开的 `ToolOutputLimits`。它在工具执行完成后、结果进入下一次模型
+请求与持久化History前运行，避免一个超大结果在后续每次模型请求中重复占用上下文。
 
 ```text
-业务工具自身分页和摘要
-  → 通用大小观测
-  → 受控 Truncate
-  → 有共享存储后再使用 Spill
+普通 Function / MCP / Sandbox / MCP Resource 返回
+  → 统一Token估算
+  → 小于阈值：保持原结果
+  → 超过阈值：Harness Spill
+      → 完整UTF-8结果上传DeepFOS平台文件服务
+      → 平台File ID作为artifact_id / overflow handle
+      → Tool Return只保留首尾预览、结构草图和读取说明
+      → 模型按需调用Harness read_tool_result分页或关键词读取
+  → Tool Return进入SSE、原始History与后续模型请求
 ```
 
-DeepAgent 不能在多 Pod 生产环境直接依赖本地文件 Store。Spill Store 必须提供：
+阈值不增加数据库字段或环境变量，固定为：
 
-- 共享存储。
-- TTL 和清理。
-- environment/user/agent/app/space 隔离。
-- 句柄不可猜测。
-- 读取范围和审计。
+```text
+available_input = context_window_tokens - max_output_tokens
+threshold = clamp(available_input × 20%, 4K, 24K Token)
+无有效context_window_tokens时使用24K Token
+```
+
+第一版只解决安全兜底，不把它扩成通用文件或Artifact平台：
+
+- Store仅适配现有平台文件服务，不使用Harness默认本地文件Store。
+- 平台File ID同时就是会话内 `artifact_id`，不增加Artifact表和第二层ID映射。
+- 句柄权限只从当前Session完整原始 `chat_messages`中的Tool Return metadata恢复；模型猜测、其他会话
+  和经过脱敏的Checkpoint均不能增加权限。
+- 同一Run首次读取后复用内存缓存，并发读取使用single-flight；下一Run重新按原始History授权和下载。
+- `read_file`、`read_tool_result`、`load_capability`和Tool Search排除在治理外，防止读取结果再次外置。
+- 上传失败时回退到最多8K字符的有损截断，保证Run仍可继续；不伪造外置成功。
+- SSE和History只附加脱敏的 `artifacts`元数据；日志仅记录数量、字节数、耗时/失败，不记录句柄、
+  工具参数、完整Schema、完整结果、Header或凭据。
+- Console提示“完整结果已外置”，当前只展示受限预览；不新增下载中心按钮。
+
+当前没有TTL、孤儿文件清理、全平台Artifact列表、独立CRUD或统计表。这些只有出现真实治理需求后，
+才作为平台文件生命周期课题另行设计，不影响本轮“大结果不再挤占模型上下文”的目标。
 
 ### 9.3 Memory
 
@@ -811,6 +908,22 @@ Harness Memory 可能向模型提供读写、搜索 Notebook 的工具，但不�
 - 最终结构化结果校验。
 
 Guardrail 不替代业务服务自身权限，也不能撤回已经通过 SSE 发出的流式文本。
+
+Harness `ToolGuardrail` 可同时介入工具调用两侧：执行前读取已经校验的参数，执行后读取尚未进入模型的
+原始结果。DeepAgent 的采用顺序应固定为：
+
+```text
+统一风险元数据（TOOL-003）
+  → 执行前按可信 deps 复检 user/App/Space、参数范围和副作用
+  → 必要时进入 Deferred 审批（TOOL-106）
+  → 工具真实执行
+  → 结果敏感信息清理（TOOL-110）
+  → ToolOutputLimits 截断或外置（TOOL-109）
+  → 模型、SSE 与历史
+```
+
+审批原语只能解决“本轮是否允许执行”，正式产品仍需持久化审批记录、TTL、操作人、幂等和执行审计。
+UI Tool 的 Deferred Result 是用户提交业务结果，不等同于批准后由后端执行原工具。
 
 ### 9.5 StepPersistence
 
@@ -875,29 +988,42 @@ company_code 不在当前表单允许字段中。
 Invalid request
 ```
 
-## 11. 设计优先级参考
+工具异常必须按模型是否能够修正来分类：
 
-以下阶段用于解释依赖顺序，不是独立待办清单。实际优先级和状态统一以
-[`../TODO.md`](../TODO.md) 为准。
+- `ModelRetry`：参数缺失、枚举错误、对象歧义或选错工具等，模型修改参数或重新选工具后可能成功。
+- `ToolFailed`：明确权限拒绝、文件损坏、下载失败或上游已经确定终止等，本次执行已经失败；继续让
+  模型使用相同工具盲目重试只会增加请求和 Token。
 
-| 优先级 | 能力 | 落地口径 |
+该分类不改变稳定工具协议名和历史主结构。`ToolFailed` 会成为带失败原因的合法 Tool Result，
+模型仍可据此继续回答；REST/SSE/History 不能丢弃失败语义或把该次工具执行伪装成成功。
+
+v0.3.15 首批只改无歧义路径：附件下载、损坏、解析和读取上限，以及 MCP Resource 已发起的
+list/read 上游失败使用 `ToolFailed`；文件 ID、MIME、分页范围、Resource Server 选择等模型可
+修正错误继续使用 `ModelRetry`。UI Tool 参数、Sandbox 和普通 MCP Tool 暂不扩大调整范围。
+
+## 11. 已完成阶段与后续触发条件
+
+以下表格保留工具体系形成过程，不再表示当前 P0～P3 优先级。当前状态统一以
+[`../TODO.md`](../TODO.md) 的“待实现、有潜力、暂缓、已关闭、已实现”五组为准；框架采用依据见
+[`../14-framework-capabilities/framework-capabilities-baseline.md`](../14-framework-capabilities/framework-capabilities-baseline.md)。
+
+| 能力 | 当前状态 | 落地或重新打开条件 |
 | --- | --- | --- |
-| P0 | 无附件时隐藏附件工具 | 使用 `PrepareTools`，根据当前请求与原始会话合法附件过滤 Tool Definitions；运行时文件权限校验保持不变 |
-| P0 | 工具协议名与展示名分离 | 模型、SSE、历史继续使用稳定协议名；Console 使用独立中文 `display_name`，不以 `RenamedToolset` 做纯 UI 美化 |
-| P1 | 结构化最终输出 | Agent 增加可选 `output_schema`；未配置时保持字符串输出，配置后默认使用 `ToolOutput + DeferredToolRequests`，后端再次执行 JSON Schema 校验 |
-| P1 | 高风险工具审批 | 先建立风险和副作用元数据；接入 `ApprovalRequiredToolset` 时同时设计持久化、TTL、操作人、幂等、权限复检和执行审计 |
-| P2 | `ToolSearch` | 先观测工具数量和 Schema Token；达到数十个真实工具后，结合 `DeferredLoadingToolset` 试点按需发现 |
-| P2 | `CombinedToolset` | 不作为独立产品功能；仅在多个工具包需要共享过滤、审批或延迟加载策略时用于运行时装配 |
-| P3 | Provider `CodeExecutionTool` | 不作为通用代码执行；继续使用自建 `execute_python`，未来仅给明确支持的托管模型作为增强能力 |
-| P3 | Provider `FileSearchTool` | 不替代附件读取或企业知识库；先建设 Provider 无关的 RAG/MCP 抽象，再把托管 File Search 作为可选实现 |
+| 按来源条件注入统一文件工具 | 已实现 | 当前请求/原始会话有合法附件，或 Agent有可读 Skill资源时注入系统 `read_file`；无来源时不注入，执行时继续复检权限 |
+| MCP 工具名原样展示 | 已关闭额外映射 | 模型、SSE、历史和 Console 统一使用最终稳定协议名，不增加 MCP `display_name` |
+| MCP `ToolSearch` | 已实现 | 在 ToolPackage 授权范围内 Top 3 预选、Top 5 搜索和渐进披露 |
+| 结构化最终输出 | 有潜力 | 产品锁定普通文本、多输出组合、严格模式和混合工具调用规则后重新实施 |
+| 高风险工具审批 | 有潜力 | 出现真实副作用工具并完成风险元数据、审计、TTL、幂等和权限复检设计后打开 |
+| `CombinedToolset` | 已关闭为独立事项 | 继续作为运行时组合实现细节按需使用，不成为产品概念 |
+| Provider Native 工具 | 有潜力 | 只在特定托管 Provider 能力成为明确产品功能时接入，不替代公共能力 |
 
-### 第一批：工具名称和可见性
+### 已完成：工具可见性
 
-- 落地附件请求级过滤。
-- 分离工具稳定协议名和 Console 展示名。
+- 落地附件与 Skill资源统一的 `read_file`条件注入。
+- MCP 工具保持最终协议名原样展示，不增加另一套名称映射。
 - 同步补充每轮工具数量和 Schema 体积观测，为后续 Tool Search 提供数据。
 
-### 第二批：结构化最终输出
+### 有潜力：结构化最终输出
 
 详细设计和测试边界见
 [`../09-structured-output/structured-output-design.md`](../09-structured-output/structured-output-design.md)。
@@ -907,16 +1033,18 @@ Invalid request
 - 固定业务结构优先使用 Pydantic Model；Agent 动态 JSON Schema 使用 `StructuredDict` 时，DeepAgent 必须补服务端校验和有限重试。
 - 中间 Thinking、普通工具和 Pending 继续流式；结构化结果第一版在 `final.output` 一次性返回，不把终止输出工具渲染成普通工具卡片。
 
-### 第三批：高风险工具审批
+### 有潜力：高风险工具审批
 
 - 工具元数据标识只读、写入、删除、外发和代码执行等风险。
 - 审批通过后由 Pydantic AI 执行原后端工具，再把真实工具结果交给模型；它与用户直接完成 External UI Tool 的语义不同。
 - 没有真实写入、删除或外发工具前，不为只读工具增加审批复杂度。
 
-### 第四批：大工具集和 Provider 增强
+### 已实现与有潜力：大工具集和 Provider 增强
 
-- 达到真实工具规模后试点 `ToolSearch + DeferredLoadingToolset`，需要跨工具包统一策略时再引入 `CombinedToolset`。
-- 业务工具先支持分页和摘要，再评估 Harness `OverflowingToolOutput`。
+- v0.3.12已用 `ToolSearch + DeferredLoadingToolset`完成MCP渐进披露，并在Run内使用
+  `CombinedToolset`统一Top 3/Top 5检索。
+- v0.4.0已用Harness `ToolOutputLimits` + 平台File Store完成大工具结果外置；业务工具仍可优先
+  提供领域分页和摘要，两者互补。
 - Provider Native Code Execution/File Search 只作为特定 Provider 增强，不作为 DeepAgent 跨模型公共能力。
 
 ## 12. 测试与验收
@@ -934,7 +1062,7 @@ Invalid request
 - Agent 未选择时工具不可见。
 - 参数不完整时不向前端发布可操作组件。
 - Pending 刷新后可恢复。
-- `result_schema` 服务端验证。
+- `result_schema` 用于前端渲染和协议说明；严格业务校验在业务恢复层完成。
 - `tool_call_id`、用户、会话和页面实例绑定。
 - 重复提交幂等。
 - 取消、拒绝、冲突和超时可恢复。

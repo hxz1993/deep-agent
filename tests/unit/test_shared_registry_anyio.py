@@ -11,15 +11,25 @@ from deep_agent.capabilities.mcp.shared_registry import (
     _record_is_live,
 )
 from deep_agent.options import OPTION
+from tests.helpers.builtin_mcp_fixture import stop_test_builtin_mcp, use_test_builtin_mcp
 
 
 class SharedRegistryEnsureTests(unittest.IsolatedAsyncioTestCase):
-    async def test_ensure_server_text_tools(self) -> None:
+    async def test_ensure_server_echo_fixture(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
+            original_runtime_dir = OPTION.agent.mcp_runtime_dir
+            original_init_timeout = float(OPTION.agent.mcp_init_timeout)
             OPTION.agent.mcp_runtime_dir = tmpdir
             OPTION.agent.mcp_init_timeout = 15.0
             registry = McpSharedRegistry(runtime_dir=Path(tmpdir), connect_timeout=15.0)
-            url = await registry.ensure_server("text_tools", {})
+            try:
+                with use_test_builtin_mcp():
+                    url = await registry.ensure_server("echo_fixture", {})
+            finally:
+                await registry.aclose()
+                stop_test_builtin_mcp(Path(tmpdir))
+                OPTION.agent.mcp_runtime_dir = original_runtime_dir
+                OPTION.agent.mcp_init_timeout = original_init_timeout
         self.assertIn("/mcp", url)
 
 

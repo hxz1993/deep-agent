@@ -54,13 +54,15 @@ tests/
 | `test_catalog.py` | models.dev Lab/Model/Provider 标准化、白名单、扩展元数据和数据库视图 |
 | `test_models_dev.py` | models.dev 严格获取与 Lab 可选补充 |
 | `test_llm_models.py` | 模型上下文、最大输出、输入模态与 tags Store/Schema |
-| `test_context_compaction.py` | 统一 Token 估算、动态输出预测、usage 回读、主模型单次摘要、同输入瞬时错误重试、SSE 状态、原始历史不改写、脱敏 Checkpoint、CAS 与兜底 |
+| `test_context_compaction.py` | 统一 Token 估算、动态输出预测、usage 回读、六段增量单次摘要、同输入瞬时错误重试、SSE 状态、原始历史不改写、脱敏 Checkpoint、CAS 与兜底；覆盖率门槛由 `tests/check_context_compaction_coverage.py` 执行 |
 | `test_context_test_scenarios.py` | 管理员测试会话场景、实时预算、消息往返序列化、常驻接口与用户归属 |
 | `test_attachment_extractors.py` | 文本编码、DOCX/XLSX 结构读取、分页与 Office 安全 |
-| `test_attachment_tools.py` | 附件工具默认参数、会话范围、缓存、分页和多模态返回 |
+| `test_file_tools.py` | 附件与 Skill统一文件工具的来源参数、权限、Run缓存、single-flight、分页和多模态返回 |
 | `test_tool_package_registry.py` | ToolPackage Registry 的整包选择、默认和空列表语义 |
-| `test_sqlite_bootstrap.py` | Alembic 001/002 结构、工具包数据迁移、降级展开与失败前校验 |
+| `test_sqlite_bootstrap.py` | Alembic 001～006结构、工具包、Skill、旧附件能力与下线预制MCP清理、降级和失败前校验 |
+| `test_*_migration_dialects.py` | 各数据迁移在SQLite、MySQL和PostgreSQL上的DDL或JSON清理逻辑 |
 | `test_tool_package_migration_dialects.py` | SQLite、MySQL、PostgreSQL 的 002 DDL 分支 |
+| `test_runtime_dependencies.py` | OpenAI SDK/aiohttp兼容锁定与Pydantic AI OpenAI模型导入 |
 | `test_session_model_override.py` | Agent 对话 `model_id` 请求级覆盖（`build_runner_for_agent`） |
 | `test_ui_tools_rfc.py` | builtin/manual UI 工具包、工具归属、Agent 整包选择、Schema 校验与 Deferred |
 
@@ -79,7 +81,8 @@ tests/
 | `test_session_model_override.py` | Agent 流式对话 `model_id` 覆盖、默认回退、轮次切换 |
 | `test_chat_attachment_tools.py` | 附件引用 → 模型调用工具 → SSE/历史持久化 → 同会话续读 |
 
-公共 fixture：`integration/fixtures/header_echo_server.py`、`pid_echo_server.py`。
+公共fixture：`integration/fixtures/header_echo_server.py`、`pid_echo_server.py`；真实Builtin进程测试使用
+`tests/fixtures/mcps/echo_fixture/`，该目录不会被生产Builtin扫描。
 
 ---
 
@@ -103,5 +106,7 @@ tests/
   插 JSON。场景随当前模型 trigger 动态扩展，断言不能写死消息条数或 Token 值。
 - 附件集成测试必须验证 `file_id` 只来自当前原始会话、同页去重键包含
   `tool/file/sheet/offset/limit`，并至少用真实生成的 TXT、DOCX、XLSX 字节覆盖解析器。
+- 新增或删除ORM业务表时必须更新配置备份分类及`test_config_backup.py`；每张表只能属于“复制配置
+  数据”或“只保留结构”之一，不能依靠备份成功后人工发现漏表。
 
 更多：[`README.md`](README.md)、[`unit/README.md`](unit/README.md)、[`integration/README.md`](integration/README.md)。

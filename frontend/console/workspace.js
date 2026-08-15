@@ -1,10 +1,11 @@
-const WORKSPACE_ASSET_VERSION = "20260803-4";
+const WORKSPACE_ASSET_VERSION = "20260815-2";
 
 let initialized = false;
 let lastRenderKey = "";
 let contextTestCatalog = null;
 let contextTestCatalogAgentId = "";
 let contextTestRequestAgentId = "";
+let selectedContextReference = null;
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -58,7 +59,7 @@ function installLegacyDom(source) {
     toolbar.className = "session-toolbar";
     const search = document.createElement("label");
     search.className = "compact-search session-search";
-    search.innerHTML = '<span aria-hidden="true">⌕</span><input type="search" id="sessionSearchInput" placeholder="搜索当前 Agent 会话" />';
+    search.innerHTML = '<i data-lucide="search" aria-hidden="true"></i><input type="search" id="sessionSearchInput" placeholder="搜索当前 Agent 会话" />';
     const testChatButton = document.createElement("button");
     testChatButton.type = "button";
     testChatButton.id = "contextTestChatBtn";
@@ -113,6 +114,7 @@ function installContextTestDialog() {
 }
 
 function formatTokens(value) {
+  if (value === null || value === undefined || value === "") return "—";
   return Number.isFinite(Number(value)) ? Number(value).toLocaleString("zh-CN") : "—";
 }
 
@@ -329,15 +331,24 @@ function syncInspectorToggle() {
   const visible = inspectorUsesDrawer()
     ? inspector.classList.contains("mobile-open")
     : !grid.classList.contains("inspector-hidden");
-  button.classList.toggle("active", visible);
-  button.setAttribute("aria-pressed", String(visible));
-  button.title = visible ? "隐藏会话详情" : "显示会话详情";
+  const sessionDetailsActive = visible && !selectedContextReference;
+  button.classList.toggle("active", sessionDetailsActive);
+  button.setAttribute("aria-pressed", String(sessionDetailsActive));
+  button.title = sessionDetailsActive ? "隐藏会话详情" : "显示会话详情";
 }
 
 function toggleInspectorPane() {
   const grid = document.getElementById("workspaceGrid");
   const inspector = document.getElementById("inspectorPane");
   if (!grid || !inspector) return;
+  if (selectedContextReference) {
+    selectedContextReference = null;
+    lastRenderKey = "";
+    syncContextReferenceButtons();
+    openInspectorPane();
+    renderInspector();
+    return;
+  }
   if (inspectorUsesDrawer()) {
     const shouldOpen = !inspector.classList.contains("mobile-open");
     closeWorkspaceDrawers();
@@ -364,19 +375,88 @@ function currentAgentName(state) {
   return state.agents.find((agent) => agent.id === state.agentId)?.name || state.agentId || "—";
 }
 
+function contextReferenceSelectionId(reference, branchPoint) {
+  return [branchPoint ?? "live", reference?.key || "", reference?.type || ""].join(":");
+}
+
+function isContextReferenceSelected(reference, branchPoint) {
+  return selectedContextReference?.id === contextReferenceSelectionId(reference, branchPoint);
+}
+
+function syncContextReferenceButtons() {
+  document.querySelectorAll(".context-ref-info").forEach((button) => {
+    button.setAttribute(
+      "aria-pressed",
+      button.dataset.contextRefId === selectedContextReference?.id ? "true" : "false",
+    );
+  });
+}
+
+function openInspectorPane() {
+  const grid = document.getElementById("workspaceGrid");
+  const inspector = document.getElementById("inspectorPane");
+  if (!grid || !inspector) return;
+  if (inspectorUsesDrawer()) {
+    closeWorkspaceDrawers();
+    inspector.classList.add("mobile-open");
+    document.getElementById("workspaceDrawerBackdrop")?.classList.remove("hidden");
+  } else {
+    grid.classList.remove("inspector-hidden");
+  }
+  syncInspectorToggle();
+}
+
+function toggleContextReferenceInspector(reference, branchPoint) {
+  const id = contextReferenceSelectionId(reference, branchPoint);
+  if (selectedContextReference?.id !== id) {
+    selectedContextReference = {
+      id,
+      sessionId: window.DeepAgentConsoleChat?.state.sessionId || null,
+      reference: JSON.parse(JSON.stringify(reference)),
+    };
+  }
+  openInspectorPane();
+  lastRenderKey = "";
+  syncContextReferenceButtons();
+  renderInspector();
+}
+
+function renderContextReferenceInspector(host, state) {
+  if (!selectedContextReference) return false;
+  if (selectedContextReference.sessionId !== (state.sessionId || null)) {
+    selectedContextReference = null;
+    syncContextReferenceButtons();
+    return false;
+  }
+  const reference = selectedContextReference.reference;
+  const rawJson = JSON.stringify(reference, null, 2);
+  host.innerHTML = `
+    <section class="inspector-section context-reference-inspector">
+      <header><strong>上下文引用</strong><span>只读 JSON</span></header>
+      <dl class="inspector-grid">
+        <dt>名称</dt><dd>${escapeHtml(reference.label || "—")}</dd>
+        <dt>Key</dt><dd class="mono">${escapeHtml(reference.key || "—")}</dd>
+        <dt>类型</dt><dd class="mono">${escapeHtml(reference.type || "—")}</dd>
+        <dt>版本</dt><dd>${escapeHtml(reference.schema_version || "—")}</dd>
+      </dl>
+      <pre class="inspector-json" aria-label="上下文引用 JSON">${escapeHtml(rawJson)}</pre>
+      <p class="inspector-help">这是会话历史保存的完整上下文引用。metadata 只用于系统和前端，不会进入模型输入。点击对话标题栏的“会话详情”可切回会话信息。</p>
+    </section>`;
+  return true;
+}
+
 function renderInspector() {
   const api = window.DeepAgentConsoleChat;
   const host = document.getElementById("inspectorContent");
   if (!api || !host) return;
   const state = api.state;
+  if (renderContextReferenceInspector(host, state)) return;
 
   const model = state.llmModels.find((item) => item.id === state.llmModelId);
   const context = window.DeepAgentConsoleContext?.effectiveContext || {};
   const identity = window.DeepAgentConsoleContext?.identity || {};
   const contextStatus = state.contextStatus || {};
   const compaction = contextStatus.last_compaction || {};
-  const formatTokens = (value) =>
-    Number.isFinite(Number(value)) ? Number(value).toLocaleString("zh-CN") : "—";
   const strategyLabels = {
     none: "未触发",
     tiered_deterministic: "确定性压缩",
@@ -386,6 +466,7 @@ function renderInspector() {
   const statusText = state.streaming ? "生成中" : state.awaitingHitl ? "等待用户" : "空闲";
   const statusClass = state.streaming ? "running" : state.awaitingHitl ? "waiting" : "idle";
   const usage = state.lastRunUsage || {};
+  const run = state.lastRunMetrics || {};
   const compactionState = compaction.triggered
     ? strategyLabels[compaction.strategy] || compaction.strategy
     : contextStatus.compaction_enabled
@@ -431,12 +512,22 @@ function renderInspector() {
         <p class="inspector-help">预算值全部由后端统一计算。这里是完整原始会话历史的只读快照，不等同于某次 Run 的最终模型请求载荷。</p>
       </section>
       <section class="inspector-section">
-        <header><strong>本轮模型调用</strong><span>当前页面最近一次 Run</span></header>
+        <header><strong>当前 Run</strong><span>${run.detailed === false ? "详细指标请查看运行日志" : "当前页面最近一次"}</span></header>
         <dl class="inspector-grid">
-          <dt>请求次数</dt><dd>${escapeHtml(usage.requests ?? "—")}</dd>
-          <dt>输入 Token</dt><dd>${escapeHtml(formatTokens(usage.input_tokens))}</dd>
-          <dt>输出 Token</dt><dd>${escapeHtml(formatTokens(usage.output_tokens))}</dd>
-          <dt>合计 Token</dt><dd>${escapeHtml(formatTokens(usage.total_tokens))}</dd>
+          <dt>Conversation ID</dt><dd class="mono">${escapeHtml(state.conversationId || run.conversation_id || "—")}</dd>
+          <dt>Run ID</dt><dd class="mono">${escapeHtml(run.run_id || "—")}</dd>
+          <dt>终态</dt><dd>${escapeHtml(run.status || "—")}</dd>
+          <dt>模型</dt><dd>${escapeHtml(run.model_id || model?.name || model?.model || "—")}</dd>
+          <dt>请求次数</dt><dd>${escapeHtml(run.requests ?? usage.requests ?? "—")}</dd>
+          <dt>输入 Token</dt><dd>${escapeHtml(formatTokens(run.input_tokens ?? usage.input_tokens))}</dd>
+          <dt>输出 Token</dt><dd>${escapeHtml(formatTokens(run.output_tokens ?? usage.output_tokens))}</dd>
+          <dt>合计 Token</dt><dd>${escapeHtml(formatTokens(run.total_tokens ?? usage.total_tokens))}</dd>
+          <dt>缓存读取</dt><dd>${escapeHtml(formatTokens(run.cache_read_tokens))}</dd>
+          <dt>缓存写入</dt><dd>${escapeHtml(formatTokens(run.cache_write_tokens))}</dd>
+          <dt>工具调用</dt><dd>${escapeHtml(run.tool_calls ?? usage.tool_calls ?? "—")}</dd>
+          <dt>Tool Search</dt><dd>${escapeHtml(run.tool_search_calls ?? "—")}</dd>
+          <dt>耗时</dt><dd>${Number.isFinite(Number(run.duration_ms)) ? `${Number(run.duration_ms).toLocaleString("zh-CN")} ms` : "—"}</dd>
+          <dt>压缩</dt><dd>${escapeHtml(run.compaction || "—")}</dd>
         </dl>
       </section>
       <section class="inspector-section">
@@ -465,6 +556,8 @@ function startStateMonitor() {
       attachments: api.state.pendingAttachments.length,
       contextStatus: api.state.contextStatus,
       lastRunUsage: api.state.lastRunUsage,
+      lastRunMetrics: api.state.lastRunMetrics,
+      conversationId: api.state.conversationId,
     });
     if (key === lastRenderKey) return;
     lastRenderKey = key;
@@ -526,6 +619,11 @@ function toggleWorkspaceDrawer(name) {
   document.getElementById("workspaceDrawerBackdrop")?.classList.remove("hidden");
   syncInspectorToggle();
 }
+
+window.DeepAgentConsoleWorkspace = {
+  isContextReferenceSelected,
+  toggleContextReferenceInspector,
+};
 
 export async function initWorkspace() {
   if (initialized) return;

@@ -1,6 +1,7 @@
 const state = {
   baseUrl: "",
   capabilities: [],
+  skills: [],
   llmModels: [],
   editingAgentId: null,
   editingLlmModelId: null,
@@ -121,6 +122,15 @@ async function loadLlmModels() {
   return state.llmModels;
 }
 
+async function loadSkills() {
+  try {
+    state.skills = await apiFetch("/api/v1/skills");
+  } catch {
+    state.skills = [];
+  }
+  return state.skills;
+}
+
 function populateAgentModelSelect(selectedId = null) {
   const select = document.getElementById("agentModelId");
   if (!select) return;
@@ -155,10 +165,12 @@ function initTabs() {
         window.databaseConnectionAdmin.refresh();
       }
       if (name === "agents" && window.agentsAdmin) {
-        loadLlmModels().then(() => window.agentsAdmin.refresh());
+        Promise.all([loadLlmModels(), loadCapabilities(), loadSkills()]).then(() => window.agentsAdmin.refresh());
       }
       if (name === "llm-models" && window.llmModelsAdmin) window.llmModelsAdmin.refresh();
       if (name === "builtin-tools" && window.builtinToolsAdmin) window.builtinToolsAdmin.refresh();
+      if (name === "system-tools" && window.systemToolsAdmin) window.systemToolsAdmin.refresh();
+      if (name === "skills" && window.skillsAdmin) window.skillsAdmin.refresh();
       if (name === "auxiliary-models" && window.auxiliaryModelsAdmin) window.auxiliaryModelsAdmin.refresh();
       if (name === "mcp" && window.mcpAdmin) window.mcpAdmin.refresh();
       if (name === "ui-tools" && window.uiToolsAdmin) window.uiToolsAdmin.refresh();
@@ -190,6 +202,7 @@ document.addEventListener("DOMContentLoaded", () => {
   loadDatabaseSchemaVersion();
   loadCapabilities().catch(() => {});
   loadLlmModels().catch(() => {});
+  loadSkills().catch(() => {});
 });
 
 window.__DatabaseSchemaVersionUI = {

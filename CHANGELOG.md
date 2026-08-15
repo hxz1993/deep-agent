@@ -3,14 +3,22 @@
 本文件记录 DeepAgent 的产品版本变化，按新版本到旧版本排列。当前代码版本以
 `deep_agent.__version__` 为准；数据库结构版本以 Alembic head 为准，两者互不替代。
 
+## v0.4.7
+
+- Console将Harness任务计划从机器人回复内部移到消息区底部的轻量浮层，当前Run只保留一张面板并随最新
+  Planning快照实时更新；步骤完成状态可直接勾选查看，完整计划全部完成后立即隐藏。
+- 打开历史会话时只检查最新Assistant Run：仅恢复其最后一份未完成计划；最新Run无计划或计划
+  已完成时不回捞更早计划。取消、失败和Pending的未完成计划分别显示明确终态。
+- 后端Planning、SSE、History和Tool Result中的计划快照保持不变；Alembic仍为`006`。
+
 ## v0.4.6
 
 - 全局接入Pydantic AI Harness 0.18 `Planning()`默认六工具。模型可自行判断复杂任务是否需要计划；
   每次Run使用独立`InMemoryPlanStore`，不增加Agent配置、数据库迁移或跨轮任务状态。
 - 规划工具继续使用标准Tool Call/Return；SSE和History以`source=planning`标识，并在已确认的
   Tool Result上附带结构化计划快照。取消、失败、Pending和上下文压缩继续遵循现有消息配对语义。
-- Console把六个规划工具聚合成一张“任务计划”卡：执行期间展开，全部完成后自动收起，刷新History
-  后可恢复最终计划；系统工具目录新增只读“任务规划”分组。Alembic保持`006`。
+- Console最初把六个规划工具聚合成一张“任务计划”卡；系统工具目录新增只读“任务规划”分组。
+  v0.4.7进一步收口了计划的展示位置与历史恢复范围。Alembic保持`006`。
 
 ## v0.4.5
 

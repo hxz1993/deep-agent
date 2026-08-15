@@ -475,8 +475,9 @@ Provider Native Tool 使用对应的原生 Call/Return 事件，不经过普通 
 - `artifacts`非空时，`result`是受限预览而非完整结果；客户端显示“完整结果已外置”，模型会通过
   系统工具 `read_tool_result`按需读取，客户端不需要代替模型回读
 - 若 `tool_call_id` 缺失，可回退到「最近一个未完成的工具块」
-- `source=planning`时，客户端应按`tool_call_id`消费原始事件，并可把六个规划工具聚合成一张计划卡；
-  `plan`只表示该Tool Result成功返回后的已确认状态，不能把尚未返回的调用伪造成完成
+- `source=planning`时，客户端应按`tool_call_id`消费原始事件，并可把六个规划工具聚合成一张计划面板；
+  Console只显示当前最新Run的最后一份未完成快照，全部完成后隐藏。`plan`只表示该Tool Result成功
+  返回后的已确认状态，不能把尚未返回的调用伪造成完成
 
 ---
 

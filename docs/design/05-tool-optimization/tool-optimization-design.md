@@ -66,7 +66,8 @@ SSE 协议。
 | 大文本外置 / Tool Output Limits | 已采用 | v0.4.0 使用平台文件 Store 完成会话内 Spill；TTL、孤儿治理和通用 Artifact 平台不作为前置条件 |
 | ConversationSearch | 暂缓 | 当前没有真实摘要缺失样本，中文历史检索质量也未验证；仅在长程任务确实无法找回关键事实时，才用自定义 `HistorySource` 读取现有 SQL `chat_messages`，不启用第二套 StepPersistence |
 | StepPersistence | 暂不做 | 现有 SQL 会话是事实源；除非出现崩溃恢复或子 Agent 持久化需求，否则会形成第二套历史 |
-| Planning / Advisor / SubAgent | 按业务需求 | 只有长任务、可审计计划和专业分工形成明确产品场景后再启用 |
+| Planning | 已采用 | v0.4.6启用Harness单轮计划，v0.4.7收口Console悬浮面板；不扩展为跨Run任务引擎 |
+| Advisor / SubAgent | 按业务需求 | 只有专业分工形成明确产品场景后再启用 |
 | BrowserUse | 当前不做 | 浏览器执行权限和网络边界过大，不作为通用线上 Agent 默认能力 |
 
 升级依赖不等于启用上述能力。每一项仍需单独的产品边界、权限设计和目标测试。

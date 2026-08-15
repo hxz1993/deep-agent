@@ -1,4 +1,4 @@
-const WORKSPACE_ASSET_VERSION = "20260813-1";
+const WORKSPACE_ASSET_VERSION = "20260815-2";
 
 let initialized = false;
 let lastRenderKey = "";

@@ -67,6 +67,15 @@
       </div>
 
       <div class="composer">
+        <section class="composer-plan hidden open" id="composerPlan" aria-live="polite">
+          <button type="button" class="composer-plan-summary" id="composerPlanSummary" aria-expanded="true">
+            <span class="composer-plan-chevron"><i data-lucide="chevron-right" aria-hidden="true"></i></span>
+            <span class="composer-plan-icon"><i data-lucide="list-checks" aria-hidden="true"></i></span>
+            <span class="composer-plan-title">任务计划</span>
+            <span class="composer-plan-progress" id="composerPlanProgress"></span>
+          </button>
+          <ol class="composer-plan-items" id="composerPlanItems"></ol>
+        </section>
         <div class="attachment-preview hidden" id="attachmentPreview"></div>
         <div class="composer-meta" id="composerMeta">
           <label class="composer-model-picker">

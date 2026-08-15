@@ -49,7 +49,7 @@ frontend/
 | 配置 | `localStorage` 只保存调试 App；全局环境配置只读展示，身份和鉴权由平台提供 |
 | 内置工具目录 | 配置中心只读展示 `builtin:general`、`builtin:sandbox`；Agent 按包选择 |
 | 系统工具目录 | 配置中心按任务规划、Skill、文件、工具结果、MCP 工具发现、MCP Resource 分组展示自动注入工具；不参与 Agent 配置 |
-| 任务计划 | `source=planning`的六个工具事件聚合成一张计划卡；执行中展开，全部完成后收起，History可恢复 |
+| 任务计划 | `source=planning`的六个工具事件聚合到消息区底部唯一浮层；实时覆盖最新快照，全部完成后隐藏；History只恢复最新Assistant Run的未完成计划 |
 | Skill | 独立 Skill 列表与详情；上传包安装/替换/启停/单个与全部导出/删除；文本、Word、Excel 资源可预览，脚本只列包内路径和数量，不展示可执行性判断；Agent 使用独立 `skills` 列表选择 |
 | 一体化控制台 | `/console/`；工作台、配置和诊断的唯一入口 |
 

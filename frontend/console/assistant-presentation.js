@@ -118,16 +118,73 @@ export function normalizePlanSnapshot(snapshot) {
   return { items, total: items.length, completed };
 }
 
-export function planDisclosureState(snapshot) {
+export function planPanelState(snapshot, terminalStatus = null) {
   const plan = normalizePlanSnapshot(snapshot);
   if (!plan) return null;
   const allCompleted = plan.completed === plan.total;
+  if (allCompleted) return null;
+  const terminalLabels = {
+    interrupted: "已中断",
+    error: "执行失败",
+    pending: "等待操作",
+    completed: "未完成",
+  };
+  const terminalLabel = terminalLabels[terminalStatus] || "";
   return {
     plan,
-    allCompleted,
-    expanded: !allCompleted,
-    label: allCompleted
-      ? `${plan.completed}/${plan.total} 已完成`
-      : `${plan.completed}/${plan.total}`,
+    label: `${plan.completed}/${plan.total}${terminalLabel ? ` · ${terminalLabel}` : ""}`,
+    terminalStatus,
   };
+}
+
+/** Return the final Planning snapshot from the latest assistant run only. */
+export function latestAssistantRunPlan(messages = []) {
+  let latestIndex = -1;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (messages[index]?.role === "assistant") {
+      latestIndex = index;
+      break;
+    }
+    if (messages[index]?.role === "user") return null;
+  }
+  if (latestIndex < 0) return null;
+
+  const latest = messages[latestIndex];
+  const runId = latest.run_id || null;
+  const records = [];
+  if (runId) {
+    for (const message of messages) {
+      if (message?.role === "assistant" && message.run_id === runId) records.push(message);
+    }
+  } else {
+    for (let index = latestIndex; index >= 0; index -= 1) {
+      const message = messages[index];
+      if (message?.role !== "assistant" || message.run_id) break;
+      records.unshift(message);
+    }
+  }
+
+  let snapshot = null;
+  for (const record of records) {
+    for (const part of record.parts || []) {
+      if (
+        part?.type === "tool_result"
+        && isPlanningToolEvent(part)
+        && part.plan
+      ) {
+        snapshot = part.plan;
+      }
+    }
+  }
+  if (!snapshot) return null;
+
+  const statuses = records.map((record) => record?.status).filter(Boolean);
+  let terminalStatus = null;
+  if (statuses.includes("interrupted")) terminalStatus = "interrupted";
+  else if (statuses.includes("error") || statuses.includes("failed")) terminalStatus = "error";
+  else if (statuses.includes("pending")) terminalStatus = "pending";
+  else if (statuses.length && statuses.every((status) => status === "completed")) {
+    terminalStatus = "completed";
+  }
+  return { snapshot, runId, terminalStatus };
 }

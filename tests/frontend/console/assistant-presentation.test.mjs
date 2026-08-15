@@ -5,8 +5,9 @@ import test from "node:test";
 import {
   buildHistoryVisualItems,
   isPlanningToolEvent,
+  latestAssistantRunPlan,
   normalizePlanSnapshot,
-  planDisclosureState,
+  planPanelState,
   processDisclosureLabel,
   splitAssistantHistoryRecords,
 } from "../../../frontend/console/assistant-presentation.js";
@@ -17,6 +18,10 @@ const chatSource = await readFile(
 );
 const workspaceCss = await readFile(
   new URL("../../../frontend/console/workspace.css", import.meta.url),
+  "utf8",
+);
+const workspaceTemplate = await readFile(
+  new URL("../../../frontend/console/workspace-template.html", import.meta.url),
   "utf8",
 );
 const themesCss = await readFile(
@@ -179,7 +184,7 @@ test("大工具结果显示外置提示并保留预览", () => {
   assert.match(workspaceCss, /\.tool-result-artifact/);
 });
 
-test("规划工具聚合为单一卡片并保留实时与历史快照", () => {
+test("任务计划只在消息区底部浮层展示最新未完成快照", () => {
   assert.equal(isPlanningToolEvent({ source: "planning", tool: "anything" }), true);
   assert.equal(isPlanningToolEvent({ tool: "write_plan" }), true);
   assert.equal(isPlanningToolEvent({ tool: "execute_python" }), false);
@@ -190,11 +195,10 @@ test("规划工具聚合为单一卡片并保留实时与历史快照", () => {
       { id: "2", content: "生成结果", status: "pending" },
     ],
   });
-  assert.deepEqual(planDisclosureState(running), {
+  assert.deepEqual(planPanelState(running), {
     plan: running,
-    allCompleted: false,
-    expanded: true,
     label: "0/2",
+    terminalStatus: null,
   });
 
   const completed = normalizePlanSnapshot({
@@ -203,13 +207,88 @@ test("规划工具聚合为单一卡片并保留实时与历史快照", () => {
       { id: "2", content: "生成结果", status: "completed" },
     ],
   });
-  assert.equal(planDisclosureState(completed).expanded, false);
-  assert.equal(planDisclosureState(completed).label, "2/2 已完成");
+  assert.equal(planPanelState(completed), null);
+  assert.equal(planPanelState(running, "interrupted").label, "0/2 · 已中断");
+  assert.equal(planPanelState(running, "error").label, "0/2 · 执行失败");
+  assert.equal(planPanelState(running, "pending").label, "0/2 · 等待操作");
   assert.equal(normalizePlanSnapshot({ items: [] }), null);
 
-  assert.match(chatSource, /wrap\.insertBefore\(planBlock, processBlock\)/);
-  assert.match(chatSource, /if \(isPlanningToolEvent\(merged\)\)/);
-  assert.match(chatSource, /if \(data\.plan\) renderPlan\(data\.plan\)/);
-  assert.match(chatSource, /plan: part\.plan/);
-  assert.match(workspaceCss, /\.assistant-plan\.open \.assistant-plan-items \{ display: grid; \}/);
+  const planPosition = workspaceTemplate.indexOf('id="composerPlan"');
+  const inputPosition = workspaceTemplate.indexOf('class="composer-inner"');
+  assert.ok(planPosition >= 0 && planPosition < inputPosition);
+  assert.doesNotMatch(chatSource, /wrap\.insertBefore\(planBlock, processBlock\)/);
+  assert.match(chatSource, /showComposerPlanPlaceholder\(data\.tool_call_id\)/);
+  assert.match(chatSource, /renderComposerPlan\(data\.plan\)/);
+  assert.match(chatSource, /if \(isPlanningToolEvent\(part\)\) continue/);
+  assert.match(workspaceCss, /\.composer-plan\.open \.composer-plan-items \{ display: grid; \}/);
+  assert.match(workspaceCss, /\.composer-plan \{[\s\S]*position: absolute;[\s\S]*bottom: calc\(100% \+ 10px\);/);
+  assert.match(workspaceCss, /width: min\(420px, calc\(100% - 48px\)\);/);
+  assert.match(workspaceCss, /\.composer \{ position: relative;/);
+});
+
+test("历史只恢复最新 Assistant Run 的最后一份未完成计划", () => {
+  const older = {
+    items: [{ id: "old", content: "旧任务", status: "pending" }],
+  };
+  const first = {
+    items: [
+      { id: "a", content: "第一步", status: "completed" },
+      { id: "b", content: "第二步", status: "pending" },
+    ],
+  };
+  const latest = {
+    items: [
+      { id: "a", content: "第一步", status: "completed" },
+      { id: "b", content: "第二步", active_form: "正在执行第二步", status: "in_progress" },
+    ],
+  };
+  const planningResult = (plan, id) => ({
+    type: "tool_result",
+    tool: "update_task_status",
+    source: "planning",
+    tool_call_id: id,
+    plan,
+  });
+  const messages = [
+    { role: "user", content: "旧任务" },
+    { role: "assistant", run_id: "run-old", status: "interrupted", parts: [planningResult(older, "old")] },
+    { role: "user", content: "新任务" },
+    { role: "assistant", run_id: "run-new", status: "completed", parts: [planningResult(first, "1")] },
+    { role: "assistant", run_id: "run-new", status: "interrupted", parts: [planningResult(latest, "2")] },
+  ];
+  assert.deepEqual(latestAssistantRunPlan(messages), {
+    snapshot: latest,
+    runId: "run-new",
+    terminalStatus: "interrupted",
+  });
+
+  assert.equal(latestAssistantRunPlan([...messages, { role: "user", content: "收到" }]), null);
+  assert.equal(latestAssistantRunPlan([
+    ...messages,
+    { role: "user", content: "收到" },
+    { role: "assistant", run_id: "run-plain", status: "completed", parts: [{ type: "text", content: "收到" }] },
+  ]), null);
+
+  const complete = {
+    items: [
+      { id: "a", content: "第一步", status: "completed" },
+      { id: "b", content: "第二步", status: "completed" },
+    ],
+  };
+  const restored = latestAssistantRunPlan([
+    { role: "user", content: "完成任务" },
+    { role: "assistant", run_id: "run-complete", status: "completed", parts: [planningResult(complete, "3")] },
+  ]);
+  assert.deepEqual(restored?.snapshot, complete);
+  assert.equal(planPanelState(restored?.snapshot, restored?.terminalStatus), null);
+
+  assert.deepEqual(latestAssistantRunPlan([
+    { role: "user", content: "兼容历史" },
+    { role: "assistant", status: "completed", parts: [planningResult(first, "legacy-1")] },
+    { role: "assistant", status: "interrupted", parts: [planningResult(latest, "legacy-2")] },
+  ]), {
+    snapshot: latest,
+    runId: null,
+    terminalStatus: "interrupted",
+  });
 });

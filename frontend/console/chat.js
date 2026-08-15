@@ -8,11 +8,11 @@ import { formatSessionIdSubtitle } from "./session-display.js?v=20260728-2";
 import {
   buildHistoryVisualItems,
   isPlanningToolEvent,
-  normalizePlanSnapshot,
-  planDisclosureState,
+  latestAssistantRunPlan,
+  planPanelState,
   processDisclosureLabel,
   splitAssistantHistoryRecords,
-} from "./assistant-presentation.js?v=20260815-1";
+} from "./assistant-presentation.js?v=20260815-2";
 
 /* ------------------------------------------------------------------ *
  * deep-agent 前端 —— 适配 FastAPI /api/v1/chat/stream (SSE over POST)
@@ -132,6 +132,9 @@ const state = {
   pendingAutomaticCompaction: null,
   automaticCompactionAnchor: null,
   assistantPresenter: null,
+  planSnapshot: null,
+  planTerminalStatus: null,
+  planningCallIds: new Set(),
 };
 
 const TITLE_POLL_TIMEOUT_MS = 30000;
@@ -189,6 +192,10 @@ const el = {
   fileInput: $("fileInput"),
   attachmentPreview: $("attachmentPreview"),
   composerMeta: $("composerMeta"),
+  composerPlan: $("composerPlan"),
+  composerPlanSummary: $("composerPlanSummary"),
+  composerPlanProgress: $("composerPlanProgress"),
+  composerPlanItems: $("composerPlanItems"),
   modelSelect: $("modelSelect"),
   composerModelModalities: $("composerModelModalities"),
   composerUploadCapabilities: $("composerUploadCapabilities"),
@@ -286,7 +293,76 @@ function showEmptyState() {
 function clearMessages() {
   clearAutomaticCompactionState();
   state.assistantPresenter = null;
+  clearComposerPlan();
   el.messages.innerHTML = "";
+}
+
+function clearComposerPlan() {
+  state.planSnapshot = null;
+  state.planTerminalStatus = null;
+  state.planningCallIds.clear();
+  if (!el.composerPlan) return;
+  el.composerPlan.classList.add("hidden");
+  el.composerPlan.classList.remove("interrupted", "error", "pending");
+  el.composerPlanProgress.textContent = "";
+  el.composerPlanItems.innerHTML = "";
+}
+
+function setComposerPlanExpanded(expanded) {
+  if (!el.composerPlan) return;
+  el.composerPlan.classList.toggle("open", expanded);
+  el.composerPlanSummary?.setAttribute("aria-expanded", String(expanded));
+}
+
+function showComposerPlanPlaceholder(toolCallId) {
+  if (toolCallId) state.planningCallIds.add(toolCallId);
+  if (!el.composerPlan || state.planSnapshot) return;
+  const wasHidden = el.composerPlan.classList.contains("hidden");
+  el.composerPlan.classList.remove("hidden", "interrupted", "error", "pending");
+  el.composerPlanProgress.textContent = "正在制定…";
+  el.composerPlanItems.innerHTML = "";
+  if (wasHidden) setComposerPlanExpanded(true);
+  refreshLucideIcons();
+}
+
+function renderComposerPlan(snapshot, { terminalStatus = null } = {}) {
+  const presentation = planPanelState(snapshot, terminalStatus);
+  if (!presentation) {
+    clearComposerPlan();
+    return;
+  }
+  const wasHidden = el.composerPlan.classList.contains("hidden");
+  state.planSnapshot = presentation.plan;
+  state.planTerminalStatus = presentation.terminalStatus;
+  el.composerPlan.classList.remove("hidden", "interrupted", "error", "pending");
+  if (presentation.terminalStatus) {
+    el.composerPlan.classList.add(presentation.terminalStatus);
+  }
+  el.composerPlanProgress.textContent = presentation.label;
+  el.composerPlanItems.innerHTML = presentation.plan.items.map((item) => {
+    const display = item.status === "in_progress" && item.active_form
+      ? item.active_form
+      : item.content;
+    const icon = item.status === "completed"
+      ? "circle-check"
+      : item.status === "in_progress" ? "loader-circle" : "circle";
+    return `<li class="composer-plan-item status-${escapeHtml(item.status)}">
+      <span class="composer-plan-status">${lucideIcon(icon)}</span>
+      <span>${escapeHtml(display)}</span>
+    </li>`;
+  }).join("");
+  if (wasHidden) setComposerPlanExpanded(true);
+  refreshLucideIcons();
+}
+
+function markComposerPlanTerminal(status) {
+  if (!state.planSnapshot) return;
+  renderComposerPlan(state.planSnapshot, { terminalStatus: status });
+}
+
+function removePlanningCall(toolCallId) {
+  if (!toolCallId || !state.planningCallIds.delete(toolCallId)) return;
+  if (!state.planSnapshot && state.planningCallIds.size === 0) clearComposerPlan();
 }
 
 function currentSessionSnapshot() {
@@ -410,6 +486,9 @@ function init() {
   $("refreshCapsBtn").addEventListener("click", loadCapabilities);
   el.sendBtn.addEventListener("click", onSend);
   el.stopBtn.addEventListener("click", stopStream);
+  el.composerPlanSummary?.addEventListener("click", () => {
+    setComposerPlanExpanded(!el.composerPlan.classList.contains("open"));
+  });
 
   el.input.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -1219,6 +1298,7 @@ function renderHistory(messages, modelMessageCount, contextCheckpoint = null) {
       const allParts = records.flatMap((record) => record.parts || []);
       const completedToolIds = collectCompletedToolIds(allParts);
       for (const part of presentation.processParts) {
+        if (isPlanningToolEvent(part)) continue;
         if (part.type === "thinking" && part.content) {
           assistant.addThinkingBlock(part.content);
         } else if (part.type === "text" && part.content) {
@@ -1254,6 +1334,12 @@ function renderHistory(messages, modelMessageCount, contextCheckpoint = null) {
     }
   }
   state.awaitingHitl = findResumablePendingUiCall(messages, contextCheckpoint) !== null;
+  const latestPlan = latestAssistantRunPlan(messages);
+  if (latestPlan) {
+    renderComposerPlan(latestPlan.snapshot, { terminalStatus: latestPlan.terminalStatus });
+  } else {
+    clearComposerPlan();
+  }
   updateHitlInputState();
   updateComposerContextControls();
   scrollToBottom();
@@ -1716,6 +1802,7 @@ async function onSend() {
 
   const userBranchPoint = branchFrom != null ? branchFrom : state.modelMessageCount;
   const isFirstTurn = branchFrom == null && state.modelMessageCount === 0;
+  clearComposerPlan();
   addMessage("user", text, null, userBranchPoint, attachments);
   state.lastUserBranchPoint = userBranchPoint;
 
@@ -1760,6 +1847,7 @@ async function resumeDeferred(deferredResults) {
   }
   state.awaitingHitl = false;
   updateHitlInputState();
+  clearComposerPlan();
 
   const assistant = state.assistantPresenter?.row?.isConnected
     ? state.assistantPresenter
@@ -1811,6 +1899,7 @@ async function runChatStream(payload, assistant) {
     } else {
       setConn("err", "请求失败");
       failAutomaticContextCompaction("上下文压缩后续请求失败，未更新 Checkpoint");
+      markComposerPlanTerminal("error");
       addErrorTo(assistant, `请求失败：${e.message}`);
     }
   } finally {
@@ -1971,13 +2060,26 @@ function handleEvent({ event, data }, assistant) {
       assistant.appendText(data.delta || "");
       break;
     case "tool_call":
-      assistant.addToolCall(data);
+      if (isPlanningToolEvent(data)) {
+        showComposerPlanPlaceholder(data.tool_call_id);
+      } else {
+        assistant.addToolCall(data);
+      }
       break;
     case "tool_call_removed":
-      assistant.removeToolCall(data);
+      if (isPlanningToolEvent(data) || state.planningCallIds.has(data.tool_call_id)) {
+        removePlanningCall(data.tool_call_id);
+      } else {
+        assistant.removeToolCall(data);
+      }
       break;
     case "tool_result":
-      assistant.addToolResult(data);
+      if (isPlanningToolEvent(data) || state.planningCallIds.has(data.tool_call_id)) {
+        if (data.tool_call_id) state.planningCallIds.delete(data.tool_call_id);
+        if (data.plan) renderComposerPlan(data.plan);
+      } else {
+        assistant.addToolResult(data);
+      }
       break;
     case "final":
       assistant.complete(data.output);
@@ -2004,6 +2106,7 @@ function handleEvent({ event, data }, assistant) {
       }
       const refreshCompactionHistory = finalizeAutomaticContextCompaction(data.context, data.status);
       state.skipHistoryRefresh = !refreshCompactionHistory;
+      markComposerPlanTerminal(data.status === "pending" ? "pending" : "completed");
       if (data.status === "pending" && data.deferred) {
         state.awaitingHitl = true;
         setStreaming(false);
@@ -2027,6 +2130,7 @@ function handleEvent({ event, data }, assistant) {
         branchFrom: state.lastUserBranchPoint,
         message: lastUserText(),
       });
+      markComposerPlanTerminal("error");
       break;
     case "cancelled":
       failAutomaticContextCompaction("上下文压缩已取消，未更新 Checkpoint");
@@ -2038,6 +2142,7 @@ function handleEvent({ event, data }, assistant) {
       assistant.finalizeThinking();
       assistant.finalizeText();
       assistant.markInterrupted();
+      markComposerPlanTerminal("interrupted");
       syncHistoryMeta(data);
       if (data.usage) renderUsage(data.usage);
       state.conversationId = data.conversation_id || state.conversationId;
@@ -2329,63 +2434,6 @@ function createAssistantMessage(timestamp, branchPoint) {
   let thinkingBuffer = "";
   let interruptedStatus = null;
   const toolBlocks = new Map(); // tool_call_id -> element
-  const planningCallIds = new Set();
-  let planBlock = null;
-  let planSnapshot = null;
-
-  function ensurePlanBlock() {
-    if (planBlock) return planBlock;
-    planBlock = document.createElement("section");
-    planBlock.className = "assistant-plan open";
-    planBlock.innerHTML = `
-      <button type="button" class="assistant-plan-summary" aria-expanded="true">
-        <span class="assistant-plan-chevron">${lucideIcon("chevron-right")}</span>
-        <span class="assistant-plan-icon">${lucideIcon("list-checks")}</span>
-        <span class="assistant-plan-title">任务计划</span>
-        <span class="assistant-plan-progress">正在制定…</span>
-      </button>
-      <ol class="assistant-plan-items"></ol>`;
-    planBlock.querySelector(".assistant-plan-summary").addEventListener("click", () => {
-      const open = !planBlock.classList.contains("open");
-      planBlock.classList.toggle("open", open);
-      planBlock.querySelector(".assistant-plan-summary")
-        .setAttribute("aria-expanded", String(open));
-    });
-    wrap.insertBefore(planBlock, processBlock);
-    refreshLucideIcons();
-    return planBlock;
-  }
-
-  function renderPlan(snapshot) {
-    const state = planDisclosureState(snapshot);
-    if (!state) {
-      planSnapshot = null;
-      planBlock?.remove();
-      planBlock = null;
-      return;
-    }
-    planSnapshot = state.plan;
-    const block = ensurePlanBlock();
-    const summary = block.querySelector(".assistant-plan-summary");
-    block.querySelector(".assistant-plan-progress").textContent = state.label;
-    block.classList.toggle("complete", state.allCompleted);
-    block.classList.toggle("open", state.expanded);
-    summary.setAttribute("aria-expanded", String(state.expanded));
-    const items = block.querySelector(".assistant-plan-items");
-    items.innerHTML = state.plan.items.map((item) => {
-      const display = item.status === "in_progress" && item.active_form
-        ? item.active_form
-        : item.content;
-      const icon = item.status === "completed"
-        ? "circle-check"
-        : item.status === "in_progress" ? "loader-circle" : "circle";
-      return `<li class="assistant-plan-item status-${escapeHtml(item.status)}">
-        <span class="assistant-plan-status">${lucideIcon(icon)}</span>
-        <span>${escapeHtml(display)}</span>
-      </li>`;
-    }).join("");
-    refreshLucideIcons();
-  }
 
   function updateProcessDisclosure() {
     const hasProcess = processBody.children.length > 0;
@@ -2549,10 +2597,6 @@ function createAssistantMessage(timestamp, branchPoint) {
       interruptedStatus.innerHTML = `${lucideIcon("circle-stop")}<span>已停止</span>`;
       wrap.appendChild(interruptedStatus);
       row.classList.add("interrupted");
-      if (planBlock && planSnapshot?.completed !== planSnapshot?.total) {
-        planBlock.classList.add("interrupted", "open");
-        planBlock.querySelector(".assistant-plan-summary")?.setAttribute("aria-expanded", "true");
-      }
       updateProcessDisclosure();
       refreshLucideIcons();
     },
@@ -2561,12 +2605,7 @@ function createAssistantMessage(timestamp, branchPoint) {
       promoteFinalToProcess();
       const merged = mergeUiToolCall(data);
       const key = merged.tool_call_id || `${merged.tool}-${toolBlocks.size}`;
-      if (isPlanningToolEvent(merged)) {
-        planningCallIds.add(key);
-        ensurePlanBlock();
-        scrollToBottom();
-        return;
-      }
+      if (isPlanningToolEvent(merged)) return;
       const hasArgs = hasNonEmptyArgs(merged.args);
       const existing = toolBlocks.get(key);
 
@@ -2620,12 +2659,7 @@ function createAssistantMessage(timestamp, branchPoint) {
     addToolResult(data) {
       promoteFinalToProcess();
       const key = data.tool_call_id;
-      if (isPlanningToolEvent(data) || (key && planningCallIds.has(key))) {
-        if (key) planningCallIds.delete(key);
-        if (data.plan) renderPlan(data.plan);
-        scrollToBottom();
-        return;
-      }
+      if (isPlanningToolEvent(data)) return;
       let block = key && toolBlocks.get(key);
       if (!block) {
         block = [...toolBlocks.values()].reverse().find((b) => !b.dataset.done);
@@ -2651,13 +2685,7 @@ function createAssistantMessage(timestamp, branchPoint) {
     removeToolCall(data) {
       const key = data.tool_call_id;
       if (!key) return;
-      if (planningCallIds.delete(key)) {
-        if (!planSnapshot && planningCallIds.size === 0) {
-          planBlock?.remove();
-          planBlock = null;
-        }
-        return;
-      }
+      if (isPlanningToolEvent(data)) return;
       const block = toolBlocks.get(key);
       if (!block) return;
       block.remove();

@@ -132,7 +132,7 @@ cache hit/miss Token，没有数据时保持 unknown。它不等于启用缓存�
 | `DeduplicateFileReads` | 去除重复文件读取内容 | 保持，不改变原始历史；运行时字节/解析复用由 `read_file`的Run级缓存负责 |
 | `estimate_token_count` | 作为估算实现的一部分 | 保持统一 `TokenEstimator` 封装，不让 Console复制算法 |
 | `ToolOutputLimits` / `Spill` | 超大工具结果在进入History前外置 | v0.4.0适配平台文件服务；保留Harness原生 `read_tool_result`，不使用本地Store或自研读取状态机 |
-| `Planning` | 模型在复杂任务中维护单轮结构化计划 | v0.4.6采用默认六工具与`InMemoryPlanStore`；DeepAgent只附加展示快照，不新增任务引擎或计划表 |
+| `Planning` | 模型在复杂任务中维护单轮结构化计划 | v0.4.6采用默认六工具与`InMemoryPlanStore`；v0.4.7 Console仅在消息区底部浮层展示当前最新Run的未完成计划，后端快照与History不变；不新增任务引擎或计划表 |
 
 Harness `Skills` 不读取 references/assets，也不执行 scripts。v0.3.18 直接使用它作为线上 Skill 的
 渐进披露内核；DeepAgent 负责安装、权限、References/Assets 读取和脚本隔离。

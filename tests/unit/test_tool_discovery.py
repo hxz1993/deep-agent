@@ -24,6 +24,7 @@ from pydantic_ai.usage import RunUsage
 from deep_agent.agent.context.estimator import TokenEstimator
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.tool_discovery import (
+    MCP_DIRECT_DISCLOSURE_LIMIT,
     MCP_SEARCH_RESULT_LIMIT,
     TOOL_SEARCH_DESCRIPTION,
     TOOL_SEARCH_PARAMETER_DESCRIPTION,
@@ -119,6 +120,8 @@ class ToolDiscoveryTests(unittest.IsolatedAsyncioTestCase):
                 list_cube_dimensions,
                 resolve_members,
                 delete_financial_model,
+                refresh_financial_model_cache,
+                generate_financial_model_report,
             ]
         ).prefixed("deepfos")
 
@@ -255,7 +258,14 @@ class ToolDiscoveryTests(unittest.IsolatedAsyncioTestCase):
             return ModelResponse(parts=[TextPart(content="done")])
 
         toolset = FunctionToolset(
-            tools=[cube_query_data, dimension_query_members, cube_describe, search_financial_model]
+            tools=[
+                cube_query_data,
+                dimension_query_members,
+                cube_describe,
+                search_financial_model,
+                platform_folder_list,
+                platform_element_search,
+            ]
         ).prefixed("renamed_server")
         wrapper = build_mcp_discovery_toolset(
             [toolset],
@@ -302,6 +312,8 @@ class ToolDiscoveryTests(unittest.IsolatedAsyncioTestCase):
                 refresh_financial_model_cache,
                 generate_financial_model_report,
                 upload_financial_model_template,
+                list_cube_dimensions,
+                resolve_members,
             ]
         ).prefixed("deepfos")
         tools = list((await toolset.get_tools(ctx)).values())
@@ -324,6 +336,8 @@ class ToolDiscoveryTests(unittest.IsolatedAsyncioTestCase):
                 refresh_financial_model_cache,
                 generate_financial_model_report,
                 upload_financial_model_template,
+                list_cube_dimensions,
+                resolve_members,
             ]
         ).prefixed("deepfos")
         wrapper = build_mcp_discovery_toolset(
@@ -387,6 +401,8 @@ class ToolDiscoveryTests(unittest.IsolatedAsyncioTestCase):
                 list_cube_dimensions,
                 resolve_members,
                 deeptable_workbook_get,
+                cube_describe,
+                platform_folder_list,
             ]
         ).prefixed("deepfos")
         wrapper = build_mcp_discovery_toolset(
@@ -425,6 +441,8 @@ class ToolDiscoveryTests(unittest.IsolatedAsyncioTestCase):
                 list_cube_dimensions,
                 resolve_members,
                 deeptable_workbook_get,
+                cube_describe,
+                platform_folder_list,
             ]
         ).prefixed("deepfos")
         wrapper = build_mcp_discovery_toolset(
@@ -460,6 +478,8 @@ class ToolDiscoveryTests(unittest.IsolatedAsyncioTestCase):
                 list_cube_dimensions,
                 resolve_members,
                 deeptable_workbook_get,
+                cube_describe,
+                platform_folder_list,
             ]
         ).prefixed("deepfos")
         wrapper = build_mcp_discovery_toolset(
@@ -473,7 +493,7 @@ class ToolDiscoveryTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(ctx.deps.tool_discovery.preselected_tools, [])
 
-    async def test_more_than_three_tools_preselects_and_defers_globally(self) -> None:
+    async def test_more_than_five_tools_preselects_and_defers_globally(self) -> None:
         ctx = self._ctx("查询财务模型和预算")
         wrapper = build_mcp_discovery_toolset(
             [self._toolset()],
@@ -489,7 +509,7 @@ class ToolDiscoveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertLessEqual(len(direct), 3)
         self.assertIn("deepfos_search_financial_model", direct)
         self.assertIn("deepfos_delete_financial_model", deferred)
-        self.assertEqual(ctx.deps.tool_discovery.candidate_count, 4)
+        self.assertEqual(ctx.deps.tool_discovery.candidate_count, 6)
         self.assertGreater(
             ctx.deps.tool_discovery.estimated_saved_schema_tokens,
             0,
@@ -500,10 +520,16 @@ class ToolDiscoveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("用户原始语言和简洁英文能力描述", instruction_text)
         self.assertIn("协议名必须原样复制", instruction_text)
 
-    async def test_three_or_fewer_mcp_tools_are_all_direct(self) -> None:
+    async def test_five_or_fewer_mcp_tools_are_all_direct(self) -> None:
         ctx = self._ctx("任意问题")
         small = FunctionToolset(
-            tools=[search_financial_model, list_cube_dimensions]
+            tools=[
+                search_financial_model,
+                list_cube_dimensions,
+                resolve_members,
+                cube_describe,
+                platform_folder_list,
+            ]
         ).prefixed("small")
         wrapper = build_mcp_discovery_toolset(
             [small],
@@ -515,16 +541,20 @@ class ToolDiscoveryTests(unittest.IsolatedAsyncioTestCase):
         tools = await wrapper.get_tools(ctx)
 
         self.assertTrue(all(not item.tool_def.defer_loading for item in tools.values()))
-        self.assertEqual(ctx.deps.tool_discovery.direct_count, 2)
+        self.assertEqual(ctx.deps.tool_discovery.direct_count, MCP_DIRECT_DISCLOSURE_LIMIT)
         self.assertEqual(ctx.deps.tool_discovery.deferred_count, 0)
 
     async def test_multiple_mcp_servers_share_one_global_preselection_limit(self) -> None:
         ctx = self._ctx("搜索维度成员并更新配置")
         finance = FunctionToolset(
-            tools=[search_financial_model, resolve_members]
+            tools=[search_financial_model, resolve_members, cube_query_data]
         ).prefixed("finance")
         catalog = FunctionToolset(
-            tools=[list_cube_dimensions, delete_financial_model]
+            tools=[
+                list_cube_dimensions,
+                delete_financial_model,
+                refresh_financial_model_cache,
+            ]
         ).prefixed("catalog")
         wrapper = build_mcp_discovery_toolset(
             [finance, catalog],
@@ -584,7 +614,13 @@ class ToolDiscoveryTests(unittest.IsolatedAsyncioTestCase):
             return ModelResponse(parts=[TextPart(content="done")])
 
         small = FunctionToolset(
-            tools=[search_financial_model, list_cube_dimensions]
+            tools=[
+                search_financial_model,
+                list_cube_dimensions,
+                resolve_members,
+                cube_describe,
+                platform_folder_list,
+            ]
         ).prefixed("small")
         wrapper = build_mcp_discovery_toolset(
             [small],
@@ -609,7 +645,16 @@ class ToolDiscoveryTests(unittest.IsolatedAsyncioTestCase):
             deps=AgentDeps(session_id="session", agent_id="agent"),
         )
 
-        self.assertEqual(set(seen), {"small_search_financial_model", "small_list_cube_dimensions"})
+        self.assertEqual(
+            set(seen),
+            {
+                "small_search_financial_model",
+                "small_list_cube_dimensions",
+                "small_resolve_members",
+                "small_cube_describe",
+                "small_platform_folder_list",
+            },
+        )
 
     async def test_search_callback_returns_at_most_five_and_updates_telemetry(self) -> None:
         ctx = self._ctx("")
@@ -838,6 +883,8 @@ class ToolDiscoveryTests(unittest.IsolatedAsyncioTestCase):
                 search_financial_model,
                 list_cube_dimensions,
                 resolve_members,
+                cube_describe,
+                platform_folder_list,
             ]
         ).prefixed("deepfos")
         wrapper = build_mcp_discovery_toolset(

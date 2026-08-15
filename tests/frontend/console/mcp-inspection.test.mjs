@@ -73,12 +73,12 @@ test("小型 MCP 直接披露全部工具", () => {
   const view = ui.inspectionView(
     {
       status: "healthy",
-      tools: { count: 2, snapshot_status: "ready" },
+      tools: { count: 5, snapshot_status: "ready" },
       resources: { count: 0, template_count: 0 },
     },
     "url",
   );
-  assert.equal(view.summary, "工具快照可用 · 2 工具 · 全部直接披露 · 0 资源 · 0 模板");
+  assert.equal(view.summary, "工具快照可用 · 5 工具 · 全部直接披露 · 0 资源 · 0 模板");
 });
 
 test("URL MCP 明确展示缺失、失效和沿用快照状态", () => {

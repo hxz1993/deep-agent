@@ -92,6 +92,37 @@ class SystemToolCatalogTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(mcp_codes, ["mcp:deepcube"])
         self.assertNotIn(retired_code, mcp_codes)
 
+    async def test_five_tool_mcp_is_reported_as_direct_disclosure(self) -> None:
+        row = SimpleNamespace(
+            name="small_docs",
+            transport="url",
+            inspection={
+                "status": "healthy",
+                "tools": {
+                    "status": "supported",
+                    "count": 5,
+                    "snapshot_status": "ready",
+                },
+            },
+            description="Small documentation MCP",
+            enabled=True,
+        )
+        ctx = SimpleNamespace(
+            registry=build_registry(),
+            stores=SimpleNamespace(
+                mcp=SimpleNamespace(list_all=AsyncMock(return_value=[row])),
+                ui_tool=SimpleNamespace(list_all=AsyncMock(return_value=[])),
+                ui_tool_package=SimpleNamespace(list_all=AsyncMock(return_value=[])),
+            ),
+        )
+
+        packages = await list_tool_packages(ctx)
+        package = next(item for item in packages if item.code == "mcp:small_docs")
+
+        self.assertEqual(package.disclosure_mode, "direct")
+        self.assertIsNone(package.preselect_limit)
+        self.assertIsNone(package.search_result_limit)
+
 
 if __name__ == "__main__":
     unittest.main()

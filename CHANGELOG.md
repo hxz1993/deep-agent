@@ -3,6 +3,13 @@
 本文件记录 DeepAgent 的产品版本变化，按新版本到旧版本排列。当前代码版本以
 `deep_agent.__version__` 为准；数据库结构版本以 Alembic head 为准，两者互不替代。
 
+## v0.4.9
+
+- 将MCP小目录直接披露上限从3个调整为5个：全局候选不超过5个时全部向模型提供完整Schema，
+  不再额外注入`search_tools`；超过5个时仍保持首轮预选Top 3、主动搜索Top 5。
+- 将“直接披露上限”和“预选数量”拆为独立常量，并同步工具包API与Console文案；权限、工具协议名、
+  MCP快照、延迟连接和Alembic `006`均不变化。
+
 ## v0.4.8
 
 - 将运行时固定升级到`pydantic-ai-slim 2.31.0`与`pydantic-ai-harness 0.21.0`，继续固定

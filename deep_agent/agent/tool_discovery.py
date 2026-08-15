@@ -31,6 +31,7 @@ from deep_agent.search import (
     tokenize,
 )
 
+MCP_DIRECT_DISCLOSURE_LIMIT = 5
 MCP_PRESELECT_LIMIT = 3
 MCP_SEARCH_RESULT_LIMIT = 5
 MCP_SEARCH_QUERY_LIMIT = 3
@@ -424,7 +425,7 @@ class McpDiscoveryToolset(WrapperToolset[AgentDeps]):
                 server_names=self.server_names,
             )
             documents = all_documents
-            if len(definitions) <= MCP_PRESELECT_LIMIT:
+            if len(definitions) <= MCP_DIRECT_DISCLOSURE_LIMIT:
                 selected = [tool.name for tool in definitions]
             else:
                 selected = rank_tool_documents(

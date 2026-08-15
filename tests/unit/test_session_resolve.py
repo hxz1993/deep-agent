@@ -16,11 +16,18 @@ class SessionResolveTests(unittest.IsolatedAsyncioTestCase):
     async def asyncTearDown(self) -> None:
         await self._engine.dispose()
 
-    async def _seed(self, session_id: str, *, agent_id: str | None = None) -> None:
+    async def _seed(
+        self,
+        session_id: str,
+        *,
+        agent_id: str | None = None,
+        user_id: str | None = None,
+    ) -> None:
         await self.store.append(
             session_id,
             [ModelRequest(parts=[UserPromptPart(content="hi")])],
             agent_id=agent_id,
+            user_id=user_id,
         )
 
     async def test_resolve_storage_ref_directly(self) -> None:
@@ -41,6 +48,25 @@ class SessionResolveTests(unittest.IsolatedAsyncioTestCase):
     async def test_resolve_unknown_returns_none(self) -> None:
         resolved = await resolve_session(self.store, "missing", agent_id="agent-a")
         self.assertIsNone(resolved)
+
+    async def test_resolve_filters_by_owner(self) -> None:
+        await self._seed("owned", user_id="user-a")
+        self.assertEqual(
+            await resolve_session(self.store, "owned", user_id="user-a"),
+            ("", "owned"),
+        )
+        self.assertIsNone(await resolve_session(self.store, "owned", user_id="user-b"))
+
+    async def test_null_owner_is_not_visible_to_authenticated_user(self) -> None:
+        await self._seed("legacy-null")
+        self.assertIsNone(
+            await resolve_session(self.store, "legacy-null", user_id="user-a")
+        )
+
+    async def test_existing_session_owner_cannot_be_reassigned(self) -> None:
+        await self._seed("owned", user_id="user-a")
+        with self.assertRaises(PermissionError):
+            await self._seed("owned", user_id="user-b")
 
     async def test_resolve_ambiguous_without_agent_returns_none(self) -> None:
         await self._seed("sess-1", agent_id="agent-a")

@@ -2,26 +2,42 @@ from __future__ import annotations
 
 import json
 import tempfile
-from contextlib import contextmanager
+from collections.abc import AsyncIterator, Iterator
+from contextlib import asynccontextmanager, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 from unittest.mock import patch
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from httpx import ASGITransport, AsyncClient
 from pydantic_ai.models.test import TestModel
 
 from deep_agent.api.v1 import api_router
 from deep_agent.capabilities import build_registry
 from deep_agent.capabilities.mcp.lease_manager import McpLeaseManager
-from deep_agent.core.context import AppContext, init_context, reset_context
+from deep_agent.core.context import AppContext, get_context, init_context, reset_context
 from deep_agent.db.stores.bundle import DataStores
 from deep_agent.schemas.mcp import McpServerCreate
-from tests.helpers.sqlite_stores import make_sqlite_stores_sync
+from tests.helpers.sqlite_stores import ensure_title_uses_main_model, make_sqlite_stores, make_sqlite_stores_sync
+from tests.helpers.request_identity import install_test_user_header
 from tests.integration.helpers.mcp import streamable_http_echo_server
 
 ECHO_TOOL_NAME = "echo_echo_request_headers"
+
+
+async def aclose_test_context(*, engine: Any | None = None) -> None:
+    try:
+        ctx = get_context()
+    except RuntimeError:
+        reset_context()
+    else:
+        await ctx.mcp_lease_manager.close_all()
+        await ctx.event_persister.aclose()
+        reset_context()
+    if engine is not None:
+        await engine.dispose()
 
 
 def parse_sse_events(raw: str) -> list[dict]:
@@ -74,11 +90,22 @@ class _McpRow:
     enabled: bool = True
 
 
-def echo_mcp_row(url: str) -> _McpRow:
+def echo_mcp_row(
+    url: str,
+    *,
+    request_context_mode: str = "inherit",
+    static_headers: dict[str, str] | None = None,
+) -> _McpRow:
+    config: dict[str, Any] = {
+        "url": url,
+        "request_context": {"mode": request_context_mode},
+    }
+    if static_headers:
+        config["headers"] = static_headers
     return _McpRow(
         name="echo",
         transport="url",
-        config={"url": url},
+        config=config,
         description="Test MCP header echo server.",
     )
 
@@ -96,6 +123,17 @@ async def _seed_mcp_rows(stores: DataStores, rows: list[_McpRow]) -> None:
         )
 
 
+async def testing_data_stores_async(
+    *,
+    mcp_rows: list[_McpRow] | None = None,
+) -> tuple[DataStores, Any, Any]:
+    rows = [] if mcp_rows is None else mcp_rows
+    stores, engine, session_factory = await make_sqlite_stores()
+    if rows:
+        await _seed_mcp_rows(stores, rows)
+    return stores, engine, session_factory
+
+
 def testing_data_stores(
     *,
     mcp_rows: list[_McpRow] | None = None,
@@ -109,23 +147,14 @@ def testing_data_stores(
     return stores, engine, session_factory
 
 
-def create_test_app(*, mcp_url: str) -> FastAPI:
-    """Build a minimal FastAPI app without production lifespan/DB side effects."""
-    test_app = FastAPI()
-    test_app.include_router(api_router)
-    configure_test_app(test_app, mcp_url=mcp_url)
-    return test_app
-
-
-def configure_test_app(
-    app: FastAPI,
+def _build_test_context(
     *,
     mcp_url: str,
     stores: DataStores | None = None,
     db_engine: Any | None = None,
     db_session_factory: Any | None = None,
 ) -> AppContext:
-    """Attach sqlite-backed dependencies and MCP rows resolved at use time."""
+    """Create AppContext for integration tests (without async store seeding)."""
     if stores is None:
         stores, db_engine, db_session_factory = testing_data_stores(mcp_rows=[echo_mcp_row(mcp_url)])
     ctx = AppContext.for_testing(
@@ -139,12 +168,105 @@ def configure_test_app(
     return ctx
 
 
+def configure_test_app(
+    app: FastAPI,
+    *,
+    mcp_url: str,
+    stores: DataStores | None = None,
+    db_engine: Any | None = None,
+    db_session_factory: Any | None = None,
+) -> AppContext:
+    """Attach sqlite-backed dependencies and MCP rows resolved at use time."""
+    install_test_user_header(app)
+    ctx = _build_test_context(
+        mcp_url=mcp_url,
+        stores=stores,
+        db_engine=db_engine,
+        db_session_factory=db_session_factory,
+    )
+    import asyncio
+
+    asyncio.run(ensure_title_uses_main_model(ctx.stores))
+    return ctx
+
+
+async def configure_test_app_async(
+    app: FastAPI,
+    *,
+    mcp_url: str,
+    stores: DataStores | None = None,
+    db_engine: Any | None = None,
+    db_session_factory: Any | None = None,
+) -> AppContext:
+    """Async variant for callers already inside a running event loop."""
+    install_test_user_header(app)
+    ctx = _build_test_context(
+        mcp_url=mcp_url,
+        stores=stores,
+        db_engine=db_engine,
+        db_session_factory=db_session_factory,
+    )
+    await ensure_title_uses_main_model(ctx.stores)
+    return ctx
+
+
+@asynccontextmanager
+async def async_echo_chat_app(
+    *,
+    record_path: Path | None = None,
+) -> AsyncIterator[tuple[FastAPI, Path]]:
+    """Async variant of echo_chat_app for IsolatedAsyncioTestCase."""
+    record_file = record_path or Path(tempfile.mkstemp(suffix=".json")[1])
+    db_engine: Any | None = None
+    with streamable_http_echo_server(record_path=record_file) as mcp_url:
+        app = FastAPI()
+        app.include_router(api_router)
+        stores, db_engine, db_session_factory = await testing_data_stores_async(
+            mcp_rows=[echo_mcp_row(mcp_url)],
+        )
+        await configure_test_app_async(
+            app,
+            mcp_url=mcp_url,
+            stores=stores,
+            db_engine=db_engine,
+            db_session_factory=db_session_factory,
+        )
+        try:
+            yield app, record_file
+        finally:
+            await aclose_test_context(engine=db_engine)
+
+
+async def read_chat_stream(
+    app: FastAPI,
+    *,
+    json_body: dict[str, Any],
+    headers: dict[str, str] | None = None,
+) -> str:
+    """Consume SSE from /chat/stream via AsyncClient (TestClient.stream blocks indefinitely)."""
+    transport = ASGITransport(app=app)
+    with mock_request_disconnect():
+        async with AsyncClient(transport=transport, base_url="http://test", timeout=30.0) as client:
+            async with client.stream(
+                "POST",
+                "/api/v1/chat/stream",
+                json=json_body,
+                headers=headers or {},
+            ) as response:
+                if response.status_code != 200:
+                    body = await response.aread()
+                    raise AssertionError(f"stream failed {response.status_code}: {body!r}")
+                return "".join([chunk async for chunk in response.aiter_text()])
+
+
 @contextmanager
 def test_chat_client(
     *,
     record_path: Path | None = None,
     call_tools: list[str] | None = None,
     stores: DataStores | None = None,
+    request_context_mode: str = "inherit",
+    static_headers: dict[str, str] | None = None,
 ) -> Iterator[tuple[TestClient, Path]]:
     """Yield a TestClient whose agent uses TestModel and the header-echo MCP server."""
     record_file = record_path or Path(tempfile.mkstemp(suffix=".json")[1])
@@ -156,7 +278,15 @@ def test_chat_client(
         app = FastAPI()
         app.include_router(api_router)
         if stores is None:
-            stores, db_engine, db_session_factory = testing_data_stores(mcp_rows=[echo_mcp_row(mcp_url)])
+            stores, db_engine, db_session_factory = testing_data_stores(
+                mcp_rows=[
+                    echo_mcp_row(
+                        mcp_url,
+                        request_context_mode=request_context_mode,
+                        static_headers=static_headers,
+                    )
+                ]
+            )
         else:
             db_engine = None
             db_session_factory = None

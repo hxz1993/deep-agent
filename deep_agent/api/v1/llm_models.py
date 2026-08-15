@@ -1,13 +1,32 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+import asyncio
+from typing import Literal
 
-from deep_agent.db.deps import get_llm_model_store
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+
+from deep_agent.agent.models.catalog import (
+    CatalogValidationError,
+    build_catalog_page,
+    normalize_models_dev_bundle,
+)
+from deep_agent.agent.models.models_dev import ModelsDevFetchError, fetch_models_dev_bundle
+from deep_agent.db.deps import get_llm_model_store, get_model_catalog_store
 from deep_agent.db.ids import normalize_agent_id
-from deep_agent.db.stores.llm_model import LlmModelStoreBase
+from deep_agent.db.stores.llm_model import (
+    LlmModelConflictError,
+    LlmModelStoreBase,
+    LlmModelValidationError,
+)
+from deep_agent.db.stores.model_catalog import ModelCatalogStoreBase
 from deep_agent.schemas.llm_model import LlmModelCreate, LlmModelResponse, LlmModelUpdate
+from deep_agent.schemas.model_catalog import (
+    ModelCatalogRefreshResponse,
+    ModelCatalogResponse,
+)
 
 router = APIRouter()
+_catalog_refresh_lock = asyncio.Lock()
 
 
 def _parse_model_id(model_id: str) -> str:
@@ -28,6 +47,77 @@ async def list_llm_models(
 ) -> list[LlmModelResponse]:
     rows = await store.list_all()
     return [await _response_for_row(store, row) for row in rows]
+
+
+@router.get("/llm-models/catalog", response_model=ModelCatalogResponse)
+async def list_model_catalog(
+    view: Literal["model", "provider"] = Query("model"),
+    q: str | None = Query(None, description="Search Lab, model, or Provider."),
+    lab_id: str | None = Query(None, description="Filter by Lab id."),
+    provider_id: str | None = Query(None, description="Filter by Provider id."),
+    modality: str | None = Query(None, description="Filter by input modality."),
+    offset: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
+    catalog_store: ModelCatalogStoreBase = Depends(get_model_catalog_store),
+    llm_store: LlmModelStoreBase = Depends(get_llm_model_store),
+) -> ModelCatalogResponse:
+    rows = await catalog_store.list_all()
+    llm_models = await llm_store.list_all()
+    return ModelCatalogResponse.model_validate(
+        build_catalog_page(
+            rows,
+            llm_models,
+            view=view,
+            q=q,
+            lab_id=lab_id,
+            provider_id=provider_id,
+            modality=modality,
+            offset=offset,
+            limit=limit,
+        )
+    )
+
+
+@router.post(
+    "/llm-models/catalog/refresh",
+    response_model=ModelCatalogRefreshResponse,
+)
+async def refresh_model_catalog(
+    catalog_store: ModelCatalogStoreBase = Depends(get_model_catalog_store),
+) -> ModelCatalogRefreshResponse:
+    if _catalog_refresh_lock.locked():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="模型目录正在更新，请稍后重试",
+        )
+
+    async with _catalog_refresh_lock:
+        try:
+            bundle = await fetch_models_dev_bundle()
+            rows, stats = normalize_models_dev_bundle(
+                bundle.models,
+                bundle.providers,
+                bundle.labs,
+            )
+            await catalog_store.replace_all(rows)
+        except ModelsDevFetchError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=str(exc),
+            ) from exc
+        except CatalogValidationError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"models.dev 目录校验失败：{exc}",
+            ) from exc
+
+    return ModelCatalogRefreshResponse(
+        rows=stats.row_count,
+        models=stats.model_count,
+        providers=stats.provider_count,
+        labs=stats.lab_count,
+        refreshed_at=stats.refreshed_at,
+    )
 
 
 @router.get("/llm-models/{model_id}", response_model=LlmModelResponse)
@@ -52,7 +142,7 @@ async def create_llm_model(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"LLM model already exists: {body.name}")
     try:
         row = await store.create_unique(body)
-    except ValueError as exc:
+    except LlmModelConflictError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     return await _response_for_row(store, row)
 
@@ -66,8 +156,13 @@ async def update_llm_model(
     normalized_id = _parse_model_id(model_id)
     try:
         row = await store.update_unique(normalized_id, body)
-    except ValueError as exc:
+    except LlmModelConflictError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except LlmModelValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"LLM model not found: {model_id}")
     return await _response_for_row(store, row)

@@ -38,7 +38,7 @@ class RepairUnprocessedToolCallsTests(unittest.TestCase):
             ModelResponse(
                 parts=[
                     ToolCallPart(
-                        tool_name="confirm_action",
+                        tool_name="builtin__confirm",
                         args={"message": "go?"},
                         tool_call_id="call-1",
                     )
@@ -68,6 +68,71 @@ class RepairUnprocessedToolCallsTests(unittest.TestCase):
         self.assertEqual(len(repaired), 2)
         self.assertIsInstance(repaired[-1], ModelRequest)
         self.assertEqual(len(repaired[-1].parts), 2)
+
+    def test_inserts_denied_before_later_assistant_response(self) -> None:
+        """Regression: back-to-back assistant tool_calls without an intervening return."""
+        messages = [
+            ModelResponse(
+                parts=[
+                    ToolCallPart(
+                        tool_name="deepcube_read",
+                        args={},
+                        tool_call_id="call_z",
+                    )
+                ]
+            ),
+            ModelResponse(
+                parts=[
+                    ToolCallPart(
+                        tool_name="deepcube_read",
+                        args={},
+                        tool_call_id="call_csv",
+                    )
+                ]
+            ),
+            ModelRequest(
+                parts=[
+                    ToolReturnPart(
+                        tool_name="deepcube_read",
+                        content="ok",
+                        tool_call_id="call_csv",
+                    )
+                ]
+            ),
+            ModelResponse(parts=[]),
+        ]
+        repaired = repair_unprocessed_tool_calls(messages)
+        self.assertEqual(len(repaired), 5)
+        denied = repaired[1]
+        self.assertIsInstance(denied, ModelRequest)
+        assert isinstance(denied, ModelRequest)
+        self.assertEqual(len(denied.parts), 1)
+        part = denied.parts[0]
+        assert isinstance(part, ToolReturnPart)
+        self.assertEqual(part.tool_call_id, "call_z")
+        self.assertIsInstance(part.content, ToolDenied)
+
+    def test_inserts_denied_before_user_turn(self) -> None:
+        messages = [
+            ModelResponse(
+                parts=[
+                    ToolCallPart(
+                        tool_name="builtin__confirm",
+                        args={},
+                        tool_call_id="call-1",
+                    )
+                ]
+            ),
+            ModelRequest(parts=[UserPromptPart(content="new question")]),
+        ]
+        repaired = repair_unprocessed_tool_calls(messages)
+        self.assertEqual(len(repaired), 3)
+        self.assertIsInstance(repaired[1], ModelRequest)
+        denied_part = repaired[1].parts[0]
+        assert isinstance(denied_part, ToolReturnPart)
+        self.assertEqual(denied_part.tool_call_id, "call-1")
+        self.assertIsInstance(repaired[2], ModelRequest)
+        self.assertIsInstance(repaired[2].parts[0], UserPromptPart)
 
 
 if __name__ == "__main__":

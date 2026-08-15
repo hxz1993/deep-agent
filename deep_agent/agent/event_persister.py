@@ -8,7 +8,7 @@ from typing import Any, Literal
 from loguru import logger
 from pydantic_ai.messages import ModelMessage, ModelRequest
 
-from deep_agent.agent.history import incremental_append_messages
+from deep_agent.agent.history import incremental_append_messages, repair_unprocessed_tool_calls
 from deep_agent.agent.stream_accumulator import StreamAccumulator
 from deep_agent.db.conversation import SessionStore
 from deep_agent.db.session_scope import runtime_session_key
@@ -33,6 +33,7 @@ class PersistEvent:
     accumulator: StreamAccumulator | None = None
     result_messages: list[ModelMessage] | None = None
     include_tool_calls: bool = True
+    repair_dangling_tool_calls: bool = True
 
 
 class EventPersister:
@@ -79,9 +80,29 @@ class EventPersister:
         q = self._queues.get(key)
         if q is None:
             return
+        worker = self._workers.get(key)
+        if worker is None:
+            return
         done = asyncio.Event()
         q.put_nowait(_FlushMarker(done))
-        await asyncio.wait_for(done.wait(), timeout=timeout)
+        marker_waiter = asyncio.create_task(done.wait())
+        try:
+            completed, _ = await asyncio.wait(
+                {marker_waiter, worker},
+                timeout=timeout,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if not completed:
+                raise TimeoutError
+            if worker in completed:
+                await worker
+            else:
+                await marker_waiter
+        finally:
+            if not marker_waiter.done():
+                marker_waiter.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await marker_waiter
 
     async def aclose(self) -> None:
         self._closed = True
@@ -163,6 +184,8 @@ class EventPersister:
                 messages,
                 skip_user_prompt=ev.skip_user_prompt,
             )
+            if ev.repair_dangling_tool_calls:
+                to_append = repair_unprocessed_tool_calls(to_append)
             if to_append:
                 await self._store.append(
                     session_id,
@@ -185,6 +208,8 @@ class EventPersister:
                 )
             else:
                 to_append = []
+            if ev.repair_dangling_tool_calls:
+                to_append = repair_unprocessed_tool_calls(to_append)
             if to_append:
                 await self._store.append(
                     session_id,

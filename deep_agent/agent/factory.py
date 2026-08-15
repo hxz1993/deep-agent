@@ -5,22 +5,27 @@ from typing import Any
 import httpx
 from loguru import logger
 from pydantic_ai import Agent
+from pydantic_ai.capabilities import AbstractCapability
 from pydantic_ai.models import DEFAULT_HTTP_TIMEOUT, Model, get_user_agent, parse_model_id
+from pydantic_ai.models.anthropic import AnthropicModel
 from pydantic_ai.models.google import GoogleModel
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers import infer_provider_class
+from pydantic_ai.providers.anthropic import AnthropicProvider
 from pydantic_ai.providers.deepseek import DeepSeekProvider
 from pydantic_ai.providers.google import GoogleProvider
 from pydantic_ai.providers.openai import OpenAIProvider
 
-from deep_agent.agent.capabilities import DeepSeekThinkingRetry
 from deep_agent.agent.deps import AgentDeps
-from deep_agent.agent.models import DeepSeekChatModel
+from deep_agent.agent.context_references import context_reference_instructions
+from deep_agent.agent.models import DeepSeekChatModel, OpenAICompatibleVideoChatModel
+from deep_agent.agent.models.deepseek_thinking_retry import DeepSeekThinkingRetry
 from deep_agent.agent.spec import AgentSpec
-from deep_agent.capabilities.registry import CapabilityRegistry
+from deep_agent.capabilities.registry import ToolPackage, ToolPackageRegistry
 from deep_agent.options import OPTION
 
 _OPENAI_PREFIXES = {"openai", "openai-chat"}
+_ANTHROPIC_PREFIXES = {"anthropic"}
 
 
 def _model_provider_prefix(model: str) -> str | None:
@@ -44,7 +49,17 @@ def _normalize_url(url: str | None) -> str | None:
 
 def _resolve_openai_compatible(spec: AgentSpec, model_name: str) -> Model:
     provider = OpenAIProvider(base_url=spec.base_url, api_key=spec.api_key)
+    if "video" in (spec.input_modalities or []) or "video_url" in (spec.tags or []):
+        return OpenAICompatibleVideoChatModel(model_name, provider=provider)
     return OpenAIChatModel(model_name, provider=provider)
+
+
+def _resolve_anthropic(spec: AgentSpec, model_name: str) -> AnthropicModel:
+    provider = AnthropicProvider(
+        api_key=spec.api_key or None,
+        base_url=_normalize_url(spec.base_url),
+    )
+    return AnthropicModel(model_name, provider=provider)
 
 
 def _gemini_http_client(proxy: str) -> httpx.AsyncClient:
@@ -67,7 +82,7 @@ def _resolve_google(spec: AgentSpec, model_name: str) -> GoogleModel:
     return GoogleModel(model_name, provider=provider)
 
 
-def _resolve_model(spec: AgentSpec) -> str | Model:
+def resolve_model(spec: AgentSpec) -> str | Model:
     """Turn the spec's model string into a model for Pydantic AI.
 
     For ``provider:model`` strings, the provider class comes from
@@ -86,10 +101,25 @@ def _resolve_model(spec: AgentSpec) -> str | Model:
             return _resolve_openai_compatible(spec, spec.model)
         return spec.model
 
-    provider_class = infer_provider_class(provider_name)
+    model_name = _model_name_without_prefix(spec.model)
+    if provider_name in _OPENAI_PREFIXES:
+        if not spec.api_key and not spec.base_url:
+            return spec.model
+        return _resolve_openai_compatible(spec, model_name)
+    if provider_name in _ANTHROPIC_PREFIXES:
+        if not spec.api_key and not spec.base_url:
+            return spec.model
+        return _resolve_anthropic(spec, model_name)
+
+    try:
+        provider_class = infer_provider_class(provider_name)
+    except Exception:
+        if spec.base_url:
+            return _resolve_openai_compatible(spec, model_name)
+        raise
 
     if provider_class is GoogleProvider:
-        return _resolve_google(spec, _model_name_without_prefix(spec.model))
+        return _resolve_google(spec, model_name)
 
     if provider_class is DeepSeekProvider:
         provider = DeepSeekProvider(api_key=spec.api_key)
@@ -97,64 +127,56 @@ def _resolve_model(spec: AgentSpec) -> str | Model:
             not spec.base_url
             or _normalize_url(spec.base_url) == _normalize_url(provider.base_url)
         ):
-            model_name = _model_name_without_prefix(spec.model)
             profile = DeepSeekProvider.model_profile(model_name)
             logger.debug("Resolving {} with DeepSeekChatModel", spec.model)
             return DeepSeekChatModel(model_name, provider=provider, profile=profile)
 
     if spec.base_url:
-        prefix, sep, rest = spec.model.partition(":")
-        model_name = rest if sep and prefix in _OPENAI_PREFIXES else _model_name_without_prefix(spec.model)
         return _resolve_openai_compatible(spec, model_name)
 
     return spec.model
 
 
-def _toolset_id(toolset: Any) -> str | None:
-    toolset_id = getattr(toolset, "id", None)
-    if toolset_id is not None:
-        return str(toolset_id)
-    wrapped = getattr(toolset, "wrapped", None)
-    if wrapped is not None:
-        return _toolset_id(wrapped)
-    return None
+# Backward-compatible internal seam used by the title path and existing tests.
+# New code may import the public ``resolve_model`` name.
+_resolve_model = resolve_model
 
 
 def _toolsets_for_spec(
-    registry: CapabilityRegistry,
+    registry: ToolPackageRegistry,
     spec: AgentSpec,
     *,
     mcp_toolsets: list[Any] | None = None,
-    dynamic_ui_toolset: Any | None = None,
+    dynamic_ui_packages: list[ToolPackage] | None = None,
+    mcp_resource_toolset: Any | None = None,
 ) -> list[Any]:
-    """Resolve capability toolsets and include UI tools for HITL."""
+    """Resolve selected product tool packages into Pydantic AI toolsets."""
     toolsets = list(registry.toolsets(spec.capabilities))
     if mcp_toolsets:
         toolsets.extend(mcp_toolsets)
+    if mcp_resource_toolset is not None:
+        toolsets.append(mcp_resource_toolset)
 
-    if dynamic_ui_toolset is not None:
-        toolsets = [toolset for toolset in toolsets if _toolset_id(toolset) != "ui"]
-        toolsets.append(dynamic_ui_toolset)
-        return toolsets
-
-    if spec.capabilities is not None and "ui" not in spec.capabilities and "ui" in registry.names():
-        toolsets.append(registry.get("ui").toolset)
+    if dynamic_ui_packages:
+        toolsets.extend(package.toolset for package in dynamic_ui_packages)
     return toolsets
 
 
 def build_agent(
     spec: AgentSpec,
-    registry: CapabilityRegistry,
+    registry: ToolPackageRegistry,
     *,
     request_retries: int = 2,
     mcp_toolsets: list[Any] | None = None,
-    dynamic_ui_toolset: Any | None = None,
+    dynamic_ui_packages: list[ToolPackage] | None = None,
+    mcp_resource_toolset: Any | None = None,
+    context_compaction: AbstractCapability[AgentDeps] | None = None,
 ) -> Agent[AgentDeps, str]:
-    """Construct a Pydantic AI agent from a spec + the capability registry.
+    """Construct a Pydantic AI agent from a spec + the tool package registry.
 
     The model string (e.g. "openai:gpt-4o") selects the provider, so switching
     providers needs only a config change. Set ``base_url``/``api_key`` on the
-    spec to target an OpenAI-compatible endpoint. Capability instructions ride
+    spec to target an OpenAI-compatible endpoint. Tool-package instructions ride
     along with their toolsets and are injected automatically when enabled.
     """
     model = _resolve_model(spec)
@@ -162,14 +184,23 @@ def build_agent(
         registry,
         spec,
         mcp_toolsets=mcp_toolsets,
-        dynamic_ui_toolset=dynamic_ui_toolset,
+        dynamic_ui_packages=dynamic_ui_packages,
+        mcp_resource_toolset=mcp_resource_toolset,
     )
-    capabilities = [DeepSeekThinkingRetry()] if isinstance(model, DeepSeekChatModel) else None
+    capabilities: list[AbstractCapability[AgentDeps]] = []
+    if isinstance(model, DeepSeekChatModel):
+        capabilities.append(DeepSeekThinkingRetry())
+    if context_compaction is not None:
+        capabilities.append(context_compaction)
+    instructions: list[Any] = []
+    if spec.instructions:
+        instructions.append(spec.instructions)
+    instructions.append(context_reference_instructions)
     return Agent(
         model,
         deps_type=AgentDeps,
-        instructions=spec.instructions,
+        instructions=instructions,
         toolsets=toolsets,
-        capabilities=capabilities,
+        capabilities=capabilities or None,
         retries=request_retries,
     )

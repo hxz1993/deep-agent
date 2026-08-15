@@ -21,6 +21,10 @@ class _DeepSeekMapModelResponseContext(OpenAIChatModel._MapModelResponseContext)
     """Map assistant history for DeepSeek while satisfying Chat Completions validation."""
 
     def _into_message_param(self) -> chat.ChatCompletionAssistantMessageParam | None:
+        fallback = _thinking_fallback_content(self.thinkings)
+        if fallback is not None and not self.texts and not self.tool_calls:
+            self.texts.append(fallback)
+
         message_param = super()._into_message_param()
         if message_param is None:
             return None
@@ -29,7 +33,6 @@ class _DeepSeekMapModelResponseContext(OpenAIChatModel._MapModelResponseContext)
         if message_param.get("content"):
             return message_param
 
-        fallback = _thinking_fallback_content(self.thinkings)
         if fallback is not None:
             message_param["content"] = fallback
         return message_param

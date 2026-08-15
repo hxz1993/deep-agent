@@ -26,7 +26,7 @@ class StreamAccumulatorTests(unittest.TestCase):
         acc.ingest(
             {
                 "type": "tool_call",
-                "tool": "confirm_action",
+                "tool": "builtin__confirm",
                 "args": {},
                 "tool_call_id": "c1",
             }
@@ -39,7 +39,7 @@ class StreamAccumulatorTests(unittest.TestCase):
         acc.ingest(
             {
                 "type": "tool_call",
-                "tool": "confirm_action",
+                "tool": "builtin__confirm",
                 "args": {},
                 "tool_call_id": "c1",
             }
@@ -47,7 +47,7 @@ class StreamAccumulatorTests(unittest.TestCase):
         acc.ingest(
             {
                 "type": "tool_call",
-                "tool": "confirm_action",
+                "tool": "builtin__confirm",
                 "args": {"message": "ok?"},
                 "tool_call_id": "c1",
             }
@@ -63,7 +63,7 @@ class StreamAccumulatorTests(unittest.TestCase):
         acc.ingest(
             {
                 "type": "tool_call",
-                "tool": "confirm_action",
+                "tool": "builtin__confirm",
                 "args": {"message": "allow?"},
                 "tool_call_id": "c1",
             }
@@ -71,7 +71,7 @@ class StreamAccumulatorTests(unittest.TestCase):
         acc.ingest(
             {
                 "type": "tool_result",
-                "tool": "confirm_action",
+                "tool": "builtin__confirm",
                 "result": {"confirmed": True},
                 "tool_call_id": "c1",
             }

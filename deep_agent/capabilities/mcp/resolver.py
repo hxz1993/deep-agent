@@ -3,79 +3,54 @@ from __future__ import annotations
 from typing import Any
 
 from deep_agent.agent.spec import AgentSpec
-from deep_agent.capabilities.mcp.builtin import load_builtin_mcp_capabilities
-from deep_agent.capabilities.mcp.db_loader import capabilities_from_rows
-from deep_agent.capabilities.registry import Capability
+from deep_agent.capabilities.mcp.builtin import load_builtin_mcp_tool_packages
+from deep_agent.capabilities.mcp.db_loader import tool_packages_from_rows
+from deep_agent.capabilities.registry import ToolPackage, describe_tool_package
 from deep_agent.core.paths import DEEP_AGENT_ROOT
 from deep_agent.db.models import McpServer
 from deep_agent.db.stores.bundle import DataStores
 
 
-def _describe_capability(cap: Capability) -> dict[str, Any]:
-    return {
-        "name": cap.name,
-        "kind": cap.kind,
-        "description": cap.description,
-        "default_enabled": cap.default_enabled,
-        "tools": [{"name": t.name, "description": t.description} for t in cap.tools],
-    }
-
-
-def effective_mcp_capability_names(spec: AgentSpec, caps: list[Capability]) -> set[str]:
+def effective_mcp_capability_names(spec: AgentSpec, packages: list[ToolPackage]) -> set[str]:
     """Short MCP server names (no ``mcp:`` prefix) selected for ``spec``."""
     return {
-        cap.name.removeprefix("mcp:")
-        for cap in select_mcp_capabilities(caps, spec)
-        if cap.name.startswith("mcp:")
+        package.code.removeprefix("mcp:")
+        for package in select_mcp_tool_packages(packages, spec)
+        if package.code.startswith("mcp:")
     }
-
-
-def effective_mcp_names_for_ui(spec: AgentSpec, caps: list[Capability], rows: list[McpServer]) -> set[str]:
-    """MCP names used for UI tool visibility (scoped when capabilities are explicit)."""
-    if spec.capabilities is not None:
-        return effective_mcp_capability_names(spec, caps)
-    return {row.name for row in rows if row.enabled}
-
-
-def effective_mcp_rows_for_discovery(spec: AgentSpec, rows: list[McpServer]) -> list[McpServer]:
-    """DB rows eligible for on-demand UI discovery for this agent."""
-    from deep_agent.capabilities.mcp.ui_discovery import non_builtin_mcp_names_for_spec
-
-    names = non_builtin_mcp_names_for_spec(spec.capabilities)
-    if not names:
-        return []
-    return [row for row in rows if row.enabled and row.name in names]
 
 
 async def load_mcp_rows(stores: DataStores) -> list[McpServer]:
     return await stores.mcp.list_all()
 
 
-async def load_mcp_capabilities(
+async def load_mcp_tool_packages(
     stores: DataStores,
     *,
     rows: list[McpServer] | None = None,
-) -> list[Capability]:
+) -> list[ToolPackage]:
     """Load enabled MCP servers from the database with builtin fallback."""
     if rows is None:
         rows = await stores.mcp.list_all()
-    caps = capabilities_from_rows(rows)
+    packages = tool_packages_from_rows(rows)
 
     db_names = {row.name for row in rows if row.enabled}
     mcps_dir = DEEP_AGENT_ROOT / "mcps"
-    for builtin in load_builtin_mcp_capabilities(str(mcps_dir)):
-        short_name = builtin.name.removeprefix("mcp:")
+    for builtin in load_builtin_mcp_tool_packages(str(mcps_dir)):
+        short_name = builtin.code.removeprefix("mcp:")
         if short_name not in db_names:
-            caps.append(builtin)
+            packages.append(builtin)
 
-    return caps
+    return packages
 
 
-def select_mcp_capabilities(caps: list[Capability], spec: AgentSpec) -> list[Capability]:
-    """Mirror ``CapabilityRegistry.toolsets`` selection semantics for MCP caps."""
+def select_mcp_tool_packages(
+    packages: list[ToolPackage], spec: AgentSpec
+) -> list[ToolPackage]:
+    """Mirror ``ToolPackageRegistry.toolsets`` selection semantics for MCP packages."""
     if spec.capabilities is None:
-        return [c for c in caps if c.default_enabled]
-    return [c for c in caps if c.name in spec.capabilities]
+        return [package for package in packages if package.default_enabled]
+    return [package for package in packages if package.code in spec.capabilities]
 
 
 async def resolve_mcp_toolsets(
@@ -84,13 +59,18 @@ async def resolve_mcp_toolsets(
     *,
     mcp_rows: list[McpServer] | None = None,
 ) -> list[Any]:
-    caps = select_mcp_capabilities(await load_mcp_capabilities(stores, rows=mcp_rows), spec)
-    return [c.toolset for c in caps]
+    packages = select_mcp_tool_packages(
+        await load_mcp_tool_packages(stores, rows=mcp_rows), spec
+    )
+    return [package.toolset for package in packages]
 
 
-async def describe_mcp_capabilities(
+async def describe_mcp_tool_packages(
     stores: DataStores,
     *,
     mcp_rows: list[McpServer] | None = None,
 ) -> list[dict[str, Any]]:
-    return [_describe_capability(cap) for cap in await load_mcp_capabilities(stores, rows=mcp_rows)]
+    return [
+        describe_tool_package(package)
+        for package in await load_mcp_tool_packages(stores, rows=mcp_rows)
+    ]

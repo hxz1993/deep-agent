@@ -73,7 +73,9 @@ class SharedRegistryTests(unittest.TestCase):
         self.assertIn("/mcp", url)
         env = captured["env"]
         assert isinstance(env, dict)
-        self.assertEqual(env.get("DEEPCUBE_MCP_TRANSPORT"), "http")
+        args = captured["args"]
+        assert isinstance(args, tuple)
+        self.assertIn("streamable-http", args)
         self.assertEqual(env.get(MCP_SERVER_TTL_ENV), "120.0")
         self.assertTrue(env.get(MCP_REGISTRY_JSON_ENV))
 

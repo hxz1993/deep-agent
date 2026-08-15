@@ -3,9 +3,10 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from deep_agent.schemas.attachment import AttachmentRef
+from deep_agent.schemas.context_reference import ContextReference, validate_context_references
 
 
 class ChatRequest(BaseModel):
@@ -23,7 +24,7 @@ class ChatRequest(BaseModel):
     )
     model_id: str | None = Field(
         default=None,
-        description="Optional LLM model preset id from the database. Ignored when agent_id is set.",
+        description="Optional LLM preset id. With agent_id, overrides the agent default for this request only.",
     )
     temperature: float | None = Field(
         default=None,
@@ -33,9 +34,8 @@ class ChatRequest(BaseModel):
     )
     capabilities: list[str] | None = Field(
         default=None,
-        description="Optional subset of capability names to enable for this run.",
+        description="Optional tool package codes to enable for this run.",
     )
-    user: str | None = Field(default=None, description="Optional user identifier.")
     branch_from: int | None = Field(
         default=None,
         description="branch_point from history; truncates stored messages at this index before run.",
@@ -44,12 +44,24 @@ class ChatRequest(BaseModel):
         default=None,
         description="Uploaded file references from POST /api/v1/uploads.",
     )
+    context_refs: list[ContextReference] | None = Field(
+        default=None,
+        description="Structured page/business context snapshots for this user turn.",
+    )
+
+    @field_validator("context_refs")
+    @classmethod
+    def _validate_context_refs(
+        cls,
+        value: list[ContextReference] | None,
+    ) -> list[ContextReference] | None:
+        return validate_context_references(value)
 
 
 class StreamChatRequest(ChatRequest):
     agent_id: str | None = Field(
         default=None,
-        description="Load agent config from the database. When set, model/model_id/capabilities/temperature are ignored.",
+        description="Load agent config from the database. model_id may override the agent's LLM preset per request.",
     )
     deferred_tool_results: list["DeferredToolResultItem"] | None = Field(
         default=None,
@@ -82,18 +94,31 @@ class ChatResponse(BaseModel):
         default=None,
         description="Pending tool calls when status is pending.",
     )
+    context: dict[str, Any] | None = Field(
+        default=None,
+        description="Read-only context budget and compaction telemetry for this run.",
+    )
 
 
 class ToolDescription(BaseModel):
     name: str
+    display_name: str
     description: str = ""
+    execution_type: str
+    enabled: bool = True
 
 
-class CapabilityDescription(BaseModel):
-    name: str
-    kind: str
+class ToolPackageDescription(BaseModel):
+    code: str
+    category: str
+    label: str | None = None
     description: str = ""
     tools: list[ToolDescription] = Field(default_factory=list)
+    enabled: bool = True
+    default_enabled: bool = False
+    source: str | None = None
+    tool_count: int = 0
+    tool_catalog_status: str = "complete"
 
 
 class SessionInfo(BaseModel):
@@ -102,6 +127,7 @@ class SessionInfo(BaseModel):
     agent_id: str | None = Field(default=None, description="Agent id used for this session.")
     agent_name: str | None = Field(default=None, description="Agent display name (if known).")
     user_prompt: str | None = Field(default=None, description="First user message in the session.")
+    title: str | None = Field(default=None, description="Session title (generated from first user message).")
     created_at: datetime | None = Field(default=None, description="Session creation time (UTC).")
     updated_at: datetime | None = Field(default=None, description="Last conversation activity time (UTC).")
 

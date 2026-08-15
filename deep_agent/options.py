@@ -8,6 +8,12 @@ from deepfos_platform.conf.option import GlobalOptions, Category, Option, Action
 from deepfos_platform.lib.cipher import maybe_decrypt_pwd
 from deepfos_platform.lib.constants import BOOLEAN_STATES
 from deep_agent.core.paths import DEEP_AGENT_ROOT, REPO_ROOT
+from deep_agent.sandbox.profile import (
+    DEFAULT_SANDBOX_PROFILE,
+    ProfileNotFoundError,
+    ProfileValidationError,
+    load_sandbox_profile,
+)
 
 DEFAULT_MCP_FORWARD_HEADERS = frozenset(
     {
@@ -55,11 +61,43 @@ def _ensure_db_module(value):
             raise RuntimeError(f"sqlalchemy_dm模块未安装")
 
 
+def _ensure_positive_int(value: int) -> None:
+    if value < 1:
+        raise ValueError("must be a positive integer")
+
+
+def _ensure_non_negative_int(value: int) -> None:
+    if value < 0:
+        raise ValueError("must be a non-negative integer")
+
+
+def _ensure_ratio(value: float) -> None:
+    if not 0 < value < 1:
+        raise ValueError("must be greater than 0 and less than 1")
+
+
 def _resolve_repo_path(value: str) -> str:
     path = Path(value)
     if path.is_absolute():
         return str(path.resolve())
     return str((REPO_ROOT / value).resolve())
+
+
+def _default_sandbox_python() -> str:
+    if sys.platform == "win32":
+        rel = ".venv-sandbox/Scripts/python.exe"
+    else:
+        rel = ".venv-sandbox/bin/python"
+    # Keep venv symlinks intact; resolve() would collapse to the base interpreter
+    # and lose pyvenv.cfg / site-packages isolation.
+    return str((REPO_ROOT / rel).absolute())
+
+
+def _resolve_sandbox_python(value: str) -> str:
+    path = Path(str(value).strip())
+    if not path.is_absolute():
+        path = REPO_ROOT / path
+    return str(path.absolute())
 
 
 def _strip_optional_str(value: str | None) -> str:
@@ -102,23 +140,55 @@ class DBMS(Category):
 
 
 
+DEFAULT_SANDBOX_PIP_INDEX_URL = "https://pypi.tuna.tsinghua.edu.cn/simple"
+DEFAULT_SANDBOX_PIP_TRUSTED_HOST = "pypi.tuna.tsinghua.edu.cn"
+
+
 class Agent(Category):
     _ENV_PREFIX = "DEEP_AGENT_"
 
     app_name = Option("deep-agent", val_type=str, bind_env="APP_NAME")
-    max_requests = Option(50, val_type=int, bind_env="MAX_REQUESTS")
+    max_requests = Option(
+        30,
+        val_type=int,
+        bind_env="MAX_REQUESTS",
+        extra_check=_ensure_positive_int,
+    )
     max_total_tokens = Option(None, val_type=int, bind_env="MAX_TOTAL_TOKENS")
     request_retries = Option(2, val_type=int, bind_env="REQUEST_RETRIES")
+    context_compaction_trigger_ratio = Option(
+        0.80,
+        val_type=float,
+        bind_env="CONTEXT_COMPACTION_TRIGGER_RATIO",
+        extra_check=_ensure_ratio,
+    )
+    context_compaction_target_ratio = Option(
+        0.55,
+        val_type=float,
+        bind_env="CONTEXT_COMPACTION_TARGET_RATIO",
+        extra_check=_ensure_ratio,
+    )
+    context_keep_tool_pairs = Option(
+        3,
+        val_type=int,
+        bind_env="CONTEXT_KEEP_TOOL_PAIRS",
+        extra_check=_ensure_non_negative_int,
+    )
+    context_min_clear_tokens = Option(
+        2000,
+        val_type=int,
+        bind_env="CONTEXT_MIN_CLEAR_TOKENS",
+        extra_check=_ensure_non_negative_int,
+    )
+    context_summary_timeout = Option(
+        60.0,
+        val_type=float,
+        bind_env="CONTEXT_SUMMARY_TIMEOUT",
+    )
     skills_dir = Option(
         _resolve_repo_path("skills"),
         val_type=str,
         bind_env="SKILLS_DIR",
-        convertor=_resolve_repo_path,
-    )
-    cursor_skills_dir = Option(
-        _resolve_repo_path(".cursor/skills"),
-        val_type=str,
-        bind_env="CURSOR_SKILLS_DIR",
         convertor=_resolve_repo_path,
     )
     mcp_forward_request_headers = Option(
@@ -158,18 +228,23 @@ class Agent(Category):
         bind_env="SQLITE_PATH",
         convertor=_resolve_repo_path,
     )
-    upload_max_size_mb = Option(20, val_type=int, bind_env="UPLOAD_MAX_SIZE_MB")
-    upload_max_count = Option(10, val_type=int, bind_env="UPLOAD_MAX_COUNT")
+    upload_max_size_mb = Option(
+        20,
+        val_type=int,
+        bind_env="UPLOAD_MAX_SIZE_MB",
+        extra_check=_ensure_positive_int,
+    )
+    upload_max_count = Option(
+        10,
+        val_type=int,
+        bind_env="UPLOAD_MAX_COUNT",
+        extra_check=_ensure_positive_int,
+    )
     upload_allowed_mimes = Option(
         "",
         val_type=str,
         bind_env="UPLOAD_ALLOWED_MIMES",
         convertor=_strip_optional_str,
-    )
-    upload_extract_text_max_chars = Option(
-        32000,
-        val_type=int,
-        bind_env="UPLOAD_EXTRACT_TEXT_MAX_CHARS",
     )
     image_max_dimension = Option(1568, val_type=int, bind_env="IMAGE_MAX_DIMENSION")
     image_max_bytes = Option(4_194_304, val_type=int, bind_env="IMAGE_MAX_BYTES")
@@ -179,6 +254,97 @@ class Agent(Category):
         val_type=str,
         bind_env="GEMINI_PROXY",
         convertor=_strip_optional_str,
+    )
+    title_model = Option(
+        "",  # 标题生成专用模型名，空=不启用 AI 标题生成
+        val_type=str,
+        bind_env="TITLE_MODEL",
+        convertor=_strip_optional_str,
+    )
+    title_model_base_url = Option(
+        "",  # 标题模型 API 基础 URL
+        val_type=str,
+        bind_env="TITLE_MODEL_BASE_URL",
+        convertor=_strip_optional_str,
+    )
+    title_model_api_key = Option(
+        "",  # 标题模型 API Key
+        val_type=str,
+        protected=True,  # 敏感信息不暴露到日志
+        bind_env="TITLE_MODEL_API_KEY",
+        convertor=_strip_optional_str,
+    )
+    title_generation_timeout = Option(
+        30.0,  # 标题生成超时（秒）；慢速 OpenAI 兼容端点可能需要更久
+        val_type=float,
+        bind_env="TITLE_GENERATION_TIMEOUT",
+    )
+    sandbox_enabled = Option(
+        True,
+        val_type=bool,
+        bind_env="SANDBOX_ENABLED",
+    )
+    sandbox_backend = Option(
+        "subprocess-dev",
+        val_type=str,
+        bind_env="SANDBOX_BACKEND",
+    )
+    sandbox_timeout = Option(
+        30,
+        val_type=int,
+        bind_env="SANDBOX_TIMEOUT",
+        extra_check=_ensure_positive_int,
+    )
+    sandbox_max_concurrency = Option(
+        4,
+        val_type=int,
+        bind_env="SANDBOX_MAX_CONCURRENCY",
+        extra_check=_ensure_positive_int,
+    )
+    sandbox_python = Option(
+        _default_sandbox_python(),
+        val_type=str,
+        bind_env="SANDBOX_PYTHON",
+        convertor=_resolve_sandbox_python,
+    )
+    sandbox_ensure_venv = Option(
+        False,
+        val_type=bool,
+        bind_env="SANDBOX_ENSURE_VENV",
+    )
+    sandbox_pip_index_url = Option(
+        DEFAULT_SANDBOX_PIP_INDEX_URL,
+        val_type=str,
+        bind_env="SANDBOX_PIP_INDEX_URL",
+        convertor=_strip_optional_str,
+    )
+    sandbox_pip_trusted_host = Option(
+        DEFAULT_SANDBOX_PIP_TRUSTED_HOST,
+        val_type=str,
+        bind_env="SANDBOX_PIP_TRUSTED_HOST",
+        convertor=_strip_optional_str,
+    )
+    sandbox_memory_mb = Option(
+        # RSS product budget in megabytes (same semantics as stage-C cgroup memory.max).
+        # subprocess-dev translates to RLIMIT_AS via RLIMIT_AS_PER_RSS_RATIO.
+        512,
+        val_type=int,
+        bind_env="SANDBOX_MEMORY_MB",
+        extra_check=_ensure_positive_int,
+    )
+    sandbox_cpu_seconds = Option(
+        30,
+        val_type=int,
+        bind_env="SANDBOX_CPU_SECONDS",
+        extra_check=_ensure_positive_int,
+    )
+    sandbox_max_pids = Option(
+        # 0 = do not apply RLIMIT_NPROC in subprocess-dev (recommended).
+        # Per-UID NPROC ≠ stage-C cgroup pids.max; enabling can break OpenBLAS / host threads.
+        0,
+        val_type=int,
+        bind_env="SANDBOX_MAX_PIDS",
+        extra_check=_ensure_non_negative_int,
     )
 
     def __get__(self, instance, owner) -> "Agent":
@@ -192,3 +358,24 @@ class DeepAgentOptions(GlobalOptions):
 
 
 OPTION = DeepAgentOptions()
+
+
+def validate_runtime_options(options: DeepAgentOptions = OPTION) -> None:
+    """Resolve startup-critical options so invalid environment values fail fast."""
+    _ = options.agent.max_requests
+    _ = options.agent.upload_max_size_mb
+    _ = options.agent.upload_max_count
+    trigger_ratio = options.agent.context_compaction_trigger_ratio
+    target_ratio = options.agent.context_compaction_target_ratio
+    if target_ratio >= trigger_ratio:
+        raise ValueError(
+            "DEEP_AGENT_CONTEXT_COMPACTION_TARGET_RATIO must be less than "
+            "DEEP_AGENT_CONTEXT_COMPACTION_TRIGGER_RATIO"
+        )
+    if options.agent.context_summary_timeout <= 0:
+        raise ValueError("DEEP_AGENT_CONTEXT_SUMMARY_TIMEOUT must be positive")
+    if options.agent.sandbox_enabled:
+        try:
+            load_sandbox_profile(DEFAULT_SANDBOX_PROFILE)
+        except (ProfileNotFoundError, ProfileValidationError) as exc:
+            raise ValueError(f"default sandbox profile is invalid: {exc}") from exc

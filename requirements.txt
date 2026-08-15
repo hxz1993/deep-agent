@@ -1,6 +1,9 @@
+# -*- coding: utf-8 -*-
 # Core agent runtime. Slim package + only the provider/mcp extras we use,
 # to avoid pulling in every provider SDK (bedrock, cohere, huggingface, ...).
-pydantic-ai-slim[openai,anthropic,google,mcp]>=1.0
+pydantic-ai-slim[openai,anthropic,google,mcp]==2.14.1
+pydantic-ai-harness==0.10.0
+tiktoken>=0.13,<1
 
 # Web framework
 uvicorn[standard]>=0.30
@@ -8,14 +11,11 @@ gunicorn~=26.0.0
 
 # Config & streaming
 pydantic-settings>=2.5
+jsonschema>=4.23,<5
 sse-starlette>=2.1
 Pillow>=10.0
-pypdf>=5.0
-python-docx>=1.1
+python-docx>=1.2,<2
 openpyxl>=3.1
-
-# Cursor SKILL.md frontmatter parsing
-pyyaml>=6
 
 # Database
 sqlalchemy[asyncio]>=2.0
@@ -24,6 +24,8 @@ asyncmy
 aiosqlite
 alembic
 filelock>=3.13
+# Cross-platform process liveness checks (MCP shared registry pid probe)
+psutil>=5.9
 
 # deepfos platform
 aiohttp~=3.9.5
@@ -41,3 +43,6 @@ deepfos-loguru-corotate>=0.1.0
 
 # DeepCube MCP assistant (mcps/deepcube/server.py); install in the same Python env as deep-agent.
 deepcube[mcp]
+
+# deepfos/deepcube → pyarrow 14.x requires NumPy 1.x; do not upgrade to NumPy 2.x.
+numpy<2

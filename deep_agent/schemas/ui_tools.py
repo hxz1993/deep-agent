@@ -1,147 +1,206 @@
 from __future__ import annotations
 
 import json
-import re
 from datetime import datetime
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
+from jsonschema.exceptions import SchemaError
+from jsonschema.validators import validator_for
 
-from deep_agent.db.models import UiToolDefinition
+from deep_agent.db.models import UiToolDefinition, UiToolPackage
+
+if TYPE_CHECKING:
+    from deep_agent.capabilities.ui.types import UIToolRecord
 
 from deep_agent.capabilities.ui.constants import (
     MAX_DESCRIPTION_LEN,
     MAX_SCHEMA_BYTES,
-    MAX_UI_TOOLS,
     RESERVED_TOOL_NAMES,
     TOOL_NAME_PATTERN,
 )
 
-UiToolSource = Literal["builtin", "mcp", "manual"]
+UiToolSource = Literal["builtin", "manual"]
+UI_PACKAGE_CODE_PATTERN = r"^ui:[a-z][a-z0-9_-]{1,120}$"
 
 
-class UiToolManifestEntry(BaseModel):
-    name: str
-    description: str
-    parameters_json_schema: dict[str, Any]
-    widget: str | None = None
-    result_schema: dict[str, Any] | None = None
-    metadata: dict[str, Any] | None = None
-
-    @field_validator("name")
-    @classmethod
-    def validate_local_name(cls, value: str) -> str:
-        if not re.fullmatch(r"[a-z][a-z0-9_]{0,63}", value):
-            raise ValueError("tool name must match ^[a-z][a-z0-9_]{0,63}$")
-        if value in RESERVED_TOOL_NAMES:
-            raise ValueError(f"tool name {value!r} is reserved")
-        return value
-
-    @model_validator(mode="after")
-    def validate_schema_size(self) -> UiToolManifestEntry:
-        encoded = json.dumps(self.parameters_json_schema, ensure_ascii=False)
-        if len(encoded.encode("utf-8")) > MAX_SCHEMA_BYTES:
-            raise ValueError(f"parameters_json_schema exceeds {MAX_SCHEMA_BYTES} bytes")
-        if len(self.description) > MAX_DESCRIPTION_LEN:
-            raise ValueError(f"description exceeds {MAX_DESCRIPTION_LEN} characters")
-        return self
+def _validate_parameters_json_schema(value: dict[str, Any]) -> dict[str, Any]:
+    encoded = json.dumps(value, ensure_ascii=False)
+    if len(encoded.encode("utf-8")) > MAX_SCHEMA_BYTES:
+        raise ValueError(f"parameters_json_schema exceeds {MAX_SCHEMA_BYTES} bytes")
+    try:
+        validator_class = validator_for(value)
+        validator_class.check_schema(value)
+    except (SchemaError, TypeError) as exc:
+        raise ValueError(f"parameters_json_schema is not a valid JSON Schema: {exc}") from exc
+    return value
 
 
-class UiToolsManifest(BaseModel):
-    protocol_version: str
-    mcp_server: str | None = None
-    tools: list[UiToolManifestEntry] = Field(default_factory=list)
-
-    @field_validator("protocol_version")
-    @classmethod
-    def validate_protocol(cls, value: str) -> str:
-        if value != "1.0":
-            raise ValueError("unsupported protocol_version")
-        return value
-
-    @model_validator(mode="after")
-    def validate_tool_count(self) -> UiToolsManifest:
-        if len(self.tools) > MAX_UI_TOOLS:
-            raise ValueError(f"too many tools (max {MAX_UI_TOOLS})")
-        return self
+def _validate_metadata_size(value: dict[str, Any]) -> dict[str, Any]:
+    encoded = json.dumps(value, ensure_ascii=False)
+    if len(encoded.encode("utf-8")) > MAX_SCHEMA_BYTES:
+        raise ValueError(f"metadata exceeds {MAX_SCHEMA_BYTES} bytes")
+    return value
 
 
 class UiToolCreate(BaseModel):
     name: str
+    package_code: str = Field(pattern=UI_PACKAGE_CODE_PATTERN)
     description: str
     parameters_json_schema: dict[str, Any]
     widget: str | None = Field(default=None, max_length=64)
     result_schema: dict[str, Any] | None = None
     metadata: dict[str, Any] | None = None
     enabled: bool = True
-    override: bool = False
-    agent_ids: list[str] | None = None
 
     @field_validator("name")
     @classmethod
     def validate_name(cls, value: str) -> str:
         if not TOOL_NAME_PATTERN.fullmatch(value):
             raise ValueError("name must match ^[a-z][a-z0-9_]{1,120}$")
-        if value in RESERVED_TOOL_NAMES and value in {"confirm_action", "ask_user_choice"}:
+        if value in RESERVED_TOOL_NAMES:
             raise ValueError(f"name {value!r} is reserved for builtin tools")
         return value
 
+    @field_validator("parameters_json_schema")
+    @classmethod
+    def validate_parameters_schema(cls, value: dict[str, Any]) -> dict[str, Any]:
+        return _validate_parameters_json_schema(value)
+
+    @field_validator("result_schema")
+    @classmethod
+    def validate_result_schema(
+        cls,
+        value: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        if value is None:
+            return None
+        return _validate_parameters_json_schema(value)
+
+    @field_validator("metadata")
+    @classmethod
+    def validate_metadata(
+        cls,
+        value: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        if value is None:
+            return None
+        return _validate_metadata_size(value)
+
     @model_validator(mode="after")
     def validate_payload(self) -> UiToolCreate:
-        encoded = json.dumps(self.parameters_json_schema, ensure_ascii=False)
-        if len(encoded.encode("utf-8")) > MAX_SCHEMA_BYTES:
-            raise ValueError(f"parameters_json_schema exceeds {MAX_SCHEMA_BYTES} bytes")
+        self.description = self.description.strip()
+        if not self.description:
+            raise ValueError("description must not be blank")
         if len(self.description) > MAX_DESCRIPTION_LEN:
             raise ValueError(f"description exceeds {MAX_DESCRIPTION_LEN} characters")
         return self
 
 
 class UiToolUpdate(BaseModel):
+    package_code: str | None = Field(default=None, pattern=UI_PACKAGE_CODE_PATTERN)
     description: str | None = None
     parameters_json_schema: dict[str, Any] | None = None
     widget: str | None = Field(default=None, max_length=64)
     result_schema: dict[str, Any] | None = None
     metadata: dict[str, Any] | None = None
     enabled: bool | None = None
-    override: bool | None = None
-    agent_ids: list[str] | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_null_required_fields(cls, value):
+        if isinstance(value, dict):
+            for field in ("package_code", "description", "parameters_json_schema", "enabled"):
+                if field in value and value[field] is None:
+                    raise ValueError(f"{field} cannot be null")
+        return value
+
+    @field_validator("parameters_json_schema")
+    @classmethod
+    def validate_parameters_schema(
+        cls,
+        value: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        if value is None:
+            return None
+        return _validate_parameters_json_schema(value)
+
+    @field_validator("result_schema")
+    @classmethod
+    def validate_result_schema(
+        cls,
+        value: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        if value is None:
+            return None
+        return _validate_parameters_json_schema(value)
+
+    @field_validator("metadata")
+    @classmethod
+    def validate_metadata(
+        cls,
+        value: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        if value is None:
+            return None
+        return _validate_metadata_size(value)
+
+    @field_validator("description")
+    @classmethod
+    def validate_description(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        if not value:
+            raise ValueError("description must not be blank")
+        if len(value) > MAX_DESCRIPTION_LEN:
+            raise ValueError(f"description exceeds {MAX_DESCRIPTION_LEN} characters")
+        return value
 
 
 class UiToolResponse(BaseModel):
     name: str
+    package_code: str
     description: str
     parameters_json_schema: dict[str, Any]
     widget: str | None = None
     result_schema: dict[str, Any] | None = None
     metadata: dict[str, Any] | None = None
     source: UiToolSource
-    mcp_server_name: str | None = None
     enabled: bool
-    override: bool
-    agent_ids: list[str] | None = None
-    discovered_at: datetime | None = None
-    created_at: datetime
-    updated_at: datetime
-    shadowed_by: str | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
     @classmethod
-    def from_row(cls, row: UiToolDefinition, *, shadowed_by: str | None = None) -> UiToolResponse:
+    def from_row(cls, row: UiToolDefinition) -> UiToolResponse:
         return cls(
             name=row.name,
+            package_code=row.package_code,
             description=row.description,
             parameters_json_schema=row.parameters_json_schema,
             widget=row.widget,
             result_schema=row.result_schema,
             metadata=row.metadata_,
             source=row.source,
-            mcp_server_name=row.mcp_server_name,
             enabled=row.enabled,
-            override=row.override,
-            agent_ids=row.agent_ids,
-            discovered_at=row.discovered_at,
             created_at=row.created_at,
             updated_at=row.updated_at,
-            shadowed_by=shadowed_by,
+        )
+
+    @classmethod
+    def from_record(cls, record: "UIToolRecord") -> UiToolResponse:
+        return cls(
+            name=record.name,
+            package_code=record.package_code,
+            description=record.description,
+            parameters_json_schema=record.parameters_json_schema,
+            widget=record.widget,
+            result_schema=record.result_schema,
+            metadata=record.metadata,
+            source=record.source,
+            enabled=record.enabled,
+            created_at=None,
+            updated_at=None,
         )
 
 
@@ -150,9 +209,76 @@ class UiToolListResponse(BaseModel):
     total: int
 
 
-class UiToolsRefreshResponse(BaseModel):
-    mcp_server: str
-    discovered: int
-    upserted: int
-    removed: int
-    errors: list[str] = Field(default_factory=list)
+class UiToolPackageCreate(BaseModel):
+    code: str = Field(pattern=UI_PACKAGE_CODE_PATTERN)
+    label: str = Field(min_length=1, max_length=191)
+    description: str | None = Field(default=None, max_length=4000)
+    enabled: bool = True
+
+    @model_validator(mode="after")
+    def normalize_text(self) -> UiToolPackageCreate:
+        self.label = self.label.strip()
+        if not self.label:
+            raise ValueError("label must not be blank")
+        if self.description is not None:
+            self.description = self.description.strip() or None
+        return self
+
+
+class UiToolPackageUpdate(BaseModel):
+    label: str | None = Field(default=None, max_length=191)
+    description: str | None = Field(default=None, max_length=4000)
+    enabled: bool | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_null_required_package_fields(cls, value):
+        if isinstance(value, dict):
+            for field in ("label", "enabled"):
+                if field in value and value[field] is None:
+                    raise ValueError(f"{field} cannot be null")
+        return value
+
+    @field_validator("label")
+    @classmethod
+    def normalize_label(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        if not value:
+            raise ValueError("label must not be blank")
+        return value
+
+
+class UiToolPackageResponse(BaseModel):
+    code: str
+    label: str
+    description: str | None = None
+    source: UiToolSource
+    enabled: bool
+    tool_count: int = 0
+    tools: list[str] = Field(default_factory=list)
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+    @classmethod
+    def from_row(
+        cls, row: UiToolPackage, *, tools: list[str] | None = None
+    ) -> UiToolPackageResponse:
+        names = tools or []
+        return cls(
+            code=row.code,
+            label=row.label,
+            description=row.description,
+            source=row.source,
+            enabled=row.enabled,
+            tool_count=len(names),
+            tools=names,
+            created_at=row.created_at,
+            updated_at=row.updated_at,
+        )
+
+
+class UiToolPackageListResponse(BaseModel):
+    items: list[UiToolPackageResponse]
+    total: int

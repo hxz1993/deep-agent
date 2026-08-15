@@ -7,7 +7,7 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
@@ -17,9 +17,10 @@ from deep_agent.api.v1 import api_router
 from deep_agent.capabilities import build_registry
 from deep_agent.capabilities.mcp.shared_registry import McpSharedRegistry
 from deep_agent.capabilities.mcp.lease_manager import McpLeaseManager
-from deep_agent.core.context import AppContext, init_context, reset_context
+from deep_agent.core.context import AppContext, get_context, init_context, reset_context
 from deep_agent.options import OPTION
-from tests.helpers.sqlite_stores import make_sqlite_stores
+from tests.helpers.request_identity import install_test_user_header
+from tests.helpers.sqlite_stores import ensure_title_uses_main_model, make_sqlite_stores
 
 
 def _parse_sse_events(raw: str) -> list[dict]:
@@ -80,6 +81,7 @@ class McpSharedHttpStreamTests(unittest.IsolatedAsyncioTestCase):
         registry = McpSharedRegistry(runtime_dir=Path(self._tmpdir.name))
         manager = McpLeaseManager(shared_registry=registry)
         stores, engine, session_factory = await make_sqlite_stores()
+        await ensure_title_uses_main_model(stores)
         init_context(
             AppContext.for_testing(
                 registry=build_registry(),
@@ -91,6 +93,7 @@ class McpSharedHttpStreamTests(unittest.IsolatedAsyncioTestCase):
         )
 
         app = FastAPI()
+        install_test_user_header(app)
         app.include_router(api_router)
         test_model = TestModel(
             call_tools=["text_tools_reverse"],
@@ -98,18 +101,26 @@ class McpSharedHttpStreamTests(unittest.IsolatedAsyncioTestCase):
         )
 
         with patch("deep_agent.agent.factory._resolve_model", return_value=test_model):
+            from tests.integration.helpers.chat import mock_request_disconnect
+
+            self._no_title = patch(
+                "deep_agent.agent.runner.AgentRunner._maybe_generate_title",
+                new_callable=AsyncMock,
+            )
+            self._no_title.start()
             transport = ASGITransport(app=app)
-            async with AsyncClient(transport=transport, base_url="http://test") as client:
-                async with client.stream(
-                    "POST",
-                    "/api/v1/chat/stream",
-                    json={
-                        "message": "reverse abc",
-                        "capabilities": ["mcp:text_tools"],
-                    },
-                ) as response:
-                    self.assertEqual(response.status_code, 200)
-                    body = "".join([chunk async for chunk in response.aiter_text()])
+            with mock_request_disconnect():
+                async with AsyncClient(transport=transport, base_url="http://test") as client:
+                    async with client.stream(
+                        "POST",
+                        "/api/v1/chat/stream",
+                        json={
+                            "message": "reverse abc",
+                            "capabilities": ["mcp:text_tools"],
+                        },
+                    ) as response:
+                        self.assertEqual(response.status_code, 200)
+                        body = "".join([chunk async for chunk in response.aiter_text()])
 
         events = _parse_sse_events(body)
         self.assertTrue(events, "expected SSE events")
@@ -119,6 +130,10 @@ class McpSharedHttpStreamTests(unittest.IsolatedAsyncioTestCase):
         assert final is not None
         self.assertEqual(final.get("status"), "completed")
         self.assertEqual(final.get("output"), "shared-http-ok")
+
+        self._no_title.stop()
+        await get_context().event_persister.aclose()
+        await engine.dispose()
 
         registry_json = Path(self._tmpdir.name) / "builtin-text_tools.json"
         self.assertTrue(registry_json.is_file(), "shared MCP registry file should exist")

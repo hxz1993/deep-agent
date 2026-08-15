@@ -18,7 +18,7 @@ if not is_configured():
 
 target_metadata = Base.metadata
 
-database_url = get_database_url()
+database_url = config.attributes.get("database_url") or get_database_url()
 if database_url:
     config.set_main_option("sqlalchemy.url", escape_for_ini(database_url))
 

@@ -1,0 +1,161 @@
+/* deep-agent 界面主题 — 通过 html[data-theme] 切换 */
+
+/* 深色（默认） */
+:root,
+[data-theme="dark"] {
+  --bg: #0d1117;
+  --bg-soft: #161b22;
+  --bg-elev: #1c2128;
+  --bg-hover: #21262d;
+  --border: #2d333b;
+  --border-soft: #21262d;
+  --text: #e6edf3;
+  --text-dim: #8b949e;
+  --text-muted: #8b949e;
+  --text-faint: #6e7681;
+  --accent: #6366f1;
+  --accent-hover: #7c7ff5;
+  --accent-soft: rgba(99, 102, 241, 0.15);
+  --user-bubble: #1f6feb;
+  --tool-bg: #16241f;
+  --tool-border: #2ea04340;
+  --thinking-bg: #1a1829;
+  --thinking-border: #6366f140;
+  --danger: #f85149;
+  --danger-soft: rgba(248, 81, 73, 0.1);
+  --danger-text: #ffb4ae;
+  --shadow: 0 8px 30px rgba(0, 0, 0, 0.35);
+  --code-bg: #0a0d12;
+  --code-inline-bg: rgba(110, 118, 129, 0.25);
+  --hitl-btn-bg: #1a2332;
+  --hitl-confirm-bg: #1f3d2a;
+  --hitl-cancel-bg: #3d1f1f;
+  --hitl-pending-border: #d29922;
+  --attach-chip-bg: rgba(255, 255, 255, 0.06);
+  --scrollbar-thumb-hover: #3d444d;
+  --brand-accent-2: #a855f7;
+  --conn-ok: #2ea043;
+  --send-fg: #fff;
+  --hljs-theme: dark;
+}
+
+/* 浅色 */
+[data-theme="light"] {
+  --bg: #ffffff;
+  --bg-soft: #f6f8fa;
+  --bg-elev: #eef1f5;
+  --bg-hover: #e8ebef;
+  --border: #d0d7de;
+  --border-soft: #e1e4e8;
+  --text: #1f2328;
+  --text-dim: #424a53;
+  --text-muted: #57606a;
+  --text-faint: #656d76;
+  --accent: #4f46e5;
+  --accent-hover: #4338ca;
+  --accent-soft: rgba(79, 70, 229, 0.12);
+  --user-bubble: #0969da;
+  --tool-bg: #f0fff4;
+  --tool-border: #2da44e55;
+  --thinking-bg: #f3f0ff;
+  --thinking-border: #6366f155;
+  --danger: #cf222e;
+  --danger-soft: rgba(207, 34, 46, 0.08);
+  --danger-text: #a40e26;
+  --shadow: 0 8px 24px rgba(31, 35, 40, 0.12);
+  --code-bg: #f6f8fa;
+  --code-inline-bg: rgba(175, 184, 193, 0.35);
+  --hitl-btn-bg: #f6f8fa;
+  --hitl-confirm-bg: #dafbe1;
+  --hitl-cancel-bg: #ffebe9;
+  --hitl-pending-border: #bf8700;
+  --attach-chip-bg: rgba(31, 35, 40, 0.06);
+  --scrollbar-thumb-hover: #afb8c1;
+  --brand-accent-2: #7c3aed;
+  --conn-ok: #1a7f37;
+  --send-fg: #fff;
+  --hljs-theme: light;
+}
+
+/* 护眼（暖色浅底，减轻刺眼） */
+[data-theme="paper"] {
+  --bg: #f4f1ea;
+  --bg-soft: #ebe6dc;
+  --bg-elev: #e2dcd0;
+  --bg-hover: #d9d2c4;
+  --border: #c8bfb0;
+  --border-soft: #d5cdc0;
+  --text: #2c2416;
+  --text-dim: #4a4030;
+  --text-muted: #5c5040;
+  --text-faint: #6e6250;
+  --accent: #5b4fc7;
+  --accent-hover: #4a3fb8;
+  --accent-soft: rgba(91, 79, 199, 0.14);
+  --user-bubble: #0b6e99;
+  --tool-bg: #e8f5e9;
+  --tool-border: #2e7d3255;
+  --thinking-bg: #ede9fe;
+  --thinking-border: #5b4fc755;
+  --danger: #b42318;
+  --danger-soft: rgba(180, 35, 24, 0.1);
+  --danger-text: #912018;
+  --shadow: 0 8px 24px rgba(44, 36, 22, 0.1);
+  --code-bg: #e8e2d6;
+  --code-inline-bg: rgba(92, 80, 64, 0.12);
+  --hitl-btn-bg: #ebe6dc;
+  --hitl-confirm-bg: #d4edda;
+  --hitl-cancel-bg: #f8d7da;
+  --hitl-pending-border: #9a6700;
+  --attach-chip-bg: rgba(44, 36, 22, 0.06);
+  --scrollbar-thumb-hover: #b8aea0;
+  --brand-accent-2: #7c3aed;
+  --conn-ok: #1a7f37;
+  --send-fg: #fff;
+  --hljs-theme: light;
+}
+
+/* 高对比（视力友好） */
+[data-theme="contrast"] {
+  --bg: #ffffff;
+  --bg-soft: #f5f5f5;
+  --bg-elev: #eeeeee;
+  --bg-hover: #e0e0e0;
+  --border: #000000;
+  --border-soft: #333333;
+  --text: #000000;
+  --text-dim: #1a1a1a;
+  --text-muted: #222222;
+  --text-faint: #333333;
+  --accent: #0000cc;
+  --accent-hover: #000099;
+  --accent-soft: rgba(0, 0, 204, 0.1);
+  --user-bubble: #0047ab;
+  --tool-bg: #f0fff0;
+  --tool-border: #006400;
+  --thinking-bg: #f0f0ff;
+  --thinking-border: #0000cc;
+  --danger: #cc0000;
+  --danger-soft: rgba(204, 0, 0, 0.1);
+  --danger-text: #990000;
+  --shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  --code-bg: #f5f5f5;
+  --code-inline-bg: #e8e8e8;
+  --hitl-btn-bg: #f5f5f5;
+  --hitl-confirm-bg: #d4ffd4;
+  --hitl-cancel-bg: #ffd4d4;
+  --hitl-pending-border: #996600;
+  --attach-chip-bg: rgba(0, 0, 0, 0.08);
+  --scrollbar-thumb-hover: #666666;
+  --brand-accent-2: #6600cc;
+  --conn-ok: #006400;
+  --send-fg: #ffffff;
+  --hljs-theme: light;
+}
+
+/* 护眼 / 高对比：略放大字号 */
+[data-theme="paper"] body,
+[data-theme="contrast"] body {
+  font-size: 16px;
+  line-height: 1.55;
+}

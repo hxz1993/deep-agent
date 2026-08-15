@@ -260,7 +260,7 @@ class AgentRunnerHistoryTests(unittest.IsolatedAsyncioTestCase):
 
         from deep_agent.capabilities.ui.builtin import build_ui_toolset
 
-        test_model = TestModel(call_tools=["confirm_action"], custom_output_text="continued")
+        test_model = TestModel(call_tools=["builtin__confirm"], custom_output_text="continued")
         agent = Agent(
             test_model,
             deps_type=AgentDeps,
@@ -324,6 +324,25 @@ class TruncateHistoryTests(unittest.IsolatedAsyncioTestCase):
         await self.store.truncate_history("s2", keep_count=0)
         self.assertEqual(await self.store.get_history("s2"), [])
 
+    async def test_replace_history_rewrites_messages(self) -> None:
+        await self.store.append(
+            "s4",
+            [
+                ModelRequest(parts=[UserPromptPart(content="old")]),
+                ModelResponse(parts=[TextPart(content="stale")]),
+            ],
+        )
+        replacement = [
+            ModelRequest(parts=[UserPromptPart(content="new")]),
+            ModelResponse(parts=[TextPart(content="fresh")]),
+        ]
+        await self.store.replace_history("s4", replacement)
+        history = await self.store.get_history("s4")
+        self.assertEqual(len(history), 2)
+        self.assertIsInstance(history[0], ModelRequest)
+        self.assertEqual(history[0].parts[0].content, "new")
+        self.assertEqual(history[1].parts[0].content, "fresh")
+
     async def test_truncate_does_not_remove_prior_assistant(self) -> None:
         messages: list[ModelMessage] = [
             ModelRequest(parts=[UserPromptPart(content="u0")]),
@@ -338,6 +357,41 @@ class TruncateHistoryTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(history[0], ModelRequest)
         self.assertIsInstance(history[1], ModelResponse)
         self.assertEqual(history[1].parts[0].content, "a0")
+
+
+class AgentRunnerTitleGenerationTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self) -> None:
+        stores, self._engine, _ = await make_sqlite_stores()
+        self.store = stores.coordinator
+        self.runner = AgentRunner(
+            Agent(TestModel(), output_type=str),
+            self.store,
+            UsageLimits(request_limit=5),
+        )
+
+    async def asyncTearDown(self) -> None:
+        await self._engine.dispose()
+
+    async def test_second_exchange_skips_title_generation_when_title_exists(self) -> None:
+        await self.store.append(
+            "title-session",
+            [
+                ModelRequest(parts=[UserPromptPart(content="第一句")]),
+                ModelResponse(parts=[TextPart(content="第一句回复")]),
+                ModelRequest(parts=[UserPromptPart(content="第二句")]),
+                ModelResponse(parts=[TextPart(content="第二句回复")]),
+            ],
+        )
+        await self.store.update_session_title("title-session", None, "已有标题")
+
+        with patch("deep_agent.agent.title_generator.generate_title", autospec=True) as generate_title:
+            await self.runner._maybe_generate_title(
+                "title-session",
+                AgentDeps(session_id="title-session"),
+                [ModelResponse(parts=[TextPart(content="第二句回复")])],
+            )
+
+        generate_title.assert_not_called()
 
 
 if __name__ == "__main__":

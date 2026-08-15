@@ -1,0 +1,6 @@
+# Local WSL go-judge preview artifacts (not for production sign-off)
+go-judge
+go-judge_*
+*.tgz
+go-judge-wsl-report.json
+cache/

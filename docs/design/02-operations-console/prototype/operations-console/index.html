@@ -1,0 +1,1211 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DeepAgent 运维控制台 · 交互原型</title>
+  <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
+  <style>
+    :root {
+      --primary: #555fff;
+      --primary-soft: #eef0ff;
+      --text: #232638;
+      --text-2: #5d6478;
+      --text-3: #8a91a3;
+      --line: #e4e7ee;
+      --line-strong: #d5d9e3;
+      --surface: #ffffff;
+      --surface-2: #f7f8fa;
+      --surface-3: #f1f3f6;
+      --success: #1f9d68;
+      --success-soft: #e9f8f1;
+      --warning: #c17a11;
+      --warning-soft: #fff5df;
+      --danger: #d44848;
+      --danger-soft: #fff0f0;
+      --cyan: #168aa3;
+      --cyan-soft: #e9f7fa;
+      --shadow: 0 12px 36px rgba(31, 38, 70, 0.12);
+      --topbar: 52px;
+      font-family: Inter, "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
+    }
+
+    html[data-theme="dark"] {
+      --text: #eef0f7;
+      --text-2: #b1b7c9;
+      --text-3: #7f879d;
+      --line: #303545;
+      --line-strong: #42495d;
+      --surface: #1d2029;
+      --surface-2: #171920;
+      --surface-3: #272b36;
+      --primary-soft: #2b3154;
+      --success-soft: #173c31;
+      --warning-soft: #44351c;
+      --danger-soft: #472629;
+      --cyan-soft: #183b43;
+      --shadow: 0 12px 36px rgba(0, 0, 0, .34);
+      color-scheme: dark;
+    }
+    html[data-theme="eye"] {
+      --text: #28312c;
+      --text-2: #5e6862;
+      --text-3: #89938d;
+      --line: #dce4dc;
+      --line-strong: #cbd6cc;
+      --surface: #f7faf6;
+      --surface-2: #edf3ec;
+      --surface-3: #e5ede4;
+      --primary: #5160dc;
+      --primary-soft: #e5e8fb;
+      --shadow: 0 12px 36px rgba(39, 67, 46, .12);
+    }
+
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      background: var(--surface-2);
+      color: var(--text);
+      font-size: 13px;
+      overflow: hidden;
+    }
+    button, input, select, textarea { font: inherit; }
+    button { color: inherit; }
+    .hidden { display: none !important; }
+
+    .icon {
+      width: 16px;
+      height: 16px;
+      stroke-width: 1.8;
+      flex: 0 0 auto;
+    }
+    .icon-sm { width: 14px; height: 14px; }
+
+    .topbar {
+      height: var(--topbar);
+      display: flex;
+      align-items: center;
+      border-bottom: 1px solid var(--line);
+      background: var(--surface);
+      position: fixed;
+      inset: 0 0 auto 0;
+      z-index: 30;
+    }
+    .brand {
+      width: 208px;
+      height: 100%;
+      padding: 0 16px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      border-right: 1px solid var(--line);
+    }
+    .brand-mark {
+      width: 26px;
+      height: 26px;
+      border-radius: 6px;
+      display: grid;
+      place-items: center;
+      color: #fff;
+      background: var(--primary);
+      font-weight: 700;
+    }
+    .brand-copy strong { display: block; font-size: 14px; }
+    .brand-copy span { display: block; color: var(--text-3); font-size: 10px; margin-top: 1px; }
+    .topbar-main {
+      flex: 1;
+      min-width: 0;
+      display: grid;
+      grid-template-columns: minmax(150px, 1fr) auto minmax(360px, 1fr);
+      align-items: center;
+      padding: 0 14px 0 18px;
+    }
+    .page-title { font-weight: 650; font-size: 14px; }
+    .top-nav { height: 100%; display: flex; align-items: center; gap: 4px; }
+    .top-nav-btn { height: 100%; min-width: 106px; padding: 0 14px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--text-2); display: inline-flex; align-items: center; justify-content: center; gap: 7px; cursor: pointer; }
+    .top-nav-btn:hover { color: var(--text); background: var(--surface-2); }
+    .top-nav-btn.active { color: var(--primary); border-bottom-color: var(--primary); font-weight: 650; }
+    .top-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      min-height: 24px;
+      padding: 2px 8px;
+      border-radius: 4px;
+      border: 1px solid var(--line);
+      background: var(--surface);
+      color: var(--text-2);
+      font-size: 12px;
+      white-space: nowrap;
+    }
+    .badge.test { color: var(--cyan); background: var(--cyan-soft); border-color: #bfe5ec; }
+    .badge.success { color: var(--success); background: var(--success-soft); border-color: #bde8d5; }
+    .badge.warning { color: var(--warning); background: var(--warning-soft); border-color: #f0d79f; }
+    .badge.danger { color: var(--danger); background: var(--danger-soft); border-color: #f1c4c4; }
+
+    .btn {
+      min-height: 30px;
+      border: 1px solid var(--line-strong);
+      border-radius: 4px;
+      padding: 0 10px;
+      background: var(--surface);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      cursor: pointer;
+      transition: .15s ease;
+      white-space: nowrap;
+    }
+    .btn:hover { border-color: #aeb4c4; background: var(--surface-2); }
+    .btn.primary { background: var(--primary); border-color: var(--primary); color: #fff; }
+    .btn.primary:hover { background: #4650e8; }
+    .btn:disabled { opacity: .45; cursor: not-allowed; pointer-events: none; }
+    .btn.ghost { border-color: transparent; background: transparent; }
+    .btn.danger { color: var(--danger); }
+    .btn.icon-only { width: 30px; padding: 0; }
+    .btn.small { min-height: 26px; padding: 0 8px; font-size: 12px; }
+
+    .nav-group-label {
+      color: var(--text-3);
+      font-size: 11px;
+      padding: 8px 10px 6px;
+    }
+    .nav-item {
+      width: 100%;
+      border: 0;
+      border-radius: 4px;
+      padding: 9px 10px;
+      background: transparent;
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      cursor: pointer;
+      color: var(--text-2);
+      text-align: left;
+      margin-bottom: 3px;
+    }
+    main {
+      position: fixed;
+      inset: var(--topbar) 0 0 0;
+      overflow: hidden;
+      background: var(--surface-2);
+    }
+    .page { width: 100%; height: 100%; display: none; }
+    .page.active { display: block; }
+    .panel {
+      background: var(--surface);
+      min-width: 0;
+      min-height: 0;
+      overflow: hidden;
+    }
+    .panel + .panel { border-left: 1px solid var(--line); }
+    .panel-head {
+      height: 48px;
+      padding: 0 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid var(--line);
+      background: var(--surface);
+    }
+    .panel-title { font-weight: 650; }
+    .subtle { color: var(--text-2); }
+    .muted { color: var(--text-3); }
+    .mono { font-family: "SFMono-Regular", Consolas, monospace; }
+    .separator { height: 1px; background: var(--line); }
+
+    .input, .select, .textarea {
+      width: 100%;
+      border: 1px solid var(--line-strong);
+      border-radius: 4px;
+      background: var(--surface);
+      color: var(--text);
+      outline: none;
+    }
+    .input, .select { height: 32px; padding: 0 9px; }
+    .textarea { min-height: 78px; resize: vertical; padding: 8px 9px; line-height: 1.55; }
+    .input:focus, .select:focus, .textarea:focus { border-color: var(--primary); box-shadow: 0 0 0 2px var(--primary-soft); }
+    .search-box { position: relative; }
+    .search-box .icon { position: absolute; left: 9px; top: 8px; color: var(--text-3); }
+    .search-box .input { padding-left: 31px; }
+
+    .segmented {
+      display: inline-flex;
+      padding: 2px;
+      border-radius: 5px;
+      background: var(--surface-3);
+    }
+    .segmented button {
+      border: 0;
+      background: transparent;
+      padding: 5px 9px;
+      border-radius: 3px;
+      color: var(--text-2);
+      cursor: pointer;
+    }
+    .segmented button.active { background: var(--surface); color: var(--text); box-shadow: 0 1px 2px rgba(20, 26, 45, .08); }
+
+    /* Test workspace */
+    .workspace-grid { height: 100%; display: grid; grid-template-columns: 188px 244px minmax(440px, 1fr) 320px; }
+    .workspace-agents, .workspace-sessions, .workspace-center, .workspace-right { display: flex; flex-direction: column; min-height: 0; }
+    .workspace-agents, .workspace-sessions { background: var(--surface-2); }
+    .left-tools { padding: 12px; border-bottom: 1px solid var(--line); }
+    .left-tools .btn { width: 100%; margin-bottom: 10px; }
+    .section-label { padding: 10px 13px 6px; color: var(--text-3); font-size: 11px; }
+    .list-scroll { overflow: auto; min-height: 0; }
+    .agent-item, .session-item {
+      margin: 0 7px 3px;
+      padding: 9px 10px;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    .agent-item:hover, .session-item:hover { background: var(--surface-3); }
+    .agent-item.active, .session-item.active { background: var(--primary-soft); }
+    .agent-line { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .agent-name, .session-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .agent-meta, .session-meta { margin-top: 4px; color: var(--text-3); font-size: 11px; }
+    .agent-item { padding: 10px; }
+    .agent-item .agent-meta { line-height: 1.5; }
+    .list-heading { height: 48px; padding: 0 12px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--line); background: var(--surface); }
+    .list-heading strong { font-size: 12px; }
+    .list-summary { color: var(--text-3); font-size: 10px; }
+    .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--success); display: inline-block; }
+    .chat-toolbar { padding: 0 14px; height: 48px; border-bottom: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between; }
+    .chat-title { display: flex; align-items: center; gap: 8px; min-width: 0; }
+    .chat-title strong { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .chat-actions { display: flex; align-items: center; gap: 6px; }
+    .messages { flex: 1; overflow: auto; padding: 18px 22px 14px; background: var(--surface-2); }
+    .message { display: flex; gap: 10px; margin: 0 auto 18px; max-width: 820px; }
+    .avatar { width: 28px; height: 28px; border-radius: 5px; display: grid; place-items: center; flex: 0 0 auto; font-size: 11px; font-weight: 700; }
+    .avatar.user { background: #e8ebf0; color: var(--text-2); }
+    .avatar.ai { background: var(--primary); color: #fff; }
+    .message-body { flex: 1; min-width: 0; line-height: 1.65; }
+    .message-meta { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; font-size: 11px; color: var(--text-3); }
+    .message-text { color: var(--text); }
+    .tool-event {
+      margin-top: 9px;
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      background: var(--surface);
+      overflow: hidden;
+    }
+    .tool-event-head { min-height: 36px; padding: 7px 10px; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .tool-event-title { display: flex; align-items: center; gap: 7px; font-weight: 600; }
+    .tool-event-detail { border-top: 1px solid var(--line); padding: 9px 10px; background: var(--surface-2); color: var(--text-2); font-size: 11px; }
+    .composer { padding: 10px 14px 12px; border-top: 1px solid var(--line); background: var(--surface); }
+    .composer-box { border: 1px solid var(--line-strong); border-radius: 6px; padding: 9px; }
+    .composer textarea { border: 0; outline: 0; resize: none; width: 100%; min-height: 54px; color: var(--text); background: transparent; }
+    .composer-actions { display: flex; align-items: center; justify-content: space-between; margin-top: 7px; }
+    .composer-left { display: flex; align-items: center; gap: 5px; }
+    .inspector-tabs { display: flex; height: 40px; border-bottom: 1px solid var(--line); padding: 0 10px; }
+    .tab-btn { border: 0; background: transparent; color: var(--text-2); padding: 0 9px; cursor: pointer; border-bottom: 2px solid transparent; }
+    .tab-btn.active { color: var(--primary); border-bottom-color: var(--primary); font-weight: 650; }
+    .inspector-body { flex: 1; min-height: 0; overflow: auto; padding: 12px 14px; }
+    .context-grid { display: grid; grid-template-columns: 92px 1fr; gap: 9px 10px; align-items: center; }
+    .context-grid dt { color: var(--text-3); }
+    .context-grid dd { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .inspect-section { margin-top: 16px; }
+    .inspect-section h4 { margin: 0 0 8px; font-size: 12px; }
+    .cap-list { display: flex; flex-wrap: wrap; gap: 5px; }
+    .timeline { position: relative; padding-left: 18px; }
+    .timeline::before { content: ""; position: absolute; left: 5px; top: 6px; bottom: 6px; width: 1px; background: var(--line-strong); }
+    .timeline-item { position: relative; padding-bottom: 14px; }
+    .timeline-item::before { content: ""; position: absolute; left: -17px; top: 4px; width: 7px; height: 7px; border-radius: 50%; background: var(--surface); border: 2px solid var(--primary); }
+    .timeline-item.success::before { border-color: var(--success); }
+    .timeline-item.warning::before { border-color: var(--warning); }
+    .timeline-item .time { float: right; color: var(--text-3); font-size: 10px; }
+    .timeline-item strong { font-size: 12px; }
+    .timeline-item p { margin: 4px 0 0; color: var(--text-2); font-size: 11px; line-height: 1.5; }
+    .code-block { padding: 9px; border: 1px solid var(--line); border-radius: 4px; background: var(--surface-2); color: var(--text-2); font: 11px/1.6 "SFMono-Regular", Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+    /* Configuration */
+    .config-grid { height: 100%; display: grid; grid-template-columns: 210px minmax(520px, 1fr) 360px; }
+    .resource-nav { padding: 12px 8px; background: var(--surface-2); overflow: auto; }
+    .resource-btn { width: 100%; padding: 9px 10px; border: 0; border-radius: 4px; background: transparent; display: flex; align-items: center; gap: 8px; color: var(--text-2); cursor: pointer; text-align: left; margin-bottom: 3px; }
+    .resource-btn:hover { background: var(--surface-3); }
+    .resource-btn.active { background: var(--primary-soft); color: var(--primary); font-weight: 650; }
+    .resource-count { margin-left: auto; font-size: 11px; color: var(--text-3); }
+    .config-main, .config-detail { display: flex; flex-direction: column; min-height: 0; }
+    .toolbar { min-height: 48px; padding: 8px 12px; border-bottom: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .toolbar-left, .toolbar-right { display: flex; align-items: center; gap: 7px; min-width: 0; }
+    .toolbar .search-box { width: 240px; }
+    .table-wrap { flex: 1; min-height: 0; overflow: auto; }
+    table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+    th { height: 36px; padding: 0 11px; text-align: left; font-weight: 600; color: var(--text-2); background: var(--surface-2); border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 1; }
+    td { min-height: 44px; padding: 10px 11px; border-bottom: 1px solid var(--line); vertical-align: middle; color: var(--text-2); }
+    tbody tr { cursor: pointer; }
+    tbody tr:hover { background: var(--surface-2); }
+    tbody tr.selected { background: var(--primary-soft); }
+    .cell-title { font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .cell-sub { color: var(--text-3); font-size: 11px; margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .detail-head { padding: 14px; border-bottom: 1px solid var(--line); }
+    .detail-head-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+    .detail-head h3 { margin: 0; font-size: 15px; }
+    .detail-head p { margin: 5px 0 0; color: var(--text-2); font-size: 11px; }
+    .detail-tabs { display: flex; height: 38px; border-bottom: 1px solid var(--line); padding: 0 8px; overflow-x: auto; }
+    .detail-content { flex: 1; min-height: 0; overflow: auto; padding: 14px; }
+    .form-group { margin-bottom: 14px; }
+    .form-label { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 6px; font-weight: 600; font-size: 12px; }
+    .form-help { margin-top: 5px; color: var(--text-3); font-size: 11px; line-height: 1.45; }
+    .switch-row { min-height: 38px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--line); }
+    .switch { width: 34px; height: 19px; border-radius: 10px; background: #c8ccd6; padding: 2px; cursor: pointer; transition: .15s; }
+    .switch::after { content: ""; display: block; width: 15px; height: 15px; border-radius: 50%; background: #fff; transition: .15s; }
+    .switch.on { background: var(--primary); }
+    .switch.on::after { transform: translateX(15px); }
+    .relation-list { border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
+    .relation-item { padding: 9px 10px; display: flex; align-items: center; gap: 8px; border-bottom: 1px solid var(--line); }
+    .relation-item:last-child { border-bottom: 0; }
+    .relation-icon { width: 26px; height: 26px; display: grid; place-items: center; border-radius: 4px; background: var(--surface-3); color: var(--text-2); }
+    .relation-copy { flex: 1; min-width: 0; }
+    .relation-copy strong { display: block; font-size: 12px; }
+    .relation-copy span { display: block; color: var(--text-3); font-size: 10px; margin-top: 2px; }
+
+    /* Diagnostics */
+    .diagnostics-page { display: flex; flex-direction: column; height: 100%; }
+    .diag-nav { height: 48px; display: flex; align-items: end; gap: 2px; padding: 0 16px; background: var(--surface); border-bottom: 1px solid var(--line); }
+    .diag-nav .tab-btn { height: 40px; }
+    .diag-content { flex: 1; min-height: 0; overflow: hidden; }
+    .diag-view { height: 100%; display: none; }
+    .diag-view.active { display: block; }
+    .runs-layout { height: 100%; display: grid; grid-template-rows: 74px minmax(0, 1fr); }
+    .metrics-strip { padding: 12px 16px; display: grid; grid-template-columns: repeat(5, minmax(120px, 1fr)); gap: 1px; background: var(--line); border-bottom: 1px solid var(--line); }
+    .metric { background: var(--surface); padding: 9px 12px; }
+    .metric span { color: var(--text-3); font-size: 11px; }
+    .metric strong { display: block; margin-top: 3px; font-size: 18px; font-weight: 650; }
+    .metric small { margin-left: 5px; font-size: 10px; color: var(--success); }
+    .runs-grid { min-height: 0; display: grid; grid-template-columns: minmax(620px, 1fr) 420px; }
+    .run-list, .run-detail { min-height: 0; display: flex; flex-direction: column; background: var(--surface); }
+    .run-detail { border-left: 1px solid var(--line); }
+    .status-cell { display: flex; align-items: center; gap: 6px; }
+    .status-dot { width: 7px; height: 7px; border-radius: 50%; }
+    .status-dot.ok { background: var(--success); }
+    .status-dot.fail { background: var(--danger); }
+    .status-dot.wait { background: var(--warning); }
+    .run-detail-body { flex: 1; min-height: 0; overflow: auto; padding: 13px 14px; }
+    .call-row { border: 1px solid var(--line); border-radius: 4px; margin-bottom: 8px; overflow: hidden; }
+    .call-row-head { padding: 8px 9px; display: flex; justify-content: space-between; gap: 10px; }
+    .call-row-body { padding: 8px 9px; border-top: 1px solid var(--line); background: var(--surface-2); font-size: 11px; color: var(--text-2); }
+    .health-grid { height: 100%; overflow: auto; padding: 16px; display: grid; grid-template-columns: repeat(3, minmax(260px, 1fr)); align-content: start; gap: 12px; }
+    .health-item { border: 1px solid var(--line); background: var(--surface); border-radius: 5px; padding: 13px; }
+    .health-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .health-item h3 { margin: 0; font-size: 13px; }
+    .health-item p { color: var(--text-2); line-height: 1.55; margin: 9px 0 12px; }
+    .schema-layout { height: 100%; display: grid; grid-template-columns: minmax(520px, 1fr) 400px; }
+    .schema-editor, .schema-result { min-height: 0; display: flex; flex-direction: column; background: var(--surface); }
+    .schema-result { border-left: 1px solid var(--line); }
+    .editor-area { flex: 1; min-height: 0; margin: 12px; border: 1px solid var(--line); border-radius: 4px; background: #1f2330; color: #dce1ef; padding: 13px; font: 12px/1.7 "SFMono-Regular", Consolas, monospace; white-space: pre-wrap; overflow: auto; }
+    .validation-item { padding: 10px 0; border-bottom: 1px solid var(--line); }
+    .validation-item strong { display: flex; align-items: center; gap: 6px; }
+    .validation-item p { margin: 5px 0 0 20px; color: var(--text-2); font-size: 11px; line-height: 1.5; }
+
+    /* Debug drawer */
+    .overlay { position: fixed; inset: 0; background: rgba(24, 28, 42, .22); z-index: 70; opacity: 0; pointer-events: none; transition: .18s; }
+    .overlay.open { opacity: 1; pointer-events: auto; }
+    .drawer { position: absolute; inset: 0 0 0 auto; width: min(460px, 92vw); background: var(--surface); box-shadow: var(--shadow); transform: translateX(100%); transition: .2s ease; display: flex; flex-direction: column; }
+    .overlay.open .drawer { transform: translateX(0); }
+    .drawer-head { height: 52px; padding: 0 14px; border-bottom: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between; }
+    .drawer-body { flex: 1; overflow: auto; padding: 16px; }
+    .drawer-foot { min-height: 56px; padding: 10px 14px; border-top: 1px solid var(--line); display: flex; justify-content: flex-end; gap: 8px; }
+    .callout { padding: 9px 10px; border-left: 3px solid var(--cyan); background: var(--cyan-soft); color: var(--text-2); line-height: 1.5; margin-bottom: 14px; }
+    .advanced-box { margin-top: 15px; border-top: 1px solid var(--line); padding-top: 14px; }
+
+    .future-badge { color: var(--warning); background: var(--warning-soft); border-color: #e5c77d; }
+    .source-badge { min-height: 20px; padding: 1px 6px; font-size: 10px; }
+    .context-table { width: 100%; border: 1px solid var(--line); border-radius: 5px; overflow: hidden; }
+    .context-row { display: grid; grid-template-columns: 86px minmax(0, 1fr) 82px; align-items: center; min-height: 34px; border-bottom: 1px solid var(--line); padding: 0 9px; gap: 8px; }
+    .context-row:last-child { border-bottom: 0; }
+    .context-row strong { font-size: 11px; }
+    .context-row .value { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); }
+    .mode-card { border: 1px solid var(--line); border-radius: 5px; padding: 10px; cursor: pointer; background: var(--surface); }
+    .mode-card:hover { border-color: var(--line-strong); }
+    .mode-card.active { border-color: var(--primary); background: var(--primary-soft); }
+    .mode-card strong { display: flex; align-items: center; gap: 6px; }
+    .mode-card p { margin: 5px 0 0; color: var(--text-2); font-size: 11px; line-height: 1.5; }
+    .mode-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; margin-bottom: 14px; }
+    .theme-menu { display: flex; align-items: center; padding: 2px; border: 1px solid var(--line); background: var(--surface-2); border-radius: 5px; }
+    .theme-menu button { width: 28px; height: 26px; padding: 0; border: 0; background: transparent; border-radius: 3px; display: grid; place-items: center; cursor: pointer; color: var(--text-2); }
+    .theme-menu button.active { background: var(--surface); color: var(--primary); box-shadow: 0 1px 2px rgba(20, 26, 45, .08); }
+    .inline-actions { display: flex; align-items: center; gap: 4px; }
+    .session-item { position: relative; overflow: hidden; }
+    .session-menu { position: absolute; right: 6px; top: 8px; width: 25px; height: 25px; opacity: 0; background: var(--surface-3); }
+    .session-item:hover .session-menu { opacity: 1; }
+    .thinking { margin: 8px 0; border-left: 2px solid var(--line-strong); padding: 7px 9px; color: var(--text-2); background: var(--surface-2); font-size: 11px; }
+    .hitl-form { display: grid; gap: 9px; }
+    .hitl-actions { display: flex; justify-content: flex-end; gap: 6px; }
+    .attachment-chip { display: inline-flex; align-items: center; gap: 6px; margin-top: 8px; padding: 5px 7px; border: 1px solid var(--line); border-radius: 4px; background: var(--surface); font-size: 11px; }
+    .diagnostic-banner { min-height: 74px; padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; gap: 16px; border-bottom: 1px solid var(--line); background: var(--surface); }
+    .diagnostic-banner strong { display: block; }
+    .diagnostic-banner p { margin: 4px 0 0; color: var(--text-2); font-size: 11px; }
+    .capability-grid { height: 100%; overflow: auto; padding: 16px; display: grid; grid-template-columns: repeat(3, minmax(260px, 1fr)); align-content: start; gap: 12px; }
+    .readonly-field { background: var(--surface-2); color: var(--text-3); }
+    .diagnostics-placeholder { height: 100%; overflow: auto; padding: 28px; }
+    .placeholder-inner { max-width: 1040px; margin: 0 auto; }
+    .placeholder-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; padding-bottom: 20px; border-bottom: 1px solid var(--line); }
+    .placeholder-head h2 { margin: 0; font-size: 18px; }
+    .placeholder-head p { margin: 7px 0 0; color: var(--text-2); max-width: 680px; line-height: 1.65; }
+    .placeholder-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 18px; }
+
+    .toast { position: fixed; right: 18px; bottom: 18px; z-index: 100; padding: 10px 13px; border-radius: 4px; color: #fff; background: #303548; box-shadow: var(--shadow); transform: translateY(16px); opacity: 0; pointer-events: none; transition: .2s; }
+    .toast.show { transform: translateY(0); opacity: 1; }
+
+    @media (max-width: 1320px) {
+      .workspace-grid { grid-template-columns: 170px 220px minmax(420px, 1fr) 286px; }
+      .config-grid { grid-template-columns: 190px minmax(480px, 1fr) 320px; }
+      .runs-grid { grid-template-columns: minmax(560px, 1fr) 360px; }
+      .topbar-main { grid-template-columns: minmax(90px, .7fr) auto minmax(330px, 1fr); }
+      .top-nav-btn { min-width: 92px; padding: 0 10px; }
+      .role-badge, .connection-badge { display: none; }
+    }
+    @media (max-width: 1080px) {
+      .brand { width: 64px; justify-content: center; padding: 0; }
+      .brand-copy, .page-title, .top-actions .badge { display: none; }
+      .topbar-main { grid-template-columns: 1fr auto 1fr; }
+      .workspace-grid { grid-template-columns: 160px 210px minmax(420px, 1fr); }
+      .workspace-right { display: none; }
+      .config-grid { grid-template-columns: 176px minmax(460px, 1fr); }
+      .config-detail { display: none; }
+      .runs-grid { grid-template-columns: 1fr; }
+      .run-detail { display: none; }
+      .metrics-strip { grid-template-columns: repeat(3, 1fr); overflow: hidden; }
+      .placeholder-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark">D</div>
+      <div class="brand-copy"><strong>DeepAgent</strong><span>运维控制台</span></div>
+    </div>
+    <div class="topbar-main">
+      <div class="page-title" id="pageTitle">测试工作台</div>
+      <nav class="top-nav" aria-label="控制台主导航">
+        <button class="top-nav-btn active" data-page="workspace"><i data-lucide="message-square-code" class="icon"></i>测试工作台</button>
+        <button class="top-nav-btn" data-page="configuration"><i data-lucide="sliders-horizontal" class="icon"></i>配置中心</button>
+        <button class="top-nav-btn" data-page="diagnostics"><i data-lucide="activity" class="icon"></i>诊断中心</button>
+      </nav>
+      <div class="top-actions">
+        <span class="badge success connection-badge"><span class="dot"></span>后端已连接</span>
+        <span class="badge test"><i data-lucide="server" class="icon icon-sm"></i>Test · 调试模式</span>
+        <span class="badge role-badge"><i data-lucide="shield-check" class="icon icon-sm"></i>运维管理员 · 原型</span>
+        <div class="theme-menu" id="themeMenu" aria-label="主题">
+          <button class="active" data-theme="light" title="明亮"><i data-lucide="sun" class="icon icon-sm"></i></button>
+          <button data-theme="eye" title="护眼"><i data-lucide="leaf" class="icon icon-sm"></i></button>
+          <button data-theme="dark" title="暗色"><i data-lucide="moon" class="icon icon-sm"></i></button>
+        </div>
+        <button class="btn icon-only ghost" title="帮助"><i data-lucide="circle-help" class="icon"></i></button>
+        <button class="btn icon-only" title="当前平台用户"><i data-lucide="user-round" class="icon"></i></button>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section class="page active" id="page-workspace">
+      <div class="workspace-grid">
+        <div class="panel workspace-agents">
+          <div class="list-heading"><div><strong>测试 Agent</strong><div class="list-summary">选择后加载会话</div></div><button class="btn icon-only ghost" title="刷新 Agent"><i data-lucide="refresh-cw" class="icon"></i></button></div>
+          <div class="left-tools">
+            <div class="search-box"><i data-lucide="search" class="icon"></i><input class="input" id="agentSearch" placeholder="搜索 Agent"></div>
+          </div>
+          <div class="list-scroll" id="agentList" style="padding-top:7px">
+          <div class="agent-item active" data-agent="deepcube" data-filter="deepcube">
+            <div class="agent-line"><span class="agent-name">DeepCube 助手</span><span class="dot"></span></div>
+            <div class="agent-meta">Qwen3 · 3 MCP · 18 tools</div>
+          </div>
+          <div class="agent-item" data-agent="analysis" data-filter="analysis">
+            <div class="agent-line"><span class="agent-name">数据分析助手</span><span class="dot"></span></div>
+            <div class="agent-meta">DeepSeek · 2 MCP · 11 tools</div>
+          </div>
+          <div class="agent-item" data-agent="knowledge" data-filter="knowledge 知识库">
+            <div class="agent-line"><span class="agent-name">知识库助手</span><span class="dot"></span></div>
+            <div class="agent-meta">Qwen3 · RAG · 6 tools</div>
+          </div>
+          </div>
+        </div>
+
+        <div class="panel workspace-sessions">
+          <div class="list-heading"><strong id="sessionPanelTitle">DeepCube 会话</strong><div class="list-summary" id="sessionCount">4 个最近会话</div></div>
+          <div class="left-tools"><div style="display:flex;gap:6px"><div class="search-box" style="flex:1"><i data-lucide="search" class="icon"></i><input class="input" id="sessionSearch" placeholder="搜索当前 Agent 会话"></div><button class="btn icon-only primary" id="newSession" title="为当前 Agent 新建对话"><i data-lucide="square-pen" class="icon"></i></button></div></div>
+          <div class="list-scroll" id="sessionList">
+            <div class="session-item active" data-agent="deepcube" data-filter="预算 分摊">
+              <div class="session-name">预算费用分摊规则验证</div>
+              <div class="session-meta">2 分钟前 · 6 次工具调用</div>
+              <button class="btn icon-only ghost session-menu" title="重命名、自动标题或删除"><i data-lucide="ellipsis" class="icon icon-sm"></i></button>
+            </div>
+            <div class="session-item" data-agent="deepcube" data-filter="组织 科目">
+              <div class="session-name">组织 1152 科目成员查询</div>
+              <div class="session-meta">今天 17:32 · 已失败</div>
+              <button class="btn icon-only ghost session-menu" title="会话操作"><i data-lucide="ellipsis" class="icon icon-sm"></i></button>
+            </div>
+            <div class="session-item" data-agent="deepcube" data-filter="全年 Period">
+              <div class="session-name">Period 全年成员识别</div>
+              <div class="session-meta">昨天 · 4 次工具调用</div>
+            </div>
+            <div class="session-item" data-agent="deepcube" data-filter="模型 元数据">
+              <div class="session-name">预算模型元数据核对</div>
+              <div class="session-meta">昨天 · 已完成</div>
+            </div>
+            <div class="session-item hidden" data-agent="analysis" data-filter="收入 趋势"><div class="session-name">月度收入趋势分析</div><div class="session-meta">今天 16:20 · 已完成</div></div>
+            <div class="session-item hidden" data-agent="analysis" data-filter="预算 偏差"><div class="session-name">预算偏差原因排查</div><div class="session-meta">昨天 · 3 次工具调用</div></div>
+            <div class="session-item hidden" data-agent="knowledge" data-filter="平台 SSO"><div class="session-name">SSO 配置入口查询</div><div class="session-meta">昨天 · 已完成</div></div>
+          </div>
+        </div>
+
+        <div class="panel workspace-center">
+          <div class="chat-toolbar">
+            <div class="chat-title">
+              <strong id="chatHeading">预算费用分摊规则验证</strong>
+              <span class="badge success">运行中</span>
+            </div>
+            <div class="chat-actions">
+              <select class="select" style="width:146px;height:30px" title="会话模型"><option>Qwen3-235B</option><option>DeepSeek-V3</option></select>
+              <button class="btn" id="openContext"><i data-lucide="waypoints" class="icon"></i>请求上下文</button>
+              <button class="btn icon-only" title="更多"><i data-lucide="ellipsis" class="icon"></i></button>
+            </div>
+          </div>
+          <div class="messages" id="messages">
+            <div class="message">
+              <div class="avatar user">我</div>
+              <div class="message-body">
+                <div class="message-meta"><strong>测试用户</strong><span>17:32:08</span></div>
+                <div class="message-text">请检查预算场景下的分摊规则，并确认组织和科目成员是否匹配。</div>
+                <span class="attachment-chip"><i data-lucide="file-spreadsheet" class="icon icon-sm"></i>allocation_rule.xlsx · 28 KB</span>
+              </div>
+            </div>
+            <div class="message">
+              <div class="avatar ai">AI</div>
+              <div class="message-body">
+                <div class="message-meta"><strong>DeepCube 助手</strong><span>17:32:09</span></div>
+                <div class="message-text">我先读取 Cube 元数据并解析你提到的组织与科目范围。</div>
+                <details class="thinking"><summary>查看推理摘要</summary><div style="margin-top:6px">先定位财务模型，再将组织、科目和期间交给成员解析工具；全年成员必须经过候选类型校验。</div></details>
+                <div class="tool-event">
+                  <div class="tool-event-head">
+                    <div class="tool-event-title"><i data-lucide="wrench" class="icon"></i>deepcube_resolve_members</div>
+                    <span class="badge success">成功 · 286 ms</span>
+                  </div>
+                  <div class="tool-event-detail mono">Entity: [Org_1152] · Account: [Bonus, Salary] · Period: [TotalPeriod]</div>
+                </div>
+                <div class="tool-event">
+                  <div class="tool-event-head">
+                    <div class="tool-event-title"><i data-lucide="list-tree" class="icon"></i>deepcube_describe_cube</div>
+                    <span class="badge success">成功 · 164 ms</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="message">
+              <div class="avatar ai">AI</div>
+              <div class="message-body">
+                <div class="message-meta"><strong>DeepCube 助手</strong><span>17:32:10</span></div>
+                <div class="message-text">范围已确认。当前规则会以组织 1152 的末级组织为接收方，按全年期间汇总值计算。需要你确认写回版本。</div>
+                <div class="tool-event">
+                  <div class="tool-event-head">
+                    <div class="tool-event-title"><i data-lucide="circle-help" class="icon"></i>deep_cube__clarify</div>
+                    <span class="badge warning">等待人工确认</span>
+                  </div>
+                  <div class="tool-event-detail">
+                    <div class="hitl-form">
+                      <label><strong>分摊原因</strong><textarea class="textarea" style="margin-top:5px;min-height:62px" placeholder="请输入说明">按收入占比分摊</textarea></label>
+                      <label><strong>目标科目</strong><select class="select" style="margin-top:5px"><option>A100 · 主营业务收入</option><option>A101 · 其他业务收入</option></select></label>
+                      <div class="hitl-actions"><button class="btn small">取消</button><button class="btn primary small" id="confirmHitl">确认并继续</button></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="composer">
+            <div class="composer-box">
+              <textarea id="promptInput" placeholder="输入测试问题，或粘贴错误日志、请求 ID、会话 ID…"></textarea>
+              <div class="composer-actions">
+                <div class="composer-left">
+                  <button class="btn icon-only ghost" title="添加附件"><i data-lucide="paperclip" class="icon"></i></button>
+                  <button class="btn icon-only ghost" title="引用上下文"><i data-lucide="at-sign" class="icon"></i></button>
+                  <span class="badge">上下文已注入</span>
+                </div>
+                <div class="inline-actions"><button class="btn danger hidden" id="stopTest"><i data-lucide="square" class="icon"></i>停止</button><button class="btn primary" id="runTest"><i data-lucide="send" class="icon"></i>发送</button></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel workspace-right">
+          <div class="panel-head"><span class="panel-title">运行检查器</span><button class="btn icon-only ghost" title="固定面板"><i data-lucide="pin" class="icon"></i></button></div>
+          <div class="inspector-tabs" id="inspectorTabs">
+            <button class="tab-btn active" data-inspector="session">会话</button>
+            <button class="tab-btn" data-inspector="context">上下文</button>
+            <button class="tab-btn" data-inspector="tools">工具链</button>
+            <button class="tab-btn" data-inspector="events">原始事件</button>
+          </div>
+          <div class="inspector-body" id="inspector-session">
+            <dl class="context-grid"><dt>会话 ID</dt><dd class="mono">b7ac91135c36...</dd><dt>Agent</dt><dd>DeepCube 助手</dd><dt>主模型</dt><dd>Qwen3-235B</dd><dt>状态</dt><dd><span class="badge warning">等待用户</span></dd><dt>附件</dt><dd>1 个</dd><dt>Token</dt><dd>1,832 / 416</dd></dl>
+            <div class="inspect-section"><h4>会话操作</h4><div class="inline-actions"><button class="btn small"><i data-lucide="pencil" class="icon icon-sm"></i>重命名</button><button class="btn small"><i data-lucide="sparkles" class="icon icon-sm"></i>自动标题</button><button class="btn small danger"><i data-lucide="trash-2" class="icon icon-sm"></i>删除</button></div></div>
+            <div class="inspect-section"><h4>启用能力</h4><div class="cap-list"><span class="badge">MCP</span><span class="badge">HITL</span><span class="badge">附件</span><span class="badge">会话历史</span><span class="badge">多模态</span></div></div>
+          </div>
+          <div class="inspector-body hidden" id="inspector-context">
+            <dl class="context-grid">
+              <dt>环境</dt><dd><span class="badge test">Test</span></dd>
+              <dt>后端</dt><dd class="mono">127.0.0.1:8000</dd>
+              <dt>App</dt><dd class="mono">iirjgi005</dd>
+              <dt>Space</dt><dd class="mono">iirjgi</dd>
+              <dt>User</dt><dd class="mono">ruge <span class="badge source-badge">网关</span></dd>
+              <dt>Language</dt><dd>zh-cn</dd>
+              <dt>Request ID</dt><dd class="mono">req_8cf92a1</dd>
+              <dt>鉴权</dt><dd><span class="badge success">已继承平台 Token</span></dd>
+            </dl>
+            <div class="inspect-section">
+              <h4>当前 Agent</h4>
+              <div class="relation-list">
+                <div class="relation-item"><div class="relation-icon"><i data-lucide="bot" class="icon"></i></div><div class="relation-copy"><strong>DeepCube 助手</strong><span>主模型 Qwen3-235B</span></div></div>
+                <div class="relation-item"><div class="relation-icon"><i data-lucide="brain" class="icon"></i></div><div class="relation-copy"><strong>辅助模型 DeepSeek-R1</strong><span>用于工具参数推理</span></div></div>
+              </div>
+            </div>
+            <div class="inspect-section"><h4>启用能力</h4><div class="cap-list"><span class="badge">MCP</span><span class="badge">HITL</span><span class="badge">附件</span><span class="badge">会话历史</span></div></div>
+          </div>
+          <div class="inspector-body hidden" id="inspector-tools">
+            <div class="timeline" id="toolTimeline">
+              <div class="timeline-item success"><span class="time">164 ms</span><strong>describe_cube</strong><p>读取 MainCube 维度及模型信息</p></div>
+              <div class="timeline-item success"><span class="time">286 ms</span><strong>resolve_members</strong><p>识别组织、科目和全年期间成员</p></div>
+              <div class="timeline-item warning"><span class="time">等待中</span><strong>clarify</strong><p>表单结构校验通过，等待用户确认</p></div>
+            </div>
+          </div>
+          <div class="inspector-body hidden" id="inspector-events">
+            <div class="code-block">event: tool-call\ndata: {\n  "tool": "deep_cube__clarify",\n  "status": "pending",\n  "tool_call_id": "call_00_KtGe...",\n  "schema_valid": true\n}\n\nevent: usage\ndata: {"input_tokens": 1832, "output_tokens": 416}</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="page" id="page-configuration">
+      <div class="config-grid">
+        <div class="panel resource-nav">
+          <div class="nav-group-label">配置对象</div>
+          <button class="resource-btn active" data-resource="agents"><i data-lucide="bot" class="icon"></i>Agent<span class="resource-count">6</span></button>
+          <button class="resource-btn" data-resource="models"><i data-lucide="cpu" class="icon"></i>模型<span class="resource-count">8</span></button>
+          <button class="resource-btn" data-resource="mcps"><i data-lucide="plug-zap" class="icon"></i>MCP 服务<span class="resource-count">4</span></button>
+          <button class="resource-btn" data-resource="ui-tools"><i data-lucide="panel-top" class="icon"></i>UI 工具<span class="resource-count">7</span></button>
+          <button class="resource-btn" data-resource="aux"><i data-lucide="brain-circuit" class="icon"></i>辅助模型<span class="resource-count">3</span></button>
+          <div class="nav-group-label">模型资源</div>
+          <button class="resource-btn" data-resource="catalog"><i data-lucide="library" class="icon"></i>模型目录<span class="resource-count">24</span></button>
+        </div>
+
+        <div class="panel config-main">
+          <div class="toolbar">
+            <div class="toolbar-left">
+              <div class="search-box"><i data-lucide="search" class="icon"></i><input class="input" id="resourceSearch" placeholder="搜索 Agent"></div>
+              <select class="select" style="width:130px"><option>全部状态</option><option>已启用</option><option>已停用</option></select>
+            </div>
+            <div class="toolbar-right"><button class="btn"><i data-lucide="refresh-cw" class="icon"></i>刷新</button><button class="btn primary" id="createResource"><i data-lucide="plus" class="icon"></i>新建 Agent</button></div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th style="width:29%">名称</th><th style="width:21%" id="resourceCol2">主模型</th><th style="width:20%" id="resourceCol3">能力</th><th style="width:14%">状态</th><th style="width:16%">更新时间</th></tr></thead>
+              <tbody id="resourceTable"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="panel config-detail">
+          <div class="detail-head">
+            <div class="detail-head-top"><div><h3 id="detailTitle">DeepCube 助手</h3><p id="detailSub">agent_deepcube · 12 分钟前更新</p></div><button class="btn small"><i data-lucide="copy" class="icon icon-sm"></i>复制</button></div>
+          </div>
+          <div class="detail-tabs" id="detailTabs">
+            <button class="tab-btn active" data-detail="base">基础</button>
+            <button class="tab-btn" data-detail="prompt">Prompt</button>
+            <button class="tab-btn" data-detail="relations">关联资源</button>
+            <button class="tab-btn" data-detail="changes">变更记录</button>
+          </div>
+          <div class="detail-content" id="detail-base">
+            <div class="form-group"><label class="form-label">名称</label><input class="input" value="DeepCube 助手"></div>
+            <div class="form-group"><label class="form-label">说明</label><textarea class="textarea">面向财务模型查询、成员解析、DeepCube 脚本生成和调试。</textarea></div>
+            <div class="form-group"><label class="form-label">主模型</label><select class="select"><option>Qwen3-235B</option><option>DeepSeek-V3</option></select></div>
+            <div class="switch-row"><div><strong>启用 Agent</strong><div class="form-help">停用后不再出现在测试工作台</div></div><div class="switch on"></div></div>
+            <div class="switch-row"><div><strong>允许附件</strong><div class="form-help">支持图片、表格与文本文件</div></div><div class="switch on"></div></div>
+            <div style="margin-top:16px;display:flex;justify-content:flex-end;gap:7px"><button class="btn">取消</button><button class="btn primary">保存变更</button></div>
+          </div>
+          <div class="detail-content hidden" id="detail-prompt">
+            <div class="form-group"><label class="form-label">系统提示词 <span class="muted">8,214 字符</span></label><textarea class="textarea mono" style="min-height:360px">你是 DeepCube 助手。回答时先定位财务模型、维度和成员，再调用 MCP 工具验证……</textarea><div class="form-help">大段内容使用详情编辑，不再放入居中弹窗。</div></div>
+            <div style="display:flex;justify-content:flex-end"><button class="btn primary">保存 Prompt</button></div>
+          </div>
+          <div class="detail-content hidden" id="detail-relations">
+            <div class="form-label">模型</div>
+            <div class="relation-list"><div class="relation-item"><div class="relation-icon"><i data-lucide="cpu" class="icon"></i></div><div class="relation-copy"><strong>Qwen3-235B</strong><span>主模型 · text / image</span></div><button class="btn icon-only ghost"><i data-lucide="chevron-right" class="icon"></i></button></div></div>
+            <div class="form-label" style="margin-top:14px">MCP 服务</div>
+            <div class="relation-list">
+              <div class="relation-item"><div class="relation-icon"><i data-lucide="plug" class="icon"></i></div><div class="relation-copy"><strong>DeepCube MCP</strong><span>11 tools · HTTP</span></div><span class="badge success">正常</span></div>
+              <div class="relation-item"><div class="relation-icon"><i data-lucide="plug" class="icon"></i></div><div class="relation-copy"><strong>DeepFOS Knowledge</strong><span>6 tools · HTTP</span></div><span class="badge success">正常</span></div>
+            </div>
+            <div class="form-label" style="margin-top:14px">UI 工具</div>
+            <div class="relation-list"><div class="relation-item"><div class="relation-icon"><i data-lucide="panel-top" class="icon"></i></div><div class="relation-copy"><strong>clarify</strong><span>HITL 表单 · schema v3</span></div><span class="badge">已启用</span></div></div>
+          </div>
+          <div class="detail-content hidden" id="detail-changes">
+            <div class="timeline"><div class="timeline-item success"><span class="time">12 分钟前</span><strong>修改 Prompt</strong><p>ruge · 增加工具失败重试规则</p></div><div class="timeline-item success"><span class="time">昨天</span><strong>关联 UI 工具</strong><p>system · clarify schema v3</p></div><div class="timeline-item"><span class="time">07-14</span><strong>创建 Agent</strong><p>admin</p></div></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="page" id="page-diagnostics">
+      <div class="diagnostics-placeholder">
+        <div class="placeholder-inner">
+          <div class="placeholder-head"><div><h2>诊断中心</h2><p>这里先保留为独立能力入口。当前后端可以支持健康检查、当前会话事件和 UI 工具 Schema 校验；全局日志、P95 和跨实例诊断需要新的后端接口，暂不在原型里伪造运行数据。</p></div><span class="badge future-badge">能力待明确</span></div>
+          <div class="placeholder-grid">
+            <div class="health-item"><div class="health-top"><h3>当前会话链路</h3><span class="badge">现有数据</span></div><p>从 SSE 事件和会话历史查看模型、工具、HITL 和错误顺序。</p><button class="btn small" data-page-link="workspace">回到测试工作台</button></div>
+            <div class="health-item"><div class="health-top"><h3>UI 工具 Schema 校验</h3><span class="badge">可实现</span></div><p>在保存前检查 JSON、字段、选项和前端 Widget 兼容性。</p><button class="btn small" data-page-link="configuration">打开 UI 工具配置</button></div>
+            <div class="health-item"><div class="health-top"><h3>全局运行诊断</h3><span class="badge future-badge">需要后端支持</span></div><p>未来再评估请求日志、MCP 主动探测、成功率、P95 和服务健康。</p><button class="btn small" disabled>暂未开放</button></div>
+          </div>
+        </div>
+      </div>
+      <div class="diagnostics-page hidden" aria-hidden="true">
+        <div class="diag-nav" id="diagTabs">
+          <button class="tab-btn active" data-diag="runs">当前运行</button>
+          <button class="tab-btn" data-diag="mcp-health">连接与能力</button>
+          <button class="tab-btn" data-diag="schema">Schema 校验</button>
+          <button class="tab-btn" data-diag="services">平台诊断 <span class="badge future-badge" style="margin-left:4px">规划中</span></button>
+        </div>
+        <div class="diag-content">
+          <div class="diag-view active" id="diag-runs">
+            <div class="runs-layout">
+              <div class="diagnostic-banner"><div><strong>当前浏览器会话的实时链路</strong><p>数据来自当前 SSE 事件和会话历史，不代表全局运行指标。</p></div><div class="inline-actions"><span class="badge success">SSE 已连接</span><button class="btn"><i data-lucide="refresh-cw" class="icon"></i>刷新当前链路</button></div></div>
+              <div class="runs-grid">
+                <div class="run-list">
+                  <div class="toolbar"><div class="toolbar-left"><div class="search-box"><i data-lucide="search" class="icon"></i><input class="input" placeholder="当前会话事件或请求 ID"></div><select class="select" style="width:120px"><option>全部结果</option><option>失败</option><option>成功</option></select></div><button class="btn"><i data-lucide="copy" class="icon"></i>复制诊断摘要</button></div>
+                  <div class="table-wrap">
+                    <table>
+                      <thead><tr><th style="width:22%">时间 / 状态</th><th style="width:25%">会话</th><th style="width:18%">Agent</th><th style="width:15%">用户</th><th style="width:10%">耗时</th><th style="width:10%">工具</th></tr></thead>
+                      <tbody>
+                        <tr class="selected"><td><div class="status-cell"><span class="status-dot fail"></span><strong>17:32:10</strong></div><div class="cell-sub">req_8cf92a1</div></td><td><div class="cell-title">组织 1152 科目查询</div><div class="cell-sub mono">b6c5315424...</div></td><td>DeepCube 助手</td><td>ruge</td><td>6.7s</td><td>4</td></tr>
+                        <tr><td><div class="status-cell"><span class="status-dot ok"></span><strong>17:29:48</strong></div><div class="cell-sub">req_017ef33</div></td><td><div class="cell-title">预算模型元数据</div><div class="cell-sub mono">0ed12ab9d1...</div></td><td>DeepCube 助手</td><td>ruge</td><td>3.1s</td><td>3</td></tr>
+                        <tr><td><div class="status-cell"><span class="status-dot wait"></span><strong>17:25:04</strong></div><div class="cell-sub">req_923ec7a</div></td><td><div class="cell-title">预算分摊配置</div><div class="cell-sub mono">b7ac91135...</div></td><td>DeepCube 助手</td><td>wenjun.zhou</td><td>12.4s</td><td>5</td></tr>
+                        <tr><td><div class="status-cell"><span class="status-dot ok"></span><strong>17:20:16</strong></div><div class="cell-sub">req_33bca41</div></td><td><div class="cell-title">维度成员检索</div><div class="cell-sub mono">aa92fce371...</div></td><td>数据分析助手</td><td>ruge</td><td>2.8s</td><td>2</td></tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+                <div class="run-detail">
+                  <div class="panel-head"><div><span class="panel-title">请求详情</span><span class="badge danger" style="margin-left:7px">失败</span></div><button class="btn small"><i data-lucide="external-link" class="icon icon-sm"></i>打开会话</button></div>
+                  <div class="run-detail-body">
+                    <dl class="context-grid"><dt>Request ID</dt><dd class="mono">req_8cf92a1</dd><dt>Session</dt><dd class="mono">b6c5315424b2...</dd><dt>User</dt><dd>ruge</dd><dt>App / Space</dt><dd class="mono">iirjgi005 / iirjgi</dd><dt>模型</dt><dd>Qwen3-235B</dd><dt>Token</dt><dd>4,621 / 886</dd></dl>
+                    <div class="inspect-section"><h4>工具调用链</h4>
+                      <div class="call-row"><div class="call-row-head"><strong>1. describe_cube</strong><span class="badge success">164 ms</span></div><div class="call-row-body">模型元数据读取成功</div></div>
+                      <div class="call-row"><div class="call-row-head"><strong>2. find_nd_member</strong><span class="badge success">286 ms</span></div><div class="call-row-body">返回 TotalPeriod，层级 Descendant</div></div>
+                      <div class="call-row"><div class="call-row-head"><strong>3. clarify</strong><span class="badge danger">校验失败</span></div><div class="call-row-body mono">fields: Input should be a valid list</div></div>
+                    </div>
+                    <div class="inspect-section"><h4>错误摘要</h4><div class="code-block">ToolValidationError: clarify.fields\nExpected: array\nReceived: object\nRetry: 1 / 2</div></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="diag-view" id="diag-mcp-health">
+            <div class="health-grid">
+              <div class="health-item"><div class="health-top"><h3>DeepAgent API</h3><span class="badge success">已连接</span></div><p>基于 <span class="mono">/health</span> 与 <span class="mono">/info</span> 显示当前后端可用性和能力摘要。</p><dl class="context-grid"><dt>后端</dt><dd class="mono">127.0.0.1:8000</dd><dt>上下文</dt><dd>已继承</dd><dt>SSE</dt><dd>已连接</dd></dl><button class="btn small" style="margin-top:12px">重新检查</button></div>
+              <div class="health-item"><div class="health-top"><h3>当前 Agent 能力</h3><span class="badge success">已加载</span></div><p>展示 Agent 当前绑定的 MCP、UI 工具、附件与模型输入能力。</p><dl class="context-grid"><dt>MCP</dt><dd>3</dd><dt>Tools</dt><dd>18</dd><dt>UI 工具</dt><dd>2</dd></dl><button class="btn small" style="margin-top:12px">打开 Agent 配置</button></div>
+              <div class="health-item"><div class="health-top"><h3>MCP 主动探测</h3><span class="badge future-badge">需要后端支持</span></div><p>未来可对每个 MCP 执行实时连通、工具列表和延迟探测，当前只能显示配置状态。</p><button class="btn small" disabled>主动探测</button></div>
+            </div>
+          </div>
+
+          <div class="diag-view" id="diag-schema">
+            <div class="schema-layout">
+              <div class="schema-editor">
+                <div class="toolbar"><div class="toolbar-left"><strong>UI 工具 Schema</strong><select class="select" style="width:170px"><option>clarify · schema v3</option><option>config_fill · schema v2</option></select></div><button class="btn primary" id="validateSchema"><i data-lucide="check-check" class="icon"></i>校验</button></div>
+                <div class="editor-area" id="schemaEditor">{
+  "title": "分摊配置确认",
+  "fields": [
+    {
+      "id": "allocation_reason",
+      "type": "textarea",
+      "label": "分摊原因"
+    },
+    {
+      "id": "target_account",
+      "type": "select",
+      "label": "目标科目",
+      "options": [
+        {"value": "A100", "label": "主营业务收入"}
+      ]
+    }
+  ]
+}</div>
+              </div>
+              <div class="schema-result">
+                <div class="panel-head"><span class="panel-title">校验结果</span><span class="badge success" id="schemaStatus">通过</span></div>
+                <div class="inspector-body" id="schemaResults">
+                  <div class="validation-item"><strong><i data-lucide="circle-check" class="icon" style="color:var(--success)"></i>JSON 结构</strong><p>语法正确，可被解析。</p></div>
+                  <div class="validation-item"><strong><i data-lucide="circle-check" class="icon" style="color:var(--success)"></i>字段定义</strong><p>fields 为数组，2 个字段均包含 id、type 和 label。</p></div>
+                  <div class="validation-item"><strong><i data-lucide="circle-check" class="icon" style="color:var(--success)"></i>选项定义</strong><p>select 选项包含 value 与 label。</p></div>
+                  <div class="validation-item"><strong><i data-lucide="info" class="icon" style="color:var(--cyan)"></i>兼容性</strong><p>适用于当前前端 StructuredInteractionBlock。</p></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="diag-view" id="diag-services">
+            <div class="capability-grid">
+              <div class="health-item"><div class="health-top"><h3>全局请求日志</h3><span class="badge future-badge">需要后端接口</span></div><p>按 Request ID、Session ID、Agent 和用户检索跨实例运行日志。</p><button class="btn small" disabled>打开日志</button></div>
+              <div class="health-item"><div class="health-top"><h3>成功率与 P95</h3><span class="badge future-badge">需要指标服务</span></div><p>展示模型、MCP、UI 工具的成功率、延迟和重试分布。</p><button class="btn small" disabled>查看指标</button></div>
+              <div class="health-item"><div class="health-top"><h3>服务与存储健康</h3><span class="badge future-badge">需要后端接口</span></div><p>聚合 DeepAgent、模型网关、数据库和会话存储状态。</p><button class="btn small" disabled>健康详情</button></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div class="overlay" id="contextOverlay">
+    <div class="drawer" role="dialog" aria-modal="true" aria-labelledby="contextTitle">
+      <div class="drawer-head"><div><strong id="contextTitle">请求上下文</strong><div class="muted" style="font-size:11px;margin-top:2px">当前浏览器发出调试请求时使用的 Header</div></div><button class="btn icon-only ghost" id="closeContext" title="关闭"><i data-lucide="x" class="icon"></i></button></div>
+      <div class="drawer-body">
+        <div class="callout" id="contextCallout">当前浏览器已保存 <strong>Test 调试 Header</strong>。原型建议 User、Token 和 Cookie 仍由真实网关请求提供，页面只覆盖 App、Space、Language 等非敏感字段。</div>
+        <div class="form-label">Header 使用方式 <span class="badge source-badge">当前浏览器</span></div>
+        <div class="mode-grid" id="contextModes">
+          <div class="mode-card" data-mode="inherit"><strong><i data-lucide="waypoints" class="icon icon-sm"></i>未配置</strong><p>不额外注入 Header，使用页面和网关自然携带的请求信息。</p></div>
+          <div class="mode-card active" data-mode="debug"><strong><i data-lucide="flask-conical" class="icon icon-sm"></i>已配置</strong><p>将浏览器 LocalStorage 中的调试 Header 合并到控制台请求。</p></div>
+          <div class="mode-card" data-mode="online"><strong><i data-lucide="scan-search" class="icon icon-sm"></i>线上诊断 <span class="badge future-badge source-badge">规划</span></strong><p>只读展示网关生效上下文，不允许页面伪造用户。</p></div>
+        </div>
+        <div class="form-group"><label class="form-label">环境</label><div class="segmented" id="environmentSwitch"><button class="active" data-env="test">Test</button><button data-env="online">线上</button><button data-env="local">Local</button></div></div>
+        <div class="form-group"><label class="form-label">后端地址 <span class="badge source-badge" id="backendSource">调试覆盖</span></label><input class="input mono context-editable" id="backendInput" value="http://127.0.0.1:8000"></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div class="form-group"><label class="form-label">App <span class="badge source-badge context-source">调试覆盖</span></label><input class="input mono context-editable" id="appInput" value="iirjgi005"></div>
+          <div class="form-group"><label class="form-label">Space <span class="badge source-badge context-source">调试覆盖</span></label><input class="input mono context-editable" id="spaceInput" value="iirjgi"></div>
+          <div class="form-group"><label class="form-label">User <span class="badge source-badge">网关</span></label><input class="input mono readonly-field" value="ruge" readonly></div>
+          <div class="form-group"><label class="form-label">Language <span class="badge source-badge context-source">调试覆盖</span></label><select class="select context-editable" id="languageInput"><option>zh-cn</option><option>en</option></select></div>
+        </div>
+        <div class="form-group"><label class="form-label">鉴权状态 <span class="badge success">网关已验证</span></label><input class="input mono readonly-field" value="Token ••••••••7FA · Cookie 已继承" readonly><div class="form-help">Token 和 Cookie 不写入 localStorage，线上模式下也不可编辑。</div></div>
+        <div class="form-group hidden" id="localIdentity"><label class="form-label">本地调试身份 <span class="badge warning">仅当前页签</span></label><input class="input mono" id="localUserInput" placeholder="本地无网关时的调试 user"><div class="form-help">只在 Local 模式且后端明确允许时可用，刷新后丢弃。</div></div>
+        <div class="form-label">最终生效上下文</div>
+        <div class="context-table" id="effectiveContext">
+          <div class="context-row"><strong>User</strong><span class="value mono" id="effectiveUser">ruge</span><span class="badge source-badge" id="effectiveUserSource">网关</span></div>
+          <div class="context-row"><strong>App</strong><span class="value mono" id="effectiveApp">iirjgi005</span><span class="badge source-badge context-effective-source">调试覆盖</span></div>
+          <div class="context-row"><strong>Space</strong><span class="value mono" id="effectiveSpace">iirjgi</span><span class="badge source-badge context-effective-source">调试覆盖</span></div>
+          <div class="context-row"><strong>Language</strong><span class="value" id="effectiveLanguage">zh-cn</span><span class="badge source-badge context-effective-source">调试覆盖</span></div>
+          <div class="context-row"><strong>Token</strong><span class="value mono">•••••••7FA</span><span class="badge source-badge">网关</span></div>
+        </div>
+        <div class="advanced-box">
+          <div class="form-label">非敏感扩展 Header <button class="btn small ghost" id="toggleHeaders"><i data-lucide="code-2" class="icon icon-sm"></i>展开</button></div>
+          <div id="advancedHeaders" class="hidden"><textarea class="textarea mono context-editable" style="min-height:120px">{
+  "x-request-id": "debug-auto",
+  "x-debug-label": "allocation-check"
+}</textarea><div class="form-help">禁止输入 Cookie、Authorization、Token 和 User。非敏感预设可保存，敏感信息永不持久化。</div></div>
+        </div>
+      </div>
+      <div class="drawer-foot"><button class="btn" id="savePreset">保存非敏感预设</button><button class="btn" id="resetContext">恢复继承值</button><button class="btn primary" id="saveContext">应用到本次测试</button></div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast">操作完成</div>
+
+  <script>
+    const pageNames = { workspace: '测试工作台', configuration: '配置中心', diagnostics: '诊断中心' };
+    const resourceSets = {
+      agents: {
+        label: 'Agent', create: '新建 Agent', placeholder: '搜索 Agent',
+        rows: [
+          ['DeepCube 助手', 'agent_deepcube', 'Qwen3-235B', 'MCP · HITL · 附件', '已启用', '12 分钟前'],
+          ['数据分析助手', 'agent_analysis', 'DeepSeek-V3', 'MCP · 附件', '已启用', '昨天'],
+          ['知识库助手', 'agent_knowledge', 'Qwen3-32B', 'RAG · MCP', '已启用', '07-16'],
+          ['模型配置助手', 'agent_modeling', 'Qwen3-235B', 'MCP · HITL', '已停用', '07-14']
+        ]
+      },
+      models: {
+        label: '模型', create: '新建模型', placeholder: '搜索模型或供应商',
+        rows: [
+          ['Qwen3-235B', 'model_qwen3', 'DashScope', 'text · image · 64K', '已启用', '今天'],
+          ['DeepSeek-V3', 'model_dsv3', 'DeepSeek', 'text · 64K', '已启用', '昨天'],
+          ['DeepSeek-R1', 'model_dsr1', 'DeepSeek', 'reasoning · 64K', '已启用', '07-15'],
+          ['Qwen-VL-Max', 'model_qwenvl', 'DashScope', 'text · image', '已停用', '07-11']
+        ]
+      },
+      catalog: {
+        label: '模型目录', create: '刷新元数据', placeholder: '搜索模型、供应商或能力',
+        rows: [
+          ['qwen3-235b-a22b', 'catalog_qwen3_235b', 'DashScope', 'text · image · tools', '已配置', '今天'],
+          ['deepseek-v3', 'catalog_dsv3', 'DeepSeek', 'text · tools', '已配置', '今天'],
+          ['qwen-vl-max', 'catalog_qwenvl', 'DashScope', 'text · image', '未配置', '昨天'],
+          ['deepseek-r1', 'catalog_dsr1', 'DeepSeek', 'reasoning', '已配置', '昨天']
+        ]
+      },
+      mcps: {
+        label: 'MCP 服务', create: '新建 MCP', placeholder: '搜索 MCP 服务',
+        rows: [
+          ['DeepCube MCP', 'mcp_deepcube', 'HTTP', '11 tools · 用户上下文', '已启用', '8 分钟前'],
+          ['DeepFOS MCP', 'mcp_deepfos', 'HTTP', '12 tools · 用户鉴权', '已启用', '今天'],
+          ['Knowledge Search', 'mcp_knowledge', 'HTTP', '6 tools · 代码图谱', '已启用', '昨天'],
+          ['Finance Cube Legacy', 'mcp_finance', '历史 stdio', '仅保留迁移信息', '已停用', '07-09']
+        ]
+      },
+      'ui-tools': {
+        label: 'UI 工具', create: '新建 UI 工具', placeholder: '搜索 UI 工具',
+        rows: [
+          ['clarify', 'ui_clarify', 'Structured form', 'HITL · schema v3', '已启用', '6 分钟前'],
+          ['config_fill', 'ui_config_fill', 'Config editor', '配置回填 · schema v2', '已启用', '昨天'],
+          ['data_preview', 'ui_preview', 'Table', '表格预览', '已启用', '07-15'],
+          ['chart_preview', 'ui_chart', 'Chart', '图表预览', '已停用', '07-10']
+        ]
+      },
+      aux: {
+        label: '辅助模型', create: '新建辅助模型', placeholder: '搜索辅助模型',
+        rows: [
+          ['工具参数推理', 'aux_tool_args', 'DeepSeek-R1', 'tool args · retry', '已启用', '今天'],
+          ['会话标题生成', 'aux_title', 'Qwen3-32B', 'session title', '已启用', '昨天'],
+          ['附件内容识别', 'aux_attachment', 'Qwen-VL-Max', 'multimodal', '已启用', '07-14']
+        ]
+      }
+    };
+
+    function refreshIcons() {
+      if (window.lucide) window.lucide.createIcons();
+    }
+
+    function toast(message) {
+      const el = document.getElementById('toast');
+      el.textContent = message;
+      el.classList.add('show');
+      clearTimeout(window.__toastTimer);
+      window.__toastTimer = setTimeout(() => el.classList.remove('show'), 1800);
+    }
+
+    function showPage(page) {
+      if (!pageNames[page]) page = 'workspace';
+      document.querySelectorAll('.top-nav-btn[data-page]').forEach(x => x.classList.toggle('active', x.dataset.page === page));
+      document.querySelectorAll('.page').forEach(x => x.classList.remove('active'));
+      document.getElementById(`page-${page}`).classList.add('active');
+      document.getElementById('pageTitle').textContent = pageNames[page];
+    }
+    document.querySelectorAll('.top-nav-btn[data-page]').forEach(btn => btn.addEventListener('click', () => showPage(btn.dataset.page)));
+    document.querySelectorAll('[data-page-link]').forEach(btn => btn.addEventListener('click', () => showPage(btn.dataset.pageLink)));
+    showPage(new URLSearchParams(location.search).get('page') || 'workspace');
+
+    document.querySelectorAll('#inspectorTabs .tab-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('#inspectorTabs .tab-btn').forEach(x => x.classList.toggle('active', x === btn));
+        ['session', 'context', 'tools', 'events'].forEach(id => document.getElementById(`inspector-${id}`).classList.toggle('hidden', id !== btn.dataset.inspector));
+      });
+    });
+
+    const savedTheme = localStorage.getItem('deepagent-console-theme') || 'eye';
+    function setTheme(theme) {
+      document.documentElement.dataset.theme = theme;
+      document.querySelectorAll('#themeMenu button').forEach(btn => btn.classList.toggle('active', btn.dataset.theme === theme));
+      localStorage.setItem('deepagent-console-theme', theme);
+    }
+    document.querySelectorAll('#themeMenu button').forEach(btn => btn.addEventListener('click', () => setTheme(btn.dataset.theme)));
+    setTheme(savedTheme);
+
+    const overlay = document.getElementById('contextOverlay');
+    function openContext() { overlay.classList.add('open'); }
+    function closeContext() { overlay.classList.remove('open'); }
+    document.getElementById('openContext').addEventListener('click', openContext);
+    document.getElementById('closeContext').addEventListener('click', closeContext);
+    overlay.addEventListener('click', e => { if (e.target === overlay) closeContext(); });
+    document.getElementById('saveContext').addEventListener('click', () => { closeContext(); toast('调试上下文已应用到本次测试'); });
+    document.getElementById('resetContext').addEventListener('click', () => {
+      contextMode = 'inherit';
+      document.querySelectorAll('#contextModes .mode-card').forEach(x => x.classList.toggle('active', x.dataset.mode === 'inherit'));
+      document.getElementById('appInput').value = 'iirjgi005';
+      document.getElementById('spaceInput').value = 'iirjgi';
+      document.getElementById('languageInput').value = 'zh-cn';
+      document.getElementById('localUserInput').value = '';
+      updateContextControls();
+      toast('已恢复平台继承值');
+    });
+    document.getElementById('savePreset').addEventListener('click', () => toast('已保存非敏感预设，用户与鉴权信息未保存'));
+    document.getElementById('toggleHeaders').addEventListener('click', () => document.getElementById('advancedHeaders').classList.toggle('hidden'));
+
+    let contextMode = 'debug';
+    let contextEnv = 'test';
+    function updateContextControls() {
+      const readOnly = contextMode !== 'debug' || contextEnv === 'online';
+      document.querySelectorAll('.context-editable').forEach(el => {
+        el.disabled = readOnly;
+        el.classList.toggle('readonly-field', readOnly);
+      });
+      document.querySelectorAll('.context-source, .context-effective-source').forEach(el => {
+        el.textContent = readOnly ? '网关' : '调试覆盖';
+      });
+      document.getElementById('backendSource').textContent = readOnly ? '部署配置' : '调试覆盖';
+      document.getElementById('localIdentity').classList.toggle('hidden', contextEnv !== 'local' || contextMode !== 'debug');
+      const localUser = document.getElementById('localUserInput').value.trim();
+      const useLocalUser = contextEnv === 'local' && contextMode === 'debug' && localUser;
+      document.getElementById('effectiveUser').textContent = useLocalUser ? localUser : 'ruge';
+      document.getElementById('effectiveUserSource').textContent = useLocalUser ? '本地临时' : '网关';
+      document.getElementById('effectiveApp').textContent = readOnly ? 'iirjgi005' : document.getElementById('appInput').value;
+      document.getElementById('effectiveSpace').textContent = readOnly ? 'iirjgi' : document.getElementById('spaceInput').value;
+      document.getElementById('effectiveLanguage').textContent = readOnly ? 'zh-cn' : document.getElementById('languageInput').value;
+      document.getElementById('saveContext').disabled = contextMode === 'online';
+      const callout = document.getElementById('contextCallout');
+      if (contextMode === 'online') callout.innerHTML = '线上诊断模式由服务端强制只读。页面使用当前登录人的真实网关上下文，不允许切换身份或鉴权。';
+      else if (contextEnv === 'local') callout.innerHTML = '当前为 <strong>Local 调试</strong>。仅当本地后端明确开启调试开关时，才允许设置当前页签临时身份。';
+      else callout.innerHTML = '当前浏览器已保存 <strong>Test 调试 Header</strong>。原型建议 User、Token 和 Cookie 仍由真实网关请求提供，页面只覆盖 App、Space、Language 等非敏感字段。';
+    }
+    document.querySelectorAll('#contextModes .mode-card').forEach(card => card.addEventListener('click', () => {
+      contextMode = card.dataset.mode;
+      document.querySelectorAll('#contextModes .mode-card').forEach(x => x.classList.toggle('active', x === card));
+      if (contextMode === 'online') {
+        contextEnv = 'online';
+        document.querySelectorAll('#environmentSwitch button').forEach(x => x.classList.toggle('active', x.dataset.env === 'online'));
+      }
+      updateContextControls();
+    }));
+    document.querySelectorAll('#environmentSwitch button').forEach(btn => btn.addEventListener('click', () => {
+      contextEnv = btn.dataset.env;
+      btn.parentElement.querySelectorAll('button').forEach(x => x.classList.toggle('active', x === btn));
+      if (contextEnv === 'online') {
+        contextMode = 'online';
+        document.querySelectorAll('#contextModes .mode-card').forEach(x => x.classList.toggle('active', x.dataset.mode === 'online'));
+      }
+      updateContextControls();
+    }));
+    ['appInput', 'spaceInput', 'languageInput', 'localUserInput'].forEach(id => document.getElementById(id).addEventListener('input', updateContextControls));
+    updateContextControls();
+
+    document.getElementById('runTest').addEventListener('click', () => {
+      const input = document.getElementById('promptInput');
+      const text = input.value.trim() || '重新验证当前工具调用链，并输出可定位的错误信息。';
+      const messages = document.getElementById('messages');
+      messages.insertAdjacentHTML('beforeend', `<div class="message"><div class="avatar user">我</div><div class="message-body"><div class="message-meta"><strong>测试用户</strong><span>刚刚</span></div><div class="message-text"></div></div></div>`);
+      messages.lastElementChild.querySelector('.message-text').textContent = text;
+      input.value = '';
+      messages.scrollTop = messages.scrollHeight;
+      const timeline = document.getElementById('toolTimeline');
+      timeline.insertAdjacentHTML('beforeend', '<div class="timeline-item warning" id="liveRun"><span class="time">进行中</span><strong>新测试请求</strong><p>正在校验上下文并准备调用工具</p></div>');
+      document.getElementById('runTest').classList.add('hidden');
+      document.getElementById('stopTest').classList.remove('hidden');
+      toast('测试已发起');
+      setTimeout(() => {
+        const live = document.getElementById('liveRun');
+        if (live) { live.classList.remove('warning'); live.classList.add('success'); live.querySelector('.time').textContent = '428 ms'; live.querySelector('p').textContent = '上下文校验完成，工具参数结构合法'; }
+        document.getElementById('runTest').classList.remove('hidden');
+        document.getElementById('stopTest').classList.add('hidden');
+      }, 900);
+    });
+    document.getElementById('stopTest').addEventListener('click', () => {
+      document.getElementById('runTest').classList.remove('hidden');
+      document.getElementById('stopTest').classList.add('hidden');
+      const live = document.getElementById('liveRun');
+      if (live) { live.classList.remove('warning'); live.querySelector('.time').textContent = '已停止'; live.querySelector('p').textContent = '用户中止本次流式请求'; }
+      toast('已停止当前测试');
+    });
+    document.getElementById('newSession').addEventListener('click', () => toast('已创建空白测试会话'));
+    document.getElementById('confirmHitl').addEventListener('click', () => toast('已提交人工确认，Agent 将继续运行'));
+    document.querySelectorAll('.session-menu').forEach(btn => btn.addEventListener('click', e => { e.stopPropagation(); toast('可重命名、重新生成标题或删除当前会话'); }));
+    let selectedAgent = 'deepcube';
+    const agentNames = { deepcube: 'DeepCube 助手', analysis: '数据分析助手', knowledge: '知识库助手' };
+    function selectAgent(agent) {
+      selectedAgent = agent;
+      document.querySelectorAll('.agent-item').forEach(item => item.classList.toggle('active', item.dataset.agent === agent));
+      let visibleCount = 0;
+      document.querySelectorAll('.session-item').forEach(item => {
+        const visible = item.dataset.agent === agent;
+        item.classList.toggle('hidden', !visible);
+        item.classList.remove('active');
+        if (visible) visibleCount += 1;
+      });
+      document.getElementById('chatHeading').textContent = '选择历史会话或新建会话';
+      document.getElementById('sessionPanelTitle').textContent = `${agentNames[agent]} 会话`;
+      document.getElementById('sessionCount').textContent = `${visibleCount} 个最近会话 · 尚未选择`;
+      document.getElementById('sessionSearch').value = '';
+      toast(`已切换到${agentNames[agent]} Agent`);
+    }
+    document.querySelectorAll('.agent-item').forEach(item => item.addEventListener('click', () => selectAgent(item.dataset.agent)));
+    document.querySelectorAll('.session-item').forEach(item => item.addEventListener('click', () => {
+      if (item.classList.contains('hidden')) return;
+      document.querySelectorAll('.session-item').forEach(x => x.classList.toggle('active', x === item));
+      document.getElementById('chatHeading').textContent = item.querySelector('.session-name').textContent;
+    }));
+    document.getElementById('agentSearch').addEventListener('input', e => {
+      const q = e.target.value.toLowerCase();
+      document.querySelectorAll('.agent-item').forEach(item => item.classList.toggle('hidden', !item.textContent.toLowerCase().includes(q) && !(item.dataset.filter || '').toLowerCase().includes(q)));
+    });
+    document.getElementById('sessionSearch').addEventListener('input', e => {
+      const q = e.target.value.toLowerCase();
+      document.querySelectorAll('.session-item').forEach(item => {
+        const belongs = item.dataset.agent === selectedAgent;
+        const matches = item.textContent.toLowerCase().includes(q) || (item.dataset.filter || '').toLowerCase().includes(q);
+        item.classList.toggle('hidden', !belongs || !matches);
+      });
+    });
+
+    function renderResources(key) {
+      const data = resourceSets[key];
+      const columnLabels = {
+        agents: ['主模型', '能力'], models: ['供应商', '输入能力'], catalog: ['供应商', '能力'],
+        mcps: ['传输方式', '工具与上下文'], 'ui-tools': ['Widget', '用途'], aux: ['模型', '使用场景']
+      };
+      document.getElementById('resourceCol2').textContent = columnLabels[key][0];
+      document.getElementById('resourceCol3').textContent = columnLabels[key][1];
+      const tbody = document.getElementById('resourceTable');
+      tbody.innerHTML = data.rows.map((row, i) => `<tr class="${i === 0 ? 'selected' : ''}" data-name="${row[0]}" data-id="${row[1]}"><td><div class="cell-title">${row[0]}</div><div class="cell-sub mono">${row[1]}</div></td><td>${row[2]}</td><td><div class="cell-sub" style="margin:0">${row[3]}</div></td><td><span class="badge ${['已启用','已配置'].includes(row[4]) ? 'success' : ''}">${row[4]}</span></td><td>${row[5]}</td></tr>`).join('');
+      document.getElementById('resourceSearch').placeholder = data.placeholder;
+      document.getElementById('createResource').innerHTML = `<i data-lucide="${key === 'catalog' ? 'refresh-cw' : 'plus'}" class="icon"></i>${data.create}`;
+      document.getElementById('detailTitle').textContent = data.rows[0][0];
+      document.getElementById('detailSub').textContent = `${data.rows[0][1]} · ${data.rows[0][5]}更新`;
+      const allowedTabs = key === 'agents' ? ['base', 'prompt', 'relations', 'changes'] : key === 'catalog' ? ['base'] : ['base', 'changes'];
+      document.querySelectorAll('#detailTabs .tab-btn').forEach(btn => {
+        btn.classList.toggle('hidden', !allowedTabs.includes(btn.dataset.detail));
+        btn.classList.toggle('active', btn.dataset.detail === 'base');
+      });
+      ['base', 'prompt', 'relations', 'changes'].forEach(id => document.getElementById(`detail-${id}`).classList.toggle('hidden', id !== 'base'));
+      document.getElementById('detail-base').innerHTML = buildResourceDetail(key, data.rows[0]);
+      tbody.querySelectorAll('tr').forEach(row => row.addEventListener('click', () => {
+        tbody.querySelectorAll('tr').forEach(x => x.classList.toggle('selected', x === row));
+        document.getElementById('detailTitle').textContent = row.dataset.name;
+        document.getElementById('detailSub').textContent = `${row.dataset.id} · 当前选中资源`;
+        const selected = data.rows.find(item => item[1] === row.dataset.id);
+        document.getElementById('detail-base').innerHTML = buildResourceDetail(key, selected);
+        wireDynamicControls();
+      }));
+      wireDynamicControls();
+      refreshIcons();
+    }
+
+    function buildResourceDetail(key, row) {
+      const commonFooter = '<div style="margin-top:16px;display:flex;justify-content:flex-end;gap:7px"><button class="btn">取消</button><button class="btn primary">保存变更</button></div>';
+      if (key === 'catalog') return `<div class="form-group"><label class="form-label">模型标识</label><input class="input mono readonly-field" value="${row[0]}" readonly></div><div class="form-group"><label class="form-label">供应商</label><input class="input readonly-field" value="${row[2]}" readonly></div><div class="form-group"><label class="form-label">输入能力</label><div class="cap-list">${row[3].split(' · ').map(x => `<span class="badge">${x}</span>`).join('')}</div></div><div class="callout">模型目录是供应商元数据的只读视图。配置模型时才会填写 Base URL、API Key 等连接信息。</div><button class="btn primary">使用此模型创建配置</button>`;
+      if (key === 'mcps') return `<div class="form-group"><label class="form-label">名称</label><input class="input" value="${row[0]}"></div><div class="form-group"><label class="form-label">传输方式</label><select class="select"><option>Streamable HTTP</option><option>Built-in</option></select><div class="form-help">历史 stdio 只做迁移展示，新配置不再提供。</div></div><div class="form-group"><label class="form-label">URL</label><input class="input mono" value="https://mcp.deepfos.com/mcp"></div><div class="form-group"><label class="form-label">静态 Header</label><textarea class="textarea mono">{"x-mcp-token":"••••"}</textarea><div class="form-help">用户请求 Header 在运行时覆盖同名静态值。</div></div>${commonFooter}`;
+      if (key === 'ui-tools') return `<div class="form-group"><label class="form-label">工具名</label><input class="input mono" value="${row[0]}"></div><div class="form-group"><label class="form-label">Widget</label><input class="input mono" value="StructuredInteractionBlock"></div><div class="form-group"><label class="form-label">参数 Schema</label><textarea class="textarea mono" style="min-height:150px">{"type":"object","required":["title","fields"],"properties":{"fields":{"type":"array"}}}</textarea></div><div class="switch-row"><div><strong>失败时返回模型重试</strong><div class="form-help">非法中间调用不会泄露到 UI 和历史</div></div><div class="switch on"></div></div>${commonFooter}`;
+      if (key === 'models') return `<div class="form-group"><label class="form-label">配置名称</label><input class="input" value="${row[0]}"></div><div class="form-group"><label class="form-label">模型 / Base URL</label><input class="input mono" value="${row[1]}"><input class="input mono" style="margin-top:7px" value="https://api.example.com/v1"></div><div class="form-group"><label class="form-label">API Key</label><input class="input mono" type="password" value="MODEL_KEY_MASKED"></div><div class="form-group"><label class="form-label">输入模态</label><div class="segmented"><button class="active">自动识别</button><button>手工指定</button></div></div>${commonFooter}`;
+      if (key === 'aux') return `<div class="form-group"><label class="form-label">使用场景</label><input class="input" value="${row[0]}"></div><div class="form-group"><label class="form-label">模型策略</label><select class="select"><option>指定模型：${row[2]}</option><option>自动选择</option></select></div><div class="switch-row"><div><strong>启用映射</strong><div class="form-help">按使用场景为 Agent 提供辅助模型</div></div><div class="switch on"></div></div>${commonFooter}`;
+      return `<div class="form-group"><label class="form-label">名称</label><input class="input" value="${row[0]}"></div><div class="form-group"><label class="form-label">说明</label><textarea class="textarea">面向财务模型查询、成员解析、DeepCube 脚本生成和调试。</textarea></div><div class="form-group"><label class="form-label">主模型</label><select class="select"><option>${row[2]}</option><option>DeepSeek-V3</option></select></div><div class="form-group"><label class="form-label">温度 / 最大请求数</label><div style="display:grid;grid-template-columns:1fr 1fr;gap:7px"><input class="input" value="0.2"><input class="input" value="10"></div></div><div class="switch-row"><div><strong>启用 Agent</strong><div class="form-help">停用后不再出现在测试工作台</div></div><div class="switch on"></div></div>${commonFooter}`;
+    }
+    function wireDynamicControls() {
+      document.querySelectorAll('#detail-base .switch').forEach(sw => sw.addEventListener('click', () => sw.classList.toggle('on')));
+      document.querySelectorAll('#detail-base .segmented button').forEach(btn => btn.addEventListener('click', () => btn.parentElement.querySelectorAll('button').forEach(x => x.classList.toggle('active', x === btn))));
+    }
+    renderResources('agents');
+    document.querySelectorAll('.resource-btn').forEach(btn => btn.addEventListener('click', () => {
+      document.querySelectorAll('.resource-btn').forEach(x => x.classList.toggle('active', x === btn));
+      renderResources(btn.dataset.resource);
+    }));
+    document.getElementById('resourceSearch').addEventListener('input', e => {
+      const q = e.target.value.toLowerCase();
+      document.querySelectorAll('#resourceTable tr').forEach(row => row.classList.toggle('hidden', !row.textContent.toLowerCase().includes(q)));
+    });
+    document.getElementById('createResource').addEventListener('click', () => toast(document.querySelector('.resource-btn.active')?.dataset.resource === 'catalog' ? '模型目录元数据已刷新' : '新建操作将在完整详情区中打开'));
+
+    document.querySelectorAll('#detailTabs .tab-btn').forEach(btn => btn.addEventListener('click', () => {
+      document.querySelectorAll('#detailTabs .tab-btn').forEach(x => x.classList.toggle('active', x === btn));
+      ['base', 'prompt', 'relations', 'changes'].forEach(id => document.getElementById(`detail-${id}`).classList.toggle('hidden', id !== btn.dataset.detail));
+    }));
+    document.querySelectorAll('.switch').forEach(sw => sw.addEventListener('click', () => sw.classList.toggle('on')));
+
+    document.querySelectorAll('#diagTabs .tab-btn').forEach(btn => btn.addEventListener('click', () => {
+      document.querySelectorAll('#diagTabs .tab-btn').forEach(x => x.classList.toggle('active', x === btn));
+      document.querySelectorAll('.diag-view').forEach(x => x.classList.remove('active'));
+      document.getElementById(`diag-${btn.dataset.diag}`).classList.add('active');
+    }));
+    document.getElementById('validateSchema').addEventListener('click', () => {
+      const status = document.getElementById('schemaStatus');
+      status.textContent = '校验中'; status.className = 'badge warning';
+      setTimeout(() => { status.textContent = '通过'; status.className = 'badge success'; toast('Schema 校验通过'); }, 650);
+    });
+
+    refreshIcons();
+  </script>
+</body>
+</html>

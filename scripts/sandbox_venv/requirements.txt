@@ -1,0 +1,6 @@
+# Independent sandbox Profile packages + worker harness dependency.
+# Keep NumPy on 1.x (host DeepCube / pyarrow stack also requires this).
+numpy>=1.26,<2
+pandas
+# Worker loads deep_agent.sandbox.types via PYTHONPATH; pydantic must exist in this venv.
+pydantic>=2,<3

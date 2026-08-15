@@ -12,8 +12,6 @@ from pydantic_ai import RunContext
 from pydantic_ai.mcp import CallToolFunc
 
 from deep_agent.agent.deps import AgentDeps
-
-
 async def inject_request_meta(
     ctx: RunContext[AgentDeps],
     call_tool: CallToolFunc,
@@ -25,16 +23,3 @@ async def inject_request_meta(
     if ctx.deps.request_headers:
         metadata = {"headers": dict(ctx.deps.request_headers)}
     return await call_tool(name, args, metadata=metadata)
-
-
-def merge_mcp_headers(
-    static_headers: dict[str, str] | None,
-    request_headers: dict[str, str] | None,
-) -> dict[str, str] | None:
-    """Merge configured MCP headers with per-request forwarded headers."""
-    merged: dict[str, str] = {}
-    if static_headers:
-        merged.update(static_headers)
-    if request_headers:
-        merged.update(request_headers)
-    return merged or None

@@ -2,41 +2,57 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from deep_agent.capabilities.cursor_skills import load_cursor_skill_capabilities
-from deep_agent.capabilities.native import build_native_capability
-from deep_agent.capabilities.registry import Capability, CapabilityRegistry, ToolInfo
-from deep_agent.capabilities.skills import load_skill_capabilities
+from deep_agent.capabilities.attachments import build_attachment_tool_package
+from deep_agent.capabilities.native import build_native_tool_package
+from deep_agent.capabilities.registry import ToolInfo, ToolPackage, ToolPackageRegistry
+from deep_agent.capabilities.skills import load_skill_tool_packages
 from deep_agent.options import OPTION
 from loguru import logger
 
+from deep_agent.sandbox.profile import ResolvedSandboxProfile
+from deep_agent.sandbox.toolset import build_python_sandbox_tool_package
+
 if TYPE_CHECKING:
     from deep_agent.db.stores.bundle import DataStores
+    from deep_agent.sandbox.backend import PythonExecutionBackend
 
 __all__ = [
-    "Capability",
-    "CapabilityRegistry",
+    "ToolPackage",
+    "ToolPackageRegistry",
     "ToolInfo",
     "build_registry",
 ]
 
 
-def build_registry(*, stores: DataStores | None = None) -> CapabilityRegistry:
-    """Assemble the registry from static capability sources.
+def build_registry(
+    *,
+    stores: DataStores | None = None,
+    sandbox_backend: PythonExecutionBackend | None = None,
+    sandbox_profile: ResolvedSandboxProfile | None = None,
+) -> ToolPackageRegistry:
+    """Assemble the registry from static tool-package sources.
 
     ``stores`` is reserved for future immutable store-backed registration at
     startup. Mutable store config (e.g. MCP servers) is resolved at use time via
     ``capabilities.mcp.resolver``.
     """
     _ = stores
-    registry = CapabilityRegistry()
+    registry = ToolPackageRegistry()
 
-    registry.register(build_native_capability())
+    registry.register(build_native_tool_package())
 
-    for cap in load_skill_capabilities(OPTION.agent.skills_dir):
-        registry.register(cap)
+    if sandbox_backend is not None:
+        registry.register(
+            build_python_sandbox_tool_package(
+                sandbox_backend,
+                timeout_sec=float(OPTION.agent.sandbox_timeout),
+                sandbox_profile=sandbox_profile,
+            )
+        )
+    registry.register(build_attachment_tool_package())
 
-    for cap in load_cursor_skill_capabilities(OPTION.agent.cursor_skills_dir):
-        registry.register(cap)
+    for package in load_skill_tool_packages(OPTION.agent.skills_dir):
+        registry.register(package)
 
-    logger.info("Registered capabilities: {}", ", ".join(registry.names()))
+    logger.info("Registered tool packages: {}", ", ".join(registry.codes()))
     return registry

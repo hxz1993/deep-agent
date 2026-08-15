@@ -11,8 +11,8 @@ class SessionNotFoundError(DeepAgentError):
         self.session_id = session_id
 
 
-class CapabilityError(DeepAgentError):
-    """Raised when a capability fails to load or is misconfigured."""
+class ToolPackageError(DeepAgentError):
+    """Raised when a product tool package is unknown or misconfigured."""
 
 
 class AgentRunError(DeepAgentError):

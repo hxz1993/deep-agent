@@ -17,12 +17,14 @@ class SqliteChatSessionStore(ChatSessionStoreBase):
         session_id: str,
         *,
         user_id: str | None,
+        title: str | None = None,
         now: datetime,
     ) -> None:
         stmt = insert(ChatSession).values(
             agent_id=agent_scope,
             session_id=session_id,
             user_id=user_id,
+            title=title,
             created_at=now,
             updated_at=now,
         )
@@ -30,7 +32,7 @@ class SqliteChatSessionStore(ChatSessionStoreBase):
             index_elements=[ChatSession.agent_id, ChatSession.session_id],
             set_={
                 "updated_at": now,
-                **({"user_id": user_id} if user_id is not None else {}),
+                **({"title": title} if title is not None else {}),
             },
         )
         await db.execute(stmt)

@@ -1,0 +1,33 @@
+{
+  "session_id": "legacy-session-no-title",
+  "agent_id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+  "title": null,
+  "messages": [
+    {
+      "sequence": 0,
+      "payload": {
+        "parts": [
+          {
+            "content": "如何用 Python 实现快速排序？",
+            "timestamp": "2026-01-01T00:00:00Z",
+            "part_kind": "user-prompt"
+          }
+        ],
+        "kind": "request"
+      }
+    },
+    {
+      "sequence": 1,
+      "payload": {
+        "parts": [
+          {
+            "content": "快速排序是一种分治算法，核心是选择基准并递归排序左右子数组。",
+            "part_kind": "text"
+          }
+        ],
+        "kind": "response",
+        "timestamp": "2026-01-01T00:00:01Z"
+      }
+    }
+  ]
+}

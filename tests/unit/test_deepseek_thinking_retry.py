@@ -15,7 +15,7 @@ from pydantic_ai.messages import (
 from pydantic_ai.models import ModelRequestContext
 from pydantic_ai.providers.deepseek import DeepSeekProvider
 
-from deep_agent.agent.capabilities.deepseek_thinking_retry import (
+from deep_agent.agent.models.deepseek_thinking_retry import (
     DEEPSEEK_THINKING_RETRY_PROMPT,
     DeepSeekThinkingRetry,
     rewrite_messages_for_thinking_retry,
@@ -88,7 +88,7 @@ class DeepSeekThinkingRetryTests(unittest.IsolatedAsyncioTestCase):
         run_context = mock.Mock()
         run_context.deps = AgentDeps(session_id="sess-1")
 
-        with mock.patch("deep_agent.agent.capabilities.deepseek_thinking_retry.logger") as log:
+        with mock.patch("deep_agent.agent.models.deepseek_thinking_retry.logger") as log:
             updated = await DeepSeekThinkingRetry().before_model_request(run_context, request_context)
 
         retry = updated.messages[-1]

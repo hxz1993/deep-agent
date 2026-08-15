@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
@@ -16,11 +16,13 @@ from deep_agent.core.context import get_context
 from deep_agent.capabilities import build_registry
 from deep_agent.capabilities.mcp.lease_manager import McpLeaseManager
 from deep_agent.core.context import AppContext, init_context, reset_context
-from tests.helpers.sqlite_stores import make_sqlite_stores
+from tests.helpers.request_identity import TEST_USER_ID, install_test_user_header
+from tests.helpers.sqlite_stores import ensure_title_uses_main_model, make_sqlite_stores
 from tests.integration.helpers.chat import mock_request_disconnect, parse_sse_buffer, parse_sse_events
 from tests.integration.helpers.models import build_slow_stream_model, text_only_model, tool_call_model
 
 _CHAT_JSON = {"capabilities": []}
+_CONFIRM_CAPABILITIES = ["ui:builtin"]
 
 
 def _last_assistant(history: dict) -> dict | None:
@@ -59,7 +61,9 @@ def _tool_result_ids(history: dict) -> list[str]:
 class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         stores, self._engine, session_factory = await make_sqlite_stores()
+        await ensure_title_uses_main_model(stores)
         self._app = FastAPI()
+        install_test_user_header(self._app)
         self._app.include_router(api_router)
         init_context(
             AppContext.for_testing(
@@ -70,9 +74,15 @@ class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
                 db_session_factory=session_factory,
             )
         )
+        self._no_title = patch(
+            "deep_agent.agent.runner.AgentRunner._maybe_generate_title",
+            new_callable=AsyncMock,
+        )
+        self._no_title.start()
         self._transport = ASGITransport(app=self._app)
 
     async def asyncTearDown(self) -> None:
+        self._no_title.stop()
         await get_context().event_persister.aclose()
         reset_context()
         await self._engine.dispose()
@@ -100,10 +110,13 @@ class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
         return parse_sse_events(body)
 
     async def _run_hitl_pending(self) -> tuple[str, str]:
-        test_model = tool_call_model("confirm_action", text="done after confirm")
+        test_model = tool_call_model("builtin__confirm", text="done after confirm")
         events = await self._stream_events(
             model=test_model,
-            json_body={"message": "请用户确认"},
+            json_body={
+                "message": "请用户确认",
+                "capabilities": _CONFIRM_CAPABILITIES,
+            },
         )
         session_id = events[0]["session_id"]
         final = next(ev for ev in reversed(events) if ev.get("type") == "final")
@@ -193,7 +206,7 @@ class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
 
         with patch("deep_agent.agent.factory._resolve_model", return_value=model):
             runner = await build_runner(get_context(), capabilities=[])
-            deps = AgentDeps(session_id=session_id)
+            deps = AgentDeps(session_id=session_id, user=TEST_USER_ID)
             events: list[dict] = []
             agen = runner.run_stream(
                 session_id,
@@ -232,14 +245,15 @@ class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
         assert assistant is not None
         calls = _tool_call_parts(assistant)
         self.assertEqual(len(calls), 1)
-        self.assertEqual(calls[0]["tool"], "confirm_action")
+        self.assertEqual(calls[0]["tool"], "builtin__confirm")
         self.assertEqual(calls[0]["tool_call_id"], tool_call_id)
 
-        test_model = tool_call_model("confirm_action", text="resumed ok")
+        test_model = tool_call_model("builtin__confirm", text="resumed ok")
         events = await self._stream_events(
             model=test_model,
             json_body={
                 "session_id": session_id,
+                "capabilities": _CONFIRM_CAPABILITIES,
                 "deferred_tool_results": [
                     {
                         "tool_call_id": tool_call_id,

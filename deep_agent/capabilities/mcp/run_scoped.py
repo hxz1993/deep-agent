@@ -14,8 +14,8 @@ from typing_extensions import Self
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.capabilities.mcp.errors import is_recoverable_mcp_disconnect
 from deep_agent.capabilities.mcp.lease_manager import McpLeaseManager, get_mcp_lease_manager
-from deep_agent.capabilities.mcp.request_context import merge_mcp_headers
 from deep_agent.db.session_scope import runtime_session_key
+from deep_agent.mcp_request_context import resolve_mcp_headers
 
 
 @dataclass
@@ -43,10 +43,8 @@ class RunScopedMcpToolset(AbstractToolset[AgentDeps]):
         return PrefixedToolset(self, prefix)
 
     async def for_run(self, ctx: RunContext[AgentDeps]) -> AbstractToolset[AgentDeps]:
-        request_headers = dict(ctx.deps.request_headers) if ctx.deps.request_headers else None
-        request_headers.update({
-            "x-session-id": ctx.deps.session_id,
-        })
+        request_headers = dict(ctx.deps.request_headers or {})
+        request_headers["x-session-id"] = ctx.deps.session_id
         pool_key = runtime_session_key(ctx.deps.session_id, agent_id=ctx.deps.agent_id)
         return replace(
             self,
@@ -59,9 +57,8 @@ class RunScopedMcpToolset(AbstractToolset[AgentDeps]):
     def _build_inner_toolset(self, connect_url: str) -> AbstractToolset[AgentDeps]:
         from deep_agent.capabilities.mcp.toolset_builder import build_raw_url_mcp_toolset
 
-        static_headers = dict(self.config.get("headers") or {})
         request_headers = dict(self._request_headers) if self._request_headers else None
-        merged = merge_mcp_headers(static_headers, request_headers) or {}
+        merged = resolve_mcp_headers("builtin", self.config, request_headers) or {}
         return build_raw_url_mcp_toolset(
             self.server_name,
             connect_url,

@@ -3,43 +3,47 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from deep_agent.capabilities.ui.builtin import builtin_ui_records
-from deep_agent.capabilities.ui.registry import merge_definitions
 from deep_agent.capabilities.ui.types import UIToolRecord
-from deep_agent.db.deps import get_ui_tool_store
+from deep_agent.db.deps import get_agent_store, get_ui_tool_package_store, get_ui_tool_store
+from deep_agent.db.stores.agent import AgentStoreBase
 from deep_agent.db.stores.ui_tool import UiToolStoreBase
+from deep_agent.db.stores.ui_tool_package import UiToolPackageStoreBase
 from deep_agent.schemas.ui_tools import UiToolCreate, UiToolListResponse, UiToolResponse, UiToolUpdate
 
 router = APIRouter()
-_BUILTIN_NAMES = {record.name for record in builtin_ui_records()}
+_BUILTIN_RECORDS = {record.name: record for record in builtin_ui_records()}
+_BUILTIN_NAMES = set(_BUILTIN_RECORDS)
+
+
+def _include_builtins(*, source: str | None, enabled: bool | None) -> bool:
+    return source in {None, "builtin"} and enabled is not False
 
 
 @router.get("/ui-tools", response_model=UiToolListResponse)
 async def list_ui_tools(
     store: UiToolStoreBase = Depends(get_ui_tool_store),
-    agent_id: str | None = Query(default=None),
-    mcp_server: str | None = Query(default=None),
     source: str | None = Query(default=None),
     enabled: bool | None = Query(default=None),
 ) -> UiToolListResponse:
     rows = await store.list_all(
         source=source,
-        mcp_server_name=mcp_server,
         enabled=enabled,
-        agent_id=agent_id,
     )
 
-    db_records = [UIToolRecord.from_row(row) for row in rows if row.source != "builtin"]
-    merged, _ = merge_definitions(builtin_ui_records(), db_records)
-    winners = {record.name: record for record in merged}
+    rows = [
+        row
+        for row in rows
+        if row.source != "builtin" and row.name not in _BUILTIN_NAMES
+    ]
+    builtins = builtin_ui_records() if _include_builtins(source=source, enabled=enabled) else []
 
     items: list[UiToolResponse] = []
+    for record in builtins:
+        items.append(UiToolResponse.from_record(record))
     for row in rows:
-        winner = winners.get(row.name)
-        shadowed_by = None
-        if winner is not None and winner.source != row.source:
-            shadowed_by = winner.source
-        items.append(UiToolResponse.from_row(row, shadowed_by=shadowed_by))
+        items.append(UiToolResponse.from_row(row))
 
+    items.sort(key=lambda item: (item.name, item.source))
     return UiToolListResponse(items=items, total=len(items))
 
 
@@ -48,6 +52,9 @@ async def get_ui_tool(
     name: str,
     store: UiToolStoreBase = Depends(get_ui_tool_store),
 ) -> UiToolResponse:
+    builtin = _BUILTIN_RECORDS.get(name)
+    if builtin is not None:
+        return UiToolResponse.from_record(builtin)
     row = await store.get_by_name(name)
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"UI tool not found: {name}")
@@ -58,8 +65,9 @@ async def get_ui_tool(
 async def create_ui_tool(
     body: UiToolCreate,
     store: UiToolStoreBase = Depends(get_ui_tool_store),
+    package_store: UiToolPackageStoreBase = Depends(get_ui_tool_package_store),
 ) -> UiToolResponse:
-    if body.name in _BUILTIN_NAMES and not body.override:
+    if body.name in _BUILTIN_NAMES:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Builtin tool name is reserved: {body.name}",
@@ -70,7 +78,13 @@ async def create_ui_tool(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"UI tool already exists: {body.name}",
         )
-    row = await store.create_manual(body)
+    package = await package_store.get_by_code(body.package_code)
+    if package is None or package.source != "manual":
+        raise HTTPException(status_code=422, detail="Manual UI tool package does not exist")
+    try:
+        row = await store.create_manual(body)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     return UiToolResponse.from_row(row)
 
 
@@ -79,21 +93,19 @@ async def update_ui_tool(
     name: str,
     body: UiToolUpdate,
     store: UiToolStoreBase = Depends(get_ui_tool_store),
-    force: bool = Query(default=False),
+    package_store: UiToolPackageStoreBase = Depends(get_ui_tool_package_store),
 ) -> UiToolResponse:
+    if name in _BUILTIN_NAMES:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Builtin UI tools cannot be modified")
     row = await store.get_by_name(name)
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"UI tool not found: {name}")
     if row.source == "builtin":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Builtin UI tools cannot be modified")
-    if row.source == "mcp" and not force:
-        allowed = {"enabled", "agent_ids", "override"}
-        updates = body.model_dump(exclude_unset=True)
-        if set(updates) - allowed:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="MCP-discovered tools only allow enabled, agent_ids, and override unless force=true",
-            )
+    if body.package_code is not None:
+        package = await package_store.get_by_code(body.package_code)
+        if package is None or package.source != "manual":
+            raise HTTPException(status_code=422, detail="Manual UI tool package does not exist")
     updated = await store.update(name, body)
     assert updated is not None
     return UiToolResponse.from_row(updated)
@@ -103,10 +115,23 @@ async def update_ui_tool(
 async def delete_ui_tool(
     name: str,
     store: UiToolStoreBase = Depends(get_ui_tool_store),
+    agent_store: AgentStoreBase = Depends(get_agent_store),
 ) -> None:
+    if name in _BUILTIN_NAMES:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Builtin UI tools cannot be deleted")
     row = await store.get_by_name(name)
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"UI tool not found: {name}")
     if row.source == "builtin":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Builtin UI tools cannot be deleted")
+    referenced_by = await agent_store.list_referencing_capability(row.package_code)
+    if referenced_by:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "message": "UI 工具正在被 Agent 引用，不能删除",
+                "resource": name,
+                "referenced_by": [agent.name for agent in referenced_by],
+            },
+        )
     await store.delete(name)

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from abc import abstractmethod
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 from sqlalchemy import Select, delete, func, select
@@ -13,7 +13,12 @@ from deep_agent.db.session_list import (
     SessionSummaryRow,
     SortField,
 )
-from deep_agent.db.session_scope import NO_AGENT_SCOPE, agent_scope_to_api, normalize_agent_scope
+from deep_agent.db.session_scope import (
+    NO_AGENT_SCOPE,
+    SessionOwner,
+    agent_scope_to_api,
+    normalize_agent_scope,
+)
 from deep_agent.db.stores._session import SessionBoundMixin
 
 if TYPE_CHECKING:
@@ -39,9 +44,19 @@ class ChatSessionStoreBase(SessionBoundMixin):
         session_id: str,
         *,
         agent_id: str | None = None,
+        user_id: str | None = None,
     ) -> tuple[str, str] | None:
         async with self._read() as db:
-            return await self._resolve_ref(db, session_id, agent_id=agent_id)
+            return await self._resolve_ref(
+                db,
+                session_id,
+                agent_id=agent_id,
+                user_id=user_id,
+            )
+
+    async def get_owner(self, agent_scope: str, session_id: str) -> SessionOwner:
+        async with self._read() as db:
+            return await self._get_owner(db, agent_scope, session_id)
 
     async def get_timestamps(
         self,
@@ -88,6 +103,7 @@ class ChatSessionStoreBase(SessionBoundMixin):
         session_id: str,
         *,
         user_id: str | None,
+        title: str | None = None,
         now: datetime,
     ) -> None:
         """Dialect-specific upsert for ChatSession."""
@@ -104,13 +120,15 @@ class ChatSessionStoreBase(SessionBoundMixin):
         session_id: str,
         *,
         agent_id: str | None = None,
+        user_id: str | None = None,
     ) -> tuple[str, str] | None:
         scope = normalize_agent_scope(agent_id)
-        result = await db.execute(
-            select(ChatSession.agent_id, ChatSession.session_id).where(
-                ChatSession.session_id == session_id,
-            )
+        stmt = select(ChatSession.agent_id, ChatSession.session_id).where(
+            ChatSession.session_id == session_id,
         )
+        if user_id is not None:
+            stmt = stmt.where(ChatSession.user_id == user_id)
+        result = await db.execute(stmt)
         matches = list(result.all())
         if not matches:
             return None
@@ -126,6 +144,25 @@ class ChatSessionStoreBase(SessionBoundMixin):
                 if row.agent_id == scope:
                     return (row.agent_id, row.session_id)
         return None
+
+    async def _get_owner(
+        self,
+        db: AsyncSession,
+        agent_scope: str,
+        session_id: str,
+        *,
+        for_update: bool = False,
+    ) -> SessionOwner:
+        stmt = select(ChatSession.user_id).where(
+            ChatSession.agent_id == agent_scope,
+            ChatSession.session_id == session_id,
+        )
+        if for_update:
+            stmt = stmt.with_for_update()
+        row = (await db.execute(stmt)).one_or_none()
+        if row is None:
+            return SessionOwner(exists=False)
+        return SessionOwner(exists=True, user_id=row.user_id)
 
     async def _get_timestamps(
         self,
@@ -216,6 +253,7 @@ class ChatSessionStoreBase(SessionBoundMixin):
             select(
                 ChatSession.session_id,
                 ChatSession.agent_id,
+                ChatSession.title,
                 ChatSession.created_at,
                 ChatSession.updated_at,
                 Agent.name.label("agent_name"),
@@ -231,6 +269,7 @@ class ChatSessionStoreBase(SessionBoundMixin):
             .group_by(
                 ChatSession.session_id,
                 ChatSession.agent_id,
+                ChatSession.title,
                 ChatSession.created_at,
                 ChatSession.updated_at,
                 Agent.name,
@@ -264,6 +303,7 @@ class ChatSessionStoreBase(SessionBoundMixin):
                 updated_at=row.updated_at,
                 message_count=int(row.message_count),
                 user_prompt=user_prompts.get((row.agent_id, row.session_id)),
+                title=row.title,  # Use title from database if available
             )
             for row in rows
         ]
@@ -303,3 +343,29 @@ class ChatSessionStoreBase(SessionBoundMixin):
             total = int((await db.execute(select(func.count()).select_from(grouped.subquery()))).scalar_one())
 
         return summaries, total
+
+    async def get_session_title(
+        self, db_session: AsyncSession, scope: str, session_id: str
+    ) -> str | None:
+        """查询会话标题。"""
+        stmt = select(ChatSession.title).where(
+            ChatSession.agent_id == scope,
+            ChatSession.session_id == session_id,
+        )
+        result = await db_session.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def update_session_title(
+        self, db_session: AsyncSession, scope: str, session_id: str, title: str
+    ) -> None:
+        """更新标题，同时刷新 updated_at。"""
+        from sqlalchemy import update
+        stmt = (
+            update(ChatSession)
+            .where(
+                ChatSession.agent_id == scope,
+                ChatSession.session_id == session_id,
+            )
+            .values(title=title, updated_at=datetime.now(timezone.utc))
+        )
+        await db_session.execute(stmt)

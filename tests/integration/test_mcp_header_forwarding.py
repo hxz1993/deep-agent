@@ -47,6 +47,22 @@ class McpHeaderForwardingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(received.get("x-api-key"), "static-key")
         self.assertEqual(received.get("x-tenant-id"), "tenant-merge")
 
+    async def test_isolated_http_mcp_does_not_receive_request_headers(self) -> None:
+        forwarded = {"X-Tenant-Id": "tenant-request", "User": "request-user"}
+        static = {"X-Api-Key": "static-key", "User": "static-user"}
+        with streamable_http_echo_server() as mcp_url:
+            received = await call_echo_tool(
+                url_echo_toolset(
+                    mcp_url,
+                    static_headers=static,
+                    request_context_mode="isolated",
+                ),
+                forwarded,
+            )
+        self.assertEqual(received.get("x-api-key"), "static-key")
+        self.assertEqual(received.get("user"), "static-user")
+        self.assertNotIn("x-tenant-id", received)
+
 
 if __name__ == "__main__":
     unittest.main()

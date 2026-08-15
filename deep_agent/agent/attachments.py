@@ -1,47 +1,48 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from typing import Any, Mapping, Sequence
 
 from pydantic_ai.messages import BinaryContent, ModelMessage, ModelRequest, TextContent, UserContent, UserPromptPart
 
+from deep_agent.agent.context_references import (
+    context_reference_dict,
+    context_references_from_content,
+    format_context_reference_prompt,
+    is_context_reference,
+)
 from deep_agent.schemas.attachment import AttachmentRef
+from deep_agent.schemas.context_reference import ContextReference
 
 ATTACHMENT_REF_KIND = "attachment-ref"
-
-# ponytail: name-heuristic until llm_models gains a supports_vision flag
-_VISION_MODEL_MARKERS = (
-    "gpt-4o",
-    "gpt-4-turbo",
-    "gpt-4-vision",
-    "gpt-4.1",
-    "claude-3",
-    "claude-sonnet-4",
-    "claude-opus-4",
-    "gemini",
-    "qwen3-vl",
-    "qwen3.7",
-    "qwen3.6",
-    "qwen3.5-omni",
-    "kimi-k2",
-    "moonshot-v1-vision",
-    "deepseek-vl",
-    "glm-4v",
-    "internvl",
+_NATIVE_MEDIA: tuple[tuple[str, str, str], ...] = (
+    ("image/", "image", "图片"),
+    ("audio/", "audio", "音频"),
+    ("video/", "video", "视频"),
 )
+
+
+def model_supports_image_input(
+    db_modalities: list[str] | None = None,
+) -> bool:
+    """Return whether the model accepts image attachments.
+
+    ``llm_models.input_modalities`` is the sole runtime source. The model name,
+    Provider URL, and catalog are intentionally not consulted.
+
+    Args:
+        db_modalities: ``input_modalities`` persisted on the ``llm_models`` row.
+    """
+    return "image" in (db_modalities or [])
 
 
 class AttachmentDownloadError(Exception):
     """Platform file download returned an error payload instead of file bytes."""
 
 
-def model_supports_image_input(model_name: str) -> bool:
-    name = model_name.lower()
-    if ":" in name:
-        _prefix, _sep, rest = name.partition(":")
-        if rest:
-            name = rest
-    return any(marker in name for marker in _VISION_MODEL_MARKERS)
+class UnsupportedAttachmentModalityError(ValueError):
+    """Attached native media is incompatible with the active model."""
 
 
 def attachment_ref_dict(ref: AttachmentRef) -> dict[str, Any]:
@@ -60,11 +61,58 @@ def is_attachment_ref(item: Any) -> bool:
     return isinstance(item, dict) and item.get("kind") == ATTACHMENT_REF_KIND
 
 
+def _merge_attachment_ref(
+    existing: AttachmentRef | None,
+    incoming: AttachmentRef,
+) -> AttachmentRef:
+    if existing is None:
+        return incoming
+    return AttachmentRef(
+        id=incoming.id,
+        name=existing.name or incoming.name,
+        mime=existing.mime or incoming.mime,
+        extracted_text=existing.extracted_text or incoming.extracted_text,
+    )
+
+
+def index_attachment_refs(
+    attachments: Sequence[AttachmentRef] | None = None,
+    messages: Sequence[ModelMessage] | None = None,
+) -> dict[str, AttachmentRef]:
+    """Index only attachment ids that belong to the current raw session."""
+    indexed: dict[str, AttachmentRef] = {}
+    for ref in attachments or ():
+        indexed[ref.id] = _merge_attachment_ref(indexed.get(ref.id), ref)
+    for message in messages or ():
+        if not isinstance(message, ModelRequest):
+            continue
+        for part in message.parts:
+            if not isinstance(part, UserPromptPart) or not isinstance(
+                part.content,
+                (list, tuple),
+            ):
+                continue
+            for item in part.content:
+                if not is_attachment_ref(item):
+                    continue
+                ref = AttachmentRef(
+                    id=str(item["id"]),
+                    name=item.get("name"),
+                    mime=item.get("mime"),
+                    extracted_text=item.get("extracted_text"),
+                )
+                indexed[ref.id] = _merge_attachment_ref(indexed.get(ref.id), ref)
+    return indexed
+
+
 def refs_from_attachments(
     message: str,
     attachments: Sequence[AttachmentRef] | None,
+    context_refs: Sequence[ContextReference] | None = None,
 ) -> str | list[str | dict[str, Any]]:
     parts: list[str | dict[str, Any]] = []
+    for ref in context_refs or ():
+        parts.append(context_reference_dict(ref))
     text = message.strip()
     if text:
         parts.append(text)
@@ -77,10 +125,14 @@ def refs_from_attachments(
     return parts
 
 
-def has_user_turn(message: str, attachments: Sequence[AttachmentRef] | None) -> bool:
+def has_user_turn(
+    message: str,
+    attachments: Sequence[AttachmentRef] | None,
+    context_refs: Sequence[ContextReference] | None = None,
+) -> bool:
     if message.strip():
         return True
-    return bool(attachments)
+    return bool(attachments or context_refs)
 
 
 async def resolve_user_prompt(
@@ -88,15 +140,24 @@ async def resolve_user_prompt(
     attachments: Sequence[AttachmentRef] | None,
     request_headers: Mapping[str, str],
     *,
-    vision_capable: bool = True,
+    context_refs: Sequence[ContextReference] | None = None,
+    input_modalities: Sequence[str] | None = None,
 ) -> list[UserContent]:
+    modalities = frozenset(input_modalities or ())
     parts: list[UserContent] = []
     text = message.strip()
-    if text:
+    if context_refs:
+        parts.append(format_context_reference_prompt(context_refs, text))
+    elif text:
         parts.append(text)
     for ref in attachments or ():
         parts.extend(
-            await _resolve_ref(ref, request_headers, full=True, vision_capable=vision_capable)
+            await _resolve_ref(
+                ref,
+                request_headers,
+                full=True,
+                modalities=modalities,
+            )
         )
     return parts
 
@@ -106,8 +167,9 @@ async def resolve_history_for_llm(
     *,
     current_user_index: int | None,
     request_headers: Mapping[str, str],
-    vision_capable: bool = True,
+    input_modalities: Sequence[str] | None = None,
 ) -> list[ModelMessage]:
+    modalities = frozenset(input_modalities or ())
     resolved: list[ModelMessage] = []
     for idx, message in enumerate(messages):
         if not isinstance(message, ModelRequest):
@@ -120,17 +182,17 @@ async def resolve_history_for_llm(
                 new_parts.append(part)
                 continue
             new_parts.append(
-                UserPromptPart(
+                replace(
+                    part,
                     content=await _resolve_user_prompt_part(
                         part.content,
                         request_headers,
                         full=full_turn,
-                        vision_capable=vision_capable,
+                        modalities=modalities,
                     ),
-                    timestamp=part.timestamp,
                 )
             )
-        resolved.append(ModelRequest(parts=new_parts, timestamp=message.timestamp))
+        resolved.append(replace(message, parts=new_parts))
     return resolved
 
 
@@ -159,14 +221,29 @@ async def _resolve_user_prompt_part(
     request_headers: Mapping[str, str],
     *,
     full: bool,
-    vision_capable: bool,
+    modalities: frozenset[str],
 ) -> str | list[UserContent]:
     if isinstance(content, str):
         return content
     resolved: list[UserContent] = []
+    context_refs = context_references_from_content(content)
+    text_chunks: list[str] = []
     for item in content:
         if isinstance(item, str):
-            resolved.append(item)
+            text_chunks.append(item)
+        elif isinstance(item, dict) and item.get("kind") == "text-content":
+            text_chunks.append(str(item.get("content", "")))
+    if context_refs:
+        resolved.append(
+            format_context_reference_prompt(
+                context_refs,
+                "\n".join(chunk for chunk in text_chunks if chunk),
+            )
+        )
+    else:
+        resolved.extend(chunk for chunk in text_chunks if chunk)
+    for item in content:
+        if isinstance(item, str) or is_context_reference(item):
             continue
         if is_attachment_ref(item):
             ref = AttachmentRef(
@@ -180,12 +257,12 @@ async def _resolve_user_prompt_part(
                     ref,
                     request_headers,
                     full=full,
-                    vision_capable=vision_capable,
+                    modalities=modalities,
                 )
             )
             continue
         if isinstance(item, dict) and item.get("kind") == "text-content":
-            resolved.append(str(item.get("content", "")))
+            continue
     if not resolved:
         return ""
     if len(resolved) == 1 and isinstance(resolved[0], str):
@@ -198,26 +275,43 @@ async def _resolve_ref(
     request_headers: Mapping[str, str],
     *,
     full: bool,
-    vision_capable: bool,
+    modalities: frozenset[str],
 ) -> list[UserContent]:
     mime = (ref.mime or "").split(";", 1)[0].strip().lower()
     name = ref.name or ref.id
     if not full:
         if ref.extracted_text:
             return [TextContent(ref.extracted_text)]
-        return [TextContent(f"[附件: {name}]")]
+        return [
+            TextContent(
+                f"[附件: {name}] (file_id: {ref.id}, mime: {ref.mime or 'unknown'})"
+            )
+        ]
 
-    if mime.startswith("image/"):
-        if not vision_capable:
-            return [TextContent(f"[附件: {name}]（当前模型不支持图片输入）")]
+    native = _native_modality_for_mime(mime)
+    if native is not None:
+        modality, label = native
+        if modality not in modalities:
+            raise UnsupportedAttachmentModalityError(
+                f"当前模型不支持{label}输入（附件: {name}）"
+            )
         try:
             data = await _download_file(ref.id, request_headers)
         except AttachmentDownloadError:
             return [TextContent(f"[附件: {name}]（文件下载失败）")]
         return [BinaryContent(data=data, media_type=mime or "application/octet-stream")]
-    if ref.extracted_text:
-        return [TextContent(ref.extracted_text)]
-    if mime in ("text/plain", "text/csv"):
-        data = await _download_file(ref.id, request_headers)
-        return [TextContent(data.decode("utf-8", errors="replace"))]
-    return [TextContent(f"[附件: {name}]")]
+    return [
+        TextContent(
+            f"[附件: {name}] (file_id: {ref.id}, mime: {ref.mime or 'unknown'})"
+            "（如需读取内容，请调用 attachment 工具）"
+        )
+    ]
+
+
+def _native_modality_for_mime(mime: str) -> tuple[str, str] | None:
+    for prefix, modality, label in _NATIVE_MEDIA:
+        if mime.startswith(prefix):
+            return modality, label
+    if mime == "application/pdf":
+        return "pdf", "PDF"
+    return None

@@ -9,6 +9,7 @@
 | `highlight.min.js` | [highlightjs/highlight.js](https://github.com/highlightjs/highlight.js) | 11.11.1 | BSD-3-Clause |
 | `github-markdown-dark.min.css` | [sindresorhus/github-markdown-css](https://github.com/sindresorhus/github-markdown-css) | 5.8.1 | MIT |
 | `highlight-github-dark.min.css` | highlight.js `github-dark` theme | 11.11.1 | BSD-3-Clause |
+| `highlight-github.min.css` | highlight.js `github` theme（浅色主题用） | 11.11.1 | BSD-3-Clause |
 
 ## 升级方式
 

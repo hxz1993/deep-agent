@@ -1,11 +1,20 @@
 from __future__ import annotations
 
 import unittest
+from dataclasses import replace
 from unittest.mock import patch
 
 from pydantic_ai import Agent, RunContext
 from pydantic_ai.capabilities import IncludeToolReturnSchemas, ToolSearch
-from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
+from pydantic_ai.messages import (
+    ModelRequest,
+    ModelResponse,
+    RetryPromptPart,
+    TextPart,
+    ToolCallPart,
+    ToolSearchCallPart,
+    ToolSearchReturnPart,
+)
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 from pydantic_ai.models.test import TestModel
 from pydantic_ai.toolsets import FunctionToolset
@@ -795,6 +804,188 @@ class ToolDiscoveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.output, "done")
         self.assertEqual(calls, 3)
         self.assertIn("deepfos_delete_financial_model", seen_tools[1])
+
+    async def test_hidden_tool_name_cannot_be_guessed_before_search(self) -> None:
+        executions = 0
+        model_calls = 0
+
+        def hidden_action(model_name: str) -> str:
+            nonlocal executions
+            executions += 1
+            return model_name
+
+        def model_function(_messages, info: AgentInfo) -> ModelResponse:
+            nonlocal model_calls
+            model_calls += 1
+            names = {tool.name for tool in info.function_tools}
+            self.assertIn("search_tools", names)
+            self.assertNotIn("deepfos_hidden_action", names)
+            if model_calls == 1:
+                return ModelResponse(
+                    parts=[
+                        ToolCallPart(
+                            "deepfos_hidden_action",
+                            {"model_name": "demo"},
+                            "guessed-hidden-1",
+                        )
+                    ]
+                )
+            return ModelResponse(parts=[TextPart(content="done")])
+
+        toolset = FunctionToolset(
+            tools=[
+                hidden_action,
+                search_financial_model,
+                list_cube_dimensions,
+                resolve_members,
+            ]
+        ).prefixed("deepfos")
+        wrapper = build_mcp_discovery_toolset(
+            [toolset],
+            server_names=["deepfos"],
+            estimator=TokenEstimator.conservative(),
+        )
+        assert wrapper is not None
+        agent = Agent(
+            FunctionModel(model_function),
+            deps_type=AgentDeps,
+            toolsets=[wrapper],
+            capabilities=[
+                ToolSearch(
+                    strategy=search_deferred_tools,
+                    max_results=MCP_SEARCH_RESULT_LIMIT,
+                )
+            ],
+        )
+
+        result = await agent.run(
+            "火星天气",
+            deps=AgentDeps(session_id="hidden-guess", agent_id="agent"),
+        )
+
+        self.assertEqual(result.output, "done")
+        self.assertEqual(executions, 0)
+        retries = [
+            part
+            for message in result.all_messages()
+            if isinstance(message, ModelRequest)
+            for part in message.parts
+            if isinstance(part, RetryPromptPart)
+        ]
+        self.assertEqual(len(retries), 1)
+        self.assertIn("search for it first", str(retries[0].content))
+
+    async def test_removed_discovery_evidence_requires_search_again(self) -> None:
+        first_calls = 0
+
+        def first_model(_messages, _info: AgentInfo) -> ModelResponse:
+            nonlocal first_calls
+            first_calls += 1
+            if first_calls == 1:
+                return ModelResponse(
+                    parts=[
+                        ToolCallPart(
+                            "search_tools",
+                            {"queries": ["永久删除财务模型"]},
+                            "search-before-compaction",
+                        )
+                    ]
+                )
+            return ModelResponse(parts=[TextPart(content="searched")])
+
+        wrapper = build_mcp_discovery_toolset(
+            [self._toolset()],
+            server_names=["deepfos"],
+            estimator=TokenEstimator.conservative(),
+        )
+        assert wrapper is not None
+        capability = ToolSearch(
+            strategy=search_deferred_tools,
+            max_results=MCP_SEARCH_RESULT_LIMIT,
+        )
+        first = Agent(
+            FunctionModel(first_model),
+            deps_type=AgentDeps,
+            toolsets=[wrapper],
+            capabilities=[capability],
+        )
+        discovered = await first.run(
+            "搜索维度成员并更新配置",
+            deps=AgentDeps(session_id="before-compaction", agent_id="agent"),
+        )
+        self.assertTrue(
+            any(
+                isinstance(part, ToolSearchReturnPart)
+                for message in discovered.all_messages()
+                for part in message.parts
+            )
+        )
+
+        compacted_history = [
+            message
+            if not isinstance(message, ModelRequest)
+            else replace(
+                message,
+                parts=[
+                    part
+                    for part in message.parts
+                    if not isinstance(part, ToolSearchReturnPart)
+                ],
+            )
+            for message in discovered.all_messages()
+            if not (
+                isinstance(message, ModelResponse)
+                and any(isinstance(part, ToolSearchCallPart) for part in message.parts)
+            )
+        ]
+        compacted_history = [
+            message
+            for message in compacted_history
+            if not isinstance(message, ModelRequest) or message.parts
+        ]
+        second_calls = 0
+
+        def second_model(_messages, info: AgentInfo) -> ModelResponse:
+            nonlocal second_calls
+            second_calls += 1
+            self.assertNotIn(
+                "deepfos_delete_financial_model",
+                {tool.name for tool in info.function_tools},
+            )
+            if second_calls == 1:
+                return ModelResponse(
+                    parts=[
+                        ToolCallPart(
+                            "deepfos_delete_financial_model",
+                            {"model_name": "demo"},
+                            "guess-after-compaction",
+                        )
+                    ]
+                )
+            return ModelResponse(parts=[TextPart(content="search required")])
+
+        second = Agent(
+            FunctionModel(second_model),
+            deps_type=AgentDeps,
+            toolsets=[wrapper],
+            capabilities=[capability],
+        )
+        result = await second.run(
+            "继续",
+            message_history=compacted_history,
+            deps=AgentDeps(session_id="after-compaction", agent_id="agent"),
+        )
+
+        self.assertEqual(result.output, "search required")
+        self.assertTrue(
+            any(
+                isinstance(part, RetryPromptPart)
+                and "search for it first" in str(part.content)
+                for message in result.new_messages()
+                if isinstance(message, ModelRequest)
+                for part in message.parts
+            )
+        )
 
 
 if __name__ == "__main__":

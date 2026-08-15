@@ -3,6 +3,15 @@
 本文件记录 DeepAgent 的产品版本变化，按新版本到旧版本排列。当前代码版本以
 `deep_agent.__version__` 为准；数据库结构版本以 Alembic head 为准，两者互不替代。
 
+## v0.4.8
+
+- 将运行时固定升级到`pydantic-ai-slim 2.31.0`与`pydantic-ai-harness 0.21.0`，继续固定
+  `openai 2.46.0`，并保持稳定解析到FastMCP 3；Alembic仍为`006`。
+- Deferred工具和Capability工具的可执行状态统一由Pydantic AI Core判断：未搜索或未加载的工具
+  即使被模型猜中协议名也不能执行；压缩历史移除披露证据后需要重新搜索。
+- Planning、Skill、ToolOutputLimits、MCP快照、取消和上下文Checkpoint保留现有产品协议，随框架升级
+  获得Planning缓存边界、MCP新协议兼容、Provider流关闭及安全修复，不新增客户端适配。
+
 ## v0.4.7
 
 - Console将Harness任务计划从机器人回复内部移到消息区底部的轻量浮层，当前Run只保留一张面板并随最新

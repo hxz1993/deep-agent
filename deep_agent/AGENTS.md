@@ -112,7 +112,7 @@ URL 与 Builtin MCP 的运行态不同：URL MCP 在管理员检测时保存 Too
 7. Harness `StepPersistence` 不替代现有 SQL 会话、SSE 和 Deferred/Pending；只有副作用账本、子 Agent 或崩溃恢复成为真实需求时再接入。
 8. Harness 仍为 0.x。引入时必须将 `pydantic-ai-slim` 与 `pydantic-ai-harness` 固定为经过联合回归的准确版本，禁止继续依赖无上限 `>=` 漂移。
 9. 不要通过修改 `AgentRunner` 主循环重复实现 Pydantic AI 已提供的机制。
-10. Harness 0.18 `Skills` 只负责延迟披露 `SKILL.md` 正文；第三方 Skill 的安装、版本、权限、素材读取和脚本隔离仍由 DeepAgent 产品层负责。v0.3.23 的系统工具 `read_file` 统一读取会话附件与 Skill 素材，脚本执行只复用 Sandbox Backend 契约，不能把它们误写成 Harness 能力。
+10. Harness 0.21 `Skills` 只负责延迟披露 `SKILL.md` 正文；第三方 Skill 的安装、版本、权限、素材读取和脚本隔离仍由 DeepAgent 产品层负责。v0.3.23 的系统工具 `read_file` 统一读取会话附件与 Skill 素材，脚本执行只复用 Sandbox Backend 契约，不能把它们误写成 Harness 能力。
 11. `IncludeToolReturnSchemas` 发生在模型请求前的 Tool Definition 准备阶段，不是工具执行后给真实结果追加 Schema。首版只允许按最终稳定协议名的明确白名单启用，并要求存在可信、稳定的返回 Schema；不得通过名称包含 `query` 等模糊规则自动扩大范围。延迟 MCP 工具只有被 Tool Search 披露时才携带其返回 Schema，并必须观测新增 Schema Token。真实结果过大或空字段过多继续由分页、投影或 `ToolOutputLimits`/Artifact 治理。
 12. Prompt Cache 不是跨 Provider 的统一 DeepAgent 缓存。DeepSeek 等 Provider 的自动缓存只读取其 Usage 命中/未命中数据，不改写请求；显式 `CachePoint`、cache key 和 TTL 只能在模型目录确认具体 Provider 支持后启用。统一观测可以归一化指标，不能伪造统一缓存协议。
 13. v0.3.17 使用 Pydantic AI 官方 `conversation_id/run_id` 贯通运行：`conversation_id=deepagent:{agent_id}:{session_id}` 在同一 Session 内稳定，每次发送、Deferred 恢复、重试或主动压缩使用新的 `run_id`。第一阶段只输出脱敏结构化日志和当前页面 Run 指标，不把高频运行数据写入业务 MySQL；后续 OTLP/Instrumentation 不得建立第二套 Agent 生命周期。
@@ -135,7 +135,7 @@ v0.3.6 的摘要链路只允许一次语义摘要。压缩器同时校验最终�
 
 v0.3.13 起，自动压缩的内部摘要复用正式 Run 的 Pydantic AI `CancellationToken`；用户停止时
 摘要调用与外层 Run 一起取消，`RunCancelled` 不得转成 Sliding Window 继续回答。工具边界和
-历史待处理判断使用 2.26 的 `BaseToolCallPart` / `BaseToolReturnPart`，同时覆盖 Local Tool、
+历史待处理判断使用2.31的`BaseToolCallPart` / `BaseToolReturnPart`，同时覆盖Local Tool、
 Tool Search 和 Provider Native Tool。Provider 原生 OpenAI/Anthropic Compaction 暂不与
 DeepAgent Checkpoint 混用；只有不透明 `provider_details` 的 `CompactionPart` 继续拒绝落盘。
 
@@ -269,7 +269,7 @@ Search和MCP Resource分组说明工具来源与自动注入条件。`read_tool_
 `runtime:*` 仅是 Console 展示编码，不得注册到 ToolPackage Registry、`/tools` 或
 `agents.capabilities`。
 
-任务规划使用Harness 0.18默认的`write_plan`、`read_plan`、`add_task`、
+任务规划使用Harness 0.21默认的`write_plan`、`read_plan`、`add_task`、
 `update_task_status`、`update_task_statuses`和`remove_task`。每个Runner Run开始时创建独立
 `InMemoryPlanStore`；成功的规划Tool Return从Store读取快照写入Part metadata，SSE/History仅映射
 该快照。不得把计划Reminder持久化成用户消息，也不得为单轮计划新增表、跨轮Store或自研状态机。
@@ -284,7 +284,7 @@ Search和MCP Resource分组说明工具来源与自动注入条件。`read_tool_
   和过期判断，不代表产品版本，也不保留历史目录。
 - 同 Hash包替换必须先验证平台原 ZIP：可下载时返回 `noop`；原 File ID失效时重新上传原包、
   原子更新记录并返回 `repaired`。不得只用请求字节恢复当前 Pod而让后续重启再次失败。
-- Harness 0.18 `Skills` 负责 `load_capability` 渐进披露；DeepAgent通过 `list_skill_resources`
+- Harness 0.21 `Skills` 负责 `load_capability` 渐进披露；DeepAgent通过 `list_skill_resources`
   提供授权目录，通过系统 `read_file`读取正文。
 - 文本、DOCX 和 XLSX 根据索引中的路径、MIME 与后缀按行、逻辑块或物理行分页；图片和其他
   二进制只展示元数据，不经文件工具读取。历史安装包不需要为XLSX重新生成索引。

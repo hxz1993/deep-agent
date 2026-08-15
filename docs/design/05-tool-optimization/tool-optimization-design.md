@@ -2,7 +2,7 @@
 
 > 最后核验：2026-08-03
 >
-> 当前运行基线：`pydantic-ai-slim 2.26.0` + `pydantic-ai-harness 0.18.0`
+> 当前运行基线：`pydantic-ai-slim 2.31.0` + `pydantic-ai-harness 0.21.0`
 >
 > 状态：v0.3.17 已选择性接入 Tool Return Schema；Native Tool、Output Tool 和其他 Harness 能力仍按本文边界评估
 
@@ -23,7 +23,7 @@ DeepAgent 已经使用了 Pydantic AI 最核心的三种工具执行方式：
 - 前端表单操作继续使用 `ExternalToolset + DeferredToolRequests/Results`。
 - 结构化最终输出使用 `ToolOutput` 或 `NativeOutput`，不依赖提示词约定 JSON。
 - Provider Code Execution 作为模型可选能力接入，不作为所有模型默认工具。
-- Harness 0.18 已用于上下文压缩和大工具结果治理；v0.4.0使用公开的
+- Harness 0.21 已用于上下文压缩和大工具结果治理；v0.4.0使用公开的
   `ToolOutputLimits` + `Spill`，不再引用旧 `OverflowingToolOutput`方案。
 - Harness 不替代 SQL 会话、SSE、配置中心、HITL 和前端执行器。
 
@@ -55,9 +55,9 @@ Pydantic AI Core 是当前 Agent 运行时，负责：
 它不是一套新的模型循环，也不提供 DeepAgent 的配置中心、用户隔离、会话页面或
 SSE 协议。
 
-#### 2.2.1 升级到 0.18 后的采用判断
+#### 2.2.1 升级到0.21后的采用判断
 
-| 0.12～0.18 能力 | 是否值得做 | DeepAgent 结论 |
+| 0.12～0.21 能力 | 是否值得做 | DeepAgent 结论 |
 | --- | --- | --- |
 | `Skills` 渐进披露 | 是，优先 | 作为 `SKILL.md` Instructions 延迟加载基础；安装、权限、References、Assets、scripts 仍由 DeepAgent 负责 |
 | Tool Guardrail / Guard Chain | 是，依赖前置 | 待工具风险元数据统一后用于参数、结果、审批和敏感信息治理，不先堆零散规则 |
@@ -205,7 +205,7 @@ sequenceDiagram
 
 Provider Native Tool 由模型 Provider 执行，不在 DeepAgent Pod 中运行。
 
-当前 Pydantic AI 2.26.0 暴露的原生工具定义包括：
+当前 Pydantic AI 2.31.0 暴露的原生工具定义包括：
 
 - `WebSearchTool`
 - `WebFetchTool`
@@ -452,7 +452,7 @@ DeepAgent 当前没有正式启用：
 - Core 通用 `PrepareTools`
 - Pydantic AI 原生执行审批
 
-`pydantic-ai-harness 0.18.0` 已用于上下文压缩，但工具结果治理、Memory、StepPersistence、
+`pydantic-ai-harness 0.21.0` 已用于上下文压缩和工具结果治理，但Memory、StepPersistence、
 SubAgent 和其他 Harness 能力尚未启用，不能把“已安装 Harness”理解成这些能力已经开放。
 
 当前主对话输出仍为：

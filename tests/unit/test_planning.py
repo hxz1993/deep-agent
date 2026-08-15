@@ -4,7 +4,14 @@ import json
 import unittest
 
 from pydantic_ai import Agent
-from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart, ToolReturnPart
+from pydantic_ai.messages import (
+    ModelRequest,
+    ModelResponse,
+    TextPart,
+    ToolCallPart,
+    ToolReturnPart,
+    UserPromptPart,
+)
 from pydantic_ai.models.function import AgentInfo, DeltaToolCall, FunctionModel
 from pydantic_ai.usage import UsageLimits
 from pydantic_ai_harness.planning import PlanItem, Planning
@@ -170,6 +177,15 @@ class PlanningRunnerTests(unittest.IsolatedAsyncioTestCase):
         ]
         self.assertEqual(plan_parts[-1].plan["completed"], 2)
         self.assertEqual(plan_parts[-1].plan["total"], 2)
+        persisted_reminders = [
+            part
+            for message in await self.store.get_history("planning-stream")
+            if isinstance(message, ModelRequest)
+            for part in message.parts
+            if isinstance(part, UserPromptPart)
+            and "<plan-reminder>" in str(part.content)
+        ]
+        self.assertEqual(persisted_reminders, [])
 
     async def test_non_stream_snapshot_persists_and_next_run_starts_empty(self) -> None:
         def respond(messages: list[object], _info: AgentInfo) -> ModelResponse:

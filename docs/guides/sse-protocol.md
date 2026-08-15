@@ -133,7 +133,7 @@ Accept: text/event-stream
 POST /api/v1/sessions/{session_id}/cancel?agent_id={optional}
 ```
 
-接口使用 Pydantic AI 2.26 `CancellationToken` 终止当前 Pod 内正在运行的流，返回
+接口使用 Pydantic AI 2.31 `CancellationToken` 终止当前 Pod 内正在运行的流，返回
 `cancel_requested` 或幂等的 `not_running`。收到 `cancel_requested` 后客户端必须继续读取同一条
 SSE，直到服务端捕获 `RunCancelled` 并返回唯一的 `cancelled`；取消后不再返回 `final`。
 服务端会在发布首条 `session` SSE 前注册 Active Run，因此客户端一旦拿到 `session_id` 就可以
@@ -616,7 +616,7 @@ Agent 执行过程中抛出未捕获异常时发出，此后流结束，**不会
 ### 4.9 `cancelled`
 
 正式取消接口触发 Pydantic AI `CancellationToken`，或客户端异常断开 SSE 后发出。此后流结束，
-**不会**再发 `final`。Pydantic AI 2.26 提供的中断消息状态优先用于持久化；若 Provider 尚未
+**不会**再发 `final`。Pydantic AI 2.31 提供的中断消息状态优先用于持久化；若 Provider 尚未
 形成完整消息时，DeepAgent 仅保存官方返回的部分消息，并把最后一个非空响应规范化为
 `interrupted`；不会用前端累积内容拼造历史。已经发布但未进入该官方中断历史的工具调用，会先
 收到 `tool_call_removed`，随后才收到 `cancelled`。

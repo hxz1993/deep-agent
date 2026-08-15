@@ -1,12 +1,12 @@
-# Pydantic AI 2.26 与 Harness 0.18 能力采用台账
+# Pydantic AI 2.31 与 Harness 0.21 能力采用台账
 
 ## 1. 目的与审计范围
 
 本文是 DeepAgent 的框架采用事实源，避免每次需求讨论都重新回答“框架是否已经实现”。审计范围固定为：
 
-- `pydantic-ai-slim[openai,anthropic,google,mcp]==2.26.0`
-- `pydantic-ai-harness==0.18.0`
-- DeepAgent `v0.3.18` 当前实现
+- `pydantic-ai-slim[openai,anthropic,google,mcp]==2.31.0`
+- `pydantic-ai-harness[skills]==0.21.0`
+- DeepAgent `v0.4.8` 当前实现
 
 证据顺序为：固定版本源码与公开 API、官方文档、DeepAgent 源码和测试。Harness 仍是 `0.x`，
 本文不把尚未固定依赖的新版本能力当成当前事实。
@@ -65,7 +65,7 @@ Tool Call/Return 配对或 Deferred 协议。
 | Product State | Session、History、Deferred、Checkpoint、Context Reference | DeepAgent SQL Store |
 | Product Protocol | REST、SSE、History、Console 和跨前端契约 | DeepAgent |
 
-## 4. Pydantic AI 2.26 能力审计
+## 4. Pydantic AI 2.31 能力审计
 
 ### 4.1 已经采用
 
@@ -76,6 +76,7 @@ Tool Call/Return 配对或 Deferred 协议。
 | `UsageLimits` | Run 级请求数和可选累计 Token 限制 | 已采用；窗口预算仍由 DeepAgent 前置估算 |
 | Toolset 体系 | Function、MCP、External、Dynamic、Prepared、Combined 等运行装配 | 已采用；ToolPackage 只是产品元数据包装 |
 | `ToolSearch` + `DeferredLoadingToolset` | MCP Top 3 预选、Top 5 搜索和渐进披露 | 已采用；检索算法由 DeepAgent 提供 |
+| Deferred/Capability可用性判断 | Core根据历史中的披露与加载证据决定工具能否执行 | v0.4.8明确以Core为唯一事实源；猜测隐藏工具名返回`ModelRetry`，不增加DeepAgent执行拦截器 |
 | `PrepareTools`/Prepared Toolset | 按附件、Skill资源、任务和授权条件准备本轮工具 | 已采用；系统 `read_file`等只在有来源时注入，权限仍在执行时复检 |
 | `DeferredToolRequests/Results` | UI Tool Pending 与恢复 | 已采用；数据库恢复和前端协议由 DeepAgent 提供 |
 | `CancellationToken`、`RunCancelled` | 正式停止 Run，持久化官方 interrupted 历史 | 已采用；多 Pod 路由仍是部署责任 |
@@ -121,7 +122,7 @@ cache hit/miss Token，没有数据时保持 unknown。它不等于启用缓存�
 
 当前暂缓而非关闭的能力是显式 Provider Prompt Cache。DeepSeek 等自动缓存只需观测现有 Usage；只有具体模型明确支持时，才评估 `CachePoint`、Provider cache key、TTL 和 Harness `WarnOnCacheBusts`，不得提供一个假装适配所有 Provider 的全局开关。
 
-## 5. Harness 0.18 能力审计
+## 5. Harness 0.21 能力审计
 
 ### 5.1 已经采用
 
@@ -133,6 +134,17 @@ cache hit/miss Token，没有数据时保持 unknown。它不等于启用缓存�
 | `estimate_token_count` | 作为估算实现的一部分 | 保持统一 `TokenEstimator` 封装，不让 Console复制算法 |
 | `ToolOutputLimits` / `Spill` | 超大工具结果在进入History前外置 | v0.4.0适配平台文件服务；保留Harness原生 `read_tool_result`，不使用本地Store或自研读取状态机 |
 | `Planning` | 模型在复杂任务中维护单轮结构化计划 | v0.4.6采用默认六工具与`InMemoryPlanStore`；v0.4.7 Console仅在消息区底部浮层展示当前最新Run的未完成计划，后端快照与History不变；不新增任务引擎或计划表 |
+
+### 5.2 v0.4.8升级采用边界
+
+- Planning继续使用官方默认六工具，直接获得0.21修正后的CachePoint顺序；DeepAgent计划快照、
+  SSE、History和Console浮层不变。
+- Harness确定性压缩tier可处理`ToolAvailabilityDeltaPart`；DeepAgent仍负责完整请求预算、主动/自动
+  压缩、Checkpoint和Hash/CAS，不切换到`SummarizingCompaction`。
+- `estimate_context_tokens`新增的Provider Usage锚点只作为后续校准参考；当前工具Schema与输出预留
+  仍由统一`TokenEstimator`计算，没有偏差证据时不更换事实源。
+- MCP底层获得新协议兼容，但当前依赖解析继续使用稳定FastMCP 3，不主动安装FastMCP 4预发布版。
+- Realtime、Coder、Researcher、AG-UI、Provider原生Compaction和新的持久化体系均不在本次采用范围。
 
 Harness `Skills` 不读取 references/assets，也不执行 scripts。v0.3.18 直接使用它作为线上 Skill 的
 渐进披露内核；DeepAgent 负责安装、权限、References/Assets 读取和脚本隔离。

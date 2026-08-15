@@ -16,6 +16,7 @@ from pydantic_ai.messages import (
     SystemPromptPart,
     TextPart,
     ToolCallPart,
+    ToolAvailabilityDeltaPart,
     ToolReturnPart,
     UserPromptPart,
     NativeToolSearchCallPart,
@@ -530,6 +531,39 @@ class ContextCompactionDefensiveBranchTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(returned, request_context)
         self.assertIsNotNone(deps.context_state)
         self.assertFalse(deps.context_state.last_budget.enabled)  # type: ignore[union-attr]
+
+    async def test_tool_availability_delta_is_safe_for_harness_compaction(self) -> None:
+        capability = DeepAgentContextCompaction(
+            context_window_tokens=4_000,
+            max_output_tokens=500,
+        )
+        messages = [
+            ModelRequest(parts=[UserPromptPart(content="最初任务")]),
+            ModelRequest(
+                parts=[
+                    ToolAvailabilityDeltaPart(
+                        tools_added=["deepfos_cube_query_data"],
+                        tool_call_id="search-1",
+                    )
+                ]
+            ),
+            ModelResponse(parts=[TextPart(content="旧内容" * 2_000)]),
+            ModelRequest(parts=[UserPromptPart(content="继续")]),
+        ]
+        request_context = self._request_context(messages)
+        deps = AgentDeps(session_id="tool-availability-compaction")
+        ctx = RunContext(deps=deps, model=TestModel(), usage=RunUsage())
+
+        compacted = await capability._deterministic_compaction(
+            messages,
+            ctx,
+            request_context,
+            200,
+            TokenEstimator.conservative(),
+        )
+
+        self.assertTrue(compacted)
+        self.assertIsInstance(estimate_token_count(compacted), int)
 
     async def test_after_model_request_records_estimated_and_provider_usage(self) -> None:
         capability = DeepAgentContextCompaction(

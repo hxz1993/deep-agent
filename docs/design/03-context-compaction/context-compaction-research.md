@@ -2,7 +2,7 @@
 
 > 状态：持续维护的研究依据
 >
-> 当前运行基线：Pydantic AI 2.26.0、Pydantic AI Harness 0.18.0
+> 当前运行基线：Pydantic AI 2.31.0、Pydantic AI Harness 0.21.0
 
 ## 总体判断
 
@@ -67,7 +67,7 @@ Provider usage 在模型响应后才产生，无法阻止当前请求超窗。�
 “本轮预计输出”“安全余量”“摘要输出上限”和“可用输入预算”都是动态算法值，不要求
 管理员配置，也不持久化。总窗口 1M、最大输出 384K 不等于每次都预留 384K。
 
-## Harness 0.18 原生压缩复用边界
+## Harness原生压缩复用边界
 
 Harness `SummarizingCompaction` 不是只能作为 Agent 内 Capability 使用。公开的 `compact_now()` 可以在
 Run 外接收一组 `ModelMessage`，调用同一个摘要策略并返回压缩后的消息，因此它具备成为 DeepAgent
@@ -98,7 +98,7 @@ Checkpoint Hash/CAS 事务语义。为了避免“框架摘要 + 产品事务”
 DeepAgent 内部，并将自动/主动入口收敛到同一投影流程。若 Harness 后续公开接口能覆盖上述差异，
 再以黑盒等价测试重新评估，不调用其私有函数。
 
-### Harness 0.18 后续采用项
+### Harness后续采用项
 
 - **ConversationSearch**：`CTX-102` 已暂缓。当前没有真实长程任务证明摘要后无法恢复精确路径、
   ID 或决定，中文历史检索质量也缺少可靠样本。只有出现可稳定复现的缺失后，才评估读取现有
@@ -112,7 +112,7 @@ DeepAgent 内部，并将自动/主动入口收敛到同一投影流程。若 Ha
   只有 Harness 公开接口能够覆盖工具 Schema 预算、动态摘要上限、主动 SSE、目标复检和
   Checkpoint 事务时才重新打开。
 
-### Pydantic AI 2.26 原生能力采用项
+### Pydantic AI Core原生能力采用项
 
 - **请求输出上限**：`MODEL-001` 优先实施。把 `llm_models.max_output_tokens` 映射到普通与流式请求的
   `ModelSettings.max_tokens`，目录字段才能从“预算参考”变成真实 Provider 请求约束；未配置时保持

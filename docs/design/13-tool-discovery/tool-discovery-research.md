@@ -38,15 +38,14 @@ Pydantic AI 的 `ToolSearch` / `DeferredLoadingToolset` 把工具分为：
 当前安装版本：
 
 ```text
-pydantic-ai-slim    2.26.0
-pydantic-ai-harness 0.18.0
+pydantic-ai-slim    2.31.0
+pydantic-ai-harness 0.21.0
 ```
 
 ### 2.2 自带本地算法不是语义搜索
 
-下述跨 Provider 关键词回退是 2.14.1 阶段的黑盒基线；DeepAgent 已升级到 2.26.0，后续
-`TOOL-201` 实施前必须重新验证 2.26 的 Tool Search、Deferred Loading、Provider 原生路径和
-本地回退，不直接照搬旧版本结论：
+下述跨Provider关键词回退是2.14.1阶段的历史黑盒基线；当前DeepAgent已经使用2.31的Tool Search
+状态机和自定义`lexical_v2`检索，不再依赖该默认算法：
 
 ```text
 query → 正则 [a-z0-9]+ 分词
@@ -114,9 +113,9 @@ Pydantic AI 允许传入自定义搜索函数：
 自定义函数可以读取真实 `ToolDefinition` 的名称、描述和参数 Schema。这为 DeepAgent 接入中文
 BM25、多语言 Embedding 和混合排序提供了正确扩展点，无需自己重写 Tool Search 状态机。
 
-### 2.6 Pydantic AI Harness 0.18 没有另一套语义检索器
+### 2.6 Pydantic AI Harness 0.21 没有另一套语义检索器
 
-Harness 0.18 会配合 Core ToolSearch 工作，但没有内置的中文 BM25、Embedding Retriever 或
+Harness 0.21 会配合 Core ToolSearch 工作，但没有内置的中文 BM25、Embedding Retriever 或
 语义 Tool Finder：
 
 - `CodeMode(dynamic_catalog=True)` 解决的是发现后工具目录变化与 Prompt Cache 稳定性。

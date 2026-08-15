@@ -45,7 +45,7 @@ def _resolve_plan_store(ctx: RunContext[AgentDeps]) -> InMemoryPlanStore:
 
 
 def build_planning_capability() -> Planning[AgentDeps]:
-    """Build the default Harness 0.18 Planning capability for one Agent."""
+    """Build the default Harness 0.21 Planning capability for one Agent."""
 
     return Planning(
         store_resolver=_resolve_plan_store,

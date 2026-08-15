@@ -2,7 +2,7 @@
 
 > 首次审计：2026-08-10
 >
-> 固定基线：`pydantic-ai-slim 2.26.0`、`pydantic-ai-harness 0.18.0`
+> 固定基线：`pydantic-ai-slim 2.31.0`、`pydantic-ai-harness 0.21.0`
 >
 > 状态：当前有效的框架能力采用台账
 

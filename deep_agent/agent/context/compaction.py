@@ -148,7 +148,7 @@ def _safe_boundaries(messages: list[ModelMessage]) -> list[int]:
     boundaries = [0]
     open_calls: set[str] = set()
     for index, message in enumerate(messages, start=1):
-        # Pydantic AI 2.26 can place provider-native call and return parts in
+        # Pydantic AI 2.31 can place provider-native call and return parts in
         # the same ModelResponse.  Process calls before returns so both local
         # and native tools close at the same safe boundary.
         for part in message.parts:

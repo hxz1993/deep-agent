@@ -4,9 +4,9 @@
 >
 > 更新日期：2026-08-10
 >
-> 依赖组合：`pydantic-ai-slim 2.26.0` + `pydantic-ai-harness 0.18.0`
+> 依赖组合：`pydantic-ai-slim 2.31.0` + `pydantic-ai-harness 0.21.0`
 >
-> 数据库迁移：本课题在v0.3.16不新增迁移；当前v0.4.7仓库head仍为`006`
+> 数据库迁移：本课题在v0.3.16不新增迁移；当前v0.4.8仓库head仍为`006`
 
 ## 1. 最终口径
 
@@ -32,7 +32,7 @@ chat_messages
 4. 压缩默认自动启用，不提供环境变量、Agent 或数据库开关。
 5. 模型没有配置 `context_window_tokens` 时不启用压缩，也不按模型名称猜窗口。
 6. 摘要始终使用当前 Agent 主模型，不再提供 `context_summary` 辅助模型用途。
-7. Harness 已固定升级到 0.18.0；现有链路仍只复用确定性 Clamp、Deduplicate 和 Clear tiers，
+7. Harness 已固定升级到 0.21.0；现有链路仍只复用确定性 Clamp、Deduplicate 和 Clear tiers，
    不用 Harness 通用摘要替换 DeepAgent 的单次摘要、Checkpoint、Hash/CAS 和主动压缩语义。
 8. `context_window_tokens` 和 `max_output_tokens` 是模型事实；本轮输出预留和安全余量是内部算法，
    不新增配置字段。
@@ -509,7 +509,7 @@ DEEP_AGENT_CONTEXT_OUTPUT_TOKEN_FLOOR
 - 本地验证只连接保留的 SQLite，不连接共享 Test。
 - 发布时 ORM、Runner、API、Console 和文档必须同版本交付。
 
-### 9.1 Pydantic AI 2.26 的复用边界
+### 9.1 Pydantic AI 2.31 的复用边界
 
 v0.3.13 完成以下兼容收口：
 
@@ -607,7 +607,8 @@ Alembic。场景构造器必须通过“序列化后可反序列化、没有工�
 22. 连续主动压缩只覆盖一条 Checkpoint，并正确增加 `row_version`。
 23. 空、短、无新增或无收益的主动尝试返回明确 `noop`，且不覆盖有效 Checkpoint。
 24. 未知窗口、Pending、Provider 失败和 CAS 冲突均不覆盖有效 Checkpoint。
-25. Pydantic AI 2.26 的 Local/Native Tool Search Call/Return 都形成安全配对边界。
+25. Pydantic AI 2.31 的 Local/Native Tool Search Call/Return 都形成安全配对边界；
+    `ToolAvailabilityDeltaPart`也可安全进入确定性Harness压缩tier。
 26. `state=interrupted` 的官方取消历史不被误判为 Pending Deferred。
 27. 只存在不透明 `provider_details` 的 Provider `CompactionPart` 不保存为空 Checkpoint 壳；当前不启用 Provider Native Compaction。
 28. 取消发生在内部摘要阶段时，嵌套摘要与外层 Run 使用同一个官方 Token，并且不执行 Sliding Window 兜底。

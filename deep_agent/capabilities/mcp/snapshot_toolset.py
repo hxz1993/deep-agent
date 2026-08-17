@@ -12,6 +12,7 @@ from pydantic_ai.toolsets import AbstractToolset, ToolsetTool
 from pydantic_core import SchemaValidator
 
 from deep_agent.agent.deps import AgentDeps
+from deep_agent.capabilities.mcp.errors import is_terminal_mcp_request_failure
 from deep_agent.mcp_request_context import resolve_mcp_headers
 from deep_agent.schemas.mcp import McpToolSnapshot
 
@@ -122,7 +123,13 @@ class SnapshotMcpToolset(AbstractToolset[AgentDeps]):
             await self._fail_connection(exc)
         except (RunCancelled, asyncio.CancelledError):
             raise
-        except (ModelRetry, ToolFailed):
+        except ModelRetry as exc:
+            if is_terminal_mcp_request_failure(exc):
+                raise ToolFailed(
+                    f"MCP tool {name!r} on server {self.server_name!r} timed out or is temporarily unavailable"
+                ) from exc
+            raise
+        except ToolFailed:
             raise
         except Exception as exc:
             await self._fail_connection(exc)

@@ -2,8 +2,13 @@ from __future__ import annotations
 
 import unittest
 
-from pydantic_ai import RunContext, ToolFailed
-from pydantic_ai.exceptions import RunCancelled
+from fastmcp.exceptions import ToolError
+from mcp import McpError
+from mcp.types import ErrorData
+from pydantic_ai import Agent, RunContext, ToolFailed
+from pydantic_ai.exceptions import ModelRetry, RunCancelled
+from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, ToolCallPart, ToolReturnPart
+from pydantic_ai.models.function import AgentInfo, FunctionModel
 from pydantic_ai.models.test import TestModel
 from pydantic_ai.usage import RunUsage
 
@@ -197,6 +202,132 @@ class BuildUrlMcpToolsetTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("secret", str(first.exception))
         self.assertEqual(str(first.exception), str(second.exception))
         mcp_toolset_cls.assert_called_once()
+
+    async def test_protocol_timeout_model_retry_becomes_tool_failed(self) -> None:
+        ctx = RunContext(
+            deps=AgentDeps(session_id="session-a"),
+            model=TestModel(),
+            usage=RunUsage(),
+        )
+        timeout = McpError(ErrorData(code=-32001, message="private timeout detail"))
+        retry = ModelRetry("private timeout detail")
+        retry.__cause__ = timeout
+        inner = unittest.mock.MagicMock()
+        inner.__aenter__ = unittest.mock.AsyncMock(return_value=inner)
+        inner.__aexit__ = unittest.mock.AsyncMock(return_value=None)
+        inner.call_tool = unittest.mock.AsyncMock(side_effect=retry)
+        with unittest.mock.patch(
+            "deep_agent.capabilities.mcp.snapshot_toolset.MCPToolset",
+            return_value=inner,
+        ):
+            toolset = build_mcp_toolset(
+                "biz",
+                "url",
+                {"url": "http://127.0.0.1:8083/mcp"},
+                inspection=self._inspection(),
+            )
+            run_toolset = await toolset.for_run(ctx)
+            tools = await run_toolset.get_tools(ctx)
+            with self.assertRaises(ToolFailed) as raised:
+                await run_toolset.call_tool("biz_query", {}, ctx, tools["biz_query"])
+
+        self.assertNotIn("private timeout detail", str(raised.exception))
+        self.assertIn("timed out or is temporarily unavailable", str(raised.exception))
+        self.assertEqual(inner.call_tool.await_count, 1)
+
+    async def test_business_model_retry_remains_retryable(self) -> None:
+        ctx = RunContext(
+            deps=AgentDeps(session_id="session-a"),
+            model=TestModel(),
+            usage=RunUsage(),
+        )
+        retry = ModelRetry("choose a unique workbook path")
+        retry.__cause__ = ToolError("choose a unique workbook path")
+        inner = unittest.mock.MagicMock()
+        inner.__aenter__ = unittest.mock.AsyncMock(return_value=inner)
+        inner.__aexit__ = unittest.mock.AsyncMock(return_value=None)
+        inner.call_tool = unittest.mock.AsyncMock(side_effect=retry)
+        with unittest.mock.patch(
+            "deep_agent.capabilities.mcp.snapshot_toolset.MCPToolset",
+            return_value=inner,
+        ):
+            toolset = build_mcp_toolset(
+                "biz",
+                "url",
+                {"url": "http://127.0.0.1:8083/mcp"},
+                inspection=self._inspection(),
+            )
+            run_toolset = await toolset.for_run(ctx)
+            tools = await run_toolset.get_tools(ctx)
+            with self.assertRaises(ModelRetry) as raised:
+                await run_toolset.call_tool("biz_query", {}, ctx, tools["biz_query"])
+
+        self.assertEqual(str(raised.exception), "choose a unique workbook path")
+        self.assertEqual(inner.call_tool.await_count, 1)
+
+    async def test_protocol_timeout_is_failed_result_and_agent_can_finish(self) -> None:
+        timeout = McpError(ErrorData(code=-32001, message="private timeout detail"))
+        retry = ModelRetry("private timeout detail")
+        retry.__cause__ = timeout
+        inner = unittest.mock.MagicMock()
+        inner.__aenter__ = unittest.mock.AsyncMock(return_value=inner)
+        inner.__aexit__ = unittest.mock.AsyncMock(return_value=None)
+        inner.call_tool = unittest.mock.AsyncMock(side_effect=retry)
+
+        def model_function(messages, _info: AgentInfo) -> ModelResponse:
+            failed = [
+                part
+                for message in messages
+                if isinstance(message, ModelRequest)
+                for part in message.parts
+                if isinstance(part, ToolReturnPart)
+            ]
+            if not failed:
+                return ModelResponse(
+                    parts=[
+                        ToolCallPart(
+                            tool_name="biz_query",
+                            args={},
+                            tool_call_id="timeout-call",
+                        )
+                    ]
+                )
+            self.assertEqual(failed[-1].outcome, "failed")
+            return ModelResponse(parts=[TextPart(content="used a safe fallback")])
+
+        with unittest.mock.patch(
+            "deep_agent.capabilities.mcp.snapshot_toolset.MCPToolset",
+            return_value=inner,
+        ):
+            toolset = build_mcp_toolset(
+                "biz",
+                "url",
+                {"url": "http://127.0.0.1:8083/mcp"},
+                inspection=self._inspection(),
+            )
+            agent = Agent(
+                FunctionModel(model_function),
+                deps_type=AgentDeps,
+                toolsets=[toolset],
+            )
+            result = await agent.run(
+                "query the service",
+                deps=AgentDeps(session_id="timeout-session"),
+            )
+
+        self.assertEqual(result.output, "used a safe fallback")
+        returns = [
+            part
+            for message in result.all_messages()
+            if isinstance(message, ModelRequest)
+            for part in message.parts
+            if isinstance(part, ToolReturnPart)
+        ]
+        self.assertEqual(len(returns), 1)
+        self.assertEqual(returns[0].tool_call_id, "timeout-call")
+        self.assertEqual(returns[0].outcome, "failed")
+        self.assertNotIn("private timeout detail", str(returns[0].content))
+        self.assertEqual(inner.call_tool.await_count, 1)
 
     async def test_missing_snapshot_exposes_no_tools(self) -> None:
         ctx = RunContext(

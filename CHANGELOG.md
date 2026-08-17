@@ -3,6 +3,13 @@
 本文件记录 DeepAgent 的产品版本变化，按新版本到旧版本排列。当前代码版本以
 `deep_agent.__version__` 为准；数据库结构版本以 Alembic head 为准，两者互不替代。
 
+## v0.4.11
+
+- 修复URL MCP真实工具调用超时被Pydantic AI包装为`ModelRetry`后绕过DeepAgent错误隔离的问题；
+  请求超时、连接中断和5xx不可用现在形成脱敏的失败Tool Result，模型可继续换工具或解释失败。
+- 参数、对象选择和普通业务校验仍使用`ModelRetry`；正式取消、工具协议、SSE和History结构不变。
+  Alembic保持`006`。
+
 ## v0.4.10
 
 - 更新内置DeepCube MCP包；发布流水线继续先注入内部Wheel，`requirements.txt`只声明`deepcube[mcp]`，不向公开PyPI查找内部版本。

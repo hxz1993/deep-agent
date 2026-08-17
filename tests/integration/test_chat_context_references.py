@@ -66,6 +66,16 @@ def deeptable_report_template_generate(name: str) -> str:
     return name
 
 
+def platform_user_profile(user_id: str) -> str:
+    """Read a platform user profile."""
+    return user_id
+
+
+def audit_log_list(category: str) -> str:
+    """List recent audit log entries by category."""
+    return category
+
+
 class ChatContextReferenceIntegrationTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         stores, self._engine, session_factory = await make_sqlite_stores()
@@ -120,6 +130,8 @@ class ChatContextReferenceIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 deeptable_workbook_get,
                 deeptable_dynamic_report_create,
                 deeptable_report_template_generate,
+                platform_user_profile,
+                audit_log_list,
             ]
         ).prefixed("deepfos")
         discovery = build_mcp_discovery_toolset(

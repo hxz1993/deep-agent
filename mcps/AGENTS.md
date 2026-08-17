@@ -64,7 +64,8 @@ python3.12 mcps/<name>/server.py
 
 薄启动器，委托 `deepcube.mcp.server:main`。**所有运行时参数由 `deepcube-mcp` 从 `DEEPCUBE_MCP_*` 环境变量读取**（见包内 `deepcube.mcp.config`）；launcher 仅设置 stdio 默认值，并在未配置时把 `deepfos_platform` 的 `EXPORT_SERVICE_DISCOVERY_*` / `EXPORT_EUREKA_*` / `EXPORT_NACOS_*` / `EXPORT_K8S_DISCOVERY_NAMESPACE` 桥接为 `DEEPCUBE_MCP_*`。
 
-DeepAgent在外层统一增加`deepcube_`协议前缀，因此当前锁定的`deepcube==2.5.6`包内原始工具必须使用
+DeepCube由发布流水线先注入内部Wheel，公开PyPI不提供该包，因此`requirements.txt`不锁定公开版本号。
+DeepAgent在外层统一增加`deepcube_`协议前缀，包内原始工具必须使用
 `list_cubes`、`resolve_members`等短名，不能再次携带`deepcube_`。模型最终看到的稳定名称仍为
 `deepcube_list_cubes`、`deepcube_resolve_members`等。
 

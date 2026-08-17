@@ -5,7 +5,7 @@
 
 ## v0.4.10
 
-- 将内置DeepCube MCP依赖锁定到最新正式包`deepcube[mcp]==2.5.6`，避免部署时静默漂移到未验收版本。
+- 更新内置DeepCube MCP包；发布流水线继续先注入内部Wheel，`requirements.txt`只声明`deepcube[mcp]`，不向公开PyPI查找内部版本。
 - 固化DeepCube包内11个短工具名的契约测试；DeepAgent继续在外层增加`deepcube_`前缀，模型最终看到的协议名不变。
 - 数据库表命名标准化登记为暂缓项，不为命名整齐扩大当前迁移和滚动发布风险。Alembic保持`006`。
 

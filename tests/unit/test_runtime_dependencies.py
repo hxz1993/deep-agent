@@ -39,6 +39,16 @@ class RuntimeDependencyTests(unittest.TestCase):
 
         self.assertEqual(OpenAIChatModel.__name__, "OpenAIChatModel")
 
+    def test_deepcube_uses_pipeline_injected_internal_wheel(self) -> None:
+        requirements = {
+            line.strip()
+            for line in (REPO_ROOT / "requirements.txt").read_text(encoding="utf-8").splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        }
+
+        self.assertIn("deepcube[mcp]", requirements)
+        self.assertFalse(any(line.startswith("deepcube[mcp]==") for line in requirements))
+
 
 if __name__ == "__main__":
     unittest.main()

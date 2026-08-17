@@ -103,6 +103,7 @@
 | `MODEL-101` | 显式 Provider Prompt Cache | DeepSeek 自动缓存无需改请求，命中观测并入 `OBS-101`；`CachePoint`、cache key、TTL 均是 Provider 专属配置，不存在跨 Provider 通用开关 | 模型目录中的某个 Provider 明确支持显式缓存，且能观测成本或首 Token 延迟收益 | [Pydantic AI 采用项](03-context-compaction/context-compaction-research.md#pydantic-ai-226-原生能力采用项) |
 | `OBS-201` / `CONSOLE-301` | OTLP Trace 与 Console 诊断中心 | v0.3.17 已有统一 conversation/run ID 和脱敏结构化日志；在线诊断需要公司观测平台，不把高频 Span 塞入业务 MySQL | 公司确认 OTLP 后端、保留周期、权限和跨实例查询接口 | [框架能力台账](14-framework-capabilities/framework-capabilities-baseline.md#42-下一步优先采用) |
 | `EVAL-001` | Agent 回复与工具调用质量评估 | 评估应建立在可查询的真实 Trace 上，分开回答质量、工具选择、参数、结果利用、副作用和成本，不同步阻塞用户请求 | OTLP/诊断数据源确定，并明确首批离线评估集、评分责任和抽样策略 | [框架能力台账](14-framework-capabilities/framework-capabilities-baseline.md#42-下一步优先采用) |
+| `DB-201` | 数据库表命名统一 | 当前业务表虽有单复数和领域前缀不完全统一的问题，但只为命名整齐而重命名会同时扩大 Alembic、ORM、配置备份、多数据库方言和滚动发布风险；现阶段不改表名 | 后续功能必须修改相关表结构，且具备一次性完成迁移、备份恢复、SQLite/MySQL/PostgreSQL和多 Pod发布验证的维护窗口 | [数据库职责](../../deep_agent/AGENTS.md) |
 
 ## 已关闭
 

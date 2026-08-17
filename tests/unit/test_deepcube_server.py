@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import subprocess
 import sys
 import types
 import unittest
@@ -63,6 +64,47 @@ def _load_server_module(option_stub: SimpleNamespace | None = None):
 
 
 class DeepcubeServerLauncherTests(unittest.TestCase):
+    def test_installed_package_exposes_unprefixed_raw_tool_names(self) -> None:
+        script = """
+import asyncio
+import json
+from deepcube.mcp.server import mcp
+
+async def main():
+    tools = await mcp.list_tools()
+    print(json.dumps([tool.name for tool in tools]))
+
+asyncio.run(main())
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        names = set(json.loads(result.stdout.strip().splitlines()[-1]))
+
+        self.assertEqual(
+            names,
+            {
+                "examples",
+                "find_nd_member",
+                "guide",
+                "list_cube_dimensions",
+                "list_cubes",
+                "ping",
+                "read",
+                "resolve_members",
+                "search",
+                "search_dimension_members",
+                "validate_expression",
+            },
+        )
+        self.assertFalse(
+            any(name.startswith("deepcube_") for name in names),
+            "DeepAgent adds the server prefix; package tools must remain unprefixed",
+        )
+
     def test_sync_env_builds_nacos_discovery_json(self) -> None:
         option_stub = _build_option_stub()
         option_stub.srvdis.implementation = "nacos"

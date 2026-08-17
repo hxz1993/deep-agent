@@ -47,7 +47,7 @@ pycryptodome==3.14.1
 deepfos-loguru-corotate>=0.1.0
 
 # DeepCube MCP assistant (mcps/deepcube/server.py); install in the same Python env as deep-agent.
-deepcube[mcp]
+deepcube[mcp]==2.5.6
 
 # deepfos/deepcube → pyarrow 14.x requires NumPy 1.x; do not upgrade to NumPy 2.x.
 numpy<2

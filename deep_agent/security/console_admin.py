@@ -116,7 +116,7 @@ class PlatformEnterpriseAdminChecker:
         if not 200 <= status_code < 300:
             logger.warning(
                 f"enterprise-admin verification returned HTTP {status_code}, "
-                f"url: [{self._url}], userId: [{user_id}], headers: [{dict(headers)}]"
+                f"url: [{self._url}]"
             )
             raise ConsoleAdminUnavailableError(
                 f"enterprise-admin verification returned HTTP {status_code}"

@@ -9,6 +9,9 @@ import aiohttp
 from fastapi import FastAPI
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
+from loguru import logger
+
+from deepfos_platform.options import OPTION as PLATFORM_OPTION
 
 from deep_agent.api.v1 import api_router
 from deep_agent.api.v1.admin import require_console_admin
@@ -157,9 +160,9 @@ class PlatformEnterpriseAdminCheckerTests(unittest.IsolatedAsyncioTestCase):
             "deep_agent.security.console_admin.AioHttpCli.get",
             new=AsyncMock(return_value=response),
         ):
-            allowed = await PlatformEnterpriseAdminChecker(
-                base_url="https://gateway.test/deepfos-server/"
-            )("u1", {"authorization": "Bearer token"})
+            allowed = await PlatformEnterpriseAdminChecker()(
+                "u1", {"authorization": "Bearer token"}
+            )
 
         self.assertTrue(allowed)
         self.assertTrue(response.released)
@@ -169,9 +172,7 @@ class PlatformEnterpriseAdminCheckerTests(unittest.IsolatedAsyncioTestCase):
             "deep_agent.security.console_admin.AioHttpCli.get",
             new=AsyncMock(return_value=direct_response),
         ):
-            denied = await PlatformEnterpriseAdminChecker(
-                base_url="https://gateway.test/deepfos-server/"
-            )("u1", {})
+            denied = await PlatformEnterpriseAdminChecker()("u1", {})
         self.assertFalse(denied)
 
     async def test_401_is_authentication_error(self) -> None:
@@ -181,14 +182,10 @@ class PlatformEnterpriseAdminCheckerTests(unittest.IsolatedAsyncioTestCase):
             new=AsyncMock(return_value=response),
         ):
             with self.assertRaises(ConsoleAdminAuthenticationError):
-                await PlatformEnterpriseAdminChecker(
-                    base_url="https://gateway.test/deepfos-server/"
-                )("u1", {})
+                await PlatformEnterpriseAdminChecker()("u1", {})
 
     async def test_timeout_and_malformed_data_are_unavailable(self) -> None:
-        checker = PlatformEnterpriseAdminChecker(
-            base_url="https://gateway.test/deepfos-server/"
-        )
+        checker = PlatformEnterpriseAdminChecker()
         with patch(
             "deep_agent.security.console_admin.AioHttpCli.get",
             new=AsyncMock(side_effect=asyncio.TimeoutError()),
@@ -207,6 +204,61 @@ class PlatformEnterpriseAdminCheckerTests(unittest.IsolatedAsyncioTestCase):
             ):
                 with self.assertRaises(ConsoleAdminUnavailableError):
                     await checker("u1", {})
+
+    async def test_request_uses_account_service_option(self) -> None:
+        response = _FakeResponse(200, "true")
+        request = AsyncMock(return_value=response)
+        original_account_service = PLATFORM_OPTION.server.account
+        try:
+            PLATFORM_OPTION.server.account = "https://account.test/system-account-api"
+            checker = PlatformEnterpriseAdminChecker(timeout_seconds=4.0)
+            with patch(
+                "deep_agent.security.console_admin.AioHttpCli.get",
+                new=request,
+            ):
+                allowed = await checker(
+                    "enterprise-user",
+                    {"authorization": "Bearer token"},
+                )
+        finally:
+            PLATFORM_OPTION.server.account = original_account_service
+
+        self.assertTrue(allowed)
+        request.assert_awaited_once()
+        args, kwargs = request.await_args
+        self.assertEqual(
+            args,
+            ("https://account.test/system-account-api/oauth/checkEnterpriseAdmin",),
+        )
+        self.assertEqual(kwargs["params"], {"userId": "enterprise-user"})
+        self.assertEqual(kwargs["headers"], {"authorization": "Bearer token"})
+        self.assertEqual(kwargs["timeout"].total, 4.0)
+
+    async def test_http_failure_log_does_not_expose_identity_or_credentials(self) -> None:
+        response = _FakeResponse(503, "unavailable")
+        messages: list[str] = []
+        sink_id = logger.add(lambda message: messages.append(str(message)), level="WARNING")
+        try:
+            with patch(
+                "deep_agent.security.console_admin.AioHttpCli.get",
+                new=AsyncMock(return_value=response),
+            ):
+                with self.assertRaises(ConsoleAdminUnavailableError):
+                    await PlatformEnterpriseAdminChecker()(
+                        "sensitive-user",
+                        {
+                            "authorization": "Bearer very-secret-token",
+                            "cookie": "session=very-secret-cookie",
+                        },
+                    )
+        finally:
+            logger.remove(sink_id)
+
+        joined = "".join(messages)
+        self.assertIn("HTTP 503", joined)
+        self.assertNotIn("sensitive-user", joined)
+        self.assertNotIn("very-secret-token", joined)
+        self.assertNotIn("very-secret-cookie", joined)
 
 
 class ConsoleAdminApiTests(unittest.TestCase):

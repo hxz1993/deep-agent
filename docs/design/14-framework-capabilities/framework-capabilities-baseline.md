@@ -6,7 +6,7 @@
 
 - `pydantic-ai-slim[openai,anthropic,google,mcp]==2.31.0`
 - `pydantic-ai-harness[skills]==0.21.0`
-- DeepAgent `v0.4.12` 当前实现
+- DeepAgent `v0.4.13` 当前实现
 
 证据顺序为：固定版本源码与公开 API、官方文档、DeepAgent 源码和测试。Harness 仍是 `0.x`，
 本文不把尚未固定依赖的新版本能力当成当前事实。

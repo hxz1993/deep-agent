@@ -110,6 +110,34 @@ class BuildUrlMcpToolsetTests(unittest.IsolatedAsyncioTestCase):
             },
         }
 
+    async def _call_pipeline_tool_with_error(self, error: Exception) -> tuple[Exception, int]:
+        ctx = RunContext(
+            deps=AgentDeps(session_id="session-a"),
+            model=TestModel(),
+            usage=RunUsage(),
+        )
+        inner = unittest.mock.MagicMock()
+        inner.__aenter__ = unittest.mock.AsyncMock(return_value=inner)
+        inner.__aexit__ = unittest.mock.AsyncMock(return_value=None)
+        inner.call_tool = unittest.mock.AsyncMock(side_effect=error)
+        with unittest.mock.patch(
+            "deep_agent.capabilities.mcp.snapshot_toolset.MCPToolset",
+            return_value=inner,
+        ):
+            toolset = build_mcp_toolset(
+                "pipeline",
+                "url",
+                {"url": "http://127.0.0.1:8083/mcp"},
+                inspection=self._inspection(),
+            )
+            run_toolset = await toolset.for_run(ctx)
+            tools = await run_toolset.get_tools(ctx)
+            try:
+                await run_toolset.call_tool("pipeline_query", {}, ctx, tools["pipeline_query"])
+            except Exception as raised:
+                return raised, inner.call_tool.await_count
+        self.fail("Expected the MCP tool call to fail")
+
     async def test_uses_snapshot_without_connecting(self) -> None:
         ctx = RunContext(
             deps=AgentDeps(session_id="session-a"),
@@ -235,6 +263,56 @@ class BuildUrlMcpToolsetTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("timed out or is temporarily unavailable", str(raised.exception))
         self.assertEqual(inner.call_tool.await_count, 1)
 
+    async def test_canvas_deadline_model_retry_becomes_tool_failed(self) -> None:
+        retry = ModelRetry("wait for canvas response: context deadline exceeded")
+        raised, call_count = await self._call_pipeline_tool_with_error(retry)
+
+        self.assertIsInstance(raised, ToolFailed)
+        self.assertNotIn("context deadline exceeded", str(raised))
+        self.assertIn("outcome may be unknown", str(raised))
+        self.assertIn("Canvas snapshot", str(raised))
+        self.assertEqual(call_count, 1)
+
+    async def test_wrapped_canvas_deadline_model_retry_becomes_tool_failed(self) -> None:
+        protocol_error = McpError(
+            ErrorData(code=-32603, message="wait for canvas response: context deadline exceeded")
+        )
+        retry = ModelRetry("tool execution failed")
+        retry.__cause__ = protocol_error
+        raised, call_count = await self._call_pipeline_tool_with_error(retry)
+
+        self.assertIsInstance(raised, ToolFailed)
+        self.assertNotIn("context deadline exceeded", str(raised))
+        self.assertIn("outcome may be unknown", str(raised))
+        self.assertIn("Canvas snapshot", str(raised))
+        self.assertEqual(call_count, 1)
+
+    async def test_structured_canvas_timeout_requires_snapshot_before_retry(self) -> None:
+        retry = ModelRetry(
+            'CANVAS_ERROR {"code":"canvas_command_timeout",'
+            '"outcome":"unknown","retryable":false,'
+            '"next_action":{"tool":"pipeline_canvas_snapshot"}}'
+        )
+        raised, call_count = await self._call_pipeline_tool_with_error(retry)
+
+        self.assertIsInstance(raised, ToolFailed)
+        message = str(raised)
+        self.assertNotIn("CANVAS_ERROR", message)
+        self.assertIn("outcome may be unknown", message)
+        self.assertIn("Canvas snapshot", message)
+        self.assertEqual(call_count, 1)
+
+    async def test_retryable_structured_canvas_error_remains_model_retry(self) -> None:
+        retry = ModelRetry(
+            'CANVAS_ERROR {"code":"canvas_validation_failed",'
+            '"outcome":"rejected","retryable":true}'
+        )
+        raised, call_count = await self._call_pipeline_tool_with_error(retry)
+
+        self.assertIsInstance(raised, ModelRetry)
+        self.assertEqual(str(raised), str(retry))
+        self.assertEqual(call_count, 1)
+
     async def test_business_model_retry_remains_retryable(self) -> None:
         ctx = RunContext(
             deps=AgentDeps(session_id="session-a"),
@@ -265,10 +343,8 @@ class BuildUrlMcpToolsetTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(str(raised.exception), "choose a unique workbook path")
         self.assertEqual(inner.call_tool.await_count, 1)
 
-    async def test_protocol_timeout_is_failed_result_and_agent_can_finish(self) -> None:
-        timeout = McpError(ErrorData(code=-32001, message="private timeout detail"))
-        retry = ModelRetry("private timeout detail")
-        retry.__cause__ = timeout
+    async def test_canvas_deadline_is_failed_result_and_agent_can_finish(self) -> None:
+        retry = ModelRetry("wait for canvas response: context deadline exceeded")
         inner = unittest.mock.MagicMock()
         inner.__aenter__ = unittest.mock.AsyncMock(return_value=inner)
         inner.__aexit__ = unittest.mock.AsyncMock(return_value=None)
@@ -286,21 +362,21 @@ class BuildUrlMcpToolsetTests(unittest.IsolatedAsyncioTestCase):
                 return ModelResponse(
                     parts=[
                         ToolCallPart(
-                            tool_name="biz_query",
+                            tool_name="pipeline_query",
                             args={},
-                            tool_call_id="timeout-call",
+                            tool_call_id="canvas-timeout-call",
                         )
                     ]
                 )
             self.assertEqual(failed[-1].outcome, "failed")
-            return ModelResponse(parts=[TextPart(content="used a safe fallback")])
+            return ModelResponse(parts=[TextPart(content="explained the temporary failure")])
 
         with unittest.mock.patch(
             "deep_agent.capabilities.mcp.snapshot_toolset.MCPToolset",
             return_value=inner,
         ):
             toolset = build_mcp_toolset(
-                "biz",
+                "pipeline",
                 "url",
                 {"url": "http://127.0.0.1:8083/mcp"},
                 inspection=self._inspection(),
@@ -311,11 +387,11 @@ class BuildUrlMcpToolsetTests(unittest.IsolatedAsyncioTestCase):
                 toolsets=[toolset],
             )
             result = await agent.run(
-                "query the service",
-                deps=AgentDeps(session_id="timeout-session"),
+                "craft the canvas",
+                deps=AgentDeps(session_id="canvas-timeout-session"),
             )
 
-        self.assertEqual(result.output, "used a safe fallback")
+        self.assertEqual(result.output, "explained the temporary failure")
         returns = [
             part
             for message in result.all_messages()
@@ -324,9 +400,9 @@ class BuildUrlMcpToolsetTests(unittest.IsolatedAsyncioTestCase):
             if isinstance(part, ToolReturnPart)
         ]
         self.assertEqual(len(returns), 1)
-        self.assertEqual(returns[0].tool_call_id, "timeout-call")
+        self.assertEqual(returns[0].tool_call_id, "canvas-timeout-call")
         self.assertEqual(returns[0].outcome, "failed")
-        self.assertNotIn("private timeout detail", str(returns[0].content))
+        self.assertNotIn("context deadline exceeded", str(returns[0].content))
         self.assertEqual(inner.call_tool.await_count, 1)
 
     async def test_missing_snapshot_exposes_no_tools(self) -> None:

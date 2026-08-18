@@ -12,7 +12,7 @@ from pydantic_ai.toolsets import AbstractToolset, ToolsetTool
 from pydantic_core import SchemaValidator
 
 from deep_agent.agent.deps import AgentDeps
-from deep_agent.capabilities.mcp.errors import is_terminal_mcp_request_failure
+from deep_agent.capabilities.mcp.errors import classify_terminal_mcp_request_failure
 from deep_agent.mcp_request_context import resolve_mcp_headers
 from deep_agent.schemas.mcp import McpToolSnapshot
 
@@ -124,7 +124,14 @@ class SnapshotMcpToolset(AbstractToolset[AgentDeps]):
         except (RunCancelled, asyncio.CancelledError):
             raise
         except ModelRetry as exc:
-            if is_terminal_mcp_request_failure(exc):
+            failure = classify_terminal_mcp_request_failure(exc)
+            if failure is not None:
+                if failure.canvas_outcome_unknown:
+                    raise ToolFailed(
+                        f"MCP tool {name!r} on server {self.server_name!r} timed out; "
+                        "the Canvas mutation outcome may be unknown. Do not retry the "
+                        "mutation directly; inspect the current Canvas snapshot first"
+                    ) from exc
                 raise ToolFailed(
                     f"MCP tool {name!r} on server {self.server_name!r} timed out or is temporarily unavailable"
                 ) from exc

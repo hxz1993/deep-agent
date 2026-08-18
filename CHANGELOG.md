@@ -3,6 +3,14 @@
 本文件记录 DeepAgent 的产品版本变化，按新版本到旧版本排列。当前代码版本以
 `deep_agent.__version__` 为准；数据库结构版本以 Alembic head 为准，两者互不替代。
 
+## v0.4.13
+
+- 兼容Go MCP工具执行超时返回的`context deadline exceeded`，将其从Pydantic AI的自动
+  `ModelRetry`重新分类为失败Tool Result，避免单个MCP超时耗尽重试并中断整个Run。
+- 支持MCP侧稳定的`CANVAS_ERROR`文本契约；仅`retryable=false`视为终止性失败，修改结果未知时
+  提示模型不要直接重放操作，应先读取当前Canvas快照。可纠正业务错误和正式取消保持原语义。
+- 不改变MCP协议、Canvas超时时间、SSE、History或数据库结构；Alembic保持`006`。
+
 ## v0.4.12
 
 - Console 启动时先通过平台综合权限接口确认当前用户是否为企业管理员；普通用户及固定超级用户

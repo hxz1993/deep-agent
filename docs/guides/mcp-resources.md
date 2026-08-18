@@ -80,6 +80,10 @@ read_mcp_resource(server_name, uri)
   不会让未使用该 MCP 的普通聊天也失败。Run 取消信号不转换为工具错误。
 - MCP SDK或Pydantic AI可能把请求超时先包装成`ModelRetry`。DeepAgent只在异常链能确认请求超时、
   连接中断或5xx不可用时重新分类为`ToolFailed`；参数、对象选择和普通业务校验错误仍允许模型修正。
+- Go MCP工具通过`CallToolResult.isError`返回的`context deadline exceeded`同样属于不可通过修改参数
+  修正的请求超时。若服务返回`CANVAS_ERROR {json}`，DeepAgent只在其中明确
+  `retryable=false`时终止框架自动重试；`outcome=unknown`会要求模型先读取Canvas快照，避免重复写入。
+  用户主动取消仍保持正式`cancelled`，不会被转换为工具失败。
 - 检测错误只保存阶段和异常类型，不保存 Token、Cookie、Header、URL 查询参数或服务返回的敏感正文。
 - 文本 Resource 最大允许 `256 KiB`；超限时要求读取更窄的 URI。
 - 二进制 Resource 只返回媒体类型和大小，不把原始字节放入模型上下文。

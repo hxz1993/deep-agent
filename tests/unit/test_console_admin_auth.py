@@ -19,7 +19,6 @@ from deep_agent.security import (
     ConsoleAdminUnavailableError,
     PlatformEnterpriseAdminChecker,
 )
-from deep_agent.security.console_admin import account_admin_check_url
 from tests.helpers.sqlite_stores import make_sqlite_stores_sync
 
 
@@ -147,17 +146,6 @@ class ConsoleAdminAuthorizerTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(access.allowed)
         self.assertEqual(checker.await_count, 2)
-
-    def test_account_url_uses_sibling_gateway_prefix(self) -> None:
-        self.assertEqual(
-            account_admin_check_url("https://test.deepfos.com/deepfos-server/"),
-            "https://test.deepfos.com/system-account-api/oauth/checkEnterpriseAdmin",
-        )
-        self.assertEqual(
-            account_admin_check_url("https://gateway.test/prefix/deepfos-server/service"),
-            "https://gateway.test/prefix/system-account-api/oauth/checkEnterpriseAdmin",
-        )
-
 
 class PlatformEnterpriseAdminCheckerTests(unittest.IsolatedAsyncioTestCase):
     async def test_strict_boolean_and_platform_envelope_responses(self) -> None:

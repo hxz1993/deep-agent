@@ -6,13 +6,13 @@ import json
 import time
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
-from urllib.parse import urlsplit, urlunsplit
 
 import aiohttp
 from fastapi import Request
 from loguru import logger
 
 from deepfos_platform.lib.httpcli import AioHttpCli
+from deepfos_platform.lib.utils import concat_url
 from deepfos_platform.options import OPTION as PLATFORM_OPTION
 
 ENTERPRISE_ADMIN_ROLE = "enterprise_admin"
@@ -44,24 +44,6 @@ class ConsoleAdminAccess:
 
 
 EnterpriseAdminChecker = Callable[[str, Mapping[str, str]], Awaitable[bool]]
-
-
-def account_admin_check_url(base_url: str | None = None) -> str:
-    """Resolve the stable gateway path for the account permission API."""
-    parsed = urlsplit(str(base_url or PLATFORM_OPTION.server.base).strip())
-    if not parsed.scheme or not parsed.netloc:
-        raise ConsoleAdminUnavailableError("platform account service is not configured")
-
-    parts = [part for part in parsed.path.split("/") if part]
-    if "system-account-api" in parts:
-        parts = parts[: parts.index("system-account-api") + 1]
-    elif "deepfos-server" in parts:
-        parts = parts[: parts.index("deepfos-server")]
-        parts.append("system-account-api")
-    else:
-        parts.append("system-account-api")
-    path = "/" + "/".join(parts + ["oauth", "checkEnterpriseAdmin"])
-    return urlunsplit((parsed.scheme, parsed.netloc, path, "", ""))
 
 
 def _forwarded_auth_headers(request: Request, user_id: str) -> dict[str, str]:
@@ -98,10 +80,9 @@ class PlatformEnterpriseAdminChecker:
     def __init__(
         self,
         *,
-        base_url: str | None = None,
         timeout_seconds: float = 5.0,
     ) -> None:
-        self._url = account_admin_check_url(base_url)
+        self._url = concat_url(PLATFORM_OPTION.server.account, "oauth", "checkEnterpriseAdmin")
         self._timeout = aiohttp.ClientTimeout(
             connect=min(3.0, timeout_seconds),
             total=timeout_seconds,
@@ -228,5 +209,4 @@ __all__ = [
     "ConsoleAdminUnavailableError",
     "ENTERPRISE_ADMIN_ROLE",
     "PlatformEnterpriseAdminChecker",
-    "account_admin_check_url",
 ]

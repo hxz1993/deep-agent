@@ -5,6 +5,7 @@ import uuid
 from fastapi import APIRouter
 from pydantic import BaseModel
 
+from deep_agent.api.v1.admin import CONSOLE_ADMIN_DEPENDENCIES
 from deep_agent.core.context import AppContextDep
 from deep_agent.options import OPTION
 from deep_agent.sandbox.profile import DEFAULT_SANDBOX_PROFILE, ResolvedSandboxProfile
@@ -16,7 +17,7 @@ from deep_agent.sandbox.types import (
 )
 from loguru import logger
 
-router = APIRouter()
+router = APIRouter(dependencies=CONSOLE_ADMIN_DEPENDENCIES)
 
 _SMOKE_CODE = "1 + 1"
 

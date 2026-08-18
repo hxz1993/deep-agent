@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from deep_agent.agent.context.estimator import TokenEstimator
+from deep_agent.api.v1.admin import CONSOLE_ADMIN_DEPENDENCIES
 from deep_agent.core.context import AppContextDep
 from deep_agent.capabilities.catalog import invalid_tool_package_codes
 from deep_agent.db.deps import get_agent_store, get_llm_model_store
@@ -81,7 +82,11 @@ async def _validate_skills(
         )
 
 
-@router.get("/agents", response_model=list[AgentResponse])
+@router.get(
+    "/agents",
+    response_model=list[AgentResponse],
+    dependencies=CONSOLE_ADMIN_DEPENDENCIES,
+)
 async def list_agents(
     store: AgentStoreBase = Depends(get_agent_store),
 ) -> list[AgentResponse]:
@@ -92,6 +97,7 @@ async def list_agents(
 @router.post(
     "/agents/prompt-estimate",
     response_model=AgentPromptEstimateResponse,
+    dependencies=CONSOLE_ADMIN_DEPENDENCIES,
 )
 async def estimate_agent_prompt(
     body: AgentPromptEstimateRequest,
@@ -126,7 +132,12 @@ async def get_agent(
     return _agent_response(row)
 
 
-@router.post("/agents", response_model=AgentResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/agents",
+    response_model=AgentResponse,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=CONSOLE_ADMIN_DEPENDENCIES,
+)
 async def create_agent(
     body: AgentCreate,
     ctx: AppContextDep,
@@ -147,7 +158,11 @@ async def create_agent(
     return _agent_response(row)
 
 
-@router.patch("/agents/{agent_id}", response_model=AgentResponse)
+@router.patch(
+    "/agents/{agent_id}",
+    response_model=AgentResponse,
+    dependencies=CONSOLE_ADMIN_DEPENDENCIES,
+)
 async def update_agent(
     agent_id: str,
     body: AgentUpdate,
@@ -182,7 +197,11 @@ async def update_agent(
     return _agent_response(row)
 
 
-@router.delete("/agents/{agent_id}", status_code=status.HTTP_200_OK)
+@router.delete(
+    "/agents/{agent_id}",
+    status_code=status.HTTP_200_OK,
+    dependencies=CONSOLE_ADMIN_DEPENDENCIES,
+)
 async def delete_agent(
     agent_id: str,
     store: AgentStoreBase = Depends(get_agent_store),

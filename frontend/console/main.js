@@ -7,7 +7,7 @@ import { initDiagnostics } from "./diagnostics.js?v=20260720-1";
 import { initWorkspace } from "./workspace.js?v=20260815-2";
 
 const VALID_PAGES = new Set(["workspace", "configuration", "diagnostics"]);
-let authenticated = false;
+let consoleAllowed = false;
 let toastTimer = null;
 
 async function loadProductVersion() {
@@ -51,7 +51,7 @@ async function showPage(page, { updateHash = true } = {}) {
     button.classList.toggle("active", button.dataset.page === next);
   });
   if (updateHash && location.hash !== `#/${next}`) history.replaceState(null, "", `#/${next}`);
-  if (authenticated && next === "configuration") {
+  if (consoleAllowed && next === "configuration") {
     await initConfiguration().catch((error) => toast(error.message, true));
     restoreConfigurationTab();
   }
@@ -115,30 +115,85 @@ function showWorkspaceLoadError(error) {
   loading.append(message, retry);
 }
 
+function showAccessLock({ title, message, icon = "shield-alert" }) {
+  const lock = document.getElementById("authLock");
+  if (!lock) return;
+  const iconNode = lock.querySelector("[data-access-lock-icon]");
+  if (iconNode) iconNode.setAttribute("data-lucide", icon);
+  const titleNode = document.getElementById("authLockTitle");
+  const messageNode = document.getElementById("authLockMessage");
+  if (titleNode) titleNode.textContent = title;
+  if (messageNode) messageNode.textContent = message;
+  lock.classList.remove("hidden");
+  document.body.classList.add("console-auth-locked");
+  window.lucide?.createIcons();
+}
+
+function hideAccessLock() {
+  document.getElementById("authLock")?.classList.add("hidden");
+  document.body.classList.remove("console-auth-locked");
+}
+
 async function boot() {
   window.DeepAgentConsole = { showPage, toast };
   bindNavigation();
   bindThemes();
   bindContextControls();
-  initDiagnostics();
   loadProductVersion();
   window.addEventListener("deep-agent-console-api-status", (event) => showApiBanner(event.detail?.status));
   window.lucide?.createIcons();
 
   try {
-    authenticated = await refreshIdentity();
+    const authenticated = await refreshIdentity();
+    if (!authenticated) {
+      showAccessLock({
+        title: "未获取到平台登录身份",
+        message: "请先登录 DeepFOS，再重新打开一体化控制台。",
+      });
+      await showPage(pageFromLocation(), { updateHash: true });
+      return;
+    }
+
+    const access = await window.DeepAgentConsoleAPI.adminAccess();
+    if (!access?.allowed || !access?.roles?.includes("enterprise_admin")) {
+      showAccessLock({
+        title: "无控制台管理权限",
+        message: "当前账号没有DeepAgent控制台管理权限。",
+        icon: "shield-x",
+      });
+      await showPage(pageFromLocation(), { updateHash: true });
+      return;
+    }
+    consoleAllowed = true;
+    hideAccessLock();
   } catch (error) {
     showApiBanner(error.status || 500);
-    showWorkspaceLoadError(error);
-    toast(error.message, true);
+    if (error.status === 401) {
+      showAccessLock({
+        title: "平台登录状态已失效",
+        message: "请重新登录 DeepFOS 后再打开控制台。",
+      });
+    } else if (error.status === 503) {
+      showAccessLock({
+        title: "暂时无法验证管理权限",
+        message: "平台权限服务暂时不可用，请稍后重新检查。",
+        icon: "shield-question",
+      });
+    } else {
+      showAccessLock({
+        title: "控制台初始化失败",
+        message: error.message || "无法完成控制台权限检查。",
+      });
+    }
+    await showPage(pageFromLocation(), { updateHash: true });
+    return;
   }
 
-  if (authenticated) {
-    await initWorkspace().catch((error) => {
-      showWorkspaceLoadError(error);
-      toast(error.message, true);
-    });
-  }
+  initDiagnostics();
+  await initWorkspace().catch((error) => {
+    showWorkspaceLoadError(error);
+    toast(error.message, true);
+  });
   await showPage(pageFromLocation(), { updateHash: true });
 }
 

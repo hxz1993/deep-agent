@@ -174,6 +174,35 @@
     }
   }
 
+  async function adminAccess({ timeoutMs = 7000 } = {}) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const response = await daFetch(serviceUrl("api/v1/admin/access"), {
+        includeContext: false,
+        signal: controller.signal,
+      });
+      const body = await parseJson(response);
+      if (!response.ok) {
+        const detail = body?.detail || body?.message || `HTTP ${response.status}`;
+        const error = new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
+        error.status = response.status;
+        throw error;
+      }
+      return body;
+    } catch (error) {
+      if (controller.signal.aborted) {
+        const timeoutError = new Error("验证控制台管理权限超时，请稍后重试");
+        timeoutError.code = "admin_access_timeout";
+        timeoutError.status = 503;
+        throw timeoutError;
+      }
+      throw error;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   try {
     localStorage.removeItem(LEGACY_BASE_URL_KEY);
   } catch {
@@ -186,6 +215,7 @@
   window.DeepAgentConsoleAPI = {
     CONTEXT_KEY,
     DEFAULT_LANGUAGE,
+    adminAccess,
     buildHeaders,
     clearContext,
     defaultApiBaseUrl,

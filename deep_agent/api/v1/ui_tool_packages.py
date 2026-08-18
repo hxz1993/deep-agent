@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from deep_agent.capabilities.ui.builtin import builtin_ui_records
+from deep_agent.api.v1.admin import CONSOLE_ADMIN_DEPENDENCIES
 from deep_agent.db.deps import get_agent_store, get_ui_tool_package_store
 from deep_agent.db.stores.agent import AgentStoreBase
 from deep_agent.db.stores.ui_tool_package import UiToolPackageStoreBase
@@ -13,7 +14,7 @@ from deep_agent.schemas.ui_tools import (
     UiToolPackageUpdate,
 )
 
-router = APIRouter()
+router = APIRouter(dependencies=CONSOLE_ADMIN_DEPENDENCIES)
 BUILTIN_UI_PACKAGE_CODE = "ui:builtin"
 
 

@@ -30,6 +30,7 @@ from deep_agent.db.factory import bootstrap_database, close_db
 from deep_agent.db.stores.bundle import DataStores
 from deep_agent.db.conversation import SessionStore
 from deep_agent.options import OPTION, validate_runtime_options
+from deep_agent.security import ConsoleAdminAuthorizer
 from deep_agent.skills.runtime import SkillRuntimeLibrary
 
 _context: AppContext | None = None
@@ -45,6 +46,7 @@ class AppContext:
     db_session_factory: async_sessionmaker[AsyncSession]
     active_runs: ActiveRunRegistry
     skill_runtime: SkillRuntimeLibrary
+    console_admin_authorizer: ConsoleAdminAuthorizer
     sandbox_backend: PythonExecutionBackend | None = None
     sandbox_profile: ResolvedSandboxProfile | None = None
 
@@ -127,6 +129,7 @@ class AppContext:
             event_persister=EventPersister(bundle.stores.coordinator),
             active_runs=ActiveRunRegistry(),
             skill_runtime=skill_runtime,
+            console_admin_authorizer=ConsoleAdminAuthorizer(),
             db_engine=bundle.engine,
             db_session_factory=bundle.session_factory,
             sandbox_backend=sandbox_backend,
@@ -151,6 +154,7 @@ class AppContext:
         sandbox_profile: ResolvedSandboxProfile | None = None,
         active_runs: ActiveRunRegistry | None = None,
         skill_runtime: SkillRuntimeLibrary | None = None,
+        console_admin_authorizer: ConsoleAdminAuthorizer | None = None,
     ) -> AppContext:
         if mcp_lease_manager is None:
             retries = (
@@ -185,6 +189,8 @@ class AppContext:
             or SkillRuntimeLibrary(
                 Path(tempfile.mkdtemp(prefix="deep-agent-runtime-skills-TMP_to_delete-"))
             ),
+            console_admin_authorizer=console_admin_authorizer
+            or ConsoleAdminAuthorizer.for_testing(),
             db_engine=db_engine,
             db_session_factory=db_session_factory,
             sandbox_backend=sandbox_backend,

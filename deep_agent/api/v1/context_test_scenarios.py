@@ -12,11 +12,12 @@ from deep_agent.agent.context.test_scenarios import (
     build_context_test_history,
     get_context_test_scenario,
 )
+from deep_agent.api.v1.admin import CONSOLE_ADMIN_DEPENDENCIES
 from deep_agent.api.v1.request_identity import RequestUserDep
 from deep_agent.core.context import AppContextDep
 from deep_agent.schemas.chat import SessionInfo
 
-router = APIRouter()
+router = APIRouter(dependencies=CONSOLE_ADMIN_DEPENDENCIES)
 
 
 class ContextTestScenarioInfo(BaseModel):

@@ -14,6 +14,7 @@ from deep_agent.api.v1 import api_router
 from deep_agent.capabilities import build_registry
 from deep_agent.capabilities.mcp.lease_manager import McpLeaseManager
 from deep_agent.core.context import AppContext, get_context, init_context, reset_context
+from tests.helpers.admin_auth import allow_console_admin
 from tests.helpers.sqlite_stores import make_sqlite_stores
 from tests.unit.test_catalog import LABS, MODELS, PROVIDERS
 
@@ -23,6 +24,7 @@ class LlmModelCatalogIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.stores, self._engine, session_factory = await make_sqlite_stores()
         self._app = FastAPI()
         self._app.include_router(api_router)
+        allow_console_admin(self._app)
         init_context(
             AppContext.for_testing(
                 registry=build_registry(),

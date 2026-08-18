@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from deep_agent.capabilities.ui.builtin import builtin_ui_records
+from deep_agent.api.v1.admin import CONSOLE_ADMIN_DEPENDENCIES
 from deep_agent.capabilities.ui.types import UIToolRecord
 from deep_agent.db.deps import get_agent_store, get_ui_tool_package_store, get_ui_tool_store
 from deep_agent.db.stores.agent import AgentStoreBase
@@ -10,7 +11,7 @@ from deep_agent.db.stores.ui_tool import UiToolStoreBase
 from deep_agent.db.stores.ui_tool_package import UiToolPackageStoreBase
 from deep_agent.schemas.ui_tools import UiToolCreate, UiToolListResponse, UiToolResponse, UiToolUpdate
 
-router = APIRouter()
+router = APIRouter(dependencies=CONSOLE_ADMIN_DEPENDENCIES)
 _BUILTIN_RECORDS = {record.name: record for record in builtin_ui_records()}
 _BUILTIN_NAMES = set(_BUILTIN_RECORDS)
 

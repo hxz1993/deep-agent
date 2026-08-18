@@ -12,7 +12,7 @@
 | 项 | 内容 |
 | --- | --- |
 | **是什么** | 通用 AI Agent 全栈：FastAPI 后端 + Pydantic AI 运行时 + 静态前端 |
-| **产品版本** | `deep_agent.__version__` 为唯一来源；当前 `0.4.11`，默认发布递增第三位 |
+| **产品版本** | `deep_agent.__version__` 为唯一来源；当前 `0.4.12`，默认发布递增第三位 |
 | **启动** | 本地 Test 联调固定使用下方命令；部署入口才使用 `deep_agent.main:app` |
 | **测试** | `python3.12 -m unittest discover -s tests -p "test_*.py" -v` |
 | **配置** | 仓库根 `.env`（`DEEP_AGENT_*` / `DEEP_AGENT_DBMS_*` / `DEEP_AGENT_SQLITE_PATH`） |
@@ -110,6 +110,7 @@ HTTP → deep_agent/api/v1 → AgentRunner → pydantic_ai.Agent → Toolsets
 - v0.3.18 使用 Harness `Skills` 渐进披露 `SKILL.md`；初始只公开名称和描述，正文由 `load_capability` 按需加载。References/Assets 通过只读分页工具访问；`scripts/` 不向模型披露源码，Agent同时选择含脚本Skill和 `builtin:sandbox` 时可通过统一沙箱执行。Skill 本身不授予工具权限。
 - v0.3.19 起 URL MCP 只在显式检测时执行 initialize/tools-list 并保存无敏感信息的工具快照；聊天 Run 用快照完成工具披露，真实调用时才按当前请求 Header 建连。同一 Run 复用连接，缺少或配置失效的快照不进入模型工具列表，必须重新“检测并更新”。Builtin MCP 和 Resource 代理保持原链路。
 - v0.4.11补齐URL MCP实际工具调用超时的错误分类：Pydantic AI将协议超时包装为`ModelRetry`时，DeepAgent识别其MCP超时、连接中断或5xx原因并转成脱敏`ToolFailed`，让模型改用其他工具或解释失败；参数、对象选择等可纠正错误仍保持`ModelRetry`，正式取消不受影响。
+- v0.4.12增加Console企业管理员兜底鉴权：`systemAdmin=true`按平台综合权限语义映射为内部`enterprise_admin`；固定`admin`账号不特殊放行。管理Router统一依赖同一授权器，聊天、会话、附件和固定Agent读取等运行接口不受影响。
 - v0.3.20 起上传 Skill 在每个 Pod 只保留 `runtime-skills/<code>/` 一份当前运行文件。服务启动、安装、替换、启用和手工重载负责同步；普通 Run 只读本地目录。单个 Skill 文件不可用时跳过该 Skill并继续回答，状态通过 `/skills`、Console 和 `final.context.skills` 诊断。
 - v0.3.23 起替换相同 Hash的上传 Skill也必须先检查平台原 ZIP；原包可下载才返回 `noop`，原 File ID失效时重新上传、更新数据库 File ID并返回 `repaired`。只恢复当前 Pod目录而不修复平台事实源属于不完整修复。
 - 上传 Skill 的平台 ZIP 是系统级配置文件，不属于业务 App/Space。平台文件使用可无 Space 回读的 `INF` 类型；安装、替换、启动恢复、管理员下载和 Run 兜底均保留调用身份但主动去掉 `app/space/language`业务上下文，保证同一 File ID 始终按系统级语义访问。不得改用 Space 级 `UPL`，数据库也不得保存请求上下文、Token、Cookie 或完整 Header。

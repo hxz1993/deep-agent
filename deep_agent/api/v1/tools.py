@@ -7,6 +7,7 @@ from deep_agent.agent.tool_discovery import (
     MCP_PRESELECT_LIMIT,
     MCP_SEARCH_RESULT_LIMIT,
 )
+from deep_agent.api.v1.admin import CONSOLE_ADMIN_DEPENDENCIES
 from deep_agent.capabilities.mcp.builtin import load_builtin_mcp_tool_packages
 from deep_agent.capabilities.registry import describe_tool_package
 from deep_agent.capabilities.ui.builtin import build_builtin_ui_tool_package
@@ -17,7 +18,7 @@ from deep_agent.core.paths import DEEP_AGENT_ROOT
 from deep_agent.schemas.chat import ToolPackageDescription
 from deep_agent.schemas.mcp import McpInspection
 
-router = APIRouter()
+router = APIRouter(dependencies=CONSOLE_ADMIN_DEPENDENCIES)
 
 
 def _ui_tool_payload(record: UIToolRecord) -> dict:

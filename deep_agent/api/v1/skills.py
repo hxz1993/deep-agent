@@ -14,6 +14,7 @@ from loguru import logger
 from starlette.responses import Response
 
 from deep_agent.agent.headers import extract_forward_headers
+from deep_agent.api.v1.admin import CONSOLE_ADMIN_DEPENDENCIES
 from deep_agent.core.context import AppContextDep
 from deep_agent.db.models import SkillPackage
 from deep_agent.schemas.skill import (
@@ -42,7 +43,7 @@ from deep_agent.skills.runtime import (
 from deepfos_platform.client.platform import FILE_TYPE_SKILL_PACKAGE, PlatformAPI
 
 
-router = APIRouter()
+router = APIRouter(dependencies=CONSOLE_ADMIN_DEPENDENCIES)
 tag = "Skills"
 
 

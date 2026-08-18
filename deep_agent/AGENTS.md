@@ -215,7 +215,8 @@ XML + JSON 投影。业务字段语义仍由具体 Agent Prompt 负责。
 | 文件 | 路由 |
 | --- | --- |
 | `chat.py` | `POST /chat`, `POST /chat/stream` |
-| `agents.py` | CRUD `/agents` |
+| `admin.py` | `GET /admin/access` 与统一企业管理员依赖；管理Router复用同一门禁 |
+| `agents.py` | 管理员列表/增删改；`GET /agents/{id}`保持业务助手公开读取 |
 | `mcp.py` | CRUD `/mcp`、统一检测 `/mcp/{name}/inspect` |
 | `ui_tools.py` | CRUD `/ui-tools`；工具必须归属手工 UI 工具包 |
 | `ui_tool_packages.py` | CRUD `/ui-tool-packages`；代码内置包只读 |
@@ -381,6 +382,17 @@ DEEP_AGENT_LOCAL_TOKEN_COOKIE=<可选，仅在目标环境要求 Cookie 时填�
 
 注意：应用启动会自动执行 Alembic `upgrade head`。本地 Profile 如果连接共享 Test 数据库，新增迁移会随本地服务启动直接应用；涉及删列等不兼容 DDL 时，必须先协调 Test 服务维护窗口，不能直接启动新代码。
 
+### Console企业管理员鉴权
+
+`security/console_admin.py`集中处理Console和管理API权限。当前只接受平台
+`checkEnterpriseAdmin`返回`true`的企业管理员，内部角色为`enterprise_admin`；固定账号`admin`
+必须明确拒绝。鉴权结果按用户和凭证摘要缓存30秒，原始Token/Cookie不得进入缓存键明文、日志或响应。
+平台401映射为未认证，超时、网络或异常响应映射为503并失败关闭。
+
+管理Router统一使用`CONSOLE_ADMIN_DEPENDENCIES`，不要在业务函数里复制账号或角色判断。新增管理接口
+必须加入路由审计测试；Chat、Session、History、附件和固定Agent读取等运行接口不能误加管理员门禁。
+完整边界见[`../docs/guides/console-admin-access.md`](../docs/guides/console-admin-access.md)。
+
 ### Agent（`DEEP_AGENT_` 前缀）
 
 | 变量 | 默认 | 说明 |
@@ -417,17 +429,19 @@ alembic upgrade head
 
 ## API 速查
 
-| 方法 | 路径 | 需 DB |
+| 方法 | 路径 | 需 DB / 权限 |
 | --- | --- | --- |
 | GET | `/health`, `/info`, `/docs` | 否 |
+| GET | `/api/v1/admin/access` | 否；当前平台身份，企业管理员返回`allowed=true` |
 | POST | `/api/v1/chat`, `/api/v1/chat/stream` | 否（持久化需 DB） |
-| CRUD | `/api/v1/agents` | 是 |
-| CRUD | `/api/v1/mcp` | 是 |
-| CRUD | `/api/v1/ui-tools` | 是 |
-| GET | `/api/v1/tools` | 否（无 DB 时跳过动态 UI 工具） |
-| GET | `/api/v1/global-settings` | 否；无需额外身份依赖，返回安全白名单，只读 |
-| GET/POST | `/api/v1/llm-models/catalog`、`/api/v1/llm-models/catalog/refresh` | 是；目录只读查询、管理员手工全量刷新 |
-| GET/POST | `/api/v1/context-test-scenarios` | 是；按当前模型预算创建普通测试会话 |
+| GET | `/api/v1/agents/{agent_id}` | 是；业务助手公开读取固定Agent |
+| CRUD | `/api/v1/agents` | 是；企业管理员，单个GET除外 |
+| CRUD | `/api/v1/mcp` | 是；企业管理员 |
+| CRUD | `/api/v1/ui-tools` | 是；企业管理员 |
+| GET | `/api/v1/tools` | 企业管理员；无 DB 时跳过动态 UI 工具 |
+| GET | `/api/v1/global-settings` | 企业管理员；返回安全白名单，只读 |
+| GET/POST | `/api/v1/llm-models/catalog`、`/api/v1/llm-models/catalog/refresh` | 是；企业管理员查询或刷新 |
+| GET/POST | `/api/v1/context-test-scenarios` | 是；企业管理员按当前模型预算创建测试会话 |
 | GET/POST | `/api/v1/uploads/capabilities`、`/api/v1/uploads` | 否/否；后端仍执行用户与文件限制校验 |
 | GET | `/api/v1/request-context` | 否；返回当前请求上下文最终值 |
 | GET | `/api/v1/sessions/{id}/context-status` | 是；沿用会话所有权校验 |

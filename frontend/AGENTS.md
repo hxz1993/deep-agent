@@ -83,7 +83,9 @@ Agent 编辑弹窗的系统提示词标题栏显示“字符数 / 预估 Token�
 
 `frontend/console/` 是不依赖构建工具的 ES Modules 页面。它复用现有聊天和配置 API，但不读取旧设置页的 `da_request_headers`：
 
-- 平台用户与鉴权只读，通过 `GET /api/v1/request-context` 获取。
+- 平台用户身份只读，通过 `GET /api/v1/request-context` 获取；随后调用`GET /api/v1/admin/access`。
+- 只有`allowed=true`且包含`enterprise_admin`角色时才初始化工作台、配置中心和诊断页面。普通用户、
+  固定`admin`、401或权限服务503均显示整页门禁，不得继续请求管理数据；直接Hash访问也不能绕过。
 - 当前控制台只允许覆盖 `app`；Space 根据标准 App 编码自动去掉末尾三位，Language 固定为 `zh-cn`。
 - Console 调试值使用 `X-Deep-Agent-App` / `X-Deep-Agent-Language` 穿过平台网关；后端再转成 MCP 所需的标准 `app` / `space` / `language`，不要从浏览器直接发送会触发网关路由校验的 `app` Header。
 - 控制台 API 根地址统一由 `api.js` 基于 `document.baseURI` 的上一级动态解析；本机 `/console/`、平台多级代理 `<服务前缀>/console/` 共用同一规则，其他模块不要自行拼接域名或服务前缀。
@@ -100,6 +102,7 @@ Agent 编辑弹窗的系统提示词标题栏显示“字符数 / 预估 Token�
 - 配置中心左侧页签只在当前前端页面的模块内存中保留；工作台与配置中心之间切换会恢复上次页签，浏览器刷新后重新回到 Agent，不写入 LocalStorage 或后端。
 - Agent 编辑弹窗在标题区显示完整 Agent ID；测试工作台对话标题第二行以 `会话 ID：<完整 ID>` 展示当前会话，不再截取前八位。
 - `/` 跳转到 `/console/#/workspace`；旧 `/settings.html`、`/models.html`、`/admin/` 返回 404。
+- 前端门禁只负责体验，后端管理Router仍统一校验企业管理员；不要把按钮隐藏当作权限控制。
 
 ---
 

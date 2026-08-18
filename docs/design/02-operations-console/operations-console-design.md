@@ -6,7 +6,7 @@
 
 ## 目标
 
-Console 是面向管理员和开发者的配置、联调和诊断界面，不是最终业务用户聊天产品。
+Console 是面向企业管理员的配置、联调和诊断界面，不是最终业务用户聊天产品。
 它把测试工作台、配置中心和诊断中心放在同一个静态前端中，并与当前 DeepAgent 服务
 同源发布。
 
@@ -18,9 +18,29 @@ Console 是面向管理员和开发者的配置、联调和诊断界面，不是
 
 旧的分散管理页面不再作为正式入口。
 
+## 管理权限门禁
+
+Console 通过平台综合权限接口判断当前用户是否为企业管理员。平台返回的
+`systemAdmin=true`在本场景映射为内部角色`enterprise_admin`；固定超级用户`admin`不特殊
+放行，并明确拒绝进入Console。
+
+```text
+平台可信身份
+→ /api/v1/admin/access
+→ 平台 checkEnterpriseAdmin
+→ enterprise_admin 才加载 Console 数据
+```
+
+页面门禁只负责交互，Agent配置、模型、MCP、Skill、UI工具、全局设置和管理诊断等Router还会
+统一执行后端门禁。平台权限服务超时或异常时返回503并失败关闭。Chat、Session、History、附件、
+取消、压缩以及按固定ID读取Agent继续服务业务助手，不要求企业管理员角色。
+
+本阶段不做企业、空间和应用级配置数据隔离，也不为普通用户建设Console只读模式。后续扩展
+`space_admin`、`app_admin`或`developer`时，应在统一授权器中增加角色，不修改每个业务Router。
+
 ## 请求上下文
 
-Console 只允许管理员编辑应用编码 `App`：
+通过管理门禁后，Console 只允许企业管理员编辑应用编码 `App`：
 
 - `Space` 由 App 去掉末尾三位数字自动推导。
 - `Language` 固定为 `zh-cn`。

@@ -153,7 +153,7 @@
   </div>
 
   <div class="auth-lock hidden" id="authLock">
-    <div class="auth-lock-content"><i data-lucide="shield-alert"></i><h2>未获取到平台登录身份</h2><p>请先登录 DeepFOS，再重新打开一体化控制台。</p><button type="button" id="retryIdentityBtn">重新检查</button></div>
+    <div class="auth-lock-content"><i data-lucide="shield-alert" data-access-lock-icon></i><h2 id="authLockTitle">正在检查控制台权限</h2><p id="authLockMessage">请稍候…</p><button type="button" id="retryIdentityBtn">重新检查</button></div>
   </div>
 
   <div class="drawer-backdrop hidden" id="contextBackdrop"></div>
@@ -180,11 +180,11 @@
   </div>
 
   <script src="../vendor/lucide.min.js"></script>
-  <script src="./api.js?v=20260728-6"></script>
+  <script src="./api.js?v=20260818-1"></script>
   <script src="./theme.js?v=20260720-1"></script>
   <script src="../vendor/marked.min.js"></script>
   <script src="../vendor/purify.min.js"></script>
   <script src="../vendor/highlight.min.js"></script>
-  <script type="module" src="./main.js?v=20260806-2"></script>
+  <script type="module" src="./main.js?v=20260818-1"></script>
 </body>
 </html>

@@ -3,7 +3,7 @@
 DeepAgent 是基于 FastAPI、Pydantic AI 和 SQLAlchemy 的多用户 Agent 服务，并
 随服务发布一体化运维控制台。
 
-当前产品版本为 `0.4.11`。`deep_agent.__version__` 是唯一代码版本来源，FastAPI、
+当前产品版本为 `0.4.12`。`deep_agent.__version__` 是唯一代码版本来源，FastAPI、
 `GET /info` 和 Console 顶部版本徽标均读取该值。后续正式发布默认递增
 `MAJOR.MINOR.PATCH` 的第三位，只有明确规划重大版本时才调整前两位。产品版本不通过
 环境变量或数据库覆盖，也不等同于 Alembic 数据库结构 revision。
@@ -67,6 +67,12 @@ test 固定镜像部署可设 `DEEP_AGENT_SANDBOX_ENSURE_VENV=true`，由 gunico
 - API 文档：<http://127.0.0.1:8000/docs>
 - 健康检查：<http://127.0.0.1:8000/health>
 - Sandbox：<http://127.0.0.1:8000/api/v1/health/sandbox>
+
+Console 是管理入口，只允许平台综合权限接口确认的企业管理员进入；固定超级用户
+`admin` 不特殊放行。Agent 配置、模型、MCP、Skill、UI 工具和运维信息等管理 API
+执行同一后端门禁，不能通过绕过页面直接访问。聊天、会话、附件、取消、压缩和按固定 ID
+读取 Agent 等业务助手运行接口保持原有用户语义。详细边界见
+[`docs/guides/console-admin-access.md`](docs/guides/console-admin-access.md)。
 
 部署环境使用：
 

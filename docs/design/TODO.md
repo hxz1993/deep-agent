@@ -154,6 +154,7 @@
 | `SKILL-001` | Skill 与 ToolPackage 分离；上传安装、Agent 授权、Harness `load_capability` 渐进披露、References/Assets 分页读取和脚本隔离；每个 Pod仅保留按 code组织的一份当前运行目录；同 Hash替换可恢复丢失的平台原包；管理操作同步、普通 Run本地读取、单 Skill故障隔离。2026-08-13普通用户式线上建模再次确认Skill正文实际进入模型上下文；具体模板内容、业务规则和回答质量由业务Skill维护方负责，不再作为DeepAgent机制待办 | v0.3.18～v0.3.23；2026-08-12～13 Test 004真实验收，[Skill 体系](12-agent-skills/skill-system-design.md) |
 | `MCP-SNAPSHOT` | URL MCP 检测保存完整工具快照，聊天按快照披露并在首次真实调用时建连；缺快照不阻塞 Run，单 Server 连接失败转为 `ToolFailed` | v0.3.19，[工具检索](13-tool-discovery/tool-discovery-design.md) |
 | `CONSOLE-202` | 独立只读系统工具目录按Skill、文件、工具结果、MCP工具发现和MCP Resource展示来源、自动注入条件与说明；`runtime:*`只作展示，不进入Agent能力或数据库 | v0.3.21～v0.4.0，[工具包 Console](11-tool-packages/tool-packages-design.md#9-console) |
+| `CONSOLE-203` | Console与全部管理API统一使用企业管理员门禁；固定`admin`拒绝，平台权限服务异常失败关闭，业务聊天与会话接口保持原有使用语义 | v0.4.12，[Console企业管理员鉴权](../guides/console-admin-access.md) |
 | `RUN-204` | Harness `Planning()`单轮结构化计划：默认六工具、每Run独立内存Store、SSE/History快照；Console在消息区底部浮层仅展示最新Run未完成计划，完成后隐藏；简单任务可不规划，不增加数据库或Agent配置 | v0.4.6～v0.4.7，[框架能力台账](14-framework-capabilities/framework-capabilities-baseline.md#51-已经采用) |
 | `SKILL-102A` | Skill脚本执行：只允许已授权 `.py`、显式JSON inputs/arguments/同Skill资源，固定读取 `outputs/result.json`；选择含脚本Skill并启用 `builtin:sandbox`后，与 `execute_python`共用当前Sandbox；中立测试Skill已在线完成首次加载、续跑、结构化结果和History配对验收 | v0.3.22～v0.3.24；2026-08-13 `SKILL-VAL-002` Test验收，[Skill 脚本边界](12-agent-skills/skill-system-design.md#10-skill脚本执行) |
 | `SKILL-104` | 上传Skill支持单个原包导出和全部集合导出；每个导出子ZIP可用现有安装接口直接导入，集合清单不包含平台File ID或Agent绑定 | v0.4.3，[Skill安装与运行](../guides/skills.md) |

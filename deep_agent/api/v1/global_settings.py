@@ -7,11 +7,12 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 from sqlalchemy.engine import make_url
 
+from deep_agent.api.v1.admin import CONSOLE_ADMIN_DEPENDENCIES
 from deep_agent.db.url import get_database_url
 from deep_agent.options import OPTION, DeepAgentOptions
 
 
-router = APIRouter()
+router = APIRouter(dependencies=CONSOLE_ADMIN_DEPENDENCIES)
 
 SettingValue = str | int | float | bool | list[str] | None
 

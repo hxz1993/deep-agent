@@ -11,6 +11,7 @@ from deep_agent.agent.models.catalog import (
     normalize_models_dev_bundle,
 )
 from deep_agent.agent.models.models_dev import ModelsDevFetchError, fetch_models_dev_bundle
+from deep_agent.api.v1.admin import CONSOLE_ADMIN_DEPENDENCIES
 from deep_agent.db.deps import get_llm_model_store, get_model_catalog_store
 from deep_agent.db.ids import normalize_agent_id
 from deep_agent.db.stores.llm_model import (
@@ -25,7 +26,7 @@ from deep_agent.schemas.model_catalog import (
     ModelCatalogResponse,
 )
 
-router = APIRouter()
+router = APIRouter(dependencies=CONSOLE_ADMIN_DEPENDENCIES)
 _catalog_refresh_lock = asyncio.Lock()
 
 

@@ -8,12 +8,13 @@ from sqlalchemy import text
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import SQLAlchemyError
 
+from deep_agent.api.v1.admin import CONSOLE_ADMIN_DEPENDENCIES
 from deep_agent.api.v1.request_identity import RequestUserDep
 from deep_agent.core.context import AppContextDep
 from deep_agent.db.url import get_database_url
 
 
-router = APIRouter()
+router = APIRouter(dependencies=CONSOLE_ADMIN_DEPENDENCIES)
 
 
 class DatabaseInfoResponse(BaseModel):

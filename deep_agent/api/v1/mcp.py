@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from deep_agent.agent.headers import extract_forward_headers
+from deep_agent.api.v1.admin import CONSOLE_ADMIN_DEPENDENCIES
 from deep_agent.capabilities.mcp.inspection import (
     inspect_mcp_server,
     mark_mcp_inspection_stale,
@@ -23,7 +24,7 @@ from deep_agent.schemas.mcp import (
     normalize_mcp_url_config,
 )
 
-router = APIRouter()
+router = APIRouter(dependencies=CONSOLE_ADMIN_DEPENDENCIES)
 
 
 async def _inspect_and_store(

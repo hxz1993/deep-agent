@@ -13,6 +13,7 @@ from httpx import ASGITransport, AsyncClient
 from deep_agent.api.v1 import api_router
 from deep_agent.capabilities import build_registry
 from deep_agent.core.context import AppContext, get_context, init_context, reset_context
+from tests.helpers.admin_auth import allow_console_admin
 from tests.helpers.sqlite_stores import make_sqlite_stores
 from tests.unit.test_skill_packages import skill_zip
 
@@ -54,6 +55,7 @@ class SkillApiTests(unittest.IsolatedAsyncioTestCase):
         self.stores, self.engine, session_factory = await make_sqlite_stores()
         self.app = FastAPI()
         self.app.include_router(api_router)
+        allow_console_admin(self.app)
         init_context(
             AppContext.for_testing(
                 registry=build_registry(),

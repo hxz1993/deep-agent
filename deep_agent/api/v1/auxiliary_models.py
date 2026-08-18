@@ -3,13 +3,14 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from deep_agent.agent.auxiliary_models import AUXILIARY_MODEL_CATALOG, is_known_use_case
+from deep_agent.api.v1.admin import CONSOLE_ADMIN_DEPENDENCIES
 from deep_agent.db.deps import get_auxiliary_model_store, get_llm_model_store
 from deep_agent.db.models import AuxiliaryModelConfig
 from deep_agent.db.stores.auxiliary_model import AuxiliaryModelStoreBase
 from deep_agent.db.stores.llm_model import LlmModelStoreBase
 from deep_agent.schemas.auxiliary_model import AuxiliaryModelResponse, AuxiliaryModelUpdate
 
-router = APIRouter()
+router = APIRouter(dependencies=CONSOLE_ADMIN_DEPENDENCIES)
 
 
 def _response_for_use_case(

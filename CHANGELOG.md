@@ -3,6 +3,14 @@
 本文件记录 DeepAgent 的产品版本变化，按新版本到旧版本排列。当前代码版本以
 `deep_agent.__version__` 为准；数据库结构版本以 Alembic head 为准，两者互不替代。
 
+## v0.4.15
+
+- 简化URL MCP工具重试耗尽收口：删除同一Run内按工具名缓存失败状态的额外分支，最后一次
+  `ModelRetry`直接转换为Pydantic AI原生`ToolFailed`。
+- 最终失败Tool Result保留MCP提供的模型可见业务校验原因，并提示模型停止当前工具调用、解释失败并
+  等待用户下一条消息；网络、超时和连接异常仍使用脱敏结果。
+- SSE、History和数据库结构不变，Alembic Head仍为`006`。
+
 ## v0.4.14
 
 - URL MCP工具在最后一次可纠正重试仍被拒绝时，转换为脱敏的失败Tool Result，不再让

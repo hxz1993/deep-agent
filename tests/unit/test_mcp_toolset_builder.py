@@ -362,45 +362,8 @@ class BuildUrlMcpToolsetTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(str(raised.exception), "choose a unique workbook path")
         self.assertEqual(inner.call_tool.await_count, 1)
 
-    async def test_last_business_retry_becomes_stable_failed_result(self) -> None:
-        ctx = RunContext(
-            deps=AgentDeps(session_id="session-a"),
-            model=TestModel(),
-            usage=RunUsage(),
-            retry=2,
-            max_retries=2,
-        )
-        retry = ModelRetry("private validation detail")
-        inner = unittest.mock.MagicMock()
-        inner.__aenter__ = unittest.mock.AsyncMock(return_value=inner)
-        inner.__aexit__ = unittest.mock.AsyncMock(return_value=None)
-        inner.call_tool = unittest.mock.AsyncMock(side_effect=retry)
-        with unittest.mock.patch(
-            "deep_agent.capabilities.mcp.snapshot_toolset.MCPToolset",
-            return_value=inner,
-        ):
-            toolset = build_mcp_toolset(
-                "pipeline",
-                "url",
-                {"url": "http://127.0.0.1:8083/mcp"},
-                inspection=self._inspection(),
-            )
-            run_toolset = await toolset.for_run(ctx)
-            tools = await run_toolset.get_tools(ctx)
-            with self.assertRaises(ToolFailed) as first:
-                await run_toolset.call_tool("pipeline_query", {}, ctx, tools["pipeline_query"])
-            with self.assertRaises(ToolFailed) as second:
-                await run_toolset.call_tool("pipeline_query", {}, ctx, tools["pipeline_query"])
-
-        message = str(first.exception)
-        self.assertEqual(message, str(second.exception))
-        self.assertIn("after 3 attempts", message)
-        self.assertIn("send a new message to retry", message)
-        self.assertNotIn("private validation detail", message)
-        self.assertEqual(inner.call_tool.await_count, 1)
-
     async def test_last_business_retry_is_persistable_failed_result_and_agent_finishes(self) -> None:
-        retry = ModelRetry("private canvas validation detail")
+        retry = ModelRetry("startId 已存在，不应包含在新增节点列表中")
         inner = unittest.mock.MagicMock()
         inner.__aenter__ = unittest.mock.AsyncMock(return_value=inner)
         inner.__aexit__ = unittest.mock.AsyncMock(return_value=None)
@@ -471,8 +434,8 @@ class BuildUrlMcpToolsetTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(retries), 2)
         self.assertEqual(len(failed), 1)
         self.assertEqual(failed[0].tool_call_id, "canvas-validation-3")
-        self.assertIn("after 3 attempts", str(failed[0].content))
-        self.assertNotIn("private canvas validation detail", str(failed[0].content))
+        self.assertIn("startId 已存在", str(failed[0].content))
+        self.assertIn("本轮工具纠正次数已经耗尽", str(failed[0].content))
         self.assertEqual(inner.call_tool.await_count, 3)
 
         history = model_messages_to_history(result.all_messages())
@@ -492,7 +455,8 @@ class BuildUrlMcpToolsetTests(unittest.IsolatedAsyncioTestCase):
         ]
         self.assertEqual(len(history_results), 1)
         self.assertEqual(history_results[0].tool_call_id, "canvas-validation-3")
-        self.assertIn("after 3 attempts", str(history_results[0].result))
+        self.assertIn("startId 已存在", str(history_results[0].result))
+        self.assertIn("本轮工具纠正次数已经耗尽", str(history_results[0].result))
         self.assertEqual(history_texts[-1], "本轮参数校验未通过，请发送新消息重试。")
 
     async def test_canvas_deadline_is_failed_result_and_agent_can_finish(self) -> None:

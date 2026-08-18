@@ -48,7 +48,6 @@ class SnapshotMcpToolset(AbstractToolset[AgentDeps]):
     _exit_stack: AsyncExitStack | None = field(default=None, init=False, repr=False)
     _connect_lock: asyncio.Lock = field(default_factory=asyncio.Lock, init=False, repr=False)
     _connection_failure: str | None = field(default=None, init=False, repr=False)
-    _retry_exhausted_failures: dict[str, str] = field(default_factory=dict, init=False, repr=False)
 
     @property
     def id(self) -> str:
@@ -84,6 +83,7 @@ class SnapshotMcpToolset(AbstractToolset[AgentDeps]):
         self,
         ctx: RunContext[AgentDeps],
     ) -> dict[str, ToolsetTool[AgentDeps]]:
+        del ctx
         tools: dict[str, ToolsetTool[AgentDeps]] = {}
         for item in self.snapshot.definitions:
             tool_def = ToolDefinition(
@@ -100,7 +100,7 @@ class SnapshotMcpToolset(AbstractToolset[AgentDeps]):
             tools[item.name] = ToolsetTool(
                 toolset=self,
                 tool_def=tool_def,
-                max_retries=self.max_retries if self.max_retries is not None else ctx.max_retries,
+                max_retries=self.max_retries,
                 args_validator=_MCP_ARGS_VALIDATOR,
             )
         return tools
@@ -114,8 +114,6 @@ class SnapshotMcpToolset(AbstractToolset[AgentDeps]):
     ) -> Any:
         if self._connection_failure is not None:
             raise ToolFailed(self._connection_failure)
-        if retry_failure := self._retry_exhausted_failures.get(name):
-            raise ToolFailed(retry_failure)
 
         try:
             inner = await self._ensure_connection()
@@ -139,15 +137,10 @@ class SnapshotMcpToolset(AbstractToolset[AgentDeps]):
                     f"MCP tool {name!r} on server {self.server_name!r} timed out or is temporarily unavailable"
                 ) from exc
             if ctx.last_attempt:
-                attempts = ctx.max_retries + 1
-                retry_failure = (
-                    f"MCP tool {name!r} on server {self.server_name!r} could not complete "
-                    f"because its arguments were rejected after {attempts} attempts. "
-                    "Do not call this tool again in the current run. Briefly explain the "
-                    "failure and ask the user to send a new message to retry"
-                )
-                self._retry_exhausted_failures[name] = retry_failure
-                raise ToolFailed(retry_failure) from exc
+                raise ToolFailed(
+                    f"{exc.message}\n"
+                    "本轮工具纠正次数已经耗尽，请停止调用、说明失败原因并等待用户下一条消息。"
+                ) from exc
             raise
         except ToolFailed:
             raise

@@ -3,6 +3,14 @@
 本文件记录 DeepAgent 的产品版本变化，按新版本到旧版本排列。当前代码版本以
 `deep_agent.__version__` 为准；数据库结构版本以 Alembic head 为准，两者互不替代。
 
+## v0.4.14
+
+- URL MCP工具在最后一次可纠正重试仍被拒绝时，转换为脱敏的失败Tool Result，不再让
+  Pydantic AI的`exceeded max retries`异常直接中断整个Run。
+- 模型收到失败结果后可正常解释并结束；失败Tool Call、Result和最终回答继续进入History，用户可在
+  下一轮重新尝试。同一Run再次调用已耗尽工具时不再访问远端MCP。
+- 不提高全局重试次数，不改变超时、取消、SSE、History结构或数据库；Alembic保持`006`。
+
 ## v0.4.13
 
 - 兼容Go MCP工具执行超时返回的`context deadline exceeded`，将其从Pydantic AI的自动

@@ -48,6 +48,7 @@ class SnapshotMcpToolset(AbstractToolset[AgentDeps]):
     _exit_stack: AsyncExitStack | None = field(default=None, init=False, repr=False)
     _connect_lock: asyncio.Lock = field(default_factory=asyncio.Lock, init=False, repr=False)
     _connection_failure: str | None = field(default=None, init=False, repr=False)
+    _retry_exhausted_failures: dict[str, str] = field(default_factory=dict, init=False, repr=False)
 
     @property
     def id(self) -> str:
@@ -113,6 +114,8 @@ class SnapshotMcpToolset(AbstractToolset[AgentDeps]):
     ) -> Any:
         if self._connection_failure is not None:
             raise ToolFailed(self._connection_failure)
+        if retry_failure := self._retry_exhausted_failures.get(name):
+            raise ToolFailed(retry_failure)
 
         try:
             inner = await self._ensure_connection()
@@ -135,6 +138,16 @@ class SnapshotMcpToolset(AbstractToolset[AgentDeps]):
                 raise ToolFailed(
                     f"MCP tool {name!r} on server {self.server_name!r} timed out or is temporarily unavailable"
                 ) from exc
+            if ctx.last_attempt:
+                attempts = ctx.max_retries + 1
+                retry_failure = (
+                    f"MCP tool {name!r} on server {self.server_name!r} could not complete "
+                    f"because its arguments were rejected after {attempts} attempts. "
+                    "Do not call this tool again in the current run. Briefly explain the "
+                    "failure and ask the user to send a new message to retry"
+                )
+                self._retry_exhausted_failures[name] = retry_failure
+                raise ToolFailed(retry_failure) from exc
             raise
         except ToolFailed:
             raise

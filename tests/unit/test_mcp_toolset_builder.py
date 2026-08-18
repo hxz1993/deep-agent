@@ -7,12 +7,20 @@ from mcp import McpError
 from mcp.types import ErrorData
 from pydantic_ai import Agent, RunContext, ToolFailed
 from pydantic_ai.exceptions import ModelRetry, RunCancelled
-from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, ToolCallPart, ToolReturnPart
+from pydantic_ai.messages import (
+    ModelRequest,
+    ModelResponse,
+    RetryPromptPart,
+    TextPart,
+    ToolCallPart,
+    ToolReturnPart,
+)
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 from pydantic_ai.models.test import TestModel
 from pydantic_ai.usage import RunUsage
 
 from deep_agent.agent.deps import AgentDeps
+from deep_agent.agent.history import model_messages_to_history
 from deep_agent.capabilities.mcp.toolset_builder import (
     build_mcp_toolset,
     build_raw_url_mcp_toolset,
@@ -84,6 +92,13 @@ class BuildRawUrlMcpToolsetTests(unittest.TestCase):
 
 
 class BuildUrlMcpToolsetTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        self._original_retries = OPTION.agent.request_retries
+        OPTION.agent.request_retries = 2
+
+    def tearDown(self) -> None:
+        OPTION.agent.request_retries = self._original_retries
+
     def _inspection(self) -> dict:
         return {
             "status": "healthy",
@@ -115,6 +130,8 @@ class BuildUrlMcpToolsetTests(unittest.IsolatedAsyncioTestCase):
             deps=AgentDeps(session_id="session-a"),
             model=TestModel(),
             usage=RunUsage(),
+            retry=0,
+            max_retries=2,
         )
         inner = unittest.mock.MagicMock()
         inner.__aenter__ = unittest.mock.AsyncMock(return_value=inner)
@@ -318,6 +335,8 @@ class BuildUrlMcpToolsetTests(unittest.IsolatedAsyncioTestCase):
             deps=AgentDeps(session_id="session-a"),
             model=TestModel(),
             usage=RunUsage(),
+            retry=1,
+            max_retries=2,
         )
         retry = ModelRetry("choose a unique workbook path")
         retry.__cause__ = ToolError("choose a unique workbook path")
@@ -342,6 +361,139 @@ class BuildUrlMcpToolsetTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(str(raised.exception), "choose a unique workbook path")
         self.assertEqual(inner.call_tool.await_count, 1)
+
+    async def test_last_business_retry_becomes_stable_failed_result(self) -> None:
+        ctx = RunContext(
+            deps=AgentDeps(session_id="session-a"),
+            model=TestModel(),
+            usage=RunUsage(),
+            retry=2,
+            max_retries=2,
+        )
+        retry = ModelRetry("private validation detail")
+        inner = unittest.mock.MagicMock()
+        inner.__aenter__ = unittest.mock.AsyncMock(return_value=inner)
+        inner.__aexit__ = unittest.mock.AsyncMock(return_value=None)
+        inner.call_tool = unittest.mock.AsyncMock(side_effect=retry)
+        with unittest.mock.patch(
+            "deep_agent.capabilities.mcp.snapshot_toolset.MCPToolset",
+            return_value=inner,
+        ):
+            toolset = build_mcp_toolset(
+                "pipeline",
+                "url",
+                {"url": "http://127.0.0.1:8083/mcp"},
+                inspection=self._inspection(),
+            )
+            run_toolset = await toolset.for_run(ctx)
+            tools = await run_toolset.get_tools(ctx)
+            with self.assertRaises(ToolFailed) as first:
+                await run_toolset.call_tool("pipeline_query", {}, ctx, tools["pipeline_query"])
+            with self.assertRaises(ToolFailed) as second:
+                await run_toolset.call_tool("pipeline_query", {}, ctx, tools["pipeline_query"])
+
+        message = str(first.exception)
+        self.assertEqual(message, str(second.exception))
+        self.assertIn("after 3 attempts", message)
+        self.assertIn("send a new message to retry", message)
+        self.assertNotIn("private validation detail", message)
+        self.assertEqual(inner.call_tool.await_count, 1)
+
+    async def test_last_business_retry_is_persistable_failed_result_and_agent_finishes(self) -> None:
+        retry = ModelRetry("private canvas validation detail")
+        inner = unittest.mock.MagicMock()
+        inner.__aenter__ = unittest.mock.AsyncMock(return_value=inner)
+        inner.__aexit__ = unittest.mock.AsyncMock(return_value=None)
+        inner.call_tool = unittest.mock.AsyncMock(side_effect=retry)
+
+        def model_function(messages, _info: AgentInfo) -> ModelResponse:
+            failed = [
+                part
+                for message in messages
+                if isinstance(message, ModelRequest)
+                for part in message.parts
+                if isinstance(part, ToolReturnPart) and part.outcome == "failed"
+            ]
+            if failed:
+                return ModelResponse(parts=[TextPart(content="本轮参数校验未通过，请发送新消息重试。")])
+            retries = [
+                part
+                for message in messages
+                if isinstance(message, ModelRequest)
+                for part in message.parts
+                if isinstance(part, RetryPromptPart)
+            ]
+            return ModelResponse(
+                parts=[
+                    ToolCallPart(
+                        tool_name="pipeline_query",
+                        args={"attempt": len(retries) + 1},
+                        tool_call_id=f"canvas-validation-{len(retries) + 1}",
+                    )
+                ]
+            )
+
+        with unittest.mock.patch(
+            "deep_agent.capabilities.mcp.snapshot_toolset.MCPToolset",
+            return_value=inner,
+        ):
+            toolset = build_mcp_toolset(
+                "pipeline",
+                "url",
+                {"url": "http://127.0.0.1:8083/mcp"},
+                inspection=self._inspection(),
+            )
+            agent = Agent(
+                FunctionModel(model_function),
+                deps_type=AgentDeps,
+                toolsets=[toolset],
+            )
+            result = await agent.run(
+                "craft the canvas",
+                deps=AgentDeps(session_id="canvas-validation-session"),
+            )
+
+        self.assertEqual(result.output, "本轮参数校验未通过，请发送新消息重试。")
+        retries = [
+            part
+            for message in result.all_messages()
+            if isinstance(message, ModelRequest)
+            for part in message.parts
+            if isinstance(part, RetryPromptPart)
+        ]
+        failed = [
+            part
+            for message in result.all_messages()
+            if isinstance(message, ModelRequest)
+            for part in message.parts
+            if isinstance(part, ToolReturnPart) and part.outcome == "failed"
+        ]
+        self.assertEqual(len(retries), 2)
+        self.assertEqual(len(failed), 1)
+        self.assertEqual(failed[0].tool_call_id, "canvas-validation-3")
+        self.assertIn("after 3 attempts", str(failed[0].content))
+        self.assertNotIn("private canvas validation detail", str(failed[0].content))
+        self.assertEqual(inner.call_tool.await_count, 3)
+
+        history = model_messages_to_history(result.all_messages())
+        history_results = [
+            part
+            for message in history
+            if message.role == "assistant"
+            for part in message.parts
+            if part.type == "tool_result"
+        ]
+        history_texts = [
+            part.content
+            for message in history
+            if message.role == "assistant"
+            for part in message.parts
+            if part.type == "text"
+        ]
+        self.assertEqual(len(history_results), 1)
+        self.assertEqual(history_results[0].tool_call_id, "canvas-validation-3")
+        self.assertIn("after 3 attempts", str(history_results[0].result))
+        self.assertEqual(history_texts[-1], "本轮参数校验未通过，请发送新消息重试。")
 
     async def test_canvas_deadline_is_failed_result_and_agent_can_finish(self) -> None:
         retry = ModelRetry("wait for canvas response: context deadline exceeded")

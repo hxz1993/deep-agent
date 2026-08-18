@@ -10,6 +10,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 import aiohttp
 from fastapi import Request
+from loguru import logger
 
 from deepfos_platform.lib.httpcli import AioHttpCli
 from deepfos_platform.options import OPTION as PLATFORM_OPTION
@@ -132,6 +133,10 @@ class PlatformEnterpriseAdminChecker:
         if status_code == 401:
             raise ConsoleAdminAuthenticationError("platform login has expired")
         if not 200 <= status_code < 300:
+            logger.warning(
+                f"enterprise-admin verification returned HTTP {status_code}, "
+                f"url: [{self._url}], userId: [{user_id}], headers: [{dict(headers)}]"
+            )
             raise ConsoleAdminUnavailableError(
                 f"enterprise-admin verification returned HTTP {status_code}"
             )

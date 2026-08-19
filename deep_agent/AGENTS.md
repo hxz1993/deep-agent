@@ -270,8 +270,8 @@ Search和MCP Resource分组说明工具来源与自动注入条件。`read_tool_
 `runtime:*` 仅是 Console 展示编码，不得注册到 ToolPackage Registry、`/tools` 或
 `agents.capabilities`。
 
-任务规划在Harness 0.21中仅启用`write_plan`、`read_plan`和`update_task_statuses`；旧History
-中的`add_task`、`update_task_status`和`remove_task`仍按规划事件识别，但不向新Run披露。
+任务规划在Harness 0.21中仅启用并识别`write_plan`、`read_plan`和`update_task_statuses`；其他
+Harness Planning工具不披露，也不提供旧History特殊兼容分支。
 每个Runner Run开始时创建独立`InMemoryPlanStore`；成功的规划Tool Return从Store读取快照写入Part
 metadata，SSE/History仅映射该快照。通过Harness公开Guidance要求模型使用稳定任务ID、在Deferred新Run
 重新规划，并在最终正文前准确收尾。不得把计划Reminder持久化成用户消息，也不得为单轮计划新增表、

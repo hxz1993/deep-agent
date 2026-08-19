@@ -12,17 +12,9 @@ from deep_agent.agent.deps import AgentDeps
 PLANNING_TOOL_NAMES = (
     "write_plan",
     "read_plan",
-    "add_task",
-    "update_task_status",
     "update_task_statuses",
-    "remove_task",
 )
 PLANNING_TOOL_NAME_SET = frozenset(PLANNING_TOOL_NAMES)
-ACTIVE_PLANNING_TOOL_NAMES = (
-    "write_plan",
-    "read_plan",
-    "update_task_statuses",
-)
 PLANNING_GUIDANCE = """Use planning only when the task benefits from multiple execution steps.
 
 - Include only work that still needs to be performed. Never add "write the final answer", "reply to the user", or equivalent presentation-only steps.
@@ -62,7 +54,7 @@ def build_planning_capability() -> Planning[AgentDeps]:
     """Build the scoped Harness 0.21 Planning capability for one Agent."""
 
     return Planning(
-        tools=ACTIVE_PLANNING_TOOL_NAMES,
+        tools=PLANNING_TOOL_NAMES,
         guidance=PLANNING_GUIDANCE,
         store_resolver=_resolve_plan_store,
         enable_subtasks=False,

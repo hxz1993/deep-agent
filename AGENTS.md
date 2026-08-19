@@ -12,7 +12,7 @@
 | 项 | 内容 |
 | --- | --- |
 | **是什么** | 通用 AI Agent 全栈：FastAPI 后端 + Pydantic AI 运行时 + 静态前端 |
-| **产品版本** | `deep_agent.__version__` 为唯一来源；当前 `0.4.16`，默认发布递增第三位 |
+| **产品版本** | `deep_agent.__version__` 为唯一来源；当前 `0.4.17`，默认发布递增第三位 |
 | **启动** | 本地 Test 联调固定使用下方命令；部署入口才使用 `deep_agent.main:app` |
 | **测试** | `python3.12 -m unittest discover -s tests -p "test_*.py" -v` |
 | **配置** | 仓库根 `.env`（`DEEP_AGENT_*` / `DEEP_AGENT_DBMS_*` / `DEEP_AGENT_SQLITE_PATH`） |
@@ -100,7 +100,7 @@ HTTP → deep_agent/api/v1 → AgentRunner → pydantic_ai.Agent → Toolsets
 - v0.4.1 将检索器升级为 `lexical_v2`：复用独立的字段化词法内核，按协议名、MCP标准 `title`、参数和描述分级匹配，并支持拼音与受限错字回退；查询明确写出协议工具名时只返回精确工具。不得加入业务词典或把词法匹配描述成中英文语义翻译。
 - v0.4.2 引导本地 `search_tools` 在一次调用中提交最多 3 个互补查询：用户原始语言、简洁英文能力描述和可选协议名。后端只做确定性词法检索，不调用翻译模型；首轮 Top 3仍只依赖原始问题和 MCP元数据。
 - v0.4.4～v0.4.5完成下线内置MCP清理；Alembic 005和006依次清理对应预制Server记录与Agent能力引用，历史会话不改写。当前代码内置MCP只保留DeepCube；真实MCP进程回归改用`tests/fixtures/`下的测试专用Server，禁止测试Fixture进入生产扫描目录。
-- v0.4.6全局采用Harness `Planning()`；每个Run使用独立内存Store，不跨消息或服务重启恢复。v0.4.16将新Run工具收敛为`write_plan`、`read_plan`和`update_task_statuses`，用Harness公开Guidance约束稳定ID、Deferred重建和最终正文前收尾；旧History六工具仍识别。规划结果继续走标准Tool Call/Return，DeepAgent只附加只读快照，不建立第二套任务引擎或计划表。Console在正常Final或UI Pending时清除浮层，取消/失败时保留。
+- v0.4.6全局采用Harness `Planning()`；每个Run使用独立内存Store，不跨消息或服务重启恢复。v0.4.16将工具收敛为`write_plan`、`read_plan`和`update_task_statuses`，用Harness公开Guidance约束稳定ID、Deferred重建和最终正文前收尾；仅这三个工具按Planning事件识别。规划结果继续走标准Tool Call/Return，DeepAgent只附加只读快照，不建立第二套任务引擎或计划表。Console在正常Final或UI Pending时清除浮层，取消/失败时保留。
 - v0.4.8将运行基线固定升级到`pydantic-ai-slim 2.31.0`与`pydantic-ai-harness 0.21.0`。Deferred工具和Capability工具的执行门槛由Core统一判断；DeepAgent继续只负责授权、检索、披露策略和观测。Planning缓存边界、MCP协议兼容、Provider流关闭及安全修复随框架升级生效，不新增产品协议。
 - Tool Search 首轮预选只使用聊天 API 的原始非空 `message`；`context_refs.type/label` 仅在纯上下文请求时回退，不能让 Page/Range 标签覆盖用户问题。实时工具若被 `ModelRetry` 或取消撤回，SSE 用 `tool_call_removed` 通知客户端删除临时卡片；取消后的非空部分回答必须以 `assistant.status=interrupted` 恢复。
 - 模型目录的 `max_output_tokens` 同时约束普通和流式回答；工具错误只有在模型修改参数或改选工具后可能成功时使用 `ModelRetry`，已确定的下载、解析或上游失败使用 `ToolFailed`，避免消耗工具重试预算。

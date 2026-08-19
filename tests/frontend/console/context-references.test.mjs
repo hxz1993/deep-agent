@@ -44,7 +44,10 @@ test("控制台只显示中性标签且不渲染 payload 或 metadata", () => {
   assert.doesNotMatch(renderer, /metadata/);
 });
 
-test("含上下文引用的历史消息不提供会丢失引用的编辑入口", () => {
-  assert.match(chatSource, /role === "user" && !contextRefs\?\.length/);
+test("含上下文引用的用户消息只复制可见正文且不提供编辑入口", () => {
+  assert.match(chatSource, /role === "user" && text/);
+  assert.match(chatSource, /copyTextToClipboard\(text\)/);
+  assert.doesNotMatch(chatSource, /startEditUserMessage/);
+  assert.doesNotMatch(chatSource, /msg-edit-btn/);
   assert.doesNotMatch(chatSource, /payload\.context_refs\s*=/);
 });

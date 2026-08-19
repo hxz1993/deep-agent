@@ -5,6 +5,7 @@ import {
   readSse,
 } from "./protocol.js?v=20260729-1";
 import { formatSessionIdSubtitle } from "./session-display.js?v=20260728-2";
+import { copyTextToClipboard } from "./message-actions.js?v=20260819-1";
 import {
   buildHistoryVisualItems,
   isPlanningToolEvent,
@@ -2193,16 +2194,40 @@ function addMessage(role, text, timestamp, branchPoint, attachments, contextRefs
   if (contextRefs?.length) {
     renderMessageContextRefs(bubble, contextRefs, branchPoint);
   }
-  if (role === "user" && !contextRefs?.length) {
+  if (role === "user" && text) {
     const actions = document.createElement("div");
     actions.className = "msg-actions";
-    const editBtn = document.createElement("button");
-    editBtn.type = "button";
-    editBtn.className = "msg-edit-btn";
-    editBtn.title = "编辑";
-    editBtn.textContent = "编辑";
-    editBtn.addEventListener("click", () => startEditUserMessage(row, text, branchPoint));
-    actions.appendChild(editBtn);
+    const copyBtn = document.createElement("button");
+    copyBtn.type = "button";
+    copyBtn.className = "msg-copy-btn";
+    copyBtn.title = "复制";
+    copyBtn.setAttribute("aria-label", "复制用户消息");
+    copyBtn.innerHTML = lucideIcon("copy");
+    copyBtn.addEventListener("click", async () => {
+      copyBtn.disabled = true;
+      try {
+        await copyTextToClipboard(text);
+        copyBtn.classList.add("copied");
+        copyBtn.title = "已复制";
+        copyBtn.setAttribute("aria-label", "用户消息已复制");
+        copyBtn.innerHTML = lucideIcon("check");
+        refreshLucideIcons();
+        showConsoleToast("已复制用户消息");
+        window.setTimeout(() => {
+          if (!copyBtn.isConnected) return;
+          copyBtn.classList.remove("copied");
+          copyBtn.title = "复制";
+          copyBtn.setAttribute("aria-label", "复制用户消息");
+          copyBtn.innerHTML = lucideIcon("copy");
+          copyBtn.disabled = false;
+          refreshLucideIcons();
+        }, 1500);
+      } catch {
+        copyBtn.disabled = false;
+        showConsoleToast("复制失败，请重试", true);
+      }
+    });
+    actions.appendChild(copyBtn);
     wrap.appendChild(actions);
   }
   el.messages.appendChild(row);
@@ -2339,16 +2364,6 @@ function renderPendingAttachments() {
 function clearPendingAttachments() {
   state.pendingAttachments = [];
   renderPendingAttachments();
-}
-
-function startEditUserMessage(row, text, branchPoint) {
-  if (state.streaming) return;
-  if (branchPoint == null) return;
-  state.branchFrom = branchPoint;
-  el.input.value = text;
-  autoGrow();
-  truncateDomAfterRow(row);
-  el.input.focus();
 }
 
 function truncateDomAfterRow(row) {

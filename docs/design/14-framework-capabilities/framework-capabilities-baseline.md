@@ -136,9 +136,8 @@ cache hit/miss Token，没有数据时保持 unknown。它不等于启用缓存�
 | `Planning` | 模型在复杂任务中维护单轮结构化计划 | v0.4.16保留`write_plan/read_plan/update_task_statuses`与`InMemoryPlanStore`；公开Guidance负责ID、Deferred和收尾约束；Console在正常Final或UI Pending隐藏浮层，取消/失败保留；不新增任务引擎或计划表 |
 
 Planning工具收敛使用Test近30天真实History作为依据：4312条消息中有14个会话、21个Run使用过
-Planning；成功记录中`write_plan/read_plan/update_task_statuses/update_task_status`分别调用
-24/14/35/17次，`add_task/remove_task`均为0次。单项状态更新统一并入批量工具后，模型只需掌握一套
-稳定ID更新协议；旧History名称继续识别，不迁移原始消息。
+Planning；真实调用证明创建、读取和批量更新三条路径已经覆盖现有任务，其他细粒度变更工具没有必要
+继续披露或保留兼容判断。单项状态更新统一并入批量工具后，模型只需掌握一套稳定ID更新协议。
 
 2026-08-19使用隔离SQLite与`deepseek-v4-flash`执行12个真实Run：2个简单回答均未规划，6个
 多步骤任务均在最终正文前把最后快照收口为全部完成，1个普通任务进入UI Choice Pending，1组

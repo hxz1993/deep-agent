@@ -93,14 +93,11 @@ export function processDisclosureLabel({ pending = false, running = false } = {}
 export const PLANNING_TOOL_NAMES = new Set([
   "write_plan",
   "read_plan",
-  "add_task",
-  "update_task_status",
   "update_task_statuses",
-  "remove_task",
 ]);
 
 export function isPlanningToolEvent(event = {}) {
-  return event.source === "planning" || PLANNING_TOOL_NAMES.has(event.tool);
+  return PLANNING_TOOL_NAMES.has(event.tool);
 }
 
 export function normalizePlanSnapshot(snapshot) {

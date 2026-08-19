@@ -861,10 +861,9 @@ html, body {
   transition: opacity 0.15s;
 }
 .msg-row.user:hover .msg-actions { opacity: 1; }
-.msg-edit-btn,
+.msg-copy-btn,
 .msg-retry-btn {
   margin-top: 4px;
-  padding: 2px 0;
   font-size: 12px;
   color: var(--text-muted);
   background: transparent;
@@ -872,11 +871,22 @@ html, body {
   border-radius: 4px;
   cursor: pointer;
 }
-.msg-edit-btn:hover,
+.msg-copy-btn {
+  width: 24px;
+  height: 24px;
+  padding: 2px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.msg-copy-btn svg { width: 14px; height: 14px; }
+.msg-copy-btn:hover,
 .msg-retry-btn:hover {
   color: var(--accent);
 }
-.msg-retry-btn { align-self: flex-start; }
+.msg-copy-btn.copied { color: var(--accent); }
+.msg-copy-btn:disabled { cursor: default; }
+.msg-retry-btn { align-self: flex-start; padding: 2px 0; }
 
 /* ---------- 输入区 ---------- */
 .composer { position: relative; flex-shrink: 0; padding: 14px 24px 18px; border-top: 1px solid var(--border); background: var(--bg); }

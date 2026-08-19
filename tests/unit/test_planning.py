@@ -21,7 +21,6 @@ from deep_agent.agent.event_persister import EventPersister
 from deep_agent.agent.factory import build_agent
 from deep_agent.agent.history import model_messages_to_history
 from deep_agent.agent.planning import (
-    ACTIVE_PLANNING_TOOL_NAMES,
     PLANNING_GUIDANCE,
     PLANNING_TOOL_NAMES,
     build_planning_capability,
@@ -55,15 +54,18 @@ class PlanningCapabilityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(planning), 1)
         self.assertFalse(planning[0].enable_subtasks)
         self.assertTrue(planning[0].inject)
-        self.assertEqual(tuple(planning[0].tools or ()), ACTIVE_PLANNING_TOOL_NAMES)
+        self.assertEqual(tuple(planning[0].tools or ()), PLANNING_TOOL_NAMES)
         self.assertEqual(planning[0].guidance, PLANNING_GUIDANCE)
 
-    async def test_new_runs_expose_three_tools_but_legacy_names_remain_recognizable(self) -> None:
+    async def test_only_three_planning_tools_are_recognized(self) -> None:
         self.assertEqual(
-            ACTIVE_PLANNING_TOOL_NAMES,
+            PLANNING_TOOL_NAMES,
             ("write_plan", "read_plan", "update_task_statuses"),
         )
         self.assertTrue(all(is_planning_tool(name) for name in PLANNING_TOOL_NAMES))
+        self.assertFalse(is_planning_tool("add_task"))
+        self.assertFalse(is_planning_tool("remove_task"))
+        self.assertFalse(is_planning_tool("update_task_status"))
         self.assertFalse(is_planning_tool("execute_python"))
 
     async def test_plan_store_is_fresh_for_each_run(self) -> None:
@@ -103,7 +105,7 @@ class PlanningRunnerTests(unittest.IsolatedAsyncioTestCase):
             calls += 1
             guidance_seen = guidance_seen or "Never add \"write the final answer\"" in str(_messages)
             self.assertEqual(
-                set(ACTIVE_PLANNING_TOOL_NAMES),
+                set(PLANNING_TOOL_NAMES),
                 {tool.name for tool in info.function_tools},
             )
             if calls == 1:

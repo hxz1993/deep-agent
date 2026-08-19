@@ -3,6 +3,15 @@
 本文件记录 DeepAgent 的产品版本变化，按新版本到旧版本排列。当前代码版本以
 `deep_agent.__version__` 为准；数据库结构版本以 Alembic head 为准，两者互不替代。
 
+## v0.4.17
+
+- Console移除用户消息下方的分支编辑入口，在原位置改为复制图标；复制内容仅为用户气泡的可见正文，
+  不包含附件、Context Reference或隐藏元数据。
+- 复制成功后图标短暂切换为勾选并显示提示，Clipboard不可用或写入失败时给出明确错误反馈。
+  重试、历史分支、SSE和后端协议保持不变，Alembic Head仍为`006`。
+- Planning仅识别当前启用的三个工具；删除旧工具名和仅凭`source=planning`触发的历史兼容判断，避免
+  已下线工具继续进入计划快照或Console计划面板。
+
 ## v0.4.16
 
 - Harness Planning从六个工具收敛为`write_plan`、`read_plan`和`update_task_statuses`；旧History

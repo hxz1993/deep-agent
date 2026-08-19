@@ -185,8 +185,9 @@ test("大工具结果显示外置提示并保留预览", () => {
 });
 
 test("任务计划只在消息区底部浮层展示最新未完成快照", () => {
-  assert.equal(isPlanningToolEvent({ source: "planning", tool: "anything" }), true);
+  assert.equal(isPlanningToolEvent({ source: "planning", tool: "anything" }), false);
   assert.equal(isPlanningToolEvent({ tool: "write_plan" }), true);
+  assert.equal(isPlanningToolEvent({ source: "planning", tool: "update_task_statuses" }), true);
   assert.equal(isPlanningToolEvent({ tool: "execute_python" }), false);
 
   const running = normalizePlanSnapshot({
@@ -248,7 +249,7 @@ test("历史只恢复最新 Assistant Run 的最后一份未完成计划", () =>
   };
   const planningResult = (plan, id) => ({
     type: "tool_result",
-    tool: "update_task_status",
+    tool: "update_task_statuses",
     source: "planning",
     tool_call_id: id,
     plan,

@@ -28,6 +28,12 @@
 当前没有可以脱离外部条件直接进入开发的主线。诊断中心、OTLP 和 Evaluation均已移入“暂缓”，
 必须先满足各自的重新启动条件。
 
+### 近期部署配置待办（非功能开发）
+
+- `ATT-CONFIG-001`：平台附件扩展名白名单补充`MD/HTML/XML/WEBP/GIF/WAV`，使平台上传入口与
+  DeepAgent当前默认附件白名单一致。该项只调整各环境的平台文件上传配置，不扩展`read_file`、
+  Provider模态或DeepAgent代码；配置完成后分别用六种最小文件验证上传能力。
+
 ### 近期验证结论（非功能开发）
 
 1. `SKILL-VAL-001`：三个业务 Skill 的核心线上验收已于2026-08-13完成。Test上的普通用户式
@@ -155,7 +161,7 @@
 | `MCP-SNAPSHOT` | URL MCP 检测保存完整工具快照，聊天按快照披露并在首次真实调用时建连；缺快照不阻塞 Run，单 Server 连接失败转为 `ToolFailed` | v0.3.19，[工具检索](13-tool-discovery/tool-discovery-design.md) |
 | `CONSOLE-202` | 独立只读系统工具目录按Skill、文件、工具结果、MCP工具发现和MCP Resource展示来源、自动注入条件与说明；`runtime:*`只作展示，不进入Agent能力或数据库 | v0.3.21～v0.4.0，[工具包 Console](11-tool-packages/tool-packages-design.md#9-console) |
 | `CONSOLE-203` | Console与全部管理API统一使用企业管理员门禁；固定`admin`拒绝，平台权限服务异常失败关闭，业务聊天与会话接口保持原有使用语义 | v0.4.12，[Console企业管理员鉴权](../guides/console-admin-access.md) |
-| `RUN-204` | Harness `Planning()`单轮结构化计划：默认六工具、每Run独立内存Store、SSE/History快照；Console在消息区底部浮层仅展示最新Run未完成计划，完成后隐藏；简单任务可不规划，不增加数据库或Agent配置 | v0.4.6～v0.4.7，[框架能力台账](14-framework-capabilities/framework-capabilities-baseline.md#51-已经采用) |
+| `RUN-204` | Harness `Planning()`单轮结构化计划：v0.4.16按Test近30天21个Planning Run的真实调用收敛为`write_plan/read_plan/update_task_statuses`（被删除的`add_task/remove_task`均0次，单项更新统一并入批量工具）；每Run独立内存Store，公开Guidance约束稳定ID、Deferred重建和最终正文前收尾；Console正常Final或UI Pending隐藏计划，取消/失败保留；旧History六工具继续识别，不增加数据库或Agent配置 | v0.4.6～v0.4.16，[框架能力台账](14-framework-capabilities/framework-capabilities-baseline.md#51-已经采用) |
 | `SKILL-102A` | Skill脚本执行：只允许已授权 `.py`、显式JSON inputs/arguments/同Skill资源，固定读取 `outputs/result.json`；选择含脚本Skill并启用 `builtin:sandbox`后，与 `execute_python`共用当前Sandbox；中立测试Skill已在线完成首次加载、续跑、结构化结果和History配对验收 | v0.3.22～v0.3.24；2026-08-13 `SKILL-VAL-002` Test验收，[Skill 脚本边界](12-agent-skills/skill-system-design.md#10-skill脚本执行) |
 | `SKILL-104` | 上传Skill支持单个原包导出和全部集合导出；每个导出子ZIP可用现有安装接口直接导入，集合清单不包含平台File ID或Agent绑定 | v0.4.3，[Skill安装与运行](../guides/skills.md) |
 | `FILE-001` / `SKILL-103` | 系统工具 `read_file`统一读取会话附件与Skill文件；只处理文本、DOCX和XLSX，同一Run字节与解析single-flight缓存；图片严格走当前轮原生多模态附件 | v0.3.23～v0.3.24，[附件解析](06-attachment-parsing/attachment-parsing-design.md)、[Skill体系](12-agent-skills/skill-system-design.md) |

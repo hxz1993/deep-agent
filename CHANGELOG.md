@@ -3,6 +3,15 @@
 本文件记录 DeepAgent 的产品版本变化，按新版本到旧版本排列。当前代码版本以
 `deep_agent.__version__` 为准；数据库结构版本以 Alembic head 为准，两者互不替代。
 
+## v0.4.16
+
+- Harness Planning从六个工具收敛为`write_plan`、`read_plan`和`update_task_statuses`；旧History
+  中的六种规划工具继续识别，不做消息迁移。
+- 通过Harness公开`guidance`明确稳定任务ID、批量状态更新、Deferred新Run重新评估，以及最终正文
+  输出前完成真实状态收尾；不修改框架源码或业务Agent Prompt。
+- Console在Run正常完成或进入UI Pending后清除计划浮层，取消和失败仍保留最后快照；计划浮层去除
+  外部阴影。DeepCube和DeepTable客户端本轮不调整，Alembic Head仍为`006`。
+
 ## v0.4.15
 
 - 简化URL MCP工具重试耗尽收口：删除同一Run内按工具名缓存失败状态的额外分支，最后一次

@@ -74,7 +74,7 @@ test("系统工具按领域展示来源、条件和说明", () => {
   assert.doesNotMatch(html, /编辑|删除|启用|checkbox|switch/);
 });
 
-test("任务规划六个官方工具属于独立只读领域", () => {
+test("任务规划三个官方工具属于独立只读领域", () => {
   const ui = loadSystemToolsUi();
   const html = ui.systemToolDomain({
     code: "runtime:planning",
@@ -82,16 +82,13 @@ test("任务规划六个官方工具属于独立只读领域", () => {
     tools: [
       "write_plan",
       "read_plan",
-      "add_task",
-      "update_task_status",
       "update_task_statuses",
-      "remove_task",
     ].map((name) => ({ name, source: "Pydantic AI Harness" })),
   });
   assert.match(html, /runtime:planning/);
   assert.match(html, /write_plan/);
   assert.match(html, /update_task_statuses/);
-  assert.match(html, /remove_task/);
+  assert.doesNotMatch(html, /add_task|update_task_status<|remove_task/);
   assert.doesNotMatch(html, /checkbox|switch/);
 });
 

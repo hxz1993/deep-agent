@@ -18,6 +18,20 @@ PLANNING_TOOL_NAMES = (
     "remove_task",
 )
 PLANNING_TOOL_NAME_SET = frozenset(PLANNING_TOOL_NAMES)
+ACTIVE_PLANNING_TOOL_NAMES = (
+    "write_plan",
+    "read_plan",
+    "update_task_statuses",
+)
+PLANNING_GUIDANCE = """Use planning only when the task benefits from multiple execution steps.
+
+- Include only work that still needs to be performed. Never add "write the final answer", "reply to the user", or equivalent presentation-only steps.
+- Task IDs are the stable IDs returned by the planning tools, not the visible list positions such as 1, 2, or 3. If you do not know the exact IDs, call read_plan before updating anything.
+- After the IDs are known, use update_task_statuses for every status change, including a single-item update.
+- Update all accurately completed work before starting the final answer. Once final-answer text begins, do not call another planning tool.
+- A deferred-tool resume is a new run. Do not reuse task IDs from the previous run; reassess the remaining work and call write_plan only if a new plan is still useful.
+- Never mark unfinished work as completed merely to close the plan.
+"""
 PLAN_METADATA_KEY = "deepagent_plan"
 
 
@@ -45,9 +59,11 @@ def _resolve_plan_store(ctx: RunContext[AgentDeps]) -> InMemoryPlanStore:
 
 
 def build_planning_capability() -> Planning[AgentDeps]:
-    """Build the default Harness 0.21 Planning capability for one Agent."""
+    """Build the scoped Harness 0.21 Planning capability for one Agent."""
 
     return Planning(
+        tools=ACTIVE_PLANNING_TOOL_NAMES,
+        guidance=PLANNING_GUIDANCE,
         store_resolver=_resolve_plan_store,
         enable_subtasks=False,
         inject=True,

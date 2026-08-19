@@ -2106,7 +2106,7 @@ function handleEvent({ event, data }, assistant) {
       }
       const refreshCompactionHistory = finalizeAutomaticContextCompaction(data.context, data.status);
       state.skipHistoryRefresh = !refreshCompactionHistory;
-      markComposerPlanTerminal(data.status === "pending" ? "pending" : "completed");
+      clearComposerPlan();
       if (data.status === "pending" && data.deferred) {
         state.awaitingHitl = true;
         setStreaming(false);

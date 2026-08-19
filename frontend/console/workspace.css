@@ -596,7 +596,6 @@ html, body {
   border: 1px solid var(--border);
   border-radius: 10px;
   background: color-mix(in srgb, var(--bg) 92%, transparent);
-  box-shadow: 0 12px 32px color-mix(in srgb, #000 16%, transparent);
   transform: translateX(-50%);
   backdrop-filter: blur(12px);
 }

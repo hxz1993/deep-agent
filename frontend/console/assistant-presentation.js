@@ -121,13 +121,12 @@ export function normalizePlanSnapshot(snapshot) {
 export function planPanelState(snapshot, terminalStatus = null) {
   const plan = normalizePlanSnapshot(snapshot);
   if (!plan) return null;
+  if (terminalStatus === "completed" || terminalStatus === "pending") return null;
   const allCompleted = plan.completed === plan.total;
   if (allCompleted) return null;
   const terminalLabels = {
     interrupted: "已中断",
     error: "执行失败",
-    pending: "等待操作",
-    completed: "未完成",
   };
   const terminalLabel = terminalLabels[terminalStatus] || "";
   return {
@@ -165,6 +164,7 @@ export function latestAssistantRunPlan(messages = []) {
   }
 
   let snapshot = null;
+  const pendingUiCalls = new Set();
   for (const record of records) {
     for (const part of record.parts || []) {
       if (
@@ -174,6 +174,11 @@ export function latestAssistantRunPlan(messages = []) {
       ) {
         snapshot = part.plan;
       }
+      if (part?.type === "tool_call" && part.tool_call_id && part.widget) {
+        pendingUiCalls.add(part.tool_call_id);
+      } else if (part?.type === "tool_result" && part.tool_call_id) {
+        pendingUiCalls.delete(part.tool_call_id);
+      }
     }
   }
   if (!snapshot) return null;
@@ -182,7 +187,7 @@ export function latestAssistantRunPlan(messages = []) {
   let terminalStatus = null;
   if (statuses.includes("interrupted")) terminalStatus = "interrupted";
   else if (statuses.includes("error") || statuses.includes("failed")) terminalStatus = "error";
-  else if (statuses.includes("pending")) terminalStatus = "pending";
+  else if (statuses.includes("pending") || pendingUiCalls.size) terminalStatus = "pending";
   else if (statuses.length && statuses.every((status) => status === "completed")) {
     terminalStatus = "completed";
   }

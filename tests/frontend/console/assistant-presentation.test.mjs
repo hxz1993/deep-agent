@@ -210,7 +210,8 @@ test("任务计划只在消息区底部浮层展示最新未完成快照", () =>
   assert.equal(planPanelState(completed), null);
   assert.equal(planPanelState(running, "interrupted").label, "0/2 · 已中断");
   assert.equal(planPanelState(running, "error").label, "0/2 · 执行失败");
-  assert.equal(planPanelState(running, "pending").label, "0/2 · 等待操作");
+  assert.equal(planPanelState(running, "pending"), null);
+  assert.equal(planPanelState(running, "completed"), null);
   assert.equal(normalizePlanSnapshot({ items: [] }), null);
 
   const planPosition = workspaceTemplate.indexOf('id="composerPlan"');
@@ -224,6 +225,9 @@ test("任务计划只在消息区底部浮层展示最新未完成快照", () =>
   assert.match(workspaceCss, /\.composer-plan \{[\s\S]*position: absolute;[\s\S]*bottom: calc\(100% \+ 10px\);/);
   assert.match(workspaceCss, /width: min\(420px, calc\(100% - 48px\)\);/);
   assert.match(workspaceCss, /\.composer \{ position: relative;/);
+  const planRule = workspaceCss.match(/\.composer-plan \{([\s\S]*?)\n\}/)?.[1] || "";
+  assert.doesNotMatch(planRule, /box-shadow/);
+  assert.match(chatSource, /case "final":[\s\S]*?clearComposerPlan\(\);/);
 });
 
 test("历史只恢复最新 Assistant Run 的最后一份未完成计划", () => {
@@ -281,6 +285,39 @@ test("历史只恢复最新 Assistant Run 的最后一份未完成计划", () =>
   ]);
   assert.deepEqual(restored?.snapshot, complete);
   assert.equal(planPanelState(restored?.snapshot, restored?.terminalStatus), null);
+
+  const normalFinalWithIncompleteSnapshot = latestAssistantRunPlan([
+    { role: "user", content: "正常结束" },
+    { role: "assistant", run_id: "run-final", status: "completed", parts: [planningResult(first, "4")] },
+  ]);
+  assert.equal(normalFinalWithIncompleteSnapshot?.terminalStatus, "completed");
+  assert.equal(
+    planPanelState(
+      normalFinalWithIncompleteSnapshot?.snapshot,
+      normalFinalWithIncompleteSnapshot?.terminalStatus,
+    ),
+    null,
+  );
+
+  const pending = latestAssistantRunPlan([
+    { role: "user", content: "等待确认" },
+    {
+      role: "assistant",
+      run_id: "run-pending",
+      status: "completed",
+      parts: [
+        planningResult(first, "pending-plan"),
+        {
+          type: "tool_call",
+          tool: "builtin__confirm",
+          tool_call_id: "confirm-1",
+          widget: "confirm",
+        },
+      ],
+    },
+  ]);
+  assert.equal(pending?.terminalStatus, "pending");
+  assert.equal(planPanelState(pending?.snapshot, pending?.terminalStatus), null);
 
   assert.deepEqual(latestAssistantRunPlan([
     { role: "user", content: "兼容历史" },

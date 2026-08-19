@@ -21,9 +21,12 @@ from deep_agent.agent.event_persister import EventPersister
 from deep_agent.agent.factory import build_agent
 from deep_agent.agent.history import model_messages_to_history
 from deep_agent.agent.planning import (
+    ACTIVE_PLANNING_TOOL_NAMES,
+    PLANNING_GUIDANCE,
     PLANNING_TOOL_NAMES,
     build_planning_capability,
     current_plan_snapshot,
+    is_planning_tool,
     prepare_plan_store,
 )
 from deep_agent.agent.runner import AgentRunner
@@ -52,7 +55,16 @@ class PlanningCapabilityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(planning), 1)
         self.assertFalse(planning[0].enable_subtasks)
         self.assertTrue(planning[0].inject)
-        self.assertIsNone(planning[0].tools)
+        self.assertEqual(tuple(planning[0].tools or ()), ACTIVE_PLANNING_TOOL_NAMES)
+        self.assertEqual(planning[0].guidance, PLANNING_GUIDANCE)
+
+    async def test_new_runs_expose_three_tools_but_legacy_names_remain_recognizable(self) -> None:
+        self.assertEqual(
+            ACTIVE_PLANNING_TOOL_NAMES,
+            ("write_plan", "read_plan", "update_task_statuses"),
+        )
+        self.assertTrue(all(is_planning_tool(name) for name in PLANNING_TOOL_NAMES))
+        self.assertFalse(is_planning_tool("execute_python"))
 
     async def test_plan_store_is_fresh_for_each_run(self) -> None:
         deps = AgentDeps(session_id="same-session")
@@ -84,12 +96,14 @@ class PlanningRunnerTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_stream_snapshots_follow_planning_results_and_persist(self) -> None:
         calls = 0
+        guidance_seen = False
 
         async def respond(_messages: list[object], info: AgentInfo):
-            nonlocal calls
+            nonlocal calls, guidance_seen
             calls += 1
+            guidance_seen = guidance_seen or "Never add \"write the final answer\"" in str(_messages)
             self.assertEqual(
-                set(PLANNING_TOOL_NAMES),
+                set(ACTIVE_PLANNING_TOOL_NAMES),
                 {tool.name for tool in info.function_tools},
             )
             if calls == 1:
@@ -128,9 +142,11 @@ class PlanningRunnerTests(unittest.IsolatedAsyncioTestCase):
                 return
             if calls == 3:
                 yield {0: DeltaToolCall(
-                    name="update_task_status",
+                    name="update_task_statuses",
                     tool_call_id="plan-complete",
-                    json_args=json.dumps({"task_id": "step-2", "status": "completed"}),
+                    json_args=json.dumps({
+                        "updates": [{"task_id": "step-2", "status": "completed"}]
+                    }),
                 )}
                 return
             yield "任务完成"
@@ -165,6 +181,7 @@ class PlanningRunnerTests(unittest.IsolatedAsyncioTestCase):
             [(0, 2), (1, 2), (2, 2)],
         )
         self.assertEqual(output[-1]["type"], "final")
+        self.assertTrue(guidance_seen)
 
         history = model_messages_to_history(
             await self.store.get_history("planning-stream")

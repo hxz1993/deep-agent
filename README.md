@@ -3,7 +3,7 @@
 DeepAgent 是基于 FastAPI、Pydantic AI 和 SQLAlchemy 的多用户 Agent 服务，并
 随服务发布一体化运维控制台。
 
-当前产品版本为 `0.4.15`。`deep_agent.__version__` 是唯一代码版本来源，FastAPI、
+当前产品版本为 `0.4.16`。`deep_agent.__version__` 是唯一代码版本来源，FastAPI、
 `GET /info` 和 Console 顶部版本徽标均读取该值。后续正式发布默认递增
 `MAJOR.MINOR.PATCH` 的第三位，只有明确规划重大版本时才调整前两位。产品版本不通过
 环境变量或数据库覆盖，也不等同于 Alembic 数据库结构 revision。
@@ -112,9 +112,10 @@ DeepAgent 当前支持：
 - 系统工具不是 ToolPackage。Harness任务规划、`load_capability`、Skill Resource、`read_file`、`read_tool_result`、
   `search_tools` 和 MCP Resource
   由运行时按 Agent/Run 条件自动注入，只在 Console 的只读“系统工具”目录中说明。
-- 每个Run均可使用Harness `Planning`的六个官方工具；模型只在复杂任务需要时创建计划，计划在
-  本轮内存中维护，SSE与History携带展示快照，下一轮重新开始，不新增计划表。Console只在
-  消息区底部以轻量浮层显示当前最新Run的未完成计划，全部完成后自动隐藏。
+- 每个Run均可使用Harness `Planning`的`write_plan`、`read_plan`和
+  `update_task_statuses`；模型只在复杂任务需要时创建计划，计划在本轮内存中维护，SSE与History
+  携带展示快照，下一轮重新开始，不新增计划表。Console只在Run进行中或异常中断后显示计划浮层；
+  正常完成或进入UI Pending后立即隐藏。
 - MCP Tool Search使用字段化词法检索：标准协议名、MCP `title`、参数和描述提供召回依据；支持
   拼音与有限错字纠正，但不把词法匹配伪装成任意中英文语义翻译。
 - Skill 不再属于 ToolPackage。Agent 通过独立 `skills` 列表选择，Harness 按需加载 `SKILL.md`；

@@ -31,10 +31,7 @@ class SystemToolCatalogTests(unittest.IsolatedAsyncioTestCase):
                 [
                     "write_plan",
                     "read_plan",
-                    "add_task",
-                    "update_task_status",
                     "update_task_statuses",
-                    "remove_task",
                 ],
                 ["load_capability", "list_skill_resources", "execute_skill_script"],
                 ["read_file"],

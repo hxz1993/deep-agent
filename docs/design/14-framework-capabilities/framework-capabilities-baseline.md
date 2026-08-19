@@ -133,12 +133,23 @@ cache hit/miss Token，没有数据时保持 unknown。它不等于启用缓存�
 | `DeduplicateFileReads` | 去除重复文件读取内容 | 保持，不改变原始历史；运行时字节/解析复用由 `read_file`的Run级缓存负责 |
 | `estimate_token_count` | 作为估算实现的一部分 | 保持统一 `TokenEstimator` 封装，不让 Console复制算法 |
 | `ToolOutputLimits` / `Spill` | 超大工具结果在进入History前外置 | v0.4.0适配平台文件服务；保留Harness原生 `read_tool_result`，不使用本地Store或自研读取状态机 |
-| `Planning` | 模型在复杂任务中维护单轮结构化计划 | v0.4.6采用默认六工具与`InMemoryPlanStore`；v0.4.7 Console仅在消息区底部浮层展示当前最新Run的未完成计划，后端快照与History不变；不新增任务引擎或计划表 |
+| `Planning` | 模型在复杂任务中维护单轮结构化计划 | v0.4.16保留`write_plan/read_plan/update_task_statuses`与`InMemoryPlanStore`；公开Guidance负责ID、Deferred和收尾约束；Console在正常Final或UI Pending隐藏浮层，取消/失败保留；不新增任务引擎或计划表 |
+
+Planning工具收敛使用Test近30天真实History作为依据：4312条消息中有14个会话、21个Run使用过
+Planning；成功记录中`write_plan/read_plan/update_task_statuses/update_task_status`分别调用
+24/14/35/17次，`add_task/remove_task`均为0次。单项状态更新统一并入批量工具后，模型只需掌握一套
+稳定ID更新协议；旧History名称继续识别，不迁移原始消息。
+
+2026-08-19使用隔离SQLite与`deepseek-v4-flash`执行12个真实Run：2个简单回答均未规划，6个
+多步骤任务均在最终正文前把最后快照收口为全部完成，1个普通任务进入UI Choice Pending，1组
+Confirm Pending/新Run恢复正常完成，另1个计划Run正式取消并产生`cancelled`。共观察到36次规划
+调用，只出现当前三个工具，被删除工具为0次；模型在猜错任务ID后能够通过`read_plan`取得稳定ID并
+继续更新。该结果证明Guidance改善常见收尾路径，但不把模型行为升级为后端强制完成保证。
 
 ### 5.2 v0.4.8升级采用边界
 
-- Planning继续使用官方默认六工具，直接获得0.21修正后的CachePoint顺序；DeepAgent计划快照、
-  SSE、History和Console浮层不变。
+- Planning使用官方实现但只披露三个实际高频工具，继续获得0.21修正后的CachePoint顺序；DeepAgent
+  仍只补充计划快照、SSE/History映射和Console浮层，不改框架Store。
 - Harness确定性压缩tier可处理`ToolAvailabilityDeltaPart`；DeepAgent仍负责完整请求预算、主动/自动
   压缩、Checkpoint和Hash/CAS，不切换到`SummarizingCompaction`。
 - `estimate_context_tokens`新增的Provider Usage锚点只作为后续校准参考；当前工具Schema与输出预留

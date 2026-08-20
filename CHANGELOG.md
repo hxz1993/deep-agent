@@ -3,6 +3,17 @@
 本文件记录 DeepAgent 的产品版本变化，按新版本到旧版本排列。当前代码版本以
 `deep_agent.__version__` 为准；数据库结构版本以 Alembic head 为准，两者互不替代。
 
+## v0.4.18
+
+- 新增直接披露的系统工具`export_file_to_download_center`：模型可把新生成的UTF-8文本上传为平台DL文件
+  并登记到当前用户下载中心，也可复用当前会话附件或大工具Artifact的File ID，只登记不重复上传。
+- 已有文件权限仅从当前Session原始History恢复；猜测File ID不会访问平台。下载中心登记失败时只清理
+  本次新上传文件，不删除已有来源文件。
+- 下载中心的`fileDescription`按平台真实语义保存完整文件名，不再当作自由文本说明，确保Markdown、
+  HTML等文件下载后保留原扩展名。
+- 工具保持普通Tool Call/Result和现有Final协议，不增加Artifact表、聊天文件卡或数据库迁移；Alembic
+  Head仍为`006`。
+
 ## v0.4.17
 
 - Console移除用户消息下方的分支编辑入口，在原位置改为复制图标；复制内容仅为用户气泡的可见正文，

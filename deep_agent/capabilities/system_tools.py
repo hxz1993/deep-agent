@@ -59,13 +59,19 @@ _SYSTEM_TOOL_DOMAINS = (
     SystemToolDomain(
         code="runtime:file",
         label="文件",
-        description="按需读取当前会话附件或 Agent 已授权 Skill 中的文件。",
+        description="按需读取文件，或将用户需要的文件发布到DeepFOS下载中心。",
         tools=(
             SystemToolDescription(
                 name="read_file",
                 source="DeepAgent",
                 injection_condition="当前会话存在可读附件，或 Agent 已配置含可读资源的 Skill",
                 description="统一分页读取文本、Word 和 Excel 文件。",
+            ),
+            SystemToolDescription(
+                name="export_file_to_download_center",
+                source="DeepAgent",
+                injection_condition="当前请求具备用户、应用和空间上下文",
+                description="将新生成的文本文件或当前会话平台文件发布到下载中心。",
             ),
         ),
     ),

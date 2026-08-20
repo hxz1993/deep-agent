@@ -20,7 +20,7 @@ from deep_agent.capabilities.ui.registry import prepare_ui_tool_packages_for_spe
 from deep_agent.skills.runtime import ResolvedSkills, resolve_skills_for_run
 from deep_agent.skills.script_tool import build_skill_script_toolset
 from deep_agent.skills.tools import build_skill_resource_toolset
-from deep_agent.files import build_file_toolset
+from deep_agent.files import build_file_export_toolset, build_file_toolset
 from deep_agent.core.context import AppContext
 from deep_agent.core.exceptions import AgentNotFoundError, LlmModelNotFoundError
 from deep_agent.options import OPTION
@@ -143,6 +143,7 @@ async def _build_runner_from_spec(
     )
     skill_resource_toolset = build_skill_resource_toolset(resolved_skills.resources)
     file_toolset = build_file_toolset(resolved_skills.resources)
+    file_export_toolset = build_file_export_toolset()
     skill_script_toolset = (
         build_skill_script_toolset(
             resolved_skills.scripts,
@@ -185,6 +186,7 @@ async def _build_runner_from_spec(
         dynamic_ui_packages=dynamic_ui_packages,
         mcp_resource_toolset=mcp_resource_toolset,
         file_toolset=file_toolset,
+        file_export_toolset=file_export_toolset,
         skill_resource_toolset=skill_resource_toolset,
         skill_script_toolset=skill_script_toolset,
         skill_capability=resolved_skills.capability,

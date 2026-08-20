@@ -168,6 +168,7 @@ def _toolsets_for_spec(
     dynamic_ui_packages: list[ToolPackage] | None = None,
     mcp_resource_toolset: Any | None = None,
     file_toolset: Any | None = None,
+    file_export_toolset: Any | None = None,
     skill_resource_toolset: Any | None = None,
     skill_script_toolset: Any | None = None,
     mcp_server_names: list[str] | None = None,
@@ -189,6 +190,8 @@ def _toolsets_for_spec(
         toolsets.append(mcp_resource_toolset)
     if file_toolset is not None:
         toolsets.append(file_toolset)
+    if file_export_toolset is not None:
+        toolsets.append(file_export_toolset)
     if skill_resource_toolset is not None:
         toolsets.append(skill_resource_toolset)
     if skill_script_toolset is not None:
@@ -208,6 +211,7 @@ def build_agent(
     dynamic_ui_packages: list[ToolPackage] | None = None,
     mcp_resource_toolset: Any | None = None,
     file_toolset: Any | None = None,
+    file_export_toolset: Any | None = None,
     skill_resource_toolset: Any | None = None,
     skill_script_toolset: Any | None = None,
     skill_capability: AbstractCapability[AgentDeps] | None = None,
@@ -231,6 +235,7 @@ def build_agent(
         dynamic_ui_packages=dynamic_ui_packages,
         mcp_resource_toolset=mcp_resource_toolset,
         file_toolset=file_toolset,
+        file_export_toolset=file_export_toolset,
         skill_resource_toolset=skill_resource_toolset,
         skill_script_toolset=skill_script_toolset,
         mcp_server_names=mcp_server_names,

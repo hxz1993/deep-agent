@@ -237,6 +237,7 @@ class ToolsetAssemblyTests(unittest.TestCase):
             mcp_toolsets=[mcp],
             mcp_resource_toolset=resources,
             file_toolset="file-toolset",
+            file_export_toolset="file-export-toolset",
             dynamic_ui_packages=[
                 ToolPackage(
                     code="ui:deepcube",
@@ -247,13 +248,14 @@ class ToolsetAssemblyTests(unittest.TestCase):
             ],
         )
 
-        self.assertEqual(len(assembled), 6)
+        self.assertEqual(len(assembled), 7)
         self.assertIs(assembled[0], general)
         self.assertIs(assembled[1], sandbox)
         self.assertIsInstance(assembled[2], McpDiscoveryToolset)
         self.assertIs(assembled[3], resources)
         self.assertEqual(assembled[4], "file-toolset")
-        self.assertIs(assembled[5], ui)
+        self.assertEqual(assembled[5], "file-export-toolset")
+        self.assertIs(assembled[6], ui)
 
     def test_null_and_empty_selection_keep_original_default_semantics(self) -> None:
         registry = ToolPackageRegistry()

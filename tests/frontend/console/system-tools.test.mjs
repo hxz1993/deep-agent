@@ -92,7 +92,7 @@ test("任务规划三个官方工具属于独立只读领域", () => {
   assert.doesNotMatch(html, /checkbox|switch/);
 });
 
-test("Skill 三个工具归 Skill，read_file 独立归文件领域", () => {
+test("Skill 三个工具归 Skill，文件工具独立归文件领域", () => {
   const ui = loadSystemToolsUi();
   const skillHtml = ui.systemToolDomain({
     code: "runtime:skill",
@@ -106,13 +106,17 @@ test("Skill 三个工具归 Skill，read_file 独立归文件领域", () => {
   const fileHtml = ui.systemToolDomain({
     code: "runtime:file",
     label: "文件",
-    tools: [{ name: "read_file" }],
+    tools: [
+      { name: "read_file" },
+      { name: "export_file_to_download_center" },
+    ],
   });
   assert.match(skillHtml, /load_capability/);
   assert.match(skillHtml, /list_skill_resources/);
   assert.match(skillHtml, /execute_skill_script/);
   assert.doesNotMatch(skillHtml, /read_file/);
   assert.match(fileHtml, /read_file/);
+  assert.match(fileHtml, /export_file_to_download_center/);
 });
 
 test("大工具结果读取作为独立系统工具只读展示", () => {

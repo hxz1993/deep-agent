@@ -3,7 +3,7 @@
 DeepAgent 是基于 FastAPI、Pydantic AI 和 SQLAlchemy 的多用户 Agent 服务，并
 随服务发布一体化运维控制台。
 
-当前产品版本为 `0.4.17`。`deep_agent.__version__` 是唯一代码版本来源，FastAPI、
+当前产品版本为 `0.4.18`。`deep_agent.__version__` 是唯一代码版本来源，FastAPI、
 `GET /info` 和 Console 顶部版本徽标均读取该值。后续正式发布默认递增
 `MAJOR.MINOR.PATCH` 的第三位，只有明确规划重大版本时才调整前两位。产品版本不通过
 环境变量或数据库覆盖，也不等同于 Alembic 数据库结构 revision。
@@ -109,8 +109,8 @@ DeepAgent 当前支持：
 - 内置工具：
   - `builtin:general`（通用工具）：默认启用，只包含 `get_current_time`。
   - `builtin:sandbox`（Python 沙箱）：默认关闭，只包含 `execute_python`。
-- 系统工具不是 ToolPackage。Harness任务规划、`load_capability`、Skill Resource、`read_file`、`read_tool_result`、
-  `search_tools` 和 MCP Resource
+- 系统工具不是 ToolPackage。Harness任务规划、`load_capability`、Skill Resource、`read_file`、
+  `export_file_to_download_center`、`read_tool_result`、`search_tools` 和 MCP Resource
   由运行时按 Agent/Run 条件自动注入，只在 Console 的只读“系统工具”目录中说明。
 - 每个Run均可使用Harness `Planning`的`write_plan`、`read_plan`和
   `update_task_statuses`；模型只在复杂任务需要时创建计划，计划在本轮内存中维护，SSE与History
@@ -138,6 +138,14 @@ v0.4.0 使用 Harness `ToolOutputLimits` 在工具执行后、结果进入下一
 通过系统工具 `read_tool_result` 按行或关键词读取。该机制不增加 Artifact 表或数据库迁移，句柄
 权限只从当前会话的原始 `chat_messages`恢复，Checkpoint 不能扩大访问范围。完整边界见
 [`docs/design/05-tool-optimization/tool-optimization-design.md`](docs/design/05-tool-optimization/tool-optimization-design.md#92-tooloutputlimits-与大工具结果外置)。
+
+## 文件发布到下载中心
+
+v0.4.18自动注入系统工具`export_file_to_download_center`。当请求具备可信的用户、App和Space上下文时，
+模型可以把新生成的UTF-8文本内容上传为平台文件并登记到当前用户下载中心，也可以复用当前会话附件或
+已外置大工具结果的File ID，仅新增下载记录而不重复上传。工具只返回文件与下载记录元数据；最终正文
+提示用户前往下载中心获取，不把它伪装成结构化最终输出或聊天附件协议。完整边界见
+[`docs/design/08-artifact-export/`](docs/design/08-artifact-export/)。
 
 ## 测试
 

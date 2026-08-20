@@ -116,7 +116,14 @@ def tool_result_artifacts(part: ToolReturnPart) -> list[dict[str, Any]]:
 
 def artifact_handles_from_history(messages: Sequence[ModelMessage]) -> set[str]:
     """Recover only authenticated spill handles from the raw session history."""
-    handles: set[str] = set()
+    return set(artifact_metadata_from_history(messages))
+
+
+def artifact_metadata_from_history(
+    messages: Sequence[ModelMessage],
+) -> dict[str, dict[str, Any]]:
+    """Recover authenticated spill metadata needed by other runtime file tools."""
+    artifacts: dict[str, dict[str, Any]] = {}
     for message in messages:
         if not isinstance(message, ModelRequest):
             continue
@@ -126,8 +133,8 @@ def artifact_handles_from_history(messages: Sequence[ModelMessage]) -> set[str]:
             for artifact in tool_result_artifacts(part):
                 artifact_id = artifact.get("artifact_id")
                 if isinstance(artifact_id, str) and artifact_id:
-                    handles.add(artifact_id)
-    return handles
+                    artifacts[artifact_id] = dict(artifact)
+    return artifacts
 
 
 class PlatformToolResultStore(OverflowStore):
@@ -147,7 +154,9 @@ class PlatformToolResultStore(OverflowStore):
 
     def bind(self, deps: AgentDeps, raw_history: Sequence[ModelMessage]) -> None:
         self._deps = deps
-        self._allowed_handles = artifact_handles_from_history(raw_history)
+        artifacts = artifact_metadata_from_history(raw_history)
+        self._allowed_handles = set(artifacts)
+        deps.tool_output_artifacts = artifacts
         deps.tool_output_limits = self.telemetry
 
     @staticmethod
@@ -192,6 +201,12 @@ class PlatformToolResultStore(OverflowStore):
         self._allowed_handles.add(handle)
         if self._deps is not None:
             self._deps.file_bytes[self._cache_key(handle)] = data
+            self._deps.tool_output_artifacts[handle] = {
+                "artifact_id": handle,
+                "kind": "tool_result_overflow",
+                "role": "return_value",
+                "byte_size": len(data),
+            }
         self.telemetry.spill_count += 1
         self.telemetry.spilled_bytes += len(data)
         log_event(
@@ -281,6 +296,7 @@ __all__ = [
     "PlatformToolResultStore",
     "ToolOutputTelemetry",
     "artifact_handles_from_history",
+    "artifact_metadata_from_history",
     "build_tool_output_limits",
     "tool_output_threshold_tokens",
     "tool_result_artifacts",

@@ -166,6 +166,7 @@
 | `SKILL-104` | 上传Skill支持单个原包导出和全部集合导出；每个导出子ZIP可用现有安装接口直接导入，集合清单不包含平台File ID或Agent绑定 | v0.4.3，[Skill安装与运行](../guides/skills.md) |
 | `FILE-001` / `SKILL-103` | 系统工具 `read_file`统一读取会话附件与Skill文件；只处理文本、DOCX和XLSX，同一Run字节与解析single-flight缓存；图片严格走当前轮原生多模态附件 | v0.3.23～v0.3.24，[附件解析](06-attachment-parsing/attachment-parsing-design.md)、[Skill体系](12-agent-skills/skill-system-design.md) |
 | `TOOL-109` / `ART-001` | 大工具结果安全兜底：Harness `ToolOutputLimits`按模型窗口动态计算阈值，`Spill`把完整结果保存到平台文件服务；平台File ID作为会话内Artifact句柄，原始History授权，`read_tool_result`按需回读，Console显示外置提示 | v0.4.0，[大工具结果治理](05-tool-optimization/tool-optimization-design.md#92-tooloutputlimits-与大工具结果外置) |
+| `ART-002` | 系统工具`export_file_to_download_center`主动发布文件：新UTF-8文本上传平台DL后登记；当前会话附件或大工具Artifact复用File ID只登记不重传；不增加Artifact表、Final协议或聊天文件卡 | v0.4.18，[Artifact与出站产物](08-artifact-export/artifact-export-design.md#5-下载中心发布v0418) |
 | Harness 确定性压缩 tiers | `ClampOversizedMessages`、`ClearToolResults`、`DeduplicateFileReads` 已复用 | 当前基线，[压缩研究](03-context-compaction/context-compaction-research.md#harness-实验结论) |
 | 官方 DeepSeek Provider | 使用 Pydantic AI 官方 Provider/Profile，不保留自定义模型循环 | v0.3.9+，[框架能力台账](14-framework-capabilities/framework-capabilities-baseline.md#41-已经采用) |
 
@@ -174,7 +175,8 @@
 - `SKILL-VAL-001`业务场景机制验收与`SKILL-VAL-002`中立脚本机制验收均已通过。DeepAgent的
   Skill主链路当前没有待修缺陷；业务Skill内容、模板样例和建模口径由业务Skill维护方继续迭代，
   不增加DeepAgent系统提示词、数据库字段或框架兼容分支。
-- 大工具结果治理已在v0.4.0完成第一版；通用下载中心、Artifact表、TTL和孤儿治理没有真实需求，
-  不作为当前待办。压缩后搜索原始会话已暂缓，只有真实长程任务出现关键事实无法找回时才重新启动。
+- 大工具结果治理已在v0.4.0完成，主动发布到下载中心已在v0.4.18完成第一版；Artifact表、聊天文件卡、
+  TTL和孤儿治理仍没有真实需求，不作为当前待办。压缩后搜索原始会话已暂缓，只有真实长程任务出现
+  关键事实无法找回时才重新启动。
 - 其余“有潜力”事项维持原分组，本轮不考虑不等于暂缓或关闭。
 - “暂缓”事项仍只按各自重新启动条件恢复，不因本次优先级调整而改变。

@@ -20,6 +20,7 @@ from deep_agent.agent.history import model_messages_to_history
 from deep_agent.agent.tool_output_limits import (
     PlatformToolResultStore,
     artifact_handles_from_history,
+    artifact_metadata_from_history,
     build_tool_output_limits,
     tool_output_threshold_tokens,
 )
@@ -102,6 +103,11 @@ class PlatformToolResultStoreTests(unittest.IsolatedAsyncioTestCase):
         deps = AgentDeps(session_id="session")
         store = PlatformToolResultStore(request_headers={}, threshold_tokens=4_000)
         store.bind(deps, history)
+        self.assertEqual(
+            artifact_metadata_from_history(history)["platform-file-1"]["byte_size"],
+            50,
+        )
+        self.assertEqual(deps.tool_output_artifacts["platform-file-1"]["role"], "return_value")
         download = AsyncMock(return_value=b"line 1\nline 2")
         with patch("deep_agent.agent.tool_output_limits._download_file", download):
             first, second = await asyncio.gather(

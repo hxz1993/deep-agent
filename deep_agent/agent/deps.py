@@ -46,6 +46,7 @@ class AgentDeps:
     cancellation_token: CancellationToken | None = field(default=None, repr=False)
     has_context_references: bool = False
     attachment_by_id: dict[str, AttachmentRef] = field(default_factory=dict)
+    tool_output_artifacts: dict[str, dict[str, Any]] = field(default_factory=dict)
     file_bytes: dict[str, bytes] = field(default_factory=dict)
     file_parsed: dict[str, Any] = field(default_factory=dict)
     file_load_tasks: dict[str, asyncio.Task[bytes]] = field(

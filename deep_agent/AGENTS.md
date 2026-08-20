@@ -108,6 +108,8 @@ URL 与 Builtin MCP 的运行态不同：URL MCP 在管理员检测时保存 Too
 5. v0.4.0 起，通用大工具结果使用 Harness `ToolOutputLimits` + `Spill`，Store适配现有平台文件服务，
    不使用Harness默认本地文件Store。平台File ID同时作为当前会话的工具结果Artifact句柄；权限只能
    从原始 `chat_messages`中的Tool Return元数据恢复，不能从Checkpoint或模型参数扩权。
+   v0.4.18的`export_file_to_download_center`可以主动把该句柄登记到下载中心，但不改变Artifact Store、
+   不建立第二层ID或Artifact表，也不把下载记录反向当作模型读取权限。
 6. Harness Memory 只保存明确的跨会话笔记，不替代聊天历史；namespace 必须由认证用户、Agent、App 和 Space 生成。
 7. Harness `StepPersistence` 不替代现有 SQL 会话、SSE 和 Deferred/Pending；只有副作用账本、子 Agent 或崩溃恢复成为真实需求时再接入。
 8. Harness 仍为 0.x。引入时必须将 `pydantic-ai-slim` 与 `pydantic-ai-harness` 固定为经过联合回归的准确版本，禁止继续依赖无上限 `>=` 漂移。
@@ -197,8 +199,10 @@ XML + JSON 投影。业务字段语义仍由具体 Agent Prompt 负责。
 | `../sandbox/toolset.py` | 默认关闭的 `builtin:sandbox`；代理 PythonExecutionBackend |
 
 `../files/`不是 ToolPackage：它按当前会话附件和已授权 Skill资源自动注入统一 `read_file`，
-并负责来源隔离、文本/Word/Excel分页、同一 Run 的字节/解析缓存和并发 single-flight。图片不经过
-`read_file`，仅作为当前轮原生多模态附件送给支持 `image` 的模型。
+并负责来源隔离、文本/Word/Excel分页、同一 Run 的字节/解析缓存和并发 single-flight。具备可信
+user/App/Space上下文时，`export_file_to_download_center`始终直接披露，用于新建UTF-8文本文件或复用
+当前会话已有平台文件并登记下载中心。图片不经过`read_file`，仅作为当前轮原生多模态附件送给支持
+`image`的模型。
 
 ### `skills/`
 
@@ -332,6 +336,11 @@ Skill路径必须属于当前 Agent已选择、启用且运行目录就绪的资
 单独建设文档解析工具，不并入普通文件工具。新上传不抽文本，
 历史 `extracted_text` 仅为回放兼容。完整设计见
 [`../docs/design/06-attachment-parsing/`](../docs/design/06-attachment-parsing/)。
+
+`export_file_to_download_center`与读取工具方向相反：`source=content`把完整UTF-8文本上传为平台DL文件后
+登记下载记录；`source=platform_file`只接受当前会话附件或大工具Artifact的File ID，并复用原文件。
+登记失败时只补偿删除本次新上传的文件，不删除已有来源文件。它不是Output Tool，不改Final/SSE结构，
+成功后模型只需在最终正文说明文件名并提示用户前往下载中心。
 
 ### 大工具结果
 

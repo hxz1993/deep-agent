@@ -3,6 +3,13 @@
 本文件记录 DeepAgent 的产品版本变化，按新版本到旧版本排列。当前代码版本以
 `deep_agent.__version__` 为准；数据库结构版本以 Alembic head 为准，两者互不替代。
 
+## v0.4.19
+
+- Console附件选择器增加`.log`；动态上传能力加载后仍保留该扩展名入口。
+- `.log`被浏览器识别为空MIME、`application/octet-stream`或常见日志MIME时，上传链路仅针对该
+  后缀规范化为`text/plain`，并由统一`read_file`按行分页读取；其他二进制格式仍然拒绝。
+- Alembic Head保持`006`，聊天、SSE与History协议不变。
+
 ## v0.4.18
 
 - 新增直接披露的系统工具`export_file_to_download_center`：模型可把新生成的UTF-8文本上传为平台DL文件

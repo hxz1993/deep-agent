@@ -26,6 +26,7 @@ class TestInputCapabilities(unittest.TestCase):
         self.assertIn("allowed_mimes", payload)
         self.assertEqual(payload["max_count"], 10)
         self.assertEqual(payload["max_size_mb"], 20)
+        self.assertIn("LOG", payload["labels"]["text_file"])
 
     def test_capability_block_lists_upload_without_local_model_gate(self) -> None:
         spec = AgentSpec(

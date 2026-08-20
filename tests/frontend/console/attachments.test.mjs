@@ -29,7 +29,9 @@ test("附件上传不再要求可配置的附件工具包", () => {
 
 test("控制台从后端读取 MIME、数量与大小限制", () => {
   assert.match(chatSource, /state\.uploadCapabilities\.allowed_mimes/);
-  assert.match(chatSource, /el\.fileInput\.accept = allowed\.join\(","\)/);
+  assert.match(chatSource, /allowed\.includes\("text\/plain"\)/);
+  assert.match(chatSource, /accept\.push\("\.log"\)/);
+  assert.match(chatSource, /el\.fileInput\.accept = accept\.join\(","\)/);
   assert.match(chatSource, /state\.uploadCapabilities\?\.max_count/);
   assert.match(chatSource, /state\.uploadCapabilities\?\.max_size_mb/);
   assert.match(chatSource, /file\.size > maxSizeMb \* 1024 \* 1024/);
@@ -43,5 +45,6 @@ test("新附件请求不再把前端抽取文本写入聊天载荷", () => {
   assert.doesNotMatch(sendPayloadBlock, /extracted_text/);
   assert.match(template, /\.docx/);
   assert.match(template, /\.xlsx/);
+  assert.match(template, /\.log/);
   assert.match(template, /\.mp4/);
 });

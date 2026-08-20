@@ -1632,7 +1632,11 @@ async function loadUploadCapabilities() {
     const allowed = Array.isArray(state.uploadCapabilities?.allowed_mimes)
       ? state.uploadCapabilities.allowed_mimes
       : [];
-    if (el.fileInput && allowed.length) el.fileInput.accept = allowed.join(",");
+    if (el.fileInput && allowed.length) {
+      const accept = [...allowed];
+      if (allowed.includes("text/plain")) accept.push(".log");
+      el.fileInput.accept = accept.join(",");
+    }
   } catch (e) {
     state.uploadCapabilities = { kinds: [], labels: {}, max_count: 10, max_size_mb: 20 };
     console.warn("[deep-agent] 加载上传能力失败", e);

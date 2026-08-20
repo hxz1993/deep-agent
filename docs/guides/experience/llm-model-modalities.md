@@ -47,7 +47,7 @@ interleaved
   由Provider返回拒绝说明或接口错误。
 - PDF和PPT/PPTX不是当前模型模态或上传类型，也没有本地解析能力；未来如有需求，使用独立文档
   解析工具，不并入 `read_file`。
-- DOCX、XLSX、TXT、CSV、JSON、Markdown、HTML、XML：平台只保存 `file_id`；合法附件存在时
+- DOCX、XLSX、TXT、LOG、CSV、JSON、Markdown、HTML、XML：平台只保存 `file_id`；合法附件存在时
   `read_file`自动注入并按需分页读取，不在上传时预抽文本，也不要求Agent额外选择工具包。
 - 图片不通过 `read_file`；当前轮图片直接作为多模态输入，历史图片和Skill图片不读取。
 - MCP、Skill、UI Tool：属于 Agent 工具能力，不属于模型输入模态。

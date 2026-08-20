@@ -12,7 +12,7 @@
 | 项 | 内容 |
 | --- | --- |
 | **是什么** | 通用 AI Agent 全栈：FastAPI 后端 + Pydantic AI 运行时 + 静态前端 |
-| **产品版本** | `deep_agent.__version__` 为唯一来源；当前 `0.4.18`，默认发布递增第三位 |
+| **产品版本** | `deep_agent.__version__` 为唯一来源；当前 `0.4.19`，默认发布递增第三位 |
 | **启动** | 本地 Test 联调固定使用下方命令；部署入口才使用 `deep_agent.main:app` |
 | **测试** | `python3.12 -m unittest discover -s tests -p "test_*.py" -v` |
 | **配置** | 仓库根 `.env`（`DEEP_AGENT_*` / `DEEP_AGENT_DBMS_*` / `DEEP_AGENT_SQLITE_PATH`） |
@@ -114,6 +114,7 @@ HTTP → deep_agent/api/v1 → AgentRunner → pydantic_ai.Agent → Toolsets
 - v0.4.13兼容Canvas MCP通过`CallToolResult.isError`返回的Go `context deadline exceeded`及稳定`CANVAS_ERROR`文本契约；不可纠正的超时形成失败Tool Result并允许Run继续回答，结果未知的修改操作提示先读取Canvas快照。可纠正错误和正式取消保持原语义。
 - v0.4.15在URL MCP工具最后一次可纠正重试仍失败时，将最后一条模型可见的业务校验原因收口为失败Tool Result并要求模型结束当前Run；失败调用、Result和最终解释正常进入History。该链路只依赖Pydantic AI原生`ModelRetry → ToolFailed`语义，不额外维护同一Run的工具封锁状态。
 - v0.4.18增加系统工具`export_file_to_download_center`：新UTF-8文本先上传平台DL文件再登记下载中心；当前会话附件或大工具Artifact复用原File ID，只登记不重传。合法已有文件必须从当前Session原始History恢复授权，工具只在可信user/App/Space上下文中直接披露，不进入Agent能力配置。
+- v0.4.19将LOG纳入文本附件：Console允许选择`.log`，上传链路把该后缀的通用二进制或日志MIME规范化为`text/plain`，`read_file`继续按行分页读取；其他二进制格式不因此放宽。
 - v0.3.20 起上传 Skill 在每个 Pod 只保留 `runtime-skills/<code>/` 一份当前运行文件。服务启动、安装、替换、启用和手工重载负责同步；普通 Run 只读本地目录。单个 Skill 文件不可用时跳过该 Skill并继续回答，状态通过 `/skills`、Console 和 `final.context.skills` 诊断。
 - v0.3.23 起替换相同 Hash的上传 Skill也必须先检查平台原 ZIP；原包可下载才返回 `noop`，原 File ID失效时重新上传、更新数据库 File ID并返回 `repaired`。只恢复当前 Pod目录而不修复平台事实源属于不完整修复。
 - 上传 Skill 的平台 ZIP 是系统级配置文件，不属于业务 App/Space。平台文件使用可无 Space 回读的 `INF` 类型；安装、替换、启动恢复、管理员下载和 Run 兜底均保留调用身份但主动去掉 `app/space/language`业务上下文，保证同一 File ID 始终按系统级语义访问。不得改用 Space 级 `UPL`，数据库也不得保存请求上下文、Token、Cookie 或完整 Header。
@@ -124,7 +125,7 @@ HTTP → deep_agent/api/v1 → AgentRunner → pydantic_ai.Agent → Toolsets
 - `pydantic-ai-slim 2.31` 的 OpenAI extra 只有 SDK 下限。当前必须同时固定 `openai==2.46.0`，以兼容 DeepFOS平台运行时的 `aiohttp 3.9.x`；升级 OpenAI 3.x 前必须先联合验证平台 aiohttp，不能让干净构建自动漂移。
 - Provider Usage 是 best effort；OpenAI-compatible 或私有端点返回 0 时可能代表缺失。上下文预算必须结合模型窗口元数据和保守估算，不能只依赖 `result.usage`。
 - 新上传只保存附件引用；运行时 `read_file`通过 1-based `offset/limit`、
-  `has_more/next_offset`渐进读取 TXT、DOCX、XLSX。合法 `file_id`
+  `has_more/next_offset`渐进读取 TXT、LOG、DOCX、XLSX。合法 `file_id`
   必须来自当前原始会话，不能从 Checkpoint 推断。详见
   [`docs/design/06-attachment-parsing/`](docs/design/06-attachment-parsing/)。
 

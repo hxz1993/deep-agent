@@ -38,7 +38,7 @@ Accept: text/event-stream
 
 新上传只发送 `id/name/mime`。旧会话中已经保存的 `extracted_text` 仍可读取，但新链路不再
 在上传阶段抽取或截断文档文本。只要当前或历史会话存在可读附件，运行时系统工具 `read_file`
-就会自动注入；TXT、DOCX 和 XLSX按需分页读取，无需 Agent配置附件工具包。
+就会自动注入；TXT、LOG、DOCX 和 XLSX按需分页读取，无需 Agent配置附件工具包。
 
 **DB Agent 模式：**
 

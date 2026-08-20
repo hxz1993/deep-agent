@@ -21,7 +21,7 @@ class ProductVersionTests(unittest.IsolatedAsyncioTestCase):
         ):
             payload = await info(ctx)
 
-        self.assertEqual(__version__, "0.4.18")
+        self.assertEqual(__version__, "0.4.19")
         self.assertEqual(app.version, __version__)
         self.assertEqual(payload["name"], "DeepAgent")
         self.assertEqual(payload["version"], __version__)

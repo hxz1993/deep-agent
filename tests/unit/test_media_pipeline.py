@@ -38,6 +38,30 @@ class TestMediaPipeline(unittest.TestCase):
         self.assertEqual(processed.data, b"hello world")
         self.assertIsNone(processed.extracted_text)
 
+    def test_log_with_generic_browser_mime_is_normalized_to_plain_text(self) -> None:
+        for mime in (
+            "application/octet-stream",
+            "application/x-log",
+            "text/x-log",
+            "",
+        ):
+            with self.subTest(mime=mime):
+                processed = process_upload(
+                    data=b"2026-08-20 INFO started\n",
+                    mime=mime,
+                    filename="service.LOG",
+                )
+                self.assertEqual(processed.mime, "text/plain")
+                self.assertEqual(processed.filename, "service.LOG")
+
+    def test_generic_binary_mime_is_not_allowed_for_non_log_files(self) -> None:
+        with self.assertRaises(MediaPipelineError):
+            process_upload(
+                data=b"binary",
+                mime="application/octet-stream",
+                filename="payload.bin",
+            )
+
     def test_rejects_invalid_office_archive(self) -> None:
         with self.assertRaises(MediaPipelineError):
             process_upload(

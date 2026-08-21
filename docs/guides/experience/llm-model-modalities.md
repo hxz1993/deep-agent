@@ -93,7 +93,7 @@ POST /api/v1/llm-models/catalog/refresh
 任何失败都保留旧目录。系统不做启动同步、定时同步、保存模型时同步或 Agent 运行时同步。
 
 部署环境无法访问models.dev时，管理员可在可联网环境下下载官方
-`https://models.dev/catalog.json`，再通过Console“导入JSON”或下列接口导入：
+`https://models.dev/catalog.json`，再通过Console“导入”或下列接口导入：
 
 ```http
 POST /api/v1/llm-models/catalog/import
@@ -106,7 +106,7 @@ file=<catalog.json>
 文件必须是UTF-8 JSON，且不超过16 MiB；校验失败保留旧目录。导入不会修改
 `llm_models`中已配置的Base URL、API Key或模型属性。
 
-当前数据库目录可通过Console“导出JSON”或下列接口导出：
+当前数据库目录可通过Console“导出”或下列接口导出：
 
 ```http
 GET /api/v1/llm-models/catalog/export

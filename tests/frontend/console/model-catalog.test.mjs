@@ -34,8 +34,11 @@ test("模型目录支持联网刷新和可往返的JSON导入导出", () => {
   assert.match(catalogSource, /api\/v1\/llm-models\/catalog\/import/);
   assert.match(catalogSource, /api\/v1\/llm-models\/catalog\/export/);
   assert.match(catalogSource, /new FormData\(\)/);
-  assert.match(catalogTemplate, /id="catalogImportBtn"[^>]*>导入JSON/);
-  assert.match(catalogTemplate, /id="catalogExportBtn"[^>]*>导出JSON/);
+  assert.match(catalogTemplate, /id="catalogExportBtn"[^>]*>[\s\S]*data-lucide="download"[\s\S]*导出/);
+  assert.match(catalogTemplate, /id="catalogImportBtn"[^>]*>[\s\S]*data-lucide="upload"[\s\S]*导入/);
+  assert.match(catalogTemplate, /id="catalogRefreshBtn"[^>]*>[\s\S]*data-lucide="cloud-download"[\s\S]*在线更新/);
+  assert.match(catalogTemplate, /catalogExportBtn[\s\S]*catalogImportBtn[\s\S]*catalogRefreshBtn/);
+  assert.doesNotMatch(catalogTemplate, /导入JSON|导出JSON|更新模型目录/);
   assert.match(catalogTemplate, /id="catalogImportInput"[^>]*accept="application\/json,.json"/);
   assert.doesNotMatch(catalogTemplate, /catalogReloadBtn|重新加载/);
   assert.doesNotMatch(catalogSource, /source=|sourceSelect|refresh=true|bundled/);

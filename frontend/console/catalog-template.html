@@ -22,10 +22,10 @@
         </p>
       </div>
       <div class="models-toolbar-actions">
-        <button type="button" class="btn" id="catalogImportBtn">导入JSON</button>
+        <button type="button" class="btn" id="catalogExportBtn"><i data-lucide="download"></i>导出</button>
+        <button type="button" class="btn" id="catalogImportBtn"><i data-lucide="upload"></i>导入</button>
         <input type="file" id="catalogImportInput" accept="application/json,.json" hidden />
-        <button type="button" class="btn" id="catalogExportBtn">导出JSON</button>
-        <button type="button" class="btn primary" id="catalogRefreshBtn">更新模型目录</button>
+        <button type="button" class="btn primary" id="catalogRefreshBtn"><i data-lucide="cloud-download"></i>在线更新</button>
       </div>
 
       <div class="models-filters">
@@ -78,7 +78,7 @@
         <div class="catalog-empty hidden" id="catalogEmptyState">
           <strong>模型目录尚未更新</strong>
           <span>可以联网更新，也可以导入models.dev官方catalog.json后写入数据库。</span>
-          <button type="button" class="btn primary" data-catalog-refresh>更新模型目录</button>
+          <button type="button" class="btn primary" data-catalog-refresh><i data-lucide="cloud-download"></i>在线更新</button>
         </div>
       </section>
     </div>

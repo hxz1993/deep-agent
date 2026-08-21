@@ -54,6 +54,10 @@ test("Agent 提供卡片和列表双视图并复用同一真实数据源", () =>
   assert.match(agents, /renderList\(agents\)/);
   assert.match(agents, /setListView\(view\)/);
   assert.match(agents, /data-open-agent/);
+  assert.match(agents, /let agentsLoadedOnce = false/);
+  assert.match(agents, /if \(!agentsLoadedOnce\)[\s\S]*正在加载 Agent/);
+  assert.match(agents, /agentsLoadedOnce = true/);
+  assert.match(agents, /Agent 刷新失败/);
 });
 
 test("Agent 卡片与列表统一使用图标文字行操作", () => {
@@ -73,7 +77,7 @@ test("Agent 编辑使用独立页面层级而不是模态框", () => {
   assert.doesNotMatch(template.match(/id="agentForm"[\s\S]*?<\/form>/)?.[0] || "", /class="modal-footer"/);
   assert.match(agents, /if \(!editor\.open\) editor\.show\(\)/);
   assert.doesNotMatch(agents, /agentModal"\)\.showModal\(\)/);
-  assert.match(agents, /当前 Agent 有未保存修改/);
+  assert.match(agents, /放弃未保存的修改/);
   assert.match(styles, /dialog\.agent-editor-page\.console-detail-dialog\.modal-agent[\s\S]*?position: fixed/);
   assert.match(styles, /inset: var\(--console-topbar\) 0 0 calc\(var\(--console-rail-width\) \+ var\(--console-resource-nav-width\) \+ var\(--console-config-padding\)\)/);
   assert.match(styles, /\.agent-editor-page \.agent-editor-back[\s\S]*?border: 0;/);

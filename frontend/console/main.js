@@ -1,7 +1,7 @@
 import {
   initConfiguration,
   restoreConfigurationTab,
-} from "./configuration.js?v=20260821-10";
+} from "./configuration.js?v=20260821-14";
 import { bindContextControls, refreshIdentity } from "./context.js?v=20260728-5";
 import { initDiagnostics } from "./diagnostics.js?v=20260720-1";
 import { initWorkspace } from "./workspace.js?v=20260821-6";
@@ -51,7 +51,7 @@ async function showPage(page, { updateHash = true } = {}) {
   const next = VALID_PAGES.has(page) ? page : "workspace";
   const current = document.querySelector("[data-page-panel].active")?.dataset.pagePanel;
   if (current === "configuration" && next !== "configuration" && window.agentsAdmin?.isEditorOpen?.()) {
-    if (!window.agentsAdmin.requestCloseEditor()) return;
+    if (!(await window.agentsAdmin.requestCloseEditor())) return;
   }
   document.querySelectorAll("[data-page-panel]").forEach((panel) => {
     panel.classList.toggle("active", panel.dataset.pagePanel === next);

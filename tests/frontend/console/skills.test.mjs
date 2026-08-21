@@ -29,8 +29,11 @@ test("配置中心提供独立 Skill 页面而不是工具包分类", () => {
 test("Skill 页面区分内置和上传包的可操作边界", () => {
   assert.match(source, /代码内置 · 只读/);
   assert.match(source, /上传安装/);
-  assert.match(source, /替换 ZIP/);
-  assert.match(source, /data-skill-action="download">导出/);
+  assert.doesNotMatch(source, /替换 ZIP/);
+  assert.match(source, /data-skill-action="replace"><i data-lucide="upload"><\/i><span>上传<\/span>/);
+  assert.match(source, /data-skill-more-trigger/);
+  assert.match(source, /data-skill-more-menu role="menu" hidden/);
+  assert.match(source, /data-skill-action="download"><i data-lucide="download"><\/i><span>导出<\/span>/);
   assert.match(template, /id="exportAllSkillsBtn"/);
   assert.match(source, /"\/api\/v1\/skills\/export"/);
   assert.match(source, /重新加载/);
@@ -84,6 +87,9 @@ test("Skill 使用左右分离的轻卡片列表与表单详情", () => {
   assert.match(styles, /\.skill-resource-row\.active\s*\{[^}]*background:[^}]*box-shadow: inset 3px 0 0 var\(--accent\)/);
   assert.match(styles, /\.skill-detail-title \.badge\.source-upload/);
   assert.match(styles, /\.skill-detail-title \.badge\.runtime-ready/);
+  assert.match(styles, /\.skill-more-trigger\s*\{[^}]*border: 0 !important;[^}]*background: transparent !important;/);
+  assert.match(styles, /\.skill-more-menu\s*\{[^}]*position: absolute;[^}]*min-width: 144px;/);
+  assert.match(styles, /\.skill-more-menu\[hidden\] \{ display: none; \}/);
   assert.doesNotMatch(styles, /\.skill-manifest/);
   assert.doesNotMatch(styles, /\.skill-list-item\.active \{ box-shadow: inset 3px/);
   assert.match(styles, /@media \(max-width: 900px\)[\s\S]*\.skill-admin-workspace \{ grid-template-columns: minmax\(0, 1fr\); \}/);

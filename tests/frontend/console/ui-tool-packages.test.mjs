@@ -26,9 +26,9 @@ test("UI 工具页使用左侧工具包树和右侧单一工具表", () => {
   assert.equal((template.match(/id="uiToolsTableBody"/g) || []).length, 1);
   assert.match(template, /Agent 按工具包整体启用/);
   assert.match(source, /api\/v1\/ui-tool-packages/);
-  assert.match(source, /item\.package_code !== this\.selectedPackageCode/);
-  assert.match(template, /id="uiToolsFilters"[\s\S]*id="uiToolFilterSearch"[\s\S]*id="uiToolFilterEnabled"/);
-  assert.match(source, /uiToolFilterSearch[\s\S]*uiToolFilterEnabled/);
+  assert.doesNotMatch(template, /uiToolsFilters|uiToolFilterSearch|uiToolFilterEnabled/);
+  assert.doesNotMatch(source, /uiToolFilterSearch|uiToolFilterEnabled/);
+  assert.match(source, /items\.filter\(\(item\) => item\.package_code === this\.selectedPackageCode\)/);
   assert.match(source, /代码内置/);
   assert.match(source, /手工工具包/);
 });

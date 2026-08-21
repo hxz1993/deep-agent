@@ -3,6 +3,7 @@ const skillsAdmin = {
   selectedResourcePath: null,
   details: new Map(),
   uploadMode: "install",
+  moreMenuDismissController: null,
 
   async refresh() {
     const pane = document.getElementById("skillListPane");
@@ -79,6 +80,8 @@ const skillsAdmin = {
   renderDetail(skill) {
     const detail = document.getElementById("skillDetailPane");
     if (!detail) return;
+    this.moreMenuDismissController?.abort();
+    this.moreMenuDismissController = null;
     const isBuiltin = skill.source === "builtin";
     const runtime = this.runtimeLabel(skill);
     const resources = skill.resources || [];
@@ -120,8 +123,19 @@ const skillsAdmin = {
           <div class="skill-detail-title"><h3>${escapeHtml(skill.label)}</h3><span class="badge source-${escapeHtml(skill.source)}">${isBuiltin ? "代码内置 · 只读" : "上传安装"}</span><span class="badge runtime-${escapeHtml(skill.runtime_status || "missing")}">${escapeHtml(runtime.label)}</span></div>
           <code>${escapeHtml(skill.code)}</code>
         </div>
-        <div class="row-actions">
-          ${isBuiltin ? "" : `<button class="btn" type="button" data-skill-action="edit">编辑</button><button class="btn" type="button" data-skill-action="replace">替换 ZIP</button><button class="btn" type="button" data-skill-action="download">导出</button>${skill.enabled ? `<button class="btn" type="button" data-skill-action="reload">重新加载</button>` : ""}<button class="btn" type="button" data-skill-action="toggle">${skill.enabled ? "停用" : "启用"}</button><button class="btn danger" type="button" data-skill-action="delete">删除</button>`}
+        <div class="row-actions skill-detail-actions">
+          ${isBuiltin ? "" : `
+            <button class="btn skill-direct-action" type="button" data-skill-action="edit"><i data-lucide="pencil-line"></i><span>编辑</span></button>
+            <button class="btn skill-direct-action" type="button" data-skill-action="replace"><i data-lucide="upload"></i><span>上传</span></button>
+            <div class="skill-more-actions">
+              <button class="skill-more-trigger" type="button" data-skill-more-trigger aria-label="更多 Skill 操作" title="更多操作" aria-haspopup="menu" aria-expanded="false"><i data-lucide="ellipsis"></i></button>
+              <div class="skill-more-menu" data-skill-more-menu role="menu" hidden>
+                <button type="button" role="menuitem" data-skill-action="download"><i data-lucide="download"></i><span>导出</span></button>
+                ${skill.enabled ? `<button type="button" role="menuitem" data-skill-action="reload"><i data-lucide="refresh-cw"></i><span>重新加载</span></button>` : ""}
+                <button type="button" role="menuitem" data-skill-action="toggle"><i data-lucide="${skill.enabled ? "circle-pause" : "circle-play"}"></i><span>${skill.enabled ? "停用" : "启用"}</span></button>
+                <button class="danger" type="button" role="menuitem" data-skill-action="delete"><i data-lucide="trash-2"></i><span>删除</span></button>
+              </div>
+            </div>`}
         </div>
       </header>
       <div class="skill-detail-layout">
@@ -150,8 +164,41 @@ const skillsAdmin = {
           </section>
         </aside>
       </div>`;
+    const moreTrigger = detail.querySelector("[data-skill-more-trigger]");
+    const moreMenu = detail.querySelector("[data-skill-more-menu]");
+    const closeMoreMenu = () => {
+      if (!moreTrigger || !moreMenu) return;
+      moreMenu.hidden = true;
+      moreTrigger.setAttribute("aria-expanded", "false");
+      this.moreMenuDismissController?.abort();
+      this.moreMenuDismissController = null;
+    };
+    moreTrigger?.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const willOpen = moreMenu.hidden;
+      if (!willOpen) {
+        closeMoreMenu();
+        return;
+      }
+      moreMenu.hidden = false;
+      moreTrigger.setAttribute("aria-expanded", "true");
+      this.moreMenuDismissController?.abort();
+      this.moreMenuDismissController = new AbortController();
+      const { signal } = this.moreMenuDismissController;
+      document.addEventListener("click", (outsideEvent) => {
+        if (!outsideEvent.target.closest(".skill-more-actions")) closeMoreMenu();
+      }, { signal });
+      document.addEventListener("keydown", (keyEvent) => {
+        if (keyEvent.key !== "Escape") return;
+        closeMoreMenu();
+        moreTrigger.focus();
+      }, { signal });
+    });
     detail.querySelectorAll("[data-skill-action]").forEach((button) => {
-      button.addEventListener("click", () => this.handleAction(button.dataset.skillAction, skill));
+      button.addEventListener("click", () => {
+        closeMoreMenu();
+        this.handleAction(button.dataset.skillAction, skill);
+      });
     });
     detail.querySelectorAll("[data-read-resource]").forEach((button) => {
       button.addEventListener("click", () => this.readResource(skill.code, button.dataset.readResource));
@@ -272,11 +319,18 @@ const skillsAdmin = {
       return;
     }
     if (action === "edit") {
-      const label = prompt("Skill 显示名称", skill.label);
-      if (label === null) return;
-      const description = prompt("Skill 描述", skill.description);
-      if (description === null) return;
-      await this.patch(skill.code, { label, description }, "Skill 信息已更新");
+      const values = await requestActionFields({
+        title: "编辑 Skill 信息",
+        message: skill.code,
+        icon: "book-open-check",
+        confirmLabel: "保存",
+        fields: [
+          { name: "label", label: "显示名称", value: skill.label, required: true },
+          { name: "description", label: "描述", value: skill.description, multiline: true },
+        ],
+      });
+      if (!values) return;
+      await this.patch(skill.code, values, "Skill 信息已更新");
       return;
     }
     if (action === "toggle") {
@@ -284,7 +338,13 @@ const skillsAdmin = {
       return;
     }
     if (action === "delete") {
-      if (!confirm(`确定删除 Skill “${skill.label}”？平台原始 ZIP 也会尝试清理。`)) return;
+      if (!(await confirmAction({
+        title: "删除 Skill？",
+        message: `平台原始 ZIP 也会尝试清理。当前对象：${skill.label}`,
+        icon: "trash-2",
+        tone: "danger",
+        confirmLabel: "删除",
+      }))) return;
       try {
         await apiFetch(`/api/v1/skills/${encodeURIComponent(skill.code)}`, { method: "DELETE" });
         this.selectedCode = null;

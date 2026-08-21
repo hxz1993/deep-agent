@@ -314,7 +314,13 @@ const llmModelsAdmin = {
   },
 
   async remove(modelId, name) {
-    if (!confirm(`确定删除模型配置 "${name}"？`)) return;
+    if (!(await confirmAction({
+      title: "删除模型配置？",
+      message: `删除后，使用该配置的 Agent 可能无法运行。当前对象：${name}`,
+      icon: "trash-2",
+      tone: "danger",
+      confirmLabel: "删除",
+    }))) return;
     try {
       await apiFetch(`/api/v1/llm-models/${encodeURIComponent(modelId)}`, { method: "DELETE" });
       showToast("模型配置已删除");

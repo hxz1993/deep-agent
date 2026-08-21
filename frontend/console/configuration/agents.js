@@ -19,6 +19,7 @@ let promptEstimateTimer = null;
 let promptEstimateRequestId = 0;
 let agentListView = "cards";
 let agentEditorDirty = false;
+let agentsLoadedOnce = false;
 
 function formatCompactCount(value) {
   const count = Number(value);
@@ -257,17 +258,28 @@ const agentsAdmin = {
     const tbody = document.getElementById("agentsTableBody");
     const cardGrid = document.getElementById("agentsCardGrid");
     if (!tbody || !cardGrid) return;
-    tbody.innerHTML = `<tr><td colspan="5" class="empty-cell">加载中…</td></tr>`;
-    cardGrid.innerHTML = `<div class="agent-list-state"><span class="loading-spinner"></span><span>正在加载 Agent…</span></div>`;
+    const panel = document.getElementById("panel-agents");
+    panel?.setAttribute("aria-busy", "true");
+    if (!agentsLoadedOnce) {
+      tbody.innerHTML = `<tr><td colspan="5" class="empty-cell">加载中…</td></tr>`;
+      cardGrid.innerHTML = `<div class="agent-list-state"><span class="loading-spinner"></span><span>正在加载 Agent…</span></div>`;
+    }
     try {
       const agents = await apiFetch("/api/v1/agents");
       showDbBanner(false);
       this.renderList(agents);
+      agentsLoadedOnce = true;
       this.setListView(agentListView);
     } catch (err) {
-      tbody.innerHTML = `<tr><td colspan="5" class="empty-cell">${escapeHtml(err.message)}</td></tr>`;
-      cardGrid.innerHTML = `<div class="agent-list-state error"><i data-lucide="circle-alert"></i><strong>Agent 加载失败</strong><span>${escapeHtml(err.message)}</span></div>`;
-      window.lucide?.createIcons();
+      if (!agentsLoadedOnce) {
+        tbody.innerHTML = `<tr><td colspan="5" class="empty-cell">${escapeHtml(err.message)}</td></tr>`;
+        cardGrid.innerHTML = `<div class="agent-list-state error"><i data-lucide="circle-alert"></i><strong>Agent 加载失败</strong><span>${escapeHtml(err.message)}</span></div>`;
+        window.lucide?.createIcons();
+      } else {
+        showToast(`Agent 刷新失败：${err.message}`, true);
+      }
+    } finally {
+      panel?.setAttribute("aria-busy", "false");
     }
   },
 
@@ -284,10 +296,19 @@ const agentsAdmin = {
     return Boolean(document.getElementById("agentModal")?.open);
   },
 
-  requestCloseEditor(force = false) {
+  async requestCloseEditor(force = false) {
     const editor = document.getElementById("agentModal");
     if (!editor?.open) return true;
-    if (!force && agentEditorDirty && !confirm("当前 Agent 有未保存修改，确定返回列表吗？")) return false;
+    if (
+      !force
+      && agentEditorDirty
+      && !(await confirmAction({
+        title: "放弃未保存的修改？",
+        message: "当前 Agent 的修改尚未保存，返回列表后这些修改将丢失。",
+        icon: "file-warning",
+        confirmLabel: "放弃修改",
+      }))
+    ) return false;
     agentEditorDirty = false;
     editor.close();
     document.body.classList.remove("agent-editor-open");
@@ -624,7 +645,7 @@ const agentsAdmin = {
         showToast("Agent 已创建");
       }
       saved = true;
-      this.requestCloseEditor(true);
+      await this.requestCloseEditor(true);
     } catch (err) {
       AdminFormFeedback.show(form, err);
     } finally {
@@ -640,7 +661,13 @@ const agentsAdmin = {
       name === "default"
         ? `确定删除默认 Agent "${name}"？这可能导致部分会话失去关联。`
         : `确定删除 Agent "${name}"？`;
-    if (!confirm(msg)) return;
+    if (!(await confirmAction({
+      title: name === "default" ? "删除默认 Agent？" : "删除 Agent？",
+      message: msg,
+      icon: "trash-2",
+      tone: "danger",
+      confirmLabel: "删除",
+    }))) return;
     try {
       await apiFetch(`/api/v1/agents/${encodeURIComponent(agentId)}`, { method: "DELETE" });
       showToast("Agent 已删除");
@@ -702,9 +729,9 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("agentForm")?.addEventListener("input", () => { agentEditorDirty = true; });
   document.getElementById("agentForm")?.addEventListener("change", () => { agentEditorDirty = true; });
   document.getElementById("closeAgentModal")?.addEventListener("click", () => agentsAdmin.requestCloseEditor());
-  document.getElementById("testAgentBtn")?.addEventListener("click", () => {
+  document.getElementById("testAgentBtn")?.addEventListener("click", async () => {
     if (!state.editingAgentId) return;
-    if (!agentsAdmin.requestCloseEditor()) return;
+    if (!(await agentsAdmin.requestCloseEditor())) return;
     window.DeepAgentConsoleChat?.selectAgent(state.editingAgentId);
     window.DeepAgentConsole?.showPage("workspace");
   });

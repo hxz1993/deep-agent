@@ -545,7 +545,13 @@ const mcpAdmin = {
   },
 
   async remove(name) {
-    if (!confirm(`确定删除 MCP "${name}"？`)) return;
+    if (!(await confirmAction({
+      title: "删除 MCP？",
+      message: `删除后，已关联该 MCP 的 Agent 将无法继续使用它。当前对象：${name}`,
+      icon: "trash-2",
+      tone: "danger",
+      confirmLabel: "删除",
+    }))) return;
     try {
       await apiFetch(`/api/v1/mcp/${encodeURIComponent(name)}`, { method: "DELETE" });
       showToast("MCP 已删除，已热重载");

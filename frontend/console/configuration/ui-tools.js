@@ -424,7 +424,13 @@ const uiToolsAdmin = {
   },
 
   async removePackage(code) {
-    if (!confirm(`确定删除 UI 工具包 "${code}"？`)) return;
+    if (!(await confirmAction({
+      title: "删除 UI 工具包？",
+      message: `删除工具包会同时移除其中的手工 UI 工具。当前对象：${code}`,
+      icon: "trash-2",
+      tone: "danger",
+      confirmLabel: "删除",
+    }))) return;
     try {
       await apiFetch(`/api/v1/ui-tool-packages/${encodeURIComponent(code)}`, { method: "DELETE" });
       if (this.selectedPackageCode === code) this.selectedPackageCode = null;
@@ -445,19 +451,12 @@ const uiToolsAdmin = {
       tbody.innerHTML = `<tr><td colspan="6" class="empty-cell">请选择左侧工具包</td></tr>`;
       return;
     }
-    const query = document.getElementById("uiToolFilterSearch")?.value.trim().toLowerCase() || "";
-    const enabled = document.getElementById("uiToolFilterEnabled")?.value || "";
-    const filtered = items.filter((item) => {
-      if (item.package_code !== this.selectedPackageCode) return false;
-      if (enabled && String(item.enabled) !== enabled) return false;
-      if (!query) return true;
-      return `${item.name} ${item.description || ""} ${item.widget || ""}`.toLowerCase().includes(query);
-    });
-    if (!filtered.length) {
-      tbody.innerHTML = `<tr><td colspan="6" class="empty-cell">当前工具包暂无匹配的 UI 工具</td></tr>`;
+    const packageTools = items.filter((item) => item.package_code === this.selectedPackageCode);
+    if (!packageTools.length) {
+      tbody.innerHTML = `<tr><td colspan="6" class="empty-cell">当前工具包暂无 UI 工具</td></tr>`;
       return;
     }
-    tbody.innerHTML = filtered
+    tbody.innerHTML = packageTools
       .map((tool) => `
       <tr>
         <td><strong>${escapeHtml(tool.name)}</strong></td>
@@ -663,7 +662,13 @@ const uiToolsAdmin = {
       showToast("内置工具不可删除", true);
       return;
     }
-    if (!confirm(`确定删除 UI 工具 "${name}"？`)) return;
+    if (!(await confirmAction({
+      title: "删除 UI 工具？",
+      message: `删除后，Agent 将无法再发起该页面交互。当前对象：${name}`,
+      icon: "trash-2",
+      tone: "danger",
+      confirmLabel: "删除",
+    }))) return;
     try {
       await apiFetch(`/api/v1/ui-tools/${encodeURIComponent(name)}`, { method: "DELETE" });
       showToast("已删除");
@@ -688,8 +693,6 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("deleteUiToolPackageBtn")?.addEventListener("click", () => uiToolsAdmin.removePackage(uiToolsAdmin.selectedPackageCode));
   document.getElementById("uiToolPackageForm")?.addEventListener("submit", (e) => uiToolsAdmin.savePackage(e));
   document.getElementById("uiToolForm")?.addEventListener("submit", (e) => uiToolsAdmin.save(e));
-  document.getElementById("uiToolFilterSearch")?.addEventListener("input", () => uiToolsAdmin.renderTools(uiToolsAdmin._lastTools || []));
-  document.getElementById("uiToolFilterEnabled")?.addEventListener("change", () => uiToolsAdmin.renderTools(uiToolsAdmin._lastTools || []));
   document.getElementById("closeUiToolModal")?.addEventListener("click", () => {
     document.getElementById("uiToolModal").close();
   });

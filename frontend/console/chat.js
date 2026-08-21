@@ -503,14 +503,6 @@ function init() {
   el.fileInput?.addEventListener("change", onFilesSelected);
   el.input?.addEventListener("paste", onPaste);
 
-  document.querySelectorAll(".suggestion").forEach((b) =>
-    b.addEventListener("click", () => {
-      el.input.value = b.textContent;
-      autoGrow();
-      onSend();
-    })
-  );
-
   // 聊天标题点击编辑
   el.chatTitle.addEventListener("click", () => {
     if (state.streaming || !state.sessionId) return;

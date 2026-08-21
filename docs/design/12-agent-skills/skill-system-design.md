@@ -196,7 +196,7 @@ GET    /api/v1/skills/{code}/package
 当前 Pod运行目录和后续 Pod启动所需的共享原包，不是仅修补当前进程缓存。
 
 Console 配置中心提供独立 Skill 页面：列表、详情、资源树、Manifest、安装、替换、启停、重载、下载和删除；
-Builtin 标识为“代码内置、只读”。Agent 编辑弹窗将 Skill 与工具包分区，保存独立编码列表。
+Builtin 标识为“代码内置、只读”。Agent 独立编辑页将 Skill 与工具包分区，保存独立编码列表。
 聊天中 `load_capability` 显示为默认折叠的“正在加载 Skill”，资源与脚本工具按普通 Tool Call/Result
 展示。Skill页区分文本、Word、Excel可读和当前不可读资源；脚本只列路径和数量，不增加单独的
 运行状态标签。

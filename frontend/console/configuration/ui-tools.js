@@ -291,13 +291,16 @@ const uiToolsAdmin = {
           <div class="ui-tool-tree-group-title">${escapeHtml(label)}</div>
           ${items.map((item) => `
             <button type="button" class="ui-tool-tree-node ${item.code === this.selectedPackageCode ? "is-selected" : ""}" data-select-package="${escapeHtml(item.code)}">
-              <span class="ui-tool-tree-node-main">
-                <strong>${escapeHtml(item.label)}</strong>
-                <span class="badge ${item.enabled ? "on" : "off"}">${item.enabled ? item.tool_count : "停用"}</span>
-              </span>
-              <span class="ui-tool-tree-node-meta">
-                <code>${escapeHtml(item.code)}</code>
-                <span>${escapeHtml(String(item.tool_count || 0))} 个工具</span>
+              <span class="ui-tool-tree-node-head">
+                <span class="ui-tool-tree-icon"><i data-lucide="${item.source === "builtin" ? "panel-top" : "blocks"}"></i></span>
+                <span class="ui-tool-tree-node-main">
+                  <strong>${escapeHtml(item.label)}</strong>
+                  <code>${escapeHtml(item.code)}</code>
+                </span>
+                <span class="ui-tool-tree-node-meta">
+                  <span class="badge ${item.enabled ? "on" : "off"}">${item.enabled ? "启用" : "停用"}</span>
+                  <span>${escapeHtml(String(item.tool_count || 0))} 个工具</span>
+                </span>
               </span>
             </button>`).join("")}
         </section>`)
@@ -305,6 +308,7 @@ const uiToolsAdmin = {
     tree.querySelectorAll("[data-select-package]").forEach((node) => {
       node.addEventListener("click", () => this.selectPackage(node.dataset.selectPackage));
     });
+    window.lucide?.createIcons();
   },
 
   selectPackage(code) {

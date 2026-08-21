@@ -64,11 +64,24 @@
 
     <!-- Agent panel -->
     <section class="panel active" id="panel-agents">
-      <div class="panel-toolbar">
-        <h2>Agent 列表</h2>
-        <button class="btn primary" id="newAgentBtn"><i data-lucide="plus"></i>新建 Agent</button>
+      <div class="panel-toolbar agent-list-toolbar">
+        <div>
+          <h2>Agent</h2>
+          <p class="panel-subtitle">集中管理模型、Prompt、工具包与 Skill，并可直接发起测试。</p>
+        </div>
+        <div class="panel-toolbar-actions">
+          <label class="agent-search"><i data-lucide="search"></i><input type="search" id="agentListSearch" placeholder="搜索 Agent" /></label>
+          <div class="agent-view-switch" role="group" aria-label="Agent 展示方式">
+            <button type="button" class="active" data-agent-view="cards" title="卡片视图" aria-label="卡片视图"><i data-lucide="layout-grid"></i></button>
+            <button type="button" data-agent-view="list" title="列表视图" aria-label="列表视图"><i data-lucide="list"></i></button>
+          </div>
+          <button class="btn primary" id="newAgentBtn"><i data-lucide="plus"></i>新建 Agent</button>
+        </div>
       </div>
-      <div class="table-wrap">
+      <div class="agent-card-grid" id="agentsCardGrid" aria-live="polite">
+        <div class="agent-list-state">正在加载 Agent…</div>
+      </div>
+      <div class="table-wrap console-list-a agent-list-table hidden" id="agentsListView">
         <table class="data-table">
           <thead>
             <tr>
@@ -98,7 +111,7 @@
           <button class="btn primary" type="button" id="newLlmModelBtn"><i data-lucide="plus"></i>新建模型</button>
         </div>
       </div>
-      <div class="table-wrap">
+      <div class="table-wrap console-list-a">
         <table class="data-table">
           <thead>
             <tr>
@@ -128,7 +141,7 @@
         </div>
         <button class="btn" type="button" id="refreshBuiltinToolsBtn">重新加载</button>
       </div>
-      <div class="table-wrap">
+      <div class="table-wrap console-list-a">
         <table class="data-table builtin-tools-table">
           <thead>
             <tr>
@@ -164,11 +177,11 @@
     <section class="panel" id="panel-auxiliary-models">
       <div class="panel-toolbar">
         <div>
-          <h2>辅助模型</h2>
+          <h2>辅助工具</h2>
           <p class="panel-subtitle">辅助任务默认复用对话主模型；可为固定场景指定专用模型配置。</p>
         </div>
       </div>
-      <div class="table-wrap">
+      <div class="table-wrap console-list-a">
         <table class="data-table">
           <thead>
             <tr>
@@ -193,7 +206,7 @@
         <h2>MCP 服务列表</h2>
         <button class="btn primary" id="newMcpBtn"><i data-lucide="plus"></i>新建 MCP</button>
       </div>
-      <div class="table-wrap">
+      <div class="table-wrap console-list-a">
         <table class="data-table">
           <thead>
             <tr>
@@ -216,15 +229,14 @@
     <!-- UI tools panel -->
     <section class="panel" id="panel-ui-tools">
       <div class="panel-toolbar">
-        <h2>UI 工具（HITL）</h2>
+        <div class="panel-title-copy">
+          <h2>UI 工具（HITL）</h2>
+          <p class="panel-subtitle">先管理工具包，再在选中的手工工具包中维护 UI 工具；Agent 按工具包整体启用。</p>
+        </div>
+        <button class="btn primary" id="newUiToolPackageBtn"><i data-lucide="plus"></i>新建工具包</button>
       </div>
-      <p class="panel-subtitle">先管理工具包，再在选中的手工工具包中维护 UI 工具；Agent 按工具包整体启用。</p>
-      <div class="ui-tools-workspace">
+      <div class="ui-tools-workspace ui-tools-light-layout">
         <aside class="ui-tool-package-pane">
-          <div class="ui-tool-pane-header">
-            <strong>工具包</strong>
-            <button class="btn" id="newUiToolPackageBtn"><i data-lucide="plus"></i>新建</button>
-          </div>
           <div class="ui-tool-package-tree" id="uiToolPackageTree">
             <div class="ui-tool-tree-state">加载中…</div>
           </div>
@@ -240,15 +252,15 @@
               <div class="ui-tool-selected-meta" id="selectedUiToolPackageMeta"></div>
             </div>
             <div class="row-actions">
-              <button class="btn hidden" id="editUiToolPackageBtn">编辑工具包</button>
-              <button class="btn danger hidden" id="deleteUiToolPackageBtn">删除工具包</button>
+              <button class="btn hidden" id="editUiToolPackageBtn"><i data-lucide="pencil"></i>编辑工具包</button>
+              <button class="btn danger hidden" id="deleteUiToolPackageBtn"><i data-lucide="trash-2"></i>删除工具包</button>
               <button class="btn primary" id="newUiToolBtn" disabled><i data-lucide="plus"></i>新建工具</button>
             </div>
           </header>
           <div class="filter-bar ui-tool-filter-bar" id="uiToolsFilters">
             <label class="inline-field ui-tool-search-field">
               <span>搜索</span>
-              <input type="search" id="uiToolFilterSearch" placeholder="名称或描述" />
+              <input type="search" id="uiToolFilterSearch" placeholder="名称、描述或 Widget" />
             </label>
             <label class="inline-field">
               <span>状态</span>
@@ -259,7 +271,7 @@
               </select>
             </label>
           </div>
-          <div class="table-wrap ui-tool-table-wrap">
+          <div class="table-wrap console-list-a ui-tool-table-wrap">
             <table class="data-table">
               <thead>
                 <tr>
@@ -281,15 +293,19 @@
     </section>
   </div>
 
-  <!-- Agent modal -->
-  <dialog class="modal modal-agent" id="agentModal">
+  <!-- Agent 独立编辑页：复用既有表单和保存契约，不再使用模态交互。 -->
+  <dialog class="modal modal-agent agent-editor-page" id="agentModal">
     <form id="agentForm" method="dialog">
       <div class="modal-header">
+        <button type="button" class="agent-editor-back" id="closeAgentModal"><i data-lucide="arrow-left"></i><span>返回</span></button>
         <div class="modal-title-copy">
           <h3 id="agentModalTitle">新建 Agent</h3>
           <span class="modal-entity-id hidden" id="agentModalId"></span>
         </div>
-        <button type="button" class="icon-btn" id="closeAgentModal" aria-label="关闭"><i data-lucide="x"></i></button>
+        <div class="agent-editor-header-actions">
+          <button type="button" class="btn agent-test-action hidden" id="testAgentBtn"><i data-lucide="message-square-code"></i>发起测试</button>
+          <button type="submit" class="btn primary" id="saveAgentBtn">保存</button>
+        </div>
       </div>
       <div class="modal-body">
         <div class="agent-form-grid">
@@ -345,10 +361,6 @@
         </section>
       </div>
       <div class="form-error hidden" data-form-error role="alert" aria-live="assertive"></div>
-      <div class="modal-footer">
-        <button type="button" class="btn" id="cancelAgentBtn">取消</button>
-        <button type="submit" class="btn primary">保存</button>
-      </div>
     </form>
   </dialog>
 

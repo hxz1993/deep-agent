@@ -153,9 +153,13 @@ function initTabs() {
   const tabs = document.querySelectorAll(".tab");
   tabs.forEach((tab) => {
     tab.addEventListener("click", () => {
+      if (window.agentsAdmin?.isEditorOpen?.() && !window.agentsAdmin.requestCloseEditor()) return;
       tabs.forEach((t) => t.classList.remove("active"));
       tab.classList.add("active");
       const name = tab.dataset.tab;
+      document
+        .querySelector(".configuration-content")
+        ?.classList.toggle("catalog-active", name === "catalog");
       document.querySelectorAll(".panel").forEach((p) => p.classList.remove("active"));
       document.getElementById(`panel-${name}`)?.classList.add("active");
       if (name === "global-settings" && window.globalSettingsAdmin) {

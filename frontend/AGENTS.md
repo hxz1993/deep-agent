@@ -10,7 +10,7 @@ Console 图标统一使用仓库内 `frontend/vendor/lucide.min.js` 的线性 SV
 
 ## Console UI 常驻 worktree
 
-`deep-agent-console-ui-0810-TMP_to_delete` 作为 DeepAgent bundled Console UI 的常驻调试入口，
+`deep-agent-console-ui-0818` 作为 DeepAgent bundled Console UI 的常驻调试入口，
 除非用户明确要求，不要自行删除该 worktree。后续每批 UI 需求开始前必须先确认工作区干净，
 再同步最新 `feat-ruge-0803` 基线；修改范围继续限定在 `frontend/console/**`、
 `tests/frontend/console/**`，必要时可同步本前端说明。若需求实际需要后端 API、SSE、History
@@ -49,7 +49,7 @@ frontend/
 | 配置 | `localStorage` 只保存调试 App；全局环境配置只读展示，身份和鉴权由平台提供 |
 | 内置工具目录 | 配置中心只读展示 `builtin:general`、`builtin:sandbox`；Agent 按包选择 |
 | 系统工具目录 | 配置中心按任务规划、Skill、文件、工具结果、MCP 工具发现、MCP Resource 分组展示自动注入工具；不参与 Agent 配置 |
-| 任务计划 | 当前三种、历史六种`source=planning`工具事件聚合到消息区底部唯一浮层；实时覆盖最新快照；正常Final或UI Pending隐藏，取消/失败保留；History只恢复最新异常Run的未完成计划 |
+| 任务计划 | `write_plan`、`read_plan`、`update_task_statuses`三种`source=planning`工具事件聚合到消息区底部唯一浮层；实时覆盖最新快照；正常Final或UI Pending隐藏，取消/失败保留；History只恢复最新异常Run的未完成计划 |
 | Skill | 独立 Skill 列表与详情；上传包安装/替换/启停/单个与全部导出/删除；文本、Word、Excel 资源可预览，脚本只列包内路径和数量，不展示可执行性判断；Agent 使用独立 `skills` 列表选择 |
 | 一体化控制台 | `/console/`；工作台、配置和诊断的唯一入口 |
 
@@ -67,15 +67,15 @@ v0.3.12 的配置卡只读展示工具披露策略：附件包为“有附件时
 输出预测或安全余量算法。
 
 配置中心 UI 工具页使用“左侧工具包树 + 右侧当前包工具表”：来源只用于左树分组，右表不再
-重复显示所属包；窄屏改为上下布局，但仍必须先选包再维护工具。Builtin 包只读，只有选中手工包
-时才开放新建工具。
+重复显示所属包，但必须保留名称/描述/Widget搜索和启停状态筛选；窄屏改为上下布局，仍须先选包
+再维护工具。Builtin 包只读，只有选中手工包时才开放新建工具。
 
 配置中心 Skill 页不是工具包页：Builtin Skill 只读，上传 Skill 可安装、替换、启停、单个与全部导出和删除；
 详情只展示安全资源索引和 Manifest；文本、DOCX、XLSX 可预览，`scripts/`/`tools/` 只展示路径与
-数量，不判断是否可执行，也不展示脚本正文。Agent 编辑弹窗将
+数量，不判断是否可执行，也不展示脚本正文。Agent 独立编辑页将
 Skill 与工具包分区保存；停用 Skill 的既有引用保留并标记不可用，不静默从 Agent 配置删除。
 
-Agent 编辑弹窗的系统提示词标题栏显示“字符数 / 预估 Token”。字符数和 Token 估算统一调用
+Agent 独立编辑页的系统提示词标题栏显示“字符数 / 预估 Token”。字符数和 Token 估算统一调用
 后端 `POST /api/v1/agents/prompt-estimate`，由当前模型对应的 `TokenEstimator` 计算；前端只做
 防抖、紧凑格式和 tooltip 展示，不维护另一套字符比例算法。
 
@@ -100,7 +100,7 @@ Agent 编辑弹窗的系统提示词标题栏显示“字符数 / 预估 Token�
 - Console 顶部只展示一处产品版本，通过同源 `GET /info` 读取
   `deep_agent.__version__`；配置中心的数据库结构 revision 是独立运维信息。
 - 配置中心左侧页签只在当前前端页面的模块内存中保留；工作台与配置中心之间切换会恢复上次页签，浏览器刷新后重新回到 Agent，不写入 LocalStorage 或后端。
-- Agent 编辑弹窗在标题区显示完整 Agent ID；测试工作台对话标题第二行以 `会话 ID：<完整 ID>` 展示当前会话，不再截取前八位。
+- Agent 独立编辑页在标题区显示完整 Agent ID；测试工作台对话标题第二行以 `会话 ID：<完整 ID>` 展示当前会话，不再截取前八位。
 - `/` 跳转到 `/console/#/workspace`；旧 `/settings.html`、`/models.html`、`/admin/` 返回 404。
 - 前端门禁只负责体验，后端管理Router仍统一校验企业管理员；不要把按钮隐藏当作权限控制。
 

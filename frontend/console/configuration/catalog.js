@@ -137,6 +137,7 @@ function renderFacets() {
   );
   if (sidebar) {
     sidebar.innerHTML = [
+      '<div class="catalog-lab-heading"><span>模型研发方</span><i data-lucide="flask-conical"></i></div>',
       `<button type="button" class="catalog-lab-item ${catalogState.labId ? "" : "active"}" data-lab-id="">
         <span>全部 Lab</span><strong>${total}</strong>
       </button>`,
@@ -163,7 +164,7 @@ function renderFacets() {
       ? catalogState.facets.providers
       : [];
     providerSelect.innerHTML = [
-      '<option value="">全部</option>',
+      '<option value="">全部接入渠道</option>',
       ...providers.map(
         (provider) =>
           `<option value="${escapeHtml(provider.id)}">${escapeHtml(provider.label)}（${Number(provider.count || 0)}）</option>`,
@@ -221,8 +222,8 @@ function renderModelRows() {
         <td>${escapeHtml(formatTokenCount(model.max_output_tokens))}</td>
         <td class="model-tag-cell">${renderBadges(model.input_modalities, MODALITY_LABELS)}</td>
         <td class="model-tag-cell">${renderBadges(model.tags, TAG_LABELS)}</td>
-        <td><button type="button" class="btn btn-sm" data-toggle-model="${escapeHtml(model.canonical_model_id)}">
-          ${Number(model.provider_count || 0)} 个可用渠道
+        <td><button type="button" class="catalog-channel-trigger" data-toggle-model="${escapeHtml(model.canonical_model_id)}" title="查看 ${Number(model.provider_count || 0)} 个可用渠道" aria-label="查看 ${Number(model.provider_count || 0)} 个可用渠道">
+          <i data-lucide="network"></i><strong>${Number(model.provider_count || 0)}</strong><i data-lucide="chevron-down"></i>
         </button></td>
       </tr>
       ${modelDetailRow(model)}`,
@@ -309,6 +310,7 @@ function renderResults() {
       ? renderProviderRows()
       : '<tr><td colspan="5" class="empty-cell">无匹配接入渠道</td></tr>';
   }
+  window.lucide?.createIcons();
 }
 
 function renderPagination() {

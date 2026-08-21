@@ -12,7 +12,7 @@ Console 配置中心的“Skill”页面提供：
 - 上传 ZIP 安装、替换当前包、启用/禁用、重新加载、导出和删除。
 - 单个上传Skill可直接导出原始ZIP；“导出全部”生成包含清单和全部上传Skill独立ZIP的集合包。
 - 查看 Manifest、Reference/Asset 和脚本索引。
-- 在 Agent 编辑弹窗的独立 Skill 区域选择允许使用的 Skill。
+- 在 Agent 独立编辑页的 Skill 区域选择允许使用的 Skill。
 
 Builtin Skill 随代码发布，只读且不能替换或删除。上传包保存在平台文件服务，数据库
 `skill_packages` 只保存平台 File ID、Hash、Manifest 和资源索引。

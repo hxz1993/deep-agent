@@ -15,6 +15,10 @@ const templateHtml = await readFile(
   new URL("../../../frontend/console/configuration-template.html", import.meta.url),
   "utf8",
 );
+const configurationCss = await readFile(
+  new URL("../../../frontend/console/configuration/configuration.css", import.meta.url),
+  "utf8",
+);
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -135,5 +139,14 @@ test("系统工具页面具备加载、失败重试和窄屏可横向查看的�
   assert.match(source, /正在加载系统工具/);
   assert.match(source, /data-retry-system-tools/);
   assert.match(templateHtml, /class="system-tool-domains"/);
-  assert.match(source, /class="table-wrap"/);
+  assert.match(source, /class="table-wrap console-list-a"/);
+});
+
+test("所有系统工具分组复用同一组固定列宽", () => {
+  assert.match(source, /<colgroup>[\s\S]*system-tool-col-name[\s\S]*system-tool-col-source[\s\S]*system-tool-col-condition[\s\S]*system-tool-col-description/);
+  assert.match(configurationCss, /\.system-tools-table[\s\S]*table-layout: fixed/);
+  assert.match(configurationCss, /system-tool-col-name \{ width: 18%; \}/);
+  assert.match(configurationCss, /system-tool-col-source \{ width: 16%; \}/);
+  assert.match(configurationCss, /system-tool-col-condition \{ width: 34%; \}/);
+  assert.match(configurationCss, /system-tool-col-description \{ width: 32%; \}/);
 });

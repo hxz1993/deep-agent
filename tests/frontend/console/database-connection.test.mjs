@@ -15,6 +15,10 @@ const templateHtml = await readFile(
   new URL("../../../frontend/console/configuration-template.html", import.meta.url),
   "utf8",
 );
+const styles = await readFile(
+  new URL("../../../frontend/console/configuration/configuration.css", import.meta.url),
+  "utf8",
+);
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -69,7 +73,11 @@ test("数据库连接页是只读安全摘要", () => {
   assert.match(html, /test-db/);
   assert.match(html, /deep_agent/);
   assert.match(html, /已隐藏/);
+  assert.match(html, /database-connection-field/);
+  assert.match(html, /database-safe-badge/);
   assert.doesNotMatch(html, /input|textarea|保存/);
+  assert.match(styles, /\.database-connection-card\s*\{[^}]*border-radius: 14px;[^}]*background: var\(--console-surface/);
+  assert.match(styles, /\.database-connection-grid\s*\{[^}]*repeat\(3, minmax\(0, 1fr\)\)/);
 });
 
 test("数据库连接渲染会转义服务端字段", () => {

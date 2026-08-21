@@ -1,4 +1,4 @@
-const WORKSPACE_ASSET_VERSION = "20260815-2";
+const WORKSPACE_ASSET_VERSION = "20260821-2";
 
 let initialized = false;
 let lastRenderKey = "";
@@ -116,6 +116,27 @@ function installContextTestDialog() {
 function formatTokens(value) {
   if (value === null || value === undefined || value === "") return "—";
   return Number.isFinite(Number(value)) ? Number(value).toLocaleString("zh-CN") : "—";
+}
+
+function contextBudgetPercent(value, total) {
+  const amount = Number(value);
+  const capacity = Number(total);
+  if (!Number.isFinite(amount) || !Number.isFinite(capacity) || capacity <= 0) return null;
+  return Math.max(0, Math.min(100, (amount / capacity) * 100));
+}
+
+function renderContextBudgetBar(label, value, contextWindow, tone) {
+  const percent = contextBudgetPercent(value, contextWindow);
+  const percentLabel = percent === null ? "—" : `${Math.round(percent)}%`;
+  const width = percent === null ? 0 : percent;
+  const progressAttrs = percent === null
+    ? ""
+    : ` role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(percent)}"`;
+  return `<div class="context-budget-row tone-${escapeHtml(tone)}">
+    <div class="context-budget-row-head"><span>${escapeHtml(label)}</span><strong>${escapeHtml(formatTokens(value))} <small>Token</small></strong></div>
+    <div class="context-budget-track"${progressAttrs} aria-label="${escapeHtml(label)}占上下文窗口比例"><span style="width:${width.toFixed(2)}%"></span></div>
+    <span class="context-budget-percent">${escapeHtml(percentLabel)}</span>
+  </div>`;
 }
 
 function renderContextTestDialog() {
@@ -472,11 +493,15 @@ function renderInspector() {
     : contextStatus.compaction_enabled
       ? "未触发"
       : "未启用";
-  const triggerTokens = Number(contextStatus.trigger_tokens);
-  const historyTokens = Number(contextStatus.estimated_history_tokens || 0);
-  const budgetPercent = triggerTokens > 0
-    ? Math.min(100, Math.round((historyTokens / triggerTokens) * 100))
-    : 0;
+  const contextWindowTokens = contextStatus.context_window_tokens;
+  const budgetBars = [
+    ["当前历史估算", contextStatus.estimated_history_tokens, "history"],
+    ["动态输出预估", contextStatus.predicted_output_tokens, "output"],
+    ["安全余量", contextStatus.safety_margin_tokens, "safety"],
+    ["可用输入预算", contextStatus.usable_request_tokens, "available"],
+    ["压缩触发线", contextStatus.trigger_tokens, "trigger"],
+    ["压缩目标线", contextStatus.target_tokens, "target"],
+  ].map(([label, value, tone]) => renderContextBudgetBar(label, value, contextWindowTokens, tone)).join("");
 
   host.innerHTML = `
     <section class="inspector-section inspector-session-group">
@@ -498,17 +523,8 @@ function renderInspector() {
       </dl>
     </section>
     <section class="inspector-section inspector-budget-section">
-        <div class="budget-meter" title="原始历史估算占压缩触发线的比例"><span style="width:${budgetPercent}%"></span></div>
-        <header><strong>上下文预算</strong><span>历史快照</span></header>
-        <dl class="inspector-grid">
-          <dt>当前历史估算</dt><dd>${escapeHtml(formatTokens(contextStatus.estimated_history_tokens))} Token</dd>
-          <dt>上下文窗口</dt><dd>${escapeHtml(formatTokens(contextStatus.context_window_tokens))} Token</dd>
-          <dt>动态输出预估</dt><dd>${escapeHtml(formatTokens(contextStatus.predicted_output_tokens))} Token</dd>
-          <dt>安全余量</dt><dd>${escapeHtml(formatTokens(contextStatus.safety_margin_tokens))} Token</dd>
-          <dt>可用输入预算</dt><dd>${escapeHtml(formatTokens(contextStatus.usable_request_tokens))} Token</dd>
-          <dt>压缩触发线</dt><dd>${escapeHtml(formatTokens(contextStatus.trigger_tokens))} Token</dd>
-          <dt>压缩目标线</dt><dd>${escapeHtml(formatTokens(contextStatus.target_tokens))} Token</dd>
-        </dl>
+        <header><div><strong>上下文预算</strong><span>统一按上下文窗口计算占比</span></div><strong class="context-budget-total">${escapeHtml(formatTokens(contextWindowTokens))}<small> Token</small></strong></header>
+        <div class="context-budget-chart">${budgetBars}</div>
         <p class="inspector-help">预算值全部由后端统一计算。这里是完整原始会话历史的只读快照，不等同于某次 Run 的最终模型请求载荷。</p>
       </section>
       <section class="inspector-section">

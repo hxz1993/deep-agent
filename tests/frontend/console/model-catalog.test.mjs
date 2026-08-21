@@ -47,6 +47,7 @@ test("目录查看方式位于筛选行且渠道视图使用完整宽度", () =>
   assert.match(catalogSource, /catalog-provider-view/);
   assert.match(consoleStyles, /\.catalog-browser\.catalog-provider-view\s*\{\s*grid-template-columns:\s*minmax\(0,\s*1fr\)/);
   assert.match(consoleStyles, /\.catalog-provider-table\s*\{[^}]*width:\s*100%[^}]*min-width:\s*0/);
+  assert.match(catalogTemplate, /class="models-toolbar"[\s\S]*class="models-filters"[\s\S]*<\/div>\s*<\/div>\s*<div class="catalog-feedback/);
 });
 
 test("目录说明收进副标题信息提示且不再保留底部展开区域", () => {
@@ -58,6 +59,16 @@ test("目录说明收进副标题信息提示且不再保留底部展开区域",
   assert.match(catalogTemplate, /class="catalog-info-tooltip" role="tooltip"/);
   assert.match(consoleStyles, /\.catalog-info-tooltip\s*\{[^}]*left:\s*0;[^}]*top:/);
   assert.doesNotMatch(catalogTemplate, /<details|<summary>目录与运行配置的关系/);
+});
+
+test("模型目录使用轻量研发方卡片和紧凑图标渠道入口", () => {
+  assert.match(catalogTemplate, /catalog-lab-heading[\s\S]*模型研发方/);
+  assert.match(catalogSource, /class="catalog-channel-trigger"/);
+  assert.match(catalogSource, /data-lucide="network"/);
+  assert.match(catalogSource, /window\.lucide\?\.createIcons\(\)/);
+  assert.match(consoleStyles, /\.catalog-lab-sidebar\s*\{[^}]*border: 0;[^}]*background: transparent/);
+  assert.match(consoleStyles, /\.catalog-lab-item\s*\{[^}]*border-radius: 9px/);
+  assert.match(consoleStyles, /\.catalog-model-table:not\(\.catalog-provider-table\)\s*\{ table-layout: fixed; \}/);
 });
 
 test("模型表单必填上下文和最大输出且模态与能力标签分开", () => {

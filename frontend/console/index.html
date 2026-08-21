@@ -18,37 +18,48 @@
   <title>DeepAgent 一体化控制台</title>
   <link rel="icon" type="image/svg+xml" href="./favicon.svg?v=20260728-1" />
   <link id="hljsTheme" rel="stylesheet" href="/vendor/highlight-github-dark.min.css" />
-  <link rel="stylesheet" href="./themes.css?v=20260721-1" />
+  <link rel="stylesheet" href="./themes.css?v=20260821-2" />
   <link rel="stylesheet" href="./workspace.css?v=20260815-3" />
-  <link rel="stylesheet" href="./configuration/configuration.css?v=20260812-1" />
-  <link rel="stylesheet" href="./console.css?v=20260807-1" />
+  <link rel="stylesheet" href="./configuration/configuration.css?v=20260821-3" />
+  <link rel="stylesheet" href="./console.css?v=20260821-3" />
 </head>
 <body>
   <div class="console-shell">
-    <header class="console-topbar">
-      <div class="console-brand">
-        <span class="brand-mark"><i data-lucide="bot"></i></span>
-        <div class="console-brand-copy"><strong>DeepAgent</strong><span>一体化控制台</span></div>
-        <span class="product-version" id="productVersion" title="正在读取 DeepAgent 产品版本">v—</span>
-        <span class="connection-pill" id="connStatus"><span class="dot"></span><span class="conn-text">连接中</span></span>
-      </div>
-
-      <nav class="console-nav" aria-label="控制台主导航">
-        <button type="button" class="console-nav-btn active" data-page="workspace">
-          <i data-lucide="message-square-code"></i><span>测试工作台</span>
+    <aside class="console-rail" aria-label="控制台主导航">
+      <nav class="console-nav">
+        <button type="button" class="console-nav-btn active" data-page="workspace" title="对话测试" aria-label="对话测试">
+          <i data-lucide="message-square-code"></i><span>对话测试</span>
         </button>
-        <button type="button" class="console-nav-btn" data-page="configuration">
-          <i data-lucide="sliders-horizontal"></i><span>配置中心</span>
+        <button type="button" class="console-nav-btn" data-page="configuration" title="配置中心" aria-label="配置中心">
+          <i data-lucide="bot"></i><span>配置中心</span>
         </button>
-        <button type="button" class="console-nav-btn" data-page="diagnostics">
+        <button type="button" class="console-nav-btn" data-page="diagnostics" title="诊断中心" aria-label="诊断中心">
           <i data-lucide="activity"></i><span>诊断中心</span>
         </button>
       </nav>
+      <div class="console-rail-spacer"></div>
+      <a class="console-rail-link" href="../docs" target="_blank" rel="noopener noreferrer" title="接口文档" aria-label="接口文档">
+        <i data-lucide="book-open-text"></i><span>接口文档</span>
+      </a>
+    </aside>
+
+    <header class="console-topbar">
+      <div class="console-brand">
+        <span class="console-brand-icon" aria-hidden="true"><img src="./favicon.svg?v=20260728-1" alt="" /></span>
+        <div class="console-brand-copy"><strong>DeepAgent</strong><span>一体化控制台</span></div>
+        <i class="breadcrumb-chevron" data-lucide="chevron-right"></i>
+        <strong class="console-section-name" id="consoleSectionName">对话测试</strong>
+      </div>
 
       <div class="console-top-actions">
-        <a class="docs-link" href="../docs" target="_blank" rel="noopener noreferrer" title="打开接口文档">
-          <i data-lucide="book-open-text"></i><span>接口文档</span>
-        </a>
+        <div class="console-runtime-status" aria-label="运行状态">
+          <span class="product-version" id="productVersion" title="正在读取 DeepAgent 产品版本">v—</span>
+          <span class="connection-pill" id="connStatus"><span class="dot"></span><span class="conn-text">连接中</span></span>
+          <div class="database-version" title="当前 Alembic 数据库结构版本">
+            <span>数据库结构</span>
+            <strong id="databaseSchemaVersion">—</strong>
+          </div>
+        </div>
         <div class="theme-switch" aria-label="界面主题">
           <button type="button" data-console-theme="light" title="明亮"><i data-lucide="sun"></i></button>
           <button type="button" data-console-theme="paper" title="护眼"><i data-lucide="leaf"></i></button>
@@ -100,10 +111,6 @@
           <aside class="resource-nav">
             <div class="resource-title">
               <strong>配置中心</strong>
-              <div class="database-version" title="当前 Alembic 数据库结构版本">
-                <span>数据库结构</span>
-                <strong id="databaseSchemaVersion">—</strong>
-              </div>
             </div>
             <div class="resource-group-label">Agent 设置</div>
             <button class="tab resource-btn active" data-tab="agents"><i data-lucide="bot"></i><span>Agent</span></button>
@@ -111,7 +118,7 @@
             <button class="tab resource-btn" data-tab="builtin-tools"><i data-lucide="blocks"></i><span>内置工具</span></button>
             <button class="tab resource-btn" data-tab="system-tools"><i data-lucide="wrench"></i><span>系统工具</span></button>
             <button class="tab resource-btn" data-tab="skills"><i data-lucide="book-open-check"></i><span>Skill</span></button>
-            <button class="tab resource-btn" data-tab="mcp"><i data-lucide="plug-zap"></i><span>MCP 服务</span></button>
+            <button class="tab resource-btn" data-tab="mcp"><i data-lucide="plug-zap"></i><span>MCP</span></button>
             <button class="tab resource-btn" data-tab="ui-tools"><i data-lucide="panel-top"></i><span>UI 工具</span></button>
             <div class="resource-group-label separated">系统设置</div>
             <button class="tab resource-btn" data-tab="auxiliary-models"><i data-lucide="brain-circuit"></i><span>辅助模型</span></button>
@@ -185,6 +192,6 @@
   <script src="../vendor/marked.min.js"></script>
   <script src="../vendor/purify.min.js"></script>
   <script src="../vendor/highlight.min.js"></script>
-  <script type="module" src="./main.js?v=20260818-1"></script>
+  <script type="module" src="./main.js?v=20260821-3"></script>
 </body>
 </html>

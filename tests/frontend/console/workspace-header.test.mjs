@@ -75,7 +75,9 @@ test("会话详情合并会话和上下文且不再重复展示工具与事件",
   assert.match(workspaceSource, /state\.lastRunMetrics/);
   assert.match(chatSource, /conversation_id/);
   assert.match(chatSource, /run_metrics/);
-  assert.match(workspaceSource, /inspector-budget-section[\s\S]*budget-meter[\s\S]*<strong>上下文预算<\/strong>/);
+  assert.match(workspaceSource, /inspector-budget-section[\s\S]*<strong>上下文预算<\/strong>[\s\S]*context-budget-chart/);
+  assert.match(workspaceSource, /contextBudgetPercent\(value, contextWindow\)/);
+  assert.match(workspaceSource, /role="progressbar"/);
   assert.doesNotMatch(consoleIndex, /data-inspector-tab|>工具<|>事件</);
   assert.doesNotMatch(workspaceSource, /activeInspectorTab|eventRows|eventToolRows/);
   assert.doesNotMatch(chatSource, /deep-agent-console-event/);
@@ -112,6 +114,12 @@ test("输入区按模型与模态输入双列展示并移除冗余提示", () =>
   assert.match(consoleCss, /#composerUploadCapabilities \{ grid-column: 1 \/ -1; \}/);
   assert.match(chatSource, /composer-modalities-label">模态输入/);
   assert.doesNotMatch(template, /deep-agent 可能会出错|composer-hint/);
+});
+
+test("空会话不再展示预设开场白", () => {
+  assert.doesNotMatch(template, /id="suggestions"|class="suggestion"/);
+  assert.doesNotMatch(template, /现在几点了|今天的待办|快速排序/);
+  assert.doesNotMatch(chatSource, /querySelectorAll\("\.suggestion"\)/);
 });
 
 test("输入框提供线性附件、主动压缩按钮和后端预算百分比", () => {

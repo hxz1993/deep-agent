@@ -17,6 +17,8 @@ const GROUP_LABELS = {
 const GROUP_ORDER = ["builtin", "mcp", "ui"];
 let promptEstimateTimer = null;
 let promptEstimateRequestId = 0;
+let agentListView = "cards";
+let agentEditorDirty = false;
 
 function formatCompactCount(value) {
   const count = Number(value);
@@ -107,6 +109,100 @@ function selectionMatchesDefaults(selectedSet, caps) {
 }
 
 const agentsAdmin = {
+  setListView(view) {
+    agentListView = view === "list" ? "list" : "cards";
+    document.getElementById("agentsCardGrid")?.classList.toggle("hidden", agentListView !== "cards");
+    document.getElementById("agentsListView")?.classList.toggle("hidden", agentListView !== "list");
+    document.querySelectorAll("[data-agent-view]").forEach((button) => {
+      const active = button.dataset.agentView === agentListView;
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-pressed", String(active));
+    });
+  },
+
+  filterList() {
+    const query = (document.getElementById("agentListSearch")?.value || "").trim().toLowerCase();
+    document.querySelectorAll("[data-agent-search]").forEach((item) => {
+      item.classList.toggle("agent-filtered", Boolean(query) && !item.dataset.agentSearch.includes(query));
+    });
+  },
+
+  renderList(agents) {
+    const cardGrid = document.getElementById("agentsCardGrid");
+    const tbody = document.getElementById("agentsTableBody");
+    if (!cardGrid || !tbody) return;
+    if (!agents.length) {
+      cardGrid.innerHTML = `<div class="agent-list-state"><i data-lucide="bot"></i><strong>暂无 Agent</strong><span>新建一个 Agent 开始配置与测试。</span></div>`;
+      tbody.innerHTML = `<tr><td colspan="5" class="empty-cell">暂无 Agent</td></tr>`;
+      window.lucide?.createIcons();
+      return;
+    }
+
+    cardGrid.innerHTML = agents.map((agent, index) => {
+      const capabilities = formatCapabilitiesPreview(agent.capabilities);
+      const skills = formatSkillsPreview(agent.skills);
+      const search = `${agent.name || ""} ${agent.model?.name || ""} ${capabilities} ${skills}`.toLowerCase();
+      const tone = ["violet", "blue", "green", "orange"][index % 4];
+      return `<article class="agent-card" data-agent-search="${escapeHtml(search)}" data-open-agent="${escapeHtml(agent.id)}" tabindex="0">
+        <header class="agent-card-head">
+          <span class="agent-card-icon tone-${tone}"><i data-lucide="bot"></i></span>
+          <div><strong>${escapeHtml(agent.name)}</strong><span>${escapeHtml(agent.model?.name || "未配置模型")}</span></div>
+          <i class="agent-card-arrow" data-lucide="arrow-up-right"></i>
+        </header>
+        <div class="agent-card-body">
+          <div class="agent-card-fact"><span>能力</span><strong>${escapeHtml(capabilities)}</strong></div>
+          <div class="agent-card-fact"><span>Skill</span><strong>${escapeHtml(skills)}</strong></div>
+        </div>
+        <footer class="agent-card-footer">
+          <span><i data-lucide="clock-3"></i>${escapeHtml(formatDate(agent.updated_at))}</span>
+          <div class="row-actions">
+            <a class="btn-link" href="${chatUrlForAgent(agent.id)}" target="_blank" rel="noopener">发起对话</a>
+            <button type="button" class="danger" data-delete="${escapeHtml(agent.id)}" data-name="${escapeHtml(agent.name)}">删除</button>
+          </div>
+        </footer>
+      </article>`;
+    }).join("");
+
+    tbody.innerHTML = agents.map((agent) => {
+      const capabilities = formatCapabilitiesPreview(agent.capabilities);
+      const skills = formatSkillsPreview(agent.skills);
+      const search = `${agent.name || ""} ${agent.model?.name || ""} ${capabilities} ${skills}`.toLowerCase();
+      return `<tr class="agent-list-row" data-agent-search="${escapeHtml(search)}" data-open-agent="${escapeHtml(agent.id)}" tabindex="0">
+        <td><strong>${escapeHtml(agent.name)}</strong></td>
+        <td>${escapeHtml(agent.model?.name || "—")}</td>
+        <td><div class="cap-preview">${escapeHtml(capabilities)}</div><div class="skill-preview">Skill：${escapeHtml(skills)}</div></td>
+        <td>${escapeHtml(formatDate(agent.updated_at))}</td>
+        <td><div class="row-actions">
+          <a class="btn-link" href="${chatUrlForAgent(agent.id)}" target="_blank" rel="noopener">发起对话</a>
+          <button type="button" data-edit="${escapeHtml(agent.id)}">编辑</button>
+          <button type="button" class="danger" data-delete="${escapeHtml(agent.id)}" data-name="${escapeHtml(agent.name)}">删除</button>
+        </div></td>
+      </tr>`;
+    }).join("");
+
+    document.querySelectorAll("[data-open-agent]").forEach((item) => {
+      const open = (event) => {
+        if (event.target.closest("a, button")) return;
+        this.openEdit(item.dataset.openAgent);
+      };
+      item.addEventListener("click", open);
+      item.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          this.openEdit(item.dataset.openAgent);
+        }
+      });
+    });
+    document.querySelectorAll("[data-edit]").forEach((button) => {
+      button.addEventListener("click", () => this.openEdit(button.dataset.edit));
+    });
+    document.querySelectorAll("[data-delete]").forEach((button) => {
+      button.addEventListener("click", () => this.remove(button.dataset.delete, button.dataset.name));
+    });
+    this.filterList();
+    window.lucide?.createIcons();
+  },
+
   async updatePromptEstimate() {
     const output = document.getElementById("agentPromptEstimate");
     const promptInput = document.getElementById("agentPrompt");
@@ -159,46 +255,43 @@ const agentsAdmin = {
 
   async refresh() {
     const tbody = document.getElementById("agentsTableBody");
-    if (!tbody) return;
+    const cardGrid = document.getElementById("agentsCardGrid");
+    if (!tbody || !cardGrid) return;
     tbody.innerHTML = `<tr><td colspan="5" class="empty-cell">加载中…</td></tr>`;
+    cardGrid.innerHTML = `<div class="agent-list-state"><span class="loading-spinner"></span><span>正在加载 Agent…</span></div>`;
     try {
       const agents = await apiFetch("/api/v1/agents");
       showDbBanner(false);
-      if (!agents.length) {
-        tbody.innerHTML = `<tr><td colspan="5" class="empty-cell">暂无 Agent</td></tr>`;
-        return;
-      }
-      tbody.innerHTML = agents
-        .map(
-          (a) => `
-        <tr>
-          <td><strong>${escapeHtml(a.name)}</strong></td>
-          <td>${escapeHtml(a.model?.name || "—")}</td>
-          <td>
-            <div class="cap-preview">${escapeHtml(formatCapabilitiesPreview(a.capabilities))}</div>
-            <div class="skill-preview">Skill：${escapeHtml(formatSkillsPreview(a.skills))}</div>
-          </td>
-          <td>${escapeHtml(formatDate(a.updated_at))}</td>
-          <td>
-            <div class="row-actions">
-              <a class="btn-link" href="${chatUrlForAgent(a.id)}" target="_blank" rel="noopener">发起对话</a>
-              <button type="button" data-edit="${escapeHtml(a.id)}">编辑</button>
-              <button type="button" class="danger" data-delete="${escapeHtml(a.id)}" data-name="${escapeHtml(a.name)}">删除</button>
-            </div>
-          </td>
-        </tr>`
-        )
-        .join("");
-
-      tbody.querySelectorAll("[data-edit]").forEach((btn) => {
-        btn.addEventListener("click", () => this.openEdit(btn.dataset.edit));
-      });
-      tbody.querySelectorAll("[data-delete]").forEach((btn) => {
-        btn.addEventListener("click", () => this.remove(btn.dataset.delete, btn.dataset.name));
-      });
+      this.renderList(agents);
+      this.setListView(agentListView);
     } catch (err) {
       tbody.innerHTML = `<tr><td colspan="5" class="empty-cell">${escapeHtml(err.message)}</td></tr>`;
+      cardGrid.innerHTML = `<div class="agent-list-state error"><i data-lucide="circle-alert"></i><strong>Agent 加载失败</strong><span>${escapeHtml(err.message)}</span></div>`;
+      window.lucide?.createIcons();
     }
+  },
+
+  openEditor() {
+    const editor = document.getElementById("agentModal");
+    if (!editor) return;
+    if (!editor.open) editor.show();
+    document.body.classList.add("agent-editor-open");
+    agentEditorDirty = false;
+    window.lucide?.createIcons();
+  },
+
+  isEditorOpen() {
+    return Boolean(document.getElementById("agentModal")?.open);
+  },
+
+  requestCloseEditor(force = false) {
+    const editor = document.getElementById("agentModal");
+    if (!editor?.open) return true;
+    if (!force && agentEditorDirty && !confirm("当前 Agent 有未保存修改，确定返回列表吗？")) return false;
+    agentEditorDirty = false;
+    editor.close();
+    document.body.classList.remove("agent-editor-open");
+    return true;
   },
 
   renderCapCard(cap, selectedSet) {
@@ -459,7 +552,8 @@ const agentsAdmin = {
       "You are a helpful assistant. Use available tools when they help answer accurately.";
     this.renderCapabilityCheckboxes(null);
     this.renderSkillChoices([]);
-    document.getElementById("agentModal").showModal();
+    document.getElementById("testAgentBtn")?.classList.add("hidden");
+    this.openEditor();
     this.schedulePromptEstimate(true);
   },
 
@@ -478,7 +572,8 @@ const agentsAdmin = {
       document.getElementById("agentPrompt").value = agent.prompt;
       this.renderCapabilityCheckboxes(agent.capabilities);
       this.renderSkillChoices(agent.skills || []);
-      document.getElementById("agentModal").showModal();
+      document.getElementById("testAgentBtn")?.classList.remove("hidden");
+      this.openEditor();
       this.schedulePromptEstimate(true);
     } catch (err) {
       showToast(err.message, true);
@@ -529,7 +624,7 @@ const agentsAdmin = {
         showToast("Agent 已创建");
       }
       saved = true;
-      document.getElementById("agentModal").close();
+      this.requestCloseEditor(true);
     } catch (err) {
       AdminFormFeedback.show(form, err);
     } finally {
@@ -586,6 +681,14 @@ const agentsAdmin = {
     document.getElementById("capSearch")?.addEventListener("input", () => this.filterCaps());
     document.getElementById("agentSkillChoices")?.addEventListener("change", () => this.updateSkillCounter());
   },
+
+  initListControls() {
+    document.querySelectorAll("[data-agent-view]").forEach((button) => {
+      button.addEventListener("click", () => this.setListView(button.dataset.agentView));
+    });
+    document.getElementById("agentListSearch")?.addEventListener("input", () => this.filterList());
+    this.setListView(agentListView);
+  },
 };
 
 window.agentsAdmin = agentsAdmin;
@@ -593,13 +696,18 @@ window.agentsAdmin = agentsAdmin;
 document.addEventListener("DOMContentLoaded", () => {
   agentsAdmin.initCapSection();
   agentsAdmin.initPromptEstimate();
+  agentsAdmin.initListControls();
   document.getElementById("newAgentBtn")?.addEventListener("click", () => agentsAdmin.openCreate());
   document.getElementById("agentForm")?.addEventListener("submit", (e) => agentsAdmin.save(e));
-  document.getElementById("closeAgentModal")?.addEventListener("click", () => {
-    document.getElementById("agentModal").close();
-  });
-  document.getElementById("cancelAgentBtn")?.addEventListener("click", () => {
-    document.getElementById("agentModal").close();
+  document.getElementById("agentForm")?.addEventListener("input", () => { agentEditorDirty = true; });
+  document.getElementById("agentForm")?.addEventListener("change", () => { agentEditorDirty = true; });
+  document.getElementById("closeAgentModal")?.addEventListener("click", () => agentsAdmin.requestCloseEditor());
+  document.getElementById("cancelAgentBtn")?.addEventListener("click", () => agentsAdmin.requestCloseEditor());
+  document.getElementById("testAgentBtn")?.addEventListener("click", () => {
+    if (!state.editingAgentId) return;
+    if (!agentsAdmin.requestCloseEditor()) return;
+    window.DeepAgentConsoleChat?.selectAgent(state.editingAgentId);
+    window.DeepAgentConsole?.showPage("workspace");
   });
   agentsAdmin.refresh();
 });

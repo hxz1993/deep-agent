@@ -1,12 +1,17 @@
 import {
   initConfiguration,
   restoreConfigurationTab,
-} from "./configuration.js?v=20260813-1";
+} from "./configuration.js?v=20260821-3";
 import { bindContextControls, refreshIdentity } from "./context.js?v=20260728-5";
 import { initDiagnostics } from "./diagnostics.js?v=20260720-1";
-import { initWorkspace } from "./workspace.js?v=20260815-2";
+import { initWorkspace } from "./workspace.js?v=20260821-2";
 
 const VALID_PAGES = new Set(["workspace", "configuration", "diagnostics"]);
+const PAGE_LABELS = {
+  workspace: "对话测试",
+  configuration: "配置中心",
+  diagnostics: "诊断中心",
+};
 let consoleAllowed = false;
 let toastTimer = null;
 
@@ -44,12 +49,18 @@ function pageFromLocation() {
 
 async function showPage(page, { updateHash = true } = {}) {
   const next = VALID_PAGES.has(page) ? page : "workspace";
+  const current = document.querySelector("[data-page-panel].active")?.dataset.pagePanel;
+  if (current === "configuration" && next !== "configuration" && window.agentsAdmin?.isEditorOpen?.()) {
+    if (!window.agentsAdmin.requestCloseEditor()) return;
+  }
   document.querySelectorAll("[data-page-panel]").forEach((panel) => {
     panel.classList.toggle("active", panel.dataset.pagePanel === next);
   });
   document.querySelectorAll("[data-page]").forEach((button) => {
     button.classList.toggle("active", button.dataset.page === next);
   });
+  const sectionName = document.getElementById("consoleSectionName");
+  if (sectionName) sectionName.textContent = PAGE_LABELS[next];
   if (updateHash && location.hash !== `#/${next}`) history.replaceState(null, "", `#/${next}`);
   if (consoleAllowed && next === "configuration") {
     await initConfiguration().catch((error) => toast(error.message, true));
@@ -195,6 +206,12 @@ async function boot() {
     toast(error.message, true);
   });
   await showPage(pageFromLocation(), { updateHash: true });
+  const prewarmConfiguration = () => initConfiguration().catch(() => {});
+  if ("requestIdleCallback" in window) {
+    window.requestIdleCallback(prewarmConfiguration, { timeout: 1800 });
+  } else {
+    window.setTimeout(prewarmConfiguration, 450);
+  }
 }
 
 window.__ProductVersionUI = { loadProductVersion };

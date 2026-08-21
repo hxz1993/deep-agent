@@ -25,7 +25,7 @@ test("产品版本只在控制台顶部品牌区展示", () => {
 test("数据库 revision 明确标注为数据库结构而非产品版本", () => {
   assert.match(
     indexHtml,
-    /class="database-version"[\s\S]*数据库结构[\s\S]*id="databaseSchemaVersion"/,
+    /class="console-runtime-status"[\s\S]*数据库结构[\s\S]*id="databaseSchemaVersion"/,
   );
   assert.doesNotMatch(indexHtml, />数据库版本</);
 });

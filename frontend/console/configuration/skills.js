@@ -35,9 +35,13 @@ const skillsAdmin = {
       const source = skill.source === "builtin" ? "内置" : "上传";
       const runtime = this.runtimeLabel(skill);
       return `<button type="button" class="skill-list-item${selected ? " active" : ""}" data-skill-code="${escapeHtml(skill.code)}">
-        <span class="skill-list-title"><strong>${escapeHtml(skill.label)}</strong><span class="badge source-${escapeHtml(skill.source)}">${source}</span></span>
-        <code>${escapeHtml(skill.code)}</code>
-        <span class="skill-list-meta">${runtime.label} · ${Number(skill.reference_count || 0)} References · ${Number(skill.asset_count || 0)} Assets</span>
+        <span class="skill-list-card-head">
+          <span class="skill-list-icon"><i data-lucide="book-open-check"></i></span>
+          <span class="skill-list-title"><strong>${escapeHtml(skill.label)}</strong><span class="badge source-${escapeHtml(skill.source)}">${source}</span></span>
+          <i class="skill-list-chevron" data-lucide="chevron-right"></i>
+        </span>
+        <code class="skill-list-code">${escapeHtml(skill.code)}</code>
+        <span class="skill-list-meta"><span class="skill-runtime-dot runtime-${escapeHtml(skill.runtime_status || "missing")}"></span>${runtime.label}<span>${Number(skill.reference_count || 0)} References</span><span>${Number(skill.asset_count || 0)} Assets</span></span>
       </button>`;
     }).join("");
     pane.querySelectorAll("[data-skill-code]").forEach((button) => {
@@ -98,7 +102,8 @@ const skillsAdmin = {
       : `<li class="skill-resource-empty">该 Skill 没有附加资源</li>`;
     detail.innerHTML = `
       <header class="skill-detail-header">
-        <div>
+        <div class="skill-detail-identity">
+          <span class="skill-detail-eyebrow">Skill 详情</span>
           <div class="skill-detail-title"><h3>${escapeHtml(skill.label)}</h3><span class="badge source-${escapeHtml(skill.source)}">${isBuiltin ? "代码内置 · 只读" : "上传安装"}</span><span class="badge runtime-${escapeHtml(skill.runtime_status || "missing")}">${escapeHtml(runtime.label)}</span></div>
           <code>${escapeHtml(skill.code)}</code>
         </div>
@@ -106,7 +111,10 @@ const skillsAdmin = {
           ${isBuiltin ? "" : `<button class="btn" type="button" data-skill-action="edit">编辑</button><button class="btn" type="button" data-skill-action="replace">替换 ZIP</button><button class="btn" type="button" data-skill-action="download">导出</button>${skill.enabled ? `<button class="btn" type="button" data-skill-action="reload">重新加载</button>` : ""}<button class="btn" type="button" data-skill-action="toggle">${skill.enabled ? "停用" : "启用"}</button><button class="btn danger" type="button" data-skill-action="delete">删除</button>`}
         </div>
       </header>
-      <p class="skill-detail-description">${escapeHtml(skill.description)}</p>
+      <section class="skill-detail-summary">
+        <span class="skill-field-label">说明</span>
+        <p class="skill-detail-description">${escapeHtml(skill.description)}</p>
+      </section>
       ${skill.runtime_status === "error" || skill.runtime_status === "missing" ? `<div class="skill-security-note"><i data-lucide="circle-alert"></i><span>${escapeHtml(runtime.detail)}</span></div>` : ""}
       <dl class="skill-facts">
         <div><dt>版本</dt><dd>${escapeHtml(skill.version || "未声明")}</dd></div>
@@ -116,7 +124,7 @@ const skillsAdmin = {
         <div><dt>脚本</dt><dd>${Number(skill.script_count || 0)}</dd></div>
         <div><dt>更新时间</dt><dd>${escapeHtml(formatDate(skill.updated_at))}</dd></div>
       </dl>
-      <section class="skill-detail-section"><h4>资源</h4><ul class="skill-resource-list">${resourceRows}</ul></section>
+      <section class="skill-detail-section"><div class="skill-section-heading"><div><span class="skill-field-label">资源</span><h4>References 与 Assets</h4></div><span>${resources.length} 项</span></div><ul class="skill-resource-list">${resourceRows}</ul></section>
       <details class="skill-manifest"><summary>Manifest</summary><pre>${escapeHtml(JSON.stringify(skill.manifest || {}, null, 2))}</pre></details>
       <section class="skill-resource-preview hidden" id="skillResourcePreview"></section>`;
     detail.querySelectorAll("[data-skill-action]").forEach((button) => {

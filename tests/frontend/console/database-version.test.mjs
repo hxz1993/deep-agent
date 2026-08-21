@@ -54,11 +54,12 @@ test("非数字 revision 保留原始标识，缺失版本显示未知", () => {
   assert.equal(ui.formatDatabaseSchemaVersion(null), "—");
 });
 
-test("数据库版本使用独立醒目徽标", () => {
+test("数据库版本与产品版本和连接状态集成在顶部运行状态区", () => {
   assert.match(
     indexHtml,
-    /class="database-version"[\s\S]*数据库结构[\s\S]*id="databaseSchemaVersion"/,
+    /class="console-runtime-status"[\s\S]*id="productVersion"[\s\S]*id="connStatus"[\s\S]*class="database-version"[\s\S]*id="databaseSchemaVersion"/,
   );
+  assert.doesNotMatch(indexHtml, /class="resource-title"[\s\S]{0,240}databaseSchemaVersion/);
   assert.match(consoleCss, /\.database-version strong\s*\{/);
   assert.match(consoleCss, /background:\s*var\(--accent\)/);
 });

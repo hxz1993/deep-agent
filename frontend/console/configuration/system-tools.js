@@ -19,6 +19,12 @@ function systemToolDomain(domain) {
     </header>
     <div class="table-wrap">
       <table class="data-table system-tools-table">
+        <colgroup>
+          <col class="system-tool-col-name" />
+          <col class="system-tool-col-source" />
+          <col class="system-tool-col-condition" />
+          <col class="system-tool-col-description" />
+        </colgroup>
         <thead><tr><th>工具名称</th><th>实现来源</th><th>自动注入条件</th><th>说明</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>

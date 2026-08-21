@@ -64,11 +64,24 @@
 
     <!-- Agent panel -->
     <section class="panel active" id="panel-agents">
-      <div class="panel-toolbar">
-        <h2>Agent 列表</h2>
-        <button class="btn primary" id="newAgentBtn"><i data-lucide="plus"></i>新建 Agent</button>
+      <div class="panel-toolbar agent-list-toolbar">
+        <div>
+          <h2>Agent</h2>
+          <p class="panel-subtitle">集中管理模型、Prompt、工具包与 Skill，并可直接发起测试。</p>
+        </div>
+        <div class="panel-toolbar-actions">
+          <label class="agent-search"><i data-lucide="search"></i><input type="search" id="agentListSearch" placeholder="搜索 Agent" /></label>
+          <div class="agent-view-switch" role="group" aria-label="Agent 展示方式">
+            <button type="button" class="active" data-agent-view="cards" title="卡片视图" aria-label="卡片视图"><i data-lucide="layout-grid"></i></button>
+            <button type="button" data-agent-view="list" title="列表视图" aria-label="列表视图"><i data-lucide="list"></i></button>
+          </div>
+          <button class="btn primary" id="newAgentBtn"><i data-lucide="plus"></i>新建 Agent</button>
+        </div>
       </div>
-      <div class="table-wrap">
+      <div class="agent-card-grid" id="agentsCardGrid" aria-live="polite">
+        <div class="agent-list-state">正在加载 Agent…</div>
+      </div>
+      <div class="table-wrap agent-list-table hidden" id="agentsListView">
         <table class="data-table">
           <thead>
             <tr>
@@ -281,15 +294,15 @@
     </section>
   </div>
 
-  <!-- Agent modal -->
-  <dialog class="modal modal-agent" id="agentModal">
+  <!-- Agent 独立编辑页：复用既有表单和保存契约，不再使用模态交互。 -->
+  <dialog class="modal modal-agent agent-editor-page" id="agentModal">
     <form id="agentForm" method="dialog">
       <div class="modal-header">
         <div class="modal-title-copy">
           <h3 id="agentModalTitle">新建 Agent</h3>
           <span class="modal-entity-id hidden" id="agentModalId"></span>
         </div>
-        <button type="button" class="icon-btn" id="closeAgentModal" aria-label="关闭"><i data-lucide="x"></i></button>
+        <button type="button" class="agent-editor-back" id="closeAgentModal"><i data-lucide="arrow-left"></i><span>返回 Agent 列表</span></button>
       </div>
       <div class="modal-body">
         <div class="agent-form-grid">
@@ -346,7 +359,9 @@
       </div>
       <div class="form-error hidden" data-form-error role="alert" aria-live="assertive"></div>
       <div class="modal-footer">
-        <button type="button" class="btn" id="cancelAgentBtn">取消</button>
+        <button type="button" class="btn agent-test-action hidden" id="testAgentBtn"><i data-lucide="message-square-code"></i>发起测试</button>
+        <span class="agent-editor-footer-spacer"></span>
+        <button type="button" class="btn" id="cancelAgentBtn">返回列表</button>
         <button type="submit" class="btn primary">保存</button>
       </div>
     </form>

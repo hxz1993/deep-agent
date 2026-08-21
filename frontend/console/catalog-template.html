@@ -22,37 +22,37 @@
         </p>
       </div>
       <div class="models-toolbar-actions">
-        <button type="button" class="btn" id="catalogReloadBtn">重新加载</button>
-        <button type="button" class="btn primary" id="catalogRefreshBtn">更新模型目录</button>
+        <button type="button" class="btn catalog-icon-action" id="catalogReloadBtn" title="重新加载" aria-label="重新加载"><i data-lucide="refresh-cw"></i></button>
+        <button type="button" class="btn primary" id="catalogRefreshBtn"><i data-lucide="cloud-download"></i>更新模型目录</button>
       </div>
-    </div>
 
-    <div class="models-filters">
-      <label class="field models-search-field">
-        <span>搜索</span>
-        <input type="search" id="catalogSearchInput" placeholder="模型、Lab 或接入渠道" autocomplete="off" />
-      </label>
-      <label class="field models-filter-field">
-        <span>接入渠道</span>
-        <select id="catalogProviderSelect">
-          <option value="">全部</option>
-        </select>
-      </label>
-      <label class="field models-filter-field">
-        <span>输入模态</span>
-        <select id="catalogModalitySelect">
-          <option value="">全部</option>
-          <option value="text">文本</option>
-          <option value="image">图像</option>
-          <option value="audio">音频</option>
-          <option value="video">视频</option>
-        </select>
-      </label>
-      <div class="field catalog-view-control">
-        <span>查看方式</span>
-        <div class="catalog-view-tabs" role="tablist" aria-label="模型目录查看方式">
-          <button type="button" class="catalog-view-tab active" data-catalog-view="model">按模型</button>
-          <button type="button" class="catalog-view-tab" data-catalog-view="provider">按接入渠道</button>
+      <div class="models-filters">
+        <label class="field models-search-field">
+          <span>搜索</span>
+          <input type="search" id="catalogSearchInput" placeholder="模型、Lab 或接入渠道" autocomplete="off" />
+        </label>
+        <label class="field models-filter-field">
+          <span>接入渠道</span>
+          <select id="catalogProviderSelect">
+            <option value="">全部</option>
+          </select>
+        </label>
+        <label class="field models-filter-field">
+          <span>输入模态</span>
+          <select id="catalogModalitySelect">
+            <option value="">全部</option>
+            <option value="text">文本</option>
+            <option value="image">图像</option>
+            <option value="audio">音频</option>
+            <option value="video">视频</option>
+          </select>
+        </label>
+        <div class="field catalog-view-control">
+          <span>查看方式</span>
+          <div class="catalog-view-tabs" role="tablist" aria-label="模型目录查看方式">
+            <button type="button" class="catalog-view-tab active" data-catalog-view="model"><i data-lucide="rows-3"></i><span>模型</span></button>
+            <button type="button" class="catalog-view-tab" data-catalog-view="provider"><i data-lucide="waypoints"></i><span>渠道</span></button>
+          </div>
         </div>
       </div>
     </div>
@@ -62,6 +62,7 @@
 
     <div class="catalog-browser" id="catalogBrowser">
       <aside class="catalog-lab-sidebar" id="catalogLabSidebar" aria-label="模型研发方">
+        <div class="catalog-lab-heading"><span>模型研发方</span><i data-lucide="flask-conical"></i></div>
         <button type="button" class="catalog-lab-item active" data-lab-id="">
           <span>全部 Lab</span><strong>0</strong>
         </button>

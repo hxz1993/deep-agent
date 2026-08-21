@@ -1,6 +1,6 @@
 let initialized = false;
 let loadingPromise = null;
-const CONFIGURATION_ASSET_VERSION = "20260813-1";
+const CONFIGURATION_ASSET_VERSION = "20260821-3";
 const CONFIGURATION_TABS = new Set([
   "agents",
   "llm-models",
@@ -63,7 +63,10 @@ function appendAdminStructure(adminDoc, modelsDoc) {
   catalog.append(...Array.from(card.children));
   host.insertBefore(catalog, document.getElementById("panel-mcp"));
 
-  adminDoc.querySelectorAll("body > dialog").forEach((dialog) => document.body.appendChild(dialog));
+  adminDoc.querySelectorAll("body > dialog").forEach((dialog) => {
+    dialog.classList.add("console-detail-dialog");
+    document.body.appendChild(dialog);
+  });
 }
 
 function loadClassicScript(src) {
@@ -101,6 +104,10 @@ async function loadAdminScripts() {
 }
 
 function decorateConfiguration() {
+  document.querySelectorAll(".resource-btn").forEach((button) => {
+    const label = button.querySelector("span")?.textContent?.trim();
+    if (label && !button.title) button.title = label;
+  });
   document.querySelectorAll("#configurationHost .panel-toolbar h2").forEach((heading) => {
     heading.parentElement?.classList.add("configuration-heading");
   });

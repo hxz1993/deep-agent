@@ -14,16 +14,17 @@ function databaseInfoHtml(info) {
     ["连接摘要", info.connection_summary],
     ["认证信息", info.credentials_hidden ? "已隐藏" : "—"],
   ];
-  return `<div class="database-connection-card">
-    <div class="database-connection-badge">
-      <i data-lucide="database"></i>
-      <div><strong>${escapeHtml(databaseInfoValue(info.database_type_label))}</strong><span>${escapeHtml(databaseInfoValue(info.connection_mode))}</span></div>
-    </div>
+  return `<article class="database-connection-card">
+    <header class="database-connection-badge">
+      <span class="database-connection-icon"><i data-lucide="database"></i></span>
+      <div><span class="database-card-eyebrow">当前连接</span><strong>${escapeHtml(databaseInfoValue(info.database_type_label))}</strong><span>${escapeHtml(databaseInfoValue(info.connection_mode))}</span></div>
+      <span class="database-safe-badge"><i data-lucide="shield-check"></i>${info.credentials_hidden ? "凭证已隐藏" : "只读摘要"}</span>
+    </header>
     <dl class="database-connection-grid">
-      ${rows.map(([label, value]) => `<dt>${escapeHtml(label)}</dt><dd>${escapeHtml(databaseInfoValue(value))}</dd>`).join("")}
+      ${rows.map(([label, value]) => `<div class="database-connection-field${label === "连接摘要" ? " is-wide" : ""}"><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(databaseInfoValue(value))}</dd></div>`).join("")}
     </dl>
-    <p class="database-connection-note">该页面展示进程启动时生效的连接摘要。修改数据库环境变量后需要重启 DeepAgent。</p>
-  </div>`;
+    <footer class="database-connection-note"><i data-lucide="info"></i><span>展示进程启动时生效的只读连接摘要；修改数据库环境变量后需重启 DeepAgent。</span></footer>
+  </article>`;
 }
 
 const databaseConnectionAdmin = {

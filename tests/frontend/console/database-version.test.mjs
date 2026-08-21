@@ -54,14 +54,15 @@ test("非数字 revision 保留原始标识，缺失版本显示未知", () => {
   assert.equal(ui.formatDatabaseSchemaVersion(null), "—");
 });
 
-test("数据库版本与产品版本和连接状态集成在顶部运行状态区", () => {
+test("顶部连接状态不可展开且版本位于用户详情", () => {
   assert.match(
     indexHtml,
-    /class="console-runtime-status"[\s\S]*id="productVersion"[\s\S]*id="connStatus"[\s\S]*class="database-version"[\s\S]*id="databaseSchemaVersion"/,
+    /<div class="console-runtime-status"[\s\S]*id="connStatus"[\s\S]*id="currentUserBtn"[\s\S]*class="user-popover user-account-popover"[\s\S]*id="productVersion"[\s\S]*id="databaseSchemaVersion"/,
   );
+  assert.doesNotMatch(indexHtml, /<details class="console-runtime-status"|runtime-status-popover/);
   assert.doesNotMatch(indexHtml, /class="resource-title"[\s\S]{0,240}databaseSchemaVersion/);
-  assert.match(consoleCss, /\.database-version strong\s*\{/);
-  assert.match(consoleCss, /background:\s*var\(--accent\)/);
+  assert.match(consoleCss, /\.user-account-popover\s*\{/);
+  assert.match(consoleCss, /\.runtime-schema-version\s*\{/);
 });
 
 test("浏览器图标复用标题栏机器人图标", () => {

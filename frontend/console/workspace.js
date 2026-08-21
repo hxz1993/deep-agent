@@ -1,4 +1,10 @@
-const WORKSPACE_ASSET_VERSION = "20260821-2";
+const WORKSPACE_ASSET_VERSION = "20260821-6";
+
+const WORKSPACE_PANE_LIMITS = {
+  agent: { min: 150, max: 280, initial: 188, variable: "--console-agent-width" },
+  session: { min: 220, max: 420, initial: 300, variable: "--console-session-width" },
+  inspector: { min: 260, max: 460, initial: 320, variable: "--console-inspector-width" },
+};
 
 let initialized = false;
 let lastRenderKey = "";
@@ -34,18 +40,30 @@ function installLegacyDom(source) {
 
   sidebar.querySelector(".sidebar-footer")?.remove();
   const sidebarHeader = sidebar.querySelector(".sidebar-header");
+  const agentSelect = document.getElementById("agentSelect");
   const agentSwitcher = document.createElement("div");
   agentSwitcher.className = "agent-switcher";
   agentSwitcher.innerHTML = `
-    <label class="agent-select-field">
-      <i data-lucide="bot" aria-hidden="true"></i>
-      <select id="workspaceAgentSelect" aria-label="选择测试 Agent">
-        <option value="">正在加载 Agent…</option>
-      </select>
-    </label>
+    <button type="button" class="icon-action refresh-agent" id="refreshWorkspaceAgentsBtn" title="刷新 Agent" aria-label="刷新 Agent">
+      <i data-lucide="refresh-cw"></i>
+    </button>
     <button type="button" class="icon-action pin-agent" id="pinAgentPaneBtn" title="固定 Agent 列表到左侧" aria-label="固定 Agent 列表到左侧" aria-pressed="false">
       <i data-lucide="pin"></i>
     </button>`;
+  if (agentSelect) {
+    const selectField = document.createElement("label");
+    selectField.className = "agent-select-field";
+    selectField.title = "切换测试 Agent";
+    selectField.innerHTML = '<span class="agent-select-icon"><i data-lucide="bot" aria-hidden="true"></i></span>';
+    agentSelect.setAttribute("aria-label", "切换测试 Agent");
+    selectField.append(agentSelect);
+    const chevron = document.createElement("i");
+    chevron.className = "agent-select-chevron";
+    chevron.dataset.lucide = "chevron-down";
+    chevron.setAttribute("aria-hidden", "true");
+    selectField.append(chevron);
+    agentSwitcher.insertBefore(selectField, agentSwitcher.firstChild);
+  }
   sidebar.insertBefore(agentSwitcher, sidebarHeader);
   sidebarHeader?.remove();
   sidebar.querySelector("#newChatBtn")?.remove();
@@ -79,8 +97,20 @@ function installLegacyDom(source) {
     sessionSection.insertBefore(toolbar, sessionSection.querySelector("#sessionList"));
   }
 
+  const sessionResizer = document.createElement("div");
+  sessionResizer.id = "sessionPaneResizer";
+  sessionResizer.className = "workspace-resizer workspace-resizer-session";
+  sessionResizer.dataset.resizePane = "session";
+  sessionResizer.tabIndex = 0;
+  sessionResizer.setAttribute("role", "separator");
+  sessionResizer.setAttribute("aria-label", "调整会话列表宽度");
+  sessionResizer.setAttribute("aria-orientation", "vertical");
+  sessionResizer.setAttribute("aria-valuemin", "220");
+  sessionResizer.setAttribute("aria-valuemax", "420");
+  sessionResizer.setAttribute("aria-valuenow", "300");
+
   const host = document.getElementById("workspaceLegacyHost");
-  host.replaceChildren(sidebar, chat);
+  host.replaceChildren(sidebar, sessionResizer, chat);
   installContextTestDialog();
 
   document.getElementById("sessionSearchInput")?.addEventListener("input", filterSessions);
@@ -303,29 +333,29 @@ function renderAgents() {
 }
 
 function renderAgentSwitcher(state) {
-  const select = document.getElementById("workspaceAgentSelect");
-  if (!select) return;
-  const optionKey = state.agents.map((agent) => `${agent.id}:${agent.name}`).join("|");
-  if (select.dataset.optionKey !== optionKey) {
-    select.dataset.optionKey = optionKey;
-    select.replaceChildren();
-    if (!state.agents.length) {
-      const option = document.createElement("option");
-      option.value = "";
-      option.textContent = "无可用 Agent";
-      select.appendChild(option);
-    } else {
-      state.agents.forEach((agent) => {
-        const option = document.createElement("option");
-        option.value = agent.id;
-        option.textContent = agent.name;
-        select.appendChild(option);
-      });
+  const select = document.getElementById("agentSelect");
+  const field = select?.closest(".agent-select-field");
+  if (!select || !field) return;
+  const label = state.agents.length ? currentAgentName(state) : "无可用 Agent";
+  field.title = `切换测试 Agent：${label}`;
+}
+
+async function refreshWorkspaceAgents(button) {
+  if (button) {
+    button.disabled = true;
+    button.classList.add("loading");
+  }
+  try {
+    await window.DeepAgentConsoleChat?.loadAgents();
+    lastRenderKey = "";
+    renderAgents();
+    renderInspector();
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.classList.remove("loading");
     }
   }
-  select.value = state.agentId || "";
-  select.disabled = !state.agents.length;
-  select.title = currentAgentName(state);
 }
 
 function setAgentPanePinned(pinned) {
@@ -342,6 +372,88 @@ function setAgentPanePinned(pinned) {
 
 function inspectorUsesDrawer() {
   return matchMedia("(max-width: 1260px)").matches;
+}
+
+function clampWorkspacePaneWidth(value, limits) {
+  return Math.max(limits.min, Math.min(limits.max, Math.round(Number(value) || limits.initial)));
+}
+
+function readWorkspacePaneWidth(grid, pane) {
+  const limits = WORKSPACE_PANE_LIMITS[pane];
+  if (!limits) return 0;
+  const value = getComputedStyle(grid).getPropertyValue(limits.variable);
+  return clampWorkspacePaneWidth(Number.parseFloat(value), limits);
+}
+
+function writeWorkspacePaneWidth(grid, handle, pane, value) {
+  const limits = WORKSPACE_PANE_LIMITS[pane];
+  if (!limits) return;
+  const width = clampWorkspacePaneWidth(value, limits);
+  grid.style.setProperty(limits.variable, `${width}px`);
+  handle.setAttribute("aria-valuenow", String(width));
+}
+
+function resetWorkspacePaneWidth(grid, handle, pane) {
+  const limits = WORKSPACE_PANE_LIMITS[pane];
+  if (!limits) return;
+  grid.style.removeProperty(limits.variable);
+  handle.setAttribute("aria-valuenow", String(limits.initial));
+}
+
+function bindWorkspaceResizer(handle) {
+  const pane = handle?.dataset.resizePane;
+  const limits = WORKSPACE_PANE_LIMITS[pane];
+  const grid = document.getElementById("workspaceGrid");
+  if (!handle || !limits || !grid) return;
+
+  let startX = 0;
+  let startWidth = limits.initial;
+  const pointerDirection = pane === "inspector" ? -1 : 1;
+
+  const finishDrag = (event) => {
+    if (!handle.classList.contains("dragging")) return;
+    handle.classList.remove("dragging");
+    document.body.classList.remove("workspace-pane-resizing");
+    if (event?.pointerId !== undefined && handle.hasPointerCapture?.(event.pointerId)) {
+      handle.releasePointerCapture(event.pointerId);
+    }
+  };
+
+  handle.addEventListener("pointerdown", (event) => {
+    if (getComputedStyle(handle).display === "none") return;
+    startX = event.clientX;
+    startWidth = readWorkspacePaneWidth(grid, pane);
+    handle.classList.add("dragging");
+    document.body.classList.add("workspace-pane-resizing");
+    handle.setPointerCapture?.(event.pointerId);
+    event.preventDefault();
+  });
+  handle.addEventListener("pointermove", (event) => {
+    if (!handle.classList.contains("dragging")) return;
+    writeWorkspacePaneWidth(grid, handle, pane, startWidth + (event.clientX - startX) * pointerDirection);
+  });
+  handle.addEventListener("pointerup", finishDrag);
+  handle.addEventListener("pointercancel", finishDrag);
+  handle.addEventListener("dblclick", () => resetWorkspacePaneWidth(grid, handle, pane));
+  handle.addEventListener("keydown", (event) => {
+    if (!["ArrowLeft", "ArrowRight", "Home"].includes(event.key)) return;
+    event.preventDefault();
+    if (event.key === "Home") {
+      resetWorkspacePaneWidth(grid, handle, pane);
+      return;
+    }
+    const coordinateDelta = event.key === "ArrowRight" ? 12 : -12;
+    writeWorkspacePaneWidth(
+      grid,
+      handle,
+      pane,
+      readWorkspacePaneWidth(grid, pane) + coordinateDelta * pointerDirection,
+    );
+  });
+}
+
+function bindWorkspaceResizers() {
+  document.querySelectorAll("[data-resize-pane]").forEach(bindWorkspaceResizer);
 }
 
 function syncInspectorToggle() {
@@ -583,8 +695,8 @@ function startStateMonitor() {
 }
 
 function bindWorkspaceControls() {
-  document.getElementById("workspaceAgentSelect")?.addEventListener("change", (event) => {
-    selectWorkspaceAgent(event.target.value);
+  document.getElementById("refreshWorkspaceAgentsBtn")?.addEventListener("click", (event) => {
+    void refreshWorkspaceAgents(event.currentTarget);
   });
   document.getElementById("pinAgentPaneBtn")?.addEventListener("click", () => {
     const pinned = document.getElementById("workspaceGrid")?.classList.contains("agent-pinned");
@@ -594,9 +706,8 @@ function bindWorkspaceControls() {
     setAgentPanePinned(false);
   });
   document.getElementById("agentSearchInput")?.addEventListener("input", renderAgents);
-  document.getElementById("refreshAgentsBtn")?.addEventListener("click", async () => {
-    await window.DeepAgentConsoleChat?.loadAgents();
-    renderAgents();
+  document.getElementById("refreshAgentsBtn")?.addEventListener("click", (event) => {
+    void refreshWorkspaceAgents(event.currentTarget);
   });
   document.getElementById("contextTestChatBtn")?.addEventListener("click", openContextTestDialog);
   document.getElementById("createContextTestBtn")?.addEventListener("click", createContextTestSession);
@@ -648,6 +759,7 @@ export async function initWorkspace() {
   installLegacyDom(source);
   await import(`./chat.js?v=${WORKSPACE_ASSET_VERSION}`);
   bindWorkspaceControls();
+  bindWorkspaceResizers();
   setAgentPanePinned(false);
   syncInspectorToggle();
   window.addEventListener("resize", syncInspectorToggle);

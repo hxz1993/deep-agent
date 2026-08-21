@@ -139,7 +139,7 @@ test("系统工具页面具备加载、失败重试和窄屏可横向查看的�
   assert.match(source, /正在加载系统工具/);
   assert.match(source, /data-retry-system-tools/);
   assert.match(templateHtml, /class="system-tool-domains"/);
-  assert.match(source, /class="table-wrap"/);
+  assert.match(source, /class="table-wrap console-list-a"/);
 });
 
 test("所有系统工具分组复用同一组固定列宽", () => {

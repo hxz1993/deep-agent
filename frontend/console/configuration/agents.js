@@ -155,9 +155,9 @@ const agentsAdmin = {
         </div>
         <footer class="agent-card-footer">
           <span><i data-lucide="clock-3"></i>${escapeHtml(formatDate(agent.updated_at))}</span>
-          <div class="row-actions">
-            <a class="btn-link" href="${chatUrlForAgent(agent.id)}" target="_blank" rel="noopener">发起对话</a>
-            <button type="button" class="danger" data-delete="${escapeHtml(agent.id)}" data-name="${escapeHtml(agent.name)}">删除</button>
+          <div class="row-actions agent-row-actions">
+            <a class="btn-link row-action" href="${chatUrlForAgent(agent.id)}" target="_blank" rel="noopener"><i data-lucide="message-square"></i><span>发起对话</span></a>
+            <button type="button" class="danger row-action" data-delete="${escapeHtml(agent.id)}" data-name="${escapeHtml(agent.name)}"><i data-lucide="trash-2"></i><span>删除</span></button>
           </div>
         </footer>
       </article>`;
@@ -172,10 +172,10 @@ const agentsAdmin = {
         <td>${escapeHtml(agent.model?.name || "—")}</td>
         <td><div class="cap-preview">${escapeHtml(capabilities)}</div><div class="skill-preview">Skill：${escapeHtml(skills)}</div></td>
         <td>${escapeHtml(formatDate(agent.updated_at))}</td>
-        <td><div class="row-actions">
-          <a class="btn-link" href="${chatUrlForAgent(agent.id)}" target="_blank" rel="noopener">发起对话</a>
-          <button type="button" data-edit="${escapeHtml(agent.id)}">编辑</button>
-          <button type="button" class="danger" data-delete="${escapeHtml(agent.id)}" data-name="${escapeHtml(agent.name)}">删除</button>
+        <td><div class="row-actions agent-row-actions">
+          <a class="btn-link row-action" href="${chatUrlForAgent(agent.id)}" target="_blank" rel="noopener"><i data-lucide="message-square"></i><span>发起对话</span></a>
+          <button type="button" class="row-action" data-edit="${escapeHtml(agent.id)}"><i data-lucide="pencil"></i><span>编辑</span></button>
+          <button type="button" class="danger row-action" data-delete="${escapeHtml(agent.id)}" data-name="${escapeHtml(agent.name)}"><i data-lucide="trash-2"></i><span>删除</span></button>
         </div></td>
       </tr>`;
     }).join("");
@@ -702,7 +702,6 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("agentForm")?.addEventListener("input", () => { agentEditorDirty = true; });
   document.getElementById("agentForm")?.addEventListener("change", () => { agentEditorDirty = true; });
   document.getElementById("closeAgentModal")?.addEventListener("click", () => agentsAdmin.requestCloseEditor());
-  document.getElementById("cancelAgentBtn")?.addEventListener("click", () => agentsAdmin.requestCloseEditor());
   document.getElementById("testAgentBtn")?.addEventListener("click", () => {
     if (!state.editingAgentId) return;
     if (!agentsAdmin.requestCloseEditor()) return;

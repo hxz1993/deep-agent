@@ -27,28 +27,24 @@
       </div>
 
       <div class="models-filters">
-        <label class="field models-search-field">
-          <span>搜索</span>
-          <input type="search" id="catalogSearchInput" placeholder="模型、Lab 或接入渠道" autocomplete="off" />
+        <label class="field models-search-field" aria-label="搜索模型目录">
+          <input type="search" id="catalogSearchInput" placeholder="搜索模型、Lab 或接入渠道" autocomplete="off" />
         </label>
-        <label class="field models-filter-field">
-          <span>接入渠道</span>
+        <label class="field models-filter-field" aria-label="筛选接入渠道">
           <select id="catalogProviderSelect">
-            <option value="">全部</option>
+            <option value="">全部接入渠道</option>
           </select>
         </label>
-        <label class="field models-filter-field">
-          <span>输入模态</span>
+        <label class="field models-filter-field" aria-label="筛选输入模态">
           <select id="catalogModalitySelect">
-            <option value="">全部</option>
+            <option value="">全部输入模态</option>
             <option value="text">文本</option>
             <option value="image">图像</option>
             <option value="audio">音频</option>
             <option value="video">视频</option>
           </select>
         </label>
-        <div class="field catalog-view-control">
-          <span>查看方式</span>
+        <div class="catalog-view-control">
           <div class="catalog-view-tabs" role="tablist" aria-label="模型目录查看方式">
             <button type="button" class="catalog-view-tab active" data-catalog-view="model"><i data-lucide="rows-3"></i><span>模型</span></button>
             <button type="button" class="catalog-view-tab" data-catalog-view="provider"><i data-lucide="waypoints"></i><span>渠道</span></button>
@@ -69,7 +65,7 @@
       </aside>
 
       <section class="catalog-results">
-        <div class="table-wrap models-table-wrap">
+        <div class="table-wrap console-list-a models-table-wrap">
           <table class="data-table catalog-model-table" id="catalogModelsTable">
             <thead id="catalogTableHead"></thead>
             <tbody id="catalogTableBody">

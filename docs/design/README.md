@@ -20,6 +20,7 @@
 | `13` | [`工具检索与渐进披露`](13-tool-discovery/README.md) | 2026-08 | v0.3.12 已完成词法 Top 3/Top 5、附件条件过滤和 Pydantic AI 渐进披露 |
 | `14` | [`框架能力采用基线`](14-framework-capabilities/README.md) | 2026-08 | 当前固定审计 Pydantic AI 2.31 与 Harness 0.21；记录已采用、暂缓和不采用边界 |
 | `15` | [`浏览器与页面操作`](15-browser-and-page-actions/README.md) | 2026-08 | 区分当前页面 UI Tool、Harness BrowserUse 与 Provider Computer Use；旧 Web 分支不整体合并 |
+| `16` | [`Console UI`](16-console-ui/README.md) | 2026-08 | 轻量企业控制台视觉体系持续落地；保留真实功能、分栏交互和四主题边界 |
 
 ## 文档命名
 

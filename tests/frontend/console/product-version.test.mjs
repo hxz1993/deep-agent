@@ -10,11 +10,15 @@ const mainSource = await readFile(
   new URL("../../../frontend/console/main.js", import.meta.url),
   "utf8",
 );
+const consoleCss = await readFile(
+  new URL("../../../frontend/console/console.css", import.meta.url),
+  "utf8",
+);
 
-test("产品版本只在控制台顶部品牌区展示", () => {
+test("产品版本只在顶部用户详情展示", () => {
   assert.match(
     indexHtml,
-    /class="product-version" id="productVersion"[\s\S]*v—<\/span>/,
+    /class="user-popover user-account-popover"[\s\S]*class="product-version" id="productVersion"[\s\S]*v—<\/strong>/,
   );
   assert.equal((indexHtml.match(/id="productVersion"/g) || []).length, 1);
   assert.match(mainSource, /serviceUrl\("info"\)/);
@@ -22,10 +26,13 @@ test("产品版本只在控制台顶部品牌区展示", () => {
   assert.match(mainSource, /target\.textContent = "v—"/);
 });
 
-test("数据库 revision 明确标注为数据库结构而非产品版本", () => {
+test("产品和数据库结构版本收进用户详情而连接状态保持只读", () => {
   assert.match(
     indexHtml,
-    /class="console-runtime-status"[\s\S]*数据库结构[\s\S]*id="databaseSchemaVersion"/,
+    /<div class="console-runtime-status"[\s\S]*id="connStatus"[\s\S]*id="currentUserBtn"[\s\S]*class="user-popover user-account-popover"[\s\S]*id="productVersion"[\s\S]*数据库结构[\s\S]*id="databaseSchemaVersion"/,
   );
+  assert.doesNotMatch(indexHtml, /<details class="console-runtime-status"|runtime-status-popover/);
   assert.doesNotMatch(indexHtml, />数据库版本</);
+  assert.match(consoleCss, /\.user-popover-runtime \{[^}]*grid-template-columns: 1fr;|\.user-popover-runtime \{[^}]*display: grid;[^}]*gap: 0;/);
+  assert.match(consoleCss, /\.user-popover-runtime > span \{[^}]*display: flex;[^}]*justify-content: space-between;[^}]*border-radius: 0;[^}]*background: transparent;/);
 });

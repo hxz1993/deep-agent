@@ -164,7 +164,7 @@ function renderFacets() {
       ? catalogState.facets.providers
       : [];
     providerSelect.innerHTML = [
-      '<option value="">全部</option>',
+      '<option value="">全部接入渠道</option>',
       ...providers.map(
         (provider) =>
           `<option value="${escapeHtml(provider.id)}">${escapeHtml(provider.label)}（${Number(provider.count || 0)}）</option>`,

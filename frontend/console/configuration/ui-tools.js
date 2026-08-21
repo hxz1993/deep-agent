@@ -291,13 +291,16 @@ const uiToolsAdmin = {
           <div class="ui-tool-tree-group-title">${escapeHtml(label)}</div>
           ${items.map((item) => `
             <button type="button" class="ui-tool-tree-node ${item.code === this.selectedPackageCode ? "is-selected" : ""}" data-select-package="${escapeHtml(item.code)}">
-              <span class="ui-tool-tree-node-main">
-                <strong>${escapeHtml(item.label)}</strong>
-                <span class="badge ${item.enabled ? "on" : "off"}">${item.enabled ? item.tool_count : "停用"}</span>
-              </span>
-              <span class="ui-tool-tree-node-meta">
-                <code>${escapeHtml(item.code)}</code>
-                <span>${escapeHtml(String(item.tool_count || 0))} 个工具</span>
+              <span class="ui-tool-tree-node-head">
+                <span class="ui-tool-tree-icon"><i data-lucide="${item.source === "builtin" ? "panel-top" : "blocks"}"></i></span>
+                <span class="ui-tool-tree-node-main">
+                  <strong>${escapeHtml(item.label)}</strong>
+                  <code>${escapeHtml(item.code)}</code>
+                </span>
+                <span class="ui-tool-tree-node-meta">
+                  <span class="badge ${item.enabled ? "on" : "off"}">${item.enabled ? "启用" : "停用"}</span>
+                  <span>${escapeHtml(String(item.tool_count || 0))} 个工具</span>
+                </span>
               </span>
             </button>`).join("")}
         </section>`)
@@ -305,6 +308,7 @@ const uiToolsAdmin = {
     tree.querySelectorAll("[data-select-package]").forEach((node) => {
       node.addEventListener("click", () => this.selectPackage(node.dataset.selectPackage));
     });
+    window.lucide?.createIcons();
   },
 
   selectPackage(code) {
@@ -441,16 +445,9 @@ const uiToolsAdmin = {
       tbody.innerHTML = `<tr><td colspan="6" class="empty-cell">请选择左侧工具包</td></tr>`;
       return;
     }
-    const query = document.getElementById("uiToolFilterSearch")?.value.trim().toLowerCase() || "";
-    const enabled = document.getElementById("uiToolFilterEnabled")?.value || "";
-    const filtered = items.filter((item) => {
-      if (item.package_code !== this.selectedPackageCode) return false;
-      if (enabled && String(item.enabled) !== enabled) return false;
-      if (!query) return true;
-      return `${item.name} ${item.description || ""} ${item.widget || ""}`.toLowerCase().includes(query);
-    });
+    const filtered = items.filter((item) => item.package_code === this.selectedPackageCode);
     if (!filtered.length) {
-      tbody.innerHTML = `<tr><td colspan="6" class="empty-cell">当前工具包暂无匹配的 UI 工具</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="6" class="empty-cell">当前工具包暂无 UI 工具</td></tr>`;
       return;
     }
     tbody.innerHTML = filtered
@@ -684,8 +681,6 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("deleteUiToolPackageBtn")?.addEventListener("click", () => uiToolsAdmin.removePackage(uiToolsAdmin.selectedPackageCode));
   document.getElementById("uiToolPackageForm")?.addEventListener("submit", (e) => uiToolsAdmin.savePackage(e));
   document.getElementById("uiToolForm")?.addEventListener("submit", (e) => uiToolsAdmin.save(e));
-  document.getElementById("uiToolFilterSearch")?.addEventListener("input", () => uiToolsAdmin.renderTools(uiToolsAdmin._lastTools || []));
-  document.getElementById("uiToolFilterEnabled")?.addEventListener("change", () => uiToolsAdmin.renderTools(uiToolsAdmin._lastTools || []));
   document.getElementById("closeUiToolModal")?.addEventListener("click", () => {
     document.getElementById("uiToolModal").close();
   });

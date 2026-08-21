@@ -1,10 +1,10 @@
 import {
   initConfiguration,
   restoreConfigurationTab,
-} from "./configuration.js?v=20260821-3";
+} from "./configuration.js?v=20260821-10";
 import { bindContextControls, refreshIdentity } from "./context.js?v=20260728-5";
 import { initDiagnostics } from "./diagnostics.js?v=20260720-1";
-import { initWorkspace } from "./workspace.js?v=20260821-2";
+import { initWorkspace } from "./workspace.js?v=20260821-6";
 
 const VALID_PAGES = new Set(["workspace", "configuration", "diagnostics"]);
 const PAGE_LABELS = {

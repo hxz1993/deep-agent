@@ -17,7 +17,7 @@ function systemToolDomain(domain) {
       <div><h3>${escapeHtml(domain.label || domain.code || "未命名领域")}</h3><p>${escapeHtml(domain.description || "")}</p></div>
       <code>${escapeHtml(domain.code || "")}</code>
     </header>
-    <div class="table-wrap">
+    <div class="table-wrap console-list-a">
       <table class="data-table system-tools-table">
         <colgroup>
           <col class="system-tool-col-name" />

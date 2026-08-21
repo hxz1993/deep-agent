@@ -1,0 +1,27 @@
+# 16 · Console UI
+
+> 首次整理：2026-08-21
+>
+> 当前状态：轻量企业控制台视觉体系已在 `frontend/console/` 持续落地；原型只保留设计结论，不在仓库内维护临时 HTML。
+
+本课题记录 DeepAgent bundled Console 的界面架构、视觉规则、关键交互和原型取舍。
+它只约束 Console 前端呈现，不修改 REST、SSE、History、数据库或工具协议。
+
+- [`console-ui-design.md`](console-ui-design.md)：当前有效的页面架构、视觉 token、组件模式和实现映射。
+- [`prototype-decisions.md`](prototype-decisions.md)：原型来源、采用内容、舍弃方向和后续原型约定。
+
+## 一句话方向
+
+**企业控制台 + 轻 Bento 卡片 + 高密度业务列表**：使用浅蓝灰画布、大圆角白色表面、
+弱边框和低阴影建立层级；信息密度高但不拥挤，以少量平台紫和语义色辅助扫描。
+
+## 权威实现
+
+- 页面结构：`frontend/console/index.html`、`frontend/console/*-template.html`
+- 全局壳与工作台样式：`frontend/console/console.css`
+- 配置页结构与样式：`frontend/console/configuration/`
+- 工作台布局与拖拽：`frontend/console/workspace.js`
+- 目标测试：`tests/frontend/console/`
+
+本文档用于解释设计决策。页面功能、字段和边界如果与文档不一致，以当前源码和接口契约为准。
+

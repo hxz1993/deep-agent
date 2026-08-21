@@ -23,6 +23,10 @@ const consoleStyles = await readFile(
   new URL("../../../frontend/console/console.css", import.meta.url),
   "utf8",
 );
+const coreSource = await readFile(
+  new URL("../../../frontend/console/configuration/core.js", import.meta.url),
+  "utf8",
+);
 
 test("模型目录只使用数据库查询和管理员手工刷新", () => {
   assert.match(catalogSource, /\/api\/v1\/llm-models\/catalog\?\$\{queryString\(\)\}/);
@@ -42,12 +46,22 @@ test("目录提供模型与接入渠道视图并按 Lab 分类", () => {
 test("目录查看方式位于筛选行且渠道视图使用完整宽度", () => {
   assert.match(
     catalogTemplate,
-    /class="models-filters"[\s\S]*catalogProviderSelect[\s\S]*catalogModalitySelect[\s\S]*class="field catalog-view-control"[\s\S]*data-catalog-view="model"[\s\S]*data-catalog-view="provider"/,
+    /class="models-filters"[\s\S]*catalogProviderSelect[\s\S]*catalogModalitySelect[\s\S]*class="catalog-view-control"[\s\S]*data-catalog-view="model"[\s\S]*data-catalog-view="provider"/,
   );
   assert.match(catalogSource, /catalog-provider-view/);
   assert.match(consoleStyles, /\.catalog-browser\.catalog-provider-view\s*\{\s*grid-template-columns:\s*minmax\(0,\s*1fr\)/);
   assert.match(consoleStyles, /\.catalog-provider-table\s*\{[^}]*width:\s*100%[^}]*min-width:\s*0/);
   assert.match(catalogTemplate, /class="models-toolbar"[\s\S]*class="models-filters"[\s\S]*<\/div>\s*<\/div>\s*<div class="catalog-feedback/);
+});
+
+test("模型目录筛选使用无标题透明命令栏并自然右对齐", () => {
+  const filterMarkup = catalogTemplate.match(/<div class="models-filters">[\s\S]*?<\/div>\s*<\/div>/)?.[0] || "";
+  assert.match(filterMarkup, /placeholder="搜索模型、Lab 或接入渠道"/);
+  assert.match(filterMarkup, />全部接入渠道</);
+  assert.match(catalogSource, /<option value="">全部接入渠道<\/option>/);
+  assert.match(filterMarkup, />全部输入模态</);
+  assert.doesNotMatch(filterMarkup, /<span>搜索<\/span>|<span>接入渠道<\/span>|<span>输入模态<\/span>|<span>查看方式<\/span>/);
+  assert.match(consoleStyles, /\.catalog-panel \.models-filters\s*\{[^}]*justify-content: flex-end;[^}]*border: 0;[^}]*background: transparent;/);
 });
 
 test("目录说明收进副标题信息提示且不再保留底部展开区域", () => {
@@ -68,7 +82,20 @@ test("模型目录使用轻量研发方卡片和紧凑图标渠道入口", () =>
   assert.match(catalogSource, /window\.lucide\?\.createIcons\(\)/);
   assert.match(consoleStyles, /\.catalog-lab-sidebar\s*\{[^}]*border: 0;[^}]*background: transparent/);
   assert.match(consoleStyles, /\.catalog-lab-item\s*\{[^}]*border-radius: 9px/);
+  assert.match(consoleStyles, /\.catalog-lab-item\s*\{[^}]*align-items: center/);
+  assert.match(consoleStyles, /\.catalog-lab-item > span,[\s\S]*\.catalog-lab-item > strong \{[^}]*align-items: center/);
   assert.match(consoleStyles, /\.catalog-model-table:not\(\.catalog-provider-table\)\s*\{ table-layout: fixed; \}/);
+});
+
+test("模型目录填满内容区且只滚动内部列表", () => {
+  assert.match(coreSource, /classList\.toggle\("catalog-active", name === "catalog"\)/);
+  assert.match(consoleStyles, /\.configuration-content\.catalog-active\s*\{[^}]*overflow: hidden;/);
+  assert.match(consoleStyles, /\.configuration-content\.catalog-active #configurationHost,[\s\S]*?#panel-catalog\.active\s*\{[^}]*height: 100%;[^}]*overflow: hidden;/);
+  assert.match(consoleStyles, /\.catalog-panel\.active\s*\{[^}]*display: flex;[^}]*height: 100%;[^}]*overflow: hidden;/);
+  assert.match(consoleStyles, /\.catalog-panel \.catalog-browser\s*\{[^}]*flex: 1 1 auto;[^}]*min-height: 0;[^}]*overflow: hidden;/);
+  assert.match(consoleStyles, /\.catalog-panel \.catalog-results\s*\{[^}]*display: flex;[^}]*min-height: 0;[^}]*overflow: hidden;/);
+  assert.match(consoleStyles, /#configurationHost \.catalog-panel \.models-table-wrap\s*\{[^}]*flex: 1 1 auto;[^}]*overflow: auto;/);
+  assert.match(consoleStyles, /\.catalog-panel \.models-pagination \{ margin: 10px 0 0; \}/);
 });
 
 test("模型表单必填上下文和最大输出且模态与能力标签分开", () => {

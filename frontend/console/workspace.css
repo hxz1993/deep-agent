@@ -1175,7 +1175,6 @@ html, body {
 ::-webkit-scrollbar-track { background: transparent; }
 
 @media (max-width: 760px) {
-  .sidebar { position: fixed; z-index: 20; height: 100%; box-shadow: var(--shadow); }
   .msg-row { padding: 10px 16px; }
   .msg-row.user .bubble-wrap { max-width: 96%; }
 }

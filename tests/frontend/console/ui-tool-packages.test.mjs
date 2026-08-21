@@ -29,8 +29,12 @@ test("UI 工具页使用左侧工具包树和右侧单一工具表", () => {
   assert.doesNotMatch(template, /uiToolsFilters|uiToolFilterSearch|uiToolFilterEnabled/);
   assert.doesNotMatch(source, /uiToolFilterSearch|uiToolFilterEnabled/);
   assert.match(source, /items\.filter\(\(item\) => item\.package_code === this\.selectedPackageCode\)/);
-  assert.match(source, /代码内置/);
-  assert.match(source, /手工工具包/);
+  assert.match(source, /\["内置", this\.packages\.filter/);
+  assert.match(source, /\["自定义", this\.packages\.filter/);
+  assert.match(source, /class="ui-tool-tree-status/);
+  assert.match(source, /class="ui-tool-tree-count" title="工具数量"/);
+  assert.match(source, /data-lucide="wrench"/);
+  assert.doesNotMatch(source, /<span class="badge">\$\{escapeHtml\(String\(selected\.tool_count/);
 });
 
 test("UI 工具页使用与 Skill 一致的分离轻卡片层级", () => {
@@ -56,13 +60,13 @@ test("UI 工具页使用与 Skill 一致的分离轻卡片层级", () => {
   assert.match(consoleStyles, /#configurationHost \.btn\s*\{[^}]*height: 34px;[^}]*padding: 0 12px/);
 });
 
-test("工具创建入口依赖当前选中的手工工具包", () => {
+test("工具创建入口依赖当前选中的自定义工具包", () => {
   assert.match(source, /selected\.source !== "manual"/);
-  assert.match(source, /请先在左侧选择一个手工 UI 工具包/);
+  assert.match(source, /请先在左侧选择一个自定义 UI 工具包/);
   assert.match(source, /this\.populatePackageSelect\(selected\.code\)/);
 });
 
-test("手工 UI 工具保存时必须提交所属工具包", () => {
+test("自定义 UI 工具保存时必须提交所属工具包", () => {
   assert.match(template, /id="uiToolPackageCode" required/);
   assert.match(source, /const package_code = document\.getElementById\("uiToolPackageCode"\)\.value/);
   assert.match(source, /JSON\.stringify\(\{[\s\S]*?package_code/);

@@ -1,4 +1,4 @@
-const WORKSPACE_ASSET_VERSION = "20260821-6";
+const WORKSPACE_ASSET_VERSION = "20260822-3";
 
 const WORKSPACE_PANE_LIMITS = {
   agent: { min: 150, max: 280, initial: 188, variable: "--console-agent-width" },
@@ -12,6 +12,7 @@ let contextTestCatalog = null;
 let contextTestCatalogAgentId = "";
 let contextTestRequestAgentId = "";
 let selectedContextReference = null;
+let inspectorActiveTab = "session";
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -51,17 +52,21 @@ function installLegacyDom(source) {
       <i data-lucide="pin"></i>
     </button>`;
   if (agentSelect) {
-    const selectField = document.createElement("label");
+    const selectField = document.createElement("div");
     selectField.className = "agent-select-field";
-    selectField.title = "切换测试 Agent";
-    selectField.innerHTML = '<span class="agent-select-icon"><i data-lucide="bot" aria-hidden="true"></i></span>';
+    selectField.innerHTML = `
+      <button type="button" class="agent-select-trigger" id="workspaceAgentSelectTrigger" aria-haspopup="listbox" aria-expanded="false">
+        <span class="agent-select-icon"><i data-lucide="bot" aria-hidden="true"></i></span>
+        <span class="agent-select-label">加载中…</span>
+        <i class="agent-select-chevron" data-lucide="chevron-down" aria-hidden="true"></i>
+      </button>
+      <div class="agent-select-menu hidden" id="workspaceAgentSelectMenu" role="listbox" aria-label="切换测试 Agent"></div>`;
     agentSelect.setAttribute("aria-label", "切换测试 Agent");
+    agentSelect.setAttribute("aria-hidden", "true");
+    agentSelect.tabIndex = -1;
+    agentSelect.hidden = true;
+    agentSelect.classList.add("workspace-native-agent-select");
     selectField.append(agentSelect);
-    const chevron = document.createElement("i");
-    chevron.className = "agent-select-chevron";
-    chevron.dataset.lucide = "chevron-down";
-    chevron.setAttribute("aria-hidden", "true");
-    selectField.append(chevron);
     agentSwitcher.insertBefore(selectField, agentSwitcher.firstChild);
   }
   sidebar.insertBefore(agentSwitcher, sidebarHeader);
@@ -155,17 +160,51 @@ function contextBudgetPercent(value, total) {
   return Math.max(0, Math.min(100, (amount / capacity) * 100));
 }
 
-function renderContextBudgetBar(label, value, contextWindow, tone) {
-  const percent = contextBudgetPercent(value, contextWindow);
-  const percentLabel = percent === null ? "—" : `${Math.round(percent)}%`;
-  const width = percent === null ? 0 : percent;
-  const progressAttrs = percent === null
-    ? ""
-    : ` role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(percent)}"`;
-  return `<div class="context-budget-row tone-${escapeHtml(tone)}">
-    <div class="context-budget-row-head"><span>${escapeHtml(label)}</span><strong>${escapeHtml(formatTokens(value))} <small>Token</small></strong></div>
-    <div class="context-budget-track"${progressAttrs} aria-label="${escapeHtml(label)}占上下文窗口比例"><span style="width:${width.toFixed(2)}%"></span></div>
-    <span class="context-budget-percent">${escapeHtml(percentLabel)}</span>
+function finiteTokenValue(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? number : 0;
+}
+
+function renderContextBudgetOverview(contextStatus) {
+  const total = finiteTokenValue(contextStatus.context_window_tokens);
+  const history = finiteTokenValue(contextStatus.estimated_history_tokens);
+  const output = finiteTokenValue(contextStatus.predicted_output_tokens);
+  const safety = finiteTokenValue(contextStatus.safety_margin_tokens);
+  const occupied = Math.min(total, history);
+  const outputWidth = Math.min(Math.max(total - occupied, 0), output);
+  const safetyWidth = Math.min(Math.max(total - occupied - outputWidth, 0), safety);
+  const free = Math.max(total - occupied - outputWidth - safetyWidth, 0);
+  const segments = [
+    ["history", occupied, "历史"],
+    ["output", outputWidth, "输出预留"],
+    ["safety", safetyWidth, "安全余量"],
+    ["free", free, "剩余"],
+  ];
+  const segmentHtml = segments.map(([tone, value, label]) => {
+    const width = contextBudgetPercent(value, total) || 0;
+    return `<span class="context-budget-segment tone-${tone}" style="width:${width.toFixed(2)}%" title="${escapeHtml(label)} ${escapeHtml(formatTokens(value))} Token"></span>`;
+  }).join("");
+  const markers = [
+    ["target", contextStatus.target_tokens, "目标线"],
+    ["trigger", contextStatus.trigger_tokens, "触发线"],
+  ].map(([tone, value, label]) => {
+    const position = contextBudgetPercent(value, total);
+    if (position === null) return "";
+    return `<span class="context-budget-marker tone-${tone}" style="left:${position.toFixed(2)}%"><span>${escapeHtml(label)}</span></span>`;
+  }).join("");
+  return `<div class="context-budget-overview">
+    <div class="context-budget-summary">
+      <span><small>历史占用</small><strong>${escapeHtml(formatTokens(contextStatus.estimated_history_tokens))}</strong></span>
+      <span><small>可用输入</small><strong>${escapeHtml(formatTokens(contextStatus.usable_request_tokens))}</strong></span>
+      <span><small>上下文窗口</small><strong>${escapeHtml(formatTokens(contextStatus.context_window_tokens))}</strong></span>
+    </div>
+    <div class="context-budget-composite" role="img" aria-label="上下文预算分段与压缩阈值">
+      <div class="context-budget-segments">${segmentHtml}</div>
+      ${markers}
+    </div>
+    <div class="context-budget-legend">
+      <span class="tone-history">历史</span><span class="tone-output">输出预留</span><span class="tone-safety">安全余量</span><span class="tone-free">剩余</span>
+    </div>
   </div>`;
 }
 
@@ -327,7 +366,7 @@ function renderAgents() {
 
   host.querySelectorAll("[data-agent-id]").forEach((button) => {
     button.addEventListener("click", () => {
-      selectWorkspaceAgent(button.dataset.agentId);
+      void selectWorkspaceAgent(button.dataset.agentId);
     });
   });
 }
@@ -335,9 +374,23 @@ function renderAgents() {
 function renderAgentSwitcher(state) {
   const select = document.getElementById("agentSelect");
   const field = select?.closest(".agent-select-field");
-  if (!select || !field) return;
+  const trigger = document.getElementById("workspaceAgentSelectTrigger");
+  const labelNode = trigger?.querySelector(".agent-select-label");
+  const menu = document.getElementById("workspaceAgentSelectMenu");
+  if (!select || !field || !trigger || !labelNode || !menu) return;
   const label = state.agents.length ? currentAgentName(state) : "无可用 Agent";
   field.title = `切换测试 Agent：${label}`;
+  labelNode.textContent = label;
+  trigger.disabled = !!state.streaming || !state.agents.length;
+  menu.innerHTML = state.agents.map((agent) => {
+    const selected = agent.id === state.agentId;
+    return `<button type="button" class="agent-select-option${selected ? " selected" : ""}" role="option" aria-selected="${selected}" data-switch-agent-id="${escapeHtml(agent.id)}">
+      <span class="agent-select-option-icon"><i data-lucide="bot" aria-hidden="true"></i></span>
+      <span>${escapeHtml(agent.name || agent.id)}</span>
+      ${selected ? '<i class="agent-select-check" data-lucide="check" aria-hidden="true"></i>' : ""}
+    </button>`;
+  }).join("");
+  window.lucide?.createIcons();
 }
 
 async function refreshWorkspaceAgents(button) {
@@ -346,7 +399,7 @@ async function refreshWorkspaceAgents(button) {
     button.classList.add("loading");
   }
   try {
-    await window.DeepAgentConsoleChat?.loadAgents();
+    await window.DeepAgentConsoleChat?.refreshAgentWorkspace();
     lastRenderKey = "";
     renderAgents();
     renderInspector();
@@ -367,11 +420,6 @@ function setAgentPanePinned(pinned) {
   pinButton.classList.toggle("active", pinned);
   pinButton.setAttribute("aria-pressed", String(pinned));
   unpinButton.setAttribute("aria-pressed", String(pinned));
-  closeWorkspaceDrawers();
-}
-
-function inspectorUsesDrawer() {
-  return matchMedia("(max-width: 1260px)").matches;
 }
 
 function clampWorkspacePaneWidth(value, limits) {
@@ -461,47 +509,53 @@ function syncInspectorToggle() {
   const inspector = document.getElementById("inspectorPane");
   const button = document.getElementById("toggleInspectorPaneBtn");
   if (!grid || !inspector || !button) return;
-  const visible = inspectorUsesDrawer()
-    ? inspector.classList.contains("mobile-open")
-    : !grid.classList.contains("inspector-hidden");
-  const sessionDetailsActive = visible && !selectedContextReference;
-  button.classList.toggle("active", sessionDetailsActive);
-  button.setAttribute("aria-pressed", String(sessionDetailsActive));
-  button.title = sessionDetailsActive ? "隐藏会话详情" : "显示会话详情";
+  const visible = !grid.classList.contains("inspector-hidden");
+  button.classList.toggle("active", visible);
+  button.setAttribute("aria-pressed", String(visible));
+  button.title = visible ? "隐藏会话详情" : "显示会话详情";
 }
 
 function toggleInspectorPane() {
   const grid = document.getElementById("workspaceGrid");
   const inspector = document.getElementById("inspectorPane");
   if (!grid || !inspector) return;
-  if (selectedContextReference) {
-    selectedContextReference = null;
+  if (!grid.classList.contains("inspector-hidden") && inspectorActiveTab === "context") {
+    inspectorActiveTab = "session";
     lastRenderKey = "";
-    syncContextReferenceButtons();
-    openInspectorPane();
     renderInspector();
     return;
   }
-  if (inspectorUsesDrawer()) {
-    const shouldOpen = !inspector.classList.contains("mobile-open");
-    closeWorkspaceDrawers();
-    if (shouldOpen) {
-      inspector.classList.add("mobile-open");
-      document.getElementById("workspaceDrawerBackdrop")?.classList.remove("hidden");
-    }
-  } else {
-    grid.classList.toggle("inspector-hidden");
-  }
+  grid.classList.toggle("inspector-hidden");
   syncInspectorToggle();
 }
 
-function selectWorkspaceAgent(agentId) {
+async function selectWorkspaceAgent(agentId) {
   const api = window.DeepAgentConsoleChat;
-  if (!api || !agentId || agentId === api.state.agentId) return;
-  api.selectAgent(agentId);
+  if (!api || !agentId) return;
+  closeAgentSelectMenu();
+  await api.selectAgent(agentId);
   lastRenderKey = "";
   renderAgents();
   renderInspector();
+}
+
+function closeAgentSelectMenu() {
+  const trigger = document.getElementById("workspaceAgentSelectTrigger");
+  const menu = document.getElementById("workspaceAgentSelectMenu");
+  trigger?.setAttribute("aria-expanded", "false");
+  menu?.classList.add("hidden");
+}
+
+function toggleAgentSelectMenu() {
+  const trigger = document.getElementById("workspaceAgentSelectTrigger");
+  const menu = document.getElementById("workspaceAgentSelectMenu");
+  if (!trigger || !menu || trigger.disabled) return;
+  const open = menu.classList.contains("hidden");
+  closeAgentSelectMenu();
+  if (!open) return;
+  trigger.setAttribute("aria-expanded", "true");
+  menu.classList.remove("hidden");
+  menu.querySelector('[aria-selected="true"]')?.focus();
 }
 
 function currentAgentName(state) {
@@ -529,13 +583,7 @@ function openInspectorPane() {
   const grid = document.getElementById("workspaceGrid");
   const inspector = document.getElementById("inspectorPane");
   if (!grid || !inspector) return;
-  if (inspectorUsesDrawer()) {
-    closeWorkspaceDrawers();
-    inspector.classList.add("mobile-open");
-    document.getElementById("workspaceDrawerBackdrop")?.classList.remove("hidden");
-  } else {
-    grid.classList.remove("inspector-hidden");
-  }
+  grid.classList.remove("inspector-hidden");
   syncInspectorToggle();
 }
 
@@ -548,34 +596,76 @@ function toggleContextReferenceInspector(reference, branchPoint) {
       reference: JSON.parse(JSON.stringify(reference)),
     };
   }
+  inspectorActiveTab = "context";
   openInspectorPane();
   lastRenderKey = "";
   syncContextReferenceButtons();
   renderInspector();
 }
 
-function renderContextReferenceInspector(host, state) {
-  if (!selectedContextReference) return false;
+function renderContextReferenceInspector(state) {
+  if (!selectedContextReference) {
+    return `<div class="inspector-tab-empty">
+      <i data-lucide="braces"></i>
+      <strong>尚未选择上下文引用</strong>
+      <span>点击对话中上下文标签旁的信息图标后，可在这里查看只读 JSON。</span>
+    </div>`;
+  }
   if (selectedContextReference.sessionId !== (state.sessionId || null)) {
     selectedContextReference = null;
     syncContextReferenceButtons();
-    return false;
+    return renderContextReferenceInspector(state);
   }
   const reference = selectedContextReference.reference;
   const rawJson = JSON.stringify(reference, null, 2);
-  host.innerHTML = `
-    <section class="inspector-section context-reference-inspector">
+  return `<section class="inspector-section context-reference-inspector">
       <header><strong>上下文引用</strong><span>只读 JSON</span></header>
-      <dl class="inspector-grid">
-        <dt>名称</dt><dd>${escapeHtml(reference.label || "—")}</dd>
-        <dt>Key</dt><dd class="mono">${escapeHtml(reference.key || "—")}</dd>
-        <dt>类型</dt><dd class="mono">${escapeHtml(reference.type || "—")}</dd>
-        <dt>版本</dt><dd>${escapeHtml(reference.schema_version || "—")}</dd>
-      </dl>
+      <div class="inspector-facts compact">
+        <div><span>名称</span><strong>${escapeHtml(reference.label || "—")}</strong></div>
+        <div><span>Key</span><strong class="mono">${escapeHtml(reference.key || "—")}</strong></div>
+        <div><span>类型</span><strong class="mono">${escapeHtml(reference.type || "—")}</strong></div>
+        <div><span>版本</span><strong>${escapeHtml(reference.schema_version || "—")}</strong></div>
+      </div>
       <pre class="inspector-json" aria-label="上下文引用 JSON">${escapeHtml(rawJson)}</pre>
-      <p class="inspector-help">这是会话历史保存的完整上下文引用。metadata 只用于系统和前端，不会进入模型输入。点击对话标题栏的“会话详情”可切回会话信息。</p>
+      <p class="inspector-help">这是会话历史保存的完整上下文引用；metadata 不进入模型输入。</p>
     </section>`;
-  return true;
+}
+
+function setInspectorTab(tab) {
+  if (!["session", "run", "context"].includes(tab)) return;
+  inspectorActiveTab = tab;
+  lastRenderKey = "";
+  renderInspector();
+}
+
+function bindInspectorTabs(host) {
+  host.querySelectorAll("[data-inspector-tab]").forEach((button) => {
+    button.addEventListener("click", () => setInspectorTab(button.dataset.inspectorTab));
+  });
+}
+
+function inspectorFact(label, value, options = {}) {
+  const classes = [options.mono ? "mono" : "", options.wide ? "wide" : ""].filter(Boolean).join(" ");
+  return `<div class="${classes}"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value ?? "—")}</strong></div>`;
+}
+
+function renderRunUsageOverview(run, usage) {
+  const input = finiteTokenValue(run.input_tokens ?? usage.input_tokens);
+  const output = finiteTokenValue(run.output_tokens ?? usage.output_tokens);
+  const total = Math.max(finiteTokenValue(run.total_tokens ?? usage.total_tokens), input + output);
+  const inputWidth = contextBudgetPercent(input, total) || 0;
+  const outputWidth = contextBudgetPercent(output, total) || 0;
+  return `<div class="run-usage-overview">
+    <div class="run-usage-summary">
+      <span><small>输入</small><strong>${escapeHtml(formatTokens(run.input_tokens ?? usage.input_tokens))}</strong></span>
+      <span><small>输出</small><strong>${escapeHtml(formatTokens(run.output_tokens ?? usage.output_tokens))}</strong></span>
+      <span><small>合计</small><strong>${escapeHtml(formatTokens(run.total_tokens ?? usage.total_tokens))}</strong></span>
+    </div>
+    <div class="run-usage-track" role="img" aria-label="本轮输入与输出 Token">
+      <span class="input" style="width:${inputWidth.toFixed(2)}%"></span><span class="output" style="width:${outputWidth.toFixed(2)}%"></span>
+    </div>
+    <div class="run-usage-legend"><span class="input">输入</span><span class="output">输出</span></div>
+  </div>`;
 }
 
 function renderInspector() {
@@ -583,7 +673,6 @@ function renderInspector() {
   const host = document.getElementById("inspectorContent");
   if (!api || !host) return;
   const state = api.state;
-  if (renderContextReferenceInspector(host, state)) return;
 
   const model = state.llmModels.find((item) => item.id === state.llmModelId);
   const context = window.DeepAgentConsoleContext?.effectiveContext || {};
@@ -605,69 +694,75 @@ function renderInspector() {
     : contextStatus.compaction_enabled
       ? "未触发"
       : "未启用";
-  const contextWindowTokens = contextStatus.context_window_tokens;
-  const budgetBars = [
-    ["当前历史估算", contextStatus.estimated_history_tokens, "history"],
-    ["动态输出预估", contextStatus.predicted_output_tokens, "output"],
-    ["安全余量", contextStatus.safety_margin_tokens, "safety"],
-    ["可用输入预算", contextStatus.usable_request_tokens, "available"],
-    ["压缩触发线", contextStatus.trigger_tokens, "trigger"],
-    ["压缩目标线", contextStatus.target_tokens, "target"],
-  ].map(([label, value, tone]) => renderContextBudgetBar(label, value, contextWindowTokens, tone)).join("");
+  const sessionContent = `<section class="inspector-section inspector-session-group">
+    <header><strong>会话概览</strong><span class="status-badge ${statusClass}">${statusText}</span></header>
+    <div class="inspector-facts">
+      ${inspectorFact("会话 ID", state.sessionId || "尚未创建", { mono: true, wide: true })}
+      ${inspectorFact("Agent", currentAgentName(state))}
+      ${inspectorFact("模型", model?.name || model?.model || "—")}
+      ${inspectorFact("消息", `${contextStatus.raw_message_count ?? state.modelMessageCount ?? 0} 条`)}
+      ${inspectorFact("待发附件", `${state.pendingAttachments.length} 个`)}
+      ${inspectorFact("Agent ID", state.agentId || "—", { mono: true, wide: true })}
+    </div>
+    <header class="inspector-subheading"><strong>请求 Header</strong><span>自动推导</span></header>
+    <div class="inspector-facts compact">
+      ${inspectorFact("App", context.app || "继承", { mono: true })}
+      ${inspectorFact("Space", context.space || "继承", { mono: true })}
+      ${inspectorFact("Language", context.language || "继承")}
+      ${inspectorFact("User ID", identity?.user || "未认证", { mono: true, wide: true })}
+    </div>
+  </section>
+  <section class="inspector-section inspector-budget-section">
+    <header><strong>上下文预算</strong><span>阈值与预留合并展示</span></header>
+    ${renderContextBudgetOverview(contextStatus)}
+    <p class="inspector-help">目标线用于压缩后的预算回收，触发线表示开始压缩的固定阈值。</p>
+  </section>`;
 
-  host.innerHTML = `
-    <section class="inspector-section inspector-session-group">
-      <header><strong>当前会话</strong><span class="status-badge ${statusClass}">${statusText}</span></header>
-      <dl class="inspector-grid">
-        <dt>会话 ID</dt><dd class="mono">${escapeHtml(state.sessionId || "尚未创建")}</dd>
-        <dt>Agent</dt><dd>${escapeHtml(currentAgentName(state))}</dd>
-        <dt>Agent ID</dt><dd class="mono">${escapeHtml(state.agentId || "—")}</dd>
-        <dt>模型</dt><dd>${escapeHtml(model?.name || model?.model || "—")}</dd>
-        <dt>原始消息</dt><dd>${escapeHtml(contextStatus.raw_message_count ?? state.modelMessageCount ?? 0)} 条</dd>
-        <dt>待发附件</dt><dd>${state.pendingAttachments.length} 个</dd>
-      </dl>
-      <header class="inspector-subheading"><strong>请求Header</strong><span>自动推导</span></header>
-      <dl class="inspector-grid">
-        <dt>App</dt><dd class="mono">${escapeHtml(context.app || "继承")}</dd>
-        <dt>Space</dt><dd class="mono">${escapeHtml(context.space || "继承")}</dd>
-        <dt>Language</dt><dd>${escapeHtml(context.language || "继承")}</dd>
-        <dt>User ID</dt><dd class="mono">${escapeHtml(identity.user || "未认证")}</dd>
-      </dl>
-    </section>
-    <section class="inspector-section inspector-budget-section">
-        <header><div><strong>上下文预算</strong><span>统一按上下文窗口计算占比</span></div><strong class="context-budget-total">${escapeHtml(formatTokens(contextWindowTokens))}<small> Token</small></strong></header>
-        <div class="context-budget-chart">${budgetBars}</div>
-        <p class="inspector-help">预算值全部由后端统一计算。这里是完整原始会话历史的只读快照，不等同于某次 Run 的最终模型请求载荷。</p>
-      </section>
-      <section class="inspector-section">
-        <header><strong>当前 Run</strong><span>${run.detailed === false ? "详细指标请查看运行日志" : "当前页面最近一次"}</span></header>
-        <dl class="inspector-grid">
-          <dt>Conversation ID</dt><dd class="mono">${escapeHtml(state.conversationId || run.conversation_id || "—")}</dd>
-          <dt>Run ID</dt><dd class="mono">${escapeHtml(run.run_id || "—")}</dd>
-          <dt>终态</dt><dd>${escapeHtml(run.status || "—")}</dd>
-          <dt>模型</dt><dd>${escapeHtml(run.model_id || model?.name || model?.model || "—")}</dd>
-          <dt>请求次数</dt><dd>${escapeHtml(run.requests ?? usage.requests ?? "—")}</dd>
-          <dt>输入 Token</dt><dd>${escapeHtml(formatTokens(run.input_tokens ?? usage.input_tokens))}</dd>
-          <dt>输出 Token</dt><dd>${escapeHtml(formatTokens(run.output_tokens ?? usage.output_tokens))}</dd>
-          <dt>合计 Token</dt><dd>${escapeHtml(formatTokens(run.total_tokens ?? usage.total_tokens))}</dd>
-          <dt>缓存读取</dt><dd>${escapeHtml(formatTokens(run.cache_read_tokens))}</dd>
-          <dt>缓存写入</dt><dd>${escapeHtml(formatTokens(run.cache_write_tokens))}</dd>
-          <dt>工具调用</dt><dd>${escapeHtml(run.tool_calls ?? usage.tool_calls ?? "—")}</dd>
-          <dt>Tool Search</dt><dd>${escapeHtml(run.tool_search_calls ?? "—")}</dd>
-          <dt>耗时</dt><dd>${Number.isFinite(Number(run.duration_ms)) ? `${Number(run.duration_ms).toLocaleString("zh-CN")} ms` : "—"}</dd>
-          <dt>压缩</dt><dd>${escapeHtml(run.compaction || "—")}</dd>
-        </dl>
-      </section>
-      <section class="inspector-section">
-        <header><strong>压缩与 Checkpoint</strong><span>${escapeHtml(compactionState)}</span></header>
-        <dl class="inspector-grid">
-          <dt>本轮压缩前/后</dt><dd>${escapeHtml(formatTokens(compaction.estimated_tokens_before))} / ${escapeHtml(formatTokens(compaction.estimated_tokens_after))}</dd>
-          <dt>Checkpoint</dt><dd>${contextStatus.checkpoint_exists ? "已生成" : "暂无"}</dd>
-          <dt>Checkpoint Token</dt><dd>${escapeHtml(formatTokens(contextStatus.checkpoint_estimated_tokens))}</dd>
-          <dt>估算范围</dt><dd>${escapeHtml(contextStatus.estimate_scope || "—")}</dd>
-          <dt>估算器</dt><dd>${escapeHtml(contextStatus.estimator_source || "—")}</dd>
-        </dl>
-    </section>`;
+  const runContent = `<section class="inspector-section">
+    <header><strong>当前 Run</strong><span>${run.detailed === false ? "详细指标请查看运行日志" : "当前页面最近一次"}</span></header>
+    ${renderRunUsageOverview(run, usage)}
+    <div class="inspector-facts compact run-facts">
+      ${inspectorFact("终态", run.status || "—")}
+      ${inspectorFact("请求", run.requests ?? usage.requests ?? "—")}
+      ${inspectorFact("工具调用", run.tool_calls ?? usage.tool_calls ?? "—")}
+      ${inspectorFact("Tool Search", run.tool_search_calls ?? "—")}
+      ${inspectorFact("缓存读取", formatTokens(run.cache_read_tokens))}
+      ${inspectorFact("缓存写入", formatTokens(run.cache_write_tokens))}
+      ${inspectorFact("耗时", Number.isFinite(Number(run.duration_ms)) ? `${Number(run.duration_ms).toLocaleString("zh-CN")} ms` : "—")}
+      ${inspectorFact("压缩", run.compaction || "—")}
+      ${inspectorFact("Conversation ID", state.conversationId || run.conversation_id || "—", { mono: true, wide: true })}
+      ${inspectorFact("Run ID", run.run_id || "—", { mono: true, wide: true })}
+      ${inspectorFact("模型", run.model_id || model?.name || model?.model || "—", { wide: true })}
+    </div>
+  </section>
+  <section class="inspector-section">
+    <header><strong>压缩与 Checkpoint</strong><span>${escapeHtml(compactionState)}</span></header>
+    <div class="checkpoint-comparison">
+      <span><small>压缩前</small><strong>${escapeHtml(formatTokens(compaction.estimated_tokens_before))}</strong></span>
+      <i data-lucide="arrow-right"></i>
+      <span><small>压缩后</small><strong>${escapeHtml(formatTokens(compaction.estimated_tokens_after))}</strong></span>
+    </div>
+    <div class="inspector-facts compact">
+      ${inspectorFact("Checkpoint", contextStatus.checkpoint_exists ? "已生成" : "暂无")}
+      ${inspectorFact("Checkpoint Token", formatTokens(contextStatus.checkpoint_estimated_tokens))}
+      ${inspectorFact("估算范围", contextStatus.estimate_scope || "—")}
+      ${inspectorFact("估算器", contextStatus.estimator_source || "—")}
+    </div>
+  </section>`;
+
+  const tabContent = inspectorActiveTab === "run"
+    ? runContent
+    : inspectorActiveTab === "context"
+      ? renderContextReferenceInspector(state)
+      : sessionContent;
+  host.innerHTML = `<nav class="inspector-tabs" role="tablist" aria-label="会话详情">
+      <button type="button" role="tab" data-inspector-tab="session" aria-selected="${inspectorActiveTab === "session"}">会话</button>
+      <button type="button" role="tab" data-inspector-tab="run" aria-selected="${inspectorActiveTab === "run"}">运行诊断</button>
+      <button type="button" role="tab" data-inspector-tab="context" aria-selected="${inspectorActiveTab === "context"}">上下文引用</button>
+    </nav>
+    <div class="inspector-tab-panel">${tabContent}</div>`;
+  bindInspectorTabs(host);
+  window.lucide?.createIcons();
 }
 
 function startStateMonitor() {
@@ -695,6 +790,21 @@ function startStateMonitor() {
 }
 
 function bindWorkspaceControls() {
+  document.getElementById("workspaceAgentSelectTrigger")?.addEventListener("click", (event) => {
+    event.stopPropagation();
+    toggleAgentSelectMenu();
+  });
+  document.getElementById("workspaceAgentSelectMenu")?.addEventListener("click", (event) => {
+    const option = event.target.closest("[data-switch-agent-id]");
+    if (!option) return;
+    void selectWorkspaceAgent(option.dataset.switchAgentId);
+  });
+  document.addEventListener("click", (event) => {
+    if (!event.target.closest(".agent-select-field")) closeAgentSelectMenu();
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeAgentSelectMenu();
+  });
   document.getElementById("refreshWorkspaceAgentsBtn")?.addEventListener("click", (event) => {
     void refreshWorkspaceAgents(event.currentTarget);
   });
@@ -712,39 +822,6 @@ function bindWorkspaceControls() {
   document.getElementById("contextTestChatBtn")?.addEventListener("click", openContextTestDialog);
   document.getElementById("createContextTestBtn")?.addEventListener("click", createContextTestSession);
   document.getElementById("toggleInspectorPaneBtn")?.addEventListener("click", toggleInspectorPane);
-  document.querySelectorAll("[data-workspace-drawer]").forEach((button) => {
-    button.addEventListener("click", () => toggleWorkspaceDrawer(button.dataset.workspaceDrawer));
-  });
-  document.getElementById("workspaceDrawerBackdrop")?.addEventListener("click", closeWorkspaceDrawers);
-  document.getElementById("sessionList")?.addEventListener("click", () => {
-    if (matchMedia("(max-width: 620px)").matches) closeWorkspaceDrawers();
-  });
-  document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") closeWorkspaceDrawers();
-  });
-}
-
-function closeWorkspaceDrawers() {
-  document.querySelector(".agent-pane")?.classList.remove("mobile-open");
-  document.querySelector("#workspaceLegacyHost > .sidebar")?.classList.remove("mobile-open");
-  document.getElementById("inspectorPane")?.classList.remove("mobile-open");
-  document.getElementById("workspaceDrawerBackdrop")?.classList.add("hidden");
-  syncInspectorToggle();
-}
-
-function toggleWorkspaceDrawer(name) {
-  const targets = {
-    agents: document.querySelector(".agent-pane"),
-    sessions: document.querySelector("#workspaceLegacyHost > .sidebar"),
-    inspector: document.getElementById("inspectorPane"),
-  };
-  const target = targets[name];
-  const shouldOpen = target && !target.classList.contains("mobile-open");
-  closeWorkspaceDrawers();
-  if (!shouldOpen) return;
-  target.classList.add("mobile-open");
-  document.getElementById("workspaceDrawerBackdrop")?.classList.remove("hidden");
-  syncInspectorToggle();
 }
 
 window.DeepAgentConsoleWorkspace = {
@@ -768,6 +845,5 @@ export async function initWorkspace() {
   startStateMonitor();
   document.getElementById("workspaceLoading")?.classList.add("hidden");
   document.getElementById("workspaceGrid")?.classList.remove("hidden");
-  document.getElementById("workspaceMobileBar")?.classList.remove("hidden");
   window.lucide?.createIcons();
 }

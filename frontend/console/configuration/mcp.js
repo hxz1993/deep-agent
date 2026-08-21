@@ -165,9 +165,12 @@ function renameSuccessMessage(updatedAgents) {
 }
 
 const mcpAdmin = {
+  moreMenuDismissController: null,
   async refresh() {
     const tbody = document.getElementById("mcpTableBody");
     if (!tbody) return;
+    this.moreMenuDismissController?.abort();
+    this.moreMenuDismissController = null;
     tbody.innerHTML = `<tr><td colspan="7" class="empty-cell">加载中…</td></tr>`;
     try {
       const servers = await apiFetch("/api/v1/mcp");
@@ -199,10 +202,15 @@ const mcpAdmin = {
           <td>${escapeHtml(formatDate(s.updated_at))}</td>
           <td class="mcp-actions-cell">
             <div class="row-actions mcp-row-actions">
-              ${s.transport === "url" ? `<button type="button" data-inspect-mcp="${escapeHtml(s.name)}">检测并更新</button>` : ""}
-              ${canRenameMcp(s.transport) ? `<button type="button" data-rename-mcp="${escapeHtml(s.name)}">重命名</button>` : ""}
+              ${s.transport === "url" ? `<button type="button" data-inspect-mcp="${escapeHtml(s.name)}">刷新</button>` : ""}
               ${s.transport === "stdio" ? "" : `<button type="button" data-edit="${escapeHtml(s.name)}">编辑</button>`}
-              ${canDeleteMcp(s.transport) ? `<button type="button" class="danger" data-delete="${escapeHtml(s.name)}">删除</button>` : ""}
+              ${canRenameMcp(s.transport) || canDeleteMcp(s.transport) ? `<div class="skill-more-actions mcp-more-actions">
+                <button class="skill-more-trigger" type="button" data-mcp-more-trigger aria-label="更多 MCP 操作" title="更多操作" aria-haspopup="menu" aria-expanded="false"><i data-lucide="ellipsis-vertical"></i></button>
+                <div class="skill-more-menu" data-mcp-more-menu role="menu" hidden>
+                  ${canRenameMcp(s.transport) ? `<button type="button" role="menuitem" data-rename-mcp="${escapeHtml(s.name)}"><i data-lucide="text-cursor-input"></i><span>重命名</span></button>` : ""}
+                  ${canDeleteMcp(s.transport) ? `<button type="button" role="menuitem" class="danger" data-delete="${escapeHtml(s.name)}"><i data-lucide="trash-2"></i><span>删除</span></button>` : ""}
+                </div>
+              </div>` : ""}
             </div>
           </td>
         </tr>`;
@@ -222,6 +230,41 @@ const mcpAdmin = {
       tbody.querySelectorAll("[data-delete]").forEach((btn) => {
         btn.addEventListener("click", () => this.remove(btn.dataset.delete));
       });
+      tbody.querySelectorAll("[data-mcp-more-trigger]").forEach((trigger) => {
+        const menu = trigger.parentElement?.querySelector("[data-mcp-more-menu]");
+        if (!menu) return;
+        const closeMenu = () => {
+          menu.hidden = true;
+          trigger.setAttribute("aria-expanded", "false");
+          this.moreMenuDismissController?.abort();
+          this.moreMenuDismissController = null;
+        };
+        trigger.addEventListener("click", (event) => {
+          event.stopPropagation();
+          const willOpen = menu.hidden;
+          tbody.querySelectorAll("[data-mcp-more-menu]").forEach((otherMenu) => { otherMenu.hidden = true; });
+          tbody.querySelectorAll("[data-mcp-more-trigger]").forEach((otherTrigger) => { otherTrigger.setAttribute("aria-expanded", "false"); });
+          this.moreMenuDismissController?.abort();
+          this.moreMenuDismissController = null;
+          if (!willOpen) return;
+          menu.hidden = false;
+          trigger.setAttribute("aria-expanded", "true");
+          this.moreMenuDismissController = new AbortController();
+          const { signal } = this.moreMenuDismissController;
+          document.addEventListener("click", (outsideEvent) => {
+            if (!outsideEvent.target.closest(".mcp-more-actions")) closeMenu();
+          }, { signal });
+          document.addEventListener("keydown", (keyEvent) => {
+            if (keyEvent.key !== "Escape") return;
+            closeMenu();
+            trigger.focus();
+          }, { signal });
+        });
+        menu.querySelectorAll("button").forEach((button) => {
+          button.addEventListener("click", closeMenu);
+        });
+      });
+      window.lucide?.createIcons();
     } catch (err) {
       tbody.innerHTML = `<tr><td colspan="7" class="empty-cell">${escapeHtml(err.message)}</td></tr>`;
     }
@@ -255,7 +298,7 @@ const mcpAdmin = {
   },
 
   async inspect(name, button) {
-    const originalText = button?.textContent || "检测并更新";
+    const originalText = button?.textContent || "刷新";
     if (button) {
       button.disabled = true;
       button.textContent = "检测中…";

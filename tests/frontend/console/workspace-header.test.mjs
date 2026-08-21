@@ -20,6 +20,10 @@ const consoleCss = await readFile(
   new URL("../../../frontend/console/console.css", import.meta.url),
   "utf8",
 );
+const workspaceCss = await readFile(
+  new URL("../../../frontend/console/workspace.css", import.meta.url),
+  "utf8",
+);
 const consoleIndex = await readFile(
   new URL("../../../frontend/console/index.html", import.meta.url),
   "utf8",
@@ -44,25 +48,29 @@ test("工作台只读展示上下文预算、压缩结果与 Checkpoint 状态",
   assert.match(chatSource, /\/context-status/);
   assert.match(chatSource, /last_compaction:\s*data\.context\.compaction/);
   assert.match(chatSource, /void loadContextStatus\(state\.sessionId\)/);
-  assert.match(workspaceSource, /历史估算/);
+  assert.match(workspaceSource, /历史占用/);
   assert.match(workspaceSource, /上下文窗口/);
-  assert.match(workspaceSource, /输出预估/);
+  assert.match(workspaceSource, /输出预留/);
   assert.match(workspaceSource, /安全余量/);
-  assert.match(workspaceSource, /可用输入预算/);
-  assert.match(workspaceSource, /压缩前\/后/);
+  assert.match(workspaceSource, /可用输入/);
+  assert.match(workspaceSource, /压缩前/);
+  assert.match(workspaceSource, /压缩后/);
   assert.match(workspaceSource, /Checkpoint/);
   assert.match(workspaceSource, /state\.lastRunUsage/);
   assert.match(chatSource, /state\.lastRunUsage = \{ \.\.\.usage \}/);
   assert.doesNotMatch(workspaceSource, /summary_body|checkpoint\.payload|摘要正文/i);
 });
 
-test("会话详情合并会话和上下文且不再重复展示工具与事件", () => {
+test("会话详情使用会话、运行诊断和上下文引用三页签", () => {
   assert.match(template, /data-open-context[\s\S]*测试Header/);
   assert.match(template, /id="toggleInspectorPaneBtn"[\s\S]*会话详情/);
   assert.match(workspaceSource, /function toggleInspectorPane\(\)/);
-  assert.match(workspaceSource, /<strong>当前会话<\/strong>/);
-  assert.match(workspaceSource, /inspector-session-group[\s\S]*<strong>请求Header<\/strong>/);
-  assert.match(workspaceSource, /<dt>User ID<\/dt>[\s\S]*identity\.user/);
+  assert.match(workspaceSource, /data-inspector-tab="session"[\s\S]*>会话<\/button>/);
+  assert.match(workspaceSource, /data-inspector-tab="run"[\s\S]*>运行诊断<\/button>/);
+  assert.match(workspaceSource, /data-inspector-tab="context"[\s\S]*>上下文引用<\/button>/);
+  assert.match(workspaceSource, /<strong>会话概览<\/strong>/);
+  assert.match(workspaceSource, /inspector-session-group[\s\S]*<strong>请求 Header<\/strong>/);
+  assert.match(workspaceSource, /inspectorFact\("User ID"[\s\S]*identity\?\.user/);
   assert.match(workspaceSource, /<strong>上下文预算<\/strong>/);
   assert.match(workspaceSource, /<strong>当前 Run<\/strong>/);
   assert.match(workspaceSource, /Conversation ID/);
@@ -75,30 +83,39 @@ test("会话详情合并会话和上下文且不再重复展示工具与事件",
   assert.match(workspaceSource, /state\.lastRunMetrics/);
   assert.match(chatSource, /conversation_id/);
   assert.match(chatSource, /run_metrics/);
-  assert.match(workspaceSource, /inspector-budget-section[\s\S]*<strong>上下文预算<\/strong>[\s\S]*context-budget-chart/);
-  assert.match(workspaceSource, /contextBudgetPercent\(value, contextWindow\)/);
-  assert.match(workspaceSource, /role="progressbar"/);
-  assert.doesNotMatch(consoleIndex, /data-inspector-tab|>工具<|>事件</);
-  assert.doesNotMatch(workspaceSource, /activeInspectorTab|eventRows|eventToolRows/);
+  assert.match(workspaceSource, /renderContextBudgetOverview\(contextStatus\)/);
+  assert.match(workspaceSource, /context-budget-composite/);
+  assert.match(workspaceSource, /\["target", contextStatus\.target_tokens, "目标线"\]/);
+  assert.match(workspaceSource, /\["trigger", contextStatus\.trigger_tokens, "触发线"\]/);
+  assert.doesNotMatch(workspaceSource, /eventRows|eventToolRows/);
   assert.doesNotMatch(chatSource, /deep-agent-console-event/);
 });
 
-test("会话详情改为连续轻量甬道但保留全部既有属性", () => {
+test("会话详情保留既有属性并用轻量事实卡与复合轨道展示", () => {
   for (const label of [
-    "会话 ID", "Agent ID", "原始消息", "待发附件",
+    "会话 ID", "Agent ID", "消息", "待发附件",
     "App", "Space", "Language", "User ID",
-    "Conversation ID", "Run ID", "请求次数", "输入 Token", "输出 Token",
-    "合计 Token", "缓存读取", "缓存写入", "工具调用", "Tool Search", "耗时", "压缩",
-    "本轮压缩前/后", "Checkpoint Token", "估算范围", "估算器",
+    "Conversation ID", "Run ID", "请求", "输入", "输出",
+    "合计", "缓存读取", "缓存写入", "工具调用", "Tool Search", "耗时", "压缩",
+    "压缩前", "压缩后", "Checkpoint Token", "估算范围", "估算器",
   ]) {
     assert.match(workspaceSource, new RegExp(label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   }
-  assert.match(consoleCss, /会话详情改为单一连续信息甬道/);
-  assert.match(consoleCss, /\.inspector-section\s*\{[\s\S]*border: 0;[\s\S]*border-bottom:/);
-  assert.match(consoleCss, /\.inspector-section\s*\{[\s\S]*box-shadow: none/);
+  assert.match(consoleCss, /右侧详情使用三页签和复合预算指标/);
+  assert.match(consoleCss, /\.inspector-tabs\s*\{/);
+  assert.match(consoleCss, /\.inspector-tab-panel \.inspector-section\s*\{[\s\S]*border: 0;[\s\S]*box-shadow: none/);
+  assert.match(consoleCss, /\.context-budget-segments/);
+  assert.match(consoleCss, /\.run-usage-track/);
 });
 
-test("桌面工作台左右边栏支持有范围的拖拽和键盘调宽", () => {
+test("测试 Header 使用锚定轻量浮层而不是抽屉", () => {
+  assert.match(consoleIndex, /id="contextPopover"[\s\S]*role="dialog"/);
+  assert.match(consoleIndex, /id="contextAppInput"/);
+  assert.doesNotMatch(consoleIndex, /contextDrawer|contextBackdrop|context-drawer|drawer-backdrop/);
+  assert.match(consoleCss, /\.context-popover\s*\{[\s\S]*position: fixed;[\s\S]*border-radius: 13px/);
+});
+
+test("工作台所有宽度保持多栏交互并支持拖拽和键盘调宽", () => {
   assert.match(consoleIndex, /id="agentPaneResizer"[\s\S]*data-resize-pane="agent"/);
   assert.match(consoleIndex, /id="inspectorPaneResizer"[\s\S]*data-resize-pane="inspector"/);
   assert.match(workspaceSource, /id = "sessionPaneResizer"/);
@@ -109,14 +126,23 @@ test("桌面工作台左右边栏支持有范围的拖拽和键盘调宽", () =>
   assert.match(workspaceSource, /\["ArrowLeft", "ArrowRight", "Home"\]/);
   assert.match(workspaceSource, /bindWorkspaceResizers\(\)/);
   assert.match(consoleCss, /\.workspace-resizer[\s\S]*cursor: col-resize/);
-  assert.match(consoleCss, /@media \(max-width: 1260px\)[\s\S]*\.workspace-resizer-inspector \{ display: none; \}/);
-  assert.match(consoleCss, /@media \(max-width: 620px\)[\s\S]*\.workspace-resizer \{ display: none !important; \}/);
+  assert.doesNotMatch(consoleIndex, /workspaceMobileBar|workspaceDrawerBackdrop|data-workspace-drawer/);
+  assert.doesNotMatch(workspaceSource, /mobile-open|toggleWorkspaceDrawer|closeWorkspaceDrawers|inspectorUsesDrawer/);
+  assert.doesNotMatch(consoleCss, /workspace-mobile-bar|workspace-drawer-backdrop|mobile-open/);
+  assert.doesNotMatch(workspaceCss, /@media \(max-width: 760px\)[\s\S]*\.sidebar \{ position: fixed/);
+  assert.match(consoleCss, /工作台各宽度下保持同一套多栏交互/);
 });
 
-test("Agent 默认使用无边框图标下拉并支持刷新与固定列表", () => {
+test("Agent 使用自定义下拉并在切换后进入新对话", () => {
   assert.match(workspaceSource, /agentSwitcher\.className = "agent-switcher"/);
   assert.match(workspaceSource, /className = "agent-select-field"/);
+  assert.match(workspaceSource, /id="workspaceAgentSelectTrigger"/);
+  assert.match(workspaceSource, /id="workspaceAgentSelectMenu"/);
+  assert.match(workspaceSource, /data-switch-agent-id/);
   assert.match(workspaceSource, /agentSelect\.setAttribute\("aria-label", "切换测试 Agent"\)/);
+  assert.match(workspaceSource, /agentSelect\.setAttribute\("aria-hidden", "true"\)/);
+  assert.match(workspaceSource, /agentSelect\.tabIndex = -1/);
+  assert.match(workspaceSource, /agentSelect\.hidden = true/);
   assert.doesNotMatch(workspaceSource, /previousAgentBtn|nextAgentBtn|cycleWorkspaceAgent/);
   assert.match(workspaceSource, /id="refreshWorkspaceAgentsBtn"/);
   assert.doesNotMatch(workspaceSource, /id="workspaceAgentSelect"/);
@@ -126,19 +152,32 @@ test("Agent 默认使用无边框图标下拉并支持刷新与固定列表", ()
   assert.doesNotMatch(consoleIndex, /class="agent-context-action"/);
   assert.match(workspaceSource, /setAgentPanePinned\(false\)/);
   assert.match(workspaceSource, /grid\.classList\.toggle\("agent-pinned", pinned\)/);
-  assert.match(workspaceSource, /api\.selectAgent\(agentId\)/);
-  assert.match(chatSource, /el\.agentSelect\.disabled = state\.streaming \|\| !!state\.sessionId/);
+  assert.match(workspaceSource, /await api\.selectAgent\(agentId\)/);
+  assert.match(chatSource, /async function selectAgent\(agentId\)/);
+  assert.match(chatSource, /newChat\(agentId\);[\s\S]*await syncSessionsFromBackend\(\)/);
+  assert.doesNotMatch(chatSource, /const latest = state\.sessions\.find/);
+  assert.match(chatSource, /el\.agentSelect\.disabled = state\.streaming/);
+  assert.doesNotMatch(chatSource, /el\.agentSelect\.disabled = state\.streaming \|\| !!state\.sessionId/);
   assert.match(workspaceSource, /function refreshWorkspaceAgents\(button\)/);
+  assert.match(workspaceSource, /refreshAgentWorkspace\(\)/);
   assert.match(workspaceSource, /sidebarHeader\?\.remove\(\)/);
   assert.doesNotMatch(workspaceSource, /sessionPanelSummary\.className/);
   assert.match(consoleCss, /\.workspace-grid > \.agent-pane \{ display: none; \}/);
   assert.match(consoleCss, /\.workspace-grid\.agent-pinned > \.agent-pane \{ display: flex; \}/);
   assert.match(consoleCss, /\.workspace-grid\.agent-pinned #workspaceLegacyHost \.agent-switcher \{ display: none; \}/);
   assert.match(consoleCss, /\.pane-heading > \.pane-heading-actions[\s\S]*flex-direction: row/);
-  assert.match(consoleCss, /\.agent-select-field[\s\S]*border: 0;[\s\S]*background: transparent/);
-  assert.match(consoleCss, /\.agent-select-field select[\s\S]*border: 0;[\s\S]*appearance: none/);
+  assert.match(consoleCss, /\.agent-select-trigger[\s\S]*border: 0;[\s\S]*background: transparent/);
+  assert.match(consoleCss, /\.agent-select-menu[\s\S]*border-radius: 10px/);
+  assert.match(consoleCss, /\.workspace-native-agent-select[\s\S]*clip-path: inset\(50%\)/);
   assert.match(consoleCss, /\.agent-switcher \.icon-action[\s\S]*border: 0;/);
-  assert.match(consoleCss, /@media \(max-width: 920px\)[\s\S]*#pinAgentPaneBtn \{ display: none; \}/);
+  assert.doesNotMatch(consoleCss, /#pinAgentPaneBtn \{ display: none; \}/);
+});
+
+test("会话头部与列表使用轻量圆角且图标无外框", () => {
+  assert.match(consoleCss, /\.workspace-header-action\s*\{[^}]*border: 1px solid transparent;[^}]*border-radius: 8px/);
+  assert.match(consoleCss, /#workspaceLegacyHost \.session-item\s*\{[^}]*border-radius: 10px/);
+  assert.match(consoleCss, /\.session-toolbar \.icon-action\s*\{[^}]*border: 0;[^}]*box-shadow: none/);
+  assert.match(consoleCss, /\.session-item \.session-actions > span\s*\{[^}]*border: 0;[^}]*box-shadow: none/);
 });
 
 test("聊天标题栏横跨右侧详情并在详情收起时恢复独立卡片", () => {

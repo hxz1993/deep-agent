@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import io
 import json
 import shutil
@@ -560,6 +561,21 @@ async def read_skill_resource(
 ) -> SkillResourceContent:
     root, index = await _resource_root(code, request, ctx)
     entry = next((item for item in index if item.get("path") == path and item.get("category") != "script"), None)
+    if path == "SKILL.md":
+        target = root / "SKILL.md"
+        if not target.is_file():
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Skill resource not found")
+        try:
+            content_hash = hashlib.sha256(target.read_bytes()).hexdigest()
+        except OSError as exc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Skill resource not found") from exc
+        entry = {
+            "path": "SKILL.md",
+            "category": "definition",
+            "mime": "text/markdown",
+            "readable": True,
+            "content_hash": content_hash,
+        }
     if entry is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Skill resource not found")
     target = (root / path).resolve()

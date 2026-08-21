@@ -1,6 +1,6 @@
 const SOURCE_LABELS = {
   builtin: "内置",
-  manual: "手工",
+  manual: "自定义",
 };
 
 function uiToolDisplayValue(value) {
@@ -269,7 +269,7 @@ const uiToolsAdmin = {
               `<option value="${escapeHtml(item.code)}" ${item.code === selectedCode ? "selected" : ""}>${escapeHtml(item.label)} (${escapeHtml(item.code)})</option>`,
           )
           .join("")
-      : `<option value="">（请先新建手工工具包）</option>`;
+      : `<option value="">（请先新建自定义工具包）</option>`;
     select.disabled = !packages.length;
   },
 
@@ -281,8 +281,8 @@ const uiToolsAdmin = {
       return;
     }
     const groups = [
-      ["代码内置", this.packages.filter((item) => item.source === "builtin")],
-      ["手工工具包", this.packages.filter((item) => item.source === "manual")],
+      ["内置", this.packages.filter((item) => item.source === "builtin")],
+      ["自定义", this.packages.filter((item) => item.source === "manual")],
     ];
     tree.innerHTML = groups
       .filter(([, items]) => items.length)
@@ -298,8 +298,8 @@ const uiToolsAdmin = {
                   <code>${escapeHtml(item.code)}</code>
                 </span>
                 <span class="ui-tool-tree-node-meta">
-                  <span class="badge ${item.enabled ? "on" : "off"}">${item.enabled ? "启用" : "停用"}</span>
-                  <span>${escapeHtml(String(item.tool_count || 0))} 个工具</span>
+                  <span class="ui-tool-tree-status ${item.enabled ? "is-enabled" : "is-disabled"}"><span></span>${item.enabled ? "启用" : "停用"}</span>
+                  <span class="ui-tool-tree-count" title="工具数量"><strong>${escapeHtml(String(item.tool_count || 0))}</strong><i data-lucide="wrench"></i></span>
                 </span>
               </span>
             </button>`).join("")}
@@ -343,8 +343,7 @@ const uiToolsAdmin = {
     description.textContent = selected.description || "暂无说明";
     meta.innerHTML = `
       <span class="badge source-${escapeHtml(selected.source)}">${escapeHtml(SOURCE_LABELS[selected.source] || selected.source)}</span>
-      <span class="badge ${selected.enabled ? "on" : "off"}">${selected.enabled ? "启用" : "停用"}</span>
-      <span class="badge">${escapeHtml(String(selected.tool_count || 0))} 个工具</span>`;
+      <span class="badge ${selected.enabled ? "on" : "off"}">${selected.enabled ? "启用" : "停用"}</span>`;
     const manual = selected.source === "manual";
     editButton.classList.toggle("hidden", !manual);
     deleteButton.classList.toggle("hidden", !manual);
@@ -426,7 +425,7 @@ const uiToolsAdmin = {
   async removePackage(code) {
     if (!(await confirmAction({
       title: "删除 UI 工具包？",
-      message: `删除工具包会同时移除其中的手工 UI 工具。当前对象：${code}`,
+      message: `删除工具包会同时移除其中的自定义 UI 工具。当前对象：${code}`,
       icon: "trash-2",
       tone: "danger",
       confirmLabel: "删除",
@@ -547,12 +546,12 @@ const uiToolsAdmin = {
   openCreate() {
     const selected = this.packages.find((item) => item.code === this.selectedPackageCode);
     if (!selected || selected.source !== "manual") {
-      showToast("请先在左侧选择一个手工 UI 工具包", true);
+      showToast("请先在左侧选择一个自定义 UI 工具包", true);
       return;
     }
     this.editingName = null;
     this.editingSource = "manual";
-    document.getElementById("uiToolModalTitle").textContent = "手工注册 UI 工具";
+    document.getElementById("uiToolModalTitle").textContent = "新建自定义 UI 工具";
     document.getElementById("uiToolName").value = "";
     document.getElementById("uiToolEnabled").checked = true;
     document.getElementById("uiToolTemplate").value = "confirm";

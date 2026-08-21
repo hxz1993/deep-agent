@@ -61,7 +61,14 @@ test("目录查看方式位于筛选行且渠道视图使用完整宽度", () =>
   assert.match(catalogSource, /catalog-provider-view/);
   assert.match(consoleStyles, /\.catalog-browser\.catalog-provider-view\s*\{\s*grid-template-columns:\s*minmax\(0,\s*1fr\)/);
   assert.match(consoleStyles, /\.catalog-provider-table\s*\{[^}]*width:\s*100%[^}]*min-width:\s*0/);
-  assert.match(catalogTemplate, /class="models-toolbar"[\s\S]*class="models-filters"[\s\S]*<\/div>\s*<\/div>\s*<div class="catalog-feedback/);
+  assert.match(catalogTemplate, /class="panel-toolbar models-toolbar catalog-header"[\s\S]*<\/div>\s*<div class="models-filters"[\s\S]*<div class="catalog-feedback/);
+});
+
+test("模型目录标题栏复用配置页标题层级", () => {
+  assert.match(catalogTemplate, /class="panel-toolbar models-toolbar catalog-header"/);
+  assert.match(catalogTemplate, /class="panel-subtitle settings-desc models-desc"/);
+  assert.match(consoleStyles, /\.catalog-panel \.models-toolbar\s*\{[^}]*min-height: 50px;[^}]*justify-content: space-between/);
+  assert.match(consoleStyles, /\.catalog-panel \.catalog-title\s*\{[^}]*font-size: 20px/);
 });
 
 test("模型目录筛选使用无标题透明命令栏并自然右对齐", () => {
@@ -148,6 +155,18 @@ test("模型配置列表只展示核心运行信息", () => {
   assert.match(modelSource, /formatList\(model\.input_modalities\)/);
   assert.doesNotMatch(modelSource, /<td>\$\{escapeHtml\(model\.base_url/);
   assert.doesNotMatch(modelSource, /formatList\(model\.tags\)/);
+});
+
+test("模型管理支持复制配置并清空 API Key", () => {
+  assert.match(modelTemplate, /<h2>模型管理<\/h2>/);
+  assert.doesNotMatch(modelTemplate, /从模型目录选择/);
+  assert.match(modelSource, /data-edit=[\s\S]*data-copy=[\s\S]*data-delete=/);
+  assert.match(modelSource, /async openCopy\(modelId\)/);
+  assert.match(modelSource, /model_label: model\.name/);
+  assert.match(modelSource, /input_modalities: model\.input_modalities \|\| \[\]/);
+  assert.match(modelSource, /tags: model\.tags \|\| \[\]/);
+  assert.match(modelSource, /document\.getElementById\("llmModelApiKey"\)\.value = ""/);
+  assert.match(modelSource, /复制模型 · \$\{model\.name\}/);
 });
 
 test("编辑模型可按运行编码或 Provider 模型编码匹配目录", () => {

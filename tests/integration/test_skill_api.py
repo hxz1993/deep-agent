@@ -138,6 +138,13 @@ class SkillApiTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(by_path["references/guide.docx"]["read_format"], "docx")
             self.assertEqual(by_path["assets/template.xlsx"]["read_format"], "xlsx")
             self.assertFalse(by_path["scripts/run.py"]["readable"])
+            definition = await client.get(
+                "/api/v1/skills/example-skill/resources/SKILL.md",
+            )
+            self.assertEqual(definition.status_code, 200, definition.text)
+            self.assertEqual(definition.json()["path"], "SKILL.md")
+            self.assertEqual(definition.json()["format"], "text")
+            self.assertIn("example-skill", definition.json()["content"])
             text = await client.get(
                 "/api/v1/skills/example-skill/resources/references/guide.md",
                 params={"limit": 1},

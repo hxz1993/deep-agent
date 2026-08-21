@@ -8,13 +8,12 @@ Console 图标统一使用仓库内 `frontend/vendor/lucide.min.js` 的线性 SV
 `data-lucide`，动态插入 DOM 的图标必须在插入后调用 `window.lucide.createIcons()`；不要重新
 引入 emoji、字符图标、外部 CDN 或第二套图标库。
 
-## Console UI 常驻 worktree
+## Console UI 开发分支
 
-`deep-agent-console-ui-0818` 作为 DeepAgent bundled Console UI 的常驻调试入口，
-除非用户明确要求，不要自行删除该 worktree。后续每批 UI 需求开始前必须先确认工作区干净，
-再同步最新 `feat-ruge-0803` 基线；修改范围继续限定在 `frontend/console/**`、
-`tests/frontend/console/**`，必要时可同步本前端说明。若需求实际需要后端 API、SSE、History
-或持久化契约变化，应停止前端假设并回报主任务，不跨边界修改 `deep_agent/**`。
+Bundled Console 与后端统一在 `feat-ruge-0803` 主开发分支维护，不再保留独立 UI worktree。
+每批 UI 需求开始前先确认分支和工作区，保留已有改动；修改范围通常限定在
+`frontend/console/**`、`tests/frontend/console/**`，必要时同步前端说明。若需求实际需要后端
+API、SSE、History 或持久化契约变化，应先确认产品边界，再修改对应拥有层。
 
 ---
 
@@ -57,11 +56,13 @@ v0.3.12 的配置卡只读展示工具披露策略：附件包为“有附件时
 
 工作台默认在会话栏顶部用 Agent 下拉框切换；管理员可在当前页面内临时固定左侧 Agent
 列表。下拉模式只在下拉框右侧保留固定操作；固定模式把刷新/取消固定集中在 Agent 标题栏。
-测试 Header 和会话详情统一位于对话标题栏右侧。该状态不写 LocalStorage。窄屏必须退化为
-可访问的下拉或抽屉，不能同时隐藏两种入口。
+测试 Header 和会话详情统一位于对话标题栏右侧。测试 Header 使用锚定按钮的轻量浮层，
+该状态不写 LocalStorage。窄屏继续压缩同一套多栏布局，不切换成抽屉或另一套交互模式。
 
-右侧会话详情不设页签，在一个连续泳道中展示会话、请求 Header、预算、最近一次 Run Usage、
-压缩和 Checkpoint。工具过程由对话区负责，Console 不再额外缓存或展示 SSE 事件列表。
+右侧会话详情使用“会话 / 运行诊断 / 上下文引用”三页签：会话页展示会话、请求 Header和
+复合上下文预算；运行诊断页展示最近一次 Run Usage、压缩和 Checkpoint；上下文引用页由
+消息中的引用信息按钮定位并展示只读 JSON。工具过程由对话区负责，Console 不再额外缓存或
+展示 SSE 事件列表。
 `context-status` 返回的是 `estimate_scope=history_only` 的会话历史快照；最近一次 Run Usage
 来自当前页面收到的 `final.usage`。前端只格式化和计算展示比例，不复制后端 Token 估算、
 输出预测或安全余量算法。
@@ -94,9 +95,9 @@ Agent 独立编辑页的系统提示词标题栏显示“字符数 / 预估 Toke
 - SSE 解析、HITL 参数归一化和 Schema 文本校验分别位于 `protocol.js`、`hitl.js`、`schema-editor.js`，可由 Node 内置测试独立验证。
 - 控制台测试：`node --test tests/frontend/console/*.test.mjs`。
 - 配置中心按“Agent 设置 / 系统设置 / 辅助资源”分组；系统设置包含辅助模型、全局配置和只读数据库连接。数据库连接页通过 `GET /api/v1/database-info` 只展示类型、主机、端口、库名或 SQLite 文件名，不返回凭据、连接参数或本地完整路径。
-- “内置工具”位于模型之后，只读展示代码随版本发布、由Agent显式配置的通用工具和Python沙箱；紧随其后的
-  “系统工具”只读展示运行时自动注入工具的来源和条件。两个页面都没有注册、编辑、删除或全局
-  启停入口，系统工具也不得进入 Agent 能力勾选。
+- “内置工具”位于模型之后，在同一目录中分别展示代码随版本发布、由Agent显式配置的工具包，
+  以及运行时自动注入的系统工具。页面没有注册、编辑、删除、全局启停或重新加载入口；系统工具
+  也不得进入 Agent 能力勾选。
 - Console 顶部只展示一处产品版本，通过同源 `GET /info` 读取
   `deep_agent.__version__`；配置中心的数据库结构 revision 是独立运维信息。
 - 配置中心左侧页签只在当前前端页面的模块内存中保留；工作台与配置中心之间切换会恢复上次页签，浏览器刷新后重新回到 Agent，不写入 LocalStorage 或后端。

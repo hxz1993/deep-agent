@@ -47,11 +47,7 @@ function renderSystemToolsError(message) {
   if (!host) return;
   host.innerHTML = `<div class="system-tools-state">
     <span class="configuration-error">${escapeHtml(message || "系统工具加载失败")}</span>
-    <button class="btn" type="button" data-retry-system-tools>重新加载</button>
   </div>`;
-  host.querySelector("[data-retry-system-tools]")?.addEventListener("click", () => {
-    window.systemToolsAdmin?.refresh();
-  });
 }
 
 const systemToolsAdmin = {
@@ -66,12 +62,6 @@ const systemToolsAdmin = {
     }
   },
 };
-
-document.addEventListener("DOMContentLoaded", () => {
-  document.getElementById("refreshSystemToolsBtn")?.addEventListener("click", () => {
-    systemToolsAdmin.refresh();
-  });
-});
 
 window.systemToolsAdmin = systemToolsAdmin;
 window.__SystemToolsUI = {

@@ -54,7 +54,8 @@ test("内置工具页位于模型之后和 MCP 之前", () => {
   assert.ok(modelPosition < builtinPosition);
   assert.ok(builtinPosition < mcpPosition);
   assert.match(templateHtml, /id="panel-builtin-tools"/);
-  assert.match(templateHtml, /内置工具随 DeepAgent 版本发布，无需注册/);
+  assert.match(templateHtml, /能力工具包[\s\S]*运行时系统工具/);
+  assert.doesNotMatch(templateHtml, /refreshBuiltinToolsBtn|refreshSystemToolsBtn/);
 });
 
 test("内置工具页只接受后端 builtin 分类工具包", () => {

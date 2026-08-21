@@ -1,11 +1,10 @@
 let initialized = false;
 let loadingPromise = null;
-const CONFIGURATION_ASSET_VERSION = "20260821-14";
+const CONFIGURATION_ASSET_VERSION = "20260822-2";
 const CONFIGURATION_TABS = new Set([
   "agents",
   "llm-models",
   "builtin-tools",
-  "system-tools",
   "skills",
   "mcp",
   "ui-tools",
@@ -115,10 +114,6 @@ function decorateConfiguration() {
     dialog.classList.add("console-detail-dialog");
   });
   document.getElementById("configurationHost")?.addEventListener("click", (event) => {
-    if (event.target.closest("[data-open-catalog]")) {
-      document.querySelector('[data-tab="catalog"]')?.click();
-      return;
-    }
     const link = event.target.closest("a[href]");
     if (!link) return;
     const url = new URL(link.href, location.href);
@@ -143,8 +138,12 @@ export function refreshCurrentConfiguration() {
   if (active === "database-connection") return window.databaseConnectionAdmin?.refresh();
   if (active === "agents") return window.agentsAdmin?.refresh();
   if (active === "llm-models") return window.llmModelsAdmin?.refresh();
-  if (active === "builtin-tools") return window.builtinToolsAdmin?.refresh();
-  if (active === "system-tools") return window.systemToolsAdmin?.refresh();
+  if (active === "builtin-tools") {
+    return Promise.all([
+      window.builtinToolsAdmin?.refresh(),
+      window.systemToolsAdmin?.refresh(),
+    ]);
+  }
   if (active === "skills") return window.skillsAdmin?.refresh();
   if (active === "auxiliary-models") return window.auxiliaryModelsAdmin?.refresh();
   if (active === "mcp") return window.mcpAdmin?.refresh();

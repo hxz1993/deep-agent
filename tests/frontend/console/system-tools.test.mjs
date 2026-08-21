@@ -43,14 +43,15 @@ function loadSystemToolsUi() {
   return window.__SystemToolsUI;
 }
 
-test("系统工具菜单位于内置工具之后和 Skill 之前", () => {
+test("系统工具合并进内置工具目录", () => {
   const builtinPosition = indexHtml.indexOf('data-tab="builtin-tools"');
   const systemPosition = indexHtml.indexOf('data-tab="system-tools"');
   const skillPosition = indexHtml.indexOf('data-tab="skills"');
 
-  assert.ok(builtinPosition < systemPosition);
-  assert.ok(systemPosition < skillPosition);
-  assert.match(templateHtml, /id="panel-system-tools"/);
+  assert.ok(builtinPosition >= 0 && builtinPosition < skillPosition);
+  assert.equal(systemPosition, -1);
+  assert.doesNotMatch(templateHtml, /id="panel-system-tools"/);
+  assert.match(templateHtml, /id="panel-builtin-tools"[\s\S]*运行时系统工具[\s\S]*id="systemToolDomains"/);
   assert.match(templateHtml, /不参与 Agent 能力配置/);
 });
 
@@ -135,9 +136,9 @@ test("大工具结果读取作为独立系统工具只读展示", () => {
   assert.match(html, /Pydantic AI Harness/);
 });
 
-test("系统工具页面具备加载、失败重试和窄屏可横向查看的结构", () => {
+test("系统工具页面保留加载与窄屏横向查看，但不提供单独刷新入口", () => {
   assert.match(source, /正在加载系统工具/);
-  assert.match(source, /data-retry-system-tools/);
+  assert.doesNotMatch(source, /data-retry-system-tools|refreshSystemToolsBtn/);
   assert.match(templateHtml, /class="system-tool-domains"/);
   assert.match(source, /class="table-wrap console-list-a"/);
 });

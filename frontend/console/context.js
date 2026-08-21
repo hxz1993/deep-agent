@@ -50,7 +50,6 @@ function renderContext() {
     ["App", effectiveContext.app || "未提供"],
     ["Space", effectiveContext.space || "未提供"],
     ["Language", effectiveContext.language || "未提供"],
-    ["User", identity?.user || "未认证"],
   ];
   document.getElementById("effectiveContext").innerHTML = rows
     .map(([label, value]) => `<dt>${label}</dt><dd>${String(value).replace(/</g, "&lt;")}</dd>`)
@@ -83,17 +82,35 @@ export async function refreshIdentity() {
   }
 }
 
-function openDrawer() {
-  renderContext();
-  document.getElementById("contextDrawer")?.classList.add("open");
-  document.getElementById("contextDrawer")?.setAttribute("aria-hidden", "false");
-  document.getElementById("contextBackdrop")?.classList.remove("hidden");
+function positionContextPopover(trigger) {
+  const popover = document.getElementById("contextPopover");
+  if (!popover) return;
+  const anchor = trigger || document.querySelector("[data-open-context]");
+  const rect = anchor?.getBoundingClientRect();
+  if (!rect) return;
+  const width = Math.min(336, window.innerWidth - 24);
+  const left = Math.max(12, Math.min(rect.right - width, window.innerWidth - width - 12));
+  popover.style.left = `${left}px`;
+  popover.style.top = `${Math.min(rect.bottom + 8, window.innerHeight - 240)}px`;
 }
 
-function closeDrawer() {
-  document.getElementById("contextDrawer")?.classList.remove("open");
-  document.getElementById("contextDrawer")?.setAttribute("aria-hidden", "true");
-  document.getElementById("contextBackdrop")?.classList.add("hidden");
+function openContextPopover(trigger) {
+  renderContext();
+  const popover = document.getElementById("contextPopover");
+  if (!popover) return;
+  positionContextPopover(trigger);
+  popover.inert = false;
+  popover.classList.remove("hidden");
+  popover.setAttribute("aria-hidden", "false");
+  document.getElementById("contextAppInput")?.focus();
+}
+
+function closeContextPopover() {
+  const popover = document.getElementById("contextPopover");
+  if (popover?.contains(document.activeElement)) document.activeElement.blur();
+  if (popover) popover.inert = true;
+  popover?.classList.add("hidden");
+  popover?.setAttribute("aria-hidden", "true");
 }
 
 function closeUserPopover() {
@@ -129,7 +146,7 @@ function saveContext() {
     window.DeepAgentConsole?.toast(error.message, true);
     return;
   }
-  closeDrawer();
+  closeContextPopover();
 
   if (before.app !== next.app) {
     location.reload();
@@ -146,7 +163,7 @@ function resetContext() {
   }
   const hadScope = Boolean(api.loadContext().app);
   api.clearContext();
-  closeDrawer();
+  closeContextPopover();
   if (hadScope) {
     location.reload();
     return;
@@ -162,24 +179,29 @@ export function bindContextControls() {
   });
   document.addEventListener("click", (event) => {
     const target = event.target instanceof Element ? event.target : null;
-    if (target?.closest("[data-open-context]")) {
+    const trigger = target?.closest("[data-open-context]");
+    if (trigger) {
       closeUserPopover();
-      openDrawer();
+      const popover = document.getElementById("contextPopover");
+      if (popover?.classList.contains("hidden")) openContextPopover(trigger);
+      else closeContextPopover();
       return;
     }
+    if (!target?.closest("#contextPopover")) closeContextPopover();
     if (!target?.closest("#currentUserBtn")) closeUserPopover();
   });
-  document.getElementById("closeContextBtn")?.addEventListener("click", closeDrawer);
-  document.getElementById("contextBackdrop")?.addEventListener("click", closeDrawer);
+  document.getElementById("closeContextBtn")?.addEventListener("click", closeContextPopover);
   document.getElementById("saveContextBtn")?.addEventListener("click", saveContext);
   document.getElementById("resetContextBtn")?.addEventListener("click", resetContext);
   document.getElementById("retryIdentityBtn")?.addEventListener("click", () => location.reload());
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") {
-      closeDrawer();
+      closeContextPopover();
       closeUserPopover();
     }
   });
+  window.addEventListener("resize", closeContextPopover);
+  window.addEventListener("scroll", closeContextPopover, true);
   renderContext();
 }
 
@@ -188,6 +210,6 @@ window.DeepAgentConsoleContext = {
   get identity() {
     return identity;
   },
-  open: openDrawer,
+  open: openContextPopover,
   refreshIdentity,
 };

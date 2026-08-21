@@ -134,6 +134,7 @@ const llmModelsAdmin = {
           <td>
             <div class="row-actions">
               <button type="button" data-edit="${escapeHtml(model.id)}">编辑</button>
+              <button type="button" data-copy="${escapeHtml(model.id)}">复制</button>
               <button type="button" class="danger" data-delete="${escapeHtml(model.id)}" data-name="${escapeHtml(model.name)}">删除</button>
             </div>
           </td>
@@ -143,6 +144,9 @@ const llmModelsAdmin = {
 
       tbody.querySelectorAll("[data-edit]").forEach((button) => {
         button.addEventListener("click", () => this.openEdit(button.dataset.edit));
+      });
+      tbody.querySelectorAll("[data-copy]").forEach((button) => {
+        button.addEventListener("click", () => this.openCopy(button.dataset.copy));
       });
       tbody.querySelectorAll("[data-delete]").forEach((button) => {
         button.addEventListener("click", () => this.remove(button.dataset.delete, button.dataset.name));
@@ -202,6 +206,25 @@ const llmModelsAdmin = {
       setCheckedValues("llmModelModality", model.input_modalities || []);
       setCheckedValues("llmModelTag", model.tags || []);
       document.getElementById("llmModelModal").showModal();
+    } catch (error) {
+      showToast(error.message, true);
+    }
+  },
+
+  async openCopy(modelId) {
+    try {
+      const model = await apiFetch(`/api/v1/llm-models/${encodeURIComponent(modelId)}`);
+      this.openCreate({
+        model_label: model.name,
+        model_description: model.description || "",
+        runtime_model: model.model,
+        provider_api_url: model.base_url || "",
+        context_window_tokens: model.context_window_tokens,
+        max_output_tokens: model.max_output_tokens,
+        input_modalities: model.input_modalities || [],
+        tags: model.tags || [],
+      });
+      document.getElementById("llmModelModalTitle").textContent = `复制模型 · ${model.name}`;
     } catch (error) {
       showToast(error.message, true);
     }

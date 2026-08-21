@@ -59,11 +59,7 @@ function renderBuiltinError(message) {
   if (!tbody) return;
   tbody.innerHTML = `<tr><td colspan="5" class="empty-cell">
     <span class="configuration-error">${escapeHtml(message || "内置工具加载失败")}</span>
-    <button class="btn" type="button" data-retry-builtin-tools>重新加载</button>
   </td></tr>`;
-  tbody.querySelector("[data-retry-builtin-tools]")?.addEventListener("click", () => {
-    window.builtinToolsAdmin?.refresh({ reload: true });
-  });
 }
 
 const builtinToolsAdmin = {
@@ -81,12 +77,6 @@ const builtinToolsAdmin = {
     }
   },
 };
-
-document.addEventListener("DOMContentLoaded", () => {
-  document.getElementById("refreshBuiltinToolsBtn")?.addEventListener("click", () => {
-    builtinToolsAdmin.refresh({ reload: true });
-  });
-});
 
 window.builtinToolsAdmin = builtinToolsAdmin;
 window.__BuiltinToolsUI = {

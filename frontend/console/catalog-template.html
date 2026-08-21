@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <body>
   <main class="settings-card models-card">
-    <div class="models-toolbar">
+    <div class="panel-toolbar models-toolbar catalog-header">
       <div>
         <h1 class="catalog-title">
           模型目录
@@ -16,7 +16,7 @@
             </span>
           </span>
         </h1>
-        <p class="settings-desc models-desc">
+        <p class="panel-subtitle settings-desc models-desc">
           目录由管理员从 <strong>models.dev</strong> 手工更新。目录只用于预填模型配置，
           Agent 运行时始终读取“模型配置列表”中已保存的属性。
         </p>
@@ -27,8 +27,9 @@
         <input type="file" id="catalogImportInput" accept="application/json,.json" hidden />
         <button type="button" class="btn primary" id="catalogRefreshBtn"><i data-lucide="cloud-download"></i>在线更新</button>
       </div>
+    </div>
 
-      <div class="models-filters">
+    <div class="models-filters">
         <label class="field models-search-field" aria-label="搜索模型目录">
           <input type="search" id="catalogSearchInput" placeholder="搜索模型、Lab 或接入渠道" autocomplete="off" />
         </label>
@@ -52,7 +53,6 @@
             <button type="button" class="catalog-view-tab" data-catalog-view="provider"><i data-lucide="waypoints"></i><span>渠道</span></button>
           </div>
         </div>
-      </div>
     </div>
 
     <div class="catalog-feedback hidden" id="catalogFeedback" role="alert"></div>

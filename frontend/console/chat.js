@@ -454,13 +454,7 @@ function init() {
   if (agentFromUrl) state.agentId = agentFromUrl;
 
   el.agentSelect?.addEventListener("change", () => {
-    state.agentId = el.agentSelect.value;
-    localStorage.setItem("da_console_agent_id_v1", state.agentId);
-    if (!state.sessionId) {
-      state.llmModelId = defaultLlmModelId();
-    }
-    updateChatHeader();
-    loadUiTools(state.agentId);
+    void selectAgent(el.agentSelect.value);
   });
   el.modelSelect?.addEventListener("change", () => {
     state.llmModelId = el.modelSelect.value;
@@ -1744,7 +1738,9 @@ function updateChatHeader() {
 }
 
 function updateAgentSelectState() {
-  if (el.agentSelect) el.agentSelect.disabled = state.streaming || !!state.sessionId;
+  if (el.agentSelect) el.agentSelect.disabled = state.streaming;
+  const trigger = document.getElementById("workspaceAgentSelectTrigger");
+  if (trigger) trigger.disabled = state.streaming;
   updateComposerModelInfo();
 }
 
@@ -3115,6 +3111,35 @@ function renderMarkdownBody(src) {
   return `<div class="markdown-body">${renderMarkdown(src)}</div>`;
 }
 
+async function selectAgent(agentId) {
+  if (!agentId || !state.agents.some((agent) => agent.id === agentId)) return false;
+  if (state.streaming) {
+    showConsoleToast("请先停止当前生成，再切换 Agent", true);
+    return false;
+  }
+
+  if (state.agentId === agentId) return true;
+  newChat(agentId);
+  await syncSessionsFromBackend();
+  return true;
+}
+
+async function refreshAgentWorkspace() {
+  const previousAgentId = state.agentId;
+  const previousSessionId = state.sessionId;
+  await loadAgents();
+  await syncSessionsFromBackend();
+
+  const scoped = state.sessions.filter(
+    (session) => (session.agentId || "") === (state.agentId || ""),
+  );
+  const target = scoped.find((session) => (
+    state.agentId === previousAgentId && session.id === previousSessionId
+  )) || scoped[0];
+  if (target && !state.streaming) await switchSession(target);
+  return true;
+}
+
 window.DeepAgentConsoleChat = {
   state,
   newChat,
@@ -3132,15 +3157,8 @@ window.DeepAgentConsoleChat = {
     autoGrow();
     el.input.focus();
   },
-  selectAgent(agentId) {
-    if (!agentId || !state.agents.some((agent) => agent.id === agentId)) return;
-    if (state.agentId === agentId) return;
-    if (state.streaming) {
-      showConsoleToast("请先停止当前生成，再切换 Agent", true);
-      return;
-    }
-    newChat(agentId);
-  },
+  selectAgent,
+  refreshAgentWorkspace,
 };
 
 init();

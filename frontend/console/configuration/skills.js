@@ -32,20 +32,36 @@ const skillsAdmin = {
   renderList() {
     const pane = document.getElementById("skillListPane");
     if (!pane) return;
-    pane.innerHTML = state.skills.map((skill) => {
+    const renderCard = (skill) => {
       const selected = skill.code === this.selectedCode;
-      const source = skill.source === "builtin" ? "内置" : "上传";
       const runtime = this.runtimeLabel(skill);
       return `<button type="button" class="skill-list-item${selected ? " active" : ""}" data-skill-code="${escapeHtml(skill.code)}">
         <span class="skill-list-card-head">
           <span class="skill-list-icon"><i data-lucide="book-open-check"></i></span>
-          <span class="skill-list-title"><strong>${escapeHtml(skill.label)}</strong><span class="badge source-${escapeHtml(skill.source)}">${source}</span></span>
-          <i class="skill-list-chevron" data-lucide="chevron-right"></i>
+          <span class="skill-list-copy">
+            <span class="skill-list-title"><strong>${escapeHtml(skill.label)}</strong></span>
+            <code class="skill-list-code">${escapeHtml(skill.code)}</code>
+          </span>
+          <span class="skill-list-signals">
+            <span class="skill-runtime-dot runtime-${escapeHtml(skill.runtime_status || "missing")}" title="${escapeHtml(runtime.label)}"></span>
+            <span class="skill-list-count" title="References"><i data-lucide="book-open-text"></i>${Number(skill.reference_count || 0)}</span>
+            <span class="skill-list-count" title="Assets"><i data-lucide="paperclip"></i>${Number(skill.asset_count || 0)}</span>
+            <i class="skill-list-chevron" data-lucide="chevron-right"></i>
+          </span>
         </span>
-        <code class="skill-list-code">${escapeHtml(skill.code)}</code>
-        <span class="skill-list-meta"><span class="skill-runtime-dot runtime-${escapeHtml(skill.runtime_status || "missing")}"></span>${runtime.label}<span>${Number(skill.reference_count || 0)} References</span><span>${Number(skill.asset_count || 0)} Assets</span></span>
       </button>`;
-    }).join("");
+    };
+    const groups = [
+      ["内置", state.skills.filter((skill) => skill.source === "builtin")],
+      ["自定义", state.skills.filter((skill) => skill.source !== "builtin")],
+    ];
+    pane.innerHTML = groups
+      .filter(([, skills]) => skills.length)
+      .map(([label, skills]) => `<section class="skill-list-group">
+        <div class="skill-list-group-title"><span>${label}</span><small>${skills.length}</small></div>
+        <div class="skill-list-group-items">${skills.map(renderCard).join("")}</div>
+      </section>`)
+      .join("");
     pane.querySelectorAll("[data-skill-code]").forEach((button) => {
       button.addEventListener("click", () => this.select(button.dataset.skillCode));
     });
@@ -94,7 +110,7 @@ const skillsAdmin = {
       : selectedResource?.path || firstPreviewableResource?.path || "SKILL.md";
     this.selectedResourcePath = activeResourcePath;
     const skillDefinitionRow = `<li class="skill-resource-row${activeResourcePath === "SKILL.md" ? " active" : ""}" data-read-resource="SKILL.md" data-resource-path="SKILL.md" role="button" tabindex="0">
-      <span class="skill-resource-main"><i data-lucide="file-badge"></i><span><code>SKILL.md</code><small>Skill 定义 · 控制台索引摘要</small></span></span>
+      <span class="skill-resource-main"><i data-lucide="file-badge"></i><span><code>SKILL.md</code><small>Skill 定义 · 完整正文</small></span></span>
       <i class="skill-resource-open" data-lucide="chevron-right"></i>
     </li>`;
     const resourceRows = resources.length
@@ -119,8 +135,7 @@ const skillsAdmin = {
     detail.innerHTML = `
       <header class="skill-detail-header">
         <div class="skill-detail-identity">
-          <span class="skill-detail-eyebrow">Skill 详情</span>
-          <div class="skill-detail-title"><h3>${escapeHtml(skill.label)}</h3><span class="badge source-${escapeHtml(skill.source)}">${isBuiltin ? "代码内置 · 只读" : "上传安装"}</span><span class="badge runtime-${escapeHtml(skill.runtime_status || "missing")}">${escapeHtml(runtime.label)}</span></div>
+          <div class="skill-detail-title"><h3>${escapeHtml(skill.label)}</h3><span class="skill-source-label">${isBuiltin ? "内置" : "自定义"}</span><span class="skill-runtime-marker runtime-${escapeHtml(skill.runtime_status || "missing")}" title="${escapeHtml(`${runtime.label}：${runtime.detail}`)}" aria-label="${escapeHtml(runtime.label)}"><span class="skill-runtime-dot"></span></span></div>
           <code>${escapeHtml(skill.code)}</code>
         </div>
         <div class="row-actions skill-detail-actions">
@@ -128,7 +143,7 @@ const skillsAdmin = {
             <button class="btn skill-direct-action" type="button" data-skill-action="edit"><i data-lucide="pencil-line"></i><span>编辑</span></button>
             <button class="btn skill-direct-action" type="button" data-skill-action="replace"><i data-lucide="upload"></i><span>上传</span></button>
             <div class="skill-more-actions">
-              <button class="skill-more-trigger" type="button" data-skill-more-trigger aria-label="更多 Skill 操作" title="更多操作" aria-haspopup="menu" aria-expanded="false"><i data-lucide="ellipsis"></i></button>
+              <button class="skill-more-trigger" type="button" data-skill-more-trigger aria-label="更多 Skill 操作" title="更多操作" aria-haspopup="menu" aria-expanded="false"><i data-lucide="ellipsis-vertical"></i></button>
               <div class="skill-more-menu" data-skill-more-menu role="menu" hidden>
                 <button type="button" role="menuitem" data-skill-action="download"><i data-lucide="download"></i><span>导出</span></button>
                 ${skill.enabled ? `<button type="button" role="menuitem" data-skill-action="reload"><i data-lucide="refresh-cw"></i><span>重新加载</span></button>` : ""}
@@ -141,7 +156,6 @@ const skillsAdmin = {
       <div class="skill-detail-layout">
         <div class="skill-detail-main">
           <section class="skill-detail-summary">
-            <p class="skill-detail-description">${escapeHtml(skill.description)}</p>
             <dl class="skill-facts">
               <div><i data-lucide="tag"></i><span><dt>版本</dt><dd>${escapeHtml(skill.version || "未声明")}</dd></span></div>
               <div><i data-lucide="braces"></i><span><dt>包格式</dt><dd>${escapeHtml(skill.schema_version)}</dd></span></div>
@@ -153,13 +167,13 @@ const skillsAdmin = {
           </section>
           ${skill.runtime_status === "error" || skill.runtime_status === "missing" ? `<div class="skill-security-note"><i data-lucide="circle-alert"></i><span>${escapeHtml(runtime.detail)}</span></div>` : ""}
           <section class="skill-detail-section skill-resource-directory">
-            <div class="skill-lane-heading"><span class="skill-lane-icon"><i data-lucide="folder-open"></i></span><div><h4>资源文件</h4><p>SKILL.md、References 与 Assets</p></div><span>${resources.length + 1} 项</span></div>
+            <div class="skill-section-heading"><div><h4>资源文件</h4><p>SKILL.md、References 与 Assets</p></div><span>${resources.length + 1} 项</span></div>
             <ul class="skill-resource-list">${skillDefinitionRow}${resourceRows}</ul>
           </section>
         </div>
-        <aside class="skill-detail-lane">
+        <aside class="skill-detail-lane skill-preview-lane">
           <section class="skill-resource-preview" id="skillResourcePreview">
-            <div class="skill-lane-heading"><span class="skill-lane-icon"><i data-lucide="scan-text"></i></span><div><h4>文件预览</h4><p>选择可读资源后在此直接查看</p></div></div>
+            <div class="skill-section-heading"><div><h4>文件预览</h4><p>选择可读资源后在此直接查看</p></div></div>
             <div class="skill-preview-empty">正在加载预览…</div>
           </section>
         </aside>
@@ -221,6 +235,34 @@ const skillsAdmin = {
     return `${(bytes / 1024 / 1024).toFixed(1)} MiB`;
   },
 
+  previewStats(content) {
+    const text = String(content || "");
+    const characters = Array.from(text).length;
+    let tokenWeight = 0;
+    for (const character of text) {
+      if (/\s/u.test(character)) tokenWeight += 0.05;
+      else if (/\p{Script=Han}/u.test(character)) tokenWeight += 1;
+      else tokenWeight += 0.25;
+    }
+    return {
+      characters,
+      tokens: Math.max(1, Math.ceil(tokenWeight)),
+    };
+  },
+
+  previewHeading(path, { format = "", lineCount = null, content = "" } = {}) {
+    const stats = this.previewStats(content);
+    const firstLine = [
+      format ? String(format).toUpperCase() : "",
+      lineCount == null ? "" : `${Number(lineCount).toLocaleString("zh-CN")} 行`,
+      content ? `${stats.characters.toLocaleString("zh-CN")} 字` : "",
+    ].filter(Boolean).join(" · ");
+    return `<div class="skill-section-heading skill-preview-heading">
+      <div><h4>文件预览</h4><p>${escapeHtml(path)}</p></div>
+      ${firstLine ? `<div class="skill-preview-stats"><span>${escapeHtml(firstLine)}</span><span>约 ${stats.tokens.toLocaleString("zh-CN")} Token</span></div>` : ""}
+    </div>`;
+  },
+
   runtimeLabel(skill) {
     const labels = {
       ready: { label: "运行文件已就绪", detail: "当前 Pod 已加载该 Skill 的运行文件。" },
@@ -239,31 +281,14 @@ const skillsAdmin = {
     document.querySelectorAll("#skillDetailPane [data-resource-path]").forEach((row) => {
       row.classList.toggle("active", row.dataset.resourcePath === path);
     });
-    preview.innerHTML = `<div class="skill-lane-heading"><span class="skill-lane-icon"><i data-lucide="scan-text"></i></span><div><h4>文件预览</h4><p>${escapeHtml(path)}</p></div></div><div class="skill-preview-loading"><span class="loading-spinner"></span>正在读取资源…</div>`;
+    preview.innerHTML = `${this.previewHeading(path)}<div class="skill-preview-loading"><span class="loading-spinner"></span>正在读取资源…</div>`;
     window.lucide?.createIcons();
-    if (path === "SKILL.md") {
-      const skill = this.details.get(code) || {};
-      const summary = [
-        `# ${skill.label || code}`,
-        "",
-        String(skill.description || ""),
-        "",
-        `Skill code: ${skill.code || code}`,
-        `Version: ${skill.version || "未声明"}`,
-        "",
-        "完整 SKILL.md 正文由运行时按需加载；此处展示控制台可用的索引摘要。",
-      ].join("\n");
-      preview.innerHTML = `<div class="skill-lane-heading"><span class="skill-lane-icon"><i data-lucide="scan-text"></i></span><div><h4>文件预览</h4><p>SKILL.md · 索引摘要</p></div><span>MARKDOWN</span></div><pre>${escapeHtml(summary)}</pre>`;
-      window.lucide?.createIcons();
-      return;
-    }
     try {
       const page = await apiFetch(`/api/v1/skills/${encodeURIComponent(code)}/resources/${path.split("/").map(encodeURIComponent).join("/")}`);
-      const unitLabels = { line: "行", block: "逻辑块", row: "行" };
-      preview.innerHTML = `<div class="skill-lane-heading"><span class="skill-lane-icon"><i data-lucide="scan-text"></i></span><div><h4>文件预览</h4><p>${escapeHtml(path)}</p></div><span>${escapeHtml(page.format.toUpperCase())} · ${Number(page.returned_count || 0)} ${escapeHtml(unitLabels[page.unit] || page.unit)}</span></div><pre>${escapeHtml(page.content)}</pre>${page.has_more ? `<p class="skill-preview-more">内容较长，可由 Agent 使用 next_offset=${escapeHtml(page.next_offset)} 继续分页读取。</p>` : ""}`;
+      preview.innerHTML = `${this.previewHeading(path, { format: page.format, lineCount: page.returned_count, content: page.content })}<pre>${escapeHtml(page.content)}</pre>${page.has_more ? `<p class="skill-preview-more">内容较长，可由 Agent 使用 next_offset=${escapeHtml(page.next_offset)} 继续分页读取。</p>` : ""}`;
       window.lucide?.createIcons();
     } catch (error) {
-      preview.innerHTML = `<div class="skill-lane-heading"><span class="skill-lane-icon"><i data-lucide="scan-text"></i></span><div><h4>文件预览</h4><p>${escapeHtml(path)}</p></div></div><div class="skill-preview-empty is-error">${escapeHtml(error.message)}</div>`;
+      preview.innerHTML = `${this.previewHeading(path)}<div class="skill-preview-empty is-error">${escapeHtml(error.message)}</div>`;
       window.lucide?.createIcons();
     }
   },

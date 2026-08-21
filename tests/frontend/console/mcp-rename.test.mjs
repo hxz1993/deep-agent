@@ -33,6 +33,9 @@ test("只有 URL MCP 提供独立重命名操作", () => {
   assert.equal(ui.canRenameMcp("builtin"), false);
   assert.equal(ui.canRenameMcp("stdio"), false);
   assert.match(source, /data-rename-mcp/);
+  assert.match(source, /data-mcp-more-trigger[\s\S]*ellipsis-vertical/);
+  assert.match(source, />刷新<\/button>/);
+  assert.match(source, /data-mcp-more-menu[\s\S]*重命名[\s\S]*删除/);
 });
 
 test("普通编辑名称只读且重命名使用独立弹窗", () => {

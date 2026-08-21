@@ -14,7 +14,7 @@
           <h2>全局配置</h2>
           <p class="panel-subtitle">当前页面只读；修改环境变量并重启 DeepAgent 后生效。</p>
         </div>
-        <button class="btn" type="button" id="refreshGlobalSettingsBtn">重新加载</button>
+        <label class="agent-search global-settings-search"><i data-lucide="search"></i><input type="search" id="globalSettingsSearch" placeholder="搜索配置项或环境变量" autocomplete="off" /></label>
       </div>
       <div class="global-settings-notice">
         仅展示允许公开的运行配置；数据库连接、密钥、Token、代理地址和本地路径不会出现在此页面。
@@ -103,11 +103,10 @@
     <section class="panel" id="panel-llm-models">
       <div class="panel-toolbar">
         <div>
-          <h2>模型配置列表</h2>
+          <h2>模型管理</h2>
           <p class="panel-subtitle">这里保存的模态、标签和 Token 上限是 Agent 运行时唯一模型事实。</p>
         </div>
         <div class="panel-toolbar-actions">
-          <button class="btn" type="button" data-open-catalog>从模型目录选择</button>
           <button class="btn primary" type="button" id="newLlmModelBtn"><i data-lucide="plus"></i>新建模型</button>
         </div>
       </div>
@@ -137,39 +136,41 @@
       <div class="panel-toolbar">
         <div>
           <h2>内置工具</h2>
-          <p class="panel-subtitle">内置工具随 DeepAgent 版本发布，无需注册；请在 Agent 能力配置中选择是否启用。</p>
+          <p class="panel-subtitle">集中查看可由 Agent 配置的能力工具包，以及按运行条件自动注入、无需配置的系统工具。</p>
         </div>
-        <button class="btn" type="button" id="refreshBuiltinToolsBtn">重新加载</button>
       </div>
-      <div class="table-wrap console-list-a">
-        <table class="data-table builtin-tools-table">
-          <thead>
-            <tr>
-              <th>能力包</th>
-              <th>能力编码</th>
-              <th>包含工具</th>
-              <th>默认状态</th>
-              <th>说明</th>
-            </tr>
-          </thead>
-          <tbody id="builtinToolsTableBody">
-            <tr><td colspan="5" class="empty-cell">正在加载内置工具…</td></tr>
-          </tbody>
-        </table>
-      </div>
-    </section>
-
-    <!-- Read-only runtime system tools panel -->
-    <section class="panel system-tools-panel" id="panel-system-tools">
-      <div class="panel-toolbar">
-        <div>
-          <h2>系统工具</h2>
-          <p class="panel-subtitle">系统工具由 DeepAgent 按当前 Agent 和 Run 条件自动注入，不参与 Agent 能力配置。</p>
-        </div>
-        <button class="btn" type="button" id="refreshSystemToolsBtn"><i data-lucide="refresh-cw"></i>重新加载</button>
-      </div>
-      <div class="system-tool-domains" id="systemToolDomains" aria-live="polite">
-        <div class="system-tools-state">正在加载系统工具…</div>
+      <div class="builtin-tools-sections">
+        <section class="builtin-tools-section">
+          <div class="configuration-subheading">
+            <h3>能力工具包</h3>
+            <p>随 DeepAgent 版本发布，可在 Agent 能力配置中选择是否启用。</p>
+          </div>
+          <div class="table-wrap console-list-a">
+            <table class="data-table builtin-tools-table">
+              <thead>
+                <tr>
+                  <th>能力包</th>
+                  <th>能力编码</th>
+                  <th>包含工具</th>
+                  <th>默认状态</th>
+                  <th>说明</th>
+                </tr>
+              </thead>
+              <tbody id="builtinToolsTableBody">
+                <tr><td colspan="5" class="empty-cell">正在加载内置工具…</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+        <section class="builtin-tools-section">
+          <div class="configuration-subheading">
+            <h3>运行时系统工具</h3>
+            <p>由 DeepAgent 按当前 Agent 和 Run 条件自动注入，不参与 Agent 能力配置。</p>
+          </div>
+          <div class="system-tool-domains" id="systemToolDomains" aria-live="polite">
+            <div class="system-tools-state">正在加载系统工具…</div>
+          </div>
+        </section>
       </div>
     </section>
 
@@ -231,7 +232,7 @@
       <div class="panel-toolbar">
         <div class="panel-title-copy">
           <h2>UI 工具（HITL）</h2>
-          <p class="panel-subtitle">先管理工具包，再在选中的手工工具包中维护 UI 工具；Agent 按工具包整体启用。</p>
+          <p class="panel-subtitle">先管理工具包，再在选中的自定义工具包中维护 UI 工具；Agent 按工具包整体启用。</p>
         </div>
         <button class="btn primary" id="newUiToolPackageBtn"><i data-lucide="plus"></i>新建工具包</button>
       </div>

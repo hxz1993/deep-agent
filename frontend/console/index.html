@@ -19,9 +19,9 @@
   <link rel="icon" type="image/svg+xml" href="./favicon.svg?v=20260728-1" />
   <link id="hljsTheme" rel="stylesheet" href="/vendor/highlight-github-dark.min.css" />
   <link rel="stylesheet" href="./themes.css?v=20260821-2" />
-  <link rel="stylesheet" href="./workspace.css?v=20260815-3" />
-  <link rel="stylesheet" href="./configuration/configuration.css?v=20260821-13" />
-  <link rel="stylesheet" href="./console.css?v=20260821-11" />
+  <link rel="stylesheet" href="./workspace.css?v=20260821-1" />
+  <link rel="stylesheet" href="./configuration/configuration.css?v=20260822-2" />
+  <link rel="stylesheet" href="./console.css?v=20260821-13" />
 </head>
 <body>
   <div class="console-shell">
@@ -46,7 +46,7 @@
     <header class="console-topbar">
       <div class="console-brand">
         <span class="console-brand-icon" aria-hidden="true"><img src="./favicon.svg?v=20260728-1" alt="" /></span>
-        <div class="console-brand-copy"><strong>DeepAgent</strong><span>一体化控制台</span></div>
+        <div class="console-brand-copy"><strong>DeepAgent</strong></div>
         <i class="breadcrumb-chevron" data-lucide="chevron-right"></i>
         <strong class="console-section-name" id="consoleSectionName">对话测试</strong>
       </div>
@@ -84,10 +84,6 @@
         <div class="workspace-loading" id="workspaceLoading">
           <span class="loading-spinner"></span><span>正在加载测试工作台…</span>
         </div>
-        <div class="workspace-mobile-bar hidden" id="workspaceMobileBar">
-          <button type="button" class="mobile-agent-trigger" data-workspace-drawer="agents"><i data-lucide="bot"></i><span>Agent</span></button>
-          <button type="button" class="mobile-session-trigger" data-workspace-drawer="sessions"><i data-lucide="messages-square"></i><span>会话</span></button>
-        </div>
         <div class="workspace-grid hidden" id="workspaceGrid">
           <aside class="agent-pane">
             <div class="pane-heading">
@@ -109,7 +105,6 @@
             </div>
           </aside>
         </div>
-        <button type="button" class="workspace-drawer-backdrop hidden" id="workspaceDrawerBackdrop" aria-label="关闭侧栏"></button>
       </section>
 
       <section class="console-page" id="page-configuration" data-page-panel="configuration">
@@ -122,7 +117,6 @@
             <button class="tab resource-btn active" data-tab="agents"><i data-lucide="bot"></i><span>Agent</span></button>
             <button class="tab resource-btn" data-tab="llm-models"><i data-lucide="cpu"></i><span>模型</span></button>
             <button class="tab resource-btn" data-tab="builtin-tools"><i data-lucide="blocks"></i><span>内置工具</span></button>
-            <button class="tab resource-btn" data-tab="system-tools"><i data-lucide="wrench"></i><span>系统工具</span></button>
             <button class="tab resource-btn" data-tab="skills"><i data-lucide="book-open-check"></i><span>Skill</span></button>
             <button class="tab resource-btn" data-tab="mcp"><i data-lucide="plug-zap"></i><span>MCP</span></button>
             <button class="tab resource-btn" data-tab="ui-tools"><i data-lucide="panel-top"></i><span>UI 工具</span></button>
@@ -169,20 +163,12 @@
     <div class="auth-lock-content"><i data-lucide="shield-alert" data-access-lock-icon></i><h2 id="authLockTitle">正在检查控制台权限</h2><p id="authLockMessage">请稍候…</p><button type="button" id="retryIdentityBtn">重新检查</button></div>
   </div>
 
-  <div class="drawer-backdrop hidden" id="contextBackdrop"></div>
-  <aside class="context-drawer" id="contextDrawer" aria-hidden="true">
-    <header><div><strong>请求Header</strong><span>仅影响当前控制台发出的请求</span></div><button type="button" id="closeContextBtn" title="关闭"><i data-lucide="x"></i></button></header>
-    <div class="context-body">
-      <section class="context-section">
-        <h3>调试上下文</h3>
-        <label><span>应用编码 App</span><input id="contextAppInput" autocomplete="off" placeholder="例如 mdxath003" /></label>
-        <p>Space 根据 App 自动推导，语言固定为简体中文。</p>
-      </section>
-      <section class="effective-context">
-        <h3>最终生效值</h3><dl id="effectiveContext"></dl>
-      </section>
-    </div>
-    <footer><button type="button" id="resetContextBtn">恢复继承值</button><button type="button" class="primary" id="saveContextBtn">应用上下文</button></footer>
+  <aside class="context-popover hidden" id="contextPopover" aria-hidden="true" role="dialog" aria-label="测试 Header" inert>
+    <header><div><strong>测试 Header</strong><span>仅影响当前控制台请求</span></div><button type="button" id="closeContextBtn" title="关闭" aria-label="关闭"><i data-lucide="x"></i></button></header>
+    <label class="context-app-field"><span>应用编码 App</span><input id="contextAppInput" autocomplete="off" placeholder="例如 mdxath003" /></label>
+    <p class="context-popover-hint">Space 根据 App 自动推导，语言固定为简体中文。</p>
+    <dl class="context-effective-values" id="effectiveContext"></dl>
+    <footer><button type="button" id="resetContextBtn">恢复继承</button><button type="button" class="primary" id="saveContextBtn">应用</button></footer>
   </aside>
 
   <div class="console-toast hidden" id="consoleToast"></div>
@@ -198,6 +184,6 @@
   <script src="../vendor/marked.min.js"></script>
   <script src="../vendor/purify.min.js"></script>
   <script src="../vendor/highlight.min.js"></script>
-  <script type="module" src="./main.js?v=20260821-15"></script>
+  <script type="module" src="./main.js?v=20260822-3"></script>
 </body>
 </html>

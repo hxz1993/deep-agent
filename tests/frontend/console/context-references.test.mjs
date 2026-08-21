@@ -22,7 +22,7 @@ test("结构化上下文可以单独形成可见的用户历史轮次", () => {
   assert.match(workspaceCss, /\.context-ref-chip\s*\{/);
 });
 
-test("上下文引用使用线性信息图标在右侧栏切换只读 JSON", () => {
+test("上下文引用使用线性信息图标切换到右栏第三页签", () => {
   assert.match(chatSource, /className = "context-ref-info"/);
   assert.match(chatSource, /info\.innerHTML = lucideIcon\("info"\)/);
   assert.doesNotMatch(chatSource, /info\.innerHTML = lucideIcon\("circle-info"\)/);
@@ -30,8 +30,9 @@ test("上下文引用使用线性信息图标在右侧栏切换只读 JSON", () 
   assert.match(chatSource, /toggleContextReferenceInspector\(ref, branchPoint\)/);
   assert.match(workspaceSource, /function toggleContextReferenceInspector/);
   assert.match(workspaceSource, /JSON\.stringify\(reference, null, 2\)/);
-  assert.match(workspaceSource, /if \(renderContextReferenceInspector\(host, state\)\) return/);
-  assert.match(workspaceSource, /if \(selectedContextReference\)[\s\S]*openInspectorPane\(\)[\s\S]*renderInspector\(\)/);
+  assert.match(workspaceSource, /inspectorActiveTab = "context";[\s\S]*openInspectorPane\(\)[\s\S]*renderInspector\(\)/);
+  assert.match(workspaceSource, /data-inspector-tab="context"/);
+  assert.match(workspaceSource, /尚未选择上下文引用/);
   assert.doesNotMatch(workspaceSource, /contextReferenceDialog/);
 });
 

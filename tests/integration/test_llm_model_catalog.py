@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import unittest
 from unittest.mock import AsyncMock, patch
 
@@ -96,6 +97,66 @@ class LlmModelCatalogIntegrationTests(unittest.IsolatedAsyncioTestCase):
             ) as client:
                 response = await client.post("/api/v1/llm-models/catalog/refresh")
         self.assertEqual(response.status_code, 502)
+        after = [
+            (row.provider_id, row.provider_model_id)
+            for row in await self.stores.model_catalog.list_all()
+        ]
+        self.assertEqual(after, before)
+
+    async def test_import_official_catalog_json_replaces_catalog(self) -> None:
+        await self._seed_catalog()
+        raw = json.dumps({"models": MODELS, "providers": PROVIDERS}).encode()
+        async with AsyncClient(transport=self._transport, base_url="http://test") as client:
+            response = await client.post(
+                "/api/v1/llm-models/catalog/import",
+                files={"file": ("catalog.json", raw, "application/json")},
+            )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["rows"], 2)
+        self.assertEqual(len(await self.stores.model_catalog.list_all()), 2)
+
+    async def test_exported_catalog_json_can_be_imported_again(self) -> None:
+        await self._seed_catalog()
+        async with AsyncClient(transport=self._transport, base_url="http://test") as client:
+            export_response = await client.get("/api/v1/llm-models/catalog/export")
+            import_response = await client.post(
+                "/api/v1/llm-models/catalog/import",
+                files={
+                    "file": (
+                        "catalog.json",
+                        export_response.content,
+                        "application/json",
+                    )
+                },
+            )
+        self.assertEqual(export_response.status_code, 200, export_response.text)
+        self.assertEqual(export_response.headers["content-type"], "application/json")
+        self.assertRegex(
+            export_response.headers["content-disposition"],
+            r'models-dev-catalog-\d{8}-\d{6}\.json',
+        )
+        self.assertEqual(set(export_response.json()), {"models", "providers", "labs"})
+        self.assertEqual(import_response.status_code, 200, import_response.text)
+        self.assertEqual(import_response.json()["rows"], 2)
+
+    async def test_export_empty_catalog_returns_conflict(self) -> None:
+        async with AsyncClient(transport=self._transport, base_url="http://test") as client:
+            response = await client.get("/api/v1/llm-models/catalog/export")
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("模型目录为空", response.json()["detail"])
+
+    async def test_invalid_import_preserves_old_catalog(self) -> None:
+        await self._seed_catalog()
+        before = [
+            (row.provider_id, row.provider_model_id)
+            for row in await self.stores.model_catalog.list_all()
+        ]
+        async with AsyncClient(transport=self._transport, base_url="http://test") as client:
+            response = await client.post(
+                "/api/v1/llm-models/catalog/import",
+                files={"file": ("catalog.json", b"{", "application/json")},
+            )
+        self.assertEqual(response.status_code, 422)
         after = [
             (row.provider_id, row.provider_model_id)
             for row in await self.stores.model_catalog.list_all()

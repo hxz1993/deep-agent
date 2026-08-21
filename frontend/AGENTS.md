@@ -185,7 +185,7 @@ python3.12 -m http.server 5173
 | 一体化控制台布局与编排 | `console/index.html`、`console/console.css`、`console/workspace.js`、`console/configuration.js` |
 | 配置 CRUD | `console/configuration/` 下各文件 |
 | 模型运行属性 | `console/configuration/llm-models.js`；上下文、最大输出、输入模态和 tags 保存到 `llm_models` |
-| 模型目录 | `console/configuration/catalog.js` → DB-only GET 与管理员 POST refresh |
+| 模型目录 | `console/configuration/catalog.js` → DB-only GET、管理员联网 refresh 与JSON import/export |
 | 上下文压缩观测 | `console/chat.js` 拉取 session context-status；`console/workspace.js` 在右侧会话详情泳道展示 |
 | 上下文压缩测试会话 | `console/workspace.js` → 场景弹窗、创建后打开会话并预填验证问题 |
 | Markdown 主题/安全 | `vendor/`，见 `vendor/README.md` |
@@ -206,7 +206,7 @@ python3.12 -m http.server 5173
 - 用户消息下方只提供复制可见正文的图标操作，不提供编辑/截断历史入口；附件、Context Reference和隐藏元数据不得拼入复制内容。
 - URL MCP 的普通编辑名称只读；改名必须走列表中的独立“重命名”操作。成功后 Console 同步刷新
   MCP、工具包与 Agent 能力目录；Builtin 和历史 stdio MCP 不显示重命名入口。
-- 模型目录只由管理员手工刷新 models.dev，保存模型配置不得触发外网请求。目录按 Lab → Model → Provider 展示，仅负责预填；模态与能力 tags 分开，Agent 运行时只认 `llm_models`。
+- 模型目录只由管理员手工联网刷新models.dev，或导入models.dev官方`catalog.json`；保存模型配置不得触发外网请求。目录按 Lab → Model → Provider 展示，仅负责预填；模态与能力 tags 分开，Agent 运行时只认 `llm_models`。
 - 上下文压缩在模型配置有效上下文窗口时自动启用；Console 只读展示全局策略、预算、
   压缩前后和 Checkpoint 状态，不提供启用开关，也不展示或编辑摘要正文。
 - Console 从 `/uploads/capabilities`读取实际 MIME、单文件大小和单次数量限制；新请求不得再发送

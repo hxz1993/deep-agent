@@ -22,7 +22,9 @@
         </p>
       </div>
       <div class="models-toolbar-actions">
-        <button type="button" class="btn" id="catalogReloadBtn">重新加载</button>
+        <button type="button" class="btn" id="catalogImportBtn">导入JSON</button>
+        <input type="file" id="catalogImportInput" accept="application/json,.json" hidden />
+        <button type="button" class="btn" id="catalogExportBtn">导出JSON</button>
         <button type="button" class="btn primary" id="catalogRefreshBtn">更新模型目录</button>
       </div>
     </div>
@@ -78,7 +80,7 @@
         </div>
         <div class="catalog-empty hidden" id="catalogEmptyState">
           <strong>模型目录尚未更新</strong>
-          <span>点击“更新模型目录”，联网获取并完整校验 models.dev 目录后写入数据库。</span>
+          <span>可以联网更新，也可以导入models.dev官方catalog.json后写入数据库。</span>
           <button type="button" class="btn primary" data-catalog-refresh>更新模型目录</button>
         </div>
       </section>

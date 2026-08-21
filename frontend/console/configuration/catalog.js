@@ -383,6 +383,96 @@ async function refreshCatalog() {
   await loadCatalog();
 }
 
+async function importCatalog(file) {
+  if (catalogState.loading || !file) return;
+  catalogState.loading = true;
+  setFeedback(`正在校验并导入 ${file.name}，请稍候…`);
+  element("catalogRefreshBtn").disabled = true;
+  element("catalogImportBtn").disabled = true;
+  const body = new FormData();
+  body.append("file", file, file.name);
+  try {
+    const response = await daFetch(serviceUrl("api/v1/llm-models/catalog/import"), {
+      method: "POST",
+      body,
+    });
+    const result = await parseJsonResponse(response);
+    if (!response.ok) {
+      const detail = result?.detail;
+      throw new Error(
+        typeof detail === "string"
+          ? detail
+          : detail
+            ? JSON.stringify(detail)
+            : `HTTP ${response.status}`,
+      );
+    }
+    setFeedback(
+      `目录导入完成：${result.labs} 个 Lab、${result.models} 个模型、${result.providers} 个接入渠道、${result.rows} 条组合。`,
+    );
+  } catch (error) {
+    setFeedback(`目录导入失败，旧目录已保留：${error.message}`, true);
+    catalogState.loading = false;
+    renderPagination();
+    element("catalogRefreshBtn").disabled = false;
+    element("catalogImportBtn").disabled = false;
+    return;
+  }
+  catalogState.loading = false;
+  element("catalogRefreshBtn").disabled = false;
+  element("catalogImportBtn").disabled = false;
+  catalogState.offset = 0;
+  await loadCatalog();
+}
+
+function exportFileName(response) {
+  const disposition = response.headers.get("content-disposition") || "";
+  const match = disposition.match(/filename="?([^";]+)"?/i);
+  return match?.[1] || "models-dev-catalog.json";
+}
+
+async function exportCatalog() {
+  if (catalogState.loading) return;
+  catalogState.loading = true;
+  setFeedback("正在导出当前模型目录…");
+  element("catalogImportBtn").disabled = true;
+  element("catalogExportBtn").disabled = true;
+  element("catalogRefreshBtn").disabled = true;
+  try {
+    const response = await daFetch(serviceUrl("api/v1/llm-models/catalog/export"));
+    if (!response.ok) {
+      const result = await parseJsonResponse(response);
+      const detail = result?.detail;
+      throw new Error(
+        typeof detail === "string"
+          ? detail
+          : detail
+            ? JSON.stringify(detail)
+            : `HTTP ${response.status}`,
+      );
+    }
+    const url = URL.createObjectURL(await response.blob());
+    const anchor = document.createElement("a");
+    try {
+      anchor.href = url;
+      anchor.download = exportFileName(response);
+      document.body.appendChild(anchor);
+      anchor.click();
+    } finally {
+      anchor.remove();
+      URL.revokeObjectURL(url);
+    }
+    setFeedback("当前模型目录已导出，该JSON可直接重新导入。");
+  } catch (error) {
+    setFeedback(`目录导出失败：${error.message}`, true);
+  } finally {
+    catalogState.loading = false;
+    element("catalogImportBtn").disabled = false;
+    element("catalogExportBtn").disabled = false;
+    element("catalogRefreshBtn").disabled = false;
+  }
+}
+
 function initCatalog() {
   document.querySelectorAll("[data-catalog-view]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -412,8 +502,20 @@ function initCatalog() {
     catalogState.offset = 0;
     loadCatalog();
   });
-  element("catalogReloadBtn")?.addEventListener("click", loadCatalog);
   element("catalogRefreshBtn")?.addEventListener("click", refreshCatalog);
+  element("catalogExportBtn")?.addEventListener("click", exportCatalog);
+  element("catalogImportBtn")?.addEventListener("click", () => {
+    const input = element("catalogImportInput");
+    if (!input) return;
+    input.value = "";
+    input.click();
+  });
+  element("catalogImportInput")?.addEventListener("change", async (event) => {
+    const input = event.target;
+    const file = input.files?.[0];
+    await importCatalog(file);
+    input.value = "";
+  });
   document.querySelectorAll("[data-catalog-refresh]").forEach((button) => {
     button.addEventListener("click", refreshCatalog);
   });

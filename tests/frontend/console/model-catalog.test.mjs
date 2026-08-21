@@ -24,9 +24,16 @@ const consoleStyles = await readFile(
   "utf8",
 );
 
-test("模型目录只使用数据库查询和管理员手工刷新", () => {
+test("模型目录支持联网刷新和可往返的JSON导入导出", () => {
   assert.match(catalogSource, /\/api\/v1\/llm-models\/catalog\?\$\{queryString\(\)\}/);
   assert.match(catalogSource, /\/api\/v1\/llm-models\/catalog\/refresh/);
+  assert.match(catalogSource, /api\/v1\/llm-models\/catalog\/import/);
+  assert.match(catalogSource, /api\/v1\/llm-models\/catalog\/export/);
+  assert.match(catalogSource, /new FormData\(\)/);
+  assert.match(catalogTemplate, /id="catalogImportBtn"[^>]*>导入JSON/);
+  assert.match(catalogTemplate, /id="catalogExportBtn"[^>]*>导出JSON/);
+  assert.match(catalogTemplate, /id="catalogImportInput"[^>]*accept="application\/json,.json"/);
+  assert.doesNotMatch(catalogTemplate, /catalogReloadBtn|重新加载/);
   assert.doesNotMatch(catalogSource, /source=|sourceSelect|refresh=true|bundled/);
   assert.doesNotMatch(catalogTemplate, /内置 JSON|自动（优先|modality_data/);
 });

@@ -8,13 +8,34 @@ import unittest
 import httpx
 
 from deep_agent.agent.models.models_dev import (
+    ModelsDevCatalogError,
     ModelsDevFetchError,
     fetch_models_dev_bundle,
+    parse_models_dev_catalog,
     parse_labs_page,
 )
 
 
 class ModelsDevClientTests(unittest.IsolatedAsyncioTestCase):
+    def test_parse_official_catalog_json_for_offline_import(self) -> None:
+        bundle = parse_models_dev_catalog(
+            json.dumps(
+                {
+                    "models": {"openai/gpt-test": {"id": "openai/gpt-test"}},
+                    "providers": {"openai": {"models": {}}},
+                }
+            ).encode()
+        )
+        self.assertIn("openai/gpt-test", bundle.models)
+        self.assertIn("openai", bundle.providers)
+        self.assertEqual(bundle.labs, [])
+
+    def test_parse_offline_catalog_rejects_invalid_json_and_shape(self) -> None:
+        with self.assertRaisesRegex(ModelsDevCatalogError, "JSON格式错误"):
+            parse_models_dev_catalog(b"{")
+        with self.assertRaisesRegex(ModelsDevCatalogError, "providers"):
+            parse_models_dev_catalog({"models": {}})
+
     def test_parse_labs_page_reads_only_lab_entries(self) -> None:
         payload = [
             {"type": "lab", "id": "openai", "name": "OpenAI"},

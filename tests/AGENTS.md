@@ -53,7 +53,7 @@ tests/
 | `test_mcp_lease_manager.py` | MCP lease 管理 |
 | `test_title_generator.py` | AI 标题清洗与无配置行为 |
 | `test_catalog.py` | models.dev Lab/Model/Provider 标准化、白名单、扩展元数据和数据库视图 |
-| `test_models_dev.py` | models.dev 严格获取与 Lab 可选补充 |
+| `test_models_dev.py` | models.dev 严格获取、官方JSON解析与 Lab 可选补充 |
 | `test_llm_models.py` | 模型上下文、最大输出、输入模态与 tags Store/Schema |
 | `test_context_compaction.py` | 统一 Token 估算、动态输出预测、usage 回读、六段增量单次摘要、同输入瞬时错误重试、SSE 状态、原始历史不改写、脱敏 Checkpoint、CAS 与兜底；覆盖率门槛由 `tests/check_context_compaction_coverage.py` 执行 |
 | `test_context_test_scenarios.py` | 管理员测试会话场景、实时预算、消息往返序列化、常驻接口与用户归属 |

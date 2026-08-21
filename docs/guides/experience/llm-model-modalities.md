@@ -92,6 +92,29 @@ POST /api/v1/llm-models/catalog/refresh
 
 任何失败都保留旧目录。系统不做启动同步、定时同步、保存模型时同步或 Agent 运行时同步。
 
+部署环境无法访问models.dev时，管理员可在可联网环境下下载官方
+`https://models.dev/catalog.json`，再通过Console“导入JSON”或下列接口导入：
+
+```http
+POST /api/v1/llm-models/catalog/import
+Content-Type: multipart/form-data
+
+file=<catalog.json>
+```
+
+导入与联网刷新使用完全相同的解析、Provider白名单、标准化与原子替换逻辑。
+文件必须是UTF-8 JSON，且不超过16 MiB；校验失败保留旧目录。导入不会修改
+`llm_models`中已配置的Base URL、API Key或模型属性。
+
+当前数据库目录可通过Console“导出JSON”或下列接口导出：
+
+```http
+GET /api/v1/llm-models/catalog/export
+```
+
+导出文件使用与导入相同的`models/providers/labs`结构，可原样再导入。它只包含当前
+Provider白名单和标准化规则已接受的目录项，不是models.dev原始全量文件的备份。
+
 目录查询：
 
 ```http
@@ -116,6 +139,7 @@ GET /api/v1/llm-models/catalog?view=provider
 - xAI
 
 OpenRouter、Azure、Bedrock、Vertex 和长尾 Gateway 暂不进入目录。白名单位于代码中，不提供在线配置。
+因此models.dev即使已收录某个模型，若它只由白名单外的渠道提供，刷新和导入都不会展示。
 
 ## 6. 已移除的旧机制
 

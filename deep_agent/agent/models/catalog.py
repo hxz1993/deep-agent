@@ -490,6 +490,102 @@ def normalize_models_dev_bundle(
     return rows, stats
 
 
+def export_models_dev_catalog(rows: Iterable[ModelCatalog]) -> dict[str, Any]:
+    """Build a catalog JSON payload that can be imported without losing normalized data."""
+    models: dict[str, dict[str, Any]] = {}
+    providers: dict[str, dict[str, Any]] = {}
+    labs: dict[str, dict[str, Any]] = {}
+
+    for row in sorted(
+        rows,
+        key=lambda item: (
+            item.canonical_model_id,
+            item.provider_id,
+            item.provider_model_id,
+        ),
+    ):
+        canonical = deepcopy(row.model_metadata or {})
+        canonical["id"] = row.canonical_model_id
+        canonical.setdefault("name", row.model_label)
+        if row.model_description:
+            canonical.setdefault("description", row.model_description)
+        if row.family:
+            canonical.setdefault("family", row.family)
+        if row.release_date:
+            canonical.setdefault("release_date", row.release_date)
+        canonical.setdefault(
+            "modalities",
+            {
+                "input": list(row.input_modalities or []),
+                "output": list(row.output_modalities or []),
+            },
+        )
+        canonical.setdefault(
+            "limit",
+            {
+                "context": row.canonical_context_window_tokens,
+                "output": row.canonical_max_output_tokens,
+            },
+        )
+        models.setdefault(row.canonical_model_id, canonical)
+
+        provider_metadata = deepcopy(row.provider_metadata or {})
+        provider = providers.setdefault(
+            row.provider_id,
+            {
+                "id": row.provider_id,
+                "name": row.provider_label,
+                "npm": row.provider_npm,
+                "api": row.provider_api_url,
+                "doc": row.provider_doc_url,
+                "env": provider_metadata.get("env"),
+                "models": {},
+            },
+        )
+        provider_model: dict[str, Any] = {
+            "id": row.canonical_model_id,
+            "name": row.model_label,
+            "modalities": {
+                "input": list(row.input_modalities or []),
+                "output": list(row.output_modalities or []),
+            },
+            "limit": {
+                "context": row.context_window_tokens,
+                "output": row.max_output_tokens,
+            },
+            **deepcopy(row.capabilities or {}),
+        }
+        if row.model_description:
+            provider_model["description"] = row.model_description
+        if row.family:
+            provider_model["family"] = row.family
+        if row.release_date:
+            provider_model["release_date"] = row.release_date
+        if row.status:
+            provider_model["status"] = row.status
+        model_provider = provider_metadata.get("provider")
+        if isinstance(model_provider, Mapping) and model_provider:
+            provider_model["provider"] = deepcopy(dict(model_provider))
+        for key in ("reasoning_options", "experimental"):
+            value = provider_metadata.get(key)
+            if value is not None:
+                provider_model[key] = deepcopy(value)
+        provider["models"][row.provider_model_id] = provider_model
+
+        lab = deepcopy(row.lab_metadata or {})
+        lab["id"] = row.lab_id
+        lab.setdefault("name", row.lab_label)
+        if row.lab_description:
+            lab.setdefault("description", row.lab_description)
+        labs.setdefault(row.lab_id, lab)
+
+    return {
+        "models": models,
+        "providers": providers,
+        "labs": [labs[key] for key in sorted(labs)],
+    }
+
+
 def _normalized_url(value: str | None) -> str:
     return (value or "").strip().rstrip("/").lower()
 

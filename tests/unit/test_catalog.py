@@ -9,6 +9,7 @@ from deep_agent.agent.models.catalog import (
     CatalogValidationError,
     PROVIDER_ALLOWLIST,
     build_catalog_page,
+    export_models_dev_catalog,
     normalize_models_dev_bundle,
 )
 from deep_agent.db.models import LlmModel, ModelCatalog
@@ -216,6 +217,42 @@ class CatalogNormalizationTests(unittest.TestCase):
         self.assertEqual(rows[0]["canonical_model_id"], "openai/gpt-test")
         self.assertEqual(rows[0]["lab_label"], "OpenAI Research")
         self.assertEqual(rows[0]["lab_description"], "Embedded Lab metadata")
+
+    def test_exported_catalog_can_be_imported_without_losing_normalized_rows(self) -> None:
+        original_rows, _ = normalize_models_dev_bundle(MODELS, PROVIDERS, LABS)
+        payload = export_models_dev_catalog(
+            [ModelCatalog(**row) for row in original_rows]
+        )
+
+        imported_rows, stats = normalize_models_dev_bundle(
+            payload["models"],
+            payload["providers"],
+            payload["labs"],
+        )
+
+        self.assertEqual(stats.row_count, 2)
+        keys = (
+            "provider_id",
+            "provider_model_id",
+            "canonical_model_id",
+            "context_window_tokens",
+            "max_output_tokens",
+            "input_modalities",
+            "output_modalities",
+            "capabilities",
+        )
+        row_key = lambda row: (row["provider_id"], row["provider_model_id"])
+        self.assertEqual(
+            {
+                row_key(row): {key: row[key] for key in keys}
+                for row in imported_rows
+            },
+            {
+                row_key(row): {key: row[key] for key in keys}
+                for row in original_rows
+            },
+        )
+        self.assertEqual(payload["labs"][0]["description"], "Anthropic Lab")
 
 
 class CatalogViewTests(unittest.TestCase):

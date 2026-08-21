@@ -3,6 +3,17 @@
 本文件记录 DeepAgent 的产品版本变化，按新版本到旧版本排列。当前代码版本以
 `deep_agent.__version__` 为准；数据库结构版本以 Alembic head 为准，两者互不替代。
 
+## v0.4.20
+
+- 模型目录增加models.dev官方`catalog.json`离线导入，用于部署环境无法访问models.dev时由
+  管理员手工更新。
+- 增加当前数据库模型目录JSON导出，导出的`models/providers/labs`可原样再导入；
+  Console删除仅重读数据库的冗余“重新加载”按钮。
+- 联网刷新与JSON导入复用同一份UTF-8解析、Provider白名单、标准化和完整校验；
+  只有全部通过后才原子替换数据库目录，错误文件不会破坏旧数据。
+- 导入只更新用于浏览与预填的`model_catalog`，不修改已保存的`llm_models`运行配置；
+  Alembic Head保持`006`。
+
 ## v0.4.19
 
 - Console附件选择器增加`.log`；动态上传能力加载后仍保留该扩展名入口。

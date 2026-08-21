@@ -310,5 +310,7 @@ chat_messages
 ## 13. 后续方向
 
 后续方向包括PDF/PPTX专用解析、复杂Office、异步解析、资源隔离、结构
-索引、跨 Run 缓存和长结果外置。优先级和状态统一维护在
+索引、跨 Run 缓存和长结果外置。PDF/PPTX的行业方案、Anthropic Skills目录、许可证边界和
+DeepAgent建议链路已独立记录在
+[`../16-pdf-and-presentation-parsing/`](../16-pdf-and-presentation-parsing/)。优先级和状态统一维护在
 [`../TODO.md`](../TODO.md)，不在本文维护第二份待办。

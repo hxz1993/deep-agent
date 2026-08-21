@@ -94,7 +94,7 @@
 
 | ID | 潜力方向 | 触发条件 | 当前边界 | 来源 |
 | --- | --- | --- | --- | --- |
-| `ATT-201` / `ATT-202` | PDF/PPT/PPTX专用文档解析、异步解析、结构索引和缓存 | 出现需要理解页面、幻灯片、图片与复杂版面的真实业务需求 | 单独建设文档解析工具和结果协议；不塞进普通 `read_file`，也不伪装成模型原生模态；需要资源隔离、租户配额和大结果外置 | [附件解析后续方向](06-attachment-parsing/attachment-parsing-design.md#13-后续方向) |
+| `ATT-201` / `ATT-202` | PDF/PPT/PPTX专用文档解析、异步解析、结构索引和缓存 | 出现需要理解页面、幻灯片、图片与复杂版面的真实业务需求 | 单独建设文档解析工具和结果协议；文本抽取、页面/幻灯片渲染和OCR分层，不塞进普通 `read_file`，也不伪装成模型原生模态；复用现有授权、Run缓存和大结果外置 | [PDF与演示文稿解析](16-pdf-and-presentation-parsing/pdf-and-presentation-parsing-research.md) |
 | `UI-201` | 当前 DeepFOS 页面动态业务工具 | 至少两个业务页面需要按请求声明工具，且静态 UI 包无法合理配置 | 复用 `ExternalToolset` + Deferred；只允许 `web__` 白名单业务动作，不开放 CSS Selector、任意脚本或第二套聊天事实源 | [浏览器与页面操作](15-browser-and-page-actions/browser-and-page-actions-design.md#51-deepfos-页面操作沿用-ui-tool) |
 | `WEB-101` | 外部或未知网站自主浏览 | 出现明确外部网站任务，并锁定域名、登录态、资源和审批边界 | 优先复用 Harness `BrowserUse`；默认关闭、首版只读、隔离 Chromium，不连接用户当前浏览器 | [浏览器与页面操作](15-browser-and-page-actions/browser-and-page-actions-design.md#52-外部网站独立-browseruse-能力) |
 

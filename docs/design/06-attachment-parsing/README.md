@@ -21,5 +21,6 @@
   专用文档解析工具。
 
 详细方案与验证口径见
-[`attachment-parsing-design.md`](attachment-parsing-design.md)。后续PDF/PPTX和大文件治理事项统一登记在
+[`attachment-parsing-design.md`](attachment-parsing-design.md)。PDF/PPTX的专项调研见
+[`../16-pdf-and-presentation-parsing/`](../16-pdf-and-presentation-parsing/)，排期状态统一登记在
 [`../TODO.md`](../TODO.md)。

@@ -1724,6 +1724,41 @@ dialog.console-action-dialog::backdrop {
   background: transparent;
 }
 
+.skill-preview-markdown {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 10px 12px;
+  border: 1px solid var(--console-card-border, var(--border));
+  border-radius: 8px;
+  background: var(--console-surface, var(--bg));
+  color: var(--text);
+  font-size: 10px;
+  line-height: 1.6;
+}
+.skill-preview-markdown .markdown-body { color: inherit; font-size: inherit; line-height: inherit; overflow-wrap: anywhere; }
+.skill-preview-markdown .markdown-body > :first-child { margin-top: 0; }
+.skill-preview-markdown .markdown-body > :last-child { margin-bottom: 0; }
+.skill-preview-markdown :is(h1, h2, h3, h4) { margin: 1em 0 .45em; line-height: 1.35; }
+.skill-preview-markdown h1 { font-size: 1.45em; }
+.skill-preview-markdown h2 { font-size: 1.25em; }
+.skill-preview-markdown h3 { font-size: 1.1em; }
+.skill-preview-markdown :is(p, ul, ol, blockquote, table) { margin: .55em 0; }
+.skill-preview-markdown :is(ul, ol) { padding-left: 1.8em; }
+.skill-preview-markdown blockquote { padding-left: .8em; border-left: 3px solid var(--border); color: var(--text-dim); }
+.skill-resource-preview .skill-preview-markdown pre {
+  flex: none;
+  margin: .65em 0;
+  overflow: auto;
+  padding: 8px;
+  font-size: 9.5px;
+  white-space: pre;
+}
+.skill-preview-markdown :not(pre) > code { padding: 1px 4px; border-radius: 4px; background: var(--code-inline-bg); }
+.skill-preview-markdown table { display: block; overflow-x: auto; border-collapse: collapse; }
+.skill-preview-markdown :is(th, td) { padding: 4px 6px; border: 1px solid var(--border); }
+.skill-preview-markdown .mermaid-diagram { margin: .65em 0; padding: 8px; }
+
 .skill-preview-empty,
 .skill-preview-loading {
   display: flex;

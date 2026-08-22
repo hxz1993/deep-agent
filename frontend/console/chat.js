@@ -2531,6 +2531,7 @@ function createAssistantMessage(timestamp, branchPoint) {
     if (!finalContent) return;
     finalContent.classList.remove("streaming");
     finalContent.innerHTML = renderMarkdownBody(textBuffer);
+    void renderMarkdownDiagrams(finalContent);
   }
 
   const presenter = {
@@ -3044,62 +3045,20 @@ function escapeHtml(s) {
     .replace(/"/g, "&quot;");
 }
 
-/* --------------------------- Markdown (marked + DOMPurify + hljs) --------------------------- */
-let markdownReady = false;
-
 function initMarkdown() {
-  if (typeof marked === "undefined" || typeof DOMPurify === "undefined") {
-    console.warn("[deep-agent] Markdown 库未加载，将回退为纯文本");
-    return;
-  }
-
-  marked.use({
-    gfm: true,
-    breaks: false,
-    renderer: {
-      code(codeText, lang) {
-        const text = String(codeText ?? "");
-        let highlighted = escapeHtml(text);
-        if (typeof hljs !== "undefined") {
-          if (lang && hljs.getLanguage(lang)) {
-            try {
-              highlighted = hljs.highlight(text, { language: lang, ignoreIllegals: true }).value;
-            } catch (_) { /* keep escaped fallback */ }
-          } else {
-            try {
-              highlighted = hljs.highlightAuto(text).value;
-            } catch (_) { /* keep escaped fallback */ }
-          }
-        }
-        const langAttr = lang ? ` class="hljs language-${escapeHtml(lang)}"` : ' class="hljs"';
-        return `<pre><code${langAttr}>${highlighted}</code></pre>\n`;
-      },
-    },
-  });
-
-  DOMPurify.addHook("afterSanitizeAttributes", (node) => {
-    if (node.tagName === "A" && node.hasAttribute("href")) {
-      node.setAttribute("target", "_blank");
-      node.setAttribute("rel", "noopener noreferrer");
-    }
-  });
-
-  markdownReady = true;
+  window.DeepAgentMarkdown?.init();
 }
 
 function renderMarkdown(src) {
-  const text = String(src ?? "");
-  if (!markdownReady) return `<pre class="md-fallback">${escapeHtml(text)}</pre>`;
-
-  const raw = marked.parse(text);
-  return DOMPurify.sanitize(raw, {
-    USE_PROFILES: { html: true },
-    ADD_ATTR: ["target", "rel", "class", "data-lang"],
-  });
+  return window.DeepAgentMarkdown?.render(src) ?? `<pre class="md-fallback">${escapeHtml(src)}</pre>`;
 }
 
 function renderMarkdownBody(src) {
-  return `<div class="markdown-body">${renderMarkdown(src)}</div>`;
+  return window.DeepAgentMarkdown?.renderBody(src) ?? `<div class="markdown-body">${renderMarkdown(src)}</div>`;
+}
+
+function renderMarkdownDiagrams(root) {
+  return window.DeepAgentMarkdown?.renderDiagrams(root) ?? Promise.resolve();
 }
 
 async function selectAgent(agentId) {

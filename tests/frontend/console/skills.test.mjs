@@ -54,6 +54,15 @@ test("Skill 上传使用 multipart 且资源按安全 API 读取", () => {
   assert.doesNotMatch(source, /已保存，当前不可读取或执行/);
 });
 
+test("Skill Markdown 资源复用对话渲染器，其他文本保持原文预览", () => {
+  assert.match(source, /const isMarkdown = \/\\\.md\$\/i\.test\(path\)/);
+  assert.match(source, /window\.DeepAgentMarkdown\?\.renderBody\(page\.content\)/);
+  assert.match(source, /window\.DeepAgentMarkdown\?\.renderDiagrams\(preview\)/);
+  assert.match(source, /: `<pre>\$\{escapeHtml\(page\.content\)\}<\/pre>`/);
+  assert.match(styles, /\.skill-preview-markdown\s*\{[\s\S]*font-size: 10px/);
+  assert.match(styles, /\.skill-preview-markdown \.markdown-body/);
+});
+
 test("同内容包在平台原文件丢失后会提示恢复而不是误报无变化", () => {
   assert.match(source, /result\.status === "repaired"/);
   assert.match(source, /Skill 原包与运行文件已恢复/);

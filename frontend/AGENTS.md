@@ -100,6 +100,8 @@ Agent 独立编辑页的系统提示词标题栏显示“字符数 / 预估 Toke
   也不得进入 Agent 能力勾选。
 - Console 顶部只展示一处产品版本，通过同源 `GET /info` 读取
   `deep_agent.__version__`；配置中心的数据库结构 revision 是独立运维信息。
+- Markdown统一由`markdown.js`渲染：工作台最终回复和Skill资源预览复用同一套安全解析；
+  `mermaid`围栏只在完整回复落定后按需加载本地vendor并以严格模式生成SVG，失败时保留源码。
 - 配置中心左侧页签只在当前前端页面的模块内存中保留；工作台与配置中心之间切换会恢复上次页签，浏览器刷新后重新回到 Agent，不写入 LocalStorage 或后端。
 - Agent 独立编辑页在标题区显示完整 Agent ID；测试工作台对话标题第二行以 `会话 ID：<完整 ID>` 展示当前会话，不再截取前八位。
 - `/` 跳转到 `/console/#/workspace`；旧 `/settings.html`、`/models.html`、`/admin/` 返回 404。

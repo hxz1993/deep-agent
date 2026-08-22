@@ -507,6 +507,29 @@ html, body {
   font-family: var(--mono);
   font-size: 13px;
 }
+.mermaid-diagram {
+  max-width: 100%;
+  margin: 12px 0;
+  overflow-x: auto;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--code-bg) 56%, transparent);
+}
+.mermaid-diagram > svg {
+  display: block;
+  width: auto;
+  max-width: 100%;
+  height: auto;
+  margin: 0 auto;
+}
+.mermaid-diagram[data-mermaid-state="rendered"] pre { display: none; }
+.mermaid-diagram-error {
+  margin: 8px 0 0;
+  color: var(--danger);
+  font-size: 11px;
+  line-height: 1.5;
+}
 .tool-body .args-pending {
   color: var(--text-faint);
   font-style: italic;

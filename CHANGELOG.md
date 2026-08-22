@@ -3,6 +3,12 @@
 本文件记录 DeepAgent 的产品版本变化，按新版本到旧版本排列。当前代码版本以
 `deep_agent.__version__` 为准；数据库结构版本以 Alembic head 为准，两者互不替代。
 
+## v0.5.1
+
+- Console抽出共享Markdown渲染链路，Skill的Markdown资源不再按纯文本显示，改为适合小字号阅读的标题、列表、表格、引用和代码样式。
+- 主对话支持`mermaid`围栏代码；仅在完整回复落定后按需加载本地Mermaid资源并生成SVG，流式输出过程不反复重绘。
+- Mermaid固定使用严格安全模式，渲染失败时保留原始围栏源码并显示轻量提示；REST、SSE、History和Alembic Head `006`均不变化。
+
 ## v0.5.0
 
 - 重构一体化 Console 外壳：三个主页面改用统一顶栏和左侧图标导航，产品版本与数据库结构

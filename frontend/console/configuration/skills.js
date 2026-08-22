@@ -103,11 +103,10 @@ const skillsAdmin = {
     const resources = skill.resources || [];
     const canPreviewResource = (resource) =>
       ["text", "docx", "xlsx"].includes(resource.read_format) && resource.category !== "script";
-    const firstPreviewableResource = resources.find(canPreviewResource);
     const selectedResource = resources.find((resource) => resource.path === this.selectedResourcePath && canPreviewResource(resource));
     const activeResourcePath = this.selectedResourcePath === "SKILL.md"
       ? "SKILL.md"
-      : selectedResource?.path || firstPreviewableResource?.path || "SKILL.md";
+      : selectedResource?.path || "SKILL.md";
     this.selectedResourcePath = activeResourcePath;
     const skillDefinitionRow = `<li class="skill-resource-row${activeResourcePath === "SKILL.md" ? " active" : ""}" data-read-resource="SKILL.md" data-resource-path="SKILL.md" role="button" tabindex="0">
       <span class="skill-resource-main"><i data-lucide="file-badge"></i><span><code>SKILL.md</code><small>Skill 定义 · 完整正文</small></span></span>

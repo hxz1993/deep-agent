@@ -77,6 +77,9 @@ test("系统工具按领域展示来源、条件和说明", () => {
   assert.match(html, /Agent 已配置可用 Skill/);
   assert.match(html, /加载完整说明/);
   assert.doesNotMatch(html, /编辑|删除|启用|checkbox|switch/);
+  assert.match(html, /system-tool-group-row/);
+  assert.match(html, /system-tool-group-help/);
+  assert.match(html, /data-tooltip="按需加载 Skill。"/);
 });
 
 test("任务规划三个官方工具属于独立只读领域", () => {
@@ -141,6 +144,8 @@ test("系统工具页面保留加载与窄屏横向查看，但不提供单独�
   assert.doesNotMatch(source, /data-retry-system-tools|refreshSystemToolsBtn/);
   assert.match(templateHtml, /class="system-tool-domains"/);
   assert.match(source, /class="table-wrap console-list-a"/);
+  assert.equal((source.match(/<thead>/g) || []).length, 1);
+  assert.match(configurationCss, /\.system-tool-group-row th/);
 });
 
 test("所有系统工具分组复用同一组固定列宽", () => {

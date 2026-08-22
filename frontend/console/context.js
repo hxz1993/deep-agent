@@ -28,6 +28,33 @@ function mergedContext(overrides = api.loadContext()) {
   };
 }
 
+function renderEffectiveContextValues(context) {
+  const rows = [
+    ["App", context.app || "未提供"],
+    ["Space", context.space || "未提供"],
+    ["Language", context.language || "未提供"],
+    ["User ID", identity?.user || "未认证"],
+  ];
+  const host = document.getElementById("effectiveContext");
+  if (!host) return;
+  host.innerHTML = rows
+    .map(([label, value]) => `<dt>${label}</dt><dd>${String(value).replace(/</g, "&lt;")}</dd>`)
+    .join("");
+}
+
+function previewContextFromInput() {
+  const app = valueOrNull(document.getElementById("contextAppInput")?.value);
+  let space = null;
+  if (app) {
+    try {
+      space = api.deriveSpaceFromApp(app);
+    } catch {
+      space = "格式无效";
+    }
+  }
+  renderEffectiveContextValues({ app, space, language: api.DEFAULT_LANGUAGE });
+}
+
 function renderContext() {
   const overrides = api.loadContext();
   effectiveContext = mergedContext(overrides);
@@ -46,14 +73,7 @@ function renderContext() {
     currentUserButton.removeAttribute("title");
     currentUserButton.setAttribute("aria-label", `当前平台用户：${currentUser}`);
   }
-  const rows = [
-    ["App", effectiveContext.app || "未提供"],
-    ["Space", effectiveContext.space || "未提供"],
-    ["Language", effectiveContext.language || "未提供"],
-  ];
-  document.getElementById("effectiveContext").innerHTML = rows
-    .map(([label, value]) => `<dt>${label}</dt><dd>${String(value).replace(/</g, "&lt;")}</dd>`)
-    .join("");
+  renderEffectiveContextValues(effectiveContext);
 }
 
 function setAuthLocked(locked) {
@@ -135,7 +155,7 @@ function currentFormContext() {
 
 function saveContext() {
   if (window.DeepAgentConsoleChat?.state?.streaming) {
-    window.DeepAgentConsole?.toast("请先停止当前生成，再修改测试 Header", true);
+    window.DeepAgentConsole?.toast("请先停止当前生成，再修改测试 App", true);
     return;
   }
   const before = api.loadContext();
@@ -158,7 +178,7 @@ function saveContext() {
 
 function resetContext() {
   if (window.DeepAgentConsoleChat?.state?.streaming) {
-    window.DeepAgentConsole?.toast("请先停止当前生成，再重置测试 Header", true);
+    window.DeepAgentConsole?.toast("请先停止当前生成，再重置测试 App", true);
     return;
   }
   const hadScope = Boolean(api.loadContext().app);
@@ -187,12 +207,18 @@ export function bindContextControls() {
       else closeContextPopover();
       return;
     }
-    if (!target?.closest("#contextPopover")) closeContextPopover();
     if (!target?.closest("#currentUserBtn")) closeUserPopover();
+  });
+  document.addEventListener("pointerdown", (event) => {
+    const target = event.target instanceof Element ? event.target : null;
+    if (!target?.closest("#contextPopover") && !target?.closest("[data-open-context]")) {
+      closeContextPopover();
+    }
   });
   document.getElementById("closeContextBtn")?.addEventListener("click", closeContextPopover);
   document.getElementById("saveContextBtn")?.addEventListener("click", saveContext);
   document.getElementById("resetContextBtn")?.addEventListener("click", resetContext);
+  document.getElementById("contextAppInput")?.addEventListener("input", previewContextFromInput);
   document.getElementById("retryIdentityBtn")?.addEventListener("click", () => location.reload());
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") {

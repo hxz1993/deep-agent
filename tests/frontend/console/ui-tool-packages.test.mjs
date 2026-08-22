@@ -56,8 +56,10 @@ test("UI 工具页使用与 Skill 一致的分离轻卡片层级", () => {
   assert.match(styles, /\.ui-tool-selected-header \.row-actions \.btn:not\(\.primary\):not\(\.danger\)/);
   assert.match(styles, /\.ui-tool-selected-header \.row-actions \.btn\.danger/);
   assert.match(styles, /\.panel-title-copy \{[^}]*gap: 4px/);
-  assert.match(consoleStyles, /#configurationHost \.panel-toolbar\s*\{[^}]*min-height: 50px;[^}]*align-items: flex-start/);
-  assert.match(consoleStyles, /#configurationHost \.btn\s*\{[^}]*height: 34px;[^}]*padding: 0 12px/);
+  assert.match(consoleStyles, /--config-radius: 8px/);
+  assert.match(consoleStyles, /--config-control-height: 32px/);
+  assert.match(consoleStyles, /#configurationHost \.ui-tool-tree-node,[\s\S]*border-radius: var\(--config-radius\) !important/);
+  assert.match(consoleStyles, /#configurationHost \.btn,[\s\S]*height: var\(--config-control-height\)/);
 });
 
 test("工具创建入口依赖当前选中的自定义工具包", () => {

@@ -74,6 +74,7 @@ test("Skill 使用左右分离的轻卡片列表与表单详情", () => {
   assert.doesNotMatch(source, /控制台索引摘要|索引摘要/);
   assert.match(source, /apiFetch\(`\/api\/v1\/skills\/\$\{encodeURIComponent\(code\)\}\/resources/);
   assert.match(source, /selectedResourcePath: null/);
+  assert.match(source, /selectedResource\?\.path \|\| "SKILL\.md"/);
   assert.match(source, /data-resource-path=/);
   assert.match(source, /row\.classList\.toggle\("active", row\.dataset\.resourcePath === path\)/);
   assert.match(source, /if \(activeResourcePath\)/);

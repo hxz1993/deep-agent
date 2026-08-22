@@ -1,7 +1,7 @@
 /* 配色变量来自 ../themes.css（html[data-theme]）。 */
 :root {
   --success: var(--conn-ok);
-  --radius: 12px;
+  --radius: 8px;
   --font: "Segoe UI", system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
   --mono: "SF Mono", "Cascadia Code", Consolas, monospace;
 }
@@ -111,41 +111,7 @@ html, body {
 .configuration-subheading p { margin-top: 3px; color: var(--text-dim); font-size: 12px; }
 
 .system-tool-domains {
-  display: grid;
-  gap: 16px;
-}
-
-.system-tool-domain {
   min-width: 0;
-}
-
-.system-tool-domain-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 0 2px 8px;
-}
-
-.system-tool-domain-head h3,
-.system-tool-domain-head p {
-  margin: 0;
-}
-
-.system-tool-domain-head h3 {
-  font-size: 15px;
-}
-
-.system-tool-domain-head p {
-  margin-top: 4px;
-  color: var(--text-dim);
-  font-size: 13px;
-}
-
-.system-tool-domain-head > code {
-  flex: 0 0 auto;
-  color: var(--text-dim);
-  font-size: 12px;
 }
 
 .system-tools-table {
@@ -162,7 +128,7 @@ html, body {
 .system-tools-table th,
 .system-tools-table td {
   overflow-wrap: anywhere;
-  vertical-align: top;
+  vertical-align: middle;
 }
 
 .system-tools-table td:first-child code {
@@ -510,13 +476,67 @@ html, body {
   width: min(320px, 34vw);
 }
 
-.global-settings-group-row th {
+.global-settings-group-row th,
+.system-tool-group-row th {
   padding: 9px 12px;
   color: var(--text);
   background: color-mix(in srgb, var(--accent) 5%, var(--console-surface, var(--bg)));
   font-size: 12px;
   font-weight: 700;
   text-align: left;
+}
+
+.system-tool-group-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.system-tool-group-help {
+  position: relative;
+  display: inline-flex;
+  width: 13px;
+  height: 13px;
+  color: var(--text-dim);
+  cursor: help;
+}
+
+.system-tool-group-help::before {
+  content: "";
+  width: 13px;
+  height: 13px;
+  background: currentColor;
+  -webkit-mask: url("./icon-info-qm.svg") center / contain no-repeat;
+  mask: url("./icon-info-qm.svg") center / contain no-repeat;
+}
+
+.system-tool-group-help::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  z-index: 20;
+  left: 50%;
+  bottom: calc(100% + 7px);
+  width: max-content;
+  max-width: min(360px, 65vw);
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  background: var(--bg-elev);
+  box-shadow: var(--shadow);
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.45;
+  white-space: normal;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-50%);
+}
+
+.system-tool-group-help:hover::after,
+.system-tool-group-help:focus::after,
+.system-tool-group-help:focus-visible::after {
+  opacity: 1;
 }
 
 .global-settings-table {
@@ -1270,7 +1290,7 @@ dialog.console-action-dialog::backdrop {
 .skill-admin-workspace {
   display: grid;
   grid-template-columns: minmax(250px, 320px) minmax(0, 1fr);
-  align-items: start;
+  align-items: stretch;
   gap: 14px;
   min-height: 520px;
   border: 0;
@@ -1373,7 +1393,8 @@ dialog.console-action-dialog::backdrop {
 .skill-list-state.is-error { flex-direction: column; color: var(--danger); }
 .skill-detail-pane {
   min-width: 0;
-  max-height: calc(100vh - 210px);
+  height: 100%;
+  max-height: none;
   padding: 16px;
   overflow: auto;
   border: 1px solid var(--console-card-border, var(--border));

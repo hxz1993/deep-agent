@@ -65,8 +65,8 @@ test("Agent 卡片与列表统一使用图标文字行操作", () => {
   assert.match(agents, /data-lucide="message-square"[\s\S]*发起对话/);
   assert.match(agents, /data-lucide="pencil"[\s\S]*编辑/);
   assert.match(agents, /data-lucide="trash-2"[\s\S]*删除/);
-  assert.match(styles, /\.agent-row-actions \.row-action[\s\S]*height: 28px;[\s\S]*border-radius: 7px;/);
-  assert.match(styles, /#configurationHost \.console-list-a \.row-actions button,[\s\S]*height: 28px;[\s\S]*border-radius: 7px;/);
+  assert.match(styles, /--config-compact-control-height: 28px/);
+  assert.match(styles, /#configurationHost \.agent-row-actions \.row-action,[\s\S]*height: var\(--config-compact-control-height\);[\s\S]*border-radius: var\(--config-radius\)/);
 });
 
 test("Agent 编辑使用独立页面层级而不是模态框", () => {
@@ -83,6 +83,18 @@ test("Agent 编辑使用独立页面层级而不是模态框", () => {
   assert.match(styles, /\.agent-editor-page \.agent-editor-back[\s\S]*?border: 0;/);
   assert.match(styles, /\.agent-editor-header-actions[\s\S]*?justify-content: flex-end/);
   assert.match(configurationCore, /agentsAdmin\?\.isEditorOpen\?\.\(\)[\s\S]*agentsAdmin\.requestCloseEditor\(\)/);
+});
+
+test("Agent 编辑采用 B 方案左右工作台并在右侧切换工具与 Skill", () => {
+  assert.match(template, /class="agent-editor-workbench"/);
+  assert.match(template, /class="agent-editor-primary"[\s\S]*id="agentName"[\s\S]*id="agentModelId"[\s\S]*id="agentPrompt"/);
+  assert.match(template, /class="agent-editor-resources"[\s\S]*data-agent-editor-tab="tools"[\s\S]*data-agent-editor-tab="skills"/);
+  assert.match(template, /data-agent-editor-pane="tools"[\s\S]*id="agentCapGroups"/);
+  assert.match(template, /data-agent-editor-pane="skills"[\s\S]*id="agentSkillChoices"/);
+  assert.match(agents, /switchEditorTab\(tab\)/);
+  assert.match(agents, /this\.switchEditorTab\("tools"\)/);
+  assert.match(styles, /\.agent-editor-workbench\s*\{[\s\S]*grid-template-columns: minmax\(310px, \.82fr\) minmax\(450px, 1\.18fr\)/);
+  assert.match(styles, /\.agent-editor-tabs button\[aria-selected="true"\]::after/);
 });
 
 test("配置导航将 MCP 服务简化为 MCP", () => {
@@ -104,4 +116,19 @@ test("配置中心的主要业务表格统一使用连续轻列表风格 A", () 
   assert.match(styles, /#configurationHost \.console-list-a \.data-table th[\s\S]*border-bottom: 1px solid var\(--console-card-border\)/);
   assert.match(styles, /#configurationHost \.console-list-a \.data-table td[\s\S]*border: 0;[\s\S]*border-bottom:/);
   assert.match(styles, /tbody tr:hover > td:first-child[\s\S]*border-left-color: var\(--accent\)/);
+});
+
+test("配置中心采用 Deepfos 轻风格的统一尺寸和表头", () => {
+  assert.match(styles, /--config-radius: 8px/);
+  assert.match(styles, /--config-control-height: 32px/);
+  assert.match(styles, /--config-header-height: 56px/);
+  assert.match(styles, /#configurationHost \.panel-toolbar,[\s\S]*min-height: var\(--config-header-height\)/);
+  assert.match(styles, /#configurationHost \.btn,[\s\S]*height: var\(--config-control-height\)/);
+  assert.match(styles, /#configurationHost \.data-table thead th,[\s\S]*height: 36px;[\s\S]*font-size: 11px/);
+  assert.match(template, /<h2>MCP 服务列表<\/h2>[\s\S]*管理 Agent 可授权使用的 MCP 服务、工具快照与连接状态/);
+  assert.match(styles, /\.agent-card-body \{[^}]*border-top:[^}]*\}/);
+  assert.doesNotMatch(styles, /\.agent-card-body \{[^}]*border-bottom:/);
+  assert.match(styles, /\.configuration-content,\s*#configurationHost\s*\{[\s\S]*height: 100%;[\s\S]*min-height: 0;/);
+  assert.match(styles, /#configurationHost > \.panel\s*\{[\s\S]*box-sizing: border-box;[\s\S]*min-height: 100%;/);
+  assert.match(styles, /\.resource-nav\s*\{[\s\S]*border-radius: var\(--console-card-radius\) !important;/);
 });

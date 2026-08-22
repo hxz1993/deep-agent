@@ -142,7 +142,7 @@
       <div class="builtin-tools-sections">
         <section class="builtin-tools-section">
           <div class="configuration-subheading">
-            <h3>能力工具包</h3>
+            <h3>预制工具包</h3>
             <p>随 DeepAgent 版本发布，可在 Agent 能力配置中选择是否启用。</p>
           </div>
           <div class="table-wrap console-list-a">
@@ -204,7 +204,10 @@
     <!-- MCP panel -->
     <section class="panel" id="panel-mcp">
       <div class="panel-toolbar">
-        <h2>MCP 服务列表</h2>
+        <div class="panel-title-copy">
+          <h2>MCP 服务列表</h2>
+          <p class="panel-subtitle">管理 Agent 可授权使用的 MCP 服务、工具快照与连接状态。</p>
+        </div>
         <button class="btn primary" id="newMcpBtn"><i data-lucide="plus"></i>新建 MCP</button>
       </div>
       <div class="table-wrap console-list-a">
@@ -295,22 +298,24 @@
         </div>
       </div>
       <div class="modal-body">
-        <div class="agent-form-grid">
-          <div class="agent-form-col">
+        <div class="agent-editor-workbench">
+          <section class="agent-editor-primary" aria-label="基础信息与提示词">
+            <div class="agent-editor-section-heading">
+              <div><strong>基础信息</strong><span>设置 Agent 的默认模型与运行提示词。</span></div>
+            </div>
+            <div class="agent-form-col agent-basic-fields">
             <label class="field">
               <span>名称</span>
               <input type="text" id="agentName" required />
             </label>
             <label class="field">
-              <span>模型配置</span>
+              <span>默认模型</span>
               <select id="agentModelId" required></select>
             </label>
             <label class="field">
               <span>Temperature（可选）</span>
               <input type="number" id="agentTemperature" min="0" max="2" step="0.1" placeholder="留空使用模型默认" />
             </label>
-          </div>
-          <div class="agent-form-col">
             <label class="field field-grow">
               <span class="field-title-row">
                 <span>System Prompt</span>
@@ -319,33 +324,43 @@
               <textarea id="agentPrompt" rows="10" required></textarea>
             </label>
           </div>
+          </section>
+
+          <section class="agent-editor-resources" aria-label="工具与 Skill 配置">
+            <nav class="agent-editor-tabs" role="tablist" aria-label="Agent 资源配置">
+              <button type="button" role="tab" data-agent-editor-tab="tools" aria-selected="true">工具配置 <span id="capCounter"></span></button>
+              <button type="button" role="tab" data-agent-editor-tab="skills" aria-selected="false">Skill <span id="agentSkillCounter"></span></button>
+            </nav>
+
+            <div class="agent-editor-pane" data-agent-editor-pane="tools">
+              <section class="cap-section">
+                <div class="cap-section-header">
+                  <div>
+                    <span class="cap-section-title">工具配置</span>
+                    <p class="field-hint">新建时默认勾选系统默认能力；主动全不选表示不启用可选能力。</p>
+                  </div>
+                  <div class="cap-section-actions">
+                    <input type="search" class="cap-search" id="capSearch" placeholder="搜索能力…" />
+                  </div>
+                </div>
+                <div class="cap-tabs" id="capTabs"></div>
+                <div class="cap-panels" id="agentCapGroups"></div>
+              </section>
+            </div>
+
+            <div class="agent-editor-pane hidden" data-agent-editor-pane="skills">
+              <section class="cap-section agent-skill-section">
+                <div class="cap-section-header">
+                  <div>
+                    <span class="cap-section-title">Skill</span>
+                    <p class="field-hint">按需向模型披露任务方法和资源；Skill 不会扩大工具包授权。</p>
+                  </div>
+                </div>
+                <div class="agent-skill-grid" id="agentSkillChoices"></div>
+              </section>
+            </div>
+          </section>
         </div>
-
-        <section class="cap-section">
-          <div class="cap-section-header">
-            <div>
-              <span class="cap-section-title">能力配置</span>
-              <p class="field-hint">新建时默认勾选系统默认能力；主动全不选表示不启用可选能力。</p>
-            </div>
-            <div class="cap-section-actions">
-              <input type="search" class="cap-search" id="capSearch" placeholder="搜索能力…" />
-              <span class="cap-counter" id="capCounter"></span>
-            </div>
-          </div>
-          <div class="cap-tabs" id="capTabs"></div>
-          <div class="cap-panels" id="agentCapGroups"></div>
-        </section>
-
-        <section class="cap-section agent-skill-section">
-          <div class="cap-section-header">
-            <div>
-              <span class="cap-section-title">Skill</span>
-              <p class="field-hint">按需向模型披露任务方法和资源；Skill 不会扩大上方工具包授权。</p>
-            </div>
-            <span class="cap-counter" id="agentSkillCounter"></span>
-          </div>
-          <div class="agent-skill-grid" id="agentSkillChoices"></div>
-        </section>
       </div>
       <div class="form-error hidden" data-form-error role="alert" aria-live="assertive"></div>
     </form>

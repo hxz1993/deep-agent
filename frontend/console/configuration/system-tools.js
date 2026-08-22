@@ -9,27 +9,13 @@ function systemToolRow(tool) {
 
 function systemToolDomain(domain) {
   const tools = domain.tools || [];
+  const description = domain.description || "该分组暂无补充说明。";
   const rows = tools.length
     ? tools.map(systemToolRow).join("")
     : `<tr><td colspan="4" class="empty-cell">该领域暂无系统工具</td></tr>`;
-  return `<section class="system-tool-domain" data-system-tool-domain="${escapeHtml(domain.code || "")}">
-    <header class="system-tool-domain-head">
-      <div><h3>${escapeHtml(domain.label || domain.code || "未命名领域")}</h3><p>${escapeHtml(domain.description || "")}</p></div>
-      <code>${escapeHtml(domain.code || "")}</code>
-    </header>
-    <div class="table-wrap console-list-a">
-      <table class="data-table system-tools-table">
-        <colgroup>
-          <col class="system-tool-col-name" />
-          <col class="system-tool-col-source" />
-          <col class="system-tool-col-condition" />
-          <col class="system-tool-col-description" />
-        </colgroup>
-        <thead><tr><th>工具名称</th><th>实现来源</th><th>自动注入条件</th><th>说明</th></tr></thead>
-        <tbody>${rows}</tbody>
-      </table>
-    </div>
-  </section>`;
+  return `<tr class="global-settings-group-row system-tool-group-row" data-system-tool-domain="${escapeHtml(domain.code || "")}">
+      <th colspan="4"><span class="system-tool-group-label">${escapeHtml(domain.label || domain.code || "未命名领域")}<span class="system-tool-group-help" tabindex="0" role="img" aria-label="${escapeHtml(description)}" title="${escapeHtml(description)}" data-tooltip="${escapeHtml(description)}"></span></span></th>
+    </tr>${rows}`;
 }
 
 function renderSystemTools(domains) {
@@ -39,7 +25,18 @@ function renderSystemTools(domains) {
     host.innerHTML = `<div class="system-tools-state">暂无可展示的系统工具</div>`;
     return;
   }
-  host.innerHTML = domains.map(systemToolDomain).join("");
+  host.innerHTML = `<div class="table-wrap console-list-a">
+    <table class="data-table system-tools-table">
+      <colgroup>
+        <col class="system-tool-col-name" />
+        <col class="system-tool-col-source" />
+        <col class="system-tool-col-condition" />
+        <col class="system-tool-col-description" />
+      </colgroup>
+      <thead><tr><th>工具名称</th><th>实现来源</th><th>自动注入条件</th><th>说明</th></tr></thead>
+      <tbody>${domains.map(systemToolDomain).join("")}</tbody>
+    </table>
+  </div>`;
 }
 
 function renderSystemToolsError(message) {

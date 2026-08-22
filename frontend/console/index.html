@@ -163,12 +163,12 @@
     <div class="auth-lock-content"><i data-lucide="shield-alert" data-access-lock-icon></i><h2 id="authLockTitle">正在检查控制台权限</h2><p id="authLockMessage">请稍候…</p><button type="button" id="retryIdentityBtn">重新检查</button></div>
   </div>
 
-  <aside class="context-popover hidden" id="contextPopover" aria-hidden="true" role="dialog" aria-label="测试 Header" inert>
-    <header><div><strong>测试 Header</strong><span>仅影响当前控制台请求</span></div><button type="button" id="closeContextBtn" title="关闭" aria-label="关闭"><i data-lucide="x"></i></button></header>
+  <aside class="context-popover hidden" id="contextPopover" aria-hidden="true" role="dialog" aria-label="测试 App" inert>
+    <header><div><strong>测试 App</strong><span>仅影响当前控制台请求</span></div><button type="button" id="closeContextBtn" title="关闭" aria-label="关闭"><i data-lucide="x"></i></button></header>
     <label class="context-app-field"><span>应用编码 App</span><input id="contextAppInput" autocomplete="off" placeholder="例如 mdxath003" /></label>
     <p class="context-popover-hint">Space 根据 App 自动推导，语言固定为简体中文。</p>
     <dl class="context-effective-values" id="effectiveContext"></dl>
-    <footer><button type="button" id="resetContextBtn">恢复继承</button><button type="button" class="primary" id="saveContextBtn">应用</button></footer>
+    <footer><button type="button" id="resetContextBtn">不分应用</button><button type="button" class="primary" id="saveContextBtn">确定</button></footer>
   </aside>
 
   <div class="console-toast hidden" id="consoleToast"></div>

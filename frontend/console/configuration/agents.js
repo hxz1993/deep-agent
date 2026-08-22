@@ -286,10 +286,21 @@ const agentsAdmin = {
   openEditor() {
     const editor = document.getElementById("agentModal");
     if (!editor) return;
+    this.switchEditorTab("tools");
     if (!editor.open) editor.show();
     document.body.classList.add("agent-editor-open");
     agentEditorDirty = false;
     window.lucide?.createIcons();
+  },
+
+  switchEditorTab(tab) {
+    const target = tab === "skills" ? "skills" : "tools";
+    document.querySelectorAll("[data-agent-editor-tab]").forEach((button) => {
+      button.setAttribute("aria-selected", String(button.dataset.agentEditorTab === target));
+    });
+    document.querySelectorAll("[data-agent-editor-pane]").forEach((pane) => {
+      pane.classList.toggle("hidden", pane.dataset.agentEditorPane !== target);
+    });
   },
 
   isEditorOpen() {
@@ -707,6 +718,9 @@ const agentsAdmin = {
 
     document.getElementById("capSearch")?.addEventListener("input", () => this.filterCaps());
     document.getElementById("agentSkillChoices")?.addEventListener("change", () => this.updateSkillCounter());
+    document.querySelectorAll("[data-agent-editor-tab]").forEach((button) => {
+      button.addEventListener("click", () => this.switchEditorTab(button.dataset.agentEditorTab));
+    });
   },
 
   initListControls() {

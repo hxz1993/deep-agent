@@ -649,22 +649,30 @@ function inspectorFact(label, value, options = {}) {
   return `<div class="${classes}"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value ?? "—")}</strong></div>`;
 }
 
-function renderRunUsageOverview(run, usage) {
+function inspectorFactHtml(label, valueHtml, options = {}) {
+  const classes = [options.mono ? "mono" : "", options.wide ? "wide" : ""].filter(Boolean).join(" ");
+  return `<div class="${classes}"><span>${escapeHtml(label)}</span><strong>${valueHtml}</strong></div>`;
+}
+
+function renderRunUsageOverview(run, usage, contextStatus) {
   const input = finiteTokenValue(run.input_tokens ?? usage.input_tokens);
   const output = finiteTokenValue(run.output_tokens ?? usage.output_tokens);
   const total = Math.max(finiteTokenValue(run.total_tokens ?? usage.total_tokens), input + output);
-  const inputWidth = contextBudgetPercent(input, total) || 0;
-  const outputWidth = contextBudgetPercent(output, total) || 0;
+  const contextWindow = finiteTokenValue(contextStatus?.context_window_tokens);
+  const capacity = Math.max(contextWindow, total);
+  const remaining = contextWindow > 0 ? Math.max(capacity - total, 0) : 0;
+  const inputWidth = contextBudgetPercent(input, capacity) || 0;
+  const outputWidth = contextBudgetPercent(output, capacity) || 0;
+  const remainingWidth = contextBudgetPercent(remaining, capacity) || 0;
   return `<div class="run-usage-overview">
     <div class="run-usage-summary">
-      <span><small>输入</small><strong>${escapeHtml(formatTokens(run.input_tokens ?? usage.input_tokens))}</strong></span>
-      <span><small>输出</small><strong>${escapeHtml(formatTokens(run.output_tokens ?? usage.output_tokens))}</strong></span>
-      <span><small>合计</small><strong>${escapeHtml(formatTokens(run.total_tokens ?? usage.total_tokens))}</strong></span>
+      <span><small>本次使用</small><strong>${escapeHtml(formatTokens(run.total_tokens ?? usage.total_tokens))}</strong></span>
+      <span><small>预计剩余</small><strong>${escapeHtml(formatTokens(contextWindow > 0 ? remaining : null))}</strong></span>
     </div>
-    <div class="run-usage-track" role="img" aria-label="本轮输入与输出 Token">
-      <span class="input" style="width:${inputWidth.toFixed(2)}%"></span><span class="output" style="width:${outputWidth.toFixed(2)}%"></span>
+    <div class="run-usage-track" role="img" aria-label="本轮输入、输出与上下文剩余 Token">
+      <span class="input" style="width:${inputWidth.toFixed(2)}%" title="输入 ${escapeHtml(formatTokens(input))} Token"></span><span class="output" style="width:${outputWidth.toFixed(2)}%" title="输出 ${escapeHtml(formatTokens(output))} Token"></span><span class="remaining" style="width:${remainingWidth.toFixed(2)}%" title="上下文剩余 ${escapeHtml(formatTokens(remaining))} Token"></span>
     </div>
-    <div class="run-usage-legend"><span class="input">输入</span><span class="output">输出</span></div>
+    <div class="run-usage-legend"><span class="input">输入</span><span class="output">输出</span><span class="remaining">上下文剩余</span></div>
   </div>`;
 }
 
@@ -689,25 +697,44 @@ function renderInspector() {
   const statusClass = state.streaming ? "running" : state.awaitingHitl ? "waiting" : "idle";
   const usage = state.lastRunUsage || {};
   const run = state.lastRunMetrics || {};
+  const runModel = state.llmModels.find((item) => item.id === run.model_id || item.model === run.model_id);
   const compactionState = compaction.triggered
     ? strategyLabels[compaction.strategy] || compaction.strategy
     : contextStatus.compaction_enabled
       ? "未触发"
       : "未启用";
+  const estimatorLabel = [contextStatus.estimate_scope, contextStatus.estimator_source].filter(Boolean).join(" · ") || "—";
+  const compactionContent = `<section class="inspector-section">
+    <header><strong>压缩与 Checkpoint</strong><span>${escapeHtml(compactionState)}</span></header>
+    <div class="checkpoint-comparison">
+      <span><small>压缩前</small><strong>${escapeHtml(formatTokens(compaction.estimated_tokens_before))}</strong></span>
+      <i data-lucide="arrow-right"></i>
+      <span><small>压缩后</small><strong>${escapeHtml(formatTokens(compaction.estimated_tokens_after))}</strong></span>
+    </div>
+    <div class="inspector-facts compact">
+      ${inspectorFact("Checkpoint", contextStatus.checkpoint_exists ? "已生成" : "暂无")}
+      ${inspectorFact("Checkpoint Token", formatTokens(contextStatus.checkpoint_estimated_tokens))}
+      ${inspectorFact("估算方式", estimatorLabel)}
+    </div>
+  </section>`;
+  const agentName = currentAgentName(state);
+  const sessionCounts = `<span class="inspector-inline-metrics">
+    <span title="消息"><i data-lucide="message-square"></i>${escapeHtml(String(contextStatus.raw_message_count ?? state.modelMessageCount ?? 0))}</span>
+    <span title="待发附件"><i data-lucide="paperclip"></i>${escapeHtml(String(state.pendingAttachments.length))}</span>
+  </span>`;
+  const agentIdentity = `<span class="inspector-stacked-value"><span>${escapeHtml(agentName)}</span><code>${escapeHtml(state.agentId || "—")}</code></span>`;
+  const requestScope = `<span class="inspector-scope-value"><code>${escapeHtml(context.app || "继承")}</code><span>/</span><code>${escapeHtml(context.space || "继承")}</code></span>`;
   const sessionContent = `<section class="inspector-section inspector-session-group">
-    <header><strong>会话概览</strong><span class="status-badge ${statusClass}">${statusText}</span></header>
+    <header><strong>会话概览</strong></header>
     <div class="inspector-facts">
       ${inspectorFact("会话 ID", state.sessionId || "尚未创建", { mono: true, wide: true })}
-      ${inspectorFact("Agent", currentAgentName(state))}
+      ${inspectorFactHtml("Agent", agentIdentity, { wide: true })}
       ${inspectorFact("模型", model?.name || model?.model || "—")}
-      ${inspectorFact("消息", `${contextStatus.raw_message_count ?? state.modelMessageCount ?? 0} 条`)}
-      ${inspectorFact("待发附件", `${state.pendingAttachments.length} 个`)}
-      ${inspectorFact("Agent ID", state.agentId || "—", { mono: true, wide: true })}
+      ${inspectorFactHtml("消息与附件", sessionCounts)}
     </div>
     <header class="inspector-subheading"><strong>请求 Header</strong><span>自动推导</span></header>
     <div class="inspector-facts compact">
-      ${inspectorFact("App", context.app || "继承", { mono: true })}
-      ${inspectorFact("Space", context.space || "继承", { mono: true })}
+      ${inspectorFactHtml("App / Space", requestScope, { wide: true })}
       ${inspectorFact("Language", context.language || "继承")}
       ${inspectorFact("User ID", identity?.user || "未认证", { mono: true, wide: true })}
     </div>
@@ -715,12 +742,12 @@ function renderInspector() {
   <section class="inspector-section inspector-budget-section">
     <header><strong>上下文预算</strong><span>阈值与预留合并展示</span></header>
     ${renderContextBudgetOverview(contextStatus)}
-    <p class="inspector-help">目标线用于压缩后的预算回收，触发线表示开始压缩的固定阈值。</p>
-  </section>`;
+  </section>
+  ${compactionContent}`;
 
   const runContent = `<section class="inspector-section">
-    <header><strong>当前 Run</strong><span>${run.detailed === false ? "详细指标请查看运行日志" : "当前页面最近一次"}</span></header>
-    ${renderRunUsageOverview(run, usage)}
+    <header><strong>当前回合</strong><span>${run.detailed === false ? "详细指标请查看运行日志" : "当前页面最近一次"}</span></header>
+    ${renderRunUsageOverview(run, usage, contextStatus)}
     <div class="inspector-facts compact run-facts">
       ${inspectorFact("终态", run.status || "—")}
       ${inspectorFact("请求", run.requests ?? usage.requests ?? "—")}
@@ -732,21 +759,7 @@ function renderInspector() {
       ${inspectorFact("压缩", run.compaction || "—")}
       ${inspectorFact("Conversation ID", state.conversationId || run.conversation_id || "—", { mono: true, wide: true })}
       ${inspectorFact("Run ID", run.run_id || "—", { mono: true, wide: true })}
-      ${inspectorFact("模型", run.model_id || model?.name || model?.model || "—", { wide: true })}
-    </div>
-  </section>
-  <section class="inspector-section">
-    <header><strong>压缩与 Checkpoint</strong><span>${escapeHtml(compactionState)}</span></header>
-    <div class="checkpoint-comparison">
-      <span><small>压缩前</small><strong>${escapeHtml(formatTokens(compaction.estimated_tokens_before))}</strong></span>
-      <i data-lucide="arrow-right"></i>
-      <span><small>压缩后</small><strong>${escapeHtml(formatTokens(compaction.estimated_tokens_after))}</strong></span>
-    </div>
-    <div class="inspector-facts compact">
-      ${inspectorFact("Checkpoint", contextStatus.checkpoint_exists ? "已生成" : "暂无")}
-      ${inspectorFact("Checkpoint Token", formatTokens(contextStatus.checkpoint_estimated_tokens))}
-      ${inspectorFact("估算范围", contextStatus.estimate_scope || "—")}
-      ${inspectorFact("估算器", contextStatus.estimator_source || "—")}
+      ${inspectorFact("模型", runModel?.name || runModel?.model || model?.name || model?.model || run.model_id || "—", { wide: true })}
     </div>
   </section>`;
 
@@ -756,9 +769,12 @@ function renderInspector() {
       ? renderContextReferenceInspector(state)
       : sessionContent;
   host.innerHTML = `<nav class="inspector-tabs" role="tablist" aria-label="会话详情">
-      <button type="button" role="tab" data-inspector-tab="session" aria-selected="${inspectorActiveTab === "session"}">会话</button>
-      <button type="button" role="tab" data-inspector-tab="run" aria-selected="${inspectorActiveTab === "run"}">运行诊断</button>
-      <button type="button" role="tab" data-inspector-tab="context" aria-selected="${inspectorActiveTab === "context"}">上下文引用</button>
+      <span class="inspector-tab-buttons">
+        <button type="button" role="tab" data-inspector-tab="session" aria-selected="${inspectorActiveTab === "session"}">会话</button>
+        <button type="button" role="tab" data-inspector-tab="run" aria-selected="${inspectorActiveTab === "run"}">当前回合</button>
+        <button type="button" role="tab" data-inspector-tab="context" aria-selected="${inspectorActiveTab === "context"}">上下文引用</button>
+      </span>
+      <span class="status-badge inspector-tab-status ${statusClass}">${statusText}</span>
     </nav>
     <div class="inspector-tab-panel">${tabContent}</div>`;
   bindInspectorTabs(host);

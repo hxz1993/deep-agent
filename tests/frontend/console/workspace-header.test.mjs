@@ -28,6 +28,10 @@ const consoleIndex = await readFile(
   new URL("../../../frontend/console/index.html", import.meta.url),
   "utf8",
 );
+const contextSource = await readFile(
+  new URL("../../../frontend/console/context.js", import.meta.url),
+  "utf8",
+);
 
 test("会话标题第二行显示带前缀的完整会话 ID", () => {
   const sessionId = "019f1857-9463-7db3-a9d3-654a4ac24b24";
@@ -61,18 +65,23 @@ test("工作台只读展示上下文预算、压缩结果与 Checkpoint 状态",
   assert.doesNotMatch(workspaceSource, /summary_body|checkpoint\.payload|摘要正文/i);
 });
 
-test("会话详情使用会话、运行诊断和上下文引用三页签", () => {
-  assert.match(template, /data-open-context[\s\S]*测试Header/);
+test("会话详情使用会话、当前回合和上下文引用三页签", () => {
+  assert.match(template, /data-open-context[\s\S]*测试App/);
+  assert.doesNotMatch(template, /id="usageInfo"/);
   assert.match(template, /id="toggleInspectorPaneBtn"[\s\S]*会话详情/);
   assert.match(workspaceSource, /function toggleInspectorPane\(\)/);
   assert.match(workspaceSource, /data-inspector-tab="session"[\s\S]*>会话<\/button>/);
-  assert.match(workspaceSource, /data-inspector-tab="run"[\s\S]*>运行诊断<\/button>/);
+  assert.match(workspaceSource, /data-inspector-tab="run"[\s\S]*>当前回合<\/button>/);
   assert.match(workspaceSource, /data-inspector-tab="context"[\s\S]*>上下文引用<\/button>/);
   assert.match(workspaceSource, /<strong>会话概览<\/strong>/);
   assert.match(workspaceSource, /inspector-session-group[\s\S]*<strong>请求 Header<\/strong>/);
+  assert.match(workspaceSource, /inspector-tab-status[\s\S]*\$\{statusText\}/);
+  assert.match(workspaceSource, /inspectorFactHtml\("Agent", agentIdentity/);
+  assert.match(workspaceSource, /inspectorFactHtml\("消息与附件", sessionCounts/);
+  assert.match(workspaceSource, /inspectorFactHtml\("App \/ Space", requestScope/);
   assert.match(workspaceSource, /inspectorFact\("User ID"[\s\S]*identity\?\.user/);
   assert.match(workspaceSource, /<strong>上下文预算<\/strong>/);
-  assert.match(workspaceSource, /<strong>当前 Run<\/strong>/);
+  assert.match(workspaceSource, /<strong>当前回合<\/strong>/);
   assert.match(workspaceSource, /Conversation ID/);
   assert.match(workspaceSource, /Run ID/);
   assert.match(workspaceSource, /缓存读取/);
@@ -91,28 +100,44 @@ test("会话详情使用会话、运行诊断和上下文引用三页签", () =>
   assert.doesNotMatch(chatSource, /deep-agent-console-event/);
 });
 
-test("会话详情保留既有属性并用轻量事实卡与复合轨道展示", () => {
+test("会话详情保留既有属性并用横向页签、键值列表与复合轨道展示", () => {
   for (const label of [
-    "会话 ID", "Agent ID", "消息", "待发附件",
-    "App", "Space", "Language", "User ID",
-    "Conversation ID", "Run ID", "请求", "输入", "输出",
-    "合计", "缓存读取", "缓存写入", "工具调用", "Tool Search", "耗时", "压缩",
-    "压缩前", "压缩后", "Checkpoint Token", "估算范围", "估算器",
+    "会话 ID", "消息与附件", "App / Space", "Language", "User ID",
+    "Conversation ID", "Run ID", "请求", "本次使用", "预计剩余",
+    "缓存读取", "缓存写入", "工具调用", "Tool Search", "耗时", "压缩",
+    "压缩前", "压缩后", "Checkpoint Token", "估算方式",
   ]) {
     assert.match(workspaceSource, new RegExp(label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   }
-  assert.match(consoleCss, /右侧详情使用三页签和复合预算指标/);
-  assert.match(consoleCss, /\.inspector-tabs\s*\{/);
+  assert.match(consoleCss, /右侧详情使用横向页签、键值列表和复合预算指标/);
+  assert.match(consoleCss, /\.inspector-tabs\s*\{[\s\S]*display: flex;[\s\S]*border-bottom:/);
+  assert.match(consoleCss, /\.inspector-tabs button\s*\{[\s\S]*border: 0;[\s\S]*background: transparent;/);
+  assert.match(consoleCss, /\.inspector-tabs button\[aria-selected="true"\]::after/);
   assert.match(consoleCss, /\.inspector-tab-panel \.inspector-section\s*\{[\s\S]*border: 0;[\s\S]*box-shadow: none/);
+  assert.match(consoleCss, /\.inspector-facts > div\s*\{[\s\S]*grid-template-columns: 82px minmax\(0, 1fr\);/);
+  assert.match(consoleCss, /\.inspector-facts > div\s*\{[\s\S]*border-bottom: 0;/);
+  assert.match(consoleCss, /\.inspector-inline-metrics/);
+  assert.match(consoleCss, /\.inspector-stacked-value/);
   assert.match(consoleCss, /\.context-budget-segments/);
   assert.match(consoleCss, /\.run-usage-track/);
+  assert.match(workspaceSource, /renderRunUsageOverview\(run, usage, contextStatus\)/);
+  assert.match(workspaceSource, /class="remaining"[\s\S]*上下文剩余/);
+  assert.ok(workspaceSource.indexOf("compactionContent") < workspaceSource.indexOf("const runContent"));
+  assert.match(workspaceSource, /runModel\?\.name \|\| runModel\?\.model/);
 });
 
-test("测试 Header 使用锚定轻量浮层而不是抽屉", () => {
+test("测试 App 使用锚定轻量浮层而不是抽屉", () => {
   assert.match(consoleIndex, /id="contextPopover"[\s\S]*role="dialog"/);
+  assert.match(consoleIndex, /<strong>测试 App<\/strong>/);
+  assert.match(consoleIndex, /id="saveContextBtn">确定<\/button>/);
   assert.match(consoleIndex, /id="contextAppInput"/);
   assert.doesNotMatch(consoleIndex, /contextDrawer|contextBackdrop|context-drawer|drawer-backdrop/);
   assert.match(consoleCss, /\.context-popover\s*\{[\s\S]*position: fixed;[\s\S]*border-radius: 13px/);
+  assert.match(consoleIndex, /id="resetContextBtn">不分应用<\/button>/);
+  assert.match(contextSource, /contextAppInput"\)\?\.addEventListener\("input", previewContextFromInput\)/);
+  assert.match(contextSource, /\["User ID", identity\?\.user \|\| "未认证"\]/);
+  assert.match(contextSource, /document\.addEventListener\("pointerdown"/);
+  assert.doesNotMatch(contextSource, /if \(!target\?\.closest\("#contextPopover"\)\) closeContextPopover\(\);/);
 });
 
 test("工作台所有宽度保持多栏交互并支持拖拽和键盘调宽", () => {

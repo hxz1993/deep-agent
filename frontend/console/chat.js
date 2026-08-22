@@ -186,7 +186,6 @@ const el = {
   chatTitle: $("chatTitle"),
   newChatMenu: $("newChatMenu"),
   newChatBtnWide: $("newChatBtnWide"),
-  usageInfo: $("usageInfo"),
   attachBtn: $("attachBtn"),
   compactContextBtn: $("compactContextBtn"),
   contextBudgetBadge: $("contextBudgetBadge"),
@@ -688,7 +687,6 @@ function newChat(agentId) {
   showEmptyState();
   el.sessionBadge.textContent = "";
   el.chatTitle.textContent = "新对话";
-  el.usageInfo.textContent = "";
   updateChatHeader();
   updateAgentSelectState();
   updateComposerContextControls();
@@ -856,7 +854,6 @@ async function switchSession(s) {
   state.lastUserBranchPoint = null;
   state.lastRunUsage = null;
   state.lastRunMetrics = null;
-  el.usageInfo.textContent = "";
   if (session.agentId) {
     state.agentId = session.agentId;
     localStorage.setItem("da_console_agent_id_v1", state.agentId);
@@ -2155,12 +2152,6 @@ function handleEvent({ event, data }, assistant) {
 
 function renderUsage(usage) {
   state.lastRunUsage = { ...usage };
-  const parts = [];
-  if (usage.requests != null) parts.push(`${usage.requests} 次请求`);
-  if (usage.input_tokens != null) parts.push(`in ${usage.input_tokens}`);
-  if (usage.output_tokens != null) parts.push(`out ${usage.output_tokens}`);
-  if (usage.total_tokens != null) parts.push(`共 ${usage.total_tokens} tokens`);
-  el.usageInfo.textContent = parts.join(" · ");
 }
 
 /* --------------------------- 消息渲染 --------------------------- */

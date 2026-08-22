@@ -54,7 +54,7 @@ test("内置工具页位于模型之后和 MCP 之前", () => {
   assert.ok(modelPosition < builtinPosition);
   assert.ok(builtinPosition < mcpPosition);
   assert.match(templateHtml, /id="panel-builtin-tools"/);
-  assert.match(templateHtml, /能力工具包[\s\S]*运行时系统工具/);
+  assert.match(templateHtml, /预制工具包[\s\S]*运行时系统工具/);
   assert.doesNotMatch(templateHtml, /refreshBuiltinToolsBtn|refreshSystemToolsBtn/);
 });
 
@@ -92,6 +92,7 @@ test("内置工具列表展示能力、工具和默认状态且没有管理操�
   assert.match(row, /builtin:general/);
   assert.match(row, /get_current_time/);
   assert.match(row, /默认启用/);
+  assert.doesNotMatch(row, /始终可用|有附件时可用/);
   assert.doesNotMatch(row, /编辑|删除|保存|checkbox|switch/);
 });
 

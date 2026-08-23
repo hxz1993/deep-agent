@@ -3,6 +3,13 @@
 本文件记录 DeepAgent 的产品版本变化，按新版本到旧版本排列。当前代码版本以
 `deep_agent.__version__` 为准；数据库结构版本以 Alembic head 为准，两者互不替代。
 
+## v0.5.4
+
+- 收敛Console会话轨迹详情展示：Assistant的Thinking归入Preview首段并保持默认折叠，
+  短正文按内容自适应，超过高度上限后再滚动。
+- Tool、Planning和Deferred复用同一套Payload/Result摘要渲染与类型分发，减少重复前端逻辑；
+  REST、SSE、History、数据库与轨迹投影语义均不变化，Alembic Head仍为`006`。
+
 ## v0.5.3
 
 - Console 对话测试新增“对话 / 轨迹”分段切换；轨迹按 Pydantic AI Run 归组展示

@@ -169,6 +169,8 @@ test("工作台以独立页签接入轨迹且默认对话链路不变", () => {
   assert.match(trajectorySource, /DeepAgentJson\?\.renderBlock/);
   assert.match(workspaceCss, /\.trajectory-summary-markdown/);
   assert.match(workspaceCss, /\.trajectory-thinking-content[^}]*max-height:\s*50vh/);
+  assert.match(trajectorySource, /const preview = `\$\{renderThinking\(event\.payload\?\.thinking\)\}\$\{renderMarkdown/);
+  assert.match(workspaceCss, /\.trajectory-summary-preview \.trajectory-thinking,[\s\S]*border-left:\s*2px solid var\(--accent-soft\)/);
   assert.doesNotMatch(workspaceCss, /trajectory-thinking-preview|trajectory-technical-details/);
   assert.doesNotMatch(trajectorySource, /标识与模型信息|renderTechnicalDetails/);
   assert.match(trajectorySource, /\["summary", "Summary"\]/);
@@ -191,7 +193,8 @@ test("工作台以独立页签接入轨迹且默认对话链路不变", () => {
   assert.doesNotMatch(trajectorySource, /trajectoryTimelineLayout|renderSequence|renderRowSignals|iconForKind/);
   assert.doesNotMatch(trajectorySource, /含思考|请求调用|个调用/);
   assert.match(workspaceCss, /\.trajectory-list\s*\{[\s\S]*overflow-x:\s*hidden/);
-  assert.match(workspaceCss, /\.trajectory-summary-preview\.is-scroll \.trajectory-summary-section-body\s*\{[\s\S]*height:\s*180px;[\s\S]*overflow-y:\s*auto/);
+  assert.match(workspaceCss, /\.trajectory-summary-preview\.is-scroll \.trajectory-summary-section-body\s*\{[\s\S]*max-height:\s*180px;[\s\S]*overflow-y:\s*auto/);
+  assert.doesNotMatch(workspaceCss, /\.trajectory-summary-preview\.is-scroll \.trajectory-summary-section-body\s*\{[^}]*\n\s*height:\s*180px/);
   assert.match(workspaceCss, /\.trajectory-export\s*\{[\s\S]*height:\s*32px;[\s\S]*min-height:\s*32px/);
   assert.match(workspaceCss, /\.trajectory-detail-body \.trajectory-json\.is-flat\s*\{[\s\S]*border:\s*0;[\s\S]*background:\s*transparent/);
   assert.match(workspaceCss, /\.trajectory-kind\.input\s*\{[^}]*background:\s*#eef4ff/);

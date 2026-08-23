@@ -514,12 +514,15 @@ function renderAssistantTools(event, events) {
 }
 
 function renderAssistantSummary(event, events) {
-  return `${event.payload?.thinking ? renderThinking(event.payload.thinking) : ""}
-    ${renderSummarySection(
-      "Preview",
-      renderMarkdown(event.payload?.content, event.payload?.thinking ? "模型尚未输出正文。" : "本次模型响应没有正文。"),
-      { targetTab: "preview", className: "trajectory-summary-preview trajectory-summary-assistant-preview is-scroll" },
-    )}
+  const preview = `${renderThinking(event.payload?.thinking)}${renderMarkdown(
+    event.payload?.content,
+    event.payload?.thinking ? "模型尚未输出正文。" : "本次模型响应没有正文。",
+  )}`;
+  return `${renderSummarySection(
+    "Preview",
+    preview,
+    { targetTab: "preview", className: "trajectory-summary-preview trajectory-summary-assistant-preview is-scroll" },
+  )}
     ${event.payload?.tool_calls?.length ? renderSummarySection("Tools", renderAssistantTools(event, events)) : ""}`;
 }
 
@@ -529,13 +532,18 @@ function toolResultValue(event) {
     : event.result;
 }
 
-function renderToolSummary(event) {
-  const result = toolResultValue(event);
-  const payload = event.payload?.args ?? event.payload;
+function renderPayloadResultSections({ payload, result }) {
   const payloadText = hasMeaningfulValue(payload) ? valuePreview(payload, 280) : null;
   const resultText = hasMeaningfulValue(result) ? valuePreview(result, 360) : null;
   return `${payloadText ? renderSummarySection("Payload", `<p class="trajectory-summary-code">${escapeHtml(payloadText)}</p>`, { targetTab: "payload" }) : ""}
     ${resultText ? renderSummarySection("Result", `<p class="trajectory-summary-code">${escapeHtml(resultText)}</p>`, { targetTab: "result" }) : ""}`;
+}
+
+function renderToolSummary(event) {
+  return renderPayloadResultSections({
+    payload: event.payload?.args ?? event.payload,
+    result: toolResultValue(event),
+  });
 }
 
 function planSnapshot(event) {
@@ -553,10 +561,8 @@ function renderPlanningSummary(event) {
   }[event.label] || event.label;
   const progress = `<p class="trajectory-summary-lead">${icon("list-checks")}<strong>${escapeHtml(label)}</strong></p>
     ${total ? `<div class="trajectory-plan-progress"><span style="width:${Math.min(100, Math.max(0, completed / total * 100))}%"></span></div><p class="trajectory-plan-count">${completed} / ${total} 已完成</p>` : ""}`;
-  const result = toolResultValue(event);
   return `${renderSummarySection("Plan", progress)}
-    ${hasMeaningfulValue(event.payload) ? renderSummarySection("Payload", `<p class="trajectory-summary-code">${escapeHtml(valuePreview(event.payload, 280))}</p>`, { targetTab: "payload" }) : ""}
-    ${hasMeaningfulValue(result) ? renderSummarySection("Result", `<p class="trajectory-summary-code">${escapeHtml(valuePreview(result, 360))}</p>`, { targetTab: "result" }) : ""}`;
+    ${renderPayloadResultSections({ payload: event.payload, result: toolResultValue(event) })}`;
 }
 
 function renderDeferredSummary(event) {
@@ -565,10 +571,8 @@ function renderDeferredSummary(event) {
   const reason = args.reason || args.message || event.summary;
   const primary = `<p class="trajectory-summary-lead">${icon("message-square-more")}<strong>${escapeHtml(title)}</strong></p>
     ${reason && reason !== title ? `<p class="trajectory-summary-copy">${escapeHtml(reason)}</p>` : ""}`;
-  const result = toolResultValue(event);
   return `${renderSummarySection("Interaction", primary)}
-    ${hasMeaningfulValue(event.payload) ? renderSummarySection("Payload", `<p class="trajectory-summary-code">${escapeHtml(valuePreview(event.payload, 280))}</p>`, { targetTab: "payload" }) : ""}
-    ${hasMeaningfulValue(result) ? renderSummarySection("Result", `<p class="trajectory-summary-code">${escapeHtml(valuePreview(result, 360))}</p>`, { targetTab: "result" }) : ""}`;
+    ${renderPayloadResultSections({ payload: event.payload, result: toolResultValue(event) })}`;
 }
 
 function renderCheckpointSummary(event) {
@@ -580,16 +584,22 @@ function renderCheckpointSummary(event) {
   return renderSummarySection("Checkpoint", `<p class="trajectory-summary-lead">${icon("archive-restore")}<strong>${escapeHtml(primary || event.label)}</strong></p>`);
 }
 
+const SUMMARY_RENDERERS = Object.freeze({
+  input: renderInputSummary,
+  context: renderContextSummary,
+  assistant: renderAssistantSummary,
+  planning: renderPlanningSummary,
+  deferred: renderDeferredSummary,
+  tool: renderToolSummary,
+  checkpoint: renderCheckpointSummary,
+  compaction: renderCheckpointSummary,
+});
+
 function renderSummary(event, events) {
-  let primary = "";
-  if (event.kind === "input") primary = renderInputSummary(event, events);
-  else if (event.kind === "context") primary = renderContextSummary(event);
-  else if (event.kind === "assistant") primary = renderAssistantSummary(event, events);
-  else if (event.kind === "planning") primary = renderPlanningSummary(event);
-  else if (event.kind === "deferred") primary = renderDeferredSummary(event);
-  else if (event.kind === "tool") primary = renderToolSummary(event);
-  else if (["checkpoint", "compaction"].includes(event.kind)) primary = renderCheckpointSummary(event);
-  else primary = renderSummarySection("Event", `<p class="trajectory-summary-lead">${escapeHtml(event.summary || event.label)}</p>`);
+  const renderer = SUMMARY_RENDERERS[event.kind];
+  const primary = renderer
+    ? renderer(event, events)
+    : renderSummarySection("Event", `<p class="trajectory-summary-lead">${escapeHtml(event.summary || event.label)}</p>`);
   return `<section class="trajectory-summary">${renderMeta(event)}<div class="trajectory-summary-primary">${primary}</div></section>`;
 }
 

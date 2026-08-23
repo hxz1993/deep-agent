@@ -105,7 +105,6 @@
 | ID | 暂缓事项 | 已确认结论 | 重新启动条件 | 来源 |
 | --- | --- | --- | --- | --- |
 | `CTX-102` | 压缩后搜索原始会话 | 当前没有真实长程任务证明六段摘要和Checkpoint无法恢复关键路径、ID、决定或工具结论；中文历史检索的召回和排序也尚无可靠样本，不提前增加搜索工具 | 出现可稳定复现的长程任务：摘要遗漏关键事实，且继续执行确实必须回查原始会话；届时再评估 Harness `ConversationSearch` + 自定义 `HistorySource` | [Harness 后续采用项](03-context-compaction/context-compaction-research.md#harness-018-后续采用项) |
-| `CONSOLE-201` | 只读运行检查器剩余能力 | Console 已能查看 Context Reference 安全 JSON；Markdown 原文、原始 SSE、History 对照和工具详情主要服务 UI/协议调试 | 调试渲染或 SSE/History 一致性成为高频工作，并能锁定最小只读范围 | [运行检查器](02-operations-console/operations-console-design.md#运行检查器) |
 | `MODEL-101` | 显式 Provider Prompt Cache | DeepSeek 自动缓存无需改请求，命中观测并入 `OBS-101`；`CachePoint`、cache key、TTL 均是 Provider 专属配置，不存在跨 Provider 通用开关 | 模型目录中的某个 Provider 明确支持显式缓存，且能观测成本或首 Token 延迟收益 | [Pydantic AI 采用项](03-context-compaction/context-compaction-research.md#pydantic-ai-226-原生能力采用项) |
 | `OBS-201` / `CONSOLE-301` | OTLP Trace 与 Console 诊断中心 | v0.3.17 已有统一 conversation/run ID 和脱敏结构化日志；在线诊断需要公司观测平台，不把高频 Span 塞入业务 MySQL | 公司确认 OTLP 后端、保留周期、权限和跨实例查询接口 | [框架能力台账](14-framework-capabilities/framework-capabilities-baseline.md#42-下一步优先采用) |
 | `EVAL-001` | Agent 回复与工具调用质量评估 | 评估应建立在可查询的真实 Trace 上，分开回答质量、工具选择、参数、结果利用、副作用和成本，不同步阻塞用户请求 | OTLP/诊断数据源确定，并明确首批离线评估集、评分责任和抽样策略 | [框架能力台账](14-framework-capabilities/framework-capabilities-baseline.md#42-下一步优先采用) |
@@ -161,6 +160,7 @@
 | `MCP-SNAPSHOT` | URL MCP 检测保存完整工具快照，聊天按快照披露并在首次真实调用时建连；缺快照不阻塞 Run，单 Server 连接失败转为 `ToolFailed` | v0.3.19，[工具检索](13-tool-discovery/tool-discovery-design.md) |
 | `CONSOLE-202` | 独立只读系统工具目录按Skill、文件、工具结果、MCP工具发现和MCP Resource展示来源、自动注入条件与说明；`runtime:*`只作展示，不进入Agent能力或数据库 | v0.3.21～v0.4.0，[工具包 Console](11-tool-packages/tool-packages-design.md#9-console) |
 | `CONSOLE-203` | Console与全部管理API统一使用企业管理员门禁；固定`admin`拒绝，平台权限服务异常失败关闭，业务聊天与会话接口保持原有使用语义 | v0.4.12，[Console企业管理员鉴权](../guides/console-admin-access.md) |
+| `CONSOLE-201` | Console“对话 / 轨迹”只读检查器：以现有History和当前SSE为事实源，按Pydantic AI Run展示模型、工具、终态、用量与Checkpoint，并提供脱敏搜索、详情和JSON导出；不建立轨迹表，也不伪造未持久化的System Prompt、动态Schema或逐Part耗时 | v0.5.3，[会话轨迹](18-session-trajectory/README.md) |
 | `RUN-204` | Harness `Planning()`单轮结构化计划：按Test真实调用收敛为`write_plan/read_plan/update_task_statuses`，其他Planning工具不披露也不特殊识别；每Run独立内存Store，公开Guidance约束稳定ID、Deferred重建和最终正文前收尾；Console正常Final或UI Pending隐藏计划，取消/失败保留，不增加数据库或Agent配置 | v0.4.6～v0.4.17，[框架能力台账](14-framework-capabilities/framework-capabilities-baseline.md#51-已经采用) |
 | `SKILL-102A` | Skill脚本执行：只允许已授权 `.py`、显式JSON inputs/arguments/同Skill资源，固定读取 `outputs/result.json`；选择含脚本Skill并启用 `builtin:sandbox`后，与 `execute_python`共用当前Sandbox；中立测试Skill已在线完成首次加载、续跑、结构化结果和History配对验收 | v0.3.22～v0.3.24；2026-08-13 `SKILL-VAL-002` Test验收，[Skill 脚本边界](12-agent-skills/skill-system-design.md#10-skill脚本执行) |
 | `SKILL-104` | 上传Skill支持单个原包导出和全部集合导出；每个导出子ZIP可用现有安装接口直接导入，集合清单不包含平台File ID或Agent绑定 | v0.4.3，[Skill安装与运行](../guides/skills.md) |

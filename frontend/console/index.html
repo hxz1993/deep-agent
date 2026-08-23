@@ -19,7 +19,7 @@
   <link rel="icon" type="image/svg+xml" href="./favicon.svg?v=20260728-1" />
   <link id="hljsTheme" rel="stylesheet" href="/vendor/highlight-github-dark.min.css" />
   <link rel="stylesheet" href="./themes.css?v=20260821-2" />
-  <link rel="stylesheet" href="./workspace.css?v=20260822-2" />
+  <link rel="stylesheet" href="./workspace.css?v=20260823-1" />
   <link rel="stylesheet" href="./configuration/configuration.css?v=20260822-3" />
   <link rel="stylesheet" href="./console.css?v=20260821-13" />
 </head>
@@ -98,7 +98,7 @@
           </aside>
           <div class="workspace-resizer workspace-resizer-agent" id="agentPaneResizer" role="separator" tabindex="0" aria-label="调整 Agent 列表宽度" aria-orientation="vertical" aria-valuemin="150" aria-valuemax="280" aria-valuenow="188" data-resize-pane="agent"></div>
           <div class="workspace-legacy-host" id="workspaceLegacyHost"></div>
-          <div class="workspace-resizer workspace-resizer-inspector" id="inspectorPaneResizer" role="separator" tabindex="0" aria-label="调整会话详情宽度" aria-orientation="vertical" aria-valuemin="260" aria-valuemax="460" aria-valuenow="320" data-resize-pane="inspector"></div>
+          <div class="workspace-resizer workspace-resizer-inspector" id="inspectorPaneResizer" role="separator" tabindex="0" aria-label="调整会话详情宽度" aria-orientation="vertical" aria-valuemin="260" aria-valuemax="720" aria-valuenow="320" data-resize-pane="inspector"></div>
           <aside class="inspector-pane" id="inspectorPane">
             <div class="inspector-content" id="inspectorContent">
               <div class="inspector-empty"><i data-lucide="scan-search"></i><p>选择会话后查看会话与上下文信息</p></div>
@@ -121,7 +121,7 @@
             <button class="tab resource-btn" data-tab="mcp"><i data-lucide="plug-zap"></i><span>MCP</span></button>
             <button class="tab resource-btn" data-tab="ui-tools"><i data-lucide="panel-top"></i><span>UI 工具</span></button>
             <div class="resource-group-label separated">系统设置</div>
-            <button class="tab resource-btn" data-tab="auxiliary-models"><i data-lucide="brain-circuit"></i><span>辅助工具</span></button>
+            <button class="tab resource-btn" data-tab="auxiliary-models"><i data-lucide="brain"></i><span>辅助工具</span></button>
             <button class="tab resource-btn" data-tab="global-settings"><i data-lucide="settings-2"></i><span>全局配置</span></button>
             <button class="tab resource-btn" data-tab="database-connection"><i data-lucide="database"></i><span>数据库连接</span></button>
             <div class="resource-group-label separated">辅助资源</div>
@@ -184,7 +184,8 @@
   <script src="../vendor/marked.min.js"></script>
   <script src="../vendor/purify.min.js"></script>
   <script src="../vendor/highlight.min.js"></script>
+  <script src="./json-view.js?v=20260823-1"></script>
   <script src="./markdown.js?v=20260822-2"></script>
-  <script type="module" src="./main.js?v=20260822-4"></script>
+  <script type="module" src="./main.js?v=20260823-2"></script>
 </body>
 </html>

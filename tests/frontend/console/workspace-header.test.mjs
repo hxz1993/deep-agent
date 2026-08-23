@@ -68,11 +68,13 @@ test("工作台只读展示上下文预算、压缩结果与 Checkpoint 状态",
 test("会话详情使用会话、当前回合和上下文引用三页签", () => {
   assert.match(template, /data-open-context[\s\S]*测试App/);
   assert.doesNotMatch(template, /id="usageInfo"/);
-  assert.match(template, /id="toggleInspectorPaneBtn"[\s\S]*会话详情/);
+  assert.match(template, /id="toggleInspectorPaneBtn"[\s\S]*<span>详情<\/span>/);
+  assert.doesNotMatch(template, /<span>会话详情<\/span>/);
   assert.match(workspaceSource, /function toggleInspectorPane\(\)/);
   assert.match(workspaceSource, /data-inspector-tab="session"[\s\S]*>会话<\/button>/);
   assert.match(workspaceSource, /data-inspector-tab="run"[\s\S]*>当前回合<\/button>/);
   assert.match(workspaceSource, /data-inspector-tab="context"[\s\S]*>上下文引用<\/button>/);
+  assert.doesNotMatch(workspaceSource, /metadata 不进入模型输入/);
   assert.match(workspaceSource, /<strong>会话概览<\/strong>/);
   assert.match(workspaceSource, /inspector-session-group[\s\S]*<strong>请求 Header<\/strong>/);
   assert.match(workspaceSource, /inspector-tab-status[\s\S]*\$\{statusText\}/);
@@ -145,7 +147,7 @@ test("工作台所有宽度保持多栏交互并支持拖拽和键盘调宽", ()
   assert.match(consoleIndex, /id="inspectorPaneResizer"[\s\S]*data-resize-pane="inspector"/);
   assert.match(workspaceSource, /id = "sessionPaneResizer"/);
   assert.match(workspaceSource, /session: \{ min: 220, max: 420, initial: 300/);
-  assert.match(workspaceSource, /inspector: \{ min: 260, max: 460, initial: 320/);
+  assert.match(workspaceSource, /inspector: \{ min: 260, max: 720, initial: 320/);
   assert.match(workspaceSource, /clampWorkspacePaneWidth/);
   assert.match(workspaceSource, /setPointerCapture/);
   assert.match(workspaceSource, /\["ArrowLeft", "ArrowRight", "Home"\]/);

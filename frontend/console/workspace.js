@@ -1,9 +1,9 @@
-const WORKSPACE_ASSET_VERSION = "20260822-3";
+const WORKSPACE_ASSET_VERSION = "20260823-2";
 
 const WORKSPACE_PANE_LIMITS = {
   agent: { min: 150, max: 280, initial: 188, variable: "--console-agent-width" },
   session: { min: 220, max: 420, initial: 300, variable: "--console-session-width" },
-  inspector: { min: 260, max: 460, initial: 320, variable: "--console-inspector-width" },
+  inspector: { min: 260, max: 720, initial: 320, variable: "--console-inspector-width" },
 };
 
 let initialized = false;
@@ -436,7 +436,16 @@ function readWorkspacePaneWidth(grid, pane) {
 function writeWorkspacePaneWidth(grid, handle, pane, value) {
   const limits = WORKSPACE_PANE_LIMITS[pane];
   if (!limits) return;
-  const width = clampWorkspacePaneWidth(value, limits);
+  let effectiveLimits = limits;
+  if (pane === "inspector") {
+    const agentWidth = grid.classList.contains("agent-pinned") ? readWorkspacePaneWidth(grid, "agent") : 0;
+    const sessionWidth = readWorkspacePaneWidth(grid, "session");
+    const resizerWidth = Number.parseFloat(getComputedStyle(grid).getPropertyValue("--console-resizer-width")) || 10;
+    const resizerCount = grid.classList.contains("agent-pinned") ? 3 : 2;
+    const available = grid.clientWidth - agentWidth - sessionWidth - resizerWidth * resizerCount - 420;
+    effectiveLimits = { ...limits, max: Math.max(limits.min, Math.min(limits.max, available)) };
+  }
+  const width = clampWorkspacePaneWidth(value, effectiveLimits);
   grid.style.setProperty(limits.variable, `${width}px`);
   handle.setAttribute("aria-valuenow", String(width));
 }
@@ -512,7 +521,7 @@ function syncInspectorToggle() {
   const visible = !grid.classList.contains("inspector-hidden");
   button.classList.toggle("active", visible);
   button.setAttribute("aria-pressed", String(visible));
-  button.title = visible ? "隐藏会话详情" : "显示会话详情";
+  button.title = visible ? "隐藏详情" : "显示详情";
 }
 
 function toggleInspectorPane() {
@@ -617,7 +626,10 @@ function renderContextReferenceInspector(state) {
     return renderContextReferenceInspector(state);
   }
   const reference = selectedContextReference.reference;
-  const rawJson = JSON.stringify(reference, null, 2);
+  const json = window.DeepAgentJson?.renderBlock(reference, {
+    className: "inspector-json",
+    ariaLabel: "上下文引用 JSON",
+  }) || `<pre class="inspector-json" aria-label="上下文引用 JSON">${escapeHtml(JSON.stringify(reference, null, 2))}</pre>`;
   return `<section class="inspector-section context-reference-inspector">
       <header><strong>上下文引用</strong><span>只读 JSON</span></header>
       <div class="inspector-facts compact">
@@ -626,8 +638,7 @@ function renderContextReferenceInspector(state) {
         <div><span>类型</span><strong class="mono">${escapeHtml(reference.type || "—")}</strong></div>
         <div><span>版本</span><strong>${escapeHtml(reference.schema_version || "—")}</strong></div>
       </div>
-      <pre class="inspector-json" aria-label="上下文引用 JSON">${escapeHtml(rawJson)}</pre>
-      <p class="inspector-help">这是会话历史保存的完整上下文引用；metadata 不进入模型输入。</p>
+      ${json}
     </section>`;
 }
 
@@ -680,6 +691,7 @@ function renderInspector() {
   const api = window.DeepAgentConsoleChat;
   const host = document.getElementById("inspectorContent");
   if (!api || !host) return;
+  if (document.querySelector("main.chat")?.classList.contains("trajectory-active")) return;
   const state = api.state;
 
   const model = state.llmModels.find((item) => item.id === state.llmModelId);
@@ -842,6 +854,8 @@ function bindWorkspaceControls() {
 
 window.DeepAgentConsoleWorkspace = {
   isContextReferenceSelected,
+  openInspectorPane,
+  renderInspector,
   toggleContextReferenceInspector,
 };
 

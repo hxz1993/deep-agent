@@ -285,8 +285,11 @@ const skillsAdmin = {
     try {
       const page = await apiFetch(`/api/v1/skills/${encodeURIComponent(code)}/resources/${path.split("/").map(encodeURIComponent).join("/")}`);
       const isMarkdown = /\.md$/i.test(path) || /markdown/i.test(String(page.mime_type || page.mime || ""));
+      const isJson = /\.json$/i.test(path) || /json/i.test(String(page.mime_type || page.mime || ""));
       const content = isMarkdown
         ? `<div class="skill-preview-markdown">${window.DeepAgentMarkdown?.renderBody(page.content) ?? `<pre>${escapeHtml(page.content)}</pre>`}</div>`
+        : isJson
+          ? (window.DeepAgentJson?.renderBlock(page.content, { className: "skill-preview-json", ariaLabel: `${path} JSON` }) || `<pre>${escapeHtml(page.content)}</pre>`)
         : `<pre>${escapeHtml(page.content)}</pre>`;
       preview.innerHTML = `${this.previewHeading(path, { format: page.format, lineCount: page.returned_count, content: page.content })}${content}${page.has_more ? `<p class="skill-preview-more">内容较长，可由 Agent 使用 next_offset=${escapeHtml(page.next_offset)} 继续分页读取。</p>` : ""}`;
       window.lucide?.createIcons();

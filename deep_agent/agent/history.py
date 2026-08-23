@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime
 from typing import Any, Literal
 
@@ -59,6 +59,14 @@ class HistoryToolResultPart(BaseModel):
     source: str | None = None
     artifacts: list[dict[str, Any]] | None = None
     plan: dict[str, Any] | None = None
+    outcome: str | None = Field(
+        default=None,
+        description="Pydantic AI tool outcome when the stored return exposes one.",
+    )
+    timestamp: datetime | None = Field(
+        default=None,
+        description="Tool completion time recorded by Pydantic AI.",
+    )
 
 
 class HistoryAttachmentPart(BaseModel):
@@ -95,6 +103,10 @@ class HistoryMessage(BaseModel):
     )
     parts: list[HistoryPart] = Field(default_factory=list, description="Assistant message parts in order.")
     timestamp: datetime | None = Field(default=None, description="Message time (UTC).")
+    request_timestamp: datetime | None = Field(
+        default=None,
+        description="Pydantic AI request time paired with this model response.",
+    )
     branch_point: int | None = Field(
         default=None,
         description="Index in raw ModelMessage list; truncate here to branch.",
@@ -102,6 +114,26 @@ class HistoryMessage(BaseModel):
     run_id: str | None = Field(
         default=None,
         description="Pydantic AI run that produced this assistant response.",
+    )
+    model_name: str | None = Field(
+        default=None,
+        description="Model recorded on the persisted response.",
+    )
+    provider_name: str | None = Field(
+        default=None,
+        description="Provider recorded on the persisted response.",
+    )
+    provider_response_id: str | None = Field(
+        default=None,
+        description="Provider response identifier when available.",
+    )
+    finish_reason: str | None = Field(
+        default=None,
+        description="Normalized response finish reason when available.",
+    )
+    usage: dict[str, Any] | None = Field(
+        default=None,
+        description="Persisted response usage projected to JSON-safe values.",
     )
 
 
@@ -495,6 +527,12 @@ def _request_tool_returns(request: ModelRequest) -> list[HistoryPart]:
                     ),
                     artifacts=tool_result_artifacts(part) or None,
                     plan=plan_snapshot_from_part(part),
+                    outcome=(
+                        str(part.outcome)
+                        if getattr(part, "outcome", None) is not None
+                        else None
+                    ),
+                    timestamp=part.timestamp,
                 )
             )
     return parts
@@ -567,6 +605,7 @@ def model_messages_to_history(messages: list[ModelMessage]) -> list[HistoryMessa
     pending_tool_results: list[HistoryPart] = []
     pending_tool_results_timestamp: datetime | None = None
     pending_tool_results_branch_point: int | None = None
+    latest_request_timestamp: datetime | None = None
 
     def flush_tool_results() -> None:
         nonlocal pending_tool_results, pending_tool_results_timestamp, pending_tool_results_branch_point
@@ -589,6 +628,7 @@ def model_messages_to_history(messages: list[ModelMessage]) -> list[HistoryMessa
 
     for idx, message in enumerate(messages):
         if isinstance(message, ModelRequest):
+            latest_request_timestamp = _request_timestamp(message)
             user_attachments: list[HistoryAttachmentPart] = []
             user_context_refs: list[ContextReference] = []
             for part in message.parts:
@@ -636,8 +676,18 @@ def model_messages_to_history(messages: list[ModelMessage]) -> list[HistoryMessa
                         ),
                         parts=parts,
                         timestamp=message.timestamp,
+                        request_timestamp=latest_request_timestamp,
                         branch_point=idx,
                         run_id=message.run_id,
+                        model_name=message.model_name,
+                        provider_name=message.provider_name,
+                        provider_response_id=message.provider_response_id,
+                        finish_reason=(
+                            str(message.finish_reason)
+                            if message.finish_reason is not None
+                            else None
+                        ),
+                        usage=asdict(message.usage) if message.usage is not None else None,
                     )
                 )
 

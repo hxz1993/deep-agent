@@ -18,6 +18,7 @@ from pydantic_ai.messages import (
     ToolSearchReturnPart,
     UserPromptPart,
 )
+from pydantic_ai.usage import RequestUsage
 
 from deep_agent.agent import events
 from deep_agent.agent.planning import PLAN_METADATA_KEY
@@ -90,6 +91,40 @@ class HistoryThinkingTests(unittest.TestCase):
         response = ModelResponse(parts=[TextPart(content="hello")], timestamp=ts)
         history = model_messages_to_history([response])
         self.assertEqual(history[0].timestamp, ts)
+
+    def test_model_response_keeps_paired_request_timestamp_for_timing(self) -> None:
+        started_at = datetime(2025, 6, 22, 10, 30, tzinfo=timezone.utc)
+        finished_at = datetime(2025, 6, 22, 10, 31, tzinfo=timezone.utc)
+        history = model_messages_to_history([
+            ModelRequest(parts=[UserPromptPart(content="hi")], timestamp=started_at),
+            ModelResponse(parts=[TextPart(content="hello")], timestamp=finished_at),
+        ])
+
+        self.assertEqual(history[1].request_timestamp, started_at)
+        self.assertEqual(history[1].timestamp, finished_at)
+
+    def test_model_messages_to_history_projects_safe_native_response_fields(self) -> None:
+        response = ModelResponse(
+            parts=[TextPart(content="hello")],
+            model_name="deepseek-v4-flash",
+            provider_name="openai-compatible",
+            provider_url="https://private-provider.example/v1",
+            provider_details={"authorization": "secret"},
+            provider_response_id="response-1",
+            finish_reason="stop",
+            usage=RequestUsage(input_tokens=12, output_tokens=3),
+        )
+
+        item = model_messages_to_history([response])[0]
+
+        self.assertEqual(item.model_name, "deepseek-v4-flash")
+        self.assertEqual(item.provider_name, "openai-compatible")
+        self.assertEqual(item.provider_response_id, "response-1")
+        self.assertEqual(item.finish_reason, "stop")
+        self.assertEqual(item.usage["input_tokens"], 12)
+        self.assertEqual(item.usage["output_tokens"], 3)
+        self.assertNotIn("provider_url", item.model_dump())
+        self.assertNotIn("provider_details", item.model_dump())
 
     def test_model_messages_to_history_includes_request_timestamp(self) -> None:
         ts = datetime(2025, 6, 22, 10, 30, tzinfo=timezone.utc)
@@ -194,6 +229,25 @@ class HistoryThinkingTests(unittest.TestCase):
         self.assertEqual(history[0].parts[0].source, "planning")
         self.assertEqual(history[0].parts[1].source, "planning")
         self.assertEqual(history[0].parts[1].plan, snapshot)
+
+    def test_tool_return_outcome_is_projected_for_diagnostics(self) -> None:
+        completed_at = datetime(2025, 6, 22, 10, 32, tzinfo=timezone.utc)
+        call = ToolCallPart(tool_name="demo", args={"value": 1}, tool_call_id="call-1")
+        result = ToolReturnPart(
+            tool_name="demo",
+            content="business validation failed",
+            tool_call_id="call-1",
+            outcome="failed",
+            timestamp=completed_at,
+        )
+
+        history = model_messages_to_history([
+            ModelResponse(parts=[call]),
+            ModelRequest(parts=[result]),
+        ])
+
+        self.assertEqual(history[0].parts[1].outcome, "failed")
+        self.assertEqual(history[0].parts[1].timestamp, completed_at)
 
     def test_model_messages_to_history_skips_thinking_only_retry(self) -> None:
         ts = datetime(2025, 6, 22, 10, 45, tzinfo=timezone.utc)

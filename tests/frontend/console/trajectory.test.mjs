@@ -1,0 +1,250 @@
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import test from "node:test";
+
+import {
+  buildTrajectory,
+  filterTrajectory,
+  redactTrajectoryValue,
+  trajectoryStats,
+} from "../../../frontend/console/trajectory.js";
+
+const template = await readFile(
+  new URL("../../../frontend/console/workspace-template.html", import.meta.url),
+  "utf8",
+);
+const chatSource = await readFile(
+  new URL("../../../frontend/console/chat.js", import.meta.url),
+  "utf8",
+);
+const workspaceCss = await readFile(
+  new URL("../../../frontend/console/workspace.css", import.meta.url),
+  "utf8",
+);
+const consoleCss = await readFile(
+  new URL("../../../frontend/console/console.css", import.meta.url),
+  "utf8",
+);
+const configurationCss = await readFile(
+  new URL("../../../frontend/console/configuration/configuration.css", import.meta.url),
+  "utf8",
+);
+const themesCss = await readFile(
+  new URL("../../../frontend/console/themes.css", import.meta.url),
+  "utf8",
+);
+const trajectorySource = await readFile(
+  new URL("../../../frontend/console/trajectory.js", import.meta.url),
+  "utf8",
+);
+const jsonViewSource = await readFile(
+  new URL("../../../frontend/console/json-view.js", import.meta.url),
+  "utf8",
+);
+
+const history = {
+  session_id: "session-1",
+  context_checkpoint: {
+    source_estimated_tokens: 9000,
+    projected_estimated_tokens: 4000,
+    updated_at: "2026-08-23T10:00:03Z",
+  },
+  messages: [
+    {
+      role: "user",
+      content: "查询收入",
+      timestamp: "2026-08-23T10:00:00Z",
+      attachments: [{ id: "file-1", name: "input.xlsx" }],
+      context_refs: [{
+        key: "current_range",
+        type: "deeptable.range",
+        schema_version: "1.0",
+        label: "预算表!B2:F10",
+        payload: { sheet: "预算表", range: "B2:F10" },
+      }],
+    },
+    {
+      role: "assistant",
+      run_id: "run-1",
+      status: "completed",
+      timestamp: "2026-08-23T10:00:01Z",
+      request_timestamp: "2026-08-23T10:00:00Z",
+      model_name: "deepseek-v4-flash",
+      provider_name: "openai-compatible",
+      provider_response_id: "response-1",
+      finish_reason: "tool_call",
+      usage: { input_tokens: 20, output_tokens: 4 },
+      parts: [
+        { type: "thinking", content: "先查工具" },
+        {
+          type: "tool_call",
+          tool: "cube_query",
+          tool_call_id: "call-1",
+          args: { cube: "Sales", access_token: "private" },
+        },
+      ],
+    },
+    {
+      role: "assistant",
+      run_id: "run-1",
+      status: "completed",
+      timestamp: "2026-08-23T10:00:02Z",
+      parts: [
+        {
+          type: "tool_result",
+          tool: "cube_query",
+          tool_call_id: "call-1",
+          result: { rows: 2 },
+          outcome: "success",
+          timestamp: "2026-08-23T10:00:02Z",
+        },
+        { type: "text", content: "查询完成" },
+      ],
+    },
+  ],
+};
+
+test("History轨迹合并工具调用结果并保留原生响应摘要", () => {
+  const events = buildTrajectory(history);
+  const tool = events.find((event) => event.tool_call_id === "call-1");
+  const assistants = events.filter((event) => event.kind === "assistant");
+  const input = events.find((event) => event.kind === "input");
+  const context = events.find((event) => event.kind === "context");
+
+  assert.equal(tool.status, "completed");
+  assert.deepEqual(tool.result.result, { rows: 2 });
+  assert.equal(tool.payload.args.access_token, "[已隐藏]");
+  assert.equal(tool.native.model_name, "deepseek-v4-flash");
+  assert.equal(tool.native.usage.input_tokens, 20);
+  assert.ok(events.some((event) => event.kind === "checkpoint"));
+  assert.equal(events.some((event) => event.kind === "thinking"), false);
+  assert.equal(assistants.length, 2);
+  assert.equal(assistants[0].payload.thinking, "先查工具");
+  assert.equal(assistants[0].payload.tool_calls[0].tool, "cube_query");
+  assert.equal(assistants[1].payload.content, "查询完成");
+  assert.equal(input.payload.context_refs[0].type, "deeptable.range");
+  assert.equal(input.payload.attachments[0].name, "input.xlsx");
+  assert.equal(input.run_id, "run-1");
+  assert.equal(context.run_id, "run-1");
+  assert.equal(context.payload.reference.type, "deeptable.range");
+  assert.equal(context.payload.parent_input_id, input.id);
+  assert.equal(assistants[0].timestamp, "2026-08-23T10:00:00Z");
+  assert.equal(assistants[0].timestamp_end, "2026-08-23T10:00:01Z");
+  assert.equal(tool.timestamp_end, "2026-08-23T10:00:02Z");
+  assert.match(tool.summary, /Sales/);
+});
+
+test("轨迹筛选、统计与脱敏保持确定性", () => {
+  const events = buildTrajectory(history);
+  assert.deepEqual(trajectoryStats(events), { inputs: 1, calls: 1, runs: 1 });
+  assert.equal(filterTrajectory(events, { mode: "calls" }).length, 1);
+  assert.equal(filterTrajectory(events, { query: "查询完成" }).length, 1);
+  assert.equal(filterTrajectory(events, { query: "预算表!B2:F10" }).length, 2);
+  assert.deepEqual(
+    redactTrajectoryValue({ authorization: "a", nested: { api_key: "b", safe: 1 } }),
+    { authorization: "[已隐藏]", nested: { api_key: "[已隐藏]", safe: 1 } },
+  );
+});
+
+test("工作台以独立页签接入轨迹且默认对话链路不变", () => {
+  assert.match(template, /class="chat-view-tab active" id="conversationViewTab"/);
+  assert.match(template, /id="trajectoryViewTab"/);
+  assert.match(template, /id="trajectoryView"[\s\S]*id="trajectoryList"/);
+  assert.doesNotMatch(template, /trajectorySequence|会话事件顺序/);
+  assert.doesNotMatch(template, /data-trajectory-mode="runs"|trajectoryRunCount/);
+  assert.match(template, /data-trajectory-mode="calls"[\s\S]*data-lucide="wrench"/);
+  assert.doesNotMatch(template, /id="trajectoryDetail"/);
+  assert.match(chatSource, /createTrajectoryController\(\{ state \}\)/);
+  assert.match(chatSource, /trajectory\?\.setHistory\(data\)/);
+  assert.match(chatSource, /trajectory\?\.ingest\(\{ event: type, data \}\)/);
+  assert.match(workspaceCss, /\.chat-view-tabs[\s\S]*border-radius:\s*8px/);
+  assert.doesNotMatch(workspaceCss, /\.chat-view-tab\.active::after/);
+  assert.match(workspaceCss, /\.trajectory-layout[\s\S]*display:\s*block/);
+  assert.doesNotMatch(workspaceCss, /trajectory-timeline|trajectory-segment|trajectory-sequence/);
+  assert.match(workspaceCss, /\.inspector-pane\.trajectory-inspector/);
+  assert.match(workspaceCss, /\.trajectory-fact[^}]*grid-template-columns:\s*64px minmax\(0, 1fr\)/);
+  assert.match(trajectorySource, /kind === "input"\) return "USER"/);
+  assert.match(trajectorySource, /kind === "context"\) return "CONTEXT"/);
+  assert.match(trajectorySource, /DeepAgentMarkdown\?\.renderBody/);
+  assert.match(trajectorySource, /DeepAgentJson\?\.renderBlock/);
+  assert.match(workspaceCss, /\.trajectory-summary-markdown/);
+  assert.match(workspaceCss, /\.trajectory-thinking-content[^}]*max-height:\s*50vh/);
+  assert.doesNotMatch(workspaceCss, /trajectory-thinking-preview|trajectory-technical-details/);
+  assert.doesNotMatch(trajectorySource, /标识与模型信息|renderTechnicalDetails/);
+  assert.match(trajectorySource, /\["summary", "Summary"\]/);
+  assert.match(trajectorySource, /tabs\.push\(\["preview", "Preview"\], \["raw", "Raw"\]\)/);
+  assert.match(trajectorySource, /\["Thinking", event\.payload\?\.thinking\][\s\S]*\["Content", event\.payload\?\.content\]/);
+  assert.match(trajectorySource, /completed: "Completed"/);
+  assert.doesNotMatch(trajectorySource, /completed: "完成"|trajectoryRunCount/);
+  assert.match(trajectorySource, /renderSummarySection\("Payload"[\s\S]*renderSummarySection\("Result"/);
+  assert.match(trajectorySource, /data-trajectory-detail-tab-target/);
+  assert.match(trajectorySource, /data-trajectory-event-target/);
+  assert.match(trajectorySource, /renderDetail\(selected, detailTab, events\)/);
+  assert.match(trajectorySource, /renderFact\("名称", reference\.label/);
+  assert.match(trajectorySource, /renderFact\("类型", reference\.type/);
+  assert.match(trajectorySource, /renderFact\("Key", reference\.key/);
+  assert.match(trajectorySource, /renderFact\("版本", reference\.schema_version/);
+  assert.doesNotMatch(trajectorySource, /Object\.entries\(reference\.payload/);
+  assert.match(trajectorySource, /TOOL_KINDS\.has\(event\.kind\) && hasMeaningfulValue\(event\.result\)/);
+  assert.doesNotMatch(trajectorySource, /\["timing", "Timing"\]/);
+  assert.doesNotMatch(trajectorySource, /renderFact\("Role"|trajectory-preview-message|eventRole/);
+  assert.doesNotMatch(trajectorySource, /trajectoryTimelineLayout|renderSequence|renderRowSignals|iconForKind/);
+  assert.doesNotMatch(trajectorySource, /含思考|请求调用|个调用/);
+  assert.match(workspaceCss, /\.trajectory-list\s*\{[\s\S]*overflow-x:\s*hidden/);
+  assert.match(workspaceCss, /\.trajectory-summary-preview\.is-scroll \.trajectory-summary-section-body\s*\{[\s\S]*height:\s*180px;[\s\S]*overflow-y:\s*auto/);
+  assert.match(workspaceCss, /\.trajectory-export\s*\{[\s\S]*height:\s*32px;[\s\S]*min-height:\s*32px/);
+  assert.match(workspaceCss, /\.trajectory-detail-body \.trajectory-json\.is-flat\s*\{[\s\S]*border:\s*0;[\s\S]*background:\s*transparent/);
+  assert.match(workspaceCss, /\.trajectory-kind\.input\s*\{[^}]*background:\s*#eef4ff/);
+  assert.match(workspaceCss, /\.trajectory-kind\.context\s*\{[^}]*background:\s*#e9f8f0/);
+  assert.match(workspaceCss, /\.trajectory-kind\.assistant,[\s\S]*background:\s*#f3edff/);
+  assert.match(workspaceCss, /\.trajectory-kind\.tool\s*\{[^}]*background:\s*#fff3e7/);
+  assert.doesNotMatch(trajectorySource, /\bturns?\b/i);
+  assert.match(trajectorySource, /currentUser\.run_id = currentRunId/);
+  assert.match(trajectorySource, /Run \$\{groupOrdinal\}/);
+  assert.doesNotMatch(workspaceCss, /@media[^}]+trajectory-layout[^}]+grid-template-columns:\s*1fr/s);
+});
+
+test("公共JSON视图区分键值类型并安全转义", async () => {
+  const { runInNewContext } = await import("node:vm");
+  const context = { window: {} };
+  runInNewContext(jsonViewSource, context);
+  const html = context.window.DeepAgentJson.renderBlock({
+    title: "<script>alert(1)</script>",
+    count: 12,
+    enabled: true,
+    empty: null,
+  });
+  assert.match(html, /class="json-view"/);
+  assert.match(html, /class="json-key"/);
+  assert.match(html, /class="json-string"/);
+  assert.match(html, /class="json-number"/);
+  assert.match(html, /class="json-boolean"/);
+  assert.match(html, /class="json-null"/);
+  assert.doesNotMatch(html, /<script>/);
+});
+
+test("轨迹JSON自动换行且只由详情正文承担滚动", () => {
+  assert.match(consoleCss, /\.json-view\s*\{[\s\S]*?overflow-x:\s*hidden;[\s\S]*?white-space:\s*pre-wrap;/);
+  assert.match(consoleCss, /\.json-view code\s*\{[^}]*min-width:\s*0;[^}]*white-space:\s*inherit;/);
+  assert.match(workspaceCss, /\.trajectory-detail-body \.trajectory-json\s*\{[\s\S]*?max-height:\s*none;[\s\S]*?overflow:\s*visible;/);
+});
+
+test("Console自有样式不再使用低于12px的可读文字", () => {
+  const lowFontDeclarations = (css) => {
+    const sizes = [];
+    for (const match of css.matchAll(/font-size\s*:\s*(\d+(?:\.\d+)?)px/gi)) {
+      if (Number(match[1]) < 12) sizes.push(match[0]);
+    }
+    for (const match of css.matchAll(/(?<!-)font\s*:\s*([^;{}]+)/gi)) {
+      for (const size of match[1].matchAll(/(\d+(?:\.\d+)?)px/g)) {
+        if (Number(size[1]) < 12) sizes.push(match[0]);
+      }
+    }
+    return sizes;
+  };
+  assert.deepEqual(lowFontDeclarations(workspaceCss), []);
+  assert.deepEqual(lowFontDeclarations(consoleCss), []);
+  assert.deepEqual(lowFontDeclarations(configurationCss), []);
+  assert.deepEqual(lowFontDeclarations(themesCss), []);
+  assert.match(consoleCss, /\.agent-select-label[^}]*font-size:\s*14px/);
+});

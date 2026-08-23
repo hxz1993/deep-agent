@@ -124,7 +124,7 @@ test("配置中心采用 Deepfos 轻风格的统一尺寸和表头", () => {
   assert.match(styles, /--config-header-height: 56px/);
   assert.match(styles, /#configurationHost \.panel-toolbar,[\s\S]*min-height: var\(--config-header-height\)/);
   assert.match(styles, /#configurationHost \.btn,[\s\S]*height: var\(--config-control-height\)/);
-  assert.match(styles, /#configurationHost \.data-table thead th,[\s\S]*height: 36px;[\s\S]*font-size: 11px/);
+  assert.match(styles, /#configurationHost \.data-table thead th,[\s\S]*height: 36px;[\s\S]*font-size: 12px/);
   assert.match(template, /<h2>MCP 服务列表<\/h2>[\s\S]*管理 Agent 可授权使用的 MCP 服务、工具快照与连接状态/);
   assert.match(styles, /\.agent-card-body \{[^}]*border-top:[^}]*\}/);
   assert.doesNotMatch(styles, /\.agent-card-body \{[^}]*border-bottom:/);

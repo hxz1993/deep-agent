@@ -14,6 +14,7 @@ import {
   processDisclosureLabel,
   splitAssistantHistoryRecords,
 } from "./assistant-presentation.js?v=20260815-2";
+import { createTrajectoryController } from "./trajectory.js?v=20260823-3";
 
 /* ------------------------------------------------------------------ *
  * deep-agent 前端 —— 适配 FastAPI /api/v1/chat/stream (SSE over POST)
@@ -200,6 +201,7 @@ const el = {
   composerModelModalities: $("composerModelModalities"),
   composerUploadCapabilities: $("composerUploadCapabilities"),
 };
+const trajectory = createTrajectoryController({ state });
 
 /* --------------------------- 初始化 --------------------------- */
 function updateAdminLink() {
@@ -684,6 +686,7 @@ function newChat(agentId) {
   state.lastRunMetrics = null;
   state.llmModelId = defaultLlmModelId();
   clearMessages();
+  trajectory?.reset();
   showEmptyState();
   el.sessionBadge.textContent = "";
   el.chatTitle.textContent = "新对话";
@@ -871,6 +874,7 @@ async function switchSession(s) {
 async function loadSessionHistory(session) {
   const normalized = normalizeSession(session);
   clearMessages();
+  trajectory?.setHistory({ session_id: normalized.id, messages: [] });
   hideEmptyState();
   try {
     await loadUiTools(state.agentId);
@@ -883,6 +887,7 @@ async function loadSessionHistory(session) {
     }
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const data = await r.json();
+    trajectory?.setHistory(data);
     state.conversationId = data.conversation_id || null;
     const latestAssistant = [...(data.messages || [])]
       .reverse()
@@ -905,6 +910,7 @@ async function loadSessionHistory(session) {
     }
     renderHistory(data.messages, data.model_message_count, state.historyCheckpoint);
   } catch (e) {
+    trajectory?.setHistory({ session_id: normalized.id, messages: [] });
     addSystemNote(`加载历史失败：${e.message}`);
   }
 }
@@ -1794,6 +1800,7 @@ async function onSend() {
   const isFirstTurn = branchFrom == null && state.modelMessageCount === 0;
   clearComposerPlan();
   addMessage("user", text, null, userBranchPoint, attachments);
+  trajectory?.addUser({ content: text, attachments, branch_point: userBranchPoint });
   state.lastUserBranchPoint = userBranchPoint;
 
   const assistant = createAssistantMessage();
@@ -1888,6 +1895,7 @@ async function runChatStream(payload, assistant) {
       assistant.finalizeText();
     } else {
       setConn("err", "请求失败");
+      trajectory?.ingest({ event: "error", data: { message: e.message } });
       failAutomaticContextCompaction("上下文压缩后续请求失败，未更新 Checkpoint");
       markComposerPlanTerminal("error");
       addErrorTo(assistant, `请求失败：${e.message}`);
@@ -2003,6 +2011,7 @@ function syncHistoryMeta({ model_message_count: count, user_branch_point: branch
 
 function handleEvent({ event, data }, assistant) {
   const type = event || data.type;
+  trajectory?.ingest({ event: type, data });
   switch (type) {
     case "session": {
       const id = data.session_id;
@@ -2490,7 +2499,7 @@ function createAssistantMessage(timestamp, branchPoint) {
       thinkingBlock.innerHTML = `
         <button type="button" class="assistant-thinking-head" aria-expanded="false">
           <span class="thinking-chevron">${lucideIcon("chevron-right")}</span>
-          <span class="thinking-icon">${lucideIcon("brain-circuit")}</span>
+          <span class="thinking-icon">${lucideIcon("brain")}</span>
           <span class="thinking-title">思考中…</span>
           <span class="thinking-status"><span class="spinner"></span></span>
         </button>
@@ -2611,7 +2620,7 @@ function createAssistantMessage(timestamp, branchPoint) {
       if (existing) {
         if (hasArgs) {
           const argsEl = existing.querySelector(".args");
-          if (argsEl) argsEl.textContent = pretty(merged.args);
+          if (argsEl) argsEl.innerHTML = window.DeepAgentJson?.highlight(merged.args) || escapeHtml(pretty(merged.args));
         }
         if (merged.widget) existing.dataset.widget = merged.widget;
         if (merged.metadata) existing.dataset.metadata = JSON.stringify(merged.metadata);
@@ -2634,7 +2643,8 @@ function createAssistantMessage(timestamp, branchPoint) {
       if (merged.widget) block.dataset.widget = merged.widget;
       if (merged.metadata) block.dataset.metadata = JSON.stringify(merged.metadata);
       const argsHtml = hasArgs
-        ? `<pre class="args">${escapeHtml(pretty(merged.args))}</pre>`
+        ? (window.DeepAgentJson?.renderBlock(merged.args, { className: "args", ariaLabel: "工具参数 JSON" })
+          || `<pre class="args">${escapeHtml(pretty(merged.args))}</pre>`)
         : `<pre class="args args-pending">参数接收中…</pre>`;
       block.innerHTML = `
         <div class="tool-head">
@@ -2843,7 +2853,8 @@ function renderHitlWidget(block, call, onSubmit) {
     const prompt = args.prompt || args.title || args.message || tool;
     const metaHtml =
       metadata && Object.keys(metadata).length
-        ? `<pre class="hitl-metadata">${escapeHtml(pretty(metadata))}</pre>`
+        ? (window.DeepAgentJson?.renderBlock(metadata, { className: "hitl-metadata", ariaLabel: "交互工具 Metadata JSON" })
+          || `<pre class="hitl-metadata">${escapeHtml(pretty(metadata))}</pre>`)
         : "";
     widgetEl.innerHTML = `
       <p class="hitl-prompt">${escapeHtml(prompt)}</p>
@@ -3016,7 +3027,8 @@ function renderToolResult(result) {
   if (typeof result === "string") {
     return `<div class="md-content tool-result-md markdown-body">${renderMarkdown(result)}</div>`;
   }
-  return `<pre>${escapeHtml(pretty(result))}</pre>`;
+  return window.DeepAgentJson?.renderBlock(result, { ariaLabel: "工具结果 JSON" })
+    || `<pre>${escapeHtml(pretty(result))}</pre>`;
 }
 
 function renderToolResultArtifacts(artifacts) {

@@ -3,12 +3,17 @@
 DeepAgent 是基于 FastAPI、Pydantic AI 和 SQLAlchemy 的多用户 Agent 服务，并
 随服务发布一体化运维控制台。
 
-当前产品版本为 `0.5.1`。`deep_agent.__version__` 是唯一代码版本来源，FastAPI、
+当前产品版本为 `0.5.3`。`deep_agent.__version__` 是唯一代码版本来源，FastAPI、
 `GET /info` 和 Console 顶部版本徽标均读取该值。后续正式发布默认递增
 `MAJOR.MINOR.PATCH` 的第三位，只有明确规划重大版本时才调整前两位。产品版本不通过
 环境变量或数据库覆盖，也不等同于 Alembic 数据库结构 revision。
 
 各版本功能变更与迁移说明见 [`CHANGELOG.md`](CHANGELOG.md)。
+
+Console 对话测试提供独立的“对话 / 轨迹”页签。轨迹以现有 History 和当前 SSE 为事实源，
+按 Run、模型输出、上下文和工具调用展示脱敏后的原生信息，便于排查工具参数、返回、终态与
+用量；它不创建新 Run、不进入模型上下文，也不额外建立轨迹表。能力边界见
+[`docs/design/18-session-trajectory/`](docs/design/18-session-trajectory/)。
 
 ## 项目结构
 

@@ -51,6 +51,7 @@ frontend/
 | 任务计划 | `write_plan`、`read_plan`、`update_task_statuses`三种`source=planning`工具事件聚合到消息区底部唯一浮层；实时覆盖最新快照；正常Final或UI Pending隐藏，取消/失败保留；History只恢复最新异常Run的未完成计划 |
 | Skill | 独立 Skill 列表与详情；上传包安装/替换/启停/单个与全部导出/删除；文本、Word、Excel 资源可预览，脚本只列包内路径和数量，不展示可执行性判断；Agent 使用独立 `skills` 列表选择 |
 | 一体化控制台 | `/console/`；工作台、配置和诊断的唯一入口 |
+| 会话轨迹 | 工作台“对话 / 轨迹”页签；对现有History和当前SSE做只读、脱敏投影，不建立第二套会话事实源 |
 
 v0.3.12 的配置卡只读展示工具披露策略：附件包为“有附件时可用”，大型 MCP 为“自动预选 Top 3 / 搜索 Top 5”。聊天中的 `search_tools` 是运行诊断过程，默认折叠显示为“正在查找可用工具”，不伪装成业务 MCP 工具。
 
@@ -59,10 +60,14 @@ v0.3.12 的配置卡只读展示工具披露策略：附件包为“有附件时
 测试 Header 和会话详情统一位于对话标题栏右侧。测试 Header 使用锚定按钮的轻量浮层，
 该状态不写 LocalStorage。窄屏继续压缩同一套多栏布局，不切换成抽屉或另一套交互模式。
 
-右侧会话详情使用“会话 / 运行诊断 / 上下文引用”三页签：会话页展示会话、请求 Header和
-复合上下文预算；运行诊断页展示最近一次 Run Usage、压缩和 Checkpoint；上下文引用页由
-消息中的引用信息按钮定位并展示只读 JSON。工具过程由对话区负责，Console 不再额外缓存或
-展示 SSE 事件列表。
+右侧会话详情使用“会话 / 当前回合 / 上下文引用”三页签：会话页展示会话、请求 Header和
+复合上下文预算；当前回合页展示最近一次 Run Usage、压缩和 Checkpoint；上下文引用页由
+消息中的引用信息按钮定位并展示只读 JSON。工具过程仍由对话区负责；独立轨迹页只在当前页面
+内投影实时SSE，并在History刷新后以持久消息重新校准，不保存第二份事件列表。
+轨迹将同一ModelResponse中的thinking、text和tool call意图聚合为一个助手Loop，同时保留独立
+Tool Call/Result记录；用户输入行只按History中现有`context_refs.type/label/schema_version`和
+附件元数据加标记，不从正文猜测业务上下文。轨迹详情复用工作台右侧Inspector，返回对话后恢复
+原会话详情。
 `context-status` 返回的是 `estimate_scope=history_only` 的会话历史快照；最近一次 Run Usage
 来自当前页面收到的 `final.usage`。前端只格式化和计算展示比例，不复制后端 Token 估算、
 输出预测或安全余量算法。
@@ -102,6 +107,9 @@ Agent 独立编辑页的系统提示词标题栏显示“字符数 / 预估 Toke
   `deep_agent.__version__`；配置中心的数据库结构 revision 是独立运维信息。
 - Markdown统一由`markdown.js`渲染：工作台最终回复和Skill资源预览复用同一套安全解析；
   `mermaid`围栏只在完整回复落定后按需加载本地vendor并以严格模式生成SVG，失败时保留源码。
+- 工作台“轨迹”页与对话共享同一Session，不创建Run或模型请求；History投影只暴露安全的
+  ModelResponse摘要和Tool Call/Result，认证信息、Provider私有字段、系统提示词与动态工具Schema
+  不得事后猜测或展示。当前SSE只用于实时更新，刷新后仍以History为准。
 - 配置中心左侧页签只在当前前端页面的模块内存中保留；工作台与配置中心之间切换会恢复上次页签，浏览器刷新后重新回到 Agent，不写入 LocalStorage 或后端。
 - Agent 独立编辑页在标题区显示完整 Agent ID；测试工作台对话标题第二行以 `会话 ID：<完整 ID>` 展示当前会话，不再截取前八位。
 - `/` 跳转到 `/console/#/workspace`；旧 `/settings.html`、`/models.html`、`/admin/` 返回 404。

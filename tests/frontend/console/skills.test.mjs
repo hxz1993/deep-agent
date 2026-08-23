@@ -59,7 +59,7 @@ test("Skill Markdown 资源复用对话渲染器，其他文本保持原文预�
   assert.match(source, /window\.DeepAgentMarkdown\?\.renderBody\(page\.content\)/);
   assert.match(source, /window\.DeepAgentMarkdown\?\.renderDiagrams\(preview\)/);
   assert.match(source, /: `<pre>\$\{escapeHtml\(page\.content\)\}<\/pre>`/);
-  assert.match(styles, /\.skill-preview-markdown\s*\{[\s\S]*font-size: 10px/);
+  assert.match(styles, /\.skill-preview-markdown\s*\{[\s\S]*font-size: 12px/);
   assert.match(styles, /\.skill-preview-markdown \.markdown-body/);
 });
 

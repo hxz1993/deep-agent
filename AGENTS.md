@@ -12,7 +12,7 @@
 | 项 | 内容 |
 | --- | --- |
 | **是什么** | 通用 AI Agent 全栈：FastAPI 后端 + Pydantic AI 运行时 + 静态前端 |
-| **产品版本** | `deep_agent.__version__` 为唯一来源；当前 `0.5.1`，默认发布递增第三位 |
+| **产品版本** | `deep_agent.__version__` 为唯一来源；当前 `0.5.3`，默认发布递增第三位 |
 | **启动** | 本地 Test 联调固定使用下方命令；部署入口才使用 `deep_agent.main:app` |
 | **测试** | `python3.12 -m unittest discover -s tests -p "test_*.py" -v` |
 | **配置** | 仓库根 `.env`（`DEEP_AGENT_*` / `DEEP_AGENT_DBMS_*` / `DEEP_AGENT_SQLITE_PATH`） |
@@ -118,6 +118,7 @@ HTTP → deep_agent/api/v1 → AgentRunner → pydantic_ai.Agent → Toolsets
 - v0.4.20为模型目录增加models.dev官方`catalog.json`离线导入和可往返的当前目录JSON导出；联网刷新与文件导入复用同一解析、Provider白名单、标准化和原子替换逻辑。导入失败保留旧目录，也不修改已保存的模型配置。
 - v0.5.0完成一体化Console视觉与布局重构：顶栏和图标导航统一三个主页面，工作台支持会话与详情栏调宽，配置中心提供Agent卡片/列表和独立编辑页，Skill与UI工具采用左右分栏。REST、SSE、History和Alembic `006`保持不变；模型目录保留导出、导入和在线更新，UI工具直接展示当前包的完整工具列表；上传Skill标题栏只保留编辑和上传，其余操作进入三点菜单；删除、未保存提醒和Skill信息输入统一使用轻量Console弹层，禁止回退浏览器原生`alert/confirm/prompt`。
 - v0.5.1抽出Console共享Markdown渲染器：Skill正文按Markdown阅读样式预览，主对话支持安全渲染`mermaid`围栏图表；图表仅在完整回复落定后按需加载本地资源并渲染，语法错误保留源码。
+- v0.5.3为Console增加独立“对话 / 轨迹”分段切换：轨迹只读投影现有History与当前SSE，按Pydantic AI Run归组；同一次模型响应的思考、正文和工具意图聚合为一个助手Loop，工具调用/结果仍保留独立排障记录。用户输入保留Context Reference和附件标记，Context Reference同时形成独立`CONTEXT`事件；详情按事件类型提供Summary、Payload、Preview、Raw或Result，JSON统一使用语法高亮。轨迹只展示数据库中可确认顺序的记录，不用不完整时间拼接甘特图或时间轴。详情复用工作台右侧会话详情栏；History只补充数据库中已经存在的请求/响应时间、工具结果时间、模型名、Provider、Response ID、Finish Reason、Usage和工具Outcome。不新建轨迹表、不保存HTTP原始报文，也不改变模型上下文或外部客户端协议。
 - v0.3.20 起上传 Skill 在每个 Pod 只保留 `runtime-skills/<code>/` 一份当前运行文件。服务启动、安装、替换、启用和手工重载负责同步；普通 Run 只读本地目录。单个 Skill 文件不可用时跳过该 Skill并继续回答，状态通过 `/skills`、Console 和 `final.context.skills` 诊断。
 - v0.3.23 起替换相同 Hash的上传 Skill也必须先检查平台原 ZIP；原包可下载才返回 `noop`，原 File ID失效时重新上传、更新数据库 File ID并返回 `repaired`。只恢复当前 Pod目录而不修复平台事实源属于不完整修复。
 - 上传 Skill 的平台 ZIP 是系统级配置文件，不属于业务 App/Space。平台文件使用可无 Space 回读的 `INF` 类型；安装、替换、启动恢复、管理员下载和 Run 兜底均保留调用身份但主动去掉 `app/space/language`业务上下文，保证同一 File ID 始终按系统级语义访问。不得改用 Space 级 `UPL`，数据库也不得保存请求上下文、Token、Cookie 或完整 Header。

@@ -3,6 +3,21 @@
 本文件记录 DeepAgent 的产品版本变化，按新版本到旧版本排列。当前代码版本以
 `deep_agent.__version__` 为准；数据库结构版本以 Alembic head 为准，两者互不替代。
 
+## v0.5.3
+
+- Console 对话测试新增“对话 / 轨迹”分段切换；轨迹按 Pydantic AI Run 归组展示
+  用户输入、助手Loop、工具调用/结果、Planning、Deferred、压缩与 Checkpoint。每个助手Loop合并
+  同一次模型响应的思考、正文和工具意图，独立工具记录仍用于检查参数、结果和错误。
+- History 安全投影补充已持久化的模型名、Provider、Response ID、Finish Reason、Usage 和工具
+  Outcome；不返回 Provider URL、私有详情、认证 Header、Token、Cookie 或系统提示词。
+- 用户输入轨迹会标记History中已有的结构化Context Reference与附件；轨迹支持顺序/调用
+  筛选、搜索、复用会话详情栏的类型化详情和脱敏JSON导出；
+  默认仍显示原对话，REST、SSE、模型上下文和数据库结构均不变化，Alembic Head仍为`006`。
+- History投影补充数据库中已有的ModelRequest/ModelResponse与ToolReturn时间；记录按已有时间与消息顺序展示，
+  不用缺少结束时间的历史数据拼接甘特图或时间轴，也不伪造逐Part耗时。
+- 结构化Context Reference除保留在User摘要外，也作为独立`CONTEXT`事件进入同一Run；User和
+  Assistant详情提供Markdown Preview与Raw，工具详情按需提供Payload与Result，JSON统一使用语法高亮。
+
 ## v0.5.1
 
 - Console抽出共享Markdown渲染链路，Skill的Markdown资源不再按纯文本显示，改为适合小字号阅读的标题、列表、表格、引用和代码样式。

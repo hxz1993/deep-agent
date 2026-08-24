@@ -26,7 +26,10 @@ from deep_agent.capabilities.mcp.lease_manager import McpLeaseManager
 from deep_agent.core.context import AppContext, get_context, init_context, reset_context
 from deep_agent.schemas.llm_model import LlmModelCreate
 from tests.helpers.request_identity import install_test_user_header
-from tests.helpers.sqlite_stores import make_sqlite_stores
+from tests.helpers.sqlite_stores import (
+    get_default_test_provider_id,
+    make_sqlite_stores,
+)
 from tests.integration.helpers.chat import mock_request_disconnect, parse_sse_events
 from tests.integration.helpers.models import text_only_model
 
@@ -76,11 +79,37 @@ def audit_log_list(category: str) -> str:
     return category
 
 
+def workflow_task_list(status: str) -> str:
+    """List workflow tasks by status."""
+    return status
+
+
+def connector_source_get(name: str) -> str:
+    """Read a connector data source."""
+    return name
+
+
+def variable_value_get(name: str) -> str:
+    """Read a configured variable value."""
+    return name
+
+
+def dimension_member_list(dimension: str) -> str:
+    """List members in a business dimension."""
+    return dimension
+
+
+def platform_menu_list(module: str) -> str:
+    """List platform menus for a module."""
+    return module
+
+
 class ChatContextReferenceIntegrationTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         stores, self._engine, session_factory = await make_sqlite_stores()
-        self._model = await stores.llm_model.create_unique(
+        self._model = await stores.llm_configuration.create_model(
             LlmModelCreate(
+                provider_id=await get_default_test_provider_id(stores),
                 name="context-ref-model",
                 model="private:context-ref-model",
                 input_modalities=["text"],
@@ -132,6 +161,11 @@ class ChatContextReferenceIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 deeptable_report_template_generate,
                 platform_user_profile,
                 audit_log_list,
+                workflow_task_list,
+                connector_source_get,
+                variable_value_get,
+                dimension_member_list,
+                platform_menu_list,
             ]
         ).prefixed("deepfos")
         discovery = build_mcp_discovery_toolset(

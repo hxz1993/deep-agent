@@ -18,7 +18,12 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
-from deep_agent.db.ids import AGENT_ID_LENGTH, new_agent_id
+from deep_agent.db.ids import (
+    AGENT_ID_LENGTH,
+    PROVIDER_ID_LENGTH,
+    new_agent_id,
+    new_provider_id,
+)
 from deep_agent.db.session_scope import NO_AGENT_SCOPE
 from deep_agent.db.types import JSONType
 
@@ -32,18 +37,53 @@ KeyText = String(191)
 
 class LlmModel(Base):
     __tablename__ = "llm_models"
-    __table_args__ = (UniqueConstraint("name", name="uq_llm_models_name"),)
+    __table_args__ = (
+        UniqueConstraint(
+            "provider_id",
+            "name",
+            name="uq_llm_models_provider_name",
+        ),
+    )
 
     id: Mapped[str] = mapped_column(String(AGENT_ID_LENGTH), primary_key=True, default=new_agent_id)
+    provider_id: Mapped[str] = mapped_column(
+        String(PROVIDER_ID_LENGTH),
+        ForeignKey("llm_providers.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
     name: Mapped[str] = mapped_column(KeyText, nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     model: Mapped[str] = mapped_column(Text, nullable=False)
-    base_url: Mapped[str | None] = mapped_column(Text, nullable=True)
-    api_key: Mapped[str | None] = mapped_column(Text, nullable=True)
     input_modalities: Mapped[list[str] | None] = mapped_column(JSONType, nullable=True)
     context_window_tokens: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     max_output_tokens: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     tags: Mapped[list[str] | None] = mapped_column(JSONType, nullable=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+
+class LlmProvider(Base):
+    __tablename__ = "llm_providers"
+    __table_args__ = (UniqueConstraint("name", name="uq_llm_providers_name"),)
+
+    id: Mapped[str] = mapped_column(
+        String(PROVIDER_ID_LENGTH),
+        primary_key=True,
+        default=new_provider_id,
+    )
+    name: Mapped[str] = mapped_column(KeyText, nullable=False)
+    provider_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    use_default_base_url: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    base_url: Mapped[str] = mapped_column(Text, nullable=False)
+    api_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

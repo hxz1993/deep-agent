@@ -3,7 +3,7 @@
 DeepAgent 是基于 FastAPI、Pydantic AI 和 SQLAlchemy 的多用户 Agent 服务，并
 随服务发布一体化运维控制台。
 
-当前产品版本为 `0.5.4`。`deep_agent.__version__` 是唯一代码版本来源，FastAPI、
+当前产品版本为 `0.5.6`。`deep_agent.__version__` 是唯一代码版本来源，FastAPI、
 `GET /info` 和 Console 顶部版本徽标均读取该值。后续正式发布默认递增
 `MAJOR.MINOR.PATCH` 的第三位，只有明确规划重大版本时才调整前两位。产品版本不通过
 环境变量或数据库覆盖，也不等同于 Alembic 数据库结构 revision。
@@ -14,6 +14,11 @@ Console 对话测试提供独立的“对话 / 轨迹”页签。轨迹以现有
 按 Run、模型输出、上下文和工具调用展示脱敏后的原生信息，便于排查工具参数、返回、终态与
 用量；它不创建新 Run、不进入模型上下文，也不额外建立轨迹表。能力边界见
 [`docs/design/18-session-trajectory/`](docs/design/18-session-trajectory/)。
+
+v0.5.6 完成 Provider + Model 两层配置：Provider 独占 Pydantic AI 适配类型、地址和密钥，
+Model 只保存 Provider 外键、模型编码与能力属性；两层启停共同决定模型是否可用。Agent、辅助模型和
+聊天请求继续只引用 `model_id`，模型目录仍是只读候选数据，不参与运行时关联。设计与迁移边界见
+[`docs/design/19-model-provider-architecture/`](docs/design/19-model-provider-architecture/)。
 
 ## 项目结构
 
@@ -98,9 +103,10 @@ v0.3.0 将发布前的 Alembic `001`～`023` 历史压缩为唯一基线 `001`�
 `stamp --purge 001` 重设版本。完整备份和切换命令见
 [`maintenance/README.md`](maintenance/README.md)。
 
-当前 Alembic head 为 `006`：`002` 统一 ToolPackage 与 UI 工具包；`003` 将线上 Skill 与
+当前 Alembic head 为 `007`：`002` 统一 ToolPackage 与 UI 工具包；`003` 将线上 Skill 与
 ToolPackage 分离；`004`清理已废弃的`builtin:attachment`；`005`和`006`依次删除已下线的
-预制MCP记录，并从显式Agent能力列表中清理对应引用。升级
+预制MCP记录，并从显式Agent能力列表中清理对应引用；`007`增加独立Provider层、模型硬外键并删除
+模型表中的重复连接字段。升级
 `003` 前仍必须确认 `agents.capabilities` 不存在历史 `skill:*` 引用。
 
 配置备份会复制全部配置表并只保留会话表结构；上传Skill的原始ZIP不塞入数据库备份。需要完整

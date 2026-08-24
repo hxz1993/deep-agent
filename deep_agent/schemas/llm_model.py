@@ -2,14 +2,18 @@ from __future__ import annotations
 
 import re
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
-from pydantic import AnyHttpUrl, BaseModel, Field, TypeAdapter, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+from deep_agent.db.ids import normalize_provider_id
+from deep_agent.agent.provider_registry import model_unavailable_reason
 
 if TYPE_CHECKING:
-    from deep_agent.db.models import LlmModel
+    from deep_agent.db.models import LlmModel, LlmProvider
 
-_HTTP_URL_ADAPTER = TypeAdapter(AnyHttpUrl)
+from deep_agent.schemas.llm_provider import LlmProviderSummary
+
 _TAG_PATTERN = re.compile(r"^[a-z][a-z0-9_:-]{0,63}$")
 _ALLOWED_MODALITIES = {"text", "image", "audio", "video"}
 LLM_REQUIRED_FIELDS = ("name", "model")
@@ -47,11 +51,13 @@ def _validate_token_pair(context_window_tokens: int | None, max_output_tokens: i
 
 
 class LlmModelCreate(BaseModel):
-    name: str = Field(..., max_length=191, description="Unique display name for this model preset.")
+    provider_id: str = Field(..., description="Foreign-key reference to an LLM provider.")
+    name: str = Field(..., max_length=191, description="Display name for this model preset.")
     description: str | None = Field(default=None, description="Optional human-readable description.")
-    model: str = Field(..., description='Runtime model string, e.g. "openai:gpt-4o".')
-    base_url: str | None = Field(default=None, description="Optional provider endpoint URL.")
-    api_key: str | None = Field(default=None, description="Optional API key for the model endpoint.")
+    model: str = Field(
+        ...,
+        description='Provider-local runtime model code, e.g. "gpt-4o".',
+    )
     input_modalities: list[str] = Field(
         ...,
         min_length=1,
@@ -71,6 +77,13 @@ class LlmModelCreate(BaseModel):
         default_factory=list,
         description="Normalized model capability tags, separate from input modalities.",
     )
+    enabled: bool = True
+
+    @field_validator("provider_id")
+    @classmethod
+    def normalize_provider_reference(cls, value: str) -> str:
+        return normalize_provider_id(value)
+
     @field_validator(*LLM_REQUIRED_FIELDS)
     @classmethod
     def normalize_required_text(cls, value: str) -> str:
@@ -79,19 +92,12 @@ class LlmModelCreate(BaseModel):
             raise ValueError("must not be blank")
         return normalized
 
-    @field_validator("description", "api_key")
+    @field_validator("description")
     @classmethod
     def normalize_optional_text(cls, value: str | None) -> str | None:
         if value is None:
             return None
         return value.strip() or None
-
-    @field_validator("base_url")
-    @classmethod
-    def validate_base_url(cls, value: str | None) -> str | None:
-        if value is None or not value.strip():
-            return None
-        return str(_HTTP_URL_ADAPTER.validate_python(value.strip())).rstrip("/")
 
     @field_validator("input_modalities")
     @classmethod
@@ -113,24 +119,32 @@ class LlmModelCreate(BaseModel):
 
 
 class LlmModelUpdate(BaseModel):
+    provider_id: str | None = None
     name: str | None = Field(default=None, max_length=191)
     description: str | None = None
     model: str | None = None
-    base_url: str | None = None
-    api_key: str | None = None
     input_modalities: list[str] | None = None
     context_window_tokens: int | None = Field(default=None, gt=0)
     max_output_tokens: int | None = Field(default=None, gt=0)
     tags: list[str] | None = None
+    enabled: bool | None = None
+
+    @field_validator("provider_id")
+    @classmethod
+    def normalize_provider_reference(cls, value: str | None) -> str | None:
+        return normalize_provider_id(value) if value is not None else None
+
     @model_validator(mode="before")
     @classmethod
     def reject_null_required_fields(cls, value):
         if isinstance(value, dict):
             for field in (
                 *LLM_REQUIRED_FIELDS,
+                "provider_id",
                 "input_modalities",
                 "context_window_tokens",
                 "max_output_tokens",
+                "enabled",
             ):
                 if field in value and value[field] is None:
                     raise ValueError(f"{field} cannot be null")
@@ -146,19 +160,12 @@ class LlmModelUpdate(BaseModel):
             raise ValueError("must not be blank")
         return normalized
 
-    @field_validator("description", "api_key")
+    @field_validator("description")
     @classmethod
     def normalize_optional_text(cls, value: str | None) -> str | None:
         if value is None:
             return None
         return value.strip() or None
-
-    @field_validator("base_url")
-    @classmethod
-    def validate_base_url(cls, value: str | None) -> str | None:
-        if value is None or not value.strip():
-            return None
-        return str(_HTTP_URL_ADAPTER.validate_python(value.strip())).rstrip("/")
 
     @field_validator("input_modalities")
     @classmethod
@@ -188,29 +195,53 @@ class LlmModelResponse(BaseModel):
     name: str
     description: str | None = None
     model: str
+    provider_id: str
+    provider: LlmProviderSummary
     base_url: str | None = None
     api_key_set: bool = Field(description="Whether an API key is configured (value is never returned).")
     input_modalities: list[str] = Field(default_factory=list, description="Supported input modalities.")
     context_window_tokens: int | None = None
     max_output_tokens: int | None = None
     tags: list[str] = Field(default_factory=list)
+    enabled: bool = True
+    selectable: bool = Field(
+        description="Effective availability after applying model and Provider state."
+    )
+    unavailable_reason: Literal[
+        "model_disabled",
+        "provider_disabled",
+        "provider_unconfigured",
+        "provider_invalid",
+    ] | None = None
     agent_count: int = Field(default=0, description="Number of agents referencing this preset.")
     created_at: datetime
     updated_at: datetime
 
     @classmethod
-    def from_row(cls, row: LlmModel, *, agent_count: int = 0) -> LlmModelResponse:
+    def from_row(
+        cls,
+        row: LlmModel,
+        *,
+        provider: LlmProvider,
+        agent_count: int = 0,
+    ) -> LlmModelResponse:
+        unavailable_reason = model_unavailable_reason(row, provider)
         return cls(
             id=row.id,
             name=row.name,
             description=row.description,
             model=row.model,
-            base_url=row.base_url,
-            api_key_set=bool(row.api_key),
+            provider_id=row.provider_id,
+            provider=LlmProviderSummary.from_row(provider),
+            base_url=provider.base_url,
+            api_key_set=bool(provider.api_key),
             input_modalities=_supported_modalities(row.input_modalities),
             context_window_tokens=row.context_window_tokens,
             max_output_tokens=row.max_output_tokens,
             tags=row.tags or [],
+            enabled=row.enabled,
+            selectable=unavailable_reason is None,
+            unavailable_reason=unavailable_reason,
             agent_count=agent_count,
             created_at=row.created_at,
             updated_at=row.updated_at,
@@ -225,6 +256,7 @@ class LlmModelSummary(BaseModel):
     context_window_tokens: int | None = None
     max_output_tokens: int | None = None
     tags: list[str] = Field(default_factory=list)
+    enabled: bool = True
 
     @classmethod
     def from_row(cls, row: LlmModel) -> LlmModelSummary:
@@ -236,4 +268,5 @@ class LlmModelSummary(BaseModel):
             context_window_tokens=row.context_window_tokens,
             max_output_tokens=row.max_output_tokens,
             tags=row.tags or [],
+            enabled=row.enabled,
         )

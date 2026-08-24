@@ -6,16 +6,19 @@ import os
 from deep_agent.db.stores.bundle import DataStores
 from deep_agent.schemas.auxiliary_model import AuxiliaryModelUpdate
 from deep_agent.schemas.llm_model import LlmModelCreate
+from deep_agent.schemas.llm_provider import LlmProviderCreate
 
 DEFAULT_TEST_LLM_MODEL = "test-default"
 DEFAULT_TEST_LLM_MODEL_STRING = "test"
 AUX_TITLE_MODEL_NAME = "aux-title"
 DEFAULT_TEST_CONTEXT_WINDOW = 128_000
 DEFAULT_TEST_MAX_OUTPUT = 8_192
+DEFAULT_TEST_PROVIDER_NAME = "Test Provider"
 
 
 def test_llm_model_create(*, name: str, model: str, **kwargs) -> LlmModelCreate:
     return LlmModelCreate(
+        provider_id=kwargs.pop("provider_id"),
         name=name,
         model=model,
         input_modalities=kwargs.pop("input_modalities", ["text"]),
@@ -33,12 +36,34 @@ async def seed_default_llm_model(stores: DataStores) -> None:
     """Ensure chat integration tests can resolve the default DB-backed model."""
     if await stores.llm_model.list_all():
         return
-    await stores.llm_model.create_unique(
+    provider = await stores.llm_configuration.get_provider_by_name(
+        DEFAULT_TEST_PROVIDER_NAME
+    )
+    if provider is None:
+        provider = await stores.llm_configuration.create_provider(
+            LlmProviderCreate(
+                name=DEFAULT_TEST_PROVIDER_NAME,
+                provider_type="openai_compatible",
+                base_url="http://test.invalid/v1",
+                api_key="test-key",
+            )
+        )
+    await stores.llm_configuration.create_model(
         test_llm_model_create(
             name=DEFAULT_TEST_LLM_MODEL,
             model=DEFAULT_TEST_LLM_MODEL_STRING,
+            provider_id=provider.id,
         ),
     )
+
+
+async def get_default_test_provider_id(stores: DataStores) -> str:
+    provider = await stores.llm_configuration.get_provider_by_name(
+        DEFAULT_TEST_PROVIDER_NAME
+    )
+    if provider is None:
+        raise AssertionError("default test provider was not seeded")
+    return provider.id
 
 
 async def ensure_title_uses_main_model(stores: DataStores) -> None:
@@ -63,12 +88,19 @@ async def seed_auxiliary_model_configs(stores: DataStores) -> None:
         if existing is not None:
             llm_model_id = existing.id
         else:
-            row = await stores.llm_model.create_unique(
+            provider = await stores.llm_configuration.create_provider(
+                LlmProviderCreate(
+                    name="Auxiliary Test Provider",
+                    provider_type="openai_compatible",
+                    base_url=base_url or "http://test.invalid/v1",
+                    api_key=api_key or "test-key",
+                )
+            )
+            row = await stores.llm_configuration.create_model(
                 test_llm_model_create(
                     name=AUX_TITLE_MODEL_NAME,
                     model=model_str,
-                    base_url=base_url,
-                    api_key=api_key,
+                    provider_id=provider.id,
                 ),
             )
             llm_model_id = row.id

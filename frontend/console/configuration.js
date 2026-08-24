@@ -1,9 +1,12 @@
 let initialized = false;
+import "./model-options.js?v=20260825-1";
+import * as ProviderCatalog from "./provider-catalog.js?v=20260825-1";
+if (typeof window !== "undefined") window.DeepAgentProviderCatalog = ProviderCatalog;
 let loadingPromise = null;
-const CONFIGURATION_ASSET_VERSION = "20260822-2";
+const CONFIGURATION_ASSET_VERSION = "20260825-1";
 const CONFIGURATION_TABS = new Set([
   "agents",
-  "llm-models",
+  "llm-providers",
   "builtin-tools",
   "skills",
   "mcp",
@@ -84,6 +87,7 @@ async function loadAdminScripts() {
     "./configuration/form-feedback.js",
     "./configuration/global-settings.js",
     "./configuration/database-connection.js",
+    "./configuration/llm-providers.js",
     "./configuration/llm-models.js",
     "./configuration/auxiliary-models.js",
     "./configuration/agents.js",
@@ -118,7 +122,7 @@ function decorateConfiguration() {
     if (!link) return;
     const url = new URL(link.href, location.href);
     const agentId = url.searchParams.get("agent_id");
-    if (agentId && link.textContent.includes("发起对话")) {
+    if (agentId && link.matches("[data-agent-chat]")) {
       event.preventDefault();
       window.DeepAgentConsoleChat?.selectAgent(agentId);
       window.DeepAgentConsole?.showPage("workspace");
@@ -137,7 +141,7 @@ export function refreshCurrentConfiguration() {
   if (active === "global-settings") return window.globalSettingsAdmin?.refresh();
   if (active === "database-connection") return window.databaseConnectionAdmin?.refresh();
   if (active === "agents") return window.agentsAdmin?.refresh();
-  if (active === "llm-models") return window.llmModelsAdmin?.refresh();
+  if (active === "llm-providers") return window.llmProvidersAdmin?.refresh();
   if (active === "builtin-tools") {
     return Promise.all([
       window.builtinToolsAdmin?.refresh(),

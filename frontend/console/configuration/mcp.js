@@ -55,7 +55,7 @@ function inspectionView(inspection, transport) {
   const [text, className] = labels[info.status] || labels.unknown;
   const toolCount = Number(info.tools?.count || 0);
   const snapshotStatus = info.tools?.snapshot_status || "missing";
-  const disclosure = toolCount > 5 ? "自动预选 Top 3 / 搜索 Top 5" : "全部直接披露";
+  const disclosure = toolCount > 10 ? "自动预选 Top 3 / 搜索 Top 5" : "全部直接披露";
   let snapshotLabel = "";
   if (transport === "url") {
     if (snapshotStatus === "stale") snapshotLabel = "配置已变更，需重新检测";

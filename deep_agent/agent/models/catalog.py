@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 import re
 from typing import Any, Literal
 
-from deep_agent.db.models import LlmModel, ModelCatalog
+from deep_agent.db.models import LlmModel, LlmProvider, ModelCatalog
 
 CatalogView = Literal["model", "provider"]
 
@@ -586,14 +586,45 @@ def export_models_dev_catalog(rows: Iterable[ModelCatalog]) -> dict[str, Any]:
     }
 
 
-def _normalized_url(value: str | None) -> str:
-    return (value or "").strip().rstrip("/").lower()
+_CATALOG_PROVIDER_TYPE_ALIASES = {
+    "moonshot": "moonshotai",
+    "qwen": "alibaba",
+    "zhipu": "zai",
+    "zhipuai": "zai",
+}
 
 
-def _configured_presets(models: Iterable[LlmModel]) -> dict[tuple[str, str], str]:
+def catalog_provider_type(provider_id: str) -> str:
+    """Map a models.dev provider code to the explicit local provider type."""
+    normalized = provider_id.strip().lower()
+    return _CATALOG_PROVIDER_TYPE_ALIASES.get(normalized, normalized)
+
+
+def _model_code_aliases(value: str) -> set[str]:
+    normalized = value.strip().lower()
+    if not normalized:
+        return set()
+    result = {normalized}
+    for separator in (":", "/"):
+        if separator in normalized:
+            suffix = normalized.split(separator, 1)[1]
+            if suffix:
+                result.add(suffix)
+    return result
+
+
+def _configured_presets(
+    models: Iterable[LlmModel],
+    providers: Iterable[LlmProvider],
+) -> dict[tuple[str, str], str]:
+    provider_types = {provider.id: provider.provider_type for provider in providers}
     result: dict[tuple[str, str], str] = {}
     for model in models:
-        result.setdefault((model.model.lower(), _normalized_url(model.base_url)), model.name)
+        provider_type = provider_types.get(model.provider_id)
+        if not provider_type:
+            continue
+        for model_code in _model_code_aliases(model.model):
+            result.setdefault((provider_type, model_code), model.name)
     return result
 
 
@@ -631,8 +662,13 @@ def _provider_option(
         "output_modalities": _row_modalities(row.output_modalities),
         "tags": _row_tags(row),
         "status": row.status,
-        "configured_preset": configured.get(
-            (runtime_model.lower(), _normalized_url(base_url))
+        "configured_preset": next(
+            (
+                configured[(catalog_provider_type(row.provider_id), model_code)]
+                for model_code in _model_code_aliases(runtime_model)
+                if (catalog_provider_type(row.provider_id), model_code) in configured
+            ),
+            None,
         ),
         "metadata": row.provider_metadata or {},
     }
@@ -672,6 +708,7 @@ def _matches(
 def build_catalog_page(
     rows: list[ModelCatalog],
     llm_models: list[LlmModel],
+    llm_providers: list[LlmProvider],
     *,
     view: CatalogView,
     q: str | None,
@@ -681,7 +718,7 @@ def build_catalog_page(
     offset: int,
     limit: int,
 ) -> dict[str, Any]:
-    configured = _configured_presets(llm_models)
+    configured = _configured_presets(llm_models, llm_providers)
     q_norm = (q or "").strip().lower()
     lab_norm = normalize_lab_id(lab_id or "")
     provider_norm = (provider_id or "").strip().lower()

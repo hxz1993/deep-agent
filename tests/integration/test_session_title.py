@@ -18,7 +18,13 @@ from deep_agent.schemas.agent import AgentCreate
 from deep_agent.schemas.auxiliary_model import AuxiliaryModelUpdate
 from deep_agent.schemas.llm_model import LlmModelCreate
 from tests.helpers.request_identity import install_test_user_header
-from tests.helpers.sqlite_stores import AUX_TITLE_MODEL_NAME, ensure_title_uses_main_model, make_sqlite_stores, seed_auxiliary_model_configs
+from tests.helpers.sqlite_stores import (
+    AUX_TITLE_MODEL_NAME,
+    ensure_title_uses_main_model,
+    get_default_test_provider_id,
+    make_sqlite_stores,
+    seed_auxiliary_model_configs,
+)
 from tests.integration.helpers.chat import mock_request_disconnect, parse_sse_events
 from tests.integration.helpers.live_llm import skip_unless_title_llm, title_llm_configured
 from tests.integration.helpers.models import text_only_model
@@ -42,8 +48,9 @@ _CHAT_JSON = {"capabilities": []}
 class SessionTitleIntegrationTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         stores, self._engine, self._session_factory = await make_sqlite_stores()
-        model_row = await stores.llm_model.create_unique(
+        model_row = await stores.llm_configuration.create_model(
             LlmModelCreate(
+                provider_id=await get_default_test_provider_id(stores),
                 name="chat-model",
                 model="test:chat-model",
                 input_modalities=["text"],

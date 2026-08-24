@@ -103,7 +103,7 @@ URL 与 Builtin MCP 的运行态不同：URL MCP 在管理员检测时保存 Too
 
 1. 确定性历史整理优先复用 Harness 的 Clamp、Deduplicate 和 Clear tiers。DeepAgent 的动态窗口预算、主动压缩 SSE、Checkpoint Hash/CAS 与目标复检属于产品语义，不能直接用通用 `ProcessHistory` 或 Harness `SummarizingCompaction` 替代。
 2. 按 App、Space、权限或模态过滤工具优先使用 `PrepareTools`。
-3. v0.4.9 起，已授权 MCP 全局候选不超过 5 个时全部直接披露；超过 5 个时统一进入 `DeferredLoadingToolset`，由本地词法检索预选 Top 3、模型 `search_tools` 返回 Top 5。首版不使用 Embedding，不持久化索引。
+3. 当前已授权 MCP 全局候选不超过 10 个时全部直接披露；超过 10 个时统一进入 `DeferredLoadingToolset`，由本地词法检索预选 Top 3、模型 `search_tools` 返回 Top 5。首版不使用 Embedding，不持久化索引。
 4. 生命周期观测优先使用 Hooks/Instrumentation，并先完成 Token、Cookie、文件和工具结果脱敏。
 5. v0.4.0 起，通用大工具结果使用 Harness `ToolOutputLimits` + `Spill`，Store适配现有平台文件服务，
    不使用Harness默认本地文件Store。平台File ID同时作为当前会话的工具结果Artifact句柄；权限只能

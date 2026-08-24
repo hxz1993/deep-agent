@@ -22,6 +22,8 @@
 | `15` | [`浏览器与页面操作`](15-browser-and-page-actions/README.md) | 2026-08 | 区分当前页面 UI Tool、Harness BrowserUse 与 Provider Computer Use；旧 Web 分支不整体合并 |
 | `16` | [`PDF 与演示文稿解析`](16-pdf-and-presentation-parsing/README.md) | 2026-08 | 已完成行业与AI Labs调研；独立文档系统工具尚未实施 |
 | `17` | [`Console UI`](17-console-ui/README.md) | 2026-08 | 轻量企业控制台视觉体系持续落地；保留真实功能、分栏交互和四主题边界 |
+| `18` | [`会话轨迹`](18-session-trajectory/README.md) | 2026-08 | v0.5.3～v0.5.4已落地只读History/SSE轨迹投影，无独立轨迹表 |
+| `19` | [`Provider与模型分层`](19-model-provider-architecture/README.md) | 2026-08 | v0.5.6已完成两层归一化、007迁移与统一运行门禁 |
 
 ## 文档命名
 

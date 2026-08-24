@@ -18,6 +18,10 @@ const configurationCore = await readFile(
   new URL("../../../frontend/console/configuration/core.js", import.meta.url),
   "utf8",
 );
+const configurationModule = await readFile(
+  new URL("../../../frontend/console/configuration.js", import.meta.url),
+  "utf8",
+);
 const styles = await readFile(
   new URL("../../../frontend/console/console.css", import.meta.url),
   "utf8",
@@ -60,11 +64,14 @@ test("Agent 提供卡片和列表双视图并复用同一真实数据源", () =>
   assert.match(agents, /Agent 刷新失败/);
 });
 
-test("Agent 卡片与列表统一使用图标文字行操作", () => {
+test("Agent 卡片与列表统一使用稳定标识的纯图标行操作", () => {
   assert.ok((agents.match(/class="row-actions agent-row-actions"/g) || []).length >= 2);
-  assert.match(agents, /data-lucide="message-square"[\s\S]*发起对话/);
-  assert.match(agents, /data-lucide="pencil"[\s\S]*编辑/);
-  assert.match(agents, /data-lucide="trash-2"[\s\S]*删除/);
+  assert.ok((agents.match(/data-agent-chat/g) || []).length >= 2);
+  assert.match(agents, /title="发起对话" aria-label="发起对话"><i data-lucide="message-square"/);
+  assert.match(agents, /title="编辑" aria-label="编辑"><i data-lucide="pencil"/);
+  assert.match(agents, /title="删除" aria-label="删除"><i data-lucide="trash-2"/);
+  assert.doesNotMatch(agents, /<span>发起对话<\/span>/);
+  assert.match(configurationModule, /link\.matches\("\[data-agent-chat\]"\)/);
   assert.match(styles, /--config-compact-control-height: 28px/);
   assert.match(styles, /#configurationHost \.agent-row-actions \.row-action,[\s\S]*height: var\(--config-compact-control-height\);[\s\S]*border-radius: var\(--config-radius\)/);
 });
@@ -110,7 +117,7 @@ test("护眼主题使用清透暖橙而不是土黄配色", () => {
 });
 
 test("配置中心的主要业务表格统一使用连续轻列表风格 A", () => {
-  assert.ok((template.match(/class="table-wrap console-list-a/g) || []).length >= 6);
+  assert.ok((template.match(/class="table-wrap console-list-a/g) || []).length >= 5);
   assert.match(catalogTemplate, /class="table-wrap console-list-a models-table-wrap"/);
   assert.match(systemTools, /class="table-wrap console-list-a"/);
   assert.match(styles, /#configurationHost \.console-list-a \.data-table th[\s\S]*border-bottom: 1px solid var\(--console-card-border\)/);

@@ -3,6 +3,7 @@ from __future__ import annotations
 from uuid import UUID, uuid4
 
 AGENT_ID_LENGTH = 36
+PROVIDER_ID_LENGTH = 32
 
 
 def new_agent_id() -> str:
@@ -13,3 +14,13 @@ def new_agent_id() -> str:
 def normalize_agent_id(value: str | UUID) -> str:
     """Normalize arbitrary UUID input to canonical hyphenated lowercase string."""
     return str(UUID(str(value)))
+
+
+def new_provider_id() -> str:
+    """Return a compact lowercase UUID hex string for a new provider row."""
+    return uuid4().hex
+
+
+def normalize_provider_id(value: str | UUID) -> str:
+    """Normalize compact or hyphenated UUID input to a 32-character hex id."""
+    return UUID(str(value)).hex

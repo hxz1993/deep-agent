@@ -19,6 +19,7 @@ deep-agent-config-<环境>-v<数据库版本>-<时间>.db
 备份包含完整的当前表结构，以及以下配置表数据：
 
 - `agents`
+- `llm_providers`
 - `llm_models`
 - `model_catalog`
 - `mcp_servers`
@@ -31,7 +32,7 @@ deep-agent-config-<环境>-v<数据库版本>-<时间>.db
 `chat_sessions`、`chat_messages` 和 `chat_context_checkpoints` 只保留表结构，
 不复制会话或上下文投影数据。Checkpoint 是可重建的派生数据，不属于配置备份。备份中的
 API Key、Token 和 MCP Header 保留原值。命令完成前会自动检查 SQLite
-完整性、各配置表行数、数据库版本和 DeepAgent 数据层连接。
+完整性、各配置表行数、数据库版本、模型到Provider的逻辑引用完整性和DeepAgent数据层连接。
 
 备份程序会把全部 ORM 业务表强制归入“复制配置数据”或“只保留结构”两类。以后增加表却没有
 同步备份清单时，测试和备份命令会直接失败，避免生成表面成功但缺配置的文件。备份文件内的
@@ -39,6 +40,7 @@ API Key、Token 和 MCP Header 保留原值。命令完成前会自动检查 SQL
 便于脱离仓库后核对备份边界。
 
 `llm_models` 会完整保留上下文窗口、最大输出 Token、输入模态与能力标签；
+`llm_providers` 会先于模型复制，并完整保留Provider类型、默认地址模式、明确地址、密钥与启停状态；
 `model_catalog` 会完整保留 Lab、标准模型、Provider 组合关系、发布时间以及模态、上下文、
 能力和扩展元数据 JSON。目录本身不包含价格信息。
 
@@ -121,3 +123,11 @@ Alembic `005`不增加表或字段。升级会删除已下线的预制演示MCP�
 Alembic `006`继续执行纯数据清理：删除已下线的预制文档MCP记录，并从显式
 `agents.capabilities`中移除对应引用。迁移保持其他能力顺序以及`null`、空列表语义；降级只回退
 revision，不恢复已经删除的Server和授权。历史会话及其中已有的Tool Call/Result保持原样。
+
+## v0.5.6 Provider与模型分层
+
+Alembic `007`新增`llm_providers`，给`llm_models`增加非空、带索引和`RESTRICT`外键的
+`provider_id`，并删除模型表原有的`base_url/api_key`。升级会按历史地址、密钥和协议推断并合并
+Provider；降级时先恢复模型连接列，再从Provider回填当前地址与密钥。配置备份固定先复制Provider
+再复制Model，清理顺序相反，并拒绝生成含孤儿`provider_id`的备份。未发布的`007`只能在隔离
+SQLite副本验证，不能连接共享Test数据库。

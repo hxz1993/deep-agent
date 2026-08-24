@@ -3,12 +3,18 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from deep_agent.agent.auxiliary_models import AUXILIARY_MODEL_CATALOG, is_known_use_case
+from deep_agent.agent.provider_registry import ProviderRuntimeError, load_provider_for_model
 from deep_agent.api.v1.admin import CONSOLE_ADMIN_DEPENDENCIES
-from deep_agent.db.deps import get_auxiliary_model_store, get_llm_model_store
+from deep_agent.db.deps import (
+    get_auxiliary_model_store,
+    get_llm_configuration_service,
+    get_llm_model_store,
+)
 from deep_agent.db.models import AuxiliaryModelConfig
 from deep_agent.db.stores.auxiliary_model import AuxiliaryModelStoreBase
 from deep_agent.db.stores.llm_model import LlmModelStoreBase
 from deep_agent.schemas.auxiliary_model import AuxiliaryModelResponse, AuxiliaryModelUpdate
+from deep_agent.services.llm_configuration import LlmConfigurationService
 
 router = APIRouter(dependencies=CONSOLE_ADMIN_DEPENDENCIES)
 
@@ -39,6 +45,7 @@ async def _response_for_row(
     use_case: str,
     row: AuxiliaryModelConfig | None,
     llm_model_store: LlmModelStoreBase,
+    llm_configuration_service: LlmConfigurationService,
 ) -> AuxiliaryModelResponse:
     meta = AUXILIARY_MODEL_CATALOG[use_case]
     if row is None or not row.llm_model_id:
@@ -51,13 +58,16 @@ async def _response_for_row(
             llm_model_id=None,
             updated_at=row.updated_at,
         )
+    provider = None
+    if llm_row.provider_id:
+        provider = await llm_configuration_service.get_provider(llm_row.provider_id)
     return _response_for_use_case(
         use_case,
         llm_model_id=row.llm_model_id,
         llm_model_name=llm_row.name,
         model=llm_row.model,
-        base_url=llm_row.base_url,
-        api_key_set=bool(llm_row.api_key),
+        base_url=provider.base_url if provider is not None else None,
+        api_key_set=bool(provider and provider.api_key),
         updated_at=row.updated_at,
     )
 
@@ -66,11 +76,21 @@ async def _response_for_row(
 async def list_auxiliary_models(
     auxiliary_store: AuxiliaryModelStoreBase = Depends(get_auxiliary_model_store),
     llm_model_store: LlmModelStoreBase = Depends(get_llm_model_store),
+    llm_configuration_service: LlmConfigurationService = Depends(
+        get_llm_configuration_service
+    ),
 ) -> list[AuxiliaryModelResponse]:
     await auxiliary_store.ensure_defaults()
     rows = {row.use_case: row for row in await auxiliary_store.list_all()}
     return [
-        (await _response_for_row(use_case, rows.get(use_case), llm_model_store))
+        (
+            await _response_for_row(
+                use_case,
+                rows.get(use_case),
+                llm_model_store,
+                llm_configuration_service,
+            )
+        )
         for use_case in AUXILIARY_MODEL_CATALOG
     ]
 
@@ -80,12 +100,20 @@ async def get_auxiliary_model(
     use_case: str,
     auxiliary_store: AuxiliaryModelStoreBase = Depends(get_auxiliary_model_store),
     llm_model_store: LlmModelStoreBase = Depends(get_llm_model_store),
+    llm_configuration_service: LlmConfigurationService = Depends(
+        get_llm_configuration_service
+    ),
 ) -> AuxiliaryModelResponse:
     if not is_known_use_case(use_case):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Unknown use case: {use_case}")
     await auxiliary_store.ensure_defaults()
     row = await auxiliary_store.get_by_use_case(use_case)
-    return await _response_for_row(use_case, row, llm_model_store)
+    return await _response_for_row(
+        use_case,
+        row,
+        llm_model_store,
+        llm_configuration_service,
+    )
 
 
 @router.patch("/auxiliary-models/{use_case}", response_model=AuxiliaryModelResponse)
@@ -94,6 +122,9 @@ async def update_auxiliary_model(
     body: AuxiliaryModelUpdate,
     auxiliary_store: AuxiliaryModelStoreBase = Depends(get_auxiliary_model_store),
     llm_model_store: LlmModelStoreBase = Depends(get_llm_model_store),
+    llm_configuration_service: LlmConfigurationService = Depends(
+        get_llm_configuration_service
+    ),
 ) -> AuxiliaryModelResponse:
     if not is_known_use_case(use_case):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Unknown use case: {use_case}")
@@ -105,9 +136,26 @@ async def update_auxiliary_model(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"LLM model not found: {body.llm_model_id}",
             )
+        current = await auxiliary_store.get_by_use_case(use_case)
+        if current is None or current.llm_model_id != body.llm_model_id:
+            try:
+                await load_provider_for_model(
+                    llm_row,
+                    llm_configuration_service,
+                )
+            except ProviderRuntimeError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=str(exc),
+                ) from exc
 
     row = await auxiliary_store.update(use_case, body)
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Use case not found: {use_case}")
 
-    return await _response_for_row(use_case, row, llm_model_store)
+    return await _response_for_row(
+        use_case,
+        row,
+        llm_model_store,
+        llm_configuration_service,
+    )

@@ -7,6 +7,11 @@ from pydantic import BaseModel, Field
 
 from deep_agent.agent.context.budget import build_context_budget
 from deep_agent.agent.context.estimator import TokenEstimator
+from deep_agent.agent.provider_registry import (
+    ProviderRuntimeConfig,
+    effective_base_url,
+    load_provider_for_model,
+)
 from deep_agent.agent.context.test_scenarios import (
     CONTEXT_TEST_SCENARIOS,
     build_context_test_history,
@@ -65,7 +70,13 @@ async def _agent_and_estimator(ctx: AppContextDep, agent_id: str):
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="当前 Agent 的模型未配置上下文窗口，无法生成压缩测试会话。",
         )
-    return row, model, TokenEstimator.for_model(model.model, model.base_url)
+    provider = await load_provider_for_model(model, ctx.stores.llm_configuration)
+    provider_config = ProviderRuntimeConfig.from_row(provider)
+    return row, model, TokenEstimator.for_model(
+        model.model,
+        effective_base_url(provider_config),
+        provider_type=provider_config.provider_type,
+    )
 
 
 @router.get(

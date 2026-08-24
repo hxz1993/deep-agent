@@ -47,7 +47,7 @@ test("检测状态展示能力摘要和完整悬停信息", () => {
         instructions_available: true,
       },
       tools: {
-        count: 10,
+        count: 11,
         snapshot_status: "ready",
         snapshot_at: "2026-07-23T10:00:00Z",
         snapshot_hash: "1234567890abcdef",
@@ -60,7 +60,7 @@ test("检测状态展示能力摘要和完整悬停信息", () => {
   assert.equal(view.text, "正常");
   assert.equal(
     view.summary,
-    "工具快照可用 · 10 工具 · 自动预选 Top 3 / 搜索 Top 5 · 2 资源 · 1 模板",
+    "工具快照可用 · 11 工具 · 自动预选 Top 3 / 搜索 Top 5 · 2 资源 · 1 模板",
   );
   assert.match(view.title, /服务：mcp-biz-go 1.0.0/);
   assert.match(view.title, /协议：2025-06-18/);
@@ -68,17 +68,17 @@ test("检测状态展示能力摘要和完整悬停信息", () => {
   assert.match(view.title, /耗时：428 ms/);
 });
 
-test("小型 MCP 直接披露全部工具", () => {
+test("不超过 10 个工具的 MCP 直接披露全部工具", () => {
   const ui = loadInspectionUi();
   const view = ui.inspectionView(
     {
       status: "healthy",
-      tools: { count: 5, snapshot_status: "ready" },
+      tools: { count: 10, snapshot_status: "ready" },
       resources: { count: 0, template_count: 0 },
     },
     "url",
   );
-  assert.equal(view.summary, "工具快照可用 · 5 工具 · 全部直接披露 · 0 资源 · 0 模板");
+  assert.equal(view.summary, "工具快照可用 · 10 工具 · 全部直接披露 · 0 资源 · 0 模板");
 });
 
 test("URL MCP 明确展示缺失、失效和沿用快照状态", () => {

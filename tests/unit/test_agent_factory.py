@@ -15,6 +15,7 @@ from pydantic_ai_harness.tool_output_limits import ToolOutputLimits
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.factory import _resolve_model, _toolsets_for_spec, build_agent
 from deep_agent.agent.models import OpenAICompatibleVideoChatModel
+from deep_agent.agent.provider_registry import ProviderRuntimeConfig
 from deep_agent.capabilities.registry import ToolPackage, ToolPackageRegistry
 from deep_agent.agent.spec import AgentSpec
 from deep_agent.agent.tool_discovery import McpDiscoveryToolset
@@ -35,6 +36,30 @@ def _spec(**kwargs: object) -> AgentSpec:
 
 
 class ResolveModelTests(unittest.TestCase):
+    def test_persisted_provider_config_overrides_legacy_url_and_prefix_inference(
+        self,
+    ) -> None:
+        model = _resolve_model(
+            _spec(
+                model="deepseek-chat",
+                base_url="https://legacy.example.invalid/v1",
+                api_key="legacy-key",
+                provider_config=ProviderRuntimeConfig(
+                    id="provider-deepseek",
+                    name="DeepSeek",
+                    provider_type="deepseek",
+                    use_default_base_url=True,
+                    base_url="https://ignored.example.invalid/v1",
+                    api_key="provider-key",
+                    enabled=True,
+                ),
+            )
+        )
+
+        self.assertIsInstance(model, OpenAIChatModel)
+        self.assertIsInstance(model._provider, DeepSeekProvider)
+        self.assertEqual(model.model_name, "deepseek-chat")
+
     def test_deepseek_uses_deepseek_provider_with_spec_api_key(self) -> None:
         model = _resolve_model(
             _spec(model="deepseek:deepseek-v4-flash", api_key="sk-test"),

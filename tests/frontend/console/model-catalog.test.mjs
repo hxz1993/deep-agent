@@ -118,7 +118,7 @@ test("模型目录填满内容区且只滚动内部列表", () => {
 test("模型表单必填上下文和最大输出且模态与能力标签分开", () => {
   assert.match(
     modelTemplate,
-    /llmModelApiKey[\s\S]*llm-advanced-divider[\s\S]*llmModelContextWindow/,
+    /llmModelModel[\s\S]*llmModelDescription[\s\S]*llmModelName[\s\S]*llmModelProviderId[\s\S]*llm-advanced-divider[\s\S]*llmModelContextWindow/,
   );
   assert.match(modelTemplate, /模型能力配置/);
   assert.match(
@@ -132,41 +132,29 @@ test("模型表单必填上下文和最大输出且模态与能力标签分开",
   assert.match(modelSource, /context_window_tokens: contextWindow/);
   assert.match(modelSource, /max_output_tokens: maxOutput/);
   assert.match(modelSource, /tags: readCheckedValues\("llmModelTag"\)/);
+  assert.match(modelSource, /provider_id: document\.getElementById\("llmModelProviderId"\)\.value/);
   assert.match(modelSource, /findCatalogProvider/);
+  assert.doesNotMatch(modelTemplate, /llmModelApiKey|llmModelBaseUrl/);
   assert.doesNotMatch(modelSource, /capabilities_source|llmModelSource/);
   assert.match(modelSource, /保存后生效/);
   assert.doesNotMatch(modelSource, /refresh-metadata/);
 });
 
-test("模型配置列表只展示核心运行信息", () => {
-  const tableMarkup = modelTemplate.slice(
-    modelTemplate.indexOf('id="panel-llm-models"'),
-    modelTemplate.indexOf("<!-- Auxiliary models panel -->"),
-  );
-  assert.match(tableMarkup, /<th>名称<\/th>[\s\S]*<th>模型<\/th>/);
-  assert.match(
-    tableMarkup,
-    /<th>上下文<\/th>[\s\S]*<th>最大输出<\/th>[\s\S]*<th>模态标签<\/th>/,
-  );
-  assert.match(tableMarkup, /<th>API Key<\/th>[\s\S]*<th>Agent 数<\/th>/);
-  assert.doesNotMatch(tableMarkup, /<th>Base URL<\/th>|<th>能力标签<\/th>/);
-  assert.match(modelSource, /formatTokenCount\(model\.context_window_tokens\)/);
-  assert.match(modelSource, /formatTokenCount\(model\.max_output_tokens\)/);
-  assert.match(modelSource, /formatList\(model\.input_modalities\)/);
-  assert.doesNotMatch(modelSource, /<td>\$\{escapeHtml\(model\.base_url/);
-  assert.doesNotMatch(modelSource, /formatList\(model\.tags\)/);
+test("模型管理只保留 Provider 内模态框而不再提供独立列表页", () => {
+  assert.doesNotMatch(modelTemplate, /id="panel-llm-models"|id="llmModelsTableBody"|<h2>模型管理<\/h2>/);
+  assert.match(modelTemplate, /id="llmModelModal"/);
+  assert.match(modelTemplate, /模型 API 编码/);
+  assert.match(modelSource, /lockProvider/);
+  assert.match(modelSource, /deriveName/);
 });
 
-test("模型管理支持复制配置并清空 API Key", () => {
-  assert.match(modelTemplate, /<h2>模型管理<\/h2>/);
-  assert.doesNotMatch(modelTemplate, /从模型目录选择/);
-  assert.match(modelSource, /data-edit=[\s\S]*data-copy=[\s\S]*data-delete=/);
-  assert.match(modelSource, /async openCopy\(modelId\)/);
-  assert.match(modelSource, /model_label: model\.name/);
+test("模型目录继续独立浏览并直接打开模型创建模态框", () => {
+  assert.match(catalogSource, /window\.llmModelsAdmin\?\.openCreateFromCatalog\(model, provider\)/);
+  assert.doesNotMatch(catalogSource, /data-tab="llm-models"/);
+  assert.match(modelSource, /provider_id: selected\.id/);
   assert.match(modelSource, /input_modalities: model\.input_modalities \|\| \[\]/);
   assert.match(modelSource, /tags: model\.tags \|\| \[\]/);
-  assert.match(modelSource, /document\.getElementById\("llmModelApiKey"\)\.value = ""/);
-  assert.match(modelSource, /复制模型 · \$\{model\.name\}/);
+  assert.doesNotMatch(modelSource, /llmModelApiKey/);
 });
 
 test("编辑模型可按运行编码或 Provider 模型编码匹配目录", () => {

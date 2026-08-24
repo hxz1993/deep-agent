@@ -18,6 +18,7 @@ from deep_agent.db.models import (
     ChatMessage,
     ChatSession,
     LlmModel,
+    LlmProvider,
     McpServer,
     ModelCatalog,
     SkillPackage,
@@ -55,13 +56,13 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
 
             self.assertEqual(
                 result.path.name,
-                "deep-agent-config-test-v006-20260723-131415.db",
+                "deep-agent-config-test-v007-20260723-131415.db",
             )
             self.assertEqual(
                 [path.resolve() for path in (output_root / "test").iterdir()],
                 [result.path.resolve()],
             )
-            self.assertEqual(result.revision, "006")
+            self.assertEqual(result.revision, "007")
             self.assertEqual(result.row_counts["agents"], 1)
             self.assertEqual(result.row_counts["chat_sessions"], 0)
             self.assertEqual(result.row_counts["chat_messages"], 0)
@@ -84,14 +85,35 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                     connection.execute(
                         "SELECT version_num FROM alembic_version"
                     ).fetchone(),
-                    ("006",),
+                    ("007",),
                 )
                 self.assertEqual(
                     connection.execute(
-                        "SELECT api_key, context_window_tokens, max_output_tokens, tags "
+                        "SELECT context_window_tokens, max_output_tokens, tags "
                         "FROM llm_models WHERE id = 'model-1'"
                     ).fetchone(),
-                    ("plain-api-key", 128000, 8192, '["reasoning","tool_call"]'),
+                    (128000, 8192, '["reasoning","tool_call"]'),
+                )
+                self.assertNotIn(
+                    "api_key",
+                    {
+                        str(row[1])
+                        for row in connection.execute("PRAGMA table_info(llm_models)")
+                    },
+                )
+                self.assertEqual(
+                    connection.execute(
+                        "SELECT id, provider_type, use_default_base_url, base_url, "
+                        "api_key, enabled FROM llm_providers WHERE name = 'OpenAI'"
+                    ).fetchone(),
+                    (
+                        "0123456789abcdef0123456789abcdef",
+                        "openai",
+                        1,
+                        "https://api.openai.com/v1",
+                        "plain-api-key",
+                        1,
+                    ),
                 )
                 catalog_row = connection.execute(
                     "SELECT input_modalities, output_modalities, capabilities, release_date, "
@@ -148,7 +170,7 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                         "SELECT environment, source_dialect, alembic_revision, "
                         "git_commit FROM _backup_info"
                     ).fetchone(),
-                    ("test", "sqlite", "006", "abc123"),
+                    ("test", "sqlite", "007", "abc123"),
                 )
                 scope_manifest = json.loads(
                     str(
@@ -243,16 +265,28 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                 )
                 await connection.execute(
                     text(
-                        "INSERT INTO alembic_version (version_num) VALUES ('006')"
+                        "INSERT INTO alembic_version (version_num) VALUES ('007')"
                     )
+                )
+                await connection.execute(
+                    insert(LlmProvider.__table__),
+                    {
+                        "id": "0123456789abcdef0123456789abcdef",
+                        "name": "OpenAI",
+                        "provider_type": "openai",
+                        "use_default_base_url": True,
+                        "base_url": "https://api.openai.com/v1",
+                        "api_key": "plain-api-key",
+                        "enabled": True,
+                    },
                 )
                 await connection.execute(
                     insert(LlmModel.__table__),
                     {
                         "id": "model-1",
+                        "provider_id": "0123456789abcdef0123456789abcdef",
                         "name": "model",
                         "model": "openai:test",
-                        "api_key": "plain-api-key",
                         "input_modalities": ["text"],
                         "context_window_tokens": 128000,
                         "max_output_tokens": 8192,

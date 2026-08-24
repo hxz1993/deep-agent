@@ -59,16 +59,7 @@ function modelCodeAliases(value) {
   return aliases;
 }
 
-function normalizedEndpoint(value) {
-  try {
-    const url = new URL(String(value || "").trim());
-    return `${url.hostname.toLowerCase()}${url.pathname.replace(/\/+$/, "")}`;
-  } catch {
-    return "";
-  }
-}
-
-function findCatalogProvider(catalog, modelCode, baseUrl = "") {
+function findCatalogProvider(catalog, modelCode) {
   const requested = modelCodeAliases(modelCode);
   const candidates = [];
   for (const model of catalog?.items || []) {
@@ -93,14 +84,6 @@ function findCatalogProvider(catalog, modelCode, baseUrl = "") {
   const pool = exact.length ? exact : candidates;
   if (pool.length === 1) return pool[0];
 
-  const endpoint = normalizedEndpoint(baseUrl);
-  if (endpoint) {
-    const endpointMatches = pool.filter(
-      ({ provider }) => normalizedEndpoint(provider.provider_api_url) === endpoint,
-    );
-    if (endpointMatches.length === 1) return endpointMatches[0];
-  }
-
   const bestRank = Math.min(...pool.map((candidate) => candidate.exactRank).filter((rank) => rank >= 0));
   const best = Number.isFinite(bestRank)
     ? pool.filter((candidate) => candidate.exactRank === bestRank)
@@ -108,16 +91,61 @@ function findCatalogProvider(catalog, modelCode, baseUrl = "") {
   return best.length === 1 ? best[0] : null;
 }
 
+const CATALOG_PROVIDER_TYPE_ALIASES = {
+  moonshot: "moonshotai",
+  qwen: "alibaba",
+  zhipu: "zai",
+  zhipuai: "zai",
+};
+
+function catalogProviderType(provider) {
+  const code = String(provider?.provider_id || "").trim().toLowerCase();
+  return CATALOG_PROVIDER_TYPE_ALIASES[code] || code;
+}
+
+function providerChoicesForCatalog(provider) {
+  const providerType = catalogProviderType(provider);
+  return (state.llmProviders || []).filter(
+    (item) => item.provider_type === providerType,
+  );
+}
+
+function populateModelProviderSelect(selectedId = "") {
+  const select = document.getElementById("llmModelProviderId");
+  if (!select) return;
+  const providers = state.llmProviders || [];
+  if (!providers.length) {
+    select.innerHTML = '<option value="">（请先创建 Provider）</option>';
+    select.disabled = true;
+    return;
+  }
+  select.disabled = false;
+  select.innerHTML = providers.map((provider) => {
+    const selected = provider.id === selectedId ? " selected" : "";
+    const suffix = provider.enabled === false
+      ? "（已停用）"
+      : provider.api_key_set ? "" : "（未配置密钥）";
+    return `<option value="${escapeHtml(provider.id)}"${selected}>${escapeHtml(provider.name)} · ${escapeHtml(providerTypeLabel(provider))}${suffix}</option>`;
+  }).join("");
+}
+
 const llmModelsAdmin = {
+  catalogTargetProviderId: "",
+  editorContext: { lockProvider: false, deriveName: false },
+
+  setCatalogTargetProvider(providerId = "") {
+    this.catalogTargetProviderId = providerId;
+  },
+
   async refresh() {
     const tbody = document.getElementById("llmModelsTableBody");
     if (!tbody) return;
-    tbody.innerHTML = `<tr><td colspan="8" class="empty-cell">加载中…</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="9" class="empty-cell">加载中…</td></tr>`;
     try {
-      const models = await apiFetch("/api/v1/llm-models");
+      const [models] = await Promise.all([loadLlmModels(), loadLlmProviders()]);
       showDbBanner(false);
       if (!models.length) {
-        tbody.innerHTML = `<tr><td colspan="8" class="empty-cell">暂无模型配置</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="9" class="empty-cell">暂无模型配置</td></tr>`;
         return;
       }
       tbody.innerHTML = models
@@ -125,11 +153,12 @@ const llmModelsAdmin = {
           (model) => `
         <tr>
           <td><strong>${escapeHtml(model.name)}</strong></td>
+          <td><span class="model-provider-cell"><span class="provider-key-dot ${model.provider?.enabled !== false && model.provider?.api_key_set ? "on" : "off"}"></span>${escapeHtml(model.provider?.name || "—")}</span></td>
           <td><code>${escapeHtml(model.model)}</code></td>
           <td>${escapeHtml(formatTokenCount(model.context_window_tokens))}</td>
           <td>${escapeHtml(formatTokenCount(model.max_output_tokens))}</td>
           <td class="model-tag-cell">${formatList(model.input_modalities)}</td>
-          <td><span class="badge ${model.api_key_set ? "on" : "off"}">${model.api_key_set ? "已配置" : "无"}</span></td>
+          <td><button type="button" class="model-status-toggle ${model.enabled === false ? "off" : "on"}" data-toggle="${escapeHtml(model.id)}" aria-pressed="${model.enabled !== false}">${model.enabled === false ? "停用" : "启用"}</button></td>
           <td>${model.agent_count}</td>
           <td>
             <div class="row-actions">
@@ -148,60 +177,126 @@ const llmModelsAdmin = {
       tbody.querySelectorAll("[data-copy]").forEach((button) => {
         button.addEventListener("click", () => this.openCopy(button.dataset.copy));
       });
+      tbody.querySelectorAll("[data-toggle]").forEach((button) => {
+        button.addEventListener("click", () => this.toggleEnabled(button.dataset.toggle));
+      });
       tbody.querySelectorAll("[data-delete]").forEach((button) => {
         button.addEventListener("click", () => this.remove(button.dataset.delete, button.dataset.name));
       });
     } catch (error) {
-      tbody.innerHTML = `<tr><td colspan="8" class="empty-cell">${escapeHtml(error.message)}</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="9" class="empty-cell">${escapeHtml(error.message)}</td></tr>`;
     }
   },
 
-  openCreate(prefill = null) {
+  setEditorContext({ lockProvider = false, deriveName = false } = {}) {
+    this.editorContext = { lockProvider, deriveName };
+    document.getElementById("llmModelNameField")?.classList.toggle("hidden", deriveName);
+    const nameInput = document.getElementById("llmModelName");
+    if (nameInput) nameInput.required = !deriveName;
+    document.getElementById("llmModelProviderField")?.classList.toggle("hidden", lockProvider);
+  },
+
+  async openCreate(prefill = null, options = {}) {
+    await Promise.all([loadLlmProviders(), loadLlmProviderTypes()]);
+    this.setEditorContext(options);
     state.editingLlmModelId = null;
-    document.getElementById("llmModelModalTitle").textContent = prefill
+    document.getElementById("llmModelModalTitle").textContent = prefill?.model_label
       ? `使用目录模型 · ${prefill.model_label}`
       : "新建模型配置";
     document.getElementById("llmModelName").disabled = false;
     document.getElementById("llmModelName").value = prefill?.model_label || "";
     document.getElementById("llmModelDescription").value = prefill?.model_description || "";
-    document.getElementById("llmModelModel").value = prefill?.runtime_model || "";
-    document.getElementById("llmModelBaseUrl").value = prefill?.provider_api_url || "";
-    document.getElementById("llmModelApiKey").value = "";
+    document.getElementById("llmModelModel").value = prefill?.runtime_model || prefill?.provider_model_id || "";
+    const selectedProviderId = prefill?.provider_id || state.llmProviders[0]?.id || "";
+    populateModelProviderSelect(selectedProviderId);
+    document.getElementById("llmModelProviderId").disabled = Boolean(options.lockProvider);
+    document.getElementById("llmModelEnabled").checked = prefill?.enabled ?? true;
     document.getElementById("llmModelContextWindow").value = prefill?.context_window_tokens || "";
     document.getElementById("llmModelMaxOutput").value = prefill?.max_output_tokens || "";
-    document.getElementById("llmModelClearApiKey").checked = false;
-    document.getElementById("llmModelClearApiKeyField").classList.add("hidden");
     document.getElementById("updateLlmModelFromCatalog").classList.add("hidden");
     setCheckedValues("llmModelModality", prefill?.input_modalities || ["text"]);
     setCheckedValues("llmModelTag", prefill?.tags || []);
     document.getElementById("llmModelModal").showModal();
   },
 
-  openCreateFromCatalog(model, provider) {
-    this.openCreate({
+  async openCreateFromCatalog(model, provider) {
+    await Promise.all([loadLlmProviders(), loadLlmProviderTypes()]);
+    const targetProviderId = this.catalogTargetProviderId;
+    const providerType = catalogProviderType(provider);
+    const targeted = this.catalogTargetProviderId
+      ? state.llmProviders.find((item) => item.id === this.catalogTargetProviderId)
+      : null;
+    this.catalogTargetProviderId = "";
+    if (targetProviderId && (!targeted || targeted.provider_type !== providerType)) {
+      showToast(targeted
+        ? `该目录渠道不能添加到 ${targeted.name}，请选择同类型模型`
+        : "当前 Provider 不存在", true);
+      return;
+    }
+    const matches = targeted ? [targeted] : providerChoicesForCatalog(provider);
+    if (!matches.length) {
+      const supported = state.llmProviderTypes.find((item) => item.code === providerType);
+      if (!supported) {
+        showToast(`当前目录渠道 ${provider.provider_label || provider.provider_id} 没有可用的 Provider 类型`, true);
+        return;
+      }
+      await window.llmProvidersAdmin?.openCreate({
+        providerType,
+        afterSave: (created) => this.openCreate({
+          ...provider,
+          provider_id: created.id,
+          model_label: model.model_label,
+          model_description: model.model_description,
+        }, { lockProvider: true, deriveName: true }),
+      });
+      showToast(`请先创建 ${supported.label} Provider`);
+      return;
+    }
+    let selected = matches[0];
+    if (matches.length > 1) {
+      const result = await requestActionFields({
+        title: "选择 Provider",
+        message: `${model.model_label} 有多个可用接入，请明确选择本次使用的 Provider。`,
+        confirmLabel: "继续",
+        fields: [{
+          name: "provider_id",
+          label: "Provider",
+          type: "select",
+          required: true,
+          value: matches[0].id,
+          options: matches.map((item) => ({ value: item.id, label: item.name })),
+        }],
+      });
+      if (!result) return;
+      selected = matches.find((item) => item.id === result.provider_id);
+    }
+    if (!selected) return;
+    await this.openCreate({
       ...provider,
+      provider_id: selected.id,
       model_label: model.model_label,
       model_description: model.model_description,
-    });
+    }, targeted ? { lockProvider: true, deriveName: true } : {});
   },
 
-  async openEdit(modelId) {
+  async openEdit(modelId, options = {}) {
     try {
-      const model = await apiFetch(`/api/v1/llm-models/${encodeURIComponent(modelId)}`);
+      const [model] = await Promise.all([
+        apiFetch(`/api/v1/llm-models/${encodeURIComponent(modelId)}`),
+        loadLlmProviders(),
+      ]);
+      this.setEditorContext(options);
       state.editingLlmModelId = modelId;
-      document.getElementById("llmModelModalTitle").textContent = `编辑模型 · ${model.name}`;
+      document.getElementById("llmModelModalTitle").textContent = `编辑模型 · ${model.model}`;
       document.getElementById("llmModelName").disabled = false;
       document.getElementById("llmModelName").value = model.name;
       document.getElementById("llmModelDescription").value = model.description || "";
       document.getElementById("llmModelModel").value = model.model;
-      document.getElementById("llmModelBaseUrl").value = model.base_url || "";
-      document.getElementById("llmModelApiKey").value = "";
+      populateModelProviderSelect(model.provider_id);
+      document.getElementById("llmModelProviderId").disabled = Boolean(options.lockProvider);
+      document.getElementById("llmModelEnabled").checked = model.enabled !== false;
       document.getElementById("llmModelContextWindow").value = model.context_window_tokens || "";
       document.getElementById("llmModelMaxOutput").value = model.max_output_tokens || "";
-      document.getElementById("llmModelClearApiKey").checked = false;
-      document
-        .getElementById("llmModelClearApiKeyField")
-        .classList.toggle("hidden", !model.api_key_set);
       document.getElementById("updateLlmModelFromCatalog").classList.remove("hidden");
       setCheckedValues("llmModelModality", model.input_modalities || []);
       setCheckedValues("llmModelTag", model.tags || []);
@@ -214,15 +309,16 @@ const llmModelsAdmin = {
   async openCopy(modelId) {
     try {
       const model = await apiFetch(`/api/v1/llm-models/${encodeURIComponent(modelId)}`);
-      this.openCreate({
+      await this.openCreate({
         model_label: model.name,
         model_description: model.description || "",
         runtime_model: model.model,
-        provider_api_url: model.base_url || "",
+        provider_id: model.provider_id,
         context_window_tokens: model.context_window_tokens,
         max_output_tokens: model.max_output_tokens,
         input_modalities: model.input_modalities || [],
         tags: model.tags || [],
+        enabled: model.enabled !== false,
       });
       document.getElementById("llmModelModalTitle").textContent = `复制模型 · ${model.name}`;
     } catch (error) {
@@ -250,11 +346,7 @@ const llmModelsAdmin = {
         limit: "200",
       });
       const catalog = await apiFetch(`/api/v1/llm-models/catalog?${params}`);
-      const match = findCatalogProvider(
-        catalog,
-        modelCode,
-        document.getElementById("llmModelBaseUrl").value,
-      );
+      const match = findCatalogProvider(catalog, modelCode);
       if (!match) {
         throw new Error(`模型目录中没有找到可唯一匹配的模型：${modelCode}`);
       }
@@ -282,9 +374,9 @@ const llmModelsAdmin = {
 
     let saved = false;
     try {
-      const name = document.getElementById("llmModelName").value.trim();
       const model = document.getElementById("llmModelModel").value.trim();
-      if (!name || !model) throw new Error("名称和模型不能为空");
+      const name = this.editorContext.deriveName ? model : document.getElementById("llmModelName").value.trim();
+      if (!name || !model) throw new Error("名称和模型 API 编码不能为空");
       const inputModalities = readCheckedValues("llmModelModality");
       if (!inputModalities.length) throw new Error("请至少选择一种输入模态");
       const contextWindow = positiveInteger("llmModelContextWindow", "上下文窗口");
@@ -297,16 +389,14 @@ const llmModelsAdmin = {
         name,
         description: document.getElementById("llmModelDescription").value.trim() || null,
         model,
-        base_url: document.getElementById("llmModelBaseUrl").value.trim() || null,
+        provider_id: document.getElementById("llmModelProviderId").value,
+        enabled: document.getElementById("llmModelEnabled").checked,
         input_modalities: inputModalities,
         context_window_tokens: contextWindow,
         max_output_tokens: maxOutput,
         tags: readCheckedValues("llmModelTag"),
       };
-      const apiKey = document.getElementById("llmModelApiKey").value.trim();
-      const clearApiKey = document.getElementById("llmModelClearApiKey").checked;
-      if (clearApiKey) payload.api_key = null;
-      else if (apiKey) payload.api_key = apiKey;
+      if (!payload.provider_id) throw new Error("请选择 Provider");
 
       if (state.editingLlmModelId) {
         await apiFetch(`/api/v1/llm-models/${encodeURIComponent(state.editingLlmModelId)}`, {
@@ -330,9 +420,24 @@ const llmModelsAdmin = {
     }
     if (saved) {
       await refreshAfterSuccessfulSave("模型配置", async () => {
-        await this.refresh();
         await loadLlmModels();
+        await window.llmProvidersAdmin?.refresh();
       });
+    }
+  },
+
+  async toggleEnabled(modelId) {
+    const model = (state.llmModels || []).find((item) => item.id === modelId);
+    if (!model) return;
+    try {
+      await apiFetch(`/api/v1/llm-models/${encodeURIComponent(modelId)}`, {
+        method: "PATCH",
+        body: JSON.stringify({ enabled: model.enabled === false }),
+      });
+      showToast(model.enabled === false ? "模型已启用" : "模型已停用");
+      await Promise.all([this.refresh(), window.llmProvidersAdmin?.refresh()]);
+    } catch (error) {
+      showToast(error.message, true);
     }
   },
 
@@ -348,8 +453,8 @@ const llmModelsAdmin = {
       await apiFetch(`/api/v1/llm-models/${encodeURIComponent(modelId)}`, { method: "DELETE" });
       showToast("模型配置已删除");
       await refreshAfterSuccessfulMutation("模型配置已删除", async () => {
-        await this.refresh();
         await loadLlmModels();
+        await window.llmProvidersAdmin?.refresh();
       });
     } catch (error) {
       showToast(error.message, true);
@@ -374,7 +479,9 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 
 window.__LlmModelConfigurationUI = {
+  catalogProviderType,
   findCatalogProvider,
   formatTokenCount,
   modelCodeAliases,
+  providerChoicesForCatalog,
 };

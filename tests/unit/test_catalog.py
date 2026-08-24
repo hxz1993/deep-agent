@@ -12,7 +12,7 @@ from deep_agent.agent.models.catalog import (
     export_models_dev_catalog,
     normalize_models_dev_bundle,
 )
-from deep_agent.db.models import LlmModel, ModelCatalog
+from deep_agent.db.models import LlmModel, LlmProvider, ModelCatalog
 
 
 MODELS = {
@@ -267,13 +267,24 @@ class CatalogViewTests(unittest.TestCase):
         self.configured = [
             LlmModel(
                 id="model-1",
+                provider_id="11111111111111111111111111111111",
                 name="Claude Preset",
                 model="anthropic:claude-test",
-                base_url="https://gateway.example/anthropic",
                 input_modalities=["text", "image"],
                 context_window_tokens=200_000,
                 max_output_tokens=4_096,
                 tags=["reasoning", "tool_call"],
+            )
+        ]
+        self.providers = [
+            LlmProvider(
+                id="11111111111111111111111111111111",
+                name="Anthropic",
+                provider_type="anthropic",
+                use_default_base_url=False,
+                base_url="https://custom-gateway.example/anthropic",
+                api_key="secret",
+                enabled=True,
             )
         ]
 
@@ -281,6 +292,7 @@ class CatalogViewTests(unittest.TestCase):
         page = build_catalog_page(
             self.rows,
             self.configured,
+            self.providers,
             view="model",
             q="claude",
             lab_id=None,
@@ -296,9 +308,26 @@ class CatalogViewTests(unittest.TestCase):
         self.assertEqual(item["tags"], ["reasoning", "tool_call"])
         self.assertEqual(item["providers"][0]["configured_preset"], "Claude Preset")
 
+    def test_configured_preset_does_not_match_a_different_provider_type(self) -> None:
+        self.providers[0].provider_type = "openai_compatible"
+        page = build_catalog_page(
+            self.rows,
+            self.configured,
+            self.providers,
+            view="model",
+            q="claude",
+            lab_id=None,
+            provider_id=None,
+            modality=None,
+            offset=0,
+            limit=50,
+        )
+        self.assertIsNone(page["items"][0]["providers"][0]["configured_preset"])
+
     def test_model_results_are_sorted_by_release_date_descending(self) -> None:
         page = build_catalog_page(
             self.rows,
+            [],
             [],
             view="model",
             q=None,
@@ -322,6 +351,7 @@ class CatalogViewTests(unittest.TestCase):
         page = build_catalog_page(
             self.rows,
             [],
+            [],
             view="model",
             q=None,
             lab_id=None,
@@ -335,6 +365,7 @@ class CatalogViewTests(unittest.TestCase):
     def test_provider_view_groups_models(self) -> None:
         page = build_catalog_page(
             self.rows,
+            [],
             [],
             view="provider",
             q=None,

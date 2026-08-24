@@ -99,35 +99,22 @@
       </div>
     </section>
 
-    <!-- LLM models panel -->
-    <section class="panel" id="panel-llm-models">
+    <!-- LLM Provider panel -->
+    <section class="panel provider-admin-panel" id="panel-llm-providers">
       <div class="panel-toolbar">
         <div>
-          <h2>模型管理</h2>
-          <p class="panel-subtitle">这里保存的模态、标签和 Token 上限是 Agent 运行时唯一模型事实。</p>
+          <h2>Provider</h2>
+          <p class="panel-subtitle">集中维护模型接入地址与凭据，模型只引用一个 Provider。</p>
         </div>
-        <div class="panel-toolbar-actions">
-          <button class="btn primary" type="button" id="newLlmModelBtn"><i data-lucide="plus"></i>新建模型</button>
-        </div>
+        <button class="btn primary" type="button" id="newLlmProviderBtn"><i data-lucide="plus"></i>新建 Provider</button>
       </div>
-      <div class="table-wrap console-list-a">
-        <table class="data-table">
-          <thead>
-            <tr>
-              <th>名称</th>
-              <th>模型</th>
-              <th>上下文</th>
-              <th>最大输出</th>
-              <th>模态标签</th>
-              <th>API Key</th>
-              <th>Agent 数</th>
-              <th>操作</th>
-            </tr>
-          </thead>
-          <tbody id="llmModelsTableBody">
-            <tr><td colspan="8" class="empty-cell">加载中…</td></tr>
-          </tbody>
-        </table>
+      <div class="provider-admin-workspace">
+        <aside class="provider-list-pane" id="llmProviderList" aria-live="polite">
+          <div class="provider-list-state">正在加载 Provider…</div>
+        </aside>
+        <section class="provider-detail-pane" id="llmProviderDetail">
+          <div class="provider-detail-empty"><i data-lucide="waypoints"></i><p>选择一个 Provider 查看接入配置与关联模型</p></div>
+        </section>
       </div>
     </section>
 
@@ -189,8 +176,8 @@
               <th>场景</th>
               <th>说明</th>
               <th>模型配置</th>
-              <th>Base URL</th>
-              <th>API Key</th>
+              <th>Provider</th>
+              <th>Provider 状态</th>
               <th>操作</th>
             </tr>
           </thead>
@@ -300,9 +287,6 @@
       <div class="modal-body">
         <div class="agent-editor-workbench">
           <section class="agent-editor-primary" aria-label="基础信息与提示词">
-            <div class="agent-editor-section-heading">
-              <div><strong>基础信息</strong><span>设置 Agent 的默认模型与运行提示词。</span></div>
-            </div>
             <div class="agent-form-col agent-basic-fields">
             <label class="field">
               <span>名称</span>
@@ -334,14 +318,8 @@
 
             <div class="agent-editor-pane" data-agent-editor-pane="tools">
               <section class="cap-section">
-                <div class="cap-section-header">
-                  <div>
-                    <span class="cap-section-title">工具配置</span>
-                    <p class="field-hint">新建时默认勾选系统默认能力；主动全不选表示不启用可选能力。</p>
-                  </div>
-                  <div class="cap-section-actions">
-                    <input type="search" class="cap-search" id="capSearch" placeholder="搜索能力…" />
-                  </div>
+                <div class="agent-cap-search">
+                  <input type="search" class="cap-search" id="capSearch" placeholder="搜索能力…" />
                 </div>
                 <div class="cap-tabs" id="capTabs"></div>
                 <div class="cap-panels" id="agentCapGroups"></div>
@@ -350,12 +328,6 @@
 
             <div class="agent-editor-pane hidden" data-agent-editor-pane="skills">
               <section class="cap-section agent-skill-section">
-                <div class="cap-section-header">
-                  <div>
-                    <span class="cap-section-title">Skill</span>
-                    <p class="field-hint">按需向模型披露任务方法和资源；Skill 不会扩大工具包授权。</p>
-                  </div>
-                </div>
                 <div class="agent-skill-grid" id="agentSkillChoices"></div>
               </section>
             </div>
@@ -363,6 +335,53 @@
         </div>
       </div>
       <div class="form-error hidden" data-form-error role="alert" aria-live="assertive"></div>
+    </form>
+  </dialog>
+
+  <!-- LLM Provider modal -->
+  <dialog class="modal" id="llmProviderModal">
+    <form id="llmProviderForm" method="dialog">
+      <div class="modal-header">
+        <h3 id="llmProviderModalTitle">新建 Provider</h3>
+        <button type="button" class="icon-btn" id="closeLlmProviderModal" aria-label="关闭"><i data-lucide="x"></i></button>
+      </div>
+      <div class="modal-body">
+        <label class="field">
+          <span>名称</span>
+          <input type="text" id="llmProviderName" required placeholder="例如 Kimi" />
+        </label>
+        <label class="field">
+          <span>Provider 类型</span>
+          <select id="llmProviderType" required></select>
+        </label>
+        <label class="field checkbox-field provider-default-toggle">
+          <input type="checkbox" id="llmProviderUseDefaultBaseUrl" />
+          <span>使用框架默认地址</span>
+        </label>
+        <label class="field">
+          <span>Base URL</span>
+          <input type="url" id="llmProviderBaseUrl" required />
+          <small class="field-hint" id="llmProviderBaseUrlHint"></small>
+        </label>
+        <label class="field">
+          <span>API Key（编辑时留空表示不修改）</span>
+          <input type="password" id="llmProviderApiKey" autocomplete="new-password" />
+          <small class="field-hint" id="llmProviderApiKeyState">尚未配置</small>
+        </label>
+        <label class="field checkbox-field hidden" id="llmProviderClearApiKeyField">
+          <input type="checkbox" id="llmProviderClearApiKey" />
+          <span>清除当前 API Key</span>
+        </label>
+        <label class="field checkbox-field">
+          <input type="checkbox" id="llmProviderEnabled" checked />
+          <span>启用 Provider</span>
+        </label>
+      </div>
+      <div class="form-error hidden" data-form-error role="alert" aria-live="assertive"></div>
+      <div class="modal-footer">
+        <button type="button" class="btn" id="cancelLlmProviderBtn">取消</button>
+        <button type="submit" class="btn primary">保存</button>
+      </div>
     </form>
   </dialog>
 
@@ -375,28 +394,25 @@
       </div>
       <div class="modal-body">
         <label class="field">
-          <span>名称</span>
-          <input type="text" id="llmModelName" required />
+          <span>模型 API 编码</span>
+          <input type="text" id="llmModelModel" placeholder="例如 gpt-4.1-mini" required />
         </label>
         <label class="field">
           <span>描述（可选）</span>
           <input type="text" id="llmModelDescription" />
         </label>
-        <label class="field">
-          <span>模型</span>
-          <input type="text" id="llmModelModel" placeholder="openai:gpt-4o" required />
+        <label class="field" id="llmModelNameField">
+          <span>名称</span>
+          <input type="text" id="llmModelName" required />
         </label>
-        <label class="field">
-          <span>Base URL（可选）</span>
-          <input type="text" id="llmModelBaseUrl" placeholder="https://api.openai.com/v1" />
+        <label class="field" id="llmModelProviderField">
+          <span>Provider</span>
+          <select id="llmModelProviderId" required></select>
+          <small class="field-hint">地址和凭据由 Provider 统一维护。</small>
         </label>
-        <label class="field">
-          <span>API Key（可选，编辑时留空表示不修改）</span>
-          <input type="password" id="llmModelApiKey" autocomplete="new-password" />
-        </label>
-        <label class="field checkbox-field hidden" id="llmModelClearApiKeyField">
-          <input type="checkbox" id="llmModelClearApiKey" />
-          <span>清除当前已配置的 API Key</span>
+        <label class="field checkbox-field">
+          <input type="checkbox" id="llmModelEnabled" checked />
+          <span>启用模型</span>
         </label>
         <div class="llm-advanced-divider" role="separator">
           <span class="llm-advanced-label">

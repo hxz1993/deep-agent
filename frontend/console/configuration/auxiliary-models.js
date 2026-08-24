@@ -29,12 +29,12 @@ const auxiliaryModelsAdmin = {
           <td><strong>${escapeHtml(item.label)}</strong></td>
           <td class="text-dim">${escapeHtml(item.description)}</td>
           <td>${this.formatModelCell(item)}</td>
-          <td>${escapeHtml(item.mode === "auto" ? "—" : item.base_url || "—")}</td>
-          <td><span class="badge ${item.mode === "auto" ? "off" : item.api_key_set ? "on" : "off"}">${item.mode === "auto" ? "—" : item.api_key_set ? "已配置" : "无"}</span></td>
+          <td>${escapeHtml(item.mode === "auto" ? "—" : (state.llmModels.find((model) => model.id === item.llm_model_id)?.provider?.name || "—"))}</td>
+          <td>${item.mode === "auto" ? "—" : (() => { const model = state.llmModels.find((candidate) => candidate.id === item.llm_model_id); return `<span class="badge ${model?.enabled === false ? "off" : "on"}">${model?.enabled === false ? "已停用" : "启用"}</span>`; })()}</td>
           <td>
             <div class="row-actions">
               <button type="button" data-use-auto="${escapeHtml(item.use_case)}" ${item.mode === "auto" ? "disabled" : ""}>设为主模型</button>
-              <button type="button" data-change="${escapeHtml(item.use_case)}" data-label="${escapeHtml(item.label)}">更改</button>
+              <button type="button" data-change="${escapeHtml(item.use_case)}" data-label="${escapeHtml(item.label)}" data-model-id="${escapeHtml(item.llm_model_id || "")}">更改</button>
             </div>
           </td>
         </tr>`
@@ -45,7 +45,7 @@ const auxiliaryModelsAdmin = {
         btn.addEventListener("click", () => this.setAuto(btn.dataset.useAuto));
       });
       tbody.querySelectorAll("[data-change]").forEach((btn) => {
-        btn.addEventListener("click", () => this.openChange(btn.dataset.change, btn.dataset.label));
+        btn.addEventListener("click", () => this.openChange(btn.dataset.change, btn.dataset.label, btn.dataset.modelId));
       });
     } catch (err) {
       tbody.innerHTML = `<tr><td colspan="6" class="empty-cell">${escapeHtml(err.message)}</td></tr>`;
@@ -65,7 +65,7 @@ const auxiliaryModelsAdmin = {
     }
   },
 
-  openChange(useCase, label) {
+  openChange(useCase, label, selectedId = "") {
     this.editingUseCase = useCase;
     document.getElementById("auxiliaryModelModalTitle").textContent = `更改辅助模型 · ${label}`;
     document.getElementById("auxiliaryModelModalHint").textContent =
@@ -77,12 +77,8 @@ const auxiliaryModelsAdmin = {
       select.disabled = true;
     } else {
       select.disabled = false;
-      select.innerHTML = models
-        .map(
-          (m) =>
-            `<option value="${escapeHtml(m.id)}">${escapeHtml(m.name)} (${escapeHtml(m.model)})</option>`
-        )
-        .join("");
+      select.innerHTML = window.DeepAgentModelOptions.renderGroupedModelOptions(models, { selectedId });
+      select.value = selectedId || window.DeepAgentModelOptions.firstSelectableModelId(models);
     }
     document.getElementById("auxiliaryModelModal").showModal();
   },

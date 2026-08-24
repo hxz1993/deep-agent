@@ -17,15 +17,19 @@ from deep_agent.core.context import AppContext, get_context, init_context, reset
 from deep_agent.schemas.agent import AgentCreate
 from deep_agent.schemas.llm_model import LlmModelCreate
 from tests.helpers.request_identity import install_test_user_header
-from tests.helpers.sqlite_stores import make_sqlite_stores
+from tests.helpers.sqlite_stores import (
+    get_default_test_provider_id,
+    make_sqlite_stores,
+)
 from tests.integration.helpers.chat import mock_request_disconnect, parse_sse_events
 
 
 class ChatFileExportIntegrationTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         stores, self._engine, session_factory = await make_sqlite_stores()
-        model = await stores.llm_model.create_unique(
+        model = await stores.llm_configuration.create_model(
             LlmModelCreate(
+                provider_id=await get_default_test_provider_id(stores),
                 name="file-export-model",
                 model="private:file-export-test",
                 input_modalities=["text"],

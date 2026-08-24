@@ -36,7 +36,9 @@ class ConfigurationCrudContractTests(unittest.IsolatedAsyncioTestCase):
             )
         )
         self._transport = ASGITransport(app=self._app, raise_app_exceptions=False)
-        self._model_id = (await self.stores.llm_model.list_all())[0].id
+        default_model = (await self.stores.llm_model.list_all())[0]
+        self._model_id = default_model.id
+        self._provider_id = default_model.provider_id
         await self.stores.ui_tool_package.create_manual(
             UiToolPackageCreate(
                 code="ui:contracts",
@@ -111,6 +113,7 @@ class ConfigurationCrudContractTests(unittest.IsolatedAsyncioTestCase):
                 "/api/v1/llm-models",
                 json={
                     "name": "contract-model",
+                    "provider_id": self._provider_id,
                     "model": "test:contract",
                     "input_modalities": ["text"],
                     "context_window_tokens": 128_000,
@@ -161,17 +164,16 @@ class ConfigurationCrudContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(tool_row.parameters_json_schema, {"type": "object"})
         self.assertTrue(tool_row.enabled)
 
-    async def test_invalid_model_base_url_and_result_schema_return_422(self) -> None:
+    async def test_invalid_provider_base_url_and_result_schema_return_422(self) -> None:
         async with AsyncClient(transport=self._transport, base_url="http://test") as client:
-            model = await client.post(
-                "/api/v1/llm-models",
+            provider = await client.post(
+                "/api/v1/llm-providers",
                 json={
                     "name": "invalid-url",
-                    "model": "test:model",
+                    "provider_type": "openai_compatible",
+                    "use_default_base_url": False,
                     "base_url": "ftp://example.test",
-                    "input_modalities": ["text"],
-                    "context_window_tokens": 128_000,
-                    "max_output_tokens": 8_192,
+                    "api_key": "secret",
                 },
             )
             tool = await client.post(
@@ -185,26 +187,26 @@ class ConfigurationCrudContractTests(unittest.IsolatedAsyncioTestCase):
                 },
             )
 
-        self.assertEqual(model.status_code, 422)
+        self.assertEqual(provider.status_code, 422)
         self.assertEqual(tool.status_code, 422)
 
     async def test_api_key_can_be_cleared_explicitly(self) -> None:
         async with AsyncClient(transport=self._transport, base_url="http://test") as client:
             created = await client.post(
-                "/api/v1/llm-models",
+                "/api/v1/llm-providers",
                 json={
                     "name": "clear-key",
-                    "model": "test:model",
+                    "provider_type": "openai_compatible",
+                    "use_default_base_url": False,
+                    "base_url": "http://test.invalid/v1",
                     "api_key": "secret",
-                    "input_modalities": ["text"],
-                    "context_window_tokens": 128_000,
-                    "max_output_tokens": 8_192,
                 },
             )
+            self.assertEqual(created.status_code, 201, created.text)
             self.assertTrue(created.json()["api_key_set"])
             cleared = await client.patch(
-                f"/api/v1/llm-models/{created.json()['id']}",
-                json={"api_key": None},
+                f"/api/v1/llm-providers/{created.json()['id']}",
+                json={"clear_api_key": True},
             )
 
         self.assertEqual(cleared.status_code, 200, cleared.text)
@@ -224,6 +226,7 @@ class ConfigurationCrudContractTests(unittest.IsolatedAsyncioTestCase):
                 "/api/v1/llm-models",
                 {
                     "name": "duplicate-model",
+                    "provider_id": self._provider_id,
                     "model": "test:duplicate",
                     "input_modalities": ["text"],
                     "context_window_tokens": 128_000,

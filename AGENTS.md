@@ -12,7 +12,7 @@
 | 项 | 内容 |
 | --- | --- |
 | **是什么** | 通用 AI Agent 全栈：FastAPI 后端 + Pydantic AI 运行时 + 静态前端 |
-| **产品版本** | `deep_agent.__version__` 为唯一来源；当前 `0.5.4`，默认发布递增第三位 |
+| **产品版本** | `deep_agent.__version__` 为唯一来源；当前 `0.5.6`，默认发布递增第三位 |
 | **启动** | 本地 Test 联调固定使用下方命令；部署入口才使用 `deep_agent.main:app` |
 | **测试** | `python3.12 -m unittest discover -s tests -p "test_*.py" -v` |
 | **配置** | 仓库根 `.env`（`DEEP_AGENT_*` / `DEEP_AGENT_DBMS_*` / `DEEP_AGENT_SQLITE_PATH`） |
@@ -96,7 +96,7 @@ HTTP → deep_agent/api/v1 → AgentRunner → pydantic_ai.Agent → Toolsets
   完全相同的 Prompt 重试一次，无法安全放入单次请求时自动链路仅临时 Sliding Window，主动
   链路直接失败，二者均不写入 Checkpoint。
 - 新的运行时横切能力优先评估 Core 的 `PrepareTools`、Hooks、`ToolSearch` 和 Harness 的 Compaction/Overflow；不要默认把逻辑继续写入 `AgentRunner`。
-- v0.3.12 对已授权 MCP 使用 Pydantic AI ToolSearch 渐进披露；v0.4.9 起全局候选不超过 5 个时全部直接披露，超过 5 个时词法预选最多 3 个完整 Schema，其余只列稳定协议名并可搜索加载。检索不扩大 ToolPackage 权限。
+- v0.3.12 对已授权 MCP 使用 Pydantic AI ToolSearch 渐进披露；当前全局候选不超过 10 个时全部直接披露，超过 10 个时词法预选最多 3 个完整 Schema，其余只列稳定协议名并可搜索加载。检索不扩大 ToolPackage 权限。
 - v0.4.1 将检索器升级为 `lexical_v2`：复用独立的字段化词法内核，按协议名、MCP标准 `title`、参数和描述分级匹配，并支持拼音与受限错字回退；查询明确写出协议工具名时只返回精确工具。不得加入业务词典或把词法匹配描述成中英文语义翻译。
 - v0.4.2 引导本地 `search_tools` 在一次调用中提交最多 3 个互补查询：用户原始语言、简洁英文能力描述和可选协议名。后端只做确定性词法检索，不调用翻译模型；首轮 Top 3仍只依赖原始问题和 MCP元数据。
 - v0.4.4～v0.4.5完成下线内置MCP清理；Alembic 005和006依次清理对应预制Server记录与Agent能力引用，历史会话不改写。当前代码内置MCP只保留DeepCube；真实MCP进程回归改用`tests/fixtures/`下的测试专用Server，禁止测试Fixture进入生产扫描目录。
@@ -120,6 +120,8 @@ HTTP → deep_agent/api/v1 → AgentRunner → pydantic_ai.Agent → Toolsets
 - v0.5.1抽出Console共享Markdown渲染器：Skill正文按Markdown阅读样式预览，主对话支持安全渲染`mermaid`围栏图表；图表仅在完整回复落定后按需加载本地资源并渲染，语法错误保留源码。
 - v0.5.3为Console增加独立“对话 / 轨迹”分段切换：轨迹只读投影现有History与当前SSE，按Pydantic AI Run归组；同一次模型响应的思考、正文和工具意图聚合为一个助手Loop，工具调用/结果仍保留独立排障记录。用户输入保留Context Reference和附件标记，Context Reference同时形成独立`CONTEXT`事件；详情按事件类型提供Summary、Payload、Preview、Raw或Result，JSON统一使用语法高亮。轨迹只展示数据库中可确认顺序的记录，不用不完整时间拼接甘特图或时间轴。详情复用工作台右侧会话详情栏；History只补充数据库中已经存在的请求/响应时间、工具结果时间、模型名、Provider、Response ID、Finish Reason、Usage和工具Outcome。不新建轨迹表、不保存HTTP原始报文，也不改变模型上下文或外部客户端协议。
 - v0.5.4收敛Console轨迹详情展示与前端实现：Assistant的Thinking归入Preview首段并默认折叠，短正文按内容自适应、长正文超过上限后滚动；Tool、Planning和Deferred复用同一套Payload/Result摘要渲染。REST、SSE、History、数据库和轨迹投影语义均不变化。
+- v0.5.5增加独立`llm_providers`配置层、九类Pydantic AI适配与Provider分栏Console，运行时开始按显式Provider类型构造原生Provider/Model，不再按模型前缀或URL猜协议。
+- v0.5.6完成Provider + Model两层归一化：Provider独占Base URL和密钥，`llm_models.provider_id`建立`RESTRICT`外键，模型名只在Provider内唯一；Provider和Model启停共同形成有效门禁，API以`selectable/unavailable_reason`披露状态。Agent、辅助模型、Chat、Session覆盖、标题与上下文估算继续引用`model_id`并统一解析Provider，外部REST、SSE与History核心协议不变。
 - v0.3.20 起上传 Skill 在每个 Pod 只保留 `runtime-skills/<code>/` 一份当前运行文件。服务启动、安装、替换、启用和手工重载负责同步；普通 Run 只读本地目录。单个 Skill 文件不可用时跳过该 Skill并继续回答，状态通过 `/skills`、Console 和 `final.context.skills` 诊断。
 - v0.3.23 起替换相同 Hash的上传 Skill也必须先检查平台原 ZIP；原包可下载才返回 `noop`，原 File ID失效时重新上传、更新数据库 File ID并返回 `repaired`。只恢复当前 Pod目录而不修复平台事实源属于不完整修复。
 - 上传 Skill 的平台 ZIP 是系统级配置文件，不属于业务 App/Space。平台文件使用可无 Space 回读的 `INF` 类型；安装、替换、启动恢复、管理员下载和 Run 兜底均保留调用身份但主动去掉 `app/space/language`业务上下文，保证同一 File ID 始终按系统级语义访问。不得改用 Space 级 `UPL`，数据库也不得保存请求上下文、Token、Cookie 或完整 Header。

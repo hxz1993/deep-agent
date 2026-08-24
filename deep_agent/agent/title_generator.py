@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from deep_agent.agent.spec import AgentSpec
     from deep_agent.db.stores.auxiliary_model import AuxiliaryModelStoreBase
     from deep_agent.db.stores.llm_model import LlmModelStoreBase
+    from deep_agent.services.llm_configuration import LlmConfigurationService
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +46,7 @@ def _title_snippet(text: str) -> str:
 async def _resolve_dedicated_title_model(
     auxiliary_store: AuxiliaryModelStoreBase | None = None,
     llm_model_store: LlmModelStoreBase | None = None,
+    llm_configuration_store: LlmConfigurationService | None = None,
 ) -> Model | str | None:
     if auxiliary_store is None or llm_model_store is None:
         try:
@@ -53,8 +55,16 @@ async def _resolve_dedicated_title_model(
             ctx = get_context()
             auxiliary_store = ctx.stores.auxiliary_model
             llm_model_store = ctx.stores.llm_model
+            llm_configuration_store = ctx.stores.llm_configuration
         except RuntimeError:
             return None
+    elif llm_configuration_store is None:
+        try:
+            from deep_agent.core.context import get_context
+
+            llm_configuration_store = get_context().stores.llm_configuration
+        except RuntimeError:
+            pass
 
     llm_row = await resolve_llm_model_for_use_case(
         auxiliary_store,
@@ -65,9 +75,11 @@ async def _resolve_dedicated_title_model(
         return None
 
     from deep_agent.agent.factory import _resolve_model
+    from deep_agent.agent.provider_registry import load_provider_for_model
     from deep_agent.agent.spec import AgentSpec
 
-    return _resolve_model(AgentSpec.from_llm_model(llm_row))
+    provider = await load_provider_for_model(llm_row, llm_configuration_store)
+    return _resolve_model(AgentSpec.from_llm_model(llm_row, provider=provider))
 
 
 async def resolve_title_model(
@@ -76,9 +88,14 @@ async def resolve_title_model(
     spec: AgentSpec | None = None,
     auxiliary_store: AuxiliaryModelStoreBase | None = None,
     llm_model_store: LlmModelStoreBase | None = None,
+    llm_configuration_store: LlmConfigurationService | None = None,
 ) -> Model | str | None:
     """专用标题模型优先，否则回退对话主模型（显式传入或从 spec 解析）。"""
-    dedicated = await _resolve_dedicated_title_model(auxiliary_store, llm_model_store)
+    dedicated = await _resolve_dedicated_title_model(
+        auxiliary_store,
+        llm_model_store,
+        llm_configuration_store,
+    )
     if dedicated is not None:
         return dedicated
     if main_model is not None:
@@ -132,6 +149,7 @@ async def generate_title(
     spec: AgentSpec | None = None,
     auxiliary_store: AuxiliaryModelStoreBase | None = None,
     llm_model_store: LlmModelStoreBase | None = None,
+    llm_configuration_store: LlmConfigurationService | None = None,
 ) -> Optional[str]:
     """从首轮对话生成标题，失败返回 None。"""
     user_snippet = _title_snippet(user_text)
@@ -143,6 +161,7 @@ async def generate_title(
         spec=spec,
         auxiliary_store=auxiliary_store,
         llm_model_store=llm_model_store,
+        llm_configuration_store=llm_configuration_store,
     )
     if not model:
         logger.info("No title model or main model available, skipping AI title generation")

@@ -20,10 +20,13 @@ from deep_agent.agent.models.models_dev import (
     parse_models_dev_catalog,
 )
 from deep_agent.api.v1.admin import CONSOLE_ADMIN_DEPENDENCIES
-from deep_agent.db.deps import get_llm_model_store, get_model_catalog_store
-from deep_agent.db.ids import normalize_agent_id
+from deep_agent.db.deps import (
+    get_llm_configuration_service,
+    get_llm_model_store,
+    get_model_catalog_store,
+)
+from deep_agent.db.ids import normalize_agent_id, normalize_provider_id
 from deep_agent.db.stores.llm_model import (
-    LlmModelConflictError,
     LlmModelStoreBase,
     LlmModelValidationError,
 )
@@ -32,6 +35,11 @@ from deep_agent.schemas.llm_model import LlmModelCreate, LlmModelResponse, LlmMo
 from deep_agent.schemas.model_catalog import (
     ModelCatalogRefreshResponse,
     ModelCatalogResponse,
+)
+from deep_agent.services.llm_configuration import (
+    LlmConfigurationConflictError,
+    LlmConfigurationService,
+    LlmConfigurationValidationError,
 )
 
 router = APIRouter(dependencies=CONSOLE_ADMIN_DEPENDENCIES)
@@ -46,17 +54,68 @@ def _parse_model_id(model_id: str) -> str:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
 
 
-async def _response_for_row(store: LlmModelStoreBase, row) -> LlmModelResponse:
-    agent_count = await store.count_agents(row.id)
-    return LlmModelResponse.from_row(row, agent_count=agent_count)
+def _parse_provider_id(provider_id: str) -> str:
+    try:
+        return normalize_provider_id(provider_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+
+
+async def _response_for_row(
+    store: LlmModelStoreBase,
+    service: LlmConfigurationService,
+    row,
+    *,
+    provider=None,
+    agent_count: int | None = None,
+) -> LlmModelResponse:
+    if agent_count is None:
+        agent_count = await store.count_agents(row.id)
+    if provider is None:
+        provider = await service.get_provider(row.provider_id)
+    if provider is None:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"LLM provider not found for model: {row.id}",
+        )
+    return LlmModelResponse.from_row(
+        row,
+        provider=provider,
+        agent_count=agent_count,
+    )
 
 
 @router.get("/llm-models", response_model=list[LlmModelResponse])
 async def list_llm_models(
+    provider_id: str | None = Query(None),
+    selectable_only: bool = Query(False),
     store: LlmModelStoreBase = Depends(get_llm_model_store),
+    service: LlmConfigurationService = Depends(get_llm_configuration_service),
 ) -> list[LlmModelResponse]:
     rows = await store.list_all()
-    return [await _response_for_row(store, row) for row in rows]
+    if provider_id is not None:
+        normalized_provider_id = _parse_provider_id(provider_id)
+        rows = [row for row in rows if row.provider_id == normalized_provider_id]
+    providers = {row.id: row for row in await service.list_providers()}
+    agent_counts = await store.count_agents_by_model()
+    responses: list[LlmModelResponse] = []
+    for row in rows:
+        provider = providers.get(row.provider_id)
+        if provider is None:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"LLM provider not found for model: {row.id}",
+            )
+        response = await _response_for_row(
+            store,
+            service,
+            row,
+            provider=provider,
+            agent_count=agent_counts.get(row.id, 0),
+        )
+        if not selectable_only or response.selectable:
+            responses.append(response)
+    return responses
 
 
 @router.get("/llm-models/catalog", response_model=ModelCatalogResponse)
@@ -70,13 +129,16 @@ async def list_model_catalog(
     limit: int = Query(50, ge=1, le=200),
     catalog_store: ModelCatalogStoreBase = Depends(get_model_catalog_store),
     llm_store: LlmModelStoreBase = Depends(get_llm_model_store),
+    service: LlmConfigurationService = Depends(get_llm_configuration_service),
 ) -> ModelCatalogResponse:
     rows = await catalog_store.list_all()
     llm_models = await llm_store.list_all()
+    llm_providers = await service.list_providers()
     return ModelCatalogResponse.model_validate(
         build_catalog_page(
             rows,
             llm_models,
+            llm_providers,
             view=view,
             q=q,
             lab_id=lab_id,
@@ -214,27 +276,28 @@ async def import_model_catalog(
 async def get_llm_model(
     model_id: str,
     store: LlmModelStoreBase = Depends(get_llm_model_store),
+    service: LlmConfigurationService = Depends(get_llm_configuration_service),
 ) -> LlmModelResponse:
     normalized_id = _parse_model_id(model_id)
     row = await store.get_by_id(normalized_id)
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"LLM model not found: {model_id}")
-    return await _response_for_row(store, row)
+    return await _response_for_row(store, service, row)
 
 
 @router.post("/llm-models", response_model=LlmModelResponse, status_code=status.HTTP_201_CREATED)
 async def create_llm_model(
     body: LlmModelCreate,
     store: LlmModelStoreBase = Depends(get_llm_model_store),
+    service: LlmConfigurationService = Depends(get_llm_configuration_service),
 ) -> LlmModelResponse:
-    existing = await store.get_by_name(body.name)
-    if existing is not None:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"LLM model already exists: {body.name}")
     try:
-        row = await store.create_unique(body)
-    except LlmModelConflictError as exc:
+        row = await service.create_model(body)
+    except LlmConfigurationConflictError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-    return await _response_for_row(store, row)
+    except LlmConfigurationValidationError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    return await _response_for_row(store, service, row)
 
 
 @router.patch("/llm-models/{model_id}", response_model=LlmModelResponse)
@@ -242,35 +305,32 @@ async def update_llm_model(
     model_id: str,
     body: LlmModelUpdate,
     store: LlmModelStoreBase = Depends(get_llm_model_store),
+    service: LlmConfigurationService = Depends(get_llm_configuration_service),
 ) -> LlmModelResponse:
     normalized_id = _parse_model_id(model_id)
     try:
-        row = await store.update_unique(normalized_id, body)
-    except LlmModelConflictError as exc:
+        row = await service.update_model(normalized_id, body)
+    except LlmConfigurationConflictError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-    except LlmModelValidationError as exc:
+    except (LlmModelValidationError, LlmConfigurationValidationError) as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(exc),
         ) from exc
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"LLM model not found: {model_id}")
-    return await _response_for_row(store, row)
+    return await _response_for_row(store, service, row)
 
 
 @router.delete("/llm-models/{model_id}", status_code=status.HTTP_200_OK)
 async def delete_llm_model(
     model_id: str,
-    store: LlmModelStoreBase = Depends(get_llm_model_store),
+    service: LlmConfigurationService = Depends(get_llm_configuration_service),
 ) -> None:
     normalized_id = _parse_model_id(model_id)
-    row = await store.get_by_id(normalized_id)
-    if row is None:
+    try:
+        deleted = await service.delete_model(normalized_id)
+    except LlmConfigurationConflictError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"LLM model not found: {model_id}")
-    agent_count = await store.count_agents(normalized_id)
-    if agent_count > 0:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"LLM model is referenced by {agent_count} agent(s)",
-        )
-    await store.delete(normalized_id)

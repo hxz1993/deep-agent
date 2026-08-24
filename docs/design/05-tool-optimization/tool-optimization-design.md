@@ -775,7 +775,7 @@ Tool Search 解决的是“工具太多导致发现困难和 Schema 占用”，
 
 v0.3.12 已复用 Pydantic AI Deferred Loading / ToolSearch 状态机；v0.4.1 将具体检索实现收敛到
 DeepAgent独立的 `lexical_v2` 字段化词法内核。它优先匹配协议名、标准 `title`和参数名，再对描述
-做BM25，低置信结果才进入拼音或受限错字回退。已授权 MCP候选超过5个时首轮预选最多Top 3，
+做BM25，低置信结果才进入拼音或受限错字回退。已授权 MCP候选超过10个时首轮预选最多Top 3，
 模型主动搜索最多返回Top 5；本轮不部署Embedding，也不通过硬编码词典伪装跨语言语义。后续只有
 真实召回数据证明词法方案不足时才评估多语言Embedding。
 

@@ -3,6 +3,32 @@
 本文件记录 DeepAgent 的产品版本变化，按新版本到旧版本排列。当前代码版本以
 `deep_agent.__version__` 为准；数据库结构版本以 Alembic head 为准，两者互不替代。
 
+## v0.5.6
+
+- 完成Provider + Model两层数据归一化：`llm_providers`独占适配类型、Base URL和API Key，
+  `llm_models`删除重复连接字段，并通过`RESTRICT`外键关联Provider；模型名称唯一性收敛到Provider内。
+- Provider与Model保留独立启停状态，有效可用性由两层状态、Provider密钥和地址共同决定；模型响应新增
+  `selectable`与脱敏`unavailable_reason`，`GET /llm-models?selectable_only=true`可只返回可选模型。
+- 清除Provider密钥不再批量改写子模型状态，补回密钥或重新启用Provider后原有模型自动恢复可选；
+  Agent创建、辅助模型、Chat、Session覆盖、标题生成、压缩和上下文估算统一执行显式Provider校验。
+- 模型创建、更新和删除统一进入同一配置Service事务，删除时原子检查Agent与辅助模型引用；列表批量
+  读取Provider和Agent计数，避免逐模型查询。007升级、降级和配置备份均适配最终两层结构。
+- Console增加Provider启停配置并统一按有效可用性禁用模型选项。Agent、DeepCube助手和电子表格助手
+  继续发送`llm_model.id`作为`model_id`，原有模型核心字段、Chat、SSE和History协议保持兼容。
+
+## v0.5.5
+
+- 新增独立Provider配置层和Provider分栏Console，开始将适配类型、明确Base URL和API Key从模型
+  配置中抽离；Provider详情按固定父子关系维护模型。
+- 首批支持DeepSeek、MoonshotAI、Alibaba、Z.AI、OpenRouter、OpenAI、Anthropic、Google和
+  OpenAI Compatible九类Pydantic AI原生适配；默认地址与自定义地址使用显式开关，不以空值猜测语义。
+- 模型管理改为选择Provider，模型响应继续保留`id/name/model/input_modalities`和`model_id`协议，
+  Agent、辅助模型、Chat、Session、History、SSE、Planning、Deferred与外部客户端无需改变。
+- Console增加Provider分栏管理，并将Agent、辅助模型和聊天模型选择器按Provider分组；模型目录仍只
+  预填模型能力，不保存或推断本地Provider凭据。
+- MCP小目录直接披露上限调整为10个：全局候选不超过10个时完整披露，超过10个时继续使用
+  首轮词法Top 3与模型主动搜索Top 5。
+
 ## v0.5.4
 
 - 收敛Console会话轨迹详情展示：Assistant的Thinking归入Preview首段并保持默认折叠，

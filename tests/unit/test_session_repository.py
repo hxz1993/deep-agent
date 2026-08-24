@@ -7,7 +7,14 @@ from pydantic import TypeAdapter
 from pydantic_ai.messages import ModelMessage, ModelRequest, UserPromptPart
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from deep_agent.db.models import Agent, Base, ChatMessage, ChatSession, LlmModel
+from deep_agent.db.models import (
+    Agent,
+    Base,
+    ChatMessage,
+    ChatSession,
+    LlmModel,
+    LlmProvider,
+)
 from deep_agent.db.dialect import DbDialect
 from deep_agent.db.stores.chat_session import ChatSessionStoreBase, create_chat_session_store
 from deep_agent.db.stores.message import create_message_store
@@ -29,8 +36,19 @@ class ChatSessionStoreTests(unittest.IsolatedAsyncioTestCase):
         )
 
         async with self.session_factory() as db:
+            provider = LlmProvider(
+                id="11111111111111111111111111111111",
+                name="Test Provider",
+                provider_type="openai_compatible",
+                use_default_base_url=False,
+                base_url="http://test.invalid/v1",
+                api_key="test-key",
+                enabled=True,
+            )
+            db.add(provider)
             llm = LlmModel(
                 id="00000000-0000-4000-8000-000000000099",
+                provider_id=provider.id,
                 name="test-model",
                 model="test",
             )

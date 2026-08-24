@@ -18,6 +18,7 @@ from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.context_references import context_reference_instructions
 from deep_agent.agent.models import OpenAICompatibleVideoChatModel
 from deep_agent.agent.planning import build_planning_capability
+from deep_agent.agent.provider_registry import resolve_provider_model
 from deep_agent.agent.spec import AgentSpec
 from deep_agent.agent.context.estimator import TokenEstimator
 from deep_agent.agent.tool_discovery import (
@@ -100,13 +101,25 @@ def _resolve_google(spec: AgentSpec, model_name: str) -> GoogleModel:
 def resolve_model(spec: AgentSpec) -> str | Model:
     """Turn the spec's model string into a model for Pydantic AI.
 
-    For ``provider:model`` strings, the provider class comes from
+    Persisted models always use their explicit provider configuration. The
+    legacy raw ``model=`` API keeps Pydantic AI's prefix resolution behavior,
+    but it is never used to infer the provider of a database model.
+
+    For legacy ``provider:model`` strings, the provider class comes from
     :func:`~pydantic_ai.providers.infer_provider_class`. When that class is
     :class:`~pydantic_ai.providers.deepseek.DeepSeekProvider` and ``base_url`` is
     unset or matches the provider's official endpoint, the native provider is used
     so reasoning fields round-trip correctly. A different ``base_url`` falls back
     to :class:`~pydantic_ai.providers.openai.OpenAIProvider`.
     """
+    if spec.provider_config is not None:
+        return resolve_provider_model(
+            model_name=spec.model,
+            provider=spec.provider_config,
+            input_modalities=spec.input_modalities,
+            tags=spec.tags,
+        )
+
     provider_name = _model_provider_prefix(spec.model)
     if provider_name is None:
         parsed_provider, model_name = parse_model_id(spec.model)
@@ -222,10 +235,10 @@ def build_agent(
 ) -> Agent[AgentDeps, str]:
     """Construct a Pydantic AI agent from a spec + the tool package registry.
 
-    The model string (e.g. "openai:gpt-4o") selects the provider, so switching
-    providers needs only a config change. Set ``base_url``/``api_key`` on the
-    spec to target an OpenAI-compatible endpoint. Tool-package instructions ride
-    along with their toolsets and are injected automatically when enabled.
+    Persisted models use the explicit Provider configuration carried by the
+    spec. The legacy raw-model path remains only for callers that do not resolve
+    a database model. Tool-package instructions ride along with their toolsets
+    and are injected automatically when enabled.
     """
     model = _resolve_model(spec)
     toolsets = _toolsets_for_spec(

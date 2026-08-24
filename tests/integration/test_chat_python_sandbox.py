@@ -36,7 +36,10 @@ from deep_agent.schemas.skill import SkillPackageRecord
 from deep_agent.skills.package import parse_skill_zip
 from tests.helpers.request_identity import install_test_user_header
 from tests.helpers.sandbox import sandbox_test_python
-from tests.helpers.sqlite_stores import make_sqlite_stores
+from tests.helpers.sqlite_stores import (
+    get_default_test_provider_id,
+    make_sqlite_stores,
+)
 from tests.integration.helpers.chat import mock_request_disconnect, parse_sse_events
 
 
@@ -82,8 +85,9 @@ class UnavailableSandboxBackend:
 class ChatPythonSandboxIntegrationTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         stores, self._engine, session_factory = await make_sqlite_stores()
-        model = await stores.llm_model.create_unique(
+        model = await stores.llm_configuration.create_model(
             LlmModelCreate(
+                provider_id=await get_default_test_provider_id(stores),
                 name="sandbox-model",
                 model="private:sandbox-test",
                 input_modalities=["text"],

@@ -223,7 +223,13 @@ async def _spec_for_history(ctx: AppContextDep, agent_id: str | None) -> AgentSp
     if agent_id:
         row = await ctx.stores.agent.get_by_id(agent_id)
         if row is not None:
-            return AgentSpec.from_row(row, row.llm_model)
+            from deep_agent.agent.provider_registry import load_provider_for_model
+
+            provider = await load_provider_for_model(
+                row.llm_model,
+                ctx.stores.llm_configuration,
+            )
+            return AgentSpec.from_row(row, row.llm_model, provider=provider)
     return anonymous_spec()
 
 
@@ -364,10 +370,25 @@ async def _build_context_data(
     model = await _context_model(ctx, agent_id, model_id)
     context_window_tokens = model.context_window_tokens if model is not None else None
     max_output_tokens = model.max_output_tokens if model is not None else None
-    estimator = TokenEstimator.for_model(
-        model.model if model is not None else "",
-        model.base_url if model is not None else None,
-    )
+    if model is not None:
+        from deep_agent.agent.provider_registry import (
+            ProviderRuntimeConfig,
+            effective_base_url,
+            load_provider_for_model,
+        )
+
+        provider = await load_provider_for_model(
+            model,
+            ctx.stores.llm_configuration,
+        )
+        provider_config = ProviderRuntimeConfig.from_row(provider)
+        estimator = TokenEstimator.for_model(
+            model.model,
+            effective_base_url(provider_config),
+            provider_type=provider_config.provider_type,
+        )
+    else:
+        estimator = TokenEstimator.for_model("")
     budget = build_context_budget(
         history,
         context_window_tokens=context_window_tokens,
@@ -581,6 +602,7 @@ async def rename_session(
             spec=spec,
             auxiliary_store=ctx.stores.auxiliary_model,
             llm_model_store=ctx.stores.llm_model,
+            llm_configuration_store=ctx.stores.llm_configuration,
         )
 
         # LLM 失败时回退到文本提取

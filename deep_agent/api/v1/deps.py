@@ -13,6 +13,12 @@ from deep_agent.agent.input_capabilities import augment_instructions_with_capabi
 from deep_agent.agent.runner import AgentRunner
 from deep_agent.agent.tool_output_limits import build_tool_output_limits
 from deep_agent.agent.spec import DEFAULT_INSTRUCTIONS, AgentSpec
+from deep_agent.agent.provider_registry import (
+    ProviderRuntimeError,
+    effective_base_url,
+    load_provider_for_model,
+    validate_provider_config,
+)
 from deep_agent.capabilities.mcp.resolver import load_mcp_rows, resolve_mcp_toolsets
 from deep_agent.capabilities.catalog import invalid_tool_package_codes
 from deep_agent.capabilities.mcp.resources import build_mcp_resource_toolset
@@ -24,6 +30,10 @@ from deep_agent.files import build_file_export_toolset, build_file_toolset
 from deep_agent.core.context import AppContext
 from deep_agent.core.exceptions import AgentNotFoundError, LlmModelNotFoundError
 from deep_agent.options import OPTION
+
+
+async def _provider_for_model(ctx: AppContext, llm_row):
+    return await load_provider_for_model(llm_row, ctx.stores.llm_configuration)
 
 
 def _model_settings_for_spec(spec: AgentSpec) -> ModelSettings | None:
@@ -67,7 +77,12 @@ async def build_runner(
         llm_row = await ctx.stores.llm_model.get_by_id(model_id)
         if llm_row is None:
             raise LlmModelNotFoundError(model_id)
-        spec = AgentSpec.from_llm_model(llm_row, temperature=temperature)
+        provider = await _provider_for_model(ctx, llm_row)
+        spec = AgentSpec.from_llm_model(
+            llm_row,
+            temperature=temperature,
+            provider=provider,
+        )
     elif model:
         spec = AgentSpec(
             name="default",
@@ -79,7 +94,26 @@ async def build_runner(
         llm_rows = await ctx.stores.llm_model.list_all()
         if not llm_rows:
             raise LlmModelNotFoundError("default")
-        spec = AgentSpec.from_llm_model(llm_rows[0], temperature=temperature)
+        provider = None
+        llm_row = None
+        last_error: ProviderRuntimeError | None = None
+        for candidate in llm_rows:
+            try:
+                provider = await _provider_for_model(ctx, candidate)
+            except ProviderRuntimeError as exc:
+                last_error = exc
+                continue
+            llm_row = candidate
+            break
+        if llm_row is None or provider is None:
+            if last_error is not None:
+                raise last_error
+            raise LlmModelNotFoundError("default")
+        spec = AgentSpec.from_llm_model(
+            llm_row,
+            temperature=temperature,
+            provider=provider,
+        )
     if capabilities is not None:
         spec.capabilities = capabilities
     return await _build_runner_from_spec(spec, ctx, request_headers=request_headers)
@@ -102,7 +136,8 @@ async def build_runner_for_agent(
     if llm_row is None:
         raise LlmModelNotFoundError(effective_model_id)
 
-    spec = AgentSpec.from_row(row, llm_row)
+    provider = await _provider_for_model(ctx, llm_row)
+    spec = AgentSpec.from_row(row, llm_row, provider=provider)
     return await _build_runner_from_spec(spec, ctx, request_headers=request_headers)
 
 
@@ -112,6 +147,8 @@ async def _build_runner_from_spec(
     *,
     request_headers: dict[str, str] | None = None,
 ) -> AgentRunner:
+    if spec.provider_config is not None:
+        validate_provider_config(spec.provider_config)
     invalid_packages = await invalid_tool_package_codes(
         spec.capabilities, ctx.registry, ctx.stores
     )
@@ -166,7 +203,17 @@ async def _build_runner_from_spec(
                 "Continue with the available Skills and tools."
             ),
         )
-    estimator = TokenEstimator.for_model(spec.model, spec.base_url)
+    estimator = TokenEstimator.for_model(
+        spec.model,
+        (
+            effective_base_url(spec.provider_config)
+            if spec.provider_config is not None
+            else spec.base_url
+        ),
+        provider_type=(
+            spec.provider_config.provider_type if spec.provider_config else None
+        ),
+    )
     context_compaction = build_context_compaction(
         context_window_tokens=spec.context_window_tokens,
         max_output_tokens=spec.max_output_tokens,

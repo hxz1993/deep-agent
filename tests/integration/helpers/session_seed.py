@@ -7,9 +7,10 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from deep_agent.db.models import Agent, ChatMessage, ChatSession, LlmModel
+from deep_agent.db.models import Agent, ChatMessage, ChatSession, LlmModel, LlmProvider
 from deep_agent.db.serialization import deserialize_message, serialize_message
 from deep_agent.db.session_scope import normalize_agent_scope
 from deep_agent.db.stores.bundle import DataStores
@@ -19,6 +20,7 @@ from tests.helpers.request_identity import TEST_USER_ID
 from tests.helpers.sqlite_stores import (
     DEFAULT_TEST_CONTEXT_WINDOW,
     DEFAULT_TEST_MAX_OUTPUT,
+    get_default_test_provider_id,
 )
 
 
@@ -41,8 +43,9 @@ async def seed_llm_model(
     model_id: str | None = None,
     input_modalities: list[str] | None = None,
 ) -> str:
-    row = await stores.llm_model.create_unique(
+    row = await stores.llm_configuration.create_model(
         LlmModelCreate(
+            provider_id=await get_default_test_provider_id(stores),
             name=name,
             model=model,
             input_modalities=input_modalities or ["text"],
@@ -100,9 +103,13 @@ async def seed_session_from_fixture(
 
     async with session_factory() as db:
         async with db.begin():
+            provider = (await db.execute(select(LlmProvider).order_by(LlmProvider.id))).scalars().first()
+            if provider is None:
+                raise AssertionError("fixture seed requires a pre-seeded LLM provider")
             db.add(
                 LlmModel(
                     id=resolved_model_id,
+                    provider_id=provider.id,
                     name=model_name,
                     model=model,
                     input_modalities=["text"],

@@ -89,7 +89,7 @@ class SystemToolCatalogTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(mcp_codes, ["mcp:deepcube"])
         self.assertNotIn(retired_code, mcp_codes)
 
-    async def test_five_tool_mcp_is_reported_as_direct_disclosure(self) -> None:
+    async def test_ten_tool_mcp_is_reported_as_direct_disclosure(self) -> None:
         row = SimpleNamespace(
             name="small_docs",
             transport="url",
@@ -97,7 +97,7 @@ class SystemToolCatalogTests(unittest.IsolatedAsyncioTestCase):
                 "status": "healthy",
                 "tools": {
                     "status": "supported",
-                    "count": 5,
+                    "count": 10,
                     "snapshot_status": "ready",
                 },
             },

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from deep_agent.api.v1.deps import build_runner_for_agent
@@ -21,14 +22,40 @@ def _agent(*, model_id: str) -> Agent:
 
 
 def _llm(model_id: str, model: str) -> LlmModel:
-    return LlmModel(id=model_id, name=model, model=f"openai:{model}")
+    return LlmModel(
+        id=model_id,
+        name=model,
+        model=f"openai:{model}",
+        provider_id="00000000-0000-4000-8000-000000000099",
+        enabled=True,
+    )
+
+
+def _provider():
+    return SimpleNamespace(
+        id="00000000-0000-4000-8000-000000000099",
+        name="test",
+        provider_type="openai_compatible",
+        use_default_base_url=False,
+        base_url="https://example.invalid/v1",
+        api_key="test-key",
+        enabled=True,
+    )
+
+
+def _ctx() -> AsyncMock:
+    ctx = AsyncMock()
+    ctx.stores.llm_configuration.get_provider = AsyncMock(
+        return_value=_provider()
+    )
+    return ctx
 
 
 class BuildRunnerForAgentTests(unittest.IsolatedAsyncioTestCase):
     async def test_uses_agent_default_model(self) -> None:
         default = _llm("00000000-0000-4000-8000-000000000010", "gpt-a")
         agent = _agent(model_id=default.id)
-        ctx = AsyncMock()
+        ctx = _ctx()
         ctx.stores.agent.get_by_id = AsyncMock(return_value=agent)
         ctx.stores.llm_model.get_by_id = AsyncMock(return_value=default)
 
@@ -43,7 +70,7 @@ class BuildRunnerForAgentTests(unittest.IsolatedAsyncioTestCase):
         default = _llm("00000000-0000-4000-8000-000000000010", "gpt-a")
         override = _llm("00000000-0000-4000-8000-000000000011", "gpt-b")
         agent = _agent(model_id=default.id)
-        ctx = AsyncMock()
+        ctx = _ctx()
         ctx.stores.agent.get_by_id = AsyncMock(return_value=agent)
         ctx.stores.llm_model.get_by_id = AsyncMock(return_value=override)
 
@@ -56,14 +83,14 @@ class BuildRunnerForAgentTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_missing_override_model_raises(self) -> None:
         agent = _agent(model_id="00000000-0000-4000-8000-000000000010")
-        ctx = AsyncMock()
+        ctx = _ctx()
         ctx.stores.agent.get_by_id = AsyncMock(return_value=agent)
         ctx.stores.llm_model.get_by_id = AsyncMock(return_value=None)
         with self.assertRaises(LlmModelNotFoundError):
             await build_runner_for_agent(ctx, agent.id, model_id="missing")
 
     async def test_missing_agent_raises(self) -> None:
-        ctx = AsyncMock()
+        ctx = _ctx()
         ctx.stores.agent.get_by_id = AsyncMock(return_value=None)
         with self.assertRaises(AgentNotFoundError):
             await build_runner_for_agent(ctx, "missing-agent")
@@ -74,7 +101,7 @@ class BuildRunnerForAgentTests(unittest.IsolatedAsyncioTestCase):
         agent = _agent(model_id=default.id)
         agent.capabilities = ["builtin:general"]
         agent.skills = ["deepagent-diagnostics"]
-        ctx = AsyncMock()
+        ctx = _ctx()
         ctx.stores.agent.get_by_id = AsyncMock(return_value=agent)
         ctx.stores.llm_model.get_by_id = AsyncMock(return_value=override)
 

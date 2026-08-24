@@ -46,12 +46,12 @@ function loadBuiltinToolsUi() {
   return window.__BuiltinToolsUI;
 }
 
-test("内置工具页位于模型之后和 MCP 之前", () => {
-  const modelPosition = indexHtml.indexOf('data-tab="llm-models"');
+test("内置工具页位于 Provider 之后和 MCP 之前", () => {
+  const providerPosition = indexHtml.indexOf('data-tab="llm-providers"');
   const builtinPosition = indexHtml.indexOf('data-tab="builtin-tools"');
   const mcpPosition = indexHtml.indexOf('data-tab="mcp"');
 
-  assert.ok(modelPosition < builtinPosition);
+  assert.ok(providerPosition < builtinPosition);
   assert.ok(builtinPosition < mcpPosition);
   assert.match(templateHtml, /id="panel-builtin-tools"/);
   assert.match(templateHtml, /预制工具包[\s\S]*运行时系统工具/);

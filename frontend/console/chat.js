@@ -15,6 +15,12 @@ import {
   splitAssistantHistoryRecords,
 } from "./assistant-presentation.js?v=20260815-2";
 import { createTrajectoryController } from "./trajectory.js?v=20260823-3";
+import {
+  firstSelectableModelId,
+  isModelSelectable,
+  modelOptionLabel,
+  renderGroupedModelOptions,
+} from "./model-options.js?v=20260825-1";
 
 /* ------------------------------------------------------------------ *
  * deep-agent 前端 —— 适配 FastAPI /api/v1/chat/stream (SSE over POST)
@@ -1590,7 +1596,7 @@ function ensureLlmModelSelected() {
   if (!state.llmModels.length) return false;
   const fallback = defaultLlmModelId();
   const valid = state.llmModelId && state.llmModels.some((m) => m.id === state.llmModelId);
-  if (!valid) state.llmModelId = fallback || state.llmModels[0]?.id || "";
+  if (!valid) state.llmModelId = fallback || firstSelectableModelId(state.llmModels);
   return !!state.llmModelId;
 }
 
@@ -1647,15 +1653,6 @@ async function loadLlmModels() {
   }
 }
 
-function modelOptionLabel(m) {
-  const name = String(m?.name || "").trim();
-  const model = String(m?.model || "").trim();
-  if (!name) return model;
-  if (!model || name === model) return name;
-  if (name.includes(model) || model.includes(name)) return name;
-  return `${name} — ${model}`;
-}
-
 function updateComposerModelInfo() {
   if (!el.composerMeta) return;
   const info = currentModelInfo();
@@ -1671,14 +1668,9 @@ function updateComposerModelInfo() {
       el.modelSelect.disabled = true;
     } else {
       ensureLlmModelSelected();
-      el.modelSelect.innerHTML = state.llmModels
-        .map((m) => {
-          const label = modelOptionLabel(m);
-          return `<option value="${escapeHtml(m.id)}" title="${escapeHtml(label)}">${escapeHtml(label)}</option>`;
-        })
-        .join("");
+      el.modelSelect.innerHTML = renderGroupedModelOptions(state.llmModels, { selectedId: state.llmModelId });
       el.modelSelect.value = state.llmModelId;
-      el.modelSelect.disabled = state.streaming;
+      el.modelSelect.disabled = state.streaming || !state.llmModels.some(isModelSelectable);
       const selected = selectedLlmModel();
       el.modelSelect.title = selected ? modelOptionLabel(selected) : "选择本会话使用的 LLM 模型";
     }

@@ -322,6 +322,24 @@ class ContextBudgetTests(unittest.TestCase):
         )
         self.assertEqual(estimator.source, "conservative_fallback")
 
+    def test_explicit_non_openai_provider_does_not_use_url_or_model_inference(
+        self,
+    ) -> None:
+        estimator = TokenEstimator.for_model(
+            "gpt-4o",
+            "https://api.openai.com/v1",
+            provider_type="deepseek",
+        )
+        self.assertEqual(estimator.source, "conservative_fallback")
+
+    def test_explicit_openai_provider_can_use_model_tokenizer(self) -> None:
+        estimator = TokenEstimator.for_model(
+            "gpt-4o",
+            "https://gateway.example.com/v1",
+            provider_type="openai",
+        )
+        self.assertEqual(estimator.source, "model_tokenizer")
+
     def test_unknown_context_window_disables_compaction(self) -> None:
         budget = build_context_budget(
             _long_tool_history(pairs=1),

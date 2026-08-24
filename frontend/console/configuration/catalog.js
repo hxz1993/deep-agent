@@ -271,7 +271,6 @@ function bindModelActions() {
         (item) => item.provider_id === button.dataset.providerId,
       );
       if (!model || !provider) return;
-      document.querySelector('[data-tab="llm-models"]')?.click();
       window.llmModelsAdmin?.openCreateFromCatalog(model, provider);
     });
   });

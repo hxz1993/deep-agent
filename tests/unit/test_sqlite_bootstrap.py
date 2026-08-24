@@ -25,6 +25,7 @@ EXPECTED_TABLES = {
     "chat_messages",
     "chat_sessions",
     "llm_models",
+    "llm_providers",
     "mcp_servers",
     "model_catalog",
     "skill_packages",
@@ -79,6 +80,97 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
 
                     await asyncio.to_thread(command.upgrade, config, "head")
                     self._assert_current_baseline(db_path)
+
+    async def test_007_infers_merges_and_round_trips_providers(self) -> None:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+            db_path = Path(tmpdir) / "providers.db"
+            url = f"sqlite+aiosqlite:///{db_path.as_posix()}"
+            with patch("deep_agent.db.url.get_database_url", return_value=url):
+                with patch("deep_agent.db.migrate.get_database_url", return_value=url):
+                    config = migrate._build_alembic_config()
+                    await asyncio.to_thread(command.upgrade, config, "006")
+                    with sqlite3.connect(db_path) as connection:
+                        connection.execute(
+                            "UPDATE llm_models SET base_url=?, api_key=?",
+                            ("https://api.openai.com/v1", "shared-key"),
+                        )
+                        connection.execute(
+                            "INSERT INTO llm_models "
+                            "(id,name,model,base_url,api_key,input_modalities,"
+                            "context_window_tokens,max_output_tokens,tags,created_at,updated_at) "
+                            "SELECT 'model-copy','copy','openai:gpt-copy',base_url,api_key,"
+                            "input_modalities,context_window_tokens,max_output_tokens,tags,"
+                            "created_at,updated_at FROM llm_models LIMIT 1"
+                        )
+                        connection.execute(
+                            "INSERT INTO llm_models "
+                            "(id,name,model,base_url,api_key,input_modalities,"
+                            "context_window_tokens,max_output_tokens,tags,created_at,updated_at) "
+                            "SELECT 'model-custom','custom','openai:custom',"
+                            "'https://kimi.example/v1','custom-key',input_modalities,"
+                            "context_window_tokens,max_output_tokens,tags,created_at,updated_at "
+                            "FROM llm_models LIMIT 1"
+                        )
+                        connection.commit()
+
+                    await asyncio.to_thread(command.upgrade, config, "007")
+                    self.assertEqual(self._row_count(db_path, "llm_providers"), 2)
+                    self.assertNotIn("base_url", self._columns(db_path, "llm_models"))
+                    self.assertNotIn("api_key", self._columns(db_path, "llm_models"))
+                    self.assertIn(
+                        ("provider_id", "llm_providers", "id", "RESTRICT"),
+                        self._foreign_keys(db_path, "llm_models"),
+                    )
+                    with sqlite3.connect(db_path) as connection:
+                        connection.execute(
+                            "INSERT INTO llm_providers "
+                            "(id,name,provider_type,use_default_base_url,base_url,api_key,enabled) "
+                            "VALUES (?,?,?,?,?,?,?)",
+                            (
+                                "provider-runtime-create",
+                                "runtime-create",
+                                "openai_compatible",
+                                0,
+                                "https://runtime-create.example/v1",
+                                "runtime-key",
+                                1,
+                            ),
+                        )
+                        timestamps = connection.execute(
+                            "SELECT created_at, updated_at FROM llm_providers WHERE id=?",
+                            ("provider-runtime-create",),
+                        ).fetchone()
+                        connection.commit()
+                    self.assertIsNotNone(timestamps)
+                    self.assertTrue(timestamps[0])
+                    self.assertTrue(timestamps[1])
+                    self.assertEqual(
+                        self._row_count_where(
+                            db_path,
+                            "llm_models",
+                            "provider_id=(SELECT provider_id FROM llm_models WHERE id=?)",
+                            ("model-copy",),
+                        ),
+                        2,
+                    )
+                    self.assertEqual(
+                        self._scalar(
+                            db_path,
+                            "SELECT provider_type FROM llm_providers WHERE id="
+                            "(SELECT provider_id FROM llm_models WHERE id='model-custom')",
+                        ),
+                        "openai_compatible",
+                    )
+
+                    await asyncio.to_thread(command.downgrade, config, "006")
+                    self.assertNotIn("provider_id", self._columns(db_path, "llm_models"))
+                    self.assertNotIn("llm_providers", self._business_tables(db_path))
+                    self.assertEqual(
+                        self._scalar(db_path, "SELECT api_key FROM llm_models WHERE id='model-custom'"),
+                        "custom-key",
+                    )
+                    await asyncio.to_thread(command.upgrade, config, "007")
+                    self.assertEqual(self._revision(db_path), "007")
 
     async def test_002_groups_ui_tools_and_rewrites_agent_packages(self) -> None:
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
@@ -586,10 +678,35 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(self._revision(db_path), "006")
 
     def _assert_current_baseline(self, db_path: Path) -> None:
-        self.assertEqual(self._revision(db_path), "006")
+        self.assertEqual(self._revision(db_path), "007")
         self.assertEqual(self._business_tables(db_path), EXPECTED_TABLES)
         self.assertNotIn("max_requests", self._columns(db_path, "agents"))
         self.assertNotIn("capabilities_source", self._columns(db_path, "llm_models"))
+        self.assertIn("provider_id", self._columns(db_path, "llm_models"))
+        self.assertNotIn("base_url", self._columns(db_path, "llm_models"))
+        self.assertNotIn("api_key", self._columns(db_path, "llm_models"))
+        self.assertIn(
+            ("provider_id", "llm_providers", "id", "RESTRICT"),
+            self._foreign_keys(db_path, "llm_models"),
+        )
+        self.assertEqual(
+            self._index_columns(db_path, "ix_llm_models_provider_id"),
+            ["provider_id"],
+        )
+        self.assertGreaterEqual(self._row_count(db_path, "llm_providers"), 1)
+        provider_id = str(
+            self._scalar(db_path, "SELECT id FROM llm_providers ORDER BY name LIMIT 1")
+        )
+        self.assertEqual(len(provider_id), 32)
+        self.assertNotIn("-", provider_id)
+        self.assertEqual(
+            self._scalar(
+                db_path,
+                "SELECT enabled FROM llm_providers WHERE id = ?",
+                (provider_id,),
+            ),
+            0,
+        )
         self.assertNotIn("resource_capabilities", self._columns(db_path, "mcp_servers"))
         self.assertIn("package_code", self._columns(db_path, "ui_tool_definitions"))
         self.assertIn("skills", self._columns(db_path, "agents"))
@@ -663,6 +780,15 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
         with sqlite3.connect(db_path) as connection:
             rows = connection.execute(f"PRAGMA index_info({index_name})").fetchall()
         return [str(row[2]) for row in rows]
+
+    @staticmethod
+    def _foreign_keys(db_path: Path, table_name: str) -> set[tuple[str, str, str, str]]:
+        with sqlite3.connect(db_path) as connection:
+            rows = connection.execute(f"PRAGMA foreign_key_list({table_name})").fetchall()
+        return {
+            (str(row[3]), str(row[2]), str(row[4]), str(row[6]).upper())
+            for row in rows
+        }
 
     @staticmethod
     def _row_count(db_path: Path, table_name: str) -> int:

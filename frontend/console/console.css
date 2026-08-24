@@ -1528,7 +1528,7 @@ html[data-theme="paper"] {
 .agent-card-footer > span { min-width: 0; display: flex; align-items: center; gap: 5px; overflow: hidden; color: var(--text-faint); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .agent-card-footer > span svg { width: 12px; height: 12px; }
 .agent-card-footer .row-actions { flex: 0 0 auto; }
-.agent-row-actions { justify-content: flex-end; gap: 4px !important; }
+.agent-row-actions { flex-wrap: nowrap; justify-content: flex-end; gap: 6px !important; white-space: nowrap; }
 .agent-row-actions .row-action,
 #configurationHost .console-list-a .agent-row-actions .row-action {
   box-sizing: border-box;
@@ -1548,6 +1548,8 @@ html[data-theme="paper"] {
   text-decoration: none;
 }
 .agent-row-actions .row-action svg { width: 12px; height: 12px; flex: 0 0 auto; }
+.agent-row-actions .row-action.icon-only,
+#configurationHost .console-list-a .agent-row-actions .row-action.icon-only { width: 28px; padding: 0; }
 .agent-row-actions .row-action:hover,
 .agent-row-actions .row-action:focus-visible,
 #configurationHost .console-list-a .agent-row-actions .row-action:hover,
@@ -1557,7 +1559,7 @@ html[data-theme="paper"] {
 .agent-row-actions .row-action.danger:hover,
 .agent-row-actions .row-action.danger:focus-visible { border-color: color-mix(in srgb, var(--danger) 30%, var(--console-card-border)); background: color-mix(in srgb, var(--danger) 8%, var(--console-surface)); }
 .agent-list-table th:last-child,
-.agent-list-table td:last-child { width: 220px; text-align: right; }
+.agent-list-table td:last-child { width: 160px; text-align: right; }
 .agent-list-state { grid-column: 1 / -1; min-height: 260px; display: grid; place-items: center; align-content: center; gap: 8px; border: 1px dashed var(--console-card-border); border-radius: 14px; color: var(--text-faint); text-align: center; }
 .agent-list-state svg { width: 25px; height: 25px; }
 .agent-list-state strong { color: var(--text); }
@@ -1621,17 +1623,17 @@ dialog.agent-editor-page::backdrop { display: none; }
 .agent-editor-page .modal-title-copy { justify-content: center; }
 .agent-editor-header-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
 .agent-editor-header-actions .btn { min-height: 32px; }
-.agent-editor-page .modal-body { flex: 1; min-height: 0; max-height: none; padding: 20px; overflow: auto; background: color-mix(in srgb, var(--console-canvas) 42%, var(--console-surface)); }
+.agent-editor-page .modal-body { flex: 1; min-height: 0; max-height: none; padding: 0; overflow: auto; background: var(--console-surface); }
 .agent-editor-workbench {
-  width: min(1120px, 100%);
+  width: 100%;
   min-width: 780px;
   min-height: 100%;
-  margin: 0 auto;
+  margin: 0;
   display: grid;
   grid-template-columns: minmax(310px, .82fr) minmax(450px, 1.18fr);
   align-items: stretch;
-  border: 1px solid var(--console-card-border);
-  border-radius: var(--console-card-radius);
+  border: 0;
+  border-radius: 0;
   background: var(--console-surface);
   overflow: hidden;
 }
@@ -1643,10 +1645,6 @@ dialog.agent-editor-page::backdrop { display: none; }
   padding: 18px;
   border-right: 1px solid var(--console-card-border);
 }
-.agent-editor-section-heading { min-height: 45px; margin-bottom: 14px; border-bottom: 1px solid var(--console-card-border); }
-.agent-editor-section-heading > div { display: grid; gap: 3px; }
-.agent-editor-section-heading strong { color: var(--text); font-size: 14px; }
-.agent-editor-section-heading span { color: var(--text-faint); font-size: 12px; }
 .agent-editor-primary .agent-form-col { flex: 1; }
 .agent-editor-primary .field-grow { min-height: 280px; }
 .agent-editor-primary .field-grow textarea { min-height: 280px; resize: none; }
@@ -1687,11 +1685,29 @@ dialog.agent-editor-page::backdrop { display: none; }
 .agent-editor-tabs button > span { min-width: 0; color: var(--text-faint); font-size: 12px; font-weight: 400; }
 .agent-editor-pane { flex: 1; min-height: 0; padding: 16px 18px 18px; overflow: auto; }
 .agent-editor-pane > .cap-section { max-width: none; margin: 0; border: 0; border-radius: 0; background: transparent; overflow: visible; }
-.agent-editor-pane .cap-section-header { padding: 0 0 12px; }
-.agent-editor-pane .cap-tabs { border: 1px solid var(--console-card-border); border-bottom: 0; border-radius: 8px 8px 0 0; }
-.agent-editor-pane .cap-panels { border: 1px solid var(--console-card-border); border-radius: 0 0 8px 8px; }
-.agent-editor-pane .agent-skill-grid { max-height: none; padding: 0; overflow: visible; }
+.agent-editor-pane .cap-section-header { align-items: center; padding: 0 0 12px; border: 0; background: transparent; }
+.agent-cap-search { display: flex; justify-content: flex-end; margin-bottom: 10px; }
+.agent-cap-search .cap-search { width: min(280px, 100%); }
+.agent-editor-pane .cap-tabs { padding: 0 0 8px; border: 0; border-radius: 0; background: transparent; }
+.agent-editor-pane .cap-panels { border: 0; border-radius: 0; background: transparent; }
+.agent-editor-pane .cap-panel { padding: 4px 0 0; }
+.agent-editor-pane .agent-skill-grid { max-height: none; padding: 0; overflow: visible; grid-template-columns: 1fr; gap: 0; }
 .agent-editor-pane .agent-skill-section { margin-top: 0; }
+.agent-editor-pane .agent-skill-card {
+  min-height: 46px;
+  align-items: center;
+  padding: 9px 4px;
+  border: 0;
+  border-bottom: 1px solid var(--console-card-border);
+  border-radius: 0;
+  background: transparent;
+}
+.agent-editor-pane .agent-skill-card:has(input:checked) { border-color: var(--console-card-border); background: var(--accent-soft); }
+.agent-editor-pane .agent-skill-card-copy { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.agent-editor-pane .agent-skill-card-meta { display: inline-flex; align-items: center; gap: 10px; white-space: nowrap; }
+.agent-editor-pane .agent-skill-card-meta > span { display: inline-flex; align-items: center; gap: 4px; }
+.agent-editor-pane .agent-skill-card-meta svg { width: 13px; height: 13px; }
+.agent-editor-pane .agent-skill-unavailable { color: var(--danger); }
 
 .diagnostics-page { padding: 22px clamp(18px, 4vw, 58px); background: var(--console-canvas); }
 .diagnostics-band,

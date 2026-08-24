@@ -111,7 +111,13 @@ def conservative_text_tokens(text: str) -> int:
     return max(1, total)
 
 
-def _official_openai_model(model: str, base_url: str | None) -> str | None:
+def _official_openai_model(
+    model: str,
+    base_url: str | None,
+    provider_type: str | None = None,
+) -> str | None:
+    if provider_type is not None:
+        return model if provider_type == "openai" else None
     prefix, sep, name = model.partition(":")
     if sep and prefix not in {"openai", "openai-chat"}:
         return None
@@ -131,8 +137,14 @@ class TokenEstimator:
     _counter: Callable[[str], int] | None = None
 
     @classmethod
-    def for_model(cls, model: str, base_url: str | None = None) -> "TokenEstimator":
-        model_name = _official_openai_model(model, base_url)
+    def for_model(
+        cls,
+        model: str,
+        base_url: str | None = None,
+        *,
+        provider_type: str | None = None,
+    ) -> "TokenEstimator":
+        model_name = _official_openai_model(model, base_url, provider_type)
         if model_name and tiktoken is not None:
             try:
                 encoding = tiktoken.encoding_for_model(model_name)

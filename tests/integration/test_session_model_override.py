@@ -16,7 +16,11 @@ from deep_agent.core.context import AppContext, get_context, init_context, reset
 from deep_agent.schemas.agent import AgentCreate
 from deep_agent.schemas.llm_model import LlmModelCreate
 from tests.helpers.request_identity import install_test_user_header
-from tests.helpers.sqlite_stores import ensure_title_uses_main_model, make_sqlite_stores
+from tests.helpers.sqlite_stores import (
+    ensure_title_uses_main_model,
+    get_default_test_provider_id,
+    make_sqlite_stores,
+)
 from tests.integration.helpers.chat import mock_request_disconnect, parse_sse_events
 from tests.integration.helpers.models import text_only_model
 
@@ -44,8 +48,10 @@ class SessionModelOverrideIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self._no_title.start()
         self._transport = ASGITransport(app=self._app)
 
-        model_a = await stores.llm_model.create_unique(
+        provider_id = await get_default_test_provider_id(stores)
+        model_a = await stores.llm_configuration.create_model(
             LlmModelCreate(
+                provider_id=provider_id,
                 name="model-a",
                 model="test:model-a",
                 input_modalities=["text"],
@@ -53,8 +59,9 @@ class SessionModelOverrideIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 max_output_tokens=8_192,
             ),
         )
-        model_b = await stores.llm_model.create_unique(
+        model_b = await stores.llm_configuration.create_model(
             LlmModelCreate(
+                provider_id=provider_id,
                 name="model-b",
                 model="test:model-b",
                 input_modalities=["text"],

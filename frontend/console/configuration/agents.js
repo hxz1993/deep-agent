@@ -157,8 +157,8 @@ const agentsAdmin = {
         <footer class="agent-card-footer">
           <span><i data-lucide="clock-3"></i>${escapeHtml(formatDate(agent.updated_at))}</span>
           <div class="row-actions agent-row-actions">
-            <a class="btn-link row-action" href="${chatUrlForAgent(agent.id)}" target="_blank" rel="noopener"><i data-lucide="message-square"></i><span>发起对话</span></a>
-            <button type="button" class="danger row-action" data-delete="${escapeHtml(agent.id)}" data-name="${escapeHtml(agent.name)}"><i data-lucide="trash-2"></i><span>删除</span></button>
+            <a class="btn-link row-action icon-only" data-agent-chat href="${chatUrlForAgent(agent.id)}" target="_blank" rel="noopener" title="发起对话" aria-label="发起对话"><i data-lucide="message-square"></i></a>
+            <button type="button" class="danger row-action icon-only" data-delete="${escapeHtml(agent.id)}" data-name="${escapeHtml(agent.name)}" title="删除" aria-label="删除"><i data-lucide="trash-2"></i></button>
           </div>
         </footer>
       </article>`;
@@ -174,9 +174,9 @@ const agentsAdmin = {
         <td><div class="cap-preview">${escapeHtml(capabilities)}</div><div class="skill-preview">Skill：${escapeHtml(skills)}</div></td>
         <td>${escapeHtml(formatDate(agent.updated_at))}</td>
         <td><div class="row-actions agent-row-actions">
-          <a class="btn-link row-action" href="${chatUrlForAgent(agent.id)}" target="_blank" rel="noopener"><i data-lucide="message-square"></i><span>发起对话</span></a>
-          <button type="button" class="row-action" data-edit="${escapeHtml(agent.id)}"><i data-lucide="pencil"></i><span>编辑</span></button>
-          <button type="button" class="danger row-action" data-delete="${escapeHtml(agent.id)}" data-name="${escapeHtml(agent.name)}"><i data-lucide="trash-2"></i><span>删除</span></button>
+          <a class="btn-link row-action icon-only" data-agent-chat href="${chatUrlForAgent(agent.id)}" target="_blank" rel="noopener" title="发起对话" aria-label="发起对话"><i data-lucide="message-square"></i></a>
+          <button type="button" class="row-action icon-only" data-edit="${escapeHtml(agent.id)}" title="编辑" aria-label="编辑"><i data-lucide="pencil"></i></button>
+          <button type="button" class="danger row-action icon-only" data-delete="${escapeHtml(agent.id)}" data-name="${escapeHtml(agent.name)}" title="删除" aria-label="删除"><i data-lucide="trash-2"></i></button>
         </div></td>
       </tr>`;
     }).join("");
@@ -545,17 +545,21 @@ const agentsAdmin = {
     container.innerHTML = skills.map((skill) => {
       const checked = selectedSet.has(skill.code);
       const disabled = skill.enabled === false;
-      const source = skill.source === "builtin" ? "内置" : skill.source === "upload" ? "上传" : "不可用";
+      const source = skill.source === "builtin" ? "内置" : skill.source === "upload" ? "自定义" : "不可用";
       return `<label class="agent-skill-card${disabled ? " is-disabled" : ""}">
         <input type="checkbox" name="agentSkill" value="${escapeHtml(skill.code)}" ${checked ? "checked" : ""} ${disabled ? "disabled" : ""} />
         <span class="agent-skill-card-copy">
           <span class="agent-skill-card-title">${escapeHtml(skill.label)} <small>${escapeHtml(source)}</small></span>
-          <span>${escapeHtml(skill.description || "暂无说明")}</span>
-          <span class="agent-skill-card-meta">${Number(skill.reference_count || 0)} References · ${Number(skill.asset_count || 0)} Assets${disabled ? " · 当前不可用" : ""}</span>
+          <span class="agent-skill-card-meta">
+            <span title="References">${Number(skill.reference_count || 0)} <i data-lucide="book-open"></i></span>
+            <span title="Assets">${Number(skill.asset_count || 0)} <i data-lucide="paperclip"></i></span>
+            ${disabled ? '<span class="agent-skill-unavailable">不可用</span>' : ""}
+          </span>
         </span>
       </label>`;
     }).join("");
     this.updateSkillCounter();
+    window.lucide?.createIcons();
   },
 
   updateSkillCounter() {
@@ -571,6 +575,12 @@ const agentsAdmin = {
     ).map((input) => input.value);
   },
 
+  syncEditorTitle() {
+    const title = document.getElementById("agentModalTitle");
+    const name = document.getElementById("agentName")?.value.trim();
+    if (title) title.textContent = name || (state.editingAgentId ? "Agent" : "新建 Agent");
+  },
+
   openCreate() {
     state.editingAgentId = null;
     document.getElementById("agentModalTitle").textContent = "新建 Agent";
@@ -578,7 +588,7 @@ const agentsAdmin = {
     document.getElementById("agentModalId").classList.add("hidden");
     document.getElementById("agentName").disabled = false;
     document.getElementById("agentName").value = "";
-    populateAgentModelSelect(state.llmModels[0]?.id || null);
+    populateAgentModelSelect(window.DeepAgentModelOptions.firstSelectableModelId(state.llmModels));
     document.getElementById("agentTemperature").value = "";
     document.getElementById("agentPrompt").value =
       "You are a helpful assistant. Use available tools when they help answer accurately.";
@@ -593,11 +603,11 @@ const agentsAdmin = {
     try {
       const agent = await apiFetch(`/api/v1/agents/${encodeURIComponent(agentId)}`);
       state.editingAgentId = agentId;
-      document.getElementById("agentModalTitle").textContent = `编辑 Agent · ${agent.name}`;
       document.getElementById("agentModalId").textContent = `Agent ID：${agent.id || agentId}`;
       document.getElementById("agentModalId").classList.remove("hidden");
       document.getElementById("agentName").disabled = false;
       document.getElementById("agentName").value = agent.name;
+      this.syncEditorTitle();
       populateAgentModelSelect(agent.model_id);
       document.getElementById("agentTemperature").value =
         agent.temperature == null ? "" : String(agent.temperature);
@@ -742,6 +752,7 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("agentForm")?.addEventListener("submit", (e) => agentsAdmin.save(e));
   document.getElementById("agentForm")?.addEventListener("input", () => { agentEditorDirty = true; });
   document.getElementById("agentForm")?.addEventListener("change", () => { agentEditorDirty = true; });
+  document.getElementById("agentName")?.addEventListener("input", () => agentsAdmin.syncEditorTitle());
   document.getElementById("closeAgentModal")?.addEventListener("click", () => agentsAdmin.requestCloseEditor());
   document.getElementById("testAgentBtn")?.addEventListener("click", async () => {
     if (!state.editingAgentId) return;

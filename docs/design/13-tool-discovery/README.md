@@ -28,7 +28,7 @@ Agent 已授权工具包
 - [`../11-tool-packages/tool-packages-design.md`](../11-tool-packages/tool-packages-design.md)：ToolPackage 配置和授权模型。
 - [`../TODO.md`](../TODO.md)：统一待办，`TOOL-103`、`TOOL-201` 已在 v0.3.12 关闭。
 
-当前实现锁定为：MCP 候选不超过 5 个时全部直接披露；超过 5 个时首轮词法预选最多 Top 3，
+当前实现锁定为：MCP 候选不超过 10 个时全部直接披露；超过 10 个时首轮词法预选最多 Top 3，
 模型通过 `search_tools` 最多加载 Top 5；其余延迟工具名称按 Server 放入动态 Instructions。
 检索只处理 Agent 已授权且当前身份可用的 MCP 工具。无合法会话附件时隐藏整个附件 Toolset。
 Shadow 是测试目录下的脱敏离线评估，不进入生产请求链路。

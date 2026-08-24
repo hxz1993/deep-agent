@@ -14,7 +14,10 @@ from deep_agent.capabilities.mcp.lease_manager import McpLeaseManager
 from deep_agent.core.context import AppContext, get_context, init_context, reset_context
 from deep_agent.schemas.llm_model import LlmModelCreate
 from tests.helpers.request_identity import install_test_user_header
-from tests.helpers.sqlite_stores import make_sqlite_stores
+from tests.helpers.sqlite_stores import (
+    get_default_test_provider_id,
+    make_sqlite_stores,
+)
 from tests.integration.helpers.chat import mock_request_disconnect, parse_sse_events
 from tests.integration.helpers.models import text_only_model
 
@@ -29,6 +32,7 @@ _IMAGE_ATTACHMENT = {
 class ChatImageAttachmentTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         stores, self._engine, session_factory = await make_sqlite_stores()
+        self._provider_id = await get_default_test_provider_id(stores)
         self._app = FastAPI()
         install_test_user_header(self._app)
         self._app.include_router(api_router)
@@ -90,8 +94,9 @@ class ChatImageAttachmentTests(unittest.IsolatedAsyncioTestCase):
         mock_download: AsyncMock,
     ) -> None:
         mock_download.return_value = b"\x89PNG\r\n\x1a\n"
-        row = await get_context().stores.llm_model.create_unique(
+        row = await get_context().stores.llm_configuration.create_model(
             LlmModelCreate(
+                provider_id=self._provider_id,
                 name="vision-history",
                 model="private:vision-history",
                 input_modalities=["text", "image"],
@@ -129,8 +134,9 @@ class ChatImageAttachmentTests(unittest.IsolatedAsyncioTestCase):
         self,
         mock_download: AsyncMock,
     ) -> None:
-        row = await get_context().stores.llm_model.create_unique(
+        row = await get_context().stores.llm_configuration.create_model(
             LlmModelCreate(
+                provider_id=self._provider_id,
                 name="text-only-error",
                 model="private:text-only-error",
                 input_modalities=["text"],
@@ -165,11 +171,11 @@ class ChatImageAttachmentTests(unittest.IsolatedAsyncioTestCase):
     ) -> None:
         """Catalog metadata is descriptive and must not create a local image gate."""
         stores = get_context().stores
-        row = await stores.llm_model.create_unique(
+        row = await stores.llm_configuration.create_model(
             LlmModelCreate(
+                provider_id=self._provider_id,
                 name="kimi-text-only",
                 model="kimi-k2.6",
-                base_url="https://api.moonshot.cn",
                 input_modalities=["text"],
                 context_window_tokens=262_144,
                 max_output_tokens=8_192,
@@ -198,8 +204,9 @@ class ChatImageAttachmentTests(unittest.IsolatedAsyncioTestCase):
                 yield ""
             raise RuntimeError("provider model does not accept image content")
 
-        row = await get_context().stores.llm_model.create_unique(
+        row = await get_context().stores.llm_configuration.create_model(
             LlmModelCreate(
+                provider_id=self._provider_id,
                 name="provider-rejects-image",
                 model="private:provider-rejects-image",
                 input_modalities=["text"],
@@ -233,8 +240,9 @@ class ChatImageAttachmentTests(unittest.IsolatedAsyncioTestCase):
         """Image metadata remains descriptive while the Provider receives the same input."""
         mock_download.return_value = b"\x89PNG\r\n\x1a\n"
         stores = get_context().stores
-        row = await stores.llm_model.create_unique(
+        row = await stores.llm_configuration.create_model(
             LlmModelCreate(
+                provider_id=self._provider_id,
                 name="vision-db",
                 model="private:vision-model",
                 input_modalities=["text", "image"],

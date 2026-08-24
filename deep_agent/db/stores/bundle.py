@@ -23,6 +23,7 @@ from deep_agent.db.stores.ui_tool_package import (
     UiToolPackageStoreBase,
     create_ui_tool_package_store,
 )
+from deep_agent.services.llm_configuration import LlmConfigurationService
 
 __all__ = ["DataStores", "create_data_stores"]
 
@@ -35,6 +36,7 @@ class DataStores:
     coordinator: SessionStore
     agent: AgentStoreBase
     llm_model: LlmModelStoreBase
+    llm_configuration: LlmConfigurationService
     model_catalog: ModelCatalogStoreBase
     auxiliary_model: AuxiliaryModelStoreBase
     mcp: McpServerStoreBase
@@ -63,6 +65,7 @@ def create_data_stores(
         ),
         agent=create_agent_store(dialect, session_factory),
         llm_model=create_llm_model_store(dialect, session_factory),
+        llm_configuration=LlmConfigurationService(session_factory),
         model_catalog=create_model_catalog_store(dialect, session_factory),
         auxiliary_model=create_auxiliary_model_store(dialect, session_factory),
         mcp=create_mcp_store(dialect, session_factory),

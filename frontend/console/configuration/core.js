@@ -3,6 +3,8 @@ const state = {
   capabilities: [],
   skills: [],
   llmModels: [],
+  llmProviders: [],
+  llmProviderTypes: [],
   editingAgentId: null,
   editingLlmModelId: null,
   editingMcp: null,
@@ -91,11 +93,19 @@ function openActionDialog({
     const label = document.createElement("label");
     const caption = document.createElement("span");
     caption.textContent = field.label || field.name;
-    const input = document.createElement(field.multiline ? "textarea" : "input");
+    const input = field.options ? document.createElement("select") : document.createElement(field.multiline ? "textarea" : "input");
     input.name = field.name;
+    if (field.options) {
+      for (const option of field.options) {
+        const item = document.createElement("option");
+        item.value = option.value;
+        item.textContent = option.label;
+        input.appendChild(item);
+      }
+    }
     input.value = field.value ?? "";
     input.required = Boolean(field.required);
-    if (!field.multiline) input.type = "text";
+    if (!field.options && !field.multiline) input.type = "text";
     if (field.placeholder) input.placeholder = field.placeholder;
     label.append(caption, input);
     fieldsHost.appendChild(label);
@@ -140,7 +150,7 @@ function openActionDialog({
     dialog.addEventListener("close", onClose);
     activeActionDialogCancel = onCancel;
     dialog.showModal();
-    (fieldsHost.querySelector("input, textarea") || confirmButton).focus();
+    (fieldsHost.querySelector("input, textarea, select") || confirmButton).focus();
   });
 }
 
@@ -236,6 +246,25 @@ async function loadLlmModels() {
   return state.llmModels;
 }
 
+async function loadLlmProviders() {
+  try {
+    state.llmProviders = await apiFetch("/api/v1/llm-providers");
+  } catch {
+    state.llmProviders = [];
+  }
+  return state.llmProviders;
+}
+
+async function loadLlmProviderTypes() {
+  try {
+    const response = await apiFetch("/api/v1/llm-provider-types");
+    state.llmProviderTypes = Array.isArray(response?.items) ? response.items : response;
+  } catch {
+    state.llmProviderTypes = [];
+  }
+  return state.llmProviderTypes;
+}
+
 async function loadSkills() {
   try {
     state.skills = await apiFetch("/api/v1/skills");
@@ -255,12 +284,7 @@ function populateAgentModelSelect(selectedId = null) {
     return;
   }
   select.disabled = false;
-  select.innerHTML = models
-    .map(
-      (m) =>
-        `<option value="${escapeHtml(m.id)}" ${m.id === selectedId ? "selected" : ""}>${escapeHtml(m.name)} (${escapeHtml(m.model)})</option>`
-    )
-    .join("");
+  select.innerHTML = window.DeepAgentModelOptions.renderGroupedModelOptions(models, { selectedId });
 }
 
 function initTabs() {
@@ -285,7 +309,7 @@ function initTabs() {
       if (name === "agents" && window.agentsAdmin) {
         Promise.all([loadLlmModels(), loadCapabilities(), loadSkills()]).then(() => window.agentsAdmin.refresh());
       }
-      if (name === "llm-models" && window.llmModelsAdmin) window.llmModelsAdmin.refresh();
+      if (name === "llm-providers" && window.llmProvidersAdmin) window.llmProvidersAdmin.refresh();
       if (name === "builtin-tools") {
         window.builtinToolsAdmin?.refresh();
         window.systemToolsAdmin?.refresh();

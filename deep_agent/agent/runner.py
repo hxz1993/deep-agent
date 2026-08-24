@@ -976,6 +976,11 @@ class AgentRunner:
                 llm_model_store=(
                     self._stores.llm_model if self._stores is not None else None
                 ),
+                llm_configuration_store=(
+                    self._stores.llm_configuration
+                    if self._stores is not None
+                    else None
+                ),
             )
 
             if not title:

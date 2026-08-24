@@ -22,6 +22,7 @@ from deep_agent.db.models import Base
 
 
 CONFIG_TABLES = (
+    "llm_providers",
     "llm_models",
     "model_catalog",
     "mcp_servers",
@@ -36,7 +37,7 @@ SESSION_TABLES = (
     "chat_messages",
     "chat_context_checkpoints",
 )
-CURRENT_SCHEMA_REVISION = "006"
+CURRENT_SCHEMA_REVISION = "007"
 ENVIRONMENT_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
 BACKUP_SCOPE_SCHEMA_VERSION = "1.0"
 
@@ -238,6 +239,7 @@ async def _clear_seed_configuration(engine: AsyncEngine) -> None:
         "mcp_servers",
         "model_catalog",
         "llm_models",
+        "llm_providers",
     )
     async with engine.begin() as connection:
         for table_name in delete_order:
@@ -342,6 +344,23 @@ async def _validate_backup(
             if await _table_count(connection, table_name) != 0:
                 raise ValueError(f"Session table must be empty: {table_name}")
 
+        orphan_models = int(
+            (
+                await connection.execute(
+                    text(
+                        "SELECT COUNT(*) FROM llm_models AS model "
+                        "LEFT JOIN llm_providers AS provider "
+                        "ON provider.id = model.provider_id "
+                        "WHERE provider.id IS NULL"
+                    )
+                )
+            ).scalar_one()
+        )
+        if orphan_models:
+            raise ValueError(
+                "Backup contains LLM models with missing Provider references"
+            )
+
         stored_revision = (
             await connection.execute(
                 text("SELECT version_num FROM alembic_version")
@@ -417,6 +436,7 @@ async def _validate_with_deep_agent(database_url: str) -> None:
     from deep_agent.db.models import (
         ChatContextCheckpoint,
         LlmModel,
+        LlmProvider,
         ModelCatalog,
         UiToolPackage,
         SkillPackage,
@@ -426,6 +446,21 @@ async def _validate_with_deep_agent(database_url: str) -> None:
     try:
         async with session_factory() as session:
             await session.execute(select(func.count()).select_from(LlmModel))
+            await session.execute(select(func.count()).select_from(LlmProvider))
+            orphan_models = int(
+                (
+                    await session.execute(
+                        select(func.count())
+                        .select_from(LlmModel)
+                        .outerjoin(LlmProvider, LlmProvider.id == LlmModel.provider_id)
+                        .where(LlmProvider.id.is_(None))
+                    )
+                ).scalar_one()
+            )
+            if orphan_models:
+                raise ValueError(
+                    "Backup contains LLM models with missing Provider references"
+                )
             await session.execute(select(func.count()).select_from(ModelCatalog))
             await session.execute(select(func.count()).select_from(UiToolPackage))
             await session.execute(select(func.count()).select_from(SkillPackage))

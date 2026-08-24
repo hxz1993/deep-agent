@@ -1,12 +1,24 @@
 """标题生成模块单元测试。"""
 
 import unittest
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
 from pydantic_ai.models.test import TestModel
+from pydantic_ai.models.openai import OpenAIChatModel
+from pydantic_ai.providers.deepseek import DeepSeekProvider
 
 from deep_agent.agent.history import _extract_assistant_text
-from deep_agent.agent.title_generator import _clean_title, _title_snippet, generate_title
+from deep_agent.agent.provider_registry import (
+    ProviderConfigurationError,
+)
+from deep_agent.agent.title_generator import (
+    _clean_title,
+    _resolve_dedicated_title_model,
+    _title_snippet,
+    generate_title,
+)
 
 
 class TestCleanTitle(unittest.TestCase):
@@ -107,6 +119,113 @@ class TestGenerateTitle(unittest.IsolatedAsyncioTestCase):
             main_model=model,
         )
         self.assertEqual(result, "Python 装饰器入门")
+
+    async def test_dedicated_model_uses_its_explicit_provider(self) -> None:
+        llm_row = SimpleNamespace(
+            id="model-1",
+            provider_id="provider-1",
+            model="deepseek-chat",
+            base_url="https://legacy.example.invalid",
+            api_key="legacy-key",
+            input_modalities=["text"],
+            context_window_tokens=64_000,
+            max_output_tokens=8_000,
+            tags=[],
+        )
+        provider_row = SimpleNamespace(
+            id="provider-1",
+            name="DeepSeek",
+            provider_type="deepseek",
+            use_default_base_url=True,
+            base_url="https://ignored.example.invalid",
+            api_key="provider-key",
+            enabled=True,
+        )
+        auxiliary_store = SimpleNamespace(
+            get_by_use_case=AsyncMock(
+                return_value=SimpleNamespace(llm_model_id="model-1")
+            )
+        )
+        llm_model_store = SimpleNamespace(get_by_id=AsyncMock(return_value=llm_row))
+        configuration_store = SimpleNamespace(
+            get_provider=AsyncMock(return_value=provider_row)
+        )
+
+        model = await _resolve_dedicated_title_model(
+            auxiliary_store,
+            llm_model_store,
+            configuration_store,
+        )
+
+        self.assertIsInstance(model, OpenAIChatModel)
+        assert isinstance(model, OpenAIChatModel)
+        self.assertIsInstance(model._provider, DeepSeekProvider)
+        configuration_store.get_provider.assert_awaited_once_with("provider-1")
+
+    async def test_dedicated_model_requires_provider_lookup(self) -> None:
+        llm_row = SimpleNamespace(id="model-1", provider_id="provider-1")
+        auxiliary_store = SimpleNamespace(
+            get_by_use_case=AsyncMock(
+                return_value=SimpleNamespace(llm_model_id="model-1")
+            )
+        )
+        llm_model_store = SimpleNamespace(get_by_id=AsyncMock(return_value=llm_row))
+
+        with self.assertRaisesRegex(ProviderConfigurationError, "store is unavailable"):
+            await _resolve_dedicated_title_model(
+                auxiliary_store,
+                llm_model_store,
+                None,
+            )
+
+    async def test_dedicated_model_requires_provider_id(self) -> None:
+        llm_row = SimpleNamespace(id="model-1", provider_id=None)
+        auxiliary_store = SimpleNamespace(
+            get_by_use_case=AsyncMock(
+                return_value=SimpleNamespace(llm_model_id="model-1")
+            )
+        )
+        llm_model_store = SimpleNamespace(get_by_id=AsyncMock(return_value=llm_row))
+
+        with self.assertRaisesRegex(ProviderConfigurationError, "is required"):
+            await _resolve_dedicated_title_model(
+                auxiliary_store,
+                llm_model_store,
+                SimpleNamespace(get_provider=AsyncMock()),
+            )
+
+    async def test_dedicated_model_rejects_disabled_model_before_request(self) -> None:
+        llm_row = SimpleNamespace(
+            id="model-1",
+            provider_id="provider-1",
+            enabled=False,
+        )
+        auxiliary_store = SimpleNamespace(
+            get_by_use_case=AsyncMock(
+                return_value=SimpleNamespace(llm_model_id="model-1")
+            )
+        )
+        llm_model_store = SimpleNamespace(get_by_id=AsyncMock(return_value=llm_row))
+        configuration_store = SimpleNamespace(
+            get_provider=AsyncMock(
+                return_value=SimpleNamespace(
+                    id="provider-1",
+                    name="Provider",
+                    provider_type="deepseek",
+                    use_default_base_url=True,
+                    base_url="https://api.deepseek.com",
+                    api_key="provider-key",
+                    enabled=True,
+                )
+            )
+        )
+
+        with self.assertRaisesRegex(ProviderConfigurationError, "model is disabled"):
+            await _resolve_dedicated_title_model(
+                auxiliary_store,
+                llm_model_store,
+                configuration_store,
+            )
 
 
 if __name__ == "__main__":

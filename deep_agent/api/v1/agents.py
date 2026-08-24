@@ -3,6 +3,12 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from deep_agent.agent.context.estimator import TokenEstimator
+from deep_agent.agent.provider_registry import (
+    ProviderRuntimeConfig,
+    ProviderRuntimeError,
+    effective_base_url,
+    load_provider_for_model,
+)
 from deep_agent.api.v1.admin import CONSOLE_ADMIN_DEPENDENCIES
 from deep_agent.core.context import AppContextDep
 from deep_agent.capabilities.catalog import invalid_tool_package_codes
@@ -45,6 +51,24 @@ async def _ensure_model_exists(model_store: LlmModelStoreBase, model_id: str) ->
     row = await model_store.get_by_id(normalized_id)
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"LLM model not found: {model_id}")
+    return normalized_id
+
+
+async def _ensure_model_selectable(
+    model_store: LlmModelStoreBase,
+    model_id: str,
+    ctx: AppContextDep,
+) -> str:
+    normalized_id = await _ensure_model_exists(model_store, model_id)
+    model = await model_store.get_by_id(normalized_id)
+    assert model is not None
+    try:
+        await load_provider_for_model(model, ctx.stores.llm_configuration)
+    except ProviderRuntimeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
     return normalized_id
 
 
@@ -101,10 +125,10 @@ async def list_agents(
 )
 async def estimate_agent_prompt(
     body: AgentPromptEstimateRequest,
-    model_store: LlmModelStoreBase = Depends(get_llm_model_store),
+    ctx: AppContextDep,
 ) -> AgentPromptEstimateResponse:
     normalized_model_id = _parse_model_id(body.model_id)
-    model = await model_store.get_by_id(normalized_model_id)
+    model = await ctx.stores.llm_model.get_by_id(normalized_model_id)
     if model is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -112,7 +136,13 @@ async def estimate_agent_prompt(
         )
 
     prompt = body.prompt.strip()
-    estimator = TokenEstimator.for_model(model.model, model.base_url)
+    provider = await load_provider_for_model(model, ctx.stores.llm_configuration)
+    provider_config = ProviderRuntimeConfig.from_row(provider)
+    estimator = TokenEstimator.for_model(
+        model.model,
+        effective_base_url(provider_config),
+        provider_type=provider_config.provider_type,
+    )
     return AgentPromptEstimateResponse(
         character_count=len(prompt),
         estimated_tokens=estimator.text(prompt),
@@ -146,7 +176,11 @@ async def create_agent(
 ) -> AgentResponse:
     await _validate_tool_packages(body.capabilities, ctx)
     await _validate_skills(body.skills, ctx)
-    normalized_model_id = await _ensure_model_exists(model_store, body.model_id)
+    normalized_model_id = await _ensure_model_selectable(
+        model_store,
+        body.model_id,
+        ctx,
+    )
     body = body.model_copy(update={"model_id": normalized_model_id})
     existing = await store.get_by_name(body.name)
     if existing is not None:
@@ -185,8 +219,12 @@ async def update_agent(
             ctx,
             allow_disabled=set(current.skills or []),
         )
-    if body.model_id is not None:
-        normalized_model_id = await _ensure_model_exists(model_store, body.model_id)
+    if body.model_id is not None and body.model_id != current.model_id:
+        normalized_model_id = await _ensure_model_selectable(
+            model_store,
+            body.model_id,
+            ctx,
+        )
         body = body.model_copy(update={"model_id": normalized_model_id})
     try:
         row = await store.update_unique(normalized_id, body)

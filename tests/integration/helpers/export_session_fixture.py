@@ -20,8 +20,9 @@ from pathlib import Path
 from sqlalchemy import select
 
 from deep_agent.db.factory import create_engine as create_db_engine
-from deep_agent.db.models import ChatMessage, ChatSession
-from deep_agent.db.session_scope import agent_scope_to_api, normalize_agent_scope
+from deep_agent.db.event_codec import MESSAGE_EVENT_TYPES, decode_message_events
+from deep_agent.db.models import ChatSession, ChatSessionEvent
+from deep_agent.db.serialization import serialize_message
 from deep_agent.db.url import get_database_url
 
 DEFAULT_FULL_DEEPCUBE_FIXTURE = (
@@ -38,40 +39,43 @@ async def export_session_fixture(
     """Write ``{session_id, agent_id, title, messages[]}`` JSON for ``seed_session_from_fixture``."""
     database_url = get_database_url()
     engine, session_factory = create_db_engine(database_url)
-    scope = normalize_agent_scope(agent_id)
-    api_agent_id = agent_id or agent_scope_to_api(scope)
-
     try:
         async with session_factory() as db:
-            title_row = (
+            session = (
                 await db.execute(
-                    select(ChatSession.title).where(
-                        ChatSession.agent_id == scope,
+                    select(ChatSession).where(
                         ChatSession.session_id == session_id,
                     )
                 )
-            ).one_or_none()
+            ).scalar_one_or_none()
+            if session is not None and agent_id is not None and session.agent_id != agent_id:
+                session = None
             rows = (
                 await db.execute(
-                    select(ChatMessage.sequence, ChatMessage.payload)
+                    select(ChatSessionEvent)
                     .where(
-                        ChatMessage.agent_id == scope,
-                        ChatMessage.session_id == session_id,
+                        ChatSessionEvent.session_id == session_id,
+                        ChatSessionEvent.event_type.in_(MESSAGE_EVENT_TYPES),
                     )
-                    .order_by(ChatMessage.sequence)
+                    .order_by(ChatSessionEvent.sequence)
                 )
-            ).all()
+            ).scalars().all() if session is not None else []
     finally:
         await engine.dispose()
 
     if not rows:
-        raise ValueError(f"No messages for session_id={session_id!r}, agent_id={api_agent_id!r}")
+        raise ValueError(f"No events for session_id={session_id!r}, agent_id={agent_id!r}")
+
+    messages = decode_message_events(rows)
 
     fixture = {
         "session_id": session_id,
-        "agent_id": api_agent_id,
-        "title": title_row[0] if title_row is not None else None,
-        "messages": [{"sequence": int(seq), "payload": payload} for seq, payload in rows],
+        "agent_id": session.agent_id,
+        "title": session.title,
+        "messages": [
+            {"sequence": index, "payload": serialize_message(message)}
+            for index, message in enumerate(messages)
+        ],
     }
 
     out_path = Path(output)

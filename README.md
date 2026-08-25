@@ -3,16 +3,16 @@
 DeepAgent 是基于 FastAPI、Pydantic AI 和 SQLAlchemy 的多用户 Agent 服务，并
 随服务发布一体化运维控制台。
 
-当前产品版本为 `0.5.8`。`deep_agent.__version__` 是唯一代码版本来源，FastAPI、
+当前产品版本为 `0.6.0`。`deep_agent.__version__` 是唯一代码版本来源，FastAPI、
 `GET /info` 和 Console 顶部版本徽标均读取该值。后续正式发布默认递增
 `MAJOR.MINOR.PATCH` 的第三位，只有明确规划重大版本时才调整前两位。产品版本不通过
 环境变量或数据库覆盖，也不等同于 Alembic 数据库结构 revision。
 
 各版本功能变更与迁移说明见 [`CHANGELOG.md`](CHANGELOG.md)。
 
-Console 对话测试提供独立的“对话 / 轨迹”页签。轨迹以现有 History 和当前 SSE 为事实源，
-按 Run、模型输出、上下文和工具调用展示脱敏后的原生信息，便于排查工具参数、返回、终态与
-用量；它不创建新 Run、不进入模型上下文，也不额外建立轨迹表。能力边界见
+Console 对话测试提供独立的“对话 / 轨迹”页签。会话历史、轨迹、Plan 和持久化 SSE 统一读取
+`chat_session_events`；轨迹按 Sequence 原位展示 Run、模型 Part、工具调用/结果和 Compaction，
+不再从整条 ModelMessage 做第二套拆解，也不额外建立轨迹表。能力边界见
 [`docs/design/18-session-trajectory/`](docs/design/18-session-trajectory/)。
 
 v0.5.6 完成 Provider + Model 两层配置：Provider 独占 Pydantic AI 适配类型、地址和密钥，
@@ -110,17 +110,15 @@ uvicorn deep_agent.main:app --host 0.0.0.0 --port 8000
 
 ## 数据库基线
 
-v0.3.0 将发布前的 Alembic `001`～`023` 历史压缩为唯一基线 `001`。新数据库直接
-执行 `alembic upgrade head`；已有旧库不能重放迁移，必须先使用
-`python3.12 -m maintenance.rebaseline_database` 校验最终结构，再通过 Alembic
-`stamp --purge 001` 重设版本。完整备份和切换命令见
-[`maintenance/README.md`](maintenance/README.md)。
-
-当前 Alembic head 为 `007`：`002` 统一 ToolPackage 与 UI 工具包；`003` 将线上 Skill 与
+新数据库直接执行 `alembic upgrade head`。当前 Alembic head 为 `008`：`002` 统一 ToolPackage
+与 UI 工具包；`003` 将线上 Skill 与
 ToolPackage 分离；`004`清理已废弃的`builtin:attachment`；`005`和`006`依次删除已下线的
 预制MCP记录，并从显式Agent能力列表中清理对应引用；`007`增加独立Provider层、模型硬外键并删除
-模型表中的重复连接字段。升级
-`003` 前仍必须确认 `agents.capabilities` 不存在历史 `skill:*` 引用。
+模型表中的重复连接字段；`008`将会话域重建为`chat_sessions + chat_session_events`。
+
+`008`不在线转换旧会话：它删除旧会话历史并建立空 Event Store，但保留所有配置表。共享环境升级前
+必须先用 Revision 007 代码分别执行配置备份和会话归档，停掉全部旧实例后才能迁移；旧版本不能与
+008并行运行。完整备份和切换边界见[`maintenance/README.md`](maintenance/README.md)。
 
 配置备份会复制全部配置表并只保留会话表结构；上传Skill的原始ZIP不塞入数据库备份。需要完整
 留存或跨环境迁移时，同时在Console Skill页面执行“导出全部”。备份程序会校验每张ORM业务表都已
@@ -136,10 +134,9 @@ DeepAgent 当前支持：
 - 系统工具不是 ToolPackage。Harness任务规划、`load_capability`、Skill Resource、`read_file`、
   `export_file_to_download_center`、`read_tool_result`、`search_tools` 和 MCP Resource
   由运行时按 Agent/Run 条件自动注入，只在 Console 的只读“系统工具”目录中说明。
-- 每个Run均可使用Harness `Planning`的`write_plan`、`read_plan`和
-  `update_task_statuses`；模型只在复杂任务需要时创建计划，计划在本轮内存中维护，SSE与History
-  携带展示快照，下一轮重新开始，不新增计划表。Console只在Run进行中或异常中断后显示计划浮层；
-  正常完成或进入UI Pending后立即隐藏。
+- 每个Run只暴露Harness `Planning`的`write_plan`完整快照工具。计划仍以普通Tool Call/Result
+  Event保存，不新增计划表；Deferred新Run通过共同`turn_id`恢复本Turn最后一次成功快照，新用户
+  Turn从空PlanStore开始。Console从Event Store投影最新快照和每次更新位置。
 - MCP Tool Search使用字段化词法检索：标准协议名、MCP `title`、参数和描述提供召回依据；支持
   拼音与有限错字纠正，但不把词法匹配伪装成任意中英文语义翻译。
 - Skill 不再属于 ToolPackage。Agent 通过独立 `skills` 列表选择，Harness 按需加载 `SKILL.md`；
@@ -159,8 +156,8 @@ Skill 管理接口和包格式见
 
 v0.4.0 使用 Harness `ToolOutputLimits` 在工具执行后、结果进入下一次模型请求前识别超大结果。
 完整内容保存到平台文件服务，模型历史只保留首尾预览、结构草图和平台 File ID；模型需要细节时
-通过系统工具 `read_tool_result` 按行或关键词读取。该机制不增加 Artifact 表或数据库迁移，句柄
-权限只从当前会话的原始 `chat_messages`恢复，Checkpoint 不能扩大访问范围。完整边界见
+通过系统工具 `read_tool_result` 按行或关键词读取。该机制不增加 Artifact 表，句柄权限只从当前
+会话的原始 Tool Result Event 恢复；结构化摘要中的 Evidence 只提供来源索引，不能扩大访问范围。完整边界见
 [`docs/design/05-tool-optimization/tool-optimization-design.md`](docs/design/05-tool-optimization/tool-optimization-design.md#92-tooloutputlimits-与大工具结果外置)。
 
 ## 文件发布到下载中心

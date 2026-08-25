@@ -34,10 +34,9 @@ CONFIG_TABLES = (
 )
 SESSION_TABLES = (
     "chat_sessions",
-    "chat_messages",
-    "chat_context_checkpoints",
+    "chat_session_events",
 )
-CURRENT_SCHEMA_REVISION = "007"
+CURRENT_SCHEMA_REVISION = "008"
 ENVIRONMENT_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
 BACKUP_SCOPE_SCHEMA_VERSION = "1.0"
 
@@ -434,7 +433,7 @@ async def _table_count(connection: Any, table_name: str) -> int:
 async def _validate_with_deep_agent(database_url: str) -> None:
     from deep_agent.db.factory import create_engine
     from deep_agent.db.models import (
-        ChatContextCheckpoint,
+        ChatSessionEvent,
         LlmModel,
         LlmProvider,
         ModelCatalog,
@@ -464,9 +463,7 @@ async def _validate_with_deep_agent(database_url: str) -> None:
             await session.execute(select(func.count()).select_from(ModelCatalog))
             await session.execute(select(func.count()).select_from(UiToolPackage))
             await session.execute(select(func.count()).select_from(SkillPackage))
-            await session.execute(
-                select(func.count()).select_from(ChatContextCheckpoint)
-            )
+            await session.execute(select(func.count()).select_from(ChatSessionEvent))
     finally:
         await engine.dispose()
 

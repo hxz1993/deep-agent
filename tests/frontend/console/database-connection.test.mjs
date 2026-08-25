@@ -38,10 +38,10 @@ function loadUi() {
   return window.__DatabaseConnectionUI;
 }
 
-test("配置中心按 Agent 设置、系统设置和辅助资源分组", () => {
+test("配置中心按 Agent 设置、系统设置和外部资源分组", () => {
   const agentGroup = indexHtml.indexOf("Agent 设置");
   const systemGroup = indexHtml.indexOf("系统设置");
-  const resourceGroup = indexHtml.indexOf("辅助资源");
+  const resourceGroup = indexHtml.indexOf("外部资源");
   assert.ok(agentGroup >= 0 && agentGroup < systemGroup && systemGroup < resourceGroup);
   assert.ok(indexHtml.indexOf('data-tab="ui-tools"') < systemGroup);
   assert.ok(systemGroup < indexHtml.indexOf('data-tab="auxiliary-models"'));

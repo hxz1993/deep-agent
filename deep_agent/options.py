@@ -168,22 +168,22 @@ class Agent(Category):
         bind_env="CONTEXT_COMPACTION_TARGET_RATIO",
         extra_check=_ensure_ratio,
     )
-    context_keep_tool_pairs = Option(
-        3,
-        val_type=int,
-        bind_env="CONTEXT_KEEP_TOOL_PAIRS",
-        extra_check=_ensure_non_negative_int,
-    )
-    context_min_clear_tokens = Option(
-        2000,
-        val_type=int,
-        bind_env="CONTEXT_MIN_CLEAR_TOKENS",
-        extra_check=_ensure_non_negative_int,
-    )
     context_summary_timeout = Option(
-        60.0,
+        300.0,
         val_type=float,
         bind_env="CONTEXT_SUMMARY_TIMEOUT",
+    )
+    context_tool_prune_threshold = Option(
+        8192, val_type=int, bind_env="CONTEXT_TOOL_PRUNE_THRESHOLD",
+        extra_check=_ensure_positive_int,
+    )
+    context_tool_prune_head = Option(
+        4096, val_type=int, bind_env="CONTEXT_TOOL_PRUNE_HEAD",
+        extra_check=_ensure_positive_int,
+    )
+    context_tool_prune_tail = Option(
+        1024, val_type=int, bind_env="CONTEXT_TOOL_PRUNE_TAIL",
+        extra_check=_ensure_positive_int,
     )
     mcp_forward_request_headers = Option(
         DEFAULT_MCP_FORWARD_HEADERS,

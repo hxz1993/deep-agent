@@ -12,6 +12,7 @@ from deep_agent.api.v1 import api_router
 from deep_agent.capabilities import build_registry
 from deep_agent.capabilities.mcp.lease_manager import McpLeaseManager
 from deep_agent.core.context import AppContext, get_context, init_context, reset_context
+from deep_agent.schemas.agent import AgentCreate
 from tests.helpers.sqlite_stores import make_sqlite_stores_sync
 
 
@@ -19,6 +20,17 @@ class SessionListApiTests(unittest.TestCase):
     def setUp(self) -> None:
         self.user_id = "user-a"
         self.stores, self.engine, self.session_factory = make_sqlite_stores_sync()
+        async def seed_agents() -> tuple[str, str]:
+            model = (await self.stores.llm_model.list_all())[0]
+            agent_a = await self.stores.agent.create_unique(
+                AgentCreate(name="session-list-a", model_id=model.id, prompt="test")
+            )
+            agent_b = await self.stores.agent.create_unique(
+                AgentCreate(name="session-list-b", model_id=model.id, prompt="test")
+            )
+            return agent_a.id, agent_b.id
+
+        self.agent_a, self.agent_b = asyncio.run(seed_agents())
         self.app = FastAPI()
         self.app.include_router(api_router)
         ctx = AppContext.for_testing(
@@ -43,13 +55,13 @@ class SessionListApiTests(unittest.TestCase):
             await store.append(
                 "sess-1",
                 [ModelRequest(parts=[UserPromptPart(content="hello one")])],
-                agent_id="agent-a",
+                agent_id=self.agent_a,
                 user_id=self.user_id,
             )
             await store.append(
                 "sess-2",
                 [ModelRequest(parts=[UserPromptPart(content="hello two")])],
-                agent_id="agent-b",
+                agent_id=self.agent_b,
                 user_id=self.user_id,
             )
 
@@ -72,23 +84,23 @@ class SessionListApiTests(unittest.TestCase):
             await store.append(
                 "sess-1",
                 [ModelRequest(parts=[UserPromptPart(content="only a")])],
-                agent_id="agent-a",
+                agent_id=self.agent_a,
                 user_id=self.user_id,
             )
             await store.append(
                 "sess-2",
                 [ModelRequest(parts=[UserPromptPart(content="only b")])],
-                agent_id="agent-b",
+                agent_id=self.agent_b,
                 user_id=self.user_id,
             )
 
         asyncio.run(seed())
 
-        response = self.client.get("/api/v1/sessions?agent_id=agent-a")
+        response = self.client.get(f"/api/v1/sessions?agent_id={self.agent_a}")
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertEqual(payload["total"], 1)
-        self.assertEqual(payload["items"][0]["agent_id"], "agent-a")
+        self.assertEqual(payload["items"][0]["agent_id"], self.agent_a)
         self.assertEqual(payload["items"][0]["user_prompt"], "only a")
 
     def test_list_sessions_has_messages_filter(self) -> None:
@@ -99,6 +111,7 @@ class SessionListApiTests(unittest.TestCase):
             await store.append(
                 "with-messages",
                 [ModelRequest(parts=[UserPromptPart(content="hi")])],
+                agent_id=self.agent_a,
                 user_id=self.user_id,
             )
 
@@ -122,11 +135,13 @@ class SessionListApiTests(unittest.TestCase):
             await store.append(
                 "owned",
                 [ModelRequest(parts=[UserPromptPart(content="mine")])],
+                agent_id=self.agent_a,
                 user_id=self.user_id,
             )
             await store.append(
                 "other",
                 [ModelRequest(parts=[UserPromptPart(content="not mine")])],
+                agent_id=self.agent_a,
                 user_id="user-b",
             )
 

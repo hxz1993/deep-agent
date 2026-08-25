@@ -38,7 +38,7 @@ class _NoopStore:
     async def get_history(self, session_id: str, *, agent_id: str | None = None):
         return []
 
-    async def append(self, session_id: str, messages, *, agent_id=None, user_id=None):
+    async def append(self, session_id: str, messages, **_kwargs):
         return None
 
 

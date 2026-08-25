@@ -137,32 +137,6 @@ class HistoryMessage(BaseModel):
     )
 
 
-class HistoryContextCheckpoint(BaseModel):
-    source_last_sequence: int
-    covered_model_message_count: int
-    source_estimated_tokens: int
-    projected_estimated_tokens: int
-    reduction_ratio: float
-    new_message_count: int
-    summary_model_id: str | None = None
-    row_version: int
-    updated_at: datetime
-
-
-class SessionHistoryResponse(BaseModel):
-    session_id: str
-    conversation_id: str
-    messages: list[HistoryMessage]
-    model_message_count: int = Field(
-        default=0,
-        description="Raw ModelMessage count; use as branch_from to append at end.",
-    )
-    context_checkpoint: HistoryContextCheckpoint | None = Field(
-        default=None,
-        description="Current active context checkpoint; not a chat message.",
-    )
-
-
 def _user_prompt_attachments(part: UserPromptPart) -> list[HistoryAttachmentPart]:
     content = part.content
     if isinstance(content, str):

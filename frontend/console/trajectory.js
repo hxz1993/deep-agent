@@ -46,39 +46,30 @@ function usageTotal(usage) {
   return null;
 }
 
-function nativeProjection(message) {
-  const native = {
-    model_name: message?.model_name || null,
-    provider_name: message?.provider_name || null,
-    provider_response_id: message?.provider_response_id || null,
-    finish_reason: message?.finish_reason || null,
-    usage: message?.usage || null,
-  };
-  return Object.values(native).some((value) => value != null) ? native : null;
-}
-
 function eventLabel(kind, part = {}) {
   if (kind === "input") return "用户输入";
   if (kind === "context") return "输入上下文";
   if (kind === "thinking") return "模型思考";
   if (kind === "assistant") return "助手输出";
-  if (kind === "checkpoint") return "上下文 Checkpoint";
+  if (kind === "run") return "模型运行";
   if (kind === "compaction") return "上下文压缩";
   if (kind === "planning") return part.tool || "任务规划";
   if (kind === "deferred") return part.tool || "等待用户操作";
-  return part.tool || "工具调用";
+  if (kind === "tool") return part.tool || "工具调用";
+  return part.event_type || "会话事件";
 }
 
 function eventSummary(kind, source = {}) {
   if (kind === "input") return valuePreview(source.content) || "仅包含附件或上下文引用";
   if (kind === "context") return valuePreview(source.label || source.content || source.type || source.key) || "结构化上下文";
   if (["thinking", "assistant"].includes(kind)) return valuePreview(source.content);
-  if (kind === "checkpoint") {
-    const before = source.source_estimated_tokens;
-    const after = source.projected_estimated_tokens;
-    return before != null && after != null ? `${before} → ${after} Token` : "当前生效的上下文压缩边界";
+  if (kind === "run") return source.status ? `Run ${source.status}` : "模型运行";
+  if (kind === "compaction") {
+    const before = source.budget?.estimated_before;
+    const after = source.budget?.estimated_after;
+    return before != null && after != null ? `${before} → ${after} Token` : "上下文压缩事件";
   }
-  if (source.type === "tool_result") return valuePreview(source.result) || "工具已返回";
+  if (source.type === "tool_result") return valuePreview(source.result ?? source.content) || "工具已返回";
   return valuePreview(source.args) || "等待参数或结果";
 }
 
@@ -113,9 +104,9 @@ function newEvent({
   };
 }
 
-function partKind(part) {
-  if (part?.source === "planning") return "planning";
-  if (part?.type === "tool_call" && part?.widget) return "deferred";
+function partKind(part, toolName) {
+  if (toolName === "write_plan") return "planning";
+  if (part?.type === "tool_call" && (part?.widget || part?.metadata?.widget)) return "deferred";
   return "tool";
 }
 
@@ -146,155 +137,110 @@ function assistantLoopSummary(payload = {}) {
   return payload.thinking ? "模型处理中" : "模型响应";
 }
 
-/** Build an honest trace projection from the existing History contract. */
+const RESULT_TYPES = new Set(["tool/result", "tool/search_result", "capability/load_result", "tool/native_result"]);
+const CALL_TYPES = new Set(["tool/call", "tool/search_call", "capability/load_call", "tool/native_call"]);
+
+function userPayload(content) {
+  if (typeof content === "string") return { content, attachments: [], context_refs: [] };
+  if (!Array.isArray(content)) return { content: null, attachments: [], context_refs: [] };
+  const texts = [];
+  const attachments = [];
+  const contextRefs = [];
+  content.forEach((item) => {
+    if (typeof item === "string") texts.push(item);
+    else if (item?.kind === "text-content") texts.push(String(item.content || ""));
+    else if (item?.kind === "attachment-ref") attachments.push(item);
+    else if (item?.kind === "context-ref") contextRefs.push(item);
+  });
+  return { content: texts.filter(Boolean).join("\n") || null, attachments, context_refs: contextRefs };
+}
+
+function storedEventKind(event, part) {
+  if (event.event_type === "run") return "run";
+  if (event.event_type === "compaction") return "compaction";
+  if (event.event_type === "user/message") return "input";
+  if (event.event_type === "assistant/reasoning") return "thinking";
+  if (["assistant/text", "assistant/file", "assistant/speech"].includes(event.event_type)) return "assistant";
+  if (CALL_TYPES.has(event.event_type) || RESULT_TYPES.has(event.event_type)) {
+    return partKind(part, event.tool_name || part?.tool_name);
+  }
+  return "event";
+}
+
+function projectStoredEvent(event, inputSequence) {
+  const rawPayload = event?.payload && typeof event.payload === "object" ? event.payload : {};
+  const part = rawPayload.part && typeof rawPayload.part === "object" ? rawPayload.part : {};
+  const messageMeta = rawPayload.message_meta && typeof rawPayload.message_meta === "object"
+    ? rawPayload.message_meta
+    : {};
+  const kind = storedEventKind(event, part);
+  const toolName = event.tool_name || part.tool_name || null;
+  let payload = rawPayload;
+  let result = null;
+  let summaryPart = { event_type: event.event_type };
+  if (kind === "input") {
+    payload = userPayload(part.content);
+    summaryPart = { content: payload.content };
+  } else if (["assistant", "thinking"].includes(kind)) {
+    payload = { content: part.content ?? null, metadata: part.metadata || null };
+    summaryPart = { content: part.content ?? null };
+  } else if (CALL_TYPES.has(event.event_type)) {
+    payload = { args: part.args ?? null, metadata: part.metadata || null };
+    summaryPart = { type: "tool_call", tool: toolName, args: part.args ?? null };
+  } else if (RESULT_TYPES.has(event.event_type)) {
+    const metadata = part.metadata && typeof part.metadata === "object" ? part.metadata : {};
+    payload = { metadata };
+    result = {
+      result: part.content ?? null,
+      outcome: part.outcome || null,
+      plan: toolName === "write_plan" ? metadata.deepagent_plan || null : null,
+    };
+    summaryPart = { type: "tool_result", tool: toolName, result: part.content ?? null };
+  } else if (kind === "run") {
+    summaryPart = { status: event.status };
+  } else if (kind === "compaction") {
+    summaryPart = rawPayload;
+  }
+  const native = Object.values(messageMeta).some((value) => value != null) ? messageMeta : null;
+  const projected = newEvent({
+    id: event.event_id,
+    kind,
+    inputSequence: Math.max(inputSequence, 1),
+    runId: event.run_id || messageMeta.run_id || null,
+    timestamp: event.created_at || part.timestamp || messageMeta.timestamp || null,
+    status: event.status || (part.outcome === "failed" ? "failed" : "completed"),
+    part: { ...summaryPart, tool: toolName, source: toolName === "write_plan" ? "planning" : null },
+    payload,
+    result,
+    native,
+  });
+  projected.sequence = Number(event.sequence || 0);
+  projected.turn_id = event.turn_id || null;
+  projected.message_id = event.message_id || null;
+  projected.event_type = event.event_type;
+  projected.tool_call_id = event.call_id || part.tool_call_id || null;
+  projected.timestamp_end = event.updated_at || projected.timestamp;
+  return projected;
+}
+
+/** Build one trajectory row from each persisted semantic Session Event. */
 export function buildTrajectory(history = {}) {
-  const messages = Array.isArray(history?.messages) ? history.messages : [];
-  const events = [];
-  const calls = new Map();
+  const items = [...(Array.isArray(history?.items) ? history.items : [])]
+    .sort((left, right) => Number(left.sequence || 0) - Number(right.sequence || 0));
   let inputSequence = 0;
-  let lastRunId = null;
-
-  messages.forEach((message, messageIndex) => {
-    if (message?.role === "user") {
-      inputSequence += 1;
-      const inputEvent = newEvent({
-        id: `history-user-${messageIndex}`,
-        kind: "input",
-        inputSequence,
-        timestamp: message.timestamp || null,
-        message,
-        payload: {
-          content: message.content || null,
-          attachments: message.attachments || [],
-          context_refs: message.context_refs || [],
-          branch_point: message.branch_point ?? null,
-        },
-      });
-      events.push(inputEvent);
-      (message.context_refs || []).forEach((reference, referenceIndex) => {
-        events.push(newEvent({
-          id: `history-context-${messageIndex}-${referenceIndex}`,
-          kind: "context",
-          inputSequence,
-          timestamp: message.timestamp || null,
-          part: { type: "context", content: reference?.label || reference?.type || reference?.key },
-          message,
-          payload: { reference, parent_input_id: inputEvent.id },
-        }));
-      });
-      return;
-    }
-    if (message?.role !== "assistant") return;
-    const runId = message.run_id || lastRunId;
-    if (message.run_id) lastRunId = message.run_id;
-    const native = nativeProjection(message);
-    const parts = Array.isArray(message.parts) ? message.parts : [];
-    const assistantParts = parts.filter((part) => ["thinking", "text", "tool_call"].includes(part?.type));
-    if (assistantParts.length) {
-      const payload = assistantLoopPayload(assistantParts);
-      const assistantEvent = newEvent({
-        id: `history-assistant-${messageIndex}`,
-        kind: "assistant",
-        inputSequence: Math.max(inputSequence, 1),
-        runId,
-        timestamp: message.request_timestamp || message.timestamp || null,
-        status: message.status,
-        part: { type: "assistant_loop", content: payload.content || payload.thinking || "" },
-        message,
-        payload,
-        native,
-      });
-      assistantEvent.summary = assistantLoopSummary(payload);
-      assistantEvent.timestamp_end = message.timestamp || null;
-      events.push(assistantEvent);
-    }
-    parts.forEach((part, partIndex) => {
-      if (!part || typeof part !== "object") return;
-      if (["thinking", "text"].includes(part.type)) return;
-      if (part.type === "tool_result" && part.tool_call_id && calls.has(part.tool_call_id)) {
-        const event = calls.get(part.tool_call_id);
-        event.result = redactTrajectoryValue(jsonClone({
-          result: part.result,
-          artifacts: part.artifacts || null,
-          plan: part.plan || null,
-          outcome: part.outcome || null,
-        }));
-        event.status = normalizedStatus(
-          part.outcome === "failed" ? "failed" : message.status,
-        );
-        if (!event.summary) event.summary = valuePreview(event.payload?.args) || "无参数";
-        event.timestamp_end = part.timestamp || message.timestamp || null;
-        if (!event.native && native) event.native = redactTrajectoryValue(jsonClone(native));
-        return;
-      }
-      const kind = partKind(part);
-      const event = newEvent({
-        id: `history-${messageIndex}-${partIndex}`,
-        kind,
-        inputSequence: Math.max(inputSequence, 1),
-        runId,
-        timestamp: message.timestamp || null,
-        status: part.type === "tool_call" ? "pending" : message.status,
-        part,
-        message,
-        payload: part.type === "tool_call"
-          ? { args: part.args ?? null, widget: part.widget || null, metadata: part.metadata || null }
-          : { content: part.content ?? null },
-        result: part.type === "tool_result"
-          ? { result: part.result, artifacts: part.artifacts || null, plan: part.plan || null, outcome: part.outcome || null }
-          : null,
-        native,
-      });
-      if (part.type === "tool_result") {
-        event.status = normalizedStatus(part.outcome === "failed" ? "failed" : message.status);
-      }
-      events.push(event);
-      if (part.type === "tool_call" && part.tool_call_id) calls.set(part.tool_call_id, event);
-    });
+  return items.map((event) => {
+    if (event.event_type === "user/message") inputSequence += 1;
+    return projectStoredEvent(event, inputSequence);
   });
-
-  if (history?.context_checkpoint) {
-    const checkpoint = history.context_checkpoint;
-    events.push(newEvent({
-      id: "history-checkpoint",
-      kind: "checkpoint",
-      inputSequence: Math.max(inputSequence, 1),
-      runId: lastRunId,
-      timestamp: checkpoint.updated_at || null,
-      part: checkpoint,
-      payload: checkpoint,
-    }));
-  }
-
-  for (const event of calls.values()) {
-    if (event.status === "pending") event.status = "pending";
-  }
-  for (let index = 0; index < events.length; index += 1) {
-    const event = events[index];
-    if (event.kind !== "input" || event.run_id) continue;
-    for (let cursor = index + 1; cursor < events.length; cursor += 1) {
-      const candidate = events[cursor];
-      if (candidate.kind === "input") break;
-      if (candidate.run_id) {
-        event.run_id = candidate.run_id;
-        break;
-      }
-    }
-  }
-  const runByInput = new Map(
-    events.filter((event) => event.kind === "input" && event.run_id)
-      .map((event) => [event.input_sequence, event.run_id]),
-  );
-  events.filter((event) => event.kind === "context" && !event.run_id).forEach((event) => {
-    event.run_id = runByInput.get(event.input_sequence) || null;
-  });
-  return events;
 }
 
 export function trajectoryStats(events = []) {
   return {
     inputs: new Set(events.map((event) => event.input_sequence).filter(Boolean)).size,
-    calls: events.filter((event) => TOOL_KINDS.has(event.kind)).length,
+    calls: events.filter((event) => (
+      TOOL_KINDS.has(event.kind)
+      && (!event.event_type || CALL_TYPES.has(event.event_type))
+    )).length,
     runs: new Set(events.map((event) => event.run_id).filter(Boolean)).size,
   };
 }
@@ -302,7 +248,10 @@ export function trajectoryStats(events = []) {
 export function filterTrajectory(events = [], { mode = "sequence", query = "" } = {}) {
   const needle = String(query || "").trim().toLocaleLowerCase();
   return events.filter((event) => {
-    if (mode === "calls" && !TOOL_KINDS.has(event.kind)) return false;
+    if (mode === "calls" && !(
+      TOOL_KINDS.has(event.kind)
+      && (!event.event_type || CALL_TYPES.has(event.event_type))
+    )) return false;
     if (!needle) return true;
     const haystack = [
       event.label,
@@ -318,7 +267,8 @@ export function filterTrajectory(events = [], { mode = "sequence", query = "" } 
 
 function liveEventKind(type, data) {
   if (["thinking", "text"].includes(type)) return "assistant";
-  if (type === "context_compaction" || type === "context_compaction_result") return "compaction";
+  if (["session", "final", "cancelled", "error"].includes(type)) return "run";
+  if (["context_compaction", "context_compaction_progress", "context_compaction_result"].includes(type)) return "compaction";
   if (type === "tool_call" || type === "tool_result" || type === "tool_call_removed") {
     if (data?.source === "planning") return "planning";
     if (data?.widget) return "deferred";
@@ -554,11 +504,7 @@ function renderPlanningSummary(event) {
   const plan = planSnapshot(event);
   const completed = Number(plan?.completed || 0);
   const total = Number(plan?.total || plan?.items?.length || 0);
-  const label = {
-    write_plan: "创建或改写任务计划",
-    read_plan: "读取当前任务计划",
-    update_task_statuses: "更新任务状态",
-  }[event.label] || event.label;
+  const label = event.label === "write_plan" ? "创建或改写任务计划" : event.label;
   const progress = `<p class="trajectory-summary-lead">${icon("list-checks")}<strong>${escapeHtml(label)}</strong></p>
     ${total ? `<div class="trajectory-plan-progress"><span style="width:${Math.min(100, Math.max(0, completed / total * 100))}%"></span></div><p class="trajectory-plan-count">${completed} / ${total} 已完成</p>` : ""}`;
   return `${renderSummarySection("Plan", progress)}
@@ -575,13 +521,19 @@ function renderDeferredSummary(event) {
     ${renderPayloadResultSections({ payload: event.payload, result: toolResultValue(event) })}`;
 }
 
-function renderCheckpointSummary(event) {
-  const before = event.payload?.source_estimated_tokens;
-  const after = event.payload?.projected_estimated_tokens;
+function renderCompactionSummary(event) {
+  const before = event.payload?.budget?.estimated_before;
+  const after = event.payload?.budget?.estimated_after;
   const primary = before != null && after != null
     ? `${Number(before).toLocaleString("zh-CN")} → ${Number(after).toLocaleString("zh-CN")} Token`
     : event.summary;
-  return renderSummarySection("Checkpoint", `<p class="trajectory-summary-lead">${icon("archive-restore")}<strong>${escapeHtml(primary || event.label)}</strong></p>`);
+  const source = event.payload?.source || {};
+  const detail = [
+    source.through_sequence != null ? `截至 Sequence ${source.through_sequence}` : null,
+    event.payload?.summary_call?.model_id || null,
+    event.payload?.error?.message || event.payload?.error || null,
+  ].filter(Boolean).join(" · ");
+  return renderSummarySection("Compaction", `<p class="trajectory-summary-lead">${icon("archive-restore")}<strong>${escapeHtml(primary || event.label)}</strong></p>${detail ? `<p class="trajectory-summary-copy">${escapeHtml(detail)}</p>` : ""}`);
 }
 
 const SUMMARY_RENDERERS = Object.freeze({
@@ -591,8 +543,7 @@ const SUMMARY_RENDERERS = Object.freeze({
   planning: renderPlanningSummary,
   deferred: renderDeferredSummary,
   tool: renderToolSummary,
-  checkpoint: renderCheckpointSummary,
-  compaction: renderCheckpointSummary,
+  compaction: renderCompactionSummary,
 });
 
 function renderSummary(event, events) {
@@ -654,7 +605,7 @@ function renderDetail(event, activeTab = "summary", events = []) {
   if (activeTab === "result") content = renderJsonBlock(event.result);
   if (activeTab === "preview") content = renderPreview(event);
   if (activeTab === "raw") content = renderRaw(event);
-  const headerLabel = TOOL_KINDS.has(event.kind) || ["checkpoint", "compaction"].includes(event.kind)
+  const headerLabel = TOOL_KINDS.has(event.kind) || event.kind === "compaction"
     ? event.label
     : event.run_id ? `Run ${String(event.run_id).slice(0, 8)}` : "";
   return `
@@ -675,7 +626,7 @@ export function createTrajectoryController({ state }) {
   const exportButton = document.getElementById("exportTrajectoryBtn");
   if (!root || !list || !detail || !conversationTab || !trajectoryTab) return null;
 
-  let history = { messages: [] };
+  let history = { items: [] };
   let historyEvents = [];
   let liveEvents = [];
   let currentRunId = null;
@@ -687,7 +638,11 @@ export function createTrajectoryController({ state }) {
   let renderQueued = false;
   const collapsedGroups = new Set();
 
-  const allEvents = () => [...historyEvents, ...liveEvents];
+  const allEvents = () => [...historyEvents, ...liveEvents].sort((left, right) => {
+    const leftSequence = Number.isFinite(Number(left.sequence)) ? Number(left.sequence) : Number.MAX_SAFE_INTEGER;
+    const rightSequence = Number.isFinite(Number(right.sequence)) ? Number(right.sequence) : Number.MAX_SAFE_INTEGER;
+    return leftSequence - rightSequence;
+  });
 
   function selectView(view) {
     const trajectoryActive = view === "trajectory";
@@ -742,8 +697,6 @@ export function createTrajectoryController({ state }) {
       const showToolName = ["tool", "deferred"].includes(event.kind);
       const planningSummary = {
         write_plan: "创建或改写任务计划",
-        read_plan: "读取当前任务计划",
-        update_task_statuses: "更新任务状态",
       }[event.label];
       const summary = event.kind === "planning" ? (planningSummary || "更新任务计划") : (event.summary || "暂无内容");
       html.push(`<button type="button" class="trajectory-row ${escapeHtml(event.kind)} ${selectedId === event.id ? "active" : ""} ${collapsed ? "hidden" : ""}" data-trajectory-id="${escapeHtml(event.id)}">
@@ -770,7 +723,7 @@ export function createTrajectoryController({ state }) {
   }
 
   function setHistory(nextHistory) {
-    history = nextHistory || { messages: [] };
+    history = nextHistory || { items: [] };
     historyEvents = buildTrajectory(history);
     liveEvents = [];
     currentRunId = null;
@@ -781,7 +734,7 @@ export function createTrajectoryController({ state }) {
   }
 
   function reset() {
-    setHistory({ messages: [] });
+    setHistory({ items: [] });
     selectView("conversation");
   }
 
@@ -859,6 +812,68 @@ export function createTrajectoryController({ state }) {
     const type = event || data?.type;
     const payload = data || {};
     if (!type) return;
+    if (["session_event_appended", "session_event_updated"].includes(type)) {
+      const stored = payload.event || payload;
+      if (!stored?.event_id || !stored?.event_type) return;
+      const existing = historyEvents.find((item) => item.id === stored.event_id);
+      const liveInput = stored.event_type === "user/message"
+        ? [...liveEvents].reverse().find((item) => item.kind === "input")
+        : null;
+      const inputSequence = existing?.input_sequence
+        || liveInput?.input_sequence
+        || Math.max(
+          trajectoryStats(allEvents()).inputs + (stored.event_type === "user/message" ? 1 : 0),
+          1,
+        );
+      const projected = projectStoredEvent(stored, inputSequence);
+      const index = historyEvents.findIndex((item) => item.id === projected.id);
+      if (index >= 0) historyEvents[index] = projected;
+      else historyEvents.push(projected);
+      if (stored.event_type === "user/message") {
+        if (liveInput) liveEvents = liveEvents.filter((item) => (
+          item !== liveInput && item.payload?.parent_input_id !== liveInput.id
+        ));
+      }
+      if (stored.event_type === "compaction") {
+        liveEvents = liveEvents.filter((item) => !(item.kind === "compaction" && item.compaction_event_id === stored.event_id));
+      }
+      if ((CALL_TYPES.has(stored.event_type) || RESULT_TYPES.has(stored.event_type)) && stored.call_id) {
+        liveEvents = liveEvents.filter((item) => item.tool_call_id !== stored.call_id);
+      }
+      if (stored.event_type === "run" && stored.run_id && stored.status !== "running") {
+        liveEvents = liveEvents.filter((item) => item.run_id !== stored.run_id || ["input", "context"].includes(item.kind));
+        if (activeAssistantLoop?.run_id === stored.run_id) activeAssistantLoop = null;
+      }
+      historyEvents.sort((left, right) => Number(left.sequence || 0) - Number(right.sequence || 0));
+      selectedId = projected.id;
+      scheduleRender();
+      return;
+    }
+    if (type === "context_compaction_progress") {
+      const id = payload.event_id || "current";
+      const existing = liveEvents.find((item) => item.kind === "compaction" && item.compaction_event_id === id);
+      const next = {
+        id: `live-compaction-${id}`,
+        compaction_event_id: id,
+        kind: "compaction",
+        input_sequence: Math.max(trajectoryStats(allEvents()).inputs, 1),
+        run_id: payload.run_id || currentRunId,
+        timestamp: existing?.timestamp || new Date().toISOString(),
+        timestamp_end: new Date().toISOString(),
+        status: "running",
+        label: "上下文压缩",
+        summary: payload.phase || "正在处理上下文",
+        tool_call_id: null,
+        source: "sse",
+        payload: redactTrajectoryValue(jsonClone(payload)),
+        result: null,
+        native: null,
+      };
+      if (existing) Object.assign(existing, next);
+      else liveEvents.push(next);
+      scheduleRender();
+      return;
+    }
     if (type === "session") {
       currentRunId = payload.run_id || currentRunId;
       const currentUser = [...liveEvents].reverse().find((item) => item.kind === "input" && !item.run_id);

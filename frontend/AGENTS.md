@@ -13,7 +13,7 @@ Console 图标统一使用仓库内 `frontend/vendor/lucide.min.js` 的线性 SV
 Bundled Console 与后端统一在 `feat-ruge-0803` 主开发分支维护，不再保留独立 UI worktree。
 每批 UI 需求开始前先确认分支和工作区，保留已有改动；修改范围通常限定在
 `frontend/console/**`、`tests/frontend/console/**`，必要时同步前端说明。若需求实际需要后端
-API、SSE、History 或持久化契约变化，应先确认产品边界，再修改对应拥有层。
+API、SSE、Event Store或持久化契约变化，应先确认产品边界，再修改对应拥有层。
 
 ---
 
@@ -37,21 +37,21 @@ frontend/
 | 功能 | 实现 |
 | --- | --- |
 | 流式对话 | `fetch` + `ReadableStream` 手动解析 SSE（非 `EventSource`，因需 POST） |
-| 停止生成 | `POST /sessions/{id}/cancel` 后等待真实 `cancelled`；History 的 `assistant.status=interrupted` 恢复“已停止”，不以 Abort 或本地假事件代替 |
+| 停止生成 | `POST /sessions/{id}/cancel` 后等待真实`cancelled`；Event投影的`assistant.status=interrupted`恢复“已停止”，不以Abort或本地假事件代替 |
 | 附件上传 | `POST /api/v1/uploads`（multipart）→ 发送时仅传 `attachments[]` 引用；可读文档由系统 `read_file`按需读取 |
 | 思考过程 UI | `thinking` 可折叠块，默认折叠；与 `text` 分离 |
 | 工具调用 UI | `tool_call` / `tool_result` 可折叠；同 `tool_call_id` 合并更新；`tool_call_removed` 删除被 ModelRetry 或取消撤回的临时卡片 |
-| HITL UI 工具 | `ui:builtin` + 数据库手工 UI 工具包；Agent 按包选择，SSE / history 仍使用稳定工具协议名并携带 `widget` / `metadata`；见 [`../docs/guides/ui-tools-external.md`](../docs/guides/ui-tools-external.md) |
+| HITL UI 工具 | `ui:builtin` + 数据库手工UI工具包；Agent按包选择，SSE/Event仍使用稳定工具协议名并携带`widget/metadata`；见[`../docs/guides/ui-tools-external.md`](../docs/guides/ui-tools-external.md) |
 | Markdown | marked + DOMPurify + highlight.js |
 | 会话 | `session_id` 由后端 `session` 事件返回；`GET/DELETE /api/v1/sessions`；标题展示 `title \|\| user_prompt`（见 [`../docs/guides/experience/ai-title-generator.md`](../docs/guides/experience/ai-title-generator.md)） |
 | 能力面板 | `GET /api/v1/tools` |
 | 配置 | `localStorage` 只保存调试 App；全局环境配置只读展示，身份和鉴权由平台提供 |
 | 内置工具目录 | 配置中心只读展示 `builtin:general`、`builtin:sandbox`；Agent 按包选择 |
 | 系统工具目录 | 配置中心按任务规划、Skill、文件、工具结果、MCP 工具发现、MCP Resource 分组展示自动注入工具；不参与 Agent 配置 |
-| 任务计划 | `write_plan`、`read_plan`、`update_task_statuses`三种`source=planning`工具事件聚合到消息区底部唯一浮层；实时覆盖最新快照；正常Final或UI Pending隐藏，取消/失败保留；History只恢复最新异常Run的未完成计划 |
+| 任务计划 | 只识别`write_plan`完整快照；从Event API投影最新成功计划和每次更新位置，同Turn Deferred由后端恢复PlanStore |
 | Skill | 独立 Skill 列表与详情；上传包安装/替换/启停/单个与全部导出/删除；文本、Word、Excel 资源可预览，脚本只列包内路径和数量，不展示可执行性判断；Agent 使用独立 `skills` 列表选择 |
 | 一体化控制台 | `/console/`；工作台、配置和诊断的唯一入口 |
-| 会话轨迹 | 工作台“对话 / 轨迹”页签；对现有History和当前SSE做只读、脱敏投影，不建立第二套会话事实源 |
+| 会话轨迹 | 工作台“对话 / 轨迹”页签；按Sequence读取Event API并按Event ID Upsert持久化SSE，不建立第二套事实源 |
 
 v0.3.12 的配置卡只读展示工具披露策略：附件包为“有附件时可用”，大型 MCP 为“自动预选 Top 3 / 搜索 Top 5”。聊天中的 `search_tools` 是运行诊断过程，默认折叠显示为“正在查找可用工具”，不伪装成业务 MCP 工具。
 
@@ -60,12 +60,12 @@ v0.3.12 的配置卡只读展示工具披露策略：附件包为“有附件时
 测试 Header 和会话详情统一位于对话标题栏右侧。测试 Header 使用锚定按钮的轻量浮层，
 该状态不写 LocalStorage。窄屏继续压缩同一套多栏布局，不切换成抽屉或另一套交互模式。
 
-右侧会话详情使用“会话 / 当前回合 / 上下文引用”三页签：会话页展示会话、请求 Header和
-复合上下文预算；当前回合页展示最近一次 Run Usage、压缩和 Checkpoint；上下文引用页由
+右侧会话详情使用“会话 / 当前回合 / 上下文引用”三页签：会话页展示会话、请求Header和
+复合上下文预算；当前回合页展示最近一次Run Usage与Compaction；上下文引用页由
 消息中的引用信息按钮定位并展示只读 JSON。工具过程仍由对话区负责；独立轨迹页只在当前页面
-内投影实时SSE，并在History刷新后以持久消息重新校准，不保存第二份事件列表。
+内投影实时SSE，并在Event API刷新后以持久事件重新校准，不保存第二份事件列表。
 轨迹将同一ModelResponse中的thinking、text和tool call意图聚合为一个助手Loop，同时保留独立
-Tool Call/Result记录；用户输入行只按History中现有`context_refs.type/label/schema_version`和
+Tool Call/Result记录；用户输入行只按Event中现有`context_refs.type/label/schema_version`和
 附件元数据加标记，不从正文猜测业务上下文。轨迹详情复用工作台右侧Inspector，返回对话后恢复
 原会话详情。
 `context-status` 返回的是 `estimate_scope=history_only` 的会话历史快照；最近一次 Run Usage
@@ -107,9 +107,9 @@ Agent 独立编辑页的系统提示词标题栏显示“字符数 / 预估 Toke
   `deep_agent.__version__`；配置中心的数据库结构 revision 是独立运维信息。
 - Markdown统一由`markdown.js`渲染：工作台最终回复和Skill资源预览复用同一套安全解析；
   `mermaid`围栏只在完整回复落定后按需加载本地vendor并以严格模式生成SVG，失败时保留源码。
-- 工作台“轨迹”页与对话共享同一Session，不创建Run或模型请求；History投影只暴露安全的
-  ModelResponse摘要和Tool Call/Result，认证信息、Provider私有字段、系统提示词与动态工具Schema
-  不得事后猜测或展示。当前SSE只用于实时更新，刷新后仍以History为准。
+- 工作台“轨迹”页与对话共享同一Session，不创建Run或模型请求；Event API只暴露公共Event Payload，
+  认证信息、内部Search Text与敏感Provider字段不展示。持久化SSE按Event ID Upsert，刷新后以完整
+  Event分页结果校准。
 - 配置中心左侧页签只在当前前端页面的模块内存中保留；工作台与配置中心之间切换会恢复上次页签，浏览器刷新后重新回到 Agent，不写入 LocalStorage 或后端。
 - Agent 独立编辑页在标题区显示完整 Agent ID；测试工作台对话标题第二行以 `会话 ID：<完整 ID>` 展示当前会话，不再截取前八位。
 - `/` 跳转到 `/console/#/workspace`；旧 `/settings.html`、`/models.html`、`/admin/` 返回 404。
@@ -124,33 +124,31 @@ Agent 独立编辑页的系统提示词标题栏显示“字符数 / 预估 Toke
 | event | data |
 | --- | --- |
 | `session` | `{ session_id }` 或含 `agent_id` |
-| `context_compaction` | `{ type, phase, message, ... }`（当前请求瞬时状态，不进入历史） |
+| `context_compaction_progress` | `{ type, persisted:false, event_id, phase, elapsed_ms, attempt }`（瞬时状态） |
 | `context_compaction_result` | 主动压缩最终结果；成功、无需压缩或失败，不作为聊天消息 |
+| `session_event_appended` | `{ type, persisted:true, event }`；按Event ID插入并按Sequence排序 |
+| `session_event_updated` | `{ type, persisted:true, event }`；按相同Event ID原位更新 |
 | `text` | `{ type, delta }` |
 | `thinking` | `{ type, delta }` |
 | `tool_call` | `{ type, tool, args, tool_call_id, widget?, metadata?, source? }` |
 | `tool_result` | `{ type, tool, result, tool_call_id, artifacts?, plan? }`；规划结果携带计划快照，大结果外置时保留预览 |
-| `tool_call_removed` | `{ type, tool, tool_call_id, reason }`；删除对应实时工具块，不写入 History |
+| `tool_call_removed` | `{ type, tool, tool_call_id, reason }`；删除对应实时工具块，不写入Event Store |
 | `final` | `{ type, status, output, usage, deferred?, context? }`（`context` 为预算/压缩观测） |
 | `error` | `{ type, message }` |
-| `cancelled` | `{ type, status, usage, history_persisted, model_message_count, user_branch_point }`；保留当前流式内容并标记中断，重新打开会话时再由 History 校准 |
+| `cancelled` | `{ type, status, usage, history_persisted, model_message_count }`；保留当前流式内容并标记中断，重新打开会话时再由Event API校准 |
 
 完整协议（含同 ID 多次推送、生命周期）：[`../docs/guides/sse-protocol.md`](../docs/guides/sse-protocol.md)。
 
 实现参考：`console/chat.js` 与 `console/protocol.js`。
 
 自动和主动上下文压缩复用消息区中的同一套独立过程条，不挂在助手消息内部。状态延迟
-150ms 显示；成功写入 Checkpoint 后立即刷新历史，并与重新打开会话一样展示当前有效的
-压缩分隔标记。临时 Sliding Window、失败和无持久化结果只显示瞬时过程条，不伪造历史标记。
+150ms显示；Running与终态使用同一Compaction Event ID，轨迹在真实Sequence原位更新。普通历史聊天
+默认隐藏完成标记，直播状态和轨迹始终可见；失败终态不伪装成有效摘要锚点。
 
 v0.3.4 的输入框在附件线性图标旁提供主动压缩线性图标。按钮状态、上下文百分比和 tooltip
 只读取后端 `context-status`，不得在前端复制 Token 估算、动态输出预测或安全余量算法。
-前端不得因历史较短、已有 Checkpoint 或没有新增消息禁用主动入口；这些情况发给后端并展示
-`noop` 结果。只在无会话、当前 Run/压缩进行中或等待 Deferred 等技术冲突时禁用。
-历史中的压缩边界来自 `history.context_checkpoint`，使用分隔标记展示，不渲染成消息气泡。
-v0.3.14 起主动压缩的终态不内嵌刷新后的 `context_status`：客户端收到
-`context_compaction_result` 后先结束压缩流，再分别刷新 history 与 context-status，避免
-Checkpoint 已成功保存但状态查询延迟时让 SSE 长时间不关闭。
+前端不得复制压缩边界、Token估算或目标复检算法。只在无会话、当前Run/压缩进行中或等待Deferred
+等技术冲突时禁用主动入口；后端结果通过同一Event和`context-status`校准。
 
 v0.3.5 Console 只兼容展示历史 `context_refs` 的 label/type，不提供业务 JSON 构造或编辑器；
 含引用的历史消息不允许用旧文本编辑动作重试，避免静默丢失引用。业务 Chip 和详情由宿主前端实现。
@@ -201,7 +199,8 @@ python3.12 -m http.server 5173
 | 上下文压缩测试会话 | `console/workspace.js` → 场景弹窗、创建后打开会话并预填验证问题 |
 | Markdown 主题/安全 | `vendor/`，见 `vendor/README.md` |
 
-历史消息由后端按 `session_id` 维护；切换会话时 `GET /api/v1/sessions/{id}/history` 回放。pending UI 工具的 `tool_call` part 同样经后端 enrichment 附带 `widget` / `metadata`。
+历史消息由后端按`session_id`维护；切换会话时循环调用`GET /api/v1/sessions/{id}/events`直到
+`next_after_sequence=null`。Pending UI工具的`tool/call`Event仍在Payload中携带`widget/metadata`。
 
 ---
 
@@ -218,8 +217,8 @@ python3.12 -m http.server 5173
 - URL MCP 的普通编辑名称只读；改名必须走列表中的独立“重命名”操作。成功后 Console 同步刷新
   MCP、工具包与 Agent 能力目录；Builtin 和历史 stdio MCP 不显示重命名入口。
 - 模型目录只由管理员手工联网刷新models.dev，或导入models.dev官方`catalog.json`；保存模型配置不得触发外网请求。目录按 Lab → Model → Provider 展示，仅负责预填；模态与能力 tags 分开，Agent 运行时只认 `llm_models`。
-- 上下文压缩在模型配置有效上下文窗口时自动启用；Console 只读展示全局策略、预算、
-  压缩前后和 Checkpoint 状态，不提供启用开关，也不展示或编辑摘要正文。
+- 上下文压缩在模型配置有效上下文窗口时自动启用；Console只读展示全局策略、预算和Compaction状态，
+  不提供启用开关，也不编辑摘要正文。
 - Console 从 `/uploads/capabilities`读取实际 MIME、单文件大小和单次数量限制；新请求不得再发送
   `extracted_text`。附件与 Skill正文统一由系统 `read_file`读取，前端只展示普通 Tool Call/Result，
   无需配置或新增专属事件。工具分页协议和解析边界见

@@ -1500,8 +1500,7 @@ html, body {
 }
 .context-budget-badge.reminder { color: #b7791f; border-color: color-mix(in srgb, #b7791f 45%, var(--border)); }
 .context-budget-badge.warning { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 48%, var(--border)); }
-.context-compaction-row,
-.context-checkpoint-marker {
+.context-compaction-row {
   width: min(780px, calc(100% - 38px));
   margin: 10px auto;
   color: var(--text-faint);
@@ -1528,10 +1527,6 @@ html, body {
 }
 .context-compaction-row.failed { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 38%, var(--border)); }
 .context-compaction-row button { border: 0; background: transparent; color: var(--accent); cursor: pointer; }
-.context-checkpoint-marker { display: flex; align-items: center; gap: 9px; }
-.context-checkpoint-marker::before,
-.context-checkpoint-marker::after { content: ""; height: 1px; flex: 1; background: var(--border); }
-.context-checkpoint-marker span { white-space: nowrap; }
 .attachment-preview {
   display: flex;
   flex-wrap: wrap;

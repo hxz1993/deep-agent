@@ -13,6 +13,21 @@ function uiToolJsonValue(value) {
   return JSON.stringify(value, null, 2);
 }
 
+function parseUiToolSchema(value, { label, required = false, requireObject = false } = {}) {
+  const text = String(value || "").trim();
+  if (!text) {
+    if (required) throw new Error(`${label || "Schema"}不能为空`);
+    return null;
+  }
+  const parser = window.DeepAgentSchemaText?.parseSchemaText;
+  if (!parser) throw new Error("JSON Schema 校验器未加载");
+  const schema = parser(text);
+  if (requireObject && schema.type !== "object") {
+    throw new Error(`${label || "Schema"}顶层 type 必须是 object`);
+  }
+  return schema;
+}
+
 const UI_TOOL_TEMPLATES = {
   confirm: {
     label: "确认对话框",
@@ -158,6 +173,7 @@ const uiToolsAdmin = {
   editingName: null,
   editingSource: null,
   editingPackageCode: null,
+  editingToolPackageCode: null,
   selectedPackageCode: null,
   packages: [],
   _schemaReadOnly: false,
@@ -222,17 +238,23 @@ const uiToolsAdmin = {
   },
 
   loadSchemas(parametersSchema, resultSchema, { readOnly = false } = {}) {
-    uiSchemaEditor.renderParamsEditor(this.paramsEl(), parametersSchema || { type: "object", properties: {} }, {
-      readOnly,
-    });
-    uiSchemaEditor.renderResultEditor(this.resultEl(), resultSchema, { readOnly });
+    const params = this.paramsEl();
+    const result = this.resultEl();
+    if (params) {
+      params.value = JSON.stringify(parametersSchema || { type: "object", properties: {} }, null, 2);
+      params.readOnly = readOnly;
+    }
+    if (result) {
+      result.value = resultSchema ? JSON.stringify(resultSchema, null, 2) : "";
+      result.readOnly = readOnly;
+    }
     this._schemaReadOnly = readOnly;
   },
 
   setSchemaReadOnly(readOnly) {
     this._schemaReadOnly = readOnly;
-    uiSchemaEditor.setReadOnly(this.paramsEl(), readOnly);
-    uiSchemaEditor.setReadOnly(this.resultEl(), readOnly);
+    if (this.paramsEl()) this.paramsEl().readOnly = readOnly;
+    if (this.resultEl()) this.resultEl().readOnly = readOnly;
   },
 
   applyTemplate(key, { fillName = false } = {}) {
@@ -259,18 +281,12 @@ const uiToolsAdmin = {
   },
 
   populatePackageSelect(selectedCode = null) {
-    const select = document.getElementById("uiToolPackageCode");
-    if (!select) return;
-    const packages = this.manualPackages();
-    select.innerHTML = packages.length
-      ? packages
-          .map(
-            (item) =>
-              `<option value="${escapeHtml(item.code)}" ${item.code === selectedCode ? "selected" : ""}>${escapeHtml(item.label)} (${escapeHtml(item.code)})</option>`,
-          )
-          .join("")
-      : `<option value="">（请先新建自定义工具包）</option>`;
-    select.disabled = !packages.length;
+    const input = document.getElementById("uiToolPackageCode");
+    const owningPackage = this.packages.find(
+      (item) => item.code === selectedCode && item.source === "manual",
+    );
+    this.editingToolPackageCode = owningPackage?.code || null;
+    if (input) input.value = this.editingToolPackageCode || "";
   },
 
   renderPackages() {
@@ -551,6 +567,7 @@ const uiToolsAdmin = {
     }
     this.editingName = null;
     this.editingSource = "manual";
+    this.editingToolPackageCode = selected.code;
     document.getElementById("uiToolModalTitle").textContent = "新建自定义 UI 工具";
     document.getElementById("uiToolName").value = "";
     document.getElementById("uiToolEnabled").checked = true;
@@ -566,6 +583,7 @@ const uiToolsAdmin = {
       const tool = await apiFetch(`/api/v1/ui-tools/${encodeURIComponent(name)}`);
       this.editingName = name;
       this.editingSource = tool.source;
+      this.editingToolPackageCode = tool.package_code;
       document.getElementById("uiToolModalTitle").textContent = `编辑 · ${name}`;
       document.getElementById("uiToolName").value = tool.name;
       document.getElementById("uiToolDescription").value = tool.description || "";
@@ -591,8 +609,12 @@ const uiToolsAdmin = {
     let result_schema;
     let metadata;
     try {
-      parameters_json_schema = uiSchemaEditor.getParamsSchema(this.paramsEl());
-      result_schema = uiSchemaEditor.getResultSchema(this.resultEl());
+      parameters_json_schema = parseUiToolSchema(this.paramsEl()?.value, {
+        label: "参数 Schema",
+        required: true,
+        requireObject: true,
+      });
+      result_schema = parseUiToolSchema(this.resultEl()?.value, { label: "结果 Schema" });
       metadata = parseJsonOrEmpty(document.getElementById("uiToolMetadata").value);
     } catch (err) {
       AdminFormFeedback.show(form, err);
@@ -602,7 +624,16 @@ const uiToolsAdmin = {
     const widget = this.getWidgetValue();
     const enabled = document.getElementById("uiToolEnabled").checked;
     const description = document.getElementById("uiToolDescription").value.trim();
-    const package_code = document.getElementById("uiToolPackageCode").value;
+    const package_code = this.editingToolPackageCode
+      || document.getElementById("uiToolPackageCode")?.value
+      || "";
+    const owningPackage = this.packages.find(
+      (item) => item.code === package_code && item.source === "manual",
+    );
+    if (!owningPackage) {
+      AdminFormFeedback.show(form, "UI 工具必须归属于创建它的自定义工具包");
+      return;
+    }
     if (!description) {
       AdminFormFeedback.show(form, "描述不能为空");
       return;

@@ -10,6 +10,13 @@ from deep_agent.schemas.context_reference import ContextReference, validate_cont
 
 
 class ChatRequest(BaseModel):
+    agent_id: str | None = Field(
+        default=None,
+        description=(
+            "Agent configuration id. Required for a new session; an existing "
+            "session resolves and verifies its stored Agent automatically."
+        ),
+    )
     message: str | None = Field(
         default=None,
         description="The user's message/prompt. Omit when resuming with deferred_tool_results only.",
@@ -38,7 +45,7 @@ class ChatRequest(BaseModel):
     )
     branch_from: int | None = Field(
         default=None,
-        description="branch_point from history; truncates stored messages at this index before run.",
+        description="Reserved. Session Event Store branching is not implemented in v0.6.0.",
     )
     attachments: list[AttachmentRef] | None = Field(
         default=None,
@@ -59,10 +66,6 @@ class ChatRequest(BaseModel):
 
 
 class StreamChatRequest(ChatRequest):
-    agent_id: str | None = Field(
-        default=None,
-        description="Load agent config from the database. model_id may override the agent's LLM preset per request.",
-    )
     deferred_tool_results: list["DeferredToolResultItem"] | None = Field(
         default=None,
         description="Results for pending UI/approval tool calls from a prior run.",

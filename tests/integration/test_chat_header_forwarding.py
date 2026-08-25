@@ -54,6 +54,7 @@ class ChatHeaderForwardingTests(unittest.TestCase):
             response = client.post(
                 "/api/v1/chat",
                 json={
+                    "agent_id": client.app.state.test_agent_id,
                     "message": "inspect headers",
                     "capabilities": ["mcp:echo"],
                 },
@@ -81,6 +82,7 @@ class ChatHeaderForwardingTests(unittest.TestCase):
             response = client.post(
                 "/api/v1/chat",
                 json={
+                    "agent_id": client.app.state.test_agent_id,
                     "message": "inspect headers",
                     "capabilities": ["mcp:echo"],
                 },
@@ -95,6 +97,7 @@ class ChatHeaderForwardingTests(unittest.TestCase):
             response = client.post(
                 "/api/v1/chat",
                 json={
+                    "agent_id": client.app.state.test_agent_id,
                     "message": "inspect headers",
                     "capabilities": ["mcp:echo"],
                 },
@@ -118,6 +121,7 @@ class ChatHeaderForwardingTests(unittest.TestCase):
             response = client.post(
                 "/api/v1/chat",
                 json={
+                    "agent_id": client.app.state.test_agent_id,
                     "message": "inspect headers",
                     "capabilities": ["mcp:echo"],
                 },
@@ -147,6 +151,7 @@ class ChatHeaderForwardingTests(unittest.TestCase):
             response = client.post(
                 "/api/v1/chat",
                 json={
+                    "agent_id": client.app.state.test_agent_id,
                     "message": "inspect headers",
                     "capabilities": ["mcp:echo"],
                 },
@@ -164,6 +169,8 @@ class ChatHeaderForwardingTests(unittest.TestCase):
         )
 
     def test_chat_uses_test_builtin_loader_for_echo_fixture(self) -> None:
+        import asyncio
+
         from fastapi import FastAPI
         from fastapi.testclient import TestClient
 
@@ -173,9 +180,13 @@ class ChatHeaderForwardingTests(unittest.TestCase):
         from deep_agent.core.context import AppContext, init_context, reset_context
         from tests.integration.helpers.chat import testing_data_stores
         from tests.helpers.builtin_mcp_fixture import use_test_builtin_mcp
+        from tests.helpers.sqlite_stores import seed_default_agent
 
         manager = McpLeaseManager()
         stores, engine, session_factory = testing_data_stores(mcp_rows=[])
+        agent_id = asyncio.run(
+            seed_default_agent(stores, name="builtin-echo-agent")
+        )
         init_context(
             AppContext.for_testing(
                 registry=build_registry(),
@@ -202,6 +213,7 @@ class ChatHeaderForwardingTests(unittest.TestCase):
                     response = client.post(
                         "/api/v1/chat",
                         json={
+                            "agent_id": agent_id,
                             "message": "reverse abc",
                             "capabilities": ["mcp:echo_fixture"],
                         },

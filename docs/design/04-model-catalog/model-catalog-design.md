@@ -320,7 +320,7 @@ auxiliary_model_configs
 - `llm_models` 的上下文、最大输出和 tags；不保留无运行价值的目录来源字段。
 - 原有 API Key、MCP Header 等配置原值。
 
-`chat_sessions/chat_messages` 仍只建结构、不复制数据。备份工具仍只负责导出，不提供恢复命令。
+`chat_sessions/chat_session_events`仍只建结构、不复制数据。备份工具仍只负责导出，不提供恢复命令。
 备份完成前，使用新版 ORM同时读取 `LlmModel` 与 `ModelCatalog` 验证兼容性。
 
 ## 11. 验收

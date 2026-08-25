@@ -15,12 +15,17 @@ from pydantic_ai.messages import (
 from deep_agent.agent.event_persister import EventPersister, PersistEvent
 from deep_agent.agent.history import is_user_only_request
 from tests.helpers.sqlite_stores import make_sqlite_stores
+from deep_agent.schemas.agent import AgentCreate
 
 
 class EventPersisterTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         stores, self._engine, _ = await make_sqlite_stores()
         self.store = stores.coordinator
+        model = (await stores.llm_model.list_all())[0]
+        self.agent = await stores.agent.create_unique(
+            AgentCreate(name="persister-test", model_id=model.id, prompt="test")
+        )
         self.persister = EventPersister(self.store)
         await self.persister.start()
 
@@ -30,23 +35,29 @@ class EventPersisterTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_user_turn_persisted_after_flush(self) -> None:
         user = ModelRequest(parts=[UserPromptPart(content="hello")])
+        result_queue: asyncio.Queue[dict] = asyncio.Queue()
         self.persister.publish(
             PersistEvent(
                 session_id="s1",
-                agent_id=None,
-                user_id=None,
+                agent_id=self.agent.id,
+                user_id="user-1",
                 kind="user_turn",
                 user_message=user,
+                result_queue=result_queue,
             )
         )
-        await self.persister.flush("s1")
-        history = await self.store.get_history("s1")
+        await self.persister.flush("s1", agent_id=self.agent.id)
+        history = await self.store.get_history("s1", agent_id=self.agent.id)
         self.assertEqual(len(history), 1)
         self.assertTrue(is_user_only_request(history[0]))
+        event = result_queue.get_nowait()
+        self.assertEqual(event["type"], "session_event_appended")
+        self.assertTrue(event["persisted"])
+        self.assertEqual(event["event"]["event_type"], "user/message")
 
     async def test_run_complete_skips_duplicate_user(self) -> None:
         user = ModelRequest(parts=[UserPromptPart(content="hi")])
-        await self.store.append("s2", [user])
+        await self.store.append("s2", [user], agent_id=self.agent.id, user_id="user-1")
         new_messages: list[ModelMessage] = [
             ModelRequest(parts=[UserPromptPart(content="hi")]),
             ModelResponse(parts=[TextPart(content="reply")]),
@@ -54,15 +65,15 @@ class EventPersisterTests(unittest.IsolatedAsyncioTestCase):
         self.persister.publish(
             PersistEvent(
                 session_id="s2",
-                agent_id=None,
-                user_id=None,
+                agent_id=self.agent.id,
+                user_id="user-1",
                 kind="run_complete",
                 new_messages=new_messages,
                 skip_user_prompt=True,
             )
         )
-        await self.persister.flush("s2")
-        history = await self.store.get_history("s2")
+        await self.persister.flush("s2", agent_id=self.agent.id)
+        history = await self.store.get_history("s2", agent_id=self.agent.id)
         self.assertEqual(len(history), 2)
         users = [m for m in history if is_user_only_request(m)]
         self.assertEqual(len(users), 1)
@@ -84,29 +95,31 @@ class EventPersisterTests(unittest.IsolatedAsyncioTestCase):
         persister.publish(
             PersistEvent(
                 session_id="s-terminal-race",
-                agent_id=None,
-                user_id=None,
+                agent_id=self.agent.id,
+                user_id="user-1",
                 kind="run_complete",
                 new_messages=[ModelResponse(parts=[TextPart(content="reply")])],
             )
         )
         await drained.wait()
-        flush_task = asyncio.create_task(persister.flush("s-terminal-race", timeout=0.5))
+        flush_task = asyncio.create_task(
+            persister.flush("s-terminal-race", agent_id=self.agent.id, timeout=0.5)
+        )
         await asyncio.sleep(0)
         release_worker.set()
         await flush_task
 
-        history = await self.store.get_history("s-terminal-race")
+        history = await self.store.get_history("s-terminal-race", agent_id=self.agent.id)
         self.assertEqual(len(history), 1)
 
     async def test_run_cancelled_persists_official_partial_text(self) -> None:
         user = ModelRequest(parts=[UserPromptPart(content="hi")])
-        await self.store.append("s3", [user])
+        await self.store.append("s3", [user], agent_id=self.agent.id, user_id="user-1")
         self.persister.publish(
             PersistEvent(
                 session_id="s3",
-                agent_id=None,
-                user_id=None,
+                agent_id=self.agent.id,
+                user_id="user-1",
                 kind="run_cancelled",
                 result_messages=[
                     user,
@@ -119,8 +132,8 @@ class EventPersisterTests(unittest.IsolatedAsyncioTestCase):
                 repair_dangling_tool_calls=False,
             )
         )
-        await self.persister.flush("s3")
-        history = await self.store.get_history("s3")
+        await self.persister.flush("s3", agent_id=self.agent.id)
+        history = await self.store.get_history("s3", agent_id=self.agent.id)
         self.assertEqual(len(history), 2)
         self.assertIsInstance(history[-1], ModelResponse)
         self.assertEqual(history[-1].parts[0].content, "partial-")
@@ -141,16 +154,16 @@ class EventPersisterTests(unittest.IsolatedAsyncioTestCase):
         self.persister.publish(
             PersistEvent(
                 session_id="s4",
-                agent_id=None,
-                user_id=None,
+                agent_id=self.agent.id,
+                user_id="user-1",
                 kind="run_cancelled",
                 result_messages=[user, interrupted],
                 skip_user_prompt=True,
                 repair_dangling_tool_calls=False,
             )
         )
-        await self.persister.flush("s4")
-        history = await self.store.get_history("s4")
+        await self.persister.flush("s4", agent_id=self.agent.id)
+        history = await self.store.get_history("s4", agent_id=self.agent.id)
         tool_calls = [
             p
             for m in history
@@ -163,12 +176,12 @@ class EventPersisterTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_run_cancelled_marks_partial_completed_response_interrupted(self) -> None:
         user = ModelRequest(parts=[UserPromptPart(content="hi")])
-        await self.store.append("s5", [user])
+        await self.store.append("s5", [user], agent_id=self.agent.id, user_id="user-1")
         self.persister.publish(
             PersistEvent(
                 session_id="s5",
-                agent_id=None,
-                user_id=None,
+                agent_id=self.agent.id,
+                user_id="user-1",
                 kind="run_cancelled",
                 result_messages=[
                     user,
@@ -179,8 +192,8 @@ class EventPersisterTests(unittest.IsolatedAsyncioTestCase):
             )
         )
 
-        await self.persister.flush("s5")
-        history = await self.store.get_history("s5")
+        await self.persister.flush("s5", agent_id=self.agent.id)
+        history = await self.store.get_history("s5", agent_id=self.agent.id)
 
         self.assertEqual(len(history), 2)
         self.assertEqual(history[-1].state, "interrupted")

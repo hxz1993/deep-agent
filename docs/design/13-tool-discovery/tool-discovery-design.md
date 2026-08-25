@@ -106,7 +106,7 @@ v0.3.23 的系统工具 `read_file` 不进入 MCP语义检索：
 - 当前请求和原始会话没有可读附件、Agent也没有可读Skill文件时，`PreparedToolset`隐藏该工具。
 - 存在任一合法来源时直接披露同一个 `read_file`，由判别式 `resource`参数选择附件或Skill。
 - 附件的会话归属、Skill的Agent选择与精确资源索引、MIME和大小仍在调用时校验。
-- Checkpoint摘要不能作为附件存在、Skill授权或文件权限依据。
+- Compaction摘要Evidence不能作为附件存在、Skill授权或文件权限依据。
 
 ## 5. 发现状态与历史
 
@@ -120,10 +120,9 @@ v0.3.23 的系统工具 `read_file` 不进入 MCP语义检索：
 - 工具是否已经披露、Capability是否已经加载以及当前能否执行，以Core可用性判断为准；猜测隐藏
   协议名只会得到`ModelRetry`，DeepAgent不增加第二套执行拦截器。压缩移除旧披露证据后必须重新搜索。
 
-历史与压缩的安全边界同时识别 Local 和 Provider Native Tool Search Call/Return；正式取消产生的
-`ModelResponse.state="interrupted"` 不被误判为 Pending Deferred。Provider `CompactionPart` 如果仅在
-`provider_details` 中保留不透明载荷，Checkpoint 保存会失败关闭，避免持久化不可恢复的空壳。当前仍不
-启用 Provider Native Compaction，单次摘要算法不变。
+历史与压缩的安全边界同时识别Local和Provider Native Tool Search Call/Return；正式取消产生的
+`ModelResponse.state="interrupted"`不被误判为Pending Deferred。Provider`CompactionPart`按普通
+Provider专属Part无损保存，只能回传兼容Provider；DeepAgent结构化Compaction仍是跨Provider历史锚点。
 
 ## 6. API、Console 与观测
 

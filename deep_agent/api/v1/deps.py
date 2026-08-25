@@ -1,17 +1,22 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import inspect
 
 from pydantic_ai.settings import ModelSettings
 from pydantic_ai.usage import UsageLimits
 
 from deep_agent.agent.context.compaction import build_context_compaction
-from deep_agent.agent.context.checkpoint import projection_fingerprint
+from deep_agent.agent.auxiliary_models import (
+    CONTEXT_COMPACTION_USE_CASE,
+    resolve_llm_model_for_use_case,
+)
 from deep_agent.agent.context.estimator import TokenEstimator
 from deep_agent.agent.factory import build_agent
 from deep_agent.agent.input_capabilities import augment_instructions_with_capabilities
 from deep_agent.agent.runner import AgentRunner
 from deep_agent.agent.tool_output_limits import build_tool_output_limits
+from deep_agent.agent.history_tools import build_history_toolset
 from deep_agent.agent.spec import DEFAULT_INSTRUCTIONS, AgentSpec
 from deep_agent.agent.provider_registry import (
     ProviderRuntimeError,
@@ -124,6 +129,7 @@ async def build_runner_for_agent(
     agent_id: str,
     *,
     model_id: str | None = None,
+    capabilities: list[str] | None = None,
     request_headers: dict[str, str] | None = None,
 ) -> AgentRunner:
     """Assemble a per-request AgentRunner from a database agent configuration."""
@@ -138,6 +144,8 @@ async def build_runner_for_agent(
 
     provider = await _provider_for_model(ctx, llm_row)
     spec = AgentSpec.from_row(row, llm_row, provider=provider)
+    if capabilities is not None:
+        spec.capabilities = capabilities
     return await _build_runner_from_spec(spec, ctx, request_headers=request_headers)
 
 
@@ -214,10 +222,34 @@ async def _build_runner_from_spec(
             spec.provider_config.provider_type if spec.provider_config else None
         ),
     )
+    summary_model = None
+    summary_model_id = spec.llm_model_id
+    summary_context_window_tokens = spec.context_window_tokens
+    summary_max_output_tokens = spec.max_output_tokens
+    summary_row = None
+    auxiliary_getter = getattr(ctx.stores.auxiliary_model, "get_by_use_case", None)
+    if inspect.iscoroutinefunction(auxiliary_getter):
+        summary_row = await resolve_llm_model_for_use_case(
+            ctx.stores.auxiliary_model,
+            ctx.stores.llm_model,
+            CONTEXT_COMPACTION_USE_CASE,
+        )
+    if summary_row is not None:
+        from deep_agent.agent.factory import _resolve_model
+
+        summary_provider = await _provider_for_model(ctx, summary_row)
+        summary_spec = AgentSpec.from_llm_model(summary_row, provider=summary_provider)
+        summary_model = _resolve_model(summary_spec)
+        summary_model_id = summary_row.id
+        summary_context_window_tokens = summary_row.context_window_tokens
+        summary_max_output_tokens = summary_row.max_output_tokens
     context_compaction = build_context_compaction(
         context_window_tokens=spec.context_window_tokens,
         max_output_tokens=spec.max_output_tokens,
         estimator=estimator,
+        summary_model=summary_model,
+        summary_context_window_tokens=summary_context_window_tokens,
+        summary_max_output_tokens=summary_max_output_tokens,
     )
     tool_output_limits, tool_output_store = build_tool_output_limits(
         request_headers=request_headers or {},
@@ -225,6 +257,7 @@ async def _build_runner_from_spec(
         max_output_tokens=spec.max_output_tokens,
         estimator=estimator,
     )
+    history_toolset = build_history_toolset(ctx.store)
     agent = build_agent(
         spec,
         ctx.registry,
@@ -236,6 +269,7 @@ async def _build_runner_from_spec(
         file_export_toolset=file_export_toolset,
         skill_resource_toolset=skill_resource_toolset,
         skill_script_toolset=skill_script_toolset,
+        history_toolset=history_toolset,
         skill_capability=resolved_skills.capability,
         context_compaction=context_compaction,
         tool_output_limits=tool_output_limits,
@@ -260,26 +294,7 @@ async def _build_runner_from_spec(
         max_output_tokens=spec.max_output_tokens,
         model_tags=spec.tags,
         context_compaction=context_compaction,
-        checkpoint_store=(
-            ctx.stores.context_checkpoint
-            if context_compaction is not None
-            else None
-        ),
-        checkpoint_fingerprint=(
-            projection_fingerprint(
-                llm_model_id=spec.llm_model_id,
-                context_window_tokens=spec.context_window_tokens,
-                max_output_tokens=spec.max_output_tokens,
-                trigger_ratio=OPTION.agent.context_compaction_trigger_ratio,
-                target_ratio=OPTION.agent.context_compaction_target_ratio,
-                keep_tool_pairs=OPTION.agent.context_keep_tool_pairs,
-                summary_model_id=spec.llm_model_id,
-                estimator_source=estimator.source,
-            )
-            if context_compaction is not None
-            else None
-        ),
-        summary_model_id=spec.llm_model_id,
+        summary_model_id=summary_model_id,
         model_id=spec.llm_model_id or spec.model,
         estimator=estimator,
         stores=ctx.stores,

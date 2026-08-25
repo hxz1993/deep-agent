@@ -14,11 +14,14 @@ from deep_agent.agent.attachments import (
     resolve_history_for_llm,
 )
 from deep_agent.agent.context.estimator import TokenEstimator
-from deep_agent.agent.context.checkpoint import (
+from deep_agent.agent.context.sanitization import (
     history_hash,
     serialize_sanitized_projection,
 )
-from deep_agent.agent.context.compaction import _summary_prompt
+from deep_agent.agent.context.compaction import (
+    _deterministic_context_evidence_text,
+    _summary_prompt,
+)
 from deep_agent.agent.context_references import (
     CONTEXT_REFERENCE_INSTRUCTIONS,
     context_reference_dict,
@@ -34,6 +37,7 @@ from deep_agent.schemas.attachment import AttachmentRef
 from deep_agent.schemas.chat import ChatRequest
 from deep_agent.schemas.context_reference import ContextReference
 from tests.helpers.sqlite_stores import make_sqlite_stores
+from deep_agent.schemas.agent import AgentCreate
 
 
 def _ref(
@@ -161,7 +165,7 @@ class ContextReferenceProjectionTests(unittest.IsolatedAsyncioTestCase):
         inflated["metadata"] = {"debug": "x" * 100_000}
         self.assertEqual(estimator.value(base), estimator.value(inflated))
 
-    def test_summary_and_checkpoint_projection_never_include_metadata(self) -> None:
+    def test_summary_excludes_context_payload_and_evidence_excludes_metadata(self) -> None:
         raw = [
             ModelRequest(
                 parts=[
@@ -174,11 +178,14 @@ class ContextReferenceProjectionTests(unittest.IsolatedAsyncioTestCase):
         raw_hash = history_hash(raw)
         projected = project_context_references_in_history(raw)
         summary_prompt = _summary_prompt(projected, None)
-        checkpoint_payload = serialize_sanitized_projection(projected)
+        anchor_projection = serialize_sanitized_projection(projected)
+        evidence = _deterministic_context_evidence_text(raw)
 
-        self.assertIn("current_selection", summary_prompt)
+        self.assertNotIn("current_selection", summary_prompt)
         self.assertNotIn("must-not-reach-model", summary_prompt)
-        self.assertNotIn("must-not-reach-model", str(checkpoint_payload))
+        self.assertIn("current_selection", evidence)
+        self.assertNotIn("must-not-reach-model", evidence)
+        self.assertNotIn("must-not-reach-model", str(anchor_projection))
         self.assertEqual(history_hash(raw), raw_hash)
 
     def test_projection_preserves_message_and_part_metadata(self) -> None:
@@ -240,6 +247,10 @@ class ContextReferenceRunnerTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         stores, self.engine, _ = await make_sqlite_stores()
         self.store = stores.coordinator
+        model = (await stores.llm_model.list_all())[0]
+        self.agent = await stores.agent.create_unique(
+            AgentCreate(name="context-ref-test", model_id=model.id, prompt="test")
+        )
 
     async def asyncTearDown(self) -> None:
         await self.engine.dispose()
@@ -257,7 +268,7 @@ class ContextReferenceRunnerTests(unittest.IsolatedAsyncioTestCase):
             instructions=["base", context_reference_instructions],
         )
         runner = AgentRunner(agent, self.store, UsageLimits(request_limit=5))
-        deps = AgentDeps(session_id="ctx-run", user="u1")
+        deps = AgentDeps(session_id="ctx-run", user="u1", agent_id=self.agent.id)
         await runner.run(
             "ctx-run",
             "分析",
@@ -269,7 +280,7 @@ class ContextReferenceRunnerTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("<context_references>", provider_text)
         self.assertIn(CONTEXT_REFERENCE_INSTRUCTIONS.splitlines()[0], provider_text)
         self.assertNotIn("must-not-reach-model", provider_text)
-        raw = await self.store.get_history("ctx-run")
+        raw = await self.store.get_history("ctx-run", agent_id=self.agent.id)
         self.assertIn("must-not-reach-model", str(serialize_message(raw[0])))
 
     async def test_no_reference_does_not_inject_protocol(self) -> None:
@@ -288,7 +299,7 @@ class ContextReferenceRunnerTests(unittest.IsolatedAsyncioTestCase):
         await runner.run(
             "plain-run",
             "hello",
-            AgentDeps(session_id="plain-run", user="u1"),
+            AgentDeps(session_id="plain-run", user="u1", agent_id=self.agent.id),
         )
         self.assertNotIn("上下文引用协议", str(captured[0]))
         self.assertNotIn("<context_references>", str(captured[0]))
@@ -296,15 +307,14 @@ class ContextReferenceRunnerTests(unittest.IsolatedAsyncioTestCase):
     async def test_branch_replaces_only_new_branch_reference(self) -> None:
         agent = Agent(FunctionModel(lambda _m, _i: ModelResponse(parts=[TextPart(content="ok")])), deps_type=AgentDeps)
         runner = AgentRunner(agent, self.store, UsageLimits(request_limit=10))
-        deps = AgentDeps(session_id="ctx-branch", user="u1")
+        deps = AgentDeps(session_id="ctx-branch", user="u1", agent_id=self.agent.id)
         await runner.run("ctx-branch", "first", deps, context_refs=[_ref(key="old")])
-        await runner.run(
-            "ctx-branch",
-            "replacement",
-            deps,
-            context_refs=[_ref(key="new")],
-            branch_from=0,
+        with self.assertRaises(ValueError):
+            await runner.run(
+                "ctx-branch", "replacement", deps,
+                context_refs=[_ref(key="new")], branch_from=0,
+            )
+        history = model_messages_to_history(
+            await self.store.get_history("ctx-branch", agent_id=self.agent.id)
         )
-        history = model_messages_to_history(await self.store.get_history("ctx-branch"))
-        self.assertEqual(history[0].context_refs[0].key, "new")
-        self.assertNotIn("old", str(history))
+        self.assertEqual(history[0].context_refs[0].key, "old")

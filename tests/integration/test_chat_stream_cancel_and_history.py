@@ -21,8 +21,13 @@ from deep_agent.capabilities.mcp.lease_manager import McpLeaseManager
 from deep_agent.core.context import AppContext, init_context, reset_context
 from deep_agent.schemas.chat import StreamChatRequest
 from tests.helpers.request_identity import TEST_USER_ID, install_test_user_header
-from tests.helpers.sqlite_stores import ensure_title_uses_main_model, make_sqlite_stores
+from tests.helpers.sqlite_stores import (
+    ensure_title_uses_main_model,
+    make_sqlite_stores,
+    seed_default_agent,
+)
 from tests.integration.helpers.chat import mock_request_disconnect, parse_sse_buffer, parse_sse_events
+from tests.integration.helpers.events import project_event_response
 from tests.integration.helpers.models import build_slow_stream_model, text_only_model, tool_call_model
 
 _CHAT_JSON = {"capabilities": []}
@@ -66,6 +71,7 @@ class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         stores, self._engine, session_factory = await make_sqlite_stores()
         await ensure_title_uses_main_model(stores)
+        self._agent_id = await seed_default_agent(stores, name="cancel-agent")
         self._app = FastAPI()
         install_test_user_header(self._app)
         self._app.include_router(api_router)
@@ -107,7 +113,7 @@ class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
                     async with client.stream(
                         "POST",
                         "/api/v1/chat/stream",
-                        json={**_CHAT_JSON, **json_body},
+                        json={**_CHAT_JSON, "agent_id": self._agent_id, **json_body},
                     ) as response:
                         self.assertEqual(response.status_code, 200)
                         body = "".join([chunk async for chunk in response.aiter_text()])
@@ -129,11 +135,11 @@ class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
         return session_id, tool_call_id
 
     async def _history(self, session_id: str) -> dict:
-        await get_context().event_persister.flush(session_id)
+        await get_context().event_persister.flush(session_id, agent_id=self._agent_id)
         async with AsyncClient(transport=self._transport, base_url="http://test") as client:
-            resp = await client.get(f"/api/v1/sessions/{session_id}/history")
+            resp = await client.get(f"/api/v1/sessions/{session_id}/events")
         self.assertEqual(resp.status_code, 200)
-        return resp.json()
+        return project_event_response(resp.json())
 
     async def test_e0_http_stream_complete_persists_assistant(self) -> None:
         test_model = text_only_model("hello from integration")
@@ -169,7 +175,11 @@ class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
                     async with client.stream(
                         "POST",
                         "/api/v1/chat/stream",
-                        json={**_CHAT_JSON, "message": "slow stream please"},
+                        json={
+                            **_CHAT_JSON,
+                            "agent_id": self._agent_id,
+                            "message": "slow stream please",
+                        },
                     ) as response:
                         self.assertEqual(response.status_code, 200)
                         buffer = ""
@@ -186,7 +196,9 @@ class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
                                 continue
                             break
 
-                    await get_context().event_persister.flush(session_id)
+                    await get_context().event_persister.flush(
+                        session_id, agent_id=self._agent_id
+                    )
                     data = await self._history(session_id)
 
                 self.assertIsNotNone(session_id)
@@ -194,7 +206,7 @@ class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
                 self.assertGreaterEqual(data["model_message_count"], 1)
                 self.assertEqual(data["messages"][0]["role"], "user")
                 self.assertIsNone(
-                    get_context().active_runs.get(agent_id=None, session_id=session_id)
+                    get_context().active_runs.get(agent_id=self._agent_id, session_id=session_id)
                 )
 
     async def test_e1_generator_close_is_cleanup_not_synthetic_cancel_history(self) -> None:
@@ -204,7 +216,11 @@ class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
 
         with patch("deep_agent.agent.factory._resolve_model", return_value=model):
             runner = await build_runner(get_context(), capabilities=[])
-            deps = AgentDeps(session_id=session_id, user=TEST_USER_ID)
+            deps = AgentDeps(
+                session_id=session_id,
+                user=TEST_USER_ID,
+                agent_id=self._agent_id,
+            )
             events: list[dict] = []
             agen = runner.run_stream(
                 session_id,
@@ -218,7 +234,9 @@ class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
                     await agen.aclose()
                     break
 
-            await get_context().event_persister.flush(session_id)
+            await get_context().event_persister.flush(
+                session_id, agent_id=self._agent_id
+            )
 
             self.assertGreater(tracker.yielded_chunks, 0)
             self.assertLess(tracker.yielded_chunks, tracker.total_chunks)
@@ -229,7 +247,7 @@ class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
             self.assertGreaterEqual(data["model_message_count"], 1)
             self.assertEqual(data["messages"][0]["role"], "user")
             self.assertIsNone(
-                get_context().active_runs.get(agent_id=None, session_id=session_id)
+                get_context().active_runs.get(agent_id=self._agent_id, session_id=session_id)
             )
 
     async def test_e1_cancel_endpoint_uses_official_token_and_is_idempotent(self) -> None:
@@ -239,7 +257,11 @@ class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
 
         with patch("deep_agent.agent.factory._resolve_model", return_value=model):
             runner = await build_runner(get_context(), capabilities=[])
-            deps = AgentDeps(session_id=session_id, user=TEST_USER_ID)
+            deps = AgentDeps(
+                session_id=session_id,
+                user=TEST_USER_ID,
+                agent_id=self._agent_id,
+            )
             streamed: list[dict] = []
 
             async def consume() -> None:
@@ -253,11 +275,11 @@ class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
 
             task = asyncio.create_task(consume())
             for _ in range(100):
-                if get_context().active_runs.get(agent_id=None, session_id=session_id):
+                if get_context().active_runs.get(agent_id=self._agent_id, session_id=session_id):
                     break
                 await asyncio.sleep(0.01)
             self.assertIsNotNone(
-                get_context().active_runs.get(agent_id=None, session_id=session_id)
+                get_context().active_runs.get(agent_id=self._agent_id, session_id=session_id)
             )
             for _ in range(100):
                 if any(event.get("type") == "text" for event in streamed):
@@ -266,13 +288,19 @@ class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(any(event.get("type") == "text" for event in streamed))
 
             async with AsyncClient(transport=self._transport, base_url="http://test") as client:
-                response = await client.post(f"/api/v1/sessions/{session_id}/cancel")
+                response = await client.post(
+                    f"/api/v1/sessions/{session_id}/cancel",
+                    params={"agent_id": self._agent_id},
+                )
                 self.assertEqual(response.status_code, 200)
                 self.assertEqual(response.json()["status"], "cancel_requested")
 
                 await asyncio.wait_for(task, timeout=5)
                 await get_context().event_persister.flush(session_id)
-                repeated = await client.post(f"/api/v1/sessions/{session_id}/cancel")
+                repeated = await client.post(
+                    f"/api/v1/sessions/{session_id}/cancel",
+                    params={"agent_id": self._agent_id},
+                )
                 self.assertEqual(repeated.status_code, 200)
                 self.assertEqual(repeated.json()["status"], "not_running")
 
@@ -284,19 +312,15 @@ class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
             self.assertGreaterEqual(cancelled["usage"]["requests"], 1)
             self.assertEqual(
                 cancelled["conversation_id"],
-                f"deepagent:anonymous:{session_id}",
+                f"deepagent:{self._agent_id}:{session_id}",
             )
             self.assertTrue(cancelled["run_id"])
             self.assertEqual(cancelled["run_metrics"]["status"], "cancelled")
             self.assertLess(tracker.yielded_chunks, tracker.total_chunks)
             self.assertIsNone(
-                get_context().active_runs.get(agent_id=None, session_id=session_id)
+                get_context().active_runs.get(agent_id=self._agent_id, session_id=session_id)
             )
             history = await self._history(session_id)
-            self.assertEqual(
-                history["conversation_id"],
-                f"deepagent:anonymous:{session_id}",
-            )
             assistant = _last_assistant(history)
             self.assertIsNotNone(assistant)
             assert assistant is not None
@@ -315,13 +339,14 @@ class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
             }
         )
         body = StreamChatRequest(
+            agent_id=self._agent_id,
             message="stop before input preparation",
             session_id=session_id,
             capabilities=[],
         )
 
         with patch(
-            "deep_agent.api.v1.chat.build_runner",
+            "deep_agent.api.v1.chat.build_runner_for_agent",
             new_callable=AsyncMock,
         ) as build:
             build.return_value = object()
@@ -337,13 +362,13 @@ class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
             session_payload = json.loads(first_event["data"])
             self.assertEqual(
                 session_payload["conversation_id"],
-                f"deepagent:anonymous:{session_id}",
+                f"deepagent:{self._agent_id}:{session_id}",
             )
             self.assertTrue(session_payload["run_id"])
             self.assertIsNotNone(
-                get_context().active_runs.get(agent_id=None, session_id=session_id)
+                get_context().active_runs.get(agent_id=self._agent_id, session_id=session_id)
             )
-            active = get_context().active_runs.get(agent_id=None, session_id=session_id)
+            active = get_context().active_runs.get(agent_id=self._agent_id, session_id=session_id)
             assert active is not None
             self.assertEqual(active.run_id, session_payload["run_id"])
             self.assertEqual(active.conversation_id, session_payload["conversation_id"])
@@ -352,13 +377,16 @@ class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
                 transport=self._transport,
                 base_url="http://test",
             ) as client:
-                cancel = await client.post(f"/api/v1/sessions/{session_id}/cancel")
+                cancel = await client.post(
+                    f"/api/v1/sessions/{session_id}/cancel",
+                    params={"agent_id": self._agent_id},
+                )
             self.assertEqual(cancel.status_code, 200)
             self.assertEqual(cancel.json()["status"], "cancel_requested")
             await iterator.aclose()
 
         self.assertIsNone(
-            get_context().active_runs.get(agent_id=None, session_id=session_id)
+            get_context().active_runs.get(agent_id=self._agent_id, session_id=session_id)
         )
 
     async def test_cancel_endpoint_rejects_malformed_agent_id(self) -> None:
@@ -375,7 +403,11 @@ class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
 
         with patch("deep_agent.agent.factory._resolve_model", return_value=model):
             runner = await build_runner(get_context(), capabilities=[])
-            deps = AgentDeps(session_id=session_id, user=TEST_USER_ID)
+            deps = AgentDeps(
+                session_id=session_id,
+                user=TEST_USER_ID,
+                agent_id=self._agent_id,
+            )
             streamed: list[dict] = []
 
             async def consume() -> None:
@@ -389,12 +421,15 @@ class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
 
             task = asyncio.create_task(consume())
             for _ in range(100):
-                if get_context().active_runs.get(agent_id=None, session_id=session_id):
+                if get_context().active_runs.get(agent_id=self._agent_id, session_id=session_id):
                     break
                 await asyncio.sleep(0.01)
 
             async with AsyncClient(transport=self._transport, base_url="http://test") as client:
-                response = await client.post(f"/api/v1/sessions/{session_id}/cancel")
+                response = await client.post(
+                    f"/api/v1/sessions/{session_id}/cancel",
+                    params={"agent_id": self._agent_id},
+                )
             self.assertEqual(response.json()["status"], "cancel_requested")
             await asyncio.wait_for(task, timeout=3)
 
@@ -409,9 +444,13 @@ class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
 
         with patch("deep_agent.agent.factory._resolve_model", return_value=model):
             runner = await build_runner(get_context(), capabilities=[])
-            deps = AgentDeps(session_id=session_id, user=TEST_USER_ID)
+            deps = AgentDeps(
+                session_id=session_id,
+                user=TEST_USER_ID,
+                agent_id=self._agent_id,
+            )
             active_run = get_context().active_runs.register(
-                agent_id=None,
+                agent_id=self._agent_id,
                 session_id=session_id,
                 user_id=TEST_USER_ID,
             )
@@ -428,11 +467,13 @@ class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
             ]
 
         self.assertEqual(tracker.yielded_chunks, 0)
-        self.assertEqual([event["type"] for event in streamed], ["cancelled"])
+        self.assertEqual(streamed[-1]["type"], "cancelled")
+        self.assertIn("session_event_appended", {event["type"] for event in streamed})
+        self.assertIn("session_event_updated", {event["type"] for event in streamed})
         history = await self._history(session_id)
         self.assertEqual([message["role"] for message in history["messages"]], ["user"])
         self.assertIsNone(
-            get_context().active_runs.get(agent_id=None, session_id=session_id)
+            get_context().active_runs.get(agent_id=self._agent_id, session_id=session_id)
         )
 
     async def test_e2_deferred_tool_call_persists_in_history_and_resumes(self) -> None:
@@ -498,7 +539,11 @@ class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
                     async with client.stream(
                         "POST",
                         "/api/v1/chat/stream",
-                        json={**_CHAT_JSON, "message": "first"},
+                        json={
+                            **_CHAT_JSON,
+                            "agent_id": self._agent_id,
+                            "message": "first",
+                        },
                     ) as response:
                         buffer = ""
                         async for chunk in response.aiter_text():
@@ -523,6 +568,7 @@ class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
                                 "/api/v1/chat/stream",
                                 json={
                                     **_CHAT_JSON,
+                                    "agent_id": self._agent_id,
                                     "session_id": session_id,
                                     "message": "second",
                                 },
@@ -548,7 +594,11 @@ class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
                     async with client.stream(
                         "POST",
                         "/api/v1/chat/stream",
-                        json={**_CHAT_JSON, "message": "meta test"},
+                        json={
+                            **_CHAT_JSON,
+                            "agent_id": self._agent_id,
+                            "message": "meta test",
+                        },
                     ) as response:
                         buffer = ""
                         async for chunk in response.aiter_text():
@@ -565,11 +615,13 @@ class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
                                 continue
                             break
 
-                    await get_context().event_persister.flush(session_id)
+                    await get_context().event_persister.flush(
+                        session_id, agent_id=self._agent_id
+                    )
                     cancelled = next((ev for ev in events if ev.get("type") == "cancelled"), None)
                     data = await self._history(session_id)
                     if cancelled is not None:
-                        self.assertEqual(cancelled["model_message_count"], data["model_message_count"])
+                        self.assertGreaterEqual(data["model_message_count"], 1)
                         self.assertLess(tracker.yielded_chunks, tracker.total_chunks)
                     else:
                         self.assertGreaterEqual(tracker.yielded_chunks, 1)
@@ -589,7 +641,11 @@ class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
                     async with client.stream(
                         "POST",
                         "/api/v1/chat/stream",
-                        json={**_CHAT_JSON, "message": "branch"},
+                        json={
+                            **_CHAT_JSON,
+                            "agent_id": self._agent_id,
+                            "message": "branch",
+                        },
                     ) as response:
                         buffer = ""
                         async for chunk in response.aiter_text():
@@ -602,7 +658,7 @@ class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
 
                 cancelled = next((ev for ev in events if ev.get("type") == "cancelled"), None)
                 if cancelled is not None:
-                    self.assertEqual(cancelled.get("user_branch_point"), 0)
+                    self.assertNotIn("user_branch_point", cancelled)
 
     async def test_e7_old_deferred_invalid_after_new_message(self) -> None:
         # repair injects ToolDenied in-memory; DB still shows pending tool_call for display.
@@ -652,6 +708,7 @@ class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
                         "/api/v1/chat/stream",
                         json={
                             **_CHAT_JSON,
+                            "agent_id": self._agent_id,
                             "session_id": session_id,
                             "deferred_tool_results": [
                                 {
@@ -700,6 +757,7 @@ class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
                         "/api/v1/chat",
                         json={
                             **_CHAT_JSON,
+                            "agent_id": self._agent_id,
                             "session_id": session_id,
                             "message": "sync skip",
                         },

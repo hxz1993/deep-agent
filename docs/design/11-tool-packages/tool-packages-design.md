@@ -182,7 +182,7 @@ Agent 能力页直接按后端 `category` 分组，不再通过旧 `kind` 猜测
 ## 10. 配置备份
 
 配置备份增加 `ui_tool_packages`，完整保存包数据和 `ui_tool_definitions.package_code`。新版 ORM
-验证必须读取包和工具关系；会话、消息与 Checkpoint 仍只复制表结构，不复制运行数据。
+验证必须读取包和工具关系；配置备份只为`chat_sessions/chat_session_events`建空结构，不复制运行数据。
 
 ## 11. 验证
 
@@ -192,7 +192,7 @@ Agent 能力页直接按后端 `category` 分组，不再通过旧 `kind` 猜测
 - 每个内置 Function、系统 `read_file`、Sandbox、UI Deferred 和 MCP 安全只读调用。
 - 工具包 CRUD、Agent 422、Builtin 403 和引用 409。
 - Console 分类、整包回填、无工具级复选框。
-- Function、文件、Sandbox、MCP、UI 的 Tool Call/Result 配对与上下文压缩、Checkpoint、SSE。
+- Function、文件、Sandbox、MCP、UI的Tool Call/Result配对与Event Store、Compaction、SSE。
 - 完整 Python、Console Node、配置备份、静态检查和浏览器四主题/窄屏。
 
 002的历史迁移验证已在隔离 SQLite完成；共享 Test曾完成 revision 004真实验收。当前仓库head为

@@ -79,8 +79,6 @@ def final(
     *,
     status: str = "completed",
     deferred: dict[str, Any] | None = None,
-    model_message_count: int | None = None,
-    user_branch_point: int | None = None,
     context: dict[str, Any] | None = None,
     conversation_id: str | None = None,
     run_id: str | None = None,
@@ -94,10 +92,6 @@ def final(
     }
     if deferred is not None:
         payload["deferred"] = deferred
-    if model_message_count is not None:
-        payload["model_message_count"] = model_message_count
-    if user_branch_point is not None:
-        payload["user_branch_point"] = user_branch_point
     if context is not None:
         payload["context"] = context
     if conversation_id is not None:
@@ -113,24 +107,16 @@ def error(
     message: str,
     *,
     history_persisted: bool = False,
-    model_message_count: int | None = None,
-    user_branch_point: int | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {"type": "error", "message": message}
     if history_persisted:
         payload["history_persisted"] = True
-    if model_message_count is not None:
-        payload["model_message_count"] = model_message_count
-    if user_branch_point is not None:
-        payload["user_branch_point"] = user_branch_point
     return payload
 
 
 def cancelled(
     *,
     history_persisted: bool = True,
-    model_message_count: int | None = None,
-    user_branch_point: int | None = None,
     usage: dict[str, Any] | None = None,
     conversation_id: str | None = None,
     run_id: str | None = None,
@@ -141,10 +127,6 @@ def cancelled(
         "status": "cancelled",
         "history_persisted": history_persisted,
     }
-    if model_message_count is not None:
-        payload["model_message_count"] = model_message_count
-    if user_branch_point is not None:
-        payload["user_branch_point"] = user_branch_point
     if usage is not None:
         payload["usage"] = usage
     if conversation_id is not None:

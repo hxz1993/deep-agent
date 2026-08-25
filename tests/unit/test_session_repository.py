@@ -1,133 +1,79 @@
 from __future__ import annotations
 
 import unittest
-from datetime import datetime, timezone
 
-from pydantic import TypeAdapter
-from pydantic_ai.messages import ModelMessage, ModelRequest, UserPromptPart
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from pydantic_ai.messages import ModelRequest, UserPromptPart
 
-from deep_agent.db.models import (
-    Agent,
-    Base,
-    ChatMessage,
-    ChatSession,
-    LlmModel,
-    LlmProvider,
-)
-from deep_agent.db.dialect import DbDialect
-from deep_agent.db.stores.chat_session import ChatSessionStoreBase, create_chat_session_store
-from deep_agent.db.stores.message import create_message_store
-
-_message_adapter: TypeAdapter[ModelMessage] = TypeAdapter(ModelMessage)
+from deep_agent.db.session_list import SessionListFilters
+from deep_agent.schemas.agent import AgentCreate
+from tests.helpers.sqlite_stores import make_sqlite_stores
 
 
 class ChatSessionStoreTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
-        self.engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-        async with self.engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-        self.session_factory = async_sessionmaker(self.engine, expire_on_commit=False)
-        message_store = create_message_store(DbDialect.SQLITE, self.session_factory)
-        self.store: ChatSessionStoreBase = create_chat_session_store(
-            DbDialect.SQLITE,
-            self.session_factory,
-            message_store=message_store,
+        self.stores, self.engine, _ = await make_sqlite_stores()
+        self.store = self.stores.coordinator
+        model = (await self.stores.llm_model.list_all())[0]
+        agent = await self.stores.agent.create_unique(
+            AgentCreate(name="session-test", model_id=model.id, prompt="test")
         )
-
-        async with self.session_factory() as db:
-            provider = LlmProvider(
-                id="11111111111111111111111111111111",
-                name="Test Provider",
-                provider_type="openai_compatible",
-                use_default_base_url=False,
-                base_url="http://test.invalid/v1",
-                api_key="test-key",
-                enabled=True,
-            )
-            db.add(provider)
-            llm = LlmModel(
-                id="00000000-0000-4000-8000-000000000099",
-                provider_id=provider.id,
-                name="test-model",
-                model="test",
-            )
-            db.add(llm)
-            agent = Agent(
-                id="00000000-0000-4000-8000-000000000001",
-                name="Demo Agent",
-                model_id=llm.id,
-                prompt="test",
-            )
-            db.add(agent)
-            now = datetime.now(timezone.utc)
-            db.add(
-                ChatSession(
-                    agent_id=agent.id,
-                    session_id="sess-1",
-                    user_id="user-1",
-                    created_at=now,
-                    updated_at=now,
-                )
-            )
-            db.add(
-                ChatMessage(
-                    id=1,
-                    agent_id=agent.id,
-                    session_id="sess-1",
-                    sequence=0,
-                    payload=_message_adapter.dump_python(
-                        ModelRequest(parts=[UserPromptPart(content="hello sql")]),
-                        mode="json",
-                    ),
-                )
-            )
-            await db.commit()
+        self.agent_id = agent.id
 
     async def asyncTearDown(self) -> None:
         await self.engine.dispose()
 
     async def test_list_summaries_joins_agent_and_counts_messages(self) -> None:
-        rows, total = await self.store.list_summaries()
-
-        self.assertEqual(total, 1)
-        self.assertEqual(len(rows), 1)
-        row = rows[0]
-        self.assertEqual(row.agent_name, "Demo Agent")
-        self.assertEqual(row.message_count, 1)
-        self.assertEqual(row.user_prompt, "hello sql")
-
-    async def test_list_summaries_filters_by_agent_and_user(self) -> None:
-        rows, total = await self.store.list_summaries(
-            agent_id="00000000-0000-4000-8000-000000000001",
+        await self.store.append(
+            "sess-1",
+            [ModelRequest(parts=[UserPromptPart(content="hello sql")])],
+            agent_id=self.agent_id,
             user_id="user-1",
+            app_id=None,
+            space_id=None,
+            turn_id="1" * 32,
+            run_id="run-1",
+        )
+        rows, total = await self.store.list_session_summaries(
+            SessionListFilters(user_id="user-1")
         )
         self.assertEqual(total, 1)
-        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].message_count, 1)
+        self.assertEqual(rows[0].user_prompt, "hello sql")
 
-        rows, total = await self.store.list_summaries(user_id="missing")
-        self.assertEqual(total, 0)
-        self.assertEqual(rows, [])
+    async def test_filters_and_has_messages_total_match(self) -> None:
+        await self.store.append_lifecycle(
+            "empty", event_type="run", status="completed",
+            agent_id=self.agent_id, user_id="user-1", turn_id="2" * 32,
+            run_id="run-empty", payload={},
+        )
+        await self.store.append(
+            "filled", [ModelRequest(parts=[UserPromptPart(content="有消息")])],
+            agent_id=self.agent_id, user_id="user-1", turn_id="3" * 32,
+            run_id="run-filled",
+        )
+        filled, filled_total = await self.store.list_session_summaries(
+            SessionListFilters(user_id="user-1", has_messages=True)
+        )
+        empty, empty_total = await self.store.list_session_summaries(
+            SessionListFilters(user_id="user-1", has_messages=False)
+        )
+        self.assertEqual(filled_total, 1)
+        self.assertEqual([item.session_id for item in filled], ["filled"])
+        self.assertEqual(empty_total, 1)
+        self.assertEqual([item.session_id for item in empty], ["empty"])
 
-    async def test_list_summaries_pagination(self) -> None:
-        async with self.session_factory() as db:
-            now = datetime.now(timezone.utc)
-            agent_id = "00000000-0000-4000-8000-000000000001"
-            for index in range(3):
-                db.add(
-                    ChatSession(
-                        agent_id=agent_id,
-                        session_id=f"sess-extra-{index}",
-                        created_at=now,
-                        updated_at=now,
-                    )
-                )
-            await db.commit()
-
-        rows, total = await self.store.list_summaries(limit=2, offset=1)
-
-        self.assertEqual(total, 4)
-        self.assertEqual(len(rows), 2)
+    async def test_global_session_id_cannot_be_reowned(self) -> None:
+        await self.store.append_lifecycle(
+            "global", event_type="run", status="completed",
+            agent_id=self.agent_id, user_id="user-1", turn_id="4" * 32,
+            run_id="run-global", payload={},
+        )
+        with self.assertRaises(PermissionError):
+            await self.store.append_lifecycle(
+                "global", event_type="run", status="completed",
+                agent_id=self.agent_id, user_id="user-2", turn_id="5" * 32,
+                run_id="run-other", payload={},
+            )
 
 
 if __name__ == "__main__":

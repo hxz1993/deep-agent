@@ -264,7 +264,8 @@ python3.12 -m unittest \
 }
 ```
 
-`payload` 为 DB `chat_messages.payload` 原样导出；含真实业务 prompt 时**默认勿提交 Git**，仅本机回归用。
+Fixture的`messages[].payload`为Pydantic ModelMessage序列化值；含真实业务Prompt时**默认勿提交Git**，
+仅本机回归用。运行数据库已改为Event Store，Fixture导出器会负责Event→Message投影。
 
 ### 6.6 非标题集成测试须隔离后台标题任务
 

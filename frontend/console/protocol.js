@@ -53,17 +53,16 @@ export async function readSse(stream, onEvent) {
 export function contextCompactionPresentation(data = {}) {
   const phase = data.phase || "started";
   const defaults = {
-    started: "正在压缩上下文…",
-    deterministic: "正在整理旧工具结果…",
+    preparing: "正在准备上下文压缩…",
     summarizing: "正在生成上下文摘要…",
-    saving: "正在保存新的 Checkpoint…",
-    completed: "上下文压缩完成，正在生成…",
-    fallback: "已缩减较早上下文，正在生成…",
+    validating: "正在校验压缩结果…",
+    committing: "正在保存压缩事件…",
+    retry_wait: "摘要服务暂时不可用，正在等待重试…",
   };
   return {
     phase,
     message: data.message || defaults[phase] || "正在处理上下文…",
-    active: ["started", "deterministic", "summarizing", "saving", "completed", "fallback"].includes(phase),
+    active: ["preparing", "summarizing", "validating", "committing", "retry_wait"].includes(phase),
   };
 }
 

@@ -5,6 +5,7 @@ import os
 
 from deep_agent.db.stores.bundle import DataStores
 from deep_agent.schemas.auxiliary_model import AuxiliaryModelUpdate
+from deep_agent.schemas.agent import AgentCreate
 from deep_agent.schemas.llm_model import LlmModelCreate
 from deep_agent.schemas.llm_provider import LlmProviderCreate
 
@@ -55,6 +56,25 @@ async def seed_default_llm_model(stores: DataStores) -> None:
             provider_id=provider.id,
         ),
     )
+
+
+async def seed_default_agent(
+    stores: DataStores,
+    *,
+    name: str = "integration-agent",
+) -> str:
+    """Create an explicit Agent for chat integration tests."""
+    models = await stores.llm_model.list_all()
+    if not models:
+        raise AssertionError("default test model was not seeded")
+    row = await stores.agent.create_unique(
+        AgentCreate(
+            name=name,
+            model_id=models[0].id,
+            prompt="You are a helpful integration-test assistant.",
+        )
+    )
+    return row.id
 
 
 async def get_default_test_provider_id(stores: DataStores) -> str:

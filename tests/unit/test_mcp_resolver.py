@@ -34,8 +34,7 @@ class McpResolverTests(unittest.IsolatedAsyncioTestCase):
         mcp_store.list_all = AsyncMock(return_value=[row])
         stores = DataStores(
             chat_session=MagicMock(),
-            message=MagicMock(),
-            context_checkpoint=MagicMock(),
+            events=MagicMock(),
             coordinator=MagicMock(),
             agent=MagicMock(),
             llm_model=MagicMock(),

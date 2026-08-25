@@ -16,6 +16,9 @@ import {
 } from "./assistant-presentation.js?v=20260815-2";
 import { createTrajectoryController } from "./trajectory.js?v=20260823-3";
 import {
+  projectSessionEvents,
+} from "./session-events.js?v=20260826-1";
+import {
   firstSelectableModelId,
   isModelSelectable,
   modelOptionLabel,
@@ -28,14 +31,15 @@ import {
  *
  * 后端 SSE 事件 (event: <type>, data: <json>):
  *   session      -> { session_id, agent_id }
- *   context_compaction -> { type:"context_compaction", phase, message }
+ *   context_compaction_progress -> { persisted:false, event_id, phase, message }
+ *   session_event_appended/session_event_updated -> { persisted:true, event }
  *   text         -> { type:"text", delta }
  *   thinking     -> { type:"thinking", delta }
  *   tool_call    -> { type:"tool_call", tool, args, tool_call_id, widget?, metadata? }
  *   tool_call_removed -> { type:"tool_call_removed", tool, tool_call_id, reason }
  *   tool_result  -> { type:"tool_result", tool, result, tool_call_id, artifacts? }
  *   final        -> { type:"final", status, output, usage, deferred? }
- *   cancelled    -> { type:"cancelled", status, model_message_count?, user_branch_point? }
+ *   cancelled    -> { type:"cancelled", status, usage, run_id }
  *   error        -> { type:"error", message }
  * ------------------------------------------------------------------ */
 
@@ -123,14 +127,11 @@ const state = {
   streamSessionConfirmed: false,
   streamCancelled: false,
   skipHistoryRefresh: false,
-  branchFrom: null,
   modelMessageCount: 0,
-  lastUserBranchPoint: null,
   pendingAttachments: [],
   pendingTitleRefresh: false,
   titlePollGeneration: 0,
   contextStatus: null,
-  historyCheckpoint: null,
   lastRunUsage: null,
   lastRunMetrics: null,
   manualCompacting: false,
@@ -683,11 +684,8 @@ function newChat(agentId) {
   loadUiTools(state.agentId);
   state.sessionId = null;
   state.conversationId = null;
-  state.branchFrom = null;
   state.modelMessageCount = 0;
-  state.lastUserBranchPoint = null;
   state.contextStatus = null;
-  state.historyCheckpoint = null;
   state.lastRunUsage = null;
   state.lastRunMetrics = null;
   state.llmModelId = defaultLlmModelId();
@@ -859,8 +857,6 @@ async function switchSession(s) {
   state.pendingTitleRefresh = false;
   const session = normalizeSession(s);
   state.sessionId = session.id;
-  state.branchFrom = null;
-  state.lastUserBranchPoint = null;
   state.lastRunUsage = null;
   state.lastRunMetrics = null;
   if (session.agentId) {
@@ -877,46 +873,62 @@ async function switchSession(s) {
 }
 
 /** 从后端拉取并渲染指定会话的历史（唯一消息来源）。 */
+async function loadAllSessionEvents(session) {
+  const items = [];
+  let afterSequence = 0;
+  for (;;) {
+    const response = await daFetch(
+      sessionApiUrl(session, "/events", { after_sequence: afterSequence, limit: 500 }),
+    );
+    if (!response.ok) return { response, data: null };
+    const page = await response.json();
+    items.push(...(Array.isArray(page.items) ? page.items : []));
+    const next = Number(page.next_after_sequence);
+    if (!Number.isInteger(next) || next <= afterSequence) {
+      return { response, data: { items, next_after_sequence: null } };
+    }
+    afterSequence = next;
+  }
+}
+
 async function loadSessionHistory(session) {
   const normalized = normalizeSession(session);
   clearMessages();
-  trajectory?.setHistory({ session_id: normalized.id, messages: [] });
+  trajectory?.setHistory({ session_id: normalized.id, items: [] });
   hideEmptyState();
   try {
     await loadUiTools(state.agentId);
-    const r = await daFetch(
-      sessionApiUrl(normalized, "/history", { model_id: chatPayloadModelId() }),
-    );
+    const { response: r, data } = await loadAllSessionEvents(normalized);
     if (r.status === 404) {
       addSystemNote("会话不存在或尚无历史记录。");
       return;
     }
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    const data = await r.json();
+    const projection = projectSessionEvents(data);
     trajectory?.setHistory(data);
-    state.conversationId = data.conversation_id || null;
-    const latestAssistant = [...(data.messages || [])]
+    const latestRun = [...projection.events]
       .reverse()
-      .find((message) => message.role === "assistant" && message.run_id);
-    state.lastRunMetrics = latestAssistant
+      .find((event) => event.event_type === "run");
+    state.conversationId = latestRun?.payload?.conversation_id || null;
+    state.lastRunMetrics = latestRun
       ? {
-          run_id: latestAssistant.run_id,
-          status: latestAssistant.status || "completed",
+          ...(latestRun.payload || {}),
+          run_id: latestRun.run_id,
+          status: latestRun.status || "completed",
           detailed: false,
         }
       : null;
-    state.historyCheckpoint = data.context_checkpoint || null;
     await loadContextStatus(normalized);
-    if (!data.messages || data.messages.length === 0) {
+    if (!projection.messages.length) {
       showEmptyState();
       state.modelMessageCount = 0;
       state.awaitingHitl = false;
       updateHitlInputState();
       return;
     }
-    renderHistory(data.messages, data.model_message_count, state.historyCheckpoint);
+    renderHistory(projection);
   } catch (e) {
-    trajectory?.setHistory({ session_id: normalized.id, messages: [] });
+    trajectory?.setHistory({ session_id: normalized.id, items: [] });
     addSystemNote(`加载历史失败：${e.message}`);
   }
 }
@@ -967,7 +979,6 @@ function updateComposerContextControls() {
     el.contextBudgetBadge.textContent = ratio == null
       ? "上下文 —"
       : `上下文 ${Math.max(0, Math.round(ratio * 100))}%`;
-    const checkpoint = status.checkpoint || {};
     el.contextBudgetBadge.title = ratio == null
       ? "历史上下文估算尚不可用"
       : [
@@ -976,8 +987,9 @@ function updateComposerContextControls() {
           `可用输入预算：${compactTokenLabel(usable)} Token`,
           `自动触发线：${compactTokenLabel(status.trigger_tokens)} Token`,
           `压缩目标线：${compactTokenLabel(status.target_tokens)} Token`,
-          `Checkpoint：${compactTokenLabel(checkpoint.projected_estimated_tokens)} Token`,
-          `更新时间：${checkpoint.updated_at || "—"}`,
+          `压缩后：${compactTokenLabel(status.compaction_estimated_tokens)} Token`,
+          `压缩事件：${status.compaction_event_id || "—"}`,
+          `更新时间：${status.compaction_updated_at || "—"}`,
           `估算器：${status.estimator_source || "—"}`,
         ].join("\n");
   }
@@ -996,7 +1008,7 @@ function updateComposerContextControls() {
     el.compactContextBtn.title = state.manualCompacting
       ? "正在压缩上下文"
       : canCompact
-        ? status.checkpoint_active
+        ? status.compaction_event_id
           ? "可再次压缩，重复压缩可能损失部分细节"
           : "压缩上下文"
         : busy
@@ -1088,7 +1100,7 @@ function finalizeAutomaticContextCompaction(context, runStatus) {
   if (runStatus === "pending") {
     setContextCompactionRow(
       row,
-      "本轮上下文已整理，完成工具交互后再更新 Checkpoint",
+      "本轮上下文已整理，完成工具交互后再生成压缩事件",
       { active: false },
     );
     state.automaticCompactionRow = null;
@@ -1102,7 +1114,7 @@ function finalizeAutomaticContextCompaction(context, runStatus) {
     && !compaction?.summary_failed
     && compaction?.target_met
     && compaction?.strategy !== "sliding_window_fallback"
-    && compaction?.checkpoint_saved === true
+    && compaction?.compaction_event_saved === true
   ) {
     setContextCompactionRow(
       row,
@@ -1115,11 +1127,11 @@ function finalizeAutomaticContextCompaction(context, runStatus) {
   if (
     compaction?.summary_applied
     && compaction?.target_met
-    && compaction?.checkpoint_saved === false
+    && compaction?.compaction_event_saved === false
   ) {
     setContextCompactionRow(
       row,
-      "上下文已压缩，但 Checkpoint 保存失败",
+      "上下文已压缩，但压缩事件保存失败",
       { failed: true, active: false },
     );
     state.automaticCompactionRow = null;
@@ -1132,8 +1144,8 @@ function finalizeAutomaticContextCompaction(context, runStatus) {
   setContextCompactionRow(
     row,
     temporary
-      ? "本轮临时缩减，未更新 Checkpoint"
-      : "本轮上下文已整理，未生成新的 Checkpoint",
+      ? "本轮临时缩减，未生成压缩事件"
+      : "本轮上下文已整理，未生成新的压缩事件",
     { active: false },
   );
   state.automaticCompactionRow = null;
@@ -1182,8 +1194,10 @@ async function compactCurrentContext() {
       throw new Error(`HTTP ${response.status} ${detail}`.trim());
     }
     await readSse(response.body, ({ event, data }) => {
-      if (event === "context_compaction") {
+      if (event === "context_compaction_progress") {
         setContextCompactionRow(row, data.message || "正在处理上下文…");
+      } else if (["session_event_appended", "session_event_updated"].includes(event)) {
+        trajectory?.ingest({ event, data });
       } else if (event === "context_compaction_result") {
         result = data;
         state.conversationId = data.conversation_id || state.conversationId;
@@ -1227,36 +1241,21 @@ async function compactCurrentContext() {
   }
 }
 
-function addContextCheckpointMarker(checkpoint) {
-  if (!checkpoint) return;
-  const marker = document.createElement("div");
-  marker.className = "context-checkpoint-marker";
-  const source = compactTokenLabel(checkpoint.source_estimated_tokens);
-  const projected = compactTokenLabel(checkpoint.projected_estimated_tokens);
-  marker.innerHTML = `<span>上下文已压缩 · 原始约 ${escapeHtml(source)} → 当前投影约 ${escapeHtml(projected)} Token · 当前生效</span>`;
-  marker.title = [
-    `更新时间：${checkpoint.updated_at || "—"}`,
-    `摘要模型：${checkpoint.summary_model_id || "—"}`,
-    `覆盖消息：${checkpoint.covered_model_message_count ?? "—"}`,
-    `Checkpoint 版本：${checkpoint.row_version ?? "—"}`,
-  ].join("\n");
-  el.messages.appendChild(marker);
-}
-
 async function refreshCurrentHistory() {
   if (!state.sessionId) return;
   await loadSessionHistory({ id: state.sessionId, agentId: state.agentId });
 }
 
-function renderHistory(messages, modelMessageCount, contextCheckpoint = null) {
-  state.modelMessageCount = modelMessageCount ?? 0;
+function renderHistory(projection) {
+  const messages = projection.messages || [];
+  state.modelMessageCount = projection.messageCount ?? 0;
   let lastDayKey = null;
   state.assistantPresenter = null;
-  const visualItems = buildHistoryVisualItems(messages, contextCheckpoint);
+  const visualItems = projection.visualItems || buildHistoryVisualItems(messages);
 
   for (const item of visualItems) {
-    if (item.type === "checkpoint") {
-      addContextCheckpointMarker(contextCheckpoint);
+    if (item.type === "compaction") {
+      // 普通历史视图保持紧凑；压缩事件在轨迹中按真实 sequence 展示。
       continue;
     }
 
@@ -1329,7 +1328,7 @@ function renderHistory(messages, modelMessageCount, contextCheckpoint = null) {
       state.assistantPresenter = assistant;
     }
   }
-  state.awaitingHitl = findResumablePendingUiCall(messages, contextCheckpoint) !== null;
+  state.awaitingHitl = findResumablePendingUiCall(messages) !== null;
   const latestPlan = latestAssistantRunPlan(messages);
   if (latestPlan) {
     renderComposerPlan(latestPlan.snapshot, { terminalStatus: latestPlan.terminalStatus });
@@ -1361,11 +1360,10 @@ function isPendingUiToolCall(part, completedToolIds) {
 }
 
 /** Pending UI tool call at the end of history (safe to resume). */
-function findResumablePendingUiCall(messages, contextCheckpoint = null) {
-  const items = buildHistoryVisualItems(messages, contextCheckpoint);
+function findResumablePendingUiCall(messages) {
+  const items = buildHistoryVisualItems(messages);
   let last = null;
   for (let index = items.length - 1; index >= 0; index -= 1) {
-    if (items[index].type === "checkpoint") continue;
     last = items[index];
     break;
   }
@@ -1783,17 +1781,10 @@ async function onSend() {
   clearPendingAttachments();
   autoGrow();
 
-  const branchFrom = state.branchFrom;
-  if (branchFrom != null) {
-    removeDomFromBranchPoint(branchFrom);
-  }
-
-  const userBranchPoint = branchFrom != null ? branchFrom : state.modelMessageCount;
-  const isFirstTurn = branchFrom == null && state.modelMessageCount === 0;
+  const isFirstTurn = state.modelMessageCount === 0;
   clearComposerPlan();
-  addMessage("user", text, null, userBranchPoint, attachments);
-  trajectory?.addUser({ content: text, attachments, branch_point: userBranchPoint });
-  state.lastUserBranchPoint = userBranchPoint;
+  addMessage("user", text, null, null, attachments);
+  trajectory?.addUser({ content: text, attachments });
 
   const assistant = createAssistantMessage();
   state.assistantPresenter = assistant;
@@ -1817,13 +1808,7 @@ async function onSend() {
       mime: a.mime,
     }));
   }
-  if (branchFrom != null) {
-    payload.branch_from = branchFrom;
-    state.modelMessageCount = branchFrom + 1;
-    state.branchFrom = null;
-  } else {
-    state.modelMessageCount += 1;
-  }
+  state.modelMessageCount += 1;
   state.pendingTitleRefresh = isFirstTurn;
   await runChatStream(payload, assistant);
 }
@@ -1888,7 +1873,7 @@ async function runChatStream(payload, assistant) {
     } else {
       setConn("err", "请求失败");
       trajectory?.ingest({ event: "error", data: { message: e.message } });
-      failAutomaticContextCompaction("上下文压缩后续请求失败，未更新 Checkpoint");
+      failAutomaticContextCompaction("上下文压缩后续请求失败，未生成压缩事件");
       markComposerPlanTerminal("error");
       addErrorTo(assistant, `请求失败：${e.message}`);
     }
@@ -1991,16 +1976,6 @@ function setStreaming(v) {
   updateComposerContextControls();
 }
 
-function syncHistoryMeta({ model_message_count: count, user_branch_point: branchPt }) {
-  if (count != null) state.modelMessageCount = count;
-  if (branchPt != null) {
-    state.lastUserBranchPoint = branchPt;
-    const rows = el.messages.querySelectorAll(".msg-row.user");
-    const last = rows[rows.length - 1];
-    if (last) last.dataset.branchPoint = String(branchPt);
-  }
-}
-
 function handleEvent({ event, data }, assistant) {
   const type = event || data.type;
   trajectory?.ingest({ event: type, data });
@@ -2040,8 +2015,11 @@ function handleEvent({ event, data }, assistant) {
       }
       break;
     }
-    case "context_compaction":
+    case "context_compaction_progress":
       showAutomaticContextCompaction(data, assistant.row);
+      break;
+    case "session_event_appended":
+    case "session_event_updated":
       break;
     case "thinking":
       assistant.appendThinking(data.delta || "");
@@ -2074,7 +2052,6 @@ function handleEvent({ event, data }, assistant) {
       break;
     case "final":
       assistant.complete(data.output);
-      syncHistoryMeta(data);
       if (data.usage) renderUsage(data.usage);
       else state.lastRunUsage = null;
       state.conversationId = data.conversation_id || state.conversationId;
@@ -2111,20 +2088,16 @@ function handleEvent({ event, data }, assistant) {
       updateHitlInputState();
       break;
     case "error":
-      failAutomaticContextCompaction("上下文压缩后续请求失败，未更新 Checkpoint");
+      failAutomaticContextCompaction("上下文压缩后续请求失败，未生成压缩事件");
       assistant.finalizeThinking();
       assistant.finalizeText();
-      syncHistoryMeta(data);
       // Error is transient SSE only — refreshing history would wipe the bubble.
       state.skipHistoryRefresh = true;
-      addErrorTo(assistant, data.message || "未知错误", {
-        branchFrom: state.lastUserBranchPoint,
-        message: lastUserText(),
-      });
+      addErrorTo(assistant, data.message || "未知错误");
       markComposerPlanTerminal("error");
       break;
     case "cancelled":
-      failAutomaticContextCompaction("上下文压缩已取消，未更新 Checkpoint");
+      failAutomaticContextCompaction("上下文压缩已取消，未生成压缩事件");
       state.streamCancelled = true;
       // Keep the current streamed conversation in place. The official
       // interrupted history remains the source of truth when the session is
@@ -2134,7 +2107,6 @@ function handleEvent({ event, data }, assistant) {
       assistant.finalizeText();
       assistant.markInterrupted();
       markComposerPlanTerminal("interrupted");
-      syncHistoryMeta(data);
       if (data.usage) renderUsage(data.usage);
       state.conversationId = data.conversation_id || state.conversationId;
       state.lastRunMetrics = {
@@ -2348,33 +2320,6 @@ function renderPendingAttachments() {
 function clearPendingAttachments() {
   state.pendingAttachments = [];
   renderPendingAttachments();
-}
-
-function truncateDomAfterRow(row) {
-  let node = row.nextSibling;
-  while (node) {
-    const next = node.nextSibling;
-    node.remove();
-    node = next;
-  }
-}
-
-/** Remove the user bubble at branch_point and everything after it. */
-function removeDomFromBranchPoint(branchPoint) {
-  const row = el.messages.querySelector(
-    `.msg-row.user[data-branch-point="${branchPoint}"]`
-  );
-  if (!row) return;
-  truncateDomAfterRow(row);
-  row.remove();
-}
-
-async function retryFromBranch({ branchFrom, message }) {
-  if (state.streaming || branchFrom == null || !message) return;
-  if (!ensureAgentSelected()) return;
-  state.branchFrom = branchFrom;
-  el.input.value = message;
-  await onSend();
 }
 
 function addDateSeparator(iso) {
@@ -2952,20 +2897,12 @@ function renderStructuredForm(widgetEl, call, onSubmit) {
   widgetEl.appendChild(submit);
 }
 
-function addErrorTo(assistant, message, retryOpts) {
+function addErrorTo(assistant, message) {
   const wrap = assistant.row.querySelector(".bubble-wrap");
   const div = document.createElement("div");
   div.className = "error-bubble";
   div.innerHTML = `${lucideIcon("triangle-alert")}<span>${escapeHtml(message)}</span>`;
   wrap.appendChild(div);
-  if (retryOpts && retryOpts.branchFrom != null && retryOpts.message) {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "msg-retry-btn";
-    btn.textContent = "重试";
-    btn.addEventListener("click", () => retryFromBranch(retryOpts));
-    wrap.appendChild(btn);
-  }
   refreshLucideIcons();
   scrollToBottom();
 }

@@ -12,7 +12,7 @@
 | 项 | 内容 |
 | --- | --- |
 | **是什么** | 通用 AI Agent 全栈：FastAPI 后端 + Pydantic AI 运行时 + 静态前端 |
-| **产品版本** | `deep_agent.__version__` 为唯一来源；当前 `0.5.8`，默认发布递增第三位 |
+| **产品版本** | `deep_agent.__version__`为唯一来源；当前`0.6.0`，数据库Head为`008` |
 | **启动** | 本地 Test 联调固定使用下方命令；部署入口才使用 `deep_agent.main:app` |
 | **测试** | `python3.12 -m unittest discover -s tests -p "test_*.py" -v` |
 | **配置** | 仓库根 `.env`（`DEEP_AGENT_*` / `DEEP_AGENT_DBMS_*` / `DEEP_AGENT_SQLITE_PATH`） |
@@ -88,27 +88,27 @@ HTTP → deep_agent/api/v1 → AgentRunner → pydantic_ai.Agent → Toolsets
 - DeepAgent 自研 `ToolPackage` 是产品配置单位，负责把分类、展示元数据和恰好一个 Toolset 组织起来；Pydantic AI 的 `AbstractCapability` 只表示压缩、重试等运行扩展，二者不能混用。
 - 模型直接接收 Instructions、历史、当前输入和 Tool Definitions。MCP Resource/Prompt 不会自动成为模型工具，必须由宿主读取、注入或显式包装。
 - Pydantic AI 负责 Agent loop、参数校验、工具调用、重试、流式事件和 Deferred 原语；DeepAgent 负责 SQL 会话、用户隔离、MCP 配置/Header、HITL、SSE 和 Console。
-- 原始 `chat_messages` 始终完整保存；启用全局上下文压缩后，模型输入可复用
-  `chat_context_checkpoints` 派生投影。v0.3.4 增加独立主动压缩接口；主动入口不受自动阈值、
-  历史长度或现有 Checkpoint 限制，无实际收益时由后端返回 `noop`，
-  Console 只展示当前有效压缩边界，不保存压缩审计列表。压缩不得破坏 Tool Call/Result 配对、原始历史、
-  分支和 Pending 恢复；模型未配置上下文窗口时自动停用。
-- v0.3.5 增加结构化 `context_refs`：原始引用随 `chat_messages` 保存，`metadata` 只用于历史和
-  前端，模型输入与摘要只使用安全派生投影。快捷命令仍是业务 Prompt 文本，不新增命令框架。
-- v0.3.6 将语义压缩改为一次安全摘要；不再滚动分块或二次激进摘要。瞬时 Provider 错误只以
-  完全相同的 Prompt 重试一次，无法安全放入单次请求时自动链路仅临时 Sliding Window，主动
-  链路直接失败，二者均不写入 Checkpoint。
+- v0.6.0将会话域统一为`chat_sessions + chat_session_events`：一个完整Pydantic公共Part一行，
+  Run和Compaction生命周期原位更新；模型历史、Event API、持久化SSE、Console轨迹和Plan从同一
+  Event Store投影。旧Message/独立压缩表和History契约已删除，Branch不兼容也不预埋。
+- v0.6.0上下文压缩采用单条Compaction Event、固定八段摘要、确定性Tool/Context Evidence和DSH式
+  超大结果裁剪；300秒总预算内每约10秒发送SSE进度。失败、超时、取消或Stale不替换上一次有效
+  历史；明确Provider Context Overflow只在没有已输出内容或工具副作用时压缩后安全重试一次。
+- 结构化`context_refs`完整保存在`user/message`Event；`metadata`只用于历史和前端，不进入模型、
+  摘要、搜索文本或Token估算。被压缩前缀生成确定性Context Evidence，精确事实仍从原Event回读。
 - 新的运行时横切能力优先评估 Core 的 `PrepareTools`、Hooks、`ToolSearch` 和 Harness 的 Compaction/Overflow；不要默认把逻辑继续写入 `AgentRunner`。
 - v0.3.12 对已授权 MCP 使用 Pydantic AI ToolSearch 渐进披露；当前全局候选不超过 10 个时全部直接披露，超过 10 个时词法预选最多 3 个完整 Schema，其余只列稳定协议名并可搜索加载。检索不扩大 ToolPackage 权限。
 - v0.4.1 将检索器升级为 `lexical_v2`：复用独立的字段化词法内核，按协议名、MCP标准 `title`、参数和描述分级匹配，并支持拼音与受限错字回退；查询明确写出协议工具名时只返回精确工具。不得加入业务词典或把词法匹配描述成中英文语义翻译。
 - v0.4.2 引导本地 `search_tools` 在一次调用中提交最多 3 个互补查询：用户原始语言、简洁英文能力描述和可选协议名。后端只做确定性词法检索，不调用翻译模型；首轮 Top 3仍只依赖原始问题和 MCP元数据。
 - v0.4.4～v0.4.5完成下线内置MCP清理；Alembic 005和006依次清理对应预制Server记录与Agent能力引用，历史会话不改写。当前代码内置MCP只保留DeepCube；真实MCP进程回归改用`tests/fixtures/`下的测试专用Server，禁止测试Fixture进入生产扫描目录。
-- v0.4.6全局采用Harness `Planning()`；每个Run使用独立内存Store，不跨消息或服务重启恢复。v0.4.16将工具收敛为`write_plan`、`read_plan`和`update_task_statuses`，用Harness公开Guidance约束稳定ID、Deferred重建和最终正文前收尾；仅这三个工具按Planning事件识别。规划结果继续走标准Tool Call/Return，DeepAgent只附加只读快照，不建立第二套任务引擎或计划表。Console在正常Final或UI Pending时清除浮层，取消/失败时保留。
+- v0.6.0的Harness Planning只暴露`write_plan`完整替换工具；快照继续走普通Tool Call/Result Event，
+  不建Plan表。同一Turn的Deferred新Run从最近成功快照恢复InMemoryPlanStore，新用户Turn从空计划开始。
 - v0.4.8将运行基线固定升级到`pydantic-ai-slim 2.31.0`与`pydantic-ai-harness 0.21.0`。Deferred工具和Capability工具的执行门槛由Core统一判断；DeepAgent继续只负责授权、检索、披露策略和观测。Planning缓存边界、MCP协议兼容、Provider流关闭及安全修复随框架升级生效，不新增产品协议。
 - Tool Search 首轮预选只使用聊天 API 的原始非空 `message`；`context_refs.type/label` 仅在纯上下文请求时回退，不能让 Page/Range 标签覆盖用户问题。实时工具若被 `ModelRetry` 或取消撤回，SSE 用 `tool_call_removed` 通知客户端删除临时卡片；取消后的非空部分回答必须以 `assistant.status=interrupted` 恢复。
 - 模型目录的 `max_output_tokens` 同时约束普通和流式回答；工具错误只有在模型修改参数或改选工具后可能成功时使用 `ModelRetry`，已确定的下载、解析或上游失败使用 `ToolFailed`，避免消耗工具重试预算。
 - v0.3.13 将正式 Run 的官方 `CancellationToken` 传给内部摘要 Agent；取消摘要直接终止 Run，不能转成 Sliding Window 后继续回答。Local/Native 工具配对统一使用 Pydantic AI 2.26 的 Call/Return 基类。
-- v0.3.16 让自动与主动压缩复用同一内部投影流程；摘要固定保留任务、决策、事实、状态、下一步和未决问题六类信息。Harness 继续只承担公开确定性整理，Checkpoint 与摘要事务仍由 DeepAgent 管理。
+- v0.6.0压缩吸收Harness/DSH的确定性整理与结构化摘要，但Event生命周期、来源Hash、证据索引、SSE
+  和目标复检仍由DeepAgent管理。
 - v0.3.17 通过 Pydantic AI 官方 `conversation_id/run_id` 参数贯通 SSE、History 和运行日志；同一 Session 共用 Conversation ID，每次发送或 Deferred 续跑生成新 Run ID。Provider 未提供缓存计数时必须显示未知，不能把框架归一化的零伪装成缓存未命中。
 - v0.3.18 使用 Harness `Skills` 渐进披露 `SKILL.md`；初始只公开名称和描述，正文由 `load_capability` 按需加载。References/Assets 通过只读分页工具访问；`scripts/` 不向模型披露源码，Agent同时选择含脚本Skill和 `builtin:sandbox` 时可通过统一沙箱执行。Skill 本身不授予工具权限。
 - v0.3.19 起 URL MCP 只在显式检测时执行 initialize/tools-list 并保存无敏感信息的工具快照；聊天 Run 用快照完成工具披露，真实调用时才按当前请求 Header 建连。同一 Run 复用连接，缺少或配置失效的快照不进入模型工具列表，必须重新“检测并更新”。Builtin MCP 和 Resource 代理保持原链路。
@@ -121,7 +121,9 @@ HTTP → deep_agent/api/v1 → AgentRunner → pydantic_ai.Agent → Toolsets
 - v0.4.20为模型目录增加models.dev官方`catalog.json`离线导入和可往返的当前目录JSON导出；联网刷新与文件导入复用同一解析、Provider白名单、标准化和原子替换逻辑。导入失败保留旧目录，也不修改已保存的模型配置。
 - v0.5.0完成一体化Console视觉与布局重构：顶栏和图标导航统一三个主页面，工作台支持会话与详情栏调宽，配置中心提供Agent卡片/列表和独立编辑页，Skill与UI工具采用左右分栏。REST、SSE、History和Alembic `006`保持不变；模型目录保留导出、导入和在线更新，UI工具直接展示当前包的完整工具列表；上传Skill标题栏只保留编辑和上传，其余操作进入三点菜单；删除、未保存提醒和Skill信息输入统一使用轻量Console弹层，禁止回退浏览器原生`alert/confirm/prompt`。
 - v0.5.1抽出Console共享Markdown渲染器：Skill正文按Markdown阅读样式预览，主对话支持安全渲染`mermaid`围栏图表；图表仅在完整回复落定后按需加载本地资源并渲染，语法错误保留源码。
-- v0.5.3为Console增加独立“对话 / 轨迹”分段切换：轨迹只读投影现有History与当前SSE，按Pydantic AI Run归组；同一次模型响应的思考、正文和工具意图聚合为一个助手Loop，工具调用/结果仍保留独立排障记录。用户输入保留Context Reference和附件标记，Context Reference同时形成独立`CONTEXT`事件；详情按事件类型提供Summary、Payload、Preview、Raw或Result，JSON统一使用语法高亮。轨迹只展示数据库中可确认顺序的记录，不用不完整时间拼接甘特图或时间轴。详情复用工作台右侧会话详情栏；History只补充数据库中已经存在的请求/响应时间、工具结果时间、模型名、Provider、Response ID、Finish Reason、Usage和工具Outcome。不新建轨迹表、不保存HTTP原始报文，也不改变模型上下文或外部客户端协议。
+- v0.6.0 Console“对话 / 轨迹”统一读取Event API；轨迹按Sequence逐行展示真实语义Event，Run与
+  Compaction按同一Event ID Upsert，不再从ModelMessage `parts[]`重拆。普通历史聊天可隐藏完成压缩
+  标记，轨迹始终保留真实触发位置和脱敏详情。
 - v0.5.4收敛Console轨迹详情展示与前端实现：Assistant的Thinking归入Preview首段并默认折叠，短正文按内容自适应、长正文超过上限后滚动；Tool、Planning和Deferred复用同一套Payload/Result摘要渲染。REST、SSE、History、数据库和轨迹投影语义均不变化。
 - v0.5.5增加独立`llm_providers`配置层、九类Pydantic AI适配与Provider分栏Console，运行时开始按显式Provider类型构造原生Provider/Model，不再按模型前缀或URL猜协议。
 - v0.5.7压缩Provider详情接入信息：Base URL改为单行图标事实，地址模式、Key和启停状态改为紧凑胶囊，运行协议并入Provider副标题；仅调整Console展示，不改变Provider、Model、迁移或外部接口。
@@ -138,14 +140,14 @@ HTTP → deep_agent/api/v1 → AgentRunner → pydantic_ai.Agent → Toolsets
 - Provider Usage 是 best effort；OpenAI-compatible 或私有端点返回 0 时可能代表缺失。上下文预算必须结合模型窗口元数据和保守估算，不能只依赖 `result.usage`。
 - 新上传只保存附件引用；运行时 `read_file`通过 1-based `offset/limit`、
   `has_more/next_offset`渐进读取 TXT、LOG、DOCX、XLSX。合法 `file_id`
-  必须来自当前原始会话，不能从 Checkpoint 推断。详见
+  必须来自当前会话的原始Event或Artifact，不能从摘要Evidence推断授权。详见
   [`docs/design/06-attachment-parsing/`](docs/design/06-attachment-parsing/)。
 
 ### 框架能力说明方式
 
 向产品或客户端解释 Pydantic AI、Harness、Provider 能力时，不能只给类名和抽象结论。至少按以下顺序说明：
 
-1. **发生阶段**：能力发生在模型请求前、工具定义披露时、工具执行后，还是 History/Checkpoint 持久化时。
+1. **发生阶段**：能力发生在模型请求前、工具定义披露时、工具执行后，还是Event持久化时。
 2. **前后数据**：给出最小的 JSON、SSE 或消息示例，明确哪些字段新增、删除或保持不变。
 3. **模型实际看到什么**：区分 Tool Definition、输入参数 Schema、返回 Schema 和真实 Tool Result，说明是否增加输入 Token。
 4. **职责归属**：分别说明 Provider、Pydantic AI Core、Harness 和 DeepAgent 产品层负责什么，避免把框架原语说成完整产品功能。

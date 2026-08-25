@@ -17,8 +17,10 @@ from tests.helpers.request_identity import install_test_user_header
 from tests.helpers.sqlite_stores import (
     get_default_test_provider_id,
     make_sqlite_stores,
+    seed_default_agent,
 )
 from tests.integration.helpers.chat import mock_request_disconnect, parse_sse_events
+from tests.integration.helpers.events import project_event_response
 from tests.integration.helpers.models import text_only_model
 
 _CHAT_JSON = {"capabilities": []}
@@ -33,6 +35,7 @@ class ChatImageAttachmentTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         stores, self._engine, session_factory = await make_sqlite_stores()
         self._provider_id = await get_default_test_provider_id(stores)
+        self._agent_id = await seed_default_agent(stores, name="image-agent")
         self._app = FastAPI()
         install_test_user_header(self._app)
         self._app.include_router(api_router)
@@ -69,7 +72,7 @@ class ChatImageAttachmentTests(unittest.IsolatedAsyncioTestCase):
                     async with client.stream(
                         "POST",
                         "/api/v1/chat/stream",
-                        json={**_CHAT_JSON, **json_body},
+                        json={**_CHAT_JSON, "agent_id": self._agent_id, **json_body},
                     ) as response:
                         self.assertEqual(response.status_code, 200)
                         body = "".join([chunk async for chunk in response.aiter_text()])
@@ -78,9 +81,9 @@ class ChatImageAttachmentTests(unittest.IsolatedAsyncioTestCase):
     async def _history(self, session_id: str) -> dict:
         await get_context().event_persister.flush(session_id)
         async with AsyncClient(transport=self._transport, base_url="http://test") as client:
-            resp = await client.get(f"/api/v1/sessions/{session_id}/history")
+            resp = await client.get(f"/api/v1/sessions/{session_id}/events")
         self.assertEqual(resp.status_code, 200)
-        return resp.json()
+        return project_event_response(resp.json())
 
     async def _list_sessions(self) -> dict:
         async with AsyncClient(transport=self._transport, base_url="http://test") as client:

@@ -70,6 +70,13 @@ class AppContext:
             OPTION.agent.app_name,
             bundle.dialect.value,
         )
+        interrupted = await bundle.stores.coordinator.interrupt_running()
+        if interrupted:
+            logger.warning(
+                "Recovered {} unfinished Run/Compaction Events as interrupted",
+                interrupted,
+            )
+        await bundle.stores.auxiliary_model.ensure_defaults()
 
         try:
             ensure_sandbox_interpreter_for_startup()

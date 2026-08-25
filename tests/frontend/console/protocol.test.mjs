@@ -58,15 +58,15 @@ test("工具调用撤销后不再保留实时工具卡状态", () => {
 
 test("上下文压缩事件提供短暂状态文案", () => {
   assert.deepEqual(
-    contextCompactionPresentation({ phase: "started" }),
-    { phase: "started", message: "正在压缩上下文…", active: true },
+    contextCompactionPresentation({ phase: "preparing" }),
+    { phase: "preparing", message: "正在准备上下文压缩…", active: true },
   );
   assert.equal(
     contextCompactionPresentation({
-      phase: "fallback",
-      message: "已缩减较早上下文，继续生成…",
+      phase: "committing",
+      message: "正在写入压缩事件…",
     }).message,
-    "已缩减较早上下文，继续生成…",
+    "正在写入压缩事件…",
   );
   assert.equal(
     contextCompactionPresentation({ phase: "ignored" }).active,

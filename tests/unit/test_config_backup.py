@@ -14,9 +14,8 @@ from deep_agent.db.models import (
     Agent,
     AuxiliaryModelConfig,
     Base,
-    ChatContextCheckpoint,
-    ChatMessage,
     ChatSession,
+    ChatSessionEvent,
     LlmModel,
     LlmProvider,
     McpServer,
@@ -56,17 +55,16 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
 
             self.assertEqual(
                 result.path.name,
-                "deep-agent-config-test-v007-20260723-131415.db",
+                "deep-agent-config-test-v008-20260723-131415.db",
             )
             self.assertEqual(
                 [path.resolve() for path in (output_root / "test").iterdir()],
                 [result.path.resolve()],
             )
-            self.assertEqual(result.revision, "007")
+            self.assertEqual(result.revision, "008")
             self.assertEqual(result.row_counts["agents"], 1)
             self.assertEqual(result.row_counts["chat_sessions"], 0)
-            self.assertEqual(result.row_counts["chat_messages"], 0)
-            self.assertEqual(result.row_counts["chat_context_checkpoints"], 0)
+            self.assertEqual(result.row_counts["chat_session_events"], 0)
 
             with sqlite3.connect(result.path) as connection:
                 tables = {
@@ -85,7 +83,7 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                     connection.execute(
                         "SELECT version_num FROM alembic_version"
                     ).fetchone(),
-                    ("007",),
+                    ("008",),
                 )
                 self.assertEqual(
                     connection.execute(
@@ -156,13 +154,7 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                     (0,),
                 )
                 self.assertEqual(
-                    connection.execute("SELECT COUNT(*) FROM chat_messages").fetchone(),
-                    (0,),
-                )
-                self.assertEqual(
-                    connection.execute(
-                        "SELECT COUNT(*) FROM chat_context_checkpoints"
-                    ).fetchone(),
+                    connection.execute("SELECT COUNT(*) FROM chat_session_events").fetchone(),
                     (0,),
                 )
                 self.assertEqual(
@@ -170,7 +162,7 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                         "SELECT environment, source_dialect, alembic_revision, "
                         "git_commit FROM _backup_info"
                     ).fetchone(),
-                    ("test", "sqlite", "007", "abc123"),
+                    ("test", "sqlite", "008", "abc123"),
                 )
                 scope_manifest = json.loads(
                     str(
@@ -265,7 +257,7 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                 )
                 await connection.execute(
                     text(
-                        "INSERT INTO alembic_version (version_num) VALUES ('007')"
+                        "INSERT INTO alembic_version (version_num) VALUES ('008')"
                     )
                 )
                 await connection.execute(
@@ -400,32 +392,22 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                 await connection.execute(
                     insert(ChatSession.__table__),
                     {
-                        "agent_id": "agent-1",
                         "session_id": "session-1",
+                        "agent_id": "agent-1",
                         "user_id": "user-1",
+                        "next_sequence": 2,
                     },
                 )
                 await connection.execute(
-                    insert(ChatMessage.__table__),
+                    insert(ChatSessionEvent.__table__),
                     {
-                        "agent_id": "agent-1",
+                        "event_id": "e" * 32,
                         "session_id": "session-1",
                         "sequence": 1,
-                        "payload": {"kind": "request"},
-                    },
-                )
-                await connection.execute(
-                    insert(ChatContextCheckpoint.__table__),
-                    {
-                        "agent_id": "agent-1",
-                        "session_id": "session-1",
-                        "source_last_sequence": 1,
-                        "source_history_hash": "a" * 64,
-                        "payload": [{"kind": "request", "parts": []}],
-                        "payload_schema_version": 1,
-                        "projection_fingerprint": "b" * 64,
-                        "estimated_tokens": 12,
-                        "row_version": 1,
+                        "schema_version": 1,
+                        "event_type": "run",
+                        "status": "completed",
+                        "payload": {"mode": "test"},
                     },
                 )
         finally:

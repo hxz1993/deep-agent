@@ -11,7 +11,7 @@ from pydantic_ai.models.test import TestModel
 from pydantic_ai.tools import ToolDefinition
 from pydantic_ai.usage import RunUsage
 
-from deep_agent.agent.context.checkpoint import serialize_sanitized_projection
+from deep_agent.agent.context.sanitization import serialize_sanitized_projection
 from deep_agent.agent.context.estimator import TokenEstimator
 from deep_agent.agent.context.file_keys import deep_agent_file_key
 from deep_agent.agent.deps import AgentDeps
@@ -83,6 +83,10 @@ class PlatformToolResultStoreTests(unittest.IsolatedAsyncioTestCase):
             handle = await store.write("run/call", b"complete output")
         self.assertEqual(handle, "platform-file-1")
         self.assertEqual(await store.read(handle), b"complete output")
+        self.assertEqual(
+            store.content_hash(handle),
+            "8468c503ac8dae011ac26d9873b7198d2a64b8f1a3b38c0d5d8506482710bf03",
+        )
         upload.assert_awaited_once()
         self.assertEqual(store.telemetry.platform_downloads, 0)
         self.assertEqual(store.telemetry.spill_count, 1)
@@ -243,16 +247,49 @@ class HarnessToolOutputLimitsTests(unittest.IsolatedAsyncioTestCase):
             max_output_tokens=2_000,
             estimator=TokenEstimator.conservative(),
         )
-        store.write = AsyncMock(side_effect=OSError("platform down"))  # type: ignore[method-assign]
-        result = await capability.after_tool_execute(
-            _ctx(),
-            call=ToolCallPart("query", {}, "call-1"),
-            tool_def=ToolDefinition(name="query"),
-            args={},
-            result="A" * 30_000,
+        upload = AsyncMock(side_effect=OSError("platform down"))
+        api = SimpleNamespace(file=SimpleNamespace(upload=upload))
+        original = "A" * 30_000
+        with patch("deep_agent.agent.tool_output_limits.PlatformAPI", return_value=api):
+            result = await capability.after_tool_execute(
+                _ctx(),
+                call=ToolCallPart("query", {}, "call-1"),
+                tool_def=ToolDefinition(name="query"),
+                args={},
+                result=original,
+            )
+        self.assertIsInstance(result, ToolReturn)
+        self.assertLessEqual(len(result.return_value), 8_200)
+        self.assertTrue(result.metadata["spill_failed"])
+        self.assertEqual(result.metadata["inline_fallback"], original)
+        self.assertEqual(store.telemetry.spill_failures, 1)
+
+    async def test_successful_spill_persists_full_artifact_hash(self) -> None:
+        capability, store = build_tool_output_limits(
+            request_headers={},
+            context_window_tokens=10_000,
+            max_output_tokens=2_000,
+            estimator=TokenEstimator.conservative(),
         )
-        self.assertIsInstance(result, str)
-        self.assertLessEqual(len(result), 8_200)
+        deps = AgentDeps(session_id="session")
+        store.bind(deps, [])
+        upload = AsyncMock(return_value=SimpleNamespace(id="platform-file-hash"))
+        api = SimpleNamespace(file=SimpleNamespace(upload=upload))
+        with patch("deep_agent.agent.tool_output_limits.PlatformAPI", return_value=api):
+            result = await capability.after_tool_execute(
+                _ctx(deps),
+                call=ToolCallPart("query", {}, "call-hash"),
+                tool_def=ToolDefinition(name="query"),
+                args={},
+                result="完整结果" * 10_000,
+            )
+        self.assertIsInstance(result, ToolReturn)
+        assert isinstance(result, ToolReturn)
+        self.assertEqual(
+            result.metadata["overflow_hash"],
+            store.content_hash("platform-file-hash"),
+        )
+        self.assertEqual(len(result.metadata["overflow_hash"]), 64)
 
     async def test_return_value_and_model_content_spill_independently(self) -> None:
         capability, store = build_tool_output_limits(

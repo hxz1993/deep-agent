@@ -72,7 +72,7 @@ CONTEXT_TEST_SCENARIOS: tuple[ContextTestScenario, ...] = (
         expected_behavior="按保守估算触发单次摘要并生成 Checkpoint，同时展示 Provider 误差。",
         user_template=(
             '第{turn}轮配置核对：context_window=true，language="zh-cn"，'
-            'JSON={{"checkpoint":"replace","raw_history":"append"}}。'
+            'JSON={{"compaction_event":"replace_prefix","raw_events":"append"}}。'
         ),
         assistant_template=(
             "Round {turn} result: keep raw messages immutable; "

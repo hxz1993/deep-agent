@@ -5,23 +5,18 @@ from typing import Any
 
 from pydantic_ai.messages import ModelMessage, ModelRequest, ToolReturnPart
 from pydantic_ai.tools import RunContext
-from pydantic_ai_harness.planning import InMemoryPlanStore, Planning
+from pydantic_ai_harness.planning import InMemoryPlanStore, PlanItem, Planning
 
 from deep_agent.agent.deps import AgentDeps
 
-PLANNING_TOOL_NAMES = (
-    "write_plan",
-    "read_plan",
-    "update_task_statuses",
-)
+PLANNING_TOOL_NAMES = ("write_plan",)
 PLANNING_TOOL_NAME_SET = frozenset(PLANNING_TOOL_NAMES)
 PLANNING_GUIDANCE = """Use planning only when the task benefits from multiple execution steps.
 
 - Include only work that still needs to be performed. Never add "write the final answer", "reply to the user", or equivalent presentation-only steps.
-- Task IDs are the stable IDs returned by the planning tools, not the visible list positions such as 1, 2, or 3. If you do not know the exact IDs, call read_plan before updating anything.
-- After the IDs are known, use update_task_statuses for every status change, including a single-item update.
-- Update all accurately completed work before starting the final answer. Once final-answer text begins, do not call another planning tool.
-- A deferred-tool resume is a new run. Do not reuse task IDs from the previous run; reassess the remaining work and call write_plan only if a new plan is still useful.
+- Every write_plan call replaces the complete plan. Include the current status of every remaining step in each call.
+- Update all accurately completed work before starting the final answer. Once final-answer text begins, do not call write_plan again.
+- A deferred-tool resume belongs to the same user turn and receives the last complete plan snapshot from that turn.
 - Never mark unfinished work as completed merely to close the plan.
 """
 PLAN_METADATA_KEY = "deepagent_plan"
@@ -34,10 +29,27 @@ def is_planning_tool(tool_name: str | None) -> bool:
 
 
 def prepare_plan_store(deps: AgentDeps) -> InMemoryPlanStore:
-    """Reset the official in-memory plan at the start of a DeepAgent Run."""
+    """Create a fresh official PlanStore for the current Pydantic Run."""
 
     store = InMemoryPlanStore()
     deps.plan_store = store
+    return store
+
+
+async def restore_plan_snapshot(
+    deps: AgentDeps,
+    snapshot: Mapping[str, Any] | None,
+) -> InMemoryPlanStore:
+    """Restore a complete write_plan snapshot for a Deferred run in the same turn."""
+
+    store = prepare_plan_store(deps)
+    if not snapshot:
+        return store
+    raw_items = snapshot.get("items")
+    if not isinstance(raw_items, list):
+        return store
+    items = [PlanItem.model_validate(item) for item in raw_items if isinstance(item, Mapping)]
+    await store.set_items(items)
     return store
 
 

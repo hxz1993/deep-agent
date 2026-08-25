@@ -3,6 +3,25 @@
 本文件记录 DeepAgent 的产品版本变化，按新版本到旧版本排列。当前代码版本以
 `deep_agent.__version__` 为准；数据库结构版本以 Alembic head 为准，两者互不替代。
 
+## v0.6.0
+
+- 将旧 `chat_messages` 与独立上下文投影重构为 `chat_session_events`：每个完整 Pydantic AI
+  语义 Part 一行，Run 与压缩使用同一 Event ID 原位更新；会话历史、模型恢复、SSE、Plan 和
+  Console 轨迹统一从 Event Store 投影。
+- Alembic `008` 是会话域破坏性迁移：删除旧会话历史与旧上下文投影，重建全局唯一 Session、
+  严格 Sequence、Turn/Run/Message/Call 定位和可空 App/Space 来源；Provider、Model、Agent、
+  MCP、Skill、UI Tool 与辅助模型配置不变。升级前必须分别执行配置备份和会话历史归档。
+- 上下文压缩改为单条 Compaction Event，采用固定八段结构摘要、确定性的 Tool/Context Evidence、
+  DSH 式超大工具结果头尾裁剪和来源 Hash 校验；失败、超时、取消和 Stale 不替换上一次有效历史。
+- 摘要总超时提高到 300 秒，并每约 10 秒发送非持久化压缩进度；明确的 Provider Context Overflow
+  在没有已输出文本或工具副作用时压缩后安全重试一次，其他失败不重复发送同一大请求。
+- 增加 `search_conversation_history` 与 `read_conversation_event` 两个只读系统工具，支持权限内中文、
+  英文、路径、Tool Name、Call ID 和稳定标识检索；完整 Artifact 继续由 `read_tool_result` 分页读取。
+- Harness Planning 只暴露 `write_plan` 完整快照；Deferred 新 Run 通过共同 `turn_id` 恢复本 Turn
+  最近成功计划，新用户 Turn 不注入旧计划。
+- Console 改读 Event API，按 Sequence 展示 Compaction 的真实触发位置，并按 Event ID Upsert
+  生命周期终态；同时合入 Provider/Skill 等配置详情的紧凑布局。本版本不恢复旧会话，也不实现 Branch。
+
 ## v0.5.8
 
 - 完善纯本地SQLite调试：仓库外Profile可显式开启仅限回环`local_dev`进程内部ASGI scope的

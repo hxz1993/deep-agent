@@ -29,8 +29,10 @@ from tests.helpers.request_identity import install_test_user_header
 from tests.helpers.sqlite_stores import (
     get_default_test_provider_id,
     make_sqlite_stores,
+    seed_default_agent,
 )
 from tests.integration.helpers.chat import mock_request_disconnect, parse_sse_events
+from tests.integration.helpers.events import project_event_response
 from tests.integration.helpers.models import text_only_model
 
 
@@ -117,6 +119,7 @@ class ChatContextReferenceIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 max_output_tokens=8_192,
             )
         )
+        self._agent_id = await seed_default_agent(stores, name="context-ref-agent")
         self._app = FastAPI()
         install_test_user_header(self._app)
         self._app.include_router(api_router)
@@ -145,9 +148,9 @@ class ChatContextReferenceIntegrationTests(unittest.IsolatedAsyncioTestCase):
     async def _history(self, session_id: str) -> dict:
         await get_context().event_persister.flush(session_id)
         async with AsyncClient(transport=self._transport, base_url="http://test") as client:
-            response = await client.get(f"/api/v1/sessions/{session_id}/history")
+            response = await client.get(f"/api/v1/sessions/{session_id}/events")
         self.assertEqual(response.status_code, 200)
-        return response.json()
+        return project_event_response(response.json())
 
     def _discovery_runner(self) -> AgentRunner:
         async def answer(_messages: list, _info: AgentInfo):
@@ -199,7 +202,7 @@ class ChatContextReferenceIntegrationTests(unittest.IsolatedAsyncioTestCase):
             "type": "deeptable.page",
         }
         with patch(
-            "deep_agent.api.v1.chat.build_runner",
+            "deep_agent.api.v1.chat.build_runner_for_agent",
             new_callable=AsyncMock,
             return_value=runner,
         ):
@@ -213,6 +216,7 @@ class ChatContextReferenceIntegrationTests(unittest.IsolatedAsyncioTestCase):
                         "POST",
                         "/api/v1/chat/stream",
                         json={
+                            "agent_id": self._agent_id,
                             "message": "火星气象温度是多少？不要调用工具；不知道就说不知道。",
                             "context_refs": [page_ref],
                         },
@@ -235,7 +239,7 @@ class ChatContextReferenceIntegrationTests(unittest.IsolatedAsyncioTestCase):
         observed: list[list[str]] = []
         for context_refs in (None, [page_ref]):
             with patch(
-                "deep_agent.api.v1.chat.build_runner",
+                "deep_agent.api.v1.chat.build_runner_for_agent",
                 new_callable=AsyncMock,
                 return_value=self._discovery_runner(),
             ):
@@ -245,7 +249,7 @@ class ChatContextReferenceIntegrationTests(unittest.IsolatedAsyncioTestCase):
                         base_url="http://test",
                         timeout=30.0,
                     ) as client:
-                        body = {"message": question}
+                        body = {"agent_id": self._agent_id, "message": question}
                         if context_refs is not None:
                             body["context_refs"] = context_refs
                         async with client.stream(
@@ -278,6 +282,7 @@ class ChatContextReferenceIntegrationTests(unittest.IsolatedAsyncioTestCase):
                         "POST",
                         "/api/v1/chat/stream",
                         json={
+                            "agent_id": self._agent_id,
                             "model_id": self._model.id,
                             "capabilities": [],
                             "context_refs": [_context_ref()],
@@ -310,6 +315,7 @@ class ChatContextReferenceIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 response = await client.post(
                     "/api/v1/chat",
                     json={
+                        "agent_id": self._agent_id,
                         "message": "结合附件解释选区",
                         "model_id": self._model.id,
                         "capabilities": [],
@@ -339,6 +345,7 @@ class ChatContextReferenceIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 created = await client.post(
                     "/api/v1/chat",
                     json={
+                        "agent_id": self._agent_id,
                         "model_id": self._model.id,
                         "capabilities": [],
                         "context_refs": [_context_ref()],
@@ -435,7 +442,7 @@ class ChatContextReferenceIntegrationTests(unittest.IsolatedAsyncioTestCase):
                         "POST",
                         "/api/v1/chat/stream",
                         json={
-                            "session_id": "context-ref-provider-failure",
+                            "agent_id": self._agent_id,
                             "model_id": self._model.id,
                             "capabilities": [],
                             "message": "分析失败后仍要保留引用",
@@ -447,7 +454,7 @@ class ChatContextReferenceIntegrationTests(unittest.IsolatedAsyncioTestCase):
 
         events = parse_sse_events(raw)
         self.assertEqual(events[-1]["type"], "error")
-        history = await self._history("context-ref-provider-failure")
+        history = await self._history(events[0]["session_id"])
         user = next(message for message in history["messages"] if message["role"] == "user")
         self.assertEqual(user["context_refs"], [_context_ref()])
 

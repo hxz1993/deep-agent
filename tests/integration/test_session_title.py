@@ -283,7 +283,10 @@ class AuxiliaryModelApiTests(unittest.IsolatedAsyncioTestCase):
         await self._stores.auxiliary_model.ensure_defaults()
 
         rows = await self._stores.auxiliary_model.list_all()
-        self.assertEqual([row.use_case for row in rows], ["title"])
+        self.assertEqual(
+            [row.use_case for row in rows],
+            ["context_compaction", "title"],
+        )
 
     async def test_update_title_model_from_env_seed(self) -> None:
         if not os.environ.get("DEEP_AGENT_TITLE_MODEL"):

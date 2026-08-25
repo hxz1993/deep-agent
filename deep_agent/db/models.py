@@ -11,6 +11,7 @@ from sqlalchemy import (
     Index,
     Integer,
     PrimaryKeyConstraint,
+    SmallInteger,
     String,
     Text,
     UniqueConstraint,
@@ -24,7 +25,6 @@ from deep_agent.db.ids import (
     new_agent_id,
     new_provider_id,
 )
-from deep_agent.db.session_scope import NO_AGENT_SCOPE
 from deep_agent.db.types import JSONType
 
 
@@ -216,16 +216,31 @@ class McpServer(Base):
 
 class ChatSession(Base):
     __tablename__ = "chat_sessions"
-    __table_args__ = (PrimaryKeyConstraint("agent_id", "session_id"),)
+    __table_args__ = (
+        Index(
+            "ix_chat_sessions_agent_user_updated",
+            "agent_id",
+            "user_id",
+            "updated_at",
+        ),
+    )
 
+    session_id: Mapped[str] = mapped_column(KeyText, primary_key=True)
     agent_id: Mapped[str] = mapped_column(
         String(AGENT_ID_LENGTH),
-        primary_key=True,
-        default=NO_AGENT_SCOPE,
+        ForeignKey("agents.id", ondelete="RESTRICT"),
+        nullable=False,
     )
-    session_id: Mapped[str] = mapped_column(KeyText, primary_key=True)
-    user_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    user_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    app_id: Mapped[str | None] = mapped_column(KeyText, nullable=True)
+    space_id: Mapped[str | None] = mapped_column(KeyText, nullable=True)
     title: Mapped[str | None] = mapped_column(Text, nullable=True)
+    next_sequence: Mapped[int] = mapped_column(
+        BigInteger,
+        nullable=False,
+        default=1,
+        server_default="1",
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -300,53 +315,72 @@ class AuxiliaryModelConfig(Base):
     llm_model: Mapped[LlmModel | None] = relationship("LlmModel", lazy="joined")
 
 
-class ChatMessage(Base):
-    __tablename__ = "chat_messages"
+class ChatSessionEvent(Base):
+    __tablename__ = "chat_session_events"
     __table_args__ = (
-        UniqueConstraint("agent_id", "session_id", "sequence", name="uq_chat_messages_session_sequence"),
+        UniqueConstraint(
+            "session_id",
+            "sequence",
+            name="uq_chat_session_events_session_sequence",
+        ),
+        UniqueConstraint(
+            "session_id",
+            "message_id",
+            "part_index",
+            name="uq_chat_session_events_message_part",
+        ),
+        Index(
+            "ix_chat_session_events_session_turn_sequence",
+            "session_id",
+            "turn_id",
+            "sequence",
+        ),
+        Index(
+            "ix_chat_session_events_session_run_sequence",
+            "session_id",
+            "run_id",
+            "sequence",
+        ),
+        Index(
+            "ix_chat_session_events_session_call_sequence",
+            "session_id",
+            "call_id",
+            "sequence",
+        ),
+        Index(
+            "ix_chat_session_events_session_type_status_sequence",
+            "session_id",
+            "event_type",
+            "status",
+            "sequence",
+        ),
+        Index(
+            "ix_chat_session_events_session_tool_sequence",
+            "session_id",
+            "tool_name",
+            "sequence",
+        ),
     )
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    agent_id: Mapped[str] = mapped_column(String(AGENT_ID_LENGTH), nullable=False, default=NO_AGENT_SCOPE)
-    session_id: Mapped[str] = mapped_column(KeyText, nullable=False)
-    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    event_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    session_id: Mapped[str] = mapped_column(
+        KeyText,
+        ForeignKey("chat_sessions.session_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    sequence: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    schema_version: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=1)
+    event_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    status: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    turn_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    run_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    message_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    part_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    call_id: Mapped[str | None] = mapped_column(KeyText, nullable=True)
+    tool_name: Mapped[str | None] = mapped_column(KeyText, nullable=True)
+    search_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     payload: Mapped[dict] = mapped_column(JSONType, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-
-
-class ChatContextCheckpoint(Base):
-    """Derived model-input projection; raw chat_messages remain authoritative."""
-
-    __tablename__ = "chat_context_checkpoints"
-    __table_args__ = (PrimaryKeyConstraint("agent_id", "session_id"),)
-
-    agent_id: Mapped[str] = mapped_column(
-        String(AGENT_ID_LENGTH),
-        primary_key=True,
-        default=NO_AGENT_SCOPE,
-    )
-    session_id: Mapped[str] = mapped_column(KeyText, primary_key=True)
-    source_last_sequence: Mapped[int] = mapped_column(Integer, nullable=False)
-    source_history_hash: Mapped[str] = mapped_column(String(64), nullable=False)
-    payload: Mapped[list[dict]] = mapped_column(JSONType, nullable=False)
-    payload_schema_version: Mapped[int] = mapped_column(Integer, nullable=False)
-    projection_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
-    estimated_tokens: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    summary_model_id: Mapped[str | None] = mapped_column(
-        String(AGENT_ID_LENGTH),
-        nullable=True,
-    )
-    row_version: Mapped[int] = mapped_column(
-        BigInteger,
-        nullable=False,
-        default=1,
-        server_default="1",
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        server_default=func.now(),
-        nullable=False,
-    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),

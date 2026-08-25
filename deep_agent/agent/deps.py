@@ -32,6 +32,10 @@ class AgentDeps:
     agent_id: str | None = None
     conversation_id: str | None = None
     run_id: str | None = None
+    turn_id: str | None = None
+    resume_from_run_id: str | None = None
+    app_id: str | None = None
+    space_id: str | None = None
     request_headers: Mapping[str, str] = field(default_factory=dict)
     context_state: "ContextRunState | None" = None
     tool_discovery: "ToolDiscoveryTelemetry | None" = None

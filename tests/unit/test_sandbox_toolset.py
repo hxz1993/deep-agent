@@ -147,6 +147,8 @@ class SandboxBootstrapHardGateTests(unittest.IsolatedAsyncioTestCase):
         fake_bundle = MagicMock()
         fake_bundle.dialect.value = "sqlite"
         fake_bundle.stores = MagicMock()
+        fake_bundle.stores.coordinator.interrupt_running = AsyncMock(return_value=0)
+        fake_bundle.stores.auxiliary_model.ensure_defaults = AsyncMock()
         fake_bundle.engine = MagicMock()
         fake_bundle.session_factory = MagicMock()
 
@@ -183,6 +185,8 @@ class SandboxBootstrapHardGateTests(unittest.IsolatedAsyncioTestCase):
         fake_bundle = MagicMock()
         fake_bundle.dialect.value = "sqlite"
         fake_bundle.stores = MagicMock()
+        fake_bundle.stores.coordinator.interrupt_running = AsyncMock(return_value=0)
+        fake_bundle.stores.auxiliary_model.ensure_defaults = AsyncMock()
         fake_bundle.engine = MagicMock()
         fake_bundle.session_factory = MagicMock()
         persister = MagicMock()

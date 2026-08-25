@@ -22,7 +22,27 @@ from tests.helpers.sqlite_stores import (
     make_sqlite_stores,
 )
 from tests.integration.helpers.chat import mock_request_disconnect, parse_sse_events
+from tests.integration.helpers.events import project_event_response
 from tests.integration.helpers.models import text_only_model
+
+
+_VALID_COMPACTION_SUMMARY = """## 1. Primary Request and Intent
+保留项目背景与既有决定。
+## 2. Key Technical Concepts
+无
+## 3. Files and Code
+无
+## 4. Errors and Fixes
+无
+## 5. Pending Jobs
+无
+## 6. Current Work
+确认当前方案。
+## 7. Next Step
+继续执行当前方案。
+## 8. Critical Context
+三轮记录均要求保留背景。
+"""
 
 
 class SessionModelOverrideIntegrationTests(unittest.IsolatedAsyncioTestCase):
@@ -193,14 +213,14 @@ class SessionModelOverrideIntegrationTests(unittest.IsolatedAsyncioTestCase):
         await get_context().event_persister.flush(self._session_id, agent_id=self._agent_id)
 
         async with AsyncClient(transport=self._transport, base_url="http://test", timeout=30.0) as client:
-            history = await client.get(
-                f"/api/v1/sessions/{self._session_id}/history",
+            events_response = await client.get(
+                f"/api/v1/sessions/{self._session_id}/events",
                 params={"agent_id": self._agent_id},
             )
-        self.assertEqual(history.status_code, 200)
-        payload = history.json()
+        self.assertEqual(events_response.status_code, 200)
+        payload = events_response.json()
         self.assertNotIn("llm_model_id", payload)
-        self.assertGreater(payload.get("model_message_count", 0), 0)
+        self.assertGreater(len(payload["items"]), 0)
 
     async def test_context_status_and_final_event_expose_read_only_budget(
         self,
@@ -246,8 +266,7 @@ class SessionModelOverrideIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreater(payload["safety_margin_tokens"], 0)
         self.assertGreater(payload["usable_request_tokens"], 0)
         self.assertTrue(payload["compaction_enabled"])
-        self.assertFalse(payload["checkpoint_exists"])
-        self.assertFalse(payload["checkpoint_active"])
+        self.assertIsNone(payload["compaction_event_id"])
         self.assertTrue(payload["manual_compaction_available"])
         self.assertEqual(payload["manual_compaction_reason"], "available")
 
@@ -338,7 +357,7 @@ class SessionModelOverrideIntegrationTests(unittest.IsolatedAsyncioTestCase):
 
         with patch(
             "deep_agent.agent.factory._resolve_model",
-            return_value=text_only_model("保留既有决定、约束与未决事项。"),
+            return_value=text_only_model(_VALID_COMPACTION_SUMMARY),
         ):
             with mock_request_disconnect():
                 async with AsyncClient(
@@ -363,11 +382,10 @@ class SessionModelOverrideIntegrationTests(unittest.IsolatedAsyncioTestCase):
             base_url="http://test",
             timeout=30.0,
         ) as client:
-            history_response = await client.get(
-                f"/api/v1/sessions/{self._session_id}/history",
+            events_response = await client.get(
+                f"/api/v1/sessions/{self._session_id}/events",
                 params={
                     "agent_id": self._agent_id,
-                    "model_id": self._model_b_id,
                 },
             )
             context_status_response = await client.get(
@@ -377,47 +395,36 @@ class SessionModelOverrideIntegrationTests(unittest.IsolatedAsyncioTestCase):
                     "model_id": self._model_b_id,
                 },
             )
-        self.assertEqual(history_response.status_code, 200, history_response.text)
+        self.assertEqual(events_response.status_code, 200, events_response.text)
         self.assertEqual(context_status_response.status_code, 200, context_status_response.text)
         context_status = context_status_response.json()
-        self.assertTrue(context_status["checkpoint_active"])
+        self.assertIsNotNone(context_status["compaction_event_id"])
         self.assertTrue(context_status["manual_compaction_available"])
         self.assertEqual(context_status["manual_compaction_reason"], "available")
-        payload = history_response.json()
-        self.assertEqual(payload["model_message_count"], len(history))
-        self.assertIsNotNone(payload["context_checkpoint"])
-        self.assertEqual(payload["context_checkpoint"]["row_version"], 1)
-
-        with patch(
-            "deep_agent.agent.factory._resolve_model",
-            return_value=text_only_model("不会再次调用"),
-        ):
-            with mock_request_disconnect():
-                async with AsyncClient(
-                    transport=self._transport,
-                    base_url="http://test",
-                    timeout=30.0,
-                ) as client:
-                    repeated = await client.post(
-                        f"/api/v1/sessions/{self._session_id}/compact",
-                        params={"agent_id": self._agent_id},
-                        json={"model_id": self._model_b_id},
-                    )
-        repeated_result = parse_sse_events(repeated.text)[-1]
-        self.assertEqual(repeated_result["status"], "noop")
-        self.assertEqual(repeated_result["reason"], "no_reduction")
-        self.assertNotIn("context_status", repeated_result)
+        event_payload = events_response.json()
+        projected = project_event_response(event_payload)
+        self.assertEqual(projected["model_message_count"], len(history))
+        compacted = [
+            item
+            for item in event_payload["items"]
+            if item["event_type"] == "compaction" and item["status"] == "completed"
+        ]
+        self.assertEqual(len(compacted), 1)
+        self.assertEqual(compacted[0]["event_id"], context_status["compaction_event_id"])
 
         async with AsyncClient(
             transport=self._transport,
             base_url="http://test",
             timeout=30.0,
         ) as client:
-            other_model_history = await client.get(
-                f"/api/v1/sessions/{self._session_id}/history",
-                params={"agent_id": self._agent_id},
+            other_model_status = await client.get(
+                f"/api/v1/sessions/{self._session_id}/context-status",
+                params={"agent_id": self._agent_id, "model_id": self._model_a_id},
             )
-        self.assertIsNone(other_model_history.json()["context_checkpoint"])
+        self.assertEqual(
+            other_model_status.json()["compaction_event_id"],
+            context_status["compaction_event_id"],
+        )
 
     async def test_manual_compaction_rejects_pending_tool_interaction(self) -> None:
         await get_context().store.append(

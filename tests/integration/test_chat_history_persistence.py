@@ -12,8 +12,13 @@ from deep_agent.capabilities import build_registry
 from deep_agent.capabilities.mcp.lease_manager import McpLeaseManager
 from deep_agent.core.context import AppContext, get_context, init_context, reset_context
 from tests.helpers.request_identity import install_test_user_header
-from tests.helpers.sqlite_stores import ensure_title_uses_main_model, make_sqlite_stores
+from tests.helpers.sqlite_stores import (
+    ensure_title_uses_main_model,
+    make_sqlite_stores,
+    seed_default_agent,
+)
 from tests.integration.helpers.chat import mock_request_disconnect, parse_sse_events
+from tests.integration.helpers.events import project_event_response
 from tests.integration.helpers.models import build_slow_stream_model, text_only_model, tool_call_model
 
 _CHAT_JSON = {"capabilities": []}
@@ -52,6 +57,7 @@ class ChatHistoryPersistenceTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         stores, self._engine, session_factory = await make_sqlite_stores()
         await ensure_title_uses_main_model(stores)
+        self._agent_id = await seed_default_agent(stores, name="history-agent")
         self._app = FastAPI()
         install_test_user_header(self._app)
         self._app.include_router(api_router)
@@ -88,7 +94,7 @@ class ChatHistoryPersistenceTests(unittest.IsolatedAsyncioTestCase):
                     async with client.stream(
                         "POST",
                         "/api/v1/chat/stream",
-                        json={**_CHAT_JSON, **json_body},
+                        json={**_CHAT_JSON, "agent_id": self._agent_id, **json_body},
                     ) as response:
                         self.assertEqual(response.status_code, 200)
                         body = "".join([chunk async for chunk in response.aiter_text()])
@@ -97,9 +103,9 @@ class ChatHistoryPersistenceTests(unittest.IsolatedAsyncioTestCase):
     async def _history(self, session_id: str) -> dict:
         await get_context().event_persister.flush(session_id)
         async with AsyncClient(transport=self._transport, base_url="http://test") as client:
-            resp = await client.get(f"/api/v1/sessions/{session_id}/history")
+            resp = await client.get(f"/api/v1/sessions/{session_id}/events")
         self.assertEqual(resp.status_code, 200)
-        return resp.json()
+        return project_event_response(resp.json())
 
     async def test_http_stream_complete_history_matches_final_output(self) -> None:
         reply = "exact integration reply"
@@ -113,7 +119,6 @@ class ChatHistoryPersistenceTests(unittest.IsolatedAsyncioTestCase):
 
         session_id = events[0]["session_id"]
         data = await self._history(session_id)
-        self.assertEqual(final["model_message_count"], data["model_message_count"])
         self.assertGreaterEqual(data["model_message_count"], 2)
         self.assertEqual(_assistant_texts(data), [reply])
 
@@ -124,7 +129,11 @@ class ChatHistoryPersistenceTests(unittest.IsolatedAsyncioTestCase):
                 async with AsyncClient(transport=self._transport, base_url="http://test") as client:
                     resp = await client.post(
                         "/api/v1/chat",
-                        json={**_CHAT_JSON, "message": "sync hello"},
+                        json={
+                            **_CHAT_JSON,
+                            "agent_id": self._agent_id,
+                            "message": "sync hello",
+                        },
                     )
         self.assertEqual(resp.status_code, 200)
         body = resp.json()
@@ -172,7 +181,11 @@ class ChatHistoryPersistenceTests(unittest.IsolatedAsyncioTestCase):
                     async with client.stream(
                         "POST",
                         "/api/v1/chat/stream",
-                        json={**_CHAT_JSON, "message": "stream please"},
+                        json={
+                            **_CHAT_JSON,
+                            "agent_id": self._agent_id,
+                            "message": "stream please",
+                        },
                     ) as response:
                         body = "".join([chunk async for chunk in response.aiter_text()])
 
@@ -197,7 +210,7 @@ class ChatHistoryPersistenceTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_test_model_default_has_no_ui_tools_without_selection(self) -> None:
         events = await self._stream_events(
-            model=TestModel(custom_output_text="plain final"),
+            model=TestModel(call_tools=[], custom_output_text="plain final"),
             json_body={"message": "no UI tools selected"},
         )
         final = next(ev for ev in reversed(events) if ev.get("type") == "final")
@@ -212,7 +225,10 @@ class ChatHistoryPersistenceTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_test_model_calls_explicitly_selected_builtin_ui_tools(self) -> None:
         events = await self._stream_events(
-            model=TestModel(custom_output_text="never returned as final"),
+            model=TestModel(
+                call_tools=["builtin__choice", "builtin__confirm"],
+                custom_output_text="never returned as final",
+            ),
             json_body={
                 "message": "triggers selected UI tools",
                 "capabilities": _CONFIRM_CAPABILITIES,
@@ -252,7 +268,6 @@ class ChatHistoryPersistenceTests(unittest.IsolatedAsyncioTestCase):
         session_id = events[0]["session_id"]
 
         data = await self._history(session_id)
-        self.assertEqual(final["model_message_count"], data["model_message_count"])
         self.assertEqual(data["model_message_count"], 2)
         assistants = _assistant_messages(data)
         self.assertEqual(len(assistants), 1)
@@ -303,7 +318,6 @@ class ChatHistoryPersistenceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(data["model_message_count"], 2)
         self.assertEqual(len(_assistant_messages(data)), 1)
         self.assertEqual(_assistant_texts(data), ["single reply"])
-        self.assertEqual(final["model_message_count"], data["model_message_count"])
 
 
 if __name__ == "__main__":

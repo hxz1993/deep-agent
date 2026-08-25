@@ -55,7 +55,7 @@ Content-Type: application/json
 名称同时决定 Agent 工具包编码 `mcp:<name>`、后续模型工具前缀 `<name>_` 和 Resource
 Server 名称。后端会在一个事务内更新 MCP 名称和所有 Agent 引用，失败时整体回滚。URL、
 Header、启用状态及检测快照保持不变，因此无需重启或重新检测。Builtin 和历史 stdio MCP
-不可重命名；历史 Tool Call/Result、Checkpoint 与正在执行的 Run 也不会被改写。
+不可重命名；历史Tool Call/Result Event、Compaction与正在执行的Run也不会被改写。
 
 ## 模型工具
 

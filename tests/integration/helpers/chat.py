@@ -20,7 +20,12 @@ from deep_agent.capabilities.mcp.lease_manager import McpLeaseManager
 from deep_agent.core.context import AppContext, get_context, init_context, reset_context
 from deep_agent.db.stores.bundle import DataStores
 from deep_agent.schemas.mcp import McpServerCreate
-from tests.helpers.sqlite_stores import ensure_title_uses_main_model, make_sqlite_stores, make_sqlite_stores_sync
+from tests.helpers.sqlite_stores import (
+    ensure_title_uses_main_model,
+    make_sqlite_stores,
+    make_sqlite_stores_sync,
+    seed_default_agent,
+)
 from tests.helpers.request_identity import install_test_user_header
 from tests.integration.helpers.mcp import streamable_http_echo_server
 
@@ -208,6 +213,9 @@ def configure_test_app(
     import asyncio
 
     asyncio.run(ensure_title_uses_main_model(ctx.stores))
+    app.state.test_agent_id = asyncio.run(
+        seed_default_agent(ctx.stores, name="sync-chat-agent")
+    )
     return ctx
 
 
@@ -228,6 +236,10 @@ async def configure_test_app_async(
         db_session_factory=db_session_factory,
     )
     await ensure_title_uses_main_model(ctx.stores)
+    app.state.test_agent_id = await seed_default_agent(
+        ctx.stores,
+        name="async-chat-agent",
+    )
     return ctx
 
 
@@ -271,7 +283,10 @@ async def read_chat_stream(
             async with client.stream(
                 "POST",
                 "/api/v1/chat/stream",
-                json=json_body,
+                json={
+                    "agent_id": app.state.test_agent_id,
+                    **json_body,
+                },
                 headers=headers or {},
             ) as response:
                 if response.status_code != 200:

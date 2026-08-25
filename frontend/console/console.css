@@ -798,8 +798,8 @@ dialog.context-test-dialog::backdrop { background: rgb(22 22 22 / 38%); backdrop
 dialog.console-detail-dialog.modal {
   width: min(720px, calc(100vw - 28px));
   max-height: calc(100vh - 28px);
-  margin: auto 14px auto auto;
-  border-radius: 7px 0 0 7px;
+  margin: auto;
+  border-radius: var(--console-card-radius);
 }
 
 dialog.console-detail-dialog.modal-agent,
@@ -1567,7 +1567,8 @@ html[data-theme="paper"] {
 .agent-list-row { cursor: pointer; }
 .agent-filtered { display: none !important; }
 
-dialog.agent-editor-page.console-detail-dialog.modal-agent {
+dialog.agent-editor-page.console-detail-dialog.modal-agent,
+dialog.mcp-editor-page.console-detail-dialog {
   position: fixed;
   inset: var(--console-topbar) 0 0 calc(var(--console-rail-width) + var(--console-resource-nav-width) + var(--console-config-padding));
   z-index: 58;
@@ -1624,6 +1625,40 @@ dialog.agent-editor-page::backdrop { display: none; }
 .agent-editor-header-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
 .agent-editor-header-actions .btn { min-height: 32px; }
 .agent-editor-page .modal-body { flex: 1; min-height: 0; max-height: none; padding: 0; overflow: auto; background: var(--console-surface); }
+.mcp-editor-page > form { width: min(1080px, 100%); }
+.mcp-editor-page .modal-body { overflow: auto; }
+.mcp-editor-workbench {
+  width: 100%;
+  height: 100%;
+  min-width: 760px;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(320px, .78fr) minmax(480px, 1.22fr);
+  align-items: stretch;
+}
+.mcp-editor-section {
+  min-width: 0;
+  padding: 24px;
+  overflow: auto;
+}
+.mcp-editor-basics { border-right: 1px solid var(--console-card-border); }
+.mcp-editor-section-head { margin-bottom: 22px; }
+.mcp-editor-section-head h4 { margin: 0; color: var(--text); font-size: 16px; }
+.mcp-editor-section-head p { margin: 6px 0 0; color: var(--text-faint); font-size: 12px; line-height: 1.6; }
+.mcp-editor-section .field + .field,
+.mcp-editor-section .mcp-transport-fields { margin-top: 18px; }
+.mcp-editor-basics #mcpDescription { min-height: 150px; resize: vertical; }
+.mcp-enabled-field { margin-top: 18px; }
+.mcp-transport-fields { display: grid; gap: 18px; }
+.mcp-transport-fields.hidden { display: none !important; }
+.mcp-editor-page #mcpHeaders,
+.mcp-editor-page #mcpEnv { min-height: 180px; font-family: var(--mono); font-size: 12px; line-height: 1.55; }
+.mcp-editor-page .mcp-context-policy {
+  padding: 16px;
+  border: 1px solid var(--console-card-border);
+  border-radius: var(--config-radius);
+  background: var(--console-canvas);
+}
 .agent-editor-workbench {
   width: 100%;
   min-width: 780px;
@@ -1683,14 +1718,14 @@ dialog.agent-editor-page::backdrop { display: none; }
   background: var(--accent);
 }
 .agent-editor-tabs button > span { min-width: 0; color: var(--text-faint); font-size: 12px; font-weight: 400; }
-.agent-editor-pane { flex: 1; min-height: 0; padding: 16px 18px 18px; overflow: auto; }
-.agent-editor-pane > .cap-section { max-width: none; margin: 0; border: 0; border-radius: 0; background: transparent; overflow: visible; }
+.agent-editor-pane { display: flex; min-height: 0; flex: 1; flex-direction: column; padding: 16px 18px 18px; overflow: hidden; }
+.agent-editor-pane > .cap-section { display: flex; min-height: 100%; max-width: none; flex: 1 1 auto; flex-direction: column; margin: 0; border: 0; border-radius: 0; background: transparent; overflow: hidden; }
 .agent-editor-pane .cap-section-header { align-items: center; padding: 0 0 12px; border: 0; background: transparent; }
 .agent-cap-search { display: flex; justify-content: flex-end; margin-bottom: 10px; }
 .agent-cap-search .cap-search { width: min(280px, 100%); }
 .agent-editor-pane .cap-tabs { padding: 0 0 8px; border: 0; border-radius: 0; background: transparent; }
-.agent-editor-pane .cap-panels { border: 0; border-radius: 0; background: transparent; }
-.agent-editor-pane .cap-panel { padding: 4px 0 0; }
+.agent-editor-pane .cap-panels { min-height: 0; flex: 1 1 auto; max-height: none; overflow: auto; border: 0; border-radius: 0; background: transparent; }
+.agent-editor-pane .cap-panel:not(.hidden) { display: flex; min-height: 100%; flex-direction: column; padding: 4px 0 0; }
 .agent-editor-pane .agent-skill-grid { max-height: none; padding: 0; overflow: visible; grid-template-columns: 1fr; gap: 0; }
 .agent-editor-pane .agent-skill-section { margin-top: 0; }
 .agent-editor-pane .agent-skill-card {
@@ -1744,13 +1779,15 @@ dialog.agent-editor-page::backdrop { display: none; }
   .agent-list-toolbar .panel-toolbar-actions { display: grid; grid-template-columns: minmax(0, 1fr) auto; }
   .agent-list-toolbar .btn.primary { grid-column: 1 / -1; }
   .agent-search { width: 100%; }
-  dialog.agent-editor-page.console-detail-dialog.modal-agent { inset: var(--console-topbar) 0 0 calc(var(--console-rail-width) + var(--console-resource-nav-width) + var(--console-config-padding)); width: auto; height: auto; padding: 7px; }
+  dialog.agent-editor-page.console-detail-dialog.modal-agent,
+  dialog.mcp-editor-page.console-detail-dialog { inset: var(--console-topbar) 0 0 calc(var(--console-rail-width) + var(--console-resource-nav-width) + var(--console-config-padding)); width: auto; height: auto; padding: 7px; }
   .agent-editor-page .modal-header { padding: 10px 12px; }
   .agent-editor-page .agent-editor-back { padding: 0; }
   .agent-editor-header-actions { gap: 6px; }
   .agent-editor-header-actions .btn { padding-left: 9px; padding-right: 9px; }
   .agent-editor-page .modal-body { padding: 12px; }
   .agent-editor-workbench { min-width: 760px; }
+  .mcp-editor-workbench { min-width: 720px; }
   .agent-editor-primary { padding: 14px; }
   .agent-editor-pane { padding: 14px; }
 }
@@ -2428,11 +2465,11 @@ body.workspace-pane-resizing { cursor: col-resize; user-select: none; }
 .run-usage-legend .output { color: #71a9dd; }
 .run-usage-legend .remaining { color: #62a988; }
 .run-facts { margin-top: 4px; }
-.checkpoint-comparison { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 9px; margin-bottom: 10px; }
-.checkpoint-comparison > span { display: grid; gap: 3px; padding: 9px; border-radius: 9px; background: color-mix(in srgb, var(--console-canvas) 58%, var(--console-surface)); }
-.checkpoint-comparison small { color: var(--text-faint); font-size: 12px; }
-.checkpoint-comparison strong { font-size: 12px; }
-.checkpoint-comparison svg { width: 13px; height: 13px; color: var(--text-faint); }
+.compaction-comparison { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 9px; margin-bottom: 10px; }
+.compaction-comparison > span { display: grid; gap: 3px; padding: 9px; border-radius: 9px; background: color-mix(in srgb, var(--console-canvas) 58%, var(--console-surface)); }
+.compaction-comparison small { color: var(--text-faint); font-size: 12px; }
+.compaction-comparison strong { font-size: 12px; }
+.compaction-comparison svg { width: 13px; height: 13px; color: var(--text-faint); }
 .inspector-tab-empty { min-height: 260px; display: grid; place-content: center; justify-items: center; gap: 8px; padding: 28px 18px; text-align: center; }
 .inspector-tab-empty svg { width: 22px; height: 22px; color: var(--accent); }
 .inspector-tab-empty strong { font-size: 12px; }
@@ -2660,13 +2697,112 @@ html[data-theme="paper"] .run-usage-legend .remaining { color: #5e9e7f; }
 
 #configurationHost #panel-skills.active {
   display: flex;
-  min-height: 100%;
+  height: 100%;
+  min-height: 0;
   flex-direction: column;
+  overflow: hidden;
 }
 
 #configurationHost #panel-skills .skill-admin-workspace {
   min-height: 0;
   flex: 1 1 auto;
+  overflow: hidden;
+}
+
+#configurationHost #panel-skills .skill-list-pane {
+  min-height: 0;
+  max-height: none;
+  overflow: auto;
+}
+
+#configurationHost #panel-skills .skill-detail-pane {
+  display: flex;
+  height: auto;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+#configurationHost #panel-skills .skill-detail-header {
+  flex: 0 0 auto;
+}
+
+#configurationHost #panel-skills .skill-detail-layout {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+
+#configurationHost #panel-skills .skill-detail-main,
+#configurationHost #panel-skills .skill-detail-lane,
+#configurationHost #panel-skills .skill-resource-preview {
+  min-height: 0;
+}
+
+#configurationHost #panel-skills .skill-detail-main {
+  overflow: auto;
+}
+
+#configurationHost #panel-skills .skill-detail-lane {
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+#configurationHost #panel-agents {
+  overflow: clip;
+  border-radius: var(--config-radius) !important;
+  background-clip: padding-box;
+}
+
+.agent-editor-pane .cap-grid {
+  min-height: 0;
+  flex: 1 1 auto;
+  align-content: start;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.agent-editor-pane .cap-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  min-height: 58px;
+}
+
+.agent-editor-pane .cap-card-header {
+  min-width: 0;
+}
+
+.agent-editor-pane .cap-card-desc {
+  -webkit-line-clamp: 1;
+}
+
+.agent-editor-pane .cap-card-tools {
+  align-self: center;
+  margin: 0 0 0 16px;
+  white-space: nowrap;
+}
+
+.agent-editor-pane .cap-card-tools[open] {
+  grid-column: 1 / -1;
+  margin: 10px 0 0 46px;
+  white-space: normal;
+}
+
+@media (max-width: 1200px) {
+  #configurationHost #panel-skills .skill-detail-layout {
+    grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  #configurationHost #panel-skills .skill-detail-lane {
+    height: auto;
+  }
+}
+
+@media (max-width: 900px) {
+  #configurationHost #panel-skills .skill-admin-workspace {
+    grid-template-rows: minmax(150px, 220px) minmax(0, 1fr);
+  }
 }
 
 @media (max-width: 920px) {

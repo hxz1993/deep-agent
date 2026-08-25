@@ -10,9 +10,10 @@ from pathlib import Path
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from deep_agent.db.models import Agent, ChatMessage, ChatSession, LlmModel, LlmProvider
-from deep_agent.db.serialization import deserialize_message, serialize_message
-from deep_agent.db.session_scope import normalize_agent_scope
+from deep_agent.db.event_codec import encode_messages
+from deep_agent.db.ids import new_event_id, new_turn_id
+from deep_agent.db.models import Agent, ChatSession, ChatSessionEvent, LlmModel, LlmProvider
+from deep_agent.db.serialization import deserialize_message
 from deep_agent.db.stores.bundle import DataStores
 from deep_agent.schemas.agent import AgentCreate
 from deep_agent.schemas.llm_model import LlmModelCreate
@@ -128,28 +129,54 @@ async def seed_session_from_fixture(
             )
 
             now = datetime.now(timezone.utc)
-            scope = normalize_agent_scope(resolved_agent_id)
             db.add(
                 ChatSession(
-                    agent_id=scope,
                     session_id=session_id,
+                    agent_id=resolved_agent_id,
                     user_id=TEST_USER_ID,
                     title=title,
+                    next_sequence=1,
                     created_at=now,
                     updated_at=now,
                 )
             )
-            for item in fixture.get("messages", []):
-                payload = item["payload"]
-                message = deserialize_message(payload)
+            await db.flush()
+            messages = [
+                deserialize_message(item["payload"])
+                for item in sorted(
+                    fixture.get("messages", []), key=lambda item: int(item["sequence"])
+                )
+            ]
+            turn_id = new_turn_id()
+            drafts = encode_messages(
+                messages,
+                session_id=session_id,
+                run_id="fixture-import",
+            )
+            for sequence, draft in enumerate(drafts, start=1):
                 db.add(
-                    ChatMessage(
-                        agent_id=scope,
+                    ChatSessionEvent(
+                        event_id=new_event_id(),
                         session_id=session_id,
-                        sequence=int(item["sequence"]),
-                        payload=serialize_message(message),
+                        sequence=sequence,
+                        schema_version=draft.schema_version,
+                        event_type=draft.event_type,
+                        status=None,
+                        turn_id=turn_id,
+                        run_id="fixture-import",
+                        message_id=draft.message_id,
+                        part_index=draft.part_index,
+                        call_id=draft.call_id,
+                        tool_name=draft.tool_name,
+                        search_text=draft.search_text,
+                        payload=draft.payload,
+                        created_at=now,
+                        updated_at=now,
                     )
                 )
+            session = await db.get(ChatSession, session_id)
+            assert session is not None
+            session.next_sequence = len(drafts) + 1
 
     return SeededSession(
         session_id=session_id,

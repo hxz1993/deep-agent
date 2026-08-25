@@ -21,8 +21,7 @@ from deep_agent.db.stores.bundle import create_data_stores
 EXPECTED_TABLES = {
     "agents",
     "auxiliary_model_configs",
-    "chat_context_checkpoints",
-    "chat_messages",
+    "chat_session_events",
     "chat_sessions",
     "llm_models",
     "llm_providers",
@@ -52,14 +51,20 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIsNotNone(stores.model_catalog)
                 self.assertIsNotNone(stores.mcp)
                 self.assertIsNotNone(stores.ui_tool)
-                self.assertIsNotNone(stores.context_checkpoint)
+                self.assertIsNotNone(stores.events)
                 self.assertIsNotNone(stores.skill_package)
 
                 await stores.coordinator.append(
                     "sess-bootstrap",
                     [ModelRequest(parts=[UserPromptPart(content="hello")])],
+                    agent_id=(await stores.agent.list_all())[0].id,
+                    user_id="local-user",
+                    turn_id="1" * 32,
+                    run_id="run-bootstrap",
                 )
-                history = await stores.coordinator.get_history("sess-bootstrap")
+                history = await stores.coordinator.get_history(
+                    "sess-bootstrap", agent_id=(await stores.agent.list_all())[0].id
+                )
                 self.assertEqual(len(history), 1)
             finally:
                 await engine.dispose()
@@ -677,8 +682,88 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
                     await asyncio.to_thread(command.upgrade, config, "006")
                     self.assertEqual(self._revision(db_path), "006")
 
+    async def test_008_destructive_session_upgrade_round_trip_preserves_configuration(self) -> None:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+            db_path = Path(tmpdir) / "session-events-008.db"
+            url = f"sqlite+aiosqlite:///{db_path.as_posix()}"
+            with patch("deep_agent.db.url.get_database_url", return_value=url):
+                with patch("deep_agent.db.migrate.get_database_url", return_value=url):
+                    config = migrate._build_alembic_config()
+                    await asyncio.to_thread(command.upgrade, config, "007")
+                    with sqlite3.connect(db_path) as connection:
+                        agent_id = str(
+                            connection.execute(
+                                "SELECT id FROM agents ORDER BY name LIMIT 1"
+                            ).fetchone()[0]
+                        )
+                        connection.execute(
+                            "INSERT INTO chat_sessions "
+                            "(agent_id,session_id,user_id,title) VALUES (?,?,?,?)",
+                            (agent_id, "legacy-session", "legacy-user", "legacy"),
+                        )
+                        connection.execute(
+                            "INSERT INTO chat_messages "
+                            "(agent_id,session_id,sequence,payload) VALUES (?,?,?,?)",
+                            (agent_id, "legacy-session", 1, "[]"),
+                        )
+                        connection.execute(
+                            "INSERT INTO chat_context_checkpoints "
+                            "(agent_id,session_id,source_last_sequence,"
+                            "source_history_hash,payload,payload_schema_version,"
+                            "projection_fingerprint,estimated_tokens,row_version) "
+                            "VALUES (?,?,?,?,?,?,?,?,?)",
+                            (
+                                agent_id,
+                                "legacy-session",
+                                1,
+                                "0" * 64,
+                                "{}",
+                                1,
+                                "1" * 64,
+                                1,
+                                1,
+                            ),
+                        )
+                        connection.commit()
+                    config_counts = {
+                        table: self._row_count(db_path, table)
+                        for table in (
+                            "agents",
+                            "llm_models",
+                            "llm_providers",
+                            "mcp_servers",
+                            "skill_packages",
+                            "ui_tool_definitions",
+                        )
+                    }
+
+                    await asyncio.to_thread(command.upgrade, config, "008")
+                    self._assert_current_baseline(db_path)
+                    self.assertEqual(self._row_count(db_path, "chat_sessions"), 0)
+                    self.assertEqual(self._row_count(db_path, "chat_session_events"), 0)
+                    self.assertEqual(
+                        config_counts,
+                        {table: self._row_count(db_path, table) for table in config_counts},
+                    )
+
+                    await asyncio.to_thread(command.downgrade, config, "007")
+                    self.assertEqual(self._revision(db_path), "007")
+                    self.assertEqual(self._row_count(db_path, "chat_sessions"), 0)
+                    self.assertEqual(self._row_count(db_path, "chat_messages"), 0)
+                    self.assertEqual(
+                        self._row_count(db_path, "chat_context_checkpoints"),
+                        0,
+                    )
+
+                    await asyncio.to_thread(command.upgrade, config, "008")
+                    self._assert_current_baseline(db_path)
+                    self.assertEqual(
+                        config_counts,
+                        {table: self._row_count(db_path, table) for table in config_counts},
+                    )
+
     def _assert_current_baseline(self, db_path: Path) -> None:
-        self.assertEqual(self._revision(db_path), "007")
+        self.assertEqual(self._revision(db_path), "008")
         self.assertEqual(self._business_tables(db_path), EXPECTED_TABLES)
         self.assertNotIn("max_requests", self._columns(db_path, "agents"))
         self.assertNotIn("capabilities_source", self._columns(db_path, "llm_models"))
@@ -714,13 +799,11 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
             json.loads(str(self._scalar(db_path, "SELECT skills FROM agents WHERE name = 'default'"))),
             [],
         )
+        self.assertEqual(self._primary_key(db_path, "chat_sessions"), ["session_id"])
+        self.assertEqual(self._primary_key(db_path, "chat_session_events"), ["event_id"])
         self.assertEqual(
-            self._primary_key(db_path, "chat_context_checkpoints"),
-            ["agent_id", "session_id"],
-        )
-        self.assertEqual(
-            self._index_columns(db_path, "ix_chat_sessions_user_id_agent_id_updated_at"),
-            ["user_id", "agent_id", "updated_at"],
+            self._index_columns(db_path, "ix_chat_sessions_agent_user_updated"),
+            ["agent_id", "user_id", "updated_at"],
         )
         self.assertEqual(self._row_count(db_path, "llm_models"), 1)
         self.assertEqual(self._row_count(db_path, "agents"), 1)

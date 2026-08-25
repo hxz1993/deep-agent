@@ -166,6 +166,17 @@ function renameSuccessMessage(updatedAgents) {
 
 const mcpAdmin = {
   moreMenuDismissController: null,
+  updateEditorMeta() {
+    const transport = document.getElementById("mcpTransport")?.value || "url";
+    const meta = document.getElementById("mcpEditorMeta");
+    if (meta) meta.textContent = `MCP 配置 · ${transport.toUpperCase()}`;
+  },
+
+  closeEditor() {
+    state.editingMcp = null;
+    document.getElementById("mcpModal")?.close();
+  },
+
   async refresh() {
     const tbody = document.getElementById("mcpTableBody");
     if (!tbody) return;
@@ -361,11 +372,13 @@ const mcpAdmin = {
       "hidden",
       transport !== "stdio" && transport !== "builtin"
     );
+    this.updateEditorMeta();
   },
 
   openCreate() {
     state.editingMcp = null;
     document.getElementById("mcpModalTitle").textContent = "新建 MCP";
+    document.getElementById("mcpEditorMeta").textContent = "MCP 配置 · URL";
     const nameInput = document.getElementById("mcpName");
     nameInput.readOnly = false;
     nameInput.classList.remove("mcp-name-readonly");
@@ -390,7 +403,8 @@ const mcpAdmin = {
     try {
       const server = await apiFetch(`/api/v1/mcp/${encodeURIComponent(name)}`);
       state.editingMcp = name;
-      document.getElementById("mcpModalTitle").textContent = `编辑 MCP · ${name}`;
+      document.getElementById("mcpModalTitle").textContent = name;
+      document.getElementById("mcpEditorMeta").textContent = `MCP 配置 · ${server.transport.toUpperCase()}`;
       const nameInput = document.getElementById("mcpName");
       nameInput.readOnly = true;
       nameInput.classList.add("mcp-name-readonly");
@@ -574,6 +588,7 @@ const mcpAdmin = {
       }
       saved = true;
       document.getElementById("mcpModal").close();
+      state.editingMcp = null;
     } catch (err) {
       AdminFormFeedback.show(form, err);
     } finally {
@@ -628,10 +643,7 @@ document.addEventListener("DOMContentLoaded", () => {
     input.addEventListener("change", () => mcpAdmin.updateRequestContextDescription());
   });
   document.getElementById("closeMcpModal")?.addEventListener("click", () => {
-    document.getElementById("mcpModal").close();
-  });
-  document.getElementById("cancelMcpBtn")?.addEventListener("click", () => {
-    document.getElementById("mcpModal").close();
+    mcpAdmin.closeEditor();
   });
   document.getElementById("closeMcpRenameModal")?.addEventListener("click", () => {
     state.renamingMcp = null;

@@ -79,23 +79,22 @@ test("系统工具按领域展示来源、条件和说明", () => {
   assert.doesNotMatch(html, /编辑|删除|启用|checkbox|switch/);
   assert.match(html, /system-tool-group-row/);
   assert.match(html, /system-tool-group-help/);
+  assert.match(html, /system-tool-group-code">runtime:skill/);
   assert.match(html, /data-tooltip="按需加载 Skill。"/);
+  assert.match(source, /className = "system-tool-tooltip hidden"/);
+  assert.match(configurationCss, /\.system-tool-tooltip\s*\{[^}]*position: fixed;[^}]*z-index: 1000;/);
 });
 
-test("任务规划三个官方工具属于独立只读领域", () => {
+test("任务规划只暴露完整快照写入工具", () => {
   const ui = loadSystemToolsUi();
   const html = ui.systemToolDomain({
     code: "runtime:planning",
     label: "任务规划",
-    tools: [
-      "write_plan",
-      "read_plan",
-      "update_task_statuses",
-    ].map((name) => ({ name, source: "Pydantic AI Harness" })),
+    tools: ["write_plan"].map((name) => ({ name, source: "Pydantic AI Harness" })),
   });
   assert.match(html, /runtime:planning/);
   assert.match(html, /write_plan/);
-  assert.match(html, /update_task_statuses/);
+  assert.doesNotMatch(html, /read_plan|update_task_statuses/);
   assert.doesNotMatch(html, /add_task|update_task_status<|remove_task/);
   assert.doesNotMatch(html, /checkbox|switch/);
 });
@@ -137,6 +136,19 @@ test("大工具结果读取作为独立系统工具只读展示", () => {
   assert.match(html, /runtime:tool-result/);
   assert.match(html, /read_tool_result/);
   assert.match(html, /Pydantic AI Harness/);
+});
+
+test("MCP 工具发现与 Resource 只在前端合并为一个展示分组", () => {
+  const ui = loadSystemToolsUi();
+  const merged = ui.mergeSystemToolDomains([
+    { code: "runtime:planning", label: "任务规划", tools: [{ name: "write_plan" }] },
+    { code: "runtime:mcp-tool-search", label: "MCP 工具发现", description: "搜索工具。", tools: [{ name: "search_tools" }] },
+    { code: "runtime:mcp-resource", label: "MCP Resource", description: "读取资源。", tools: [{ name: "read_mcp_resource" }] },
+  ]);
+  assert.equal(Array.from(merged, (domain) => domain.code).join(","), "runtime:planning,runtime:mcp");
+  assert.equal(Array.from(merged[1].tools, (tool) => tool.name).join(","), "search_tools,read_mcp_resource");
+  assert.match(merged[1].description, /MCP 工具发现：搜索工具/);
+  assert.match(merged[1].description, /MCP Resource：读取资源/);
 });
 
 test("系统工具页面保留加载与窄屏横向查看，但不提供单独刷新入口", () => {

@@ -44,94 +44,136 @@ const jsonViewSource = await readFile(
 
 const history = {
   session_id: "session-1",
-  context_checkpoint: {
-    source_estimated_tokens: 9000,
-    projected_estimated_tokens: 4000,
-    updated_at: "2026-08-23T10:00:03Z",
-  },
-  messages: [
+  items: [
     {
-      role: "user",
-      content: "查询收入",
-      timestamp: "2026-08-23T10:00:00Z",
-      attachments: [{ id: "file-1", name: "input.xlsx" }],
-      context_refs: [{
-        key: "current_range",
-        type: "deeptable.range",
-        schema_version: "1.0",
-        label: "预算表!B2:F10",
-        payload: { sheet: "预算表", range: "B2:F10" },
-      }],
+      event_id: "evt-run",
+      sequence: 1,
+      event_type: "run",
+      status: "completed",
+      turn_id: "turn-1",
+      run_id: "run-1",
+      payload: { model_id: "model-1" },
+      created_at: "2026-08-23T10:00:00Z",
+      updated_at: "2026-08-23T10:00:03Z",
     },
     {
-      role: "assistant",
+      event_id: "evt-user",
+      sequence: 2,
+      event_type: "user/message",
+      turn_id: "turn-1",
       run_id: "run-1",
-      status: "completed",
-      timestamp: "2026-08-23T10:00:01Z",
-      request_timestamp: "2026-08-23T10:00:00Z",
-      model_name: "deepseek-v4-flash",
-      provider_name: "openai-compatible",
-      provider_response_id: "response-1",
-      finish_reason: "tool_call",
-      usage: { input_tokens: 20, output_tokens: 4 },
-      parts: [
-        { type: "thinking", content: "先查工具" },
-        {
-          type: "tool_call",
-          tool: "cube_query",
-          tool_call_id: "call-1",
-          args: { cube: "Sales", access_token: "private" },
+      message_id: "message-user",
+      part_index: 0,
+      payload: {
+        part: {
+          part_kind: "user-prompt",
+          content: [
+            { kind: "text-content", content: "查询收入" },
+            { kind: "attachment-ref", id: "file-1", name: "input.xlsx" },
+            { kind: "context-ref", key: "current_range", type: "deeptable.range", schema_version: "1.0", label: "预算表!B2:F10" },
+          ],
         },
-      ],
+      },
+      created_at: "2026-08-23T10:00:00Z",
+      updated_at: "2026-08-23T10:00:00Z",
     },
     {
-      role: "assistant",
+      event_id: "evt-thinking",
+      sequence: 3,
+      event_type: "assistant/reasoning",
+      turn_id: "turn-1",
       run_id: "run-1",
-      status: "completed",
-      timestamp: "2026-08-23T10:00:02Z",
-      parts: [
-        {
-          type: "tool_result",
-          tool: "cube_query",
-          tool_call_id: "call-1",
-          result: { rows: 2 },
-          outcome: "success",
-          timestamp: "2026-08-23T10:00:02Z",
+      message_id: "message-response",
+      part_index: 0,
+      payload: {
+        part: { part_kind: "thinking", content: "先查工具" },
+        message_meta: {
+          model_name: "deepseek-v4-flash",
+          provider_name: "openai-compatible",
+          provider_response_id: "response-1",
+          finish_reason: "tool_call",
+          usage: { input_tokens: 20, output_tokens: 4 },
         },
-        { type: "text", content: "查询完成" },
-      ],
+      },
+      created_at: "2026-08-23T10:00:01Z",
+      updated_at: "2026-08-23T10:00:01Z",
+    },
+    {
+      event_id: "evt-call",
+      sequence: 4,
+      event_type: "tool/call",
+      turn_id: "turn-1",
+      run_id: "run-1",
+      message_id: "message-response",
+      part_index: 1,
+      call_id: "call-1",
+      tool_name: "cube_query",
+      payload: { part: { part_kind: "tool-call", tool_name: "cube_query", tool_call_id: "call-1", args: { cube: "Sales", access_token: "private" } } },
+      created_at: "2026-08-23T10:00:01Z",
+      updated_at: "2026-08-23T10:00:01Z",
+    },
+    {
+      event_id: "evt-result",
+      sequence: 5,
+      event_type: "tool/result",
+      turn_id: "turn-1",
+      run_id: "run-1",
+      message_id: "message-request-result",
+      part_index: 0,
+      call_id: "call-1",
+      tool_name: "cube_query",
+      payload: { part: { part_kind: "tool-return", tool_name: "cube_query", tool_call_id: "call-1", content: { rows: 2 }, outcome: "success" } },
+      created_at: "2026-08-23T10:00:02Z",
+      updated_at: "2026-08-23T10:00:02Z",
+    },
+    {
+      event_id: "evt-text",
+      sequence: 6,
+      event_type: "assistant/text",
+      turn_id: "turn-1",
+      run_id: "run-1",
+      message_id: "message-final",
+      part_index: 0,
+      payload: { part: { part_kind: "text", content: "查询完成" } },
+      created_at: "2026-08-23T10:00:03Z",
+      updated_at: "2026-08-23T10:00:03Z",
+    },
+    {
+      event_id: "evt-compaction",
+      sequence: 7,
+      event_type: "compaction",
+      status: "completed",
+      turn_id: "turn-1",
+      run_id: "run-1",
+      payload: { source: { through_sequence: 5 }, budget: { estimated_before: 9000, estimated_after: 4000 }, summary_call: { model_id: "summary-model" } },
+      created_at: "2026-08-23T10:00:04Z",
+      updated_at: "2026-08-23T10:00:05Z",
     },
   ],
 };
 
-test("History轨迹合并工具调用结果并保留原生响应摘要", () => {
+test("Event 轨迹逐行保留调用、结果、原生摘要和压缩位置", () => {
   const events = buildTrajectory(history);
-  const tool = events.find((event) => event.tool_call_id === "call-1");
-  const assistants = events.filter((event) => event.kind === "assistant");
+  const call = events.find((event) => event.id === "evt-call");
+  const result = events.find((event) => event.id === "evt-result");
+  const assistant = events.find((event) => event.id === "evt-text");
+  const thinking = events.find((event) => event.id === "evt-thinking");
   const input = events.find((event) => event.kind === "input");
-  const context = events.find((event) => event.kind === "context");
 
-  assert.equal(tool.status, "completed");
-  assert.deepEqual(tool.result.result, { rows: 2 });
-  assert.equal(tool.payload.args.access_token, "[已隐藏]");
-  assert.equal(tool.native.model_name, "deepseek-v4-flash");
-  assert.equal(tool.native.usage.input_tokens, 20);
-  assert.ok(events.some((event) => event.kind === "checkpoint"));
-  assert.equal(events.some((event) => event.kind === "thinking"), false);
-  assert.equal(assistants.length, 2);
-  assert.equal(assistants[0].payload.thinking, "先查工具");
-  assert.equal(assistants[0].payload.tool_calls[0].tool, "cube_query");
-  assert.equal(assistants[1].payload.content, "查询完成");
+  assert.equal(call.status, "completed");
+  assert.deepEqual(result.result.result, { rows: 2 });
+  assert.equal(call.payload.args.access_token, "[已隐藏]");
+  assert.equal(thinking.native.model_name, "deepseek-v4-flash");
+  assert.equal(thinking.native.usage.input_tokens, 20);
+  assert.equal(thinking.kind, "thinking");
+  assert.equal(assistant.payload.content, "查询完成");
   assert.equal(input.payload.context_refs[0].type, "deeptable.range");
   assert.equal(input.payload.attachments[0].name, "input.xlsx");
   assert.equal(input.run_id, "run-1");
-  assert.equal(context.run_id, "run-1");
-  assert.equal(context.payload.reference.type, "deeptable.range");
-  assert.equal(context.payload.parent_input_id, input.id);
-  assert.equal(assistants[0].timestamp, "2026-08-23T10:00:00Z");
-  assert.equal(assistants[0].timestamp_end, "2026-08-23T10:00:01Z");
-  assert.equal(tool.timestamp_end, "2026-08-23T10:00:02Z");
-  assert.match(tool.summary, /Sales/);
+  assert.deepEqual(events.map((event) => event.id), history.items.map((event) => event.event_id));
+  assert.equal(events.at(-1).kind, "compaction");
+  assert.equal(events.at(-1).sequence, 7);
+  assert.match(call.summary, /Sales/);
 });
 
 test("轨迹筛选、统计与脱敏保持确定性", () => {
@@ -139,7 +181,7 @@ test("轨迹筛选、统计与脱敏保持确定性", () => {
   assert.deepEqual(trajectoryStats(events), { inputs: 1, calls: 1, runs: 1 });
   assert.equal(filterTrajectory(events, { mode: "calls" }).length, 1);
   assert.equal(filterTrajectory(events, { query: "查询完成" }).length, 1);
-  assert.equal(filterTrajectory(events, { query: "预算表!B2:F10" }).length, 2);
+  assert.equal(filterTrajectory(events, { query: "预算表!B2:F10" }).length, 1);
   assert.deepEqual(
     redactTrajectoryValue({ authorization: "a", nested: { api_key: "b", safe: 1 } }),
     { authorization: "[已隐藏]", nested: { api_key: "[已隐藏]", safe: 1 } },

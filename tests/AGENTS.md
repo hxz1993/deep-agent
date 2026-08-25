@@ -56,12 +56,12 @@ tests/
 | `test_models_dev.py` | models.dev 严格获取、官方JSON解析与 Lab 可选补充 |
 | `test_llm_models.py` | Provider硬外键、Provider内唯一性、模型上下文、最大输出、输入模态与 tags Service/Store/Schema |
 | `test_provider_registry.py` | 九种Provider顺序、默认地址、Pydantic AI Provider/Model工厂及配置失败边界 |
-| `test_context_compaction.py` | 统一 Token 估算、动态输出预测、usage 回读、六段增量单次摘要、同输入瞬时错误重试、SSE 状态、原始历史不改写、脱敏 Checkpoint、CAS 与兜底；覆盖率门槛由 `tests/check_context_compaction_coverage.py` 执行 |
+| `test_context_compaction.py` | 统一Token估算、八段单次摘要、Tool/Context Evidence、DSH式裁剪、超时/重试/取消、Provider Overflow识别、SSE状态和失败闭合 |
 | `test_context_test_scenarios.py` | 管理员测试会话场景、实时预算、消息往返序列化、常驻接口与用户归属 |
 | `test_attachment_extractors.py` | 文本编码、DOCX/XLSX 结构读取、分页与 Office 安全 |
 | `test_file_tools.py` | 附件与 Skill统一文件工具的来源参数、权限、Run缓存、single-flight、分页和多模态返回 |
 | `test_tool_package_registry.py` | ToolPackage Registry 的整包选择、默认和空列表语义 |
-| `test_sqlite_bootstrap.py` | Alembic 001～007结构、Provider迁移往返、工具包、Skill、旧附件能力与下线预制MCP清理、降级和失败前校验 |
+| `test_sqlite_bootstrap.py` | Alembic 001～008结构、007→008→007→008会话清空与配置保留、Provider迁移往返及历史数据清理 |
 | `test_*_migration_dialects.py` | 各数据迁移在SQLite、MySQL和PostgreSQL上的DDL或JSON清理逻辑 |
 | `test_tool_package_migration_dialects.py` | SQLite、MySQL、PostgreSQL 的 002 DDL 分支 |
 | `test_runtime_dependencies.py` | OpenAI SDK/aiohttp兼容锁定与Pydantic AI OpenAI模型导入 |

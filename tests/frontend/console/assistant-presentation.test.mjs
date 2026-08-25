@@ -43,16 +43,16 @@ test("连续 assistant 历史按 user turn 合并为一个可视回答", () => {
   assert.equal(items[3].records.length, 1);
 });
 
-test("Checkpoint 边界会截断连续 assistant 合并", () => {
+test("消息投影不再接收独立 Checkpoint 边界", () => {
   const items = buildHistoryVisualItems([
     { role: "user", content: "问题", branch_point: 0 },
     { role: "assistant", parts: [{ type: "text", content: "边界前" }], branch_point: 1 },
     { role: "assistant", parts: [{ type: "text", content: "边界后" }], branch_point: 4 },
   ], { source_last_sequence: 2 });
 
-  assert.deepEqual(items.map((item) => item.type), ["user", "assistant", "checkpoint", "assistant"]);
+  assert.deepEqual(items.map((item) => item.type), ["user", "assistant"]);
   assert.equal(items[1].records[0].parts[0].content, "边界前");
-  assert.equal(items[3].records[0].parts[0].content, "边界后");
+  assert.equal(items[1].records[1].parts[0].content, "边界后");
 });
 
 test("最终文本常显，之前文本、thinking 和工具进入处理过程", () => {
@@ -187,7 +187,7 @@ test("大工具结果显示外置提示并保留预览", () => {
 test("任务计划只在消息区底部浮层展示最新未完成快照", () => {
   assert.equal(isPlanningToolEvent({ source: "planning", tool: "anything" }), false);
   assert.equal(isPlanningToolEvent({ tool: "write_plan" }), true);
-  assert.equal(isPlanningToolEvent({ source: "planning", tool: "update_task_statuses" }), true);
+  assert.equal(isPlanningToolEvent({ source: "planning", tool: "update_task_statuses" }), false);
   assert.equal(isPlanningToolEvent({ tool: "execute_python" }), false);
 
   const running = normalizePlanSnapshot({
@@ -249,7 +249,7 @@ test("历史只恢复最新 Assistant Run 的最后一份未完成计划", () =>
   };
   const planningResult = (plan, id) => ({
     type: "tool_result",
-    tool: "update_task_statuses",
+    tool: "write_plan",
     source: "planning",
     tool_call_id: id,
     plan,

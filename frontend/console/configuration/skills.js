@@ -273,6 +273,13 @@ const skillsAdmin = {
     return labels[skill.runtime_status] || labels.missing;
   },
 
+  renderMetadataCard(entries) {
+    if (!entries?.length) return "";
+    return `<section class="skill-metadata-card" aria-label="Skill 元数据">
+      <dl class="skill-metadata-grid">${entries.map(({ key, value }) => `<div><dt>${escapeHtml(key)}</dt><dd>${escapeHtml(value)}</dd></div>`).join("")}</dl>
+    </section>`;
+  },
+
   async readResource(code, path) {
     const preview = document.getElementById("skillResourcePreview");
     if (!preview) return;
@@ -286,8 +293,11 @@ const skillsAdmin = {
       const page = await apiFetch(`/api/v1/skills/${encodeURIComponent(code)}/resources/${path.split("/").map(encodeURIComponent).join("/")}`);
       const isMarkdown = /\.md$/i.test(path) || /markdown/i.test(String(page.mime_type || page.mime || ""));
       const isJson = /\.json$/i.test(path) || /json/i.test(String(page.mime_type || page.mime || ""));
+      const markdownDocument = isMarkdown
+        ? window.DeepAgentSkillFrontmatter?.parseSkillFrontmatter(page.content)
+        : null;
       const content = isMarkdown
-        ? `<div class="skill-preview-markdown">${window.DeepAgentMarkdown?.renderBody(page.content) ?? `<pre>${escapeHtml(page.content)}</pre>`}</div>`
+        ? `<div class="skill-preview-markdown">${this.renderMetadataCard(markdownDocument?.entries)}${window.DeepAgentMarkdown?.renderBody(markdownDocument?.body ?? page.content) ?? `<pre>${escapeHtml(markdownDocument?.body ?? page.content)}</pre>`}</div>`
         : isJson
           ? (window.DeepAgentJson?.renderBlock(page.content, { className: "skill-preview-json", ariaLabel: `${path} JSON` }) || `<pre>${escapeHtml(page.content)}</pre>`)
         : `<pre>${escapeHtml(page.content)}</pre>`;

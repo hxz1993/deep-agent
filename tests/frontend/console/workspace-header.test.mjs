@@ -48,7 +48,7 @@ test("会话标题第二行显示带前缀的完整会话 ID", () => {
   assert.doesNotMatch(chatSource, /sessionBadge\.textContent = .*slice\(/);
 });
 
-test("工作台只读展示上下文预算、压缩结果与 Checkpoint 状态", () => {
+test("工作台只读展示上下文预算与压缩事件状态", () => {
   assert.match(chatSource, /\/context-status/);
   assert.match(chatSource, /last_compaction:\s*data\.context\.compaction/);
   assert.match(chatSource, /void loadContextStatus\(state\.sessionId\)/);
@@ -59,10 +59,11 @@ test("工作台只读展示上下文预算、压缩结果与 Checkpoint 状态",
   assert.match(workspaceSource, /可用输入/);
   assert.match(workspaceSource, /压缩前/);
   assert.match(workspaceSource, /压缩后/);
-  assert.match(workspaceSource, /Checkpoint/);
+  assert.match(workspaceSource, /压缩事件/);
+  assert.match(workspaceSource, /compaction_event_id/);
   assert.match(workspaceSource, /state\.lastRunUsage/);
   assert.match(chatSource, /state\.lastRunUsage = \{ \.\.\.usage \}/);
-  assert.doesNotMatch(workspaceSource, /summary_body|checkpoint\.payload|摘要正文/i);
+  assert.doesNotMatch(workspaceSource, /summary_body|context_checkpoint|摘要正文/i);
 });
 
 test("会话详情使用会话、当前回合和上下文引用三页签", () => {
@@ -107,7 +108,7 @@ test("会话详情保留既有属性并用横向页签、键值列表与复合�
     "会话 ID", "消息与附件", "App / Space", "Language", "User ID",
     "Conversation ID", "Run ID", "请求", "本次使用", "预计剩余",
     "缓存读取", "缓存写入", "工具调用", "Tool Search", "耗时", "压缩",
-    "压缩前", "压缩后", "Checkpoint Token", "估算方式",
+    "压缩前", "压缩后", "压缩事件", "来源截止", "摘要模型", "更新时间", "估算方式",
   ]) {
     assert.match(workspaceSource, new RegExp(label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   }
@@ -284,12 +285,15 @@ test("历史中的 interrupted 助手消息恢复已停止标记", () => {
   assert.match(chatSource, /circle-stop/);
 });
 
-test("当前有效 Checkpoint 作为历史分隔标记而非聊天消息渲染", () => {
-  assert.match(chatSource, /data\.context_checkpoint/);
-  assert.match(chatSource, /addContextCheckpointMarker/);
-  assert.match(chatSource, /上下文已压缩 · 原始约/);
-  assert.match(chatSource, /buildHistoryVisualItems\(messages, contextCheckpoint\)/);
-  assert.doesNotMatch(chatSource, /addMessage\([^\n]*context_checkpoint/);
+test("历史与轨迹统一读取 Event API 且普通聊天隐藏完成压缩标记", () => {
+  assert.match(chatSource, /sessionApiUrl\(session, "\/events"/);
+  assert.match(chatSource, /after_sequence: afterSequence, limit: 500/);
+  assert.match(chatSource, /page\.next_after_sequence/);
+  assert.match(chatSource, /projectSessionEvents\(data\)/);
+  assert.match(chatSource, /trajectory\?\.setHistory\(data\)/);
+  assert.match(chatSource, /item\.type === "compaction"/);
+  assert.match(chatSource, /压缩事件在轨迹中按真实 sequence 展示/);
+  assert.doesNotMatch(chatSource, /context_checkpoint|addContextCheckpointMarker|\/history/);
 });
 
 test("0803 不带入 0802 的对话消息与滚动重构", () => {
@@ -297,14 +301,15 @@ test("0803 不带入 0802 的对话消息与滚动重构", () => {
   assert.doesNotMatch(chatSource, /tool-block open running/);
 });
 
-test("自动和主动压缩复用独立过程条并在成功后刷新历史标记", () => {
+test("自动和主动压缩复用独立过程条并由 Event 更新轨迹", () => {
   assert.match(chatSource, /function createContextCompactionRow\(beforeNode = null\)/);
   assert.match(chatSource, /function setContextCompactionRow\(/);
-  assert.match(chatSource, /case "context_compaction":\s*showAutomaticContextCompaction\(data, assistant\.row\)/);
+  assert.match(chatSource, /case "context_compaction_progress":\s*showAutomaticContextCompaction\(data, assistant\.row\)/);
   assert.match(chatSource, /automaticCompactionTimer = window\.setTimeout\([\s\S]*?, 150\)/);
   assert.match(chatSource, /finalizeAutomaticContextCompaction\(data\.context, data\.status\)/);
   assert.match(chatSource, /state\.skipHistoryRefresh = !refreshCompactionHistory/);
-  assert.match(chatSource, /本轮临时缩减，未更新 Checkpoint/);
+  assert.match(chatSource, /本轮临时缩减，未生成压缩事件/);
+  assert.match(chatSource, /case "session_event_appended":\s*case "session_event_updated":/);
   assert.doesNotMatch(chatSource, /assistant\.showContextCompaction|assistant\.hideContextCompaction/);
   assert.doesNotMatch(chatSource, /className = "context-compaction-status"/);
 });

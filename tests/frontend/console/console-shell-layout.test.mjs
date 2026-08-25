@@ -64,6 +64,22 @@ test("Agent 提供卡片和列表双视图并复用同一真实数据源", () =>
   assert.match(agents, /Agent 刷新失败/);
 });
 
+test("Agent 容器圆角收口且工具包卡片改为单列两行摘要", () => {
+  assert.match(styles, /#configurationHost #panel-agents\s*\{[^}]*overflow: clip;[^}]*border-radius: var\(--config-radius\) !important;/);
+  assert.match(styles, /\.agent-editor-pane \.cap-grid\s*\{[^}]*grid-template-columns: minmax\(0, 1fr\);/);
+  assert.match(styles, /\.agent-editor-pane\s*\{[^}]*display: flex;[^}]*overflow: hidden;/);
+  assert.match(styles, /\.agent-editor-pane \.cap-panels\s*\{[^}]*flex: 1 1 auto;[^}]*max-height: none;[^}]*overflow: auto;/);
+  assert.match(styles, /\.agent-editor-pane \.cap-panel:not\(\.hidden\)\s*\{[^}]*min-height: 100%;[^}]*flex-direction: column;/);
+  assert.match(styles, /\.agent-editor-pane \.cap-grid\s*\{[^}]*flex: 1 1 auto;[^}]*align-content: start;/);
+  assert.match(styles, /\.agent-editor-pane \.cap-card\s*\{[^}]*grid-template-columns: minmax\(0, 1fr\) auto;[^}]*min-height: 58px;/);
+  assert.match(styles, /\.agent-editor-pane \.cap-card-desc\s*\{[^}]*-webkit-line-clamp: 1;/);
+});
+
+test("配置弹窗统一水平居中，Agent 独立编辑页仍保持页面层级", () => {
+  assert.match(styles, /dialog\.console-detail-dialog\.modal\s*\{[^}]*margin: auto;[^}]*border-radius: var\(--console-card-radius\);/);
+  assert.match(styles, /dialog\.agent-editor-page\.console-detail-dialog\.modal-agent[\s\S]*?margin: 0;/);
+});
+
 test("Agent 卡片与列表统一使用稳定标识的纯图标行操作", () => {
   assert.ok((agents.match(/class="row-actions agent-row-actions"/g) || []).length >= 2);
   assert.ok((agents.match(/data-agent-chat/g) || []).length >= 2);

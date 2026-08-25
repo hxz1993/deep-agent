@@ -40,9 +40,9 @@ Harness ToolOutputLimits.after_tool_execute
 
 ## 3. 权限与压缩
 
-- `chat_messages`是Artifact授权事实源。
-- Checkpoint会删除Tool Return metadata，只保存模型需要的预览投影；它不能恢复或扩大Artifact权限。
-- 分支会话只在新Session原始History确实复制了对应Tool Return时获得句柄。
+- 当前Session原始Tool Result Event是Artifact授权事实源。
+- 摘要Evidence只保存模型需要的预览与来源索引，不能恢复或扩大Artifact权限。
+- 未来分支只有在新Session事实源确实包含对应Tool Result时才能获得句柄。
 - 平台下载仍携带当前Run可信转发Header；句柄本身不能绕过Session归属检查。
 - 日志不记录句柄和完整内容。
 

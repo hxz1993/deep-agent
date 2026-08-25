@@ -1,26 +1,9 @@
-function checkpointBoundary(checkpoint) {
-  const raw = checkpoint?.source_last_sequence ?? checkpoint;
-  if (raw == null || raw === "") return null;
-  const value = Number(raw);
-  return Number.isInteger(value) ? value : null;
-}
-
-function crossesCheckpoint(message, boundary) {
-  return (
-    boundary != null
-    && Number.isInteger(message?.branch_point)
-    && message.branch_point > boundary
-  );
-}
-
 /**
- * Convert persisted messages into visual rows. Consecutive assistant records
- * belong to one answer until a user turn or the active Checkpoint boundary.
+ * Convert projected Event messages into visual rows. Compaction placement is
+ * handled by session-events.js from the original Event sequence.
  */
-export function buildHistoryVisualItems(messages = [], checkpoint = null) {
+export function buildHistoryVisualItems(messages = []) {
   const items = [];
-  const boundary = checkpointBoundary(checkpoint);
-  let checkpointInserted = boundary == null;
   let assistantRecords = [];
 
   const flushAssistant = () => {
@@ -30,12 +13,6 @@ export function buildHistoryVisualItems(messages = [], checkpoint = null) {
   };
 
   for (const message of messages) {
-    if (!checkpointInserted && crossesCheckpoint(message, boundary)) {
-      flushAssistant();
-      items.push({ type: "checkpoint" });
-      checkpointInserted = true;
-    }
-
     if (message?.role === "assistant") {
       assistantRecords.push(message);
       continue;
@@ -48,7 +25,6 @@ export function buildHistoryVisualItems(messages = [], checkpoint = null) {
   }
 
   flushAssistant();
-  if (!checkpointInserted) items.push({ type: "checkpoint" });
   return items;
 }
 
@@ -90,11 +66,7 @@ export function processDisclosureLabel({ pending = false, running = false } = {}
   return "处理过程";
 }
 
-export const PLANNING_TOOL_NAMES = new Set([
-  "write_plan",
-  "read_plan",
-  "update_task_statuses",
-]);
+export const PLANNING_TOOL_NAMES = new Set(["write_plan"]);
 
 export function isPlanningToolEvent(event = {}) {
   return PLANNING_TOOL_NAMES.has(event.tool);

@@ -21,6 +21,14 @@ def new_provider_id() -> str:
     return uuid4().hex
 
 
+def new_event_id() -> str:
+    return uuid4().hex
+
+
+def new_turn_id() -> str:
+    return uuid4().hex
+
+
 def normalize_provider_id(value: str | UUID) -> str:
     """Normalize compact or hyphenated UUID input to a 32-character hex id."""
     return UUID(str(value)).hex

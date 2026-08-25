@@ -21,8 +21,8 @@
 稳定边界：
 
 - 不增加Artifact数据库表，Tool Return metadata和平台文件是现阶段唯一事实。
-- 权限从当前Session原始 `chat_messages`恢复，不从Checkpoint或模型参数恢复。
-- 同一Run复用下载缓存；跨Run重新校验History并按需下载。
+- 权限从当前Session原始Tool Result Event恢复，不从摘要Evidence或模型参数恢复。
+- 同一Run复用下载缓存；跨Run重新校验Event并按需下载。
 - Console只提示完整结果已外置，不提供下载按钮。
 - 当前不提供TTL、孤儿扫描、全局列表、统计或通用Artifact CRUD。
 

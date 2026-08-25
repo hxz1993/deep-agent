@@ -710,22 +710,26 @@ function renderInspector() {
   const usage = state.lastRunUsage || {};
   const run = state.lastRunMetrics || {};
   const runModel = state.llmModels.find((item) => item.id === run.model_id || item.model === run.model_id);
-  const compactionState = compaction.triggered
+  const compactionState = contextStatus.compaction_event_id
+    ? "已完成"
+    : compaction.triggered
     ? strategyLabels[compaction.strategy] || compaction.strategy
     : contextStatus.compaction_enabled
       ? "未触发"
       : "未启用";
   const estimatorLabel = [contextStatus.estimate_scope, contextStatus.estimator_source].filter(Boolean).join(" · ") || "—";
   const compactionContent = `<section class="inspector-section">
-    <header><strong>压缩与 Checkpoint</strong><span>${escapeHtml(compactionState)}</span></header>
-    <div class="checkpoint-comparison">
+    <header><strong>上下文压缩</strong><span>${escapeHtml(compactionState)}</span></header>
+    <div class="compaction-comparison">
       <span><small>压缩前</small><strong>${escapeHtml(formatTokens(compaction.estimated_tokens_before))}</strong></span>
       <i data-lucide="arrow-right"></i>
-      <span><small>压缩后</small><strong>${escapeHtml(formatTokens(compaction.estimated_tokens_after))}</strong></span>
+      <span><small>压缩后</small><strong>${escapeHtml(formatTokens(compaction.estimated_tokens_after ?? contextStatus.compaction_estimated_tokens))}</strong></span>
     </div>
     <div class="inspector-facts compact">
-      ${inspectorFact("Checkpoint", contextStatus.checkpoint_exists ? "已生成" : "暂无")}
-      ${inspectorFact("Checkpoint Token", formatTokens(contextStatus.checkpoint_estimated_tokens))}
+      ${inspectorFact("压缩事件", contextStatus.compaction_event_id || "暂无", { mono: true, wide: true })}
+      ${inspectorFact("来源截止", contextStatus.compaction_source_through_sequence ?? "—")}
+      ${inspectorFact("摘要模型", contextStatus.summary_model_id || "—")}
+      ${inspectorFact("更新时间", contextStatus.compaction_updated_at || "—")}
       ${inspectorFact("估算方式", estimatorLabel)}
     </div>
   </section>`;

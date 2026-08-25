@@ -61,10 +61,10 @@ SSE 协议。
 | --- | --- | --- |
 | `Skills` 渐进披露 | 是，优先 | 作为 `SKILL.md` Instructions 延迟加载基础；安装、权限、References、Assets、scripts 仍由 DeepAgent 负责 |
 | Tool Guardrail / Guard Chain | 是，依赖前置 | 待工具风险元数据统一后用于参数、结果、审批和敏感信息治理，不先堆零散规则 |
-| Compaction receipts、`pin`、`keep_user_messages` | 部分吸收 | 用于补充观测和回归思路；不替换当前单次摘要、完整 SQL 历史和 Checkpoint |
+| Compaction receipts、`pin`、`keep_user_messages` | 部分吸收 | 用于观测和边界思路；当前以单条Compaction Event、完整原始Event和结构化摘要为准 |
 | Spend Limits | 是，中期 | 适合请求级成本保护；先与现有 `UsageLimits`、全局请求上限和错误协议统一 |
 | 大文本外置 / Tool Output Limits | 已采用 | v0.4.0 使用平台文件 Store 完成会话内 Spill；TTL、孤儿治理和通用 Artifact 平台不作为前置条件 |
-| ConversationSearch | 暂缓 | 当前没有真实摘要缺失样本，中文历史检索质量也未验证；仅在长程任务确实无法找回关键事实时，才用自定义 `HistorySource` 读取现有 SQL `chat_messages`，不启用第二套 StepPersistence |
+| ConversationSearch | 已采用产品化子集 | v0.6.0提供`search_conversation_history/read_conversation_event`，从现有Event Store做权限内中英文检索，不启用第二套StepPersistence |
 | StepPersistence | 暂不做 | 现有 SQL 会话是事实源；除非出现崩溃恢复或子 Agent 持久化需求，否则会形成第二套历史 |
 | Planning | 已采用 | v0.4.6启用Harness单轮计划，v0.4.7收口Console悬浮面板；不扩展为跨Run任务引擎 |
 | Advisor / SubAgent | 按业务需求 | 只有专业分工形成明确产品场景后再启用 |
@@ -735,9 +735,9 @@ v0.3.22 同一Backend内部增加Skill脚本模式：宿主只复制已授权脚
 
 工具权限必须由可信 `AgentDeps` 决定，不允许模型在参数中自选权限 Scope。
 
-文件工具是已落地的请求级准备场景：当前请求或原始 `chat_messages` 存在合法附件，或者 Agent
+文件工具是已落地的请求级准备场景：当前请求或原始`user/message`Event存在合法附件，或者Agent
 选择了可读且运行目录就绪的 Skill资源时，才注入统一系统工具 `read_file`；没有任何文件来源时
-不注入。附件归属不能从 Checkpoint推断，Skill路径必须命中已授权资源索引。该优化只减少无效
+不注入。附件归属不能从摘要Evidence推断，Skill路径必须命中已授权资源索引。该优化只减少无效
 Schema和误调用，实际读取仍需复检用户、会话、`file_id`、Skill选择和路径权限。
 
 ### 8.2 ToolSearch
@@ -870,12 +870,11 @@ threshold = clamp(available_input × 20%, 4K, 24K Token)
 
 - Store仅适配现有平台文件服务，不使用Harness默认本地文件Store。
 - 平台File ID同时就是会话内 `artifact_id`，不增加Artifact表和第二层ID映射。
-- 句柄权限只从当前Session完整原始 `chat_messages`中的Tool Return metadata恢复；模型猜测、其他会话
-  和经过脱敏的Checkpoint均不能增加权限。
-- 同一Run首次读取后复用内存缓存，并发读取使用single-flight；下一Run重新按原始History授权和下载。
+- 句柄权限只从当前Session完整原始Tool Result Event恢复；模型猜测、其他会话和摘要Evidence均不能增加权限。
+- 同一Run首次读取后复用内存缓存，并发读取使用single-flight；下一Run重新按原始Event授权和下载。
 - `read_file`、`read_tool_result`、`load_capability`和Tool Search排除在治理外，防止读取结果再次外置。
-- 上传失败时回退到最多8K字符的有损截断，保证Run仍可继续；不伪造外置成功。
-- SSE和History只附加脱敏的 `artifacts`元数据；日志仅记录数量、字节数、耗时/失败，不记录句柄、
+- Spill失败时Event保存完整`inline_fallback`并明确标记，模型只接收受限头尾投影；不伪造外置成功。
+- SSE和Event只附加脱敏的`artifacts`元数据；日志仅记录数量、字节数、耗时/失败，不记录句柄、
   工具参数、完整Schema、完整结果、Header或凭据。
 - Console提示“完整结果已外置”，当前只展示受限预览；不新增下载中心按钮。
 
@@ -938,7 +937,7 @@ unknown_after_crash
 
 只有出现大量写入型工具、长工作流或崩溃后重复执行风险时才值得接入。它不替代：
 
-- `chat_sessions/chat_messages`
+- `chat_sessions/chat_session_events`
 - EventPersister
 - Deferred Pending
 - 前端表单状态

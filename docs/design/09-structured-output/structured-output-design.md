@@ -404,8 +404,8 @@ Agent 配置 output_contract，mode=strict
 3. `final.output/output_type`、原始 ModelResponse、历史 `structured_output` 和 Console 通用只读卡片
    可以保持同一份结构化结果。
 4. UI Deferred 可以先 Pending，恢复模型后再由 Output Tool 结束本轮；两者不需要合并状态机。
-5. Output Call/acknowledgement 可以作为完整配对参与安全切分；契约与 Schema 指纹可以让不兼容的
-   Checkpoint 失效，而不改写原始历史。
+5. Output Call/acknowledgement可以作为完整配对参与安全切分；契约与Schema指纹可让不兼容的
+   Compaction投影失效，而不改写原始Event。
 
 不应沿用：
 

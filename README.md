@@ -3,7 +3,7 @@
 DeepAgent 是基于 FastAPI、Pydantic AI 和 SQLAlchemy 的多用户 Agent 服务，并
 随服务发布一体化运维控制台。
 
-当前产品版本为 `0.5.7`。`deep_agent.__version__` 是唯一代码版本来源，FastAPI、
+当前产品版本为 `0.5.8`。`deep_agent.__version__` 是唯一代码版本来源，FastAPI、
 `GET /info` 和 Console 顶部版本徽标均读取该值。后续正式发布默认递增
 `MAJOR.MINOR.PATCH` 的第三位，只有明确规划重大版本时才调整前两位。产品版本不通过
 环境变量或数据库覆盖，也不等同于 Alembic 数据库结构 revision。
@@ -70,6 +70,19 @@ Cookie、数据库密码或 API Key 提交到仓库。Sandbox 相关项可按需
 test 固定镜像部署可设 `DEEP_AGENT_SANDBOX_ENSURE_VENV=true`，由 gunicorn 主进程在 fork 前创建临时 venv（如 `/tmp/.venv-sandbox/bin/python`），无需为 pydata 重建镜像。
 
 若不想自动建 venv（例如离线环境），加 `--no-sandbox-env`；此时缺解释器会直接退出并提示手动 setup。
+
+只使用本地 SQLite、且不依赖平台 App 或企业管理员接口时，可以使用独立的仓库外 Profile：
+
+```dotenv
+DEEP_AGENT_LOCAL_USER=local-dev
+DEEP_AGENT_LOCAL_ADMIN_BYPASS=true
+DEEP_AGENT_SQLITE_PATH=/absolute/path/to/deep-agent-local.db
+```
+
+该开关只由回环地址上的 `deep_agent.local_dev` 读取，通过 ASGI 内部标记放行 Console 管理接口；
+它不是 HTTP Header，也不会改变 `deep_agent.main:app` 的生产鉴权。未开启该开关时仍必须配置平台
+Token，并由平台综合权限接口确认企业管理员身份。无 App 的本地请求可以完成 Provider、模型、Agent
+配置和普通对话；需要平台文件、下载中心或继承式 MCP 上下文的能力仍需真实 App/Space 和平台凭证。
 
 访问入口：
 

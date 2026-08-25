@@ -8,6 +8,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from deep_agent.local_security import LOCAL_CONSOLE_ADMIN_SCOPE_KEY
+
 
 DEFAULT_CONFIG_FILE = Path("~/.config/deep-agent/test.env").expanduser()
 LOCAL_IDENTITY_KEYS = frozenset(
@@ -15,6 +17,7 @@ LOCAL_IDENTITY_KEYS = frozenset(
         "DEEP_AGENT_LOCAL_USER",
         "DEEP_AGENT_LOCAL_TOKEN",
         "DEEP_AGENT_LOCAL_TOKEN_COOKIE",
+        "DEEP_AGENT_LOCAL_ADMIN_BYPASS",
     }
 )
 PROTECTED_HEADERS = frozenset(
@@ -31,47 +34,63 @@ ASGIApp = Callable[
     [MutableMapping[str, Any], Callable[..., Awaitable[Any]], Callable[..., Awaitable[Any]]],
     Awaitable[None],
 ]
+_TRUE_VALUES = frozenset({"1", "true", "yes", "on"})
+_FALSE_VALUES = frozenset({"0", "false", "no", "off"})
 
 
 @dataclass(frozen=True)
 class LocalIdentity:
     user: str
-    token: str = field(repr=False)
+    token: str | None = field(default=None, repr=False)
     token_cookie: str | None = None
+    console_admin_bypass: bool = False
 
     @classmethod
     def from_mapping(cls, values: Mapping[str, str | None]) -> "LocalIdentity":
         user = str(values.get("DEEP_AGENT_LOCAL_USER") or "").strip()
         token = str(values.get("DEEP_AGENT_LOCAL_TOKEN") or "").strip()
-        missing = [
-            name
-            for name, value in (
-                ("DEEP_AGENT_LOCAL_USER", user),
-                ("DEEP_AGENT_LOCAL_TOKEN", token),
+        raw_bypass = str(
+            values.get("DEEP_AGENT_LOCAL_ADMIN_BYPASS") or ""
+        ).strip().lower()
+        if raw_bypass and raw_bypass not in _TRUE_VALUES | _FALSE_VALUES:
+            raise ValueError(
+                "DEEP_AGENT_LOCAL_ADMIN_BYPASS must be a boolean value"
             )
-            if not value
-        ]
+        console_admin_bypass = raw_bypass in _TRUE_VALUES
+        missing = ["DEEP_AGENT_LOCAL_USER"] if not user else []
+        if not token and not console_admin_bypass:
+            missing.append("DEEP_AGENT_LOCAL_TOKEN")
         if missing:
             raise ValueError(f"Local development config is missing: {', '.join(missing)}")
-        if token.lower().startswith("bearer "):
+        if token and token.lower().startswith("bearer "):
             token = token[7:].strip()
-        if not token:
+        if not token and not console_admin_bypass:
             raise ValueError("DEEP_AGENT_LOCAL_TOKEN must contain a token value")
         token_cookie = str(values.get("DEEP_AGENT_LOCAL_TOKEN_COOKIE") or "").strip() or None
-        return cls(user=user, token=token, token_cookie=token_cookie)
+        return cls(
+            user=user,
+            token=token or None,
+            token_cookie=token_cookie,
+            console_admin_bypass=console_admin_bypass,
+        )
 
     def request_headers(self) -> tuple[tuple[bytes, bytes], ...]:
-        token = self.token.encode("latin-1")
-        headers = [
-            (b"user", self.user.encode("utf-8")),
-            (b"authorization", b"Bearer " + token),
-            (b"x-user-token", token),
-        ]
-        if self.token_cookie:
+        headers = [(b"user", self.user.encode("utf-8"))]
+        if self.token:
+            token = self.token.encode("latin-1")
+            headers.extend(
+                [
+                    (b"authorization", b"Bearer " + token),
+                    (b"x-user-token", token),
+                ]
+            )
+        if self.token_cookie and self.token:
             headers.append(
                 (
                     b"cookie",
-                    self.token_cookie.encode("latin-1") + b"=" + token,
+                    self.token_cookie.encode("latin-1")
+                    + b"="
+                    + self.token.encode("latin-1"),
                 )
             )
         return tuple(headers)
@@ -103,6 +122,8 @@ class LocalIdentityAdapter:
         ]
         headers.extend(self.identity.request_headers())
         forwarded_scope["headers"] = headers
+        if self.identity.console_admin_bypass:
+            forwarded_scope[LOCAL_CONSOLE_ADMIN_SCOPE_KEY] = True
         await self.app(forwarded_scope, receive, send)
 
 
@@ -138,9 +159,10 @@ def load_local_config(path: str | Path) -> LocalIdentity:
 
     for key, value in file_values.items():
         if key not in LOCAL_IDENTITY_KEYS:
-            os.environ.setdefault(key, value)
-    # The external file is the complete local runtime profile. Do not silently
-    # merge it with the repository's ignored .env file.
+            # The external file is the complete local runtime profile. Its
+            # values must win over an ambient shell or a previous dev command.
+            os.environ[key] = value
+    # Do not silently merge the profile with the repository's ignored .env.
     os.environ["DEEP_AGENT_LOAD_DOTENV"] = "false"
     # Some downstream SDK clients log request headers at INFO. Keep the local
     # identity quiet unless the developer explicitly opts into more logging.

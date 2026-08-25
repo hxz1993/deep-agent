@@ -15,6 +15,8 @@ from deepfos_platform.lib.httpcli import AioHttpCli
 from deepfos_platform.lib.utils import concat_url
 from deepfos_platform.options import OPTION as PLATFORM_OPTION
 
+from deep_agent.local_security import LOCAL_CONSOLE_ADMIN_SCOPE_KEY
+
 ENTERPRISE_ADMIN_ROLE = "enterprise_admin"
 _FORWARDED_AUTH_HEADERS = frozenset(
     {
@@ -208,5 +210,6 @@ __all__ = [
     "ConsoleAdminAuthorizer",
     "ConsoleAdminUnavailableError",
     "ENTERPRISE_ADMIN_ROLE",
+    "LOCAL_CONSOLE_ADMIN_SCOPE_KEY",
     "PlatformEnterpriseAdminChecker",
 ]

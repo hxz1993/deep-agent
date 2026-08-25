@@ -3,6 +3,15 @@
 本文件记录 DeepAgent 的产品版本变化，按新版本到旧版本排列。当前代码版本以
 `deep_agent.__version__` 为准；数据库结构版本以 Alembic head 为准，两者互不替代。
 
+## v0.5.8
+
+- 完善纯本地SQLite调试：仓库外Profile可显式开启仅限回环`local_dev`进程内部ASGI scope的
+  Console管理鉴权旁路，无需平台Token、App或Space即可维护Provider、Model、Agent并执行基础对话。
+- 本地Profile配置改为覆盖同名环境变量，避免终端残留的Test/平台配置污染SQLite启动；未开启旁路时
+  仍保持原有可信Token校验，部署入口和外部HTTP Header均无法触发本地放行。
+- 平台文件下载、上传Skill、远程MCP及其他依赖App/Space继承上下文的能力仍需平台身份。本版本不新增
+  数据库迁移；Provider + Model两层结构继续使用Alembic `007`。
+
 ## v0.5.7
 
 - 收紧Console的Provider详情信息密度：Base URL使用单行图标事实，地址模式、Key和启停状态

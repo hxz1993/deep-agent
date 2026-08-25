@@ -12,6 +12,8 @@ from deep_agent.security import (
     ConsoleAdminAccess,
     ConsoleAdminAuthenticationError,
     ConsoleAdminUnavailableError,
+    ENTERPRISE_ADMIN_ROLE,
+    LOCAL_CONSOLE_ADMIN_SCOPE_KEY,
 )
 
 router = APIRouter()
@@ -22,6 +24,13 @@ async def resolve_console_admin_access(
     user: RequestUserDep,
     ctx: AppContextDep,
 ) -> ConsoleAdminAccess:
+    # Only the loopback-only local_dev ASGI adapter can set this internal scope
+    # marker. It is deliberately not an HTTP header or a production option.
+    if request.scope.get(LOCAL_CONSOLE_ADMIN_SCOPE_KEY) is True:
+        return ConsoleAdminAccess(
+            allowed=True,
+            roles=(ENTERPRISE_ADMIN_ROLE,),
+        )
     try:
         return await ctx.console_admin_authorizer.access_for(request, user)
     except ConsoleAdminAuthenticationError as exc:

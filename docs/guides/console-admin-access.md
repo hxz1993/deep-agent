@@ -56,3 +56,13 @@ GET /api/v1/admin/access
 - 向平台权限接口转发认证Header时不写日志，也不在错误响应中回显。
 - 平台权限服务不可用时失败关闭，不因Console可用性需求绕过鉴权。
 - 固定超级用户`admin`明确拒绝；不把账号名当作企业管理员依据。
+
+## 本地 SQLite 调试例外
+
+回环地址专用入口 `python3.12 -m deep_agent.local_dev` 支持在仓库外私有 Profile 中显式设置
+`DEEP_AGENT_LOCAL_ADMIN_BYPASS=true`。该入口仍要求 `DEEP_AGENT_LOCAL_USER`，但可以不提供平台
+Token，也不要求 App/Space；本地适配器通过不可由浏览器伪造的 ASGI scope 内部标记放行管理接口。
+
+这个例外不属于部署配置：`deep_agent.main:app` 不读取或识别该开关，外部 HTTP Header 也不能触发。
+无 App 时平台文件、下载中心和需要继承业务上下文的 MCP 仍按各自契约不可用，普通 Provider/模型/
+Agent 配置与对话不受影响。

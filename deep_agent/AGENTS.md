@@ -391,6 +391,11 @@ DEEP_AGENT_LOCAL_TOKEN_COOKIE=<可选，仅在目标环境要求 Cookie 时填�
 
 本地入口只监听 `127.0.0.1`。它会覆盖浏览器提交的 `user / authorization / x-user-token / cookie`，保留控制台提交的调试 `app`。后端根据标准平台编码规则从 App 去掉末尾三位得到 Space，并在未显式提供语言时使用 `zh-cn`。身份和 Token 不得进入源码、仓库、浏览器存储、日志或测试夹具。
 
+纯本地 SQLite、不使用平台 App 时，仓库外 Profile 可设置
+`DEEP_AGENT_LOCAL_ADMIN_BYPASS=true`。此模式仍要求 `DEEP_AGENT_LOCAL_USER`，允许省略平台 Token，
+并只通过 `local_dev` 写入的内部 ASGI scope 标记放行 Console 管理接口；生产入口和 HTTP Header
+不能触发。Profile 是本地运行事实源，文件值必须覆盖启动 Shell 中同名的环境变量。
+
 注意：应用启动会自动执行 Alembic `upgrade head`。本地 Profile 如果连接共享 Test 数据库，新增迁移会随本地服务启动直接应用；涉及删列等不兼容 DDL 时，必须先协调 Test 服务维护窗口，不能直接启动新代码。
 
 ### Console企业管理员鉴权

@@ -22,6 +22,7 @@ from deep_agent.security import (
     ConsoleAdminUnavailableError,
     PlatformEnterpriseAdminChecker,
 )
+from deep_agent.local_dev import LocalIdentity, LocalIdentityAdapter
 from tests.helpers.sqlite_stores import make_sqlite_stores_sync
 
 
@@ -294,6 +295,29 @@ class ConsoleAdminApiTests(unittest.TestCase):
             {"allowed": True, "roles": ["enterprise_admin"]},
         )
         self.assertEqual(agents.status_code, 200, agents.text)
+
+    def test_loopback_local_adapter_can_explicitly_bypass_platform_admin_check(self) -> None:
+        self.checker.side_effect = ConsoleAdminUnavailableError("offline")
+        app = FastAPI()
+        app.include_router(api_router)
+        local_app = LocalIdentityAdapter(
+            app,
+            LocalIdentity(
+                user="local-user",
+                console_admin_bypass=True,
+            ),
+        )
+
+        with TestClient(local_app) as client:
+            access = client.get("/api/v1/admin/access")
+            agents = client.get("/api/v1/agents")
+
+        self.assertEqual(
+            access.json(),
+            {"allowed": True, "roles": ["enterprise_admin"]},
+        )
+        self.assertEqual(agents.status_code, 200, agents.text)
+        self.checker.assert_not_awaited()
 
     def test_normal_user_and_fixed_admin_are_denied(self) -> None:
         self.checker.return_value = False

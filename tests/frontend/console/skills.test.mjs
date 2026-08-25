@@ -68,7 +68,7 @@ test("Skill Markdown 资源复用对话渲染器，其他文本保持原文预�
   assert.match(styles, /\.skill-preview-markdown \.markdown-body/);
 });
 
-test("Skill Markdown frontmatter 独立展示为元数据卡且不混入正文", () => {
+test("Skill Markdown frontmatter 展示在正文预览顶部且不混入正文解析", () => {
   const parsed = parseSkillFrontmatter(`---\nname: deepagent-diagnostics\ndescription: Diagnose runtime problems.\n---\n# DeepAgent diagnostics\n\n正文`);
   assert.equal(parsed.hasFrontmatter, true);
   assert.deepEqual(parsed.entries, [
@@ -77,10 +77,13 @@ test("Skill Markdown frontmatter 独立展示为元数据卡且不混入正文",
   ]);
   assert.equal(parsed.body, "# DeepAgent diagnostics\n\n正文");
   assert.match(source, /skill-metadata-card/);
+  assert.doesNotMatch(source, /skill-metadata-title/);
   assert.match(source, /DeepAgentSkillFrontmatter\?\.parseSkillFrontmatter/);
   assert.match(source, /renderBody\(markdownDocument\?\.body/);
+  assert.match(source, /<div class="skill-preview-markdown">\$\{this\.renderMetadataCard\(markdownDocument\?\.entries\)\}\$\{window\.DeepAgentMarkdown/);
   assert.match(styles, /\.skill-metadata-card\s*\{/);
-  assert.match(styles, /\.skill-metadata-grid > div\s*\{[^}]*grid-template-columns:/);
+  assert.match(styles, /\.skill-metadata-card\s*\{[^}]*border-bottom:/);
+  assert.match(styles, /\.skill-metadata-grid > div\s*\{[^}]*grid-template-columns: minmax\(72px, 20%\)/);
 });
 
 test("Skill 页面固定在配置视口内并把溢出交给目录和预览区", () => {

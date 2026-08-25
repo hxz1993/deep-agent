@@ -276,7 +276,6 @@ const skillsAdmin = {
   renderMetadataCard(entries) {
     if (!entries?.length) return "";
     return `<section class="skill-metadata-card" aria-label="Skill 元数据">
-      <div class="skill-metadata-title">元数据</div>
       <dl class="skill-metadata-grid">${entries.map(({ key, value }) => `<div><dt>${escapeHtml(key)}</dt><dd>${escapeHtml(value)}</dd></div>`).join("")}</dl>
     </section>`;
   },
@@ -298,7 +297,7 @@ const skillsAdmin = {
         ? window.DeepAgentSkillFrontmatter?.parseSkillFrontmatter(page.content)
         : null;
       const content = isMarkdown
-        ? `${this.renderMetadataCard(markdownDocument?.entries)}<div class="skill-preview-markdown">${window.DeepAgentMarkdown?.renderBody(markdownDocument?.body ?? page.content) ?? `<pre>${escapeHtml(markdownDocument?.body ?? page.content)}</pre>`}</div>`
+        ? `<div class="skill-preview-markdown">${this.renderMetadataCard(markdownDocument?.entries)}${window.DeepAgentMarkdown?.renderBody(markdownDocument?.body ?? page.content) ?? `<pre>${escapeHtml(markdownDocument?.body ?? page.content)}</pre>`}</div>`
         : isJson
           ? (window.DeepAgentJson?.renderBlock(page.content, { className: "skill-preview-json", ariaLabel: `${path} JSON` }) || `<pre>${escapeHtml(page.content)}</pre>`)
         : `<pre>${escapeHtml(page.content)}</pre>`;

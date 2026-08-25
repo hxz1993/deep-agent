@@ -61,7 +61,7 @@ test("Provider 使用正式 API 和后端类型目录契约", () => {
 });
 
 test("Provider Key 只回显配置状态且编辑输入始终置空", () => {
-  assert.match(providerSource, /provider\.api_key_set \? "已配置" : "未配置"/);
+  assert.match(providerSource, /provider\.api_key_set \? "Key 已配" : "Key 未配"/);
   assert.match(providerSource, /getElementById\("llmProviderApiKey"\)\.value = ""/);
   assert.doesNotMatch(providerSource, /\.api_key\s*\|\||value = provider\.api_key/);
   assert.match(template, /<input[^>]*(?:id="llmProviderApiKey"[^>]*type="password"|type="password"[^>]*id="llmProviderApiKey")[^>]*>/);
@@ -82,6 +82,16 @@ test("Provider 详情操作统一使用轻风格按钮", () => {
   assert.match(providerSource, /data-toggle-model/);
   assert.match(providerSource, /data-delete-model/);
   assert.doesNotMatch(providerSource, /data-provider-toggle/);
+});
+
+test("Provider 接入信息使用紧凑图标胶囊而不是纵向定义列表", () => {
+  assert.match(providerSource, /class="provider-facts" aria-label="Provider 接入信息"/);
+  assert.match(providerSource, /class="provider-fact provider-fact-url"/);
+  assert.match(providerSource, /data-lucide="link-2"/);
+  assert.match(providerSource, /data-lucide="route"/);
+  assert.match(providerSource, /Key 已配/);
+  assert.match(providerSource, /<small><span>\$\{escapeHtml\(providerTypeLabel\(provider\)\)\}<\/span><code>/);
+  assert.doesNotMatch(providerSource, /<dl class="provider-facts">|<dt>Base URL<\/dt>/);
 });
 
 test("Provider 使用本地官方标识且模型行只展示 API 编码和两项能力事实", () => {

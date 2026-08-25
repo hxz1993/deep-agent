@@ -3,6 +3,13 @@
 本文件记录 DeepAgent 的产品版本变化，按新版本到旧版本排列。当前代码版本以
 `deep_agent.__version__` 为准；数据库结构版本以 Alembic head 为准，两者互不替代。
 
+## v0.5.7
+
+- 收紧Console的Provider详情信息密度：Base URL使用单行图标事实，地址模式、Key和启停状态
+  改为紧凑胶囊，运行协议并入Provider副标题，降低关联模型区域上方的占用高度。
+- 本版本不新增数据库迁移，不改变Provider、Model、Chat、SSE、History或外部客户端协议；
+  Provider + Model两层结构继续使用Alembic `007`。
+
 ## v0.5.6
 
 - 完成Provider + Model两层数据归一化：`llm_providers`独占适配类型、Base URL和API Key，

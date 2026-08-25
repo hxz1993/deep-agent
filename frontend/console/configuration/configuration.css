@@ -1436,11 +1436,71 @@ dialog.console-action-dialog::backdrop {
 .provider-detail-header > div:first-child { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 3px 8px; min-width: 0; }
 .provider-detail-header > div:first-child .provider-brand-mark { grid-row: 1 / span 2; }
 .provider-detail-header h3 { margin: 0; font-size: 16px; }
-.provider-detail-header small { grid-column: 2; color: var(--text-dim); font-size: 12px; }
-.provider-facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 18px; margin: 18px 0; }
-.provider-facts > div { min-width: 0; }
-.provider-facts dt { color: var(--text-dim); font-size: 12px; }
-.provider-facts dd { margin: 4px 0 0; overflow-wrap: anywhere; font-size: 13px; }
+.provider-detail-header small {
+  display: inline-flex;
+  grid-column: 2;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+.provider-detail-header small code {
+  overflow: hidden;
+  color: var(--text-faint);
+  font-family: var(--mono);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.provider-facts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 12px 0;
+}
+.provider-fact {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  min-height: 26px;
+  padding: 4px 7px;
+  border: 1px solid var(--console-card-border, var(--border));
+  border-radius: 999px;
+  background: var(--console-subtle, var(--bg-soft));
+  color: var(--text-dim);
+  font-size: 12px;
+  line-height: 1;
+  white-space: nowrap;
+}
+.provider-fact svg { width: 13px; height: 13px; color: var(--text-faint); }
+.provider-fact.on {
+  border-color: color-mix(in srgb, var(--success) 32%, var(--console-card-border, var(--border)));
+  background: color-mix(in srgb, var(--success) 7%, var(--console-surface, var(--bg)));
+  color: var(--success);
+}
+.provider-fact.on svg { color: var(--success); }
+.provider-fact.off { color: var(--text-faint); }
+.provider-fact-url {
+  flex: 1 1 100%;
+  justify-content: flex-start;
+  border-color: transparent;
+  background: transparent;
+  padding-right: 0;
+  padding-left: 0;
+}
+.provider-fact-url code {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .provider-models-section { padding-top: 16px; border-top: 1px solid var(--border); }
 .provider-section-head h4 { margin: 0; font-size: 14px; }
 .provider-section-head p { margin: 3px 0 0; color: var(--text-dim); font-size: 12px; }

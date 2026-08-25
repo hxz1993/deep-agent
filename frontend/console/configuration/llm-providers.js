@@ -140,19 +140,18 @@ const llmProvidersAdmin = {
     const catalogId = providerCatalogId(provider);
     host.innerHTML = `
       <header class="provider-detail-header">
-        <div>${providerBrandMarkup(provider)}<h3>${escapeHtml(provider.name)}</h3><small>${escapeHtml(providerTypeLabel(provider))}</small></div>
+        <div>${providerBrandMarkup(provider)}<h3>${escapeHtml(provider.name)}</h3><small><span>${escapeHtml(providerTypeLabel(provider))}</span><code>${escapeHtml(providerTypeByCode(provider.provider_type)?.model_protocol || "—")}</code></small></div>
         <div class="row-actions provider-action-group">
           <button type="button" class="provider-action" data-provider-edit><i data-lucide="pencil"></i><span>编辑</span></button>
           <button type="button" class="provider-action danger" data-provider-delete><i data-lucide="trash-2"></i><span>删除</span></button>
         </div>
       </header>
-      <dl class="provider-facts">
-        <div><dt>Base URL</dt><dd>${escapeHtml(provider.effective_base_url || provider.base_url || "—")}</dd></div>
-        <div><dt>地址模式</dt><dd>${provider.use_default_base_url ? "框架默认" : "自定义"}</dd></div>
-        <div><dt>API Key</dt><dd><span class="badge ${provider.api_key_set ? "on" : "off"}">${provider.api_key_set ? "已配置" : "未配置"}</span></dd></div>
-        <div><dt>Provider 状态</dt><dd><span class="badge ${provider.enabled === false ? "off" : "on"}">${provider.enabled === false ? "停用" : "启用"}</span></dd></div>
-        <div><dt>协议</dt><dd>${escapeHtml(providerTypeByCode(provider.provider_type)?.model_protocol || "—")}</dd></div>
-      </dl>
+      <div class="provider-facts" aria-label="Provider 接入信息">
+        <span class="provider-fact provider-fact-url" title="Base URL"><i data-lucide="link-2"></i><code>${escapeHtml(provider.effective_base_url || provider.base_url || "—")}</code></span>
+        <span class="provider-fact" title="地址模式"><i data-lucide="route"></i><span>${provider.use_default_base_url ? "默认地址" : "自定义地址"}</span></span>
+        <span class="provider-fact ${provider.api_key_set ? "on" : "off"}" title="API Key"><i data-lucide="key-round"></i><span>${provider.api_key_set ? "Key 已配" : "Key 未配"}</span></span>
+        <span class="provider-fact ${provider.enabled === false ? "off" : "on"}" title="Provider 状态"><i data-lucide="power"></i><span>${provider.enabled === false ? "停用" : "启用"}</span></span>
+      </div>
       <section class="provider-models-section">
         <div class="provider-section-head"><div><h4>关联模型</h4><p>${models.length} 个模型使用此 Provider</p></div><div class="row-actions provider-action-group">${catalogId ? `<button type="button" class="provider-action" data-provider-catalog><i data-lucide="library"></i><span>从目录添加</span></button>` : ""}<button type="button" class="provider-action" data-provider-model><i data-lucide="plus"></i><span>新建模型</span></button></div></div>
         <div class="provider-related-models">${models.length ? models.map((model) => `

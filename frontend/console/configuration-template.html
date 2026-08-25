@@ -33,7 +33,7 @@
         </div>
         <div class="panel-toolbar-actions">
           <button class="btn" type="button" id="refreshSkillsBtn"><i data-lucide="refresh-cw"></i>重新加载</button>
-          <button class="btn" type="button" id="exportAllSkillsBtn"><i data-lucide="package-open"></i>导出全部</button>
+          <button class="btn" type="button" id="exportAllSkillsBtn"><i data-lucide="download"></i>导出全部</button>
           <button class="btn primary" type="button" id="installSkillBtn"><i data-lucide="package-plus"></i>上传安装</button>
         </div>
       </div>
@@ -238,9 +238,9 @@
               <div class="ui-tool-selected-title">
                 <strong id="selectedUiToolPackageLabel">请选择工具包</strong>
                 <code id="selectedUiToolPackageCode"></code>
+                <div class="ui-tool-selected-meta" id="selectedUiToolPackageMeta"></div>
               </div>
               <p id="selectedUiToolPackageDescription">从左侧选择工具包后查看工具。</p>
-              <div class="ui-tool-selected-meta" id="selectedUiToolPackageMeta"></div>
             </div>
             <div class="row-actions">
               <button class="btn hidden" id="editUiToolPackageBtn"><i data-lucide="pencil"></i>编辑工具包</button>
@@ -472,6 +472,31 @@
     </form>
   </dialog>
 
+  <!-- Provider catalog picker -->
+  <dialog class="modal provider-catalog-picker-modal" id="providerCatalogPickerModal">
+    <form id="providerCatalogPickerForm" method="dialog">
+      <div class="modal-header">
+        <div class="modal-title-copy">
+          <h3 id="providerCatalogPickerTitle">选择要添加的模型</h3>
+          <span class="modal-entity-id" id="providerCatalogPickerProvider"></span>
+        </div>
+        <button type="button" class="icon-btn" id="closeProviderCatalogPickerModal" aria-label="关闭"><i data-lucide="x"></i></button>
+      </div>
+      <div class="modal-body provider-catalog-picker-body">
+        <div class="provider-catalog-picker-toolbar">
+          <p class="field-hint">已添加的模型仅作标识且不可选择；勾选其他模型后，点击“添加所选”才会创建。</p>
+          <button type="button" class="btn-link" id="toggleProviderCatalogSelection">全选可添加</button>
+        </div>
+        <div class="provider-catalog-choice-list" id="providerCatalogChoiceList" aria-live="polite"></div>
+      </div>
+      <div class="form-error hidden" data-form-error role="alert" aria-live="assertive"></div>
+      <div class="modal-footer">
+        <button type="button" class="btn" id="cancelProviderCatalogPickerBtn">取消</button>
+        <button type="submit" class="btn primary" id="confirmProviderCatalogPickerBtn" disabled>添加所选</button>
+      </div>
+    </form>
+  </dialog>
+
   <!-- Auxiliary model modal -->
   <dialog class="modal" id="auxiliaryModelModal">
     <form id="auxiliaryModelForm" method="dialog">
@@ -495,36 +520,55 @@
   </dialog>
 
   <!-- MCP modal -->
-  <dialog class="modal" id="mcpModal">
+  <dialog class="modal agent-editor-page mcp-editor-page" id="mcpModal">
     <form id="mcpForm" method="dialog">
       <div class="modal-header">
-        <h3 id="mcpModalTitle">新建 MCP</h3>
-        <button type="button" class="icon-btn" id="closeMcpModal" aria-label="关闭"><i data-lucide="x"></i></button>
+        <button type="button" class="agent-editor-back" id="closeMcpModal"><i data-lucide="arrow-left"></i><span>返回</span></button>
+        <div class="modal-title-copy">
+          <h3 id="mcpModalTitle">新建 MCP</h3>
+          <span class="modal-entity-id" id="mcpEditorMeta">MCP 配置 · URL</span>
+        </div>
+        <div class="agent-editor-header-actions">
+          <button type="submit" class="btn primary">保存</button>
+        </div>
       </div>
       <div class="modal-body">
-        <label class="field">
-          <span>名称</span>
-          <input type="text" id="mcpName" required maxlength="191" pattern="[a-zA-Z][a-zA-Z0-9_-]*" />
-          <small class="field-hint hidden" id="mcpNameReadOnlyHint">名称用于能力编码和模型工具前缀；请通过列表中的“重命名”操作修改。</small>
-        </label>
-        <label class="field">
-          <span>传输类型</span>
-          <select id="mcpTransport">
-            <option value="url">url（远程 SSE / HTTP）</option>
-            <option value="stdio" hidden disabled>stdio（历史配置，已停止支持）</option>
-            <option value="builtin">builtin（仓库内置 mcps/）</option>
-          </select>
-        </label>
-        <label class="field">
-          <span>描述（可选）</span>
-          <input type="text" id="mcpDescription" />
-        </label>
-        <label class="field checkbox-field">
-          <input type="checkbox" id="mcpEnabled" checked />
-          <span>启用</span>
-        </label>
+        <div class="mcp-editor-workbench">
+          <section class="mcp-editor-section mcp-editor-basics">
+            <div class="mcp-editor-section-head">
+              <h4>基本信息</h4>
+              <p>定义服务名称、用途和运行状态。</p>
+            </div>
+            <label class="field">
+              <span>名称</span>
+              <input type="text" id="mcpName" required maxlength="191" pattern="[a-zA-Z][a-zA-Z0-9_-]*" />
+              <small class="field-hint hidden" id="mcpNameReadOnlyHint">名称用于能力编码和模型工具前缀；请通过列表中的“重命名”操作修改。</small>
+            </label>
+            <label class="field">
+              <span>描述（可选）</span>
+              <textarea id="mcpDescription" rows="6" placeholder="说明这个 MCP 提供的能力和使用范围"></textarea>
+            </label>
+            <label class="field checkbox-field mcp-enabled-field">
+              <input type="checkbox" id="mcpEnabled" checked />
+              <span>启用</span>
+            </label>
+          </section>
 
-        <div id="mcpUrlFields">
+          <section class="mcp-editor-section mcp-editor-connection">
+            <div class="mcp-editor-section-head">
+              <h4>连接与请求上下文</h4>
+              <p>配置传输方式、访问地址、静态 Header 和上下文继承策略。</p>
+            </div>
+            <label class="field">
+              <span>传输类型</span>
+              <select id="mcpTransport">
+                <option value="url">url（远程 SSE / HTTP）</option>
+                <option value="stdio" hidden disabled>stdio（历史配置，已停止支持）</option>
+                <option value="builtin">builtin（仓库内置 mcps/）</option>
+              </select>
+            </label>
+
+            <div id="mcpUrlFields" class="mcp-transport-fields">
           <label class="field">
             <span>URL</span>
             <input type="url" id="mcpUrl" placeholder="http://localhost:8080/sse" />
@@ -547,9 +591,9 @@
             </div>
             <p class="field-hint context-mode-description" id="mcpRequestContextDescription"></p>
           </div>
-        </div>
+            </div>
 
-        <div id="mcpStdioFields" class="hidden">
+            <div id="mcpStdioFields" class="hidden mcp-transport-fields">
           <label class="field">
             <span>Command</span>
             <input type="text" id="mcpCommand" placeholder="python" />
@@ -558,13 +602,13 @@
             <span>Args（JSON 数组或逗号分隔）</span>
             <input type="text" id="mcpArgs" placeholder='["path/to/server.py"]' />
           </label>
-        </div>
+            </div>
 
-        <div id="mcpBuiltinFields" class="hidden">
+            <div id="mcpBuiltinFields" class="hidden mcp-transport-fields">
           <p class="field-hint">启动路径固定为 <code>mcps/&lt;名称&gt;/server.py</code>，无需配置 command / args。</p>
-        </div>
+            </div>
 
-        <div id="mcpEnvCwdFields" class="hidden">
+            <div id="mcpEnvCwdFields" class="hidden mcp-transport-fields">
           <label class="field">
             <span>Env JSON（可选）</span>
             <textarea id="mcpEnv" rows="2" placeholder='{"KEY": "value"}'></textarea>
@@ -573,14 +617,11 @@
             <span>工作目录（可选）</span>
             <input type="text" id="mcpCwd" />
           </label>
+            </div>
+          </section>
         </div>
-
       </div>
       <div class="form-error hidden" data-form-error role="alert" aria-live="assertive"></div>
-      <div class="modal-footer">
-        <button type="button" class="btn" id="cancelMcpBtn">取消</button>
-        <button type="submit" class="btn primary">保存</button>
-      </div>
     </form>
   </dialog>
 
@@ -659,51 +700,60 @@
           <p class="field-hint" id="uiToolTemplateDesc"></p>
         </section>
 
-        <label class="field">
-          <span>名称</span>
-          <input type="text" id="uiToolName" required pattern="[a-z][a-z0-9_]{1,120}" placeholder="myapp__ask_confirm" />
-        </label>
-        <label class="field">
-          <span>所属工具包</span>
-          <select id="uiToolPackageCode" required></select>
-        </label>
-        <label class="field">
-          <span>描述</span>
-          <textarea id="uiToolDescription" rows="2" required></textarea>
-        </label>
-        <label class="field">
-          <span>Widget</span>
-          <div class="widget-picker">
-            <select id="uiToolWidget">
-              <option value="">—</option>
-              <option value="confirm">confirm</option>
-              <option value="choice">choice</option>
-              <option value="text">text</option>
-              <option value="date_picker">date_picker</option>
-              <option value="custom">自定义…</option>
-            </select>
-            <input type="text" id="uiToolWidgetCustom" class="hidden" placeholder="输入自定义 widget 名称" />
-          </div>
-        </label>
+        <input type="hidden" id="uiToolPackageCode" />
+        <div class="ui-tool-basic-grid">
+          <section class="ui-tool-basic-column">
+            <label class="field">
+              <span>名称</span>
+              <input type="text" id="uiToolName" required pattern="[a-z][a-z0-9_]{1,120}" placeholder="myapp__ask_confirm" />
+            </label>
+            <label class="field">
+              <span>描述</span>
+              <textarea id="uiToolDescription" rows="4" required></textarea>
+            </label>
+          </section>
+          <section class="ui-tool-basic-column">
+            <label class="field">
+              <span>Widget</span>
+              <div class="widget-picker">
+                <select id="uiToolWidget">
+                  <option value="">—</option>
+                  <option value="confirm">confirm</option>
+                  <option value="choice">choice</option>
+                  <option value="text">text</option>
+                  <option value="date_picker">date_picker</option>
+                  <option value="custom">自定义…</option>
+                </select>
+                <input type="text" id="uiToolWidgetCustom" class="hidden" placeholder="输入客户端自定义渲染器标识" />
+              </div>
+              <small class="field-hint">Widget 是前端渲染器标识；选择“自定义”时，填写客户端已注册的渲染器名称。</small>
+            </label>
+            <label class="field checkbox-field ui-tool-enabled-field">
+              <input type="checkbox" id="uiToolEnabled" checked />
+              <span>启用</span>
+            </label>
+          </section>
+        </div>
 
-        <section class="field field-grow">
-          <span>参数 Schema</span>
-          <div id="uiToolParamsEditor"></div>
-        </section>
+        <div class="ui-tool-json-grid">
+          <section class="field field-grow ui-tool-json-field">
+            <span class="field-title-row"><span>参数 Schema</span><code class="schema-json-format">JSON Schema</code></span>
+            <textarea id="uiToolParamsEditor" class="mono-textarea schema-json-textarea" rows="13" required spellcheck="false" aria-describedby="uiToolParamsHint"></textarea>
+            <small class="field-hint" id="uiToolParamsHint">参数顶层类型必须是 object；保存时校验 JSON。</small>
+          </section>
 
-        <section class="field field-grow">
-          <span>结果 Schema</span>
-          <div id="uiToolResultEditor"></div>
-        </section>
+          <section class="field field-grow ui-tool-json-field">
+            <span class="field-title-row"><span>结果 Schema</span><code class="schema-json-format">JSON Schema</code></span>
+            <textarea id="uiToolResultEditor" class="mono-textarea schema-json-textarea" rows="13" spellcheck="false" aria-describedby="uiToolResultHint" placeholder="留空表示不声明结果 Schema"></textarea>
+            <small class="field-hint" id="uiToolResultHint">留空时保存为 null。</small>
+          </section>
 
-        <label class="field">
-          <span>Metadata（选填）</span>
-          <textarea id="uiToolMetadata" rows="2" class="mono-textarea" placeholder='{"key": "value"}'></textarea>
-        </label>
-        <label class="field checkbox-field">
-          <input type="checkbox" id="uiToolEnabled" checked />
-          <span>启用</span>
-        </label>
+          <section class="field field-grow ui-tool-json-field">
+            <span class="field-title-row"><span>Metadata（选填）</span><code class="schema-json-format">JSON</code></span>
+            <textarea id="uiToolMetadata" rows="13" class="mono-textarea schema-json-textarea" spellcheck="false" placeholder='{"key": "value"}'></textarea>
+            <small class="field-hint">工具展示和客户端行为的扩展元数据；留空时保存为 null。</small>
+          </section>
+        </div>
       </div>
       <div class="form-error hidden" data-form-error role="alert" aria-live="assertive"></div>
       <div class="modal-footer">

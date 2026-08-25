@@ -7,6 +7,7 @@ import {
   renderGroupedModelOptions,
 } from "../../../frontend/console/model-options.js";
 import {
+  buildProviderCatalogChoices,
   buildProviderCatalogCreatePlan,
   catalogProviderIdForType,
   providerCatalogSummary,
@@ -85,6 +86,7 @@ test("Provider 详情操作统一使用轻风格按钮", () => {
 });
 
 test("Provider 接入信息使用紧凑图标胶囊而不是纵向定义列表", () => {
+  assert.match(providerSource, /class="provider-detail-title-line">[\s\S]*class="provider-facts" aria-label="Provider 接入信息"/);
   assert.match(providerSource, /class="provider-facts" aria-label="Provider 接入信息"/);
   assert.match(providerSource, /class="provider-fact provider-fact-url"/);
   assert.match(providerSource, /data-lucide="link-2"/);
@@ -92,6 +94,7 @@ test("Provider 接入信息使用紧凑图标胶囊而不是纵向定义列表",
   assert.match(providerSource, /Key 已配/);
   assert.match(providerSource, /<small><span>\$\{escapeHtml\(providerTypeLabel\(provider\)\)\}<\/span><code>/);
   assert.doesNotMatch(providerSource, /<dl class="provider-facts">|<dt>Base URL<\/dt>/);
+  assert.doesNotMatch(providerSource, /个模型使用此 Provider/);
 });
 
 test("Provider 使用本地官方标识且模型行只展示 API 编码和两项能力事实", () => {
@@ -102,6 +105,7 @@ test("Provider 使用本地官方标识且模型行只展示 API 编码和两项
   assert.match(providerSource, /provider-model-facts/);
   assert.match(providerSource, /input_modalities/);
   assert.match(providerSource, /context_window_tokens/);
+  assert.doesNotMatch(providerSource, /escapeHtml\(context\)\} 上下文/);
   assert.doesNotMatch(providerSource, /provider-model-chip|>LLM<|>CHAT</);
 });
 
@@ -139,8 +143,24 @@ test("Provider 目录初始化只映射明确渠道并跳过当前 Provider 已�
     tags: ["tool_call"],
   });
   assert.equal(providerCatalogSummary({ created: 1, skipped: 2, failed: 1 }), "新增 1 个，跳过 2 个，失败 1 个");
+  const choices = buildProviderCatalogChoices({
+    provider: { id: "provider-1" },
+    existingModels: [{ model: "existing-model" }],
+    catalogModels: [
+      { provider_model_id: "existing-model", input_modalities: ["text"] },
+      { provider_model_id: "new-model", input_modalities: ["text"] },
+    ],
+  }).choices;
+  assert.deepEqual(choices.map(({ model, added }) => ({ model, added })), [
+    { model: "existing-model", added: true },
+    { model: "new-model", added: false },
+  ]);
   assert.match(providerSource, /view: "provider"/);
-  assert.match(providerSource, /for \(const payload of plan\.payloads\)/);
+  assert.match(template, /id="providerCatalogPickerModal"[\s\S]*id="providerCatalogChoiceList"[\s\S]*添加所选/);
+  assert.match(providerSource, /buildProviderCatalogChoices/);
+  assert.match(providerSource, /choice\.added \? "disabled"/);
+  assert.match(providerSource, /submitCatalogPicker\(event\)/);
+  assert.match(providerSource, /for \(const choice of selected\)/);
 });
 
 test("模型只提交 Provider 逻辑关联并移除重复连接字段", () => {

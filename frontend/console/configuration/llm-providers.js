@@ -3,6 +3,11 @@ const providerAdminState = {
   afterSave: null,
 };
 
+const providerCatalogPickerState = {
+  provider: null,
+  choices: [],
+};
+
 function providerTypeByCode(code) {
   return (state.llmProviderTypes || []).find((item) => item.code === code) || null;
 }
@@ -40,7 +45,7 @@ function providerModelFacts(model) {
   const context = window.__LlmModelConfigurationUI?.formatTokenCount?.(model.context_window_tokens) || "—";
   const labels = { text: "文本", image: "图像", audio: "音频", video: "视频" };
   const modalities = (model.input_modalities || []).map((item) => labels[item] || item).join("、") || "未声明";
-  return `<span><i data-lucide="image"></i>${escapeHtml(modalities)}</span><span><i data-lucide="scan-line"></i>${escapeHtml(context)} 上下文</span>`;
+  return `<span><i data-lucide="image"></i>${escapeHtml(modalities)}</span><span><i data-lucide="scan-line"></i>${escapeHtml(context)}</span>`;
 }
 
 function providerCatalogId(provider) {
@@ -140,20 +145,28 @@ const llmProvidersAdmin = {
     const catalogId = providerCatalogId(provider);
     host.innerHTML = `
       <header class="provider-detail-header">
-        <div>${providerBrandMarkup(provider)}<h3>${escapeHtml(provider.name)}</h3><small><span>${escapeHtml(providerTypeLabel(provider))}</span><code>${escapeHtml(providerTypeByCode(provider.provider_type)?.model_protocol || "—")}</code></small></div>
+        <div class="provider-detail-identity">
+          ${providerBrandMarkup(provider)}
+          <div class="provider-detail-copy">
+            <div class="provider-detail-title-line">
+              <h3>${escapeHtml(provider.name)}</h3>
+              <div class="provider-facts" aria-label="Provider 接入信息">
+                <span class="provider-fact" title="地址模式"><i data-lucide="route"></i><span>${provider.use_default_base_url ? "默认地址" : "自定义地址"}</span></span>
+                <span class="provider-fact ${provider.api_key_set ? "on" : "off"}" title="API Key"><i data-lucide="key-round"></i><span>${provider.api_key_set ? "Key 已配" : "Key 未配"}</span></span>
+                <span class="provider-fact ${provider.enabled === false ? "off" : "on"}" title="Provider 状态"><i data-lucide="power"></i><span>${provider.enabled === false ? "停用" : "启用"}</span></span>
+              </div>
+            </div>
+            <small><span>${escapeHtml(providerTypeLabel(provider))}</span><code>${escapeHtml(providerTypeByCode(provider.provider_type)?.model_protocol || "—")}</code></small>
+            <span class="provider-fact provider-fact-url" title="Base URL"><i data-lucide="link-2"></i><code>${escapeHtml(provider.effective_base_url || provider.base_url || "—")}</code></span>
+          </div>
+        </div>
         <div class="row-actions provider-action-group">
           <button type="button" class="provider-action" data-provider-edit><i data-lucide="pencil"></i><span>编辑</span></button>
           <button type="button" class="provider-action danger" data-provider-delete><i data-lucide="trash-2"></i><span>删除</span></button>
         </div>
       </header>
-      <div class="provider-facts" aria-label="Provider 接入信息">
-        <span class="provider-fact provider-fact-url" title="Base URL"><i data-lucide="link-2"></i><code>${escapeHtml(provider.effective_base_url || provider.base_url || "—")}</code></span>
-        <span class="provider-fact" title="地址模式"><i data-lucide="route"></i><span>${provider.use_default_base_url ? "默认地址" : "自定义地址"}</span></span>
-        <span class="provider-fact ${provider.api_key_set ? "on" : "off"}" title="API Key"><i data-lucide="key-round"></i><span>${provider.api_key_set ? "Key 已配" : "Key 未配"}</span></span>
-        <span class="provider-fact ${provider.enabled === false ? "off" : "on"}" title="Provider 状态"><i data-lucide="power"></i><span>${provider.enabled === false ? "停用" : "启用"}</span></span>
-      </div>
       <section class="provider-models-section">
-        <div class="provider-section-head"><div><h4>关联模型</h4><p>${models.length} 个模型使用此 Provider</p></div><div class="row-actions provider-action-group">${catalogId ? `<button type="button" class="provider-action" data-provider-catalog><i data-lucide="library"></i><span>从目录添加</span></button>` : ""}<button type="button" class="provider-action" data-provider-model><i data-lucide="plus"></i><span>新建模型</span></button></div></div>
+        <div class="provider-section-head"><h4>关联模型</h4><div class="row-actions provider-action-group">${catalogId ? `<button type="button" class="provider-action" data-provider-catalog><i data-lucide="library"></i><span>从目录添加</span></button>` : ""}<button type="button" class="provider-action" data-provider-model><i data-lucide="plus"></i><span>新建模型</span></button></div></div>
         <div class="provider-related-models">${models.length ? models.map((model) => `
           <div class="provider-related-model ${model.selectable === false ? "is-disabled" : ""}">
             <button type="button" class="provider-related-model-main" data-edit-model="${escapeHtml(model.id)}">
@@ -187,29 +200,103 @@ const llmProvidersAdmin = {
         showToast("目录中暂无可初始化模型", true);
         return;
       }
-      const plan = window.DeepAgentProviderCatalog.buildProviderCatalogCreatePlan({
+      const { choices } = window.DeepAgentProviderCatalog.buildProviderCatalogChoices({
         provider,
         catalogModels,
         existingModels: providerModels(provider.id),
       });
-      let created = 0;
-      let failed = 0;
-      for (const payload of plan.payloads) {
+      providerCatalogPickerState.provider = provider;
+      providerCatalogPickerState.choices = choices;
+      this.renderCatalogPicker();
+      document.getElementById("providerCatalogPickerModal")?.showModal();
+    } catch (error) {
+      showToast(`目录模型加载失败：${error.message}`, true);
+    } finally {
+      button.disabled = false;
+      button.classList.remove("is-loading");
+    }
+  },
+
+  renderCatalogPicker() {
+    const provider = providerCatalogPickerState.provider;
+    const choices = providerCatalogPickerState.choices;
+    const host = document.getElementById("providerCatalogChoiceList");
+    if (!provider || !host) return;
+    document.getElementById("providerCatalogPickerTitle").textContent = "选择要添加的模型";
+    document.getElementById("providerCatalogPickerProvider").textContent = provider.name;
+    host.innerHTML = choices.length ? choices.map((choice) => {
+      const context = window.__LlmModelConfigurationUI?.formatTokenCount?.(choice.payload.context_window_tokens) || "—";
+      const modalities = (choice.payload.input_modalities || []).join("、") || "text";
+      return `<label class="provider-catalog-choice ${choice.added ? "is-added" : ""}">
+        <input type="checkbox" name="providerCatalogChoice" value="${escapeHtml(choice.id)}" ${choice.added ? "disabled" : ""} />
+        <span class="provider-catalog-choice-copy"><code>${escapeHtml(choice.model)}</code><small>${escapeHtml(modalities)} · ${escapeHtml(context)}</small></span>
+        <span class="badge ${choice.added ? "on" : ""}">${choice.added ? "已添加" : "可添加"}</span>
+      </label>`;
+    }).join("") : `<div class="provider-model-empty">目录中暂无模型</div>`;
+    host.querySelectorAll('input[name="providerCatalogChoice"]').forEach((input) => {
+      input.addEventListener("change", () => this.updateCatalogPickerSelection());
+    });
+    AdminFormFeedback.clear(document.getElementById("providerCatalogPickerForm"));
+    this.updateCatalogPickerSelection();
+  },
+
+  updateCatalogPickerSelection() {
+    const inputs = Array.from(document.querySelectorAll('#providerCatalogChoiceList input[name="providerCatalogChoice"]:not(:disabled)'));
+    const selected = inputs.filter((input) => input.checked).length;
+    const confirm = document.getElementById("confirmProviderCatalogPickerBtn");
+    const toggle = document.getElementById("toggleProviderCatalogSelection");
+    if (confirm) {
+      confirm.disabled = selected === 0;
+      confirm.textContent = selected ? `添加所选（${selected}）` : "添加所选";
+    }
+    if (toggle) {
+      toggle.disabled = inputs.length === 0;
+      toggle.textContent = inputs.length > 0 && selected === inputs.length ? "取消全选" : "全选可添加";
+    }
+  },
+
+  toggleCatalogPickerSelection() {
+    const inputs = Array.from(document.querySelectorAll('#providerCatalogChoiceList input[name="providerCatalogChoice"]:not(:disabled)'));
+    const shouldSelect = inputs.some((input) => !input.checked);
+    inputs.forEach((input) => { input.checked = shouldSelect; });
+    this.updateCatalogPickerSelection();
+  },
+
+  closeCatalogPicker() {
+    document.getElementById("providerCatalogPickerModal")?.close();
+    providerCatalogPickerState.provider = null;
+    providerCatalogPickerState.choices = [];
+  },
+
+  async submitCatalogPicker(event) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const selectedIds = new Set(Array.from(
+      form.querySelectorAll('input[name="providerCatalogChoice"]:checked:not(:disabled)'),
+      (input) => input.value,
+    ));
+    const selected = providerCatalogPickerState.choices.filter((choice) => selectedIds.has(choice.id));
+    if (!selected.length) return;
+    AdminFormFeedback.clear(form);
+    AdminFormFeedback.setSubmitting(form, true);
+    let created = 0;
+    let failed = 0;
+    try {
+      for (const choice of selected) {
         try {
-          await apiFetch("/api/v1/llm-models", { method: "POST", body: JSON.stringify(payload) });
+          await apiFetch("/api/v1/llm-models", { method: "POST", body: JSON.stringify(choice.payload) });
           created += 1;
         } catch {
           failed += 1;
         }
       }
       await this.refresh();
-      const summary = window.DeepAgentProviderCatalog.providerCatalogSummary({ created, skipped: plan.skipped, failed });
-      showToast(summary, failed > 0);
+      this.closeCatalogPicker();
+      showToast(window.DeepAgentProviderCatalog.providerCatalogSummary({ created, skipped: 0, failed }), failed > 0);
     } catch (error) {
-      showToast(`目录初始化失败：${error.message}`, true);
+      AdminFormFeedback.show(form, error);
     } finally {
-      button.disabled = false;
-      button.classList.remove("is-loading");
+      AdminFormFeedback.setSubmitting(form, false);
     }
   },
 
@@ -322,6 +409,10 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("llmProviderUseDefaultBaseUrl")?.addEventListener("change", syncProviderBaseUrl);
   document.getElementById("closeLlmProviderModal")?.addEventListener("click", () => document.getElementById("llmProviderModal").close());
   document.getElementById("cancelLlmProviderBtn")?.addEventListener("click", () => document.getElementById("llmProviderModal").close());
+  document.getElementById("providerCatalogPickerForm")?.addEventListener("submit", (event) => llmProvidersAdmin.submitCatalogPicker(event));
+  document.getElementById("toggleProviderCatalogSelection")?.addEventListener("click", () => llmProvidersAdmin.toggleCatalogPickerSelection());
+  document.getElementById("closeProviderCatalogPickerModal")?.addEventListener("click", () => llmProvidersAdmin.closeCatalogPicker());
+  document.getElementById("cancelProviderCatalogPickerBtn")?.addEventListener("click", () => llmProvidersAdmin.closeCatalogPicker());
 });
 
 window.__LlmProviderConfigurationUI = { providerBrand, providerTypeLabel, syncProviderBaseUrl };

@@ -7,6 +7,14 @@ const source = await readFile(
   new URL("../../../frontend/console/configuration/mcp.js", import.meta.url),
   "utf8",
 );
+const template = await readFile(
+  new URL("../../../frontend/console/configuration-template.html", import.meta.url),
+  "utf8",
+);
+const styles = await readFile(
+  new URL("../../../frontend/console/console.css", import.meta.url),
+  "utf8",
+);
 
 function loadInspectionUi() {
   const window = {};
@@ -31,6 +39,18 @@ test("URL MCP 在提交前拒绝空地址", () => {
   assert.equal(ui.validateMcpConfig("url", { url: "   " }), "MCP URL 不能为空");
   assert.equal(ui.validateMcpConfig("url", { url: "http://example.test/mcp" }), null);
   assert.equal(ui.validateMcpConfig("builtin", {}), null);
+});
+
+test("MCP 编辑使用详情页式工作台并保留原配置字段", () => {
+  assert.match(template, /class="modal agent-editor-page mcp-editor-page" id="mcpModal"/);
+  assert.match(template, /id="closeMcpModal"[^>]*>[\s\S]*arrow-left[\s\S]*返回/);
+  assert.match(template, /class="mcp-editor-workbench"/);
+  assert.match(template, /基本信息[\s\S]*连接与请求上下文/);
+  ["mcpName", "mcpDescription", "mcpEnabled", "mcpTransport", "mcpUrl", "mcpHeaders", "mcpRequestContextDescription"]
+    .forEach((id) => assert.match(template, new RegExp(`id="${id}"`)));
+  assert.doesNotMatch(template, /id="cancelMcpBtn"/);
+  assert.match(styles, /dialog\.mcp-editor-page\.console-detail-dialog/);
+  assert.match(styles, /\.mcp-editor-workbench\s*\{[^}]*grid-template-columns:/);
 });
 
 test("检测状态展示能力摘要和完整悬停信息", () => {

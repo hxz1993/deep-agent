@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { parseSkillFrontmatter } from "../../../frontend/console/skill-frontmatter.js";
 
 const source = await readFile(
   new URL("../../../frontend/console/configuration/skills.js", import.meta.url),
@@ -16,6 +17,10 @@ const shell = await readFile(
 );
 const styles = await readFile(
   new URL("../../../frontend/console/configuration/configuration.css", import.meta.url),
+  "utf8",
+);
+const consoleStyles = await readFile(
+  new URL("../../../frontend/console/console.css", import.meta.url),
   "utf8",
 );
 
@@ -36,7 +41,7 @@ test("Skill 页面区分内置和上传包的可操作边界", () => {
   assert.match(source, /data-skill-more-trigger/);
   assert.match(source, /data-skill-more-menu role="menu" hidden/);
   assert.match(source, /data-skill-action="download"><i data-lucide="download"><\/i><span>导出<\/span>/);
-  assert.match(template, /id="exportAllSkillsBtn"/);
+  assert.match(template, /id="exportAllSkillsBtn"><i data-lucide="download"><\/i>导出全部/);
   assert.match(source, /"\/api\/v1\/skills\/export"/);
   assert.match(source, /重新加载/);
   assert.match(source, /\/skills\/\$\{encodeURIComponent\(skill\.code\)\}\/reload/);
@@ -56,11 +61,33 @@ test("Skill 上传使用 multipart 且资源按安全 API 读取", () => {
 
 test("Skill Markdown 资源复用对话渲染器，其他文本保持原文预览", () => {
   assert.match(source, /const isMarkdown = \/\\\.md\$\/i\.test\(path\)/);
-  assert.match(source, /window\.DeepAgentMarkdown\?\.renderBody\(page\.content\)/);
+  assert.match(source, /window\.DeepAgentMarkdown\?\.renderBody\(markdownDocument\?\.body \?\? page\.content\)/);
   assert.match(source, /window\.DeepAgentMarkdown\?\.renderDiagrams\(preview\)/);
   assert.match(source, /: `<pre>\$\{escapeHtml\(page\.content\)\}<\/pre>`/);
   assert.match(styles, /\.skill-preview-markdown\s*\{[\s\S]*font-size: 12px/);
   assert.match(styles, /\.skill-preview-markdown \.markdown-body/);
+});
+
+test("Skill Markdown frontmatter 独立展示为元数据卡且不混入正文", () => {
+  const parsed = parseSkillFrontmatter(`---\nname: deepagent-diagnostics\ndescription: Diagnose runtime problems.\n---\n# DeepAgent diagnostics\n\n正文`);
+  assert.equal(parsed.hasFrontmatter, true);
+  assert.deepEqual(parsed.entries, [
+    { key: "name", value: "deepagent-diagnostics" },
+    { key: "description", value: "Diagnose runtime problems." },
+  ]);
+  assert.equal(parsed.body, "# DeepAgent diagnostics\n\n正文");
+  assert.match(source, /skill-metadata-card/);
+  assert.match(source, /DeepAgentSkillFrontmatter\?\.parseSkillFrontmatter/);
+  assert.match(source, /renderBody\(markdownDocument\?\.body/);
+  assert.match(styles, /\.skill-metadata-card\s*\{/);
+  assert.match(styles, /\.skill-metadata-grid > div\s*\{[^}]*grid-template-columns:/);
+});
+
+test("Skill 页面固定在配置视口内并把溢出交给目录和预览区", () => {
+  assert.match(consoleStyles, /#configurationHost #panel-skills\.active\s*\{[^}]*height: 100%;[^}]*overflow: hidden;/);
+  assert.match(consoleStyles, /#configurationHost #panel-skills \.skill-detail-pane\s*\{[^}]*display: flex;[^}]*overflow: hidden;/);
+  assert.match(consoleStyles, /#configurationHost #panel-skills \.skill-detail-main\s*\{[^}]*overflow: auto;/);
+  assert.match(styles, /\.skill-preview-markdown\s*\{[^}]*overflow: auto;/);
 });
 
 test("同内容包在平台原文件丢失后会提示恢复而不是误报无变化", () => {

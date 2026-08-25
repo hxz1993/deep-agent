@@ -17,11 +17,23 @@ function normalizedModelCode(value) {
 }
 
 export function buildProviderCatalogCreatePlan({ provider, catalogModels, existingModels }) {
+  const { choices, skipped } = buildProviderCatalogChoices({
+    provider,
+    catalogModels,
+    existingModels,
+  });
+  return {
+    payloads: choices.filter((choice) => !choice.added).map((choice) => choice.payload),
+    skipped,
+  };
+}
+
+export function buildProviderCatalogChoices({ provider, catalogModels, existingModels }) {
   const existingCodes = new Set(
     (existingModels || []).map((model) => normalizedModelCode(model.model || model.name)),
   );
-  const seen = new Set(existingCodes);
-  const payloads = [];
+  const seen = new Set();
+  const choices = [];
   let skipped = 0;
 
   for (const model of catalogModels || []) {
@@ -32,22 +44,29 @@ export function buildProviderCatalogCreatePlan({ provider, catalogModels, existi
       continue;
     }
     seen.add(normalized);
-    payloads.push({
-      provider_id: provider.id,
-      name: modelCode,
-      description: null,
+    const added = existingCodes.has(normalized);
+    if (added) skipped += 1;
+    choices.push({
+      id: normalized,
       model: modelCode,
-      enabled: true,
-      input_modalities: Array.isArray(model.input_modalities) && model.input_modalities.length
-        ? model.input_modalities
-        : ["text"],
-      context_window_tokens: model.context_window_tokens,
-      max_output_tokens: model.max_output_tokens,
-      tags: Array.isArray(model.tags) ? model.tags : [],
+      added,
+      payload: {
+        provider_id: provider.id,
+        name: modelCode,
+        description: null,
+        model: modelCode,
+        enabled: true,
+        input_modalities: Array.isArray(model.input_modalities) && model.input_modalities.length
+          ? model.input_modalities
+          : ["text"],
+        context_window_tokens: model.context_window_tokens,
+        max_output_tokens: model.max_output_tokens,
+        tags: Array.isArray(model.tags) ? model.tags : [],
+      },
     });
   }
 
-  return { payloads, skipped };
+  return { choices, skipped };
 }
 
 export function providerCatalogSummary({ created, skipped, failed }) {

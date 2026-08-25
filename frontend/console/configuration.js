@@ -1,9 +1,13 @@
 let initialized = false;
 import "./model-options.js?v=20260825-1";
-import * as ProviderCatalog from "./provider-catalog.js?v=20260825-1";
+import * as ProviderCatalog from "./provider-catalog.js?v=20260825-2";
+import * as SkillFrontmatter from "./skill-frontmatter.js?v=20260825-1";
+import * as SchemaText from "./schema-editor.js?v=20260825-1";
 if (typeof window !== "undefined") window.DeepAgentProviderCatalog = ProviderCatalog;
+if (typeof window !== "undefined") window.DeepAgentSkillFrontmatter = SkillFrontmatter;
+if (typeof window !== "undefined") window.DeepAgentSchemaText = SchemaText;
 let loadingPromise = null;
-const CONFIGURATION_ASSET_VERSION = "20260825-1";
+const CONFIGURATION_ASSET_VERSION = "20260825-6";
 const CONFIGURATION_TABS = new Set([
   "agents",
   "llm-providers",
@@ -95,7 +99,6 @@ async function loadAdminScripts() {
     "./configuration/system-tools.js",
     "./configuration/skills.js",
     "./configuration/mcp.js",
-    "./configuration/ui-schema-editor.js",
     "./configuration/ui-tools.js",
   ];
   for (const script of scripts) await loadClassicScript(script);

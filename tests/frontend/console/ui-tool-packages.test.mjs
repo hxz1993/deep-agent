@@ -35,6 +35,7 @@ test("UI 工具页使用左侧工具包树和右侧单一工具表", () => {
   assert.match(source, /class="ui-tool-tree-count" title="工具数量"/);
   assert.match(source, /data-lucide="wrench"/);
   assert.doesNotMatch(source, /<span class="badge">\$\{escapeHtml\(String\(selected\.tool_count/);
+  assert.match(template, /class="ui-tool-selected-title">[\s\S]*id="selectedUiToolPackageMeta"[\s\S]*<\/div>[\s\S]*id="selectedUiToolPackageDescription"/);
 });
 
 test("UI 工具页使用与 Skill 一致的分离轻卡片层级", () => {
@@ -69,9 +70,35 @@ test("工具创建入口依赖当前选中的自定义工具包", () => {
 });
 
 test("自定义 UI 工具保存时必须提交所属工具包", () => {
-  assert.match(template, /id="uiToolPackageCode" required/);
-  assert.match(source, /const package_code = document\.getElementById\("uiToolPackageCode"\)\.value/);
+  assert.match(template, /type="hidden" id="uiToolPackageCode"/);
+  assert.doesNotMatch(template, /<select id="uiToolPackageCode"/);
+  assert.match(source, /editingToolPackageCode/);
+  assert.match(source, /item\.code === package_code && item\.source === "manual"/);
+  assert.match(source, /UI 工具必须归属于创建它的自定义工具包/);
   assert.match(source, /JSON\.stringify\(\{[\s\S]*?package_code/);
+});
+
+test("UI 工具直接编辑 JSON Schema 并在保存前校验", () => {
+  assert.match(template, /id="uiToolParamsEditor"[^>]*class="mono-textarea schema-json-textarea"/);
+  assert.match(template, /id="uiToolResultEditor"[^>]*class="mono-textarea schema-json-textarea"/);
+  assert.match(template, /参数顶层类型必须是 object/);
+  assert.doesNotMatch(template, /schema-field-header|添加字段/);
+  assert.match(source, /DeepAgentSchemaText\?\.parseSchemaText/);
+  assert.match(source, /requireObject && schema\.type !== "object"/);
+  assert.match(source, /parameters_json_schema = parseUiToolSchema/);
+  assert.match(source, /result_schema = parseUiToolSchema/);
+  assert.doesNotMatch(source, /uiSchemaEditor\./);
+  assert.match(styles, /\.schema-json-textarea\s*\{[^}]*min-height: 180px;/);
+});
+
+test("UI 工具基础信息左右布局且三类 JSON 并排编辑", () => {
+  assert.match(template, /class="ui-tool-basic-grid"/);
+  assert.match(template, /Widget 是前端渲染器标识/);
+  assert.match(template, /class="ui-tool-json-grid"/);
+  assert.equal((template.match(/class="field field-grow ui-tool-json-field"/g) || []).length, 3);
+  assert.match(template, /Metadata（选填）[\s\S]*schema-json-format">JSON</);
+  assert.match(styles, /\.ui-tool-basic-grid\s*\{[^}]*grid-template-columns: repeat\(2,/);
+  assert.match(styles, /\.ui-tool-json-grid\s*\{[^}]*grid-template-columns: repeat\(3,/);
 });
 
 test("Agent 能力页只渲染工具包级开关", async () => {

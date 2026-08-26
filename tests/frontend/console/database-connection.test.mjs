@@ -70,15 +70,17 @@ test("数据库连接页是只读安全摘要", () => {
     credentials_hidden: true,
   });
   assert.match(html, /MySQL/);
-  assert.match(html, /V2/);
+  assert.equal(loadUi().schemaBadgeText({ schema_version: "002" }), "V2");
   assert.match(html, /test-db/);
   assert.match(html, /deep_agent/);
   assert.match(html, /已隐藏/);
-  assert.match(html, /database-connection-field/);
+  assert.match(html, /database-connection-facts/);
   assert.match(html, /database-safe-badge/);
+  assert.doesNotMatch(html, /当前连接|database-connection-note|数据库结构/);
   assert.doesNotMatch(html, /input|textarea|保存/);
   assert.match(styles, /\.database-connection-card\s*\{[^}]*border-radius: 14px;[^}]*background: var\(--console-surface/);
-  assert.match(styles, /\.database-connection-grid\s*\{[^}]*repeat\(3, minmax\(0, 1fr\)\)/);
+  assert.match(styles, /\.database-connection-facts\s*\{[^}]*display: flex;/);
+  assert.match(templateHtml, /id="databaseSchemaBadge"/);
 });
 
 test("数据库连接渲染会转义服务端字段", () => {

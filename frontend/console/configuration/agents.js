@@ -148,7 +148,6 @@ const agentsAdmin = {
         <header class="agent-card-head">
           <span class="agent-card-icon tone-${tone}"><i data-lucide="bot"></i></span>
           <div><strong>${escapeHtml(agent.name)}</strong><span>${escapeHtml(agent.model?.name || "未配置模型")}</span></div>
-          <i class="agent-card-arrow" data-lucide="arrow-up-right"></i>
         </header>
         <div class="agent-card-body">
           <div class="agent-card-fact"><span>能力</span><strong>${escapeHtml(capabilities)}</strong></div>

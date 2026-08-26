@@ -133,6 +133,8 @@ class SessionListApiTests(unittest.TestCase):
         self.assertEqual(payload["total"], 1)
         self.assertEqual(payload["items"][0]["session_id"], "with-messages")
         self.assertEqual(payload["items"][0]["message_count"], 1)
+        self.assertEqual(payload["items"][0]["turn_count"], 1)
+        self.assertEqual(payload["items"][0]["attachment_count"], 0)
 
     def test_list_sessions_requires_user_header(self) -> None:
         response = self.client.get("/api/v1/sessions", headers={"user": ""})
@@ -188,6 +190,8 @@ class SummaryToSessionInfoTests(unittest.TestCase):
         self.assertEqual(info.session_id, "sess-1")
         self.assertEqual(info.agent_name, "Demo")
         self.assertEqual(info.message_count, 3)
+        self.assertEqual(info.turn_count, 0)
+        self.assertEqual(info.attachment_count, 0)
 
 
 if __name__ == "__main__":

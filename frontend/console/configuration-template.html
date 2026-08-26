@@ -52,10 +52,13 @@
     <section class="panel database-connection-panel" id="panel-database-connection">
       <div class="panel-toolbar">
         <div>
-          <h2>数据库连接</h2>
+          <div class="database-panel-title">
+            <h2>数据库连接</h2>
+            <span class="database-schema-badge" id="databaseSchemaBadge">V—</span>
+          </div>
           <p class="panel-subtitle">查看当前 DeepAgent 进程实际使用的数据库；用户名、密码、连接参数和本地完整路径不会展示。</p>
         </div>
-        <button class="btn" type="button" id="refreshDatabaseConnectionBtn">重新加载</button>
+        <button class="btn" type="button" id="refreshDatabaseConnectionBtn"><i data-lucide="refresh-cw"></i>重新加载</button>
       </div>
       <div class="database-connection-content" id="databaseConnectionContent" aria-live="polite">
         <div class="global-settings-state">正在加载数据库连接…</div>

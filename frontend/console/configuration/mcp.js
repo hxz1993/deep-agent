@@ -213,8 +213,8 @@ const mcpAdmin = {
           <td>${escapeHtml(formatDate(s.updated_at))}</td>
           <td class="mcp-actions-cell">
             <div class="row-actions mcp-row-actions">
-              ${s.transport === "url" ? `<button type="button" data-inspect-mcp="${escapeHtml(s.name)}">刷新</button>` : ""}
-              ${s.transport === "stdio" ? "" : `<button type="button" data-edit="${escapeHtml(s.name)}">编辑</button>`}
+              ${s.transport === "url" ? `<button class="mcp-direct-action" type="button" data-inspect-mcp="${escapeHtml(s.name)}"><i data-lucide="refresh-cw"></i><span>刷新</span></button>` : ""}
+              ${s.transport === "stdio" ? "" : `<button class="mcp-direct-action" type="button" data-edit="${escapeHtml(s.name)}"><i data-lucide="pencil-line"></i><span>编辑</span></button>`}
               ${canRenameMcp(s.transport) || canDeleteMcp(s.transport) ? `<div class="skill-more-actions mcp-more-actions">
                 <button class="skill-more-trigger" type="button" data-mcp-more-trigger aria-label="更多 MCP 操作" title="更多操作" aria-haspopup="menu" aria-expanded="false"><i data-lucide="ellipsis-vertical"></i></button>
                 <div class="skill-more-menu" data-mcp-more-menu role="menu" hidden>

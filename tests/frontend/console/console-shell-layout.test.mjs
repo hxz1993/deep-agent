@@ -65,7 +65,7 @@ test("Agent 提供卡片和列表双视图并复用同一真实数据源", () =>
 });
 
 test("Agent 容器圆角收口且工具包卡片改为单列两行摘要", () => {
-  assert.match(styles, /#configurationHost #panel-agents\s*\{[^}]*overflow: clip;[^}]*border-radius: var\(--config-radius\) !important;/);
+  assert.match(styles, /#configurationHost #panel-agents\s*\{[^}]*overflow: clip;[^}]*border-radius: var\(--console-card-radius\) !important;/);
   assert.match(styles, /\.agent-editor-pane \.cap-grid\s*\{[^}]*grid-template-columns: minmax\(0, 1fr\);/);
   assert.match(styles, /\.agent-editor-pane\s*\{[^}]*display: flex;[^}]*overflow: hidden;/);
   assert.match(styles, /\.agent-editor-pane \.cap-panels\s*\{[^}]*flex: 1 1 auto;[^}]*max-height: none;[^}]*overflow: auto;/);

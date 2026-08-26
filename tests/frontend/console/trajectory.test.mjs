@@ -65,8 +65,30 @@ const history = {
       updated_at: "2026-08-23T10:00:00Z",
     },
     {
-      event_id: "evt-assistant-tool",
+      event_id: "evt-title-fallback",
       sequence: 2,
+      event_type: "session/title",
+      status: "running",
+      turn_id: "turn-1",
+      run_id: "run-1",
+      payload: { title: "查询收入", source: "fallback", source_event_id: "evt-user" },
+      created_at: "2026-08-23T10:00:00Z",
+      updated_at: "2026-08-23T10:00:00Z",
+    },
+    {
+      event_id: "evt-title-model",
+      sequence: 3,
+      event_type: "session/title",
+      status: "completed",
+      turn_id: "turn-1",
+      run_id: "run-1",
+      payload: { title: "收入查询分析", source: "model", source_event_id: "evt-user", model_name: "title-model" },
+      created_at: "2026-08-23T10:00:00Z",
+      updated_at: "2026-08-23T10:00:01Z",
+    },
+    {
+      event_id: "evt-assistant-tool",
+      sequence: 4,
       event_type: "assistant/message",
       turn_id: "turn-1",
       run_id: "run-1",
@@ -89,7 +111,7 @@ const history = {
     },
     {
       event_id: "evt-result",
-      sequence: 3,
+      sequence: 5,
       event_type: "tool/results",
       turn_id: "turn-1",
       run_id: "run-1",
@@ -99,7 +121,7 @@ const history = {
     },
     {
       event_id: "evt-final",
-      sequence: 4,
+      sequence: 6,
       event_type: "assistant/message",
       turn_id: "turn-1",
       run_id: "run-1",
@@ -109,7 +131,7 @@ const history = {
     },
     {
       event_id: "evt-compaction",
-      sequence: 5,
+      sequence: 7,
       event_type: "compaction",
       status: "completed",
       turn_id: "turn-1",
@@ -127,6 +149,7 @@ test("完整 Message 投影合并思考正文与工具调用结果", () => {
   const assistant = events.find((event) => event.id === "evt-final");
   const thinking = events.find((event) => event.id === "evt-assistant-tool");
   const input = events.find((event) => event.kind === "input");
+  const title = events.find((event) => event.kind === "title");
 
   assert.equal(call.status, "completed");
   assert.deepEqual(call.result.result, { rows: 2 });
@@ -140,9 +163,13 @@ test("完整 Message 投影合并思考正文与工具调用结果", () => {
   assert.equal(input.payload.attachments[0].name, "input.xlsx");
   assert.equal(input.summary, "查询收入");
   assert.equal(input.run_id, "run-1");
-  assert.deepEqual(events.map((event) => event.id), ["evt-user", "evt-assistant-tool", "tool:call-1", "evt-final", "evt-compaction"]);
+  assert.equal(title.id, "evt-title-fallback");
+  assert.equal(title.summary, "收入查询分析");
+  assert.equal(title.payload.source, "model");
+  assert.deepEqual(title.native.event_ids, ["evt-title-fallback", "evt-title-model"]);
+  assert.deepEqual(events.map((event) => event.id), ["evt-user", "evt-title-fallback", "evt-assistant-tool", "tool:call-1", "evt-final", "evt-compaction"]);
   assert.equal(events.at(-1).kind, "compaction");
-  assert.equal(events.at(-1).sequence, 5);
+  assert.equal(events.at(-1).sequence, 7);
   assert.equal(events.at(-1).duration_ms, 4321);
   assert.equal(call.payload.args.cube, "Sales");
 });
@@ -201,7 +228,9 @@ test("工作台以独立页签接入轨迹且默认对话链路不变", () => {
   assert.match(trajectorySource, /renderFact\("版本", reference\.schema_version/);
   assert.doesNotMatch(trajectorySource, /Object\.entries\(reference\.payload/);
   assert.match(trajectorySource, /TOOL_KINDS\.has\(event\.kind\) && hasMeaningfulValue\(event\.result\)/);
-  assert.match(trajectorySource, /下载本地文件/);
+  assert.doesNotMatch(trajectorySource, /下载本地文件/);
+  assert.match(trajectorySource, /trajectory-summary-link local-file-download/);
+  assert.doesNotMatch(trajectorySource, /icon\("list-checks"\)|icon\("archive-restore"\)|icon\("message-square-more"\)/);
   assert.match(trajectorySource, /fileId\.startsWith\("local_"\)/);
   assert.match(chatSource, /renderLocalFileDownload\(data\.result\)/);
   assert.match(workspaceCss, /\.local-file-download\s*\{/);

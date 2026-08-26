@@ -80,7 +80,8 @@ test("会话详情使用会话、当前回合和上下文引用三页签", () =>
   assert.match(workspaceSource, /inspector-session-group[\s\S]*<strong>请求 Header<\/strong>/);
   assert.match(workspaceSource, /inspector-tab-status[\s\S]*\$\{statusText\}/);
   assert.match(workspaceSource, /inspectorFactHtml\("Agent", agentIdentity/);
-  assert.match(workspaceSource, /inspectorFactHtml\("消息与附件", sessionCounts/);
+  assert.match(workspaceSource, /inspectorFactHtml\("会话统计", sessionCounts/);
+  assert.match(workspaceSource, /title="回合数"[\s\S]*title="消息事件数"[\s\S]*title="附件数"/);
   assert.match(workspaceSource, /inspectorFactHtml\("App \/ Space", requestScope/);
   assert.match(workspaceSource, /inspectorFact\("User ID"[\s\S]*identity\?\.user/);
   assert.match(workspaceSource, /<strong>上下文预算<\/strong>/);
@@ -105,7 +106,7 @@ test("会话详情使用会话、当前回合和上下文引用三页签", () =>
 
 test("会话详情保留既有属性并用横向页签、键值列表与复合轨道展示", () => {
   for (const label of [
-    "会话 ID", "消息与附件", "App / Space", "Language", "User ID",
+    "会话 ID", "会话统计", "App / Space", "Language", "User ID",
     "Conversation ID", "Run ID", "请求", "本次使用", "预计剩余",
     "缓存读取", "缓存写入", "工具调用", "Tool Search", "耗时", "压缩",
     "压缩前", "压缩后", "压缩事件", "来源截止", "摘要模型", "更新时间", "估算方式",
@@ -232,21 +233,17 @@ test("空会话不再展示预设开场白", () => {
   assert.doesNotMatch(chatSource, /querySelectorAll\("\.suggestion"\)/);
 });
 
-test("输入框提供线性附件、主动压缩按钮和后端预算百分比", () => {
+test("输入框提供线性附件和后端预算百分比且不再暴露手动压缩", () => {
   assert.match(template, /id="attachBtn"[\s\S]*?data-lucide="paperclip"/);
-  assert.match(template, /id="compactContextBtn"[\s\S]*?data-lucide="minimize-2"/);
+  assert.doesNotMatch(template, /id="compactContextBtn"|data-lucide="minimize-2"/);
   assert.match(template, /id="contextBudgetBadge"[\s\S]*上下文 —/);
   assert.doesNotMatch(template, /📎/);
   assert.doesNotMatch(chatSource, /📎/);
   assert.match(chatSource, /estimated_history_tokens/);
   assert.match(chatSource, /usable_request_tokens/);
-  assert.match(chatSource, /manual_compaction_available/);
-  assert.match(chatSource, /\/compact/);
-  assert.match(chatSource, /context_compaction_result/);
-  assert.doesNotMatch(chatSource, /result\.context_status/);
-  assert.match(chatSource, /status === "noop"[\s\S]*?await loadContextStatus\(session\)/);
-  assert.match(chatSource, /本次压缩未产生明显效果/);
-  assert.match(chatSource, /可再次压缩，重复压缩可能损失部分细节/);
+  assert.doesNotMatch(chatSource, /manual_compaction_available|compactCurrentContext|context_compaction_result/);
+  assert.match(chatSource, /context_compaction_progress/);
+  assert.match(chatSource, /finalizeAutomaticContextCompaction/);
   assert.doesNotMatch(chatSource, /already_compacted|insufficient_new_history/);
   assert.doesNotMatch(chatSource, /context_compaction_target_ratio|safety_margin\s*=|predict.*output/i);
 });
@@ -299,8 +296,17 @@ test("历史与轨迹统一读取 Event API 且普通聊天隐藏完成压缩标
 test("会话标题由持久化 Event 实时更新且不再轮询或自动重命名", () => {
   assert.match(chatSource, /persistedEvent\?\.event_type === "session\/title"/);
   assert.match(chatSource, /applySessionTitle\([\s\S]*persistedEvent\.payload\?\.title/);
+  assert.match(chatSource, /persistedEvent\.payload\?\.title,[\s\S]*trajectory\?\.ingest/);
   assert.doesNotMatch(chatSource, /TITLE_POLL|pollSessionTitle|scheduleTitleRefresh|autoRenameSession/);
   assert.doesNotMatch(chatSource, /auto-rename-btn|自动重命名|JSON\.stringify\(\{ auto: true \}\)/);
+});
+
+test("会话列表保留活动时间并展示三项统计", () => {
+  assert.match(chatSource, /class="session-activity">\$\{escapeHtml\(activity\)\}/);
+  assert.match(chatSource, /title="回合数"[^\n]*messages-square/);
+  assert.match(chatSource, /title="消息事件数"[^\n]*repeat-2/);
+  assert.match(chatSource, /title="附件数"[^\n]*paperclip/);
+  assert.match(consoleCss, /\.session-item:hover\s*\{\s*background:\s*var\(--accent-soft\)/);
 });
 
 test("0803 不带入 0802 的对话消息与滚动重构", () => {
@@ -308,7 +314,7 @@ test("0803 不带入 0802 的对话消息与滚动重构", () => {
   assert.doesNotMatch(chatSource, /tool-block open running/);
 });
 
-test("自动和主动压缩复用独立过程条并由 Event 更新轨迹", () => {
+test("自动压缩复用独立过程条并由 Event 更新轨迹", () => {
   assert.match(chatSource, /function createContextCompactionRow\(beforeNode = null\)/);
   assert.match(chatSource, /function setContextCompactionRow\(/);
   assert.match(chatSource, /case "context_compaction_progress":\s*showAutomaticContextCompaction\(data, assistant\.row\)/);
@@ -321,25 +327,22 @@ test("自动和主动压缩复用独立过程条并由 Event 更新轨迹", () =
   assert.doesNotMatch(chatSource, /className = "context-compaction-status"/);
 });
 
-test("搜索框与普通新建之间提供独立的测试会话入口", () => {
-  assert.match(workspaceSource, /testChatButton\.id = "contextTestChatBtn"/);
-  assert.match(workspaceSource, /data-lucide="flask-conical"/);
+test("搜索框旁只保留带文字的普通新建入口", () => {
+  assert.doesNotMatch(workspaceSource, /contextTestChatBtn|flask-conical|testChatButton/);
+  assert.match(workspaceSource, /newChatButton\.innerHTML = '<i data-lucide="square-pen"><\/i><span>新建<\/span>'/);
   assert.match(
     workspaceSource,
-    /toolbar\.append\(search, testChatButton, newChatButton\)/,
+    /toolbar\.append\(search, newChatButton\)/,
   );
   assert.match(
     consoleCss,
-    /grid-template-columns:\s*minmax\(0,\s*1fr\)\s+31px\s+31px/,
+    /grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto/,
   );
 });
 
-test("测试会话弹窗选择场景后创建、打开并预填推荐问题", () => {
-  assert.match(workspaceSource, /dialog\.id = "contextTestDialog"/);
-  assert.match(workspaceSource, /name="contextTestScenario"/);
-  assert.match(workspaceSource, /api\/v1\/context-test-scenarios\/\$\{encodeURIComponent\(selected\.value\)\}/);
-  assert.match(workspaceSource, /await api\.openSession\(/);
-  assert.match(workspaceSource, /api\.setComposerText\(payload\.recommended_prompt\)/);
+test("Console 完整移除压缩测试会话生成器", () => {
+  assert.doesNotMatch(workspaceSource, /context-test|contextTest|ContextTest|context-test-scenarios/);
+  assert.doesNotMatch(consoleCss, /context-test|session-test-action/);
   assert.match(chatSource, /async openSession\(session\)/);
   assert.match(chatSource, /setComposerText\(text\)/);
 });

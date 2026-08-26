@@ -598,10 +598,27 @@ html, body {
   max-width: 980px;
 }
 
+.database-panel-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.database-schema-badge {
+  display: inline-flex;
+  min-height: 22px;
+  align-items: center;
+  padding: 0 8px;
+  border-radius: 999px;
+  color: var(--accent);
+  background: var(--accent-soft);
+  font: 600 12px/1 var(--mono);
+}
+
 .database-connection-card {
   display: grid;
-  gap: 14px;
-  padding: 18px;
+  gap: 12px;
+  padding: 16px;
   border: 1px solid var(--console-card-border, var(--border));
   border-radius: 14px;
   background: var(--console-surface, var(--bg));
@@ -612,7 +629,7 @@ html, body {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 0 0 14px;
+  padding: 0 0 12px;
   border-bottom: 1px solid var(--console-card-border, var(--border));
 }
 
@@ -635,51 +652,35 @@ html, body {
 
 .database-connection-badge strong { font-size: 14px; }
 .database-connection-badge span { color: var(--text-faint); font-size: 12px; }
-.database-card-eyebrow { font-size: 12px !important; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
 .database-safe-badge { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; padding: 5px 8px; border-radius: 999px; color: var(--success) !important; background: color-mix(in srgb, var(--success) 9%, transparent); }
 .database-safe-badge svg { width: 13px; height: 13px; }
 
-.database-connection-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 9px;
+.database-connection-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 22px;
   margin: 0;
 }
 
-.database-connection-field {
+.database-connection-facts > div {
   min-width: 0;
-  padding: 11px 12px;
-  border: 1px solid var(--console-card-border, var(--border));
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--bg-soft) 68%, var(--console-surface, var(--bg)));
+  display: inline-flex;
+  align-items: baseline;
+  gap: 7px;
 }
-.database-connection-field.is-wide { grid-column: span 2; }
 
-.database-connection-grid dt {
-  margin: 0 0 5px;
+.database-connection-facts dt {
+  margin: 0;
   color: var(--text-faint);
   font-size: 12px;
 }
 
-.database-connection-grid dd {
+.database-connection-facts dd {
   margin: 0;
   overflow-wrap: anywhere;
   color: var(--text-dim);
   font: 12px/1.5 var(--mono);
 }
-
-.database-connection-note {
-  display: flex;
-  align-items: flex-start;
-  gap: 7px;
-  margin: 0;
-  padding: 11px 12px;
-  border-radius: 9px;
-  color: var(--text-faint);
-  background: color-mix(in srgb, var(--accent) 4%, var(--bg-soft));
-  font-size: 12px;
-}
-.database-connection-note svg { width: 13px; height: 13px; flex: 0 0 auto; margin-top: 1px; }
 
 .text-dim {
   color: var(--text-dim);
@@ -817,8 +818,33 @@ html, body {
 }
 
 .mcp-row-actions {
+  align-items: center;
   justify-content: flex-end;
   white-space: nowrap;
+}
+
+.mcp-direct-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.mcp-direct-action svg { width: 14px; height: 14px; }
+
+#configurationHost .console-list-a .mcp-more-actions .skill-more-menu button {
+  width: 100%;
+  height: 34px;
+  min-height: 34px;
+  justify-content: flex-start;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  text-align: left;
+}
+
+#configurationHost .console-list-a .mcp-more-actions .skill-more-menu button:hover {
+  background: var(--console-hover, var(--bg-muted));
 }
 
 .row-actions {
@@ -1850,6 +1876,11 @@ dialog.console-action-dialog::backdrop {
   height: 15px;
 }
 
+.skill-detail-actions .skill-icon-action {
+  width: 28px;
+  padding: 0;
+}
+
 .skill-more-actions { position: relative; }
 
 .skill-more-trigger {
@@ -2218,13 +2249,7 @@ dialog.console-action-dialog::backdrop {
   .skill-detail-pane { max-height: none; }
 }
 
-@media (max-width: 760px) {
-  .database-connection-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-}
-
 @media (max-width: 560px) {
-  .database-connection-grid { grid-template-columns: minmax(0, 1fr); }
-  .database-connection-field.is-wide { grid-column: auto; }
   .database-safe-badge { display: none; }
 }
 

@@ -137,6 +137,8 @@ class ToolPackageDescription(BaseModel):
 class SessionInfo(BaseModel):
     session_id: str
     message_count: int
+    turn_count: int = Field(default=0, description="Distinct conversation turns in this session.")
+    attachment_count: int = Field(default=0, description="Attachment references in user messages.")
     agent_id: str | None = Field(default=None, description="Agent id used for this session.")
     agent_name: str | None = Field(default=None, description="Agent display name (if known).")
     user_prompt: str | None = Field(default=None, description="First user message in the session.")

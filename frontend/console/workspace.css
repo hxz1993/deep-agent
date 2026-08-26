@@ -703,8 +703,7 @@ html, body {
 .trajectory-summary-markdown pre { min-height: 0; }
 .trajectory-summary-empty { margin: 0; color: var(--text-faint); font-size: 12px; line-height: 1.6; }
 .trajectory-summary-lead { display: flex; align-items: flex-start; gap: 8px; margin: 0; color: var(--text); font-size: 13px; line-height: 1.6; }
-.trajectory-summary-lead svg { width: 16px; height: 16px; margin-top: 2px; color: var(--accent); }
-.trajectory-summary-copy { margin: 10px 0 0 24px; color: var(--text-dim); font-size: 12px; line-height: 1.65; }
+.trajectory-summary-copy { margin: 8px 0 0; color: var(--text-dim); font-size: 12px; line-height: 1.65; }
 .trajectory-context-standard { margin-top: 14px; }
 .trajectory-thinking { border-top: 1px solid var(--border-soft); }
 .trajectory-thinking > summary { min-height: 38px; display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--text-dim); cursor: pointer; list-style: none; }
@@ -965,31 +964,21 @@ html, body {
 }
 .tool-result-artifact svg { width: 14px; height: 14px; flex: none; }
 .local-file-download {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 7px;
-  margin-top: 8px;
-  padding: 7px 9px;
-  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border));
-  border-radius: 7px;
-  color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 6%, var(--surface));
+  margin-top: 6px;
+  padding: 4px 0;
+  border: 0;
+  color: var(--text-dim);
+  background: transparent;
   font-size: 12px;
   font-weight: 600;
   text-decoration: none;
 }
-.local-file-download:hover { border-color: var(--accent); }
+.local-file-download:hover { color: var(--accent); }
 .local-file-download svg { width: 14px; height: 14px; flex: none; }
-.local-file-download small {
-  min-width: 0;
-  margin-left: auto;
-  overflow: hidden;
-  color: var(--text-faint);
-  font-size: 12px;
-  font-weight: 400;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
+.trajectory-summary-link.local-file-download { display: grid; margin-top: 0; }
 
 /* Assistant 直接排版；过程统一收进一层大折叠。 */
 .assistant-process {
@@ -1509,7 +1498,6 @@ html, body {
 .composer-icon-btn:hover:not(:disabled) { background: var(--bg-hover); color: var(--text); border-color: var(--border-soft); }
 .composer-icon-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .composer-icon-btn:disabled { opacity: .38; cursor: not-allowed; }
-.compact-context-btn.compacting svg { animation: context-compact-spin 1s linear infinite; }
 @keyframes context-compact-spin { to { transform: rotate(360deg); } }
 .context-budget-badge {
   flex-shrink: 0;

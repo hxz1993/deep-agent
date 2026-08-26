@@ -41,6 +41,8 @@ def _summary_to_session_info(row: SessionSummaryRow) -> SessionInfo:
     return SessionInfo(
         session_id=row.session_id,
         message_count=row.message_count,
+        turn_count=row.turn_count,
+        attachment_count=row.attachment_count,
         agent_id=row.agent_id,
         agent_name=row.agent_name,
         user_prompt=row.user_prompt,

@@ -132,8 +132,6 @@ const state = {
   contextStatus: null,
   lastRunUsage: null,
   lastRunMetrics: null,
-  manualCompacting: false,
-  manualCompactionController: null,
   automaticCompactionRow: null,
   automaticCompactionTimer: null,
   pendingAutomaticCompaction: null,
@@ -190,7 +188,6 @@ const el = {
   newChatMenu: $("newChatMenu"),
   newChatBtnWide: $("newChatBtnWide"),
   attachBtn: $("attachBtn"),
-  compactContextBtn: $("compactContextBtn"),
   contextBudgetBadge: $("contextBudgetBadge"),
   fileInput: $("fileInput"),
   attachmentPreview: $("attachmentPreview"),
@@ -274,11 +271,6 @@ function formatSessionActivity(session) {
   return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日`;
 }
 
-function formatSessionMessageCount(session) {
-  const count = Number(session.messageCount);
-  return Number.isFinite(count) && count > 0 ? `${count} 条消息` : "暂无消息";
-}
-
 function sortSessions() {
   state.sessions.sort((a, b) => sessionSortTime(b) - sessionSortTime(a));
 }
@@ -331,7 +323,7 @@ function showComposerPlanPlaceholder(toolCallId) {
 
 function renderComposerPlan(snapshot, { terminalStatus = null } = {}) {
   const presentation = planPanelState(snapshot, terminalStatus);
-  if (!presentation) {
+  if (!presentation || presentation.plan.completed === presentation.plan.total) {
     clearComposerPlan();
     return;
   }
@@ -371,6 +363,9 @@ function removePlanningCall(toolCallId) {
 
 function currentSessionSnapshot() {
   if (!state.sessionId) return null;
+  const persisted = state.sessions.find(
+    (session) => session.id === state.sessionId && (session.agentId || "") === (state.agentId || ""),
+  );
   const title = (el.chatTitle.textContent || "").trim();
   const displayTitle =
     title && title !== "新对话" && title !== "对话"
@@ -384,6 +379,8 @@ function currentSessionSnapshot() {
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     messageCount: state.modelMessageCount,
+    turnCount: persisted?.turnCount || 0,
+    attachmentCount: persisted?.attachmentCount || 0,
   });
 }
 
@@ -399,6 +396,8 @@ function mergeSessionsFromBackend(rows) {
       createdAt: row.created_at || null,
       updatedAt: row.updated_at || row.created_at || null,
       messageCount: Number(row.message_count) || 0,
+      turnCount: Number(row.turn_count) || 0,
+      attachmentCount: Number(row.attachment_count) || 0,
     });
   });
 
@@ -496,7 +495,6 @@ function init() {
   });
   el.input.addEventListener("input", autoGrow);
   el.attachBtn?.addEventListener("click", () => el.fileInput?.click());
-  el.compactContextBtn?.addEventListener("click", compactCurrentContext);
   el.fileInput?.addEventListener("change", onFilesSelected);
   el.input?.addEventListener("paste", onPaste);
 
@@ -664,7 +662,6 @@ function newChat(agentId) {
     showConsoleToast("请先停止当前生成，再新建会话", true);
     return;
   }
-  state.manualCompactionController?.abort();
   if (id) {
     state.agentId = id;
     localStorage.setItem("da_console_agent_id_v1", state.agentId);
@@ -756,7 +753,8 @@ function renderSessions() {
     li.className =
       "session-item" +
       (s.id === state.sessionId && (s.agentId || "") === (state.agentId || "") ? " active" : "");
-    li.innerHTML = `<span class="sid" title="${escapeHtml(s.title)}"><span class="session-title">${escapeHtml(s.title)}</span><span class="session-meta"><span>${escapeHtml(formatSessionActivity(s))}</span><span class="session-meta-dot" aria-hidden="true"></span><span>${escapeHtml(formatSessionMessageCount(s))}</span></span></span><span class="session-actions"><span class="rename-btn" title="重命名" aria-label="重命名">${lucideIcon("pencil")}</span><span class="del" title="删除" aria-label="删除">${lucideIcon("trash-2")}</span></span>`;
+    const activity = formatSessionActivity(s);
+    li.innerHTML = `<span class="sid" title="${escapeHtml(`${s.title} · ${activity}`)}"><span class="session-title">${escapeHtml(s.title)}</span><span class="session-meta"><span class="session-activity">${escapeHtml(activity)}</span><span class="session-stat-group"><span title="回合数">${lucideIcon("messages-square")}${escapeHtml(String(s.turnCount || 0))}</span><span title="消息事件数">${lucideIcon("repeat-2")}${escapeHtml(String(s.messageCount || 0))}</span><span title="附件数">${lucideIcon("paperclip")}${escapeHtml(String(s.attachmentCount || 0))}</span></span></span></span><span class="session-actions"><span class="rename-btn" title="重命名" aria-label="重命名">${lucideIcon("pencil")}</span><span class="del" title="删除" aria-label="删除">${lucideIcon("trash-2")}</span></span>`;
     li.querySelector(".sid").addEventListener("click", (e) => {
       if (e.target.closest(".session-title-input")) return;
       switchSession(s);
@@ -779,7 +777,6 @@ async function switchSession(s) {
     showConsoleToast("请先停止当前生成，再切换会话", true);
     return;
   }
-  state.manualCompactionController?.abort();
   const session = normalizeSession(s);
   state.sessionId = session.id;
   state.lastRunUsage = null;
@@ -877,15 +874,6 @@ async function loadContextStatus(session) {
   updateComposerContextControls();
 }
 
-const MANUAL_COMPACTION_REASON_LABELS = {
-  empty_history: "当前会话没有可压缩内容",
-  insufficient_history: "历史较短，本次未产生压缩结果",
-  no_reduction: "本次压缩未产生明显效果",
-  context_window_unknown: "当前模型未配置上下文窗口",
-  pending_deferred: "请先完成或取消当前工具交互",
-  session_changed: "压缩期间会话已变化，请重试",
-};
-
 function compactTokenLabel(value) {
   const n = Number(value);
   if (!Number.isFinite(n)) return "—";
@@ -922,28 +910,7 @@ function updateComposerContextControls() {
         ].join("\n");
   }
 
-  const unavailableReason = !state.sessionId
-    ? "尚未创建会话"
-    : MANUAL_COMPACTION_REASON_LABELS[status.manual_compaction_reason]
-      || "当前上下文无需压缩";
-  const busy = state.streaming || state.awaitingHitl || state.manualCompacting;
-  const canCompact = Boolean(
-    state.sessionId && status.manual_compaction_available && !busy,
-  );
-  if (el.compactContextBtn) {
-    el.compactContextBtn.disabled = !canCompact;
-    el.compactContextBtn.classList.toggle("compacting", state.manualCompacting);
-    el.compactContextBtn.title = state.manualCompacting
-      ? "正在压缩上下文"
-      : canCompact
-        ? status.compaction_event_id
-          ? "可再次压缩，重复压缩可能损失部分细节"
-          : "压缩上下文"
-        : busy
-          ? "当前会话正在运行"
-          : unavailableReason;
-  }
-  if (el.attachBtn) el.attachBtn.disabled = busy;
+  if (el.attachBtn) el.attachBtn.disabled = state.streaming || state.awaitingHitl;
 }
 
 function createContextCompactionRow(beforeNode = null) {
@@ -960,21 +927,11 @@ function createContextCompactionRow(beforeNode = null) {
   return row;
 }
 
-function setContextCompactionRow(row, message, { failed = false, retry = false, active = true } = {}) {
+function setContextCompactionRow(row, message, { failed = false, active = true } = {}) {
   if (!row) return;
   row.classList.toggle("failed", failed);
   row.innerHTML = `${active && !failed ? '<span class="spinner" aria-hidden="true"></span>' : ""}<span class="status-text"></span>`;
   row.querySelector(".status-text").textContent = message;
-  if (retry) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.textContent = "重试";
-    button.addEventListener("click", () => {
-      row.remove();
-      compactCurrentContext();
-    }, { once: true });
-    row.appendChild(button);
-  }
   scrollToBottom();
 }
 
@@ -1098,75 +1055,6 @@ function failAutomaticContextCompaction(message) {
 
 function showConsoleToast(message, isError = false) {
   if (window.DeepAgentConsole?.toast) window.DeepAgentConsole.toast(message, isError);
-}
-
-async function compactCurrentContext() {
-  if (!state.sessionId || state.manualCompacting || state.streaming || state.awaitingHitl) return;
-  if (!state.contextStatus?.manual_compaction_available) return;
-  const session = { id: state.sessionId, agentId: state.agentId };
-  const row = createContextCompactionRow();
-  state.manualCompacting = true;
-  state.manualCompactionController = new AbortController();
-  updateComposerContextControls();
-  updateHitlInputState();
-  let result = null;
-  try {
-    const response = await daFetch(sessionApiUrl(session, "/compact"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
-      body: JSON.stringify({ model_id: chatPayloadModelId() || null }),
-      signal: state.manualCompactionController.signal,
-    });
-    if (!response.ok || !response.body) {
-      const detail = await response.text().catch(() => "");
-      throw new Error(`HTTP ${response.status} ${detail}`.trim());
-    }
-    await readSse(response.body, ({ event, data }) => {
-      if (event === "context_compaction_progress") {
-        setContextCompactionRow(row, data.message || "正在处理上下文…");
-      } else if (["session_event_appended", "session_event_updated"].includes(event)) {
-        trajectory?.ingest({ event, data });
-      } else if (event === "context_compaction_result") {
-        result = data;
-        state.conversationId = data.conversation_id || state.conversationId;
-        state.lastRunMetrics = {
-          ...(data.run_metrics || {}),
-          conversation_id: state.conversationId,
-          run_id: data.run_id || null,
-          status: data.status || "completed",
-          detailed: true,
-        };
-        if (data.usage) renderUsage(data.usage);
-      }
-    });
-    if (!result) throw new Error("压缩流未返回最终结果");
-    if (result.status === "completed") {
-      const message = `上下文已压缩：${compactTokenLabel(result.before_tokens)} → ${compactTokenLabel(result.after_tokens)} Token`;
-      setContextCompactionRow(row, message, { active: false });
-      showConsoleToast(message);
-      await refreshCurrentHistory();
-    } else if (result.status === "noop") {
-      const message = MANUAL_COMPACTION_REASON_LABELS[result.reason]
-        || "本次压缩未产生明显效果";
-      setContextCompactionRow(row, message, { active: false });
-      showConsoleToast(message);
-      await loadContextStatus(session);
-      window.setTimeout(() => row.remove(), 2500);
-    } else {
-      const message = MANUAL_COMPACTION_REASON_LABELS[result.reason] || `压缩失败：${result.reason || "未知错误"}`;
-      setContextCompactionRow(row, message, { failed: true, retry: true });
-      showConsoleToast(message, true);
-    }
-  } catch (error) {
-    const message = error.name === "AbortError" ? "上下文压缩已取消" : `上下文压缩失败：${error.message}`;
-    setContextCompactionRow(row, message, { failed: true, retry: error.name !== "AbortError" });
-    showConsoleToast(message, true);
-  } finally {
-    state.manualCompacting = false;
-    state.manualCompactionController = null;
-    updateComposerContextControls();
-    updateHitlInputState();
-  }
 }
 
 async function refreshCurrentHistory() {
@@ -1661,7 +1549,7 @@ async function loadCapabilities() {
 async function onSend() {
   const text = el.input.value.trim();
   const attachments = state.pendingAttachments.slice();
-  if ((!text && attachments.length === 0) || state.streaming || state.manualCompacting) return;
+  if ((!text && attachments.length === 0) || state.streaming) return;
   if (state.awaitingHitl) {
     addSystemNote("请先完成上方待处理的交互。");
     return;
@@ -1785,13 +1673,11 @@ async function runChatStream(payload, assistant) {
 }
 
 function updateHitlInputState() {
-  const locked = state.awaitingHitl || state.manualCompacting;
+  const locked = state.awaitingHitl;
   if (el.input) {
     el.input.placeholder = state.awaitingHitl
       ? "请先完成上方交互…"
-      : state.manualCompacting
-        ? "正在压缩上下文…"
-        : "输入消息…";
+      : "输入消息…";
     el.input.disabled = locked;
   }
   if (el.sendBtn) el.sendBtn.disabled = locked;
@@ -1867,6 +1753,7 @@ function handleEvent({ event, data }, assistant) {
       { id: persistedEvent.session_id || state.sessionId, agentId: state.agentId },
       persistedEvent.payload?.title,
     );
+    trajectory?.ingest({ event: type, data });
     return;
   }
   trajectory?.ingest({ event: type, data });
@@ -2877,7 +2764,7 @@ function renderLocalFileDownload(result) {
   const href = window.serviceUrl(
     `api/v1/local-files/${encodeURIComponent(file.fileId)}/download`,
   );
-  return `<a class="local-file-download" href="${escapeHtml(href)}" download>${lucideIcon("download")}<span>下载本地文件</span><small>${escapeHtml(file.fileName)}</small></a>`;
+  return `<a class="local-file-download" href="${escapeHtml(href)}" download>${lucideIcon("download")}<span>${escapeHtml(file.fileName)}</span></a>`;
 }
 
 function renderToolResultArtifacts(artifacts) {

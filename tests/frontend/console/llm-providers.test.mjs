@@ -58,7 +58,6 @@ test("Provider 使用正式 API 和后端类型目录契约", () => {
   assert.match(providerSource, /supports_default_base_url/);
   assert.match(providerSource, /supports_custom_base_url/);
   assert.match(providerSource, /default_base_url/);
-  assert.match(providerSource, /model_protocol/);
 });
 
 test("Provider Key 只回显配置状态且编辑输入始终置空", () => {
@@ -92,7 +91,7 @@ test("Provider 接入信息使用紧凑图标胶囊而不是纵向定义列表",
   assert.match(providerSource, /data-lucide="link-2"/);
   assert.match(providerSource, /data-lucide="route"/);
   assert.match(providerSource, /Key 已配/);
-  assert.match(providerSource, /<small><span>\$\{escapeHtml\(providerTypeLabel\(provider\)\)\}<\/span><code>/);
+  assert.doesNotMatch(providerSource, /<small><span>\$\{escapeHtml\(providerTypeLabel\(provider\)\)\}<\/span><code>/);
   assert.doesNotMatch(providerSource, /<dl class="provider-facts">|<dt>Base URL<\/dt>/);
   assert.doesNotMatch(providerSource, /个模型使用此 Provider/);
 });

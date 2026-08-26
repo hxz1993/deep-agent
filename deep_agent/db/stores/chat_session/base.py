@@ -172,11 +172,13 @@ class ChatSessionStoreBase(SessionBoundMixin):
         limit = min(max(limit, 1), MAX_LIST_LIMIT)
         offset = max(offset, 0)
         message_count = func.count(ChatSessionEvent.event_id)
+        turn_count = func.count(func.distinct(ChatSessionEvent.turn_id))
         stmt = (
             select(
                 ChatSession.session_id, ChatSession.agent_id, ChatSession.title,
                 ChatSession.created_at, ChatSession.updated_at,
                 Agent.name.label("agent_name"), message_count.label("message_count"),
+                turn_count.label("turn_count"),
             )
             .select_from(ChatSession)
             .join(Agent, ChatSession.agent_id == Agent.id)
@@ -205,6 +207,9 @@ class ChatSessionStoreBase(SessionBoundMixin):
         async with self._read() as db:
             rows = list((await db.execute(stmt)).all())
             prompts = await self._first_user_prompts(db, [str(row.session_id) for row in rows])
+            attachment_counts = await self._attachment_counts(
+                db, [str(row.session_id) for row in rows]
+            )
             count_stmt = self._apply_session_filters(
                 select(func.count()).select_from(ChatSession),
                 agent_id=agent_id, user_id=user_id,
@@ -228,11 +233,44 @@ class ChatSessionStoreBase(SessionBoundMixin):
                 session_id=row.session_id, agent_id=agent_scope_to_api(row.agent_id),
                 agent_name=row.agent_name, created_at=row.created_at,
                 updated_at=row.updated_at, message_count=int(row.message_count),
+                turn_count=int(row.turn_count),
+                attachment_count=attachment_counts.get(row.session_id, 0),
                 user_prompt=prompts.get(row.session_id), title=row.title,
             )
             for row in rows
         ]
         return summaries, total
+
+    async def _attachment_counts(
+        self, db: AsyncSession, session_ids: list[str],
+    ) -> dict[str, int]:
+        from deep_agent.agent.attachments import is_attachment_ref
+
+        if not session_ids:
+            return {}
+        rows = (
+            await db.execute(
+                select(ChatSessionEvent.session_id, ChatSessionEvent.payload).where(
+                    ChatSessionEvent.session_id.in_(session_ids),
+                    ChatSessionEvent.event_type == "user/message",
+                )
+            )
+        ).all()
+
+        def count_refs(value: object) -> int:
+            if is_attachment_ref(value):
+                return 1
+            if isinstance(value, dict):
+                return sum(count_refs(child) for child in value.values())
+            if isinstance(value, list):
+                return sum(count_refs(child) for child in value)
+            return 0
+
+        result = {session_id: 0 for session_id in session_ids}
+        for session_id, payload in rows:
+            message = payload.get("message") if isinstance(payload, dict) else None
+            result[session_id] = result.get(session_id, 0) + count_refs(message)
+        return result
 
     async def _first_user_prompts(
         self, db: AsyncSession, session_ids: list[str],

@@ -141,10 +141,10 @@ const skillsAdmin = {
           ${isBuiltin ? "" : `
             <button class="btn skill-direct-action" type="button" data-skill-action="edit"><i data-lucide="pencil-line"></i><span>编辑</span></button>
             <button class="btn skill-direct-action" type="button" data-skill-action="replace"><i data-lucide="upload"></i><span>上传</span></button>
+            <button class="btn skill-direct-action" type="button" data-skill-action="download" title="下载 Skill 包" aria-label="下载 Skill 包"><i data-lucide="download"></i><span>下载</span></button>
             <div class="skill-more-actions">
               <button class="skill-more-trigger" type="button" data-skill-more-trigger aria-label="更多 Skill 操作" title="更多操作" aria-haspopup="menu" aria-expanded="false"><i data-lucide="ellipsis-vertical"></i></button>
               <div class="skill-more-menu" data-skill-more-menu role="menu" hidden>
-                <button type="button" role="menuitem" data-skill-action="download"><i data-lucide="download"></i><span>导出</span></button>
                 ${skill.enabled ? `<button type="button" role="menuitem" data-skill-action="reload"><i data-lucide="refresh-cw"></i><span>重新加载</span></button>` : ""}
                 <button type="button" role="menuitem" data-skill-action="toggle"><i data-lucide="${skill.enabled ? "circle-pause" : "circle-play"}"></i><span>${skill.enabled ? "停用" : "启用"}</span></button>
                 <button class="danger" type="button" role="menuitem" data-skill-action="delete"><i data-lucide="trash-2"></i><span>删除</span></button>

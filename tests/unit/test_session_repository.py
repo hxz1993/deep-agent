@@ -25,7 +25,10 @@ class ChatSessionStoreTests(unittest.IsolatedAsyncioTestCase):
     async def test_list_summaries_joins_agent_and_counts_messages(self) -> None:
         await self.store.append(
             "sess-1",
-            [ModelRequest(parts=[UserPromptPart(content="hello sql")])],
+            [ModelRequest(parts=[UserPromptPart(content=[
+                "hello sql",
+                {"kind": "attachment-ref", "id": "file-1", "name": "input.xlsx", "mime": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"},
+            ])])],
             agent_id=self.agent_id,
             user_id="user-1",
             app_id=None,
@@ -33,11 +36,21 @@ class ChatSessionStoreTests(unittest.IsolatedAsyncioTestCase):
             turn_id="1" * 32,
             run_id="run-1",
         )
+        await self.store.append(
+            "sess-1",
+            [ModelRequest(parts=[UserPromptPart(content="second turn")])],
+            agent_id=self.agent_id,
+            user_id="user-1",
+            turn_id="2" * 32,
+            run_id="run-2",
+        )
         rows, total = await self.store.list_session_summaries(
             SessionListFilters(user_id="user-1")
         )
         self.assertEqual(total, 1)
-        self.assertEqual(rows[0].message_count, 1)
+        self.assertEqual(rows[0].message_count, 2)
+        self.assertEqual(rows[0].turn_count, 2)
+        self.assertEqual(rows[0].attachment_count, 1)
         self.assertEqual(rows[0].user_prompt, "hello sql")
 
     async def test_filters_and_has_messages_total_match(self) -> None:

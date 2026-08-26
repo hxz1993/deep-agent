@@ -40,7 +40,8 @@ test("Skill 页面区分内置和上传包的可操作边界", () => {
   assert.match(source, /data-skill-action="replace"><i data-lucide="upload"><\/i><span>上传<\/span>/);
   assert.match(source, /data-skill-more-trigger/);
   assert.match(source, /data-skill-more-menu role="menu" hidden/);
-  assert.match(source, /data-skill-action="download"><i data-lucide="download"><\/i><span>导出<\/span>/);
+  assert.match(source, /class="btn skill-direct-action"[^>]*data-skill-action="download"[^>]*aria-label="下载 Skill 包"[^>]*>[^<]*<i[^>]*><\/i><span>下载<\/span>/);
+  assert.doesNotMatch(source, /role="menuitem" data-skill-action="download"/);
   assert.match(template, /id="exportAllSkillsBtn"><i data-lucide="download"><\/i>导出全部/);
   assert.match(source, /"\/api\/v1\/skills\/export"/);
   assert.match(source, /重新加载/);

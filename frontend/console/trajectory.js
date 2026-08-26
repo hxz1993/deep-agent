@@ -51,6 +51,7 @@ function eventLabel(kind, part = {}) {
   if (kind === "context") return "输入上下文";
   if (kind === "thinking") return "模型思考";
   if (kind === "assistant") return "助手输出";
+  if (kind === "title") return "会话标题";
   if (kind === "run") return "模型运行";
   if (kind === "compaction") return "上下文压缩";
   if (kind === "planning") return part.tool || "任务规划";
@@ -63,6 +64,7 @@ function eventSummary(kind, source = {}) {
   if (kind === "input") return valuePreview(source.content) || "仅包含附件或上下文引用";
   if (kind === "context") return valuePreview(source.label || source.content || source.type || source.key) || "结构化上下文";
   if (["thinking", "assistant"].includes(kind)) return valuePreview(source.content);
+  if (kind === "title") return valuePreview(source.title) || "会话标题";
   if (kind === "run") return source.status ? `Run ${source.status}` : "模型运行";
   if (kind === "compaction") {
     const before = source.budget?.estimated_before;
@@ -198,6 +200,30 @@ function projectCompaction(event, inputSequence) {
   return projected;
 }
 
+function projectTitle(event, inputSequence) {
+  const payload = event.payload || {};
+  const projected = newEvent({
+    id: event.event_id,
+    kind: "title",
+    inputSequence: Math.max(inputSequence, 1),
+    runId: event.run_id || null,
+    timestamp: event.created_at || null,
+    status: event.status || "completed",
+    part: payload,
+    payload,
+    native: {
+      event_ids: [event.event_id],
+      title_request: payload,
+      title_result: payload,
+    },
+  });
+  projected.sequence = Number(event.sequence || 0);
+  projected.turn_id = event.turn_id || null;
+  projected.event_type = event.event_type;
+  projected.timestamp_end = event.updated_at || projected.timestamp;
+  return projected;
+}
+
 /** Build semantic trajectory rows from complete Message Events. */
 export function buildTrajectory(history = {}) {
   const items = [...(Array.isArray(history?.items) ? history.items : [])]
@@ -205,7 +231,27 @@ export function buildTrajectory(history = {}) {
   let inputSequence = 0;
   const projected = [];
   const tools = new Map();
+  const automaticTitles = new Map();
   for (const event of items) {
+    if (event.event_type === "session/title") {
+      const source = event.payload?.source;
+      const sourceEventId = event.payload?.source_event_id;
+      const automaticKey = source !== "user" && sourceEventId ? sourceEventId : null;
+      const existing = automaticKey ? automaticTitles.get(automaticKey) : null;
+      if (existing) {
+        existing.status = normalizedStatus(event.status || "completed");
+        existing.summary = eventSummary("title", event.payload || {});
+        existing.payload = redactTrajectoryValue(jsonClone(event.payload || {}));
+        existing.native.title_result = redactTrajectoryValue(jsonClone(event.payload || {}));
+        existing.timestamp_end = event.updated_at || event.created_at || existing.timestamp_end;
+        existing.native.event_ids.push(event.event_id);
+      } else {
+        const title = projectTitle(event, inputSequence);
+        projected.push(title);
+        if (automaticKey) automaticTitles.set(automaticKey, title);
+      }
+      continue;
+    }
     if (event.event_type === "compaction") {
       projected.push(projectCompaction(event, inputSequence));
       continue;
@@ -445,6 +491,7 @@ function escapeHtml(value) {
 function kindBadge(kind) {
   if (kind === "input") return "USER";
   if (kind === "context") return "CONTEXT";
+  if (kind === "title") return "TITLE";
   return String(kind || "event").toUpperCase();
 }
 
@@ -623,7 +670,7 @@ function renderLocalFileDownload(value) {
   const href = globalThis.serviceUrl?.(path) || `/${path}`;
   return renderSummarySection(
     "File",
-    `<a class="local-file-download" href="${escapeHtml(href)}" download>${icon("download")}<span>下载本地文件</span><small>${escapeHtml(file.fileName)}</small></a>`,
+    `<a class="trajectory-summary-link local-file-download" href="${escapeHtml(href)}" download>${icon("download")}<span><strong>${escapeHtml(file.fileName)}</strong></span></a>`,
   );
 }
 
@@ -651,7 +698,7 @@ function renderPlanningSummary(event) {
   const completed = Number(plan?.completed || 0);
   const total = Number(plan?.total || plan?.items?.length || 0);
   const label = event.label === "write_plan" ? "创建或改写任务计划" : event.label;
-  const progress = `<p class="trajectory-summary-lead">${icon("list-checks")}<strong>${escapeHtml(label)}</strong></p>
+  const progress = `<p class="trajectory-summary-lead"><strong>${escapeHtml(label)}</strong></p>
     ${total ? `<div class="trajectory-plan-progress"><span style="width:${Math.min(100, Math.max(0, completed / total * 100))}%"></span></div><p class="trajectory-plan-count">${completed} / ${total} 已完成</p>` : ""}`;
   return `${renderSummarySection("Plan", progress)}
     ${renderPayloadResultSections({ payload: event.payload, result: toolResultValue(event) })}`;
@@ -661,7 +708,7 @@ function renderDeferredSummary(event) {
   const args = event.payload?.args || {};
   const title = args.title || args.prompt || event.label;
   const reason = args.reason || args.message || event.summary;
-  const primary = `<p class="trajectory-summary-lead">${icon("message-square-more")}<strong>${escapeHtml(title)}</strong></p>
+  const primary = `<p class="trajectory-summary-lead"><strong>${escapeHtml(title)}</strong></p>
     ${reason && reason !== title ? `<p class="trajectory-summary-copy">${escapeHtml(reason)}</p>` : ""}`;
   return `${renderSummarySection("Interaction", primary)}
     ${renderPayloadResultSections({ payload: event.payload, result: toolResultValue(event) })}`;
@@ -679,7 +726,25 @@ function renderCompactionSummary(event) {
     event.payload?.summary_call?.model_id || null,
     event.payload?.error?.message || event.payload?.error || null,
   ].filter(Boolean).join(" · ");
-  return renderSummarySection("Compaction", `<p class="trajectory-summary-lead">${icon("archive-restore")}<strong>${escapeHtml(primary || event.label)}</strong></p>${detail ? `<p class="trajectory-summary-copy">${escapeHtml(detail)}</p>` : ""}`);
+  return renderSummarySection("Compaction", `<p class="trajectory-summary-lead"><strong>${escapeHtml(primary || event.label)}</strong></p>${detail ? `<p class="trajectory-summary-copy">${escapeHtml(detail)}</p>` : ""}`);
+}
+
+function renderTitleSummary(event) {
+  const sourceLabel = {
+    fallback: "确定性兜底",
+    model: "模型生成",
+    user: "用户修改",
+  }[event.payload?.source] || event.payload?.source;
+  const model = event.payload?.model_name || event.payload?.model_id;
+  const facts = [
+    renderFact("来源", sourceLabel),
+    renderFact("模型", model, { mono: true }),
+    renderFact("源事件", event.payload?.source_event_id, { mono: true }),
+  ].join("");
+  return renderSummarySection(
+    "Title",
+    `<p class="trajectory-summary-lead"><strong>${escapeHtml(event.payload?.title || event.summary || "会话标题")}</strong></p>${facts ? `<div class="trajectory-context-standard">${facts}</div>` : ""}`,
+  );
 }
 
 const SUMMARY_RENDERERS = Object.freeze({
@@ -690,6 +755,7 @@ const SUMMARY_RENDERERS = Object.freeze({
   deferred: renderDeferredSummary,
   tool: renderToolSummary,
   compaction: renderCompactionSummary,
+  title: renderTitleSummary,
 });
 
 function renderSummary(event, events) {
@@ -708,6 +774,7 @@ function renderJsonBlock(value) {
 }
 
 function detailTabs(event) {
+  if (event.kind === "title") return [["request", "Request"], ["result", "Result"]];
   const tabs = [["summary", "Summary"]];
   if (hasMeaningfulValue(event.payload)) tabs.push(["payload", "Payload"]);
   if (["input", "assistant"].includes(event.kind)) {
@@ -747,11 +814,12 @@ function renderDetail(event, activeTab = "summary", events = []) {
   const allowedTabs = new Set(tabs.map(([id]) => id));
   if (!allowedTabs.has(activeTab)) activeTab = "summary";
   let content = renderSummary(event, events);
+  if (activeTab === "request") content = renderJsonBlock(event.native?.title_request || event.payload);
   if (activeTab === "payload") content = renderJsonBlock(event.payload);
-  if (activeTab === "result") content = renderJsonBlock(event.result);
+  if (activeTab === "result") content = renderJsonBlock(event.kind === "title" ? (event.native?.title_result || event.payload) : event.result);
   if (activeTab === "preview") content = renderPreview(event);
   if (activeTab === "raw") content = renderRaw(event);
-  const headerLabel = TOOL_KINDS.has(event.kind) || event.kind === "compaction"
+  const headerLabel = TOOL_KINDS.has(event.kind) || ["compaction", "title"].includes(event.kind)
     ? event.label
     : event.run_id ? `Run ${String(event.run_id).slice(0, 8)}` : "";
   return `
@@ -971,7 +1039,12 @@ export function createTrajectoryController({ state }) {
         liveEvents = liveEvents.filter((item) => item !== activeAssistantLoop || item.run_id !== stored.run_id);
         if (activeAssistantLoop?.run_id === stored.run_id) activeAssistantLoop = null;
       }
-      selectedId = storedCallIds.size ? `tool:${[...storedCallIds][0]}` : stored.event_id;
+      const projectedTitle = stored.event_type === "session/title"
+        ? historyEvents.find((item) => item.kind === "title" && item.native?.event_ids?.includes(stored.event_id))
+        : null;
+      selectedId = storedCallIds.size
+        ? `tool:${[...storedCallIds][0]}`
+        : projectedTitle?.id || stored.event_id;
       scheduleRender();
       return;
     }

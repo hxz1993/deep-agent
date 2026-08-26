@@ -13,7 +13,7 @@ from pydantic_ai.messages import ModelMessage
 from deep_agent.db.serialization import deserialize_message, serialize_message
 
 
-EVENT_SCHEMA_VERSION = 2
+EVENT_SCHEMA_VERSION = 1
 MAX_SEARCH_TEXT_CHARS = 65_536
 MESSAGE_EVENT_TYPES = frozenset(
     {"user/message", "assistant/message", "tool/results", "model/request"}

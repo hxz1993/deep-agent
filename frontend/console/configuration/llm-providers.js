@@ -156,7 +156,6 @@ const llmProvidersAdmin = {
                 <span class="provider-fact ${provider.enabled === false ? "off" : "on"}" title="Provider 状态"><i data-lucide="power"></i><span>${provider.enabled === false ? "停用" : "启用"}</span></span>
               </div>
             </div>
-            <small><span>${escapeHtml(providerTypeLabel(provider))}</span><code>${escapeHtml(providerTypeByCode(provider.provider_type)?.model_protocol || "—")}</code></small>
             <span class="provider-fact provider-fact-url" title="Base URL"><i data-lucide="link-2"></i><code>${escapeHtml(provider.effective_base_url || provider.base_url || "—")}</code></span>
           </div>
         </div>

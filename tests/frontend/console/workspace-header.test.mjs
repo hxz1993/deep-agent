@@ -296,6 +296,13 @@ test("历史与轨迹统一读取 Event API 且普通聊天隐藏完成压缩标
   assert.doesNotMatch(chatSource, /context_checkpoint|addContextCheckpointMarker|\/history/);
 });
 
+test("会话标题由持久化 Event 实时更新且不再轮询或自动重命名", () => {
+  assert.match(chatSource, /persistedEvent\?\.event_type === "session\/title"/);
+  assert.match(chatSource, /applySessionTitle\([\s\S]*persistedEvent\.payload\?\.title/);
+  assert.doesNotMatch(chatSource, /TITLE_POLL|pollSessionTitle|scheduleTitleRefresh|autoRenameSession/);
+  assert.doesNotMatch(chatSource, /auto-rename-btn|自动重命名|JSON\.stringify\(\{ auto: true \}\)/);
+});
+
 test("0803 不带入 0802 的对话消息与滚动重构", () => {
   assert.doesNotMatch(chatSource, /message-expand-btn|scrollBottomBtn|appendAssistantCopyAction/);
   assert.doesNotMatch(chatSource, /tool-block open running/);

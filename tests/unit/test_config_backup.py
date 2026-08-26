@@ -12,7 +12,6 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 from deep_agent.db.models import (
     Agent,
-    AuxiliaryModelConfig,
     Base,
     ChatSession,
     ChatSessionEvent,
@@ -380,13 +379,6 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                         "parameters_json_schema": {"type": "object"},
                         "source": "manual",
                         "enabled": True,
-                    },
-                )
-                await connection.execute(
-                    insert(AuxiliaryModelConfig.__table__),
-                    {
-                        "use_case": "title",
-                        "llm_model_id": "model-1",
                     },
                 )
                 await connection.execute(

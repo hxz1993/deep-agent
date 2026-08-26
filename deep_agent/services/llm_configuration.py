@@ -8,7 +8,7 @@ from deep_agent.agent.provider_registry import (
     UnknownProviderTypeError,
     provider_type_definition,
 )
-from deep_agent.db.models import Agent, AuxiliaryModelConfig, LlmModel, LlmProvider
+from deep_agent.db.models import Agent, LlmModel, LlmProvider
 from deep_agent.db.stores._session import SessionBoundMixin
 from deep_agent.db.stores.llm_model.base import _validate_runtime_metadata
 from deep_agent.schemas.llm_model import LlmModelCreate, LlmModelUpdate
@@ -276,14 +276,7 @@ class LlmConfigurationService(SessionBoundMixin):
             agent_count = await db.execute(
                 select(func.count()).select_from(Agent).where(Agent.model_id == model_id)
             )
-            auxiliary_count = await db.execute(
-                select(func.count()).select_from(AuxiliaryModelConfig).where(
-                    AuxiliaryModelConfig.llm_model_id == model_id
-                )
-            )
-            reference_count = int(agent_count.scalar_one()) + int(
-                auxiliary_count.scalar_one()
-            )
+            reference_count = int(agent_count.scalar_one())
             if reference_count:
                 raise LlmConfigurationConflictError(
                     f"LLM model is referenced by {reference_count} configuration(s)"

@@ -347,30 +347,6 @@ _SETTING_GROUPS = (
             ),
         ),
     ),
-    _SettingGroupDefinition(
-        key="titles",
-        label="会话标题",
-        items=(
-            _SettingDefinition(
-                "title_model",
-                "标题模型",
-                "DEEP_AGENT_TITLE_MODEL",
-                "agent",
-                "title_model",
-                "用于生成会话标题的模型名称，不展示地址或密钥。",
-                empty_display="未启用",
-            ),
-            _SettingDefinition(
-                "title_generation_timeout",
-                "标题生成超时",
-                "DEEP_AGENT_TITLE_GENERATION_TIMEOUT",
-                "agent",
-                "title_generation_timeout",
-                "生成会话标题允许的最大等待时间。",
-                "秒",
-            ),
-        ),
-    ),
 )
 
 

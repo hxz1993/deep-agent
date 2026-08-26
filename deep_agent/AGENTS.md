@@ -126,8 +126,8 @@ URL 与 Builtin MCP 的运行态不同：URL MCP 在管理员检测时保存 Too
 升级 Pydantic AI/Harness 时只做相对该基线的增量审计，不从历史 TODO 重新发散；没有真实触发条件的
 框架能力不得因为“官方已经提供”就进入开发计划。
 
-当前上下文压缩在模型配置有效`context_window_tokens`时启用，否则停用。辅助模型优先使用
-`context_compaction`配置，缺失时使用当前Agent模型。自动、主动和Provider Overflow调用同一安全前缀、
+当前上下文压缩在模型配置有效`context_window_tokens`时启用，否则停用，并固定使用当前Agent模型。
+自动、主动和Provider Overflow调用同一安全前缀、
 八段摘要、Evidence与目标复检流程；Compaction从Running原位更新到终态，失败不改变Surface。
 摘要总预算300秒，每约10秒发送非持久化进度；客户端取消复用正式Run Cancellation Token。Timeout不重试，
 仅满足时间与剩余预算条件的429/502/503/504快速失败可重试一次。Provider原生CompactionPart作为普通
@@ -212,7 +212,6 @@ user/App/Space上下文时，`export_file_to_download_center`始终直接披露�
 | `ui_tool_packages.py` | CRUD `/ui-tool-packages`；代码内置包只读 |
 | `skills.py` | Skill 目录、安装、替换、启停、资源和原包下载 |
 | `sessions.py` | 会话列表、Event分页、上下文状态、删除与正式取消当前Run |
-| `auxiliary_models.py` | CRUD `/auxiliary-models` |
 | `tools.py` | `GET /tools` |
 | `deps.py` | `build_runner` / `build_runner_for_agent`，统一承接多入口的运行器组装 |
 
@@ -231,13 +230,12 @@ user/App/Space上下文时，`export_file_to_download_center`始终直接披露�
 | `agents` | DB Agent（UUID PK，name 唯一） |
 | `llm_models` | LLM 运行时唯一模型事实：连接、模态、上下文、最大输出与 tags |
 | `model_catalog` | models.dev 的 Lab/Model/Provider 数据库快照，只用于浏览和预填 |
-| `auxiliary_model_configs` | 辅助模型场景绑定；用于会话标题和上下文压缩 |
 | `mcp_servers` | MCP transport、config JSON、最近一次 inspection 检测快照 |
 | `skill_packages` | 上传 Skill 当前安装版本的元数据、平台 File ID、Manifest 与资源索引 |
 | `ui_tool_packages` | 手工 UI 工具包；代码内置 `ui:builtin` 不写表 |
 | `ui_tool_definitions` | 手工 UI 工具定义及所属包；builtin 由代码生成，不写表 |
 | `chat_sessions` | 全局唯一会话、Agent/User归属、可空App/Space来源、标题与Sequence分配 |
-| `chat_session_events` | 语义Part、Run、Compaction、Tool、Plan和Context的唯一有序事实源 |
+| `chat_session_events` | Message、Title、Compaction、Tool、Plan和Context的唯一有序事实源 |
 
 配置备份必须在`maintenance/config_backup.py`中把每张ORM业务表明确归类为复制配置数据或只保留
 结构；新增表未归类时备份应失败。上传Skill原ZIP属于平台外部文件，不进入SQLite配置备份，完整

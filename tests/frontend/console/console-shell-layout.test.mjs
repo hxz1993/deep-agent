@@ -133,7 +133,7 @@ test("护眼主题使用清透暖橙而不是土黄配色", () => {
 });
 
 test("配置中心的主要业务表格统一使用连续轻列表风格 A", () => {
-  assert.ok((template.match(/class="table-wrap console-list-a/g) || []).length >= 5);
+  assert.ok((template.match(/class="table-wrap console-list-a/g) || []).length >= 4);
   assert.match(catalogTemplate, /class="table-wrap console-list-a models-table-wrap"/);
   assert.match(systemTools, /class="table-wrap console-list-a"/);
   assert.match(styles, /#configurationHost \.console-list-a \.data-table th[\s\S]*border-bottom: 1px solid var\(--console-card-border\)/);

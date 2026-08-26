@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 import tempfile
 from pathlib import Path
+from unittest.mock import AsyncMock, patch
 
 from pydantic_ai import Agent
 from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart, ToolReturnPart
@@ -81,7 +82,11 @@ class SkillRuntimeTests(unittest.IsolatedAsyncioTestCase):
         deps = AgentDeps(
             session_id="session", user="skill-user", agent_id=self.db_agent.id
         )
-        result = await runner.run("session", "Diagnose the session", deps)
+        with patch(
+            "deep_agent.agent.title_generator.generate_title",
+            new=AsyncMock(return_value=None),
+        ):
+            result = await runner.run("session", "Diagnose the session", deps)
 
         self.assertEqual(result["output"], "diagnosed")
         self.assertIn("deepagent-diagnostics", seen_instructions[0])

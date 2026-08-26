@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from deep_agent.agent.spec import AgentSpec
 from deep_agent.db.dialect import DbDialect
-from deep_agent.db.models import Agent, AuxiliaryModelConfig, Base, LlmModel, LlmProvider
+from deep_agent.db.models import Agent, Base, LlmModel, LlmProvider
 from deep_agent.db.stores.agent import create_agent_store
 from deep_agent.db.stores.llm_model import (
     LlmModelValidationError,
@@ -95,22 +95,6 @@ class LlmModelStoreTests(unittest.IsolatedAsyncioTestCase):
         assert updated is not None
         self.assertEqual(updated.tags, ["reasoning"])
         self.assertEqual(updated.max_output_tokens, 8_192)
-
-    async def test_reference_count_includes_auxiliary_model_configuration(self) -> None:
-        row = await self.service.create_model(model_create())
-        async with self.session_factory.begin() as session:
-            session.add(
-                AuxiliaryModelConfig(
-                    use_case="session_title",
-                    llm_model_id=row.id,
-                )
-            )
-
-        self.assertEqual(await self.store.count_agents(row.id), 0)
-        self.assertEqual(await self.store.count_references(row.id), 1)
-        with self.assertRaises(LlmConfigurationConflictError):
-            await self.service.delete_model(row.id)
-        self.assertIsNotNone(await self.store.get_by_id(row.id))
 
     async def test_historical_pdf_modality_is_hidden_from_runtime_and_api(self) -> None:
         row = await self.service.create_model(model_create())

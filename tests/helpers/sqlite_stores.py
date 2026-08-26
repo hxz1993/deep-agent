@@ -1,17 +1,13 @@
 from __future__ import annotations
 
 import asyncio
-import os
-
 from deep_agent.db.stores.bundle import DataStores
-from deep_agent.schemas.auxiliary_model import AuxiliaryModelUpdate
 from deep_agent.schemas.agent import AgentCreate
 from deep_agent.schemas.llm_model import LlmModelCreate
 from deep_agent.schemas.llm_provider import LlmProviderCreate
 
 DEFAULT_TEST_LLM_MODEL = "test-default"
 DEFAULT_TEST_LLM_MODEL_STRING = "test"
-AUX_TITLE_MODEL_NAME = "aux-title"
 DEFAULT_TEST_CONTEXT_WINDOW = 128_000
 DEFAULT_TEST_MAX_OUTPUT = 8_192
 DEFAULT_TEST_PROVIDER_NAME = "Test Provider"
@@ -86,51 +82,6 @@ async def get_default_test_provider_id(stores: DataStores) -> str:
     return provider.id
 
 
-async def ensure_title_uses_main_model(stores: DataStores) -> None:
-    """Force title generation to auto (main model) for non-title integration tests."""
-    await stores.auxiliary_model.ensure_defaults()
-    await stores.auxiliary_model.update(
-        "title",
-        AuxiliaryModelUpdate(llm_model_id=None),
-    )
-
-
-async def seed_auxiliary_model_configs(stores: DataStores) -> None:
-    """Ensure auxiliary model rows exist and mirror DEEP_AGENT_TITLE_* env for tests."""
-    await stores.auxiliary_model.ensure_defaults()
-    model_str = os.environ.get("DEEP_AGENT_TITLE_MODEL", "").strip()
-    base_url = os.environ.get("DEEP_AGENT_TITLE_MODEL_BASE_URL", "").strip() or None
-    api_key = os.environ.get("DEEP_AGENT_TITLE_MODEL_API_KEY", "").strip() or None
-
-    llm_model_id = None
-    if model_str:
-        existing = await stores.llm_model.get_by_name(AUX_TITLE_MODEL_NAME)
-        if existing is not None:
-            llm_model_id = existing.id
-        else:
-            provider = await stores.llm_configuration.create_provider(
-                LlmProviderCreate(
-                    name="Auxiliary Test Provider",
-                    provider_type="openai_compatible",
-                    base_url=base_url or "http://test.invalid/v1",
-                    api_key=api_key or "test-key",
-                )
-            )
-            row = await stores.llm_configuration.create_model(
-                test_llm_model_create(
-                    name=AUX_TITLE_MODEL_NAME,
-                    model=model_str,
-                    provider_id=provider.id,
-                ),
-            )
-            llm_model_id = row.id
-
-    await stores.auxiliary_model.update(
-        "title",
-        AuxiliaryModelUpdate(llm_model_id=llm_model_id),
-    )
-
-
 async def make_sqlite_stores(
     url: str = "sqlite+aiosqlite:///:memory:",
 ) -> tuple[DataStores, object, object]:
@@ -146,7 +97,6 @@ async def make_sqlite_stores(
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
     stores = create_data_stores(DbDialect.SQLITE, session_factory)
     await seed_default_llm_model(stores)
-    await seed_auxiliary_model_configs(stores)
     return stores, engine, session_factory
 
 

@@ -30,7 +30,6 @@ CONFIG_TABLES = (
     "skill_packages",
     "ui_tool_packages",
     "ui_tool_definitions",
-    "auxiliary_model_configs",
 )
 SESSION_TABLES = (
     "chat_sessions",
@@ -230,7 +229,6 @@ async def _create_backup_info_table(engine: AsyncEngine) -> None:
 
 async def _clear_seed_configuration(engine: AsyncEngine) -> None:
     delete_order = (
-        "auxiliary_model_configs",
         "agents",
         "skill_packages",
         "ui_tool_definitions",

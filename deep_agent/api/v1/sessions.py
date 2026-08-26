@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any, Literal, Optional
 
 from fastapi import APIRouter, HTTPException, Query, status
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pydantic_ai.messages import ModelMessage
 
 from deep_agent.core.context import AppContextDep
@@ -13,11 +13,9 @@ from deep_agent.db.session_list import MAX_LIST_LIMIT, SessionListFilters, Sessi
 from deep_agent.db.session_scope import resolve_session
 from deep_agent.db.ids import normalize_agent_id
 from deep_agent.agent.history import (
-    _extract_assistant_text,
     first_user_prompt,
     session_activity_timestamps,
 )
-from deep_agent.agent.spec import AgentSpec, anonymous_spec
 from deep_agent.agent.context.budget import build_context_budget
 from deep_agent.agent.context.estimator import TokenEstimator
 from deep_agent.agent.context.manual import manual_compaction_availability
@@ -210,20 +208,6 @@ async def cancel_session_run(
     )
 
 
-async def _spec_for_history(ctx: AppContextDep, agent_id: str | None) -> AgentSpec:
-    if agent_id:
-        row = await ctx.stores.agent.get_by_id(agent_id)
-        if row is not None:
-            from deep_agent.agent.provider_registry import load_provider_for_model
-
-            provider = await load_provider_for_model(
-                row.llm_model,
-                ctx.stores.llm_configuration,
-            )
-            return AgentSpec.from_row(row, row.llm_model, provider=provider)
-    return anonymous_spec()
-
-
 class SessionEventResponse(BaseModel):
     event_id: str
     session_id: str
@@ -301,13 +285,18 @@ async def delete_session(
 
 
 class SessionRenameRequest(BaseModel):
-    """会话重命名请求体。"""
+    """Manual session rename. Automatic regeneration is intentionally absent."""
 
-    title: Optional[str] = None
-    """手动设置的标题。与 auto 互斥。"""
+    model_config = ConfigDict(extra="forbid")
+    title: str = Field(min_length=1, max_length=80)
 
-    auto: bool = False
-    """是否自动重新生成标题（基于对话内容）。与 title 互斥。"""
+    @field_validator("title")
+    @classmethod
+    def _non_blank_title(cls, value: str) -> str:
+        title = value.strip()
+        if not title:
+            raise ValueError("Session title must not be blank")
+        return title
 
 
 class SessionContextStatus(BaseModel):
@@ -502,21 +491,7 @@ async def rename_session(
     body: SessionRenameRequest,
     agent_id: str | None = None,
 ) -> SessionInfo:
-    """重命名会话：手动设置标题或自动重新生成。
-
-    - `{"title": "新名称"}` → 手动重命名
-    - `{"auto": true}` → 基于对话内容自动重新生成标题
-    """
-    if body.title is not None and body.auto:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Cannot specify both 'title' and 'auto'",
-        )
-    if body.title is None and not body.auto:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Must specify either 'title' or 'auto'",
-        )
+    """Set a non-blank manual title and append its audit Event."""
 
     resolved = await resolve_session(
         ctx.store,
@@ -531,53 +506,22 @@ async def rename_session(
 
     api_agent_id = agent_id or agent_scope_to_api(scope)
 
-    def session_lock():
-        lock = getattr(ctx.store, "lock", None)
-        return lock(resolved_session_id, agent_id=api_agent_id) if callable(lock) else None
-
-    if body.title is not None:
-        # 手动设置标题
-        title = body.title.strip()[:80] if body.title.strip() else None
-        lock = session_lock()
-        if lock is None:
-            await ctx.store.update_session_title(resolved_session_id, api_agent_id, title)
-        else:
-            # 与首轮后台标题生成共用会话锁，确保人工标题无论先后都最终获胜。
-            async with lock:
-                await ctx.store.update_session_title(resolved_session_id, api_agent_id, title)
-    elif body.auto:
-        # 自动重新生成标题
-        history = await ctx.store.get_history(resolved_session_id, agent_id=api_agent_id)
-        if not history:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Cannot auto-rename: session has no messages",
-            )
-        user_text = first_user_prompt(history) or ""
-        assistant_text = _extract_assistant_text(history)
-
-        from deep_agent.agent.title_generator import generate_title
-
-        spec = await _spec_for_history(ctx, api_agent_id)
-        title = await generate_title(
-            user_text=user_text,
-            assistant_text=assistant_text or user_text,
-            spec=spec,
-            auxiliary_store=ctx.stores.auxiliary_model,
-            llm_model_store=ctx.stores.llm_model,
-            llm_configuration_store=ctx.stores.llm_configuration,
+    title = body.title.strip()
+    if not title:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Session title must not be blank",
         )
-
-        # LLM 失败时回退到文本提取
-        if not title:
-            title = user_text
-
-        lock = session_lock()
-        if lock is None:
-            await ctx.store.update_session_title(resolved_session_id, api_agent_id, title)
-        else:
-            async with lock:
-                await ctx.store.update_session_title(resolved_session_id, api_agent_id, title)
+    await ctx.store.apply_session_title(
+        resolved_session_id,
+        agent_id=api_agent_id,
+        user_id=user_id,
+        title=title,
+        source="user",
+        source_event_id=None,
+        turn_id=None,
+        run_id=None,
+    )
 
     # 返回更新后的会话信息
     history = await ctx.store.get_history(resolved_session_id, agent_id=api_agent_id)

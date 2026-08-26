@@ -13,7 +13,6 @@ from deep_agent.capabilities.mcp.lease_manager import McpLeaseManager
 from deep_agent.core.context import AppContext, get_context, init_context, reset_context
 from tests.helpers.request_identity import install_test_user_header
 from tests.helpers.sqlite_stores import (
-    ensure_title_uses_main_model,
     make_sqlite_stores,
     seed_default_agent,
 )
@@ -56,7 +55,6 @@ def _tool_call_ids(history: dict) -> list[str]:
 class ChatHistoryPersistenceTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         stores, self._engine, session_factory = await make_sqlite_stores()
-        await ensure_title_uses_main_model(stores)
         self._agent_id = await seed_default_agent(stores, name="history-agent")
         self._app = FastAPI()
         install_test_user_header(self._app)
@@ -71,7 +69,7 @@ class ChatHistoryPersistenceTests(unittest.IsolatedAsyncioTestCase):
             )
         )
         self._no_title = patch(
-            "deep_agent.agent.runner.AgentRunner._maybe_generate_title",
+            "deep_agent.agent.runner.AgentRunner._generate_model_title",
             new_callable=AsyncMock,
         )
         self._no_title.start()

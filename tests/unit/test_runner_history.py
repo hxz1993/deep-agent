@@ -119,7 +119,9 @@ class AgentRunnerHistoryTests(unittest.IsolatedAsyncioTestCase):
             run_id="run-provider-overflow-seed",
         )
 
-        async def summarize(_messages, _info):
+        async def respond(messages, _info):
+            if "Primary Request and Intent" not in repr(messages):
+                return ModelResponse(parts=[TextPart(content="recovered")])
             headings = (
                 "Primary Request and Intent", "Key Technical Concepts", "Files and Code",
                 "Errors and Fixes", "Pending Jobs", "Current Work", "Next Step",
@@ -131,7 +133,13 @@ class AgentRunnerHistoryTests(unittest.IsolatedAsyncioTestCase):
             )
             return ModelResponse(parts=[TextPart(content=content)])
 
-        agent = Agent(TestModel(custom_output_text="recovered"), deps_type=AgentDeps)
+        async def stream_respond(_messages, _info):
+            yield "recovered"
+
+        agent = Agent(
+            FunctionModel(respond, stream_function=stream_respond),
+            deps_type=AgentDeps,
+        )
         original_stream = agent.run_stream_events
         attempts = 0
 
@@ -152,9 +160,6 @@ class AgentRunnerHistoryTests(unittest.IsolatedAsyncioTestCase):
             context_window_tokens=10_000,
             max_output_tokens=128,
             summary_timeout=5,
-            summary_model=FunctionModel(summarize),
-            summary_context_window_tokens=16_000,
-            summary_max_output_tokens=256,
         )
         runner = AgentRunner(
             agent,
@@ -163,7 +168,7 @@ class AgentRunnerHistoryTests(unittest.IsolatedAsyncioTestCase):
             context_window_tokens=10_000,
             max_output_tokens=128,
             context_compaction=compaction,
-            summary_model_id="summary-model",
+            model_id="main-model",
         )
         deps = self._deps("sess-provider-overflow")
         with patch.object(agent, "run_stream_events", side_effect=overflow_once):
@@ -511,55 +516,6 @@ class BranchPointAlignmentTests(unittest.TestCase):
         ]
         history = model_messages_to_history(messages)
         self.assertEqual([m.branch_point for m in history], [0, 1, 2, 3])
-
-
-class AgentRunnerTitleGenerationTests(unittest.IsolatedAsyncioTestCase):
-    async def asyncSetUp(self) -> None:
-        stores, self._engine, _ = await make_sqlite_stores()
-        self.store = stores.coordinator
-        model = (await stores.llm_model.list_all())[0]
-        self.db_agent = await stores.agent.create_unique(
-            AgentCreate(name="runner-title-test", model_id=model.id, prompt="test")
-        )
-        self.runner = AgentRunner(
-            Agent(TestModel(), output_type=str),
-            self.store,
-            UsageLimits(request_limit=5),
-        )
-
-    async def asyncTearDown(self) -> None:
-        await self._engine.dispose()
-
-    async def test_second_exchange_skips_title_generation_when_title_exists(self) -> None:
-        await self.store.append(
-            "title-session",
-            [
-                ModelRequest(parts=[UserPromptPart(content="第一句")]),
-                ModelResponse(parts=[TextPart(content="第一句回复")]),
-                ModelRequest(parts=[UserPromptPart(content="第二句")]),
-                ModelResponse(parts=[TextPart(content="第二句回复")]),
-            ],
-            agent_id=self.db_agent.id,
-            user_id="runner-title-user",
-            turn_id="run-title-seed",
-            run_id="run-title-seed",
-        )
-        await self.store.update_session_title(
-            "title-session", self.db_agent.id, "已有标题"
-        )
-
-        with patch("deep_agent.agent.title_generator.generate_title", autospec=True) as generate_title:
-            await self.runner._maybe_generate_title(
-                "title-session",
-                AgentDeps(
-                    session_id="title-session",
-                    agent_id=self.db_agent.id,
-                    user="runner-title-user",
-                ),
-                [ModelResponse(parts=[TextPart(content="第二句回复")])],
-            )
-
-        generate_title.assert_not_called()
 
 
 if __name__ == "__main__":

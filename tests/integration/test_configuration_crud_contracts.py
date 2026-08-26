@@ -625,20 +625,6 @@ class ConfigurationCrudContractTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIsNotNone(await self.stores.mcp.get_by_name("builtin_protected"))
 
-    async def test_auxiliary_update_creates_missing_default_row(self) -> None:
-        async with self.stores.auxiliary_model._write() as db:
-            row = await self.stores.auxiliary_model._get_by_use_case(db, "title")
-            await db.delete(row)
-
-        async with AsyncClient(transport=self._transport, base_url="http://test") as client:
-            response = await client.patch(
-                "/api/v1/auxiliary-models/title",
-                json={"llm_model_id": self._model_id},
-            )
-
-        self.assertEqual(response.status_code, 200, response.text)
-        self.assertEqual(response.json()["llm_model_id"], self._model_id)
-
 
 if __name__ == "__main__":
     unittest.main()

@@ -8,10 +8,10 @@ DeepAgent 自 v0.5.6 起完成模型接入信息与模型事实的归一化分�
 模型目录 Catalog（候选数据）
   -> Provider（地址、密钥、Pydantic AI 适配类型）
     -> Model（模型编码、模态、上下文与能力）
-      -> Agent / 辅助模型（继续引用 model_id）
+      -> Agent / 请求级模型覆盖（继续引用 model_id）
 ```
 
-Provider 是管理员创建的本地运行实例，不等同于 models.dev 的 Provider 编码。同一种类型可以创建多个实例，例如“公司 Kimi”和“测试 Kimi”。Agent、辅助模型、Chat、Session、History、SSE 继续使用既有 `model_id` 协议，不增加自动路由、故障转移或新的凭据服务。
+Provider 是管理员创建的本地运行实例，不等同于 models.dev 的 Provider 编码。同一种类型可以创建多个实例，例如“公司 Kimi”和“测试 Kimi”。Agent、Chat、Session、History、SSE 继续使用既有 `model_id` 协议，不增加自动路由、故障转移或新的凭据服务。
 
 ## 首批 Provider 类型
 
@@ -114,7 +114,7 @@ Pydantic AI继续负责 SDK客户端、认证头、默认地址、Provider Profi
 DeepAgent只负责持久化、授权、两层启停与引用校验、显式工厂选择、脱敏和观测。Provider停用、
 缺失、缺Key、地址无效或模型停用时在请求前失败，不自动切换或重新猜测。
 
-普通Agent、模型覆盖、Prompt估算、上下文测试、标题生成、压缩摘要和辅助模型均使用同一解析器。Catalog 只提供预填数据，不参与运行时关联。
+普通Agent、模型覆盖、Prompt估算、上下文测试、标题生成均使用同一解析器。首轮标题请求使用该轮实际生效模型；压缩摘要固定复用当前Agent已解析的主模型。二者都不提供独立模型配置。Catalog只提供预填数据，不参与运行时关联。
 
 ## Console
 
@@ -123,7 +123,7 @@ DeepAgent只负责持久化、授权、两层启停与引用校验、显式工�
 
 Provider详情中的模型采用固定父子关系：新建和编辑时不允许切换Provider，名称兼容字段由运行模型
 编码同步生成；关联列表直接展示运行模型编码。模型选项只有在Provider和Model两层均启用且连接配置
-完整时才可新选。模型也可由目录预填；目录不会修改Provider凭据。Agent、辅助模型、Console Chat等
+完整时才可新选。模型也可由目录预填；目录不会修改Provider凭据。Agent、Console Chat等
 模型选择器按Provider实例分组，option值和请求参数始终仍是 `llm_model.id` / `model_id`。
 
 DeepCube和DeepTable客户端读取的模型核心字段和发送的`model_id`保持兼容，不要求阻断式改造。为避免

@@ -200,7 +200,7 @@ test("模型选项按 Provider 分组并禁止新选任一层不可用的模型"
   assert.doesNotMatch(preserved, /value="b" selected disabled/);
 });
 
-test("Agent、辅助模型和 Chat 统一复用 Provider 分组模型选项", () => {
+test("Agent 和 Chat 统一复用 Provider 分组模型选项", () => {
   assert.match(coreSource, /renderGroupedModelOptions/);
   assert.match(chatSource, /renderGroupedModelOptions/);
   assert.match(chatSource, /firstSelectableModelId/);

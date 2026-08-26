@@ -15,7 +15,6 @@ const CONFIGURATION_TABS = new Set([
   "skills",
   "mcp",
   "ui-tools",
-  "auxiliary-models",
   "global-settings",
   "database-connection",
   "catalog",
@@ -93,7 +92,6 @@ async function loadAdminScripts() {
     "./configuration/database-connection.js",
     "./configuration/llm-providers.js",
     "./configuration/llm-models.js",
-    "./configuration/auxiliary-models.js",
     "./configuration/agents.js",
     "./configuration/builtin-tools.js",
     "./configuration/system-tools.js",
@@ -152,7 +150,6 @@ export function refreshCurrentConfiguration() {
     ]);
   }
   if (active === "skills") return window.skillsAdmin?.refresh();
-  if (active === "auxiliary-models") return window.auxiliaryModelsAdmin?.refresh();
   if (active === "mcp") return window.mcpAdmin?.refresh();
   if (active === "ui-tools") return window.uiToolsAdmin?.refresh();
   if (active === "catalog") return window.modelCatalogAdmin?.refresh();

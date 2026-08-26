@@ -82,8 +82,6 @@ class GlobalSettingsBuilderTests(unittest.TestCase):
             "deep_agent_dbms_hostname",
             "deep_agent_dbms_user",
             "deep_agent_dbms_database",
-            "deep_agent_title_model_api_key",
-            "deep_agent_title_model_base_url",
             "deep_agent_gemini_proxy",
             "deep_agent_sqlite_path",
             "deep_agent_mcp_runtime_dir",
@@ -99,7 +97,6 @@ class GlobalSettingsBuilderTests(unittest.TestCase):
                 "sandbox",
                 "uploads",
                 "images",
-                "titles",
             ],
         )
 

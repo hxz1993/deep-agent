@@ -133,7 +133,7 @@ class ChatContextReferenceIntegrationTests(unittest.IsolatedAsyncioTestCase):
             )
         )
         self._no_title = patch(
-            "deep_agent.agent.runner.AgentRunner._maybe_generate_title",
+            "deep_agent.agent.runner.AgentRunner._generate_model_title",
             new_callable=AsyncMock,
         )
         self._no_title.start()
@@ -336,7 +336,7 @@ class ChatContextReferenceIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(user["attachments"][0]["id"], "file-1")
         self.assertEqual(user["context_refs"][0]["key"], "current_selection")
 
-    async def test_manual_and_auto_rename_preserve_refs_and_never_read_payload(self) -> None:
+    async def test_manual_rename_preserves_context_refs(self) -> None:
         with patch(
             "deep_agent.agent.factory._resolve_model",
             return_value=text_only_model("ok"),
@@ -362,22 +362,6 @@ class ChatContextReferenceIntegrationTests(unittest.IsolatedAsyncioTestCase):
             )
         self.assertEqual(manual.status_code, 200)
         self.assertEqual(manual.json()["title"], "手动选区分析")
-        self.assertEqual((await self._history(session_id))["messages"], before["messages"])
-
-        title_mock = AsyncMock(return_value="销售预算分析")
-        with patch("deep_agent.agent.title_generator.generate_title", title_mock):
-            async with AsyncClient(transport=self._transport, base_url="http://test") as client:
-                renamed = await client.patch(
-                    f"/api/v1/sessions/{session_id}",
-                    json={"auto": True},
-                )
-        self.assertEqual(renamed.status_code, 200)
-        self.assertEqual(renamed.json()["title"], "销售预算分析")
-        title_mock.assert_awaited_once()
-        kwargs = title_mock.await_args.kwargs
-        self.assertEqual(kwargs["user_text"], "[上下文] 销售预算!B2:C4")
-        self.assertNotIn("cells", str(kwargs))
-        self.assertNotIn("history-only", str(kwargs))
         self.assertEqual((await self._history(session_id))["messages"], before["messages"])
 
     async def test_deferred_results_and_context_refs_are_rejected_before_writing(self) -> None:

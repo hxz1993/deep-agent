@@ -161,33 +161,6 @@
       </div>
     </section>
 
-    <!-- Auxiliary models panel -->
-    <section class="panel" id="panel-auxiliary-models">
-      <div class="panel-toolbar">
-        <div>
-          <h2>辅助工具</h2>
-          <p class="panel-subtitle">辅助任务默认复用对话主模型；可为固定场景指定专用模型配置。</p>
-        </div>
-      </div>
-      <div class="table-wrap console-list-a">
-        <table class="data-table">
-          <thead>
-            <tr>
-              <th>场景</th>
-              <th>说明</th>
-              <th>模型配置</th>
-              <th>Provider</th>
-              <th>Provider 状态</th>
-              <th>操作</th>
-            </tr>
-          </thead>
-          <tbody id="auxiliaryModelsTableBody">
-            <tr><td colspan="6" class="empty-cell">加载中…</td></tr>
-          </tbody>
-        </table>
-      </div>
-    </section>
-
     <!-- MCP panel -->
     <section class="panel" id="panel-mcp">
       <div class="panel-toolbar">
@@ -493,28 +466,6 @@
       <div class="modal-footer">
         <button type="button" class="btn" id="cancelProviderCatalogPickerBtn">取消</button>
         <button type="submit" class="btn primary" id="confirmProviderCatalogPickerBtn" disabled>添加所选</button>
-      </div>
-    </form>
-  </dialog>
-
-  <!-- Auxiliary model modal -->
-  <dialog class="modal" id="auxiliaryModelModal">
-    <form id="auxiliaryModelForm" method="dialog">
-      <div class="modal-header">
-        <h3 id="auxiliaryModelModalTitle">更改辅助模型</h3>
-        <button type="button" class="icon-btn" id="closeAuxiliaryModelModal" aria-label="关闭"><i data-lucide="x"></i></button>
-      </div>
-      <div class="modal-body">
-        <p class="field-hint" id="auxiliaryModelModalHint"></p>
-        <label class="field">
-          <span>模型配置</span>
-          <select id="auxiliaryModelSelect" required></select>
-        </label>
-      </div>
-      <div class="form-error hidden" data-form-error role="alert" aria-live="assertive"></div>
-      <div class="modal-footer">
-        <button type="button" class="btn" id="cancelAuxiliaryModelBtn">取消</button>
-        <button type="submit" class="btn primary">保存</button>
       </div>
     </form>
   </dialog>

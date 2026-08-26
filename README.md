@@ -16,7 +16,7 @@ Console 对话测试提供独立的“对话 / 轨迹”页签。会话历史、
 [`docs/design/18-session-trajectory/`](docs/design/18-session-trajectory/)。
 
 v0.5.6 完成 Provider + Model 两层配置：Provider 独占 Pydantic AI 适配类型、地址和密钥，
-Model 只保存 Provider 外键、模型编码与能力属性；两层启停共同决定模型是否可用。Agent、辅助模型和
+Model 只保存 Provider 外键、模型编码与能力属性；两层启停共同决定模型是否可用。Agent和
 聊天请求继续只引用 `model_id`，模型目录仍是只读候选数据，不参与运行时关联。设计与迁移边界见
 [`docs/design/19-model-provider-architecture/`](docs/design/19-model-provider-architecture/)。
 

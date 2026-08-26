@@ -296,25 +296,6 @@ class UiToolDefinition(Base):
     package: Mapped[UiToolPackage] = relationship("UiToolPackage", lazy="joined")
 
 
-class AuxiliaryModelConfig(Base):
-    __tablename__ = "auxiliary_model_configs"
-
-    use_case: Mapped[str] = mapped_column(String(64), primary_key=True)
-    llm_model_id: Mapped[str | None] = mapped_column(
-        String(AGENT_ID_LENGTH),
-        ForeignKey("llm_models.id", ondelete="SET NULL"),
-        nullable=True,
-    )
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        server_default=func.now(),
-        onupdate=func.now(),
-        nullable=False,
-    )
-    llm_model: Mapped[LlmModel | None] = relationship("LlmModel", lazy="joined")
-
-
 class ChatSessionEvent(Base):
     __tablename__ = "chat_session_events"
     __table_args__ = (

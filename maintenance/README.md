@@ -26,7 +26,6 @@ deep-agent-config-<环境>-v<数据库版本>-<时间>.db
 - `skill_packages`
 - `ui_tool_packages`
 - `ui_tool_definitions`
-- `auxiliary_model_configs`
 - `alembic_version`
 
 `chat_sessions` 和 `chat_session_events` 只保留表结构，不复制会话事件。备份中的
@@ -52,6 +51,9 @@ Hash、Manifest 和资源索引，不包含平台文件服务中的原始 ZIP，
 `skills/<code>.zip`都可在目标环境通过现有“上传安装”导入。若当前环境中的File ID已经失效，
 先在Skill管理页重新提交相同ZIP修复原包，再重新导出。Agent的Skill选择仍保存在配置DB中，
 导出的Skill ZIP不携带Agent绑定。
+
+会话标题不再有独立模型配置；首轮标题请求直接复用该轮实际生效的Provider和模型，因此配置备份
+无需保存标题专用表或环境变量。
 
 备份工具只负责数据库配置备份，不提供恢复命令。Skill原包的跨环境迁移由独立的单个/全部导出
 负责，两者职责不合并，避免把平台二进制文件塞入配置数据库。
@@ -135,7 +137,7 @@ SQLite副本验证，不能连接共享Test数据库。
 
 Alembic `008`是有意的破坏性会话迁移：删除Revision 007的旧会话、消息和上下文投影，建立新的
 `chat_sessions`与`chat_session_events`，不转换旧历史。Provider、Model、Agent、MCP、Skill、
-UI Tool、辅助模型和模型目录数据不变。
+UI Tool和模型目录数据不变；旧的会话标题模型映射由Revision 008删除。
 
 共享环境发布顺序固定为：先用007代码生成并验证配置备份和会话归档；构建并推送0.6.0镜像；进入
 维护窗口并停止全部旧实例与旧镜像自动扩容；复核Revision和物理表；启动新镜像执行008；核对配置

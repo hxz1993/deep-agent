@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import AsyncMock, patch
 
 from pydantic import ValidationError
 from pydantic_ai import Agent
@@ -269,12 +270,16 @@ class ContextReferenceRunnerTests(unittest.IsolatedAsyncioTestCase):
         )
         runner = AgentRunner(agent, self.store, UsageLimits(request_limit=5))
         deps = AgentDeps(session_id="ctx-run", user="u1", agent_id=self.agent.id)
-        await runner.run(
-            "ctx-run",
-            "分析",
-            deps,
-            context_refs=[_ref()],
-        )
+        with patch(
+            "deep_agent.agent.title_generator.generate_title",
+            new=AsyncMock(return_value=None),
+        ):
+            await runner.run(
+                "ctx-run",
+                "分析",
+                deps,
+                context_refs=[_ref()],
+            )
 
         provider_text = str(captured[0])
         self.assertIn("<context_references>", provider_text)

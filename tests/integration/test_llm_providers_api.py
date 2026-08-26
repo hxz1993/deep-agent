@@ -223,7 +223,7 @@ class LlmProviderApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(enabled_model.status_code, 200, enabled_model.text)
         self.assertTrue(enabled_model.json()["enabled"])
 
-    async def test_disabled_model_blocks_new_agent_and_auxiliary_selection(self) -> None:
+    async def test_disabled_model_blocks_new_agent_selection(self) -> None:
         provider_id = self._default_model.provider_id
         existing_agent = await self._client.post(
             "/api/v1/agents",
@@ -234,12 +234,6 @@ class LlmProviderApiTests(unittest.IsolatedAsyncioTestCase):
             },
         )
         self.assertEqual(existing_agent.status_code, 201, existing_agent.text)
-        selected_auxiliary = await self._client.patch(
-            "/api/v1/auxiliary-models/title",
-            json={"llm_model_id": self._default_model.id},
-        )
-        self.assertEqual(selected_auxiliary.status_code, 200, selected_auxiliary.text)
-
         provider_flag = await self._client.patch(
             f"/api/v1/llm-providers/{provider_id}",
             json={"enabled": False},
@@ -303,23 +297,6 @@ class LlmProviderApiTests(unittest.IsolatedAsyncioTestCase):
             json={"prompt": "unrelated edit remains valid"},
         )
         self.assertEqual(preserved_agent.status_code, 200, preserved_agent.text)
-
-        preserved_auxiliary = await self._client.patch(
-            "/api/v1/auxiliary-models/title",
-            json={"llm_model_id": self._default_model.id},
-        )
-        self.assertEqual(preserved_auxiliary.status_code, 200, preserved_auxiliary.text)
-        cleared_auxiliary = await self._client.patch(
-            "/api/v1/auxiliary-models/title",
-            json={"llm_model_id": None},
-        )
-        self.assertEqual(cleared_auxiliary.status_code, 200, cleared_auxiliary.text)
-        rejected_auxiliary = await self._client.patch(
-            "/api/v1/auxiliary-models/title",
-            json={"llm_model_id": self._default_model.id},
-        )
-        self.assertEqual(rejected_auxiliary.status_code, 422, rejected_auxiliary.text)
-        self.assertIn("disabled", rejected_auxiliary.text)
 
     async def test_compact_provider_id_lifecycle_and_model_filter(self) -> None:
         created = await self._client.post(

@@ -134,7 +134,7 @@ HTTP → deep_agent/api/v1 → AgentRunner → pydantic_ai.Agent → Toolsets
 - v0.5.5增加独立`llm_providers`配置层、九类Pydantic AI适配与Provider分栏Console，运行时开始按显式Provider类型构造原生Provider/Model，不再按模型前缀或URL猜协议。
 - v0.5.7压缩Provider详情接入信息：Base URL改为单行图标事实，地址模式、Key和启停状态改为紧凑胶囊，运行协议并入Provider副标题；仅调整Console展示，不改变Provider、Model、迁移或外部接口。
 - v0.5.8完善纯本地SQLite调试：`local_dev`可通过仓库外Profile显式开启仅限回环进程内部ASGI scope的管理鉴权旁路，无需平台Token、App或Space即可维护Provider、Model、Agent并执行基础对话；Profile值覆盖同名环境变量，部署入口、外部Header和平台文件/MCP上下文均不放行。数据库Head仍为`007`。
-- v0.5.6完成Provider + Model两层归一化：Provider独占Base URL和密钥，`llm_models.provider_id`建立`RESTRICT`外键，模型名只在Provider内唯一；Provider和Model启停共同形成有效门禁，API以`selectable/unavailable_reason`披露状态。Agent、辅助模型、Chat、Session覆盖、标题与上下文估算继续引用`model_id`并统一解析Provider，外部REST、SSE与History核心协议不变。
+- v0.5.6完成Provider + Model两层归一化：Provider独占Base URL和密钥，`llm_models.provider_id`建立`RESTRICT`外键，模型名只在Provider内唯一；Provider和Model启停共同形成有效门禁，API以`selectable/unavailable_reason`披露状态。Agent、Chat、Session覆盖、标题与上下文估算统一通过`model_id`解析Provider，外部REST、SSE与History核心协议不变。
 - v0.3.20 起上传 Skill 在每个 Pod 只保留 `runtime-skills/<code>/` 一份当前运行文件。服务启动、安装、替换、启用和手工重载负责同步；普通 Run 只读本地目录。单个 Skill 文件不可用时跳过该 Skill并继续回答，状态通过 `/skills`、Console 和 `final.context.skills` 诊断。
 - v0.3.23 起替换相同 Hash的上传 Skill也必须先检查平台原 ZIP；原包可下载才返回 `noop`，原 File ID失效时重新上传、更新数据库 File ID并返回 `repaired`。只恢复当前 Pod目录而不修复平台事实源属于不完整修复。
 - 上传 Skill 的平台 ZIP 是系统级配置文件，不属于业务 App/Space。平台文件使用可无 Space 回读的 `INF` 类型；安装、替换、启动恢复、管理员下载和 Run 兜底均保留调用身份但主动去掉 `app/space/language`业务上下文，保证同一 File ID 始终按系统级语义访问。不得改用 Space 级 `UPL`，数据库也不得保存请求上下文、Token、Cookie 或完整 Header。

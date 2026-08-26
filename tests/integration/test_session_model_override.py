@@ -17,7 +17,6 @@ from deep_agent.schemas.agent import AgentCreate
 from deep_agent.schemas.llm_model import LlmModelCreate
 from tests.helpers.request_identity import install_test_user_header
 from tests.helpers.sqlite_stores import (
-    ensure_title_uses_main_model,
     get_default_test_provider_id,
     make_sqlite_stores,
 )
@@ -48,7 +47,6 @@ _VALID_COMPACTION_SUMMARY = """## 1. Primary Request and Intent
 class SessionModelOverrideIntegrationTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         stores, self._engine, session_factory = await make_sqlite_stores()
-        await ensure_title_uses_main_model(stores)
         self._app = FastAPI()
         install_test_user_header(self._app)
         self._app.include_router(api_router)
@@ -62,7 +60,7 @@ class SessionModelOverrideIntegrationTests(unittest.IsolatedAsyncioTestCase):
             )
         )
         self._no_title = patch(
-            "deep_agent.agent.runner.AgentRunner._maybe_generate_title",
+            "deep_agent.agent.runner.AgentRunner._generate_model_title",
             new_callable=AsyncMock,
         )
         self._no_title.start()

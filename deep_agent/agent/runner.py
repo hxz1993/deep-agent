@@ -79,8 +79,6 @@ from deep_agent.agent.planning import (
 from deep_agent.agent.run_identity import conversation_id_for, new_run_id
 from deep_agent.agent.tool_output_limits import PlatformToolResultStore
 from deep_agent.agent.history import (
-    _extract_assistant_text,
-    first_user_prompt,
     incremental_append_messages,
     mark_cancelled_response_interrupted,
     repair_unprocessed_tool_calls,
@@ -89,7 +87,6 @@ from deep_agent.capabilities.ui.registry import enrich_deferred, enrich_tool_eve
 from loguru import logger
 
 from deep_agent.db.conversation import SessionStore
-from deep_agent.db.stores.bundle import DataStores
 from deep_agent.db.serialization import serialize_message
 from deep_agent.schemas.attachment import AttachmentRef
 from deep_agent.schemas.context_reference import ContextReference
@@ -103,6 +100,7 @@ class _PreparedHistory:
     projected: list[ModelMessage]
     raw: list[ModelMessage]
     pre_persisted_user: bool
+    user_event_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -158,10 +156,11 @@ class AgentRunner:
         max_output_tokens: int | None = None,
         model_tags: list[str] | None = None,
         context_compaction: DeepAgentContextCompaction | None = None,
-        summary_model_id: str | None = None,
         model_id: str | None = None,
+        model_name: str | None = None,
+        provider_id: str | None = None,
+        provider_type: str | None = None,
         estimator: TokenEstimator | None = None,
-        stores: DataStores | None = None,
         active_runs: ActiveRunRegistry | None = None,
         skill_runtime_context: dict[str, Any] | None = None,
         tool_output_store: PlatformToolResultStore | None = None,
@@ -175,10 +174,11 @@ class AgentRunner:
         self._max_output_tokens = max_output_tokens
         self._model_tags = list(model_tags or [])
         self._context_compaction = context_compaction
-        self._summary_model_id = summary_model_id
-        self._model_id = model_id or summary_model_id
+        self._model_id = model_id
+        self._model_name = model_name
+        self._provider_id = provider_id
+        self._provider_type = provider_type
         self._estimator = estimator or TokenEstimator.conservative()
-        self._stores = stores
         self._active_runs = active_runs or ActiveRunRegistry()
         self._skill_runtime_context = skill_runtime_context
         self._tool_output_store = tool_output_store
@@ -672,7 +672,7 @@ class AgentRunner:
                     "event_id": event.event_id,
                     "through_sequence": event.payload["source"]["through_sequence"],
                     "projected_estimated_tokens": event.payload["budget"]["estimated_after"],
-                    "summary_model_id": self._summary_model_id,
+                    "summary_model_id": self._model_id,
                     "updated_at": event.updated_at.isoformat(),
                 },
             )
@@ -700,6 +700,7 @@ class AgentRunner:
             if repaired is not history:
                 history = repaired
         pre_persisted_user = False
+        user_event_id: str | None = None
         if has_user_turn(message, attachments, context_refs):
             content = refs_from_attachments(message, attachments, context_refs)
             user_request = ModelRequest(parts=[UserPromptPart(content=content)])
@@ -722,6 +723,8 @@ class AgentRunner:
                             "event": row.public_dict(),
                         }
                     )
+            if rows:
+                user_event_id = rows[0].event_id
             history = [*history, user_request]
             raw_history = [*raw_history, user_request]
             pre_persisted_user = True
@@ -734,6 +737,7 @@ class AgentRunner:
             projected=history,
             raw=raw_history,
             pre_persisted_user=pre_persisted_user,
+            user_event_id=user_event_id,
         )
 
     def _context_status(
@@ -959,7 +963,7 @@ class AgentRunner:
             projected_history=projected_history,
             summary_markdown=summaries[-1],
             trigger=trigger,
-            model_id=self._summary_model_id,
+            model_id=self._model_id,
             estimated_before=self._estimator.messages(raw_history),
             estimated_after=self._estimator.messages(projected_history),
             target_tokens=target_tokens,
@@ -1149,86 +1153,136 @@ class AgentRunner:
         )
 
 
-    async def _maybe_generate_title(
+    async def _start_title_generation(
         self,
         session_id: str,
         deps: AgentDeps,
-        new_messages: list[ModelMessage],
-    ) -> None:
-        """后台生成并持久化会话标题。"""
+        prepared: _PreparedHistory,
+        *,
+        message: str,
+        attachments: list[AttachmentRef] | None,
+        context_refs: list[ContextReference] | None,
+        session_event_queue: asyncio.Queue[dict[str, Any]] | None = None,
+    ) -> asyncio.Task[None] | None:
+        """Persist the fallback once, then start one independent model request."""
+
+        if prepared.user_event_id is None:
+            return None
+        from deep_agent.agent.title_generator import fallback_title
+
+        details = {
+            "context_count": len(context_refs or ()),
+            "attachment_count": len(attachments or ()),
+            "image_used": False,
+        }
         try:
-            async with self._session_lock(session_id, agent_id=deps.agent_id):
-                history = await self.store.get_history(session_id, agent_id=deps.agent_id)
-                user_count = sum(1 for m in history if isinstance(m, ModelRequest))
-                if not (user_count <= 1):
-                    return
+            fallback = await self.store.ensure_title_fallback(
+                session_id,
+                agent_id=deps.agent_id,
+                user_id=deps.user,
+                title=fallback_title(message, context_refs, attachments),
+                source_event_id=prepared.user_event_id,
+                turn_id=deps.turn_id,
+                run_id=deps.run_id,
+                details=details,
+            )
+        except Exception as exc:  # noqa: BLE001 - title must never fail the chat run
+            logger.warning(
+                "Fallback title persistence failed for session {}: {}",
+                session_id,
+                type(exc).__name__,
+            )
+            return None
+        if fallback is None:
+            return None
+        if session_event_queue is not None:
+            session_event_queue.put_nowait(
+                {
+                    "type": "session_event_appended",
+                    "persisted": True,
+                    "event": fallback.public_dict(),
+                }
+            )
+        return asyncio.create_task(
+            self._generate_model_title(
+                session_id,
+                deps,
+                fallback_event=fallback,
+                message=message,
+                attachments=attachments,
+                context_refs=context_refs,
+                session_event_queue=session_event_queue,
+            ),
+            name=f"session-title:{session_id}",
+        )
 
-                user_text = first_user_prompt(history) or ""
-                existing = await self.store.get_session_title(session_id, agent_id=deps.agent_id)
-                # 已有非 seed 标题（AI 或手动）则不再覆盖；seed 与用户首句相同时允许 AI 升级。
-                if existing and (not user_text or existing != user_text):
-                    return
+    async def _generate_model_title(
+        self,
+        session_id: str,
+        deps: AgentDeps,
+        *,
+        fallback_event: Any,
+        message: str,
+        attachments: list[AttachmentRef] | None,
+        context_refs: list[ContextReference] | None,
+        session_event_queue: asyncio.Queue[dict[str, Any]] | None,
+    ) -> None:
+        from deep_agent.agent.title_generator import generate_title
 
-            assistant_text = _extract_assistant_text(new_messages) or _extract_assistant_text(history)
-
-            from deep_agent.agent.title_generator import generate_title
-
-            title = await generate_title(
-                user_text=user_text,
-                assistant_text=assistant_text or user_text,
-                main_model=self.agent.model,
-                auxiliary_store=(
-                    self._stores.auxiliary_model if self._stores is not None else None
-                ),
-                llm_model_store=(
-                    self._stores.llm_model if self._stores is not None else None
-                ),
-                llm_configuration_store=(
-                    self._stores.llm_configuration
-                    if self._stores is not None
-                    else None
-                ),
+        try:
+            result = await generate_title(
+                model=self.agent.model,
+                user_text=message,
+                context_refs=context_refs,
+                attachments=attachments,
+                file_store=deps.file_store,
+                request_headers=deps.request_headers,
+            )
+            if result is None:
+                return
+            event = await self.store.apply_session_title(
+                session_id,
+                agent_id=deps.agent_id,
+                user_id=deps.user,
+                title=result.title,
+                source="model",
+                source_event_id=fallback_event.payload.get("source_event_id"),
+                turn_id=deps.turn_id,
+                run_id=deps.run_id,
+                expected_event_id=fallback_event.event_id,
+                details={
+                    "provider_id": self._provider_id,
+                    "provider_type": self._provider_type,
+                    "model_id": self._model_id,
+                    "model_name": self._model_name,
+                    "context_count": len(context_refs or ()),
+                    "attachment_count": len(attachments or ()),
+                    "image_used": result.image_used,
+                },
+            )
+        except Exception as exc:  # noqa: BLE001 - fallback remains authoritative
+            logger.warning(
+                "Model title persistence failed for session {}: {}",
+                session_id,
+                type(exc).__name__,
+            )
+            return
+        if event is not None and session_event_queue is not None:
+            session_event_queue.put_nowait(
+                {
+                    "type": "session_event_appended",
+                    "persisted": True,
+                    "event": event.public_dict(),
+                }
             )
 
-            if not title:
-                title = user_text
-
-            if title:
-                async with self._session_lock(session_id, agent_id=deps.agent_id):
-                    latest = await self.store.get_session_title(session_id, agent_id=deps.agent_id)
-                    if latest and (not user_text or latest != user_text):
-                        return
-                    conditional_update = getattr(
-                        self.store, "update_session_title_if_current", None
-                    )
-                    if callable(conditional_update):
-                        await conditional_update(
-                            session_id,
-                            deps.agent_id,
-                            expected_title=latest,
-                            title=title,
-                        )
-                    else:
-                        await self.store.update_session_title(
-                            session_id, deps.agent_id, title
-                        )
-
-        except Exception as e:
-            logger.warning("Title generation failed for session {}: {}", session_id, e)
-
-    async def _generate_title_after_persist(
-        self,
-        persister: EventPersister,
-        session_id: str,
-        deps: AgentDeps,
-        new_messages: list[ModelMessage],
-    ) -> None:
-        try:
-            await persister.flush(session_id, agent_id=deps.agent_id)
-        except Exception as exc:  # noqa: BLE001 - background task must not leak failures
-            logger.warning("Title persistence wait failed for session {}: {}", session_id, exc)
+    @staticmethod
+    async def _cancel_title_task(task: asyncio.Task[None] | None) -> None:
+        if task is None or task.done():
             return
-        await self._maybe_generate_title(session_id, deps, new_messages)
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
 
     async def run(
         self,
@@ -1260,6 +1314,7 @@ class AgentRunner:
             mode="non_stream",
         )
         self._set_tool_discovery_inputs(deps, message, context_refs)
+        title_task: asyncio.Task[None] | None = None
         async with self._session_lock(session_id, agent_id=deps.agent_id):
             try:
                 prepared = await self._prepare_history(
@@ -1280,6 +1335,14 @@ class AgentRunner:
                     error=type(exc).__name__,
                 )
                 raise
+            title_task = await self._start_title_generation(
+                session_id,
+                deps,
+                prepared,
+                message=message,
+                attachments=attachments,
+                context_refs=context_refs,
+            )
             self._bind_tool_output_store(deps, prepared.raw)
             try:
                 llm_history, user_prompt = await self._llm_inputs(
@@ -1302,6 +1365,7 @@ class AgentRunner:
                     usage=None,
                     error=type(exc).__name__,
                 )
+                await self._cancel_title_task(title_task)
                 raise
             self._prepare_context_state(deps, prepared)
             try:
@@ -1324,6 +1388,7 @@ class AgentRunner:
                     usage=getattr(exc, "usage", None),
                     error=type(exc).__name__,
                 )
+                await self._cancel_title_task(title_task)
                 raise
             new_messages = result.new_messages()
             await self._attach_final_plan_snapshot(new_messages, deps)
@@ -1355,6 +1420,8 @@ class AgentRunner:
                     if compaction_event is False
                     else True
                 )
+        if title_task is not None:
+            await title_task
         response = _build_run_result(result, self.ui_tool_hints)
         response["conversation_id"] = result.conversation_id or deps.conversation_id
         response["run_id"] = result.run_id or deps.run_id
@@ -1584,6 +1651,7 @@ class AgentRunner:
         cancelled_messages: list[ModelMessage] = []
         published_tool_calls: dict[str, str] = {}
         session_events: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+        title_task: asyncio.Task[None] | None = None
         self._set_tool_discovery_inputs(deps, message, context_refs)
         async with self._session_lock(session_id, agent_id=deps.agent_id):
             try:
@@ -1619,6 +1687,15 @@ class AgentRunner:
                     raise
                 yield events.error(format_stream_error(exc))
                 return
+            title_task = await self._start_title_generation(
+                session_id,
+                deps,
+                prepared,
+                message=message,
+                attachments=attachments,
+                context_refs=context_refs,
+                session_event_queue=session_events,
+            )
             self._bind_tool_output_store(deps, prepared.raw)
             try:
                 llm_history, user_prompt = await self._llm_inputs(
@@ -1652,6 +1729,7 @@ class AgentRunner:
                     format_stream_error(exc),
                     history_persisted=prepared.pre_persisted_user,
                 )
+                await self._cancel_title_task(title_task)
                 return
             self._prepare_context_state(
                 deps,
@@ -1784,23 +1862,16 @@ class AgentRunner:
                     if not deferred_pending and pre_saved_compaction_event is None:
                         compaction_projection = result.all_messages()
 
-                    if branch_from is None:
-                        asyncio.create_task(
-                            self._generate_title_after_persist(
-                                persister,
-                                session_id,
-                                deps,
-                                new_messages,
-                            )
-                        )
             except RunCancelled as exc:
                 cancelled_run = exc
             except asyncio.CancelledError as exc:
                 active_run.cancellation_token.cancel()
                 cancelled_run = RunCancelled.from_cancellation(exc)
+                await self._cancel_title_task(title_task)
                 raise
             except GeneratorExit:
                 active_run.cancellation_token.cancel()
+                await self._cancel_title_task(title_task)
                 raise
             except Exception as exc:  # noqa: BLE001 - surface as an SSE error event
                 logger.exception("Agent stream failed for session {}", session_id)
@@ -1829,6 +1900,7 @@ class AgentRunner:
                     format_stream_error(exc),
                     history_persisted=prepared.pre_persisted_user,
                 )
+                await self._cancel_title_task(title_task)
                 return
             finally:
                 if cancelled_run is not None and not run_published:
@@ -1847,6 +1919,7 @@ class AgentRunner:
                 self._active_runs.unregister(active_run)
 
         if cancelled_run is not None:
+            await self._cancel_title_task(title_task)
             pending = cancelled_messages
             history_persisted = False
             try:
@@ -1948,7 +2021,12 @@ class AgentRunner:
                         "event": failed_run_event.public_dict(),
                     }
                 yield events.error(f"会话事件持久化失败：{type(exc).__name__}")
+                await self._cancel_title_task(title_task)
                 return
+            while not session_events.empty():
+                yield session_events.get_nowait()
+        if title_task is not None:
+            await title_task
             while not session_events.empty():
                 yield session_events.get_nowait()
         compaction_event_saved: bool | None = (

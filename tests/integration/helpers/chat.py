@@ -21,7 +21,6 @@ from deep_agent.core.context import AppContext, get_context, init_context, reset
 from deep_agent.db.stores.bundle import DataStores
 from deep_agent.schemas.mcp import McpServerCreate
 from tests.helpers.sqlite_stores import (
-    ensure_title_uses_main_model,
     make_sqlite_stores,
     make_sqlite_stores_sync,
     seed_default_agent,
@@ -212,7 +211,6 @@ def configure_test_app(
     )
     import asyncio
 
-    asyncio.run(ensure_title_uses_main_model(ctx.stores))
     app.state.test_agent_id = asyncio.run(
         seed_default_agent(ctx.stores, name="sync-chat-agent")
     )
@@ -235,7 +233,6 @@ async def configure_test_app_async(
         db_engine=db_engine,
         db_session_factory=db_session_factory,
     )
-    await ensure_title_uses_main_model(ctx.stores)
     app.state.test_agent_id = await seed_default_agent(
         ctx.stores,
         name="async-chat-agent",

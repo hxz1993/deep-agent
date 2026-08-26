@@ -194,6 +194,64 @@ class SessionEventStore(SessionBoundMixin):
         await db.flush()
         return row
 
+    async def _latest_title(
+        self,
+        db: AsyncSession,
+        session_id: str,
+    ) -> ChatSessionEvent | None:
+        return (
+            await db.execute(
+                select(ChatSessionEvent)
+                .where(
+                    ChatSessionEvent.session_id == session_id,
+                    ChatSessionEvent.event_type == "session/title",
+                )
+                .order_by(ChatSessionEvent.sequence.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+
+    async def _append_title(
+        self,
+        db: AsyncSession,
+        session: ChatSession,
+        *,
+        title: str,
+        source: Literal["fallback", "model", "user"],
+        source_event_id: str | None,
+        turn_id: str | None,
+        run_id: str | None,
+        details: dict[str, Any] | None = None,
+        now: datetime | None = None,
+    ) -> ChatSessionEvent:
+        timestamp = now or datetime.now(timezone.utc)
+        payload: dict[str, Any] = {
+            "title": title,
+            "source": source,
+            "source_event_id": source_event_id,
+        }
+        payload.update(details or {})
+        row = ChatSessionEvent(
+            event_id=new_event_id(),
+            session_id=session.session_id,
+            sequence=int(session.next_sequence),
+            schema_version=1,
+            event_type="session/title",
+            status=None,
+            turn_id=turn_id,
+            run_id=run_id,
+            search_text=None,
+            payload=payload,
+            created_at=timestamp,
+            updated_at=timestamp,
+        )
+        session.next_sequence = int(session.next_sequence) + 1
+        session.title = title
+        session.updated_at = timestamp
+        db.add(row)
+        await db.flush()
+        return row
+
     async def _append_terminal(
         self, db: AsyncSession, session: ChatSession, *,
         status: LifecycleStatus, turn_id: str | None, run_id: str,

@@ -57,7 +57,7 @@ class ChatAttachmentToolIntegrationTests(unittest.IsolatedAsyncioTestCase):
         )
         self.transport = ASGITransport(app=self.app)
         self._no_title = patch(
-            "deep_agent.agent.runner.AgentRunner._maybe_generate_title",
+            "deep_agent.agent.runner.AgentRunner._generate_model_title",
             new_callable=AsyncMock,
         )
         self._no_title.start()

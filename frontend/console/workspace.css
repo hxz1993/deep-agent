@@ -197,7 +197,6 @@ html, body {
 .session-item:hover .session-actions,
 .session-item.active .session-actions { opacity: 1; }
 .session-item .rename-btn,
-.session-item .auto-rename-btn,
 .session-item .del {
   width: 24px;
   height: 24px;
@@ -210,8 +209,7 @@ html, body {
   line-height: 1;
 }
 .session-item .session-actions svg { width: 13px; height: 13px; display: block; }
-.session-item .rename-btn:hover,
-.session-item .auto-rename-btn:hover { color: var(--accent-hover); background: var(--accent-soft); }
+.session-item .rename-btn:hover { color: var(--accent-hover); background: var(--accent-soft); }
 .session-item .del:hover { color: var(--danger); background: var(--danger-soft); }
 .session-title-input {
   width: 100%;

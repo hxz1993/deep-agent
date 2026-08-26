@@ -129,8 +129,6 @@ const state = {
   skipHistoryRefresh: false,
   modelMessageCount: 0,
   pendingAttachments: [],
-  pendingTitleRefresh: false,
-  titlePollGeneration: 0,
   contextStatus: null,
   lastRunUsage: null,
   lastRunMetrics: null,
@@ -145,9 +143,6 @@ const state = {
   planTerminalStatus: null,
   planningCallIds: new Set(),
 };
-
-const TITLE_POLL_TIMEOUT_MS = 30000;
-const TITLE_POLL_INTERVAL_MS = 500;
 
 const LLM_MODALITY_LABELS = {
   text: "文本",
@@ -670,10 +665,6 @@ function newChat(agentId) {
     return;
   }
   state.manualCompactionController?.abort();
-  cancelTitlePoll();
-  state.pendingTitleRefresh = false;
-  cancelTitlePoll();
-  state.pendingTitleRefresh = false;
   if (id) {
     state.agentId = id;
     localStorage.setItem("da_console_agent_id_v1", state.agentId);
@@ -725,10 +716,6 @@ function upsertSession(id, title, agentId, agentName) {
   renderSessions();
 }
 
-function cancelTitlePoll() {
-  state.titlePollGeneration += 1;
-}
-
 function applySessionTitle(session, title) {
   const normalized = normalizeSession(session);
   const displayTitle = (title || "").slice(0, 40);
@@ -745,55 +732,6 @@ function applySessionTitle(session, title) {
     el.chatTitle.textContent = displayTitle;
   }
   renderSessions();
-}
-
-function knownSessionTitle(session) {
-  const normalized = normalizeSession(session);
-  const key = sessionLookupKey(normalized);
-  const found = state.sessions.find((s) => sessionLookupKey(s) === key);
-  return found?.title || "";
-}
-
-async function pollSessionTitle(session, knownTitle, generation) {
-  const normalized = normalizeSession(session);
-  const deadline = Date.now() + TITLE_POLL_TIMEOUT_MS;
-
-  while (Date.now() < deadline) {
-    if (generation !== state.titlePollGeneration) return;
-    await new Promise((r) => setTimeout(r, TITLE_POLL_INTERVAL_MS));
-    if (generation !== state.titlePollGeneration) return;
-
-    try {
-      const r = await daFetch(sessionApiUrl(normalized));
-      if (!r.ok) continue;
-      const data = await r.json();
-      const title = data.title ? data.title.slice(0, 40) : "";
-      if (title && title !== knownTitle) {
-        applySessionTitle(normalized, title);
-        return;
-      }
-    } catch (_) {
-      /* retry until timeout */
-    }
-  }
-
-  if (generation === state.titlePollGeneration) {
-    await syncSessionsFromBackend();
-    const key = sessionLookupKey(normalized);
-    const existing = state.sessions.find((s) => sessionLookupKey(s) === key);
-    if (existing?.title && existing.title !== knownTitle) {
-      applySessionTitle(normalized, existing.title);
-    }
-  }
-}
-
-function scheduleTitleRefresh() {
-  if (!state.sessionId) return;
-  const session = { id: state.sessionId, agentId: state.agentId };
-  const knownTitle = knownSessionTitle(session) || lastUserText().slice(0, 40);
-  cancelTitlePoll();
-  const generation = state.titlePollGeneration;
-  void pollSessionTitle(session, knownTitle, generation);
 }
 
 function renderSessions() {
@@ -818,7 +756,7 @@ function renderSessions() {
     li.className =
       "session-item" +
       (s.id === state.sessionId && (s.agentId || "") === (state.agentId || "") ? " active" : "");
-    li.innerHTML = `<span class="sid" title="${escapeHtml(s.title)}"><span class="session-title">${escapeHtml(s.title)}</span><span class="session-meta"><span>${escapeHtml(formatSessionActivity(s))}</span><span class="session-meta-dot" aria-hidden="true"></span><span>${escapeHtml(formatSessionMessageCount(s))}</span></span></span><span class="session-actions"><span class="rename-btn" title="重命名" aria-label="重命名">${lucideIcon("pencil")}</span><span class="auto-rename-btn" title="自动重命名" aria-label="自动重命名">${lucideIcon("refresh-cw")}</span><span class="del" title="删除" aria-label="删除">${lucideIcon("trash-2")}</span></span>`;
+    li.innerHTML = `<span class="sid" title="${escapeHtml(s.title)}"><span class="session-title">${escapeHtml(s.title)}</span><span class="session-meta"><span>${escapeHtml(formatSessionActivity(s))}</span><span class="session-meta-dot" aria-hidden="true"></span><span>${escapeHtml(formatSessionMessageCount(s))}</span></span></span><span class="session-actions"><span class="rename-btn" title="重命名" aria-label="重命名">${lucideIcon("pencil")}</span><span class="del" title="删除" aria-label="删除">${lucideIcon("trash-2")}</span></span>`;
     li.querySelector(".sid").addEventListener("click", (e) => {
       if (e.target.closest(".session-title-input")) return;
       switchSession(s);
@@ -826,17 +764,6 @@ function renderSessions() {
     li.querySelector(".rename-btn").addEventListener("click", (e) => {
       e.stopPropagation();
       startInlineEdit(s, li.querySelector(".session-title"));
-    });
-    li.querySelector(".auto-rename-btn").addEventListener("click", async (e) => {
-      e.stopPropagation();
-      const titleEl = li.querySelector(".session-title");
-      const originalTitle = titleEl.textContent;
-      titleEl.textContent = "生成中…";
-      const result = await autoRenameSession(s);
-      // 如果失败，恢复原标题
-      if (!result) {
-        titleEl.textContent = originalTitle;
-      }
     });
     li.querySelector(".del").addEventListener("click", (e) => {
       e.stopPropagation();
@@ -853,8 +780,6 @@ async function switchSession(s) {
     return;
   }
   state.manualCompactionController?.abort();
-  cancelTitlePoll();
-  state.pendingTitleRefresh = false;
   const session = normalizeSession(s);
   state.sessionId = session.id;
   state.lastRunUsage = null;
@@ -1429,39 +1354,6 @@ async function renameSession(session, newTitle) {
   }
 }
 
-async function autoRenameSession(session) {
-  const normalized = normalizeSession(session);
-  try {
-    const r = await daFetch(sessionApiUrl(normalized), {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ auto: true }),
-    });
-    if (r.status === 404) {
-      noteSessionNotFound();
-      return null;
-    }
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    const data = await r.json();
-    // 更新本地会话列表
-    const key = sessionLookupKey(normalized);
-    const existing = state.sessions.find((s) => sessionLookupKey(s) === key);
-    if (existing && data.title) {
-      existing.title = data.title.slice(0, 40);
-      renderSessions();
-    }
-    // 如果是当前会话，更新标题显示
-    if (normalized.id === state.sessionId && (normalized.agentId || "") === (state.agentId || "")) {
-      el.chatTitle.textContent = data.title || "对话";
-    }
-    return data.title;
-  } catch (e) {
-    console.warn("[deep-agent] 自动重命名失败", e);
-    addSystemNote(`自动重命名失败：${e.message}`);
-    return null;
-  }
-}
-
 function startInlineEdit(session, titleElement) {
   if (state.streaming) return;
 
@@ -1784,7 +1676,6 @@ async function onSend() {
   clearPendingAttachments();
   autoGrow();
 
-  const isFirstTurn = state.modelMessageCount === 0;
   clearComposerPlan();
   addMessage("user", text, null, null, attachments);
   trajectory?.addUser({ content: text, attachments });
@@ -1812,7 +1703,6 @@ async function onSend() {
     }));
   }
   state.modelMessageCount += 1;
-  state.pendingTitleRefresh = isFirstTurn;
   await runChatStream(payload, assistant);
 }
 
@@ -1851,8 +1741,6 @@ async function runChatStream(payload, assistant) {
   state.streamSessionConfirmed = false;
   state.streamCancelled = false;
   state.skipHistoryRefresh = false;
-  const shouldRefreshTitle = state.pendingTitleRefresh;
-  state.pendingTitleRefresh = false;
   try {
     const resp = await daFetch(serviceUrl("api/v1/chat/stream"), {
       method: "POST",
@@ -1892,17 +1780,6 @@ async function runChatStream(payload, assistant) {
         await refreshCurrentHistory();
       }
       await syncSessionsFromBackend();
-      if (shouldRefreshTitle && state.sessionId) {
-        const title = lastUserText() || el.chatTitle.textContent;
-        upsertSession(state.sessionId, title, state.agentId, agentNameById(state.agentId));
-      }
-      if (
-        shouldRefreshTitle &&
-        !state.awaitingHitl &&
-        !state.streamCancelled
-      ) {
-        scheduleTitleRefresh();
-      }
     }
   }
 }
@@ -1981,6 +1858,17 @@ function setStreaming(v) {
 
 function handleEvent({ event, data }, assistant) {
   const type = event || data.type;
+  const persistedEvent = data?.event;
+  if (
+    ["session_event_appended", "session_event_updated"].includes(type)
+    && persistedEvent?.event_type === "session/title"
+  ) {
+    applySessionTitle(
+      { id: persistedEvent.session_id || state.sessionId, agentId: state.agentId },
+      persistedEvent.payload?.title,
+    );
+    return;
+  }
   trajectory?.ingest({ event: type, data });
   switch (type) {
     case "session": {

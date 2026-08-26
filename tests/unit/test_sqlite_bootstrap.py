@@ -20,7 +20,6 @@ from deep_agent.db.stores.bundle import create_data_stores
 
 EXPECTED_TABLES = {
     "agents",
-    "auxiliary_model_configs",
     "chat_session_events",
     "chat_sessions",
     "llm_models",
@@ -754,6 +753,14 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
                         self._row_count(db_path, "chat_context_checkpoints"),
                         0,
                     )
+                    self.assertEqual(
+                        self._columns(db_path, "auxiliary_model_configs"),
+                        {"use_case", "llm_model_id", "created_at", "updated_at"},
+                    )
+                    self.assertIn(
+                        ("llm_model_id", "llm_models", "id", "SET NULL"),
+                        self._foreign_keys(db_path, "auxiliary_model_configs"),
+                    )
 
                     await asyncio.to_thread(command.upgrade, config, "008")
                     self._assert_current_baseline(db_path)
@@ -836,7 +843,6 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self._row_count(db_path, "llm_models"), 1)
         self.assertEqual(self._row_count(db_path, "agents"), 1)
         self.assertEqual(self._row_count(db_path, "mcp_servers"), 1)
-        self.assertEqual(self._row_count(db_path, "auxiliary_model_configs"), 1)
         self.assertEqual(
             self._scalar(
                 db_path,

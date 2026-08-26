@@ -1,16 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import replace
-import inspect
 
 from pydantic_ai.settings import ModelSettings
 from pydantic_ai.usage import UsageLimits
 
 from deep_agent.agent.context.compaction import build_context_compaction
-from deep_agent.agent.auxiliary_models import (
-    CONTEXT_COMPACTION_USE_CASE,
-    resolve_llm_model_for_use_case,
-)
 from deep_agent.agent.context.estimator import TokenEstimator
 from deep_agent.agent.factory import build_agent
 from deep_agent.agent.input_capabilities import augment_instructions_with_capabilities
@@ -222,34 +217,10 @@ async def _build_runner_from_spec(
             spec.provider_config.provider_type if spec.provider_config else None
         ),
     )
-    summary_model = None
-    summary_model_id = spec.llm_model_id
-    summary_context_window_tokens = spec.context_window_tokens
-    summary_max_output_tokens = spec.max_output_tokens
-    summary_row = None
-    auxiliary_getter = getattr(ctx.stores.auxiliary_model, "get_by_use_case", None)
-    if inspect.iscoroutinefunction(auxiliary_getter):
-        summary_row = await resolve_llm_model_for_use_case(
-            ctx.stores.auxiliary_model,
-            ctx.stores.llm_model,
-            CONTEXT_COMPACTION_USE_CASE,
-        )
-    if summary_row is not None:
-        from deep_agent.agent.factory import _resolve_model
-
-        summary_provider = await _provider_for_model(ctx, summary_row)
-        summary_spec = AgentSpec.from_llm_model(summary_row, provider=summary_provider)
-        summary_model = _resolve_model(summary_spec)
-        summary_model_id = summary_row.id
-        summary_context_window_tokens = summary_row.context_window_tokens
-        summary_max_output_tokens = summary_row.max_output_tokens
     context_compaction = build_context_compaction(
         context_window_tokens=spec.context_window_tokens,
         max_output_tokens=spec.max_output_tokens,
         estimator=estimator,
-        summary_model=summary_model,
-        summary_context_window_tokens=summary_context_window_tokens,
-        summary_max_output_tokens=summary_max_output_tokens,
     )
     tool_output_limits, tool_output_store = build_tool_output_limits(
         request_headers=request_headers or {},
@@ -295,10 +266,13 @@ async def _build_runner_from_spec(
         max_output_tokens=spec.max_output_tokens,
         model_tags=spec.tags,
         context_compaction=context_compaction,
-        summary_model_id=summary_model_id,
         model_id=spec.llm_model_id or spec.model,
+        model_name=spec.model,
+        provider_id=(spec.provider_config.id if spec.provider_config else None),
+        provider_type=(
+            spec.provider_config.provider_type if spec.provider_config else None
+        ),
         estimator=estimator,
-        stores=ctx.stores,
         active_runs=getattr(ctx, "active_runs", None),
         skill_runtime_context=resolved_skills.as_context(),
         tool_output_store=tool_output_store,

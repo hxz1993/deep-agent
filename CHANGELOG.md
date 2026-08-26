@@ -12,7 +12,7 @@
 - Alembic `008` 是会话域破坏性迁移：删除旧会话历史与旧上下文投影，重建全局唯一 Session、
   严格 Sequence、Turn/Run 定位和可空 App/Space 来源；Call/Result 通过完整 Message Payload 内的
   Call ID 精确配对。Provider、Model、Agent、
-  MCP、Skill、UI Tool 与辅助模型配置不变。升级前必须分别执行配置备份和会话历史归档。
+  MCP、Skill、UI Tool 配置保持不变。`008` 同时删除旧的标题专用模型配置表；升级前必须分别执行配置备份和会话历史归档。
 - 上下文压缩改为单条 Compaction Event，采用固定八段结构摘要、确定性的 Tool/Context Evidence、
   DSH 式超大工具结果头尾裁剪和来源 Hash 校验；失败、超时、取消和 Stale 不替换上一次有效历史。
 - 摘要总超时提高到 300 秒，并每约 10 秒发送非持久化压缩进度；明确的 Provider Context Overflow
@@ -21,6 +21,8 @@
   英文、路径、Tool Name、Call ID 和稳定标识检索；完整 Artifact 继续由 `read_tool_result` 分页读取。
 - Harness Planning 只暴露 `write_plan` 完整快照；Deferred 新 Run 通过共同 `turn_id` 恢复本 Turn
   最近成功计划，新用户 Turn 不注入旧计划。
+- 会话标题改为与首轮正文并行的独立模型调用，复用该轮实际生效的Provider与模型；兜底、模型和
+  手动标题都写入`session/title` Event。删除标题专用模型配置、自动重新生成、刷新按钮和客户端轮询。
 - Console 改读 Event API，按 Sequence 展示 Compaction 的真实触发位置，并按 Event ID Upsert
   生命周期终态；同时合入 Provider/Skill 等配置详情的紧凑布局。本版本不恢复旧会话，也不实现 Branch。
 
@@ -47,8 +49,8 @@
 - Provider与Model保留独立启停状态，有效可用性由两层状态、Provider密钥和地址共同决定；模型响应新增
   `selectable`与脱敏`unavailable_reason`，`GET /llm-models?selectable_only=true`可只返回可选模型。
 - 清除Provider密钥不再批量改写子模型状态，补回密钥或重新启用Provider后原有模型自动恢复可选；
-  Agent创建、辅助模型、Chat、Session覆盖、标题生成、压缩和上下文估算统一执行显式Provider校验。
-- 模型创建、更新和删除统一进入同一配置Service事务，删除时原子检查Agent与辅助模型引用；列表批量
+  Agent创建、Chat、Session覆盖、标题生成和上下文估算统一执行显式Provider校验；压缩固定复用当前Agent已校验的主模型。
+- 模型创建、更新和删除统一进入同一配置Service事务，删除时原子检查Agent引用；列表批量
   读取Provider和Agent计数，避免逐模型查询。007升级、降级和配置备份均适配最终两层结构。
 - Console增加Provider启停配置并统一按有效可用性禁用模型选项。Agent、DeepCube助手和电子表格助手
   继续发送`llm_model.id`作为`model_id`，原有模型核心字段、Chat、SSE和History协议保持兼容。
@@ -60,8 +62,8 @@
 - 首批支持DeepSeek、MoonshotAI、Alibaba、Z.AI、OpenRouter、OpenAI、Anthropic、Google和
   OpenAI Compatible九类Pydantic AI原生适配；默认地址与自定义地址使用显式开关，不以空值猜测语义。
 - 模型管理改为选择Provider，模型响应继续保留`id/name/model/input_modalities`和`model_id`协议，
-  Agent、辅助模型、Chat、Session、History、SSE、Planning、Deferred与外部客户端无需改变。
-- Console增加Provider分栏管理，并将Agent、辅助模型和聊天模型选择器按Provider分组；模型目录仍只
+  Agent、Chat、Session、History、SSE、Planning、Deferred与外部客户端无需改变。
+- Console增加Provider分栏管理，并将Agent和聊天模型选择器按Provider分组；模型目录仍只
   预填模型能力，不保存或推断本地Provider凭据。
 - MCP小目录直接披露上限调整为10个：全局候选不超过10个时完整披露，超过10个时继续使用
   首轮词法Top 3与模型主动搜索Top 5。

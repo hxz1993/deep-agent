@@ -63,6 +63,18 @@ class SessionStore(Protocol):
     async def update_session_title(
         self, session_id: str, agent_id: str | None, title: str,
     ) -> None: ...
+    async def ensure_title_fallback(
+        self, session_id: str, *, agent_id: str | None, user_id: str | None,
+        title: str, source_event_id: str, turn_id: str | None,
+        run_id: str | None, details: dict[str, Any] | None = None,
+    ) -> SessionEventSnapshot | None: ...
+    async def apply_session_title(
+        self, session_id: str, *, agent_id: str | None, user_id: str | None,
+        title: str, source: str, source_event_id: str | None,
+        turn_id: str | None, run_id: str | None,
+        expected_event_id: str | None = None,
+        details: dict[str, Any] | None = None,
+    ) -> SessionEventSnapshot | None: ...
     async def list_session_summaries(
         self, filters: SessionListFilters,
     ) -> tuple[list[SessionSummaryRow], int]: ...
@@ -594,6 +606,98 @@ class SqlConversationCoordinator:
             return await self._chat_sessions.update_session_title_if_current(
                 db, scope, session_id, expected_title=expected_title, title=title
             )
+
+    async def ensure_title_fallback(
+        self,
+        session_id: str,
+        *,
+        agent_id: str | None,
+        user_id: str | None,
+        title: str,
+        source_event_id: str,
+        turn_id: str | None,
+        run_id: str | None,
+        details: dict[str, Any] | None = None,
+    ) -> SessionEventSnapshot | None:
+        scope, user = self._required_identity(agent_id, user_id)
+        normalized = title.strip()[:80]
+        if not normalized:
+            raise ValueError("Session title must not be blank")
+        async with self._write() as db:
+            owner = await self._chat_sessions._get_owner(
+                db, scope, session_id, for_update=True
+            )
+            if not owner.exists or owner.user_id != user:
+                raise PermissionError("Session belongs to another Agent or user")
+            if await self._events._latest_title(db, session_id) is not None:
+                return None
+            source_row = await db.get(ChatSessionEvent, source_event_id)
+            if (
+                source_row is None
+                or source_row.session_id != session_id
+                or source_row.event_type != "user/message"
+            ):
+                raise ValueError("Title source must be the first persisted user message")
+            session = await db.get(ChatSession, session_id)
+            assert session is not None
+            row = await self._events._append_title(
+                db,
+                session,
+                title=normalized,
+                source="fallback",
+                source_event_id=source_event_id,
+                turn_id=turn_id,
+                run_id=run_id,
+                details=details,
+            )
+            return SessionEventSnapshot.from_row(row)
+
+    async def apply_session_title(
+        self,
+        session_id: str,
+        *,
+        agent_id: str | None,
+        user_id: str | None,
+        title: str,
+        source: str,
+        source_event_id: str | None,
+        turn_id: str | None,
+        run_id: str | None,
+        expected_event_id: str | None = None,
+        details: dict[str, Any] | None = None,
+    ) -> SessionEventSnapshot | None:
+        if source not in {"model", "user"}:
+            raise ValueError("Session title source must be model or user")
+        scope, user = self._required_identity(agent_id, user_id)
+        normalized = title.strip()[:80]
+        if not normalized:
+            raise ValueError("Session title must not be blank")
+        async with self._write() as db:
+            owner = await self._chat_sessions._get_owner(
+                db, scope, session_id, for_update=True
+            )
+            if not owner.exists or owner.user_id != user:
+                raise PermissionError("Session belongs to another Agent or user")
+            latest = await self._events._latest_title(db, session_id)
+            if source == "model" and (
+                latest is None
+                or latest.event_id != expected_event_id
+                or latest.payload.get("source") != "fallback"
+            ):
+                return None
+            session = await db.get(ChatSession, session_id)
+            assert session is not None
+            row = await self._events._append_title(
+                db,
+                session,
+                title=normalized,
+                source=source,
+                source_event_id=source_event_id,
+                turn_id=turn_id,
+                run_id=run_id,
+                details=details,
+            )
+            return SessionEventSnapshot.from_row(row)
 
     async def list_session_summaries(
         self, filters: SessionListFilters,

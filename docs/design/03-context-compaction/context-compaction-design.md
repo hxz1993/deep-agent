@@ -22,7 +22,7 @@ DeepAgent的跨Provider摘要事件。Evidence使用`source_event_id + part_offs
 - 自动压力阈值：有效输入预算的80%；目标压回55%。
 - 手动压缩与明确Provider Context Overflow复用同一算法。
 - 只选择最旧的安全完整前缀；不切断Message、Tool Call/Result或Deferred Pending；当前活跃Turn保留。
-- 摘要模型优先使用辅助模型`context_compaction`，未配置时使用Agent当前模型。
+- 摘要固定使用当前 Agent 的有效模型，不配置第二套模型映射。
 - 摘要模型窗口放不下候选前缀时失败关闭，不递归生成多层摘要。
 - 新锚点加保留尾部必须小于原前缀并达到目标Token，否则不提交成功。
 

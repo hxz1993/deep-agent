@@ -78,8 +78,6 @@ class AppContext:
                 "Recovered {} unfinished Run/Compaction Events as interrupted",
                 interrupted,
             )
-        await bundle.stores.auxiliary_model.ensure_defaults()
-
         file_store = await build_file_store(
             backend=OPTION.agent.file_backend,
             local_root=OPTION.agent.local_file_root,

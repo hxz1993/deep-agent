@@ -3,7 +3,7 @@ from __future__ import annotations
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from deep_agent.db.models import Agent, AuxiliaryModelConfig, LlmModel
+from deep_agent.db.models import Agent, LlmModel
 from deep_agent.db.stores._session import SessionBoundMixin
 class LlmModelValidationError(ValueError):
     pass
@@ -54,12 +54,7 @@ class LlmModelStoreBase(SessionBoundMixin):
             agents = await db.execute(
                 select(func.count()).select_from(Agent).where(Agent.model_id == model_id)
             )
-            auxiliary = await db.execute(
-                select(func.count()).select_from(AuxiliaryModelConfig).where(
-                    AuxiliaryModelConfig.llm_model_id == model_id
-                )
-            )
-            return int(agents.scalar_one()) + int(auxiliary.scalar_one())
+            return int(agents.scalar_one())
 
     async def _get_by_id(self, db: AsyncSession, model_id: str) -> LlmModel | None:
         result = await db.execute(select(LlmModel).where(LlmModel.id == model_id))

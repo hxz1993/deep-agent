@@ -37,7 +37,7 @@ GET /api/v1/admin/access
 需要企业管理员权限：
 
 - Agent列表、Prompt估算和增删改。
-- 模型、辅助模型、模型目录和刷新。
+- Provider、模型、模型目录和刷新。
 - MCP、Skill、UI Tool、UI Tool Package。
 - 内置工具、系统工具、全局设置、数据库信息、Sandbox健康和上下文测试场景。
 

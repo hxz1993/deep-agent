@@ -66,10 +66,7 @@ test("Agent 是配置中心默认页且全局配置位于系统设置分组", ()
   );
   assert.match(templateHtml, /当前页面只读；修改环境变量并重启 DeepAgent 后生效/);
   assert.doesNotMatch(templateHtml, /agentMaxRequests|max_requests|最大请求次数（可选）/);
-  assert.ok(
-    indexHtml.indexOf('data-tab="auxiliary-models"') <
-      indexHtml.indexOf('data-tab="global-settings"'),
-  );
+  assert.doesNotMatch(indexHtml, /data-tab="auxiliary-models"|辅助模型|辅助工具/);
   assert.ok(
     indexHtml.indexOf("系统设置") <
       indexHtml.indexOf('data-tab="global-settings"'),

@@ -44,7 +44,8 @@ test("配置中心按 Agent 设置、系统设置和外部资源分组", () => {
   const resourceGroup = indexHtml.indexOf("外部资源");
   assert.ok(agentGroup >= 0 && agentGroup < systemGroup && systemGroup < resourceGroup);
   assert.ok(indexHtml.indexOf('data-tab="ui-tools"') < systemGroup);
-  assert.ok(systemGroup < indexHtml.indexOf('data-tab="auxiliary-models"'));
+  assert.ok(systemGroup < indexHtml.indexOf('data-tab="global-settings"'));
+  assert.doesNotMatch(indexHtml, /data-tab="auxiliary-models"|辅助模型|辅助工具/);
   assert.ok(indexHtml.indexOf('data-tab="database-connection"') < resourceGroup);
   assert.ok(resourceGroup < indexHtml.indexOf('data-tab="catalog"'));
   assert.doesNotMatch(indexHtml, />模型资源</);

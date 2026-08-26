@@ -37,7 +37,6 @@ from deep_agent.agent.context.runtime import CompactionTelemetry, ContextRunStat
 from deep_agent.options import OPTION
 
 if TYPE_CHECKING:
-    from pydantic_ai.models import Model
     from pydantic_ai.models import ModelRequestContext
 
 _SUMMARY_PREFIX = "Summary of previous conversation:\n\n"
@@ -713,9 +712,6 @@ class DeepAgentContextCompaction(AbstractCapability[Any]):
     max_output_tokens: int | None
     estimator: TokenEstimator = field(default_factory=TokenEstimator.conservative)
     summary_timeout: float = 300.0
-    summary_model: "Model | str | None" = None
-    summary_context_window_tokens: int | None = None
-    summary_max_output_tokens: int | None = None
     telemetry: CompactionTelemetry = field(default_factory=CompactionTelemetry, init=False)
     last_budget: ContextBudget | None = field(default=None, init=False)
 
@@ -1088,9 +1084,7 @@ class DeepAgentContextCompaction(AbstractCapability[Any]):
         estimator = state.estimator
         previous = _summary_contents(messages)
         previous_summary = previous[-1] if previous else None
-        output_limit = _summary_output_limit(
-            target, self.summary_max_output_tokens or self.max_output_tokens
-        )
+        output_limit = _summary_output_limit(target, self.max_output_tokens)
         cutoff = self._single_summary_cutoff(
             messages,
             request_context,
@@ -1206,7 +1200,7 @@ class DeepAgentContextCompaction(AbstractCapability[Any]):
             safety = _summary_safety_tokens(estimator, prompt_tokens)
             if (
                 prompt_tokens + output_limit + safety
-                <= (self.summary_context_window_tokens or self.context_window_tokens)
+                <= self.context_window_tokens
             ):
                 return cutoff
 
@@ -1229,12 +1223,12 @@ class DeepAgentContextCompaction(AbstractCapability[Any]):
         prompt_tokens = estimator.text(_SUMMARY_INSTRUCTIONS) + estimator.text(prompt)
         safety = _summary_safety_tokens(estimator, prompt_tokens)
         if prompt_tokens + output_limit + safety > (
-            self.summary_context_window_tokens or self.context_window_tokens
+            self.context_window_tokens
         ):
             raise SummaryUnavailable("summary_input_too_large")
 
         summary_agent: Agent[None, str] = Agent(
-            self.summary_model or ctx.model,
+            ctx.model,
             instructions=_SUMMARY_INSTRUCTIONS,
         )
         started_at = time.monotonic()
@@ -1375,9 +1369,6 @@ def build_context_compaction(
     context_window_tokens: int | None,
     max_output_tokens: int | None,
     estimator: TokenEstimator | None = None,
-    summary_model: "Model | str | None" = None,
-    summary_context_window_tokens: int | None = None,
-    summary_max_output_tokens: int | None = None,
 ) -> DeepAgentContextCompaction | None:
     if context_window_tokens is None or context_window_tokens <= 0:
         return None
@@ -1386,7 +1377,4 @@ def build_context_compaction(
         max_output_tokens=max_output_tokens,
         estimator=estimator or TokenEstimator.conservative(),
         summary_timeout=OPTION.agent.context_summary_timeout,
-        summary_model=summary_model,
-        summary_context_window_tokens=summary_context_window_tokens,
-        summary_max_output_tokens=summary_max_output_tokens,
     )

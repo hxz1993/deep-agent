@@ -1086,6 +1086,7 @@ html, body {
 .composer-plan-item.status-completed .composer-plan-status { color: var(--conn-ok); }
 .composer-plan:is(.interrupted, .error) { border-color: color-mix(in srgb, var(--danger) 45%, var(--border)); }
 .composer-plan.pending { border-color: color-mix(in srgb, var(--accent) 42%, var(--border)); }
+.composer-plan.completed { border-color: color-mix(in srgb, var(--conn-ok) 42%, var(--border)); }
 .assistant-thinking {
   color: var(--text-faint);
   background: var(--thinking-bg);

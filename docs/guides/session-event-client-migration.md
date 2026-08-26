@@ -25,16 +25,12 @@ GET /api/v1/sessions/{session_id}/events
       "event_id": "...",
       "session_id": "...",
       "sequence": 12,
-      "schema_version": 1,
-      "event_type": "assistant/text",
-      "status": null,
+      "schema_version": 2,
+      "event_type": "assistant/message",
+      "status": "completed",
       "turn_id": "...",
       "run_id": "...",
-      "message_id": "...",
-      "part_index": 0,
-      "call_id": null,
-      "tool_name": null,
-      "payload": {},
+      "payload": {"message": {"kind": "response", "parts": []}},
       "created_at": "...",
       "updated_at": "..."
     }
@@ -57,20 +53,20 @@ GET /api/v1/sessions/{session_id}/events
 
 投影规则：
 
-- 同一 `message_id` 的事件按 `part_index` 重组一个模型消息。
-- `tool/call` 与 `tool/result` 是两行，通过 `call_id` 配对。
-- `run` 事件提供 Run 终态；`cancelled/interrupted` 投影为中断状态。
-- `write_plan` 的成功 `tool/result` 从
-  `payload.part.metadata.deepagent_plan` 读取完整快照。
+- 每条消息 Event 的 `payload.message` 已是一条完整 Pydantic Message，不再重组 Part。
+- Tool Call 位于 `assistant/message`，Result 位于 `tool/results`；按 Part 内的
+  `tool_call_id` 投影成一条逻辑工具记录。
+- 正常 Run 不落库；Assistant Event 的 `status` 保存终态，无响应异常使用 `run/terminal`。
+- `write_plan` 快照从对应 Tool Result Part 的 `metadata.deepagent_plan` 读取。
 - `compaction` 是独立可视事件，不属于普通聊天消息。
-- 未识别的 `schema_version` 或 `model/unknown_part` 必须显式降级，不能静默丢弃。
+- 未识别的 `schema_version`、Message 或 Part 必须显式降级，不能静默丢弃。
 
 ### 1.2 SSE
 
 新增持久化事件：
 
 - `session_event_appended`：`data.persisted=true`，`data.event` 是完整 Event。
-- `session_event_updated`：同一 `event_id` 的生命周期更新，客户端必须 Upsert，
+- `session_event_updated`：同一 Compaction `event_id` 的生命周期更新，客户端必须 Upsert，
   不能追加第二行。
 
 压缩等待事件改为：
@@ -118,6 +114,11 @@ GET /api/v1/sessions/{session_id}/events
 - `session` SSE 返回后确认真实 Session ID 的流程。
 - 会话列表、标题轮询、删除和取消流程。
 
+源码审计结论：该客户端没有读取 Event 顶层 `message_id/part_index/call_id/tool_name`，
+也没有把普通 Run Event 当作终态来源；真正的不兼容点是 `/history`、独立
+`context_checkpoint`、旧压缩阶段和“最近单 Run”计划恢复。迁移后仍应使用
+`payload.message.parts[].tool_call_id` 配对工具与提交 Deferred Result。
+
 ## 3. 电子表格助手
 
 仓库：
@@ -140,12 +141,19 @@ GET /api/v1/sessions/{session_id}/events
 | `src/components/aiAssistant/taskPlan.ts` | 三个 Planning 工具、最新单 Run 恢复 | 只保留 `write_plan`；恢复时以 Turn 覆盖 Deferred 跨 Run |
 | `src/components/aiAssistant/**/*.test.ts(x)` | 多处 fixture 使用 `messages/context_checkpoint` | 统一改 Event fixture，覆盖分页、Upsert、Turn/Run、Plan 和断流恢复 |
 | `docs/design/03-AI智能助手/04-统一AI对话框架构.md` | 记录旧历史和压缩契约 | 更新 Event Store、SSE 与 Plan 口径 |
+| `docs/design/03-AI智能助手/06-当前实现与剩余事项.md` | 仍把旧 History/Checkpoint 当成当前能力 | 改为 V8 Event API 与剩余客户端迁移事项 |
+| `docs/design/03-AI智能助手/07-正式停止与中断恢复.md` | 中断恢复依赖旧 History 投影 | 改为 Assistant Event 终态、`run/terminal` 与 Events 刷新 |
 
 可直接保留：
 
 - `src/components/aiAssistant/client/chat.ts` 的 `session_id` 和
   `deferred_tool_results` 请求。
 - 现有停止生成、会话列表、标题、删除和 UI Tool 提交主流程。
+
+源码审计结论：该客户端同样没有读取 Event 顶层
+`message_id/part_index/call_id/tool_name`，也不依赖普通 Run Event；它目前从旧
+`HistoryMessage.parts[]` 读取 `tool_call_id`。需要替换的是历史数据源、Checkpoint
+状态和压缩/Plan 投影，Deferred 请求中的原 Call ID 保持不变。
 
 ## 4. 额外发现：通用 ai-components
 
@@ -158,12 +166,14 @@ GET /api/v1/sessions/{session_id}/events
 否则 `0.6.0` 发布后打开历史会返回 404。它不是本次指定的两个助手，但必须加入
 后续前端发布清单。
 
+三个前端仓库均为只读审计，本次没有跨仓修改；各自现存工作区改动也没有被触碰。
+
 ## 5. 客户端验收最小集
 
 - 超过 500 个 Event 的会话能完整翻页，无重复、无漏行。
 - 刷新前直播内容与刷新后 Event 投影一致。
 - 同一 `session_event_updated.event_id` 不产生重复 Run/Compaction 行。
-- Tool Call/Result 跨 Deferred Run 仍按 `call_id` 配对，并保留共同 `turn_id`。
+- Tool Call/Result 跨 Deferred Run 仍按 Part 内 `tool_call_id` 配对，并保留共同 `turn_id`。
 - 压缩标记在真实 Sequence 位置；历史普通聊天可隐藏，轨迹必须显示。
 - 300 秒摘要期间每约 10 秒能看到进度，不因无 Provider Token 断开。
 - Plan 只消费 `write_plan`，Deferred 恢复后仍显示同 Turn 最新快照。

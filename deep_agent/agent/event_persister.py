@@ -39,6 +39,7 @@ class PersistEvent:
     skip_user_prompt: bool = False
     result_messages: list[ModelMessage] | None = None
     repair_dangling_tool_calls: bool = True
+    terminal_status: str | None = None
     result_queue: asyncio.Queue[dict[str, Any]] | None = None
 
 
@@ -209,6 +210,7 @@ class EventPersister:
                     turn_id=ev.turn_id,
                     run_id=ev.run_id,
                     first_message_ordinal=1 if ev.skip_user_prompt else 0,
+                    terminal_status=ev.terminal_status,
                 )
                 self._publish_rows(ev, rows)
             return
@@ -229,6 +231,7 @@ class EventPersister:
                     turn_id=ev.turn_id,
                     run_id=ev.run_id,
                     first_message_ordinal=1 if ev.skip_user_prompt else 0,
+                    terminal_status="interrupted",
                 )
                 self._publish_rows(ev, rows)
 

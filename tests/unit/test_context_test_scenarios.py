@@ -140,6 +140,11 @@ class ContextTestScenarioApiTests(unittest.TestCase):
                 for part in message.parts
             )
         )
+        events = asyncio.run(
+            get_context().store.list_events(session_id, limit=500)
+        )
+        self.assertTrue(events)
+        self.assertEqual({event.turn_id for event in events}, {events[0].run_id})
 
 
 if __name__ == "__main__":

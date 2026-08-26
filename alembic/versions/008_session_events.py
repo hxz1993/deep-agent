@@ -101,12 +101,8 @@ def upgrade() -> None:
         sa.Column("schema_version", sa.SmallInteger(), nullable=False),
         sa.Column("event_type", sa.String(64), nullable=False),
         sa.Column("status", sa.String(32), nullable=True),
-        sa.Column("turn_id", sa.String(32), nullable=True),
+        sa.Column("turn_id", sa.String(128), nullable=True),
         sa.Column("run_id", sa.String(128), nullable=True),
-        sa.Column("message_id", sa.String(32), nullable=True),
-        sa.Column("part_index", sa.Integer(), nullable=True),
-        sa.Column("call_id", _key_type(), nullable=True),
-        sa.Column("tool_name", _key_type(), nullable=True),
         sa.Column("search_text", sa.Text(), nullable=True),
         sa.Column("payload", _json_type(), nullable=False),
         sa.Column(
@@ -133,22 +129,6 @@ def upgrade() -> None:
             "sequence",
             name="uq_chat_session_events_session_sequence",
         ),
-        sa.UniqueConstraint(
-            "session_id",
-            "message_id",
-            "part_index",
-            name="uq_chat_session_events_message_part",
-        ),
-    )
-    op.create_index(
-        "ix_chat_session_events_event_type",
-        "chat_session_events",
-        ["event_type"],
-    )
-    op.create_index(
-        "ix_chat_session_events_status",
-        "chat_session_events",
-        ["status"],
     )
     op.create_index(
         "ix_chat_session_events_session_turn_sequence",
@@ -161,19 +141,9 @@ def upgrade() -> None:
         ["session_id", "run_id", "sequence"],
     )
     op.create_index(
-        "ix_chat_session_events_session_call_sequence",
-        "chat_session_events",
-        ["session_id", "call_id", "sequence"],
-    )
-    op.create_index(
         "ix_chat_session_events_session_type_status_sequence",
         "chat_session_events",
         ["session_id", "event_type", "status", "sequence"],
-    )
-    op.create_index(
-        "ix_chat_session_events_session_tool_sequence",
-        "chat_session_events",
-        ["session_id", "tool_name", "sequence"],
     )
 
 

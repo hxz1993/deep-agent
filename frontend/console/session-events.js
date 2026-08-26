@@ -1,20 +1,7 @@
-function eventPart(event) {
-  return event?.payload?.part && typeof event.payload.part === "object"
-    ? event.payload.part
+function eventMessage(event) {
+  return event?.payload?.message && typeof event.payload.message === "object"
+    ? event.payload.message
     : null;
-}
-
-function messageMeta(event) {
-  return event?.payload?.message_meta && typeof event.payload.message_meta === "object"
-    ? event.payload.message_meta
-    : {};
-}
-
-function normalizedRunStatus(status) {
-  if (["cancelled", "interrupted"].includes(status)) return "interrupted";
-  if (["failed", "error"].includes(status)) return "error";
-  if (status === "pending") return "pending";
-  return status === "completed" ? "completed" : null;
 }
 
 function splitUserContent(content) {
@@ -30,14 +17,14 @@ function splitUserContent(content) {
   for (const item of content) {
     if (typeof item === "string") texts.push(item);
     else if (item?.kind === "text-content") texts.push(String(item.content || ""));
-    else if (item?.kind === "attachment-ref") {
-      attachments.push({
-        id: item.id,
-        name: item.name || null,
-        mime: item.mime || null,
-        extracted_text: item.extracted_text || null,
-      });
-    } else if (item?.kind === "context-ref") {
+    else if (item?.kind === "attachment-ref") attachments.push({
+      id: item.id,
+      name: item.name || null,
+      mime: item.mime || item.mime_type || null,
+      byte_size: item.byte_size ?? null,
+      content_hash: item.content_hash || null,
+    });
+    else if (item?.kind === "context-ref") {
       const { kind: _kind, ...reference } = item;
       contextRefs.push(reference);
     }
@@ -51,23 +38,19 @@ function splitUserContent(content) {
 
 function toolArtifacts(metadata = {}) {
   const artifacts = [];
-  if (metadata.overflow_handle) {
-    artifacts.push({
-      artifact_id: metadata.overflow_handle,
-      kind: "tool_result_overflow",
-      role: "return_value",
-      byte_size: metadata.overflow_bytes ?? null,
-      content_hash: metadata.overflow_hash || null,
-    });
-  }
-  if (metadata.overflow_content_handle) {
-    artifacts.push({
-      artifact_id: metadata.overflow_content_handle,
-      kind: "tool_result_overflow",
-      role: "content",
-      content_hash: metadata.overflow_content_hash || null,
-    });
-  }
+  if (metadata.overflow_handle) artifacts.push({
+    artifact_id: metadata.overflow_handle,
+    kind: "tool_result_overflow",
+    role: "return_value",
+    byte_size: metadata.overflow_bytes ?? null,
+    content_hash: metadata.overflow_hash || null,
+  });
+  if (metadata.overflow_content_handle) artifacts.push({
+    artifact_id: metadata.overflow_content_handle,
+    kind: "tool_result_overflow",
+    role: "content",
+    content_hash: metadata.overflow_content_hash || null,
+  });
   return artifacts;
 }
 
@@ -77,106 +60,109 @@ function sourceForTool(toolName) {
   return null;
 }
 
-function eventPartForHistory(event) {
-  const part = eventPart(event) || {};
-  if (event.event_type === "assistant/text") {
-    return { type: "text", content: part.content || "" };
-  }
-  if (event.event_type === "assistant/reasoning") {
-    return { type: "thinking", content: part.content || "" };
-  }
-  if (["tool/call", "tool/search_call", "capability/load_call", "tool/native_call"].includes(event.event_type)) {
+function historyPart(part) {
+  const kind = part?.part_kind;
+  if (kind === "text") return { type: "text", content: part.content || "" };
+  if (kind === "thinking") return { type: "thinking", content: part.content || "" };
+  if (["tool-call", "builtin-tool-call"].includes(kind)) {
+    const tool = part.tool_name || null;
     return {
       type: "tool_call",
-      tool: event.tool_name || part.tool_name || null,
+      tool,
       args: part.args ?? null,
-      tool_call_id: event.call_id || part.tool_call_id || null,
-      source: sourceForTool(event.tool_name || part.tool_name),
+      tool_call_id: part.tool_call_id || null,
+      source: sourceForTool(tool),
+      widget: part.metadata?.widget || null,
       metadata: part.metadata || null,
     };
   }
-  if (["tool/result", "tool/search_result", "capability/load_result", "tool/native_result"].includes(event.event_type)) {
+  if (["tool-return", "builtin-tool-return", "retry-prompt"].includes(kind)) {
     const metadata = part.metadata && typeof part.metadata === "object" ? part.metadata : {};
+    const tool = part.tool_name || null;
     return {
       type: "tool_result",
-      tool: event.tool_name || part.tool_name || null,
+      tool,
       result: part.content ?? null,
-      tool_call_id: event.call_id || part.tool_call_id || null,
-      source: sourceForTool(event.tool_name || part.tool_name),
+      tool_call_id: part.tool_call_id || null,
+      source: sourceForTool(tool),
       artifacts: toolArtifacts(metadata),
-      plan: event.tool_name === "write_plan" ? metadata.deepagent_plan || null : null,
-      outcome: part.outcome || null,
+      plan: tool === "write_plan" ? metadata.deepagent_plan || null : null,
+      outcome: part.outcome || (kind === "retry-prompt" ? "retry" : null),
       timestamp: part.timestamp || null,
+      metadata,
     };
   }
+  if (kind === "file") return { type: "file", ...part };
+  if (kind === "speech") return { type: "speech", ...part };
   return null;
 }
 
-/** Deterministic Console projection from the public Session Event contract. */
+function userMessage(event, message) {
+  const prompt = (message.parts || []).find((part) => part?.part_kind === "user-prompt");
+  if (!prompt) return null;
+  return {
+    role: "user",
+    ...splitUserContent(prompt.content),
+    parts: [],
+    instructions: message.instructions || null,
+    system_parts: (message.parts || []).filter((part) => ["system-prompt", "instruction"].includes(part?.part_kind)),
+    timestamp: prompt.timestamp || message.timestamp || event.created_at || null,
+    event_id: event.event_id,
+    sequence: event.sequence,
+    turn_id: event.turn_id || null,
+    run_id: event.run_id || message.run_id || null,
+    raw_message: message,
+  };
+}
+
+function assistantRecord(event, message) {
+  const parts = (message.parts || []).map(historyPart).filter(Boolean);
+  if (!parts.length) return null;
+  return {
+    role: "assistant",
+    parts,
+    timestamp: message.timestamp || event.created_at || null,
+    request_timestamp: null,
+    event_id: event.event_id,
+    sequence: event.sequence,
+    turn_id: event.turn_id || null,
+    run_id: event.run_id || message.run_id || null,
+    status: message.state === "interrupted" ? "interrupted" : event.status || "completed",
+    model_name: message.model_name || null,
+    provider_name: message.provider_name || null,
+    provider_response_id: message.provider_response_id || null,
+    finish_reason: message.finish_reason || null,
+    usage: message.usage || null,
+    raw_message: message,
+  };
+}
+
+/** Deterministic projection from complete Message Events. */
 export function projectSessionEvents(response = {}) {
   const events = [...(Array.isArray(response?.items) ? response.items : [])]
     .sort((left, right) => Number(left.sequence || 0) - Number(right.sequence || 0));
-  const runStatuses = new Map(
-    events
-      .filter((event) => event.event_type === "run" && event.run_id)
-      .map((event) => [event.run_id, normalizedRunStatus(event.status)]),
-  );
-  const groups = new Map();
-  for (const event of events) {
-    if (!event.message_id) continue;
-    if (!groups.has(event.message_id)) groups.set(event.message_id, []);
-    groups.get(event.message_id).push(event);
-  }
   const messages = [];
-  for (const group of groups.values()) {
-    const first = group[0];
-    const meta = messageMeta(first);
-    const userEvent = group.find((event) => event.event_type === "user/message");
-    if (userEvent) {
-      const user = splitUserContent(eventPart(userEvent)?.content);
-      messages.push({
-        role: "user",
-        ...user,
-        parts: [],
-        timestamp: eventPart(userEvent)?.timestamp || meta.timestamp || first.created_at || null,
-        event_id: userEvent.event_id,
-        sequence: first.sequence,
-        turn_id: first.turn_id || null,
-        run_id: first.run_id || meta.run_id || null,
-      });
-      continue;
-    }
-    const parts = group.map(eventPartForHistory).filter(Boolean);
-    if (!parts.length) continue;
-    const runId = first.run_id || meta.run_id || null;
-    messages.push({
-      role: "assistant",
-      parts,
-      timestamp: meta.timestamp || first.created_at || null,
-      request_timestamp: null,
-      event_id: first.event_id,
-      sequence: first.sequence,
-      turn_id: first.turn_id || null,
-      run_id: runId,
-      status: meta.state === "interrupted"
-        ? "interrupted"
-        : runStatuses.get(runId) || "completed",
-      model_name: meta.model_name || null,
-      provider_name: meta.provider_name || null,
-      provider_response_id: meta.provider_response_id || null,
-      finish_reason: meta.finish_reason || null,
-      usage: meta.usage || null,
-    });
+  const messageByEventId = new Map();
+  for (const event of events) {
+    const message = eventMessage(event);
+    if (!message) continue;
+    const projected = event.event_type === "user/message"
+      ? userMessage(event, message)
+      : ["assistant/message", "tool/results"].includes(event.event_type)
+        ? assistantRecord(event, message)
+        : null;
+    if (!projected) continue;
+    messages.push(projected);
+    messageByEventId.set(event.event_id, projected);
   }
 
   const visualItems = [];
-  const messageBySequence = new Map(messages.map((message) => [message.sequence, message]));
   for (const event of events) {
     if (event.event_type === "compaction") {
       visualItems.push({ type: "compaction", event });
       continue;
     }
-    const message = messageBySequence.get(event.sequence);
+    const message = messageByEventId.get(event.event_id);
     if (!message) continue;
     if (message.role === "user") {
       visualItems.push({ type: "user", message });
@@ -191,7 +177,7 @@ export function projectSessionEvents(response = {}) {
     events,
     messages,
     visualItems,
-    messageCount: new Set(events.map((event) => event.message_id).filter(Boolean)).size,
+    messageCount: messages.length,
   };
 }
 

@@ -8,7 +8,14 @@ from pydantic_ai.messages import ModelMessage, ModelRequest, UserPromptPart
 from sqlalchemy import Select, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from deep_agent.db.event_codec import MESSAGE_EVENT_TYPES, decode_message_events, encode_messages
+from deep_agent.db.event_codec import (
+    MESSAGE_EVENT_TYPES,
+    decode_message_events,
+    encode_messages,
+    event_contains_call,
+    message_parts,
+    tool_part_references,
+)
 from deep_agent.db.ids import new_event_id
 from deep_agent.db.models import ChatSession, ChatSessionEvent
 from deep_agent.db.stores._session import SessionBoundMixin
@@ -29,10 +36,6 @@ class SessionEventSnapshot:
     status: str | None
     turn_id: str | None
     run_id: str | None
-    message_id: str | None
-    part_index: int | None
-    call_id: str | None
-    tool_name: str | None
     payload: dict[str, Any]
     created_at: datetime
     updated_at: datetime
@@ -43,8 +46,7 @@ class SessionEventSnapshot:
             event_id=row.event_id, session_id=row.session_id,
             sequence=int(row.sequence), schema_version=int(row.schema_version),
             event_type=row.event_type, status=row.status, turn_id=row.turn_id,
-            run_id=row.run_id, message_id=row.message_id, part_index=row.part_index,
-            call_id=row.call_id, tool_name=row.tool_name, payload=dict(row.payload),
+            run_id=row.run_id, payload=dict(row.payload),
             created_at=row.created_at, updated_at=row.updated_at,
         )
 
@@ -54,8 +56,6 @@ class SessionEventSnapshot:
             "sequence": self.sequence, "schema_version": self.schema_version,
             "event_type": self.event_type, "status": self.status,
             "turn_id": self.turn_id, "run_id": self.run_id,
-            "message_id": self.message_id, "part_index": self.part_index,
-            "call_id": self.call_id, "tool_name": self.tool_name,
             "payload": self.payload, "created_at": self.created_at.isoformat(),
             "updated_at": self.updated_at.isoformat(),
         }
@@ -116,45 +116,54 @@ class SessionEventStore(SessionBoundMixin):
     async def _append_messages(
         self, db: AsyncSession, session: ChatSession, messages: Sequence[ModelMessage],
         *, turn_id: str, run_id: str | None, first_message_ordinal: int = 0,
-        now: datetime | None = None,
+        now: datetime | None = None, terminal_status: str | None = None,
     ) -> list[ChatSessionEvent]:
         timestamp = now or datetime.now(timezone.utc)
         drafts = encode_messages(
             messages, session_id=session.session_id, run_id=run_id,
             first_message_ordinal=first_message_ordinal,
         )
-        message_ids = sorted({draft.message_id for draft in drafts})
+        event_ids = [draft.event_id for draft in drafts]
         existing_rows = list(
             (
                 await db.execute(
                     select(ChatSessionEvent).where(
                         ChatSessionEvent.session_id == session.session_id,
-                        ChatSessionEvent.message_id.in_(message_ids),
+                        ChatSessionEvent.event_id.in_(event_ids),
                     )
                 )
             ).scalars()
-        ) if message_ids else []
-        existing = {(row.message_id, row.part_index): row for row in existing_rows}
+        ) if event_ids else []
+        existing = {row.event_id: row for row in existing_rows}
         rows: list[ChatSessionEvent] = []
         new_count = 0
-        for draft in drafts:
-            key = (draft.message_id, draft.part_index)
-            row = existing.get(key)
+        last_assistant_index = next(
+            (
+                index for index in range(len(drafts) - 1, -1, -1)
+                if drafts[index].event_type == "assistant/message"
+            ),
+            None,
+        )
+        for index, draft in enumerate(drafts):
+            row = existing.get(draft.event_id)
             if row is not None:
-                if row.payload != draft.payload or row.event_type != draft.event_type:
+                expected_status = terminal_status if index == last_assistant_index else None
+                if (
+                    row.payload != draft.payload
+                    or row.event_type != draft.event_type
+                    or row.status != expected_status
+                ):
                     raise ValueError(
-                        "Session Event idempotency conflict for "
-                        f"message_id={draft.message_id} part_index={draft.part_index}"
+                        f"Session Event idempotency conflict for event_id={draft.event_id}"
                     )
                 rows.append(row)
                 continue
             row = ChatSessionEvent(
-                event_id=new_event_id(), session_id=session.session_id,
+                event_id=draft.event_id, session_id=session.session_id,
                 sequence=int(session.next_sequence) + new_count,
                 schema_version=draft.schema_version, event_type=draft.event_type,
-                status=None, turn_id=turn_id, run_id=run_id,
-                message_id=draft.message_id, part_index=draft.part_index,
-                call_id=draft.call_id, tool_name=draft.tool_name,
+                status=terminal_status if index == last_assistant_index else None,
+                turn_id=turn_id, run_id=run_id,
                 search_text=draft.search_text, payload=draft.payload,
                 created_at=timestamp, updated_at=timestamp,
             )
@@ -168,7 +177,7 @@ class SessionEventStore(SessionBoundMixin):
 
     async def _append_lifecycle(
         self, db: AsyncSession, session: ChatSession, *,
-        event_type: Literal["run", "compaction"], status: LifecycleStatus,
+        event_type: Literal["compaction"], status: LifecycleStatus,
         turn_id: str | None, run_id: str | None, payload: dict[str, Any],
         now: datetime | None = None,
     ) -> ChatSessionEvent:
@@ -177,8 +186,54 @@ class SessionEventStore(SessionBoundMixin):
             event_id=new_event_id(), session_id=session.session_id,
             sequence=int(session.next_sequence), schema_version=1,
             event_type=event_type, status=status, turn_id=turn_id, run_id=run_id,
-            message_id=None, part_index=None, call_id=None, tool_name=None,
             search_text=None, payload=payload, created_at=timestamp, updated_at=timestamp,
+        )
+        session.next_sequence = int(session.next_sequence) + 1
+        session.updated_at = timestamp
+        db.add(row)
+        await db.flush()
+        return row
+
+    async def _append_terminal(
+        self, db: AsyncSession, session: ChatSession, *,
+        status: LifecycleStatus, turn_id: str | None, run_id: str,
+        payload: dict[str, Any], now: datetime | None = None,
+    ) -> ChatSessionEvent | None:
+        """Append one exceptional Run terminal only when no response was saved."""
+
+        assistant = (
+            await db.execute(
+                select(ChatSessionEvent.event_id).where(
+                    ChatSessionEvent.session_id == session.session_id,
+                    ChatSessionEvent.run_id == run_id,
+                    ChatSessionEvent.event_type == "assistant/message",
+                ).limit(1)
+            )
+        ).scalar_one_or_none()
+        if assistant is not None:
+            return None
+        existing = (
+            await db.execute(
+                select(ChatSessionEvent).where(
+                    ChatSessionEvent.session_id == session.session_id,
+                    ChatSessionEvent.run_id == run_id,
+                    ChatSessionEvent.event_type == "run/terminal",
+                ).limit(1)
+            )
+        ).scalar_one_or_none()
+        if existing is not None:
+            if existing.status != status or existing.payload != payload:
+                raise ValueError(
+                    f"Run terminal idempotency conflict for run_id={run_id}"
+                )
+            return existing
+        timestamp = now or datetime.now(timezone.utc)
+        row = ChatSessionEvent(
+            event_id=new_event_id(), session_id=session.session_id,
+            sequence=int(session.next_sequence), schema_version=1,
+            event_type="run/terminal", status=status, turn_id=turn_id,
+            run_id=run_id, search_text=None, payload=payload,
+            created_at=timestamp, updated_at=timestamp,
         )
         session.next_sequence = int(session.next_sequence) + 1
         session.updated_at = timestamp
@@ -195,7 +250,7 @@ class SessionEventStore(SessionBoundMixin):
                     select(ChatSessionEvent)
                     .where(
                         ChatSessionEvent.event_id == event_id,
-                        ChatSessionEvent.event_type.in_(("run", "compaction")),
+                        ChatSessionEvent.event_type == "compaction",
                         ChatSessionEvent.status == "running",
                     )
                     .with_for_update()
@@ -223,13 +278,16 @@ class SessionEventStore(SessionBoundMixin):
             (ChatSessionEvent.event_type, event_type),
             (ChatSessionEvent.turn_id, turn_id),
             (ChatSessionEvent.run_id, run_id),
-            (ChatSessionEvent.call_id, call_id),
         ):
             if value is not None:
                 stmt = stmt.where(column == value)
-        stmt = stmt.order_by(ChatSessionEvent.sequence).limit(limit)
+        stmt = stmt.order_by(ChatSessionEvent.sequence)
+        if call_id is None:
+            stmt = stmt.limit(limit)
         async with self._read() as db:
             rows = list((await db.execute(stmt)).scalars())
+        if call_id is not None:
+            rows = [row for row in rows if event_contains_call(row, call_id)][:limit]
         return [SessionEventSnapshot.from_row(row) for row in rows]
 
     async def latest_completed_compaction(
@@ -249,22 +307,34 @@ class SessionEventStore(SessionBoundMixin):
             ).scalar_one_or_none()
         return SessionEventSnapshot.from_row(row) if row is not None else None
 
-    async def latest_pending_run_id(
-        self, session_id: str, turn_id: str,
-    ) -> str | None:
+    async def find_call_origin(
+        self, session_id: str, call_ids: Sequence[str],
+    ) -> tuple[str, str] | None:
+        wanted = {str(item) for item in call_ids if item}
+        if not wanted:
+            return None
         async with self._read() as db:
-            return (
-                await db.execute(
-                    select(ChatSessionEvent.run_id)
-                    .where(
-                        ChatSessionEvent.session_id == session_id,
-                        ChatSessionEvent.turn_id == turn_id,
-                        ChatSessionEvent.event_type == "run",
-                        ChatSessionEvent.status == "pending",
+            rows = list(
+                (
+                    await db.execute(
+                        select(ChatSessionEvent)
+                        .where(
+                            ChatSessionEvent.session_id == session_id,
+                            ChatSessionEvent.event_type == "assistant/message",
+                        )
+                        .order_by(ChatSessionEvent.sequence.desc())
                     )
-                    .order_by(ChatSessionEvent.sequence.desc()).limit(1)
-                )
-            ).scalar_one_or_none()
+                ).scalars()
+            )
+        for row in rows:
+            found = {
+                item["call_id"]
+                for item in tool_part_references(row)
+                if item["role"] == "call"
+            }
+            if wanted <= found and row.turn_id and row.run_id:
+                return row.turn_id, row.run_id
+        return None
 
     async def latest_plan_snapshot(
         self, session_id: str, turn_id: str,
@@ -277,19 +347,20 @@ class SessionEventStore(SessionBoundMixin):
                         .where(
                             ChatSessionEvent.session_id == session_id,
                             ChatSessionEvent.turn_id == turn_id,
-                            ChatSessionEvent.event_type == "tool/result",
-                            ChatSessionEvent.tool_name == "write_plan",
+                            ChatSessionEvent.event_type == "tool/results",
                         )
                         .order_by(ChatSessionEvent.sequence.desc()).limit(20)
                     )
                 ).scalars()
             )
         for row in rows:
-            part = row.payload.get("part") or {}
-            metadata = part.get("metadata") or {}
-            snapshot = metadata.get("deepagent_plan")
-            if isinstance(snapshot, dict) and isinstance(snapshot.get("items"), list):
-                return dict(snapshot)
+            for part in reversed(message_parts(row)):
+                if part.get("tool_name") != "write_plan":
+                    continue
+                metadata = part.get("metadata") or {}
+                snapshot = metadata.get("deepagent_plan")
+                if isinstance(snapshot, dict) and isinstance(snapshot.get("items"), list):
+                    return dict(snapshot)
         return None
 
     async def _latest_turn_id(self, db: AsyncSession, session_id: str) -> str | None:
@@ -309,7 +380,7 @@ class SessionEventStore(SessionBoundMixin):
             result = await db.execute(
                 update(ChatSessionEvent)
                 .where(
-                    ChatSessionEvent.event_type.in_(("run", "compaction")),
+                    ChatSessionEvent.event_type == "compaction",
                     ChatSessionEvent.status == "running",
                 )
                 .values(status="interrupted", updated_at=datetime.now(timezone.utc))

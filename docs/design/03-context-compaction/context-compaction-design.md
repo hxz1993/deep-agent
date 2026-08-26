@@ -5,7 +5,7 @@
 
 ## 事实源与模型可见历史
 
-原始Message Part、Tool Call/Result、Context Reference和Plan结果永久保留为Event。最新有效模型历史为：
+原始完整Message（含Tool Call/Result、Context Reference和Plan结果）永久保留为Event。最新有效模型历史为：
 
 ```text
 最新 completed Compaction 渲染出的结构化摘要锚点
@@ -14,7 +14,8 @@
 
 失败、超时、取消、Stale或Interrupted事件只用于审计，不改变模型历史；每次成功压缩的Cutoff只能
 向前移动。Provider原生`CompactionPart`按普通消息Part持久化，只能回传同一Provider，不能替代
-DeepAgent的跨Provider摘要事件。
+DeepAgent的跨Provider摘要事件。Evidence使用`source_event_id + part_offset + call_id`精确回查
+完整Message内的原始Part。
 
 ## 触发、边界与预算
 

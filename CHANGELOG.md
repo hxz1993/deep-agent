@@ -6,10 +6,12 @@
 ## v0.6.0
 
 - 将旧 `chat_messages` 与独立上下文投影重构为 `chat_session_events`：每个完整 Pydantic AI
-  语义 Part 一行，Run 与压缩使用同一 Event ID 原位更新；会话历史、模型恢复、SSE、Plan 和
+  `ModelRequest/ModelResponse` 一行；普通 Run 不再单独落库，只有无 Assistant Response 的异常
+  终态写 `run/terminal`，压缩使用同一 Event ID 原位更新。会话历史、模型恢复、SSE、Plan 和
   Console 轨迹统一从 Event Store 投影。
 - Alembic `008` 是会话域破坏性迁移：删除旧会话历史与旧上下文投影，重建全局唯一 Session、
-  严格 Sequence、Turn/Run/Message/Call 定位和可空 App/Space 来源；Provider、Model、Agent、
+  严格 Sequence、Turn/Run 定位和可空 App/Space 来源；Call/Result 通过完整 Message Payload 内的
+  Call ID 精确配对。Provider、Model、Agent、
   MCP、Skill、UI Tool 与辅助模型配置不变。升级前必须分别执行配置备份和会话历史归档。
 - 上下文压缩改为单条 Compaction Event，采用固定八段结构摘要、确定性的 Tool/Context Evidence、
   DSH 式超大工具结果头尾裁剪和来源 Hash 校验；失败、超时、取消和 Stale 不替换上一次有效历史。

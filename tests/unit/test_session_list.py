@@ -57,12 +57,16 @@ class SessionListApiTests(unittest.TestCase):
                 [ModelRequest(parts=[UserPromptPart(content="hello one")])],
                 agent_id=self.agent_a,
                 user_id=self.user_id,
+                turn_id="run-sess-1",
+                run_id="run-sess-1",
             )
             await store.append(
                 "sess-2",
                 [ModelRequest(parts=[UserPromptPart(content="hello two")])],
                 agent_id=self.agent_b,
                 user_id=self.user_id,
+                turn_id="run-sess-2",
+                run_id="run-sess-2",
             )
 
         asyncio.run(seed())
@@ -86,12 +90,16 @@ class SessionListApiTests(unittest.TestCase):
                 [ModelRequest(parts=[UserPromptPart(content="only a")])],
                 agent_id=self.agent_a,
                 user_id=self.user_id,
+                turn_id="run-sess-1",
+                run_id="run-sess-1",
             )
             await store.append(
                 "sess-2",
                 [ModelRequest(parts=[UserPromptPart(content="only b")])],
                 agent_id=self.agent_b,
                 user_id=self.user_id,
+                turn_id="run-sess-2",
+                run_id="run-sess-2",
             )
 
         asyncio.run(seed())
@@ -113,6 +121,8 @@ class SessionListApiTests(unittest.TestCase):
                 [ModelRequest(parts=[UserPromptPart(content="hi")])],
                 agent_id=self.agent_a,
                 user_id=self.user_id,
+                turn_id="run-with-messages",
+                run_id="run-with-messages",
             )
 
         asyncio.run(seed())
@@ -137,12 +147,16 @@ class SessionListApiTests(unittest.TestCase):
                 [ModelRequest(parts=[UserPromptPart(content="mine")])],
                 agent_id=self.agent_a,
                 user_id=self.user_id,
+                turn_id="run-owned",
+                run_id="run-owned",
             )
             await store.append(
                 "other",
                 [ModelRequest(parts=[UserPromptPart(content="not mine")])],
                 agent_id=self.agent_a,
                 user_id="user-b",
+                turn_id="run-other",
+                run_id="run-other",
             )
 
         asyncio.run(seed())

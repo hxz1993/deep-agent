@@ -802,6 +802,34 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self._primary_key(db_path, "chat_sessions"), ["session_id"])
         self.assertEqual(self._primary_key(db_path, "chat_session_events"), ["event_id"])
         self.assertEqual(
+            self._columns(db_path, "chat_session_events"),
+            {
+                "event_id", "session_id", "sequence", "schema_version",
+                "event_type", "status", "turn_id", "run_id", "search_text",
+                "payload", "created_at", "updated_at",
+            },
+        )
+        for removed in ("message_id", "part_index", "call_id", "tool_name"):
+            self.assertNotIn(removed, self._columns(db_path, "chat_session_events"))
+        self.assertEqual(
+            self._index_columns(
+                db_path, "ix_chat_session_events_session_turn_sequence"
+            ),
+            ["session_id", "turn_id", "sequence"],
+        )
+        self.assertEqual(
+            self._index_columns(
+                db_path, "ix_chat_session_events_session_run_sequence"
+            ),
+            ["session_id", "run_id", "sequence"],
+        )
+        self.assertEqual(
+            self._index_columns(
+                db_path, "ix_chat_session_events_session_type_status_sequence"
+            ),
+            ["session_id", "event_type", "status", "sequence"],
+        )
+        self.assertEqual(
             self._index_columns(db_path, "ix_chat_sessions_agent_user_updated"),
             ["agent_id", "user_id", "updated_at"],
         )

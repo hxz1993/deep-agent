@@ -40,6 +40,8 @@ class SessionResolveTests(unittest.IsolatedAsyncioTestCase):
             [ModelRequest(parts=[UserPromptPart(content="hi")])],
             agent_id=agent_id or self.agent_a,
             user_id=user_id or "user-a",
+            turn_id=f"run-{session_id}",
+            run_id=f"run-{session_id}",
         )
 
     async def test_resolve_storage_ref_directly(self) -> None:

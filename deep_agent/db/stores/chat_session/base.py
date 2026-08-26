@@ -127,6 +127,26 @@ class ChatSessionStoreBase(SessionBoundMixin):
             .values(title=title, updated_at=datetime.now(timezone.utc))
         )
 
+    async def update_session_title_if_current(
+        self, db: AsyncSession, agent_id: str, session_id: str,
+        *, expected_title: str | None, title: str,
+    ) -> bool:
+        condition = (
+            ChatSession.title.is_(None)
+            if expected_title is None
+            else ChatSession.title == expected_title
+        )
+        result = await db.execute(
+            update(ChatSession)
+            .where(
+                ChatSession.session_id == session_id,
+                ChatSession.agent_id == agent_id,
+                condition,
+            )
+            .values(title=title, updated_at=datetime.now(timezone.utc))
+        )
+        return bool(result.rowcount)
+
     @staticmethod
     def _apply_session_filters(
         stmt: Select, *, agent_id: str | None, user_id: str | None,
@@ -151,7 +171,7 @@ class ChatSessionStoreBase(SessionBoundMixin):
     ) -> tuple[list[SessionSummaryRow], int]:
         limit = min(max(limit, 1), MAX_LIST_LIMIT)
         offset = max(offset, 0)
-        message_count = func.count(func.distinct(ChatSessionEvent.message_id))
+        message_count = func.count(ChatSessionEvent.event_id)
         stmt = (
             select(
                 ChatSession.session_id, ChatSession.agent_id, ChatSession.title,
@@ -163,7 +183,9 @@ class ChatSessionStoreBase(SessionBoundMixin):
             .outerjoin(
                 ChatSessionEvent,
                 (ChatSessionEvent.session_id == ChatSession.session_id)
-                & (ChatSessionEvent.message_id.is_not(None)),
+                & ChatSessionEvent.event_type.in_(
+                    ("user/message", "assistant/message", "tool/results", "model/request")
+                ),
             )
             .group_by(
                 ChatSession.session_id, ChatSession.agent_id, ChatSession.title,
@@ -191,7 +213,9 @@ class ChatSessionStoreBase(SessionBoundMixin):
             message_exists = exists(
                 select(ChatSessionEvent.event_id).where(
                     ChatSessionEvent.session_id == ChatSession.session_id,
-                    ChatSessionEvent.message_id.is_not(None),
+                    ChatSessionEvent.event_type.in_(
+                        ("user/message", "assistant/message", "tool/results", "model/request")
+                    ),
                 )
             )
             if has_messages is True:
@@ -235,7 +259,15 @@ class ChatSessionStoreBase(SessionBoundMixin):
         for session_id, _sequence, payload in rows:
             if session_id in result:
                 continue
-            part = payload.get("part") if isinstance(payload, dict) else None
+            message = payload.get("message") if isinstance(payload, dict) else None
+            parts = message.get("parts") if isinstance(message, dict) else None
+            part = next(
+                (
+                    item for item in parts or []
+                    if isinstance(item, dict) and item.get("part_kind") == "user-prompt"
+                ),
+                None,
+            )
             content = part.get("content") if isinstance(part, dict) else None
             if isinstance(content, str):
                 result[session_id] = content

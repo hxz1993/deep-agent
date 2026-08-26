@@ -15,8 +15,13 @@ from sqlalchemy import and_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from deep_agent.agent.history import first_user_prompt
-from deep_agent.db.event_codec import MESSAGE_EVENT_TYPES, decode_message_events
-from deep_agent.db.ids import new_turn_id
+from deep_agent.db.event_codec import (
+    MESSAGE_EVENT_TYPES,
+    decode_message_events,
+    event_contains_call,
+    message_parts,
+    tool_part_references,
+)
 from deep_agent.db.session_list import SessionListFilters, SessionSummaryRow
 from deep_agent.db.session_scope import NO_AGENT_SCOPE, SessionOwner, normalize_agent_scope, runtime_session_key
 from deep_agent.db.stores.chat_session.base import ChatSessionStoreBase
@@ -39,7 +44,7 @@ class SessionStore(Protocol):
         agent_id: str | None = None, user_id: str | None = None,
         app_id: str | None = None, space_id: str | None = None,
         turn_id: str | None = None, run_id: str | None = None,
-        first_message_ordinal: int = 0,
+        first_message_ordinal: int = 0, terminal_status: str | None = None,
     ) -> list[SessionEventSnapshot]: ...
 
     async def list_sessions(self) -> list[tuple[str, str]]: ...
@@ -139,7 +144,7 @@ class SqlConversationCoordinator:
         agent_id: str | None = None, user_id: str | None = None,
         app_id: str | None = None, space_id: str | None = None,
         turn_id: str | None = None, run_id: str | None = None,
-        first_message_ordinal: int = 0,
+        first_message_ordinal: int = 0, terminal_status: str | None = None,
     ) -> list[SessionEventSnapshot]:
         if not messages:
             return []
@@ -155,10 +160,13 @@ class SqlConversationCoordinator:
                 and any(isinstance(part, UserPromptPart) for part in message.parts)
                 for message in messages
             )
-            resolved_turn_id = turn_id
+            resolved_turn_id = turn_id or (run_id if creates_turn else None)
             if resolved_turn_id is None and not creates_turn:
                 resolved_turn_id = await self._events._latest_turn_id(db, session_id)
-            resolved_turn_id = resolved_turn_id or new_turn_id()
+            if resolved_turn_id is None:
+                raise ValueError(
+                    "Message Events require turn_id, or run_id for a new user turn"
+                )
             now = datetime.now(timezone.utc)
             title = first_user_prompt(messages) if not existing_owner.exists else None
             session = await self._chat_sessions._ensure(
@@ -168,6 +176,7 @@ class SqlConversationCoordinator:
             rows = await self._events._append_messages(
                 db, session, messages, turn_id=resolved_turn_id, run_id=run_id, now=now,
                 first_message_ordinal=first_message_ordinal,
+                terminal_status=terminal_status,
             )
             return [SessionEventSnapshot.from_row(row) for row in rows]
 
@@ -177,8 +186,8 @@ class SqlConversationCoordinator:
         run_id: str | None, payload: dict[str, Any],
         app_id: str | None = None, space_id: str | None = None,
     ) -> SessionEventSnapshot:
-        if event_type not in {"run", "compaction"}:
-            raise ValueError("Only run and compaction are lifecycle events")
+        if event_type != "compaction":
+            raise ValueError("Only compaction is a mutable lifecycle event")
         scope, user = self._required_identity(agent_id, user_id)
         async with self._write() as db:
             session = await self._chat_sessions._ensure(
@@ -190,6 +199,31 @@ class SqlConversationCoordinator:
                 turn_id=turn_id, run_id=run_id, payload=payload,
             )
             return SessionEventSnapshot.from_row(row)
+
+    async def append_terminal(
+        self, session_id: str, *, status: LifecycleStatus,
+        agent_id: str | None, user_id: str | None, turn_id: str | None,
+        run_id: str, payload: dict[str, Any], app_id: str | None = None,
+        space_id: str | None = None,
+    ) -> SessionEventSnapshot | None:
+        if status not in {"failed", "cancelled", "interrupted"}:
+            raise ValueError("Run terminal status must be exceptional")
+        scope, user = self._required_identity(agent_id, user_id)
+        async with self._write() as db:
+            existing_owner = await self._chat_sessions._get_owner(
+                db, scope, session_id, for_update=True
+            )
+            if existing_owner.exists and existing_owner.user_id != user:
+                raise PermissionError("Session belongs to another user")
+            session = await self._chat_sessions._ensure(
+                db, session_id, agent_id=scope, user_id=user,
+                app_id=app_id, space_id=space_id,
+            )
+            row = await self._events._append_terminal(
+                db, session, status=status, turn_id=turn_id, run_id=run_id,
+                payload=payload,
+            )
+            return SessionEventSnapshot.from_row(row) if row is not None else None
 
     async def update_lifecycle(
         self, event_id: str, *, status: LifecycleStatus, payload: dict[str, Any],
@@ -252,15 +286,9 @@ class SqlConversationCoordinator:
                         }
                         stale.updated_at = datetime.now(timezone.utc)
                 return None
-            message_groups: list[list[ChatSessionEvent]] = []
-            for row in message_rows:
-                if not message_groups or message_groups[-1][0].message_id != row.message_id:
-                    message_groups.append([row])
-                else:
-                    message_groups[-1].append(row)
-            if len(message_groups) != len(raw_history) or covered_messages > len(message_groups):
+            if len(message_rows) != len(raw_history) or covered_messages > len(message_rows):
                 return None
-            through_sequence = max(row.sequence for row in message_groups[covered_messages - 1])
+            through_sequence = int(message_rows[covered_messages - 1].sequence)
             covered_rows = [row for row in message_rows if row.sequence <= through_sequence]
             previous = (
                 await db.execute(
@@ -281,22 +309,19 @@ class SqlConversationCoordinator:
                 return None
             tool_evidence = _bounded_evidence(_tool_evidence(covered_rows))
             context_evidence = _bounded_evidence(_context_evidence(covered_rows))
-            result_event_ids = {
-                row.call_id: row.event_id
-                for row in covered_rows
-                if row.call_id
-                and row.event_type
-                in {
-                    "tool/result",
-                    "tool/search_result",
-                    "capability/load_result",
-                    "tool/native_result",
+            result_locations = {
+                ref["call_id"]: {
+                    "source_event_id": row.event_id,
+                    "part_offset": ref["part_offset"],
                 }
+                for row in covered_rows
+                for ref in tool_part_references(row)
+                if ref["role"] == "result"
             }
             pruned_records = []
             for record in pruned_tool_results or []:
                 item = dict(record)
-                item["source_event_id"] = result_event_ids.get(item.get("call_id"))
+                item.update(result_locations.get(item.get("call_id"), {}))
                 pruned_records.append(item)
             summary_call_payload = dict(summary_call or {})
             resolved_model_name = summary_call_payload.get("model_id")
@@ -373,8 +398,10 @@ class SqlConversationCoordinator:
         async with self._session_factory() as db:
             return await self._events._latest_turn_id(db, session_id)
 
-    async def latest_pending_run_id(self, session_id: str, turn_id: str) -> str | None:
-        return await self._events.latest_pending_run_id(session_id, turn_id)
+    async def find_call_origin(
+        self, session_id: str, call_ids: list[str],
+    ) -> tuple[str, str] | None:
+        return await self._events.find_call_origin(session_id, call_ids)
 
     async def latest_plan_snapshot(
         self, session_id: str, turn_id: str,
@@ -401,9 +428,8 @@ class SqlConversationCoordinator:
                 ChatSessionEvent.turn_id,
                 ChatSessionEvent.run_id,
                 ChatSessionEvent.event_type,
-                ChatSessionEvent.tool_name,
-                ChatSessionEvent.call_id,
                 ChatSessionEvent.search_text,
+                ChatSessionEvent.payload,
                 ChatSessionEvent.created_at,
                 ChatSession.title,
             )
@@ -412,17 +438,12 @@ class SqlConversationCoordinator:
                 ChatSession.agent_id == scope,
                 ChatSession.user_id == user,
                 ChatSessionEvent.search_text.is_not(None),
-                ChatSessionEvent.event_type != "assistant/reasoning",
             )
         )
         if session_id is not None:
             stmt = stmt.where(ChatSessionEvent.session_id == session_id)
         if event_types:
             stmt = stmt.where(ChatSessionEvent.event_type.in_(event_types))
-        if tool_name:
-            stmt = stmt.where(ChatSessionEvent.tool_name == tool_name)
-        if call_id:
-            stmt = stmt.where(ChatSessionEvent.call_id == call_id)
         if created_after:
             stmt = stmt.where(ChatSessionEvent.created_at >= created_after)
         if created_before:
@@ -432,7 +453,31 @@ class SqlConversationCoordinator:
         )
         async with self._session_factory() as db:
             rows = (await db.execute(stmt)).all()
-        return [dict(row._mapping) for row in rows]
+        candidates: list[dict[str, Any]] = []
+        for row in rows:
+            item = dict(row._mapping)
+            refs = tool_part_references({"payload": item.get("payload")})
+            if tool_name and not any(ref["tool_name"] == tool_name for ref in refs):
+                continue
+            if call_id and not any(ref["call_id"] == call_id for ref in refs):
+                continue
+            matches = [
+                {
+                    "part_offset": ref["part_offset"],
+                    "role": ref["role"],
+                    "call_id": ref["call_id"],
+                    "tool_name": ref["tool_name"],
+                }
+                for ref in refs
+                if (tool_name is None or ref["tool_name"] == tool_name)
+                and (call_id is None or ref["call_id"] == call_id)
+            ]
+            item["tool_matches"] = matches
+            item["call_id"] = matches[0]["call_id"] if len(matches) == 1 else None
+            item["tool_name"] = matches[0]["tool_name"] if len(matches) == 1 else None
+            item.pop("payload", None)
+            candidates.append(item)
+        return candidates
 
     async def read_authorized_events(
         self, *, agent_id: str, user_id: str, event_id: str | None = None,
@@ -465,13 +510,15 @@ class SqlConversationCoordinator:
             elif session_id is not None and call_id is not None:
                 stmt = select(ChatSessionEvent).join(ChatSession, authorized).where(
                     ChatSessionEvent.session_id == session_id,
-                    ChatSessionEvent.call_id == call_id,
+                    ChatSessionEvent.event_type.in_(("assistant/message", "tool/results")),
                 )
             else:
                 raise ValueError("event_id or session_id + call_id is required")
             rows = list(
                 (await db.execute(stmt.order_by(ChatSessionEvent.sequence))).scalars()
             )
+            if call_id is not None:
+                rows = [row for row in rows if event_contains_call(row, call_id)]
         return [SessionEventSnapshot.from_row(row) for row in rows]
 
     async def list_sessions(self) -> list[tuple[str, str]]:
@@ -517,6 +564,16 @@ class SqlConversationCoordinator:
         async with self._write() as db:
             await self._chat_sessions.update_session_title(db, scope, session_id, title)
 
+    async def update_session_title_if_current(
+        self, session_id: str, agent_id: str | None, *,
+        expected_title: str | None, title: str,
+    ) -> bool:
+        scope = normalize_agent_scope(agent_id)
+        async with self._write() as db:
+            return await self._chat_sessions.update_session_title_if_current(
+                db, scope, session_id, expected_title=expected_title, title=title
+            )
+
     async def list_session_summaries(
         self, filters: SessionListFilters,
     ) -> tuple[list[SessionSummaryRow], int]:
@@ -550,8 +607,6 @@ def _event_rows_hash(rows: list[ChatSessionEvent]) -> str:
         [
             {
                 "sequence": int(row.sequence), "event_type": row.event_type,
-                "message_id": row.message_id, "part_index": row.part_index,
-                "call_id": row.call_id, "tool_name": row.tool_name,
                 "payload": row.payload,
             }
             for row in rows
@@ -566,21 +621,25 @@ def _value_hash(value: Any) -> str:
 
 
 def _tool_evidence(rows: list[ChatSessionEvent]) -> list[dict[str, Any]]:
-    calls: dict[str, ChatSessionEvent] = {}
-    results: dict[str, ChatSessionEvent] = {}
+    calls: dict[str, tuple[ChatSessionEvent, dict[str, Any]]] = {}
+    results: dict[str, tuple[ChatSessionEvent, dict[str, Any]]] = {}
     for row in rows:
-        if not row.call_id:
-            continue
-        if row.event_type in {"tool/call", "tool/search_call", "capability/load_call", "tool/native_call"}:
-            calls[row.call_id] = row
-        elif row.event_type in {"tool/result", "tool/search_result", "capability/load_result", "tool/native_result"}:
-            results[row.call_id] = row
+        for ref in tool_part_references(row):
+            target = calls if ref["role"] == "call" else results
+            target[ref["call_id"]] = (row, ref)
     evidence: list[dict[str, Any]] = []
-    for call_id in sorted(set(calls) | set(results), key=lambda item: (results.get(item) or calls[item]).sequence):
-        call = calls.get(call_id)
-        result = results.get(call_id)
-        call_part = ((call.payload.get("part") or {}) if call else {})
-        result_part = ((result.payload.get("part") or {}) if result else {})
+    for call_id in sorted(
+        set(calls) | set(results),
+        key=lambda item: (results.get(item) or calls[item])[0].sequence,
+    ):
+        call_entry = calls.get(call_id)
+        result_entry = results.get(call_id)
+        call = call_entry[0] if call_entry else None
+        result = result_entry[0] if result_entry else None
+        call_ref = call_entry[1] if call_entry else None
+        result_ref = result_entry[1] if result_entry else None
+        call_part = call_ref["part"] if call_ref else {}
+        result_part = result_ref["part"] if result_ref else {}
         content = result_part.get("content")
         raw_metadata = result_part.get("metadata")
         metadata = raw_metadata if isinstance(raw_metadata, dict) else {}
@@ -595,15 +654,17 @@ def _tool_evidence(rows: list[ChatSessionEvent]) -> list[dict[str, Any]]:
             {
                 "_sequence": int((result or call).sequence),
                 "_priority": _tool_evidence_priority(
-                    tool_name=(call.tool_name if call else result.tool_name if result else None),
+                    tool_name=(call_ref or result_ref or {}).get("tool_name"),
                     result_present=result is not None,
                     outcome=result_part.get("outcome") if result else "pending",
                     metadata=metadata,
                 ),
                 "call_id": call_id,
-                "tool_name": (call.tool_name if call else result.tool_name if result else None),
+                "tool_name": (call_ref or result_ref or {}).get("tool_name"),
                 "call_event_id": call.event_id if call else None,
+                "call_part_offset": call_ref.get("part_offset") if call_ref else None,
                 "result_event_id": result.event_id if result else None,
+                "result_part_offset": result_ref.get("part_offset") if result_ref else None,
                 "args_hash": _value_hash(call_part.get("args")) if call else None,
                 "result_hash": result_hash,
                 "result_complete": bool(result)
@@ -625,27 +686,36 @@ def _context_evidence(rows: list[ChatSessionEvent]) -> list[dict[str, Any]]:
     for row in rows:
         if row.event_type != "user/message":
             continue
-        part = row.payload.get("part") or {}
-        content = part.get("content")
-        if not isinstance(content, list):
-            continue
-        for item in content:
-            if not isinstance(item, dict) or item.get("kind") != "context-ref":
+        for part_offset, part in enumerate(message_parts(row)):
+            if part.get("part_kind") != "user-prompt":
                 continue
-            payload = item.get("payload") or {}
-            entry = {
-                "_sequence": int(row.sequence),
-                "_priority": 1,
-                "source_event_id": row.event_id,
-                "key": item.get("key"), "type": item.get("type"),
-                "schema_version": item.get("schema_version"), "label": item.get("label"),
-                "payload_hash": _value_hash(payload),
-                "stable_facts": _stable_facts(payload),
-            }
-            encoded = json.dumps(payload, ensure_ascii=False, separators=(",", ":"), default=str)
-            if len(encoded) <= 8192:
-                entry["payload"] = payload
-            evidence.append(entry)
+            content = part.get("content")
+            if not isinstance(content, list):
+                continue
+            for item in content:
+                if not isinstance(item, dict) or item.get("kind") != "context-ref":
+                    continue
+                payload = item.get("payload") or {}
+                entry = {
+                    "_sequence": int(row.sequence),
+                    "_priority": 1,
+                    "source_event_id": row.event_id,
+                    "part_offset": part_offset,
+                    "key": item.get("key"), "type": item.get("type"),
+                    "schema_version": item.get("schema_version"),
+                    "label": item.get("label"),
+                    "payload_hash": _value_hash(payload),
+                    "stable_facts": _stable_facts(payload),
+                }
+                encoded = json.dumps(
+                    payload,
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                    default=str,
+                )
+                if len(encoded) <= 8192:
+                    entry["payload"] = payload
+                evidence.append(entry)
     return evidence
 
 

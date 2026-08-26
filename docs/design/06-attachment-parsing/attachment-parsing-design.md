@@ -233,8 +233,9 @@ chat_session_events
 }
 ```
 
-模型的`tool/call`和每一页`tool/result`作为完整原始Event写入`chat_session_events`。工具结果包含
-`file_id`、分页范围、解析文本和继续读取游标。Compaction的摘要锚点：
+模型的完整Assistant Message（含Tool Call）与完整Tool Results Message分别写入
+`chat_session_events`。工具Part包含`file_id`、分页范围、解析文本和继续读取游标，并通过
+`tool_call_id`在投影层配对。Compaction的摘要锚点：
 
 - 只保留安全附件引用，不保存文件字节。
 - 不保留旧 `extracted_text`。

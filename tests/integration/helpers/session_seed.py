@@ -11,7 +11,6 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from deep_agent.db.event_codec import encode_messages
-from deep_agent.db.ids import new_event_id, new_turn_id
 from deep_agent.db.models import Agent, ChatSession, ChatSessionEvent, LlmModel, LlmProvider
 from deep_agent.db.serialization import deserialize_message
 from deep_agent.db.stores.bundle import DataStores
@@ -147,7 +146,7 @@ async def seed_session_from_fixture(
                     fixture.get("messages", []), key=lambda item: int(item["sequence"])
                 )
             ]
-            turn_id = new_turn_id()
+            turn_id = "fixture-import"
             drafts = encode_messages(
                 messages,
                 session_id=session_id,
@@ -156,7 +155,7 @@ async def seed_session_from_fixture(
             for sequence, draft in enumerate(drafts, start=1):
                 db.add(
                     ChatSessionEvent(
-                        event_id=new_event_id(),
+                        event_id=draft.event_id,
                         session_id=session_id,
                         sequence=sequence,
                         schema_version=draft.schema_version,
@@ -164,10 +163,6 @@ async def seed_session_from_fixture(
                         status=None,
                         turn_id=turn_id,
                         run_id="fixture-import",
-                        message_id=draft.message_id,
-                        part_index=draft.part_index,
-                        call_id=draft.call_id,
-                        tool_name=draft.tool_name,
                         search_text=draft.search_text,
                         payload=draft.payload,
                         created_at=now,

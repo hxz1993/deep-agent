@@ -7,7 +7,7 @@ import json
 import math
 import re
 import time
-from dataclasses import asdict, dataclass, field, is_dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
 from pydantic_ai import Agent
@@ -24,6 +24,7 @@ from pydantic_ai.messages import (
 )
 from pydantic_ai.settings import ModelSettings
 from pydantic_ai.tools import RunContext
+from pydantic_core import to_jsonable_python
 from loguru import logger
 
 from deep_agent.agent.context.budget import (
@@ -1322,13 +1323,7 @@ def _jsonable_usage(value: Any) -> Any:
         value = value()
     if value is None:
         return None
-    if hasattr(value, "model_dump"):
-        return value.model_dump(mode="json")
-    if is_dataclass(value):
-        return asdict(value)
-    if isinstance(value, dict):
-        return value
-    return str(value)
+    return to_jsonable_python(value, fallback=str)
 
 
 def build_context_compaction(

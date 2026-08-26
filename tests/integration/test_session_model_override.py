@@ -353,6 +353,8 @@ class SessionModelOverrideIntegrationTests(unittest.IsolatedAsyncioTestCase):
             history,
             agent_id=self._agent_id,
             user_id="integration-test-user",
+            turn_id="run-manual-compaction-seed",
+            run_id="run-manual-compaction-seed",
         )
 
         with patch(
@@ -426,6 +428,83 @@ class SessionModelOverrideIntegrationTests(unittest.IsolatedAsyncioTestCase):
             context_status["compaction_event_id"],
         )
 
+    async def test_manual_compaction_persistence_failure_closes_sse_and_event(self) -> None:
+        history = []
+        for turn in range(3):
+            history.extend(
+                [
+                    ModelRequest(
+                        parts=[
+                            UserPromptPart(
+                                content=f"第 {turn} 轮项目记录：" + "必须保留这项背景。" * 500
+                            )
+                        ]
+                    ),
+                    ModelResponse(
+                        parts=[TextPart(content=f"第 {turn} 轮决定：" + "确认当前方案。" * 500)]
+                    ),
+                ]
+            )
+        await get_context().store.append(
+            self._session_id,
+            history,
+            agent_id=self._agent_id,
+            user_id="integration-test-user",
+            turn_id="run-manual-compaction-failure-seed",
+            run_id="run-manual-compaction-failure-seed",
+        )
+
+        with patch(
+            "deep_agent.agent.factory._resolve_model",
+            return_value=text_only_model(_VALID_COMPACTION_SUMMARY),
+        ):
+            with patch.object(
+                get_context().store,
+                "persist_compaction_projection",
+                new=AsyncMock(side_effect=RuntimeError("save failed")),
+            ):
+                with mock_request_disconnect():
+                    async with AsyncClient(
+                        transport=self._transport,
+                        base_url="http://test",
+                        timeout=30.0,
+                    ) as client:
+                        response = await client.post(
+                            f"/api/v1/sessions/{self._session_id}/compact",
+                            params={"agent_id": self._agent_id},
+                            json={"model_id": self._model_b_id},
+                        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        events = parse_sse_events(response.text)
+        result = events[-1]
+        self.assertEqual(result["type"], "context_compaction_result")
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["reason"], "RuntimeError")
+        lifecycle_updates = [
+            item["event"]
+            for item in events
+            if item.get("type") == "session_event_updated"
+            and item.get("event", {}).get("event_type") == "compaction"
+        ]
+        self.assertEqual(lifecycle_updates[-1]["status"], "failed")
+
+        async with AsyncClient(
+            transport=self._transport,
+            base_url="http://test",
+            timeout=30.0,
+        ) as client:
+            event_response = await client.get(
+                f"/api/v1/sessions/{self._session_id}/events",
+                params={"agent_id": self._agent_id},
+            )
+        compactions = [
+            item
+            for item in event_response.json()["items"]
+            if item["event_type"] == "compaction"
+        ]
+        self.assertEqual(compactions[-1]["status"], "failed")
+
     async def test_manual_compaction_rejects_pending_tool_interaction(self) -> None:
         await get_context().store.append(
             "manual-pending",
@@ -443,6 +522,8 @@ class SessionModelOverrideIntegrationTests(unittest.IsolatedAsyncioTestCase):
             ],
             agent_id=self._agent_id,
             user_id="integration-test-user",
+            turn_id="run-manual-pending-seed",
+            run_id="run-manual-pending-seed",
         )
         with patch(
             "deep_agent.agent.factory._resolve_model",

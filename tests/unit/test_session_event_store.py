@@ -55,7 +55,7 @@ class SessionEventStoreTests(unittest.IsolatedAsyncioTestCase):
     async def asyncTearDown(self) -> None:
         await self.engine.dispose()
 
-    async def test_appends_parts_and_restores_messages(self) -> None:
+    async def test_appends_messages_and_restores_messages(self) -> None:
         messages = [
             ModelRequest(parts=[UserPromptPart(content="查询成员")], run_id="run-1"),
             ModelResponse(parts=[TextPart(content="结果")], run_id="run-1"),
@@ -72,7 +72,7 @@ class SessionEventStoreTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual([row.sequence for row in rows], [1, 2])
-        self.assertEqual([row.event_type for row in rows], ["user/message", "assistant/text"])
+        self.assertEqual([row.event_type for row in rows], ["user/message", "assistant/message"])
         self.assertEqual(
             await self.store.get_history("session-1", agent_id=self.agent_id),
             messages,
@@ -83,7 +83,7 @@ class SessionEventStoreTests(unittest.IsolatedAsyncioTestCase):
     async def test_lifecycle_updates_same_event(self) -> None:
         run = await self.store.append_lifecycle(
             "session-2",
-            event_type="run",
+            event_type="compaction",
             status="running",
             agent_id=self.agent_id,
             user_id="user-1",
@@ -143,6 +143,43 @@ class SessionEventStoreTests(unittest.IsolatedAsyncioTestCase):
                 run_id="run-idem",
             )
 
+    async def test_exceptional_terminal_is_saved_only_without_assistant_response(self) -> None:
+        terminal = await self.store.append_terminal(
+            "session-terminal",
+            status="failed",
+            agent_id=self.agent_id,
+            user_id="user-1",
+            turn_id="run-failed",
+            run_id="run-failed",
+            payload={"error": "ProviderError"},
+        )
+        self.assertIsNotNone(terminal)
+        assert terminal is not None
+        self.assertEqual(terminal.event_type, "run/terminal")
+        self.assertEqual(terminal.status, "failed")
+
+        await self.store.append(
+            "session-response-terminal",
+            [ModelResponse(parts=[TextPart(content="partial")], run_id="run-partial")],
+            agent_id=self.agent_id,
+            user_id="user-1",
+            turn_id="run-partial",
+            run_id="run-partial",
+            terminal_status="interrupted",
+        )
+        suppressed = await self.store.append_terminal(
+            "session-response-terminal",
+            status="interrupted",
+            agent_id=self.agent_id,
+            user_id="user-1",
+            turn_id="run-partial",
+            run_id="run-partial",
+            payload={"reason": "cancelled"},
+        )
+        self.assertIsNone(suppressed)
+        events = await self.store.list_events("session-response-terminal")
+        self.assertEqual([event.event_type for event in events], ["assistant/message"])
+
     async def test_pre_persisted_user_and_run_tail_keep_message_ordinals(self) -> None:
         user = ModelRequest(parts=[UserPromptPart(content="question")], run_id="run-split")
         response = ModelResponse(parts=[TextPart(content="answer")], run_id="run-split")
@@ -169,11 +206,11 @@ class SessionEventStoreTests(unittest.IsolatedAsyncioTestCase):
             [user, response],
         )
 
-    async def test_sqlite_concurrent_lifecycle_sequence_allocation_is_unique(self) -> None:
+    async def test_sqlite_concurrent_compaction_sequence_allocation_is_unique(self) -> None:
         async def append_run(index: int):
             return await self.store.append_lifecycle(
                 "session-concurrent",
-                event_type="run",
+                event_type="compaction",
                 status="running",
                 agent_id=self.agent_id,
                 user_id="user-1",

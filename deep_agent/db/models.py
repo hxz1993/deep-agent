@@ -323,12 +323,6 @@ class ChatSessionEvent(Base):
             "sequence",
             name="uq_chat_session_events_session_sequence",
         ),
-        UniqueConstraint(
-            "session_id",
-            "message_id",
-            "part_index",
-            name="uq_chat_session_events_message_part",
-        ),
         Index(
             "ix_chat_session_events_session_turn_sequence",
             "session_id",
@@ -342,22 +336,10 @@ class ChatSessionEvent(Base):
             "sequence",
         ),
         Index(
-            "ix_chat_session_events_session_call_sequence",
-            "session_id",
-            "call_id",
-            "sequence",
-        ),
-        Index(
             "ix_chat_session_events_session_type_status_sequence",
             "session_id",
             "event_type",
             "status",
-            "sequence",
-        ),
-        Index(
-            "ix_chat_session_events_session_tool_sequence",
-            "session_id",
-            "tool_name",
             "sequence",
         ),
     )
@@ -370,14 +352,10 @@ class ChatSessionEvent(Base):
     )
     sequence: Mapped[int] = mapped_column(BigInteger, nullable=False)
     schema_version: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=1)
-    event_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
-    status: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
-    turn_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    event_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    turn_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     run_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    message_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
-    part_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    call_id: Mapped[str | None] = mapped_column(KeyText, nullable=True)
-    tool_name: Mapped[str | None] = mapped_column(KeyText, nullable=True)
     search_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     payload: Mapped[dict] = mapped_column(JSONType, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)

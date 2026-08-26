@@ -312,7 +312,7 @@ function clearComposerPlan() {
   state.planningCallIds.clear();
   if (!el.composerPlan) return;
   el.composerPlan.classList.add("hidden");
-  el.composerPlan.classList.remove("interrupted", "error", "pending");
+  el.composerPlan.classList.remove("interrupted", "error", "pending", "completed");
   el.composerPlanProgress.textContent = "";
   el.composerPlanItems.innerHTML = "";
 }
@@ -327,7 +327,7 @@ function showComposerPlanPlaceholder(toolCallId) {
   if (toolCallId) state.planningCallIds.add(toolCallId);
   if (!el.composerPlan || state.planSnapshot) return;
   const wasHidden = el.composerPlan.classList.contains("hidden");
-  el.composerPlan.classList.remove("hidden", "interrupted", "error", "pending");
+  el.composerPlan.classList.remove("hidden", "interrupted", "error", "pending", "completed");
   el.composerPlanProgress.textContent = "正在制定…";
   el.composerPlanItems.innerHTML = "";
   if (wasHidden) setComposerPlanExpanded(true);
@@ -343,7 +343,7 @@ function renderComposerPlan(snapshot, { terminalStatus = null } = {}) {
   const wasHidden = el.composerPlan.classList.contains("hidden");
   state.planSnapshot = presentation.plan;
   state.planTerminalStatus = presentation.terminalStatus;
-  el.composerPlan.classList.remove("hidden", "interrupted", "error", "pending");
+  el.composerPlan.classList.remove("hidden", "interrupted", "error", "pending", "completed");
   if (presentation.terminalStatus) {
     el.composerPlan.classList.add(presentation.terminalStatus);
   }
@@ -908,11 +908,14 @@ async function loadSessionHistory(session) {
     trajectory?.setHistory(data);
     const latestRun = [...projection.events]
       .reverse()
-      .find((event) => event.event_type === "run");
-    state.conversationId = latestRun?.payload?.conversation_id || null;
+      .find((event) => event.event_type === "assistant/message");
+    const latestMessage = latestRun?.payload?.message || {};
+    state.conversationId = latestMessage.conversation_id || null;
     state.lastRunMetrics = latestRun
       ? {
-          ...(latestRun.payload || {}),
+          usage: latestMessage.usage || null,
+          model_name: latestMessage.model_name || null,
+          provider_name: latestMessage.provider_name || null,
           run_id: latestRun.run_id,
           status: latestRun.status || "completed",
           detailed: false,
@@ -2074,7 +2077,7 @@ function handleEvent({ event, data }, assistant) {
       }
       const refreshCompactionHistory = finalizeAutomaticContextCompaction(data.context, data.status);
       state.skipHistoryRefresh = !refreshCompactionHistory;
-      clearComposerPlan();
+      markComposerPlanTerminal(data.status || state.lastRunMetrics.status || "completed");
       if (data.status === "pending" && data.deferred) {
         state.awaitingHitl = true;
         setStreaming(false);

@@ -46,48 +46,37 @@ const history = {
   session_id: "session-1",
   items: [
     {
-      event_id: "evt-run",
-      sequence: 1,
-      event_type: "run",
-      status: "completed",
-      turn_id: "turn-1",
-      run_id: "run-1",
-      payload: { model_id: "model-1" },
-      created_at: "2026-08-23T10:00:00Z",
-      updated_at: "2026-08-23T10:00:03Z",
-    },
-    {
       event_id: "evt-user",
-      sequence: 2,
+      sequence: 1,
       event_type: "user/message",
       turn_id: "turn-1",
       run_id: "run-1",
-      message_id: "message-user",
-      part_index: 0,
       payload: {
-        part: {
+        message: { kind: "request", parts: [{
           part_kind: "user-prompt",
           content: [
             { kind: "text-content", content: "查询收入" },
             { kind: "attachment-ref", id: "file-1", name: "input.xlsx" },
             { kind: "context-ref", key: "current_range", type: "deeptable.range", schema_version: "1.0", label: "预算表!B2:F10" },
           ],
-        },
+        }] },
       },
       created_at: "2026-08-23T10:00:00Z",
       updated_at: "2026-08-23T10:00:00Z",
     },
     {
-      event_id: "evt-thinking",
-      sequence: 3,
-      event_type: "assistant/reasoning",
+      event_id: "evt-assistant-tool",
+      sequence: 2,
+      event_type: "assistant/message",
       turn_id: "turn-1",
       run_id: "run-1",
-      message_id: "message-response",
-      part_index: 0,
       payload: {
-        part: { part_kind: "thinking", content: "先查工具" },
-        message_meta: {
+        message: {
+          kind: "response",
+          parts: [
+            { part_kind: "thinking", content: "先查工具" },
+            { part_kind: "tool-call", tool_name: "cube_query", tool_call_id: "call-1", args: { cube: "Sales", access_token: "private" } },
+          ],
           model_name: "deepseek-v4-flash",
           provider_name: "openai-compatible",
           provider_response_id: "response-1",
@@ -99,48 +88,28 @@ const history = {
       updated_at: "2026-08-23T10:00:01Z",
     },
     {
-      event_id: "evt-call",
-      sequence: 4,
-      event_type: "tool/call",
-      turn_id: "turn-1",
-      run_id: "run-1",
-      message_id: "message-response",
-      part_index: 1,
-      call_id: "call-1",
-      tool_name: "cube_query",
-      payload: { part: { part_kind: "tool-call", tool_name: "cube_query", tool_call_id: "call-1", args: { cube: "Sales", access_token: "private" } } },
-      created_at: "2026-08-23T10:00:01Z",
-      updated_at: "2026-08-23T10:00:01Z",
-    },
-    {
       event_id: "evt-result",
-      sequence: 5,
-      event_type: "tool/result",
+      sequence: 3,
+      event_type: "tool/results",
       turn_id: "turn-1",
       run_id: "run-1",
-      message_id: "message-request-result",
-      part_index: 0,
-      call_id: "call-1",
-      tool_name: "cube_query",
-      payload: { part: { part_kind: "tool-return", tool_name: "cube_query", tool_call_id: "call-1", content: { rows: 2 }, outcome: "success" } },
+      payload: { message: { kind: "request", parts: [{ part_kind: "tool-return", tool_name: "cube_query", tool_call_id: "call-1", content: { rows: 2 }, outcome: "success" }] } },
       created_at: "2026-08-23T10:00:02Z",
       updated_at: "2026-08-23T10:00:02Z",
     },
     {
-      event_id: "evt-text",
-      sequence: 6,
-      event_type: "assistant/text",
+      event_id: "evt-final",
+      sequence: 4,
+      event_type: "assistant/message",
       turn_id: "turn-1",
       run_id: "run-1",
-      message_id: "message-final",
-      part_index: 0,
-      payload: { part: { part_kind: "text", content: "查询完成" } },
+      payload: { message: { kind: "response", parts: [{ part_kind: "text", content: "查询完成" }] } },
       created_at: "2026-08-23T10:00:03Z",
       updated_at: "2026-08-23T10:00:03Z",
     },
     {
       event_id: "evt-compaction",
-      sequence: 7,
+      sequence: 5,
       event_type: "compaction",
       status: "completed",
       turn_id: "turn-1",
@@ -152,28 +121,29 @@ const history = {
   ],
 };
 
-test("Event 轨迹逐行保留调用、结果、原生摘要和压缩位置", () => {
+test("完整 Message 投影合并思考正文与工具调用结果", () => {
   const events = buildTrajectory(history);
-  const call = events.find((event) => event.id === "evt-call");
-  const result = events.find((event) => event.id === "evt-result");
-  const assistant = events.find((event) => event.id === "evt-text");
-  const thinking = events.find((event) => event.id === "evt-thinking");
+  const call = events.find((event) => event.id === "tool:call-1");
+  const assistant = events.find((event) => event.id === "evt-final");
+  const thinking = events.find((event) => event.id === "evt-assistant-tool");
   const input = events.find((event) => event.kind === "input");
 
   assert.equal(call.status, "completed");
-  assert.deepEqual(result.result.result, { rows: 2 });
+  assert.deepEqual(call.result.result, { rows: 2 });
   assert.equal(call.payload.args.access_token, "[已隐藏]");
   assert.equal(thinking.native.model_name, "deepseek-v4-flash");
   assert.equal(thinking.native.usage.input_tokens, 20);
-  assert.equal(thinking.kind, "thinking");
+  assert.equal(thinking.kind, "assistant");
+  assert.equal(thinking.payload.thinking, "先查工具");
   assert.equal(assistant.payload.content, "查询完成");
   assert.equal(input.payload.context_refs[0].type, "deeptable.range");
   assert.equal(input.payload.attachments[0].name, "input.xlsx");
+  assert.equal(input.summary, "查询收入");
   assert.equal(input.run_id, "run-1");
-  assert.deepEqual(events.map((event) => event.id), history.items.map((event) => event.event_id));
+  assert.deepEqual(events.map((event) => event.id), ["evt-user", "evt-assistant-tool", "tool:call-1", "evt-final", "evt-compaction"]);
   assert.equal(events.at(-1).kind, "compaction");
-  assert.equal(events.at(-1).sequence, 7);
-  assert.match(call.summary, /Sales/);
+  assert.equal(events.at(-1).sequence, 5);
+  assert.equal(call.payload.args.cube, "Sales");
 });
 
 test("轨迹筛选、统计与脱敏保持确定性", () => {
@@ -245,7 +215,7 @@ test("工作台以独立页签接入轨迹且默认对话链路不变", () => {
   assert.match(workspaceCss, /\.trajectory-kind\.tool\s*\{[^}]*background:\s*#fff3e7/);
   assert.doesNotMatch(trajectorySource, /\bturns?\b/i);
   assert.match(trajectorySource, /currentUser\.run_id = currentRunId/);
-  assert.match(trajectorySource, /Run \$\{groupOrdinal\}/);
+  assert.doesNotMatch(trajectorySource, /Run \$\{groupOrdinal\}|data-trajectory-group/);
   assert.doesNotMatch(workspaceCss, /@media[^}]+trajectory-layout[^}]+grid-template-columns:\s*1fr/s);
 });
 

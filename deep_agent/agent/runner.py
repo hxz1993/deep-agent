@@ -91,7 +91,6 @@ from loguru import logger
 from deep_agent.db.conversation import SessionStore
 from deep_agent.db.stores.bundle import DataStores
 from deep_agent.db.serialization import serialize_message
-from deep_agent.db.ids import new_turn_id
 from deep_agent.schemas.attachment import AttachmentRef
 from deep_agent.schemas.context_reference import ContextReference
 from deep_agent.options import OPTION
@@ -104,6 +103,13 @@ class _PreparedHistory:
     projected: list[ModelMessage]
     raw: list[ModelMessage]
     pre_persisted_user: bool
+
+
+@dataclass(frozen=True)
+class _RunTerminalContext:
+    session_id: str
+    deps: AgentDeps
+    mode: str
 
 
 def _should_publish_tool_call(
@@ -211,21 +217,29 @@ class AgentRunner:
         deferred_tool_results: DeferredToolResults | None,
     ) -> None:
         if has_user_turn(message, attachments, context_refs):
-            deps.turn_id = new_turn_id()
+            deps.turn_id = deps.run_id
             deps.resume_from_run_id = None
             return
         if deps.turn_id is not None:
             return
-        if deferred_tool_results:
-            latest = getattr(self.store, "latest_turn_id", None)
-            if callable(latest):
-                deps.turn_id = await latest(session_id)
-        deps.turn_id = deps.turn_id or new_turn_id()
         deps.resume_from_run_id = None
         if deferred_tool_results:
-            latest_pending = getattr(self.store, "latest_pending_run_id", None)
-            if callable(latest_pending):
-                deps.resume_from_run_id = await latest_pending(session_id, deps.turn_id)
+            call_ids = sorted(
+                set(deferred_tool_results.calls)
+                | set(deferred_tool_results.approvals)
+                | set(deferred_tool_results.metadata)
+            )
+            find_origin = getattr(self.store, "find_call_origin", None)
+            origin = (
+                await find_origin(session_id, call_ids)
+                if callable(find_origin) and call_ids
+                else None
+            )
+            if origin is None:
+                raise ValueError("Deferred tool results do not match a persisted tool call")
+            deps.turn_id, deps.resume_from_run_id = origin
+            return
+        deps.turn_id = deps.turn_id or deps.run_id
 
     async def _prepare_plan_store(self, session_id: str, deps: AgentDeps) -> None:
         snapshot = None
@@ -236,49 +250,42 @@ class AgentRunner:
         await restore_plan_snapshot(deps, snapshot)
 
     async def _start_run_event(self, session_id: str, deps: AgentDeps, *, mode: str):
-        append = getattr(self.store, "append_lifecycle", None)
-        if not callable(append):
-            return None
-        return await append(
-            session_id,
-            event_type="run",
-            status="running",
-            agent_id=deps.agent_id,
-            user_id=deps.user,
-            app_id=deps.app_id,
-            space_id=deps.space_id,
-            turn_id=deps.turn_id,
-            run_id=deps.run_id,
-            payload={
-                "model_id": self._model_id,
-                "mode": mode,
-                "resume_from_run_id": deps.resume_from_run_id,
-            },
-        )
+        # This is an in-memory context only. Normal runs never persist a Run row.
+        return _RunTerminalContext(session_id=session_id, deps=deps, mode=mode)
 
     async def _finish_run_event(
         self,
-        run_event: Any,
+        run_event: _RunTerminalContext,
         *,
         status: str,
         started_at: float,
         usage: RunUsage | None,
         error: str | None = None,
     ):
-        if run_event is None:
+        if status not in {"failed", "cancelled", "interrupted"}:
             return None
-        update = getattr(self.store, "update_lifecycle", None)
-        if not callable(update):
+        deps = run_event.deps
+        append_terminal = getattr(self.store, "append_terminal", None)
+        if not callable(append_terminal):
             return None
-        payload = dict(run_event.payload)
-        payload.update(
-            {
-                "usage": usage_dict(usage) if usage is not None else None,
-                "duration_ms": max(0, round((time.perf_counter() - started_at) * 1_000)),
-                "error": error,
-            }
+        payload = {
+            "mode": run_event.mode,
+            "model_id": self._model_id,
+            "duration_ms": max(0, round((time.perf_counter() - started_at) * 1_000)),
+            "usage": _run_usage_dict(usage),
+            "error": {"code": error} if error else None,
+        }
+        return await append_terminal(
+            run_event.session_id,
+            status=status,
+            agent_id=deps.agent_id,
+            user_id=deps.user,
+            app_id=deps.app_id,
+            space_id=deps.space_id,
+            turn_id=deps.turn_id,
+            run_id=deps.run_id,
+            payload=payload,
         )
-        return await update(run_event.event_id, status=status, payload=payload)
 
     @staticmethod
     async def _capture_planning_result(event: Any, deps: AgentDeps) -> None:
@@ -599,12 +606,45 @@ class AgentRunner:
                 "mode": "manual",
                 "message": "正在保存压缩事件…",
             }
-            event = await self._persist_compaction(
-                session_id, deps, raw_history=raw, projected_history=compacted,
-                trigger="manual",
-                started_at=state.compaction_started_at or started_at,
-                target_tokens=target_tokens,
-            )
+            try:
+                event = await self._persist_compaction(
+                    session_id, deps, raw_history=raw, projected_history=compacted,
+                    trigger="manual",
+                    started_at=state.compaction_started_at or started_at,
+                    target_tokens=target_tokens,
+                )
+            except asyncio.CancelledError:
+                await state.finish_compaction("cancelled", "cancelled")
+                while not event_queue.empty():
+                    yield event_queue.get_nowait()
+                raise
+            except Exception as exc:
+                error_code = type(exc).__name__
+                logger.warning(
+                    "Manual context compaction Event save failed for {}/{}: {}",
+                    deps.agent_id,
+                    session_id,
+                    error_code,
+                )
+                try:
+                    await state.finish_compaction("failed", error_code)
+                except Exception as lifecycle_exc:
+                    logger.warning(
+                        "Manual context compaction failure status save failed for {}/{}: {}",
+                        deps.agent_id,
+                        session_id,
+                        type(lifecycle_exc).__name__,
+                    )
+                while not event_queue.empty():
+                    yield event_queue.get_nowait()
+                yield manual_result(
+                    "failed",
+                    error_code,
+                    usage=usage,
+                    telemetry=state.telemetry.as_dict(),
+                    target_tokens=target_tokens,
+                )
+                return
             if event is None:
                 await state.finish_compaction("stale", "source_history_changed")
                 while not event_queue.empty():
@@ -654,16 +694,7 @@ class AgentRunner:
         raw_reader = getattr(self.store, "get_raw_history", self.store.get_history)
         raw_history = await raw_reader(session_id, agent_id=deps.agent_id)
         history = await self.store.get_history(session_id, agent_id=deps.agent_id)
-        if deps.turn_id is None and has_user_turn(message, attachments, context_refs):
-            deps.turn_id = new_turn_id()
-        elif deps.turn_id is None and deferred_tool_results:
-            latest_turn = getattr(self.store, "latest_turn_id", None)
-            deps.turn_id = (
-                await latest_turn(session_id)
-                if callable(latest_turn)
-                else deps.turn_id
-            )
-        deps.turn_id = deps.turn_id or new_turn_id()
+        deps.turn_id = deps.turn_id or deps.run_id
         if not deferred_tool_results:
             repaired = repair_unprocessed_tool_calls(history)
             if repaired is not history:
@@ -1037,6 +1068,7 @@ class AgentRunner:
         pre_persisted_user: bool,
         repair_dangling_tool_calls: bool = True,
         result_queue: asyncio.Queue[dict[str, Any]] | None = None,
+        terminal_status: str | None = None,
     ) -> bool:
         to_append = incremental_append_messages(new_messages, skip_user_prompt=pre_persisted_user)
         if repair_dangling_tool_calls:
@@ -1053,6 +1085,7 @@ class AgentRunner:
             turn_id=deps.turn_id,
             run_id=deps.run_id,
             first_message_ordinal=1 if pre_persisted_user else 0,
+            terminal_status=terminal_status,
         )
         return True
 
@@ -1066,6 +1099,7 @@ class AgentRunner:
         pre_persisted_user: bool,
         repair_dangling_tool_calls: bool = True,
         result_queue: asyncio.Queue[dict[str, Any]] | None = None,
+        terminal_status: str | None = None,
     ) -> None:
         persister.publish(
             PersistEvent(
@@ -1080,6 +1114,7 @@ class AgentRunner:
                 new_messages=new_messages,
                 skip_user_prompt=pre_persisted_user,
                 repair_dangling_tool_calls=repair_dangling_tool_calls,
+                terminal_status=terminal_status,
                 result_queue=result_queue,
             )
         )
@@ -1161,7 +1196,20 @@ class AgentRunner:
                     latest = await self.store.get_session_title(session_id, agent_id=deps.agent_id)
                     if latest and (not user_text or latest != user_text):
                         return
-                    await self.store.update_session_title(session_id, deps.agent_id, title)
+                    conditional_update = getattr(
+                        self.store, "update_session_title_if_current", None
+                    )
+                    if callable(conditional_update):
+                        await conditional_update(
+                            session_id,
+                            deps.agent_id,
+                            expected_title=latest,
+                            title=title,
+                        )
+                    else:
+                        await self.store.update_session_title(
+                            session_id, deps.agent_id, title
+                        )
 
         except Exception as e:
             logger.warning("Title generation failed for session {}: {}", session_id, e)
@@ -1284,6 +1332,11 @@ class AgentRunner:
                 deps,
                 pre_persisted_user=prepared.pre_persisted_user,
                 repair_dangling_tool_calls=not isinstance(result.output, DeferredToolRequests),
+                terminal_status=(
+                    "pending"
+                    if isinstance(result.output, DeferredToolRequests)
+                    else "completed"
+                ),
             )
             compaction_event_saved: bool | None = None
             if not isinstance(result.output, DeferredToolRequests):
@@ -1514,12 +1567,6 @@ class AgentRunner:
         self._prepare_skill_runtime(deps)
         started_at = time.perf_counter()
         run_event = await self._start_run_event(session_id, deps, mode="stream")
-        if run_event is not None:
-            yield {
-                "type": "session_event_appended",
-                "persisted": True,
-                "event": run_event.public_dict(),
-            }
         log_event(
             "agent_run_started",
             conversation_id=deps.conversation_id,
@@ -1646,15 +1693,16 @@ class AgentRunner:
                         ):
                             if source == "status":
                                 status_event = event
-                                log_event(
-                                    "context_compaction_phase",
-                                    conversation_id=deps.conversation_id,
-                                    run_id=deps.run_id,
-                                    agent_id=deps.agent_id,
-                                    session_id=session_id,
-                                    phase=status_event.get("phase"),
-                                    mode=status_event.get("mode", "automatic"),
-                                )
+                                if status_event.get("type") == "context_compaction_progress":
+                                    log_event(
+                                        "context_compaction_phase",
+                                        conversation_id=deps.conversation_id,
+                                        run_id=deps.run_id,
+                                        agent_id=deps.agent_id,
+                                        session_id=session_id,
+                                        phase=status_event.get("phase"),
+                                        mode=status_event.get("mode", "automatic"),
+                                    )
                                 yield status_event
                                 continue
                             if isinstance(event, AgentRunResultEvent):
@@ -1727,6 +1775,7 @@ class AgentRunner:
                         new_messages,
                         pre_persisted_user=prepared.pre_persisted_user,
                         repair_dangling_tool_calls=not deferred_pending,
+                        terminal_status="pending" if deferred_pending else "completed",
                         result_queue=session_events,
                     )
                     run_published = True

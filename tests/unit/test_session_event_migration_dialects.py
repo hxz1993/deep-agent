@@ -56,6 +56,14 @@ class SessionEventMigrationDialectTests(unittest.TestCase):
                     ddl = str(CreateTable(table).compile(dialect=dialect))
                     self.assertIn("CREATE TABLE", ddl)
                 event_payload = tables["chat_session_events"].c.payload.type
+                self.assertEqual(
+                    set(tables["chat_session_events"].c.keys()),
+                    {
+                        "event_id", "session_id", "sequence", "schema_version",
+                        "event_type", "status", "turn_id", "run_id", "search_text",
+                        "payload", "created_at", "updated_at",
+                    },
+                )
                 if dialect.name == "mysql":
                     self.assertEqual(event_payload.__class__.__name__, "LONGTEXT")
                 else:

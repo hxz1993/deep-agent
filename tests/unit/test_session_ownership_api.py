@@ -46,10 +46,12 @@ class SessionOwnershipApiTests(unittest.TestCase):
         self.agent_id = agent.id
         message = [ModelRequest(parts=[UserPromptPart(content="hello")])]
         await store.append(
-            "mine", message, agent_id=self.agent_id, user_id=self.user_id
+            "mine", message, agent_id=self.agent_id, user_id=self.user_id,
+            turn_id="run-mine", run_id="run-mine",
         )
         await store.append(
-            "other", message, agent_id=self.agent_id, user_id="user-b"
+            "other", message, agent_id=self.agent_id, user_id="user-b",
+            turn_id="run-other", run_id="run-other",
         )
 
     def test_get_and_events_only_return_owned_session(self) -> None:

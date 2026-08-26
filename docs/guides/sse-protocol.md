@@ -1,33 +1,35 @@
-# SSE 流式消息协议（v0.6.0）
+# SSE 流式消息协议（v0.6.0 / V8）
 
-`POST /api/v1/chat/stream`使用`text/event-stream`。浏览器原生`EventSource`不支持POST，客户端使用
-`fetch + ReadableStream`，按空行分帧、拼接多行`data:`后解析JSON。
+`POST /api/v1/chat/stream` 使用 `text/event-stream`。客户端使用
+`fetch + ReadableStream`，按空行分帧并拼接多行 `data:`。
 
-## 两类事件
+## 持久化与直播事件
 
-持久化事件是Event Store的实时镜像：
+持久化事件是 Event Store 的实时镜像：
 
 | `type` | 语义 | 客户端处理 |
 | --- | --- | --- |
-| `session_event_appended` | 新Event已经提交 | 按`event.event_id`插入，按`sequence`排序 |
-| `session_event_updated` | Run或Compaction生命周期终态已提交 | 按同一`event.event_id`覆盖，不追加到底部 |
+| `session_event_appended` | Message、Compaction 或异常终态已经提交 | 按 `event_id` 插入并按 `sequence` 排序 |
+| `session_event_updated` | 同一 Compaction 生命周期更新 | 按同一 `event_id` 覆盖，不能追加第二行 |
 
-两者都携带`persisted=true`和完整公共Event：`event_id/session_id/sequence/schema_version/event_type/status/turn_id/run_id/message_id/part_index/call_id/tool_name/payload/created_at/updated_at`。
-刷新后的权威结果由`GET /api/v1/sessions/{session_id}/events`返回，应与实时Upsert结果一致。
+公共 Event 字段只有：`event_id/session_id/sequence/schema_version/event_type/status/turn_id/run_id/payload/created_at/updated_at`。
+普通消息的 `payload.message` 是一条完整 Pydantic `ModelRequest` 或 `ModelResponse`；
+`message_id/part_index/call_id/tool_name` 不再是 Event 顶层字段。
 
-非持久化事件只用于当前直播过程，明确`persisted=false`或没有持久化标志：
+以下事件只服务当前直播，不入库：
 
 - `text`、`thinking`
 - `tool_call`、`tool_result`、`tool_call_removed`
 - `context_compaction_progress`
 - `final`、`cancelled`、`error`
 
-这些事件不能在刷新后被假定仍然存在；最终消息与工具Part会另外通过持久化Event提交。
+刷新后的权威状态由 `GET /api/v1/sessions/{session_id}/events` 返回。工具直播状态
+与持久化 Message 中的 Tool Part 按 `tool_call_id` 投影为同一逻辑项。
 
 ## 上下文压缩
 
-压缩开始会先追加一条`compaction/status=running`Event，完成或失败时更新同一Event ID。等待摘要模型期间
-服务端每约10秒发送：
+压缩开始追加一条 `compaction/status=running` Event；完成或失败只更新同一 Event。
+等待摘要模型期间服务端每约 10 秒发送：
 
 ```json
 {
@@ -40,33 +42,25 @@
 }
 ```
 
-`phase`只取`preparing/summarizing/validating/committing/retry_wait`，不提供虚假百分比。客户端按
-`event_id`更新一条临时状态；收到持久化终态后移除临时状态并以Event为准。
+`phase` 只取 `preparing/summarizing/validating/committing/retry_wait`，不提供虚假百分比。
+默认总预算 300 秒，网关 Read Timeout 至少 330 秒、建议 360 秒，并关闭 SSE 缓冲。
+心跳由应用层产生，不依赖 Provider 返回 Token。
 
-默认摘要总预算300秒，因此网关Read Timeout至少330秒、建议360秒，并关闭SSE代理缓冲。心跳由应用
-外层调度，不依赖Provider返回Token。
+## 取消与 Deferred
 
-## 取消与Deferred
+停止生成调用 `POST /api/v1/sessions/{session_id}/cancel`。客户端继续读取原 SSE，
+直到收到真实 `cancelled` 或终态；连接断开也会取消正在等待的模型和摘要调用。
 
-停止生成调用：
+正常完成和正常 Pending 不写 Run Event。`final` 继续携带本次 `run_id`、Usage 和状态。
+新用户回合的 `turn_id` 等于首个 `run_id`；Deferred 恢复创建新 Run，但从持久化
+Tool Call 的 `tool_call_id` 精确继承原 `turn_id`。只有没有 Assistant Message 的失败、
+取消或中断才追加 `run/terminal` Event。
 
-```http
-POST /api/v1/sessions/{session_id}/cancel
-```
+## 重连
 
-客户端继续读取原SSE，直到收到真实`cancelled`或终态；不能仅关闭连接后伪造成功。服务端在发布首条
-Session信息前已经登记Active Run，因此拿到Session ID后即可取消。连接异常断开会触发同一个
-Cancellation Token，并取消正在等待的摘要模型。
+- 从已知最大 `sequence` 分页补齐，不按时间戳猜顺序。
+- `tool_call_removed` 只撤销尚未持久化的直播工具项。
+- `final` 不是历史事实；最终消息、工具和压缩状态以 Event Store 为准。
 
-UI Tool/HITL返回Pending时，Run Event更新为`pending`。提交`deferred_tool_results`会创建新Run，继承
-同一`turn_id`，工具结果继续按`call_id`与旧Run中的调用配对；客户端不需要自行合并Run身份。
-
-## 错误与重连
-
-- `error`保留后端错误语义；Provider Context Overflow只有在尚未输出正文或工具事件时才可能压缩后安全
-  重试一次，否则返回原错误。
-- 客户端重连或页面刷新后，从已知最大Sequence调用Event API分页补齐，不按时间戳猜顺序。
-- `tool_call_removed`撤销的是尚未持久化的实时工具卡；已持久化Event不由该消息删除。
-- `final`表示本次Run结束，不等于它本身是历史事实；持久化消息和Run终态仍以Event为准。
-
-前端实现见`frontend/console/protocol.js`、`chat.js`和`session-events.js`。
+前端实现见 `frontend/console/protocol.js`、`chat.js`、`session-events.js` 和
+`trajectory.js`。

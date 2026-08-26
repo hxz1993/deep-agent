@@ -9,15 +9,11 @@ import {
 const event = (sequence, eventType, overrides = {}) => ({
   event_id: `event-${sequence}`,
   sequence,
-  schema_version: 1,
+  schema_version: eventType === "compaction" ? 1 : 2,
   event_type: eventType,
   status: null,
   turn_id: "turn-1",
   run_id: "run-1",
-  message_id: null,
-  part_index: null,
-  call_id: null,
-  tool_name: null,
   payload: {},
   created_at: `2026-08-26T00:00:0${Math.min(sequence, 9)}Z`,
   updated_at: `2026-08-26T00:00:0${Math.min(sequence, 9)}Z`,
@@ -32,33 +28,29 @@ test("Event API 确定性投影聊天、Plan 和真实位置的压缩事件", ()
   const response = {
     session_id: "session-1",
     items: [
-      event(1, "run", { status: "completed" }),
-      event(2, "user/message", {
-        message_id: "message-user",
-        part_index: 0,
+      event(1, "user/message", {
         payload: {
-          part: {
-            content: [
+          message: {
+            kind: "request",
+            parts: [{ part_kind: "user-prompt", content: [
               { kind: "text-content", content: "分析预算" },
               { kind: "attachment-ref", id: "file-1", name: "budget.xlsx", mime: "application/vnd.ms-excel" },
               { kind: "context-ref", key: "range", type: "deeptable.range", label: "预算!B2:C4" },
-            ],
+            ] }],
           },
         },
       }),
-      event(3, "assistant/reasoning", {
-        message_id: "message-response",
-        part_index: 0,
-        payload: { part: { content: "先读取数据" }, message_meta: { model_name: "model-1" } },
+      event(2, "assistant/message", {
+        payload: { message: {
+          kind: "response",
+          model_name: "model-1",
+          parts: [
+            { part_kind: "thinking", content: "先读取数据" },
+            { part_kind: "tool-call", tool_name: "write_plan", tool_call_id: "call-plan", args: { items: plan.items } },
+          ],
+        } },
       }),
-      event(4, "tool/call", {
-        message_id: "message-response",
-        part_index: 1,
-        call_id: "call-plan",
-        tool_name: "write_plan",
-        payload: { part: { tool_name: "write_plan", tool_call_id: "call-plan", args: { items: plan.items } } },
-      }),
-      event(5, "compaction", {
+      event(3, "compaction", {
         status: "completed",
         payload: {
           source: { through_sequence: 3 },
@@ -66,17 +58,14 @@ test("Event API 确定性投影聊天、Plan 和真实位置的压缩事件", ()
           summary_call: { model_id: "summary-model" },
         },
       }),
-      event(6, "tool/result", {
-        message_id: "message-tool-result",
-        part_index: 0,
-        call_id: "call-plan",
-        tool_name: "write_plan",
-        payload: { part: { tool_name: "write_plan", tool_call_id: "call-plan", content: { ok: true }, metadata: { deepagent_plan: plan } } },
+      event(4, "tool/results", {
+        payload: { message: {
+          kind: "request",
+          parts: [{ part_kind: "tool-return", tool_name: "write_plan", tool_call_id: "call-plan", content: { ok: true }, metadata: { deepagent_plan: plan } }],
+        } },
       }),
-      event(7, "assistant/text", {
-        message_id: "message-final",
-        part_index: 0,
-        payload: { part: { content: "已完成分析" }, message_meta: { finish_reason: "stop" } },
+      event(5, "assistant/message", {
+        payload: { message: { kind: "response", finish_reason: "stop", parts: [{ part_kind: "text", content: "已完成分析" }] } },
       }),
     ],
   };
@@ -95,13 +84,13 @@ test("Event API 确定性投影聊天、Plan 和真实位置的压缩事件", ()
     .find((part) => part.type === "tool_result" && part.tool === "write_plan");
   assert.deepEqual(planResult.plan, plan);
 
-  assert.deepEqual(compactionPresentation(response.items[4]), {
-    event_id: "event-5",
+  assert.deepEqual(compactionPresentation(response.items[2]), {
+    event_id: "event-3",
     status: "completed",
     before_tokens: 10000,
     after_tokens: 5000,
     through_sequence: 3,
-    updated_at: "2026-08-26T00:00:05Z",
+    updated_at: "2026-08-26T00:00:03Z",
     summary_model_id: "summary-model",
   });
 });

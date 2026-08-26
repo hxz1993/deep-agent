@@ -42,7 +42,7 @@ class ChatSessionStoreTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_filters_and_has_messages_total_match(self) -> None:
         await self.store.append_lifecycle(
-            "empty", event_type="run", status="completed",
+            "empty", event_type="compaction", status="completed",
             agent_id=self.agent_id, user_id="user-1", turn_id="2" * 32,
             run_id="run-empty", payload={},
         )
@@ -64,13 +64,13 @@ class ChatSessionStoreTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_global_session_id_cannot_be_reowned(self) -> None:
         await self.store.append_lifecycle(
-            "global", event_type="run", status="completed",
+            "global", event_type="compaction", status="completed",
             agent_id=self.agent_id, user_id="user-1", turn_id="4" * 32,
             run_id="run-global", payload={},
         )
         with self.assertRaises(PermissionError):
             await self.store.append_lifecycle(
-                "global", event_type="run", status="completed",
+                "global", event_type="compaction", status="completed",
                 agent_id=self.agent_id, user_id="user-2", turn_id="5" * 32,
                 run_id="run-other", payload={},
             )

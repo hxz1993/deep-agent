@@ -233,10 +233,6 @@ class SessionEventResponse(BaseModel):
     status: str | None = None
     turn_id: str | None = None
     run_id: str | None = None
-    message_id: str | None = None
-    part_index: int | None = None
-    call_id: str | None = None
-    tool_name: str | None = None
     payload: dict[str, Any]
     created_at: datetime
     updated_at: datetime
@@ -535,10 +531,20 @@ async def rename_session(
 
     api_agent_id = agent_id or agent_scope_to_api(scope)
 
+    def session_lock():
+        lock = getattr(ctx.store, "lock", None)
+        return lock(resolved_session_id, agent_id=api_agent_id) if callable(lock) else None
+
     if body.title is not None:
         # 手动设置标题
         title = body.title.strip()[:80] if body.title.strip() else None
-        await ctx.store.update_session_title(resolved_session_id, api_agent_id, title)
+        lock = session_lock()
+        if lock is None:
+            await ctx.store.update_session_title(resolved_session_id, api_agent_id, title)
+        else:
+            # 与首轮后台标题生成共用会话锁，确保人工标题无论先后都最终获胜。
+            async with lock:
+                await ctx.store.update_session_title(resolved_session_id, api_agent_id, title)
     elif body.auto:
         # 自动重新生成标题
         history = await ctx.store.get_history(resolved_session_id, agent_id=api_agent_id)
@@ -566,7 +572,12 @@ async def rename_session(
         if not title:
             title = user_text
 
-        await ctx.store.update_session_title(resolved_session_id, api_agent_id, title)
+        lock = session_lock()
+        if lock is None:
+            await ctx.store.update_session_title(resolved_session_id, api_agent_id, title)
+        else:
+            async with lock:
+                await ctx.store.update_session_title(resolved_session_id, api_agent_id, title)
 
     # 返回更新后的会话信息
     history = await ctx.store.get_history(resolved_session_id, agent_id=api_agent_id)

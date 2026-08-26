@@ -19,6 +19,7 @@ from deep_agent.core.context import get_context
 from deep_agent.capabilities import build_registry
 from deep_agent.capabilities.mcp.lease_manager import McpLeaseManager
 from deep_agent.core.context import AppContext, init_context, reset_context
+from deep_agent.db.event_codec import tool_part_references
 from deep_agent.schemas.chat import StreamChatRequest
 from tests.helpers.request_identity import TEST_USER_ID, install_test_user_header
 from tests.helpers.sqlite_stores import (
@@ -505,6 +506,21 @@ class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
         final = next(ev for ev in reversed(events) if ev.get("type") == "final")
         self.assertEqual(final["status"], "completed")
         self.assertTrue(any(ev.get("type") == "tool_result" for ev in events))
+        await get_context().event_persister.flush(session_id, agent_id=self._agent_id)
+        rows = await get_context().store.list_events(session_id, limit=100)
+        tool_rows = [
+            row
+            for row in rows
+            if row.event_type in {"assistant/message", "tool/results"}
+            and any(
+                ref["call_id"] == tool_call_id
+                for ref in tool_part_references(row)
+            )
+        ]
+        self.assertGreaterEqual(len(tool_rows), 2)
+        self.assertEqual(len({row.turn_id for row in tool_rows}), 1)
+        self.assertGreaterEqual(len({row.run_id for row in tool_rows}), 2)
+        self.assertEqual(final["run_id"], tool_rows[-1].run_id)
 
     async def test_e3_new_message_after_deferred_without_confirm(self) -> None:
         session_id, _ = await self._run_hitl_pending()

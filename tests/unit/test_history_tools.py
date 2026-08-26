@@ -40,6 +40,11 @@ class ConversationHistoryToolTests(unittest.IsolatedAsyncioTestCase):
                             {"parent": "华东", "path": "/区域/华东"},
                             "call-cn-1",
                         ),
+                        ToolCallPart(
+                            "other_tool",
+                            {"scope": "unrelated"},
+                            "call-other-1",
+                        ),
                     ]
                 ),
                 ModelRequest(
@@ -52,7 +57,12 @@ class ConversationHistoryToolTests(unittest.IsolatedAsyncioTestCase):
                                 "overflow_handle": "artifact-1",
                                 "authorization": "secret",
                             },
-                        )
+                        ),
+                        ToolReturnPart(
+                            "other_tool",
+                            {"ok": True},
+                            "call-other-1",
+                        ),
                     ]
                 ),
             ],
@@ -106,7 +116,7 @@ class ConversationHistoryToolTests(unittest.IsolatedAsyncioTestCase):
             any(item["session_id"] == "session-other" for item in result["items"])
         )
         self.assertFalse(
-            any(item["event_type"] == "assistant/reasoning" for item in result["items"])
+            any("私有思考" in item.get("preview", "") for item in result["items"])
         )
 
     async def test_call_id_reads_pair_and_redacts_metadata(self) -> None:
@@ -116,10 +126,30 @@ class ConversationHistoryToolTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(
             [item["event_type"] for item in result["events"]],
-            ["tool/call", "tool/result"],
+            ["assistant/message", "tool/results"],
         )
         self.assertNotIn("secret", str(result))
         self.assertNotIn("metadata", str(result))
+
+    async def test_tool_filter_returns_only_the_matching_part(self) -> None:
+        result = await self._call(
+            "search_conversation_history",
+            query="华东",
+            tool_name="query_members",
+        )
+        matching = [
+            item for item in result["items"]
+            if item["event_type"] == "assistant/message"
+        ]
+        self.assertTrue(matching)
+        self.assertEqual(matching[0]["tool_name"], "query_members")
+        self.assertEqual(matching[0]["call_id"], "call-cn-1")
+        self.assertTrue(
+            all(
+                part["tool_name"] == "query_members"
+                for part in matching[0]["matched_parts"]
+            )
+        )
 
     async def test_exact_event_is_not_readable_by_another_user(self) -> None:
         event = (

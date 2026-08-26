@@ -143,12 +143,15 @@ async def create_context_test_session(
         estimator=estimator,
     )
     session_id = f"context-test-{scenario.key}-{uuid.uuid4().hex}"
+    run_id = uuid.uuid4().hex
     title = f"【压缩测试】{scenario.title}"
     await ctx.store.append(
         session_id,
         built.messages,
         agent_id=agent.id,
         user_id=user,
+        turn_id=run_id,
+        run_id=run_id,
     )
     await ctx.store.update_session_title(session_id, agent.id, title)
 

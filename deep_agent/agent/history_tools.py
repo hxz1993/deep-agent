@@ -12,6 +12,7 @@ from pydantic_ai import FunctionToolset, ModelRetry, RunContext
 
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.db.conversation import SqlConversationCoordinator
+from deep_agent.db.event_codec import tool_part_references
 
 _SENSITIVE_KEYS = frozenset(
     {
@@ -170,17 +171,28 @@ def build_history_toolset(
         for score, row in page:
             complete: bool | None = None
             artifact: str | None = None
-            if row.get("event_type") in {"tool/result", "tool/search_result", "tool/native_result"}:
+            if row.get("event_type") == "tool/results":
                 detail = await store.read_authorized_events(
                     agent_id=ctx.deps.agent_id,
                     user_id=ctx.deps.user,
                     event_id=str(row["event_id"]),
                 )
                 if detail:
-                    part = detail[0].payload.get("part") or {}
-                    metadata = part.get("metadata") or {}
-                    complete = not bool(metadata.get("truncated") or metadata.get("spill_failed"))
-                    artifact = _artifact_id(part)
+                    result_parts = [
+                        ref["part"]
+                        for ref in tool_part_references(detail[0])
+                        if ref["role"] == "result"
+                    ]
+                    metadata_items = [
+                        part.get("metadata") or {}
+                        for part in result_parts
+                        if isinstance(part, dict)
+                    ]
+                    complete = bool(result_parts) and all(
+                        not bool(metadata.get("truncated") or metadata.get("spill_failed"))
+                        for metadata in metadata_items
+                    )
+                    artifact = _artifact_id(result_parts)
             items.append(
                 {
                     "session_id": row["session_id"],
@@ -192,6 +204,7 @@ def build_history_toolset(
                     "event_type": row["event_type"],
                     "tool_name": row.get("tool_name"),
                     "call_id": row.get("call_id"),
+                    "matched_parts": row.get("tool_matches") or [],
                     "preview": _preview(str(row.get("search_text") or ""), query),
                     "result_complete": complete,
                     "artifact_id": artifact,

@@ -95,7 +95,10 @@ function newEvent({
     timestamp,
     status: normalizedStatus(status),
     label: eventLabel(kind, part),
-    summary: eventSummary(kind, part.type ? part : message),
+    summary: eventSummary(
+      kind,
+      part && typeof part === "object" && Object.keys(part).length ? part : message,
+    ),
     tool_call_id: part.tool_call_id || null,
     source: part.source || source,
     payload: redactTrajectoryValue(jsonClone(payload)),
@@ -137,9 +140,6 @@ function assistantLoopSummary(payload = {}) {
   return payload.thinking ? "模型处理中" : "模型响应";
 }
 
-const RESULT_TYPES = new Set(["tool/result", "tool/search_result", "capability/load_result", "tool/native_result"]);
-const CALL_TYPES = new Set(["tool/call", "tool/search_call", "capability/load_call", "tool/native_call"]);
-
 function userPayload(content) {
   if (typeof content === "string") return { content, attachments: [], context_refs: [] };
   if (!Array.isArray(content)) return { content: null, attachments: [], context_refs: [] };
@@ -155,83 +155,195 @@ function userPayload(content) {
   return { content: texts.filter(Boolean).join("\n") || null, attachments, context_refs: contextRefs };
 }
 
-function storedEventKind(event, part) {
-  if (event.event_type === "run") return "run";
-  if (event.event_type === "compaction") return "compaction";
-  if (event.event_type === "user/message") return "input";
-  if (event.event_type === "assistant/reasoning") return "thinking";
-  if (["assistant/text", "assistant/file", "assistant/speech"].includes(event.event_type)) return "assistant";
-  if (CALL_TYPES.has(event.event_type) || RESULT_TYPES.has(event.event_type)) {
-    return partKind(part, event.tool_name || part?.tool_name);
-  }
-  return "event";
+function storedMessage(event) {
+  return event?.payload?.message && typeof event.payload.message === "object"
+    ? event.payload.message
+    : null;
 }
 
-function projectStoredEvent(event, inputSequence) {
-  const rawPayload = event?.payload && typeof event.payload === "object" ? event.payload : {};
-  const part = rawPayload.part && typeof rawPayload.part === "object" ? rawPayload.part : {};
-  const messageMeta = rawPayload.message_meta && typeof rawPayload.message_meta === "object"
-    ? rawPayload.message_meta
-    : {};
-  const kind = storedEventKind(event, part);
-  const toolName = event.tool_name || part.tool_name || null;
-  let payload = rawPayload;
-  let result = null;
-  let summaryPart = { event_type: event.event_type };
-  if (kind === "input") {
-    payload = userPayload(part.content);
-    summaryPart = { content: payload.content };
-  } else if (["assistant", "thinking"].includes(kind)) {
-    payload = { content: part.content ?? null, metadata: part.metadata || null };
-    summaryPart = { content: part.content ?? null };
-  } else if (CALL_TYPES.has(event.event_type)) {
-    payload = { args: part.args ?? null, metadata: part.metadata || null };
-    summaryPart = { type: "tool_call", tool: toolName, args: part.args ?? null };
-  } else if (RESULT_TYPES.has(event.event_type)) {
-    const metadata = part.metadata && typeof part.metadata === "object" ? part.metadata : {};
-    payload = { metadata };
-    result = {
-      result: part.content ?? null,
-      outcome: part.outcome || null,
-      plan: toolName === "write_plan" ? metadata.deepagent_plan || null : null,
-    };
-    summaryPart = { type: "tool_result", tool: toolName, result: part.content ?? null };
-  } else if (kind === "run") {
-    summaryPart = { status: event.status };
-  } else if (kind === "compaction") {
-    summaryPart = rawPayload;
-  }
-  const native = Object.values(messageMeta).some((value) => value != null) ? messageMeta : null;
+function messageMeta(message = {}) {
+  const { parts: _parts, ...meta } = message;
+  return meta;
+}
+
+function toolRole(part) {
+  if (["tool-call", "builtin-tool-call"].includes(part?.part_kind)) return "call";
+  if (["tool-return", "builtin-tool-return", "retry-prompt"].includes(part?.part_kind)) return "result";
+  return null;
+}
+
+function toolSource(toolName) {
+  if (toolName === "write_plan") return "planning";
+  if (["search_tools", "tool_search"].includes(toolName)) return "tool_search";
+  return null;
+}
+
+function projectCompaction(event, inputSequence) {
   const projected = newEvent({
     id: event.event_id,
-    kind,
+    kind: "compaction",
     inputSequence: Math.max(inputSequence, 1),
-    runId: event.run_id || messageMeta.run_id || null,
-    timestamp: event.created_at || part.timestamp || messageMeta.timestamp || null,
-    status: event.status || (part.outcome === "failed" ? "failed" : "completed"),
-    part: { ...summaryPart, tool: toolName, source: toolName === "write_plan" ? "planning" : null },
-    payload,
-    result,
-    native,
+    runId: event.run_id || null,
+    timestamp: event.created_at || null,
+    status: event.status || "running",
+    part: event.payload || {},
+    payload: event.payload || {},
   });
   projected.sequence = Number(event.sequence || 0);
   projected.turn_id = event.turn_id || null;
-  projected.message_id = event.message_id || null;
   projected.event_type = event.event_type;
-  projected.tool_call_id = event.call_id || part.tool_call_id || null;
   projected.timestamp_end = event.updated_at || projected.timestamp;
   return projected;
 }
 
-/** Build one trajectory row from each persisted semantic Session Event. */
+/** Build semantic trajectory rows from complete Message Events. */
 export function buildTrajectory(history = {}) {
   const items = [...(Array.isArray(history?.items) ? history.items : [])]
     .sort((left, right) => Number(left.sequence || 0) - Number(right.sequence || 0));
   let inputSequence = 0;
-  return items.map((event) => {
-    if (event.event_type === "user/message") inputSequence += 1;
-    return projectStoredEvent(event, inputSequence);
-  });
+  const projected = [];
+  const tools = new Map();
+  for (const event of items) {
+    if (event.event_type === "compaction") {
+      projected.push(projectCompaction(event, inputSequence));
+      continue;
+    }
+    if (event.event_type === "run/terminal") {
+      const terminal = newEvent({
+        id: event.event_id,
+        kind: "run",
+        inputSequence: Math.max(inputSequence, 1),
+        runId: event.run_id || null,
+        timestamp: event.created_at || null,
+        status: event.status || "failed",
+        part: { status: event.status },
+        payload: event.payload || {},
+      });
+      terminal.sequence = Number(event.sequence || 0);
+      terminal.turn_id = event.turn_id || null;
+      terminal.event_type = event.event_type;
+      projected.push(terminal);
+      continue;
+    }
+    const message = storedMessage(event);
+    if (!message) continue;
+    const parts = Array.isArray(message.parts) ? message.parts : [];
+    if (event.event_type === "user/message") {
+      inputSequence += 1;
+      const prompt = parts.find((part) => part?.part_kind === "user-prompt");
+      const payload = userPayload(prompt?.content);
+      payload.instructions = message.instructions || null;
+      payload.system_parts = parts.filter((part) => ["system-prompt", "instruction"].includes(part?.part_kind));
+      const input = newEvent({
+        id: event.event_id,
+        kind: "input",
+        inputSequence,
+        runId: event.run_id || message.run_id || null,
+        timestamp: event.created_at || prompt?.timestamp || message.timestamp || null,
+        part: { content: payload.content },
+        payload,
+        native: messageMeta(message),
+      });
+      input.sequence = Number(event.sequence || 0);
+      input.turn_id = event.turn_id || null;
+      input.event_type = event.event_type;
+      input.timestamp_end = event.updated_at || input.timestamp;
+      projected.push(input);
+    }
+
+    if (event.event_type === "assistant/message") {
+      const assistantParts = parts.map((part) => {
+        if (part?.part_kind === "thinking") return { type: "thinking", content: part.content || "" };
+        if (part?.part_kind === "text") return { type: "text", content: part.content || "" };
+        if (toolRole(part) === "call") return {
+          type: "tool_call",
+          tool: part.tool_name || null,
+          tool_call_id: part.tool_call_id || null,
+          args: part.args ?? null,
+          source: toolSource(part.tool_name),
+          widget: part.metadata?.widget || null,
+          metadata: part.metadata || null,
+        };
+        return null;
+      }).filter(Boolean);
+      const assistantPayload = assistantLoopPayload(assistantParts);
+      if (assistantPayload.thinking || assistantPayload.content) {
+        const assistant = newEvent({
+          id: event.event_id,
+          kind: "assistant",
+          inputSequence: Math.max(inputSequence, 1),
+          runId: event.run_id || message.run_id || null,
+          timestamp: event.created_at || message.timestamp || null,
+          status: event.status || message.state || "completed",
+          part: { content: assistantPayload.content },
+          payload: assistantPayload,
+          native: messageMeta(message),
+        });
+        assistant.summary = assistantLoopSummary(assistantPayload);
+        assistant.sequence = Number(event.sequence || 0);
+        assistant.turn_id = event.turn_id || null;
+        assistant.event_type = event.event_type;
+        assistant.timestamp_end = event.updated_at || assistant.timestamp;
+        projected.push(assistant);
+      }
+    }
+
+    parts.forEach((part, offset) => {
+      const role = toolRole(part);
+      const callId = part?.tool_call_id;
+      if (!role || !callId) return;
+      const toolName = part.tool_name || null;
+      let tool = tools.get(callId);
+      if (!tool) {
+        const pseudoPart = {
+          type: role === "call" ? "tool_call" : "tool_result",
+          tool: toolName,
+          tool_call_id: callId,
+          args: part.args ?? null,
+          result: part.content ?? null,
+          source: toolSource(toolName),
+          widget: part.metadata?.widget || null,
+          metadata: part.metadata || null,
+        };
+        tool = newEvent({
+          id: `tool:${callId}`,
+          kind: partKind(pseudoPart, toolName),
+          inputSequence: Math.max(inputSequence, 1),
+          runId: event.run_id || message.run_id || null,
+          timestamp: event.created_at || part.timestamp || null,
+          status: role === "call" ? (event.status === "interrupted" ? "interrupted" : "pending") : "completed",
+          part: pseudoPart,
+          payload: role === "call" ? { args: part.args ?? null, metadata: part.metadata || null } : {},
+          result: role === "result" ? { result: part.content ?? null, outcome: part.outcome || null } : null,
+          native: { call_event_id: role === "call" ? event.event_id : null, result_event_id: role === "result" ? event.event_id : null },
+        });
+        tool.sequence = Number(event.sequence || 0) + (offset + 1) / 1000;
+        tool.turn_id = event.turn_id || null;
+        tool.event_type = "tool/interaction";
+        tool.timestamp_end = event.updated_at || tool.timestamp;
+        tools.set(callId, tool);
+        projected.push(tool);
+      }
+      if (role === "call") {
+        tool.kind = partKind({ type: "tool_call", widget: part.metadata?.widget, metadata: part.metadata }, toolName);
+        tool.label = eventLabel(tool.kind, { tool: toolName });
+        tool.payload = redactTrajectoryValue(jsonClone({ args: part.args ?? null, metadata: part.metadata || null }));
+        tool.native = { ...(tool.native || {}), call_event_id: event.event_id, call_part_offset: offset };
+      } else {
+        const metadata = part.metadata && typeof part.metadata === "object" ? part.metadata : {};
+        tool.status = normalizedStatus(part.outcome === "failed" ? "failed" : "completed");
+        tool.result = redactTrajectoryValue(jsonClone({
+          result: part.content ?? null,
+          outcome: part.outcome || null,
+          plan: toolName === "write_plan" ? metadata.deepagent_plan || null : null,
+        }));
+        tool.native = { ...(tool.native || {}), result_event_id: event.event_id, result_part_offset: offset };
+        tool.timestamp_end = event.updated_at || part.timestamp || tool.timestamp_end;
+        tool.summary = eventSummary(tool.kind, { type: "tool_result", result: part.content });
+      }
+    });
+  }
+  return projected.sort((left, right) => Number(left.sequence || 0) - Number(right.sequence || 0));
 }
 
 export function trajectoryStats(events = []) {
@@ -239,7 +351,7 @@ export function trajectoryStats(events = []) {
     inputs: new Set(events.map((event) => event.input_sequence).filter(Boolean)).size,
     calls: events.filter((event) => (
       TOOL_KINDS.has(event.kind)
-      && (!event.event_type || CALL_TYPES.has(event.event_type))
+      && event.event_type === "tool/interaction"
     )).length,
     runs: new Set(events.map((event) => event.run_id).filter(Boolean)).size,
   };
@@ -250,7 +362,7 @@ export function filterTrajectory(events = [], { mode = "sequence", query = "" } 
   return events.filter((event) => {
     if (mode === "calls" && !(
       TOOL_KINDS.has(event.kind)
-      && (!event.event_type || CALL_TYPES.has(event.event_type))
+      && event.event_type === "tool/interaction"
     )) return false;
     if (!needle) return true;
     const haystack = [
@@ -267,7 +379,7 @@ export function filterTrajectory(events = [], { mode = "sequence", query = "" } 
 
 function liveEventKind(type, data) {
   if (["thinking", "text"].includes(type)) return "assistant";
-  if (["session", "final", "cancelled", "error"].includes(type)) return "run";
+  if (["cancelled", "error"].includes(type)) return "run";
   if (["context_compaction", "context_compaction_progress", "context_compaction_result"].includes(type)) return "compaction";
   if (type === "tool_call" || type === "tool_result" || type === "tool_call_removed") {
     if (data?.source === "planning") return "planning";
@@ -636,7 +748,6 @@ export function createTrajectoryController({ state }) {
   let detailTab = "summary";
   let mode = "sequence";
   let renderQueued = false;
-  const collapsedGroups = new Set();
 
   const allEvents = () => [...historyEvents, ...liveEvents].sort((left, right) => {
     const leftSequence = Number.isFinite(Number(left.sequence)) ? Number(left.sequence) : Number.MAX_SAFE_INTEGER;
@@ -663,10 +774,6 @@ export function createTrajectoryController({ state }) {
     }
   }
 
-  function groupKey(event) {
-    return event.run_id || "session-events";
-  }
-
   function scheduleRender() {
     if (renderQueued) return;
     renderQueued = true;
@@ -681,25 +788,14 @@ export function createTrajectoryController({ state }) {
       list.innerHTML = `<div class="trajectory-empty">${icon("route")}<p>当前筛选下没有轨迹。</p></div>`;
       return;
     }
-    let previousGroup = null;
-    let groupOrdinal = 0;
     const html = [];
     events.forEach((event) => {
-      const key = groupKey(event);
-      if (key !== previousGroup) {
-        groupOrdinal += 1;
-        const collapsed = collapsedGroups.has(key);
-        const groupTitle = event.run_id ? `Run ${groupOrdinal}` : "会话事件";
-        html.push(`<button type="button" class="trajectory-group" data-trajectory-group="${escapeHtml(key)}" aria-expanded="${String(!collapsed)}"><span>${icon("chevron-down")}${groupTitle}</span><small>${escapeHtml(event.run_id || "未归属具体 Run")}</small></button>`);
-        previousGroup = key;
-      }
-      const collapsed = collapsedGroups.has(key);
       const showToolName = ["tool", "deferred"].includes(event.kind);
       const planningSummary = {
         write_plan: "创建或改写任务计划",
       }[event.label];
       const summary = event.kind === "planning" ? (planningSummary || "更新任务计划") : (event.summary || "暂无内容");
-      html.push(`<button type="button" class="trajectory-row ${escapeHtml(event.kind)} ${selectedId === event.id ? "active" : ""} ${collapsed ? "hidden" : ""}" data-trajectory-id="${escapeHtml(event.id)}">
+      html.push(`<button type="button" class="trajectory-row ${escapeHtml(event.kind)} ${selectedId === event.id ? "active" : ""}" data-trajectory-id="${escapeHtml(event.id)}">
         <span class="trajectory-row-copy"><span class="trajectory-kind ${escapeHtml(event.kind)}">${escapeHtml(kindBadge(event.kind))}</span>${showToolName ? `<strong>${escapeHtml(event.label)}</strong>` : ""}<span class="trajectory-row-summary">${escapeHtml(summary)}</span></span>
         <span class="trajectory-row-meta"><time>${escapeHtml(formatTime(event.timestamp))}</time><em class="${escapeHtml(event.status)}">${escapeHtml(statusLabel(event.status))}</em></span>
       </button>`);
@@ -815,20 +911,15 @@ export function createTrajectoryController({ state }) {
     if (["session_event_appended", "session_event_updated"].includes(type)) {
       const stored = payload.event || payload;
       if (!stored?.event_id || !stored?.event_type) return;
-      const existing = historyEvents.find((item) => item.id === stored.event_id);
       const liveInput = stored.event_type === "user/message"
         ? [...liveEvents].reverse().find((item) => item.kind === "input")
         : null;
-      const inputSequence = existing?.input_sequence
-        || liveInput?.input_sequence
-        || Math.max(
-          trajectoryStats(allEvents()).inputs + (stored.event_type === "user/message" ? 1 : 0),
-          1,
-        );
-      const projected = projectStoredEvent(stored, inputSequence);
-      const index = historyEvents.findIndex((item) => item.id === projected.id);
-      if (index >= 0) historyEvents[index] = projected;
-      else historyEvents.push(projected);
+      const rawItems = Array.isArray(history.items) ? history.items : [];
+      const rawIndex = rawItems.findIndex((item) => item.event_id === stored.event_id);
+      if (rawIndex >= 0) rawItems[rawIndex] = stored;
+      else rawItems.push(stored);
+      history.items = rawItems.sort((left, right) => Number(left.sequence || 0) - Number(right.sequence || 0));
+      historyEvents = buildTrajectory(history);
       if (stored.event_type === "user/message") {
         if (liveInput) liveEvents = liveEvents.filter((item) => (
           item !== liveInput && item.payload?.parent_input_id !== liveInput.id
@@ -837,15 +928,16 @@ export function createTrajectoryController({ state }) {
       if (stored.event_type === "compaction") {
         liveEvents = liveEvents.filter((item) => !(item.kind === "compaction" && item.compaction_event_id === stored.event_id));
       }
-      if ((CALL_TYPES.has(stored.event_type) || RESULT_TYPES.has(stored.event_type)) && stored.call_id) {
-        liveEvents = liveEvents.filter((item) => item.tool_call_id !== stored.call_id);
+      const storedParts = storedMessage(stored)?.parts || [];
+      const storedCallIds = new Set(storedParts.map((part) => part?.tool_call_id).filter(Boolean));
+      if (storedCallIds.size) {
+        liveEvents = liveEvents.filter((item) => !storedCallIds.has(item.tool_call_id));
       }
-      if (stored.event_type === "run" && stored.run_id && stored.status !== "running") {
-        liveEvents = liveEvents.filter((item) => item.run_id !== stored.run_id || ["input", "context"].includes(item.kind));
+      if (stored.event_type === "assistant/message" && stored.run_id) {
+        liveEvents = liveEvents.filter((item) => item !== activeAssistantLoop || item.run_id !== stored.run_id);
         if (activeAssistantLoop?.run_id === stored.run_id) activeAssistantLoop = null;
       }
-      historyEvents.sort((left, right) => Number(left.sequence || 0) - Number(right.sequence || 0));
-      selectedId = projected.id;
+      selectedId = storedCallIds.size ? `tool:${[...storedCallIds][0]}` : stored.event_id;
       scheduleRender();
       return;
     }
@@ -874,7 +966,7 @@ export function createTrajectoryController({ state }) {
       scheduleRender();
       return;
     }
-    if (type === "session") {
+        if (type === "session") {
       currentRunId = payload.run_id || currentRunId;
       const currentUser = [...liveEvents].reverse().find((item) => item.kind === "input" && !item.run_id);
       if (currentUser && currentRunId) {
@@ -884,8 +976,10 @@ export function createTrajectoryController({ state }) {
           && !item.run_id
           && item.input_sequence === currentUser.input_sequence
         )).forEach((item) => { item.run_id = currentRunId; });
-      }
-    }
+          }
+          scheduleRender();
+          return;
+        }
     const inputSequence = Math.max(trajectoryStats(allEvents()).inputs, 1);
     const timestamp = new Date().toISOString();
 
@@ -894,11 +988,7 @@ export function createTrajectoryController({ state }) {
       scheduleRender();
       return;
     }
-    if (type === "tool_call") {
-      updateLiveAssistant(type, payload, inputSequence, timestamp);
-    }
-
-    if (type === "tool_result" && payload.tool_call_id) {
+        if (type === "tool_result" && payload.tool_call_id) {
       const call = [...liveEvents].reverse().find((item) => item.tool_call_id === payload.tool_call_id);
       if (call) {
         call.result = redactTrajectoryValue(jsonClone({ result: payload.result, artifacts: payload.artifacts || null, plan: payload.plan || null }));
@@ -927,10 +1017,12 @@ export function createTrajectoryController({ state }) {
         return;
       }
     }
-    if (type === "final") {
-      liveEvents.filter((item) => item.run_id === currentRunId && item.status === "running")
-        .forEach((item) => { item.status = "completed"; item.timestamp_end = timestamp; });
-      activeAssistantLoop = null;
+        if (type === "final") {
+          liveEvents.filter((item) => item.run_id === currentRunId && item.status === "running")
+            .forEach((item) => { item.status = "completed"; item.timestamp_end = timestamp; });
+          activeAssistantLoop = null;
+          scheduleRender();
+          return;
     }
     if (["cancelled", "error"].includes(type)) {
       liveEvents.filter((item) => item.run_id === currentRunId && ["running", "pending"].includes(item.status))
@@ -998,16 +1090,8 @@ export function createTrajectoryController({ state }) {
   });
   search?.addEventListener("input", scheduleRender);
   exportButton?.addEventListener("click", exportTrace);
-  list.addEventListener("click", (event) => {
-    const group = event.target.closest("[data-trajectory-group]");
-    if (group) {
-      const key = group.dataset.trajectoryGroup;
-      if (collapsedGroups.has(key)) collapsedGroups.delete(key);
-      else collapsedGroups.add(key);
-      scheduleRender();
-      return;
-    }
-    const row = event.target.closest("[data-trajectory-id]");
+      list.addEventListener("click", (event) => {
+        const row = event.target.closest("[data-trajectory-id]");
     if (!row) return;
     selectedId = row.dataset.trajectoryId;
     detailTab = "summary";

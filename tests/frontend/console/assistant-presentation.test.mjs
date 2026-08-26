@@ -184,7 +184,7 @@ test("大工具结果显示外置提示并保留预览", () => {
   assert.match(workspaceCss, /\.tool-result-artifact/);
 });
 
-test("任务计划只在消息区底部浮层展示最新未完成快照", () => {
+test("任务计划在消息区底部浮层展示最新快照", () => {
   assert.equal(isPlanningToolEvent({ source: "planning", tool: "anything" }), false);
   assert.equal(isPlanningToolEvent({ tool: "write_plan" }), true);
   assert.equal(isPlanningToolEvent({ source: "planning", tool: "update_task_statuses" }), false);
@@ -208,11 +208,15 @@ test("任务计划只在消息区底部浮层展示最新未完成快照", () =>
       { id: "2", content: "生成结果", status: "completed" },
     ],
   });
-  assert.equal(planPanelState(completed), null);
+  assert.deepEqual(planPanelState(completed), {
+    plan: completed,
+    label: "2/2 · 已完成",
+    terminalStatus: "completed",
+  });
   assert.equal(planPanelState(running, "interrupted").label, "0/2 · 已中断");
   assert.equal(planPanelState(running, "error").label, "0/2 · 执行失败");
-  assert.equal(planPanelState(running, "pending"), null);
-  assert.equal(planPanelState(running, "completed"), null);
+  assert.equal(planPanelState(running, "pending").label, "0/2 · 等待交互");
+  assert.equal(planPanelState(running, "completed").label, "0/2 · 回合结束");
   assert.equal(normalizePlanSnapshot({ items: [] }), null);
 
   const planPosition = workspaceTemplate.indexOf('id="composerPlan"');
@@ -228,10 +232,10 @@ test("任务计划只在消息区底部浮层展示最新未完成快照", () =>
   assert.match(workspaceCss, /\.composer \{ position: relative;/);
   const planRule = workspaceCss.match(/\.composer-plan \{([\s\S]*?)\n\}/)?.[1] || "";
   assert.doesNotMatch(planRule, /box-shadow/);
-  assert.match(chatSource, /case "final":[\s\S]*?clearComposerPlan\(\);/);
+  assert.match(chatSource, /case "final":[\s\S]*?markComposerPlanTerminal\(data\.status/);
 });
 
-test("历史只恢复最新 Assistant Run 的最后一份未完成计划", () => {
+test("历史恢复最新 Assistant Run 的最后一份计划", () => {
   const older = {
     items: [{ id: "old", content: "旧任务", status: "pending" }],
   };
@@ -285,19 +289,26 @@ test("历史只恢复最新 Assistant Run 的最后一份未完成计划", () =>
     { role: "assistant", run_id: "run-complete", status: "completed", parts: [planningResult(complete, "3")] },
   ]);
   assert.deepEqual(restored?.snapshot, complete);
-  assert.equal(planPanelState(restored?.snapshot, restored?.terminalStatus), null);
+  assert.equal(
+    planPanelState(restored?.snapshot, restored?.terminalStatus)?.label,
+    "2/2 · 已完成",
+  );
 
   const normalFinalWithIncompleteSnapshot = latestAssistantRunPlan([
     { role: "user", content: "正常结束" },
     { role: "assistant", run_id: "run-final", status: "completed", parts: [planningResult(first, "4")] },
   ]);
   assert.equal(normalFinalWithIncompleteSnapshot?.terminalStatus, "completed");
-  assert.equal(
+  assert.deepEqual(
     planPanelState(
       normalFinalWithIncompleteSnapshot?.snapshot,
       normalFinalWithIncompleteSnapshot?.terminalStatus,
     ),
-    null,
+    {
+      plan: normalizePlanSnapshot(first),
+      label: "1/2 · 回合结束",
+      terminalStatus: "completed",
+    },
   );
 
   const pending = latestAssistantRunPlan([
@@ -318,7 +329,10 @@ test("历史只恢复最新 Assistant Run 的最后一份未完成计划", () =>
     },
   ]);
   assert.equal(pending?.terminalStatus, "pending");
-  assert.equal(planPanelState(pending?.snapshot, pending?.terminalStatus), null);
+  assert.equal(
+    planPanelState(pending?.snapshot, pending?.terminalStatus)?.label,
+    "1/2 · 等待交互",
+  );
 
   assert.deepEqual(latestAssistantRunPlan([
     { role: "user", content: "兼容历史" },

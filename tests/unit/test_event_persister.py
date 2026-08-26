@@ -41,6 +41,8 @@ class EventPersisterTests(unittest.IsolatedAsyncioTestCase):
                 session_id="s1",
                 agent_id=self.agent.id,
                 user_id="user-1",
+                turn_id="run-s1",
+                run_id="run-s1",
                 kind="user_turn",
                 user_message=user,
                 result_queue=result_queue,
@@ -57,7 +59,10 @@ class EventPersisterTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_run_complete_skips_duplicate_user(self) -> None:
         user = ModelRequest(parts=[UserPromptPart(content="hi")])
-        await self.store.append("s2", [user], agent_id=self.agent.id, user_id="user-1")
+        await self.store.append(
+            "s2", [user], agent_id=self.agent.id, user_id="user-1",
+            turn_id="run-s2", run_id="run-s2",
+        )
         new_messages: list[ModelMessage] = [
             ModelRequest(parts=[UserPromptPart(content="hi")]),
             ModelResponse(parts=[TextPart(content="reply")]),
@@ -67,6 +72,8 @@ class EventPersisterTests(unittest.IsolatedAsyncioTestCase):
                 session_id="s2",
                 agent_id=self.agent.id,
                 user_id="user-1",
+                turn_id="run-s2",
+                run_id="run-s2",
                 kind="run_complete",
                 new_messages=new_messages,
                 skip_user_prompt=True,
@@ -97,6 +104,8 @@ class EventPersisterTests(unittest.IsolatedAsyncioTestCase):
                 session_id="s-terminal-race",
                 agent_id=self.agent.id,
                 user_id="user-1",
+                turn_id="run-terminal-race",
+                run_id="run-terminal-race",
                 kind="run_complete",
                 new_messages=[ModelResponse(parts=[TextPart(content="reply")])],
             )
@@ -114,12 +123,17 @@ class EventPersisterTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_run_cancelled_persists_official_partial_text(self) -> None:
         user = ModelRequest(parts=[UserPromptPart(content="hi")])
-        await self.store.append("s3", [user], agent_id=self.agent.id, user_id="user-1")
+        await self.store.append(
+            "s3", [user], agent_id=self.agent.id, user_id="user-1",
+            turn_id="run-s3", run_id="run-s3",
+        )
         self.persister.publish(
             PersistEvent(
                 session_id="s3",
                 agent_id=self.agent.id,
                 user_id="user-1",
+                turn_id="run-s3",
+                run_id="run-s3",
                 kind="run_cancelled",
                 result_messages=[
                     user,
@@ -156,6 +170,8 @@ class EventPersisterTests(unittest.IsolatedAsyncioTestCase):
                 session_id="s4",
                 agent_id=self.agent.id,
                 user_id="user-1",
+                turn_id="run-s4",
+                run_id="run-s4",
                 kind="run_cancelled",
                 result_messages=[user, interrupted],
                 skip_user_prompt=True,
@@ -176,12 +192,17 @@ class EventPersisterTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_run_cancelled_marks_partial_completed_response_interrupted(self) -> None:
         user = ModelRequest(parts=[UserPromptPart(content="hi")])
-        await self.store.append("s5", [user], agent_id=self.agent.id, user_id="user-1")
+        await self.store.append(
+            "s5", [user], agent_id=self.agent.id, user_id="user-1",
+            turn_id="run-s5", run_id="run-s5",
+        )
         self.persister.publish(
             PersistEvent(
                 session_id="s5",
                 agent_id=self.agent.id,
                 user_id="user-1",
+                turn_id="run-s5",
+                run_id="run-s5",
                 kind="run_cancelled",
                 result_messages=[
                     user,

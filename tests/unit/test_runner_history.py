@@ -115,6 +115,8 @@ class AgentRunnerHistoryTests(unittest.IsolatedAsyncioTestCase):
             ],
             agent_id=self.db_agent.id,
             user_id="runner-history-user",
+            turn_id="run-provider-overflow-seed",
+            run_id="run-provider-overflow-seed",
         )
 
         async def summarize(_messages, _info):
@@ -289,9 +291,16 @@ class AgentRunnerHistoryTests(unittest.IsolatedAsyncioTestCase):
                 "sess-run-ids", "second", deps, persister=self.persister
             )
         ][-1]
+        await self._flush("sess-run-ids", agent_id=self.db_agent.id)
 
         self.assertEqual(first["conversation_id"], second["conversation_id"])
         self.assertNotEqual(first["run_id"], second["run_id"])
+        persisted = await self.store.list_events("sess-run-ids", limit=100)
+        self.assertNotIn("run", {event.event_type for event in persisted})
+        for run_id in (first["run_id"], second["run_id"]):
+            run_events = [event for event in persisted if event.run_id == run_id]
+            self.assertTrue(run_events)
+            self.assertEqual({event.turn_id for event in run_events}, {run_id})
 
     async def test_transport_close_keeps_user_without_synthetic_partial_response(self) -> None:
         from tests.integration.helpers.models import build_slow_stream_model
@@ -364,6 +373,8 @@ class AgentRunnerHistoryTests(unittest.IsolatedAsyncioTestCase):
             ],
             agent_id=self.db_agent.id,
             user_id="runner-history-user",
+            turn_id="run-interrupted-seed",
+            run_id="run-interrupted-seed",
         )
         agent = Agent(FunctionModel(respond), deps_type=AgentDeps)
         runner = AgentRunner(agent, self.store, UsageLimits(request_limit=10))
@@ -530,6 +541,8 @@ class AgentRunnerTitleGenerationTests(unittest.IsolatedAsyncioTestCase):
             ],
             agent_id=self.db_agent.id,
             user_id="runner-title-user",
+            turn_id="run-title-seed",
+            run_id="run-title-seed",
         )
         await self.store.update_session_title(
             "title-session", self.db_agent.id, "已有标题"

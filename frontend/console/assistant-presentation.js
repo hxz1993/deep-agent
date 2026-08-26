@@ -90,18 +90,19 @@ export function normalizePlanSnapshot(snapshot) {
 export function planPanelState(snapshot, terminalStatus = null) {
   const plan = normalizePlanSnapshot(snapshot);
   if (!plan) return null;
-  if (terminalStatus === "completed" || terminalStatus === "pending") return null;
   const allCompleted = plan.completed === plan.total;
-  if (allCompleted) return null;
+  const presentationStatus = terminalStatus || (allCompleted ? "completed" : null);
   const terminalLabels = {
     interrupted: "已中断",
     error: "执行失败",
+    pending: "等待交互",
+    completed: allCompleted ? "已完成" : "回合结束",
   };
-  const terminalLabel = terminalLabels[terminalStatus] || "";
+  const terminalLabel = terminalLabels[presentationStatus] || "";
   return {
     plan,
     label: `${plan.completed}/${plan.total}${terminalLabel ? ` · ${terminalLabel}` : ""}`,
-    terminalStatus,
+    terminalStatus: presentationStatus,
   };
 }
 

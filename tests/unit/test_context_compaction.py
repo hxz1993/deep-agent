@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import unittest
+from decimal import Decimal
 
 from pydantic_ai.exceptions import ModelHTTPError
 from pydantic_ai.messages import (
@@ -11,6 +13,7 @@ from pydantic_ai.messages import (
     ToolReturnPart,
     UserPromptPart,
 )
+from pydantic_ai.usage import RunUsage
 
 from deep_agent.agent.context.compaction import (
     SummaryUnavailable,
@@ -20,6 +23,7 @@ from deep_agent.agent.context.compaction import (
     _raw_prefix_for_visible_cutoff,
     _safe_boundaries,
     _prune_tool_results,
+    _jsonable_usage,
     is_provider_context_overflow,
     summary_contents,
     validate_summary_markdown,
@@ -39,6 +43,20 @@ def valid_summary() -> str:
 
 
 class DshCompactionRulesTests(unittest.TestCase):
+    def test_summary_usage_is_recursively_json_safe(self) -> None:
+        usage = RunUsage(
+            input_tokens=12,
+            output_tokens=3,
+            cost=Decimal("0.0008047872"),
+        )
+
+        serialized = _jsonable_usage(usage)
+
+        self.assertEqual(serialized["cost"], "0.0008047872")
+        self.assertEqual(serialized["input_tokens"], 12)
+        self.assertEqual(serialized["output_tokens"], 3)
+        json.dumps(serialized)
+
     def test_provider_overflow_detection_is_explicit_and_narrow(self) -> None:
         self.assertTrue(
             is_provider_context_overflow(

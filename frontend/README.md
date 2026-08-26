@@ -19,7 +19,7 @@ http://127.0.0.1:8000/console/
 
 工作台默认在会话栏顶部用下拉框选择 Agent；需要同时浏览多个 Agent 时，可临时把 Agent
 列表固定到最左侧。固定状态只存在于当前页面内存，刷新后恢复下拉模式。对话标题栏右侧
-集中提供测试 Header 和会话详情入口；右侧详情将会话、请求 Header、预算、压缩和 Checkpoint
+集中提供测试 Header 和会话详情入口；右侧详情将会话、请求 Header、预算和压缩事件
 连续展示，不重复记录聊天区已经展示的工具过程或底层 SSE 事件。上下文预算全部读取后端
 只读状态，Console 不实现独立 Token 估算算法。
 
@@ -42,8 +42,8 @@ frontend/
 Console 使用原生 HTML、CSS 和 JavaScript ES Modules，不需要 npm 构建。
 
 工作台输入框的附件与主动压缩入口使用线性 SVG。上下文百分比、主动压缩可用性和历史
-Checkpoint 标记全部读取 session API；前端不实现 Token 估算或压缩策略。主动压缩期间保留
-草稿与待上传附件，只暂时锁定发送和附件操作。历史较短、已有 Checkpoint 或没有新增消息时
+Compaction 标记全部读取 Event API；前端不实现 Token 估算或压缩策略。主动压缩期间保留
+草稿与待上传附件，只暂时锁定发送和附件操作。历史较短、已有有效 Compaction 或没有新增消息时
 入口仍可使用；是否有效由后端 `completed/noop/failed` 结果决定。
 
 停止生成使用 `POST /api/v1/sessions/{session_id}/cancel`。接口接受取消后，Console 继续读取

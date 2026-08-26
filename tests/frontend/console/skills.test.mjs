@@ -49,6 +49,9 @@ test("Skill 页面区分内置和上传包的可操作边界", () => {
   assert.match(source, /运行文件已就绪/);
   assert.match(source, /运行文件同步失败/);
   assert.doesNotMatch(source, /script_execution_status/);
+  assert.ok(source.indexOf('["自定义", state.skills.filter') < source.indexOf('["内置", state.skills.filter'));
+  assert.match(source, /暂无自定义 Skill，请先上传安装/);
+  assert.match(source, /state\.skills\.find\(\(item\) => item\.source !== "builtin"\)/);
 });
 
 test("Skill 上传使用 multipart 且资源按安全 API 读取", () => {

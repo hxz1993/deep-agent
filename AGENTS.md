@@ -41,6 +41,29 @@ python3.12 -m deep_agent.local_dev \
   `DEEP_AGENT_LOCAL_FILE_ROOT=<独立目录>`。该后端只允许`local_dev + SQLite`，部署/Test默认仍为
   `platform`。文件正文保存为私有Blob，独立`metadata.sqlite3`只存索引；业务API与线上保持一致。
 
+### 稳定 SQLite 本地开发基线
+
+后续日常本地开发、Console 联调和人工验收，不再随任务创建全新的空 SQLite。默认固定复用：
+
+```text
+Profile:         ~/.config/deep-agent/sqlite.env
+主数据库:        data/deep-agent-local.db
+本地文件根目录:   data/deep-agent-local-files/
+启动端口:        8000
+```
+
+- 这套主数据库以共享 Test 的**配置数据**为基础，保留 Provider、Model、Agent、MCP 和 Skill 等真实
+  配置；不复制 Test 会话历史。日常开发应继续沿用其中的本地会话、附件和验收数据，不得因为开始新
+  任务就删除、覆盖、重新初始化或换成另一个数据库文件。
+- Test 配置发生变化时，使用正式配置备份/恢复工具做受控刷新，并保留本地会话和本地文件；不要直接
+  用新空库替换稳定库，也不要把 Test 的聊天历史混入本地库。
+- 启动 SQLite 服务前确认 Profile、`DEEP_AGENT_SQLITE_PATH`、本地文件根目录和 Alembic Revision
+  都指向这套基线；启动后至少验证 `/health`，并确认 Console 能读取已有 Agent、模型和验收会话。
+- 迁移往返、破坏性 DDL、单元测试和隔离集成测试可以使用独立临时 SQLite 与文件目录，但名称必须
+  标记 `TMP_to_delete`，测试结束后清理，且绝不能把破坏性测试指向上述稳定库。
+- 稳定数据库、本地 Blob 和仓库外 Profile 都是开发运行数据，不提交 Git；除非用户明确要求清空、
+  重建或切换基线，否则一律保留。
+
 ---
 
 ## 子文档索引

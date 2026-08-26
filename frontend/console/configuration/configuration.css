@@ -183,11 +183,26 @@ html, body {
 .ui-tool-tree-group + .ui-tool-tree-group { margin-top: 2px; }
 
 .ui-tool-tree-group-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
   padding: 2px 3px 0;
   color: var(--text-faint);
   font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.04em;
+}
+
+.ui-tool-tree-group-title small {
+  display: inline-grid;
+  min-width: 17px;
+  height: 17px;
+  place-items: center;
+  border-radius: 999px;
+  color: var(--text-dim);
+  background: var(--bg-muted);
+  font-size: 12px;
+  letter-spacing: 0;
 }
 
 .ui-tool-tree-node {
@@ -271,6 +286,19 @@ html, body {
 
 .ui-tool-tree-state .btn {
   margin-top: 10px;
+}
+
+.configuration-group-empty {
+  min-height: 58px;
+  display: grid;
+  place-items: center;
+  padding: 12px;
+  border: 1px dashed var(--console-card-border, var(--border));
+  border-radius: var(--config-radius, 8px);
+  color: var(--text-faint);
+  background: color-mix(in srgb, var(--console-canvas, var(--bg-soft)) 48%, transparent);
+  font-size: 12px;
+  text-align: center;
 }
 
 .ui-tool-content-pane {
@@ -793,11 +821,30 @@ html, body {
   margin-top: 7px;
 }
 
-.mcp-inspection-summary {
+.mcp-inspection-counts {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
   color: var(--text-dim);
   font-size: 12px;
   white-space: nowrap;
-  text-align: right;
+}
+
+.mcp-inspection-counts > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.mcp-inspection-counts svg {
+  width: 13px;
+  height: 13px;
+  color: var(--text-faint);
+}
+
+.mcp-inspection-counts strong {
+  color: var(--text-dim);
+  font-weight: 600;
 }
 
 .mcp-description-column,

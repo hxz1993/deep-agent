@@ -1,8 +1,12 @@
 const MCP_TRANSPORT_LABELS = {
-  url: "url",
-  stdio: "stdio",
-  builtin: "builtin",
+  url: "Streamable HTTP",
+  stdio: "STDIO（历史）",
+  builtin: "STDIO（Builtin）",
 };
+
+function mcpTransportLabel(transport) {
+  return MCP_TRANSPORT_LABELS[transport] || transport;
+}
 
 const MCP_CONTEXT_LABELS = {
   inherit: "继承",
@@ -39,7 +43,7 @@ function inspectionView(inspection, transport) {
     return {
       text: "已停止支持",
       className: "off",
-      summary: "请迁移为 URL MCP",
+      counts: { tools: 0, resources: 0, templates: 0 },
       title: "历史 stdio MCP 只能查看或删除",
     };
   }
@@ -54,8 +58,9 @@ function inspectionView(inspection, transport) {
   };
   const [text, className] = labels[info.status] || labels.unknown;
   const toolCount = Number(info.tools?.count || 0);
+  const resourceCount = Number(info.resources?.count || 0);
+  const templateCount = Number(info.resources?.template_count || 0);
   const snapshotStatus = info.tools?.snapshot_status || "missing";
-  const disclosure = toolCount > 10 ? "自动预选 Top 3 / 搜索 Top 5" : "全部直接披露";
   let snapshotLabel = "";
   if (transport === "url") {
     if (snapshotStatus === "stale") snapshotLabel = "配置已变更，需重新检测";
@@ -63,12 +68,6 @@ function inspectionView(inspection, transport) {
     else if (info.status === "unreachable") snapshotLabel = "当前无法连接，沿用上次快照";
     else snapshotLabel = "工具快照可用";
   }
-  const summary = info.status === "not_applicable"
-    ? "运行时按需启动"
-    : [
-        snapshotLabel,
-        `${toolCount} 工具 · ${disclosure} · ${info.resources?.count || 0} 资源 · ${info.resources?.template_count || 0} 模板`,
-      ].filter(Boolean).join(" · ");
   const server = [info.server?.name, info.server?.version].filter(Boolean).join(" ");
   const errors = [
     inspectionErrorMessage(info.error),
@@ -79,6 +78,7 @@ function inspectionView(inspection, transport) {
     server ? `服务：${server}` : "",
     info.server?.protocol_version ? `协议：${info.server.protocol_version}` : "",
     info.server ? `Instructions：${info.server.instructions_available ? "可用" : "无"}` : "",
+    snapshotLabel ? `快照状态：${snapshotLabel}` : "",
     info.checked_at ? `检测时间：${formatDate(info.checked_at)}` : "",
     info.tools?.snapshot_at ? `快照时间：${formatDate(info.tools.snapshot_at)}` : "",
     info.tools?.snapshot_hash ? `快照：${info.tools.snapshot_hash.slice(0, 12)}` : "",
@@ -88,9 +88,17 @@ function inspectionView(inspection, transport) {
   return {
     text,
     className,
-    summary,
+    counts: { tools: toolCount, resources: resourceCount, templates: templateCount },
     title: details.join("\n") || (info.status === "not_applicable" ? "Builtin MCP 不参与主动检测" : "尚未检测"),
   };
+}
+
+function renderInspectionCounts(counts = {}) {
+  return [
+    ["wrench", "工具", counts.tools],
+    ["file-box", "资源", counts.resources],
+    ["layout-template", "模板", counts.templates],
+  ].map(([iconName, label, count]) => `<span title="${label}"><i data-lucide="${iconName}"></i><strong>${Number(count || 0)}</strong></span>`).join("");
 }
 
 function inspectionToast(result) {
@@ -169,7 +177,7 @@ const mcpAdmin = {
   updateEditorMeta() {
     const transport = document.getElementById("mcpTransport")?.value || "url";
     const meta = document.getElementById("mcpEditorMeta");
-    if (meta) meta.textContent = `MCP 配置 · ${transport.toUpperCase()}`;
+    if (meta) meta.textContent = `MCP 配置 · ${mcpTransportLabel(transport)}`;
   },
 
   closeEditor() {
@@ -200,14 +208,14 @@ const mcpAdmin = {
             return `
         <tr>
           <td><strong>${escapeHtml(s.name)}</strong></td>
-          <td><span class="badge">${escapeHtml(MCP_TRANSPORT_LABELS[s.transport] || s.transport)}</span></td>
+          <td><span class="badge">${escapeHtml(mcpTransportLabel(s.transport))}</span></td>
           <td><span class="badge">${escapeHtml(MCP_CONTEXT_LABELS[s.request_context?.mode] || "继承")}</span></td>
           <td><span class="badge ${s.enabled ? "on" : "off"}">${s.enabled ? "是" : "否"}</span></td>
           <td class="mcp-description-cell">
             <div class="mcp-description-text">${escapeHtml(s.description || "—")}</div>
             <div class="mcp-inspection" title="${escapeHtml(inspection.title)}">
               <span class="badge ${inspection.className}">${escapeHtml(inspection.text)}</span>
-              <span class="mcp-inspection-summary">${escapeHtml(inspection.summary)}</span>
+              <span class="mcp-inspection-counts">${renderInspectionCounts(inspection.counts)}</span>
             </div>
           </td>
           <td>${escapeHtml(formatDate(s.updated_at))}</td>
@@ -378,7 +386,7 @@ const mcpAdmin = {
   openCreate() {
     state.editingMcp = null;
     document.getElementById("mcpModalTitle").textContent = "新建 MCP";
-    document.getElementById("mcpEditorMeta").textContent = "MCP 配置 · URL";
+    document.getElementById("mcpEditorMeta").textContent = `MCP 配置 · ${mcpTransportLabel("url")}`;
     const nameInput = document.getElementById("mcpName");
     nameInput.readOnly = false;
     nameInput.classList.remove("mcp-name-readonly");
@@ -404,7 +412,7 @@ const mcpAdmin = {
       const server = await apiFetch(`/api/v1/mcp/${encodeURIComponent(name)}`);
       state.editingMcp = name;
       document.getElementById("mcpModalTitle").textContent = name;
-      document.getElementById("mcpEditorMeta").textContent = `MCP 配置 · ${server.transport.toUpperCase()}`;
+      document.getElementById("mcpEditorMeta").textContent = `MCP 配置 · ${mcpTransportLabel(server.transport)}`;
       const nameInput = document.getElementById("mcpName");
       nameInput.readOnly = true;
       nameInput.classList.add("mcp-name-readonly");

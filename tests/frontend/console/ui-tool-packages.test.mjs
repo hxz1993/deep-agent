@@ -31,10 +31,14 @@ test("UI 工具页使用左侧工具包树和右侧单一工具表", () => {
   assert.match(source, /items\.filter\(\(item\) => item\.package_code === this\.selectedPackageCode\)/);
   assert.match(source, /\["内置", this\.packages\.filter/);
   assert.match(source, /\["自定义", this\.packages\.filter/);
+  assert.ok(source.indexOf('["自定义", this.packages.filter') < source.indexOf('["内置", this.packages.filter'));
+  assert.match(source, /暂无自定义工具包，请先新建/);
+  assert.match(source, /this\.packages\.find\(\(item\) => item\.source === "manual"\)/);
   assert.match(source, /class="ui-tool-tree-status/);
   assert.match(source, /class="ui-tool-tree-count" title="工具数量"/);
   assert.match(source, /data-lucide="wrench"/);
   assert.doesNotMatch(source, /<span class="badge">\$\{escapeHtml\(String\(selected\.tool_count/);
+  assert.doesNotMatch(source, /meta\.innerHTML = `[\s\S]*source-\$\{escapeHtml\(selected\.source\)/);
   assert.match(template, /class="ui-tool-selected-title">[\s\S]*id="selectedUiToolPackageMeta"[\s\S]*<\/div>[\s\S]*id="selectedUiToolPackageDescription"/);
 });
 
@@ -59,6 +63,7 @@ test("UI 工具页使用与 Skill 一致的分离轻卡片层级", () => {
   assert.match(styles, /\.panel-title-copy \{[^}]*gap: 4px/);
   assert.match(consoleStyles, /--config-radius: 8px/);
   assert.match(consoleStyles, /--config-control-height: 32px/);
+  assert.match(consoleStyles, /#configurationHost > \.panel\s*\{[^}]*border-radius: var\(--console-card-radius\) !important/);
   assert.match(consoleStyles, /#configurationHost \.ui-tool-tree-node,[\s\S]*border-radius: var\(--config-radius\) !important/);
   assert.match(consoleStyles, /#configurationHost \.btn,[\s\S]*height: var\(--config-control-height\)/);
 });

@@ -481,7 +481,15 @@ textarea {
   border: 1px solid transparent;
   border-radius: 10px;
 }
-#workspaceLegacyHost .session-item.active { border-color: color-mix(in srgb, var(--accent) 26%, var(--border)); box-shadow: none; }
+#workspaceLegacyHost .session-item.active {
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
+  background: var(--bg);
+  box-shadow: none;
+}
+#workspaceLegacyHost .session-item.active:hover {
+  border-color: color-mix(in srgb, var(--accent) 64%, var(--border));
+  background: color-mix(in srgb, var(--accent) 4%, var(--bg));
+}
 #workspaceLegacyHost .session-item .sid { width: 100%; padding-right: 0; }
 #workspaceLegacyHost .session-item .session-title { line-height: 18px; }
 #workspaceLegacyHost .session-item .session-meta {
@@ -499,7 +507,7 @@ textarea {
 #workspaceLegacyHost .session-item .session-stat-group { margin-left: auto; gap: 7px; }
 #workspaceLegacyHost .session-item .session-stat-group > span { display: inline-flex; align-items: center; gap: 3px; }
 #workspaceLegacyHost .session-item .session-meta svg { width: 12px; height: 12px; }
-#workspaceLegacyHost .session-item:hover { background: var(--accent-soft); }
+#workspaceLegacyHost .session-item:not(.active):hover { background: var(--accent-soft); }
 #workspaceLegacyHost .session-item .session-actions {
   position: absolute;
   top: 0;
@@ -509,11 +517,16 @@ textarea {
   padding: 0 7px;
   opacity: 0;
   pointer-events: none;
-  background: transparent;
+  border-radius: 0 9px 9px 0;
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg-soft));
 }
 #workspaceLegacyHost .session-item:hover .session-actions {
   opacity: 1;
   pointer-events: auto;
+}
+#workspaceLegacyHost .session-item.active .session-actions { background: var(--bg); }
+#workspaceLegacyHost .session-item.active:hover .session-actions {
+  background: color-mix(in srgb, var(--accent) 4%, var(--bg));
 }
 #workspaceLegacyHost .session-item.active:not(:hover) .session-actions { opacity: 0; }
 #workspaceLegacyHost .session-toolbar .icon-action { border: 0; border-radius: 8px; background: transparent; box-shadow: none; }
@@ -2434,6 +2447,10 @@ html[data-theme="paper"] .run-usage-legend .remaining { color: #5e9e7f; }
 }
 
 .resource-nav {
+  border-radius: var(--console-card-radius) !important;
+}
+
+#configurationHost > .panel {
   border-radius: var(--console-card-radius) !important;
 }
 

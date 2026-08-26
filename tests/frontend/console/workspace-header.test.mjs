@@ -205,8 +205,13 @@ test("Agent 使用自定义下拉并在切换后进入新对话", () => {
 test("会话头部与列表使用轻量圆角且图标无外框", () => {
   assert.match(consoleCss, /\.workspace-header-action\s*\{[^}]*border: 1px solid transparent;[^}]*border-radius: 8px/);
   assert.match(consoleCss, /#workspaceLegacyHost \.session-item\s*\{[^}]*border-radius: 10px/);
+  assert.match(consoleCss, /#workspaceLegacyHost \.session-item\.active\s*\{[^}]*border-color: color-mix[^}]*background: var\(--bg\)/);
+  assert.match(consoleCss, /#workspaceLegacyHost \.session-item\.active:hover\s*\{[^}]*border-color: color-mix[^}]*background: color-mix\(in srgb, var\(--accent\) 4%, var\(--bg\)\)/);
   assert.match(consoleCss, /\.session-toolbar \.icon-action\s*\{[^}]*border: 0;[^}]*box-shadow: none/);
   assert.match(consoleCss, /\.session-item \.session-actions > span\s*\{[^}]*border: 0;[^}]*box-shadow: none/);
+  assert.match(consoleCss, /#workspaceLegacyHost \.session-item \.session-actions\s*\{[^}]*background: color-mix\(in srgb, var\(--accent\) 12%, var\(--bg-soft\)\)/);
+  assert.match(consoleCss, /#workspaceLegacyHost \.session-item\.active \.session-actions\s*\{\s*background: var\(--bg\)/);
+  assert.match(consoleCss, /#workspaceLegacyHost \.session-item\.active:hover \.session-actions\s*\{[^}]*background: color-mix\(in srgb, var\(--accent\) 4%, var\(--bg\)\)/);
 });
 
 test("聊天标题栏横跨右侧详情并在详情收起时恢复独立卡片", () => {
@@ -305,7 +310,7 @@ test("会话列表保留活动时间并展示三项统计", () => {
   assert.match(chatSource, /title="回合数"[^\n]*messages-square/);
   assert.match(chatSource, /title="消息事件数"[^\n]*repeat-2/);
   assert.match(chatSource, /title="附件数"[^\n]*paperclip/);
-  assert.match(consoleCss, /\.session-item:hover\s*\{\s*background:\s*var\(--accent-soft\)/);
+  assert.match(consoleCss, /\.session-item:not\(\.active\):hover\s*\{\s*background:\s*var\(--accent-soft\)/);
 });
 
 test("0803 不带入 0802 的对话消息与滚动重构", () => {

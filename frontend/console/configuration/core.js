@@ -314,9 +314,15 @@ function initTabs() {
         window.builtinToolsAdmin?.refresh();
         window.systemToolsAdmin?.refresh();
       }
-      if (name === "skills" && window.skillsAdmin) window.skillsAdmin.refresh();
+      if (name === "skills" && window.skillsAdmin) {
+        window.skillsAdmin.selectedCode = null;
+        window.skillsAdmin.refresh();
+      }
       if (name === "mcp" && window.mcpAdmin) window.mcpAdmin.refresh();
-      if (name === "ui-tools" && window.uiToolsAdmin) window.uiToolsAdmin.refresh();
+      if (name === "ui-tools" && window.uiToolsAdmin) {
+        window.uiToolsAdmin.selectedPackageCode = null;
+        window.uiToolsAdmin.refresh();
+      }
       if (name === "catalog" && window.modelCatalogAdmin) window.modelCatalogAdmin.refresh();
     });
   });

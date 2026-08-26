@@ -18,7 +18,9 @@ const skillsAdmin = {
         return;
       }
       if (!state.skills.some((item) => item.code === this.selectedCode)) {
-        this.selectedCode = state.skills[0].code;
+        this.selectedCode = state.skills.find((item) => item.source !== "builtin")?.code
+          || state.skills.find((item) => item.source === "builtin")?.code
+          || null;
       }
       this.renderList();
       await this.select(this.selectedCode);
@@ -52,14 +54,15 @@ const skillsAdmin = {
       </button>`;
     };
     const groups = [
-      ["内置", state.skills.filter((skill) => skill.source === "builtin")],
       ["自定义", state.skills.filter((skill) => skill.source !== "builtin")],
+      ["内置", state.skills.filter((skill) => skill.source === "builtin")],
     ];
     pane.innerHTML = groups
-      .filter(([, skills]) => skills.length)
       .map(([label, skills]) => `<section class="skill-list-group">
         <div class="skill-list-group-title"><span>${label}</span><small>${skills.length}</small></div>
-        <div class="skill-list-group-items">${skills.map(renderCard).join("")}</div>
+        <div class="skill-list-group-items">${skills.length
+          ? skills.map(renderCard).join("")
+          : `<div class="configuration-group-empty">${label === "自定义" ? "暂无自定义 Skill，请先上传安装" : "暂无内置 Skill"}</div>`}</div>
       </section>`)
       .join("");
     pane.querySelectorAll("[data-skill-code]").forEach((button) => {

@@ -297,15 +297,14 @@ const uiToolsAdmin = {
       return;
     }
     const groups = [
-      ["内置", this.packages.filter((item) => item.source === "builtin")],
       ["自定义", this.packages.filter((item) => item.source === "manual")],
+      ["内置", this.packages.filter((item) => item.source === "builtin")],
     ];
     tree.innerHTML = groups
-      .filter(([, items]) => items.length)
       .map(([label, items]) => `
         <section class="ui-tool-tree-group">
-          <div class="ui-tool-tree-group-title">${escapeHtml(label)}</div>
-          ${items.map((item) => `
+          <div class="ui-tool-tree-group-title"><span>${escapeHtml(label)}</span><small>${items.length}</small></div>
+          ${items.length ? items.map((item) => `
             <button type="button" class="ui-tool-tree-node ${item.code === this.selectedPackageCode ? "is-selected" : ""}" data-select-package="${escapeHtml(item.code)}">
               <span class="ui-tool-tree-node-head">
                 <span class="ui-tool-tree-icon"><i data-lucide="${item.source === "builtin" ? "panel-top" : "blocks"}"></i></span>
@@ -318,7 +317,7 @@ const uiToolsAdmin = {
                   <span class="ui-tool-tree-count" title="工具数量"><strong>${escapeHtml(String(item.tool_count || 0))}</strong><i data-lucide="wrench"></i></span>
                 </span>
               </span>
-            </button>`).join("")}
+            </button>`).join("") : `<div class="configuration-group-empty">${label === "自定义" ? "暂无自定义工具包，请先新建" : "暂无内置工具包"}</div>`}
         </section>`)
       .join("");
     tree.querySelectorAll("[data-select-package]").forEach((node) => {
@@ -357,9 +356,7 @@ const uiToolsAdmin = {
     label.textContent = selected.label;
     code.textContent = selected.code;
     description.textContent = selected.description || "暂无说明";
-    meta.innerHTML = `
-      <span class="badge source-${escapeHtml(selected.source)}">${escapeHtml(SOURCE_LABELS[selected.source] || selected.source)}</span>
-      <span class="badge ${selected.enabled ? "on" : "off"}">${selected.enabled ? "启用" : "停用"}</span>`;
+    meta.innerHTML = `<span class="badge ${selected.enabled ? "on" : "off"}">${selected.enabled ? "启用" : "停用"}</span>`;
     const manual = selected.source === "manual";
     editButton.classList.toggle("hidden", !manual);
     deleteButton.classList.toggle("hidden", !manual);
@@ -507,7 +504,11 @@ const uiToolsAdmin = {
       const items = data.items || [];
       this._lastTools = items;
       if (this.selectedPackageCode && !this.packages.some((item) => item.code === this.selectedPackageCode)) this.selectedPackageCode = null;
-      if (!this.selectedPackageCode && this.packages.length) this.selectedPackageCode = this.packages[0].code;
+      if (!this.selectedPackageCode && this.packages.length) {
+        this.selectedPackageCode = this.packages.find((item) => item.source === "manual")?.code
+          || this.packages.find((item) => item.source === "builtin")?.code
+          || null;
+      }
       this.renderPackages();
       this.renderSelectedPackage();
       this.renderTools(items);

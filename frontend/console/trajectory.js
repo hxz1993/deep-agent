@@ -774,7 +774,7 @@ function renderJsonBlock(value) {
 }
 
 function detailTabs(event) {
-  if (event.kind === "title") return [["request", "Request"], ["result", "Result"]];
+  if (event.kind === "title") return [["summary", "Summary"], ["request", "Request"], ["result", "Result"]];
   const tabs = [["summary", "Summary"]];
   if (hasMeaningfulValue(event.payload)) tabs.push(["payload", "Payload"]);
   if (["input", "assistant"].includes(event.kind)) {

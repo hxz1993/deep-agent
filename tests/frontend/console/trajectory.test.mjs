@@ -214,6 +214,7 @@ test("工作台以独立页签接入轨迹且默认对话链路不变", () => {
   assert.doesNotMatch(workspaceCss, /trajectory-thinking-preview|trajectory-technical-details/);
   assert.doesNotMatch(trajectorySource, /标识与模型信息|renderTechnicalDetails/);
   assert.match(trajectorySource, /\["summary", "Summary"\]/);
+  assert.match(trajectorySource, /event\.kind === "title"\) return \[\["summary", "Summary"\], \["request", "Request"\], \["result", "Result"\]\]/);
   assert.match(trajectorySource, /tabs\.push\(\["preview", "Preview"\], \["raw", "Raw"\]\)/);
   assert.match(trajectorySource, /\["Thinking", event\.payload\?\.thinking\][\s\S]*\["Content", event\.payload\?\.content\]/);
   assert.match(trajectorySource, /completed: "Completed"/);

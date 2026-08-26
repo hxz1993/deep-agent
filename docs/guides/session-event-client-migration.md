@@ -15,6 +15,11 @@ Event。服务端提供两个只读视图：
 - `fixtures/conversation-history-v1.json`
 - `fixtures/conversation-sse-v1.ndjson`
 
+两个客户端的逐文件改造说明：
+
+- `client-adaptation/deepcube-conversation-history.md`
+- `client-adaptation/deeptable-conversation-history.md`
+
 ```json
 {
   "schema_version": 1,

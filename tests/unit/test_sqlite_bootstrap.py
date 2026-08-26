@@ -681,7 +681,7 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
                     await asyncio.to_thread(command.upgrade, config, "006")
                     self.assertEqual(self._revision(db_path), "006")
 
-    async def test_008_destructive_session_upgrade_round_trip_preserves_configuration(self) -> None:
+    async def test_008_destructive_session_upgrade_and_009_cleanup_round_trip(self) -> None:
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
             db_path = Path(tmpdir) / "session-events-008.db"
             url = f"sqlite+aiosqlite:///{db_path.as_posix()}"
@@ -737,12 +737,30 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
                     }
 
                     await asyncio.to_thread(command.upgrade, config, "008")
-                    self._assert_current_baseline(db_path)
+                    self.assertEqual(self._revision(db_path), "008")
                     self.assertEqual(self._row_count(db_path, "chat_sessions"), 0)
                     self.assertEqual(self._row_count(db_path, "chat_session_events"), 0)
+                    self.assertIn(
+                        "auxiliary_model_configs",
+                        self._business_tables(db_path),
+                    )
                     self.assertEqual(
                         config_counts,
                         {table: self._row_count(db_path, table) for table in config_counts},
+                    )
+
+                    await asyncio.to_thread(command.upgrade, config, "009")
+                    self._assert_current_baseline(db_path)
+
+                    await asyncio.to_thread(command.downgrade, config, "008")
+                    self.assertEqual(self._revision(db_path), "008")
+                    self.assertEqual(
+                        self._columns(db_path, "auxiliary_model_configs"),
+                        {"use_case", "llm_model_id", "created_at", "updated_at"},
+                    )
+                    self.assertIn(
+                        ("llm_model_id", "llm_models", "id", "SET NULL"),
+                        self._foreign_keys(db_path, "auxiliary_model_configs"),
                     )
 
                     await asyncio.to_thread(command.downgrade, config, "007")
@@ -762,15 +780,32 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
                         self._foreign_keys(db_path, "auxiliary_model_configs"),
                     )
 
-                    await asyncio.to_thread(command.upgrade, config, "008")
+                    await asyncio.to_thread(command.upgrade, config, "009")
                     self._assert_current_baseline(db_path)
                     self.assertEqual(
                         config_counts,
                         {table: self._row_count(db_path, table) for table in config_counts},
                     )
 
+    async def test_009_accepts_an_008_database_where_auxiliary_table_was_already_removed(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+            db_path = Path(tmpdir) / "already-cleaned-008.db"
+            url = f"sqlite+aiosqlite:///{db_path.as_posix()}"
+            with patch("deep_agent.db.url.get_database_url", return_value=url):
+                with patch("deep_agent.db.migrate.get_database_url", return_value=url):
+                    config = migrate._build_alembic_config()
+                    await asyncio.to_thread(command.upgrade, config, "008")
+                    with sqlite3.connect(db_path) as connection:
+                        connection.execute("DROP TABLE auxiliary_model_configs")
+                        connection.commit()
+
+                    await asyncio.to_thread(command.upgrade, config, "009")
+                    self._assert_current_baseline(db_path)
+
     def _assert_current_baseline(self, db_path: Path) -> None:
-        self.assertEqual(self._revision(db_path), "008")
+        self.assertEqual(self._revision(db_path), "009")
         self.assertEqual(self._business_tables(db_path), EXPECTED_TABLES)
         self.assertNotIn("max_requests", self._columns(db_path, "agents"))
         self.assertNotIn("capabilities_source", self._columns(db_path, "llm_models"))

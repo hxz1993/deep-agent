@@ -1,6 +1,6 @@
 # 18 · 会话事件与轨迹
 
-> v0.6.0 V8；Alembic head：008。
+> v0.6.0 V8会话结构；Alembic head：009。
 
 DeepAgent 会话域只有 `chat_sessions` 和 `chat_session_events`。Event Store 是模型恢复、
 会话历史、Console 轨迹、Plan 和持久化 SSE 的唯一事实源；没有 Checkpoint、Plan、Evidence、

@@ -137,7 +137,7 @@ SQLite副本验证，不能连接共享Test数据库。
 
 Alembic `008`是有意的破坏性会话迁移：删除Revision 007的旧会话、消息和上下文投影，建立新的
 `chat_sessions`与`chat_session_events`，不转换旧历史。Provider、Model、Agent、MCP、Skill、
-UI Tool和模型目录数据不变；旧的会话标题模型映射由Revision 008删除。
+UI Tool和模型目录数据不变；旧的会话标题模型映射由后续Revision 009删除。
 
 共享环境发布顺序固定为：先用007代码生成并验证配置备份和会话归档；构建并推送0.6.0镜像；进入
 维护窗口并停止全部旧实例与旧镜像自动扩容；复核Revision和物理表；启动新镜像执行008；核对配置
@@ -145,3 +145,13 @@ UI Tool和模型目录数据不变；旧的会话标题模型映射由Revision 0
 配置备份。Migration本身完成清空，禁止再执行无审计的手工`TRUNCATE`。
 
 `008 → 007`只重建空旧表，不从Events逆向恢复旧Message；再次升级008仍然是空Event Store。
+
+## v0.6.0 标题模型配置清理
+
+Alembic `009`只删除已废弃的`auxiliary_model_configs`，不修改Provider、Model、Agent、Skill、
+UI Tool、Session或Event数据。开发阶段存在两种Revision 008物理状态：共享Test仍保留旧表，部分
+本地SQLite已经受控删除；009会先检查表是否存在，使两种状态都安全收敛到同一结构。降级到008时
+恢复空的旧表及其`llm_models.id`外键，重新升级009再次删除。
+
+共享环境仍遵循先备份、部署包含009的镜像、停止旧实例、再迁移和冒烟的顺序；禁止只修改
+`alembic_version`或在旧镜像仍运行时提前删表。升级后的配置备份文件名使用`v009`。

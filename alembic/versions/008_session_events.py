@@ -45,7 +45,6 @@ def _now_default():
 
 
 def upgrade() -> None:
-    op.drop_table("auxiliary_model_configs")
     op.drop_table("chat_context_checkpoints")
     op.drop_table("chat_messages")
     op.drop_index("ix_chat_sessions_user_id_agent_id_updated_at", table_name="chat_sessions")
@@ -244,29 +243,4 @@ def downgrade() -> None:
             nullable=False,
         ),
         sa.PrimaryKeyConstraint("agent_id", "session_id"),
-    )
-
-    op.create_table(
-        "auxiliary_model_configs",
-        sa.Column("use_case", sa.String(64), nullable=False),
-        sa.Column("llm_model_id", sa.String(AGENT_ID_LENGTH), nullable=True),
-        sa.Column(
-            "created_at",
-            sa.DateTime(timezone=True),
-            server_default=_now_default(),
-            nullable=False,
-        ),
-        sa.Column(
-            "updated_at",
-            sa.DateTime(timezone=True),
-            server_default=_now_default(),
-            nullable=False,
-        ),
-        sa.ForeignKeyConstraint(
-            ["llm_model_id"],
-            ["llm_models.id"],
-            name="auxiliary_model_configs_llm_model_id_fkey",
-            ondelete="SET NULL",
-        ),
-        sa.PrimaryKeyConstraint("use_case"),
     )

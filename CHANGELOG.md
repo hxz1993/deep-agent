@@ -12,7 +12,9 @@
 - Alembic `008` 是会话域破坏性迁移：删除旧会话历史与旧上下文投影，重建全局唯一 Session、
   严格 Sequence、Turn/Run 定位和可空 App/Space 来源；Call/Result 通过完整 Message Payload 内的
   Call ID 精确配对。Provider、Model、Agent、
-  MCP、Skill、UI Tool 配置保持不变。`008` 同时删除旧的标题专用模型配置表；升级前必须分别执行配置备份和会话历史归档。
+  MCP、Skill、UI Tool 配置保持不变；升级前必须分别执行配置备份和会话历史归档。
+- Alembic `009` 删除已废弃的标题专用模型配置表，并兼容开发阶段 Revision 008 中该表已存在或
+  已被手动清理的两种物理状态；产品版本仍为 0.6.0。
 - 上下文压缩改为单条 Compaction Event，采用固定八段结构摘要、确定性的 Tool/Context Evidence、
   DSH 式超大工具结果头尾裁剪和来源 Hash 校验；失败、超时、取消和 Stale 不替换上一次有效历史。
 - 摘要总超时提高到 300 秒，并每约 10 秒发送非持久化压缩进度；明确的 Provider Context Overflow

@@ -61,7 +61,7 @@ tests/
 | `test_attachment_extractors.py` | 文本编码、DOCX/XLSX 结构读取、分页与 Office 安全 |
 | `test_file_tools.py` | 附件与 Skill统一文件工具的来源参数、权限、Run缓存、single-flight、分页和多模态返回 |
 | `test_tool_package_registry.py` | ToolPackage Registry 的整包选择、默认和空列表语义 |
-| `test_sqlite_bootstrap.py` | Alembic 001～008结构、007→008→007→008会话清空与配置保留、Provider迁移往返及历史数据清理 |
+| `test_sqlite_bootstrap.py` | Alembic 001～009结构、007→008会话清空、008→009辅助表清理及完整往返、Provider迁移与配置保留 |
 | `test_*_migration_dialects.py` | 各数据迁移在SQLite、MySQL和PostgreSQL上的DDL或JSON清理逻辑 |
 | `test_tool_package_migration_dialects.py` | SQLite、MySQL、PostgreSQL 的 002 DDL 分支 |
 | `test_runtime_dependencies.py` | OpenAI SDK/aiohttp兼容锁定与Pydantic AI OpenAI模型导入 |

@@ -77,12 +77,22 @@ test 固定镜像部署可设 `DEEP_AGENT_SANDBOX_ENSURE_VENV=true`，由 gunico
 DEEP_AGENT_LOCAL_USER=local-dev
 DEEP_AGENT_LOCAL_ADMIN_BYPASS=true
 DEEP_AGENT_SQLITE_PATH=/absolute/path/to/deep-agent-local.db
+DEEP_AGENT_FILE_BACKEND=local
+DEEP_AGENT_LOCAL_FILE_ROOT=/absolute/path/to/local-file-store
 ```
 
 该开关只由回环地址上的 `deep_agent.local_dev` 读取，通过 ASGI 内部标记放行 Console 管理接口；
 它不是 HTTP Header，也不会改变 `deep_agent.main:app` 的生产鉴权。未开启该开关时仍必须配置平台
 Token，并由平台综合权限接口确认企业管理员身份。无 App 的本地请求可以完成 Provider、模型、Agent
-配置和普通对话；需要平台文件、下载中心或继承式 MCP 上下文的能力仍需真实 App/Space 和平台凭证。
+配置和普通对话。显式启用本地文件后端后，附件上传、图片原生输入、`read_file`、大工具结果
+Spill、上传 Skill和文件导出均使用本地 Blob，但保持与平台模式相同的 API、Message和工具协议。
+Blob 位于 `DEEP_AGENT_LOCAL_FILE_ROOT/blobs/`，独立 `metadata.sqlite3`只保存文件索引、用户归属和
+下载记录；它不属于Alembic数据库，也不会进入配置备份。普通文件仍按User隔离，App/Space只记录
+来源。Console对本地导出的`local_`文件显示“下载本地文件”；平台模式固定不开放该下载端点。
+
+`DEEP_AGENT_FILE_BACKEND`默认始终为`platform`，不会因为数据库是SQLite而自动切换。`local`仅允许
+通过回环`deep_agent.local_dev`且主数据库为SQLite时启动；部署入口、Test MySQL或普通
+`deep_agent.main:app`误配都会失败关闭。继承式MCP上下文仍需真实App/Space及对应服务能力。
 
 访问入口：
 
@@ -155,7 +165,7 @@ Skill 管理接口和包格式见
 ## 大工具结果
 
 v0.4.0 使用 Harness `ToolOutputLimits` 在工具执行后、结果进入下一次模型请求前识别超大结果。
-完整内容保存到平台文件服务，模型历史只保留首尾预览、结构草图和平台 File ID；模型需要细节时
+完整内容保存到当前FileStore（部署默认平台；显式本地开发模式为本地Blob），模型历史只保留首尾预览、结构草图和 File ID；模型需要细节时
 通过系统工具 `read_tool_result` 按行或关键词读取。该机制不增加 Artifact 表，句柄权限只从当前
 会话的原始 Tool Result Event 恢复；结构化摘要中的 Evidence 只提供来源索引，不能扩大访问范围。完整边界见
 [`docs/design/05-tool-optimization/tool-optimization-design.md`](docs/design/05-tool-optimization/tool-optimization-design.md#92-tooloutputlimits-与大工具结果外置)。

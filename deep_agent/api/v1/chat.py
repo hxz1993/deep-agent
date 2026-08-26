@@ -68,6 +68,7 @@ def _agent_deps(
         conversation_id=conversation_id,
         run_id=new_run_id(),
         request_headers=dict(request_headers or {}),
+        file_store=ctx.file_store,
         app_id=(request_headers or {}).get("app"),
         space_id=(request_headers or {}).get("space"),
     )

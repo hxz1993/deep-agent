@@ -256,6 +256,7 @@ async def _build_runner_from_spec(
         context_window_tokens=spec.context_window_tokens,
         max_output_tokens=spec.max_output_tokens,
         estimator=estimator,
+        file_store=getattr(ctx, "file_store", None),
     )
     history_toolset = build_history_toolset(ctx.store)
     agent = build_agent(

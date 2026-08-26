@@ -41,7 +41,8 @@ from deep_agent.skills.runtime import (
     SkillRuntimeLibrary,
     skill_platform_file_headers,
 )
-from deepfos_platform.client.platform import FILE_TYPE_SKILL_PACKAGE, PlatformAPI
+from deep_agent.files.storage import FileStore
+from deepfos_platform.client.platform import FILE_TYPE_SKILL_PACKAGE
 
 
 router = APIRouter(dependencies=CONSOLE_ADMIN_DEPENDENCIES)
@@ -167,32 +168,39 @@ def _record(
     )
 
 
-async def _upload_platform(
+async def _upload_file(
     request: Request,
+    store: FileStore,
     *,
     raw: bytes,
     file_name: str,
 ):
-    api = PlatformAPI(
-        header=skill_platform_file_headers(extract_forward_headers(request))
-    )
+    headers = skill_platform_file_headers(extract_forward_headers(request))
     try:
-        uploaded = await api.file.upload(
+        uploaded = await store.upload(
             file_type=FILE_TYPE_SKILL_PACKAGE,
             file_name=file_name,
-            file=raw,
+            mime="application/zip",
+            data=raw,
+            request_headers=headers,
         )
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Platform Skill upload failed: {type(exc).__name__}",
+            detail=f"Skill file upload failed: {type(exc).__name__}",
         ) from exc
-    return api, uploaded
+    return headers, uploaded
 
 
-async def _best_effort_delete(api: PlatformAPI, file_id: str, *, context: str) -> None:
+async def _best_effort_delete(
+    store: FileStore,
+    headers: dict[str, str],
+    file_id: str,
+    *,
+    context: str,
+) -> None:
     try:
-        await api.file.delete_file(file_id)
+        await store.delete(file_id, headers)
     except Exception as exc:
         logger.warning(
             "Orphan platform Skill file cleanup failed context={} file_id={} error_type={}",
@@ -301,18 +309,28 @@ async def install_skill(
                 detail=f"Skill already exists: {parsed.code}",
             )
         request_headers = extract_forward_headers(request)
-        api, uploaded = await _upload_platform(request, raw=raw, file_name=filename)
+        file_headers, uploaded = await _upload_file(
+            request,
+            ctx.file_store,
+            raw=raw,
+            file_name=filename,
+        )
         try:
             row = await ctx.stores.skill_package.create(
                 _record(
                     parsed,
                     platform_file_id=uploaded.id,
-                    file_name=uploaded.fileName or filename,
-                    file_size=int(uploaded.fileSize or len(raw)),
+                    file_name=uploaded.file_name or filename,
+                    file_size=uploaded.file_size,
                 )
             )
         except Exception:
-            await _best_effort_delete(api, uploaded.id, context="install-compensation")
+            await _best_effort_delete(
+                ctx.file_store,
+                file_headers,
+                uploaded.id,
+                context="install-compensation",
+            )
             raise
         await ctx.skill_runtime.materialize(
             row,
@@ -376,13 +394,18 @@ async def replace_skill_package(
                     skill=_row_detail(current, ctx.skill_runtime),
                 )
 
-        api, uploaded = await _upload_platform(request, raw=raw, file_name=filename)
+        file_headers, uploaded = await _upload_file(
+            request,
+            ctx.file_store,
+            raw=raw,
+            file_name=filename,
+        )
         try:
             replacement = _record(
                 parsed,
                 platform_file_id=uploaded.id,
-                file_name=uploaded.fileName or filename,
-                file_size=int(uploaded.fileSize or len(raw)),
+                file_name=uploaded.file_name or filename,
+                file_size=uploaded.file_size,
             ).model_copy(
                 update={
                     "enabled": current.enabled,
@@ -400,9 +423,19 @@ async def replace_skill_package(
             if row is None:
                 raise RuntimeError(f"Skill disappeared during package update: {code}")
         except Exception:
-            await _best_effort_delete(api, uploaded.id, context="update-compensation")
+            await _best_effort_delete(
+                ctx.file_store,
+                file_headers,
+                uploaded.id,
+                context="update-compensation",
+            )
             raise
-        await _best_effort_delete(api, current.platform_file_id, context="update-old-file")
+        await _best_effort_delete(
+            ctx.file_store,
+            file_headers,
+            current.platform_file_id,
+            context="update-old-file",
+        )
         await ctx.skill_runtime.materialize(
             row,
             request_headers=request_headers,
@@ -457,10 +490,13 @@ async def delete_skill(code: str, request: Request, ctx: AppContextDep) -> dict:
         )
     await ctx.stores.skill_package.delete(code)
     await ctx.skill_runtime.remove(code)
-    api = PlatformAPI(
-        header=skill_platform_file_headers(extract_forward_headers(request))
+    file_headers = skill_platform_file_headers(extract_forward_headers(request))
+    await _best_effort_delete(
+        ctx.file_store,
+        file_headers,
+        row.platform_file_id,
+        context="delete",
     )
-    await _best_effort_delete(api, row.platform_file_id, context="delete")
     return {"status": "deleted", "code": code}
 
 

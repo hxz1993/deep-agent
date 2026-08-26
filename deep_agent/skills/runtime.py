@@ -18,7 +18,7 @@ from deep_agent.db.models import SkillPackage
 from deep_agent.db.stores.bundle import DataStores
 from deep_agent.skills.catalog import BUILTIN_SKILLS_ROOT, SkillDescriptor, get_builtin_skill
 from deep_agent.skills.package import ParsedSkillPackage, SkillPackageError, parse_skill_zip
-from deepfos_platform.client.platform import PlatformAPI
+from deep_agent.files.storage import FileStore, PlatformFileStore
 from deepfos_platform.lib.constants import INTERNAL_TOKEN_HEADER
 from deepfos_platform.options import OPTION as PLATFORM_OPTION
 
@@ -166,8 +166,14 @@ def _runtime_error_code(exc: BaseException) -> str:
 class SkillRuntimeLibrary:
     """One current, rebuildable Skill directory per uploaded Skill code."""
 
-    def __init__(self, root: Path | None = None) -> None:
+    def __init__(
+        self,
+        root: Path | None = None,
+        *,
+        file_store: FileStore | None = None,
+    ) -> None:
         self.root = (root or SKILL_RUNTIME_ROOT).resolve()
+        self.file_store = file_store or PlatformFileStore()
         self._states: dict[str, SkillRuntimeState] = {}
         self._locks: dict[str, asyncio.Lock] = {}
 
@@ -236,9 +242,11 @@ class SkillRuntimeLibrary:
         row: SkillPackage,
         request_headers: Mapping[str, str],
     ) -> bytes:
-        api = PlatformAPI(header=dict(request_headers))
         async with asyncio.timeout(SKILL_DOWNLOAD_TIMEOUT_SECONDS):
-            payload = await api.file.download(row.platform_file_id)
+            payload = await self.file_store.download(
+                row.platform_file_id,
+                request_headers,
+            )
         if not isinstance(payload, (bytes, bytearray)):
             raise SkillUnavailableError(
                 f"Platform file for Skill {row.code!r} did not return bytes"

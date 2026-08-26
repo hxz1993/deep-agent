@@ -22,7 +22,8 @@ from deep_agent.agent.attachments import _download_file
 from deep_agent.agent.context.estimator import TokenEstimator
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.observability import log_event
-from deepfos_platform.client.platform import FILE_TYPE_ATTACHMENT, PlatformAPI
+from deep_agent.files.storage import FileStore, PlatformFileStore
+from deepfos_platform.client.platform import FILE_TYPE_ATTACHMENT
 
 TOOL_OUTPUT_MIN_TOKENS = 4_000
 TOOL_OUTPUT_MAX_TOKENS = 24_000
@@ -152,8 +153,10 @@ class PlatformToolResultStore(OverflowStore):
         *,
         request_headers: Mapping[str, str],
         threshold_tokens: int,
+        file_store: FileStore | None = None,
     ) -> None:
         self._headers = dict(request_headers)
+        self._file_store = file_store or PlatformFileStore()
         self._deps: AgentDeps | None = None
         self._allowed_handles: set[str] = set()
         self._load_tasks: dict[str, asyncio.Task[bytes]] = {}
@@ -190,12 +193,13 @@ class PlatformToolResultStore(OverflowStore):
 
     async def write(self, key: str, data: bytes) -> str:
         digest = hashlib.sha256(key.encode("utf-8")).hexdigest()[:20]
-        api = PlatformAPI(header=self._headers)
         try:
-            uploaded = await api.file.upload(
+            uploaded = await self._file_store.upload(
                 file_type=FILE_TYPE_ATTACHMENT,
                 file_name=f"tool-result-{digest}.txt",
-                file=data,
+                mime="text/plain",
+                data=data,
+                request_headers=self._headers,
             )
         except asyncio.CancelledError:
             raise
@@ -208,7 +212,7 @@ class PlatformToolResultStore(OverflowStore):
                 spill_failures=self.telemetry.spill_failures,
             )
             raise
-        raw_handle = getattr(uploaded, "id", None)
+        raw_handle = uploaded.id
         if not isinstance(raw_handle, str) or not raw_handle:
             self._failed_inline_payloads.append(data)
             self.telemetry.spill_failures += 1
@@ -259,7 +263,11 @@ class PlatformToolResultStore(OverflowStore):
         if task is None:
             async def download_and_cache() -> bytes:
                 try:
-                    data = await _download_file(handle, self._headers)
+                    data = await _download_file(
+                        handle,
+                        self._headers,
+                        file_store=self._file_store,
+                    )
                 except asyncio.CancelledError:
                     raise
                 except Exception as exc:
@@ -394,6 +402,7 @@ def build_tool_output_limits(
     context_window_tokens: int | None,
     max_output_tokens: int | None,
     estimator: TokenEstimator,
+    file_store: FileStore | None = None,
 ) -> tuple[ToolOutputLimits[AgentDeps], PlatformToolResultStore]:
     threshold = tool_output_threshold_tokens(
         context_window_tokens=context_window_tokens,
@@ -402,6 +411,7 @@ def build_tool_output_limits(
     store = PlatformToolResultStore(
         request_headers=request_headers,
         threshold_tokens=threshold,
+        file_store=file_store,
     )
     capability: ToolOutputLimits[AgentDeps] = DeepAgentToolOutputLimits(
         bands=[

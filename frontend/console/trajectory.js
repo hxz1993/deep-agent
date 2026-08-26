@@ -193,6 +193,8 @@ function projectCompaction(event, inputSequence) {
   projected.turn_id = event.turn_id || null;
   projected.event_type = event.event_type;
   projected.timestamp_end = event.updated_at || projected.timestamp;
+  const durationMs = Number(event.payload?.duration_ms);
+  if (Number.isFinite(durationMs)) projected.duration_ms = durationMs;
   return projected;
 }
 
@@ -594,6 +596,37 @@ function toolResultValue(event) {
     : event.result;
 }
 
+function localFileDownload(value) {
+  if (Array.isArray(value)) {
+    for (const child of value) {
+      const found = localFileDownload(child);
+      if (found) return found;
+    }
+    return null;
+  }
+  if (!value || typeof value !== "object") return null;
+  const fileId = String(value.file_id || "");
+  if (fileId.startsWith("local_")) {
+    return { fileId, fileName: value.file_name || fileId };
+  }
+  for (const child of Object.values(value)) {
+    const found = localFileDownload(child);
+    if (found) return found;
+  }
+  return null;
+}
+
+function renderLocalFileDownload(value) {
+  const file = localFileDownload(value);
+  if (!file) return "";
+  const path = `api/v1/local-files/${encodeURIComponent(file.fileId)}/download`;
+  const href = globalThis.serviceUrl?.(path) || `/${path}`;
+  return renderSummarySection(
+    "File",
+    `<a class="local-file-download" href="${escapeHtml(href)}" download>${icon("download")}<span>下载本地文件</span><small>${escapeHtml(file.fileName)}</small></a>`,
+  );
+}
+
 function renderPayloadResultSections({ payload, result }) {
   const payloadText = hasMeaningfulValue(payload) ? valuePreview(payload, 280) : null;
   const resultText = hasMeaningfulValue(result) ? valuePreview(result, 360) : null;
@@ -602,10 +635,11 @@ function renderPayloadResultSections({ payload, result }) {
 }
 
 function renderToolSummary(event) {
-  return renderPayloadResultSections({
+  const result = toolResultValue(event);
+  return `${renderPayloadResultSections({
     payload: event.payload?.args ?? event.payload,
-    result: toolResultValue(event),
-  });
+    result,
+  })}${renderLocalFileDownload(result)}`;
 }
 
 function planSnapshot(event) {

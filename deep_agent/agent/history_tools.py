@@ -204,7 +204,10 @@ def build_history_toolset(
                     "event_type": row["event_type"],
                     "tool_name": row.get("tool_name"),
                     "call_id": row.get("call_id"),
-                    "matched_parts": row.get("tool_matches") or [],
+                    "matched_parts": [
+                        *(row.get("tool_matches") or []),
+                        *(row.get("attachment_matches") or []),
+                    ],
                     "preview": _preview(str(row.get("search_text") or ""), query),
                     "result_complete": complete,
                     "artifact_id": artifact,

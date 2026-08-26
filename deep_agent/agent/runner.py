@@ -1022,6 +1022,7 @@ class AgentRunner:
             history,
             current_user_index=current_user_index,
             request_headers=deps.request_headers,
+            file_store=deps.file_store,
         )
         if pre_persisted_user:
             return llm_history, None
@@ -1031,6 +1032,7 @@ class AgentRunner:
                 attachments,
                 deps.request_headers,
                 context_refs=context_refs,
+                file_store=deps.file_store,
             )
         return llm_history, message or None
 

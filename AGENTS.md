@@ -37,6 +37,9 @@ python3.12 -m deep_agent.local_dev \
 - 纯本地 SQLite 可在仓库外 Profile 设置 `DEEP_AGENT_LOCAL_ADMIN_BYPASS=true`；仍需
   `DEEP_AGENT_LOCAL_USER`，但无需 App/Space 或平台 Token。该放行只存在于回环地址
   `local_dev` 的内部 ASGI scope，部署入口和外部 Header 无法触发。
+- 纯本地附件闭环必须再显式设置`DEEP_AGENT_FILE_BACKEND=local`和
+  `DEEP_AGENT_LOCAL_FILE_ROOT=<独立目录>`。该后端只允许`local_dev + SQLite`，部署/Test默认仍为
+  `platform`。文件正文保存为私有Blob，独立`metadata.sqlite3`只存索引；业务API与线上保持一致。
 
 ---
 
@@ -91,6 +94,9 @@ HTTP → deep_agent/api/v1 → AgentRunner → pydantic_ai.Agent → Toolsets
 - v0.6.0将会话域统一为`chat_sessions + chat_session_events`：一个完整Pydantic公共Part一行，
   Run和Compaction生命周期原位更新；模型历史、Event API、持久化SSE、Console轨迹和Plan从同一
   Event Store投影。旧Message/独立压缩表和History契约已删除，Branch不兼容也不预埋。
+- v0.6.0增加显式FileStore适配层：Platform仍是默认实现；仅`local_dev + SQLite`可启用本地Blob。
+  上传、附件读取、原生图片、Tool Spill、上传Skill和导出共用同一注入接口，业务层不得自行判断
+  环境。Compaction增加确定性Attachment Evidence，但文件授权仍只从原始Event恢复。
 - v0.6.0上下文压缩采用单条Compaction Event、固定八段摘要、确定性Tool/Context Evidence和DSH式
   超大结果裁剪；300秒总预算内每约10秒发送SSE进度。失败、超时、取消或Stale不替换上一次有效
   历史；明确Provider Context Overflow只在没有已输出内容或工具副作用时压缩后安全重试一次。

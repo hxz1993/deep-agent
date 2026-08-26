@@ -179,6 +179,35 @@ def tool_part_references(value: Any) -> list[dict[str, Any]]:
     return references
 
 
+def attachment_part_references(value: Any) -> list[dict[str, Any]]:
+    """Return attachment locations inside a serialized user prompt."""
+
+    references: list[dict[str, Any]] = []
+    for part_offset, part in enumerate(message_parts(value)):
+        if part.get("part_kind") != "user-prompt":
+            continue
+        content = part.get("content")
+        if not isinstance(content, list):
+            continue
+        for item_offset, item in enumerate(content):
+            if not isinstance(item, Mapping) or item.get("kind") != "attachment-ref":
+                continue
+            file_id = item.get("id")
+            if not file_id:
+                continue
+            references.append(
+                {
+                    "part_offset": part_offset,
+                    "item_offset": item_offset,
+                    "file_id": str(file_id),
+                    "name": str(item.get("name") or "") or None,
+                    "mime": str(item.get("mime") or "") or None,
+                    "item": dict(item),
+                }
+            )
+    return references
+
+
 def event_contains_call(value: Any, call_id: str) -> bool:
     return any(item["call_id"] == call_id for item in tool_part_references(value))
 

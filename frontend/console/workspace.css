@@ -966,6 +966,32 @@ html, body {
   font-size: 12px;
 }
 .tool-result-artifact svg { width: 14px; height: 14px; flex: none; }
+.local-file-download {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 8px;
+  padding: 7px 9px;
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border));
+  border-radius: 7px;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 6%, var(--surface));
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: none;
+}
+.local-file-download:hover { border-color: var(--accent); }
+.local-file-download svg { width: 14px; height: 14px; flex: none; }
+.local-file-download small {
+  min-width: 0;
+  margin-left: auto;
+  overflow: hidden;
+  color: var(--text-faint);
+  font-size: 12px;
+  font-weight: 400;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 /* Assistant 直接排版；过程统一收进一层大折叠。 */
 .assistant-process {

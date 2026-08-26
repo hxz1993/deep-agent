@@ -125,12 +125,12 @@ class ChatFileExportIntegrationTests(unittest.IsolatedAsyncioTestCase):
         )
         save = AsyncMock(return_value="download-record")
         with patch(
-            "deep_agent.files.export_toolset.PlatformAPI",
+            "deep_agent.files.storage.PlatformAPI",
             return_value=SimpleNamespace(
                 file=SimpleNamespace(upload=upload, delete_file=AsyncMock())
             ),
         ), patch(
-            "deep_agent.files.export_toolset.SpaceAPI",
+            "deep_agent.files.storage.SpaceAPI",
             return_value=SimpleNamespace(
                 business_record=SimpleNamespace(save=save)
             ),
@@ -176,8 +176,8 @@ class ChatFileExportIntegrationTests(unittest.IsolatedAsyncioTestCase):
             "deep_agent.files.export_toolset._download_file",
             new_callable=AsyncMock,
             return_value=b"<h1>Existing report</h1>",
-        ), patch("deep_agent.files.export_toolset.PlatformAPI") as platform, patch(
-            "deep_agent.files.export_toolset.SpaceAPI",
+        ), patch("deep_agent.files.storage.PlatformAPI") as platform, patch(
+            "deep_agent.files.storage.SpaceAPI",
             return_value=SimpleNamespace(
                 business_record=SimpleNamespace(save=save)
             ),

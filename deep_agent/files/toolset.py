@@ -258,7 +258,11 @@ async def _resolve_file(
             )
 
         async def load_attachment() -> bytes:
-            return await _download_file(ref.id, ctx.deps.request_headers)
+            return await _download_file(
+                ref.id,
+                ctx.deps.request_headers,
+                file_store=ctx.deps.file_store,
+            )
 
         return _ResolvedFile(
             source="attachment",

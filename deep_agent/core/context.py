@@ -29,6 +29,7 @@ from loguru import logger
 from deep_agent.db.factory import bootstrap_database, close_db
 from deep_agent.db.stores.bundle import DataStores
 from deep_agent.db.conversation import SessionStore
+from deep_agent.files.storage import FileStore, PlatformFileStore, build_file_store
 from deep_agent.options import OPTION, validate_runtime_options
 from deep_agent.security import ConsoleAdminAuthorizer
 from deep_agent.skills.runtime import SkillRuntimeLibrary
@@ -47,6 +48,7 @@ class AppContext:
     active_runs: ActiveRunRegistry
     skill_runtime: SkillRuntimeLibrary
     console_admin_authorizer: ConsoleAdminAuthorizer
+    file_store: FileStore
     sandbox_backend: PythonExecutionBackend | None = None
     sandbox_profile: ResolvedSandboxProfile | None = None
 
@@ -77,6 +79,12 @@ class AppContext:
                 interrupted,
             )
         await bundle.stores.auxiliary_model.ensure_defaults()
+
+        file_store = await build_file_store(
+            backend=OPTION.agent.file_backend,
+            local_root=OPTION.agent.local_file_root,
+            database_dialect=bundle.dialect,
+        )
 
         try:
             ensure_sandbox_interpreter_for_startup()
@@ -116,7 +124,7 @@ class AppContext:
                 list(resolved_profile.package_display_names),
             )
 
-        skill_runtime = SkillRuntimeLibrary()
+        skill_runtime = SkillRuntimeLibrary(file_store=file_store)
         try:
             await skill_runtime.reconcile(bundle.stores)
         except Exception as exc:  # noqa: BLE001 - Skill files must not block service startup
@@ -137,6 +145,7 @@ class AppContext:
             active_runs=ActiveRunRegistry(),
             skill_runtime=skill_runtime,
             console_admin_authorizer=ConsoleAdminAuthorizer(),
+            file_store=file_store,
             db_engine=bundle.engine,
             db_session_factory=bundle.session_factory,
             sandbox_backend=sandbox_backend,
@@ -162,6 +171,7 @@ class AppContext:
         active_runs: ActiveRunRegistry | None = None,
         skill_runtime: SkillRuntimeLibrary | None = None,
         console_admin_authorizer: ConsoleAdminAuthorizer | None = None,
+        file_store: FileStore | None = None,
     ) -> AppContext:
         if mcp_lease_manager is None:
             retries = (
@@ -194,10 +204,12 @@ class AppContext:
             active_runs=active_runs or ActiveRunRegistry(),
             skill_runtime=skill_runtime
             or SkillRuntimeLibrary(
-                Path(tempfile.mkdtemp(prefix="deep-agent-runtime-skills-TMP_to_delete-"))
+                Path(tempfile.mkdtemp(prefix="deep-agent-runtime-skills-TMP_to_delete-")),
+                file_store=file_store or PlatformFileStore(),
             ),
             console_admin_authorizer=console_admin_authorizer
             or ConsoleAdminAuthorizer.for_testing(),
+            file_store=file_store or PlatformFileStore(),
             db_engine=db_engine,
             db_session_factory=db_session_factory,
             sandbox_backend=sandbox_backend,

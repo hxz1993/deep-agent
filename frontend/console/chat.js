@@ -2626,7 +2626,7 @@ function createAssistantMessage(timestamp, branchPoint) {
       body.querySelector("[data-tool-result]")?.remove();
       const res = document.createElement("div");
       res.dataset.toolResult = "1";
-      res.innerHTML = `${renderToolResultArtifacts(data.artifacts)}<div class="label" style="margin-top:8px">结果 result</div>${renderToolResult(data.result)}`;
+      res.innerHTML = `${renderToolResultArtifacts(data.artifacts)}<div class="label" style="margin-top:8px">结果 result</div>${renderToolResult(data.result)}${renderLocalFileDownload(data.result)}`;
       body.appendChild(res);
       refreshLucideIcons();
       updateProcessDisclosure();
@@ -2961,6 +2961,35 @@ function renderToolResult(result) {
   }
   return window.DeepAgentJson?.renderBlock(result, { ariaLabel: "工具结果 JSON" })
     || `<pre>${escapeHtml(pretty(result))}</pre>`;
+}
+
+function findLocalFileResult(value) {
+  if (Array.isArray(value)) {
+    for (const child of value) {
+      const found = findLocalFileResult(child);
+      if (found) return found;
+    }
+    return null;
+  }
+  if (!value || typeof value !== "object") return null;
+  const fileId = String(value.file_id || "");
+  if (fileId.startsWith("local_")) {
+    return { fileId, fileName: value.file_name || fileId };
+  }
+  for (const child of Object.values(value)) {
+    const found = findLocalFileResult(child);
+    if (found) return found;
+  }
+  return null;
+}
+
+function renderLocalFileDownload(result) {
+  const file = findLocalFileResult(result);
+  if (!file) return "";
+  const href = window.serviceUrl(
+    `api/v1/local-files/${encodeURIComponent(file.fileId)}/download`,
+  );
+  return `<a class="local-file-download" href="${escapeHtml(href)}" download>${lucideIcon("download")}<span>下载本地文件</span><small>${escapeHtml(file.fileName)}</small></a>`;
 }
 
 function renderToolResultArtifacts(artifacts) {

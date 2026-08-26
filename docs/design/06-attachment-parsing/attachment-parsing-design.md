@@ -145,7 +145,8 @@ read_file(resource, sheet=None, offset=None, limit=None)
   → 本轮 attachment_by_id 白名单
 ```
 
-未知 `file_id` 在平台下载前直接拒绝。平台下载仍使用当前请求的认证 Header，因此同时具备：
+未知 `file_id` 在FileStore下载前直接拒绝。部署默认的Platform下载仍使用当前请求的认证 Header，
+显式本地开发后端则按User校验`metadata.sqlite3`归属，因此同时具备：
 
 1. DeepAgent 会话范围限制。
 2. 平台当前用户文件权限限制。
@@ -216,13 +217,15 @@ chat_session_events
 - 超大工具结果优先Spill；摘要输入副本只对单条超大内联结果做头尾裁剪。
 - 只有八段摘要、Evidence、来源Hash和目标预算都通过时，Compaction Event才更新为Completed。
 - Compaction不修改原始附件引用或工具Event。
+- Compaction Payload与模型锚点增加确定性`attachment_evidence`，记录原Event、Part/Item位置、
+  File ID、名称、MIME和引用Hash；摘要模型不能改写该证据，证据也不能扩展文件权限。
 
 因此压缩后模型仍能从原始会话范围重新读取附件，但不会把所有已读文件内容永久堆进每轮
 输入。
 
 ## 8. 数据与Compaction
 
-平台文件服务保存文件字节，DeepAgent 只持久化稳定引用：
+当前FileStore保存文件字节（部署默认Platform；显式本地开发为Blob目录），DeepAgent会话只持久化稳定引用：
 
 ```json
 {

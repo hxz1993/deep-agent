@@ -93,6 +93,7 @@ async def compact_session_context(
         conversation_id=conversation_id_for(api_agent_id, resolved_session_id),
         run_id=new_run_id(),
         request_headers=request_headers,
+        file_store=ctx.file_store,
         app_id=request_headers.get("app"),
         space_id=request_headers.get("space"),
     )

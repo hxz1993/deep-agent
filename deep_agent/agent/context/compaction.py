@@ -404,6 +404,41 @@ def _deterministic_context_evidence_text(messages: list[ModelMessage]) -> str:
     )
 
 
+def _deterministic_attachment_evidence_text(messages: list[ModelMessage]) -> str:
+    evidence: list[dict[str, Any]] = []
+    for message in messages:
+        if not isinstance(message, ModelRequest):
+            continue
+        for part in message.parts:
+            if not isinstance(part, UserPromptPart) or not isinstance(
+                part.content, (list, tuple)
+            ):
+                continue
+            for item in part.content:
+                if not isinstance(item, dict) or item.get("kind") != "attachment-ref":
+                    continue
+                file_id = item.get("id")
+                if not file_id:
+                    continue
+                evidence.append(
+                    {
+                        "file_id": str(file_id),
+                        "name": item.get("name"),
+                        "mime": item.get("mime"),
+                        "reference_hash": hashlib.sha256(
+                            canonical_json(item).encode("utf-8")
+                        ).hexdigest(),
+                    }
+                )
+    if not evidence:
+        return ""
+    return "## Verified Attachment Evidence\n" + json.dumps(
+        _bounded_runtime_evidence(evidence, kind="attachment"),
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+
+
 def _bounded_runtime_evidence(
     entries: list[dict[str, Any]], *, kind: str, max_chars: int = 16_384
 ) -> list[dict[str, Any]]:
@@ -1081,8 +1116,17 @@ class DeepAgentContextCompaction(AbstractCapability[Any]):
         state.pruned_tool_results.extend(pruned)
         deterministic_evidence = _deterministic_evidence_text(raw_evidence_source)
         context_evidence = _deterministic_context_evidence_text(raw_evidence_source)
+        attachment_evidence = _deterministic_attachment_evidence_text(
+            raw_evidence_source
+        )
         generated_evidence = tuple(
-            item for item in (deterministic_evidence, context_evidence) if item
+            item
+            for item in (
+                deterministic_evidence,
+                context_evidence,
+                attachment_evidence,
+            )
+            if item
         )
         evidence_sections = generated_evidence or previous_evidence
         summary = await self._single_summary(

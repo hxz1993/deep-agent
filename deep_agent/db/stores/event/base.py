@@ -393,6 +393,7 @@ def _compaction_anchor(payload: dict[str, Any]) -> ModelRequest:
     summary = str(replacement.get("summary_markdown") or "").strip()
     tool_evidence = replacement.get("tool_evidence") or []
     context_evidence = replacement.get("context_evidence") or []
+    attachment_evidence = replacement.get("attachment_evidence") or []
     sections = [f"Summary of previous conversation:\n\n{summary}"]
     evidence: list[str] = []
     if tool_evidence:
@@ -406,6 +407,16 @@ def _compaction_anchor(payload: dict[str, Any]) -> ModelRequest:
         evidence.append(
             "## Verified Context Evidence\n"
             + json.dumps(context_evidence, ensure_ascii=False, separators=(",", ":"))
+        )
+    if attachment_evidence:
+        import json
+        evidence.append(
+            "## Verified Attachment Evidence\n"
+            + json.dumps(
+                attachment_evidence,
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
         )
     sections.append(
         "[DeepAgent deterministic evidence]\n"

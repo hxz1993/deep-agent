@@ -222,6 +222,19 @@ class Agent(Category):
         bind_env="SQLITE_PATH",
         convertor=_resolve_repo_path,
     )
+    file_backend = Option(
+        "platform",
+        val_type=str,
+        bind_env="FILE_BACKEND",
+        convertor=lambda value: str(value).strip().lower(),
+        val_choices=("platform", "local"),
+    )
+    local_file_root = Option(
+        _resolve_repo_path("data/local-file-store"),
+        val_type=str,
+        bind_env="LOCAL_FILE_ROOT",
+        convertor=_resolve_repo_path,
+    )
     upload_max_size_mb = Option(
         20,
         val_type=int,
@@ -359,6 +372,16 @@ def validate_runtime_options(options: DeepAgentOptions = OPTION) -> None:
     _ = options.agent.max_requests
     _ = options.agent.upload_max_size_mb
     _ = options.agent.upload_max_count
+    _ = options.agent.file_backend
+    _ = options.agent.local_file_root
+    if options.agent.file_backend == "local":
+        from deep_agent.local_security import local_runtime_enabled
+
+        if not local_runtime_enabled():
+            raise ValueError(
+                "DEEP_AGENT_FILE_BACKEND=local is only allowed through "
+                "deep_agent.local_dev"
+            )
     trigger_ratio = options.agent.context_compaction_trigger_ratio
     target_ratio = options.agent.context_compaction_target_ratio
     if target_ratio >= trigger_ratio:

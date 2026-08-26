@@ -79,7 +79,7 @@ class SkillRuntimeLibraryTests(unittest.IsolatedAsyncioTestCase):
         _Files.fail = False
         _PlatformAPI.headers = []
         self.platform_patch = patch(
-            "deep_agent.skills.runtime.PlatformAPI",
+            "deep_agent.files.storage.PlatformAPI",
             _PlatformAPI,
         )
         self.platform_patch.start()

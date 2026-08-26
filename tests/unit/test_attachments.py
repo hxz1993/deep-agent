@@ -31,7 +31,11 @@ class TestAttachments(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(parts[0], "see this")
         self.assertEqual(parts[1].media_type, "image/jpeg")
         self.assertEqual(parts[1].data, b"img-bytes")
-        mock_download.assert_awaited_once_with("platform-file-1", headers)
+        mock_download.assert_awaited_once_with(
+            "platform-file-1",
+            headers,
+            file_store=None,
+        )
 
     @patch("deep_agent.agent.attachments._download_file", new_callable=AsyncMock)
     async def test_image_is_forwarded_without_local_model_gate(self, mock_download: AsyncMock) -> None:

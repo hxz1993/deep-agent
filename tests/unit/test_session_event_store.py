@@ -226,7 +226,21 @@ class SessionEventStoreTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_completed_compaction_replaces_only_prefix_surface(self) -> None:
         raw = [
-            ModelRequest(parts=[UserPromptPart(content="first")]),
+            ModelRequest(
+                parts=[
+                    UserPromptPart(
+                        content=[
+                            "first",
+                            {
+                                "kind": "attachment-ref",
+                                "id": "local_123",
+                                "name": "预算.xlsx",
+                                "mime": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            },
+                        ]
+                    )
+                ]
+            ),
             ModelResponse(parts=[TextPart(content="old answer")]),
             ModelRequest(parts=[UserPromptPart(content="latest")]),
             ModelResponse(parts=[TextPart(content="latest answer")]),
@@ -275,6 +289,10 @@ class SessionEventStoreTests(unittest.IsolatedAsyncioTestCase):
         assert event is not None
         self.assertEqual(event.payload["budget"]["preserved_tail_tokens"], 25)
         self.assertEqual(event.payload["summary_call"]["model_id"], "model")
+        attachment_evidence = event.payload["replacement"]["attachment_evidence"]
+        self.assertEqual(attachment_evidence[0]["file_id"], "local_123")
+        self.assertEqual(attachment_evidence[0]["part_offset"], 0)
+        self.assertEqual(attachment_evidence[0]["item_offset"], 1)
         self.assertEqual(
             event.payload["summary_call"]["resolved_model_name"], "resolved-model"
         )

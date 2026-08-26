@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from deep_agent.agent.history import first_user_prompt
 from deep_agent.db.event_codec import (
     MESSAGE_EVENT_TYPES,
+    attachment_part_references,
     decode_message_events,
     event_contains_call,
     message_parts,
@@ -309,6 +310,9 @@ class SqlConversationCoordinator:
                 return None
             tool_evidence = _bounded_evidence(_tool_evidence(covered_rows))
             context_evidence = _bounded_evidence(_context_evidence(covered_rows))
+            attachment_evidence = _bounded_evidence(
+                _attachment_evidence(covered_rows)
+            )
             result_locations = {
                 ref["call_id"]: {
                     "source_event_id": row.event_id,
@@ -338,6 +342,7 @@ class SqlConversationCoordinator:
                 "summary_markdown": summary_markdown.strip(),
                 "tool_evidence": tool_evidence,
                 "context_evidence": context_evidence,
+                "attachment_evidence": attachment_evidence,
             }
             lifecycle_row = None
             if compaction_event_id is not None:
@@ -457,6 +462,9 @@ class SqlConversationCoordinator:
         for row in rows:
             item = dict(row._mapping)
             refs = tool_part_references({"payload": item.get("payload")})
+            attachment_refs = attachment_part_references(
+                {"payload": item.get("payload")}
+            )
             if tool_name and not any(ref["tool_name"] == tool_name for ref in refs):
                 continue
             if call_id and not any(ref["call_id"] == call_id for ref in refs):
@@ -473,6 +481,19 @@ class SqlConversationCoordinator:
                 and (call_id is None or ref["call_id"] == call_id)
             ]
             item["tool_matches"] = matches
+            item["attachment_matches"] = [
+                {
+                    key: ref[key]
+                    for key in (
+                        "part_offset",
+                        "item_offset",
+                        "file_id",
+                        "name",
+                        "mime",
+                    )
+                }
+                for ref in attachment_refs
+            ]
             item["call_id"] = matches[0]["call_id"] if len(matches) == 1 else None
             item["tool_name"] = matches[0]["tool_name"] if len(matches) == 1 else None
             item.pop("payload", None)
@@ -719,6 +740,28 @@ def _context_evidence(rows: list[ChatSessionEvent]) -> list[dict[str, Any]]:
     return evidence
 
 
+def _attachment_evidence(rows: list[ChatSessionEvent]) -> list[dict[str, Any]]:
+    evidence: list[dict[str, Any]] = []
+    for row in rows:
+        if row.event_type != "user/message":
+            continue
+        for ref in attachment_part_references(row):
+            evidence.append(
+                {
+                    "_sequence": int(row.sequence),
+                    "_priority": 1,
+                    "source_event_id": row.event_id,
+                    "part_offset": ref["part_offset"],
+                    "item_offset": ref["item_offset"],
+                    "file_id": ref["file_id"],
+                    "name": ref["name"],
+                    "mime": ref["mime"],
+                    "reference_hash": _value_hash(ref["item"]),
+                }
+            )
+    return evidence
+
+
 def _tool_evidence_priority(
     *,
     tool_name: str | None,
@@ -779,6 +822,21 @@ def _bounded_evidence(
                         "result_complete",
                         "artifact_id",
                         "outcome",
+                    )
+                }
+            )
+        elif "file_id" in full:
+            candidates.append(
+                {
+                    key: full.get(key)
+                    for key in (
+                        "source_event_id",
+                        "part_offset",
+                        "item_offset",
+                        "file_id",
+                        "name",
+                        "mime",
+                        "reference_hash",
                     )
                 }
             )

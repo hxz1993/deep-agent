@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from deep_agent.local_security import LOCAL_CONSOLE_ADMIN_SCOPE_KEY
+from deep_agent.local_security import LOCAL_CONSOLE_ADMIN_SCOPE_KEY, enable_local_runtime
 
 
 DEFAULT_CONFIG_FILE = Path("~/.config/deep-agent/test.env").expanduser()
@@ -172,6 +172,7 @@ def load_local_config(path: str | Path) -> LocalIdentity:
 
 def build_local_app(config_file: str | Path) -> LocalIdentityAdapter:
     identity = load_local_config(config_file)
+    enable_local_runtime()
     from deep_agent.main import app
 
     return LocalIdentityAdapter(app, identity)

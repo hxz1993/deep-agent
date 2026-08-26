@@ -106,15 +106,23 @@ export function planPanelState(snapshot, terminalStatus = null) {
   };
 }
 
-/** Return the final Planning snapshot from the latest assistant run only. */
+/** Return the newest persisted Planning snapshot for session-level display. */
 export function latestAssistantRunPlan(messages = []) {
   let latestIndex = -1;
+  let snapshot = null;
   for (let index = messages.length - 1; index >= 0; index -= 1) {
-    if (messages[index]?.role === "assistant") {
-      latestIndex = index;
-      break;
+    const message = messages[index];
+    if (message?.role !== "assistant") continue;
+    const parts = Array.isArray(message.parts) ? message.parts : [];
+    for (let partIndex = parts.length - 1; partIndex >= 0; partIndex -= 1) {
+      const part = parts[partIndex];
+      if (part?.type === "tool_result" && isPlanningToolEvent(part) && part.plan) {
+        latestIndex = index;
+        snapshot = part.plan;
+        break;
+      }
     }
-    if (messages[index]?.role === "user") return null;
+    if (snapshot) break;
   }
   if (latestIndex < 0) return null;
 
@@ -126,14 +134,16 @@ export function latestAssistantRunPlan(messages = []) {
       if (message?.role === "assistant" && message.run_id === runId) records.push(message);
     }
   } else {
-    for (let index = latestIndex; index >= 0; index -= 1) {
+    let start = latestIndex;
+    while (start > 0 && messages[start - 1]?.role !== "user") start -= 1;
+    let end = latestIndex;
+    while (end + 1 < messages.length && messages[end + 1]?.role !== "user") end += 1;
+    for (let index = start; index <= end; index += 1) {
       const message = messages[index];
-      if (message?.role !== "assistant" || message.run_id) break;
-      records.unshift(message);
+      if (message?.role === "assistant" && !message.run_id) records.push(message);
     }
   }
 
-  let snapshot = null;
   const pendingUiCalls = new Set();
   for (const record of records) {
     for (const part of record.parts || []) {

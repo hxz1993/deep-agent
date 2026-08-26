@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from deep_agent.agent.tool_discovery import ToolDiscoveryTelemetry
     from deep_agent.agent.tool_output_limits import ToolOutputTelemetry
     from pydantic_ai_harness.planning import InMemoryPlanStore
+    from deep_agent.files.storage import FileStore
 
 
 @dataclass
@@ -37,6 +38,7 @@ class AgentDeps:
     app_id: str | None = None
     space_id: str | None = None
     request_headers: Mapping[str, str] = field(default_factory=dict)
+    file_store: "FileStore | None" = field(default=None, repr=False)
     context_state: "ContextRunState | None" = None
     tool_discovery: "ToolDiscoveryTelemetry | None" = None
     tool_output_limits: "ToolOutputTelemetry | None" = None

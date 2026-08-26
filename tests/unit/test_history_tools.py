@@ -31,7 +31,21 @@ class ConversationHistoryToolTests(unittest.IsolatedAsyncioTestCase):
         await self.store.append(
             "session-cn",
             [
-                ModelRequest(parts=[UserPromptPart(content="查询华东区域成员")]),
+                ModelRequest(
+                    parts=[
+                        UserPromptPart(
+                            content=[
+                                "查询华东区域成员",
+                                {
+                                    "kind": "attachment-ref",
+                                    "id": "local_budget_1",
+                                    "name": "华东预算.xlsx",
+                                    "mime": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                },
+                            ]
+                        )
+                    ]
+                ),
                 ModelResponse(
                     parts=[
                         ThinkingPart(content="这段私有思考不应被搜索"),
@@ -130,6 +144,21 @@ class ConversationHistoryToolTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertNotIn("secret", str(result))
         self.assertNotIn("metadata", str(result))
+
+    async def test_attachment_name_search_returns_exact_part_location(self) -> None:
+        result = await self._call(
+            "search_conversation_history",
+            query="华东预算.xlsx",
+        )
+        user_event = next(
+            item for item in result["items"] if item["event_type"] == "user/message"
+        )
+        attachment = next(
+            part for part in user_event["matched_parts"] if part.get("file_id")
+        )
+        self.assertEqual(attachment["file_id"], "local_budget_1")
+        self.assertEqual(attachment["part_offset"], 0)
+        self.assertEqual(attachment["item_offset"], 1)
 
     async def test_tool_filter_returns_only_the_matching_part(self) -> None:
         result = await self._call(

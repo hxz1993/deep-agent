@@ -73,10 +73,10 @@ class FileExportToolTests(unittest.IsolatedAsyncioTestCase):
         space = SimpleNamespace(business_record=SimpleNamespace(save=save))
 
         with patch(
-            "deep_agent.files.export_toolset.PlatformAPI",
+            "deep_agent.files.storage.PlatformAPI",
             return_value=platform,
         ), patch(
-            "deep_agent.files.export_toolset.SpaceAPI",
+            "deep_agent.files.storage.SpaceAPI",
             return_value=space,
         ):
             result = await tool.call_func(
@@ -113,9 +113,9 @@ class FileExportToolTests(unittest.IsolatedAsyncioTestCase):
             new_callable=AsyncMock,
             return_value=b"# Existing attachment",
         ) as download, patch(
-            "deep_agent.files.export_toolset.PlatformAPI",
+            "deep_agent.files.storage.PlatformAPI",
         ) as platform, patch(
-            "deep_agent.files.export_toolset.SpaceAPI",
+            "deep_agent.files.storage.SpaceAPI",
             return_value=space,
         ):
             result = await tool.call_func(
@@ -151,7 +151,7 @@ class FileExportToolTests(unittest.IsolatedAsyncioTestCase):
             "deep_agent.files.export_toolset._download_file",
             new_callable=AsyncMock,
         ) as download, patch(
-            "deep_agent.files.export_toolset.SpaceAPI",
+            "deep_agent.files.storage.SpaceAPI",
             return_value=space,
         ):
             result = await tool.call_func(
@@ -168,7 +168,7 @@ class FileExportToolTests(unittest.IsolatedAsyncioTestCase):
         ctx = _context()
         tool = await _tool(ctx)
         assert tool is not None
-        with patch("deep_agent.files.export_toolset.SpaceAPI") as space:
+        with patch("deep_agent.files.storage.SpaceAPI") as space:
             with self.assertRaises(ModelRetry):
                 await tool.call_func(
                     {
@@ -189,10 +189,10 @@ class FileExportToolTests(unittest.IsolatedAsyncioTestCase):
         platform = SimpleNamespace(file=SimpleNamespace(upload=upload, delete_file=delete))
         space = SimpleNamespace(business_record=SimpleNamespace(save=save))
         with patch(
-            "deep_agent.files.export_toolset.PlatformAPI",
+            "deep_agent.files.storage.PlatformAPI",
             return_value=platform,
         ), patch(
-            "deep_agent.files.export_toolset.SpaceAPI",
+            "deep_agent.files.storage.SpaceAPI",
             return_value=space,
         ):
             with self.assertRaises(ToolFailed):

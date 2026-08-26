@@ -65,17 +65,12 @@ class SkillApiTests(unittest.IsolatedAsyncioTestCase):
             )
         )
         self.transport = ASGITransport(app=self.app, raise_app_exceptions=False)
-        self.platform_patch = patch("deep_agent.api.v1.skills.PlatformAPI", _FakePlatformAPI)
+        self.platform_patch = patch("deep_agent.files.storage.PlatformAPI", _FakePlatformAPI)
         self.platform_patch.start()
-        self.runtime_platform_patch = patch(
-            "deep_agent.skills.runtime.PlatformAPI", _FakePlatformAPI
-        )
-        self.runtime_platform_patch.start()
         self.client_headers = {"app": "iirjgi005", "space": "iirjgi"}
 
     async def asyncTearDown(self) -> None:
         self.platform_patch.stop()
-        self.runtime_platform_patch.stop()
         await get_context().event_persister.aclose()
         reset_context()
         await self.engine.dispose()

@@ -17,6 +17,7 @@ from pydantic_ai.usage import RunUsage
 
 from deep_agent.agent.context.compaction import (
     SummaryUnavailable,
+    _deterministic_attachment_evidence_text,
     _deterministic_context_evidence_text,
     _formatted_history,
     _protected_messages,
@@ -195,6 +196,28 @@ class DshCompactionRulesTests(unittest.TestCase):
         self.assertIn("member-42", evidence)
         self.assertIn("华东", evidence)
         self.assertNotIn("must-not-enter", evidence)
+
+    def test_attachment_reference_is_deterministic_evidence(self) -> None:
+        raw = ModelRequest(
+            parts=[
+                UserPromptPart(
+                    content=[
+                        "请读取附件",
+                        {
+                            "kind": "attachment-ref",
+                            "id": "local_123",
+                            "name": "预算.xlsx",
+                            "mime": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        },
+                    ]
+                )
+            ]
+        )
+        evidence = _deterministic_attachment_evidence_text([raw])
+        self.assertIn("Verified Attachment Evidence", evidence)
+        self.assertIn("local_123", evidence)
+        self.assertIn("预算.xlsx", evidence)
+        self.assertIn("reference_hash", evidence)
 
     def test_rendered_context_projection_is_removed_from_summary_input(self) -> None:
         projected = ModelRequest(

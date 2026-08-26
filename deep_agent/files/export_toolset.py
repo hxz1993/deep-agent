@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -18,8 +17,8 @@ from deep_agent.files.export_schema import (
     ExportFileSource,
     GeneratedTextFileSource,
 )
-from deepfos_platform.client.platform import FILE_TYPE_ATTACHMENT, PlatformAPI
-from deepfos_platform.client.space import SpaceAPI
+from deep_agent.files.storage import FileStore, PlatformFileStore
+from deepfos_platform.client.platform import FILE_TYPE_ATTACHMENT
 
 _MAX_FILE_NAME_CHARS = 255
 _SOURCE_ADAPTER = TypeAdapter(ExportFileSource)
@@ -52,15 +51,8 @@ def _validate_file_name(file_name: str) -> str:
     return normalized
 
 
-def _display_size(byte_size: int) -> tuple[float, str]:
-    size = float(max(0, byte_size))
-    unit = "B"
-    for candidate in ("KB", "MB", "GB"):
-        if size < 1024:
-            break
-        size /= 1024
-        unit = candidate
-    return round(size, 2), unit
+def _file_store(ctx: RunContext[AgentDeps]) -> FileStore:
+    return ctx.deps.file_store or PlatformFileStore()
 
 
 async def _authorized_existing_file(
@@ -74,7 +66,11 @@ async def _authorized_existing_file(
         if cached is not None:
             return cached, len(cached)
         try:
-            data = await _download_file(file_id, _request_headers(ctx))
+            data = await _download_file(
+                file_id,
+                _request_headers(ctx),
+                file_store=_file_store(ctx),
+            )
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -96,7 +92,11 @@ async def _authorized_existing_file(
     if cached is not None:
         return cached, len(cached)
     try:
-        data = await _download_file(file_id, _request_headers(ctx))
+        data = await _download_file(
+            file_id,
+            _request_headers(ctx),
+            file_store=_file_store(ctx),
+        )
     except asyncio.CancelledError:
         raise
     except Exception as exc:
@@ -113,26 +113,13 @@ async def _register_download(
     byte_size: int,
 ) -> str:
     headers = _request_headers(ctx)
-    display_size, unit = _display_size(byte_size)
-    payload: dict[str, Any] = {
-        "app": headers["app"],
-        "space": headers["space"],
-        "fileId": file_id,
-        "fileName": file_name,
-        "fileSize": display_size,
-        "unit": unit,
-        "status": "SUCCESS",
-        "percentage": 100,
-        "opeType": "ELEMENT_EXPORT",
-        "opeTypeDesc": "Agent文件导出",
-        # The platform field is historically named `fileDescription`, but both
-        # the Download Center UI and download response use it as the final file
-        # name. It must therefore retain the extension.
-        "fileDescription": file_name,
-        "createTime": datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S"),
-    }
     try:
-        record_id = await SpaceAPI(header=headers).business_record.save(payload)
+        record_id = await _file_store(ctx).register_download(
+            file_id=file_id,
+            file_name=file_name,
+            byte_size=byte_size,
+            request_headers=headers,
+        )
     except asyncio.CancelledError:
         raise
     except Exception as exc:
@@ -195,22 +182,22 @@ def build_file_export_toolset() -> PreparedToolset[AgentDeps]:
                 f"新文件内容超过当前 {max_upload_bytes()} 字节上传上限；"
                 "请缩小内容或先通过其他工具生成平台文件"
             )
-        platform = PlatformAPI(header=headers)
         try:
-            uploaded = await platform.file.upload(
+            uploaded = await _file_store(ctx).upload(
                 file_type=FILE_TYPE_ATTACHMENT,
                 file_name=normalized_name,
-                file=data,
+                mime="text/plain; charset=utf-8",
+                data=data,
+                request_headers=headers,
             )
         except asyncio.CancelledError:
             raise
         except Exception as exc:
             raise ToolFailed("新文件上传到平台失败，请检查格式或稍后重试") from exc
-        uploaded_id = getattr(uploaded, "id", None)
+        uploaded_id = uploaded.id
         if not isinstance(uploaded_id, str) or not uploaded_id:
             raise ToolFailed("平台文件上传成功但未返回File ID")
-        uploaded_size = getattr(uploaded, "fileSize", None)
-        byte_size = uploaded_size if isinstance(uploaded_size, int) and uploaded_size >= 0 else len(data)
+        byte_size = uploaded.file_size
         try:
             record_id = await _register_download(
                 ctx,
@@ -222,7 +209,7 @@ def build_file_export_toolset() -> PreparedToolset[AgentDeps]:
             raise
         except Exception:
             try:
-                await platform.file.delete_file(uploaded_id)
+                await _file_store(ctx).delete(uploaded_id, headers)
             except Exception:
                 pass
             raise

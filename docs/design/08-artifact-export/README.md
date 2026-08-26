@@ -1,7 +1,7 @@
 # 08 · Artifact 与出站产物
 
 > 首次整理：2026-08-02
-> 当前状态：**v0.4.0 已实现会话内大工具结果Artifact；v0.4.18 已实现主动发布文件到下载中心**
+> 当前状态：**v0.4.0 已实现会话内大工具结果Artifact；v0.4.18 已实现主动发布文件到下载中心；v0.6.0 增加协议一致的本地文件运行时**
 
 ## 一句话
 
@@ -42,8 +42,12 @@
 ```
 
 工具只在可信user/App/Space上下文中直接披露，不进入Agent能力配置。已有File ID必须来自当前Session
-原始History中的附件或大工具Tool Return；模型猜测的ID不会访问平台。第一版不提供聊天内文件卡、
+原始History中的附件或大工具Tool Return；模型猜测的ID不会访问平台。平台模式仍不新增聊天内文件卡、
 预览、下载链接、下载中心转存按钮或独立Artifact表。
+
+v0.6.0在`local_dev + SQLite`中可显式选择本地FileStore：工具名、参数和返回结构保持不变，本地模式
+写入Blob并创建`local_record_`下载记录，Console仅对`local_`文件展示鉴权下载链接。平台模式仍走
+原Platform File与Space Download Center链路，且本地下载端点固定返回404。
 
 ## 尚未实施：通用二进制计算产物
 

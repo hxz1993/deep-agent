@@ -114,7 +114,7 @@ const history = {
       status: "completed",
       turn_id: "turn-1",
       run_id: "run-1",
-      payload: { source: { through_sequence: 5 }, budget: { estimated_before: 9000, estimated_after: 4000 }, summary_call: { model_id: "summary-model" } },
+      payload: { source: { through_sequence: 5 }, budget: { estimated_before: 9000, estimated_after: 4000 }, summary_call: { model_id: "summary-model" }, duration_ms: 4321 },
       created_at: "2026-08-23T10:00:04Z",
       updated_at: "2026-08-23T10:00:05Z",
     },
@@ -143,6 +143,7 @@ test("完整 Message 投影合并思考正文与工具调用结果", () => {
   assert.deepEqual(events.map((event) => event.id), ["evt-user", "evt-assistant-tool", "tool:call-1", "evt-final", "evt-compaction"]);
   assert.equal(events.at(-1).kind, "compaction");
   assert.equal(events.at(-1).sequence, 5);
+  assert.equal(events.at(-1).duration_ms, 4321);
   assert.equal(call.payload.args.cube, "Sales");
 });
 
@@ -200,6 +201,10 @@ test("工作台以独立页签接入轨迹且默认对话链路不变", () => {
   assert.match(trajectorySource, /renderFact\("版本", reference\.schema_version/);
   assert.doesNotMatch(trajectorySource, /Object\.entries\(reference\.payload/);
   assert.match(trajectorySource, /TOOL_KINDS\.has\(event\.kind\) && hasMeaningfulValue\(event\.result\)/);
+  assert.match(trajectorySource, /下载本地文件/);
+  assert.match(trajectorySource, /fileId\.startsWith\("local_"\)/);
+  assert.match(chatSource, /renderLocalFileDownload\(data\.result\)/);
+  assert.match(workspaceCss, /\.local-file-download\s*\{/);
   assert.doesNotMatch(trajectorySource, /\["timing", "Timing"\]/);
   assert.doesNotMatch(trajectorySource, /renderFact\("Role"|trajectory-preview-message|eventRole/);
   assert.doesNotMatch(trajectorySource, /trajectoryTimelineLayout|renderSequence|renderRowSignals|iconForKind/);

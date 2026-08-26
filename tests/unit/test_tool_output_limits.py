@@ -79,7 +79,7 @@ class PlatformToolResultStoreTests(unittest.IsolatedAsyncioTestCase):
         store.bind(deps, [])
         upload = AsyncMock(return_value=SimpleNamespace(id="platform-file-1"))
         api = SimpleNamespace(file=SimpleNamespace(upload=upload))
-        with patch("deep_agent.agent.tool_output_limits.PlatformAPI", return_value=api):
+        with patch("deep_agent.files.storage.PlatformAPI", return_value=api):
             handle = await store.write("run/call", b"complete output")
         self.assertEqual(handle, "platform-file-1")
         self.assertEqual(await store.read(handle), b"complete output")
@@ -119,7 +119,11 @@ class PlatformToolResultStoreTests(unittest.IsolatedAsyncioTestCase):
                 store.read("platform-file-1"),
             )
         self.assertEqual(first, second)
-        download.assert_awaited_once_with("platform-file-1", {})
+        download.assert_awaited_once_with(
+            "platform-file-1",
+            {},
+            file_store=store._file_store,
+        )
         self.assertEqual(store.telemetry.platform_downloads, 1)
 
     async def test_untrusted_handle_never_reaches_platform(self) -> None:
@@ -250,7 +254,7 @@ class HarnessToolOutputLimitsTests(unittest.IsolatedAsyncioTestCase):
         upload = AsyncMock(side_effect=OSError("platform down"))
         api = SimpleNamespace(file=SimpleNamespace(upload=upload))
         original = "A" * 30_000
-        with patch("deep_agent.agent.tool_output_limits.PlatformAPI", return_value=api):
+        with patch("deep_agent.files.storage.PlatformAPI", return_value=api):
             result = await capability.after_tool_execute(
                 _ctx(),
                 call=ToolCallPart("query", {}, "call-1"),
@@ -275,7 +279,7 @@ class HarnessToolOutputLimitsTests(unittest.IsolatedAsyncioTestCase):
         store.bind(deps, [])
         upload = AsyncMock(return_value=SimpleNamespace(id="platform-file-hash"))
         api = SimpleNamespace(file=SimpleNamespace(upload=upload))
-        with patch("deep_agent.agent.tool_output_limits.PlatformAPI", return_value=api):
+        with patch("deep_agent.files.storage.PlatformAPI", return_value=api):
             result = await capability.after_tool_execute(
                 _ctx(deps),
                 call=ToolCallPart("query", {}, "call-hash"),

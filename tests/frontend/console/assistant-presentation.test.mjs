@@ -235,7 +235,7 @@ test("任务计划在消息区底部浮层展示最新快照", () => {
   assert.match(chatSource, /case "final":[\s\S]*?markComposerPlanTerminal\(data\.status/);
 });
 
-test("历史恢复最新 Assistant Run 的最后一份计划", () => {
+test("历史恢复会话最近一次计划并保留其 Run 终态", () => {
   const older = {
     items: [{ id: "old", content: "旧任务", status: "pending" }],
   };
@@ -271,12 +271,20 @@ test("历史恢复最新 Assistant Run 的最后一份计划", () => {
     terminalStatus: "interrupted",
   });
 
-  assert.equal(latestAssistantRunPlan([...messages, { role: "user", content: "收到" }]), null);
-  assert.equal(latestAssistantRunPlan([
+  assert.deepEqual(latestAssistantRunPlan([...messages, { role: "user", content: "收到" }]), {
+    snapshot: latest,
+    runId: "run-new",
+    terminalStatus: "interrupted",
+  });
+  assert.deepEqual(latestAssistantRunPlan([
     ...messages,
     { role: "user", content: "收到" },
     { role: "assistant", run_id: "run-plain", status: "completed", parts: [{ type: "text", content: "收到" }] },
-  ]), null);
+  ]), {
+    snapshot: latest,
+    runId: "run-new",
+    terminalStatus: "interrupted",
+  });
 
   const complete = {
     items: [

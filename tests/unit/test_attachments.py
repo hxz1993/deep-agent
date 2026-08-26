@@ -13,9 +13,9 @@ from deep_agent.agent.attachments import (
     resolve_history_for_llm,
     resolve_user_prompt,
 )
-from deep_agent.agent.history import model_messages_to_history
 from deep_agent.db.serialization import deserialize_message, serialize_message
 from deep_agent.schemas.attachment import AttachmentRef
+from tests.helpers.conversation import project_model_messages
 
 
 class TestAttachments(unittest.IsolatedAsyncioTestCase):
@@ -126,9 +126,9 @@ class TestAttachments(unittest.IsolatedAsyncioTestCase):
             )
         )
         messages = [ModelRequest(parts=[UserPromptPart(content=["hello", ref])])]
-        timeline = model_messages_to_history(messages)
+        timeline = project_model_messages(messages)
         self.assertEqual(len(timeline), 1)
-        self.assertEqual(timeline[0].content, "hello")
+        self.assertEqual(timeline[0].text, "hello")
         self.assertEqual(len(timeline[0].attachments), 1)
         self.assertEqual(timeline[0].attachments[0].id, "f1")
 

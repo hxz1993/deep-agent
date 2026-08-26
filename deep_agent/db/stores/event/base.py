@@ -348,6 +348,21 @@ class SessionEventStore(SessionBoundMixin):
             rows = [row for row in rows if event_contains_call(row, call_id)][:limit]
         return [SessionEventSnapshot.from_row(row) for row in rows]
 
+    async def list_all_events(self, session_id: str) -> list[SessionEventSnapshot]:
+        """Read the complete ordered fact log for a deterministic projection."""
+
+        async with self._read() as db:
+            rows = list(
+                (
+                    await db.execute(
+                        select(ChatSessionEvent)
+                        .where(ChatSessionEvent.session_id == session_id)
+                        .order_by(ChatSessionEvent.sequence)
+                    )
+                ).scalars()
+            )
+        return [SessionEventSnapshot.from_row(row) for row in rows]
+
     async def latest_completed_compaction(
         self, session_id: str,
     ) -> SessionEventSnapshot | None:

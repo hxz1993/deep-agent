@@ -16,7 +16,6 @@ from deep_agent.agent.context.estimator import TokenEstimator
 from deep_agent.agent.context.file_keys import deep_agent_file_key
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.events import map_part
-from deep_agent.agent.history import model_messages_to_history
 from deep_agent.agent.tool_output_limits import (
     PlatformToolResultStore,
     artifact_handles_from_history,
@@ -25,6 +24,7 @@ from deep_agent.agent.tool_output_limits import (
     tool_output_threshold_tokens,
 )
 from deep_agent.db.serialization import deserialize_message, serialize_message
+from tests.helpers.conversation import project_model_messages
 
 
 def _ctx(deps: AgentDeps | None = None) -> RunContext[AgentDeps]:
@@ -202,15 +202,15 @@ class HarnessToolOutputLimitsTests(unittest.IsolatedAsyncioTestCase):
         )
         event = map_part(part)
         self.assertEqual(event["artifacts"][0]["artifact_id"], "platform-file-1")
-        history = model_messages_to_history([ModelRequest(parts=[part])])
-        self.assertEqual(history[0].parts[0].artifacts[0]["byte_size"], result.metadata["overflow_bytes"])
+        history = project_model_messages([ModelRequest(parts=[part])])
+        self.assertEqual(history[0].artifacts[0].byte_size, result.metadata["overflow_bytes"])
         self.assertEqual(artifact_handles_from_history([ModelRequest(parts=[part])]), {"platform-file-1"})
 
         restored = deserialize_message(serialize_message(ModelRequest(parts=[part])))
         self.assertEqual(artifact_handles_from_history([restored]), {"platform-file-1"})
-        restored_history = model_messages_to_history([restored])
+        restored_history = project_model_messages([restored])
         self.assertEqual(
-            restored_history[0].parts[0].artifacts[0]["artifact_id"],
+            restored_history[0].artifacts[0].artifact_id,
             "platform-file-1",
         )
 

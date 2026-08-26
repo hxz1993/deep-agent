@@ -139,6 +139,9 @@ class SessionTitleIntegrationTests(unittest.IsolatedAsyncioTestCase):
             and item.get("event", {}).get("event_type") == "session/title"
         ]
         self.assertEqual([item["event"]["payload"]["source"] for item in title_events], ["fallback", "model"])
+        title_projections = [item for item in events if item["type"] == "session_title"]
+        self.assertEqual([item["source"] for item in title_projections], ["fallback", "model"])
+        self.assertEqual(title_projections[-1]["title"], "分析预算差异")
         self.assertLess(events.index(title_events[-1]), next(i for i, item in enumerate(events) if item["type"] == "final"))
         title_mock.assert_awaited_once()
         call = title_mock.await_args.kwargs
@@ -165,6 +168,27 @@ class SessionTitleIntegrationTests(unittest.IsolatedAsyncioTestCase):
             ),
             "销售趋势分析",
         )
+
+    async def test_persisted_sse_upserts_equal_history_items(self) -> None:
+        session_id, events, _title_mock = await self._stream(message="核对历史投影")
+        upserts = {
+            event["item"]["item_id"]: event["item"]
+            for event in events
+            if event.get("type") == "conversation_item_upsert"
+        }
+        self.assertTrue(upserts)
+        async with AsyncClient(
+            transport=self._transport, base_url="http://test", timeout=30.0
+        ) as client:
+            response = await client.get(
+                f"/api/v1/sessions/{session_id}/history",
+                params={"agent_id": self._agent_id},
+            )
+        self.assertEqual(response.status_code, 200, response.text)
+        history_items = {
+            item["item_id"]: item for item in response.json()["items"]
+        }
+        self.assertEqual(upserts, history_items)
 
     async def test_context_only_turn_is_used_by_title_projection(self) -> None:
         context_refs = [

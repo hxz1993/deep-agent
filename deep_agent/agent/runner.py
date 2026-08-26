@@ -88,6 +88,7 @@ from loguru import logger
 
 from deep_agent.db.conversation import SessionStore
 from deep_agent.db.serialization import serialize_message
+from deep_agent.conversation.notifications import conversation_item_upserts
 from deep_agent.schemas.attachment import AttachmentRef
 from deep_agent.schemas.context_reference import ContextReference
 from deep_agent.options import OPTION
@@ -723,6 +724,12 @@ class AgentRunner:
                             "event": row.public_dict(),
                         }
                     )
+                for item_event in await conversation_item_upserts(
+                    self.store,
+                    session_id,
+                    rows,
+                ):
+                    session_event_queue.put_nowait(item_event)
             if rows:
                 user_event_id = rows[0].event_id
             history = [*history, user_request]
@@ -1196,13 +1203,7 @@ class AgentRunner:
         if fallback is None:
             return None
         if session_event_queue is not None:
-            session_event_queue.put_nowait(
-                {
-                    "type": "session_event_appended",
-                    "persisted": True,
-                    "event": fallback.public_dict(),
-                }
-            )
+            self._publish_title_events(session_event_queue, fallback)
         return asyncio.create_task(
             self._generate_model_title(
                 session_id,
@@ -1268,13 +1269,34 @@ class AgentRunner:
             )
             return
         if event is not None and session_event_queue is not None:
-            session_event_queue.put_nowait(
-                {
-                    "type": "session_event_appended",
-                    "persisted": True,
-                    "event": event.public_dict(),
-                }
-            )
+            self._publish_title_events(session_event_queue, event)
+
+    @staticmethod
+    def _publish_title_events(
+        queue: asyncio.Queue[dict[str, Any]],
+        event: Any,
+    ) -> None:
+        """Publish the audit Event and the client-facing title projection."""
+
+        public_event = event.public_dict()
+        queue.put_nowait(
+            {
+                "type": "session_event_appended",
+                "persisted": True,
+                "event": public_event,
+            }
+        )
+        payload = public_event.get("payload") or {}
+        queue.put_nowait(
+            {
+                "type": "session_title",
+                "persisted": True,
+                "session_id": public_event.get("session_id"),
+                "title": payload.get("title"),
+                "source": payload.get("source"),
+                "source_event_id": public_event.get("event_id"),
+            }
+        )
 
     @staticmethod
     async def _cancel_title_task(task: asyncio.Task[None] | None) -> None:
@@ -1793,6 +1815,21 @@ class AgentRunner:
                             if mapped is not None:
                                 if not _should_publish_tool_call(event, mapped):
                                     continue
+                                mapped_type = mapped.get("type")
+                                mapped_call_id = mapped.get("tool_call_id")
+                                if mapped_type in {"text", "thinking"}:
+                                    mapped["item_id"] = f"live:{deps.run_id}:assistant"
+                                elif mapped_type in {
+                                    "tool_call",
+                                    "tool_result",
+                                    "tool_call_removed",
+                                } and mapped_call_id:
+                                    prefix = (
+                                        "plan"
+                                        if is_planning_tool(mapped.get("tool"))
+                                        else "tool"
+                                    )
+                                    mapped["item_id"] = f"{prefix}:{mapped_call_id}"
                                 provider_retry_safe = False
                                 event_type = mapped.get("type")
                                 tool_call_id = mapped.get("tool_call_id")
@@ -1943,11 +1980,14 @@ class AgentRunner:
             }
             for tool_call_id, tool_name in list(published_tool_calls.items()):
                 if tool_call_id not in retained_call_ids:
-                    yield events.tool_call_removed(
+                    removed = events.tool_call_removed(
                         tool_name,
                         tool_call_id,
                         reason="cancelled",
                     )
+                    prefix = "plan" if is_planning_tool(tool_name) else "tool"
+                    removed["item_id"] = f"{prefix}:{tool_call_id}"
+                    yield removed
             cancelled_run_event = await self._finish_run_event(
                 run_event, status="cancelled", started_at=started_at,
                 usage=cancelled_run.usage,

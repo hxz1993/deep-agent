@@ -21,7 +21,6 @@ from tests.helpers.sqlite_stores import (
     make_sqlite_stores,
 )
 from tests.integration.helpers.chat import mock_request_disconnect, parse_sse_events
-from tests.integration.helpers.events import project_event_response
 from tests.integration.helpers.models import text_only_model
 
 
@@ -395,15 +394,25 @@ class SessionModelOverrideIntegrationTests(unittest.IsolatedAsyncioTestCase):
                     "model_id": self._model_b_id,
                 },
             )
+            history_response = await client.get(
+                f"/api/v1/sessions/{self._session_id}/history",
+                params={"agent_id": self._agent_id},
+            )
         self.assertEqual(events_response.status_code, 200, events_response.text)
         self.assertEqual(context_status_response.status_code, 200, context_status_response.text)
+        self.assertEqual(history_response.status_code, 200, history_response.text)
         context_status = context_status_response.json()
         self.assertIsNotNone(context_status["compaction_event_id"])
         self.assertTrue(context_status["manual_compaction_available"])
         self.assertEqual(context_status["manual_compaction_reason"], "available")
         event_payload = events_response.json()
-        projected = project_event_response(event_payload)
-        self.assertEqual(projected["model_message_count"], len(history))
+        projected = history_response.json()
+        message_items = [
+            item
+            for item in projected["items"]
+            if item["kind"] in {"user_message", "assistant_message"}
+        ]
+        self.assertEqual(len(message_items), len(history))
         compacted = [
             item
             for item in event_payload["items"]

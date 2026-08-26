@@ -156,7 +156,8 @@ XML + JSON 投影。业务字段语义仍由具体 Agent Prompt 负责。
 | 文件 | 职责 |
 | --- | --- |
 | `spec.py` | `AgentSpec`：`from_row()`、model、instructions、capabilities、skills |
-| `history.py` | `ModelMessage[]` → 前端时间线 |
+| `history.py` | 模型历史过滤、取消修复和运行时辅助；不生成前端 DTO |
+| `../conversation/` | Event → `ConversationItem`纯投影；供`/history`与持久化SSE共用 |
 | `factory.py` | `build_agent()` — model 字符串或 OpenAI 兼容 endpoint |
 | `models/` | models.dev 管理员刷新、目录标准化和 Provider/模型适配 |
 | `attachment_extractors.py` | 文本、DOCX、XLSX 按需解析、分页与文件安全限制 |
@@ -211,7 +212,7 @@ user/App/Space上下文时，`export_file_to_download_center`始终直接披露�
 | `ui_tools.py` | CRUD `/ui-tools`；工具必须归属手工 UI 工具包 |
 | `ui_tool_packages.py` | CRUD `/ui-tool-packages`；代码内置包只读 |
 | `skills.py` | Skill 目录、安装、替换、启停、资源和原包下载 |
-| `sessions.py` | 会话列表、Event分页、上下文状态、删除与正式取消当前Run |
+| `sessions.py` | 会话列表、Conversation History、Event分页、上下文状态、删除与正式取消当前Run |
 | `tools.py` | `GET /tools` |
 | `deps.py` | `build_runner` / `build_runner_for_agent`，统一承接多入口的运行器组装 |
 

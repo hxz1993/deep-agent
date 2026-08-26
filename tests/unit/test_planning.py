@@ -19,7 +19,7 @@ from pydantic_ai_harness.planning import PlanItem, Planning
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.event_persister import EventPersister
 from deep_agent.agent.factory import build_agent
-from deep_agent.agent.history import model_messages_to_history
+from deep_agent.conversation.projector import project_session_events
 from deep_agent.agent.planning import (
     PLANNING_GUIDANCE,
     PLANNING_TOOL_NAMES,
@@ -195,17 +195,12 @@ class PlanningRunnerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(output[-1]["type"], "final")
         self.assertTrue(guidance_seen)
 
-        history = model_messages_to_history(
-            await self.store.get_history("planning-stream", agent_id=self.db_agent.id)
+        projection = project_session_events(
+            await self.store.list_all_events("planning-stream")
         )
-        plan_parts = [
-            part
-            for message in history
-            for part in message.parts
-            if part.type == "tool_result" and part.source == "planning"
-        ]
-        self.assertEqual(plan_parts[-1].plan["completed"], 2)
-        self.assertEqual(plan_parts[-1].plan["total"], 2)
+        plan_items = [item for item in projection.items if item.kind == "plan"]
+        self.assertEqual(plan_items[-1].plan["completed"], 2)
+        self.assertEqual(plan_items[-1].plan["total"], 2)
         persisted_reminders = [
             part
             for message in await self.store.get_history(
@@ -250,18 +245,11 @@ class PlanningRunnerTests(unittest.IsolatedAsyncioTestCase):
         )
 
         await runner.run("planning-non-stream", "创建计划", deps)
-        first_history = model_messages_to_history(
-            await self.store.get_history(
-                "planning-non-stream", agent_id=self.db_agent.id
-            )
+        first_projection = project_session_events(
+            await self.store.list_all_events("planning-non-stream")
         )
-        first_plan_parts = [
-            part
-            for message in first_history
-            for part in message.parts
-            if part.type == "tool_result" and part.source == "planning"
-        ]
-        self.assertEqual(first_plan_parts[-1].plan["completed"], 1)
+        first_plan_items = [item for item in first_projection.items if item.kind == "plan"]
+        self.assertEqual(first_plan_items[-1].plan["completed"], 1)
 
         await runner.run("planning-non-stream", "简单回答", deps)
         self.assertEqual((await current_plan_snapshot(deps))["total"], 0)

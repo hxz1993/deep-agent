@@ -91,9 +91,9 @@ HTTP → deep_agent/api/v1 → AgentRunner → pydantic_ai.Agent → Toolsets
 - DeepAgent 自研 `ToolPackage` 是产品配置单位，负责把分类、展示元数据和恰好一个 Toolset 组织起来；Pydantic AI 的 `AbstractCapability` 只表示压缩、重试等运行扩展，二者不能混用。
 - 模型直接接收 Instructions、历史、当前输入和 Tool Definitions。MCP Resource/Prompt 不会自动成为模型工具，必须由宿主读取、注入或显式包装。
 - Pydantic AI 负责 Agent loop、参数校验、工具调用、重试、流式事件和 Deferred 原语；DeepAgent 负责 SQL 会话、用户隔离、MCP 配置/Header、HITL、SSE 和 Console。
-- v0.6.0将会话域统一为`chat_sessions + chat_session_events`：一个完整Pydantic公共Part一行，
-  Run和Compaction生命周期原位更新；模型历史、Event API、持久化SSE、Console轨迹和Plan从同一
-  Event Store投影。旧Message/独立压缩表和History契约已删除，Branch不兼容也不预埋。
+- v0.6.0将会话域统一为`chat_sessions + chat_session_events`：一个完整Pydantic Message一行；
+  Event Store是唯一事实源。模型历史、审计轨迹和面向客户端的`ConversationItem`均由服务端确定性
+  投影，不双写History表。Branch不兼容也不预埋。
 - v0.6.0增加显式FileStore适配层：Platform仍是默认实现；仅`local_dev + SQLite`可启用本地Blob。
   上传、附件读取、原生图片、Tool Spill、上传Skill和导出共用同一注入接口，业务层不得自行判断
   环境。Compaction增加确定性Attachment Evidence，但文件授权仍只从原始Event恢复。
@@ -127,9 +127,9 @@ HTTP → deep_agent/api/v1 → AgentRunner → pydantic_ai.Agent → Toolsets
 - v0.4.20为模型目录增加models.dev官方`catalog.json`离线导入和可往返的当前目录JSON导出；联网刷新与文件导入复用同一解析、Provider白名单、标准化和原子替换逻辑。导入失败保留旧目录，也不修改已保存的模型配置。
 - v0.5.0完成一体化Console视觉与布局重构：顶栏和图标导航统一三个主页面，工作台支持会话与详情栏调宽，配置中心提供Agent卡片/列表和独立编辑页，Skill与UI工具采用左右分栏。REST、SSE、History和Alembic `006`保持不变；模型目录保留导出、导入和在线更新，UI工具直接展示当前包的完整工具列表；上传Skill标题栏只保留编辑和上传，其余操作进入三点菜单；删除、未保存提醒和Skill信息输入统一使用轻量Console弹层，禁止回退浏览器原生`alert/confirm/prompt`。
 - v0.5.1抽出Console共享Markdown渲染器：Skill正文按Markdown阅读样式预览，主对话支持安全渲染`mermaid`围栏图表；图表仅在完整回复落定后按需加载本地资源并渲染，语法错误保留源码。
-- v0.6.0 Console“对话 / 轨迹”统一读取Event API；轨迹按Sequence逐行展示真实语义Event，Run与
-  Compaction按同一Event ID Upsert，不再从ModelMessage `parts[]`重拆。普通历史聊天可隐藏完成压缩
-  标记，轨迹始终保留真实触发位置和脱敏详情。
+- v0.6.0 Console普通对话读取`/history`的`ConversationItem[]`，轨迹才读取Event API。History与
+  `conversation_item_upsert`共用服务端投影器；客户端不解析Event Payload。Compaction按同一Event ID
+  原位更新，轨迹保留真实触发位置和脱敏详情。
 - v0.5.4收敛Console轨迹详情展示与前端实现：Assistant的Thinking归入Preview首段并默认折叠，短正文按内容自适应、长正文超过上限后滚动；Tool、Planning和Deferred复用同一套Payload/Result摘要渲染。REST、SSE、History、数据库和轨迹投影语义均不变化。
 - v0.5.5增加独立`llm_providers`配置层、九类Pydantic AI适配与Provider分栏Console，运行时开始按显式Provider类型构造原生Provider/Model，不再按模型前缀或URL猜协议。
 - v0.5.7压缩Provider详情接入信息：Base URL改为单行图标事实，地址模式、Key和启停状态改为紧凑胶囊，运行协议并入Provider副标题；仅调整Console展示，不改变Provider、Model、迁移或外部接口。

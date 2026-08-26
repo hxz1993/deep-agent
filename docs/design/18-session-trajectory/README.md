@@ -1,6 +1,6 @@
 # 18 · 会话事件与轨迹
 
-> v0.6.0 V8会话结构；Alembic head：009。
+> v0.6.0 会话结构；Alembic head：009。
 
 DeepAgent 会话域只有 `chat_sessions` 和 `chat_session_events`。Event Store 是模型恢复、
 会话历史、Console 轨迹、Plan 和持久化 SSE 的唯一事实源；没有 Checkpoint、Plan、Evidence、
@@ -54,18 +54,28 @@ Tool/Context Evidence 由程序确定性生成，并以 `source_event_id + part_
 
 ## API、SSE 与 Console
 
+普通聊天与轨迹是同一 Event Store 的两种服务端投影：
+
+```http
+GET /api/v1/sessions/{session_id}/history
+```
+
+返回稳定的 `ConversationItem[]`，供普通聊天客户端直接渲染。用户、助手、工具和 Plan
+分别投影成稳定 Item；Tool/Plan 的 Call 与 Result 在服务端按 Call ID 合成。
+
 ```http
 GET /api/v1/sessions/{session_id}/events
   ?after_sequence=0&limit=100
   &event_type=&turn_id=&run_id=&call_id=
 ```
 
-响应按 Sequence 分页，内部 `search_text` 不返回。持久化 SSE 只有
-`session_event_appended/session_event_updated`；普通消息只追加，Compaction 才允许同 ID 更新。
+Event API 按 Sequence 分页，内部 `search_text` 不返回，只供轨迹、审计和精确回读。
+SSE 的持久化聊天终态使用 `conversation_item_upsert`，内容与刷新后 `/history` 的同 ID Item
+完全一致；`session_event_appended/session_event_updated` 继续供轨迹和标题等系统事件消费。
 
-Console 使用一个确定性投影器：Assistant 的 Thinking 与 Text 合并显示；每个 Tool、Plan、
-Deferred Call/Result 按 Call ID 合成一行；Compaction 按真实 Sequence 穿插；普通 Run 不显示。
-历史刷新和直播后的结构、顺序、状态必须一致。
+Event → Conversation 的确定性投影位于后端。Console 普通聊天只消费 `/history`、Item Upsert
+和少量流式 Delta；只有轨迹读取 Event API。Compaction 按真实 Sequence 穿插在轨迹中，
+普通 Run 不显示。历史刷新和直播后的结构、顺序、状态必须一致。
 
 Branch From 本版不实现，也不预埋 Parent 列。稳定 Event ID、完整 Message 和工具 Call ID 已提供
 未来实现分支读取所需的事实边界。

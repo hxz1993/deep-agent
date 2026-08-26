@@ -20,7 +20,7 @@ from pydantic_ai.models.test import TestModel
 from pydantic_ai.usage import RunUsage
 
 from deep_agent.agent.deps import AgentDeps
-from deep_agent.agent.history import model_messages_to_history
+from tests.helpers.conversation import project_model_messages
 from deep_agent.capabilities.mcp.toolset_builder import (
     build_mcp_toolset,
     build_raw_url_mcp_toolset,
@@ -438,25 +438,17 @@ class BuildUrlMcpToolsetTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("本轮工具纠正次数已经耗尽", str(failed[0].content))
         self.assertEqual(inner.call_tool.await_count, 3)
 
-        history = model_messages_to_history(result.all_messages())
+        conversation = project_model_messages(result.all_messages())
         history_results = [
-            part
-            for message in history
-            if message.role == "assistant"
-            for part in message.parts
-            if part.type == "tool_result"
+            item
+            for item in conversation
+            if item.kind == "tool" and item.status != "removed"
         ]
-        history_texts = [
-            part.content
-            for message in history
-            if message.role == "assistant"
-            for part in message.parts
-            if part.type == "text"
-        ]
+        history_texts = [item.text for item in conversation if item.kind == "assistant_message" and item.text]
         self.assertEqual(len(history_results), 1)
-        self.assertEqual(history_results[0].tool_call_id, "canvas-validation-3")
-        self.assertIn("startId 已存在", str(history_results[0].result))
-        self.assertIn("本轮工具纠正次数已经耗尽", str(history_results[0].result))
+        self.assertEqual(history_results[0].call_id, "canvas-validation-3")
+        self.assertIn("startId 已存在", str(history_results[0].output))
+        self.assertIn("本轮工具纠正次数已经耗尽", str(history_results[0].output))
         self.assertEqual(history_texts[-1], "本轮参数校验未通过，请发送新消息重试。")
 
     async def test_canvas_deadline_is_failed_result_and_agent_can_finish(self) -> None:

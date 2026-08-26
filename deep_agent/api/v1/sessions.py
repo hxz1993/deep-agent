@@ -19,6 +19,8 @@ from deep_agent.agent.history import (
 from deep_agent.agent.context.budget import build_context_budget
 from deep_agent.agent.context.estimator import TokenEstimator
 from deep_agent.agent.context.manual import manual_compaction_availability
+from deep_agent.conversation.models import ConversationHistoryResponse
+from deep_agent.conversation.projector import ConversationProjectionError, project_session_events
 from deep_agent.schemas.chat import SessionInfo, SessionListResponse
 
 router = APIRouter()
@@ -227,6 +229,35 @@ class SessionEventResponse(BaseModel):
 class SessionEventsResponse(BaseModel):
     items: list[SessionEventResponse]
     next_after_sequence: int | None = None
+
+
+@router.get(
+    "/sessions/{session_id}/history",
+    response_model=ConversationHistoryResponse,
+)
+async def get_session_history(
+    ctx: AppContextDep,
+    user_id: RequestUserDep,
+    session_id: str,
+    agent_id: str | None = None,
+) -> ConversationHistoryResponse:
+    resolved = await resolve_session(
+        ctx.store,
+        session_id,
+        agent_id=agent_id,
+        user_id=user_id,
+    )
+    if resolved is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
+    _scope, resolved_session_id = resolved
+    events = await ctx.store.list_all_events(resolved_session_id)
+    try:
+        return project_session_events(events, session_id=resolved_session_id)
+    except ConversationProjectionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
 
 
 @router.get("/sessions/{session_id}/events", response_model=SessionEventsResponse)

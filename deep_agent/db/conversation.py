@@ -78,6 +78,12 @@ class SessionStore(Protocol):
     async def list_session_summaries(
         self, filters: SessionListFilters,
     ) -> tuple[list[SessionSummaryRow], int]: ...
+    async def list_events(
+        self, session_id: str, **filters: Any,
+    ) -> list[SessionEventSnapshot]: ...
+    async def list_all_events(
+        self, session_id: str,
+    ) -> list[SessionEventSnapshot]: ...
 
 
 class SqlConversationCoordinator:
@@ -410,6 +416,9 @@ class SqlConversationCoordinator:
 
     async def list_events(self, session_id: str, **filters: Any) -> list[SessionEventSnapshot]:
         return await self._events.list_events(session_id, **filters)
+
+    async def list_all_events(self, session_id: str) -> list[SessionEventSnapshot]:
+        return await self._events.list_all_events(session_id)
 
     async def latest_turn_id(self, session_id: str) -> str | None:
         async with self._session_factory() as db:

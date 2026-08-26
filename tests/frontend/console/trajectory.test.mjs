@@ -195,7 +195,7 @@ test("工作台以独立页签接入轨迹且默认对话链路不变", () => {
   assert.match(template, /data-trajectory-mode="calls"[\s\S]*data-lucide="wrench"/);
   assert.doesNotMatch(template, /id="trajectoryDetail"/);
   assert.match(chatSource, /createTrajectoryController\(\{ state \}\)/);
-  assert.match(chatSource, /trajectory\?\.setHistory\(data\)/);
+  assert.match(chatSource, /trajectory\?\.setHistory\(eventResult\.response\.ok/);
   assert.match(chatSource, /trajectory\?\.ingest\(\{ event: type, data \}\)/);
   assert.match(workspaceCss, /\.chat-view-tabs[\s\S]*border-radius:\s*8px/);
   assert.doesNotMatch(workspaceCss, /\.chat-view-tab\.active::after/);

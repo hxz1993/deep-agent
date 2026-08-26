@@ -56,11 +56,16 @@ class SessionOwnershipApiTests(unittest.TestCase):
 
     def test_get_and_events_only_return_owned_session(self) -> None:
         self.assertEqual(self.client.get("/api/v1/sessions/mine").status_code, 200)
+        history = self.client.get("/api/v1/sessions/mine/history")
+        self.assertEqual(history.status_code, 200)
+        self.assertEqual(history.json()["schema_version"], 1)
+        self.assertEqual(history.json()["items"][0]["kind"], "user_message")
         self.assertEqual(
             self.client.get("/api/v1/sessions/mine/events").status_code,
             200,
         )
         self.assertEqual(self.client.get("/api/v1/sessions/other").status_code, 404)
+        self.assertEqual(self.client.get("/api/v1/sessions/other/history").status_code, 404)
         self.assertEqual(
             self.client.get("/api/v1/sessions/other/events").status_code,
             404,
@@ -96,6 +101,7 @@ class SessionOwnershipApiTests(unittest.TestCase):
         requests = (
             ("get", "/api/v1/sessions", None),
             ("get", "/api/v1/sessions/mine", None),
+            ("get", "/api/v1/sessions/mine/history", None),
             ("get", "/api/v1/sessions/mine/events", None),
             ("patch", "/api/v1/sessions/mine", {"title": "blocked"}),
             ("delete", "/api/v1/sessions/mine", None),

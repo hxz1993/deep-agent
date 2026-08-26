@@ -1,10 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, replace
+from dataclasses import dataclass, replace
 from datetime import datetime
-from typing import Any, Literal
-
-from pydantic import BaseModel, Field
 from pydantic_ai import ToolDenied
 from pydantic_ai.messages import (
     BaseToolCallPart,
@@ -17,149 +14,12 @@ from pydantic_ai.messages import (
     ThinkingPart,
     ToolReturnPart,
     UserPromptPart,
-    NativeToolSearchReturnPart,
 )
 
-from deep_agent.agent.attachments import is_attachment_ref
 from deep_agent.agent.context_references import (
     context_reference_title,
     context_references_from_content,
 )
-from deep_agent.agent.events import _to_jsonable
-from deep_agent.agent.tool_output_limits import tool_result_artifacts
-from deep_agent.agent.planning import is_planning_tool, plan_snapshot_from_part
-from deep_agent.schemas.context_reference import ContextReference
-
-
-class HistoryTextPart(BaseModel):
-    type: Literal["text"] = "text"
-    content: str
-
-
-class HistoryThinkingPart(BaseModel):
-    type: Literal["thinking"] = "thinking"
-    content: str
-
-
-class HistoryToolCallPart(BaseModel):
-    type: Literal["tool_call"] = "tool_call"
-    tool: str
-    args: Any = None
-    tool_call_id: str | None = None
-    widget: str | None = None
-    metadata: dict[str, Any] | None = None
-    source: str | None = None
-
-
-class HistoryToolResultPart(BaseModel):
-    type: Literal["tool_result"] = "tool_result"
-    tool: str | None = None
-    result: Any = None
-    tool_call_id: str | None = None
-    source: str | None = None
-    artifacts: list[dict[str, Any]] | None = None
-    plan: dict[str, Any] | None = None
-    outcome: str | None = Field(
-        default=None,
-        description="Pydantic AI tool outcome when the stored return exposes one.",
-    )
-    timestamp: datetime | None = Field(
-        default=None,
-        description="Tool completion time recorded by Pydantic AI.",
-    )
-
-
-class HistoryAttachmentPart(BaseModel):
-    type: Literal["attachment"] = "attachment"
-    id: str
-    name: str | None = None
-    mime: str | None = None
-    extracted_text: str | None = None
-
-
-HistoryPart = (
-    HistoryTextPart
-    | HistoryThinkingPart
-    | HistoryToolCallPart
-    | HistoryToolResultPart
-    | HistoryAttachmentPart
-)
-
-
-class HistoryMessage(BaseModel):
-    role: Literal["user", "assistant"]
-    status: Literal["completed", "interrupted"] | None = Field(
-        default=None,
-        description="Assistant response state; omitted for user turns and synthetic result groups.",
-    )
-    content: str | None = Field(default=None, description="User message text.")
-    attachments: list[HistoryAttachmentPart] = Field(
-        default_factory=list,
-        description="User-uploaded files attached to this turn.",
-    )
-    context_refs: list[ContextReference] = Field(
-        default_factory=list,
-        description="Structured context snapshots attached to this user turn.",
-    )
-    parts: list[HistoryPart] = Field(default_factory=list, description="Assistant message parts in order.")
-    timestamp: datetime | None = Field(default=None, description="Message time (UTC).")
-    request_timestamp: datetime | None = Field(
-        default=None,
-        description="Pydantic AI request time paired with this model response.",
-    )
-    branch_point: int | None = Field(
-        default=None,
-        description="Index in raw ModelMessage list; truncate here to branch.",
-    )
-    run_id: str | None = Field(
-        default=None,
-        description="Pydantic AI run that produced this assistant response.",
-    )
-    model_name: str | None = Field(
-        default=None,
-        description="Model recorded on the persisted response.",
-    )
-    provider_name: str | None = Field(
-        default=None,
-        description="Provider recorded on the persisted response.",
-    )
-    provider_response_id: str | None = Field(
-        default=None,
-        description="Provider response identifier when available.",
-    )
-    finish_reason: str | None = Field(
-        default=None,
-        description="Normalized response finish reason when available.",
-    )
-    usage: dict[str, Any] | None = Field(
-        default=None,
-        description="Persisted response usage projected to JSON-safe values.",
-    )
-
-
-def _user_prompt_attachments(part: UserPromptPart) -> list[HistoryAttachmentPart]:
-    content = part.content
-    if isinstance(content, str):
-        return []
-    if not isinstance(content, list):
-        return []
-    attachments: list[HistoryAttachmentPart] = []
-    for item in content:
-        if not is_attachment_ref(item):
-            continue
-        attachments.append(
-            HistoryAttachmentPart(
-                id=str(item["id"]),
-                name=item.get("name"),
-                mime=item.get("mime"),
-                extracted_text=item.get("extracted_text"),
-            )
-        )
-    return attachments
-
-
-def _user_prompt_context_refs(part: UserPromptPart) -> list[ContextReference]:
-    return context_references_from_content(part.content)
 
 
 def _user_prompt_text(part: UserPromptPart) -> str:
@@ -177,17 +37,6 @@ def _user_prompt_text(part: UserPromptPart) -> str:
     return str(content)
 
 
-def _tool_call_args(part: BaseToolCallPart) -> Any:
-    if not part.args:
-        return None
-    if isinstance(part.args, dict):
-        return part.args
-    try:
-        return part.args_as_dict()
-    except Exception:  # noqa: BLE001
-        return part.args
-
-
 def is_thinking_only_response(response: ModelResponse) -> bool:
     """True when a model turn has thinking but no user-visible text or tool calls."""
     if not response.parts:
@@ -197,13 +46,6 @@ def is_thinking_only_response(response: ModelResponse) -> bool:
     if any(isinstance(part, BaseToolCallPart) for part in response.parts):
         return False
     return all(isinstance(part, ThinkingPart) for part in response.parts)
-
-
-def is_retry_only_request(request: ModelRequest) -> bool:
-    """True for pydantic_ai output-validation retry prompts (not user turns)."""
-    if not request.parts:
-        return False
-    return all(isinstance(part, RetryPromptPart) for part in request.parts)
 
 
 def is_user_only_request(message: ModelMessage) -> bool:
@@ -446,72 +288,6 @@ def incremental_append_messages(
     return [message for message in filtered if not is_user_only_request(message)]
 
 
-def _response_parts(
-    response: ModelResponse,
-    *,
-    rejected_part_indices: set[int] | None = None,
-) -> list[HistoryPart]:
-    parts: list[HistoryPart] = []
-    rejected_part_indices = rejected_part_indices or set()
-    for part_index, part in enumerate(response.parts):
-        if part_index in rejected_part_indices:
-            continue
-        if isinstance(part, TextPart) and part.content:
-            parts.append(HistoryTextPart(content=part.content))
-        elif isinstance(part, ThinkingPart) and part.content:
-            parts.append(HistoryThinkingPart(content=part.content))
-        elif isinstance(part, BaseToolCallPart):
-            parts.append(
-                HistoryToolCallPart(
-                    tool=part.tool_name,
-                    args=_tool_call_args(part),
-                    tool_call_id=part.tool_call_id,
-                    source=(
-                        "tool_search"
-                        if part.tool_name in {"search_tools", "tool_search"}
-                        else "planning" if is_planning_tool(part.tool_name) else None
-                    ),
-                )
-            )
-        elif isinstance(part, NativeToolSearchReturnPart):
-            parts.append(
-                HistoryToolResultPart(
-                    tool=part.tool_name,
-                    result=_to_jsonable(part.content),
-                    tool_call_id=part.tool_call_id,
-                    source="tool_search",
-                )
-            )
-    return parts
-
-
-def _request_tool_returns(request: ModelRequest) -> list[HistoryPart]:
-    parts: list[HistoryPart] = []
-    for part in request.parts:
-        if isinstance(part, ToolReturnPart):
-            parts.append(
-                HistoryToolResultPart(
-                    tool=part.tool_name,
-                    result=_to_jsonable(part.content),
-                    tool_call_id=part.tool_call_id,
-                    source=(
-                        "tool_search"
-                        if part.tool_name in {"search_tools", "tool_search"}
-                        else "planning" if is_planning_tool(part.tool_name) else None
-                    ),
-                    artifacts=tool_result_artifacts(part) or None,
-                    plan=plan_snapshot_from_part(part),
-                    outcome=(
-                        str(part.outcome)
-                        if getattr(part, "outcome", None) is not None
-                        else None
-                    ),
-                    timestamp=part.timestamp,
-                )
-            )
-    return parts
-
-
 def _request_timestamp(request: ModelRequest) -> datetime | None:
     if request.timestamp is not None:
         return request.timestamp
@@ -523,38 +299,30 @@ def _request_timestamp(request: ModelRequest) -> datetime | None:
 
 def first_user_prompt(messages: list[ModelMessage]) -> str | None:
     """Return the first user message text from raw model history."""
-    for item in model_messages_to_history(messages):
-        if item.role == "user":
-            if item.content:
-                return item.content
-            if item.attachments:
-                names = [a.name or a.id for a in item.attachments]
-                return "[附件] " + ", ".join(names)
-            if item.context_refs:
-                return context_reference_title(item.context_refs)
-    return None
-
-
-def _extract_assistant_text(messages: list[ModelMessage]) -> str:
-    """从消息列表中提取助手响应文本。
-
-    使用提前返回模式（if not ... continue）减少缩进深度。
-    只处理 ModelResponse 中的 TextPart 内容。
-    """
-    texts: list[str] = []
-    for msg in messages:
-        # 只处理助手响应消息
-        if not isinstance(msg, ModelResponse):
+    for message in messages:
+        if not isinstance(message, ModelRequest):
             continue
-        for part in msg.parts:
-            # 只处理文本片段
-            if not isinstance(part, TextPart):
+        for part in message.parts:
+            if not isinstance(part, UserPromptPart):
                 continue
-            # 跳过空内容
-            if not part.content:
-                continue
-            texts.append(part.content)
-    return "\n".join(texts).strip()
+            text = _user_prompt_text(part).strip()
+            if text:
+                return text
+            content = part.content if isinstance(part.content, list) else []
+            attachments = [
+                item
+                for item in content
+                if isinstance(item, dict)
+                and item.get("kind") == "attachment-ref"
+                and item.get("id")
+            ]
+            if attachments:
+                names = [str(item.get("name") or item["id"]) for item in attachments]
+                return "[附件] " + ", ".join(names)
+            context_refs = context_references_from_content(part.content)
+            if context_refs:
+                return context_reference_title(context_refs)
+    return None
 
 
 def session_activity_timestamps(messages: list[ModelMessage]) -> tuple[datetime | None, datetime | None]:
@@ -570,155 +338,3 @@ def session_activity_timestamps(messages: list[ModelMessage]) -> tuple[datetime 
     if not timestamps:
         return None, None
     return min(timestamps), max(timestamps)
-
-
-def model_messages_to_history(messages: list[ModelMessage]) -> list[HistoryMessage]:
-    """Convert Pydantic AI message history to a frontend-friendly timeline."""
-    rejected_calls = _rejected_tool_calls(messages)
-    history: list[HistoryMessage] = []
-    pending_tool_results: list[HistoryPart] = []
-    pending_tool_results_timestamp: datetime | None = None
-    pending_tool_results_branch_point: int | None = None
-    latest_request_timestamp: datetime | None = None
-
-    def flush_tool_results() -> None:
-        nonlocal pending_tool_results, pending_tool_results_timestamp, pending_tool_results_branch_point
-        if not pending_tool_results:
-            return
-        if history and history[-1].role == "assistant":
-            history[-1].parts.extend(pending_tool_results)
-        else:
-            history.append(
-                HistoryMessage(
-                    role="assistant",
-                    parts=list(pending_tool_results),
-                    timestamp=pending_tool_results_timestamp,
-                    branch_point=pending_tool_results_branch_point,
-                )
-            )
-        pending_tool_results = []
-        pending_tool_results_timestamp = None
-        pending_tool_results_branch_point = None
-
-    for idx, message in enumerate(messages):
-        if isinstance(message, ModelRequest):
-            latest_request_timestamp = _request_timestamp(message)
-            user_attachments: list[HistoryAttachmentPart] = []
-            user_context_refs: list[ContextReference] = []
-            for part in message.parts:
-                if isinstance(part, UserPromptPart):
-                    user_attachments.extend(_user_prompt_attachments(part))
-                    user_context_refs.extend(_user_prompt_context_refs(part))
-            user_texts = [_user_prompt_text(p) for p in message.parts if isinstance(p, UserPromptPart)]
-            user_text = "\n".join(t for t in user_texts if t).strip() or None
-            tool_results = _request_tool_returns(message)
-
-            if user_text or user_attachments or user_context_refs:
-                flush_tool_results()
-                history.append(
-                    HistoryMessage(
-                        role="user",
-                        content=user_text,
-                        attachments=user_attachments,
-                        context_refs=user_context_refs,
-                        timestamp=_request_timestamp(message),
-                        branch_point=idx,
-                    )
-                )
-            if tool_results:
-                if not pending_tool_results:
-                    pending_tool_results_timestamp = _request_timestamp(message)
-                    pending_tool_results_branch_point = idx
-                pending_tool_results.extend(tool_results)
-
-        elif isinstance(message, ModelResponse):
-            if message.state != "interrupted" and is_thinking_only_response(message):
-                continue
-            flush_tool_results()
-            parts = _response_parts(
-                message,
-                rejected_part_indices=rejected_calls.rejected_positions.get(idx),
-            )
-            if parts:
-                history.append(
-                    HistoryMessage(
-                        role="assistant",
-                        status=(
-                            "interrupted"
-                            if message.state == "interrupted"
-                            else "completed"
-                        ),
-                        parts=parts,
-                        timestamp=message.timestamp,
-                        request_timestamp=latest_request_timestamp,
-                        branch_point=idx,
-                        run_id=message.run_id,
-                        model_name=message.model_name,
-                        provider_name=message.provider_name,
-                        provider_response_id=message.provider_response_id,
-                        finish_reason=(
-                            str(message.finish_reason)
-                            if message.finish_reason is not None
-                            else None
-                        ),
-                        usage=asdict(message.usage) if message.usage is not None else None,
-                    )
-                )
-
-    flush_tool_results()
-    return history
-
-
-def enrich_history_messages(
-    messages: list[HistoryMessage],
-    hints: dict[str, dict[str, Any]],
-) -> list[HistoryMessage]:
-    """Enrich UI calls and project cancelled tool execution for history display.
-
-    Pydantic AI keeps a response ``completed`` when the model finished choosing
-    a function tool and cancellation happened while that tool was executing.
-    It adds the official ``outcome='interrupted'`` return when history is reused,
-    but before the next run the Console still needs to distinguish that dangling
-    function call from a completed one. Persisted model messages are not changed.
-
-    Deferred UI tools are left pending because their missing result means
-    "waiting for user input", not "run was stopped".
-    """
-    enriched: list[HistoryMessage] = []
-    for msg in messages:
-        if msg.role != "assistant":
-            enriched.append(msg)
-            continue
-        parts: list[HistoryPart] = []
-        for part in msg.parts:
-            if isinstance(part, HistoryToolCallPart):
-                extra = hints.get(part.tool, {})
-                parts.append(part.model_copy(update=extra) if extra else part)
-            else:
-                parts.append(part)
-        enriched.append(msg.model_copy(update={"parts": parts}))
-
-    unresolved: list[tuple[str, int, str]] = []
-    for message_index, msg in enumerate(enriched):
-        if msg.role != "assistant":
-            continue
-        for part in msg.parts:
-            if isinstance(part, HistoryToolCallPart) and part.tool_call_id:
-                unresolved.append((part.tool_call_id, message_index, part.tool))
-            elif isinstance(part, HistoryToolResultPart) and part.tool_call_id:
-                for index in range(len(unresolved) - 1, -1, -1):
-                    if unresolved[index][0] == part.tool_call_id:
-                        unresolved.pop(index)
-                        break
-
-    interrupted_indices = {
-        message_index
-        for _, message_index, tool_name in unresolved
-        if tool_name not in hints
-    }
-    return [
-        msg.model_copy(update={"status": "interrupted"})
-        if index in interrupted_indices and msg.status == "completed"
-        else msg
-        for index, msg in enumerate(enriched)
-    ]

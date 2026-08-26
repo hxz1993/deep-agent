@@ -31,13 +31,14 @@ from deep_agent.agent.context_references import (
     project_context_references_in_history,
 )
 from deep_agent.agent.deps import AgentDeps
-from deep_agent.agent.history import first_user_prompt, model_messages_to_history
+from deep_agent.agent.history import first_user_prompt
 from deep_agent.agent.runner import AgentRunner
 from deep_agent.db.serialization import deserialize_message, serialize_message
 from deep_agent.schemas.attachment import AttachmentRef
 from deep_agent.schemas.chat import ChatRequest
 from deep_agent.schemas.context_reference import ContextReference
 from tests.helpers.sqlite_stores import make_sqlite_stores
+from tests.helpers.conversation import project_model_messages
 from deep_agent.schemas.agent import AgentCreate
 
 
@@ -228,10 +229,12 @@ class ContextReferencePersistenceTests(unittest.TestCase):
         request = ModelRequest(
             parts=[UserPromptPart(content=[context_reference_dict(_ref()), "解释"])]
         )
-        history = model_messages_to_history([request])
-        self.assertEqual(history[0].content, "解释")
-        self.assertEqual(history[0].context_refs, [_ref()])
-        self.assertNotIn("<context_references>", history[0].content or "")
+        history = project_model_messages([request])
+        self.assertEqual(history[0].text, "解释")
+        expected = _ref().model_dump(mode="json")
+        expected.pop("metadata", None)
+        self.assertEqual(history[0].context_refs, [expected])
+        self.assertNotIn("<context_references>", history[0].text or "")
 
     def test_context_only_title_uses_label_or_fallback(self) -> None:
         labelled = ModelRequest(
@@ -319,7 +322,7 @@ class ContextReferenceRunnerTests(unittest.IsolatedAsyncioTestCase):
                 "ctx-branch", "replacement", deps,
                 context_refs=[_ref(key="new")], branch_from=0,
             )
-        history = model_messages_to_history(
+        history = project_model_messages(
             await self.store.get_history("ctx-branch", agent_id=self.agent.id)
         )
-        self.assertEqual(history[0].context_refs[0].key, "old")
+        self.assertEqual(history[0].context_refs[0]["key"], "old")

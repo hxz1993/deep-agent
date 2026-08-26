@@ -32,7 +32,6 @@ from tests.helpers.sqlite_stores import (
     seed_default_agent,
 )
 from tests.integration.helpers.chat import mock_request_disconnect, parse_sse_events
-from tests.integration.helpers.events import project_event_response
 from tests.integration.helpers.models import text_only_model
 
 
@@ -148,9 +147,9 @@ class ChatContextReferenceIntegrationTests(unittest.IsolatedAsyncioTestCase):
     async def _history(self, session_id: str) -> dict:
         await get_context().event_persister.flush(session_id)
         async with AsyncClient(transport=self._transport, base_url="http://test") as client:
-            response = await client.get(f"/api/v1/sessions/{session_id}/events")
+            response = await client.get(f"/api/v1/sessions/{session_id}/history")
         self.assertEqual(response.status_code, 200)
-        return project_event_response(response.json())
+        return response.json()
 
     def _discovery_runner(self) -> AgentRunner:
         async def answer(_messages: list, _info: AgentInfo):
@@ -296,9 +295,12 @@ class ChatContextReferenceIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(final["status"], "completed")
 
         history = await self._history(session_id)
-        user = next(message for message in history["messages"] if message["role"] == "user")
-        self.assertIsNone(user["content"])
-        self.assertEqual(user["context_refs"], [_context_ref()])
+        user = next(item for item in history["items"] if item["kind"] == "user_message")
+        self.assertIsNone(user["text"])
+        self.assertEqual(
+            user["context_refs"],
+            [{key: value for key, value in _context_ref().items() if key != "metadata"}],
+        )
         self.assertNotIn("<context_references>", str(history))
 
         async with AsyncClient(transport=self._transport, base_url="http://test") as client:
@@ -331,8 +333,8 @@ class ChatContextReferenceIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 )
         self.assertEqual(response.status_code, 200)
         history = await self._history(response.json()["session_id"])
-        user = next(message for message in history["messages"] if message["role"] == "user")
-        self.assertEqual(user["content"], "结合附件解释选区")
+        user = next(item for item in history["items"] if item["kind"] == "user_message")
+        self.assertEqual(user["text"], "结合附件解释选区")
         self.assertEqual(user["attachments"][0]["id"], "file-1")
         self.assertEqual(user["context_refs"][0]["key"], "current_selection")
 
@@ -362,7 +364,7 @@ class ChatContextReferenceIntegrationTests(unittest.IsolatedAsyncioTestCase):
             )
         self.assertEqual(manual.status_code, 200)
         self.assertEqual(manual.json()["title"], "手动选区分析")
-        self.assertEqual((await self._history(session_id))["messages"], before["messages"])
+        self.assertEqual((await self._history(session_id))["items"], before["items"])
 
     async def test_deferred_results_and_context_refs_are_rejected_before_writing(self) -> None:
         async with AsyncClient(transport=self._transport, base_url="http://test") as client:
@@ -439,8 +441,11 @@ class ChatContextReferenceIntegrationTests(unittest.IsolatedAsyncioTestCase):
         events = parse_sse_events(raw)
         self.assertEqual(events[-1]["type"], "error")
         history = await self._history(events[0]["session_id"])
-        user = next(message for message in history["messages"] if message["role"] == "user")
-        self.assertEqual(user["context_refs"], [_context_ref()])
+        user = next(item for item in history["items"] if item["kind"] == "user_message")
+        self.assertEqual(
+            user["context_refs"],
+            [{key: value for key, value in _context_ref().items() if key != "metadata"}],
+        )
 
 
 if __name__ == "__main__":

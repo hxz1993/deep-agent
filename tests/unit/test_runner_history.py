@@ -25,7 +25,7 @@ from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.active_runs import ActiveRunRegistry
 from deep_agent.agent.context.compaction import DeepAgentContextCompaction
 from deep_agent.agent.event_persister import EventPersister
-from deep_agent.agent.history import is_user_only_request, model_messages_to_history
+from deep_agent.agent.history import is_user_only_request
 from deep_agent.agent.runner import AgentRunner
 from deep_agent.schemas.agent import AgentCreate
 from tests.helpers.sqlite_stores import make_sqlite_stores
@@ -275,8 +275,6 @@ class AgentRunnerHistoryTests(unittest.IsolatedAsyncioTestCase):
         history = await self.store.get_history("sess-meta", agent_id=self.db_agent.id)
         assistant = next(message for message in history if isinstance(message, ModelResponse))
         self.assertEqual(assistant.run_id, final["run_id"])
-        projected = model_messages_to_history(history)
-        self.assertEqual(projected[-1].run_id, final["run_id"])
 
     async def test_each_send_gets_a_new_run_id_in_same_conversation(self) -> None:
         agent = Agent(TestModel(), deps_type=AgentDeps)
@@ -504,19 +502,6 @@ class AgentRunnerHistoryTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(second[-1]["type"], "final")
         self.assertEqual(second[-1]["status"], "completed")
-
-
-class BranchPointAlignmentTests(unittest.TestCase):
-    def test_branch_point_matches_model_index(self) -> None:
-        messages: list[ModelMessage] = [
-            ModelRequest(parts=[UserPromptPart(content="a")]),
-            ModelResponse(parts=[TextPart(content="b")]),
-            ModelRequest(parts=[UserPromptPart(content="c")]),
-            ModelResponse(parts=[TextPart(content="d")]),
-        ]
-        history = model_messages_to_history(messages)
-        self.assertEqual([m.branch_point for m in history], [0, 1, 2, 3])
-
 
 if __name__ == "__main__":
     unittest.main()

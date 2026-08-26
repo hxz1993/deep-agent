@@ -20,7 +20,6 @@ from tests.helpers.sqlite_stores import (
     seed_default_agent,
 )
 from tests.integration.helpers.chat import mock_request_disconnect, parse_sse_events
-from tests.integration.helpers.events import project_event_response
 from tests.integration.helpers.models import text_only_model
 
 _CHAT_JSON = {"capabilities": []}
@@ -81,9 +80,9 @@ class ChatImageAttachmentTests(unittest.IsolatedAsyncioTestCase):
     async def _history(self, session_id: str) -> dict:
         await get_context().event_persister.flush(session_id)
         async with AsyncClient(transport=self._transport, base_url="http://test") as client:
-            resp = await client.get(f"/api/v1/sessions/{session_id}/events")
+            resp = await client.get(f"/api/v1/sessions/{session_id}/history")
         self.assertEqual(resp.status_code, 200)
-        return project_event_response(resp.json())
+        return resp.json()
 
     async def _list_sessions(self) -> dict:
         async with AsyncClient(transport=self._transport, base_url="http://test") as client:
@@ -121,9 +120,11 @@ class ChatImageAttachmentTests(unittest.IsolatedAsyncioTestCase):
         session_id = events[0]["session_id"]
 
         history = await self._history(session_id)
-        user_messages = [m for m in history["messages"] if m.get("role") == "user"]
+        user_messages = [
+            item for item in history["items"] if item.get("kind") == "user_message"
+        ]
         self.assertEqual(len(user_messages), 1)
-        self.assertEqual(user_messages[0]["content"], "这张图是什么")
+        self.assertEqual(user_messages[0]["text"], "这张图是什么")
         self.assertEqual(len(user_messages[0]["attachments"]), 1)
         self.assertEqual(user_messages[0]["attachments"][0]["id"], "platform-file-1")
 
@@ -163,7 +164,7 @@ class ChatImageAttachmentTests(unittest.IsolatedAsyncioTestCase):
         session_id = events[0]["session_id"]
         history = await self._history(session_id)
         self.assertEqual(
-            len([m for m in history["messages"] if m.get("role") == "user"]),
+            len([item for item in history["items"] if item.get("kind") == "user_message"]),
             1,
         )
 
@@ -231,7 +232,7 @@ class ChatImageAttachmentTests(unittest.IsolatedAsyncioTestCase):
 
         history = await self._history(events[0]["session_id"])
         self.assertEqual(
-            len([m for m in history["messages"] if m.get("role") == "user"]),
+            len([item for item in history["items"] if item.get("kind") == "user_message"]),
             1,
         )
 

@@ -15,6 +15,7 @@ from deep_agent.agent.history import (
 )
 from deep_agent.db.conversation import SessionStore
 from deep_agent.db.session_scope import runtime_session_key
+from deep_agent.conversation.notifications import conversation_item_upserts
 
 _SENTINEL = object()
 
@@ -188,7 +189,7 @@ class EventPersister:
                 run_id=ev.run_id,
                 first_message_ordinal=0,
             )
-            self._publish_rows(ev, rows)
+            await self._publish_rows(ev, rows)
             return
 
         if ev.kind == "run_complete":
@@ -212,7 +213,7 @@ class EventPersister:
                     first_message_ordinal=1 if ev.skip_user_prompt else 0,
                     terminal_status=ev.terminal_status,
                 )
-                self._publish_rows(ev, rows)
+                await self._publish_rows(ev, rows)
             return
 
         if ev.kind == "run_cancelled":
@@ -233,10 +234,9 @@ class EventPersister:
                     first_message_ordinal=1 if ev.skip_user_prompt else 0,
                     terminal_status="interrupted",
                 )
-                self._publish_rows(ev, rows)
+                await self._publish_rows(ev, rows)
 
-    @staticmethod
-    def _publish_rows(ev: PersistEvent, rows: list[Any]) -> None:
+    async def _publish_rows(self, ev: PersistEvent, rows: list[Any]) -> None:
         if ev.result_queue is None:
             return
         for row in rows:
@@ -247,6 +247,12 @@ class EventPersister:
                     "event": row.public_dict(),
                 }
             )
+        for item_event in await conversation_item_upserts(
+            self._store,
+            ev.session_id,
+            rows,
+        ):
+            ev.result_queue.put_nowait(item_event)
 
     async def _persist_one(self, ev: PersistEvent) -> None:
         await self._handle_event(ev.session_id, ev.agent_id, ev)

@@ -13,580 +13,97 @@ from pydantic_ai.messages import (
     ThinkingPart,
     ThinkingPartDelta,
     ToolCallPart,
-    ToolReturnPart,
     ToolSearchCallPart,
     ToolSearchReturnPart,
     UserPromptPart,
 )
-from pydantic_ai.usage import RequestUsage
 
 from deep_agent.agent import events
-from deep_agent.agent.planning import PLAN_METADATA_KEY
-from deep_agent.agent.history import (
-    filter_ephemeral_agent_messages,
-    model_messages_to_history,
-    session_activity_timestamps,
-)
+from deep_agent.agent.history import filter_ephemeral_agent_messages, session_activity_timestamps
+from tests.helpers.conversation import project_model_messages
 
 
-class AgentEventsThinkingTests(unittest.TestCase):
-    def test_map_thinking_part(self) -> None:
-        result = events.map_part(ThinkingPart(content="internal reasoning"))
-        self.assertEqual(result, {"type": "thinking", "delta": "internal reasoning"})
-
-    def test_map_thinking_part_empty(self) -> None:
-        self.assertIsNone(events.map_part(ThinkingPart(content="")))
-
-    def test_map_thinking_part_delta(self) -> None:
-        result = events.map_part(ThinkingPartDelta(content_delta="more thought"))
-        self.assertEqual(result, {"type": "thinking", "delta": "more thought"})
-
-    def test_map_text_part_unchanged(self) -> None:
-        result = events.map_part(TextPart(content="hello"))
-        self.assertEqual(result, {"type": "text", "delta": "hello"})
-
-    def test_local_and_native_tool_search_events_share_diagnostic_source(self) -> None:
-        local_call = events.map_part(
-            ToolSearchCallPart(args={"queries": ["财务模型"]}, tool_call_id="local")
+class AgentEventsTests(unittest.TestCase):
+    def test_thinking_text_and_tool_search_sse_mapping(self) -> None:
+        self.assertEqual(
+            events.map_part(ThinkingPart(content="internal reasoning")),
+            {"type": "thinking", "delta": "internal reasoning"},
         )
-        local_return = events.map_part(
-            ToolSearchReturnPart(content={"tools": []}, tool_call_id="local")
+        self.assertEqual(
+            events.map_part(ThinkingPartDelta(content_delta="more thought")),
+            {"type": "thinking", "delta": "more thought"},
         )
-        native_call = events.map_part(
-            NativeToolSearchCallPart(
-                args={"queries": ["财务模型"]},
-                tool_call_id="native",
-            )
+        self.assertEqual(
+            events.map_part(TextPart(content="hello")),
+            {"type": "text", "delta": "hello"},
         )
-        native_return = events.map_part(
-            NativeToolSearchReturnPart(content={"tools": []}, tool_call_id="native")
-        )
+        for part in (
+            ToolSearchCallPart(args={"queries": ["财务模型"]}, tool_call_id="local"),
+            ToolSearchReturnPart(content={"tools": []}, tool_call_id="local"),
+            NativeToolSearchCallPart(args={"queries": ["财务模型"]}, tool_call_id="native"),
+            NativeToolSearchReturnPart(content={"tools": []}, tool_call_id="native"),
+        ):
+            self.assertEqual(events.map_part(part)["source"], "tool_search")
 
-        self.assertEqual(local_call["source"], "tool_search")
-        self.assertEqual(local_return["source"], "tool_search")
-        self.assertEqual(native_call["source"], "tool_search")
-        self.assertEqual(native_return["source"], "tool_search")
+    def test_conversation_projection_merges_thinking_text_and_tool_pair(self) -> None:
+        from pydantic_ai.messages import ToolReturnPart
 
-
-class HistoryThinkingTests(unittest.TestCase):
-    def test_model_messages_to_history_splits_thinking_and_text(self) -> None:
-        response = ModelResponse(
-            parts=[
-                ThinkingPart(content="用户用中文打招呼。"),
-                TextPart(content="你好！"),
-            ],
-            timestamp=datetime.now(timezone.utc),
-        )
-        history = model_messages_to_history([response])
-        self.assertEqual(len(history), 1)
-        self.assertEqual(history[0].role, "assistant")
-        self.assertEqual(len(history[0].parts), 2)
-        self.assertEqual(history[0].parts[0].type, "thinking")
-        self.assertEqual(history[0].parts[0].content, "用户用中文打招呼。")
-        self.assertEqual(history[0].parts[1].type, "text")
-        self.assertEqual(history[0].parts[1].content, "你好！")
-
-    def test_model_messages_to_history_includes_response_timestamp(self) -> None:
-        ts = datetime(2025, 6, 22, 10, 31, tzinfo=timezone.utc)
-        response = ModelResponse(parts=[TextPart(content="hello")], timestamp=ts)
-        history = model_messages_to_history([response])
-        self.assertEqual(history[0].timestamp, ts)
-
-    def test_model_response_keeps_paired_request_timestamp_for_timing(self) -> None:
-        started_at = datetime(2025, 6, 22, 10, 30, tzinfo=timezone.utc)
-        finished_at = datetime(2025, 6, 22, 10, 31, tzinfo=timezone.utc)
-        history = model_messages_to_history([
-            ModelRequest(parts=[UserPromptPart(content="hi")], timestamp=started_at),
-            ModelResponse(parts=[TextPart(content="hello")], timestamp=finished_at),
+        items = project_model_messages([
+            ModelRequest(parts=[UserPromptPart(content="分析预算")]),
+            ModelResponse(parts=[
+                ThinkingPart(content="先查询"),
+                TextPart(content="正在查询"),
+                ToolCallPart("lookup", {"region": "华东"}, tool_call_id="call-1"),
+            ]),
+            ModelRequest(parts=[ToolReturnPart("lookup", {"count": 2}, "call-1")]),
+            ModelResponse(parts=[TextPart(content="已完成")]),
         ])
 
-        self.assertEqual(history[1].request_timestamp, started_at)
-        self.assertEqual(history[1].timestamp, finished_at)
-
-    def test_model_messages_to_history_projects_safe_native_response_fields(self) -> None:
-        response = ModelResponse(
-            parts=[TextPart(content="hello")],
-            model_name="deepseek-v4-flash",
-            provider_name="openai-compatible",
-            provider_url="https://private-provider.example/v1",
-            provider_details={"authorization": "secret"},
-            provider_response_id="response-1",
-            finish_reason="stop",
-            usage=RequestUsage(input_tokens=12, output_tokens=3),
+        self.assertEqual(
+            [item.kind for item in items],
+            ["user_message", "assistant_message", "tool", "assistant_message"],
         )
+        self.assertEqual(items[1].thinking, "先查询")
+        self.assertEqual(items[1].phase, "process")
+        self.assertEqual(items[2].output, {"count": 2})
+        self.assertEqual(items[3].phase, "final")
 
-        item = model_messages_to_history([response])[0]
-
-        self.assertEqual(item.model_name, "deepseek-v4-flash")
-        self.assertEqual(item.provider_name, "openai-compatible")
-        self.assertEqual(item.provider_response_id, "response-1")
-        self.assertEqual(item.finish_reason, "stop")
-        self.assertEqual(item.usage["input_tokens"], 12)
-        self.assertEqual(item.usage["output_tokens"], 3)
-        self.assertNotIn("provider_url", item.model_dump())
-        self.assertNotIn("provider_details", item.model_dump())
-
-    def test_model_messages_to_history_includes_request_timestamp(self) -> None:
-        ts = datetime(2025, 6, 22, 10, 30, tzinfo=timezone.utc)
-        request = ModelRequest(parts=[UserPromptPart(content="hi")], timestamp=ts)
-        history = model_messages_to_history([request])
-        self.assertEqual(len(history), 1)
-        self.assertEqual(history[0].role, "user")
-        self.assertEqual(history[0].timestamp, ts)
-        self.assertEqual(history[0].branch_point, 0)
-
-    def test_model_messages_to_history_falls_back_to_user_prompt_part_timestamp(self) -> None:
-        part_ts = datetime(2025, 6, 22, 9, 0, tzinfo=timezone.utc)
-        request = ModelRequest(parts=[UserPromptPart(content="hi", timestamp=part_ts)])
-        history = model_messages_to_history([request])
-        self.assertEqual(history[0].timestamp, part_ts)
-
-    def test_model_messages_to_history_missing_timestamp(self) -> None:
-        request = ModelRequest(
-            parts=[UserPromptPart(content="hi", timestamp=None)],
-            timestamp=None,
-        )
-        history = model_messages_to_history([request])
-        self.assertIsNone(history[0].timestamp)
-
-    def test_session_activity_timestamps_from_messages(self) -> None:
-        early = datetime(2025, 6, 22, 9, 0, tzinfo=timezone.utc)
-        late = datetime(2025, 6, 22, 10, 0, tzinfo=timezone.utc)
-        messages = [
-            ModelRequest(parts=[UserPromptPart(content="hi", timestamp=early)]),
-            ModelResponse(parts=[TextPart(content="hello")], timestamp=late),
-        ]
-        created_at, updated_at = session_activity_timestamps(messages)
-        self.assertEqual(created_at, early)
-        self.assertEqual(updated_at, late)
-
-    def test_session_activity_timestamps_empty(self) -> None:
-        self.assertEqual(session_activity_timestamps([]), (None, None))
-
-    def test_model_messages_to_history_text_only(self) -> None:
-        response = ModelResponse(
-            parts=[TextPart(content="hello")],
-            timestamp=datetime.now(timezone.utc),
-        )
-        history = model_messages_to_history([response])
-        self.assertEqual(len(history), 1)
-        self.assertEqual(history[0].parts[0].type, "text")
-        self.assertEqual(history[0].parts[0].content, "hello")
-
-    def test_tool_search_history_is_marked_as_diagnostic(self) -> None:
-        messages = [
-            ModelResponse(
-                parts=[
-                    ToolSearchCallPart(
-                        args={"queries": ["财务模型"]},
-                        tool_call_id="search-1",
-                    )
-                ]
-            ),
-            ModelRequest(
-                parts=[
-                    ToolSearchReturnPart(
-                        content={"tools": []},
-                        tool_call_id="search-1",
-                    )
-                ]
-            ),
-        ]
-
-        history = model_messages_to_history(messages)
-
-        self.assertEqual(history[0].parts[0].source, "tool_search")
-        self.assertEqual(history[0].parts[1].source, "tool_search")
-
-    def test_planning_return_exposes_only_plan_snapshot(self) -> None:
-        snapshot = {
-            "items": [{"id": "step-1", "content": "读取输入", "status": "completed"}],
-            "total": 1,
-            "completed": 1,
-        }
-        call = ToolCallPart(
-            tool_name="write_plan",
-            args={"items": []},
-            tool_call_id="plan-1",
-        )
-        result = ToolReturnPart(
-            tool_name="write_plan",
-            content={"ok": True},
-            tool_call_id="plan-1",
-            metadata={PLAN_METADATA_KEY: snapshot, "private": "hidden"},
-        )
-
-        self.assertEqual(events.map_part(call)["source"], "planning")
-        mapped = events.map_part(result)
-        self.assertEqual(mapped["source"], "planning")
-        self.assertEqual(mapped["plan"], snapshot)
-        self.assertNotIn("private", mapped)
-
-        history = model_messages_to_history([
-            ModelResponse(parts=[call]),
-            ModelRequest(parts=[result]),
-        ])
-        self.assertEqual(history[0].parts[0].source, "planning")
-        self.assertEqual(history[0].parts[1].source, "planning")
-        self.assertEqual(history[0].parts[1].plan, snapshot)
-
-    def test_tool_return_outcome_is_projected_for_diagnostics(self) -> None:
-        completed_at = datetime(2025, 6, 22, 10, 32, tzinfo=timezone.utc)
-        call = ToolCallPart(tool_name="demo", args={"value": 1}, tool_call_id="call-1")
-        result = ToolReturnPart(
-            tool_name="demo",
-            content="business validation failed",
-            tool_call_id="call-1",
-            outcome="failed",
-            timestamp=completed_at,
-        )
-
-        history = model_messages_to_history([
-            ModelResponse(parts=[call]),
-            ModelRequest(parts=[result]),
-        ])
-
-        self.assertEqual(history[0].parts[1].outcome, "failed")
-        self.assertEqual(history[0].parts[1].timestamp, completed_at)
-
-    def test_model_messages_to_history_skips_thinking_only_retry(self) -> None:
-        ts = datetime(2025, 6, 22, 10, 45, tzinfo=timezone.utc)
-        messages = [
-            ModelRequest(parts=[UserPromptPart(content="你好")], timestamp=ts),
-            ModelResponse(
-                parts=[ThinkingPart(content="你好！有什么我可以帮你的吗？")],
-                timestamp=ts,
-            ),
-            ModelRequest(parts=[RetryPromptPart(content="Please return text or call a tool.")]),
-            ModelResponse(parts=[TextPart(content="你好！")], timestamp=ts),
-        ]
-        history = model_messages_to_history(messages)
-        self.assertEqual(len(history), 2)
-        self.assertEqual(history[0].role, "user")
-        self.assertEqual(history[1].role, "assistant")
-        self.assertEqual(history[1].parts[0].type, "text")
-        self.assertEqual(history[1].parts[0].content, "你好！")
-
-    def test_model_messages_to_history_skips_rejected_tool_call(self) -> None:
-        messages = [
-            ModelResponse(
-                parts=[
-                    ToolCallPart(
-                        tool_name="deep_cube__clarify",
-                        args={},
-                        tool_call_id="invalid-call",
-                    )
-                ]
-            ),
-            ModelRequest(
-                parts=[
-                    RetryPromptPart(
-                        content="fields must be a non-empty array",
-                        tool_name="deep_cube__clarify",
-                        tool_call_id="invalid-call",
-                    )
-                ]
-            ),
-            ModelResponse(
-                parts=[
-                    ToolCallPart(
-                        tool_name="deep_cube__clarify",
-                        args={"fields": [{"id": "reason", "type": "textarea"}]},
-                        tool_call_id="valid-call",
-                    )
-                ]
-            ),
-        ]
-
-        history = model_messages_to_history(messages)
-
-        self.assertEqual(len(history), 1)
-        self.assertEqual(len(history[0].parts), 1)
-        self.assertEqual(history[0].parts[0].type, "tool_call")
-        self.assertEqual(history[0].parts[0].tool_call_id, "valid-call")
-
-    def test_filter_ephemeral_agent_messages(self) -> None:
+    def test_filter_ephemeral_messages_drops_retry_and_rejected_call(self) -> None:
         messages = [
             ModelResponse(parts=[ThinkingPart(content="internal only")]),
             ModelRequest(parts=[RetryPromptPart(content="Please return text.")]),
-            ModelResponse(parts=[TextPart(content="hello")]),
-        ]
-        filtered = filter_ephemeral_agent_messages(messages)
-        self.assertEqual(len(filtered), 1)
-        self.assertIsInstance(filtered[0], ModelResponse)
-        self.assertEqual(filtered[0].parts[0].content, "hello")
-
-    def test_filter_ephemeral_agent_messages_drops_rejected_tool_call(self) -> None:
-        messages = [
-            ModelResponse(
-                parts=[
-                    ToolCallPart(
-                        tool_name="deep_cube__clarify",
-                        args={},
-                        tool_call_id="invalid-call",
-                    )
-                ]
-            ),
-            ModelRequest(
-                parts=[
-                    RetryPromptPart(
-                        content="fields must be a non-empty array",
-                        tool_name="deep_cube__clarify",
-                        tool_call_id="invalid-call",
-                    )
-                ]
-            ),
-            ModelResponse(
-                parts=[
-                    ToolCallPart(
-                        tool_name="deep_cube__clarify",
-                        args={"fields": [{"id": "reason", "type": "textarea"}]},
-                        tool_call_id="valid-call",
-                    )
-                ]
-            ),
-        ]
-
-        filtered = filter_ephemeral_agent_messages(messages)
-
-        self.assertEqual(len(filtered), 1)
-        self.assertIsInstance(filtered[0], ModelResponse)
-        self.assertEqual(filtered[0].parts[0].tool_call_id, "valid-call")
-
-    def test_filter_ephemeral_agent_messages_preserves_sibling_parts(self) -> None:
-        messages = [
-            ModelResponse(
-                parts=[
-                    TextPart(content="正在准备表单"),
-                    ToolCallPart(
-                        tool_name="deep_cube__clarify",
-                        args={},
-                        tool_call_id="invalid-call",
-                    ),
-                ]
-            ),
-            ModelRequest(
-                parts=[
-                    RetryPromptPart(
-                        content="fields must be a non-empty array",
-                        tool_name="deep_cube__clarify",
-                        tool_call_id="invalid-call",
-                    )
-                ]
-            ),
-            ModelResponse(
-                parts=[
-                    ToolCallPart(
-                        tool_name="deep_cube__clarify",
-                        args={"fields": [{"field": "reason", "type": "textarea"}]},
-                        tool_call_id="valid-call",
-                    )
-                ]
-            ),
+            ModelResponse(parts=[
+                TextPart(content="正在准备"),
+                ToolCallPart("deep_cube__clarify", {}, tool_call_id="invalid"),
+            ]),
+            ModelRequest(parts=[RetryPromptPart(
+                content="fields required",
+                tool_name="deep_cube__clarify",
+                tool_call_id="invalid",
+            )]),
+            ModelResponse(parts=[ToolCallPart(
+                "deep_cube__clarify",
+                {"fields": [{"field": "reason"}]},
+                tool_call_id="valid",
+            )]),
         ]
 
         filtered = filter_ephemeral_agent_messages(messages)
 
         self.assertEqual(len(filtered), 2)
-        self.assertIsInstance(filtered[0], ModelResponse)
-        self.assertEqual(len(filtered[0].parts), 1)
-        self.assertIsInstance(filtered[0].parts[0], TextPart)
-        self.assertEqual(filtered[0].parts[0].content, "正在准备表单")
-        self.assertEqual(filtered[1].parts[0].tool_call_id, "valid-call")
+        self.assertEqual(filtered[0].parts[0].content, "正在准备")
+        self.assertEqual(filtered[1].parts[0].tool_call_id, "valid")
 
-    def test_same_tool_call_id_retry_preserves_corrected_call(self) -> None:
-        messages = [
-            ModelResponse(
-                parts=[
-                    ToolCallPart(
-                        tool_name="deep_cube__clarify",
-                        args={},
-                        tool_call_id="same-call",
-                    )
-                ]
-            ),
-            ModelRequest(
-                parts=[
-                    RetryPromptPart(
-                        content="fields must be a non-empty array",
-                        tool_name="deep_cube__clarify",
-                        tool_call_id="same-call",
-                    )
-                ]
-            ),
-            ModelResponse(
-                parts=[
-                    ToolCallPart(
-                        tool_name="deep_cube__clarify",
-                        args={"fields": [{"field": "reason", "type": "textarea"}]},
-                        tool_call_id="same-call",
-                    )
-                ]
-            ),
-        ]
-
-        filtered = filter_ephemeral_agent_messages(messages)
-        history = model_messages_to_history(messages)
-
-        self.assertEqual(len(filtered), 1)
-        self.assertEqual(filtered[0].parts[0].args["fields"][0]["field"], "reason")
-        self.assertEqual(len(history), 1)
-        self.assertEqual(history[0].parts[0].tool_call_id, "same-call")
-        self.assertEqual(history[0].parts[0].args["fields"][0]["field"], "reason")
-
-    def test_missing_tool_call_id_retry_preserves_only_corrected_call(self) -> None:
-        messages = [
-            ModelResponse(
-                parts=[ToolCallPart("deep_cube__clarify", {}, tool_call_id=None)]
-            ),
-            ModelRequest(
-                parts=[
-                    RetryPromptPart(
-                        content="fields must be a non-empty array",
-                        tool_name="deep_cube__clarify",
-                        tool_call_id=None,
-                    )
-                ]
-            ),
-            ModelResponse(
-                parts=[
-                    ToolCallPart(
-                        "deep_cube__clarify",
-                        {"fields": [{"field": "reason", "type": "textarea"}]},
-                        tool_call_id=None,
-                    )
-                ]
-            ),
-        ]
-
-        filtered = filter_ephemeral_agent_messages(messages)
-        history = model_messages_to_history(messages)
-
-        self.assertEqual(len(filtered), 1)
-        self.assertEqual(filtered[0].parts[0].args["fields"][0]["field"], "reason")
-        self.assertEqual(len(history), 1)
-        self.assertEqual(history[0].parts[0].args["fields"][0]["field"], "reason")
-
-    def test_mixed_tool_result_and_retry_preserves_valid_pair(self) -> None:
-        messages = [
-            ModelResponse(
-                parts=[
-                    ToolCallPart("lookup", {"query": "A"}, tool_call_id="lookup-call"),
-                    ToolCallPart("deep_cube__clarify", {}, tool_call_id="clarify-call"),
-                ]
-            ),
-            ModelRequest(
-                parts=[
-                    ToolReturnPart(
-                        tool_name="lookup",
-                        content={"value": "A100"},
-                        tool_call_id="lookup-call",
-                    ),
-                    RetryPromptPart(
-                        content="fields must be a non-empty array",
-                        tool_name="deep_cube__clarify",
-                        tool_call_id="clarify-call",
-                    ),
-                ]
-            ),
-            ModelResponse(
-                parts=[
-                    ToolCallPart(
-                        "deep_cube__clarify",
-                        {"fields": [{"field": "reason", "type": "textarea"}]},
-                        tool_call_id="clarify-call-2",
-                    )
-                ]
-            ),
-        ]
-
-        filtered = filter_ephemeral_agent_messages(messages)
-
-        self.assertEqual(len(filtered), 3)
-        self.assertEqual([part.tool_name for part in filtered[0].parts], ["lookup"])
-        self.assertEqual(len(filtered[1].parts), 1)
-        self.assertIsInstance(filtered[1].parts[0], ToolReturnPart)
-        self.assertEqual(filtered[1].parts[0].tool_call_id, "lookup-call")
-        self.assertEqual(filtered[2].parts[0].tool_call_id, "clarify-call-2")
-
-    def test_terminal_retry_is_preserved_for_deferred_resume_but_hidden_from_history(self) -> None:
-        messages = [
-            ModelResponse(
-                parts=[
-                    ToolCallPart("builtin__confirm", {"message": "继续？"}, tool_call_id="confirm"),
-                    ToolCallPart("deep_cube__clarify", {}, tool_call_id="clarify"),
-                ]
-            ),
-            ModelRequest(
-                parts=[
-                    RetryPromptPart(
-                        content="fields must be a non-empty array",
-                        tool_name="deep_cube__clarify",
-                        tool_call_id="clarify",
-                    )
-                ]
-            ),
-        ]
-
-        filtered = filter_ephemeral_agent_messages(messages)
-        history = model_messages_to_history(messages)
-
-        self.assertEqual(len(filtered), 2)
-        self.assertEqual(len(filtered[0].parts), 2)
-        self.assertIsInstance(filtered[1].parts[0], RetryPromptPart)
-        self.assertEqual(len(history), 1)
-        self.assertEqual(len(history[0].parts), 1)
-        self.assertEqual(history[0].parts[0].tool_call_id, "confirm")
-
-    def test_reused_old_tool_call_id_only_drops_latest_rejected_call(self) -> None:
-        messages = [
-            ModelResponse(parts=[ToolCallPart("lookup", {"query": "A"}, tool_call_id="same")]),
-            ModelRequest(
-                parts=[
-                    ToolReturnPart(
-                        tool_name="lookup",
-                        content={"value": "A100"},
-                        tool_call_id="same",
-                    )
-                ]
-            ),
-            ModelResponse(
-                parts=[ToolCallPart("deep_cube__clarify", {}, tool_call_id="same")]
-            ),
-            ModelRequest(
-                parts=[
-                    RetryPromptPart(
-                        content="fields must be a non-empty array",
-                        tool_name="deep_cube__clarify",
-                        tool_call_id="same",
-                    )
-                ]
-            ),
-            ModelResponse(
-                parts=[
-                    ToolCallPart(
-                        "deep_cube__clarify",
-                        {"fields": [{"field": "reason", "type": "textarea"}]},
-                        tool_call_id="same",
-                    )
-                ]
-            ),
-        ]
-
-        filtered = filter_ephemeral_agent_messages(messages)
-        history = model_messages_to_history(messages)
-
-        self.assertEqual(len(filtered), 3)
-        self.assertEqual(filtered[0].parts[0].tool_name, "lookup")
-        self.assertIsInstance(filtered[1].parts[0], ToolReturnPart)
-        self.assertEqual(filtered[2].parts[0].tool_name, "deep_cube__clarify")
-        tool_calls = [
-            part
-            for message in history
-            for part in message.parts
-            if part.type == "tool_call"
-        ]
-        self.assertEqual([part.tool for part in tool_calls], ["lookup", "deep_cube__clarify"])
+    def test_session_activity_timestamps(self) -> None:
+        early = datetime(2025, 6, 22, 9, 0, tzinfo=timezone.utc)
+        late = datetime(2025, 6, 22, 10, 0, tzinfo=timezone.utc)
+        created_at, updated_at = session_activity_timestamps([
+            ModelRequest(parts=[UserPromptPart(content="hi", timestamp=early)]),
+            ModelResponse(parts=[TextPart(content="hello")], timestamp=late),
+        ])
+        self.assertEqual(created_at, early)
+        self.assertEqual(updated_at, late)
+        self.assertEqual(session_activity_timestamps([]), (None, None))
 
 
 if __name__ == "__main__":

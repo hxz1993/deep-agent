@@ -277,26 +277,25 @@ test("业务重试或取消撤回工具调用时删除实时工具卡", () => {
 });
 
 test("历史中的 interrupted 助手消息恢复已停止标记", () => {
-  assert.match(chatSource, /presentation\.interrupted/);
+  assert.match(chatSource, /interrupted \|\|= item\.status === "interrupted"/);
+  assert.match(chatSource, /if \(interrupted\) assistant\.markInterrupted\(\)/);
   assert.match(chatSource, /message-run-status interrupted/);
   assert.match(chatSource, /circle-stop/);
 });
 
-test("历史与轨迹统一读取 Event API 且普通聊天隐藏完成压缩标记", () => {
+test("普通聊天读取 History 投影且轨迹独立读取 Event API", () => {
+  assert.match(chatSource, /sessionApiUrl\(normalized, "\/history"/);
   assert.match(chatSource, /sessionApiUrl\(session, "\/events"/);
   assert.match(chatSource, /after_sequence: afterSequence, limit: 500/);
   assert.match(chatSource, /page\.next_after_sequence/);
-  assert.match(chatSource, /projectSessionEvents\(data\)/);
-  assert.match(chatSource, /trajectory\?\.setHistory\(data\)/);
-  assert.match(chatSource, /item\.type === "compaction"/);
-  assert.match(chatSource, /压缩事件在轨迹中按真实 sequence 展示/);
-  assert.doesNotMatch(chatSource, /context_checkpoint|addContextCheckpointMarker|\/history/);
+  assert.match(chatSource, /normalizeConversationHistory\(await r\.json\(\)\)/);
+  assert.match(chatSource, /trajectory\?\.setHistory\(eventResult\.response\.ok/);
+  assert.doesNotMatch(chatSource, /projectSessionEvents|context_checkpoint|addContextCheckpointMarker/);
 });
 
 test("会话标题由持久化 Event 实时更新且不再轮询或自动重命名", () => {
-  assert.match(chatSource, /persistedEvent\?\.event_type === "session\/title"/);
-  assert.match(chatSource, /applySessionTitle\([\s\S]*persistedEvent\.payload\?\.title/);
-  assert.match(chatSource, /persistedEvent\.payload\?\.title,[\s\S]*trajectory\?\.ingest/);
+  assert.match(chatSource, /if \(type === "session_title"\)[\s\S]*applySessionTitle/);
+  assert.match(chatSource, /case "session_event_appended":[\s\S]*break/);
   assert.doesNotMatch(chatSource, /TITLE_POLL|pollSessionTitle|scheduleTitleRefresh|autoRenameSession/);
   assert.doesNotMatch(chatSource, /auto-rename-btn|自动重命名|JSON\.stringify\(\{ auto: true \}\)/);
 });

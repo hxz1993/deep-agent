@@ -48,10 +48,10 @@ frontend/
 | 配置 | `localStorage` 只保存调试 App；全局环境配置只读展示，身份和鉴权由平台提供 |
 | 内置工具目录 | 配置中心只读展示 `builtin:general`、`builtin:sandbox`；Agent 按包选择 |
 | 系统工具目录 | 配置中心按任务规划、Skill、文件、工具结果、MCP 工具发现、MCP Resource 分组展示自动注入工具；不参与 Agent 配置 |
-| 任务计划 | 只识别`write_plan`完整快照；从Event API投影最新成功计划和每次更新位置，同Turn Deferred由后端恢复PlanStore |
+| 任务计划 | 只识别`write_plan`完整快照；普通对话直接消费History中的`plan` Item，同Turn Deferred由后端恢复PlanStore |
 | Skill | 独立 Skill 列表与详情；上传包安装/替换/启停/单个与全部导出/删除；文本、Word、Excel 资源可预览，脚本只列包内路径和数量，不展示可执行性判断；Agent 使用独立 `skills` 列表选择 |
 | 一体化控制台 | `/console/`；工作台、配置和诊断的唯一入口 |
-| 会话轨迹 | 工作台“对话 / 轨迹”页签；按Sequence读取Event API并按Event ID Upsert持久化SSE，不建立第二套事实源 |
+| 会话轨迹 | 工作台“对话 / 轨迹”页签；普通对话读History/SSE ConversationItem，只有轨迹按Sequence读取Event API |
 
 v0.3.12 的配置卡只读展示工具披露策略：附件包为“有附件时可用”，大型 MCP 为“自动预选 Top 3 / 搜索 Top 5”。聊天中的 `search_tools` 是运行诊断过程，默认折叠显示为“正在查找可用工具”，不伪装成业务 MCP 工具。
 
@@ -62,8 +62,8 @@ v0.3.12 的配置卡只读展示工具披露策略：附件包为“有附件时
 
 右侧会话详情使用“会话 / 当前回合 / 上下文引用”三页签：会话页展示会话、请求Header和
 复合上下文预算；当前回合页展示最近一次Run Usage与Compaction；上下文引用页由
-消息中的引用信息按钮定位并展示只读 JSON。工具过程仍由对话区负责；独立轨迹页只在当前页面
-内投影实时SSE，并在Event API刷新后以持久事件重新校准，不保存第二份事件列表。
+消息中的引用信息按钮定位并展示只读 JSON。工具过程仍由对话区负责；普通会话历史和持久化SSE
+共用ConversationItem Store，独立轨迹页在Event API刷新后以持久事件重新校准。
 轨迹将同一ModelResponse中的thinking、text和tool call意图聚合为一个助手Loop，同时保留独立
 Tool Call/Result记录；用户输入行只按Event中现有`context_refs.type/label/schema_version`和
 附件元数据加标记，不从正文猜测业务上下文。轨迹详情复用工作台右侧Inspector，返回对话后恢复
@@ -128,14 +128,15 @@ Agent 独立编辑页的系统提示词标题栏显示“字符数 / 预估 Toke
 | `context_compaction_result` | 主动压缩最终结果；成功、无需压缩或失败，不作为聊天消息 |
 | `session_event_appended` | `{ type, persisted:true, event }`；按Event ID插入并按Sequence排序 |
 | `session_event_updated` | `{ type, persisted:true, event }`；按相同Event ID原位更新 |
-| `text` | `{ type, delta }` |
-| `thinking` | `{ type, delta }` |
-| `tool_call` | `{ type, tool, args, tool_call_id, widget?, metadata?, source? }` |
-| `tool_result` | `{ type, tool, result, tool_call_id, artifacts?, plan? }`；规划结果携带计划快照，大结果外置时保留预览 |
+| `conversation_item_upsert` | `{ type, persisted:true, item }`；与`/history`同ID Item完全一致 |
+| `session_title` | `{ type, persisted:true, session_id, title, source }`；更新标题，不轮询 |
+| `text` / `thinking` | `{ type, item_id, delta }` |
+| `tool_call` | `{ type, item_id, tool, args, tool_call_id, widget?, metadata?, source? }` |
+| `tool_result` | `{ type, item_id, tool, result, tool_call_id, artifacts?, plan? }`；规划结果携带计划快照，大结果外置时保留预览 |
 | `tool_call_removed` | `{ type, tool, tool_call_id, reason }`；删除对应实时工具块，不写入Event Store |
 | `final` | `{ type, status, output, usage, deferred?, context? }`（`context` 为预算/压缩观测） |
 | `error` | `{ type, message }` |
-| `cancelled` | `{ type, status, usage, history_persisted, model_message_count }`；保留当前流式内容并标记中断，重新打开会话时再由Event API校准 |
+| `cancelled` | `{ type, status, usage, history_persisted }`；保留当前流式内容并标记中断，重新打开会话时由History校准 |
 
 完整协议（含同 ID 多次推送、生命周期）：[`../docs/guides/sse-protocol.md`](../docs/guides/sse-protocol.md)。
 

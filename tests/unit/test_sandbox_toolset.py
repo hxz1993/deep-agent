@@ -251,7 +251,7 @@ class SandboxCapabilityTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(capability.code, "builtin:sandbox")
         self.assertEqual(capability.category, "builtin")
-        self.assertFalse(capability.default_enabled)
+        self.assertFalse(hasattr(capability, "default_enabled"))
         self.assertEqual(capability.source, "builtin")
         self.assertEqual(
             {item.name for item in capability.tools},

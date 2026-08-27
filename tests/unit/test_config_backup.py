@@ -54,13 +54,13 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
 
             self.assertEqual(
                 result.path.name,
-                "deep-agent-config-test-v009-20260723-131415.db",
+                "deep-agent-config-test-v010-20260723-131415.db",
             )
             self.assertEqual(
                 [path.resolve() for path in (output_root / "test").iterdir()],
                 [result.path.resolve()],
             )
-            self.assertEqual(result.revision, "009")
+            self.assertEqual(result.revision, "010")
             self.assertEqual(result.row_counts["agents"], 1)
             self.assertEqual(result.row_counts["chat_sessions"], 0)
             self.assertEqual(result.row_counts["chat_session_events"], 0)
@@ -82,7 +82,7 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                     connection.execute(
                         "SELECT version_num FROM alembic_version"
                     ).fetchone(),
-                    ("009",),
+                    ("010",),
                 )
                 self.assertEqual(
                     connection.execute(
@@ -101,7 +101,7 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(
                     connection.execute(
                         "SELECT id, provider_type, use_default_base_url, base_url, "
-                        "api_key, enabled FROM llm_providers WHERE name = 'OpenAI'"
+                        "api_key FROM llm_providers WHERE name = 'OpenAI'"
                     ).fetchone(),
                     (
                         "0123456789abcdef0123456789abcdef",
@@ -109,7 +109,6 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                         1,
                         "https://api.openai.com/v1",
                         "plain-api-key",
-                        1,
                     ),
                 )
                 catalog_row = connection.execute(
@@ -161,7 +160,7 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                         "SELECT environment, source_dialect, alembic_revision, "
                         "git_commit FROM _backup_info"
                     ).fetchone(),
-                    ("test", "sqlite", "009", "abc123"),
+                    ("test", "sqlite", "010", "abc123"),
                 )
                 scope_manifest = json.loads(
                     str(
@@ -256,7 +255,7 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                 )
                 await connection.execute(
                     text(
-                        "INSERT INTO alembic_version (version_num) VALUES ('009')"
+                        "INSERT INTO alembic_version (version_num) VALUES ('010')"
                     )
                 )
                 await connection.execute(
@@ -268,7 +267,6 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                         "use_default_base_url": True,
                         "base_url": "https://api.openai.com/v1",
                         "api_key": "plain-api-key",
-                        "enabled": True,
                     },
                 )
                 await connection.execute(
@@ -327,7 +325,6 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                             "url": "http://example.test/mcp",
                             "headers": {"token": "plain-token"},
                         },
-                        "enabled": True,
                     },
                 )
                 await connection.execute(
@@ -350,7 +347,6 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                         "version": "1.0.0",
                         "schema_version": "1.0",
                         "source": "upload",
-                        "enabled": True,
                         "platform_file_id": "platform-file-1",
                         "file_name": "uploaded-skill.zip",
                         "file_size": 1234,
@@ -367,7 +363,6 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                         "label": "测试交互",
                         "description": "backup test package",
                         "source": "manual",
-                        "enabled": True,
                     },
                 )
                 await connection.execute(
@@ -378,7 +373,6 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                         "description": "manual",
                         "parameters_json_schema": {"type": "object"},
                         "source": "manual",
-                        "enabled": True,
                     },
                 )
                 await connection.execute(

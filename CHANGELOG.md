@@ -3,6 +3,17 @@
 本文件记录 DeepAgent 的产品版本变化，按新版本到旧版本排列。当前代码版本以
 `deep_agent.__version__` 为准；数据库结构版本以 Alembic head 为准，两者互不替代。
 
+## v0.6.1
+
+- Alembic `010`删除Provider、模型、Skill、MCP、UI工具包和UI工具上的冗余`enabled`字段；
+  配置实体只要存在即可出现在管理目录，Provider的真实可用性继续由地址、凭据和协议校验决定。
+- Agent的`capabilities`收敛为非空显式列表；新Agent的`capabilities/skills`均默认为空，
+  不再通过`null`、预制默认值或资源自身开关隐式获得能力。资源是否进入Run只由Agent关联决定。
+- Console同步删除Provider、模型、Skill、MCP、UI工具包和UI工具的启停配置、状态列与停用操作；
+  内置工具目录不再展示“默认启用/关闭”。Agent的模型与工具/Skill关联成为唯一使用入口。
+- Skill信息编辑弹窗改为与配置中心其他标准弹窗一致的宽度、标题和表单布局。
+- Chat、History、SSE、Session Event、Plan、Deferred、附件和外部客户端协议均不变。
+
 ## v0.6.0
 
 - 将旧 `chat_messages` 与独立上下文投影重构为 `chat_session_events`：每个完整 Pydantic AI

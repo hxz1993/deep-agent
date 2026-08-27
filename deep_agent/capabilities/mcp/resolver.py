@@ -30,12 +30,12 @@ async def load_mcp_tool_packages(
     *,
     rows: list[McpServer] | None = None,
 ) -> list[ToolPackage]:
-    """Load enabled MCP servers from the database with builtin fallback."""
+    """Load configured MCP servers from the database with builtin fallback."""
     if rows is None:
         rows = await stores.mcp.list_all()
     packages = tool_packages_from_rows(rows)
 
-    db_names = {row.name for row in rows if row.enabled}
+    db_names = {row.name for row in rows}
     mcps_dir = DEEP_AGENT_ROOT / "mcps"
     for builtin in load_builtin_mcp_tool_packages(str(mcps_dir)):
         short_name = builtin.code.removeprefix("mcp:")
@@ -48,9 +48,7 @@ async def load_mcp_tool_packages(
 def select_mcp_tool_packages(
     packages: list[ToolPackage], spec: AgentSpec
 ) -> list[ToolPackage]:
-    """Mirror ``ToolPackageRegistry.toolsets`` selection semantics for MCP packages."""
-    if spec.capabilities is None:
-        return [package for package in packages if package.default_enabled]
+    """Select only MCP packages explicitly associated with the Agent."""
     return [package for package in packages if package.code in spec.capabilities]
 
 

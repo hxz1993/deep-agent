@@ -78,13 +78,8 @@ function groupCapabilities(caps) {
   return { byGroup, groups: ordered };
 }
 
-function defaultEnabledCapabilityNames(caps) {
-  return (caps || []).filter((c) => c.default_enabled && c.enabled !== false).map((c) => c.code);
-}
-
 function formatCapabilitiesPreview(capabilities) {
-  if (capabilities == null) return "（全部默认）";
-  if (!capabilities.length) return "（无）";
+  if (!capabilities?.length) return "（无）";
   return capabilities.join(", ");
 }
 
@@ -93,20 +88,8 @@ function formatSkillsPreview(skills) {
   return skills.join(", ");
 }
 
-function buildCapabilitySelectionSet(selected, caps) {
-  if (selected === null) {
-    return new Set(defaultEnabledCapabilityNames(caps));
-  }
+function buildCapabilitySelectionSet(selected) {
   return new Set(selected || []);
-}
-
-function selectionMatchesDefaults(selectedSet, caps) {
-  const defaults = new Set(defaultEnabledCapabilityNames(caps));
-  if (defaults.size !== selectedSet.size) return false;
-  for (const name of defaults) {
-    if (!selectedSet.has(name)) return false;
-  }
-  return true;
 }
 
 const agentsAdmin = {
@@ -331,7 +314,6 @@ const agentsAdmin = {
     const kindLabel = capKindLabel(cap);
     const toolCount = Number(cap.tool_count ?? cap.tools?.length ?? 0);
     const searchText = `${displayName} ${cap.description || ""} ${cap.code}`.toLowerCase();
-    const disabled = cap.enabled === false;
 
     const toolsHtml = toolCount
       ? `<details class="cap-card-tools">
@@ -345,10 +327,10 @@ const agentsAdmin = {
         </details>`
       : "";
 
-    return `<article class="cap-card kind-${escapeHtml(cap.category)}${disabled ? " is-locked" : ""}" data-cap-name="${escapeHtml(cap.code)}" data-search="${escapeHtml(searchText)}">
+    return `<article class="cap-card kind-${escapeHtml(cap.category)}" data-cap-name="${escapeHtml(cap.code)}" data-search="${escapeHtml(searchText)}">
       <div class="cap-card-header">
-        <label class="cap-switch" title="${disabled ? "工具包已停用" : checked ? "已启用" : "未启用"}">
-          <input type="checkbox" name="cap" value="${escapeHtml(cap.code)}" ${checked ? "checked" : ""} ${disabled ? "disabled" : ""} />
+        <label class="cap-switch" title="${checked ? "已关联" : "未关联"}">
+          <input type="checkbox" name="cap" value="${escapeHtml(cap.code)}" ${checked ? "checked" : ""} />
           <span class="cap-switch-ui"></span>
         </label>
         <div class="cap-card-info">
@@ -369,7 +351,7 @@ const agentsAdmin = {
     return caps.filter((c) => isCapabilitySelected(c, selectedSet)).length;
   },
 
-  renderCapabilityCheckboxes(selected = null) {
+  renderCapabilityCheckboxes(selected = []) {
     const container = document.getElementById("agentCapGroups");
     const tabsEl = document.getElementById("capTabs");
     const searchEl = document.getElementById("capSearch");
@@ -385,7 +367,7 @@ const agentsAdmin = {
       return;
     }
 
-    const selectedSet = buildCapabilitySelectionSet(selected, caps);
+    const selectedSet = buildCapabilitySelectionSet(selected);
     const { byGroup, groups } = groupCapabilities(caps);
     const defaultTab = groups.find((group) => group !== "mcp") || groups[0];
 
@@ -488,8 +470,6 @@ const agentsAdmin = {
 
     if (selected === 0) {
       counter.textContent = "无能力";
-    } else if (selectionMatchesDefaults(selectedSet, state.capabilities || [])) {
-      counter.textContent = "全部默认";
     } else {
       counter.textContent = `已选 ${selected} / ${total}`;
     }
@@ -509,11 +489,6 @@ const agentsAdmin = {
   getSelectedCapabilities() {
     const boxes = document.querySelectorAll('#agentCapGroups input[name="cap"]:checked:not(:disabled)');
     const selected = Array.from(boxes).map((b) => b.value);
-    const allBoxes = document.querySelectorAll('#agentCapGroups input[name="cap"]:not(:disabled)');
-    if (!allBoxes.length) return null;
-    if (selected.length === 0) return [];
-    const selectedSet = new Set(selected);
-    if (selectionMatchesDefaults(selectedSet, state.capabilities || [])) return null;
     return selected;
   },
 
@@ -531,7 +506,7 @@ const agentsAdmin = {
         label: code,
         description: "该 Skill 当前不存在，保存时将保留原引用。",
         source: "unknown",
-        enabled: false,
+        missing: true,
         reference_count: 0,
         asset_count: 0,
       })),
@@ -543,7 +518,7 @@ const agentsAdmin = {
     }
     container.innerHTML = skills.map((skill) => {
       const checked = selectedSet.has(skill.code);
-      const disabled = skill.enabled === false;
+      const disabled = skill.missing === true;
       const source = skill.source === "builtin" ? "内置" : skill.source === "upload" ? "自定义" : "不可用";
       return `<label class="agent-skill-card${disabled ? " is-disabled" : ""}">
         <input type="checkbox" name="agentSkill" value="${escapeHtml(skill.code)}" ${checked ? "checked" : ""} ${disabled ? "disabled" : ""} />
@@ -591,7 +566,7 @@ const agentsAdmin = {
     document.getElementById("agentTemperature").value = "";
     document.getElementById("agentPrompt").value =
       "You are a helpful assistant. Use available tools when they help answer accurately.";
-    this.renderCapabilityCheckboxes(null);
+    this.renderCapabilityCheckboxes([]);
     this.renderSkillChoices([]);
     document.getElementById("testAgentBtn")?.classList.add("hidden");
     this.openEditor();

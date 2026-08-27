@@ -9,7 +9,7 @@ DeepAgent v0.3.18 将 Skill 与 ToolPackage 分离，v0.3.20 收口上传 Skill 
 Console 配置中心的“Skill”页面提供：
 
 - 查看代码内置与上传 Skill。
-- 上传 ZIP 安装、替换当前包、启用/禁用、重新加载、导出和删除。
+- 上传 ZIP 安装、替换当前包、重新加载、导出和删除。
 - 单个上传Skill可直接导出原始ZIP；“导出全部”生成包含清单和全部上传Skill独立ZIP的集合包。
 - 查看 Manifest、Reference/Asset 和脚本索引。
 - 在 Agent 独立编辑页的 Skill 区域选择允许使用的 Skill。
@@ -17,7 +17,7 @@ Console 配置中心的“Skill”页面提供：
 Builtin Skill 随代码发布，只读且不能替换或删除。上传包保存在平台文件服务，数据库
 `skill_packages` 只保存平台 File ID、Hash、Manifest 和资源索引。
 
-上传包在每个 Pod 只生成 `runtime-skills/<code>/` 一份当前运行副本。服务启动、安装、替换、启用
+上传包在每个 Pod 只生成 `runtime-skills/<code>/` 一份当前运行副本。服务启动、安装、替换
 和手工“重新加载”负责同步；普通 Run 只读本地目录，不访问平台文件服务。运行副本丢失或同步
 失败时，该 Skill 暂时跳过，其他 Skill、工具和普通回答继续工作。
 
@@ -90,8 +90,8 @@ Agent 创建/更新接口增加独立字段：
 }
 ```
 
-新建 Agent 默认 `[]`；更新不传时保持原值，显式 `null` 返回 422。停用 Skill 的既有引用保留，
-但运行时不加载；重新启用后自动恢复。仍被 Agent 引用的上传 Skill不能删除。
+新建 Agent 默认 `[]`；更新不传时保持原值，显式 `null` 返回 422。Skill自身没有启停状态；是否
+参与运行只由Agent的`skills`关联决定。仍被 Agent 引用的上传 Skill不能删除。
 
 ## 模型运行
 
@@ -102,7 +102,7 @@ Agent.skills
 → Harness 返回完整 SKILL.md
 → list_skill_resources 获得精确路径
 → read_file(resource={type: skill, skill_code, path}) 按需读取素材
-→ Agent同时启用 builtin:sandbox 时，可 execute_skill_script
+→ Agent同时关联 builtin:sandbox 时，可 execute_skill_script
 ```
 
 `load_capability` 使用 Pydantic AI 官方 Tool Call/Return，正常进入 History，并参与取消和上下文
@@ -117,6 +117,9 @@ Alembic 003 创建 `skill_packages`，并给 `agents` 增加非空 `skills` JSON
 Agent能力中的旧 `builtin:attachment`编码。升级003前必须确认
 `agents.capabilities` 不存在旧 `skill:*` 引用；迁移遇到此类数据会在 DDL 前失败。降级只允许
 `skill_packages` 为空且所有 Agent 的 `skills=[]`。
+
+Alembic 010 删除`skill_packages.enabled`。旧值不再影响运行时：升级后所有已安装Skill都作为目录
+资源存在，只有Agent显式关联的Skill才会加载。
 
 配置备份包含 Skill 元数据和 Agent 引用，但不复制平台文件服务中的 ZIP，所以不是可跨环境独立
 恢复的 Skill 安装包。跨环境迁移上传Skill应使用单个或全部导出；Agent绑定仍由目标环境配置。

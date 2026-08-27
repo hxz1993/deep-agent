@@ -15,7 +15,7 @@
 ```text
 Agent.capabilities
 → 解析已选择 ToolPackage
-→ 当前身份、App、Space、enabled 过滤
+→ 当前身份、App、Space和配置有效性过滤
 → 直接工具与 MCP Toolset
 → MCP 运行时 CombinedToolset
 → DeferredLoadingToolset

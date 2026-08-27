@@ -60,8 +60,8 @@ tests/
 | `test_context_test_scenarios.py` | 管理员测试会话场景、实时预算、消息往返序列化、常驻接口与用户归属 |
 | `test_attachment_extractors.py` | 文本编码、DOCX/XLSX 结构读取、分页与 Office 安全 |
 | `test_file_tools.py` | 附件与 Skill统一文件工具的来源参数、权限、Run缓存、single-flight、分页和多模态返回 |
-| `test_tool_package_registry.py` | ToolPackage Registry 的整包选择、默认和空列表语义 |
-| `test_sqlite_bootstrap.py` | Alembic 001～009结构、007→008会话清空、008→009辅助表清理及完整往返、Provider迁移与配置保留 |
+| `test_tool_package_registry.py` | ToolPackage Registry 的显式整包选择和空列表语义 |
+| `test_sqlite_bootstrap.py` | Alembic 001～010结构、007→008会话清空、008→009辅助表清理、009→010 Provider/模型/资源启停字段清理及完整往返、Provider迁移与配置保留 |
 | `test_*_migration_dialects.py` | 各数据迁移在SQLite、MySQL和PostgreSQL上的DDL或JSON清理逻辑 |
 | `test_tool_package_migration_dialects.py` | SQLite、MySQL、PostgreSQL 的 002 DDL 分支 |
 | `test_runtime_dependencies.py` | OpenAI SDK/aiohttp兼容锁定与Pydantic AI OpenAI模型导入 |
@@ -102,7 +102,7 @@ tests/
 - 在 `deep_agent/` 子目录运行 discover 会找不到测试；**始终在仓库根**
 - 集成测试可能依赖环境变量；勿把 `.env` 密钥写进测试
 - 改 `capabilities/mcp/` 或 `agent/headers.py` 后跑 integration 相关用例
-- 改内置 UI 工具时同时覆盖：`ui:builtin` 整包选择、`capabilities=null` 和空数组不加载、内置包/工具修改删除保护，以及 choice 的单选、多选、自由输入和空提交阻止。
+- 改内置 UI 工具时同时覆盖：`ui:builtin` 整包选择、空 `capabilities` 不加载、内置包/工具修改删除保护，以及 choice 的单选、多选、自由输入和空提交阻止。
 - `builtin__confirm`、`builtin__choice` 不兼容旧 `confirm_action`、`ask_user_choice` pending 会话；测试夹具和断言不得继续把旧名称当作内置工具。
 - 上下文压缩测试场景必须使用正式 Pydantic 消息类型并验证 serialize/deserialize 往返；不要直接
   插 JSON。场景随当前模型 trigger 动态扩展，断言不能写死消息条数或 Token 值。

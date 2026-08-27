@@ -28,9 +28,7 @@ def is_tool_visible(
     *,
     capabilities: list[str] | None,
 ) -> bool:
-    if not record.enabled:
-        return False
-    if capabilities is None or record.package_code not in capabilities:
+    if record.package_code not in (capabilities or []):
         return False
     return True
 
@@ -99,11 +97,9 @@ def build_ui_tool_package(
                 display_name=str((item.metadata or {}).get("display_name") or item.name),
                 description=item.description,
                 execution_type="external",
-                enabled=item.enabled,
             )
             for item in definitions
         ],
-        default_enabled=False,
     )
 
 
@@ -169,17 +165,16 @@ async def load_effective_ui_tools(
     stores: DataStores,
     spec: AgentSpec,
 ) -> EffectiveUiTools:
-    db_rows = await stores.ui_tool.list_all(enabled=True)
-    enabled_packages = {
-        package.code
-        for package in await stores.ui_tool_package.list_all(enabled=True)
+    db_rows = await stores.ui_tool.list_all()
+    available_packages = {
+        package.code for package in await stores.ui_tool_package.list_all()
     }
     db_records = [UIToolRecord.from_row(row) for row in db_rows if row.source == "manual"]
 
     visible_db = [
         record
         for record in db_records
-        if record.package_code in enabled_packages
+        if record.package_code in available_packages
         if is_tool_visible(
             record,
             capabilities=spec.capabilities,
@@ -204,8 +199,8 @@ async def load_effective_ui_tools(
 async def load_selectable_ui_tools(
     stores: DataStores,
 ) -> list[UIToolRecord]:
-    """List enabled extension UI tools that can be assigned to an Agent."""
-    db_rows = await stores.ui_tool.list_all(enabled=True)
+    """List extension UI tools that can be assigned to an Agent."""
+    db_rows = await stores.ui_tool.list_all()
     db_records = [UIToolRecord.from_row(row) for row in db_rows if row.source == "manual"]
     merged, _ = merge_definitions(builtin_ui_records(), db_records)
     return [record for record in merged if record.source == "manual"]
@@ -230,7 +225,7 @@ async def prepare_ui_tool_packages_for_spec(
         grouped.setdefault(definition.package_code, []).append(definition)
     package_rows = {
         package.code: package
-        for package in await stores.ui_tool_package.list_all(enabled=True)
+        for package in await stores.ui_tool_package.list_all()
     }
     packages: list[ToolPackage] = []
     for package_code, definitions in sorted(grouped.items()):
@@ -263,13 +258,13 @@ async def prepare_ui_tool_packages_for_spec(
 
 async def runnable_ui_tool_package_codes(stores: DataStores) -> set[str]:
     """Return UI package codes that can resolve to a non-empty valid Toolset."""
-    enabled_packages = {
+    available_packages = {
         package.code
-        for package in await stores.ui_tool_package.list_all(enabled=True)
+        for package in await stores.ui_tool_package.list_all()
     }
     valid_codes = {"ui:builtin"}
-    for row in await stores.ui_tool.list_all(enabled=True):
-        if row.source != "manual" or row.package_code not in enabled_packages:
+    for row in await stores.ui_tool.list_all():
+        if row.source != "manual" or row.package_code not in available_packages:
             continue
         record = UIToolRecord.from_row(row)
         try:

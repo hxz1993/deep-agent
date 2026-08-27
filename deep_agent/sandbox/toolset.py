@@ -70,5 +70,4 @@ def build_python_sandbox_tool_package(
                 "在全新的无状态 Python 环境中执行一次数据计算。",
             ),
         ],
-        default_enabled=False,
     )

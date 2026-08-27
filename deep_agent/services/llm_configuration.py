@@ -107,7 +107,6 @@ class LlmConfigurationService(SessionBoundMixin):
                     use_default_base_url=data.use_default_base_url,
                     base_url=base_url,
                     api_key=data.api_key,
-                    enabled=data.enabled,
                 )
                 db.add(row)
                 await db.flush()
@@ -210,7 +209,6 @@ class LlmConfigurationService(SessionBoundMixin):
                     context_window_tokens=data.context_window_tokens,
                     max_output_tokens=data.max_output_tokens,
                     tags=data.tags,
-                    enabled=data.enabled,
                 )
                 db.add(row)
                 await db.flush()

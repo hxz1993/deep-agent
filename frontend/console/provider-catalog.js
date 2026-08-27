@@ -55,7 +55,6 @@ export function buildProviderCatalogChoices({ provider, catalogModels, existingM
         name: modelCode,
         description: null,
         model: modelCode,
-        enabled: true,
         input_modalities: Array.isArray(model.input_modalities) && model.input_modalities.length
           ? model.input_modalities
           : ["text"],

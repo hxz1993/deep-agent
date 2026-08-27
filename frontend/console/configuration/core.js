@@ -73,6 +73,7 @@ function openActionDialog({
   message = "",
   icon = "circle-alert",
   tone = "default",
+  variant = "default",
   confirmLabel = "确认",
   cancelLabel = "取消",
   fields = [],
@@ -81,6 +82,7 @@ function openActionDialog({
   activeActionDialogCancel?.();
 
   dialog.dataset.tone = tone;
+  dialog.dataset.variant = variant;
   dialog.querySelector(".console-action-dialog-icon i")?.setAttribute("data-lucide", icon);
   dialog.querySelector("#consoleActionDialogTitle").textContent = title || "请确认";
   dialog.querySelector("#consoleActionDialogMessage").textContent = message;

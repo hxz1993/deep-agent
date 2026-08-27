@@ -20,7 +20,6 @@ def _package(code: str, *, source: str | None = None) -> ToolPackage:
         code=code,
         category="mcp",
         toolset=object(),
-        default_enabled=False,
         source=source,
     )
 
@@ -29,7 +28,6 @@ class McpResolverTests(unittest.IsolatedAsyncioTestCase):
     async def test_load_mcp_packages_reads_from_store(self) -> None:
         row = MagicMock(name="mcp-row")
         row.name = "echo"
-        row.enabled = True
         mcp_store = MagicMock()
         mcp_store.list_all = AsyncMock(return_value=[row])
         stores = DataStores(
@@ -64,8 +62,8 @@ class McpResolverTests(unittest.IsolatedAsyncioTestCase):
         selected = select_mcp_tool_packages(packages, spec)
         self.assertEqual([package.code for package in selected], ["mcp:echo"])
 
-    def test_null_excludes_non_default_mcp(self) -> None:
-        spec = AgentSpec(name="t", model="test", instructions="", capabilities=None)
+    def test_empty_selection_excludes_mcp(self) -> None:
+        spec = AgentSpec(name="t", model="test", instructions="", capabilities=[])
         self.assertEqual(select_mcp_tool_packages([_package("mcp:echo")], spec), [])
 
     def test_effective_names_use_package_codes(self) -> None:

@@ -129,7 +129,6 @@ const llmProvidersAdmin = {
         ${providerBrandMarkup(provider)}
         <span class="provider-list-copy"><strong>${escapeHtml(provider.name)}</strong><small>${escapeHtml(providerTypeLabel(provider))}</small></span>
         <span class="provider-list-signals">
-          <span class="provider-key-state ${provider.enabled === false ? "off" : "on"}" title="${provider.enabled === false ? "Provider 已停用" : "Provider 已启用"}"><i data-lucide="power"></i></span>
           <span class="provider-key-state ${provider.api_key_set ? "on" : "off"}" title="${provider.api_key_set ? "API Key 已配置" : "API Key 未配置"}"><i data-lucide="key-round"></i></span>
           <span class="provider-model-count"><i data-lucide="cpu"></i>${Number(provider.model_count ?? providerModels(provider.id).length)}</span>
         </span>
@@ -165,7 +164,6 @@ const llmProvidersAdmin = {
               <div class="provider-facts" aria-label="Provider 接入信息">
                 <span class="provider-fact" title="地址模式"><i data-lucide="route"></i><span>${provider.use_default_base_url ? "默认地址" : "自定义地址"}</span></span>
                 <span class="provider-fact ${provider.api_key_set ? "on" : "off"}" title="API Key"><i data-lucide="key-round"></i><span>${provider.api_key_set ? "Key 已配" : "Key 未配"}</span></span>
-                <span class="provider-fact ${provider.enabled === false ? "off" : "on"}" title="Provider 状态"><i data-lucide="power"></i><span>${provider.enabled === false ? "停用" : "启用"}</span></span>
               </div>
             </div>
             <span class="provider-fact provider-fact-url" title="Base URL"><i data-lucide="link-2"></i><code>${escapeHtml(provider.effective_base_url || provider.base_url || "—")}</code></span>
@@ -184,7 +182,6 @@ const llmProvidersAdmin = {
               <code>${escapeHtml(model.model)}</code>
               <span class="provider-model-facts">${providerModelFacts(model)}</span>
             </button>
-            <button type="button" class="model-enabled-switch ${model.enabled === false ? "off" : "on"}" data-toggle-model="${escapeHtml(model.id)}" role="switch" aria-checked="${model.enabled !== false}" title="${model.enabled === false ? "启用模型" : "停用模型"}"><span></span></button>
             <button type="button" class="provider-model-delete" data-delete-model="${escapeHtml(model.id)}" data-model-name="${escapeHtml(model.model)}" title="删除模型" aria-label="删除模型"><i data-lucide="trash-2"></i></button>
           </div>`).join("") : `<div class="provider-model-empty">尚未关联模型</div>`}</div>
       </section>`;
@@ -193,7 +190,6 @@ const llmProvidersAdmin = {
     host.querySelector("[data-provider-model]")?.addEventListener("click", () => window.llmModelsAdmin?.openCreate({ provider_id: provider.id }, { lockProvider: true, deriveName: true }));
     host.querySelector("[data-provider-catalog]")?.addEventListener("click", (event) => this.initializeFromCatalog(provider, event.currentTarget));
     host.querySelectorAll("[data-edit-model]").forEach((button) => button.addEventListener("click", () => window.llmModelsAdmin?.openEdit(button.dataset.editModel, { lockProvider: true, deriveName: true })));
-    host.querySelectorAll("[data-toggle-model]").forEach((button) => button.addEventListener("click", () => this.toggleModel(button.dataset.toggleModel)));
     host.querySelectorAll("[data-delete-model]").forEach((button) => button.addEventListener("click", () => window.llmModelsAdmin?.remove(button.dataset.deleteModel, button.dataset.modelName)));
     window.lucide?.createIcons();
   },
@@ -319,7 +315,6 @@ const llmProvidersAdmin = {
     document.getElementById("llmProviderModalTitle").textContent = "新建 Provider";
     document.getElementById("llmProviderName").value = "";
     setProviderApiKeyEditor();
-    document.getElementById("llmProviderEnabled").checked = true;
     document.getElementById("llmProviderUseDefaultBaseUrl").checked = Boolean(providerTypeByCode(document.getElementById("llmProviderType").value)?.supports_default_base_url);
     document.getElementById("llmProviderBaseUrl").value = "";
     syncProviderBaseUrl();
@@ -337,7 +332,6 @@ const llmProvidersAdmin = {
     document.getElementById("llmProviderUseDefaultBaseUrl").checked = Boolean(provider.use_default_base_url);
     document.getElementById("llmProviderBaseUrl").value = provider.base_url || provider.effective_base_url || "";
     setProviderApiKeyEditor({ maskedValue: provider.api_key_masked || "" });
-    document.getElementById("llmProviderEnabled").checked = provider.enabled !== false;
     syncProviderBaseUrl();
     document.getElementById("llmProviderModal").showModal();
   },
@@ -357,7 +351,6 @@ const llmProvidersAdmin = {
         provider_type: document.getElementById("llmProviderType").value,
         use_default_base_url: useDefault,
         base_url: document.getElementById("llmProviderBaseUrl").value.trim(),
-        enabled: document.getElementById("llmProviderEnabled").checked,
       };
       const apiKeyInput = document.getElementById("llmProviderApiKey");
       const apiKey = apiKeyInput.value.trim();
@@ -382,19 +375,6 @@ const llmProvidersAdmin = {
     } finally {
       AdminFormFeedback.setSubmitting(form, false);
     }
-  },
-
-  async toggleModel(modelId) {
-    const model = (state.llmModels || []).find((item) => item.id === modelId);
-    if (!model) return;
-    try {
-      await apiFetch(`/api/v1/llm-models/${encodeURIComponent(modelId)}`, {
-        method: "PATCH",
-        body: JSON.stringify({ enabled: model.enabled === false }),
-      });
-      await this.refresh();
-      showToast(model.enabled === false ? "模型已启用" : "模型已停用");
-    } catch (error) { showToast(error.message, true); }
   },
 
   async remove(provider) {

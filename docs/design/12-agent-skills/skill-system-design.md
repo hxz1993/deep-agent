@@ -1,8 +1,7 @@
 # DeepAgent 线上 Skill 体系设计
 
-> 实施版本：v0.3.18；运行目录收口：v0.3.20；脚本协议：v0.3.22；统一文件读取：v0.3.23；Alembic head：006
-> 运行时：Pydantic AI 2.31 + Pydantic AI Harness 0.21
-> Skill 数据结构由 Alembic 003 引入；当前数据库 head：006
+> 实施版本：v0.6.1；运行目录收口：v0.3.20；脚本协议：v0.3.22；统一文件读取：v0.3.23；Alembic head：010
+> Skill 数据结构由 Alembic 003 引入；Alembic 010删除Skill自身的冗余启停层。
 
 ## 1. 结论
 
@@ -30,7 +29,6 @@ MCP 工具，不代表 Agent 自动获得该工具。未被 Agent 选择的 Skil
 | `version` | 包声明版本，可为空；不用于历史固定 |
 | `schema_version` | DeepAgent Skill 包格式版本，当前 `1.0` |
 | `source` | 当前固定为 `upload`；Builtin 不写表 |
-| `enabled` | 全局启停；停用不清理 Agent 引用 |
 | `platform_file_id` | 平台文件服务中原始 ZIP 的 ID |
 | `file_name/file_size/content_hash` | 原包校验和展示信息 |
 | `manifest` | Manifest 与 SKILL frontmatter 的解析结果 |
@@ -39,10 +37,9 @@ MCP 工具，不代表 Agent 自动获得该工具。未被 Agent 选择的 Skil
 
 `agents.skills` 是非空 JSON 列表，默认 `[]`。新建和更新规则：
 
-- 新建只能选择存在且启用的 Builtin/上传 Skill。
+- 新建只能选择存在的 Builtin/上传 Skill。
 - 更新未携带 `skills` 时保持原值；显式 `null` 返回 422。
-- Skill 停用后已有引用保留，Agent 运行时给出明确不可用诊断；重新启用后自动恢复。
-- 编辑旧 Agent 时允许原样保留已停用引用，但不能把已停用 Skill 新增给其他 Agent。
+- Skill目录不再提供启停开关；是否进入Run只由Agent的`skills`显式关联决定。
 - 删除仍被 Agent 引用的上传 Skill 返回 409 和 Agent 名称列表。
 
 首版只有当前安装版本，不建 Revision 表。替换包时更新 File ID、Hash、Manifest 和资源索引。相同
@@ -95,9 +92,9 @@ runtime-skills/
 └── quick-create-budget-poc/
 ```
 
-服务启动时清理数据库已删除/停用的孤儿目录，并按 `platform_file_id` 下载缺失或 Hash 不一致的
-当前包。安装和替换直接复用本次已校验的上传字节原子更新 `<code>/`；启用和管理员手工重载会
-重新物化，停用和删除立即清理目录。普通 Agent Run 只读取本地目录，不访问平台文件服务、
+服务启动时清理数据库已删除的孤儿目录，并按 `platform_file_id` 下载缺失或 Hash 不一致的
+当前包。安装和替换直接复用本次已校验的上传字节原子更新 `<code>/`；管理员手工重载会
+重新物化，删除立即清理目录。普通 Agent Run 只读取本地目录，不访问平台文件服务、
 不重新解压，也不保留按 Hash 区分的历史版本。Hash 仅用于完整性和判断运行副本是否过期。
 
 平台 ZIP 是系统级配置文件，不属于业务 Space。平台上传使用 `INF` 文件类型；Space 级用户上传
@@ -107,7 +104,7 @@ runtime-skills/
 Token、Cookie 或完整 Header。
 
 单个 Skill 同步失败不会阻止应用启动，也不会阻塞其他 Skill 或普通回答。运行目录意外丢失时，
-本进程只兜底同步一次；失败后保持错误状态，直到重载、启停或服务重启，不在每轮 Run 重复下载。
+本进程只兜底同步一次；失败后保持错误状态，直到重载或服务重启，不在每轮 Run 重复下载。
 多 Pod 共享平台原包，但各自维护一份当前运行目录。
 
 事务边界：
@@ -124,7 +121,7 @@ Token、Cookie 或完整 Header。
 
 ## 5. Harness 渐进披露
 
-每次 Run 只装配当前 Agent 选择且启用的 Skill：
+每次 Run 只装配当前 Agent 选择且运行副本就绪的 Skill：
 
 ```text
 Agent.skills
@@ -147,8 +144,8 @@ DeepAgent提供一个Skill资源目录工具和一个跨来源文件工具：
   与会话附件共用入口；文本按1-based逻辑行、DOCX按逻辑块、XLSX按物理行分页。XLSX未指定
   `sheet`时选择第一个可见工作表。图片不属于文件工具。
 
-没有可用资源时不披露 `read_file`；目录工具在选择含资源的Skill时披露。未选择、停用和未知
-Skill均不可访问。图片、PDF、PPTX等当前不解析的二进制只出现在目录；后续专用文档解析工具必须
+没有可用资源时不披露 `read_file`；目录工具在选择含资源的Skill时披露。未选择、未知或运行副本
+不可用的Skill均不可访问。图片、PDF、PPTX等当前不解析的二进制只出现在目录；后续专用文档解析工具必须
 继续复用同一Agent Skill授权与精确资源索引。Script可以列出但 `read_file`
 始终拒绝。
 路径错误使用 `ModelRetry`，索引内文件缺失、损坏或解析失败使用 `ToolFailed`。运行时根据路径、
@@ -165,7 +162,7 @@ Builtin Skill 位于 `deep_agent/builtin_skills/`，随代码发布、不写数�
 展示且只读：
 
 - `deepagent-diagnostics`：排查会话、模型、工具、压缩和取消；不读取服务器日志、不执行 Shell。
-- `deepfos-readonly-analysis`：指导 DeepFOS 只读问数、成员确认和结果核验；仍需 Agent 独立启用
+- `deepfos-readonly-analysis`：指导 DeepFOS 只读问数、成员确认和结果核验；仍需 Agent 独立关联
   对应 MCP ToolPackage。
 
 两个包都包含 SKILL.md、References 与 JSON Asset，用于回归名称目录、正文加载、资源分页、MCP
@@ -195,7 +192,7 @@ GET    /api/v1/skills/{code}/package
 `noop`、内容相同但平台原包已丢失并完成恢复 `repaired`。`repaired` 会同时修复数据库 File ID、
 当前 Pod运行目录和后续 Pod启动所需的共享原包，不是仅修补当前进程缓存。
 
-Console 配置中心提供独立 Skill 页面：列表、详情、资源树、Manifest、安装、替换、启停、重载、下载和删除；
+Console 配置中心提供独立 Skill 页面：列表、详情、资源树、Manifest、安装、替换、重载、下载和删除；
 Builtin 标识为“代码内置、只读”。Agent 独立编辑页将 Skill 与工具包分区，保存独立编码列表。
 聊天中 `load_capability` 显示为默认折叠的“正在加载 Skill”，资源与脚本工具按普通 Tool Call/Result
 展示。Skill页区分文本、Word、Excel可读和当前不可读资源；脚本只列路径和数量，不增加单独的

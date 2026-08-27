@@ -54,7 +54,11 @@ MCP 在请求时由 `resolve_mcp_toolsets` 解析（DB 行 + `mcps/` builtin 兜
 2. **无 `agent_id`**：`build_runner(model?, capabilities?)` → `OPTION` 默认 `AgentSpec`
 3. **有 `agent_id`**：`build_runner_for_agent()` → `agents` 表 → `AgentSpec.from_row()` → 存储 `(agent_id, session_id)`
 4. `AgentRunner.run_stream()`：Session锁 → Event Store恢复模型Surface → Pydantic AI运行/压缩 → 临时SSE → 完整Part拆成Event；Run/Compaction终态按同一Event ID更新
-5. `capabilities: null` → 仅 `default_enabled=True` 的工具包；显式列表按工具包编码启用
+5. `capabilities`和`skills`都是非空显式列表；空列表表示本Agent不关联该类资源，不存在默认包继承
+
+v0.6.1起，Provider、Model、Skill、MCP、UI工具包和UI工具表均不保存`enabled`。Provider运行可用性
+只从类型、地址、凭据等真实配置派生；Model由Agent或请求级`model_id`选用；Skill和工具是否参与
+Run只看Agent显式关联。API Schema必须拒绝旧`enabled`输入，不能静默忽略后形成第二套状态。
 
 ### 正式取消（v0.3.10）
 
@@ -177,7 +181,7 @@ XML + JSON 投影。业务字段语义仍由具体 Agent Prompt 负责。
 | 路径 | 职责 |
 | --- | --- |
 | `registry.py` | `ToolInfo` / `ToolPackage` / `ToolPackageRegistry` |
-| `native/builtin.py` | 默认启用的内置“通用工具”，当前提供 `get_current_time` |
+| `native/builtin.py` | 内置“通用工具”，当前提供 `get_current_time` |
 | `mcp/db_loader.py` | 从 `mcp_servers` 构建 MCP ToolPackage 与快照 Toolset |
 | `mcp/builtin.py` | 发现 `mcps/<name>/server.py` |
 | `mcp/toolset_builder.py` | url / stdio / builtin + header 注入 |
@@ -187,7 +191,7 @@ XML + JSON 投影。业务字段语义仍由具体 Agent Prompt 负责。
 | `mcp/run_scoped.py` | builtin MCP：按 agent run 租约 HTTP client |
 | `mcp/lease_manager.py` | worker 级 MCP lease + shared registry touch |
 | `ui/registry.py` | builtin/manual UI 工具按包筛选、合并和 `prepare_ui_tool_packages_for_spec` |
-| `../sandbox/toolset.py` | 默认关闭的 `builtin:sandbox`；代理 PythonExecutionBackend |
+| `../sandbox/toolset.py` | `builtin:sandbox`；代理 PythonExecutionBackend |
 
 `../files/`不是 ToolPackage：它按当前会话附件和已授权 Skill资源自动注入统一 `read_file`，
 并负责来源隔离、文本/Word/Excel分页、同一 Run 的字节/解析缓存和并发 single-flight。具备可信
@@ -215,7 +219,7 @@ user/App/Space上下文时，`export_file_to_download_center`始终直接披露�
 | `mcp.py` | CRUD `/mcp`、统一检测 `/mcp/{name}/inspect` |
 | `ui_tools.py` | CRUD `/ui-tools`；工具必须归属手工 UI 工具包 |
 | `ui_tool_packages.py` | CRUD `/ui-tool-packages`；代码内置包只读 |
-| `skills.py` | Skill 目录、安装、替换、启停、资源和原包下载 |
+| `skills.py` | Skill 目录、安装、替换、资源和原包下载 |
 | `sessions.py` | 会话列表、Conversation History、Event分页、上下文状态、删除与正式取消当前Run |
 | `tools.py` | `GET /tools` |
 | `deps.py` | `build_runner` / `build_runner_for_agent`，统一承接多入口的运行器组装 |
@@ -233,7 +237,8 @@ user/App/Space上下文时，`export_file_to_download_center`始终直接披露�
 | 表 | 用途 |
 | --- | --- |
 | `agents` | DB Agent（UUID PK，name 唯一） |
-| `llm_models` | LLM 运行时唯一模型事实：连接、模态、上下文、最大输出与 tags |
+| `llm_providers` | Provider类型、Base URL、凭据和协议配置；不保存独立启停状态 |
+| `llm_models` | LLM 运行时唯一模型事实：Provider引用、模态、上下文、最大输出与 tags；不保存独立启停状态 |
 | `model_catalog` | models.dev 的 Lab/Model/Provider 数据库快照，只用于浏览和预填 |
 | `mcp_servers` | MCP transport、config JSON、最近一次 inspection 检测快照 |
 | `skill_packages` | 上传 Skill 当前安装版本的元数据、平台 File ID、Manifest 与资源索引 |
@@ -250,8 +255,8 @@ user/App/Space上下文时，`export_file_to_download_center`始终直接披露�
 
 ### 内置工具包
 
-`builtin:general` 只提供当前时间且默认启用；`builtin:sandbox` 提供 Python 计算和条件式 Skill 脚本执行，
-且默认关闭。每个包严格包装一个 Toolset。内置包由代码随版本发布，
+`builtin:general` 只提供当前时间；`builtin:sandbox` 提供 Python 计算和条件式 Skill 脚本执行。
+二者都只在Agent的`capabilities`显式关联后进入Run。每个包严格包装一个 Toolset。内置包由代码随版本发布，
 不在数据库注册；配置中心只读展示，Agent 仍按整包选择。
 
 ### 系统工具目录
@@ -271,7 +276,7 @@ Plan表、隐藏全局计划、Reminder用户消息或自研任务状态机。
 - Skill 不属于 ToolPackage，Agent 通过 `agents.skills` 独立选择。
 - 代码内置只读包位于 `builtin_skills/<code>/SKILL.md`。
 - 上传包由 `/api/v1/skills` 校验后保存到平台文件服务，`skill_packages` 只存 File ID 和索引。
-- 当前 Pod 只保留 `runtime-skills/<code>/` 一份上传 Skill 运行副本；启动、安装、替换、启用和
+- 当前 Pod 只保留 `runtime-skills/<code>/` 一份上传 Skill 运行副本；启动、安装、替换和
   `POST /api/v1/skills/{code}/reload` 负责同步，普通 Run 不访问平台文件服务。Hash 只用于完整性
   和过期判断，不代表产品版本，也不保留历史目录。
 - 同 Hash包替换必须先验证平台原 ZIP：可下载时返回 `noop`；原 File ID失效时重新上传原包、
@@ -280,7 +285,7 @@ Plan表、隐藏全局计划、Reminder用户消息或自研任务状态机。
   提供授权目录，通过系统 `read_file`读取正文。
 - 文本、DOCX 和 XLSX 根据索引中的路径、MIME 与后缀按行、逻辑块或物理行分页；图片和其他
   二进制只展示元数据，不经文件工具读取。历史安装包不需要为XLSX重新生成索引。
-- `scripts/`、`tools/` 可以随包保存并列出路径，但不能通过资源工具读取。Agent选择该Skill并启用
+- `scripts/`、`tools/` 可以随包保存并列出路径，但不能通过资源工具读取。Agent选择该Skill并关联
   `builtin:sandbox`时，`execute_skill_script`与 `execute_python`共用当前Python沙箱Backend。
 - 单个上传 Skill 文件缺失或同步失败时，本轮跳过该 Skill 并继续运行；不得让它阻塞其他 Skill、
   MCP 或普通回答。诊断进入 `/skills` 的派生状态与 `final.context.skills`，不写数据库状态字段。
@@ -300,7 +305,7 @@ Plan表、隐藏全局计划、Reminder用户消息或自研任务状态机。
 
 代码内置 `builtin__confirm`、`builtin__choice` 同属只读包 `ui:builtin`。手工包保存于
 `ui_tool_packages`，工具通过 `package_code` 归属；Agent 的 `capabilities` 只保存包编码，
-选中后包内所有启用且 Schema 有效的工具进入同一个 ExternalToolset。内置包和工具不能修改
+选中后包内所有 Schema 有效的工具进入同一个 ExternalToolset。内置包和工具不能修改
 或删除；手工包包含工具或被 Agent 引用时也不能删除。
 
 `builtin__choice` 始终支持候选外自由输入，结果固定为 `{selected: string[], custom_input: string | null}`；单选、多选和自由输入共用这一结构。
@@ -312,7 +317,7 @@ Plan表、隐藏全局计划、Reminder用户消息或自研任务状态机。
 `resource={type: skill, skill_code, path}`。工具首次通常只传来源，随后根据
 `has_more/next_offset`渐进读取。合法附件ID范围必须从当前消息和当前会话完整
 原始附件Event建立，不能从摘要Evidence建立，也不能仅依赖平台下载权限。
-Skill路径必须属于当前 Agent已选择、启用且运行目录就绪的资源索引。字节和解析结果只缓存到
+Skill路径必须属于当前 Agent已选择且运行目录就绪的资源索引。字节和解析结果只缓存到
 本次用户消息对应的完整 Run终态，不跨Run、进程或数据库保存。
 
 图片、音频和视频不进入 `read_file`。当前轮媒体附件直接作为原生多模态内容交给Provider；
@@ -341,7 +346,7 @@ single-flight。Spill失败时Event保存完整`inline_fallback`并标记失败�
 
 ### Python Sandbox
 
-`execute_python` 属于默认关闭的 `builtin:sandbox`，与时间工具分开整包选择。v0.3.22 的
+`execute_python` 属于 `builtin:sandbox`，与时间工具分开整包选择；新Agent不会自动关联。v0.3.22 的
 `execute_skill_script` 复用同一 Backend，但只接受已索引的 UTF-8 `.py`、JSON inputs、显式参数和
 最多 16 个同 Skill 授权资源；正式结果只从 `outputs/result.json` 读取。`subprocess-dev` 的
 二者都通过当前 `SubprocessBackend`启动全新的 `.venv-sandbox` Python子进程；结束后销毁进程和
@@ -473,5 +478,5 @@ SSE 协议：[`../docs/guides/sse-protocol.md`](../docs/guides/sse-protocol.md)�
 
 | 现象 | 原因 |
 | --- | --- |
-| MCP 工具为空 | MCP 未 enabled，或 Agent 未选择对应 `mcp:<name>` |
+| MCP 工具为空 | Agent 未选择对应 `mcp:<name>`，或URL MCP缺少有效工具快照 |
 | 历史不在预期数据库 | 未配置 DBMS 时实际使用默认文件 SQLite；检查 `DEEP_AGENT_SQLITE_PATH` |

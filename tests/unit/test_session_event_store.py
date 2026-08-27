@@ -33,14 +33,12 @@ class SessionEventStoreTests(unittest.IsolatedAsyncioTestCase):
                 use_default_base_url=False,
                 base_url="http://example.invalid/v1",
                 api_key=None,
-                enabled=True,
             )
             model = LlmModel(
                 id="00000000-0000-4000-8000-000000000099",
                 provider_id=provider.id,
                 name="Model",
                 model="test:model",
-                enabled=True,
             )
             agent = Agent(
                 id="00000000-0000-4000-8000-000000000001",

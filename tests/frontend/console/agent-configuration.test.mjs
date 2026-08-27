@@ -28,16 +28,16 @@ function loadAgentConfigurationUi() {
   return context;
 }
 
-test("新建和历史 null 能力配置不选择内置 UI 工具", () => {
+test("新建和历史 null 能力配置都不隐式选择任何工具包", () => {
   const ui = loadAgentConfigurationUi();
   const selected = ui.buildCapabilitySelectionSet(null, [
-    { code: "builtin:general", default_enabled: true, enabled: true },
-    { code: "builtin:sandbox", default_enabled: false, enabled: true },
-    { code: "skill:optional", default_enabled: false, enabled: true },
-    { code: "ui:builtin", default_enabled: false, enabled: true },
+    { code: "builtin:general" },
+    { code: "builtin:sandbox" },
+    { code: "mcp:optional" },
+    { code: "ui:builtin" },
   ]);
 
-  assert.deepEqual([...selected], ["builtin:general"]);
+  assert.deepEqual([...selected], []);
 });
 
 test("内置 UI 工具与手工 UI 工具使用相同可选能力编码", () => {
@@ -45,8 +45,8 @@ test("内置 UI 工具与手工 UI 工具使用相同可选能力编码", () => 
   const selected = ui.buildCapabilitySelectionSet(
     ["ui:builtin", "ui:demo"],
     [
-      { code: "ui:builtin", default_enabled: false, enabled: true },
-      { code: "ui:demo", default_enabled: false, enabled: true },
+      { code: "ui:builtin" },
+      { code: "ui:demo" },
     ],
   );
 
@@ -56,10 +56,10 @@ test("内置 UI 工具与手工 UI 工具使用相同可选能力编码", () => 
   );
 });
 
-test("新建 Agent 使用 null 初始化默认能力而不是空数组", () => {
+test("新建 Agent 使用空数组初始化工具包关联", () => {
   assert.match(
     source,
-    /openCreate\(\)[\s\S]*?renderCapabilityCheckboxes\(null\)/,
+    /openCreate\(\)[\s\S]*?renderCapabilityCheckboxes\(\[\]\)/,
   );
 });
 
@@ -89,7 +89,6 @@ test("Agent 能力页提交独立 Sandbox 工具包编码", () => {
       label: "Python 沙箱",
       source: "builtin",
       description: "执行受控 Python 代码",
-      default_enabled: false,
       tools: [{ name: "execute_python", description: "执行 Python。" }],
     },
     new Set(["builtin:sandbox"]),
@@ -109,7 +108,6 @@ test("Agent 内置工具卡片优先展示中文名称和技术类型", () => {
       label: "通用工具",
       source: "builtin",
       description: "进程内通用工具",
-      default_enabled: true,
       tools: [{ name: "get_current_time", description: "获取当前 UTC 时间。" }],
     },
     new Set(["builtin:general"]),
@@ -130,7 +128,6 @@ test("Agent 工具包卡片展示后端披露策略且不提供工具级复选�
       label: "deepfos",
       source: "database",
       description: "DeepFOS 平台工具",
-      default_enabled: false,
       tool_count: 24,
       disclosure_mode: "search",
       preselect_limit: 3,

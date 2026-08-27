@@ -100,7 +100,6 @@ class SystemToolCatalogTests(unittest.IsolatedAsyncioTestCase):
                 },
             },
             description="Small documentation MCP",
-            enabled=True,
         )
         ctx = SimpleNamespace(
             registry=build_registry(),

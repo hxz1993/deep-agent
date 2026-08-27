@@ -42,14 +42,14 @@ provider_type         注册表类型编码
 use_default_base_url  是否使用框架默认地址
 base_url              明确持久化并回显的当前地址
 api_key               沿用现有数据库密钥存储方式
-enabled               Provider运行门禁
 created_at / updated_at
 ```
 
-`llm_models`新增带索引和`RESTRICT`外键的 `provider_id`及模型级`enabled`，并删除原有
+`llm_models`新增带索引和`RESTRICT`外键的 `provider_id`，并删除原有
 `base_url`、`api_key`。Provider被模型引用时不能删除，类型也不能直接修改。模型名称只要求在同一
-Provider内唯一，因此两个Provider可以配置同名模型。是否允许进入新Run由Provider状态、模型状态、
-密钥和地址共同决定，连接事实只存在Provider一处。
+Provider内唯一，因此两个Provider可以配置同名模型。模型是否进入Run只由Agent或请求级`model_id`
+选择；Provider是否可用由密钥和地址等真实连接配置决定，连接事实只存在Provider一处。Alembic 010
+删除Provider和模型自身的冗余`enabled`列。
 
 ### 默认地址语义
 
@@ -89,12 +89,12 @@ DELETE /api/v1/llm-providers/{provider_id}
 ```
 
 响应只返回 `api_key_set`，永不返回原始密钥。PATCH省略 `api_key`表示保留；替换使用新值；清除
-必须显式发送 `clear_api_key=true`。清除密钥不会修改子模型的`enabled`；模型配置保持原状并进入
+必须显式发送 `clear_api_key=true`。清除密钥不会修改子模型；模型配置保持原状并进入
 `provider_unconfigured`不可用状态，补回密钥后自动恢复。
 
 模型创建和更新接收 `provider_id`，管理接口不再通过模型修改地址或密钥。模型响应增加Provider摘要，
 并保留从Provider派生的 `base_url`和 `api_key_set`兼容字段；`selectable`表示当前有效可用性，
-`unavailable_reason`只返回模型停用、Provider停用、未配置或配置无效等脱敏原因。
+`unavailable_reason`只返回Provider未配置或配置无效等脱敏原因。
 `GET /llm-models`支持可选 `provider_id`过滤，业务选择器可加`selectable_only=true`只读取可选模型。
 原有核心字段与 `model_id`语义不变。
 
@@ -104,26 +104,26 @@ DELETE /api/v1/llm-providers/{provider_id}
 
 ```text
 LlmModel + LlmProvider
-  -> 校验外键、Provider与模型启用状态、密钥和地址
+  -> 校验外键、密钥和地址
   -> 按 provider_type 选择 Pydantic AI Provider
   -> 构造 Pydantic AI Model
   -> 交给现有 Agent Factory
 ```
 
 Pydantic AI继续负责 SDK客户端、认证头、默认地址、Provider Profile、流式响应、取消和错误转换。
-DeepAgent只负责持久化、授权、两层启停与引用校验、显式工厂选择、脱敏和观测。Provider停用、
-缺失、缺Key、地址无效或模型停用时在请求前失败，不自动切换或重新猜测。
+DeepAgent只负责持久化、授权、引用校验、显式工厂选择、脱敏和观测。Provider缺失、缺Key或地址
+无效时在请求前失败，不自动切换或重新猜测。
 
 普通Agent、模型覆盖、Prompt估算、上下文测试、标题生成均使用同一解析器。首轮标题请求使用该轮实际生效模型；压缩摘要固定复用当前Agent已解析的主模型。二者都不提供独立模型配置。Catalog只提供预填数据，不参与运行时关联。
 
 ## Console
 
-配置中心Provider页面采用轻风格左右分栏：左侧展示品牌标识、实例、类型、启停、密钥状态和模型
-数量；右侧管理默认地址、明确地址回显、密钥、启停和关联模型。新建Provider不自动创建模型。
+配置中心Provider页面采用轻风格左右分栏：左侧展示品牌标识、实例、类型、密钥状态和模型数量；
+右侧管理默认地址、明确地址回显、密钥和关联模型。新建Provider不自动创建模型。
 
 Provider详情中的模型采用固定父子关系：新建和编辑时不允许切换Provider，名称兼容字段由运行模型
-编码同步生成；关联列表直接展示运行模型编码。模型选项只有在Provider和Model两层均启用且连接配置
-完整时才可新选。模型也可由目录预填；目录不会修改Provider凭据。Agent、Console Chat等
+编码同步生成；关联列表直接展示运行模型编码。模型选项只有在Provider连接配置完整时才可新选。
+模型也可由目录预填；目录不会修改Provider凭据。Agent、Console Chat等
 模型选择器按Provider实例分组，option值和请求参数始终仍是 `llm_model.id` / `model_id`。
 
 DeepCube和DeepTable客户端读取的模型核心字段和发送的`model_id`保持兼容，不要求阻断式改造。为避免

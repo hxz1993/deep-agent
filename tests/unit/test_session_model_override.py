@@ -27,7 +27,6 @@ def _llm(model_id: str, model: str) -> LlmModel:
         name=model,
         model=f"openai:{model}",
         provider_id="00000000-0000-4000-8000-000000000099",
-        enabled=True,
     )
 
 
@@ -39,7 +38,6 @@ def _provider():
         use_default_base_url=False,
         base_url="https://example.invalid/v1",
         api_key="test-key",
-        enabled=True,
     )
 
 

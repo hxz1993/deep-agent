@@ -313,7 +313,6 @@ const uiToolsAdmin = {
                   <code>${escapeHtml(item.code)}</code>
                 </span>
                 <span class="ui-tool-tree-node-meta">
-                  <span class="ui-tool-tree-status ${item.enabled ? "is-enabled" : "is-disabled"}"><span></span>${item.enabled ? "启用" : "停用"}</span>
                   <span class="ui-tool-tree-count" title="工具数量"><strong>${escapeHtml(String(item.tool_count || 0))}</strong><i data-lucide="wrench"></i></span>
                 </span>
               </span>
@@ -356,7 +355,7 @@ const uiToolsAdmin = {
     label.textContent = selected.label;
     code.textContent = selected.code;
     description.textContent = selected.description || "暂无说明";
-    meta.innerHTML = `<span class="badge ${selected.enabled ? "on" : "off"}">${selected.enabled ? "启用" : "停用"}</span>`;
+    meta.innerHTML = "";
     const manual = selected.source === "manual";
     editButton.classList.toggle("hidden", !manual);
     deleteButton.classList.toggle("hidden", !manual);
@@ -372,7 +371,6 @@ const uiToolsAdmin = {
     document.getElementById("uiToolPackageEditCode").disabled = false;
     document.getElementById("uiToolPackageLabel").value = "";
     document.getElementById("uiToolPackageDescription").value = "";
-    document.getElementById("uiToolPackageEnabled").checked = true;
     document.getElementById("uiToolPackageModal").showModal();
   },
 
@@ -387,7 +385,6 @@ const uiToolsAdmin = {
     document.getElementById("uiToolPackageEditCode").disabled = true;
     document.getElementById("uiToolPackageLabel").value = item.label;
     document.getElementById("uiToolPackageDescription").value = item.description || "";
-    document.getElementById("uiToolPackageEnabled").checked = item.enabled;
     document.getElementById("uiToolPackageModal").showModal();
   },
 
@@ -398,7 +395,6 @@ const uiToolsAdmin = {
     const payload = {
       label: document.getElementById("uiToolPackageLabel").value.trim(),
       description: document.getElementById("uiToolPackageDescription").value.trim() || null,
-      enabled: document.getElementById("uiToolPackageEnabled").checked,
     };
     if (!payload.label) {
       AdminFormFeedback.show(form, "显示名称不能为空");
@@ -460,12 +456,12 @@ const uiToolsAdmin = {
     const tbody = document.getElementById("uiToolsTableBody");
     if (!tbody) return;
     if (!this.selectedPackageCode) {
-      tbody.innerHTML = `<tr><td colspan="6" class="empty-cell">请选择左侧工具包</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="5" class="empty-cell">请选择左侧工具包</td></tr>`;
       return;
     }
     const packageTools = items.filter((item) => item.package_code === this.selectedPackageCode);
     if (!packageTools.length) {
-      tbody.innerHTML = `<tr><td colspan="6" class="empty-cell">当前工具包暂无 UI 工具</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="5" class="empty-cell">当前工具包暂无 UI 工具</td></tr>`;
       return;
     }
     tbody.innerHTML = packageTools
@@ -473,7 +469,6 @@ const uiToolsAdmin = {
       <tr>
         <td><strong>${escapeHtml(tool.name)}</strong></td>
         <td>${escapeHtml(tool.widget || "—")}</td>
-        <td><span class="badge ${tool.enabled ? "on" : "off"}">${tool.enabled ? "是" : "否"}</span></td>
         <td class="desc-cell" title="${escapeHtml(tool.description || "—")}">${escapeHtml(tool.description || "—")}</td>
         <td>${escapeHtml(formatDate(tool.updated_at))}</td>
         <td><div class="row-actions">
@@ -492,7 +487,7 @@ const uiToolsAdmin = {
     const tbody = document.getElementById("uiToolsTableBody");
     const tree = document.getElementById("uiToolPackageTree");
     if (!tbody || !tree) return;
-    tbody.innerHTML = `<tr><td colspan="6" class="empty-cell">加载中…</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="5" class="empty-cell">加载中…</td></tr>`;
     tree.innerHTML = `<div class="ui-tool-tree-state">加载中…</div>`;
     try {
       const [packageData, data] = await Promise.all([
@@ -515,7 +510,7 @@ const uiToolsAdmin = {
       this.populatePackageSelect(this.selectedPackageCode);
     } catch (err) {
       tree.innerHTML = `<div class="ui-tool-tree-state">${escapeHtml(err.message)}<br /><button type="button" class="btn" data-ui-tools-retry>重新加载</button></div>`;
-      tbody.innerHTML = `<tr><td colspan="6" class="empty-cell">加载失败</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="5" class="empty-cell">加载失败</td></tr>`;
       tree.querySelector("[data-ui-tools-retry]")?.addEventListener("click", () => this.refresh());
     }
   },
@@ -528,7 +523,6 @@ const uiToolsAdmin = {
         ["所属工具包", tool.package_code],
         ["来源", SOURCE_LABELS[tool.source] || tool.source],
         ["Widget", tool.widget],
-        ["启用", tool.enabled ? "是" : "否"],
         ["描述", tool.description],
         ["参数 Schema", uiToolJsonValue(tool.parameters_json_schema), "code"],
         ["结果 Schema", uiToolJsonValue(tool.result_schema), "code"],
@@ -571,7 +565,6 @@ const uiToolsAdmin = {
     this.editingToolPackageCode = selected.code;
     document.getElementById("uiToolModalTitle").textContent = "新建自定义 UI 工具";
     document.getElementById("uiToolName").value = "";
-    document.getElementById("uiToolEnabled").checked = true;
     document.getElementById("uiToolTemplate").value = "confirm";
     this.setFormMode("create");
     this.populatePackageSelect(selected.code);
@@ -592,7 +585,6 @@ const uiToolsAdmin = {
       document.getElementById("uiToolMetadata").value = tool.metadata
         ? JSON.stringify(tool.metadata, null, 2)
         : "";
-      document.getElementById("uiToolEnabled").checked = tool.enabled;
       this.populatePackageSelect(tool.package_code);
       this.setFormMode("edit");
       this.loadSchemas(tool.parameters_json_schema, tool.result_schema);
@@ -623,7 +615,6 @@ const uiToolsAdmin = {
     }
 
     const widget = this.getWidgetValue();
-    const enabled = document.getElementById("uiToolEnabled").checked;
     const description = document.getElementById("uiToolDescription").value.trim();
     const package_code = this.editingToolPackageCode
       || document.getElementById("uiToolPackageCode")?.value
@@ -653,7 +644,6 @@ const uiToolsAdmin = {
             widget,
             result_schema: result_schema ?? null,
             metadata: metadata ?? null,
-            enabled,
           }),
         });
         showToast("已保存");
@@ -668,7 +658,6 @@ const uiToolsAdmin = {
             widget,
             result_schema: result_schema ?? null,
             metadata: metadata ?? null,
-            enabled,
           }),
         });
         showToast("已注册");

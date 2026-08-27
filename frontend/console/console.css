@@ -1608,7 +1608,6 @@ dialog.agent-editor-page::backdrop { display: none; }
 .mcp-editor-section .field + .field,
 .mcp-editor-section .mcp-transport-fields { margin-top: 18px; }
 .mcp-editor-basics #mcpDescription { min-height: 150px; resize: vertical; }
-.mcp-enabled-field { margin-top: 18px; }
 .mcp-transport-fields { display: grid; gap: 18px; }
 .mcp-transport-fields.hidden { display: none !important; }
 .mcp-editor-page #mcpHeaders,

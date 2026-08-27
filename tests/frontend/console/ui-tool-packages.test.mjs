@@ -24,7 +24,8 @@ test("UI 工具页使用左侧工具包树和右侧单一工具表", () => {
   assert.match(template, /id="uiToolsTableBody"/);
   assert.doesNotMatch(template, /id="uiToolPackagesTableBody"/);
   assert.equal((template.match(/id="uiToolsTableBody"/g) || []).length, 1);
-  assert.match(template, /Agent 按工具包整体启用/);
+  assert.match(template, /是否参与运行只由 Agent 关联决定/);
+  assert.doesNotMatch(template, /id="uiToolPackageEnabled"|id="uiToolEnabled"/);
   assert.match(source, /api\/v1\/ui-tool-packages/);
   assert.doesNotMatch(template, /uiToolsFilters|uiToolFilterSearch|uiToolFilterEnabled/);
   assert.doesNotMatch(source, /uiToolFilterSearch|uiToolFilterEnabled/);
@@ -34,8 +35,8 @@ test("UI 工具页使用左侧工具包树和右侧单一工具表", () => {
   assert.ok(source.indexOf('["自定义", this.packages.filter') < source.indexOf('["内置", this.packages.filter'));
   assert.match(source, /暂无自定义工具包，请先新建/);
   assert.match(source, /this\.packages\.find\(\(item\) => item\.source === "manual"\)/);
-  assert.match(source, /class="ui-tool-tree-status/);
   assert.match(source, /class="ui-tool-tree-count" title="工具数量"/);
+  assert.doesNotMatch(source, /class="ui-tool-tree-status/);
   assert.match(source, /data-lucide="wrench"/);
   assert.doesNotMatch(source, /<span class="badge">\$\{escapeHtml\(String\(selected\.tool_count/);
   assert.doesNotMatch(source, /meta\.innerHTML = `[\s\S]*source-\$\{escapeHtml\(selected\.source\)/);

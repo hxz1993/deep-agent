@@ -37,7 +37,6 @@ def tool_package_from_row(row: McpServer) -> ToolPackage:
         source="builtin" if row.transport == "builtin" else "database",
         description=description,
         tools=[],
-        default_enabled=False,
         tool_catalog_status="count_only" if catalog_ready else inspection.tools.snapshot_status,
     )
 
@@ -45,8 +44,6 @@ def tool_package_from_row(row: McpServer) -> ToolPackage:
 def tool_packages_from_rows(rows: list[McpServer]) -> list[ToolPackage]:
     packages: list[ToolPackage] = []
     for row in rows:
-        if not row.enabled:
-            continue
         try:
             packages.append(tool_package_from_row(row))
         except Exception:

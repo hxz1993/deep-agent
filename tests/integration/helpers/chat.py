@@ -91,7 +91,6 @@ class _McpRow:
     transport: str
     config: dict[str, Any]
     description: str | None = None
-    enabled: bool = True
     inspection: dict[str, Any] | None = None
 
 
@@ -142,7 +141,6 @@ async def _seed_mcp_rows(stores: DataStores, rows: list[_McpRow]) -> None:
                 transport=row.transport,
                 config=row.config,
                 description=row.description,
-                enabled=row.enabled,
             ),
             inspection=row.inspection,
         )

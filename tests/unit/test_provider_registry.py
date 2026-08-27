@@ -37,7 +37,6 @@ def _config(
     use_default_base_url: bool = True,
     base_url: str = "https://gateway.example.com/v1/",
     api_key: str = "sk-test",
-    enabled: bool = True,
 ) -> ProviderRuntimeConfig:
     return ProviderRuntimeConfig(
         id=f"provider-{provider_type}",
@@ -46,7 +45,6 @@ def _config(
         use_default_base_url=use_default_base_url,
         base_url=base_url,
         api_key=api_key,
-        enabled=enabled,
     )
 
 
@@ -96,21 +94,9 @@ class ProviderDefinitionTests(unittest.TestCase):
 
 
 class ProviderValidationTests(unittest.TestCase):
-    def test_disabled_provider_fails(self) -> None:
-        with self.assertRaisesRegex(ProviderConfigurationError, "provider is disabled"):
-            validate_provider_config(_config("deepseek", enabled=False))
-
-    def test_effective_model_availability_reports_each_layer(self) -> None:
-        model = SimpleNamespace(enabled=True)
+    def test_effective_model_availability_is_provider_configuration(self) -> None:
+        model = SimpleNamespace()
         self.assertIsNone(model_unavailable_reason(model, _config("deepseek")))
-        self.assertEqual(
-            model_unavailable_reason(SimpleNamespace(enabled=False), _config("deepseek")),
-            "model_disabled",
-        )
-        self.assertEqual(
-            model_unavailable_reason(model, _config("deepseek", enabled=False)),
-            "provider_disabled",
-        )
         self.assertEqual(
             model_unavailable_reason(model, _config("deepseek", api_key="")),
             "provider_unconfigured",
@@ -192,23 +178,6 @@ class ProviderLookupTests(unittest.IsolatedAsyncioTestCase):
 
         with self.assertRaisesRegex(ProviderConfigurationError, "not found"):
             await load_provider_for_model(model, store)
-
-    async def test_disabled_provider_blocks_lookup(self) -> None:
-        provider = _config("deepseek", enabled=False)
-        store = SimpleNamespace(get_provider=AsyncMock(return_value=provider))
-        model = SimpleNamespace(id="model-1", provider_id=provider.id)
-
-        with self.assertRaisesRegex(ProviderConfigurationError, "provider is disabled"):
-            await load_provider_for_model(model, store)
-
-    async def test_disabled_model_fails_during_lookup(self) -> None:
-        provider = _config("deepseek")
-        store = SimpleNamespace(get_provider=AsyncMock(return_value=provider))
-        model = SimpleNamespace(id="model-1", provider_id=provider.id, enabled=False)
-
-        with self.assertRaisesRegex(ProviderConfigurationError, "model is disabled"):
-            await load_provider_for_model(model, store)
-
 
 class ProviderModelAssemblyTests(unittest.TestCase):
     def test_default_openai_style_types_use_native_providers(self) -> None:

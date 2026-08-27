@@ -18,13 +18,11 @@ class UiToolStoreBase(SessionBoundMixin):
         self,
         *,
         source: str | None = None,
-        enabled: bool | None = None,
     ) -> list[UiToolDefinition]:
         async with self._read() as db:
             return await self._list_all(
                 db,
                 source=source,
-                enabled=enabled,
             )
 
     async def create_manual(self, data: UiToolCreate) -> UiToolDefinition:
@@ -39,7 +37,6 @@ class UiToolStoreBase(SessionBoundMixin):
                     result_schema=data.result_schema,
                     metadata_=data.metadata,
                     source="manual",
-                    enabled=data.enabled,
                 )
                 db.add(row)
                 await db.flush()
@@ -83,12 +80,9 @@ class UiToolStoreBase(SessionBoundMixin):
         db: AsyncSession,
         *,
         source: str | None = None,
-        enabled: bool | None = None,
     ) -> list[UiToolDefinition]:
         stmt = select(UiToolDefinition).order_by(UiToolDefinition.name)
         if source is not None:
             stmt = stmt.where(UiToolDefinition.source == source)
-        if enabled is not None:
-            stmt = stmt.where(UiToolDefinition.enabled == enabled)
         result = await db.execute(stmt)
         return list(result.scalars().all())

@@ -46,8 +46,9 @@ test("MCP 编辑使用详情页式工作台并保留原配置字段", () => {
   assert.match(template, /id="closeMcpModal"[^>]*>[\s\S]*arrow-left[\s\S]*返回/);
   assert.match(template, /class="mcp-editor-workbench"/);
   assert.match(template, /基本信息[\s\S]*连接与请求上下文/);
-  ["mcpName", "mcpDescription", "mcpEnabled", "mcpTransport", "mcpUrl", "mcpHeaders", "mcpRequestContextDescription"]
+  ["mcpName", "mcpDescription", "mcpTransport", "mcpUrl", "mcpHeaders", "mcpRequestContextDescription"]
     .forEach((id) => assert.match(template, new RegExp(`id="${id}"`)));
+  assert.doesNotMatch(template, /id="mcpEnabled"/);
   assert.doesNotMatch(template, /id="cancelMcpBtn"/);
   assert.match(styles, /dialog\.mcp-editor-page\.console-detail-dialog/);
   assert.match(styles, /\.mcp-editor-workbench\s*\{[^}]*grid-template-columns:/);

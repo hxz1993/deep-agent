@@ -38,7 +38,7 @@ API Key、Token 和 MCP Header 保留原值。命令完成前会自动检查 SQL
 便于脱离仓库后核对备份边界。
 
 `llm_models` 会完整保留上下文窗口、最大输出 Token、输入模态与能力标签；
-`llm_providers` 会先于模型复制，并完整保留Provider类型、默认地址模式、明确地址、密钥与启停状态；
+`llm_providers` 会先于模型复制，并完整保留Provider类型、默认地址模式、明确地址与密钥；
 `model_catalog` 会完整保留 Lab、标准模型、Provider 组合关系、发布时间以及模态、上下文、
 能力和扩展元数据 JSON。目录本身不包含价格信息。
 
@@ -155,3 +155,15 @@ UI Tool、Session或Event数据。开发阶段存在两种Revision 008物理状�
 
 共享环境仍遵循先备份、部署包含009的镜像、停止旧实例、再迁移和冒烟的顺序；禁止只修改
 `alembic_version`或在旧镜像仍运行时提前删表。升级后的配置备份文件名使用`v009`。
+
+## v0.6.1 资源启停层清理
+
+Alembic `010`删除Provider、模型、Skill、MCP、UI工具包和UI工具配置表中的`enabled`列，并把
+`agents.capabilities`统一为非空显式列表。升级会把历史`NULL`能力转换为`[]`，不会根据旧资源
+启停值自动给任何Agent增加关联；Agent已有的显式`model_id/skills/capabilities`保持不变。
+Provider迁移后按类型、地址和凭据等真实配置判断可用，模型不再额外经过目录启停门禁。
+
+共享Test从009升级010时应先用009代码导出配置备份，停止旧实例后部署0.6.1并执行标准
+`alembic upgrade head`。迁移后核验六张配置表不再有`enabled`列、Agent关联数量不变，再执行
+Agent创建、MCP、Skill、UI工具和对话冒烟。禁止手工只改`alembic_version`。升级后的配置备份
+文件名使用`v010`。

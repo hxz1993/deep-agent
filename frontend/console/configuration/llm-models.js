@@ -122,9 +122,7 @@ function populateModelProviderSelect(selectedId = "") {
   select.disabled = false;
   select.innerHTML = providers.map((provider) => {
     const selected = provider.id === selectedId ? " selected" : "";
-    const suffix = provider.enabled === false
-      ? "（已停用）"
-      : provider.api_key_set ? "" : "（未配置密钥）";
+    const suffix = provider.api_key_set ? "" : "（未配置密钥）";
     return `<option value="${escapeHtml(provider.id)}"${selected}>${escapeHtml(provider.name)} · ${escapeHtml(providerTypeLabel(provider))}${suffix}</option>`;
   }).join("");
 }
@@ -140,12 +138,12 @@ const llmModelsAdmin = {
   async refresh() {
     const tbody = document.getElementById("llmModelsTableBody");
     if (!tbody) return;
-    tbody.innerHTML = `<tr><td colspan="9" class="empty-cell">加载中…</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="8" class="empty-cell">加载中…</td></tr>`;
     try {
       const [models] = await Promise.all([loadLlmModels(), loadLlmProviders()]);
       showDbBanner(false);
       if (!models.length) {
-        tbody.innerHTML = `<tr><td colspan="9" class="empty-cell">暂无模型配置</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="8" class="empty-cell">暂无模型配置</td></tr>`;
         return;
       }
       tbody.innerHTML = models
@@ -153,12 +151,11 @@ const llmModelsAdmin = {
           (model) => `
         <tr>
           <td><strong>${escapeHtml(model.name)}</strong></td>
-          <td><span class="model-provider-cell"><span class="provider-key-dot ${model.provider?.enabled !== false && model.provider?.api_key_set ? "on" : "off"}"></span>${escapeHtml(model.provider?.name || "—")}</span></td>
+          <td><span class="model-provider-cell"><span class="provider-key-dot ${model.provider?.api_key_set ? "on" : "off"}"></span>${escapeHtml(model.provider?.name || "—")}</span></td>
           <td><code>${escapeHtml(model.model)}</code></td>
           <td>${escapeHtml(formatTokenCount(model.context_window_tokens))}</td>
           <td>${escapeHtml(formatTokenCount(model.max_output_tokens))}</td>
           <td class="model-tag-cell">${formatList(model.input_modalities)}</td>
-          <td><button type="button" class="model-status-toggle ${model.enabled === false ? "off" : "on"}" data-toggle="${escapeHtml(model.id)}" aria-pressed="${model.enabled !== false}">${model.enabled === false ? "停用" : "启用"}</button></td>
           <td>${model.agent_count}</td>
           <td>
             <div class="row-actions">
@@ -177,14 +174,11 @@ const llmModelsAdmin = {
       tbody.querySelectorAll("[data-copy]").forEach((button) => {
         button.addEventListener("click", () => this.openCopy(button.dataset.copy));
       });
-      tbody.querySelectorAll("[data-toggle]").forEach((button) => {
-        button.addEventListener("click", () => this.toggleEnabled(button.dataset.toggle));
-      });
       tbody.querySelectorAll("[data-delete]").forEach((button) => {
         button.addEventListener("click", () => this.remove(button.dataset.delete, button.dataset.name));
       });
     } catch (error) {
-      tbody.innerHTML = `<tr><td colspan="9" class="empty-cell">${escapeHtml(error.message)}</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="8" class="empty-cell">${escapeHtml(error.message)}</td></tr>`;
     }
   },
 
@@ -419,21 +413,6 @@ const llmModelsAdmin = {
         await loadLlmModels();
         await window.llmProvidersAdmin?.refresh();
       });
-    }
-  },
-
-  async toggleEnabled(modelId) {
-    const model = (state.llmModels || []).find((item) => item.id === modelId);
-    if (!model) return;
-    try {
-      await apiFetch(`/api/v1/llm-models/${encodeURIComponent(modelId)}`, {
-        method: "PATCH",
-        body: JSON.stringify({ enabled: model.enabled === false }),
-      });
-      showToast(model.enabled === false ? "模型已启用" : "模型已停用");
-      await Promise.all([this.refresh(), window.llmProvidersAdmin?.refresh()]);
-    } catch (error) {
-      showToast(error.message, true);
     }
   },
 

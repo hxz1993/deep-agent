@@ -148,8 +148,7 @@ const skillsAdmin = {
             <div class="skill-more-actions">
               <button class="skill-more-trigger" type="button" data-skill-more-trigger aria-label="更多 Skill 操作" title="更多操作" aria-haspopup="menu" aria-expanded="false"><i data-lucide="ellipsis-vertical"></i></button>
               <div class="skill-more-menu" data-skill-more-menu role="menu" hidden>
-                ${skill.enabled ? `<button type="button" role="menuitem" data-skill-action="reload"><i data-lucide="refresh-cw"></i><span>重新加载</span></button>` : ""}
-                <button type="button" role="menuitem" data-skill-action="toggle"><i data-lucide="${skill.enabled ? "circle-pause" : "circle-play"}"></i><span>${skill.enabled ? "停用" : "启用"}</span></button>
+                <button type="button" role="menuitem" data-skill-action="reload"><i data-lucide="refresh-cw"></i><span>重新加载</span></button>
                 <button class="danger" type="button" role="menuitem" data-skill-action="delete"><i data-lucide="trash-2"></i><span>删除</span></button>
               </div>
             </div>`}
@@ -271,7 +270,6 @@ const skillsAdmin = {
       missing: { label: "运行文件未加载", detail: "当前 Pod 缺少运行文件，请使用“重新加载”。" },
       syncing: { label: "运行文件同步中", detail: "正在同步 Skill 运行文件。" },
       error: { label: "运行文件同步失败", detail: `运行文件不可用（${skill.runtime_error_code || "unknown"}），普通对话和其他 Skill 不受影响。` },
-      disabled: { label: "已停用", detail: "Skill 已停用。" },
     };
     return labels[skill.runtime_status] || labels.missing;
   },
@@ -367,7 +365,7 @@ const skillsAdmin = {
       const values = await requestActionFields({
         title: "编辑 Skill 信息",
         message: skill.code,
-        icon: "book-open-check",
+        variant: "form",
         confirmLabel: "保存",
         fields: [
           { name: "label", label: "显示名称", value: skill.label, required: true },
@@ -376,10 +374,6 @@ const skillsAdmin = {
       });
       if (!values) return;
       await this.patch(skill.code, values, "Skill 信息已更新");
-      return;
-    }
-    if (action === "toggle") {
-      await this.patch(skill.code, { enabled: !skill.enabled }, skill.enabled ? "Skill 已停用" : "Skill 已启用");
       return;
     }
     if (action === "delete") {

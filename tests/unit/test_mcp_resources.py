@@ -139,7 +139,6 @@ def _row(
     name: str = "docs",
     *,
     inspection: dict | None | object = _DEFAULT_INSPECTION,
-    enabled: bool = True,
     transport: str = "url",
 ) -> McpServer:
     stored_inspection = (
@@ -151,7 +150,6 @@ def _row(
         name=name,
         transport=transport,
         config={"url": f"http://{name}.example/mcp"},
-        enabled=enabled,
         inspection=stored_inspection,
         created_at=datetime.now(timezone.utc),
         updated_at=datetime.now(timezone.utc),
@@ -434,7 +432,7 @@ class _FakeMcpStore:
         *,
         inspection: dict | None = None,
     ) -> McpServer:
-        self.row = _row(data.name, inspection=None, enabled=data.enabled)
+        self.row = _row(data.name, inspection=None)
         self.row.config = data.config
         self.row.description = data.description
         self.row.inspection = inspection
@@ -467,7 +465,7 @@ class _FakeMcpStore:
 
 
 class McpInspectionApiTests(unittest.IsolatedAsyncioTestCase):
-    async def test_enabled_create_inspects_but_failure_does_not_block_save(self) -> None:
+    async def test_create_inspects_but_unreachable_result_does_not_block_save(self) -> None:
         store = _FakeMcpStore()
         result = McpInspectionResult.model_validate(
             {
@@ -504,26 +502,6 @@ class McpInspectionApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.inspection.status, "unreachable")
         self.assertEqual(store.saved_inspection["status"], "unreachable")
 
-    async def test_disabled_create_does_not_connect(self) -> None:
-        store = _FakeMcpStore()
-        with patch(
-            "deep_agent.api.v1.mcp.inspect_mcp_server",
-            new=AsyncMock(),
-        ) as inspect:
-            response = await create_mcp_server(
-                McpServerCreate(
-                    name="docs",
-                    transport="url",
-                    config={"url": "http://docs.example/mcp"},
-                    enabled=False,
-                ),
-                _request(),
-                store,
-            )
-
-        self.assertEqual(response.inspection.status, "unknown")
-        inspect.assert_not_awaited()
-
     async def test_create_does_not_persist_when_inspection_pipeline_crashes(self) -> None:
         store = _FakeMcpStore()
         with patch(
@@ -544,7 +522,7 @@ class McpInspectionApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(store.row)
 
     async def test_manual_inspection_persists_result_and_changes(self) -> None:
-        store = _FakeMcpStore(_row("docs", inspection=None, enabled=False))
+        store = _FakeMcpStore(_row("docs", inspection=None))
         detected = McpInspectionResult.model_validate(
             {
                 "inspection": {
@@ -595,30 +573,8 @@ class McpInspectionApiTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertNotIn("snapshot", response.inspection.model_dump(mode="json")["tools"])
 
-    async def test_disabled_config_update_marks_snapshot_stale_without_connecting(self) -> None:
-        store = _FakeMcpStore(_row("docs", enabled=False))
-        with patch(
-            "deep_agent.api.v1.mcp.inspect_mcp_server",
-            new=AsyncMock(),
-        ) as inspect:
-            response = await update_mcp_server(
-                "docs",
-                McpServerUpdate(
-                    config={"url": "http://new.example/mcp"},
-                ),
-                _request(),
-                store,
-            )
-
-        self.assertEqual(response.inspection.status, "stale")
-        self.assertEqual(response.inspection.tools.snapshot_status, "stale")
-        self.assertIsNone(response.inspection.tools.snapshot)
-        self.assertEqual(store.saved_inspection["status"], "stale")
-        self.assertNotIn("snapshot", store.saved_inspection["tools"])
-        inspect.assert_not_awaited()
-
-    async def test_enabled_config_update_marks_stale_then_reinspects(self) -> None:
-        store = _FakeMcpStore(_row("docs", enabled=True))
+    async def test_config_update_marks_stale_then_reinspects(self) -> None:
+        store = _FakeMcpStore(_row("docs"))
         detected = McpInspectionResult.model_validate(
             {
                 "inspection": {
@@ -657,7 +613,7 @@ class McpInspectionApiTests(unittest.IsolatedAsyncioTestCase):
         inspect.assert_awaited_once()
 
     async def test_update_does_not_persist_when_inspection_pipeline_crashes(self) -> None:
-        store = _FakeMcpStore(_row("docs", enabled=True))
+        store = _FakeMcpStore(_row("docs"))
         original_config = dict(store.row.config)
         with patch(
             "deep_agent.api.v1.mcp.inspect_mcp_server",
@@ -672,38 +628,6 @@ class McpInspectionApiTests(unittest.IsolatedAsyncioTestCase):
                 )
 
         self.assertEqual(store.row.config, original_config)
-
-    async def test_enabling_url_mcp_triggers_inspection(self) -> None:
-        store = _FakeMcpStore(_row("docs", inspection=None, enabled=False))
-        detected = McpInspectionResult.model_validate(
-            {
-                "inspection": {
-                    "status": "healthy",
-                    "tools": {"status": "unsupported"},
-                    "resources": {"status": "unsupported"},
-                },
-                "changes": {
-                    "status": {"before": "unknown", "after": "healthy"},
-                    "tool_count": {"before": 0, "after": 0},
-                    "resource_count": {"before": 0, "after": 0},
-                    "template_count": {"before": 0, "after": 0},
-                },
-            }
-        )
-        with patch(
-            "deep_agent.api.v1.mcp.inspect_mcp_server",
-            new=AsyncMock(return_value=detected),
-        ) as inspect:
-            response = await update_mcp_server(
-                "docs",
-                McpServerUpdate(enabled=True),
-                _request(),
-                store,
-            )
-
-        self.assertEqual(response.inspection.status, "healthy")
-        inspect.assert_awaited_once()
-
 
 class McpResourceToolsetTests(unittest.IsolatedAsyncioTestCase):
     async def test_toolset_is_only_exposed_for_selected_supported_mcp(self) -> None:

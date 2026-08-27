@@ -4,7 +4,7 @@ import json
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from jsonschema.exceptions import SchemaError
 from jsonschema.validators import validator_for
 
@@ -44,6 +44,8 @@ def _validate_metadata_size(value: dict[str, Any]) -> dict[str, Any]:
 
 
 class UiToolCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     name: str
     package_code: str = Field(pattern=UI_PACKAGE_CODE_PATTERN)
     description: str
@@ -51,7 +53,6 @@ class UiToolCreate(BaseModel):
     widget: str | None = Field(default=None, max_length=64)
     result_schema: dict[str, Any] | None = None
     metadata: dict[str, Any] | None = None
-    enabled: bool = True
 
     @field_validator("name")
     @classmethod
@@ -98,19 +99,20 @@ class UiToolCreate(BaseModel):
 
 
 class UiToolUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     package_code: str | None = Field(default=None, pattern=UI_PACKAGE_CODE_PATTERN)
     description: str | None = None
     parameters_json_schema: dict[str, Any] | None = None
     widget: str | None = Field(default=None, max_length=64)
     result_schema: dict[str, Any] | None = None
     metadata: dict[str, Any] | None = None
-    enabled: bool | None = None
 
     @model_validator(mode="before")
     @classmethod
     def reject_null_required_fields(cls, value):
         if isinstance(value, dict):
-            for field in ("package_code", "description", "parameters_json_schema", "enabled"):
+            for field in ("package_code", "description", "parameters_json_schema"):
                 if field in value and value[field] is None:
                     raise ValueError(f"{field} cannot be null")
         return value
@@ -167,7 +169,6 @@ class UiToolResponse(BaseModel):
     result_schema: dict[str, Any] | None = None
     metadata: dict[str, Any] | None = None
     source: UiToolSource
-    enabled: bool
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
@@ -182,7 +183,6 @@ class UiToolResponse(BaseModel):
             result_schema=row.result_schema,
             metadata=row.metadata_,
             source=row.source,
-            enabled=row.enabled,
             created_at=row.created_at,
             updated_at=row.updated_at,
         )
@@ -198,7 +198,6 @@ class UiToolResponse(BaseModel):
             result_schema=record.result_schema,
             metadata=record.metadata,
             source=record.source,
-            enabled=record.enabled,
             created_at=None,
             updated_at=None,
         )
@@ -210,10 +209,11 @@ class UiToolListResponse(BaseModel):
 
 
 class UiToolPackageCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     code: str = Field(pattern=UI_PACKAGE_CODE_PATTERN)
     label: str = Field(min_length=1, max_length=191)
     description: str | None = Field(default=None, max_length=4000)
-    enabled: bool = True
 
     @model_validator(mode="after")
     def normalize_text(self) -> UiToolPackageCreate:
@@ -226,15 +226,16 @@ class UiToolPackageCreate(BaseModel):
 
 
 class UiToolPackageUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     label: str | None = Field(default=None, max_length=191)
     description: str | None = Field(default=None, max_length=4000)
-    enabled: bool | None = None
 
     @model_validator(mode="before")
     @classmethod
     def reject_null_required_package_fields(cls, value):
         if isinstance(value, dict):
-            for field in ("label", "enabled"):
+            for field in ("label",):
                 if field in value and value[field] is None:
                     raise ValueError(f"{field} cannot be null")
         return value
@@ -255,7 +256,6 @@ class UiToolPackageResponse(BaseModel):
     label: str
     description: str | None = None
     source: UiToolSource
-    enabled: bool
     tool_count: int = 0
     tools: list[str] = Field(default_factory=list)
     created_at: datetime | None = None
@@ -271,7 +271,6 @@ class UiToolPackageResponse(BaseModel):
             label=row.label,
             description=row.description,
             source=row.source,
-            enabled=row.enabled,
             tool_count=len(names),
             tools=names,
             created_at=row.created_at,

@@ -114,7 +114,6 @@ class ToolDescription(BaseModel):
     display_name: str
     description: str = ""
     execution_type: str
-    enabled: bool = True
 
 
 class ToolPackageDescription(BaseModel):
@@ -123,8 +122,6 @@ class ToolPackageDescription(BaseModel):
     label: str | None = None
     description: str = ""
     tools: list[ToolDescription] = Field(default_factory=list)
-    enabled: bool = True
-    default_enabled: bool = False
     source: str | None = None
     tool_count: int = 0
     tool_catalog_status: str = "complete"

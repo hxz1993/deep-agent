@@ -73,7 +73,7 @@ async def _ensure_model_selectable(
 
 
 async def _validate_tool_packages(
-    capabilities: list[str] | None,
+    capabilities: list[str],
     ctx: AppContextDep,
 ) -> None:
     invalid = await invalid_tool_package_codes(capabilities, ctx.registry, ctx.stores)
@@ -81,7 +81,7 @@ async def _validate_tool_packages(
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail={
-                "message": "Agent 包含未知、禁用或不存在的工具包",
+                "message": "Agent 包含未知或不存在的工具包",
                 "invalid_tool_packages": invalid,
             },
         )
@@ -90,17 +90,13 @@ async def _validate_tool_packages(
 async def _validate_skills(
     skills: list[str],
     ctx: AppContextDep,
-    *,
-    allow_disabled: set[str] | None = None,
 ) -> None:
     invalid = await validate_skill_codes(ctx.stores, skills)
-    if allow_disabled:
-        invalid = [code for code in invalid if code not in allow_disabled]
     if invalid:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail={
-                "message": "Agent 包含未知、禁用或重复的 Skill",
+                "message": "Agent 包含未知或重复的 Skill",
                 "invalid_skills": invalid,
             },
         )
@@ -211,14 +207,7 @@ async def update_agent(
     if "capabilities" in body.model_fields_set:
         await _validate_tool_packages(body.capabilities, ctx)
     if "skills" in body.model_fields_set:
-        # A disabled Skill remains visible in existing Agent configuration. Allow an
-        # unrelated edit to preserve that reference, while still rejecting newly
-        # selected disabled or unknown Skills.
-        await _validate_skills(
-            body.skills or [],
-            ctx,
-            allow_disabled=set(current.skills or []),
-        )
+        await _validate_skills(body.skills or [], ctx)
     if body.model_id is not None and body.model_id != current.model_id:
         normalized_model_id = await _ensure_model_selectable(
             model_store,

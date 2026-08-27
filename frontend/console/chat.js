@@ -93,7 +93,7 @@ function resolveWidgetType(call) {
 
 async function loadUiTools(agentId) {
   try {
-    const params = new URLSearchParams({ enabled: "true" });
+    const params = new URLSearchParams();
     if (agentId) params.set("agent_id", agentId);
     const r = await daFetch(serviceUrl(`api/v1/ui-tools?${params}`));
     if (!r.ok) return;

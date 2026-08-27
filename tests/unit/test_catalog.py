@@ -284,7 +284,6 @@ class CatalogViewTests(unittest.TestCase):
                 use_default_base_url=False,
                 base_url="https://custom-gateway.example/anthropic",
                 api_key="secret",
-                enabled=True,
             )
         ]
 

@@ -25,7 +25,6 @@ def _builtin_response() -> UiToolPackageResponse:
         label="通用交互",
         description="代码内置的确认与候选选择交互。",
         source="builtin",
-        enabled=True,
         tool_count=len(names),
         tools=names,
     )

@@ -65,7 +65,6 @@ def _builtin_detail(item: SkillDescriptor) -> SkillDetail:
         version=item.version,
         schema_version=item.schema_version,
         source="builtin",
-        enabled=True,
         reference_count=references,
         asset_count=assets,
         script_count=scripts,
@@ -93,7 +92,6 @@ def _row_detail(
         version=row.version,
         schema_version=row.schema_version,
         source="upload",
-        enabled=row.enabled,
         reference_count=references,
         asset_count=assets,
         script_count=scripts,
@@ -157,7 +155,6 @@ def _record(
         version=parsed.version,
         schema_version=parsed.schema_version,
         source="upload",
-        enabled=True,
         platform_file_id=platform_file_id,
         file_name=file_name,
         file_size=file_size,
@@ -260,7 +257,6 @@ async def export_uploaded_skills(request: Request, ctx: AppContextDep) -> Respon
                 "description": row.description,
                 "version": row.version,
                 "schema_version": row.schema_version,
-                "enabled": row.enabled,
                 "package_file": f"skills/{row.code}.zip",
                 "content_hash": row.content_hash,
                 "original_file_name": row.file_name,
@@ -408,7 +404,6 @@ async def replace_skill_package(
                 file_size=uploaded.file_size,
             ).model_copy(
                 update={
-                    "enabled": current.enabled,
                     **(
                         {
                             "label": current.label,
@@ -464,14 +459,6 @@ async def update_skill(
     row = await ctx.stores.skill_package.update(code, body)
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Skill not found: {code}")
-    if body.enabled is False:
-        await ctx.skill_runtime.remove(code, status="disabled")
-    elif body.enabled is True:
-        request_headers = extract_forward_headers(request)
-        await ctx.skill_runtime.materialize(
-            row,
-            request_headers=request_headers,
-        )
     return _row_detail(row, ctx.skill_runtime)
 
 
@@ -504,11 +491,6 @@ async def delete_skill(code: str, request: Request, ctx: AppContextDep) -> dict:
 async def reload_skill(code: str, request: Request, ctx: AppContextDep) -> SkillReloadResult:
     _reject_builtin(code)
     row = await _row_or_404(ctx, code)
-    if not row.enabled:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"Disabled Skill cannot be reloaded: {code}",
-        )
     request_headers = extract_forward_headers(request)
     runtime_state = await ctx.skill_runtime.materialize(
         row,
@@ -574,7 +556,7 @@ async def _resource_root(code: str, request: Request, ctx: AppContextDep) -> tup
             detail=f"Could not materialize Skill package: {type(exc).__name__}",
         ) from exc
     if resolved is None:
-        runtime_state = ctx.skill_runtime.state(code, enabled=row.enabled)
+        runtime_state = ctx.skill_runtime.state(code)
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail={

@@ -329,16 +329,16 @@ DeepAgent 原有自研 `Capability` 只是产品配置包装，却与 Pydantic A
 产品层把代码随 DeepAgent 发布、无需管理员注册的可配置后端 Function Tool 归入
 “内置工具”，与 MCP 服务同级展示。v0.3.23 保留两个 Tool Package：
 
-| 前端名称 | Tool Package 编码 | 默认状态 | 工具 |
-| --- | --- | --- | --- |
-| 通用工具 | `builtin:general` | 默认启用 | `get_current_time` |
-| Python 沙箱 | `builtin:sandbox` | 默认关闭 | `execute_python`、条件式 `execute_skill_script` |
+| 前端名称 | Tool Package 编码 | 工具 |
+| --- | --- | --- |
+| 通用工具 | `builtin:general` | `get_current_time` |
+| Python 沙箱 | `builtin:sandbox` | `execute_python`、条件式 `execute_skill_script` |
 
 两包中的后端函数对模型都表现为 `FunctionToolset`。配置中心只读展示工具包及工具明细，
-实际启用仍由 `agents.capabilities` 中的工具包编码决定；本轮不提供包内逐工具开关。
+实际装配只由 `agents.capabilities` 中显式关联的工具包编码决定；目录层没有默认状态或包内逐工具开关。
 `execute_python` 的工具定义位于 DeepAgent 进程，实际代码通过可替换的
 `PythonExecutionBackend` 执行；这不改变它的 Function Tool 类型。Skill脚本复用同一Backend，
-在Agent启用Sandbox且选择含脚本Skill时动态追加，不扩大包级授权。
+在Agent关联Sandbox且选择含脚本Skill时动态追加，不扩大包级授权。
 
 0.2.3 删除了原来 Native 中的 `http_get`。该工具没有目标域名白名单、私网地址保护和
 请求审计，不适合作为所有 Agent 默认获得的通用网络能力；需要联网时应接入边界明确、
@@ -693,7 +693,7 @@ FunctionToolset(execute_python)
 ```
 
 v0.3.22 同一Backend内部增加Skill脚本模式：宿主只复制已授权脚本、JSON inputs和同Skill资源，
-固定读取 `outputs/result.json`。Agent选择含脚本Skill并启用 `builtin:sandbox`时，模型可直接调用
+固定读取 `outputs/result.json`。Agent选择含脚本Skill并关联 `builtin:sandbox`时，模型可直接调用
 `execute_skill_script`。
 
 该能力不是 MCP，也不依赖 Provider Native Tool。当前已落地无状态执行、独立解释器、超时、

@@ -61,7 +61,6 @@ class LlmModelStoreTests(unittest.IsolatedAsyncioTestCase):
                     use_default_base_url=False,
                     base_url="http://test.invalid/v1",
                     api_key="test-key",
-                    enabled=True,
                 )
             )
 
@@ -135,7 +134,6 @@ class LlmModelStoreTests(unittest.IsolatedAsyncioTestCase):
                     use_default_base_url=False,
                     base_url="http://second.invalid/v1",
                     api_key="test-key",
-                    enabled=True,
                 )
             )
         second = await self.service.create_model(
@@ -178,7 +176,6 @@ class LlmModelMigrationShapeTests(unittest.TestCase):
                 "description",
                 "model",
                 "provider_id",
-                "enabled",
                 "input_modalities",
                 "context_window_tokens",
                 "max_output_tokens",

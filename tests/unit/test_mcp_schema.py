@@ -137,16 +137,19 @@ class McpSchemaBuiltinGuardTests(unittest.TestCase):
                         "DEEPCUBE_MCP_DISCOVERY": '{"enabled":false}',
                     }
                 },
-                "enabled": True,
             }
         )
         self.assertIsNone(row.transport)
         self.assertIn("env", row.config)
 
     def test_update_rejects_null_required_fields(self) -> None:
-        for field in ("transport", "config", "enabled"):
+        for field in ("transport", "config"):
             with self.subTest(field=field), self.assertRaises(ValidationError):
                 McpServerUpdate.model_validate({field: None})
+
+    def test_update_rejects_removed_enabled_field(self) -> None:
+        with self.assertRaises(ValidationError):
+            McpServerUpdate.model_validate({"enabled": True})
 
 
 if __name__ == "__main__":

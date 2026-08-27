@@ -1,6 +1,6 @@
 # DeepAgent 工具包与工具目录设计
 
-> 实施状态：v0.3.2已按本文完成；v0.3.18起Skill已从ToolPackage分离；v0.3.23起文件读取是自动注入的系统工具；v0.4.4～v0.4.5删除已下线的预制MCP，当前数据库head为006。
+> 实施状态：v0.3.2已按本文完成；v0.3.18起Skill已从ToolPackage分离；v0.3.23起文件读取是自动注入的系统工具；v0.6.1 / Alembic 010删除资源自身的冗余启停层。
 
 ## 1. 目标与边界
 
@@ -26,7 +26,6 @@ category（分类属性）
 DeepAgent 产品概念，承担：
 
 - 稳定包编码、分类、中文名称、来源和说明。
-- 默认启用状态和包级可用状态。
 - Console 目录与 Agent 配置选择。
 - 工具数量及可用工具目录。
 - 恰好一个预定义 Toolset，或请求级创建该 Toolset 所需的元数据。
@@ -48,18 +47,18 @@ v0.3.9 改由 Pydantic AI 官方 Provider/Profile 处理，不再保留项目自
 
 ## 3. 工具包目录
 
-| category | code | label | 来源 | 默认 | 工具 |
-| --- | --- | --- | --- | --- | --- |
-| `builtin` | `builtin:general` | 通用工具 | code | 开 | `get_current_time` |
-| `builtin` | `builtin:sandbox` | Python 沙箱 | code | 关 | `execute_python`、条件式 `execute_skill_script` |
-| `mcp` | `mcp:<name>` | MCP 配置名称 | builtin/database | 关 | URL 检测快照 / Builtin 运行时发现 |
-| `ui` | `ui:builtin` | 通用交互 | code | 关 | `builtin__confirm`、`builtin__choice` |
-| `ui` | `ui:deepcube` | DeepCube 助手 | database | 关 | `deep_cube__clarify`、`deep_cube__config_fill` |
+| category | code | label | 来源 | 工具 |
+| --- | --- | --- | --- | --- |
+| `builtin` | `builtin:general` | 通用工具 | code | `get_current_time` |
+| `builtin` | `builtin:sandbox` | Python 沙箱 | code | `execute_python`、条件式 `execute_skill_script` |
+| `mcp` | `mcp:<name>` | MCP 配置名称 | builtin/database | URL 检测快照 / Builtin 运行时发现 |
+| `ui` | `ui:builtin` | 通用交互 | code | `builtin__confirm`、`builtin__choice` |
+| `ui` | `ui:deepcube` | DeepCube 助手 | database | `deep_cube__clarify`、`deep_cube__config_fill` |
 
-`builtin:general` 和 `builtin:sandbox` 是两个独立包级开关。文件读取不属于 ToolPackage；
+`builtin:general` 和 `builtin:sandbox` 是两个独立包级关联项。文件读取不属于 ToolPackage；
 `read_file` 根据当前会话附件或 Agent 已选 Skill 自动注入。Python Sandbox 后端不可用时，
 `builtin:sandbox` 不进入可选目录。`execute_skill_script` 只作为管理员可见的条件式工具元数据；
-运行时还必须选择含脚本Skill并启用 `builtin:sandbox`才注入模型。
+运行时还必须选择含脚本Skill并关联 `builtin:sandbox`才注入模型。
 
 ## 4. 编码和稳定协议
 
@@ -83,7 +82,6 @@ v0.3.9 改由 Pydantic AI 官方 Provider/Profile 处理，不再保留项目自
 | `label` | 非空 | Console 名称 |
 | `description` | 可空 | 包说明 |
 | `source` | 非空 | 首版数据库记录固定 `manual` |
-| `enabled` | 非空 | 包级可用状态 |
 | `created_at` / `updated_at` | 非空 | 审计时间 |
 
 `ui_tool_definitions` 新增非空 `package_code`，外键指向 `ui_tool_packages.code`，删除策略
@@ -126,7 +124,7 @@ flowchart LR
 ```
 
 不新增统一 Resolver 抽象。沿用现有构建过程：静态包从 Registry 取 Toolset，MCP 按配置创建，
-UI 按数据库包成员创建，最后由 AgentFactory 汇总。UI 包无启用且 Schema 有效的成员时不向模型
+UI 按数据库包成员创建，最后由 AgentFactory 汇总。UI 包无 Schema 有效的成员时不向模型
 暴露空工具，并记录诊断。
 
 ## 8. API
@@ -140,8 +138,6 @@ UI 按数据库包成员创建，最后由 AgentFactory 汇总。UI 包无启用
   "label": "通用工具",
   "source": "builtin",
   "description": "...",
-  "enabled": true,
-  "default_enabled": true,
   "tool_count": 1,
   "tool_catalog_status": "complete",
   "tools": [
@@ -149,8 +145,7 @@ UI 按数据库包成员创建，最后由 AgentFactory 汇总。UI 包无启用
       "name": "get_current_time",
       "display_name": "获取当前时间",
       "description": "...",
-      "execution_type": "function",
-      "enabled": true
+      "execution_type": "function"
     }
   ]
 }
@@ -162,7 +157,8 @@ Builtin MCP继续按其运行时目录生成工具定义。
 
 新增 `/api/v1/ui-tool-packages` CRUD。`ui:builtin` 可查询但不可修改或删除；手工工具创建必须
 选择手工包，允许更新时移动。包含工具或被 Agent 引用时禁止删除；工具所属包被 Agent 引用时
-也禁止删除。Agent 创建和更新只接受存在且启用的工具包编码，未知或禁用编码返回 422。
+也禁止删除。Agent 创建和更新只接受存在的工具包编码，未知编码返回 422。新Agent的
+`capabilities=[]`，不会隐式关联任何工具包。
 
 ## 9. Console
 
@@ -173,9 +169,14 @@ Agent 能力页直接按后端 `category` 分组，不再通过旧 `kind` 猜测
 
 - 内置工具：只读展示通用工具和Python沙箱。
 - 系统工具：按Skill、文件、工具结果、MCP工具发现、MCP Resource展示来源和自动注入条件；不可配置。
-- Skill：独立列表、安装和Agent选择，不属于工具包。
+- Skill：独立列表、安装和Agent选择，不属于工具包，也没有资源级启停状态。
 - MCP服务：展示Server检测状态、工具快照状态和数量；通过“检测并更新”刷新快照。
 - UI 工具：左侧按来源展示工具包树，右侧只展示当前包的工具表；手工包 CRUD，内置包只读；工具编辑必须选择包。
+
+Alembic 010同时删除Provider、Model以及
+`skill_packages/mcp_servers/ui_tool_packages/ui_tool_definitions.enabled`，并把
+`agents.capabilities`从可空改为非空显式列表。目录资源是否健康、Schema是否有效仍用于诊断和
+失败关闭，但不再承担产品启停语义；Agent关联是唯一运行开关。
 
 页面错误、空包、无有效工具、引用冲突和保存后刷新失败沿用现有反馈规范。
 

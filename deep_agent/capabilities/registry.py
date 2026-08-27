@@ -16,7 +16,6 @@ class ToolInfo:
     display_name: str | None = None
     description: str = ""
     execution_type: str = "function"
-    enabled: bool = True
 
 
 @dataclass
@@ -30,8 +29,6 @@ class ToolPackage:
     source: str | None = None
     description: str = ""
     tools: list[ToolInfo] = field(default_factory=list)
-    default_enabled: bool = True
-    enabled: bool = True
     tool_catalog_status: str = "complete"
     disclosure_mode: str = "direct"
     disclosure_condition: str | None = None
@@ -71,19 +68,11 @@ class ToolPackageRegistry:
         return [package.toolset for package in self.selected(codes)]
 
     def selected(self, codes: list[str] | None = None) -> list[ToolPackage]:
-        if codes is None:
-            packages = [
-                package
-                for package in self._packages.values()
-                if package.enabled and package.default_enabled
-            ]
-        else:
-            packages = [
-                self._packages[code]
-                for code in codes
-                if code in self._packages and self._packages[code].enabled
-            ]
-        return packages
+        return [
+            self._packages[code]
+            for code in (codes or [])
+            if code in self._packages
+        ]
 
     def describe(self) -> list[dict[str, Any]]:
         return [describe_tool_package(package) for package in self._packages.values()]
@@ -96,8 +85,6 @@ def describe_tool_package(package: ToolPackage) -> dict[str, Any]:
         "label": package.label,
         "source": package.source,
         "description": package.description,
-        "enabled": package.enabled,
-        "default_enabled": package.default_enabled,
         "tool_count": len(package.tools),
         "tool_catalog_status": package.tool_catalog_status,
         "disclosure_mode": package.disclosure_mode,
@@ -110,7 +97,6 @@ def describe_tool_package(package: ToolPackage) -> dict[str, Any]:
                 "display_name": tool.display_name or tool.name,
                 "description": tool.description,
                 "execution_type": tool.execution_type,
-                "enabled": tool.enabled,
             }
             for tool in package.tools
         ],

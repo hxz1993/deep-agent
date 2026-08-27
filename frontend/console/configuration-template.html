@@ -133,7 +133,7 @@
         <section class="builtin-tools-section">
           <div class="configuration-subheading">
             <h3>预制工具包</h3>
-            <p>随 DeepAgent 版本发布，可在 Agent 能力配置中选择是否启用。</p>
+            <p>随 DeepAgent 版本发布，是否参与运行只由 Agent 能力关联决定。</p>
           </div>
           <div class="table-wrap console-list-a">
             <table class="data-table builtin-tools-table">
@@ -142,12 +142,11 @@
                   <th>能力包</th>
                   <th>能力编码</th>
                   <th>包含工具</th>
-                  <th>默认状态</th>
                   <th>说明</th>
                 </tr>
               </thead>
               <tbody id="builtinToolsTableBody">
-                <tr><td colspan="5" class="empty-cell">正在加载内置工具…</td></tr>
+                <tr><td colspan="4" class="empty-cell">正在加载内置工具…</td></tr>
               </tbody>
             </table>
           </div>
@@ -180,14 +179,13 @@
               <th>名称</th>
               <th>传输</th>
               <th>上下文</th>
-              <th>启用</th>
               <th class="mcp-description-column">描述</th>
               <th>更新时间</th>
               <th class="mcp-actions-column">操作</th>
             </tr>
           </thead>
           <tbody id="mcpTableBody">
-            <tr><td colspan="7" class="empty-cell">加载中…</td></tr>
+            <tr><td colspan="6" class="empty-cell">加载中…</td></tr>
           </tbody>
         </table>
       </div>
@@ -198,7 +196,7 @@
       <div class="panel-toolbar">
         <div class="panel-title-copy">
           <h2>UI 工具（HITL）</h2>
-          <p class="panel-subtitle">先管理工具包，再在选中的自定义工具包中维护 UI 工具；Agent 按工具包整体启用。</p>
+          <p class="panel-subtitle">先管理工具包，再在选中的自定义工具包中维护 UI 工具；是否参与运行只由 Agent 关联决定。</p>
         </div>
         <button class="btn primary" id="newUiToolPackageBtn"><i data-lucide="plus"></i>新建工具包</button>
       </div>
@@ -230,14 +228,13 @@
                 <tr>
                   <th>名称</th>
                   <th>Widget</th>
-                  <th>状态</th>
                   <th>描述</th>
                   <th>更新时间</th>
                   <th>操作</th>
                 </tr>
               </thead>
               <tbody id="uiToolsTableBody">
-                <tr><td colspan="6" class="empty-cell">请选择左侧工具包</td></tr>
+                <tr><td colspan="5" class="empty-cell">请选择左侧工具包</td></tr>
               </tbody>
             </table>
           </div>
@@ -345,10 +342,6 @@
           <div class="field-label-actions"><label for="llmProviderApiKey">API Key</label><button type="button" class="field-text-action hidden" id="llmProviderClearApiKey">清除</button></div>
           <input type="password" id="llmProviderApiKey" autocomplete="new-password" />
         </div>
-        <label class="field checkbox-field">
-          <input type="checkbox" id="llmProviderEnabled" checked />
-          <span>启用 Provider</span>
-        </label>
       </div>
       <div class="form-error hidden" data-form-error role="alert" aria-live="assertive"></div>
       <div class="modal-footer">
@@ -484,7 +477,7 @@
           <section class="mcp-editor-section mcp-editor-basics">
             <div class="mcp-editor-section-head">
               <h4>基本信息</h4>
-              <p>定义服务名称、用途和运行状态。</p>
+              <p>定义服务名称和用途；是否参与运行由 Agent 关联决定。</p>
             </div>
             <label class="field">
               <span>名称</span>
@@ -494,10 +487,6 @@
             <label class="field">
               <span>描述（可选）</span>
               <textarea id="mcpDescription" rows="6" placeholder="说明这个 MCP 提供的能力和使用范围"></textarea>
-            </label>
-            <label class="field checkbox-field mcp-enabled-field">
-              <input type="checkbox" id="mcpEnabled" checked />
-              <span>启用</span>
             </label>
           </section>
 
@@ -618,10 +607,6 @@
           <span>说明</span>
           <textarea id="uiToolPackageDescription" rows="3"></textarea>
         </label>
-        <label class="field checkbox-field">
-          <input type="checkbox" id="uiToolPackageEnabled" checked />
-          <span>启用</span>
-        </label>
       </div>
       <div class="form-error hidden" data-form-error role="alert" aria-live="assertive"></div>
       <div class="modal-footer">
@@ -674,10 +659,6 @@
                 <input type="text" id="uiToolWidgetCustom" class="hidden" placeholder="输入客户端自定义渲染器标识" />
               </div>
               <small class="field-hint">Widget 是前端渲染器标识；选择“自定义”时，填写客户端已注册的渲染器名称。</small>
-            </label>
-            <label class="field checkbox-field ui-tool-enabled-field">
-              <input type="checkbox" id="uiToolEnabled" checked />
-              <span>启用</span>
             </label>
           </section>
         </div>

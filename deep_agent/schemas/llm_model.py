@@ -4,7 +4,7 @@ import re
 from datetime import datetime
 from typing import TYPE_CHECKING, Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from deep_agent.db.ids import normalize_provider_id
 from deep_agent.agent.provider_registry import model_unavailable_reason
@@ -51,6 +51,8 @@ def _validate_token_pair(context_window_tokens: int | None, max_output_tokens: i
 
 
 class LlmModelCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     provider_id: str = Field(..., description="Foreign-key reference to an LLM provider.")
     name: str = Field(..., max_length=191, description="Display name for this model preset.")
     description: str | None = Field(default=None, description="Optional human-readable description.")
@@ -77,7 +79,6 @@ class LlmModelCreate(BaseModel):
         default_factory=list,
         description="Normalized model capability tags, separate from input modalities.",
     )
-    enabled: bool = True
 
     @field_validator("provider_id")
     @classmethod
@@ -119,6 +120,8 @@ class LlmModelCreate(BaseModel):
 
 
 class LlmModelUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     provider_id: str | None = None
     name: str | None = Field(default=None, max_length=191)
     description: str | None = None
@@ -127,7 +130,6 @@ class LlmModelUpdate(BaseModel):
     context_window_tokens: int | None = Field(default=None, gt=0)
     max_output_tokens: int | None = Field(default=None, gt=0)
     tags: list[str] | None = None
-    enabled: bool | None = None
 
     @field_validator("provider_id")
     @classmethod
@@ -144,7 +146,6 @@ class LlmModelUpdate(BaseModel):
                 "input_modalities",
                 "context_window_tokens",
                 "max_output_tokens",
-                "enabled",
             ):
                 if field in value and value[field] is None:
                     raise ValueError(f"{field} cannot be null")
@@ -203,13 +204,10 @@ class LlmModelResponse(BaseModel):
     context_window_tokens: int | None = None
     max_output_tokens: int | None = None
     tags: list[str] = Field(default_factory=list)
-    enabled: bool = True
     selectable: bool = Field(
-        description="Effective availability after applying model and Provider state."
+        description="Effective availability after validating Provider configuration."
     )
     unavailable_reason: Literal[
-        "model_disabled",
-        "provider_disabled",
         "provider_unconfigured",
         "provider_invalid",
     ] | None = None
@@ -239,7 +237,6 @@ class LlmModelResponse(BaseModel):
             context_window_tokens=row.context_window_tokens,
             max_output_tokens=row.max_output_tokens,
             tags=row.tags or [],
-            enabled=row.enabled,
             selectable=unavailable_reason is None,
             unavailable_reason=unavailable_reason,
             agent_count=agent_count,
@@ -256,7 +253,6 @@ class LlmModelSummary(BaseModel):
     context_window_tokens: int | None = None
     max_output_tokens: int | None = None
     tags: list[str] = Field(default_factory=list)
-    enabled: bool = True
 
     @classmethod
     def from_row(cls, row: LlmModel) -> LlmModelSummary:
@@ -268,5 +264,4 @@ class LlmModelSummary(BaseModel):
             context_window_tokens=row.context_window_tokens,
             max_output_tokens=row.max_output_tokens,
             tags=row.tags or [],
-            enabled=row.enabled,
         )

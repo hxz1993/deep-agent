@@ -75,7 +75,7 @@ test("内置工具页只接受后端 builtin 分类工具包", () => {
   );
 });
 
-test("内置工具列表展示能力、工具和默认状态且没有管理操作", () => {
+test("内置工具列表展示能力和工具且没有资源级状态或管理操作", () => {
   const ui = loadBuiltinToolsUi();
   const row = ui.builtinCapabilityRow({
     code: "builtin:general",
@@ -83,7 +83,6 @@ test("内置工具列表展示能力、工具和默认状态且没有管理操�
     label: "通用工具",
     source: "builtin",
     description: "进程内通用工具。",
-    default_enabled: true,
     tools: [{ name: "get_current_time", description: "获取当前 UTC 时间。" }],
   });
 
@@ -91,12 +90,12 @@ test("内置工具列表展示能力、工具和默认状态且没有管理操�
   assert.match(row, /内置工具包/);
   assert.match(row, /builtin:general/);
   assert.match(row, /get_current_time/);
-  assert.match(row, /默认启用/);
+  assert.doesNotMatch(row, /默认启用|默认关闭|启用|停用/);
   assert.doesNotMatch(row, /始终可用|有附件时可用/);
   assert.doesNotMatch(row, /编辑|删除|保存|checkbox|switch/);
 });
 
-test("Python 沙箱作为独立且默认关闭的内置工具包展示", () => {
+test("Python 沙箱作为独立的可关联内置工具包展示", () => {
   const ui = loadBuiltinToolsUi();
   const row = ui.builtinCapabilityRow({
     code: "builtin:sandbox",
@@ -104,14 +103,13 @@ test("Python 沙箱作为独立且默认关闭的内置工具包展示", () => {
     label: "Python 沙箱",
     source: "builtin",
     description: "执行受控 Python 代码。",
-    default_enabled: false,
     tools: [{ name: "execute_python", description: "执行 Python。" }],
   });
 
   assert.match(row, /Python 沙箱/);
   assert.match(row, /builtin:sandbox/);
   assert.match(row, /execute_python/);
-  assert.match(row, /默认关闭/);
+  assert.doesNotMatch(row, /默认启用|默认关闭|启用|停用/);
 });
 
 test("附件读取不再作为可配置内置工具包", () => {

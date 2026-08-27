@@ -43,7 +43,6 @@ def load_builtin_mcp_tool_packages(mcps_dir: str) -> list[ToolPackage]:
                 source="builtin",
                 description=f"Builtin MCP server '{name}'. Tools are prefixed with '{name}_'.",
                 tools=[],
-                default_enabled=False,
             )
         )
         logger.info("Loaded builtin MCP server {!r} ({})", name, server_file)

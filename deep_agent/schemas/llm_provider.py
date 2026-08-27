@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import AnyHttpUrl, BaseModel, Field, TypeAdapter, field_validator, model_validator
+from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, TypeAdapter, field_validator, model_validator
 
 
 _HTTP_URL_ADAPTER = TypeAdapter(AnyHttpUrl)
@@ -25,12 +25,13 @@ def mask_api_key(value: str | None) -> str | None:
 
 
 class LlmProviderCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     name: str = Field(..., max_length=191)
     provider_type: str = Field(..., max_length=64)
     use_default_base_url: bool = False
     base_url: str | None = None
     api_key: str | None = None
-    enabled: bool = True
 
     @field_validator("name", "provider_type")
     @classmethod
@@ -54,19 +55,20 @@ class LlmProviderCreate(BaseModel):
 
 
 class LlmProviderUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     name: str | None = Field(default=None, max_length=191)
     provider_type: str | None = Field(default=None, max_length=64)
     use_default_base_url: bool | None = None
     base_url: str | None = None
     api_key: str | None = None
     clear_api_key: bool = False
-    enabled: bool | None = None
 
     @model_validator(mode="before")
     @classmethod
     def reject_null_required_fields(cls, value):
         if isinstance(value, dict):
-            for field in ("name", "provider_type", "use_default_base_url", "enabled"):
+            for field in ("name", "provider_type", "use_default_base_url"):
                 if field in value and value[field] is None:
                     raise ValueError(f"{field} cannot be null")
             if value.get("clear_api_key") and value.get("api_key") is not None:
@@ -108,7 +110,6 @@ class LlmProviderSummary(BaseModel):
     id: str
     name: str
     provider_type: str
-    enabled: bool
     api_key_set: bool
 
     @classmethod
@@ -117,7 +118,6 @@ class LlmProviderSummary(BaseModel):
             id=row.id,
             name=row.name,
             provider_type=row.provider_type,
-            enabled=row.enabled,
             api_key_set=bool(row.api_key),
         )
 

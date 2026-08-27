@@ -46,13 +46,13 @@ class AgentCreate(_RejectLegacyMaxRequests):
         le=2,
         description="Optional sampling temperature for this agent.",
     )
-    capabilities: list[str] | None = Field(
-        default=None,
-        description="Tool package codes to enable. Null uses default packages.",
+    capabilities: list[str] = Field(
+        default_factory=list,
+        description="Tool package codes explicitly associated with this agent.",
     )
     skills: list[str] = Field(
         default_factory=list,
-        description="Skill package codes explicitly enabled for this agent.",
+        description="Skill package codes explicitly associated with this agent.",
     )
 
     @field_validator(*AGENT_REQUIRED_FIELDS)
@@ -63,14 +63,14 @@ class AgentCreate(_RejectLegacyMaxRequests):
             raise ValueError("must not be blank")
         return normalized
 
-    @field_validator("skills")
+    @field_validator("capabilities", "skills")
     @classmethod
-    def validate_skills(cls, value: list[str]) -> list[str]:
+    def validate_code_list(cls, value: list[str]) -> list[str]:
         normalized = [item.strip() for item in value]
         if any(not item for item in normalized):
-            raise ValueError("skills cannot contain blank values")
+            raise ValueError("values cannot contain blank strings")
         if len(set(normalized)) != len(normalized):
-            raise ValueError("skills must be unique")
+            raise ValueError("values must be unique")
         return normalized
 
 
@@ -91,6 +91,8 @@ class AgentUpdate(_RejectLegacyMaxRequests):
                     raise ValueError(f"{field} cannot be null")
             if "skills" in value and value["skills"] is None:
                 raise ValueError("skills cannot be null")
+            if "capabilities" in value and value["capabilities"] is None:
+                raise ValueError("capabilities cannot be null")
         return value
 
     @field_validator(*AGENT_REQUIRED_FIELDS)
@@ -103,16 +105,16 @@ class AgentUpdate(_RejectLegacyMaxRequests):
             raise ValueError("must not be blank")
         return normalized
 
-    @field_validator("skills")
+    @field_validator("capabilities", "skills")
     @classmethod
-    def validate_skills(cls, value: list[str] | None) -> list[str] | None:
+    def validate_code_list(cls, value: list[str] | None) -> list[str] | None:
         if value is None:
             return None
         normalized = [item.strip() for item in value]
         if any(not item for item in normalized):
-            raise ValueError("skills cannot contain blank values")
+            raise ValueError("values cannot contain blank strings")
         if len(set(normalized)) != len(normalized):
-            raise ValueError("skills must be unique")
+            raise ValueError("values must be unique")
         return normalized
 
 
@@ -134,7 +136,7 @@ class AgentResponse(BaseModel):
     model: LlmModelSummary
     prompt: str
     temperature: float | None = None
-    capabilities: list[str] | None = None
+    capabilities: list[str] = Field(default_factory=list)
     skills: list[str] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
@@ -148,7 +150,7 @@ class AgentResponse(BaseModel):
             model=LlmModelSummary.from_row(llm_model),
             prompt=row.prompt,
             temperature=row.temperature,
-            capabilities=row.capabilities,
+            capabilities=list(row.capabilities or []),
             skills=row.skills or [],
             created_at=row.created_at,
             updated_at=row.updated_at,

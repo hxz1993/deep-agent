@@ -15,7 +15,7 @@ class _McpRow:
 
 
 class McpToolPackageDefaultsTests(unittest.TestCase):
-    def test_db_mcp_tool_package_is_not_default_enabled(self) -> None:
+    def test_db_mcp_tool_package_uses_explicit_capability_code(self) -> None:
         with unittest.mock.patch(
             "deep_agent.capabilities.mcp.db_loader.build_mcp_toolset",
             return_value=object(),
@@ -23,7 +23,9 @@ class McpToolPackageDefaultsTests(unittest.TestCase):
             package = tool_package_from_row(_McpRow())  # type: ignore[arg-type]
 
         self.assertIsInstance(package, ToolPackage)
-        self.assertFalse(package.default_enabled)
+        self.assertEqual(package.code, "mcp:echo")
+        self.assertEqual(package.category, "mcp")
+        self.assertFalse(hasattr(package, "default_enabled"))
 
 
 if __name__ == "__main__":

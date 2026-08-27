@@ -3,7 +3,7 @@
 DeepAgent 是基于 FastAPI、Pydantic AI 和 SQLAlchemy 的多用户 Agent 服务，并
 随服务发布一体化运维控制台。
 
-当前产品版本为 `0.6.0`。`deep_agent.__version__` 是唯一代码版本来源，FastAPI、
+当前产品版本为 `0.6.1`。`deep_agent.__version__` 是唯一代码版本来源，FastAPI、
 `GET /info` 和 Console 顶部版本徽标均读取该值。后续正式发布默认递增
 `MAJOR.MINOR.PATCH` 的第三位，只有明确规划重大版本时才调整前两位。产品版本不通过
 环境变量或数据库覆盖，也不等同于 Alembic 数据库结构 revision。
@@ -16,8 +16,9 @@ Console 对话测试提供独立的“对话 / 轨迹”页签。会话历史、
 [`docs/design/18-session-trajectory/`](docs/design/18-session-trajectory/)。
 
 v0.5.6 完成 Provider + Model 两层配置：Provider 独占 Pydantic AI 适配类型、地址和密钥，
-Model 只保存 Provider 外键、模型编码与能力属性；两层启停共同决定模型是否可用。Agent和
-聊天请求继续只引用 `model_id`，模型目录仍是只读候选数据，不参与运行时关联。设计与迁移边界见
+Model 只保存 Provider 外键、模型编码与能力属性。v0.6.1删除两层的冗余启停字段：Provider
+是否可用由真实连接配置决定，Model是否进入Run由Agent或聊天请求的`model_id`决定。模型目录仍是
+只读候选数据，不参与运行时关联。设计与迁移边界见
 [`docs/design/19-model-provider-architecture/`](docs/design/19-model-provider-architecture/)。
 
 ## 项目结构
@@ -120,16 +121,18 @@ uvicorn deep_agent.main:app --host 0.0.0.0 --port 8000
 
 ## 数据库基线
 
-新数据库直接执行 `alembic upgrade head`。当前 Alembic head 为 `009`：`002` 统一 ToolPackage
+新数据库直接执行 `alembic upgrade head`。当前 Alembic head 为 `010`：`002` 统一 ToolPackage
 与 UI 工具包；`003` 将线上 Skill 与
 ToolPackage 分离；`004`清理已废弃的`builtin:attachment`；`005`和`006`依次删除已下线的
 预制MCP记录，并从显式Agent能力列表中清理对应引用；`007`增加独立Provider层、模型硬外键并删除
 模型表中的重复连接字段；`008`将会话域重建为`chat_sessions + chat_session_events`；`009`删除
-已经下线的标题专用模型配置表。
+已经下线的标题专用模型配置表；`010`删除 Provider、模型、Skill、MCP、UI 工具包和 UI 工具自身的冗余启停字段，
+并把 Agent 的 `capabilities` 收敛为非空显式列表。
 
 `008`不在线转换旧会话：它删除旧会话历史并建立空 Event Store，但保留所有配置表。共享环境升级前
 必须先用 Revision 007 代码分别执行配置备份和会话归档，停掉全部旧实例后才能迁移；旧版本不能与
-008并行运行。Revision 008数据库可直接升级009，迁移会兼容旧表已存在或已被清理的两种状态。
+008并行运行。Revision 009数据库可直接升级010；升级后模型、工具和Skill是否进入 Run 只由Agent
+的`model_id`、`capabilities`和`skills`关联决定，Provider可用性只由实际连接配置决定。
 完整备份和切换边界见[`maintenance/README.md`](maintenance/README.md)。
 
 配置备份会复制全部配置表并只保留会话表结构；上传Skill的原始ZIP不塞入数据库备份。需要完整
@@ -141,8 +144,8 @@ ToolPackage 分离；`004`清理已废弃的`builtin:attachment`；`005`和`006`
 DeepAgent 当前支持：
 
 - 内置工具：
-  - `builtin:general`（通用工具）：默认启用，只包含 `get_current_time`。
-  - `builtin:sandbox`（Python 沙箱）：默认关闭，只包含 `execute_python`。
+  - `builtin:general`（通用工具）：只包含 `get_current_time`。
+  - `builtin:sandbox`（Python 沙箱）：只包含 `execute_python`。
 - 系统工具不是 ToolPackage。Harness任务规划、`load_capability`、Skill Resource、`read_file`、
   `export_file_to_download_center`、`read_tool_result`、`search_tools` 和 MCP Resource
   由运行时按 Agent/Run 条件自动注入，只在 Console 的只读“系统工具”目录中说明。
@@ -154,11 +157,12 @@ DeepAgent 当前支持：
 - Skill 不再属于 ToolPackage。Agent 通过独立 `skills` 列表选择，Harness 按需加载 `SKILL.md`；
   Skill 不能绕过 `capabilities` 获得 MCP 或其他工具。
 - `mcp:<name>`：URL或Builtin MCP；历史stdio记录只允许查看/删除，不能新建、修改或运行。
-- `ui:builtin`：代码内置的确认和候选选择交互，默认关闭。
-- `ui:<package>`：数据库管理的手工 UI 工具包，Agent 按包启用。
+- `ui:builtin`：代码内置的确认和候选选择交互。
+- `ui:<package>`：数据库管理的手工 UI 工具包，Agent 按包关联。
 
-产品配置单位是 Tool Package，每个包严格包装一个 Pydantic AI Toolset。Agent 的
-`capabilities` 字段保存工具包编码；当前不提供包内逐工具授权。Output Tool 是最终输出契约，
+产品配置单位是 Tool Package，每个包严格包装一个 Pydantic AI Toolset。资源目录没有第二层
+启停状态：Agent 的 `capabilities` 字段保存本 Agent 明确关联的工具包编码，新 Agent 默认为空；
+`agents.skills` 同样只保存明确关联的 Skill。当前不提供包内逐工具授权。Output Tool 是最终输出契约，
 不属于工具包，也不进入 `capabilities`。
 
 Skill 管理接口和包格式见

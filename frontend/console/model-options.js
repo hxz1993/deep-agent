@@ -13,16 +13,12 @@ export function modelProvider(model) {
 export function isModelSelectable(model) {
   if (typeof model?.selectable === "boolean") return model.selectable;
   const provider = modelProvider(model);
-  return model?.enabled !== false
-    && provider?.enabled !== false
-    && provider?.api_key_set !== false;
+  return provider?.api_key_set !== false;
 }
 
 function unavailableSuffix(model) {
   const provider = modelProvider(model);
   const reason = model?.unavailable_reason;
-  if (reason === "model_disabled" || model?.enabled === false) return "（模型已停用）";
-  if (reason === "provider_disabled" || provider?.enabled === false) return "（Provider 已停用）";
   if (reason === "provider_unconfigured" || provider?.api_key_set === false) return "（Provider 未配置密钥）";
   if (reason === "provider_invalid") return "（Provider 配置无效）";
   return "";

@@ -54,7 +54,6 @@ def _resolved_skill(root: Path, entries: list[dict]) -> ResolvedSkill:
     return ResolvedSkill(
         code="demo",
         source="upload",
-        enabled=True,
         package_root=root,
         library_root=root.parent,
         resource_index=entries,

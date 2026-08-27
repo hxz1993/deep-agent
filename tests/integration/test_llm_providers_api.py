@@ -92,7 +92,7 @@ class LlmProviderApiTests(unittest.IsolatedAsyncioTestCase):
             },
         )
         self.assertEqual(model.status_code, 201, model.text)
-        self.assertTrue(model.json()["enabled"])
+        self.assertNotIn("enabled", model.json())
 
         cleared = await self._client.patch(
             f"/api/v1/llm-providers/{body['id']}",
@@ -101,14 +101,13 @@ class LlmProviderApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(cleared.status_code, 200, cleared.text)
         self.assertFalse(cleared.json()["api_key_set"])
         self.assertIsNone(cleared.json()["api_key_masked"])
-        disabled_model = await self._client.get(
+        unavailable_model = await self._client.get(
             f"/api/v1/llm-models/{model.json()['id']}"
         )
-        self.assertEqual(disabled_model.status_code, 200, disabled_model.text)
-        self.assertTrue(disabled_model.json()["enabled"])
-        self.assertFalse(disabled_model.json()["selectable"])
+        self.assertEqual(unavailable_model.status_code, 200, unavailable_model.text)
+        self.assertFalse(unavailable_model.json()["selectable"])
         self.assertEqual(
-            disabled_model.json()["unavailable_reason"],
+            unavailable_model.json()["unavailable_reason"],
             "provider_unconfigured",
         )
 
@@ -120,7 +119,6 @@ class LlmProviderApiTests(unittest.IsolatedAsyncioTestCase):
         selectable_model = await self._client.get(
             f"/api/v1/llm-models/{model.json()['id']}"
         )
-        self.assertTrue(selectable_model.json()["enabled"])
         self.assertTrue(selectable_model.json()["selectable"])
 
     async def test_ruge_create_succeeds_once_and_real_duplicate_is_a_safe_conflict(self) -> None:
@@ -133,7 +131,6 @@ class LlmProviderApiTests(unittest.IsolatedAsyncioTestCase):
                 "use_default_base_url": False,
                 "base_url": "https://ruge.example/v1",
                 "api_key": first_secret,
-                "enabled": True,
             },
         )
         self.assertEqual(created.status_code, 201, created.text)
@@ -182,34 +179,20 @@ class LlmProviderApiTests(unittest.IsolatedAsyncioTestCase):
             "/api/v1/llm-models",
             json={
                 "provider_id": body["id"],
-                "name": "unconfigured-enabled-model",
-                "model": "unconfigured-enabled-model",
+                "name": "unconfigured-model",
+                "model": "unconfigured-model",
                 "input_modalities": ["text"],
                 "context_window_tokens": 32_000,
                 "max_output_tokens": 4_096,
             },
         )
         self.assertEqual(pending_model.status_code, 201, pending_model.text)
-        self.assertTrue(pending_model.json()["enabled"])
         self.assertFalse(pending_model.json()["selectable"])
         self.assertEqual(
             pending_model.json()["unavailable_reason"],
             "provider_unconfigured",
         )
 
-        disabled_model = await self._client.post(
-            "/api/v1/llm-models",
-            json={
-                "provider_id": body["id"],
-                "name": "unconfigured-disabled-model",
-                "model": "unconfigured-disabled-model",
-                "input_modalities": ["text"],
-                "context_window_tokens": 32_000,
-                "max_output_tokens": 4_096,
-                "enabled": False,
-            },
-        )
-        self.assertEqual(disabled_model.status_code, 201, disabled_model.text)
         configured = await self._client.patch(
             f"/api/v1/llm-providers/{body['id']}",
             json={"api_key": "configured-secret"},
@@ -219,87 +202,30 @@ class LlmProviderApiTests(unittest.IsolatedAsyncioTestCase):
             f"/api/v1/llm-models/{pending_model.json()['id']}"
         )
         self.assertTrue(restored_pending.json()["selectable"])
-        enabled_model = await self._client.patch(
-            f"/api/v1/llm-models/{disabled_model.json()['id']}",
-            json={"enabled": True},
-        )
-        self.assertEqual(enabled_model.status_code, 200, enabled_model.text)
-        self.assertTrue(enabled_model.json()["enabled"])
 
-    async def test_disabled_model_blocks_new_agent_selection(self) -> None:
+    async def test_enabled_flags_are_rejected_and_agent_uses_configured_model(self) -> None:
         provider_id = self._default_model.provider_id
-        existing_agent = await self._client.post(
-            "/api/v1/agents",
-            json={
-                "name": "existing-provider-agent",
-                "model_id": self._default_model.id,
-                "prompt": "before disable",
-            },
-        )
-        self.assertEqual(existing_agent.status_code, 201, existing_agent.text)
         provider_flag = await self._client.patch(
             f"/api/v1/llm-providers/{provider_id}",
             json={"enabled": False},
         )
-        self.assertEqual(provider_flag.status_code, 200, provider_flag.text)
+        self.assertEqual(provider_flag.status_code, 422, provider_flag.text)
 
-        provider_flag_gates = await self._client.post(
-            "/api/v1/agents",
-            json={
-                "name": "provider-flag-gates",
-                "model_id": self._default_model.id,
-                "prompt": "provider flag enforced",
-            },
-        )
-        self.assertEqual(
-            provider_flag_gates.status_code,
-            422,
-            provider_flag_gates.text,
-        )
-        self.assertIn("provider is disabled", provider_flag_gates.text)
-
-        unavailable = await self._client.get(
-            f"/api/v1/llm-models/{self._default_model.id}"
-        )
-        self.assertFalse(unavailable.json()["selectable"])
-        self.assertEqual(unavailable.json()["unavailable_reason"], "provider_disabled")
-
-        hidden = await self._client.get(
-            "/api/v1/llm-models", params={"selectable_only": True}
-        )
-        self.assertNotIn(
-            self._default_model.id,
-            [item["id"] for item in hidden.json()],
-        )
-
-        reenabled = await self._client.patch(
-            f"/api/v1/llm-providers/{provider_id}",
-            json={"enabled": True},
-        )
-        self.assertEqual(reenabled.status_code, 200, reenabled.text)
-
-        disabled = await self._client.patch(
+        model_flag = await self._client.patch(
             f"/api/v1/llm-models/{self._default_model.id}",
             json={"enabled": False},
         )
-        self.assertEqual(disabled.status_code, 200, disabled.text)
+        self.assertEqual(model_flag.status_code, 422, model_flag.text)
 
-        rejected_agent = await self._client.post(
+        created_agent = await self._client.post(
             "/api/v1/agents",
             json={
-                "name": "new-disabled-model-agent",
+                "name": "configured-model-agent",
                 "model_id": self._default_model.id,
-                "prompt": "must reject",
+                "prompt": "model association selects this model",
             },
         )
-        self.assertEqual(rejected_agent.status_code, 422, rejected_agent.text)
-        self.assertIn("disabled", rejected_agent.text)
-
-        preserved_agent = await self._client.patch(
-            f"/api/v1/agents/{existing_agent.json()['id']}",
-            json={"prompt": "unrelated edit remains valid"},
-        )
-        self.assertEqual(preserved_agent.status_code, 200, preserved_agent.text)
+        self.assertEqual(created_agent.status_code, 201, created_agent.text)
 
     async def test_compact_provider_id_lifecycle_and_model_filter(self) -> None:
         created = await self._client.post(
@@ -395,7 +321,6 @@ class LlmProviderApiTests(unittest.IsolatedAsyncioTestCase):
                 "provider_type": "openai_compatible",
                 "base_url": "https://example.invalid/v1",
                 "api_key": "provider-secret",
-                "enabled": False,
             },
         )
         self.assertEqual(keyed_provider.status_code, 201, keyed_provider.text)
@@ -403,31 +328,28 @@ class LlmProviderApiTests(unittest.IsolatedAsyncioTestCase):
             "/api/v1/llm-models",
             json={
                 "provider_id": keyed_provider.json()["id"],
-                "name": "provider-flag-ignored-model",
-                "model": "provider-flag-ignored-model",
+                "name": "configured-provider-model",
+                "model": "configured-provider-model",
                 "input_modalities": ["text"],
                 "context_window_tokens": 32_000,
                 "max_output_tokens": 4_096,
             },
         )
         self.assertEqual(model.status_code, 201, model.text)
-        self.assertTrue(model.json()["enabled"])
-        self.assertFalse(model.json()["selectable"])
-        self.assertEqual(model.json()["unavailable_reason"], "provider_disabled")
+        self.assertTrue(model.json()["selectable"])
 
         enabled_without_key = await self._client.post(
             "/api/v1/llm-models",
             json={
                 "provider_id": missing_key.json()["id"],
-                "name": "enabled-without-key",
-                "model": "enabled-without-key",
+                "name": "model-without-key",
+                "model": "model-without-key",
                 "input_modalities": ["text"],
                 "context_window_tokens": 32_000,
                 "max_output_tokens": 4_096,
             },
         )
         self.assertEqual(enabled_without_key.status_code, 201, enabled_without_key.text)
-        self.assertTrue(enabled_without_key.json()["enabled"])
         self.assertFalse(enabled_without_key.json()["selectable"])
         switched = await self._client.patch(
             f"/api/v1/llm-models/{self._default_model.id}",
@@ -460,7 +382,7 @@ class LlmProviderApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(model["provider"]["api_key_set"])
         self.assertEqual(model["base_url"], "https://updated.invalid/v1")
         self.assertTrue(model["api_key_set"])
-        self.assertTrue(model["enabled"])
+        self.assertNotIn("enabled", model)
 
     async def test_referenced_provider_cannot_change_type_or_be_deleted(self) -> None:
         provider_id = self._default_model.provider_id

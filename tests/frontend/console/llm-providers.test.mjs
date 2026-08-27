@@ -74,10 +74,10 @@ test("Provider Key 回显脱敏标识且未修改时不重复写入", () => {
   assert.doesNotMatch(template, /llmProviderApiKeyState|llmProviderBaseUrlHint|清除当前 API Key|API Key（编辑时留空表示不修改）/);
 });
 
-test("Provider 启停是独立配置并由表单保存", () => {
-  assert.match(template, /id="llmProviderEnabled"/);
-  assert.match(providerSource, /enabled: document\.getElementById\("llmProviderEnabled"\)\.checked/);
-  assert.match(providerSource, /provider\.enabled === false \? "Provider 已停用" : "Provider 已启用"/);
+test("Provider 和模型不提供重复的启停配置", () => {
+  assert.doesNotMatch(template, /id="llmProviderEnabled"|启用 Provider/);
+  assert.doesNotMatch(providerSource, /provider\.enabled|model\.enabled|data-toggle-model|toggleModel/);
+  assert.doesNotMatch(modelSource, /provider\.enabled|model\.enabled|toggleEnabled/);
 });
 
 test("Provider 详情操作统一使用轻风格按钮", () => {
@@ -86,7 +86,6 @@ test("Provider 详情操作统一使用轻风格按钮", () => {
   assert.match(providerSource, /class="provider-action danger" data-provider-delete/);
   assert.match(providerSource, /class="provider-action" data-provider-catalog/);
   assert.match(providerSource, /class="provider-action" data-provider-model/);
-  assert.match(providerSource, /data-toggle-model/);
   assert.match(providerSource, /data-delete-model/);
   assert.doesNotMatch(providerSource, /data-provider-toggle/);
 });
@@ -142,7 +141,6 @@ test("Provider 目录初始化只映射明确渠道并跳过当前 Provider 已�
     name: "new-model",
     description: null,
     model: "new-model",
-    enabled: true,
     input_modalities: ["text", "image"],
     context_window_tokens: 8_000,
     max_output_tokens: 2_000,
@@ -187,25 +185,24 @@ test("目录按 0、1、多 Provider 分流且不再按 URL 猜测", () => {
   assert.doesNotMatch(modelSource, /provider_api_url.*base_url|normalizeBaseUrl/);
 });
 
-test("模型选项按 Provider 分组并禁止新选任一层不可用的模型", () => {
+test("模型选项按 Provider 分组并只禁用 Provider 配置不可用的模型", () => {
   const models = [
-    { id: "a", name: "A", model: "model-a", enabled: true, selectable: true, provider: { id: "p1", name: "DeepSeek", enabled: true, api_key_set: true } },
-    { id: "b", name: "B", model: "model-b", enabled: false, selectable: false, unavailable_reason: "model_disabled", provider: { id: "p2", name: "Moonshot", enabled: true, api_key_set: true } },
-    { id: "c", name: "C", model: "model-c", enabled: true, selectable: false, unavailable_reason: "provider_unconfigured", provider: { id: "p3", name: "Compatible", enabled: true, api_key_set: false } },
-    { id: "d", name: "D", model: "model-d", enabled: true, selectable: false, unavailable_reason: "provider_disabled", provider: { id: "p4", name: "OpenAI", enabled: false, api_key_set: true } },
+    { id: "a", name: "A", model: "model-a", selectable: true, provider: { id: "p1", name: "DeepSeek", api_key_set: true } },
+    { id: "b", name: "B", model: "model-b", selectable: true, provider: { id: "p2", name: "Moonshot", api_key_set: true } },
+    { id: "c", name: "C", model: "model-c", selectable: false, unavailable_reason: "provider_unconfigured", provider: { id: "p3", name: "Compatible", api_key_set: false } },
+    { id: "d", name: "D", model: "model-d", selectable: false, unavailable_reason: "provider_invalid", provider: { id: "p4", name: "OpenAI", api_key_set: true } },
   ];
   const html = renderGroupedModelOptions(models, { selectedId: "" });
   assert.match(html, /<optgroup label="DeepSeek">/);
   assert.match(html, /<optgroup label="Moonshot">/);
-  assert.match(html, /value="b" disabled/);
+  assert.doesNotMatch(html, /value="b" disabled/);
   assert.match(html, /value="c" disabled/);
   assert.match(html, /value="d" disabled/);
-  assert.match(html, /Provider 已停用/);
   assert.equal(firstSelectableModelId(models), "a");
 
-  const preserved = renderGroupedModelOptions(models, { selectedId: "b" });
-  assert.match(preserved, /value="b" selected/);
-  assert.doesNotMatch(preserved, /value="b" selected disabled/);
+  const preserved = renderGroupedModelOptions(models, { selectedId: "c" });
+  assert.match(preserved, /value="c" selected/);
+  assert.doesNotMatch(preserved, /value="c" selected disabled/);
 });
 
 test("Agent 和 Chat 统一复用 Provider 分组模型选项", () => {

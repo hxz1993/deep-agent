@@ -253,7 +253,6 @@ class ChatPythonSandboxIntegrationTests(unittest.IsolatedAsyncioTestCase):
                     version=parsed.version,
                     schema_version=parsed.schema_version,
                     source="upload",
-                    enabled=True,
                     platform_file_id="test-script-file",
                     file_name="script-test.zip",
                     file_size=len(raw),

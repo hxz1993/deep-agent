@@ -141,7 +141,6 @@ function inspectionToast(result) {
 function savedInspectionToast(server, action) {
   const info = server?.inspection || {};
   if (server?.transport === "builtin") return { message: `MCP 已${action}，已热重载`, error: false };
-  if (!server?.enabled) return { message: `MCP 已${action}，当前未启用，尚未检测`, error: false };
   if (info.status === "unreachable") {
     return {
       message: `MCP 已${action}，但检测失败：${inspectionFailureLabel(info.error) || "无法连接"}`,
@@ -190,12 +189,12 @@ const mcpAdmin = {
     if (!tbody) return;
     this.moreMenuDismissController?.abort();
     this.moreMenuDismissController = null;
-    tbody.innerHTML = `<tr><td colspan="7" class="empty-cell">加载中…</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="6" class="empty-cell">加载中…</td></tr>`;
     try {
       const servers = await apiFetch("/api/v1/mcp");
       showDbBanner(false);
       if (!servers.length) {
-        tbody.innerHTML = `<tr><td colspan="7" class="empty-cell">暂无 MCP 服务</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="6" class="empty-cell">暂无 MCP 服务</td></tr>`;
         return;
       }
       const inherited = servers.find((item) => item.request_context?.inherited_headers?.length)
@@ -210,7 +209,6 @@ const mcpAdmin = {
           <td><strong>${escapeHtml(s.name)}</strong></td>
           <td><span class="badge">${escapeHtml(mcpTransportLabel(s.transport))}</span></td>
           <td><span class="badge">${escapeHtml(MCP_CONTEXT_LABELS[s.request_context?.mode] || "继承")}</span></td>
-          <td><span class="badge ${s.enabled ? "on" : "off"}">${s.enabled ? "是" : "否"}</span></td>
           <td class="mcp-description-cell">
             <div class="mcp-description-text">${escapeHtml(s.description || "—")}</div>
             <div class="mcp-inspection" title="${escapeHtml(inspection.title)}">
@@ -394,7 +392,6 @@ const mcpAdmin = {
     document.getElementById("mcpNameReadOnlyHint")?.classList.add("hidden");
     document.getElementById("mcpTransport").value = "url";
     document.getElementById("mcpDescription").value = "";
-    document.getElementById("mcpEnabled").checked = true;
     document.getElementById("mcpUrl").value = "";
     document.getElementById("mcpHeaders").value = "";
     document.getElementById("mcpCommand").value = "";
@@ -420,7 +417,6 @@ const mcpAdmin = {
       document.getElementById("mcpNameReadOnlyHint")?.classList.remove("hidden");
       document.getElementById("mcpTransport").value = server.transport;
       document.getElementById("mcpDescription").value = server.description || "";
-      document.getElementById("mcpEnabled").checked = server.enabled;
 
       if (server.transport === "url") {
         document.getElementById("mcpUrl").value = server.config.url || "";
@@ -563,7 +559,6 @@ const mcpAdmin = {
     const payload = {
       config,
       description: document.getElementById("mcpDescription").value.trim() || null,
-      enabled: document.getElementById("mcpEnabled").checked,
     };
     if (transport !== "builtin") {
       payload.transport = transport;
@@ -571,7 +566,7 @@ const mcpAdmin = {
 
     const submit = form.querySelector('button[type="submit"]');
     if (submit) {
-      submit.dataset.submittingLabel = transport === "url" && payload.enabled
+      submit.dataset.submittingLabel = transport === "url"
         ? "保存并检测中…"
         : "保存中…";
     }

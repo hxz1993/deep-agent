@@ -39,15 +39,15 @@ def _provider_config(
 class AgentSpec:
     """Declarative description of an agent.
 
-    ``capabilities=None`` uses default capabilities and no extension UI tools;
-    otherwise the list contains product tool-package codes such as
+    ``capabilities`` contains the explicitly associated product tool-package
+    codes such as
     ``builtin:general`` or ``ui:deepcube``.
     """
 
     name: str
     model: str
     instructions: str
-    capabilities: list[str] | None = None
+    capabilities: list[str] = field(default_factory=list)
     skills: list[str] = field(default_factory=list)
     base_url: str | None = None
     api_key: str | None = None
@@ -72,7 +72,7 @@ class AgentSpec:
             name=row.name,
             model=llm_model.model,
             instructions=row.prompt,
-            capabilities=row.capabilities,
+            capabilities=list(row.capabilities or []),
             skills=list(row.skills or []),
             temperature=row.temperature,
             agent_id=row.id,
@@ -100,7 +100,7 @@ class AgentSpec:
             name=name,
             model=llm_model.model,
             instructions=instructions or DEFAULT_INSTRUCTIONS,
-            capabilities=capabilities,
+            capabilities=list(capabilities or []),
             skills=list(skills or []),
             temperature=temperature,
             input_modalities=_input_modalities(llm_model),

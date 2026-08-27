@@ -49,7 +49,7 @@ frontend/
 | 内置工具目录 | 配置中心只读展示 `builtin:general`、`builtin:sandbox`；Agent 按包选择 |
 | 系统工具目录 | 配置中心按任务规划、Skill、文件、工具结果、MCP 工具发现、MCP Resource 分组展示自动注入工具；不参与 Agent 配置 |
 | 任务计划 | 只识别`write_plan`完整快照；普通对话直接消费History中的`plan` Item，同Turn Deferred由后端恢复PlanStore |
-| Skill | 独立 Skill 列表与详情；上传包安装/替换/启停/单个与全部导出/删除；文本、Word、Excel 资源可预览，脚本只列包内路径和数量，不展示可执行性判断；Agent 使用独立 `skills` 列表选择 |
+| Skill | 独立 Skill 列表与详情；上传包安装/替换/单个与全部导出/删除；文本、Word、Excel 资源可预览，脚本只列包内路径和数量，不展示可执行性判断；Agent 使用独立 `skills` 列表选择 |
 | 一体化控制台 | `/console/`；工作台、配置和诊断的唯一入口 |
 | 会话轨迹 | 工作台“对话 / 轨迹”页签；普通对话读History/SSE ConversationItem，只有轨迹按Sequence读取Event API |
 
@@ -73,13 +73,17 @@ Tool Call/Result记录；用户输入行只按Event中现有`context_refs.type/l
 输出预测或安全余量算法。
 
 配置中心 UI 工具页使用“左侧工具包树 + 右侧当前包工具表”：来源只用于左树分组，右表不再
-重复显示所属包，但必须保留名称/描述/Widget搜索和启停状态筛选；窄屏改为上下布局，仍须先选包
+重复显示所属包；资源自身没有启停状态或启停筛选。窄屏改为上下布局，仍须先选包
 再维护工具。Builtin 包只读，只有选中手工包时才开放新建工具。
 
-配置中心 Skill 页不是工具包页：Builtin Skill 只读，上传 Skill 可安装、替换、启停、单个与全部导出和删除；
+配置中心 Skill 页不是工具包页：Builtin Skill 只读，上传 Skill 可安装、替换、单个与全部导出和删除；
 详情只展示安全资源索引和 Manifest；文本、DOCX、XLSX 可预览，`scripts/`/`tools/` 只展示路径与
 数量，不判断是否可执行，也不展示脚本正文。Agent 独立编辑页将
-Skill 与工具包分区保存；停用 Skill 的既有引用保留并标记不可用，不静默从 Agent 配置删除。
+Skill 与工具包分区保存；是否参与运行只看 Agent 的显式关联。
+
+配置中心所有目录资源都没有独立“启用”配置：Provider只按地址、凭据和类型等实际配置判断可用，
+Model由Agent或请求级模型选择；Skill、MCP、UI工具包、UI工具和预制工具包由Agent显式关联后才进入
+Run。Console不得重新增加这些资源的启停开关、状态列或停用操作。
 
 Agent 独立编辑页的系统提示词标题栏显示“字符数 / 预估 Token”。字符数和 Token 估算统一调用
 后端 `POST /api/v1/agents/prompt-estimate`，由当前模型对应的 `TokenEstimator` 计算；前端只做
@@ -210,8 +214,8 @@ python3.12 -m http.server 5173
 - 生产环境应收紧后端 CORS `allow_origins`
 - `tool_call` 首帧 `args` 可能为 `{}`，需按 `tool_call_id` 合并后续帧
 - 配置表单必须区分“主体保存失败”和“保存成功后的列表刷新失败”；后者保留成功结果并提示重新加载，不能让用户按新建模式重复提交。条件字段（如 URL MCP 的 URL）需要前端动态必填和后端 Schema 双重校验。
-- Agent 的 `capabilities: null` 表示使用默认工具包，`[]` 表示明确不启用任何工具包；新建表单必须按 `null` 初始化。删除 MCP、UI 工具包或 UI 工具若返回 `detail.referenced_by`，应直接展示引用它的 Agent 名称。
-- `builtin__confirm`、`builtin__choice` 同属非默认启用的 `ui:builtin` 工具包；Agent 新建和历史回填不得自动勾选。choice 始终提供候选外自由输入，提交结果固定包含 `selected: string[]` 与 `custom_input: string | null`，二者不能同时为空。
+- Agent 的 `capabilities` 和 `skills` 都是非空显式列表；新建表单必须按 `[]` 初始化，不得自动勾选任何资源。删除 MCP、UI 工具包或 UI 工具若返回 `detail.referenced_by`，应直接展示引用它的 Agent 名称。
+- `builtin__confirm`、`builtin__choice` 同属 `ui:builtin` 工具包；Agent 新建和历史回填不得自动勾选。choice 始终提供候选外自由输入，提交结果固定包含 `selected: string[]` 与 `custom_input: string | null`，二者不能同时为空。
 - MCP 新建页只允许 URL transport；历史 stdio 配置只读且不显示编辑入口。Builtin MCP 继续由仓库内程序配置管理，列表保留编辑入口但不显示删除按钮，后端删除接口也会拒绝。
 - 用户消息下方只提供复制可见正文的图标操作，不提供编辑/截断历史入口；附件、Context Reference和隐藏元数据不得拼入复制内容。
 - URL MCP 的普通编辑名称只读；改名必须走列表中的独立“重命名”操作。成功后 Console 同步刷新

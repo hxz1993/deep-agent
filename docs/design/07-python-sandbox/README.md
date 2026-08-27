@@ -17,7 +17,7 @@ execute_skill_script(skill_code, script_path, arguments, inputs, resource_paths)
 → outputs/result.json 作为正式 result
 ```
 
-`execute_python` 在 Agent 启用 `builtin:sandbox` 时披露。`execute_skill_script` 还要求 Agent
+`execute_python` 在 Agent 关联 `builtin:sandbox` 时披露。`execute_skill_script` 还要求 Agent
 选择了一个包含脚本的 Skill。Skill 脚本源码不能通过 `read_file` 读取。
 
 ## 当前执行边界

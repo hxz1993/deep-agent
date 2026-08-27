@@ -1,6 +1,6 @@
 # Conversation/History 客户端迁移清单
 
-DeepAgent `0.6.0` 的唯一数据库事实源是 `chat_session_events`。普通聊天客户端不解析 Event：
+DeepAgent `0.6.1` 的唯一数据库事实源是 `chat_session_events`。普通聊天客户端不解析 Event：
 
 - `GET /api/v1/sessions/{session_id}/history`：普通聊天、工具、Plan、Deferred、附件和上下文。
 - `GET /api/v1/sessions/{session_id}/events`：仅供 Console 轨迹、审计和精确回读。
@@ -103,6 +103,11 @@ Event Store 的最终 Conversation 投影。客户端不需要维护“临时项
 - Deferred、停止、会话列表、删除和手动改名请求保持不变。
 
 本次 DeepAgent 改动不会写入上述两个外部仓库。
+
+Alembic `010`只删除配置目录中Provider、模型、Skill、MCP、UI工具包和UI工具的`enabled`字段，并把
+Agent能力收敛为显式列表；Chat、History、SSE、附件、Plan和Deferred契约没有变化。两个普通聊天
+客户端不读取这些配置目录字段，因此不需要因010调整运行代码；只有外部管理员页面若直接维护上述
+资源，才需删除对应启停字段和操作。
 
 ## 5. 最小验收
 

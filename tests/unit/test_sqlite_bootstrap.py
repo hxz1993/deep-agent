@@ -749,7 +749,7 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
                         {table: self._row_count(db_path, table) for table in config_counts},
                     )
 
-                    await asyncio.to_thread(command.upgrade, config, "009")
+                    await asyncio.to_thread(command.upgrade, config, "010")
                     self._assert_current_baseline(db_path)
 
                     await asyncio.to_thread(command.downgrade, config, "008")
@@ -780,7 +780,7 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
                         self._foreign_keys(db_path, "auxiliary_model_configs"),
                     )
 
-                    await asyncio.to_thread(command.upgrade, config, "009")
+                    await asyncio.to_thread(command.upgrade, config, "010")
                     self._assert_current_baseline(db_path)
                     self.assertEqual(
                         config_counts,
@@ -801,11 +801,11 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
                         connection.execute("DROP TABLE auxiliary_model_configs")
                         connection.commit()
 
-                    await asyncio.to_thread(command.upgrade, config, "009")
+                    await asyncio.to_thread(command.upgrade, config, "010")
                     self._assert_current_baseline(db_path)
 
     def _assert_current_baseline(self, db_path: Path) -> None:
-        self.assertEqual(self._revision(db_path), "009")
+        self.assertEqual(self._revision(db_path), "010")
         self.assertEqual(self._business_tables(db_path), EXPECTED_TABLES)
         self.assertNotIn("max_requests", self._columns(db_path, "agents"))
         self.assertNotIn("capabilities_source", self._columns(db_path, "llm_models"))
@@ -826,15 +826,20 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(len(provider_id), 32)
         self.assertNotIn("-", provider_id)
-        self.assertEqual(
-            self._scalar(
-                db_path,
-                "SELECT enabled FROM llm_providers WHERE id = ?",
-                (provider_id,),
-            ),
-            0,
-        )
         self.assertNotIn("resource_capabilities", self._columns(db_path, "mcp_servers"))
+        for table in (
+            "llm_providers",
+            "llm_models",
+            "skill_packages",
+            "mcp_servers",
+            "ui_tool_packages",
+            "ui_tool_definitions",
+        ):
+            self.assertNotIn("enabled", self._columns(db_path, table))
+        self.assertEqual(
+            self._index_columns(db_path, "ix_ui_tool_definitions_source_enabled"),
+            [],
+        )
         self.assertIn("package_code", self._columns(db_path, "ui_tool_definitions"))
         self.assertIn("skills", self._columns(db_path, "agents"))
         self.assertEqual(

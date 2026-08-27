@@ -47,7 +47,6 @@ class McpConfigurationAtomicityTests(unittest.IsolatedAsyncioTestCase):
                     "name": "blank-url",
                     "transport": "url",
                     "config": {"url": ""},
-                    "enabled": True,
                 },
             )
 
@@ -66,7 +65,6 @@ class McpConfigurationAtomicityTests(unittest.IsolatedAsyncioTestCase):
                         "name": "atomic-create",
                         "transport": "url",
                         "config": {"url": "http://example.test/mcp"},
-                        "enabled": True,
                     },
                 )
 
@@ -79,7 +77,6 @@ class McpConfigurationAtomicityTests(unittest.IsolatedAsyncioTestCase):
                 name="atomic-update",
                 transport="url",
                 config={"url": "http://old.example.test/mcp"},
-                enabled=True,
             ),
             inspection={"status": "healthy"},
         )
@@ -106,7 +103,6 @@ class McpConfigurationAtomicityTests(unittest.IsolatedAsyncioTestCase):
                 name="atomic-rename-old",
                 transport="url",
                 config={"url": "http://old.example.test/mcp"},
-                enabled=False,
             )
         )
         model_id = (await self.stores.llm_model.list_all())[0].id

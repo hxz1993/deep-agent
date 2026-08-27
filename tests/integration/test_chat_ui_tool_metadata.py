@@ -45,7 +45,6 @@ async def _seed_manual_ui_tool(stores, *, name: str, metadata: dict) -> None:
                 "required": ["text"],
             },
             metadata=metadata,
-            enabled=True,
         )
     )
 

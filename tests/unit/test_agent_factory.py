@@ -27,7 +27,7 @@ def _spec(**kwargs: object) -> AgentSpec:
         "name": "test",
         "model": "openai:gpt-4o",
         "instructions": "hi",
-        "capabilities": None,
+        "capabilities": [],
         "base_url": None,
         "api_key": None,
     }
@@ -51,7 +51,6 @@ class ResolveModelTests(unittest.TestCase):
                     use_default_base_url=True,
                     base_url="https://ignored.example.invalid/v1",
                     api_key="provider-key",
-                    enabled=True,
                 ),
             )
         )
@@ -241,7 +240,6 @@ class ToolsetAssemblyTests(unittest.TestCase):
                     code=code,
                     category="builtin",
                     toolset=toolset,
-                    default_enabled=code == "builtin:general",
                 )
             )
 
@@ -268,7 +266,6 @@ class ToolsetAssemblyTests(unittest.TestCase):
                     code="ui:deepcube",
                     category="ui",
                     toolset=ui,
-                    default_enabled=False,
                 )
             ],
         )
@@ -282,7 +279,7 @@ class ToolsetAssemblyTests(unittest.TestCase):
         self.assertEqual(assembled[5], "file-export-toolset")
         self.assertIs(assembled[6], ui)
 
-    def test_null_and_empty_selection_keep_original_default_semantics(self) -> None:
+    def test_empty_selection_has_no_implicit_packages(self) -> None:
         registry = ToolPackageRegistry()
         general = object()
         registry.register(
@@ -290,11 +287,13 @@ class ToolsetAssemblyTests(unittest.TestCase):
                 code="builtin:general",
                 category="builtin",
                 toolset=general,
-                default_enabled=True,
             )
         )
-        self.assertEqual(_toolsets_for_spec(registry, _spec(capabilities=None)), [general])
         self.assertEqual(_toolsets_for_spec(registry, _spec(capabilities=[])), [])
+        self.assertEqual(
+            _toolsets_for_spec(registry, _spec(capabilities=["builtin:general"])),
+            [general],
+        )
 
 
 if __name__ == "__main__":

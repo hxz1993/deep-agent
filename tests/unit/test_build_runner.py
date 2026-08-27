@@ -60,7 +60,6 @@ class BuildRunnerTests(unittest.IsolatedAsyncioTestCase):
             use_default_base_url=True,
             base_url="https://api.openai.com/v1/",
             api_key="test-key",
-            enabled=True,
         )
 
     async def test_model_id_loads_llm_preset(self) -> None:
@@ -70,7 +69,6 @@ class BuildRunnerTests(unittest.IsolatedAsyncioTestCase):
             provider_id=provider.id,
             name="m",
             model="openai:gpt-4o",
-            enabled=True,
         )
         ctx = AsyncMock()
         ctx.stores.llm_model.get_by_id = AsyncMock(return_value=llm)
@@ -108,7 +106,6 @@ class BuildRunnerTests(unittest.IsolatedAsyncioTestCase):
             provider_id=provider.id,
             name="m",
             model="openai:gpt-4o",
-            enabled=True,
         )
         ctx = AsyncMock()
         ctx.stores.llm_model.list_all = AsyncMock(return_value=[llm])

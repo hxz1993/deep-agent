@@ -35,7 +35,7 @@ SESSION_TABLES = (
     "chat_sessions",
     "chat_session_events",
 )
-CURRENT_SCHEMA_REVISION = "009"
+CURRENT_SCHEMA_REVISION = "010"
 ENVIRONMENT_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
 BACKUP_SCOPE_SCHEMA_VERSION = "1.0"
 

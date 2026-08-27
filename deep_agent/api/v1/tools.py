@@ -27,7 +27,6 @@ def _ui_tool_payload(record: UIToolRecord) -> dict:
         "display_name": str((record.metadata or {}).get("display_name") or record.name),
         "description": record.description,
         "execution_type": "external",
-        "enabled": record.enabled,
     }
 
 
@@ -52,8 +51,6 @@ async def list_tool_packages(ctx: AppContextDep) -> list[ToolPackageDescription]
                 "label": row.name,
                 "source": "builtin" if row.transport == "builtin" else "database",
                 "description": row.description or f"MCP 服务 {row.name}",
-                "enabled": row.enabled,
-                "default_enabled": False,
                 "tool_count": inspection.tools.count,
                 "tool_catalog_status": catalog_status,
                 "tools": [],
@@ -98,18 +95,17 @@ async def list_tool_packages(ctx: AppContextDep) -> list[ToolPackageDescription]
         manual_by_package.setdefault(record.package_code, []).append(record)
     for package in await ctx.stores.ui_tool_package.list_all():
         records = sorted(manual_by_package.get(package.code, []), key=lambda item: item.name)
-        enabled_records = [record for record in records if record.enabled]
-        invalid_enabled_count = 0
-        for record in enabled_records:
+        invalid_count = 0
+        for record in records:
             try:
                 build_args_validator(record)
             except ValueError:
-                invalid_enabled_count += 1
-        if not enabled_records:
+                invalid_count += 1
+        if not records:
             catalog_status = "empty"
-        elif invalid_enabled_count == len(enabled_records):
+        elif invalid_count == len(records):
             catalog_status = "invalid"
-        elif invalid_enabled_count:
+        elif invalid_count:
             catalog_status = "partial"
         else:
             catalog_status = "complete"
@@ -120,8 +116,6 @@ async def list_tool_packages(ctx: AppContextDep) -> list[ToolPackageDescription]
                 "label": package.label,
                 "source": package.source,
                 "description": package.description or "",
-                "enabled": package.enabled,
-                "default_enabled": False,
                 "tool_count": len(records),
                 "tool_catalog_status": catalog_status,
                 "tools": [_ui_tool_payload(record) for record in records],

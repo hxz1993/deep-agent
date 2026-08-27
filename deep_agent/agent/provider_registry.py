@@ -140,7 +140,6 @@ class ProviderRuntimeConfig:
     use_default_base_url: bool
     base_url: str
     api_key: str
-    enabled: bool
 
     @classmethod
     def from_row(cls, row: Any) -> "ProviderRuntimeConfig":
@@ -151,7 +150,6 @@ class ProviderRuntimeConfig:
             use_default_base_url=bool(getattr(row, "use_default_base_url", False)),
             base_url=str(getattr(row, "base_url", "") or "").strip(),
             api_key=str(getattr(row, "api_key", "") or "").strip(),
-            enabled=bool(getattr(row, "enabled", False)),
         )
 
 
@@ -179,10 +177,6 @@ def _validate_http_url(value: str, *, field: str) -> str:
 
 def validate_provider_config(config: ProviderRuntimeConfig) -> ProviderTypeDefinition:
     definition = provider_type_definition(config.provider_type)
-    if not config.enabled:
-        raise ProviderConfigurationError(
-            f"LLM provider is disabled: {config.name or config.provider_type}"
-        )
     if not config.api_key:
         raise ProviderConfigurationError(
             f"API key is required for LLM provider: {config.name or config.provider_type}"
@@ -208,10 +202,6 @@ def validate_provider_config(config: ProviderRuntimeConfig) -> ProviderTypeDefin
 
 def model_unavailable_reason(llm_model: Any, provider: Any) -> str | None:
     """Return a secret-free reason when a persisted model cannot be selected."""
-    if not bool(getattr(llm_model, "enabled", True)):
-        return "model_disabled"
-    if not bool(getattr(provider, "enabled", False)):
-        return "provider_disabled"
     if not str(getattr(provider, "api_key", "") or "").strip():
         return "provider_unconfigured"
     try:
@@ -234,8 +224,6 @@ async def load_provider_for_model(
 ) -> Any:
     """Load and validate the explicit provider linked to a persisted model."""
     model_id = getattr(llm_model, "id", None) or "unknown"
-    if not bool(getattr(llm_model, "enabled", True)):
-        raise ProviderConfigurationError(f"LLM model is disabled: {model_id}")
     provider_id = getattr(llm_model, "provider_id", None)
     if not provider_id:
         raise ProviderConfigurationError(

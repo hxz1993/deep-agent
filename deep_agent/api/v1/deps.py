@@ -159,7 +159,7 @@ async def _build_runner_from_spec(
         from deep_agent.core.exceptions import ToolPackageError
 
         raise ToolPackageError(
-            "Unknown or disabled tool packages: " + ", ".join(invalid_packages)
+            "Unknown or unavailable tool packages: " + ", ".join(invalid_packages)
         )
     mcp_rows = await load_mcp_rows(ctx.stores)
 

@@ -45,7 +45,6 @@ async def _response(
         base_url=row.base_url,
         api_key_set=bool(row.api_key),
         api_key_masked=mask_api_key(row.api_key),
-        enabled=row.enabled,
         model_count=await service.count_provider_models(row.id),
         created_at=row.created_at,
         updated_at=row.updated_at,

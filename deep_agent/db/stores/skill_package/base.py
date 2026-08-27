@@ -14,11 +14,9 @@ class SkillPackageStoreBase(SessionBoundMixin):
             result = await db.execute(select(SkillPackage).where(SkillPackage.code == code))
             return result.scalar_one_or_none()
 
-    async def list_all(self, *, enabled: bool | None = None) -> list[SkillPackage]:
+    async def list_all(self) -> list[SkillPackage]:
         async with self._read() as db:
             stmt = select(SkillPackage).order_by(SkillPackage.label, SkillPackage.code)
-            if enabled is not None:
-                stmt = stmt.where(SkillPackage.enabled == enabled)
             result = await db.execute(stmt)
             return list(result.scalars().all())
 

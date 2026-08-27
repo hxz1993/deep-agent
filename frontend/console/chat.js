@@ -14,7 +14,6 @@ import {
 import { createTrajectoryController } from "./trajectory.js?v=20260827-4";
 import {
   conversationVisualGroups,
-  latestConversationPlan,
   latestPendingDeferredTool,
   normalizeConversationHistory,
   upsertConversationItem,
@@ -140,7 +139,6 @@ const state = {
   automaticCompactionAnchor: null,
   assistantPresenter: null,
   planSnapshot: null,
-  planTerminalStatus: null,
   planningCallIds: new Set(),
 };
 
@@ -297,11 +295,9 @@ function clearMessages() {
 
 function clearComposerPlan() {
   state.planSnapshot = null;
-  state.planTerminalStatus = null;
   state.planningCallIds.clear();
   if (!el.composerPlan) return;
   el.composerPlan.classList.add("hidden");
-  el.composerPlan.classList.remove("interrupted", "error", "pending", "completed");
   el.composerPlanProgress.textContent = "";
   el.composerPlanItems.innerHTML = "";
 }
@@ -316,26 +312,22 @@ function showComposerPlanPlaceholder(toolCallId) {
   if (toolCallId) state.planningCallIds.add(toolCallId);
   if (!el.composerPlan || state.planSnapshot) return;
   const wasHidden = el.composerPlan.classList.contains("hidden");
-  el.composerPlan.classList.remove("hidden", "interrupted", "error", "pending", "completed");
+  el.composerPlan.classList.remove("hidden");
   el.composerPlanProgress.textContent = "正在制定…";
   el.composerPlanItems.innerHTML = "";
   if (wasHidden) setComposerPlanExpanded(true);
   refreshLucideIcons();
 }
 
-function renderComposerPlan(snapshot, { terminalStatus = null } = {}) {
-  const presentation = planPanelState(snapshot, terminalStatus);
+function renderComposerPlan(snapshot) {
+  const presentation = planPanelState(snapshot);
   if (!presentation || presentation.plan.completed === presentation.plan.total) {
     clearComposerPlan();
     return;
   }
   const wasHidden = el.composerPlan.classList.contains("hidden");
   state.planSnapshot = presentation.plan;
-  state.planTerminalStatus = presentation.terminalStatus;
-  el.composerPlan.classList.remove("hidden", "interrupted", "error", "pending", "completed");
-  if (presentation.terminalStatus) {
-    el.composerPlan.classList.add(presentation.terminalStatus);
-  }
+  el.composerPlan.classList.remove("hidden");
   el.composerPlanProgress.textContent = presentation.label;
   el.composerPlanItems.innerHTML = presentation.plan.items.map((item) => {
     const display = item.status === "in_progress" && item.active_form
@@ -351,11 +343,6 @@ function renderComposerPlan(snapshot, { terminalStatus = null } = {}) {
   }).join("");
   if (wasHidden) setComposerPlanExpanded(true);
   refreshLucideIcons();
-}
-
-function markComposerPlanTerminal(status) {
-  if (!state.planSnapshot) return;
-  renderComposerPlan(state.planSnapshot, { terminalStatus: status });
 }
 
 function removePlanningCall(toolCallId) {
@@ -1152,12 +1139,8 @@ function renderHistory(items) {
     }
   }
   state.awaitingHitl = latestPendingDeferredTool(items) !== null;
-  const latestPlan = latestConversationPlan(items);
-  if (latestPlan) {
-    renderComposerPlan(latestPlan.snapshot, { terminalStatus: latestPlan.terminalStatus });
-  } else {
-    clearComposerPlan();
-  }
+  // Plan 是当前 Run 的实时辅助浮层；历史会话只保留其事实和轨迹，不恢复浮层。
+  clearComposerPlan();
   updateHitlInputState();
   updateComposerContextControls();
   scrollToBottom();
@@ -1624,12 +1607,13 @@ async function runChatStream(payload, assistant) {
       setConn("err", "请求失败");
       trajectory?.ingest({ event: "error", data: { message: e.message } });
       failAutomaticContextCompaction("上下文压缩后续请求失败，未生成压缩事件");
-      markComposerPlanTerminal("error");
+      clearComposerPlan();
       addErrorTo(assistant, `请求失败：${e.message}`);
     }
   } finally {
     assistant.finalizeThinking();
     assistant.finalizeText();
+    clearComposerPlan();
     setStreaming(false);
     if (state.abortController === streamController) state.abortController = null;
     state.stopRequested = false;
@@ -1767,9 +1751,13 @@ function handleEvent({ event, data }, assistant) {
       break;
     case "conversation_item_upsert":
       state.conversationItems = upsertConversationItem(state.conversationItems, data.item);
-      if (data.item?.kind === "plan" && data.item.plan) {
-        const plan = latestConversationPlan(state.conversationItems);
-        if (plan) renderComposerPlan(plan.snapshot, { terminalStatus: plan.terminalStatus });
+      if (
+        data.item?.kind === "plan"
+        && data.item.plan
+        && state.streaming
+        && state.lastRunMetrics?.status === "running"
+      ) {
+        renderComposerPlan(data.item.plan);
       }
       break;
     case "thinking":
@@ -1825,7 +1813,7 @@ function handleEvent({ event, data }, assistant) {
       }
       const refreshCompactionHistory = finalizeAutomaticContextCompaction(data.context, data.status);
       state.skipHistoryRefresh = !refreshCompactionHistory;
-      markComposerPlanTerminal(data.status || state.lastRunMetrics.status || "completed");
+      clearComposerPlan();
       if (data.status === "pending" && data.deferred) {
         state.awaitingHitl = true;
         setStreaming(false);
@@ -1845,7 +1833,7 @@ function handleEvent({ event, data }, assistant) {
       // Error is transient SSE only — refreshing history would wipe the bubble.
       state.skipHistoryRefresh = true;
       addErrorTo(assistant, data.message || "未知错误");
-      markComposerPlanTerminal("error");
+      clearComposerPlan();
       break;
     case "cancelled":
       failAutomaticContextCompaction("上下文压缩已取消，未生成压缩事件");
@@ -1857,7 +1845,7 @@ function handleEvent({ event, data }, assistant) {
       assistant.finalizeThinking();
       assistant.finalizeText();
       assistant.markInterrupted();
-      markComposerPlanTerminal("interrupted");
+      clearComposerPlan();
       if (data.usage) renderUsage(data.usage);
       state.conversationId = data.conversation_id || state.conversationId;
       state.lastRunMetrics = {

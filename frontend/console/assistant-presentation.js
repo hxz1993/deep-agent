@@ -25,21 +25,11 @@ export function normalizePlanSnapshot(snapshot) {
   return { items, total: items.length, completed };
 }
 
-export function planPanelState(snapshot, terminalStatus = null) {
+export function planPanelState(snapshot) {
   const plan = normalizePlanSnapshot(snapshot);
   if (!plan) return null;
-  const allCompleted = plan.completed === plan.total;
-  const presentationStatus = terminalStatus || (allCompleted ? "completed" : null);
-  const terminalLabels = {
-    interrupted: "已中断",
-    error: "执行失败",
-    pending: "等待交互",
-    completed: allCompleted ? "已完成" : "回合结束",
-  };
-  const terminalLabel = terminalLabels[presentationStatus] || "";
   return {
     plan,
-    label: `${plan.completed}/${plan.total}${terminalLabel ? ` · ${terminalLabel}` : ""}`,
-    terminalStatus: presentationStatus,
+    label: `${plan.completed}/${plan.total}`,
   };
 }

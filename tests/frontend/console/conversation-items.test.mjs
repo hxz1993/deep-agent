@@ -3,7 +3,6 @@ import test from "node:test";
 
 import {
   conversationVisualGroups,
-  latestConversationPlan,
   latestPendingDeferredTool,
   normalizeConversationHistory,
   upsertConversationItem,
@@ -45,7 +44,7 @@ test("History 与 SSE Upsert 共用 ConversationItem 顺序和稳定 ID", () => 
   assert.deepEqual(conversationVisualGroups(next).map((group) => group.type), ["user", "assistant"]);
 });
 
-test("Plan 和 Deferred 直接由 ConversationItem 恢复", () => {
+test("Deferred 由 ConversationItem 恢复而历史 Plan 不投影到输入区", () => {
   const plan = { items: [{ id: "1", content: "读取", status: "completed" }] };
   const items = [
     base("message:u", "user_message", 1, { text: "继续" }),
@@ -57,6 +56,5 @@ test("Plan 和 Deferred 直接由 ConversationItem 恢复", () => {
       status: "awaiting_input",
     }),
   ];
-  assert.deepEqual(latestConversationPlan(items), { snapshot: plan, terminalStatus: "completed" });
   assert.equal(latestPendingDeferredTool(items)?.item_id, "tool:confirm");
 });

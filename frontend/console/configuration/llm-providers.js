@@ -64,8 +64,7 @@ function syncProviderBaseUrl() {
   const type = providerTypeByCode(document.getElementById("llmProviderType")?.value);
   const toggle = document.getElementById("llmProviderUseDefaultBaseUrl");
   const input = document.getElementById("llmProviderBaseUrl");
-  const hint = document.getElementById("llmProviderBaseUrlHint");
-  if (!toggle || !input || !hint) return;
+  if (!toggle || !input) return;
   const supportsDefault = Boolean(type?.supports_default_base_url && type?.default_base_url);
   const supportsCustom = type?.supports_custom_base_url !== false;
   toggle.disabled = !supportsDefault;
@@ -73,13 +72,26 @@ function syncProviderBaseUrl() {
   if (toggle.checked) {
     input.value = type.default_base_url;
     input.readOnly = true;
-    hint.textContent = `使用 ${type.label} 的框架默认地址`;
   } else {
     input.readOnly = !supportsCustom;
     if (!input.value || input.dataset.defaultValue === input.value) input.value = type?.default_base_url || "";
-    hint.textContent = supportsCustom ? "使用自定义地址" : "该类型不支持自定义地址";
   }
   input.dataset.defaultValue = type?.default_base_url || "";
+}
+
+function setProviderApiKeyEditor({ maskedValue = "", clearRequested = false } = {}) {
+  const input = document.getElementById("llmProviderApiKey");
+  const button = document.getElementById("llmProviderClearApiKey");
+  if (!input || !button) return;
+  const masked = String(maskedValue || "");
+  input.dataset.maskedValue = masked;
+  input.dataset.clearRequested = clearRequested ? "true" : "false";
+  input.value = clearRequested ? "" : masked;
+  input.type = masked && !clearRequested ? "text" : "password";
+  input.placeholder = clearRequested ? "保存后清除当前 API Key" : "";
+  button.classList.toggle("hidden", !masked);
+  button.textContent = clearRequested ? "撤销清除" : "清除";
+  button.classList.toggle("is-undo", clearRequested);
 }
 
 const llmProvidersAdmin = {
@@ -306,10 +318,7 @@ const llmProvidersAdmin = {
     renderProviderTypeOptions(providerType || state.llmProviderTypes[0]?.code || "");
     document.getElementById("llmProviderModalTitle").textContent = "新建 Provider";
     document.getElementById("llmProviderName").value = "";
-    document.getElementById("llmProviderApiKey").value = "";
-    document.getElementById("llmProviderApiKeyState").textContent = "尚未配置";
-    document.getElementById("llmProviderClearApiKey").checked = false;
-    document.getElementById("llmProviderClearApiKeyField").classList.add("hidden");
+    setProviderApiKeyEditor();
     document.getElementById("llmProviderEnabled").checked = true;
     document.getElementById("llmProviderUseDefaultBaseUrl").checked = Boolean(providerTypeByCode(document.getElementById("llmProviderType").value)?.supports_default_base_url);
     document.getElementById("llmProviderBaseUrl").value = "";
@@ -327,10 +336,7 @@ const llmProvidersAdmin = {
     document.getElementById("llmProviderName").value = provider.name;
     document.getElementById("llmProviderUseDefaultBaseUrl").checked = Boolean(provider.use_default_base_url);
     document.getElementById("llmProviderBaseUrl").value = provider.base_url || provider.effective_base_url || "";
-    document.getElementById("llmProviderApiKey").value = "";
-    document.getElementById("llmProviderApiKeyState").textContent = provider.api_key_set ? "已配置；留空表示保持不变" : "尚未配置";
-    document.getElementById("llmProviderClearApiKey").checked = false;
-    document.getElementById("llmProviderClearApiKeyField").classList.toggle("hidden", !provider.api_key_set);
+    setProviderApiKeyEditor({ maskedValue: provider.api_key_masked || "" });
     document.getElementById("llmProviderEnabled").checked = provider.enabled !== false;
     syncProviderBaseUrl();
     document.getElementById("llmProviderModal").showModal();
@@ -353,9 +359,11 @@ const llmProvidersAdmin = {
         base_url: document.getElementById("llmProviderBaseUrl").value.trim(),
         enabled: document.getElementById("llmProviderEnabled").checked,
       };
-      const apiKey = document.getElementById("llmProviderApiKey").value.trim();
-      if (apiKey) payload.api_key = apiKey;
-      if (document.getElementById("llmProviderClearApiKey").checked) {
+      const apiKeyInput = document.getElementById("llmProviderApiKey");
+      const apiKey = apiKeyInput.value.trim();
+      const maskedValue = String(apiKeyInput.dataset.maskedValue || "");
+      if (apiKey && apiKey !== maskedValue) payload.api_key = apiKey;
+      if (apiKeyInput.dataset.clearRequested === "true") {
         payload.clear_api_key = true;
       }
       const saved = await apiFetch(editingId ? `/api/v1/llm-providers/${encodeURIComponent(editingId)}` : "/api/v1/llm-providers", {
@@ -404,8 +412,31 @@ window.llmProvidersAdmin = llmProvidersAdmin;
 document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("newLlmProviderBtn")?.addEventListener("click", () => llmProvidersAdmin.openCreate());
   document.getElementById("llmProviderForm")?.addEventListener("submit", (event) => llmProvidersAdmin.save(event));
-  document.getElementById("llmProviderType")?.addEventListener("change", () => { document.getElementById("llmProviderBaseUrl").value = ""; syncProviderBaseUrl(); });
+  document.getElementById("llmProviderType")?.addEventListener("change", () => {
+    const type = providerTypeByCode(document.getElementById("llmProviderType").value);
+    document.getElementById("llmProviderUseDefaultBaseUrl").checked = Boolean(type?.supports_default_base_url && type?.default_base_url);
+    document.getElementById("llmProviderBaseUrl").value = "";
+    syncProviderBaseUrl();
+  });
   document.getElementById("llmProviderUseDefaultBaseUrl")?.addEventListener("change", syncProviderBaseUrl);
+  document.getElementById("llmProviderApiKey")?.addEventListener("focus", (event) => {
+    if (event.currentTarget.value === event.currentTarget.dataset.maskedValue) event.currentTarget.select();
+  });
+  document.getElementById("llmProviderApiKey")?.addEventListener("input", (event) => {
+    const input = event.currentTarget;
+    if (input.value !== input.dataset.maskedValue) input.type = "password";
+    input.dataset.clearRequested = "false";
+    const button = document.getElementById("llmProviderClearApiKey");
+    if (button) {
+      button.textContent = "清除";
+      button.classList.remove("is-undo");
+    }
+  });
+  document.getElementById("llmProviderClearApiKey")?.addEventListener("click", () => {
+    const input = document.getElementById("llmProviderApiKey");
+    const clearRequested = input.dataset.clearRequested !== "true";
+    setProviderApiKeyEditor({ maskedValue: input.dataset.maskedValue, clearRequested });
+  });
   document.getElementById("closeLlmProviderModal")?.addEventListener("click", () => document.getElementById("llmProviderModal").close());
   document.getElementById("cancelLlmProviderBtn")?.addEventListener("click", () => document.getElementById("llmProviderModal").close());
   document.getElementById("providerCatalogPickerForm")?.addEventListener("submit", (event) => llmProvidersAdmin.submitCatalogPicker(event));

@@ -221,7 +221,7 @@
             <div class="row-actions">
               <button class="btn hidden" id="editUiToolPackageBtn"><i data-lucide="pencil"></i>编辑工具包</button>
               <button class="btn danger hidden" id="deleteUiToolPackageBtn"><i data-lucide="trash-2"></i>删除工具包</button>
-              <button class="btn primary" id="newUiToolBtn" disabled><i data-lucide="plus"></i>新建工具</button>
+              <button class="btn" id="newUiToolBtn" disabled><i data-lucide="plus"></i>新建工具</button>
             </div>
           </header>
           <div class="table-wrap console-list-a ui-tool-table-wrap">
@@ -330,24 +330,21 @@
           <span>Provider 类型</span>
           <select id="llmProviderType" required></select>
         </label>
-        <label class="field checkbox-field provider-default-toggle">
-          <input type="checkbox" id="llmProviderUseDefaultBaseUrl" />
-          <span>使用框架默认地址</span>
-        </label>
-        <label class="field">
-          <span>Base URL</span>
+        <div class="field">
+          <div class="field-label-actions">
+            <label for="llmProviderBaseUrl">Base URL</label>
+            <label class="provider-default-switch" for="llmProviderUseDefaultBaseUrl">
+              <span>使用默认地址</span>
+              <input type="checkbox" id="llmProviderUseDefaultBaseUrl" />
+              <span class="provider-default-switch-ui" aria-hidden="true"></span>
+            </label>
+          </div>
           <input type="url" id="llmProviderBaseUrl" required />
-          <small class="field-hint" id="llmProviderBaseUrlHint"></small>
-        </label>
-        <label class="field">
-          <span>API Key（编辑时留空表示不修改）</span>
+        </div>
+        <div class="field">
+          <div class="field-label-actions"><label for="llmProviderApiKey">API Key</label><button type="button" class="field-text-action hidden" id="llmProviderClearApiKey">清除</button></div>
           <input type="password" id="llmProviderApiKey" autocomplete="new-password" />
-          <small class="field-hint" id="llmProviderApiKeyState">尚未配置</small>
-        </label>
-        <label class="field checkbox-field hidden" id="llmProviderClearApiKeyField">
-          <input type="checkbox" id="llmProviderClearApiKey" />
-          <span>清除当前 API Key</span>
-        </label>
+        </div>
         <label class="field checkbox-field">
           <input type="checkbox" id="llmProviderEnabled" checked />
           <span>启用 Provider</span>
@@ -385,10 +382,6 @@
           <span>Provider</span>
           <select id="llmModelProviderId" required></select>
           <small class="field-hint">地址和凭据由 Provider 统一维护。</small>
-        </label>
-        <label class="field checkbox-field">
-          <input type="checkbox" id="llmModelEnabled" checked />
-          <span>启用模型</span>
         </label>
         <div class="llm-advanced-divider" role="separator">
           <span class="llm-advanced-label">

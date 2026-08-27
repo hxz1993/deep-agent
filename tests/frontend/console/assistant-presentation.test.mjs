@@ -126,7 +126,6 @@ test("任务计划在消息区底部浮层展示最新快照", () => {
   assert.deepEqual(planPanelState(running), {
     plan: running,
     label: "0/2",
-    terminalStatus: null,
   });
 
   const completed = normalizePlanSnapshot({
@@ -137,13 +136,8 @@ test("任务计划在消息区底部浮层展示最新快照", () => {
   });
   assert.deepEqual(planPanelState(completed), {
     plan: completed,
-    label: "2/2 · 已完成",
-    terminalStatus: "completed",
+    label: "2/2",
   });
-  assert.equal(planPanelState(running, "interrupted").label, "0/2 · 已中断");
-  assert.equal(planPanelState(running, "error").label, "0/2 · 执行失败");
-  assert.equal(planPanelState(running, "pending").label, "0/2 · 等待交互");
-  assert.equal(planPanelState(running, "completed").label, "0/2 · 回合结束");
   assert.equal(normalizePlanSnapshot({ items: [] }), null);
 
   const planPosition = workspaceTemplate.indexOf('id="composerPlan"');
@@ -159,5 +153,7 @@ test("任务计划在消息区底部浮层展示最新快照", () => {
   assert.match(workspaceCss, /\.composer \{ position: relative;/);
   const planRule = workspaceCss.match(/\.composer-plan \{([\s\S]*?)\n\}/)?.[1] || "";
   assert.doesNotMatch(planRule, /box-shadow/);
-  assert.match(chatSource, /case "final":[\s\S]*?markComposerPlanTerminal\(data\.status/);
+  assert.match(chatSource, /case "final":[\s\S]*?clearComposerPlan\(\)/);
+  assert.doesNotMatch(chatSource, /markComposerPlanTerminal|回合结束/);
+  assert.match(chatSource, /历史会话只保留其事实和轨迹，不恢复浮层/);
 });

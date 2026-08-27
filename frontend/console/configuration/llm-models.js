@@ -210,7 +210,6 @@ const llmModelsAdmin = {
     const selectedProviderId = prefill?.provider_id || state.llmProviders[0]?.id || "";
     populateModelProviderSelect(selectedProviderId);
     document.getElementById("llmModelProviderId").disabled = Boolean(options.lockProvider);
-    document.getElementById("llmModelEnabled").checked = prefill?.enabled ?? true;
     document.getElementById("llmModelContextWindow").value = prefill?.context_window_tokens || "";
     document.getElementById("llmModelMaxOutput").value = prefill?.max_output_tokens || "";
     document.getElementById("updateLlmModelFromCatalog").classList.add("hidden");
@@ -294,7 +293,6 @@ const llmModelsAdmin = {
       document.getElementById("llmModelModel").value = model.model;
       populateModelProviderSelect(model.provider_id);
       document.getElementById("llmModelProviderId").disabled = Boolean(options.lockProvider);
-      document.getElementById("llmModelEnabled").checked = model.enabled !== false;
       document.getElementById("llmModelContextWindow").value = model.context_window_tokens || "";
       document.getElementById("llmModelMaxOutput").value = model.max_output_tokens || "";
       document.getElementById("updateLlmModelFromCatalog").classList.remove("hidden");
@@ -318,7 +316,6 @@ const llmModelsAdmin = {
         max_output_tokens: model.max_output_tokens,
         input_modalities: model.input_modalities || [],
         tags: model.tags || [],
-        enabled: model.enabled !== false,
       });
       document.getElementById("llmModelModalTitle").textContent = `复制模型 · ${model.name}`;
     } catch (error) {
@@ -390,7 +387,6 @@ const llmModelsAdmin = {
         description: document.getElementById("llmModelDescription").value.trim() || null,
         model,
         provider_id: document.getElementById("llmModelProviderId").value,
-        enabled: document.getElementById("llmModelEnabled").checked,
         input_modalities: inputModalities,
         context_window_tokens: contextWindow,
         max_output_tokens: maxOutput,

@@ -96,8 +96,8 @@ function inspectionView(inspection, transport) {
 function renderInspectionCounts(counts = {}) {
   return [
     ["wrench", "工具", counts.tools],
-    ["file-box", "资源", counts.resources],
-    ["layout-template", "模板", counts.templates],
+    ["file-text", "资源", counts.resources],
+    ["file-text", "模板", counts.templates],
   ].map(([iconName, label, count]) => `<span title="${label}"><i data-lucide="${iconName}"></i><strong>${Number(count || 0)}</strong></span>`).join("");
 }
 

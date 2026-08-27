@@ -46,20 +46,6 @@ export function conversationVisualGroups(items = []) {
   return groups;
 }
 
-export function latestConversationPlan(items = []) {
-  const plans = sortConversationItems(items).filter((item) => item.kind === "plan" && item.plan);
-  const latest = plans.at(-1);
-  if (!latest) return null;
-  const terminalStatus = latest.status === "interrupted"
-    ? "interrupted"
-    : ["failed", "rejected"].includes(latest.status)
-      ? "error"
-      : ["pending", "awaiting_input"].includes(latest.status)
-        ? "pending"
-        : "completed";
-  return { snapshot: latest.plan, terminalStatus };
-}
-
 export function latestPendingDeferredTool(items = []) {
   const ordered = sortConversationItems(items);
   for (let index = ordered.length - 1; index >= 0; index -= 1) {

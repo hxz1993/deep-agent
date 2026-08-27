@@ -72,6 +72,8 @@ class LlmProviderApiTests(unittest.IsolatedAsyncioTestCase):
         body = created.json()
         self.assertNotIn("api_key", body)
         self.assertTrue(body["api_key_set"])
+        self.assertEqual(body["api_key_masked"], "top********ret")
+        self.assertNotIn("top-secret", created.text)
         self.assertEqual(body["base_url"], "https://api.deepseek.com")
 
         preserved = await self._client.patch(
@@ -98,6 +100,7 @@ class LlmProviderApiTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(cleared.status_code, 200, cleared.text)
         self.assertFalse(cleared.json()["api_key_set"])
+        self.assertIsNone(cleared.json()["api_key_masked"])
         disabled_model = await self._client.get(
             f"/api/v1/llm-models/{model.json()['id']}"
         )

@@ -50,6 +50,7 @@ test("UI 工具页使用与 Skill 一致的分离轻卡片层级", () => {
   assert.match(template, /id="editUiToolPackageBtn"[^>]*>[\s\S]*data-lucide="pencil"/);
   assert.match(template, /id="deleteUiToolPackageBtn"[^>]*>[\s\S]*data-lucide="trash-2"/);
   assert.match(template, /id="newUiToolBtn"[^>]*>[\s\S]*data-lucide="plus"/);
+  assert.doesNotMatch(template, /class="btn primary" id="newUiToolBtn"/);
   assert.match(source, /class="ui-tool-tree-icon"[\s\S]*data-lucide=/);
   assert.match(source, /window\.lucide\?\.createIcons\(\)/);
   assert.match(styles, /\.ui-tools-workspace\s*\{[^}]*gap: 14px;[^}]*border: 0;[^}]*background: transparent;/);
@@ -58,8 +59,8 @@ test("UI 工具页使用与 Skill 一致的分离轻卡片层级", () => {
   assert.match(styles, /\.ui-tool-tree-node-head \{[^}]*width: 100%;[^}]*gap: 8px/);
   assert.match(styles, /\.ui-tool-tree-node-meta\s*\{[^}]*margin-left: auto;[^}]*white-space: nowrap/);
   assert.match(styles, /\.ui-tool-content-pane\s*\{[^}]*border-radius: 14px;[^}]*background:/);
-  assert.match(styles, /\.ui-tool-selected-header \.row-actions \.btn:not\(\.primary\):not\(\.danger\)/);
-  assert.match(styles, /\.ui-tool-selected-header \.row-actions \.btn\.danger/);
+  assert.doesNotMatch(styles, /\.ui-tool-selected-header \.row-actions \.btn:not\(\.primary\):not\(\.danger\)/);
+  assert.match(styles, /\.ui-tool-selected-header \.row-actions \.btn\s*\{[^}]*border: 1px solid var\(--border\);[^}]*background: var\(--bg-soft\)/);
   assert.match(styles, /\.panel-title-copy \{[^}]*gap: 4px/);
   assert.match(consoleStyles, /--config-radius: 8px/);
   assert.match(consoleStyles, /--config-control-height: 32px/);

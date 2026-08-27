@@ -58,13 +58,20 @@ test("Provider 使用正式 API 和后端类型目录契约", () => {
   assert.match(providerSource, /supports_default_base_url/);
   assert.match(providerSource, /supports_custom_base_url/);
   assert.match(providerSource, /default_base_url/);
+  assert.match(template, /class="field-label-actions">[\s\S]*Base URL[\s\S]*class="provider-default-switch"[\s\S]*使用默认地址[\s\S]*id="llmProviderUseDefaultBaseUrl"/);
+  assert.doesNotMatch(template, /使用框架默认地址|provider-default-toggle/);
+  assert.match(providerSource, /llmProviderUseDefaultBaseUrl"\)\.checked = Boolean\(type\?\.supports_default_base_url && type\?\.default_base_url\)/);
 });
 
-test("Provider Key 只回显配置状态且编辑输入始终置空", () => {
+test("Provider Key 回显脱敏标识且未修改时不重复写入", () => {
   assert.match(providerSource, /provider\.api_key_set \? "Key 已配" : "Key 未配"/);
-  assert.match(providerSource, /getElementById\("llmProviderApiKey"\)\.value = ""/);
+  assert.match(providerSource, /maskedValue: provider\.api_key_masked \|\| ""/);
+  assert.match(providerSource, /apiKey !== maskedValue/);
   assert.doesNotMatch(providerSource, /\.api_key\s*\|\||value = provider\.api_key/);
-  assert.match(template, /<input[^>]*(?:id="llmProviderApiKey"[^>]*type="password"|type="password"[^>]*id="llmProviderApiKey")[^>]*>/);
+  assert.match(template, /id="llmProviderClearApiKey">清除/);
+  assert.match(template, /class="field-label-actions"><label for="llmProviderApiKey">API Key<\/label><button/);
+  assert.doesNotMatch(template, /<label class="field">\s*<span class="field-label-actions"/);
+  assert.doesNotMatch(template, /llmProviderApiKeyState|llmProviderBaseUrlHint|清除当前 API Key|API Key（编辑时留空表示不修改）/);
 });
 
 test("Provider 启停是独立配置并由表单保存", () => {
@@ -168,6 +175,8 @@ test("模型只提交 Provider 逻辑关联并移除重复连接字段", () => {
   assert.doesNotMatch(modelSource, /base_url:/);
   assert.doesNotMatch(modelSource, /api_key:/);
   assert.doesNotMatch(template, /id="llmModelBaseUrl"|id="llmModelApiKey"/);
+  assert.doesNotMatch(template, /id="llmModelEnabled"|启用模型/);
+  assert.doesNotMatch(modelSource, /getElementById\("llmModelEnabled"\)/);
 });
 
 test("目录按 0、1、多 Provider 分流且不再按 URL 猜测", () => {

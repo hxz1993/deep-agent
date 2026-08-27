@@ -8,6 +8,22 @@ from pydantic import AnyHttpUrl, BaseModel, Field, TypeAdapter, field_validator,
 _HTTP_URL_ADAPTER = TypeAdapter(AnyHttpUrl)
 
 
+def mask_api_key(value: str | None) -> str | None:
+    """Return a stable identification hint without exposing the stored secret."""
+    secret = str(value or "").strip()
+    if not secret:
+        return None
+    if len(secret) <= 4:
+        return "*" * max(4, len(secret))
+    if len(secret) <= 8:
+        prefix_length, suffix_length = 1, 2
+    elif len(secret) <= 16:
+        prefix_length, suffix_length = 3, 3
+    else:
+        prefix_length, suffix_length = 6, 4
+    return f"{secret[:prefix_length]}********{secret[-suffix_length:]}"
+
+
 class LlmProviderCreate(BaseModel):
     name: str = Field(..., max_length=191)
     provider_type: str = Field(..., max_length=64)
@@ -111,6 +127,7 @@ class LlmProviderResponse(LlmProviderSummary):
     use_default_base_url: bool
     base_url: str
     api_key_set: bool
+    api_key_masked: str | None = None
     model_count: int = 0
     created_at: datetime
     updated_at: datetime

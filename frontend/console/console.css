@@ -480,15 +480,19 @@ textarea {
   padding: 8px 9px;
   border: 1px solid transparent;
   border-radius: 10px;
+  background: var(--bg);
+  box-shadow: none;
+  transition: border-color 0.12s, box-shadow 0.12s;
 }
 #workspaceLegacyHost .session-item.active {
-  border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
+  border-color: color-mix(in srgb, var(--accent) 54%, var(--border));
   background: var(--bg);
   box-shadow: none;
 }
 #workspaceLegacyHost .session-item.active:hover {
-  border-color: color-mix(in srgb, var(--accent) 64%, var(--border));
-  background: color-mix(in srgb, var(--accent) 4%, var(--bg));
+  border-color: color-mix(in srgb, var(--accent) 72%, var(--border));
+  background: var(--bg);
+  box-shadow: 0 2px 6px color-mix(in srgb, var(--accent) 10%, transparent);
 }
 #workspaceLegacyHost .session-item .sid { width: 100%; padding-right: 0; }
 #workspaceLegacyHost .session-item .session-title { line-height: 18px; }
@@ -507,7 +511,11 @@ textarea {
 #workspaceLegacyHost .session-item .session-stat-group { margin-left: auto; gap: 7px; }
 #workspaceLegacyHost .session-item .session-stat-group > span { display: inline-flex; align-items: center; gap: 3px; }
 #workspaceLegacyHost .session-item .session-meta svg { width: 12px; height: 12px; }
-#workspaceLegacyHost .session-item:not(.active):hover { background: var(--accent-soft); }
+#workspaceLegacyHost .session-item:not(.active):hover {
+  border-color: color-mix(in srgb, var(--accent) 26%, var(--border));
+  background: var(--bg);
+  box-shadow: 0 2px 6px color-mix(in srgb, var(--accent) 7%, transparent);
+}
 #workspaceLegacyHost .session-item .session-actions {
   position: absolute;
   top: 0;
@@ -518,7 +526,7 @@ textarea {
   opacity: 0;
   pointer-events: none;
   border-radius: 0 9px 9px 0;
-  background: color-mix(in srgb, var(--accent) 12%, var(--bg-soft));
+  background: var(--bg);
 }
 #workspaceLegacyHost .session-item:hover .session-actions {
   opacity: 1;
@@ -526,7 +534,7 @@ textarea {
 }
 #workspaceLegacyHost .session-item.active .session-actions { background: var(--bg); }
 #workspaceLegacyHost .session-item.active:hover .session-actions {
-  background: color-mix(in srgb, var(--accent) 4%, var(--bg));
+  background: var(--bg);
 }
 #workspaceLegacyHost .session-item.active:not(:hover) .session-actions { opacity: 0; }
 #workspaceLegacyHost .session-toolbar .icon-action { border: 0; border-radius: 8px; background: transparent; box-shadow: none; }
@@ -1291,8 +1299,41 @@ html[data-theme="paper"] {
   box-sizing: border-box;
   gap: 10px;
   padding: 10px;
+  overflow: hidden;
+  border-radius: var(--console-card-radius);
   background: var(--console-canvas);
 }
+
+.field-label-actions {
+  min-height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.field-label-actions > label {
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+.field-text-action {
+  width: auto;
+  min-width: 0;
+  min-height: 0;
+  display: inline;
+  flex: 0 0 auto;
+  padding: 0;
+  border: 0;
+  color: var(--danger);
+  background: transparent;
+  font: inherit;
+  line-height: 1.25;
+  cursor: pointer;
+}
+
+.field-text-action:hover { text-decoration: underline; }
+.field-text-action.is-undo { color: var(--accent); }
 .agent-pane,
 #workspaceLegacyHost > .sidebar,
 #workspaceLegacyHost > .chat,

@@ -25,8 +25,10 @@
   最近成功计划，新用户 Turn 不注入旧计划。
 - 会话标题改为与首轮正文并行的独立模型调用，复用该轮实际生效的Provider与模型；兜底、模型和
   手动标题都写入`session/title` Event。删除标题专用模型配置、自动重新生成、刷新按钮和客户端轮询。
-- Console 改读 Event API，按 Sequence 展示 Compaction 的真实触发位置，并按 Event ID Upsert
-  生命周期终态；同时合入 Provider/Skill 等配置详情的紧凑布局。本版本不恢复旧会话，也不实现 Branch。
+- Console 普通聊天改读 `/history` 的 Conversation 投影，只有轨迹读取 Event API；实时会话使用
+  Text/Thinking/Tool Delta 与 `final`，不再重复发送持久化 Conversation Item 通知。Compaction 按
+  Sequence 和 Event ID 原位展示；同时合入 Provider/Skill 等配置详情的紧凑布局。本版本不恢复旧会话，
+  也不实现 Branch。
 
 ## v0.5.8
 

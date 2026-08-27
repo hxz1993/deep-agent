@@ -15,7 +15,6 @@ from deep_agent.agent.history import (
 )
 from deep_agent.db.conversation import SessionStore
 from deep_agent.db.session_scope import runtime_session_key
-from deep_agent.conversation.notifications import conversation_item_upserts
 
 _SENTINEL = object()
 
@@ -247,12 +246,6 @@ class EventPersister:
                     "event": row.public_dict(),
                 }
             )
-        for item_event in await conversation_item_upserts(
-            self._store,
-            ev.session_id,
-            rows,
-        ):
-            ev.result_queue.put_nowait(item_event)
 
     async def _persist_one(self, ev: PersistEvent) -> None:
         await self._handle_event(ev.session_id, ev.agent_id, ev)

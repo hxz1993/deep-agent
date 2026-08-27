@@ -6,6 +6,7 @@ import {
   buildTrajectory,
   filterTrajectory,
   redactTrajectoryValue,
+  shouldIngestTrajectoryEvent,
   trajectoryStats,
 } from "../../../frontend/console/trajectory.js";
 
@@ -184,6 +185,12 @@ test("轨迹筛选、统计与脱敏保持确定性", () => {
     redactTrajectoryValue({ authorization: "a", nested: { api_key: "b", safe: 1 } }),
     { authorization: "[已隐藏]", nested: { api_key: "[已隐藏]", safe: 1 } },
   );
+});
+
+test("标题投影通知不进入语义轨迹", () => {
+  assert.equal(shouldIngestTrajectoryEvent("session_title"), false);
+  assert.equal(shouldIngestTrajectoryEvent("session_event_appended"), true);
+  assert.equal(shouldIngestTrajectoryEvent("thinking"), true);
 });
 
 test("工作台以独立页签接入轨迹且默认对话链路不变", () => {

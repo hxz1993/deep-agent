@@ -125,17 +125,6 @@ def project_session_events(
     )
 
 
-def affected_conversation_items(
-    projection: ConversationHistoryResponse,
-    changed_event_ids: set[str],
-) -> list[ConversationItem]:
-    return [
-        item
-        for item in projection.items
-        if changed_event_ids.intersection(item.source_event_ids)
-    ]
-
-
 def _message(event: Any) -> dict[str, Any] | None:
     payload = _get(event, "payload")
     if not isinstance(payload, Mapping):

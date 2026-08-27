@@ -134,9 +134,8 @@ URL 与 Builtin MCP 的运行态不同：URL MCP 在管理员检测时保存 Too
 Provider Part保存，不能替代DeepAgent跨Provider摘要。
 
 压缩前的预算估算、安全边界选择和Evidence整理必须在线性复杂度内完成，并把CPU准备工作移出SSE事件
-循环；准备耗时超过心跳周期时继续发送`preparing`。持久化`assistant_message`
-`conversation_item_upsert`是完整权威终态，必须先于`final`发送，且同一Item此后不得再发送Text/Thinking
-Delta；客户端在Upsert到达时即可替换直播草稿。
+循环；准备耗时超过心跳周期时继续发送`preparing`。实时SSE不重复发送持久化Conversation Item；
+客户端用流式事件展示当前Run，并在正常结束、重连或重新打开会话时通过`/history`读取最终投影。
 
 v0.3.14 起部署入口固定每个 Pod 一个异步 Gunicorn Worker，使 session 取消请求与进程内
 `ActiveRunRegistry` 一致命中。主动压缩的 `context_compaction_result` 不再等待二次

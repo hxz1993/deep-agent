@@ -203,25 +203,9 @@ class ChatHistoryPersistenceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(final["status"], "completed")
         self.assertEqual(_streamed_text(events), expected)
 
-        assistant_upsert_index = next(
-            index
-            for index, event in enumerate(events)
-            if event.get("type") == "conversation_item_upsert"
-            and event.get("item", {}).get("kind") == "assistant_message"
-        )
-        final_index = next(
-            index for index, event in enumerate(events) if event.get("type") == "final"
-        )
-        self.assertLess(assistant_upsert_index, final_index)
-        self.assertFalse(
-            any(
-                event.get("type") in {"text", "thinking"}
-                for event in events[assistant_upsert_index + 1 :]
-            )
-        )
-        self.assertEqual(
-            events[assistant_upsert_index]["item"]["text"],
-            expected,
+        self.assertNotIn(
+            "conversation_item_upsert",
+            {event.get("type") for event in events},
         )
 
         session_id = events[0]["session_id"]

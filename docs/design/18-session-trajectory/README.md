@@ -70,12 +70,13 @@ GET /api/v1/sessions/{session_id}/events
 ```
 
 Event API 按 Sequence 分页，内部 `search_text` 不返回，只供轨迹、审计和精确回读。
-SSE 的持久化聊天终态使用 `conversation_item_upsert`，内容与刷新后 `/history` 的同 ID Item
-完全一致；`session_event_appended/session_event_updated` 继续供轨迹和标题等系统事件消费。
+实时聊天通过 Text/Thinking/Tool 等流式事件展示当前 Run；正常收流、重连或重新打开会话时从
+`/history`读取最终 Conversation 投影。`session_event_appended/session_event_updated` 继续供轨迹和
+标题等系统事件消费。
 
-Event → Conversation 的确定性投影位于后端。Console 普通聊天只消费 `/history`、Item Upsert
-和少量流式 Delta；只有轨迹读取 Event API。Compaction 按真实 Sequence 穿插在轨迹中，
-普通 Run 不显示。历史刷新和直播后的结构、顺序、状态必须一致。
+Event → Conversation 的确定性投影位于后端。Console 普通聊天只消费 `/history`和流式事件；
+只有轨迹读取 Event API。Compaction 按真实 Sequence 穿插在轨迹中，普通 Run 不显示。实时会话允许
+保留进度和压缩提示等临时状态，重新打开的 History 只展示持久化 Conversation。
 
 Branch From 本版不实现，也不预埋 Parent 列。稳定 Event ID、完整 Message 和工具 Call ID 已提供
 未来实现分支读取所需的事实边界。

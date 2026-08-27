@@ -11,15 +11,12 @@ import {
   planPanelState,
   processDisclosureLabel,
 } from "./assistant-presentation.js?v=20260815-2";
-import { createTrajectoryController } from "./trajectory.js?v=20260827-4";
+import { createTrajectoryController } from "./trajectory.js?v=20260827-5";
 import {
   conversationVisualGroups,
-  isAuthoritativeAssistantUpsert,
-  isSettledAssistantDelta,
   latestPendingDeferredTool,
   normalizeConversationHistory,
-  upsertConversationItem,
-} from "./conversation-items.js?v=20260827-2";
+} from "./conversation-items.js?v=20260827-3";
 import {
   firstSelectableModelId,
   isModelSelectable,
@@ -142,7 +139,6 @@ const state = {
   assistantPresenter: null,
   planSnapshot: null,
   planningCallIds: new Set(),
-  settledAssistantRunIds: new Set(),
 };
 
 const LLM_MODALITY_LABELS = {
@@ -665,7 +661,6 @@ function newChat(agentId) {
   state.sessionId = null;
   state.conversationId = null;
   state.conversationItems = [];
-  state.settledAssistantRunIds.clear();
   state.modelMessageCount = 0;
   state.contextStatus = null;
   state.lastRunUsage = null;
@@ -810,7 +805,6 @@ async function loadAllSessionEvents(session) {
 async function loadSessionHistory(session) {
   const normalized = normalizeSession(session);
   state.conversationItems = [];
-  state.settledAssistantRunIds.clear();
   clearMessages();
   trajectory?.setHistory({ session_id: normalized.id, items: [] });
   hideEmptyState();
@@ -1153,28 +1147,6 @@ function populateAssistantPresenter(assistant, items) {
   assistant.finalizeThinking();
   assistant.finalizeText();
   if (interrupted) assistant.markInterrupted();
-}
-
-function replaceLiveAssistantWithCanonicalTurn(turnId, fallbackAssistant) {
-  if (!turnId || !fallbackAssistant?.row?.isConnected) return fallbackAssistant;
-  const group = conversationVisualGroups(state.conversationItems).find(
-    (candidate) => candidate.type === "assistant" && candidate.items.some((item) => item.turn_id === turnId),
-  );
-  const visible = group?.items?.filter((item) => item.kind !== "plan") || [];
-  if (!visible.length) return fallbackAssistant;
-  const first = visible[0];
-  const canonical = createAssistantMessage(
-    first.created_at || null,
-    first.order?.sequence,
-    fallbackAssistant.row,
-  );
-  populateAssistantPresenter(canonical, visible);
-  if (state.automaticCompactionAnchor === fallbackAssistant.row) {
-    state.automaticCompactionAnchor = canonical.row;
-  }
-  fallbackAssistant.row.remove();
-  state.assistantPresenter = canonical;
-  return canonical;
 }
 
 async function deleteSession(session) {
@@ -1614,7 +1586,6 @@ async function runChatStream(payload, assistant) {
   state.streamSessionConfirmed = false;
   state.streamCancelled = false;
   state.skipHistoryRefresh = false;
-  state.settledAssistantRunIds.clear();
   try {
     const resp = await daFetch(serviceUrl("api/v1/chat/stream"), {
       method: "POST",
@@ -1784,36 +1755,10 @@ function handleEvent({ event, data }, assistant) {
     case "session_event_appended":
     case "session_event_updated":
       break;
-    case "conversation_item_upsert":
-      state.conversationItems = upsertConversationItem(state.conversationItems, data.item);
-      {
-        const currentRunId = state.lastRunMetrics?.run_id || "";
-        if (isAuthoritativeAssistantUpsert(data.item, currentRunId)) {
-          state.settledAssistantRunIds.add(currentRunId);
-        }
-        if (
-          currentRunId
-          && state.settledAssistantRunIds.has(currentRunId)
-          && data.item?.turn_id
-        ) {
-          assistant = replaceLiveAssistantWithCanonicalTurn(data.item.turn_id, assistant);
-        }
-      }
-      if (
-        data.item?.kind === "plan"
-        && data.item.plan
-        && state.streaming
-        && state.lastRunMetrics?.status === "running"
-      ) {
-        renderComposerPlan(data.item.plan);
-      }
-      break;
     case "thinking":
-      if (isSettledAssistantDelta(data, state.settledAssistantRunIds)) break;
       assistant.appendThinking(data.delta || "");
       break;
     case "text":
-      if (isSettledAssistantDelta(data, state.settledAssistantRunIds)) break;
       assistant.finalizeThinking();
       assistant.appendText(data.delta || "");
       break;
@@ -1840,9 +1785,7 @@ function handleEvent({ event, data }, assistant) {
       }
       break;
     case "final":
-      if (!state.settledAssistantRunIds.has(String(data.run_id || state.lastRunMetrics?.run_id || ""))) {
-        assistant.complete(data.output);
-      }
+      assistant.complete(data.output);
       if (data.usage) renderUsage(data.usage);
       else state.lastRunUsage = null;
       state.conversationId = data.conversation_id || state.conversationId;

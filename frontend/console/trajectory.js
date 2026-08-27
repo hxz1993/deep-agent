@@ -1,4 +1,5 @@
 const TOOL_KINDS = new Set(["tool", "planning", "deferred"]);
+const PRESENTATION_ONLY_SSE_TYPES = new Set(["session_title"]);
 const SENSITIVE_KEY = /(^|[_-])(authorization|cookie|set-cookie|token|api[_-]?key|password|secret)([_-]|$)/i;
 
 function jsonClone(value) {
@@ -17,6 +18,10 @@ export function redactTrajectoryValue(value) {
     key,
     SENSITIVE_KEY.test(key) ? "[已隐藏]" : redactTrajectoryValue(child),
   ]));
+}
+
+export function shouldIngestTrajectoryEvent(type) {
+  return !PRESENTATION_ONLY_SSE_TYPES.has(String(type || ""));
 }
 
 function normalizedStatus(status, fallback = "completed") {
@@ -1009,7 +1014,7 @@ export function createTrajectoryController({ state }) {
   function ingest({ event, data }) {
     const type = event || data?.type;
     const payload = data || {};
-    if (!type) return;
+    if (!type || !shouldIngestTrajectoryEvent(type)) return;
     if (["session_event_appended", "session_event_updated"].includes(type)) {
       const stored = payload.event || payload;
       if (!stored?.event_id || !stored?.event_type) return;

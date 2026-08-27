@@ -128,7 +128,6 @@ Agent 独立编辑页的系统提示词标题栏显示“字符数 / 预估 Toke
 | `context_compaction_result` | 主动压缩最终结果；成功、无需压缩或失败，不作为聊天消息 |
 | `session_event_appended` | `{ type, persisted:true, event }`；按Event ID插入并按Sequence排序 |
 | `session_event_updated` | `{ type, persisted:true, event }`；按相同Event ID原位更新 |
-| `conversation_item_upsert` | `{ type, persisted:true, item }`；与`/history`同ID Item完全一致 |
 | `session_title` | `{ type, persisted:true, session_id, title, source }`；更新标题，不轮询 |
 | `text` / `thinking` | `{ type, item_id, delta }` |
 | `tool_call` | `{ type, item_id, tool, args, tool_call_id, widget?, metadata?, source? }` |

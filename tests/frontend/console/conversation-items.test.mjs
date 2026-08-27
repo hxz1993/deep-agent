@@ -3,11 +3,8 @@ import test from "node:test";
 
 import {
   conversationVisualGroups,
-  isAuthoritativeAssistantUpsert,
-  isSettledAssistantDelta,
   latestPendingDeferredTool,
   normalizeConversationHistory,
-  upsertConversationItem,
 } from "../../../frontend/console/conversation-items.js";
 
 const order = (sequence, partOffset = 0) => ({ sequence, part_offset: partOffset });
@@ -24,7 +21,7 @@ const base = (itemId, kind, sequence, overrides = {}) => ({
   ...overrides,
 });
 
-test("History 与 SSE Upsert 共用 ConversationItem 顺序和稳定 ID", () => {
+test("History 按 ConversationItem 顺序和稳定 ID 归一化", () => {
   const history = normalizeConversationHistory({
     schema_version: 1,
     session_id: "session-1",
@@ -32,18 +29,16 @@ test("History 与 SSE Upsert 共用 ConversationItem 顺序和稳定 ID", () => 
     items: [
       base("message:a", "assistant_message", 3, { text: "完成", phase: "final" }),
       base("message:u", "user_message", 1, { text: "分析预算" }),
+      base("tool:call-1", "tool", 2, {
+        call_id: "call-1",
+        tool_name: "lookup",
+        status: "completed",
+        output: { ok: true },
+      }),
     ],
   });
-  assert.deepEqual(history.items.map((item) => item.item_id), ["message:u", "message:a"]);
-
-  const next = upsertConversationItem(history.items, base("tool:call-1", "tool", 2, {
-    call_id: "call-1",
-    tool_name: "lookup",
-    status: "completed",
-    output: { ok: true },
-  }));
-  assert.deepEqual(next.map((item) => item.item_id), ["message:u", "tool:call-1", "message:a"]);
-  assert.deepEqual(conversationVisualGroups(next).map((group) => group.type), ["user", "assistant"]);
+  assert.deepEqual(history.items.map((item) => item.item_id), ["message:u", "tool:call-1", "message:a"]);
+  assert.deepEqual(conversationVisualGroups(history.items).map((group) => group.type), ["user", "assistant"]);
 });
 
 test("Deferred 由 ConversationItem 恢复而历史 Plan 不投影到输入区", () => {
@@ -59,19 +54,4 @@ test("Deferred 由 ConversationItem 恢复而历史 Plan 不投影到输入区",
     }),
   ];
   assert.equal(latestPendingDeferredTool(items)?.item_id, "tool:confirm");
-});
-
-test("权威 Assistant Upsert 立即落定并防御同 Run 迟到 Delta", () => {
-  const item = base("message:a", "assistant_message", 2, {
-    text: "权威完整回复",
-    phase: "final",
-  });
-  assert.equal(isAuthoritativeAssistantUpsert(item, "run-1"), true);
-  assert.equal(isAuthoritativeAssistantUpsert(item, "run-2"), false);
-
-  const settled = new Set(["run-1"]);
-  assert.equal(isSettledAssistantDelta({ run_id: "run-1" }, settled), true);
-  assert.equal(isSettledAssistantDelta({ item_id: "live:run-1:assistant" }, settled), true);
-  assert.equal(isSettledAssistantDelta({ run_id: "run-2" }, settled), false);
-  assert.equal(isSettledAssistantDelta({}, settled), false);
 });

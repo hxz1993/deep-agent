@@ -88,7 +88,6 @@ from loguru import logger
 
 from deep_agent.db.conversation import SessionStore
 from deep_agent.db.serialization import serialize_message
-from deep_agent.conversation.notifications import conversation_item_upserts
 from deep_agent.schemas.attachment import AttachmentRef
 from deep_agent.schemas.context_reference import ContextReference
 from deep_agent.options import OPTION
@@ -724,12 +723,6 @@ class AgentRunner:
                             "event": row.public_dict(),
                         }
                     )
-                for item_event in await conversation_item_upserts(
-                    self.store,
-                    session_id,
-                    rows,
-                ):
-                    session_event_queue.put_nowait(item_event)
             if rows:
                 user_event_id = rows[0].event_id
             history = [*history, user_request]

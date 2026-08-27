@@ -157,8 +157,9 @@ Model是否进入Run由Agent或请求级`model_id`选择。Skill和工具是否�
 - v0.5.0完成一体化Console视觉与布局重构：顶栏和图标导航统一三个主页面，工作台支持会话与详情栏调宽，配置中心提供Agent卡片/列表和独立编辑页，Skill与UI工具采用左右分栏。REST、SSE、History和Alembic `006`保持不变；模型目录保留导出、导入和在线更新，UI工具直接展示当前包的完整工具列表；上传Skill标题栏只保留编辑和上传，其余操作进入三点菜单；删除、未保存提醒和Skill信息输入统一使用轻量Console弹层，禁止回退浏览器原生`alert/confirm/prompt`。
 - v0.5.1抽出Console共享Markdown渲染器：Skill正文按Markdown阅读样式预览，主对话支持安全渲染`mermaid`围栏图表；图表仅在完整回复落定后按需加载本地资源并渲染，语法错误保留源码。
 - v0.6.0 Console普通对话读取`/history`的`ConversationItem[]`，轨迹才读取Event API；客户端不解析
-  Event Payload。实时会话只消费Text/Thinking/Tool等流式事件和`final`，重新打开或正常收流后通过
-  `/history`读取持久化投影。Compaction按同一Event ID原位更新，轨迹保留真实触发位置和脱敏详情。
+  Event Payload。实时会话只消费Text/Thinking/Tool等流式事件和`final`，正常收流保留当前直播结果；
+  切换、刷新、重新打开或异常恢复时读取`/history`持久化投影。Compaction按同一Event ID原位更新，
+  轨迹保留真实触发位置和脱敏详情。
 - v0.5.4收敛Console轨迹详情展示与前端实现：Assistant的Thinking归入Preview首段并默认折叠，短正文按内容自适应、长正文超过上限后滚动；Tool、Planning和Deferred复用同一套Payload/Result摘要渲染。REST、SSE、History、数据库和轨迹投影语义均不变化。
 - v0.5.5增加独立`llm_providers`配置层、九类Pydantic AI适配与Provider分栏Console，运行时开始按显式Provider类型构造原生Provider/Model，不再按模型前缀或URL猜协议。
 - v0.5.7压缩Provider详情接入信息：Base URL改为单行图标事实，地址模式、Key和启停状态改为紧凑胶囊，运行协议并入Provider副标题；仅调整Console展示，不改变Provider、Model、迁移或外部接口。

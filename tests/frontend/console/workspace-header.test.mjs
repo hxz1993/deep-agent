@@ -12,6 +12,10 @@ const chatSource = await readFile(
   new URL("../../../frontend/console/chat.js", import.meta.url),
   "utf8",
 );
+const assistantPresentationSource = await readFile(
+  new URL("../../../frontend/console/assistant-presentation.js", import.meta.url),
+  "utf8",
+);
 const workspaceSource = await readFile(
   new URL("../../../frontend/console/workspace.js", import.meta.url),
   "utf8",
@@ -256,7 +260,7 @@ test("输入框提供线性附件和后端预算百分比且不再暴露手动�
 test("停止生成只请求正式取消接口并等待真实 cancelled 事件", () => {
   assert.match(chatSource, /sessionApiUrl\(\{ id: sessionId, agentId \}, "\/cancel"\)/);
   assert.match(chatSource, /body\.status === "cancel_requested"/);
-  assert.match(chatSource, /case "cancelled":[\s\S]*assistant\.markInterrupted\(\)/);
+  assert.match(chatSource, /case "cancelled":[\s\S]*assistantActionsFromSse\(type, data\)/);
   assert.match(
     chatSource,
     /case "cancelled":[\s\S]*state\.skipHistoryRefresh = true;[\s\S]*break;/,
@@ -266,14 +270,22 @@ test("停止生成只请求正式取消接口并等待真实 cancelled 事件", 
   assert.match(chatSource, /tool-status-interrupted/);
   assert.match(chatSource, /state\.stopRequested/);
   assert.doesNotMatch(chatSource, /cancelFallbackTimer|abortFallback|setTimeout\(abortFallback/);
-  assert.doesNotMatch(chatSource, /streamCancelled[\s\S]{0,120}setTimeout/);
+  assert.doesNotMatch(chatSource, /streamCancelled/);
   assert.doesNotMatch(chatSource, /addErrorTo\(assistant, "（已停止生成）"\)/);
+});
+
+test("普通聊天只保留统一展示动作入口且没有旧投影状态", () => {
+  assert.match(chatSource, /projectConversationItems\(items\)/);
+  assert.match(chatSource, /applyAssistantPresentationActions\(assistant, node\.actions,[\s\S]*prepareDeferredCall: mergeUiToolCall/);
+  assert.match(chatSource, /assistantActionsFromSse\(type, data\)/);
+  assert.doesNotMatch(chatSource, /conversationVisualGroups|populateAssistantPresenter/);
+  assert.doesNotMatch(chatSource, /state\.conversationItems|conversation_item_upsert/);
 });
 
 test("业务重试或取消撤回工具调用时删除实时工具卡", () => {
   assert.match(
     chatSource,
-    /case "tool_call_removed":[\s\S]*assistant\.removeToolCall\(data\)/,
+    /case "tool_call_removed":[\s\S]*assistantActionsFromSse\(type, data\)/,
   );
   assert.match(
     chatSource,
@@ -282,8 +294,8 @@ test("业务重试或取消撤回工具调用时删除实时工具卡", () => {
 });
 
 test("历史中的 interrupted 助手消息恢复已停止标记", () => {
-  assert.match(chatSource, /interrupted \|\|= item\.status === "interrupted"/);
-  assert.match(chatSource, /if \(interrupted\) assistant\.markInterrupted\(\)/);
+  assert.match(assistantPresentationSource, /interrupted \|\|= item\.status === "interrupted"/);
+  assert.match(assistantPresentationSource, /if \(interrupted\) actions\.push\(\{ type: ASSISTANT_PRESENTATION_ACTIONS\.INTERRUPT \}\)/);
   assert.match(chatSource, /message-run-status interrupted/);
   assert.match(chatSource, /circle-stop/);
 });

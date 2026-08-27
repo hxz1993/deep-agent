@@ -48,7 +48,7 @@ frontend/
 | 配置 | `localStorage` 只保存调试 App；全局环境配置只读展示，身份和鉴权由平台提供 |
 | 内置工具目录 | 配置中心只读展示 `builtin:general`、`builtin:sandbox`；Agent 按包选择 |
 | 系统工具目录 | 配置中心按任务规划、Skill、文件、工具结果、MCP 工具发现、MCP Resource 分组展示自动注入工具；不参与 Agent 配置 |
-| 任务计划 | 只识别`write_plan`完整快照；普通对话直接消费History中的`plan` Item，同Turn Deferred由后端恢复PlanStore |
+| 任务计划 | 只识别`write_plan`完整快照；仅当前Run直播展示，任何Run终态后隐藏，重新打开History不恢复；同Turn Deferred由后端恢复PlanStore |
 | Skill | 独立 Skill 列表与详情；上传包安装/替换/单个与全部导出/删除；文本、Word、Excel 资源可预览，脚本只列包内路径和数量，不展示可执行性判断；Agent 使用独立 `skills` 列表选择 |
 | 一体化控制台 | `/console/`；工作台、配置和诊断的唯一入口 |
 | 会话轨迹 | 工作台“对话 / 轨迹”页签；普通对话读History/SSE ConversationItem，只有轨迹按Sequence读取Event API |
@@ -62,8 +62,9 @@ v0.3.12 的配置卡只读展示工具披露策略：附件包为“有附件时
 
 右侧会话详情使用“会话 / 当前回合 / 上下文引用”三页签：会话页展示会话、请求Header和
 复合上下文预算；当前回合页展示最近一次Run Usage与Compaction；上下文引用页由
-消息中的引用信息按钮定位并展示只读 JSON。工具过程仍由对话区负责；普通会话历史和持久化SSE
-共用ConversationItem Store，独立轨迹页在Event API刷新后以持久事件重新校准。
+消息中的引用信息按钮定位并展示只读 JSON。工具过程仍由对话区负责；History与当前Run的实时SSE
+分别通过同一套Assistant展示动作驱动DOM Presenter，不引入持久化Conversation Item推送。
+独立轨迹页只读取Event API，并在刷新后以持久事件重新校准。
 轨迹将同一ModelResponse中的thinking、text和tool call意图聚合为一个助手Loop，同时保留独立
 Tool Call/Result记录；用户输入行只按Event中现有`context_refs.type/label/schema_version`和
 附件元数据加标记，不从正文猜测业务上下文。轨迹详情复用工作台右侧Inspector，返回对话后恢复
@@ -112,8 +113,8 @@ Agent 独立编辑页的系统提示词标题栏显示“字符数 / 预估 Toke
 - Markdown统一由`markdown.js`渲染：工作台最终回复和Skill资源预览复用同一套安全解析；
   `mermaid`围栏只在完整回复落定后按需加载本地vendor并以严格模式生成SVG，失败时保留源码。
 - 工作台“轨迹”页与对话共享同一Session，不创建Run或模型请求；Event API只暴露公共Event Payload，
-  认证信息、内部Search Text与敏感Provider字段不展示。持久化SSE按Event ID Upsert，刷新后以完整
-  Event分页结果校准。
+  认证信息、内部Search Text与敏感Provider字段不展示。`session_event_appended/updated`仅更新轨迹，
+  刷新后以完整Event分页结果校准。
 - 配置中心左侧页签只在当前前端页面的模块内存中保留；工作台与配置中心之间切换会恢复上次页签，浏览器刷新后重新回到 Agent，不写入 LocalStorage 或后端。
 - Agent 独立编辑页在标题区显示完整 Agent ID；测试工作台对话标题第二行以 `会话 ID：<完整 ID>` 展示当前会话，不再截取前八位。
 - `/` 跳转到 `/console/#/workspace`；旧 `/settings.html`、`/models.html`、`/admin/` 返回 404。
@@ -203,8 +204,16 @@ python3.12 -m http.server 5173
 | 上下文压缩测试会话 | `console/workspace.js` → 场景弹窗、创建后打开会话并预填验证问题 |
 | Markdown 主题/安全 | `vendor/`，见 `vendor/README.md` |
 
-历史消息由后端按`session_id`维护；切换会话时循环调用`GET /api/v1/sessions/{id}/events`直到
-`next_after_sequence=null`。Pending UI工具的`tool/call`Event仍在Payload中携带`widget/metadata`。
+普通历史由后端按`session_id`投影；切换会话时一次读取`GET /api/v1/sessions/{id}/history`。
+只有轨迹循环读取`GET /api/v1/sessions/{id}/events`直到`next_after_sequence=null`。
+Pending UI工具的`tool/call`Event仍在Payload中携带`widget/metadata`。
+
+Console会话渲染模块边界：
+
+- `conversation-items.js`：把History `ConversationItem[]`确定性投影为用户节点和Assistant节点。
+- `assistant-presentation.js`：把History节点和实时SSE统一转换为Presenter展示动作。
+- `chat.js`：负责请求编排、Session/附件/Context状态、DOM Presenter和副作用，不再维护第二套事件投影。
+- `trajectory.js`：独立消费Event API，不参与普通聊天消息投影。
 
 ---
 

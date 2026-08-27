@@ -3,7 +3,7 @@
 `POST /api/v1/chat/stream` 使用 `text/event-stream`。实时会话和重新打开的 History 使用不同生命周期：
 
 - 当前 Run 使用流式事件增量展示。
-- 正常收流后、重连或重新打开会话时，读取 `/api/v1/sessions/{session_id}/history` 的最终投影。
+- 正常收流后保留当前直播结果；切换、刷新、重连或重新打开会话时，读取 `/api/v1/sessions/{session_id}/history` 的最终投影。
 - 客户端不解析 Event Store Payload，也不接收重复的持久化 Conversation Item 通知。
 
 ## 普通聊天事件
@@ -13,7 +13,7 @@
 | `text` / `thinking` | 否 | 按 `item_id` 追加当前 Assistant Delta |
 | `tool_call` / `tool_result` / `tool_call_removed` | 否 | 按 `tool_call_id` 更新当前 Run 的临时工具项 |
 | `session_title` | 是 | 更新会话列表和页头标题 |
-| `final` | 否 | 收口 Run 状态、Usage 和上下文预算；正常结束后可刷新 `/history` |
+| `final` | 否 | 收口 Run 状态、Usage 和上下文预算；保留本轮直播结果，不额外刷新 `/history` |
 | `cancelled` / `error` | 否 | 保留当前直播结果并结束 Run；重连或重新打开时由 `/history`校准 |
 
 直播中的 Thinking、工具进度、自动压缩提示等可以只存在于当前页面，不要求在 History 中重放。

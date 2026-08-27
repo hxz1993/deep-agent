@@ -25,8 +25,8 @@
 
 ## v0.6.0 已完成
 
-- `chat_sessions + chat_session_events`成为唯一会话事实源；模型历史、Event API、持久化SSE、Console
-  轨迹和Plan从同一Event Store投影。
+- `chat_sessions + chat_session_events`成为唯一会话事实源；模型历史、Event API、Conversation History、
+  Console轨迹和Plan从同一Event Store投影；实时SSE只承载当前Run增量与终态。
 - Turn/Run边界、Deferred跨Run、完整Pydantic Message逐行往返、Part Offset工具定位和未知Part失败闭合。
 - 单Event上下文压缩、固定八段摘要、Tool/Context Evidence、DSH式超大结果裁剪、300秒预算、SSE
   心跳、取消、Stale校验和安全Provider Overflow重试。

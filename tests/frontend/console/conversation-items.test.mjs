@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  conversationVisualGroups,
   latestPendingDeferredTool,
   normalizeConversationHistory,
+  projectConversationItems,
 } from "../../../frontend/console/conversation-items.js";
 
 const order = (sequence, partOffset = 0) => ({ sequence, part_offset: partOffset });
@@ -38,7 +38,7 @@ test("History 按 ConversationItem 顺序和稳定 ID 归一化", () => {
     ],
   });
   assert.deepEqual(history.items.map((item) => item.item_id), ["message:u", "tool:call-1", "message:a"]);
-  assert.deepEqual(conversationVisualGroups(history.items).map((group) => group.type), ["user", "assistant"]);
+  assert.deepEqual(projectConversationItems(history.items).map((node) => node.type), ["user", "assistant"]);
 });
 
 test("Deferred 由 ConversationItem 恢复而历史 Plan 不投影到输入区", () => {
@@ -54,4 +54,31 @@ test("Deferred 由 ConversationItem 恢复而历史 Plan 不投影到输入区",
     }),
   ];
   assert.equal(latestPendingDeferredTool(items)?.item_id, "tool:confirm");
+});
+
+test("History 投影保留用户附件和上下文，并排除 Plan、Compaction 与 Title", () => {
+  const attachments = [{ id: "file-1", name: "预算.xlsx", mime: "application/vnd.ms-excel" }];
+  const contextRefs = [{ type: "range", label: "预算区域" }];
+  const nodes = projectConversationItems([
+    base("message:u", "user_message", 1, {
+      text: "分析预算",
+      attachments,
+      context_refs: contextRefs,
+    }),
+    base("plan:p", "plan", 2, { call_id: "p" }),
+    base("compaction:c", "compaction", 3),
+    base("title:t", "session_title", 4),
+    base("message:a", "assistant_message", 5, { text: "完成", phase: "final" }),
+  ]);
+
+  assert.equal(nodes.length, 2);
+  assert.equal(nodes[0].type, "user");
+  assert.equal(nodes[0].itemId, "message:u");
+  assert.equal(nodes[0].createdAt, "2026-08-27T00:00:01Z");
+  assert.deepEqual(nodes[0].order, order(1));
+  assert.equal(nodes[0].text, "分析预算");
+  assert.deepEqual(nodes[0].attachments, attachments);
+  assert.deepEqual(nodes[0].contextRefs, contextRefs);
+  assert.equal(nodes[1].type, "assistant");
+  assert.ok(nodes[1].actions.length > 0);
 });

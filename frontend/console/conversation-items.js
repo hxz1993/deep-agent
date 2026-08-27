@@ -1,3 +1,5 @@
+import { assistantActionsFromHistoryItems } from "./assistant-presentation.js?v=20260827-1";
+
 function itemOrder(item) {
   return [Number(item?.order?.sequence || 0), Number(item?.order?.part_offset || 0), String(item?.item_id || "")];
 }
@@ -19,24 +21,39 @@ export function normalizeConversationHistory(response = {}) {
   };
 }
 
-export function conversationVisualGroups(items = []) {
-  const groups = [];
+export function projectConversationItems(items = []) {
+  const nodes = [];
   let assistantItems = [];
   const flushAssistant = () => {
     if (!assistantItems.length) return;
-    groups.push({ type: "assistant", items: assistantItems });
+    const first = assistantItems[0];
+    nodes.push({
+      type: "assistant",
+      itemId: first?.item_id || "",
+      createdAt: first?.created_at || null,
+      order: first?.order || null,
+      actions: assistantActionsFromHistoryItems(assistantItems),
+    });
     assistantItems = [];
   };
   for (const item of sortConversationItems(items)) {
     if (item.kind === "user_message") {
       flushAssistant();
-      groups.push({ type: "user", item });
-    } else {
+      nodes.push({
+        type: "user",
+        itemId: item.item_id || "",
+        createdAt: item.created_at || null,
+        order: item.order || null,
+        text: item.text || "",
+        attachments: Array.isArray(item.attachments) ? item.attachments : [],
+        contextRefs: Array.isArray(item.context_refs) ? item.context_refs : [],
+      });
+    } else if (["assistant_message", "tool"].includes(item.kind)) {
       assistantItems.push(item);
     }
   }
   flushAssistant();
-  return groups;
+  return nodes;
 }
 
 export function latestPendingDeferredTool(items = []) {

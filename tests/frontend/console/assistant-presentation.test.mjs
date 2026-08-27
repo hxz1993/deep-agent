@@ -3,11 +3,38 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
+  applyAssistantPresentationActions,
+  assistantActionsFromDeferred,
+  assistantActionsFromHistoryItems,
+  assistantActionsFromSse,
   isPlanningToolEvent,
   normalizePlanSnapshot,
   planPanelState,
   processDisclosureLabel,
 } from "../../../frontend/console/assistant-presentation.js";
+
+function recordingPresenter() {
+  const calls = [];
+  const presenter = {};
+  for (const method of [
+    "appendThinking",
+    "addThinkingBlock",
+    "finalizeThinking",
+    "appendText",
+    "setFinalText",
+    "addProcessText",
+    "finalizeText",
+    "addToolCall",
+    "addToolResult",
+    "removeToolCall",
+    "attachHitlWidget",
+    "complete",
+    "markInterrupted",
+  ]) {
+    presenter[method] = (...args) => calls.push([method, ...args]);
+  }
+  return { presenter, calls };
+}
 
 const chatSource = await readFile(
   new URL("../../../frontend/console/chat.js", import.meta.url),
@@ -99,9 +126,123 @@ test("实时 deferred 续跑复用同一可视回答且 removed 即时删除工�
     chatSource,
     /removeToolCall\(data\)[\s\S]*block\.remove\(\)[\s\S]*toolBlocks\.delete\(key\)/,
   );
-  assert.match(chatSource, /case "final":[\s\S]*assistant\.complete\(data\.output\)/);
-  assert.match(chatSource, /case "cancelled":[\s\S]*assistant\.markInterrupted\(\)/);
+  assert.match(chatSource, /case "final":[\s\S]*assistantActionsFromSse\(type, data\)/);
+  assert.match(chatSource, /case "cancelled":[\s\S]*assistantActionsFromSse\(type, data\)/);
   assert.match(chatSource, /case "error":[\s\S]*addErrorTo\(assistant/);
+});
+
+test("History 与 SSE 通过同一动作入口驱动思考、正文和工具", () => {
+  const historyActions = assistantActionsFromHistoryItems([
+    {
+      kind: "assistant_message",
+      thinking: "先核对",
+      text: "正在处理",
+      phase: "process",
+      status: "completed",
+    },
+    {
+      kind: "tool",
+      call_id: "call-1",
+      tool_name: "lookup",
+      input: { region: "华东" },
+      output: { count: 2 },
+      status: "completed",
+      artifacts: [{ id: "artifact-1" }],
+    },
+    {
+      kind: "assistant_message",
+      text: "核对完成",
+      phase: "final",
+      status: "completed",
+    },
+  ]);
+  const liveActions = [
+    ...assistantActionsFromSse("thinking", { delta: "先核对" }),
+    ...assistantActionsFromSse("text", { delta: "正在处理" }),
+    ...assistantActionsFromSse("tool_call", {
+      tool_call_id: "call-1",
+      tool: "lookup",
+      args: { region: "华东" },
+    }),
+    ...assistantActionsFromSse("tool_result", {
+      tool_call_id: "call-1",
+      tool: "lookup",
+      result: { count: 2 },
+      artifacts: [{ id: "artifact-1" }],
+    }),
+    ...assistantActionsFromSse("final", { output: "核对完成" }),
+  ];
+
+  const historyRecorder = recordingPresenter();
+  const liveRecorder = recordingPresenter();
+  applyAssistantPresentationActions(historyRecorder.presenter, historyActions);
+  applyAssistantPresentationActions(liveRecorder.presenter, liveActions);
+
+  assert.ok(historyRecorder.calls.some(([method]) => method === "addThinkingBlock"));
+  assert.ok(liveRecorder.calls.some(([method]) => method === "appendThinking"));
+  assert.equal(historyRecorder.calls.filter(([method]) => method === "addToolCall").length, 1);
+  assert.equal(liveRecorder.calls.filter(([method]) => method === "addToolCall").length, 1);
+  assert.equal(historyRecorder.calls.filter(([method]) => method === "addToolResult").length, 1);
+  assert.equal(liveRecorder.calls.filter(([method]) => method === "addToolResult").length, 1);
+  assert.ok(historyRecorder.calls.some(([method, value]) => method === "setFinalText" && value === "核对完成"));
+  assert.ok(liveRecorder.calls.some(([method, value]) => method === "complete" && value === "核对完成"));
+});
+
+test("展示动作覆盖多工具、撤回、失败、中断与 Deferred", () => {
+  const historyActions = assistantActionsFromHistoryItems([
+    {
+      kind: "tool",
+      call_id: "call-failed",
+      tool_name: "failed_tool",
+      input: { id: 1 },
+      output: { error: "failed" },
+      status: "failed",
+    },
+    {
+      kind: "tool",
+      call_id: "call-deferred",
+      tool_name: "builtin__confirm",
+      input: { message: "继续？" },
+      status: "awaiting_input",
+      widget: "confirm",
+    },
+    {
+      kind: "assistant_message",
+      text: "部分结果",
+      phase: "final",
+      status: "interrupted",
+    },
+  ]);
+  const recorder = recordingPresenter();
+  applyAssistantPresentationActions(recorder.presenter, historyActions);
+  applyAssistantPresentationActions(
+    recorder.presenter,
+    assistantActionsFromSse("tool_call_removed", { tool_call_id: "call-retry" }),
+  );
+  applyAssistantPresentationActions(
+    recorder.presenter,
+    assistantActionsFromDeferred({ calls: [{ tool_call_id: "call-next" }] }),
+  );
+
+  assert.equal(recorder.calls.filter(([method]) => method === "addToolCall").length, 2);
+  assert.equal(recorder.calls.filter(([method]) => method === "addToolResult").length, 1);
+  assert.equal(recorder.calls.filter(([method]) => method === "attachHitlWidget").length, 2);
+  assert.ok(recorder.calls.some(([method]) => method === "removeToolCall"));
+  assert.ok(recorder.calls.some(([method]) => method === "markInterrupted"));
+});
+
+test("共享动作入口恢复 Deferred 时仍补齐 UI 工具元数据", () => {
+  const recorder = recordingPresenter();
+  applyAssistantPresentationActions(
+    recorder.presenter,
+    assistantActionsFromDeferred({ calls: [{ tool: "confirm" }] }),
+    { prepareDeferredCall: (call) => ({ ...call, widget: "confirmation" }) },
+  );
+
+  assert.deepEqual(
+    recorder.calls.find(([method]) => method === "attachHitlWidget"),
+    ["attachHitlWidget", { tool: "confirm", widget: "confirmation" }],
+  );
 });
 
 test("大工具结果显示外置提示并保留预览", () => {
@@ -146,7 +287,7 @@ test("任务计划在消息区底部浮层展示最新快照", () => {
   assert.doesNotMatch(chatSource, /wrap\.insertBefore\(planBlock, processBlock\)/);
   assert.match(chatSource, /showComposerPlanPlaceholder\(data\.tool_call_id\)/);
   assert.match(chatSource, /renderComposerPlan\(data\.plan\)/);
-  assert.match(chatSource, /item\.kind !== "plan"/);
+  assert.doesNotMatch(chatSource, /item\.kind !== "plan"/);
   assert.match(workspaceCss, /\.composer-plan\.open \.composer-plan-items \{ display: grid; \}/);
   assert.match(workspaceCss, /\.composer-plan \{[\s\S]*position: absolute;[\s\S]*bottom: calc\(100% \+ 10px\);/);
   assert.match(workspaceCss, /width: min\(420px, calc\(100% - 48px\)\);/);

@@ -65,23 +65,3 @@ export function contextCompactionPresentation(data = {}) {
     active: ["preparing", "summarizing", "validating", "committing", "retry_wait"].includes(phase),
   };
 }
-
-export function reduceToolEvents(events) {
-  const calls = new Map();
-  for (const event of events) {
-    const data = event?.data || {};
-    const id = data.tool_call_id;
-    if (!id || !["tool_call", "tool_result", "tool_call_removed"].includes(event.event)) continue;
-    if (event.event === "tool_call_removed") {
-      calls.delete(id);
-      continue;
-    }
-    const current = calls.get(id) || { tool_call_id: id, status: "pending" };
-    if (event.event === "tool_call") {
-      calls.set(id, { ...current, ...data, status: "pending" });
-    } else {
-      calls.set(id, { ...current, ...data, status: "complete" });
-    }
-  }
-  return [...calls.values()];
-}

@@ -38,8 +38,8 @@
 
 ### DeepAgent自有产品能力
 
-- `chat_sessions + chat_session_events`是唯一会话事实源；Event API、持久化SSE、Console轨迹和Plan投影
-  共用同一数据。
+- `chat_sessions + chat_session_events`是唯一会话事实源；Event API、Conversation History、Console轨迹
+  和Plan投影共用同一数据，实时SSE只承载当前Run增量与终态。
 - 单Event上下文压缩：动态预算、八段摘要、Tool/Context Evidence、来源Hash、目标复检、300秒预算与
   SSE进度。
 - `search_conversation_history/read_conversation_event`：Agent+User授权内的中英文历史检索和精读。

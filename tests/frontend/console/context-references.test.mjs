@@ -14,9 +14,14 @@ const workspaceSource = await readFile(
   new URL("../../../frontend/console/workspace.js", import.meta.url),
   "utf8",
 );
+const conversationItemsSource = await readFile(
+  new URL("../../../frontend/console/conversation-items.js", import.meta.url),
+  "utf8",
+);
 
 test("结构化上下文可以单独形成可见的用户历史轮次", () => {
-  assert.match(chatSource, /msg\.context_refs && msg\.context_refs\.length/);
+  assert.match(conversationItemsSource, /contextRefs: Array\.isArray\(item\.context_refs\)/);
+  assert.match(chatSource, /node\.contextRefs\.length/);
   assert.match(chatSource, /renderMessageContextRefs\(bubble, contextRefs, branchPoint\)/);
   assert.match(chatSource, /ref\.label \|\| ref\.type \|\| "引用"/);
   assert.match(workspaceCss, /\.context-ref-chip\s*\{/);

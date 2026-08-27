@@ -52,7 +52,7 @@ source_event_ids / created_at / updated_at
 - `session_title` 直接更新标题；客户端不轮询标题，也不需要解析 Title Event。
 - `session_event_appended/updated` 只供 Console 轨迹和审计。
 - `context_compaction_progress` 只在当前实时会话展示；重新打开 History 不恢复压缩标记。
-- `final/cancelled/error` 收口当前 Run。正常结束、断流恢复或重新打开会话时读取 `/history`。
+- `final/cancelled/error` 收口当前 Run。正常结束保留直播结果；切换、刷新、断流恢复或重新打开会话时读取 `/history`。
 
 实时 UI 与 History 不要求逐项相同：直播可以保留思考、进度、工具执行和压缩提示，History 只展示
 Event Store 的最终 Conversation 投影。客户端不需要维护“临时项覆盖为持久化项”的第二套状态机。

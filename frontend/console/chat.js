@@ -7,16 +7,19 @@ import {
 import { formatSessionIdSubtitle } from "./session-display.js?v=20260728-2";
 import { copyTextToClipboard } from "./message-actions.js?v=20260819-1";
 import {
+  applyAssistantPresentationActions,
+  assistantActionsFromDeferred,
+  assistantActionsFromSse,
   isPlanningToolEvent,
   planPanelState,
   processDisclosureLabel,
-} from "./assistant-presentation.js?v=20260815-2";
+} from "./assistant-presentation.js?v=20260827-1";
 import { createTrajectoryController } from "./trajectory.js?v=20260827-5";
 import {
-  conversationVisualGroups,
   latestPendingDeferredTool,
   normalizeConversationHistory,
-} from "./conversation-items.js?v=20260827-3";
+  projectConversationItems,
+} from "./conversation-items.js?v=20260827-4";
 import {
   firstSelectableModelId,
   isModelSelectable,
@@ -124,10 +127,8 @@ const state = {
   abortController: null,
   stopRequested: false,
   streamSessionConfirmed: false,
-  streamCancelled: false,
   skipHistoryRefresh: false,
   modelMessageCount: 0,
-  conversationItems: [],
   pendingAttachments: [],
   contextStatus: null,
   lastRunUsage: null,
@@ -660,7 +661,6 @@ function newChat(agentId) {
   loadUiTools(state.agentId);
   state.sessionId = null;
   state.conversationId = null;
-  state.conversationItems = [];
   state.modelMessageCount = 0;
   state.contextStatus = null;
   state.lastRunUsage = null;
@@ -804,7 +804,6 @@ async function loadAllSessionEvents(session) {
 
 async function loadSessionHistory(session) {
   const normalized = normalizeSession(session);
-  state.conversationItems = [];
   clearMessages();
   trajectory?.setHistory({ session_id: normalized.id, items: [] });
   hideEmptyState();
@@ -815,13 +814,11 @@ async function loadSessionHistory(session) {
       loadAllSessionEvents(normalized),
     ]);
     if (r.status === 404) {
-      state.conversationItems = [];
       addSystemNote("会话不存在或尚无历史记录。");
       return;
     }
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const history = normalizeConversationHistory(await r.json());
-    state.conversationItems = history.items;
     trajectory?.setHistory(eventResult.response.ok ? eventResult.data : { session_id: normalized.id, items: [] });
     const latestAssistant = [...history.items]
       .reverse()
@@ -847,7 +844,6 @@ async function loadSessionHistory(session) {
     }
     renderHistory(history.items);
   } catch (e) {
-    state.conversationItems = [];
     trajectory?.setHistory({ session_id: normalized.id, items: [] });
     addSystemNote(`加载历史失败：${e.message}`);
   }
@@ -1061,11 +1057,10 @@ function renderHistory(items) {
   state.modelMessageCount = items.filter((item) => ["user_message", "assistant_message"].includes(item.kind)).length;
   let lastDayKey = null;
   state.assistantPresenter = null;
-  const visualItems = conversationVisualGroups(items);
+  const presentationNodes = projectConversationItems(items);
 
-  for (const group of visualItems) {
-    const first = group.type === "assistant" ? group.items[0] : group.item;
-    const ts = first?.created_at || null;
+  for (const node of presentationNodes) {
+    const ts = node.createdAt;
     if (ts) {
       const dayKey = localDayKey(ts);
       if (dayKey !== lastDayKey) {
@@ -1073,30 +1068,29 @@ function renderHistory(items) {
         lastDayKey = dayKey;
       }
     }
-    if (group.type === "user") {
-      const msg = group.item;
+    if (node.type === "user") {
       if (
-        msg.text
-        || (msg.attachments && msg.attachments.length)
-        || (msg.context_refs && msg.context_refs.length)
+        node.text
+        || node.attachments.length
+        || node.contextRefs.length
       ) {
         addMessage(
           "user",
-          msg.text || "",
+          node.text,
           ts,
-          msg.order?.sequence,
-          msg.attachments,
-          msg.context_refs,
+          node.order?.sequence,
+          node.attachments,
+          node.contextRefs,
         );
       }
       continue;
     }
 
-    if (group.type === "assistant") {
-      const visible = group.items.filter((item) => item.kind !== "plan");
-      if (!visible.length) continue;
-      const assistant = createAssistantMessage(ts, first?.order?.sequence);
-      populateAssistantPresenter(assistant, visible);
+    if (node.type === "assistant") {
+      const assistant = createAssistantMessage(ts, node.order?.sequence);
+      applyAssistantPresentationActions(assistant, node.actions, {
+        prepareDeferredCall: mergeUiToolCall,
+      });
       state.assistantPresenter = assistant;
     }
   }
@@ -1106,47 +1100,6 @@ function renderHistory(items) {
   updateHitlInputState();
   updateComposerContextControls();
   scrollToBottom();
-}
-
-function populateAssistantPresenter(assistant, items) {
-  let interrupted = false;
-  for (const item of items) {
-    if (item.kind === "assistant_message") {
-      if (item.thinking) assistant.addThinkingBlock(item.thinking);
-      if (item.text) {
-        if (item.phase === "final") assistant.setFinalText(item.text);
-        else assistant.addProcessText(item.text);
-      }
-      interrupted ||= item.status === "interrupted";
-      continue;
-    }
-    if (item.kind !== "tool") continue;
-    const call = {
-      tool: item.tool_name,
-      args: item.input,
-      tool_call_id: item.call_id,
-      source: item.mode === "tool_search" ? "tool_search" : null,
-      widget: item.widget,
-      metadata: item.metadata,
-    };
-    assistant.addToolCall(call);
-    if (!["pending", "awaiting_input"].includes(item.status)) {
-      assistant.addToolResult({
-        tool: item.tool_name,
-        result: item.output,
-        tool_call_id: item.call_id,
-        source: call.source,
-        artifacts: item.artifacts,
-        outcome: item.outcome,
-      });
-    } else if (item.status === "awaiting_input") {
-      assistant.attachHitlWidget(mergeUiToolCall(call));
-    }
-    interrupted ||= item.status === "interrupted";
-  }
-  assistant.finalizeThinking();
-  assistant.finalizeText();
-  if (interrupted) assistant.markInterrupted();
 }
 
 async function deleteSession(session) {
@@ -1584,7 +1537,6 @@ async function runChatStream(payload, assistant) {
   state.abortController = streamController;
   state.stopRequested = false;
   state.streamSessionConfirmed = false;
-  state.streamCancelled = false;
   state.skipHistoryRefresh = false;
   try {
     const resp = await daFetch(serviceUrl("api/v1/chat/stream"), {
@@ -1604,8 +1556,7 @@ async function runChatStream(payload, assistant) {
   } catch (e) {
     if (e.name === "AbortError") {
       // Transport cleanup (page unload/network teardown), not a user stop result.
-      assistant.finalizeThinking();
-      assistant.finalizeText();
+      applyAssistantPresentationActions(assistant, assistantActionsFromSse("error"));
     } else {
       setConn("err", "请求失败");
       trajectory?.ingest({ event: "error", data: { message: e.message } });
@@ -1614,8 +1565,7 @@ async function runChatStream(payload, assistant) {
       addErrorTo(assistant, `请求失败：${e.message}`);
     }
   } finally {
-    assistant.finalizeThinking();
-    assistant.finalizeText();
+    applyAssistantPresentationActions(assistant, assistantActionsFromSse("error"));
     clearComposerPlan();
     setStreaming(false);
     if (state.abortController === streamController) state.abortController = null;
@@ -1756,24 +1706,23 @@ function handleEvent({ event, data }, assistant) {
     case "session_event_updated":
       break;
     case "thinking":
-      assistant.appendThinking(data.delta || "");
+      applyAssistantPresentationActions(assistant, assistantActionsFromSse(type, data));
       break;
     case "text":
-      assistant.finalizeThinking();
-      assistant.appendText(data.delta || "");
+      applyAssistantPresentationActions(assistant, assistantActionsFromSse(type, data));
       break;
     case "tool_call":
       if (isPlanningToolEvent(data)) {
         showComposerPlanPlaceholder(data.tool_call_id);
       } else {
-        assistant.addToolCall(data);
+        applyAssistantPresentationActions(assistant, assistantActionsFromSse(type, data));
       }
       break;
     case "tool_call_removed":
       if (isPlanningToolEvent(data) || state.planningCallIds.has(data.tool_call_id)) {
         removePlanningCall(data.tool_call_id);
       } else {
-        assistant.removeToolCall(data);
+        applyAssistantPresentationActions(assistant, assistantActionsFromSse(type, data));
       }
       break;
     case "tool_result":
@@ -1781,11 +1730,11 @@ function handleEvent({ event, data }, assistant) {
         if (data.tool_call_id) state.planningCallIds.delete(data.tool_call_id);
         if (data.plan) renderComposerPlan(data.plan);
       } else {
-        assistant.addToolResult(data);
+        applyAssistantPresentationActions(assistant, assistantActionsFromSse(type, data));
       }
       break;
     case "final":
-      assistant.complete(data.output);
+      applyAssistantPresentationActions(assistant, assistantActionsFromSse(type, data));
       if (data.usage) renderUsage(data.usage);
       else state.lastRunUsage = null;
       state.conversationId = data.conversation_id || state.conversationId;
@@ -1812,10 +1761,11 @@ function handleEvent({ event, data }, assistant) {
       if (data.status === "pending" && data.deferred) {
         state.awaitingHitl = true;
         setStreaming(false);
-        const pending = [...(data.deferred.calls || []), ...(data.deferred.approvals || [])];
-        for (const call of pending) {
-          assistant.attachHitlWidget(mergeUiToolCall(call));
-        }
+        applyAssistantPresentationActions(
+          assistant,
+          assistantActionsFromDeferred(data.deferred),
+          { prepareDeferredCall: mergeUiToolCall },
+        );
       } else {
         state.awaitingHitl = false;
       }
@@ -1823,8 +1773,7 @@ function handleEvent({ event, data }, assistant) {
       break;
     case "error":
       failAutomaticContextCompaction("上下文压缩后续请求失败，未生成压缩事件");
-      assistant.finalizeThinking();
-      assistant.finalizeText();
+      applyAssistantPresentationActions(assistant, assistantActionsFromSse(type, data));
       // Error is transient SSE only — refreshing history would wipe the bubble.
       state.skipHistoryRefresh = true;
       addErrorTo(assistant, data.message || "未知错误");
@@ -1832,14 +1781,11 @@ function handleEvent({ event, data }, assistant) {
       break;
     case "cancelled":
       failAutomaticContextCompaction("上下文压缩已取消，未生成压缩事件");
-      state.streamCancelled = true;
       // Keep the current streamed conversation in place. The official
       // interrupted history remains the source of truth when the session is
       // reopened, but re-rendering it here causes a disruptive visual reload.
       state.skipHistoryRefresh = true;
-      assistant.finalizeThinking();
-      assistant.finalizeText();
-      assistant.markInterrupted();
+      applyAssistantPresentationActions(assistant, assistantActionsFromSse(type, data));
       clearComposerPlan();
       if (data.usage) renderUsage(data.usage);
       state.conversationId = data.conversation_id || state.conversationId;

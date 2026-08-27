@@ -3,7 +3,7 @@
 > v0.6.0 会话结构；当前产品版本0.6.1，Alembic head：010。010不修改会话事件结构。
 
 DeepAgent 会话域只有 `chat_sessions` 和 `chat_session_events`。Event Store 是模型恢复、
-会话历史、Console 轨迹、Plan 和持久化 SSE 的唯一事实源；没有 Checkpoint、Plan、Evidence、
+会话历史、Console 轨迹和Plan的唯一事实源；没有 Checkpoint、Plan、Evidence、
 搜索或 Provider HTTP 报文留底表。
 
 ## Event 粒度
@@ -70,13 +70,17 @@ GET /api/v1/sessions/{session_id}/events
 ```
 
 Event API 按 Sequence 分页，内部 `search_text` 不返回，只供轨迹、审计和精确回读。
-实时聊天通过 Text/Thinking/Tool 等流式事件展示当前 Run；正常收流、重连或重新打开会话时从
-`/history`读取最终 Conversation 投影。`session_event_appended/session_event_updated` 继续供轨迹和
-标题等系统事件消费。
+实时聊天通过 Text/Thinking/Tool 等流式事件展示当前 Run；正常收流保留本轮直播结果，切换、刷新、
+重连或重新打开会话时从`/history`读取最终 Conversation 投影。
+`session_event_appended/session_event_updated`继续供轨迹和标题等系统事件消费。
 
 Event → Conversation 的确定性投影位于后端。Console 普通聊天只消费 `/history`和流式事件；
 只有轨迹读取 Event API。Compaction 按真实 Sequence 穿插在轨迹中，普通 Run 不显示。实时会话允许
 保留进度和压缩提示等临时状态，重新打开的 History 只展示持久化 Conversation。
+
+Console内部不再为History与SSE维护两套展示分支：`conversation-items.js`负责History节点投影，
+`assistant-presentation.js`把History和SSE转换为同一组Presenter动作，`chat.js`只负责请求编排、
+DOM Presenter和页面副作用；`trajectory.js`继续独立消费Event API。
 
 Branch From 本版不实现，也不预埋 Parent 列。稳定 Event ID、完整 Message 和工具 Call ID 已提供
 未来实现分支读取所需的事实边界。

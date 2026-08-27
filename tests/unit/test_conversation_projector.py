@@ -138,6 +138,29 @@ class ConversationProjectorTests(unittest.TestCase):
         self.assertEqual(tool.mode, "deferred")
         self.assertEqual(tool.status, "interrupted")
 
+    def test_interrupted_assistant_closes_unfinished_tool_in_same_run(self) -> None:
+        interrupted = event(
+            1,
+            "assistant/message",
+            status="interrupted",
+            message=ModelResponse(
+                parts=[
+                    TextPart(content="正在导出报告"),
+                    ToolCallPart(
+                        tool_name="export_file_to_download_center",
+                        args={"name": "报告.xlsx"},
+                        tool_call_id="export-1",
+                    ),
+                ],
+                state="interrupted",
+            ),
+        )
+
+        projected = project_session_events([interrupted])
+        tool = next(item for item in projected.items if item.kind == "tool")
+
+        self.assertEqual(tool.status, "interrupted")
+
     def test_native_call_and_result_in_same_response_form_one_tool(self) -> None:
         native = event(
             1,

@@ -142,6 +142,22 @@ class AgentRunnerDeferredTests(unittest.IsolatedAsyncioTestCase):
             persister=self.persister,
         ):
             events_out.append(ev)
+            if ev.get("type") == "tool_call":
+                history = await self.store.get_history(
+                    "sess-1", agent_id=self.db_agent.id
+                )
+                self.assertTrue(
+                    any(
+                        isinstance(message, ModelResponse)
+                        and any(
+                            isinstance(part, ToolCallPart)
+                            and part.tool_call_id == ev.get("tool_call_id")
+                            for part in message.parts
+                        )
+                        for message in history
+                    ),
+                    "Deferred tool_call must not become interactive before persistence",
+                )
 
         self.assertEqual(events_out[-1]["type"], "final")
         self.assertEqual(events_out[-1]["status"], "pending")

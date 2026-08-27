@@ -68,6 +68,10 @@ def project_session_events(
                 items.append(item)
             continue
         if event_type == "assistant/message":
+            run_id = _optional_str(_get(event, "run_id") or message.get("run_id"))
+            assistant_terminal = _assistant_terminal_status(event, message)
+            if run_id and assistant_terminal:
+                terminal_by_run[run_id] = assistant_terminal
             assistant = _assistant_item(event, message)
             if assistant is not None:
                 items.append(assistant)
@@ -429,6 +433,18 @@ def _mark_final_assistant_items(items: Sequence[ConversationItem]) -> None:
 def _terminal_status(value: Any) -> str:
     normalized = str(value or "interrupted").casefold()
     return normalized if normalized in {"failed", "interrupted"} else "interrupted"
+
+
+def _assistant_terminal_status(
+    event: Any,
+    message: Mapping[str, Any],
+) -> str | None:
+    state = str(message.get("state") or "").casefold()
+    status = str(_get(event, "status") or "").casefold()
+    for value in (state, status):
+        if value in {"interrupted", "failed"}:
+            return value
+    return None
 
 
 def _get(value: Any, key: str, default: Any = None) -> Any:

@@ -1665,6 +1665,7 @@ class AgentRunner:
         cancelled_run: RunCancelled | None = None
         cancelled_messages: list[ModelMessage] = []
         published_tool_calls: dict[str, str] = {}
+        buffered_ui_tool_calls: dict[str, dict[str, Any]] = {}
         session_events: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         title_task: asyncio.Task[None] | None = None
         self._set_tool_discovery_inputs(deps, message, context_refs)
@@ -1826,6 +1827,22 @@ class AgentRunner:
                                 provider_retry_safe = False
                                 event_type = mapped.get("type")
                                 tool_call_id = mapped.get("tool_call_id")
+                                enriched = enrich_tool_event(mapped, self.ui_tool_hints)
+                                if event_type == "tool_call" and tool_call_id:
+                                    tool_name = str(mapped.get("tool") or "tool")
+                                    if tool_name in self.ui_tool_hints:
+                                        buffered_ui_tool_calls[tool_call_id] = enriched
+                                        continue
+                                if event_type == "tool_call_removed" and tool_call_id:
+                                    if buffered_ui_tool_calls.pop(tool_call_id, None) is not None:
+                                        continue
+                                if event_type == "tool_result" and tool_call_id:
+                                    buffered_call = buffered_ui_tool_calls.pop(tool_call_id, None)
+                                    if buffered_call is not None:
+                                        published_tool_calls[tool_call_id] = str(
+                                            buffered_call.get("tool") or "tool"
+                                        )
+                                        yield buffered_call
                                 if event_type == "tool_call_removed":
                                     if not tool_call_id or tool_call_id not in published_tool_calls:
                                         continue
@@ -1846,7 +1863,7 @@ class AgentRunner:
                                         tool_call_id=tool_call_id,
                                         source=mapped.get("source") or "tool",
                                     )
-                                yield enrich_tool_event(mapped, self.ui_tool_hints)
+                                yield enriched
                         break
                     except Exception as exc:
                         if (
@@ -1964,23 +1981,15 @@ class AgentRunner:
                     session_id,
                     exc,
                 )
-            retained_call_ids = {
-                part.tool_call_id
-                for message in pending
-                if isinstance(message, ModelResponse)
-                for part in message.parts
-                if isinstance(part, ToolCallPart) and part.tool_call_id
-            }
             for tool_call_id, tool_name in list(published_tool_calls.items()):
-                if tool_call_id not in retained_call_ids:
-                    removed = events.tool_call_removed(
-                        tool_name,
-                        tool_call_id,
-                        reason="cancelled",
-                    )
-                    prefix = "plan" if is_planning_tool(tool_name) else "tool"
-                    removed["item_id"] = f"{prefix}:{tool_call_id}"
-                    yield removed
+                removed = events.tool_call_removed(
+                    tool_name,
+                    tool_call_id,
+                    reason="cancelled",
+                )
+                prefix = "plan" if is_planning_tool(tool_name) else "tool"
+                removed["item_id"] = f"{prefix}:{tool_call_id}"
+                yield removed
             cancelled_run_event = await self._finish_run_event(
                 run_event, status="cancelled", started_at=started_at,
                 usage=cancelled_run.usage,
@@ -2058,6 +2067,24 @@ class AgentRunner:
                 return
             while not session_events.empty():
                 yield session_events.get_nowait()
+            for buffered_call in buffered_ui_tool_calls.values():
+                tool_call_id = str(buffered_call.get("tool_call_id") or "")
+                tool_name = str(buffered_call.get("tool") or "tool")
+                if tool_call_id:
+                    published_tool_calls[tool_call_id] = tool_name
+                log_event(
+                    "agent_tool_event",
+                    conversation_id=deps.conversation_id,
+                    run_id=deps.run_id,
+                    agent_id=deps.agent_id,
+                    session_id=session_id,
+                    phase="tool_call",
+                    tool=tool_name,
+                    tool_call_id=tool_call_id or None,
+                    source=buffered_call.get("source") or "tool",
+                )
+                yield buffered_call
+            buffered_ui_tool_calls.clear()
         if title_task is not None:
             await title_task
             while not session_events.empty():

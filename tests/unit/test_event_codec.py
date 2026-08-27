@@ -17,6 +17,7 @@ from pydantic_ai.messages import (
 
 from deep_agent.db.event_codec import (
     EventCodecError,
+    MAX_SEARCH_TEXT_BYTES,
     decode_message_events,
     encode_messages,
     normalize_search_text,
@@ -123,6 +124,19 @@ class EventCodecTests(unittest.TestCase):
         self.assertNotIn("不能检索的私有推理", draft.search_text or "")
         self.assertNotIn("secret", draft.search_text or "")
         self.assertNotIn("private", draft.search_text or "")
+
+    def test_search_projection_is_bounded_by_mysql_text_bytes(self) -> None:
+        message = ModelRequest(
+            parts=[UserPromptPart(content="预算差异" * 30_000)]
+        )
+
+        draft = encode_messages([message], session_id="large", run_id="run-large")[0]
+
+        self.assertIsNotNone(draft.search_text)
+        self.assertLessEqual(
+            len((draft.search_text or "").encode("utf-8")),
+            MAX_SEARCH_TEXT_BYTES,
+        )
 
 
 if __name__ == "__main__":

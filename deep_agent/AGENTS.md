@@ -67,9 +67,11 @@ Pydantic AI `CancellationToken`。Runner 捕获 `RunCancelled` 后只持久化
 `RunCancelled.new_messages()` 并返回真实 `cancelled` SSE（含 `usage`）；不再探测其他 result、
 拼接流式文本、手工补 `ToolDenied` 或生成前端假事件。若 Provider 返回的最后一个非空部分响应
 仍标为 `complete`，持久化前统一规范化为 `state=interrupted`，Event投影映射为
-`assistant.status=interrupted`；下一轮的悬空 Tool Call 由 Pydantic AI 自动补
-`outcome=interrupted`。已实时发布但未进入官方中断历史的工具调用先发送
-`tool_call_removed(reason=cancelled)`，避免刷新前后工具卡不一致。
+`assistant.status=interrupted`；同一 Run 内没有结果的工具在 Conversation History 投影为
+`interrupted`，下一轮模型历史中的悬空 Tool Call 仍由 Pydantic AI 自动补
+`outcome=interrupted`。取消时，所有已实时发布但尚未返回结果的工具调用发送
+`tool_call_removed(reason=cancelled)`，关闭直播临时卡片；原始 Event 与 History 的
+`interrupted` 审计事实仍保留。
 
 普通工具在参数校验后发布 `tool_call`；若业务执行返回 Pydantic AI `ModelRetry`，对应官方
 `RetryPromptPart` 必须映射为 `tool_call_removed(reason=model_retry)`。客户端按

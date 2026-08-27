@@ -14,7 +14,9 @@ from deep_agent.db.serialization import deserialize_message, serialize_message
 
 
 EVENT_SCHEMA_VERSION = 1
-MAX_SEARCH_TEXT_CHARS = 65_536
+# SQLAlchemy ``Text`` maps to MySQL ``TEXT``, whose limit is 65,535 bytes.
+# Search text can contain multi-byte Unicode, so a character limit is unsafe.
+MAX_SEARCH_TEXT_BYTES = 65_000
 MESSAGE_EVENT_TYPES = frozenset(
     {"user/message", "assistant/message", "tool/results", "model/request"}
 )
@@ -234,7 +236,14 @@ def build_search_text(event_type: str, message: Mapping[str, Any]) -> str | None
     normalized = normalize_search_text(
         json.dumps(safe, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     )
-    return normalized[:MAX_SEARCH_TEXT_CHARS] or None
+    return _truncate_utf8(normalized, MAX_SEARCH_TEXT_BYTES) or None
+
+
+def _truncate_utf8(value: str, max_bytes: int) -> str:
+    encoded = value.encode("utf-8")
+    if len(encoded) <= max_bytes:
+        return value
+    return encoded[:max_bytes].decode("utf-8", errors="ignore")
 
 
 def normalize_search_text(value: str) -> str:

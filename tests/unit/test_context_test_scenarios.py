@@ -7,6 +7,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pydantic_ai.messages import ModelRequest, ModelResponse, ToolReturnPart
 
+from deep_agent.agent.context.budget import build_context_budget
 from deep_agent.agent.context.estimator import TokenEstimator
 from deep_agent.agent.context.test_scenarios import (
     CONTEXT_TEST_SCENARIOS,
@@ -36,6 +37,15 @@ class ContextTestScenarioBuilderTests(unittest.TestCase):
                     built.budget.estimated_request_tokens,
                     built.budget.trigger_tokens,
                 )
+                direct_budget = build_context_budget(
+                    built.messages,
+                    context_window_tokens=16_000,
+                    max_output_tokens=2_000,
+                    estimator=estimator,
+                    output_history=built.messages,
+                    estimate_scope="history_only",
+                )
+                self.assertEqual(built.budget, direct_budget)
                 self.assertTrue(
                     all(
                         isinstance(message, (ModelRequest, ModelResponse))

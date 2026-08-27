@@ -3,6 +3,8 @@ import test from "node:test";
 
 import {
   conversationVisualGroups,
+  isAuthoritativeAssistantUpsert,
+  isSettledAssistantDelta,
   latestPendingDeferredTool,
   normalizeConversationHistory,
   upsertConversationItem,
@@ -57,4 +59,19 @@ test("Deferred 由 ConversationItem 恢复而历史 Plan 不投影到输入区",
     }),
   ];
   assert.equal(latestPendingDeferredTool(items)?.item_id, "tool:confirm");
+});
+
+test("权威 Assistant Upsert 立即落定并防御同 Run 迟到 Delta", () => {
+  const item = base("message:a", "assistant_message", 2, {
+    text: "权威完整回复",
+    phase: "final",
+  });
+  assert.equal(isAuthoritativeAssistantUpsert(item, "run-1"), true);
+  assert.equal(isAuthoritativeAssistantUpsert(item, "run-2"), false);
+
+  const settled = new Set(["run-1"]);
+  assert.equal(isSettledAssistantDelta({ run_id: "run-1" }, settled), true);
+  assert.equal(isSettledAssistantDelta({ item_id: "live:run-1:assistant" }, settled), true);
+  assert.equal(isSettledAssistantDelta({ run_id: "run-2" }, settled), false);
+  assert.equal(isSettledAssistantDelta({}, settled), false);
 });

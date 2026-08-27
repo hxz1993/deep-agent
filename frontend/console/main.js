@@ -4,7 +4,7 @@ import {
 } from "./configuration.js?v=20260827-4";
 import { bindContextControls, refreshIdentity } from "./context.js?v=20260822-1";
 import { initDiagnostics } from "./diagnostics.js?v=20260720-1";
-import { initWorkspace } from "./workspace.js?v=20260827-3";
+import { initWorkspace } from "./workspace.js?v=20260827-4";
 
 const VALID_PAGES = new Set(["workspace", "configuration", "diagnostics"]);
 const PAGE_LABELS = {

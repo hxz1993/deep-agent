@@ -122,7 +122,8 @@ HTTP → deep_agent/api/v1 → AgentRunner → pydantic_ai.Agent → Toolsets
   环境。Compaction增加确定性Attachment Evidence，但文件授权仍只从原始Event恢复。
 - v0.6.0上下文压缩采用单条Compaction Event、固定八段摘要、确定性Tool/Context Evidence和DSH式
   超大结果裁剪；300秒总预算内每约10秒发送SSE进度。失败、超时、取消或Stale不替换上一次有效
-  历史；明确Provider Context Overflow只在没有已输出内容或工具副作用时压缩后安全重试一次。
+  历史；预算、安全边界和Evidence准备保持线性并移出SSE事件循环，准备期也持续发送心跳；明确Provider
+  Context Overflow只在没有已输出内容或工具副作用时压缩后安全重试一次。
 - 结构化`context_refs`完整保存在`user/message`Event；`metadata`只用于历史和前端，不进入模型、
   摘要、搜索文本或Token估算。被压缩前缀生成确定性Context Evidence，精确事实仍从原Event回读。
 - 新的运行时横切能力优先评估 Core 的 `PrepareTools`、Hooks、`ToolSearch` 和 Harness 的 Compaction/Overflow；不要默认把逻辑继续写入 `AgentRunner`。
@@ -152,7 +153,8 @@ HTTP → deep_agent/api/v1 → AgentRunner → pydantic_ai.Agent → Toolsets
 - v0.5.1抽出Console共享Markdown渲染器：Skill正文按Markdown阅读样式预览，主对话支持安全渲染`mermaid`围栏图表；图表仅在完整回复落定后按需加载本地资源并渲染，语法错误保留源码。
 - v0.6.0 Console普通对话读取`/history`的`ConversationItem[]`，轨迹才读取Event API。History与
   `conversation_item_upsert`共用服务端投影器；客户端不解析Event Payload。Compaction按同一Event ID
-  原位更新，轨迹保留真实触发位置和脱敏详情。
+  原位更新，轨迹保留真实触发位置和脱敏详情。持久化Assistant Upsert是完整权威终态并先于`final`
+  发送；客户端收到后立即替换同Run直播草稿，同一Item不再继续发送Text/Thinking Delta。
 - v0.5.4收敛Console轨迹详情展示与前端实现：Assistant的Thinking归入Preview首段并默认折叠，短正文按内容自适应、长正文超过上限后滚动；Tool、Planning和Deferred复用同一套Payload/Result摘要渲染。REST、SSE、History、数据库和轨迹投影语义均不变化。
 - v0.5.5增加独立`llm_providers`配置层、九类Pydantic AI适配与Provider分栏Console，运行时开始按显式Provider类型构造原生Provider/Model，不再按模型前缀或URL猜协议。
 - v0.5.7压缩Provider详情接入信息：Base URL改为单行图标事实，地址模式、Key和启停状态改为紧凑胶囊，运行协议并入Provider副标题；仅调整Console展示，不改变Provider、Model、迁移或外部接口。

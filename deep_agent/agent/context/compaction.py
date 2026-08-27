@@ -8,7 +8,7 @@ import math
 import re
 import time
 from dataclasses import dataclass, field, replace
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Callable, TypeVar
 
 from pydantic_ai import Agent
 from pydantic_ai.capabilities import AbstractCapability
@@ -116,6 +116,8 @@ _CONTEXT_REFERENCES_BLOCK_RE = re.compile(
     r"<context_references>.*?</context_references>\s*",
     flags=re.DOTALL | re.IGNORECASE,
 )
+
+_T = TypeVar("_T")
 
 
 class ContextWindowExceededError(ValueError):
@@ -678,6 +680,66 @@ def _request_estimate(
     )[0]
 
 
+async def _run_preparation_step(
+    operation: Callable[[], _T],
+    state: ContextRunState,
+    *,
+    message: str,
+) -> _T:
+    """Run deterministic CPU preparation without starving the SSE loop."""
+
+    started_at = time.monotonic()
+    state.emit("preparing", message, elapsed_ms=0)
+    task = asyncio.create_task(asyncio.to_thread(operation))
+    try:
+        while not task.done():
+            done, _ = await asyncio.wait(
+                {task},
+                timeout=_SUMMARY_HEARTBEAT_SECONDS,
+            )
+            if task not in done:
+                state.emit(
+                    "preparing",
+                    message,
+                    elapsed_ms=round((time.monotonic() - started_at) * 1_000),
+                )
+        return task.result()
+    finally:
+        if not task.done():
+            task.cancel()
+
+
+def _summary_materials(
+    messages: list[ModelMessage],
+    raw_history: list[ModelMessage],
+    cutoff: int,
+) -> tuple[list[ModelMessage], list[dict[str, Any]], tuple[str, ...]]:
+    summary_source = list(messages[:cutoff])
+    raw_evidence_source = _raw_prefix_for_visible_cutoff(
+        messages,
+        raw_history,
+        cutoff,
+    )
+    previous_evidence = _anchor_evidence_contents(summary_source)
+    to_summarize = _strip_summary_and_system(summary_source)
+    to_summarize, pruned = _prune_tool_results(
+        to_summarize,
+        threshold=OPTION.agent.context_tool_prune_threshold,
+        head=OPTION.agent.context_tool_prune_head,
+        tail=OPTION.agent.context_tool_prune_tail,
+    )
+    generated_evidence = tuple(
+        item
+        for item in (
+            _deterministic_evidence_text(raw_evidence_source),
+            _deterministic_context_evidence_text(raw_evidence_source),
+            _deterministic_attachment_evidence_text(raw_evidence_source),
+        )
+        if item
+    )
+    return to_summarize, pruned, generated_evidence or previous_evidence
+
+
 def _protected_messages(messages: list[ModelMessage]) -> list[ModelMessage]:
     start = _active_turn_start(messages)
     return list(messages[start:]) if start is not None else []
@@ -734,7 +796,8 @@ class DeepAgentContextCompaction(AbstractCapability[Any]):
         state: ContextRunState = ctx.deps.context_state
         state.request_index += 1
         messages = list(request_context.messages)
-        budget = build_context_budget(
+        budget = await asyncio.to_thread(
+            build_context_budget,
             messages,
             context_window_tokens=self.context_window_tokens,
             max_output_tokens=self.max_output_tokens,
@@ -1085,44 +1148,26 @@ class DeepAgentContextCompaction(AbstractCapability[Any]):
         previous = _summary_contents(messages)
         previous_summary = previous[-1] if previous else None
         output_limit = _summary_output_limit(target, self.max_output_tokens)
-        cutoff = self._single_summary_cutoff(
-            messages,
-            request_context,
-            target=target,
-            output_limit=output_limit,
-            previous_summary=previous_summary,
-            estimator=estimator,
+        cutoff = await _run_preparation_step(
+            lambda: self._single_summary_cutoff(
+                messages,
+                request_context,
+                target=target,
+                output_limit=output_limit,
+                previous_summary=previous_summary,
+                estimator=estimator,
+            ),
+            state,
+            message="正在选择安全的历史压缩边界…",
         )
-        summary_source = list(messages[:cutoff])
-        raw_evidence_source = _raw_prefix_for_visible_cutoff(
-            messages, state.raw_history, cutoff
+        to_summarize, pruned, evidence_sections = await _run_preparation_step(
+            lambda: _summary_materials(messages, state.raw_history, cutoff),
+            state,
+            message="正在整理历史工具结果和上下文证据…",
         )
-        previous_evidence = _anchor_evidence_contents(summary_source)
-        to_summarize = _strip_summary_and_system(summary_source)
         if not to_summarize:
             raise SummaryUnavailable("no_new_summary_content")
-        to_summarize, pruned = _prune_tool_results(
-            to_summarize,
-            threshold=OPTION.agent.context_tool_prune_threshold,
-            head=OPTION.agent.context_tool_prune_head,
-            tail=OPTION.agent.context_tool_prune_tail,
-        )
         state.pruned_tool_results.extend(pruned)
-        deterministic_evidence = _deterministic_evidence_text(raw_evidence_source)
-        context_evidence = _deterministic_context_evidence_text(raw_evidence_source)
-        attachment_evidence = _deterministic_attachment_evidence_text(
-            raw_evidence_source
-        )
-        generated_evidence = tuple(
-            item
-            for item in (
-                deterministic_evidence,
-                context_evidence,
-                attachment_evidence,
-            )
-            if item
-        )
-        evidence_sections = generated_evidence or previous_evidence
         summary = await self._single_summary(
             to_summarize,
             previous_summary,
@@ -1165,33 +1210,44 @@ class DeepAgentContextCompaction(AbstractCapability[Any]):
     ) -> int:
         """Pick one safe prefix while preserving as much recent history as possible."""
 
-        saw_summary_content = False
         active_turn_start = _active_turn_start(messages)
-        for cutoff in _safe_boundaries(messages):
+        summary_prefix_end = (
+            active_turn_start if active_turn_start is not None else len(messages)
+        )
+        saw_summary_content = bool(
+            _strip_summary_and_system(messages[:summary_prefix_end])
+        )
+        boundaries = _safe_boundaries(messages)
+        summary_shell = ModelRequest(
+            parts=[UserPromptPart(content=_SUMMARY_PREFIX)]
+        )
+        request_base = estimator.request(
+            [],
+            request_context.model_request_parameters,
+        )[0]
+        suffix_tokens = [0] * (len(messages) + 1)
+        for index in range(len(messages) - 1, -1, -1):
+            suffix_tokens[index] = (
+                suffix_tokens[index + 1] + estimator.message(messages[index])
+            )
+        summary_shell_tokens = estimator.message(summary_shell)
+
+        for cutoff in boundaries:
             if cutoff <= 0:
                 continue
             if active_turn_start is not None and cutoff > active_turn_start:
                 continue
-            to_summarize = _strip_summary_and_system(messages[:cutoff])
-            if not to_summarize:
-                continue
-            saw_summary_content = True
-            preserved = list(messages[cutoff:])
-            summary_shell = ModelRequest(
-                parts=[UserPromptPart(content=_SUMMARY_PREFIX)]
-            )
-            projected_without_summary = [
-                summary_shell,
-                *preserved,
-            ]
-            projected_tokens = _request_estimate(
-                estimator,
-                projected_without_summary,
-                request_context,
+            projected_tokens = (
+                request_base
+                + summary_shell_tokens
+                + suffix_tokens[cutoff]
             )
             if projected_tokens + output_limit > target:
                 continue
 
+            to_summarize = _strip_summary_and_system(messages[:cutoff])
+            if not to_summarize:
+                continue
             prompt = _summary_prompt(to_summarize, previous_summary)
             prompt_tokens = (
                 estimator.text(_SUMMARY_INSTRUCTIONS)

@@ -14,10 +14,12 @@ import {
 import { createTrajectoryController } from "./trajectory.js?v=20260827-4";
 import {
   conversationVisualGroups,
+  isAuthoritativeAssistantUpsert,
+  isSettledAssistantDelta,
   latestPendingDeferredTool,
   normalizeConversationHistory,
   upsertConversationItem,
-} from "./conversation-items.js?v=20260827-1";
+} from "./conversation-items.js?v=20260827-2";
 import {
   firstSelectableModelId,
   isModelSelectable,
@@ -140,6 +142,7 @@ const state = {
   assistantPresenter: null,
   planSnapshot: null,
   planningCallIds: new Set(),
+  settledAssistantRunIds: new Set(),
 };
 
 const LLM_MODALITY_LABELS = {
@@ -662,6 +665,7 @@ function newChat(agentId) {
   state.sessionId = null;
   state.conversationId = null;
   state.conversationItems = [];
+  state.settledAssistantRunIds.clear();
   state.modelMessageCount = 0;
   state.contextStatus = null;
   state.lastRunUsage = null;
@@ -806,6 +810,7 @@ async function loadAllSessionEvents(session) {
 async function loadSessionHistory(session) {
   const normalized = normalizeSession(session);
   state.conversationItems = [];
+  state.settledAssistantRunIds.clear();
   clearMessages();
   trajectory?.setHistory({ session_id: normalized.id, items: [] });
   hideEmptyState();
@@ -1097,44 +1102,7 @@ function renderHistory(items) {
       const visible = group.items.filter((item) => item.kind !== "plan");
       if (!visible.length) continue;
       const assistant = createAssistantMessage(ts, first?.order?.sequence);
-      let interrupted = false;
-      for (const item of visible) {
-        if (item.kind === "assistant_message") {
-          if (item.thinking) assistant.addThinkingBlock(item.thinking);
-          if (item.text) {
-            if (item.phase === "final") assistant.setFinalText(item.text);
-            else assistant.addProcessText(item.text);
-          }
-          interrupted ||= item.status === "interrupted";
-          continue;
-        }
-        if (item.kind !== "tool") continue;
-        const call = {
-          tool: item.tool_name,
-          args: item.input,
-          tool_call_id: item.call_id,
-          source: item.mode === "tool_search" ? "tool_search" : null,
-          widget: item.widget,
-          metadata: item.metadata,
-        };
-        assistant.addToolCall(call);
-        if (!["pending", "awaiting_input"].includes(item.status)) {
-          assistant.addToolResult({
-            tool: item.tool_name,
-            result: item.output,
-            tool_call_id: item.call_id,
-            source: call.source,
-            artifacts: item.artifacts,
-            outcome: item.outcome,
-          });
-        } else if (item.status === "awaiting_input") {
-          assistant.attachHitlWidget(mergeUiToolCall(call));
-        }
-        interrupted ||= item.status === "interrupted";
-      }
-      assistant.finalizeThinking();
-      assistant.finalizeText();
-      if (interrupted) assistant.markInterrupted();
+      populateAssistantPresenter(assistant, visible);
       state.assistantPresenter = assistant;
     }
   }
@@ -1144,6 +1112,69 @@ function renderHistory(items) {
   updateHitlInputState();
   updateComposerContextControls();
   scrollToBottom();
+}
+
+function populateAssistantPresenter(assistant, items) {
+  let interrupted = false;
+  for (const item of items) {
+    if (item.kind === "assistant_message") {
+      if (item.thinking) assistant.addThinkingBlock(item.thinking);
+      if (item.text) {
+        if (item.phase === "final") assistant.setFinalText(item.text);
+        else assistant.addProcessText(item.text);
+      }
+      interrupted ||= item.status === "interrupted";
+      continue;
+    }
+    if (item.kind !== "tool") continue;
+    const call = {
+      tool: item.tool_name,
+      args: item.input,
+      tool_call_id: item.call_id,
+      source: item.mode === "tool_search" ? "tool_search" : null,
+      widget: item.widget,
+      metadata: item.metadata,
+    };
+    assistant.addToolCall(call);
+    if (!["pending", "awaiting_input"].includes(item.status)) {
+      assistant.addToolResult({
+        tool: item.tool_name,
+        result: item.output,
+        tool_call_id: item.call_id,
+        source: call.source,
+        artifacts: item.artifacts,
+        outcome: item.outcome,
+      });
+    } else if (item.status === "awaiting_input") {
+      assistant.attachHitlWidget(mergeUiToolCall(call));
+    }
+    interrupted ||= item.status === "interrupted";
+  }
+  assistant.finalizeThinking();
+  assistant.finalizeText();
+  if (interrupted) assistant.markInterrupted();
+}
+
+function replaceLiveAssistantWithCanonicalTurn(turnId, fallbackAssistant) {
+  if (!turnId || !fallbackAssistant?.row?.isConnected) return fallbackAssistant;
+  const group = conversationVisualGroups(state.conversationItems).find(
+    (candidate) => candidate.type === "assistant" && candidate.items.some((item) => item.turn_id === turnId),
+  );
+  const visible = group?.items?.filter((item) => item.kind !== "plan") || [];
+  if (!visible.length) return fallbackAssistant;
+  const first = visible[0];
+  const canonical = createAssistantMessage(
+    first.created_at || null,
+    first.order?.sequence,
+    fallbackAssistant.row,
+  );
+  populateAssistantPresenter(canonical, visible);
+  if (state.automaticCompactionAnchor === fallbackAssistant.row) {
+    state.automaticCompactionAnchor = canonical.row;
+  }
+  fallbackAssistant.row.remove();
+  state.assistantPresenter = canonical;
+  return canonical;
 }
 
 async function deleteSession(session) {
@@ -1583,6 +1614,7 @@ async function runChatStream(payload, assistant) {
   state.streamSessionConfirmed = false;
   state.streamCancelled = false;
   state.skipHistoryRefresh = false;
+  state.settledAssistantRunIds.clear();
   try {
     const resp = await daFetch(serviceUrl("api/v1/chat/stream"), {
       method: "POST",
@@ -1698,6 +1730,9 @@ function setStreaming(v) {
 }
 
 function handleEvent({ event, data }, assistant) {
+  if (state.assistantPresenter?.row?.isConnected) {
+    assistant = state.assistantPresenter;
+  }
   const type = event || data.type;
   if (type === "session_title") {
     applySessionTitle(
@@ -1751,6 +1786,19 @@ function handleEvent({ event, data }, assistant) {
       break;
     case "conversation_item_upsert":
       state.conversationItems = upsertConversationItem(state.conversationItems, data.item);
+      {
+        const currentRunId = state.lastRunMetrics?.run_id || "";
+        if (isAuthoritativeAssistantUpsert(data.item, currentRunId)) {
+          state.settledAssistantRunIds.add(currentRunId);
+        }
+        if (
+          currentRunId
+          && state.settledAssistantRunIds.has(currentRunId)
+          && data.item?.turn_id
+        ) {
+          assistant = replaceLiveAssistantWithCanonicalTurn(data.item.turn_id, assistant);
+        }
+      }
       if (
         data.item?.kind === "plan"
         && data.item.plan
@@ -1761,9 +1809,11 @@ function handleEvent({ event, data }, assistant) {
       }
       break;
     case "thinking":
+      if (isSettledAssistantDelta(data, state.settledAssistantRunIds)) break;
       assistant.appendThinking(data.delta || "");
       break;
     case "text":
+      if (isSettledAssistantDelta(data, state.settledAssistantRunIds)) break;
       assistant.finalizeThinking();
       assistant.appendText(data.delta || "");
       break;
@@ -1790,7 +1840,9 @@ function handleEvent({ event, data }, assistant) {
       }
       break;
     case "final":
-      assistant.complete(data.output);
+      if (!state.settledAssistantRunIds.has(String(data.run_id || state.lastRunMetrics?.run_id || ""))) {
+        assistant.complete(data.output);
+      }
       if (data.usage) renderUsage(data.usage);
       else state.lastRunUsage = null;
       state.conversationId = data.conversation_id || state.conversationId;
@@ -2085,7 +2137,7 @@ function addSystemNote(text) {
   scrollToBottom();
 }
 
-function createAssistantMessage(timestamp, branchPoint) {
+function createAssistantMessage(timestamp, branchPoint, beforeNode = null) {
   const row = document.createElement("div");
   row.className = "msg-row assistant assistant-answer";
   if (branchPoint != null) row.dataset.branchPoint = String(branchPoint);
@@ -2107,7 +2159,8 @@ function createAssistantMessage(timestamp, branchPoint) {
   const processTitle = processBlock.querySelector(".assistant-process-title");
   const processBody = processBlock.querySelector(".assistant-process-body");
 
-  el.messages.appendChild(row);
+  if (beforeNode?.parentNode === el.messages) el.messages.insertBefore(row, beforeNode);
+  else el.messages.appendChild(row);
   refreshLucideIcons();
   scrollToBottom();
 

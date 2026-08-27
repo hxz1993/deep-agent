@@ -26,6 +26,22 @@ export function upsertConversationItem(items = [], item) {
   return sortConversationItems(next);
 }
 
+export function liveAssistantRunId(item = {}) {
+  return item?.kind === "assistant_message" ? String(item.run_id || "") : "";
+}
+
+export function isAuthoritativeAssistantUpsert(item = {}, runId = "") {
+  const itemRunId = liveAssistantRunId(item);
+  return Boolean(itemRunId && runId && itemRunId === String(runId));
+}
+
+export function isSettledAssistantDelta(data = {}, settledRunIds = new Set()) {
+  const itemId = String(data?.item_id || "");
+  const liveMatch = /^live:(.+):assistant$/.exec(itemId);
+  const runId = String(data?.run_id || liveMatch?.[1] || "");
+  return Boolean(runId && settledRunIds.has(runId));
+}
+
 export function conversationVisualGroups(items = []) {
   const groups = [];
   let assistantItems = [];

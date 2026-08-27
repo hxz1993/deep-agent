@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 import json
+import time
 import unittest
 from decimal import Decimal
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from pydantic_ai.exceptions import ModelHTTPError
 from pydantic_ai.messages import (
@@ -16,6 +20,7 @@ from pydantic_ai.messages import (
 from pydantic_ai.usage import RunUsage
 
 from deep_agent.agent.context.compaction import (
+    DeepAgentContextCompaction,
     SummaryUnavailable,
     _deterministic_attachment_evidence_text,
     _deterministic_context_evidence_text,
@@ -25,10 +30,13 @@ from deep_agent.agent.context.compaction import (
     _safe_boundaries,
     _prune_tool_results,
     _jsonable_usage,
+    _run_preparation_step,
     is_provider_context_overflow,
     summary_contents,
     validate_summary_markdown,
 )
+from deep_agent.agent.context.estimator import TokenEstimator
+from deep_agent.agent.context.runtime import ContextRunState
 
 
 def valid_summary() -> str:
@@ -169,6 +177,53 @@ class DshCompactionRulesTests(unittest.TestCase):
             raw[:4],
         )
 
+    def test_summary_cutoff_scans_history_once(self) -> None:
+        messages = [
+            item
+            for index in range(80)
+            for item in (
+                ModelRequest(parts=[UserPromptPart(content=f"问题-{index}-" + "甲" * 80)]),
+                ModelResponse(parts=[TextPart(content=f"回答-{index}-" + "乙" * 80)]),
+            )
+        ]
+        delegate = TokenEstimator.conservative()
+
+        class CountingEstimator:
+            source = delegate.source
+
+            def __init__(self) -> None:
+                self.request_calls = 0
+                self.message_calls = 0
+
+            def request(self, values, parameters=None):
+                self.request_calls += 1
+                return delegate.request(values, parameters)
+
+            def message(self, value):
+                self.message_calls += 1
+                return delegate.message(value)
+
+            def text(self, value):
+                return delegate.text(value)
+
+        estimator = CountingEstimator()
+        compaction = DeepAgentContextCompaction(
+            context_window_tokens=200_000,
+            max_output_tokens=4_096,
+        )
+        cutoff = compaction._single_summary_cutoff(
+            messages,
+            SimpleNamespace(model_request_parameters=None),
+            target=9_000,
+            output_limit=1_000,
+            previous_summary=None,
+            estimator=estimator,
+        )
+
+        self.assertGreater(cutoff, 0)
+        self.assertEqual(estimator.request_calls, 1)
+        self.assertEqual(estimator.message_calls, len(messages) + 1)
+
     def test_context_payload_is_evidence_not_summary_input(self) -> None:
         raw = ModelRequest(
             parts=[
@@ -233,6 +288,33 @@ class DshCompactionRulesTests(unittest.TestCase):
         formatted = _formatted_history([projected])
         self.assertNotIn("member-99", formatted)
         self.assertIn("继续分析", formatted)
+
+
+class CompactionPreparationProgressTests(unittest.IsolatedAsyncioTestCase):
+    async def test_cpu_preparation_yields_periodic_sse_progress(self) -> None:
+        queue: asyncio.Queue[dict] = asyncio.Queue()
+        state = ContextRunState(
+            raw_history=[],
+            estimator=TokenEstimator.conservative(),
+            event_queue=queue,
+        )
+
+        with patch(
+            "deep_agent.agent.context.compaction._SUMMARY_HEARTBEAT_SECONDS",
+            0.01,
+        ):
+            result = await _run_preparation_step(
+                lambda: (time.sleep(0.04), "done")[1],
+                state,
+                message="正在准备测试历史…",
+            )
+
+        self.assertEqual(result, "done")
+        events = []
+        while not queue.empty():
+            events.append(queue.get_nowait())
+        self.assertGreaterEqual(len(events), 3)
+        self.assertTrue(all(event["phase"] == "preparing" for event in events))
 
 
 if __name__ == "__main__":

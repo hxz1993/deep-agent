@@ -120,32 +120,35 @@ def build_context_test_history(
     ]
     filler = _FILLER_BY_SCENARIO[scenario.key]
     repeated_filler = filler * _FILLER_REPETITIONS
+    estimated_message_tokens = estimator.messages(messages)
 
     for turn in range(1, _MAX_TURNS + 1):
-        messages.extend(
-            [
-                ModelRequest(
-                    parts=[
-                        UserPromptPart(
-                            content=(
-                                scenario.user_template.format(turn=turn)
-                                + repeated_filler
-                            )
+        new_messages: list[ModelMessage] = [
+            ModelRequest(
+                parts=[
+                    UserPromptPart(
+                        content=(
+                            scenario.user_template.format(turn=turn)
+                            + repeated_filler
                         )
-                    ]
-                ),
-                ModelResponse(
-                    parts=[
-                        TextPart(
-                            content=(
-                                scenario.assistant_template.format(turn=turn)
-                                + repeated_filler
-                            )
+                    )
+                ]
+            ),
+            ModelResponse(
+                parts=[
+                    TextPart(
+                        content=(
+                            scenario.assistant_template.format(turn=turn)
+                            + repeated_filler
                         )
-                    ],
-                    usage=RequestUsage(output_tokens=256),
-                ),
-            ]
+                    )
+                ],
+                usage=RequestUsage(output_tokens=256),
+            ),
+        ]
+        messages.extend(new_messages)
+        estimated_message_tokens += sum(
+            estimator.message(message) for message in new_messages
         )
         budget = build_context_budget(
             messages,
@@ -154,6 +157,7 @@ def build_context_test_history(
             estimator=estimator,
             output_history=messages,
             estimate_scope="history_only",
+            precomputed_message_tokens=estimated_message_tokens,
         )
         if (
             budget.trigger_tokens is not None

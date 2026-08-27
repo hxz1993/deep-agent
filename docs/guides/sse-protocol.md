@@ -30,7 +30,10 @@
 ```
 
 该 Item 必须与随后请求 `/api/v1/sessions/{session_id}/history` 得到的同 ID Item
-完全一致。`final` 只保留 Run 状态、Usage 和上下文预算。
+完全一致。持久化的 `assistant_message` Upsert 表示该 Assistant Item 已经完整落库：客户端应在
+Upsert 到达时立即用它替换同 Run 的直播草稿，不能继续等待 `final`；服务端不会在该 Upsert 后再发送
+属于同一 Assistant Item 的 `text/thinking` Delta。`final` 只保留 Run 状态、Usage 和上下文预算，
+客户端可忽略权威 Upsert 后异常迟到的同 Run Delta。
 
 ## 轨迹与压缩事件
 
@@ -50,7 +53,8 @@ Title Event 和 Compaction 原位展示。普通客户端无需消费。
 }
 ```
 
-阶段只取 `preparing/summarizing/validating/committing/retry_wait`。默认总预算 300 秒；
+阶段只取 `preparing/summarizing/validating/committing/retry_wait`。历史预算估算、安全边界选择和证据整理
+均不得阻塞 SSE 事件循环，准备阶段耗时较长时同样发送 `preparing` 心跳。默认总预算 300 秒；
 客户端断开或正式取消会取消摘要调用。
 
 ## Deferred 与重连

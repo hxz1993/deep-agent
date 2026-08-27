@@ -263,7 +263,7 @@ test("停止生成只请求正式取消接口并等待真实 cancelled 事件", 
   assert.match(chatSource, /case "cancelled":[\s\S]*assistantActionsFromSse\(type, data\)/);
   assert.match(
     chatSource,
-    /case "cancelled":[\s\S]*state\.skipHistoryRefresh = true;[\s\S]*break;/,
+    /case "cancelled":[\s\S]*state\.refreshHistoryAfterStream = false;[\s\S]*break;/,
   );
   assert.match(chatSource, /case "cancelled":[\s\S]*renderUsage\(data\.usage\)/);
   assert.match(chatSource, /markInterrupted\(\)[\s\S]*for \(const block of toolBlocks\.values\(\)\)/);
@@ -336,11 +336,31 @@ test("自动压缩复用独立过程条并由 Event 更新轨迹", () => {
   assert.match(chatSource, /case "context_compaction_progress":\s*showAutomaticContextCompaction\(data, assistant\.row\)/);
   assert.match(chatSource, /automaticCompactionTimer = window\.setTimeout\([\s\S]*?, 150\)/);
   assert.match(chatSource, /finalizeAutomaticContextCompaction\(data\.context, data\.status\)/);
-  assert.match(chatSource, /state\.skipHistoryRefresh = !refreshCompactionHistory/);
+  assert.doesNotMatch(chatSource, /refreshCompactionHistory|skipHistoryRefresh/);
   assert.match(chatSource, /本轮临时缩减，未生成压缩事件/);
   assert.match(chatSource, /case "session_event_appended":\s*case "session_event_updated":/);
   assert.doesNotMatch(chatSource, /assistant\.showContextCompaction|assistant\.hideContextCompaction/);
   assert.doesNotMatch(chatSource, /className = "context-compaction-status"/);
+});
+
+test("正常终态保留直播结果且只有异常断流恢复 History", () => {
+  assert.match(chatSource, /state\.refreshHistoryAfterStream = true;/);
+  assert.match(
+    chatSource,
+    /case "final":[\s\S]*finalizeAutomaticContextCompaction\(data\.context, data\.status\);[\s\S]*state\.refreshHistoryAfterStream = false;[\s\S]*break;/,
+  );
+  assert.match(
+    chatSource,
+    /case "error":[\s\S]*state\.refreshHistoryAfterStream = false;[\s\S]*break;/,
+  );
+  assert.match(
+    chatSource,
+    /case "cancelled":[\s\S]*state\.refreshHistoryAfterStream = false;[\s\S]*break;/,
+  );
+  assert.match(
+    chatSource,
+    /if \(state\.refreshHistoryAfterStream\) \{[\s\S]*await refreshCurrentHistory\(\);/,
+  );
 });
 
 test("搜索框旁只保留带文字的普通新建入口", () => {

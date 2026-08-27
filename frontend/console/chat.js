@@ -127,7 +127,7 @@ const state = {
   abortController: null,
   stopRequested: false,
   streamSessionConfirmed: false,
-  skipHistoryRefresh: false,
+  refreshHistoryAfterStream: false,
   modelMessageCount: 0,
   pendingAttachments: [],
   contextStatus: null,
@@ -965,7 +965,7 @@ function finalizeAutomaticContextCompaction(context, runStatus) {
   const compaction = context?.compaction;
   if (!compaction?.triggered && !state.pendingAutomaticCompaction) {
     clearAutomaticCompactionState({ remove: true });
-    return false;
+    return;
   }
   if (!state.automaticCompactionRow) {
     state.automaticCompactionRow = createContextCompactionRow(
@@ -983,7 +983,7 @@ function finalizeAutomaticContextCompaction(context, runStatus) {
     state.pendingAutomaticCompaction = null;
     state.automaticCompactionAnchor = null;
     window.setTimeout(() => row.remove(), 2500);
-    return false;
+    return;
   }
   if (
     compaction?.summary_applied
@@ -998,7 +998,7 @@ function finalizeAutomaticContextCompaction(context, runStatus) {
       { active: false },
     );
     clearAutomaticCompactionState();
-    return true;
+    return;
   }
   if (
     compaction?.summary_applied
@@ -1014,7 +1014,7 @@ function finalizeAutomaticContextCompaction(context, runStatus) {
     state.pendingAutomaticCompaction = null;
     state.automaticCompactionAnchor = null;
     window.setTimeout(() => row.remove(), 3500);
-    return false;
+    return;
   }
   const temporary = compaction?.strategy === "sliding_window_fallback";
   setContextCompactionRow(
@@ -1028,7 +1028,6 @@ function finalizeAutomaticContextCompaction(context, runStatus) {
   state.pendingAutomaticCompaction = null;
   state.automaticCompactionAnchor = null;
   window.setTimeout(() => row.remove(), 2500);
-  return false;
 }
 
 function failAutomaticContextCompaction(message) {
@@ -1537,7 +1536,9 @@ async function runChatStream(payload, assistant) {
   state.abortController = streamController;
   state.stopRequested = false;
   state.streamSessionConfirmed = false;
-  state.skipHistoryRefresh = false;
+  // A stream without any terminal event may have persisted facts that the
+  // live presenter never received. Only that abnormal path reloads History.
+  state.refreshHistoryAfterStream = true;
   try {
     const resp = await daFetch(serviceUrl("api/v1/chat/stream"), {
       method: "POST",
@@ -1572,7 +1573,7 @@ async function runChatStream(payload, assistant) {
     state.stopRequested = false;
     state.streamSessionConfirmed = false;
     if (state.sessionId) {
-      if (!state.skipHistoryRefresh) {
+      if (state.refreshHistoryAfterStream) {
         await refreshCurrentHistory();
       }
       await syncSessionsFromBackend();
@@ -1755,8 +1756,8 @@ function handleEvent({ event, data }, assistant) {
         };
         if (state.sessionId) void loadContextStatus(state.sessionId);
       }
-      const refreshCompactionHistory = finalizeAutomaticContextCompaction(data.context, data.status);
-      state.skipHistoryRefresh = !refreshCompactionHistory;
+      finalizeAutomaticContextCompaction(data.context, data.status);
+      state.refreshHistoryAfterStream = false;
       clearComposerPlan();
       if (data.status === "pending" && data.deferred) {
         state.awaitingHitl = true;
@@ -1775,7 +1776,7 @@ function handleEvent({ event, data }, assistant) {
       failAutomaticContextCompaction("上下文压缩后续请求失败，未生成压缩事件");
       applyAssistantPresentationActions(assistant, assistantActionsFromSse(type, data));
       // Error is transient SSE only — refreshing history would wipe the bubble.
-      state.skipHistoryRefresh = true;
+      state.refreshHistoryAfterStream = false;
       addErrorTo(assistant, data.message || "未知错误");
       clearComposerPlan();
       break;
@@ -1784,7 +1785,7 @@ function handleEvent({ event, data }, assistant) {
       // Keep the current streamed conversation in place. The official
       // interrupted history remains the source of truth when the session is
       // reopened, but re-rendering it here causes a disruptive visual reload.
-      state.skipHistoryRefresh = true;
+      state.refreshHistoryAfterStream = false;
       applyAssistantPresentationActions(assistant, assistantActionsFromSse(type, data));
       clearComposerPlan();
       if (data.usage) renderUsage(data.usage);
@@ -2346,7 +2347,7 @@ function maybeAttachHitlWidget(block, call) {
   }
   renderHitlWidget(block, merged, resumeDeferred);
   state.awaitingHitl = true;
-  state.skipHistoryRefresh = true;
+  state.refreshHistoryAfterStream = false;
   updateHitlInputState();
 }
 

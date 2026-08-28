@@ -294,6 +294,7 @@ function initTabs() {
   tabs.forEach((tab) => {
     tab.addEventListener("click", async () => {
       if (window.agentsAdmin?.isEditorOpen?.() && !(await window.agentsAdmin.requestCloseEditor())) return;
+      if (window.mcpAdmin?.isEditorOpen?.() && !(await window.mcpAdmin.requestCloseEditor())) return;
       tabs.forEach((t) => t.classList.remove("active"));
       tab.classList.add("active");
       const name = tab.dataset.tab;

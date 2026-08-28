@@ -9,14 +9,47 @@ function mcpTransportLabel(transport) {
 }
 
 const MCP_CONTEXT_LABELS = {
-  inherit: "继承",
-  isolated: "独立",
+  inherit: "内部继承",
+  isolated: "外部固定",
 };
 
-function inheritedHeadersTooltip(headers) {
-  return headers?.length
-    ? `允许继承的 Header：${headers.join("、")}`
-    : "允许继承的 Header 由后端白名单控制。";
+function escapeJsonEditorHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function highlightJsonEditorSource(value) {
+  const source = String(value ?? "");
+  const tokenPattern = /("(?:\\.|[^"\\])*"\s*:)|("(?:\\.|[^"\\])*")|\b(true|false)\b|\b(null)\b|(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)|([{}[\],:])/g;
+  let cursor = 0;
+  let html = "";
+  for (const match of source.matchAll(tokenPattern)) {
+    const index = match.index ?? 0;
+    html += escapeJsonEditorHtml(source.slice(cursor, index));
+    const token = match[0];
+    if (match[1]) {
+      const colonIndex = token.lastIndexOf(":");
+      const key = token.slice(0, colonIndex).trimEnd();
+      const spacing = token.slice(key.length, colonIndex);
+      html += `<span class="json-key">${escapeJsonEditorHtml(key)}</span>${escapeJsonEditorHtml(spacing)}:`;
+    } else if (match[2]) {
+      html += `<span class="json-string">${escapeJsonEditorHtml(token)}</span>`;
+    } else if (match[3]) {
+      html += `<span class="json-boolean">${escapeJsonEditorHtml(token)}</span>`;
+    } else if (match[4]) {
+      html += `<span class="json-null">${escapeJsonEditorHtml(token)}</span>`;
+    } else if (match[5]) {
+      html += `<span class="json-number">${escapeJsonEditorHtml(token)}</span>`;
+    } else {
+      html += escapeJsonEditorHtml(token);
+    }
+    cursor = index + token.length;
+  }
+  html += escapeJsonEditorHtml(source.slice(cursor));
+  return `${html}\n`;
 }
 
 function inspectionErrorMessage(error) {
@@ -173,15 +206,34 @@ function renameSuccessMessage(updatedAgents) {
 
 const mcpAdmin = {
   moreMenuDismissController: null,
+  editorDirty: false,
   updateEditorMeta() {
     const transport = document.getElementById("mcpTransport")?.value || "url";
     const meta = document.getElementById("mcpEditorMeta");
     if (meta) meta.textContent = `MCP 配置 · ${mcpTransportLabel(transport)}`;
   },
 
-  closeEditor() {
+  isEditorOpen() {
+    return Boolean(document.getElementById("mcpModal")?.open);
+  },
+
+  async requestCloseEditor(force = false) {
+    const editor = document.getElementById("mcpModal");
+    if (!editor?.open) return true;
+    if (
+      !force
+      && this.editorDirty
+      && !(await confirmAction({
+        title: "放弃未保存的修改？",
+        message: "当前 MCP 的修改尚未保存，离开后这些修改将丢失。",
+        icon: "file-warning",
+        confirmLabel: "放弃修改",
+      }))
+    ) return false;
+    this.editorDirty = false;
     state.editingMcp = null;
-    document.getElementById("mcpModal")?.close();
+    editor.close();
+    return true;
   },
 
   async refresh() {
@@ -205,10 +257,10 @@ const mcpAdmin = {
           (s) => {
             const inspection = inspectionView(s.inspection, s.transport);
             return `
-        <tr>
+        <tr class="mcp-list-row${s.transport === "stdio" ? " is-readonly" : ""}" ${s.transport === "stdio" ? "" : `data-open-mcp="${escapeHtml(s.name)}" tabindex="0"`}>
           <td><strong>${escapeHtml(s.name)}</strong></td>
           <td><span class="badge">${escapeHtml(mcpTransportLabel(s.transport))}</span></td>
-          <td><span class="badge">${escapeHtml(MCP_CONTEXT_LABELS[s.request_context?.mode] || "继承")}</span></td>
+          <td><span class="badge">${escapeHtml(MCP_CONTEXT_LABELS[s.request_context?.mode] || "内部继承")}</span></td>
           <td class="mcp-description-cell">
             <div class="mcp-description-text">${escapeHtml(s.description || "—")}</div>
             <div class="mcp-inspection" title="${escapeHtml(inspection.title)}">
@@ -220,7 +272,6 @@ const mcpAdmin = {
           <td class="mcp-actions-cell">
             <div class="row-actions mcp-row-actions">
               ${s.transport === "url" ? `<button class="mcp-direct-action" type="button" data-inspect-mcp="${escapeHtml(s.name)}"><i data-lucide="refresh-cw"></i><span>刷新</span></button>` : ""}
-              ${s.transport === "stdio" ? "" : `<button class="mcp-direct-action" type="button" data-edit="${escapeHtml(s.name)}"><i data-lucide="pencil-line"></i><span>编辑</span></button>`}
               ${canRenameMcp(s.transport) || canDeleteMcp(s.transport) ? `<div class="skill-more-actions mcp-more-actions">
                 <button class="skill-more-trigger" type="button" data-mcp-more-trigger aria-label="更多 MCP 操作" title="更多操作" aria-haspopup="menu" aria-expanded="false"><i data-lucide="ellipsis-vertical"></i></button>
                 <div class="skill-more-menu" data-mcp-more-menu role="menu" hidden>
@@ -235,17 +286,40 @@ const mcpAdmin = {
         )
         .join("");
 
-      tbody.querySelectorAll("[data-edit]").forEach((btn) => {
-        btn.addEventListener("click", () => this.openEdit(btn.dataset.edit));
+      tbody.querySelectorAll("[data-open-mcp]").forEach((row) => {
+        const open = (event) => {
+          if (event.target.closest("a, button, [role=menu]")) return;
+          this.openEdit(row.dataset.openMcp);
+        };
+        row.addEventListener("click", open);
+        row.addEventListener("keydown", (event) => {
+          if (event.key !== "Enter" && event.key !== " ") return;
+          if (event.target.closest("a, button, [role=menu]")) return;
+          event.preventDefault();
+          this.openEdit(row.dataset.openMcp);
+        });
+      });
+      tbody.querySelectorAll(".mcp-row-actions").forEach((actions) => {
+        actions.addEventListener("click", (event) => event.stopPropagation());
+        actions.addEventListener("keydown", (event) => event.stopPropagation());
       });
       tbody.querySelectorAll("[data-inspect-mcp]").forEach((btn) => {
-        btn.addEventListener("click", () => this.inspect(btn.dataset.inspectMcp, btn));
+        btn.addEventListener("click", (event) => {
+          event.stopPropagation();
+          this.inspect(btn.dataset.inspectMcp, btn);
+        });
       });
       tbody.querySelectorAll("[data-rename-mcp]").forEach((btn) => {
-        btn.addEventListener("click", () => this.openRename(btn.dataset.renameMcp));
+        btn.addEventListener("click", (event) => {
+          event.stopPropagation();
+          this.openRename(btn.dataset.renameMcp);
+        });
       });
       tbody.querySelectorAll("[data-delete]").forEach((btn) => {
-        btn.addEventListener("click", () => this.remove(btn.dataset.delete));
+        btn.addEventListener("click", (event) => {
+          event.stopPropagation();
+          this.remove(btn.dataset.delete);
+        });
       });
       tbody.querySelectorAll("[data-mcp-more-trigger]").forEach((trigger) => {
         const menu = trigger.parentElement?.querySelector("[data-mcp-more-menu]");
@@ -301,17 +375,41 @@ const mcpAdmin = {
 
   updateRequestContextDescription(inheritedHeaders = state.mcpInheritedHeaders || []) {
     const mode = this.readRequestContextMode();
+    document.getElementById("mcpFixedHeaders")?.classList.toggle("hidden", mode === "inherit");
     const description = document.getElementById("mcpRequestContextDescription");
     if (description) {
+      description.classList.toggle("hidden", mode !== "inherit");
+      const allowedHeaders = inheritedHeaders?.length
+        ? inheritedHeaders.join("、")
+        : "由后端白名单控制";
       description.innerHTML = mode === "inherit"
-        ? `静态 Header 与当前请求上下文合并，请求中的同名值优先。<span class="context-policy-help" data-context-help role="img" tabindex="0" aria-label="查看允许继承的 Header"></span>`
-        : "仅使用该 MCP 自身配置的 Header，不继承当前用户请求。";
+        ? `<span>DeepAgent 会将当前请求中的允许 Header 直接透传给 MCP。</span><small>允许透传：${escapeHtml(allowedHeaders)}</small>`
+        : "";
     }
-    document.querySelectorAll("[data-context-help]").forEach((button) => {
-      const tooltip = inheritedHeadersTooltip(inheritedHeaders);
-      button.dataset.tooltip = tooltip;
-      button.title = tooltip;
-    });
+  },
+
+  syncHeadersHighlight() {
+    const input = document.getElementById("mcpHeaders");
+    const highlight = document.getElementById("mcpHeadersHighlight");
+    if (!input || !highlight) return;
+    highlight.innerHTML = highlightJsonEditorSource(input.value);
+    const pre = highlight.parentElement;
+    if (pre) {
+      pre.scrollTop = input.scrollTop;
+      pre.scrollLeft = input.scrollLeft;
+    }
+  },
+
+  formatHeadersInput() {
+    const input = document.getElementById("mcpHeaders");
+    if (!input || !input.value.trim()) {
+      this.syncHeadersHighlight();
+      return null;
+    }
+    const parsed = JSON.parse(input.value);
+    input.value = JSON.stringify(parsed, null, 2);
+    this.syncHeadersHighlight();
+    return parsed;
   },
 
   async inspect(name, button) {
@@ -399,9 +497,11 @@ const mcpAdmin = {
     document.getElementById("mcpEnv").value = "";
     document.getElementById("mcpCwd").value = "";
     this.fillRequestContextFields();
+    this.syncHeadersHighlight();
     this.setTransportSelectMode("create");
     this.toggleTransportFields();
-    document.getElementById("mcpModal").showModal();
+    this.editorDirty = false;
+    document.getElementById("mcpModal").show();
   },
 
   async openEdit(name) {
@@ -448,9 +548,11 @@ const mcpAdmin = {
       }
 
       this.fillRequestContextFields(server);
+      this.syncHeadersHighlight();
       this.setTransportSelectMode(server.transport === "builtin" ? "edit-builtin" : "edit");
       this.toggleTransportFields();
-      document.getElementById("mcpModal").showModal();
+      this.editorDirty = false;
+      document.getElementById("mcpModal").show();
     } catch (err) {
       showToast(err.message, true);
     }
@@ -508,12 +610,19 @@ const mcpAdmin = {
     const transport = document.getElementById("mcpTransport").value;
     let config;
     if (transport === "url") {
+      const mode = this.readRequestContextMode();
       config = {
         url: document.getElementById("mcpUrl").value.trim(),
-        request_context: { mode: this.readRequestContextMode() },
+        request_context: { mode },
       };
-      const headers = parseJsonOrEmpty(document.getElementById("mcpHeaders").value);
-      if (headers) config.headers = headers;
+      if (mode === "isolated") {
+        const headers = parseJsonOrEmpty(document.getElementById("mcpHeaders").value);
+        if (headers) {
+          document.getElementById("mcpHeaders").value = JSON.stringify(headers, null, 2);
+          this.syncHeadersHighlight();
+          config.headers = headers;
+        }
+      }
     } else if (transport === "builtin") {
       config = {};
       const env = parseJsonOrEmpty(document.getElementById("mcpEnv").value);
@@ -590,8 +699,7 @@ const mcpAdmin = {
         showToast(toast.message, toast.error);
       }
       saved = true;
-      document.getElementById("mcpModal").close();
-      state.editingMcp = null;
+      await this.requestCloseEditor(true);
     } catch (err) {
       AdminFormFeedback.show(form, err);
     } finally {
@@ -628,6 +736,7 @@ const mcpAdmin = {
 
 window.mcpAdmin = mcpAdmin;
 window.__McpInspectionUI = {
+  highlightJsonEditorSource,
   inspectionView,
   inspectionToast,
   savedInspectionToast,
@@ -640,14 +749,19 @@ window.__McpInspectionUI = {
 document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("newMcpBtn")?.addEventListener("click", () => mcpAdmin.openCreate());
   document.getElementById("mcpForm")?.addEventListener("submit", (e) => mcpAdmin.save(e));
+  document.getElementById("mcpForm")?.addEventListener("input", () => { mcpAdmin.editorDirty = true; });
+  document.getElementById("mcpForm")?.addEventListener("change", () => { mcpAdmin.editorDirty = true; });
   document.getElementById("mcpRenameForm")?.addEventListener("submit", (e) => mcpAdmin.rename(e));
   document.getElementById("mcpTransport")?.addEventListener("change", () => mcpAdmin.toggleTransportFields());
+  document.getElementById("mcpHeaders")?.addEventListener("input", () => mcpAdmin.syncHeadersHighlight());
+  document.getElementById("mcpHeaders")?.addEventListener("scroll", () => mcpAdmin.syncHeadersHighlight());
+  document.getElementById("mcpHeaders")?.addEventListener("blur", () => {
+    try { mcpAdmin.formatHeadersInput(); } catch (_) { mcpAdmin.syncHeadersHighlight(); }
+  });
   document.querySelectorAll('input[name="mcpRequestContextMode"]').forEach((input) => {
     input.addEventListener("change", () => mcpAdmin.updateRequestContextDescription());
   });
-  document.getElementById("closeMcpModal")?.addEventListener("click", () => {
-    mcpAdmin.closeEditor();
-  });
+  document.getElementById("closeMcpModal")?.addEventListener("click", () => mcpAdmin.requestCloseEditor());
   document.getElementById("closeMcpRenameModal")?.addEventListener("click", () => {
     state.renamingMcp = null;
     document.getElementById("mcpRenameModal").close();

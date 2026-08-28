@@ -1525,6 +1525,7 @@ html[data-theme="paper"] {
 .agent-list-state strong { color: var(--text); }
 .agent-list-state.error { color: var(--danger); }
 .agent-list-row { cursor: pointer; }
+.mcp-list-row[data-open-mcp] { cursor: pointer; }
 .agent-filtered { display: none !important; }
 
 dialog.agent-editor-page.console-detail-dialog.modal-agent,
@@ -1608,16 +1609,121 @@ dialog.agent-editor-page::backdrop { display: none; }
 .mcp-editor-section .field + .field,
 .mcp-editor-section .mcp-transport-fields { margin-top: 18px; }
 .mcp-editor-basics #mcpDescription { min-height: 150px; resize: vertical; }
-.mcp-transport-fields { display: grid; gap: 18px; }
+.mcp-transport-fields { display: grid; gap: 14px; }
 .mcp-transport-fields.hidden { display: none !important; }
 .mcp-editor-page #mcpHeaders,
 .mcp-editor-page #mcpEnv { min-height: 180px; font-family: var(--mono); font-size: 12px; line-height: 1.55; }
-.mcp-editor-page .mcp-context-policy {
-  padding: 16px;
+.mcp-header-policy { gap: 9px; }
+.mcp-header-policy-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.mcp-header-policy-head > label { color: var(--text-dim); font-size: 13px; }
+.mcp-editor-page .context-mode-options {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
   border: 1px solid var(--console-card-border);
-  border-radius: var(--config-radius);
+  border-radius: 8px;
   background: var(--console-canvas);
 }
+.mcp-editor-page .context-mode-option { position: relative; margin: 0; cursor: pointer; }
+.mcp-editor-page .context-mode-option input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+.mcp-editor-page .context-mode-option span {
+  min-height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 10px;
+  border-radius: 6px;
+  color: var(--text-faint);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.mcp-editor-page .context-mode-option input:checked + span {
+  color: var(--accent);
+  background: var(--console-surface);
+  box-shadow: 0 1px 3px color-mix(in srgb, var(--text) 12%, transparent);
+}
+.mcp-editor-page .context-mode-option input:focus-visible + span {
+  outline: 2px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  outline-offset: 1px;
+}
+.mcp-json-input {
+  display: grid;
+  min-height: 170px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--console-card-border));
+  border-radius: 9px;
+  background: var(--code-bg);
+}
+.mcp-json-input:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 10%, transparent);
+}
+.mcp-json-input > .mcp-json-highlight,
+.mcp-json-input > #mcpHeaders {
+  grid-area: 1 / 1;
+  width: 100%;
+  min-height: 170px;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 9px;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.55;
+  tab-size: 2;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+.mcp-json-input > .mcp-json-highlight {
+  pointer-events: none;
+  overflow: hidden;
+  background: transparent;
+  color: var(--text);
+}
+.mcp-editor-page .mcp-json-input #mcpHeaders {
+  position: relative;
+  background: transparent;
+  color: transparent;
+  caret-color: var(--text);
+  -webkit-text-fill-color: transparent;
+  resize: vertical;
+}
+.mcp-editor-page .mcp-json-input #mcpHeaders::placeholder {
+  color: var(--text-faint);
+  -webkit-text-fill-color: var(--text-faint);
+  opacity: 1;
+}
+.mcp-editor-page .mcp-json-input #mcpHeaders::selection {
+  background: color-mix(in srgb, var(--accent) 24%, transparent);
+}
+.mcp-editor-page .mcp-json-input #mcpHeaders:focus { outline: 0; box-shadow: none; }
+.mcp-editor-page .context-mode-description {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--accent) 10%, var(--console-card-border));
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--accent) 4%, var(--console-canvas));
+  color: var(--text-dim);
+  font-size: 12px;
+  line-height: 1.55;
+}
+.mcp-editor-page .context-mode-description small { color: var(--text-faint); font-size: 12px; }
+.mcp-editor-page .context-mode-description.hidden { display: none; }
 .agent-editor-workbench {
   width: 100%;
   min-width: 780px;

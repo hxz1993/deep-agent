@@ -83,8 +83,10 @@ test("配置弹窗统一水平居中，Agent 独立编辑页仍保持页面层�
 test("Agent 卡片与列表统一使用稳定标识的纯图标行操作", () => {
   assert.ok((agents.match(/class="row-actions agent-row-actions"/g) || []).length >= 2);
   assert.ok((agents.match(/data-agent-chat/g) || []).length >= 2);
+  assert.ok((agents.match(/data-copy-agent/g) || []).length >= 2);
   assert.match(agents, /title="发起对话" aria-label="发起对话"><i data-lucide="message-square"/);
-  assert.match(agents, /title="编辑" aria-label="编辑"><i data-lucide="pencil"/);
+  assert.match(agents, /title="复制" aria-label="复制"><i data-lucide="copy"/);
+  assert.doesNotMatch(agents, /title="编辑" aria-label="编辑"><i data-lucide="pencil"/);
   assert.match(agents, /title="删除" aria-label="删除"><i data-lucide="trash-2"/);
   assert.doesNotMatch(agents, /<span>发起对话<\/span>/);
   assert.match(configurationModule, /link\.matches\("\[data-agent-chat\]"\)/);
@@ -106,6 +108,10 @@ test("Agent 编辑使用独立页面层级而不是模态框", () => {
   assert.match(styles, /\.agent-editor-page \.agent-editor-back[\s\S]*?border: 0;/);
   assert.match(styles, /\.agent-editor-header-actions[\s\S]*?justify-content: flex-end/);
   assert.match(configurationCore, /agentsAdmin\?\.isEditorOpen\?\.\(\)[\s\S]*agentsAdmin\.requestCloseEditor\(\)/);
+});
+
+test("MCP 详情沿用独立页面层级并在导航前确认未保存修改", () => {
+  assert.match(configurationCore, /mcpAdmin\?\.isEditorOpen\?\.\(\)[\s\S]*mcpAdmin\.requestCloseEditor\(\)/);
 });
 
 test("Agent 编辑采用 B 方案左右工作台并在右侧切换工具与 Skill", () => {

@@ -505,28 +505,30 @@
             </label>
 
             <div id="mcpUrlFields" class="mcp-transport-fields">
-          <label class="field">
-            <span>URL</span>
-            <input type="url" id="mcpUrl" placeholder="http://localhost:8080/sse" />
-          </label>
-          <label class="field">
-            <span>Headers JSON（可选）</span>
-            <textarea id="mcpHeaders" rows="2" placeholder='{"Authorization": "Bearer ..."}'></textarea>
-          </label>
-          <div class="field mcp-context-policy">
-            <span>请求上下文</span>
-            <div class="context-mode-options" role="radiogroup" aria-label="MCP 请求上下文">
-              <label class="radio-field">
-                <input type="radio" name="mcpRequestContextMode" value="isolated" checked />
-                独立
+              <label class="field">
+                <span>URL</span>
+                <input type="url" id="mcpUrl" placeholder="http://localhost:8080/sse" />
               </label>
-              <label class="radio-field">
-                <input type="radio" name="mcpRequestContextMode" value="inherit" />
-                继承
-              </label>
-            </div>
-            <p class="field-hint context-mode-description" id="mcpRequestContextDescription"></p>
-          </div>
+              <div class="field mcp-header-policy">
+                <div class="mcp-header-policy-head">
+                  <label for="mcpHeaders">Headers JSON</label>
+                  <div class="context-mode-options" role="radiogroup" aria-label="MCP Header 来源">
+                    <label class="context-mode-option">
+                      <input type="radio" name="mcpRequestContextMode" value="isolated" checked />
+                      <span>外部固定</span>
+                    </label>
+                    <label class="context-mode-option">
+                      <input type="radio" name="mcpRequestContextMode" value="inherit" />
+                      <span>内部继承</span>
+                    </label>
+                  </div>
+                </div>
+                <div class="mcp-json-input" id="mcpFixedHeaders">
+                  <pre class="mcp-json-highlight json-view" aria-hidden="true"><code id="mcpHeadersHighlight"></code></pre>
+                  <textarea id="mcpHeaders" rows="7" spellcheck="false" placeholder='{"Authorization": "Bearer ..."}'></textarea>
+                </div>
+                <div class="context-mode-description hidden" id="mcpRequestContextDescription"></div>
+              </div>
             </div>
 
             <div id="mcpStdioFields" class="hidden mcp-transport-fields">

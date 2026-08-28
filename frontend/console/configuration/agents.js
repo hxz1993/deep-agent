@@ -92,6 +92,14 @@ function buildCapabilitySelectionSet(selected) {
   return new Set(selected || []);
 }
 
+function nextAgentCopyName(sourceName, existingNames) {
+  const base = `${sourceName} 副本`;
+  if (!existingNames.has(base)) return base;
+  let suffix = 2;
+  while (existingNames.has(`${base} ${suffix}`)) suffix += 1;
+  return `${base} ${suffix}`;
+}
+
 const agentsAdmin = {
   setListView(view) {
     agentListView = view === "list" ? "list" : "cards";
@@ -140,6 +148,7 @@ const agentsAdmin = {
           <span><i data-lucide="clock-3"></i>${escapeHtml(formatDate(agent.updated_at))}</span>
           <div class="row-actions agent-row-actions">
             <a class="btn-link row-action icon-only" data-agent-chat href="${chatUrlForAgent(agent.id)}" target="_blank" rel="noopener" title="发起对话" aria-label="发起对话"><i data-lucide="message-square"></i></a>
+            <button type="button" class="row-action icon-only" data-copy-agent="${escapeHtml(agent.id)}" title="复制" aria-label="复制"><i data-lucide="copy"></i></button>
             <button type="button" class="danger row-action icon-only" data-delete="${escapeHtml(agent.id)}" data-name="${escapeHtml(agent.name)}" title="删除" aria-label="删除"><i data-lucide="trash-2"></i></button>
           </div>
         </footer>
@@ -157,7 +166,7 @@ const agentsAdmin = {
         <td>${escapeHtml(formatDate(agent.updated_at))}</td>
         <td><div class="row-actions agent-row-actions">
           <a class="btn-link row-action icon-only" data-agent-chat href="${chatUrlForAgent(agent.id)}" target="_blank" rel="noopener" title="发起对话" aria-label="发起对话"><i data-lucide="message-square"></i></a>
-          <button type="button" class="row-action icon-only" data-edit="${escapeHtml(agent.id)}" title="编辑" aria-label="编辑"><i data-lucide="pencil"></i></button>
+          <button type="button" class="row-action icon-only" data-copy-agent="${escapeHtml(agent.id)}" title="复制" aria-label="复制"><i data-lucide="copy"></i></button>
           <button type="button" class="danger row-action icon-only" data-delete="${escapeHtml(agent.id)}" data-name="${escapeHtml(agent.name)}" title="删除" aria-label="删除"><i data-lucide="trash-2"></i></button>
         </div></td>
       </tr>`;
@@ -170,17 +179,28 @@ const agentsAdmin = {
       };
       item.addEventListener("click", open);
       item.addEventListener("keydown", (event) => {
+        if (event.target.closest("a, button")) return;
         if (event.key === "Enter" || event.key === " ") {
           event.preventDefault();
           this.openEdit(item.dataset.openAgent);
         }
       });
     });
-    document.querySelectorAll("[data-edit]").forEach((button) => {
-      button.addEventListener("click", () => this.openEdit(button.dataset.edit));
+    document.querySelectorAll(".agent-row-actions").forEach((actions) => {
+      actions.addEventListener("click", (event) => event.stopPropagation());
+      actions.addEventListener("keydown", (event) => event.stopPropagation());
+    });
+    document.querySelectorAll("[data-copy-agent]").forEach((button) => {
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        this.copy(button.dataset.copyAgent, button);
+      });
     });
     document.querySelectorAll("[data-delete]").forEach((button) => {
-      button.addEventListener("click", () => this.remove(button.dataset.delete, button.dataset.name));
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        this.remove(button.dataset.delete, button.dataset.name);
+      });
     });
     this.filterList();
     window.lucide?.createIcons();
@@ -596,6 +616,49 @@ const agentsAdmin = {
     }
   },
 
+  async copy(agentId, button = null) {
+    if (button) button.disabled = true;
+    try {
+      const [agent, agents] = await Promise.all([
+        apiFetch(`/api/v1/agents/${encodeURIComponent(agentId)}`),
+        apiFetch("/api/v1/agents"),
+      ]);
+      const existingNames = new Set((agents || []).map((item) => item.name));
+      const values = await requestActionFields({
+        title: "复制 Agent",
+        message: "除 Agent ID 外，模型、Prompt、温度、工具包和 Skill 都会完整复制。",
+        icon: "copy",
+        confirmLabel: "复制",
+        fields: [{
+          name: "name",
+          label: "Agent 名称",
+          value: nextAgentCopyName(agent.name, existingNames),
+          required: true,
+        }],
+      });
+      if (!values) return;
+      const name = String(values.name || "").trim();
+      if (!name) return;
+      await apiFetch("/api/v1/agents", {
+        method: "POST",
+        body: JSON.stringify({
+          name,
+          model_id: agent.model_id,
+          prompt: agent.prompt,
+          temperature: agent.temperature,
+          capabilities: [...(agent.capabilities || [])],
+          skills: [...(agent.skills || [])],
+        }),
+      });
+      showToast("Agent 已复制");
+      await this.refresh();
+    } catch (err) {
+      showToast(err.message, true);
+    } finally {
+      if (button?.isConnected) button.disabled = false;
+    }
+  },
+
   async save(event) {
     event.preventDefault();
     const form = event.currentTarget;
@@ -717,6 +780,7 @@ const agentsAdmin = {
 };
 
 window.agentsAdmin = agentsAdmin;
+window.__AgentAdminUI = { nextAgentCopyName };
 
 document.addEventListener("DOMContentLoaded", () => {
   agentsAdmin.initCapSection();

@@ -35,7 +35,8 @@ test("只有 URL MCP 提供独立重命名操作", () => {
   assert.match(source, /data-rename-mcp/);
   assert.match(source, /data-mcp-more-trigger[\s\S]*ellipsis-vertical/);
   assert.match(source, /data-inspect-mcp=[\s\S]*data-lucide="refresh-cw"[\s\S]*<span>刷新<\/span>/);
-  assert.match(source, /data-edit=[\s\S]*data-lucide="pencil-line"[\s\S]*<span>编辑<\/span>/);
+  assert.doesNotMatch(source, /data-edit=[\s\S]*data-lucide="pencil-line"[\s\S]*<span>编辑<\/span>/);
+  assert.match(source, /data-open-mcp/);
   assert.match(source, /data-mcp-more-menu[\s\S]*重命名[\s\S]*删除/);
 });
 

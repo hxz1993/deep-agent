@@ -2,7 +2,7 @@
 
 > 首次研究：2026-08-04
 >
-> 当前状态：v0.3.2 已完成数据库、接口、运行装配、Console 与配置备份落地
+> 当前状态：v0.3.2 已完成基础目录；v0.6.2 增加显式 `builtin:code-mode`
 
 本课题统一 DeepAgent 中长期混用的 Capability、Toolset、UI 工具和 Console 分组概念。
 
@@ -13,3 +13,6 @@
 
 核心口径：Tool Package 是产品配置和 Agent 选择单位，Pydantic AI Toolset 是运行对象；分类只是
 Tool Package 的元数据字段。Agent 本轮整包选择，工具协议名、SSE、历史和 Deferred 协议不变。
+
+`builtin:code-mode` 仍遵守“一个 ToolPackage 包装一个 Toolset”；包内 Toolset 只提供
+code-only `load_file_data`，而 `run_code` 由对应 Harness Capability 在 Agent 运行时注入。

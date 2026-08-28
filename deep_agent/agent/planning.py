@@ -63,7 +63,7 @@ def _resolve_plan_store(ctx: RunContext[AgentDeps]) -> InMemoryPlanStore:
 
 
 def build_planning_capability() -> Planning[AgentDeps]:
-    """Build the scoped Harness 0.21 Planning capability for one Agent."""
+    """Build the scoped Harness Planning capability for one Agent."""
 
     return Planning(
         tools=PLANNING_TOOL_NAMES,

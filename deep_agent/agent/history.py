@@ -191,7 +191,7 @@ def repair_unprocessed_tool_calls(messages: list[ModelMessage]) -> list[ModelMes
     """Close legacy dangling tool calls without touching official interrupted turns.
 
     Synthetic tool returns are inserted immediately after the assistant turn they
-    belong to, not only at history tail. Pydantic AI 2.31 owns the repair of
+    belong to, not only at history tail. Pydantic AI owns the repair of
     ``state='interrupted'`` responses and synthesizes ``outcome='interrupted'``
     when that history is reused, so those responses must remain unchanged.
     """

@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlsplit
 
-import httpx
+import httpx2
 from pydantic_ai.models import DEFAULT_HTTP_TIMEOUT, Model, get_user_agent
 from pydantic_ai.models.anthropic import AnthropicModel
 from pydantic_ai.models.google import GoogleModel
@@ -242,11 +242,11 @@ async def load_provider_for_model(
     return provider
 
 
-def _gemini_http_client(proxy: str) -> httpx.AsyncClient:
-    return httpx.AsyncClient(
+def _gemini_http_client(proxy: str) -> httpx2.AsyncClient:
+    return httpx2.AsyncClient(
         proxy=proxy,
         trust_env=False,
-        timeout=httpx.Timeout(timeout=DEFAULT_HTTP_TIMEOUT, connect=5),
+        timeout=httpx2.Timeout(timeout=DEFAULT_HTTP_TIMEOUT, connect=5),
         headers={"User-Agent": get_user_agent()},
     )
 

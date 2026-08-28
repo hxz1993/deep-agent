@@ -16,6 +16,7 @@ from pydantic_ai_harness.tool_output_limits import (
     Spill,
     ToolOutputLimits,
     Truncate,
+    json_lines,
 )
 
 from deep_agent.agent.attachments import _download_file
@@ -427,6 +428,7 @@ def build_tool_output_limits(
         over_tokens=True,
         tokenizer=estimator.text,
         store=store,
+        serializer=json_lines,
     )
     return capability, store
 

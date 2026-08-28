@@ -34,5 +34,11 @@
 - Harness Planning只保留`write_plan`，同Turn Deferred恢复完整快照，新Turn不注入旧计划。
 - Revision 007会话归档工具与Alembic 008破坏性会话迁移；配置表不受影响。
 
+## v0.6.2 已完成
+
+- 显式`builtin:code-mode`，已授权且已披露MCP的原生Schema与`run_code`双通道。
+- Code-only `load_file_data`、Run内不透明文件变量、MCP边界延迟Base64和脱敏嵌套调用审计。
+- Shell、Host FileSystem、沙箱生成二进制文件、通用Artifact CRUD和Tool Approval仍不在本次范围。
+
 框架能力是否采用的长期原则见
 [`14-framework-capabilities/framework-capabilities-baseline.md`](14-framework-capabilities/framework-capabilities-baseline.md)。

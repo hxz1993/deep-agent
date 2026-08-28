@@ -1,6 +1,6 @@
 # 14 · 框架能力采用基线
 
-> 当前固定审计：Pydantic AI 2.31.0、Pydantic AI Harness 0.21.0、DeepAgent v0.6.0。
+> 当前固定审计：Pydantic AI 2.35.1、Pydantic AI Harness 0.26.0、Monty 0.0.21、DeepAgent v0.6.2。
 
 - [`framework-capabilities-baseline.md`](framework-capabilities-baseline.md)：Provider、Core、Harness和
   DeepAgent职责，已采用能力、明确不采用项与升级审计清单。

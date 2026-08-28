@@ -2,7 +2,7 @@
 
 > 首次研究：2026-08-03
 >
-> 当前运行基线：`pydantic-ai-slim 2.31.0` + `pydantic-ai-harness 0.21.0`
+> 当前运行基线：`pydantic-ai-slim 2.35.1` + `pydantic-ai-harness 0.26.0`
 >
 > 状态：设计结论；当前 DeepAgent 尚未启用 `ToolOutput`、`NativeOutput` 或 `PromptedOutput`
 
@@ -25,7 +25,7 @@ DeepAgent 应把三类结构化数据分开：
 5. 多种互斥结果优先注册为多个小型 Output Tool，不使用一个塞满 Optional 字段的宽松结构。
 6. Output Tool 与 UI Deferred 可以存在于同一个 Agent，但不能合并成同一种运行语义。
 7. MCP 已经返回完整权威结构时，前端直接渲染 `tool_result`；不得让模型通过 Output Tool 重写事实。
-8. Harness 0.21 可补充最终结果业务校验，但不替代 Core 的结构化输出能力，也不是首版前置依赖。
+8. Harness 0.26 可补充最终结果业务校验，但不替代 Core 的结构化输出能力，也不是首版前置依赖。
 9. Output Tool 不是 Agent 可选执行能力，不加入现有 `agents.capabilities` 或 `/tools` 工具目录；
    Agent 通过独立的输出契约选择一组互斥终止类型。
 
@@ -313,7 +313,7 @@ DeepAgent 实施时必须：
 
 ## 9. Pydantic AI Harness 的边界
 
-`pydantic-ai-harness 0.21.0` 没有另一套结构化输出机制。结构化结果仍由 Pydantic AI Core 的
+`pydantic-ai-harness 0.26.0` 没有另一套结构化输出机制。结构化结果仍由 Pydantic AI Core 的
 `ToolOutput`、`NativeOutput` 和 `PromptedOutput` 负责。
 
 Harness Guardrail 可以在最终结果形成后增加业务规则：

@@ -12,7 +12,7 @@
 | 项 | 内容 |
 | --- | --- |
 | **是什么** | 通用 AI Agent 全栈：FastAPI 后端 + Pydantic AI 运行时 + 静态前端 |
-| **产品版本** | `deep_agent.__version__`为唯一来源；当前`0.6.1`，数据库Head为`010` |
+| **产品版本** | `deep_agent.__version__`为唯一来源；当前`0.6.2`，数据库Head为`010` |
 | **启动** | 本地 Test 联调固定使用下方命令；部署入口才使用 `deep_agent.main:app` |
 | **测试** | `python3.12 -m unittest discover -s tests -p "test_*.py" -v` |
 | **配置** | 仓库根 `.env`（`DEEP_AGENT_*` / `DEEP_AGENT_DBMS_*` / `DEEP_AGENT_SQLITE_PATH`） |
@@ -105,7 +105,7 @@ HTTP → deep_agent/api/v1 → AgentRunner → pydantic_ai.Agent → Toolsets
                                       └→ SessionStore (postgres/mysql/sqlite)
 ```
 
-工具包来源：`builtin:general` | `builtin:sandbox` | `mcp:*`
+工具包来源：`builtin:general` | `builtin:sandbox` | `builtin:code-mode` | `mcp:*`
 （DB + `mcps/` 兜底）| `ui:builtin` | `ui:<package>`。Skill 与 ToolPackage 分离，Agent 通过
 `agents.skills` 显式选择，上传包元数据位于 `skill_packages`。
 
@@ -138,7 +138,8 @@ Model是否进入Run由Agent或请求级`model_id`选择。Skill和工具是否�
 - v0.4.4～v0.4.5完成下线内置MCP清理；Alembic 005和006依次清理对应预制Server记录与Agent能力引用，历史会话不改写。当前代码内置MCP只保留DeepCube；真实MCP进程回归改用`tests/fixtures/`下的测试专用Server，禁止测试Fixture进入生产扫描目录。
 - v0.6.0的Harness Planning只暴露`write_plan`完整替换工具；快照继续走普通Tool Call/Result Event，
   不建Plan表。同一Turn的Deferred新Run从最近成功快照恢复InMemoryPlanStore，新用户Turn从空计划开始。
-- v0.4.8将运行基线固定升级到`pydantic-ai-slim 2.31.0`与`pydantic-ai-harness 0.21.0`。Deferred工具和Capability工具的执行门槛由Core统一判断；DeepAgent继续只负责授权、检索、披露策略和观测。Planning缓存边界、MCP协议兼容、Provider流关闭及安全修复随框架升级生效，不新增产品协议。
+- v0.6.1将运行基线固定升级到`pydantic-ai-slim 2.35.1`与`pydantic-ai-harness 0.26.0`。OpenAI 3.5、aiohttp 3.14、deepfos SDK 1.1.97和Google Provider的`httpx2`客户端必须联合升级。
+- v0.6.2显式引入`builtin:code-mode`：只在Agent关联后注入Harness `run_code`，已授权且已披露MCP保留原生Schema并同时可供Monty组合调用。Code Mode不扩大MCP权限，不可调用Sandbox、History、Planning、UI/HITL、Deferred/Approval、导出、Resource或自身等内部工具；Code-only `load_file_data`仅将当前会话已授权文件转为Run内不透明变量，真实Base64只在MCP调用边界生成。Shell、Playwright、Host FileSystem和FallbackCompaction仍未启用。
 - Tool Search 首轮预选只使用聊天 API 的原始非空 `message`；`context_refs.type/label` 仅在纯上下文请求时回退，不能让 Page/Range 标签覆盖用户问题。实时工具若被 `ModelRetry` 或取消撤回，SSE 用 `tool_call_removed` 通知客户端删除临时卡片；取消后的非空部分回答必须以 `assistant.status=interrupted` 恢复。
 - 模型目录的 `max_output_tokens` 同时约束普通和流式回答；工具错误只有在模型修改参数或改选工具后可能成功时使用 `ModelRetry`，已确定的下载、解析或上游失败使用 `ToolFailed`，避免消耗工具重试预算。
 - v0.3.13 将正式 Run 的官方 `CancellationToken` 传给内部摘要 Agent；取消摘要直接终止 Run，不能转成 Sliding Window 后继续回答。Local/Native 工具配对统一使用 Pydantic AI 2.26 的 Call/Return 基类。
@@ -172,7 +173,7 @@ Model是否进入Run由Agent或请求级`model_id`选择。Skill和工具是否�
 - v0.3.23 起附件与 Skill 文件统一由自动注入的系统工具 `read_file`读取：只处理文本、DOCX和XLSX，并在同一Run复用字节与解析结果。图片不属于文件工具：当前轮图片始终作为原生多模态内容交给Provider，由Provider决定所选模型是否接受；历史图片和Skill图片不读取。PDF和PPT/PPTX若有产品需求，单独设计文档解析工具，不塞进 `read_file`或伪装成模型原生模态。`execute_skill_script`在Agent同时选择含脚本Skill和 `builtin:sandbox`时注入，与 `execute_python`共用当前子进程沙箱。
 - v0.3.14 起每个 Pod 固定一个异步 Gunicorn Worker，保证进程内 `ActiveRunRegistry` 与取消请求一致命中；横向扩容多个 Pod 前必须提供会话粘性或共享取消协调器。工具检索以用户问题为主，Context Reference 标签仅在问题无检索结果时回退，并在单次 Run 内排除已披露工具和重复搜索；不得清空 Pydantic AI 的跨 Run 发现历史。
 - Harness 是可选能力库，不是产品平台。会话、身份、配置、HITL、SSE 和 Console 继续由 DeepAgent 负责；引入 Harness 0.x 时必须与 `pydantic-ai-slim` 一起固定准确版本。
-- `pydantic-ai-slim 2.31` 的 OpenAI extra 只有 SDK 下限。当前必须同时固定 `openai==2.46.0`，以兼容 DeepFOS平台运行时的 `aiohttp 3.9.x`；升级 OpenAI 3.x 前必须先联合验证平台 aiohttp，不能让干净构建自动漂移。
+- `pydantic-ai-slim 2.35.1`要求OpenAI 3.x；当前联合固定`openai==3.5.0`、`aiohttp>=3.14.3,<4`和`deepfos>=1.1.97,<2`。OpenAI 3.x在模块导入时就会加载aiohttp传输，不能再与aiohttp 3.9混装。Google Provider的自定义代理客户端使用`httpx2`，禁止退回已弃用的旧`httpx.AsyncClient`路径。
 - Provider Usage 是 best effort；OpenAI-compatible 或私有端点返回 0 时可能代表缺失。上下文预算必须结合模型窗口元数据和保守估算，不能只依赖 `result.usage`。
 - 新上传只保存附件引用；运行时 `read_file`通过 1-based `offset/limit`、
   `has_more/next_offset`渐进读取 TXT、LOG、DOCX、XLSX。合法 `file_id`

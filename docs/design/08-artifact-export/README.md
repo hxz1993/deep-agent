@@ -1,7 +1,7 @@
 # 08 · Artifact 与出站产物
 
 > 首次整理：2026-08-02
-> 当前状态：**v0.4.0 已实现会话内大工具结果Artifact；v0.4.18 已实现主动发布文件到下载中心；v0.6.0 增加协议一致的本地文件运行时**
+> 当前状态：**v0.4.0 已实现会话内大工具结果Artifact；v0.4.18 已实现主动发布文件到下载中心；v0.6.0 增加协议一致的本地文件运行时；v0.6.2 支持会话文件到MCP的不透明变量中转**
 
 ## 一句话
 
@@ -49,6 +49,10 @@ v0.6.0在`local_dev + SQLite`中可显式选择本地FileStore：工具名、参
 写入Blob并创建`local_record_`下载记录，Console仅对`local_`文件展示鉴权下载链接。平台模式仍走
 原Platform File与Space Download Center链路，且本地下载端点固定返回404。
 
+v0.6.2的 `load_file_data` 只解决“已有会话文件作为 MCP 输入”：它不新建 Artifact，
+不输出真实 Base64 给模型，也不让沙箱产生任意二进制文件。当前会话附件或大工具
+Artifact 经原 Event 授权后形成 Run 内不透明变量，只在 MCP 调用边界转换。
+
 ## 尚未实施：通用二进制计算产物
 
 `execute_python`或Skill脚本生成Excel、图片、压缩包等可下载文件，属于不同的出站产物需求。
@@ -71,6 +75,7 @@ v0.6.0在`local_dev + SQLite`中可显式选择本地FileStore：工具名、参
 | 超大工具文本结果 | 模型上下文外置与回读 | `read_tool_result` | v0.4.0 |
 | 新生成UTF-8文本 | 出站下载中心 | `export_file_to_download_center` | v0.4.18 |
 | 已有附件/大工具Artifact | 出站下载中心 | `export_file_to_download_center` | v0.4.18 |
+| 已有附件/大工具Artifact | MCP文件参数中转 | Code-only `load_file_data` | v0.6.2 |
 | 沙箱生成二进制文件 | 出站下载/归档 | 尚无 | 否 |
 | PDF/PPT专用解析 | 入站复杂文档理解 | 尚无 | 否 |
 

@@ -17,8 +17,10 @@ from deep_agent.agent.factory import _resolve_model, _toolsets_for_spec, build_a
 from deep_agent.agent.models import OpenAICompatibleVideoChatModel
 from deep_agent.agent.provider_registry import ProviderRuntimeConfig
 from deep_agent.capabilities.registry import ToolPackage, ToolPackageRegistry
+from deep_agent.code_mode import HybridCodeMode
 from deep_agent.agent.spec import AgentSpec
 from deep_agent.agent.tool_discovery import McpDiscoveryToolset
+from deep_agent.capabilities import build_registry
 from deep_agent.options import OPTION
 
 
@@ -227,6 +229,30 @@ class ResolveModelTests(unittest.TestCase):
 
 
 class ToolsetAssemblyTests(unittest.TestCase):
+    def test_code_mode_capability_is_explicit_and_default_off(self) -> None:
+        registry = ToolPackageRegistry()
+        code_package = build_registry().get("builtin:code-mode")
+        registry.register(code_package)
+
+        default_agent = build_agent(_spec(model="test"), registry)
+        enabled_agent = build_agent(
+            _spec(model="test", capabilities=["builtin:code-mode"]),
+            registry,
+        )
+
+        self.assertFalse(
+            any(
+                isinstance(capability, HybridCodeMode)
+                for capability in default_agent.root_capability.capabilities
+            )
+        )
+        self.assertTrue(
+            any(
+                isinstance(capability, HybridCodeMode)
+                for capability in enabled_agent.root_capability.capabilities
+            )
+        )
+
     def test_selected_packages_preserve_all_runtime_toolset_layers(self) -> None:
         registry = ToolPackageRegistry()
         general = object()

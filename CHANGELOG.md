@@ -3,8 +3,25 @@
 本文件记录 DeepAgent 的产品版本变化，按新版本到旧版本排列。当前代码版本以
 `deep_agent.__version__` 为准；数据库结构版本以 Alembic head 为准，两者互不替代。
 
+## v0.6.2
+
+- 增加默认不关联的 `builtin:code-mode` Agent 能力包，使用 Harness `CodeMode`、
+  `CodeModeToolset` 与 Monty 提供 `run_code`；数据库结构仍为 Alembic `010`。
+- 已授权且已披露 MCP 保留原生 Tool Schema，同时作为 Monty 函数参与多步依赖、
+  并发、循环、过滤和聚合；未授权 MCP 和 Deferred/Approval/内部系统工具不进入代码环境。
+- 增加 Code Mode 专属 `load_file_data`，只允许当前会话附件或大工具结果 Artifact；
+  Base64 使用 Run 内不透明变量延迟到 MCP 边界生成，不进入模型、Event、History、SSE、检索和轨迹。
+- `run_code` 嵌套调用只保留有界、脱敏的工具名、Call ID、状态、耗时和结果摘要；
+  REST、SSE、Conversation History、Event API 与三端客户端协议不变。
+
 ## v0.6.1
 
+- 运行时联合升级到`pydantic-ai-slim 2.35.1`、`pydantic-ai-harness 0.26.0`、`openai 3.5.0`、
+  `aiohttp 3.14.3+`和`deepfos 1.1.97+`；Google Provider的代理客户端切换为Pydantic AI推荐的
+  `httpx2`。本次只吸收Provider、流式、工具与Harness稳定性修复，不启用CodeMode、Shell、
+  Playwright、FallbackCompaction或新的产品协议。
+- 大工具结果外置使用Harness原生`json_lines` Serializer：顶层数组在平台Artifact中每条记录一行，
+  模型可通过`read_tool_result`按记录分页或匹配中文关键词；小结果、文件句柄和客户端协议保持不变。
 - Alembic `010`删除Provider、模型、Skill、MCP、UI工具包和UI工具上的冗余`enabled`字段；
   配置实体只要存在即可出现在管理目录，Provider的真实可用性继续由地址、凭据和协议校验决定。
 - Agent的`capabilities`收敛为非空显式列表；新Agent的`capabilities/skills`均默认为空，

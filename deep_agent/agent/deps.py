@@ -63,3 +63,5 @@ class AgentDeps:
         default_factory=dict,
         repr=False,
     )
+    code_mode_file_payloads: dict[str, Any] = field(default_factory=dict, repr=False)
+    code_mode_audit: list[dict[str, Any]] = field(default_factory=list, repr=False)

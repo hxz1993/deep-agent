@@ -42,6 +42,7 @@ tests/
 | 文件 | 覆盖 |
 | --- | --- |
 | `test_agent_max_requests.py` | 全局 request 上限、旧 Agent 字段 422 兼容提示 |
+| `test_code_mode.py` | Hybrid Code Mode 装配、MCP 双通道、Monty 调用、文件变量与脱敏 |
 | `test_global_settings.py` | 全局配置安全白名单、来源和企业管理员只读接口 |
 | `test_console_admin_auth.py` | 企业管理员放行、普通用户与固定admin拒绝、401/503、凭证缓存、管理路由审计和运行接口开放边界 |
 | `test_builtin_mcp_config.py` | builtin MCP 配置规范化 |
@@ -64,7 +65,7 @@ tests/
 | `test_sqlite_bootstrap.py` | Alembic 001～010结构、007→008会话清空、008→009辅助表清理、009→010 Provider/模型/资源启停字段清理及完整往返、Provider迁移与配置保留 |
 | `test_*_migration_dialects.py` | 各数据迁移在SQLite、MySQL和PostgreSQL上的DDL或JSON清理逻辑 |
 | `test_tool_package_migration_dialects.py` | SQLite、MySQL、PostgreSQL 的 002 DDL 分支 |
-| `test_runtime_dependencies.py` | OpenAI SDK/aiohttp兼容锁定与Pydantic AI OpenAI模型导入 |
+| `test_runtime_dependencies.py` | Pydantic AI/Harness、OpenAI/aiohttp/deepfos联合版本锁定与模型导入 |
 | `test_session_model_override.py` | Agent 对话 `model_id` 请求级覆盖（`build_runner_for_agent`） |
 | `test_ui_tools_rfc.py` | builtin/manual UI 工具包、工具归属、Agent 整包选择、Schema 校验与 Deferred |
 

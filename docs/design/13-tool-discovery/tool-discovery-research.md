@@ -269,7 +269,8 @@ LLM Selector 的语义能力通常强于词面匹配，但它仍要把目录摘�
 4. 推荐“确定性过滤 + 混合语义预选 + 模型按需继续搜索”，而不是只给一个裸搜索框。
 5. ToolPackage 继续作为授权上限，工具检索只是本轮 Schema 披露优化。
 6. 附件等小型工具不经过检索：无附件时整包隐藏，有附件时直接提供三个读取工具。
-7. 第一版不采用 LLM Selector、Bridge Tool Call 或 OpenCode Code Mode。
+7. v0.6.1 的第一版检索不采用 LLM Selector、Bridge Tool Call 或 OpenCode Code Mode；
+   v0.6.2 后续增加的 Hybrid Code Mode 仍复用本节 Tool Search 状态机，不替代检索器。
 8. 搜索质量最终依赖真实 DeepFOS 中文评估集，不能凭几个演示查询设定固定阈值。
 
 ## 8. 主要资料

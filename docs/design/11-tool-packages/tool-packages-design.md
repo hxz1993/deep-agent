@@ -1,6 +1,6 @@
 # DeepAgent 工具包与工具目录设计
 
-> 实施状态：v0.3.2已按本文完成；v0.3.18起Skill已从ToolPackage分离；v0.3.23起文件读取是自动注入的系统工具；v0.6.1 / Alembic 010删除资源自身的冗余启停层。
+> 实施状态：v0.3.2已按本文完成；v0.3.18起Skill已从ToolPackage分离；v0.3.23起文件读取是自动注入的系统工具；v0.6.1 / Alembic 010删除资源自身的冗余启停层；v0.6.2增加显式Code Mode包。
 
 ## 1. 目标与边界
 
@@ -51,14 +51,17 @@ v0.3.9 改由 Pydantic AI 官方 Provider/Profile 处理，不再保留项目自
 | --- | --- | --- | --- | --- |
 | `builtin` | `builtin:general` | 通用工具 | code | `get_current_time` |
 | `builtin` | `builtin:sandbox` | Python 沙箱 | code | `execute_python`、条件式 `execute_skill_script` |
+| `builtin` | `builtin:code-mode` | 代码编排 | code | Harness `run_code`、code-only `load_file_data` |
 | `mcp` | `mcp:<name>` | MCP 配置名称 | builtin/database | URL 检测快照 / Builtin 运行时发现 |
 | `ui` | `ui:builtin` | 通用交互 | code | `builtin__confirm`、`builtin__choice` |
 | `ui` | `ui:deepcube` | DeepCube 助手 | database | `deep_cube__clarify`、`deep_cube__config_fill` |
 
-`builtin:general` 和 `builtin:sandbox` 是两个独立包级关联项。文件读取不属于 ToolPackage；
+`builtin:general`、`builtin:sandbox` 和 `builtin:code-mode` 是三个独立包级关联项。文件读取不属于 ToolPackage；
 `read_file` 根据当前会话附件或 Agent 已选 Skill 自动注入。Python Sandbox 后端不可用时，
 `builtin:sandbox` 不进入可选目录。`execute_skill_script` 只作为管理员可见的条件式工具元数据；
 运行时还必须选择含脚本Skill并关联 `builtin:sandbox`才注入模型。
+`builtin:code-mode` 包内 Toolset 只承载 code-only 文件原语；对应 Pydantic Capability
+在运行时注入 `run_code`，并仅包装当前 Agent 已授权 MCP。
 
 ## 4. 编码和稳定协议
 

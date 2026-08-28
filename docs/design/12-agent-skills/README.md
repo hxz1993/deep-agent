@@ -5,7 +5,7 @@
 
 本课题记录 DeepAgent 线上 Skill 的最终边界：Skill 是任务方法与素材包，不属于 ToolPackage，
 也不自动授予工具权限。上传包原 ZIP 保存于平台文件服务，数据库保存元数据和资源索引；
-Harness 0.21 `Skills` 负责按需加载 `SKILL.md`。上传 Skill在启动或管理操作时同步到
+Harness 0.26 `Skills` 负责按需加载 `SKILL.md`。上传 Skill在启动或管理操作时同步到
 `runtime-skills/<code>/`，普通 Run只读本地当前目录。
 
 同 Hash替换会先核验平台原 ZIP：原包可用返回 `noop`，原包丢失则重新上传并返回 `repaired`。

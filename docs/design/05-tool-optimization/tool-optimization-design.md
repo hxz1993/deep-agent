@@ -2,7 +2,7 @@
 
 > 最后核验：2026-08-03
 >
-> 当前运行基线：`pydantic-ai-slim 2.31.0` + `pydantic-ai-harness 0.21.0`
+> 当前运行基线：`pydantic-ai-slim 2.35.1` + `pydantic-ai-harness 0.26.0`
 >
 > 状态：v0.3.17 已选择性接入 Tool Return Schema；Native Tool、Output Tool 和其他 Harness 能力仍按本文边界评估
 
@@ -23,7 +23,7 @@ DeepAgent 已经使用了 Pydantic AI 最核心的三种工具执行方式：
 - 前端表单操作继续使用 `ExternalToolset + DeferredToolRequests/Results`。
 - 结构化最终输出使用 `ToolOutput` 或 `NativeOutput`，不依赖提示词约定 JSON。
 - Provider Code Execution 作为模型可选能力接入，不作为所有模型默认工具。
-- Harness 0.21 已用于上下文压缩和大工具结果治理；v0.4.0使用公开的
+- Harness 0.26 已用于大工具结果治理；DeepAgent上下文压缩仍使用自有Event生命周期和结构化摘要，v0.4.0使用公开的
   `ToolOutputLimits` + `Spill`，不再引用旧 `OverflowingToolOutput`方案。
 - Harness 不替代 SQL 会话、SSE、配置中心、HITL 和前端执行器。
 
@@ -205,7 +205,7 @@ sequenceDiagram
 
 Provider Native Tool 由模型 Provider 执行，不在 DeepAgent Pod 中运行。
 
-当前 Pydantic AI 2.31.0 暴露的原生工具定义包括：
+当前 Pydantic AI 2.35.1 暴露的原生工具定义包括：
 
 - `WebSearchTool`
 - `WebFetchTool`
@@ -452,8 +452,10 @@ DeepAgent 当前没有正式启用：
 - Core 通用 `PrepareTools`
 - Pydantic AI 原生执行审批
 
-`pydantic-ai-harness 0.21.0` 已用于上下文压缩和工具结果治理，但Memory、StepPersistence、
-SubAgent 和其他 Harness 能力尚未启用，不能把“已安装 Harness”理解成这些能力已经开放。
+`pydantic-ai-harness 0.26.0` 已用于Planning、Skills和工具结果治理，但Memory、StepPersistence、
+Memory、StepPersistence、SubAgent 和其他未被本文明确采用的 Harness 能力尚未启用，不能把
+“已安装 Harness”理解成所有能力都已经开放。CodeMode 自 v0.6.2 起仅以显式
+`builtin:code-mode`、已授权 MCP 和受限 Monty 边界开放。
 
 当前主对话输出仍为：
 
@@ -851,6 +853,7 @@ v0.4.0 已直接采用Harness 0.18公开的 `ToolOutputLimits`。它在工具执
   → 统一Token估算
   → 小于阈值：保持原结果
   → 超过阈值：Harness Spill
+      → 结构化顶层数组确定性序列化为JSON Lines，其他对象序列化为缩进JSON
       → 完整UTF-8结果上传DeepFOS平台文件服务
       → 平台File ID作为artifact_id / overflow handle
       → Tool Return只保留首尾预览、结构草图和读取说明
@@ -869,6 +872,10 @@ threshold = clamp(available_input × 20%, 4K, 24K Token)
 第一版只解决安全兜底，不把它扩成通用文件或Artifact平台：
 
 - Store仅适配现有平台文件服务，不使用Harness默认本地文件Store。
+- 使用Harness原生`json_lines` Serializer：顶层Sequence在Artifact中每项一行，
+  `read_tool_result(offset, limit, pattern)`可按记录分页并返回整条命中记录；顶层Mapping继续保留
+  完整嵌套结构并使用缩进JSON，不猜测`rows/data/items`等业务字段。未达到Spill阈值的
+  结构化结果仍保持原对象，不会被提前转成文本。
 - 平台File ID同时就是会话内 `artifact_id`，不增加Artifact表和第二层ID映射。
 - 句柄权限只从当前Session完整原始Tool Result Event恢复；模型猜测、其他会话和摘要Evidence均不能增加权限。
 - 同一Run首次读取后复用内存缓存，并发读取使用single-flight；下一Run重新按原始Event授权和下载。
@@ -945,14 +952,14 @@ unknown_after_crash
 
 ### 9.6 FileSystem、Shell 和 CodeMode
 
-这些能力面向 Coding Agent，不适合作为 DeepAgent 业务 Agent 默认能力。引入前必须先有：
+FileSystem 和 Shell 仍不是 DeepAgent 业务 Agent 能力。v0.6.2 只引入经过收口的
+Hybrid Code Mode：Agent 必须显式关联 `builtin:code-mode`，且 Monty 只能调用当前已授权、
+已披露 MCP 及 code-only `load_file_data`。MCP 原生 Schema 同时保留，所以单次调用不必编码。
 
-- 沙箱边界。
-- Authority 和审批模型。
-- 配额。
-- 允许目录和命令白名单。
-- 副作用账本。
-- 产物和临时文件清理。
+Code Mode 不提供宿主文件、网络、环境变量、Shell、pip 或第三方包，也不会包装
+Deferred/Approval、Planning、History、Sandbox、Resource 或导出工具。文件载荷使用 Run 内不透明
+Token，真实 Base64 只在 MCP 调用边界生成。详见
+[`../20-code-mode/`](../20-code-mode/README.md)。
 
 ## 10. 工具质量统一契约
 

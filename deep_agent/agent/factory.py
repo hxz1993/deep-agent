@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-import httpx
+import httpx2
 from pydantic_ai import Agent
 from pydantic_ai.capabilities import AbstractCapability, IncludeToolReturnSchemas, ToolSearch
 from pydantic_ai.models import DEFAULT_HTTP_TIMEOUT, Model, get_user_agent, parse_model_id
@@ -30,6 +30,7 @@ from deep_agent.agent.tool_discovery import (
     search_deferred_tools,
 )
 from deep_agent.capabilities.registry import ToolPackage, ToolPackageRegistry
+from deep_agent.code_mode import FilePayloadResolvingToolset, HybridCodeMode
 from deep_agent.options import OPTION
 
 _OPENAI_PREFIXES = {"openai", "openai-chat"}
@@ -78,12 +79,12 @@ def _resolve_anthropic(spec: AgentSpec, model_name: str) -> AnthropicModel:
     return AnthropicModel(model_name, provider=provider)
 
 
-def _gemini_http_client(proxy: str) -> httpx.AsyncClient:
+def _gemini_http_client(proxy: str) -> httpx2.AsyncClient:
     # ponytail: trust_env=False so global HTTP_PROXY does not leak into Gemini-only traffic
-    return httpx.AsyncClient(
+    return httpx2.AsyncClient(
         proxy=proxy,
         trust_env=False,
-        timeout=httpx.Timeout(timeout=DEFAULT_HTTP_TIMEOUT, connect=5),
+        timeout=httpx2.Timeout(timeout=DEFAULT_HTTP_TIMEOUT, connect=5),
         headers={"User-Agent": get_user_agent()},
     )
 
@@ -193,8 +194,14 @@ def _toolsets_for_spec(
     for package in registry.selected(spec.capabilities):
         toolsets.append(package.toolset)
     if mcp_toolsets:
+        effective_mcp_toolsets = mcp_toolsets
+        if "builtin:code-mode" in spec.capabilities:
+            effective_mcp_toolsets = [
+                FilePayloadResolvingToolset(toolset)
+                for toolset in mcp_toolsets
+            ]
         discovery = build_mcp_discovery_toolset(
-            mcp_toolsets,
+            effective_mcp_toolsets,
             server_names=mcp_server_names or (),
             estimator=estimator or TokenEstimator.conservative(),
         )
@@ -280,6 +287,18 @@ def build_agent(
                 tools=build_return_schema_selector(
                     server_names=mcp_server_names or (),
                 )
+            )
+        )
+    if "builtin:code-mode" in spec.capabilities:
+        capabilities.append(
+            HybridCodeMode(
+                tools=[],
+                dynamic_catalog=True,
+                max_tool_calls=100,
+                resource_limits={
+                    "max_duration_secs": 30,
+                    "max_memory": 256 * 1024 * 1024,
+                },
             )
         )
     capabilities.append(build_planning_capability())

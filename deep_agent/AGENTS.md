@@ -29,6 +29,7 @@ HTTP (REST/SSE)
     → ToolPackageRegistry.toolsets()
         ├─ builtin:general  UTC 时间 FunctionToolset
         ├─ builtin:sandbox  无状态 Python FunctionToolset
+        ├─ builtin:code-mode  Harness CodeMode + Monty（显式关联）
         ├─ mcp          请求时 `capabilities/mcp/resolver.py`（DB + mcps/ 兜底）
         └─ ui           代码内置或数据库工具包 → ExternalToolset
     → Agent.skills → Harness Skills（SKILL.md 渐进披露）
@@ -105,6 +106,12 @@ DeepAgent 自研 `capabilities.registry.ToolPackage` 是产品配置单位，包
 
 URL 与 Builtin MCP 的运行态不同：URL MCP 在管理员检测时保存 Tool Definitions 和 Server Instructions，Run 只读快照，首次真实调用时才创建官方 `MCPToolset`；Builtin MCP 仍由 Run-scoped Client 按需启动。两者最终工具名都由 `PrefixedToolset` 统一加 Server 前缀。缺少或配置失效的 URL 快照不披露工具，也不会因远端不可达阻塞普通聊天。
 
+v0.6.2的 Hybrid Code Mode 实现位于 `code_mode/`。产品配置单位仍是
+`builtin:code-mode` ToolPackage，运行时由 `HybridCodeMode` Capability 在最外层包装
+ToolSearch。只有已授权 MCP Toolset 会被标记为 Hybrid；已披露工具保留原生 Schema，
+又可在 Monty 中组合调用。`load_file_data` 是 code-only 文件原语，不出现在普通工具列表；
+其 Run Token、Base64 和大中间结果必须在进入 Event、History、SSE、轨迹、检索或日志前脱敏。
+
 新增横切能力时遵循：
 
 1. 历史整理优先复用Harness公开能力；v0.6.0不再使用批量`ClearToolResults`，只对摘要模型副本中的
@@ -122,7 +129,7 @@ URL 与 Builtin MCP 的运行态不同：URL MCP 在管理员检测时保存 Too
 7. Harness `StepPersistence` 不替代现有 SQL 会话、SSE 和 Deferred/Pending；只有副作用账本、子 Agent 或崩溃恢复成为真实需求时再接入。
 8. Harness 仍为 0.x。引入时必须将 `pydantic-ai-slim` 与 `pydantic-ai-harness` 固定为经过联合回归的准确版本，禁止继续依赖无上限 `>=` 漂移。
 9. 不要通过修改 `AgentRunner` 主循环重复实现 Pydantic AI 已提供的机制。
-10. Harness 0.21 `Skills` 只负责延迟披露 `SKILL.md` 正文；第三方 Skill 的安装、版本、权限、素材读取和脚本隔离仍由 DeepAgent 产品层负责。v0.3.23 的系统工具 `read_file` 统一读取会话附件与 Skill 素材，脚本执行只复用 Sandbox Backend 契约，不能把它们误写成 Harness 能力。
+10. Harness 0.26 `Skills` 只负责延迟披露 `SKILL.md` 正文；第三方 Skill 的安装、版本、权限、素材读取和脚本隔离仍由 DeepAgent 产品层负责。v0.3.23 的系统工具 `read_file` 统一读取会话附件与 Skill 素材，脚本执行只复用 Sandbox Backend 契约，不能把它们误写成 Harness 能力。
 11. `IncludeToolReturnSchemas` 发生在模型请求前的 Tool Definition 准备阶段，不是工具执行后给真实结果追加 Schema。首版只允许按最终稳定协议名的明确白名单启用，并要求存在可信、稳定的返回 Schema；不得通过名称包含 `query` 等模糊规则自动扩大范围。延迟 MCP 工具只有被 Tool Search 披露时才携带其返回 Schema，并必须观测新增 Schema Token。真实结果过大或空字段过多继续由分页、投影或 `ToolOutputLimits`/Artifact 治理。
 12. Prompt Cache 不是跨 Provider 的统一 DeepAgent 缓存。DeepSeek 等 Provider 的自动缓存只读取其 Usage 命中/未命中数据，不改写请求；显式 `CachePoint`、cache key 和 TTL 只能在模型目录确认具体 Provider 支持后启用。统一观测可以归一化指标，不能伪造统一缓存协议。
 13. v0.3.17 使用 Pydantic AI 官方 `conversation_id/run_id` 贯通运行：`conversation_id=deepagent:{agent_id}:{session_id}` 在同一 Session 内稳定，每次发送、Deferred 恢复、重试或主动压缩使用新的 `run_id`。第一阶段只输出脱敏结构化日志和当前页面 Run 指标，不把高频运行数据写入业务 MySQL；后续 OTLP/Instrumentation 不得建立第二套 Agent 生命周期。
@@ -257,7 +264,8 @@ user/App/Space上下文时，`export_file_to_download_center`始终直接披露�
 
 ### 内置工具包
 
-`builtin:general` 只提供当前时间；`builtin:sandbox` 提供 Python 计算和条件式 Skill 脚本执行。
+`builtin:general` 只提供当前时间；`builtin:sandbox` 提供 Python 计算和条件式 Skill 脚本执行；
+`builtin:code-mode` 仅在 Agent 显式关联时注入 `run_code`，用于编排当前已授权 MCP。
 二者都只在Agent的`capabilities`显式关联后进入Run。每个包严格包装一个 Toolset。内置包由代码随版本发布，
 不在数据库注册；配置中心只读展示，Agent 仍按整包选择。
 
@@ -269,7 +277,7 @@ Search和MCP Resource分组说明工具来源与自动注入条件。`read_tool_
 `runtime:*` 仅是 Console 展示编码，不得注册到 ToolPackage Registry、`/tools` 或
 `agents.capabilities`。
 
-任务规划在Harness 0.21中只启用`write_plan`完整替换工具。成功Tool Result的metadata保存完整快照并
+任务规划在Harness 0.26中只启用`write_plan`完整替换工具。成功Tool Result的metadata保存完整快照并
 作为普通Event持久化；Deferred新Run沿用Turn并恢复最近成功快照，新用户Turn使用空Store。不得新增
 Plan表、隐藏全局计划、Reminder用户消息或自研任务状态机。
 
@@ -283,7 +291,7 @@ Plan表、隐藏全局计划、Reminder用户消息或自研任务状态机。
   和过期判断，不代表产品版本，也不保留历史目录。
 - 同 Hash包替换必须先验证平台原 ZIP：可下载时返回 `noop`；原 File ID失效时重新上传原包、
   原子更新记录并返回 `repaired`。不得只用请求字节恢复当前 Pod而让后续重启再次失败。
-- Harness 0.21 `Skills` 负责 `load_capability` 渐进披露；DeepAgent通过 `list_skill_resources`
+- Harness 0.26 `Skills` 负责 `load_capability` 渐进披露；DeepAgent通过 `list_skill_resources`
   提供授权目录，通过系统 `read_file`读取正文。
 - 文本、DOCX 和 XLSX 根据索引中的路径、MIME 与后缀按行、逻辑块或物理行分页；图片和其他
   二进制只展示元数据，不经文件工具读取。历史安装包不需要为XLSX重新生成索引。
@@ -341,6 +349,9 @@ Skill路径必须属于当前 Agent已选择且运行目录就绪的资源索引
 24K。超过阈值时，完整UTF-8结果上传为平台 `DL` 文件，历史只保存受限预览和
 `ToolReturnPart.metadata.overflow_handle`。`read_file`、`read_tool_result`、Skill加载和Tool Search
 不再次进入该治理链路，避免递归外置。
+结构化返回使用Harness原生`json_lines` Serializer：顶层Sequence在Spill Artifact中每项一行，
+用于`read_tool_result`按记录分页和关键词筛选；顶层Mapping使用缩进JSON，不猜测业务字段。
+未达到Spill阈值的结果继续保持原对象。
 
 平台File ID就是当前会话的`artifact_id`，不增加Artifact表。新Run只从当前会话完整原始Tool Result
 Event索引允许的句柄；摘要Evidence不能作为授权事实源。同一Run回读复用`AgentDeps.file_bytes`并使用
@@ -466,7 +477,7 @@ SSE 协议：[`../docs/guides/sse-protocol.md`](../docs/guides/sse-protocol.md)�
    - 多入口共享组装 → `api/v1/deps.py`（变化量留在入口，上下文在 `_build_*` 内统一解包）
 1. 包名 **`deep_agent`**，启动 `deep_agent.main:app`（非 `app.main`）
 2. 扩展优先走路径注册，避免改 `runner.py` 核心
-3. 工具包命名：`builtin:general` \| `builtin:sandbox` \| `mcp:<name>` \| `ui:<package>`；一个包严格包装一个 Toolset，Agent 按包选择，工具协议名不随包编码变化。Skill 使用独立 `agents.skills`，`runtime:*`系统工具不得塞回 ToolPackage
+3. 工具包命名：`builtin:general` \| `builtin:sandbox` \| `builtin:code-mode` \| `mcp:<name>` \| `ui:<package>`；一个包严格包装一个 Toolset，Agent 按包选择，工具协议名不随包编码变化。Skill 使用独立 `agents.skills`，`runtime:*`系统工具不得塞回 ToolPackage
 4. 会话`session_id`全局唯一，新会话必须有明确`agent_id + user_id`；App/Space可空且不参与当前授权
 5. 同Session进程内用`SessionStore.lock()`串行；Sequence由Session行和`next_sequence`在短事务分配
 6. 配置保存先完成 Schema/引用校验，再进入写事务；一次 API 业务变更不要串联多个各自提交的 Store `_write()`。MCP 检测等外部 I/O 先基于候选配置执行，再把配置与检测快照一次性提交。模型目录联网、解析和完整校验必须在事务前完成，随后单事务全量替换；模型配置保存不得隐式联网。

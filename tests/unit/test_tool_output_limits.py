@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -138,6 +139,64 @@ class PlatformToolResultStoreTests(unittest.IsolatedAsyncioTestCase):
 
 
 class HarnessToolOutputLimitsTests(unittest.IsolatedAsyncioTestCase):
+    async def test_large_sequence_spills_as_pageable_json_lines(self) -> None:
+        capability, store = build_tool_output_limits(
+            request_headers={},
+            context_window_tokens=10_000,
+            max_output_tokens=2_000,
+            estimator=TokenEstimator.conservative(),
+        )
+        deps = AgentDeps(session_id="session")
+        store.bind(deps, [])
+        captured: list[bytes] = []
+
+        async def capture_write(_key: str, data: bytes) -> str:
+            captured.append(data)
+            return "platform-file-jsonl"
+
+        store.write = capture_write  # type: ignore[method-assign]
+        rows = [
+            {"id": index, "name": "上海" if index == 2 else f"成员{index}"}
+            for index in range(1_000)
+        ]
+
+        result = await capability.after_tool_execute(
+            _ctx(deps),
+            call=ToolCallPart("large_query", {}, "call-jsonl"),
+            tool_def=ToolDefinition(name="large_query"),
+            args={},
+            result=rows,
+        )
+
+        self.assertIsInstance(result, ToolReturn)
+        self.assertEqual(result.metadata["overflow_handle"], "platform-file-jsonl")
+        self.assertEqual(len(captured), 1)
+        lines = captured[0].decode("utf-8").splitlines()
+        self.assertEqual(len(lines), len(rows))
+        self.assertEqual(json.loads(lines[0]), rows[0])
+        self.assertEqual(json.loads(lines[2]), rows[2])
+
+    async def test_small_structured_result_keeps_original_object(self) -> None:
+        capability, store = build_tool_output_limits(
+            request_headers={},
+            context_window_tokens=10_000,
+            max_output_tokens=2_000,
+            estimator=TokenEstimator.conservative(),
+        )
+        store.write = AsyncMock(return_value="unused")  # type: ignore[method-assign]
+        original = [{"id": 1, "name": "上海"}]
+
+        result = await capability.after_tool_execute(
+            _ctx(),
+            call=ToolCallPart("query", {}, "call-small-json"),
+            tool_def=ToolDefinition(name="query"),
+            args={},
+            result=original,
+        )
+
+        self.assertIs(result, original)
+        store.write.assert_not_awaited()  # type: ignore[attr-defined]
+
     async def test_capability_runs_inside_real_agent_loop(self) -> None:
         capability, store = build_tool_output_limits(
             request_headers={},

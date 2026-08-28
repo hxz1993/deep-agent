@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 import tempfile
 from pathlib import Path
+from unittest.mock import AsyncMock, patch
 
 from pydantic_ai import Agent
 from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart, ToolReturnPart
@@ -19,6 +20,7 @@ from deep_agent.skills.runtime import (
     validate_skill_codes,
 )
 from deep_agent.files import build_file_toolset
+from deep_agent.schemas.agent import AgentCreate
 from deep_agent.skills.tools import build_skill_resource_toolset
 from tests.helpers.sqlite_stores import make_sqlite_stores
 
@@ -28,6 +30,10 @@ class SkillRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.stores, self.engine, _ = await make_sqlite_stores()
         self.runtime = SkillRuntimeLibrary(
             Path(tempfile.mkdtemp(prefix="skill-runtime-test-TMP_to_delete-"))
+        )
+        model = (await self.stores.llm_model.list_all())[0]
+        self.db_agent = await self.stores.agent.create_unique(
+            AgentCreate(name="skill-runtime-test", model_id=model.id, prompt="test")
         )
 
     async def asyncTearDown(self) -> None:
@@ -73,8 +79,14 @@ class SkillRuntimeTests(unittest.IsolatedAsyncioTestCase):
             UsageLimits(request_limit=5),
             skill_runtime_context=resolved.as_context(),
         )
-        deps = AgentDeps(session_id="session")
-        result = await runner.run("session", "Diagnose the session", deps)
+        deps = AgentDeps(
+            session_id="session", user="skill-user", agent_id=self.db_agent.id
+        )
+        with patch(
+            "deep_agent.agent.title_generator.generate_title",
+            new=AsyncMock(return_value=None),
+        ):
+            result = await runner.run("session", "Diagnose the session", deps)
 
         self.assertEqual(result["output"], "diagnosed")
         self.assertIn("deepagent-diagnostics", seen_instructions[0])
@@ -82,13 +94,17 @@ class SkillRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Identify the exact Agent", seen_messages[1])
         call_parts = [
             part
-            for message in await self.stores.coordinator.get_history("session")
+            for message in await self.stores.coordinator.get_history(
+                "session", agent_id=self.db_agent.id
+            )
             for part in message.parts
             if isinstance(part, (ToolCallPart, ToolReturnPart))
             and part.tool_name == "load_capability"
         ]
         self.assertEqual(len(call_parts), 2)
-        history = await self.stores.coordinator.get_history("session")
+        history = await self.stores.coordinator.get_history(
+            "session", agent_id=self.db_agent.id
+        )
         self.assertFalse(has_unprocessed_tool_calls(history))
         boundaries = _safe_boundaries(history)
         self.assertEqual(boundaries[-1], len(history))
@@ -187,7 +203,11 @@ class SkillRuntimeTests(unittest.IsolatedAsyncioTestCase):
         response = await runner.run(
             "plain-session",
             "hello",
-            AgentDeps(session_id="plain-session"),
+            AgentDeps(
+                session_id="plain-session",
+                user="skill-user",
+                agent_id=self.db_agent.id,
+            ),
         )
 
         self.assertEqual(response["output"], "plain answer")

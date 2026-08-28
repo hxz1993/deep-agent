@@ -6,13 +6,19 @@ from pydantic_ai.settings import ModelSettings
 from pydantic_ai.usage import UsageLimits
 
 from deep_agent.agent.context.compaction import build_context_compaction
-from deep_agent.agent.context.checkpoint import projection_fingerprint
 from deep_agent.agent.context.estimator import TokenEstimator
 from deep_agent.agent.factory import build_agent
 from deep_agent.agent.input_capabilities import augment_instructions_with_capabilities
 from deep_agent.agent.runner import AgentRunner
 from deep_agent.agent.tool_output_limits import build_tool_output_limits
+from deep_agent.agent.history_tools import build_history_toolset
 from deep_agent.agent.spec import DEFAULT_INSTRUCTIONS, AgentSpec
+from deep_agent.agent.provider_registry import (
+    ProviderRuntimeError,
+    effective_base_url,
+    load_provider_for_model,
+    validate_provider_config,
+)
 from deep_agent.capabilities.mcp.resolver import load_mcp_rows, resolve_mcp_toolsets
 from deep_agent.capabilities.catalog import invalid_tool_package_codes
 from deep_agent.capabilities.mcp.resources import build_mcp_resource_toolset
@@ -20,10 +26,14 @@ from deep_agent.capabilities.ui.registry import prepare_ui_tool_packages_for_spe
 from deep_agent.skills.runtime import ResolvedSkills, resolve_skills_for_run
 from deep_agent.skills.script_tool import build_skill_script_toolset
 from deep_agent.skills.tools import build_skill_resource_toolset
-from deep_agent.files import build_file_toolset
+from deep_agent.files import build_file_export_toolset, build_file_toolset
 from deep_agent.core.context import AppContext
 from deep_agent.core.exceptions import AgentNotFoundError, LlmModelNotFoundError
 from deep_agent.options import OPTION
+
+
+async def _provider_for_model(ctx: AppContext, llm_row):
+    return await load_provider_for_model(llm_row, ctx.stores.llm_configuration)
 
 
 def _model_settings_for_spec(spec: AgentSpec) -> ModelSettings | None:
@@ -67,7 +77,12 @@ async def build_runner(
         llm_row = await ctx.stores.llm_model.get_by_id(model_id)
         if llm_row is None:
             raise LlmModelNotFoundError(model_id)
-        spec = AgentSpec.from_llm_model(llm_row, temperature=temperature)
+        provider = await _provider_for_model(ctx, llm_row)
+        spec = AgentSpec.from_llm_model(
+            llm_row,
+            temperature=temperature,
+            provider=provider,
+        )
     elif model:
         spec = AgentSpec(
             name="default",
@@ -79,7 +94,26 @@ async def build_runner(
         llm_rows = await ctx.stores.llm_model.list_all()
         if not llm_rows:
             raise LlmModelNotFoundError("default")
-        spec = AgentSpec.from_llm_model(llm_rows[0], temperature=temperature)
+        provider = None
+        llm_row = None
+        last_error: ProviderRuntimeError | None = None
+        for candidate in llm_rows:
+            try:
+                provider = await _provider_for_model(ctx, candidate)
+            except ProviderRuntimeError as exc:
+                last_error = exc
+                continue
+            llm_row = candidate
+            break
+        if llm_row is None or provider is None:
+            if last_error is not None:
+                raise last_error
+            raise LlmModelNotFoundError("default")
+        spec = AgentSpec.from_llm_model(
+            llm_row,
+            temperature=temperature,
+            provider=provider,
+        )
     if capabilities is not None:
         spec.capabilities = capabilities
     return await _build_runner_from_spec(spec, ctx, request_headers=request_headers)
@@ -90,6 +124,7 @@ async def build_runner_for_agent(
     agent_id: str,
     *,
     model_id: str | None = None,
+    capabilities: list[str] | None = None,
     request_headers: dict[str, str] | None = None,
 ) -> AgentRunner:
     """Assemble a per-request AgentRunner from a database agent configuration."""
@@ -102,7 +137,10 @@ async def build_runner_for_agent(
     if llm_row is None:
         raise LlmModelNotFoundError(effective_model_id)
 
-    spec = AgentSpec.from_row(row, llm_row)
+    provider = await _provider_for_model(ctx, llm_row)
+    spec = AgentSpec.from_row(row, llm_row, provider=provider)
+    if capabilities is not None:
+        spec.capabilities = capabilities
     return await _build_runner_from_spec(spec, ctx, request_headers=request_headers)
 
 
@@ -112,6 +150,8 @@ async def _build_runner_from_spec(
     *,
     request_headers: dict[str, str] | None = None,
 ) -> AgentRunner:
+    if spec.provider_config is not None:
+        validate_provider_config(spec.provider_config)
     invalid_packages = await invalid_tool_package_codes(
         spec.capabilities, ctx.registry, ctx.stores
     )
@@ -119,7 +159,7 @@ async def _build_runner_from_spec(
         from deep_agent.core.exceptions import ToolPackageError
 
         raise ToolPackageError(
-            "Unknown or disabled tool packages: " + ", ".join(invalid_packages)
+            "Unknown or unavailable tool packages: " + ", ".join(invalid_packages)
         )
     mcp_rows = await load_mcp_rows(ctx.stores)
 
@@ -143,6 +183,7 @@ async def _build_runner_from_spec(
     )
     skill_resource_toolset = build_skill_resource_toolset(resolved_skills.resources)
     file_toolset = build_file_toolset(resolved_skills.resources)
+    file_export_toolset = build_file_export_toolset()
     skill_script_toolset = (
         build_skill_script_toolset(
             resolved_skills.scripts,
@@ -165,7 +206,17 @@ async def _build_runner_from_spec(
                 "Continue with the available Skills and tools."
             ),
         )
-    estimator = TokenEstimator.for_model(spec.model, spec.base_url)
+    estimator = TokenEstimator.for_model(
+        spec.model,
+        (
+            effective_base_url(spec.provider_config)
+            if spec.provider_config is not None
+            else spec.base_url
+        ),
+        provider_type=(
+            spec.provider_config.provider_type if spec.provider_config else None
+        ),
+    )
     context_compaction = build_context_compaction(
         context_window_tokens=spec.context_window_tokens,
         max_output_tokens=spec.max_output_tokens,
@@ -176,7 +227,9 @@ async def _build_runner_from_spec(
         context_window_tokens=spec.context_window_tokens,
         max_output_tokens=spec.max_output_tokens,
         estimator=estimator,
+        file_store=getattr(ctx, "file_store", None),
     )
+    history_toolset = build_history_toolset(ctx.store)
     agent = build_agent(
         spec,
         ctx.registry,
@@ -185,8 +238,10 @@ async def _build_runner_from_spec(
         dynamic_ui_packages=dynamic_ui_packages,
         mcp_resource_toolset=mcp_resource_toolset,
         file_toolset=file_toolset,
+        file_export_toolset=file_export_toolset,
         skill_resource_toolset=skill_resource_toolset,
         skill_script_toolset=skill_script_toolset,
+        history_toolset=history_toolset,
         skill_capability=resolved_skills.capability,
         context_compaction=context_compaction,
         tool_output_limits=tool_output_limits,
@@ -211,29 +266,13 @@ async def _build_runner_from_spec(
         max_output_tokens=spec.max_output_tokens,
         model_tags=spec.tags,
         context_compaction=context_compaction,
-        checkpoint_store=(
-            ctx.stores.context_checkpoint
-            if context_compaction is not None
-            else None
-        ),
-        checkpoint_fingerprint=(
-            projection_fingerprint(
-                llm_model_id=spec.llm_model_id,
-                context_window_tokens=spec.context_window_tokens,
-                max_output_tokens=spec.max_output_tokens,
-                trigger_ratio=OPTION.agent.context_compaction_trigger_ratio,
-                target_ratio=OPTION.agent.context_compaction_target_ratio,
-                keep_tool_pairs=OPTION.agent.context_keep_tool_pairs,
-                summary_model_id=spec.llm_model_id,
-                estimator_source=estimator.source,
-            )
-            if context_compaction is not None
-            else None
-        ),
-        summary_model_id=spec.llm_model_id,
         model_id=spec.llm_model_id or spec.model,
+        model_name=spec.model,
+        provider_id=(spec.provider_config.id if spec.provider_config else None),
+        provider_type=(
+            spec.provider_config.provider_type if spec.provider_config else None
+        ),
         estimator=estimator,
-        stores=ctx.stores,
         active_runs=getattr(ctx, "active_runs", None),
         skill_runtime_context=resolved_skills.as_context(),
         tool_output_store=tool_output_store,

@@ -168,22 +168,22 @@ class Agent(Category):
         bind_env="CONTEXT_COMPACTION_TARGET_RATIO",
         extra_check=_ensure_ratio,
     )
-    context_keep_tool_pairs = Option(
-        3,
-        val_type=int,
-        bind_env="CONTEXT_KEEP_TOOL_PAIRS",
-        extra_check=_ensure_non_negative_int,
-    )
-    context_min_clear_tokens = Option(
-        2000,
-        val_type=int,
-        bind_env="CONTEXT_MIN_CLEAR_TOKENS",
-        extra_check=_ensure_non_negative_int,
-    )
     context_summary_timeout = Option(
-        60.0,
+        300.0,
         val_type=float,
         bind_env="CONTEXT_SUMMARY_TIMEOUT",
+    )
+    context_tool_prune_threshold = Option(
+        8192, val_type=int, bind_env="CONTEXT_TOOL_PRUNE_THRESHOLD",
+        extra_check=_ensure_positive_int,
+    )
+    context_tool_prune_head = Option(
+        4096, val_type=int, bind_env="CONTEXT_TOOL_PRUNE_HEAD",
+        extra_check=_ensure_positive_int,
+    )
+    context_tool_prune_tail = Option(
+        1024, val_type=int, bind_env="CONTEXT_TOOL_PRUNE_TAIL",
+        extra_check=_ensure_positive_int,
     )
     mcp_forward_request_headers = Option(
         DEFAULT_MCP_FORWARD_HEADERS,
@@ -222,6 +222,19 @@ class Agent(Category):
         bind_env="SQLITE_PATH",
         convertor=_resolve_repo_path,
     )
+    file_backend = Option(
+        "platform",
+        val_type=str,
+        bind_env="FILE_BACKEND",
+        convertor=lambda value: str(value).strip().lower(),
+        val_choices=("platform", "local"),
+    )
+    local_file_root = Option(
+        _resolve_repo_path("data/local-file-store"),
+        val_type=str,
+        bind_env="LOCAL_FILE_ROOT",
+        convertor=_resolve_repo_path,
+    )
     upload_max_size_mb = Option(
         20,
         val_type=int,
@@ -248,30 +261,6 @@ class Agent(Category):
         val_type=str,
         bind_env="GEMINI_PROXY",
         convertor=_strip_optional_str,
-    )
-    title_model = Option(
-        "",  # 标题生成专用模型名，空=不启用 AI 标题生成
-        val_type=str,
-        bind_env="TITLE_MODEL",
-        convertor=_strip_optional_str,
-    )
-    title_model_base_url = Option(
-        "",  # 标题模型 API 基础 URL
-        val_type=str,
-        bind_env="TITLE_MODEL_BASE_URL",
-        convertor=_strip_optional_str,
-    )
-    title_model_api_key = Option(
-        "",  # 标题模型 API Key
-        val_type=str,
-        protected=True,  # 敏感信息不暴露到日志
-        bind_env="TITLE_MODEL_API_KEY",
-        convertor=_strip_optional_str,
-    )
-    title_generation_timeout = Option(
-        30.0,  # 标题生成超时（秒）；慢速 OpenAI 兼容端点可能需要更久
-        val_type=float,
-        bind_env="TITLE_GENERATION_TIMEOUT",
     )
     sandbox_enabled = Option(
         True,
@@ -359,6 +348,16 @@ def validate_runtime_options(options: DeepAgentOptions = OPTION) -> None:
     _ = options.agent.max_requests
     _ = options.agent.upload_max_size_mb
     _ = options.agent.upload_max_count
+    _ = options.agent.file_backend
+    _ = options.agent.local_file_root
+    if options.agent.file_backend == "local":
+        from deep_agent.local_security import local_runtime_enabled
+
+        if not local_runtime_enabled():
+            raise ValueError(
+                "DEEP_AGENT_FILE_BACKEND=local is only allowed through "
+                "deep_agent.local_dev"
+            )
     trigger_ratio = options.agent.context_compaction_trigger_ratio
     target_ratio = options.agent.context_compaction_target_ratio
     if target_ratio >= trigger_ratio:

@@ -18,6 +18,7 @@ class SystemToolCatalogTests(unittest.IsolatedAsyncioTestCase):
             [domain.code for domain in domains],
             [
                 "runtime:planning",
+                "runtime:conversation-history",
                 "runtime:skill",
                 "runtime:file",
                 "runtime:tool-result",
@@ -28,16 +29,10 @@ class SystemToolCatalogTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             [[tool.name for tool in domain.tools] for domain in domains],
             [
-                [
-                    "write_plan",
-                    "read_plan",
-                    "add_task",
-                    "update_task_status",
-                    "update_task_statuses",
-                    "remove_task",
-                ],
+                ["write_plan"],
+                ["search_conversation_history", "read_conversation_event"],
                 ["load_capability", "list_skill_resources", "execute_skill_script"],
-                ["read_file"],
+                ["read_file", "export_file_to_download_center"],
                 ["read_tool_result"],
                 ["search_tools"],
                 [
@@ -92,7 +87,7 @@ class SystemToolCatalogTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(mcp_codes, ["mcp:deepcube"])
         self.assertNotIn(retired_code, mcp_codes)
 
-    async def test_five_tool_mcp_is_reported_as_direct_disclosure(self) -> None:
+    async def test_ten_tool_mcp_is_reported_as_direct_disclosure(self) -> None:
         row = SimpleNamespace(
             name="small_docs",
             transport="url",
@@ -100,12 +95,11 @@ class SystemToolCatalogTests(unittest.IsolatedAsyncioTestCase):
                 "status": "healthy",
                 "tools": {
                     "status": "supported",
-                    "count": 5,
+                    "count": 10,
                     "snapshot_status": "ready",
                 },
             },
             description="Small documentation MCP",
-            enabled=True,
         )
         ctx = SimpleNamespace(
             registry=build_registry(),

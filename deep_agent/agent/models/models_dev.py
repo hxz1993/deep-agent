@@ -23,11 +23,44 @@ class ModelsDevFetchError(RuntimeError):
     pass
 
 
+class ModelsDevCatalogError(ValueError):
+    pass
+
+
 @dataclass(frozen=True)
 class ModelsDevBundle:
     models: dict[str, Any]
     providers: dict[str, Any]
     labs: object
+
+
+def parse_models_dev_catalog(payload: bytes | str | object) -> ModelsDevBundle:
+    """Parse the official combined catalog used by online refresh and JSON import."""
+    if isinstance(payload, bytes):
+        try:
+            payload = payload.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise ModelsDevCatalogError("models.dev 目录JSON必须使用UTF-8编码") from exc
+    if isinstance(payload, str):
+        try:
+            payload = json.loads(payload)
+        except json.JSONDecodeError as exc:
+            raise ModelsDevCatalogError(
+                f"models.dev 目录JSON格式错误：第{exc.lineno}行第{exc.colno}列"
+            ) from exc
+    if not isinstance(payload, dict):
+        raise ModelsDevCatalogError("models.dev 组合目录必须是JSON对象")
+    models = payload.get("models")
+    providers = payload.get("providers")
+    if not isinstance(models, dict):
+        raise ModelsDevCatalogError("models.dev 组合目录缺少models对象")
+    if not isinstance(providers, dict):
+        raise ModelsDevCatalogError("models.dev 组合目录缺少providers对象")
+    return ModelsDevBundle(
+        models=models,
+        providers=providers,
+        labs=payload.get("labs", []),
+    )
 
 
 async def _get_required_json(client: httpx.AsyncClient, url: str, label: str) -> object:
@@ -82,15 +115,15 @@ async def fetch_models_dev_bundle(
             _get_required_json(client, catalog_url, "组合目录"),
             _get_optional_labs(client, labs_url),
         )
-        if not isinstance(catalog, dict):
-            raise ModelsDevFetchError("models.dev 组合目录必须是 JSON 对象")
-        models = catalog.get("models")
-        providers = catalog.get("providers")
-        if not isinstance(models, dict):
-            raise ModelsDevFetchError("models.dev 组合目录缺少 models 对象")
-        if not isinstance(providers, dict):
-            raise ModelsDevFetchError("models.dev 组合目录缺少 providers 对象")
-        return ModelsDevBundle(models=models, providers=providers, labs=labs)
+        try:
+            bundle = parse_models_dev_catalog(catalog)
+        except ModelsDevCatalogError as exc:
+            raise ModelsDevFetchError(str(exc)) from exc
+        return ModelsDevBundle(
+            models=bundle.models,
+            providers=bundle.providers,
+            labs=labs,
+        )
     finally:
         if owns_client:
             await client.aclose()

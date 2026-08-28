@@ -38,7 +38,7 @@ _MIME_UPLOAD_KIND: dict[str, str] = {
 
 _UPLOAD_KIND_LABELS: dict[str, str] = {
     "image": "图片",
-    "text_file": "TXT / CSV / JSON / MD / HTML / XML",
+    "text_file": "TXT / LOG / CSV / JSON / MD / HTML / XML",
     "docx": "DOCX",
     "xlsx": "XLSX",
     "audio": "音频（MP3 / WAV）",

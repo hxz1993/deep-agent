@@ -2,7 +2,7 @@
 
 覆盖:
 - PATCH /api/v1/sessions/{id} 手动重命名（含 happy path）
-- PATCH /api/v1/sessions/{id} 自动重命名（mock）
+- PATCH /api/v1/sessions/{id} 不再接受自动重命名
 - 参数校验与 404
 """
 
@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import unittest
 from pathlib import Path
-from unittest.mock import patch
 
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
@@ -81,9 +80,16 @@ class SessionRenameTests(unittest.IsolatedAsyncioTestCase):
             agent_id=seeded.agent_id,
         )
         self.assertEqual(stored, manual_title)
+        title_events = await get_context().store.list_events(
+            seeded.session_id,
+            event_type="session/title",
+        )
+        self.assertEqual(len(title_events), 1)
+        self.assertEqual(title_events[0].payload["source"], "user")
+        self.assertEqual(title_events[0].payload["title"], manual_title)
 
-    async def test_manual_rename_whitespace_clears_title(self) -> None:
-        """空白 title 应清除已存标题（title=null）。"""
+    async def test_manual_rename_whitespace_is_rejected(self) -> None:
+        """空白 title 不支持清空或重置。"""
         seeded = await self._seed_legacy_session()
         async with AsyncClient(transport=self._transport, base_url="http://test") as client:
             await client.patch(
@@ -97,31 +103,18 @@ class SessionRenameTests(unittest.IsolatedAsyncioTestCase):
                 json={"title": "   "},
             )
 
-        self.assertEqual(clear_resp.status_code, 200)
-        self.assertIsNone(clear_resp.json()["title"])
-        self.assertIn("快速排序", clear_resp.json()["user_prompt"] or "")
+        self.assertEqual(clear_resp.status_code, 422)
 
-    async def test_auto_rename_happy_path_with_mocked_generator(self) -> None:
-        """auto=true 应调用 generate_title 并写回响应。"""
+    async def test_auto_rename_is_removed(self) -> None:
+        """auto=true 不再属于 PATCH 契约。"""
         seeded = await self._seed_legacy_session()
-        generated = "Python 快速排序"
-
-        with patch(
-            "deep_agent.agent.title_generator.generate_title",
-            return_value=generated,
-        ) as mock_generate:
-            async with AsyncClient(transport=self._transport, base_url="http://test") as client:
-                resp = await client.patch(
-                    f"/api/v1/sessions/{seeded.session_id}",
-                    params={"agent_id": seeded.agent_id},
-                    json={"auto": True},
-                )
-
-        self.assertEqual(resp.status_code, 200)
-        body = resp.json()
-        self.assertEqual(body["title"], generated)
-        mock_generate.assert_called_once()
-        self.assertIn("快速排序", body["user_prompt"] or "")
+        async with AsyncClient(transport=self._transport, base_url="http://test") as client:
+            resp = await client.patch(
+                f"/api/v1/sessions/{seeded.session_id}",
+                params={"agent_id": seeded.agent_id},
+                json={"auto": True},
+            )
+        self.assertEqual(resp.status_code, 422)
 
     async def test_rename_conflict(self) -> None:
         """同时指定 title 和 auto 应该失败。"""
@@ -133,7 +126,7 @@ class SessionRenameTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(resp.status_code, 422)
 
     async def test_rename_no_params_fails(self) -> None:
-        """不指定 title 或 auto 应该失败。"""
+        """不指定 title 应该失败。"""
         async with AsyncClient(transport=self._transport, base_url="http://test") as client:
             resp = await client.patch(
                 "/api/v1/sessions/test-session",
@@ -150,14 +143,14 @@ class SessionRenameTests(unittest.IsolatedAsyncioTestCase):
             )
             self.assertEqual(resp.status_code, 404)
 
-    async def test_rename_empty_title_on_missing_session(self) -> None:
-        """空白 title 参数校验通过，但会话不存在仍返回 404。"""
+    async def test_rename_empty_title_is_rejected_before_lookup(self) -> None:
+        """空白 title 在会话查询前就被拒绝。"""
         async with AsyncClient(transport=self._transport, base_url="http://test") as client:
             resp = await client.patch(
                 "/api/v1/sessions/test",
                 json={"title": "  "},
             )
-            self.assertEqual(resp.status_code, 404)
+            self.assertEqual(resp.status_code, 422)
 
 
 if __name__ == "__main__":

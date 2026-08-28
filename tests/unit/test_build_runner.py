@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, patch
 from deep_agent.agent.spec import AgentSpec, DEFAULT_INSTRUCTIONS
 from deep_agent.api.v1.deps import _model_settings_for_spec, build_runner
 from deep_agent.core.exceptions import LlmModelNotFoundError
-from deep_agent.db.models import LlmModel
+from deep_agent.db.models import LlmModel, LlmProvider
 from pydantic_ai.settings import ModelSettings
 
 
@@ -51,10 +51,28 @@ class ModelSettingsHelperTests(unittest.TestCase):
 
 
 class BuildRunnerTests(unittest.IsolatedAsyncioTestCase):
+    @staticmethod
+    def _provider() -> LlmProvider:
+        return LlmProvider(
+            id="11111111111111111111111111111111",
+            name="OpenAI Test",
+            provider_type="openai",
+            use_default_base_url=True,
+            base_url="https://api.openai.com/v1/",
+            api_key="test-key",
+        )
+
     async def test_model_id_loads_llm_preset(self) -> None:
-        llm = LlmModel(id="00000000-0000-4000-8000-000000000099", name="m", model="openai:gpt-4o")
+        provider = self._provider()
+        llm = LlmModel(
+            id="00000000-0000-4000-8000-000000000099",
+            provider_id=provider.id,
+            name="m",
+            model="openai:gpt-4o",
+        )
         ctx = AsyncMock()
         ctx.stores.llm_model.get_by_id = AsyncMock(return_value=llm)
+        ctx.stores.llm_configuration.get_provider = AsyncMock(return_value=provider)
 
         with patch("deep_agent.api.v1.deps._build_runner_from_spec", new_callable=AsyncMock) as build:
             build.return_value = object()
@@ -82,9 +100,16 @@ class BuildRunnerTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(spec.temperature, 1.0)
 
     async def test_no_model_uses_first_llm_preset(self) -> None:
-        llm = LlmModel(id="00000000-0000-4000-8000-000000000099", name="m", model="openai:gpt-4o")
+        provider = self._provider()
+        llm = LlmModel(
+            id="00000000-0000-4000-8000-000000000099",
+            provider_id=provider.id,
+            name="m",
+            model="openai:gpt-4o",
+        )
         ctx = AsyncMock()
         ctx.stores.llm_model.list_all = AsyncMock(return_value=[llm])
+        ctx.stores.llm_configuration.get_provider = AsyncMock(return_value=provider)
 
         with patch("deep_agent.api.v1.deps._build_runner_from_spec", new_callable=AsyncMock) as build:
             build.return_value = object()

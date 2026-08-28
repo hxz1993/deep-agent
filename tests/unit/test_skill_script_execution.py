@@ -71,7 +71,6 @@ class SkillScriptProtocolTests(unittest.IsolatedAsyncioTestCase):
         item = ResolvedSkill(
             code="demo",
             source="upload",
-            enabled=True,
             package_root=Path("/tmp/demo"),
             library_root=Path("/tmp"),
             resource_index=[{"path": "scripts/a.py", "category": "script"}],
@@ -188,7 +187,6 @@ class SkillScriptProtocolTests(unittest.IsolatedAsyncioTestCase):
             item = ResolvedSkill(
                 code="demo",
                 source="upload",
-                enabled=True,
                 package_root=root,
                 library_root=root.parent,
                 resource_index=[
@@ -244,7 +242,6 @@ class SkillScriptProtocolTests(unittest.IsolatedAsyncioTestCase):
             item = ResolvedSkill(
                 code="demo",
                 source="upload",
-                enabled=True,
                 package_root=root,
                 library_root=root.parent,
                 resource_index=[

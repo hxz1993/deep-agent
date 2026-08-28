@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 import re
 from typing import Any, Literal
 
-from deep_agent.db.models import LlmModel, ModelCatalog
+from deep_agent.db.models import LlmModel, LlmProvider, ModelCatalog
 
 CatalogView = Literal["model", "provider"]
 
@@ -490,14 +490,141 @@ def normalize_models_dev_bundle(
     return rows, stats
 
 
-def _normalized_url(value: str | None) -> str:
-    return (value or "").strip().rstrip("/").lower()
+def export_models_dev_catalog(rows: Iterable[ModelCatalog]) -> dict[str, Any]:
+    """Build a catalog JSON payload that can be imported without losing normalized data."""
+    models: dict[str, dict[str, Any]] = {}
+    providers: dict[str, dict[str, Any]] = {}
+    labs: dict[str, dict[str, Any]] = {}
+
+    for row in sorted(
+        rows,
+        key=lambda item: (
+            item.canonical_model_id,
+            item.provider_id,
+            item.provider_model_id,
+        ),
+    ):
+        canonical = deepcopy(row.model_metadata or {})
+        canonical["id"] = row.canonical_model_id
+        canonical.setdefault("name", row.model_label)
+        if row.model_description:
+            canonical.setdefault("description", row.model_description)
+        if row.family:
+            canonical.setdefault("family", row.family)
+        if row.release_date:
+            canonical.setdefault("release_date", row.release_date)
+        canonical.setdefault(
+            "modalities",
+            {
+                "input": list(row.input_modalities or []),
+                "output": list(row.output_modalities or []),
+            },
+        )
+        canonical.setdefault(
+            "limit",
+            {
+                "context": row.canonical_context_window_tokens,
+                "output": row.canonical_max_output_tokens,
+            },
+        )
+        models.setdefault(row.canonical_model_id, canonical)
+
+        provider_metadata = deepcopy(row.provider_metadata or {})
+        provider = providers.setdefault(
+            row.provider_id,
+            {
+                "id": row.provider_id,
+                "name": row.provider_label,
+                "npm": row.provider_npm,
+                "api": row.provider_api_url,
+                "doc": row.provider_doc_url,
+                "env": provider_metadata.get("env"),
+                "models": {},
+            },
+        )
+        provider_model: dict[str, Any] = {
+            "id": row.canonical_model_id,
+            "name": row.model_label,
+            "modalities": {
+                "input": list(row.input_modalities or []),
+                "output": list(row.output_modalities or []),
+            },
+            "limit": {
+                "context": row.context_window_tokens,
+                "output": row.max_output_tokens,
+            },
+            **deepcopy(row.capabilities or {}),
+        }
+        if row.model_description:
+            provider_model["description"] = row.model_description
+        if row.family:
+            provider_model["family"] = row.family
+        if row.release_date:
+            provider_model["release_date"] = row.release_date
+        if row.status:
+            provider_model["status"] = row.status
+        model_provider = provider_metadata.get("provider")
+        if isinstance(model_provider, Mapping) and model_provider:
+            provider_model["provider"] = deepcopy(dict(model_provider))
+        for key in ("reasoning_options", "experimental"):
+            value = provider_metadata.get(key)
+            if value is not None:
+                provider_model[key] = deepcopy(value)
+        provider["models"][row.provider_model_id] = provider_model
+
+        lab = deepcopy(row.lab_metadata or {})
+        lab["id"] = row.lab_id
+        lab.setdefault("name", row.lab_label)
+        if row.lab_description:
+            lab.setdefault("description", row.lab_description)
+        labs.setdefault(row.lab_id, lab)
+
+    return {
+        "models": models,
+        "providers": providers,
+        "labs": [labs[key] for key in sorted(labs)],
+    }
 
 
-def _configured_presets(models: Iterable[LlmModel]) -> dict[tuple[str, str], str]:
+_CATALOG_PROVIDER_TYPE_ALIASES = {
+    "moonshot": "moonshotai",
+    "qwen": "alibaba",
+    "zhipu": "zai",
+    "zhipuai": "zai",
+}
+
+
+def catalog_provider_type(provider_id: str) -> str:
+    """Map a models.dev provider code to the explicit local provider type."""
+    normalized = provider_id.strip().lower()
+    return _CATALOG_PROVIDER_TYPE_ALIASES.get(normalized, normalized)
+
+
+def _model_code_aliases(value: str) -> set[str]:
+    normalized = value.strip().lower()
+    if not normalized:
+        return set()
+    result = {normalized}
+    for separator in (":", "/"):
+        if separator in normalized:
+            suffix = normalized.split(separator, 1)[1]
+            if suffix:
+                result.add(suffix)
+    return result
+
+
+def _configured_presets(
+    models: Iterable[LlmModel],
+    providers: Iterable[LlmProvider],
+) -> dict[tuple[str, str], str]:
+    provider_types = {provider.id: provider.provider_type for provider in providers}
     result: dict[tuple[str, str], str] = {}
     for model in models:
-        result.setdefault((model.model.lower(), _normalized_url(model.base_url)), model.name)
+        provider_type = provider_types.get(model.provider_id)
+        if not provider_type:
+            continue
+        for model_code in _model_code_aliases(model.model):
+            result.setdefault((provider_type, model_code), model.name)
     return result
 
 
@@ -535,8 +662,13 @@ def _provider_option(
         "output_modalities": _row_modalities(row.output_modalities),
         "tags": _row_tags(row),
         "status": row.status,
-        "configured_preset": configured.get(
-            (runtime_model.lower(), _normalized_url(base_url))
+        "configured_preset": next(
+            (
+                configured[(catalog_provider_type(row.provider_id), model_code)]
+                for model_code in _model_code_aliases(runtime_model)
+                if (catalog_provider_type(row.provider_id), model_code) in configured
+            ),
+            None,
         ),
         "metadata": row.provider_metadata or {},
     }
@@ -576,6 +708,7 @@ def _matches(
 def build_catalog_page(
     rows: list[ModelCatalog],
     llm_models: list[LlmModel],
+    llm_providers: list[LlmProvider],
     *,
     view: CatalogView,
     q: str | None,
@@ -585,7 +718,7 @@ def build_catalog_page(
     offset: int,
     limit: int,
 ) -> dict[str, Any]:
-    configured = _configured_presets(llm_models)
+    configured = _configured_presets(llm_models, llm_providers)
     q_norm = (q or "").strip().lower()
     lab_norm = normalize_lab_id(lab_id or "")
     provider_norm = (provider_id or "").strip().lower()

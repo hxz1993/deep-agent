@@ -1,15 +1,20 @@
 let initialized = false;
+import "./model-options.js?v=20260825-1";
+import * as ProviderCatalog from "./provider-catalog.js?v=20260825-2";
+import * as SkillFrontmatter from "./skill-frontmatter.js?v=20260825-1";
+import * as SchemaText from "./schema-editor.js?v=20260825-1";
+if (typeof window !== "undefined") window.DeepAgentProviderCatalog = ProviderCatalog;
+if (typeof window !== "undefined") window.DeepAgentSkillFrontmatter = SkillFrontmatter;
+if (typeof window !== "undefined") window.DeepAgentSchemaText = SchemaText;
 let loadingPromise = null;
-const CONFIGURATION_ASSET_VERSION = "20260813-1";
+const CONFIGURATION_ASSET_VERSION = "20260829-3";
 const CONFIGURATION_TABS = new Set([
   "agents",
-  "llm-models",
+  "llm-providers",
   "builtin-tools",
-  "system-tools",
   "skills",
   "mcp",
   "ui-tools",
-  "auxiliary-models",
   "global-settings",
   "database-connection",
   "catalog",
@@ -63,7 +68,10 @@ function appendAdminStructure(adminDoc, modelsDoc) {
   catalog.append(...Array.from(card.children));
   host.insertBefore(catalog, document.getElementById("panel-mcp"));
 
-  adminDoc.querySelectorAll("body > dialog").forEach((dialog) => document.body.appendChild(dialog));
+  adminDoc.querySelectorAll("body > dialog").forEach((dialog) => {
+    dialog.classList.add("console-detail-dialog");
+    document.body.appendChild(dialog);
+  });
 }
 
 function loadClassicScript(src) {
@@ -82,14 +90,13 @@ async function loadAdminScripts() {
     "./configuration/form-feedback.js",
     "./configuration/global-settings.js",
     "./configuration/database-connection.js",
+    "./configuration/llm-providers.js",
     "./configuration/llm-models.js",
-    "./configuration/auxiliary-models.js",
     "./configuration/agents.js",
     "./configuration/builtin-tools.js",
     "./configuration/system-tools.js",
     "./configuration/skills.js",
     "./configuration/mcp.js",
-    "./configuration/ui-schema-editor.js",
     "./configuration/ui-tools.js",
   ];
   for (const script of scripts) await loadClassicScript(script);
@@ -101,6 +108,10 @@ async function loadAdminScripts() {
 }
 
 function decorateConfiguration() {
+  document.querySelectorAll(".resource-btn").forEach((button) => {
+    const label = button.querySelector("span")?.textContent?.trim();
+    if (label && !button.title) button.title = label;
+  });
   document.querySelectorAll("#configurationHost .panel-toolbar h2").forEach((heading) => {
     heading.parentElement?.classList.add("configuration-heading");
   });
@@ -108,15 +119,11 @@ function decorateConfiguration() {
     dialog.classList.add("console-detail-dialog");
   });
   document.getElementById("configurationHost")?.addEventListener("click", (event) => {
-    if (event.target.closest("[data-open-catalog]")) {
-      document.querySelector('[data-tab="catalog"]')?.click();
-      return;
-    }
     const link = event.target.closest("a[href]");
     if (!link) return;
     const url = new URL(link.href, location.href);
     const agentId = url.searchParams.get("agent_id");
-    if (agentId && link.textContent.includes("发起对话")) {
+    if (agentId && link.matches("[data-agent-chat]")) {
       event.preventDefault();
       window.DeepAgentConsoleChat?.selectAgent(agentId);
       window.DeepAgentConsole?.showPage("workspace");
@@ -135,11 +142,14 @@ export function refreshCurrentConfiguration() {
   if (active === "global-settings") return window.globalSettingsAdmin?.refresh();
   if (active === "database-connection") return window.databaseConnectionAdmin?.refresh();
   if (active === "agents") return window.agentsAdmin?.refresh();
-  if (active === "llm-models") return window.llmModelsAdmin?.refresh();
-  if (active === "builtin-tools") return window.builtinToolsAdmin?.refresh();
-  if (active === "system-tools") return window.systemToolsAdmin?.refresh();
+  if (active === "llm-providers") return window.llmProvidersAdmin?.refresh();
+  if (active === "builtin-tools") {
+    return Promise.all([
+      window.builtinToolsAdmin?.refresh(),
+      window.systemToolsAdmin?.refresh(),
+    ]);
+  }
   if (active === "skills") return window.skillsAdmin?.refresh();
-  if (active === "auxiliary-models") return window.auxiliaryModelsAdmin?.refresh();
   if (active === "mcp") return window.mcpAdmin?.refresh();
   if (active === "ui-tools") return window.uiToolsAdmin?.refresh();
   if (active === "catalog") return window.modelCatalogAdmin?.refresh();

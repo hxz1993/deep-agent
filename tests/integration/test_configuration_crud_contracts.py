@@ -16,6 +16,7 @@ from deep_agent.db.models import McpServer
 from deep_agent.schemas.agent import AgentCreate
 from deep_agent.schemas.mcp import McpServerCreate, McpServerUpdate
 from deep_agent.schemas.ui_tools import UiToolPackageCreate
+from tests.helpers.admin_auth import allow_console_admin
 from tests.helpers.sqlite_stores import make_sqlite_stores
 
 
@@ -24,6 +25,7 @@ class ConfigurationCrudContractTests(unittest.IsolatedAsyncioTestCase):
         self.stores, self._engine, session_factory = await make_sqlite_stores()
         self._app = FastAPI()
         self._app.include_router(api_router)
+        allow_console_admin(self._app)
         init_context(
             AppContext.for_testing(
                 registry=build_registry(),
@@ -34,7 +36,9 @@ class ConfigurationCrudContractTests(unittest.IsolatedAsyncioTestCase):
             )
         )
         self._transport = ASGITransport(app=self._app, raise_app_exceptions=False)
-        self._model_id = (await self.stores.llm_model.list_all())[0].id
+        default_model = (await self.stores.llm_model.list_all())[0]
+        self._model_id = default_model.id
+        self._provider_id = default_model.provider_id
         await self.stores.ui_tool_package.create_manual(
             UiToolPackageCreate(
                 code="ui:contracts",
@@ -83,7 +87,6 @@ class ConfigurationCrudContractTests(unittest.IsolatedAsyncioTestCase):
                     "name": "   ",
                     "transport": "url",
                     "config": {"url": "http://example.test/mcp"},
-                    "enabled": False,
                 },
             )
 
@@ -109,6 +112,7 @@ class ConfigurationCrudContractTests(unittest.IsolatedAsyncioTestCase):
                 "/api/v1/llm-models",
                 json={
                     "name": "contract-model",
+                    "provider_id": self._provider_id,
                     "model": "test:contract",
                     "input_modalities": ["text"],
                     "context_window_tokens": 128_000,
@@ -122,7 +126,6 @@ class ConfigurationCrudContractTests(unittest.IsolatedAsyncioTestCase):
                     "package_code": "ui:contracts",
                     "description": "keep description",
                     "parameters_json_schema": {"type": "object"},
-                    "enabled": True,
                 },
             )
             self.assertEqual(agent_response.status_code, 201, agent_response.text)
@@ -157,19 +160,17 @@ class ConfigurationCrudContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(model_row.model, "test:contract")
         self.assertEqual(tool_row.description, "keep description")
         self.assertEqual(tool_row.parameters_json_schema, {"type": "object"})
-        self.assertTrue(tool_row.enabled)
 
-    async def test_invalid_model_base_url_and_result_schema_return_422(self) -> None:
+    async def test_invalid_provider_base_url_and_result_schema_return_422(self) -> None:
         async with AsyncClient(transport=self._transport, base_url="http://test") as client:
-            model = await client.post(
-                "/api/v1/llm-models",
+            provider = await client.post(
+                "/api/v1/llm-providers",
                 json={
                     "name": "invalid-url",
-                    "model": "test:model",
+                    "provider_type": "openai_compatible",
+                    "use_default_base_url": False,
                     "base_url": "ftp://example.test",
-                    "input_modalities": ["text"],
-                    "context_window_tokens": 128_000,
-                    "max_output_tokens": 8_192,
+                    "api_key": "secret",
                 },
             )
             tool = await client.post(
@@ -183,26 +184,26 @@ class ConfigurationCrudContractTests(unittest.IsolatedAsyncioTestCase):
                 },
             )
 
-        self.assertEqual(model.status_code, 422)
+        self.assertEqual(provider.status_code, 422)
         self.assertEqual(tool.status_code, 422)
 
     async def test_api_key_can_be_cleared_explicitly(self) -> None:
         async with AsyncClient(transport=self._transport, base_url="http://test") as client:
             created = await client.post(
-                "/api/v1/llm-models",
+                "/api/v1/llm-providers",
                 json={
                     "name": "clear-key",
-                    "model": "test:model",
+                    "provider_type": "openai_compatible",
+                    "use_default_base_url": False,
+                    "base_url": "http://test.invalid/v1",
                     "api_key": "secret",
-                    "input_modalities": ["text"],
-                    "context_window_tokens": 128_000,
-                    "max_output_tokens": 8_192,
                 },
             )
+            self.assertEqual(created.status_code, 201, created.text)
             self.assertTrue(created.json()["api_key_set"])
             cleared = await client.patch(
-                f"/api/v1/llm-models/{created.json()['id']}",
-                json={"api_key": None},
+                f"/api/v1/llm-providers/{created.json()['id']}",
+                json={"clear_api_key": True},
             )
 
         self.assertEqual(cleared.status_code, 200, cleared.text)
@@ -222,6 +223,7 @@ class ConfigurationCrudContractTests(unittest.IsolatedAsyncioTestCase):
                 "/api/v1/llm-models",
                 {
                     "name": "duplicate-model",
+                    "provider_id": self._provider_id,
                     "model": "test:duplicate",
                     "input_modalities": ["text"],
                     "context_window_tokens": 128_000,
@@ -234,7 +236,6 @@ class ConfigurationCrudContractTests(unittest.IsolatedAsyncioTestCase):
                     "name": "duplicate_mcp",
                     "transport": "url",
                     "config": {"url": "http://example.test/mcp"},
-                    "enabled": False,
                 },
             ),
             (
@@ -255,29 +256,47 @@ class ConfigurationCrudContractTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(created.status_code, 201, created.text)
                     self.assertEqual(duplicate.status_code, 409, duplicate.text)
 
-    async def test_agent_rejects_unknown_and_disabled_tool_packages(self) -> None:
+    async def test_agent_rejects_unknown_and_accepts_configured_tool_packages(self) -> None:
         async with AsyncClient(transport=self._transport, base_url="http://test") as client:
-            disabled = await client.post(
+            configured = await client.post(
                 "/api/v1/ui-tool-packages",
-                json={"code": "ui:disabled", "label": "Disabled", "enabled": False},
+                json={"code": "ui:configured", "label": "Configured"},
             )
-            self.assertEqual(disabled.status_code, 201, disabled.text)
-            for code in ("ui:missing", "ui:disabled"):
-                with self.subTest(code=code):
-                    response = await client.post(
-                        "/api/v1/agents",
-                        json={
-                            "name": f"invalid-{code.split(':')[-1]}",
-                            "model_id": self._model_id,
-                            "prompt": "invalid package",
-                            "capabilities": [code],
-                        },
-                    )
-                    self.assertEqual(response.status_code, 422, response.text)
-                    self.assertEqual(
-                        response.json()["detail"]["invalid_tool_packages"],
-                        [code],
-                    )
+            self.assertEqual(configured.status_code, 201, configured.text)
+            tool = await client.post(
+                "/api/v1/ui-tools",
+                json={
+                    "name": "configured__tool",
+                    "package_code": "ui:configured",
+                    "description": "Configured tool",
+                    "parameters_json_schema": {"type": "object"},
+                },
+            )
+            self.assertEqual(tool.status_code, 201, tool.text)
+            missing = await client.post(
+                "/api/v1/agents",
+                json={
+                    "name": "invalid-missing",
+                    "model_id": self._model_id,
+                    "prompt": "invalid package",
+                    "capabilities": ["ui:missing"],
+                },
+            )
+            accepted = await client.post(
+                "/api/v1/agents",
+                json={
+                    "name": "valid-configured",
+                    "model_id": self._model_id,
+                    "prompt": "configured package",
+                    "capabilities": ["ui:configured"],
+                },
+            )
+            self.assertEqual(missing.status_code, 422, missing.text)
+            self.assertEqual(
+                missing.json()["detail"]["invalid_tool_packages"],
+                ["ui:missing"],
+            )
+            self.assertEqual(accepted.status_code, 201, accepted.text)
 
     async def test_historical_stdio_mcp_is_readable_but_cannot_be_updated(self) -> None:
         async with self.stores.mcp._write() as db:
@@ -286,7 +305,6 @@ class ConfigurationCrudContractTests(unittest.IsolatedAsyncioTestCase):
                     name="historical_stdio",
                     transport="stdio",
                     config={"command": "python", "args": ["server.py"]},
-                    enabled=False,
                 )
             )
 
@@ -314,13 +332,12 @@ class ConfigurationCrudContractTests(unittest.IsolatedAsyncioTestCase):
                     "transport": "url",
                     "config": {"url": "http://example.test/mcp"},
                     "description": "keep description",
-                    "enabled": False,
                 },
             )
         self.assertEqual(created.status_code, 201, created.text)
         await self.stores.mcp.update(
             "rename_old",
-            McpServerUpdate(enabled=True),
+            McpServerUpdate(),
             inspection={
                 "status": "healthy",
                 "tools": {
@@ -353,14 +370,6 @@ class ConfigurationCrudContractTests(unittest.IsolatedAsyncioTestCase):
                 model_id=self._model_id,
                 prompt="rename B",
                 capabilities=["mcp:rename_old", "builtin:sandbox"],
-            )
-        )
-        untouched_null = await self.stores.agent.create_unique(
-            AgentCreate(
-                name="rename-agent-null",
-                model_id=self._model_id,
-                prompt="null",
-                capabilities=None,
             )
         )
         untouched_empty = await self.stores.agent.create_unique(
@@ -405,7 +414,6 @@ class ConfigurationCrudContractTests(unittest.IsolatedAsyncioTestCase):
             (await self.stores.agent.get_by_id(second.id)).capabilities,
             ["mcp:rename_new", "builtin:sandbox"],
         )
-        self.assertIsNone((await self.stores.agent.get_by_id(untouched_null.id)).capabilities)
         self.assertEqual((await self.stores.agent.get_by_id(untouched_empty.id)).capabilities, [])
         tool_codes = {item["code"] for item in tools.json()}
         self.assertIn("mcp:rename_new", tool_codes)
@@ -440,7 +448,6 @@ class ConfigurationCrudContractTests(unittest.IsolatedAsyncioTestCase):
                 name="rename_source",
                 transport="url",
                 config={"url": "http://source.example.test/mcp"},
-                enabled=False,
             )
         )
         await self.stores.mcp.create_unique(
@@ -448,18 +455,16 @@ class ConfigurationCrudContractTests(unittest.IsolatedAsyncioTestCase):
                 name="rename_taken",
                 transport="url",
                 config={"url": "http://taken.example.test/mcp"},
-                enabled=False,
             )
         )
         async with self.stores.mcp._write() as db:
             db.add_all(
                 [
-                    McpServer(name="rename_builtin", transport="builtin", config={}, enabled=True),
+                    McpServer(name="rename_builtin", transport="builtin", config={}),
                     McpServer(
                         name="rename_stdio",
                         transport="stdio",
                         config={"command": "python", "args": ["server.py"]},
-                        enabled=False,
                     ),
                 ]
             )
@@ -505,7 +510,6 @@ class ConfigurationCrudContractTests(unittest.IsolatedAsyncioTestCase):
                         name="custom_old",
                         transport="url",
                         config={"url": "http://old.example.test/mcp"},
-                        enabled=False,
                         created_at=now - timedelta(days=2),
                         updated_at=now - timedelta(days=2),
                     ),
@@ -513,7 +517,6 @@ class ConfigurationCrudContractTests(unittest.IsolatedAsyncioTestCase):
                         name="custom_new",
                         transport="url",
                         config={"url": "http://new.example.test/mcp"},
-                        enabled=False,
                         created_at=now,
                         updated_at=now,
                     ),
@@ -521,7 +524,6 @@ class ConfigurationCrudContractTests(unittest.IsolatedAsyncioTestCase):
                         name="builtin_old",
                         transport="builtin",
                         config={},
-                        enabled=True,
                         created_at=now - timedelta(days=3),
                         updated_at=now - timedelta(days=3),
                     ),
@@ -529,7 +531,6 @@ class ConfigurationCrudContractTests(unittest.IsolatedAsyncioTestCase):
                         name="builtin_new",
                         transport="builtin",
                         config={},
-                        enabled=True,
                         created_at=now - timedelta(days=1),
                         updated_at=now - timedelta(days=1),
                     ),
@@ -557,7 +558,6 @@ class ConfigurationCrudContractTests(unittest.IsolatedAsyncioTestCase):
                     "name": "referenced_mcp",
                     "transport": "url",
                     "config": {"url": "http://example.test/mcp"},
-                    "enabled": False,
                 },
             )
             tool = await client.post(
@@ -568,10 +568,6 @@ class ConfigurationCrudContractTests(unittest.IsolatedAsyncioTestCase):
                     "description": "referenced",
                     "parameters_json_schema": {"type": "object"},
                 },
-            )
-            await self.stores.mcp.update(
-                "referenced_mcp",
-                McpServerUpdate(enabled=True),
             )
             agent = await client.post(
                 "/api/v1/agents",
@@ -606,7 +602,6 @@ class ConfigurationCrudContractTests(unittest.IsolatedAsyncioTestCase):
                     name="builtin_protected",
                     transport="builtin",
                     config={},
-                    enabled=True,
                 )
             )
 
@@ -619,20 +614,6 @@ class ConfigurationCrudContractTests(unittest.IsolatedAsyncioTestCase):
             "内建 MCP 由程序管理，不能通过 API 删除",
         )
         self.assertIsNotNone(await self.stores.mcp.get_by_name("builtin_protected"))
-
-    async def test_auxiliary_update_creates_missing_default_row(self) -> None:
-        async with self.stores.auxiliary_model._write() as db:
-            row = await self.stores.auxiliary_model._get_by_use_case(db, "title")
-            await db.delete(row)
-
-        async with AsyncClient(transport=self._transport, base_url="http://test") as client:
-            response = await client.patch(
-                "/api/v1/auxiliary-models/title",
-                json={"llm_model_id": self._model_id},
-            )
-
-        self.assertEqual(response.status_code, 200, response.text)
-        self.assertEqual(response.json()["llm_model_id"], self._model_id)
 
 
 if __name__ == "__main__":

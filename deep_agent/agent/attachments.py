@@ -14,6 +14,7 @@ from deep_agent.agent.context_references import (
 )
 from deep_agent.schemas.attachment import AttachmentRef
 from deep_agent.schemas.context_reference import ContextReference
+from deep_agent.files.storage import FileStore, FileStoreError, PlatformFileStore
 
 ATTACHMENT_REF_KIND = "attachment-ref"
 _NATIVE_MEDIA_PREFIXES = ("image/", "audio/", "video/")
@@ -119,6 +120,7 @@ async def resolve_user_prompt(
     request_headers: Mapping[str, str],
     *,
     context_refs: Sequence[ContextReference] | None = None,
+    file_store: FileStore | None = None,
 ) -> list[UserContent]:
     parts: list[UserContent] = []
     text = message.strip()
@@ -132,6 +134,7 @@ async def resolve_user_prompt(
                 ref,
                 request_headers,
                 full=True,
+                file_store=file_store,
             )
         )
     return parts
@@ -142,6 +145,7 @@ async def resolve_history_for_llm(
     *,
     current_user_index: int | None,
     request_headers: Mapping[str, str],
+    file_store: FileStore | None = None,
 ) -> list[ModelMessage]:
     resolved: list[ModelMessage] = []
     for idx, message in enumerate(messages):
@@ -161,6 +165,7 @@ async def resolve_history_for_llm(
                         part.content,
                         request_headers,
                         full=full_turn,
+                        file_store=file_store,
                     ),
                 )
             )
@@ -168,11 +173,19 @@ async def resolve_history_for_llm(
     return resolved
 
 
-async def _download_file(file_id: str, request_headers: Mapping[str, str]) -> bytes:
-    from deepfos_platform.client.platform import PlatformAPI
-
-    api = PlatformAPI(header=request_headers)
-    data = await api.file.download(file_id)
+async def _download_file(
+    file_id: str,
+    request_headers: Mapping[str, str],
+    *,
+    file_store: FileStore | None = None,
+) -> bytes:
+    try:
+        data = await (file_store or PlatformFileStore()).download(
+            file_id,
+            request_headers,
+        )
+    except FileStoreError as exc:
+        raise AttachmentDownloadError(f"File download failed for {file_id}") from exc
     if _looks_like_platform_error_json(data):
         raise AttachmentDownloadError(f"Platform file download failed for {file_id}")
     return data
@@ -193,6 +206,7 @@ async def _resolve_user_prompt_part(
     request_headers: Mapping[str, str],
     *,
     full: bool,
+    file_store: FileStore | None = None,
 ) -> str | list[UserContent]:
     if isinstance(content, str):
         return content
@@ -228,6 +242,7 @@ async def _resolve_user_prompt_part(
                     ref,
                     request_headers,
                     full=full,
+                    file_store=file_store,
                 )
             )
             continue
@@ -245,6 +260,7 @@ async def _resolve_ref(
     request_headers: Mapping[str, str],
     *,
     full: bool,
+    file_store: FileStore | None = None,
 ) -> list[UserContent]:
     mime = (ref.mime or "").split(";", 1)[0].strip().lower()
     name = ref.name or ref.id
@@ -259,7 +275,11 @@ async def _resolve_ref(
 
     if _is_native_media(mime):
         try:
-            data = await _download_file(ref.id, request_headers)
+            data = await _download_file(
+                ref.id,
+                request_headers,
+                file_store=file_store,
+            )
         except AttachmentDownloadError:
             return [TextContent(f"[附件: {name}]（文件下载失败）")]
         return [BinaryContent(data=data, media_type=mime or "application/octet-stream")]

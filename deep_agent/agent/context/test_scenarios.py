@@ -37,9 +37,9 @@ CONTEXT_TEST_SCENARIOS: tuple[ContextTestScenario, ...] = (
     ContextTestScenario(
         key="long_chinese_summary",
         title="长中文项目记录",
-        description="构造多轮中文项目背景，验证主模型摘要和 Checkpoint 写入。",
+        description="构造多轮中文项目背景，验证主模型摘要和 Compaction 锚点写入。",
         recommended_prompt="请总结完整历史中的项目目标、关键约束、已有结论和未决事项。",
-        expected_behavior="触发单次摘要，达到目标线后继续回答并生成 Checkpoint。",
+        expected_behavior="触发单次摘要，达到目标线后继续回答并生成 Compaction 锚点。",
         user_template=(
             "第{turn}轮项目补充：目标是交付稳定的上下文压缩能力；"
             "约束是原始消息不可改写、摘要必须保留决策与未决事项。"
@@ -54,7 +54,7 @@ CONTEXT_TEST_SCENARIOS: tuple[ContextTestScenario, ...] = (
         title="多轮决策追踪",
         description="构造持续演进的产品决策，验证压缩后能否保留早期决定。",
         recommended_prompt="请按时间顺序列出已经确认的决策，并指出仍未解决的问题。",
-        expected_behavior="触发单次摘要并生成 Checkpoint，同时保留首轮任务、稳定决策和最近对话。",
+        expected_behavior="触发单次摘要并生成 Compaction 锚点，同时保留首轮任务、稳定决策和最近对话。",
         user_template=(
             "产品评审第{turn}轮：确认测试入口只服务人工复现，"
             "测试会话必须与普通会话隔离且可以直接删除。"
@@ -69,10 +69,10 @@ CONTEXT_TEST_SCENARIOS: tuple[ContextTestScenario, ...] = (
         title="中英代码混合记录",
         description="构造中文、英文、JSON 和代码混合历史，观察统一 Token 估算。",
         recommended_prompt="请提取历史中的配置约束、代码约定和最终验证结论。",
-        expected_behavior="按保守估算触发单次摘要并生成 Checkpoint，同时展示 Provider 误差。",
+        expected_behavior="按保守估算触发单次摘要并生成 Compaction 锚点，同时展示 Provider 误差。",
         user_template=(
             '第{turn}轮配置核对：context_window=true，language="zh-cn"，'
-            'JSON={{"checkpoint":"replace","raw_history":"append"}}。'
+            'JSON={{"compaction_event":"replace_prefix","raw_events":"append"}}。'
         ),
         assistant_template=(
             "Round {turn} result: keep raw messages immutable; "
@@ -120,32 +120,35 @@ def build_context_test_history(
     ]
     filler = _FILLER_BY_SCENARIO[scenario.key]
     repeated_filler = filler * _FILLER_REPETITIONS
+    estimated_message_tokens = estimator.messages(messages)
 
     for turn in range(1, _MAX_TURNS + 1):
-        messages.extend(
-            [
-                ModelRequest(
-                    parts=[
-                        UserPromptPart(
-                            content=(
-                                scenario.user_template.format(turn=turn)
-                                + repeated_filler
-                            )
+        new_messages: list[ModelMessage] = [
+            ModelRequest(
+                parts=[
+                    UserPromptPart(
+                        content=(
+                            scenario.user_template.format(turn=turn)
+                            + repeated_filler
                         )
-                    ]
-                ),
-                ModelResponse(
-                    parts=[
-                        TextPart(
-                            content=(
-                                scenario.assistant_template.format(turn=turn)
-                                + repeated_filler
-                            )
+                    )
+                ]
+            ),
+            ModelResponse(
+                parts=[
+                    TextPart(
+                        content=(
+                            scenario.assistant_template.format(turn=turn)
+                            + repeated_filler
                         )
-                    ],
-                    usage=RequestUsage(output_tokens=256),
-                ),
-            ]
+                    )
+                ],
+                usage=RequestUsage(output_tokens=256),
+            ),
+        ]
+        messages.extend(new_messages)
+        estimated_message_tokens += sum(
+            estimator.message(message) for message in new_messages
         )
         budget = build_context_budget(
             messages,
@@ -154,6 +157,7 @@ def build_context_test_history(
             estimator=estimator,
             output_history=messages,
             estimate_scope="history_only",
+            precomputed_message_tokens=estimated_message_tokens,
         )
         if (
             budget.trigger_tokens is not None

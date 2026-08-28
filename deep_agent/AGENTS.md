@@ -29,6 +29,7 @@ HTTP (REST/SSE)
     → ToolPackageRegistry.toolsets()
         ├─ builtin:general  UTC 时间 FunctionToolset
         ├─ builtin:sandbox  无状态 Python FunctionToolset
+        ├─ builtin:code-mode  Harness CodeMode + Monty（显式关联）
         ├─ mcp          请求时 `capabilities/mcp/resolver.py`（DB + mcps/ 兜底）
         └─ ui           代码内置或数据库工具包 → ExternalToolset
     → Agent.skills → Harness Skills（SKILL.md 渐进披露）
@@ -53,8 +54,13 @@ MCP 在请求时由 `resolve_mcp_toolsets` 解析（DB 行 + `mcps/` builtin 兜
 1. 解析 `StreamChatRequest`；`session_id` 缺省则生成 UUID
 2. **无 `agent_id`**：`build_runner(model?, capabilities?)` → `OPTION` 默认 `AgentSpec`
 3. **有 `agent_id`**：`build_runner_for_agent()` → `agents` 表 → `AgentSpec.from_row()` → 存储 `(agent_id, session_id)`
-4. `AgentRunner.run_stream()`：session 锁 → raw history / Checkpoint 投影 → Pydantic AI `AbstractCapability` 预算与压缩 → SSE 事件 → `append(new_messages)`
-5. `capabilities: null` → 仅 `default_enabled=True` 的工具包；显式列表按工具包编码启用
+4. `AgentRunner.run_stream()`：Session锁 → Event Store恢复模型Surface → Pydantic AI运行/压缩 → 临时SSE → 完整Part拆成Event；Run/Compaction终态按同一Event ID更新
+5. `capabilities`和`skills`都是非空显式列表；空列表表示本Agent不关联该类资源，不存在默认包继承
+
+Provider运行可用性只从类型、地址、凭据等真实配置派生，不保存`enabled`。v0.6.4起Model恢复
+非空、默认开启的`enabled`：只有模型启用且Provider有效时才可由Agent或请求级`model_id`选用；
+既有Agent引用不自动改写，但实际运行必须失败关闭。Skill、MCP、UI工具包和UI工具是否参与Run仍只看
+Agent显式关联，不恢复资源自身的启停字段。
 
 ### 正式取消（v0.3.10）
 
@@ -62,10 +68,12 @@ MCP 在请求时由 `resolve_mcp_toolsets` 解析（DB 行 + `mcps/` builtin 兜
 Pydantic AI `CancellationToken`。Runner 捕获 `RunCancelled` 后只持久化
 `RunCancelled.new_messages()` 并返回真实 `cancelled` SSE（含 `usage`）；不再探测其他 result、
 拼接流式文本、手工补 `ToolDenied` 或生成前端假事件。若 Provider 返回的最后一个非空部分响应
-仍标为 `complete`，持久化前统一规范化为 `state=interrupted`，History API 映射为
-`assistant.status=interrupted`；下一轮的悬空 Tool Call 由 Pydantic AI 自动补
-`outcome=interrupted`。已实时发布但未进入官方中断历史的工具调用先发送
-`tool_call_removed(reason=cancelled)`，避免刷新前后工具卡不一致。
+仍标为 `complete`，持久化前统一规范化为 `state=interrupted`，Event投影映射为
+`assistant.status=interrupted`；同一 Run 内没有结果的工具在 Conversation History 投影为
+`interrupted`，下一轮模型历史中的悬空 Tool Call 仍由 Pydantic AI 自动补
+`outcome=interrupted`。取消时，所有已实时发布但尚未返回结果的工具调用发送
+`tool_call_removed(reason=cancelled)`，关闭直播临时卡片；原始 Event 与 History 的
+`interrupted` 审计事实仍保留。
 
 普通工具在参数校验后发布 `tool_call`；若业务执行返回 Pydantic AI `ModelRetry`，对应官方
 `RetryPromptPart` 必须映射为 `tool_call_removed(reason=model_retry)`。客户端按
@@ -99,20 +107,31 @@ DeepAgent 自研 `capabilities.registry.ToolPackage` 是产品配置单位，包
 
 URL 与 Builtin MCP 的运行态不同：URL MCP 在管理员检测时保存 Tool Definitions 和 Server Instructions，Run 只读快照，首次真实调用时才创建官方 `MCPToolset`；Builtin MCP 仍由 Run-scoped Client 按需启动。两者最终工具名都由 `PrefixedToolset` 统一加 Server 前缀。缺少或配置失效的 URL 快照不披露工具，也不会因远端不可达阻塞普通聊天。
 
+v0.6.2起的 Hybrid Code Mode 实现位于 `code_mode/`；v0.6.3增加可信返回Schema、
+总量受限的嵌套审计和更明确的SDK作用域说明。产品配置单位仍是
+`builtin:code-mode` ToolPackage，运行时由 `HybridCodeMode` Capability 在最外层包装
+ToolSearch。只有已授权 MCP Toolset 会被标记为 Hybrid；已披露工具保留原生 Schema，
+又可在 Monty 中组合调用。`load_file_data` 是 code-only 文件原语，不出现在普通工具列表；
+其 Run Token、Base64 和大中间结果必须在进入 Event、History、SSE、轨迹、检索或日志前脱敏。
+
 新增横切能力时遵循：
 
-1. 确定性历史整理优先复用 Harness 的 Clamp、Deduplicate 和 Clear tiers。DeepAgent 的动态窗口预算、主动压缩 SSE、Checkpoint Hash/CAS 与目标复检属于产品语义，不能直接用通用 `ProcessHistory` 或 Harness `SummarizingCompaction` 替代。
+1. 历史整理优先复用Harness公开能力；v0.6.0不再使用批量`ClearToolResults`，只对摘要模型副本中的
+   单条超大结果做DSH式头尾裁剪。动态预算、Compaction Event、来源Hash、Evidence、SSE和目标复检
+   属于DeepAgent产品语义。
 2. 按 App、Space、权限或模态过滤工具优先使用 `PrepareTools`。
-3. v0.4.9 起，已授权 MCP 全局候选不超过 5 个时全部直接披露；超过 5 个时统一进入 `DeferredLoadingToolset`，由本地词法检索预选 Top 3、模型 `search_tools` 返回 Top 5。首版不使用 Embedding，不持久化索引。
+3. 当前已授权 MCP 全局候选不超过 10 个时全部直接披露；超过 10 个时统一进入 `DeferredLoadingToolset`，由本地词法检索预选 Top 3、模型 `search_tools` 返回 Top 5。首版不使用 Embedding，不持久化索引。
 4. 生命周期观测优先使用 Hooks/Instrumentation，并先完成 Token、Cookie、文件和工具结果脱敏。
 5. v0.4.0 起，通用大工具结果使用 Harness `ToolOutputLimits` + `Spill`，Store适配现有平台文件服务，
    不使用Harness默认本地文件Store。平台File ID同时作为当前会话的工具结果Artifact句柄；权限只能
-   从原始 `chat_messages`中的Tool Return元数据恢复，不能从Checkpoint或模型参数扩权。
+   从当前会话原始Tool Result Event恢复，不能从摘要Evidence或模型参数扩权。
+   v0.4.18的`export_file_to_download_center`可以主动把该句柄登记到下载中心，但不改变Artifact Store、
+   不建立第二层ID或Artifact表，也不把下载记录反向当作模型读取权限。
 6. Harness Memory 只保存明确的跨会话笔记，不替代聊天历史；namespace 必须由认证用户、Agent、App 和 Space 生成。
 7. Harness `StepPersistence` 不替代现有 SQL 会话、SSE 和 Deferred/Pending；只有副作用账本、子 Agent 或崩溃恢复成为真实需求时再接入。
 8. Harness 仍为 0.x。引入时必须将 `pydantic-ai-slim` 与 `pydantic-ai-harness` 固定为经过联合回归的准确版本，禁止继续依赖无上限 `>=` 漂移。
 9. 不要通过修改 `AgentRunner` 主循环重复实现 Pydantic AI 已提供的机制。
-10. Harness 0.21 `Skills` 只负责延迟披露 `SKILL.md` 正文；第三方 Skill 的安装、版本、权限、素材读取和脚本隔离仍由 DeepAgent 产品层负责。v0.3.23 的系统工具 `read_file` 统一读取会话附件与 Skill 素材，脚本执行只复用 Sandbox Backend 契约，不能把它们误写成 Harness 能力。
+10. Harness 0.26 `Skills` 只负责延迟披露 `SKILL.md` 正文；第三方 Skill 的安装、版本、权限、素材读取和脚本隔离仍由 DeepAgent 产品层负责。v0.3.23 的系统工具 `read_file` 统一读取会话附件与 Skill 素材，脚本执行只复用 Sandbox Backend 契约，不能把它们误写成 Harness 能力。
 11. `IncludeToolReturnSchemas` 发生在模型请求前的 Tool Definition 准备阶段，不是工具执行后给真实结果追加 Schema。首版只允许按最终稳定协议名的明确白名单启用，并要求存在可信、稳定的返回 Schema；不得通过名称包含 `query` 等模糊规则自动扩大范围。延迟 MCP 工具只有被 Tool Search 披露时才携带其返回 Schema，并必须观测新增 Schema Token。真实结果过大或空字段过多继续由分页、投影或 `ToolOutputLimits`/Artifact 治理。
 12. Prompt Cache 不是跨 Provider 的统一 DeepAgent 缓存。DeepSeek 等 Provider 的自动缓存只读取其 Usage 命中/未命中数据，不改写请求；显式 `CachePoint`、cache key 和 TTL 只能在模型目录确认具体 Provider 支持后启用。统一观测可以归一化指标，不能伪造统一缓存协议。
 13. v0.3.17 使用 Pydantic AI 官方 `conversation_id/run_id` 贯通运行：`conversation_id=deepagent:{agent_id}:{session_id}` 在同一 Session 内稳定，每次发送、Deferred 恢复、重试或主动压缩使用新的 `run_id`。第一阶段只输出脱敏结构化日志和当前页面 Run 指标，不把高频运行数据写入业务 MySQL；后续 OTLP/Instrumentation 不得建立第二套 Agent 生命周期。
@@ -122,28 +141,16 @@ URL 与 Builtin MCP 的运行态不同：URL MCP 在管理员检测时保存 Too
 升级 Pydantic AI/Harness 时只做相对该基线的增量审计，不从历史 TODO 重新发散；没有真实触发条件的
 框架能力不得因为“官方已经提供”就进入开发计划。
 
-当前上下文压缩默认自动启用：模型配置有效 `context_window_tokens` 即启用，否则停用。
-摘要始终复用当前 Agent 主模型，并与正式回答共享 `RunUsage` 和全局 `UsageLimits`；
-`chat_messages` 保持完整事实源，只有摘要成功且复检达到目标线时才覆盖 Checkpoint。
-v0.3.4 同时提供独立的 session 主动压缩 SSE 接口；它跳过自动触发线，也不因历史较短、
-已经生成 Checkpoint 或没有新增消息而拒绝用户操作。后端仍要求安全前缀、目标复检、历史 Hash
-与 Checkpoint CAS 全部通过；无有效收益返回 `noop`，失败时不得用 Sliding Window 冒充成功。
+当前上下文压缩在模型配置有效`context_window_tokens`时启用，否则停用，并固定使用当前Agent模型。
+自动、主动和Provider Overflow调用同一安全前缀、
+八段摘要、Evidence与目标复检流程；Compaction从Running原位更新到终态，失败不改变Surface。
+摘要总预算300秒，每约10秒发送非持久化进度；客户端取消复用正式Run Cancellation Token。Timeout不重试，
+仅满足时间与剩余预算条件的429/502/503/504快速失败可重试一次。Provider原生CompactionPart作为普通
+Provider Part保存，不能替代DeepAgent跨Provider摘要。
 
-v0.3.6 的摘要链路只允许一次语义摘要。压缩器同时校验最终投影目标和摘要请求窗口，保留最近
-历史最多的安全切分点；不再使用 192K 固定封顶、滚动分块或第二次更激进摘要。429、502、
-503、504、连接重置和超时可用同一 Prompt 重试一次，自动链路还必须为正式回答保留一次请求。
-
-v0.3.13 起，自动压缩的内部摘要复用正式 Run 的 Pydantic AI `CancellationToken`；用户停止时
-摘要调用与外层 Run 一起取消，`RunCancelled` 不得转成 Sliding Window 继续回答。工具边界和
-历史待处理判断使用2.31的`BaseToolCallPart` / `BaseToolReturnPart`，同时覆盖Local Tool、
-Tool Search 和 Provider Native Tool。Provider 原生 OpenAI/Anthropic Compaction 暂不与
-DeepAgent Checkpoint 混用；只有不透明 `provider_details` 的 `CompactionPart` 继续拒绝落盘。
-
-v0.3.16 起，自动与主动压缩必须调用同一个“确定性整理 → 单次摘要 → 目标复检”内部投影流程。
-摘要输出固定为任务目标与约束、关键决策及理由、事实/文件/标识和工具结论、当前状态、下一步、未决问题
-与阻塞六段；旧摘要只作为一次锚点更新。运行压缩相关改动时执行
-`python3.12 tests/check_context_compaction_coverage.py`，核心行覆盖率不得低于 95%，分支覆盖率
-不得低于 85%。
+压缩前的预算估算、安全边界选择和Evidence整理必须在线性复杂度内完成，并把CPU准备工作移出SSE事件
+循环；准备耗时超过心跳周期时继续发送`preparing`。实时SSE不重复发送持久化Conversation Item；
+客户端用流式事件展示当前Run，并在正常结束、重连或重新打开会话时通过`/history`读取最终投影。
 
 v0.3.14 起部署入口固定每个 Pod 一个异步 Gunicorn Worker，使 session 取消请求与进程内
 `ActiveRunRegistry` 一致命中。主动压缩的 `context_compaction_result` 不再等待二次
@@ -168,7 +175,8 @@ XML + JSON 投影。业务字段语义仍由具体 Agent Prompt 负责。
 | 文件 | 职责 |
 | --- | --- |
 | `spec.py` | `AgentSpec`：`from_row()`、model、instructions、capabilities、skills |
-| `history.py` | `ModelMessage[]` → 前端时间线 |
+| `history.py` | 模型历史过滤、取消修复和运行时辅助；不生成前端 DTO |
+| `../conversation/` | Event → `ConversationItem`纯投影；供`/history`与持久化SSE共用 |
 | `factory.py` | `build_agent()` — model 字符串或 OpenAI 兼容 endpoint |
 | `models/` | models.dev 管理员刷新、目录标准化和 Provider/模型适配 |
 | `attachment_extractors.py` | 文本、DOCX、XLSX 按需解析、分页与文件安全限制 |
@@ -184,7 +192,7 @@ XML + JSON 投影。业务字段语义仍由具体 Agent Prompt 负责。
 | 路径 | 职责 |
 | --- | --- |
 | `registry.py` | `ToolInfo` / `ToolPackage` / `ToolPackageRegistry` |
-| `native/builtin.py` | 默认启用的内置“通用工具”，当前提供 `get_current_time` |
+| `native/builtin.py` | 内置“通用工具”，当前提供 `get_current_time` |
 | `mcp/db_loader.py` | 从 `mcp_servers` 构建 MCP ToolPackage 与快照 Toolset |
 | `mcp/builtin.py` | 发现 `mcps/<name>/server.py` |
 | `mcp/toolset_builder.py` | url / stdio / builtin + header 注入 |
@@ -194,11 +202,13 @@ XML + JSON 投影。业务字段语义仍由具体 Agent Prompt 负责。
 | `mcp/run_scoped.py` | builtin MCP：按 agent run 租约 HTTP client |
 | `mcp/lease_manager.py` | worker 级 MCP lease + shared registry touch |
 | `ui/registry.py` | builtin/manual UI 工具按包筛选、合并和 `prepare_ui_tool_packages_for_spec` |
-| `../sandbox/toolset.py` | 默认关闭的 `builtin:sandbox`；代理 PythonExecutionBackend |
+| `../sandbox/toolset.py` | `builtin:sandbox`；代理 PythonExecutionBackend |
 
 `../files/`不是 ToolPackage：它按当前会话附件和已授权 Skill资源自动注入统一 `read_file`，
-并负责来源隔离、文本/Word/Excel分页、同一 Run 的字节/解析缓存和并发 single-flight。图片不经过
-`read_file`，仅作为当前轮原生多模态附件送给支持 `image` 的模型。
+并负责来源隔离、文本/Word/Excel分页、同一 Run 的字节/解析缓存和并发 single-flight。具备可信
+user/App/Space上下文时，`export_file_to_download_center`始终直接披露，用于新建UTF-8文本文件或复用
+当前会话已有平台文件并登记下载中心。图片不经过`read_file`，仅作为当前轮原生多模态附件送给支持
+`image`的模型。
 
 ### `skills/`
 
@@ -215,13 +225,13 @@ XML + JSON 投影。业务字段语义仍由具体 Agent Prompt 负责。
 | 文件 | 路由 |
 | --- | --- |
 | `chat.py` | `POST /chat`, `POST /chat/stream` |
-| `agents.py` | CRUD `/agents` |
+| `admin.py` | `GET /admin/access` 与统一企业管理员依赖；管理Router复用同一门禁 |
+| `agents.py` | 管理员列表/增删改；`GET /agents/{id}`保持业务助手公开读取 |
 | `mcp.py` | CRUD `/mcp`、统一检测 `/mcp/{name}/inspect` |
 | `ui_tools.py` | CRUD `/ui-tools`；工具必须归属手工 UI 工具包 |
 | `ui_tool_packages.py` | CRUD `/ui-tool-packages`；代码内置包只读 |
-| `skills.py` | Skill 目录、安装、替换、启停、资源和原包下载 |
-| `sessions.py` | 会话列表 / 历史 / 删除 / 正式取消当前 Run |
-| `auxiliary_models.py` | CRUD `/auxiliary-models` |
+| `skills.py` | Skill 目录、安装、替换、资源和原包下载 |
+| `sessions.py` | 会话列表、Conversation History、Event分页、上下文状态、删除与正式取消当前Run |
 | `tools.py` | `GET /tools` |
 | `deps.py` | `build_runner` / `build_runner_for_agent`，统一承接多入口的运行器组装 |
 
@@ -231,23 +241,22 @@ XML + JSON 投影。业务字段语义仍由具体 Agent Prompt 负责。
 | --- | --- |
 | `deps.py` | `get_*_store(ctx)` Depends |
 | `conversation.py` | `SessionStore` 协议 + SQL/内存协调器（跨表写入、进程锁） |
-| `stores/` | 表 Store（含 `model_catalog/`、`skill_package/`、`ui_tool_package/`、`context_checkpoint/`）+ `bundle.DataStores` |
+| `stores/` | 表Store（含`event/`、`chat_session/`、`model_catalog/`、`skill_package/`、`ui_tool_package/`）+ `bundle.DataStores` |
 | `factory.py` / `dialect.py` | `create_engine` / `close_db`、`bootstrap_database()`、方言解析 |
 | `session_scope.py` / `session_list.py` | 会话作用域解析、列表过滤 DTO |
 
 | 表 | 用途 |
 | --- | --- |
 | `agents` | DB Agent（UUID PK，name 唯一） |
-| `llm_models` | LLM 运行时唯一模型事实：连接、模态、上下文、最大输出与 tags |
+| `llm_providers` | Provider类型、Base URL、凭据和协议配置；不保存独立启停状态 |
+| `llm_models` | LLM 运行时唯一模型事实：Provider引用、模型启停、模态、上下文、最大输出与 tags |
 | `model_catalog` | models.dev 的 Lab/Model/Provider 数据库快照，只用于浏览和预填 |
-| `auxiliary_model_configs` | 辅助模型场景绑定；当前只用于会话标题生成 |
 | `mcp_servers` | MCP transport、config JSON、最近一次 inspection 检测快照 |
 | `skill_packages` | 上传 Skill 当前安装版本的元数据、平台 File ID、Manifest 与资源索引 |
 | `ui_tool_packages` | 手工 UI 工具包；代码内置 `ui:builtin` 不写表 |
 | `ui_tool_definitions` | 手工 UI 工具定义及所属包；builtin 由代码生成，不写表 |
-| `chat_sessions` | 会话元数据 |
-| `chat_messages` | `ModelMessage` JSONB 历史 |
-| `chat_context_checkpoints` | 脱敏后的模型输入派生投影；不替代原始历史 |
+| `chat_sessions` | 全局唯一会话、Agent/User归属、可空App/Space来源、标题与Sequence分配 |
+| `chat_session_events` | Message、Title、Compaction、Tool、Plan和Context的唯一有序事实源 |
 
 配置备份必须在`maintenance/config_backup.py`中把每张ORM业务表明确归类为复制配置数据或只保留
 结构；新增表未归类时备份应失败。上传Skill原ZIP属于平台外部文件，不进入SQLite配置备份，完整
@@ -257,8 +266,9 @@ XML + JSON 投影。业务字段语义仍由具体 Agent Prompt 负责。
 
 ### 内置工具包
 
-`builtin:general` 只提供当前时间且默认启用；`builtin:sandbox` 提供 Python 计算和条件式 Skill 脚本执行，
-且默认关闭。每个包严格包装一个 Toolset。内置包由代码随版本发布，
+`builtin:general` 只提供当前时间；`builtin:sandbox` 提供 Python 计算和条件式 Skill 脚本执行；
+`builtin:code-mode` 仅在 Agent 显式关联时注入 `run_code`，用于编排当前已授权 MCP。
+二者都只在Agent的`capabilities`显式关联后进入Run。每个包严格包装一个 Toolset。内置包由代码随版本发布，
 不在数据库注册；配置中心只读展示，Agent 仍按整包选择。
 
 ### 系统工具目录
@@ -269,26 +279,25 @@ Search和MCP Resource分组说明工具来源与自动注入条件。`read_tool_
 `runtime:*` 仅是 Console 展示编码，不得注册到 ToolPackage Registry、`/tools` 或
 `agents.capabilities`。
 
-任务规划使用Harness 0.21默认的`write_plan`、`read_plan`、`add_task`、
-`update_task_status`、`update_task_statuses`和`remove_task`。每个Runner Run开始时创建独立
-`InMemoryPlanStore`；成功的规划Tool Return从Store读取快照写入Part metadata，SSE/History仅映射
-该快照。不得把计划Reminder持久化成用户消息，也不得为单轮计划新增表、跨轮Store或自研状态机。
+任务规划在Harness 0.26中只启用`write_plan`完整替换工具。成功Tool Result的metadata保存完整快照并
+作为普通Event持久化；Deferred新Run沿用Turn并恢复最近成功快照，新用户Turn使用空Store。不得新增
+Plan表、隐藏全局计划、Reminder用户消息或自研任务状态机。
 
 ### Skill
 
 - Skill 不属于 ToolPackage，Agent 通过 `agents.skills` 独立选择。
 - 代码内置只读包位于 `builtin_skills/<code>/SKILL.md`。
 - 上传包由 `/api/v1/skills` 校验后保存到平台文件服务，`skill_packages` 只存 File ID 和索引。
-- 当前 Pod 只保留 `runtime-skills/<code>/` 一份上传 Skill 运行副本；启动、安装、替换、启用和
+- 当前 Pod 只保留 `runtime-skills/<code>/` 一份上传 Skill 运行副本；启动、安装、替换和
   `POST /api/v1/skills/{code}/reload` 负责同步，普通 Run 不访问平台文件服务。Hash 只用于完整性
   和过期判断，不代表产品版本，也不保留历史目录。
 - 同 Hash包替换必须先验证平台原 ZIP：可下载时返回 `noop`；原 File ID失效时重新上传原包、
   原子更新记录并返回 `repaired`。不得只用请求字节恢复当前 Pod而让后续重启再次失败。
-- Harness 0.21 `Skills` 负责 `load_capability` 渐进披露；DeepAgent通过 `list_skill_resources`
+- Harness 0.26 `Skills` 负责 `load_capability` 渐进披露；DeepAgent通过 `list_skill_resources`
   提供授权目录，通过系统 `read_file`读取正文。
 - 文本、DOCX 和 XLSX 根据索引中的路径、MIME 与后缀按行、逻辑块或物理行分页；图片和其他
   二进制只展示元数据，不经文件工具读取。历史安装包不需要为XLSX重新生成索引。
-- `scripts/`、`tools/` 可以随包保存并列出路径，但不能通过资源工具读取。Agent选择该Skill并启用
+- `scripts/`、`tools/` 可以随包保存并列出路径，但不能通过资源工具读取。Agent选择该Skill并关联
   `builtin:sandbox`时，`execute_skill_script`与 `execute_python`共用当前Python沙箱Backend。
 - 单个上传 Skill 文件缺失或同步失败时，本轮跳过该 Skill 并继续运行；不得让它阻塞其他 Skill、
   MCP 或普通回答。诊断进入 `/skills` 的派生状态与 `final.context.skills`，不写数据库状态字段。
@@ -308,7 +317,7 @@ Search和MCP Resource分组说明工具来源与自动注入条件。`read_tool_
 
 代码内置 `builtin__confirm`、`builtin__choice` 同属只读包 `ui:builtin`。手工包保存于
 `ui_tool_packages`，工具通过 `package_code` 归属；Agent 的 `capabilities` 只保存包编码，
-选中后包内所有启用且 Schema 有效的工具进入同一个 ExternalToolset。内置包和工具不能修改
+选中后包内所有 Schema 有效的工具进入同一个 ExternalToolset。内置包和工具不能修改
 或删除；手工包包含工具或被 Agent 引用时也不能删除。
 
 `builtin__choice` 始终支持候选外自由输入，结果固定为 `{selected: string[], custom_input: string | null}`；单选、多选和自由输入共用这一结构。
@@ -319,8 +328,8 @@ Search和MCP Resource分组说明工具来源与自动注入条件。`read_tool_
 `resource={type: attachment, file_id}`，Skill使用
 `resource={type: skill, skill_code, path}`。工具首次通常只传来源，随后根据
 `has_more/next_offset`渐进读取。合法附件ID范围必须从当前消息和当前会话完整
-`chat_messages` 建立，不能从可能被裁剪的 Checkpoint 建立，也不能仅依赖平台下载权限。
-Skill路径必须属于当前 Agent已选择、启用且运行目录就绪的资源索引。字节和解析结果只缓存到
+原始附件Event建立，不能从摘要Evidence建立，也不能仅依赖平台下载权限。
+Skill路径必须属于当前 Agent已选择且运行目录就绪的资源索引。字节和解析结果只缓存到
 本次用户消息对应的完整 Run终态，不跨Run、进程或数据库保存。
 
 图片、音频和视频不进入 `read_file`。当前轮媒体附件直接作为原生多模态内容交给Provider；
@@ -330,6 +339,11 @@ Skill路径必须属于当前 Agent已选择、启用且运行目录就绪的资
 历史 `extracted_text` 仅为回放兼容。完整设计见
 [`../docs/design/06-attachment-parsing/`](../docs/design/06-attachment-parsing/)。
 
+`export_file_to_download_center`与读取工具方向相反：`source=content`把完整UTF-8文本上传为平台DL文件后
+登记下载记录；`source=platform_file`只接受当前会话附件或大工具Artifact的File ID，并复用原文件。
+登记失败时只补偿删除本次新上传的文件，不删除已有来源文件。它不是Output Tool，不改Final/SSE结构，
+成功后模型只需在最终正文说明文件名并提示用户前往下载中心。
+
 ### 大工具结果
 
 普通Function、MCP、Sandbox和MCP Resource工具的返回在进入模型历史前经过Harness
@@ -337,15 +351,17 @@ Skill路径必须属于当前 Agent已选择、启用且运行目录就绪的资
 24K。超过阈值时，完整UTF-8结果上传为平台 `DL` 文件，历史只保存受限预览和
 `ToolReturnPart.metadata.overflow_handle`。`read_file`、`read_tool_result`、Skill加载和Tool Search
 不再次进入该治理链路，避免递归外置。
+结构化返回使用Harness原生`json_lines` Serializer：顶层Sequence在Spill Artifact中每项一行，
+用于`read_tool_result`按记录分页和关键词筛选；顶层Mapping使用缩进JSON，不猜测业务字段。
+未达到Spill阈值的结果继续保持原对象。
 
-平台File ID就是当前会话的 `artifact_id`，不增加Artifact表。新Run只从当前会话完整原始History
-索引允许的句柄；Checkpoint会脱敏metadata，只用于模型投影，不能作为授权事实源。同一Run回读
-复用 `AgentDeps.file_bytes`，并发下载使用single-flight。上传失败回退8K字符截断；取消必须原样传播。
-SSE/History可选输出 `artifacts`元数据，但不得在日志记录句柄、完整结果、Header或请求内容。
+平台File ID就是当前会话的`artifact_id`，不增加Artifact表。新Run只从当前会话完整原始Tool Result
+Event索引允许的句柄；摘要Evidence不能作为授权事实源。同一Run回读复用`AgentDeps.file_bytes`并使用
+single-flight。Spill失败时Event保存完整`inline_fallback`并标记失败，模型只接收受限投影；取消原样传播。
 
 ### Python Sandbox
 
-`execute_python` 属于默认关闭的 `builtin:sandbox`，与时间工具分开整包选择。v0.3.22 的
+`execute_python` 属于 `builtin:sandbox`，与时间工具分开整包选择；新Agent不会自动关联。v0.3.22 的
 `execute_skill_script` 复用同一 Backend，但只接受已索引的 UTF-8 `.py`、JSON inputs、显式参数和
 最多 16 个同 Skill 授权资源；正式结果只从 `outputs/result.json` 读取。`subprocess-dev` 的
 二者都通过当前 `SubprocessBackend`启动全新的 `.venv-sandbox` Python子进程；结束后销毁进程和
@@ -379,7 +395,23 @@ DEEP_AGENT_LOCAL_TOKEN_COOKIE=<可选，仅在目标环境要求 Cookie 时填�
 
 本地入口只监听 `127.0.0.1`。它会覆盖浏览器提交的 `user / authorization / x-user-token / cookie`，保留控制台提交的调试 `app`。后端根据标准平台编码规则从 App 去掉末尾三位得到 Space，并在未显式提供语言时使用 `zh-cn`。身份和 Token 不得进入源码、仓库、浏览器存储、日志或测试夹具。
 
+纯本地 SQLite、不使用平台 App 时，仓库外 Profile 可设置
+`DEEP_AGENT_LOCAL_ADMIN_BYPASS=true`。此模式仍要求 `DEEP_AGENT_LOCAL_USER`，允许省略平台 Token，
+并只通过 `local_dev` 写入的内部 ASGI scope 标记放行 Console 管理接口；生产入口和 HTTP Header
+不能触发。Profile 是本地运行事实源，文件值必须覆盖启动 Shell 中同名的环境变量。
+
 注意：应用启动会自动执行 Alembic `upgrade head`。本地 Profile 如果连接共享 Test 数据库，新增迁移会随本地服务启动直接应用；涉及删列等不兼容 DDL 时，必须先协调 Test 服务维护窗口，不能直接启动新代码。
+
+### Console企业管理员鉴权
+
+`security/console_admin.py`集中处理Console和管理API权限。当前只接受平台
+`checkEnterpriseAdmin`返回`true`的企业管理员，内部角色为`enterprise_admin`；固定账号`admin`
+必须明确拒绝。鉴权结果按用户和凭证摘要缓存30秒，原始Token/Cookie不得进入缓存键明文、日志或响应。
+平台401映射为未认证，超时、网络或异常响应映射为503并失败关闭。
+
+管理Router统一使用`CONSOLE_ADMIN_DEPENDENCIES`，不要在业务函数里复制账号或角色判断。新增管理接口
+必须加入路由审计测试；Chat、Session、History、附件和固定Agent读取等运行接口不能误加管理员门禁。
+完整边界见[`../docs/guides/console-admin-access.md`](../docs/guides/console-admin-access.md)。
 
 ### Agent（`DEEP_AGENT_` 前缀）
 
@@ -417,17 +449,19 @@ alembic upgrade head
 
 ## API 速查
 
-| 方法 | 路径 | 需 DB |
+| 方法 | 路径 | 需 DB / 权限 |
 | --- | --- | --- |
 | GET | `/health`, `/info`, `/docs` | 否 |
+| GET | `/api/v1/admin/access` | 否；当前平台身份，企业管理员返回`allowed=true` |
 | POST | `/api/v1/chat`, `/api/v1/chat/stream` | 否（持久化需 DB） |
-| CRUD | `/api/v1/agents` | 是 |
-| CRUD | `/api/v1/mcp` | 是 |
-| CRUD | `/api/v1/ui-tools` | 是 |
-| GET | `/api/v1/tools` | 否（无 DB 时跳过动态 UI 工具） |
-| GET | `/api/v1/global-settings` | 否；无需额外身份依赖，返回安全白名单，只读 |
-| GET/POST | `/api/v1/llm-models/catalog`、`/api/v1/llm-models/catalog/refresh` | 是；目录只读查询、管理员手工全量刷新 |
-| GET/POST | `/api/v1/context-test-scenarios` | 是；按当前模型预算创建普通测试会话 |
+| GET | `/api/v1/agents/{agent_id}` | 是；业务助手公开读取固定Agent |
+| CRUD | `/api/v1/agents` | 是；企业管理员，单个GET除外 |
+| CRUD | `/api/v1/mcp` | 是；企业管理员 |
+| CRUD | `/api/v1/ui-tools` | 是；企业管理员 |
+| GET | `/api/v1/tools` | 企业管理员；无 DB 时跳过动态 UI 工具 |
+| GET | `/api/v1/global-settings` | 企业管理员；返回安全白名单，只读 |
+| GET/POST | `/api/v1/llm-models/catalog`、`/api/v1/llm-models/catalog/refresh` | 是；企业管理员查询或刷新 |
+| GET/POST | `/api/v1/context-test-scenarios` | 是；企业管理员按当前模型预算创建测试会话 |
 | GET/POST | `/api/v1/uploads/capabilities`、`/api/v1/uploads` | 否/否；后端仍执行用户与文件限制校验 |
 | GET | `/api/v1/request-context` | 否；返回当前请求上下文最终值 |
 | GET | `/api/v1/sessions/{id}/context-status` | 是；沿用会话所有权校验 |
@@ -445,20 +479,19 @@ SSE 协议：[`../docs/guides/sse-protocol.md`](../docs/guides/sse-protocol.md)�
    - 多入口共享组装 → `api/v1/deps.py`（变化量留在入口，上下文在 `_build_*` 内统一解包）
 1. 包名 **`deep_agent`**，启动 `deep_agent.main:app`（非 `app.main`）
 2. 扩展优先走路径注册，避免改 `runner.py` 核心
-3. 工具包命名：`builtin:general` \| `builtin:sandbox` \| `mcp:<name>` \| `ui:<package>`；一个包严格包装一个 Toolset，Agent 按包选择，工具协议名不随包编码变化。Skill 使用独立 `agents.skills`，`runtime:*`系统工具不得塞回 ToolPackage
-4. DB Agent 会话：复合键 `(agent_id, session_id)`；无 agent 时 `agent_id=''`
-5. 同 session 用 `SessionStore.lock()` 串行；多实例 DB 级锁未实现
+3. 工具包命名：`builtin:general` \| `builtin:sandbox` \| `builtin:code-mode` \| `mcp:<name>` \| `ui:<package>`；一个包严格包装一个 Toolset，Agent 按包选择，工具协议名不随包编码变化。Skill 使用独立 `agents.skills`，`runtime:*`系统工具不得塞回 ToolPackage
+4. 会话`session_id`全局唯一，新会话必须有明确`agent_id + user_id`；App/Space可空且不参与当前授权
+5. 同Session进程内用`SessionStore.lock()`串行；Sequence由Session行和`next_sequence`在短事务分配
 6. 配置保存先完成 Schema/引用校验，再进入写事务；一次 API 业务变更不要串联多个各自提交的 Store `_write()`。MCP 检测等外部 I/O 先基于候选配置执行，再把配置与检测快照一次性提交。模型目录联网、解析和完整校验必须在事务前完成，随后单事务全量替换；模型配置保存不得隐式联网。
 7. `model_catalog` 不是运行时事实源，目录刷新不得修改已有 `llm_models`。模型名称和 Base URL 不再用于猜测模态；上下文缺失时当前自动压缩保持关闭。
 8. 配置中心必填文本会去除首尾空白并拒绝空值，显式把必填更新字段传为 `null` 返回 422；重复名称返回 409。删除仍被 Agent 引用的 MCP、UI 工具包或包内工具返回 409，并在 `detail.referenced_by` 列出引用方。
 9. 请求上下文以 App 为主键：标准 App 必须以三位数字结尾；Space 自动取 `app[:-3]`。App 与显式 Space 不一致时返回 422，Language 缺失时默认 `zh-cn`。
-10. 上下文压缩在模型配置有效上下文窗口时自动启用；环境变量只调节全局比例、工具保留量和摘要超时，
-   不提供启用开关。只有主模型实际生成/更新 Summary 且复检达标时才写 Checkpoint；
-   确定性压缩、Sliding Window、Pending、取消、失败都不更新。Checkpoint 写入失败不能让已完成对话失败。
-11. Console 压缩测试会话是管理员控制台的常驻功能；后端必须按当前模型实时预算构造可重新
-    反序列化的普通对话历史，不得直接写 Checkpoint，也不得新增测试专用表。
+10. 上下文压缩只在八段Summary、Evidence、来源Hash和目标预算全部通过时把同一Compaction Event更新为
+    Completed；失败终态保留审计但不改变模型Surface。
+11. Console压缩测试会话是管理员功能；后端按当前模型实时预算构造可往返的普通Event，不得直接伪造
+    Completed Compaction或新增测试专用表。
 
 | 现象 | 原因 |
 | --- | --- |
-| MCP 工具为空 | MCP 未 enabled，或 Agent 未选择对应 `mcp:<name>` |
+| MCP 工具为空 | Agent 未选择对应 `mcp:<name>`，或URL MCP缺少有效工具快照 |
 | 历史不在预期数据库 | 未配置 DBMS 时实际使用默认文件 SQLite；检查 `DEEP_AGENT_SQLITE_PATH` |

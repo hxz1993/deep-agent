@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 
 from deep_agent.api.v1.request_context import router as request_context_router
 from deep_agent.local_dev import LocalIdentity, LocalIdentityAdapter, load_local_config
+from deep_agent.security import LOCAL_CONSOLE_ADMIN_SCOPE_KEY
 
 
 class HeaderCaptureApp:
@@ -94,6 +95,26 @@ class LocalIdentityAdapterTests(unittest.IsolatedAsyncioTestCase):
         await adapter(scope, unused, unused)
         self.assertIs(target.scope, scope)
 
+    async def test_local_admin_bypass_uses_internal_scope_without_fake_token(self) -> None:
+        target = HeaderCaptureApp()
+        adapter = LocalIdentityAdapter(
+            target,
+            LocalIdentity(
+                user="local-user",
+                console_admin_bypass=True,
+            ),
+        )
+        scope = {"type": "http", "headers": []}
+
+        async def unused(*args, **kwargs):
+            return None
+
+        await adapter(scope, unused, unused)
+        headers = header_map(target.scope)
+
+        self.assertEqual(headers, {"user": "local-user"})
+        self.assertIs(target.scope[LOCAL_CONSOLE_ADMIN_SCOPE_KEY], True)
+
 
 class LocalIdentityRequestContextTests(unittest.TestCase):
     def test_request_context_uses_local_identity_and_console_context(self) -> None:
@@ -147,6 +168,26 @@ class LocalConfigTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "DEEP_AGENT_LOCAL_TOKEN"):
             LocalIdentity.from_mapping({"DEEP_AGENT_LOCAL_USER": "user"})
 
+    def test_admin_bypass_requires_user_but_not_platform_token(self) -> None:
+        identity = LocalIdentity.from_mapping(
+            {
+                "DEEP_AGENT_LOCAL_USER": "local-user",
+                "DEEP_AGENT_LOCAL_ADMIN_BYPASS": "true",
+            }
+        )
+        self.assertEqual(identity.user, "local-user")
+        self.assertIsNone(identity.token)
+        self.assertTrue(identity.console_admin_bypass)
+
+    def test_admin_bypass_rejects_invalid_boolean(self) -> None:
+        with self.assertRaisesRegex(ValueError, "must be a boolean"):
+            LocalIdentity.from_mapping(
+                {
+                    "DEEP_AGENT_LOCAL_USER": "local-user",
+                    "DEEP_AGENT_LOCAL_ADMIN_BYPASS": "sometimes",
+                }
+            )
+
     def test_external_file_loads_runtime_but_not_identity_into_environment(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "local.env"
@@ -172,6 +213,7 @@ class LocalConfigTests(unittest.TestCase):
             try:
                 for key in keys:
                     os.environ.pop(key, None)
+                os.environ["DEEP_AGENT_DBMS_HOSTNAME"] = "ambient-db"
                 identity = load_local_config(path)
                 self.assertEqual(identity.user, "file-user")
                 self.assertEqual(identity.token, "file-token")

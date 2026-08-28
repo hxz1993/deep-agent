@@ -12,12 +12,11 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 from deep_agent.db.models import (
     Agent,
-    AuxiliaryModelConfig,
     Base,
-    ChatContextCheckpoint,
-    ChatMessage,
     ChatSession,
+    ChatSessionEvent,
     LlmModel,
+    LlmProvider,
     McpServer,
     ModelCatalog,
     SkillPackage,
@@ -55,17 +54,16 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
 
             self.assertEqual(
                 result.path.name,
-                "deep-agent-config-test-v006-20260723-131415.db",
+                "deep-agent-config-test-v011-20260723-131415.db",
             )
             self.assertEqual(
                 [path.resolve() for path in (output_root / "test").iterdir()],
                 [result.path.resolve()],
             )
-            self.assertEqual(result.revision, "006")
+            self.assertEqual(result.revision, "011")
             self.assertEqual(result.row_counts["agents"], 1)
             self.assertEqual(result.row_counts["chat_sessions"], 0)
-            self.assertEqual(result.row_counts["chat_messages"], 0)
-            self.assertEqual(result.row_counts["chat_context_checkpoints"], 0)
+            self.assertEqual(result.row_counts["chat_session_events"], 0)
 
             with sqlite3.connect(result.path) as connection:
                 tables = {
@@ -84,14 +82,34 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                     connection.execute(
                         "SELECT version_num FROM alembic_version"
                     ).fetchone(),
-                    ("006",),
+                    ("011",),
                 )
                 self.assertEqual(
                     connection.execute(
-                        "SELECT api_key, context_window_tokens, max_output_tokens, tags "
+                        "SELECT context_window_tokens, max_output_tokens, tags "
                         "FROM llm_models WHERE id = 'model-1'"
                     ).fetchone(),
-                    ("plain-api-key", 128000, 8192, '["reasoning","tool_call"]'),
+                    (128000, 8192, '["reasoning","tool_call"]'),
+                )
+                self.assertNotIn(
+                    "api_key",
+                    {
+                        str(row[1])
+                        for row in connection.execute("PRAGMA table_info(llm_models)")
+                    },
+                )
+                self.assertEqual(
+                    connection.execute(
+                        "SELECT id, provider_type, use_default_base_url, base_url, "
+                        "api_key FROM llm_providers WHERE name = 'OpenAI'"
+                    ).fetchone(),
+                    (
+                        "0123456789abcdef0123456789abcdef",
+                        "openai",
+                        1,
+                        "https://api.openai.com/v1",
+                        "plain-api-key",
+                    ),
                 )
                 catalog_row = connection.execute(
                     "SELECT input_modalities, output_modalities, capabilities, release_date, "
@@ -134,13 +152,7 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                     (0,),
                 )
                 self.assertEqual(
-                    connection.execute("SELECT COUNT(*) FROM chat_messages").fetchone(),
-                    (0,),
-                )
-                self.assertEqual(
-                    connection.execute(
-                        "SELECT COUNT(*) FROM chat_context_checkpoints"
-                    ).fetchone(),
+                    connection.execute("SELECT COUNT(*) FROM chat_session_events").fetchone(),
                     (0,),
                 )
                 self.assertEqual(
@@ -148,7 +160,7 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                         "SELECT environment, source_dialect, alembic_revision, "
                         "git_commit FROM _backup_info"
                     ).fetchone(),
-                    ("test", "sqlite", "006", "abc123"),
+                    ("test", "sqlite", "011", "abc123"),
                 )
                 scope_manifest = json.loads(
                     str(
@@ -243,16 +255,27 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                 )
                 await connection.execute(
                     text(
-                        "INSERT INTO alembic_version (version_num) VALUES ('006')"
+                        "INSERT INTO alembic_version (version_num) VALUES ('011')"
                     )
+                )
+                await connection.execute(
+                    insert(LlmProvider.__table__),
+                    {
+                        "id": "0123456789abcdef0123456789abcdef",
+                        "name": "OpenAI",
+                        "provider_type": "openai",
+                        "use_default_base_url": True,
+                        "base_url": "https://api.openai.com/v1",
+                        "api_key": "plain-api-key",
+                    },
                 )
                 await connection.execute(
                     insert(LlmModel.__table__),
                     {
                         "id": "model-1",
+                        "provider_id": "0123456789abcdef0123456789abcdef",
                         "name": "model",
                         "model": "openai:test",
-                        "api_key": "plain-api-key",
                         "input_modalities": ["text"],
                         "context_window_tokens": 128000,
                         "max_output_tokens": 8192,
@@ -302,7 +325,6 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                             "url": "http://example.test/mcp",
                             "headers": {"token": "plain-token"},
                         },
-                        "enabled": True,
                     },
                 )
                 await connection.execute(
@@ -325,7 +347,6 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                         "version": "1.0.0",
                         "schema_version": "1.0",
                         "source": "upload",
-                        "enabled": True,
                         "platform_file_id": "platform-file-1",
                         "file_name": "uploaded-skill.zip",
                         "file_size": 1234,
@@ -342,7 +363,6 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                         "label": "测试交互",
                         "description": "backup test package",
                         "source": "manual",
-                        "enabled": True,
                     },
                 )
                 await connection.execute(
@@ -353,45 +373,27 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                         "description": "manual",
                         "parameters_json_schema": {"type": "object"},
                         "source": "manual",
-                        "enabled": True,
-                    },
-                )
-                await connection.execute(
-                    insert(AuxiliaryModelConfig.__table__),
-                    {
-                        "use_case": "title",
-                        "llm_model_id": "model-1",
                     },
                 )
                 await connection.execute(
                     insert(ChatSession.__table__),
                     {
-                        "agent_id": "agent-1",
                         "session_id": "session-1",
+                        "agent_id": "agent-1",
                         "user_id": "user-1",
+                        "next_sequence": 2,
                     },
                 )
                 await connection.execute(
-                    insert(ChatMessage.__table__),
+                    insert(ChatSessionEvent.__table__),
                     {
-                        "agent_id": "agent-1",
+                        "event_id": "e" * 32,
                         "session_id": "session-1",
                         "sequence": 1,
-                        "payload": {"kind": "request"},
-                    },
-                )
-                await connection.execute(
-                    insert(ChatContextCheckpoint.__table__),
-                    {
-                        "agent_id": "agent-1",
-                        "session_id": "session-1",
-                        "source_last_sequence": 1,
-                        "source_history_hash": "a" * 64,
-                        "payload": [{"kind": "request", "parts": []}],
-                        "payload_schema_version": 1,
-                        "projection_fingerprint": "b" * 64,
-                        "estimated_tokens": 12,
-                        "row_version": 1,
+                        "schema_version": 1,
+                        "event_type": "run",
+                        "status": "completed",
+                        "payload": {"mode": "test"},
                     },
                 )
         finally:

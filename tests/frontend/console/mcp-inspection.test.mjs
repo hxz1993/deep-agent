@@ -7,6 +7,14 @@ const source = await readFile(
   new URL("../../../frontend/console/configuration/mcp.js", import.meta.url),
   "utf8",
 );
+const template = await readFile(
+  new URL("../../../frontend/console/configuration-template.html", import.meta.url),
+  "utf8",
+);
+const styles = await readFile(
+  new URL("../../../frontend/console/console.css", import.meta.url),
+  "utf8",
+);
 
 function loadInspectionUi() {
   const window = {};
@@ -33,7 +41,57 @@ test("URL MCP 在提交前拒绝空地址", () => {
   assert.equal(ui.validateMcpConfig("builtin", {}), null);
 });
 
-test("检测状态展示能力摘要和完整悬停信息", () => {
+test("MCP 编辑使用详情页式工作台并保留原配置字段", () => {
+  assert.match(template, /class="modal agent-editor-page mcp-editor-page" id="mcpModal"/);
+  assert.match(template, /id="closeMcpModal"[^>]*>[\s\S]*arrow-left[\s\S]*返回/);
+  assert.match(template, /class="mcp-editor-workbench"/);
+  assert.match(template, /基本信息[\s\S]*连接与请求上下文/);
+  ["mcpName", "mcpDescription", "mcpTransport", "mcpUrl", "mcpHeaders", "mcpRequestContextDescription"]
+    .forEach((id) => assert.match(template, new RegExp(`id="${id}"`)));
+  assert.doesNotMatch(template, /id="mcpEnabled"/);
+  assert.doesNotMatch(template, /id="cancelMcpBtn"/);
+  assert.match(styles, /dialog\.mcp-editor-page\.console-detail-dialog/);
+  assert.match(styles, /\.mcp-editor-workbench\s*\{[^}]*grid-template-columns:/);
+  assert.match(source, /document\.getElementById\("mcpModal"\)\.show\(\)/);
+  assert.doesNotMatch(source, /document\.getElementById\("mcpModal"\)\.showModal\(\)/);
+  assert.match(source, /放弃未保存的修改/);
+  assert.match(source, /data-open-mcp/);
+});
+
+test("MCP Header 来源使用互斥的外部固定和内部继承", () => {
+  assert.match(template, /Headers JSON/);
+  assert.doesNotMatch(template, /Headers JSON（可选）/);
+  assert.match(template, /value="isolated" checked[\s\S]*外部固定/);
+  assert.match(template, /value="inherit"[\s\S]*内部继承/);
+  assert.match(template, /class="mcp-json-input" id="mcpFixedHeaders"/);
+  assert.match(template, /id="mcpHeadersHighlight"/);
+  assert.doesNotMatch(template, /mcp-json-editor-bar/);
+  assert.match(source, /mcpFixedHeaders"\)\?\.classList\.toggle\("hidden", mode === "inherit"\)/);
+  assert.match(source, /if \(mode === "isolated"\) \{[\s\S]*config\.headers = headers;/);
+  assert.match(source, /允许透传：/);
+  assert.doesNotMatch(source, /data-context-help/);
+  assert.doesNotMatch(source, /仅发送这里配置的固定 Header/);
+  assert.match(styles, /\.mcp-json-input:focus-within/);
+  assert.match(styles, /\.context-mode-description\s*\{[\s\S]*border-radius:/);
+});
+
+test("MCP Header JSON 编辑高亮会转义原文并区分主要类型", () => {
+  const html = loadInspectionUi().highlightJsonEditorSource('{"name":"<script>","count":2,"ok":true}');
+  assert.match(html, /class="json-key"/);
+  assert.match(html, /class="json-string"/);
+  assert.match(html, /class="json-number"/);
+  assert.match(html, /class="json-boolean"/);
+  assert.doesNotMatch(html, /<script>/);
+  assert.match(html, /&lt;script&gt;/);
+});
+
+test("MCP 行内刷新和更多操作不会冒泡打开详情", () => {
+  assert.match(source, /\.mcp-row-actions"\)\.forEach\(\(actions\) => \{[\s\S]*stopPropagation/);
+  assert.match(source, /data-inspect-mcp[\s\S]*event\.stopPropagation\(\);[\s\S]*this\.inspect/);
+  assert.match(source, /if \(event\.target\.closest\("a, button, \[role=menu\]"\)\) return;/);
+});
+
+test("检测状态展示紧凑能力计数和完整悬停信息", () => {
   const ui = loadInspectionUi();
   const view = ui.inspectionView(
     {
@@ -47,7 +105,7 @@ test("检测状态展示能力摘要和完整悬停信息", () => {
         instructions_available: true,
       },
       tools: {
-        count: 10,
+        count: 11,
         snapshot_status: "ready",
         snapshot_at: "2026-07-23T10:00:00Z",
         snapshot_hash: "1234567890abcdef",
@@ -58,47 +116,46 @@ test("检测状态展示能力摘要和完整悬停信息", () => {
   );
 
   assert.equal(view.text, "正常");
-  assert.equal(
-    view.summary,
-    "工具快照可用 · 10 工具 · 自动预选 Top 3 / 搜索 Top 5 · 2 资源 · 1 模板",
-  );
+  assert.deepEqual(JSON.parse(JSON.stringify(view.counts)), { tools: 11, resources: 2, templates: 1 });
   assert.match(view.title, /服务：mcp-biz-go 1.0.0/);
   assert.match(view.title, /协议：2025-06-18/);
   assert.match(view.title, /Instructions：可用/);
+  assert.match(view.title, /快照状态：工具快照可用/);
   assert.match(view.title, /耗时：428 ms/);
 });
 
-test("小型 MCP 直接披露全部工具", () => {
+test("工具数量不再生成写死的披露策略文案", () => {
   const ui = loadInspectionUi();
   const view = ui.inspectionView(
     {
       status: "healthy",
-      tools: { count: 5, snapshot_status: "ready" },
+      tools: { count: 10, snapshot_status: "ready" },
       resources: { count: 0, template_count: 0 },
     },
     "url",
   );
-  assert.equal(view.summary, "工具快照可用 · 5 工具 · 全部直接披露 · 0 资源 · 0 模板");
+  assert.deepEqual(JSON.parse(JSON.stringify(view.counts)), { tools: 10, resources: 0, templates: 0 });
+  assert.doesNotMatch(source, /全部直接披露|自动预选 Top/);
 });
 
 test("URL MCP 明确展示缺失、失效和沿用快照状态", () => {
   const ui = loadInspectionUi();
   assert.match(
-    ui.inspectionView({ status: "healthy", tools: { count: 7 } }, "url").summary,
+    ui.inspectionView({ status: "healthy", tools: { count: 7 } }, "url").title,
     /缺少工具快照，请检测并更新/,
   );
   assert.match(
     ui.inspectionView(
       { status: "stale", tools: { count: 7, snapshot_status: "stale" } },
       "url",
-    ).summary,
+    ).title,
     /配置已变更，需重新检测/,
   );
   assert.match(
     ui.inspectionView(
       { status: "unreachable", tools: { count: 7, snapshot_status: "ready" } },
       "url",
-    ).summary,
+    ).title,
     /当前无法连接，沿用上次快照/,
   );
 });
@@ -107,7 +164,7 @@ test("Builtin 显示内置运行时且不伪装成待检测", () => {
   const ui = loadInspectionUi();
   const view = ui.inspectionView(null, "builtin");
   assert.equal(view.text, "内置运行时");
-  assert.equal(view.summary, "运行时按需启动");
+  assert.deepEqual(JSON.parse(JSON.stringify(view.counts)), { tools: 0, resources: 0, templates: 0 });
   assert.equal(ui.canDeleteMcp("builtin"), false);
   assert.equal(ui.canDeleteMcp("url"), true);
   assert.equal(ui.canDeleteMcp("stdio"), true);
@@ -117,7 +174,16 @@ test("历史 stdio MCP 明确显示为停止支持", () => {
   const ui = loadInspectionUi();
   const view = ui.inspectionView(null, "stdio");
   assert.equal(view.text, "已停止支持");
-  assert.equal(view.summary, "请迁移为 URL MCP");
+  assert.deepEqual(JSON.parse(JSON.stringify(view.counts)), { tools: 0, resources: 0, templates: 0 });
+});
+
+test("MCP 传输类型使用产品语义而不是后端枚举值", () => {
+  assert.match(template, /<option value="url">Streamable HTTP<\/option>/);
+  assert.match(template, /<option value="builtin">STDIO（Builtin）<\/option>/);
+  assert.match(source, /url: "Streamable HTTP"/);
+  assert.match(source, /builtin: "STDIO（Builtin）"/);
+  assert.match(source, /class="mcp-inspection-counts"/);
+  assert.match(source, /data-lucide="\$\{iconName\}"/);
 });
 
 test("检测结果区分变化、无变化、部分异常和无法连接", () => {

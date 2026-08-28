@@ -77,40 +77,40 @@
   --hljs-theme: light;
 }
 
-/* 护眼（暖色浅底，减轻刺眼） */
+/* 护眼（清透暖橙，避免土黄与低对比） */
 [data-theme="paper"] {
-  --bg: #f4f1ea;
-  --bg-soft: #ebe6dc;
-  --bg-elev: #e2dcd0;
-  --bg-hover: #d9d2c4;
-  --border: #c8bfb0;
-  --border-soft: #d5cdc0;
-  --text: #2c2416;
-  --text-dim: #4a4030;
-  --text-muted: #5c5040;
-  --text-faint: #6e6250;
-  --accent: #5b4fc7;
-  --accent-hover: #4a3fb8;
-  --accent-soft: rgba(91, 79, 199, 0.14);
-  --user-bubble: #e9e5dc;
-  --tool-bg: #ebe6dc;
-  --tool-border: #d5cdc0;
-  --thinking-bg: #ebe6dc;
-  --thinking-border: #d5cdc0;
-  --danger: #b42318;
-  --danger-soft: rgba(180, 35, 24, 0.1);
-  --danger-text: #912018;
-  --shadow: 0 8px 24px rgba(44, 36, 22, 0.1);
-  --code-bg: #e8e2d6;
-  --code-inline-bg: rgba(92, 80, 64, 0.12);
-  --hitl-btn-bg: #ebe6dc;
-  --hitl-confirm-bg: #d4edda;
-  --hitl-cancel-bg: #f8d7da;
-  --hitl-pending-border: #9a6700;
-  --attach-chip-bg: rgba(44, 36, 22, 0.06);
-  --scrollbar-thumb-hover: #b8aea0;
-  --brand-accent-2: #7c3aed;
-  --conn-ok: #1a7f37;
+  --bg: #fffaf6;
+  --bg-soft: #fff4eb;
+  --bg-elev: #ffead9;
+  --bg-hover: #ffe2cd;
+  --border: #ead8ca;
+  --border-soft: #f1e3d8;
+  --text: #2f2925;
+  --text-dim: #5f554e;
+  --text-muted: #71645b;
+  --text-faint: #8a7a6f;
+  --accent: #e46f2b;
+  --accent-hover: #c85b20;
+  --accent-soft: rgba(228, 111, 43, 0.12);
+  --user-bubble: #fff0e4;
+  --tool-bg: #fff8f2;
+  --tool-border: #efded1;
+  --thinking-bg: #fff8f2;
+  --thinking-border: #efded1;
+  --danger: #c43d2d;
+  --danger-soft: rgba(196, 61, 45, 0.09);
+  --danger-text: #9f2f23;
+  --shadow: 0 8px 24px rgba(105, 66, 39, 0.09);
+  --code-bg: #fff2e8;
+  --code-inline-bg: rgba(126, 83, 53, 0.11);
+  --hitl-btn-bg: #fff5ed;
+  --hitl-confirm-bg: #e4f4e8;
+  --hitl-cancel-bg: #fde9e6;
+  --hitl-pending-border: #d7772f;
+  --attach-chip-bg: rgba(126, 83, 53, 0.06);
+  --scrollbar-thumb-hover: #cdb7a7;
+  --brand-accent-2: #f09a58;
+  --conn-ok: #2b865c;
   --send-fg: #fff;
   --hljs-theme: light;
 }

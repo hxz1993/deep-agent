@@ -46,7 +46,7 @@ class _PlatformAPI:
         self.file = _Files()
 
 
-def _record(payload: bytes, *, file_id: str, enabled: bool = True) -> SkillPackageRecord:
+def _record(payload: bytes, *, file_id: str) -> SkillPackageRecord:
     parsed = parse_skill_zip(payload)
     try:
         return SkillPackageRecord(
@@ -56,7 +56,6 @@ def _record(payload: bytes, *, file_id: str, enabled: bool = True) -> SkillPacka
             version=parsed.version,
             schema_version=parsed.schema_version,
             source="upload",
-            enabled=enabled,
             platform_file_id=file_id,
             file_name=f"{parsed.code}.zip",
             file_size=len(payload),
@@ -79,7 +78,7 @@ class SkillRuntimeLibraryTests(unittest.IsolatedAsyncioTestCase):
         _Files.fail = False
         _PlatformAPI.headers = []
         self.platform_patch = patch(
-            "deep_agent.skills.runtime.PlatformAPI",
+            "deep_agent.files.storage.PlatformAPI",
             _PlatformAPI,
         )
         self.platform_patch.start()

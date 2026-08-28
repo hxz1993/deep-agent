@@ -48,6 +48,7 @@ class Server(Category):
     space = Option("space-server", val_type=str, bind_env="SPACE_SERVER_NAME", reload_opt=True)
     platform_file = Option("platform-file-server", val_type=str, bind_env="PLATFORM_FILE_SERVER_NAME", reload_opt=True)
     os_space_tenant = Option("os-space-tenant", val_type=str, bind_env="OS_SPACE_TENANT_SERVER_NAME", reload_opt=True)
+    account = Option("seepln-account", val_type=str, bind_env="SERVER_NAME_USER", reload_opt=True)
 
     if typing.TYPE_CHECKING:
         def __get__(self, instance, owner) -> "Server": ...

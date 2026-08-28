@@ -127,8 +127,8 @@ UIToolRecord(
 ### 3.2 注册与注入规则
 
 - builtin 和 manual UI 工具都按所属 `package_code` 与 Agent 正向关联。
-- `prepare_ui_tool_packages_for_spec()` 只加载 Agent 已选、工具包已启用、工具已启用且 Schema 有效的定义，并保证每个包只生成一个 `ExternalToolset`。
-- `capabilities=null`、空数组或未包含对应 `ui:<package>` 时，该包不进入模型工具列表。
+- `prepare_ui_tool_packages_for_spec()` 只加载 Agent 已选且 Schema 有效的定义，并保证每个包只生成一个 `ExternalToolset`。
+- `capabilities`为空数组或未包含对应 `ui:<package>` 时，该包不进入模型工具列表。
 - Alembic `002` 一次性把旧单工具引用转换为包编码，运行时不保留旧编码兼容。
 
 **注意**：不要在 `factory.py` 里无条件注入 `build_ui_toolset()`，否则会绕过 `ui:builtin`
@@ -146,7 +146,7 @@ UIToolRecord(
 流式 `tool_call` 与 `final.deferred` 事件上的 `widget`、`metadata` 由 [`registry.py`](../../deep_agent/capabilities/ui/registry.py) 的 `enrich_tool_event` / `enrich_deferred` 注入：
 
 - **manual 工具**：从 `load_ui_tool_hints()` 加载的数据库 hints 合并进事件。
-- **builtin 工具**（当前为 `builtin__confirm`、`builtin__choice`）：即使 DB 无对应行，也会在 hints 未命中时回退到 `builtin_ui_records()`，保证已启用工具的 SSE 仍带 `widget` 供客户端渲染。
+- **builtin 工具**（当前为 `builtin__confirm`、`builtin__choice`）：即使 DB 无对应行，也会在 hints 未命中时回退到 `builtin_ui_records()`，保证Agent已关联工具的SSE仍带`widget`供客户端渲染。
 
 详见 [`sse-protocol.md`](sse-protocol.md) 中 `tool_call` 可选字段说明。
 
@@ -320,7 +320,7 @@ ExternalToolset 'ui' defines a tool whose name conflicts with ...
 - 检查 instructions 是否说明使用场景
 - 用更直白的测试句：`请调用 builtin__confirm，message 为「测试」`
 - 确认 `GET /api/v1/tools` 的 `ui:builtin` 包能看到 `builtin__confirm`
-- 确认当前 Agent 的 capabilities 已显式包含对应 `ui:<package>`；仅出现在目录不代表运行时已启用
+- 确认当前 Agent 的 capabilities 已显式包含对应 `ui:<package>`；仅出现在目录不代表已关联到本Agent
 
 ### 刷新后没有按钮
 

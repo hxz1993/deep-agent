@@ -193,3 +193,42 @@ test("身份上下文请求超时后返回可识别错误", async () => {
     (error) => error.code === "request_timeout" && error.message.includes("连接后端超时"),
   );
 });
+
+test("控制台权限检查不携带调试 App 上下文并返回企业管理员角色", async () => {
+  const requests = [];
+  const fetchImpl = async (url, options) => {
+    requests.push({ url: String(url), headers: options.headers });
+    return {
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({
+        allowed: true,
+        roles: ["enterprise_admin"],
+      }),
+    };
+  };
+  const { api } = loadApi({
+    da_console_request_context_v1: JSON.stringify({ app: "iirjgi005" }),
+  }, fetchImpl);
+
+  const result = await api.adminAccess();
+
+  assert.deepEqual(JSON.parse(JSON.stringify(result)), {
+    allowed: true,
+    roles: ["enterprise_admin"],
+  });
+  assert.equal(requests[0].url, "http://localhost:8000/api/v1/admin/access");
+  assert.equal(requests[0].headers["X-Deep-Agent-App"], undefined);
+});
+
+test("控制台权限检查超时统一映射为503", async () => {
+  const pendingFetch = (_url, options) => new Promise((_resolve, reject) => {
+    options.signal.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")));
+  });
+  const { api } = loadApi({}, pendingFetch);
+
+  await assert.rejects(
+    api.adminAccess({ timeoutMs: 5 }),
+    (error) => error.code === "admin_access_timeout" && error.status === 503,
+  );
+});

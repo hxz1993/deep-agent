@@ -186,11 +186,12 @@ class McpBuiltinConfig(BaseModel):
 
 
 class McpServerCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     name: str = Field(..., description="Unique MCP server identifier.")
     transport: McpUserTransport = Field(..., description="Connection transport type.")
     config: dict[str, Any] = Field(..., description="Transport-specific connection config.")
     description: str | None = Field(default=None, description="Optional human-readable description.")
-    enabled: bool = Field(default=True, description="Whether this server is loaded at runtime.")
 
     @field_validator("name")
     @classmethod
@@ -209,14 +210,15 @@ class McpServerCreate(BaseModel):
 
 
 class McpServerUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     transport: McpUserTransport | None = None
     config: dict[str, Any] | None = None
     description: str | None = None
-    enabled: bool | None = None
 
     @model_validator(mode="after")
     def validate_config(self) -> McpServerUpdate:
-        for field in ("transport", "config", "enabled"):
+        for field in ("transport", "config"):
             if field in self.model_fields_set and getattr(self, field) is None:
                 raise ValueError(f"{field} cannot be null")
         if self.config is None:
@@ -242,7 +244,6 @@ class McpServerResponse(BaseModel):
     transport: McpTransport
     config: dict[str, Any]
     description: str | None = None
-    enabled: bool
     created_at: datetime
     updated_at: datetime
     request_context: McpRequestContextInfo
@@ -256,7 +257,6 @@ class McpServerResponse(BaseModel):
             transport=row.transport,  # type: ignore[arg-type]
             config=row.config,
             description=row.description,
-            enabled=row.enabled,
             created_at=row.created_at,
             updated_at=row.updated_at,
             request_context=McpRequestContextInfo(

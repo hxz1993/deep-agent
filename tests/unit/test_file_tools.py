@@ -54,7 +54,6 @@ def _resolved_skill(root: Path, entries: list[dict]) -> ResolvedSkill:
     return ResolvedSkill(
         code="demo",
         source="upload",
-        enabled=True,
         package_root=root,
         library_root=root.parent,
         resource_index=entries,
@@ -133,6 +132,27 @@ class UnifiedFileToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(first.unit, "line")
         download.assert_awaited_once()
         parser.assert_called_once()
+
+    async def test_log_attachment_with_generic_mime_is_read_as_text(self) -> None:
+        ref = AttachmentRef(
+            id="log",
+            name="service.log",
+            mime="application/octet-stream",
+        )
+        context = _context(ref)
+        tool = await _tool(ctx=context)
+        assert tool is not None
+        with patch(
+            "deep_agent.files.toolset._download_file",
+            new_callable=AsyncMock,
+            return_value=b"INFO started\nWARN slow",
+        ):
+            result = await tool.call_func(
+                {"resource": {"type": "attachment", "file_id": ref.id}},
+                context,
+            )
+        self.assertEqual(result.format, "text")
+        self.assertEqual(result.content, "INFO started\nWARN slow")
 
     async def test_new_run_has_a_new_file_cache(self) -> None:
         ref = AttachmentRef(id="text", name="note.txt", mime="text/plain")

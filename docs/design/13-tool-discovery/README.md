@@ -2,7 +2,7 @@
 
 > 首次研究：2026-08-07
 >
-> 当前状态：v0.3.12 已实施第一版；当前使用本地词法检索与 Pydantic AI 2.31 渐进披露，
+> 当前状态：v0.3.12 已实施第一版；当前使用本地词法检索与 Pydantic AI 2.35.1 渐进披露，
 > 不部署 Embedding、不增加数据库结构
 
 本课题解决大型 MCP 工具包的 Schema 每轮全部进入模型上下文，导致 Token 成本、工具误选和
@@ -28,7 +28,11 @@ Agent 已授权工具包
 - [`../11-tool-packages/tool-packages-design.md`](../11-tool-packages/tool-packages-design.md)：ToolPackage 配置和授权模型。
 - [`../TODO.md`](../TODO.md)：统一待办，`TOOL-103`、`TOOL-201` 已在 v0.3.12 关闭。
 
-当前实现锁定为：MCP 候选不超过 5 个时全部直接披露；超过 5 个时首轮词法预选最多 Top 3，
+当前实现锁定为：MCP 候选不超过 10 个时全部直接披露；超过 10 个时首轮词法预选最多 Top 3，
 模型通过 `search_tools` 最多加载 Top 5；其余延迟工具名称按 Server 放入动态 Instructions。
 检索只处理 Agent 已授权且当前身份可用的 MCP 工具。无合法会话附件时隐藏整个附件 Toolset。
 Shadow 是测试目录下的脱敏离线评估，不进入生产请求链路。
+
+v0.6.2当 Agent 显式关联`builtin:code-mode`时，ToolSearch新披露的MCP在下一模型
+步骤中同时获得原生Schema与`run_code`函数别名。未披露工具不进入Code Mode；
+`dynamic_catalog=true`只把函数名目录移到动态Instructions，不扩大授权或重复Schema。

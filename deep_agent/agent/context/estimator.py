@@ -4,11 +4,13 @@ import json
 import math
 import re
 import unicodedata
+from io import BytesIO
 from dataclasses import asdict, dataclass, is_dataclass
 from typing import Any, Callable
 
 from pydantic_ai.messages import (
     BaseToolCallPart,
+    BinaryContent,
     ModelMessage,
     ModelRequest,
     ModelResponse,
@@ -36,6 +38,13 @@ MESSAGE_OVERHEAD_TOKENS = 8
 PART_OVERHEAD_TOKENS = 4
 TOOL_DEFINITION_OVERHEAD_TOKENS = 32
 MEDIA_CONTENT_TOKENS = 1_024
+
+_DEEPSEEK_PATCH_SIZE = 14
+_DEEPSEEK_DOWNSAMPLE_RATIO = 3
+_DEEPSEEK_MAX_IMAGE_TOKENS = 384
+_DEEPSEEK_COMPRESS_PAD = 3
+_DEEPSEEK_MAX_WIDTH_HEIGHT_RATIO = 8
+_DEEPSEEK_MIN_PIXELS = 384 * 384
 
 _OPENAI_OFFICIAL_HOSTS = {"api.openai.com"}
 _ASCII_WORD_RE = re.compile(r"[A-Za-z0-9_]+")
@@ -111,7 +120,121 @@ def conservative_text_tokens(text: str) -> int:
     return max(1, total)
 
 
-def _official_openai_model(model: str, base_url: str | None) -> str | None:
+def _ceil_div(value: int, divisor: int) -> int:
+    return (value + divisor - 1) // divisor
+
+
+def _deepseek_grid_tokens(grid_height: int, grid_width: int) -> int:
+    tokens = grid_height * (grid_width + 1) + 2
+    if grid_height % 2 == 1:
+        tokens += grid_width + 1
+    tokens += (_ceil_div(grid_height, 2) * (grid_width + 1) % 2) * 2
+    return tokens
+
+
+def _deepseek_solve_resize(
+    height: int,
+    width: int,
+    budget: int,
+) -> tuple[int, int, int, int, int]:
+    aspect = height / width
+    ideal_grid_width = math.sqrt((budget - 2) / aspect + 0.25) - 0.5
+    ideal_grid_height = ideal_grid_width * aspect
+    if ideal_grid_width < 1:
+        solved_grid_width = 1
+        solved_grid_height = (budget - 2) // (solved_grid_width + 1)
+        if solved_grid_height % 2 == 1:
+            solved_grid_height -= 1
+        best_width = solved_grid_width * _DEEPSEEK_PATCH_SIZE * _DEEPSEEK_DOWNSAMPLE_RATIO
+        best_height = solved_grid_height * _DEEPSEEK_PATCH_SIZE * _DEEPSEEK_DOWNSAMPLE_RATIO
+    elif ideal_grid_height < 2:  # retained for parity with the provider algorithm
+        solved_grid_height = 2
+        solved_grid_width = (budget - 2) // solved_grid_height - 1
+        if solved_grid_width <= 1:
+            raise ValueError("no DeepSeek image grid fits the token budget")
+        best_width = solved_grid_width * _DEEPSEEK_PATCH_SIZE * _DEEPSEEK_DOWNSAMPLE_RATIO
+        best_height = solved_grid_height * _DEEPSEEK_PATCH_SIZE * _DEEPSEEK_DOWNSAMPLE_RATIO
+    else:
+        solved_grid_width = math.trunc(ideal_grid_width)
+        solved_grid_height = math.trunc(ideal_grid_height)
+        if solved_grid_height % 2 == 1:
+            solved_grid_height -= 1
+        width_scale = (
+            solved_grid_width * _DEEPSEEK_PATCH_SIZE * _DEEPSEEK_DOWNSAMPLE_RATIO / width
+        )
+        height_scale = (
+            solved_grid_height * _DEEPSEEK_PATCH_SIZE * _DEEPSEEK_DOWNSAMPLE_RATIO / height
+        )
+        scale = min(width_scale, height_scale)
+        best_width = math.trunc(width * scale / _DEEPSEEK_PATCH_SIZE) * _DEEPSEEK_PATCH_SIZE
+        best_height = math.trunc(height * scale / _DEEPSEEK_PATCH_SIZE) * _DEEPSEEK_PATCH_SIZE
+    grid_height = _ceil_div(best_height // _DEEPSEEK_PATCH_SIZE, _DEEPSEEK_DOWNSAMPLE_RATIO)
+    grid_width = _ceil_div(best_width // _DEEPSEEK_PATCH_SIZE, _DEEPSEEK_DOWNSAMPLE_RATIO)
+    return grid_height, grid_width, best_height, best_width, _deepseek_grid_tokens(grid_height, grid_width)
+
+
+def _deepseek_resize_once(width: int, height: int) -> tuple[int, int, int, int, int]:
+    clamped_width = width
+    clamped_height = height
+    if clamped_width > clamped_height * _DEEPSEEK_MAX_WIDTH_HEIGHT_RATIO:
+        clamped_width = clamped_height * _DEEPSEEK_MAX_WIDTH_HEIGHT_RATIO
+    pixels = clamped_width * clamped_height
+    if 0 < pixels < _DEEPSEEK_MIN_PIXELS:
+        scale = math.sqrt(_DEEPSEEK_MIN_PIXELS / pixels)
+        clamped_width = math.trunc(clamped_width * scale)
+        clamped_height = math.trunc(clamped_height * scale)
+    padded_width = _ceil_div(clamped_width, _DEEPSEEK_PATCH_SIZE) * _DEEPSEEK_PATCH_SIZE
+    padded_height = _ceil_div(clamped_height, _DEEPSEEK_PATCH_SIZE) * _DEEPSEEK_PATCH_SIZE
+    grid_height = _ceil_div(padded_height // _DEEPSEEK_PATCH_SIZE, _DEEPSEEK_DOWNSAMPLE_RATIO)
+    grid_width = _ceil_div(padded_width // _DEEPSEEK_PATCH_SIZE, _DEEPSEEK_DOWNSAMPLE_RATIO)
+    budget = _DEEPSEEK_MAX_IMAGE_TOKENS - _DEEPSEEK_COMPRESS_PAD
+    result = (
+        grid_height,
+        grid_width,
+        padded_height,
+        padded_width,
+        _deepseek_grid_tokens(grid_height, grid_width),
+    )
+    if result[4] > budget:
+        result = _deepseek_solve_resize(clamped_height, clamped_width, budget)
+        reduced = budget
+        while result[4] > budget:
+            reduced -= 1
+            result = _deepseek_solve_resize(clamped_height, clamped_width, reduced)
+    return (*result[:4], result[4] + _DEEPSEEK_COMPRESS_PAD)
+
+
+def deepseek_image_tokens(width: int, height: int) -> int:
+    """DeepSeek v4 provider image-token formula with worst-case alignment padding."""
+
+    if width <= 0 or height <= 0:
+        raise ValueError("image dimensions must be positive")
+    result = _deepseek_resize_once(width, height)
+    for _iteration in range(1, 10):
+        next_result = _deepseek_resize_once(result[3], result[2])
+        if next_result == result:
+            return result[4]
+        result = next_result
+    raise ValueError(f"DeepSeek image resize did not converge for {width}x{height}")
+
+
+def _is_deepseek_v4_vision(model: str, provider_type: str | None) -> bool:
+    normalized_model = model.lower()
+    normalized_provider = (provider_type or "").lower()
+    return (
+        normalized_provider == "deepseek"
+        and "v4" in normalized_model
+        and "vision" in normalized_model
+    )
+
+
+def _official_openai_model(
+    model: str,
+    base_url: str | None,
+    provider_type: str | None = None,
+) -> str | None:
+    if provider_type is not None:
+        return model if provider_type == "openai" else None
     prefix, sep, name = model.partition(":")
     if sep and prefix not in {"openai", "openai-chat"}:
         return None
@@ -129,10 +252,18 @@ def _official_openai_model(model: str, base_url: str | None) -> str | None:
 class TokenEstimator:
     source: str
     _counter: Callable[[str], int] | None = None
+    _image_counter: Callable[[int, int], int] | None = None
 
     @classmethod
-    def for_model(cls, model: str, base_url: str | None = None) -> "TokenEstimator":
-        model_name = _official_openai_model(model, base_url)
+    def for_model(
+        cls,
+        model: str,
+        base_url: str | None = None,
+        *,
+        provider_type: str | None = None,
+    ) -> "TokenEstimator":
+        image_counter = deepseek_image_tokens if _is_deepseek_v4_vision(model, provider_type) else None
+        model_name = _official_openai_model(model, base_url, provider_type)
         if model_name and tiktoken is not None:
             try:
                 encoding = tiktoken.encoding_for_model(model_name)
@@ -142,8 +273,9 @@ class TokenEstimator:
                 return cls(
                     source="model_tokenizer",
                     _counter=lambda text: len(encoding.encode(text)),
+                    _image_counter=image_counter,
                 )
-        return cls(source="conservative_fallback")
+        return cls(source="conservative_fallback", _image_counter=image_counter)
 
     @classmethod
     def conservative(cls) -> "TokenEstimator":
@@ -158,6 +290,16 @@ class TokenEstimator:
         return conservative_text_tokens(text)
 
     def value(self, value: Any) -> int:
+        if isinstance(value, BinaryContent):
+            if value.media_type.startswith("image/") and self._image_counter is not None:
+                try:
+                    from PIL import Image
+
+                    with Image.open(BytesIO(value.data)) as image:
+                        return self._image_counter(*image.size)
+                except Exception:
+                    return MEDIA_CONTENT_TOKENS
+            return MEDIA_CONTENT_TOKENS
         if isinstance(value, dict):
             if is_context_reference(value):
                 try:

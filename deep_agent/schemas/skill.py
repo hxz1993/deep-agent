@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class SkillResource(BaseModel):
@@ -23,7 +23,6 @@ class SkillPackageRecord(BaseModel):
     version: str | None = None
     schema_version: str
     source: str
-    enabled: bool
     platform_file_id: str
     file_name: str
     file_size: int
@@ -34,15 +33,16 @@ class SkillPackageRecord(BaseModel):
 
 
 class SkillUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     label: str | None = Field(default=None, max_length=191)
     description: str | None = None
-    enabled: bool | None = None
 
     @model_validator(mode="before")
     @classmethod
     def reject_explicit_null(cls, value):
         if isinstance(value, dict):
-            for field in ("label", "description", "enabled"):
+            for field in ("label", "description"):
                 if field in value and value[field] is None:
                     raise ValueError(f"{field} cannot be null")
         return value
@@ -65,7 +65,6 @@ class SkillSummary(BaseModel):
     version: str | None = None
     schema_version: str
     source: str
-    enabled: bool
     reference_count: int = 0
     asset_count: int = 0
     script_count: int = 0

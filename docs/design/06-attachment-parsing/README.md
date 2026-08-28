@@ -16,10 +16,14 @@
 - 工具首次调用通常只传附件 `file_id`或 Skill精确路径；返回 `has_more`和 `next_offset`后再读取
   下一页。
 - 新上传不再预抽文本，也不再使用 `DEEP_AGENT_UPLOAD_EXTRACT_TEXT_MAX_CHARS`。
-- `chat_messages` 保存原始附件引用和完整工具事件；Checkpoint 只保存模型输入的派生投影。
+- `chat_session_events`保存原始附件引用和完整工具Event；Compaction只生成摘要锚点和来源索引。
+- v0.6.2 当 Agent 显式关联 `builtin:code-mode` 时，`load_file_data` 可把当前会话
+  已授权附件转为 Run 内不透明变量，供 MCP 文件参数直接消费。它不替代给模型
+  阅读正文的 `read_file`，也不扩大原 Event 授权。
 - PDF和PPT/PPTX不作为模型原生模态或普通文件读取类型；当前无解析能力，未来有明确需求时另建
   专用文档解析工具。
 
 详细方案与验证口径见
-[`attachment-parsing-design.md`](attachment-parsing-design.md)。后续PDF/PPTX和大文件治理事项统一登记在
+[`attachment-parsing-design.md`](attachment-parsing-design.md)。PDF/PPTX的专项调研见
+[`../16-pdf-and-presentation-parsing/`](../16-pdf-and-presentation-parsing/)，排期状态统一登记在
 [`../TODO.md`](../TODO.md)。

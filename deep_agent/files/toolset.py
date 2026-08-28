@@ -24,7 +24,7 @@ from deep_agent.agent.attachment_extractors import (
 )
 from deep_agent.agent.attachments import AttachmentDownloadError, _download_file
 from deep_agent.agent.deps import AgentDeps
-from deep_agent.agent.media_pipeline import max_upload_bytes
+from deep_agent.agent.media_pipeline import is_log_text_attachment, max_upload_bytes
 from deep_agent.files.schema import (
     AttachmentFileRef,
     FileReadResult,
@@ -80,6 +80,8 @@ def _normalized_mime(value: str | None) -> str:
 
 def _attachment_format(ref: AttachmentRef) -> str | None:
     mime = _normalized_mime(ref.mime)
+    if is_log_text_attachment(filename=ref.name or "", mime=mime):
+        return "text"
     if mime in _TEXT_MIMES:
         return "text"
     if mime == _DOCX_MIME:
@@ -256,7 +258,11 @@ async def _resolve_file(
             )
 
         async def load_attachment() -> bytes:
-            return await _download_file(ref.id, ctx.deps.request_headers)
+            return await _download_file(
+                ref.id,
+                ctx.deps.request_headers,
+                file_store=ctx.deps.file_store,
+            )
 
         return _ResolvedFile(
             source="attachment",

@@ -13,6 +13,7 @@ from deep_agent.capabilities.mcp.lease_manager import McpLeaseManager
 from deep_agent.core.context import AppContext, get_context, init_context, reset_context
 from deep_agent.schemas.mcp import McpServerCreate
 from deep_agent.schemas.agent import AgentCreate
+from tests.helpers.admin_auth import allow_console_admin
 from tests.helpers.sqlite_stores import make_sqlite_stores
 
 
@@ -21,6 +22,7 @@ class McpConfigurationAtomicityTests(unittest.IsolatedAsyncioTestCase):
         self.stores, self._engine, session_factory = await make_sqlite_stores()
         self._app = FastAPI()
         self._app.include_router(api_router)
+        allow_console_admin(self._app)
         init_context(
             AppContext.for_testing(
                 registry=build_registry(),
@@ -45,7 +47,6 @@ class McpConfigurationAtomicityTests(unittest.IsolatedAsyncioTestCase):
                     "name": "blank-url",
                     "transport": "url",
                     "config": {"url": ""},
-                    "enabled": True,
                 },
             )
 
@@ -64,7 +65,6 @@ class McpConfigurationAtomicityTests(unittest.IsolatedAsyncioTestCase):
                         "name": "atomic-create",
                         "transport": "url",
                         "config": {"url": "http://example.test/mcp"},
-                        "enabled": True,
                     },
                 )
 
@@ -77,7 +77,6 @@ class McpConfigurationAtomicityTests(unittest.IsolatedAsyncioTestCase):
                 name="atomic-update",
                 transport="url",
                 config={"url": "http://old.example.test/mcp"},
-                enabled=True,
             ),
             inspection={"status": "healthy"},
         )
@@ -104,7 +103,6 @@ class McpConfigurationAtomicityTests(unittest.IsolatedAsyncioTestCase):
                 name="atomic-rename-old",
                 transport="url",
                 config={"url": "http://old.example.test/mcp"},
-                enabled=False,
             )
         )
         model_id = (await self.stores.llm_model.list_all())[0].id

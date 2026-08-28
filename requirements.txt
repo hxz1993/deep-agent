@@ -1,11 +1,18 @@
 # -*- coding: utf-8 -*-
 # Core agent runtime. Slim package + only the provider/mcp extras we use,
 # to avoid pulling in every provider SDK (bedrock, cohere, huggingface, ...).
-pydantic-ai-slim[openai,anthropic,google,mcp]==2.31.0
-# OpenAI 3.x imports an aiohttp transport that requires aiohttp>=3.14.1,
-# while the bundled DeepFOS platform runtime remains on aiohttp 3.9.x.
-openai==2.46.0
-pydantic-ai-harness[skills]==0.21.0
+pydantic-ai-slim[openai,anthropic,google,mcp]==2.35.1
+# Pydantic AI 2.35 requires OpenAI 3.x. Its bundled aiohttp transport imports
+# aiohttp 3.14 APIs at module load time, so the SDK and aiohttp must move together.
+openai==3.5.0
+pydantic-ai-harness[skills]==0.26.0
+# Harness CodeMode uses Monty as its isolated Python-subset runtime. Keep the
+# direct pin instead of enabling the broader code-mode extra, which would also
+# install search providers DeepAgent does not use.
+pydantic-monty==0.0.21
+# DeepAgent passes a dedicated proxy client to GoogleProvider. Pydantic AI 2.35
+# deprecates legacy httpx clients for this path in favor of httpx2.
+httpx2>=2.7,<3
 tiktoken>=0.13,<1
 pypinyin>=0.55,<1
 
@@ -33,7 +40,10 @@ filelock>=3.13
 psutil>=5.9
 
 # deepfos platform
-aiohttp~=3.9.5
+# OpenAI 3.5 imports SocketTimeoutError from aiohttp during normal module import.
+# deepfos 1.1.97 is the first current platform SDK line compatible with 3.14+.
+aiohttp>=3.14.3,<4
+deepfos>=1.1.97,<2
 cachetools>=5.0.0,<6
 fastapi~=0.111.0
 kubernetes_asyncio~=33.3.0
@@ -46,7 +56,8 @@ starlette!=0.36.0
 pycryptodome==3.14.1
 deepfos-loguru-corotate>=0.1.0
 
-# DeepCube MCP assistant (mcps/deepcube/server.py); install in the same Python env as deep-agent.
+# DeepCube MCP assistant (mcps/deepcube/server.py). The release pipeline injects
+# its internal wheel before this file is resolved; DeepCube is not on public PyPI.
 deepcube[mcp]
 
 # deepfos/deepcube → pyarrow 14.x requires NumPy 1.x; do not upgrade to NumPy 2.x.

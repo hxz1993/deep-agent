@@ -13,6 +13,7 @@ from httpx import ASGITransport, AsyncClient
 from deep_agent.api.v1 import api_router
 from deep_agent.capabilities import build_registry
 from deep_agent.core.context import AppContext, get_context, init_context, reset_context
+from tests.helpers.admin_auth import allow_console_admin
 from tests.helpers.sqlite_stores import make_sqlite_stores
 from tests.unit.test_skill_packages import skill_zip
 
@@ -54,6 +55,7 @@ class SkillApiTests(unittest.IsolatedAsyncioTestCase):
         self.stores, self.engine, session_factory = await make_sqlite_stores()
         self.app = FastAPI()
         self.app.include_router(api_router)
+        allow_console_admin(self.app)
         init_context(
             AppContext.for_testing(
                 registry=build_registry(),
@@ -63,17 +65,12 @@ class SkillApiTests(unittest.IsolatedAsyncioTestCase):
             )
         )
         self.transport = ASGITransport(app=self.app, raise_app_exceptions=False)
-        self.platform_patch = patch("deep_agent.api.v1.skills.PlatformAPI", _FakePlatformAPI)
+        self.platform_patch = patch("deep_agent.files.storage.PlatformAPI", _FakePlatformAPI)
         self.platform_patch.start()
-        self.runtime_platform_patch = patch(
-            "deep_agent.skills.runtime.PlatformAPI", _FakePlatformAPI
-        )
-        self.runtime_platform_patch.start()
         self.client_headers = {"app": "iirjgi005", "space": "iirjgi"}
 
     async def asyncTearDown(self) -> None:
         self.platform_patch.stop()
-        self.runtime_platform_patch.stop()
         await get_context().event_persister.aclose()
         reset_context()
         await self.engine.dispose()
@@ -136,6 +133,13 @@ class SkillApiTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(by_path["references/guide.docx"]["read_format"], "docx")
             self.assertEqual(by_path["assets/template.xlsx"]["read_format"], "xlsx")
             self.assertFalse(by_path["scripts/run.py"]["readable"])
+            definition = await client.get(
+                "/api/v1/skills/example-skill/resources/SKILL.md",
+            )
+            self.assertEqual(definition.status_code, 200, definition.text)
+            self.assertEqual(definition.json()["path"], "SKILL.md")
+            self.assertEqual(definition.json()["format"], "text")
+            self.assertIn("example-skill", definition.json()["content"])
             text = await client.get(
                 "/api/v1/skills/example-skill/resources/references/guide.md",
                 params={"limit": 1},
@@ -261,7 +265,7 @@ class SkillApiTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(wrong_code.status_code, 422, wrong_code.text)
             self.assertIn("must remain 'example-skill'", wrong_code.json()["detail"])
 
-    async def test_builtin_is_read_only_and_disabled_upload_cannot_be_selected(self) -> None:
+    async def test_builtin_is_read_only_and_uploaded_skill_can_be_selected(self) -> None:
         async with AsyncClient(
             transport=self.transport,
             base_url="http://test",
@@ -269,7 +273,7 @@ class SkillApiTests(unittest.IsolatedAsyncioTestCase):
         ) as client:
             forbidden = await client.patch(
                 "/api/v1/skills/deepagent-diagnostics",
-                json={"enabled": False},
+                json={"label": "不能修改"},
             )
             self.assertEqual(forbidden.status_code, 403)
 
@@ -278,28 +282,26 @@ class SkillApiTests(unittest.IsolatedAsyncioTestCase):
                 files={"file": ("example.zip", skill_zip(), "application/zip")},
             )
             self.assertEqual(installed.status_code, 201)
-            disabled = await client.patch(
+            obsolete_field = await client.patch(
                 "/api/v1/skills/example-skill",
                 json={"enabled": False},
             )
-            self.assertEqual(disabled.status_code, 200)
-            self.assertEqual(disabled.json()["runtime_status"], "disabled")
-            disabled_reload = await client.post("/api/v1/skills/example-skill/reload")
-            self.assertEqual(disabled_reload.status_code, 409)
+            self.assertEqual(obsolete_field.status_code, 422)
+            reloaded = await client.post("/api/v1/skills/example-skill/reload")
+            self.assertEqual(reloaded.status_code, 200)
             model_id = (await self.stores.llm_model.list_all())[0].id
-            rejected = await client.post(
+            accepted = await client.post(
                 "/api/v1/agents",
                 json={
-                    "name": "disabled-skill-agent",
+                    "name": "configured-skill-agent",
                     "model_id": model_id,
                     "prompt": "test",
                     "skills": ["example-skill"],
                 },
             )
-            self.assertEqual(rejected.status_code, 422)
-            self.assertEqual(rejected.json()["detail"]["invalid_skills"], ["example-skill"])
+            self.assertEqual(accepted.status_code, 201, accepted.text)
 
-    async def test_existing_disabled_skill_reference_can_be_preserved_but_not_added(self) -> None:
+    async def test_uploaded_skill_can_be_associated_with_multiple_agents(self) -> None:
         async with AsyncClient(
             transport=self.transport,
             base_url="http://test",
@@ -314,14 +316,13 @@ class SkillApiTests(unittest.IsolatedAsyncioTestCase):
             agent = await client.post(
                 "/api/v1/agents",
                 json={
-                    "name": "preserve-disabled-skill",
+                    "name": "first-skill-agent",
                     "model_id": model_id,
                     "prompt": "test",
                     "skills": ["example-skill"],
                 },
             )
             self.assertEqual(agent.status_code, 201, agent.text)
-            await client.patch("/api/v1/skills/example-skill", json={"enabled": False})
 
             preserved = await client.patch(
                 f"/api/v1/agents/{agent.json()['id']}",
@@ -334,11 +335,12 @@ class SkillApiTests(unittest.IsolatedAsyncioTestCase):
                 "/api/v1/agents",
                 json={"name": "another", "model_id": model_id, "prompt": "test"},
             )
-            rejected = await client.patch(
+            associated = await client.patch(
                 f"/api/v1/agents/{another.json()['id']}",
                 json={"skills": ["example-skill"]},
             )
-            self.assertEqual(rejected.status_code, 422)
+            self.assertEqual(associated.status_code, 200, associated.text)
+            self.assertEqual(associated.json()["skills"], ["example-skill"])
 
     async def test_same_hash_update_is_noop_without_new_upload(self) -> None:
         payload = skill_zip()

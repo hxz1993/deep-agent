@@ -19,19 +19,18 @@ deep-agent-config-<环境>-v<数据库版本>-<时间>.db
 备份包含完整的当前表结构，以及以下配置表数据：
 
 - `agents`
+- `llm_providers`
 - `llm_models`
 - `model_catalog`
 - `mcp_servers`
 - `skill_packages`
 - `ui_tool_packages`
 - `ui_tool_definitions`
-- `auxiliary_model_configs`
 - `alembic_version`
 
-`chat_sessions`、`chat_messages` 和 `chat_context_checkpoints` 只保留表结构，
-不复制会话或上下文投影数据。Checkpoint 是可重建的派生数据，不属于配置备份。备份中的
+`chat_sessions` 和 `chat_session_events` 只保留表结构，不复制会话事件。备份中的
 API Key、Token 和 MCP Header 保留原值。命令完成前会自动检查 SQLite
-完整性、各配置表行数、数据库版本和 DeepAgent 数据层连接。
+完整性、各配置表行数、数据库版本、模型到Provider的逻辑引用完整性和DeepAgent数据层连接。
 
 备份程序会把全部 ORM 业务表强制归入“复制配置数据”或“只保留结构”两类。以后增加表却没有
 同步备份清单时，测试和备份命令会直接失败，避免生成表面成功但缺配置的文件。备份文件内的
@@ -39,6 +38,7 @@ API Key、Token 和 MCP Header 保留原值。命令完成前会自动检查 SQL
 便于脱离仓库后核对备份边界。
 
 `llm_models` 会完整保留上下文窗口、最大输出 Token、输入模态与能力标签；
+`llm_providers` 会先于模型复制，并完整保留Provider类型、默认地址模式、明确地址与密钥；
 `model_catalog` 会完整保留 Lab、标准模型、Provider 组合关系、发布时间以及模态、上下文、
 能力和扩展元数据 JSON。目录本身不包含价格信息。
 
@@ -52,35 +52,38 @@ Hash、Manifest 和资源索引，不包含平台文件服务中的原始 ZIP，
 先在Skill管理页重新提交相同ZIP修复原包，再重新导出。Agent的Skill选择仍保存在配置DB中，
 导出的Skill ZIP不携带Agent绑定。
 
+会话标题不再有独立模型配置；首轮标题请求直接复用该轮实际生效的Provider和模型，因此配置备份
+无需保存标题专用表或环境变量。
+
 备份工具只负责数据库配置备份，不提供恢复命令。Skill原包的跨环境迁移由独立的单个/全部导出
 负责，两者职责不合并，避免把平台二进制文件塞入配置数据库。
 
-## v0.3.0 数据库基线重整
+## 会话历史归档
 
-v0.3.0 只保留 Alembic `001` 完整基线。旧库从 `023` 切换前先只读校验：
-
-```bash
-python3.12 -m maintenance.rebaseline_database \
-  --config ~/.config/deep-agent/test.env \
-  --expected-revision 023 \
-  --report '/path/DeepAgent-schema-before-v0.3.0-TMP-to-delete.json'
-```
-
-校验会检查九张业务表的字段、类型族、空值、默认值、主键、唯一约束、外键和必要索引，
-并只输出行数与内容哈希，不输出 API Key、Header 或业务行内容。检查通过且旧服务不会再
-重启后，执行：
+会话历史与配置是两个独立备份范围。Revision 007 升级到 008 前必须额外执行：
 
 ```bash
-python3.12 -m maintenance.rebaseline_database \
+python3.12 -m maintenance.session_history_backup \
   --config ~/.config/deep-agent/test.env \
-  --expected-revision 023 \
-  --stamp --yes \
-  --report '/path/DeepAgent-schema-after-v0.3.0-TMP-to-delete.json'
+  --environment test
 ```
 
-命令内部使用 Alembic `stamp --purge 001`，并再次验证 stamp 前后表结构、行数与内容哈希
-完全一致。它不创建、删除或改写业务表。数据库 stamp 为 `001` 后，旧版 `023` 镜像不得
-重启或扩容；应尽快部署 v0.3.0。
+默认输出到仓库相邻目录：
+
+```text
+../deep-agent-session-backups/<环境>/
+deep-agent-sessions-<环境>-v007-<时间>.db
+deep-agent-sessions-<环境>-v007-<时间>.db.sha256
+```
+
+归档原样保存 Revision 007 的 `chat_sessions`、`chat_messages`、旧上下文投影及会话清单；同时记录
+来源方言、Revision、Git Commit、表级/会话级 Canonical Hash 和外部 Artifact 句柄，但不下载平台
+文件。命令必须通过 SQLite `integrity_check`、源/归档行数、Pydantic Message解析、孤儿检查与Hash
+校验后才会留下最终文件；失败的`.partial-TMP-to-delete`会清理。目录权限为`0700`、文件为`0600`，
+正文、凭据和完整Tool Result不写日志。
+
+该归档是以后按指定Session ID编写一次性导入器的只读来源，不是可直接挂载的新数据库，也不提供
+通用Restore命令。清空会话不会删除平台File；跨环境恢复仍需单独迁移外部文件。
 
 ## v0.3.2 工具包迁移
 
@@ -121,3 +124,56 @@ Alembic `005`不增加表或字段。升级会删除已下线的预制演示MCP�
 Alembic `006`继续执行纯数据清理：删除已下线的预制文档MCP记录，并从显式
 `agents.capabilities`中移除对应引用。迁移保持其他能力顺序以及`null`、空列表语义；降级只回退
 revision，不恢复已经删除的Server和授权。历史会话及其中已有的Tool Call/Result保持原样。
+
+## v0.5.6 Provider与模型分层
+
+Alembic `007`新增`llm_providers`，给`llm_models`增加非空、带索引和`RESTRICT`外键的
+`provider_id`，并删除模型表原有的`base_url/api_key`。升级会按历史地址、密钥和协议推断并合并
+Provider；降级时先恢复模型连接列，再从Provider回填当前地址与密钥。配置备份固定先复制Provider
+再复制Model，清理顺序相反，并拒绝生成含孤儿`provider_id`的备份。未发布的`007`只能在隔离
+SQLite副本验证，不能连接共享Test数据库。
+
+## v0.6.0 会话事件迁移
+
+Alembic `008`是有意的破坏性会话迁移：删除Revision 007的旧会话、消息和上下文投影，建立新的
+`chat_sessions`与`chat_session_events`，不转换旧历史。Provider、Model、Agent、MCP、Skill、
+UI Tool和模型目录数据不变；旧的会话标题模型映射由后续Revision 009删除。
+
+共享环境发布顺序固定为：先用007代码生成并验证配置备份和会话归档；构建并推送0.6.0镜像；进入
+维护窗口并停止全部旧实例与旧镜像自动扩容；复核Revision和物理表；启动新镜像执行008；核对配置
+表行数、新会话表为空和健康接口；执行并删除临时对话/工具/压缩冒烟会话；最后生成Revision 008
+配置备份。Migration本身完成清空，禁止再执行无审计的手工`TRUNCATE`。
+
+`008 → 007`只重建空旧表，不从Events逆向恢复旧Message；再次升级008仍然是空Event Store。
+
+## v0.6.0 标题模型配置清理
+
+Alembic `009`只删除已废弃的`auxiliary_model_configs`，不修改Provider、Model、Agent、Skill、
+UI Tool、Session或Event数据。开发阶段存在两种Revision 008物理状态：共享Test仍保留旧表，部分
+本地SQLite已经受控删除；009会先检查表是否存在，使两种状态都安全收敛到同一结构。降级到008时
+恢复空的旧表及其`llm_models.id`外键，重新升级009再次删除。
+
+共享环境仍遵循先备份、部署包含009的镜像、停止旧实例、再迁移和冒烟的顺序；禁止只修改
+`alembic_version`或在旧镜像仍运行时提前删表。升级后的配置备份文件名使用`v009`。
+
+## v0.6.1 资源启停层清理
+
+Alembic `010`删除Provider、模型、Skill、MCP、UI工具包和UI工具配置表中的`enabled`列，并把
+`agents.capabilities`统一为非空显式列表。升级会把历史`NULL`能力转换为`[]`，不会根据旧资源
+启停值自动给任何Agent增加关联；Agent已有的显式`model_id/skills/capabilities`保持不变。
+Provider迁移后按类型、地址和凭据等真实配置判断可用，模型不再额外经过目录启停门禁。
+
+共享Test从009升级010时应先用009代码导出配置备份，停止旧实例后部署0.6.1并执行标准
+`alembic upgrade head`。迁移后核验六张配置表不再有`enabled`列、Agent关联数量不变，再执行
+Agent创建、MCP、Skill、UI工具和对话冒烟。禁止手工只改`alembic_version`。升级后的配置备份
+文件名使用`v010`。
+
+## v0.6.4 模型启停恢复
+
+Alembic `011`只给`llm_models`恢复非空、默认启用的`enabled`列。升级时现有模型全部回填为启用；
+Provider、Skill、MCP、UI工具包和UI工具仍无启停字段，Agent关联、会话和事件数据均不改写。
+降级到010只删除该列，再次升级011会把所有现存模型恢复为启用，不能把Downgrade当作保存停用状态的手段。
+
+共享环境从010升级011前使用010代码导出配置备份，停止旧实例后执行标准`alembic upgrade head`。
+迁移后核验模型数量不变、`enabled`全部非空，并验证停用模型从业务模型列表消失、管理列表仍可读取和
+重新启用。升级后的配置备份文件名使用`v011`。

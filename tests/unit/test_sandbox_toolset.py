@@ -147,6 +147,7 @@ class SandboxBootstrapHardGateTests(unittest.IsolatedAsyncioTestCase):
         fake_bundle = MagicMock()
         fake_bundle.dialect.value = "sqlite"
         fake_bundle.stores = MagicMock()
+        fake_bundle.stores.coordinator.interrupt_running = AsyncMock(return_value=0)
         fake_bundle.engine = MagicMock()
         fake_bundle.session_factory = MagicMock()
 
@@ -183,6 +184,7 @@ class SandboxBootstrapHardGateTests(unittest.IsolatedAsyncioTestCase):
         fake_bundle = MagicMock()
         fake_bundle.dialect.value = "sqlite"
         fake_bundle.stores = MagicMock()
+        fake_bundle.stores.coordinator.interrupt_running = AsyncMock(return_value=0)
         fake_bundle.engine = MagicMock()
         fake_bundle.session_factory = MagicMock()
         persister = MagicMock()
@@ -249,7 +251,7 @@ class SandboxCapabilityTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(capability.code, "builtin:sandbox")
         self.assertEqual(capability.category, "builtin")
-        self.assertFalse(capability.default_enabled)
+        self.assertFalse(hasattr(capability, "default_enabled"))
         self.assertEqual(capability.source, "builtin")
         self.assertEqual(
             {item.name for item in capability.tools},

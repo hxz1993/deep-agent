@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import hashlib
+import json
 from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
 
-from pydantic_ai import RunContext
+from pydantic_ai import RunContext, ToolReturn
 from pydantic_ai.messages import ModelMessage, ModelRequest, ToolReturnPart
 from pydantic_ai.tools import ToolDefinition
 from pydantic_ai_harness.tool_output_limits import (
@@ -14,13 +16,15 @@ from pydantic_ai_harness.tool_output_limits import (
     Spill,
     ToolOutputLimits,
     Truncate,
+    json_lines,
 )
 
 from deep_agent.agent.attachments import _download_file
 from deep_agent.agent.context.estimator import TokenEstimator
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.observability import log_event
-from deepfos_platform.client.platform import FILE_TYPE_ATTACHMENT, PlatformAPI
+from deep_agent.files.storage import FileStore, PlatformFileStore
+from deepfos_platform.client.platform import FILE_TYPE_ATTACHMENT
 
 TOOL_OUTPUT_MIN_TOKENS = 4_000
 TOOL_OUTPUT_MAX_TOKENS = 24_000
@@ -101,22 +105,34 @@ def tool_result_artifacts(part: ToolReturnPart) -> list[dict[str, Any]]:
         byte_size = metadata.get("overflow_bytes")
         if isinstance(byte_size, int) and byte_size >= 0:
             item["byte_size"] = byte_size
+        content_hash = metadata.get("overflow_hash")
+        if isinstance(content_hash, str) and content_hash:
+            item["content_hash"] = content_hash
         artifacts.append(item)
     content_handle = metadata.get("overflow_content_handle")
     if isinstance(content_handle, str) and content_handle:
-        artifacts.append(
-            {
-                "artifact_id": content_handle,
-                "kind": "tool_result_overflow",
-                "role": "content",
-            }
-        )
+        item = {
+            "artifact_id": content_handle,
+            "kind": "tool_result_overflow",
+            "role": "content",
+        }
+        content_hash = metadata.get("overflow_content_hash")
+        if isinstance(content_hash, str) and content_hash:
+            item["content_hash"] = content_hash
+        artifacts.append(item)
     return artifacts
 
 
 def artifact_handles_from_history(messages: Sequence[ModelMessage]) -> set[str]:
     """Recover only authenticated spill handles from the raw session history."""
-    handles: set[str] = set()
+    return set(artifact_metadata_from_history(messages))
+
+
+def artifact_metadata_from_history(
+    messages: Sequence[ModelMessage],
+) -> dict[str, dict[str, Any]]:
+    """Recover authenticated spill metadata needed by other runtime file tools."""
+    artifacts: dict[str, dict[str, Any]] = {}
     for message in messages:
         if not isinstance(message, ModelRequest):
             continue
@@ -126,8 +142,8 @@ def artifact_handles_from_history(messages: Sequence[ModelMessage]) -> set[str]:
             for artifact in tool_result_artifacts(part):
                 artifact_id = artifact.get("artifact_id")
                 if isinstance(artifact_id, str) and artifact_id:
-                    handles.add(artifact_id)
-    return handles
+                    artifacts[artifact_id] = dict(artifact)
+    return artifacts
 
 
 class PlatformToolResultStore(OverflowStore):
@@ -138,16 +154,27 @@ class PlatformToolResultStore(OverflowStore):
         *,
         request_headers: Mapping[str, str],
         threshold_tokens: int,
+        file_store: FileStore | None = None,
     ) -> None:
         self._headers = dict(request_headers)
+        self._file_store = file_store or PlatformFileStore()
         self._deps: AgentDeps | None = None
         self._allowed_handles: set[str] = set()
         self._load_tasks: dict[str, asyncio.Task[bytes]] = {}
+        self._content_hashes: dict[str, str] = {}
+        self._failed_inline_payloads: list[bytes] = []
         self.telemetry = ToolOutputTelemetry(threshold_tokens=threshold_tokens)
 
     def bind(self, deps: AgentDeps, raw_history: Sequence[ModelMessage]) -> None:
         self._deps = deps
-        self._allowed_handles = artifact_handles_from_history(raw_history)
+        artifacts = artifact_metadata_from_history(raw_history)
+        self._allowed_handles = set(artifacts)
+        self._content_hashes = {
+            handle: str(metadata["content_hash"])
+            for handle, metadata in artifacts.items()
+            if metadata.get("content_hash")
+        }
+        deps.tool_output_artifacts = artifacts
         deps.tool_output_limits = self.telemetry
 
     @staticmethod
@@ -167,16 +194,18 @@ class PlatformToolResultStore(OverflowStore):
 
     async def write(self, key: str, data: bytes) -> str:
         digest = hashlib.sha256(key.encode("utf-8")).hexdigest()[:20]
-        api = PlatformAPI(header=self._headers)
         try:
-            uploaded = await api.file.upload(
+            uploaded = await self._file_store.upload(
                 file_type=FILE_TYPE_ATTACHMENT,
                 file_name=f"tool-result-{digest}.txt",
-                file=data,
+                mime="text/plain",
+                data=data,
+                request_headers=self._headers,
             )
         except asyncio.CancelledError:
             raise
         except Exception:
+            self._failed_inline_payloads.append(data)
             self.telemetry.spill_failures += 1
             log_event(
                 "tool_output_spill_failed",
@@ -184,14 +213,24 @@ class PlatformToolResultStore(OverflowStore):
                 spill_failures=self.telemetry.spill_failures,
             )
             raise
-        raw_handle = getattr(uploaded, "id", None)
+        raw_handle = uploaded.id
         if not isinstance(raw_handle, str) or not raw_handle:
+            self._failed_inline_payloads.append(data)
             self.telemetry.spill_failures += 1
             raise OSError("Platform file upload returned no id")
         handle = raw_handle
         self._allowed_handles.add(handle)
+        content_hash = hashlib.sha256(data).hexdigest()
+        self._content_hashes[handle] = content_hash
         if self._deps is not None:
             self._deps.file_bytes[self._cache_key(handle)] = data
+            self._deps.tool_output_artifacts[handle] = {
+                "artifact_id": handle,
+                "kind": "tool_result_overflow",
+                "role": "return_value",
+                "byte_size": len(data),
+                "content_hash": content_hash,
+            }
         self.telemetry.spill_count += 1
         self.telemetry.spilled_bytes += len(data)
         log_event(
@@ -201,6 +240,14 @@ class PlatformToolResultStore(OverflowStore):
             spilled_bytes=len(data),
         )
         return handle
+
+    def consume_failed_inline_payloads(self) -> list[bytes]:
+        payloads = self._failed_inline_payloads
+        self._failed_inline_payloads = []
+        return payloads
+
+    def content_hash(self, handle: str) -> str | None:
+        return self._content_hashes.get(handle)
 
     async def read(self, handle: str) -> bytes:
         self.telemetry.read_calls += 1
@@ -217,7 +264,11 @@ class PlatformToolResultStore(OverflowStore):
         if task is None:
             async def download_and_cache() -> bytes:
                 try:
-                    data = await _download_file(handle, self._headers)
+                    data = await _download_file(
+                        handle,
+                        self._headers,
+                        file_store=self._file_store,
+                    )
                 except asyncio.CancelledError:
                     raise
                 except Exception as exc:
@@ -244,12 +295,115 @@ class PlatformToolResultStore(OverflowStore):
         return data
 
 
+class DeepAgentToolOutputLimits(ToolOutputLimits[AgentDeps]):
+    """Preserve a complete Event-only fallback when platform spill fails."""
+
+    async def after_tool_execute(
+        self,
+        ctx: RunContext[AgentDeps],
+        *,
+        call: ToolCallPart,
+        tool_def: ToolDefinition,
+        args: dict[str, Any],
+        result: Any,
+    ) -> Any:
+        reduced = await super().after_tool_execute(
+            ctx,
+            call=call,
+            tool_def=tool_def,
+            args=args,
+            result=result,
+        )
+        store = self.store
+        if not isinstance(store, PlatformToolResultStore):
+            return reduced
+        if isinstance(reduced, ToolReturn):
+            metadata = dict(reduced.metadata) if isinstance(reduced.metadata, Mapping) else {}
+            value_handle = metadata.get("overflow_handle")
+            content_handle = metadata.get("overflow_content_handle")
+            value_hash = (
+                store.content_hash(value_handle) if isinstance(value_handle, str) else None
+            )
+            content_hash = (
+                store.content_hash(content_handle)
+                if isinstance(content_handle, str)
+                else None
+            )
+            if value_hash or content_hash:
+                if value_hash:
+                    metadata["overflow_hash"] = value_hash
+                if content_hash:
+                    metadata["overflow_content_hash"] = content_hash
+                reduced = ToolReturn(
+                    return_value=reduced.return_value,
+                    content=reduced.content,
+                    metadata=metadata,
+                )
+        failed_payloads = store.consume_failed_inline_payloads()
+        if not failed_payloads:
+            return reduced
+
+        if isinstance(result, ToolReturn):
+            original_value = result.return_value
+            original_content = result.content
+        else:
+            original_value = result
+            original_content = None
+        inline_fallback = _json_safe_value(original_value)
+        canonical = json.dumps(
+            inline_fallback,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        if isinstance(reduced, ToolReturn):
+            metadata = dict(reduced.metadata) if isinstance(reduced.metadata, Mapping) else {}
+            return_value = reduced.return_value
+            content = reduced.content
+        else:
+            metadata = {}
+            return_value = reduced
+            content = original_content
+        metadata.update(
+            {
+                "spill_failed": True,
+                "inline_fallback": inline_fallback,
+                "inline_fallback_bytes": len(canonical),
+                "inline_fallback_hash": hashlib.sha256(canonical).hexdigest(),
+                "failed_spill_units": len(failed_payloads),
+            }
+        )
+        return ToolReturn(
+            return_value=return_value,
+            content=content,
+            metadata=metadata,
+        )
+
+
+def _json_safe_value(value: Any) -> Any:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, bytes):
+        return {
+            "encoding": "base64",
+            "data": base64.b64encode(value).decode("ascii"),
+        }
+    if isinstance(value, Mapping):
+        return {str(key): _json_safe_value(child) for key, child in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_json_safe_value(child) for child in value]
+    if hasattr(value, "model_dump"):
+        return _json_safe_value(value.model_dump(mode="json"))
+    return str(value)
+
+
 def build_tool_output_limits(
     *,
     request_headers: Mapping[str, str],
     context_window_tokens: int | None,
     max_output_tokens: int | None,
     estimator: TokenEstimator,
+    file_store: FileStore | None = None,
 ) -> tuple[ToolOutputLimits[AgentDeps], PlatformToolResultStore]:
     threshold = tool_output_threshold_tokens(
         context_window_tokens=context_window_tokens,
@@ -258,8 +412,9 @@ def build_tool_output_limits(
     store = PlatformToolResultStore(
         request_headers=request_headers,
         threshold_tokens=threshold,
+        file_store=file_store,
     )
-    capability: ToolOutputLimits[AgentDeps] = ToolOutputLimits(
+    capability: ToolOutputLimits[AgentDeps] = DeepAgentToolOutputLimits(
         bands=[
             Band(
                 over=threshold,
@@ -273,6 +428,7 @@ def build_tool_output_limits(
         over_tokens=True,
         tokenizer=estimator.text,
         store=store,
+        serializer=json_lines,
     )
     return capability, store
 
@@ -281,6 +437,7 @@ __all__ = [
     "PlatformToolResultStore",
     "ToolOutputTelemetry",
     "artifact_handles_from_history",
+    "artifact_metadata_from_history",
     "build_tool_output_limits",
     "tool_output_threshold_tokens",
     "tool_result_artifacts",

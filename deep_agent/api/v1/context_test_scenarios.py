@@ -7,16 +7,22 @@ from pydantic import BaseModel, Field
 
 from deep_agent.agent.context.budget import build_context_budget
 from deep_agent.agent.context.estimator import TokenEstimator
+from deep_agent.agent.provider_registry import (
+    ProviderRuntimeConfig,
+    effective_base_url,
+    load_provider_for_model,
+)
 from deep_agent.agent.context.test_scenarios import (
     CONTEXT_TEST_SCENARIOS,
     build_context_test_history,
     get_context_test_scenario,
 )
+from deep_agent.api.v1.admin import CONSOLE_ADMIN_DEPENDENCIES
 from deep_agent.api.v1.request_identity import RequestUserDep
 from deep_agent.core.context import AppContextDep
 from deep_agent.schemas.chat import SessionInfo
 
-router = APIRouter()
+router = APIRouter(dependencies=CONSOLE_ADMIN_DEPENDENCIES)
 
 
 class ContextTestScenarioInfo(BaseModel):
@@ -64,7 +70,13 @@ async def _agent_and_estimator(ctx: AppContextDep, agent_id: str):
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="当前 Agent 的模型未配置上下文窗口，无法生成压缩测试会话。",
         )
-    return row, model, TokenEstimator.for_model(model.model, model.base_url)
+    provider = await load_provider_for_model(model, ctx.stores.llm_configuration)
+    provider_config = ProviderRuntimeConfig.from_row(provider)
+    return row, model, TokenEstimator.for_model(
+        model.model,
+        effective_base_url(provider_config),
+        provider_type=provider_config.provider_type,
+    )
 
 
 @router.get(
@@ -131,12 +143,15 @@ async def create_context_test_session(
         estimator=estimator,
     )
     session_id = f"context-test-{scenario.key}-{uuid.uuid4().hex}"
+    run_id = uuid.uuid4().hex
     title = f"【压缩测试】{scenario.title}"
     await ctx.store.append(
         session_id,
         built.messages,
         agent_id=agent.id,
         user_id=user,
+        turn_id=run_id,
+        run_id=run_id,
     )
     await ctx.store.update_session_title(session_id, agent.id, title)
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -11,19 +12,20 @@ from pydantic_ai.models.test import TestModel
 from pydantic_ai.tools import ToolDefinition
 from pydantic_ai.usage import RunUsage
 
-from deep_agent.agent.context.checkpoint import serialize_sanitized_projection
+from deep_agent.agent.context.sanitization import serialize_sanitized_projection
 from deep_agent.agent.context.estimator import TokenEstimator
 from deep_agent.agent.context.file_keys import deep_agent_file_key
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.events import map_part
-from deep_agent.agent.history import model_messages_to_history
 from deep_agent.agent.tool_output_limits import (
     PlatformToolResultStore,
     artifact_handles_from_history,
+    artifact_metadata_from_history,
     build_tool_output_limits,
     tool_output_threshold_tokens,
 )
 from deep_agent.db.serialization import deserialize_message, serialize_message
+from tests.helpers.conversation import project_model_messages
 
 
 def _ctx(deps: AgentDeps | None = None) -> RunContext[AgentDeps]:
@@ -78,10 +80,14 @@ class PlatformToolResultStoreTests(unittest.IsolatedAsyncioTestCase):
         store.bind(deps, [])
         upload = AsyncMock(return_value=SimpleNamespace(id="platform-file-1"))
         api = SimpleNamespace(file=SimpleNamespace(upload=upload))
-        with patch("deep_agent.agent.tool_output_limits.PlatformAPI", return_value=api):
+        with patch("deep_agent.files.storage.PlatformAPI", return_value=api):
             handle = await store.write("run/call", b"complete output")
         self.assertEqual(handle, "platform-file-1")
         self.assertEqual(await store.read(handle), b"complete output")
+        self.assertEqual(
+            store.content_hash(handle),
+            "8468c503ac8dae011ac26d9873b7198d2a64b8f1a3b38c0d5d8506482710bf03",
+        )
         upload.assert_awaited_once()
         self.assertEqual(store.telemetry.platform_downloads, 0)
         self.assertEqual(store.telemetry.spill_count, 1)
@@ -102,6 +108,11 @@ class PlatformToolResultStoreTests(unittest.IsolatedAsyncioTestCase):
         deps = AgentDeps(session_id="session")
         store = PlatformToolResultStore(request_headers={}, threshold_tokens=4_000)
         store.bind(deps, history)
+        self.assertEqual(
+            artifact_metadata_from_history(history)["platform-file-1"]["byte_size"],
+            50,
+        )
+        self.assertEqual(deps.tool_output_artifacts["platform-file-1"]["role"], "return_value")
         download = AsyncMock(return_value=b"line 1\nline 2")
         with patch("deep_agent.agent.tool_output_limits._download_file", download):
             first, second = await asyncio.gather(
@@ -109,7 +120,11 @@ class PlatformToolResultStoreTests(unittest.IsolatedAsyncioTestCase):
                 store.read("platform-file-1"),
             )
         self.assertEqual(first, second)
-        download.assert_awaited_once_with("platform-file-1", {})
+        download.assert_awaited_once_with(
+            "platform-file-1",
+            {},
+            file_store=store._file_store,
+        )
         self.assertEqual(store.telemetry.platform_downloads, 1)
 
     async def test_untrusted_handle_never_reaches_platform(self) -> None:
@@ -124,6 +139,64 @@ class PlatformToolResultStoreTests(unittest.IsolatedAsyncioTestCase):
 
 
 class HarnessToolOutputLimitsTests(unittest.IsolatedAsyncioTestCase):
+    async def test_large_sequence_spills_as_pageable_json_lines(self) -> None:
+        capability, store = build_tool_output_limits(
+            request_headers={},
+            context_window_tokens=10_000,
+            max_output_tokens=2_000,
+            estimator=TokenEstimator.conservative(),
+        )
+        deps = AgentDeps(session_id="session")
+        store.bind(deps, [])
+        captured: list[bytes] = []
+
+        async def capture_write(_key: str, data: bytes) -> str:
+            captured.append(data)
+            return "platform-file-jsonl"
+
+        store.write = capture_write  # type: ignore[method-assign]
+        rows = [
+            {"id": index, "name": "上海" if index == 2 else f"成员{index}"}
+            for index in range(1_000)
+        ]
+
+        result = await capability.after_tool_execute(
+            _ctx(deps),
+            call=ToolCallPart("large_query", {}, "call-jsonl"),
+            tool_def=ToolDefinition(name="large_query"),
+            args={},
+            result=rows,
+        )
+
+        self.assertIsInstance(result, ToolReturn)
+        self.assertEqual(result.metadata["overflow_handle"], "platform-file-jsonl")
+        self.assertEqual(len(captured), 1)
+        lines = captured[0].decode("utf-8").splitlines()
+        self.assertEqual(len(lines), len(rows))
+        self.assertEqual(json.loads(lines[0]), rows[0])
+        self.assertEqual(json.loads(lines[2]), rows[2])
+
+    async def test_small_structured_result_keeps_original_object(self) -> None:
+        capability, store = build_tool_output_limits(
+            request_headers={},
+            context_window_tokens=10_000,
+            max_output_tokens=2_000,
+            estimator=TokenEstimator.conservative(),
+        )
+        store.write = AsyncMock(return_value="unused")  # type: ignore[method-assign]
+        original = [{"id": 1, "name": "上海"}]
+
+        result = await capability.after_tool_execute(
+            _ctx(),
+            call=ToolCallPart("query", {}, "call-small-json"),
+            tool_def=ToolDefinition(name="query"),
+            args={},
+            result=original,
+        )
+
+        self.assertIs(result, original)
+        store.write.assert_not_awaited()  # type: ignore[attr-defined]
+
     async def test_capability_runs_inside_real_agent_loop(self) -> None:
         capability, store = build_tool_output_limits(
             request_headers={},
@@ -188,15 +261,15 @@ class HarnessToolOutputLimitsTests(unittest.IsolatedAsyncioTestCase):
         )
         event = map_part(part)
         self.assertEqual(event["artifacts"][0]["artifact_id"], "platform-file-1")
-        history = model_messages_to_history([ModelRequest(parts=[part])])
-        self.assertEqual(history[0].parts[0].artifacts[0]["byte_size"], result.metadata["overflow_bytes"])
+        history = project_model_messages([ModelRequest(parts=[part])])
+        self.assertEqual(history[0].artifacts[0].byte_size, result.metadata["overflow_bytes"])
         self.assertEqual(artifact_handles_from_history([ModelRequest(parts=[part])]), {"platform-file-1"})
 
         restored = deserialize_message(serialize_message(ModelRequest(parts=[part])))
         self.assertEqual(artifact_handles_from_history([restored]), {"platform-file-1"})
-        restored_history = model_messages_to_history([restored])
+        restored_history = project_model_messages([restored])
         self.assertEqual(
-            restored_history[0].parts[0].artifacts[0]["artifact_id"],
+            restored_history[0].artifacts[0].artifact_id,
             "platform-file-1",
         )
 
@@ -237,16 +310,49 @@ class HarnessToolOutputLimitsTests(unittest.IsolatedAsyncioTestCase):
             max_output_tokens=2_000,
             estimator=TokenEstimator.conservative(),
         )
-        store.write = AsyncMock(side_effect=OSError("platform down"))  # type: ignore[method-assign]
-        result = await capability.after_tool_execute(
-            _ctx(),
-            call=ToolCallPart("query", {}, "call-1"),
-            tool_def=ToolDefinition(name="query"),
-            args={},
-            result="A" * 30_000,
+        upload = AsyncMock(side_effect=OSError("platform down"))
+        api = SimpleNamespace(file=SimpleNamespace(upload=upload))
+        original = "A" * 30_000
+        with patch("deep_agent.files.storage.PlatformAPI", return_value=api):
+            result = await capability.after_tool_execute(
+                _ctx(),
+                call=ToolCallPart("query", {}, "call-1"),
+                tool_def=ToolDefinition(name="query"),
+                args={},
+                result=original,
+            )
+        self.assertIsInstance(result, ToolReturn)
+        self.assertLessEqual(len(result.return_value), 8_200)
+        self.assertTrue(result.metadata["spill_failed"])
+        self.assertEqual(result.metadata["inline_fallback"], original)
+        self.assertEqual(store.telemetry.spill_failures, 1)
+
+    async def test_successful_spill_persists_full_artifact_hash(self) -> None:
+        capability, store = build_tool_output_limits(
+            request_headers={},
+            context_window_tokens=10_000,
+            max_output_tokens=2_000,
+            estimator=TokenEstimator.conservative(),
         )
-        self.assertIsInstance(result, str)
-        self.assertLessEqual(len(result), 8_200)
+        deps = AgentDeps(session_id="session")
+        store.bind(deps, [])
+        upload = AsyncMock(return_value=SimpleNamespace(id="platform-file-hash"))
+        api = SimpleNamespace(file=SimpleNamespace(upload=upload))
+        with patch("deep_agent.files.storage.PlatformAPI", return_value=api):
+            result = await capability.after_tool_execute(
+                _ctx(deps),
+                call=ToolCallPart("query", {}, "call-hash"),
+                tool_def=ToolDefinition(name="query"),
+                args={},
+                result="完整结果" * 10_000,
+            )
+        self.assertIsInstance(result, ToolReturn)
+        assert isinstance(result, ToolReturn)
+        self.assertEqual(
+            result.metadata["overflow_hash"],
+            store.content_hash("platform-file-hash"),
+        )
+        self.assertEqual(len(result.metadata["overflow_hash"]), 64)
 
     async def test_return_value_and_model_content_spill_independently(self) -> None:
         capability, store = build_tool_output_limits(

@@ -14,11 +14,9 @@ class UiToolPackageStoreBase(SessionBoundMixin):
             result = await db.execute(select(UiToolPackage).where(UiToolPackage.code == code))
             return result.scalar_one_or_none()
 
-    async def list_all(self, *, enabled: bool | None = None) -> list[UiToolPackage]:
+    async def list_all(self) -> list[UiToolPackage]:
         async with self._read() as db:
             stmt = select(UiToolPackage).order_by(UiToolPackage.code)
-            if enabled is not None:
-                stmt = stmt.where(UiToolPackage.enabled == enabled)
             result = await db.execute(stmt)
             return list(result.scalars().all())
 
@@ -48,7 +46,6 @@ class UiToolPackageStoreBase(SessionBoundMixin):
                     label=data.label,
                     description=data.description,
                     source="manual",
-                    enabled=data.enabled,
                 )
                 db.add(row)
                 await db.flush()

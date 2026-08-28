@@ -252,9 +252,14 @@ Lab
 - “按模型”默认视图：Lab 左侧分类，模型列表，展开 Provider。
 - “按接入渠道”视图。
 - 搜索、Provider 与输入模态过滤。
-- “重新加载”只查数据库。
-- “更新模型目录”调用手工刷新接口。
+- “在线更新”调用手工刷新接口。
+- “导入”接受models.dev官方`catalog.json`，供不能访问外网的部署环境离线更新。
+- “导出”输出当前数据库中的已接受目录，格式可直接再导入。
 - 初始空状态、刷新进度、错误回显和失败保留旧目录提示。
+
+联网刷新和JSON导入共用一套解析、Provider白名单、标准化、完整校验和
+单事务替换。导入上限为16 MiB，不接受自定义精简Schema；校验或写入失败不清空
+已有目录。目录更新始终不修改`llm_models`运行配置。
 
 点击“使用此模型”后，模型配置弹窗预填：
 
@@ -305,7 +310,6 @@ mcp_servers
 agents
 ui_tool_packages
 ui_tool_definitions
-auxiliary_model_configs
 ```
 
 备份完整保存：
@@ -315,7 +319,7 @@ auxiliary_model_configs
 - `llm_models` 的上下文、最大输出和 tags；不保留无运行价值的目录来源字段。
 - 原有 API Key、MCP Header 等配置原值。
 
-`chat_sessions/chat_messages` 仍只建结构、不复制数据。备份工具仍只负责导出，不提供恢复命令。
+`chat_sessions/chat_session_events`仍只建结构、不复制数据。备份工具仍只负责导出，不提供恢复命令。
 备份完成前，使用新版 ORM同时读取 `LlmModel` 与 `ModelCatalog` 验证兼容性。
 
 ## 11. 验收

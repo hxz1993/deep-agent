@@ -16,7 +16,6 @@ class UIToolRecord:
     result_schema: dict[str, Any] | None = None
     metadata: dict[str, Any] | None = None
     source: str = "builtin"
-    enabled: bool = True
 
     @classmethod
     def from_row(cls, row: UiToolDefinition) -> UIToolRecord:
@@ -29,5 +28,4 @@ class UIToolRecord:
             result_schema=row.result_schema,
             metadata=row.metadata_,
             source=row.source,
-            enabled=row.enabled,
         )

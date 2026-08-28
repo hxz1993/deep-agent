@@ -1,11 +1,15 @@
-const WORKSPACE_ASSET_VERSION = "20260815-2";
+const WORKSPACE_ASSET_VERSION = "20260828-1";
+
+const WORKSPACE_PANE_LIMITS = {
+  agent: { min: 150, max: 280, initial: 188, variable: "--console-agent-width" },
+  session: { min: 220, max: 420, initial: 300, variable: "--console-session-width" },
+  inspector: { min: 260, max: 720, initial: 320, variable: "--console-inspector-width" },
+};
 
 let initialized = false;
 let lastRenderKey = "";
-let contextTestCatalog = null;
-let contextTestCatalogAgentId = "";
-let contextTestRequestAgentId = "";
 let selectedContextReference = null;
+let inspectorActiveTab = "session";
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -34,18 +38,34 @@ function installLegacyDom(source) {
 
   sidebar.querySelector(".sidebar-footer")?.remove();
   const sidebarHeader = sidebar.querySelector(".sidebar-header");
+  const agentSelect = document.getElementById("agentSelect");
   const agentSwitcher = document.createElement("div");
   agentSwitcher.className = "agent-switcher";
   agentSwitcher.innerHTML = `
-    <label class="agent-select-field">
-      <i data-lucide="bot" aria-hidden="true"></i>
-      <select id="workspaceAgentSelect" aria-label="选择测试 Agent">
-        <option value="">正在加载 Agent…</option>
-      </select>
-    </label>
+    <button type="button" class="icon-action refresh-agent" id="refreshWorkspaceAgentsBtn" title="刷新 Agent" aria-label="刷新 Agent">
+      <i data-lucide="refresh-cw"></i>
+    </button>
     <button type="button" class="icon-action pin-agent" id="pinAgentPaneBtn" title="固定 Agent 列表到左侧" aria-label="固定 Agent 列表到左侧" aria-pressed="false">
       <i data-lucide="pin"></i>
     </button>`;
+  if (agentSelect) {
+    const selectField = document.createElement("div");
+    selectField.className = "agent-select-field";
+    selectField.innerHTML = `
+      <button type="button" class="agent-select-trigger" id="workspaceAgentSelectTrigger" aria-haspopup="listbox" aria-expanded="false">
+        <span class="agent-select-icon"><i data-lucide="bot" aria-hidden="true"></i></span>
+        <span class="agent-select-label">加载中…</span>
+        <i class="agent-select-chevron" data-lucide="chevron-down" aria-hidden="true"></i>
+      </button>
+      <div class="agent-select-menu hidden" id="workspaceAgentSelectMenu" role="listbox" aria-label="切换测试 Agent"></div>`;
+    agentSelect.setAttribute("aria-label", "切换测试 Agent");
+    agentSelect.setAttribute("aria-hidden", "true");
+    agentSelect.tabIndex = -1;
+    agentSelect.hidden = true;
+    agentSelect.classList.add("workspace-native-agent-select");
+    selectField.append(agentSelect);
+    agentSwitcher.insertBefore(selectField, agentSwitcher.firstChild);
+  }
   sidebar.insertBefore(agentSwitcher, sidebarHeader);
   sidebarHeader?.remove();
   sidebar.querySelector("#newChatBtn")?.remove();
@@ -60,13 +80,6 @@ function installLegacyDom(source) {
     const search = document.createElement("label");
     search.className = "compact-search session-search";
     search.innerHTML = '<i data-lucide="search" aria-hidden="true"></i><input type="search" id="sessionSearchInput" placeholder="搜索当前 Agent 会话" />';
-    const testChatButton = document.createElement("button");
-    testChatButton.type = "button";
-    testChatButton.id = "contextTestChatBtn";
-    testChatButton.className = "icon-action session-test-action hidden";
-    testChatButton.title = "新建测试会话";
-    testChatButton.setAttribute("aria-label", "新建测试会话");
-    testChatButton.innerHTML = '<i data-lucide="flask-conical"></i>';
     const newChatButton = document.createElement("button");
     newChatButton.type = "button";
     newChatButton.id = "newChatBtn";
@@ -74,43 +87,26 @@ function installLegacyDom(source) {
     newChatButton.dataset.consoleDirectNewChat = "true";
     newChatButton.title = "为当前 Agent 新建对话";
     newChatButton.setAttribute("aria-label", "为当前 Agent 新建对话");
-    newChatButton.innerHTML = '<i data-lucide="square-pen"></i>';
-    toolbar.append(search, testChatButton, newChatButton);
+    newChatButton.innerHTML = '<i data-lucide="square-pen"></i><span>新建</span>';
+    toolbar.append(search, newChatButton);
     sessionSection.insertBefore(toolbar, sessionSection.querySelector("#sessionList"));
   }
 
+  const sessionResizer = document.createElement("div");
+  sessionResizer.id = "sessionPaneResizer";
+  sessionResizer.className = "workspace-resizer workspace-resizer-session";
+  sessionResizer.dataset.resizePane = "session";
+  sessionResizer.tabIndex = 0;
+  sessionResizer.setAttribute("role", "separator");
+  sessionResizer.setAttribute("aria-label", "调整会话列表宽度");
+  sessionResizer.setAttribute("aria-orientation", "vertical");
+  sessionResizer.setAttribute("aria-valuemin", "220");
+  sessionResizer.setAttribute("aria-valuemax", "420");
+  sessionResizer.setAttribute("aria-valuenow", "300");
+
   const host = document.getElementById("workspaceLegacyHost");
-  host.replaceChildren(sidebar, chat);
-  installContextTestDialog();
-
+  host.replaceChildren(sidebar, sessionResizer, chat);
   document.getElementById("sessionSearchInput")?.addEventListener("input", filterSessions);
-}
-
-function installContextTestDialog() {
-  document.getElementById("contextTestDialog")?.remove();
-  const dialog = document.createElement("dialog");
-  dialog.id = "contextTestDialog";
-  dialog.className = "context-test-dialog";
-  dialog.innerHTML = `
-    <form method="dialog">
-      <header>
-        <div><strong>新建测试会话</strong><span>快速初始化一段可触发上下文压缩的合法对话历史</span></div>
-        <button type="button" class="icon-action" data-context-test-close aria-label="关闭"><i data-lucide="x"></i></button>
-      </header>
-      <div class="context-test-body">
-        <div class="context-test-budget" id="contextTestBudget"></div>
-        <div class="context-test-scenarios" id="contextTestScenarios"></div>
-        <div class="context-test-error hidden" id="contextTestError"></div>
-      </div>
-      <footer>
-        <button type="button" data-context-test-close>取消</button>
-        <button type="button" class="primary" id="createContextTestBtn">创建并打开</button>
-      </footer>
-    </form>`;
-  document.body.appendChild(dialog);
-  dialog.querySelectorAll("[data-context-test-close]").forEach((button) => {
-    button.addEventListener("click", () => dialog.close());
-  });
 }
 
 function formatTokens(value) {
@@ -118,123 +114,61 @@ function formatTokens(value) {
   return Number.isFinite(Number(value)) ? Number(value).toLocaleString("zh-CN") : "—";
 }
 
-function renderContextTestDialog() {
-  if (!contextTestCatalog) return;
-  const budget = document.getElementById("contextTestBudget");
-  const scenarios = document.getElementById("contextTestScenarios");
-  if (!budget || !scenarios) return;
-  budget.innerHTML = `
-    <span>模型 <strong>${escapeHtml(contextTestCatalog.model_name)}</strong></span>
-    <span>窗口 <strong>${escapeHtml(formatTokens(contextTestCatalog.context_window_tokens))}</strong></span>
-    <span>触发线 <strong>${escapeHtml(formatTokens(contextTestCatalog.trigger_tokens))}</strong></span>
-    <span>目标线 <strong>${escapeHtml(formatTokens(contextTestCatalog.target_tokens))}</strong></span>`;
-  scenarios.innerHTML = contextTestCatalog.scenarios
-    .map(
-      (scenario, index) => `
-        <label class="context-test-scenario">
-          <input type="radio" name="contextTestScenario" value="${escapeHtml(scenario.key)}" ${index === 0 ? "checked" : ""} />
-          <span class="context-test-scenario-copy">
-            <strong>${escapeHtml(scenario.title)}</strong>
-            <span>${escapeHtml(scenario.description)}</span>
-            <small>${escapeHtml(scenario.expected_behavior)}</small>
-          </span>
-        </label>`,
-    )
-    .join("");
+function contextBudgetPercent(value, total) {
+  const amount = Number(value);
+  const capacity = Number(total);
+  if (!Number.isFinite(amount) || !Number.isFinite(capacity) || capacity <= 0) return null;
+  return Math.max(0, Math.min(100, (amount / capacity) * 100));
 }
 
-async function loadContextTestCatalog(agentId) {
-  const button = document.getElementById("contextTestChatBtn");
-  if (!agentId) {
-    button?.classList.add("hidden");
-    return null;
-  }
-  if (contextTestCatalogAgentId === agentId && contextTestCatalog) {
-    button?.classList.remove("hidden");
-    return contextTestCatalog;
-  }
-  if (contextTestRequestAgentId === agentId) return null;
-  button?.classList.add("hidden");
-  contextTestRequestAgentId = agentId;
-  try {
-    const response = await daFetch(
-      serviceUrl(`api/v1/context-test-scenarios?agent_id=${encodeURIComponent(agentId)}`),
-    );
-    if (!response.ok) {
-      if (contextTestRequestAgentId === agentId) button?.classList.add("hidden");
-      return null;
-    }
-    const payload = await response.json();
-    if (contextTestRequestAgentId !== agentId) return null;
-    contextTestCatalog = payload;
-    contextTestCatalogAgentId = agentId;
-    button?.classList.remove("hidden");
-    return payload;
-  } catch {
-    if (contextTestRequestAgentId === agentId) button?.classList.add("hidden");
-    return null;
-  } finally {
-    if (contextTestRequestAgentId === agentId) contextTestRequestAgentId = "";
-  }
+function finiteTokenValue(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? number : 0;
 }
 
-async function openContextTestDialog() {
-  const api = window.DeepAgentConsoleChat;
-  const dialog = document.getElementById("contextTestDialog");
-  if (!api?.state.agentId || !dialog) return;
-  const catalog = await loadContextTestCatalog(api.state.agentId);
-  if (!catalog) return;
-  document.getElementById("contextTestError")?.classList.add("hidden");
-  renderContextTestDialog();
-  window.lucide?.createIcons();
-  dialog.showModal();
+function renderContextBudgetOverview(contextStatus) {
+  const total = finiteTokenValue(contextStatus.context_window_tokens);
+  const history = finiteTokenValue(contextStatus.estimated_history_tokens);
+  const output = finiteTokenValue(contextStatus.predicted_output_tokens);
+  const safety = finiteTokenValue(contextStatus.safety_margin_tokens);
+  const occupied = Math.min(total, history);
+  const outputWidth = Math.min(Math.max(total - occupied, 0), output);
+  const safetyWidth = Math.min(Math.max(total - occupied - outputWidth, 0), safety);
+  const free = Math.max(total - occupied - outputWidth - safetyWidth, 0);
+  const segments = [
+    ["history", occupied, "历史"],
+    ["output", outputWidth, "输出预留"],
+    ["safety", safetyWidth, "安全余量"],
+    ["free", free, "剩余"],
+  ];
+  const segmentHtml = segments.map(([tone, value, label]) => {
+    const width = contextBudgetPercent(value, total) || 0;
+    return `<span class="context-budget-segment tone-${tone}" style="width:${width.toFixed(2)}%" title="${escapeHtml(label)} ${escapeHtml(formatTokens(value))} Token"></span>`;
+  }).join("");
+  const markers = [
+    ["target", contextStatus.target_tokens, "目标线"],
+    ["trigger", contextStatus.trigger_tokens, "触发线"],
+  ].map(([tone, value, label]) => {
+    const position = contextBudgetPercent(value, total);
+    if (position === null) return "";
+    return `<span class="context-budget-marker tone-${tone}" style="left:${position.toFixed(2)}%"><span>${escapeHtml(label)}</span></span>`;
+  }).join("");
+  return `<div class="context-budget-overview">
+    <div class="context-budget-summary">
+      <span><small>历史占用</small><strong>${escapeHtml(formatTokens(contextStatus.estimated_history_tokens))}</strong></span>
+      <span><small>可用输入</small><strong>${escapeHtml(formatTokens(contextStatus.usable_request_tokens))}</strong></span>
+      <span><small>上下文窗口</small><strong>${escapeHtml(formatTokens(contextStatus.context_window_tokens))}</strong></span>
+    </div>
+    <div class="context-budget-composite" role="img" aria-label="上下文预算分段与压缩阈值">
+      <div class="context-budget-segments">${segmentHtml}</div>
+      ${markers}
+    </div>
+    <div class="context-budget-legend">
+      <span class="tone-history">历史</span><span class="tone-output">输出预留</span><span class="tone-safety">安全余量</span><span class="tone-free">剩余</span>
+    </div>
+  </div>`;
 }
 
-async function createContextTestSession() {
-  const api = window.DeepAgentConsoleChat;
-  const dialog = document.getElementById("contextTestDialog");
-  const createButton = document.getElementById("createContextTestBtn");
-  const error = document.getElementById("contextTestError");
-  const selected = dialog?.querySelector('input[name="contextTestScenario"]:checked');
-  if (!api?.state.agentId || !selected || !createButton || !error) return;
-  createButton.disabled = true;
-  createButton.textContent = "正在创建…";
-  error.classList.add("hidden");
-  try {
-    const response = await daFetch(
-      serviceUrl(`api/v1/context-test-scenarios/${encodeURIComponent(selected.value)}`),
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ agent_id: api.state.agentId }),
-      },
-    );
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      throw new Error(
-        typeof payload.detail === "string"
-          ? payload.detail
-          : `创建测试会话失败：HTTP ${response.status}`,
-      );
-    }
-    dialog.close();
-    await api.syncSessionsFromBackend();
-    await api.openSession({
-      id: payload.session.session_id,
-      agentId: payload.session.agent_id,
-      agentName: payload.session.agent_name,
-      title: payload.session.title,
-      messageCount: payload.session.message_count,
-    });
-    api.setComposerText(payload.recommended_prompt);
-  } catch (cause) {
-    error.textContent = cause?.message || "创建测试会话失败";
-    error.classList.remove("hidden");
-  } finally {
-    createButton.disabled = false;
-    createButton.textContent = "创建并打开";
-  }
-}
 
 function filterSessions(event) {
   const query = String(event?.target?.value || "").trim().toLowerCase();
@@ -253,9 +187,6 @@ function renderAgents() {
   });
   renderAgentSwitcher(api.state);
   const host = document.getElementById("consoleAgentList");
-  if (api.state.agentId && api.state.agentId !== contextTestCatalogAgentId) {
-    void loadContextTestCatalog(api.state.agentId);
-  }
   document.getElementById("agentCount").textContent = `${agents.length} 个`;
   if (!agents.length) {
     host.innerHTML = '<div class="list-empty">没有匹配的 Agent</div>';
@@ -276,35 +207,49 @@ function renderAgents() {
 
   host.querySelectorAll("[data-agent-id]").forEach((button) => {
     button.addEventListener("click", () => {
-      selectWorkspaceAgent(button.dataset.agentId);
+      void selectWorkspaceAgent(button.dataset.agentId);
     });
   });
 }
 
 function renderAgentSwitcher(state) {
-  const select = document.getElementById("workspaceAgentSelect");
-  if (!select) return;
-  const optionKey = state.agents.map((agent) => `${agent.id}:${agent.name}`).join("|");
-  if (select.dataset.optionKey !== optionKey) {
-    select.dataset.optionKey = optionKey;
-    select.replaceChildren();
-    if (!state.agents.length) {
-      const option = document.createElement("option");
-      option.value = "";
-      option.textContent = "无可用 Agent";
-      select.appendChild(option);
-    } else {
-      state.agents.forEach((agent) => {
-        const option = document.createElement("option");
-        option.value = agent.id;
-        option.textContent = agent.name;
-        select.appendChild(option);
-      });
+  const select = document.getElementById("agentSelect");
+  const field = select?.closest(".agent-select-field");
+  const trigger = document.getElementById("workspaceAgentSelectTrigger");
+  const labelNode = trigger?.querySelector(".agent-select-label");
+  const menu = document.getElementById("workspaceAgentSelectMenu");
+  if (!select || !field || !trigger || !labelNode || !menu) return;
+  const label = state.agents.length ? currentAgentName(state) : "无可用 Agent";
+  field.title = `切换测试 Agent：${label}`;
+  labelNode.textContent = label;
+  trigger.disabled = !!state.streaming || !state.agents.length;
+  menu.innerHTML = state.agents.map((agent) => {
+    const selected = agent.id === state.agentId;
+    return `<button type="button" class="agent-select-option${selected ? " selected" : ""}" role="option" aria-selected="${selected}" data-switch-agent-id="${escapeHtml(agent.id)}">
+      <span class="agent-select-option-icon"><i data-lucide="bot" aria-hidden="true"></i></span>
+      <span>${escapeHtml(agent.name || agent.id)}</span>
+      ${selected ? '<i class="agent-select-check" data-lucide="check" aria-hidden="true"></i>' : ""}
+    </button>`;
+  }).join("");
+  window.lucide?.createIcons();
+}
+
+async function refreshWorkspaceAgents(button) {
+  if (button) {
+    button.disabled = true;
+    button.classList.add("loading");
+  }
+  try {
+    await window.DeepAgentConsoleChat?.refreshAgentWorkspace();
+    lastRenderKey = "";
+    renderAgents();
+    renderInspector();
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.classList.remove("loading");
     }
   }
-  select.value = state.agentId || "";
-  select.disabled = !state.agents.length;
-  select.title = currentAgentName(state);
 }
 
 function setAgentPanePinned(pinned) {
@@ -316,11 +261,97 @@ function setAgentPanePinned(pinned) {
   pinButton.classList.toggle("active", pinned);
   pinButton.setAttribute("aria-pressed", String(pinned));
   unpinButton.setAttribute("aria-pressed", String(pinned));
-  closeWorkspaceDrawers();
 }
 
-function inspectorUsesDrawer() {
-  return matchMedia("(max-width: 1260px)").matches;
+function clampWorkspacePaneWidth(value, limits) {
+  return Math.max(limits.min, Math.min(limits.max, Math.round(Number(value) || limits.initial)));
+}
+
+function readWorkspacePaneWidth(grid, pane) {
+  const limits = WORKSPACE_PANE_LIMITS[pane];
+  if (!limits) return 0;
+  const value = getComputedStyle(grid).getPropertyValue(limits.variable);
+  return clampWorkspacePaneWidth(Number.parseFloat(value), limits);
+}
+
+function writeWorkspacePaneWidth(grid, handle, pane, value) {
+  const limits = WORKSPACE_PANE_LIMITS[pane];
+  if (!limits) return;
+  let effectiveLimits = limits;
+  if (pane === "inspector") {
+    const agentWidth = grid.classList.contains("agent-pinned") ? readWorkspacePaneWidth(grid, "agent") : 0;
+    const sessionWidth = readWorkspacePaneWidth(grid, "session");
+    const resizerWidth = Number.parseFloat(getComputedStyle(grid).getPropertyValue("--console-resizer-width")) || 10;
+    const resizerCount = grid.classList.contains("agent-pinned") ? 3 : 2;
+    const available = grid.clientWidth - agentWidth - sessionWidth - resizerWidth * resizerCount - 420;
+    effectiveLimits = { ...limits, max: Math.max(limits.min, Math.min(limits.max, available)) };
+  }
+  const width = clampWorkspacePaneWidth(value, effectiveLimits);
+  grid.style.setProperty(limits.variable, `${width}px`);
+  handle.setAttribute("aria-valuenow", String(width));
+}
+
+function resetWorkspacePaneWidth(grid, handle, pane) {
+  const limits = WORKSPACE_PANE_LIMITS[pane];
+  if (!limits) return;
+  grid.style.removeProperty(limits.variable);
+  handle.setAttribute("aria-valuenow", String(limits.initial));
+}
+
+function bindWorkspaceResizer(handle) {
+  const pane = handle?.dataset.resizePane;
+  const limits = WORKSPACE_PANE_LIMITS[pane];
+  const grid = document.getElementById("workspaceGrid");
+  if (!handle || !limits || !grid) return;
+
+  let startX = 0;
+  let startWidth = limits.initial;
+  const pointerDirection = pane === "inspector" ? -1 : 1;
+
+  const finishDrag = (event) => {
+    if (!handle.classList.contains("dragging")) return;
+    handle.classList.remove("dragging");
+    document.body.classList.remove("workspace-pane-resizing");
+    if (event?.pointerId !== undefined && handle.hasPointerCapture?.(event.pointerId)) {
+      handle.releasePointerCapture(event.pointerId);
+    }
+  };
+
+  handle.addEventListener("pointerdown", (event) => {
+    if (getComputedStyle(handle).display === "none") return;
+    startX = event.clientX;
+    startWidth = readWorkspacePaneWidth(grid, pane);
+    handle.classList.add("dragging");
+    document.body.classList.add("workspace-pane-resizing");
+    handle.setPointerCapture?.(event.pointerId);
+    event.preventDefault();
+  });
+  handle.addEventListener("pointermove", (event) => {
+    if (!handle.classList.contains("dragging")) return;
+    writeWorkspacePaneWidth(grid, handle, pane, startWidth + (event.clientX - startX) * pointerDirection);
+  });
+  handle.addEventListener("pointerup", finishDrag);
+  handle.addEventListener("pointercancel", finishDrag);
+  handle.addEventListener("dblclick", () => resetWorkspacePaneWidth(grid, handle, pane));
+  handle.addEventListener("keydown", (event) => {
+    if (!["ArrowLeft", "ArrowRight", "Home"].includes(event.key)) return;
+    event.preventDefault();
+    if (event.key === "Home") {
+      resetWorkspacePaneWidth(grid, handle, pane);
+      return;
+    }
+    const coordinateDelta = event.key === "ArrowRight" ? 12 : -12;
+    writeWorkspacePaneWidth(
+      grid,
+      handle,
+      pane,
+      readWorkspacePaneWidth(grid, pane) + coordinateDelta * pointerDirection,
+    );
+  });
+}
+
+function bindWorkspaceResizers() {
+  document.querySelectorAll("[data-resize-pane]").forEach(bindWorkspaceResizer);
 }
 
 function syncInspectorToggle() {
@@ -328,47 +359,53 @@ function syncInspectorToggle() {
   const inspector = document.getElementById("inspectorPane");
   const button = document.getElementById("toggleInspectorPaneBtn");
   if (!grid || !inspector || !button) return;
-  const visible = inspectorUsesDrawer()
-    ? inspector.classList.contains("mobile-open")
-    : !grid.classList.contains("inspector-hidden");
-  const sessionDetailsActive = visible && !selectedContextReference;
-  button.classList.toggle("active", sessionDetailsActive);
-  button.setAttribute("aria-pressed", String(sessionDetailsActive));
-  button.title = sessionDetailsActive ? "隐藏会话详情" : "显示会话详情";
+  const visible = !grid.classList.contains("inspector-hidden");
+  button.classList.toggle("active", visible);
+  button.setAttribute("aria-pressed", String(visible));
+  button.title = visible ? "隐藏详情" : "显示详情";
 }
 
 function toggleInspectorPane() {
   const grid = document.getElementById("workspaceGrid");
   const inspector = document.getElementById("inspectorPane");
   if (!grid || !inspector) return;
-  if (selectedContextReference) {
-    selectedContextReference = null;
+  if (!grid.classList.contains("inspector-hidden") && inspectorActiveTab === "context") {
+    inspectorActiveTab = "session";
     lastRenderKey = "";
-    syncContextReferenceButtons();
-    openInspectorPane();
     renderInspector();
     return;
   }
-  if (inspectorUsesDrawer()) {
-    const shouldOpen = !inspector.classList.contains("mobile-open");
-    closeWorkspaceDrawers();
-    if (shouldOpen) {
-      inspector.classList.add("mobile-open");
-      document.getElementById("workspaceDrawerBackdrop")?.classList.remove("hidden");
-    }
-  } else {
-    grid.classList.toggle("inspector-hidden");
-  }
+  grid.classList.toggle("inspector-hidden");
   syncInspectorToggle();
 }
 
-function selectWorkspaceAgent(agentId) {
+async function selectWorkspaceAgent(agentId) {
   const api = window.DeepAgentConsoleChat;
-  if (!api || !agentId || agentId === api.state.agentId) return;
-  api.selectAgent(agentId);
+  if (!api || !agentId) return;
+  closeAgentSelectMenu();
+  await api.selectAgent(agentId);
   lastRenderKey = "";
   renderAgents();
   renderInspector();
+}
+
+function closeAgentSelectMenu() {
+  const trigger = document.getElementById("workspaceAgentSelectTrigger");
+  const menu = document.getElementById("workspaceAgentSelectMenu");
+  trigger?.setAttribute("aria-expanded", "false");
+  menu?.classList.add("hidden");
+}
+
+function toggleAgentSelectMenu() {
+  const trigger = document.getElementById("workspaceAgentSelectTrigger");
+  const menu = document.getElementById("workspaceAgentSelectMenu");
+  if (!trigger || !menu || trigger.disabled) return;
+  const open = menu.classList.contains("hidden");
+  closeAgentSelectMenu();
+  if (!open) return;
+  trigger.setAttribute("aria-expanded", "true");
+  menu.classList.remove("hidden");
+  menu.querySelector('[aria-selected="true"]')?.focus();
 }
 
 function currentAgentName(state) {
@@ -396,13 +433,7 @@ function openInspectorPane() {
   const grid = document.getElementById("workspaceGrid");
   const inspector = document.getElementById("inspectorPane");
   if (!grid || !inspector) return;
-  if (inspectorUsesDrawer()) {
-    closeWorkspaceDrawers();
-    inspector.classList.add("mobile-open");
-    document.getElementById("workspaceDrawerBackdrop")?.classList.remove("hidden");
-  } else {
-    grid.classList.remove("inspector-hidden");
-  }
+  grid.classList.remove("inspector-hidden");
   syncInspectorToggle();
 }
 
@@ -415,42 +446,97 @@ function toggleContextReferenceInspector(reference, branchPoint) {
       reference: JSON.parse(JSON.stringify(reference)),
     };
   }
+  inspectorActiveTab = "context";
   openInspectorPane();
   lastRenderKey = "";
   syncContextReferenceButtons();
   renderInspector();
 }
 
-function renderContextReferenceInspector(host, state) {
-  if (!selectedContextReference) return false;
+function renderContextReferenceInspector(state) {
+  if (!selectedContextReference) {
+    return `<div class="inspector-tab-empty">
+      <i data-lucide="braces"></i>
+      <strong>尚未选择上下文引用</strong>
+      <span>点击对话中上下文标签旁的信息图标后，可在这里查看只读 JSON。</span>
+    </div>`;
+  }
   if (selectedContextReference.sessionId !== (state.sessionId || null)) {
     selectedContextReference = null;
     syncContextReferenceButtons();
-    return false;
+    return renderContextReferenceInspector(state);
   }
   const reference = selectedContextReference.reference;
-  const rawJson = JSON.stringify(reference, null, 2);
-  host.innerHTML = `
-    <section class="inspector-section context-reference-inspector">
+  const json = window.DeepAgentJson?.renderBlock(reference, {
+    className: "inspector-json",
+    ariaLabel: "上下文引用 JSON",
+  }) || `<pre class="inspector-json" aria-label="上下文引用 JSON">${escapeHtml(JSON.stringify(reference, null, 2))}</pre>`;
+  return `<section class="inspector-section context-reference-inspector">
       <header><strong>上下文引用</strong><span>只读 JSON</span></header>
-      <dl class="inspector-grid">
-        <dt>名称</dt><dd>${escapeHtml(reference.label || "—")}</dd>
-        <dt>Key</dt><dd class="mono">${escapeHtml(reference.key || "—")}</dd>
-        <dt>类型</dt><dd class="mono">${escapeHtml(reference.type || "—")}</dd>
-        <dt>版本</dt><dd>${escapeHtml(reference.schema_version || "—")}</dd>
-      </dl>
-      <pre class="inspector-json" aria-label="上下文引用 JSON">${escapeHtml(rawJson)}</pre>
-      <p class="inspector-help">这是会话历史保存的完整上下文引用。metadata 只用于系统和前端，不会进入模型输入。点击对话标题栏的“会话详情”可切回会话信息。</p>
+      <div class="inspector-facts compact">
+        <div><span>名称</span><strong>${escapeHtml(reference.label || "—")}</strong></div>
+        <div><span>Key</span><strong class="mono">${escapeHtml(reference.key || "—")}</strong></div>
+        <div><span>类型</span><strong class="mono">${escapeHtml(reference.type || "—")}</strong></div>
+        <div><span>版本</span><strong>${escapeHtml(reference.schema_version || "—")}</strong></div>
+      </div>
+      ${json}
     </section>`;
-  return true;
+}
+
+function setInspectorTab(tab) {
+  if (!["session", "run", "context"].includes(tab)) return;
+  inspectorActiveTab = tab;
+  lastRenderKey = "";
+  renderInspector();
+}
+
+function bindInspectorTabs(host) {
+  host.querySelectorAll("[data-inspector-tab]").forEach((button) => {
+    button.addEventListener("click", () => setInspectorTab(button.dataset.inspectorTab));
+  });
+}
+
+function inspectorFact(label, value, options = {}) {
+  const classes = [options.mono ? "mono" : "", options.wide ? "wide" : ""].filter(Boolean).join(" ");
+  return `<div class="${classes}"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value ?? "—")}</strong></div>`;
+}
+
+function inspectorFactHtml(label, valueHtml, options = {}) {
+  const classes = [options.mono ? "mono" : "", options.wide ? "wide" : ""].filter(Boolean).join(" ");
+  return `<div class="${classes}"><span>${escapeHtml(label)}</span><strong>${valueHtml}</strong></div>`;
+}
+
+function renderRunUsageOverview(run, usage, contextStatus) {
+  const input = finiteTokenValue(run.input_tokens ?? usage.input_tokens);
+  const output = finiteTokenValue(run.output_tokens ?? usage.output_tokens);
+  const total = Math.max(finiteTokenValue(run.total_tokens ?? usage.total_tokens), input + output);
+  const contextWindow = finiteTokenValue(contextStatus?.context_window_tokens);
+  const capacity = Math.max(contextWindow, total);
+  const remaining = contextWindow > 0 ? Math.max(capacity - total, 0) : 0;
+  const inputWidth = contextBudgetPercent(input, capacity) || 0;
+  const outputWidth = contextBudgetPercent(output, capacity) || 0;
+  const remainingWidth = contextBudgetPercent(remaining, capacity) || 0;
+  return `<div class="run-usage-overview">
+    <div class="run-usage-summary">
+      <span><small>本次使用</small><strong>${escapeHtml(formatTokens(run.total_tokens ?? usage.total_tokens))}</strong></span>
+      <span><small>预计剩余</small><strong>${escapeHtml(formatTokens(contextWindow > 0 ? remaining : null))}</strong></span>
+    </div>
+    <div class="run-usage-track" role="img" aria-label="本轮输入、输出与上下文剩余 Token">
+      <span class="input" style="width:${inputWidth.toFixed(2)}%" title="输入 ${escapeHtml(formatTokens(input))} Token"></span><span class="output" style="width:${outputWidth.toFixed(2)}%" title="输出 ${escapeHtml(formatTokens(output))} Token"></span><span class="remaining" style="width:${remainingWidth.toFixed(2)}%" title="上下文剩余 ${escapeHtml(formatTokens(remaining))} Token"></span>
+    </div>
+    <div class="run-usage-legend"><span class="input">输入</span><span class="output">输出</span><span class="remaining">上下文剩余</span></div>
+  </div>`;
 }
 
 function renderInspector() {
   const api = window.DeepAgentConsoleChat;
   const host = document.getElementById("inspectorContent");
   if (!api || !host) return;
+  if (document.querySelector("main.chat")?.classList.contains("trajectory-active")) return;
   const state = api.state;
-  if (renderContextReferenceInspector(host, state)) return;
+  const activeSession = state.sessions.find(
+    (session) => session.id === state.sessionId && (session.agentId || "") === (state.agentId || ""),
+  ) || {};
 
   const model = state.llmModels.find((item) => item.id === state.llmModelId);
   const context = window.DeepAgentConsoleContext?.effectiveContext || {};
@@ -467,79 +553,93 @@ function renderInspector() {
   const statusClass = state.streaming ? "running" : state.awaitingHitl ? "waiting" : "idle";
   const usage = state.lastRunUsage || {};
   const run = state.lastRunMetrics || {};
-  const compactionState = compaction.triggered
+  const runModel = state.llmModels.find((item) => item.id === run.model_id || item.model === run.model_id);
+  const compactionState = contextStatus.compaction_event_id
+    ? "已完成"
+    : compaction.triggered
     ? strategyLabels[compaction.strategy] || compaction.strategy
     : contextStatus.compaction_enabled
       ? "未触发"
       : "未启用";
-  const triggerTokens = Number(contextStatus.trigger_tokens);
-  const historyTokens = Number(contextStatus.estimated_history_tokens || 0);
-  const budgetPercent = triggerTokens > 0
-    ? Math.min(100, Math.round((historyTokens / triggerTokens) * 100))
-    : 0;
+  const estimatorLabel = [contextStatus.estimate_scope, contextStatus.estimator_source].filter(Boolean).join(" · ") || "—";
+  const compactionContent = `<section class="inspector-section">
+    <header><strong>上下文压缩</strong><span>${escapeHtml(compactionState)}</span></header>
+    <div class="compaction-comparison">
+      <span><small>压缩前</small><strong>${escapeHtml(formatTokens(compaction.estimated_tokens_before))}</strong></span>
+      <i data-lucide="arrow-right"></i>
+      <span><small>压缩后</small><strong>${escapeHtml(formatTokens(compaction.estimated_tokens_after ?? contextStatus.compaction_estimated_tokens))}</strong></span>
+    </div>
+    <div class="inspector-facts compact">
+      ${inspectorFact("压缩事件", contextStatus.compaction_event_id || "暂无", { mono: true, wide: true })}
+      ${inspectorFact("来源截止", contextStatus.compaction_source_through_sequence ?? "—")}
+      ${inspectorFact("摘要模型", contextStatus.summary_model_id || "—")}
+      ${inspectorFact("更新时间", contextStatus.compaction_updated_at || "—")}
+      ${inspectorFact("估算方式", estimatorLabel)}
+    </div>
+  </section>`;
+  const agentName = currentAgentName(state);
+  const sessionCounts = `<span class="inspector-inline-metrics">
+    <span title="回合数"><i data-lucide="messages-square"></i>${escapeHtml(String(activeSession.turnCount || 0))}</span>
+    <span title="消息事件数"><i data-lucide="repeat-2"></i>${escapeHtml(String(activeSession.messageCount ?? contextStatus.raw_message_count ?? state.modelMessageCount ?? 0))}</span>
+    <span title="附件数"><i data-lucide="paperclip"></i>${escapeHtml(String(activeSession.attachmentCount || 0))}</span>
+  </span>`;
+  const agentIdentity = `<span class="inspector-stacked-value"><span>${escapeHtml(agentName)}</span><code>${escapeHtml(state.agentId || "—")}</code></span>`;
+  const requestScope = `<span class="inspector-scope-value"><code>${escapeHtml(context.app || "继承")}</code><span>/</span><code>${escapeHtml(context.space || "继承")}</code></span>`;
+  const sessionContent = `<section class="inspector-section inspector-session-group">
+    <header><strong>会话概览</strong></header>
+    <div class="inspector-facts">
+      ${inspectorFact("会话 ID", state.sessionId || "尚未创建", { mono: true, wide: true })}
+      ${inspectorFactHtml("Agent", agentIdentity, { wide: true })}
+      ${inspectorFact("模型", model?.name || model?.model || "—")}
+      ${inspectorFactHtml("会话统计", sessionCounts)}
+    </div>
+    <header class="inspector-subheading"><strong>请求 Header</strong><span>自动推导</span></header>
+    <div class="inspector-facts compact">
+      ${inspectorFactHtml("App / Space", requestScope, { wide: true })}
+      ${inspectorFact("Language", context.language || "继承")}
+      ${inspectorFact("User ID", identity?.user || "未认证", { mono: true, wide: true })}
+    </div>
+  </section>
+  <section class="inspector-section inspector-budget-section">
+    <header><strong>上下文预算</strong><span>阈值与预留合并展示</span></header>
+    ${renderContextBudgetOverview(contextStatus)}
+  </section>
+  ${compactionContent}`;
 
-  host.innerHTML = `
-    <section class="inspector-section inspector-session-group">
-      <header><strong>当前会话</strong><span class="status-badge ${statusClass}">${statusText}</span></header>
-      <dl class="inspector-grid">
-        <dt>会话 ID</dt><dd class="mono">${escapeHtml(state.sessionId || "尚未创建")}</dd>
-        <dt>Agent</dt><dd>${escapeHtml(currentAgentName(state))}</dd>
-        <dt>Agent ID</dt><dd class="mono">${escapeHtml(state.agentId || "—")}</dd>
-        <dt>模型</dt><dd>${escapeHtml(model?.name || model?.model || "—")}</dd>
-        <dt>原始消息</dt><dd>${escapeHtml(contextStatus.raw_message_count ?? state.modelMessageCount ?? 0)} 条</dd>
-        <dt>待发附件</dt><dd>${state.pendingAttachments.length} 个</dd>
-      </dl>
-      <header class="inspector-subheading"><strong>请求Header</strong><span>自动推导</span></header>
-      <dl class="inspector-grid">
-        <dt>App</dt><dd class="mono">${escapeHtml(context.app || "继承")}</dd>
-        <dt>Space</dt><dd class="mono">${escapeHtml(context.space || "继承")}</dd>
-        <dt>Language</dt><dd>${escapeHtml(context.language || "继承")}</dd>
-        <dt>User ID</dt><dd class="mono">${escapeHtml(identity.user || "未认证")}</dd>
-      </dl>
-    </section>
-    <section class="inspector-section inspector-budget-section">
-        <div class="budget-meter" title="原始历史估算占压缩触发线的比例"><span style="width:${budgetPercent}%"></span></div>
-        <header><strong>上下文预算</strong><span>历史快照</span></header>
-        <dl class="inspector-grid">
-          <dt>当前历史估算</dt><dd>${escapeHtml(formatTokens(contextStatus.estimated_history_tokens))} Token</dd>
-          <dt>上下文窗口</dt><dd>${escapeHtml(formatTokens(contextStatus.context_window_tokens))} Token</dd>
-          <dt>动态输出预估</dt><dd>${escapeHtml(formatTokens(contextStatus.predicted_output_tokens))} Token</dd>
-          <dt>安全余量</dt><dd>${escapeHtml(formatTokens(contextStatus.safety_margin_tokens))} Token</dd>
-          <dt>可用输入预算</dt><dd>${escapeHtml(formatTokens(contextStatus.usable_request_tokens))} Token</dd>
-          <dt>压缩触发线</dt><dd>${escapeHtml(formatTokens(contextStatus.trigger_tokens))} Token</dd>
-          <dt>压缩目标线</dt><dd>${escapeHtml(formatTokens(contextStatus.target_tokens))} Token</dd>
-        </dl>
-        <p class="inspector-help">预算值全部由后端统一计算。这里是完整原始会话历史的只读快照，不等同于某次 Run 的最终模型请求载荷。</p>
-      </section>
-      <section class="inspector-section">
-        <header><strong>当前 Run</strong><span>${run.detailed === false ? "详细指标请查看运行日志" : "当前页面最近一次"}</span></header>
-        <dl class="inspector-grid">
-          <dt>Conversation ID</dt><dd class="mono">${escapeHtml(state.conversationId || run.conversation_id || "—")}</dd>
-          <dt>Run ID</dt><dd class="mono">${escapeHtml(run.run_id || "—")}</dd>
-          <dt>终态</dt><dd>${escapeHtml(run.status || "—")}</dd>
-          <dt>模型</dt><dd>${escapeHtml(run.model_id || model?.name || model?.model || "—")}</dd>
-          <dt>请求次数</dt><dd>${escapeHtml(run.requests ?? usage.requests ?? "—")}</dd>
-          <dt>输入 Token</dt><dd>${escapeHtml(formatTokens(run.input_tokens ?? usage.input_tokens))}</dd>
-          <dt>输出 Token</dt><dd>${escapeHtml(formatTokens(run.output_tokens ?? usage.output_tokens))}</dd>
-          <dt>合计 Token</dt><dd>${escapeHtml(formatTokens(run.total_tokens ?? usage.total_tokens))}</dd>
-          <dt>缓存读取</dt><dd>${escapeHtml(formatTokens(run.cache_read_tokens))}</dd>
-          <dt>缓存写入</dt><dd>${escapeHtml(formatTokens(run.cache_write_tokens))}</dd>
-          <dt>工具调用</dt><dd>${escapeHtml(run.tool_calls ?? usage.tool_calls ?? "—")}</dd>
-          <dt>Tool Search</dt><dd>${escapeHtml(run.tool_search_calls ?? "—")}</dd>
-          <dt>耗时</dt><dd>${Number.isFinite(Number(run.duration_ms)) ? `${Number(run.duration_ms).toLocaleString("zh-CN")} ms` : "—"}</dd>
-          <dt>压缩</dt><dd>${escapeHtml(run.compaction || "—")}</dd>
-        </dl>
-      </section>
-      <section class="inspector-section">
-        <header><strong>压缩与 Checkpoint</strong><span>${escapeHtml(compactionState)}</span></header>
-        <dl class="inspector-grid">
-          <dt>本轮压缩前/后</dt><dd>${escapeHtml(formatTokens(compaction.estimated_tokens_before))} / ${escapeHtml(formatTokens(compaction.estimated_tokens_after))}</dd>
-          <dt>Checkpoint</dt><dd>${contextStatus.checkpoint_exists ? "已生成" : "暂无"}</dd>
-          <dt>Checkpoint Token</dt><dd>${escapeHtml(formatTokens(contextStatus.checkpoint_estimated_tokens))}</dd>
-          <dt>估算范围</dt><dd>${escapeHtml(contextStatus.estimate_scope || "—")}</dd>
-          <dt>估算器</dt><dd>${escapeHtml(contextStatus.estimator_source || "—")}</dd>
-        </dl>
-    </section>`;
+  const runContent = `<section class="inspector-section">
+    <header><strong>当前回合</strong><span>${run.detailed === false ? "详细指标请查看运行日志" : "当前页面最近一次"}</span></header>
+    ${renderRunUsageOverview(run, usage, contextStatus)}
+    <div class="inspector-facts compact run-facts">
+      ${inspectorFact("终态", run.status || "—")}
+      ${inspectorFact("请求", run.requests ?? usage.requests ?? "—")}
+      ${inspectorFact("工具调用", run.tool_calls ?? usage.tool_calls ?? "—")}
+      ${inspectorFact("Tool Search", run.tool_search_calls ?? "—")}
+      ${inspectorFact("缓存读取", formatTokens(run.cache_read_tokens))}
+      ${inspectorFact("缓存写入", formatTokens(run.cache_write_tokens))}
+      ${inspectorFact("耗时", Number.isFinite(Number(run.duration_ms)) ? `${Number(run.duration_ms).toLocaleString("zh-CN")} ms` : "—")}
+      ${inspectorFact("压缩", run.compaction || "—")}
+      ${inspectorFact("Conversation ID", state.conversationId || run.conversation_id || "—", { mono: true, wide: true })}
+      ${inspectorFact("Run ID", run.run_id || "—", { mono: true, wide: true })}
+      ${inspectorFact("模型", runModel?.name || runModel?.model || model?.name || model?.model || run.model_id || "—", { wide: true })}
+    </div>
+  </section>`;
+
+  const tabContent = inspectorActiveTab === "run"
+    ? runContent
+    : inspectorActiveTab === "context"
+      ? renderContextReferenceInspector(state)
+      : sessionContent;
+  host.innerHTML = `<nav class="inspector-tabs" role="tablist" aria-label="会话详情">
+      <span class="inspector-tab-buttons">
+        <button type="button" role="tab" data-inspector-tab="session" aria-selected="${inspectorActiveTab === "session"}">会话</button>
+        <button type="button" role="tab" data-inspector-tab="run" aria-selected="${inspectorActiveTab === "run"}">当前回合</button>
+        <button type="button" role="tab" data-inspector-tab="context" aria-selected="${inspectorActiveTab === "context"}">上下文引用</button>
+      </span>
+      <span class="status-badge inspector-tab-status ${statusClass}">${statusText}</span>
+    </nav>
+    <div class="inspector-tab-panel">${tabContent}</div>`;
+  bindInspectorTabs(host);
+  window.lucide?.createIcons();
 }
 
 function startStateMonitor() {
@@ -558,6 +658,9 @@ function startStateMonitor() {
       lastRunUsage: api.state.lastRunUsage,
       lastRunMetrics: api.state.lastRunMetrics,
       conversationId: api.state.conversationId,
+      sessionMetrics: api.state.sessions
+        .filter((session) => session.id === api.state.sessionId && (session.agentId || "") === (api.state.agentId || ""))
+        .map((session) => [session.turnCount, session.messageCount, session.attachmentCount]),
     });
     if (key === lastRenderKey) return;
     lastRenderKey = key;
@@ -567,8 +670,23 @@ function startStateMonitor() {
 }
 
 function bindWorkspaceControls() {
-  document.getElementById("workspaceAgentSelect")?.addEventListener("change", (event) => {
-    selectWorkspaceAgent(event.target.value);
+  document.getElementById("workspaceAgentSelectTrigger")?.addEventListener("click", (event) => {
+    event.stopPropagation();
+    toggleAgentSelectMenu();
+  });
+  document.getElementById("workspaceAgentSelectMenu")?.addEventListener("click", (event) => {
+    const option = event.target.closest("[data-switch-agent-id]");
+    if (!option) return;
+    void selectWorkspaceAgent(option.dataset.switchAgentId);
+  });
+  document.addEventListener("click", (event) => {
+    if (!event.target.closest(".agent-select-field")) closeAgentSelectMenu();
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeAgentSelectMenu();
+  });
+  document.getElementById("refreshWorkspaceAgentsBtn")?.addEventListener("click", (event) => {
+    void refreshWorkspaceAgents(event.currentTarget);
   });
   document.getElementById("pinAgentPaneBtn")?.addEventListener("click", () => {
     const pinned = document.getElementById("workspaceGrid")?.classList.contains("agent-pinned");
@@ -578,50 +696,16 @@ function bindWorkspaceControls() {
     setAgentPanePinned(false);
   });
   document.getElementById("agentSearchInput")?.addEventListener("input", renderAgents);
-  document.getElementById("refreshAgentsBtn")?.addEventListener("click", async () => {
-    await window.DeepAgentConsoleChat?.loadAgents();
-    renderAgents();
+  document.getElementById("refreshAgentsBtn")?.addEventListener("click", (event) => {
+    void refreshWorkspaceAgents(event.currentTarget);
   });
-  document.getElementById("contextTestChatBtn")?.addEventListener("click", openContextTestDialog);
-  document.getElementById("createContextTestBtn")?.addEventListener("click", createContextTestSession);
   document.getElementById("toggleInspectorPaneBtn")?.addEventListener("click", toggleInspectorPane);
-  document.querySelectorAll("[data-workspace-drawer]").forEach((button) => {
-    button.addEventListener("click", () => toggleWorkspaceDrawer(button.dataset.workspaceDrawer));
-  });
-  document.getElementById("workspaceDrawerBackdrop")?.addEventListener("click", closeWorkspaceDrawers);
-  document.getElementById("sessionList")?.addEventListener("click", () => {
-    if (matchMedia("(max-width: 620px)").matches) closeWorkspaceDrawers();
-  });
-  document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") closeWorkspaceDrawers();
-  });
-}
-
-function closeWorkspaceDrawers() {
-  document.querySelector(".agent-pane")?.classList.remove("mobile-open");
-  document.querySelector("#workspaceLegacyHost > .sidebar")?.classList.remove("mobile-open");
-  document.getElementById("inspectorPane")?.classList.remove("mobile-open");
-  document.getElementById("workspaceDrawerBackdrop")?.classList.add("hidden");
-  syncInspectorToggle();
-}
-
-function toggleWorkspaceDrawer(name) {
-  const targets = {
-    agents: document.querySelector(".agent-pane"),
-    sessions: document.querySelector("#workspaceLegacyHost > .sidebar"),
-    inspector: document.getElementById("inspectorPane"),
-  };
-  const target = targets[name];
-  const shouldOpen = target && !target.classList.contains("mobile-open");
-  closeWorkspaceDrawers();
-  if (!shouldOpen) return;
-  target.classList.add("mobile-open");
-  document.getElementById("workspaceDrawerBackdrop")?.classList.remove("hidden");
-  syncInspectorToggle();
 }
 
 window.DeepAgentConsoleWorkspace = {
   isContextReferenceSelected,
+  openInspectorPane,
+  renderInspector,
   toggleContextReferenceInspector,
 };
 
@@ -632,6 +716,7 @@ export async function initWorkspace() {
   installLegacyDom(source);
   await import(`./chat.js?v=${WORKSPACE_ASSET_VERSION}`);
   bindWorkspaceControls();
+  bindWorkspaceResizers();
   setAgentPanePinned(false);
   syncInspectorToggle();
   window.addEventListener("resize", syncInspectorToggle);
@@ -640,6 +725,5 @@ export async function initWorkspace() {
   startStateMonitor();
   document.getElementById("workspaceLoading")?.classList.add("hidden");
   document.getElementById("workspaceGrid")?.classList.remove("hidden");
-  document.getElementById("workspaceMobileBar")?.classList.remove("hidden");
   window.lucide?.createIcons();
 }

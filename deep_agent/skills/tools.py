@@ -30,13 +30,13 @@ def build_skill_resource_toolset(
         item = resources.get(skill_code)
         if item is None:
             raise ModelRetry(
-                f"Skill {skill_code!r} is not enabled for this Agent. Choose one of: {names}."
+                f"Skill {skill_code!r} is not associated with this Agent. Choose one of: {names}."
             )
         return item
 
     @toolset.tool_plain
     async def list_skill_resources(skill_code: str) -> dict[str, Any]:
-        """List References and Assets in one enabled Skill without reading their content."""
+        """List References and Assets in one associated Skill without reading their content."""
         item = _item(skill_code)
         entries = []
         for raw_entry in item.resource_index:

@@ -3,6 +3,8 @@ const state = {
   capabilities: [],
   skills: [],
   llmModels: [],
+  llmProviders: [],
+  llmProviderTypes: [],
   editingAgentId: null,
   editingLlmModelId: null,
   editingMcp: null,
@@ -36,6 +38,130 @@ function showToast(message, isError = false) {
   el.classList.remove("hidden");
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => el.classList.add("hidden"), 3200);
+}
+
+let activeActionDialogCancel = null;
+
+function ensureActionDialog() {
+  let dialog = document.getElementById("consoleActionDialog");
+  if (dialog) return dialog;
+  dialog = document.createElement("dialog");
+  dialog.id = "consoleActionDialog";
+  dialog.className = "console-action-dialog";
+  dialog.setAttribute("aria-labelledby", "consoleActionDialogTitle");
+  dialog.innerHTML = `
+    <form method="dialog" novalidate>
+      <div class="console-action-dialog-main">
+        <span class="console-action-dialog-icon" aria-hidden="true"><i data-lucide="circle-alert"></i></span>
+        <div class="console-action-dialog-copy">
+          <h3 id="consoleActionDialogTitle"></h3>
+          <p id="consoleActionDialogMessage"></p>
+          <div class="console-action-dialog-fields hidden" id="consoleActionDialogFields"></div>
+        </div>
+      </div>
+      <footer>
+        <button type="button" class="btn" data-action-dialog-cancel>取消</button>
+        <button type="submit" class="btn primary" data-action-dialog-confirm>确认</button>
+      </footer>
+    </form>`;
+  document.body.appendChild(dialog);
+  return dialog;
+}
+
+function openActionDialog({
+  title,
+  message = "",
+  icon = "circle-alert",
+  tone = "default",
+  variant = "default",
+  confirmLabel = "确认",
+  cancelLabel = "取消",
+  fields = [],
+} = {}) {
+  const dialog = ensureActionDialog();
+  activeActionDialogCancel?.();
+
+  dialog.dataset.tone = tone;
+  dialog.dataset.variant = variant;
+  dialog.querySelector(".console-action-dialog-icon i")?.setAttribute("data-lucide", icon);
+  dialog.querySelector("#consoleActionDialogTitle").textContent = title || "请确认";
+  dialog.querySelector("#consoleActionDialogMessage").textContent = message;
+  dialog.querySelector("#consoleActionDialogMessage").classList.toggle("hidden", !message);
+
+  const fieldsHost = dialog.querySelector("#consoleActionDialogFields");
+  fieldsHost.replaceChildren();
+  fieldsHost.classList.toggle("hidden", !fields.length);
+  for (const field of fields) {
+    const label = document.createElement("label");
+    const caption = document.createElement("span");
+    caption.textContent = field.label || field.name;
+    const input = field.options ? document.createElement("select") : document.createElement(field.multiline ? "textarea" : "input");
+    input.name = field.name;
+    if (field.options) {
+      for (const option of field.options) {
+        const item = document.createElement("option");
+        item.value = option.value;
+        item.textContent = option.label;
+        input.appendChild(item);
+      }
+    }
+    input.value = field.value ?? "";
+    input.required = Boolean(field.required);
+    if (!field.options && !field.multiline) input.type = "text";
+    if (field.placeholder) input.placeholder = field.placeholder;
+    label.append(caption, input);
+    fieldsHost.appendChild(label);
+  }
+
+  const cancelButton = dialog.querySelector("[data-action-dialog-cancel]");
+  const confirmButton = dialog.querySelector("[data-action-dialog-confirm]");
+  cancelButton.textContent = cancelLabel;
+  confirmButton.textContent = confirmLabel;
+  confirmButton.classList.toggle("danger", tone === "danger");
+  confirmButton.classList.toggle("primary", tone !== "danger");
+  window.lucide?.createIcons();
+
+  return new Promise((resolve) => {
+    let settled = false;
+    const form = dialog.querySelector("form");
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      form.removeEventListener("submit", onSubmit);
+      cancelButton.removeEventListener("click", onCancel);
+      dialog.removeEventListener("cancel", onCancel);
+      dialog.removeEventListener("close", onClose);
+      if (dialog.open) dialog.close();
+      if (activeActionDialogCancel === onCancel) activeActionDialogCancel = null;
+      resolve(result);
+    };
+    const onSubmit = (event) => {
+      event.preventDefault();
+      if (!form.reportValidity()) return;
+      const values = Object.fromEntries(new FormData(form).entries());
+      finish(fields.length ? values : true);
+    };
+    const onCancel = (event) => {
+      event?.preventDefault?.();
+      finish(null);
+    };
+    const onClose = () => finish(null);
+    form.addEventListener("submit", onSubmit);
+    cancelButton.addEventListener("click", onCancel);
+    dialog.addEventListener("cancel", onCancel);
+    dialog.addEventListener("close", onClose);
+    activeActionDialogCancel = onCancel;
+    dialog.showModal();
+    (fieldsHost.querySelector("input, textarea, select") || confirmButton).focus();
+  });
+}
+
+async function confirmAction(options) {
+  return (await openActionDialog(options)) === true;
+}
+
+async function requestActionFields(options) {
+  return openActionDialog(options);
 }
 
 function showDbBanner(show) {
@@ -115,11 +241,30 @@ async function loadCapabilities() {
 
 async function loadLlmModels() {
   try {
-    state.llmModels = await apiFetch("/api/v1/llm-models");
+    state.llmModels = await apiFetch("/api/v1/llm-models?selectable_only=false");
   } catch {
     state.llmModels = [];
   }
   return state.llmModels;
+}
+
+async function loadLlmProviders() {
+  try {
+    state.llmProviders = await apiFetch("/api/v1/llm-providers");
+  } catch {
+    state.llmProviders = [];
+  }
+  return state.llmProviders;
+}
+
+async function loadLlmProviderTypes() {
+  try {
+    const response = await apiFetch("/api/v1/llm-provider-types");
+    state.llmProviderTypes = Array.isArray(response?.items) ? response.items : response;
+  } catch {
+    state.llmProviderTypes = [];
+  }
+  return state.llmProviderTypes;
 }
 
 async function loadSkills() {
@@ -141,21 +286,21 @@ function populateAgentModelSelect(selectedId = null) {
     return;
   }
   select.disabled = false;
-  select.innerHTML = models
-    .map(
-      (m) =>
-        `<option value="${escapeHtml(m.id)}" ${m.id === selectedId ? "selected" : ""}>${escapeHtml(m.name)} (${escapeHtml(m.model)})</option>`
-    )
-    .join("");
+  select.innerHTML = window.DeepAgentModelOptions.renderGroupedModelOptions(models, { selectedId });
 }
 
 function initTabs() {
   const tabs = document.querySelectorAll(".tab");
   tabs.forEach((tab) => {
-    tab.addEventListener("click", () => {
+    tab.addEventListener("click", async () => {
+      if (window.agentsAdmin?.isEditorOpen?.() && !(await window.agentsAdmin.requestCloseEditor())) return;
+      if (window.mcpAdmin?.isEditorOpen?.() && !(await window.mcpAdmin.requestCloseEditor())) return;
       tabs.forEach((t) => t.classList.remove("active"));
       tab.classList.add("active");
       const name = tab.dataset.tab;
+      document
+        .querySelector(".configuration-content")
+        ?.classList.toggle("catalog-active", name === "catalog");
       document.querySelectorAll(".panel").forEach((p) => p.classList.remove("active"));
       document.getElementById(`panel-${name}`)?.classList.add("active");
       if (name === "global-settings" && window.globalSettingsAdmin) {
@@ -167,13 +312,20 @@ function initTabs() {
       if (name === "agents" && window.agentsAdmin) {
         Promise.all([loadLlmModels(), loadCapabilities(), loadSkills()]).then(() => window.agentsAdmin.refresh());
       }
-      if (name === "llm-models" && window.llmModelsAdmin) window.llmModelsAdmin.refresh();
-      if (name === "builtin-tools" && window.builtinToolsAdmin) window.builtinToolsAdmin.refresh();
-      if (name === "system-tools" && window.systemToolsAdmin) window.systemToolsAdmin.refresh();
-      if (name === "skills" && window.skillsAdmin) window.skillsAdmin.refresh();
-      if (name === "auxiliary-models" && window.auxiliaryModelsAdmin) window.auxiliaryModelsAdmin.refresh();
+      if (name === "llm-providers" && window.llmProvidersAdmin) window.llmProvidersAdmin.refresh();
+      if (name === "builtin-tools") {
+        window.builtinToolsAdmin?.refresh();
+        window.systemToolsAdmin?.refresh();
+      }
+      if (name === "skills" && window.skillsAdmin) {
+        window.skillsAdmin.selectedCode = null;
+        window.skillsAdmin.refresh();
+      }
       if (name === "mcp" && window.mcpAdmin) window.mcpAdmin.refresh();
-      if (name === "ui-tools" && window.uiToolsAdmin) window.uiToolsAdmin.refresh();
+      if (name === "ui-tools" && window.uiToolsAdmin) {
+        window.uiToolsAdmin.selectedPackageCode = null;
+        window.uiToolsAdmin.refresh();
+      }
       if (name === "catalog" && window.modelCatalogAdmin) window.modelCatalogAdmin.refresh();
     });
   });

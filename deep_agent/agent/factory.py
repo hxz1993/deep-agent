@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-import httpx
+import httpx2
 from pydantic_ai import Agent
 from pydantic_ai.capabilities import AbstractCapability, IncludeToolReturnSchemas, ToolSearch
 from pydantic_ai.models import DEFAULT_HTTP_TIMEOUT, Model, get_user_agent, parse_model_id
@@ -18,6 +18,7 @@ from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.context_references import context_reference_instructions
 from deep_agent.agent.models import OpenAICompatibleVideoChatModel
 from deep_agent.agent.planning import build_planning_capability
+from deep_agent.agent.provider_registry import resolve_provider_model
 from deep_agent.agent.spec import AgentSpec
 from deep_agent.agent.context.estimator import TokenEstimator
 from deep_agent.agent.tool_discovery import (
@@ -29,6 +30,7 @@ from deep_agent.agent.tool_discovery import (
     search_deferred_tools,
 )
 from deep_agent.capabilities.registry import ToolPackage, ToolPackageRegistry
+from deep_agent.code_mode import FilePayloadResolvingToolset, HybridCodeMode
 from deep_agent.options import OPTION
 
 _OPENAI_PREFIXES = {"openai", "openai-chat"}
@@ -77,12 +79,12 @@ def _resolve_anthropic(spec: AgentSpec, model_name: str) -> AnthropicModel:
     return AnthropicModel(model_name, provider=provider)
 
 
-def _gemini_http_client(proxy: str) -> httpx.AsyncClient:
+def _gemini_http_client(proxy: str) -> httpx2.AsyncClient:
     # ponytail: trust_env=False so global HTTP_PROXY does not leak into Gemini-only traffic
-    return httpx.AsyncClient(
+    return httpx2.AsyncClient(
         proxy=proxy,
         trust_env=False,
-        timeout=httpx.Timeout(timeout=DEFAULT_HTTP_TIMEOUT, connect=5),
+        timeout=httpx2.Timeout(timeout=DEFAULT_HTTP_TIMEOUT, connect=5),
         headers={"User-Agent": get_user_agent()},
     )
 
@@ -100,13 +102,25 @@ def _resolve_google(spec: AgentSpec, model_name: str) -> GoogleModel:
 def resolve_model(spec: AgentSpec) -> str | Model:
     """Turn the spec's model string into a model for Pydantic AI.
 
-    For ``provider:model`` strings, the provider class comes from
+    Persisted models always use their explicit provider configuration. The
+    legacy raw ``model=`` API keeps Pydantic AI's prefix resolution behavior,
+    but it is never used to infer the provider of a database model.
+
+    For legacy ``provider:model`` strings, the provider class comes from
     :func:`~pydantic_ai.providers.infer_provider_class`. When that class is
     :class:`~pydantic_ai.providers.deepseek.DeepSeekProvider` and ``base_url`` is
     unset or matches the provider's official endpoint, the native provider is used
     so reasoning fields round-trip correctly. A different ``base_url`` falls back
     to :class:`~pydantic_ai.providers.openai.OpenAIProvider`.
     """
+    if spec.provider_config is not None:
+        return resolve_provider_model(
+            model_name=spec.model,
+            provider=spec.provider_config,
+            input_modalities=spec.input_modalities,
+            tags=spec.tags,
+        )
+
     provider_name = _model_provider_prefix(spec.model)
     if provider_name is None:
         parsed_provider, model_name = parse_model_id(spec.model)
@@ -168,8 +182,10 @@ def _toolsets_for_spec(
     dynamic_ui_packages: list[ToolPackage] | None = None,
     mcp_resource_toolset: Any | None = None,
     file_toolset: Any | None = None,
+    file_export_toolset: Any | None = None,
     skill_resource_toolset: Any | None = None,
     skill_script_toolset: Any | None = None,
+    history_toolset: Any | None = None,
     mcp_server_names: list[str] | None = None,
     estimator: TokenEstimator | None = None,
 ) -> list[Any]:
@@ -178,8 +194,17 @@ def _toolsets_for_spec(
     for package in registry.selected(spec.capabilities):
         toolsets.append(package.toolset)
     if mcp_toolsets:
+        effective_mcp_toolsets = mcp_toolsets
+        if "builtin:code-mode" in spec.capabilities:
+            effective_mcp_toolsets = [
+                FilePayloadResolvingToolset(
+                    toolset,
+                    server_names=tuple(mcp_server_names or ()),
+                )
+                for toolset in mcp_toolsets
+            ]
         discovery = build_mcp_discovery_toolset(
-            mcp_toolsets,
+            effective_mcp_toolsets,
             server_names=mcp_server_names or (),
             estimator=estimator or TokenEstimator.conservative(),
         )
@@ -189,10 +214,14 @@ def _toolsets_for_spec(
         toolsets.append(mcp_resource_toolset)
     if file_toolset is not None:
         toolsets.append(file_toolset)
+    if file_export_toolset is not None:
+        toolsets.append(file_export_toolset)
     if skill_resource_toolset is not None:
         toolsets.append(skill_resource_toolset)
     if skill_script_toolset is not None:
         toolsets.append(skill_script_toolset)
+    if history_toolset is not None:
+        toolsets.append(history_toolset)
 
     if dynamic_ui_packages:
         toolsets.extend(package.toolset for package in dynamic_ui_packages)
@@ -208,8 +237,10 @@ def build_agent(
     dynamic_ui_packages: list[ToolPackage] | None = None,
     mcp_resource_toolset: Any | None = None,
     file_toolset: Any | None = None,
+    file_export_toolset: Any | None = None,
     skill_resource_toolset: Any | None = None,
     skill_script_toolset: Any | None = None,
+    history_toolset: Any | None = None,
     skill_capability: AbstractCapability[AgentDeps] | None = None,
     context_compaction: AbstractCapability[AgentDeps] | None = None,
     tool_output_limits: AbstractCapability[AgentDeps] | None = None,
@@ -218,10 +249,10 @@ def build_agent(
 ) -> Agent[AgentDeps, str]:
     """Construct a Pydantic AI agent from a spec + the tool package registry.
 
-    The model string (e.g. "openai:gpt-4o") selects the provider, so switching
-    providers needs only a config change. Set ``base_url``/``api_key`` on the
-    spec to target an OpenAI-compatible endpoint. Tool-package instructions ride
-    along with their toolsets and are injected automatically when enabled.
+    Persisted models use the explicit Provider configuration carried by the
+    spec. The legacy raw-model path remains only for callers that do not resolve
+    a database model. Tool-package instructions ride along with their toolsets
+    and are injected automatically when enabled.
     """
     model = _resolve_model(spec)
     toolsets = _toolsets_for_spec(
@@ -231,8 +262,10 @@ def build_agent(
         dynamic_ui_packages=dynamic_ui_packages,
         mcp_resource_toolset=mcp_resource_toolset,
         file_toolset=file_toolset,
+        file_export_toolset=file_export_toolset,
         skill_resource_toolset=skill_resource_toolset,
         skill_script_toolset=skill_script_toolset,
+        history_toolset=history_toolset,
         mcp_server_names=mcp_server_names,
         estimator=estimator,
     )
@@ -257,6 +290,18 @@ def build_agent(
                 tools=build_return_schema_selector(
                     server_names=mcp_server_names or (),
                 )
+            )
+        )
+    if "builtin:code-mode" in spec.capabilities:
+        capabilities.append(
+            HybridCodeMode(
+                tools=[],
+                dynamic_catalog=True,
+                max_tool_calls=100,
+                resource_limits={
+                    "max_duration_secs": 30,
+                    "max_memory": 256 * 1024 * 1024,
+                },
             )
         )
     capabilities.append(build_planning_capability())

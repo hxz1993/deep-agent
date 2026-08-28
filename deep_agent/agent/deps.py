@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from deep_agent.agent.tool_discovery import ToolDiscoveryTelemetry
     from deep_agent.agent.tool_output_limits import ToolOutputTelemetry
     from pydantic_ai_harness.planning import InMemoryPlanStore
+    from deep_agent.files.storage import FileStore
 
 
 @dataclass
@@ -32,7 +33,12 @@ class AgentDeps:
     agent_id: str | None = None
     conversation_id: str | None = None
     run_id: str | None = None
+    turn_id: str | None = None
+    resume_from_run_id: str | None = None
+    app_id: str | None = None
+    space_id: str | None = None
     request_headers: Mapping[str, str] = field(default_factory=dict)
+    file_store: "FileStore | None" = field(default=None, repr=False)
     context_state: "ContextRunState | None" = None
     tool_discovery: "ToolDiscoveryTelemetry | None" = None
     tool_output_limits: "ToolOutputTelemetry | None" = None
@@ -46,6 +52,7 @@ class AgentDeps:
     cancellation_token: CancellationToken | None = field(default=None, repr=False)
     has_context_references: bool = False
     attachment_by_id: dict[str, AttachmentRef] = field(default_factory=dict)
+    tool_output_artifacts: dict[str, dict[str, Any]] = field(default_factory=dict)
     file_bytes: dict[str, bytes] = field(default_factory=dict)
     file_parsed: dict[str, Any] = field(default_factory=dict)
     file_load_tasks: dict[str, asyncio.Task[bytes]] = field(
@@ -56,3 +63,5 @@ class AgentDeps:
         default_factory=dict,
         repr=False,
     )
+    code_mode_file_payloads: dict[str, Any] = field(default_factory=dict, repr=False)
+    code_mode_audit: list[dict[str, Any]] = field(default_factory=list, repr=False)

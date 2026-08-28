@@ -29,5 +29,7 @@ class SessionSummaryRow:
     created_at: datetime
     updated_at: datetime
     message_count: int
+    turn_count: int = 0
+    attachment_count: int = 0
     user_prompt: str | None = None
     title: str | None = None

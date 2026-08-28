@@ -33,6 +33,8 @@ Thumbs.db
 
 # Default local SQLite database
 data/deep-agent.db
+data/local-file-store/
+data/acceptance-v8-local-files-*/
 
 .agents/
 .claude/

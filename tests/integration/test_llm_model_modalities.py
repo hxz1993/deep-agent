@@ -12,7 +12,8 @@ from deep_agent.api.v1 import api_router
 from deep_agent.capabilities import build_registry
 from deep_agent.capabilities.mcp.lease_manager import McpLeaseManager
 from deep_agent.core.context import AppContext, get_context, init_context, reset_context
-from tests.helpers.sqlite_stores import make_sqlite_stores
+from tests.helpers.admin_auth import allow_console_admin
+from tests.helpers.sqlite_stores import get_default_test_provider_id, make_sqlite_stores
 
 
 def model_payload(**overrides) -> dict:
@@ -31,8 +32,10 @@ def model_payload(**overrides) -> dict:
 class LlmModelRuntimeFactsIntegrationTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         stores, self._engine, session_factory = await make_sqlite_stores()
+        self._provider_id = await get_default_test_provider_id(stores)
         self._app = FastAPI()
         self._app.include_router(api_router)
+        allow_console_admin(self._app)
         init_context(
             AppContext.for_testing(
                 registry=build_registry(),
@@ -54,6 +57,7 @@ class LlmModelRuntimeFactsIntegrationTests(unittest.IsolatedAsyncioTestCase):
             create_response = await client.post(
                 "/api/v1/llm-models",
                 json=model_payload(
+                    provider_id=self._provider_id,
                     input_modalities=["text", "image"],
                     context_window_tokens=200_000,
                     max_output_tokens=16_384,
@@ -80,7 +84,11 @@ class LlmModelRuntimeFactsIntegrationTests(unittest.IsolatedAsyncioTestCase):
         async with AsyncClient(transport=self._transport, base_url="http://test") as client:
             response = await client.post(
                 "/api/v1/llm-models",
-                json={"name": "missing-facts", "model": "private:model"},
+                json={
+                    "provider_id": self._provider_id,
+                    "name": "missing-facts",
+                    "model": "private:model",
+                },
             )
         self.assertEqual(response.status_code, 422)
         error_fields = {item["loc"][-1] for item in response.json()["detail"]}
@@ -94,6 +102,7 @@ class LlmModelRuntimeFactsIntegrationTests(unittest.IsolatedAsyncioTestCase):
             response = await client.post(
                 "/api/v1/llm-models",
                 json=model_payload(
+                    provider_id=self._provider_id,
                     context_window_tokens=4_096,
                     max_output_tokens=8_192,
                 ),
@@ -104,7 +113,7 @@ class LlmModelRuntimeFactsIntegrationTests(unittest.IsolatedAsyncioTestCase):
         async with AsyncClient(transport=self._transport, base_url="http://test") as client:
             create_response = await client.post(
                 "/api/v1/llm-models",
-                json=model_payload(),
+                json=model_payload(provider_id=self._provider_id),
             )
             model_id = create_response.json()["id"]
             one = await client.post(f"/api/v1/llm-models/{model_id}/refresh-metadata")
@@ -117,7 +126,10 @@ class LlmModelRuntimeFactsIntegrationTests(unittest.IsolatedAsyncioTestCase):
         async with AsyncClient(transport=self._transport, base_url="http://test") as client:
             create_response = await client.post(
                 "/api/v1/llm-models",
-                json=model_payload(name="estimate-model"),
+                json=model_payload(
+                    provider_id=self._provider_id,
+                    name="estimate-model",
+                ),
             )
             model = create_response.json()
             response = await client.post(
@@ -136,7 +148,10 @@ class LlmModelRuntimeFactsIntegrationTests(unittest.IsolatedAsyncioTestCase):
         async with AsyncClient(transport=self._transport, base_url="http://test") as client:
             create_response = await client.post(
                 "/api/v1/llm-models",
-                json=model_payload(name="empty-estimate-model"),
+                json=model_payload(
+                    provider_id=self._provider_id,
+                    name="empty-estimate-model",
+                ),
             )
             model_id = create_response.json()["id"]
             empty = await client.post(

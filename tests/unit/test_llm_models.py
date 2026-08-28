@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from deep_agent.agent.spec import AgentSpec
 from deep_agent.db.dialect import DbDialect
-from deep_agent.db.models import Agent, Base, LlmModel
+from deep_agent.db.models import Agent, Base, LlmModel, LlmProvider
 from deep_agent.db.stores.agent import create_agent_store
 from deep_agent.db.stores.llm_model import (
     LlmModelValidationError,
@@ -21,11 +21,18 @@ from deep_agent.schemas.llm_model import (
     LlmModelResponse,
     LlmModelUpdate,
 )
+from deep_agent.services.llm_configuration import (
+    LlmConfigurationConflictError,
+    LlmConfigurationService,
+)
+
+_PROVIDER_ID = "1" * 32
 
 
 def model_create(name: str = "gpt-4o", **overrides) -> LlmModelCreate:
     data = {
         "name": name,
+        "provider_id": _PROVIDER_ID,
         "model": "openai:gpt-4o",
         "input_modalities": ["text"],
         "context_window_tokens": 128_000,
@@ -43,13 +50,25 @@ class LlmModelStoreTests(unittest.IsolatedAsyncioTestCase):
             await conn.run_sync(Base.metadata.create_all)
         self.session_factory = async_sessionmaker(self.engine, expire_on_commit=False)
         self.store = create_llm_model_store(DbDialect.SQLITE, self.session_factory)
+        self.service = LlmConfigurationService(self.session_factory)
         self.agent_store = create_agent_store(DbDialect.SQLITE, self.session_factory)
+        async with self.session_factory.begin() as session:
+            session.add(
+                LlmProvider(
+                    id=_PROVIDER_ID,
+                    name="Test Provider",
+                    provider_type="openai_compatible",
+                    use_default_base_url=False,
+                    base_url="http://test.invalid/v1",
+                    api_key="test-key",
+                )
+            )
 
     async def asyncTearDown(self) -> None:
         await self.engine.dispose()
 
     async def test_create_persists_runtime_facts_and_counts_agents(self) -> None:
-        row = await self.store.create_unique(
+        row = await self.service.create_model(
             model_create(
                 input_modalities=["text", "image"],
                 tags=["reasoning", "tool_call"],
@@ -59,6 +78,7 @@ class LlmModelStoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(row.context_window_tokens, 128_000)
         self.assertEqual(row.max_output_tokens, 16_384)
         self.assertEqual(row.tags, ["reasoning", "tool_call"])
+        self.assertTrue(row.enabled)
         self.assertEqual(await self.store.count_agents(row.id), 0)
 
         await self.agent_store.create_unique(
@@ -67,32 +87,61 @@ class LlmModelStoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await self.store.count_agents(row.id), 1)
 
     async def test_update_persists_runtime_facts(self) -> None:
-        row = await self.store.create_unique(model_create())
-        updated = await self.store.update_unique(
+        row = await self.service.create_model(model_create())
+        updated = await self.service.update_model(
             row.id,
-            LlmModelUpdate(tags=["reasoning"], max_output_tokens=8_192),
+            LlmModelUpdate(tags=["reasoning"], max_output_tokens=8_192, enabled=False),
         )
         assert updated is not None
         self.assertEqual(updated.tags, ["reasoning"])
         self.assertEqual(updated.max_output_tokens, 8_192)
+        self.assertFalse(updated.enabled)
 
     async def test_historical_pdf_modality_is_hidden_from_runtime_and_api(self) -> None:
-        row = await self.store.create_unique(model_create())
+        row = await self.service.create_model(model_create())
         row.input_modalities = ["text", "image", "pdf"]
 
-        self.assertEqual(AgentSpec.from_llm_model(row).input_modalities, ["text", "image"])
         self.assertEqual(
-            LlmModelResponse.from_row(row).input_modalities,
+            AgentSpec.from_llm_model(row, provider=await self._provider()).input_modalities,
+            ["text", "image"],
+        )
+        self.assertEqual(
+            LlmModelResponse.from_row(
+                row,
+                provider=await self._provider(),
+            ).input_modalities,
             ["text", "image"],
         )
 
     async def test_update_rejects_invalid_merged_token_pair(self) -> None:
-        row = await self.store.create_unique(model_create())
+        row = await self.service.create_model(model_create())
         with self.assertRaises(LlmModelValidationError):
-            await self.store.update_unique(
+            await self.service.update_model(
                 row.id,
                 LlmModelUpdate(context_window_tokens=4_096),
             )
+
+    async def test_model_names_are_unique_within_provider_only(self) -> None:
+        first = await self.service.create_model(model_create())
+        with self.assertRaises(LlmConfigurationConflictError):
+            await self.service.create_model(model_create(model="openai:gpt-4.1"))
+
+        second_provider_id = "2" * 32
+        async with self.session_factory.begin() as session:
+            session.add(
+                LlmProvider(
+                    id=second_provider_id,
+                    name="Second Provider",
+                    provider_type="openai_compatible",
+                    use_default_base_url=False,
+                    base_url="http://second.invalid/v1",
+                    api_key="test-key",
+                )
+            )
+        second = await self.service.create_model(
+            model_create(provider_id=second_provider_id)
+        )
+        self.assertNotEqual(first.id, second.id)
 
     def test_create_requires_modalities_and_token_limits(self) -> None:
         with self.assertRaises(ValidationError):
@@ -100,8 +149,18 @@ class LlmModelStoreTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ValidationError):
             model_create(context_window_tokens=4_096, max_output_tokens=8_192)
 
+    async def _provider(self) -> LlmProvider:
+        async with self.session_factory() as session:
+            provider = await session.get(LlmProvider, _PROVIDER_ID)
+            assert provider is not None
+            return provider
+
 
 class LlmModelMigrationShapeTests(unittest.TestCase):
+    def test_provider_ids_use_compact_uuid_storage(self) -> None:
+        self.assertEqual(LlmProvider.__table__.c.id.type.length, 32)
+        self.assertEqual(LlmModel.__table__.c.provider_id.type.length, 32)
+
     def test_agent_requires_model_id_column(self) -> None:
         cols = {column.name for column in Agent.__table__.columns}
         self.assertIn("model_id", cols)
@@ -118,15 +177,31 @@ class LlmModelMigrationShapeTests(unittest.TestCase):
                 "name",
                 "description",
                 "model",
-                "base_url",
-                "api_key",
+                "provider_id",
                 "input_modalities",
                 "context_window_tokens",
                 "max_output_tokens",
                 "tags",
+                "enabled",
                 "created_at",
                 "updated_at",
             },
+        )
+
+    def test_provider_reference_is_a_restricting_foreign_key(self) -> None:
+        foreign_key = next(iter(LlmModel.__table__.c.provider_id.foreign_keys))
+        self.assertEqual(foreign_key.target_fullname, "llm_providers.id")
+        self.assertEqual(foreign_key.ondelete, "RESTRICT")
+
+    def test_model_name_uniqueness_is_scoped_to_provider(self) -> None:
+        constraints = {
+            constraint.name: tuple(column.name for column in constraint.columns)
+            for constraint in LlmModel.__table__.constraints
+            if constraint.name
+        }
+        self.assertEqual(
+            constraints["uq_llm_models_provider_name"],
+            ("provider_id", "name"),
         )
 
     def test_json_fields_use_text_json_type(self) -> None:

@@ -22,12 +22,11 @@ class ToolPackageRegistryTests(unittest.TestCase):
                 code="builtin:general",
                 category="builtin",
                 toolset=object(),
-                default_enabled=True,
             )
         )
         self.assertEqual(registry.toolsets([]), [])
 
-    def test_null_selection_only_returns_default_packages(self) -> None:
+    def test_null_selection_returns_no_packages(self) -> None:
         registry = ToolPackageRegistry()
         general = object()
         mcp = object()
@@ -36,7 +35,6 @@ class ToolPackageRegistryTests(unittest.TestCase):
                 code="builtin:general",
                 category="builtin",
                 toolset=general,
-                default_enabled=True,
             )
         )
         registry.register(
@@ -44,10 +42,9 @@ class ToolPackageRegistryTests(unittest.TestCase):
                 code="mcp:echo",
                 category="mcp",
                 toolset=mcp,
-                default_enabled=False,
             )
         )
-        self.assertEqual(registry.toolsets(None), [general])
+        self.assertEqual(registry.toolsets(None), [])
         self.assertEqual(registry.toolsets(["mcp:echo"]), [mcp])
 
     def test_one_package_contributes_exactly_one_toolset(self) -> None:
@@ -60,7 +57,8 @@ class ToolPackageRegistryTests(unittest.TestCase):
                 toolset=toolset,
             )
         )
-        self.assertEqual(registry.toolsets(None), [toolset])
+        self.assertEqual(registry.toolsets(None), [])
+        self.assertEqual(registry.toolsets(["builtin:general"]), [toolset])
         self.assertFalse(hasattr(registry.get("builtin:general"), "toolsets"))
 
 class BuiltinToolPackageMetadataTests(unittest.IsolatedAsyncioTestCase):
@@ -70,7 +68,6 @@ class BuiltinToolPackageMetadataTests(unittest.IsolatedAsyncioTestCase):
         tools = await package.toolset.get_tools(context)
         self.assertEqual(package.code, "builtin:general")
         self.assertEqual(package.category, "builtin")
-        self.assertTrue(package.default_enabled)
         self.assertEqual(set(tools), {"get_current_time"})
         current_time = await tools["get_current_time"].call_func({}, context)
         self.assertIsNotNone(datetime.fromisoformat(current_time))
@@ -82,7 +79,6 @@ class PythonSandboxPackageTests(unittest.TestCase):
         backend.aclose = AsyncMock()
         package = build_python_sandbox_tool_package(backend, timeout_sec=30.0)
         self.assertEqual(package.code, "builtin:sandbox")
-        self.assertFalse(package.default_enabled)
         self.assertEqual(
             {item.name for item in package.tools},
             {"execute_python"},
@@ -101,9 +97,11 @@ class PythonSandboxPackageTests(unittest.TestCase):
             {item.name for item in sandbox.tools},
             {"execute_python"},
         )
-        default_toolsets = registry.toolsets(None)
-        self.assertIn(general.toolset, default_toolsets)
-        self.assertNotIn(sandbox.toolset, default_toolsets)
+        self.assertEqual(registry.toolsets(None), [])
+        self.assertEqual(
+            registry.toolsets(["builtin:general"]),
+            [general.toolset],
+        )
         self.assertEqual(
             registry.toolsets(["builtin:sandbox"]),
             [sandbox.toolset],

@@ -5,7 +5,10 @@ from dataclasses import dataclass
 
 from pydantic_ai.messages import ModelMessage, ModelResponse
 
-from deep_agent.agent.context.estimator import TokenEstimator
+from deep_agent.agent.context.estimator import (
+    REQUEST_ENVELOPE_TOKENS,
+    TokenEstimator,
+)
 from deep_agent.options import OPTION
 
 OUTPUT_PREDICTION_FLOOR = 2_048
@@ -180,12 +183,20 @@ def build_context_budget(
     additional_output_samples: list[OutputTokenSample] | None = None,
     request_parameters=None,
     estimate_scope: str | None = None,
+    precomputed_message_tokens: int | None = None,
 ) -> ContextBudget:
     estimator = estimator or TokenEstimator.conservative()
-    estimated_request, message_tokens, parameter_tokens = estimator.request(
-        messages,
-        request_parameters,
-    )
+    if precomputed_message_tokens is None:
+        estimated_request, message_tokens, parameter_tokens = estimator.request(
+            messages,
+            request_parameters,
+        )
+    else:
+        message_tokens = max(0, int(precomputed_message_tokens))
+        parameter_tokens = estimator.request_parameters(request_parameters)
+        estimated_request = (
+            message_tokens + parameter_tokens + REQUEST_ENVELOPE_TOKENS
+        )
     scope = estimate_scope or (
         "full_model_request" if request_parameters is not None else "history_only"
     )

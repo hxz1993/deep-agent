@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any, Literal, Optional
 
 from fastapi import APIRouter, HTTPException, Query, status
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pydantic_ai.messages import ModelMessage
 
 from deep_agent.core.context import AppContextDep
@@ -13,24 +13,15 @@ from deep_agent.db.session_list import MAX_LIST_LIMIT, SessionListFilters, Sessi
 from deep_agent.db.session_scope import resolve_session
 from deep_agent.db.ids import normalize_agent_id
 from deep_agent.agent.history import (
-    SessionHistoryResponse,
-    HistoryContextCheckpoint,
-    _extract_assistant_text,
-    enrich_history_messages,
     first_user_prompt,
-    model_messages_to_history,
     session_activity_timestamps,
 )
-from deep_agent.agent.run_identity import conversation_id_for
-from deep_agent.agent.spec import AgentSpec, anonymous_spec
 from deep_agent.agent.context.budget import build_context_budget
-from deep_agent.agent.context.checkpoint import load_projection, projection_fingerprint
 from deep_agent.agent.context.estimator import TokenEstimator
 from deep_agent.agent.context.manual import manual_compaction_availability
-from deep_agent.capabilities.mcp.resolver import load_mcp_rows
-from deep_agent.capabilities.ui.registry import load_ui_tool_hints
+from deep_agent.conversation.models import ConversationHistoryResponse
+from deep_agent.conversation.projector import ConversationProjectionError, project_session_events
 from deep_agent.schemas.chat import SessionInfo, SessionListResponse
-from deep_agent.options import OPTION
 
 router = APIRouter()
 
@@ -52,6 +43,8 @@ def _summary_to_session_info(row: SessionSummaryRow) -> SessionInfo:
     return SessionInfo(
         session_id=row.session_id,
         message_count=row.message_count,
+        turn_count=row.turn_count,
+        attachment_count=row.attachment_count,
         agent_id=row.agent_id,
         agent_name=row.agent_name,
         user_prompt=row.user_prompt,
@@ -219,22 +212,35 @@ async def cancel_session_run(
     )
 
 
-async def _spec_for_history(ctx: AppContextDep, agent_id: str | None) -> AgentSpec:
-    if agent_id:
-        row = await ctx.stores.agent.get_by_id(agent_id)
-        if row is not None:
-            return AgentSpec.from_row(row, row.llm_model)
-    return anonymous_spec()
+class SessionEventResponse(BaseModel):
+    event_id: str
+    session_id: str
+    sequence: int
+    schema_version: int
+    event_type: str
+    status: str | None = None
+    turn_id: str | None = None
+    run_id: str | None = None
+    payload: dict[str, Any]
+    created_at: datetime
+    updated_at: datetime
 
 
-@router.get("/sessions/{session_id}/history", response_model=SessionHistoryResponse)
+class SessionEventsResponse(BaseModel):
+    items: list[SessionEventResponse]
+    next_after_sequence: int | None = None
+
+
+@router.get(
+    "/sessions/{session_id}/history",
+    response_model=ConversationHistoryResponse,
+)
 async def get_session_history(
     ctx: AppContextDep,
     user_id: RequestUserDep,
     session_id: str,
     agent_id: str | None = None,
-    model_id: str | None = None,
-) -> SessionHistoryResponse:
+) -> ConversationHistoryResponse:
     resolved = await resolve_session(
         ctx.store,
         session_id,
@@ -243,29 +249,49 @@ async def get_session_history(
     )
     if resolved is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
-    scope, resolved_session_id = resolved
-    from deep_agent.db.session_scope import agent_scope_to_api
+    _scope, resolved_session_id = resolved
+    events = await ctx.store.list_all_events(resolved_session_id)
+    try:
+        return project_session_events(events, session_id=resolved_session_id)
+    except ConversationProjectionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
 
-    api_agent_id = agent_id or agent_scope_to_api(scope)
-    raw = await ctx.store.get_history(resolved_session_id, agent_id=api_agent_id)
-    messages = model_messages_to_history(raw)
-    mcp_rows = await load_mcp_rows(ctx.stores)
-    spec = await _spec_for_history(ctx, api_agent_id)
-    hints = await load_ui_tool_hints(ctx.stores, spec)
-    messages = enrich_history_messages(messages, hints)
-    context_data = await _build_context_data(
-        ctx,
-        resolved_session_id,
-        api_agent_id,
-        raw,
-        model_id=model_id,
+
+@router.get("/sessions/{session_id}/events", response_model=SessionEventsResponse)
+async def get_session_events(
+    ctx: AppContextDep,
+    user_id: RequestUserDep,
+    session_id: str,
+    agent_id: str | None = None,
+    after_sequence: int = Query(default=0, ge=0),
+    limit: int = Query(default=100, ge=1, le=500),
+    event_type: str | None = None,
+    turn_id: str | None = None,
+    run_id: str | None = None,
+    call_id: str | None = None,
+) -> SessionEventsResponse:
+    resolved = await resolve_session(
+        ctx.store, session_id, agent_id=agent_id, user_id=user_id
     )
-    return SessionHistoryResponse(
-        session_id=resolved_session_id,
-        conversation_id=conversation_id_for(api_agent_id, resolved_session_id),
-        messages=messages,
-        model_message_count=len(raw),
-        context_checkpoint=context_data["history_checkpoint"],
+    if resolved is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
+    _scope, resolved_session_id = resolved
+    events = await ctx.store.list_events(
+        resolved_session_id,
+        after_sequence=after_sequence,
+        limit=limit,
+        event_type=event_type,
+        turn_id=turn_id,
+        run_id=run_id,
+        call_id=call_id,
+    )
+    items = [SessionEventResponse.model_validate(event.public_dict()) for event in events]
+    return SessionEventsResponse(
+        items=items,
+        next_after_sequence=items[-1].sequence if len(items) == limit else None,
     )
 
 
@@ -292,13 +318,18 @@ async def delete_session(
 
 
 class SessionRenameRequest(BaseModel):
-    """会话重命名请求体。"""
+    """Manual session rename. Automatic regeneration is intentionally absent."""
 
-    title: Optional[str] = None
-    """手动设置的标题。与 auto 互斥。"""
+    model_config = ConfigDict(extra="forbid")
+    title: str = Field(min_length=1, max_length=80)
 
-    auto: bool = False
-    """是否自动重新生成标题（基于对话内容）。与 title 互斥。"""
+    @field_validator("title")
+    @classmethod
+    def _non_blank_title(cls, value: str) -> str:
+        title = value.strip()
+        if not title:
+            raise ValueError("Session title must not be blank")
+        return title
 
 
 class SessionContextStatus(BaseModel):
@@ -320,14 +351,11 @@ class SessionContextStatus(BaseModel):
     usable_request_tokens: int | None = None
     trigger_tokens: int | None = None
     target_tokens: int | None = None
-    checkpoint_exists: bool = False
-    checkpoint_active: bool = False
-    checkpoint_invalid_reason: str | None = None
-    checkpoint_source_last_sequence: int | None = None
-    checkpoint_estimated_tokens: int | None = None
-    checkpoint_updated_at: datetime | None = None
+    compaction_event_id: str | None = None
+    compaction_source_through_sequence: int | None = None
+    compaction_estimated_tokens: int | None = None
+    compaction_updated_at: datetime | None = None
     summary_model_id: str | None = None
-    checkpoint: HistoryContextCheckpoint | None = None
     manual_compaction_available: bool = False
     manual_compaction_reason: str = "context_window_unknown"
 
@@ -364,10 +392,25 @@ async def _build_context_data(
     model = await _context_model(ctx, agent_id, model_id)
     context_window_tokens = model.context_window_tokens if model is not None else None
     max_output_tokens = model.max_output_tokens if model is not None else None
-    estimator = TokenEstimator.for_model(
-        model.model if model is not None else "",
-        model.base_url if model is not None else None,
-    )
+    if model is not None:
+        from deep_agent.agent.provider_registry import (
+            ProviderRuntimeConfig,
+            effective_base_url,
+            load_provider_for_model,
+        )
+
+        provider = await load_provider_for_model(
+            model,
+            ctx.stores.llm_configuration,
+        )
+        provider_config = ProviderRuntimeConfig.from_row(provider)
+        estimator = TokenEstimator.for_model(
+            model.model,
+            effective_base_url(provider_config),
+            provider_type=provider_config.provider_type,
+        )
+    else:
+        estimator = TokenEstimator.for_model("")
     budget = build_context_budget(
         history,
         context_window_tokens=context_window_tokens,
@@ -376,73 +419,24 @@ async def _build_context_data(
         output_history=history,
         estimate_scope="history_only",
     )
-    checkpoint = await ctx.stores.context_checkpoint.get(
-        session_id,
-        agent_id=agent_id,
-    )
-    fingerprint = projection_fingerprint(
-        llm_model_id=model.id if model is not None else None,
-        context_window_tokens=context_window_tokens,
-        max_output_tokens=max_output_tokens,
-        trigger_ratio=OPTION.agent.context_compaction_trigger_ratio,
-        target_ratio=OPTION.agent.context_compaction_target_ratio,
-        keep_tool_pairs=OPTION.agent.context_keep_tool_pairs,
-        summary_model_id=model.id if model is not None else None,
-        estimator_source=estimator.source,
-    )
-    projection = await load_projection(
-        ctx.stores.context_checkpoint,
-        history,
-        session_id=session_id,
-        agent_id=agent_id,
-        fingerprint=fingerprint,
-    )
-    availability_budget = build_context_budget(
-        projection.messages,
-        context_window_tokens=context_window_tokens,
-        max_output_tokens=max_output_tokens,
-        estimator=estimator,
-        output_history=history,
-        estimate_scope="history_only",
+    latest_loader = getattr(ctx.store, "latest_completed_compaction", None)
+    compaction = await latest_loader(session_id) if callable(latest_loader) else None
+    raw_reader = getattr(ctx.store, "get_raw_history", None)
+    raw_history = (
+        await raw_reader(session_id, agent_id=agent_id)
+        if callable(raw_reader)
+        else history
     )
     availability = manual_compaction_availability(
-        history,
-        availability_budget,
+        raw_history,
+        budget,
     )
-
-    checkpoint_view: dict[str, Any] | None = None
-    history_checkpoint: dict[str, Any] | None = None
-    if projection.used_checkpoint and checkpoint is not None:
-        source_count = checkpoint.source_last_sequence + 1
-        source_tokens = estimator.messages(history[:source_count])
-        projected_tokens = checkpoint.estimated_tokens
-        reduction_ratio = (
-            max(0.0, 1.0 - projected_tokens / source_tokens)
-            if source_tokens > 0
-            else 0.0
-        )
-        checkpoint_view = {
-            "source_last_sequence": checkpoint.source_last_sequence,
-            "covered_model_message_count": source_count,
-            "source_estimated_tokens": source_tokens,
-            "projected_estimated_tokens": projected_tokens,
-            "reduction_ratio": reduction_ratio,
-            "new_message_count": max(0, len(history) - source_count),
-            "summary_model_id": checkpoint.summary_model_id,
-            "row_version": checkpoint.row_version,
-            "updated_at": checkpoint.updated_at,
-        }
-        history_checkpoint = dict(checkpoint_view)
-
     return {
-        "budget": availability_budget if projection.used_checkpoint else budget,
+        "budget": budget,
         "context_window_tokens": context_window_tokens,
         "max_output_tokens": max_output_tokens,
-        "checkpoint": checkpoint,
-        "checkpoint_active": projection.used_checkpoint,
-        "checkpoint_invalid_reason": projection.invalid_reason,
-        "checkpoint_view": checkpoint_view,
-        "history_checkpoint": history_checkpoint,
+        "compaction": compaction,
+        "raw_history": raw_history,
         "manual_compaction_available": availability.available,
         "manual_compaction_reason": availability.reason,
     }
@@ -483,10 +477,13 @@ async def get_session_context_status(
         model_id=model_id,
     )
     budget = context_data["budget"]
-    checkpoint = context_data["checkpoint"]
+    compaction = context_data["compaction"]
+    compaction_source = compaction.payload.get("source", {}) if compaction else {}
+    compaction_budget = compaction.payload.get("budget", {}) if compaction else {}
+    summary_call = compaction.payload.get("summary_call", {}) if compaction else {}
     return SessionContextStatus(
         session_id=resolved_session_id,
-        raw_message_count=len(history),
+        raw_message_count=len(context_data["raw_history"]),
         estimated_history_tokens=budget.estimated_history_tokens,
         compaction_enabled=budget.enabled,
         compaction_reason=budget.reason,
@@ -503,18 +500,17 @@ async def get_session_context_status(
         usable_request_tokens=budget.usable_request_tokens,
         trigger_tokens=budget.trigger_tokens,
         target_tokens=budget.target_tokens,
-        checkpoint_exists=checkpoint is not None,
-        checkpoint_active=context_data["checkpoint_active"],
-        checkpoint_invalid_reason=context_data["checkpoint_invalid_reason"],
-        checkpoint_source_last_sequence=(
-            checkpoint.source_last_sequence if checkpoint else None
+        compaction_event_id=compaction.event_id if compaction else None,
+        compaction_source_through_sequence=(
+            int(compaction_source.get("through_sequence"))
+            if compaction_source.get("through_sequence") is not None else None
         ),
-        checkpoint_estimated_tokens=(
-            checkpoint.estimated_tokens if checkpoint else None
+        compaction_estimated_tokens=(
+            int(compaction_budget.get("estimated_after"))
+            if compaction_budget.get("estimated_after") is not None else None
         ),
-        checkpoint_updated_at=checkpoint.updated_at if checkpoint else None,
-        summary_model_id=checkpoint.summary_model_id if checkpoint else None,
-        checkpoint=context_data["checkpoint_view"],
+        compaction_updated_at=compaction.updated_at if compaction else None,
+        summary_model_id=summary_call.get("model_id"),
         manual_compaction_available=context_data["manual_compaction_available"],
         manual_compaction_reason=context_data["manual_compaction_reason"],
     )
@@ -528,21 +524,7 @@ async def rename_session(
     body: SessionRenameRequest,
     agent_id: str | None = None,
 ) -> SessionInfo:
-    """重命名会话：手动设置标题或自动重新生成。
-
-    - `{"title": "新名称"}` → 手动重命名
-    - `{"auto": true}` → 基于对话内容自动重新生成标题
-    """
-    if body.title is not None and body.auto:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Cannot specify both 'title' and 'auto'",
-        )
-    if body.title is None and not body.auto:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Must specify either 'title' or 'auto'",
-        )
+    """Set a non-blank manual title and append its audit Event."""
 
     resolved = await resolve_session(
         ctx.store,
@@ -557,37 +539,22 @@ async def rename_session(
 
     api_agent_id = agent_id or agent_scope_to_api(scope)
 
-    if body.title is not None:
-        # 手动设置标题
-        title = body.title.strip()[:80] if body.title.strip() else None
-        await ctx.store.update_session_title(resolved_session_id, api_agent_id, title)
-    elif body.auto:
-        # 自动重新生成标题
-        history = await ctx.store.get_history(resolved_session_id, agent_id=api_agent_id)
-        if not history:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Cannot auto-rename: session has no messages",
-            )
-        user_text = first_user_prompt(history) or ""
-        assistant_text = _extract_assistant_text(history)
-
-        from deep_agent.agent.title_generator import generate_title
-
-        spec = await _spec_for_history(ctx, api_agent_id)
-        title = await generate_title(
-            user_text=user_text,
-            assistant_text=assistant_text or user_text,
-            spec=spec,
-            auxiliary_store=ctx.stores.auxiliary_model,
-            llm_model_store=ctx.stores.llm_model,
+    title = body.title.strip()
+    if not title:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Session title must not be blank",
         )
-
-        # LLM 失败时回退到文本提取
-        if not title:
-            title = user_text
-
-        await ctx.store.update_session_title(resolved_session_id, api_agent_id, title)
+    await ctx.store.apply_session_title(
+        resolved_session_id,
+        agent_id=api_agent_id,
+        user_id=user_id,
+        title=title,
+        source="user",
+        source_event_id=None,
+        turn_id=None,
+        run_id=None,
+    )
 
     # 返回更新后的会话信息
     history = await ctx.store.get_history(resolved_session_id, agent_id=api_agent_id)

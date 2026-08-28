@@ -19,16 +19,19 @@ from pydantic_ai_harness.planning import PlanItem, Planning
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.event_persister import EventPersister
 from deep_agent.agent.factory import build_agent
-from deep_agent.agent.history import model_messages_to_history
+from deep_agent.conversation.projector import project_session_events
 from deep_agent.agent.planning import (
+    PLANNING_GUIDANCE,
     PLANNING_TOOL_NAMES,
     build_planning_capability,
     current_plan_snapshot,
+    is_planning_tool,
     prepare_plan_store,
 )
 from deep_agent.agent.runner import AgentRunner
 from deep_agent.agent.spec import AgentSpec
 from deep_agent.capabilities.registry import ToolPackageRegistry
+from deep_agent.schemas.agent import AgentCreate
 from tests.helpers.sqlite_stores import make_sqlite_stores
 
 
@@ -52,7 +55,19 @@ class PlanningCapabilityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(planning), 1)
         self.assertFalse(planning[0].enable_subtasks)
         self.assertTrue(planning[0].inject)
-        self.assertIsNone(planning[0].tools)
+        self.assertEqual(tuple(planning[0].tools or ()), PLANNING_TOOL_NAMES)
+        self.assertEqual(planning[0].guidance, PLANNING_GUIDANCE)
+
+    async def test_only_write_plan_is_recognized(self) -> None:
+        self.assertEqual(
+            PLANNING_TOOL_NAMES,
+            ("write_plan",),
+        )
+        self.assertTrue(all(is_planning_tool(name) for name in PLANNING_TOOL_NAMES))
+        self.assertFalse(is_planning_tool("add_task"))
+        self.assertFalse(is_planning_tool("remove_task"))
+        self.assertFalse(is_planning_tool("update_task_status"))
+        self.assertFalse(is_planning_tool("execute_python"))
 
     async def test_plan_store_is_fresh_for_each_run(self) -> None:
         deps = AgentDeps(session_id="same-session")
@@ -75,6 +90,10 @@ class PlanningRunnerTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         stores, self.engine, _ = await make_sqlite_stores()
         self.store = stores.coordinator
+        model = (await stores.llm_model.list_all())[0]
+        self.db_agent = await stores.agent.create_unique(
+            AgentCreate(name="planning-test", model_id=model.id, prompt="test")
+        )
         self.persister = EventPersister(self.store)
         await self.persister.start()
 
@@ -84,10 +103,12 @@ class PlanningRunnerTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_stream_snapshots_follow_planning_results_and_persist(self) -> None:
         calls = 0
+        guidance_seen = False
 
         async def respond(_messages: list[object], info: AgentInfo):
-            nonlocal calls
+            nonlocal calls, guidance_seen
             calls += 1
+            guidance_seen = guidance_seen or "Never add \"write the final answer\"" in str(_messages)
             self.assertEqual(
                 set(PLANNING_TOOL_NAMES),
                 {tool.name for tool in info.function_tools},
@@ -116,21 +137,26 @@ class PlanningRunnerTests(unittest.IsolatedAsyncioTestCase):
                 return
             if calls == 2:
                 yield {0: DeltaToolCall(
-                    name="update_task_statuses",
+                    name="write_plan",
                     tool_call_id="plan-progress",
                     json_args=json.dumps({
-                        "updates": [
-                            {"task_id": "step-1", "status": "completed"},
-                            {"task_id": "step-2", "status": "in_progress"},
+                        "items": [
+                            {"id": "step-1", "content": "读取输入", "active_form": "正在读取输入", "status": "completed"},
+                            {"id": "step-2", "content": "生成结果", "active_form": "正在生成结果", "status": "in_progress"},
                         ]
                     }),
                 )}
                 return
             if calls == 3:
                 yield {0: DeltaToolCall(
-                    name="update_task_status",
+                    name="write_plan",
                     tool_call_id="plan-complete",
-                    json_args=json.dumps({"task_id": "step-2", "status": "completed"}),
+                    json_args=json.dumps({
+                        "items": [
+                            {"id": "step-1", "content": "读取输入", "active_form": "正在读取输入", "status": "completed"},
+                            {"id": "step-2", "content": "生成结果", "active_form": "正在生成结果", "status": "completed"},
+                        ]
+                    }),
                 )}
                 return
             yield "任务完成"
@@ -141,7 +167,9 @@ class PlanningRunnerTests(unittest.IsolatedAsyncioTestCase):
             capabilities=[build_planning_capability()],
         )
         runner = AgentRunner(agent, self.store, UsageLimits(request_limit=10))
-        deps = AgentDeps(session_id="planning-stream")
+        deps = AgentDeps(
+            session_id="planning-stream", user="user-1", agent_id=self.db_agent.id
+        )
 
         output = [
             event
@@ -165,21 +193,19 @@ class PlanningRunnerTests(unittest.IsolatedAsyncioTestCase):
             [(0, 2), (1, 2), (2, 2)],
         )
         self.assertEqual(output[-1]["type"], "final")
+        self.assertTrue(guidance_seen)
 
-        history = model_messages_to_history(
-            await self.store.get_history("planning-stream")
+        projection = project_session_events(
+            await self.store.list_all_events("planning-stream")
         )
-        plan_parts = [
-            part
-            for message in history
-            for part in message.parts
-            if part.type == "tool_result" and part.source == "planning"
-        ]
-        self.assertEqual(plan_parts[-1].plan["completed"], 2)
-        self.assertEqual(plan_parts[-1].plan["total"], 2)
+        plan_items = [item for item in projection.items if item.kind == "plan"]
+        self.assertEqual(plan_items[-1].plan["completed"], 2)
+        self.assertEqual(plan_items[-1].plan["total"], 2)
         persisted_reminders = [
             part
-            for message in await self.store.get_history("planning-stream")
+            for message in await self.store.get_history(
+                "planning-stream", agent_id=self.db_agent.id
+            )
             if isinstance(message, ModelRequest)
             for part in message.parts
             if isinstance(part, UserPromptPart)
@@ -214,19 +240,16 @@ class PlanningRunnerTests(unittest.IsolatedAsyncioTestCase):
             capabilities=[build_planning_capability()],
         )
         runner = AgentRunner(agent, self.store, UsageLimits(request_limit=5))
-        deps = AgentDeps(session_id="planning-non-stream")
+        deps = AgentDeps(
+            session_id="planning-non-stream", user="user-1", agent_id=self.db_agent.id
+        )
 
         await runner.run("planning-non-stream", "创建计划", deps)
-        first_history = model_messages_to_history(
-            await self.store.get_history("planning-non-stream")
+        first_projection = project_session_events(
+            await self.store.list_all_events("planning-non-stream")
         )
-        first_plan_parts = [
-            part
-            for message in first_history
-            for part in message.parts
-            if part.type == "tool_result" and part.source == "planning"
-        ]
-        self.assertEqual(first_plan_parts[-1].plan["completed"], 1)
+        first_plan_items = [item for item in first_projection.items if item.kind == "plan"]
+        self.assertEqual(first_plan_items[-1].plan["completed"], 1)
 
         await runner.run("planning-non-stream", "简单回答", deps)
         self.assertEqual((await current_plan_snapshot(deps))["total"], 0)

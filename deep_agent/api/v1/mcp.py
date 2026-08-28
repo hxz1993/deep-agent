@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from deep_agent.agent.headers import extract_forward_headers
+from deep_agent.api.v1.admin import CONSOLE_ADMIN_DEPENDENCIES
 from deep_agent.capabilities.mcp.inspection import (
     inspect_mcp_server,
     mark_mcp_inspection_stale,
@@ -23,7 +24,7 @@ from deep_agent.schemas.mcp import (
     normalize_mcp_url_config,
 )
 
-router = APIRouter()
+router = APIRouter(dependencies=CONSOLE_ADMIN_DEPENDENCIES)
 
 
 async def _inspect_and_store(
@@ -81,16 +82,14 @@ def _candidate_row(row, body: McpServerUpdate):
         transport=body.transport or row.transport,
         config=body.config if body.config is not None else row.config,
         description=body.description if "description" in body.model_fields_set else row.description,
-        enabled=body.enabled if body.enabled is not None else row.enabled,
         inspection=getattr(row, "inspection", None),
     )
 
 
 def _should_reinspect(row, body: McpServerUpdate) -> bool:
     effective_transport = body.transport or row.transport
-    effective_enabled = body.enabled if body.enabled is not None else row.enabled
-    return effective_transport == "url" and effective_enabled and bool(
-        {"transport", "config", "enabled"} & body.model_fields_set
+    return effective_transport == "url" and bool(
+        {"transport", "config"} & body.model_fields_set
     )
 
 
@@ -126,13 +125,12 @@ async def create_mcp_server(
             detail=f"MCP server already exists: {body.name}",
         )
     inspection = None
-    if body.transport == "url" and body.enabled:
+    if body.transport == "url":
         candidate = SimpleNamespace(
             name=body.name,
             transport=body.transport,
             config=body.config,
             description=body.description,
-            enabled=body.enabled,
             inspection=None,
         )
         result = await inspect_mcp_server(

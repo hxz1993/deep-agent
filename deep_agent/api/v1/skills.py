@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import io
 import json
 import shutil
@@ -14,6 +15,7 @@ from loguru import logger
 from starlette.responses import Response
 
 from deep_agent.agent.headers import extract_forward_headers
+from deep_agent.api.v1.admin import CONSOLE_ADMIN_DEPENDENCIES
 from deep_agent.core.context import AppContextDep
 from deep_agent.db.models import SkillPackage
 from deep_agent.schemas.skill import (
@@ -39,10 +41,11 @@ from deep_agent.skills.runtime import (
     SkillRuntimeLibrary,
     skill_platform_file_headers,
 )
-from deepfos_platform.client.platform import FILE_TYPE_SKILL_PACKAGE, PlatformAPI
+from deep_agent.files.storage import FileStore
+from deepfos_platform.client.platform import FILE_TYPE_SKILL_PACKAGE
 
 
-router = APIRouter()
+router = APIRouter(dependencies=CONSOLE_ADMIN_DEPENDENCIES)
 tag = "Skills"
 
 
@@ -62,7 +65,6 @@ def _builtin_detail(item: SkillDescriptor) -> SkillDetail:
         version=item.version,
         schema_version=item.schema_version,
         source="builtin",
-        enabled=True,
         reference_count=references,
         asset_count=assets,
         script_count=scripts,
@@ -90,7 +92,6 @@ def _row_detail(
         version=row.version,
         schema_version=row.schema_version,
         source="upload",
-        enabled=row.enabled,
         reference_count=references,
         asset_count=assets,
         script_count=scripts,
@@ -154,7 +155,6 @@ def _record(
         version=parsed.version,
         schema_version=parsed.schema_version,
         source="upload",
-        enabled=True,
         platform_file_id=platform_file_id,
         file_name=file_name,
         file_size=file_size,
@@ -165,32 +165,39 @@ def _record(
     )
 
 
-async def _upload_platform(
+async def _upload_file(
     request: Request,
+    store: FileStore,
     *,
     raw: bytes,
     file_name: str,
 ):
-    api = PlatformAPI(
-        header=skill_platform_file_headers(extract_forward_headers(request))
-    )
+    headers = skill_platform_file_headers(extract_forward_headers(request))
     try:
-        uploaded = await api.file.upload(
+        uploaded = await store.upload(
             file_type=FILE_TYPE_SKILL_PACKAGE,
             file_name=file_name,
-            file=raw,
+            mime="application/zip",
+            data=raw,
+            request_headers=headers,
         )
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Platform Skill upload failed: {type(exc).__name__}",
+            detail=f"Skill file upload failed: {type(exc).__name__}",
         ) from exc
-    return api, uploaded
+    return headers, uploaded
 
 
-async def _best_effort_delete(api: PlatformAPI, file_id: str, *, context: str) -> None:
+async def _best_effort_delete(
+    store: FileStore,
+    headers: dict[str, str],
+    file_id: str,
+    *,
+    context: str,
+) -> None:
     try:
-        await api.file.delete_file(file_id)
+        await store.delete(file_id, headers)
     except Exception as exc:
         logger.warning(
             "Orphan platform Skill file cleanup failed context={} file_id={} error_type={}",
@@ -250,7 +257,6 @@ async def export_uploaded_skills(request: Request, ctx: AppContextDep) -> Respon
                 "description": row.description,
                 "version": row.version,
                 "schema_version": row.schema_version,
-                "enabled": row.enabled,
                 "package_file": f"skills/{row.code}.zip",
                 "content_hash": row.content_hash,
                 "original_file_name": row.file_name,
@@ -299,18 +305,28 @@ async def install_skill(
                 detail=f"Skill already exists: {parsed.code}",
             )
         request_headers = extract_forward_headers(request)
-        api, uploaded = await _upload_platform(request, raw=raw, file_name=filename)
+        file_headers, uploaded = await _upload_file(
+            request,
+            ctx.file_store,
+            raw=raw,
+            file_name=filename,
+        )
         try:
             row = await ctx.stores.skill_package.create(
                 _record(
                     parsed,
                     platform_file_id=uploaded.id,
-                    file_name=uploaded.fileName or filename,
-                    file_size=int(uploaded.fileSize or len(raw)),
+                    file_name=uploaded.file_name or filename,
+                    file_size=uploaded.file_size,
                 )
             )
         except Exception:
-            await _best_effort_delete(api, uploaded.id, context="install-compensation")
+            await _best_effort_delete(
+                ctx.file_store,
+                file_headers,
+                uploaded.id,
+                context="install-compensation",
+            )
             raise
         await ctx.skill_runtime.materialize(
             row,
@@ -374,16 +390,20 @@ async def replace_skill_package(
                     skill=_row_detail(current, ctx.skill_runtime),
                 )
 
-        api, uploaded = await _upload_platform(request, raw=raw, file_name=filename)
+        file_headers, uploaded = await _upload_file(
+            request,
+            ctx.file_store,
+            raw=raw,
+            file_name=filename,
+        )
         try:
             replacement = _record(
                 parsed,
                 platform_file_id=uploaded.id,
-                file_name=uploaded.fileName or filename,
-                file_size=int(uploaded.fileSize or len(raw)),
+                file_name=uploaded.file_name or filename,
+                file_size=uploaded.file_size,
             ).model_copy(
                 update={
-                    "enabled": current.enabled,
                     **(
                         {
                             "label": current.label,
@@ -398,9 +418,19 @@ async def replace_skill_package(
             if row is None:
                 raise RuntimeError(f"Skill disappeared during package update: {code}")
         except Exception:
-            await _best_effort_delete(api, uploaded.id, context="update-compensation")
+            await _best_effort_delete(
+                ctx.file_store,
+                file_headers,
+                uploaded.id,
+                context="update-compensation",
+            )
             raise
-        await _best_effort_delete(api, current.platform_file_id, context="update-old-file")
+        await _best_effort_delete(
+            ctx.file_store,
+            file_headers,
+            current.platform_file_id,
+            context="update-old-file",
+        )
         await ctx.skill_runtime.materialize(
             row,
             request_headers=request_headers,
@@ -429,14 +459,6 @@ async def update_skill(
     row = await ctx.stores.skill_package.update(code, body)
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Skill not found: {code}")
-    if body.enabled is False:
-        await ctx.skill_runtime.remove(code, status="disabled")
-    elif body.enabled is True:
-        request_headers = extract_forward_headers(request)
-        await ctx.skill_runtime.materialize(
-            row,
-            request_headers=request_headers,
-        )
     return _row_detail(row, ctx.skill_runtime)
 
 
@@ -455,10 +477,13 @@ async def delete_skill(code: str, request: Request, ctx: AppContextDep) -> dict:
         )
     await ctx.stores.skill_package.delete(code)
     await ctx.skill_runtime.remove(code)
-    api = PlatformAPI(
-        header=skill_platform_file_headers(extract_forward_headers(request))
+    file_headers = skill_platform_file_headers(extract_forward_headers(request))
+    await _best_effort_delete(
+        ctx.file_store,
+        file_headers,
+        row.platform_file_id,
+        context="delete",
     )
-    await _best_effort_delete(api, row.platform_file_id, context="delete")
     return {"status": "deleted", "code": code}
 
 
@@ -466,11 +491,6 @@ async def delete_skill(code: str, request: Request, ctx: AppContextDep) -> dict:
 async def reload_skill(code: str, request: Request, ctx: AppContextDep) -> SkillReloadResult:
     _reject_builtin(code)
     row = await _row_or_404(ctx, code)
-    if not row.enabled:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"Disabled Skill cannot be reloaded: {code}",
-        )
     request_headers = extract_forward_headers(request)
     runtime_state = await ctx.skill_runtime.materialize(
         row,
@@ -536,7 +556,7 @@ async def _resource_root(code: str, request: Request, ctx: AppContextDep) -> tup
             detail=f"Could not materialize Skill package: {type(exc).__name__}",
         ) from exc
     if resolved is None:
-        runtime_state = ctx.skill_runtime.state(code, enabled=row.enabled)
+        runtime_state = ctx.skill_runtime.state(code)
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail={
@@ -559,6 +579,21 @@ async def read_skill_resource(
 ) -> SkillResourceContent:
     root, index = await _resource_root(code, request, ctx)
     entry = next((item for item in index if item.get("path") == path and item.get("category") != "script"), None)
+    if path == "SKILL.md":
+        target = root / "SKILL.md"
+        if not target.is_file():
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Skill resource not found")
+        try:
+            content_hash = hashlib.sha256(target.read_bytes()).hexdigest()
+        except OSError as exc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Skill resource not found") from exc
+        entry = {
+            "path": "SKILL.md",
+            "category": "definition",
+            "mime": "text/markdown",
+            "readable": True,
+            "content_hash": content_hash,
+        }
     if entry is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Skill resource not found")
     target = (root / path).resolve()

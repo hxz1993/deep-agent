@@ -6,24 +6,26 @@ function databaseInfoValue(value) {
 function databaseInfoHtml(info) {
   const remote = info.connection_mode === "远程数据库";
   const rows = [
-    ["数据库结构", info.schema_version ? `V${String(info.schema_version).replace(/^0+/, "") || "0"}` : "—"],
-    ["数据库类型", info.database_type_label],
-    ["连接方式", info.connection_mode],
+    ["类型", info.database_type_label],
+    ["方式", info.connection_mode],
     ...(remote ? [["主机", info.host], ["端口", info.port]] : []),
-    [remote ? "数据库" : "数据库文件", info.database],
-    ["连接摘要", info.connection_summary],
-    ["认证信息", info.credentials_hidden ? "已隐藏" : "—"],
+    [remote ? "数据库" : "文件", info.database],
   ];
-  return `<div class="database-connection-card">
-    <div class="database-connection-badge">
-      <i data-lucide="database"></i>
-      <div><strong>${escapeHtml(databaseInfoValue(info.database_type_label))}</strong><span>${escapeHtml(databaseInfoValue(info.connection_mode))}</span></div>
-    </div>
-    <dl class="database-connection-grid">
-      ${rows.map(([label, value]) => `<dt>${escapeHtml(label)}</dt><dd>${escapeHtml(databaseInfoValue(value))}</dd>`).join("")}
+  return `<article class="database-connection-card">
+    <header class="database-connection-badge">
+      <span class="database-connection-icon"><i data-lucide="database"></i></span>
+      <div><strong>${escapeHtml(databaseInfoValue(info.database_type_label))}</strong><span>${escapeHtml(databaseInfoValue(info.connection_summary || info.connection_mode))}</span></div>
+      <span class="database-safe-badge"><i data-lucide="shield-check"></i>${info.credentials_hidden ? "凭证已隐藏" : "只读摘要"}</span>
+    </header>
+    <dl class="database-connection-facts">
+      ${rows.map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(databaseInfoValue(value))}</dd></div>`).join("")}
     </dl>
-    <p class="database-connection-note">该页面展示进程启动时生效的连接摘要。修改数据库环境变量后需要重启 DeepAgent。</p>
-  </div>`;
+  </article>`;
+}
+
+function schemaBadgeText(info) {
+  if (!info?.schema_version) return "V—";
+  return `V${String(info.schema_version).replace(/^0+/, "") || "0"}`;
 }
 
 const databaseConnectionAdmin = {
@@ -37,6 +39,8 @@ const databaseConnectionAdmin = {
     try {
       const info = await apiFetch("/api/v1/database-info");
       target.innerHTML = databaseInfoHtml(info || {});
+      const schemaBadge = document.getElementById("databaseSchemaBadge");
+      if (schemaBadge) schemaBadge.textContent = schemaBadgeText(info);
       window.lucide?.createIcons();
     } catch (error) {
       target.innerHTML = `<div class="global-settings-state error">
@@ -50,7 +54,7 @@ const databaseConnectionAdmin = {
 };
 
 window.databaseConnectionAdmin = databaseConnectionAdmin;
-window.__DatabaseConnectionUI = { databaseInfoHtml, databaseInfoValue };
+window.__DatabaseConnectionUI = { databaseInfoHtml, databaseInfoValue, schemaBadgeText };
 
 document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("refreshDatabaseConnectionBtn")?.addEventListener("click", () => {

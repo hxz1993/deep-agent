@@ -18,7 +18,7 @@ from deep_agent.db.models import SkillPackage
 from deep_agent.db.stores.bundle import DataStores
 from deep_agent.skills.catalog import BUILTIN_SKILLS_ROOT, SkillDescriptor, get_builtin_skill
 from deep_agent.skills.package import ParsedSkillPackage, SkillPackageError, parse_skill_zip
-from deepfos_platform.client.platform import PlatformAPI
+from deep_agent.files.storage import FileStore, PlatformFileStore
 from deepfos_platform.lib.constants import INTERNAL_TOKEN_HEADER
 from deepfos_platform.options import OPTION as PLATFORM_OPTION
 
@@ -33,7 +33,6 @@ RUNTIME_READY = "ready"
 RUNTIME_MISSING = "missing"
 RUNTIME_SYNCING = "syncing"
 RUNTIME_ERROR = "error"
-RUNTIME_DISABLED = "disabled"
 
 
 class SkillUnavailableError(ValueError):
@@ -60,7 +59,6 @@ class SkillRuntimeIssue:
 class ResolvedSkill:
     code: str
     source: str
-    enabled: bool
     package_root: Path
     library_root: Path
     resource_index: list[dict]
@@ -166,18 +164,22 @@ def _runtime_error_code(exc: BaseException) -> str:
 class SkillRuntimeLibrary:
     """One current, rebuildable Skill directory per uploaded Skill code."""
 
-    def __init__(self, root: Path | None = None) -> None:
+    def __init__(
+        self,
+        root: Path | None = None,
+        *,
+        file_store: FileStore | None = None,
+    ) -> None:
         self.root = (root or SKILL_RUNTIME_ROOT).resolve()
+        self.file_store = file_store or PlatformFileStore()
         self._states: dict[str, SkillRuntimeState] = {}
         self._locks: dict[str, asyncio.Lock] = {}
 
-    def state(self, code: str, *, enabled: bool = True) -> SkillRuntimeState:
-        if not enabled:
-            return SkillRuntimeState(code=code, status=RUNTIME_DISABLED)
+    def state(self, code: str) -> SkillRuntimeState:
         return self._states.get(code, SkillRuntimeState(code=code, status=RUNTIME_MISSING))
 
     def state_for(self, row: SkillPackage) -> SkillRuntimeState:
-        current = self.state(row.code, enabled=row.enabled)
+        current = self.state(row.code)
         if (
             current.status == RUNTIME_READY
             and (
@@ -225,7 +227,6 @@ class SkillRuntimeLibrary:
         return ResolvedSkill(
             code=row.code,
             source="upload",
-            enabled=row.enabled,
             package_root=self._destination(row.code),
             library_root=self.root,
             resource_index=_row_resource_index(row),
@@ -236,9 +237,11 @@ class SkillRuntimeLibrary:
         row: SkillPackage,
         request_headers: Mapping[str, str],
     ) -> bytes:
-        api = PlatformAPI(header=dict(request_headers))
         async with asyncio.timeout(SKILL_DOWNLOAD_TIMEOUT_SECONDS):
-            payload = await api.file.download(row.platform_file_id)
+            payload = await self.file_store.download(
+                row.platform_file_id,
+                request_headers,
+            )
         if not isinstance(payload, (bytes, bytearray)):
             raise SkillUnavailableError(
                 f"Platform file for Skill {row.code!r} did not return bytes"
@@ -314,10 +317,6 @@ class SkillRuntimeLibrary:
         payload: bytes | None = None,
         force: bool = False,
     ) -> SkillRuntimeState:
-        if not row.enabled:
-            await self.remove(row.code, status=RUNTIME_DISABLED)
-            return self.state(row.code, enabled=False)
-
         async with self._lock(row.code):
             if not force and self._ready_from_disk(row):
                 previous = self._states.get(row.code)
@@ -396,12 +395,6 @@ class SkillRuntimeLibrary:
         *,
         request_headers: Mapping[str, str],
     ) -> ResolvedSkill | None:
-        if not row.enabled:
-            self._states[row.code] = SkillRuntimeState(
-                code=row.code,
-                status=RUNTIME_DISABLED,
-            )
-            return None
         current = self.state_for(row)
         if current.status == RUNTIME_READY and (
             self._destination(row.code) / "SKILL.md"
@@ -433,7 +426,7 @@ class SkillRuntimeLibrary:
     async def reconcile(self, stores: DataStores) -> None:
         rows = await stores.skill_package.list_all()
         by_code = {row.code: row for row in rows}
-        enabled = {row.code for row in rows if row.enabled}
+        configured = set(by_code)
         self.root.mkdir(parents=True, exist_ok=True)
 
         for item in self.root.iterdir():
@@ -441,16 +434,11 @@ class SkillRuntimeLibrary:
                 if "TMP_to_delete" in item.name:
                     shutil.rmtree(item, ignore_errors=True)
                 continue
-            if item.is_dir() and item.name not in enabled:
+            if item.is_dir() and item.name not in configured:
                 shutil.rmtree(item, ignore_errors=True)
 
         for row in rows:
-            if not row.enabled:
-                self._states[row.code] = SkillRuntimeState(
-                    code=row.code,
-                    status=RUNTIME_DISABLED,
-                )
-            elif self._ready_from_disk(row):
+            if self._ready_from_disk(row):
                 self._states[row.code] = SkillRuntimeState(
                     code=row.code,
                     status=RUNTIME_READY,
@@ -472,7 +460,7 @@ class SkillRuntimeLibrary:
 
         pending = [
             sync_one(by_code[code])
-            for code in sorted(enabled)
+            for code in sorted(configured)
             if not self._ready_from_disk(by_code[code])
         ]
         if not pending:
@@ -482,7 +470,7 @@ class SkillRuntimeLibrary:
                 await asyncio.gather(*pending)
         except TimeoutError:
             logger.warning("Skill startup sync timed out pending_count={}", len(pending))
-            for code in enabled:
+            for code in configured:
                 if self.state(code).status == RUNTIME_SYNCING:
                     self._states[code] = SkillRuntimeState(
                         code=code,
@@ -495,7 +483,6 @@ def _resolved_builtin(item: SkillDescriptor) -> ResolvedSkill:
     return ResolvedSkill(
         code=item.code,
         source="builtin",
-        enabled=True,
         package_root=item.package_root,
         library_root=BUILTIN_SKILLS_ROOT,
         resource_index=[dict(entry) for entry in item.resource_index],
@@ -514,7 +501,7 @@ async def validate_skill_codes(stores: DataStores, codes: list[str]) -> list[str
         if builtin is not None:
             continue
         row = await stores.skill_package.get_by_code(code)
-        if row is None or not row.enabled:
+        if row is None:
             invalid.append(code)
     return invalid
 
@@ -542,9 +529,6 @@ async def resolve_skills_for_run(
         row = await stores.skill_package.get_by_code(code)
         if row is None:
             unavailable.append(SkillRuntimeIssue(code=code, reason="unknown"))
-            continue
-        if not row.enabled:
-            unavailable.append(SkillRuntimeIssue(code=code, reason="disabled"))
             continue
         resolved = await runtime.resolve(row, request_headers=request_headers)
         if resolved is None:

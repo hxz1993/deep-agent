@@ -10,12 +10,12 @@ from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.headers import extract_forward_headers
 from deep_agent.agent.history import has_unprocessed_tool_calls
 from deep_agent.agent.run_identity import conversation_id_for, new_run_id
-from deep_agent.api.v1.deps import build_runner, build_runner_for_agent
+from deep_agent.api.v1.deps import build_runner_for_agent
 from deep_agent.api.v1.request_identity import RequestUserDep
 from deep_agent.core.context import AppContextDep
 from deep_agent.core.exceptions import AgentNotFoundError, LlmModelNotFoundError
 from deep_agent.db.ids import normalize_agent_id
-from deep_agent.db.session_scope import agent_scope_to_api, resolve_session
+from deep_agent.db.session_scope import resolve_session
 
 router = APIRouter()
 
@@ -52,31 +52,16 @@ async def compact_session_context(
     if resolved is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
     scope, resolved_session_id = resolved
-    api_agent_id = normalized_agent_id or agent_scope_to_api(scope)
-    if api_agent_id is None and body.model_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail={
-                "code": "model_required",
-                "message": "model_id is required when agent_id is not provided.",
-            },
-        )
+    api_agent_id = normalized_agent_id or scope
 
     request_headers = extract_forward_headers(request)
     try:
-        if api_agent_id is not None:
-            runner = await build_runner_for_agent(
-                ctx,
-                api_agent_id,
-                model_id=body.model_id,
-                request_headers=request_headers,
-            )
-        else:
-            runner = await build_runner(
-                ctx,
-                model_id=body.model_id,
-                request_headers=request_headers,
-            )
+        runner = await build_runner_for_agent(
+            ctx,
+            api_agent_id,
+            model_id=body.model_id,
+            request_headers=request_headers,
+        )
     except (AgentNotFoundError, LlmModelNotFoundError) as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
@@ -108,6 +93,9 @@ async def compact_session_context(
         conversation_id=conversation_id_for(api_agent_id, resolved_session_id),
         run_id=new_run_id(),
         request_headers=request_headers,
+        file_store=ctx.file_store,
+        app_id=request_headers.get("app"),
+        space_id=request_headers.get("space"),
     )
 
     async def event_generator():

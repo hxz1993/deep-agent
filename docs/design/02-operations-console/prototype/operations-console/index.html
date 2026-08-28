@@ -643,7 +643,7 @@
           </div>
           <div class="inspector-body" id="inspector-session">
             <dl class="context-grid"><dt>会话 ID</dt><dd class="mono">b7ac91135c36...</dd><dt>Agent</dt><dd>DeepCube 助手</dd><dt>主模型</dt><dd>Qwen3-235B</dd><dt>状态</dt><dd><span class="badge warning">等待用户</span></dd><dt>附件</dt><dd>1 个</dd><dt>Token</dt><dd>1,832 / 416</dd></dl>
-            <div class="inspect-section"><h4>会话操作</h4><div class="inline-actions"><button class="btn small"><i data-lucide="pencil" class="icon icon-sm"></i>重命名</button><button class="btn small"><i data-lucide="sparkles" class="icon icon-sm"></i>自动标题</button><button class="btn small danger"><i data-lucide="trash-2" class="icon icon-sm"></i>删除</button></div></div>
+            <div class="inspect-section"><h4>会话操作</h4><div class="inline-actions"><button class="btn small"><i data-lucide="pencil" class="icon icon-sm"></i>重命名</button><button class="btn small danger"><i data-lucide="trash-2" class="icon icon-sm"></i>删除</button></div></div>
             <div class="inspect-section"><h4>启用能力</h4><div class="cap-list"><span class="badge">MCP</span><span class="badge">HITL</span><span class="badge">附件</span><span class="badge">会话历史</span><span class="badge">多模态</span></div></div>
           </div>
           <div class="inspector-body hidden" id="inspector-context">
@@ -661,7 +661,6 @@
               <h4>当前 Agent</h4>
               <div class="relation-list">
                 <div class="relation-item"><div class="relation-icon"><i data-lucide="bot" class="icon"></i></div><div class="relation-copy"><strong>DeepCube 助手</strong><span>主模型 Qwen3-235B</span></div></div>
-                <div class="relation-item"><div class="relation-icon"><i data-lucide="brain" class="icon"></i></div><div class="relation-copy"><strong>辅助模型 DeepSeek-R1</strong><span>用于工具参数推理</span></div></div>
               </div>
             </div>
             <div class="inspect-section"><h4>启用能力</h4><div class="cap-list"><span class="badge">MCP</span><span class="badge">HITL</span><span class="badge">附件</span><span class="badge">会话历史</span></div></div>
@@ -688,7 +687,6 @@
           <button class="resource-btn" data-resource="models"><i data-lucide="cpu" class="icon"></i>模型<span class="resource-count">8</span></button>
           <button class="resource-btn" data-resource="mcps"><i data-lucide="plug-zap" class="icon"></i>MCP 服务<span class="resource-count">4</span></button>
           <button class="resource-btn" data-resource="ui-tools"><i data-lucide="panel-top" class="icon"></i>UI 工具<span class="resource-count">7</span></button>
-          <button class="resource-btn" data-resource="aux"><i data-lucide="brain-circuit" class="icon"></i>辅助模型<span class="resource-count">3</span></button>
           <div class="nav-group-label">模型资源</div>
           <button class="resource-btn" data-resource="catalog"><i data-lucide="library" class="icon"></i>模型目录<span class="resource-count">24</span></button>
         </div>
@@ -948,14 +946,6 @@
           ['chart_preview', 'ui_chart', 'Chart', '图表预览', '已停用', '07-10']
         ]
       },
-      aux: {
-        label: '辅助模型', create: '新建辅助模型', placeholder: '搜索辅助模型',
-        rows: [
-          ['工具参数推理', 'aux_tool_args', 'DeepSeek-R1', 'tool args · retry', '已启用', '今天'],
-          ['会话标题生成', 'aux_title', 'Qwen3-32B', 'session title', '已启用', '昨天'],
-          ['附件内容识别', 'aux_attachment', 'Qwen-VL-Max', 'multimodal', '已启用', '07-14']
-        ]
-      }
     };
 
     function refreshIcons() {
@@ -1170,7 +1160,6 @@
       if (key === 'mcps') return `<div class="form-group"><label class="form-label">名称</label><input class="input" value="${row[0]}"></div><div class="form-group"><label class="form-label">传输方式</label><select class="select"><option>Streamable HTTP</option><option>Built-in</option></select><div class="form-help">历史 stdio 只做迁移展示，新配置不再提供。</div></div><div class="form-group"><label class="form-label">URL</label><input class="input mono" value="https://mcp.deepfos.com/mcp"></div><div class="form-group"><label class="form-label">静态 Header</label><textarea class="textarea mono">{"x-mcp-token":"••••"}</textarea><div class="form-help">用户请求 Header 在运行时覆盖同名静态值。</div></div>${commonFooter}`;
       if (key === 'ui-tools') return `<div class="form-group"><label class="form-label">工具名</label><input class="input mono" value="${row[0]}"></div><div class="form-group"><label class="form-label">Widget</label><input class="input mono" value="StructuredInteractionBlock"></div><div class="form-group"><label class="form-label">参数 Schema</label><textarea class="textarea mono" style="min-height:150px">{"type":"object","required":["title","fields"],"properties":{"fields":{"type":"array"}}}</textarea></div><div class="switch-row"><div><strong>失败时返回模型重试</strong><div class="form-help">非法中间调用不会泄露到 UI 和历史</div></div><div class="switch on"></div></div>${commonFooter}`;
       if (key === 'models') return `<div class="form-group"><label class="form-label">配置名称</label><input class="input" value="${row[0]}"></div><div class="form-group"><label class="form-label">模型 / Base URL</label><input class="input mono" value="${row[1]}"><input class="input mono" style="margin-top:7px" value="https://api.example.com/v1"></div><div class="form-group"><label class="form-label">API Key</label><input class="input mono" type="password" value="MODEL_KEY_MASKED"></div><div class="form-group"><label class="form-label">输入模态</label><div class="segmented"><button class="active">自动识别</button><button>手工指定</button></div></div>${commonFooter}`;
-      if (key === 'aux') return `<div class="form-group"><label class="form-label">使用场景</label><input class="input" value="${row[0]}"></div><div class="form-group"><label class="form-label">模型策略</label><select class="select"><option>指定模型：${row[2]}</option><option>自动选择</option></select></div><div class="switch-row"><div><strong>启用映射</strong><div class="form-help">按使用场景为 Agent 提供辅助模型</div></div><div class="switch on"></div></div>${commonFooter}`;
       return `<div class="form-group"><label class="form-label">名称</label><input class="input" value="${row[0]}"></div><div class="form-group"><label class="form-label">说明</label><textarea class="textarea">面向财务模型查询、成员解析、DeepCube 脚本生成和调试。</textarea></div><div class="form-group"><label class="form-label">主模型</label><select class="select"><option>${row[2]}</option><option>DeepSeek-V3</option></select></div><div class="form-group"><label class="form-label">温度 / 最大请求数</label><div style="display:grid;grid-template-columns:1fr 1fr;gap:7px"><input class="input" value="0.2"><input class="input" value="10"></div></div><div class="switch-row"><div><strong>启用 Agent</strong><div class="form-help">停用后不再出现在测试工作台</div></div><div class="switch on"></div></div>${commonFooter}`;
     }
     function wireDynamicControls() {

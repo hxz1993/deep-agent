@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from deep_agent.capabilities.ui.builtin import builtin_ui_records
+from deep_agent.api.v1.admin import CONSOLE_ADMIN_DEPENDENCIES
 from deep_agent.capabilities.ui.types import UIToolRecord
 from deep_agent.db.deps import get_agent_store, get_ui_tool_package_store, get_ui_tool_store
 from deep_agent.db.stores.agent import AgentStoreBase
@@ -10,32 +11,24 @@ from deep_agent.db.stores.ui_tool import UiToolStoreBase
 from deep_agent.db.stores.ui_tool_package import UiToolPackageStoreBase
 from deep_agent.schemas.ui_tools import UiToolCreate, UiToolListResponse, UiToolResponse, UiToolUpdate
 
-router = APIRouter()
+router = APIRouter(dependencies=CONSOLE_ADMIN_DEPENDENCIES)
 _BUILTIN_RECORDS = {record.name: record for record in builtin_ui_records()}
 _BUILTIN_NAMES = set(_BUILTIN_RECORDS)
-
-
-def _include_builtins(*, source: str | None, enabled: bool | None) -> bool:
-    return source in {None, "builtin"} and enabled is not False
 
 
 @router.get("/ui-tools", response_model=UiToolListResponse)
 async def list_ui_tools(
     store: UiToolStoreBase = Depends(get_ui_tool_store),
     source: str | None = Query(default=None),
-    enabled: bool | None = Query(default=None),
 ) -> UiToolListResponse:
-    rows = await store.list_all(
-        source=source,
-        enabled=enabled,
-    )
+    rows = await store.list_all(source=source)
 
     rows = [
         row
         for row in rows
         if row.source != "builtin" and row.name not in _BUILTIN_NAMES
     ]
-    builtins = builtin_ui_records() if _include_builtins(source=source, enabled=enabled) else []
+    builtins = builtin_ui_records() if source in {None, "builtin"} else []
 
     items: list[UiToolResponse] = []
     for record in builtins:

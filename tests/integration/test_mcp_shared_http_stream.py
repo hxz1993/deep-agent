@@ -20,7 +20,10 @@ from deep_agent.capabilities.mcp.lease_manager import McpLeaseManager
 from deep_agent.core.context import AppContext, get_context, init_context, reset_context
 from deep_agent.options import OPTION
 from tests.helpers.request_identity import install_test_user_header
-from tests.helpers.sqlite_stores import ensure_title_uses_main_model, make_sqlite_stores
+from tests.helpers.sqlite_stores import (
+    make_sqlite_stores,
+    seed_default_agent,
+)
 from tests.helpers.builtin_mcp_fixture import use_test_builtin_mcp
 
 
@@ -82,7 +85,7 @@ class McpSharedHttpStreamTests(unittest.IsolatedAsyncioTestCase):
         registry = McpSharedRegistry(runtime_dir=Path(self._tmpdir.name))
         manager = McpLeaseManager(shared_registry=registry)
         stores, engine, session_factory = await make_sqlite_stores()
-        await ensure_title_uses_main_model(stores)
+        agent_id = await seed_default_agent(stores, name="shared-mcp-agent")
         init_context(
             AppContext.for_testing(
                 registry=build_registry(),
@@ -107,7 +110,7 @@ class McpSharedHttpStreamTests(unittest.IsolatedAsyncioTestCase):
             from tests.integration.helpers.chat import mock_request_disconnect
 
             self._no_title = patch(
-                "deep_agent.agent.runner.AgentRunner._maybe_generate_title",
+                "deep_agent.agent.runner.AgentRunner._generate_model_title",
                 new_callable=AsyncMock,
             )
             self._no_title.start()
@@ -118,6 +121,7 @@ class McpSharedHttpStreamTests(unittest.IsolatedAsyncioTestCase):
                         "POST",
                         "/api/v1/chat/stream",
                         json={
+                            "agent_id": agent_id,
                             "message": "reverse abc",
                             "capabilities": ["mcp:echo_fixture"],
                         },

@@ -45,7 +45,6 @@ async def _seed_manual_ui_tool(stores, *, name: str, metadata: dict) -> None:
                 "required": ["text"],
             },
             metadata=metadata,
-            enabled=True,
         )
     )
 
@@ -55,7 +54,7 @@ async def ui_tool_stream_app(
     *,
     tool_name: str,
     metadata: dict,
-) -> AsyncIterator[tuple[ASGITransport, TestModel]]:
+) -> AsyncIterator[tuple[ASGITransport, TestModel, str]]:
     """AsyncClient transport for /chat/stream; TestClient.stream blocks indefinitely."""
     stores, engine, session_factory = await _testing_data_stores_async(mcp_rows=[])
     await _seed_manual_ui_tool(stores, name=tool_name, metadata=metadata)
@@ -73,7 +72,7 @@ async def ui_tool_stream_app(
     test_model = TestModel(call_tools=[tool_name], custom_output_text="done")
     transport = ASGITransport(app=app)
     try:
-        yield transport, test_model
+        yield transport, test_model, app.state.test_agent_id
     finally:
         await aclose_test_context(engine=engine)
 
@@ -85,7 +84,11 @@ class ChatUiToolMetadataStreamTests(unittest.IsolatedAsyncioTestCase):
         tool_name = "myapp__collect_note"
         metadata = {"form_version": "1", "icon": "calendar"}
 
-        async with ui_tool_stream_app(tool_name=tool_name, metadata=metadata) as (transport, test_model):
+        async with ui_tool_stream_app(tool_name=tool_name, metadata=metadata) as (
+            transport,
+            test_model,
+            agent_id,
+        ):
             with patch("deep_agent.agent.factory._resolve_model", return_value=test_model):
                 with mock_request_disconnect():
                     async with AsyncClient(
@@ -97,6 +100,7 @@ class ChatUiToolMetadataStreamTests(unittest.IsolatedAsyncioTestCase):
                             "POST",
                             "/api/v1/chat/stream",
                             json={
+                                "agent_id": agent_id,
                                 "message": "请用户填写备注",
                                 "capabilities": ["ui:myapp"],
                             },

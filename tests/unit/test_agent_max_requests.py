@@ -24,6 +24,7 @@ from deep_agent.schemas.agent import (
     AgentResponse,
     AgentUpdate,
 )
+from tests.helpers.admin_auth import allow_console_admin
 from tests.helpers.sqlite_stores import make_sqlite_stores_sync
 
 
@@ -84,6 +85,7 @@ class AgentRequestLimitApiTests(unittest.TestCase):
         )
         app = FastAPI()
         app.include_router(api_router)
+        allow_console_admin(app)
         self.client = TestClient(app)
         self.model_id = asyncio.run(self.stores.llm_model.list_all())[0].id
 

@@ -4,7 +4,6 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from deep_agent.db.dialect import DbDialect
 from deep_agent.db.stores.llm_model.base import (
-    LlmModelConflictError,
     LlmModelStoreBase,
     LlmModelValidationError,
 )
@@ -13,7 +12,6 @@ from deep_agent.db.stores.llm_model.postgres import PostgresLlmModelStore
 from deep_agent.db.stores.llm_model.sqlite import SqliteLlmModelStore
 
 __all__ = [
-    "LlmModelConflictError",
     "LlmModelStoreBase",
     "LlmModelValidationError",
     "create_llm_model_store",

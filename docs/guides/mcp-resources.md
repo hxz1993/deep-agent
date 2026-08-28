@@ -4,7 +4,7 @@ DeepAgent 使用 Pydantic AI `MCPToolset` 的 Resource API，向模型提供受�
 
 ## 检测并更新
 
-创建或修改启用状态的 URL MCP 时，DeepAgent 使用本次配置请求的上下文 Header 连接 MCP，并依次执行：
+创建或检测 URL MCP 时，DeepAgent 使用本次配置请求的上下文 Header 连接 MCP，并依次执行：
 
 ```text
 initialize
@@ -54,12 +54,12 @@ Content-Type: application/json
 
 名称同时决定 Agent 工具包编码 `mcp:<name>`、后续模型工具前缀 `<name>_` 和 Resource
 Server 名称。后端会在一个事务内更新 MCP 名称和所有 Agent 引用，失败时整体回滚。URL、
-Header、启用状态及检测快照保持不变，因此无需重启或重新检测。Builtin 和历史 stdio MCP
-不可重命名；历史 Tool Call/Result、Checkpoint 与正在执行的 Run 也不会被改写。
+Header及检测快照保持不变，因此无需重启或重新检测。Builtin 和历史 stdio MCP
+不可重命名；历史Tool Call/Result Event、Compaction与正在执行的Run也不会被改写。
 
 ## 模型工具
 
-Agent 至少关联一个 `enabled=true`、整体检测状态为 `healthy/degraded` 且 Resource 状态为 `supported` 的 URL MCP 时，DeepAgent 才动态加入三个宿主代理工具：
+Agent 至少关联一个整体检测状态为 `healthy/degraded` 且 Resource 状态为 `supported` 的 URL MCP 时，DeepAgent 才动态加入三个宿主代理工具：
 
 ```text
 list_mcp_resources(server_name)
@@ -78,6 +78,12 @@ read_mcp_resource(server_name, uri)
 - 运行时权限、网络或协议失败会作为工具错误反馈给模型。
 - 普通 MCP 初始化或连接失败会转换为脱敏 `ToolFailed`；模型可以改用其他工具或解释暂时不可用，
   不会让未使用该 MCP 的普通聊天也失败。Run 取消信号不转换为工具错误。
+- MCP SDK或Pydantic AI可能把请求超时先包装成`ModelRetry`。DeepAgent只在异常链能确认请求超时、
+  连接中断或5xx不可用时重新分类为`ToolFailed`；参数、对象选择和普通业务校验错误仍允许模型修正。
+- Go MCP工具通过`CallToolResult.isError`返回的`context deadline exceeded`同样属于不可通过修改参数
+  修正的请求超时。若服务返回`CANVAS_ERROR {json}`，DeepAgent只在其中明确
+  `retryable=false`时终止框架自动重试；`outcome=unknown`会要求模型先读取Canvas快照，避免重复写入。
+  用户主动取消仍保持正式`cancelled`，不会被转换为工具失败。
 - 检测错误只保存阶段和异常类型，不保存 Token、Cookie、Header、URL 查询参数或服务返回的敏感正文。
 - 文本 Resource 最大允许 `256 KiB`；超限时要求读取更窄的 URI。
 - 二进制 Resource 只返回媒体类型和大小，不把原始字节放入模型上下文。

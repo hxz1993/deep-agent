@@ -2,7 +2,7 @@
 
 > 最后核验：2026-08-03
 >
-> 当前运行基线：`pydantic-ai-slim 2.31.0` + `pydantic-ai-harness 0.21.0`
+> 当前运行基线：`pydantic-ai-slim 2.35.1` + `pydantic-ai-harness 0.26.0`
 >
 > 状态：v0.3.17 已选择性接入 Tool Return Schema；Native Tool、Output Tool 和其他 Harness 能力仍按本文边界评估
 
@@ -23,7 +23,7 @@ DeepAgent 已经使用了 Pydantic AI 最核心的三种工具执行方式：
 - 前端表单操作继续使用 `ExternalToolset + DeferredToolRequests/Results`。
 - 结构化最终输出使用 `ToolOutput` 或 `NativeOutput`，不依赖提示词约定 JSON。
 - Provider Code Execution 作为模型可选能力接入，不作为所有模型默认工具。
-- Harness 0.21 已用于上下文压缩和大工具结果治理；v0.4.0使用公开的
+- Harness 0.26 已用于大工具结果治理；DeepAgent上下文压缩仍使用自有Event生命周期和结构化摘要，v0.4.0使用公开的
   `ToolOutputLimits` + `Spill`，不再引用旧 `OverflowingToolOutput`方案。
 - Harness 不替代 SQL 会话、SSE、配置中心、HITL 和前端执行器。
 
@@ -61,10 +61,10 @@ SSE 协议。
 | --- | --- | --- |
 | `Skills` 渐进披露 | 是，优先 | 作为 `SKILL.md` Instructions 延迟加载基础；安装、权限、References、Assets、scripts 仍由 DeepAgent 负责 |
 | Tool Guardrail / Guard Chain | 是，依赖前置 | 待工具风险元数据统一后用于参数、结果、审批和敏感信息治理，不先堆零散规则 |
-| Compaction receipts、`pin`、`keep_user_messages` | 部分吸收 | 用于补充观测和回归思路；不替换当前单次摘要、完整 SQL 历史和 Checkpoint |
+| Compaction receipts、`pin`、`keep_user_messages` | 部分吸收 | 用于观测和边界思路；当前以单条Compaction Event、完整原始Event和结构化摘要为准 |
 | Spend Limits | 是，中期 | 适合请求级成本保护；先与现有 `UsageLimits`、全局请求上限和错误协议统一 |
 | 大文本外置 / Tool Output Limits | 已采用 | v0.4.0 使用平台文件 Store 完成会话内 Spill；TTL、孤儿治理和通用 Artifact 平台不作为前置条件 |
-| ConversationSearch | 暂缓 | 当前没有真实摘要缺失样本，中文历史检索质量也未验证；仅在长程任务确实无法找回关键事实时，才用自定义 `HistorySource` 读取现有 SQL `chat_messages`，不启用第二套 StepPersistence |
+| ConversationSearch | 已采用产品化子集 | v0.6.0提供`search_conversation_history/read_conversation_event`，从现有Event Store做权限内中英文检索，不启用第二套StepPersistence |
 | StepPersistence | 暂不做 | 现有 SQL 会话是事实源；除非出现崩溃恢复或子 Agent 持久化需求，否则会形成第二套历史 |
 | Planning | 已采用 | v0.4.6启用Harness单轮计划，v0.4.7收口Console悬浮面板；不扩展为跨Run任务引擎 |
 | Advisor / SubAgent | 按业务需求 | 只有专业分工形成明确产品场景后再启用 |
@@ -205,7 +205,7 @@ sequenceDiagram
 
 Provider Native Tool 由模型 Provider 执行，不在 DeepAgent Pod 中运行。
 
-当前 Pydantic AI 2.31.0 暴露的原生工具定义包括：
+当前 Pydantic AI 2.35.1 暴露的原生工具定义包括：
 
 - `WebSearchTool`
 - `WebFetchTool`
@@ -329,16 +329,16 @@ DeepAgent 原有自研 `Capability` 只是产品配置包装，却与 Pydantic A
 产品层把代码随 DeepAgent 发布、无需管理员注册的可配置后端 Function Tool 归入
 “内置工具”，与 MCP 服务同级展示。v0.3.23 保留两个 Tool Package：
 
-| 前端名称 | Tool Package 编码 | 默认状态 | 工具 |
-| --- | --- | --- | --- |
-| 通用工具 | `builtin:general` | 默认启用 | `get_current_time` |
-| Python 沙箱 | `builtin:sandbox` | 默认关闭 | `execute_python`、条件式 `execute_skill_script` |
+| 前端名称 | Tool Package 编码 | 工具 |
+| --- | --- | --- |
+| 通用工具 | `builtin:general` | `get_current_time` |
+| Python 沙箱 | `builtin:sandbox` | `execute_python`、条件式 `execute_skill_script` |
 
 两包中的后端函数对模型都表现为 `FunctionToolset`。配置中心只读展示工具包及工具明细，
-实际启用仍由 `agents.capabilities` 中的工具包编码决定；本轮不提供包内逐工具开关。
+实际装配只由 `agents.capabilities` 中显式关联的工具包编码决定；目录层没有默认状态或包内逐工具开关。
 `execute_python` 的工具定义位于 DeepAgent 进程，实际代码通过可替换的
 `PythonExecutionBackend` 执行；这不改变它的 Function Tool 类型。Skill脚本复用同一Backend，
-在Agent启用Sandbox且选择含脚本Skill时动态追加，不扩大包级授权。
+在Agent关联Sandbox且选择含脚本Skill时动态追加，不扩大包级授权。
 
 0.2.3 删除了原来 Native 中的 `http_get`。该工具没有目标域名白名单、私网地址保护和
 请求审计，不适合作为所有 Agent 默认获得的通用网络能力；需要联网时应接入边界明确、
@@ -452,8 +452,10 @@ DeepAgent 当前没有正式启用：
 - Core 通用 `PrepareTools`
 - Pydantic AI 原生执行审批
 
-`pydantic-ai-harness 0.21.0` 已用于上下文压缩和工具结果治理，但Memory、StepPersistence、
-SubAgent 和其他 Harness 能力尚未启用，不能把“已安装 Harness”理解成这些能力已经开放。
+`pydantic-ai-harness 0.26.0` 已用于Planning、Skills和工具结果治理，但Memory、StepPersistence、
+Memory、StepPersistence、SubAgent 和其他未被本文明确采用的 Harness 能力尚未启用，不能把
+“已安装 Harness”理解成所有能力都已经开放。CodeMode 自 v0.6.2 起仅以显式
+`builtin:code-mode`、已授权 MCP 和受限 Monty 边界开放。
 
 当前主对话输出仍为：
 
@@ -693,7 +695,7 @@ FunctionToolset(execute_python)
 ```
 
 v0.3.22 同一Backend内部增加Skill脚本模式：宿主只复制已授权脚本、JSON inputs和同Skill资源，
-固定读取 `outputs/result.json`。Agent选择含脚本Skill并启用 `builtin:sandbox`时，模型可直接调用
+固定读取 `outputs/result.json`。Agent选择含脚本Skill并关联 `builtin:sandbox`时，模型可直接调用
 `execute_skill_script`。
 
 该能力不是 MCP，也不依赖 Provider Native Tool。当前已落地无状态执行、独立解释器、超时、
@@ -735,9 +737,9 @@ v0.3.22 同一Backend内部增加Skill脚本模式：宿主只复制已授权脚
 
 工具权限必须由可信 `AgentDeps` 决定，不允许模型在参数中自选权限 Scope。
 
-文件工具是已落地的请求级准备场景：当前请求或原始 `chat_messages` 存在合法附件，或者 Agent
+文件工具是已落地的请求级准备场景：当前请求或原始`user/message`Event存在合法附件，或者Agent
 选择了可读且运行目录就绪的 Skill资源时，才注入统一系统工具 `read_file`；没有任何文件来源时
-不注入。附件归属不能从 Checkpoint推断，Skill路径必须命中已授权资源索引。该优化只减少无效
+不注入。附件归属不能从摘要Evidence推断，Skill路径必须命中已授权资源索引。该优化只减少无效
 Schema和误调用，实际读取仍需复检用户、会话、`file_id`、Skill选择和路径权限。
 
 ### 8.2 ToolSearch
@@ -775,7 +777,7 @@ Tool Search 解决的是“工具太多导致发现困难和 Schema 占用”，
 
 v0.3.12 已复用 Pydantic AI Deferred Loading / ToolSearch 状态机；v0.4.1 将具体检索实现收敛到
 DeepAgent独立的 `lexical_v2` 字段化词法内核。它优先匹配协议名、标准 `title`和参数名，再对描述
-做BM25，低置信结果才进入拼音或受限错字回退。已授权 MCP候选超过5个时首轮预选最多Top 3，
+做BM25，低置信结果才进入拼音或受限错字回退。已授权 MCP候选超过10个时首轮预选最多Top 3，
 模型主动搜索最多返回Top 5；本轮不部署Embedding，也不通过硬编码词典伪装跨语言语义。后续只有
 真实召回数据证明词法方案不足时才评估多语言Embedding。
 
@@ -851,6 +853,7 @@ v0.4.0 已直接采用Harness 0.18公开的 `ToolOutputLimits`。它在工具执
   → 统一Token估算
   → 小于阈值：保持原结果
   → 超过阈值：Harness Spill
+      → 结构化顶层数组确定性序列化为JSON Lines，其他对象序列化为缩进JSON
       → 完整UTF-8结果上传DeepFOS平台文件服务
       → 平台File ID作为artifact_id / overflow handle
       → Tool Return只保留首尾预览、结构草图和读取说明
@@ -869,13 +872,16 @@ threshold = clamp(available_input × 20%, 4K, 24K Token)
 第一版只解决安全兜底，不把它扩成通用文件或Artifact平台：
 
 - Store仅适配现有平台文件服务，不使用Harness默认本地文件Store。
+- 使用Harness原生`json_lines` Serializer：顶层Sequence在Artifact中每项一行，
+  `read_tool_result(offset, limit, pattern)`可按记录分页并返回整条命中记录；顶层Mapping继续保留
+  完整嵌套结构并使用缩进JSON，不猜测`rows/data/items`等业务字段。未达到Spill阈值的
+  结构化结果仍保持原对象，不会被提前转成文本。
 - 平台File ID同时就是会话内 `artifact_id`，不增加Artifact表和第二层ID映射。
-- 句柄权限只从当前Session完整原始 `chat_messages`中的Tool Return metadata恢复；模型猜测、其他会话
-  和经过脱敏的Checkpoint均不能增加权限。
-- 同一Run首次读取后复用内存缓存，并发读取使用single-flight；下一Run重新按原始History授权和下载。
+- 句柄权限只从当前Session完整原始Tool Result Event恢复；模型猜测、其他会话和摘要Evidence均不能增加权限。
+- 同一Run首次读取后复用内存缓存，并发读取使用single-flight；下一Run重新按原始Event授权和下载。
 - `read_file`、`read_tool_result`、`load_capability`和Tool Search排除在治理外，防止读取结果再次外置。
-- 上传失败时回退到最多8K字符的有损截断，保证Run仍可继续；不伪造外置成功。
-- SSE和History只附加脱敏的 `artifacts`元数据；日志仅记录数量、字节数、耗时/失败，不记录句柄、
+- Spill失败时Event保存完整`inline_fallback`并明确标记，模型只接收受限头尾投影；不伪造外置成功。
+- SSE和Event只附加脱敏的`artifacts`元数据；日志仅记录数量、字节数、耗时/失败，不记录句柄、
   工具参数、完整Schema、完整结果、Header或凭据。
 - Console提示“完整结果已外置”，当前只展示受限预览；不新增下载中心按钮。
 
@@ -938,7 +944,7 @@ unknown_after_crash
 
 只有出现大量写入型工具、长工作流或崩溃后重复执行风险时才值得接入。它不替代：
 
-- `chat_sessions/chat_messages`
+- `chat_sessions/chat_session_events`
 - EventPersister
 - Deferred Pending
 - 前端表单状态
@@ -946,14 +952,14 @@ unknown_after_crash
 
 ### 9.6 FileSystem、Shell 和 CodeMode
 
-这些能力面向 Coding Agent，不适合作为 DeepAgent 业务 Agent 默认能力。引入前必须先有：
+FileSystem 和 Shell 仍不是 DeepAgent 业务 Agent 能力。v0.6.2 只引入经过收口的
+Hybrid Code Mode：Agent 必须显式关联 `builtin:code-mode`，且 Monty 只能调用当前已授权、
+已披露 MCP 及 code-only `load_file_data`。MCP 原生 Schema 同时保留，所以单次调用不必编码。
 
-- 沙箱边界。
-- Authority 和审批模型。
-- 配额。
-- 允许目录和命令白名单。
-- 副作用账本。
-- 产物和临时文件清理。
+Code Mode 不提供宿主文件、网络、环境变量、Shell、pip 或第三方包，也不会包装
+Deferred/Approval、Planning、History、Sandbox、Resource 或导出工具。文件载荷使用 Run 内不透明
+Token，真实 Base64 只在 MCP 调用边界生成。详见
+[`../20-code-mode/`](../20-code-mode/README.md)。
 
 ## 10. 工具质量统一契约
 

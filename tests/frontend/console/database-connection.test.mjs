@@ -15,6 +15,10 @@ const templateHtml = await readFile(
   new URL("../../../frontend/console/configuration-template.html", import.meta.url),
   "utf8",
 );
+const styles = await readFile(
+  new URL("../../../frontend/console/configuration/configuration.css", import.meta.url),
+  "utf8",
+);
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -34,13 +38,14 @@ function loadUi() {
   return window.__DatabaseConnectionUI;
 }
 
-test("配置中心按 Agent 设置、系统设置和辅助资源分组", () => {
+test("配置中心按 Agent 设置、系统设置和外部资源分组", () => {
   const agentGroup = indexHtml.indexOf("Agent 设置");
   const systemGroup = indexHtml.indexOf("系统设置");
-  const resourceGroup = indexHtml.indexOf("辅助资源");
+  const resourceGroup = indexHtml.indexOf("外部资源");
   assert.ok(agentGroup >= 0 && agentGroup < systemGroup && systemGroup < resourceGroup);
   assert.ok(indexHtml.indexOf('data-tab="ui-tools"') < systemGroup);
-  assert.ok(systemGroup < indexHtml.indexOf('data-tab="auxiliary-models"'));
+  assert.ok(systemGroup < indexHtml.indexOf('data-tab="global-settings"'));
+  assert.doesNotMatch(indexHtml, /data-tab="auxiliary-models"|辅助模型|辅助工具/);
   assert.ok(indexHtml.indexOf('data-tab="database-connection"') < resourceGroup);
   assert.ok(resourceGroup < indexHtml.indexOf('data-tab="catalog"'));
   assert.doesNotMatch(indexHtml, />模型资源</);
@@ -65,11 +70,17 @@ test("数据库连接页是只读安全摘要", () => {
     credentials_hidden: true,
   });
   assert.match(html, /MySQL/);
-  assert.match(html, /V2/);
+  assert.equal(loadUi().schemaBadgeText({ schema_version: "002" }), "V2");
   assert.match(html, /test-db/);
   assert.match(html, /deep_agent/);
   assert.match(html, /已隐藏/);
+  assert.match(html, /database-connection-facts/);
+  assert.match(html, /database-safe-badge/);
+  assert.doesNotMatch(html, /当前连接|database-connection-note|数据库结构/);
   assert.doesNotMatch(html, /input|textarea|保存/);
+  assert.match(styles, /\.database-connection-card\s*\{[^}]*border-radius: 14px;[^}]*background: var\(--console-surface/);
+  assert.match(styles, /\.database-connection-facts\s*\{[^}]*display: flex;/);
+  assert.match(templateHtml, /id="databaseSchemaBadge"/);
 });
 
 test("数据库连接渲染会转义服务端字段", () => {

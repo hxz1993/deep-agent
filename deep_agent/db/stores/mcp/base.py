@@ -54,7 +54,6 @@ class McpServerStoreBase(SessionBoundMixin):
                 transport=data.transport,
                 config=data.config,
                 description=data.description,
-                enabled=data.enabled,
                 inspection=inspection,
             )
             db.add(row)
@@ -134,7 +133,7 @@ class McpServerStoreBase(SessionBoundMixin):
                 updated_agent_names: list[str] = []
                 for agent in agent_result.scalars().all():
                     capabilities = agent.capabilities
-                    if capabilities is None or old_capability not in capabilities:
+                    if old_capability not in capabilities:
                         continue
                     agent.capabilities = [
                         new_capability if capability == old_capability else capability

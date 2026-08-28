@@ -51,7 +51,7 @@ Deferred/Pending，浏览器提交结果，再恢复模型。后两类能力均�
 这种能力的核心不是“模拟点击”，而是调用页面已经拥有的业务 API。它可以直接访问准确的
 `sheet_id`、`range`、写入范围和组件状态，稳定性高于视觉自动化。
 
-### 2.2 Harness 0.21 `BrowserUse`
+### 2.2 Harness 0.26 `BrowserUse`
 
 Harness `BrowserUse` 是 Pydantic AI `AbstractCapability`。它向主模型增加一个固定工具：
 
@@ -85,7 +85,7 @@ Pydantic Schema 校验的结构化结果返回主模型。
 - 支持截图视觉、敏感信息占位和结构化最终结果。
 - 默认排除文件读取和上传动作。
 - 调用结束后清理自己启动的浏览器；共享会话需要显式 `aclose()`。
-- 当前 DeepAgent 只安装了 `pydantic-ai-harness[skills]==0.21.0`，没有安装可选的
+- 当前 DeepAgent 只安装了 `pydantic-ai-harness[skills]==0.26.0`，没有安装可选的
   `pydantic-ai-harness[browser-use]`/`browser-use` 运行依赖，因此该能力当前不可运行。
 
 ### 2.3 Provider 原生 Computer Use
@@ -94,7 +94,7 @@ Provider 原生 Computer Use 是供应商协议能力，不会因升级 Pydantic
 获得当前用户浏览器。以 OpenAI Responses 为例，应用必须显式将 `computer_use` 加入
 `openai_native_tools`，并使用支持该能力的模型。
 
-升级到Pydantic AI 2.31不会自动启用Computer Use。DeepAgent当前没有配置对应模型、动作执行器、
+升级到Pydantic AI 2.35.1不会自动启用Computer Use。DeepAgent当前没有配置对应模型、动作执行器、
 History和安全边界，因此不能只升级依赖就获得完整可用的能力；若未来采用，应把具体Provider的
 动作循环作为独立能力接入。
 
@@ -339,7 +339,7 @@ BrowserUse 是 Harness `AbstractCapability`，并不天然等于一个现有数�
 ## 9. 证据入口
 
 - 远端分支：`origin/feat/web-capabilities@b12e683`
-- Harness 0.21 [`BrowserUse` 文档](https://github.com/pydantic/pydantic-ai-harness/blob/v0.21.0/docs/browser-use.md)
+- Harness [`BrowserUse` 文档](https://github.com/pydantic/pydantic-ai-harness/blob/main/docs/browser-use.md)
 - Pydantic AI [OpenAI 原生工具文档](https://github.com/pydantic/pydantic-ai/blob/main/docs/models/openai.md)
 - OpenAI [Computer Use 动作循环](https://developers.openai.com/api/docs/guides/tools-computer-use)
 - Anthropic [Computer Use Tool](https://platform.claude.com/docs/en/agents-and-tools/tool-use/computer-use-tool)

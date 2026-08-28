@@ -30,11 +30,17 @@ class PersistEvent:
     agent_id: str | None
     user_id: str | None
     kind: Literal["user_turn", "run_complete", "run_cancelled"]
+    turn_id: str | None = None
+    run_id: str | None = None
+    app_id: str | None = None
+    space_id: str | None = None
     user_message: ModelRequest | None = None
     new_messages: list[ModelMessage] | None = None
     skip_user_prompt: bool = False
     result_messages: list[ModelMessage] | None = None
     repair_dangling_tool_calls: bool = True
+    terminal_status: str | None = None
+    result_queue: asyncio.Queue[dict[str, Any]] | None = None
 
 
 class EventPersister:
@@ -171,12 +177,18 @@ class EventPersister:
         if ev.kind == "user_turn":
             if ev.user_message is None:
                 return
-            await self._store.append(
+            rows = await self._store.append(
                 session_id,
                 [ev.user_message],
                 agent_id=agent_id,
                 user_id=ev.user_id,
+                app_id=ev.app_id,
+                space_id=ev.space_id,
+                turn_id=ev.turn_id,
+                run_id=ev.run_id,
+                first_message_ordinal=0,
             )
+            await self._publish_rows(ev, rows)
             return
 
         if ev.kind == "run_complete":
@@ -188,12 +200,19 @@ class EventPersister:
             if ev.repair_dangling_tool_calls:
                 to_append = repair_unprocessed_tool_calls(to_append)
             if to_append:
-                await self._store.append(
+                rows = await self._store.append(
                     session_id,
                     to_append,
                     agent_id=agent_id,
                     user_id=ev.user_id,
+                    app_id=ev.app_id,
+                    space_id=ev.space_id,
+                    turn_id=ev.turn_id,
+                    run_id=ev.run_id,
+                    first_message_ordinal=1 if ev.skip_user_prompt else 0,
+                    terminal_status=ev.terminal_status,
                 )
+                await self._publish_rows(ev, rows)
             return
 
         if ev.kind == "run_cancelled":
@@ -202,12 +221,31 @@ class EventPersister:
                 skip_user_prompt=ev.skip_user_prompt,
             )
             if to_append:
-                await self._store.append(
+                rows = await self._store.append(
                     session_id,
                     to_append,
                     agent_id=agent_id,
                     user_id=ev.user_id,
+                    app_id=ev.app_id,
+                    space_id=ev.space_id,
+                    turn_id=ev.turn_id,
+                    run_id=ev.run_id,
+                    first_message_ordinal=1 if ev.skip_user_prompt else 0,
+                    terminal_status="interrupted",
                 )
+                await self._publish_rows(ev, rows)
+
+    async def _publish_rows(self, ev: PersistEvent, rows: list[Any]) -> None:
+        if ev.result_queue is None:
+            return
+        for row in rows:
+            ev.result_queue.put_nowait(
+                {
+                    "type": "session_event_appended",
+                    "persisted": True,
+                    "event": row.public_dict(),
+                }
+            )
 
     async def _persist_one(self, ev: PersistEvent) -> None:
         await self._handle_event(ev.session_id, ev.agent_id, ev)

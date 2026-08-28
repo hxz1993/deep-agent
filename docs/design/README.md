@@ -7,19 +7,24 @@
 |------|-------------------------------------------------| --- | --- |
 | `01` | [`UI 工具`](01-ui-tools/README.md)                | 2026-06 | builtin/manual 已落地；MCP 自动发现方案已关闭 |
 | `02` | [`运维控制台`](02-operations-console/README.md)      | 2026-07 | 一体化 Console 已落地，保留交互原型 |
-| `03` | [`上下文压缩`](03-context-compaction/README.md)      | 2026-07 | 自动与主动主模型压缩已落地；当前有效 Checkpoint 可在 Console 恢复 |
+| `03` | [`上下文压缩`](03-context-compaction/README.md)      | 2026-07 | v0.6.0单Event压缩、八段摘要、Evidence、超大结果裁剪和历史回读已落地 |
 | `04` | [`模型目录`](04-model-catalog/README.md)            | 2026-07 | 数据库目录与手工刷新已落地，结构并入 v0.3.0 基线 001 |
 | `05` | [`工具优化`](05-tool-optimization/README.md)        | 2026-07 | 工具体系映射、错误语义、Return Schema与v0.4.0大工具结果外置已落地；大型 MCP 检索见 13 课题 |
 | `06` | [`附件解析`](06-attachment-parsing/README.md)       | 2026-07 | 第一版按需读取与压缩协同已落地 |
 | `07` | [`Python Sandbox`](07-python-sandbox/README.md) | 2026-07 起 | A 已落地（subprocess-dev + soft guardrails）；B 探针代码已有、节点选型未完成；C 阻塞于 B |
-| `08` | [`Artifact 与出站产物`](08-artifact-export/README.md) | 2026-08 | v0.4.0已实现会话内大工具结果Artifact；通用计算产物与下载中心未实施 |
+| `08` | [`Artifact 与出站产物`](08-artifact-export/README.md) | 2026-08 | v0.4.0实现会话内大工具结果Artifact；v0.4.18支持主动发布文件到下载中心 |
 | `09` | [`结构化最终输出`](09-structured-output/README.md) | 2026-08 | 0805 实验实现已归档；产品边界未锁定，当前暂缓正式实施 |
 | `10` | [`上下文引用`](10-context-reference/README.md) | 2026-08 | v0.3.5 已完成公共协议；DeepCube/DeepTable业务前端已迁移并验证 |
 | `11` | [`工具包与工具目录`](11-tool-packages/README.md) | 2026-08 | v0.3.2 已完成工具包目录、UI 工具包、运行 Toolset 与 Console 统一改造 |
 | `12` | [`Agent Skill`](12-agent-skills/README.md) | 2026-08 | v0.3.18 已完成 ToolPackage 分离、上传安装、Harness 渐进披露与资源治理 |
 | `13` | [`工具检索与渐进披露`](13-tool-discovery/README.md) | 2026-08 | v0.3.12 已完成词法 Top 3/Top 5、附件条件过滤和 Pydantic AI 渐进披露 |
-| `14` | [`框架能力采用基线`](14-framework-capabilities/README.md) | 2026-08 | 当前固定审计 Pydantic AI 2.31 与 Harness 0.21；记录已采用、暂缓和不采用边界 |
+| `14` | [`框架能力采用基线`](14-framework-capabilities/README.md) | 2026-08 | 当前固定审计 Pydantic AI 2.35.1 与 Harness 0.26.0；记录已采用、暂缓和不采用边界 |
 | `15` | [`浏览器与页面操作`](15-browser-and-page-actions/README.md) | 2026-08 | 区分当前页面 UI Tool、Harness BrowserUse 与 Provider Computer Use；旧 Web 分支不整体合并 |
+| `16` | [`PDF 与演示文稿解析`](16-pdf-and-presentation-parsing/README.md) | 2026-08 | 已完成行业与AI Labs调研；独立文档系统工具尚未实施 |
+| `17` | [`Console UI`](17-console-ui/README.md) | 2026-08 | 轻量企业控制台视觉体系持续落地；保留真实功能、分栏交互和四主题边界 |
+| `18` | [`会话事件与轨迹`](18-session-trajectory/README.md) | 2026-08 | v0.6.0统一Event Store、Event API、持久化SSE、Plan与Console轨迹 |
+| `19` | [`Provider与模型分层`](19-model-provider-architecture/README.md) | 2026-08 | v0.5.6已完成两层归一化、007迁移与统一运行门禁 |
+| `20` | [`Hybrid Code Mode`](20-code-mode/README.md) | 2026-08 | v0.6.3显式能力包、可信返回类型、MCP原生+Code双通道与不透明文件变量已实现 |
 
 ## 文档命名
 

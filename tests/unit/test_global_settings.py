@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 import unittest
 from unittest.mock import patch
@@ -9,8 +10,10 @@ from fastapi.testclient import TestClient
 
 from deep_agent.api.v1 import api_router
 from deep_agent.api.v1.global_settings import build_global_settings
+from deep_agent.core.context import AppContext, init_context, reset_context
 from deep_agent.options import Agent as AgentOptions
 from deep_agent.options import DeepAgentOptions
+from tests.helpers.sqlite_stores import make_sqlite_stores_sync
 
 
 def _find_item(response, key: str):
@@ -79,8 +82,6 @@ class GlobalSettingsBuilderTests(unittest.TestCase):
             "deep_agent_dbms_hostname",
             "deep_agent_dbms_user",
             "deep_agent_dbms_database",
-            "deep_agent_title_model_api_key",
-            "deep_agent_title_model_base_url",
             "deep_agent_gemini_proxy",
             "deep_agent_sqlite_path",
             "deep_agent_mcp_runtime_dir",
@@ -96,7 +97,6 @@ class GlobalSettingsBuilderTests(unittest.TestCase):
                 "sandbox",
                 "uploads",
                 "images",
-                "titles",
             ],
         )
 
@@ -121,14 +121,29 @@ class GlobalSettingsBuilderTests(unittest.TestCase):
 
 class GlobalSettingsApiTests(unittest.TestCase):
     def setUp(self) -> None:
+        stores, self.engine, session_factory = make_sqlite_stores_sync()
+        init_context(
+            AppContext.for_testing(
+                stores=stores,
+                db_engine=self.engine,
+                db_session_factory=session_factory,
+            )
+        )
         app = FastAPI()
         app.include_router(api_router)
         self.client = TestClient(app)
 
-    def test_returns_grouped_read_only_settings_without_extra_authentication(
+    def tearDown(self) -> None:
+        reset_context()
+        asyncio.run(self.engine.dispose())
+
+    def test_returns_grouped_read_only_settings_for_enterprise_admin(
         self,
     ) -> None:
-        response = self.client.get("/api/v1/global-settings")
+        response = self.client.get(
+            "/api/v1/global-settings",
+            headers={"user": "enterprise-admin"},
+        )
         self.assertEqual(response.status_code, 200, response.text)
         body = response.json()
         self.assertTrue(body["groups"])

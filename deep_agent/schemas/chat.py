@@ -10,6 +10,13 @@ from deep_agent.schemas.context_reference import ContextReference, validate_cont
 
 
 class ChatRequest(BaseModel):
+    agent_id: str | None = Field(
+        default=None,
+        description=(
+            "Agent configuration id. Required for a new session; an existing "
+            "session resolves and verifies its stored Agent automatically."
+        ),
+    )
     message: str | None = Field(
         default=None,
         description="The user's message/prompt. Omit when resuming with deferred_tool_results only.",
@@ -38,7 +45,7 @@ class ChatRequest(BaseModel):
     )
     branch_from: int | None = Field(
         default=None,
-        description="branch_point from history; truncates stored messages at this index before run.",
+        description="Reserved. Session Event Store branching is not implemented in v0.6.0.",
     )
     attachments: list[AttachmentRef] | None = Field(
         default=None,
@@ -59,10 +66,6 @@ class ChatRequest(BaseModel):
 
 
 class StreamChatRequest(ChatRequest):
-    agent_id: str | None = Field(
-        default=None,
-        description="Load agent config from the database. model_id may override the agent's LLM preset per request.",
-    )
     deferred_tool_results: list["DeferredToolResultItem"] | None = Field(
         default=None,
         description="Results for pending UI/approval tool calls from a prior run.",
@@ -111,7 +114,6 @@ class ToolDescription(BaseModel):
     display_name: str
     description: str = ""
     execution_type: str
-    enabled: bool = True
 
 
 class ToolPackageDescription(BaseModel):
@@ -120,8 +122,6 @@ class ToolPackageDescription(BaseModel):
     label: str | None = None
     description: str = ""
     tools: list[ToolDescription] = Field(default_factory=list)
-    enabled: bool = True
-    default_enabled: bool = False
     source: str | None = None
     tool_count: int = 0
     tool_catalog_status: str = "complete"
@@ -134,6 +134,8 @@ class ToolPackageDescription(BaseModel):
 class SessionInfo(BaseModel):
     session_id: str
     message_count: int
+    turn_count: int = Field(default=0, description="Distinct conversation turns in this session.")
+    attachment_count: int = Field(default=0, description="Attachment references in user messages.")
     agent_id: str | None = Field(default=None, description="Agent id used for this session.")
     agent_name: str | None = Field(default=None, description="Agent display name (if known).")
     user_prompt: str | None = Field(default=None, description="First user message in the session.")

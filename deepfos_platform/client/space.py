@@ -1,6 +1,6 @@
 from typing import List, Union, Sequence, Optional, Any
 
-from .base import BaseAPI, ComponentAPI, get
+from .base import BaseAPI, ComponentAPI, get, post
 from ..options import OPTION
 from .models import ModuleInfo, SpModuleRegisterDetailVo, AppInfoBySpaceResp, UserInfoVo
 from functools import cached_property
@@ -30,6 +30,10 @@ class SpaceAPI(BaseAPI):
     @cached_property
     def user_group(self):
         return SpaceUserGroupAPI(self)
+
+    @cached_property
+    def business_record(self):
+        return SpaceBusinessRecordAPI(self)
 
 
 class SpaceModuleAPI(ComponentAPI):
@@ -99,3 +103,14 @@ class SpaceUserGroupAPI(ComponentAPI):
         根据id查询单个用户组信息,以及该用户组下的所有用户的基本信息
         """
         return {'param': {'groupInfoId': groupInfoId, 'status': status}}
+
+
+class SpaceBusinessRecordAPI(ComponentAPI):
+    """Platform Download Center business-file records."""
+
+    endpoint = '/api/space/file/business/record'
+
+    @post('save')
+    def save(self, record: dict[str, Any]):
+        """Register an existing platform file in the current user's Download Center."""
+        return {'body': record}

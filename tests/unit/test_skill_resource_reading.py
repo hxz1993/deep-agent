@@ -104,7 +104,6 @@ class SkillResourceReadingTests(unittest.IsolatedAsyncioTestCase):
             item = ResolvedSkill(
                 code="demo",
                 source="upload",
-                enabled=True,
                 package_root=root,
                 library_root=root.parent,
                 resource_index=[
@@ -133,7 +132,6 @@ class SkillResourceReadingTests(unittest.IsolatedAsyncioTestCase):
             item = ResolvedSkill(
                 code="demo",
                 source="upload",
-                enabled=True,
                 package_root=root,
                 library_root=root.parent,
                 resource_index=[_entry("references/missing.md", category="reference", readable=True)],

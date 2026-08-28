@@ -1,0 +1,5 @@
+{"type":"thinking","item_id":"live:run-1:assistant","delta":"正在读取预算…"}
+{"type":"tool_call","item_id":"tool:call-read-1","tool":"read_file","tool_call_id":"call-read-1","args":{"file_id":"local_file_1"}}
+{"type":"tool_result","item_id":"tool:call-read-1","tool":"read_file","tool_call_id":"call-read-1","result":{"sheet":"预算","rows":9},"outcome":"success","artifacts":[]}
+{"type":"text","item_id":"live:run-1:assistant","delta":"华东预算范围和成员已经核对完成。"}
+{"type":"final","status":"completed","run_id":"run-1","output":"华东预算范围和成员已经核对完成。","usage":{"input_tokens":120,"output_tokens":32,"total_tokens":152}}

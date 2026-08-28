@@ -1,6 +1,6 @@
 # DeepAgent MCP 工具检索与渐进披露设计
 
-> 实施版本：v0.3.12；v0.3.14完成真实联调边界修复；当前运行于Pydantic AI 2.31；本课题不新增迁移，当前仓库head为006。
+> 实施版本：v0.3.12；v0.3.14完成真实联调边界修复；当前运行于Pydantic AI 2.35.1；本课题不新增迁移，当前仓库head为006。
 
 ## 1. 稳定边界
 
@@ -15,7 +15,7 @@
 ```text
 Agent.capabilities
 → 解析已选择 ToolPackage
-→ 当前身份、App、Space、enabled 过滤
+→ 当前身份、App、Space和配置有效性过滤
 → 直接工具与 MCP Toolset
 → MCP 运行时 CombinedToolset
 → DeferredLoadingToolset
@@ -28,11 +28,11 @@ Agent.capabilities
 
 ### 2.1 小型 MCP
 
-候选工具不超过 5 个时全部直接披露，不向模型增加 `search_tools`。
+候选工具不超过 10 个时全部直接披露，不向模型增加 `search_tools`。
 
 ### 2.2 大型 MCP
 
-候选工具超过 5 个时：
+候选工具超过 10 个时：
 
 - 当前问题正相关工具最多 3 个以完整 Schema 直接披露。
 - 无正相关结果时允许 0 个，不用任意写入工具凑满 Top 3。
@@ -106,7 +106,7 @@ v0.3.23 的系统工具 `read_file` 不进入 MCP语义检索：
 - 当前请求和原始会话没有可读附件、Agent也没有可读Skill文件时，`PreparedToolset`隐藏该工具。
 - 存在任一合法来源时直接披露同一个 `read_file`，由判别式 `resource`参数选择附件或Skill。
 - 附件的会话归属、Skill的Agent选择与精确资源索引、MIME和大小仍在调用时校验。
-- Checkpoint摘要不能作为附件存在、Skill授权或文件权限依据。
+- Compaction摘要Evidence不能作为附件存在、Skill授权或文件权限依据。
 
 ## 5. 发现状态与历史
 
@@ -116,14 +116,13 @@ v0.3.23 的系统工具 `read_file` 不进入 MCP语义检索：
   执行一次，避免重复请求消耗。模型修改查询词后仍可继续搜索。
 - 新 Run 仍按新问题增加首轮 Top 3；Pydantic AI 可从有效历史恢复已发现工具。
 - 如果压缩移除旧搜索交换，工具重新回到延迟状态，可再次搜索。
-- 不增加自定义过期或清空状态；跨Run的已发现工具完全遵循Pydantic AI 2.31历史恢复语义。
+- 不增加自定义过期或清空状态；跨Run的已发现工具完全遵循当前Pydantic AI历史恢复语义。
 - 工具是否已经披露、Capability是否已经加载以及当前能否执行，以Core可用性判断为准；猜测隐藏
   协议名只会得到`ModelRetry`，DeepAgent不增加第二套执行拦截器。压缩移除旧披露证据后必须重新搜索。
 
-历史与压缩的安全边界同时识别 Local 和 Provider Native Tool Search Call/Return；正式取消产生的
-`ModelResponse.state="interrupted"` 不被误判为 Pending Deferred。Provider `CompactionPart` 如果仅在
-`provider_details` 中保留不透明载荷，Checkpoint 保存会失败关闭，避免持久化不可恢复的空壳。当前仍不
-启用 Provider Native Compaction，单次摘要算法不变。
+历史与压缩的安全边界同时识别Local和Provider Native Tool Search Call/Return；正式取消产生的
+`ModelResponse.state="interrupted"`不被误判为Pending Deferred。Provider`CompactionPart`按普通
+Provider专属Part无损保存，只能回传兼容Provider；DeepAgent结构化Compaction仍是跨Provider历史锚点。
 
 ## 6. API、Console 与观测
 
@@ -158,6 +157,8 @@ Console 展示“始终可用”“有附件时可用”“自动预选 Top 3 / 
 - 工具执行继续通过原 Toolset 的权限、Header、连接和错误处理。
 - URL MCP 只在首次真实工具调用时 initialize 并按当前请求注入 Header，同一 Run 内复用连接；初始化、
   网络或 503 失败转换为脱敏 `ToolFailed`，本 Run 不重复等待。取消继续向外传播，不能被转成工具失败。
+- 实际`call_tool`的协议超时即使被Pydantic AI先包装为`ModelRetry`，也按异常链重新分类为
+  `ToolFailed`，避免同一参数耗尽工具重试预算后中止整个Run；模型可纠正的业务错误不做该转换。
 - 历史 MCP 只有数量而没有定义快照时不进入工具目录；配置 URL/Header/请求上下文后旧快照立即失效，
   重新检测成功前保持隐藏。检测同一配置失败时可以沿用上次成功快照。
 - 工具检索不替代高风险审批。

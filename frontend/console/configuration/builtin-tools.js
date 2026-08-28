@@ -23,10 +23,6 @@ function builtinToolDetails(capability) {
 
 function builtinCapabilityRow(capability) {
   const label = capability.label || capability.code;
-  const defaultLabel = capability.default_enabled ? "默认启用" : "默认关闭";
-  const disclosureLabel = capability.disclosure_mode === "conditional"
-    ? "有附件时可用"
-    : "始终可用";
   return `<tr>
     <td>
       <div class="builtin-tool-name">
@@ -36,8 +32,7 @@ function builtinCapabilityRow(capability) {
     </td>
     <td><code>${escapeHtml(capability.code)}</code></td>
     <td>${builtinToolDetails(capability)}</td>
-    <td><span class="builtin-default-badge${capability.default_enabled ? " enabled" : ""}">${defaultLabel}</span></td>
-    <td><span class="builtin-default-badge">${escapeHtml(disclosureLabel)}</span> ${escapeHtml(capability.description || "—")}</td>
+    <td>${escapeHtml(capability.description || "—")}</td>
   </tr>`;
 }
 
@@ -48,7 +43,7 @@ function renderBuiltinCapabilities(capabilities) {
     .filter(isManagedBuiltinCapability)
     .sort((left, right) => left.code.localeCompare(right.code));
   if (!builtins.length) {
-    tbody.innerHTML = `<tr><td colspan="5" class="empty-cell">暂无可展示的内置工具</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="4" class="empty-cell">暂无可展示的内置工具</td></tr>`;
     return;
   }
   tbody.innerHTML = builtins.map(builtinCapabilityRow).join("");
@@ -57,20 +52,16 @@ function renderBuiltinCapabilities(capabilities) {
 function renderBuiltinError(message) {
   const tbody = document.getElementById("builtinToolsTableBody");
   if (!tbody) return;
-  tbody.innerHTML = `<tr><td colspan="5" class="empty-cell">
+  tbody.innerHTML = `<tr><td colspan="4" class="empty-cell">
     <span class="configuration-error">${escapeHtml(message || "内置工具加载失败")}</span>
-    <button class="btn" type="button" data-retry-builtin-tools>重新加载</button>
   </td></tr>`;
-  tbody.querySelector("[data-retry-builtin-tools]")?.addEventListener("click", () => {
-    window.builtinToolsAdmin?.refresh({ reload: true });
-  });
 }
 
 const builtinToolsAdmin = {
   async refresh({ reload = false } = {}) {
     const tbody = document.getElementById("builtinToolsTableBody");
     if (!tbody) return;
-    tbody.innerHTML = `<tr><td colspan="5" class="empty-cell">正在加载内置工具…</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="4" class="empty-cell">正在加载内置工具…</td></tr>`;
     try {
       if (reload || !(state.capabilities || []).length) {
         await loadCapabilities();
@@ -81,12 +72,6 @@ const builtinToolsAdmin = {
     }
   },
 };
-
-document.addEventListener("DOMContentLoaded", () => {
-  document.getElementById("refreshBuiltinToolsBtn")?.addEventListener("click", () => {
-    builtinToolsAdmin.refresh({ reload: true });
-  });
-});
 
 window.builtinToolsAdmin = builtinToolsAdmin;
 window.__BuiltinToolsUI = {

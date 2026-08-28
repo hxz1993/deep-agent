@@ -141,16 +141,17 @@ read_file(resource, sheet=None, offset=None, limit=None)
 
 ```text
 当前消息 attachments[]
-  + 当前会话原始 chat_messages 中的 attachment-ref
+  + 当前会话原始 user/message Event 中的 attachment-ref
   → 本轮 attachment_by_id 白名单
 ```
 
-未知 `file_id` 在平台下载前直接拒绝。平台下载仍使用当前请求的认证 Header，因此同时具备：
+未知 `file_id` 在FileStore下载前直接拒绝。部署默认的Platform下载仍使用当前请求的认证 Header，
+显式本地开发后端则按User校验`metadata.sqlite3`归属，因此同时具备：
 
 1. DeepAgent 会话范围限制。
 2. 平台当前用户文件权限限制。
 
-Checkpoint 不能作为附件权限来源，因为它会裁剪旧消息；允许范围必须从完整原始历史建立。
+摘要Evidence不能作为附件权限来源；允许范围必须从完整原始Event建立。
 
 Skill文件必须来自当前Agent已选择、启用且运行目录就绪的Skill，并精确命中安装资源索引；脚本、
 目录穿越、宿主绝对路径与跨Skill读取均拒绝。
@@ -202,7 +203,7 @@ OpenAI Compatible 视频模型增加 `video_url` 请求适配。是否启用只�
 原始事实源保持：
 
 ```text
-chat_messages
+chat_session_events
   ├─ 用户附件引用
   ├─ 模型工具调用
   └─ 每一页工具结果
@@ -213,16 +214,18 @@ chat_messages
 - 工具读取键包含 `source + file_id/skill_code/path + sheet + offset + limit`。
 - 同一文件同一页重复读取可以去重。
 - 不同 offset、limit 或 sheet 不能误判为重复。
-- 长工具结果仍参与 Clamp、ClearToolResults 和摘要治理。
-- 只有摘要成功且达到目标预算时才更新 Checkpoint。
-- Checkpoint 更新不修改原始附件引用或原始工具事件。
+- 超大工具结果优先Spill；摘要输入副本只对单条超大内联结果做头尾裁剪。
+- 只有八段摘要、Evidence、来源Hash和目标预算都通过时，Compaction Event才更新为Completed。
+- Compaction不修改原始附件引用或工具Event。
+- Compaction Payload与模型锚点增加确定性`attachment_evidence`，记录原Event、Part/Item位置、
+  File ID、名称、MIME和引用Hash；摘要模型不能改写该证据，证据也不能扩展文件权限。
 
 因此压缩后模型仍能从原始会话范围重新读取附件，但不会把所有已读文件内容永久堆进每轮
 输入。
 
-## 8. 数据与 Checkpoint
+## 8. 数据与Compaction
 
-平台文件服务保存文件字节，DeepAgent 只持久化稳定引用：
+当前FileStore保存文件字节（部署默认Platform；显式本地开发为Blob目录），DeepAgent会话只持久化稳定引用：
 
 ```json
 {
@@ -233,10 +236,9 @@ chat_messages
 }
 ```
 
-模型的 `tool-call` 和每一页 `tool-return` 继续作为完整原始事件写入
-`chat_messages.payload`。工具结果包含 `file_id`、分页范围、解析文本和继续读取游标。
-
-`chat_context_checkpoints.payload` 只是下一轮模型输入的派生投影：
+模型的完整Assistant Message（含Tool Call）与完整Tool Results Message分别写入
+`chat_session_events`。工具Part包含`file_id`、分页范围、解析文本和继续读取游标，并通过
+`tool_call_id`在投影层配对。Compaction的摘要锚点：
 
 - 只保留安全附件引用，不保存文件字节。
 - 不保留旧 `extracted_text`。
@@ -250,12 +252,12 @@ chat_messages
 读取完整原始历史
 → 持久化当前用户附件引用
 → 从完整历史建立会话附件白名单
-→ 加载 Checkpoint 与其后的原始尾部
+→ 加载最新Completed Compaction锚点与其后的原始尾部
 → 执行压缩和模型调用
 ```
 
-不能从 Checkpoint 建附件权限白名单，否则被摘要覆盖的旧附件会失去可读性。Checkpoint 损坏、
-版本不符或哈希不匹配时，可以放弃投影并回退完整原始历史。
+不能从摘要Evidence建附件权限白名单。Compaction版本不符、来源Hash不匹配或校验失败时保持上一次
+有效Surface；原始Event始终可用于授权回查。
 
 ## 9. 标题与兼容
 
@@ -310,5 +312,7 @@ chat_messages
 ## 13. 后续方向
 
 后续方向包括PDF/PPTX专用解析、复杂Office、异步解析、资源隔离、结构
-索引、跨 Run 缓存和长结果外置。优先级和状态统一维护在
+索引、跨 Run 缓存和长结果外置。PDF/PPTX的行业方案、Anthropic Skills目录、许可证边界和
+DeepAgent建议链路已独立记录在
+[`../16-pdf-and-presentation-parsing/`](../16-pdf-and-presentation-parsing/)。优先级和状态统一维护在
 [`../TODO.md`](../TODO.md)，不在本文维护第二份待办。

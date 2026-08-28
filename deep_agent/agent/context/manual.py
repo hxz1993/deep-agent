@@ -21,7 +21,7 @@ def manual_compaction_availability(
     """Evaluate whether manual compaction can be started safely.
 
     Manual compaction is a user action.  Content length, an existing
-    checkpoint, or the absence of new messages must not disable the action;
+    prior compaction, or the absence of new messages must not disable the action;
     the compaction result reports whether the attempt had an effect.
     """
 

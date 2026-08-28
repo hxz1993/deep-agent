@@ -12,6 +12,7 @@ from pydantic_ai.toolsets import AbstractToolset, ToolsetTool
 from pydantic_core import SchemaValidator
 
 from deep_agent.agent.deps import AgentDeps
+from deep_agent.capabilities.mcp.errors import classify_terminal_mcp_request_failure
 from deep_agent.mcp_request_context import resolve_mcp_headers
 from deep_agent.schemas.mcp import McpToolSnapshot
 
@@ -82,6 +83,7 @@ class SnapshotMcpToolset(AbstractToolset[AgentDeps]):
         self,
         ctx: RunContext[AgentDeps],
     ) -> dict[str, ToolsetTool[AgentDeps]]:
+        del ctx
         tools: dict[str, ToolsetTool[AgentDeps]] = {}
         for item in self.snapshot.definitions:
             tool_def = ToolDefinition(
@@ -98,7 +100,7 @@ class SnapshotMcpToolset(AbstractToolset[AgentDeps]):
             tools[item.name] = ToolsetTool(
                 toolset=self,
                 tool_def=tool_def,
-                max_retries=self.max_retries if self.max_retries is not None else ctx.max_retries,
+                max_retries=self.max_retries,
                 args_validator=_MCP_ARGS_VALIDATOR,
             )
         return tools
@@ -122,7 +124,25 @@ class SnapshotMcpToolset(AbstractToolset[AgentDeps]):
             await self._fail_connection(exc)
         except (RunCancelled, asyncio.CancelledError):
             raise
-        except (ModelRetry, ToolFailed):
+        except ModelRetry as exc:
+            failure = classify_terminal_mcp_request_failure(exc)
+            if failure is not None:
+                if failure.canvas_outcome_unknown:
+                    raise ToolFailed(
+                        f"MCP tool {name!r} on server {self.server_name!r} timed out; "
+                        "the Canvas mutation outcome may be unknown. Do not retry the "
+                        "mutation directly; inspect the current Canvas snapshot first"
+                    ) from exc
+                raise ToolFailed(
+                    f"MCP tool {name!r} on server {self.server_name!r} timed out or is temporarily unavailable"
+                ) from exc
+            if ctx.last_attempt:
+                raise ToolFailed(
+                    f"{exc.message}\n"
+                    "本轮工具纠正次数已经耗尽，请停止调用、说明失败原因并等待用户下一条消息。"
+                ) from exc
+            raise
+        except ToolFailed:
             raise
         except Exception as exc:
             await self._fail_connection(exc)

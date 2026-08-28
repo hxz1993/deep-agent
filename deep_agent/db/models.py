@@ -11,6 +11,7 @@ from sqlalchemy import (
     Index,
     Integer,
     PrimaryKeyConstraint,
+    SmallInteger,
     String,
     Text,
     UniqueConstraint,
@@ -18,8 +19,12 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
-from deep_agent.db.ids import AGENT_ID_LENGTH, new_agent_id
-from deep_agent.db.session_scope import NO_AGENT_SCOPE
+from deep_agent.db.ids import (
+    AGENT_ID_LENGTH,
+    PROVIDER_ID_LENGTH,
+    new_agent_id,
+    new_provider_id,
+)
 from deep_agent.db.types import JSONType
 
 
@@ -32,18 +37,52 @@ KeyText = String(191)
 
 class LlmModel(Base):
     __tablename__ = "llm_models"
-    __table_args__ = (UniqueConstraint("name", name="uq_llm_models_name"),)
+    __table_args__ = (
+        UniqueConstraint(
+            "provider_id",
+            "name",
+            name="uq_llm_models_provider_name",
+        ),
+    )
 
     id: Mapped[str] = mapped_column(String(AGENT_ID_LENGTH), primary_key=True, default=new_agent_id)
+    provider_id: Mapped[str] = mapped_column(
+        String(PROVIDER_ID_LENGTH),
+        ForeignKey("llm_providers.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
     name: Mapped[str] = mapped_column(KeyText, nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     model: Mapped[str] = mapped_column(Text, nullable=False)
-    base_url: Mapped[str | None] = mapped_column(Text, nullable=True)
-    api_key: Mapped[str | None] = mapped_column(Text, nullable=True)
     input_modalities: Mapped[list[str] | None] = mapped_column(JSONType, nullable=True)
     context_window_tokens: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     max_output_tokens: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     tags: Mapped[list[str] | None] = mapped_column(JSONType, nullable=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+
+class LlmProvider(Base):
+    __tablename__ = "llm_providers"
+    __table_args__ = (UniqueConstraint("name", name="uq_llm_providers_name"),)
+
+    id: Mapped[str] = mapped_column(
+        String(PROVIDER_ID_LENGTH),
+        primary_key=True,
+        default=new_provider_id,
+    )
+    name: Mapped[str] = mapped_column(KeyText, nullable=False)
+    provider_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    use_default_base_url: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    base_url: Mapped[str] = mapped_column(Text, nullable=False)
+    api_key: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -114,7 +153,7 @@ class Agent(Base):
         nullable=False,
     )
     temperature: Mapped[float | None] = mapped_column(Float, nullable=True)
-    capabilities: Mapped[list[str] | None] = mapped_column(JSONType, nullable=True)
+    capabilities: Mapped[list[str]] = mapped_column(JSONType, nullable=False, default=list)
     skills: Mapped[list[str]] = mapped_column(JSONType, nullable=False, default=list)
     prompt: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
@@ -136,7 +175,6 @@ class SkillPackage(Base):
     version: Mapped[str | None] = mapped_column(String(64), nullable=True)
     schema_version: Mapped[str] = mapped_column(String(32), nullable=False)
     source: Mapped[str] = mapped_column(String(16), nullable=False)
-    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
     platform_file_id: Mapped[str] = mapped_column(KeyText, nullable=False)
     file_name: Mapped[str] = mapped_column(Text, nullable=False)
     file_size: Mapped[int] = mapped_column(BigInteger, nullable=False)
@@ -160,11 +198,6 @@ class McpServer(Base):
     config: Mapped[dict] = mapped_column(JSONType, nullable=False)
     inspection: Mapped[dict | None] = mapped_column(JSONType, nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
-    enabled: Mapped[bool] = mapped_column(
-        Boolean,
-        nullable=False,
-        server_default="true",
-    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -176,16 +209,31 @@ class McpServer(Base):
 
 class ChatSession(Base):
     __tablename__ = "chat_sessions"
-    __table_args__ = (PrimaryKeyConstraint("agent_id", "session_id"),)
+    __table_args__ = (
+        Index(
+            "ix_chat_sessions_agent_user_updated",
+            "agent_id",
+            "user_id",
+            "updated_at",
+        ),
+    )
 
+    session_id: Mapped[str] = mapped_column(KeyText, primary_key=True)
     agent_id: Mapped[str] = mapped_column(
         String(AGENT_ID_LENGTH),
-        primary_key=True,
-        default=NO_AGENT_SCOPE,
+        ForeignKey("agents.id", ondelete="RESTRICT"),
+        nullable=False,
     )
-    session_id: Mapped[str] = mapped_column(KeyText, primary_key=True)
-    user_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    user_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    app_id: Mapped[str | None] = mapped_column(KeyText, nullable=True)
+    space_id: Mapped[str | None] = mapped_column(KeyText, nullable=True)
     title: Mapped[str | None] = mapped_column(Text, nullable=True)
+    next_sequence: Mapped[int] = mapped_column(
+        BigInteger,
+        nullable=False,
+        default=1,
+        server_default="1",
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -202,7 +250,6 @@ class UiToolPackage(Base):
     label: Mapped[str] = mapped_column(Text, nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     source: Mapped[str] = mapped_column(String(16), nullable=False)
-    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -230,7 +277,6 @@ class UiToolDefinition(Base):
     result_schema: Mapped[dict | None] = mapped_column(JSONType, nullable=True)
     metadata_: Mapped[dict | None] = mapped_column("metadata", JSONType, nullable=True)
     source: Mapped[str] = mapped_column(String(16), nullable=False)
-    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -241,72 +287,50 @@ class UiToolDefinition(Base):
     package: Mapped[UiToolPackage] = relationship("UiToolPackage", lazy="joined")
 
 
-class AuxiliaryModelConfig(Base):
-    __tablename__ = "auxiliary_model_configs"
-
-    use_case: Mapped[str] = mapped_column(String(64), primary_key=True)
-    llm_model_id: Mapped[str | None] = mapped_column(
-        String(AGENT_ID_LENGTH),
-        ForeignKey("llm_models.id", ondelete="SET NULL"),
-        nullable=True,
+class ChatSessionEvent(Base):
+    __tablename__ = "chat_session_events"
+    __table_args__ = (
+        UniqueConstraint(
+            "session_id",
+            "sequence",
+            name="uq_chat_session_events_session_sequence",
+        ),
+        Index(
+            "ix_chat_session_events_session_turn_sequence",
+            "session_id",
+            "turn_id",
+            "sequence",
+        ),
+        Index(
+            "ix_chat_session_events_session_run_sequence",
+            "session_id",
+            "run_id",
+            "sequence",
+        ),
+        Index(
+            "ix_chat_session_events_session_type_status_sequence",
+            "session_id",
+            "event_type",
+            "status",
+            "sequence",
+        ),
     )
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        server_default=func.now(),
-        onupdate=func.now(),
+
+    event_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    session_id: Mapped[str] = mapped_column(
+        KeyText,
+        ForeignKey("chat_sessions.session_id", ondelete="CASCADE"),
         nullable=False,
     )
-    llm_model: Mapped[LlmModel | None] = relationship("LlmModel", lazy="joined")
-
-
-class ChatMessage(Base):
-    __tablename__ = "chat_messages"
-    __table_args__ = (
-        UniqueConstraint("agent_id", "session_id", "sequence", name="uq_chat_messages_session_sequence"),
-    )
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    agent_id: Mapped[str] = mapped_column(String(AGENT_ID_LENGTH), nullable=False, default=NO_AGENT_SCOPE)
-    session_id: Mapped[str] = mapped_column(KeyText, nullable=False)
-    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    sequence: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    schema_version: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=1)
+    event_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    turn_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    run_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    search_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     payload: Mapped[dict] = mapped_column(JSONType, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-
-
-class ChatContextCheckpoint(Base):
-    """Derived model-input projection; raw chat_messages remain authoritative."""
-
-    __tablename__ = "chat_context_checkpoints"
-    __table_args__ = (PrimaryKeyConstraint("agent_id", "session_id"),)
-
-    agent_id: Mapped[str] = mapped_column(
-        String(AGENT_ID_LENGTH),
-        primary_key=True,
-        default=NO_AGENT_SCOPE,
-    )
-    session_id: Mapped[str] = mapped_column(KeyText, primary_key=True)
-    source_last_sequence: Mapped[int] = mapped_column(Integer, nullable=False)
-    source_history_hash: Mapped[str] = mapped_column(String(64), nullable=False)
-    payload: Mapped[list[dict]] = mapped_column(JSONType, nullable=False)
-    payload_schema_version: Mapped[int] = mapped_column(Integer, nullable=False)
-    projection_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
-    estimated_tokens: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    summary_model_id: Mapped[str | None] = mapped_column(
-        String(AGENT_ID_LENGTH),
-        nullable=True,
-    )
-    row_version: Mapped[int] = mapped_column(
-        BigInteger,
-        nullable=False,
-        default=1,
-        server_default="1",
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        server_default=func.now(),
-        nullable=False,
-    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),

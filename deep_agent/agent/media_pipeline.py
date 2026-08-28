@@ -31,6 +31,15 @@ _DEFAULT_ALLOWED_MIMES = frozenset(
     }
 )
 
+_GENERIC_LOG_MIMES = frozenset(
+    {
+        "",
+        "application/octet-stream",
+        "application/x-log",
+        "text/x-log",
+    }
+)
+
 
 class MediaPipelineError(ValueError):
     """Invalid or unsupported upload for the media pipeline."""
@@ -55,12 +64,24 @@ def max_upload_bytes() -> int:
     return int(OPTION.agent.upload_max_size_mb) * 1024 * 1024
 
 
+def is_log_text_attachment(*, filename: str, mime: str | None) -> bool:
+    normalized = (mime or "").split(";", 1)[0].strip().lower()
+    return filename.lower().endswith(".log") and normalized in _GENERIC_LOG_MIMES
+
+
+def _normalized_upload_mime(*, mime: str, filename: str) -> str:
+    normalized = mime.split(";", 1)[0].strip().lower()
+    if is_log_text_attachment(filename=filename, mime=normalized):
+        return "text/plain"
+    return normalized
+
+
 def validate_upload(*, data: bytes, mime: str, filename: str) -> None:
     if not data:
         raise MediaPipelineError("Empty file.")
     if len(data) > max_upload_bytes():
         raise MediaPipelineError(f"File exceeds {OPTION.agent.upload_max_size_mb}MB limit.")
-    normalized = mime.split(";", 1)[0].strip().lower()
+    normalized = _normalized_upload_mime(mime=mime, filename=filename)
     if normalized not in allowed_mimes():
         raise MediaPipelineError(f"Unsupported MIME type: {mime}")
     if normalized in {
@@ -75,7 +96,7 @@ def validate_upload(*, data: bytes, mime: str, filename: str) -> None:
 
 def process_upload(*, data: bytes, mime: str, filename: str) -> ProcessedUpload:
     validate_upload(data=data, mime=mime, filename=filename)
-    normalized = mime.split(";", 1)[0].strip().lower()
+    normalized = _normalized_upload_mime(mime=mime, filename=filename)
     if normalized.startswith("image/"):
         try:
             processed, out_mime, out_name = process_image(

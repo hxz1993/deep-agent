@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from deep_agent.db.models import Agent, LlmModel
+from deep_agent.agent.provider_registry import ProviderRuntimeConfig
+from deep_agent.db.models import Agent, LlmModel, LlmProvider
 
 DEFAULT_INSTRUCTIONS = (
     "You are deep-agent, a helpful general-purpose assistant. "
@@ -21,19 +22,32 @@ def _input_modalities(llm_model: LlmModel) -> list[str]:
     ]
 
 
+def _provider_config(
+    llm_model: LlmModel,
+    provider: LlmProvider | None,
+) -> ProviderRuntimeConfig | None:
+    provider_row = provider or getattr(llm_model, "provider", None)
+    if provider_row is not None:
+        return ProviderRuntimeConfig.from_row(provider_row)
+    # Raw/legacy specs without a persisted provider remain supported for the
+    # explicit `model=` API and non-runtime history projections. Runtime paths
+    # load and pass the persisted provider explicitly before a request starts.
+    return None
+
+
 @dataclass
 class AgentSpec:
     """Declarative description of an agent.
 
-    ``capabilities=None`` uses default capabilities and no extension UI tools;
-    otherwise the list contains product tool-package codes such as
+    ``capabilities`` contains the explicitly associated product tool-package
+    codes such as
     ``builtin:general`` or ``ui:deepcube``.
     """
 
     name: str
     model: str
     instructions: str
-    capabilities: list[str] | None = None
+    capabilities: list[str] = field(default_factory=list)
     skills: list[str] = field(default_factory=list)
     base_url: str | None = None
     api_key: str | None = None
@@ -44,17 +58,22 @@ class AgentSpec:
     max_output_tokens: int | None = None
     tags: list[str] | None = None
     llm_model_id: str | None = None
+    provider_config: ProviderRuntimeConfig | None = None
 
     @classmethod
-    def from_row(cls, row: Agent, llm_model: LlmModel) -> AgentSpec:
+    def from_row(
+        cls,
+        row: Agent,
+        llm_model: LlmModel,
+        *,
+        provider: LlmProvider | None = None,
+    ) -> AgentSpec:
         return cls(
             name=row.name,
             model=llm_model.model,
             instructions=row.prompt,
-            capabilities=row.capabilities,
+            capabilities=list(row.capabilities or []),
             skills=list(row.skills or []),
-            base_url=llm_model.base_url,
-            api_key=llm_model.api_key,
             temperature=row.temperature,
             agent_id=row.id,
             input_modalities=_input_modalities(llm_model),
@@ -62,6 +81,7 @@ class AgentSpec:
             max_output_tokens=llm_model.max_output_tokens,
             tags=llm_model.tags,
             llm_model_id=llm_model.id,
+            provider_config=_provider_config(llm_model, provider),
         )
 
     @classmethod
@@ -74,21 +94,21 @@ class AgentSpec:
         temperature: float | None = None,
         capabilities: list[str] | None = None,
         skills: list[str] | None = None,
+        provider: LlmProvider | None = None,
     ) -> AgentSpec:
         return cls(
             name=name,
             model=llm_model.model,
             instructions=instructions or DEFAULT_INSTRUCTIONS,
-            capabilities=capabilities,
+            capabilities=list(capabilities or []),
             skills=list(skills or []),
-            base_url=llm_model.base_url,
-            api_key=llm_model.api_key,
             temperature=temperature,
             input_modalities=_input_modalities(llm_model),
             context_window_tokens=llm_model.context_window_tokens,
             max_output_tokens=llm_model.max_output_tokens,
             tags=llm_model.tags,
             llm_model_id=llm_model.id,
+            provider_config=_provider_config(llm_model, provider),
         )
 
 

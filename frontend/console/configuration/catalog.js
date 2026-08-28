@@ -137,6 +137,7 @@ function renderFacets() {
   );
   if (sidebar) {
     sidebar.innerHTML = [
+      '<div class="catalog-lab-heading"><span>模型研发方</span><i data-lucide="flask-conical"></i></div>',
       `<button type="button" class="catalog-lab-item ${catalogState.labId ? "" : "active"}" data-lab-id="">
         <span>全部 Lab</span><strong>${total}</strong>
       </button>`,
@@ -163,7 +164,7 @@ function renderFacets() {
       ? catalogState.facets.providers
       : [];
     providerSelect.innerHTML = [
-      '<option value="">全部</option>',
+      '<option value="">全部接入渠道</option>',
       ...providers.map(
         (provider) =>
           `<option value="${escapeHtml(provider.id)}">${escapeHtml(provider.label)}（${Number(provider.count || 0)}）</option>`,
@@ -221,8 +222,8 @@ function renderModelRows() {
         <td>${escapeHtml(formatTokenCount(model.max_output_tokens))}</td>
         <td class="model-tag-cell">${renderBadges(model.input_modalities, MODALITY_LABELS)}</td>
         <td class="model-tag-cell">${renderBadges(model.tags, TAG_LABELS)}</td>
-        <td><button type="button" class="btn btn-sm" data-toggle-model="${escapeHtml(model.canonical_model_id)}">
-          ${Number(model.provider_count || 0)} 个可用渠道
+        <td><button type="button" class="catalog-channel-trigger" data-toggle-model="${escapeHtml(model.canonical_model_id)}" title="查看 ${Number(model.provider_count || 0)} 个可用渠道" aria-label="查看 ${Number(model.provider_count || 0)} 个可用渠道">
+          <i data-lucide="network"></i><strong>${Number(model.provider_count || 0)}</strong><i data-lucide="chevron-down"></i>
         </button></td>
       </tr>
       ${modelDetailRow(model)}`,
@@ -270,7 +271,6 @@ function bindModelActions() {
         (item) => item.provider_id === button.dataset.providerId,
       );
       if (!model || !provider) return;
-      document.querySelector('[data-tab="llm-models"]')?.click();
       window.llmModelsAdmin?.openCreateFromCatalog(model, provider);
     });
   });
@@ -309,6 +309,7 @@ function renderResults() {
       ? renderProviderRows()
       : '<tr><td colspan="5" class="empty-cell">无匹配接入渠道</td></tr>';
   }
+  window.lucide?.createIcons();
 }
 
 function renderPagination() {
@@ -383,6 +384,96 @@ async function refreshCatalog() {
   await loadCatalog();
 }
 
+async function importCatalog(file) {
+  if (catalogState.loading || !file) return;
+  catalogState.loading = true;
+  setFeedback(`正在校验并导入 ${file.name}，请稍候…`);
+  element("catalogRefreshBtn").disabled = true;
+  element("catalogImportBtn").disabled = true;
+  const body = new FormData();
+  body.append("file", file, file.name);
+  try {
+    const response = await daFetch(serviceUrl("api/v1/llm-models/catalog/import"), {
+      method: "POST",
+      body,
+    });
+    const result = await parseJsonResponse(response);
+    if (!response.ok) {
+      const detail = result?.detail;
+      throw new Error(
+        typeof detail === "string"
+          ? detail
+          : detail
+            ? JSON.stringify(detail)
+            : `HTTP ${response.status}`,
+      );
+    }
+    setFeedback(
+      `目录导入完成：${result.labs} 个 Lab、${result.models} 个模型、${result.providers} 个接入渠道、${result.rows} 条组合。`,
+    );
+  } catch (error) {
+    setFeedback(`目录导入失败，旧目录已保留：${error.message}`, true);
+    catalogState.loading = false;
+    renderPagination();
+    element("catalogRefreshBtn").disabled = false;
+    element("catalogImportBtn").disabled = false;
+    return;
+  }
+  catalogState.loading = false;
+  element("catalogRefreshBtn").disabled = false;
+  element("catalogImportBtn").disabled = false;
+  catalogState.offset = 0;
+  await loadCatalog();
+}
+
+function exportFileName(response) {
+  const disposition = response.headers.get("content-disposition") || "";
+  const match = disposition.match(/filename="?([^";]+)"?/i);
+  return match?.[1] || "models-dev-catalog.json";
+}
+
+async function exportCatalog() {
+  if (catalogState.loading) return;
+  catalogState.loading = true;
+  setFeedback("正在导出当前模型目录…");
+  element("catalogImportBtn").disabled = true;
+  element("catalogExportBtn").disabled = true;
+  element("catalogRefreshBtn").disabled = true;
+  try {
+    const response = await daFetch(serviceUrl("api/v1/llm-models/catalog/export"));
+    if (!response.ok) {
+      const result = await parseJsonResponse(response);
+      const detail = result?.detail;
+      throw new Error(
+        typeof detail === "string"
+          ? detail
+          : detail
+            ? JSON.stringify(detail)
+            : `HTTP ${response.status}`,
+      );
+    }
+    const url = URL.createObjectURL(await response.blob());
+    const anchor = document.createElement("a");
+    try {
+      anchor.href = url;
+      anchor.download = exportFileName(response);
+      document.body.appendChild(anchor);
+      anchor.click();
+    } finally {
+      anchor.remove();
+      URL.revokeObjectURL(url);
+    }
+    setFeedback("当前模型目录已导出，该JSON可直接重新导入。");
+  } catch (error) {
+    setFeedback(`目录导出失败：${error.message}`, true);
+  } finally {
+    catalogState.loading = false;
+    element("catalogImportBtn").disabled = false;
+    element("catalogExportBtn").disabled = false;
+    element("catalogRefreshBtn").disabled = false;
+  }
+}
+
 function initCatalog() {
   document.querySelectorAll("[data-catalog-view]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -412,8 +503,20 @@ function initCatalog() {
     catalogState.offset = 0;
     loadCatalog();
   });
-  element("catalogReloadBtn")?.addEventListener("click", loadCatalog);
   element("catalogRefreshBtn")?.addEventListener("click", refreshCatalog);
+  element("catalogExportBtn")?.addEventListener("click", exportCatalog);
+  element("catalogImportBtn")?.addEventListener("click", () => {
+    const input = element("catalogImportInput");
+    if (!input) return;
+    input.value = "";
+    input.click();
+  });
+  element("catalogImportInput")?.addEventListener("change", async (event) => {
+    const input = event.target;
+    const file = input.files?.[0];
+    await importCatalog(file);
+    input.value = "";
+  });
   document.querySelectorAll("[data-catalog-refresh]").forEach((button) => {
     button.addEventListener("click", refreshCatalog);
   });

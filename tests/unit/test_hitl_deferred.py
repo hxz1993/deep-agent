@@ -26,6 +26,7 @@ from deep_agent.schemas.chat import DeferredToolResultItem
 from pydantic_ai.models.test import TestModel
 from pydantic_ai.usage import UsageLimits
 from tests.helpers.sqlite_stores import make_sqlite_stores
+from deep_agent.schemas.agent import AgentCreate
 
 
 class DeferredSerializationTests(unittest.TestCase):
@@ -107,6 +108,10 @@ class AgentRunnerDeferredTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         stores, self._engine, _ = await make_sqlite_stores()
         self.store = stores.coordinator
+        model = (await stores.llm_model.list_all())[0]
+        self.db_agent = await stores.agent.create_unique(
+            AgentCreate(name="deferred-test", model_id=model.id, prompt="test")
+        )
         self.persister = EventPersister(self.store)
         await self.persister.start()
 
@@ -133,10 +138,26 @@ class AgentRunnerDeferredTests(unittest.IsolatedAsyncioTestCase):
         async for ev in runner.run_stream(
             "sess-1",
             "请用户确认",
-            AgentDeps(session_id="sess-1"),
+            AgentDeps(session_id="sess-1", user="user-1", agent_id=self.db_agent.id),
             persister=self.persister,
         ):
             events_out.append(ev)
+            if ev.get("type") == "tool_call":
+                history = await self.store.get_history(
+                    "sess-1", agent_id=self.db_agent.id
+                )
+                self.assertTrue(
+                    any(
+                        isinstance(message, ModelResponse)
+                        and any(
+                            isinstance(part, ToolCallPart)
+                            and part.tool_call_id == ev.get("tool_call_id")
+                            for part in message.parts
+                        )
+                        for message in history
+                    ),
+                    "Deferred tool_call must not become interactive before persistence",
+                )
 
         self.assertEqual(events_out[-1]["type"], "final")
         self.assertEqual(events_out[-1]["status"], "pending")
@@ -170,7 +191,7 @@ class AgentRunnerDeferredTests(unittest.IsolatedAsyncioTestCase):
         async for ev in runner.run_stream(
             "sess-meta",
             "请填写表单",
-            AgentDeps(session_id="sess-meta"),
+            AgentDeps(session_id="sess-meta", user="user-1", agent_id=self.db_agent.id),
             persister=self.persister,
         ):
             events_out.append(ev)
@@ -223,7 +244,7 @@ class AgentRunnerDeferredTests(unittest.IsolatedAsyncioTestCase):
             async for event in runner.run_stream(
                 "sess-business-retry",
                 "读取工作簿",
-                AgentDeps(session_id="sess-business-retry"),
+                AgentDeps(session_id="sess-business-retry", user="user-1", agent_id=self.db_agent.id),
                 persister=self.persister,
             )
         ]
@@ -242,8 +263,10 @@ class AgentRunnerDeferredTests(unittest.IsolatedAsyncioTestCase):
                 ("tool_result", "workbook-2"),
             ],
         )
-        await self.persister.flush("sess-business-retry")
-        history = await self.store.get_history("sess-business-retry")
+        await self.persister.flush("sess-business-retry", agent_id=self.db_agent.id)
+        history = await self.store.get_history(
+            "sess-business-retry", agent_id=self.db_agent.id
+        )
         call_ids = [
             part.tool_call_id
             for message in history
@@ -298,7 +321,7 @@ class AgentRunnerDeferredTests(unittest.IsolatedAsyncioTestCase):
         async for ev in runner.run_stream(
             "sess-retry",
             "请澄清",
-            AgentDeps(session_id="sess-retry"),
+            AgentDeps(session_id="sess-retry", user="user-1", agent_id=self.db_agent.id),
             persister=self.persister,
         ):
             events_out.append(ev)
@@ -324,12 +347,12 @@ class AgentRunnerDeferredTests(unittest.IsolatedAsyncioTestCase):
             output_type=[str, DeferredToolRequests],
         )
         runner = AgentRunner(agent, self.store, UsageLimits(request_limit=10))
-        deps = AgentDeps(session_id="sess-2")
+        deps = AgentDeps(session_id="sess-2", user="user-1", agent_id=self.db_agent.id)
 
         first: list[dict] = []
         async for ev in runner.run_stream("sess-2", "需要确认", deps, persister=self.persister):
             first.append(ev)
-        await self.persister.flush("sess-2")
+        await self.persister.flush("sess-2", agent_id=self.db_agent.id)
         self.assertEqual(first[-1]["status"], "pending")
         tool_call_id = first[-1]["deferred"]["calls"][0]["tool_call_id"]
 

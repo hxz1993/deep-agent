@@ -19,6 +19,7 @@ from deep_agent.sandbox.profile import (
 )
 from deep_agent.sandbox.subprocess_dev.rlimit import rlimit_as_supported
 from deep_agent.sandbox.types import BackendHealth, ExecuteResult, TruncationMetadata
+from tests.helpers.admin_auth import allow_console_admin
 from tests.helpers.sandbox import sandbox_test_python
 from tests.helpers.sqlite_stores import make_sqlite_stores
 
@@ -36,6 +37,7 @@ class SandboxHealthEndpointTests(unittest.IsolatedAsyncioTestCase):
         stores, self._engine, session_factory = await make_sqlite_stores()
         self.app = FastAPI()
         self.app.include_router(api_router)
+        allow_console_admin(self.app)
         self.transport = ASGITransport(app=self.app)
         self._stores = stores
         self._session_factory = session_factory

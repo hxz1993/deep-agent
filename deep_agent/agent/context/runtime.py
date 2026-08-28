@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from dataclasses import dataclass, field
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from pydantic_ai.messages import ModelMessage
@@ -70,12 +72,54 @@ class ContextRunState:
     last_budget: Any | None = None
     request_index: int = 0
     pending_request_estimate: int | None = None
+    compaction_event_id: str | None = None
+    compaction_started_at: float | None = None
+    summary_call: dict[str, Any] | None = None
+    pruned_tool_results: list[dict[str, Any]] = field(default_factory=list)
+    start_compaction_event: Callable[[str], Awaitable[Any]] | None = field(
+        default=None, repr=False
+    )
+    finish_compaction_event: Callable[[str, str | None], Awaitable[Any]] | None = field(
+        default=None, repr=False
+    )
+
+    async def begin_compaction(self, trigger: str) -> None:
+        self.compaction_started_at = time.perf_counter()
+        self.summary_call = None
+        self.pruned_tool_results = []
+        if self.start_compaction_event is None:
+            return
+        event = await self.start_compaction_event(trigger)
+        self.compaction_event_id = getattr(event, "event_id", None)
+        if self.event_queue is not None and event is not None:
+            self.event_queue.put_nowait(
+                {
+                    "type": "session_event_appended",
+                    "persisted": True,
+                    "event": event.public_dict(),
+                }
+            )
+
+    async def finish_compaction(self, status: str, error: str | None = None) -> None:
+        if self.finish_compaction_event is None or self.compaction_event_id is None:
+            return
+        event = await self.finish_compaction_event(status, error)
+        if self.event_queue is not None and event is not None:
+            self.event_queue.put_nowait(
+                {
+                    "type": "session_event_updated",
+                    "persisted": True,
+                    "event": event.public_dict(),
+                }
+            )
 
     def emit(self, phase: str, message: str, **fields: Any) -> None:
         if self.event_queue is None:
             return
         payload = {
-            "type": "context_compaction",
+            "type": "context_compaction_progress",
+            "persisted": False,
+            "event_id": self.compaction_event_id,
             "phase": phase,
             "message": message,
             "request_index": self.request_index,

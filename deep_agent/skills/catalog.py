@@ -18,7 +18,6 @@ class SkillDescriptor:
     version: str | None
     schema_version: str
     source: str
-    enabled: bool
     manifest: dict
     resource_index: list[dict]
     contains_scripts: bool
@@ -48,7 +47,6 @@ def _builtin_descriptor(path: Path) -> SkillDescriptor:
         version=parsed.version,
         schema_version=parsed.schema_version,
         source="builtin",
-        enabled=True,
         manifest=parsed.manifest,
         resource_index=parsed.resource_index,
         contains_scripts=parsed.contains_scripts,

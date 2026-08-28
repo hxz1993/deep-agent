@@ -1,2057 +1,320 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import time
 import unittest
+from decimal import Decimal
 from types import SimpleNamespace
-from typing import Any
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
-from pydantic_ai import Agent, CancellationToken
-from pydantic_ai.exceptions import RunCancelled
+from pydantic_ai.exceptions import ModelHTTPError
 from pydantic_ai.messages import (
-    CompactionPart,
-    ModelMessage,
     ModelRequest,
     ModelResponse,
-    SystemPromptPart,
     TextPart,
     ToolCallPart,
-    ToolAvailabilityDeltaPart,
     ToolReturnPart,
     UserPromptPart,
-    NativeToolSearchCallPart,
-    NativeToolSearchReturnPart,
-    NativeToolCallPart,
-    NativeToolReturnPart,
 )
-from pydantic_ai.models.test import TestModel
-from pydantic_ai.models.function import FunctionModel
-from pydantic_ai.models.function import AgentInfo
-from pydantic_ai.models import ModelRequestContext, ModelRequestParameters
-from pydantic_ai.tools import RunContext
-from pydantic_ai.usage import RequestUsage, RunUsage, UsageLimits
-from pydantic_ai_harness.compaction import estimate_token_count
+from pydantic_ai.usage import RunUsage
 
-from deep_agent.agent.context.budget import build_context_budget, predict_output_tokens
-from deep_agent.agent.attachments import attachment_ref_dict
-from deep_agent.agent.context.checkpoint import (
-    deserialize_projection,
-    history_hash,
-    load_projection,
-    projection_fingerprint,
-    save_projection,
-    serialize_sanitized_projection,
-)
 from deep_agent.agent.context.compaction import (
-    ContextWindowExceededError,
     DeepAgentContextCompaction,
     SummaryUnavailable,
-    _first_user_message,
+    _deterministic_attachment_evidence_text,
+    _deterministic_context_evidence_text,
     _formatted_history,
-    _is_transient_summary_error,
-    _last_user_message,
-    _logical_units,
     _protected_messages,
+    _raw_prefix_for_visible_cutoff,
     _safe_boundaries,
-    _safe_tail_cutoff,
-    _status_code,
-    _summary_prompt,
-    _summary_safety_tokens,
-    _system_parts,
-    _strip_summary_and_system,
+    _prune_tool_results,
+    _jsonable_usage,
+    _run_preparation_step,
+    is_provider_context_overflow,
+    summary_contents,
+    validate_summary_markdown,
 )
-from deep_agent.agent.context_references import context_reference_dict
-from deep_agent.agent.context.estimator import (
-    TokenEstimator,
-    conservative_text_tokens,
-)
-from deep_agent.agent.context.test_scenarios import (
-    CONTEXT_TEST_SCENARIOS,
-    build_context_test_history,
-)
-from deep_agent.agent.context.file_keys import deep_agent_file_key
+from deep_agent.agent.context.estimator import TokenEstimator
 from deep_agent.agent.context.runtime import ContextRunState
-from deep_agent.agent.deps import AgentDeps
-from deep_agent.agent.history import has_unprocessed_tool_calls
-from deep_agent.agent.event_persister import EventPersister
-from deep_agent.agent.runner import AgentRunner
-from deep_agent.db.serialization import deserialize_message, serialize_message
-from deep_agent.options import OPTION
-from deep_agent.schemas.attachment import AttachmentRef
-from deep_agent.schemas.context_reference import ContextReference
-from tests.helpers.sqlite_stores import make_sqlite_stores
 
 
-def _long_tool_history(*, pairs: int = 8, result_chars: int = 1_200) -> list[ModelMessage]:
-    history: list[ModelMessage] = [
-        ModelRequest(parts=[UserPromptPart(content="请持续完成最初的任务")])
-    ]
-    for index in range(pairs):
-        call_id = f"tool-{index}"
-        history.extend(
-            [
-                ModelResponse(
-                    parts=[
-                        ToolCallPart(
-                            "search",
-                            {"query": f"topic-{index}"},
-                            call_id,
-                        )
-                    ]
-                ),
-                ModelRequest(
-                    parts=[
-                        ToolReturnPart(
-                            "search",
-                            (
-                                "Authorization: Bearer abcdefghij "
-                                "api_key=plain-secret-token "
-                                + f"result-{index}-"
-                                + ("x" * result_chars)
-                            ),
-                            call_id,
-                        )
-                    ]
-                ),
-            ]
-        )
-    return history
+def valid_summary() -> str:
+    titles = (
+        "Primary Request and Intent", "Key Technical Concepts", "Files and Code",
+        "Errors and Fixes", "Pending Jobs", "Current Work", "Next Step",
+        "Critical Context",
+    )
+    return "\n\n".join(
+        f"## {index}. {title}\n{'内容' if index == 1 else '无'}"
+        for index, title in enumerate(titles, start=1)
+    )
 
 
-class AttachmentFileKeyTests(unittest.TestCase):
-    def test_same_attachment_range_has_same_key(self) -> None:
-        first = ToolCallPart(
-            "read_file",
-            {"resource": {"type": "attachment", "file_id": "file-1"}, "offset": 1, "limit": 500},
-            "call-1",
-        )
-        second = ToolCallPart(
-            "read_file",
-            {"resource": {"type": "attachment", "file_id": "file-1"}, "offset": 1, "limit": 500},
-            "call-2",
-        )
-        self.assertEqual(deep_agent_file_key(first), deep_agent_file_key(second))
-
-    def test_different_attachment_pages_and_sheets_are_not_deduplicated(self) -> None:
-        page_one = ToolCallPart(
-            "read_file",
-            {"resource": {"type": "attachment", "file_id": "file-1"}, "sheet": "A", "offset": 1, "limit": 100},
-            "call-1",
-        )
-        page_two = ToolCallPart(
-            "read_file",
-            {"resource": {"type": "attachment", "file_id": "file-1"}, "sheet": "A", "offset": 101, "limit": 100},
-            "call-2",
-        )
-        other_sheet = ToolCallPart(
-            "read_file",
-            {"resource": {"type": "attachment", "file_id": "file-1"}, "sheet": "B", "offset": 1, "limit": 100},
-            "call-3",
-        )
-        self.assertNotEqual(
-            deep_agent_file_key(page_one),
-            deep_agent_file_key(page_two),
-        )
-        self.assertNotEqual(
-            deep_agent_file_key(page_one),
-            deep_agent_file_key(other_sheet),
+class DshCompactionRulesTests(unittest.TestCase):
+    def test_summary_usage_is_recursively_json_safe(self) -> None:
+        usage = RunUsage(
+            input_tokens=12,
+            output_tokens=3,
+            cost=Decimal("0.0008047872"),
         )
 
-    def test_legacy_attachment_history_remains_deduplicatable(self) -> None:
-        first = ToolCallPart(
-            "read_xlsx",
-            {"file_id": "file-1", "sheet": "A", "offset": 1, "limit": 100},
-            "call-1",
-        )
-        second = ToolCallPart(
-            "read_xlsx",
-            {"file_id": "file-1", "sheet": "A", "offset": 1, "limit": 100},
-            "call-2",
-        )
-        next_page = ToolCallPart(
-            "read_xlsx",
-            {"file_id": "file-1", "sheet": "A", "offset": 101, "limit": 100},
-            "call-3",
-        )
+        serialized = _jsonable_usage(usage)
 
-        self.assertEqual(deep_agent_file_key(first), deep_agent_file_key(second))
-        self.assertNotEqual(deep_agent_file_key(first), deep_agent_file_key(next_page))
+        self.assertEqual(serialized["cost"], "0.0008047872")
+        self.assertEqual(serialized["input_tokens"], 12)
+        self.assertEqual(serialized["output_tokens"], 3)
+        json.dumps(serialized)
 
-
-class ToolSearchCompactionBoundaryTests(unittest.TestCase):
-    def test_planning_call_and_return_remain_a_safe_pair(self) -> None:
-        messages = [
-            ModelRequest(parts=[UserPromptPart(content="完成复杂任务")]),
-            ModelResponse(
-                parts=[
-                    ToolCallPart(
-                        "write_plan",
-                        {"items": [{"id": "step-1", "content": "读取输入"}]},
-                        "plan-1",
-                    )
-                ]
-            ),
-            ModelRequest(
-                parts=[
-                    ToolReturnPart(
-                        "write_plan",
-                        "Plan updated: 1 step(s).",
-                        "plan-1",
-                    )
-                ]
-            ),
-            ModelResponse(parts=[TextPart(content="继续执行")]),
-        ]
-
-        self.assertEqual(_safe_boundaries(messages), [0, 1, 3, 4])
-        self.assertFalse(has_unprocessed_tool_calls(messages))
-
-    def test_native_tool_search_call_and_return_close_same_boundary(self) -> None:
-        messages = [
-            ModelRequest(parts=[UserPromptPart(content="查找工具")]),
-            ModelResponse(
-                parts=[
-                    NativeToolSearchCallPart(args={"queries": ["财务模型"]}, tool_call_id="search-1"),
-                    NativeToolSearchReturnPart(
-                        content={"matches": []},
-                        tool_call_id="search-1",
-                    ),
-                ]
-            ),
-            ModelRequest(parts=[UserPromptPart(content="继续")]),
-        ]
-
-        self.assertEqual(_safe_boundaries(messages), [0, 1, 2, 3])
-
-    def test_generic_native_tool_call_and_return_close_same_boundary(self) -> None:
-        messages = [
-            ModelRequest(parts=[UserPromptPart(content="执行原生工具")]),
-            ModelResponse(
-                parts=[
-                    NativeToolCallPart("native_lookup", {"query": "预算"}, "native-1"),
-                    NativeToolReturnPart("native_lookup", {"ok": True}, "native-1"),
-                ]
-            ),
-            ModelRequest(parts=[UserPromptPart(content="继续")]),
-        ]
-
-        self.assertEqual(_safe_boundaries(messages), [0, 1, 2, 3])
-        self.assertFalse(has_unprocessed_tool_calls(messages))
-
-    def test_interrupted_response_is_not_pending_deferred_work(self) -> None:
-        messages = [
-            ModelRequest(parts=[UserPromptPart(content="开始")]),
-            ModelResponse(
-                parts=[ToolCallPart("slow_tool", {}, "tool-1")],
-                state="interrupted",
-            ),
-        ]
-
-        self.assertFalse(has_unprocessed_tool_calls(messages))
-
-
-class ContextBudgetTests(unittest.TestCase):
-    def setUp(self) -> None:
-        self._original = (
-            OPTION.agent.context_compaction_trigger_ratio,
-            OPTION.agent.context_compaction_target_ratio,
-        )
-        OPTION.agent.context_compaction_trigger_ratio = 0.80
-        OPTION.agent.context_compaction_target_ratio = 0.55
-
-    def tearDown(self) -> None:
-        (
-            OPTION.agent.context_compaction_trigger_ratio,
-            OPTION.agent.context_compaction_target_ratio,
-        ) = self._original
-
-    def test_max_output_is_a_ceiling_not_the_reserved_output(self) -> None:
-        budget = build_context_budget(
-            [],
-            context_window_tokens=1_000_000,
-            max_output_tokens=384_000,
-        )
-
-        self.assertTrue(budget.enabled)
-        self.assertEqual(budget.predicted_output_tokens, 2_048)
-        self.assertEqual(budget.safety_margin_tokens, 1_024)
-        self.assertEqual(budget.usable_request_tokens, 996_928)
-        self.assertNotEqual(
-            budget.usable_request_tokens,
-            1_000_000 - 384_000 - 1_024,
-        )
-
-    def test_recent_usage_predicts_upper_quartile_bounded_by_model_maximum(
-        self,
-    ) -> None:
-        messages = [
-            ModelResponse(parts=[], usage=RequestUsage(output_tokens=value))
-            for value in (600, 800, 1_000, 8_000)
-        ]
-
-        self.assertEqual(
-            predict_output_tokens(
-                messages,
-                max_output_tokens=4_000,
-                output_floor=512,
-            ),
-            2_048,
-        )
-
-    def test_missing_usage_uses_estimated_output_sample(self) -> None:
-        messages = [ModelResponse(parts=[], usage=RequestUsage())]
-        budget = build_context_budget(
-            messages,
-            context_window_tokens=16_000,
-            max_output_tokens=8_000,
-        )
-        self.assertEqual(budget.output_prediction_source, "estimated")
-        self.assertEqual(budget.estimated_sample_count, 1)
-
-    def test_conservative_estimator_is_cjk_and_symbol_sensitive(self) -> None:
-        self.assertGreaterEqual(conservative_text_tokens("中文测试"), 4)
-        self.assertGreater(
-            conservative_text_tokens('{"a":[1,2,3]}'),
-            conservative_text_tokens("abcdefghijkl"),
-        )
-
-    def test_private_openai_compatible_model_does_not_use_tiktoken(self) -> None:
-        estimator = TokenEstimator.for_model(
-            "openai:gpt-4o",
-            "https://private.example/v1",
-        )
-        self.assertEqual(estimator.source, "conservative_fallback")
-
-    def test_unknown_context_window_disables_compaction(self) -> None:
-        budget = build_context_budget(
-            _long_tool_history(pairs=1),
-            context_window_tokens=None,
-            max_output_tokens=8_192,
-        )
-
-        self.assertFalse(budget.enabled)
-        self.assertEqual(budget.reason, "context_window_unknown")
-        self.assertIsNone(budget.trigger_tokens)
-
-
-class ContextCompactionAlgorithmTests(unittest.TestCase):
-    def test_projection_helpers_cover_empty_duplicate_and_mixed_parts(self) -> None:
-        summary = SystemPromptPart(content="Summary of previous conversation:\n\n旧摘要")
-        shared = SystemPromptPart(content="公共系统规则")
-        first = ModelRequest(
-            parts=[shared, shared, summary, UserPromptPart(content="首个任务")]
-        )
-        last = ModelRequest(parts=[UserPromptPart(content="当前问题")])
-        messages = [
-            ModelResponse(parts=[]),
-            first,
-            ModelResponse(parts=[TextPart(content="中间结论")]),
-            last,
-        ]
-
-        self.assertEqual(_system_parts(messages), [shared])
-        self.assertIs(_first_user_message(messages), first)
-        self.assertIs(_last_user_message(messages), last)
-        self.assertIsNone(_first_user_message([ModelResponse(parts=[])]))
-        self.assertIsNone(_last_user_message([ModelResponse(parts=[])]))
-        self.assertEqual(
-            _protected_messages(messages),
-            [ModelRequest(parts=[shared]), first, last],
-        )
-
-        formatted = _formatted_history(messages)
-        self.assertIn('"kind":"text"', formatted)
-        self.assertIn("旧摘要", formatted)
-
-    def test_safe_tail_cutoff_keeps_largest_tail_within_budget(self) -> None:
-        estimator = TokenEstimator(
-            source="unit_counter",
-            _counter=lambda text: len(text),
-        )
-        messages = [
-            ModelRequest(parts=[UserPromptPart(content="a" * 30)]),
-            ModelResponse(parts=[TextPart(content="b" * 30)]),
-            ModelRequest(parts=[UserPromptPart(content="c")]),
-        ]
-
-        cutoff = _safe_tail_cutoff(messages, keep_tokens=60, estimator=estimator)
-
-        self.assertGreater(cutoff, 0)
-        self.assertLessEqual(estimator.messages(messages[cutoff:]), 200)
-
-    def test_status_code_follows_response_and_exception_chain(self) -> None:
-        response_error = RuntimeError("response status")
-        response_error.response = SimpleNamespace(status_code=503)  # type: ignore[attr-defined]
-        self.assertEqual(_status_code(response_error), 503)
-
-        outer = RuntimeError("outer")
-        outer.__cause__ = response_error
-        self.assertEqual(_status_code(outer), 503)
-        self.assertIsNone(_status_code(ValueError("no status")))
-
-    def test_summary_prompt_uses_stable_continuation_sections(self) -> None:
-        prompt = _summary_prompt(
-            [ModelRequest(parts=[UserPromptPart(content="继续交付当前任务")])],
-            None,
-        )
-
-        for heading in (
-            "## 任务目标与约束",
-            "## 关键决策及理由",
-            "## 事实、文件、标识和工具结论",
-            "## 当前状态",
-            "## 下一步",
-            "## 未决问题与阻塞",
-        ):
-            self.assertIn(heading, prompt)
-        self.assertIn("不要添加前言或代码围栏", prompt)
-        self.assertNotIn("上一次压缩形成的锚点摘要", prompt)
-
-    def test_summary_safety_uses_estimator_specific_margin(self) -> None:
-        conservative = TokenEstimator.conservative()
-        tokenizer = TokenEstimator(
-            source="model_tokenizer",
-            _counter=lambda text: conservative.text(text),
-        )
-        self.assertEqual(_summary_safety_tokens(conservative, 20_000), 2_000)
-        self.assertEqual(_summary_safety_tokens(tokenizer, 20_000), 1_024)
-
-    def test_only_transient_provider_errors_are_retried(self) -> None:
-        class ProviderError(RuntimeError):
-            def __init__(self, status_code: int) -> None:
-                self.status_code = status_code
-                super().__init__(f"HTTP {status_code}")
-
-        self.assertTrue(_is_transient_summary_error(ProviderError(503)))
-        self.assertTrue(_is_transient_summary_error(TimeoutError("timed out")))
-        self.assertFalse(_is_transient_summary_error(ProviderError(401)))
-        self.assertFalse(_is_transient_summary_error(ValueError("bad schema")))
-
-    def test_old_summary_appears_once_in_incremental_summary_prompt(self) -> None:
-        old_summary = "旧摘要唯一标记"
-        first_user = ModelRequest(parts=[UserPromptPart(content="最初任务")])
-        messages = [
-            ModelRequest(
-                parts=[
-                    SystemPromptPart(
-                        content=f"Summary of previous conversation:\n\n{old_summary}"
-                    )
-                ]
-            ),
-            first_user,
-            ModelResponse(parts=[TextPart(content="旧回答")]),
-            ModelRequest(parts=[UserPromptPart(content="新增问题")]),
-        ]
-        to_summarize = _strip_summary_and_system(
-            messages,
-            first_user=first_user,
-        )
-        prompt = _summary_prompt(to_summarize, old_summary)
-
-        self.assertEqual(prompt.count(old_summary), 1)
-        self.assertNotIn("最初任务", prompt)
-        self.assertIn("旧回答", prompt)
-        self.assertIn("新增问题", prompt)
-        self.assertIn("保留仍然成立的内容", prompt)
-        self.assertIn("删除已经过时的状态", prompt)
-        self.assertIn("不要累计重复条目", prompt)
-
-    def test_summary_units_keep_tool_call_and_result_together(self) -> None:
-        messages = [
-            ModelRequest(parts=[UserPromptPart(content="查询")]),
-            ModelResponse(
-                parts=[
-                    ToolCallPart(
-                        "search",
-                        {"query": "context"},
-                        "paired-call",
-                    )
-                ]
-            ),
-            ModelRequest(
-                parts=[
-                    ToolReturnPart(
-                        "search",
-                        "result",
-                        "paired-call",
-                    )
-                ]
-            ),
-            ModelResponse(parts=[TextPart(content="完成")]),
-        ]
-
-        units = _logical_units(messages)
-
-        paired_unit = next(
-            unit
-            for unit in units
-            if any(
-                isinstance(part, ToolCallPart)
-                for message in unit
-                for part in message.parts
-            )
-        )
-        self.assertEqual(len(paired_unit), 2)
+    def test_provider_overflow_detection_is_explicit_and_narrow(self) -> None:
         self.assertTrue(
-            any(
-                isinstance(part, ToolReturnPart)
-                for message in paired_unit
-                for part in message.parts
-            )
-        )
-
-
-class ContextCompactionDefensiveBranchTests(unittest.IsolatedAsyncioTestCase):
-    @staticmethod
-    def _request_context(messages: list[ModelMessage]) -> ModelRequestContext:
-        model = TestModel()
-        return ModelRequestContext(
-            model=model,
-            messages=messages,
-            model_settings=None,
-            model_request_parameters=ModelRequestParameters(),
-        )
-
-    async def test_before_run_initializes_state_and_disabled_budget_returns_unchanged(
-        self,
-    ) -> None:
-        capability = DeepAgentContextCompaction(
-            context_window_tokens=0,
-            max_output_tokens=None,
-        )
-        deps = AgentDeps(session_id="disabled-context")
-        ctx = RunContext(deps=deps, model=TestModel(), usage=RunUsage())
-        request_context = self._request_context(
-            [ModelRequest(parts=[UserPromptPart(content="你好")])]
-        )
-
-        await capability.before_run(ctx)
-        returned = await capability.before_model_request(ctx, request_context)
-
-        self.assertIs(returned, request_context)
-        self.assertIsNotNone(deps.context_state)
-        self.assertFalse(deps.context_state.last_budget.enabled)  # type: ignore[union-attr]
-
-    async def test_tool_availability_delta_is_safe_for_harness_compaction(self) -> None:
-        capability = DeepAgentContextCompaction(
-            context_window_tokens=4_000,
-            max_output_tokens=500,
-        )
-        messages = [
-            ModelRequest(parts=[UserPromptPart(content="最初任务")]),
-            ModelRequest(
-                parts=[
-                    ToolAvailabilityDeltaPart(
-                        tools_added=["deepfos_cube_query_data"],
-                        tool_call_id="search-1",
-                    )
-                ]
-            ),
-            ModelResponse(parts=[TextPart(content="旧内容" * 2_000)]),
-            ModelRequest(parts=[UserPromptPart(content="继续")]),
-        ]
-        request_context = self._request_context(messages)
-        deps = AgentDeps(session_id="tool-availability-compaction")
-        ctx = RunContext(deps=deps, model=TestModel(), usage=RunUsage())
-
-        compacted = await capability._deterministic_compaction(
-            messages,
-            ctx,
-            request_context,
-            200,
-            TokenEstimator.conservative(),
-        )
-
-        self.assertTrue(compacted)
-        self.assertIsInstance(estimate_token_count(compacted), int)
-
-    async def test_after_model_request_records_estimated_and_provider_usage(self) -> None:
-        capability = DeepAgentContextCompaction(
-            context_window_tokens=4_000,
-            max_output_tokens=500,
-        )
-        state = ContextRunState(
-            raw_history=[],
-            estimator=TokenEstimator.conservative(),
-        )
-        state.pending_request_estimate = 200
-        ctx = RunContext(
-            deps=AgentDeps(session_id="usage", context_state=state),
-            model=TestModel(),
-            usage=RunUsage(),
-        )
-        request_context = self._request_context([])
-
-        estimated_response = ModelResponse(
-            parts=[TextPart(content="需要估算的回复")],
-            usage=RequestUsage(),
-        )
-        await capability.after_model_request(
-            ctx,
-            request_context=request_context,
-            response=estimated_response,
-        )
-        provider_response = ModelResponse(
-            parts=[TextPart(content="provider usage")],
-            usage=RequestUsage(input_tokens=100, output_tokens=20),
-        )
-        await capability.after_model_request(
-            ctx,
-            request_context=request_context,
-            response=provider_response,
-        )
-
-        self.assertEqual(
-            [sample.usage_source for sample in state.output_samples],
-            ["estimated", "provider"],
-        )
-        self.assertEqual(state.telemetry.estimation_error_ratio, 1.0)
-
-    async def test_projection_reports_target_and_summary_contract_failures(self) -> None:
-        capability = DeepAgentContextCompaction(
-            context_window_tokens=4_000,
-            max_output_tokens=500,
-        )
-        state = ContextRunState(
-            raw_history=[],
-            estimator=TokenEstimator.conservative(),
-        )
-        ctx = RunContext(deps=None, model=TestModel(), usage=RunUsage())
-        request_context = self._request_context(
-            [ModelRequest(parts=[UserPromptPart(content="需要压缩" * 50)])]
-        )
-
-        with (
-            patch.object(
-                capability,
-                "_deterministic_compaction",
-                new=AsyncMock(return_value=request_context.messages),
-            ),
-            patch.object(
-                capability,
-                "_summarize_projection",
-                new=AsyncMock(return_value=request_context.messages),
-            ),
-        ):
-            with self.assertRaises(SummaryUnavailable) as target_failure:
-                await capability._compact_projection(
-                    request_context.messages,
-                    ctx,
-                    request_context,
-                    1,
-                    state,
-                    require_summary=False,
-                    emit_deterministic=True,
-                    reserve_answer_request=False,
+            is_provider_context_overflow(
+                ModelHTTPError(
+                    400,
+                    "test-model",
+                    {"error": {"code": "context_length_exceeded"}},
                 )
-        self.assertEqual(target_failure.exception.reason, "target_not_met")
-
-        short = [ModelRequest(parts=[UserPromptPart(content="短历史")])]
-        short_context = self._request_context(short)
-        with (
-            patch.object(
-                capability,
-                "_deterministic_compaction",
-                new=AsyncMock(return_value=short),
-            ),
-            patch.object(
-                capability,
-                "_summarize_projection",
-                new=AsyncMock(return_value=short),
-            ),
-        ):
-            with self.assertRaises(SummaryUnavailable) as summary_failure:
-                await capability._compact_projection(
-                    short,
-                    ctx,
-                    short_context,
-                    10_000,
-                    state,
-                    require_summary=True,
-                    emit_deterministic=False,
-                    reserve_answer_request=False,
-                )
-        self.assertEqual(summary_failure.exception.reason, "summary_not_applied")
-
-        with patch.object(
-            capability,
-            "_deterministic_compaction",
-            new=AsyncMock(return_value=short),
-        ):
-            compacted, estimated = await capability._compact_projection(
-                short,
-                ctx,
-                short_context,
-                10_000,
-                state,
-                require_summary=False,
-                emit_deterministic=False,
-                reserve_answer_request=True,
             )
-        self.assertEqual(compacted, short)
-        self.assertLess(estimated, 10_000)
-
-    async def test_single_summary_rejects_empty_output(self) -> None:
-        capability = DeepAgentContextCompaction(
-            context_window_tokens=8_000,
-            max_output_tokens=500,
         )
-        state = ContextRunState(
-            raw_history=[],
-            estimator=TokenEstimator.conservative(),
-            usage_limits=UsageLimits(request_limit=5),
-        )
-        ctx = RunContext(deps=None, model=TestModel(), usage=RunUsage())
-        result = SimpleNamespace(output="   ")
-
-        with patch(
-            "deep_agent.agent.context.compaction.Agent.run",
-            new=AsyncMock(return_value=result),
-        ):
-            with self.assertRaises(SummaryUnavailable) as raised:
-                await capability._single_summary(
-                    [ModelResponse(parts=[TextPart(content="旧历史")])],
-                    None,
-                    ctx,
-                    500,
-                    state,
-                    reserve_answer_request=False,
-                )
-
-        self.assertEqual(raised.exception.reason, "summary_empty")
-
-    def test_sliding_window_preserves_system_and_reports_hard_overflow(self) -> None:
-        capability = DeepAgentContextCompaction(
-            context_window_tokens=4_000,
-            max_output_tokens=500,
-        )
-        estimator = TokenEstimator.conservative()
-        messages = [
-            ModelRequest(
-                parts=[
-                    SystemPromptPart(content="系统规则"),
-                    UserPromptPart(content="首条任务"),
-                ]
-            ),
-            ModelResponse(parts=[TextPart(content="旧内容" * 50)]),
-            ModelRequest(parts=[UserPromptPart(content="最近问题")]),
-        ]
-        request_context = self._request_context(messages)
-
-        compacted = capability._sliding_window(
-            messages,
-            request_context,
-            500,
-            estimator,
-        )
-        self.assertIn("系统规则", str(compacted))
-
-        with self.assertRaises(ContextWindowExceededError):
-            capability._sliding_window(
-                messages,
-                request_context,
-                1,
-                estimator,
-            )
-
-
-class ContextCheckpointTests(unittest.IsolatedAsyncioTestCase):
-    async def asyncSetUp(self) -> None:
-        self.stores, self._engine, _ = await make_sqlite_stores()
-        self._original = (
-            OPTION.agent.context_compaction_trigger_ratio,
-            OPTION.agent.context_compaction_target_ratio,
-            OPTION.agent.context_keep_tool_pairs,
-            OPTION.agent.context_min_clear_tokens,
-        )
-        OPTION.agent.context_compaction_trigger_ratio = 0.80
-        OPTION.agent.context_compaction_target_ratio = 0.55
-        OPTION.agent.context_keep_tool_pairs = 3
-        OPTION.agent.context_min_clear_tokens = 10
-        self.persister = EventPersister(self.stores.coordinator)
-        await self.persister.start()
-
-    async def asyncTearDown(self) -> None:
-        (
-            OPTION.agent.context_compaction_trigger_ratio,
-            OPTION.agent.context_compaction_target_ratio,
-            OPTION.agent.context_keep_tool_pairs,
-            OPTION.agent.context_min_clear_tokens,
-        ) = self._original
-        await self.persister.aclose()
-        await self._engine.dispose()
-
-    def _fingerprint(self) -> str:
-        return projection_fingerprint(
-            llm_model_id="main-model",
-            context_window_tokens=4_000,
-            trigger_ratio=OPTION.agent.context_compaction_trigger_ratio,
-            target_ratio=OPTION.agent.context_compaction_target_ratio,
-            keep_tool_pairs=OPTION.agent.context_keep_tool_pairs,
-            summary_model_id="summary-model",
-        )
-
-    def _runner(
-        self,
-        capability: DeepAgentContextCompaction,
-        *,
-        model=None,
-    ) -> AgentRunner:
-        agent = Agent(
-            model or TestModel(call_tools=[], custom_output_text="done"),
-            deps_type=AgentDeps,
-            capabilities=[capability],
-        )
-        return AgentRunner(
-            agent,
-            self.stores.coordinator,
-            UsageLimits(request_limit=20),
-            context_window_tokens=4_000,
-            max_output_tokens=500,
-            context_compaction=capability,
-            checkpoint_store=self.stores.context_checkpoint,
-            checkpoint_fingerprint=self._fingerprint(),
-            summary_model_id="summary-model",
-        )
-
-    def test_opaque_provider_compaction_fails_closed_before_checkpoint_save(self) -> None:
-        history = [
-            ModelResponse(
-                parts=[
-                    CompactionPart(
-                        content=None,
-                        provider_name="openai",
-                        provider_details={"opaque": "provider-state"},
-                    )
-                ]
-            )
-        ]
-
-        with self.assertRaisesRegex(ValueError, "Opaque provider-native compaction"):
-            serialize_sanitized_projection(history)
-
-    def test_text_provider_compaction_can_be_sanitized_without_provider_details(self) -> None:
-        history = [
-            ModelResponse(
-                parts=[
-                    CompactionPart(
-                        content="safe summary",
-                        provider_name="openai",
-                        provider_details={"opaque": "provider-state"},
-                    )
-                ]
-            )
-        ]
-
-        payload = serialize_sanitized_projection(history)
-
-        self.assertEqual(payload[0]["parts"][0]["content"], "safe summary")
-        self.assertNotIn("provider_details", payload[0]["parts"][0])
-
-    async def test_harness_compacts_projection_without_rewriting_raw_history(
-        self,
-    ) -> None:
-        raw_before = _long_tool_history()
-        raw_before_tokens = estimate_token_count(raw_before)
-        await self.stores.coordinator.append(
-            "compact-session",
-            raw_before,
-            user_id="user-1",
-        )
-        capability = DeepAgentContextCompaction(
-            context_window_tokens=4_000,
-            max_output_tokens=500,
-            summary_timeout=10,
-        )
-        runner = self._runner(capability)
-
-        result = await runner.run(
-            "compact-session",
-            "继续",
-            AgentDeps(session_id="compact-session", user="user-1"),
-        )
-
-        telemetry = result["context"]["compaction"]
-        self.assertTrue(telemetry["triggered"])
-        self.assertTrue(telemetry["summary_applied"], telemetry)
-        self.assertTrue(telemetry["checkpoint_saved"], telemetry)
-        self.assertEqual(telemetry["strategy"], "tiered_summary")
-        self.assertLess(
-            telemetry["estimated_tokens_after"],
-            telemetry["estimated_tokens_before"] * 0.50,
-        )
-        self.assertEqual(
-            telemetry["estimated_input_tokens"],
-            telemetry["estimated_tokens_after"],
-        )
-        self.assertGreaterEqual(result["usage"]["requests"], 2)
-
-        raw_after = await self.stores.coordinator.get_history("compact-session")
-        self.assertEqual(len(raw_after), len(raw_before) + 2)
-        raw_tool_returns = [
-            part
-            for message in raw_after
-            if isinstance(message, ModelRequest)
-            for part in message.parts
-            if isinstance(part, ToolReturnPart)
-        ]
-        self.assertEqual(len(raw_tool_returns), 8)
-        self.assertIn("Bearer abcdefghij", str(raw_tool_returns[0].content))
-        self.assertGreater(raw_before_tokens, 2_000)
-
-        checkpoint = await self.stores.context_checkpoint.get("compact-session")
-        self.assertIsNotNone(checkpoint)
-        assert checkpoint is not None
-        self.assertEqual(checkpoint.row_version, 1)
-        self.assertEqual(checkpoint.source_last_sequence, len(raw_after) - 1)
-        self.assertLess(checkpoint.estimated_tokens, raw_before_tokens * 0.50)
-        self.assertNotIn("Bearer abcdefghij", str(checkpoint.payload))
-        self.assertNotIn("plain-secret-token", str(checkpoint.payload))
-
-        projected = deserialize_projection(checkpoint.payload)
-        summaries = [
-            part.content
-            for message in projected
-            if isinstance(message, ModelRequest)
-            for part in message.parts
-            if isinstance(part, SystemPromptPart)
-        ]
         self.assertTrue(
-            any(text.startswith("Summary of previous conversation:") for text in summaries)
-        )
-        call_ids = {
-            part.tool_call_id
-            for message in projected
-            if isinstance(message, ModelResponse)
-            for part in message.parts
-            if isinstance(part, ToolCallPart)
-        }
-        return_ids = {
-            part.tool_call_id
-            for message in projected
-            if isinstance(message, ModelRequest)
-            for part in message.parts
-            if isinstance(part, ToolReturnPart)
-        }
-        self.assertTrue(return_ids.issubset(call_ids))
-
-        await runner.run(
-            "compact-session",
-            "再继续一步",
-            AgentDeps(session_id="compact-session", user="user-1"),
-        )
-        unchanged = await self.stores.context_checkpoint.get("compact-session")
-        self.assertIsNotNone(unchanged)
-        assert unchanged is not None
-        self.assertEqual(unchanged.row_version, 1)
-        self.assertEqual(
-            unchanged.source_last_sequence,
-            checkpoint.source_last_sequence,
-        )
-
-    async def test_automatic_compaction_projects_context_refs_without_metadata(
-        self,
-    ) -> None:
-        ref = ContextReference(
-            key="selection",
-            type="deeptable.selection",
-            schema_version="2.0",
-            label="预算!B2:C4",
-            payload={"cells": [{"address": "B2", "value": 42}]},
-            metadata={"history_only_secret": "must-stay-out-of-checkpoint"},
-        )
-        raw = _long_tool_history()
-        first = raw[0]
-        assert isinstance(first, ModelRequest)
-        raw[0] = ModelRequest(
-            parts=[
-                UserPromptPart(
-                    content=[
-                        context_reference_dict(ref),
-                        "请持续完成最初的任务",
-                    ]
-                )
-            ]
-        )
-        await self.stores.coordinator.append(
-            "context-ref-auto-compact",
-            raw,
-            user_id="user-1",
-        )
-        capability = DeepAgentContextCompaction(
-            context_window_tokens=4_000,
-            max_output_tokens=500,
-            summary_timeout=10,
-        )
-
-        result = await self._runner(capability).run(
-            "context-ref-auto-compact",
-            "继续",
-            AgentDeps(session_id="context-ref-auto-compact", user="user-1"),
-        )
-
-        self.assertTrue(result["context"]["compaction"]["summary_applied"])
-        stored = await self.stores.coordinator.get_history("context-ref-auto-compact")
-        self.assertIn("must-stay-out-of-checkpoint", str(serialize_message(stored[0])))
-        checkpoint = await self.stores.context_checkpoint.get(
-            "context-ref-auto-compact"
-        )
-        self.assertIsNotNone(checkpoint)
-        assert checkpoint is not None
-        self.assertNotIn("must-stay-out-of-checkpoint", str(checkpoint.payload))
-
-    async def test_large_window_history_uses_one_summary_then_reuses_checkpoint(
-        self,
-    ) -> None:
-        context_window = 40_000
-        max_output = 4_000
-        estimator = TokenEstimator.conservative()
-        built = build_context_test_history(
-            CONTEXT_TEST_SCENARIOS[0],
-            context_window_tokens=context_window,
-            max_output_tokens=max_output,
-            estimator=estimator,
-        )
-        await self.stores.coordinator.append(
-            "large-window-single-summary",
-            built.messages,
-            user_id="user-1",
-        )
-        summary_prompt_tokens: list[int] = []
-
-        def respond(messages: list[ModelMessage], _info: AgentInfo) -> ModelResponse:
-            if "<history>" in str(messages):
-                prompt_tokens = sum(
-                    estimator.text(str(getattr(part, "content", "")))
-                    for message in messages
-                    for part in message.parts
-                )
-                summary_prompt_tokens.append(prompt_tokens)
-                return ModelResponse(parts=[TextPart(content="单次摘要：保留目标与约束。")])
-            return ModelResponse(parts=[TextPart(content="done")])
-
-        capability = DeepAgentContextCompaction(
-            context_window_tokens=context_window,
-            max_output_tokens=max_output,
-            summary_timeout=10,
-        )
-        fingerprint = projection_fingerprint(
-            llm_model_id="main-model",
-            context_window_tokens=context_window,
-            max_output_tokens=max_output,
-            trigger_ratio=OPTION.agent.context_compaction_trigger_ratio,
-            target_ratio=OPTION.agent.context_compaction_target_ratio,
-            keep_tool_pairs=OPTION.agent.context_keep_tool_pairs,
-            summary_model_id="main-model",
-            estimator_source=estimator.source,
-        )
-        runner = AgentRunner(
-            Agent(
-                FunctionModel(respond),
-                deps_type=AgentDeps,
-                capabilities=[capability],
-            ),
-            self.stores.coordinator,
-            UsageLimits(request_limit=20),
-            context_window_tokens=context_window,
-            max_output_tokens=max_output,
-            context_compaction=capability,
-            checkpoint_store=self.stores.context_checkpoint,
-            checkpoint_fingerprint=fingerprint,
-            summary_model_id="main-model",
-            estimator=estimator,
-        )
-
-        first = await runner.run(
-            "large-window-single-summary",
-            "总结并继续",
-            AgentDeps(session_id="large-window-rolling-summary", user="user-1"),
-        )
-        self.assertEqual(first["context"]["compaction"]["summary_calls"], 1)
-        self.assertEqual(first["context"]["compaction"]["summary_chunks"], 1)
-        self.assertEqual(len(summary_prompt_tokens), 1)
-        prompt_tokens = summary_prompt_tokens[0]
-        output_limit = min(
-            max_output,
-            4_096,
-            max(256, int(first["context"]["budget"]["target_tokens"] * 0.10)),
-        )
-        self.assertLessEqual(
-            prompt_tokens
-            + output_limit
-            + _summary_safety_tokens(estimator, prompt_tokens),
-            context_window,
-        )
-        checkpoint = await self.stores.context_checkpoint.get(
-            "large-window-single-summary"
-        )
-        self.assertIsNotNone(checkpoint)
-
-        second = await runner.run(
-            "large-window-single-summary",
-            "继续",
-            AgentDeps(session_id="large-window-rolling-summary", user="user-1"),
-        )
-        self.assertFalse(second["context"]["compaction"]["triggered"])
-        unchanged = await self.stores.context_checkpoint.get(
-            "large-window-single-summary"
-        )
-        self.assertEqual(unchanged.row_version, checkpoint.row_version)
-
-    async def test_transient_summary_failure_retries_the_identical_prompt_once(
-        self,
-    ) -> None:
-        capability = DeepAgentContextCompaction(
-            context_window_tokens=8_000,
-            max_output_tokens=500,
-            summary_timeout=10,
-        )
-        state = ContextRunState(
-            raw_history=[],
-            estimator=TokenEstimator.conservative(),
-            usage_limits=UsageLimits(request_limit=5),
-        )
-        context = RunContext(
-            deps=None,
-            model=TestModel(),
-            usage=RunUsage(),
-        )
-        messages = [
-            ModelResponse(parts=[TextPart(content="需要压缩的旧历史")]),
-            ModelRequest(parts=[UserPromptPart(content="继续")]),
-        ]
-
-        with (
-            patch(
-                "deep_agent.agent.context.compaction.Agent.run",
-                new=AsyncMock(
-                    side_effect=[
-                        TimeoutError("provider timed out"),
-                        SimpleNamespace(output="重试后摘要"),
-                    ]
-                ),
-            ) as run,
-            patch(
-                "deep_agent.agent.context.compaction.asyncio.sleep",
-                new=AsyncMock(),
-            ) as sleep,
-        ):
-            summary = await capability._single_summary(
-                messages,
-                None,
-                context,
-                500,
-                state,
-                reserve_answer_request=True,
-            )
-
-        self.assertEqual(summary, "重试后摘要")
-        self.assertEqual(run.await_count, 2)
-        self.assertEqual(
-            run.await_args_list[0].args[0],
-            run.await_args_list[1].args[0],
-        )
-        self.assertEqual(
-            run.await_args_list[0].kwargs["model_settings"]["max_tokens"],
-            500,
-        )
-        sleep.assert_awaited_once_with(1.0)
-        self.assertEqual(state.telemetry.summary_calls, 2)
-        self.assertEqual(state.telemetry.summary_chunks, 1)
-
-    async def test_two_transient_summary_failures_stop_after_two_identical_calls(
-        self,
-    ) -> None:
-        capability = DeepAgentContextCompaction(
-            context_window_tokens=8_000,
-            max_output_tokens=500,
-            summary_timeout=10,
-        )
-        state = ContextRunState(
-            raw_history=[],
-            estimator=TokenEstimator.conservative(),
-            usage_limits=UsageLimits(request_limit=5),
-        )
-        context = RunContext(deps=None, model=TestModel(), usage=RunUsage())
-        run = AsyncMock(
-            side_effect=[
-                TimeoutError("first timeout"),
-                TimeoutError("second timeout"),
-            ]
-        )
-        with (
-            patch("deep_agent.agent.context.compaction.Agent.run", new=run),
-            patch(
-                "deep_agent.agent.context.compaction.asyncio.sleep",
-                new=AsyncMock(),
-            ),
-        ):
-            with self.assertRaises(SummaryUnavailable) as raised:
-                await capability._single_summary(
-                    [ModelResponse(parts=[TextPart(content="旧历史")])],
-                    None,
-                    context,
-                    500,
-                    state,
-                    reserve_answer_request=True,
-                )
-
-        self.assertEqual(raised.exception.reason, "summary_timeout")
-        self.assertEqual(run.await_count, 2)
-        self.assertEqual(run.await_args_list[0].args[0], run.await_args_list[1].args[0])
-        self.assertEqual(state.telemetry.summary_calls, 2)
-        self.assertEqual(state.telemetry.summary_chunks, 1)
-
-    async def test_nested_summary_uses_official_run_cancellation_token(self) -> None:
-        capability = DeepAgentContextCompaction(
-            context_window_tokens=8_000,
-            max_output_tokens=500,
-            summary_timeout=10,
-        )
-        token = CancellationToken()
-        state = ContextRunState(
-            raw_history=[],
-            estimator=TokenEstimator.conservative(),
-            usage_limits=UsageLimits(request_limit=5),
-        )
-        context = RunContext(
-            deps=AgentDeps(
-                session_id="cancel-summary",
-                cancellation_token=token,
-            ),
-            model=TestModel(),
-            usage=RunUsage(),
-        )
-        cancelled = RunCancelled("summary cancelled", usage=RunUsage())
-
-        with patch(
-            "deep_agent.agent.context.compaction.Agent.run",
-            new=AsyncMock(side_effect=cancelled),
-        ) as run:
-            with self.assertRaises(RunCancelled):
-                await capability._single_summary(
-                    [ModelResponse(parts=[TextPart(content="需要压缩的旧历史")])],
-                    None,
-                    context,
-                    500,
-                    state,
-                    reserve_answer_request=True,
-                )
-
-        self.assertIs(run.await_args.kwargs["cancellation_token"], token)
-        self.assertEqual(run.await_count, 1)
-        self.assertEqual(state.telemetry.summary_calls, 1)
-
-    async def test_cancelled_automatic_summary_never_uses_sliding_fallback(self) -> None:
-        capability = DeepAgentContextCompaction(
-            context_window_tokens=4_000,
-            max_output_tokens=100,
-            summary_timeout=10,
-        )
-        state = ContextRunState(
-            raw_history=[],
-            estimator=TokenEstimator.conservative(),
-            usage_limits=UsageLimits(request_limit=5),
-        )
-        deps = AgentDeps(session_id="cancel-before-request", context_state=state)
-        model = TestModel()
-        context = RunContext(deps=deps, model=model, usage=RunUsage())
-        request_context = ModelRequestContext(
-            model=model,
-            messages=[
-                ModelRequest(parts=[UserPromptPart(content="最初任务")]),
-                ModelResponse(parts=[TextPart(content="旧历史" * 2_000)]),
-                ModelRequest(parts=[UserPromptPart(content="继续")]),
-            ],
-            model_settings=None,
-            model_request_parameters=ModelRequestParameters(),
-        )
-        cancelled = RunCancelled("summary cancelled", usage=RunUsage())
-
-        with (
-            patch.object(
-                capability,
-                "_compact_projection",
-                new=AsyncMock(side_effect=cancelled),
-            ),
-            patch.object(capability, "_sliding_window") as sliding,
-        ):
-            with self.assertRaises(RunCancelled):
-                await capability.before_model_request(context, request_context)
-
-        sliding.assert_not_called()
-
-    async def test_automatic_summary_reserves_one_request_for_the_answer(self) -> None:
-        capability = DeepAgentContextCompaction(
-            context_window_tokens=8_000,
-            max_output_tokens=500,
-            summary_timeout=10,
-        )
-        state = ContextRunState(
-            raw_history=[],
-            estimator=TokenEstimator.conservative(),
-            usage_limits=UsageLimits(request_limit=1),
-        )
-        context = RunContext(deps=None, model=TestModel(), usage=RunUsage())
-        with patch(
-            "deep_agent.agent.context.compaction.Agent.run",
-            new=AsyncMock(),
-        ) as run:
-            with self.assertRaises(SummaryUnavailable) as raised:
-                await capability._single_summary(
-                    [ModelResponse(parts=[TextPart(content="旧历史")])],
-                    None,
-                    context,
-                    500,
-                    state,
-                    reserve_answer_request=True,
-                )
-
-        self.assertEqual(raised.exception.reason, "request_limit_reserved")
-        run.assert_not_awaited()
-
-    async def test_checkpoint_cas_hash_and_branch_invalidation(self) -> None:
-        raw = [
-            ModelRequest(parts=[UserPromptPart(content="raw-a")]),
-            ModelResponse(parts=[]),
-        ]
-        projected = [ModelRequest(parts=[UserPromptPart(content="projection-a")])]
-        fingerprint = self._fingerprint()
-
-        self.assertTrue(
-            await save_projection(
-                self.stores.context_checkpoint,
-                raw_history=raw,
-                projected_history=projected,
-                session_id="cas-session",
-                agent_id=None,
-                fingerprint=fingerprint,
-                expected_row_version=0,
-                summary_model_id="summary-model",
+            is_provider_context_overflow(
+                ModelHTTPError(413, "test-model", "maximum context length exceeded")
             )
         )
         self.assertFalse(
-            await save_projection(
-                self.stores.context_checkpoint,
-                raw_history=raw,
-                projected_history=projected,
-                session_id="cas-session",
-                agent_id=None,
-                fingerprint=fingerprint,
-                expected_row_version=0,
-                summary_model_id="summary-model",
+            is_provider_context_overflow(
+                ModelHTTPError(400, "test-model", {"error": "invalid api key"})
             )
         )
-        await self.stores.coordinator.append("cas-session", raw)
-
-        valid = await load_projection(
-            self.stores.context_checkpoint,
-            raw,
-            session_id="cas-session",
-            agent_id=None,
-            fingerprint=fingerprint,
-        )
-        self.assertTrue(valid.used_checkpoint)
-        self.assertEqual(valid.messages, projected)
-
-        mismatched = await load_projection(
-            self.stores.context_checkpoint,
-            raw,
-            session_id="cas-session",
-            agent_id=None,
-            fingerprint="different-policy",
-        )
-        self.assertFalse(mismatched.used_checkpoint)
-        self.assertEqual(mismatched.invalid_reason, "projection_fingerprint")
-        self.assertEqual(history_hash(mismatched.messages), history_hash(raw))
-
-        await self.stores.coordinator.truncate_history(
-            "cas-session",
-            keep_count=1,
-        )
-        self.assertIsNone(
-            await self.stores.context_checkpoint.get("cas-session")
-        )
-
-    async def test_summary_failure_uses_fallback_without_writing_checkpoint(
-        self,
-    ) -> None:
-        def fail_summary(
-            messages: list[ModelMessage],
-            _info: AgentInfo,
-        ) -> ModelResponse:
-            if "<history>" in str(messages):
-                raise RuntimeError("summary unavailable")
-            return ModelResponse(parts=[TextPart(content="done")])
-
-        raw_before = _long_tool_history()
-        await self.stores.coordinator.append(
-            "summary-failure",
-            raw_before,
-            user_id="user-1",
-        )
-        capability = DeepAgentContextCompaction(
-            context_window_tokens=4_000,
-            max_output_tokens=500,
-            summary_timeout=10,
-        )
-
-        result = await self._runner(
-            capability,
-            model=FunctionModel(fail_summary),
-        ).run(
-            "summary-failure",
-            "继续",
-            AgentDeps(session_id="summary-failure", user="user-1"),
-        )
-
-        telemetry = result["context"]["compaction"]
-        self.assertTrue(telemetry["triggered"])
-        self.assertTrue(telemetry["summary_failed"])
-        self.assertFalse(telemetry["summary_applied"])
-        self.assertIsNone(telemetry["checkpoint_saved"])
-        self.assertEqual(telemetry["strategy"], "sliding_window_fallback")
-        self.assertIsNone(
-            await self.stores.context_checkpoint.get("summary-failure")
-        )
-        self.assertEqual(
-            len(await self.stores.coordinator.get_history("summary-failure")),
-            len(raw_before) + 2,
-        )
-
-    async def test_no_single_request_intersection_uses_sliding_without_summary_call(
-        self,
-    ) -> None:
-        summary_calls = 0
-
-        def respond(messages: list[ModelMessage], _info: AgentInfo) -> ModelResponse:
-            nonlocal summary_calls
-            if "<history>" in str(messages):
-                summary_calls += 1
-            return ModelResponse(parts=[TextPart(content="done")])
-
-        raw = [
-            ModelRequest(parts=[UserPromptPart(content="首条任务" * 220)]),
-            ModelResponse(parts=[TextPart(content="早期结论" * 220)]),
-            ModelRequest(parts=[UserPromptPart(content="中段约束" * 220)]),
-            ModelResponse(parts=[TextPart(content="中段结论" * 220)]),
-        ]
-        await self.stores.coordinator.append(
-            "no-safe-intersection-auto",
-            raw,
-            user_id="user-1",
-        )
-        capability = DeepAgentContextCompaction(
-            context_window_tokens=4_000,
-            max_output_tokens=500,
-            summary_timeout=10,
-        )
-
-        result = await self._runner(
-            capability,
-            model=FunctionModel(respond),
-        ).run(
-            "no-safe-intersection-auto",
-            "当前问题" * 220,
-            AgentDeps(session_id="no-safe-intersection-auto", user="user-1"),
-        )
-
-        telemetry = result["context"]["compaction"]
-        self.assertEqual(summary_calls, 0)
-        self.assertEqual(telemetry["strategy"], "sliding_window_fallback")
-        self.assertFalse(telemetry["summary_applied"])
-        self.assertIsNone(
-            await self.stores.context_checkpoint.get("no-safe-intersection-auto")
-        )
-
-    async def test_manual_input_too_large_does_not_call_model_or_write_checkpoint(
-        self,
-    ) -> None:
-        summary_calls = 0
-
-        def respond(messages: list[ModelMessage], _info: AgentInfo) -> ModelResponse:
-            nonlocal summary_calls
-            if "<history>" in str(messages):
-                summary_calls += 1
-            return ModelResponse(parts=[TextPart(content="unused")])
-
-        raw = [
-            ModelRequest(parts=[UserPromptPart(content="首条任务" * 220)]),
-            ModelResponse(parts=[TextPart(content="早期结论" * 220)]),
-            ModelRequest(parts=[UserPromptPart(content="当前问题" * 220)]),
-            ModelResponse(parts=[TextPart(content="当前结论" * 220)]),
-        ]
-        await self.stores.coordinator.append(
-            "no-safe-intersection-manual",
-            raw,
-            user_id="user-1",
-        )
-        capability = DeepAgentContextCompaction(
-            context_window_tokens=4_000,
-            max_output_tokens=500,
-            summary_timeout=10,
-        )
-        events = [
-            event
-            async for event in self._runner(
-                capability,
-                model=FunctionModel(respond),
-            ).run_manual_compaction(
-                "no-safe-intersection-manual",
-                AgentDeps(session_id="no-safe-intersection-manual", user="user-1"),
+        self.assertFalse(
+            is_provider_context_overflow(
+                ModelHTTPError(503, "test-model", "maximum context length exceeded")
             )
-        ]
-
-        self.assertEqual(events[-1]["status"], "failed")
-        self.assertEqual(events[-1]["reason"], "summary_input_too_large")
-        self.assertEqual(summary_calls, 0)
-        self.assertIsNone(
-            await self.stores.context_checkpoint.get("no-safe-intersection-manual")
         )
 
-    async def test_attachment_scope_comes_from_raw_history_not_checkpoint_payload(
-        self,
-    ) -> None:
-        session_id = "attachment-checkpoint"
+    def test_eight_section_summary_is_strict(self) -> None:
+        validate_summary_markdown(valid_summary())
+        with self.assertRaises(SummaryUnavailable):
+            validate_summary_markdown(valid_summary().replace("## 8. Critical Context", ""))
+        with self.assertRaises(SummaryUnavailable):
+            validate_summary_markdown(valid_summary().replace("## 2.", "## 9."))
+
+    def test_tool_result_8192_boundary_and_8193_pruning(self) -> None:
+        unchanged = ModelRequest(parts=[ToolReturnPart("query", "甲" * 8192, "call-1")])
+        pruned, records = _prune_tool_results(
+            [unchanged], threshold=8192, head=4096, tail=1024
+        )
+        self.assertEqual(pruned, [unchanged])
+        self.assertEqual(records, [])
+
+        oversized = ModelRequest(parts=[ToolReturnPart("query", "😀" * 8193, "call-2")])
+        pruned, records = _prune_tool_results(
+            [oversized], threshold=8192, head=4096, tail=1024
+        )
+        content = pruned[0].parts[0].content
+        self.assertTrue(content.startswith("😀" * 4096))
+        self.assertTrue(content.endswith("😀" * 1024))
+        self.assertIn("tool result middle pruned", content)
+        self.assertEqual(records[0]["before_codepoints"], 8193)
+        self.assertEqual(oversized.parts[0].content, "😀" * 8193)
+
+    def test_non_text_blocks_keep_order(self) -> None:
+        marker = {"kind": "custom", "id": "binary"}
+        message = ModelRequest(
+            parts=[ToolReturnPart("query", [marker, "中" * 8193, marker], "call-3")]
+        )
+        pruned, _ = _prune_tool_results(
+            [message], threshold=8192, head=4096, tail=1024
+        )
+        blocks = pruned[0].parts[0].content
+        self.assertEqual(blocks[0], marker)
+        self.assertEqual(blocks[2], marker)
+
+    def test_tool_pair_is_never_split_by_safe_boundary(self) -> None:
+        messages = [
+            ModelRequest(parts=[UserPromptPart(content="查成员")]),
+            ModelResponse(parts=[ToolCallPart("query", {}, "call-4")]),
+            ModelRequest(parts=[ToolReturnPart("query", "结果", "call-4")]),
+            ModelResponse(parts=[TextPart(content="完成")]),
+        ]
+        boundaries = _safe_boundaries(messages)
+        self.assertNotIn(2, boundaries)
+        self.assertIn(3, boundaries)
+
+    def test_current_turn_is_preserved_as_one_unit(self) -> None:
+        messages = [
+            ModelRequest(parts=[UserPromptPart(content="第一轮")]),
+            ModelResponse(parts=[TextPart(content="旧回答")]),
+            ModelRequest(parts=[UserPromptPart(content="当前轮")]),
+            ModelResponse(parts=[ToolCallPart("query", {}, "call-current")]),
+            ModelRequest(parts=[ToolReturnPart("query", "结果", "call-current")]),
+            ModelResponse(parts=[TextPart(content="当前回答")]),
+        ]
+        self.assertEqual(_protected_messages(messages), messages[2:])
+
+    def test_visible_compaction_prefix_maps_back_to_raw_events(self) -> None:
         raw = [
-            ModelRequest(
-                parts=[
-                    UserPromptPart(
-                        content=[
-                            "读取附件",
-                            attachment_ref_dict(
-                                AttachmentRef(
-                                    id="file-in-raw-history",
-                                    name="history.txt",
-                                    mime="text/plain",
-                                )
-                            ),
-                        ]
+            ModelRequest(parts=[UserPromptPart(content=f"用户-{index}")])
+            if index % 2 == 0
+            else ModelResponse(parts=[TextPart(content=f"回答-{index}")])
+            for index in range(6)
+        ]
+        anchor = ModelRequest(
+            parts=[
+                UserPromptPart(
+                    content=(
+                        "Summary of previous conversation:\n\n"
+                        f"{valid_summary()}\n\n"
+                        "[DeepAgent deterministic evidence]\n历史证据"
                     )
-                ]
-            ),
-            ModelResponse(parts=[TextPart(content="旧回复")]),
-        ]
-        await self.stores.coordinator.append(
-            session_id,
-            raw,
-            user_id="user-1",
-        )
-        projected = [
-            ModelRequest(
-                parts=[UserPromptPart(content="旧历史摘要，不包含附件引用")]
-            )
-        ]
-        self.assertTrue(
-            await save_projection(
-                self.stores.context_checkpoint,
-                raw_history=raw,
-                projected_history=projected,
-                session_id=session_id,
-                agent_id=None,
-                fingerprint=self._fingerprint(),
-                expected_row_version=0,
-                summary_model_id="summary-model",
-            )
-        )
-        capability = DeepAgentContextCompaction(
-            context_window_tokens=4_000,
-            max_output_tokens=500,
-            summary_timeout=10,
-        )
-        runner = self._runner(capability)
-        deps = AgentDeps(session_id=session_id, user="user-1")
-
-        prepared = await runner._prepare_history(
-            session_id,
-            "继续读取原附件",
-            deps,
-        )
-
-        self.assertTrue(prepared.checkpoint and prepared.checkpoint.used_checkpoint)
-        self.assertIn("file-in-raw-history", deps.attachment_by_id)
-        self.assertNotIn("file-in-raw-history", str(prepared.projected))
-
-    async def test_stream_emits_transient_compaction_status_before_model_output(
-        self,
-    ) -> None:
-        raw_before = _long_tool_history()
-        await self.stores.coordinator.append(
-            "compact-stream",
-            raw_before,
-            user_id="user-1",
-        )
-        capability = DeepAgentContextCompaction(
-            context_window_tokens=4_000,
-            max_output_tokens=500,
-            summary_timeout=10,
-        )
-        events: list[dict] = []
-        async for event in self._runner(capability).run_stream(
-            "compact-stream",
-            "继续",
-            AgentDeps(session_id="compact-stream", user="user-1"),
-            persister=self.persister,
-        ):
-            events.append(event)
-
-        types = [event["type"] for event in events]
-        self.assertIn("context_compaction", types)
-        self.assertLess(
-            types.index("context_compaction"),
-            min(
-                index
-                for index, event_type in enumerate(types)
-                if event_type in {"text", "thinking", "tool_call", "final"}
-            ),
-        )
-        self.assertEqual(events[-1]["type"], "final")
-        self.assertTrue(events[-1]["context"]["compaction"]["checkpoint_saved"])
-        persisted = await self.stores.coordinator.get_history("compact-stream")
-        self.assertNotIn("context_compaction", str(persisted))
-
-    async def test_stream_cancel_during_nested_summary_uses_outer_history(self) -> None:
-        summary_started = asyncio.Event()
-        summary_cancelled = asyncio.Event()
-
-        async def respond(
-            messages: list[ModelMessage],
-            _info: AgentInfo,
-        ) -> ModelResponse:
-            if "<history>" in str(messages):
-                summary_started.set()
-                try:
-                    await asyncio.sleep(30)
-                except asyncio.CancelledError:
-                    summary_cancelled.set()
-                    raise
-            return ModelResponse(parts=[TextPart(content="不应完成")])
-
-        raw_before = _long_tool_history()
-        session_id = "cancel-nested-summary"
-        await self.stores.coordinator.append(
-            session_id,
-            raw_before,
-            user_id="user-1",
-        )
-        capability = DeepAgentContextCompaction(
-            context_window_tokens=4_000,
-            max_output_tokens=500,
-            summary_timeout=30,
-        )
-        runner = self._runner(capability, model=FunctionModel(respond))
-        deps = AgentDeps(session_id=session_id, user="user-1")
-        events: list[dict[str, Any]] = []
-
-        async def consume() -> None:
-            async for event in runner.run_stream(
-                session_id,
-                "继续",
-                deps,
-                persister=self.persister,
-            ):
-                events.append(event)
-
-        task = asyncio.create_task(consume())
-        await asyncio.wait_for(summary_started.wait(), timeout=3)
-        self.assertTrue(
-            runner._active_runs.request_cancel(
-                agent_id=None,
-                session_id=session_id,
-                user_id="user-1",
-            )
-        )
-        await asyncio.wait_for(task, timeout=3)
-
-        self.assertTrue(summary_cancelled.is_set())
-        self.assertIn("cancelled", {event.get("type") for event in events})
-        self.assertNotIn("final", {event.get("type") for event in events})
-        self.assertIsNone(await self.stores.context_checkpoint.get(session_id))
-        persisted = await self.stores.coordinator.get_history(session_id)
-        self.assertEqual(len(persisted), len(raw_before) + 1)
-        self.assertNotIn("<history>", str(persisted))
-
-    async def test_manual_compaction_writes_checkpoint_without_rewriting_history(
-        self,
-    ) -> None:
-        ref = ContextReference(
-            key="selection",
-            type="deeptable.selection",
-            schema_version="2.0",
-            payload={"selection": "B2:C4"},
-            metadata={"history_only_secret": "manual-metadata"},
-        )
-        raw: list[ModelMessage] = []
-        for turn in range(3):
-            repeats = 100 if turn == 1 else 20
-            prompt: str | list[object] = (
-                [
-                    context_reference_dict(ref),
-                    f"第 {turn} 轮约束：" + ("需要保留的中文背景。" * repeats),
-                ]
-                if turn == 0
-                else f"第 {turn} 轮约束：" + ("需要保留的中文背景。" * repeats)
-            )
-            raw.extend(
-                [
-                    ModelRequest(
-                        parts=[
-                            UserPromptPart(content=prompt)
-                        ]
-                    ),
-                    ModelResponse(
-                        parts=[TextPart(content=f"第 {turn} 轮结论：" + ("确认当前决定。" * repeats))]
-                    ),
-                ]
-            )
-        await self.stores.coordinator.append(
-            "manual-compact",
-            raw,
-            user_id="user-1",
-        )
-        capability = DeepAgentContextCompaction(
-            context_window_tokens=4_000,
-            max_output_tokens=500,
-            summary_timeout=10,
-        )
-        runner = self._runner(capability)
-
-        events = [
-            event
-            async for event in runner.run_manual_compaction(
-                "manual-compact",
-                AgentDeps(session_id="manual-compact", user="user-1"),
-            )
-        ]
-
-        self.assertIn("started", [e.get("phase") for e in events])
-        self.assertIn("deterministic", [e.get("phase") for e in events])
-        self.assertIn("summarizing", [e.get("phase") for e in events])
-        self.assertIn("saving", [e.get("phase") for e in events])
-        result = events[-1]
-        self.assertEqual(result["type"], "context_compaction_result")
-        self.assertEqual(result["status"], "completed", result)
-        self.assertGreater(result["usage"]["requests"], 0)
-        self.assertLess(result["after_tokens"], result["before_tokens"])
-
-        self.assertEqual(
-            history_hash(await self.stores.coordinator.get_history("manual-compact")),
-            history_hash(raw),
-        )
-        checkpoint = await self.stores.context_checkpoint.get("manual-compact")
-        self.assertIsNotNone(checkpoint)
-        assert checkpoint is not None
-        self.assertEqual(checkpoint.row_version, 1)
-        self.assertNotIn("manual-metadata", str(checkpoint.payload))
-
-        repeated = [
-            event
-            async for event in runner.run_manual_compaction(
-                "manual-compact",
-                AgentDeps(session_id="manual-compact", user="user-1"),
-            )
-        ]
-        self.assertEqual(repeated[-1]["status"], "noop")
-        self.assertEqual(repeated[-1]["reason"], "no_reduction")
-        unchanged = await self.stores.context_checkpoint.get("manual-compact")
-        self.assertIsNotNone(unchanged)
-        assert unchanged is not None
-        self.assertEqual(unchanged.row_version, 1)
-
-        tail = [
-            ModelRequest(
-                parts=[UserPromptPart(content="新增约束：" + "保留新增中文背景。" * 100)]
-            ),
-            ModelResponse(
-                parts=[TextPart(content="新增结论：" + "确认新增决定。" * 100)]
-            ),
-        ]
-        await self.stores.coordinator.append(
-            "manual-compact",
-            tail,
-            user_id="user-1",
-        )
-        refreshed = [
-            event
-            async for event in runner.run_manual_compaction(
-                "manual-compact",
-                AgentDeps(session_id="manual-compact", user="user-1"),
-            )
-        ]
-        self.assertEqual(refreshed[-1]["status"], "completed", refreshed[-1])
-        updated = await self.stores.context_checkpoint.get("manual-compact")
-        self.assertIsNotNone(updated)
-        assert updated is not None
-        self.assertEqual(updated.row_version, 2)
-        self.assertEqual(updated.source_last_sequence, len(raw) + len(tail) - 1)
-
-    async def test_manual_compaction_does_not_resummarize_checkpoint_without_new_messages(
-        self,
-    ) -> None:
-        raw = [
-            ModelRequest(parts=[UserPromptPart(content="原始任务" + "背景" * 200)]),
-            ModelResponse(parts=[TextPart(content="原始结论" + "决定" * 200)]),
-            ModelRequest(parts=[UserPromptPart(content="继续处理" + "约束" * 200)]),
-            ModelResponse(parts=[TextPart(content="继续结论" + "状态" * 200)]),
-        ]
-        await self.stores.coordinator.append(
-            "manual-recompact",
-            raw,
-            user_id="user-1",
-        )
-        capability = DeepAgentContextCompaction(
-            context_window_tokens=4_000,
-            max_output_tokens=500,
-            summary_timeout=10,
-        )
-        runner = self._runner(capability)
-        projections = [
-            [
-                ModelRequest(parts=[UserPromptPart(content="摘要：保留原始任务和约束")]),
-                ModelResponse(parts=[TextPart(content="最近结论")]),
-            ],
-            [
-                ModelRequest(parts=[UserPromptPart(content="摘要：任务与约束")]),
-                ModelResponse(parts=[TextPart(content="结论")]),
-            ],
-        ]
-        with patch.object(
-            capability,
-            "compact_manually",
-            new=AsyncMock(side_effect=projections),
-        ):
-            first = [
-                event
-                async for event in runner.run_manual_compaction(
-                    "manual-recompact",
-                    AgentDeps(session_id="manual-recompact", user="user-1"),
                 )
             ]
-            second = [
-                event
-                async for event in runner.run_manual_compaction(
-                    "manual-recompact",
-                    AgentDeps(session_id="manual-recompact", user="user-1"),
-                )
-            ]
-
-        self.assertEqual(first[-1]["status"], "completed")
-        self.assertEqual(second[-1]["status"], "noop")
-        self.assertEqual(second[-1]["reason"], "no_reduction")
-        checkpoint = await self.stores.context_checkpoint.get("manual-recompact")
-        self.assertIsNotNone(checkpoint)
-        assert checkpoint is not None
-        self.assertEqual(checkpoint.row_version, 1)
-        self.assertEqual(checkpoint.source_last_sequence, len(raw) - 1)
+        )
+        visible = [anchor, *raw[-4:]]
+        self.assertEqual(summary_contents(visible), (valid_summary(),))
         self.assertEqual(
-            history_hash(await self.stores.coordinator.get_history("manual-recompact")),
-            history_hash(raw),
+            _raw_prefix_for_visible_cutoff(visible, raw, 3),
+            raw[:4],
         )
 
-    async def test_manual_compaction_empty_and_short_history_are_noop(self) -> None:
-        capability = DeepAgentContextCompaction(
-            context_window_tokens=4_000,
-            max_output_tokens=500,
-            summary_timeout=10,
-        )
-        runner = self._runner(capability)
-        empty = [
-            event
-            async for event in runner.run_manual_compaction(
-                "manual-empty",
-                AgentDeps(session_id="manual-empty", user="user-1"),
+    def test_summary_cutoff_scans_history_once(self) -> None:
+        messages = [
+            item
+            for index in range(80)
+            for item in (
+                ModelRequest(parts=[UserPromptPart(content=f"问题-{index}-" + "甲" * 80)]),
+                ModelResponse(parts=[TextPart(content=f"回答-{index}-" + "乙" * 80)]),
             )
         ]
-        self.assertEqual(empty[-1]["status"], "noop")
-        self.assertEqual(empty[-1]["reason"], "empty_history")
+        delegate = TokenEstimator.conservative()
 
-        await self.stores.coordinator.append(
-            "manual-short",
-            [
-                ModelRequest(parts=[UserPromptPart(content="你好")]),
-                ModelResponse(parts=[TextPart(content="你好")]),
-            ],
-            user_id="user-1",
+        class CountingEstimator:
+            source = delegate.source
+
+            def __init__(self) -> None:
+                self.request_calls = 0
+                self.message_calls = 0
+
+            def request(self, values, parameters=None):
+                self.request_calls += 1
+                return delegate.request(values, parameters)
+
+            def message(self, value):
+                self.message_calls += 1
+                return delegate.message(value)
+
+            def text(self, value):
+                return delegate.text(value)
+
+        estimator = CountingEstimator()
+        compaction = DeepAgentContextCompaction(
+            context_window_tokens=200_000,
+            max_output_tokens=4_096,
         )
-        short = [
-            event
-            async for event in runner.run_manual_compaction(
-                "manual-short",
-                AgentDeps(session_id="manual-short", user="user-1"),
-            )
-        ]
-        self.assertEqual(short[-1]["status"], "noop")
-        self.assertEqual(short[-1]["reason"], "insufficient_history")
-        self.assertEqual(short[-1]["usage"]["requests"], 0)
+        cutoff = compaction._single_summary_cutoff(
+            messages,
+            SimpleNamespace(model_request_parameters=None),
+            target=9_000,
+            output_limit=1_000,
+            previous_summary=None,
+            estimator=estimator,
+        )
 
-    async def test_manual_compaction_failure_and_cas_conflict_preserve_history(
-        self,
-    ) -> None:
-        def long_history() -> list[ModelMessage]:
-            messages: list[ModelMessage] = []
-            for turn in range(3):
-                repeats = 100 if turn == 1 else 20
-                messages.extend(
-                    [
-                        ModelRequest(
-                            parts=[
-                                UserPromptPart(
-                                    content=f"第 {turn} 轮背景：" + "保留约束。" * repeats
-                                )
-                            ]
-                        ),
-                        ModelResponse(
-                            parts=[TextPart(content=f"第 {turn} 轮结论：" + "确认决定。" * repeats)]
-                        ),
+        self.assertGreater(cutoff, 0)
+        self.assertEqual(estimator.request_calls, 1)
+        self.assertEqual(estimator.message_calls, len(messages) + 1)
+
+    def test_context_payload_is_evidence_not_summary_input(self) -> None:
+        raw = ModelRequest(
+            parts=[
+                UserPromptPart(
+                    content=[
+                        {
+                            "kind": "context-ref",
+                            "key": "selection",
+                            "type": "region",
+                            "schema_version": 1,
+                            "label": "当前区域",
+                            "payload": {"id": "member-42", "name": "华东"},
+                            "metadata": {"secret": "must-not-enter"},
+                        },
+                        "请分析",
                     ]
                 )
-            return messages
+            ]
+        )
+        formatted = _formatted_history([raw])
+        self.assertIn("请分析", formatted)
+        self.assertNotIn("member-42", formatted)
+        self.assertNotIn("must-not-enter", formatted)
+        evidence = _deterministic_context_evidence_text([raw])
+        self.assertIn("member-42", evidence)
+        self.assertIn("华东", evidence)
+        self.assertNotIn("must-not-enter", evidence)
 
-        def fail_summary(
-            messages: list[ModelMessage],
-            _info: AgentInfo,
-        ) -> ModelResponse:
-            if "<history>" in str(messages):
-                raise RuntimeError("provider unavailable")
-            return ModelResponse(parts=[TextPart(content="unused")])
-
-        failed_raw = long_history()
-        await self.stores.coordinator.append(
-            "manual-provider-failure",
-            failed_raw,
-            user_id="user-1",
-        )
-        capability = DeepAgentContextCompaction(
-            context_window_tokens=4_000,
-            max_output_tokens=500,
-            summary_timeout=10,
-        )
-        failed = [
-            event
-            async for event in self._runner(
-                capability,
-                model=FunctionModel(fail_summary),
-            ).run_manual_compaction(
-                "manual-provider-failure",
-                AgentDeps(session_id="manual-provider-failure", user="user-1"),
-            )
-        ]
-        self.assertEqual(failed[-1]["status"], "failed")
-        self.assertEqual(failed[-1]["reason"], "summary_provider_error")
-        self.assertIsNone(
-            await self.stores.context_checkpoint.get("manual-provider-failure")
-        )
-        self.assertEqual(
-            history_hash(
-                await self.stores.coordinator.get_history("manual-provider-failure")
-            ),
-            history_hash(failed_raw),
-        )
-
-        cas_raw = long_history()
-        await self.stores.coordinator.append(
-            "manual-cas-conflict",
-            cas_raw,
-            user_id="user-1",
-        )
-        with patch(
-            "deep_agent.agent.runner.save_projection",
-            new=AsyncMock(return_value=False),
-        ):
-            conflicted = [
-                event
-                async for event in self._runner(
-                    DeepAgentContextCompaction(
-                        context_window_tokens=4_000,
-                        max_output_tokens=500,
-                        summary_timeout=10,
-                    )
-                ).run_manual_compaction(
-                    "manual-cas-conflict",
-                    AgentDeps(session_id="manual-cas-conflict", user="user-1"),
+    def test_attachment_reference_is_deterministic_evidence(self) -> None:
+        raw = ModelRequest(
+            parts=[
+                UserPromptPart(
+                    content=[
+                        "请读取附件",
+                        {
+                            "kind": "attachment-ref",
+                            "id": "local_123",
+                            "name": "预算.xlsx",
+                            "mime": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        },
+                    ]
                 )
             ]
-        self.assertEqual(conflicted[-1]["status"], "failed")
-        self.assertEqual(conflicted[-1]["reason"], "session_changed")
-        self.assertIsNone(
-            await self.stores.context_checkpoint.get("manual-cas-conflict")
         )
-        self.assertEqual(
-            history_hash(await self.stores.coordinator.get_history("manual-cas-conflict")),
-            history_hash(cas_raw),
+        evidence = _deterministic_attachment_evidence_text([raw])
+        self.assertIn("Verified Attachment Evidence", evidence)
+        self.assertIn("local_123", evidence)
+        self.assertIn("预算.xlsx", evidence)
+        self.assertIn("reference_hash", evidence)
+
+    def test_rendered_context_projection_is_removed_from_summary_input(self) -> None:
+        projected = ModelRequest(
+            parts=[
+                UserPromptPart(
+                    content=[
+                        '<context_references>{"id":"member-99"}</context_references>\n'
+                        "<user_message>继续分析</user_message>"
+                    ]
+                )
+            ]
         )
+        formatted = _formatted_history([projected])
+        self.assertNotIn("member-99", formatted)
+        self.assertIn("继续分析", formatted)
 
-    async def test_model_response_usage_survives_database_serialization(
-        self,
-    ) -> None:
-        original = ModelResponse(
-            parts=[TextPart(content="完成")],
-            usage=RequestUsage(
-                input_tokens=10_451,
-                output_tokens=187,
-                cache_read_tokens=9_984,
-                details={"reasoning_tokens": 111},
-            ),
-        )
-        restored = deserialize_message(serialize_message(original))
 
-        self.assertIsInstance(restored, ModelResponse)
-        self.assertEqual(restored.usage.input_tokens, 10_451)
-        self.assertEqual(restored.usage.output_tokens, 187)
-        self.assertEqual(restored.usage.cache_read_tokens, 9_984)
-        self.assertEqual(restored.usage.details["reasoning_tokens"], 111)
-
-    async def test_single_current_user_message_over_window_is_explicit_error(
-        self,
-    ) -> None:
-        capability = DeepAgentContextCompaction(
-            context_window_tokens=4_000,
-            max_output_tokens=500,
-            summary_timeout=10,
+class CompactionPreparationProgressTests(unittest.IsolatedAsyncioTestCase):
+    async def test_cpu_preparation_yields_periodic_sse_progress(self) -> None:
+        queue: asyncio.Queue[dict] = asyncio.Queue()
+        state = ContextRunState(
+            raw_history=[],
+            estimator=TokenEstimator.conservative(),
+            event_queue=queue,
         )
 
-        with self.assertRaises(ContextWindowExceededError) as raised:
-            await self._runner(capability).run(
-                "oversized-current-input",
-                "中" * 6_000,
-                AgentDeps(
-                    session_id="oversized-current-input",
-                    user="user-1",
-                ),
+        with patch(
+            "deep_agent.agent.context.compaction._SUMMARY_HEARTBEAT_SECONDS",
+            0.01,
+        ):
+            result = await _run_preparation_step(
+                lambda: (time.sleep(0.04), "done")[1],
+                state,
+                message="正在准备测试历史…",
             )
 
-        self.assertIn("请缩短内容", str(raised.exception))
-        raw = await self.stores.coordinator.get_history(
-            "oversized-current-input"
-        )
-        self.assertEqual(len(raw), 1)
-
-    async def test_single_context_reference_over_window_is_explicit_error(self) -> None:
-        capability = DeepAgentContextCompaction(
-            context_window_tokens=4_000,
-            max_output_tokens=500,
-            summary_timeout=10,
-        )
-        ref = ContextReference(
-            key="large_selection",
-            type="deeptable.selection",
-            schema_version="2.0",
-            label="超大选区",
-            payload={"cells": "中" * 6_000},
-            metadata={"debug": "not-visible"},
-        )
-
-        with self.assertRaises(ContextWindowExceededError):
-            await self._runner(capability).run(
-                "oversized-context-ref",
-                "",
-                AgentDeps(session_id="oversized-context-ref", user="user-1"),
-                context_refs=[ref],
-            )
-
-        raw = await self.stores.coordinator.get_history("oversized-context-ref")
-        self.assertEqual(len(raw), 1)
-        self.assertIn("not-visible", str(serialize_message(raw[0])))
+        self.assertEqual(result, "done")
+        events = []
+        while not queue.empty():
+            events.append(queue.get_nowait())
+        self.assertGreaterEqual(len(events), 3)
+        self.assertTrue(all(event["phase"] == "preparing" for event in events))
 
 
 if __name__ == "__main__":

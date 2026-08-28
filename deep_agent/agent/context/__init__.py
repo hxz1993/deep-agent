@@ -1,4 +1,4 @@
-"""Context budgeting, Harness compaction, and checkpoint projections."""
+"""Context budgeting and durable Session Event compaction."""
 
 from deep_agent.agent.context.budget import ContextBudget, build_context_budget
 from deep_agent.agent.context.compaction import (

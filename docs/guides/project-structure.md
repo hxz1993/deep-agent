@@ -46,8 +46,8 @@ FastAPI API
 
 | 名称 | 来源 | 用途 |
 | --- | --- | --- |
-| `builtin:general` | `deep_agent/capabilities/native/` | 内置“通用工具”，默认启用，提供 UTC 时间 |
-| `builtin:sandbox` | `deep_agent/sandbox/` | 内置“Python 沙箱”，默认关闭，提供无状态 Python 计算 |
+| `builtin:general` | `deep_agent/capabilities/native/` | 内置“通用工具”，提供 UTC 时间 |
+| `builtin:sandbox` | `deep_agent/sandbox/` | 内置“Python 沙箱”，提供无状态 Python 计算 |
 | `mcp:<name>` | 数据库或 `mcps/` | 外部或内置 MCP 工具 |
 | `ui:builtin` | 代码 | 确认和候选选择 HITL 工具包 |
 | `ui:<package>` | `ui_tool_packages` + `ui_tool_definitions` | Agent 显式选择的手工 HITL 工具包 |
@@ -56,7 +56,8 @@ FastAPI API
 交给 Pydantic AI 的对象。一个包严格包装一个 Toolset，当前不提供包内逐工具授权；未来可在
 该 Toolset 上使用过滤包装器实现包内工具选择。
 
-Skill 不属于工具包，也不进入 `agents.capabilities`。Agent 使用独立 `agents.skills` 选择
+所有工具包只在 `agents.capabilities` 中显式关联后进入Run；新Agent默认空列表。Skill 不属于
+工具包，也不进入 `agents.capabilities`。Agent 使用独立 `agents.skills` 选择
 Builtin 或上传 Skill；Harness 只先披露名称和简介，模型按需调用 `load_capability` 加载正文。
 Skill 不能扩大 MCP 或其他工具授权。
 
@@ -79,7 +80,7 @@ Pydantic AI Tool，也不会出现在 Console 的 Agent 能力列表。
 
 - `mcps/` 是 MCP Server 的本地实现或启动入口，运行时仍通过 MCP 协议接入。
 - `deep_agent/skills/` 是线上 Skill 管理和运行适配；Skill 只提供任务方法、References 和 Assets，
-  不自动授予工具权限；Agent同时启用含脚本Skill和 `builtin:sandbox`时，可以通过条件式系统工具
+  不自动授予工具权限；Agent同时关联含脚本Skill和 `builtin:sandbox`时，可以通过条件式系统工具
   `execute_skill_script`执行已索引脚本。
 
 MCP 提供可执行工具；Skill 提供渐进披露的说明和素材。两者生命周期、权限和协议不同，不应混放。

@@ -3,12 +3,30 @@
 DeepAgent 是基于 FastAPI、Pydantic AI 和 SQLAlchemy 的多用户 Agent 服务，并
 随服务发布一体化运维控制台。
 
-当前产品版本为 `0.4.9`。`deep_agent.__version__` 是唯一代码版本来源，FastAPI、
+当前产品版本为 `0.6.4`。`deep_agent.__version__` 是唯一代码版本来源，FastAPI、
 `GET /info` 和 Console 顶部版本徽标均读取该值。后续正式发布默认递增
 `MAJOR.MINOR.PATCH` 的第三位，只有明确规划重大版本时才调整前两位。产品版本不通过
 环境变量或数据库覆盖，也不等同于 Alembic 数据库结构 revision。
 
 各版本功能变更与迁移说明见 [`CHANGELOG.md`](CHANGELOG.md)。
+
+Console 对话测试提供独立的“对话 / 轨迹”页签。会话历史、轨迹、Plan 和持久化 SSE 统一读取
+`chat_session_events`；轨迹按 Sequence 原位展示 Run、模型 Part、工具调用/结果和 Compaction，
+不再从整条 ModelMessage 做第二套拆解，也不额外建立轨迹表。能力边界见
+[`docs/design/18-session-trajectory/`](docs/design/18-session-trajectory/)。
+
+v0.5.6 完成 Provider + Model 两层配置：Provider 独占 Pydantic AI 适配类型、地址和密钥，
+Model 只保存 Provider 外键、模型编码与能力属性。Provider 不设置启停层，其可用性由真实连接
+配置决定；v0.6.4 恢复模型级 `enabled`，用于管理员控制哪些已配置模型可供 Agent 和聊天选择。
+模型目录仍是只读候选数据，不参与运行时关联。设计与迁移边界见
+[`docs/design/19-model-provider-architecture/`](docs/design/19-model-provider-architecture/)。
+
+v0.6.2 增加显式 Agent 能力包 `builtin:code-mode`。关联后，已授权且已披露的
+MCP 工具既保留普通 Tool Schema，也可在 Harness `run_code` 的 Monty 环境内组合调用。
+当前会话已授权文件通过不透明 Run 变量中转，真实 Base64 只在 MCP 调用边界生成。
+v0.6.3进一步收紧 SDK 函数作用域、可信返回类型和嵌套审计，并为 DeepSeek v4 Vision
+加入按图片尺寸计价的上下文预算估算；未知路由仍保守回退。
+使用和安全边界见 [`docs/guides/code-mode.md`](docs/guides/code-mode.md)。
 
 ## 项目结构
 
@@ -61,12 +79,41 @@ test 固定镜像部署可设 `DEEP_AGENT_SANDBOX_ENSURE_VENV=true`，由 gunico
 
 若不想自动建 venv（例如离线环境），加 `--no-sandbox-env`；此时缺解释器会直接退出并提示手动 setup。
 
+只使用本地 SQLite、且不依赖平台 App 或企业管理员接口时，可以使用独立的仓库外 Profile：
+
+```dotenv
+DEEP_AGENT_LOCAL_USER=local-dev
+DEEP_AGENT_LOCAL_ADMIN_BYPASS=true
+DEEP_AGENT_SQLITE_PATH=/absolute/path/to/deep-agent-local.db
+DEEP_AGENT_FILE_BACKEND=local
+DEEP_AGENT_LOCAL_FILE_ROOT=/absolute/path/to/local-file-store
+```
+
+该开关只由回环地址上的 `deep_agent.local_dev` 读取，通过 ASGI 内部标记放行 Console 管理接口；
+它不是 HTTP Header，也不会改变 `deep_agent.main:app` 的生产鉴权。未开启该开关时仍必须配置平台
+Token，并由平台综合权限接口确认企业管理员身份。无 App 的本地请求可以完成 Provider、模型、Agent
+配置和普通对话。显式启用本地文件后端后，附件上传、图片原生输入、`read_file`、大工具结果
+Spill、上传 Skill和文件导出均使用本地 Blob，但保持与平台模式相同的 API、Message和工具协议。
+Blob 位于 `DEEP_AGENT_LOCAL_FILE_ROOT/blobs/`，独立 `metadata.sqlite3`只保存文件索引、用户归属和
+下载记录；它不属于Alembic数据库，也不会进入配置备份。普通文件仍按User隔离，App/Space只记录
+来源。Console对本地导出的`local_`文件显示“下载本地文件”；平台模式固定不开放该下载端点。
+
+`DEEP_AGENT_FILE_BACKEND`默认始终为`platform`，不会因为数据库是SQLite而自动切换。`local`仅允许
+通过回环`deep_agent.local_dev`且主数据库为SQLite时启动；部署入口、Test MySQL或普通
+`deep_agent.main:app`误配都会失败关闭。继承式MCP上下文仍需真实App/Space及对应服务能力。
+
 访问入口：
 
 - Console：<http://127.0.0.1:8000/console/>
 - API 文档：<http://127.0.0.1:8000/docs>
 - 健康检查：<http://127.0.0.1:8000/health>
 - Sandbox：<http://127.0.0.1:8000/api/v1/health/sandbox>
+
+Console 是管理入口，只允许平台综合权限接口确认的企业管理员进入；固定超级用户
+`admin` 不特殊放行。Agent 配置、模型、MCP、Skill、UI 工具和运维信息等管理 API
+执行同一后端门禁，不能通过绕过页面直接访问。聊天、会话、附件、取消、压缩和按固定 ID
+读取 Agent 等业务助手运行接口保持原有用户语义。详细边界见
+[`docs/guides/console-admin-access.md`](docs/guides/console-admin-access.md)。
 
 部署环境使用：
 
@@ -81,16 +128,20 @@ uvicorn deep_agent.main:app --host 0.0.0.0 --port 8000
 
 ## 数据库基线
 
-v0.3.0 将发布前的 Alembic `001`～`023` 历史压缩为唯一基线 `001`。新数据库直接
-执行 `alembic upgrade head`；已有旧库不能重放迁移，必须先使用
-`python3.12 -m maintenance.rebaseline_database` 校验最终结构，再通过 Alembic
-`stamp --purge 001` 重设版本。完整备份和切换命令见
-[`maintenance/README.md`](maintenance/README.md)。
-
-当前 Alembic head 为 `006`：`002` 统一 ToolPackage 与 UI 工具包；`003` 将线上 Skill 与
+新数据库直接执行 `alembic upgrade head`。当前 Alembic head 为 `011`：`002` 统一 ToolPackage
+与 UI 工具包；`003` 将线上 Skill 与
 ToolPackage 分离；`004`清理已废弃的`builtin:attachment`；`005`和`006`依次删除已下线的
-预制MCP记录，并从显式Agent能力列表中清理对应引用。升级
-`003` 前仍必须确认 `agents.capabilities` 不存在历史 `skill:*` 引用。
+预制MCP记录，并从显式Agent能力列表中清理对应引用；`007`增加独立Provider层、模型硬外键并删除
+模型表中的重复连接字段；`008`将会话域重建为`chat_sessions + chat_session_events`；`009`删除
+已经下线的标题专用模型配置表；`010`删除 Provider、模型、Skill、MCP、UI 工具包和 UI 工具自身的冗余启停字段，
+并把 Agent 的 `capabilities` 收敛为非空显式列表；`011`仅恢复模型级`enabled`，现有模型全部回填为启用，
+Provider、Skill、MCP和UI工具仍无独立启停层。
+
+`008`不在线转换旧会话：它删除旧会话历史并建立空 Event Store，但保留所有配置表。共享环境升级前
+必须先用 Revision 007 代码分别执行配置备份和会话归档，停掉全部旧实例后才能迁移；旧版本不能与
+008并行运行。Revision 010数据库可直接升级011；升级后工具和Skill是否进入 Run 仍只由Agent
+的`capabilities`和`skills`关联决定，模型还必须处于启用状态，Provider可用性只由实际连接配置决定。
+完整备份和切换边界见[`maintenance/README.md`](maintenance/README.md)。
 
 配置备份会复制全部配置表并只保留会话表结构；上传Skill的原始ZIP不塞入数据库备份。需要完整
 留存或跨环境迁移时，同时在Console Skill页面执行“导出全部”。备份程序会校验每张ORM业务表都已
@@ -101,24 +152,25 @@ ToolPackage 分离；`004`清理已废弃的`builtin:attachment`；`005`和`006`
 DeepAgent 当前支持：
 
 - 内置工具：
-  - `builtin:general`（通用工具）：默认启用，只包含 `get_current_time`。
-  - `builtin:sandbox`（Python 沙箱）：默认关闭，只包含 `execute_python`。
-- 系统工具不是 ToolPackage。Harness任务规划、`load_capability`、Skill Resource、`read_file`、`read_tool_result`、
-  `search_tools` 和 MCP Resource
+  - `builtin:general`（通用工具）：只包含 `get_current_time`。
+  - `builtin:sandbox`（Python 沙箱）：只包含 `execute_python`。
+- 系统工具不是 ToolPackage。Harness任务规划、`load_capability`、Skill Resource、`read_file`、
+  `export_file_to_download_center`、`read_tool_result`、`search_tools` 和 MCP Resource
   由运行时按 Agent/Run 条件自动注入，只在 Console 的只读“系统工具”目录中说明。
-- 每个Run均可使用Harness `Planning`的六个官方工具；模型只在复杂任务需要时创建计划，计划在
-  本轮内存中维护，SSE与History携带展示快照，下一轮重新开始，不新增计划表。Console只在
-  消息区底部以轻量浮层显示当前最新Run的未完成计划，全部完成后自动隐藏。
+- 每个Run只暴露Harness `Planning`的`write_plan`完整快照工具。计划仍以普通Tool Call/Result
+  Event保存，不新增计划表；Deferred新Run通过共同`turn_id`恢复本Turn最后一次成功快照，新用户
+  Turn从空PlanStore开始。Console从Event Store投影最新快照和每次更新位置。
 - MCP Tool Search使用字段化词法检索：标准协议名、MCP `title`、参数和描述提供召回依据；支持
   拼音与有限错字纠正，但不把词法匹配伪装成任意中英文语义翻译。
 - Skill 不再属于 ToolPackage。Agent 通过独立 `skills` 列表选择，Harness 按需加载 `SKILL.md`；
   Skill 不能绕过 `capabilities` 获得 MCP 或其他工具。
 - `mcp:<name>`：URL或Builtin MCP；历史stdio记录只允许查看/删除，不能新建、修改或运行。
-- `ui:builtin`：代码内置的确认和候选选择交互，默认关闭。
-- `ui:<package>`：数据库管理的手工 UI 工具包，Agent 按包启用。
+- `ui:builtin`：代码内置的确认和候选选择交互。
+- `ui:<package>`：数据库管理的手工 UI 工具包，Agent 按包关联。
 
-产品配置单位是 Tool Package，每个包严格包装一个 Pydantic AI Toolset。Agent 的
-`capabilities` 字段保存工具包编码；当前不提供包内逐工具授权。Output Tool 是最终输出契约，
+产品配置单位是 Tool Package，每个包严格包装一个 Pydantic AI Toolset。资源目录没有第二层
+启停状态：Agent 的 `capabilities` 字段保存本 Agent 明确关联的工具包编码，新 Agent 默认为空；
+`agents.skills` 同样只保存明确关联的 Skill。当前不提供包内逐工具授权。Output Tool 是最终输出契约，
 不属于工具包，也不进入 `capabilities`。
 
 Skill 管理接口和包格式见
@@ -127,10 +179,18 @@ Skill 管理接口和包格式见
 ## 大工具结果
 
 v0.4.0 使用 Harness `ToolOutputLimits` 在工具执行后、结果进入下一次模型请求前识别超大结果。
-完整内容保存到平台文件服务，模型历史只保留首尾预览、结构草图和平台 File ID；模型需要细节时
-通过系统工具 `read_tool_result` 按行或关键词读取。该机制不增加 Artifact 表或数据库迁移，句柄
-权限只从当前会话的原始 `chat_messages`恢复，Checkpoint 不能扩大访问范围。完整边界见
+完整内容保存到当前FileStore（部署默认平台；显式本地开发模式为本地Blob），模型历史只保留首尾预览、结构草图和 File ID；模型需要细节时
+通过系统工具 `read_tool_result` 按行或关键词读取。该机制不增加 Artifact 表，句柄权限只从当前
+会话的原始 Tool Result Event 恢复；结构化摘要中的 Evidence 只提供来源索引，不能扩大访问范围。完整边界见
 [`docs/design/05-tool-optimization/tool-optimization-design.md`](docs/design/05-tool-optimization/tool-optimization-design.md#92-tooloutputlimits-与大工具结果外置)。
+
+## 文件发布到下载中心
+
+v0.4.18自动注入系统工具`export_file_to_download_center`。当请求具备可信的用户、App和Space上下文时，
+模型可以把新生成的UTF-8文本内容上传为平台文件并登记到当前用户下载中心，也可以复用当前会话附件或
+已外置大工具结果的File ID，仅新增下载记录而不重复上传。工具只返回文件与下载记录元数据；最终正文
+提示用户前往下载中心获取，不把它伪装成结构化最终输出或聊天附件协议。完整边界见
+[`docs/design/08-artifact-export/`](docs/design/08-artifact-export/)。
 
 ## 测试
 

@@ -15,6 +15,10 @@ const templateHtml = await readFile(
   new URL("../../../frontend/console/configuration-template.html", import.meta.url),
   "utf8",
 );
+const configurationCss = await readFile(
+  new URL("../../../frontend/console/configuration/configuration.css", import.meta.url),
+  "utf8",
+);
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -39,14 +43,15 @@ function loadSystemToolsUi() {
   return window.__SystemToolsUI;
 }
 
-test("系统工具菜单位于内置工具之后和 Skill 之前", () => {
+test("系统工具合并进内置工具目录", () => {
   const builtinPosition = indexHtml.indexOf('data-tab="builtin-tools"');
   const systemPosition = indexHtml.indexOf('data-tab="system-tools"');
   const skillPosition = indexHtml.indexOf('data-tab="skills"');
 
-  assert.ok(builtinPosition < systemPosition);
-  assert.ok(systemPosition < skillPosition);
-  assert.match(templateHtml, /id="panel-system-tools"/);
+  assert.ok(builtinPosition >= 0 && builtinPosition < skillPosition);
+  assert.equal(systemPosition, -1);
+  assert.doesNotMatch(templateHtml, /id="panel-system-tools"/);
+  assert.match(templateHtml, /id="panel-builtin-tools"[\s\S]*运行时系统工具[\s\S]*id="systemToolDomains"/);
   assert.match(templateHtml, /不参与 Agent 能力配置/);
 });
 
@@ -72,30 +77,29 @@ test("系统工具按领域展示来源、条件和说明", () => {
   assert.match(html, /Agent 已配置可用 Skill/);
   assert.match(html, /加载完整说明/);
   assert.doesNotMatch(html, /编辑|删除|启用|checkbox|switch/);
+  assert.match(html, /system-tool-group-row/);
+  assert.match(html, /system-tool-group-help/);
+  assert.match(html, /system-tool-group-code">runtime:skill/);
+  assert.match(html, /data-tooltip="按需加载 Skill。"/);
+  assert.match(source, /className = "system-tool-tooltip hidden"/);
+  assert.match(configurationCss, /\.system-tool-tooltip\s*\{[^}]*position: fixed;[^}]*z-index: 1000;/);
 });
 
-test("任务规划六个官方工具属于独立只读领域", () => {
+test("任务规划只暴露完整快照写入工具", () => {
   const ui = loadSystemToolsUi();
   const html = ui.systemToolDomain({
     code: "runtime:planning",
     label: "任务规划",
-    tools: [
-      "write_plan",
-      "read_plan",
-      "add_task",
-      "update_task_status",
-      "update_task_statuses",
-      "remove_task",
-    ].map((name) => ({ name, source: "Pydantic AI Harness" })),
+    tools: ["write_plan"].map((name) => ({ name, source: "Pydantic AI Harness" })),
   });
   assert.match(html, /runtime:planning/);
   assert.match(html, /write_plan/);
-  assert.match(html, /update_task_statuses/);
-  assert.match(html, /remove_task/);
+  assert.doesNotMatch(html, /read_plan|update_task_statuses/);
+  assert.doesNotMatch(html, /add_task|update_task_status<|remove_task/);
   assert.doesNotMatch(html, /checkbox|switch/);
 });
 
-test("Skill 三个工具归 Skill，read_file 独立归文件领域", () => {
+test("Skill 三个工具归 Skill，文件工具独立归文件领域", () => {
   const ui = loadSystemToolsUi();
   const skillHtml = ui.systemToolDomain({
     code: "runtime:skill",
@@ -109,13 +113,17 @@ test("Skill 三个工具归 Skill，read_file 独立归文件领域", () => {
   const fileHtml = ui.systemToolDomain({
     code: "runtime:file",
     label: "文件",
-    tools: [{ name: "read_file" }],
+    tools: [
+      { name: "read_file" },
+      { name: "export_file_to_download_center" },
+    ],
   });
   assert.match(skillHtml, /load_capability/);
   assert.match(skillHtml, /list_skill_resources/);
   assert.match(skillHtml, /execute_skill_script/);
   assert.doesNotMatch(skillHtml, /read_file/);
   assert.match(fileHtml, /read_file/);
+  assert.match(fileHtml, /export_file_to_download_center/);
 });
 
 test("大工具结果读取作为独立系统工具只读展示", () => {
@@ -130,9 +138,33 @@ test("大工具结果读取作为独立系统工具只读展示", () => {
   assert.match(html, /Pydantic AI Harness/);
 });
 
-test("系统工具页面具备加载、失败重试和窄屏可横向查看的结构", () => {
+test("MCP 工具发现与 Resource 只在前端合并为一个展示分组", () => {
+  const ui = loadSystemToolsUi();
+  const merged = ui.mergeSystemToolDomains([
+    { code: "runtime:planning", label: "任务规划", tools: [{ name: "write_plan" }] },
+    { code: "runtime:mcp-tool-search", label: "MCP 工具发现", description: "搜索工具。", tools: [{ name: "search_tools" }] },
+    { code: "runtime:mcp-resource", label: "MCP Resource", description: "读取资源。", tools: [{ name: "read_mcp_resource" }] },
+  ]);
+  assert.equal(Array.from(merged, (domain) => domain.code).join(","), "runtime:planning,runtime:mcp");
+  assert.equal(Array.from(merged[1].tools, (tool) => tool.name).join(","), "search_tools,read_mcp_resource");
+  assert.match(merged[1].description, /MCP 工具发现：搜索工具/);
+  assert.match(merged[1].description, /MCP Resource：读取资源/);
+});
+
+test("系统工具页面保留加载与窄屏横向查看，但不提供单独刷新入口", () => {
   assert.match(source, /正在加载系统工具/);
-  assert.match(source, /data-retry-system-tools/);
+  assert.doesNotMatch(source, /data-retry-system-tools|refreshSystemToolsBtn/);
   assert.match(templateHtml, /class="system-tool-domains"/);
-  assert.match(source, /class="table-wrap"/);
+  assert.match(source, /class="table-wrap console-list-a"/);
+  assert.equal((source.match(/<thead>/g) || []).length, 1);
+  assert.match(configurationCss, /\.system-tool-group-row th/);
+});
+
+test("所有系统工具分组复用同一组固定列宽", () => {
+  assert.match(source, /<colgroup>[\s\S]*system-tool-col-name[\s\S]*system-tool-col-source[\s\S]*system-tool-col-condition[\s\S]*system-tool-col-description/);
+  assert.match(configurationCss, /\.system-tools-table[\s\S]*table-layout: fixed/);
+  assert.match(configurationCss, /system-tool-col-name \{ width: 18%; \}/);
+  assert.match(configurationCss, /system-tool-col-source \{ width: 16%; \}/);
+  assert.match(configurationCss, /system-tool-col-condition \{ width: 34%; \}/);
+  assert.match(configurationCss, /system-tool-col-description \{ width: 32%; \}/);
 });

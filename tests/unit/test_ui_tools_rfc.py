@@ -12,12 +12,6 @@ from pydantic_ai.messages import ModelResponse, ToolCallPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from deep_agent.agent.history import (
-    HistoryMessage,
-    HistoryToolCallPart,
-    HistoryToolResultPart,
-    enrich_history_messages,
-)
 from deep_agent.agent.spec import AgentSpec
 from deep_agent.capabilities.ui.builtin import builtin_ui_records
 from deep_agent.capabilities.ui.registry import (
@@ -124,7 +118,6 @@ class UiToolStoreTests(unittest.IsolatedAsyncioTestCase):
                     label="Demo",
                     description="Demo UI package",
                     source="manual",
-                    enabled=True,
                 )
             )
             await db.commit()
@@ -161,11 +154,10 @@ class UiToolStoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(created.code, "ui:spreadsheet")
         updated = await update_ui_tool_package(
             "ui:spreadsheet",
-            UiToolPackageUpdate(label="电子表格", enabled=False),
+            UiToolPackageUpdate(label="电子表格"),
             store=self.stores.ui_tool_package,
         )
         self.assertEqual(updated.label, "电子表格")
-        self.assertFalse(updated.enabled)
         await delete_ui_tool_package(
             "ui:spreadsheet",
             store=self.stores.ui_tool_package,
@@ -206,30 +198,22 @@ class UiToolStoreTests(unittest.IsolatedAsyncioTestCase):
         response = await list_ui_tools(
             store=self.store,
             source=None,
-            enabled=None,
         )
 
         by_name = {item.name: item for item in response.items}
         self.assertEqual(set(by_name), {"builtin__choice", "builtin__confirm"})
         self.assertTrue(all(item.source == "builtin" for item in by_name.values()))
-        self.assertTrue(all(item.enabled for item in by_name.values()))
+        self.assertTrue(all(not hasattr(item, "enabled") for item in by_name.values()))
         self.assertTrue(all(item.created_at is None for item in by_name.values()))
         self.assertTrue(all(item.updated_at is None for item in by_name.values()))
 
-    async def test_management_list_filters_builtin_tools(self) -> None:
+    async def test_management_list_filters_by_source(self) -> None:
         builtin_response = await list_ui_tools(
             store=self.store,
             source="builtin",
-            enabled=True,
-        )
-        disabled_response = await list_ui_tools(
-            store=self.store,
-            source=None,
-            enabled=False,
         )
 
         self.assertEqual({item.name for item in builtin_response.items}, {"builtin__choice", "builtin__confirm"})
-        self.assertEqual(disabled_response.items, [])
 
     async def test_management_detail_reads_builtin_without_database_row(self) -> None:
         response = await get_ui_tool("builtin__confirm", store=self.store)
@@ -269,7 +253,6 @@ class UiToolStoreTests(unittest.IsolatedAsyncioTestCase):
                     description="Pick color",
                     parameters_json_schema={"type": "object", "properties": {}},
                     source="manual",
-                    enabled=True,
                     created_at=now,
                     updated_at=now,
                 )
@@ -306,7 +289,6 @@ class UiToolStoreTests(unittest.IsolatedAsyncioTestCase):
                         description="first",
                         parameters_json_schema={"type": "object"},
                         source="manual",
-                        enabled=True,
                         created_at=now,
                         updated_at=now,
                     ),
@@ -316,7 +298,6 @@ class UiToolStoreTests(unittest.IsolatedAsyncioTestCase):
                         description="second",
                         parameters_json_schema={"type": "object"},
                         source="manual",
-                        enabled=True,
                         created_at=now,
                         updated_at=now,
                     ),
@@ -338,7 +319,7 @@ class UiToolStoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("demo__first", names)
         self.assertNotIn("missing__tool", names)
 
-    async def test_null_capabilities_do_not_enable_extension_ui_tools(self) -> None:
+    async def test_empty_capabilities_do_not_enable_extension_ui_tools(self) -> None:
         now = datetime.now(timezone.utc)
         async with self.session_factory() as db:
             db.add(
@@ -348,14 +329,13 @@ class UiToolStoreTests(unittest.IsolatedAsyncioTestCase):
                     description="hidden",
                     parameters_json_schema={"type": "object"},
                     source="manual",
-                    enabled=True,
                     created_at=now,
                     updated_at=now,
                 )
             )
             await db.commit()
 
-        spec = AgentSpec(name="demo", model="test", instructions="hi", capabilities=None)
+        spec = AgentSpec(name="demo", model="test", instructions="hi", capabilities=[])
         effective = await load_effective_ui_tools(self.stores, spec)
         names = {item.name for item in effective.definitions}
         self.assertEqual(names, set())
@@ -376,7 +356,6 @@ class UiToolStoreTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_builtin_model_tool_list_matches_exact_agent_selection(self) -> None:
         cases = (
-            (None, set()),
             ([], set()),
             (["ui:builtin"], {"builtin__confirm", "builtin__choice"}),
         )
@@ -407,17 +386,16 @@ class UiToolStoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(properties["custom_placeholder"]["default"], "请输入其他内容")
         self.assertEqual(choice.result_schema["required"], ["selected", "custom_input"])
 
-    async def test_disabled_selected_tool_is_ignored(self) -> None:
+    async def test_configured_selected_tool_is_available(self) -> None:
         now = datetime.now(timezone.utc)
         async with self.session_factory() as db:
             db.add(
                 UiToolDefinition(
-                    name="demo__disabled",
+                    name="demo__configured",
                     package_code="ui:demo",
-                    description="disabled",
+                    description="configured",
                     parameters_json_schema={"type": "object"},
                     source="manual",
-                    enabled=False,
                     created_at=now,
                     updated_at=now,
                 )
@@ -431,7 +409,7 @@ class UiToolStoreTests(unittest.IsolatedAsyncioTestCase):
             capabilities=["ui:demo"],
         )
         effective = await load_effective_ui_tools(self.stores, spec)
-        self.assertNotIn("demo__disabled", {item.name for item in effective.definitions})
+        self.assertIn("demo__configured", {item.name for item in effective.definitions})
 
     async def test_tool_package_directory_groups_ui_and_reports_mcp_count_only(self) -> None:
         now = datetime.now(timezone.utc)
@@ -444,17 +422,15 @@ class UiToolStoreTests(unittest.IsolatedAsyncioTestCase):
                         description="First form",
                         parameters_json_schema={"type": "object"},
                         source="manual",
-                        enabled=True,
                         created_at=now,
                         updated_at=now,
                     ),
                     UiToolDefinition(
-                        name="demo__disabled",
+                        name="demo__second",
                         package_code="ui:demo",
-                        description="Disabled form",
+                        description="Second form",
                         parameters_json_schema={"type": "object"},
                         source="manual",
-                        enabled=False,
                         created_at=now,
                         updated_at=now,
                     ),
@@ -466,14 +442,13 @@ class UiToolStoreTests(unittest.IsolatedAsyncioTestCase):
                             "status": "healthy",
                             "tools": {"status": "supported", "count": 7},
                         },
-                        enabled=True,
                     ),
                 ]
             )
             await db.commit()
 
         selectable = await load_selectable_ui_tools(self.stores)
-        self.assertEqual([record.name for record in selectable], ["demo__first"])
+        self.assertEqual([record.name for record in selectable], ["demo__first", "demo__second"])
 
         registry = build_registry(sandbox_backend=MagicMock())
         ctx = SimpleNamespace(stores=self.stores, registry=registry)
@@ -492,21 +467,21 @@ class UiToolStoreTests(unittest.IsolatedAsyncioTestCase):
             [tool.name for tool in sandbox_package.tools],
             ["execute_python"],
         )
-        self.assertFalse(sandbox_package.default_enabled)
+        self.assertFalse(hasattr(sandbox_package, "default_enabled"))
         self.assertNotIn("builtin:attachment", [item.code for item in capabilities])
         ui_packages = [item for item in capabilities if item.category == "ui"]
         self.assertEqual([item.code for item in ui_packages], ["ui:builtin", "ui:demo"])
         self.assertEqual([item.source for item in ui_packages], ["builtin", "manual"])
-        self.assertEqual([tool.name for tool in ui_packages[-1].tools], ["demo__disabled", "demo__first"])
+        self.assertEqual([tool.name for tool in ui_packages[-1].tools], ["demo__first", "demo__second"])
         mcp_package = next(
             item for item in capabilities if item.code == "mcp:remote_catalog"
         )
         self.assertEqual(mcp_package.category, "mcp")
         self.assertEqual(mcp_package.tool_count, 7)
         self.assertEqual(mcp_package.tool_catalog_status, "missing")
-        self.assertEqual(mcp_package.disclosure_mode, "search")
-        self.assertEqual(mcp_package.preselect_limit, 3)
-        self.assertEqual(mcp_package.search_result_limit, 5)
+        self.assertEqual(mcp_package.disclosure_mode, "direct")
+        self.assertIsNone(mcp_package.preselect_limit)
+        self.assertIsNone(mcp_package.search_result_limit)
         self.assertEqual(mcp_package.tools, [])
 
     async def test_prepare_toolset_skips_historical_invalid_schema_only(self) -> None:
@@ -519,7 +494,6 @@ class UiToolStoreTests(unittest.IsolatedAsyncioTestCase):
                     description="invalid",
                     parameters_json_schema={"type": 123},
                     source="manual",
-                    enabled=True,
                     created_at=now,
                     updated_at=now,
                 )
@@ -573,10 +547,9 @@ class VisibilityTests(unittest.TestCase):
             description="x",
             parameters_json_schema={},
             source="manual",
-            enabled=True,
         )
         self.assertFalse(
-            is_tool_visible(record, capabilities=None)
+            is_tool_visible(record, capabilities=[])
         )
         self.assertFalse(
             is_tool_visible(record, capabilities=["ui"])
@@ -587,7 +560,6 @@ class VisibilityTests(unittest.TestCase):
 
     def test_builtin_tool_uses_the_same_exact_ui_capability_rule(self) -> None:
         record = next(item for item in builtin_ui_records() if item.name == "builtin__confirm")
-        self.assertFalse(is_tool_visible(record, capabilities=None))
         self.assertFalse(is_tool_visible(record, capabilities=[]))
         self.assertTrue(
             is_tool_visible(record, capabilities=["ui:builtin"])
@@ -641,93 +613,6 @@ class ToolHintsTests(unittest.TestCase):
         enriched = enrich_deferred(deferred, hints)
         self.assertEqual(enriched["calls"][0]["metadata"], {"v": 1})
         self.assertEqual(enriched["calls"][0]["widget"], "text")
-
-
-class HistoryEnrichmentTests(unittest.TestCase):
-    def test_enrich_history_messages_adds_metadata(self) -> None:
-        messages = [
-            HistoryMessage(
-                role="assistant",
-                parts=[
-                    HistoryToolCallPart(
-                        tool="myapp__form",
-                        args={"prompt": "hi"},
-                        tool_call_id="c1",
-                    )
-                ],
-            )
-        ]
-        hints = {"myapp__form": {"widget": "text", "metadata": {"form_version": "1"}}}
-        enriched = enrich_history_messages(messages, hints)
-        part = enriched[0].parts[0]
-        assert isinstance(part, HistoryToolCallPart)
-        self.assertEqual(part.widget, "text")
-        self.assertEqual(part.metadata, {"form_version": "1"})
-
-    def test_dangling_function_tool_is_projected_as_interrupted(self) -> None:
-        messages = [
-            HistoryMessage(
-                role="assistant",
-                status="completed",
-                parts=[
-                    HistoryToolCallPart(
-                        tool="execute_python",
-                        args={"code": "sleep(30)"},
-                        tool_call_id="function-call",
-                    )
-                ],
-            )
-        ]
-
-        enriched = enrich_history_messages(messages, {})
-
-        self.assertEqual(enriched[0].status, "interrupted")
-        self.assertEqual(messages[0].status, "completed")
-
-    def test_completed_function_tool_stays_completed(self) -> None:
-        messages = [
-            HistoryMessage(
-                role="assistant",
-                status="completed",
-                parts=[
-                    HistoryToolCallPart(
-                        tool="execute_python",
-                        tool_call_id="function-call",
-                    ),
-                    HistoryToolResultPart(
-                        tool="execute_python",
-                        tool_call_id="function-call",
-                        result={"ok": True},
-                    ),
-                ],
-            )
-        ]
-
-        enriched = enrich_history_messages(messages, {})
-
-        self.assertEqual(enriched[0].status, "completed")
-
-    def test_pending_ui_tool_stays_pending_not_interrupted(self) -> None:
-        messages = [
-            HistoryMessage(
-                role="assistant",
-                status="completed",
-                parts=[
-                    HistoryToolCallPart(
-                        tool="myapp__form",
-                        tool_call_id="ui-call",
-                    )
-                ],
-            )
-        ]
-
-        enriched = enrich_history_messages(
-            messages,
-            {"myapp__form": {"widget": "text"}},
-        )
-
-        self.assertEqual(enriched[0].status, "completed")
-
 
 class ExternalToolsetTests(unittest.IsolatedAsyncioTestCase):
     def test_build_external_toolset_preserves_names(self) -> None:

@@ -20,11 +20,10 @@ from deep_agent.db.stores.bundle import create_data_stores
 
 EXPECTED_TABLES = {
     "agents",
-    "auxiliary_model_configs",
-    "chat_context_checkpoints",
-    "chat_messages",
+    "chat_session_events",
     "chat_sessions",
     "llm_models",
+    "llm_providers",
     "mcp_servers",
     "model_catalog",
     "skill_packages",
@@ -51,14 +50,20 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIsNotNone(stores.model_catalog)
                 self.assertIsNotNone(stores.mcp)
                 self.assertIsNotNone(stores.ui_tool)
-                self.assertIsNotNone(stores.context_checkpoint)
+                self.assertIsNotNone(stores.events)
                 self.assertIsNotNone(stores.skill_package)
 
                 await stores.coordinator.append(
                     "sess-bootstrap",
                     [ModelRequest(parts=[UserPromptPart(content="hello")])],
+                    agent_id=(await stores.agent.list_all())[0].id,
+                    user_id="local-user",
+                    turn_id="1" * 32,
+                    run_id="run-bootstrap",
                 )
-                history = await stores.coordinator.get_history("sess-bootstrap")
+                history = await stores.coordinator.get_history(
+                    "sess-bootstrap", agent_id=(await stores.agent.list_all())[0].id
+                )
                 self.assertEqual(len(history), 1)
             finally:
                 await engine.dispose()
@@ -79,6 +84,123 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
 
                     await asyncio.to_thread(command.upgrade, config, "head")
                     self._assert_current_baseline(db_path)
+
+    async def test_010_011_round_trip_restores_model_enabled(self) -> None:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+            db_path = Path(tmpdir) / "model-enabled.db"
+            url = f"sqlite+aiosqlite:///{db_path.as_posix()}"
+            with patch("deep_agent.db.url.get_database_url", return_value=url):
+                with patch("deep_agent.db.migrate.get_database_url", return_value=url):
+                    config = migrate._build_alembic_config()
+                    await asyncio.to_thread(command.upgrade, config, "010")
+                    self.assertNotIn("enabled", self._columns(db_path, "llm_models"))
+
+                    await asyncio.to_thread(command.upgrade, config, "011")
+                    self.assertEqual(self._revision(db_path), "011")
+                    self.assertIn("enabled", self._columns(db_path, "llm_models"))
+                    self.assertEqual(
+                        self._scalar(
+                            db_path,
+                            "SELECT COUNT(*) FROM llm_models WHERE enabled != 1 OR enabled IS NULL",
+                        ),
+                        0,
+                    )
+
+                    await asyncio.to_thread(command.downgrade, config, "010")
+                    self.assertNotIn("enabled", self._columns(db_path, "llm_models"))
+                    await asyncio.to_thread(command.upgrade, config, "011")
+                    self._assert_current_baseline(db_path)
+
+    async def test_007_infers_merges_and_round_trips_providers(self) -> None:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+            db_path = Path(tmpdir) / "providers.db"
+            url = f"sqlite+aiosqlite:///{db_path.as_posix()}"
+            with patch("deep_agent.db.url.get_database_url", return_value=url):
+                with patch("deep_agent.db.migrate.get_database_url", return_value=url):
+                    config = migrate._build_alembic_config()
+                    await asyncio.to_thread(command.upgrade, config, "006")
+                    with sqlite3.connect(db_path) as connection:
+                        connection.execute(
+                            "UPDATE llm_models SET base_url=?, api_key=?",
+                            ("https://api.openai.com/v1", "shared-key"),
+                        )
+                        connection.execute(
+                            "INSERT INTO llm_models "
+                            "(id,name,model,base_url,api_key,input_modalities,"
+                            "context_window_tokens,max_output_tokens,tags,created_at,updated_at) "
+                            "SELECT 'model-copy','copy','openai:gpt-copy',base_url,api_key,"
+                            "input_modalities,context_window_tokens,max_output_tokens,tags,"
+                            "created_at,updated_at FROM llm_models LIMIT 1"
+                        )
+                        connection.execute(
+                            "INSERT INTO llm_models "
+                            "(id,name,model,base_url,api_key,input_modalities,"
+                            "context_window_tokens,max_output_tokens,tags,created_at,updated_at) "
+                            "SELECT 'model-custom','custom','openai:custom',"
+                            "'https://kimi.example/v1','custom-key',input_modalities,"
+                            "context_window_tokens,max_output_tokens,tags,created_at,updated_at "
+                            "FROM llm_models LIMIT 1"
+                        )
+                        connection.commit()
+
+                    await asyncio.to_thread(command.upgrade, config, "007")
+                    self.assertEqual(self._row_count(db_path, "llm_providers"), 2)
+                    self.assertNotIn("base_url", self._columns(db_path, "llm_models"))
+                    self.assertNotIn("api_key", self._columns(db_path, "llm_models"))
+                    self.assertIn(
+                        ("provider_id", "llm_providers", "id", "RESTRICT"),
+                        self._foreign_keys(db_path, "llm_models"),
+                    )
+                    with sqlite3.connect(db_path) as connection:
+                        connection.execute(
+                            "INSERT INTO llm_providers "
+                            "(id,name,provider_type,use_default_base_url,base_url,api_key,enabled) "
+                            "VALUES (?,?,?,?,?,?,?)",
+                            (
+                                "provider-runtime-create",
+                                "runtime-create",
+                                "openai_compatible",
+                                0,
+                                "https://runtime-create.example/v1",
+                                "runtime-key",
+                                1,
+                            ),
+                        )
+                        timestamps = connection.execute(
+                            "SELECT created_at, updated_at FROM llm_providers WHERE id=?",
+                            ("provider-runtime-create",),
+                        ).fetchone()
+                        connection.commit()
+                    self.assertIsNotNone(timestamps)
+                    self.assertTrue(timestamps[0])
+                    self.assertTrue(timestamps[1])
+                    self.assertEqual(
+                        self._row_count_where(
+                            db_path,
+                            "llm_models",
+                            "provider_id=(SELECT provider_id FROM llm_models WHERE id=?)",
+                            ("model-copy",),
+                        ),
+                        2,
+                    )
+                    self.assertEqual(
+                        self._scalar(
+                            db_path,
+                            "SELECT provider_type FROM llm_providers WHERE id="
+                            "(SELECT provider_id FROM llm_models WHERE id='model-custom')",
+                        ),
+                        "openai_compatible",
+                    )
+
+                    await asyncio.to_thread(command.downgrade, config, "006")
+                    self.assertNotIn("provider_id", self._columns(db_path, "llm_models"))
+                    self.assertNotIn("llm_providers", self._business_tables(db_path))
+                    self.assertEqual(
+                        self._scalar(db_path, "SELECT api_key FROM llm_models WHERE id='model-custom'"),
+                        "custom-key",
+                    )
+                    await asyncio.to_thread(command.upgrade, config, "007")
+                    self.assertEqual(self._revision(db_path), "007")
 
     async def test_002_groups_ui_tools_and_rewrites_agent_packages(self) -> None:
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
@@ -585,30 +707,215 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
                     await asyncio.to_thread(command.upgrade, config, "006")
                     self.assertEqual(self._revision(db_path), "006")
 
+    async def test_008_destructive_session_upgrade_and_009_cleanup_round_trip(self) -> None:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+            db_path = Path(tmpdir) / "session-events-008.db"
+            url = f"sqlite+aiosqlite:///{db_path.as_posix()}"
+            with patch("deep_agent.db.url.get_database_url", return_value=url):
+                with patch("deep_agent.db.migrate.get_database_url", return_value=url):
+                    config = migrate._build_alembic_config()
+                    await asyncio.to_thread(command.upgrade, config, "007")
+                    with sqlite3.connect(db_path) as connection:
+                        agent_id = str(
+                            connection.execute(
+                                "SELECT id FROM agents ORDER BY name LIMIT 1"
+                            ).fetchone()[0]
+                        )
+                        connection.execute(
+                            "INSERT INTO chat_sessions "
+                            "(agent_id,session_id,user_id,title) VALUES (?,?,?,?)",
+                            (agent_id, "legacy-session", "legacy-user", "legacy"),
+                        )
+                        connection.execute(
+                            "INSERT INTO chat_messages "
+                            "(agent_id,session_id,sequence,payload) VALUES (?,?,?,?)",
+                            (agent_id, "legacy-session", 1, "[]"),
+                        )
+                        connection.execute(
+                            "INSERT INTO chat_context_checkpoints "
+                            "(agent_id,session_id,source_last_sequence,"
+                            "source_history_hash,payload,payload_schema_version,"
+                            "projection_fingerprint,estimated_tokens,row_version) "
+                            "VALUES (?,?,?,?,?,?,?,?,?)",
+                            (
+                                agent_id,
+                                "legacy-session",
+                                1,
+                                "0" * 64,
+                                "{}",
+                                1,
+                                "1" * 64,
+                                1,
+                                1,
+                            ),
+                        )
+                        connection.commit()
+                    config_counts = {
+                        table: self._row_count(db_path, table)
+                        for table in (
+                            "agents",
+                            "llm_models",
+                            "llm_providers",
+                            "mcp_servers",
+                            "skill_packages",
+                            "ui_tool_definitions",
+                        )
+                    }
+
+                    await asyncio.to_thread(command.upgrade, config, "008")
+                    self.assertEqual(self._revision(db_path), "008")
+                    self.assertEqual(self._row_count(db_path, "chat_sessions"), 0)
+                    self.assertEqual(self._row_count(db_path, "chat_session_events"), 0)
+                    self.assertIn(
+                        "auxiliary_model_configs",
+                        self._business_tables(db_path),
+                    )
+                    self.assertEqual(
+                        config_counts,
+                        {table: self._row_count(db_path, table) for table in config_counts},
+                    )
+
+                    await asyncio.to_thread(command.upgrade, config, "011")
+                    self._assert_current_baseline(db_path)
+
+                    await asyncio.to_thread(command.downgrade, config, "008")
+                    self.assertEqual(self._revision(db_path), "008")
+                    self.assertEqual(
+                        self._columns(db_path, "auxiliary_model_configs"),
+                        {"use_case", "llm_model_id", "created_at", "updated_at"},
+                    )
+                    self.assertIn(
+                        ("llm_model_id", "llm_models", "id", "SET NULL"),
+                        self._foreign_keys(db_path, "auxiliary_model_configs"),
+                    )
+
+                    await asyncio.to_thread(command.downgrade, config, "007")
+                    self.assertEqual(self._revision(db_path), "007")
+                    self.assertEqual(self._row_count(db_path, "chat_sessions"), 0)
+                    self.assertEqual(self._row_count(db_path, "chat_messages"), 0)
+                    self.assertEqual(
+                        self._row_count(db_path, "chat_context_checkpoints"),
+                        0,
+                    )
+                    self.assertEqual(
+                        self._columns(db_path, "auxiliary_model_configs"),
+                        {"use_case", "llm_model_id", "created_at", "updated_at"},
+                    )
+                    self.assertIn(
+                        ("llm_model_id", "llm_models", "id", "SET NULL"),
+                        self._foreign_keys(db_path, "auxiliary_model_configs"),
+                    )
+
+                    await asyncio.to_thread(command.upgrade, config, "011")
+                    self._assert_current_baseline(db_path)
+                    self.assertEqual(
+                        config_counts,
+                        {table: self._row_count(db_path, table) for table in config_counts},
+                    )
+
+    async def test_009_accepts_an_008_database_where_auxiliary_table_was_already_removed(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+            db_path = Path(tmpdir) / "already-cleaned-008.db"
+            url = f"sqlite+aiosqlite:///{db_path.as_posix()}"
+            with patch("deep_agent.db.url.get_database_url", return_value=url):
+                with patch("deep_agent.db.migrate.get_database_url", return_value=url):
+                    config = migrate._build_alembic_config()
+                    await asyncio.to_thread(command.upgrade, config, "008")
+                    with sqlite3.connect(db_path) as connection:
+                        connection.execute("DROP TABLE auxiliary_model_configs")
+                        connection.commit()
+
+                    await asyncio.to_thread(command.upgrade, config, "011")
+                    self._assert_current_baseline(db_path)
+
     def _assert_current_baseline(self, db_path: Path) -> None:
-        self.assertEqual(self._revision(db_path), "006")
+        self.assertEqual(self._revision(db_path), "011")
         self.assertEqual(self._business_tables(db_path), EXPECTED_TABLES)
         self.assertNotIn("max_requests", self._columns(db_path, "agents"))
         self.assertNotIn("capabilities_source", self._columns(db_path, "llm_models"))
+        self.assertIn("provider_id", self._columns(db_path, "llm_models"))
+        self.assertNotIn("base_url", self._columns(db_path, "llm_models"))
+        self.assertNotIn("api_key", self._columns(db_path, "llm_models"))
+        self.assertIn("enabled", self._columns(db_path, "llm_models"))
+        self.assertEqual(
+            self._scalar(
+                db_path,
+                "SELECT COUNT(*) FROM llm_models WHERE enabled != 1 OR enabled IS NULL",
+            ),
+            0,
+        )
+        self.assertIn(
+            ("provider_id", "llm_providers", "id", "RESTRICT"),
+            self._foreign_keys(db_path, "llm_models"),
+        )
+        self.assertEqual(
+            self._index_columns(db_path, "ix_llm_models_provider_id"),
+            ["provider_id"],
+        )
+        self.assertGreaterEqual(self._row_count(db_path, "llm_providers"), 1)
+        provider_id = str(
+            self._scalar(db_path, "SELECT id FROM llm_providers ORDER BY name LIMIT 1")
+        )
+        self.assertEqual(len(provider_id), 32)
+        self.assertNotIn("-", provider_id)
         self.assertNotIn("resource_capabilities", self._columns(db_path, "mcp_servers"))
+        for table in (
+            "llm_providers",
+            "skill_packages",
+            "mcp_servers",
+            "ui_tool_packages",
+            "ui_tool_definitions",
+        ):
+            self.assertNotIn("enabled", self._columns(db_path, table))
+        self.assertEqual(
+            self._index_columns(db_path, "ix_ui_tool_definitions_source_enabled"),
+            [],
+        )
         self.assertIn("package_code", self._columns(db_path, "ui_tool_definitions"))
         self.assertIn("skills", self._columns(db_path, "agents"))
         self.assertEqual(
             json.loads(str(self._scalar(db_path, "SELECT skills FROM agents WHERE name = 'default'"))),
             [],
         )
+        self.assertEqual(self._primary_key(db_path, "chat_sessions"), ["session_id"])
+        self.assertEqual(self._primary_key(db_path, "chat_session_events"), ["event_id"])
         self.assertEqual(
-            self._primary_key(db_path, "chat_context_checkpoints"),
-            ["agent_id", "session_id"],
+            self._columns(db_path, "chat_session_events"),
+            {
+                "event_id", "session_id", "sequence", "schema_version",
+                "event_type", "status", "turn_id", "run_id", "search_text",
+                "payload", "created_at", "updated_at",
+            },
+        )
+        for removed in ("message_id", "part_index", "call_id", "tool_name"):
+            self.assertNotIn(removed, self._columns(db_path, "chat_session_events"))
+        self.assertEqual(
+            self._index_columns(
+                db_path, "ix_chat_session_events_session_turn_sequence"
+            ),
+            ["session_id", "turn_id", "sequence"],
         )
         self.assertEqual(
-            self._index_columns(db_path, "ix_chat_sessions_user_id_agent_id_updated_at"),
-            ["user_id", "agent_id", "updated_at"],
+            self._index_columns(
+                db_path, "ix_chat_session_events_session_run_sequence"
+            ),
+            ["session_id", "run_id", "sequence"],
+        )
+        self.assertEqual(
+            self._index_columns(
+                db_path, "ix_chat_session_events_session_type_status_sequence"
+            ),
+            ["session_id", "event_type", "status", "sequence"],
+        )
+        self.assertEqual(
+            self._index_columns(db_path, "ix_chat_sessions_agent_user_updated"),
+            ["agent_id", "user_id", "updated_at"],
         )
         self.assertEqual(self._row_count(db_path, "llm_models"), 1)
         self.assertEqual(self._row_count(db_path, "agents"), 1)
         self.assertEqual(self._row_count(db_path, "mcp_servers"), 1)
-        self.assertEqual(self._row_count(db_path, "auxiliary_model_configs"), 1)
         self.assertEqual(
             self._scalar(
                 db_path,
@@ -663,6 +970,15 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
         with sqlite3.connect(db_path) as connection:
             rows = connection.execute(f"PRAGMA index_info({index_name})").fetchall()
         return [str(row[2]) for row in rows]
+
+    @staticmethod
+    def _foreign_keys(db_path: Path, table_name: str) -> set[tuple[str, str, str, str]]:
+        with sqlite3.connect(db_path) as connection:
+            rows = connection.execute(f"PRAGMA foreign_key_list({table_name})").fetchall()
+        return {
+            (str(row[3]), str(row[2]), str(row[4]), str(row[6]).upper())
+            for row in rows
+        }
 
     @staticmethod
     def _row_count(db_path: Path, table_name: str) -> int:

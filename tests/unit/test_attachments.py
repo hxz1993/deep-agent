@@ -13,9 +13,9 @@ from deep_agent.agent.attachments import (
     resolve_history_for_llm,
     resolve_user_prompt,
 )
-from deep_agent.agent.history import model_messages_to_history
 from deep_agent.db.serialization import deserialize_message, serialize_message
 from deep_agent.schemas.attachment import AttachmentRef
+from tests.helpers.conversation import project_model_messages
 
 
 class TestAttachments(unittest.IsolatedAsyncioTestCase):
@@ -31,7 +31,11 @@ class TestAttachments(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(parts[0], "see this")
         self.assertEqual(parts[1].media_type, "image/jpeg")
         self.assertEqual(parts[1].data, b"img-bytes")
-        mock_download.assert_awaited_once_with("platform-file-1", headers)
+        mock_download.assert_awaited_once_with(
+            "platform-file-1",
+            headers,
+            file_store=None,
+        )
 
     @patch("deep_agent.agent.attachments._download_file", new_callable=AsyncMock)
     async def test_image_is_forwarded_without_local_model_gate(self, mock_download: AsyncMock) -> None:
@@ -122,9 +126,9 @@ class TestAttachments(unittest.IsolatedAsyncioTestCase):
             )
         )
         messages = [ModelRequest(parts=[UserPromptPart(content=["hello", ref])])]
-        timeline = model_messages_to_history(messages)
+        timeline = project_model_messages(messages)
         self.assertEqual(len(timeline), 1)
-        self.assertEqual(timeline[0].content, "hello")
+        self.assertEqual(timeline[0].text, "hello")
         self.assertEqual(len(timeline[0].attachments), 1)
         self.assertEqual(timeline[0].attachments[0].id, "f1")
 

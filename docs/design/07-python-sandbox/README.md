@@ -1,6 +1,6 @@
 # 无状态 Python 沙箱
 
-DeepAgent 当前只有一套 Python 执行链路：`SubprocessBackend`。`execute_python` 与
+DeepAgent 的完整 CPython 计算只有一套链路：`SubprocessBackend`。`execute_python` 与
 `execute_skill_script` 都通过这套 Backend 在全新的 Python 子进程中执行；每次调用结束后进程和
 临时工作目录都会销毁，不保留上一次调用的变量或文件。
 
@@ -17,8 +17,13 @@ execute_skill_script(skill_code, script_path, arguments, inputs, resource_paths)
 → outputs/result.json 作为正式 result
 ```
 
-`execute_python` 在 Agent 启用 `builtin:sandbox` 时披露。`execute_skill_script` 还要求 Agent
+`execute_python` 在 Agent 关联 `builtin:sandbox` 时披露。`execute_skill_script` 还要求 Agent
 选择了一个包含脚本的 Skill。Skill 脚本源码不能通过 `read_file` 读取。
+
+v0.6.2 另有显式 `builtin:code-mode` 提供 Harness `run_code`。它不运行完整 CPython，
+而是在 Monty Python 子集中编排当前已授权 MCP；没有宿主文件、网络、Shell、pip 和
+第三方包。所以 `run_code` 不替代 `execute_python`，也不复用这一子进程 Backend。
+详见 [`../20-code-mode/`](../20-code-mode/README.md)。
 
 ## 当前执行边界
 

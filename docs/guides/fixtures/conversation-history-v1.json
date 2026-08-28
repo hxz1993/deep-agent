@@ -1,0 +1,83 @@
+{
+  "schema_version": 1,
+  "session_id": "fixture-session-001",
+  "event_head_sequence": 5,
+  "items": [
+    {
+      "item_id": "message:evt-user-1",
+      "kind": "user_message",
+      "status": "completed",
+      "turn_id": "run-1",
+      "run_id": "run-1",
+      "order": {"sequence": 1, "part_offset": 0},
+      "source_event_ids": ["evt-user-1"],
+      "created_at": "2026-08-27T02:00:00Z",
+      "updated_at": "2026-08-27T02:00:00Z",
+      "text": "请读取预算附件并核对华东成员。",
+      "attachments": [
+        {"id": "local_file_1", "name": "预算.xlsx", "mime": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "byte_size": 2048, "content_hash": "sha256:file"}
+      ],
+      "context_refs": [
+        {"key": "selection", "type": "deeptable.selection", "schema_version": "1", "label": "预算!B2:F10", "payload": {"id": "selection-1"}}
+      ]
+    },
+    {
+      "item_id": "plan:call-plan-1",
+      "kind": "plan",
+      "status": "completed",
+      "turn_id": "run-1",
+      "run_id": "run-1",
+      "order": {"sequence": 2, "part_offset": 1},
+      "source_event_ids": ["evt-assistant-1", "evt-results-1"],
+      "created_at": "2026-08-27T02:00:01Z",
+      "updated_at": "2026-08-27T02:00:02Z",
+      "call_id": "call-plan-1",
+      "tool_name": "write_plan",
+      "input": {"items": [{"id": "read", "content": "读取预算", "status": "in_progress"}]},
+      "output": "Plan updated",
+      "plan": {"items": [{"id": "read", "content": "读取预算", "status": "completed"}]},
+      "total": 1,
+      "completed": 1
+    },
+    {
+      "item_id": "tool:call-read-1",
+      "kind": "tool",
+      "status": "completed",
+      "turn_id": "run-1",
+      "run_id": "run-1",
+      "order": {"sequence": 2, "part_offset": 2},
+      "source_event_ids": ["evt-assistant-1", "evt-results-1"],
+      "created_at": "2026-08-27T02:00:01Z",
+      "updated_at": "2026-08-27T02:00:02Z",
+      "call_id": "call-read-1",
+      "tool_name": "read_file",
+      "mode": "tool",
+      "input": {"file_id": "local_file_1"},
+      "output": {"sheet": "预算", "rows": 9},
+      "outcome": "success",
+      "widget": null,
+      "metadata": null,
+      "artifacts": []
+    },
+    {
+      "item_id": "message:evt-assistant-2",
+      "kind": "assistant_message",
+      "status": "completed",
+      "turn_id": "run-1",
+      "run_id": "run-1",
+      "order": {"sequence": 4, "part_offset": 0},
+      "source_event_ids": ["evt-assistant-2"],
+      "created_at": "2026-08-27T02:00:03Z",
+      "updated_at": "2026-08-27T02:00:03Z",
+      "phase": "final",
+      "thinking": "已读取预算并核对成员。",
+      "text": "华东预算范围和成员已经核对完成。",
+      "conversation_id": "deepagent:agent-1:fixture-session-001",
+      "model_name": "deepseek-chat",
+      "provider_name": "deepseek",
+      "provider_response_id": "response-1",
+      "finish_reason": "stop",
+      "usage": {"input_tokens": 120, "output_tokens": 32, "total_tokens": 152}
+    }
+  ]
+}

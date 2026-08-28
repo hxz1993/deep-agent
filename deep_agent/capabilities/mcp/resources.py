@@ -22,7 +22,7 @@ def _selected_resource_rows(spec: AgentSpec, rows: list[McpServer]) -> dict[str,
     }
     eligible: dict[str, McpServer] = {}
     for row in rows:
-        if row.name not in selected or not row.enabled or row.transport != "url":
+        if row.name not in selected or row.transport != "url":
             continue
         inspection = McpInspection.from_value(
             getattr(row, "inspection", None),

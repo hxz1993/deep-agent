@@ -26,7 +26,11 @@ from deep_agent.capabilities.mcp.lease_manager import McpLeaseManager
 from deep_agent.core.context import AppContext, get_context, init_context, reset_context
 from deep_agent.schemas.llm_model import LlmModelCreate
 from tests.helpers.request_identity import install_test_user_header
-from tests.helpers.sqlite_stores import make_sqlite_stores
+from tests.helpers.sqlite_stores import (
+    get_default_test_provider_id,
+    make_sqlite_stores,
+    seed_default_agent,
+)
 from tests.integration.helpers.chat import mock_request_disconnect, parse_sse_events
 from tests.integration.helpers.models import text_only_model
 
@@ -66,11 +70,47 @@ def deeptable_report_template_generate(name: str) -> str:
     return name
 
 
+def platform_user_profile(user_id: str) -> str:
+    """Read a platform user profile."""
+    return user_id
+
+
+def audit_log_list(category: str) -> str:
+    """List recent audit log entries by category."""
+    return category
+
+
+def workflow_task_list(status: str) -> str:
+    """List workflow tasks by status."""
+    return status
+
+
+def connector_source_get(name: str) -> str:
+    """Read a connector data source."""
+    return name
+
+
+def variable_value_get(name: str) -> str:
+    """Read a configured variable value."""
+    return name
+
+
+def dimension_member_list(dimension: str) -> str:
+    """List members in a business dimension."""
+    return dimension
+
+
+def platform_menu_list(module: str) -> str:
+    """List platform menus for a module."""
+    return module
+
+
 class ChatContextReferenceIntegrationTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         stores, self._engine, session_factory = await make_sqlite_stores()
-        self._model = await stores.llm_model.create_unique(
+        self._model = await stores.llm_configuration.create_model(
             LlmModelCreate(
+                provider_id=await get_default_test_provider_id(stores),
                 name="context-ref-model",
                 model="private:context-ref-model",
                 input_modalities=["text"],
@@ -78,6 +118,7 @@ class ChatContextReferenceIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 max_output_tokens=8_192,
             )
         )
+        self._agent_id = await seed_default_agent(stores, name="context-ref-agent")
         self._app = FastAPI()
         install_test_user_header(self._app)
         self._app.include_router(api_router)
@@ -91,7 +132,7 @@ class ChatContextReferenceIntegrationTests(unittest.IsolatedAsyncioTestCase):
             )
         )
         self._no_title = patch(
-            "deep_agent.agent.runner.AgentRunner._maybe_generate_title",
+            "deep_agent.agent.runner.AgentRunner._generate_model_title",
             new_callable=AsyncMock,
         )
         self._no_title.start()
@@ -120,6 +161,13 @@ class ChatContextReferenceIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 deeptable_workbook_get,
                 deeptable_dynamic_report_create,
                 deeptable_report_template_generate,
+                platform_user_profile,
+                audit_log_list,
+                workflow_task_list,
+                connector_source_get,
+                variable_value_get,
+                dimension_member_list,
+                platform_menu_list,
             ]
         ).prefixed("deepfos")
         discovery = build_mcp_discovery_toolset(
@@ -153,7 +201,7 @@ class ChatContextReferenceIntegrationTests(unittest.IsolatedAsyncioTestCase):
             "type": "deeptable.page",
         }
         with patch(
-            "deep_agent.api.v1.chat.build_runner",
+            "deep_agent.api.v1.chat.build_runner_for_agent",
             new_callable=AsyncMock,
             return_value=runner,
         ):
@@ -167,6 +215,7 @@ class ChatContextReferenceIntegrationTests(unittest.IsolatedAsyncioTestCase):
                         "POST",
                         "/api/v1/chat/stream",
                         json={
+                            "agent_id": self._agent_id,
                             "message": "火星气象温度是多少？不要调用工具；不知道就说不知道。",
                             "context_refs": [page_ref],
                         },
@@ -189,7 +238,7 @@ class ChatContextReferenceIntegrationTests(unittest.IsolatedAsyncioTestCase):
         observed: list[list[str]] = []
         for context_refs in (None, [page_ref]):
             with patch(
-                "deep_agent.api.v1.chat.build_runner",
+                "deep_agent.api.v1.chat.build_runner_for_agent",
                 new_callable=AsyncMock,
                 return_value=self._discovery_runner(),
             ):
@@ -199,7 +248,7 @@ class ChatContextReferenceIntegrationTests(unittest.IsolatedAsyncioTestCase):
                         base_url="http://test",
                         timeout=30.0,
                     ) as client:
-                        body = {"message": question}
+                        body = {"agent_id": self._agent_id, "message": question}
                         if context_refs is not None:
                             body["context_refs"] = context_refs
                         async with client.stream(
@@ -232,6 +281,7 @@ class ChatContextReferenceIntegrationTests(unittest.IsolatedAsyncioTestCase):
                         "POST",
                         "/api/v1/chat/stream",
                         json={
+                            "agent_id": self._agent_id,
                             "model_id": self._model.id,
                             "capabilities": [],
                             "context_refs": [_context_ref()],
@@ -245,9 +295,12 @@ class ChatContextReferenceIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(final["status"], "completed")
 
         history = await self._history(session_id)
-        user = next(message for message in history["messages"] if message["role"] == "user")
-        self.assertIsNone(user["content"])
-        self.assertEqual(user["context_refs"], [_context_ref()])
+        user = next(item for item in history["items"] if item["kind"] == "user_message")
+        self.assertIsNone(user["text"])
+        self.assertEqual(
+            user["context_refs"],
+            [{key: value for key, value in _context_ref().items() if key != "metadata"}],
+        )
         self.assertNotIn("<context_references>", str(history))
 
         async with AsyncClient(transport=self._transport, base_url="http://test") as client:
@@ -264,6 +317,7 @@ class ChatContextReferenceIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 response = await client.post(
                     "/api/v1/chat",
                     json={
+                        "agent_id": self._agent_id,
                         "message": "结合附件解释选区",
                         "model_id": self._model.id,
                         "capabilities": [],
@@ -279,12 +333,12 @@ class ChatContextReferenceIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 )
         self.assertEqual(response.status_code, 200)
         history = await self._history(response.json()["session_id"])
-        user = next(message for message in history["messages"] if message["role"] == "user")
-        self.assertEqual(user["content"], "结合附件解释选区")
+        user = next(item for item in history["items"] if item["kind"] == "user_message")
+        self.assertEqual(user["text"], "结合附件解释选区")
         self.assertEqual(user["attachments"][0]["id"], "file-1")
         self.assertEqual(user["context_refs"][0]["key"], "current_selection")
 
-    async def test_manual_and_auto_rename_preserve_refs_and_never_read_payload(self) -> None:
+    async def test_manual_rename_preserves_context_refs(self) -> None:
         with patch(
             "deep_agent.agent.factory._resolve_model",
             return_value=text_only_model("ok"),
@@ -293,6 +347,7 @@ class ChatContextReferenceIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 created = await client.post(
                     "/api/v1/chat",
                     json={
+                        "agent_id": self._agent_id,
                         "model_id": self._model.id,
                         "capabilities": [],
                         "context_refs": [_context_ref()],
@@ -309,23 +364,7 @@ class ChatContextReferenceIntegrationTests(unittest.IsolatedAsyncioTestCase):
             )
         self.assertEqual(manual.status_code, 200)
         self.assertEqual(manual.json()["title"], "手动选区分析")
-        self.assertEqual((await self._history(session_id))["messages"], before["messages"])
-
-        title_mock = AsyncMock(return_value="销售预算分析")
-        with patch("deep_agent.agent.title_generator.generate_title", title_mock):
-            async with AsyncClient(transport=self._transport, base_url="http://test") as client:
-                renamed = await client.patch(
-                    f"/api/v1/sessions/{session_id}",
-                    json={"auto": True},
-                )
-        self.assertEqual(renamed.status_code, 200)
-        self.assertEqual(renamed.json()["title"], "销售预算分析")
-        title_mock.assert_awaited_once()
-        kwargs = title_mock.await_args.kwargs
-        self.assertEqual(kwargs["user_text"], "[上下文] 销售预算!B2:C4")
-        self.assertNotIn("cells", str(kwargs))
-        self.assertNotIn("history-only", str(kwargs))
-        self.assertEqual((await self._history(session_id))["messages"], before["messages"])
+        self.assertEqual((await self._history(session_id))["items"], before["items"])
 
     async def test_deferred_results_and_context_refs_are_rejected_before_writing(self) -> None:
         async with AsyncClient(transport=self._transport, base_url="http://test") as client:
@@ -389,7 +428,7 @@ class ChatContextReferenceIntegrationTests(unittest.IsolatedAsyncioTestCase):
                         "POST",
                         "/api/v1/chat/stream",
                         json={
-                            "session_id": "context-ref-provider-failure",
+                            "agent_id": self._agent_id,
                             "model_id": self._model.id,
                             "capabilities": [],
                             "message": "分析失败后仍要保留引用",
@@ -401,9 +440,12 @@ class ChatContextReferenceIntegrationTests(unittest.IsolatedAsyncioTestCase):
 
         events = parse_sse_events(raw)
         self.assertEqual(events[-1]["type"], "error")
-        history = await self._history("context-ref-provider-failure")
-        user = next(message for message in history["messages"] if message["role"] == "user")
-        self.assertEqual(user["context_refs"], [_context_ref()])
+        history = await self._history(events[0]["session_id"])
+        user = next(item for item in history["items"] if item["kind"] == "user_message")
+        self.assertEqual(
+            user["context_refs"],
+            [{key: value for key, value in _context_ref().items() if key != "metadata"}],
+        )
 
 
 if __name__ == "__main__":

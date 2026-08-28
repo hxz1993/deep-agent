@@ -10,15 +10,9 @@ async def selectable_tool_package_codes(
     registry: ToolPackageRegistry,
     stores: DataStores,
 ) -> set[str]:
-    codes = {
-        package.code
-        for package in (registry.get(code) for code in registry.codes())
-        if package.enabled
-    }
+    codes = set(registry.codes())
     codes.update(
-        package.code
-        for package in await load_mcp_tool_packages(stores)
-        if package.enabled
+        package.code for package in await load_mcp_tool_packages(stores)
     )
     codes.update(await runnable_ui_tool_package_codes(stores))
     return codes
@@ -29,7 +23,7 @@ async def invalid_tool_package_codes(
     registry: ToolPackageRegistry,
     stores: DataStores,
 ) -> list[str]:
-    if codes is None:
+    if not codes:
         return []
     available = await selectable_tool_package_codes(registry, stores)
     return sorted({code for code in codes if code not in available})

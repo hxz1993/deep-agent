@@ -7,11 +7,12 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 from sqlalchemy.engine import make_url
 
+from deep_agent.api.v1.admin import CONSOLE_ADMIN_DEPENDENCIES
 from deep_agent.db.url import get_database_url
 from deep_agent.options import OPTION, DeepAgentOptions
 
 
-router = APIRouter()
+router = APIRouter(dependencies=CONSOLE_ADMIN_DEPENDENCIES)
 
 SettingValue = str | int | float | bool | list[str] | None
 
@@ -129,31 +130,22 @@ _SETTING_GROUPS = (
                 "触发后将模型输入历史压缩到可用请求预算的该比例附近。",
             ),
             _SettingDefinition(
-                "context_keep_tool_pairs",
-                "保留工具结果组数",
-                "DEEP_AGENT_CONTEXT_KEEP_TOOL_PAIRS",
-                "agent",
-                "context_keep_tool_pairs",
-                "确定性压缩时保持完整的最近工具调用/结果配对数量。",
-                "组",
-            ),
-            _SettingDefinition(
-                "context_min_clear_tokens",
-                "最小清理收益",
-                "DEEP_AGENT_CONTEXT_MIN_CLEAR_TOKENS",
-                "agent",
-                "context_min_clear_tokens",
-                "预计回收不足该数量时不改写旧工具结果，避免无意义破坏提示缓存。",
-                "Token",
-            ),
-            _SettingDefinition(
                 "context_summary_timeout",
                 "摘要超时",
                 "DEEP_AGENT_CONTEXT_SUMMARY_TIMEOUT",
                 "agent",
                 "context_summary_timeout",
-                "主模型单次摘要调用的最大等待时间；失败时使用滑动窗口兜底且不更新 Checkpoint。",
+                "摘要调用的总等待时间；期间持续发送 SSE 心跳，超时不重试。",
                 "秒",
+            ),
+            _SettingDefinition(
+                "context_tool_prune_threshold",
+                "工具结果裁剪阈值",
+                "DEEP_AGENT_CONTEXT_TOOL_PRUNE_THRESHOLD",
+                "agent",
+                "context_tool_prune_threshold",
+                "仅对摘要输入副本中超过阈值的单条旧工具结果执行头尾裁剪。",
+                "Unicode 码点",
             ),
         ),
     ),
@@ -352,30 +344,6 @@ _SETTING_GROUPS = (
                 "agent",
                 "image_jpeg_quality",
                 "图片转码为 JPEG 时使用的质量参数。",
-            ),
-        ),
-    ),
-    _SettingGroupDefinition(
-        key="titles",
-        label="会话标题",
-        items=(
-            _SettingDefinition(
-                "title_model",
-                "标题模型",
-                "DEEP_AGENT_TITLE_MODEL",
-                "agent",
-                "title_model",
-                "用于生成会话标题的模型名称，不展示地址或密钥。",
-                empty_display="未启用",
-            ),
-            _SettingDefinition(
-                "title_generation_timeout",
-                "标题生成超时",
-                "DEEP_AGENT_TITLE_GENERATION_TIMEOUT",
-                "agent",
-                "title_generation_timeout",
-                "生成会话标题允许的最大等待时间。",
-                "秒",
             ),
         ),
     ),

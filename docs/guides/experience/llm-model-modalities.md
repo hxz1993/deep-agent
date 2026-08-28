@@ -47,7 +47,7 @@ interleaved
   由Provider返回拒绝说明或接口错误。
 - PDF和PPT/PPTX不是当前模型模态或上传类型，也没有本地解析能力；未来如有需求，使用独立文档
   解析工具，不并入 `read_file`。
-- DOCX、XLSX、TXT、CSV、JSON、Markdown、HTML、XML：平台只保存 `file_id`；合法附件存在时
+- DOCX、XLSX、TXT、LOG、CSV、JSON、Markdown、HTML、XML：平台只保存 `file_id`；合法附件存在时
   `read_file`自动注入并按需分页读取，不在上传时预抽文本，也不要求Agent额外选择工具包。
 - 图片不通过 `read_file`；当前轮图片直接作为多模态输入，历史图片和Skill图片不读取。
 - MCP、Skill、UI Tool：属于 Agent 工具能力，不属于模型输入模态。
@@ -71,6 +71,11 @@ max_output_tokens
 不保存 `max_input_tokens` 或固定输出预留。当前上下文压缩会结合最近历史 usage 和保守估算
 动态预测本轮输出，不能简单用“总窗口减最大输出”作为输入预算。
 
+v0.6.3起，实际进入模型请求的当前轮图片会按Provider/模型路由估算：DeepSeek v4 Vision使用
+公开的14像素Patch、3:1下采样和单图384 Token上限公式，并从已规范化图片字节读取实际尺寸。
+其他路由、URL图片或无法识别的图像继续按单个媒体1024 Token保守估算。该值只用于压力预判，
+实际结算与后续预算校准仍以Provider Usage为准；附件引用元数据不会冒充已发送的图片字节。
+
 ## 4. 模型目录刷新
 
 管理员调用：
@@ -91,6 +96,29 @@ POST /api/v1/llm-models/catalog/refresh
 ```
 
 任何失败都保留旧目录。系统不做启动同步、定时同步、保存模型时同步或 Agent 运行时同步。
+
+部署环境无法访问models.dev时，管理员可在可联网环境下下载官方
+`https://models.dev/catalog.json`，再通过Console“导入”或下列接口导入：
+
+```http
+POST /api/v1/llm-models/catalog/import
+Content-Type: multipart/form-data
+
+file=<catalog.json>
+```
+
+导入与联网刷新使用完全相同的解析、Provider白名单、标准化与原子替换逻辑。
+文件必须是UTF-8 JSON，且不超过16 MiB；校验失败保留旧目录。导入不会修改
+`llm_models`中已配置的Base URL、API Key或模型属性。
+
+当前数据库目录可通过Console“导出”或下列接口导出：
+
+```http
+GET /api/v1/llm-models/catalog/export
+```
+
+导出文件使用与导入相同的`models/providers/labs`结构，可原样再导入。它只包含当前
+Provider白名单和标准化规则已接受的目录项，不是models.dev原始全量文件的备份。
 
 目录查询：
 
@@ -116,6 +144,7 @@ GET /api/v1/llm-models/catalog?view=provider
 - xAI
 
 OpenRouter、Azure、Bedrock、Vertex 和长尾 Gateway 暂不进入目录。白名单位于代码中，不提供在线配置。
+因此models.dev即使已收录某个模型，若它只由白名单外的渠道提供，刷新和导入都不会展示。
 
 ## 6. 已移除的旧机制
 

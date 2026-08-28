@@ -11,6 +11,7 @@ from deep_agent.api.v1 import api_router
 from deep_agent.capabilities import build_registry
 from deep_agent.capabilities.mcp.lease_manager import McpLeaseManager
 from deep_agent.core.context import AppContext, get_context, init_context, reset_context
+from deep_agent.schemas.agent import AgentCreate
 from tests.helpers.sqlite_stores import make_sqlite_stores_sync
 
 
@@ -38,28 +39,35 @@ class SessionOwnershipApiTests(unittest.TestCase):
 
     async def _seed(self) -> None:
         store = get_context().store
+        model = (await self.stores.llm_model.list_all())[0]
+        agent = await self.stores.agent.create_unique(
+            AgentCreate(name="ownership-test", model_id=model.id, prompt="test")
+        )
+        self.agent_id = agent.id
         message = [ModelRequest(parts=[UserPromptPart(content="hello")])]
-        await store.append("mine", message, user_id=self.user_id)
-        await store.append("other", message, user_id="user-b")
-        await store.append("legacy-null", message, user_id=None)
+        await store.append(
+            "mine", message, agent_id=self.agent_id, user_id=self.user_id,
+            turn_id="run-mine", run_id="run-mine",
+        )
+        await store.append(
+            "other", message, agent_id=self.agent_id, user_id="user-b",
+            turn_id="run-other", run_id="run-other",
+        )
 
-    def test_get_and_history_only_return_owned_session(self) -> None:
+    def test_get_and_events_only_return_owned_session(self) -> None:
         self.assertEqual(self.client.get("/api/v1/sessions/mine").status_code, 200)
+        history = self.client.get("/api/v1/sessions/mine/history")
+        self.assertEqual(history.status_code, 200)
+        self.assertEqual(history.json()["schema_version"], 1)
+        self.assertEqual(history.json()["items"][0]["kind"], "user_message")
         self.assertEqual(
-            self.client.get("/api/v1/sessions/mine/history").status_code,
+            self.client.get("/api/v1/sessions/mine/events").status_code,
             200,
         )
         self.assertEqual(self.client.get("/api/v1/sessions/other").status_code, 404)
+        self.assertEqual(self.client.get("/api/v1/sessions/other/history").status_code, 404)
         self.assertEqual(
-            self.client.get("/api/v1/sessions/legacy-null").status_code,
-            404,
-        )
-        self.assertEqual(
-            self.client.get("/api/v1/sessions/other/history").status_code,
-            404,
-        )
-        self.assertEqual(
-            self.client.get("/api/v1/sessions/legacy-null/history").status_code,
+            self.client.get("/api/v1/sessions/other/events").status_code,
             404,
         )
 
@@ -71,15 +79,7 @@ class SessionOwnershipApiTests(unittest.TestCase):
             ).status_code,
             404,
         )
-        self.assertEqual(
-            self.client.patch(
-                "/api/v1/sessions/legacy-null",
-                json={"title": "not allowed"},
-            ).status_code,
-            404,
-        )
         self.assertEqual(self.client.delete("/api/v1/sessions/other").status_code, 404)
-        self.assertEqual(self.client.delete("/api/v1/sessions/legacy-null").status_code, 404)
         self.assertEqual(self.client.delete("/api/v1/sessions/mine").status_code, 200)
         self.assertEqual(self.client.get("/api/v1/sessions/mine").status_code, 404)
         self.assertEqual(
@@ -89,7 +89,7 @@ class SessionOwnershipApiTests(unittest.TestCase):
 
     def test_chat_endpoints_cannot_resume_unowned_session(self) -> None:
         for path in ("/api/v1/chat", "/api/v1/chat/stream"):
-            for session_id in ("other", "legacy-null"):
+            for session_id in ("other",):
                 with self.subTest(path=path, session_id=session_id):
                     response = self.client.post(
                         path,
@@ -102,6 +102,7 @@ class SessionOwnershipApiTests(unittest.TestCase):
             ("get", "/api/v1/sessions", None),
             ("get", "/api/v1/sessions/mine", None),
             ("get", "/api/v1/sessions/mine/history", None),
+            ("get", "/api/v1/sessions/mine/events", None),
             ("patch", "/api/v1/sessions/mine", {"title": "blocked"}),
             ("delete", "/api/v1/sessions/mine", None),
             ("post", "/api/v1/chat", {"message": "blocked"}),

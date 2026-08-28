@@ -14,7 +14,7 @@ from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.context.compaction import ContextWindowExceededError
 from deep_agent.agent.headers import extract_forward_headers
 from deep_agent.agent.run_identity import conversation_id_for, new_run_id
-from deep_agent.api.v1.deps import build_runner, build_runner_for_agent
+from deep_agent.api.v1.deps import build_runner_for_agent
 from deep_agent.api.v1.request_identity import RequestUserDep
 from deep_agent.core.context import AppContextDep
 from deep_agent.core.exceptions import AgentNotFoundError, LlmModelNotFoundError
@@ -68,6 +68,9 @@ def _agent_deps(
         conversation_id=conversation_id,
         run_id=new_run_id(),
         request_headers=dict(request_headers or {}),
+        file_store=ctx.file_store,
+        app_id=(request_headers or {}).get("app"),
+        space_id=(request_headers or {}).get("space"),
     )
 
 
@@ -77,10 +80,53 @@ async def _ensure_session_access(
     *,
     user: str,
     agent_id: str | None,
-) -> None:
-    owner = await ctx.store.get_session_owner(session_id, agent_id=agent_id)
-    if owner.exists and owner.user_id != user:
+) -> str:
+    resolved = await ctx.store.resolve_ref(session_id, user_id=user)
+    if resolved is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
+    stored_agent_id, _ = resolved
+    if agent_id is not None and stored_agent_id != agent_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
+    return stored_agent_id
+
+
+async def _resolve_chat_agent_id(
+    ctx: AppContextDep,
+    body: ChatRequest | StreamChatRequest,
+    *,
+    session_id: str,
+    user: str,
+) -> str:
+    requested: str | None = None
+    if body.agent_id is not None:
+        try:
+            requested = normalize_agent_id(body.agent_id)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=str(exc),
+            ) from exc
+    if body.session_id is not None:
+        existing = await ctx.store.resolve_ref(session_id)
+        if existing is not None:
+            return await _ensure_session_access(
+                ctx,
+                session_id,
+                user=user,
+                agent_id=requested,
+            )
+        if requested is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="agent_id is required when creating a session.",
+            )
+        return requested
+    if requested is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="agent_id is required when creating a session.",
+        )
+    return requested
 
 
 def _validate_chat_body(body: ChatRequest | StreamChatRequest) -> None:
@@ -99,37 +145,15 @@ def _validate_chat_body(body: ChatRequest | StreamChatRequest) -> None:
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"At most {OPTION.agent.upload_max_count} attachments per message.",
         )
-    if body.branch_from is not None and has_deferred:
+    if body.branch_from is not None:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="branch_from and deferred_tool_results are mutually exclusive.",
+            detail="branch_from is not implemented for the Session Event Store.",
         )
     if has_context_refs and has_deferred:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="context_refs and deferred_tool_results are mutually exclusive.",
-        )
-    if body.branch_from is not None and body.branch_from < 0:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="branch_from must be non-negative.",
-        )
-
-
-async def _validate_branch_from(
-    ctx: AppContextDep,
-    session_id: str,
-    *,
-    agent_id: str | None,
-    branch_from: int | None,
-) -> None:
-    if branch_from is None:
-        return
-    history = await ctx.store.get_history(session_id, agent_id=agent_id)
-    if branch_from > len(history):
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"branch_from {branch_from} out of range (history length {len(history)}).",
         )
 
 
@@ -149,24 +173,24 @@ async def chat(
     _validate_chat_body(body)
     session_id = body.session_id or uuid.uuid4().hex
     request_headers = extract_forward_headers(request)
-    if body.session_id is not None:
-        await _ensure_session_access(ctx, session_id, user=user, agent_id=None)
-    await _validate_branch_from(ctx, session_id, agent_id=None, branch_from=body.branch_from)
+    agent_id = await _resolve_chat_agent_id(
+        ctx, body, session_id=session_id, user=user
+    )
     try:
-        runner = await build_runner(
+        runner = await build_runner_for_agent(
             ctx,
-            model=body.model if body.model_id is None else None,
+            agent_id,
             model_id=body.model_id,
-            temperature=body.temperature,
             capabilities=body.capabilities,
             request_headers=request_headers,
         )
-    except LlmModelNotFoundError as exc:
+    except (AgentNotFoundError, LlmModelNotFoundError) as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     deps = _agent_deps(
         ctx,
         session_id=session_id,
         user=user,
+        agent_id=agent_id,
         request_headers=request_headers,
     )
     try:
@@ -209,70 +233,34 @@ async def chat_stream(
     message = body.message or ""
     request_headers = extract_forward_headers(request)
 
-    api_agent_id: str | None = None
-    if body.agent_id is not None:
-        try:
-            agent_id = normalize_agent_id(body.agent_id)
-        except ValueError as exc:
-            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
-        try:
-            runner = await build_runner_for_agent(
-                ctx,
-                agent_id,
-                model_id=body.model_id,
-                request_headers=request_headers,
-            )
-        except AgentNotFoundError as exc:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-        except LlmModelNotFoundError as exc:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-        deps = _agent_deps(
+    agent_id = await _resolve_chat_agent_id(
+        ctx, body, session_id=session_id, user=user
+    )
+    try:
+        runner = await build_runner_for_agent(
             ctx,
-            session_id=session_id,
-            user=user,
-            agent_id=agent_id,
+            agent_id,
+            model_id=body.model_id,
+            capabilities=body.capabilities,
             request_headers=request_headers,
         )
-        session_data = {
-            "session_id": session_id,
-            "agent_id": agent_id,
-            "conversation_id": deps.conversation_id,
-            "run_id": deps.run_id,
-        }
-        api_agent_id = agent_id
-    else:
-        try:
-            runner = await build_runner(
-                ctx,
-                model=body.model if body.model_id is None else None,
-                model_id=body.model_id,
-                temperature=body.temperature,
-                capabilities=body.capabilities,
-                request_headers=request_headers,
-            )
-        except LlmModelNotFoundError as exc:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-        deps = _agent_deps(
-            ctx,
-            session_id=session_id,
-            user=user,
-            request_headers=request_headers,
-        )
-        session_data = {
-            "session_id": session_id,
-            "conversation_id": deps.conversation_id,
-            "run_id": deps.run_id,
-        }
-        api_agent_id = None
-
-    if body.session_id is not None:
-        await _ensure_session_access(
-            ctx,
-            session_id,
-            user=user,
-            agent_id=api_agent_id,
-        )
-    await _validate_branch_from(ctx, session_id, agent_id=api_agent_id, branch_from=body.branch_from)
+    except AgentNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except LlmModelNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    deps = _agent_deps(
+        ctx,
+        session_id=session_id,
+        user=user,
+        agent_id=agent_id,
+        request_headers=request_headers,
+    )
+    session_data = {
+        "session_id": session_id,
+        "agent_id": agent_id,
+        "conversation_id": deps.conversation_id,
+        "run_id": deps.run_id,
+    }
 
     async def event_generator():
         active_run = ctx.active_runs.register(
@@ -303,6 +291,6 @@ async def chat_stream(
             active_run.cancellation_token.cancel()
             ctx.active_runs.unregister(active_run)
             # Ensure background persistence finishes before the client refreshes session list.
-            await ctx.event_persister.flush(session_id, agent_id=api_agent_id)
+            await ctx.event_persister.flush(session_id, agent_id=agent_id)
 
     return EventSourceResponse(event_generator())

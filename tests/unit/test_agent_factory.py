@@ -15,9 +15,12 @@ from pydantic_ai_harness.tool_output_limits import ToolOutputLimits
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.factory import _resolve_model, _toolsets_for_spec, build_agent
 from deep_agent.agent.models import OpenAICompatibleVideoChatModel
+from deep_agent.agent.provider_registry import ProviderRuntimeConfig
 from deep_agent.capabilities.registry import ToolPackage, ToolPackageRegistry
+from deep_agent.code_mode import HybridCodeMode
 from deep_agent.agent.spec import AgentSpec
 from deep_agent.agent.tool_discovery import McpDiscoveryToolset
+from deep_agent.capabilities import build_registry
 from deep_agent.options import OPTION
 
 
@@ -26,7 +29,7 @@ def _spec(**kwargs: object) -> AgentSpec:
         "name": "test",
         "model": "openai:gpt-4o",
         "instructions": "hi",
-        "capabilities": None,
+        "capabilities": [],
         "base_url": None,
         "api_key": None,
     }
@@ -35,6 +38,29 @@ def _spec(**kwargs: object) -> AgentSpec:
 
 
 class ResolveModelTests(unittest.TestCase):
+    def test_persisted_provider_config_overrides_legacy_url_and_prefix_inference(
+        self,
+    ) -> None:
+        model = _resolve_model(
+            _spec(
+                model="deepseek-chat",
+                base_url="https://legacy.example.invalid/v1",
+                api_key="legacy-key",
+                provider_config=ProviderRuntimeConfig(
+                    id="provider-deepseek",
+                    name="DeepSeek",
+                    provider_type="deepseek",
+                    use_default_base_url=True,
+                    base_url="https://ignored.example.invalid/v1",
+                    api_key="provider-key",
+                ),
+            )
+        )
+
+        self.assertIsInstance(model, OpenAIChatModel)
+        self.assertIsInstance(model._provider, DeepSeekProvider)
+        self.assertEqual(model.model_name, "deepseek-chat")
+
     def test_deepseek_uses_deepseek_provider_with_spec_api_key(self) -> None:
         model = _resolve_model(
             _spec(model="deepseek:deepseek-v4-flash", api_key="sk-test"),
@@ -203,6 +229,30 @@ class ResolveModelTests(unittest.TestCase):
 
 
 class ToolsetAssemblyTests(unittest.TestCase):
+    def test_code_mode_capability_is_explicit_and_default_off(self) -> None:
+        registry = ToolPackageRegistry()
+        code_package = build_registry().get("builtin:code-mode")
+        registry.register(code_package)
+
+        default_agent = build_agent(_spec(model="test"), registry)
+        enabled_agent = build_agent(
+            _spec(model="test", capabilities=["builtin:code-mode"]),
+            registry,
+        )
+
+        self.assertFalse(
+            any(
+                isinstance(capability, HybridCodeMode)
+                for capability in default_agent.root_capability.capabilities
+            )
+        )
+        self.assertTrue(
+            any(
+                isinstance(capability, HybridCodeMode)
+                for capability in enabled_agent.root_capability.capabilities
+            )
+        )
+
     def test_selected_packages_preserve_all_runtime_toolset_layers(self) -> None:
         registry = ToolPackageRegistry()
         general = object()
@@ -216,7 +266,6 @@ class ToolsetAssemblyTests(unittest.TestCase):
                     code=code,
                     category="builtin",
                     toolset=toolset,
-                    default_enabled=code == "builtin:general",
                 )
             )
 
@@ -237,25 +286,26 @@ class ToolsetAssemblyTests(unittest.TestCase):
             mcp_toolsets=[mcp],
             mcp_resource_toolset=resources,
             file_toolset="file-toolset",
+            file_export_toolset="file-export-toolset",
             dynamic_ui_packages=[
                 ToolPackage(
                     code="ui:deepcube",
                     category="ui",
                     toolset=ui,
-                    default_enabled=False,
                 )
             ],
         )
 
-        self.assertEqual(len(assembled), 6)
+        self.assertEqual(len(assembled), 7)
         self.assertIs(assembled[0], general)
         self.assertIs(assembled[1], sandbox)
         self.assertIsInstance(assembled[2], McpDiscoveryToolset)
         self.assertIs(assembled[3], resources)
         self.assertEqual(assembled[4], "file-toolset")
-        self.assertIs(assembled[5], ui)
+        self.assertEqual(assembled[5], "file-export-toolset")
+        self.assertIs(assembled[6], ui)
 
-    def test_null_and_empty_selection_keep_original_default_semantics(self) -> None:
+    def test_empty_selection_has_no_implicit_packages(self) -> None:
         registry = ToolPackageRegistry()
         general = object()
         registry.register(
@@ -263,11 +313,13 @@ class ToolsetAssemblyTests(unittest.TestCase):
                 code="builtin:general",
                 category="builtin",
                 toolset=general,
-                default_enabled=True,
             )
         )
-        self.assertEqual(_toolsets_for_spec(registry, _spec(capabilities=None)), [general])
         self.assertEqual(_toolsets_for_spec(registry, _spec(capabilities=[])), [])
+        self.assertEqual(
+            _toolsets_for_spec(registry, _spec(capabilities=["builtin:general"])),
+            [general],
+        )
 
 
 if __name__ == "__main__":

@@ -5,19 +5,20 @@ from typing import Any
 
 from pydantic_ai.messages import ModelMessage, ModelRequest, ToolReturnPart
 from pydantic_ai.tools import RunContext
-from pydantic_ai_harness.planning import InMemoryPlanStore, Planning
+from pydantic_ai_harness.planning import InMemoryPlanStore, PlanItem, Planning
 
 from deep_agent.agent.deps import AgentDeps
 
-PLANNING_TOOL_NAMES = (
-    "write_plan",
-    "read_plan",
-    "add_task",
-    "update_task_status",
-    "update_task_statuses",
-    "remove_task",
-)
+PLANNING_TOOL_NAMES = ("write_plan",)
 PLANNING_TOOL_NAME_SET = frozenset(PLANNING_TOOL_NAMES)
+PLANNING_GUIDANCE = """Use planning only when the task benefits from multiple execution steps.
+
+- Include only work that still needs to be performed. Never add "write the final answer", "reply to the user", or equivalent presentation-only steps.
+- Every write_plan call replaces the complete plan. Include the current status of every remaining step in each call.
+- Update all accurately completed work before starting the final answer. Once final-answer text begins, do not call write_plan again.
+- A deferred-tool resume belongs to the same user turn and receives the last complete plan snapshot from that turn.
+- Never mark unfinished work as completed merely to close the plan.
+"""
 PLAN_METADATA_KEY = "deepagent_plan"
 
 
@@ -28,10 +29,27 @@ def is_planning_tool(tool_name: str | None) -> bool:
 
 
 def prepare_plan_store(deps: AgentDeps) -> InMemoryPlanStore:
-    """Reset the official in-memory plan at the start of a DeepAgent Run."""
+    """Create a fresh official PlanStore for the current Pydantic Run."""
 
     store = InMemoryPlanStore()
     deps.plan_store = store
+    return store
+
+
+async def restore_plan_snapshot(
+    deps: AgentDeps,
+    snapshot: Mapping[str, Any] | None,
+) -> InMemoryPlanStore:
+    """Restore a complete write_plan snapshot for a Deferred run in the same turn."""
+
+    store = prepare_plan_store(deps)
+    if not snapshot:
+        return store
+    raw_items = snapshot.get("items")
+    if not isinstance(raw_items, list):
+        return store
+    items = [PlanItem.model_validate(item) for item in raw_items if isinstance(item, Mapping)]
+    await store.set_items(items)
     return store
 
 
@@ -45,9 +63,11 @@ def _resolve_plan_store(ctx: RunContext[AgentDeps]) -> InMemoryPlanStore:
 
 
 def build_planning_capability() -> Planning[AgentDeps]:
-    """Build the default Harness 0.21 Planning capability for one Agent."""
+    """Build the scoped Harness Planning capability for one Agent."""
 
     return Planning(
+        tools=PLANNING_TOOL_NAMES,
+        guidance=PLANNING_GUIDANCE,
         store_resolver=_resolve_plan_store,
         enable_subtasks=False,
         inject=True,

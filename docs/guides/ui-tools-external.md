@@ -63,7 +63,7 @@ MCP Resource 是另一项独立能力，用于读取 MCP 暴露的静态上下�
 仅填写自由输入时，`selected` 为空数组，`custom_input` 保存用户输入；多选模式允许候选项和自由输入同时提交。
 
 两个内置工具同属 `ui:builtin`。该包和工具在 Console 中只读展示，不能修改或删除；
-它们不会自动随 Agent 启用。
+它们不会自动关联到 Agent。
 
 ## 手工工具
 
@@ -80,8 +80,7 @@ POST /api/v1/ui-tools
 {
   "code": "ui:deepcube",
   "label": "DeepCube 助手",
-  "description": "DeepCube 专用交互",
-  "enabled": true
+  "description": "DeepCube 专用交互"
 }
 ```
 
@@ -106,8 +105,7 @@ POST /api/v1/ui-tools
     },
     "required": ["title", "fields"]
   },
-  "widget": "clarify",
-  "enabled": true
+  "widget": "clarify"
 }
 ```
 
@@ -120,12 +118,12 @@ ui:deepcube
 
 运行时只有同时满足以下条件才会进入模型工具列表：
 
-1. UI 工具包和工具均为 `enabled=true`。
-2. Agent `capabilities` 包含精确的 `ui:<package>` 工具包编码。
-3. 工具 Schema 有效。
+1. Agent `capabilities` 包含精确的 `ui:<package>` 工具包编码。
+2. 工具 Schema 有效。
 
-创建和更新 Agent 时，不存在或已停用的包编码返回 422。`capabilities=null`、空数组或未选择
-UI 包时不加载 UI 工具。旧的单工具编码只在 Alembic `002` 中一次性转换，运行时不保留兼容分支。
+创建和更新 Agent 时，不存在的包编码返回 422。`capabilities`是非空列表；空数组或未选择UI包时
+不加载 UI 工具。旧的单工具编码只在 Alembic `002` 中一次性转换，运行时不保留兼容分支。
+Alembic 010删除工具包和工具自身的`enabled`字段，目录层不再存在第二个运行开关。
 
 ## 调用与恢复
 

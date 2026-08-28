@@ -57,9 +57,10 @@ MCP 在请求时由 `resolve_mcp_toolsets` 解析（DB 行 + `mcps/` builtin 兜
 4. `AgentRunner.run_stream()`：Session锁 → Event Store恢复模型Surface → Pydantic AI运行/压缩 → 临时SSE → 完整Part拆成Event；Run/Compaction终态按同一Event ID更新
 5. `capabilities`和`skills`都是非空显式列表；空列表表示本Agent不关联该类资源，不存在默认包继承
 
-v0.6.1起，Provider、Model、Skill、MCP、UI工具包和UI工具表均不保存`enabled`。Provider运行可用性
-只从类型、地址、凭据等真实配置派生；Model由Agent或请求级`model_id`选用；Skill和工具是否参与
-Run只看Agent显式关联。API Schema必须拒绝旧`enabled`输入，不能静默忽略后形成第二套状态。
+Provider运行可用性只从类型、地址、凭据等真实配置派生，不保存`enabled`。v0.6.4起Model恢复
+非空、默认开启的`enabled`：只有模型启用且Provider有效时才可由Agent或请求级`model_id`选用；
+既有Agent引用不自动改写，但实际运行必须失败关闭。Skill、MCP、UI工具包和UI工具是否参与Run仍只看
+Agent显式关联，不恢复资源自身的启停字段。
 
 ### 正式取消（v0.3.10）
 
@@ -248,7 +249,7 @@ user/App/Space上下文时，`export_file_to_download_center`始终直接披露�
 | --- | --- |
 | `agents` | DB Agent（UUID PK，name 唯一） |
 | `llm_providers` | Provider类型、Base URL、凭据和协议配置；不保存独立启停状态 |
-| `llm_models` | LLM 运行时唯一模型事实：Provider引用、模态、上下文、最大输出与 tags；不保存独立启停状态 |
+| `llm_models` | LLM 运行时唯一模型事实：Provider引用、模型启停、模态、上下文、最大输出与 tags |
 | `model_catalog` | models.dev 的 Lab/Model/Provider 数据库快照，只用于浏览和预填 |
 | `mcp_servers` | MCP transport、config JSON、最近一次 inspection 检测快照 |
 | `skill_packages` | 上传 Skill 当前安装版本的元数据、平台 File ID、Manifest 与资源索引 |

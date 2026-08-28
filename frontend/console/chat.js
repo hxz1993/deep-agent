@@ -24,8 +24,9 @@ import {
   firstSelectableModelId,
   isModelSelectable,
   modelOptionLabel,
+  preserveCurrentModel,
   renderGroupedModelOptions,
-} from "./model-options.js?v=20260825-1";
+} from "./model-options.js?v=20260828-1";
 
 /* ------------------------------------------------------------------ *
  * deep-agent 前端 —— 适配 FastAPI /api/v1/chat/stream (SSE over POST)
@@ -451,6 +452,7 @@ function init() {
     state.llmModelId = el.modelSelect.value;
     rememberSessionModel();
     updateComposerModelInfo();
+    updateHitlInputState();
     if (state.sessionId) {
       void loadContextStatus({ id: state.sessionId, agentId: state.agentId });
     }
@@ -1282,6 +1284,11 @@ function selectedLlmModel() {
   return state.llmModels.find((m) => m.id === id) || null;
 }
 
+function selectedModelUnavailable() {
+  const model = selectedLlmModel();
+  return Boolean(model && !isModelSelectable(model));
+}
+
 function ensureLlmModelSelected() {
   if (!state.llmModels.length) return false;
   const fallback = defaultLlmModelId();
@@ -1333,13 +1340,15 @@ async function loadLlmModels() {
   try {
     const r = await daFetch(serviceUrl("api/v1/llm-models"));
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    state.llmModels = await r.json();
+    state.llmModels = preserveCurrentModel(await r.json(), currentAgent()?.model);
     ensureLlmModelSelected();
     updateComposerModelInfo();
+    updateHitlInputState();
   } catch (e) {
     state.llmModels = [];
     console.warn("[deep-agent] 加载 LLM 模型失败", e);
     updateComposerModelInfo();
+    updateHitlInputState();
   }
 }
 
@@ -1467,6 +1476,10 @@ async function onSend() {
     addSystemNote("请先选择 Agent。");
     return;
   }
+  if (selectedModelUnavailable()) {
+    showConsoleToast("当前 Agent 的模型已停用或不可用，请先选择可用模型", true);
+    return;
+  }
 
   hideEmptyState();
   el.input.value = "";
@@ -1582,11 +1595,14 @@ async function runChatStream(payload, assistant) {
 }
 
 function updateHitlInputState() {
-  const locked = state.awaitingHitl;
+  const modelUnavailable = selectedModelUnavailable();
+  const locked = state.awaitingHitl || modelUnavailable;
   if (el.input) {
     el.input.placeholder = state.awaitingHitl
       ? "请先完成上方交互…"
-      : "输入消息…";
+      : modelUnavailable
+        ? "当前 Agent 模型不可用，请先切换模型…"
+        : "输入消息…";
     el.input.disabled = locked;
   }
   if (el.sendBtn) el.sendBtn.disabled = locked;

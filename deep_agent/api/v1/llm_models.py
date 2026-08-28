@@ -88,7 +88,10 @@ async def _response_for_row(
 @router.get("/llm-models", response_model=list[LlmModelResponse])
 async def list_llm_models(
     provider_id: str | None = Query(None),
-    selectable_only: bool = Query(False),
+    selectable_only: bool = Query(
+        True,
+        description="Return only models currently available for Agent or request selection.",
+    ),
     store: LlmModelStoreBase = Depends(get_llm_model_store),
     service: LlmConfigurationService = Depends(get_llm_configuration_service),
 ) -> list[LlmModelResponse]:

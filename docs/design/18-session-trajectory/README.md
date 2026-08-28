@@ -1,6 +1,6 @@
 # 18 · 会话事件与轨迹
 
-> v0.6.0 会话结构；当前产品版本0.6.3，Alembic head：010。Code Mode不修改会话事件结构。
+> v0.6.0 会话结构；当前产品版本0.6.4，Alembic head：011。Code Mode和模型启停均不修改会话事件结构。
 
 DeepAgent 会话域只有 `chat_sessions` 和 `chat_session_events`。Event Store 是模型恢复、
 会话历史、Console 轨迹和Plan的唯一事实源；没有 Checkpoint、Plan、Evidence、

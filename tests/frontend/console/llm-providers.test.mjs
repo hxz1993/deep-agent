@@ -4,6 +4,8 @@ import test from "node:test";
 
 import {
   firstSelectableModelId,
+  isModelSelectable,
+  preserveCurrentModel,
   renderGroupedModelOptions,
 } from "../../../frontend/console/model-options.js";
 import {
@@ -74,10 +76,13 @@ test("Provider Key 回显脱敏标识且未修改时不重复写入", () => {
   assert.doesNotMatch(template, /llmProviderApiKeyState|llmProviderBaseUrlHint|清除当前 API Key|API Key（编辑时留空表示不修改）/);
 });
 
-test("Provider 和模型不提供重复的启停配置", () => {
+test("Provider 无启停层而关联模型可独立启停", () => {
   assert.doesNotMatch(template, /id="llmProviderEnabled"|启用 Provider/);
-  assert.doesNotMatch(providerSource, /provider\.enabled|model\.enabled|data-toggle-model|toggleModel/);
-  assert.doesNotMatch(modelSource, /provider\.enabled|model\.enabled|toggleEnabled/);
+  assert.doesNotMatch(providerSource, /provider\.enabled|data-provider-toggle/);
+  assert.match(providerSource, /model\.enabled/);
+  assert.match(providerSource, /data-toggle-model/);
+  assert.match(modelSource, /toggleEnabled/);
+  assert.match(coreSource, /\/api\/v1\/llm-models\?selectable_only=false/);
 });
 
 test("Provider 详情操作统一使用轻风格按钮", () => {
@@ -185,28 +190,39 @@ test("目录按 0、1、多 Provider 分流且不再按 URL 猜测", () => {
   assert.doesNotMatch(modelSource, /provider_api_url.*base_url|normalizeBaseUrl/);
 });
 
-test("模型选项按 Provider 分组并只禁用 Provider 配置不可用的模型", () => {
+test("业务模型选项隐藏不可用模型并仅保留既有 Agent 当前引用", () => {
   const models = [
     { id: "a", name: "A", model: "model-a", selectable: true, provider: { id: "p1", name: "DeepSeek", api_key_set: true } },
     { id: "b", name: "B", model: "model-b", selectable: true, provider: { id: "p2", name: "Moonshot", api_key_set: true } },
     { id: "c", name: "C", model: "model-c", selectable: false, unavailable_reason: "provider_unconfigured", provider: { id: "p3", name: "Compatible", api_key_set: false } },
     { id: "d", name: "D", model: "model-d", selectable: false, unavailable_reason: "provider_invalid", provider: { id: "p4", name: "OpenAI", api_key_set: true } },
+    { id: "e", name: "E", model: "model-e", enabled: false, selectable: false, unavailable_reason: "model_disabled", provider: { id: "p1", name: "DeepSeek", api_key_set: true } },
   ];
   const html = renderGroupedModelOptions(models, { selectedId: "" });
   assert.match(html, /<optgroup label="DeepSeek">/);
   assert.match(html, /<optgroup label="Moonshot">/);
   assert.doesNotMatch(html, /value="b" disabled/);
-  assert.match(html, /value="c" disabled/);
-  assert.match(html, /value="d" disabled/);
+  assert.doesNotMatch(html, /value="c"/);
+  assert.doesNotMatch(html, /value="d"/);
+  assert.doesNotMatch(html, /value="e"/);
   assert.equal(firstSelectableModelId(models), "a");
 
   const preserved = renderGroupedModelOptions(models, { selectedId: "c" });
-  assert.match(preserved, /value="c" selected/);
-  assert.doesNotMatch(preserved, /value="c" selected disabled/);
+  assert.match(preserved, /value="c" selected[^>]*>C — model-c（Provider 未配置密钥）<\/option>/);
+  assert.doesNotMatch(preserved, /value="d"|value="e"/);
+
+  assert.equal(isModelSelectable({ enabled: false, provider: { api_key_set: true } }), false);
+  const retained = preserveCurrentModel(models.filter((model) => model.id !== "e"), models[4]);
+  assert.equal(retained.at(-1).id, "e");
+  assert.equal(retained.at(-1).selectable, false);
+  assert.equal(retained.at(-1).unavailable_reason, "model_disabled");
+  assert.equal(retained.at(-1).provider.name, "当前 Agent 模型");
+  assert.equal(preserveCurrentModel(models, models[0]).length, models.length);
 });
 
 test("Agent 和 Chat 统一复用 Provider 分组模型选项", () => {
   assert.match(coreSource, /renderGroupedModelOptions/);
   assert.match(chatSource, /renderGroupedModelOptions/);
   assert.match(chatSource, /firstSelectableModelId/);
+  assert.match(chatSource, /preserveCurrentModel\(await r\.json\(\), currentAgent\(\)\?\.model\)/);
 });

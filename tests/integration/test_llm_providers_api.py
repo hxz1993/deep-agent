@@ -92,7 +92,7 @@ class LlmProviderApiTests(unittest.IsolatedAsyncioTestCase):
             },
         )
         self.assertEqual(model.status_code, 201, model.text)
-        self.assertNotIn("enabled", model.json())
+        self.assertTrue(model.json()["enabled"])
 
         cleared = await self._client.patch(
             f"/api/v1/llm-providers/{body['id']}",
@@ -203,7 +203,7 @@ class LlmProviderApiTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertTrue(restored_pending.json()["selectable"])
 
-    async def test_enabled_flags_are_rejected_and_agent_uses_configured_model(self) -> None:
+    async def test_provider_enabled_is_rejected_but_model_enabled_controls_selection(self) -> None:
         provider_id = self._default_model.provider_id
         provider_flag = await self._client.patch(
             f"/api/v1/llm-providers/{provider_id}",
@@ -211,11 +211,64 @@ class LlmProviderApiTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(provider_flag.status_code, 422, provider_flag.text)
 
+        existing_agent = await self._client.post(
+            "/api/v1/agents",
+            json={
+                "name": "existing-model-agent",
+                "model_id": self._default_model.id,
+                "prompt": "existing references must remain intact",
+            },
+        )
+        self.assertEqual(existing_agent.status_code, 201, existing_agent.text)
+
         model_flag = await self._client.patch(
             f"/api/v1/llm-models/{self._default_model.id}",
             json={"enabled": False},
         )
-        self.assertEqual(model_flag.status_code, 422, model_flag.text)
+        self.assertEqual(model_flag.status_code, 200, model_flag.text)
+        self.assertFalse(model_flag.json()["enabled"])
+        self.assertFalse(model_flag.json()["selectable"])
+        self.assertEqual(model_flag.json()["unavailable_reason"], "model_disabled")
+
+        ordinary = await self._client.get("/api/v1/llm-models")
+        self.assertEqual(ordinary.status_code, 200, ordinary.text)
+        self.assertNotIn(self._default_model.id, {item["id"] for item in ordinary.json()})
+        administrative = await self._client.get(
+            "/api/v1/llm-models", params={"selectable_only": False}
+        )
+        self.assertIn(
+            self._default_model.id,
+            {item["id"] for item in administrative.json()},
+        )
+
+        rejected_agent = await self._client.post(
+            "/api/v1/agents",
+            json={
+                "name": "disabled-model-agent",
+                "model_id": self._default_model.id,
+                "prompt": "disabled models cannot be newly selected",
+            },
+        )
+        self.assertEqual(rejected_agent.status_code, 422, rejected_agent.text)
+
+        retained_agent = await self._client.patch(
+            f"/api/v1/agents/{existing_agent.json()['id']}",
+            json={"prompt": "the reference remains while disabled"},
+        )
+        self.assertEqual(retained_agent.status_code, 200, retained_agent.text)
+        self.assertEqual(retained_agent.json()["model_id"], self._default_model.id)
+
+        referenced_delete = await self._client.delete(
+            f"/api/v1/llm-models/{self._default_model.id}"
+        )
+        self.assertEqual(referenced_delete.status_code, 409, referenced_delete.text)
+
+        reenabled = await self._client.patch(
+            f"/api/v1/llm-models/{self._default_model.id}",
+            json={"enabled": True},
+        )
+        self.assertEqual(reenabled.status_code, 200, reenabled.text)
+        self.assertTrue(reenabled.json()["selectable"])
 
         created_agent = await self._client.post(
             "/api/v1/agents",
@@ -382,7 +435,8 @@ class LlmProviderApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(model["provider"]["api_key_set"])
         self.assertEqual(model["base_url"], "https://updated.invalid/v1")
         self.assertTrue(model["api_key_set"])
-        self.assertNotIn("enabled", model)
+        self.assertTrue(model["enabled"])
+        self.assertTrue(model["selectable"])
 
     async def test_referenced_provider_cannot_change_type_or_be_deleted(self) -> None:
         provider_id = self._default_model.provider_id

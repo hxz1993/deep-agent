@@ -241,7 +241,7 @@ async function loadCapabilities() {
 
 async function loadLlmModels() {
   try {
-    state.llmModels = await apiFetch("/api/v1/llm-models");
+    state.llmModels = await apiFetch("/api/v1/llm-models?selectable_only=false");
   } catch {
     state.llmModels = [];
   }

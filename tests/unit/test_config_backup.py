@@ -54,13 +54,13 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
 
             self.assertEqual(
                 result.path.name,
-                "deep-agent-config-test-v010-20260723-131415.db",
+                "deep-agent-config-test-v011-20260723-131415.db",
             )
             self.assertEqual(
                 [path.resolve() for path in (output_root / "test").iterdir()],
                 [result.path.resolve()],
             )
-            self.assertEqual(result.revision, "010")
+            self.assertEqual(result.revision, "011")
             self.assertEqual(result.row_counts["agents"], 1)
             self.assertEqual(result.row_counts["chat_sessions"], 0)
             self.assertEqual(result.row_counts["chat_session_events"], 0)
@@ -82,7 +82,7 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                     connection.execute(
                         "SELECT version_num FROM alembic_version"
                     ).fetchone(),
-                    ("010",),
+                    ("011",),
                 )
                 self.assertEqual(
                     connection.execute(
@@ -160,7 +160,7 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                         "SELECT environment, source_dialect, alembic_revision, "
                         "git_commit FROM _backup_info"
                     ).fetchone(),
-                    ("test", "sqlite", "010", "abc123"),
+                    ("test", "sqlite", "011", "abc123"),
                 )
                 scope_manifest = json.loads(
                     str(
@@ -255,7 +255,7 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                 )
                 await connection.execute(
                     text(
-                        "INSERT INTO alembic_version (version_num) VALUES ('010')"
+                        "INSERT INTO alembic_version (version_num) VALUES ('011')"
                     )
                 )
                 await connection.execute(

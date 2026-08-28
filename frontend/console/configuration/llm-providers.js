@@ -182,6 +182,7 @@ const llmProvidersAdmin = {
               <code>${escapeHtml(model.model)}</code>
               <span class="provider-model-facts">${providerModelFacts(model)}</span>
             </button>
+            <button type="button" class="model-enabled-switch ${model.enabled === false ? "off" : "on"}" data-toggle-model="${escapeHtml(model.id)}" role="switch" aria-checked="${model.enabled !== false}" title="${model.enabled === false ? "启用模型" : "停用模型"}" aria-label="${model.enabled === false ? "启用模型" : "停用模型"}"><span></span></button>
             <button type="button" class="provider-model-delete" data-delete-model="${escapeHtml(model.id)}" data-model-name="${escapeHtml(model.model)}" title="删除模型" aria-label="删除模型"><i data-lucide="trash-2"></i></button>
           </div>`).join("") : `<div class="provider-model-empty">尚未关联模型</div>`}</div>
       </section>`;
@@ -190,6 +191,7 @@ const llmProvidersAdmin = {
     host.querySelector("[data-provider-model]")?.addEventListener("click", () => window.llmModelsAdmin?.openCreate({ provider_id: provider.id }, { lockProvider: true, deriveName: true }));
     host.querySelector("[data-provider-catalog]")?.addEventListener("click", (event) => this.initializeFromCatalog(provider, event.currentTarget));
     host.querySelectorAll("[data-edit-model]").forEach((button) => button.addEventListener("click", () => window.llmModelsAdmin?.openEdit(button.dataset.editModel, { lockProvider: true, deriveName: true })));
+    host.querySelectorAll("[data-toggle-model]").forEach((button) => button.addEventListener("click", () => window.llmModelsAdmin?.toggleEnabled(button.dataset.toggleModel)));
     host.querySelectorAll("[data-delete-model]").forEach((button) => button.addEventListener("click", () => window.llmModelsAdmin?.remove(button.dataset.deleteModel, button.dataset.modelName)));
     window.lucide?.createIcons();
   },

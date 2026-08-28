@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from deep_agent.api.v1.deps import build_runner_for_agent
+from deep_agent.agent.provider_registry import ProviderConfigurationError
 from deep_agent.core.exceptions import AgentNotFoundError, LlmModelNotFoundError
 from deep_agent.db.models import Agent, ChatSession, LlmModel
 
@@ -86,6 +87,30 @@ class BuildRunnerForAgentTests(unittest.IsolatedAsyncioTestCase):
         ctx.stores.llm_model.get_by_id = AsyncMock(return_value=None)
         with self.assertRaises(LlmModelNotFoundError):
             await build_runner_for_agent(ctx, agent.id, model_id="missing")
+
+    async def test_disabled_override_model_fails_closed(self) -> None:
+        disabled = _llm("00000000-0000-4000-8000-000000000011", "gpt-b")
+        disabled.enabled = False
+        agent = _agent(model_id="00000000-0000-4000-8000-000000000010")
+        ctx = _ctx()
+        ctx.stores.agent.get_by_id = AsyncMock(return_value=agent)
+        ctx.stores.llm_model.get_by_id = AsyncMock(return_value=disabled)
+
+        with self.assertRaisesRegex(ProviderConfigurationError, "disabled"):
+            await build_runner_for_agent(ctx, agent.id, model_id=disabled.id)
+        ctx.stores.llm_configuration.get_provider.assert_not_awaited()
+
+    async def test_existing_agent_with_disabled_default_model_fails_closed(self) -> None:
+        disabled = _llm("00000000-0000-4000-8000-000000000010", "gpt-a")
+        disabled.enabled = False
+        agent = _agent(model_id=disabled.id)
+        ctx = _ctx()
+        ctx.stores.agent.get_by_id = AsyncMock(return_value=agent)
+        ctx.stores.llm_model.get_by_id = AsyncMock(return_value=disabled)
+
+        with self.assertRaisesRegex(ProviderConfigurationError, "disabled"):
+            await build_runner_for_agent(ctx, agent.id)
+        ctx.stores.llm_configuration.get_provider.assert_not_awaited()
 
     async def test_missing_agent_raises(self) -> None:
         ctx = _ctx()

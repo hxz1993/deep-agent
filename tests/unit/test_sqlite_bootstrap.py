@@ -85,6 +85,32 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
                     await asyncio.to_thread(command.upgrade, config, "head")
                     self._assert_current_baseline(db_path)
 
+    async def test_010_011_round_trip_restores_model_enabled(self) -> None:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+            db_path = Path(tmpdir) / "model-enabled.db"
+            url = f"sqlite+aiosqlite:///{db_path.as_posix()}"
+            with patch("deep_agent.db.url.get_database_url", return_value=url):
+                with patch("deep_agent.db.migrate.get_database_url", return_value=url):
+                    config = migrate._build_alembic_config()
+                    await asyncio.to_thread(command.upgrade, config, "010")
+                    self.assertNotIn("enabled", self._columns(db_path, "llm_models"))
+
+                    await asyncio.to_thread(command.upgrade, config, "011")
+                    self.assertEqual(self._revision(db_path), "011")
+                    self.assertIn("enabled", self._columns(db_path, "llm_models"))
+                    self.assertEqual(
+                        self._scalar(
+                            db_path,
+                            "SELECT COUNT(*) FROM llm_models WHERE enabled != 1 OR enabled IS NULL",
+                        ),
+                        0,
+                    )
+
+                    await asyncio.to_thread(command.downgrade, config, "010")
+                    self.assertNotIn("enabled", self._columns(db_path, "llm_models"))
+                    await asyncio.to_thread(command.upgrade, config, "011")
+                    self._assert_current_baseline(db_path)
+
     async def test_007_infers_merges_and_round_trips_providers(self) -> None:
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
             db_path = Path(tmpdir) / "providers.db"
@@ -749,7 +775,7 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
                         {table: self._row_count(db_path, table) for table in config_counts},
                     )
 
-                    await asyncio.to_thread(command.upgrade, config, "010")
+                    await asyncio.to_thread(command.upgrade, config, "011")
                     self._assert_current_baseline(db_path)
 
                     await asyncio.to_thread(command.downgrade, config, "008")
@@ -780,7 +806,7 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
                         self._foreign_keys(db_path, "auxiliary_model_configs"),
                     )
 
-                    await asyncio.to_thread(command.upgrade, config, "010")
+                    await asyncio.to_thread(command.upgrade, config, "011")
                     self._assert_current_baseline(db_path)
                     self.assertEqual(
                         config_counts,
@@ -801,17 +827,25 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
                         connection.execute("DROP TABLE auxiliary_model_configs")
                         connection.commit()
 
-                    await asyncio.to_thread(command.upgrade, config, "010")
+                    await asyncio.to_thread(command.upgrade, config, "011")
                     self._assert_current_baseline(db_path)
 
     def _assert_current_baseline(self, db_path: Path) -> None:
-        self.assertEqual(self._revision(db_path), "010")
+        self.assertEqual(self._revision(db_path), "011")
         self.assertEqual(self._business_tables(db_path), EXPECTED_TABLES)
         self.assertNotIn("max_requests", self._columns(db_path, "agents"))
         self.assertNotIn("capabilities_source", self._columns(db_path, "llm_models"))
         self.assertIn("provider_id", self._columns(db_path, "llm_models"))
         self.assertNotIn("base_url", self._columns(db_path, "llm_models"))
         self.assertNotIn("api_key", self._columns(db_path, "llm_models"))
+        self.assertIn("enabled", self._columns(db_path, "llm_models"))
+        self.assertEqual(
+            self._scalar(
+                db_path,
+                "SELECT COUNT(*) FROM llm_models WHERE enabled != 1 OR enabled IS NULL",
+            ),
+            0,
+        )
         self.assertIn(
             ("provider_id", "llm_providers", "id", "RESTRICT"),
             self._foreign_keys(db_path, "llm_models"),
@@ -829,7 +863,6 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("resource_capabilities", self._columns(db_path, "mcp_servers"))
         for table in (
             "llm_providers",
-            "llm_models",
             "skill_packages",
             "mcp_servers",
             "ui_tool_packages",

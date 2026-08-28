@@ -416,6 +416,24 @@ const llmModelsAdmin = {
     }
   },
 
+  async toggleEnabled(modelId) {
+    const model = (state.llmModels || []).find((item) => item.id === modelId);
+    if (!model) return;
+    try {
+      await apiFetch(`/api/v1/llm-models/${encodeURIComponent(modelId)}`, {
+        method: "PATCH",
+        body: JSON.stringify({ enabled: model.enabled === false }),
+      });
+      showToast(model.enabled === false ? "模型已启用" : "模型已停用");
+      await refreshAfterSuccessfulMutation("模型状态已更新", async () => {
+        await loadLlmModels();
+        await window.llmProvidersAdmin?.refresh();
+      });
+    } catch (error) {
+      showToast(error.message, true);
+    }
+  },
+
   async remove(modelId, name) {
     if (!(await confirmAction({
       title: "删除模型配置？",

@@ -209,6 +209,7 @@ class LlmConfigurationService(SessionBoundMixin):
                     context_window_tokens=data.context_window_tokens,
                     max_output_tokens=data.max_output_tokens,
                     tags=data.tags,
+                    enabled=data.enabled,
                 )
                 db.add(row)
                 await db.flush()

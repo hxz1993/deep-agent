@@ -3,7 +3,7 @@
 DeepAgent 是基于 FastAPI、Pydantic AI 和 SQLAlchemy 的多用户 Agent 服务，并
 随服务发布一体化运维控制台。
 
-当前产品版本为 `0.6.3`。`deep_agent.__version__` 是唯一代码版本来源，FastAPI、
+当前产品版本为 `0.6.4`。`deep_agent.__version__` 是唯一代码版本来源，FastAPI、
 `GET /info` 和 Console 顶部版本徽标均读取该值。后续正式发布默认递增
 `MAJOR.MINOR.PATCH` 的第三位，只有明确规划重大版本时才调整前两位。产品版本不通过
 环境变量或数据库覆盖，也不等同于 Alembic 数据库结构 revision。
@@ -16,9 +16,9 @@ Console 对话测试提供独立的“对话 / 轨迹”页签。会话历史、
 [`docs/design/18-session-trajectory/`](docs/design/18-session-trajectory/)。
 
 v0.5.6 完成 Provider + Model 两层配置：Provider 独占 Pydantic AI 适配类型、地址和密钥，
-Model 只保存 Provider 外键、模型编码与能力属性。v0.6.1删除两层的冗余启停字段：Provider
-是否可用由真实连接配置决定，Model是否进入Run由Agent或聊天请求的`model_id`决定。模型目录仍是
-只读候选数据，不参与运行时关联。设计与迁移边界见
+Model 只保存 Provider 外键、模型编码与能力属性。Provider 不设置启停层，其可用性由真实连接
+配置决定；v0.6.4 恢复模型级 `enabled`，用于管理员控制哪些已配置模型可供 Agent 和聊天选择。
+模型目录仍是只读候选数据，不参与运行时关联。设计与迁移边界见
 [`docs/design/19-model-provider-architecture/`](docs/design/19-model-provider-architecture/)。
 
 v0.6.2 增加显式 Agent 能力包 `builtin:code-mode`。关联后，已授权且已披露的
@@ -128,18 +128,19 @@ uvicorn deep_agent.main:app --host 0.0.0.0 --port 8000
 
 ## 数据库基线
 
-新数据库直接执行 `alembic upgrade head`。当前 Alembic head 为 `010`：`002` 统一 ToolPackage
+新数据库直接执行 `alembic upgrade head`。当前 Alembic head 为 `011`：`002` 统一 ToolPackage
 与 UI 工具包；`003` 将线上 Skill 与
 ToolPackage 分离；`004`清理已废弃的`builtin:attachment`；`005`和`006`依次删除已下线的
 预制MCP记录，并从显式Agent能力列表中清理对应引用；`007`增加独立Provider层、模型硬外键并删除
 模型表中的重复连接字段；`008`将会话域重建为`chat_sessions + chat_session_events`；`009`删除
 已经下线的标题专用模型配置表；`010`删除 Provider、模型、Skill、MCP、UI 工具包和 UI 工具自身的冗余启停字段，
-并把 Agent 的 `capabilities` 收敛为非空显式列表。
+并把 Agent 的 `capabilities` 收敛为非空显式列表；`011`仅恢复模型级`enabled`，现有模型全部回填为启用，
+Provider、Skill、MCP和UI工具仍无独立启停层。
 
 `008`不在线转换旧会话：它删除旧会话历史并建立空 Event Store，但保留所有配置表。共享环境升级前
 必须先用 Revision 007 代码分别执行配置备份和会话归档，停掉全部旧实例后才能迁移；旧版本不能与
-008并行运行。Revision 009数据库可直接升级010；升级后模型、工具和Skill是否进入 Run 只由Agent
-的`model_id`、`capabilities`和`skills`关联决定，Provider可用性只由实际连接配置决定。
+008并行运行。Revision 010数据库可直接升级011；升级后工具和Skill是否进入 Run 仍只由Agent
+的`capabilities`和`skills`关联决定，模型还必须处于启用状态，Provider可用性只由实际连接配置决定。
 完整备份和切换边界见[`maintenance/README.md`](maintenance/README.md)。
 
 配置备份会复制全部配置表并只保留会话表结构；上传Skill的原始ZIP不塞入数据库备份。需要完整

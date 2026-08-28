@@ -48,8 +48,14 @@ created_at / updated_at
 `llm_models`新增带索引和`RESTRICT`外键的 `provider_id`，并删除原有
 `base_url`、`api_key`。Provider被模型引用时不能删除，类型也不能直接修改。模型名称只要求在同一
 Provider内唯一，因此两个Provider可以配置同名模型。模型是否进入Run只由Agent或请求级`model_id`
-选择；Provider是否可用由密钥和地址等真实连接配置决定，连接事实只存在Provider一处。Alembic 010
-删除Provider和模型自身的冗余`enabled`列。
+选择，并要求模型自身处于启用状态；Provider是否可用由密钥和地址等真实连接配置决定，连接事实只
+存在Provider一处。Alembic 010删除了Provider和模型的旧启停列，Alembic 011仅恢复模型级
+`enabled`，Provider仍无启停层。
+
+普通`GET /llm-models`只返回`selectable=true`的当前可用模型；管理Console必须显式传
+`selectable_only=false`读取全部模型。`selectable`同时要求模型启用和Provider配置有效，失败原因
+区分`model_disabled`、`provider_unconfigured`和`provider_invalid`。停用模型不会删除已有Agent
+引用或触发自动换模，但新选择、请求覆盖和实际运行均失败关闭。
 
 ### 默认地址语义
 
@@ -94,8 +100,9 @@ DELETE /api/v1/llm-providers/{provider_id}
 
 模型创建和更新接收 `provider_id`，管理接口不再通过模型修改地址或密钥。模型响应增加Provider摘要，
 并保留从Provider派生的 `base_url`和 `api_key_set`兼容字段；`selectable`表示当前有效可用性，
-`unavailable_reason`只返回Provider未配置或配置无效等脱敏原因。
-`GET /llm-models`支持可选 `provider_id`过滤，业务选择器可加`selectable_only=true`只读取可选模型。
+`unavailable_reason`只返回模型停用、Provider未配置或配置无效等脱敏原因。
+`GET /llm-models`支持可选 `provider_id`过滤，默认只读取可选模型；管理界面显式传
+`selectable_only=false`读取包括停用模型在内的完整目录。
 原有核心字段与 `model_id`语义不变。
 
 ## 运行时
@@ -126,9 +133,9 @@ Provider详情中的模型采用固定父子关系：新建和编辑时不允许
 模型也可由目录预填；目录不会修改Provider凭据。Agent、Console Chat等
 模型选择器按Provider实例分组，option值和请求参数始终仍是 `llm_model.id` / `model_id`。
 
-DeepCube和DeepTable客户端读取的模型核心字段和发送的`model_id`保持兼容，不要求阻断式改造。为避免
-展示当前不可选模型，建议将列表请求改为`GET /llm-models?selectable_only=true`；若仍读取全量列表，
-则应识别`selectable=false`并禁用对应选项，不能把Provider ID当作聊天请求的`model_id`。
+DeepCube和DeepTable客户端读取的模型核心字段和发送的`model_id`保持兼容，不要求改造；普通列表请求
+天然只返回当前可用模型。只有管理界面应显式读取全量列表并识别`selectable=false`，不能把Provider ID
+当作聊天请求的`model_id`。
 
 ## 安全与非目标
 

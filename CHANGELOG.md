@@ -3,6 +3,17 @@
 本文件记录 DeepAgent 的产品版本变化，按新版本到旧版本排列。当前代码版本以
 `deep_agent.__version__` 为准；数据库结构版本以 Alembic head 为准，两者互不替代。
 
+## v0.6.4
+
+- Alembic `011`为`llm_models`恢复非空、默认启用的`enabled`字段，升级时现有模型全部保持启用；
+  Provider仍不设置启停层，其可用性继续由类型、地址、凭据和协议配置决定。
+- 普通`GET /llm-models`正式定义为当前可用模型列表；管理Console显式读取全部模型，以便停用、审计
+  和重新启用。模型停用后从Agent与聊天选择器消失，但已有Agent引用保持不变。
+- 新建Agent、切换模型、请求级模型覆盖和实际运行均拒绝停用模型；重新启用或手动切换前不自动替换
+  已有Agent配置。被Agent引用的模型仍禁止删除。
+- Provider详情恢复关联模型Switch，模型目录仍按真实模型记录判断是否已添加，不因停用生成重复配置。
+  Chat、History、SSE、Event Store以及DeepCube、DeepTable客户端协议没有变化。
+
 ## v0.6.3
 
 - Code Mode 明确区分外层普通工具与仅能在 `run_code` 内调用的 SDK 函数；手写

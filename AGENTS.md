@@ -12,7 +12,7 @@
 | 项 | 内容 |
 | --- | --- |
 | **是什么** | 通用 AI Agent 全栈：FastAPI 后端 + Pydantic AI 运行时 + 静态前端 |
-| **产品版本** | `deep_agent.__version__`为唯一来源；当前`0.6.3`，数据库Head为`010` |
+| **产品版本** | `deep_agent.__version__`为唯一来源；当前`0.6.4`，数据库Head为`011` |
 | **启动** | 本地 Test 联调固定使用下方命令；部署入口才使用 `deep_agent.main:app` |
 | **测试** | `python3.12 -m unittest discover -s tests -p "test_*.py" -v` |
 | **配置** | 仓库根 `.env`（`DEEP_AGENT_*` / `DEEP_AGENT_DBMS_*` / `DEEP_AGENT_SQLITE_PATH`） |
@@ -109,9 +109,9 @@ HTTP → deep_agent/api/v1 → AgentRunner → pydantic_ai.Agent → Toolsets
 （DB + `mcps/` 兜底）| `ui:builtin` | `ui:<package>`。Skill 与 ToolPackage 分离，Agent 通过
 `agents.skills` 显式选择，上传包元数据位于 `skill_packages`。
 
-v0.6.1删除目录资源自身的冗余启停层：Provider、Model、Skill、MCP、UI工具包、UI工具和预制
-ToolPackage只表达“资源存在且配置有效”。Provider是否可用由类型、地址与凭据等真实配置决定；
-Model是否进入Run由Agent或请求级`model_id`选择。Skill和工具是否进入Run仅由Agent的
+v0.6.1删除目录资源自身的冗余启停层；v0.6.4只恢复Model的`enabled`。Provider是否可用仍由
+类型、地址与凭据等真实配置决定，不设置启停字段；模型必须同时启用且Provider有效，才能由Agent
+或请求级`model_id`选择。Skill和工具是否进入Run仅由Agent的
 `skills/capabilities`显式关联决定。新Agent两项均为空，不再通过`null`或默认包隐式继承能力。
 
 ### Pydantic AI 运行边界

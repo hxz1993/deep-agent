@@ -202,7 +202,7 @@ python3.12 -m http.server 5173
 | 页面布局 | `console/index.html` 与两个 Console template |
 | 一体化控制台布局与编排 | `console/index.html`、`console/console.css`、`console/workspace.js`、`console/configuration.js` |
 | 配置 CRUD | `console/configuration/` 下各文件 |
-| 模型运行属性 | `console/configuration/llm-models.js`；上下文、最大输出、输入模态和 tags 保存到 `llm_models` |
+| 模型运行属性 | `console/configuration/llm-models.js`；启停、上下文、最大输出、输入模态和 tags 保存到 `llm_models` |
 | 模型目录 | `console/configuration/catalog.js` → DB-only GET、管理员联网 refresh 与JSON import/export |
 | 上下文压缩观测 | `console/chat.js` 拉取 session context-status；`console/workspace.js` 在右侧会话详情泳道展示 |
 | 上下文压缩测试会话 | `console/workspace.js` → 场景弹窗、创建后打开会话并预填验证问题 |
@@ -234,6 +234,9 @@ Console会话渲染模块边界：
 - URL MCP 的普通编辑名称只读；改名必须走列表中的独立“重命名”操作。成功后 Console 同步刷新
   MCP、工具包与 Agent 能力目录；Builtin 和历史 stdio MCP 不显示重命名入口。
 - 模型目录只由管理员手工联网刷新models.dev，或导入models.dev官方`catalog.json`；保存模型配置不得触发外网请求。目录按 Lab → Model → Provider 展示，仅负责预填；模态与能力 tags 分开，Agent 运行时只认 `llm_models`。
+- v0.6.4起Provider详情中的模型Switch直接维护`llm_models.enabled`。配置中心请求
+  `/llm-models?selectable_only=false`以保留停用模型的管理入口；Agent和聊天选择器使用普通
+  `/llm-models`，不得在前端自行复制可用性判断或重新显示停用模型。
 - 上下文压缩在模型配置有效上下文窗口时自动启用；Console只读展示全局策略、预算和Compaction状态，
   不提供启用开关，也不编辑摘要正文。
 - Console 从 `/uploads/capabilities`读取实际 MIME、单文件大小和单次数量限制；新请求不得再发送

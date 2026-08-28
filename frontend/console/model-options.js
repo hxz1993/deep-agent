@@ -11,14 +11,35 @@ export function modelProvider(model) {
 }
 
 export function isModelSelectable(model) {
+  if (model?.enabled === false) return false;
   if (typeof model?.selectable === "boolean") return model.selectable;
   const provider = modelProvider(model);
   return provider?.api_key_set !== false;
 }
 
+export function preserveCurrentModel(models, currentModel) {
+  const available = Array.isArray(models) ? [...models] : [];
+  if (!currentModel?.id || available.some((model) => model.id === currentModel.id)) return available;
+  const disabled = currentModel.enabled === false;
+  return [
+    ...available,
+    {
+      ...currentModel,
+      selectable: false,
+      unavailable_reason: disabled ? "model_disabled" : "provider_invalid",
+      provider: {
+        id: `current-agent:${currentModel.id}`,
+        name: "当前 Agent 模型",
+        api_key_set: !disabled,
+      },
+    },
+  ];
+}
+
 function unavailableSuffix(model) {
   const provider = modelProvider(model);
   const reason = model?.unavailable_reason;
+  if (reason === "model_disabled" || model?.enabled === false) return "（模型已停用）";
   if (reason === "provider_unconfigured" || provider?.api_key_set === false) return "（Provider 未配置密钥）";
   if (reason === "provider_invalid") return "（Provider 配置无效）";
   return "";
@@ -37,11 +58,14 @@ export function firstSelectableModelId(models) {
 }
 
 export function renderGroupedModelOptions(models, { selectedId = "", emptyLabel = "无可用模型" } = {}) {
-  if (!Array.isArray(models) || !models.length) {
+  const visibleModels = Array.isArray(models)
+    ? models.filter((model) => isModelSelectable(model) || model.id === selectedId)
+    : [];
+  if (!visibleModels.length) {
     return `<option value="">${escapeOptionText(emptyLabel)}</option>`;
   }
   const groups = new Map();
-  for (const model of models) {
+  for (const model of visibleModels) {
     const provider = modelProvider(model);
     const key = provider?.id || model?.provider_id || "unassigned";
     if (!groups.has(key)) {
@@ -55,9 +79,8 @@ export function renderGroupedModelOptions(models, { selectedId = "", emptyLabel 
   return [...groups.values()].map((group) => {
     const options = group.models.map((model) => {
       const selected = model.id === selectedId ? " selected" : "";
-      const disabled = !isModelSelectable(model) && model.id !== selectedId ? " disabled" : "";
       const suffix = unavailableSuffix(model);
-      return `<option value="${escapeOptionText(model.id)}"${selected}${disabled}>${escapeOptionText(modelOptionLabel(model))}${suffix}</option>`;
+      return `<option value="${escapeOptionText(model.id)}"${selected}>${escapeOptionText(modelOptionLabel(model))}${suffix}</option>`;
     }).join("");
     return `<optgroup label="${escapeOptionText(group.label)}">${options}</optgroup>`;
   }).join("");
@@ -69,6 +92,7 @@ if (typeof window !== "undefined") {
     isModelSelectable,
     modelOptionLabel,
     modelProvider,
+    preserveCurrentModel,
     renderGroupedModelOptions,
   };
 }

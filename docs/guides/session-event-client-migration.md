@@ -1,6 +1,6 @@
 # Conversation/History 客户端迁移清单
 
-DeepAgent `0.6.3` 的唯一数据库事实源是 `chat_session_events`。普通聊天客户端不解析 Event：
+DeepAgent `0.6.4` 的唯一数据库事实源是 `chat_session_events`。普通聊天客户端不解析 Event：
 
 - `GET /api/v1/sessions/{session_id}/history`：普通聊天、工具、Plan、Deferred、附件和上下文。
 - `GET /api/v1/sessions/{session_id}/events`：仅供 Console 轨迹、审计和精确回读。
@@ -108,6 +108,10 @@ Alembic `010`只删除配置目录中Provider、模型、Skill、MCP、UI工具�
 Agent能力收敛为显式列表；Chat、History、SSE、附件、Plan和Deferred契约没有变化。两个普通聊天
 客户端不读取这些配置目录字段，因此不需要因010调整运行代码；只有外部管理员页面若直接维护上述
 资源，才需删除对应启停字段和操作。
+
+Alembic `011`仅恢复模型级`enabled`。普通`GET /llm-models`仍表示当前可用模型列表，停用模型会由
+服务端过滤；DeepCube和DeepTable继续使用原接口，无需解析新字段或修改聊天协议。只有模型管理页面
+需要显式请求`selectable_only=false`并提供启停操作。
 
 ## 5. 最小验收
 

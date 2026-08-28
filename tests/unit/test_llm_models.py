@@ -78,6 +78,7 @@ class LlmModelStoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(row.context_window_tokens, 128_000)
         self.assertEqual(row.max_output_tokens, 16_384)
         self.assertEqual(row.tags, ["reasoning", "tool_call"])
+        self.assertTrue(row.enabled)
         self.assertEqual(await self.store.count_agents(row.id), 0)
 
         await self.agent_store.create_unique(
@@ -89,11 +90,12 @@ class LlmModelStoreTests(unittest.IsolatedAsyncioTestCase):
         row = await self.service.create_model(model_create())
         updated = await self.service.update_model(
             row.id,
-            LlmModelUpdate(tags=["reasoning"], max_output_tokens=8_192),
+            LlmModelUpdate(tags=["reasoning"], max_output_tokens=8_192, enabled=False),
         )
         assert updated is not None
         self.assertEqual(updated.tags, ["reasoning"])
         self.assertEqual(updated.max_output_tokens, 8_192)
+        self.assertFalse(updated.enabled)
 
     async def test_historical_pdf_modality_is_hidden_from_runtime_and_api(self) -> None:
         row = await self.service.create_model(model_create())
@@ -180,6 +182,7 @@ class LlmModelMigrationShapeTests(unittest.TestCase):
                 "context_window_tokens",
                 "max_output_tokens",
                 "tags",
+                "enabled",
                 "created_at",
                 "updated_at",
             },

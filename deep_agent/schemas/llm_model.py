@@ -79,6 +79,7 @@ class LlmModelCreate(BaseModel):
         default_factory=list,
         description="Normalized model capability tags, separate from input modalities.",
     )
+    enabled: bool = True
 
     @field_validator("provider_id")
     @classmethod
@@ -130,6 +131,7 @@ class LlmModelUpdate(BaseModel):
     context_window_tokens: int | None = Field(default=None, gt=0)
     max_output_tokens: int | None = Field(default=None, gt=0)
     tags: list[str] | None = None
+    enabled: bool | None = None
 
     @field_validator("provider_id")
     @classmethod
@@ -146,6 +148,7 @@ class LlmModelUpdate(BaseModel):
                 "input_modalities",
                 "context_window_tokens",
                 "max_output_tokens",
+                "enabled",
             ):
                 if field in value and value[field] is None:
                     raise ValueError(f"{field} cannot be null")
@@ -204,10 +207,12 @@ class LlmModelResponse(BaseModel):
     context_window_tokens: int | None = None
     max_output_tokens: int | None = None
     tags: list[str] = Field(default_factory=list)
+    enabled: bool = True
     selectable: bool = Field(
-        description="Effective availability after validating Provider configuration."
+        description="Effective availability after applying model state and Provider validation."
     )
     unavailable_reason: Literal[
+        "model_disabled",
         "provider_unconfigured",
         "provider_invalid",
     ] | None = None
@@ -237,6 +242,7 @@ class LlmModelResponse(BaseModel):
             context_window_tokens=row.context_window_tokens,
             max_output_tokens=row.max_output_tokens,
             tags=row.tags or [],
+            enabled=row.enabled,
             selectable=unavailable_reason is None,
             unavailable_reason=unavailable_reason,
             agent_count=agent_count,
@@ -253,6 +259,7 @@ class LlmModelSummary(BaseModel):
     context_window_tokens: int | None = None
     max_output_tokens: int | None = None
     tags: list[str] = Field(default_factory=list)
+    enabled: bool = True
 
     @classmethod
     def from_row(cls, row: LlmModel) -> LlmModelSummary:
@@ -264,4 +271,5 @@ class LlmModelSummary(BaseModel):
             context_window_tokens=row.context_window_tokens,
             max_output_tokens=row.max_output_tokens,
             tags=row.tags or [],
+            enabled=row.enabled,
         )

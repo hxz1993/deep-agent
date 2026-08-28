@@ -102,6 +102,13 @@ class ProviderValidationTests(unittest.TestCase):
             "provider_unconfigured",
         )
 
+    def test_disabled_model_is_unavailable_before_provider_validation(self) -> None:
+        model = SimpleNamespace(enabled=False)
+        self.assertEqual(
+            model_unavailable_reason(model, _config("deepseek", api_key="")),
+            "model_disabled",
+        )
+
     def test_missing_api_key_fails(self) -> None:
         with self.assertRaisesRegex(ProviderConfigurationError, "API key"):
             validate_provider_config(_config("deepseek", api_key=""))
@@ -163,6 +170,14 @@ class ProviderLookupTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIs(resolved, provider)
         store.get_provider.assert_awaited_once_with(provider.id)
+
+    async def test_disabled_model_fails_before_provider_lookup(self) -> None:
+        store = SimpleNamespace(get_provider=AsyncMock())
+        model = SimpleNamespace(id="model-1", provider_id="provider-1", enabled=False)
+
+        with self.assertRaisesRegex(ProviderConfigurationError, "disabled"):
+            await load_provider_for_model(model, store)
+        store.get_provider.assert_not_awaited()
 
     async def test_missing_provider_link_fails_without_fallback(self) -> None:
         store = SimpleNamespace(get_provider=AsyncMock())

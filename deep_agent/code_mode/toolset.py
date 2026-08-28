@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import keyword
+import json
 import re
 from dataclasses import replace
 from typing import Any
@@ -17,6 +18,7 @@ from deep_agent.code_mode.file_payload import (
     CODE_MODE_HYBRID,
     CODE_MODE_METADATA_KEY,
     CODE_MODE_ORIGINAL_NAME_KEY,
+    CODE_MODE_TRUSTED_RETURN_SCHEMA_KEY,
     FILE_DATA_TOKEN_PREFIX,
     payload_secrets,
     safe_audit_value,
@@ -25,10 +27,14 @@ from deep_agent.code_mode.file_payload import (
 _RUN_CODE_NAME = "run_code"
 _INVALID_IDENTIFIER = re.compile(r"\W")
 _LONG_BASE64 = re.compile(r"(?<![A-Za-z0-9+/])[A-Za-z0-9+/]{256,}={0,2}(?![A-Za-z0-9+/])")
+_MAX_NESTED_AUDIT_CHARS = 32_768
 
 _USAGE_RULES = """
 
 DeepAgent hybrid rules:
+- Catalog functions are SDK functions that exist only inside `run_code`; never call a
+  catalog alias as a direct outer tool. A function can be called directly only when the
+  same protocol name is separately present in the ordinary tool list with its own schema.
 - Every function listed in the Code Mode catalog is async. Call it with top-level
   `await function_name(...)`; never wrap it with `asyncio.run()`.
 - Use a normal tool call when one call is enough and its arguments are already known.
@@ -100,6 +106,32 @@ def _scrub_error_text(value: str, *, sensitive_values: frozenset[str]) -> str:
         flags=re.DOTALL,
     )
     return _LONG_BASE64.sub("[base64-redacted]", value)
+
+
+def _bounded_nested_audit(
+    entries: list[dict[str, Any]],
+    *,
+    sensitive_values: frozenset[str],
+    max_chars: int = _MAX_NESTED_AUDIT_CHARS,
+) -> list[Any]:
+    """Project nested calls into a deterministic, aggregate-bounded audit list."""
+
+    projected: list[Any] = []
+    used = 2
+    for index, entry in enumerate(entries):
+        safe = safe_audit_value(entry, sensitive_values=sensitive_values)
+        encoded = json.dumps(safe, ensure_ascii=False, separators=(",", ":"))
+        if used + len(encoded) + 1 > max_chars:
+            projected.append(
+                {
+                    "truncated_calls": len(entries) - index,
+                    "reason": "nested_audit_limit",
+                }
+            )
+            break
+        projected.append(safe)
+        used += len(encoded) + 1
+    return projected
 
 
 class HybridCodeModeToolset(CodeModeToolset[AgentDeps]):
@@ -188,6 +220,24 @@ class HybridCodeModeToolset(CodeModeToolset[AgentDeps]):
                 rows.append(f"- `await {alias}(...)`")
         return "\n".join(rows)
 
+    def _partition_callable_tools(
+        self,
+        wrapped_tools: dict[str, ToolsetTool[AgentDeps]],
+    ) -> tuple[dict[str, Any], dict[str, str]]:
+        callable_defs, aliases = super()._partition_callable_tools(wrapped_tools)
+        # MCP output schemas are third-party input. Only the existing evidence-backed
+        # allowlist may shape Monty's generated return types; everything else remains
+        # canonical JSON/Any rather than inventing a structure from a tool name.
+        for alias, tool_def in list(callable_defs.items()):
+            metadata = tool_def.metadata or {}
+            if (
+                metadata.get(CODE_MODE_METADATA_KEY) == CODE_MODE_HYBRID
+                and not metadata.get(CODE_MODE_TRUSTED_RETURN_SCHEMA_KEY)
+                and tool_def.return_schema is not None
+            ):
+                callable_defs[alias] = replace(tool_def, return_schema=None)
+        return callable_defs, aliases
+
     async def call_tool(
         self,
         name: str,
@@ -218,7 +268,7 @@ class HybridCodeModeToolset(CodeModeToolset[AgentDeps]):
                 ),
                 metadata={
                     "code_mode": True,
-                    "nested_calls": safe_audit_value(
+                    "nested_calls": _bounded_nested_audit(
                         nested_calls,
                         sensitive_values=secrets,
                     ),

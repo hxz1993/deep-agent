@@ -3,6 +3,17 @@
 本文件记录 DeepAgent 的产品版本变化，按新版本到旧版本排列。当前代码版本以
 `deep_agent.__version__` 为准；数据库结构版本以 Alembic head 为准，两者互不替代。
 
+## v0.6.3
+
+- Code Mode 明确区分外层普通工具与仅能在 `run_code` 内调用的 SDK 函数；手写
+  `load_file_data` 目录签名由测试锁定，避免模型把代码别名误当成直接工具。
+- 嵌套 MCP 返回仅对证据白名单中的稳定 Schema 生成类型；未知或第三方不可信 Schema
+  退化为通用 JSON。嵌套审计继续保留在一条 `run_code` Tool Item 中，并增加总大小上限。
+- 上下文预算对 DeepSeek v4 Vision 的当前轮图片按实际像素尺寸和 Provider 公式估算；其他
+  Provider/模型或无法识别的图片继续使用保守固定值，不改变实际 Provider Usage。
+- Console 轨迹为 `run_code` 增加独立 `CODE` 标签和可复制、语法高亮的 Python Code 页签；
+  用户输入详情将附件与 Context Reference 分区展示。API、SSE、Event 与数据库仍保持不变。
+
 ## v0.6.2
 
 - 增加默认不关联的 `builtin:code-mode` Agent 能力包，使用 Harness `CodeMode`、

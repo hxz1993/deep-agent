@@ -53,6 +53,10 @@ frontend/
 | 一体化控制台 | `/console/`；工作台、配置和诊断的唯一入口 |
 | 会话轨迹 | 工作台“对话 / 轨迹”页签；普通对话读History/SSE ConversationItem，只有轨迹按Sequence读取Event API |
 
+v0.6.3起，轨迹把`run_code`显示为独立`CODE`类型，并在详情中提供带Python高亮与复制能力的
+Code页签；用户输入详情中的附件与Context Reference分区展示。这里只改变Event的Console投影，
+不增加Event字段或普通ConversationItem类型。
+
 v0.3.12 的配置卡只读展示工具披露策略：附件包为“有附件时可用”，大型 MCP 为“自动预选 Top 3 / 搜索 Top 5”。聊天中的 `search_tools` 是运行诊断过程，默认折叠显示为“正在查找可用工具”，不伪装成业务 MCP 工具。
 
 工作台默认在会话栏顶部用 Agent 下拉框切换；管理员可在当前页面内临时固定左侧 Agent

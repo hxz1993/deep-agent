@@ -1,4 +1,4 @@
-# Pydantic AI与Harness采用基线（v0.6.2）
+# Pydantic AI与Harness采用基线（v0.6.3）
 
 当前固定版本：`pydantic-ai-slim[openai,anthropic,google,mcp]==2.35.1`、
 `pydantic-ai-harness[skills]==0.26.0`。联动依赖固定为`openai==3.5.0`、
@@ -14,10 +14,10 @@ Harness仍是0.x能力库，升级必须固定准确版本并跑完整回归。
 | Harness 0.24的ToolOutputLimits序列化扩展与文件系统加固 | 现有Spill链路继续可用；暂不改变当前平台File协议和预览格式 |
 | Harness 0.25的嵌套摘要UsageLimits与可覆盖摘要指令 | 当前自研Event Compaction仍是唯一压缩事实源，不叠加Harness摘要链 |
 | Harness 0.26的Shell错误恢复与BatchSpendStore | 当前未启用Shell/SpendStore，不因此增加功能 |
-| Harness 0.22～0.24的CodeMode | v0.6.2以显式`builtin:code-mode`部分采用；只编排已授权MCP与code-only文件原语 |
+| Harness 0.22～0.24的CodeMode | v0.6.2以显式`builtin:code-mode`部分采用；v0.6.3补充SDK作用域、可信返回类型和嵌套审计总量上限 |
 | PromptInjectionDefender、Playwright和FallbackCompaction | 只记录为后续候选；当前不安装、不配置、不向模型披露 |
 
-本次升级不改变REST、SSE、History、Event、Plan、Deferred、附件、MCP或Console契约。
+v0.6.3不改变REST、SSE、History、Event、Plan、Deferred、附件或MCP契约；Console只增加轨迹展示。
 
 ## 职责边界
 

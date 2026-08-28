@@ -41,6 +41,8 @@ sorted({row["id"]: row for group in items for row in group}.values(), key=lambda
 `run_code(code: str, restart: bool=false)` 使用 Monty Python 子集。支持 `await`、条件、循环、容器处理
 和 `asyncio.gather`，但没有宿主文件、环境变量、网络 Socket、Shell、pip 或第三方包。工具参数和
 业务说明仍以外层普通 MCP Tool Schema 为准，Code Mode 动态目录只告诉模型可用函数名。
+动态目录中的函数只能写在 `run_code` 代码中；只有同一协议名也出现在普通工具列表时，才允许
+作为外层工具直接调用。可信稳定的返回Schema会生成结构化类型，其他MCP返回按通用JSON处理。
 
 ## 本地开发
 

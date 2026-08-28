@@ -25,6 +25,8 @@ DeepAgent的跨Provider摘要事件。Evidence使用`source_event_id + part_offs
 - 摘要固定使用当前 Agent 的有效模型，不配置第二套模型映射。
 - 摘要模型窗口放不下候选前缀时失败关闭，不递归生成多层摘要。
 - 新锚点加保留尾部必须小于原前缀并达到目标Token，否则不提交成功。
+- Token估算同时覆盖文字、工具Schema和实际模型可见媒体。DeepSeek v4 Vision图片按像素尺寸与
+  Provider公式估算；未知路由或图片解码失败按1024 Token保守回退。实际Usage始终优先于估算。
 
 环境配置：
 

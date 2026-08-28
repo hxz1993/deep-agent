@@ -22,6 +22,7 @@ if TYPE_CHECKING:
 
 CODE_MODE_METADATA_KEY = "deepagent_code_mode"
 CODE_MODE_ORIGINAL_NAME_KEY = "deepagent_original_name"
+CODE_MODE_TRUSTED_RETURN_SCHEMA_KEY = "deepagent_trusted_return_schema"
 CODE_MODE_HYBRID = "hybrid"
 CODE_MODE_CODE_ONLY = "code_only"
 
@@ -151,7 +152,12 @@ def build_code_mode_tool_package() -> "ToolPackage":
 
     toolset = FunctionToolset[AgentDeps](id="code-mode-files")
 
-    @toolset.tool(metadata={CODE_MODE_METADATA_KEY: CODE_MODE_CODE_ONLY})
+    @toolset.tool(
+        metadata={
+            CODE_MODE_METADATA_KEY: CODE_MODE_CODE_ONLY,
+            CODE_MODE_TRUSTED_RETURN_SCHEMA_KEY: True,
+        }
+    )
     async def load_file_data(
         ctx: RunContext[AgentDeps],
         file_id: str,
@@ -361,13 +367,25 @@ class _ResolvingTool(ToolsetTool[AgentDeps]):
 class FilePayloadResolvingToolset(WrapperToolset[AgentDeps]):
     """Mark MCP tools for hybrid mode and resolve opaque file variables at call time."""
 
+    server_names: tuple[str, ...] = ()
+
     async def get_tools(self, ctx: RunContext[AgentDeps]) -> dict[str, ToolsetTool[AgentDeps]]:
         tools = await self.wrapped.get_tools(ctx)
         result: dict[str, ToolsetTool[AgentDeps]] = {}
         for name, tool in tools.items():
+            from deep_agent.agent.tool_discovery import (
+                MCP_RETURN_SCHEMA_TOOLS,
+                mcp_original_tool_name,
+            )
+
             metadata = dict(tool.tool_def.metadata or {})
             metadata[CODE_MODE_METADATA_KEY] = CODE_MODE_HYBRID
             metadata[CODE_MODE_ORIGINAL_NAME_KEY] = name
+            original_name = mcp_original_tool_name(name, self.server_names)
+            metadata[CODE_MODE_TRUSTED_RETURN_SCHEMA_KEY] = bool(
+                original_name in MCP_RETURN_SCHEMA_TOOLS
+                and tool.tool_def.return_schema
+            )
             tool_def = replace(tool.tool_def, metadata=metadata)
             result[name] = _ResolvingTool(
                 toolset=self,

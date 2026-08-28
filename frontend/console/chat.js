@@ -14,7 +14,7 @@ import {
   planPanelState,
   processDisclosureLabel,
 } from "./assistant-presentation.js?v=20260827-1";
-import { createTrajectoryController } from "./trajectory.js?v=20260827-5";
+import { createTrajectoryController } from "./trajectory.js?v=20260828-1";
 import {
   latestPendingDeferredTool,
   normalizeConversationHistory,

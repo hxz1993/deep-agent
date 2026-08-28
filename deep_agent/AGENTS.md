@@ -106,7 +106,8 @@ DeepAgent 自研 `capabilities.registry.ToolPackage` 是产品配置单位，包
 
 URL 与 Builtin MCP 的运行态不同：URL MCP 在管理员检测时保存 Tool Definitions 和 Server Instructions，Run 只读快照，首次真实调用时才创建官方 `MCPToolset`；Builtin MCP 仍由 Run-scoped Client 按需启动。两者最终工具名都由 `PrefixedToolset` 统一加 Server 前缀。缺少或配置失效的 URL 快照不披露工具，也不会因远端不可达阻塞普通聊天。
 
-v0.6.2的 Hybrid Code Mode 实现位于 `code_mode/`。产品配置单位仍是
+v0.6.2起的 Hybrid Code Mode 实现位于 `code_mode/`；v0.6.3增加可信返回Schema、
+总量受限的嵌套审计和更明确的SDK作用域说明。产品配置单位仍是
 `builtin:code-mode` ToolPackage，运行时由 `HybridCodeMode` Capability 在最外层包装
 ToolSearch。只有已授权 MCP Toolset 会被标记为 Hybrid；已披露工具保留原生 Schema，
 又可在 Monty 中组合调用。`load_file_data` 是 code-only 文件原语，不出现在普通工具列表；

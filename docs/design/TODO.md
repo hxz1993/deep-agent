@@ -40,5 +40,11 @@
 - Code-only `load_file_data`、Run内不透明文件变量、MCP边界延迟Base64和脱敏嵌套调用审计。
 - Shell、Host FileSystem、沙箱生成二进制文件、通用Artifact CRUD和Tool Approval仍不在本次范围。
 
+## v0.6.3 已完成
+
+- Code Mode SDK作用域说明、`load_file_data`签名一致性、可信返回Schema和嵌套审计总量上限。
+- DeepSeek v4 Vision当前轮图片按像素尺寸估算上下文Token；未知Provider/模型继续保守回退。
+- Console轨迹的`CODE`标签、Python Code页签，以及附件与Context Reference分区预览。
+
 框架能力是否采用的长期原则见
 [`14-framework-capabilities/framework-capabilities-baseline.md`](14-framework-capabilities/framework-capabilities-baseline.md)。

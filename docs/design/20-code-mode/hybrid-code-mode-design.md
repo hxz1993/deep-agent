@@ -37,6 +37,14 @@ Agent.capabilities 包含 builtin:code-mode
 3. 动态目录只列函数名和别名，不复制外层 JSON Schema。
 4. 将官方完整嵌套调用 metadata 投影为有界、脱敏摘要。
 
+目录中的 Python 名称只是 `run_code` 内 SDK，不是外层直接工具；只有普通工具列表中另有完整
+Schema 的协议名才可直接调用。Code-only `load_file_data` 的手写目录签名必须由测试与真实函数
+默认值保持一致，示例只使用签名实际接受的参数。
+
+第三方 MCP 的 Output Schema 不自动成为 Monty 类型事实。只有已有证据白名单中的稳定 Schema
+生成结构化返回类型；其他返回统一退化为通用 JSON/Any，不根据工具名猜测字段。普通原生 MCP
+Schema 与返回内容不因此改写。
+
 ## 3. ToolSearch 与名称
 
 ToolSearch 未披露的工具不会进入任一模型可调用路径。工具被搜索揭示后的下一模型步骤，同时获得
@@ -73,7 +81,11 @@ MCP Wrapper 递归扫描参数，仅在字符串完整等于有效 Token 时替�
 
 轨迹 metadata 只保留嵌套顺序、工具名、Call ID、状态、耗时、安全小参数和受限结果摘要。投影必须
 移除文件 Token、Base64、bytes、大字符串、敏感键、完整嵌套返回、Header、Cookie 和凭据。外层大
-结果继续由 `ToolOutputLimits + Spill` 处理。
+结果继续由 `ToolOutputLimits + Spill` 处理；嵌套审计本身还有固定总字符上限，超过后只记录剩余
+调用数量，不拆成新的会话 Event。
+
+Console 仍把它作为普通工具，但轨迹使用独立 `CODE` 标签，并提供只读、可复制、Python 高亮的
+Code 页签。该展示直接读取既有 Tool Call 参数，不增加客户端协议字段。
 
 ## 6. 资源与失败
 

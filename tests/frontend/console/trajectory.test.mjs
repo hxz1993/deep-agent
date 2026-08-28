@@ -6,6 +6,7 @@ import {
   buildTrajectory,
   filterTrajectory,
   redactTrajectoryValue,
+  runCodeSource,
   shouldIngestTrajectoryEvent,
   trajectoryStats,
 } from "../../../frontend/console/trajectory.js";
@@ -187,6 +188,37 @@ test("轨迹筛选、统计与脱敏保持确定性", () => {
   );
 });
 
+test("真实 Pydantic 工具参数字符串可提取 run_code Python 源码", () => {
+  const code = 'payload = await load_file_data(file_id="local_1")\nawait upload_media(base64_content=payload["content"])';
+  const projected = buildTrajectory({
+    items: [{
+      event_id: "evt-run-code",
+      sequence: 1,
+      event_type: "assistant/message",
+      turn_id: "turn-code",
+      run_id: "run-code",
+      payload: {
+        message: {
+          kind: "response",
+          parts: [{
+            part_kind: "tool-call",
+            tool_name: "run_code",
+            tool_call_id: "call-code",
+            args: JSON.stringify({ code }),
+          }],
+        },
+      },
+      created_at: "2026-08-28T08:00:00Z",
+      updated_at: "2026-08-28T08:00:00Z",
+    }],
+  });
+  const event = projected.find((item) => item.id === "tool:call-code");
+  assert.equal(event.label, "run_code");
+  assert.equal(runCodeSource(event), code);
+  assert.equal(runCodeSource({ payload: { args: { code } } }), code);
+  assert.equal(runCodeSource({ payload: { args: "not-json" } }), "");
+});
+
 test("标题投影通知不进入语义轨迹", () => {
   assert.equal(shouldIngestTrajectoryEvent("session_title"), false);
   assert.equal(shouldIngestTrajectoryEvent("session_event_appended"), true);
@@ -234,6 +266,8 @@ test("工作台以独立页签接入轨迹且默认对话链路不变", () => {
   assert.match(trajectorySource, /renderFact\("类型", reference\.type/);
   assert.match(trajectorySource, /renderFact\("Key", reference\.key/);
   assert.match(trajectorySource, /renderFact\("版本", reference\.schema_version/);
+  assert.match(trajectorySource, /renderSummarySection\("Attachments"/);
+  assert.match(trajectorySource, /renderSummarySection\("Context References"/);
   assert.doesNotMatch(trajectorySource, /Object\.entries\(reference\.payload/);
   assert.match(trajectorySource, /TOOL_KINDS\.has\(event\.kind\) && hasMeaningfulValue\(event\.result\)/);
   assert.doesNotMatch(trajectorySource, /下载本地文件/);
@@ -255,6 +289,11 @@ test("工作台以独立页签接入轨迹且默认对话链路不变", () => {
   assert.match(workspaceCss, /\.trajectory-kind\.context\s*\{[^}]*background:\s*#e9f8f0/);
   assert.match(workspaceCss, /\.trajectory-kind\.assistant,[\s\S]*background:\s*#f3edff/);
   assert.match(workspaceCss, /\.trajectory-kind\.tool\s*\{[^}]*background:\s*#fff3e7/);
+  assert.match(workspaceCss, /\.trajectory-kind\.code\s*\{[^}]*background:\s*#e8f1ff/);
+  assert.match(trajectorySource, /return isRunCodeEvent\(event\) \? "CODE"/);
+  assert.match(trajectorySource, /isRunCodeEvent\(event\)\) tabs\.push\(\["code", "Code"\]\)/);
+  assert.match(trajectorySource, /class="hljs language-python"/);
+  assert.match(trajectorySource, /data-copy-run-code/);
   assert.doesNotMatch(trajectorySource, /\bturns?\b/i);
   assert.match(trajectorySource, /currentUser\.run_id = currentRunId/);
   assert.doesNotMatch(trajectorySource, /Run \$\{groupOrdinal\}|data-trajectory-group/);

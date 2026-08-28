@@ -1,6 +1,6 @@
 # 18 · 会话事件与轨迹
 
-> v0.6.0 会话结构；当前产品版本0.6.2，Alembic head：010。Code Mode不修改会话事件结构。
+> v0.6.0 会话结构；当前产品版本0.6.3，Alembic head：010。Code Mode不修改会话事件结构。
 
 DeepAgent 会话域只有 `chat_sessions` 和 `chat_session_events`。Event Store 是模型恢复、
 会话历史、Console 轨迹和Plan的唯一事实源；没有 Checkpoint、Plan、Evidence、
@@ -51,6 +51,9 @@ Header、Cookie 和 Provider Details。中文搜索先按权限和事件范围�
 摘要采用 DSH 八段结构；超大工具结果只在摘要副本中按 `8192/4096/1024` 裁剪。
 Tool/Context Evidence 由程序确定性生成，并以 `source_event_id + part_offset + call_id` 回查原始事实。
 失败、超时、取消和 Stale Compaction 不改变 Surface。
+
+当前轮真实图片参与预算时，DeepSeek v4 Vision按图片尺寸估算；未知模型仍使用固定保守媒体值。
+这只改变触发判断，不改变Event Payload、History或SSE。
 
 ## API、SSE 与 Console
 

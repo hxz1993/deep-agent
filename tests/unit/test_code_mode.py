@@ -2,18 +2,26 @@ from __future__ import annotations
 
 import base64
 import asyncio
+import inspect
 import unittest
 from dataclasses import replace
 
-from pydantic_ai import Agent, FunctionToolset
+from pydantic_ai import Agent, FunctionToolset, ToolDefinition
 from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart, ToolReturnPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
+from pydantic_ai.toolsets.abstract import ToolsetTool
+from pydantic_core import SchemaValidator
 
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.capabilities import build_registry
 from deep_agent.code_mode import FilePayloadResolvingToolset, HybridCodeMode
-from deep_agent.code_mode.toolset import HybridCodeModeToolset, _scrub_error_text
+from deep_agent.code_mode.toolset import (
+    HybridCodeModeToolset,
+    _bounded_nested_audit,
+    _scrub_error_text,
+)
 from deep_agent.code_mode.file_payload import (
+    CODE_MODE_TRUSTED_RETURN_SCHEMA_KEY,
     FILE_DATA_TOKEN_PREFIX,
     MAX_FILE_BYTES,
     FilePayload,
@@ -446,6 +454,8 @@ class CodeModeTests(unittest.IsolatedAsyncioTestCase):
         await agent.run("inspect", deps=AgentDeps(session_id="session"))
 
         self.assertIn("never wrap it with `asyncio.run()`", descriptions[0])
+        self.assertIn("exist only inside `run_code`", descriptions[0])
+        self.assertIn("separately present in the ordinary tool list", descriptions[0])
         self.assertIn("one tool's result feeds another", descriptions[0])
         self.assertIn("execute the\n  remaining chain in one `run_code` call", descriptions[0])
         catalog = HybridCodeModeToolset._render_catalog(
@@ -456,6 +466,108 @@ class CodeModeTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIn("await demo_lookup(...)", catalog)
         self.assertIn("await load_file_data", catalog)
+
+    def test_load_file_data_catalog_signature_matches_function_schema(self) -> None:
+        rendered = HybridCodeModeToolset._render_catalog(
+            {
+                "load_file_data": type("Definition", (), {"metadata": {}})(),
+            }
+        )
+        toolset = build_code_mode_tool_package().toolset
+        function = next(iter(toolset.tools.values())).function
+        signature = inspect.signature(function)
+        self.assertEqual(signature.parameters["encoding"].default, "base64")
+        self.assertEqual(signature.parameters["text_encoding"].default, "utf-8")
+        self.assertEqual(signature.parameters["max_chars"].default, 65_536)
+        self.assertIn("max_chars: int = 65536", rendered)
+
+    def test_nested_audit_has_an_aggregate_limit(self) -> None:
+        entries = [
+            {"tool_name": f"tool-{index}", "result": "x" * 2_000}
+            for index in range(100)
+        ]
+        projected = _bounded_nested_audit(
+            entries,
+            sensitive_values=frozenset(),
+            max_chars=4_096,
+        )
+        self.assertLess(len(str(projected)), 6_000)
+        self.assertEqual(projected[-1]["reason"], "nested_audit_limit")
+        self.assertGreater(projected[-1]["truncated_calls"], 0)
+
+    async def test_untrusted_mcp_return_schema_degrades_to_generic_json(self) -> None:
+        wrapped = FilePayloadResolvingToolset(
+            FunctionToolset(),
+            server_names=("demo",),
+        )
+        validator = SchemaValidator(
+            {
+                "type": "dict",
+                "keys_schema": {"type": "str"},
+                "values_schema": {"type": "any"},
+            }
+        )
+        tools = {
+            "demo_untrusted": ToolsetTool(
+                toolset=wrapped,
+                tool_def=ToolDefinition(
+                    name="demo_untrusted",
+                    parameters_json_schema={
+                        "type": "object",
+                        "properties": {"query": {"type": "string"}},
+                    },
+                    return_schema={"type": "object", "properties": {"rows": {"type": "array"}}},
+                    metadata={
+                        "deepagent_code_mode": "hybrid",
+                        "deepagent_trusted_return_schema": False,
+                    },
+                ),
+                max_retries=1,
+                args_validator=validator,
+            )
+        }
+        hybrid = HybridCodeModeToolset(wrapped=wrapped)
+        callable_defs, _aliases = hybrid._partition_callable_tools(tools)
+        self.assertIsNone(callable_defs["demo_untrusted"].return_schema)
+
+    async def test_trusted_mcp_return_schema_remains_typed(self) -> None:
+        wrapped = FilePayloadResolvingToolset(
+            FunctionToolset(),
+            server_names=("demo",),
+        )
+        validator = SchemaValidator(
+            {
+                "type": "dict",
+                "keys_schema": {"type": "str"},
+                "values_schema": {"type": "any"},
+            }
+        )
+        return_schema = {
+            "type": "object",
+            "properties": {"rows": {"type": "array"}},
+        }
+        tools = {
+            "demo_trusted": ToolsetTool(
+                toolset=wrapped,
+                tool_def=ToolDefinition(
+                    name="demo_trusted",
+                    parameters_json_schema={
+                        "type": "object",
+                        "properties": {"query": {"type": "string"}},
+                    },
+                    return_schema=return_schema,
+                    metadata={
+                        "deepagent_code_mode": "hybrid",
+                        CODE_MODE_TRUSTED_RETURN_SCHEMA_KEY: True,
+                    },
+                ),
+                max_retries=1,
+                args_validator=validator,
+            )
+        }
+        hybrid = HybridCodeModeToolset(wrapped=wrapped)
+        callable_defs, _aliases = hybrid._partition_callable_tools(tools)
+        self.assertEqual(callable_defs["demo_trusted"].return_schema, return_schema)
 
     async def test_unknown_file_id_fails_closed(self) -> None:
         calls = 0

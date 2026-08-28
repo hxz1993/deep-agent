@@ -197,7 +197,10 @@ def _toolsets_for_spec(
         effective_mcp_toolsets = mcp_toolsets
         if "builtin:code-mode" in spec.capabilities:
             effective_mcp_toolsets = [
-                FilePayloadResolvingToolset(toolset)
+                FilePayloadResolvingToolset(
+                    toolset,
+                    server_names=tuple(mcp_server_names or ()),
+                )
                 for toolset in mcp_toolsets
             ]
         discovery = build_mcp_discovery_toolset(

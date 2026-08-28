@@ -1,3 +1,5 @@
+import { copyTextToClipboard } from "./message-actions.js?v=20260819-1";
+
 const TOOL_KINDS = new Set(["tool", "planning", "deferred"]);
 const PRESENTATION_ONLY_SSE_TYPES = new Set(["session_title"]);
 const SENSITIVE_KEY = /(^|[_-])(authorization|cookie|set-cookie|token|api[_-]?key|password|secret)([_-]|$)/i;
@@ -500,6 +502,18 @@ function kindBadge(kind) {
   return String(kind || "event").toUpperCase();
 }
 
+function isRunCodeEvent(event) {
+  return event?.kind === "tool" && event?.label === "run_code";
+}
+
+function eventKindClass(event) {
+  return isRunCodeEvent(event) ? "code" : event?.kind;
+}
+
+function eventKindBadge(event) {
+  return isRunCodeEvent(event) ? "CODE" : kindBadge(event?.kind);
+}
+
 function icon(name) {
   return `<i data-lucide="${name}" aria-hidden="true"></i>`;
 }
@@ -575,25 +589,24 @@ function renderInputSummary(event, events) {
   const contextRefs = Array.isArray(event.payload?.context_refs) ? event.payload.context_refs : [];
   const attachments = Array.isArray(event.payload?.attachments) ? event.payload.attachments : [];
   const contextEvents = events.filter((item) => item.kind === "context" && item.payload?.parent_input_id === event.id);
-  const references = [
-    ...contextRefs.map((reference, index) => renderJumpLink({
+  const contextLinks = contextRefs.map((reference, index) => renderJumpLink({
       eventId: contextEvents[index]?.id || null,
       iconName: "braces",
       text: reference?.label || reference?.key || reference?.type || "未命名上下文",
       detail: reference?.type || reference?.key || "",
-    })),
-    ...attachments.map((attachment) => renderJumpLink({
+    })).join("");
+  const attachmentLinks = attachments.map((attachment) => renderJumpLink({
       eventId: null,
       iconName: "paperclip",
       text: attachment?.name || attachment?.id || "未命名附件",
       detail: attachment?.mime_type || attachment?.mime || "附件",
-    })),
-  ].join("");
+    })).join("");
   return `${renderSummarySection(
     "Preview",
     renderMarkdown(event.payload?.content, "本次输入只包含附件或结构化上下文。"),
     { targetTab: "preview", className: "trajectory-summary-preview is-scroll" },
-  )}${references ? renderSummarySection("Context", `<div class="trajectory-summary-links">${references}</div>`) : ""}`;
+  )}${attachmentLinks ? renderSummarySection("Attachments", `<div class="trajectory-summary-links">${attachmentLinks}</div>`) : ""}
+    ${contextLinks ? renderSummarySection("Context References", `<div class="trajectory-summary-links">${contextLinks}</div>`) : ""}`;
 }
 
 function renderContextSummary(event) {
@@ -778,9 +791,46 @@ function renderJsonBlock(value) {
   }) || `<pre class="trajectory-json"><code>${escapeHtml(formatJson(value))}</code></pre>`;
 }
 
+export function runCodeSource(event) {
+  const rawArgs = event?.payload?.args ?? event?.payload;
+  if (rawArgs && typeof rawArgs === "object") {
+    return typeof rawArgs.code === "string" ? rawArgs.code : "";
+  }
+  if (typeof rawArgs !== "string") return "";
+  try {
+    const parsed = JSON.parse(rawArgs);
+    return parsed && typeof parsed === "object" && typeof parsed.code === "string"
+      ? parsed.code
+      : "";
+  } catch {
+    return "";
+  }
+}
+
+function highlightPython(code) {
+  if (globalThis.hljs?.getLanguage?.("python")) {
+    try {
+      return globalThis.hljs.highlight(code, { language: "python", ignoreIllegals: true }).value;
+    } catch {
+      // Fall through to escaped text when highlighting fails.
+    }
+  }
+  return escapeHtml(code);
+}
+
+function renderRunCode(event) {
+  const code = runCodeSource(event);
+  if (!code) return `<p class="trajectory-summary-empty">本次代码编排没有可展示的源代码。</p>`;
+  return `<section class="trajectory-code-view">
+    <header><span>Python</span><button type="button" data-copy-run-code>${icon("copy")}复制</button></header>
+    <pre><code class="hljs language-python">${highlightPython(code)}</code></pre>
+  </section>`;
+}
+
 function detailTabs(event) {
   if (event.kind === "title") return [["summary", "Summary"], ["request", "Request"], ["result", "Result"]];
   const tabs = [["summary", "Summary"]];
+  if (isRunCodeEvent(event)) tabs.push(["code", "Code"]);
   if (hasMeaningfulValue(event.payload)) tabs.push(["payload", "Payload"]);
   if (["input", "assistant"].includes(event.kind)) {
     tabs.push(["preview", "Preview"], ["raw", "Raw"]);
@@ -824,12 +874,13 @@ function renderDetail(event, activeTab = "summary", events = []) {
   if (activeTab === "result") content = renderJsonBlock(event.kind === "title" ? (event.native?.title_result || event.payload) : event.result);
   if (activeTab === "preview") content = renderPreview(event);
   if (activeTab === "raw") content = renderRaw(event);
+  if (activeTab === "code") content = renderRunCode(event);
   const headerLabel = TOOL_KINDS.has(event.kind) || ["compaction", "title"].includes(event.kind)
     ? event.label
     : event.run_id ? `Run ${String(event.run_id).slice(0, 8)}` : "";
   return `
     <header class="trajectory-detail-head">
-      <div><span class="trajectory-kind ${escapeHtml(event.kind)}">${escapeHtml(kindBadge(event.kind))}</span>${headerLabel ? `<strong>${escapeHtml(headerLabel)}</strong>` : ""}<em class="${escapeHtml(event.status)}">${escapeHtml(statusLabel(event.status))}</em></div>
+      <div><span class="trajectory-kind ${escapeHtml(eventKindClass(event))}">${escapeHtml(eventKindBadge(event))}</span>${headerLabel ? `<strong>${escapeHtml(headerLabel)}</strong>` : ""}<em class="${escapeHtml(event.status)}">${escapeHtml(statusLabel(event.status))}</em></div>
     </header>
     <nav class="trajectory-detail-tabs" role="tablist">${tabs.map(([id, label]) => `<button type="button" class="${activeTab === id ? "active" : ""}" data-trajectory-detail-tab="${id}">${label}</button>`).join("")}</nav>
     <div class="trajectory-detail-body">${content}</div>`;
@@ -903,7 +954,7 @@ export function createTrajectoryController({ state }) {
       }[event.label];
       const summary = event.kind === "planning" ? (planningSummary || "更新任务计划") : (event.summary || "暂无内容");
       html.push(`<button type="button" class="trajectory-row ${escapeHtml(event.kind)} ${selectedId === event.id ? "active" : ""}" data-trajectory-id="${escapeHtml(event.id)}">
-        <span class="trajectory-row-copy"><span class="trajectory-kind ${escapeHtml(event.kind)}">${escapeHtml(kindBadge(event.kind))}</span>${showToolName ? `<strong>${escapeHtml(event.label)}</strong>` : ""}<span class="trajectory-row-summary">${escapeHtml(summary)}</span></span>
+        <span class="trajectory-row-copy"><span class="trajectory-kind ${escapeHtml(eventKindClass(event))}">${escapeHtml(eventKindBadge(event))}</span>${showToolName ? `<strong>${escapeHtml(event.label)}</strong>` : ""}<span class="trajectory-row-summary">${escapeHtml(summary)}</span></span>
         <span class="trajectory-row-meta"><time>${escapeHtml(formatTime(event.timestamp))}</time><em class="${escapeHtml(event.status)}">${escapeHtml(statusLabel(event.status))}</em></span>
       </button>`);
     });
@@ -1210,6 +1261,15 @@ export function createTrajectoryController({ state }) {
     scheduleRender();
   });
   detail.addEventListener("click", (event) => {
+    const copyCode = event.target.closest("[data-copy-run-code]");
+    if (copyCode) {
+      const selected = allEvents().find((item) => item.id === selectedId);
+      copyTextToClipboard(runCodeSource(selected)).then(() => {
+        copyCode.classList.add("copied");
+        copyCode.textContent = "已复制";
+      });
+      return;
+    }
     const eventTarget = event.target.closest("[data-trajectory-event-target]");
     if (eventTarget) {
       selectedId = eventTarget.dataset.trajectoryEventTarget;

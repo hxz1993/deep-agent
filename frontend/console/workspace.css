@@ -549,6 +549,7 @@ html, body {
 .trajectory-kind.assistant,
 .trajectory-kind.thinking { background: #f3edff; color: #7c3aed; }
 .trajectory-kind.tool { background: #fff3e7; color: #c65d08; }
+.trajectory-kind.code { background: #e8f1ff; color: #3156c8; }
 .trajectory-kind.planning { background: #e7f7f4; color: #078573; }
 .trajectory-kind.deferred { background: #fff5df; color: #b45309; }
 .trajectory-row-meta { display: flex; align-items: center; justify-content: flex-end; gap: 7px; padding-left: 8px; white-space: nowrap; }
@@ -748,6 +749,39 @@ html, body {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+.trajectory-code-view {
+  overflow: hidden;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--bg-soft);
+}
+.trajectory-code-view > header {
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--border-soft);
+  color: var(--text-faint);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+.trajectory-code-view > header button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 6px;
+  border: 0;
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  cursor: pointer;
+}
+.trajectory-code-view > header button:hover,
+.trajectory-code-view > header button.copied { color: var(--accent); }
+.trajectory-code-view > header svg { width: 14px; height: 14px; }
+.trajectory-code-view pre { margin: 0; padding: 14px; overflow: auto; }
+.trajectory-code-view code { font-family: var(--mono); font-size: 12px; line-height: 1.65; }
 .trajectory-plan-progress { height: 5px; margin-top: 14px; overflow: hidden; border-radius: 999px; background: var(--border-soft); }
 .trajectory-plan-progress span { display: block; height: 100%; border-radius: inherit; background: var(--accent); }
 .trajectory-plan-count { margin: 7px 0 0; color: var(--text-faint); font-size: 12px; }

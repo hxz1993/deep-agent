@@ -3,7 +3,7 @@
 DeepAgent 是基于 FastAPI、Pydantic AI 和 SQLAlchemy 的多用户 Agent 服务，并
 随服务发布一体化运维控制台。
 
-当前产品版本为 `0.6.2`。`deep_agent.__version__` 是唯一代码版本来源，FastAPI、
+当前产品版本为 `0.6.3`。`deep_agent.__version__` 是唯一代码版本来源，FastAPI、
 `GET /info` 和 Console 顶部版本徽标均读取该值。后续正式发布默认递增
 `MAJOR.MINOR.PATCH` 的第三位，只有明确规划重大版本时才调整前两位。产品版本不通过
 环境变量或数据库覆盖，也不等同于 Alembic 数据库结构 revision。
@@ -24,6 +24,8 @@ Model 只保存 Provider 外键、模型编码与能力属性。v0.6.1删除两�
 v0.6.2 增加显式 Agent 能力包 `builtin:code-mode`。关联后，已授权且已披露的
 MCP 工具既保留普通 Tool Schema，也可在 Harness `run_code` 的 Monty 环境内组合调用。
 当前会话已授权文件通过不透明 Run 变量中转，真实 Base64 只在 MCP 调用边界生成。
+v0.6.3进一步收紧 SDK 函数作用域、可信返回类型和嵌套审计，并为 DeepSeek v4 Vision
+加入按图片尺寸计价的上下文预算估算；未知路由仍保守回退。
 使用和安全边界见 [`docs/guides/code-mode.md`](docs/guides/code-mode.md)。
 
 ## 项目结构

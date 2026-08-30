@@ -36,10 +36,13 @@ def build_registry(
     ``capabilities.mcp.resolver``.
     """
     _ = stores
+    from deep_agent.web.package import build_web_tool_package
+
     registry = ToolPackageRegistry()
 
     registry.register(build_native_tool_package())
     registry.register(build_code_mode_tool_package())
+    registry.register(build_web_tool_package())
 
     if sandbox_backend is not None:
         registry.register(

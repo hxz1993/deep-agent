@@ -178,6 +178,88 @@ class ConversationProjectorTests(unittest.TestCase):
         self.assertEqual(tool.status, "completed")
         self.assertEqual(tool.output, {"tools": {}})
 
+    def test_provider_web_search_preserves_safe_audit_metadata(self) -> None:
+        events = [
+            event(
+                1,
+                "assistant/message",
+                message=ModelResponse(parts=[
+                    ToolCallPart(
+                        "web_search",
+                        {"query": "DeepAgent"},
+                        tool_call_id="web-provider-1",
+                    )
+                ]),
+            ),
+            event(
+                2,
+                "tool/results",
+                message=ModelRequest(parts=[
+                    ToolReturnPart(
+                        "web_search",
+                        {"provider": "tavily", "result_count": 1},
+                        "web-provider-1",
+                        metadata={
+                            "web_search": {
+                                "mode": "provider",
+                                "provider": "tavily",
+                                "elapsed_ms": 42,
+                                "truncated": False,
+                            },
+                            "sources": [
+                                {"url": "https://example.com", "title": "Example"}
+                            ],
+                        },
+                    )
+                ]),
+            ),
+        ]
+
+        tool = project_session_events(events).items[0]
+
+        self.assertEqual(tool.metadata["web_search"]["provider"], "tavily")
+        self.assertEqual(tool.metadata["web_search"]["elapsed_ms"], 42)
+        self.assertEqual(tool.metadata["sources"][0]["url"], "https://example.com")
+
+    def test_web_fetch_preserves_safe_audit_metadata(self) -> None:
+        events = [
+            event(
+                1,
+                "assistant/message",
+                message=ModelResponse(parts=[
+                    ToolCallPart(
+                        "web_fetch",
+                        {"url": "https://example.com"},
+                        tool_call_id="web-fetch-1",
+                    )
+                ]),
+            ),
+            event(
+                2,
+                "tool/results",
+                message=ModelRequest(parts=[
+                    ToolReturnPart(
+                        "web_fetch",
+                        {"content": "body"},
+                        "web-fetch-1",
+                        metadata={
+                            "web_fetch": {
+                                "mode": "local",
+                                "elapsed_ms": 17,
+                                "truncated": False,
+                            },
+                            "sources": [{"url": "https://example.com", "title": None}],
+                        },
+                    )
+                ]),
+            ),
+        ]
+
+        tool = project_session_events(events).items[0]
+
+        self.assertEqual(tool.metadata["web_fetch"]["elapsed_ms"], 17)
+        self.assertEqual(tool.metadata["sources"][0]["url"], "https://example.com")
+
 
 if __name__ == "__main__":
     unittest.main()

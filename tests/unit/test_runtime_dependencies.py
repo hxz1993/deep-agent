@@ -29,10 +29,13 @@ class RuntimeDependencyTests(unittest.TestCase):
         }
 
         self.assertIn(
-            "pydantic-ai-slim[openai,anthropic,google,mcp]==2.35.1",
+            "pydantic-ai-slim[openai,anthropic,google,mcp,duckduckgo,tavily,web-fetch]==2.35.1",
             requirements,
         )
-        self.assertIn("pydantic-ai-harness[skills]==0.26.0", requirements)
+        self.assertIn(
+            "pydantic-ai-harness[skills,exa,youdotcom]==0.26.0",
+            requirements,
+        )
         self.assertIn("pydantic-monty==0.0.21", requirements)
         self.assertEqual(version("pydantic-ai-slim"), "2.35.1")
         self.assertEqual(version("pydantic-ai-harness"), "0.26.0")

@@ -3,13 +3,33 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-from fastapi import APIRouter
+import time
+
+from fastapi import APIRouter, HTTPException, status
+from loguru import logger
+from pydantic_ai import ToolFailed
 from pydantic import BaseModel
 from sqlalchemy.engine import make_url
 
 from deep_agent.api.v1.admin import CONSOLE_ADMIN_DEPENDENCIES
+from deep_agent.core.context import AppContextDep
 from deep_agent.db.url import get_database_url
 from deep_agent.options import OPTION, DeepAgentOptions
+from deep_agent.schemas.llm_provider import mask_api_key
+from deep_agent.schemas.web_search import (
+    WebSearchSettingsResponse,
+    WebSearchSettingsWrite,
+    WebSearchTestResponse,
+    WebSearchValueResponse,
+)
+from deep_agent.web.runtime import probe_web_search_config
+from deep_agent.web.settings import (
+    WEB_SEARCH_SCHEMA_VERSION,
+    WEB_SEARCH_SETTING_KEY,
+    WebSearchConfigurationError,
+    WebSearchRuntimeConfig,
+    resolve_web_search_config,
+)
 
 
 router = APIRouter(dependencies=CONSOLE_ADMIN_DEPENDENCIES)
@@ -420,3 +440,137 @@ def build_global_settings(
 async def get_global_settings() -> GlobalSettingsResponse:
     """Return the Console's safe, read-only runtime settings."""
     return build_global_settings()
+
+
+def _web_search_response(row, config: WebSearchRuntimeConfig) -> WebSearchSettingsResponse:
+    return WebSearchSettingsResponse(
+        version=WEB_SEARCH_SCHEMA_VERSION,
+        value=WebSearchValueResponse(
+            mode=config.mode,
+            provider=config.provider,
+            model=config.model,
+            api_key_set=bool(config.api_key),
+            api_key_masked=mask_api_key(config.api_key),
+        ),
+        created_at=getattr(row, "created_at", None),
+        updated_at=getattr(row, "updated_at", None),
+    )
+
+
+async def _current_web_search(ctx: AppContextDep):
+    store = ctx.stores.global_setting
+    if store is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Global settings store is unavailable",
+        )
+    row = await store.get(WEB_SEARCH_SETTING_KEY)
+    if row is None:
+        return None, WebSearchRuntimeConfig(mode="native")
+    try:
+        if int(row.version) != WEB_SEARCH_SCHEMA_VERSION:
+            raise WebSearchConfigurationError(
+                f"Unsupported Web Search settings version: {row.version}"
+            )
+        return row, resolve_web_search_config(row.value)
+    except WebSearchConfigurationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Stored Web Search configuration is invalid: {exc}",
+        ) from exc
+
+
+def _resolve_web_search_write(
+    body: WebSearchSettingsWrite,
+    *,
+    existing: WebSearchRuntimeConfig,
+) -> WebSearchRuntimeConfig:
+    try:
+        return resolve_web_search_config(
+            body.value.model_dump(exclude_none=True),
+            existing=existing,
+        )
+    except WebSearchConfigurationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+
+
+@router.get(
+    "/global-settings/web-search",
+    response_model=WebSearchSettingsResponse,
+)
+async def get_web_search_settings(ctx: AppContextDep) -> WebSearchSettingsResponse:
+    row, config = await _current_web_search(ctx)
+    return _web_search_response(row, config)
+
+
+@router.put(
+    "/global-settings/web-search",
+    response_model=WebSearchSettingsResponse,
+)
+async def put_web_search_settings(
+    body: WebSearchSettingsWrite,
+    ctx: AppContextDep,
+) -> WebSearchSettingsResponse:
+    _row, existing = await _current_web_search(ctx)
+    config = _resolve_web_search_write(body, existing=existing)
+    store = ctx.stores.global_setting
+    if store is None:  # pragma: no cover - guarded by _current_web_search
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Global settings store is unavailable",
+        )
+    row = await store.upsert(
+        WEB_SEARCH_SETTING_KEY,
+        value=config.to_stored_value(),
+        version=WEB_SEARCH_SCHEMA_VERSION,
+    )
+    logger.info(
+        "Global Web Search configuration updated mode={} provider={}",
+        config.mode,
+        config.provider or "current-model",
+    )
+    return _web_search_response(row, config)
+
+
+@router.post(
+    "/global-settings/web-search/test",
+    response_model=WebSearchTestResponse,
+)
+async def test_web_search_settings(
+    body: WebSearchSettingsWrite,
+    ctx: AppContextDep,
+) -> WebSearchTestResponse:
+    _row, existing = await _current_web_search(ctx)
+    config = _resolve_web_search_write(body, existing=existing)
+    started = time.monotonic()
+    provider = config.provider or "current-model"
+    try:
+        await probe_web_search_config(config)
+    except ToolFailed as exc:
+        elapsed_ms = int((time.monotonic() - started) * 1000)
+        logger.info(
+            "Global Web Search connectivity test failed provider={} elapsed_ms={}",
+            provider,
+            elapsed_ms,
+        )
+        return WebSearchTestResponse(
+            ok=False,
+            provider=provider,
+            message=str(exc),
+            elapsed_ms=elapsed_ms,
+        )
+    elapsed_ms = int((time.monotonic() - started) * 1000)
+    logger.info(
+        "Global Web Search connectivity test succeeded provider={} elapsed_ms={}",
+        provider,
+        elapsed_ms,
+    )
+    return WebSearchTestResponse(
+        ok=True,
+        provider=provider,
+        message="连接成功",
+        elapsed_ms=elapsed_ms,
+    )

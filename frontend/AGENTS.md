@@ -46,7 +46,7 @@ frontend/
 | 会话 | `session_id` 由后端 `session` 事件返回；`GET/DELETE /api/v1/sessions`；标题展示 `title \|\| user_prompt`（见 [`../docs/guides/experience/ai-title-generator.md`](../docs/guides/experience/ai-title-generator.md)） |
 | 能力面板 | `GET /api/v1/tools` |
 | 配置 | `localStorage` 只保存调试 App；全局环境配置只读展示，身份和鉴权由平台提供 |
-| 内置工具目录 | 配置中心只读展示 `builtin:general`、`builtin:sandbox`；Agent 按包选择 |
+| 内置工具目录 | 配置中心展示 `builtin:general`、`builtin:sandbox`、`builtin:code-mode`、`builtin:web`；Agent 按包选择 |
 | 系统工具目录 | 配置中心按任务规划、Skill、文件、工具结果、MCP 工具发现、MCP Resource 分组展示自动注入工具；不参与 Agent 配置 |
 | 任务计划 | 只识别`write_plan`完整快照；仅当前Run直播展示，任何Run终态后隐藏，重新打开History不恢复；同Turn Deferred由后端恢复PlanStore |
 | Skill | 独立 Skill 列表与详情；上传包安装/替换/单个与全部导出/删除；文本、Word、Excel 资源可预览，脚本只列包内路径和数量，不展示可执行性判断；Agent 使用独立 `skills` 列表选择 |
@@ -108,7 +108,7 @@ Agent 独立编辑页的系统提示词标题栏显示“字符数 / 预估 Toke
 - 控制台请求固定使用当前同源后端。本地联调直接访问本机 `8000/console/`，不在浏览器中切换后端地址。
 - SSE 解析、HITL 参数归一化和 Schema 文本校验分别位于 `protocol.js`、`hitl.js`、`schema-editor.js`，可由 Node 内置测试独立验证。
 - 控制台测试：`node --test tests/frontend/console/*.test.mjs`。
-- 配置中心按“Agent 设置 / 系统设置 / 辅助资源”分组；系统设置包含全局配置和只读数据库连接。数据库连接页通过 `GET /api/v1/database-info` 只展示类型、主机、端口、库名或 SQLite 文件名，不返回凭据、连接参数或本地完整路径。会话标题使用首轮实际模型并通过`session/title`事件更新，不提供独立模型入口或轮询刷新。
+- 配置中心按“Agent 设置 / 系统设置 / 辅助资源”分组；系统设置包含全局配置和数据库连接。全局配置内用160px分栏承载Web Search和运行设置：Web Search只展示当前模型/指定Provider及当前Provider必填字段，Fetch无配置不展示；运行设置沿用原安全白名单。数据库连接页通过 `GET /api/v1/database-info` 只展示类型、主机、端口、库名或 SQLite 文件名，不返回凭据、连接参数或本地完整路径。会话标题使用首轮实际模型并通过`session/title`事件更新，不提供独立模型入口或轮询刷新。
 - “内置工具”位于模型之后，在同一目录中分别展示代码随版本发布、由Agent显式配置的工具包，
   以及运行时自动注入的系统工具。页面没有注册、编辑、删除、全局启停或重新加载入口；系统工具
   也不得进入 Agent 能力勾选。
@@ -237,6 +237,9 @@ Console会话渲染模块边界：
 - v0.6.4起Provider详情中的模型Switch直接维护`llm_models.enabled`。配置中心请求
   `/llm-models?selectable_only=false`以保留停用模型的管理入口；Agent和聊天选择器使用普通
   `/llm-models`，不得在前端自行复制可用性判断或重新显示停用模型。
+- v0.6.5 Web Search表单只有一份当前生效配置。API Key未重填时发送空值以保留同Provider旧Key；
+  切换Provider必须清理无关模型和密钥状态。连通性图标测试当前草稿，只显示成功或脱敏短错误，
+  不展示测试问题或结果正文。
 - 上下文压缩在模型配置有效上下文窗口时自动启用；Console只读展示全局策略、预算和Compaction状态，
   不提供启用开关，也不编辑摘要正文。
 - Console 从 `/uploads/capabilities`读取实际 MIME、单文件大小和单次数量限制；新请求不得再发送

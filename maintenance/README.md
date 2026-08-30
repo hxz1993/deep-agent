@@ -168,6 +168,12 @@ Provider迁移后按类型、地址和凭据等真实配置判断可用，模型
 Agent创建、MCP、Skill、UI工具和对话冒烟。禁止手工只改`alembic_version`。升级后的配置备份
 文件名使用`v010`。
 
+## v0.6.5 全局配置
+
+Alembic `012`增加`global_settings`并初始化`web_search={"mode":"native"}`。该表属于配置备份范围，
+备份文件名使用`v012`；降级到011会删除整张表，因此降级前必须先导出012配置备份。Web Search密钥
+与LLM Provider密钥一样属于配置秘密，备份文件继续按私有敏感文件管理，不提交仓库或公开传输。
+
 ## v0.6.4 模型启停恢复
 
 Alembic `011`只给`llm_models`恢复非空、默认启用的`enabled`列。升级时现有模型全部回填为启用；

@@ -22,6 +22,7 @@ EXPECTED_TABLES = {
     "agents",
     "chat_session_events",
     "chat_sessions",
+    "global_settings",
     "llm_models",
     "llm_providers",
     "mcp_servers",
@@ -108,7 +109,32 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
 
                     await asyncio.to_thread(command.downgrade, config, "010")
                     self.assertNotIn("enabled", self._columns(db_path, "llm_models"))
+                    await asyncio.to_thread(command.upgrade, config, "head")
+                    self._assert_current_baseline(db_path)
+
+    async def test_011_012_round_trip_seeds_web_search_setting(self) -> None:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+            db_path = Path(tmpdir) / "global-settings.db"
+            url = f"sqlite+aiosqlite:///{db_path.as_posix()}"
+            with patch("deep_agent.db.url.get_database_url", return_value=url):
+                with patch("deep_agent.db.migrate.get_database_url", return_value=url):
+                    config = migrate._build_alembic_config()
                     await asyncio.to_thread(command.upgrade, config, "011")
+                    self.assertNotIn("global_settings", self._business_tables(db_path))
+
+                    await asyncio.to_thread(command.upgrade, config, "012")
+                    self.assertEqual(self._revision(db_path), "012")
+                    self.assertEqual(
+                        self._scalar(
+                            db_path,
+                            "SELECT value FROM global_settings WHERE key='web_search'",
+                        ),
+                        '{"mode":"native"}',
+                    )
+
+                    await asyncio.to_thread(command.downgrade, config, "011")
+                    self.assertNotIn("global_settings", self._business_tables(db_path))
+                    await asyncio.to_thread(command.upgrade, config, "012")
                     self._assert_current_baseline(db_path)
 
     async def test_007_infers_merges_and_round_trips_providers(self) -> None:
@@ -775,7 +801,7 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
                         {table: self._row_count(db_path, table) for table in config_counts},
                     )
 
-                    await asyncio.to_thread(command.upgrade, config, "011")
+                    await asyncio.to_thread(command.upgrade, config, "head")
                     self._assert_current_baseline(db_path)
 
                     await asyncio.to_thread(command.downgrade, config, "008")
@@ -806,7 +832,7 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
                         self._foreign_keys(db_path, "auxiliary_model_configs"),
                     )
 
-                    await asyncio.to_thread(command.upgrade, config, "011")
+                    await asyncio.to_thread(command.upgrade, config, "head")
                     self._assert_current_baseline(db_path)
                     self.assertEqual(
                         config_counts,
@@ -827,11 +853,11 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
                         connection.execute("DROP TABLE auxiliary_model_configs")
                         connection.commit()
 
-                    await asyncio.to_thread(command.upgrade, config, "011")
+                    await asyncio.to_thread(command.upgrade, config, "head")
                     self._assert_current_baseline(db_path)
 
     def _assert_current_baseline(self, db_path: Path) -> None:
-        self.assertEqual(self._revision(db_path), "011")
+        self.assertEqual(self._revision(db_path), "012")
         self.assertEqual(self._business_tables(db_path), EXPECTED_TABLES)
         self.assertNotIn("max_requests", self._columns(db_path, "agents"))
         self.assertNotIn("capabilities_source", self._columns(db_path, "llm_models"))

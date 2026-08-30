@@ -166,6 +166,28 @@ class Agent(Base):
     llm_model: Mapped[LlmModel] = relationship("LlmModel", lazy="joined")
 
 
+class GlobalSetting(Base):
+    __tablename__ = "global_settings"
+
+    key: Mapped[str] = mapped_column(KeyText, primary_key=True)
+    value: Mapped[dict] = mapped_column(JSONType, nullable=False)
+    version: Mapped[int] = mapped_column(
+        SmallInteger,
+        nullable=False,
+        default=1,
+        server_default="1",
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+
 class SkillPackage(Base):
     __tablename__ = "skill_packages"
 

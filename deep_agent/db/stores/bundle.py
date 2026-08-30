@@ -9,6 +9,7 @@ from deep_agent.db.dialect import DbDialect
 from deep_agent.db.stores.agent import AgentStoreBase, create_agent_store
 from deep_agent.db.stores.chat_session import ChatSessionStoreBase, create_chat_session_store
 from deep_agent.db.stores.event import SessionEventStore
+from deep_agent.db.stores.global_setting import GlobalSettingStore
 from deep_agent.db.stores.llm_model import LlmModelStoreBase, create_llm_model_store
 from deep_agent.db.stores.mcp import McpServerStoreBase, create_mcp_store
 from deep_agent.db.stores.model_catalog import ModelCatalogStoreBase, create_model_catalog_store
@@ -36,6 +37,9 @@ class DataStores:
     ui_tool: UiToolStoreBase
     ui_tool_package: UiToolPackageStoreBase
     skill_package: SkillPackageStoreBase
+    # Optional keeps manually assembled test/integration bundles compatible;
+    # the production factory below always supplies the store.
+    global_setting: GlobalSettingStore | None = None
 
 
 def create_data_stores(
@@ -61,4 +65,5 @@ def create_data_stores(
         ui_tool=create_ui_tool_store(dialect, session_factory),
         ui_tool_package=create_ui_tool_package_store(dialect, session_factory),
         skill_package=create_skill_package_store(dialect, session_factory),
+        global_setting=GlobalSettingStore(session_factory),
     )

@@ -3,7 +3,7 @@
 DeepAgent 是基于 FastAPI、Pydantic AI 和 SQLAlchemy 的多用户 Agent 服务，并
 随服务发布一体化运维控制台。
 
-当前产品版本为 `0.6.4`。`deep_agent.__version__` 是唯一代码版本来源，FastAPI、
+当前产品版本为 `0.6.5`。`deep_agent.__version__` 是唯一代码版本来源，FastAPI、
 `GET /info` 和 Console 顶部版本徽标均读取该值。后续正式发布默认递增
 `MAJOR.MINOR.PATCH` 的第三位，只有明确规划重大版本时才调整前两位。产品版本不通过
 环境变量或数据库覆盖，也不等同于 Alembic 数据库结构 revision。
@@ -27,6 +27,10 @@ MCP 工具既保留普通 Tool Schema，也可在 Harness `run_code` 的 Monty �
 v0.6.3进一步收紧 SDK 函数作用域、可信返回类型和嵌套审计，并为 DeepSeek v4 Vision
 加入按图片尺寸计价的上下文预算估算；未知路由仍保守回退。
 使用和安全边界见 [`docs/guides/code-mode.md`](docs/guides/code-mode.md)。
+
+v0.6.5增加默认不关联的`builtin:web`，固定提供公开互联网`web_search`和SSRF-safe
+`web_fetch`。Search全局明确选择当前模型或一个固定Provider，不执行隐式降级；Web配置与安全边界见
+[`docs/design/21-web-tools/`](docs/design/21-web-tools/)。
 
 ## 项目结构
 
@@ -128,14 +132,15 @@ uvicorn deep_agent.main:app --host 0.0.0.0 --port 8000
 
 ## 数据库基线
 
-新数据库直接执行 `alembic upgrade head`。当前 Alembic head 为 `011`：`002` 统一 ToolPackage
+新数据库直接执行 `alembic upgrade head`。当前 Alembic head 为 `012`：`002` 统一 ToolPackage
 与 UI 工具包；`003` 将线上 Skill 与
 ToolPackage 分离；`004`清理已废弃的`builtin:attachment`；`005`和`006`依次删除已下线的
 预制MCP记录，并从显式Agent能力列表中清理对应引用；`007`增加独立Provider层、模型硬外键并删除
 模型表中的重复连接字段；`008`将会话域重建为`chat_sessions + chat_session_events`；`009`删除
 已经下线的标题专用模型配置表；`010`删除 Provider、模型、Skill、MCP、UI 工具包和 UI 工具自身的冗余启停字段，
 并把 Agent 的 `capabilities` 收敛为非空显式列表；`011`仅恢复模型级`enabled`，现有模型全部回填为启用，
-Provider、Skill、MCP和UI工具仍无独立启停层。
+Provider、Skill、MCP和UI工具仍无独立启停层；`012`增加通用`global_settings`并初始化Web Search为
+当前模型模式。
 
 `008`不在线转换旧会话：它删除旧会话历史并建立空 Event Store，但保留所有配置表。共享环境升级前
 必须先用 Revision 007 代码分别执行配置备份和会话归档，停掉全部旧实例后才能迁移；旧版本不能与
@@ -154,6 +159,7 @@ DeepAgent 当前支持：
 - 内置工具：
   - `builtin:general`（通用工具）：只包含 `get_current_time`。
   - `builtin:sandbox`（Python 沙箱）：只包含 `execute_python`。
+  - `builtin:web`（公开网络）：包含 `web_search` 与 `web_fetch`，默认不关联。
 - 系统工具不是 ToolPackage。Harness任务规划、`load_capability`、Skill Resource、`read_file`、
   `export_file_to_download_center`、`read_tool_result`、`search_tools` 和 MCP Resource
   由运行时按 Agent/Run 条件自动注入，只在 Console 的只读“系统工具”目录中说明。

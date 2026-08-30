@@ -30,6 +30,7 @@ HTTP (REST/SSE)
         ├─ builtin:general  UTC 时间 FunctionToolset
         ├─ builtin:sandbox  无状态 Python FunctionToolset
         ├─ builtin:code-mode  Harness CodeMode + Monty（显式关联）
+        ├─ builtin:web  WebSearch Capability + 请求级公开Web Toolset（显式关联）
         ├─ mcp          请求时 `capabilities/mcp/resolver.py`（DB + mcps/ 兜底）
         └─ ui           代码内置或数据库工具包 → ExternalToolset
     → Agent.skills → Harness Skills（SKILL.md 渐进披露）
@@ -113,6 +114,11 @@ v0.6.2起的 Hybrid Code Mode 实现位于 `code_mode/`；v0.6.3增加可信返�
 ToolSearch。只有已授权 MCP Toolset 会被标记为 Hybrid；已披露工具保留原生 Schema，
 又可在 Monty 中组合调用。`load_file_data` 是 code-only 文件原语，不出现在普通工具列表；
 其 Run Token、Base64 和大中间结果必须在进入 Event、History、SSE、轨迹、检索或日志前脱敏。
+
+v0.6.5的公开Web实现位于`web/`。`builtin:web`只提供`web_search/web_fetch`，全局唯一
+`global_settings.web_search`决定当前模型或固定Provider路由，但不能替代Agent显式授权。固定Provider
+工具可在同时授权Code Mode时进入Monty；原生搜索由Provider执行。不得因此开放Sandbox、Monty
+Socket、任意Header或Internal HTTP。完整边界见`../docs/design/21-web-tools/`。
 
 新增横切能力时遵循：
 
@@ -460,6 +466,8 @@ alembic upgrade head
 | CRUD | `/api/v1/ui-tools` | 是；企业管理员 |
 | GET | `/api/v1/tools` | 企业管理员；无 DB 时跳过动态 UI 工具 |
 | GET | `/api/v1/global-settings` | 企业管理员；返回安全白名单，只读 |
+| GET/PUT | `/api/v1/global-settings/web-search` | 企业管理员；读取或保存唯一Web Search配置，密钥只返回掩码 |
+| POST | `/api/v1/global-settings/web-search/test` | 企业管理员；测试未保存固定Provider草稿，不返回正文 |
 | GET/POST | `/api/v1/llm-models/catalog`、`/api/v1/llm-models/catalog/refresh` | 是；企业管理员查询或刷新 |
 | GET/POST | `/api/v1/context-test-scenarios` | 是；企业管理员按当前模型预算创建测试会话 |
 | GET/POST | `/api/v1/uploads/capabilities`、`/api/v1/uploads` | 否/否；后端仍执行用户与文件限制校验 |
@@ -479,7 +487,7 @@ SSE 协议：[`../docs/guides/sse-protocol.md`](../docs/guides/sse-protocol.md)�
    - 多入口共享组装 → `api/v1/deps.py`（变化量留在入口，上下文在 `_build_*` 内统一解包）
 1. 包名 **`deep_agent`**，启动 `deep_agent.main:app`（非 `app.main`）
 2. 扩展优先走路径注册，避免改 `runner.py` 核心
-3. 工具包命名：`builtin:general` \| `builtin:sandbox` \| `builtin:code-mode` \| `mcp:<name>` \| `ui:<package>`；一个包严格包装一个 Toolset，Agent 按包选择，工具协议名不随包编码变化。Skill 使用独立 `agents.skills`，`runtime:*`系统工具不得塞回 ToolPackage
+3. 工具包命名：`builtin:general` \| `builtin:sandbox` \| `builtin:code-mode` \| `builtin:web` \| `mcp:<name>` \| `ui:<package>`；一个包严格包装一个 Toolset，Agent 按包选择，工具协议名不随包编码变化。Skill 使用独立 `agents.skills`，`runtime:*`系统工具不得塞回 ToolPackage
 4. 会话`session_id`全局唯一，新会话必须有明确`agent_id + user_id`；App/Space可空且不参与当前授权
 5. 同Session进程内用`SessionStore.lock()`串行；Sequence由Session行和`next_sequence`在短事务分配
 6. 配置保存先完成 Schema/引用校验，再进入写事务；一次 API 业务变更不要串联多个各自提交的 Store `_write()`。MCP 检测等外部 I/O 先基于候选配置执行，再把配置与检测快照一次性提交。模型目录联网、解析和完整校验必须在事务前完成，随后单事务全量替换；模型配置保存不得隐式联网。

@@ -64,7 +64,10 @@ test("Agent 是配置中心默认页且全局配置位于系统设置分组", ()
     templateHtml,
     /class="panel active global-settings-panel" id="panel-global-settings"/,
   );
-  assert.match(templateHtml, /当前页面只读；修改环境变量并重启 DeepAgent 后生效/);
+  assert.match(templateHtml, /data-global-settings-view="web-search"/);
+  assert.match(templateHtml, /data-global-settings-view="runtime"/);
+  assert.match(templateHtml, /管理 DeepAgent 的系统级业务配置和运行设置/);
+  assert.doesNotMatch(templateHtml, /当前页面只读|只读标签/);
   assert.doesNotMatch(templateHtml, /agentMaxRequests|max_requests|最大请求次数（可选）/);
   assert.doesNotMatch(indexHtml, /data-tab="auxiliary-models"|辅助模型|辅助工具/);
   assert.ok(
@@ -75,6 +78,39 @@ test("Agent 是配置中心默认页且全局配置位于系统设置分组", ()
     indexHtml.indexOf('data-tab="global-settings"') <
       indexHtml.indexOf('data-tab="database-connection"'),
   );
+});
+
+test("Web Search 配置采用两个显式模式并列出原生 Provider", () => {
+  assert.match(templateHtml, /value="native" checked/);
+  assert.match(templateHtml, /value="provider"/);
+  assert.match(templateHtml, /DeepSeek、OpenAI、Anthropic Claude、Google Gemini 和 OpenRouter/);
+  assert.match(templateHtml, /Kimi 请选择“指定 Provider”/);
+  assert.doesNotMatch(templateHtml, /Web Fetch/);
+  assert.match(templateHtml, /id="testWebSearchBtn"/);
+  assert.match(templateHtml, /id="saveWebSearchBtn"/);
+});
+
+test("不同搜索 Provider 只生成必要配置", () => {
+  const ui = loadGlobalSettingsUi();
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(ui.buildPayload({ mode: "native" }))),
+    { version: 1, value: { mode: "native" } },
+  );
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(ui.buildPayload({ mode: "provider", provider: "deepseek", model: "", apiKey: "secret" }))),
+    { version: 1, value: { mode: "provider", provider: "deepseek", model: "deepseek-v4-flash", api_key: "secret" } },
+  );
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(ui.buildPayload({ mode: "provider", provider: "tavily", model: "ignored", apiKey: "key" }))),
+    { version: 1, value: { mode: "provider", provider: "tavily", api_key: "key" } },
+  );
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(ui.buildPayload({ mode: "provider", provider: "duckduckgo", model: "ignored", apiKey: "ignored" }))),
+    { version: 1, value: { mode: "provider", provider: "duckduckgo" } },
+  );
+  assert.equal(ui.providerState("kimi").requiresModel, true);
+  assert.equal(ui.providerState("exa").requiresModel, false);
+  assert.equal(ui.providerState("duckduckgo").requiresKey, false);
 });
 
 test("全局配置列表展示值、单位、环境变量和来源", () => {

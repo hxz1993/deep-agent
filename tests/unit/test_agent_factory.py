@@ -321,6 +321,23 @@ class ToolsetAssemblyTests(unittest.TestCase):
             [general],
         )
 
+    def test_web_toolset_is_only_injected_for_explicit_runtime_selection(self) -> None:
+        registry = build_registry()
+        web_toolset = object()
+
+        self.assertEqual(
+            _toolsets_for_spec(registry, _spec(capabilities=[])),
+            [],
+        )
+        self.assertEqual(
+            _toolsets_for_spec(
+                registry,
+                _spec(capabilities=["builtin:web"]),
+                web_toolset=web_toolset,
+            ),
+            [web_toolset],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

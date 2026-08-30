@@ -6,6 +6,8 @@ from datetime import datetime, timezone
 from pydantic_ai.messages import (
     ModelRequest,
     ModelResponse,
+    NativeToolCallPart,
+    NativeToolReturnPart,
     NativeToolSearchCallPart,
     NativeToolSearchReturnPart,
     RetryPromptPart,
@@ -13,6 +15,7 @@ from pydantic_ai.messages import (
     ThinkingPart,
     ThinkingPartDelta,
     ToolCallPart,
+    ToolReturnPart,
     ToolSearchCallPart,
     ToolSearchReturnPart,
     UserPromptPart,
@@ -44,6 +47,47 @@ class AgentEventsTests(unittest.TestCase):
             NativeToolSearchReturnPart(content={"tools": []}, tool_call_id="native"),
         ):
             self.assertEqual(events.map_part(part)["source"], "tool_search")
+
+    def test_native_web_search_sse_records_execution_and_provider(self) -> None:
+        call = NativeToolCallPart(
+            "web_search",
+            {"query": "DeepAgent"},
+            "web-1",
+            provider_name="deepseek",
+        )
+        result = NativeToolReturnPart(
+            "web_search",
+            {"sources": [{"url": "https://example.com"}]},
+            "web-1",
+            provider_name="deepseek",
+        )
+
+        for payload in (events.map_part(call), events.map_part(result)):
+            self.assertEqual(payload["source"], "web")
+            self.assertEqual(payload["execution"], "native")
+            self.assertEqual(payload["provider"], "deepseek")
+
+    def test_local_web_fetch_sse_records_safe_audit_metadata(self) -> None:
+        part = ToolReturnPart(
+            "web_fetch",
+            {"url": "https://example.com", "content": "body"},
+            "fetch-1",
+            metadata={
+                "web_fetch": {
+                    "mode": "local",
+                    "elapsed_ms": 12,
+                    "truncated": False,
+                },
+                "sources": [{"url": "https://example.com", "title": "Example"}],
+            },
+        )
+
+        payload = events.map_part(part)
+
+        self.assertEqual(payload["source"], "web")
+        self.assertEqual(payload["execution"], "local")
+        self.assertEqual(payload["web"]["elapsed_ms"], 12)
+        self.assertEqual(payload["sources"][0]["url"], "https://example.com")
 
     def test_conversation_projection_merges_thinking_text_and_tool_pair(self) -> None:
         from pydantic_ai.messages import ToolReturnPart

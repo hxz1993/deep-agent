@@ -336,6 +336,16 @@ def _apply_result(
         return
     item.outcome = outcome
     item.artifacts = _artifacts(part)
+    metadata = part.get("metadata")
+    if item.tool_name in {"web_search", "web_fetch"} and isinstance(metadata, Mapping):
+        web_audit = metadata.get(item.tool_name)
+        sources = metadata.get("sources")
+        web_metadata = dict(item.metadata or {})
+        if isinstance(web_audit, Mapping):
+            web_metadata[item.tool_name] = dict(web_audit)
+        if isinstance(sources, list):
+            web_metadata["sources"] = sources
+        item.metadata = web_metadata or None
 
 
 def _artifacts(part: Mapping[str, Any]) -> list[ConversationArtifact]:

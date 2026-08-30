@@ -43,7 +43,9 @@ tests/
 | --- | --- |
 | `test_agent_max_requests.py` | 全局 request 上限、旧 Agent 字段 422 兼容提示 |
 | `test_code_mode.py` | Hybrid Code Mode 装配、MCP 双通道、Monty 调用、文件变量与脱敏 |
-| `test_global_settings.py` | 全局配置安全白名单、来源和企业管理员只读接口 |
+| `test_global_settings.py` | 运行设置安全白名单、Web Search唯一配置、六Provider校验、Key掩码/保留和草稿测试 |
+| `test_web_tools.py` | `builtin:web`目录、显式注入、固定Provider无降级及SSRF-safe Fetch边界 |
+| `test_global_settings_migration_dialects.py` | Alembic 012三方言DDL与默认配置种子 |
 | `test_console_admin_auth.py` | 企业管理员放行、普通用户与固定admin拒绝、401/503、凭证缓存、管理路由审计和运行接口开放边界 |
 | `test_builtin_mcp_config.py` | builtin MCP 配置规范化 |
 | `test_database_url_resolution.py` | DSN 构建 |
@@ -62,7 +64,7 @@ tests/
 | `test_attachment_extractors.py` | 文本编码、DOCX/XLSX 结构读取、分页与 Office 安全 |
 | `test_file_tools.py` | 附件与 Skill统一文件工具的来源参数、权限、Run缓存、single-flight、分页和多模态返回 |
 | `test_tool_package_registry.py` | ToolPackage Registry 的显式整包选择和空列表语义 |
-| `test_sqlite_bootstrap.py` | Alembic 001～011结构、007→008会话清空、008→009辅助表清理、009→010资源启停清理、010→011模型启停恢复及完整往返、Provider迁移与配置保留 |
+| `test_sqlite_bootstrap.py` | Alembic 001～012结构、007→008会话清空、008→009辅助表清理、009→010资源启停清理、010→011模型启停、011→012全局配置及完整往返、Provider配置保留 |
 | `test_*_migration_dialects.py` | 各数据迁移在SQLite、MySQL和PostgreSQL上的DDL或JSON清理逻辑 |
 | `test_tool_package_migration_dialects.py` | SQLite、MySQL、PostgreSQL 的 002 DDL 分支 |
 | `test_runtime_dependencies.py` | Pydantic AI/Harness、OpenAI/aiohttp/deepfos联合版本锁定与模型导入 |

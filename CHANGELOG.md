@@ -3,6 +3,17 @@
 本文件记录 DeepAgent 的产品版本变化，按新版本到旧版本排列。当前代码版本以
 `deep_agent.__version__` 为准；数据库结构版本以 Alembic head 为准，两者互不替代。
 
+## v0.6.5
+
+- 新增默认不关联的`builtin:web`，固定包含`web_search`与`web_fetch`；只有Agent显式关联后才注入，
+  Internal HTTP、`execute_python`联网和Monty任意Socket/Shell仍保持关闭。
+- 新增全局唯一Web Search配置：明确选择当前模型原生搜索，或DeepSeek、Kimi、Tavily、Exa、
+  You.com、DuckDuckGo之一；不做隐式降级，密钥读取只返回掩码与是否已配置。
+- 复用Pydantic AI 2.35.1的原生WebSearch、DuckDuckGo/Tavily与SSRF-safe WebFetch，复用Harness
+  0.26.0的Exa/You.com，补充DeepSeek Responses与Kimi `$web_search`薄适配。
+- Alembic`012`增加通用`global_settings`表并初始化`web_search={"mode":"native"}`；配置备份与
+  Console全局配置同步覆盖新结构，Chat、SSE、History和Event Store协议保持不变。
+
 ## v0.6.4
 
 - Alembic `011`为`llm_models`恢复非空、默认启用的`enabled`字段，升级时现有模型全部保持启用；

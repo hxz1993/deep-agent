@@ -22,6 +22,7 @@ from deep_agent.db.models import Base
 
 
 CONFIG_TABLES = (
+    "global_settings",
     "llm_providers",
     "llm_models",
     "model_catalog",
@@ -35,7 +36,7 @@ SESSION_TABLES = (
     "chat_sessions",
     "chat_session_events",
 )
-CURRENT_SCHEMA_REVISION = "011"
+CURRENT_SCHEMA_REVISION = "012"
 ENVIRONMENT_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
 BACKUP_SCOPE_SCHEMA_VERSION = "1.0"
 
@@ -237,6 +238,7 @@ async def _clear_seed_configuration(engine: AsyncEngine) -> None:
         "model_catalog",
         "llm_models",
         "llm_providers",
+        "global_settings",
     )
     async with engine.begin() as connection:
         for table_name in delete_order:

@@ -15,6 +15,7 @@ from deep_agent.db.models import (
     Base,
     ChatSession,
     ChatSessionEvent,
+    GlobalSetting,
     LlmModel,
     LlmProvider,
     McpServer,
@@ -54,13 +55,13 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
 
             self.assertEqual(
                 result.path.name,
-                "deep-agent-config-test-v011-20260723-131415.db",
+                "deep-agent-config-test-v012-20260723-131415.db",
             )
             self.assertEqual(
                 [path.resolve() for path in (output_root / "test").iterdir()],
                 [result.path.resolve()],
             )
-            self.assertEqual(result.revision, "011")
+            self.assertEqual(result.revision, "012")
             self.assertEqual(result.row_counts["agents"], 1)
             self.assertEqual(result.row_counts["chat_sessions"], 0)
             self.assertEqual(result.row_counts["chat_session_events"], 0)
@@ -82,7 +83,7 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                     connection.execute(
                         "SELECT version_num FROM alembic_version"
                     ).fetchone(),
-                    ("011",),
+                    ("012",),
                 )
                 self.assertEqual(
                     connection.execute(
@@ -155,12 +156,19 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                     connection.execute("SELECT COUNT(*) FROM chat_session_events").fetchone(),
                     (0,),
                 )
+                web_setting = connection.execute(
+                    "SELECT key, value, version FROM global_settings"
+                ).fetchone()
+                self.assertIsNotNone(web_setting)
+                self.assertEqual(web_setting[0], "web_search")
+                self.assertEqual(json.loads(str(web_setting[1])), {"mode": "native"})
+                self.assertEqual(web_setting[2], 1)
                 self.assertEqual(
                     connection.execute(
                         "SELECT environment, source_dialect, alembic_revision, "
                         "git_commit FROM _backup_info"
                     ).fetchone(),
-                    ("test", "sqlite", "011", "abc123"),
+                    ("test", "sqlite", "012", "abc123"),
                 )
                 scope_manifest = json.loads(
                     str(
@@ -255,8 +263,16 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                 )
                 await connection.execute(
                     text(
-                        "INSERT INTO alembic_version (version_num) VALUES ('011')"
+                        "INSERT INTO alembic_version (version_num) VALUES ('012')"
                     )
+                )
+                await connection.execute(
+                    insert(GlobalSetting.__table__),
+                    {
+                        "key": "web_search",
+                        "value": {"mode": "native"},
+                        "version": 1,
+                    },
                 )
                 await connection.execute(
                     insert(LlmProvider.__table__),

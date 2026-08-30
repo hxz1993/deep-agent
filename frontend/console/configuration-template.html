@@ -7,20 +7,100 @@
     </div>
     <div class="toast hidden" id="toast"></div>
 
-    <!-- Read-only global settings panel -->
+    <!-- Global settings panel -->
     <section class="panel global-settings-panel" id="panel-global-settings">
       <div class="panel-toolbar">
         <div>
           <h2>全局配置</h2>
-          <p class="panel-subtitle">当前页面只读；修改环境变量并重启 DeepAgent 后生效。</p>
+          <p class="panel-subtitle">管理 DeepAgent 的系统级业务配置和运行设置。</p>
         </div>
-        <label class="agent-search global-settings-search"><i data-lucide="search"></i><input type="search" id="globalSettingsSearch" placeholder="搜索配置项或环境变量" autocomplete="off" /></label>
       </div>
-      <div class="global-settings-notice">
-        仅展示允许公开的运行配置；数据库连接、密钥、Token、代理地址和本地路径不会出现在此页面。
-      </div>
-      <div class="global-settings-groups" id="globalSettingsGroups" aria-live="polite">
-        <div class="global-settings-state">正在加载全局配置…</div>
+      <div class="global-settings-workspace">
+        <nav class="global-settings-nav" aria-label="全局配置分类">
+          <button class="active" type="button" data-global-settings-view="web-search"><i data-lucide="search"></i><span>Web Search</span></button>
+          <button type="button" data-global-settings-view="runtime"><i data-lucide="settings-2"></i><span>运行设置</span></button>
+        </nav>
+        <div class="global-settings-content">
+          <section class="global-settings-view active" id="globalSettingsWebSearch" data-global-settings-panel="web-search">
+            <div class="global-settings-view-heading">
+              <h3>Web Search</h3>
+              <p>配置 Agent 使用当前模型的原生搜索能力，或指定一个固定的搜索 Provider。</p>
+            </div>
+            <form class="web-search-settings-form" id="webSearchSettingsForm" novalidate>
+              <fieldset class="web-search-mode-fieldset">
+                <legend>搜索方式</legend>
+                <div class="web-search-mode-grid">
+                  <label class="web-search-mode-card">
+                    <input type="radio" name="webSearchMode" value="native" checked />
+                    <span class="web-search-mode-dot" aria-hidden="true"></span>
+                    <span><strong>当前模型</strong><small>使用 Agent 当前模型提供的原生搜索能力。</small></span>
+                  </label>
+                  <label class="web-search-mode-card">
+                    <input type="radio" name="webSearchMode" value="provider" />
+                    <span class="web-search-mode-dot" aria-hidden="true"></span>
+                    <span><strong>指定 Provider</strong><small>所有 Agent 通过一个固定搜索服务执行搜索。</small></span>
+                  </label>
+                </div>
+              </fieldset>
+
+              <div class="web-search-mode-detail" data-web-search-detail="native">
+                <strong>当前模型搜索</strong>
+                <p>无需额外配置。当前支持 DeepSeek、OpenAI、Anthropic Claude、Google Gemini 和 OpenRouter；实际仍以具体模型能力为准。Kimi 请选择“指定 Provider”。</p>
+              </div>
+
+              <div class="web-search-mode-detail hidden" data-web-search-detail="provider">
+                <label class="field">
+                  <span>Provider</span>
+                  <select id="webSearchProvider" name="provider">
+                    <option value="deepseek">DeepSeek</option>
+                    <option value="kimi">Kimi</option>
+                    <option value="tavily">Tavily</option>
+                    <option value="exa">Exa</option>
+                    <option value="you">You.com</option>
+                    <option value="duckduckgo">DuckDuckGo</option>
+                  </select>
+                </label>
+                <label class="field" data-web-search-field="model">
+                  <span>模型</span>
+                  <input id="webSearchModel" name="model" type="text" list="webSearchModelOptions" autocomplete="off" />
+                  <datalist id="webSearchModelOptions"></datalist>
+                </label>
+                <label class="field" data-web-search-field="api-key">
+                  <span>API Key</span>
+                  <div class="web-search-secret-row">
+                    <input id="webSearchApiKey" name="apiKey" type="password" autocomplete="new-password" />
+                    <button class="btn icon-btn" id="testWebSearchBtn" type="button" title="测试连接" aria-label="测试连接"><i data-lucide="plug-zap"></i></button>
+                  </div>
+                  <small id="webSearchApiKeyHint">输入 Provider 的 API Key。</small>
+                </label>
+                <div class="web-search-keyless-test hidden" data-web-search-field="keyless-test">
+                  <button class="btn" id="testWebSearchKeylessBtn" type="button"><i data-lucide="plug-zap"></i>测试连接</button>
+                </div>
+              </div>
+
+              <footer class="web-search-settings-actions">
+                <button class="btn" id="cancelWebSearchBtn" type="button">取消</button>
+                <button class="btn primary" id="saveWebSearchBtn" type="submit">保存</button>
+              </footer>
+            </form>
+          </section>
+
+          <section class="global-settings-view" id="globalSettingsRuntime" data-global-settings-panel="runtime">
+            <div class="global-settings-runtime-toolbar">
+              <div class="global-settings-view-heading">
+                <h3>运行设置</h3>
+                <p>查看当前 DeepAgent 进程实际使用的安全运行参数。</p>
+              </div>
+              <label class="agent-search global-settings-search"><i data-lucide="search"></i><input type="search" id="globalSettingsSearch" placeholder="搜索配置项或环境变量" autocomplete="off" /></label>
+            </div>
+            <div class="global-settings-notice">
+              数据库连接、密钥、Token、代理地址和本地完整路径不会在此处展示。
+            </div>
+            <div class="global-settings-groups" id="globalSettingsGroups" aria-live="polite">
+              <div class="global-settings-state">正在加载运行设置…</div>
+            </div>
+          </section>
+        </div>
       </div>
     </section>
 

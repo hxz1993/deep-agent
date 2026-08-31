@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import ssl
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -137,25 +139,236 @@ class WebFetchSafetyTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result.return_value["untrusted_external_content"])
         self.assertTrue(result.metadata["web_content_untrusted"])
         self.assertTrue(result.metadata["web_fetch"]["truncated"])
+        self.assertEqual(result.metadata["web_fetch"]["attempts"], 1)
+        self.assertFalse(result.metadata["web_fetch"]["retried"])
+        self.assertIsNone(result.metadata["web_fetch"]["retry_reason"])
+        self.assertEqual(result.metadata["web_fetch"]["retry_wait_ms"], 0)
         self.assertEqual(
             result.metadata["sources"][0]["url"],
             "https://example.com/page",
         )
 
     async def test_transport_retry_becomes_terminal_tool_feedback(self) -> None:
+        fetch_calls = 0
+
         async def fake_fetch(url: str):
+            nonlocal fetch_calls
+            fetch_calls += 1
             request = httpx2.Request("GET", url)
             try:
                 raise httpx2.ConnectTimeout("proxy timeout", request=request)
             except httpx2.ConnectTimeout as cause:
                 raise ModelRetry("Unable to fetch URL") from cause
 
-        with patch(
-            "deep_agent.web.runtime.web_fetch_tool",
-            return_value=Tool(fake_fetch),
+        with (
+            patch(
+                "deep_agent.web.runtime.web_fetch_tool",
+                return_value=Tool(fake_fetch),
+            ),
+            patch(
+                "deep_agent.web.runtime.asyncio.sleep",
+                new=AsyncMock(),
+            ) as sleep,
         ):
             with self.assertRaisesRegex(ToolFailed, "timed out"):
                 await _web_fetch_tool().function("https://example.com/page")
+
+        self.assertEqual(fetch_calls, 2)
+        sleep.assert_awaited_once_with(0.5)
+
+    async def test_transient_timeout_retries_once_then_records_success(self) -> None:
+        fetch_calls = 0
+
+        async def fake_fetch(url: str):
+            nonlocal fetch_calls
+            fetch_calls += 1
+            if fetch_calls == 1:
+                request = httpx2.Request("GET", url)
+                try:
+                    raise httpx2.ReadTimeout("read timeout", request=request)
+                except httpx2.ReadTimeout as cause:
+                    raise ModelRetry("Unable to fetch URL") from cause
+            return {"url": url, "title": "Recovered", "content": "body"}
+
+        with (
+            patch(
+                "deep_agent.web.runtime.web_fetch_tool",
+                return_value=Tool(fake_fetch),
+            ),
+            patch(
+                "deep_agent.web.runtime.asyncio.sleep",
+                new=AsyncMock(),
+            ) as sleep,
+        ):
+            result = await _web_fetch_tool().function("https://example.com/page")
+
+        self.assertEqual(fetch_calls, 2)
+        sleep.assert_awaited_once_with(0.5)
+        self.assertEqual(result.metadata["web_fetch"]["attempts"], 2)
+        self.assertTrue(result.metadata["web_fetch"]["retried"])
+        self.assertEqual(result.metadata["web_fetch"]["retry_reason"], "timeout")
+        self.assertEqual(result.metadata["web_fetch"]["retry_wait_ms"], 500)
+
+    async def test_retryable_http_status_honors_short_retry_after(self) -> None:
+        fetch_calls = 0
+
+        async def fake_fetch(url: str):
+            nonlocal fetch_calls
+            fetch_calls += 1
+            if fetch_calls == 1:
+                request = httpx2.Request("GET", url)
+                response = httpx2.Response(
+                    503,
+                    request=request,
+                    headers={"Retry-After": "1"},
+                )
+                try:
+                    raise httpx2.HTTPStatusError(
+                        "Service unavailable",
+                        request=request,
+                        response=response,
+                    )
+                except httpx2.HTTPStatusError as cause:
+                    raise ModelRetry("Unable to fetch URL") from cause
+            return {"url": url, "title": "Recovered", "content": "body"}
+
+        with (
+            patch(
+                "deep_agent.web.runtime.web_fetch_tool",
+                return_value=Tool(fake_fetch),
+            ),
+            patch(
+                "deep_agent.web.runtime.asyncio.sleep",
+                new=AsyncMock(),
+            ) as sleep,
+        ):
+            result = await _web_fetch_tool().function("https://example.com/page")
+
+        self.assertEqual(fetch_calls, 2)
+        sleep.assert_awaited_once_with(1.0)
+        self.assertEqual(result.metadata["web_fetch"]["retry_reason"], "http_503")
+        self.assertEqual(result.metadata["web_fetch"]["retry_wait_ms"], 1000)
+
+    async def test_non_retryable_http_status_fails_without_retry(self) -> None:
+        fetch_calls = 0
+
+        async def fake_fetch(url: str):
+            nonlocal fetch_calls
+            fetch_calls += 1
+            request = httpx2.Request("GET", url)
+            response = httpx2.Response(404, request=request)
+            try:
+                raise httpx2.HTTPStatusError(
+                    "Not found",
+                    request=request,
+                    response=response,
+                )
+            except httpx2.HTTPStatusError as cause:
+                raise ModelRetry("Unable to fetch URL") from cause
+
+        with (
+            patch(
+                "deep_agent.web.runtime.web_fetch_tool",
+                return_value=Tool(fake_fetch),
+            ),
+            patch(
+                "deep_agent.web.runtime.asyncio.sleep",
+                new=AsyncMock(),
+            ) as sleep,
+        ):
+            with self.assertRaisesRegex(ToolFailed, "HTTP 404"):
+                await _web_fetch_tool().function("https://example.com/missing")
+
+        self.assertEqual(fetch_calls, 1)
+        sleep.assert_not_awaited()
+
+    async def test_long_retry_after_fails_without_blocking_run(self) -> None:
+        fetch_calls = 0
+
+        async def fake_fetch(url: str):
+            nonlocal fetch_calls
+            fetch_calls += 1
+            request = httpx2.Request("GET", url)
+            response = httpx2.Response(
+                429,
+                request=request,
+                headers={"Retry-After": "30"},
+            )
+            try:
+                raise httpx2.HTTPStatusError(
+                    "Rate limited",
+                    request=request,
+                    response=response,
+                )
+            except httpx2.HTTPStatusError as cause:
+                raise ModelRetry("Unable to fetch URL") from cause
+
+        with (
+            patch(
+                "deep_agent.web.runtime.web_fetch_tool",
+                return_value=Tool(fake_fetch),
+            ),
+            patch(
+                "deep_agent.web.runtime.asyncio.sleep",
+                new=AsyncMock(),
+            ) as sleep,
+        ):
+            with self.assertRaisesRegex(ToolFailed, "HTTP 429"):
+                await _web_fetch_tool().function("https://example.com/page")
+
+        self.assertEqual(fetch_calls, 1)
+        sleep.assert_not_awaited()
+
+    async def test_tls_certificate_failure_is_not_retried(self) -> None:
+        fetch_calls = 0
+
+        async def fake_fetch(_url: str):
+            nonlocal fetch_calls
+            fetch_calls += 1
+            try:
+                raise ssl.SSLCertVerificationError(1, "certificate verify failed")
+            except ssl.SSLCertVerificationError as cause:
+                raise ModelRetry("Unable to fetch URL") from cause
+
+        with (
+            patch(
+                "deep_agent.web.runtime.web_fetch_tool",
+                return_value=Tool(fake_fetch),
+            ),
+            patch(
+                "deep_agent.web.runtime.asyncio.sleep",
+                new=AsyncMock(),
+            ) as sleep,
+        ):
+            with self.assertRaisesRegex(ToolFailed, "TLS certificate"):
+                await _web_fetch_tool().function("https://example.com/page")
+
+        self.assertEqual(fetch_calls, 1)
+        sleep.assert_not_awaited()
+
+    async def test_cancellation_propagates_without_retry(self) -> None:
+        fetch_calls = 0
+
+        async def fake_fetch(_url: str):
+            nonlocal fetch_calls
+            fetch_calls += 1
+            raise asyncio.CancelledError
+
+        with (
+            patch(
+                "deep_agent.web.runtime.web_fetch_tool",
+                return_value=Tool(fake_fetch),
+            ),
+            patch(
+                "deep_agent.web.runtime.asyncio.sleep",
+                new=AsyncMock(),
+            ) as sleep,
+        ):
+            with self.assertRaises(asyncio.CancelledError):
+                await _web_fetch_tool().function("https://example.com/page")
+
+        self.assertEqual(fetch_calls, 1)
+        sleep.assert_not_awaited()
 
     async def test_non_transport_retry_keeps_upstream_retry_semantics(self) -> None:
         async def fake_fetch(_url: str):

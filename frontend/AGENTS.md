@@ -8,6 +8,10 @@ Console 图标统一使用仓库内 `frontend/vendor/lucide.min.js` 的线性 SV
 `data-lucide`，动态插入 DOM 的图标必须在插入后调用 `window.lucide.createIcons()`；不要重新
 引入 emoji、字符图标、外部 CDN 或第二套图标库。
 
+修改 Console 页面结构、控件或样式前，必须先读
+[`../docs/guides/console-ui-guidelines.md`](../docs/guides/console-ui-guidelines.md)，并在当前页面和相邻页面中
+找到可复用模式。没有独立层级、滚动、选择、状态或安全边界的字段组不得新增装饰性容器。
+
 ## Console UI 开发分支
 
 Bundled Console 与后端统一在 `feat-ruge-0803` 主开发分支维护，不再保留独立 UI worktree。
@@ -108,7 +112,7 @@ Agent 独立编辑页的系统提示词标题栏显示“字符数 / 预估 Toke
 - 控制台请求固定使用当前同源后端。本地联调直接访问本机 `8000/console/`，不在浏览器中切换后端地址。
 - SSE 解析、HITL 参数归一化和 Schema 文本校验分别位于 `protocol.js`、`hitl.js`、`schema-editor.js`，可由 Node 内置测试独立验证。
 - 控制台测试：`node --test tests/frontend/console/*.test.mjs`。
-- 配置中心按“Agent 设置 / 系统设置 / 辅助资源”分组；系统设置包含全局配置和数据库连接。全局配置内用160px分栏承载Web Search和运行设置：Web Search只展示当前模型/指定Provider及当前Provider必填字段，Fetch无配置不展示；运行设置沿用原安全白名单。数据库连接页通过 `GET /api/v1/database-info` 只展示类型、主机、端口、库名或 SQLite 文件名，不返回凭据、连接参数或本地完整路径。会话标题使用首轮实际模型并通过`session/title`事件更新，不提供独立模型入口或轮询刷新。
+- 配置中心按“Agent 设置 / 系统设置 / 辅助资源”分组；系统设置包含全局配置和数据库连接。全局配置在同一页面上下排列Web Search和运行设置：Web Search默认只回显一个当前Provider选择，点击编辑后在标准Console弹窗中维护当前模型/指定Provider及当前Provider必填字段；Provider与模型同排并使用Console自定义下拉，DeepSeek/Kimi可选择沿用同类型会话Provider或单独配置API Key；条件字段直接落在弹窗正文，不增加装饰性配置卡片；Fetch无配置不展示；运行设置沿用原安全白名单。数据库连接页通过 `GET /api/v1/database-info` 只展示类型、主机、端口、库名或 SQLite 文件名，不返回凭据、连接参数或本地完整路径。会话标题使用首轮实际模型并通过`session/title`事件更新，不提供独立模型入口或轮询刷新。
 - “内置工具”位于模型之后，在同一目录中分别展示代码随版本发布、由Agent显式配置的工具包，
   以及运行时自动注入的系统工具。页面没有注册、编辑、删除、全局启停或重新加载入口；系统工具
   也不得进入 Agent 能力勾选。

@@ -122,6 +122,7 @@ class GlobalSettingsBuilderTests(unittest.TestCase):
 class GlobalSettingsApiTests(unittest.TestCase):
     def setUp(self) -> None:
         stores, self.engine, session_factory = make_sqlite_stores_sync()
+        self.stores = stores
         init_context(
             AppContext.for_testing(
                 stores=stores,
@@ -178,6 +179,9 @@ class GlobalSettingsApiTests(unittest.TestCase):
                 "model": None,
                 "api_key_set": False,
                 "api_key_masked": None,
+                "credential_source": None,
+                "llm_provider_id": None,
+                "llm_provider_name": None,
             },
         )
 
@@ -265,8 +269,74 @@ class GlobalSettingsApiTests(unittest.TestCase):
                 "model": None,
                 "api_key_set": False,
                 "api_key_masked": None,
+                "credential_source": None,
+                "llm_provider_id": None,
+                "llm_provider_name": None,
             },
         )
+
+    def test_deepseek_can_reuse_llm_provider_without_copying_its_key(self) -> None:
+        headers = {"user": "enterprise-admin"}
+        llm_provider = self.client.post(
+            "/api/v1/llm-providers",
+            headers=headers,
+            json={
+                "name": "DeepSeek Session",
+                "provider_type": "deepseek",
+                "use_default_base_url": True,
+                "api_key": "shared-deepseek-secret",
+            },
+        )
+        self.assertEqual(llm_provider.status_code, 201, llm_provider.text)
+        provider_id = llm_provider.json()["id"]
+
+        saved = self.client.put(
+            "/api/v1/global-settings/web-search",
+            headers=headers,
+            json={
+                "version": 1,
+                "value": {
+                    "mode": "provider",
+                    "provider": "deepseek",
+                    "model": "deepseek-v4-flash",
+                    "credential_source": "llm_provider",
+                    "llm_provider_id": provider_id,
+                },
+            },
+        )
+        self.assertEqual(saved.status_code, 200, saved.text)
+        value = saved.json()["value"]
+        self.assertEqual(value["credential_source"], "llm_provider")
+        self.assertEqual(value["llm_provider_id"], provider_id)
+        self.assertEqual(value["llm_provider_name"], "DeepSeek Session")
+        self.assertTrue(value["api_key_set"])
+        self.assertIsNone(value["api_key_masked"])
+        self.assertNotIn("shared-deepseek-secret", saved.text)
+
+        stored = asyncio.run(self.stores.global_setting.get("web_search"))
+        self.assertEqual(stored.value["llm_provider_id"], provider_id)
+        self.assertNotIn("api_key", stored.value)
+
+    def test_reused_llm_provider_must_match_search_provider_type(self) -> None:
+        headers = {"user": "enterprise-admin"}
+        providers = self.client.get("/api/v1/llm-providers", headers=headers)
+        self.assertEqual(providers.status_code, 200, providers.text)
+        incompatible_id = providers.json()[0]["id"]
+        response = self.client.put(
+            "/api/v1/global-settings/web-search",
+            headers=headers,
+            json={
+                "version": 1,
+                "value": {
+                    "mode": "provider",
+                    "provider": "deepseek",
+                    "credential_source": "llm_provider",
+                    "llm_provider_id": incompatible_id,
+                },
+            },
+        )
+        self.assertEqual(response.status_code, 422, response.text)
+        self.assertIn("must be deepseek", response.text)
 
     def test_all_keyed_providers_validate_only_their_required_fields(self) -> None:
         headers = {"user": "enterprise-admin"}

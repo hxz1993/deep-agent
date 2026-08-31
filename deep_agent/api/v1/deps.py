@@ -244,7 +244,10 @@ async def _build_runner_from_spec(
                 raise WebSearchConfigurationError(
                     "Global settings store is unavailable"
                 )
-            web_config = await load_web_search_config(global_setting_store)
+            web_config = await load_web_search_config(
+                global_setting_store,
+                ctx.stores.llm_configuration,
+            )
             web_runtime = build_web_runtime(web_config)
         except WebSearchConfigurationError as exc:
             from deep_agent.core.exceptions import ToolPackageError

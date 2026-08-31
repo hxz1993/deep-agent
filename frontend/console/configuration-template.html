@@ -15,92 +15,33 @@
           <p class="panel-subtitle">管理 DeepAgent 的系统级业务配置和运行设置。</p>
         </div>
       </div>
-      <div class="global-settings-workspace">
-        <nav class="global-settings-nav" aria-label="全局配置分类">
-          <button class="active" type="button" data-global-settings-view="web-search"><i data-lucide="search"></i><span>Web Search</span></button>
-          <button type="button" data-global-settings-view="runtime"><i data-lucide="settings-2"></i><span>运行设置</span></button>
-        </nav>
-        <div class="global-settings-content">
-          <section class="global-settings-view active" id="globalSettingsWebSearch" data-global-settings-panel="web-search">
-            <div class="global-settings-view-heading">
+      <div class="global-settings-stack">
+        <section class="global-settings-section" id="globalSettingsWebSearch">
+          <div class="global-settings-section-heading">
+            <div class="global-settings-section-title">
+              <i data-lucide="globe-2"></i>
               <h3>Web Search</h3>
-              <p>配置 Agent 使用当前模型的原生搜索能力，或指定一个固定的搜索 Provider。</p>
+              <span class="global-settings-section-copy">配置 Agent 的搜索 Provider。</span>
             </div>
-            <form class="web-search-settings-form" id="webSearchSettingsForm" novalidate>
-              <fieldset class="web-search-mode-fieldset">
-                <legend>搜索方式</legend>
-                <div class="web-search-mode-grid">
-                  <label class="web-search-mode-card">
-                    <input type="radio" name="webSearchMode" value="native" checked />
-                    <span class="web-search-mode-dot" aria-hidden="true"></span>
-                    <span><strong>当前模型</strong><small>使用 Agent 当前模型提供的原生搜索能力。</small></span>
-                  </label>
-                  <label class="web-search-mode-card">
-                    <input type="radio" name="webSearchMode" value="provider" />
-                    <span class="web-search-mode-dot" aria-hidden="true"></span>
-                    <span><strong>指定 Provider</strong><small>所有 Agent 通过一个固定搜索服务执行搜索。</small></span>
-                  </label>
-                </div>
-              </fieldset>
-
-              <div class="web-search-mode-detail" data-web-search-detail="native">
-                <strong>当前模型搜索</strong>
-                <p>无需额外配置。当前支持 DeepSeek、OpenAI、Anthropic Claude、Google Gemini 和 OpenRouter；实际仍以具体模型能力为准。Kimi 请选择“指定 Provider”。</p>
-              </div>
-
-              <div class="web-search-mode-detail hidden" data-web-search-detail="provider">
-                <label class="field">
-                  <span>Provider</span>
-                  <select id="webSearchProvider" name="provider">
-                    <option value="deepseek">DeepSeek</option>
-                    <option value="kimi">Kimi</option>
-                    <option value="tavily">Tavily</option>
-                    <option value="exa">Exa</option>
-                    <option value="you">You.com</option>
-                    <option value="duckduckgo">DuckDuckGo</option>
-                  </select>
-                </label>
-                <label class="field" data-web-search-field="model">
-                  <span>模型</span>
-                  <input id="webSearchModel" name="model" type="text" list="webSearchModelOptions" autocomplete="off" />
-                  <datalist id="webSearchModelOptions"></datalist>
-                </label>
-                <label class="field" data-web-search-field="api-key">
-                  <span>API Key</span>
-                  <div class="web-search-secret-row">
-                    <input id="webSearchApiKey" name="apiKey" type="password" autocomplete="new-password" />
-                    <button class="btn icon-btn" id="testWebSearchBtn" type="button" title="测试连接" aria-label="测试连接"><i data-lucide="plug-zap"></i></button>
-                  </div>
-                  <small id="webSearchApiKeyHint">输入 Provider 的 API Key。</small>
-                </label>
-                <div class="web-search-keyless-test hidden" data-web-search-field="keyless-test">
-                  <button class="btn" id="testWebSearchKeylessBtn" type="button"><i data-lucide="plug-zap"></i>测试连接</button>
-                </div>
-              </div>
-
-              <footer class="web-search-settings-actions">
-                <button class="btn" id="cancelWebSearchBtn" type="button">取消</button>
-                <button class="btn primary" id="saveWebSearchBtn" type="submit">保存</button>
-              </footer>
-            </form>
-          </section>
-
-          <section class="global-settings-view" id="globalSettingsRuntime" data-global-settings-panel="runtime">
-            <div class="global-settings-runtime-toolbar">
-              <div class="global-settings-view-heading">
-                <h3>运行设置</h3>
-                <p>查看当前 DeepAgent 进程实际使用的安全运行参数。</p>
-              </div>
-              <label class="agent-search global-settings-search"><i data-lucide="search"></i><input type="search" id="globalSettingsSearch" placeholder="搜索配置项或环境变量" autocomplete="off" /></label>
+            <div class="global-settings-section-actions">
+              <span class="global-settings-summary-value" id="webSearchSummaryValue">会话原生搜索</span>
+              <button class="btn" id="openWebSearchSettingsBtn" type="button"><i data-lucide="pencil"></i>编辑</button>
             </div>
-            <div class="global-settings-notice">
-              数据库连接、密钥、Token、代理地址和本地完整路径不会在此处展示。
+          </div>
+        </section>
+
+        <section class="global-settings-section" id="globalSettingsRuntime">
+          <div class="global-settings-runtime-toolbar">
+            <div class="global-settings-section-title">
+              <i data-lucide="settings-2"></i>
+              <h3>运行设置</h3>
             </div>
-            <div class="global-settings-groups" id="globalSettingsGroups" aria-live="polite">
-              <div class="global-settings-state">正在加载运行设置…</div>
-            </div>
-          </section>
-        </div>
+            <label class="agent-search global-settings-search"><i data-lucide="search"></i><input type="search" id="globalSettingsSearch" placeholder="搜索配置项或环境变量" autocomplete="off" /></label>
+          </div>
+          <div class="global-settings-groups" id="globalSettingsGroups" aria-live="polite">
+            <div class="global-settings-state">正在加载运行设置…</div>
+          </div>
+        </section>
       </div>
     </section>
 
@@ -322,6 +263,106 @@
       </div>
     </section>
   </div>
+
+  <dialog class="modal console-detail-dialog web-search-settings-dialog" id="webSearchSettingsDialog">
+    <form class="web-search-settings-form" id="webSearchSettingsForm" novalidate>
+      <div class="modal-header">
+        <h3>编辑 Web Search</h3>
+        <button class="icon-action" id="closeWebSearchSettingsBtn" type="button" title="关闭" aria-label="关闭"><i data-lucide="x"></i></button>
+      </div>
+      <div class="modal-body web-search-settings-body">
+        <fieldset class="web-search-mode-fieldset">
+          <legend>搜索模式</legend>
+          <div class="web-search-mode-grid">
+            <label class="web-search-mode-card">
+              <input type="radio" name="webSearchMode" value="native" checked />
+              <span class="web-search-mode-dot" aria-hidden="true"></span>
+              <span><strong>会话原生搜索</strong><small>使用当前会话模型的原生搜索能力。</small></span>
+            </label>
+            <label class="web-search-mode-card">
+              <input type="radio" name="webSearchMode" value="provider" />
+              <span class="web-search-mode-dot" aria-hidden="true"></span>
+              <span><strong>指定 Provider</strong><small>使用固定搜索服务。</small></span>
+            </label>
+          </div>
+        </fieldset>
+
+        <div class="web-search-native-copy" data-web-search-detail="native">
+          <p>支持 DeepSeek、OpenAI、Anthropic Claude、Google Gemini 和 OpenRouter。</p>
+        </div>
+
+        <div class="web-search-provider-fields hidden" data-web-search-detail="provider">
+          <div class="web-search-provider-grid" id="webSearchProviderGrid">
+            <div class="field web-search-provider-field">
+              <span>Provider</span>
+              <div class="console-select" data-console-select="webSearchProvider">
+                <button class="console-select-trigger" id="webSearchProviderTrigger" type="button" aria-haspopup="listbox" aria-expanded="false">
+                  <span id="webSearchProviderLabel">DeepSeek</span><i data-lucide="chevron-down" aria-hidden="true"></i>
+                </button>
+                <div class="console-select-menu hidden" id="webSearchProviderMenu" role="listbox" aria-label="选择搜索 Provider"></div>
+                <select class="hidden" id="webSearchProvider" name="provider" tabindex="-1" aria-hidden="true">
+                  <option value="deepseek">DeepSeek</option>
+                  <option value="kimi">Kimi</option>
+                  <option value="tavily">Tavily</option>
+                  <option value="exa">Exa</option>
+                  <option value="you">You.com</option>
+                  <option value="duckduckgo">DuckDuckGo</option>
+                </select>
+              </div>
+            </div>
+            <div class="field" data-web-search-field="model">
+              <span>模型</span>
+              <div class="console-combobox" id="webSearchModelCombobox">
+                <input id="webSearchModel" name="model" type="text" autocomplete="off" />
+                <button class="console-combobox-toggle" id="webSearchModelToggle" type="button" title="选择模型" aria-label="选择模型" aria-expanded="false"><i data-lucide="chevron-down"></i></button>
+                <div class="console-select-menu hidden" id="webSearchModelMenu" role="listbox" aria-label="选择搜索模型"></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="web-search-credential-row" id="webSearchCredentialRow">
+            <div class="web-search-credential-source" data-web-search-field="credential-source" role="group" aria-label="凭据来源">
+              <strong>凭据</strong>
+              <div class="web-search-credential-options">
+                <label><input type="radio" name="webSearchCredentialSource" value="llm_provider" checked /><span>沿用 Provider</span></label>
+                <label><input type="radio" name="webSearchCredentialSource" value="api_key" /><span>单独 API Key</span></label>
+              </div>
+            </div>
+
+            <div class="field web-search-credential-value" data-web-search-field="llm-provider">
+              <div class="web-search-secret-row">
+                <div class="console-select" data-console-select="webSearchLlmProvider">
+                  <button class="console-select-trigger" id="webSearchLlmProviderTrigger" type="button" aria-haspopup="listbox" aria-expanded="false">
+                    <span id="webSearchLlmProviderLabel">请选择</span><i data-lucide="chevron-down" aria-hidden="true"></i>
+                  </button>
+                  <div class="console-select-menu hidden" id="webSearchLlmProviderMenu" role="listbox" aria-label="选择会话 Provider"></div>
+                  <select class="hidden" id="webSearchLlmProvider" name="llmProviderId" tabindex="-1" aria-hidden="true"></select>
+                </div>
+                <button class="btn icon-btn" id="testWebSearchLlmProviderBtn" type="button" title="测试连接" aria-label="测试连接"><i data-lucide="plug-zap"></i></button>
+              </div>
+            </div>
+
+            <div class="field web-search-credential-value hidden" data-web-search-field="api-key">
+              <span>API Key</span>
+              <div class="web-search-secret-row">
+                <input id="webSearchApiKey" name="apiKey" type="password" autocomplete="new-password" />
+                <button class="btn icon-btn" id="testWebSearchBtn" type="button" title="测试连接" aria-label="测试连接"><i data-lucide="plug-zap"></i></button>
+              </div>
+            </div>
+
+            <div class="web-search-keyless-test hidden" data-web-search-field="keyless-test">
+              <button class="btn" id="testWebSearchKeylessBtn" type="button"><i data-lucide="plug-zap"></i>测试连接</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <footer class="modal-footer">
+        <button class="btn" id="cancelWebSearchBtn" type="button">取消</button>
+        <button class="btn primary" id="saveWebSearchBtn" type="submit">保存</button>
+      </footer>
+    </form>
+  </dialog>
 
   <!-- Agent 独立编辑页：复用既有表单和保存契约，不再使用模态交互。 -->
   <dialog class="modal modal-agent agent-editor-page" id="agentModal">

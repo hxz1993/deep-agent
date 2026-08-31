@@ -166,6 +166,14 @@ textarea {
   box-shadow: 0 1px 4px color-mix(in srgb, var(--text) 8%, transparent);
 }
 
+.resource-btn .mcp-brand-icon {
+  color: var(--text-faint);
+  stroke: currentColor;
+  stroke-width: 12;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
 .console-top-actions {
   min-width: 0;
   justify-content: flex-end;

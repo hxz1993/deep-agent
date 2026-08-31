@@ -5,7 +5,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from deep_agent.web.settings import WebSearchProvider
+from deep_agent.web.settings import WebSearchCredentialSource, WebSearchProvider
 
 
 class WebSearchValueInput(BaseModel):
@@ -15,8 +15,10 @@ class WebSearchValueInput(BaseModel):
     provider: WebSearchProvider | None = None
     api_key: str | None = Field(default=None, max_length=8192)
     model: str | None = Field(default=None, max_length=191)
+    credential_source: WebSearchCredentialSource | None = None
+    llm_provider_id: str | None = Field(default=None, max_length=64)
 
-    @field_validator("api_key", "model")
+    @field_validator("api_key", "model", "llm_provider_id")
     @classmethod
     def normalize_optional_text(cls, value: str | None) -> str | None:
         if value is None:
@@ -38,6 +40,9 @@ class WebSearchValueResponse(BaseModel):
     model: str | None = None
     api_key_set: bool = False
     api_key_masked: str | None = None
+    credential_source: WebSearchCredentialSource | None = None
+    llm_provider_id: str | None = None
+    llm_provider_name: str | None = None
 
 
 class WebSearchSettingsResponse(BaseModel):

@@ -31,11 +31,17 @@ global_settings(key PK, value TEXT JSON, version SMALLINT, created_at, updated_a
 ```
 
 ```json
-{"mode":"provider","provider":"deepseek","api_key":"...","model":"deepseek-v4-flash"}
+{"mode":"provider","provider":"deepseek","credential_source":"api_key","api_key":"...","model":"deepseek-v4-flash"}
 ```
 
-`model`只用于DeepSeek/Kimi；DuckDuckGo没有Key；其他固定Provider只有Key。切换Provider时不复用
-旧Provider密钥。读接口只返回`api_key_set`与掩码；同Provider未重填Key时保留原值。
+```json
+{"mode":"provider","provider":"deepseek","credential_source":"llm_provider","llm_provider_id":"...","model":"deepseek-v4-flash"}
+```
+
+`model`只用于DeepSeek/Kimi；这两类模型供应商可选择复用一个同类型会话Provider的凭据，或单独
+配置搜索API Key。复用时JSON只保存`llm_provider_id`，运行时从受信数据库记录读取Key，不复制密钥。
+DuckDuckGo没有Key；其他固定Provider只有Key。切换Provider时不复用旧Provider密钥。读接口只返回
+`api_key_set`与掩码；同Provider未重填独立Key时保留原值。
 
 ## 管理接口与Console
 
@@ -46,9 +52,10 @@ global_settings(key PK, value TEXT JSON, version SMALLINT, created_at, updated_a
 均沿用Console企业管理员门禁。测试接口直接测试未保存草稿，只返回成功或脱敏短错误，不保存配置，
 也不返回结果正文。
 
-Console路径为“配置中心 → 全局配置”。160px内部分栏只放“Web Search”和“运行设置”；后者继续
-展示既有环境变量事实，不显示只读标签。Web Search选择“当前模型”或“指定Provider”，仅展示
-当前供应商必填字段。
+Console路径为“配置中心 → 全局配置”。同一页按上下顺序展示“Web Search”和“运行设置”；后者
+继续展示既有环境变量事实，不显示只读标签。Web Search平时只回显当前方式，点击编辑后选择“当前
+模型”或“指定Provider”。Provider与模型同排，凭据位于下一排；所有选择器使用Console统一的
+自定义下拉。DeepSeek/Kimi额外显示“沿用会话Provider / 单独配置API Key”二选一。
 
 ## 运行路由
 
@@ -107,7 +114,7 @@ Header、Cookie或原始鉴权数据。抓取和搜索正文一律视为不可�
 ## 测试矩阵
 
 - 012空库、011→012→011、SQLite及MySQL/PostgreSQL DDL、配置备份恢复。
-- 默认native、六Provider字段校验、Key掩码/保留/切换清理、草稿连通性测试。
+- 默认native、六Provider字段校验、Key掩码/保留/切换清理、DeepSeek/Kimi会话Provider引用、草稿连通性测试。
 - 未授权无工具、native适配/不支持错误、固定Provider无降级、Search/Fetch Schema。
 - Fetch协议、凭据、回环、私网、元数据、DNS与重定向复检、类型/大小/超时配置。
 - Console两模式、六Provider条件字段、保存/取消/测试、运行设置与窄屏。

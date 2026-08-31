@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from pydantic_ai import ModelRetry, Tool, ToolFailed
@@ -18,7 +19,7 @@ from deep_agent.web.runtime import (
     build_web_runtime,
     execute_provider_search,
 )
-from deep_agent.web.settings import WebSearchRuntimeConfig
+from deep_agent.web.settings import WebSearchRuntimeConfig, load_web_search_config
 
 
 class WebPackageTests(unittest.TestCase):
@@ -57,6 +58,40 @@ class WebPackageTests(unittest.TestCase):
         self.assertEqual(names, {"web_search", "web_fetch"})
         search = runtime.toolset.toolsets[0].tools["web_search"]
         self.assertEqual(search.metadata[CODE_MODE_METADATA_KEY], CODE_MODE_HYBRID)
+
+
+class WebSearchCredentialTests(unittest.IsolatedAsyncioTestCase):
+    async def test_runtime_resolves_reused_llm_provider_without_storing_key(self) -> None:
+        class Store:
+            async def get(self, key: str):
+                self.key = key
+                return SimpleNamespace(
+                    version=1,
+                    value={
+                        "mode": "provider",
+                        "provider": "deepseek",
+                        "model": "deepseek-v4-flash",
+                        "credential_source": "llm_provider",
+                        "llm_provider_id": "provider-1",
+                    },
+                )
+
+        class LlmConfiguration:
+            async def get_provider(self, provider_id: str):
+                self.provider_id = provider_id
+                return SimpleNamespace(
+                    id=provider_id,
+                    name="DeepSeek Session",
+                    provider_type="deepseek",
+                    api_key="session-secret",
+                )
+
+        config = await load_web_search_config(Store(), LlmConfiguration())
+
+        self.assertEqual(config.api_key, "session-secret")
+        self.assertEqual(config.llm_provider_name, "DeepSeek Session")
+        self.assertEqual(config.to_stored_value()["llm_provider_id"], "provider-1")
+        self.assertNotIn("api_key", config.to_stored_value())
 
 
 class WebFetchSafetyTests(unittest.IsolatedAsyncioTestCase):

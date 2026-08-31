@@ -129,6 +129,14 @@ test("Agent 编辑采用 B 方案左右工作台并在右侧切换工具与 Skil
 test("配置导航将 MCP 服务简化为 MCP", () => {
   assert.match(index, /data-tab="mcp"[^>]*>[\s\S]*?<span>MCP<\/span>/);
   assert.doesNotMatch(index, /<span>MCP 服务<\/span>/);
+  const mcpButton = index.match(/<button class="tab resource-btn" data-tab="mcp">[\s\S]*?<\/button>/)?.[0] || "";
+  assert.match(mcpButton, /<svg class="mcp-brand-icon"/);
+  assert.match(mcpButton, /<path d=/);
+  assert.doesNotMatch(mcpButton, /<rect|fill="black"/);
+  assert.match(
+    styles,
+    /\.resource-btn \.mcp-brand-icon\s*\{[\s\S]*?color: var\(--text-faint\);[\s\S]*?stroke: currentColor;[\s\S]*?stroke-width: 12;/,
+  );
 });
 
 test("护眼主题使用清透暖橙而不是土黄配色", () => {

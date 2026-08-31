@@ -29,6 +29,7 @@ from deep_agent.web.settings import (
     WebSearchConfigurationError,
     WebSearchRuntimeConfig,
     resolve_web_search_config,
+    resolve_web_search_credentials,
 )
 
 
@@ -450,7 +451,14 @@ def _web_search_response(row, config: WebSearchRuntimeConfig) -> WebSearchSettin
             provider=config.provider,
             model=config.model,
             api_key_set=bool(config.api_key),
-            api_key_masked=mask_api_key(config.api_key),
+            api_key_masked=(
+                mask_api_key(config.api_key)
+                if config.credential_source == "api_key"
+                else None
+            ),
+            credential_source=config.credential_source,
+            llm_provider_id=config.llm_provider_id,
+            llm_provider_name=config.llm_provider_name,
         ),
         created_at=getattr(row, "created_at", None),
         updated_at=getattr(row, "updated_at", None),
@@ -472,7 +480,11 @@ async def _current_web_search(ctx: AppContextDep):
             raise WebSearchConfigurationError(
                 f"Unsupported Web Search settings version: {row.version}"
             )
-        return row, resolve_web_search_config(row.value)
+        config = resolve_web_search_config(row.value)
+        return row, await resolve_web_search_credentials(
+            config,
+            ctx.stores.llm_configuration,
+        )
     except WebSearchConfigurationError as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -480,15 +492,20 @@ async def _current_web_search(ctx: AppContextDep):
         ) from exc
 
 
-def _resolve_web_search_write(
+async def _resolve_web_search_write(
     body: WebSearchSettingsWrite,
     *,
     existing: WebSearchRuntimeConfig,
+    ctx: AppContextDep,
 ) -> WebSearchRuntimeConfig:
     try:
-        return resolve_web_search_config(
+        config = resolve_web_search_config(
             body.value.model_dump(exclude_none=True),
             existing=existing,
+        )
+        return await resolve_web_search_credentials(
+            config,
+            ctx.stores.llm_configuration,
         )
     except WebSearchConfigurationError as exc:
         raise HTTPException(
@@ -515,7 +532,7 @@ async def put_web_search_settings(
     ctx: AppContextDep,
 ) -> WebSearchSettingsResponse:
     _row, existing = await _current_web_search(ctx)
-    config = _resolve_web_search_write(body, existing=existing)
+    config = await _resolve_web_search_write(body, existing=existing, ctx=ctx)
     store = ctx.stores.global_setting
     if store is None:  # pragma: no cover - guarded by _current_web_search
         raise HTTPException(
@@ -544,7 +561,7 @@ async def test_web_search_settings(
     ctx: AppContextDep,
 ) -> WebSearchTestResponse:
     _row, existing = await _current_web_search(ctx)
-    config = _resolve_web_search_write(body, existing=existing)
+    config = await _resolve_web_search_write(body, existing=existing, ctx=ctx)
     started = time.monotonic()
     provider = config.provider or "current-model"
     try:

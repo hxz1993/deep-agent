@@ -1,7 +1,7 @@
 import {
   initConfiguration,
   restoreConfigurationTab,
-} from "./configuration.js?v=20260829-3";
+} from "./configuration.js?v=20260831-12";
 import { bindContextControls, refreshIdentity } from "./context.js?v=20260822-1";
 import { initDiagnostics } from "./diagnostics.js?v=20260720-1";
 import { initWorkspace } from "./workspace.js?v=20260828-1";

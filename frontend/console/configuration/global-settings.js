@@ -6,6 +6,7 @@ const WEB_SEARCH_PROVIDERS = {
   you: { label: "You.com", requiresKey: true },
   duckduckgo: { label: "DuckDuckGo", requiresKey: false },
 };
+let webSearchTestRunId = 0;
 
 function globalSettingSourceLabel(source) {
   return source === "environment" ? "环境配置" : "代码默认值";
@@ -219,6 +220,32 @@ function webSearchSummaryLabel(settings) {
   return WEB_SEARCH_PROVIDERS[value.provider]?.label || value.provider || "未配置";
 }
 
+function webSearchTestFeedbackPresentation(status, message = "") {
+  const normalized = ["testing", "success", "error"].includes(status) ? status : "";
+  const defaults = {
+    testing: "正在测试连接…",
+    success: "连接成功",
+    error: "连接失败",
+  };
+  return {
+    visible: Boolean(normalized),
+    status: normalized,
+    message: String(message || defaults[normalized] || "").trim(),
+  };
+}
+
+function setWebSearchTestFeedback(status = "", message = "") {
+  const target = document.getElementById("webSearchTestFeedback");
+  const text = document.getElementById("webSearchTestFeedbackText");
+  if (!target || !text) return;
+  const presentation = webSearchTestFeedbackPresentation(status, message);
+  if (!presentation.visible) webSearchTestRunId += 1;
+  target.classList.toggle("hidden", !presentation.visible);
+  target.dataset.status = presentation.status;
+  target.title = presentation.message;
+  text.textContent = presentation.message;
+}
+
 function renderWebSearchSummary(settings) {
   const target = document.getElementById("webSearchSummaryValue");
   if (target) target.textContent = webSearchSummaryLabel(settings);
@@ -246,6 +273,7 @@ function selectedWebSearchMode() {
 }
 
 function updateWebSearchMode() {
+  setWebSearchTestFeedback();
   const mode = selectedWebSearchMode();
   document.querySelectorAll("[data-web-search-detail]").forEach((element) => {
     element.classList.toggle("hidden", element.dataset.webSearchDetail !== mode);
@@ -257,6 +285,7 @@ function updateWebSearchMode() {
 }
 
 function updateWebSearchProvider({ resetCredentialSource = false } = {}) {
+  setWebSearchTestFeedback();
   const provider = document.getElementById("webSearchProvider")?.value || "deepseek";
   const current = globalSettingsAdmin.webSearch?.value || {};
   const currentUsesDirectKey = current.provider === provider && current.credential_source !== "llm_provider";
@@ -386,15 +415,22 @@ const globalSettingsAdmin = {
     }
   },
   async testWebSearch() {
+    const requestId = ++webSearchTestRunId;
     setWebSearchBusy(true);
+    setWebSearchTestFeedback("testing");
     try {
       const result = await apiFetch("/api/v1/global-settings/web-search/test", {
         method: "POST",
         body: JSON.stringify(currentWebSearchDraft()),
       });
-      showToast(result?.message || (result?.ok ? "连接成功" : "连接失败"), !result?.ok);
+      if (requestId !== webSearchTestRunId) return;
+      setWebSearchTestFeedback(
+        result?.ok ? "success" : "error",
+        result?.message || (result?.ok ? "连接成功" : "连接失败"),
+      );
     } catch (error) {
-      showToast(error?.message || "连接测试失败", true);
+      if (requestId !== webSearchTestRunId) return;
+      setWebSearchTestFeedback("error", error?.message || "连接测试失败");
     } finally {
       setWebSearchBusy(false);
     }
@@ -411,6 +447,7 @@ window.__GlobalSettingsUI = {
   tableHtml: globalSettingsTableHtml,
   matches: globalSettingMatches,
   webSearchSummaryLabel,
+  webSearchTestFeedbackPresentation,
 };
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -429,6 +466,7 @@ document.addEventListener("DOMContentLoaded", () => {
     updateWebSearchProvider({ resetCredentialSource: true });
   });
   document.querySelectorAll('input[name="webSearchCredentialSource"]').forEach((input) => input.addEventListener("change", () => updateWebSearchProvider()));
+  document.getElementById("webSearchLlmProvider")?.addEventListener("change", () => setWebSearchTestFeedback());
   document.getElementById("webSearchModelToggle")?.addEventListener("click", () => {
     const menu = document.getElementById("webSearchModelMenu");
     const trigger = document.getElementById("webSearchModelToggle");
@@ -441,6 +479,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (opening) positionWebSearchMenu(trigger, menu);
   });
   document.getElementById("webSearchModel")?.addEventListener("input", (event) => {
+    setWebSearchTestFeedback();
     renderWebSearchModelMenu(event.target.value);
   });
   document.getElementById("webSearchModelMenu")?.addEventListener("click", (event) => {
@@ -460,6 +499,7 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("testWebSearchBtn")?.addEventListener("click", () => globalSettingsAdmin.testWebSearch());
   document.getElementById("testWebSearchLlmProviderBtn")?.addEventListener("click", () => globalSettingsAdmin.testWebSearch());
   document.getElementById("testWebSearchKeylessBtn")?.addEventListener("click", () => globalSettingsAdmin.testWebSearch());
+  document.getElementById("webSearchApiKey")?.addEventListener("input", () => setWebSearchTestFeedback());
   document.addEventListener("click", (event) => {
     if (!event.target.closest("#webSearchSettingsDialog .console-select, #webSearchSettingsDialog .console-combobox")) closeWebSearchMenus();
   });

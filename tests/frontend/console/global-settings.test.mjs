@@ -103,6 +103,7 @@ test("Web Search 配置采用两个显式模式并列出原生 Provider", () => 
   assert.doesNotMatch(templateHtml, /Kimi 请选择|当前模型搜索|无需额外配置/);
   assert.doesNotMatch(templateHtml, /Web Fetch/);
   assert.match(templateHtml, /id="testWebSearchBtn"/);
+  assert.match(templateHtml, /id="webSearchTestFeedback"[^>]*role="status"[^>]*aria-live="polite"/);
   assert.match(templateHtml, /id="saveWebSearchBtn"/);
   assert.match(templateHtml, /id="openWebSearchSettingsBtn"/);
   assert.match(
@@ -142,6 +143,33 @@ test("Web Search 配置采用两个显式模式并列出原生 Provider", () => 
   assert.match(configurationCss, /\.console-select-trigger\s*\{[\s\S]*?border-radius: 8px/);
   assert.match(configurationCss, /\.console-select-menu\s*\{[\s\S]*?box-shadow:/);
   assert.doesNotMatch(configurationCss, /\.web-search-provider-fields\s*\{[^}]*\b(?:border|background|padding)\s*:/);
+  assert.match(configurationCss, /\.web-search-test-feedback\s*\{[^}]*display: flex/);
+  assert.doesNotMatch(configurationCss, /\.web-search-test-feedback\s*\{[^}]*(?:border|background)\s*:/);
+});
+
+test("Web Search 连接测试在当前弹框内展示简短反馈", () => {
+  const ui = loadGlobalSettingsUi();
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(ui.webSearchTestFeedbackPresentation("testing"))),
+    { visible: true, status: "testing", message: "正在测试连接…" },
+  );
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(ui.webSearchTestFeedbackPresentation("success"))),
+    { visible: true, status: "success", message: "连接成功" },
+  );
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(ui.webSearchTestFeedbackPresentation("error", "API Key 无效"))),
+    { visible: true, status: "error", message: "API Key 无效" },
+  );
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(ui.webSearchTestFeedbackPresentation(""))),
+    { visible: false, status: "", message: "" },
+  );
+  const testMethod = source.match(/async testWebSearch\(\) \{[\s\S]*?\n  \},/)?.[0] || "";
+  assert.match(testMethod, /setWebSearchTestFeedback\("testing"\)/);
+  assert.match(testMethod, /requestId !== webSearchTestRunId/);
+  assert.match(testMethod, /setWebSearchTestFeedback\([\s\S]*?result\?\.ok \? "success" : "error"/);
+  assert.doesNotMatch(testMethod, /showToast/);
 });
 
 test("Web Search 摘要只回显当前生效的一个 Provider 选择", () => {

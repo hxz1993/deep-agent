@@ -20,6 +20,7 @@ from deep_agent.agent.context_references import (
     context_reference_title,
     context_references_from_content,
 )
+from deep_agent.time import ensure_utc
 
 
 def _user_prompt_text(part: UserPromptPart) -> str:
@@ -336,9 +337,9 @@ def session_activity_timestamps(messages: list[ModelMessage]) -> tuple[datetime 
         if isinstance(message, ModelRequest):
             ts = _request_timestamp(message)
             if ts is not None:
-                timestamps.append(ts)
+                timestamps.append(ensure_utc(ts))
         elif isinstance(message, ModelResponse) and message.timestamp is not None:
-            timestamps.append(message.timestamp)
+            timestamps.append(ensure_utc(message.timestamp))
     if not timestamps:
         return None, None
     return min(timestamps), max(timestamps)

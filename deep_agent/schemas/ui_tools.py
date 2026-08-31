@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
 from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -9,6 +8,7 @@ from jsonschema.exceptions import SchemaError
 from jsonschema.validators import validator_for
 
 from deep_agent.db.models import UiToolDefinition, UiToolPackage
+from deep_agent.time import UtcDatetime
 
 if TYPE_CHECKING:
     from deep_agent.capabilities.ui.types import UIToolRecord
@@ -169,8 +169,8 @@ class UiToolResponse(BaseModel):
     result_schema: dict[str, Any] | None = None
     metadata: dict[str, Any] | None = None
     source: UiToolSource
-    created_at: datetime | None = None
-    updated_at: datetime | None = None
+    created_at: UtcDatetime | None = None
+    updated_at: UtcDatetime | None = None
 
     @classmethod
     def from_row(cls, row: UiToolDefinition) -> UiToolResponse:
@@ -258,8 +258,8 @@ class UiToolPackageResponse(BaseModel):
     source: UiToolSource
     tool_count: int = 0
     tools: list[str] = Field(default_factory=list)
-    created_at: datetime | None = None
-    updated_at: datetime | None = None
+    created_at: UtcDatetime | None = None
+    updated_at: UtcDatetime | None = None
 
     @classmethod
     def from_row(

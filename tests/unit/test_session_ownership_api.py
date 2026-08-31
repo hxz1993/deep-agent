@@ -55,15 +55,26 @@ class SessionOwnershipApiTests(unittest.TestCase):
         )
 
     def test_get_and_events_only_return_owned_session(self) -> None:
-        self.assertEqual(self.client.get("/api/v1/sessions/mine").status_code, 200)
+        detail = self.client.get("/api/v1/sessions/mine")
+        self.assertEqual(detail.status_code, 200)
         history = self.client.get("/api/v1/sessions/mine/history")
         self.assertEqual(history.status_code, 200)
         self.assertEqual(history.json()["schema_version"], 1)
         self.assertEqual(history.json()["items"][0]["kind"], "user_message")
-        self.assertEqual(
-            self.client.get("/api/v1/sessions/mine/events").status_code,
-            200,
-        )
+        events = self.client.get("/api/v1/sessions/mine/events")
+        self.assertEqual(events.status_code, 200)
+        listed = self.client.get("/api/v1/sessions")
+        self.assertEqual(listed.status_code, 200)
+        timestamp_pairs = [
+            detail.json(),
+            history.json()["items"][0],
+            events.json()["items"][0],
+            listed.json()["items"][0],
+        ]
+        for payload in timestamp_pairs:
+            with self.subTest(payload=payload):
+                self.assertTrue(payload["created_at"].endswith("+00:00"))
+                self.assertTrue(payload["updated_at"].endswith("+00:00"))
         self.assertEqual(self.client.get("/api/v1/sessions/other").status_code, 404)
         self.assertEqual(self.client.get("/api/v1/sessions/other/history").status_code, 404)
         self.assertEqual(

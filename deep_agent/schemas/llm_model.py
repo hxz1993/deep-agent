@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime
 from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from deep_agent.db.ids import normalize_provider_id
 from deep_agent.agent.provider_registry import model_unavailable_reason
+from deep_agent.time import UtcDatetime
 
 if TYPE_CHECKING:
     from deep_agent.db.models import LlmModel, LlmProvider
@@ -217,8 +217,8 @@ class LlmModelResponse(BaseModel):
         "provider_invalid",
     ] | None = None
     agent_count: int = Field(default=0, description="Number of agents referencing this preset.")
-    created_at: datetime
-    updated_at: datetime
+    created_at: UtcDatetime
+    updated_at: UtcDatetime
 
     @classmethod
     def from_row(

@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from datetime import datetime
-
 from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, TypeAdapter, field_validator, model_validator
+
+from deep_agent.time import UtcDatetime
 
 
 _HTTP_URL_ADAPTER = TypeAdapter(AnyHttpUrl)
@@ -129,8 +129,8 @@ class LlmProviderResponse(LlmProviderSummary):
     api_key_set: bool
     api_key_masked: str | None = None
     model_count: int = 0
-    created_at: datetime
-    updated_at: datetime
+    created_at: UtcDatetime
+    updated_at: UtcDatetime
 
 
 class LlmProviderTypeItem(BaseModel):

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -14,6 +13,7 @@ from deep_agent.mcp_request_context import (
     resolve_mcp_request_context_mode,
 )
 from deep_agent.options import OPTION
+from deep_agent.time import UtcDatetime
 
 if TYPE_CHECKING:
     from deep_agent.db.models import McpServer
@@ -80,7 +80,7 @@ class McpToolsInspection(BaseModel):
     count: int = 0
     error: McpInspectionError | None = None
     snapshot_status: McpToolSnapshotStatus = "missing"
-    snapshot_at: datetime | None = None
+    snapshot_at: UtcDatetime | None = None
     snapshot_hash: str | None = None
     # Persisted inside ``mcp_servers.inspection`` but deliberately excluded from
     # normal API serialization so the Console never downloads large schemas.
@@ -96,9 +96,9 @@ class McpResourcesInspection(BaseModel):
 
 class McpInspection(BaseModel):
     status: McpInspectionStatus = "unknown"
-    checked_at: datetime | None = None
+    checked_at: UtcDatetime | None = None
     duration_ms: int | None = None
-    previous_success_at: datetime | None = None
+    previous_success_at: UtcDatetime | None = None
     server: McpInspectionServer = Field(default_factory=McpInspectionServer)
     tools: McpToolsInspection = Field(default_factory=McpToolsInspection)
     resources: McpResourcesInspection = Field(default_factory=McpResourcesInspection)
@@ -244,8 +244,8 @@ class McpServerResponse(BaseModel):
     transport: McpTransport
     config: dict[str, Any]
     description: str | None = None
-    created_at: datetime
-    updated_at: datetime
+    created_at: UtcDatetime
+    updated_at: UtcDatetime
     request_context: McpRequestContextInfo
     inspection: McpInspection
 

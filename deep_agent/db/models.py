@@ -5,7 +5,6 @@ from datetime import datetime
 from sqlalchemy import (
     BigInteger,
     Boolean,
-    DateTime,
     Float,
     ForeignKey,
     Index,
@@ -25,7 +24,7 @@ from deep_agent.db.ids import (
     new_agent_id,
     new_provider_id,
 )
-from deep_agent.db.types import JSONType
+from deep_agent.db.types import JSONType, UtcTimestamp
 
 
 class Base(DeclarativeBase):
@@ -60,9 +59,9 @@ class LlmModel(Base):
     max_output_tokens: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     tags: Mapped[list[str] | None] = mapped_column(JSONType, nullable=True)
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UtcTimestamp(), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
+        UtcTimestamp(),
         server_default=func.now(),
         onupdate=func.now(),
         nullable=False,
@@ -83,9 +82,9 @@ class LlmProvider(Base):
     use_default_base_url: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     base_url: Mapped[str] = mapped_column(Text, nullable=False)
     api_key: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UtcTimestamp(), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
+        UtcTimestamp(),
         server_default=func.now(),
         onupdate=func.now(),
         nullable=False,
@@ -131,10 +130,10 @@ class ModelCatalog(Base):
     model_metadata: Mapped[dict] = mapped_column(JSONType, nullable=False)
     provider_metadata: Mapped[dict] = mapped_column(JSONType, nullable=False)
     source: Mapped[str] = mapped_column(String(32), nullable=False)
-    refreshed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    refreshed_at: Mapped[datetime] = mapped_column(UtcTimestamp(), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UtcTimestamp(), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
+        UtcTimestamp(),
         server_default=func.now(),
         onupdate=func.now(),
         nullable=False,
@@ -156,9 +155,9 @@ class Agent(Base):
     capabilities: Mapped[list[str]] = mapped_column(JSONType, nullable=False, default=list)
     skills: Mapped[list[str]] = mapped_column(JSONType, nullable=False, default=list)
     prompt: Mapped[str] = mapped_column(Text, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UtcTimestamp(), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
+        UtcTimestamp(),
         server_default=func.now(),
         onupdate=func.now(),
         nullable=False,
@@ -178,10 +177,10 @@ class GlobalSetting(Base):
         server_default="1",
     )
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
+        UtcTimestamp(), server_default=func.now(), nullable=False
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
+        UtcTimestamp(),
         server_default=func.now(),
         onupdate=func.now(),
         nullable=False,
@@ -205,10 +204,10 @@ class SkillPackage(Base):
     resource_index: Mapped[list[dict]] = mapped_column(JSONType, nullable=False)
     contains_scripts: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
+        UtcTimestamp(), server_default=func.now(), nullable=False
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+        UtcTimestamp(), server_default=func.now(), onupdate=func.now(), nullable=False
     )
 
 
@@ -220,9 +219,9 @@ class McpServer(Base):
     config: Mapped[dict] = mapped_column(JSONType, nullable=False)
     inspection: Mapped[dict | None] = mapped_column(JSONType, nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UtcTimestamp(), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
+        UtcTimestamp(),
         server_default=func.now(),
         onupdate=func.now(),
         nullable=False,
@@ -256,9 +255,9 @@ class ChatSession(Base):
         default=1,
         server_default="1",
     )
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UtcTimestamp(), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
+        UtcTimestamp(),
         server_default=func.now(),
         onupdate=func.now(),
         nullable=False,
@@ -273,10 +272,10 @@ class UiToolPackage(Base):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     source: Mapped[str] = mapped_column(String(16), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
+        UtcTimestamp(), server_default=func.now(), nullable=False
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
+        UtcTimestamp(),
         server_default=func.now(),
         onupdate=func.now(),
         nullable=False,
@@ -299,9 +298,9 @@ class UiToolDefinition(Base):
     result_schema: Mapped[dict | None] = mapped_column(JSONType, nullable=True)
     metadata_: Mapped[dict | None] = mapped_column("metadata", JSONType, nullable=True)
     source: Mapped[str] = mapped_column(String(16), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UtcTimestamp(), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
+        UtcTimestamp(),
         server_default=func.now(),
         onupdate=func.now(),
         nullable=False,
@@ -352,9 +351,9 @@ class ChatSessionEvent(Base):
     run_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     search_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     payload: Mapped[dict] = mapped_column(JSONType, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UtcTimestamp(), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
+        UtcTimestamp(),
         server_default=func.now(),
         onupdate=func.now(),
         nullable=False,

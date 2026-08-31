@@ -88,6 +88,7 @@ from deep_agent.capabilities.ui.registry import enrich_deferred, enrich_tool_eve
 from loguru import logger
 
 from deep_agent.db.conversation import SessionStore
+from deep_agent.time import utc_rfc3339
 from deep_agent.db.serialization import serialize_message
 from deep_agent.schemas.attachment import AttachmentRef
 from deep_agent.schemas.context_reference import ContextReference
@@ -694,7 +695,7 @@ class AgentRunner:
                     "through_sequence": event.payload["source"]["through_sequence"],
                     "projected_estimated_tokens": event.payload["budget"]["estimated_after"],
                     "summary_model_id": self._model_id,
-                    "updated_at": event.updated_at.isoformat(),
+                    "updated_at": utc_rfc3339(event.updated_at),
                 },
             )
 

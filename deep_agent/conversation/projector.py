@@ -17,6 +17,7 @@ from deep_agent.conversation.models import (
     UserConversationItem,
 )
 from deep_agent.db.event_codec import EVENT_SCHEMA_VERSION, MESSAGE_EVENT_TYPES
+from deep_agent.time import ensure_utc
 
 
 _TOOL_CALL_KINDS = frozenset({"tool-call", "builtin-tool-call"})
@@ -481,12 +482,11 @@ def _optional_int(value: Any) -> int | None:
 
 def _datetime(value: Any) -> datetime | None:
     if isinstance(value, datetime):
-        return value
+        return ensure_utc(value)
     if not isinstance(value, str) or not value:
         return None
     try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-        return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+        return ensure_utc(datetime.fromisoformat(value.replace("Z", "+00:00")))
     except ValueError:
         return None
 

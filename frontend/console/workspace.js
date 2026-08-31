@@ -1,4 +1,4 @@
-const WORKSPACE_ASSET_VERSION = "20260828-1";
+const WORKSPACE_ASSET_VERSION = "20260831-13";
 
 const WORKSPACE_PANE_LIMITS = {
   agent: { min: 150, max: 280, initial: 188, variable: "--console-agent-width" },

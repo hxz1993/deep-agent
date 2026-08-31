@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
 from deep_agent.schemas.attachment import AttachmentRef
 from deep_agent.schemas.context_reference import ContextReference, validate_context_references
+from deep_agent.time import UtcDatetime
 
 
 class ChatRequest(BaseModel):
@@ -140,8 +140,8 @@ class SessionInfo(BaseModel):
     agent_name: str | None = Field(default=None, description="Agent display name (if known).")
     user_prompt: str | None = Field(default=None, description="First user message in the session.")
     title: str | None = Field(default=None, description="Session title (generated from first user message).")
-    created_at: datetime | None = Field(default=None, description="Session creation time (UTC).")
-    updated_at: datetime | None = Field(default=None, description="Last conversation activity time (UTC).")
+    created_at: UtcDatetime | None = Field(default=None, description="Session creation time (UTC).")
+    updated_at: UtcDatetime | None = Field(default=None, description="Last conversation activity time (UTC).")
 
 
 class SessionListResponse(BaseModel):

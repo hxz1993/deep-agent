@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from deep_agent.web.settings import WebSearchCredentialSource, WebSearchProvider
+from deep_agent.time import UtcDatetime
 
 
 class WebSearchValueInput(BaseModel):
@@ -49,8 +49,8 @@ class WebSearchSettingsResponse(BaseModel):
     key: Literal["web_search"] = "web_search"
     version: Literal[1] = 1
     value: WebSearchValueResponse
-    created_at: datetime | None = None
-    updated_at: datetime | None = None
+    created_at: UtcDatetime | None = None
+    updated_at: UtcDatetime | None = None
 
 
 class WebSearchTestResponse(BaseModel):

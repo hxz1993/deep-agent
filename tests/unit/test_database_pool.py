@@ -8,6 +8,7 @@ from deep_agent.db.factory import (
     MYSQL_POOL_RECYCLE_SECONDS,
     _is_asyncmy_closed_transport_error,
     _mark_asyncmy_pre_ping_disconnect,
+    _set_mysql_session_utc,
     create_engine,
 )
 
@@ -27,10 +28,21 @@ class DatabasePoolConfigurationTests(unittest.TestCase):
             pool_pre_ping=True,
             pool_recycle=MYSQL_POOL_RECYCLE_SECONDS,
         )
-        listen.assert_called_once_with(
-            engine.sync_engine,
-            "handle_error",
-            _mark_asyncmy_pre_ping_disconnect,
+        self.assertEqual(
+            listen.call_args_list,
+            [
+                unittest.mock.call(
+                    engine.sync_engine,
+                    "connect",
+                    _set_mysql_session_utc,
+                    insert=True,
+                ),
+                unittest.mock.call(
+                    engine.sync_engine,
+                    "handle_error",
+                    _mark_asyncmy_pre_ping_disconnect,
+                ),
+            ],
         )
 
     def test_sqlite_keeps_existing_pool_behavior(self) -> None:
@@ -47,6 +59,16 @@ class DatabasePoolConfigurationTests(unittest.TestCase):
             pool_pre_ping=True,
         )
         listen.assert_not_called()
+
+    def test_mysql_connection_is_initialized_to_utc(self) -> None:
+        cursor = unittest.mock.Mock()
+        connection = unittest.mock.Mock()
+        connection.cursor.return_value = cursor
+
+        _set_mysql_session_utc(connection, object())
+
+        cursor.execute.assert_called_once_with("SET time_zone = '+00:00'")
+        cursor.close.assert_called_once_with()
 
 
 class AsyncmyDisconnectRecognitionTests(unittest.TestCase):

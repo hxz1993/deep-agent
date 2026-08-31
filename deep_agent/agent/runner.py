@@ -5,7 +5,8 @@ import hashlib
 import json
 import time
 from contextlib import asynccontextmanager, suppress
-from dataclasses import dataclass
+from copy import deepcopy
+from dataclasses import dataclass, field
 from typing import Any, AsyncIterator
 
 from pydantic_ai import (
@@ -108,6 +109,26 @@ class _RunTerminalContext:
     session_id: str
     deps: AgentDeps
     mode: str
+
+
+@dataclass
+class _StreamRunSnapshot:
+    """Messages and usage retained from a live Pydantic AI event stream."""
+
+    new_messages: list[ModelMessage] = field(default_factory=list)
+    all_messages: list[ModelMessage] = field(default_factory=list)
+    usage: RunUsage | None = None
+
+    def capture(self, stream: Any) -> None:
+        # Accessors become available after the first event starts the run. A
+        # failure before model start is intentionally represented by an empty
+        # snapshot and retains the existing user-only history behavior.
+        with suppress(Exception):
+            self.new_messages = list(stream.new_messages())
+        with suppress(Exception):
+            self.all_messages = list(stream.all_messages())
+        with suppress(Exception):
+            self.usage = deepcopy(stream.usage)
 
 
 def _should_publish_tool_call(
@@ -1073,12 +1094,18 @@ class AgentRunner:
         *,
         pre_persisted_user: bool,
         repair_dangling_tool_calls: bool = True,
+        dangling_tool_message: str | None = None,
         result_queue: asyncio.Queue[dict[str, Any]] | None = None,
         terminal_status: str | None = None,
     ) -> bool:
         to_append = incremental_append_messages(new_messages, skip_user_prompt=pre_persisted_user)
         if repair_dangling_tool_calls:
-            to_append = repair_unprocessed_tool_calls(to_append)
+            repair_kwargs = (
+                {"denied_message": dangling_tool_message}
+                if dangling_tool_message is not None
+                else {}
+            )
+            to_append = repair_unprocessed_tool_calls(to_append, **repair_kwargs)
         if not to_append:
             return False
         await self.store.append(
@@ -1486,6 +1513,7 @@ class AgentRunner:
         cancellation_token: CancellationToken,
         usage: RunUsage,
         session_events: asyncio.Queue[dict[str, Any]],
+        snapshot: _StreamRunSnapshot,
     ) -> AsyncIterator[tuple[str, Any]]:
         """Interleave Pydantic stream events with DeepAgent lifecycle progress."""
 
@@ -1537,6 +1565,7 @@ class AgentRunner:
                         task.cancel()
                         with suppress(asyncio.CancelledError):
                             await task
+                snapshot.capture(stream)
 
     async def _recover_provider_overflow(
         self,
@@ -1668,6 +1697,7 @@ class AgentRunner:
         buffered_ui_tool_calls: dict[str, dict[str, Any]] = {}
         session_events: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         title_task: asyncio.Task[None] | None = None
+        stream_snapshot = _StreamRunSnapshot()
         self._set_tool_discovery_inputs(deps, message, context_refs)
         async with self._session_lock(session_id, agent_id=deps.agent_id):
             try:
@@ -1786,6 +1816,7 @@ class AgentRunner:
                             cancellation_token=active_run.cancellation_token,
                             usage=model_usage,
                             session_events=session_events,
+                            snapshot=stream_snapshot,
                         ):
                             if source == "status":
                                 status_event = event
@@ -1922,9 +1953,41 @@ class AgentRunner:
                 raise
             except Exception as exc:  # noqa: BLE001 - surface as an SSE error event
                 logger.exception("Agent stream failed for session {}", session_id)
+                failed_messages = stream_snapshot.new_messages
+                history_persisted = prepared.pre_persisted_user
+                if failed_messages:
+                    try:
+                        await self._attach_final_plan_snapshot(failed_messages, deps)
+                        if stream_snapshot.all_messages:
+                            self._record_loaded_skills(deps, stream_snapshot.all_messages)
+                        history_persisted = await self._persist_run_messages(
+                            session_id,
+                            failed_messages,
+                            deps,
+                            pre_persisted_user=prepared.pre_persisted_user,
+                            repair_dangling_tool_calls=True,
+                            dangling_tool_message=(
+                                "Tool execution failed before a result was produced"
+                            ),
+                            terminal_status="failed",
+                        ) or history_persisted
+                        log_model_requests(
+                            failed_messages,
+                            conversation_id=deps.conversation_id,
+                            run_id=deps.run_id,
+                            agent_id=deps.agent_id,
+                            session_id=session_id,
+                        )
+                    except Exception as persistence_exc:
+                        logger.exception(
+                            "Failed-run history persistence failed for session {}: {}",
+                            session_id,
+                            persistence_exc,
+                        )
                 failed_run_event = await self._finish_run_event(
                     run_event, status="failed", started_at=started_at,
-                    usage=None, error=type(exc).__name__,
+                    usage=stream_snapshot.usage or model_usage,
+                    error=type(exc).__name__,
                 )
                 if failed_run_event is not None:
                     yield {
@@ -1945,7 +2008,7 @@ class AgentRunner:
                 )
                 yield events.error(
                     format_stream_error(exc),
-                    history_persisted=prepared.pre_persisted_user,
+                    history_persisted=history_persisted,
                 )
                 await self._cancel_title_task(title_task)
                 return

@@ -118,7 +118,13 @@ ToolSearch。只有已授权 MCP Toolset 会被标记为 Hybrid；已披露工�
 v0.6.5的公开Web实现位于`web/`。`builtin:web`只提供`web_search/web_fetch`，全局唯一
 `global_settings.web_search`决定当前模型或固定Provider路由，但不能替代Agent显式授权。固定Provider
 工具可在同时授权Code Mode时进入Monty；原生搜索由Provider执行。不得因此开放Sandbox、Monty
-Socket、任意Header或Internal HTTP。完整边界见`../docs/design/21-web-tools/`。
+Socket、任意Header或Internal HTTP。显式HTTP CONNECT代理下，`web/proxy_compat.py`只修正fake-IP
+公共解析与TLS SNI传递，SSRF地址校验、固定IP、重定向复检和正文解析仍由Pydantic AI原生WebFetch
+负责。完整边界见`../docs/design/21-web-tools/`。
+
+流式Run在模型或工具链最终异常时，必须从Pydantic AI `AgentRunEvents`实时句柄保存已经产生的
+`new_messages/all_messages/usage`；最后一条Assistant Event标记`failed`并修复悬空Tool Call。只有
+模型尚未产生Assistant时才保存独立`run/terminal`，不得把已直播的工具轨迹丢掉而只留下User Event。
 
 新增横切能力时遵循：
 

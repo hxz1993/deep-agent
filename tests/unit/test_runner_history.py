@@ -92,6 +92,47 @@ class AgentRunnerHistoryTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(history[0], ModelRequest)
         self.assertTrue(is_user_only_request(history[0]))
 
+    async def test_run_stream_persists_partial_assistant_on_late_error(self) -> None:
+        async def fail_after_partial(_messages, _info):
+            yield "partial answer"
+            raise RuntimeError("boom after partial")
+
+        agent = Agent(
+            FunctionModel(stream_function=fail_after_partial),
+            deps_type=AgentDeps,
+        )
+        runner = AgentRunner(agent, self.store, UsageLimits(request_limit=10))
+        deps = self._deps("sess-partial-error")
+
+        events_out = [
+            event
+            async for event in runner.run_stream(
+                "sess-partial-error",
+                "hello",
+                deps,
+                persister=self.persister,
+            )
+        ]
+
+        self.assertEqual(events_out[-1]["type"], "error")
+        self.assertTrue(events_out[-1]["history_persisted"])
+        history = await self.store.get_raw_history(
+            "sess-partial-error",
+            agent_id=self.db_agent.id,
+        )
+        self.assertEqual(len(history), 2)
+        self.assertIsInstance(history[0], ModelRequest)
+        self.assertIsInstance(history[1], ModelResponse)
+        self.assertEqual(history[1].parts[0].content, "partial answer")
+        self.assertEqual(history[1].state, "interrupted")
+
+        persisted = await self.store.list_events("sess-partial-error", limit=100)
+        assistant = next(
+            item for item in persisted if item.event_type == "assistant/message"
+        )
+        self.assertEqual(assistant.status, "failed")
+        self.assertFalse(any(item.event_type == "run/terminal" for item in persisted))
+
     async def test_run_stream_no_duplicate_user_on_success(self) -> None:
         agent = Agent(TestModel(), deps_type=AgentDeps)
         runner = AgentRunner(agent, self.store, UsageLimits(request_limit=10))

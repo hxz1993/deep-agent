@@ -11,6 +11,10 @@
   You.com、DuckDuckGo之一；不做隐式降级，密钥读取只返回掩码与是否已配置。
 - 复用Pydantic AI 2.35.1的原生WebSearch、DuckDuckGo/Tavily与SSRF-safe WebFetch，复用Harness
   0.26.0的Exa/You.com，补充DeepSeek Responses与Kimi `$web_search`薄适配。
+- WebFetch兼容显式HTTP CONNECT代理的fake-IP DNS：仍由Pydantic AI校验并固定公网IP，同时把原始
+  主机名传入TLS SNI；确定性网络失败返回`ToolFailed`，不再耗尽模型工具重试并中断整轮。
+- 流式Run异常时保存Pydantic AI已经产生的消息、工具轨迹和Usage，并把最后一条Assistant标记为
+  `failed`；只有模型尚未产生Assistant时才继续写独立`run/terminal`，History不再只剩用户问题。
 - Alembic`012`增加通用`global_settings`表并初始化`web_search={"mode":"native"}`；配置备份与
   Console全局配置同步覆盖新结构，Chat、SSE、History和Event Store协议保持不变。
 

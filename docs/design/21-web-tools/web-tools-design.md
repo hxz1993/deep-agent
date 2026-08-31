@@ -85,10 +85,10 @@ Pydantic AI `WebSearch(native=True, local=False)`进入本次请求的Capabiliti
 不添加Cookie、Authorization或平台Header。下载上限5 MiB，文本上限50K字符，超时30秒；二进制
 只接受PDF和常见图片。
 
-部署时应为Web Fetch提供可控的公网直连出口。Pydantic的安全下载器会先解析域名并固定目标IP，
-同时底层HTTP客户端可能继承系统代理；如果代理不支持这种固定IP加原始SNI的TLS连接，会出现证书
-校验失败。此时应在DeepAgent进程级配置精确的`NO_PROXY`或调整出口代理，不得改回普通URL直连、
-关闭证书校验或绕过SSRF复检。
+部署时应为Web Fetch提供可控的公网出口。无代理时直接沿用Pydantic AI的系统DNS与固定IP连接；
+显式HTTP CONNECT代理下，通过公共DNS获得待校验和固定的公网IP，并把原始主机名传递给TLS SNI，
+兼容Clash类fake-IP环境。公共解析不可用时回退原解析并继续执行全部SSRF校验；不得改回普通URL
+直连、关闭证书校验或绕过重定向复检。
 
 ## Code Mode、安全与审计
 
@@ -109,7 +109,7 @@ Header、Cookie或原始鉴权数据。抓取和搜索正文一律视为不可�
 | 固定Provider缺Key/模型 | 保存或运行前校验失败 |
 | Provider鉴权/限流/超时/空结果 | 对应脱敏`ToolFailed`，不降级 |
 | Fetch非法协议、凭据或私网 | `ModelRetry`拒绝该URL |
-| Fetch上游/响应类型/大小失败 | 有界失败结果，不返回部分未验证内容 |
+| Fetch网络/上游/响应类型/大小失败 | 脱敏`ToolFailed`，允许模型解释失败，不返回部分未验证内容 |
 
 ## 测试矩阵
 

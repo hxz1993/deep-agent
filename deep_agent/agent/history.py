@@ -187,7 +187,11 @@ def mark_cancelled_response_interrupted(messages: list[ModelMessage]) -> list[Mo
 _USER_CANCELLED_TOOL_MESSAGE = "User cancelled"
 
 
-def repair_unprocessed_tool_calls(messages: list[ModelMessage]) -> list[ModelMessage]:
+def repair_unprocessed_tool_calls(
+    messages: list[ModelMessage],
+    *,
+    denied_message: str = _USER_CANCELLED_TOOL_MESSAGE,
+) -> list[ModelMessage]:
     """Close legacy dangling tool calls without touching official interrupted turns.
 
     Synthetic tool returns are inserted immediately after the assistant turn they
@@ -209,7 +213,7 @@ def repair_unprocessed_tool_calls(messages: list[ModelMessage]) -> list[ModelMes
             parts=[
                 ToolReturnPart(
                     tool_name=tool_name,
-                    content=ToolDenied(message=_USER_CANCELLED_TOOL_MESSAGE),
+                    content=ToolDenied(message=denied_message),
                     tool_call_id=tool_call_id,
                 )
                 for tool_call_id, tool_name in pending.items()

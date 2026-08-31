@@ -3,11 +3,13 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import ssl
 import time
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlsplit
 
+import httpx2
 from openai import AsyncOpenAI
 from pydantic_ai import Agent, ModelRetry, Tool, ToolFailed
 from pydantic_ai.capabilities import AbstractCapability, WebSearch
@@ -21,6 +23,7 @@ from pydantic_ai.toolsets import CombinedToolset, FunctionToolset
 
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.code_mode.file_payload import CODE_MODE_HYBRID, CODE_MODE_METADATA_KEY
+from deep_agent.web.proxy_compat import proxy_compatible_web_fetch
 from deep_agent.web.settings import WEB_PACKAGE_CODE, WebSearchRuntimeConfig
 
 
@@ -37,6 +40,21 @@ _ALLOWED_BINARY_MEDIA_TYPES = {
     "image/png",
     "image/webp",
 }
+
+
+def _fetch_transport_failure(exc: BaseException) -> str | None:
+    cause: BaseException | None = exc
+    while cause is not None:
+        if isinstance(cause, (httpx2.TimeoutException, TimeoutError)):
+            return "Web Fetch timed out while connecting to the public page"
+        if isinstance(cause, ssl.SSLCertVerificationError):
+            return "Web Fetch could not verify the public page TLS certificate"
+        if isinstance(cause, httpx2.HTTPStatusError):
+            return f"Web Fetch received HTTP {cause.response.status_code} from the public page"
+        if isinstance(cause, httpx2.RequestError):
+            return "Web Fetch could not connect to the public page"
+        cause = cause.__cause__
+    return None
 
 
 @dataclass(frozen=True)
@@ -66,7 +84,14 @@ def _web_fetch_tool() -> Tool[Any]:
         if parsed.username is not None or parsed.password is not None:
             raise ModelRetry("Web Fetch does not accept credentialed URLs")
         started = time.monotonic()
-        result = await upstream.function(url)
+        try:
+            async with proxy_compatible_web_fetch():
+                result = await upstream.function(url)
+        except ModelRetry as exc:
+            failure = _fetch_transport_failure(exc)
+            if failure is None:
+                raise
+            raise ToolFailed(failure) from exc
         if (
             isinstance(result, BinaryContent)
             and result.media_type not in _ALLOWED_BINARY_MEDIA_TYPES

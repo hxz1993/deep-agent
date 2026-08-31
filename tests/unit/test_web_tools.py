@@ -4,6 +4,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+import httpx2
 from pydantic_ai import ModelRetry, Tool, ToolFailed
 from pydantic_ai.messages import ModelResponse, NativeToolReturnPart, ToolReturn
 from pydantic_ai.capabilities import WebSearch
@@ -140,6 +141,32 @@ class WebFetchSafetyTests(unittest.IsolatedAsyncioTestCase):
             result.metadata["sources"][0]["url"],
             "https://example.com/page",
         )
+
+    async def test_transport_retry_becomes_terminal_tool_feedback(self) -> None:
+        async def fake_fetch(url: str):
+            request = httpx2.Request("GET", url)
+            try:
+                raise httpx2.ConnectTimeout("proxy timeout", request=request)
+            except httpx2.ConnectTimeout as cause:
+                raise ModelRetry("Unable to fetch URL") from cause
+
+        with patch(
+            "deep_agent.web.runtime.web_fetch_tool",
+            return_value=Tool(fake_fetch),
+        ):
+            with self.assertRaisesRegex(ToolFailed, "timed out"):
+                await _web_fetch_tool().function("https://example.com/page")
+
+    async def test_non_transport_retry_keeps_upstream_retry_semantics(self) -> None:
+        async def fake_fetch(_url: str):
+            raise ModelRetry("URL resolves to a private/internal address")
+
+        with patch(
+            "deep_agent.web.runtime.web_fetch_tool",
+            return_value=Tool(fake_fetch),
+        ):
+            with self.assertRaisesRegex(ModelRetry, "private/internal"):
+                await _web_fetch_tool().function("https://example.com/page")
 
 
 class ProviderSearchRoutingTests(unittest.IsolatedAsyncioTestCase):

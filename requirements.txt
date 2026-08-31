@@ -12,6 +12,9 @@ pydantic-monty==0.0.21
 # DeepAgent passes a dedicated proxy client to GoogleProvider. Pydantic AI 2.35
 # deprecates legacy httpx clients for this path in favor of httpx2.
 httpx2>=2.7,<3
+# Web Fetch keeps SSRF address pinning meaningful behind fake-IP HTTP proxies
+# by resolving public A/AAAA records through explicit public resolvers.
+dnspython>=2.8,<3
 tiktoken>=0.13,<1
 pypinyin>=0.55,<1
 

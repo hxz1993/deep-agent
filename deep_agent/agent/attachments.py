@@ -4,7 +4,15 @@ import json
 from dataclasses import replace
 from typing import Any, Mapping, Sequence
 
-from pydantic_ai.messages import BinaryContent, ModelMessage, ModelRequest, TextContent, UserContent, UserPromptPart
+from pydantic_ai.messages import (
+    BinaryContent,
+    ModelMessage,
+    ModelRequest,
+    TextContent,
+    ToolReturnPart,
+    UserContent,
+    UserPromptPart,
+)
 
 from deep_agent.agent.context_references import (
     context_reference_dict,
@@ -15,6 +23,7 @@ from deep_agent.agent.context_references import (
 from deep_agent.schemas.attachment import AttachmentRef
 from deep_agent.schemas.context_reference import ContextReference
 from deep_agent.files.storage import FileStore, FileStoreError, PlatformFileStore
+from deep_agent.web.images import prior_run_web_image_value
 
 ATTACHMENT_REF_KIND = "attachment-ref"
 _NATIVE_MEDIA_PREFIXES = ("image/", "audio/", "video/")
@@ -155,6 +164,14 @@ async def resolve_history_for_llm(
         full_turn = idx == current_user_index
         new_parts = []
         for part in message.parts:
+            if isinstance(part, ToolReturnPart) and part.tool_name == "web_image_view":
+                new_parts.append(
+                    replace(
+                        part,
+                        content=prior_run_web_image_value(part.content),
+                    )
+                )
+                continue
             if not isinstance(part, UserPromptPart):
                 new_parts.append(part)
                 continue

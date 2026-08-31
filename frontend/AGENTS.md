@@ -244,6 +244,8 @@ Console会话渲染模块边界：
 - v0.6.5 Web Search表单只有一份当前生效配置。API Key未重填时发送空值以保留同Provider旧Key；
   切换Provider必须清理无关模型和密钥状态。连通性图标测试当前草稿，在当前弹层内就地显示测试中、
   成功或脱敏短错误，不使用会落在弹层背后的全局Toast，也不展示测试问题或结果正文。
+- v0.6.6的`web_image_view`结果在聊天工具卡和轨迹详情中复用同一URL预览；必须懒加载、
+  `referrerpolicy=no-referrer`并保留“打开原图”失败回退，不上传附件、不代理下载、不写Base64。
 - 上下文压缩在模型配置有效上下文窗口时自动启用；Console只读展示全局策略、预算和Compaction状态，
   不提供启用开关，也不编辑摘要正文。
 - Console 从 `/uploads/capabilities`读取实际 MIME、单文件大小和单次数量限制；新请求不得再发送

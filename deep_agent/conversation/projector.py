@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from deep_agent.agent.planning import is_planning_tool
+from deep_agent.web.images import safe_web_image_value
 from deep_agent.conversation.models import (
     AssistantConversationItem,
     ConversationArtifact,
@@ -319,7 +320,7 @@ def _apply_result(
     if event_id not in item.source_event_ids:
         item.source_event_ids.append(event_id)
     item.updated_at = _event_datetime(event, "updated_at")
-    item.output = part.get("content")
+    item.output = safe_web_image_value(part.get("content"))
     outcome = _optional_str(part.get("outcome"))
     item.status = _result_status(part, outcome)
     if isinstance(item, PlanConversationItem):
@@ -338,7 +339,7 @@ def _apply_result(
     item.outcome = outcome
     item.artifacts = _artifacts(part)
     metadata = part.get("metadata")
-    if item.tool_name in {"web_search", "web_fetch"} and isinstance(metadata, Mapping):
+    if item.tool_name in {"web_search", "web_fetch", "web_image_view"} and isinstance(metadata, Mapping):
         web_audit = metadata.get(item.tool_name)
         sources = metadata.get("sources")
         web_metadata = dict(item.metadata or {})

@@ -4,6 +4,7 @@ import unittest
 from datetime import datetime, timezone
 
 from pydantic_ai.messages import (
+    ImageUrl,
     ModelRequest,
     ModelResponse,
     NativeToolCallPart,
@@ -88,6 +89,37 @@ class AgentEventsTests(unittest.TestCase):
         self.assertEqual(payload["execution"], "local")
         self.assertEqual(payload["web"]["elapsed_ms"], 12)
         self.assertEqual(payload["sources"][0]["url"], "https://example.com")
+
+    def test_web_image_sse_exposes_reference_without_base64(self) -> None:
+        part = ToolReturnPart(
+            "web_image_view",
+            ImageUrl(
+                url="https://cdn.example.com/chart.png",
+                media_type="image/png",
+                force_download=True,
+            ),
+            "image-1",
+            metadata={
+                "web_image_view": {
+                    "mode": "local",
+                    "media_type": "image/png",
+                    "force_download": True,
+                    "ssrf_validated": True,
+                },
+                "sources": [
+                    {"url": "https://cdn.example.com/chart.png", "title": None}
+                ],
+            },
+        )
+
+        payload = events.map_part(part)
+
+        self.assertEqual(payload["source"], "web")
+        self.assertEqual(payload["execution"], "local")
+        self.assertEqual(payload["result"]["kind"], "web-image-reference")
+        self.assertEqual(payload["result"]["url"], "https://cdn.example.com/chart.png")
+        self.assertTrue(payload["web"]["force_download"])
+        self.assertNotIn("base64", str(payload).lower())
 
     def test_conversation_projection_merges_thinking_text_and_tool_pair(self) -> None:
         from pydantic_ai.messages import ToolReturnPart

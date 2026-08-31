@@ -115,12 +115,19 @@ ToolSearch。只有已授权 MCP Toolset 会被标记为 Hybrid；已披露工�
 又可在 Monty 中组合调用。`load_file_data` 是 code-only 文件原语，不出现在普通工具列表；
 其 Run Token、Base64 和大中间结果必须在进入 Event、History、SSE、轨迹、检索或日志前脱敏。
 
-v0.6.5的公开Web实现位于`web/`。`builtin:web`只提供`web_search/web_fetch`，全局唯一
+v0.6.5起的公开Web实现位于`web/`。`builtin:web`提供`web_search/web_fetch`，v0.6.6另向
+图片输入模型注入外层普通工具`web_image_view`；该工具返回Pydantic AI原生`ImageUrl`且不进入Monty。
+`web_fetch`的HTML薄适配只负责过滤脚本/样式并在原位置保留绝对图片URL，不自动发送图片。全局唯一
 `global_settings.web_search`决定当前模型或固定Provider路由，但不能替代Agent显式授权。固定Provider
 工具可在同时授权Code Mode时进入Monty；原生搜索由Provider执行。不得因此开放Sandbox、Monty
 Socket、任意Header或Internal HTTP。显式HTTP CONNECT代理下，`web/proxy_compat.py`只修正fake-IP
-公共解析与TLS SNI传递，SSRF地址校验、固定IP、重定向复检和正文解析仍由Pydantic AI原生WebFetch
-负责。完整边界见`../docs/design/21-web-tools/`。
+公共解析与TLS SNI传递，并覆盖Pydantic AI组装下一次请求时的`ImageUrl(force_download=true)`延迟
+下载；SSRF地址校验、固定IP、重定向复检和正文解析仍由Pydantic AI负责。完整边界见
+`../docs/design/21-web-tools/`。
+
+Web图片在当前`agent.run()`内部保持原生视觉结果；写入Event Store时只允许URL、MIME、
+`force_download`和无敏感审计，下一次独立Run必须投影成轻量URL说明，禁止重复携带旧图片或Base64。
+直接`web_fetch`二进制图片仍走原有`BinaryContent`与ToolOutputLimits，本版本不得修改大工具治理。
 
 流式Run在模型或工具链最终异常时，必须从Pydantic AI `AgentRunEvents`实时句柄保存已经产生的
 `new_messages/all_messages/usage`；最后一条Assistant Event标记`failed`并修复悬空Tool Call。只有

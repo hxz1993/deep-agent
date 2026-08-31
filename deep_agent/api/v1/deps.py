@@ -248,7 +248,13 @@ async def _build_runner_from_spec(
                 global_setting_store,
                 ctx.stores.llm_configuration,
             )
-            web_runtime = build_web_runtime(web_config)
+            web_runtime = build_web_runtime(
+                web_config,
+                image_capable="image" in {
+                    str(value).strip().lower()
+                    for value in (spec.input_modalities or [])
+                },
+            )
         except WebSearchConfigurationError as exc:
             from deep_agent.core.exceptions import ToolPackageError
 

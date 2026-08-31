@@ -3,6 +3,19 @@
 本文件记录 DeepAgent 的产品版本变化，按新版本到旧版本排列。当前代码版本以
 `deep_agent.__version__` 为准；数据库结构版本以 Alembic head 为准，两者互不替代。
 
+## v0.6.6
+
+- `builtin:web`增加仅向图片输入模型披露的`web_image_view(url, force_download=false)`；工具返回
+  Pydantic AI原生`ImageUrl`，由下一次模型请求按Provider能力直传URL或安全下载，不进入Code Mode。
+- 显式HTTP隧道代理的fake-IP/SNI兼容同时覆盖`force_download=true`的延迟图片下载；Pydantic AI仍负责
+  SSRF校验、固定公网IP和证书验证，不关闭TLS校验。
+- `web_fetch`继续复用Pydantic AI的SSRF-safe下载、类型判断和长度限制；HTML转换只做一处薄适配，
+  过滤`script/style`正文并在原位置保留`![alt](绝对URL)`，不自动选择或发送页面图片。
+- Web图片工具结果在同一次`agent.run()`内保持原生视觉输入；Event Store只保存URL、MIME、
+  `force_download`和安全审计，后续Run投影为轻量引用，SSE、History、轨迹与Console均不保存Base64。
+- Console工具结果与轨迹详情按URL懒加载无Referrer预览，失败时保留原图链接。本版本不修改
+  ToolOutputLimits、大工具Artifact、附件存储或数据库结构；Alembic head仍为`012`。
+
 ## v0.6.5
 
 - 新增默认不关联的`builtin:web`，固定包含`web_search`与`web_fetch`；只有Agent显式关联后才注入，

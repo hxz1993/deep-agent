@@ -42,6 +42,13 @@ def _http_tunnel_proxy_configured() -> bool:
     return False
 
 
+def _proxy_compatibility_active() -> bool:
+    """Keep proxy-safe DNS/SNI active for deferred Pydantic media downloads."""
+    return _PROXY_FETCH_ACTIVE.get() or (
+        _PATCHED and _http_tunnel_proxy_configured()
+    )
+
+
 async def _public_resolve_hostname(hostname: str) -> list[str]:
     """Resolve a public hostname without consuming a local fake-IP answer.
 
@@ -70,13 +77,13 @@ async def _public_resolve_hostname(hostname: str) -> list[str]:
 
 
 async def _resolve_hostname(hostname: str) -> list[str]:
-    if not _PROXY_FETCH_ACTIVE.get():
+    if not _proxy_compatibility_active():
         return await _ORIGINAL_RESOLVE_HOSTNAME(hostname)
     return await _public_resolve_hostname(hostname)
 
 
 async def _send_request(client: Any, request: Any):
-    if not _PROXY_FETCH_ACTIVE.get():
+    if not _proxy_compatibility_active():
         return await _ORIGINAL_SEND_REQUEST(client, request)
     token = _PROXY_TLS_SERVER_NAME.set(request.extensions.get("sni_hostname"))
     try:
@@ -103,7 +110,14 @@ async def _start_tls(
     )
 
 
-def _install_proxy_compatibility() -> None:
+def install_proxy_compatibility() -> None:
+    """Install process-wide hooks that activate only for an explicit HTTP proxy.
+
+    Pydantic AI may download an ``ImageUrl`` after the tool call has returned,
+    while it is assembling the next model request.  The hooks therefore remain
+    installed, but change DNS/SNI behavior only when a compatible explicit HTTP
+    tunnel proxy is configured (or inside the scoped Web Fetch context).
+    """
     global _PATCHED
     if _PATCHED:
         return
@@ -117,7 +131,7 @@ def _install_proxy_compatibility() -> None:
 async def proxy_compatible_web_fetch() -> AsyncIterator[None]:
     """Scope the upstream Pydantic AI fetcher to explicit HTTP proxies."""
 
-    _install_proxy_compatibility()
+    install_proxy_compatibility()
     token = _PROXY_FETCH_ACTIVE.set(_http_tunnel_proxy_configured())
     try:
         yield

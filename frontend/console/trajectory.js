@@ -1,5 +1,6 @@
 import { copyTextToClipboard } from "./message-actions.js?v=20260819-1";
 import { parseServerTimestamp } from "./time.js?v=20260831-1";
+import { renderWebImagePreview } from "./web-image.js?v=20260901-1";
 
 const TOOL_KINDS = new Set(["tool", "planning", "deferred"]);
 const PRESENTATION_ONLY_SSE_TYPES = new Set(["session_title"]);
@@ -702,7 +703,8 @@ function renderPayloadResultSections({ payload, result }) {
 
 function renderToolSummary(event) {
   const result = toolResultValue(event);
-  return `${renderPayloadResultSections({
+  const imagePreview = renderWebImagePreview(result, { className: "trajectory-web-image-preview" });
+  return `${imagePreview ? renderSummarySection("Web Image", imagePreview) : ""}${renderPayloadResultSections({
     payload: event.payload?.args ?? event.payload,
     result,
   })}${renderLocalFileDownload(result)}`;

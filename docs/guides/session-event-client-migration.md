@@ -1,6 +1,6 @@
 # Conversation/History 客户端迁移清单
 
-DeepAgent `0.6.5` 的唯一数据库事实源是 `chat_session_events`。普通聊天客户端不解析 Event：
+DeepAgent `0.6.6` 的唯一数据库事实源是 `chat_session_events`。普通聊天客户端不解析 Event：
 
 - `GET /api/v1/sessions/{session_id}/history`：普通聊天、工具、Plan、Deferred、附件和上下文。
 - `GET /api/v1/sessions/{session_id}/events`：仅供 Console 轨迹、审计和精确回读。

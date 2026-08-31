@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import mimetypes
 import re
 import ssl
 import time
@@ -9,23 +10,33 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urljoin, urlsplit, urlunsplit
 
 import httpx2
+from markdownify import MarkdownConverter
 from openai import AsyncOpenAI
 from pydantic_ai import Agent, ModelRetry, Tool, ToolFailed
+from pydantic_ai._ssrf import safe_download, validate_and_resolve_url
+from pydantic_ai._utils import is_text_like_media_type
 from pydantic_ai.capabilities import AbstractCapability, WebSearch
 from pydantic_ai.common_tools.duckduckgo import duckduckgo_search_tool
 from pydantic_ai.common_tools.tavily import tavily_search_tool
-from pydantic_ai.common_tools.web_fetch import web_fetch_tool
-from pydantic_ai.messages import BinaryContent, NativeToolReturnPart, ToolReturn
+from pydantic_ai.common_tools.web_fetch import (
+    WebFetchLocalTool,
+    _clean_whitespace,
+    _extract_title,
+)
+from pydantic_ai.messages import BinaryContent, ImageUrl, NativeToolReturnPart, ToolReturn
 from pydantic_ai.models.openai import OpenAIResponsesModel
 from pydantic_ai.providers.deepseek import DeepSeekProvider
 from pydantic_ai.toolsets import CombinedToolset, FunctionToolset
 
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.code_mode.file_payload import CODE_MODE_HYBRID, CODE_MODE_METADATA_KEY
-from deep_agent.web.proxy_compat import proxy_compatible_web_fetch
+from deep_agent.web.proxy_compat import (
+    install_proxy_compatibility,
+    proxy_compatible_web_fetch,
+)
 from deep_agent.web.settings import WEB_PACKAGE_CODE, WebSearchRuntimeConfig
 
 
@@ -42,6 +53,11 @@ _ALLOWED_BINARY_MEDIA_TYPES = {
     "image/png",
     "image/webp",
 }
+_IMAGE_MEDIA_TYPES = frozenset(
+    media_type
+    for media_type in _ALLOWED_BINARY_MEDIA_TYPES
+    if media_type.startswith("image/")
+)
 _WEB_FETCH_ATTEMPT_TIMEOUT_SECONDS = 30.0
 _WEB_FETCH_TOTAL_TIMEOUT_SECONDS = 50.0
 _WEB_FETCH_TOOL_TIMEOUT_SECONDS = 55.0
@@ -153,6 +169,136 @@ class WebRuntime:
     capability: AbstractCapability[AgentDeps] | None
 
 
+def _normalized_public_image_url(raw_url: str, *, base_url: str) -> str | None:
+    value = raw_url.strip()
+    if not value:
+        return None
+    absolute = urljoin(base_url, value)
+    parsed = urlsplit(absolute)
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+    ):
+        return None
+    return absolute
+
+
+class _ImagePreservingMarkdownConverter(MarkdownConverter):
+    def __init__(self, *, base_url: str) -> None:
+        super().__init__()
+        self._base_url = base_url
+
+    def convert_img(self, el, text, parent_tags):  # type: ignore[no-untyped-def]
+        alt = str(el.attrs.get("alt") or "")
+        raw_url = str(el.attrs.get("src") or "")
+        url = _normalized_public_image_url(raw_url, base_url=self._base_url)
+        if url is None:
+            return alt
+        title = str(el.attrs.get("title") or "")
+        title_part = f' "{title.replace(chr(34), r"\"")}"' if title else ""
+        return f"![{alt}]({url}{title_part})"
+
+    def convert_script(self, el, text, parent_tags):  # type: ignore[no-untyped-def]
+        return ""
+
+    def convert_style(self, el, text, parent_tags):  # type: ignore[no-untyped-def]
+        return ""
+
+
+def _html_to_markdown(html: str, *, base_url: str) -> str:
+    """Convert HTML while preserving safe image references in their source position."""
+    return _ImagePreservingMarkdownConverter(base_url=base_url).convert(html)
+
+
+def _response_public_url(response: httpx2.Response, fallback: str) -> str:
+    """Recover the public redirect URL from the SSRF-safe IP request."""
+    request = response.request
+    parsed = urlsplit(str(request.url))
+    host = request.headers.get("host")
+    if not host:
+        return fallback
+    return urlunsplit((parsed.scheme, host, parsed.path, parsed.query, ""))
+
+
+class _DeepAgentWebFetchLocalTool(WebFetchLocalTool):
+    """Pydantic Web Fetch with only the HTML image conversion behavior adapted."""
+
+    async def __call__(self, url: str):  # type: ignore[override]
+        request_headers = {"Accept": "text/markdown, text/html;q=0.9, */*;q=0.8"}
+        if self.headers:
+            request_headers.update(self.headers)
+        try:
+            response = await safe_download(
+                url,
+                allow_local=self.allow_local_urls,
+                timeout=self.timeout,
+                headers=request_headers,
+                allowed_domains=self.allowed_domains,
+                blocked_domains=self.blocked_domains,
+                max_bytes=self.max_download_bytes,
+            )
+        except (ValueError, httpx2.HTTPStatusError, httpx2.RequestError) as exc:
+            raise ModelRetry(f"Failed to fetch {url}: {exc}") from exc
+
+        media_type = response.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+        title = ""
+        if not media_type or is_text_like_media_type(media_type):
+            text = response.text
+            if media_type in {"text/markdown", "text/x-markdown"}:
+                content = text
+            elif not media_type or media_type in {"text/html", "application/xhtml+xml"}:
+                title = _extract_title(text)
+                content = _html_to_markdown(
+                    text,
+                    base_url=_response_public_url(response, url),
+                )
+            elif media_type == "application/json":
+                try:
+                    parsed = json.loads(text)
+                    content = f"```json\n{json.dumps(parsed, indent=2)}\n```"
+                except (json.JSONDecodeError, ValueError):
+                    content = text
+            else:
+                content = text
+        else:
+            return BinaryContent(
+                data=response.content,
+                media_type=media_type or "application/octet-stream",
+            )
+
+        content = _clean_whitespace(content)
+        if self.max_content_length is not None and len(content) > self.max_content_length:
+            content = content[: self.max_content_length] + "\n\n[Content truncated]"
+        return {"url": url, "title": title, "content": content}
+
+
+def web_fetch_tool(
+    *,
+    max_content_length: int | None = 50_000,
+    allow_local_urls: bool = False,
+    timeout: int = 30,
+    max_download_bytes: int | None = 50 * 1024 * 1024,
+    allowed_domains: list[str] | None = None,
+    blocked_domains: list[str] | None = None,
+    headers: dict[str, str] | None = None,
+) -> Tool[Any]:
+    """Build the pinned Pydantic Web Fetch tool with DeepAgent's HTML adapter."""
+    return Tool(
+        _DeepAgentWebFetchLocalTool(
+            max_content_length=max_content_length,
+            allow_local_urls=allow_local_urls,
+            timeout=timeout,
+            max_download_bytes=max_download_bytes,
+            allowed_domains=allowed_domains,
+            blocked_domains=blocked_domains,
+            headers=headers,
+        ).__call__,
+        name="web_fetch",
+    )
+
+
 def _web_fetch_tool() -> Tool[Any]:
     upstream = web_fetch_tool(
         max_content_length=50_000,
@@ -261,6 +407,89 @@ def _web_fetch_tool() -> Tool[Any]:
         ),
         timeout=_WEB_FETCH_TOOL_TIMEOUT_SECONDS,
         metadata={**_HYBRID_METADATA, "web_fetch": {"mode": "local"}},
+    )
+
+
+async def _probe_image_media_type(url: str) -> str:
+    """Use the existing bounded/retried Web Fetch path for extensionless URLs."""
+    result = await _web_fetch_tool().function(url)
+    value = result.return_value if isinstance(result, ToolReturn) else result
+    if not isinstance(value, BinaryContent) or value.media_type not in _IMAGE_MEDIA_TYPES:
+        raise ModelRetry("Web Image View URL did not return a supported image")
+    return value.media_type
+
+
+def _image_media_type_from_url(url: str) -> str | None:
+    parsed = urlsplit(url)
+    media_type, _ = mimetypes.guess_type(unquote(parsed.path))
+    return media_type.lower() if isinstance(media_type, str) else None
+
+
+def _web_image_view_tool() -> Tool[Any]:
+    async def web_image_view(
+        url: str,
+        force_download: bool = False,
+    ) -> ToolReturn:
+        """View one public web image with the current visual model.
+
+        Args:
+            url: A public HTTP(S) image URL without embedded credentials.
+            force_download: Download safely before constructing the next model request.
+        """
+        parsed = urlsplit(url)
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            raise ModelRetry("Web Image View only accepts absolute HTTP(S) URLs")
+        if parsed.username is not None or parsed.password is not None:
+            raise ModelRetry("Web Image View does not accept credentialed URLs")
+        # ``force_download=True`` is consumed later, while Pydantic AI assembles
+        # the next model request.  Install the explicit-proxy DNS/SNI shim now so
+        # that deferred safe download keeps the validated public hostname.
+        install_proxy_compatibility()
+        try:
+            await validate_and_resolve_url(url, allow_local=False)
+        except (ValueError, httpx2.RequestError) as exc:
+            raise ModelRetry(f"Web Image View rejected URL: {exc}") from exc
+
+        media_type = _image_media_type_from_url(url)
+        if media_type is None:
+            media_type = await _probe_image_media_type(url)
+        elif media_type not in _IMAGE_MEDIA_TYPES:
+            raise ModelRetry(
+                f"Web Image View does not accept response type: {media_type}"
+            )
+
+        image = ImageUrl(
+            url=url,
+            media_type=media_type,
+            force_download=force_download,
+        )
+        return ToolReturn(
+            return_value=image,
+            metadata={
+                "sources": [{"url": url, "title": None}],
+                "web_image_view": {
+                    "mode": "local",
+                    "media_type": media_type,
+                    "force_download": force_download,
+                    "ssrf_validated": True,
+                },
+                "web_content_untrusted": True,
+            },
+        )
+
+    return Tool(
+        web_image_view,
+        name="web_image_view",
+        description=(
+            "Make one public HTTP(S) image available to the current visual model. "
+            "Use image URLs discovered in Web Fetch Markdown. Private, loopback, "
+            "cloud-metadata and credentialed URLs are blocked."
+        ),
+        timeout=_WEB_FETCH_TOOL_TIMEOUT_SECONDS,
+        metadata={
+            "web_content_untrusted": True,
+            "web_image_view": {"mode": "local"},
+        },
     )
 
 
@@ -556,8 +785,15 @@ def _web_search_tool(config: WebSearchRuntimeConfig) -> Tool[Any]:
     )
 
 
-def build_web_runtime(config: WebSearchRuntimeConfig) -> WebRuntime:
-    fetch_toolset = FunctionToolset([_web_fetch_tool()])
+def build_web_runtime(
+    config: WebSearchRuntimeConfig,
+    *,
+    image_capable: bool = False,
+) -> WebRuntime:
+    web_tools = [_web_fetch_tool()]
+    if image_capable:
+        web_tools.append(_web_image_view_tool())
+    fetch_toolset = FunctionToolset(web_tools)
     if config.mode == "native":
         return WebRuntime(
             toolset=fetch_toolset,

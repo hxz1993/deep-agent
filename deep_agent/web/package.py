@@ -26,5 +26,10 @@ def build_web_tool_package() -> ToolPackage:
                 display_name="Web Fetch",
                 description="抓取公开 HTTP(S) 网页并转换为受限 Markdown。",
             ),
+            ToolInfo(
+                name="web_image_view",
+                display_name="Web Image View",
+                description="让视觉模型读取公开 HTTP(S) 图片。",
+            ),
         ],
     )

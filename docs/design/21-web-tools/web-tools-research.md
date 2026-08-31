@@ -28,7 +28,7 @@
 
 ## 上游能力与本仓采用
 
-| 能力 | 上游已有 | v0.6.5采用方式 |
+| 能力 | 上游已有 | DeepAgent采用方式 |
 | --- | --- | --- |
 | Provider原生搜索 | Pydantic AI `WebSearch` | 当前模型模式，失败不降级 |
 | DuckDuckGo | Pydantic AI Common Tool | 固定Provider模式 |
@@ -36,6 +36,7 @@
 | Exa | Harness `ExaSearch` | 固定Provider模式，只导出搜索 |
 | You.com | Harness `YouSearch` | 固定Provider模式，只导出搜索 |
 | SSRF-safe Fetch | Pydantic AI `WebFetch` | 5 MiB/50K/30秒、禁止私网与凭据 |
+| 工具返回视觉内容 | Pydantic AI `ImageUrl`/`BinaryContent` | v0.6.6新增`web_image_view`返回小型URL引用；直接Fetch二进制保持原行为 |
 | DeepSeek搜索 | DeepSeek Responses `web_search` | 薄适配层，默认`deepseek-v4-flash` |
 | Kimi搜索 | Kimi `$web_search` | 薄适配层，默认`kimi-k3` |
 
@@ -48,5 +49,17 @@
 
 Researcher不是第3个网络工具，也不是Exa/Tavily的别名。它通常是：拆分问题 → 多次Search →
 按URL Fetch → 交叉验证 → 带来源综合。Pydantic AI/Harness用Agent、WebSearch、WebFetch、
-ToolOutputLimits和可选子任务组合表达；v0.6.5先提供底层两工具，后续可在不改变`builtin:web`、
-数据库或Provider配置的前提下增加Research Skill/Agent模板。
+ToolOutputLimits和可选子任务组合表达；v0.6.5先提供Search/Fetch，v0.6.6补充按需视觉读取。
+后续仍可在不改变数据库或Provider配置的前提下增加Research Skill/Agent模板。
+
+## 图片结论
+
+Pydantic AI原生WebFetch考虑了“直接URL就是图片”的场景，返回`BinaryContent`；这适合必须由宿主
+下载的媒体，但字节会成为工具结果，可能触发大工具治理。它的HTML转换默认移除`img`，因此模型
+既不知道图片位置，也不能自主选图。
+
+v0.6.6不自动下载整页图片，也不把图片Base64塞入历史。Fetch只保留原位置Markdown引用；
+`web_image_view`返回原生`ImageUrl`，Pydantic AI在同一个Agent Loop的下一次Provider请求中把它映射
+为URL视觉参数，或在`force_download=true`时临时下载后映射。这个中间对象可序列化为URL/MIME/模式，
+不是Code Mode变量，也不要求附件上传。AI Labs中常见的浏览器截图、页面渲染或视觉附件属于更重的
+浏览器/文件链路；当前Web课题只提供公开静态图片的最小、安全读取路径。

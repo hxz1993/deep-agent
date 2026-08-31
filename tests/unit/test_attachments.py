@@ -4,7 +4,7 @@ import unittest
 import warnings
 from unittest.mock import AsyncMock, patch
 
-from pydantic_ai.messages import ModelRequest, UserPromptPart
+from pydantic_ai.messages import ImageUrl, ModelRequest, ToolReturnPart, UserPromptPart
 
 from deep_agent.agent.attachments import (
     attachment_ref_dict,
@@ -115,6 +115,37 @@ class TestAttachments(unittest.IsolatedAsyncioTestCase):
         assert isinstance(first, UserPromptPart)
         self.assertIn("[附件: old.jpg]", str(first.content))
         mock_download.assert_not_awaited()
+
+    async def test_prior_web_image_is_projected_to_lightweight_url_reference(self) -> None:
+        history = [
+            ModelRequest(
+                parts=[
+                    ToolReturnPart(
+                        "web_image_view",
+                        ImageUrl(
+                            url="https://cdn.example.com/chart.png",
+                            media_type="image/png",
+                            force_download=True,
+                        ),
+                        "image-1",
+                    )
+                ]
+            )
+        ]
+
+        resolved = await resolve_history_for_llm(
+            history,
+            current_user_index=None,
+            request_headers={},
+        )
+
+        part = resolved[0].parts[0]
+        self.assertIsInstance(part, ToolReturnPart)
+        self.assertEqual(part.content["kind"], "web-image-reference")
+        self.assertEqual(part.content["url"], "https://cdn.example.com/chart.png")
+        self.assertEqual(part.content["media_type"], "image/png")
+        self.assertTrue(part.content["force_download"])
+        self.assertNotIn("base64", str(part.content).lower())
 
     def test_history_api_includes_attachments(self) -> None:
         ref = attachment_ref_dict(

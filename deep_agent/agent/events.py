@@ -22,6 +22,7 @@ from pydantic_ai.messages import (
 )
 from deep_agent.agent.tool_output_limits import tool_result_artifacts
 from deep_agent.agent.planning import is_planning_tool, plan_snapshot_from_part
+from deep_agent.web.images import safe_web_image_value
 
 
 def text_delta(delta: str) -> dict[str, Any]:
@@ -40,7 +41,7 @@ def tool_call(tool: str, args: Any, tool_call_id: str | None = None) -> dict[str
         payload["source"] = "planning"
     elif tool == "web_search":
         payload.update(source="web", execution="provider")
-    elif tool == "web_fetch":
+    elif tool in {"web_fetch", "web_image_view"}:
         payload.update(source="web", execution="local")
     return payload
 
@@ -64,7 +65,7 @@ def tool_result(
         payload["source"] = "planning"
     elif tool == "web_search":
         payload.update(source="web", execution="provider")
-    elif tool == "web_fetch":
+    elif tool in {"web_fetch", "web_image_view"}:
         payload.update(source="web", execution="local")
     return payload
 
@@ -149,12 +150,15 @@ def cancelled(
 
 
 def _to_jsonable(value: Any) -> Any:
+    value = safe_web_image_value(value)
     if isinstance(value, (str, int, float, bool)) or value is None:
         return value
     if hasattr(value, "model_dump"):
-        return value.model_dump()
-    if isinstance(value, (list, dict)):
-        return value
+        return _to_jsonable(value.model_dump())
+    if isinstance(value, list):
+        return [_to_jsonable(child) for child in value]
+    if isinstance(value, dict):
+        return {str(key): _to_jsonable(child) for key, child in value.items()}
     return str(value)
 
 
@@ -184,7 +188,7 @@ def _map_tool_return_part(part: ToolReturnPart) -> dict[str, Any] | None:
         artifacts=tool_result_artifacts(part),
         plan=plan_snapshot_from_part(part),
     )
-    if part.tool_name in {"web_search", "web_fetch"} and isinstance(part.metadata, dict):
+    if part.tool_name in {"web_search", "web_fetch", "web_image_view"} and isinstance(part.metadata, dict):
         audit = part.metadata.get(part.tool_name)
         if isinstance(audit, dict):
             payload["web"] = _to_jsonable(audit)

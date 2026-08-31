@@ -15,6 +15,7 @@ class WebFetchProxyCompatibilityTests(unittest.IsolatedAsyncioTestCase):
         with (
             patch.object(proxy_compat, "_ORIGINAL_RESOLVE_HOSTNAME", original),
             patch.object(proxy_compat, "_public_resolve_hostname", public),
+            patch.object(proxy_compat, "_PATCHED", False),
             patch.dict(os.environ, {"HTTPS_PROXY": "http://127.0.0.1:7897"}),
         ):
             self.assertEqual(
@@ -29,6 +30,25 @@ class WebFetchProxyCompatibilityTests(unittest.IsolatedAsyncioTestCase):
 
         original.assert_awaited_once_with("github.com")
         public.assert_awaited_once_with("github.com")
+
+    async def test_installed_proxy_compatibility_covers_deferred_media_downloads(
+        self,
+    ) -> None:
+        original = AsyncMock(return_value=["197.18.0.27"])
+        public = AsyncMock(return_value=["140.82.114.4"])
+        with (
+            patch.object(proxy_compat, "_ORIGINAL_RESOLVE_HOSTNAME", original),
+            patch.object(proxy_compat, "_public_resolve_hostname", public),
+            patch.object(proxy_compat, "_PATCHED", True),
+            patch.dict(os.environ, {"HTTPS_PROXY": "http://127.0.0.1:7897"}),
+        ):
+            self.assertEqual(
+                await proxy_compat._resolve_hostname("python.org"),
+                ["140.82.114.4"],
+            )
+
+        original.assert_not_awaited()
+        public.assert_awaited_once_with("python.org")
 
     async def test_proxy_tunnel_preserves_validated_hostname_for_tls(self) -> None:
         start_tls = AsyncMock(return_value=SimpleNamespace())

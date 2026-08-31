@@ -3,7 +3,7 @@
 DeepAgent 是基于 FastAPI、Pydantic AI 和 SQLAlchemy 的多用户 Agent 服务，并
 随服务发布一体化运维控制台。
 
-当前产品版本为 `0.6.5`。`deep_agent.__version__` 是唯一代码版本来源，FastAPI、
+当前产品版本为 `0.6.6`。`deep_agent.__version__` 是唯一代码版本来源，FastAPI、
 `GET /info` 和 Console 顶部版本徽标均读取该值。后续正式发布默认递增
 `MAJOR.MINOR.PATCH` 的第三位，只有明确规划重大版本时才调整前两位。产品版本不通过
 环境变量或数据库覆盖，也不等同于 Alembic 数据库结构 revision。
@@ -28,8 +28,9 @@ v0.6.3进一步收紧 SDK 函数作用域、可信返回类型和嵌套审计，
 加入按图片尺寸计价的上下文预算估算；未知路由仍保守回退。
 使用和安全边界见 [`docs/guides/code-mode.md`](docs/guides/code-mode.md)。
 
-v0.6.5增加默认不关联的`builtin:web`，固定提供公开互联网`web_search`和SSRF-safe
-`web_fetch`。Search全局明确选择当前模型或一个固定Provider，不执行隐式降级；Web配置与安全边界见
+v0.6.5增加默认不关联的`builtin:web`和公开互联网`web_search/web_fetch`；v0.6.6让Fetch保留
+页面图片位置，并为图片输入模型增加`web_image_view`，通过原生`ImageUrl`按需读取公网图片。
+Search全局明确选择当前模型或一个固定Provider，不执行隐式降级；Web配置与安全边界见
 [`docs/design/21-web-tools/`](docs/design/21-web-tools/)。
 
 ## 项目结构
@@ -159,7 +160,8 @@ DeepAgent 当前支持：
 - 内置工具：
   - `builtin:general`（通用工具）：只包含 `get_current_time`。
   - `builtin:sandbox`（Python 沙箱）：只包含 `execute_python`。
-  - `builtin:web`（公开网络）：包含 `web_search` 与 `web_fetch`，默认不关联。
+  - `builtin:web`（公开网络）：包含 `web_search`、`web_fetch` 与按模型能力注入的
+    `web_image_view`，默认不关联。
 - 系统工具不是 ToolPackage。Harness任务规划、`load_capability`、Skill Resource、`read_file`、
   `export_file_to_download_center`、`read_tool_result`、`search_tools` 和 MCP Resource
   由运行时按 Agent/Run 条件自动注入，只在 Console 的只读“系统工具”目录中说明。

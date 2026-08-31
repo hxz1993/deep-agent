@@ -14,7 +14,8 @@ import {
   planPanelState,
   processDisclosureLabel,
 } from "./assistant-presentation.js?v=20260827-1";
-import { createTrajectoryController } from "./trajectory.js?v=20260831-13";
+import { createTrajectoryController } from "./trajectory.js?v=20260901-1";
+import { bindWebImagePreviewFallback, renderWebImagePreview } from "./web-image.js?v=20260901-1";
 import { parseServerTimestamp, serverTimestampMilliseconds } from "./time.js?v=20260831-1";
 import {
   latestPendingDeferredTool,
@@ -48,6 +49,8 @@ import {
  * ------------------------------------------------------------------ */
 
 const DEFAULT_BASE_URL = defaultApiBaseUrl();
+
+bindWebImagePreviewFallback();
 
 const BUILTIN_UI_TOOLS = new Set(["builtin__confirm", "builtin__choice"]);
 const LEGACY_BUILTIN_UI_TOOLS = new Set(["confirm_action", "ask_user_choice"]);
@@ -2656,6 +2659,8 @@ function pretty(v) {
 }
 
 function renderToolResult(result) {
+  const imagePreview = renderWebImagePreview(result, { className: "tool-web-image-preview" });
+  if (imagePreview) return imagePreview;
   if (typeof result === "string") {
     return `<div class="md-content tool-result-md markdown-body">${renderMarkdown(result)}</div>`;
   }

@@ -44,7 +44,7 @@ tests/
 | `test_agent_max_requests.py` | 全局 request 上限、旧 Agent 字段 422 兼容提示 |
 | `test_code_mode.py` | Hybrid Code Mode 装配、MCP 双通道、Monty 调用、文件变量与脱敏 |
 | `test_global_settings.py` | 运行设置安全白名单、Web Search唯一配置、六Provider校验、Key掩码/保留和草稿测试 |
-| `test_web_tools.py`、`test_web_proxy_compat.py` | `builtin:web`目录、显式注入、固定Provider无降级、SSRF-safe Fetch边界及HTTP代理fake-IP/SNI兼容 |
+| `test_web_tools.py`、`test_web_proxy_compat.py` | `builtin:web`目录、视觉模型条件注入、HTML图片位置与URL规范化、固定Provider无降级、SSRF-safe Fetch/Image边界及HTTP代理fake-IP/SNI兼容 |
 | `test_global_settings_migration_dialects.py` | Alembic 012三方言DDL与默认配置种子 |
 | `test_console_admin_auth.py` | 企业管理员放行、普通用户与固定admin拒绝、401/503、凭证缓存、管理路由审计和运行接口开放边界 |
 | `test_builtin_mcp_config.py` | builtin MCP 配置规范化 |

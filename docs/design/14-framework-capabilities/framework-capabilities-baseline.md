@@ -1,4 +1,4 @@
-# Pydantic AI与Harness采用基线（v0.6.5）
+# Pydantic AI与Harness采用基线（v0.6.6）
 
 当前固定版本：`pydantic-ai-slim[openai,anthropic,google,mcp,duckduckgo,tavily,web-fetch]==2.35.1`、
 `pydantic-ai-harness[skills,exa,youdotcom]==0.26.0`。联动依赖固定为`openai==3.5.0`、
@@ -15,10 +15,11 @@ Harness仍是0.x能力库，升级必须固定准确版本并跑完整回归。
 | Harness 0.25的嵌套摘要UsageLimits与可覆盖摘要指令 | 当前自研Event Compaction仍是唯一压缩事实源，不叠加Harness摘要链 |
 | Harness 0.26的Shell错误恢复与BatchSpendStore | 当前未启用Shell/SpendStore，不因此增加功能 |
 | Harness 0.22～0.24的CodeMode | v0.6.2以显式`builtin:code-mode`部分采用；v0.6.3补充SDK作用域、可信返回类型和嵌套审计总量上限 |
-| Core WebSearch/WebFetch与Harness Exa/You.com | v0.6.5以显式`builtin:web`采用；Provider路由、Agent授权和审计仍由DeepAgent负责 |
+| Core WebSearch/WebFetch、`ImageUrl`与Harness Exa/You.com | v0.6.5以显式`builtin:web`采用搜索/抓取；v0.6.6增加HTML图片引用与按视觉模型注入的`web_image_view`，Provider路由、Agent授权和审计仍由DeepAgent负责 |
 | PromptInjectionDefender、Playwright和FallbackCompaction | 只记录为后续候选；当前不安装、不配置、不向模型披露 |
 
-v0.6.5新增Web管理接口和`global_settings`，不改变Chat、SSE、History、Event、Plan、Deferred、附件或MCP契约。
+v0.6.5新增Web管理接口和`global_settings`；v0.6.6复用原生`ImageUrl`并保持现有Chat、SSE、
+History、Event、Plan、Deferred、附件、ToolOutputLimits和MCP契约。
 
 ## 职责边界
 

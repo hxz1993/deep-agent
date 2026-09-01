@@ -281,6 +281,12 @@ user/App/Space上下文时，`export_file_to_download_center`始终直接披露�
 `chat_session_events`两张会话事实表留空；新增配置表不得再依赖手工白名单。上传Skill原ZIP属于
 平台外部文件，不进入SQLite配置备份，完整留存需另外执行Skill“导出全部”。
 
+无会话新环境可通过企业管理员接口`POST /api/v1/configuration/import`做同Revision初始化：默认
+`apply=false`只预检，正式执行必须同时传`apply=true&confirm=true`。配置DB只使用请求级临时文件；
+上传Skill原包进入目标平台File Store并回写新File ID。导入不得改写目标`alembic_version`，不得跨
+Revision转换，并必须原样保留Agent、Provider、Model等业务主键。实现位于
+`services/configuration_import.py`，契约见`docs/guides/configuration-import.md`。
+
 ## 扩展指南
 
 ### 内置工具包

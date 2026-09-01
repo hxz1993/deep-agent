@@ -5,6 +5,10 @@
 
 ## v0.6.6
 
+- 新增企业管理员接口`POST /api/v1/configuration/import`，用于无会话新环境的同Alembic Revision
+  配置初始化；默认只预检，显式确认后在单事务中保留全部业务主键完成替换，不执行迁移或改标。
+- 配置备份DB仅作为请求级临时文件；上传Skill通过全量导出包迁移到目标File Store并回写新File ID，
+  数据库失败时回滚并尽力清理本次上传文件。
 - `builtin:web`增加仅向图片输入模型披露的`web_image_view(url, force_download=false)`；工具返回
   Pydantic AI原生`ImageUrl`，由下一次模型请求按Provider能力直传URL或安全下载，不进入Code Mode。
 - 显式HTTP隧道代理的fake-IP/SNI兼容同时覆盖`force_download=true`的延迟图片下载；Pydantic AI仍负责

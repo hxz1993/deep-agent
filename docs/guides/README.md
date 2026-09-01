@@ -16,6 +16,7 @@
 | [`ui-tools-external.md`](ui-tools-external.md) | 集成方使用和配置 UI 工具的说明 |
 | [`mcp-resources.md`](mcp-resources.md) | MCP Resource 探测、代理工具和安全边界 |
 | [`skills.md`](skills.md) | Skill 安装、Agent 授权、渐进披露、迁移与发布复测 |
+| [`configuration-import.md`](configuration-import.md) | 无会话新环境的同Revision配置预检与初始化接口 |
 | [`code-mode.md`](code-mode.md) | Hybrid Code Mode 启用、工具选择、文件变量、边界与排障 |
 | [`console-admin-access.md`](console-admin-access.md) | Console 企业管理员判定、管理API门禁和业务接口边界 |
 | [`console-ui-guidelines.md`](console-ui-guidelines.md) | Console 页面、弹窗、表单、容器、控件和视觉验收规范 |

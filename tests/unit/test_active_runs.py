@@ -14,6 +14,7 @@ class ActiveRunRegistryTests(unittest.TestCase):
             user_id="user-1",
         )
 
+        self.assertEqual(registry.active_count(), 1)
         self.assertIs(registry.get(agent_id="agent-1", session_id="session-1"), entry)
         self.assertFalse(
             registry.request_cancel(
@@ -32,6 +33,7 @@ class ActiveRunRegistryTests(unittest.TestCase):
         self.assertEqual(entry.status, "cancel_requested")
 
         registry.unregister(entry)
+        self.assertEqual(registry.active_count(), 0)
         self.assertIsNone(registry.get(agent_id="agent-1", session_id="session-1"))
 
     def test_repeated_cancel_and_cancel_all_are_idempotent(self) -> None:
@@ -45,5 +47,5 @@ class ActiveRunRegistryTests(unittest.TestCase):
         )
         registry.cancel_all()
         registry.cancel_all()
+        self.assertEqual(registry.active_count(), 0)
         self.assertIsNone(registry.get(agent_id=None, session_id="session-1"))
-

@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from deep_agent.agent.provider_registry import ProviderRuntimeConfig
+from deep_agent.capabilities.codes import canonical_tool_package_codes
 from deep_agent.db.models import Agent, LlmModel, LlmProvider
 
 DEFAULT_INSTRUCTIONS = (
@@ -72,7 +73,7 @@ class AgentSpec:
             name=row.name,
             model=llm_model.model,
             instructions=row.prompt,
-            capabilities=list(row.capabilities or []),
+            capabilities=canonical_tool_package_codes(row.capabilities),
             skills=list(row.skills or []),
             temperature=row.temperature,
             agent_id=row.id,
@@ -100,7 +101,7 @@ class AgentSpec:
             name=name,
             model=llm_model.model,
             instructions=instructions or DEFAULT_INSTRUCTIONS,
-            capabilities=list(capabilities or []),
+            capabilities=canonical_tool_package_codes(capabilities),
             skills=list(skills or []),
             temperature=temperature,
             input_modalities=_input_modalities(llm_model),

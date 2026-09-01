@@ -42,7 +42,8 @@ tests/
 | 文件 | 覆盖 |
 | --- | --- |
 | `test_agent_max_requests.py` | 全局 request 上限、旧 Agent 字段 422 兼容提示 |
-| `test_code_mode.py` | Hybrid Code Mode 装配、MCP 双通道、Monty 调用、文件变量与脱敏 |
+| `test_code_mode.py` | PTC新旧编码兼容、MCP双通道、Monty调用、URL/File ID文件变量与脱敏 |
+| `test_sandbox_*.py` | Python沙箱公网边界、FileStore输入、`deepagent_files`产物发布、回滚、依赖探针与子进程清理 |
 | `test_global_settings.py` | 运行设置安全白名单、Web Search唯一配置、六Provider校验、Key掩码/保留和草稿测试 |
 | `test_web_tools.py`、`test_web_proxy_compat.py` | `builtin:web`目录、视觉模型条件注入、HTML图片位置与URL规范化、固定Provider无降级、SSRF-safe Fetch/Image边界及HTTP代理fake-IP/SNI兼容 |
 | `test_console_admin_auth.py` | 企业管理员放行、普通用户与固定admin拒绝、401/503、凭证缓存、管理路由审计和运行接口开放边界 |

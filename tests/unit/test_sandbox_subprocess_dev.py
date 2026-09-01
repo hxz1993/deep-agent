@@ -19,7 +19,7 @@ from deep_agent.sandbox.subprocess_dev.rlimit import (
     rlimit_as_supported,
     rss_bytes_to_rlimit_as,
 )
-from deep_agent.sandbox.types import ExecuteRequest
+from deep_agent.sandbox.types import ExecuteRequest, SandboxInputFile
 from tests.helpers.sandbox import FAKE_SANDBOX_PYTHON, sandbox_test_python
 
 
@@ -53,6 +53,8 @@ class BuildWorkerEnvTests(unittest.TestCase):
         self.assertNotIn("PYTHONHOME", env)
         self.assertNotIn("DEEP_AGENT_SECRET", env)
         self.assertEqual(env.get("PYTHONNOUSERSITE"), "1")
+        self.assertEqual(env.get("NO_PROXY"), "*")
+        self.assertEqual(env.get("no_proxy"), "*")
 
     def test_rss_budget_translates_to_rlimit_as(self) -> None:
         self.assertEqual(rss_bytes_to_rlimit_as(512 * 1024 * 1024), 1536 * 1024 * 1024)
@@ -339,6 +341,79 @@ class SubprocessBackendTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(result.error)
         self.assertEqual(result.backend, BACKEND_NAME)
         self.assertEqual(result.security_level, "none")
+
+    async def test_expression_reads_authorized_input_and_collects_published_output(self) -> None:
+        result = await self.backend.execute(
+            ExecuteRequest(
+                request_id="files-1",
+                code=(
+                    "from deepagent_files import input_path, publish_path\n"
+                    "source = input_path('source-id')\n"
+                    "target = publish_path('result.txt', mime='text/plain')\n"
+                    "open(target, 'wb').write(open(source, 'rb').read() + b'!')\n"
+                    "{'saved': True}"
+                ),
+                files=(
+                    SandboxInputFile.from_bytes(
+                        "inputs/source.txt",
+                        b"hello",
+                        file_id="source-id",
+                    ),
+                ),
+            )
+        )
+        self.assertEqual(result.status, "ok")
+        self.assertEqual(result.result, {"saved": True})
+        self.assertEqual(len(result.published_files), 1)
+        output = result.published_files[0]
+        self.assertEqual(output.file_name, "result.txt")
+        self.assertEqual(output.mime, "text/plain")
+        self.assertEqual(output.data, b"hello!")
+        self.assertNotIn("published_files", result.model_dump(mode="json"))
+
+    async def test_missing_published_file_fails_without_partial_output(self) -> None:
+        result = await self.backend.execute(
+            ExecuteRequest(
+                request_id="files-missing",
+                code=(
+                    "from deepagent_files import publish_path\n"
+                    "publish_path('missing.txt', mime='text/plain')\n"
+                    "{'saved': True}"
+                ),
+            )
+        )
+        self.assertEqual(result.status, "error")
+        self.assertEqual(result.published_files, ())
+        assert result.error is not None
+        self.assertIn("FileNotFoundError", result.error.message)
+
+    async def test_public_network_is_allowed_and_private_network_is_blocked(self) -> None:
+        public = await self.backend.execute(
+            ExecuteRequest(
+                request_id="public-net",
+                code=(
+                    "import urllib.request\n"
+                    "urllib.request.urlopen('https://example.com', timeout=10).status"
+                ),
+                timeout_ms=15_000,
+            )
+        )
+        self.assertEqual(public.status, "ok")
+        self.assertEqual(public.result, 200)
+
+        private = await self.backend.execute(
+            ExecuteRequest(
+                request_id="private-net",
+                code=(
+                    "import socket\n"
+                    "socket.create_connection(('127.0.0.1', 80), timeout=1)"
+                ),
+                timeout_ms=5_000,
+            )
+        )
+        self.assertEqual(private.status, "error")
+        assert private.error is not None
+        self.assertIn("blocks non-public", private.error.message)
 
     async def test_timeout_returns_timeout_error(self) -> None:
         result = await self.backend.execute(

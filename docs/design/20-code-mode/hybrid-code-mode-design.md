@@ -1,4 +1,4 @@
-# Hybrid Code Mode 设计
+# PTC 程序编排设计
 
 ## 1. 目标与非目标
 
@@ -10,29 +10,30 @@ MCP 原生调用，也不替代完整 CPython 沙箱。
 | 运行时 | Harness CodeMode + Monty Python 子集 | 独立 CPython 子进程 |
 | 状态 | 同一 Pydantic Run 内 REPL 可复用 | 每次调用全新进程 |
 | 可调用工具 | 当前已授权、已披露 MCP + `load_file_data` | 不可调用 MCP |
-| 文件/网络/Shell | 无宿主文件、网络、环境变量、Shell、pip | 只允许受控输入和预装包 |
-| 适用 | 工具编排和中间结果收敛 | pandas/numpy 计算、Skill 固定脚本 |
+| 文件/网络/Shell | 无宿主文件、任意Socket、环境变量、Shell、pip；文件只经`load_file_data`中转 | 受控FileStore输入、公开网络和预装包 |
+| 适用 | MCP编排与文件原样中转 | 文件下载、解析、转换、生成与数据计算 |
 
-本期不实现 Shell、Playwright、Host FileSystem、Monty Mount、通用 Artifact CRUD、沙箱二进制输出、
+本期不实现 Shell、Playwright、Host FileSystem、Monty Mount、通用 Artifact CRUD、
 Tool Approval 或外部工作流事实表。
 
 ## 2. 装配
 
 ```text
-Agent.capabilities 包含 builtin:code-mode
+Agent.capabilities 包含 builtin:ptc
   → 注册 code-only load_file_data Toolset
   → 已授权 MCP Toolset 外包 FilePayloadResolvingToolset
   → HybridCodeMode(outermost) 包装 ToolSearch
   → 模型同时看到普通 MCP Schema 与 run_code
 ```
 
-未关联该包时不注入 `run_code`，也不包装 MCP。关联 Code Mode 不会自动关联任何 MCP；权限仍只来自
+未关联该包时不注入`run_code`，也不包装MCP。旧`builtin:code-mode`只在读取、运行和配置导入时
+映射为`builtin:ptc`；新保存和导出统一写新编码。关联PTC不会自动关联任何MCP；权限仍只来自
 `mcp:<name>`。MCP Resource、Planning、History、文件读取、Sandbox、UI/HITL/Deferred、Approval、
-导出与 Capability/Search 控制工具均不会成为 Monty 函数。
+导出、Web工具与Capability/Search控制工具均不会成为Monty函数。
 
 `HybridCodeModeToolset`复用官方执行器、类型检查、调用预算和资源限制，只调整：
 
-1. 通过内部 metadata 选择 MCP 与 code-only helper。
+1. 只选择已授权MCP与code-only helper；不依赖Web工具metadata。
 2. 将已披露 MCP 重新加入普通原生工具目录。
 3. 动态目录只列函数名和别名，不复制外层 JSON Schema。
 4. 将官方完整嵌套调用 metadata 投影为有界、脱敏摘要。
@@ -53,22 +54,24 @@ ToolSearch 未披露的工具不会进入任一模型可调用路径。工具被
 
 协议名规范化为 Python 标识符，例如 `wecom-doc_media_upload` 变为
 `wecom_doc_media_upload`。非字母数字字符替换为下划线，关键字和数字开头安全改名。两个协议名若
-规范化后碰撞，则二者都保留原生调用但不进入 Code Mode，并记录不含参数的告警。
+规范化后碰撞，则二者都保留原生调用但不进入PTC，并记录不含参数的告警。
 
 ## 4. 文件变量
 
 ```python
 load_file_data(
-    file_id: str,
+    file_id: str | None = None,
+    url: str | None = None,
     encoding: Literal["base64", "text"] = "base64",
     text_encoding: str = "utf-8",
     max_chars: int = 65536,
 ) -> FileData
 ```
 
-授权来源仅限当前会话附件和当前会话 Tool Result Artifact。复用 FileStore、User/App/Space、原始 Event
-授权、Run 缓存与 Hash 校验。拒绝宿主路径、URL、其他会话或用户文件、猜测 File ID 和超过 20 MiB
-的文件。
+`file_id`与`url`必须且只能提供一个。File ID授权来源限当前会话附件、大工具结果与Python生成文件，
+复用FileStore、User/App/Space、原始Event授权、Run缓存与Hash校验。URL只抓取公开HTTP(S)文件，
+复用安全下载、重试和代理兼容，阻断凭据URL、私网、回环、链路本地、云元数据与重定向绕过。
+两种来源都拒绝超过20 MiB；URL字节不写FileStore。
 
 `base64` 模式返回 `deepagent-file-data://<run-token>`，真实字节只在 `AgentDeps` 的 Run 内存中保留。
 MCP Wrapper 递归扫描参数，仅在字符串完整等于有效 Token 时替换；局部嵌入不替换，伪造、过期或
@@ -84,15 +87,15 @@ MCP Wrapper 递归扫描参数，仅在字符串完整等于有效 Token 时替�
 结果继续由 `ToolOutputLimits + Spill` 处理；嵌套审计本身还有固定总字符上限，超过后只记录剩余
 调用数量，不拆成新的会话 Event。
 
-Console 仍把它作为普通工具，但轨迹使用独立 `CODE` 标签，并提供只读、可复制、Python 高亮的
+Console仍把它作为普通工具，但轨迹使用独立`PTC`标签，并提供只读、可复制、Python高亮的
 Code 页签。该展示直接读取既有 Tool Call 参数，不增加客户端协议字段。
 
 ## 6. 资源与失败
 
 - 每次 `run_code` 最多 100 次嵌套工具调用。
 - Monty Session 最长 30 秒、最大 256 MiB；同一 Run 可用 `restart=true` 重置状态。
-- 不配置 OS Access、Mount、网络、Shell 或第三方包。
+- 不配置OS Access、Mount、任意Socket、Shell或第三方包；公开URL只经受控`load_file_data`下载。
 - 正式取消向 Monty 和正在执行的 MCP 传播。
 - 参数、语法、类型和运行错误沿用 Harness ModelRetry；不自动重跑整个代码片段。
 - 副作用工具默认顺序执行；不确定网络失败后先读取目标状态，不盲目重放。
-- Deferred/Approval 不在 Code Mode 内往返，继续使用外层原生工具协议。
+- Deferred/Approval不在PTC内往返，继续使用外层原生工具协议。

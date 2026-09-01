@@ -12,6 +12,7 @@ from loguru import logger
 from sqlalchemy import Boolean, DateTime, Float, Integer, func, inspect, select, text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_engine
 
+from deep_agent.capabilities.codes import canonical_tool_package_codes
 from deep_agent.db.configuration_transfer import (
     SESSION_TABLES,
     backup_scope_manifest,
@@ -355,6 +356,10 @@ async def inspect_configuration_backup(
                 table = Base.metadata.tables[table_name]
                 result = await connection.execute(select(table))
                 rows[table_name] = [dict(row) for row in result.mappings().all()]
+            for row in rows.get("agents", []):
+                row["capabilities"] = canonical_tool_package_codes(
+                    row.get("capabilities") or []
+                )
 
             source = BackupSource(
                 environment=str(info["environment"]),

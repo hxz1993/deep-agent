@@ -29,6 +29,7 @@ from deep_agent.agent.tool_discovery import (
     build_mcp_discovery_toolset,
     search_deferred_tools,
 )
+from deep_agent.capabilities.codes import is_ptc_selected
 from deep_agent.capabilities.registry import ToolPackage, ToolPackageRegistry
 from deep_agent.code_mode import FilePayloadResolvingToolset, HybridCodeMode
 from deep_agent.options import OPTION
@@ -205,7 +206,7 @@ def _toolsets_for_spec(
         toolsets.append(web_toolset)
     if mcp_toolsets:
         effective_mcp_toolsets = mcp_toolsets
-        if "builtin:code-mode" in spec.capabilities:
+        if is_ptc_selected(spec.capabilities):
             effective_mcp_toolsets = [
                 FilePayloadResolvingToolset(
                     toolset,
@@ -311,7 +312,7 @@ def build_agent(
                 )
             )
         )
-    if "builtin:code-mode" in spec.capabilities:
+    if is_ptc_selected(spec.capabilities):
         capabilities.append(
             HybridCodeMode(
                 tools=[],

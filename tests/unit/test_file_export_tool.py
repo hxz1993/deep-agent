@@ -31,6 +31,7 @@ def _context(
             user="user-1",
             request_headers=request_headers,
             attachment_by_id={item.id: item for item in attachments},
+            session_file_artifacts=artifacts or {},
             tool_output_artifacts=artifacts or {},
         ),
         model=TestModel(),
@@ -162,6 +163,43 @@ class FileExportToolTests(unittest.IsolatedAsyncioTestCase):
                 ctx,
             )
         self.assertEqual(result.byte_size, 4096)
+        download.assert_not_awaited()
+
+    async def test_generated_session_file_uses_unified_authorization(self) -> None:
+        ctx = _context(
+            artifacts={
+                "generated-1": {
+                    "artifact_id": "generated-1",
+                    "file_id": "generated-1",
+                    "kind": "sandbox_output",
+                    "file_name": "chart.png",
+                    "mime": "image/png",
+                    "byte_size": 512,
+                    "sha256": "abc123",
+                }
+            }
+        )
+        ctx.deps.tool_output_artifacts = {}
+        tool = await _tool(ctx)
+        assert tool is not None
+        save = AsyncMock(return_value="download-record-generated")
+        space = SimpleNamespace(business_record=SimpleNamespace(save=save))
+        with patch(
+            "deep_agent.files.export_toolset._download_file",
+            new_callable=AsyncMock,
+        ) as download, patch(
+            "deep_agent.files.storage.SpaceAPI",
+            return_value=space,
+        ):
+            result = await tool.call_func(
+                {
+                    "source": {"type": "platform_file", "file_id": "generated-1"},
+                    "file_name": "chart.png",
+                },
+                ctx,
+            )
+        self.assertEqual(result.file_id, "generated-1")
+        self.assertEqual(result.byte_size, 512)
         download.assert_not_awaited()
 
     async def test_unknown_file_id_is_rejected_before_platform_calls(self) -> None:

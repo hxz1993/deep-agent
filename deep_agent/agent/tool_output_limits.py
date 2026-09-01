@@ -91,9 +91,55 @@ def _metadata_dict(part: ToolReturnPart) -> Mapping[str, Any]:
     return metadata if isinstance(metadata, Mapping) else {}
 
 
-def tool_result_artifacts(part: ToolReturnPart) -> list[dict[str, Any]]:
-    """Expose Harness spill handles without leaking other tool metadata."""
-    metadata = _metadata_dict(part)
+def _generated_file_refs(metadata: Mapping[str, Any]) -> list[dict[str, Any]]:
+    raw_files = metadata.get("generated_files")
+    if not isinstance(raw_files, Sequence) or isinstance(raw_files, (str, bytes)):
+        return []
+    artifacts: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for raw_file in raw_files:
+        if not isinstance(raw_file, Mapping):
+            continue
+        file_id = raw_file.get("file_id")
+        if not isinstance(file_id, str) or not file_id or file_id in seen:
+            continue
+        seen.add(file_id)
+        item: dict[str, Any] = {
+            "file_id": file_id,
+            "kind": "sandbox_output",
+        }
+        file_name = raw_file.get("file_name")
+        if isinstance(file_name, str) and file_name:
+            item["file_name"] = file_name
+        mime = raw_file.get("mime")
+        if isinstance(mime, str) and mime:
+            item["mime"] = mime
+        byte_size = raw_file.get("byte_size")
+        if isinstance(byte_size, int) and byte_size >= 0:
+            item["byte_size"] = byte_size
+        sha256 = raw_file.get("sha256")
+        if isinstance(sha256, str) and sha256:
+            item["sha256"] = sha256
+        artifacts.append(item)
+    return artifacts
+
+
+def _generated_file_artifacts(metadata: Mapping[str, Any]) -> list[dict[str, Any]]:
+    artifacts: list[dict[str, Any]] = []
+    for file_ref in _generated_file_refs(metadata):
+        item = {
+            **file_ref,
+            "artifact_id": file_ref["file_id"],
+            "role": "generated_file",
+        }
+        if file_ref.get("sha256"):
+            item["content_hash"] = file_ref["sha256"]
+        artifacts.append(item)
+    return artifacts
+
+
+def artifacts_from_metadata(metadata: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """Project safe FileStore references from application-only tool metadata."""
     artifacts: list[dict[str, Any]] = []
     value_handle = metadata.get("overflow_handle")
     if isinstance(value_handle, str) and value_handle:
@@ -120,7 +166,13 @@ def tool_result_artifacts(part: ToolReturnPart) -> list[dict[str, Any]]:
         if isinstance(content_hash, str) and content_hash:
             item["content_hash"] = content_hash
         artifacts.append(item)
+    artifacts.extend(_generated_file_artifacts(metadata))
     return artifacts
+
+
+def tool_result_artifacts(part: ToolReturnPart) -> list[dict[str, Any]]:
+    """Expose safe file references without leaking bytes or temporary paths."""
+    return artifacts_from_metadata(_metadata_dict(part))
 
 
 def artifact_handles_from_history(messages: Sequence[ModelMessage]) -> set[str]:
@@ -132,6 +184,26 @@ def artifact_metadata_from_history(
     messages: Sequence[ModelMessage],
 ) -> dict[str, dict[str, Any]]:
     """Recover authenticated spill metadata needed by other runtime file tools."""
+    artifacts: dict[str, dict[str, Any]] = {}
+    for message in messages:
+        if not isinstance(message, ModelRequest):
+            continue
+        for part in message.parts:
+            if not isinstance(part, ToolReturnPart):
+                continue
+            for artifact in artifacts_from_metadata(_metadata_dict(part)):
+                if artifact.get("kind") != "tool_result_overflow":
+                    continue
+                artifact_id = artifact.get("artifact_id")
+                if isinstance(artifact_id, str) and artifact_id:
+                    artifacts[artifact_id] = dict(artifact)
+    return artifacts
+
+
+def session_file_metadata_from_history(
+    messages: Sequence[ModelMessage],
+) -> dict[str, dict[str, Any]]:
+    """Recover FileStore authorization only from raw persisted tool results."""
     artifacts: dict[str, dict[str, Any]] = {}
     for message in messages:
         if not isinstance(message, ModelRequest):
@@ -168,6 +240,7 @@ class PlatformToolResultStore(OverflowStore):
     def bind(self, deps: AgentDeps, raw_history: Sequence[ModelMessage]) -> None:
         self._deps = deps
         artifacts = artifact_metadata_from_history(raw_history)
+        session_artifacts = session_file_metadata_from_history(raw_history)
         self._allowed_handles = set(artifacts)
         self._content_hashes = {
             handle: str(metadata["content_hash"])
@@ -175,6 +248,7 @@ class PlatformToolResultStore(OverflowStore):
             if metadata.get("content_hash")
         }
         deps.tool_output_artifacts = artifacts
+        deps.session_file_artifacts = session_artifacts
         deps.tool_output_limits = self.telemetry
 
     @staticmethod
@@ -231,6 +305,9 @@ class PlatformToolResultStore(OverflowStore):
                 "byte_size": len(data),
                 "content_hash": content_hash,
             }
+            self._deps.session_file_artifacts[handle] = dict(
+                self._deps.tool_output_artifacts[handle]
+            )
         self.telemetry.spill_count += 1
         self.telemetry.spilled_bytes += len(data)
         log_event(
@@ -314,6 +391,33 @@ class DeepAgentToolOutputLimits(ToolOutputLimits[AgentDeps]):
             args=args,
             result=result,
         )
+        if isinstance(result, ToolReturn) and isinstance(reduced, ToolReturn):
+            original_metadata = (
+                result.metadata if isinstance(result.metadata, Mapping) else {}
+            )
+            generated_files = _generated_file_refs(original_metadata)
+            reduced_metadata = (
+                dict(reduced.metadata) if isinstance(reduced.metadata, Mapping) else {}
+            )
+            if generated_files:
+                reduced_metadata["generated_files"] = generated_files
+                return_value = reduced.return_value
+                if isinstance(return_value, Mapping):
+                    return_value = dict(return_value)
+                    return_value["files"] = generated_files
+                elif not (
+                    isinstance(return_value, list)
+                    and all(item in return_value for item in generated_files)
+                ):
+                    return_value = {
+                        "result": return_value,
+                        "files": generated_files,
+                    }
+                reduced = ToolReturn(
+                    return_value=return_value,
+                    content=reduced.content,
+                    metadata=reduced_metadata,
+                )
         store = self.store
         if not isinstance(store, PlatformToolResultStore):
             return reduced
@@ -438,7 +542,9 @@ __all__ = [
     "ToolOutputTelemetry",
     "artifact_handles_from_history",
     "artifact_metadata_from_history",
+    "artifacts_from_metadata",
     "build_tool_output_limits",
+    "session_file_metadata_from_history",
     "tool_output_threshold_tokens",
     "tool_result_artifacts",
 ]

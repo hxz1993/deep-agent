@@ -3,6 +3,23 @@
 本文件记录 DeepAgent 的产品版本变化，按新版本到旧版本排列。当前代码版本以
 `deep_agent.__version__` 为准；数据库结构版本以 Alembic head 为准，两者互不替代。
 
+## v0.6.7
+
+- 将显式编排能力包规范化为`builtin:ptc`，Console名称为“程序编排”，模型协议仍保持Harness
+  `run_code`；旧`builtin:code-mode`在读取、运行和配置导入时自动兼容，新保存与导出统一写新编码，
+  不增加数据库迁移。
+- PTC只编排当前Agent已授权且已披露的MCP；Web Search、Web Fetch、Web Image View和Python沙箱均
+  不进入PTC。Code-only `load_file_data`同时支持当前会话授权的`file_id`与公开HTTP(S) URL，原始
+  Base64仅在MCP参数边界展开，不进入模型、Event、日志或轨迹。
+- `execute_python`支持把当前会话授权的FileStore文件挂入一次性沙箱，并预置`deepagent_files`
+  的`input_path()`与`publish_path()`；成功执行后可将零到多个产物上传为FileStore文件，模型与历史
+  只接收File ID、名称、MIME、大小和SHA-256，不接收宿主路径或Base64。
+- Python沙箱增加常用网络、网页、图片、图表、PDF和Office处理依赖，并默认允许访问公网；仍保留
+  资源限制、Landlock、环境变量白名单和临时目录销毁，同时在Worker连接层尽力阻断回环、私网、
+  链路本地和云元数据地址。`subprocess-dev`仍明确不是面向恶意代码的强隔离沙箱。
+- 大工具结果阈值、Spill和Artifact外置逻辑保持不变；大工具Artifact与Python生成文件统一进入当前
+  会话文件授权投影。后续Run从原始Event恢复授权，Console聊天卡与轨迹展示安全文件引用。
+
 ## v0.6.6
 
 - 新增企业管理员接口`POST /api/v1/configuration/import`，用于无会话新环境的同Alembic Revision

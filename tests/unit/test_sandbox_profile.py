@@ -97,20 +97,26 @@ class SandboxProfileProbeTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_probe_reports_missing_imports(self) -> None:
         manifest = load_sandbox_profile(DEFAULT_SANDBOX_PROFILE)
-        backend = FakeProbeBackend({"numpy": True, "pandas": False, "pydantic": True})
+        package_state = {item.import_name: True for item in manifest.packages}
+        package_state["pandas"] = False
+        backend = FakeProbeBackend(package_state)
         probe = await probe_sandbox_profile(manifest, backend, timeout_ms=30_000)
         self.assertFalse(probe.ok)
         self.assertEqual(probe.missing_imports, ("pandas",))
 
         resolved = resolve_sandbox_profile(manifest, probe)
         self.assertFalse(resolved.profile_ok)
-        self.assertEqual(resolved.package_names, ("numpy", "pandas", "pydantic"))
+        self.assertIn("numpy", resolved.package_names)
+        self.assertIn("pandas", resolved.package_names)
+        self.assertIn("requests", resolved.package_names)
 
 
 class ProfileVerifierTests(unittest.IsolatedAsyncioTestCase):
     async def test_strict_verifier_raises_on_missing(self) -> None:
         manifest = load_sandbox_profile(DEFAULT_SANDBOX_PROFILE)
-        backend = FakeProbeBackend({"numpy": True, "pandas": False, "pydantic": True})
+        package_state = {item.import_name: True for item in manifest.packages}
+        package_state["pandas"] = False
+        backend = FakeProbeBackend(package_state)
         verifier = DefaultProfileVerifier()
         with self.assertRaises(ProfileMismatchError):
             await verifier.verify_strict(manifest, backend, timeout_ms=30_000)
@@ -125,6 +131,8 @@ class SandboxProfileInstructionsTests(unittest.TestCase):
         self.assertIn("numpy", text)
         self.assertIn("pandas", text)
         self.assertIn("pydantic", text)
+        self.assertIn("requests", text)
+        self.assertIn("publish_path", text)
         self.assertNotIn("duckdb", text)
         self.assertIn("pip install", text)
         self.assertIn("全新", text)

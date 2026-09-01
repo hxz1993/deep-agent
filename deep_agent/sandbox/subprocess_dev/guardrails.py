@@ -289,19 +289,16 @@ def apply_soft_guardrails(
     *,
     work_dir: str | None,
 ) -> SoftGuardrailResult:
-    """Apply network seccomp then Landlock. Never raises.
+    """Apply filesystem guardrails without blocking public networking.
 
-    Seccomp is applied before Landlock so libseccomp setup does not need a
-    writable ``/tmp`` after the filesystem guard is active.
+    Network policy is enforced at the worker socket layer so ordinary public
+    HTTP clients can be used while local/private destinations remain blocked.
+    This function remains best-effort and never raises.
     """
     if sys.platform != "linux":
         return SoftGuardrailResult()
 
     no_new_privs = try_set_no_new_privs()
-
-    network_ok = try_apply_network_seccomp()
-    if network_ok:
-        no_new_privs = True
 
     landlock_ok = False
     if work_dir:
@@ -312,7 +309,7 @@ def apply_soft_guardrails(
     return SoftGuardrailResult(
         no_new_privs=no_new_privs,
         landlock=landlock_ok,
-        network_seccomp=network_ok,
+        network_seccomp=False,
     )
 
 

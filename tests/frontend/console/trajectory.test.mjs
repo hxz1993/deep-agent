@@ -219,6 +219,62 @@ test("真实 Pydantic 工具参数字符串可提取 run_code Python 源码", ()
   assert.equal(runCodeSource({ payload: { args: "not-json" } }), "");
 });
 
+test("Python 生成文件在轨迹中只保留安全引用", () => {
+  const projected = buildTrajectory({
+    items: [
+      {
+        event_id: "evt-python-call",
+        sequence: 1,
+        event_type: "assistant/message",
+        run_id: "run-python",
+        payload: { message: { kind: "response", parts: [{
+          part_kind: "tool-call",
+          tool_name: "execute_python",
+          tool_call_id: "call-python",
+          args: { code: "pass" },
+        }] } },
+        created_at: "2026-09-01T08:00:00Z",
+        updated_at: "2026-09-01T08:00:00Z",
+      },
+      {
+        event_id: "evt-python-result",
+        sequence: 2,
+        event_type: "tool/results",
+        run_id: "run-python",
+        payload: { message: { kind: "request", parts: [{
+          part_kind: "tool-return",
+          tool_name: "execute_python",
+          tool_call_id: "call-python",
+          content: { result: { ok: true }, files: [{ file_id: "local_generated", file_name: "chart.png" }] },
+          metadata: { generated_files: [{
+            file_id: "local_generated",
+            file_name: "chart.png",
+            mime: "image/png",
+            byte_size: 2048,
+            sha256: "abc",
+            path: "/tmp/hidden.png",
+            base64: "hidden",
+          }] },
+        }] } },
+        created_at: "2026-09-01T08:00:01Z",
+        updated_at: "2026-09-01T08:00:01Z",
+      },
+    ],
+  });
+  const event = projected.find((item) => item.id === "tool:call-python");
+  assert.deepEqual(event.result.artifacts, [{
+    artifact_id: "local_generated",
+    file_id: "local_generated",
+    kind: "sandbox_output",
+    role: "generated_file",
+    file_name: "chart.png",
+    mime: "image/png",
+    byte_size: 2048,
+    sha256: "abc",
+  }]);
+  assert.doesNotMatch(JSON.stringify(event.result.artifacts), /\/tmp\/|base64|hidden/);
+});
+
 test("标题投影通知不进入语义轨迹", () => {
   assert.equal(shouldIngestTrajectoryEvent("session_title"), false);
   assert.equal(shouldIngestTrajectoryEvent("session_event_appended"), true);
@@ -274,8 +330,12 @@ test("工作台以独立页签接入轨迹且默认对话链路不变", () => {
   assert.match(trajectorySource, /trajectory-summary-link local-file-download/);
   assert.doesNotMatch(trajectorySource, /icon\("list-checks"\)|icon\("archive-restore"\)|icon\("message-square-more"\)/);
   assert.match(trajectorySource, /fileId\.startsWith\("local_"\)/);
-  assert.match(chatSource, /renderLocalFileDownload\(data\.result\)/);
+  assert.match(chatSource, /renderLocalFileDownload\(data\.result, data\.artifacts\)/);
   assert.match(workspaceCss, /\.local-file-download\s*\{/);
+  assert.match(chatSource, /data-copy-file-id/);
+  assert.match(trajectorySource, /renderGeneratedFiles\(artifacts\)/);
+  assert.match(trajectorySource, /metadata\.generated_files/);
+  assert.match(workspaceCss, /\.generated-file-list\s*\{/);
   assert.doesNotMatch(trajectorySource, /\["timing", "Timing"\]/);
   assert.doesNotMatch(trajectorySource, /renderFact\("Role"|trajectory-preview-message|eventRole/);
   assert.doesNotMatch(trajectorySource, /trajectoryTimelineLayout|renderSequence|renderRowSignals|iconForKind/);
@@ -290,7 +350,7 @@ test("工作台以独立页签接入轨迹且默认对话链路不变", () => {
   assert.match(workspaceCss, /\.trajectory-kind\.assistant,[\s\S]*background:\s*#f3edff/);
   assert.match(workspaceCss, /\.trajectory-kind\.tool\s*\{[^}]*background:\s*#fff3e7/);
   assert.match(workspaceCss, /\.trajectory-kind\.code\s*\{[^}]*background:\s*#e8f1ff/);
-  assert.match(trajectorySource, /return isRunCodeEvent\(event\) \? "CODE"/);
+  assert.match(trajectorySource, /return isRunCodeEvent\(event\) \? "PTC"/);
   assert.match(trajectorySource, /isRunCodeEvent\(event\)\) tabs\.push\(\["code", "Code"\]\)/);
   assert.match(trajectorySource, /class="hljs language-python"/);
   assert.match(trajectorySource, /data-copy-run-code/);

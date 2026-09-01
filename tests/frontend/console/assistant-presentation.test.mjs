@@ -252,6 +252,15 @@ test("大工具结果显示外置提示并保留预览", () => {
   assert.match(workspaceCss, /\.tool-result-artifact/);
 });
 
+test("Python 生成文件显示文件信息、下载与可复制 File ID", () => {
+  assert.match(chatSource, /item\?\.kind === "sandbox_output"/);
+  assert.match(chatSource, /renderGeneratedFileArtifact/);
+  assert.match(chatSource, /data-copy-file-id/);
+  assert.match(chatSource, /api\/v1\/local-files/);
+  assert.match(workspaceCss, /\.generated-file-item/);
+  assert.match(workspaceCss, /\.generated-file-actions/);
+});
+
 test("任务计划在消息区底部浮层展示最新快照", () => {
   assert.equal(isPlanningToolEvent({ source: "planning", tool: "anything" }), false);
   assert.equal(isPlanningToolEvent({ tool: "write_plan" }), true);

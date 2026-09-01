@@ -18,6 +18,7 @@ from sqlalchemy import MetaData, Table, delete, func, insert, inspect, select, t
 from sqlalchemy.engine import URL
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
+from deep_agent.capabilities.codes import canonical_tool_package_codes
 from deep_agent.db.models import Base
 from deep_agent.db.configuration_transfer import (
     BACKUP_SCOPE_SCHEMA_VERSION,
@@ -307,6 +308,18 @@ async def _copy_table(
     async with source_engine.connect() as source_connection:
         result = await source_connection.execute(select(source_table))
         rows = [dict(row) for row in result.mappings().all()]
+    if table_name == "agents":
+        for row in rows:
+            raw_capabilities = row.get("capabilities") or []
+            serialized = isinstance(raw_capabilities, str)
+            if serialized:
+                raw_capabilities = json.loads(raw_capabilities)
+            canonical = canonical_tool_package_codes(raw_capabilities)
+            row["capabilities"] = (
+                json.dumps(canonical, ensure_ascii=False, separators=(",", ":"))
+                if serialized
+                else canonical
+            )
     if rows:
         async with target_engine.begin() as target_connection:
             await target_connection.execute(insert(target_table), rows)

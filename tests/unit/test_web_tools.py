@@ -12,7 +12,7 @@ from pydantic_ai.messages import ImageUrl, ModelResponse, NativeToolReturnPart, 
 from pydantic_ai.capabilities import WebSearch
 from pydantic_ai.toolsets import CombinedToolset, FunctionToolset
 
-from deep_agent.code_mode.file_payload import CODE_MODE_HYBRID, CODE_MODE_METADATA_KEY
+from deep_agent.code_mode.file_payload import CODE_MODE_METADATA_KEY
 from deep_agent.web.package import build_web_tool_package
 from deep_agent.web.runtime import (
     _search_duckduckgo,
@@ -45,7 +45,7 @@ class WebPackageTests(unittest.TestCase):
         self.assertEqual(set(runtime.toolset.tools), {"web_fetch"})
         self.assertIsInstance(runtime.capability, WebSearch)
         fetch = runtime.toolset.tools["web_fetch"]
-        self.assertEqual(fetch.metadata[CODE_MODE_METADATA_KEY], CODE_MODE_HYBRID)
+        self.assertNotIn(CODE_MODE_METADATA_KEY, fetch.metadata)
         self.assertTrue(fetch.metadata["web_content_untrusted"])
 
     def test_visual_model_gets_outer_image_tool_without_code_mode_metadata(self) -> None:
@@ -73,7 +73,7 @@ class WebPackageTests(unittest.TestCase):
         }
         self.assertEqual(names, {"web_search", "web_fetch"})
         search = runtime.toolset.toolsets[0].tools["web_search"]
-        self.assertEqual(search.metadata[CODE_MODE_METADATA_KEY], CODE_MODE_HYBRID)
+        self.assertNotIn(CODE_MODE_METADATA_KEY, search.metadata)
 
 
 class WebSearchCredentialTests(unittest.IsolatedAsyncioTestCase):

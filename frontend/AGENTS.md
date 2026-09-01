@@ -50,16 +50,19 @@ frontend/
 | 会话 | `session_id` 由后端 `session` 事件返回；`GET/DELETE /api/v1/sessions`；标题展示 `title \|\| user_prompt`（见 [`../docs/guides/experience/ai-title-generator.md`](../docs/guides/experience/ai-title-generator.md)） |
 | 能力面板 | `GET /api/v1/tools` |
 | 配置 | `localStorage` 只保存调试 App；全局环境配置只读展示，身份和鉴权由平台提供 |
-| 内置工具目录 | 配置中心展示 `builtin:general`、`builtin:sandbox`、`builtin:code-mode`、`builtin:web`；Agent 按包选择 |
+| 内置工具目录 | 配置中心展示`builtin:general`、`builtin:sandbox`、`builtin:ptc`（程序编排）、`builtin:web`；Agent按包选择，旧`builtin:code-mode`不作为新目录项展示 |
 | 系统工具目录 | 配置中心按任务规划、Skill、文件、工具结果、MCP 工具发现、MCP Resource 分组展示自动注入工具；不参与 Agent 配置 |
 | 任务计划 | 只识别`write_plan`完整快照；仅当前Run直播展示，任何Run终态后隐藏，重新打开History不恢复；同Turn Deferred由后端恢复PlanStore |
 | Skill | 独立 Skill 列表与详情；上传包安装/替换/单个与全部导出/删除；文本、Word、Excel 资源可预览，脚本只列包内路径和数量，不展示可执行性判断；Agent 使用独立 `skills` 列表选择 |
 | 一体化控制台 | `/console/`；工作台、配置和诊断的唯一入口 |
 | 会话轨迹 | 工作台“对话 / 轨迹”页签；普通对话读History/SSE ConversationItem，只有轨迹按Sequence读取Event API |
 
-v0.6.3起，轨迹把`run_code`显示为独立`CODE`类型，并在详情中提供带Python高亮与复制能力的
+v0.6.7起，轨迹把`run_code`显示为独立`PTC`类型，并在详情中提供带Python高亮与复制能力的
 Code页签；用户输入详情中的附件与Context Reference分区展示。这里只改变Event的Console投影，
 不增加Event字段或普通ConversationItem类型。
+
+`execute_python`返回的生成文件在聊天工具卡与轨迹中展示名称、MIME、大小和可复制File ID；本地
+FileStore复用现有下载链接，平台FileStore不新增代理下载接口。页面不得渲染Base64或宿主临时路径。
 
 v0.3.12 的配置卡只读展示工具披露策略：附件包为“有附件时可用”，大型 MCP 为“自动预选 Top 3 / 搜索 Top 5”。聊天中的 `search_tools` 是运行诊断过程，默认折叠显示为“正在查找可用工具”，不伪装成业务 MCP 工具。
 

@@ -471,6 +471,29 @@ function init() {
     if (e.target.closest("#newChatMenu, #newChatBtn, #newChatBtnWide")) return;
     closeNewChatMenu();
   });
+  document.addEventListener("click", (e) => {
+    const button = e.target.closest("[data-copy-file-id]");
+    if (!button) return;
+    const fileId = button.dataset.copyFileId;
+    if (!fileId) return;
+    button.disabled = true;
+    copyTextToClipboard(fileId).then(() => {
+      button.classList.add("copied");
+      button.title = "File ID 已复制";
+      button.innerHTML = lucideIcon("check");
+      refreshLucideIcons();
+      window.setTimeout(() => {
+        if (!button.isConnected) return;
+        button.classList.remove("copied");
+        button.title = "复制 File ID";
+        button.innerHTML = lucideIcon("copy");
+        button.disabled = false;
+        refreshLucideIcons();
+      }, 1500);
+    }).catch(() => {
+      button.disabled = false;
+    });
+  });
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") closeNewChatMenu();
   });
@@ -2325,7 +2348,7 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null) {
       body.querySelector("[data-tool-result]")?.remove();
       const res = document.createElement("div");
       res.dataset.toolResult = "1";
-      res.innerHTML = `${renderToolResultArtifacts(data.artifacts)}<div class="label" style="margin-top:8px">结果 result</div>${renderToolResult(data.result)}${renderLocalFileDownload(data.result)}`;
+      res.innerHTML = `${renderToolResultArtifacts(data.artifacts)}<div class="label" style="margin-top:8px">结果 result</div>${renderToolResult(data.result)}${renderLocalFileDownload(data.result, data.artifacts)}`;
       body.appendChild(res);
       refreshLucideIcons();
       updateProcessDisclosure();
@@ -2688,7 +2711,8 @@ function findLocalFileResult(value) {
   return null;
 }
 
-function renderLocalFileDownload(result) {
+function renderLocalFileDownload(result, artifacts = []) {
+  if (artifacts.some((item) => item?.kind === "sandbox_output")) return "";
   const file = findLocalFileResult(result);
   if (!file) return "";
   const href = window.serviceUrl(
@@ -2699,12 +2723,30 @@ function renderLocalFileDownload(result) {
 
 function renderToolResultArtifacts(artifacts) {
   if (!Array.isArray(artifacts) || artifacts.length === 0) return "";
-  const totalBytes = artifacts.reduce(
+  const overflow = artifacts.filter((item) => item?.kind !== "sandbox_output");
+  const generated = artifacts.filter((item) => item?.kind === "sandbox_output");
+  const totalBytes = overflow.reduce(
     (total, item) => total + (Number.isFinite(Number(item?.byte_size)) ? Number(item.byte_size) : 0),
     0,
   );
   const size = totalBytes > 0 ? ` · ${formatArtifactBytes(totalBytes)}` : "";
-  return `<div class="tool-result-artifact">${lucideIcon("archive")}<span>完整结果已外置${escapeHtml(size)}，当前展示预览；Agent 可按需读取。</span></div>`;
+  const overflowHtml = overflow.length
+    ? `<div class="tool-result-artifact">${lucideIcon("archive")}<span>完整结果已外置${escapeHtml(size)}，当前展示预览；Agent 可按需读取。</span></div>`
+    : "";
+  const generatedHtml = generated.length
+    ? `<div class="generated-file-list"><div class="generated-file-heading">${lucideIcon("files")}<span>生成文件</span></div>${generated.map(renderGeneratedFileArtifact).join("")}</div>`
+    : "";
+  return `${overflowHtml}${generatedHtml}`;
+}
+
+function renderGeneratedFileArtifact(artifact) {
+  const fileId = String(artifact?.file_id || artifact?.artifact_id || "");
+  const fileName = String(artifact?.file_name || fileId || "未命名文件");
+  const details = [artifact?.mime, formatArtifactBytes(artifact?.byte_size)].filter(Boolean).join(" · ");
+  const download = fileId.startsWith("local_")
+    ? `<a href="${escapeHtml(window.serviceUrl(`api/v1/local-files/${encodeURIComponent(fileId)}/download`))}" download title="下载文件">${lucideIcon("download")}</a>`
+    : "";
+  return `<div class="generated-file-item"><span class="generated-file-icon">${lucideIcon("file-output")}</span><span class="generated-file-copy"><strong>${escapeHtml(fileName)}</strong>${details ? `<small>${escapeHtml(details)}</small>` : ""}<code title="${escapeHtml(fileId)}">${escapeHtml(fileId)}</code></span><span class="generated-file-actions">${download}<button type="button" data-copy-file-id="${escapeHtml(fileId)}" title="复制 File ID">${lucideIcon("copy")}</button></span></div>`;
 }
 
 function formatArtifactBytes(value) {

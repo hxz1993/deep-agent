@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from deep_agent.agent.planning import is_planning_tool
+from deep_agent.agent.tool_output_limits import artifacts_from_metadata
 from deep_agent.web.images import safe_web_image_value
 from deep_agent.conversation.models import (
     AssistantConversationItem,
@@ -354,27 +355,7 @@ def _artifacts(part: Mapping[str, Any]) -> list[ConversationArtifact]:
     metadata = part.get("metadata")
     if not isinstance(metadata, Mapping):
         return []
-    artifacts: list[ConversationArtifact] = []
-    value_handle = metadata.get("overflow_handle")
-    if value_handle:
-        artifacts.append(
-            ConversationArtifact(
-                artifact_id=str(value_handle),
-                role="return_value",
-                byte_size=_optional_int(metadata.get("overflow_bytes")),
-                content_hash=_optional_str(metadata.get("overflow_hash")),
-            )
-        )
-    content_handle = metadata.get("overflow_content_handle")
-    if content_handle:
-        artifacts.append(
-            ConversationArtifact(
-                artifact_id=str(content_handle),
-                role="content",
-                content_hash=_optional_str(metadata.get("overflow_content_hash")),
-            )
-        )
-    return artifacts
+    return [ConversationArtifact.model_validate(item) for item in artifacts_from_metadata(metadata)]
 
 
 def _pending_tool_status(event: Any, part: Mapping[str, Any]) -> str:

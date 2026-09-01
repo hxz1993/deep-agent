@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
+import os
 import tempfile
 import time
 from pathlib import Path
@@ -30,9 +32,12 @@ from deep_agent.sandbox.types import (
     ExecuteRequest,
     ExecuteResult,
     MAX_RESULT_BYTES,
+    MAX_SCRIPT_RESOURCE_BYTES,
+    MAX_SCRIPT_RESOURCE_FILES,
     MAX_STDERR_BYTES,
     MAX_STDOUT_BYTES,
     ResourceLimitsSummary,
+    SandboxPublishedFile,
 )
 
 
@@ -122,6 +127,7 @@ class SubprocessBackend:
                 proc,
                 request,
                 started=started,
+                work_dir=Path(work_dir),
             )
         except asyncio.CancelledError:
             if proc is not None:
@@ -163,13 +169,22 @@ class SubprocessBackend:
             cpu_seconds=self._cpu_limit_seconds,
             max_pids=self._max_pids if self._max_pids else None,
         )
+        worker_env = build_worker_env()
+        worker_env.update(
+            {
+                "HOME": work_dir,
+                "TMPDIR": os.path.join(work_dir, ".tmp"),
+                "XDG_CACHE_HOME": os.path.join(work_dir, ".cache"),
+                "MPLCONFIGDIR": os.path.join(work_dir, ".matplotlib"),
+            }
+        )
         popen_kwargs: dict[str, Any] = {
             "stdin": asyncio.subprocess.PIPE,
             "stdout": asyncio.subprocess.PIPE,
             # Worker captures user stderr internally; discard worker diagnostics
             # so an unbounded PIPE cannot stall the parent.
             "stderr": asyncio.subprocess.DEVNULL,
-            "env": build_worker_env(),
+            "env": worker_env,
             "cwd": work_dir,
             "start_new_session": True,
         }
@@ -195,21 +210,22 @@ class SubprocessBackend:
 
     @staticmethod
     def _prepare_work_dir(work_dir: Path, request: ExecuteRequest) -> ExecuteRequest:
-        if request.mode != "script":
-            return request
-
-        script_path = work_dir / "main.py"
-        script_path.write_text(request.code, encoding="utf-8")
-        script_path.chmod(0o600)
-        inputs_path = work_dir / "inputs.json"
-        inputs_path.write_text(
-            json.dumps(request.inputs, ensure_ascii=False, separators=(",", ":")),
-            encoding="utf-8",
-        )
-        inputs_path.chmod(0o600)
+        if request.mode == "script":
+            script_path = work_dir / "main.py"
+            script_path.write_text(request.code, encoding="utf-8")
+            script_path.chmod(0o600)
+            inputs_path = work_dir / "inputs.json"
+            inputs_path.write_text(
+                json.dumps(request.inputs, ensure_ascii=False, separators=(",", ":")),
+                encoding="utf-8",
+            )
+            inputs_path.chmod(0o600)
         (work_dir / "outputs").mkdir(mode=0o700)
+        for controlled_dir in (".tmp", ".cache", ".matplotlib"):
+            (work_dir / controlled_dir).mkdir(mode=0o700)
 
         resolved_root = work_dir.resolve()
+        input_manifest: dict[str, str] = {}
         for item in request.files:
             target = (work_dir / item.path).resolve()
             if resolved_root not in target.parents:
@@ -217,6 +233,17 @@ class SubprocessBackend:
             target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
             target.write_bytes(item.decoded())
             target.chmod(0o600)
+            if item.file_id:
+                if item.file_id in input_manifest:
+                    raise ValueError("sandbox input file ids must be unique")
+                input_manifest[item.file_id] = item.path
+
+        manifest_path = work_dir / ".deepagent-files.json"
+        manifest_path.write_text(
+            json.dumps({"inputs": input_manifest}, ensure_ascii=False, separators=(",", ":")),
+            encoding="utf-8",
+        )
+        manifest_path.chmod(0o600)
 
         # The development worker reads files from its isolated cwd. Keeping the
         # bytes out of the framed child request avoids sending binary payloads twice.
@@ -228,6 +255,7 @@ class SubprocessBackend:
         request: ExecuteRequest,
         *,
         started: float,
+        work_dir: Path,
     ) -> ExecuteResult:
         timeout_sec = request.timeout_ms / 1000.0
         response_frame: dict[str, Any] | None = None
@@ -285,13 +313,69 @@ class SubprocessBackend:
             )
 
         assert response_frame is not None
-        return result_from_frame(
+        result = result_from_frame(
             request.request_id,
             response_frame,
             duration_ms=duration_ms,
             exit_code=exit_code,
             environment=self._environment,
         )
+        if result.status != "ok":
+            return result
+        try:
+            published = self._collect_published_files(work_dir, response_frame)
+        except Exception as exc:
+            return error_result(
+                request.request_id,
+                code="BACKEND_PROTOCOL_ERROR",
+                message=f"invalid published file payload: {type(exc).__name__}",
+                duration_ms=duration_ms,
+                environment=self._environment,
+                exit_code=exit_code,
+            )
+        return result.model_copy(update={"published_files": published})
+
+    @staticmethod
+    def _collect_published_files(
+        work_dir: Path,
+        frame: dict[str, Any],
+    ) -> tuple[SandboxPublishedFile, ...]:
+        payload = frame.get("published_files", [])
+        if not isinstance(payload, list) or len(payload) > MAX_SCRIPT_RESOURCE_FILES:
+            raise ValueError("published file list is invalid")
+        root = work_dir.resolve()
+        output_root = (root / "outputs").resolve()
+        out: list[SandboxPublishedFile] = []
+        names: set[str] = set()
+        for item in payload:
+            if not isinstance(item, dict):
+                raise ValueError("published file entry is invalid")
+            file_name = item.get("file_name")
+            relative = item.get("path")
+            mime = item.get("mime")
+            if not isinstance(file_name, str) or not file_name or file_name in names:
+                raise ValueError("published file name is invalid")
+            if not isinstance(relative, str) or relative != f"outputs/{file_name}":
+                raise ValueError("published file path is invalid")
+            if mime is not None and not isinstance(mime, str):
+                raise ValueError("published file MIME is invalid")
+            target = (root / relative).resolve()
+            if output_root not in target.parents or not target.is_file():
+                raise ValueError("published file is missing")
+            data = target.read_bytes()
+            if len(data) > MAX_SCRIPT_RESOURCE_BYTES:
+                raise ValueError("published file exceeds backend safety limit")
+            names.add(file_name)
+            out.append(
+                SandboxPublishedFile(
+                    file_name=file_name,
+                    mime=mime,
+                    byte_size=len(data),
+                    sha256=hashlib.sha256(data).hexdigest(),
+                    data=data,
+                )
+            )
+        return tuple(out)
 
     async def _finalize(
         self,

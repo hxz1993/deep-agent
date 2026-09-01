@@ -31,8 +31,8 @@ _MAX_NESTED_AUDIT_CHARS = 32_768
 
 _USAGE_RULES = """
 
-DeepAgent hybrid rules:
-- Catalog functions are SDK functions that exist only inside `run_code`; never call a
+DeepAgent PTC rules:
+- Catalog functions exist only inside `run_code`; never call a
   catalog alias as a direct outer tool. A function can be called directly only when the
   same protocol name is separately present in the ordinary tool list with its own schema.
 - Every function listed in the Code Mode catalog is async. Call it with top-level
@@ -44,16 +44,25 @@ DeepAgent hybrid rules:
 - After `search_tools` reveals the functions required by a dependency chain, execute the
   remaining chain in one `run_code` call. Also use `run_code` for bounded concurrency,
   loops, filtering, sorting, grouping, aggregation, or conditional branches.
-- Use `load_file_data` only inside `run_code` when an authorized session file must be
-  passed directly to an MCP string argument. Treat the returned value as a mapping,
+- Before a file relay, identify every required list/lookup, upload, and send function and
+  disclose them together in one `search_tools` call. Do not search separately for each
+  stage, and do not split a successful upload/send dependency chain across multiple
+  `run_code` calls.
+- Use `load_file_data` only inside `run_code` when an authorized session file or a
+  public HTTP(S) file must be passed unchanged to an MCP string argument. Provide
+  exactly one of `file_id` and `url`. Treat the returned value as a mapping,
   access fields with `payload['name']`, and pass `payload['content']` unchanged to the
   next tool. Never inspect, measure, print, or return the `content` value.
 - Return only the compact result needed for the task. Do not print file payloads,
   Base64, or large intermediate values.
 - Execute side-effecting tools sequentially. After an uncertain failure, inspect the
-  target state instead of blindly repeating the write.
-- `run_code` cannot access host files, environment variables, network sockets, Shell,
-  pip, or third-party packages. It can call only the functions listed in its catalog.
+  target state instead of blindly repeating the write. Never retry the same media send
+  with the same uploaded id and unchanged arguments. If an image upload succeeds but
+  the destination rejects a nonstandard format such as WebP, stop the PTC chain and use
+  the outer Python sandbox to convert it to PNG before one new relay attempt.
+- `run_code` cannot directly access host files, environment variables, network sockets,
+  Shell, pip, or third-party packages. It can call only catalog functions; public-file
+  relay is available exclusively through `load_file_data(url=...)`.
 
 Generic dependency-chain shape (replace the abstract function names and arguments with
 tools from the current catalog; do not copy them literally):
@@ -72,6 +81,42 @@ uploaded = await upload_tool(
 )
 {"uploaded_id": uploaded["id"]}
 ```
+
+Generic public-file relay shape:
+```python
+payload = await load_file_data(url="https://example.com/report.png")
+uploaded = await upload_tool(
+    file_name=payload["name"],
+    payload_string=payload["content"],
+)
+{"uploaded_id": uploaded["id"]}
+```
+
+Common media-message relay shape:
+```python
+sessions = await list_bot_sessions()
+target = next(item for item in sessions["sessions"] if item["chat_name"] == target_name)
+payload = await load_file_data(url=public_url)
+uploaded = await upload_media(
+    file_name=payload["name"],
+    base64_content=payload["content"],
+    type="image",
+)
+sent = await send_bot_message(
+    chat_id=target["chat_id"],
+    msg_type="image",
+    image={"media_id": uploaded["media_id"]},
+)
+{"success": sent.get("success"), "chat_name": target["chat_name"]}
+```
+For WeCom AI-bot media relay, the corresponding protocol names are usually
+`wecom-chat_message_aibot_sessions_list`, `wecom-doc_media_upload`, and
+`wecom-chat_message_aibot_send`. Disclose their schemas together if needed, then use
+their sanitized Python aliases inside one `run_code` call. Never pass a public URL or
+the opaque `payload["content"]` directly to the final message-send field. The WeCom
+session-list result is a mapping whose `sessions` value is a list of mappings containing
+`chat_id` and `chat_name`; consume that shape directly in the relay call instead of
+spending a separate `run_code` call to print or probe it.
 """.rstrip()
 
 
@@ -209,9 +254,11 @@ class HybridCodeModeToolset(CodeModeToolset[AgentDeps]):
             original = metadata.get(CODE_MODE_ORIGINAL_NAME_KEY)
             if alias == "load_file_data":
                 rows.append(
-                    "- `await load_file_data(file_id: str, encoding: Literal['base64', 'text'] "
-                    "= 'base64', text_encoding: str = 'utf-8', max_chars: int = 65536) "
-                    "-> FileData` (code-only authorized session-file primitive; access "
+                    "- `await load_file_data(file_id: str | None = None, url: str | None "
+                    "= None, encoding: Literal['base64', 'text'] = 'base64', "
+                    "text_encoding: str = 'utf-8', max_chars: int = 65536) -> FileData` "
+                    "(code-only authorized session/public-file primitive; provide exactly "
+                    "one source and access "
                     "the returned mapping with `payload['name']` / `payload['content']`)"
                 )
             elif isinstance(original, str) and original != alias:

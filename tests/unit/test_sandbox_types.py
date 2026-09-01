@@ -60,13 +60,19 @@ class SandboxTypesTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             SandboxInputFile.from_bytes("outputs/result.json", b"bad")
 
-    def test_expression_mode_rejects_script_inputs(self) -> None:
-        with self.assertRaises(ValueError):
-            ExecuteRequest(
-                request_id="expression-files",
-                code="pass",
-                files=(SandboxInputFile.from_bytes("assets/input.txt", b"ok"),),
-            )
+    def test_expression_mode_accepts_authorized_files(self) -> None:
+        request = ExecuteRequest(
+            request_id="expression-files",
+            code="pass",
+            files=(
+                SandboxInputFile.from_bytes(
+                    "assets/input.txt",
+                    b"ok",
+                    file_id="file-1",
+                ),
+            ),
+        )
+        self.assertEqual(request.files[0].file_id, "file-1")
 
     def test_script_request_rejects_oversized_resource_payload(self) -> None:
         with self.assertRaises(ValueError):

@@ -19,8 +19,9 @@ from deep_agent.agent.provider_registry import (
     load_provider_for_model,
     validate_provider_config,
 )
-from deep_agent.capabilities.mcp.resolver import load_mcp_rows, resolve_mcp_toolsets
 from deep_agent.capabilities.catalog import invalid_tool_package_codes
+from deep_agent.capabilities.codes import canonical_tool_package_codes
+from deep_agent.capabilities.mcp.resolver import load_mcp_rows, resolve_mcp_toolsets
 from deep_agent.capabilities.mcp.resources import build_mcp_resource_toolset
 from deep_agent.capabilities.ui.registry import prepare_ui_tool_packages_for_spec
 from deep_agent.skills.runtime import ResolvedSkills, resolve_skills_for_run
@@ -121,7 +122,7 @@ async def build_runner(
             provider=provider,
         )
     if capabilities is not None:
-        spec.capabilities = capabilities
+        spec.capabilities = canonical_tool_package_codes(capabilities)
     return await _build_runner_from_spec(spec, ctx, request_headers=request_headers)
 
 
@@ -146,7 +147,7 @@ async def build_runner_for_agent(
     provider = await _provider_for_model(ctx, llm_row)
     spec = AgentSpec.from_row(row, llm_row, provider=provider)
     if capabilities is not None:
-        spec.capabilities = capabilities
+        spec.capabilities = canonical_tool_package_codes(capabilities)
     return await _build_runner_from_spec(spec, ctx, request_headers=request_headers)
 
 
@@ -156,6 +157,10 @@ async def _build_runner_from_spec(
     *,
     request_headers: dict[str, str] | None = None,
 ) -> AgentRunner:
+    spec = replace(
+        spec,
+        capabilities=canonical_tool_package_codes(spec.capabilities),
+    )
     if spec.provider_config is not None:
         validate_provider_config(spec.provider_config)
     invalid_packages = await invalid_tool_package_codes(

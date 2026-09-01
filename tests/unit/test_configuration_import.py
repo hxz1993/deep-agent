@@ -278,6 +278,26 @@ class ConfigurationImportTests(unittest.IsolatedAsyncioTestCase):
         finally:
             await engine.dispose()
 
+    async def test_import_plan_canonicalizes_legacy_ptc_capability(self) -> None:
+        backup_path, _, _ = await self._backup()
+        with sqlite3.connect(backup_path) as connection:
+            connection.execute(
+                "UPDATE agents SET capabilities = ? WHERE id = 'agent-1'",
+                ('["builtin:code-mode","mcp:remote"]',),
+            )
+        engine = await self._target_engine()
+        try:
+            plan = await build_configuration_import_plan(
+                backup_path,
+                target_engine=engine,
+            )
+            self.assertEqual(
+                plan.rows["agents"][0]["capabilities"],
+                ["builtin:ptc", "mcp:remote"],
+            )
+        finally:
+            await engine.dispose()
+
     async def test_active_run_is_rejected_before_database_access(self) -> None:
         backup_path, _, _ = await self._backup()
         engine = await self._target_engine()

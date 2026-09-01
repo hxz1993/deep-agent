@@ -33,10 +33,14 @@ class ConversationAttachment(BaseModel):
 
 class ConversationArtifact(BaseModel):
     artifact_id: str
+    file_id: str | None = None
     kind: str = "tool_result_overflow"
     role: str | None = None
+    file_name: str | None = None
+    mime: str | None = None
     byte_size: int | None = None
     content_hash: str | None = None
+    sha256: str | None = None
 
 
 class ConversationItemBase(BaseModel):

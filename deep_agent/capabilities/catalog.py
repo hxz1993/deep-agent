@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from deep_agent.capabilities.mcp.resolver import load_mcp_tool_packages
+from deep_agent.capabilities.codes import canonical_tool_package_codes
 from deep_agent.capabilities.registry import ToolPackageRegistry
 from deep_agent.capabilities.ui.registry import runnable_ui_tool_package_codes
 from deep_agent.db.stores.bundle import DataStores
@@ -26,4 +27,6 @@ async def invalid_tool_package_codes(
     if not codes:
         return []
     available = await selectable_tool_package_codes(registry, stores)
-    return sorted({code for code in codes if code not in available})
+    return sorted(
+        {code for code in canonical_tool_package_codes(codes) if code not in available}
+    )

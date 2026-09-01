@@ -3,19 +3,27 @@ from __future__ import annotations
 import asyncio
 import base64
 import hashlib
+import mimetypes
 import re
 import time
 import uuid
 from dataclasses import dataclass, replace
+from email.message import Message
+from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any, Literal, TypedDict
+from urllib.parse import unquote, urlsplit, urlunsplit
 
+import httpx2
 from pydantic_ai import FunctionToolset, ModelRetry, RunContext, ToolFailed
+from pydantic_ai._ssrf import safe_download
 from pydantic_ai.toolsets import WrapperToolset
 from pydantic_ai.toolsets.abstract import ToolsetTool
 
 from deep_agent.agent.attachments import _download_file
 from deep_agent.agent.deps import AgentDeps
+from deep_agent.capabilities.codes import PTC_PACKAGE_CODE
 from deep_agent.files.storage import FileStore, PlatformFileStore
+from deep_agent.web.proxy_compat import proxy_compatible_web_fetch
 
 if TYPE_CHECKING:
     from deep_agent.capabilities.registry import ToolPackage
@@ -70,7 +78,8 @@ _SECRET_ASSIGNMENT_RE = re.compile(
 
 
 class FileData(TypedDict):
-    file_id: str
+    file_id: str | None
+    url: str | None
     name: str
     mime: str
     byte_size: int
@@ -82,12 +91,13 @@ class FileData(TypedDict):
 @dataclass(frozen=True)
 class FilePayload:
     token: str
-    file_id: str
+    file_id: str | None
     name: str
     mime: str
     byte_size: int
     sha256: str
     data: bytes
+    url: str | None = None
 
 
 def _request_headers(ctx: RunContext[AgentDeps]) -> dict[str, str]:
@@ -106,16 +116,23 @@ async def _load_authorized_file(
     file_id: str,
 ) -> tuple[bytes, str, str]:
     attachment = ctx.deps.attachment_by_id.get(file_id)
-    artifact = ctx.deps.tool_output_artifacts.get(file_id)
+    session_artifacts = getattr(ctx.deps, "session_file_artifacts", None)
+    artifact = (
+        session_artifacts.get(file_id)
+        if isinstance(session_artifacts, dict)
+        else None
+    )
+    if artifact is None:
+        artifact = ctx.deps.tool_output_artifacts.get(file_id)
     if attachment is None and artifact is None:
         raise ModelRetry(
-            "file_id 不属于当前会话附件或当前会话大工具结果，无法在代码编排中读取"
+            "file_id 不属于当前会话附件或当前会话工具产物，无法在程序编排中读取"
         )
 
     if artifact is not None:
         byte_size = artifact.get("byte_size")
         if isinstance(byte_size, int) and byte_size > MAX_FILE_BYTES:
-            raise ModelRetry(f"文件超过代码编排固定 {MAX_FILE_BYTES} 字节上限")
+            raise ModelRetry(f"文件超过程序编排固定 {MAX_FILE_BYTES} 字节上限")
         cache_key = f"tool-result:{file_id}"
         name = str(artifact.get("file_name") or f"tool-result-{file_id}.txt")
         mime = str(artifact.get("mime") or "text/plain")
@@ -142,8 +159,107 @@ async def _load_authorized_file(
         ctx.deps.file_bytes[cache_key] = data
 
     if len(data) > MAX_FILE_BYTES:
-        raise ModelRetry(f"文件超过代码编排固定 {MAX_FILE_BYTES} 字节上限")
+        raise ModelRetry(f"文件超过程序编排固定 {MAX_FILE_BYTES} 字节上限")
     return data, name, mime
+
+
+def _safe_download_name(url: str, response: httpx2.Response, mime: str) -> str:
+    disposition = response.headers.get("content-disposition")
+    candidate: str | None = None
+    if disposition:
+        message = Message()
+        message["content-disposition"] = disposition
+        candidate = message.get_filename()
+    if not candidate:
+        candidate = PurePosixPath(unquote(urlsplit(url).path)).name
+    candidate = (candidate or "").replace("\\", "/").rsplit("/", 1)[-1]
+    candidate = "".join(char for char in candidate if ord(char) >= 32).strip(" .")
+    if candidate:
+        return candidate[:255]
+    extension = mimetypes.guess_extension(mime, strict=False) or ".bin"
+    return f"download{extension}"
+
+
+def _public_response_url(response: httpx2.Response, fallback: str) -> str:
+    request = response.request
+    parsed = urlsplit(str(request.url))
+    host = request.headers.get("host")
+    if not host:
+        return fallback
+    return urlunsplit((parsed.scheme, host, parsed.path, parsed.query, ""))
+
+
+async def _load_public_url(url: str) -> tuple[bytes, str, str, str]:
+    parsed = urlsplit(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise ModelRetry("url 只接受绝对 HTTP(S) 公网地址")
+    if parsed.username is not None or parsed.password is not None:
+        raise ModelRetry("url 不允许包含用户名或密码")
+
+    # Keep the relay aligned with Web Fetch: every redirect is SSRF checked by
+    # Pydantic AI, while DeepAgent's proxy shim preserves hostname DNS/SNI.
+    from deep_agent.web.runtime import (
+        _WEB_FETCH_ATTEMPT_TIMEOUT_SECONDS,
+        _WEB_FETCH_MAX_ATTEMPTS,
+        _WEB_FETCH_RETRY_DELAY_SECONDS,
+        _WEB_FETCH_TOTAL_TIMEOUT_SECONDS,
+        _fetch_retry_decision,
+    )
+
+    deadline = time.monotonic() + _WEB_FETCH_TOTAL_TIMEOUT_SECONDS
+    attempts = 0
+    while True:
+        attempts += 1
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise ModelRetry("公网文件下载超时")
+        try:
+            async with asyncio.timeout(
+                min(_WEB_FETCH_ATTEMPT_TIMEOUT_SECONDS, remaining)
+            ):
+                async with proxy_compatible_web_fetch():
+                    response = await safe_download(
+                        url,
+                        allow_local=False,
+                        timeout=int(_WEB_FETCH_ATTEMPT_TIMEOUT_SECONDS),
+                        headers={"Accept": "*/*"},
+                        max_bytes=MAX_FILE_BYTES,
+                    )
+            break
+        except asyncio.CancelledError:
+            raise
+        except (ValueError, httpx2.HTTPError, TimeoutError) as exc:
+            decision = _fetch_retry_decision(exc)
+            remaining = deadline - time.monotonic()
+            if (
+                decision is not None
+                and attempts < _WEB_FETCH_MAX_ATTEMPTS
+                and remaining > decision.delay_seconds
+            ):
+                await asyncio.sleep(decision.delay_seconds)
+                continue
+            if decision is None and attempts < _WEB_FETCH_MAX_ATTEMPTS:
+                # Pydantic AI deliberately collapses some transport subclasses;
+                # keep the same one short delay used by Web Fetch for request errors.
+                if (
+                    isinstance(exc, httpx2.RequestError)
+                    and remaining > _WEB_FETCH_RETRY_DELAY_SECONDS
+                ):
+                    await asyncio.sleep(_WEB_FETCH_RETRY_DELAY_SECONDS)
+                    continue
+            raise ModelRetry("公网文件下载失败或地址不安全") from exc
+
+    data = response.content
+    if len(data) > MAX_FILE_BYTES:
+        raise ModelRetry(f"文件超过程序编排固定 {MAX_FILE_BYTES} 字节上限")
+    raw_mime = response.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+    mime = (
+        raw_mime
+        if re.fullmatch(r"[a-z0-9!#$&^_.+-]+/[a-z0-9!#$&^_.+-]+", raw_mime)
+        else "application/octet-stream"
+    )
+    final_url = _public_response_url(response, url)
+    return data, _safe_download_name(final_url, response, mime), mime, final_url
 
 
 def build_code_mode_tool_package() -> "ToolPackage":
@@ -160,16 +276,33 @@ def build_code_mode_tool_package() -> "ToolPackage":
     )
     async def load_file_data(
         ctx: RunContext[AgentDeps],
-        file_id: str,
+        file_id: str | None = None,
+        url: str | None = None,
         encoding: Literal["base64", "text"] = "base64",
         text_encoding: str = "utf-8",
         max_chars: int = DEFAULT_TEXT_CHARS,
     ) -> FileData:
-        """读取当前会话已授权文件，供 run_code 直接中转给后续 MCP 工具。"""
+        """读取当前会话已授权文件或公网文件，供 run_code 原样中转。"""
         started = time.perf_counter()
         status = "completed"
         try:
-            data, name, mime = await _load_authorized_file(ctx, file_id)
+            normalized_file_id = file_id.strip() if isinstance(file_id, str) else None
+            normalized_url = url.strip() if isinstance(url, str) else None
+            if not normalized_file_id:
+                normalized_file_id = None
+            if not normalized_url:
+                normalized_url = None
+            if (normalized_file_id is None) == (normalized_url is None):
+                raise ModelRetry("file_id 与 url 必须且只能提供一个")
+            final_url: str | None = None
+            if normalized_file_id is not None:
+                data, name, mime = await _load_authorized_file(
+                    ctx,
+                    normalized_file_id,
+                )
+            else:
+                assert normalized_url is not None
+                data, name, mime, final_url = await _load_public_url(normalized_url)
             digest = hashlib.sha256(data).hexdigest()
             if encoding == "text":
                 if not 1 <= max_chars <= MAX_TEXT_CHARS:
@@ -189,7 +322,8 @@ def build_code_mode_tool_package() -> "ToolPackage":
                 token = f"{FILE_DATA_TOKEN_PREFIX}{uuid.uuid4().hex}"
                 payload = FilePayload(
                     token=token,
-                    file_id=file_id,
+                    file_id=normalized_file_id,
+                    url=final_url,
                     name=name,
                     mime=mime,
                     byte_size=len(data),
@@ -200,7 +334,8 @@ def build_code_mode_tool_package() -> "ToolPackage":
                 content = token
 
             return FileData(
-                file_id=file_id,
+                file_id=normalized_file_id,
+                url=final_url,
                 name=name,
                 mime=mime,
                 byte_size=len(data),
@@ -223,6 +358,7 @@ def build_code_mode_tool_package() -> "ToolPackage":
                     "duration_ms": round((time.perf_counter() - started) * 1000, 3),
                     "args": {
                         "file_id": file_id,
+                        "url": url,
                         "encoding": encoding,
                         "text_encoding": text_encoding,
                         "max_chars": max_chars,
@@ -231,16 +367,16 @@ def build_code_mode_tool_package() -> "ToolPackage":
             )
 
     return ToolPackage(
-        code="builtin:code-mode",
+        code=PTC_PACKAGE_CODE,
         category="builtin",
         toolset=toolset,
-        label="代码编排",
+        label="程序编排",
         source="builtin",
-        description="在受限 Monty 环境中编排当前 Agent 已授权的 MCP 工具。",
+        description="使用 PTC 在受限环境中编排当前 Agent 已授权的 MCP 工具。",
         tools=[
             ToolInfo(
                 "run_code",
-                "代码编排",
+                "程序编排",
                 "使用受限 Python 子集完成多步、并发、循环、聚合和文件载荷中转。",
                 execution_type="code",
             )

@@ -46,11 +46,25 @@ python - <<'PY'
 import numpy
 import pandas
 import pydantic
+import requests
+import httpx
+import bs4
+import lxml
+import PIL
+import matplotlib
+import pypdf
+import pdfplumber
+import reportlab
+import openpyxl
+import xlsxwriter
+import docx
+import pptx
 
 print("sandbox packages ok:")
 print(f"  numpy={numpy.__version__}")
 print(f"  pandas={pandas.__version__}")
 print(f"  pydantic={pydantic.__version__}")
+print("  web/image/pdf/office packages=ok")
 assert tuple(int(x) for x in numpy.__version__.split(".")[:2]) < (2, 0), numpy.__version__
 PY
 

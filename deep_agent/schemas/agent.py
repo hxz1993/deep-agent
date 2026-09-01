@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
 
+from deep_agent.capabilities.codes import canonical_tool_package_codes
 from deep_agent.schemas.llm_model import LlmModelSummary
 from deep_agent.time import UtcDatetime
 
@@ -65,13 +66,17 @@ class AgentCreate(_RejectLegacyMaxRequests):
 
     @field_validator("capabilities", "skills")
     @classmethod
-    def validate_code_list(cls, value: list[str]) -> list[str]:
+    def validate_code_list(cls, value: list[str], info: ValidationInfo) -> list[str]:
         normalized = [item.strip() for item in value]
         if any(not item for item in normalized):
             raise ValueError("values cannot contain blank strings")
         if len(set(normalized)) != len(normalized):
             raise ValueError("values must be unique")
-        return normalized
+        return (
+            canonical_tool_package_codes(normalized)
+            if info.field_name == "capabilities"
+            else normalized
+        )
 
 
 class AgentUpdate(_RejectLegacyMaxRequests):
@@ -107,7 +112,11 @@ class AgentUpdate(_RejectLegacyMaxRequests):
 
     @field_validator("capabilities", "skills")
     @classmethod
-    def validate_code_list(cls, value: list[str] | None) -> list[str] | None:
+    def validate_code_list(
+        cls,
+        value: list[str] | None,
+        info: ValidationInfo,
+    ) -> list[str] | None:
         if value is None:
             return None
         normalized = [item.strip() for item in value]
@@ -115,7 +124,11 @@ class AgentUpdate(_RejectLegacyMaxRequests):
             raise ValueError("values cannot contain blank strings")
         if len(set(normalized)) != len(normalized):
             raise ValueError("values must be unique")
-        return normalized
+        return (
+            canonical_tool_package_codes(normalized)
+            if info.field_name == "capabilities"
+            else normalized
+        )
 
 
 class AgentPromptEstimateRequest(BaseModel):
@@ -150,7 +163,7 @@ class AgentResponse(BaseModel):
             model=LlmModelSummary.from_row(llm_model),
             prompt=row.prompt,
             temperature=row.temperature,
-            capabilities=list(row.capabilities or []),
+            capabilities=canonical_tool_package_codes(row.capabilities),
             skills=row.skills or [],
             created_at=row.created_at,
             updated_at=row.updated_at,

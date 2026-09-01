@@ -4,3 +4,16 @@ numpy>=1.26,<2
 pandas
 # Worker loads deep_agent.sandbox.types via PYTHONPATH; pydantic must exist in this venv.
 pydantic>=2,<3
+requests
+httpx
+beautifulsoup4
+lxml
+Pillow
+matplotlib
+pypdf
+pdfplumber
+reportlab
+openpyxl
+xlsxwriter
+python-docx
+python-pptx

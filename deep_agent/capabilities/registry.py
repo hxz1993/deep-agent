@@ -5,6 +5,10 @@ from typing import Any
 
 from pydantic_ai.toolsets import AbstractToolset
 
+from deep_agent.capabilities.codes import (
+    canonical_tool_package_code,
+    canonical_tool_package_codes,
+)
 from deep_agent.core.exceptions import ToolPackageError
 
 
@@ -60,6 +64,7 @@ class ToolPackageRegistry:
         return list(self._packages)
 
     def get(self, code: str) -> ToolPackage:
+        code = canonical_tool_package_code(code)
         if code not in self._packages:
             raise ToolPackageError(f"Unknown tool package: {code}")
         return self._packages[code]
@@ -70,7 +75,7 @@ class ToolPackageRegistry:
     def selected(self, codes: list[str] | None = None) -> list[ToolPackage]:
         return [
             self._packages[code]
-            for code in (codes or [])
+            for code in canonical_tool_package_codes(codes)
             if code in self._packages
         ]
 

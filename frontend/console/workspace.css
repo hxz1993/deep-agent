@@ -997,6 +997,56 @@ html, body {
   font-size: 12px;
 }
 .tool-result-artifact svg { width: 14px; height: 14px; flex: none; }
+.generated-file-list {
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+}
+.generated-file-heading {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+.generated-file-heading svg,
+.generated-file-icon svg,
+.generated-file-actions svg { width: 14px; height: 14px; }
+.generated-file-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px 9px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface-soft);
+}
+.generated-file-icon { display: inline-flex; color: var(--accent); }
+.generated-file-copy { min-width: 0; display: grid; flex: 1; gap: 2px; }
+.generated-file-copy strong,
+.generated-file-copy small,
+.generated-file-copy code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.generated-file-copy strong { color: var(--text); font-size: 12px; }
+.generated-file-copy small { color: var(--text-faint); font-size: 12px; }
+.generated-file-copy code { color: var(--text-muted); font-size: 12px; }
+.generated-file-actions { display: inline-flex; align-items: center; gap: 3px; }
+.generated-file-actions :is(a, button) {
+  display: inline-grid;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  place-items: center;
+  border: 0;
+  border-radius: 6px;
+  color: var(--text-muted);
+  background: transparent;
+  cursor: pointer;
+}
+.generated-file-actions :is(a, button):hover,
+.generated-file-actions button.copied { color: var(--accent); background: var(--accent-soft); }
+.generated-file-actions button:disabled { cursor: default; }
 .local-file-download {
   display: inline-flex;
   align-items: center;

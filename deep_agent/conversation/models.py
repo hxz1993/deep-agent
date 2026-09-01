@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+
+from deep_agent.time import UtcDatetime
 
 
 ConversationStatus = Literal[
@@ -48,8 +49,8 @@ class ConversationItemBase(BaseModel):
     run_id: str | None = None
     order: ConversationOrder
     source_event_ids: list[str] = Field(default_factory=list)
-    created_at: datetime
-    updated_at: datetime
+    created_at: UtcDatetime
+    updated_at: UtcDatetime
 
 
 class UserConversationItem(ConversationItemBase):

@@ -1,4 +1,6 @@
 import { copyTextToClipboard } from "./message-actions.js?v=20260819-1";
+import { parseServerTimestamp } from "./time.js?v=20260831-1";
+import { renderWebImagePreview } from "./web-image.js?v=20260901-1";
 
 const TOOL_KINDS = new Set(["tool", "planning", "deferred"]);
 const PRESENTATION_ONLY_SSE_TYPES = new Set(["session_title"]);
@@ -476,8 +478,8 @@ function formatJson(value) {
 
 function formatTime(value) {
   if (!value) return "—";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return String(value);
+  const date = parseServerTimestamp(value);
+  if (!date) return String(value);
   return new Intl.DateTimeFormat("zh-CN", {
     hour: "2-digit",
     minute: "2-digit",
@@ -542,8 +544,8 @@ function hasMeaningfulValue(value) {
 
 function eventDuration(event) {
   if (Number.isFinite(Number(event.duration_ms))) return Number(event.duration_ms);
-  const started = event.timestamp ? new Date(event.timestamp).getTime() : NaN;
-  const ended = event.timestamp_end ? new Date(event.timestamp_end).getTime() : NaN;
+  const started = event.timestamp ? parseServerTimestamp(event.timestamp)?.getTime() : NaN;
+  const ended = event.timestamp_end ? parseServerTimestamp(event.timestamp_end)?.getTime() : NaN;
   return Number.isFinite(started) && Number.isFinite(ended) ? Math.max(0, ended - started) : null;
 }
 
@@ -701,7 +703,8 @@ function renderPayloadResultSections({ payload, result }) {
 
 function renderToolSummary(event) {
   const result = toolResultValue(event);
-  return `${renderPayloadResultSections({
+  const imagePreview = renderWebImagePreview(result, { className: "trajectory-web-image-preview" });
+  return `${imagePreview ? renderSummarySection("Web Image", imagePreview) : ""}${renderPayloadResultSections({
     payload: event.payload?.args ?? event.payload,
     result,
   })}${renderLocalFileDownload(result)}`;

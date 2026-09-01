@@ -294,23 +294,16 @@ DeepSeek 或兼容 Provider；目录不参与运行时 Provider 解析。
 
 ## 9. Alembic 与发布安全
 
-v0.3.0 已将发布前迁移历史压缩为完整基线 `001_initial_schema.py`。该基线一次性创建
-`model_catalog`、`llm_models` 运行属性及全部当前表、约束和索引。新数据库从空库升级；
-旧 `023` 数据库必须在备份和物理结构校验后使用 Alembic `stamp --purge 001`，不能重放
-或手工伪造迁移状态。共享环境的具体安全门和校验命令见 `maintenance/README.md`。
+v0.6.6 已将Revision 001～012的稳定结构再次压缩为完整基线 `001_initial_schema.py`。该基线
+一次性创建`model_catalog`、`llm_models`运行属性及全部当前表、约束、索引和默认数据。新数据库
+从空库升级；旧Revision 012数据库必须在完整备份、停止旧实例并通过物理结构与全表内容哈希校验后，
+使用`maintenance.rebaseline_database`执行无DDL的`stamp --purge 001`，不能重放或手工伪造迁移
+状态。共享环境的具体安全门和校验命令见`maintenance/README.md`。
 
 ## 10. 配置备份
 
-`maintenance/config_backup.py` 的 `CONFIG_TABLES` 包含：
-
-```text
-llm_models
-model_catalog
-mcp_servers
-agents
-ui_tool_packages
-ui_tool_definitions
-```
+`maintenance/config_backup.py`按源Alembic Revision自动复制全部业务表，只将
+`chat_sessions`和`chat_session_events`保留为空结构；新增配置表不再维护手工白名单。
 
 备份完整保存：
 

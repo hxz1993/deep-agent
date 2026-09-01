@@ -1,6 +1,6 @@
 # 20 · Hybrid Code Mode
 
-> 当前状态：DeepAgent v0.6.4 已实现；数据库结构为 Alembic 011，Code Mode本身不增加表或字段。
+> 当前状态：DeepAgent v0.6.6 已实现；数据库结构为 Alembic 001生产基线，Code Mode本身不增加表或字段。
 
 Hybrid Code Mode 是显式 Agent 能力包 `builtin:code-mode`。启用后，模型获得 Harness 官方
 `run_code(code, restart=false)`，并可在受限 Monty Python 子集中编排该 Agent 已授权且当前已经

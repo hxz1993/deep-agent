@@ -16,26 +16,19 @@ python3.12 -m maintenance.config_backup \
 deep-agent-config-<环境>-v<数据库版本>-<时间>.db
 ```
 
-备份包含完整的当前表结构，以及以下配置表数据：
+备份按源数据库的Alembic Revision创建同版本结构，并复制该Revision中的全部业务表数据，唯一排除：
 
-- `agents`
-- `llm_providers`
-- `llm_models`
-- `model_catalog`
-- `mcp_servers`
-- `skill_packages`
-- `ui_tool_packages`
-- `ui_tool_definitions`
-- `alembic_version`
+- `chat_sessions`
+- `chat_session_events`
 
 `chat_sessions` 和 `chat_session_events` 只保留表结构，不复制会话事件。备份中的
 API Key、Token 和 MCP Header 保留原值。命令完成前会自动检查 SQLite
 完整性、各配置表行数、数据库版本、模型到Provider的逻辑引用完整性和DeepAgent数据层连接。
 
-备份程序会把全部 ORM 业务表强制归入“复制配置数据”或“只保留结构”两类。以后增加表却没有
-同步备份清单时，测试和备份命令会直接失败，避免生成表面成功但缺配置的文件。备份文件内的
-`_backup_info.scope_manifest`同时记录本次范围、只保留结构的会话表，以及未内嵌的外部文件类型，
-便于脱离仓库后核对备份边界。
+复制范围从源Revision实际结构自动发现，不维护配置表白名单；后续Migration新增配置表时会自动
+进入备份。源库仍在旧Revision时，备份也不会提前要求未来表存在。备份文件内的
+`_backup_info.scope_manifest`记录本次实际复制范围、只保留结构的两张会话表，以及未内嵌的外部
+文件类型，便于脱离仓库后核对备份边界。
 
 `llm_models` 会完整保留上下文窗口、最大输出 Token、输入模态与能力标签；
 `llm_providers` 会先于模型复制，并完整保留Provider类型、默认地址模式、明确地址与密钥；
@@ -57,6 +50,45 @@ Hash、Manifest 和资源索引，不包含平台文件服务中的原始 ZIP，
 
 备份工具只负责数据库配置备份，不提供恢复命令。Skill原包的跨环境迁移由独立的单个/全部导出
 负责，两者职责不合并，避免把平台二进制文件塞入配置数据库。
+
+## v0.6.6 生产基线重整（012 → 001）
+
+稳定结构已经折叠为唯一Alembic生产基线`001`。新环境执行`alembic upgrade head`时直接创建
+原Revision 012的最终结构和当前默认数据，不再重放历史开发迁移。
+
+已有012数据库只允许使用`maintenance.rebaseline_database`做无DDL改标。工具默认只读：它要求
+源Revision精确为012，校验全部11张业务表的列、主键、唯一约束、索引、外键、空值和必要默认值，
+并记录每张表的行数与按主键排序的内容哈希。只有显式同时提供`--stamp --yes`才会执行
+`alembic stamp --purge 001`；完成后再次比较物理结构、行数和内容哈希，任一变化都会失败。
+
+只读预检：
+
+```bash
+python3.12 -m maintenance.rebaseline_database \
+  --config ~/.config/deep-agent/test.env \
+  --report ../deep-agent-rebaseline-reports/test-012-audit-TMP-to-delete.json
+```
+
+正式切换顺序固定为：
+
+1. 生成配置备份，并由数据库运维创建包含两张会话表的MySQL全库快照；记录当前镜像和Git Commit。
+2. 停止全部旧镜像实例及自动扩容，确认不会再有Revision 012代码启动或执行迁移。
+3. 再执行一次只读预检，确认Revision、表结构、行数与哈希；预检报告按敏感文件保存。
+4. 使用即将部署的新代码执行：
+
+   ```bash
+   python3.12 -m maintenance.rebaseline_database \
+     --config ~/.config/deep-agent/test.env \
+     --stamp --yes \
+     --report ../deep-agent-rebaseline-reports/test-012-to-001.json
+   ```
+
+5. 立即部署且只启动包含唯一`001`基线的新镜像；旧镜像从此不能连接该数据库。
+6. 核验`alembic_version=001`、`/health`、`/info`、数据库信息接口、配置页、会话History与一次新对话。
+
+本地SQLite采用相同顺序：停止8000服务，复制完整`.db`文件作为备份，移除非业务备份元数据表后
+执行只读预检和显式改标，再用新代码启动。禁止在服务运行时直接执行
+`UPDATE alembic_version SET version_num='001'`；这会让旧镜像把002～012当作待执行迁移。
 
 ## 会话历史归档
 
@@ -167,6 +199,12 @@ Provider迁移后按类型、地址和凭据等真实配置判断可用，模型
 `alembic upgrade head`。迁移后核验六张配置表不再有`enabled`列、Agent关联数量不变，再执行
 Agent创建、MCP、Skill、UI工具和对话冒烟。禁止手工只改`alembic_version`。升级后的配置备份
 文件名使用`v010`。
+
+## v0.6.5 全局配置（历史迁移）
+
+历史Alembic `012`增加`global_settings`并初始化`web_search={"mode":"native"}`；该最终结构现已折叠
+进入唯一生产基线`001`。旧012库切换前仍须生成`v012`配置备份。Web Search密钥与LLM Provider
+密钥一样属于配置秘密，备份文件继续按私有敏感文件管理，不提交仓库或公开传输。
 
 ## v0.6.4 模型启停恢复
 

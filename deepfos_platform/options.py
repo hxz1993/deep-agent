@@ -39,6 +39,14 @@ def _ensure_discovery_server_is_set(value):
         raise RuntimeError(f"Missing server configure for {impl}")
 
 
+def _resolve_instance_host() -> str:
+    """Resolve the local registration address without blocking app startup."""
+    try:
+        return socket.gethostbyname(socket.gethostname())
+    except socket.gaierror:
+        return "127.0.0.1"
+
+
 class Server(Category):
     _ENV_PREFIX = "EXPORT_"
 
@@ -125,7 +133,7 @@ class Gunicorn(Category):
     max_requests = Option(2000, val_type=int, bind_env="MAX_REQUESTS_BEFORE_RESTART")
     #: Eureka注册IP
     inst_host = Option(
-        socket.gethostbyname(socket.gethostname()),
+        _resolve_instance_host(),
         val_type=str, bind_env="LOAD_BALANCER_HOST")
     #: Eureka注册PORT
     inst_port = Option(

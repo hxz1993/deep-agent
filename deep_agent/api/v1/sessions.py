@@ -22,6 +22,7 @@ from deep_agent.agent.context.manual import manual_compaction_availability
 from deep_agent.conversation.models import ConversationHistoryResponse
 from deep_agent.conversation.projector import ConversationProjectionError, project_session_events
 from deep_agent.schemas.chat import SessionInfo, SessionListResponse
+from deep_agent.time import UtcDatetime
 
 router = APIRouter()
 
@@ -99,8 +100,8 @@ async def list_sessions(
     agent_id: str | None = Query(default=None, description="Filter by agent id."),
     limit: int = Query(default=50, ge=1, le=MAX_LIST_LIMIT, description="Page size."),
     offset: int = Query(default=0, ge=0, description="Page offset."),
-    updated_after: datetime | None = Query(default=None, description="Only sessions updated at or after this time (UTC)."),
-    updated_before: datetime | None = Query(default=None, description="Only sessions updated at or before this time (UTC)."),
+    updated_after: UtcDatetime | None = Query(default=None, description="Only sessions updated at or after this time (UTC)."),
+    updated_before: UtcDatetime | None = Query(default=None, description="Only sessions updated at or before this time (UTC)."),
     has_messages: bool | None = Query(
         default=None,
         description="When true, only sessions with messages; when false, only empty sessions.",
@@ -222,8 +223,8 @@ class SessionEventResponse(BaseModel):
     turn_id: str | None = None
     run_id: str | None = None
     payload: dict[str, Any]
-    created_at: datetime
-    updated_at: datetime
+    created_at: UtcDatetime
+    updated_at: UtcDatetime
 
 
 class SessionEventsResponse(BaseModel):
@@ -354,7 +355,7 @@ class SessionContextStatus(BaseModel):
     compaction_event_id: str | None = None
     compaction_source_through_sequence: int | None = None
     compaction_estimated_tokens: int | None = None
-    compaction_updated_at: datetime | None = None
+    compaction_updated_at: UtcDatetime | None = None
     summary_model_id: str | None = None
     manual_compaction_available: bool = False
     manual_compaction_reason: str = "context_window_unknown"

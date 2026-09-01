@@ -12,7 +12,7 @@
 | 项 | 内容 |
 | --- | --- |
 | **是什么** | 通用 AI Agent 全栈：FastAPI 后端 + Pydantic AI 运行时 + 静态前端 |
-| **产品版本** | `deep_agent.__version__`为唯一来源；当前`0.6.4`，数据库Head为`011` |
+| **产品版本** | `deep_agent.__version__`为唯一来源；当前`0.6.6`，数据库Head为`001` |
 | **启动** | 本地 Test 联调固定使用下方命令；部署入口才使用 `deep_agent.main:app` |
 | **测试** | `python3.12 -m unittest discover -s tests -p "test_*.py" -v` |
 | **配置** | 仓库根 `.env`（`DEEP_AGENT_*` / `DEEP_AGENT_DBMS_*` / `DEEP_AGENT_SQLITE_PATH`） |
@@ -105,7 +105,7 @@ HTTP → deep_agent/api/v1 → AgentRunner → pydantic_ai.Agent → Toolsets
                                       └→ SessionStore (postgres/mysql/sqlite)
 ```
 
-工具包来源：`builtin:general` | `builtin:sandbox` | `builtin:code-mode` | `mcp:*`
+工具包来源：`builtin:general` | `builtin:sandbox` | `builtin:code-mode` | `builtin:web` | `mcp:*`
 （DB + `mcps/` 兜底）| `ui:builtin` | `ui:<package>`。Skill 与 ToolPackage 分离，Agent 通过
 `agents.skills` 显式选择，上传包元数据位于 `skill_packages`。
 
@@ -141,6 +141,10 @@ v0.6.1删除目录资源自身的冗余启停层；v0.6.4只恢复Model的`enabl
 - v0.6.1将运行基线固定升级到`pydantic-ai-slim 2.35.1`与`pydantic-ai-harness 0.26.0`。OpenAI 3.5、aiohttp 3.14、deepfos SDK 1.1.97和Google Provider的`httpx2`客户端必须联合升级。
 - v0.6.2显式引入`builtin:code-mode`：只在Agent关联后注入Harness `run_code`，已授权且已披露MCP保留原生Schema并同时可供Monty组合调用。Code Mode不扩大MCP权限，不可调用Sandbox、History、Planning、UI/HITL、Deferred/Approval、导出、Resource或自身等内部工具；Code-only `load_file_data`仅将当前会话已授权文件转为Run内不透明变量，真实Base64只在MCP调用边界生成。Shell、Playwright、Host FileSystem和FallbackCompaction仍未启用。
 - v0.6.3只让证据白名单中的稳定MCP返回Schema进入Monty类型信息，未知Schema退化为通用JSON；嵌套审计有总大小上限。DeepSeek v4 Vision当前轮图片按像素尺寸估算上下文Token，其他路由保守回退。Console用`CODE`标签和Code页签展示`run_code`，附件与Context Reference在输入详情中分区。
+- v0.6.5新增默认不关联的`builtin:web`，固定包含`web_search`和`web_fetch`。Search全局配置明确选择当前模型或一个固定Provider，失败不隐式降级；Fetch复用Pydantic AI SSRF-safe实现并禁止私网、云元数据和URL凭据。只有同时授权`builtin:web`与`builtin:code-mode`时，固定Provider的两工具才作为显式函数进入Monty；`execute_python`和Monty本身仍无任意网络。`global_settings`已进入当前Alembic `001`生产基线和配置备份。
+- v0.6.6为图片输入模型增加外层普通工具`web_image_view`，不进入Monty。`web_fetch`在原位置保留
+  安全图片Markdown引用，但不自动读图；同一Run使用原生`ImageUrl`，Event/History/SSE/轨迹只保存
+  URL、MIME和下载模式，Console按URL预览。不得把图片引用加入ToolOutputLimits排除名单，也不得保存Base64。
 - Tool Search 首轮预选只使用聊天 API 的原始非空 `message`；`context_refs.type/label` 仅在纯上下文请求时回退，不能让 Page/Range 标签覆盖用户问题。实时工具若被 `ModelRetry` 或取消撤回，SSE 用 `tool_call_removed` 通知客户端删除临时卡片；取消后的非空部分回答必须以 `assistant.status=interrupted` 恢复。
 - 模型目录的 `max_output_tokens` 同时约束普通和流式回答；工具错误只有在模型修改参数或改选工具后可能成功时使用 `ModelRetry`，已确定的下载、解析或上游失败使用 `ToolFailed`，避免消耗工具重试预算。
 - v0.3.13 将正式 Run 的官方 `CancellationToken` 传给内部摘要 Agent；取消摘要直接终止 Run，不能转成 Sliding Window 后继续回答。Local/Native 工具配对统一使用 Pydantic AI 2.26 的 Call/Return 基类。

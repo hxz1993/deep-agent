@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Text, TypeDecorator
+from sqlalchemy import DateTime, Text, TypeDecorator
 from sqlalchemy.dialects.mysql import LONGTEXT
+
+from deep_agent.time import ensure_utc
 
 
 class TextJSON(TypeDecorator[Any]):
@@ -37,3 +40,30 @@ class TextJSON(TypeDecorator[Any]):
 
 # Backward-compatible alias used by models and future migrations.
 JSONType = TextJSON
+
+
+class UtcTimestamp(TypeDecorator[datetime]):
+    """Persist UTC consistently and always return an aware UTC datetime.
+
+    PostgreSQL keeps a timezone-aware physical type. MySQL and SQLite store a
+    naive UTC value because their datetime columns do not preserve offsets.
+    Legacy naive values are interpreted as UTC when read or written.
+    """
+
+    impl = DateTime
+    cache_ok = True
+
+    def load_dialect_impl(self, dialect):  # type: ignore[no-untyped-def]
+        return dialect.type_descriptor(DateTime(timezone=dialect.name == "postgresql"))
+
+    def process_bind_param(self, value: datetime | None, dialect) -> datetime | None:  # type: ignore[no-untyped-def]
+        if value is None:
+            return None
+        normalized = ensure_utc(value)
+        if dialect.name == "postgresql":
+            return normalized
+        return normalized.replace(tzinfo=None)
+
+    def process_result_value(self, value: datetime | None, dialect) -> datetime | None:  # type: ignore[no-untyped-def]
+        del dialect
+        return ensure_utc(value) if value is not None else None

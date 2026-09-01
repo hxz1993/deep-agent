@@ -140,6 +140,12 @@ class SessionListApiTests(unittest.TestCase):
         response = self.client.get("/api/v1/sessions", headers={"user": ""})
         self.assertEqual(response.status_code, 401)
 
+    def test_naive_utc_query_parameter_remains_supported(self) -> None:
+        response = self.client.get(
+            "/api/v1/sessions?updated_before=2099-01-01T00:00:00"
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+
     def test_list_sessions_ignores_user_id_query_and_uses_header(self) -> None:
         store = get_context().store
 

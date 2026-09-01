@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from datetime import datetime
 from pydantic_ai import ToolDenied
@@ -20,6 +21,7 @@ from deep_agent.agent.context_references import (
     context_reference_title,
     context_references_from_content,
 )
+from deep_agent.time import ensure_utc
 
 
 def _user_prompt_text(part: UserPromptPart) -> str:
@@ -187,7 +189,17 @@ def mark_cancelled_response_interrupted(messages: list[ModelMessage]) -> list[Mo
 _USER_CANCELLED_TOOL_MESSAGE = "User cancelled"
 
 
-def repair_unprocessed_tool_calls(messages: list[ModelMessage]) -> list[ModelMessage]:
+def _is_tool_denied_content(value: object) -> bool:
+    return isinstance(value, ToolDenied) or (
+        isinstance(value, Mapping) and value.get("kind") == "tool-denied"
+    )
+
+
+def repair_unprocessed_tool_calls(
+    messages: list[ModelMessage],
+    *,
+    denied_message: str = _USER_CANCELLED_TOOL_MESSAGE,
+) -> list[ModelMessage]:
     """Close legacy dangling tool calls without touching official interrupted turns.
 
     Synthetic tool returns are inserted immediately after the assistant turn they
@@ -200,25 +212,29 @@ def repair_unprocessed_tool_calls(messages: list[ModelMessage]) -> list[ModelMes
 
     repaired: list[ModelMessage] = []
     pending: dict[str, str] = {}
+    retry_resolved: set[tuple[str, str | None]] = set()
+    changed = False
 
     def flush_pending() -> None:
-        nonlocal pending
+        nonlocal changed, pending
         if not pending:
             return
         repaired.append(ModelRequest(
             parts=[
                 ToolReturnPart(
                     tool_name=tool_name,
-                    content=ToolDenied(message=_USER_CANCELLED_TOOL_MESSAGE),
+                    content=ToolDenied(message=denied_message),
                     tool_call_id=tool_call_id,
                 )
                 for tool_call_id, tool_name in pending.items()
             ]
         ))
+        changed = True
         pending = {}
 
     for message in messages:
         if isinstance(message, ModelResponse):
+            retry_resolved = set()
             returned_ids = {
                 part.tool_call_id
                 for part in message.parts
@@ -240,17 +256,38 @@ def repair_unprocessed_tool_calls(messages: list[ModelMessage]) -> list[ModelMes
         if isinstance(message, ModelRequest):
             if pending and any(isinstance(part, UserPromptPart) for part in message.parts):
                 flush_pending()
-            repaired.append(message)
+            kept_parts = []
+            current_retry_resolved: set[tuple[str, str | None]] = set()
             for part in message.parts:
-                if isinstance(part, BaseToolReturnPart) and part.tool_call_id:
+                if isinstance(part, RetryPromptPart) and part.tool_call_id:
                     pending.pop(part.tool_call_id, None)
+                    current_retry_resolved.add((part.tool_call_id, part.tool_name))
+                    kept_parts.append(part)
+                    continue
+                if isinstance(part, BaseToolReturnPart) and part.tool_call_id:
+                    key = (part.tool_call_id, part.tool_name)
+                    if key in retry_resolved and _is_tool_denied_content(
+                        getattr(part, "content", None)
+                    ):
+                        changed = True
+                        continue
+                    pending.pop(part.tool_call_id, None)
+                kept_parts.append(part)
+            if kept_parts:
+                if len(kept_parts) != len(message.parts):
+                    message = replace(message, parts=kept_parts)
+                repaired.append(message)
+            else:
+                changed = True
+            retry_resolved = current_retry_resolved
             continue
 
+        retry_resolved = set()
         flush_pending()
         repaired.append(message)
 
     flush_pending()
-    if len(repaired) == len(messages):
+    if not changed:
         return messages
     return repaired
 
@@ -332,9 +369,9 @@ def session_activity_timestamps(messages: list[ModelMessage]) -> tuple[datetime 
         if isinstance(message, ModelRequest):
             ts = _request_timestamp(message)
             if ts is not None:
-                timestamps.append(ts)
+                timestamps.append(ensure_utc(ts))
         elif isinstance(message, ModelResponse) and message.timestamp is not None:
-            timestamps.append(message.timestamp)
+            timestamps.append(ensure_utc(message.timestamp))
     if not timestamps:
         return None, None
     return min(timestamps), max(timestamps)

@@ -388,6 +388,7 @@ class ConsoleAdminRouteAuditTests(unittest.TestCase):
     def test_management_routes_have_the_unified_dependency(self) -> None:
         protected_prefixes = (
             "/api/v1/context-test-scenarios",
+            "/api/v1/global-settings",
             "/api/v1/llm-models",
             "/api/v1/mcp",
             "/api/v1/skills",
@@ -398,7 +399,6 @@ class ConsoleAdminRouteAuditTests(unittest.TestCase):
             "/api/v1/agents",
             "/api/v1/agents/prompt-estimate",
             "/api/v1/database-info",
-            "/api/v1/global-settings",
             "/api/v1/health/sandbox",
             "/api/v1/system-tools",
             "/api/v1/tools",

@@ -30,6 +30,12 @@ from deep_agent.files import build_file_export_toolset, build_file_toolset
 from deep_agent.core.context import AppContext
 from deep_agent.core.exceptions import AgentNotFoundError, LlmModelNotFoundError
 from deep_agent.options import OPTION
+from deep_agent.web.runtime import build_web_runtime
+from deep_agent.web.settings import (
+    WEB_PACKAGE_CODE,
+    WebSearchConfigurationError,
+    load_web_search_config,
+)
 
 
 async def _provider_for_model(ctx: AppContext, llm_row):
@@ -230,6 +236,29 @@ async def _build_runner_from_spec(
         file_store=getattr(ctx, "file_store", None),
     )
     history_toolset = build_history_toolset(ctx.store)
+    web_runtime = None
+    if WEB_PACKAGE_CODE in spec.capabilities:
+        try:
+            global_setting_store = ctx.stores.global_setting
+            if global_setting_store is None:
+                raise WebSearchConfigurationError(
+                    "Global settings store is unavailable"
+                )
+            web_config = await load_web_search_config(
+                global_setting_store,
+                ctx.stores.llm_configuration,
+            )
+            web_runtime = build_web_runtime(
+                web_config,
+                image_capable="image" in {
+                    str(value).strip().lower()
+                    for value in (spec.input_modalities or [])
+                },
+            )
+        except WebSearchConfigurationError as exc:
+            from deep_agent.core.exceptions import ToolPackageError
+
+            raise ToolPackageError(f"Invalid Web Search configuration: {exc}") from exc
     agent = build_agent(
         spec,
         ctx.registry,
@@ -251,6 +280,8 @@ async def _build_runner_from_spec(
             if code.startswith("mcp:")
         ],
         estimator=estimator,
+        web_toolset=(web_runtime.toolset if web_runtime is not None else None),
+        web_capability=(web_runtime.capability if web_runtime is not None else None),
     )
     limits = UsageLimits(
         request_limit=OPTION.agent.max_requests,

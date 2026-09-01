@@ -85,7 +85,7 @@ Pydantic Schema 校验的结构化结果返回主模型。
 - 支持截图视觉、敏感信息占位和结构化最终结果。
 - 默认排除文件读取和上传动作。
 - 调用结束后清理自己启动的浏览器；共享会话需要显式 `aclose()`。
-- 当前 DeepAgent 只安装了 `pydantic-ai-harness[skills]==0.26.0`，没有安装可选的
+- 当前 DeepAgent 安装了 `pydantic-ai-harness[skills,exa,youdotcom]==0.26.0`，没有安装可选的
   `pydantic-ai-harness[browser-use]`/`browser-use` 运行依赖，因此该能力当前不可运行。
 
 ### 2.3 Provider 原生 Computer Use

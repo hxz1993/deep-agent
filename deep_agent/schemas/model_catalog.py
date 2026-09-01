@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field
+
+from deep_agent.time import UtcDatetime
 
 
 class CatalogFacet(BaseModel):
@@ -89,7 +90,7 @@ class ModelCatalogResponse(BaseModel):
     offset: int = 0
     limit: int = 50
     facets: CatalogFacets = Field(default_factory=CatalogFacets)
-    refreshed_at: datetime | None = None
+    refreshed_at: UtcDatetime | None = None
 
 
 class ModelCatalogRefreshResponse(BaseModel):
@@ -97,4 +98,4 @@ class ModelCatalogRefreshResponse(BaseModel):
     models: int
     providers: int
     labs: int
-    refreshed_at: datetime
+    refreshed_at: UtcDatetime

@@ -9,6 +9,7 @@
 
 - [`console-ui-design.md`](console-ui-design.md)：当前有效的页面架构、视觉 token、组件模式和实现映射。
 - [`prototype-decisions.md`](prototype-decisions.md)：原型来源、采用内容、舍弃方向和后续原型约定。
+- [`../../guides/console-ui-guidelines.md`](../../guides/console-ui-guidelines.md)：后续修改 Console UI 时必须执行的实施与验收规范。
 
 ## 一句话方向
 

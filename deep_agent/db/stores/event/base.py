@@ -19,6 +19,7 @@ from deep_agent.db.event_codec import (
 from deep_agent.db.ids import new_event_id
 from deep_agent.db.models import ChatSession, ChatSessionEvent
 from deep_agent.db.stores._session import SessionBoundMixin
+from deep_agent.time import utc_rfc3339
 
 LifecycleStatus = Literal[
     "running", "pending", "completed", "cancelled", "failed", "interrupted",
@@ -56,8 +57,8 @@ class SessionEventSnapshot:
             "sequence": self.sequence, "schema_version": self.schema_version,
             "event_type": self.event_type, "status": self.status,
             "turn_id": self.turn_id, "run_id": self.run_id,
-            "payload": self.payload, "created_at": self.created_at.isoformat(),
-            "updated_at": self.updated_at.isoformat(),
+            "payload": self.payload, "created_at": utc_rfc3339(self.created_at),
+            "updated_at": utc_rfc3339(self.updated_at),
         }
 
 

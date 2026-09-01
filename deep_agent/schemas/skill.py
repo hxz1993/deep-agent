@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from datetime import datetime
-
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from deep_agent.time import UtcDatetime
 
 
 class SkillResource(BaseModel):
@@ -74,9 +74,9 @@ class SkillSummary(BaseModel):
     content_hash: str | None = None
     runtime_status: str = "missing"
     runtime_error_code: str | None = None
-    runtime_synced_at: datetime | None = None
-    created_at: datetime | None = None
-    updated_at: datetime | None = None
+    runtime_synced_at: UtcDatetime | None = None
+    created_at: UtcDatetime | None = None
+    updated_at: UtcDatetime | None = None
 
 
 class SkillDetail(SkillSummary):
@@ -93,7 +93,7 @@ class SkillReloadResult(BaseModel):
     code: str
     runtime_status: str
     runtime_error_code: str | None = None
-    runtime_synced_at: datetime | None = None
+    runtime_synced_at: UtcDatetime | None = None
 
 
 class SkillResourceContent(BaseModel):

@@ -14,7 +14,9 @@ import {
   planPanelState,
   processDisclosureLabel,
 } from "./assistant-presentation.js?v=20260827-1";
-import { createTrajectoryController } from "./trajectory.js?v=20260828-1";
+import { createTrajectoryController } from "./trajectory.js?v=20260901-1";
+import { bindWebImagePreviewFallback, renderWebImagePreview } from "./web-image.js?v=20260901-1";
+import { parseServerTimestamp, serverTimestampMilliseconds } from "./time.js?v=20260831-1";
 import {
   latestPendingDeferredTool,
   normalizeConversationHistory,
@@ -47,6 +49,8 @@ import {
  * ------------------------------------------------------------------ */
 
 const DEFAULT_BASE_URL = defaultApiBaseUrl();
+
+bindWebImagePreviewFallback();
 
 const BUILTIN_UI_TOOLS = new Set(["builtin__confirm", "builtin__choice"]);
 const LEGACY_BUILTIN_UI_TOOLS = new Set(["confirm_action", "ask_user_choice"]);
@@ -245,14 +249,14 @@ function sessionLookupKey(session) {
 }
 
 function sessionSortTime(session) {
-  return Date.parse(session.updatedAt || session.createdAt || 0) || 0;
+  return serverTimestampMilliseconds(session.updatedAt || session.createdAt);
 }
 
 function formatSessionActivity(session) {
   const value = session.updatedAt || session.createdAt;
   if (!value) return "时间未知";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "时间未知";
+  const date = parseServerTimestamp(value);
+  if (!date) return "时间未知";
 
   const now = new Date();
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -2607,12 +2611,14 @@ function addErrorTo(assistant, message) {
 
 /* --------------------------- 工具函数 --------------------------- */
 function localDayKey(iso) {
-  const d = new Date(iso);
+  const d = parseServerTimestamp(iso);
+  if (!d) return "invalid";
   return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
 }
 
 function formatDateSeparator(iso) {
-  const d = new Date(iso);
+  const d = parseServerTimestamp(iso);
+  if (!d) return "日期未知";
   const now = new Date();
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const msgDay = new Date(d.getFullYear(), d.getMonth(), d.getDate());
@@ -2624,8 +2630,10 @@ function formatDateSeparator(iso) {
 }
 
 function formatMessageTime(iso) {
+  const date = parseServerTimestamp(iso);
+  if (!date) return "—";
   return new Intl.DateTimeFormat("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false }).format(
-    new Date(iso)
+    date
   );
 }
 
@@ -2651,6 +2659,8 @@ function pretty(v) {
 }
 
 function renderToolResult(result) {
+  const imagePreview = renderWebImagePreview(result, { className: "tool-web-image-preview" });
+  if (imagePreview) return imagePreview;
   if (typeof result === "string") {
     return `<div class="md-content tool-result-md markdown-body">${renderMarkdown(result)}</div>`;
   }

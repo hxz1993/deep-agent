@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 
 from pydantic_ai.messages import (
+    ImageUrl,
     ModelRequest,
     ModelResponse,
     RetryPromptPart,
@@ -25,6 +26,46 @@ from deep_agent.db.event_codec import (
 
 
 class EventCodecTests(unittest.TestCase):
+    def test_web_image_reference_round_trip_never_embeds_base64(self) -> None:
+        message = ModelRequest(parts=[
+            ToolReturnPart(
+                "web_image_view",
+                ImageUrl(
+                    url="https://cdn.example.com/chart.png",
+                    media_type="image/png",
+                    force_download=True,
+                ),
+                "image-1",
+                metadata={
+                    "web_image_view": {
+                        "mode": "local",
+                        "media_type": "image/png",
+                        "force_download": True,
+                        "ssrf_validated": True,
+                    }
+                },
+            )
+        ])
+
+        draft = encode_messages([message], session_id="safe", run_id="run-safe")[0]
+        restored = decode_message_events([
+            {
+                "sequence": 1,
+                "event_id": draft.event_id,
+                "schema_version": draft.schema_version,
+                "event_type": draft.event_type,
+                "payload": draft.payload,
+            }
+        ])[0]
+
+        payload_text = str(draft.payload).lower()
+        self.assertNotIn("base64", payload_text)
+        self.assertNotIn("data:image", payload_text)
+        part = restored.parts[0]
+        self.assertIsInstance(part.content, ImageUrl)
+        self.assertEqual(part.content.url, "https://cdn.example.com/chart.png")
+        self.assertTrue(part.content.force_download)
+
     def test_model_messages_round_trip_as_one_event_per_message(self) -> None:
         messages = [
             ModelRequest(

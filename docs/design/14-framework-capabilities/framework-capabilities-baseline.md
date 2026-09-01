@@ -1,7 +1,7 @@
-# Pydantic AI与Harness采用基线（v0.6.3）
+# Pydantic AI与Harness采用基线（v0.6.6）
 
-当前固定版本：`pydantic-ai-slim[openai,anthropic,google,mcp]==2.35.1`、
-`pydantic-ai-harness[skills]==0.26.0`。联动依赖固定为`openai==3.5.0`、
+当前固定版本：`pydantic-ai-slim[openai,anthropic,google,mcp,duckduckgo,tavily,web-fetch]==2.35.1`、
+`pydantic-ai-harness[skills,exa,youdotcom]==0.26.0`。联动依赖固定为`openai==3.5.0`、
 `aiohttp>=3.14.3,<4`、`deepfos>=1.1.97,<2`、`pydantic-monty==0.0.21`，Google Provider自定义代理客户端使用`httpx2`。
 Harness仍是0.x能力库，升级必须固定准确版本并跑完整回归。
 
@@ -15,9 +15,11 @@ Harness仍是0.x能力库，升级必须固定准确版本并跑完整回归。
 | Harness 0.25的嵌套摘要UsageLimits与可覆盖摘要指令 | 当前自研Event Compaction仍是唯一压缩事实源，不叠加Harness摘要链 |
 | Harness 0.26的Shell错误恢复与BatchSpendStore | 当前未启用Shell/SpendStore，不因此增加功能 |
 | Harness 0.22～0.24的CodeMode | v0.6.2以显式`builtin:code-mode`部分采用；v0.6.3补充SDK作用域、可信返回类型和嵌套审计总量上限 |
+| Core WebSearch/WebFetch、`ImageUrl`与Harness Exa/You.com | v0.6.5以显式`builtin:web`采用搜索/抓取；v0.6.6增加HTML图片引用与按视觉模型注入的`web_image_view`，Provider路由、Agent授权和审计仍由DeepAgent负责 |
 | PromptInjectionDefender、Playwright和FallbackCompaction | 只记录为后续候选；当前不安装、不配置、不向模型披露 |
 
-v0.6.3不改变REST、SSE、History、Event、Plan、Deferred、附件或MCP契约；Console只增加轨迹展示。
+v0.6.5新增Web管理接口和`global_settings`；v0.6.6复用原生`ImageUrl`并保持现有Chat、SSE、
+History、Event、Plan、Deferred、附件、ToolOutputLimits和MCP契约。
 
 ## 职责边界
 
@@ -43,6 +45,7 @@ v0.6.3不改变REST、SSE、History、Event、Plan、Deferred、附件或MCP契�
 - Tool Search、Prepared/Filtered Toolset和MCP Toolset：只在已有Agent授权范围内渐进披露。
 - 官方OpenAI、Anthropic、Google、DeepSeek和OpenAI-Compatible Provider：模型切换不改变Event结构。
 - Provider`CompactionPart`：作为普通Provider专属Part无损保存，只回传兼容Provider。
+- `WebSearch`与SSRF-safe `WebFetch`：只在Agent关联`builtin:web`时启用；当前模型模式不静默降级。
 
 ### Harness
 
@@ -53,6 +56,7 @@ v0.6.3不改变REST、SSE、History、Event、Plan、Deferred、附件或MCP契�
 - `CodeMode + CodeModeToolset + Monty`：仅在Agent显式关联`builtin:code-mode`时注入；
   已披露MCP同时保留原生Schema和代码函数，文件载荷通过Run内不透明变量中转。
 - Clamp/Deduplicate等确定性思路按需吸收；不再使用批量清空旧Tool Result。
+- Exa/You.com搜索适配：只作为固定Web Search Provider，不引入另一套Fetch或Research协议。
 
 ### DeepAgent自有产品能力
 
@@ -62,6 +66,7 @@ v0.6.3不改变REST、SSE、History、Event、Plan、Deferred、附件或MCP契�
   SSE进度。
 - `search_conversation_history/read_conversation_event`：Agent+User授权内的中英文历史检索和精读。
 - MCP配置/Header、企业管理员Console、平台File、Context Reference与UI Deferred产品协议。
+- 全局Web Search路由、密钥保存/掩码、ToolPackage授权、事件展示与错误语义。
 
 ## 明确不采用为默认事实源
 
@@ -87,4 +92,5 @@ v0.6.3不改变REST、SSE、History、Event、Plan、Deferred、附件或MCP契�
 2. 核对Deferred、Cancellation、Tool Search和Provider Stream关闭语义。
 3. 核对Planning工具名、快照Schema、ToolOutputLimits与Spill接口。
 4. 运行Unit、Integration、SQLite迁移往返、三方言DDL与Console Node测试。
-5. 不因框架新增一个类就增加表、协议或配置；必须先给出产品收益和失败边界。
+5. 核对Web Search/Fetch的Provider支持、SSRF实现、可选extras和原生工具Part。
+6. 不因框架新增一个类就增加表、协议或配置；必须先给出产品收益和失败边界。

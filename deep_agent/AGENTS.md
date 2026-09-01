@@ -30,6 +30,7 @@ HTTP (REST/SSE)
         ├─ builtin:general  UTC 时间 FunctionToolset
         ├─ builtin:sandbox  无状态 Python FunctionToolset
         ├─ builtin:code-mode  Harness CodeMode + Monty（显式关联）
+        ├─ builtin:web  WebSearch Capability + 请求级公开Web Toolset（显式关联）
         ├─ mcp          请求时 `capabilities/mcp/resolver.py`（DB + mcps/ 兜底）
         └─ ui           代码内置或数据库工具包 → ExternalToolset
     → Agent.skills → Harness Skills（SKILL.md 渐进披露）
@@ -113,6 +114,24 @@ v0.6.2起的 Hybrid Code Mode 实现位于 `code_mode/`；v0.6.3增加可信返�
 ToolSearch。只有已授权 MCP Toolset 会被标记为 Hybrid；已披露工具保留原生 Schema，
 又可在 Monty 中组合调用。`load_file_data` 是 code-only 文件原语，不出现在普通工具列表；
 其 Run Token、Base64 和大中间结果必须在进入 Event、History、SSE、轨迹、检索或日志前脱敏。
+
+v0.6.5起的公开Web实现位于`web/`。`builtin:web`提供`web_search/web_fetch`，v0.6.6另向
+图片输入模型注入外层普通工具`web_image_view`；该工具返回Pydantic AI原生`ImageUrl`且不进入Monty。
+`web_fetch`的HTML薄适配只负责过滤脚本/样式并在原位置保留绝对图片URL，不自动发送图片。全局唯一
+`global_settings.web_search`决定当前模型或固定Provider路由，但不能替代Agent显式授权。固定Provider
+工具可在同时授权Code Mode时进入Monty；原生搜索由Provider执行。不得因此开放Sandbox、Monty
+Socket、任意Header或Internal HTTP。显式HTTP CONNECT代理下，`web/proxy_compat.py`只修正fake-IP
+公共解析与TLS SNI传递，并覆盖Pydantic AI组装下一次请求时的`ImageUrl(force_download=true)`延迟
+下载；SSRF地址校验、固定IP、重定向复检和正文解析仍由Pydantic AI负责。完整边界见
+`../docs/design/21-web-tools/`。
+
+Web图片在当前`agent.run()`内部保持原生视觉结果；写入Event Store时只允许URL、MIME、
+`force_download`和无敏感审计，下一次独立Run必须投影成轻量URL说明，禁止重复携带旧图片或Base64。
+直接`web_fetch`二进制图片仍走原有`BinaryContent`与ToolOutputLimits，本版本不得修改大工具治理。
+
+流式Run在模型或工具链最终异常时，必须从Pydantic AI `AgentRunEvents`实时句柄保存已经产生的
+`new_messages/all_messages/usage`；最后一条Assistant Event标记`failed`并修复悬空Tool Call。只有
+模型尚未产生Assistant时才保存独立`run/terminal`，不得把已直播的工具轨迹丢掉而只留下User Event。
 
 新增横切能力时遵循：
 
@@ -258,9 +277,9 @@ user/App/Space上下文时，`export_file_to_download_center`始终直接披露�
 | `chat_sessions` | 全局唯一会话、Agent/User归属、可空App/Space来源、标题与Sequence分配 |
 | `chat_session_events` | Message、Title、Compaction、Tool、Plan和Context的唯一有序事实源 |
 
-配置备份必须在`maintenance/config_backup.py`中把每张ORM业务表明确归类为复制配置数据或只保留
-结构；新增表未归类时备份应失败。上传Skill原ZIP属于平台外部文件，不进入SQLite配置备份，完整
-留存需另外执行Skill“导出全部”。
+配置备份按源Alembic Revision自动发现并复制全部业务表，只把`chat_sessions`和
+`chat_session_events`两张会话事实表留空；新增配置表不得再依赖手工白名单。上传Skill原ZIP属于
+平台外部文件，不进入SQLite配置备份，完整留存需另外执行Skill“导出全部”。
 
 ## 扩展指南
 
@@ -443,7 +462,7 @@ Provider Key（`OPENAI_API_KEY` 等）由 Pydantic AI 直接读取。
 alembic upgrade head
 ```
 
-迁移：v0.3.0 起只保留 `alembic/versions/001_initial_schema.py` 作为完整基线；旧 `001` … `023` 历史不再兼容。已有旧库必须先用 `maintenance.rebaseline_database` 校验最终物理结构，再执行 `stamp --purge 001`，禁止仅手工修改版本号。涉及共享数据库时必须按维护窗口发布。本地 Postgres：`docker compose up -d`。
+迁移：v0.6.6 起再次只保留 `alembic/versions/001_initial_schema.py` 作为当前完整生产基线；旧 `001` … `012` 历史不再兼容。已有Revision 012数据库必须先用 `maintenance.rebaseline_database` 校验最终物理结构和全表内容哈希，再执行 `stamp --purge 001`，禁止仅手工修改版本号。涉及共享数据库时必须按维护窗口发布，并确保改标后不再启动旧镜像。本地 Postgres：`docker compose up -d`。
 
 ---
 
@@ -460,6 +479,8 @@ alembic upgrade head
 | CRUD | `/api/v1/ui-tools` | 是；企业管理员 |
 | GET | `/api/v1/tools` | 企业管理员；无 DB 时跳过动态 UI 工具 |
 | GET | `/api/v1/global-settings` | 企业管理员；返回安全白名单，只读 |
+| GET/PUT | `/api/v1/global-settings/web-search` | 企业管理员；读取或保存唯一Web Search配置，密钥只返回掩码 |
+| POST | `/api/v1/global-settings/web-search/test` | 企业管理员；测试未保存固定Provider草稿，不返回正文 |
 | GET/POST | `/api/v1/llm-models/catalog`、`/api/v1/llm-models/catalog/refresh` | 是；企业管理员查询或刷新 |
 | GET/POST | `/api/v1/context-test-scenarios` | 是；企业管理员按当前模型预算创建测试会话 |
 | GET/POST | `/api/v1/uploads/capabilities`、`/api/v1/uploads` | 否/否；后端仍执行用户与文件限制校验 |
@@ -479,7 +500,7 @@ SSE 协议：[`../docs/guides/sse-protocol.md`](../docs/guides/sse-protocol.md)�
    - 多入口共享组装 → `api/v1/deps.py`（变化量留在入口，上下文在 `_build_*` 内统一解包）
 1. 包名 **`deep_agent`**，启动 `deep_agent.main:app`（非 `app.main`）
 2. 扩展优先走路径注册，避免改 `runner.py` 核心
-3. 工具包命名：`builtin:general` \| `builtin:sandbox` \| `builtin:code-mode` \| `mcp:<name>` \| `ui:<package>`；一个包严格包装一个 Toolset，Agent 按包选择，工具协议名不随包编码变化。Skill 使用独立 `agents.skills`，`runtime:*`系统工具不得塞回 ToolPackage
+3. 工具包命名：`builtin:general` \| `builtin:sandbox` \| `builtin:code-mode` \| `builtin:web` \| `mcp:<name>` \| `ui:<package>`；一个包严格包装一个 Toolset，Agent 按包选择，工具协议名不随包编码变化。Skill 使用独立 `agents.skills`，`runtime:*`系统工具不得塞回 ToolPackage
 4. 会话`session_id`全局唯一，新会话必须有明确`agent_id + user_id`；App/Space可空且不参与当前授权
 5. 同Session进程内用`SessionStore.lock()`串行；Sequence由Session行和`next_sequence`在短事务分配
 6. 配置保存先完成 Schema/引用校验，再进入写事务；一次 API 业务变更不要串联多个各自提交的 Store `_write()`。MCP 检测等外部 I/O 先基于候选配置执行，再把配置与检测快照一次性提交。模型目录联网、解析和完整校验必须在事务前完成，随后单事务全量替换；模型配置保存不得隐式联网。

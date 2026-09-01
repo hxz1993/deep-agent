@@ -7,7 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from pydantic_ai import Agent, RunContext, ToolReturn
-from pydantic_ai.messages import ModelRequest, ToolCallPart, ToolReturnPart
+from pydantic_ai.messages import ImageUrl, ModelRequest, ToolCallPart, ToolReturnPart
 from pydantic_ai.models.test import TestModel
 from pydantic_ai.tools import ToolDefinition
 from pydantic_ai.usage import RunUsage
@@ -195,6 +195,31 @@ class HarnessToolOutputLimitsTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertIs(result, original)
+        store.write.assert_not_awaited()  # type: ignore[attr-defined]
+
+    async def test_web_image_url_stays_native_and_never_creates_artifact(self) -> None:
+        capability, store = build_tool_output_limits(
+            request_headers={},
+            context_window_tokens=10_000,
+            max_output_tokens=2_000,
+            estimator=TokenEstimator.conservative(),
+        )
+        store.write = AsyncMock(return_value="unused")  # type: ignore[method-assign]
+        image = ImageUrl(
+            url="https://cdn.example.com/chart.png",
+            media_type="image/png",
+            force_download=True,
+        )
+
+        result = await capability.after_tool_execute(
+            _ctx(),
+            call=ToolCallPart("web_image_view", {}, "image-1"),
+            tool_def=ToolDefinition(name="web_image_view"),
+            args={},
+            result=image,
+        )
+
+        self.assertIs(result, image)
         store.write.assert_not_awaited()  # type: ignore[attr-defined]
 
     async def test_capability_runs_inside_real_agent_loop(self) -> None:

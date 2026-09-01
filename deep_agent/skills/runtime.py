@@ -19,6 +19,7 @@ from deep_agent.db.stores.bundle import DataStores
 from deep_agent.skills.catalog import BUILTIN_SKILLS_ROOT, SkillDescriptor, get_builtin_skill
 from deep_agent.skills.package import ParsedSkillPackage, SkillPackageError, parse_skill_zip
 from deep_agent.files.storage import FileStore, PlatformFileStore
+from deep_agent.time import ensure_utc
 from deepfos_platform.lib.constants import INTERNAL_TOKEN_HEADER
 from deepfos_platform.options import OPTION as PLATFORM_OPTION
 
@@ -219,7 +220,7 @@ class SkillRuntimeLibrary:
             value = json.loads(self._marker(row.code).read_text("utf-8")).get(
                 "materialized_at"
             )
-            return datetime.fromisoformat(value) if value else None
+            return ensure_utc(datetime.fromisoformat(value)) if value else None
         except (OSError, TypeError, ValueError):
             return None
 

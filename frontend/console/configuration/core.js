@@ -22,11 +22,8 @@ function escapeHtml(text) {
 
 function formatDate(iso) {
   if (!iso) return "—";
-  try {
-    return new Date(iso).toLocaleString("zh-CN");
-  } catch {
-    return iso;
-  }
+  const date = window.DeepAgentTime?.parseServerTimestamp?.(iso);
+  return date ? date.toLocaleString("zh-CN") : iso;
 }
 
 let toastTimer;

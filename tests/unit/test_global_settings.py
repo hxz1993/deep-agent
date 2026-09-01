@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import os
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -122,6 +122,7 @@ class GlobalSettingsBuilderTests(unittest.TestCase):
 class GlobalSettingsApiTests(unittest.TestCase):
     def setUp(self) -> None:
         stores, self.engine, session_factory = make_sqlite_stores_sync()
+        self.stores = stores
         init_context(
             AppContext.for_testing(
                 stores=stores,
@@ -163,6 +164,246 @@ class GlobalSettingsApiTests(unittest.TestCase):
             },
         )
         self.assertTrue(first["restart_required"])
+
+    def test_web_search_defaults_to_current_model(self) -> None:
+        response = self.client.get(
+            "/api/v1/global-settings/web-search",
+            headers={"user": "enterprise-admin"},
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(
+            response.json()["value"],
+            {
+                "mode": "native",
+                "provider": None,
+                "model": None,
+                "api_key_set": False,
+                "api_key_masked": None,
+                "credential_source": None,
+                "llm_provider_id": None,
+                "llm_provider_name": None,
+            },
+        )
+
+    def test_provider_key_is_masked_and_retained_on_same_provider(self) -> None:
+        headers = {"user": "enterprise-admin"}
+        created = self.client.put(
+            "/api/v1/global-settings/web-search",
+            headers=headers,
+            json={
+                "version": 1,
+                "value": {
+                    "mode": "provider",
+                    "provider": "deepseek",
+                    "api_key": "deepseek-secret",
+                },
+            },
+        )
+        self.assertEqual(created.status_code, 200, created.text)
+        self.assertTrue(created.json()["value"]["api_key_set"])
+        self.assertNotIn("deepseek-secret", created.text)
+        self.assertEqual(created.json()["value"]["model"], "deepseek-v4-flash")
+
+        retained = self.client.put(
+            "/api/v1/global-settings/web-search",
+            headers=headers,
+            json={
+                "version": 1,
+                "value": {
+                    "mode": "provider",
+                    "provider": "deepseek",
+                    "model": "deepseek-v4-pro",
+                },
+            },
+        )
+        self.assertEqual(retained.status_code, 200, retained.text)
+        self.assertTrue(retained.json()["value"]["api_key_set"])
+        self.assertEqual(retained.json()["value"]["model"], "deepseek-v4-pro")
+
+    def test_switching_provider_does_not_reuse_previous_key(self) -> None:
+        headers = {"user": "enterprise-admin"}
+        first = self.client.put(
+            "/api/v1/global-settings/web-search",
+            headers=headers,
+            json={
+                "version": 1,
+                "value": {
+                    "mode": "provider",
+                    "provider": "tavily",
+                    "api_key": "tavily-secret",
+                },
+            },
+        )
+        self.assertEqual(first.status_code, 200, first.text)
+        switched = self.client.put(
+            "/api/v1/global-settings/web-search",
+            headers=headers,
+            json={
+                "version": 1,
+                "value": {"mode": "provider", "provider": "exa"},
+            },
+        )
+        self.assertEqual(switched.status_code, 422, switched.text)
+        self.assertIn("API key is required for exa", switched.text)
+
+    def test_duckduckgo_requires_no_key_or_model(self) -> None:
+        response = self.client.put(
+            "/api/v1/global-settings/web-search",
+            headers={"user": "enterprise-admin"},
+            json={
+                "version": 1,
+                "value": {
+                    "mode": "provider",
+                    "provider": "duckduckgo",
+                    "api_key": "ignored",
+                    "model": "ignored",
+                },
+            },
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(
+            response.json()["value"],
+            {
+                "mode": "provider",
+                "provider": "duckduckgo",
+                "model": None,
+                "api_key_set": False,
+                "api_key_masked": None,
+                "credential_source": None,
+                "llm_provider_id": None,
+                "llm_provider_name": None,
+            },
+        )
+
+    def test_deepseek_can_reuse_llm_provider_without_copying_its_key(self) -> None:
+        headers = {"user": "enterprise-admin"}
+        llm_provider = self.client.post(
+            "/api/v1/llm-providers",
+            headers=headers,
+            json={
+                "name": "DeepSeek Session",
+                "provider_type": "deepseek",
+                "use_default_base_url": True,
+                "api_key": "shared-deepseek-secret",
+            },
+        )
+        self.assertEqual(llm_provider.status_code, 201, llm_provider.text)
+        provider_id = llm_provider.json()["id"]
+
+        saved = self.client.put(
+            "/api/v1/global-settings/web-search",
+            headers=headers,
+            json={
+                "version": 1,
+                "value": {
+                    "mode": "provider",
+                    "provider": "deepseek",
+                    "model": "deepseek-v4-flash",
+                    "credential_source": "llm_provider",
+                    "llm_provider_id": provider_id,
+                },
+            },
+        )
+        self.assertEqual(saved.status_code, 200, saved.text)
+        value = saved.json()["value"]
+        self.assertEqual(value["credential_source"], "llm_provider")
+        self.assertEqual(value["llm_provider_id"], provider_id)
+        self.assertEqual(value["llm_provider_name"], "DeepSeek Session")
+        self.assertTrue(value["api_key_set"])
+        self.assertIsNone(value["api_key_masked"])
+        self.assertNotIn("shared-deepseek-secret", saved.text)
+
+        stored = asyncio.run(self.stores.global_setting.get("web_search"))
+        self.assertEqual(stored.value["llm_provider_id"], provider_id)
+        self.assertNotIn("api_key", stored.value)
+
+    def test_reused_llm_provider_must_match_search_provider_type(self) -> None:
+        headers = {"user": "enterprise-admin"}
+        providers = self.client.get("/api/v1/llm-providers", headers=headers)
+        self.assertEqual(providers.status_code, 200, providers.text)
+        incompatible_id = providers.json()[0]["id"]
+        response = self.client.put(
+            "/api/v1/global-settings/web-search",
+            headers=headers,
+            json={
+                "version": 1,
+                "value": {
+                    "mode": "provider",
+                    "provider": "deepseek",
+                    "credential_source": "llm_provider",
+                    "llm_provider_id": incompatible_id,
+                },
+            },
+        )
+        self.assertEqual(response.status_code, 422, response.text)
+        self.assertIn("must be deepseek", response.text)
+
+    def test_all_keyed_providers_validate_only_their_required_fields(self) -> None:
+        headers = {"user": "enterprise-admin"}
+        cases = (
+            ("deepseek", "deepseek-v4-flash"),
+            ("kimi", "kimi-k3"),
+            ("tavily", None),
+            ("exa", None),
+            ("you", None),
+        )
+        for provider, expected_model in cases:
+            with self.subTest(provider=provider):
+                missing = self.client.put(
+                    "/api/v1/global-settings/web-search",
+                    headers=headers,
+                    json={
+                        "version": 1,
+                        "value": {"mode": "provider", "provider": provider},
+                    },
+                )
+                self.assertEqual(missing.status_code, 422, missing.text)
+
+                value = {
+                    "mode": "provider",
+                    "provider": provider,
+                    "api_key": f"{provider}-secret",
+                }
+                if expected_model is None:
+                    value["model"] = "ignored-neutral-model"
+                saved = self.client.put(
+                    "/api/v1/global-settings/web-search",
+                    headers=headers,
+                    json={
+                        "version": 1,
+                        "value": value,
+                    },
+                )
+                self.assertEqual(saved.status_code, 200, saved.text)
+                self.assertEqual(saved.json()["value"]["model"], expected_model)
+                self.assertTrue(saved.json()["value"]["api_key_set"])
+                self.assertNotIn(f"{provider}-secret", saved.text)
+
+    def test_connectivity_test_uses_draft_without_saving(self) -> None:
+        with patch(
+            "deep_agent.api.v1.global_settings.probe_web_search_config",
+            new=AsyncMock(return_value=None),
+        ) as probe:
+            response = self.client.post(
+                "/api/v1/global-settings/web-search/test",
+                headers={"user": "enterprise-admin"},
+                json={
+                    "version": 1,
+                    "value": {
+                        "mode": "provider",
+                        "provider": "tavily",
+                        "api_key": "draft-key",
+                    },
+                },
+            )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertTrue(response.json()["ok"])
+        probe.assert_awaited_once()
+        persisted = self.client.get(
+            "/api/v1/global-settings/web-search",
+            headers={"user": "enterprise-admin"},
+        )
+        self.assertEqual(persisted.json()["value"]["mode"], "native")
 
 
 if __name__ == "__main__":

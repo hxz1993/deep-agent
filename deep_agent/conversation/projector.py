@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from deep_agent.agent.planning import is_planning_tool
+from deep_agent.web.images import safe_web_image_value
 from deep_agent.conversation.models import (
     AssistantConversationItem,
     ConversationArtifact,
@@ -17,6 +18,7 @@ from deep_agent.conversation.models import (
     UserConversationItem,
 )
 from deep_agent.db.event_codec import EVENT_SCHEMA_VERSION, MESSAGE_EVENT_TYPES
+from deep_agent.time import ensure_utc
 
 
 _TOOL_CALL_KINDS = frozenset({"tool-call", "builtin-tool-call"})
@@ -318,7 +320,7 @@ def _apply_result(
     if event_id not in item.source_event_ids:
         item.source_event_ids.append(event_id)
     item.updated_at = _event_datetime(event, "updated_at")
-    item.output = part.get("content")
+    item.output = safe_web_image_value(part.get("content"))
     outcome = _optional_str(part.get("outcome"))
     item.status = _result_status(part, outcome)
     if isinstance(item, PlanConversationItem):
@@ -336,6 +338,16 @@ def _apply_result(
         return
     item.outcome = outcome
     item.artifacts = _artifacts(part)
+    metadata = part.get("metadata")
+    if item.tool_name in {"web_search", "web_fetch", "web_image_view"} and isinstance(metadata, Mapping):
+        web_audit = metadata.get(item.tool_name)
+        sources = metadata.get("sources")
+        web_metadata = dict(item.metadata or {})
+        if isinstance(web_audit, Mapping):
+            web_metadata[item.tool_name] = dict(web_audit)
+        if isinstance(sources, list):
+            web_metadata["sources"] = sources
+        item.metadata = web_metadata or None
 
 
 def _artifacts(part: Mapping[str, Any]) -> list[ConversationArtifact]:
@@ -471,12 +483,11 @@ def _optional_int(value: Any) -> int | None:
 
 def _datetime(value: Any) -> datetime | None:
     if isinstance(value, datetime):
-        return value
+        return ensure_utc(value)
     if not isinstance(value, str) or not value:
         return None
     try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-        return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+        return ensure_utc(datetime.fromisoformat(value.replace("Z", "+00:00")))
     except ValueError:
         return None
 

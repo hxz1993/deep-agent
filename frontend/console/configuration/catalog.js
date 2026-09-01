@@ -58,8 +58,8 @@ function formatTokenCount(value) {
 
 function formatDateTime(value) {
   if (!value) return "尚未更新";
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? "尚未更新" : date.toLocaleString("zh-CN");
+  const date = window.DeepAgentTime?.parseServerTimestamp?.(value);
+  return date ? date.toLocaleString("zh-CN") : "尚未更新";
 }
 
 function renderBadges(values, labels = {}) {

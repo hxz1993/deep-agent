@@ -15,11 +15,14 @@ from pydantic_ai.messages import (
     ThinkingPartDelta,
     ToolCallPart,
     ToolReturnPart,
+    NativeToolCallPart,
+    NativeToolReturnPart,
     NativeToolSearchCallPart,
     NativeToolSearchReturnPart,
 )
 from deep_agent.agent.tool_output_limits import tool_result_artifacts
 from deep_agent.agent.planning import is_planning_tool, plan_snapshot_from_part
+from deep_agent.web.images import safe_web_image_value
 
 
 def text_delta(delta: str) -> dict[str, Any]:
@@ -36,6 +39,10 @@ def tool_call(tool: str, args: Any, tool_call_id: str | None = None) -> dict[str
         payload["source"] = "tool_search"
     elif is_planning_tool(tool):
         payload["source"] = "planning"
+    elif tool == "web_search":
+        payload.update(source="web", execution="provider")
+    elif tool in {"web_fetch", "web_image_view"}:
+        payload.update(source="web", execution="local")
     return payload
 
 
@@ -56,6 +63,10 @@ def tool_result(
         payload["source"] = "tool_search"
     elif is_planning_tool(tool):
         payload["source"] = "planning"
+    elif tool == "web_search":
+        payload.update(source="web", execution="provider")
+    elif tool in {"web_fetch", "web_image_view"}:
+        payload.update(source="web", execution="local")
     return payload
 
 
@@ -139,12 +150,15 @@ def cancelled(
 
 
 def _to_jsonable(value: Any) -> Any:
+    value = safe_web_image_value(value)
     if isinstance(value, (str, int, float, bool)) or value is None:
         return value
     if hasattr(value, "model_dump"):
-        return value.model_dump()
-    if isinstance(value, (list, dict)):
-        return value
+        return _to_jsonable(value.model_dump())
+    if isinstance(value, list):
+        return [_to_jsonable(child) for child in value]
+    if isinstance(value, dict):
+        return {str(key): _to_jsonable(child) for key, child in value.items()}
     return str(value)
 
 
@@ -167,13 +181,21 @@ def _map_tool_call_part(part: ToolCallPart) -> dict[str, Any] | None:
 
 @map_part.register(ToolReturnPart)
 def _map_tool_return_part(part: ToolReturnPart) -> dict[str, Any] | None:
-    return tool_result(
+    payload = tool_result(
         part.tool_name,
         _to_jsonable(part.content),
         part.tool_call_id,
         artifacts=tool_result_artifacts(part),
         plan=plan_snapshot_from_part(part),
     )
+    if part.tool_name in {"web_search", "web_fetch", "web_image_view"} and isinstance(part.metadata, dict):
+        audit = part.metadata.get(part.tool_name)
+        if isinstance(audit, dict):
+            payload["web"] = _to_jsonable(audit)
+        sources = part.metadata.get("sources")
+        if isinstance(sources, list):
+            payload["sources"] = _to_jsonable(sources)
+    return payload
 
 
 @map_part.register(NativeToolSearchCallPart)
@@ -184,6 +206,30 @@ def _map_native_tool_search_call(part: NativeToolSearchCallPart) -> dict[str, An
 @map_part.register(NativeToolSearchReturnPart)
 def _map_native_tool_search_return(part: NativeToolSearchReturnPart) -> dict[str, Any]:
     return tool_result(part.tool_name, _to_jsonable(part.content), part.tool_call_id)
+
+
+@map_part.register(NativeToolCallPart)
+def _map_native_tool_call(part: NativeToolCallPart) -> dict[str, Any]:
+    payload = tool_call(part.tool_name, part.args_as_dict(), part.tool_call_id)
+    payload.update(
+        source=("web" if "web_search" in part.tool_name else "native"),
+        execution="native",
+    )
+    if part.provider_name:
+        payload["provider"] = part.provider_name
+    return payload
+
+
+@map_part.register(NativeToolReturnPart)
+def _map_native_tool_return(part: NativeToolReturnPart) -> dict[str, Any]:
+    payload = tool_result(part.tool_name, _to_jsonable(part.content), part.tool_call_id)
+    payload.update(
+        source=("web" if "web_search" in part.tool_name else "native"),
+        execution="native",
+    )
+    if part.provider_name:
+        payload["provider"] = part.provider_name
+    return payload
 
 
 @map_part.register(TextPartDelta)

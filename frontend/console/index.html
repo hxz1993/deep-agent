@@ -19,9 +19,9 @@
   <link rel="icon" type="image/svg+xml" href="./favicon.svg?v=20260728-1" />
   <link id="hljsTheme" rel="stylesheet" href="/vendor/highlight-github-dark.min.css" />
   <link rel="stylesheet" href="./themes.css?v=20260821-2" />
-  <link rel="stylesheet" href="./workspace.css?v=20260827-3" />
-  <link rel="stylesheet" href="./configuration/configuration.css?v=20260827-4" />
-  <link rel="stylesheet" href="./console.css?v=20260829-3" />
+  <link rel="stylesheet" href="./workspace.css?v=20260901-1" />
+  <link rel="stylesheet" href="./configuration/configuration.css?v=20260831-12" />
+  <link rel="stylesheet" href="./console.css?v=20260831-12" />
 </head>
 <body>
   <div class="console-shell">
@@ -118,7 +118,14 @@
             <button class="tab resource-btn" data-tab="llm-providers"><i data-lucide="waypoints"></i><span>Provider</span></button>
             <button class="tab resource-btn" data-tab="builtin-tools"><i data-lucide="blocks"></i><span>内置工具</span></button>
             <button class="tab resource-btn" data-tab="skills"><i data-lucide="book-open-check"></i><span>Skill</span></button>
-            <button class="tab resource-btn" data-tab="mcp"><i data-lucide="plug-zap"></i><span>MCP</span></button>
+            <button class="tab resource-btn" data-tab="mcp">
+              <svg class="mcp-brand-icon" viewBox="0 0 180 180" fill="none" aria-hidden="true">
+                <path d="M23.5996 85.2532L86.2021 22.6507C94.8457 14.0071 108.86 14.0071 117.503 22.6507C126.147 31.2942 126.147 45.3083 117.503 53.9519L70.2254 101.23" />
+                <path d="M70.8789 100.578L117.504 53.952C126.148 45.3083 140.163 45.3083 148.806 53.952L149.132 54.278C157.776 62.9216 157.776 76.9357 149.132 85.5792L92.5139 142.198C89.6327 145.079 89.6327 149.75 92.5139 152.631L104.14 164.257" />
+                <path d="M101.853 38.3013L55.553 84.6011C46.9094 93.2447 46.9094 107.258 55.553 115.902C64.1966 124.546 78.2106 124.546 86.8543 115.902L133.154 69.6025" />
+              </svg>
+              <span>MCP</span>
+            </button>
             <button class="tab resource-btn" data-tab="ui-tools"><i data-lucide="panel-top"></i><span>UI 工具</span></button>
             <div class="resource-group-label separated">系统设置</div>
             <button class="tab resource-btn" data-tab="global-settings"><i data-lucide="settings-2"></i><span>全局配置</span></button>
@@ -185,6 +192,6 @@
   <script src="../vendor/highlight.min.js"></script>
   <script src="./json-view.js?v=20260823-1"></script>
   <script src="./markdown.js?v=20260822-2"></script>
-  <script type="module" src="./main.js?v=20260829-3"></script>
+  <script type="module" src="./main.js?v=20260901-1"></script>
 </body>
 </html>

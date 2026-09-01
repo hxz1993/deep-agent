@@ -4,6 +4,7 @@ import unittest
 from datetime import datetime, timezone
 
 from pydantic_ai.messages import (
+    ImageUrl,
     ModelRequest,
     ModelResponse,
     NativeToolSearchCallPart,
@@ -177,6 +178,139 @@ class ConversationProjectorTests(unittest.TestCase):
         self.assertEqual(tool.mode, "tool_search")
         self.assertEqual(tool.status, "completed")
         self.assertEqual(tool.output, {"tools": {}})
+
+    def test_provider_web_search_preserves_safe_audit_metadata(self) -> None:
+        events = [
+            event(
+                1,
+                "assistant/message",
+                message=ModelResponse(parts=[
+                    ToolCallPart(
+                        "web_search",
+                        {"query": "DeepAgent"},
+                        tool_call_id="web-provider-1",
+                    )
+                ]),
+            ),
+            event(
+                2,
+                "tool/results",
+                message=ModelRequest(parts=[
+                    ToolReturnPart(
+                        "web_search",
+                        {"provider": "tavily", "result_count": 1},
+                        "web-provider-1",
+                        metadata={
+                            "web_search": {
+                                "mode": "provider",
+                                "provider": "tavily",
+                                "elapsed_ms": 42,
+                                "truncated": False,
+                            },
+                            "sources": [
+                                {"url": "https://example.com", "title": "Example"}
+                            ],
+                        },
+                    )
+                ]),
+            ),
+        ]
+
+        tool = project_session_events(events).items[0]
+
+        self.assertEqual(tool.metadata["web_search"]["provider"], "tavily")
+        self.assertEqual(tool.metadata["web_search"]["elapsed_ms"], 42)
+        self.assertEqual(tool.metadata["sources"][0]["url"], "https://example.com")
+
+    def test_web_fetch_preserves_safe_audit_metadata(self) -> None:
+        events = [
+            event(
+                1,
+                "assistant/message",
+                message=ModelResponse(parts=[
+                    ToolCallPart(
+                        "web_fetch",
+                        {"url": "https://example.com"},
+                        tool_call_id="web-fetch-1",
+                    )
+                ]),
+            ),
+            event(
+                2,
+                "tool/results",
+                message=ModelRequest(parts=[
+                    ToolReturnPart(
+                        "web_fetch",
+                        {"content": "body"},
+                        "web-fetch-1",
+                        metadata={
+                            "web_fetch": {
+                                "mode": "local",
+                                "elapsed_ms": 17,
+                                "truncated": False,
+                            },
+                            "sources": [{"url": "https://example.com", "title": None}],
+                        },
+                    )
+                ]),
+            ),
+        ]
+
+        tool = project_session_events(events).items[0]
+
+        self.assertEqual(tool.metadata["web_fetch"]["elapsed_ms"], 17)
+        self.assertEqual(tool.metadata["sources"][0]["url"], "https://example.com")
+
+    def test_web_image_history_projects_safe_preview_reference(self) -> None:
+        events = [
+            event(
+                1,
+                "assistant/message",
+                message=ModelResponse(parts=[
+                    ToolCallPart(
+                        "web_image_view",
+                        {"url": "https://cdn.example.com/chart.png"},
+                        tool_call_id="image-1",
+                    )
+                ]),
+            ),
+            event(
+                2,
+                "tool/results",
+                message=ModelRequest(parts=[
+                    ToolReturnPart(
+                        "web_image_view",
+                        ImageUrl(
+                            url="https://cdn.example.com/chart.png",
+                            media_type="image/png",
+                            force_download=False,
+                        ),
+                        "image-1",
+                        metadata={
+                            "web_image_view": {
+                                "mode": "local",
+                                "media_type": "image/png",
+                                "force_download": False,
+                                "ssrf_validated": True,
+                            },
+                            "sources": [
+                                {
+                                    "url": "https://cdn.example.com/chart.png",
+                                    "title": None,
+                                }
+                            ],
+                        },
+                    )
+                ]),
+            ),
+        ]
+
+        tool = project_session_events(events).items[0]
+
+        self.assertEqual(tool.output["kind"], "web-image-reference")
+        self.assertEqual(tool.output["url"], "https://cdn.example.com/chart.png")
+        self.assertEqual(tool.metadata["web_image_view"]["media_type"], "image/png")
+        self.assertNotIn("base64", str(tool.model_dump()).lower())
 
 
 if __name__ == "__main__":

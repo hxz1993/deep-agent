@@ -14,30 +14,24 @@ from typing import Any, Mapping, Sequence
 from alembic import command
 from alembic.config import Config
 from dotenv import dotenv_values
-from sqlalchemy import MetaData, Table, delete, func, insert, select, text
+from sqlalchemy import MetaData, Table, delete, func, insert, inspect, select, text
 from sqlalchemy.engine import URL
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from deep_agent.db.models import Base
 
 
-CONFIG_TABLES = (
-    "llm_providers",
-    "llm_models",
-    "model_catalog",
-    "mcp_servers",
-    "agents",
-    "skill_packages",
-    "ui_tool_packages",
-    "ui_tool_definitions",
-)
 SESSION_TABLES = (
     "chat_sessions",
     "chat_session_events",
 )
-CURRENT_SCHEMA_REVISION = "011"
+CONFIG_TABLES = tuple(
+    table.name
+    for table in Base.metadata.sorted_tables
+    if table.name not in SESSION_TABLES
+)
 ENVIRONMENT_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
-BACKUP_SCOPE_SCHEMA_VERSION = "1.0"
+BACKUP_SCOPE_SCHEMA_VERSION = "1.1"
 
 
 @dataclass(frozen=True)
@@ -141,12 +135,14 @@ async def export_backup(
         )
         partial_path.unlink(missing_ok=True)
         target_url = f"sqlite+aiosqlite:///{partial_path.as_posix()}"
-        await asyncio.to_thread(_upgrade_target_schema, target_url)
+        await asyncio.to_thread(_upgrade_target_schema, target_url, revision)
         target_engine = create_async_engine(target_url)
+        copied_tables = await _discover_copied_tables(target_engine)
+        await _validate_source_tables(source_engine, copied_tables)
         await _create_backup_info_table(target_engine)
-        await _clear_seed_configuration(target_engine)
+        await _clear_seed_configuration(target_engine, copied_tables)
         row_counts: dict[str, int] = {}
-        for table_name in CONFIG_TABLES:
+        for table_name in copied_tables:
             row_counts[table_name] = await _copy_table(
                 source_engine,
                 target_engine,
@@ -160,11 +156,13 @@ async def export_backup(
             source_dialect=source_engine.dialect.name,
             revision=revision,
             git_commit=git_commit or _current_git_commit(),
+            copied_tables=copied_tables,
         )
         await _validate_backup(
             target_engine,
             revision=revision,
             expected_counts=row_counts,
+            copied_tables=copied_tables,
         )
         await target_engine.dispose()
         target_engine = None
@@ -201,11 +199,53 @@ async def _source_revision(engine: AsyncEngine) -> str:
     return str(revision)
 
 
-def _upgrade_target_schema(database_url: str) -> None:
+def _upgrade_target_schema(database_url: str, revision: str = "head") -> None:
     config = Config(str(repository_root() / "alembic.ini"))
     config.set_main_option("script_location", str(repository_root() / "alembic"))
     config.attributes["database_url"] = database_url
-    command.upgrade(config, "head")
+    command.upgrade(config, revision)
+
+
+async def _database_table_names(engine: AsyncEngine) -> set[str]:
+    async with engine.connect() as connection:
+        return await connection.run_sync(
+            lambda sync_connection: set(inspect(sync_connection).get_table_names())
+        )
+
+
+async def _discover_copied_tables(engine: AsyncEngine) -> tuple[str, ...]:
+    table_names = await _database_table_names(engine)
+    missing_session_tables = set(SESSION_TABLES) - table_names
+    if missing_session_tables:
+        raise ValueError(
+            "Backup schema is missing session tables: "
+            + ", ".join(sorted(missing_session_tables))
+        )
+
+    copied_names = table_names - set(SESSION_TABLES) - {"alembic_version"}
+    metadata = MetaData()
+    async with engine.connect() as connection:
+        await connection.run_sync(
+            lambda sync_connection: metadata.reflect(
+                bind=sync_connection,
+                only=sorted(copied_names),
+            )
+        )
+    return tuple(table.name for table in metadata.sorted_tables)
+
+
+async def _validate_source_tables(
+    engine: AsyncEngine,
+    copied_tables: Sequence[str],
+) -> None:
+    source_tables = await _database_table_names(engine)
+    required_tables = set(copied_tables) | set(SESSION_TABLES) | {"alembic_version"}
+    missing = required_tables - source_tables
+    if missing:
+        raise ValueError(
+            "Source database is missing tables required by its Alembic revision: "
+            + ", ".join(sorted(missing))
+        )
 
 
 async def _create_backup_info_table(engine: AsyncEngine) -> None:
@@ -227,19 +267,12 @@ async def _create_backup_info_table(engine: AsyncEngine) -> None:
         )
 
 
-async def _clear_seed_configuration(engine: AsyncEngine) -> None:
-    delete_order = (
-        "agents",
-        "skill_packages",
-        "ui_tool_definitions",
-        "ui_tool_packages",
-        "mcp_servers",
-        "model_catalog",
-        "llm_models",
-        "llm_providers",
-    )
+async def _clear_seed_configuration(
+    engine: AsyncEngine,
+    copied_tables: Sequence[str],
+) -> None:
     async with engine.begin() as connection:
-        for table_name in delete_order:
+        for table_name in reversed(copied_tables):
             table = await connection.run_sync(
                 lambda sync_connection, name=table_name: Table(
                     name,
@@ -286,11 +319,8 @@ async def _write_backup_metadata(
     source_dialect: str,
     revision: str,
     git_commit: str,
+    copied_tables: Sequence[str],
 ) -> None:
-    if revision != CURRENT_SCHEMA_REVISION:
-        raise ValueError(
-            f"Backup source revision must be {CURRENT_SCHEMA_REVISION}, got {revision}"
-        )
     async with engine.begin() as connection:
         await connection.execute(
             text(
@@ -311,7 +341,7 @@ async def _write_backup_metadata(
                 "revision": revision,
                 "git_commit": git_commit,
                 "scope_manifest": json.dumps(
-                    _backup_scope_manifest(),
+                    _backup_scope_manifest(copied_tables),
                     ensure_ascii=False,
                     separators=(",", ":"),
                 ),
@@ -324,6 +354,7 @@ async def _validate_backup(
     *,
     revision: str,
     expected_counts: Mapping[str, int],
+    copied_tables: Sequence[str],
 ) -> None:
     async with engine.connect() as connection:
         integrity = await connection.execute(text("PRAGMA integrity_check"))
@@ -378,14 +409,14 @@ async def _validate_backup(
         if not all(info.values()) or info["alembic_revision"] != revision:
             raise ValueError("Backup metadata is incomplete")
         scope_manifest = json.loads(str(info["scope_manifest"]))
-        if scope_manifest != _backup_scope_manifest():
+        if scope_manifest != _backup_scope_manifest(copied_tables):
             raise ValueError("Backup scope manifest does not match the current contract")
 
 
-def _backup_scope_manifest() -> dict[str, Any]:
+def _backup_scope_manifest(copied_tables: Sequence[str]) -> dict[str, Any]:
     return {
         "schema_version": BACKUP_SCOPE_SCHEMA_VERSION,
-        "copied_tables": list(CONFIG_TABLES),
+        "copied_tables": list(copied_tables),
         "structure_only_tables": list(SESSION_TABLES),
         "external_files": [
             {
@@ -400,25 +431,14 @@ def _backup_scope_manifest() -> dict[str, Any]:
 
 
 def _validate_table_classification() -> None:
-    configured = set(CONFIG_TABLES)
     structure_only = set(SESSION_TABLES)
-    overlap = configured & structure_only
-    if overlap:
-        raise ValueError(
-            "Backup table classification overlaps: " + ", ".join(sorted(overlap))
-        )
-
     model_tables = set(Base.metadata.tables)
-    classified = configured | structure_only
-    missing = model_tables - classified
-    unknown = classified - model_tables
-    if missing or unknown:
-        details: list[str] = []
-        if missing:
-            details.append("unclassified=" + ",".join(sorted(missing)))
-        if unknown:
-            details.append("unknown=" + ",".join(sorted(unknown)))
-        raise ValueError("Backup table classification is stale: " + "; ".join(details))
+    unknown = structure_only - model_tables
+    if unknown:
+        raise ValueError(
+            "Backup session table exclusions are stale: "
+            + ", ".join(sorted(unknown))
+        )
 
 
 async def _table_count(connection: Any, table_name: str) -> int:

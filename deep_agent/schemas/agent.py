@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from datetime import datetime
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from deep_agent.schemas.llm_model import LlmModelSummary
+from deep_agent.time import UtcDatetime
 
 if TYPE_CHECKING:
     from deep_agent.db.models import Agent, LlmModel
@@ -138,8 +138,8 @@ class AgentResponse(BaseModel):
     temperature: float | None = None
     capabilities: list[str] = Field(default_factory=list)
     skills: list[str] = Field(default_factory=list)
-    created_at: datetime
-    updated_at: datetime
+    created_at: UtcDatetime
+    updated_at: UtcDatetime
 
     @classmethod
     def from_row(cls, row: Agent, llm_model: LlmModel) -> AgentResponse:

@@ -99,7 +99,11 @@ def _resolve_google(spec: AgentSpec, model_name: str) -> GoogleModel:
     return GoogleModel(model_name, provider=provider)
 
 
-def resolve_model(spec: AgentSpec) -> str | Model:
+def resolve_model(
+    spec: AgentSpec,
+    *,
+    native_web_search: bool = False,
+) -> str | Model:
     """Turn the spec's model string into a model for Pydantic AI.
 
     Persisted models always use their explicit provider configuration. The
@@ -119,6 +123,7 @@ def resolve_model(spec: AgentSpec) -> str | Model:
             provider=spec.provider_config,
             input_modalities=spec.input_modalities,
             tags=spec.tags,
+            native_web_search=native_web_search,
         )
 
     provider_name = _model_provider_prefix(spec.model)
@@ -188,11 +193,16 @@ def _toolsets_for_spec(
     history_toolset: Any | None = None,
     mcp_server_names: list[str] | None = None,
     estimator: TokenEstimator | None = None,
+    web_toolset: Any | None = None,
 ) -> list[Any]:
     """Resolve selected product tool packages into Pydantic AI toolsets."""
     toolsets: list[Any] = []
     for package in registry.selected(spec.capabilities):
+        if package.code == "builtin:web":
+            continue
         toolsets.append(package.toolset)
+    if web_toolset is not None:
+        toolsets.append(web_toolset)
     if mcp_toolsets:
         effective_mcp_toolsets = mcp_toolsets
         if "builtin:code-mode" in spec.capabilities:
@@ -246,6 +256,8 @@ def build_agent(
     tool_output_limits: AbstractCapability[AgentDeps] | None = None,
     mcp_server_names: list[str] | None = None,
     estimator: TokenEstimator | None = None,
+    web_toolset: Any | None = None,
+    web_capability: AbstractCapability[AgentDeps] | None = None,
 ) -> Agent[AgentDeps, str]:
     """Construct a Pydantic AI agent from a spec + the tool package registry.
 
@@ -254,7 +266,11 @@ def build_agent(
     a database model. Tool-package instructions ride along with their toolsets
     and are injected automatically when enabled.
     """
-    model = _resolve_model(spec)
+    # Keep the long-standing internal seam here: integration tests and callers
+    # replace ``_resolve_model`` with a deterministic TestModel.  Calling the
+    # public alias directly would bypass that replacement and accidentally send
+    # test traffic to the configured Provider.
+    model = _resolve_model(spec, native_web_search=web_capability is not None)
     toolsets = _toolsets_for_spec(
         registry,
         spec,
@@ -268,6 +284,7 @@ def build_agent(
         history_toolset=history_toolset,
         mcp_server_names=mcp_server_names,
         estimator=estimator,
+        web_toolset=web_toolset,
     )
     capabilities: list[AbstractCapability[AgentDeps]] = []
     if context_compaction is not None:
@@ -276,6 +293,8 @@ def build_agent(
         capabilities.append(skill_capability)
     if tool_output_limits is not None:
         capabilities.append(tool_output_limits)
+    if web_capability is not None:
+        capabilities.append(web_capability)
     if mcp_toolsets:
         capabilities.append(
             ToolSearch(

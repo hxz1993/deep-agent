@@ -16,7 +16,8 @@ import httpx2
 from pydantic_ai.models import DEFAULT_HTTP_TIMEOUT, Model, get_user_agent
 from pydantic_ai.models.anthropic import AnthropicModel
 from pydantic_ai.models.google import GoogleModel
-from pydantic_ai.models.openai import OpenAIChatModel
+from pydantic_ai.models.openai import OpenAIChatModel, OpenAIResponsesModel
+from pydantic_ai.models.openrouter import OpenRouterModel
 from pydantic_ai.providers.alibaba import AlibabaProvider
 from pydantic_ai.providers.anthropic import AnthropicProvider
 from pydantic_ai.providers.deepseek import DeepSeekProvider
@@ -313,6 +314,7 @@ def resolve_provider_model(
     provider: ProviderRuntimeConfig,
     input_modalities: list[str] | None = None,
     tags: list[str] | None = None,
+    native_web_search: bool = False,
 ) -> Model:
     """Build a Pydantic AI model from an explicit model/provider pair."""
     definition = validate_provider_config(provider)
@@ -322,6 +324,15 @@ def resolve_provider_model(
 
     if definition.model_protocol == "openai_chat":
         runtime_provider = _openai_style_provider(provider)
+        if native_web_search:
+            if provider.provider_type in {"deepseek", "openai"}:
+                return OpenAIResponsesModel(model_name, provider=runtime_provider)
+            if provider.provider_type == "openrouter":
+                return OpenRouterModel(model_name, provider=runtime_provider)
+            raise ProviderConfigurationError(
+                "Current model Provider does not support native Web Search: "
+                f"{provider.provider_type}"
+            )
         model_class = (
             OpenAICompatibleVideoChatModel
             if "video" in (input_modalities or []) or "video_url" in (tags or [])

@@ -48,6 +48,15 @@ def _mark_asyncmy_pre_ping_disconnect(exception_context) -> None:
         exception_context.is_disconnect = True
 
 
+def _set_mysql_session_utc(dbapi_connection, _connection_record) -> None:
+    """Make server defaults and naive MySQL DATETIME values unambiguously UTC."""
+    cursor = dbapi_connection.cursor()
+    try:
+        cursor.execute("SET time_zone = '+00:00'")
+    finally:
+        cursor.close()
+
+
 def create_engine(database_url: str) -> tuple[AsyncEngine, async_sessionmaker[AsyncSession]]:
     dialect = resolve_dialect(database_url)
     engine_options: dict[str, object] = {"pool_pre_ping": True}
@@ -56,6 +65,12 @@ def create_engine(database_url: str) -> tuple[AsyncEngine, async_sessionmaker[As
 
     engine = create_async_engine(database_url, **engine_options)
     if dialect is DbDialect.MYSQL:
+        event.listen(
+            engine.sync_engine,
+            "connect",
+            _set_mysql_session_utc,
+            insert=True,
+        )
         event.listen(engine.sync_engine, "handle_error", _mark_asyncmy_pre_ping_disconnect)
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
     return engine, session_factory

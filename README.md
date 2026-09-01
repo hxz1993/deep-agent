@@ -3,7 +3,7 @@
 DeepAgent 是基于 FastAPI、Pydantic AI 和 SQLAlchemy 的多用户 Agent 服务，并
 随服务发布一体化运维控制台。
 
-当前产品版本为 `0.6.4`。`deep_agent.__version__` 是唯一代码版本来源，FastAPI、
+当前产品版本为 `0.6.6`。`deep_agent.__version__` 是唯一代码版本来源，FastAPI、
 `GET /info` 和 Console 顶部版本徽标均读取该值。后续正式发布默认递增
 `MAJOR.MINOR.PATCH` 的第三位，只有明确规划重大版本时才调整前两位。产品版本不通过
 环境变量或数据库覆盖，也不等同于 Alembic 数据库结构 revision。
@@ -27,6 +27,11 @@ MCP 工具既保留普通 Tool Schema，也可在 Harness `run_code` 的 Monty �
 v0.6.3进一步收紧 SDK 函数作用域、可信返回类型和嵌套审计，并为 DeepSeek v4 Vision
 加入按图片尺寸计价的上下文预算估算；未知路由仍保守回退。
 使用和安全边界见 [`docs/guides/code-mode.md`](docs/guides/code-mode.md)。
+
+v0.6.5增加默认不关联的`builtin:web`和公开互联网`web_search/web_fetch`；v0.6.6让Fetch保留
+页面图片位置，并为图片输入模型增加`web_image_view`，通过原生`ImageUrl`按需读取公网图片。
+Search全局明确选择当前模型或一个固定Provider，不执行隐式降级；Web配置与安全边界见
+[`docs/design/21-web-tools/`](docs/design/21-web-tools/)。
 
 ## 项目结构
 
@@ -128,24 +133,19 @@ uvicorn deep_agent.main:app --host 0.0.0.0 --port 8000
 
 ## 数据库基线
 
-新数据库直接执行 `alembic upgrade head`。当前 Alembic head 为 `011`：`002` 统一 ToolPackage
-与 UI 工具包；`003` 将线上 Skill 与
-ToolPackage 分离；`004`清理已废弃的`builtin:attachment`；`005`和`006`依次删除已下线的
-预制MCP记录，并从显式Agent能力列表中清理对应引用；`007`增加独立Provider层、模型硬外键并删除
-模型表中的重复连接字段；`008`将会话域重建为`chat_sessions + chat_session_events`；`009`删除
-已经下线的标题专用模型配置表；`010`删除 Provider、模型、Skill、MCP、UI 工具包和 UI 工具自身的冗余启停字段，
-并把 Agent 的 `capabilities` 收敛为非空显式列表；`011`仅恢复模型级`enabled`，现有模型全部回填为启用，
-Provider、Skill、MCP和UI工具仍无独立启停层。
+新数据库直接执行 `alembic upgrade head`。当前 Alembic 只有一个生产基线 `001`，它完整包含原
+Revision 001～012 的最终结构和默认数据：Provider/Model/Agent、MCP、Skill、UI工具、模型目录、
+`chat_sessions + chat_session_events` Event Store，以及初始化为会话原生搜索的`global_settings`。
 
-`008`不在线转换旧会话：它删除旧会话历史并建立空 Event Store，但保留所有配置表。共享环境升级前
-必须先用 Revision 007 代码分别执行配置备份和会话归档，停掉全部旧实例后才能迁移；旧版本不能与
-008并行运行。Revision 010数据库可直接升级011；升级后工具和Skill是否进入 Run 仍只由Agent
-的`capabilities`和`skills`关联决定，模型还必须处于启用状态，Provider可用性只由实际连接配置决定。
-完整备份和切换边界见[`maintenance/README.md`](maintenance/README.md)。
+已经处于旧Revision 012的数据库不能重放`001`，也不能在旧镜像运行时手工修改
+`alembic_version`。必须先完整备份并停止旧实例，再用`maintenance.rebaseline_database`校验物理
+结构和全表内容哈希后只做`012 → 001`改标，随后只允许启动包含新`001`基线的镜像。完整切换边界
+见[`maintenance/README.md`](maintenance/README.md)。
 
 配置备份会复制全部配置表并只保留会话表结构；上传Skill的原始ZIP不塞入数据库备份。需要完整
-留存或跨环境迁移时，同时在Console Skill页面执行“导出全部”。备份程序会校验每张ORM业务表都已
-明确归类，避免后续新增表时静默漏备份；完整边界见[`maintenance/README.md`](maintenance/README.md)。
+留存或跨环境迁移时，同时在Console Skill页面执行“导出全部”。复制范围按源Alembic Revision自动
+发现，后续新增配置表无需维护白名单，只有两张会话事实表固定留空；完整边界见
+[`maintenance/README.md`](maintenance/README.md)。
 
 ## 工具包类型
 
@@ -154,6 +154,8 @@ DeepAgent 当前支持：
 - 内置工具：
   - `builtin:general`（通用工具）：只包含 `get_current_time`。
   - `builtin:sandbox`（Python 沙箱）：只包含 `execute_python`。
+  - `builtin:web`（公开网络）：包含 `web_search`、`web_fetch` 与按模型能力注入的
+    `web_image_view`，默认不关联。
 - 系统工具不是 ToolPackage。Harness任务规划、`load_capability`、Skill Resource、`read_file`、
   `export_file_to_download_center`、`read_tool_result`、`search_tools` 和 MCP Resource
   由运行时按 Agent/Run 条件自动注入，只在 Console 的只读“系统工具”目录中说明。

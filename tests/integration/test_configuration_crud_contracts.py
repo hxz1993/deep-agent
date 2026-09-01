@@ -52,6 +52,48 @@ class ConfigurationCrudContractTests(unittest.IsolatedAsyncioTestCase):
         reset_context()
         await self._engine.dispose()
 
+    async def test_configuration_api_timestamps_use_explicit_utc_offsets(self) -> None:
+        await self.stores.mcp.create_unique(
+            McpServerCreate(
+                name="utc_contract",
+                transport="url",
+                config={"url": "http://utc.example.test/mcp"},
+            )
+        )
+        async with AsyncClient(transport=self._transport, base_url="http://test") as client:
+            web_search = await client.put(
+                "/api/v1/global-settings/web-search",
+                json={"value": {"mode": "native"}},
+            )
+            responses = [
+                await client.get("/api/v1/agents"),
+                await client.get("/api/v1/llm-models"),
+                await client.get("/api/v1/llm-providers"),
+                await client.get("/api/v1/ui-tools"),
+                await client.get("/api/v1/mcp"),
+                web_search,
+            ]
+
+        timestamp_count = 0
+
+        def assert_timestamp_contract(value) -> None:
+            nonlocal timestamp_count
+            if isinstance(value, dict):
+                for key, child in value.items():
+                    if key.endswith("_at") and child is not None:
+                        timestamp_count += 1
+                        self.assertIsInstance(child, str)
+                        self.assertTrue(child.endswith("+00:00"), (key, child))
+                    assert_timestamp_contract(child)
+            elif isinstance(value, list):
+                for child in value:
+                    assert_timestamp_contract(child)
+
+        for response in responses:
+            self.assertEqual(response.status_code, 200, response.text)
+            assert_timestamp_contract(response.json())
+        self.assertGreaterEqual(timestamp_count, 8)
+
     async def test_blank_required_values_are_rejected_without_creating_rows(self) -> None:
         async with AsyncClient(transport=self._transport, base_url="http://test") as client:
             agent = await client.post(

@@ -277,9 +277,9 @@ user/App/Space上下文时，`export_file_to_download_center`始终直接披露�
 | `chat_sessions` | 全局唯一会话、Agent/User归属、可空App/Space来源、标题与Sequence分配 |
 | `chat_session_events` | Message、Title、Compaction、Tool、Plan和Context的唯一有序事实源 |
 
-配置备份必须在`maintenance/config_backup.py`中把每张ORM业务表明确归类为复制配置数据或只保留
-结构；新增表未归类时备份应失败。上传Skill原ZIP属于平台外部文件，不进入SQLite配置备份，完整
-留存需另外执行Skill“导出全部”。
+配置备份按源Alembic Revision自动发现并复制全部业务表，只把`chat_sessions`和
+`chat_session_events`两张会话事实表留空；新增配置表不得再依赖手工白名单。上传Skill原ZIP属于
+平台外部文件，不进入SQLite配置备份，完整留存需另外执行Skill“导出全部”。
 
 ## 扩展指南
 

@@ -301,16 +301,8 @@ v0.3.0 已将发布前迁移历史压缩为完整基线 `001_initial_schema.py`�
 
 ## 10. 配置备份
 
-`maintenance/config_backup.py` 的 `CONFIG_TABLES` 包含：
-
-```text
-llm_models
-model_catalog
-mcp_servers
-agents
-ui_tool_packages
-ui_tool_definitions
-```
+`maintenance/config_backup.py`按源Alembic Revision自动复制全部业务表，只将
+`chat_sessions`和`chat_session_events`保留为空结构；新增配置表不再维护手工白名单。
 
 备份完整保存：
 

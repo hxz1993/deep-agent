@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import sqlite3
 import tempfile
@@ -29,6 +30,7 @@ from maintenance.config_backup import (
     CONFIG_TABLES,
     SESSION_TABLES,
     _backup_scope_manifest,
+    _upgrade_target_schema,
     _validate_table_classification,
     database_url_from_config,
     default_output_root,
@@ -177,7 +179,10 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                         ).fetchone()[0]
                     )
                 )
-                self.assertEqual(scope_manifest, _backup_scope_manifest())
+                self.assertEqual(
+                    scope_manifest,
+                    _backup_scope_manifest(CONFIG_TABLES),
+                )
                 self.assertEqual(
                     scope_manifest["schema_version"],
                     BACKUP_SCOPE_SCHEMA_VERSION,
@@ -193,6 +198,66 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                             "export_api": "/api/v1/skills/export",
                         }
                     ],
+                )
+
+    async def test_exports_source_revision_without_future_configuration_tables(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+            root = Path(tmpdir)
+            source_path = root / "source-v011.db"
+            output_root = root / "backups"
+            await asyncio.to_thread(
+                _upgrade_target_schema,
+                self._url(source_path),
+                "011",
+            )
+
+            result = await export_backup(
+                self._url(source_path),
+                environment="test",
+                output_root=output_root,
+                exported_at=datetime(2026, 7, 23, 13, 14, 16, tzinfo=timezone.utc),
+                git_commit="abc123",
+            )
+
+            self.assertEqual(
+                result.path.name,
+                "deep-agent-config-test-v011-20260723-131416.db",
+            )
+            self.assertEqual(result.revision, "011")
+            self.assertNotIn("global_settings", result.row_counts)
+            self.assertEqual(result.row_counts["chat_sessions"], 0)
+            self.assertEqual(result.row_counts["chat_session_events"], 0)
+
+            with sqlite3.connect(result.path) as connection:
+                tables = {
+                    str(row[0])
+                    for row in connection.execute(
+                        "SELECT name FROM sqlite_master WHERE type = 'table'"
+                    )
+                }
+                self.assertNotIn("global_settings", tables)
+                self.assertEqual(
+                    connection.execute(
+                        "SELECT version_num FROM alembic_version"
+                    ).fetchone(),
+                    ("011",),
+                )
+                scope_manifest = json.loads(
+                    str(
+                        connection.execute(
+                            "SELECT scope_manifest FROM _backup_info"
+                        ).fetchone()[0]
+                    )
+                )
+                self.assertNotIn(
+                    "global_settings",
+                    scope_manifest["copied_tables"],
+                )
+                self.assertEqual(
+                    scope_manifest["structure_only_tables"],
+                    list(SESSION_TABLES),
                 )
 
     async def test_failed_export_removes_partial_database(self) -> None:
@@ -230,11 +295,11 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
             repository_root().parent,
         )
 
-    def test_every_orm_table_has_an_explicit_backup_classification(self) -> None:
+    def test_only_session_tables_are_excluded_from_configuration_copy(self) -> None:
         _validate_table_classification()
         self.assertEqual(
-            set(CONFIG_TABLES) | set(SESSION_TABLES),
-            set(Base.metadata.tables),
+            set(CONFIG_TABLES),
+            set(Base.metadata.tables) - set(SESSION_TABLES),
         )
 
     def test_reads_sqlite_database_from_external_config(self) -> None:

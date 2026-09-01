@@ -150,8 +150,9 @@ Provider、Skill、MCP和UI工具仍无独立启停层；`012`增加通用`globa
 完整备份和切换边界见[`maintenance/README.md`](maintenance/README.md)。
 
 配置备份会复制全部配置表并只保留会话表结构；上传Skill的原始ZIP不塞入数据库备份。需要完整
-留存或跨环境迁移时，同时在Console Skill页面执行“导出全部”。备份程序会校验每张ORM业务表都已
-明确归类，避免后续新增表时静默漏备份；完整边界见[`maintenance/README.md`](maintenance/README.md)。
+留存或跨环境迁移时，同时在Console Skill页面执行“导出全部”。复制范围按源Alembic Revision自动
+发现，后续新增配置表无需维护白名单，只有两张会话事实表固定留空；完整边界见
+[`maintenance/README.md`](maintenance/README.md)。
 
 ## 工具包类型
 

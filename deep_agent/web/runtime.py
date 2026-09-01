@@ -197,7 +197,8 @@ class _ImagePreservingMarkdownConverter(MarkdownConverter):
         if url is None:
             return alt
         title = str(el.attrs.get("title") or "")
-        title_part = f' "{title.replace(chr(34), r"\"")}"' if title else ""
+        escaped_title = title.replace('"', '\\"')
+        title_part = f' "{escaped_title}"' if title else ""
         return f"![{alt}]({url}{title_part})"
 
     def convert_script(self, el, text, parent_tags):  # type: ignore[no-untyped-def]

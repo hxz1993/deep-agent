@@ -16,26 +16,19 @@ python3.12 -m maintenance.config_backup \
 deep-agent-config-<环境>-v<数据库版本>-<时间>.db
 ```
 
-备份包含完整的当前表结构，以及以下配置表数据：
+备份按源数据库的Alembic Revision创建同版本结构，并复制该Revision中的全部业务表数据，唯一排除：
 
-- `agents`
-- `llm_providers`
-- `llm_models`
-- `model_catalog`
-- `mcp_servers`
-- `skill_packages`
-- `ui_tool_packages`
-- `ui_tool_definitions`
-- `alembic_version`
+- `chat_sessions`
+- `chat_session_events`
 
 `chat_sessions` 和 `chat_session_events` 只保留表结构，不复制会话事件。备份中的
 API Key、Token 和 MCP Header 保留原值。命令完成前会自动检查 SQLite
 完整性、各配置表行数、数据库版本、模型到Provider的逻辑引用完整性和DeepAgent数据层连接。
 
-备份程序会把全部 ORM 业务表强制归入“复制配置数据”或“只保留结构”两类。以后增加表却没有
-同步备份清单时，测试和备份命令会直接失败，避免生成表面成功但缺配置的文件。备份文件内的
-`_backup_info.scope_manifest`同时记录本次范围、只保留结构的会话表，以及未内嵌的外部文件类型，
-便于脱离仓库后核对备份边界。
+复制范围从源Revision实际结构自动发现，不维护配置表白名单；后续Migration新增配置表时会自动
+进入备份。源库仍在旧Revision时，备份也不会提前要求未来表存在。备份文件内的
+`_backup_info.scope_manifest`记录本次实际复制范围、只保留结构的两张会话表，以及未内嵌的外部
+文件类型，便于脱离仓库后核对备份边界。
 
 `llm_models` 会完整保留上下文窗口、最大输出 Token、输入模态与能力标签；
 `llm_providers` 会先于模型复制，并完整保留Provider类型、默认地址模式、明确地址与密钥；

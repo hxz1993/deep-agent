@@ -14,7 +14,9 @@
 - Web图片工具结果在同一次`agent.run()`内保持原生视觉输入；Event Store只保存URL、MIME、
   `force_download`和安全审计，后续Run投影为轻量引用，SSE、History、轨迹与Console均不保存Base64。
 - Console工具结果与轨迹详情按URL懒加载无Referrer预览，失败时保留原图链接。本版本不修改
-  ToolOutputLimits、大工具Artifact、附件存储或数据库结构；Alembic head仍为`012`。
+  ToolOutputLimits、大工具Artifact或附件存储。
+- 将已稳定的Revision 001～012折叠为唯一生产基线`001`；新环境从当前完整结构和默认数据直接
+  创建。旧012库只能在停旧实例、完整备份、物理结构校验和全表内容哈希校验后执行无DDL改标。
 
 ## v0.6.5
 

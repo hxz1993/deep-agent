@@ -1,6 +1,6 @@
 # 21 · Web 工具
 
-> 状态：DeepAgent v0.6.6 已实现；Alembic head 为 `012`。
+> 状态：DeepAgent v0.6.6 已实现；Alembic head 为 `001`。
 
 - [`web-tools-research.md`](web-tools-research.md)：Codex、DeepSeek Harness、Deep Agents、
   Dify、Pydantic AI/Harness 与搜索供应商的横向核验。

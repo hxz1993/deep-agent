@@ -462,7 +462,7 @@ Provider Key（`OPENAI_API_KEY` 等）由 Pydantic AI 直接读取。
 alembic upgrade head
 ```
 
-迁移：v0.3.0 起只保留 `alembic/versions/001_initial_schema.py` 作为完整基线；旧 `001` … `023` 历史不再兼容。已有旧库必须先用 `maintenance.rebaseline_database` 校验最终物理结构，再执行 `stamp --purge 001`，禁止仅手工修改版本号。涉及共享数据库时必须按维护窗口发布。本地 Postgres：`docker compose up -d`。
+迁移：v0.6.6 起再次只保留 `alembic/versions/001_initial_schema.py` 作为当前完整生产基线；旧 `001` … `012` 历史不再兼容。已有Revision 012数据库必须先用 `maintenance.rebaseline_database` 校验最终物理结构和全表内容哈希，再执行 `stamp --purge 001`，禁止仅手工修改版本号。涉及共享数据库时必须按维护窗口发布，并确保改标后不再启动旧镜像。本地 Postgres：`docker compose up -d`。
 
 ---
 

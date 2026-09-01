@@ -16,7 +16,7 @@ Agent授权；Fetch无配置项。Internal HTTP和MCP继续是独立边界，稳
 
 ## 数据
 
-Alembic `012`增加通用、版本化配置表：
+当前Alembic `001`生产基线包含通用、版本化配置表：
 
 ```text
 global_settings(key PK, value TEXT JSON, version SMALLINT, created_at, updated_at)
@@ -141,7 +141,7 @@ Store只保存URL、MIME、`force_download`和SSRF审计，不保存Base64或文
 
 ## 测试矩阵
 
-- 012空库、011→012→011、SQLite及MySQL/PostgreSQL DDL、配置备份恢复。
+- 001空库、旧012结构安全改标、SQLite/MySQL物理结构校验、配置备份恢复。
 - 默认native、六Provider字段校验、Key掩码/保留/切换清理、DeepSeek/Kimi会话Provider引用、草稿连通性测试。
 - 未授权无工具、native适配/不支持错误、固定Provider无降级、Search/Fetch/Image Schema。
 - Fetch协议、凭据、回环、私网、元数据、DNS与重定向复检、类型/大小/超时配置；HTML图片位置、

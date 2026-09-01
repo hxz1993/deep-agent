@@ -133,21 +133,14 @@ uvicorn deep_agent.main:app --host 0.0.0.0 --port 8000
 
 ## 数据库基线
 
-新数据库直接执行 `alembic upgrade head`。当前 Alembic head 为 `012`：`002` 统一 ToolPackage
-与 UI 工具包；`003` 将线上 Skill 与
-ToolPackage 分离；`004`清理已废弃的`builtin:attachment`；`005`和`006`依次删除已下线的
-预制MCP记录，并从显式Agent能力列表中清理对应引用；`007`增加独立Provider层、模型硬外键并删除
-模型表中的重复连接字段；`008`将会话域重建为`chat_sessions + chat_session_events`；`009`删除
-已经下线的标题专用模型配置表；`010`删除 Provider、模型、Skill、MCP、UI 工具包和 UI 工具自身的冗余启停字段，
-并把 Agent 的 `capabilities` 收敛为非空显式列表；`011`仅恢复模型级`enabled`，现有模型全部回填为启用，
-Provider、Skill、MCP和UI工具仍无独立启停层；`012`增加通用`global_settings`并初始化Web Search为
-当前模型模式。
+新数据库直接执行 `alembic upgrade head`。当前 Alembic 只有一个生产基线 `001`，它完整包含原
+Revision 001～012 的最终结构和默认数据：Provider/Model/Agent、MCP、Skill、UI工具、模型目录、
+`chat_sessions + chat_session_events` Event Store，以及初始化为会话原生搜索的`global_settings`。
 
-`008`不在线转换旧会话：它删除旧会话历史并建立空 Event Store，但保留所有配置表。共享环境升级前
-必须先用 Revision 007 代码分别执行配置备份和会话归档，停掉全部旧实例后才能迁移；旧版本不能与
-008并行运行。Revision 010数据库可直接升级011；升级后工具和Skill是否进入 Run 仍只由Agent
-的`capabilities`和`skills`关联决定，模型还必须处于启用状态，Provider可用性只由实际连接配置决定。
-完整备份和切换边界见[`maintenance/README.md`](maintenance/README.md)。
+已经处于旧Revision 012的数据库不能重放`001`，也不能在旧镜像运行时手工修改
+`alembic_version`。必须先完整备份并停止旧实例，再用`maintenance.rebaseline_database`校验物理
+结构和全表内容哈希后只做`012 → 001`改标，随后只允许启动包含新`001`基线的镜像。完整切换边界
+见[`maintenance/README.md`](maintenance/README.md)。
 
 配置备份会复制全部配置表并只保留会话表结构；上传Skill的原始ZIP不塞入数据库备份。需要完整
 留存或跨环境迁移时，同时在Console Skill页面执行“导出全部”。复制范围按源Alembic Revision自动

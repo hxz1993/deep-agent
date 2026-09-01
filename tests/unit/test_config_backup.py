@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import json
 import sqlite3
 import tempfile
@@ -30,7 +29,6 @@ from maintenance.config_backup import (
     CONFIG_TABLES,
     SESSION_TABLES,
     _backup_scope_manifest,
-    _upgrade_target_schema,
     _validate_table_classification,
     database_url_from_config,
     default_output_root,
@@ -57,13 +55,13 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
 
             self.assertEqual(
                 result.path.name,
-                "deep-agent-config-test-v012-20260723-131415.db",
+                "deep-agent-config-test-v001-20260723-131415.db",
             )
             self.assertEqual(
                 [path.resolve() for path in (output_root / "test").iterdir()],
                 [result.path.resolve()],
             )
-            self.assertEqual(result.revision, "012")
+            self.assertEqual(result.revision, "001")
             self.assertEqual(result.row_counts["agents"], 1)
             self.assertEqual(result.row_counts["chat_sessions"], 0)
             self.assertEqual(result.row_counts["chat_session_events"], 0)
@@ -85,7 +83,7 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                     connection.execute(
                         "SELECT version_num FROM alembic_version"
                     ).fetchone(),
-                    ("012",),
+                    ("001",),
                 )
                 self.assertEqual(
                     connection.execute(
@@ -170,7 +168,7 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                         "SELECT environment, source_dialect, alembic_revision, "
                         "git_commit FROM _backup_info"
                     ).fetchone(),
-                    ("test", "sqlite", "012", "abc123"),
+                    ("test", "sqlite", "001", "abc123"),
                 )
                 scope_manifest = json.loads(
                     str(
@@ -198,66 +196,6 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                             "export_api": "/api/v1/skills/export",
                         }
                     ],
-                )
-
-    async def test_exports_source_revision_without_future_configuration_tables(
-        self,
-    ) -> None:
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
-            root = Path(tmpdir)
-            source_path = root / "source-v011.db"
-            output_root = root / "backups"
-            await asyncio.to_thread(
-                _upgrade_target_schema,
-                self._url(source_path),
-                "011",
-            )
-
-            result = await export_backup(
-                self._url(source_path),
-                environment="test",
-                output_root=output_root,
-                exported_at=datetime(2026, 7, 23, 13, 14, 16, tzinfo=timezone.utc),
-                git_commit="abc123",
-            )
-
-            self.assertEqual(
-                result.path.name,
-                "deep-agent-config-test-v011-20260723-131416.db",
-            )
-            self.assertEqual(result.revision, "011")
-            self.assertNotIn("global_settings", result.row_counts)
-            self.assertEqual(result.row_counts["chat_sessions"], 0)
-            self.assertEqual(result.row_counts["chat_session_events"], 0)
-
-            with sqlite3.connect(result.path) as connection:
-                tables = {
-                    str(row[0])
-                    for row in connection.execute(
-                        "SELECT name FROM sqlite_master WHERE type = 'table'"
-                    )
-                }
-                self.assertNotIn("global_settings", tables)
-                self.assertEqual(
-                    connection.execute(
-                        "SELECT version_num FROM alembic_version"
-                    ).fetchone(),
-                    ("011",),
-                )
-                scope_manifest = json.loads(
-                    str(
-                        connection.execute(
-                            "SELECT scope_manifest FROM _backup_info"
-                        ).fetchone()[0]
-                    )
-                )
-                self.assertNotIn(
-                    "global_settings",
-                    scope_manifest["copied_tables"],
-                )
-                self.assertEqual(
-                    scope_manifest["structure_only_tables"],
-                    list(SESSION_TABLES),
                 )
 
     async def test_failed_export_removes_partial_database(self) -> None:
@@ -328,7 +266,7 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                 )
                 await connection.execute(
                     text(
-                        "INSERT INTO alembic_version (version_num) VALUES ('012')"
+                        "INSERT INTO alembic_version (version_num) VALUES ('001')"
                     )
                 )
                 await connection.execute(

@@ -12,7 +12,7 @@
 | 项 | 内容 |
 | --- | --- |
 | **是什么** | 通用 AI Agent 全栈：FastAPI 后端 + Pydantic AI 运行时 + 静态前端 |
-| **产品版本** | `deep_agent.__version__`为唯一来源；当前`0.6.6`，数据库Head为`012` |
+| **产品版本** | `deep_agent.__version__`为唯一来源；当前`0.6.6`，数据库Head为`001` |
 | **启动** | 本地 Test 联调固定使用下方命令；部署入口才使用 `deep_agent.main:app` |
 | **测试** | `python3.12 -m unittest discover -s tests -p "test_*.py" -v` |
 | **配置** | 仓库根 `.env`（`DEEP_AGENT_*` / `DEEP_AGENT_DBMS_*` / `DEEP_AGENT_SQLITE_PATH`） |
@@ -141,7 +141,7 @@ v0.6.1删除目录资源自身的冗余启停层；v0.6.4只恢复Model的`enabl
 - v0.6.1将运行基线固定升级到`pydantic-ai-slim 2.35.1`与`pydantic-ai-harness 0.26.0`。OpenAI 3.5、aiohttp 3.14、deepfos SDK 1.1.97和Google Provider的`httpx2`客户端必须联合升级。
 - v0.6.2显式引入`builtin:code-mode`：只在Agent关联后注入Harness `run_code`，已授权且已披露MCP保留原生Schema并同时可供Monty组合调用。Code Mode不扩大MCP权限，不可调用Sandbox、History、Planning、UI/HITL、Deferred/Approval、导出、Resource或自身等内部工具；Code-only `load_file_data`仅将当前会话已授权文件转为Run内不透明变量，真实Base64只在MCP调用边界生成。Shell、Playwright、Host FileSystem和FallbackCompaction仍未启用。
 - v0.6.3只让证据白名单中的稳定MCP返回Schema进入Monty类型信息，未知Schema退化为通用JSON；嵌套审计有总大小上限。DeepSeek v4 Vision当前轮图片按像素尺寸估算上下文Token，其他路由保守回退。Console用`CODE`标签和Code页签展示`run_code`，附件与Context Reference在输入详情中分区。
-- v0.6.5新增默认不关联的`builtin:web`，固定包含`web_search`和`web_fetch`。Search全局配置明确选择当前模型或一个固定Provider，失败不隐式降级；Fetch复用Pydantic AI SSRF-safe实现并禁止私网、云元数据和URL凭据。只有同时授权`builtin:web`与`builtin:code-mode`时，固定Provider的两工具才作为显式函数进入Monty；`execute_python`和Monty本身仍无任意网络。Alembic`012`增加通用`global_settings`并进入配置备份。
+- v0.6.5新增默认不关联的`builtin:web`，固定包含`web_search`和`web_fetch`。Search全局配置明确选择当前模型或一个固定Provider，失败不隐式降级；Fetch复用Pydantic AI SSRF-safe实现并禁止私网、云元数据和URL凭据。只有同时授权`builtin:web`与`builtin:code-mode`时，固定Provider的两工具才作为显式函数进入Monty；`execute_python`和Monty本身仍无任意网络。`global_settings`已进入当前Alembic `001`生产基线和配置备份。
 - v0.6.6为图片输入模型增加外层普通工具`web_image_view`，不进入Monty。`web_fetch`在原位置保留
   安全图片Markdown引用，但不自动读图；同一Run使用原生`ImageUrl`，Event/History/SSE/轨迹只保存
   URL、MIME和下载模式，Console按URL预览。不得把图片引用加入ToolOutputLimits排除名单，也不得保存Base64。

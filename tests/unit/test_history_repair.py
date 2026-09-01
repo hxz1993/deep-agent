@@ -8,6 +8,7 @@ from pydantic_ai.messages import (
     ModelResponse,
     NativeToolCallPart,
     NativeToolReturnPart,
+    RetryPromptPart,
     ToolCallPart,
     ToolReturnPart,
     UserPromptPart,
@@ -45,6 +46,114 @@ class RepairUnprocessedToolCallsTests(unittest.TestCase):
         ]
         repaired = repair_unprocessed_tool_calls(messages)
         self.assertEqual(repaired, messages)
+
+    def test_terminal_retry_prompt_closes_tool_call_without_synthetic_return(self) -> None:
+        messages = [
+            ModelResponse(
+                parts=[
+                    ToolCallPart(
+                        tool_name="run_code",
+                        args={"code": "import importlib"},
+                        tool_call_id="retry-call",
+                    )
+                ]
+            ),
+            ModelRequest(
+                parts=[
+                    RetryPromptPart(
+                        content="ModuleNotFoundError: importlib",
+                        tool_name="run_code",
+                        tool_call_id="retry-call",
+                    )
+                ]
+            ),
+        ]
+
+        repaired = repair_unprocessed_tool_calls(
+            messages,
+            denied_message="Tool execution failed before a result was produced",
+        )
+
+        self.assertIs(repaired, messages)
+        self.assertEqual(len(repaired), 2)
+
+    def test_existing_synthetic_return_after_retry_is_removed_from_projection(self) -> None:
+        retry = ModelRequest(
+            parts=[
+                RetryPromptPart(
+                    content="ModuleNotFoundError: importlib",
+                    tool_name="run_code",
+                    tool_call_id="retry-call",
+                )
+            ]
+        )
+        messages = [
+            ModelResponse(
+                parts=[
+                    ToolCallPart(
+                        tool_name="run_code",
+                        args={"code": "import importlib"},
+                        tool_call_id="retry-call",
+                    )
+                ]
+            ),
+            retry,
+            ModelRequest(
+                parts=[
+                    ToolReturnPart(
+                        tool_name="run_code",
+                        content=ToolDenied(
+                            message="Tool execution failed before a result was produced"
+                        ),
+                        tool_call_id="retry-call",
+                    )
+                ]
+            ),
+            ModelRequest(parts=[UserPromptPart(content="继续")]),
+        ]
+
+        repaired = repair_unprocessed_tool_calls(messages)
+
+        self.assertEqual(repaired, [messages[0], retry, messages[3]])
+
+    def test_serialized_synthetic_return_after_retry_is_removed(self) -> None:
+        retry = ModelRequest(
+            parts=[
+                RetryPromptPart(
+                    content="ModuleNotFoundError: importlib",
+                    tool_name="run_code",
+                    tool_call_id="retry-call",
+                )
+            ]
+        )
+        messages = [
+            ModelResponse(
+                parts=[
+                    ToolCallPart(
+                        tool_name="run_code",
+                        args={"code": "import importlib"},
+                        tool_call_id="retry-call",
+                    )
+                ]
+            ),
+            retry,
+            ModelRequest(
+                parts=[
+                    ToolReturnPart(
+                        tool_name="run_code",
+                        content={
+                            "kind": "tool-denied",
+                            "message": "Tool execution failed before a result was produced",
+                        },
+                        tool_call_id="retry-call",
+                    )
+                ]
+            ),
+        ]
+
+        repaired = repair_unprocessed_tool_calls(messages)
+
+        self.assertEqual(repaired, [messages[0], retry])
 
     def test_native_call_and_return_in_same_response_are_not_repaired(self) -> None:
         messages = [

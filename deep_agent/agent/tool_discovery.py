@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 import time
 from collections import defaultdict
@@ -10,7 +11,8 @@ from typing import Any
 
 from loguru import logger
 from pydantic_ai import RunContext
-from pydantic_ai.messages import ModelRequest, UserPromptPart
+from pydantic_ai.capabilities import ToolSearch
+from pydantic_ai.messages import ModelRequest, ToolCallPart, UserPromptPart
 from pydantic_ai.tools import ToolDefinition
 from pydantic_ai.toolsets import CombinedToolset, DeferredLoadingToolset, PreparedToolset
 from pydantic_ai.toolsets.wrapper import WrapperToolset
@@ -370,6 +372,80 @@ def search_inputs_for_run(ctx: RunContext[AgentDeps]) -> tuple[str, str]:
 def search_text_for_run(ctx: RunContext[AgentDeps]) -> str:
     primary, supplemental = search_inputs_for_run(ctx)
     return "\n".join(filter(None, (primary, supplemental)))
+
+
+class DeepAgentToolSearch(ToolSearch[AgentDeps]):
+    """Normalize invalid local ``search_tools`` queries before validation.
+
+    Some OpenAI-compatible models occasionally emit ``query`` or an empty object even
+    though the generated schema requires ``queries``.  Letting that reach
+    normal validation creates a ``RetryPromptPart``.  Certain compatible endpoints
+    then reject the retry result because they cannot match its tool call ID.  The
+    original user prompt is already the authoritative input for first-pass MCP
+    disclosure, so reuse it here before validation instead of starting that fragile
+    retry exchange.
+    """
+
+    async def before_tool_validate(
+        self,
+        ctx: RunContext[AgentDeps],
+        *,
+        call: ToolCallPart,
+        tool_def: ToolDefinition,
+        args: str | dict[str, Any],
+    ) -> str | dict[str, Any]:
+        if call.tool_name != self.function_tool_name:
+            return args
+
+        parsed: dict[str, Any] | None
+        if isinstance(args, dict):
+            parsed = dict(args)
+        else:
+            try:
+                candidate = json.loads(args)
+            except (TypeError, ValueError):
+                return args
+            parsed = dict(candidate) if isinstance(candidate, dict) else None
+        if parsed is None:
+            return args
+
+        raw_queries = parsed.get("queries")
+        if isinstance(raw_queries, str):
+            raw_queries = [raw_queries]
+        if not isinstance(raw_queries, (list, tuple)):
+            raw_queries = parsed.get("query")
+            if isinstance(raw_queries, str):
+                raw_queries = [raw_queries]
+
+        normalized_queries = []
+        if isinstance(raw_queries, (list, tuple)):
+            normalized_queries = list(
+                dict.fromkeys(
+                    query.strip()
+                    for query in raw_queries
+                    if isinstance(query, str) and query.strip()
+                )
+            )[:MCP_SEARCH_QUERY_LIMIT]
+
+        if not normalized_queries:
+            primary, supplemental = search_inputs_for_run(ctx)
+            normalized_queries = list(
+                dict.fromkeys(
+                    query.strip()
+                    for query in (primary, supplemental)
+                    if query.strip()
+                )
+            )[:MCP_SEARCH_QUERY_LIMIT]
+        if not normalized_queries:
+            return args
+
+        normalized = {"queries": normalized_queries}
+        if parsed == normalized:
+            return args
+        logger.warning(
+            "MCP tool search normalized invalid query arguments before validation"
+        )
+        return normalized
 
 
 def _tool_tokens(estimator: TokenEstimator, tool: ToolDefinition) -> int:

@@ -28,6 +28,7 @@ from deep_agent.agent.tool_discovery import (
     MCP_SEARCH_RESULT_LIMIT,
     TOOL_SEARCH_DESCRIPTION,
     TOOL_SEARCH_PARAMETER_DESCRIPTION,
+    DeepAgentToolSearch,
     ToolDiscoveryTelemetry,
     build_mcp_discovery_toolset,
     build_return_schema_selector,
@@ -907,6 +908,65 @@ class ToolDiscoveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("2～3 个互补查询", query_description)
         self.assertIn("目录协议名", query_description)
         self.assertIn("单独占一个数组项", query_description)
+
+    async def test_tool_search_repairs_singular_query_before_validation(self) -> None:
+        calls = 0
+
+        def model_function(_messages, _info: AgentInfo) -> ModelResponse:
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                return ModelResponse(
+                    parts=[
+                        ToolCallPart(
+                            "search_tools",
+                            {"query": "搜索维度成员"},
+                            "singular-search-query",
+                        )
+                    ]
+                )
+            return ModelResponse(parts=[TextPart(content="done")])
+
+        wrapper = build_mcp_discovery_toolset(
+            [self._toolset()],
+            server_names=["deepfos"],
+            estimator=TokenEstimator.conservative(),
+        )
+        assert wrapper is not None
+        deps = AgentDeps(session_id="repair-search", agent_id="agent")
+        agent = Agent(
+            FunctionModel(model_function),
+            deps_type=AgentDeps,
+            toolsets=[wrapper],
+            capabilities=[
+                DeepAgentToolSearch(
+                    strategy=search_deferred_tools,
+                    max_results=MCP_SEARCH_RESULT_LIMIT,
+                )
+            ],
+        )
+
+        result = await agent.run("搜索维度成员", deps=deps)
+
+        self.assertEqual(result.output, "done")
+        self.assertEqual(calls, 2)
+        self.assertEqual(deps.tool_discovery.search_calls, 1)
+        self.assertTrue(
+            any(
+                isinstance(part, ToolSearchReturnPart)
+                for message in result.all_messages()
+                if isinstance(message, ModelRequest)
+                for part in message.parts
+            )
+        )
+        self.assertFalse(
+            any(
+                isinstance(part, RetryPromptPart)
+                for message in result.all_messages()
+                if isinstance(message, ModelRequest)
+                for part in message.parts
+            )
+        )
 
     async def test_tool_search_uses_at_most_three_queries(self) -> None:
         ctx = self._ctx("")

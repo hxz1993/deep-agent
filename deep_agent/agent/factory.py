@@ -4,7 +4,7 @@ from typing import Any
 
 import httpx2
 from pydantic_ai import Agent
-from pydantic_ai.capabilities import AbstractCapability, IncludeToolReturnSchemas, ToolSearch
+from pydantic_ai.capabilities import AbstractCapability, IncludeToolReturnSchemas
 from pydantic_ai.models import DEFAULT_HTTP_TIMEOUT, Model, get_user_agent, parse_model_id
 from pydantic_ai.models.anthropic import AnthropicModel
 from pydantic_ai.models.google import GoogleModel
@@ -25,6 +25,7 @@ from deep_agent.agent.tool_discovery import (
     MCP_SEARCH_RESULT_LIMIT,
     TOOL_SEARCH_DESCRIPTION,
     TOOL_SEARCH_PARAMETER_DESCRIPTION,
+    DeepAgentToolSearch,
     build_return_schema_selector,
     build_mcp_discovery_toolset,
     search_deferred_tools,
@@ -298,7 +299,7 @@ def build_agent(
         capabilities.append(web_capability)
     if mcp_toolsets:
         capabilities.append(
-            ToolSearch(
+            DeepAgentToolSearch(
                 strategy=search_deferred_tools,
                 max_results=MCP_SEARCH_RESULT_LIMIT,
                 tool_description=TOOL_SEARCH_DESCRIPTION,

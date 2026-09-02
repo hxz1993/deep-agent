@@ -327,6 +327,10 @@ class SandboxCapabilityTests(unittest.IsolatedAsyncioTestCase):
             set(schema.get("properties", {}).keys()),
             {"code", "inputs", "files"},
         )
+        description = tool.tool_def.description or ""
+        self.assertIn("确实需要解析、转码或生成新文件", description)
+        self.assertIn("load_file_data(url=...)", description)
+        self.assertIn("仅要求发送/转交 WebP", description)
 
     async def test_user_none_is_rejected(self) -> None:
         backend = FakeSandboxBackend()

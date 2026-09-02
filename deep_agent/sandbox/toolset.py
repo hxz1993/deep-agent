@@ -172,7 +172,14 @@ def build_python_sandbox_tool_package(
         inputs: dict[str, JsonValue] | None = None,
         files: list[SandboxFileInput] | None = None,
     ) -> ToolReturn:
-        """执行 Python 计算，可读取会话文件并发布转换后的文件。"""
+        """执行 Python 计算、解析或文件转换，可读取会话文件并发布转换产物。
+
+        公网文件无需修改、只需原样传给 MCP 时，不要用本工具重复抓取或探测网络；
+        应在 PTC 中使用 load_file_data(url=...) 直接完成读取、上传和发送依赖链。
+        只有确实需要解析、转码或生成新文件时才使用 Python 沙箱。
+        用户仅要求发送/转交 WebP 等公网文件时不属于转码需求，保持原文件中转即可；
+        只有用户明确要求 PNG/JPEG 或内联图片时才尝试转换。
+        """
         if ctx.deps.user is None:
             raise ModelRetry("python-sandbox 需要已认证用户，无法在无用户身份时执行")
 

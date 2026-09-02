@@ -40,7 +40,10 @@
         <button class="icon-btn ghost" id="toggleSidebar" title="切换侧边栏" aria-label="切换侧边栏"><i data-lucide="panel-left"></i></button>
         <div class="chat-title">
           <span id="chatTitle">新对话</span>
-          <span class="session-badge session-subtitle" id="sessionBadge"></span>
+          <span class="session-subtitle-row">
+            <span class="session-badge session-subtitle" id="sessionBadge"></span>
+            <button type="button" class="session-copy-btn" id="copySessionIdBtn" title="复制会话 ID" aria-label="复制会话 ID" hidden><i data-lucide="copy"></i></button>
+          </span>
         </div>
         <nav class="chat-view-tabs" id="chatViewTabs" role="tablist" aria-label="会话视图">
           <button type="button" class="chat-view-tab active" id="conversationViewTab" role="tab" aria-selected="true" aria-controls="messages" data-chat-view="conversation">对话</button>
@@ -51,7 +54,7 @@
             <i data-lucide="waypoints"></i><span>测试App</span>
           </button>
           <button type="button" class="workspace-header-action active" id="toggleInspectorPaneBtn" title="隐藏详情" aria-label="显示或隐藏详情" aria-pressed="true">
-            <i data-lucide="panel-right"></i><span>详情</span>
+            <i data-lucide="panel-right"></i>
           </button>
         </div>
       </header>
@@ -92,35 +95,63 @@
           </button>
           <ol class="composer-plan-items" id="composerPlanItems"></ol>
         </section>
-        <div class="attachment-preview hidden" id="attachmentPreview"></div>
-        <div class="composer-meta" id="composerMeta">
-          <label class="composer-model-picker">
-            <span class="composer-model-label">模型</span>
-            <select id="modelSelect" class="composer-model-select" title="选择本会话使用的 LLM 模型"></select>
-          </label>
-          <span class="composer-modalities" id="composerModelModalities"></span>
-          <span class="composer-modalities" id="composerUploadCapabilities"></span>
-        </div>
-        <div class="composer-inner">
-          <button type="button" class="composer-icon-btn attach-btn" id="attachBtn" title="添加附件" aria-label="添加附件">
-            <i data-lucide="paperclip" aria-hidden="true"></i>
-          </button>
+        <div class="composer-inner" id="composerDropZone">
+          <div class="composer-drop-overlay" id="composerDropOverlay" aria-hidden="true">
+            <i data-lucide="file-up" aria-hidden="true"></i><span>松开添加附件</span>
+          </div>
+          <div class="attachment-preview hidden" id="attachmentPreview"></div>
           <input type="file" id="fileInput" class="hidden" multiple accept="image/*,.docx,.xlsx,.txt,.log,.csv,.json,.md,.html,.xml,.mp3,.wav,.mp4" />
-          <textarea
-            id="input"
-            rows="1"
-            placeholder="给 Agent 发送消息…（Enter 发送，Shift+Enter 换行）"
-          ></textarea>
-          <button type="button" class="context-budget-badge" id="contextBudgetBadge" title="历史上下文估算尚不可用" aria-label="历史上下文估算">上下文 —</button>
-          <button class="send-btn" id="sendBtn" title="发送">
-            <i data-lucide="send" aria-hidden="true"></i>
-          </button>
-          <button class="stop-btn hidden" id="stopBtn" title="停止生成">
-            <span class="stop-square"></span>
-          </button>
+          <div class="composer-input-row">
+            <textarea
+              id="input"
+              rows="2"
+              placeholder="给 Agent 发送消息…（Enter 发送，Shift+Enter 换行）"
+            ></textarea>
+          </div>
+          <div class="composer-toolbar">
+            <div class="composer-toolbar-start">
+              <span class="attachment-control">
+                <button type="button" class="composer-icon-btn attach-btn" id="attachBtn" aria-label="添加附件">
+                  <i data-lucide="paperclip" aria-hidden="true"></i>
+                </button>
+                <span class="composer-tooltip attachment-tooltip" id="attachmentTooltip" role="tooltip">添加附件</span>
+              </span>
+            </div>
+            <div class="composer-toolbar-end">
+              <span class="context-budget-wrap">
+                <button type="button" class="context-budget-badge" id="contextBudgetBadge" aria-label="上下文用量暂不可用"></button>
+                <span class="composer-tooltip context-budget-tooltip" id="contextBudgetTooltip" role="tooltip">历史上下文估算尚不可用</span>
+              </span>
+              <div class="composer-model-picker" id="composerMeta">
+                <select id="modelSelect" class="composer-model-select" aria-hidden="true" tabindex="-1"></select>
+                <button type="button" class="composer-model-trigger" id="composerModelTrigger" aria-haspopup="listbox" aria-expanded="false" title="选择模型">
+                  <span class="composer-provider-icon"><i data-lucide="waypoints" aria-hidden="true"></i></span>
+                  <span class="composer-model-trigger-label">模型</span>
+                  <i class="composer-model-chevron" data-lucide="chevron-up" aria-hidden="true"></i>
+                </button>
+                <div class="composer-model-menu hidden" id="composerModelMenu" role="listbox" aria-label="选择本会话模型"></div>
+              </div>
+              <button class="send-btn" id="sendBtn" title="发送" aria-label="发送">
+                <i data-lucide="send" aria-hidden="true"></i>
+              </button>
+              <button class="stop-btn hidden" id="stopBtn" title="停止生成" aria-label="停止生成">
+                <span class="stop-square"></span>
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     </main>
+
+    <dialog class="attachment-image-dialog" id="attachmentImageDialog" aria-labelledby="attachmentImageDialogName">
+      <div class="attachment-image-dialog-content">
+        <button type="button" class="attachment-image-dialog-close" id="attachmentImageDialogClose" aria-label="关闭图片预览">
+          <i data-lucide="x" aria-hidden="true"></i>
+        </button>
+        <img id="attachmentImageDialogImage" alt="附件图片预览" />
+        <p id="attachmentImageDialogName"></p>
+      </div>
+    </dialog>
   </div>
 
   <div class="new-chat-menu hidden" id="newChatMenu" role="menu" aria-label="选择 Agent 新建对话"></div>

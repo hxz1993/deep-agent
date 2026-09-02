@@ -50,7 +50,7 @@ class ConsoleAdminAccess:
 EnterpriseAdminChecker = Callable[[str, Mapping[str, str]], Awaitable[bool]]
 
 
-def _forwarded_auth_headers(request: Request, user_id: str) -> dict[str, str]:
+def forwarded_platform_auth_headers(request: Request, user_id: str) -> dict[str, str]:
     headers: dict[str, str] = {}
     for raw_name, value in request.headers.items():
         name = raw_name.lower()
@@ -64,7 +64,7 @@ def _forwarded_auth_headers(request: Request, user_id: str) -> dict[str, str]:
     return headers
 
 
-def _credential_digest(headers: Mapping[str, str]) -> str:
+def platform_credential_digest(headers: Mapping[str, str]) -> str:
     credential_items = sorted(
         (name.lower(), value)
         for name, value in headers.items()
@@ -233,8 +233,8 @@ class ConsoleAdminAuthorizer:
         if normalized_user == "admin":
             return ConsoleAdminAccess(allowed=False)
 
-        headers = _forwarded_auth_headers(request, normalized_user)
-        key = (normalized_user, _credential_digest(headers))
+        headers = forwarded_platform_auth_headers(request, normalized_user)
+        key = (normalized_user, platform_credential_digest(headers))
         now = self._clock()
         cached = self._cache.get(key)
         if cached is not None and cached[0] > now:
@@ -270,4 +270,6 @@ __all__ = [
     "ENTERPRISE_ADMIN_ROLE",
     "LOCAL_CONSOLE_ADMIN_SCOPE_KEY",
     "PlatformEnterpriseAdminChecker",
+    "forwarded_platform_auth_headers",
+    "platform_credential_digest",
 ]

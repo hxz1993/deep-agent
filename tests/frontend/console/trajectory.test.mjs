@@ -341,6 +341,13 @@ test("工作台以独立页签接入轨迹且默认对话链路不变", () => {
   assert.doesNotMatch(trajectorySource, /trajectoryTimelineLayout|renderSequence|renderRowSignals|iconForKind/);
   assert.doesNotMatch(trajectorySource, /含思考|请求调用|个调用/);
   assert.match(workspaceCss, /\.trajectory-list\s*\{[\s\S]*overflow-x:\s*hidden/);
+  assert.match(workspaceCss, /\.trajectory-toolbar\s*\{[^}]*border-bottom:\s*0;/);
+  assert.match(workspaceCss, /\.trajectory-group\s*\{[^}]*border-bottom:\s*0;/);
+  assert.match(workspaceCss, /\.trajectory-row\s*\{[^}]*border-bottom:\s*0;/);
+  assert.match(workspaceCss, /\.trajectory-summary-meta\s*\{[^}]*border-bottom:\s*0;/);
+  assert.match(workspaceCss, /\.inspector-pane\.trajectory-inspector \.inspector-content\s*\{[^}]*overflow:\s*hidden;/);
+  assert.match(workspaceCss, /\.trajectory-detail-tabs\s*\{[^}]*overflow-x:\s*auto;/);
+  assert.match(workspaceCss, /\.trajectory-detail-body\s*\{[^}]*width:\s*100%;[^}]*min-width:\s*0;[^}]*overflow:\s*auto;/);
   assert.match(workspaceCss, /\.trajectory-summary-preview\.is-scroll \.trajectory-summary-section-body\s*\{[\s\S]*max-height:\s*180px;[\s\S]*overflow-y:\s*auto/);
   assert.doesNotMatch(workspaceCss, /\.trajectory-summary-preview\.is-scroll \.trajectory-summary-section-body\s*\{[^}]*\n\s*height:\s*180px/);
   assert.match(workspaceCss, /\.trajectory-export\s*\{[\s\S]*height:\s*32px;[\s\S]*min-height:\s*32px/);
@@ -354,6 +361,11 @@ test("工作台以独立页签接入轨迹且默认对话链路不变", () => {
   assert.match(trajectorySource, /isRunCodeEvent\(event\)\) tabs\.push\(\["code", "Code"\]\)/);
   assert.match(trajectorySource, /class="hljs language-python"/);
   assert.match(trajectorySource, /data-copy-run-code/);
+  assert.match(trajectorySource, /activeTab === "code"[\s\S]*?"trajectory-detail-body is-code"/);
+  assert.match(workspaceCss, /\.trajectory-detail-body\.is-code\s*\{[^}]*padding-top:\s*0;[^}]*padding-bottom:\s*0;[^}]*overflow:\s*hidden;/);
+  assert.match(workspaceCss, /\.trajectory-code-view\s*\{[^}]*min-height:\s*100%;[^}]*display:\s*flex;[^}]*border:\s*0;[^}]*background:\s*transparent;/);
+  assert.match(workspaceCss, /\.trajectory-code-view pre\s*\{[^}]*flex:\s*1;[^}]*min-height:\s*0;[^}]*overflow:\s*auto;[^}]*background:\s*transparent;/);
+  assert.match(workspaceCss, /\.trajectory-code-view code\.hljs\s*\{[^}]*min-height:\s*100%;[^}]*padding:\s*0;[^}]*background:\s*transparent;/);
   assert.doesNotMatch(trajectorySource, /\bturns?\b/i);
   assert.match(trajectorySource, /currentUser\.run_id = currentRunId/);
   assert.doesNotMatch(trajectorySource, /Run \$\{groupOrdinal\}|data-trajectory-group/);

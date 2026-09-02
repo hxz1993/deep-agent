@@ -947,12 +947,15 @@ function renderDetail(event, activeTab = "summary", events = []) {
   const headerLabel = TOOL_KINDS.has(event.kind) || ["compaction", "title"].includes(event.kind)
     ? event.label
     : event.run_id ? `Run ${String(event.run_id).slice(0, 8)}` : "";
+  const detailBodyClass = activeTab === "code"
+    ? "trajectory-detail-body is-code"
+    : "trajectory-detail-body";
   return `
     <header class="trajectory-detail-head">
       <div><span class="trajectory-kind ${escapeHtml(eventKindClass(event))}">${escapeHtml(eventKindBadge(event))}</span>${headerLabel ? `<strong>${escapeHtml(headerLabel)}</strong>` : ""}<em class="${escapeHtml(event.status)}">${escapeHtml(statusLabel(event.status))}</em></div>
     </header>
     <nav class="trajectory-detail-tabs" role="tablist">${tabs.map(([id, label]) => `<button type="button" class="${activeTab === id ? "active" : ""}" data-trajectory-detail-tab="${id}">${label}</button>`).join("")}</nav>
-    <div class="trajectory-detail-body">${content}</div>`;
+    <div class="${detailBodyClass}">${content}</div>`;
 }
 
 export function createTrajectoryController({ state }) {

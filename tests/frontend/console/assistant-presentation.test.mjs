@@ -7,6 +7,7 @@ import {
   assistantActionsFromDeferred,
   assistantActionsFromHistoryItems,
   assistantActionsFromSse,
+  formatProcessElapsed,
   isPlanningToolEvent,
   normalizePlanSnapshot,
   planPanelState,
@@ -54,15 +55,30 @@ const themesCss = await readFile(
 );
 
 test("过程、工具和 HITL 默认折叠且等待操作标题清晰", () => {
-  assert.equal(processDisclosureLabel(), "处理过程");
-  assert.equal(processDisclosureLabel({ running: true }), "处理过程 · 处理中");
-  assert.equal(processDisclosureLabel({ pending: true }), "处理过程 · 等待操作");
+  assert.equal(processDisclosureLabel(), "已处理");
+  assert.equal(processDisclosureLabel({ running: true }), "处理中");
+  assert.equal(processDisclosureLabel({ pending: true }), "等待操作");
   assert.match(chatSource, /processBlock\.className = "assistant-process hidden"/);
   assert.match(chatSource, /isSkillLoad = merged\.tool === "load_capability"/);
   assert.match(chatSource, /isSkillLoad \? "正在加载 Skill"/);
   assert.match(chatSource, /block\.classList\.add\("hitl-pending"\)/);
   assert.doesNotMatch(chatSource, /block\.classList\.add\("open", "hitl-pending"\)/);
   assert.match(chatSource, /textContent = `等待操作 · \$\{defaultTitle\}`/);
+});
+
+test("实时处理过程展开计时并在最终结果后折叠", () => {
+  assert.equal(formatProcessElapsed(8), "8秒");
+  assert.equal(formatProcessElapsed(72), "1分12秒");
+  assert.equal(processDisclosureLabel({ running: true, elapsedSeconds: 72 }), "处理中 · 1分12秒");
+  assert.equal(processDisclosureLabel({ elapsedSeconds: 72 }), "已处理 · 用时 1分12秒");
+  assert.match(chatSource, /let isLive = !timestamp/);
+  assert.match(chatSource, /processElapsedSecondsBetween\([\s\S]*processTiming\.startedAt[\s\S]*processTiming\.completedAt/);
+  assert.match(chatSource, /processDisclosureLabel\(\{[\s\S]*elapsedSeconds: processElapsedSeconds/);
+  assert.match(chatSource, /window\.setInterval\(updateProcessTimer, 1000\)/);
+  assert.match(chatSource, /processBlock\.classList\.add\("open"\)/);
+  assert.match(chatSource, /processBlock\.classList\.remove\("open", "running"\)/);
+  assert.match(chatSource, /complete\(output\)[\s\S]*finishProcess\(\)/);
+  assert.match(chatSource, /resumeProcess\(\) \{[\s\S]*startProcess\(\)/);
 });
 
 test("思考过程是独立的二级折叠，默认关闭且正文不受影响", () => {
@@ -83,6 +99,19 @@ test("思考过程是独立的二级折叠，默认关闭且正文不受影响",
     workspaceCss,
     /\.assistant-thinking\.open \.assistant-thinking-body\s*\{\s*display:\s*block;/,
   );
+  assert.match(chatSource, /class="thinking-heading"[\s\S]*lucideIcon\("brain"\)[\s\S]*lucideIcon\("chevron-down"\)/);
+  assert.match(
+    workspaceCss,
+    /\.assistant-thinking \{[\s\S]*?padding-left: 12px;[\s\S]*?border-left: 2px solid var\(--accent-soft\);/,
+  );
+  assert.match(
+    workspaceCss,
+    /\.assistant-thinking-head \{[\s\S]*?justify-content: space-between;[\s\S]*?min-height: 38px;/,
+  );
+  assert.match(
+    workspaceCss,
+    /\.assistant-thinking \.thinking-content \{[\s\S]*?max-height: 50vh;[\s\S]*?padding: 10px 0 2px 20px;[\s\S]*?line-height: 1\.6;/,
+  );
   assert.doesNotMatch(chatSource, /thinkingBlock\.classList\.add\("open"\)/);
   assert.match(chatSource, /finalContent\.className = "assistant-final markdown streaming"/);
 });
@@ -95,9 +124,33 @@ test("方案 A 使用线性文档层级并移除对话中的装饰性色块", ()
   );
   assert.match(
     workspaceCss,
-    /\.assistant-process \{[\s\S]*?margin: 1px 0 16px;[\s\S]*?border-bottom: 1px solid var\(--border-soft\);/,
+    /\.assistant-process \{[\s\S]*?margin: 1px 0 0;[\s\S]*?border: 0;/,
+  );
+  assert.match(
+    workspaceCss,
+    /\.assistant-process-header \{[\s\S]*?width: 100%;[\s\S]*?border-bottom: 1px solid var\(--border-soft\);/,
+  );
+  assert.match(
+    workspaceCss,
+    /\.assistant-process-summary \{[\s\S]*?width: fit-content;[\s\S]*?display: inline-flex;/,
   );
   assert.match(workspaceCss, /\.assistant-process-icon \{ display: none; \}/);
+  assert.match(
+    workspaceCss,
+    /\.assistant-process-body \{[\s\S]*?gap: 4px;[\s\S]*?padding: 4px 0 6px;/,
+  );
+  assert.match(
+    workspaceCss,
+    /\.assistant-process-text \{[\s\S]*?padding: 0;[\s\S]*?color: var\(--text\);[\s\S]*?background: transparent;[\s\S]*?border: 0;/,
+  );
+  assert.match(
+    workspaceCss,
+    /:is\(\.assistant-final, \.assistant-process-text\) \.markdown-body > :first-child \{ margin-top: 0; \}/,
+  );
+  assert.match(
+    workspaceCss,
+    /:is\(\.assistant-final, \.assistant-process-text\) \.markdown-body > :last-child \{ margin-bottom: 0; \}/,
+  );
   assert.match(workspaceCss, /\.tool-search-block \{[\s\S]*?border-style: solid;/);
   assert.match(
     workspaceCss,
@@ -115,6 +168,21 @@ test("方案 A 使用线性文档层级并移除对话中的装饰性色块", ()
     themesCss,
     /--(tool|thinking)-bg: #(16241f|f0fff4|e8f5e9|f0fff0|1a1829|f3f0ff|ede9fe|f0f0ff);/,
   );
+});
+
+test("用户与 Agent 正文底部统一悬停展示复制和时间", () => {
+  assert.match(chatSource, /function createMessageActions\(\{/);
+  assert.match(chatSource, /timeEl\.className = "msg-time"/);
+  assert.match(chatSource, /getText: text \? \(\) => text : null/);
+  assert.match(chatSource, /getText: \(\) => textBuffer/);
+  assert.doesNotMatch(chatSource, /prependMsgTime/);
+  assert.match(
+    workspaceCss,
+    /\.msg-row\.user:hover \.msg-actions,[\s\S]*?\.msg-row\.assistant:hover \.msg-actions,[\s\S]*?opacity: 1;/,
+  );
+  assert.match(workspaceCss, /\.assistant-answer \.assistant-message \{[^}]*gap: 6px;/);
+  assert.match(workspaceCss, /:is\(\.assistant-final, \.assistant-process-text\) \.markdown-body > :first-child \{ margin-top: 0; \}/);
+  assert.match(workspaceCss, /:is\(\.assistant-final, \.assistant-process-text\) \.markdown-body > :last-child \{ margin-bottom: 0; \}/);
 });
 
 test("实时 deferred 续跑复用同一可视回答且 removed 即时删除工具卡", () => {

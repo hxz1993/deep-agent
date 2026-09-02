@@ -26,6 +26,10 @@ const styles = await readFile(
   new URL("../../../frontend/console/console.css", import.meta.url),
   "utf8",
 );
+const configurationStyles = await readFile(
+  new URL("../../../frontend/console/configuration/configuration.css", import.meta.url),
+  "utf8",
+);
 const themes = await readFile(
   new URL("../../../frontend/console/themes.css", import.meta.url),
   "utf8",
@@ -114,16 +118,16 @@ test("MCP 详情沿用独立页面层级并在导航前确认未保存修改", (
   assert.match(configurationCore, /mcpAdmin\?\.isEditorOpen\?\.\(\)[\s\S]*mcpAdmin\.requestCloseEditor\(\)/);
 });
 
-test("Agent 编辑采用 B 方案左右工作台并在右侧切换工具与 Skill", () => {
+test("Agent 编辑采用左右工作台并在右侧顶部统一切换四类资源", () => {
   assert.match(template, /class="agent-editor-workbench"/);
   assert.match(template, /class="agent-editor-primary"[\s\S]*id="agentName"[\s\S]*id="agentModelId"[\s\S]*id="agentPrompt"/);
-  assert.match(template, /class="agent-editor-resources"[\s\S]*data-agent-editor-tab="tools"[\s\S]*data-agent-editor-tab="skills"/);
-  assert.match(template, /data-agent-editor-pane="tools"[\s\S]*id="agentCapGroups"/);
-  assert.match(template, /data-agent-editor-pane="skills"[\s\S]*id="agentSkillChoices"/);
-  assert.match(agents, /switchEditorTab\(tab\)/);
-  assert.match(agents, /this\.switchEditorTab\("tools"\)/);
+  assert.match(template, /class="cap-tabs agent-resource-tabs"[\s\S]*data-kind="builtin"[\s\S]*data-kind="mcp"[\s\S]*data-kind="ui"[\s\S]*data-kind="skills"/);
+  assert.match(template, /id="agentCapGroups"[\s\S]*data-kind-panel="skills"[\s\S]*id="agentSkillChoices"/);
+  assert.match(agents, /this\.switchCapTab\("builtin"\)/);
   assert.match(styles, /\.agent-editor-workbench\s*\{[\s\S]*grid-template-columns: minmax\(310px, \.82fr\) minmax\(450px, 1\.18fr\)/);
-  assert.match(styles, /\.agent-editor-tabs button\[aria-selected="true"\]::after/);
+  assert.match(styles, /\.agent-resource-tabs\s*\{[^}]*border-bottom: 0;/);
+  assert.match(configurationStyles, /\.cap-switch-ui::after\s*\{[^}]*top: 50%;[^}]*transform: translateY\(-50%\)/);
+  assert.match(configurationStyles, /\.cap-switch input:checked \+ \.cap-switch-ui::after\s*\{[^}]*transform: translate\(12px, -50%\)/);
 });
 
 test("配置导航将 MCP 服务简化为 MCP", () => {

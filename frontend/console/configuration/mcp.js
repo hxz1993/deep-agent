@@ -137,6 +137,26 @@ function renderInspectionCounts(counts = {}) {
 function inspectionToast(result) {
   const inspection = result.inspection || {};
   const changes = result.changes || {};
+  if (inspection.status === "not_applicable") {
+    const failure = inspectionErrorMessage(inspection.error)
+      || inspectionFailureLabel(inspection.tools?.error)
+      || inspectionFailureLabel(inspection.resources?.error);
+    if (failure) return { message: `内置清单刷新失败：${failure}`, error: true };
+    const changed = [];
+    [
+      ["工具", changes.tool_count],
+      ["资源", changes.resource_count],
+      ["模板", changes.template_count],
+    ].forEach(([label, item]) => {
+      if (item && item.before !== item.after) changed.push(`${label} ${item.before ?? 0} → ${item.after ?? 0}`);
+    });
+    return {
+      message: changed.length
+        ? `内置清单已刷新并保存：${changed.join("，")}`
+        : `内置清单已刷新：无变化，共 ${inspection.tools?.count || 0} 个工具、${inspection.resources?.count || 0} 个资源、${inspection.resources?.template_count || 0} 个模板`,
+      error: false,
+    };
+  }
   if (inspection.status === "unreachable") {
     return {
       message: `检测失败：${inspectionFailureLabel(inspection.error) || "MCP 无法连接"}`,
@@ -271,7 +291,7 @@ const mcpAdmin = {
           <td>${escapeHtml(formatDate(s.updated_at))}</td>
           <td class="mcp-actions-cell">
             <div class="row-actions mcp-row-actions">
-              ${s.transport === "url" ? `<button class="mcp-direct-action" type="button" data-inspect-mcp="${escapeHtml(s.name)}"><i data-lucide="refresh-cw"></i><span>刷新</span></button>` : ""}
+              ${s.transport === "url" || s.transport === "builtin" ? `<button class="mcp-direct-action" type="button" data-inspect-mcp="${escapeHtml(s.name)}"><i data-lucide="refresh-cw"></i><span>刷新</span></button>` : ""}
               ${canRenameMcp(s.transport) || canDeleteMcp(s.transport) ? `<div class="skill-more-actions mcp-more-actions">
                 <button class="skill-more-trigger" type="button" data-mcp-more-trigger aria-label="更多 MCP 操作" title="更多操作" aria-haspopup="menu" aria-expanded="false"><i data-lucide="ellipsis-vertical"></i></button>
                 <div class="skill-more-menu" data-mcp-more-menu role="menu" hidden>

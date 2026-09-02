@@ -421,6 +421,7 @@ python3.12 -m deep_agent.local_dev \
 
 ```text
 DEEP_AGENT_LOCAL_USER=<平台网关注入的用户 ID>
+DEEP_AGENT_LOCAL_USERNAME=<可选；纯本地头像菜单模拟用户名>
 DEEP_AGENT_LOCAL_TOKEN=<当前环境的有效 Token>
 DEEP_AGENT_LOCAL_TOKEN_COOKIE=<可选，仅在目标环境要求 Cookie 时填写 Cookie 名>
 ```
@@ -498,6 +499,7 @@ alembic upgrade head
 | GET/POST | `/api/v1/context-test-scenarios` | 是；企业管理员按当前模型预算创建测试会话 |
 | GET/POST | `/api/v1/uploads/capabilities`、`/api/v1/uploads` | 否/否；后端仍执行用户与文件限制校验 |
 | GET | `/api/v1/request-context` | 否；返回当前请求上下文最终值 |
+| GET | `/api/v1/current-user` | 否；返回当前用户ID与账号中心用户名，本地开发同契约模拟 |
 | GET | `/api/v1/sessions/{id}/context-status` | 是；沿用会话所有权校验 |
 | | `/api/v1/sessions/*` | 是 |
 | | `/console/#/configuration` | 是 |

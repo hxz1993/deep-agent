@@ -1,4 +1,4 @@
-const WORKSPACE_ASSET_VERSION = "20260901-1";
+const WORKSPACE_ASSET_VERSION = "20260902-8";
 
 const WORKSPACE_PANE_LIMITS = {
   agent: { min: 150, max: 280, initial: 188, variable: "--console-agent-width" },
@@ -31,8 +31,9 @@ function installLegacyDom(source) {
   const legacyApp = source.querySelector(".app");
   const sidebar = legacyApp?.querySelector("#sidebar");
   const chat = legacyApp?.querySelector(".chat");
+  const attachmentImageDialog = legacyApp?.querySelector("#attachmentImageDialog");
   const menu = source.querySelector("#newChatMenu");
-  if (!legacyApp || !sidebar || !chat || !menu) {
+  if (!legacyApp || !sidebar || !chat || !attachmentImageDialog || !menu) {
     throw new Error("工作台页面结构不完整");
   }
 
@@ -105,7 +106,7 @@ function installLegacyDom(source) {
   sessionResizer.setAttribute("aria-valuenow", "300");
 
   const host = document.getElementById("workspaceLegacyHost");
-  host.replaceChildren(sidebar, sessionResizer, chat);
+  host.replaceChildren(sidebar, sessionResizer, chat, attachmentImageDialog);
   document.getElementById("sessionSearchInput")?.addEventListener("input", filterSessions);
 }
 
@@ -261,10 +262,55 @@ function setAgentPanePinned(pinned) {
   pinButton.classList.toggle("active", pinned);
   pinButton.setAttribute("aria-pressed", String(pinned));
   unpinButton.setAttribute("aria-pressed", String(pinned));
+  constrainWorkspaceInspector();
 }
 
 function clampWorkspacePaneWidth(value, limits) {
   return Math.max(limits.min, Math.min(limits.max, Math.round(Number(value) || limits.initial)));
+}
+
+function finiteLayoutLength(value, fallback = 0) {
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.max(0, number) : fallback;
+}
+
+export function calculateInspectorPaneWidth(value, layout = {}) {
+  const minimum = finiteLayoutLength(layout.min, WORKSPACE_PANE_LIMITS.inspector.min);
+  const maximum = Math.max(minimum, finiteLayoutLength(layout.max, WORKSPACE_PANE_LIMITS.inspector.max));
+  const available = Math.floor(
+    finiteLayoutLength(layout.gridWidth)
+      - finiteLayoutLength(layout.horizontalPadding)
+      - finiteLayoutLength(layout.agentWidth)
+      - finiteLayoutLength(layout.sessionWidth)
+      - finiteLayoutLength(layout.resizerWidth) * finiteLayoutLength(layout.resizerCount)
+      - finiteLayoutLength(layout.mainMinWidth),
+  );
+  const effectiveMaximum = Math.max(minimum, Math.min(maximum, available));
+  const requested = Math.round(Number(value) || finiteLayoutLength(layout.initial, WORKSPACE_PANE_LIMITS.inspector.initial));
+  return Math.max(minimum, Math.min(effectiveMaximum, requested));
+}
+
+function readWorkspaceCssLength(styles, property, fallback) {
+  const value = Number.parseFloat(styles.getPropertyValue(property));
+  return Number.isFinite(value) ? value : fallback;
+}
+
+function inspectorPaneLayout(grid) {
+  const styles = getComputedStyle(grid);
+  const pinned = grid.classList.contains("agent-pinned");
+  const resizerWidth = readWorkspaceCssLength(styles, "--console-resizer-width", 10);
+  return {
+    ...WORKSPACE_PANE_LIMITS.inspector,
+    gridWidth: grid.clientWidth,
+    horizontalPadding: readWorkspaceCssLength(styles, "padding-left", 0)
+      + readWorkspaceCssLength(styles, "padding-right", 0),
+    agentWidth: pinned ? readWorkspacePaneWidth(grid, "agent") : 0,
+    sessionWidth: readWorkspacePaneWidth(grid, "session"),
+    resizerWidth,
+    resizerCount: pinned ? 3 : 2,
+    mainMinWidth: readWorkspaceCssLength(styles, "--console-workspace-main-min-width", pinned ? 500 : 520),
+    min: readWorkspaceCssLength(styles, "--console-inspector-min-width", WORKSPACE_PANE_LIMITS.inspector.min),
+  };
 }
 
 function readWorkspacePaneWidth(grid, pane) {
@@ -277,17 +323,16 @@ function readWorkspacePaneWidth(grid, pane) {
 function writeWorkspacePaneWidth(grid, handle, pane, value) {
   const limits = WORKSPACE_PANE_LIMITS[pane];
   if (!limits) return;
-  let effectiveLimits = limits;
-  if (pane === "inspector") {
-    const agentWidth = grid.classList.contains("agent-pinned") ? readWorkspacePaneWidth(grid, "agent") : 0;
-    const sessionWidth = readWorkspacePaneWidth(grid, "session");
-    const resizerWidth = Number.parseFloat(getComputedStyle(grid).getPropertyValue("--console-resizer-width")) || 10;
-    const resizerCount = grid.classList.contains("agent-pinned") ? 3 : 2;
-    const available = grid.clientWidth - agentWidth - sessionWidth - resizerWidth * resizerCount - 420;
-    effectiveLimits = { ...limits, max: Math.max(limits.min, Math.min(limits.max, available)) };
-  }
-  const width = clampWorkspacePaneWidth(value, effectiveLimits);
+  const width = pane === "inspector"
+    ? calculateInspectorPaneWidth(value, inspectorPaneLayout(grid))
+    : clampWorkspacePaneWidth(value, limits);
   grid.style.setProperty(limits.variable, `${width}px`);
+  if (pane === "inspector") {
+    const inspectorLimits = inspectorPaneLayout(grid);
+    const maximum = calculateInspectorPaneWidth(inspectorLimits.max, inspectorLimits);
+    handle.setAttribute("aria-valuemin", String(inspectorLimits.min));
+    handle.setAttribute("aria-valuemax", String(maximum));
+  }
   handle.setAttribute("aria-valuenow", String(width));
 }
 
@@ -295,7 +340,14 @@ function resetWorkspacePaneWidth(grid, handle, pane) {
   const limits = WORKSPACE_PANE_LIMITS[pane];
   if (!limits) return;
   grid.style.removeProperty(limits.variable);
-  handle.setAttribute("aria-valuenow", String(limits.initial));
+  writeWorkspacePaneWidth(grid, handle, pane, limits.initial);
+}
+
+function constrainWorkspaceInspector() {
+  const grid = document.getElementById("workspaceGrid");
+  const handle = document.getElementById("inspectorPaneResizer");
+  if (!grid || !handle || grid.clientWidth <= 0) return;
+  writeWorkspacePaneWidth(grid, handle, "inspector", readWorkspacePaneWidth(grid, "inspector"));
 }
 
 function bindWorkspaceResizer(handle) {
@@ -365,6 +417,11 @@ function syncInspectorToggle() {
   button.title = visible ? "隐藏详情" : "显示详情";
 }
 
+function syncWorkspaceLayout() {
+  syncInspectorToggle();
+  constrainWorkspaceInspector();
+}
+
 function toggleInspectorPane() {
   const grid = document.getElementById("workspaceGrid");
   const inspector = document.getElementById("inspectorPane");
@@ -376,7 +433,7 @@ function toggleInspectorPane() {
     return;
   }
   grid.classList.toggle("inspector-hidden");
-  syncInspectorToggle();
+  syncWorkspaceLayout();
 }
 
 async function selectWorkspaceAgent(agentId) {
@@ -434,7 +491,7 @@ function openInspectorPane() {
   const inspector = document.getElementById("inspectorPane");
   if (!grid || !inspector) return;
   grid.classList.remove("inspector-hidden");
-  syncInspectorToggle();
+  syncWorkspaceLayout();
 }
 
 function toggleContextReferenceInspector(reference, branchPoint) {
@@ -718,12 +775,12 @@ export async function initWorkspace() {
   bindWorkspaceControls();
   bindWorkspaceResizers();
   setAgentPanePinned(false);
-  syncInspectorToggle();
-  window.addEventListener("resize", syncInspectorToggle);
+  window.addEventListener("resize", syncWorkspaceLayout);
   renderAgents();
   renderInspector();
   startStateMonitor();
   document.getElementById("workspaceLoading")?.classList.add("hidden");
   document.getElementById("workspaceGrid")?.classList.remove("hidden");
+  syncWorkspaceLayout();
   window.lucide?.createIcons();
 }

@@ -37,6 +37,9 @@ python3.12 -m deep_agent.local_dev \
 - 纯本地 SQLite 可在仓库外 Profile 设置 `DEEP_AGENT_LOCAL_ADMIN_BYPASS=true`；仍需
   `DEEP_AGENT_LOCAL_USER`，但无需 App/Space 或平台 Token。该放行只存在于回环地址
   `local_dev` 的内部 ASGI scope，部署入口和外部 Header 无法触发。
+- 纯本地头像菜单通过同源`GET /api/v1/current-user`使用模拟资料；可用
+  `DEEP_AGENT_LOCAL_USERNAME`指定显示用户名，未指定时显示“本地用户”。生产与带平台Token的
+  本地联调仍由该接口适配账号中心`GET /api/user/full-detail`，浏览器不直连账号服务。
 - 纯本地附件闭环必须再显式设置`DEEP_AGENT_FILE_BACKEND=local`和
   `DEEP_AGENT_LOCAL_FILE_ROOT=<独立目录>`。该后端只允许`local_dev + SQLite`，部署/Test默认仍为
   `platform`。文件正文保存为私有Blob，独立`metadata.sqlite3`只存索引；业务API与线上保持一致。

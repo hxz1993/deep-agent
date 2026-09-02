@@ -12,7 +12,10 @@ from fastapi.testclient import TestClient
 
 from deep_agent.api.v1.request_context import router as request_context_router
 from deep_agent.local_dev import LocalIdentity, LocalIdentityAdapter, load_local_config
-from deep_agent.security import LOCAL_CONSOLE_ADMIN_SCOPE_KEY
+from deep_agent.security import (
+    LOCAL_CONSOLE_ADMIN_SCOPE_KEY,
+    LOCAL_CURRENT_USERNAME_SCOPE_KEY,
+)
 
 
 class HeaderCaptureApp:
@@ -114,6 +117,10 @@ class LocalIdentityAdapterTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(headers, {"user": "local-user"})
         self.assertIs(target.scope[LOCAL_CONSOLE_ADMIN_SCOPE_KEY], True)
+        self.assertEqual(
+            target.scope[LOCAL_CURRENT_USERNAME_SCOPE_KEY],
+            "本地用户",
+        )
 
 
 class LocalIdentityRequestContextTests(unittest.TestCase):
@@ -178,6 +185,18 @@ class LocalConfigTests(unittest.TestCase):
         self.assertEqual(identity.user, "local-user")
         self.assertIsNone(identity.token)
         self.assertTrue(identity.console_admin_bypass)
+        self.assertEqual(identity.username, "本地用户")
+
+    def test_local_username_is_an_optional_identity_only_profile_value(self) -> None:
+        identity = LocalIdentity.from_mapping(
+            {
+                "DEEP_AGENT_LOCAL_USER": "local-user-id",
+                "DEEP_AGENT_LOCAL_USERNAME": " 本地测试用户 ",
+                "DEEP_AGENT_LOCAL_ADMIN_BYPASS": "true",
+            }
+        )
+
+        self.assertEqual(identity.username, "本地测试用户")
 
     def test_admin_bypass_rejects_invalid_boolean(self) -> None:
         with self.assertRaisesRegex(ValueError, "must be a boolean"):
@@ -204,6 +223,7 @@ class LocalConfigTests(unittest.TestCase):
             path.chmod(stat.S_IRUSR | stat.S_IWUSR)
             keys = [
                 "DEEP_AGENT_LOCAL_USER",
+                "DEEP_AGENT_LOCAL_USERNAME",
                 "DEEP_AGENT_LOCAL_TOKEN",
                 "DEEP_AGENT_DBMS_HOSTNAME",
                 "DEEP_AGENT_LOAD_DOTENV",
@@ -221,6 +241,7 @@ class LocalConfigTests(unittest.TestCase):
                 self.assertEqual(os.environ["DEEP_AGENT_LOAD_DOTENV"], "false")
                 self.assertEqual(os.environ["DEEP_AGENT_LOG_LEVEL"], "WARNING")
                 self.assertNotIn("DEEP_AGENT_LOCAL_USER", os.environ)
+                self.assertNotIn("DEEP_AGENT_LOCAL_USERNAME", os.environ)
                 self.assertNotIn("DEEP_AGENT_LOCAL_TOKEN", os.environ)
             finally:
                 for key in keys:

@@ -253,6 +253,7 @@ textarea {
 }
 .user-popover-heading { width: 100%; display: flex; align-items: center; gap: 9px; padding-bottom: 10px; border-bottom: 1px solid var(--console-card-border); }
 .user-popover-heading > span:last-child { min-width: 0; display: grid; gap: 2px; }
+.user-popover-heading strong { font-family: var(--font); }
 .user-popover-heading small,
 .user-popover-runtime small { color: var(--text-faint); font-size: 12px; font-weight: 500; }
 .user-popover-icon { width: 30px; height: 30px; display: grid; place-items: center; flex: 0 0 auto; border-radius: 8px; color: var(--accent); background: var(--accent-soft); }
@@ -668,6 +669,13 @@ textarea {
 #configurationHost .models-toolbar { margin-top: 0; }
 #configurationHost .models-table-wrap { max-height: calc(100vh - 300px); }
 .llm-token-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.llm-option-row { display: grid; grid-template-columns: minmax(260px, 1fr) minmax(280px, auto); align-items: center; gap: 18px; }
+.llm-option-copy { min-width: 0; }
+.llm-option-copy > span { display: block; }
+.llm-option-copy .field-hint { margin-bottom: 0; }
+.llm-option-row .modality-checkboxes { justify-content: flex-end; }
+.llm-model-catalog-feedback { margin: 7px 0 3px; padding: 8px 10px; border: 1px solid color-mix(in srgb, var(--accent) 34%, var(--border)); border-radius: 6px; color: var(--text); background: var(--accent-soft); font-size: 12px; }
+.llm-model-catalog-feedback.error { border-color: color-mix(in srgb, var(--danger) 42%, var(--border)); color: var(--danger); background: color-mix(in srgb, var(--danger) 8%, var(--bg-soft)); }
 .model-tag-cell { min-width: 130px; }
 .model-tag-cell .badge { margin: 2px 3px 2px 0; }
 .catalog-view-control { flex: 0 0 auto; margin: 0 0 0 auto; }
@@ -729,6 +737,8 @@ textarea {
 
 @media (max-width: 640px) {
   .llm-token-grid { grid-template-columns: 1fr; }
+  .llm-option-row { grid-template-columns: 1fr; gap: 9px; }
+  .llm-option-row .modality-checkboxes { justify-content: flex-start; }
 }
 
 dialog.console-detail-dialog.modal {
@@ -740,6 +750,7 @@ dialog.console-detail-dialog.modal {
 
 dialog.console-detail-dialog.modal-agent,
 dialog.console-detail-dialog.modal-wide { width: min(980px, calc(100vw - 28px)); }
+dialog.console-detail-dialog#llmModelModal { width: min(840px, calc(100vw - 32px)); }
 
 .diagnostics-page { height: 100%; overflow: auto; padding: 28px clamp(20px, 5vw, 72px); }
 .diagnostics-head { max-width: 1120px; margin: 0 auto 22px; display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; }
@@ -1055,6 +1066,7 @@ dialog.console-detail-dialog.modal-wide { width: min(980px, calc(100vw - 28px));
 }
 #workspaceLegacyHost .workspace-header-action:hover { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 22%, var(--border)); background: var(--accent-soft); }
 #workspaceLegacyHost .workspace-header-action svg { width: 14px; height: 14px; }
+#workspaceLegacyHost #toggleInspectorPaneBtn { width: 30px; padding: 0; }
 
 .inspector-pane { padding-top: 48px; }
 .inspector-content { padding: 11px; }
@@ -1757,50 +1769,18 @@ dialog.agent-editor-page::backdrop { display: none; }
 .agent-editor-primary .field-grow { min-height: 280px; }
 .agent-editor-primary .field-grow textarea { min-height: 280px; resize: none; }
 .agent-editor-resources { display: flex; flex-direction: column; min-height: 0; }
-.agent-editor-tabs {
-  height: 52px;
-  display: flex;
-  align-items: flex-end;
-  gap: 22px;
-  padding: 0 18px;
-  border-bottom: 1px solid var(--console-card-border);
+.agent-resource-tabs {
+  flex: 0 0 auto;
+  gap: 6px;
+  padding: 14px 18px 12px;
+  border-bottom: 0;
 }
-.agent-editor-tabs button {
-  position: relative;
-  height: 40px;
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  padding: 0 1px;
-  border: 0;
-  background: transparent;
-  color: var(--text-faint);
-  cursor: pointer;
-  font: inherit;
-  font-size: 12px;
-}
-.agent-editor-tabs button[aria-selected="true"] { color: var(--accent); }
-.agent-editor-tabs button[aria-selected="true"]::after {
-  content: "";
-  position: absolute;
-  right: 0;
-  bottom: -1px;
-  left: 0;
-  height: 2px;
-  border-radius: 999px 999px 0 0;
-  background: var(--accent);
-}
-.agent-editor-tabs button > span { min-width: 0; color: var(--text-faint); font-size: 12px; font-weight: 400; }
 .agent-editor-pane { display: flex; min-height: 0; flex: 1; flex-direction: column; padding: 16px 18px 18px; overflow: hidden; }
 .agent-editor-pane > .cap-section { display: flex; min-height: 100%; max-width: none; flex: 1 1 auto; flex-direction: column; margin: 0; border: 0; border-radius: 0; background: transparent; overflow: hidden; }
-.agent-editor-pane .cap-section-header { align-items: center; padding: 0 0 12px; border: 0; background: transparent; }
-.agent-cap-search { display: flex; justify-content: flex-end; margin-bottom: 10px; }
-.agent-cap-search .cap-search { width: min(280px, 100%); }
-.agent-editor-pane .cap-tabs { padding: 0 0 8px; border: 0; border-radius: 0; background: transparent; }
 .agent-editor-pane .cap-panels { min-height: 0; flex: 1 1 auto; max-height: none; overflow: auto; border: 0; border-radius: 0; background: transparent; }
 .agent-editor-pane .cap-panel:not(.hidden) { display: flex; min-height: 100%; flex-direction: column; padding: 4px 0 0; }
+.agent-resource-panels > #agentCapGroups { display: contents; }
 .agent-editor-pane .agent-skill-grid { max-height: none; padding: 0; overflow: visible; grid-template-columns: 1fr; gap: 0; }
-.agent-editor-pane .agent-skill-section { margin-top: 0; }
 .agent-editor-pane .agent-skill-card {
   min-height: 46px;
   align-items: center;
@@ -2269,27 +2249,32 @@ html[data-theme="paper"] .context-budget-row.tone-target .context-budget-track >
 .context-reference-inspector .inspector-json { border-color: var(--console-card-border); border-radius: 8px; background: color-mix(in srgb, var(--console-canvas) 55%, var(--console-surface)); }
 
 /* 0821：工作台各宽度下保持同一套多栏交互，仅收窄栏宽。 */
-:root { --console-resizer-width: 10px; }
+:root {
+  --console-resizer-width: 10px;
+  --console-workspace-main-min-width: 520px;
+  --console-inspector-min-width: 260px;
+}
 
 .workspace-grid {
   gap: 0;
   grid-template-columns:
     var(--console-session-width)
     var(--console-resizer-width)
-    minmax(520px, 1fr)
+    minmax(var(--console-workspace-main-min-width), 1fr)
     var(--console-resizer-width)
-    var(--console-inspector-width);
+    minmax(var(--console-inspector-min-width), var(--console-inspector-width));
 }
 
 .workspace-grid.agent-pinned {
+  --console-workspace-main-min-width: 500px;
   grid-template-columns:
     var(--console-agent-width)
     var(--console-resizer-width)
     var(--console-session-width)
     var(--console-resizer-width)
-    minmax(500px, 1fr)
+    minmax(var(--console-workspace-main-min-width), 1fr)
     var(--console-resizer-width)
-    var(--console-inspector-width);
+    minmax(var(--console-inspector-min-width), var(--console-inspector-width));
 }
 
 .workspace-grid.inspector-hidden {
@@ -2370,22 +2355,25 @@ body.workspace-pane-resizing { cursor: col-resize; user-select: none; }
 
 @media (max-width: 1260px) {
   .workspace-grid {
+    --console-workspace-main-min-width: 280px;
+    --console-inspector-min-width: 240px;
     grid-template-columns:
       minmax(210px, var(--console-session-width))
       var(--console-resizer-width)
-      minmax(280px, 1fr)
+      minmax(var(--console-workspace-main-min-width), 1fr)
       var(--console-resizer-width)
-      minmax(240px, var(--console-inspector-width));
+      minmax(var(--console-inspector-min-width), var(--console-inspector-width));
   }
   .workspace-grid.agent-pinned {
+    --console-workspace-main-min-width: 280px;
     grid-template-columns:
       minmax(150px, var(--console-agent-width))
       var(--console-resizer-width)
       minmax(210px, var(--console-session-width))
       var(--console-resizer-width)
-      minmax(280px, 1fr)
+      minmax(var(--console-workspace-main-min-width), 1fr)
       var(--console-resizer-width)
-      minmax(240px, var(--console-inspector-width));
+      minmax(var(--console-inspector-min-width), var(--console-inspector-width));
   }
   .workspace-grid.inspector-hidden {
     grid-template-columns:

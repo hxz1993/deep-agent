@@ -37,18 +37,28 @@ const contextSource = await readFile(
   "utf8",
 );
 
+globalThis.window = {};
+const { calculateInspectorPaneWidth } = await import(
+  new URL("../../../frontend/console/workspace.js", import.meta.url)
+);
+
 test("会话标题第二行显示带前缀的完整会话 ID", () => {
   const sessionId = "019f1857-9463-7db3-a9d3-654a4ac24b24";
   assert.equal(formatSessionIdSubtitle(sessionId), `会话 ID：${sessionId}`);
   assert.equal(formatSessionIdSubtitle(null), "");
   assert.match(
     template,
-    /id="chatTitle"[\s\S]*?class="session-badge session-subtitle" id="sessionBadge"/,
+    /id="chatTitle"[\s\S]*?class="session-subtitle-row"[\s\S]*?class="session-badge session-subtitle" id="sessionBadge"/,
   );
+  assert.match(template, /id="copySessionIdBtn"[\s\S]*?data-lucide="copy"/);
   assert.match(
     chatSource,
     /sessionBadge\.textContent = formatSessionIdSubtitle\(state\.sessionId\)/,
   );
+  assert.match(chatSource, /copySessionIdBtn\?\.addEventListener\("click", copyCurrentSessionId\)/);
+  assert.match(chatSource, /await copyTextToClipboard\(sessionId\)/);
+  assert.match(chatSource, /showConsoleToast\("会话 ID 已复制"\)/);
+  assert.match(workspaceCss, /\.session-copy-btn \{[\s\S]*?width: 16px;[\s\S]*?border: 0;/);
   assert.doesNotMatch(chatSource, /sessionBadge\.textContent = .*slice\(/);
 });
 
@@ -73,7 +83,8 @@ test("工作台只读展示上下文预算与压缩事件状态", () => {
 test("会话详情使用会话、当前回合和上下文引用三页签", () => {
   assert.match(template, /data-open-context[\s\S]*测试App/);
   assert.doesNotMatch(template, /id="usageInfo"/);
-  assert.match(template, /id="toggleInspectorPaneBtn"[\s\S]*<span>详情<\/span>/);
+  assert.match(template, /id="toggleInspectorPaneBtn"[\s\S]*data-lucide="panel-right"/);
+  assert.doesNotMatch(template, /<span>详情<\/span>/);
   assert.doesNotMatch(template, /<span>会话详情<\/span>/);
   assert.match(workspaceSource, /function toggleInspectorPane\(\)/);
   assert.match(workspaceSource, /data-inspector-tab="session"[\s\S]*>会话<\/button>/);
@@ -144,6 +155,8 @@ test("测试 App 使用锚定轻量浮层而不是抽屉", () => {
   assert.match(consoleIndex, /id="resetContextBtn">不分应用<\/button>/);
   assert.match(contextSource, /contextAppInput"\)\?\.addEventListener\("input", previewContextFromInput\)/);
   assert.match(contextSource, /\["User ID", identity\?\.user \|\| "未认证"\]/);
+  assert.match(contextSource, /identity\?\.username \|\| identity\?\.user \|\| "未认证"/);
+  assert.match(contextSource, /api\.currentUser\(\)[\s\S]*catch\(\(\) => null\)/);
   assert.match(contextSource, /document\.addEventListener\("pointerdown"/);
   assert.doesNotMatch(contextSource, /if \(!target\?\.closest\("#contextPopover"\)\) closeContextPopover\(\);/);
 });
@@ -155,6 +168,9 @@ test("工作台所有宽度保持多栏交互并支持拖拽和键盘调宽", ()
   assert.match(workspaceSource, /session: \{ min: 220, max: 420, initial: 300/);
   assert.match(workspaceSource, /inspector: \{ min: 260, max: 720, initial: 320/);
   assert.match(workspaceSource, /clampWorkspacePaneWidth/);
+  assert.match(workspaceSource, /--console-workspace-main-min-width/);
+  assert.match(workspaceSource, /calculateInspectorPaneWidth\(value, inspectorPaneLayout\(grid\)\)/);
+  assert.match(workspaceSource, /window\.addEventListener\("resize", syncWorkspaceLayout\)/);
   assert.match(workspaceSource, /setPointerCapture/);
   assert.match(workspaceSource, /\["ArrowLeft", "ArrowRight", "Home"\]/);
   assert.match(workspaceSource, /bindWorkspaceResizers\(\)/);
@@ -164,6 +180,30 @@ test("工作台所有宽度保持多栏交互并支持拖拽和键盘调宽", ()
   assert.doesNotMatch(consoleCss, /workspace-mobile-bar|workspace-drawer-backdrop|mobile-open/);
   assert.doesNotMatch(workspaceCss, /@media \(max-width: 760px\)[\s\S]*\.sidebar \{ position: fixed/);
   assert.match(consoleCss, /工作台各宽度下保持同一套多栏交互/);
+  assert.match(consoleCss, /--console-workspace-main-min-width:\s*520px/);
+  assert.match(consoleCss, /minmax\(var\(--console-workspace-main-min-width\), 1fr\)/);
+  assert.equal(calculateInspectorPaneWidth(680, {
+    gridWidth: 1273,
+    horizontalPadding: 20,
+    sessionWidth: 300,
+    resizerWidth: 10,
+    resizerCount: 2,
+    mainMinWidth: 520,
+    min: 260,
+    max: 720,
+    initial: 320,
+  }), 413);
+  assert.equal(calculateInspectorPaneWidth(360, {
+    gridWidth: 1273,
+    horizontalPadding: 20,
+    sessionWidth: 300,
+    resizerWidth: 10,
+    resizerCount: 2,
+    mainMinWidth: 520,
+    min: 260,
+    max: 720,
+    initial: 320,
+  }), 360);
 });
 
 test("Agent 使用自定义下拉并在切换后进入新对话", () => {
@@ -229,11 +269,17 @@ test("主题选中态在主题容器内保持有间距的圆角正方形", () =>
   assert.match(consoleCss, /\.theme-switch button \{[^}]*width: 22px;[^}]*height: 22px;[^}]*padding: 0;[^}]*border-radius: 7px/);
 });
 
-test("输入区按模型与模态输入双列展示并移除冗余提示", () => {
-  assert.match(consoleCss, /#workspaceLegacyHost \.composer-meta[\s\S]*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/);
-  assert.match(consoleCss, /#composerUploadCapabilities \{ grid-column: 1 \/ -1; \}/);
-  assert.match(chatSource, /composer-modalities-label">模态输入/);
+test("输入区使用内嵌模型菜单并把非文本模态放到模型选项", () => {
+  assert.match(template, /id="composerModelTrigger"/);
+  assert.match(template, /id="composerModelMenu"/);
+  assert.match(chatSource, /model-modality-badge/);
+  assert.match(chatSource, /\["image", "audio", "video"\]/);
+  assert.doesNotMatch(template, /composerModelModalities|composerUploadCapabilities/);
   assert.doesNotMatch(template, /deep-agent 可能会出错|composer-hint/);
+  assert.match(chatSource, /COMPOSER_PROVIDER_BRANDS/);
+  assert.match(chatSource, /assets\/provider-logos\/deepseek\.ico/);
+  assert.match(chatSource, /class="composer-model-option-name"/);
+  assert.doesNotMatch(chatSource, /composer-model-option-copy[\s\S]*<small>/);
 });
 
 test("空会话不再展示预设开场白", () => {
@@ -242,10 +288,20 @@ test("空会话不再展示预设开场白", () => {
   assert.doesNotMatch(chatSource, /querySelectorAll\("\.suggestion"\)/);
 });
 
-test("输入框提供线性附件和后端预算百分比且不再暴露手动压缩", () => {
+test("输入框提供附件入口和圆环预算且不再暴露手动压缩", () => {
   assert.match(template, /id="attachBtn"[\s\S]*?data-lucide="paperclip"/);
   assert.doesNotMatch(template, /id="compactContextBtn"|data-lucide="minimize-2"/);
-  assert.match(template, /id="contextBudgetBadge"[\s\S]*上下文 —/);
+  assert.match(template, /id="contextBudgetBadge"[^>]*aria-label="上下文用量暂不可用"><\/button>/);
+  assert.doesNotMatch(template, /context-budget-value/);
+  assert.match(workspaceCss, /conic-gradient\(var\(--accent\) var\(--context-progress\)/);
+  assert.match(workspaceCss, /\.context-budget-badge \{[\s\S]*width: 14px;[\s\S]*height: 14px;/);
+  assert.match(workspaceCss, /\.attach-btn \{[^}]*width: 16px;[^}]*height: 16px;/);
+  assert.match(workspaceCss, /\.attach-btn svg \{[^}]*width: 16px;[^}]*height: 16px;/);
+  assert.match(workspaceCss, /\.composer \{[^}]*padding: 10px 24px 16px;[^}]*border-top: 0;/);
+  assert.match(workspaceCss, /\.composer-model-picker\.open \.composer-model-trigger \{[^}]*background: var\(--bg-hover\);[^}]*box-shadow: none;/);
+  assert.match(workspaceCss, /\.composer-icon-btn:focus-visible \{[^}]*background: var\(--bg-hover\);[^}]*box-shadow: none;/);
+  assert.match(workspaceCss, /#input \{[^}]*font-size: 13px;[^}]*line-height: 18px;/);
+  assert.match(template, /id="input"[\s\S]*rows="2"/);
   assert.doesNotMatch(template, /📎/);
   assert.doesNotMatch(chatSource, /📎/);
   assert.match(chatSource, /estimated_history_tokens/);

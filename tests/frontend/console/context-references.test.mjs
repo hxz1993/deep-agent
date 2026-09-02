@@ -51,7 +51,7 @@ test("控制台只显示中性标签且不渲染 payload 或 metadata", () => {
 });
 
 test("含上下文引用的用户消息只复制可见正文且不提供编辑入口", () => {
-  assert.match(chatSource, /role === "user" && text/);
+  assert.match(chatSource, /role === "user"[\s\S]*?getText: text \? \(\) => text : null/);
   assert.match(chatSource, /copyTextToClipboard\(text\)/);
   assert.doesNotMatch(chatSource, /startEditUserMessage/);
   assert.doesNotMatch(chatSource, /msg-edit-btn/);

@@ -86,7 +86,8 @@ Tool Call/Result记录；用户输入行只按Event中现有`context_refs.type/l
 
 配置中心 UI 工具页使用“左侧工具包树 + 右侧当前包工具表”：来源只用于左树分组，右表不再
 重复显示所属包；资源自身没有启停状态或启停筛选。窄屏改为上下布局，仍须先选包
-再维护工具。Builtin 包只读，只有选中手工包时才开放新建工具。
+再维护工具。Builtin 包只读，只有选中手工包时才开放新建工具；Builtin 工具详情复用自定义工具的
+表单布局，但所有字段只读且不显示保存操作，避免维护第二套详情视觉。
 
 配置中心 Skill 页不是工具包页：Builtin Skill 只读，上传 Skill 可安装、替换、单个与全部导出和删除；
 详情只展示安全资源索引和 Manifest；文本、DOCX、XLSX 可预览，`scripts/`/`tools/` 只展示路径与
@@ -106,6 +107,8 @@ Agent 独立编辑页的系统提示词标题栏显示“字符数 / 预估 Toke
 `frontend/console/` 是不依赖构建工具的 ES Modules 页面。它复用现有聊天和配置 API，但不读取旧设置页的 `da_request_headers`：
 
 - 平台用户身份只读，通过 `GET /api/v1/request-context` 获取；随后调用`GET /api/v1/admin/access`。
+- 顶部用户菜单通过同源`GET /api/v1/current-user`读取账号中心用户名；接口不可用时只回退显示已认证
+  User ID，不阻断Console初始化，也不让浏览器直接访问账号中心。
 - 只有`allowed=true`且包含`enterprise_admin`角色时才初始化工作台、配置中心和诊断页面。普通用户、
   固定`admin`、401或权限服务503均显示整页门禁，不得继续请求管理数据；直接Hash访问也不能绕过。
 - 当前控制台只允许覆盖 `app`；Space 根据标准 App 编码自动去掉末尾三位，Language 固定为 `zh-cn`。

@@ -66,7 +66,7 @@ function renderContext() {
     appInput.placeholder = inheritedContext.app || "继承平台";
   }
 
-  const currentUser = identity?.user || "未认证";
+  const currentUser = identity?.username || identity?.user || "未认证";
   document.getElementById("currentUserFull").textContent = currentUser;
   const currentUserButton = document.getElementById("currentUserBtn");
   if (currentUserButton) {
@@ -83,8 +83,12 @@ function setAuthLocked(locked) {
 
 export async function refreshIdentity() {
   try {
-    const inherited = await api.requestContext({ inherited: true });
-    identity = inherited;
+    const [inherited, profile] = await Promise.all([
+      api.requestContext({ inherited: true }),
+      api.currentUser().catch(() => null),
+    ]);
+    const username = profile?.user_id === inherited.user ? valueOrNull(profile.username) : null;
+    identity = { ...inherited, username };
     inheritedContext = {
       app: inherited.app || null,
       space: inherited.space || null,

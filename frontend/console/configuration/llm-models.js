@@ -135,6 +135,14 @@ const llmModelsAdmin = {
     this.catalogTargetProviderId = providerId;
   },
 
+  setCatalogFeedback(message = "", error = false) {
+    const feedback = document.getElementById("llmModelCatalogFeedback");
+    if (!feedback) return;
+    feedback.textContent = message;
+    feedback.classList.toggle("hidden", !message);
+    feedback.classList.toggle("error", Boolean(message) && error);
+  },
+
   async refresh() {
     const tbody = document.getElementById("llmModelsTableBody");
     if (!tbody) return;
@@ -207,6 +215,7 @@ const llmModelsAdmin = {
     document.getElementById("llmModelContextWindow").value = prefill?.context_window_tokens || "";
     document.getElementById("llmModelMaxOutput").value = prefill?.max_output_tokens || "";
     document.getElementById("updateLlmModelFromCatalog").classList.add("hidden");
+    this.setCatalogFeedback();
     setCheckedValues("llmModelModality", prefill?.input_modalities || ["text"]);
     setCheckedValues("llmModelTag", prefill?.tags || []);
     document.getElementById("llmModelModal").showModal();
@@ -290,6 +299,7 @@ const llmModelsAdmin = {
       document.getElementById("llmModelContextWindow").value = model.context_window_tokens || "";
       document.getElementById("llmModelMaxOutput").value = model.max_output_tokens || "";
       document.getElementById("updateLlmModelFromCatalog").classList.remove("hidden");
+      this.setCatalogFeedback();
       setCheckedValues("llmModelModality", model.input_modalities || []);
       setCheckedValues("llmModelTag", model.tags || []);
       document.getElementById("llmModelModal").showModal();
@@ -321,10 +331,11 @@ const llmModelsAdmin = {
     const button = document.getElementById("updateLlmModelFromCatalog");
     const modelCode = document.getElementById("llmModelModel").value.trim();
     if (!state.editingLlmModelId || !modelCode) {
-      showToast("请先打开一个已有模型配置", true);
+      this.setCatalogFeedback("请先打开一个已有模型配置", true);
       return;
     }
 
+    this.setCatalogFeedback("正在从模型目录更新…");
     button.disabled = true;
     button.classList.add("is-loading");
     button.title = "正在从模型目录匹配";
@@ -347,9 +358,9 @@ const llmModelsAdmin = {
       document.getElementById("llmModelMaxOutput").value = provider.max_output_tokens;
       setCheckedValues("llmModelModality", provider.input_modalities || []);
       setCheckedValues("llmModelTag", provider.tags || []);
-      showToast(`已从模型目录读取 ${model.model_label}，保存后生效`);
+      this.setCatalogFeedback(`已从模型目录读取 ${model.model_label}，保存后生效`);
     } catch (error) {
-      showToast(error.message, true);
+      this.setCatalogFeedback(error.message, true);
     } finally {
       button.disabled = false;
       button.classList.remove("is-loading");
@@ -367,7 +378,8 @@ const llmModelsAdmin = {
     try {
       const model = document.getElementById("llmModelModel").value.trim();
       const name = this.editorContext.deriveName ? model : document.getElementById("llmModelName").value.trim();
-      if (!name || !model) throw new Error("名称和模型 API 编码不能为空");
+      if (!model) throw new Error("模型名称不能为空");
+      if (!name) throw new Error("名称不能为空");
       const inputModalities = readCheckedValues("llmModelModality");
       if (!inputModalities.length) throw new Error("请至少选择一种输入模态");
       const contextWindow = positiveInteger("llmModelContextWindow", "上下文窗口");

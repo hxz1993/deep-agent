@@ -37,15 +37,36 @@ MCP_SEARCH_RESULT_LIMIT = 5
 MCP_SEARCH_QUERY_LIMIT = 3
 TOOL_DISCOVERY_RETRIEVER = "lexical_v2"
 MCP_RETURN_SCHEMA_TOOLS = frozenset({"cube_query_data", "dimension_query_members"})
+_TOOL_DESCRIPTION_SUPPLEMENTS = {
+    "wecom-doc_media_upload": (
+        "企微机器人发送图片、文件、语音或视频前，先用本工具上传并取得 media_id。"
+        "在 PTC 中可把 load_file_data(url=... 或 file_id=...) 返回的 name/content "
+        "直接传给 file_name/base64_content；payload['content'] 是不透明载荷，"
+        "只能原样传给 base64_content，禁止对它做 len、print、decode、切片、返回或其他检查。"
+        "type=image 只适合企微可内联展示的常规图片格式（优先 PNG/JPEG）；"
+        "用户仅要求发送/转交而未明确要求内联预览或 PNG/JPEG 时，WebP 等格式不要先尝试转码，"
+        "应保持原文件并使用 type=file，在发送工具中使用 msg_type=file。"
+    ),
+    "wecom-chat_message_aibot_send": (
+        "发送 image/file/voice/video 前必须先调用 wecom-doc_media_upload，"
+        "再把其返回的 media_id 放入对应消息对象。"
+        "公开 URL 不能直接作为 image.media_id 或 file.media_id。"
+        "在 PTC 中应把读取、上传和本工具发送组织为一次依赖链；"
+        "用户只要求发送/转交时，WebP 未转成 PNG/JPEG 就直接使用文件消息，"
+        "不要为追求内联预览额外尝试沙箱转码。"
+    ),
+}
 TOOL_SEARCH_DESCRIPTION = (
     "搜索当前 Agent 已授权但尚未披露参数的 MCP 工具。"
     "通常在一次调用中同时提供用户原始语言和简洁英文能力描述；"
-    "若名称目录中存在疑似工具，再增加该协议名。"
+    "若名称目录中存在疑似工具，再把完整协议名作为单独一个查询项原样复制，"
+    "不要在该协议名查询项前后拼接说明或同义词。"
     "返回匹配工具后，下一次模型请求会获得这些工具的完整参数。"
 )
 TOOL_SEARCH_PARAMETER_DESCRIPTION = (
     "提供 2～3 个互补查询：用户原始语言的能力描述、简洁英文能力描述，"
-    "以及可选的目录协议名；不要只重复改写同一表达。"
+    "以及可选的完整目录协议名。协议名必须单独占一个数组项并原样复制；"
+    "不要只重复改写同一表达。"
 )
 
 _ACTION_GROUPS = {
@@ -235,14 +256,15 @@ def _is_read_only_query(query_text: str, query_tokens: set[str]) -> bool:
     )
     if re.search(
         r"\b(?:write|save|create|update|set|insert|delete|remove|drop|clear|stop|cancel|"
-        r"modify|refresh|reload|rebuild|generate|upload|publish|sync|import|submit|approve|trigger)\b",
+        r"modify|refresh|reload|rebuild|generate|upload|publish|sync|import|submit|approve|trigger|"
+        r"send|relay|forward)\b",
         affirmative_text,
     ) or any(
         term in affirmative_text
         for term in (
             "保存", "写入", "创建", "更新", "设置", "新增", "修改", "刷新", "重载",
             "重建", "生成", "上传", "发布", "同步", "导入", "提交", "审批", "触发",
-            "删除", "移除", "清除", "停止", "取消",
+            "删除", "移除", "清除", "停止", "取消", "发送", "发到", "转发",
         )
     ):
         return False
@@ -360,6 +382,19 @@ def _tool_tokens(estimator: TokenEstimator, tool: ToolDefinition) -> int:
     )
 
 
+def _supplement_tool_description(tool: ToolDefinition) -> ToolDefinition:
+    supplement = _TOOL_DESCRIPTION_SUPPLEMENTS.get(tool.name)
+    if not supplement:
+        return tool
+    description = (tool.description or "").strip()
+    if supplement in description:
+        return tool
+    return replace(
+        tool,
+        description=f"{description}\n\n{supplement}" if description else supplement,
+    )
+
+
 def _return_schema_telemetry(
     tools: Sequence[ToolDefinition],
     *,
@@ -410,6 +445,7 @@ class McpDiscoveryToolset(WrapperToolset[AgentDeps]):
         definitions: list[ToolDefinition],
     ) -> list[ToolDefinition]:
         started = time.perf_counter()
+        definitions = [_supplement_tool_description(tool) for tool in definitions]
         telemetry = ctx.deps.tool_discovery or ToolDiscoveryTelemetry()
         ctx.deps.tool_discovery = telemetry
         telemetry.server_names = self.server_names
@@ -614,16 +650,49 @@ def search_deferred_tools(
     )
     searchable_tools = [tool for tool in tools if tool.name not in excluded_names]
     try:
-        documents = build_search_documents(
-            searchable_tools,
-            server_names=telemetry.server_names,
-        )
-        ranked = rank_tool_documents(
-            query_text,
-            documents,
-            limit=MCP_SEARCH_RESULT_LIMIT,
-            enforce_read_only=telemetry.read_only_intent,
-        )
+        # Protocol names are stable identifiers, not fuzzy prose.  When the
+        # model copies one from the catalog, disclose that exact tool first;
+        # otherwise a broad multi-query search can bury the requested tool
+        # below semantically related entries.
+        exact_names: list[str] = []
+        for query in effective_queries:
+            normalized_query = normalize_text(query)
+            for tool in searchable_tools:
+                original_name = mcp_original_tool_name(tool.name, telemetry.server_names)
+                candidates = {normalize_text(tool.name)}
+                if original_name:
+                    candidates.add(normalize_text(original_name))
+                if not any(
+                    normalized_query == candidate
+                    or bool(
+                        re.search(
+                            rf"(?<![a-z0-9]){re.escape(candidate)}(?![a-z0-9])",
+                            normalized_query,
+                        )
+                    )
+                    for candidate in candidates
+                    if candidate
+                ):
+                    continue
+                if telemetry.read_only_intent and (
+                    set(lexical_tokens(tool.name)) & {"write", "delete"}
+                ):
+                    continue
+                exact_names.append(tool.name)
+
+        if exact_names:
+            ranked = list(dict.fromkeys(exact_names))[:MCP_SEARCH_RESULT_LIMIT]
+        else:
+            documents = build_search_documents(
+                searchable_tools,
+                server_names=telemetry.server_names,
+            )
+            ranked = rank_tool_documents(
+                query_text,
+                documents,
+                limit=MCP_SEARCH_RESULT_LIMIT,
+                enforce_read_only=telemetry.read_only_intent,
+            )
     except Exception as exc:  # reveal the authorized corpus instead of dropping access
         telemetry.fallback_reason = type(exc).__name__
         logger.exception("MCP tool search failed; returning the authorized deferred catalog")

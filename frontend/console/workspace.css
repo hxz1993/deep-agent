@@ -1045,9 +1045,9 @@ html, body {
   font-size: 12px;
   line-height: 1.5;
 }
-.tool-body .args-pending {
-  color: var(--text-faint);
-  font-style: italic;
+.tool-body > .json-view.args,
+.tool-body [data-tool-result] > .json-view {
+  border: 0;
 }
 .tool-result-artifact {
   display: flex;

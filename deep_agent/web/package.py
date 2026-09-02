@@ -18,17 +18,17 @@ def build_web_tool_package() -> ToolPackage:
         tools=[
             ToolInfo(
                 name="web_search",
-                display_name="Web Search",
+                display_name="网络搜索",
                 description="搜索公开互联网并返回来源。",
             ),
             ToolInfo(
                 name="web_fetch",
-                display_name="Web Fetch",
+                display_name="获取网页内容",
                 description="抓取公开 HTTP(S) 网页并转换为受限 Markdown。",
             ),
             ToolInfo(
                 name="web_image_view",
-                display_name="Web Image View",
+                display_name="查看网络图片",
                 description="让视觉模型读取公开 HTTP(S) 图片。",
             ),
         ],

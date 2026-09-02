@@ -42,9 +42,9 @@ import { shouldFollowMessages } from "./message-scroll.js?v=20260902-1";
  *   session_event_appended/session_event_updated -> { persisted:true, event }
  *   text         -> { type:"text", delta }
  *   thinking     -> { type:"thinking", delta }
- *   tool_call    -> { type:"tool_call", tool, args, tool_call_id, widget?, metadata? }
- *   tool_call_removed -> { type:"tool_call_removed", tool, tool_call_id, reason }
- *   tool_result  -> { type:"tool_result", tool, result, tool_call_id, artifacts? }
+ *   tool_call    -> { type:"tool_call", tool, display_name?, args, tool_call_id, widget?, metadata? }
+ *   tool_call_removed -> { type:"tool_call_removed", tool, display_name?, tool_call_id, reason }
+ *   tool_result  -> { type:"tool_result", tool, display_name?, result, tool_call_id, artifacts? }
  *   final        -> { type:"final", status, output, usage, deferred? }
  *   cancelled    -> { type:"cancelled", status, usage, run_id }
  *   error        -> { type:"error", message }
@@ -2574,18 +2574,15 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null, proce
       const isToolSearch =
         merged.source === "tool_search" || ["search_tools", "tool_search"].includes(merged.tool);
       const isSkillLoad = merged.tool === "load_capability";
-      const defaultTitle = isToolSearch
-        ? "查找可用工具"
-        : isSkillLoad ? "正在加载 Skill" : (merged.tool || "tool");
+      const defaultTitle = merged.display_name || merged.tool || "tool";
       block.className = `tool-block${isToolSearch ? " tool-search-block" : ""}${isSkillLoad ? " skill-load-block" : ""}`;
       block.dataset.toolCallId = key;
       block.dataset.defaultTitle = defaultTitle;
       if (merged.widget) block.dataset.widget = merged.widget;
       if (merged.metadata) block.dataset.metadata = JSON.stringify(merged.metadata);
-      const argsHtml = hasArgs
-        ? (window.DeepAgentJson?.renderBlock(merged.args, { className: "args", ariaLabel: "工具参数 JSON" })
-          || `<pre class="args">${escapeHtml(pretty(merged.args))}</pre>`)
-        : `<pre class="args args-pending">参数接收中…</pre>`;
+      const renderedArgs = hasArgs ? merged.args : {};
+      const argsHtml = window.DeepAgentJson?.renderBlock(renderedArgs, { className: "args", ariaLabel: "工具参数 JSON" })
+        || `<pre class="args">${escapeHtml(pretty(renderedArgs))}</pre>`;
       block.innerHTML = `
         <div class="tool-head">
           <span class="chevron">${lucideIcon("chevron-right")}</span>

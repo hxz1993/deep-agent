@@ -128,7 +128,7 @@ async def _inspect_builtin_mcp_server(
     previous: McpInspection,
     request_headers: dict[str, str] | None,
 ) -> McpInspectionResult:
-    """Refresh count-only metadata from a repo-shipped builtin MCP runtime."""
+    """Refresh metadata and the raw Tool snapshot from a builtin MCP runtime."""
     from deep_agent.capabilities.mcp.lease_manager import get_mcp_lease_manager
     from deep_agent.mcp_request_context import resolve_mcp_headers
 
@@ -161,12 +161,33 @@ async def _inspect_builtin_mcp_server(
                 instructions_available=bool(client.instructions),
             )
 
-            tools = McpToolsInspection(status="unsupported")
+            empty_snapshot, empty_snapshot_hash = _tool_snapshot(
+                [],
+                instructions=client.instructions,
+            )
+            tools = McpToolsInspection(
+                status="unsupported",
+                snapshot_status="ready",
+                snapshot_at=inspected_at,
+                snapshot_hash=empty_snapshot_hash,
+                snapshot=empty_snapshot,
+            )
             resources = McpResourcesInspection(status="unsupported")
             if client.capabilities.tools:
                 try:
                     tool_items = await client.list_tools()
-                    tools = McpToolsInspection(status="supported", count=len(tool_items or []))
+                    snapshot, snapshot_hash = _tool_snapshot(
+                        tool_items or [],
+                        instructions=client.instructions,
+                    )
+                    tools = McpToolsInspection(
+                        status="supported",
+                        count=len(tool_items or []),
+                        snapshot_status="ready",
+                        snapshot_at=inspected_at,
+                        snapshot_hash=snapshot_hash,
+                        snapshot=snapshot,
+                    )
                 except Exception as exc:
                     tools = previous.tools.model_copy(
                         update={"status": "error", "error": _safe_error("tools/list", exc)}

@@ -32,12 +32,14 @@ test("History 按 ConversationItem 顺序和稳定 ID 归一化", () => {
       base("tool:call-1", "tool", 2, {
         call_id: "call-1",
         tool_name: "lookup",
+        display_name: "查询数据",
         status: "completed",
         output: { ok: true },
       }),
     ],
   });
   assert.deepEqual(history.items.map((item) => item.item_id), ["message:u", "tool:call-1", "message:a"]);
+  assert.equal(history.items[1].display_name, "查询数据");
   assert.deepEqual(projectConversationItems(history.items).map((node) => node.type), ["user", "assistant"]);
 });
 

@@ -214,6 +214,7 @@ test("真实 Pydantic 工具参数字符串可提取 run_code Python 源码", ()
   });
   const event = projected.find((item) => item.id === "tool:call-code");
   assert.equal(event.label, "run_code");
+  assert.doesNotMatch(trajectorySource, /display_name/);
   assert.equal(runCodeSource(event), code);
   assert.equal(runCodeSource({ payload: { args: { code } } }), code);
   assert.equal(runCodeSource({ payload: { args: "not-json" } }), "");

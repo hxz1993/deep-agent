@@ -60,7 +60,7 @@ test("过程、工具和 HITL 默认折叠且等待操作标题清晰", () => {
   assert.equal(processDisclosureLabel({ pending: true }), "等待操作");
   assert.match(chatSource, /processBlock\.className = "assistant-process hidden"/);
   assert.match(chatSource, /isSkillLoad = merged\.tool === "load_capability"/);
-  assert.match(chatSource, /isSkillLoad \? "正在加载 Skill"/);
+  assert.match(chatSource, /const defaultTitle = merged\.display_name \|\| merged\.tool \|\| "tool"/);
   assert.match(chatSource, /block\.classList\.add\("hitl-pending"\)/);
   assert.doesNotMatch(chatSource, /block\.classList\.add\("open", "hitl-pending"\)/);
   assert.match(chatSource, /textContent = `等待操作 · \$\{defaultTitle\}`/);
@@ -212,6 +212,7 @@ test("History 与 SSE 通过同一动作入口驱动思考、正文和工具", (
       kind: "tool",
       call_id: "call-1",
       tool_name: "lookup",
+      display_name: "查询数据",
       input: { region: "华东" },
       output: { count: 2 },
       status: "completed",
@@ -230,11 +231,13 @@ test("History 与 SSE 通过同一动作入口驱动思考、正文和工具", (
     ...assistantActionsFromSse("tool_call", {
       tool_call_id: "call-1",
       tool: "lookup",
+      display_name: "查询数据",
       args: { region: "华东" },
     }),
     ...assistantActionsFromSse("tool_result", {
       tool_call_id: "call-1",
       tool: "lookup",
+      display_name: "查询数据",
       result: { count: 2 },
       artifacts: [{ id: "artifact-1" }],
     }),
@@ -252,6 +255,14 @@ test("History 与 SSE 通过同一动作入口驱动思考、正文和工具", (
   assert.equal(liveRecorder.calls.filter(([method]) => method === "addToolCall").length, 1);
   assert.equal(historyRecorder.calls.filter(([method]) => method === "addToolResult").length, 1);
   assert.equal(liveRecorder.calls.filter(([method]) => method === "addToolResult").length, 1);
+  assert.equal(
+    historyRecorder.calls.find(([method]) => method === "addToolCall")[1].display_name,
+    "查询数据",
+  );
+  assert.equal(
+    liveRecorder.calls.find(([method]) => method === "addToolCall")[1].display_name,
+    "查询数据",
+  );
   assert.ok(historyRecorder.calls.some(([method, value]) => method === "setFinalText" && value === "核对完成"));
   assert.ok(liveRecorder.calls.some(([method, value]) => method === "complete" && value === "核对完成"));
 });
@@ -318,6 +329,16 @@ test("大工具结果显示外置提示并保留预览", () => {
   assert.match(chatSource, /完整结果已外置/);
   assert.match(chatSource, /Agent 可按需读取/);
   assert.match(workspaceCss, /\.tool-result-artifact/);
+});
+
+test("无参数工具显示空对象且参数和结果 JSON 不重复绘制边框", () => {
+  assert.match(chatSource, /const renderedArgs = hasArgs \? merged\.args : \{\};/);
+  assert.match(chatSource, /renderBlock\(renderedArgs, \{ className: "args", ariaLabel: "工具参数 JSON" \}\)/);
+  assert.doesNotMatch(chatSource, /参数接收中…|args-pending/);
+  assert.match(
+    workspaceCss,
+    /\.tool-body > \.json-view\.args,[\s\S]*?\.tool-body \[data-tool-result\] > \.json-view\s*\{[\s\S]*?border:\s*0;/,
+  );
 });
 
 test("Python 生成文件显示文件信息、下载与可复制 File ID", () => {

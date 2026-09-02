@@ -37,6 +37,10 @@ class WebPackageTests(unittest.TestCase):
             [tool.name for tool in package.tools],
             ["web_search", "web_fetch", "web_image_view"],
         )
+        self.assertEqual(
+            [tool.display_name for tool in package.tools],
+            ["网络搜索", "获取网页内容", "查看网络图片"],
+        )
 
     def test_native_mode_keeps_fetch_local_and_search_native(self) -> None:
         runtime = build_web_runtime(WebSearchRuntimeConfig(mode="native"))

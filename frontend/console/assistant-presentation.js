@@ -38,6 +38,7 @@ export function isPlanningToolEvent(event = {}) {
 function toolCallFromConversationItem(item = {}) {
   return {
     tool: item.tool_name,
+    display_name: item.display_name,
     args: item.input,
     tool_call_id: item.call_id,
     source: item.mode === "tool_search" ? "tool_search" : null,
@@ -80,6 +81,7 @@ export function assistantActionsFromHistoryItems(items = []) {
         type: ASSISTANT_PRESENTATION_ACTIONS.TOOL_RESULT,
         result: {
           tool: item.tool_name,
+          display_name: item.display_name,
           result: item.output,
           tool_call_id: item.call_id,
           source: call.source,

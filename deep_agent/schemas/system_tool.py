@@ -7,6 +7,7 @@ class SystemToolDescription(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     name: str
+    display_name: str
     source: str
     injection_condition: str
     description: str

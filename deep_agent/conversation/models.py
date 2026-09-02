@@ -81,6 +81,7 @@ class ToolConversationItem(ConversationItemBase):
     kind: Literal["tool"] = "tool"
     call_id: str
     tool_name: str | None = None
+    display_name: str | None = None
     mode: Literal["tool", "deferred", "tool_search", "native"] = "tool"
     input: Any = None
     output: Any = None
@@ -94,6 +95,7 @@ class PlanConversationItem(ConversationItemBase):
     kind: Literal["plan"] = "plan"
     call_id: str
     tool_name: Literal["write_plan"] = "write_plan"
+    display_name: str | None = None
     input: Any = None
     output: Any = None
     plan: dict[str, Any] | None = None

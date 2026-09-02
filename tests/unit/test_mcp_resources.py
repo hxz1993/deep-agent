@@ -420,12 +420,17 @@ class McpInspectionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.inspection.status, "unreachable")
         self.assertEqual(result.inspection.error.stage, "ping")
 
-    async def test_builtin_refreshes_count_only_catalog(self) -> None:
+    async def test_builtin_refreshes_tool_snapshot_with_titles(self) -> None:
         row = _row("deepcube", transport="builtin", inspection=None)
         row.config = {"env": {"MODE": "test"}}
         client = _FakeInspectionClient(
             tools=[
-                Tool(name="query", description="Query", inputSchema={"type": "object"}),
+                Tool(
+                    name="query",
+                    title="查询数据",
+                    description="Query",
+                    inputSchema={"type": "object"},
+                ),
                 Tool(name="write", description="Write", inputSchema={"type": "object"}),
             ],
             resources=[Resource(name="guide", uri="deepfos://guide")],
@@ -447,8 +452,11 @@ class McpInspectionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.inspection.status, "not_applicable")
         self.assertEqual(result.inspection.tools.count, 2)
         self.assertEqual(result.inspection.resources.count, 1)
-        self.assertEqual(result.inspection.tools.snapshot_status, "missing")
-        self.assertIsNone(result.inspection.tools.snapshot)
+        self.assertEqual(result.inspection.tools.snapshot_status, "ready")
+        self.assertEqual(
+            result.inspection.tools.snapshot.definitions[0].title,
+            "查询数据",
+        )
         self.assertEqual(lease_manager.spawn_config, row.config)
 
     def test_builtin_inspection_round_trips_persisted_counts(self) -> None:

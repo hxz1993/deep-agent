@@ -19,6 +19,22 @@
 直播中的 Thinking、工具进度、自动压缩提示等可以只存在于当前页面，不要求在 History 中重放。
 History 的用户消息、助手回复、工具、Plan、附件和 Context 均由后端从 Event Store 确定性投影。
 
+工具生命周期帧继续使用稳定调用字段 `tool`，并额外返回展示字段 `display_name`：
+
+```json
+{
+  "type": "tool_call",
+  "tool": "web_fetch",
+  "display_name": "获取网页内容",
+  "tool_call_id": "...",
+  "args": {}
+}
+```
+
+`tool_result`、`tool_call_removed` 以及 `final.deferred.calls/approvals` 使用相同规则。客户端只在普通
+会话工具卡标题中使用 `display_name || tool`；调用、续跑和撤回仍以 `tool`、`tool_call_id` 为准。
+`display_name` 是当前工具配置动态生成的展示信息，不写入 Event Payload，也不进入 `/events` 或轨迹。
+
 ## 轨迹与压缩事件
 
 `session_event_appended/updated` 是 Event Store 的实时镜像，只供 Console 轨迹、审计、Title Event

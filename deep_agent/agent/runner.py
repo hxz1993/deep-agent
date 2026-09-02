@@ -85,6 +85,10 @@ from deep_agent.agent.history import (
     repair_unprocessed_tool_calls,
 )
 from deep_agent.capabilities.ui.registry import enrich_deferred, enrich_tool_event
+from deep_agent.capabilities.display_names import (
+    enrich_deferred_display_names,
+    enrich_tool_event_display_name,
+)
 from loguru import logger
 
 from deep_agent.db.conversation import SessionStore
@@ -173,6 +177,7 @@ class AgentRunner:
         usage_limits: UsageLimits,
         *,
         ui_tool_hints: dict[str, dict[str, Any]] | None = None,
+        tool_display_names: dict[str, str] | None = None,
         model_settings: ModelSettings | None = None,
         context_window_tokens: int | None = None,
         max_output_tokens: int | None = None,
@@ -191,6 +196,7 @@ class AgentRunner:
         self.store = store
         self.usage_limits = usage_limits
         self.ui_tool_hints = ui_tool_hints or {}
+        self.tool_display_names = tool_display_names or {}
         self.model_settings = model_settings
         self._context_window_tokens = context_window_tokens
         self._max_output_tokens = max_output_tokens
@@ -1465,7 +1471,11 @@ class AgentRunner:
                 )
         if title_task is not None:
             await title_task
-        response = _build_run_result(result, self.ui_tool_hints)
+        response = _build_run_result(
+            result,
+            self.ui_tool_hints,
+            self.tool_display_names,
+        )
         response["conversation_id"] = result.conversation_id or deps.conversation_id
         response["run_id"] = result.run_id or deps.run_id
         response["run_metrics"] = run_metrics(
@@ -1860,6 +1870,10 @@ class AgentRunner:
                                 event_type = mapped.get("type")
                                 tool_call_id = mapped.get("tool_call_id")
                                 enriched = enrich_tool_event(mapped, self.ui_tool_hints)
+                                enriched = enrich_tool_event_display_name(
+                                    enriched,
+                                    self.tool_display_names,
+                                )
                                 if event_type == "tool_call" and tool_call_id:
                                     tool_name = str(mapped.get("tool") or "tool")
                                     if tool_name in self.ui_tool_hints:
@@ -2053,7 +2067,10 @@ class AgentRunner:
                 )
                 prefix = "plan" if is_planning_tool(tool_name) else "tool"
                 removed["item_id"] = f"{prefix}:{tool_call_id}"
-                yield removed
+                yield enrich_tool_event_display_name(
+                    removed,
+                    self.tool_display_names,
+                )
             cancelled_run_event = await self._finish_run_event(
                 run_event, status="cancelled", started_at=started_at,
                 usage=cancelled_run.usage,
@@ -2233,6 +2250,7 @@ class AgentRunner:
         yield _final_event(
             result,
             self.ui_tool_hints,
+            self.tool_display_names,
             context=final_context,
             conversation_id=deps.conversation_id,
             run_id=deps.run_id,
@@ -2240,14 +2258,21 @@ class AgentRunner:
         )
 
 
-def _build_run_result(result: Any, ui_tool_hints: dict[str, dict[str, Any]]) -> dict[str, Any]:
+def _build_run_result(
+    result: Any,
+    ui_tool_hints: dict[str, dict[str, Any]],
+    tool_display_names: dict[str, str],
+) -> dict[str, Any]:
     output = result.output
     if isinstance(output, DeferredToolRequests):
         deferred = serialize_deferred(output)
         return {
             "output": None,
             "status": "pending",
-            "deferred": enrich_deferred(deferred, ui_tool_hints),
+            "deferred": enrich_deferred_display_names(
+                enrich_deferred(deferred, ui_tool_hints),
+                tool_display_names,
+            ),
             "usage": _usage_dict(result),
         }
     return {
@@ -2260,6 +2285,7 @@ def _build_run_result(result: Any, ui_tool_hints: dict[str, dict[str, Any]]) -> 
 def _final_event(
     result: Any,
     ui_tool_hints: dict[str, dict[str, Any]],
+    tool_display_names: dict[str, str],
     *,
     context: dict[str, Any] | None = None,
     conversation_id: str | None = None,
@@ -2269,7 +2295,10 @@ def _final_event(
     output = result.output
     usage = _usage_dict(result)
     if isinstance(output, DeferredToolRequests):
-        deferred = enrich_deferred(serialize_deferred(output), ui_tool_hints)
+        deferred = enrich_deferred_display_names(
+            enrich_deferred(serialize_deferred(output), ui_tool_hints),
+            tool_display_names,
+        )
         return events.final(
             None,
             usage,

@@ -376,7 +376,7 @@ def build_code_mode_tool_package() -> "ToolPackage":
         tools=[
             ToolInfo(
                 "run_code",
-                "程序编排",
+                "工具调用编排",
                 "使用受限 Python 子集完成多步、并发、循环、聚合和文件载荷中转。",
                 execution_type="code",
             )

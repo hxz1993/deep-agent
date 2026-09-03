@@ -3,8 +3,40 @@
 本文件记录 DeepAgent 的产品版本变化，按新版本到旧版本排列。当前代码版本以
 `deep_agent.__version__` 为准；数据库结构版本以 Alembic head 为准，两者互不替代。
 
+## v0.6.8
+
+- Console完善配置中心、会话过程展示、当前用户名称适配和MCP检测刷新反馈；本地开发与平台账号中心
+  继续通过同一个`/api/v1/current-user`契约返回用户资料。
+- 修复Tool Search向模型暴露不兼容参数结构导致会话执行失败的问题，保持工具发现与实际调用参数一致。
+- 为内置工具、运行时系统工具、UI工具和MCP工具统一补充展示名称来源；实时SSE只额外返回
+  `display_name`，History根据当前Agent工具定义动态补充，Event Payload、数据库和轨迹保持不变。
+- Console普通会话工具卡使用`display_name || tool`展示，历史与实时逻辑一致；轨迹继续显示稳定协议名。
+  内置`builtin__confirm`和`builtin__choice`分别补充“确认操作”和“候选选择”元数据。
+- 本版本不新增数据库迁移，Alembic生产基线仍为`001`。
+
+## v0.6.7
+
+- 将显式编排能力包规范化为`builtin:ptc`，Console名称为“程序编排”，模型协议仍保持Harness
+  `run_code`；旧`builtin:code-mode`在读取、运行和配置导入时自动兼容，新保存与导出统一写新编码，
+  不增加数据库迁移。
+- PTC只编排当前Agent已授权且已披露的MCP；Web Search、Web Fetch、Web Image View和Python沙箱均
+  不进入PTC。Code-only `load_file_data`同时支持当前会话授权的`file_id`与公开HTTP(S) URL，原始
+  Base64仅在MCP参数边界展开，不进入模型、Event、日志或轨迹。
+- `execute_python`支持把当前会话授权的FileStore文件挂入一次性沙箱，并预置`deepagent_files`
+  的`input_path()`与`publish_path()`；成功执行后可将零到多个产物上传为FileStore文件，模型与历史
+  只接收File ID、名称、MIME、大小和SHA-256，不接收宿主路径或Base64。
+- Python沙箱增加常用网络、网页、图片、图表、PDF和Office处理依赖，并默认允许访问公网；仍保留
+  资源限制、Landlock、环境变量白名单和临时目录销毁，同时在Worker连接层尽力阻断回环、私网、
+  链路本地和云元数据地址。`subprocess-dev`仍明确不是面向恶意代码的强隔离沙箱。
+- 大工具结果阈值、Spill和Artifact外置逻辑保持不变；大工具Artifact与Python生成文件统一进入当前
+  会话文件授权投影。后续Run从原始Event恢复授权，Console聊天卡与轨迹展示安全文件引用。
+
 ## v0.6.6
 
+- 新增企业管理员接口`POST /api/v1/configuration/import`，用于无会话新环境的同Alembic Revision
+  配置初始化；默认只预检，显式确认后在单事务中保留全部业务主键完成替换，不执行迁移或改标。
+- 配置备份DB仅作为请求级临时文件；上传Skill通过全量导出包迁移到目标File Store并回写新File ID，
+  数据库失败时回滚并尽力清理本次上传文件。
 - `builtin:web`增加仅向图片输入模型披露的`web_image_view(url, force_download=false)`；工具返回
   Pydantic AI原生`ImageUrl`，由下一次模型请求按Provider能力直传URL或安全下载，不进入Code Mode。
 - 显式HTTP隧道代理的fake-IP/SNI兼容同时覆盖`force_download=true`的延迟图片下载；Pydantic AI仍负责

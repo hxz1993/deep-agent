@@ -50,16 +50,19 @@ frontend/
 | 会话 | `session_id` 由后端 `session` 事件返回；`GET/DELETE /api/v1/sessions`；标题展示 `title \|\| user_prompt`（见 [`../docs/guides/experience/ai-title-generator.md`](../docs/guides/experience/ai-title-generator.md)） |
 | 能力面板 | `GET /api/v1/tools` |
 | 配置 | `localStorage` 只保存调试 App；全局环境配置只读展示，身份和鉴权由平台提供 |
-| 内置工具目录 | 配置中心展示 `builtin:general`、`builtin:sandbox`、`builtin:code-mode`、`builtin:web`；Agent 按包选择 |
+| 内置工具目录 | 配置中心展示`builtin:general`、`builtin:sandbox`、`builtin:ptc`（程序编排）、`builtin:web`；Agent按包选择，旧`builtin:code-mode`不作为新目录项展示 |
 | 系统工具目录 | 配置中心按任务规划、Skill、文件、工具结果、MCP 工具发现、MCP Resource 分组展示自动注入工具；不参与 Agent 配置 |
 | 任务计划 | 只识别`write_plan`完整快照；仅当前Run直播展示，任何Run终态后隐藏，重新打开History不恢复；同Turn Deferred由后端恢复PlanStore |
 | Skill | 独立 Skill 列表与详情；上传包安装/替换/单个与全部导出/删除；文本、Word、Excel 资源可预览，脚本只列包内路径和数量，不展示可执行性判断；Agent 使用独立 `skills` 列表选择 |
 | 一体化控制台 | `/console/`；工作台、配置和诊断的唯一入口 |
 | 会话轨迹 | 工作台“对话 / 轨迹”页签；普通对话读History/SSE ConversationItem，只有轨迹按Sequence读取Event API |
 
-v0.6.3起，轨迹把`run_code`显示为独立`CODE`类型，并在详情中提供带Python高亮与复制能力的
+v0.6.7起，轨迹把`run_code`显示为独立`PTC`类型，并在详情中提供带Python高亮与复制能力的
 Code页签；用户输入详情中的附件与Context Reference分区展示。这里只改变Event的Console投影，
 不增加Event字段或普通ConversationItem类型。
+
+`execute_python`返回的生成文件在聊天工具卡与轨迹中展示名称、MIME、大小和可复制File ID；本地
+FileStore复用现有下载链接，平台FileStore不新增代理下载接口。页面不得渲染Base64或宿主临时路径。
 
 v0.3.12 的配置卡只读展示工具披露策略：附件包为“有附件时可用”，大型 MCP 为“自动预选 Top 3 / 搜索 Top 5”。聊天中的 `search_tools` 是运行诊断过程，默认折叠显示为“正在查找可用工具”，不伪装成业务 MCP 工具。
 
@@ -83,7 +86,8 @@ Tool Call/Result记录；用户输入行只按Event中现有`context_refs.type/l
 
 配置中心 UI 工具页使用“左侧工具包树 + 右侧当前包工具表”：来源只用于左树分组，右表不再
 重复显示所属包；资源自身没有启停状态或启停筛选。窄屏改为上下布局，仍须先选包
-再维护工具。Builtin 包只读，只有选中手工包时才开放新建工具。
+再维护工具。Builtin 包只读，只有选中手工包时才开放新建工具；Builtin 工具详情复用自定义工具的
+表单布局，但所有字段只读且不显示保存操作，避免维护第二套详情视觉。
 
 配置中心 Skill 页不是工具包页：Builtin Skill 只读，上传 Skill 可安装、替换、单个与全部导出和删除；
 详情只展示安全资源索引和 Manifest；文本、DOCX、XLSX 可预览，`scripts/`/`tools/` 只展示路径与
@@ -103,6 +107,8 @@ Agent 独立编辑页的系统提示词标题栏显示“字符数 / 预估 Toke
 `frontend/console/` 是不依赖构建工具的 ES Modules 页面。它复用现有聊天和配置 API，但不读取旧设置页的 `da_request_headers`：
 
 - 平台用户身份只读，通过 `GET /api/v1/request-context` 获取；随后调用`GET /api/v1/admin/access`。
+- 顶部用户菜单通过同源`GET /api/v1/current-user`读取账号中心用户名；接口不可用时只回退显示已认证
+  User ID，不阻断Console初始化，也不让浏览器直接访问账号中心。
 - 只有`allowed=true`且包含`enterprise_admin`角色时才初始化工作台、配置中心和诊断页面。普通用户、
   固定`admin`、401或权限服务503均显示整页门禁，不得继续请求管理数据；直接Hash访问也不能绕过。
 - 当前控制台只允许覆盖 `app`；Space 根据标准 App 编码自动去掉末尾三位，Language 固定为 `zh-cn`。

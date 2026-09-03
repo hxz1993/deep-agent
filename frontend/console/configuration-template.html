@@ -410,24 +410,21 @@
           </section>
 
           <section class="agent-editor-resources" aria-label="工具与 Skill 配置">
-            <nav class="agent-editor-tabs" role="tablist" aria-label="Agent 资源配置">
-              <button type="button" role="tab" data-agent-editor-tab="tools" aria-selected="true">工具配置 <span id="capCounter"></span></button>
-              <button type="button" role="tab" data-agent-editor-tab="skills" aria-selected="false">Skill <span id="agentSkillCounter"></span></button>
+            <nav class="cap-tabs agent-resource-tabs" id="capTabs" role="tablist" aria-label="Agent 资源配置">
+              <button type="button" class="cap-tab active" role="tab" data-kind="builtin" aria-selected="true">内置工具 <span class="cap-tab-badge" data-kind-badge="builtin">0/0</span></button>
+              <button type="button" class="cap-tab" role="tab" data-kind="mcp" aria-selected="false">MCP <span class="cap-tab-badge" data-kind-badge="mcp">0/0</span></button>
+              <button type="button" class="cap-tab" role="tab" data-kind="ui" aria-selected="false">UI 工具 <span class="cap-tab-badge" data-kind-badge="ui">0/0</span></button>
+              <button type="button" class="cap-tab" role="tab" data-kind="skills" aria-selected="false">Skill <span class="cap-tab-badge" id="agentSkillCounter">0/0</span></button>
             </nav>
 
-            <div class="agent-editor-pane" data-agent-editor-pane="tools">
+            <div class="agent-editor-pane">
               <section class="cap-section">
-                <div class="agent-cap-search">
-                  <input type="search" class="cap-search" id="capSearch" placeholder="搜索能力…" />
+                <div class="cap-panels agent-resource-panels">
+                  <div id="agentCapGroups"></div>
+                  <div class="cap-panel hidden agent-skill-panel" data-kind-panel="skills">
+                    <div class="agent-skill-grid" id="agentSkillChoices"></div>
+                  </div>
                 </div>
-                <div class="cap-tabs" id="capTabs"></div>
-                <div class="cap-panels" id="agentCapGroups"></div>
-              </section>
-            </div>
-
-            <div class="agent-editor-pane hidden" data-agent-editor-pane="skills">
-              <section class="cap-section agent-skill-section">
-                <div class="agent-skill-grid" id="agentSkillChoices"></div>
               </section>
             </div>
           </section>
@@ -486,7 +483,7 @@
       </div>
       <div class="modal-body">
         <label class="field">
-          <span>模型 API 编码</span>
+          <span>模型名称</span>
           <input type="text" id="llmModelModel" placeholder="例如 gpt-4.1-mini" required />
         </label>
         <label class="field">
@@ -514,6 +511,7 @@
             ><i data-lucide="refresh-cw"></i></button>
           </span>
         </div>
+        <div class="llm-model-catalog-feedback hidden" id="llmModelCatalogFeedback" role="status" aria-live="polite"></div>
         <div class="llm-token-grid">
           <label class="field">
             <span>上下文窗口 Token</span>
@@ -526,11 +524,13 @@
             <small class="field-hint">模型能力上限，不是每轮固定预留值。</small>
           </label>
         </div>
-        <div class="field">
-          <span>输入模态</span>
-          <p class="field-hint">
-            仅描述 LLM 原生输入能力；平台文件上传和 Agent 附件工具不在此列。
-          </p>
+        <div class="field llm-option-row">
+          <div class="llm-option-copy">
+            <span>输入模态</span>
+            <p class="field-hint">
+              仅描述 LLM 原生输入能力；平台文件上传和 Agent 附件工具不在此列。
+            </p>
+          </div>
           <div class="modality-checkboxes" id="llmModelModalities">
             <label class="checkbox-field"><input type="checkbox" name="llmModelModality" value="text" checked /> 文本</label>
             <label class="checkbox-field"><input type="checkbox" name="llmModelModality" value="image" /> 图像</label>
@@ -538,9 +538,11 @@
             <label class="checkbox-field"><input type="checkbox" name="llmModelModality" value="video" /> 视频</label>
           </div>
         </div>
-        <div class="field">
-          <span>能力标签</span>
-          <p class="field-hint">模型能力标签与输入模态分开保存；私有模型可手工指定。</p>
+        <div class="field llm-option-row">
+          <div class="llm-option-copy">
+            <span>能力标签</span>
+            <p class="field-hint">模型能力标签与输入模态分开保存；私有模型可手工指定。</p>
+          </div>
           <div class="modality-checkboxes" id="llmModelTags">
             <label class="checkbox-field"><input type="checkbox" name="llmModelTag" value="attachment" /> 附件</label>
             <label class="checkbox-field"><input type="checkbox" name="llmModelTag" value="reasoning" /> 推理</label>
@@ -814,23 +816,9 @@
       <div class="form-error hidden" data-form-error role="alert" aria-live="assertive"></div>
       <div class="modal-footer">
         <button type="button" class="btn" id="cancelUiToolBtn">取消</button>
-        <button type="submit" class="btn primary">保存</button>
+        <button type="submit" class="btn primary" id="saveUiToolBtn">保存</button>
       </div>
     </form>
-  </dialog>
-
-  <!-- Builtin UI tool details -->
-  <dialog class="modal modal-wide" id="uiToolDetailModal">
-    <div class="modal-header">
-      <h3 id="uiToolDetailTitle">UI 工具详情</h3>
-      <button type="button" class="icon-btn" id="closeUiToolDetailModal" aria-label="关闭"><i data-lucide="x"></i></button>
-    </div>
-    <div class="modal-body">
-      <dl class="ui-tool-detail-grid" id="uiToolDetailGrid"></dl>
-    </div>
-    <div class="modal-footer">
-      <button type="button" class="btn" id="dismissUiToolDetailModal">关闭</button>
-    </div>
   </dialog>
 
 </body>

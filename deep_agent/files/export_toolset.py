@@ -78,16 +78,23 @@ async def _authorized_existing_file(
         ctx.deps.file_bytes[cache_key] = data
         return data, len(data)
 
-    artifact = ctx.deps.tool_output_artifacts.get(file_id)
+    artifact = ctx.deps.session_file_artifacts.get(file_id)
+    if artifact is None:
+        # Compatibility for request-scoped callers created before the unified
+        # authorization map was introduced. Runtime history binding populates both.
+        artifact = ctx.deps.tool_output_artifacts.get(file_id)
     if artifact is None:
         raise ModelRetry(
-            "file_id 不属于当前会话附件或大工具结果；"
+            "file_id 不属于当前会话附件或工具生成文件；"
             "请只使用当前会话中已明确提供的平台 File ID"
         )
     byte_size = artifact.get("byte_size")
     if isinstance(byte_size, int) and byte_size >= 0:
         return None, byte_size
-    cache_key = f"tool-result:{file_id}"
+    cache_prefix = (
+        "tool-result" if artifact.get("kind") == "tool_result_overflow" else "session-file"
+    )
+    cache_key = f"{cache_prefix}:{file_id}"
     cached = ctx.deps.file_bytes.get(cache_key)
     if cached is not None:
         return cached, len(cached)
@@ -100,7 +107,7 @@ async def _authorized_existing_file(
     except asyncio.CancelledError:
         raise
     except Exception as exc:
-        raise ToolFailed("大工具结果下载失败，无法登记到下载中心") from exc
+        raise ToolFailed("当前会话工具生成文件下载失败，无法登记到下载中心") from exc
     ctx.deps.file_bytes[cache_key] = data
     return data, len(data)
 
@@ -135,7 +142,7 @@ def build_file_export_toolset() -> PreparedToolset[AgentDeps]:
         instructions=(
             "当用户明确需要导出、生成或保存可下载文件时，使用 "
             "export_file_to_download_center 将文件发布到当前用户的DeepFOS下载中心。"
-            "可以复用当前会话附件或大工具结果，也可以提交新生成的UTF-8文本文件内容。"
+            "可以复用当前会话附件或工具生成文件，也可以提交新生成的UTF-8文本文件内容。"
             "成功后文件已经可以在下载中心获取，最终回答应说明文件名并引导用户前往下载中心。"
             "普通文字回答不要调用，不得传宿主机路径或未经当前会话授权的File ID。"
         ),
@@ -149,7 +156,7 @@ def build_file_export_toolset() -> PreparedToolset[AgentDeps]:
     ) -> ExportFileResult:
         """用户明确需要导出文件时，将新文本内容或当前会话平台文件发布到下载中心。
 
-        使用 content 新建UTF-8文本文件；使用 platform_file 复用当前会话附件或大工具结果，
+        使用 content 新建UTF-8文本文件；使用 platform_file 复用当前会话附件或工具生成文件，
         不重复上传。成功后在最终回答中说明文件名并提示用户前往下载中心。
         """
         if not _has_download_center_context(ctx):

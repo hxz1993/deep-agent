@@ -30,6 +30,11 @@ def build_worker_env() -> dict[str, str]:
         if value is not None:
             env[key] = value
     env["PYTHONNOUSERSITE"] = "1"
+    # Do not inherit macOS system/desktop proxy routes (often a loopback Clash
+    # listener). Public traffic connects directly and is checked by the worker
+    # socket guard on every connection.
+    env["NO_PROXY"] = "*"
+    env["no_proxy"] = "*"
     # Backend-controlled import path for the worker module; never inherit host PYTHONPATH.
     env["PYTHONPATH"] = str(repo_root())
     env.pop("PYTHONHOME", None)

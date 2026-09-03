@@ -1,6 +1,6 @@
 {
   "id": "pydata",
-  "description": "DeepAgent 默认数据计算 Profile（numpy、pandas、pydantic）",
+  "description": "DeepAgent 默认数据、网页和文件处理 Profile",
   "packages": [
     {
       "import_name": "numpy",
@@ -15,11 +15,64 @@
       "import_name": "pydantic",
       "display_name": "pydantic",
       "version_note": ">=2,<3"
+    },
+    {
+      "import_name": "requests",
+      "display_name": "requests"
+    },
+    {
+      "import_name": "httpx",
+      "display_name": "httpx"
+    },
+    {
+      "import_name": "bs4",
+      "display_name": "beautifulsoup4"
+    },
+    {
+      "import_name": "lxml",
+      "display_name": "lxml"
+    },
+    {
+      "import_name": "PIL",
+      "display_name": "Pillow"
+    },
+    {
+      "import_name": "matplotlib",
+      "display_name": "matplotlib"
+    },
+    {
+      "import_name": "pypdf",
+      "display_name": "pypdf"
+    },
+    {
+      "import_name": "pdfplumber",
+      "display_name": "pdfplumber"
+    },
+    {
+      "import_name": "reportlab",
+      "display_name": "reportlab"
+    },
+    {
+      "import_name": "openpyxl",
+      "display_name": "openpyxl"
+    },
+    {
+      "import_name": "xlsxwriter",
+      "display_name": "xlsxwriter"
+    },
+    {
+      "import_name": "docx",
+      "display_name": "python-docx"
+    },
+    {
+      "import_name": "pptx",
+      "display_name": "python-pptx"
     }
   ],
   "model_notes": [
     "不支持 pip install；未列出的三方库会 ModuleNotFoundError。",
-    "标准库可用。",
+    "标准库可用；普通公网 HTTP(S) 可访问，非公网地址会阻断。",
+    "deepagent_files.input_path 读取本次授权输入，publish_path 登记需上传的执行产物。",
     "每次调用都是全新环境；未在 inputs 或 code 中提供的变量不得假设仍存在。"
   ]
 }

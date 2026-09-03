@@ -5,11 +5,15 @@ import asyncio
 import inspect
 import unittest
 from dataclasses import replace
+from unittest import mock
 
-from pydantic_ai import Agent, FunctionToolset, ToolDefinition
+import httpx2
+from pydantic_ai import Agent, FunctionToolset, ModelRetry, RunContext, ToolDefinition
 from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart, ToolReturnPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
+from pydantic_ai.models.test import TestModel
 from pydantic_ai.toolsets.abstract import ToolsetTool
+from pydantic_ai.usage import RunUsage
 from pydantic_core import SchemaValidator
 
 from deep_agent.agent.deps import AgentDeps
@@ -25,6 +29,7 @@ from deep_agent.code_mode.file_payload import (
     FILE_DATA_TOKEN_PREFIX,
     MAX_FILE_BYTES,
     FilePayload,
+    _load_public_url,
     _resolve_payload_value,
     build_code_mode_tool_package,
     safe_audit_value,
@@ -62,8 +67,10 @@ class _MemoryFileStore:
 
 class CodeModeTests(unittest.IsolatedAsyncioTestCase):
     def test_registry_exposes_explicit_default_off_package(self) -> None:
-        package = build_registry().get("builtin:code-mode")
-        self.assertEqual(package.label, "代码编排")
+        registry = build_registry()
+        package = registry.get("builtin:ptc")
+        self.assertIs(registry.get("builtin:code-mode"), package)
+        self.assertEqual(package.label, "程序编排")
         self.assertEqual([tool.name for tool in package.tools], ["run_code"])
 
     def test_small_file_payload_is_removed_from_error_text(self) -> None:
@@ -436,7 +443,11 @@ class CodeModeTests(unittest.IsolatedAsyncioTestCase):
 
         def respond(_messages, info: AgentInfo) -> ModelResponse:
             descriptions.append(
-                next(tool.description or "" for tool in info.function_tools if tool.name == "run_code")
+                next(
+                    tool.description or ""
+                    for tool in info.function_tools
+                    if tool.name == "run_code"
+                )
             )
             return ModelResponse(parts=[TextPart(content="done")])
 
@@ -476,10 +487,143 @@ class CodeModeTests(unittest.IsolatedAsyncioTestCase):
         toolset = build_code_mode_tool_package().toolset
         function = next(iter(toolset.tools.values())).function
         signature = inspect.signature(function)
+        self.assertIsNone(signature.parameters["file_id"].default)
+        self.assertIsNone(signature.parameters["url"].default)
         self.assertEqual(signature.parameters["encoding"].default, "base64")
         self.assertEqual(signature.parameters["text_encoding"].default, "utf-8")
         self.assertEqual(signature.parameters["max_chars"].default, 65_536)
         self.assertIn("max_chars: int = 65536", rendered)
+
+    async def test_public_url_file_payload_uses_opaque_token(self) -> None:
+        raw = b"public-image"
+        received: dict[str, str] = {}
+
+        async def upload(file_name: str, base64_content: str) -> dict[str, str]:
+            received.update(file_name=file_name, base64_content=base64_content)
+            return {"media_id": "media-public"}
+
+        step = 0
+
+        def respond(_messages, _info: AgentInfo) -> ModelResponse:
+            nonlocal step
+            step += 1
+            if step == 1:
+                return ModelResponse(
+                    parts=[
+                        ToolCallPart(
+                            "run_code",
+                            {
+                                "code": (
+                                    "payload = await load_file_data("
+                                    "url='https://example.com/image.png')\n"
+                                    "await relay_upload(file_name=payload['name'], "
+                                    "base64_content=payload['content'])"
+                                )
+                            },
+                            "public-file",
+                        )
+                    ]
+                )
+            return ModelResponse(parts=[TextPart(content="done")])
+
+        agent = Agent(
+            FunctionModel(respond),
+            deps_type=AgentDeps,
+            toolsets=[
+                build_code_mode_tool_package().toolset,
+                FilePayloadResolvingToolset(
+                    FunctionToolset(tools=[upload]).prefixed("relay")
+                ),
+            ],
+            capabilities=[HybridCodeMode(tools=[], dynamic_catalog=True)],
+        )
+        with mock.patch(
+            "deep_agent.code_mode.file_payload._load_public_url",
+            new=mock.AsyncMock(
+                return_value=(
+                    raw,
+                    "image.png",
+                    "image/png",
+                    "https://example.com/image.png",
+                )
+            ),
+        ):
+            result = await agent.run("relay", deps=AgentDeps(session_id="session"))
+
+        encoded = base64.b64encode(raw).decode("ascii")
+        self.assertEqual(
+            received,
+            {"file_name": "image.png", "base64_content": encoded},
+        )
+        serialized = str(result.all_messages())
+        self.assertNotIn(encoded, serialized)
+        self.assertNotIn(FILE_DATA_TOKEN_PREFIX, serialized)
+
+    async def test_load_file_data_requires_exactly_one_source(self) -> None:
+        function = next(
+            iter(build_code_mode_tool_package().toolset.tools.values())
+        ).function
+        ctx = RunContext(
+            deps=AgentDeps(session_id="session"),
+            model=TestModel(),
+            usage=RunUsage(),
+        )
+
+        with self.assertRaisesRegex(ModelRetry, "必须且只能提供一个"):
+            await function(ctx)
+        with self.assertRaisesRegex(ModelRetry, "必须且只能提供一个"):
+            await function(
+                ctx,
+                file_id="file-1",
+                url="https://example.com/file.bin",
+            )
+
+    async def test_public_url_uses_bounded_pydantic_safe_download(self) -> None:
+        response = httpx2.Response(
+            200,
+            headers={
+                "content-type": "image/png",
+                "content-disposition": 'attachment; filename="chart.png"',
+            },
+            content=b"image-bytes",
+            request=httpx2.Request(
+                "GET",
+                "https://93.184.216.34/assets/chart",
+                headers={"host": "example.com"},
+            ),
+        )
+        with mock.patch(
+            "deep_agent.code_mode.file_payload.safe_download",
+            new=mock.AsyncMock(return_value=response),
+        ) as downloader:
+            data, name, mime, final_url = await _load_public_url(
+                "https://example.com/assets/chart"
+            )
+
+        self.assertEqual(data, b"image-bytes")
+        self.assertEqual(name, "chart.png")
+        self.assertEqual(mime, "image/png")
+        self.assertEqual(final_url, "https://example.com/assets/chart")
+        self.assertFalse(downloader.await_args.kwargs["allow_local"])
+        self.assertEqual(downloader.await_args.kwargs["max_bytes"], MAX_FILE_BYTES)
+
+    async def test_public_url_rejects_credentials_before_download(self) -> None:
+        with mock.patch(
+            "deep_agent.code_mode.file_payload.safe_download",
+            new=mock.AsyncMock(),
+        ) as downloader:
+            with self.assertRaisesRegex(ModelRetry, "用户名或密码"):
+                await _load_public_url("https://user:secret@example.com/file")
+        downloader.assert_not_awaited()
+
+    async def test_public_url_preserves_safe_download_ssrf_rejection(self) -> None:
+        with mock.patch(
+            "deep_agent.code_mode.file_payload.safe_download",
+            new=mock.AsyncMock(side_effect=ValueError("private/internal IP address")),
+        ) as downloader:
+            with self.assertRaisesRegex(ModelRetry, "地址不安全"):
+                await _load_public_url("http://127.0.0.1/private")
+        self.assertEqual(downloader.await_count, 1)
 
     def test_nested_audit_has_an_aggregate_limit(self) -> None:
         entries = [

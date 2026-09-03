@@ -24,7 +24,7 @@
 | `17` | [`Console UI`](17-console-ui/README.md) | 2026-08 | 轻量企业控制台视觉体系持续落地；保留真实功能、分栏交互和四主题边界 |
 | `18` | [`会话事件与轨迹`](18-session-trajectory/README.md) | 2026-08 | v0.6.0统一Event Store、Event API、持久化SSE、Plan与Console轨迹 |
 | `19` | [`Provider与模型分层`](19-model-provider-architecture/README.md) | 2026-08 | v0.5.6已完成两层归一化、007迁移与统一运行门禁 |
-| `20` | [`Hybrid Code Mode`](20-code-mode/README.md) | 2026-08 | v0.6.3显式能力包、可信返回类型、MCP原生+Code双通道与不透明文件变量已实现 |
+| `20` | [`PTC程序编排`](20-code-mode/README.md) | 2026-08 | v0.6.7规范化`builtin:ptc`，保留MCP原生+`run_code`双通道，并支持URL/File ID不透明中转 |
 | `21` | [`Web 工具`](21-web-tools/README.md) | 2026-09 | v0.6.6显式`builtin:web`、搜索路由、SSRF-safe Fetch与按需Web图片读取已实现 |
 
 ## 文档命名

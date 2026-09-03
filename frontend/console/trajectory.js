@@ -189,6 +189,45 @@ function toolSource(toolName) {
   return null;
 }
 
+function toolResultArtifacts(metadata) {
+  if (!metadata || typeof metadata !== "object") return [];
+  const artifacts = [];
+  if (metadata.overflow_handle) {
+    artifacts.push({
+      artifact_id: String(metadata.overflow_handle),
+      kind: "tool_result_overflow",
+      role: "return_value",
+      byte_size: metadata.overflow_bytes ?? null,
+      content_hash: metadata.overflow_hash || null,
+    });
+  }
+  if (metadata.overflow_content_handle) {
+    artifacts.push({
+      artifact_id: String(metadata.overflow_content_handle),
+      kind: "tool_result_overflow",
+      role: "content",
+      content_hash: metadata.overflow_content_hash || null,
+    });
+  }
+  const seen = new Set();
+  (Array.isArray(metadata.generated_files) ? metadata.generated_files : []).forEach((file) => {
+    const fileId = typeof file?.file_id === "string" ? file.file_id : "";
+    if (!fileId || seen.has(fileId)) return;
+    seen.add(fileId);
+    artifacts.push({
+      artifact_id: fileId,
+      file_id: fileId,
+      kind: "sandbox_output",
+      role: "generated_file",
+      file_name: typeof file.file_name === "string" ? file.file_name : null,
+      mime: typeof file.mime === "string" ? file.mime : null,
+      byte_size: Number.isFinite(Number(file.byte_size)) ? Number(file.byte_size) : null,
+      sha256: typeof file.sha256 === "string" ? file.sha256 : null,
+    });
+  });
+  return artifacts;
+}
+
 function projectCompaction(event, inputSequence) {
   const projected = newEvent({
     id: event.event_id,
@@ -393,6 +432,7 @@ export function buildTrajectory(history = {}) {
           result: part.content ?? null,
           outcome: part.outcome || null,
           plan: toolName === "write_plan" ? metadata.deepagent_plan || null : null,
+          artifacts: toolResultArtifacts(metadata),
         }));
         tool.native = { ...(tool.native || {}), result_event_id: event.event_id, result_part_offset: offset };
         tool.timestamp_end = event.updated_at || part.timestamp || tool.timestamp_end;
@@ -513,7 +553,7 @@ function eventKindClass(event) {
 }
 
 function eventKindBadge(event) {
-  return isRunCodeEvent(event) ? "CODE" : kindBadge(event?.kind);
+  return isRunCodeEvent(event) ? "PTC" : kindBadge(event?.kind);
 }
 
 function icon(name) {
@@ -683,7 +723,8 @@ function localFileDownload(value) {
   return null;
 }
 
-function renderLocalFileDownload(value) {
+function renderLocalFileDownload(value, artifacts = []) {
+  if (artifacts.some((item) => item?.kind === "sandbox_output")) return "";
   const file = localFileDownload(value);
   if (!file) return "";
   const path = `api/v1/local-files/${encodeURIComponent(file.fileId)}/download`;
@@ -692,6 +733,30 @@ function renderLocalFileDownload(value) {
     "File",
     `<a class="trajectory-summary-link local-file-download" href="${escapeHtml(href)}" download>${icon("download")}<span><strong>${escapeHtml(file.fileName)}</strong></span></a>`,
   );
+}
+
+function formatFileBytes(value) {
+  const bytes = Number(value);
+  if (!Number.isFinite(bytes) || bytes <= 0) return "";
+  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
+  if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KiB`;
+  return `${Math.round(bytes)} B`;
+}
+
+function renderGeneratedFiles(artifacts) {
+  const generated = (Array.isArray(artifacts) ? artifacts : [])
+    .filter((item) => item?.kind === "sandbox_output");
+  if (!generated.length) return "";
+  const rows = generated.map((artifact) => {
+    const fileId = String(artifact.file_id || artifact.artifact_id || "");
+    const fileName = String(artifact.file_name || fileId || "未命名文件");
+    const details = [artifact.mime, formatFileBytes(artifact.byte_size)].filter(Boolean).join(" · ");
+    const download = fileId.startsWith("local_")
+      ? `<a class="local-file-download" href="${escapeHtml(globalThis.serviceUrl?.(`api/v1/local-files/${encodeURIComponent(fileId)}/download`) || `/api/v1/local-files/${encodeURIComponent(fileId)}/download`)}" download title="下载文件">${icon("download")}</a>`
+      : "";
+    return `<div class="generated-file-item"><span class="generated-file-icon">${icon("file-output")}</span><span class="generated-file-copy"><strong>${escapeHtml(fileName)}</strong>${details ? `<small>${escapeHtml(details)}</small>` : ""}<code title="${escapeHtml(fileId)}">${escapeHtml(fileId)}</code></span><span class="generated-file-actions">${download}<button type="button" data-copy-file-id="${escapeHtml(fileId)}" title="复制 File ID">${icon("copy")}</button></span></div>`;
+  }).join("");
+  return renderSummarySection("Generated Files", `<div class="generated-file-list">${rows}</div>`);
 }
 
 function renderPayloadResultSections({ payload, result }) {
@@ -703,11 +768,12 @@ function renderPayloadResultSections({ payload, result }) {
 
 function renderToolSummary(event) {
   const result = toolResultValue(event);
+  const artifacts = Array.isArray(event.result?.artifacts) ? event.result.artifacts : [];
   const imagePreview = renderWebImagePreview(result, { className: "trajectory-web-image-preview" });
-  return `${imagePreview ? renderSummarySection("Web Image", imagePreview) : ""}${renderPayloadResultSections({
+  return `${imagePreview ? renderSummarySection("Web Image", imagePreview) : ""}${renderGeneratedFiles(artifacts)}${renderPayloadResultSections({
     payload: event.payload?.args ?? event.payload,
     result,
-  })}${renderLocalFileDownload(result)}`;
+  })}${renderLocalFileDownload(result, artifacts)}`;
 }
 
 function planSnapshot(event) {
@@ -881,12 +947,15 @@ function renderDetail(event, activeTab = "summary", events = []) {
   const headerLabel = TOOL_KINDS.has(event.kind) || ["compaction", "title"].includes(event.kind)
     ? event.label
     : event.run_id ? `Run ${String(event.run_id).slice(0, 8)}` : "";
+  const detailBodyClass = activeTab === "code"
+    ? "trajectory-detail-body is-code"
+    : "trajectory-detail-body";
   return `
     <header class="trajectory-detail-head">
       <div><span class="trajectory-kind ${escapeHtml(eventKindClass(event))}">${escapeHtml(eventKindBadge(event))}</span>${headerLabel ? `<strong>${escapeHtml(headerLabel)}</strong>` : ""}<em class="${escapeHtml(event.status)}">${escapeHtml(statusLabel(event.status))}</em></div>
     </header>
     <nav class="trajectory-detail-tabs" role="tablist">${tabs.map(([id, label]) => `<button type="button" class="${activeTab === id ? "active" : ""}" data-trajectory-detail-tab="${id}">${label}</button>`).join("")}</nav>
-    <div class="trajectory-detail-body">${content}</div>`;
+    <div class="${detailBodyClass}">${content}</div>`;
 }
 
 export function createTrajectoryController({ state }) {
@@ -1264,6 +1333,14 @@ export function createTrajectoryController({ state }) {
     scheduleRender();
   });
   detail.addEventListener("click", (event) => {
+    const copyFile = event.target.closest("[data-copy-file-id]");
+    if (copyFile) {
+      copyTextToClipboard(copyFile.dataset.copyFileId || "").then(() => {
+        copyFile.classList.add("copied");
+        copyFile.textContent = "已复制";
+      });
+      return;
+    }
     const copyCode = event.target.closest("[data-copy-run-code]");
     if (copyCode) {
       const selected = allEvents().find((item) => item.id === selectedId);

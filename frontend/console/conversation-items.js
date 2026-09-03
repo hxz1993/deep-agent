@@ -1,4 +1,4 @@
-import { assistantActionsFromHistoryItems } from "./assistant-presentation.js?v=20260827-1";
+import { assistantActionsFromHistoryItems } from "./assistant-presentation.js?v=20260902-1";
 
 function itemOrder(item) {
   return [Number(item?.order?.sequence || 0), Number(item?.order?.part_offset || 0), String(item?.item_id || "")];
@@ -24,13 +24,20 @@ export function normalizeConversationHistory(response = {}) {
 export function projectConversationItems(items = []) {
   const nodes = [];
   let assistantItems = [];
+  let turnStartedAt = null;
   const flushAssistant = () => {
     if (!assistantItems.length) return;
     const first = assistantItems[0];
+    const finalAssistant = [...assistantItems]
+      .reverse()
+      .find((item) => item?.kind === "assistant_message" && item?.phase === "final");
+    const last = assistantItems[assistantItems.length - 1];
     nodes.push({
       type: "assistant",
       itemId: first?.item_id || "",
       createdAt: first?.created_at || null,
+      startedAt: turnStartedAt || first?.created_at || null,
+      completedAt: finalAssistant?.updated_at || last?.updated_at || last?.created_at || null,
       order: first?.order || null,
       actions: assistantActionsFromHistoryItems(assistantItems),
     });
@@ -39,6 +46,7 @@ export function projectConversationItems(items = []) {
   for (const item of sortConversationItems(items)) {
     if (item.kind === "user_message") {
       flushAssistant();
+      turnStartedAt = item.created_at || null;
       nodes.push({
         type: "user",
         itemId: item.item_id || "",

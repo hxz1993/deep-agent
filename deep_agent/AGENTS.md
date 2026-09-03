@@ -29,7 +29,7 @@ HTTP (REST/SSE)
     → ToolPackageRegistry.toolsets()
         ├─ builtin:general  UTC 时间 FunctionToolset
         ├─ builtin:sandbox  无状态 Python FunctionToolset
-        ├─ builtin:code-mode  Harness CodeMode + Monty（显式关联）
+        ├─ builtin:ptc  Harness CodeMode + Monty（程序编排，显式关联）
         ├─ builtin:web  WebSearch Capability + 请求级公开Web Toolset（显式关联）
         ├─ mcp          请求时 `capabilities/mcp/resolver.py`（DB + mcps/ 兜底）
         └─ ui           代码内置或数据库工具包 → ExternalToolset
@@ -110,7 +110,7 @@ URL 与 Builtin MCP 的运行态不同：URL MCP 在管理员检测时保存 Too
 
 v0.6.2起的 Hybrid Code Mode 实现位于 `code_mode/`；v0.6.3增加可信返回Schema、
 总量受限的嵌套审计和更明确的SDK作用域说明。产品配置单位仍是
-`builtin:code-mode` ToolPackage，运行时由 `HybridCodeMode` Capability 在最外层包装
+`builtin:ptc` ToolPackage，运行时由 `HybridCodeMode` Capability 在最外层包装
 ToolSearch。只有已授权 MCP Toolset 会被标记为 Hybrid；已披露工具保留原生 Schema，
 又可在 Monty 中组合调用。`load_file_data` 是 code-only 文件原语，不出现在普通工具列表；
 其 Run Token、Base64 和大中间结果必须在进入 Event、History、SSE、轨迹、检索或日志前脱敏。
@@ -118,9 +118,9 @@ ToolSearch。只有已授权 MCP Toolset 会被标记为 Hybrid；已披露工�
 v0.6.5起的公开Web实现位于`web/`。`builtin:web`提供`web_search/web_fetch`，v0.6.6另向
 图片输入模型注入外层普通工具`web_image_view`；该工具返回Pydantic AI原生`ImageUrl`且不进入Monty。
 `web_fetch`的HTML薄适配只负责过滤脚本/样式并在原位置保留绝对图片URL，不自动发送图片。全局唯一
-`global_settings.web_search`决定当前模型或固定Provider路由，但不能替代Agent显式授权。固定Provider
-工具可在同时授权Code Mode时进入Monty；原生搜索由Provider执行。不得因此开放Sandbox、Monty
-Socket、任意Header或Internal HTTP。显式HTTP CONNECT代理下，`web/proxy_compat.py`只修正fake-IP
+`global_settings.web_search`决定当前模型或固定Provider路由，但不能替代Agent显式授权。v0.6.7起
+Web工具不进入PTC；原生搜索由Provider执行。不得因此开放PTC内部Socket、平台凭据、任意Header或
+Internal HTTP。显式HTTP CONNECT代理下，`web/proxy_compat.py`只修正fake-IP
 公共解析与TLS SNI传递，并覆盖Pydantic AI组装下一次请求时的`ImageUrl(force_download=true)`延迟
 下载；SSRF地址校验、固定IP、重定向复检和正文解析仍由Pydantic AI负责。完整边界见
 `../docs/design/21-web-tools/`。
@@ -281,13 +281,20 @@ user/App/Space上下文时，`export_file_to_download_center`始终直接披露�
 `chat_session_events`两张会话事实表留空；新增配置表不得再依赖手工白名单。上传Skill原ZIP属于
 平台外部文件，不进入SQLite配置备份，完整留存需另外执行Skill“导出全部”。
 
+无会话新环境可通过企业管理员接口`POST /api/v1/configuration/import`做同Revision初始化：默认
+`apply=false`只预检，正式执行必须同时传`apply=true&confirm=true`。配置DB只使用请求级临时文件；
+上传Skill原包进入目标平台File Store并回写新File ID。导入不得改写目标`alembic_version`，不得跨
+Revision转换，并必须原样保留Agent、Provider、Model等业务主键。实现位于
+`services/configuration_import.py`，契约见`docs/guides/configuration-import.md`。
+
 ## 扩展指南
 
 ### 内置工具包
 
 `builtin:general` 只提供当前时间；`builtin:sandbox` 提供 Python 计算和条件式 Skill 脚本执行；
-`builtin:code-mode` 仅在 Agent 显式关联时注入 `run_code`，用于编排当前已授权 MCP。
-二者都只在Agent的`capabilities`显式关联后进入Run。每个包严格包装一个 Toolset。内置包由代码随版本发布，
+`builtin:ptc`仅在Agent显式关联时注入`run_code`，用于编排当前已授权MCP；旧
+`builtin:code-mode`只作运行和配置导入兼容。
+这些包都只在Agent的`capabilities`显式关联后进入Run。每个包严格包装一个 Toolset。内置包由代码随版本发布，
 不在数据库注册；配置中心只读展示，Agent 仍按整包选择。
 
 ### 系统工具目录
@@ -382,9 +389,15 @@ single-flight。Spill失败时Event保存完整`inline_fallback`并标记失败�
 
 `execute_python` 属于 `builtin:sandbox`，与时间工具分开整包选择；新Agent不会自动关联。v0.3.22 的
 `execute_skill_script` 复用同一 Backend，但只接受已索引的 UTF-8 `.py`、JSON inputs、显式参数和
-最多 16 个同 Skill 授权资源；正式结果只从 `outputs/result.json` 读取。`subprocess-dev` 的
-二者都通过当前 `SubprocessBackend`启动全新的 `.venv-sandbox` Python子进程；结束后销毁进程和
+最多16个同Skill授权资源；正式结果只从`outputs/result.json`读取。v0.6.7起`execute_python`
+可挂入当前会话授权File ID，并通过沙箱预置`deepagent_files.input_path()`读取临时路径；
+`publish_path()`登记的零到多个产物只在成功执行后上传FileStore，模型与Event只获得文件引用。
+两者都通过当前`SubprocessBackend`启动全新的`.venv-sandbox`Python子进程；结束后销毁进程和
 临时目录，不跨调用保留状态。脚本工具的额外权限来自Agent选择的Skill。
+
+沙箱预装常用网络、网页、图片、图表、PDF和Office库，默认允许公网访问；Worker连接层尽力阻断
+回环、私网、链路本地与云元数据地址，重定向连接也重新校验。Landlock、资源限制、环境变量白名单
+和无平台凭据边界仍保留；`security_level=none`必须如实说明这不是面向恶意代码的强隔离沙箱。
 它不是MCP，也不等同于Provider托管的 `CodeExecutionTool`。完整边界见
 [`../docs/design/07-python-sandbox/`](../docs/design/07-python-sandbox/)。
 
@@ -408,6 +421,7 @@ python3.12 -m deep_agent.local_dev \
 
 ```text
 DEEP_AGENT_LOCAL_USER=<平台网关注入的用户 ID>
+DEEP_AGENT_LOCAL_USERNAME=<可选；纯本地头像菜单模拟用户名>
 DEEP_AGENT_LOCAL_TOKEN=<当前环境的有效 Token>
 DEEP_AGENT_LOCAL_TOKEN_COOKIE=<可选，仅在目标环境要求 Cookie 时填写 Cookie 名>
 ```
@@ -485,6 +499,7 @@ alembic upgrade head
 | GET/POST | `/api/v1/context-test-scenarios` | 是；企业管理员按当前模型预算创建测试会话 |
 | GET/POST | `/api/v1/uploads/capabilities`、`/api/v1/uploads` | 否/否；后端仍执行用户与文件限制校验 |
 | GET | `/api/v1/request-context` | 否；返回当前请求上下文最终值 |
+| GET | `/api/v1/current-user` | 否；返回当前用户ID与账号中心用户名，本地开发同契约模拟 |
 | GET | `/api/v1/sessions/{id}/context-status` | 是；沿用会话所有权校验 |
 | | `/api/v1/sessions/*` | 是 |
 | | `/console/#/configuration` | 是 |
@@ -500,7 +515,7 @@ SSE 协议：[`../docs/guides/sse-protocol.md`](../docs/guides/sse-protocol.md)�
    - 多入口共享组装 → `api/v1/deps.py`（变化量留在入口，上下文在 `_build_*` 内统一解包）
 1. 包名 **`deep_agent`**，启动 `deep_agent.main:app`（非 `app.main`）
 2. 扩展优先走路径注册，避免改 `runner.py` 核心
-3. 工具包命名：`builtin:general` \| `builtin:sandbox` \| `builtin:code-mode` \| `builtin:web` \| `mcp:<name>` \| `ui:<package>`；一个包严格包装一个 Toolset，Agent 按包选择，工具协议名不随包编码变化。Skill 使用独立 `agents.skills`，`runtime:*`系统工具不得塞回 ToolPackage
+3. 工具包命名：`builtin:general` \| `builtin:sandbox` \| `builtin:ptc` \| `builtin:web` \| `mcp:<name>` \| `ui:<package>`；旧`builtin:code-mode`仅兼容读取/导入。一个包严格包装一个Toolset，Agent按包选择，工具协议名不随包编码变化。Skill使用独立`agents.skills`，`runtime:*`系统工具不得塞回ToolPackage
 4. 会话`session_id`全局唯一，新会话必须有明确`agent_id + user_id`；App/Space可空且不参与当前授权
 5. 同Session进程内用`SessionStore.lock()`串行；Sequence由Session行和`next_sequence`在短事务分配
 6. 配置保存先完成 Schema/引用校验，再进入写事务；一次 API 业务变更不要串联多个各自提交的 Store `_write()`。MCP 检测等外部 I/O 先基于候选配置执行，再把配置与检测快照一次性提交。模型目录联网、解析和完整校验必须在事务前完成，随后单事务全量替换；模型配置保存不得隐式联网。

@@ -8,13 +8,18 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from deep_agent.local_security import LOCAL_CONSOLE_ADMIN_SCOPE_KEY, enable_local_runtime
+from deep_agent.local_security import (
+    LOCAL_CONSOLE_ADMIN_SCOPE_KEY,
+    LOCAL_CURRENT_USERNAME_SCOPE_KEY,
+    enable_local_runtime,
+)
 
 
 DEFAULT_CONFIG_FILE = Path("~/.config/deep-agent/test.env").expanduser()
 LOCAL_IDENTITY_KEYS = frozenset(
     {
         "DEEP_AGENT_LOCAL_USER",
+        "DEEP_AGENT_LOCAL_USERNAME",
         "DEEP_AGENT_LOCAL_TOKEN",
         "DEEP_AGENT_LOCAL_TOKEN_COOKIE",
         "DEEP_AGENT_LOCAL_ADMIN_BYPASS",
@@ -41,6 +46,7 @@ _FALSE_VALUES = frozenset({"0", "false", "no", "off"})
 @dataclass(frozen=True)
 class LocalIdentity:
     user: str
+    username: str | None = None
     token: str | None = field(default=None, repr=False)
     token_cookie: str | None = None
     console_admin_bypass: bool = False
@@ -48,6 +54,7 @@ class LocalIdentity:
     @classmethod
     def from_mapping(cls, values: Mapping[str, str | None]) -> "LocalIdentity":
         user = str(values.get("DEEP_AGENT_LOCAL_USER") or "").strip()
+        username = str(values.get("DEEP_AGENT_LOCAL_USERNAME") or "").strip()
         token = str(values.get("DEEP_AGENT_LOCAL_TOKEN") or "").strip()
         raw_bypass = str(
             values.get("DEEP_AGENT_LOCAL_ADMIN_BYPASS") or ""
@@ -69,6 +76,7 @@ class LocalIdentity:
         token_cookie = str(values.get("DEEP_AGENT_LOCAL_TOKEN_COOKIE") or "").strip() or None
         return cls(
             user=user,
+            username=username or ("本地用户" if console_admin_bypass else None),
             token=token or None,
             token_cookie=token_cookie,
             console_admin_bypass=console_admin_bypass,
@@ -124,6 +132,11 @@ class LocalIdentityAdapter:
         forwarded_scope["headers"] = headers
         if self.identity.console_admin_bypass:
             forwarded_scope[LOCAL_CONSOLE_ADMIN_SCOPE_KEY] = True
+        local_username = self.identity.username or (
+            "本地用户" if self.identity.console_admin_bypass else None
+        )
+        if local_username:
+            forwarded_scope[LOCAL_CURRENT_USERNAME_SCOPE_KEY] = local_username
         await self.app(forwarded_scope, receive, send)
 
 

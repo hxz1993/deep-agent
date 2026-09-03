@@ -119,7 +119,7 @@ test("Agent 内置工具卡片优先展示中文名称和技术类型", () => {
   assert.match(card, /get_current_time/);
 });
 
-test("Agent 工具包卡片展示后端披露策略且不提供工具级复选框", () => {
+test("Agent 工具包卡片不展示内部披露策略且不提供工具级复选框", () => {
   const ui = loadAgentConfigurationUi();
   const card = ui.window.agentsAdmin.renderCapCard(
     {
@@ -137,7 +137,7 @@ test("Agent 工具包卡片展示后端披露策略且不提供工具级复选�
     new Set(["mcp:deepfos"]),
   );
 
-  assert.match(card, /自动预选 Top 3 · 搜索 Top 5/);
+  assert.doesNotMatch(card, /自动预选|搜索 Top|disclosure-badge/);
   assert.match(card, /value="mcp:deepfos"/);
   assert.doesNotMatch(card, /tool-checkbox|name="tools"/);
 });
@@ -148,6 +148,13 @@ test("Agent 将 Skill 与工具包分开配置", () => {
   assert.match(source, /skills: this\.getSelectedSkills\(\)/);
   assert.match(source, /input type="checkbox" name="agentSkill"/);
   assert.match(source, /该 Skill 当前不存在，保存时将保留原引用/);
+});
+
+test("Agent 资源在顶部合并为内置、MCP、UI 工具和 Skill 四个 Tab", () => {
+  assert.match(template, /id="capTabs"[\s\S]*data-kind="builtin"[\s\S]*data-kind="mcp"[\s\S]*data-kind="ui"[\s\S]*data-kind="skills"/);
+  assert.doesNotMatch(template, /id="capSearch"|data-agent-editor-tab|data-agent-editor-pane/);
+  assert.match(source, /counter\.textContent = `\$\{selected\}\/\$\{total\}`/);
+  assert.doesNotMatch(source, /未选择|capabilityDisclosureLabel|filterCaps/);
 });
 
 test("编辑 Agent 时在弹窗标题栏显示完整 Agent ID", () => {

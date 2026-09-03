@@ -40,15 +40,22 @@ source_event_ids / created_at / updated_at
 
 - `user_message`：`text/attachments/context_refs`。
 - `assistant_message`：`thinking/text/phase/model/provider/usage`；`phase` 为 `process/final`。
-- `tool`：Call 与 Result 已按 `call_id` 合并，含 `mode/input/output/outcome/artifacts`。
-- `plan`：`write_plan` 的完整快照和完成数。
+- `tool`：Call 与 Result 已按 `call_id` 合并，含稳定字段 `tool_name`，以及
+  `display_name/mode/input/output/outcome/artifacts`。
+- `plan`：`write_plan` 的完整快照、完成数和可选 `display_name`。
+
+`display_name` 只用于普通会话展示，客户端使用 `display_name || tool_name`。它在每次读取 History 时，
+根据会话所属 Agent 的当前内置工具元数据、UI 工具 `metadata.display_name` 和 MCP `Tool.title` 动态补充；
+旧 Event 不迁移，Event Payload、数据库和 `/events` 响应中都不保存该字段。调用协议、轨迹和审计继续使用
+原始 `tool_name`。
 
 稳定 ID：Message 为 `message:<event_id>`，工具为 `tool:<call_id>`，计划为
 `plan:<call_id>`。Compaction、Title 和 Run Terminal 不进入普通 History。
 
 ## 2. SSE 契约
 
-- 当前 Run 使用 `text/thinking/tool_call/tool_result/tool_call_removed` 增量展示。
+- 当前 Run 使用 `text/thinking/tool_call/tool_result/tool_call_removed` 增量展示；工具生命周期帧保留
+  原 `tool` 并额外携带 `display_name`，Deferred Call/Approval 同样如此。
 - `session_title` 直接更新标题；客户端不轮询标题，也不需要解析 Title Event。
 - `session_event_appended/updated` 只供 Console 轨迹和审计。
 - `context_compaction_progress` 只在当前实时会话展示；重新打开 History 不恢复压缩标记。

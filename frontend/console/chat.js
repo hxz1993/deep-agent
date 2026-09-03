@@ -13,7 +13,7 @@ import {
   isPlanningToolEvent,
   planPanelState,
   processDisclosureLabel,
-} from "./assistant-presentation.js?v=20260827-1";
+} from "./assistant-presentation.js?v=20260902-1";
 import { createTrajectoryController } from "./trajectory.js?v=20260901-1";
 import { bindWebImagePreviewFallback, renderWebImagePreview } from "./web-image.js?v=20260901-1";
 import { parseServerTimestamp, serverTimestampMilliseconds } from "./time.js?v=20260831-1";
@@ -21,14 +21,16 @@ import {
   latestPendingDeferredTool,
   normalizeConversationHistory,
   projectConversationItems,
-} from "./conversation-items.js?v=20260827-4";
+} from "./conversation-items.js?v=20260902-1";
 import {
   firstSelectableModelId,
   isModelSelectable,
+  modelProvider,
   modelOptionLabel,
   preserveCurrentModel,
   renderGroupedModelOptions,
 } from "./model-options.js?v=20260828-1";
+import { shouldFollowMessages } from "./message-scroll.js?v=20260902-1";
 
 /* ------------------------------------------------------------------ *
  * deep-agent 前端 —— 适配 FastAPI /api/v1/chat/stream (SSE over POST)
@@ -40,9 +42,9 @@ import {
  *   session_event_appended/session_event_updated -> { persisted:true, event }
  *   text         -> { type:"text", delta }
  *   thinking     -> { type:"thinking", delta }
- *   tool_call    -> { type:"tool_call", tool, args, tool_call_id, widget?, metadata? }
- *   tool_call_removed -> { type:"tool_call_removed", tool, tool_call_id, reason }
- *   tool_result  -> { type:"tool_result", tool, result, tool_call_id, artifacts? }
+ *   tool_call    -> { type:"tool_call", tool, display_name?, args, tool_call_id, widget?, metadata? }
+ *   tool_call_removed -> { type:"tool_call_removed", tool, display_name?, tool_call_id, reason }
+ *   tool_result  -> { type:"tool_result", tool, display_name?, result, tool_call_id, artifacts? }
  *   final        -> { type:"final", status, output, usage, deferred? }
  *   cancelled    -> { type:"cancelled", status, usage, run_id }
  *   error        -> { type:"error", message }
@@ -143,6 +145,10 @@ const state = {
   pendingAutomaticCompaction: null,
   automaticCompactionAnchor: null,
   assistantPresenter: null,
+  messageAutoFollow: true,
+  messageScrollFrame: null,
+  modelMenuOpen: false,
+  composerDragDepth: 0,
   planSnapshot: null,
   planningCallIds: new Set(),
 };
@@ -154,25 +160,17 @@ const LLM_MODALITY_LABELS = {
   video: "视频",
 };
 
-const LLM_MODALITY_ICONS = {
-  text: "type",
-  image: "image",
-  audio: "audio-lines",
-  video: "video",
-};
-
-/** LLM-native modalities only (Admin ``input_modalities``). */
-const ALL_LLM_MODALITIES = ["text", "image", "audio", "video"];
-
 const UPLOAD_KIND_ORDER = ["image", "text_file", "docx", "xlsx", "audio", "video"];
-
-const UPLOAD_KIND_ICONS = {
-  image: "image",
-  text_file: "file-text",
-  docx: "file-text",
-  xlsx: "table-2",
-  audio: "audio-lines",
-  video: "video",
+const COMPOSER_PROVIDER_BRANDS = {
+  deepseek: "./assets/provider-logos/deepseek.ico",
+  moonshotai: "./assets/provider-logos/kimi.ico",
+  alibaba: "./assets/provider-logos/qwen.png",
+  zai: "./assets/provider-logos/zai.svg",
+  openrouter: "./assets/provider-logos/openrouter.png",
+  openai: "./assets/provider-logos/openai.svg",
+  anthropic: "./assets/provider-logos/anthropic.png",
+  google: "./assets/provider-logos/google-gemini.png",
+  openai_compatible: "./assets/provider-logos/openai-compatible.svg",
 };
 
 /* ----------------------------- DOM ----------------------------- */
@@ -189,6 +187,7 @@ const el = {
   agentSelect: $("agentSelect"),
   connStatus: $("connStatus"),
   sessionBadge: $("sessionBadge"),
+  copySessionIdBtn: $("copySessionIdBtn"),
   chatTitle: $("chatTitle"),
   newChatMenu: $("newChatMenu"),
   newChatBtnWide: $("newChatBtnWide"),
@@ -197,13 +196,21 @@ const el = {
   fileInput: $("fileInput"),
   attachmentPreview: $("attachmentPreview"),
   composerMeta: $("composerMeta"),
+  composerModelTrigger: $("composerModelTrigger"),
+  composerModelMenu: $("composerModelMenu"),
+  composerDropZone: $("composerDropZone"),
+  composerDropOverlay: $("composerDropOverlay"),
+  attachmentTooltip: $("attachmentTooltip"),
+  contextBudgetTooltip: $("contextBudgetTooltip"),
+  attachmentImageDialog: $("attachmentImageDialog"),
+  attachmentImageDialogImage: $("attachmentImageDialogImage"),
+  attachmentImageDialogName: $("attachmentImageDialogName"),
+  attachmentImageDialogClose: $("attachmentImageDialogClose"),
   composerPlan: $("composerPlan"),
   composerPlanSummary: $("composerPlanSummary"),
   composerPlanProgress: $("composerPlanProgress"),
   composerPlanItems: $("composerPlanItems"),
   modelSelect: $("modelSelect"),
-  composerModelModalities: $("composerModelModalities"),
-  composerUploadCapabilities: $("composerUploadCapabilities"),
 };
 const trajectory = createTrajectoryController({ state });
 
@@ -294,6 +301,7 @@ function showEmptyState() {
 function clearMessages() {
   clearAutomaticCompactionState();
   state.assistantPresenter = null;
+  state.messageAutoFollow = true;
   clearComposerPlan();
   el.messages.innerHTML = "";
 }
@@ -453,26 +461,60 @@ function init() {
     void selectAgent(el.agentSelect.value);
   });
   el.modelSelect?.addEventListener("change", () => {
-    state.llmModelId = el.modelSelect.value;
-    rememberSessionModel();
-    updateComposerModelInfo();
-    updateHitlInputState();
-    if (state.sessionId) {
-      void loadContextStatus({ id: state.sessionId, agentId: state.agentId });
-    }
+    selectComposerModel(el.modelSelect.value);
   });
+  el.composerModelTrigger?.addEventListener("click", () => {
+    setComposerModelMenuOpen(!state.modelMenuOpen);
+  });
+  el.copySessionIdBtn?.addEventListener("click", copyCurrentSessionId);
 
   $("newChatBtn").addEventListener("click", handleNewChatControl);
   el.newChatBtnWide?.addEventListener("click", (e) => {
     handleNewChatControl(e);
   });
   document.addEventListener("click", (e) => {
+    if (state.modelMenuOpen && !e.target.closest("#composerMeta")) {
+      setComposerModelMenuOpen(false);
+    }
     if (el.newChatMenu?.classList.contains("hidden")) return;
     if (e.target.closest("#newChatMenu, #newChatBtn, #newChatBtnWide")) return;
     closeNewChatMenu();
   });
+  document.addEventListener("click", (e) => {
+    const button = e.target.closest("[data-copy-file-id]");
+    if (!button) return;
+    const fileId = button.dataset.copyFileId;
+    if (!fileId) return;
+    button.disabled = true;
+    copyTextToClipboard(fileId).then(() => {
+      button.classList.add("copied");
+      button.title = "File ID 已复制";
+      button.innerHTML = lucideIcon("check");
+      refreshLucideIcons();
+      window.setTimeout(() => {
+        if (!button.isConnected) return;
+        button.classList.remove("copied");
+        button.title = "复制 File ID";
+        button.innerHTML = lucideIcon("copy");
+        button.disabled = false;
+        refreshLucideIcons();
+      }, 1500);
+    }).catch(() => {
+      button.disabled = false;
+    });
+  });
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") closeNewChatMenu();
+    if (e.key === "Escape") {
+      closeNewChatMenu();
+      setComposerModelMenuOpen(false);
+    }
+  });
+  el.attachmentImageDialogClose?.addEventListener("click", closeAttachmentImagePreview);
+  el.attachmentImageDialog?.addEventListener("click", (event) => {
+    if (event.target === el.attachmentImageDialog) closeAttachmentImagePreview();
+  });
+  el.attachmentImageDialog?.addEventListener("close", () => {
+    el.attachmentImageDialogImage?.removeAttribute("src");
   });
   $("toggleSidebar").addEventListener("click", () => el.sidebar.classList.toggle("collapsed"));
   $("refreshCapsBtn").addEventListener("click", loadCapabilities);
@@ -492,6 +534,18 @@ function init() {
   el.attachBtn?.addEventListener("click", () => el.fileInput?.click());
   el.fileInput?.addEventListener("change", onFilesSelected);
   el.input?.addEventListener("paste", onPaste);
+  el.messages?.addEventListener("scroll", () => {
+    state.messageAutoFollow = state.messageAutoFollow
+      ? shouldFollowMessages(el.messages)
+      : shouldFollowMessages(el.messages, 4);
+  }, { passive: true });
+  el.messages?.addEventListener("wheel", (event) => {
+    if (event.deltaY < 0) state.messageAutoFollow = false;
+  }, { passive: true });
+  el.composerDropZone?.addEventListener("dragenter", onComposerDragEnter);
+  el.composerDropZone?.addEventListener("dragover", onComposerDragOver);
+  el.composerDropZone?.addEventListener("dragleave", onComposerDragLeave);
+  el.composerDropZone?.addEventListener("drop", onComposerDrop);
 
   // 聊天标题点击编辑
   el.chatTitle.addEventListener("click", () => {
@@ -672,6 +726,7 @@ function newChat(agentId) {
   state.lastRunUsage = null;
   state.lastRunMetrics = null;
   state.llmModelId = defaultLlmModelId();
+  clearPendingAttachments();
   clearMessages();
   trajectory?.reset();
   showEmptyState();
@@ -887,24 +942,16 @@ function updateComposerContextControls() {
     ? estimated / usable
     : null;
   if (el.contextBudgetBadge) {
+    const percent = ratio == null ? null : Math.max(0, Math.min(100, Math.round(ratio * 100)));
     el.contextBudgetBadge.classList.toggle("reminder", ratio != null && ratio >= 0.7 && ratio < 0.8);
     el.contextBudgetBadge.classList.toggle("warning", ratio != null && ratio >= 0.8);
-    el.contextBudgetBadge.textContent = ratio == null
-      ? "上下文 —"
-      : `上下文 ${Math.max(0, Math.round(ratio * 100))}%`;
-    el.contextBudgetBadge.title = ratio == null
-      ? "历史上下文估算尚不可用"
-      : [
-          "历史上下文估算（非 Provider 精确账单）",
-          `已估算历史：${compactTokenLabel(estimated)} Token`,
-          `可用输入预算：${compactTokenLabel(usable)} Token`,
-          `自动触发线：${compactTokenLabel(status.trigger_tokens)} Token`,
-          `压缩目标线：${compactTokenLabel(status.target_tokens)} Token`,
-          `压缩后：${compactTokenLabel(status.compaction_estimated_tokens)} Token`,
-          `压缩事件：${status.compaction_event_id || "—"}`,
-          `更新时间：${status.compaction_updated_at || "—"}`,
-          `估算器：${status.estimator_source || "—"}`,
-        ].join("\n");
+    el.contextBudgetBadge.style.setProperty("--context-progress", `${(percent || 0) * 3.6}deg`);
+    const detail = ratio == null
+      ? "上下文用量暂不可用"
+      : `上下文窗口：已用 ${percent}%\n${compactTokenLabel(estimated)} / ${compactTokenLabel(usable)} Token`;
+    el.contextBudgetBadge.setAttribute("aria-label", detail.replace("\n", "，"));
+    el.contextBudgetBadge.removeAttribute("title");
+    if (el.contextBudgetTooltip) el.contextBudgetTooltip.textContent = detail;
   }
 
   if (el.attachBtn) el.attachBtn.disabled = state.streaming || state.awaitingHitl;
@@ -1092,7 +1139,10 @@ function renderHistory(items) {
     }
 
     if (node.type === "assistant") {
-      const assistant = createAssistantMessage(ts, node.order?.sequence);
+      const assistant = createAssistantMessage(ts, node.order?.sequence, null, {
+        startedAt: node.startedAt,
+        completedAt: node.completedAt,
+      });
       applyAssistantPresentationActions(assistant, node.actions, {
         prepareDeferredCall: mergeUiToolCall,
       });
@@ -1104,7 +1154,7 @@ function renderHistory(items) {
   clearComposerPlan();
   updateHitlInputState();
   updateComposerContextControls();
-  scrollToBottom();
+  scrollToBottom({ force: true });
 }
 
 async function deleteSession(session) {
@@ -1320,6 +1370,76 @@ function currentModelInfo() {
   return { presetName, modelId, modalities };
 }
 
+function nonTextModalityBadges(modalities = []) {
+  const supported = new Set(modalities.map((item) => String(item).toLowerCase()));
+  return ["image", "audio", "video"]
+    .filter((key) => supported.has(key))
+    .map((key) => `<span class="model-modality-badge">${escapeHtml(LLM_MODALITY_LABELS[key] || key)}</span>`)
+    .join("");
+}
+
+function composerModelLabel(model) {
+  return String(model?.name || model?.model || "模型").trim();
+}
+
+function composerProviderType(provider) {
+  const configured = String(provider?.provider_type || "").trim().toLowerCase();
+  if (COMPOSER_PROVIDER_BRANDS[configured]) return configured;
+  const hint = `${provider?.name || ""} ${provider?.id || ""}`.toLowerCase();
+  if (hint.includes("deepseek")) return "deepseek";
+  if (hint.includes("moonshot") || hint.includes("kimi")) return "moonshotai";
+  if (hint.includes("qwen") || hint.includes("alibaba")) return "alibaba";
+  if (hint.includes("zhipu") || hint.includes("zai")) return "zai";
+  if (hint.includes("openrouter")) return "openrouter";
+  if (hint.includes("anthropic") || hint.includes("claude")) return "anthropic";
+  if (hint.includes("google") || hint.includes("gemini")) return "google";
+  if (hint.includes("openai")) return "openai";
+  return "openai_compatible";
+}
+
+function composerProviderIcon(provider) {
+  const providerType = composerProviderType(provider);
+  const src = COMPOSER_PROVIDER_BRANDS[providerType];
+  return `<img src="${escapeHtml(src)}" alt="" data-provider-type="${escapeHtml(providerType)}" />`;
+}
+
+function selectComposerModel(modelId) {
+  if (!modelId || modelId === state.llmModelId) {
+    setComposerModelMenuOpen(false);
+    return;
+  }
+  state.llmModelId = modelId;
+  if (el.modelSelect) el.modelSelect.value = modelId;
+  rememberSessionModel();
+  setComposerModelMenuOpen(false);
+  updateComposerModelInfo();
+  updateHitlInputState();
+  if (state.sessionId) {
+    void loadContextStatus({ id: state.sessionId, agentId: state.agentId });
+  }
+}
+
+function setComposerModelMenuOpen(open) {
+  state.modelMenuOpen = Boolean(open && !state.streaming && el.composerModelMenu);
+  el.composerModelMenu?.classList.toggle("hidden", !state.modelMenuOpen);
+  el.composerModelTrigger?.setAttribute("aria-expanded", String(state.modelMenuOpen));
+  el.composerMeta?.classList.toggle("open", state.modelMenuOpen);
+}
+
+function uploadCapabilityText() {
+  const kinds = Array.isArray(state.uploadCapabilities?.kinds) ? state.uploadCapabilities.kinds : [];
+  const labels = state.uploadCapabilities?.labels || {};
+  if (!kinds.length) return "添加附件（上传类型尚未加载）";
+  const ordered = UPLOAD_KIND_ORDER.filter((key) => kinds.includes(key)).concat(
+    kinds.filter((key) => !UPLOAD_KIND_ORDER.includes(key)),
+  );
+  return [
+    "附件",
+    `支持：${ordered.map((key) => labels[key] || key).join("、")}`,
+    `支持点击、拖拽或粘贴 · 最多 ${Number(state.uploadCapabilities?.max_count) || 10} 个 · 单个 ${Number(state.uploadCapabilities?.max_size_mb) || 20}MB`,
+  ].join("\n");
+}
+
 async function loadUploadCapabilities() {
   try {
     const r = await daFetch(serviceUrl("api/v1/uploads/capabilities"));
@@ -1379,60 +1499,80 @@ function updateComposerModelInfo() {
     }
   }
 
-  if (el.composerModelModalities) {
-    const supported = new Set((info?.modalities || []).map((m) => String(m).toLowerCase()));
-    if (!supported.size) {
-      el.composerModelModalities.innerHTML =
-        '<span class="composer-modalities-label">模态输入</span><span class="modality-chip">未配置（管理后台可刷新 Meta）</span>';
-    } else {
-      const chips = ALL_LLM_MODALITIES.map((key) => {
-        const on = supported.has(key);
-        const label = LLM_MODALITY_LABELS[key] || key;
-        const icon = LLM_MODALITY_ICONS[key] || "circle";
-        const title = on ? `LLM 原生支持：${label}` : `LLM 原生不支持：${label}`;
-        return `<span class="modality-chip ${on ? "supported" : "unsupported"}" title="${escapeHtml(title)}">${lucideIcon(icon)}<span>${escapeHtml(label)}</span></span>`;
-      }).join("");
-      el.composerModelModalities.innerHTML = `<span class="composer-modalities-label">模态输入</span>${chips}`;
-    }
+  const selected = selectedLlmModel();
+  if (el.composerModelTrigger) {
+    const selectedLabel = selected ? composerModelLabel(selected) : (info?.presetName || "选择模型");
+    el.composerModelTrigger.disabled = state.streaming || !state.llmModels.some(isModelSelectable);
+    el.composerModelTrigger.querySelector(".composer-model-trigger-label").textContent = selectedLabel;
+    el.composerModelTrigger.querySelector(".composer-provider-icon").innerHTML = composerProviderIcon(modelProvider(selected));
+    el.composerModelTrigger.title = selected
+      ? `${modelProvider(selected)?.name || "Provider"} · ${selectedLabel}`
+      : "选择本会话使用的 LLM 模型";
   }
-
-  if (el.composerUploadCapabilities) {
-    const kinds = Array.isArray(state.uploadCapabilities?.kinds) ? state.uploadCapabilities.kinds : [];
-    const labels = state.uploadCapabilities?.labels || {};
-    const vision = new Set((info?.modalities || []).map((m) => String(m).toLowerCase())).has("image");
-    if (!kinds.length) {
-      el.composerUploadCapabilities.innerHTML =
-        '<span class="composer-modalities-label">附件</span><span class="modality-chip">未配置</span>';
-    } else {
-      const ordered = UPLOAD_KIND_ORDER.filter((k) => kinds.includes(k)).concat(
-        kinds.filter((k) => !UPLOAD_KIND_ORDER.includes(k)),
-      );
-      const chips = ordered
-        .map((key) => {
-          const label = labels[key] || key;
-          const icon = UPLOAD_KIND_ICONS[key] || "file";
-          let chipClass = "supported";
-          let title = `平台上传：${label}`;
-          if (key === "image" && !vision) {
-            chipClass = "upload-partial";
-            title = `${label}：当前模型未配置原生图片输入`;
-          } else if (key === "image") {
-            title = `${label}：可上传，当前模型支持原生看图`;
-          } else if (["text_file", "docx", "xlsx"].includes(key)) {
-            title = `${label}：上传后由 Agent 的 read_file 系统工具按需分页读取`;
-          }
-          return `<span class="modality-chip ${chipClass}" title="${escapeHtml(title)}">${lucideIcon(icon)}<span>${escapeHtml(label)}</span></span>`;
-        })
-        .join("");
-      el.composerUploadCapabilities.innerHTML = `<span class="composer-modalities-label">附件</span>${chips}`;
-    }
+  if (el.composerModelMenu) {
+    const visible = state.llmModels.filter((model) => isModelSelectable(model) || model.id === state.llmModelId);
+    el.composerModelMenu.innerHTML = visible.length
+      ? visible.map((model) => {
+          const active = model.id === state.llmModelId;
+          const provider = modelProvider(model)?.name || "Provider";
+          return `<button type="button" class="composer-model-option${active ? " active" : ""}" role="option" aria-selected="${active}" data-model-id="${escapeHtml(model.id)}">
+            <span class="composer-provider-icon" title="${escapeHtml(provider)}">${composerProviderIcon(modelProvider(model))}</span>
+            <strong class="composer-model-option-name">${escapeHtml(composerModelLabel(model))}</strong>
+            <span class="composer-model-option-badges">${nonTextModalityBadges(model.input_modalities || [])}</span>
+            ${active ? `<span class="composer-model-check">${lucideIcon("check")}</span>` : ""}
+          </button>`;
+        }).join("")
+      : '<div class="composer-model-empty">无可用模型</div>';
+    el.composerModelMenu.querySelectorAll("[data-model-id]").forEach((button) => {
+      button.addEventListener("click", () => selectComposerModel(button.dataset.modelId));
+    });
   }
+  const tooltip = uploadCapabilityText();
+  if (el.attachmentTooltip) el.attachmentTooltip.textContent = tooltip;
+  if (el.attachBtn) el.attachBtn.removeAttribute("title");
   refreshLucideIcons();
 }
 
 function updateChatHeader() {
   el.sessionBadge.textContent = formatSessionIdSubtitle(state.sessionId);
+  if (el.copySessionIdBtn) {
+    el.copySessionIdBtn.hidden = !state.sessionId;
+    el.copySessionIdBtn.disabled = false;
+    el.copySessionIdBtn.classList.remove("copied");
+    el.copySessionIdBtn.title = "复制会话 ID";
+    el.copySessionIdBtn.setAttribute("aria-label", "复制会话 ID");
+    el.copySessionIdBtn.innerHTML = lucideIcon("copy");
+  }
   updateComposerModelInfo();
+  refreshLucideIcons();
+}
+
+async function copyCurrentSessionId() {
+  const sessionId = String(state.sessionId || "");
+  if (!sessionId || !el.copySessionIdBtn) return;
+  const button = el.copySessionIdBtn;
+  button.disabled = true;
+  try {
+    await copyTextToClipboard(sessionId);
+    button.classList.add("copied");
+    button.title = "会话 ID 已复制";
+    button.setAttribute("aria-label", "会话 ID 已复制");
+    button.innerHTML = lucideIcon("check");
+    refreshLucideIcons();
+    showConsoleToast("会话 ID 已复制");
+    window.setTimeout(() => {
+      if (!button.isConnected || state.sessionId !== sessionId) return;
+      button.classList.remove("copied");
+      button.title = "复制会话 ID";
+      button.setAttribute("aria-label", "复制会话 ID");
+      button.innerHTML = lucideIcon("copy");
+      button.disabled = false;
+      refreshLucideIcons();
+    }, 1500);
+  } catch {
+    button.disabled = false;
+    showConsoleToast("会话 ID 复制失败，请重试", true);
+  }
 }
 
 function updateAgentSelectState() {
@@ -1486,15 +1626,17 @@ async function onSend() {
   }
 
   hideEmptyState();
+  state.messageAutoFollow = true;
   el.input.value = "";
   clearPendingAttachments();
   autoGrow();
 
   clearComposerPlan();
-  addMessage("user", text, null, null, attachments);
+  const turnStartedAt = new Date().toISOString();
+  addMessage("user", text, turnStartedAt, null, attachments);
   trajectory?.addUser({ content: text, attachments });
 
-  const assistant = createAssistantMessage();
+  const assistant = createAssistantMessage(null, null, null, { startedAt: turnStartedAt });
   state.assistantPresenter = assistant;
   setStreaming(true);
   updateAgentSelectState();
@@ -1527,12 +1669,14 @@ async function resumeDeferred(deferredResults) {
     return;
   }
   state.awaitingHitl = false;
+  state.messageAutoFollow = true;
   updateHitlInputState();
   clearComposerPlan();
 
   const assistant = state.assistantPresenter?.row?.isConnected
     ? state.assistantPresenter
     : createAssistantMessage();
+  assistant.resumeProcess?.();
   state.assistantPresenter = assistant;
   setStreaming(true);
   updateAgentSelectState();
@@ -1652,6 +1796,7 @@ async function stopStream() {
 
 function setStreaming(v) {
   state.streaming = v;
+  if (v) setComposerModelMenuOpen(false);
   el.sendBtn.classList.toggle("hidden", v);
   el.stopBtn.classList.toggle("hidden", !v);
   if (v) {
@@ -1829,7 +1974,62 @@ function renderUsage(usage) {
 }
 
 /* --------------------------- 消息渲染 --------------------------- */
+function createMessageActions({
+  getText = null,
+  timestamp,
+  copyLabel = "复制消息",
+  copiedLabel = "消息已复制",
+  toastMessage = "已复制消息",
+}) {
+  const actions = document.createElement("div");
+  actions.className = "msg-actions";
+
+  if (typeof getText === "function") {
+    const copyBtn = document.createElement("button");
+    copyBtn.type = "button";
+    copyBtn.className = "msg-copy-btn";
+    copyBtn.title = "复制";
+    copyBtn.setAttribute("aria-label", copyLabel);
+    copyBtn.innerHTML = lucideIcon("copy");
+    copyBtn.addEventListener("click", async () => {
+      const text = String(getText() || "");
+      if (!text) return;
+      copyBtn.disabled = true;
+      try {
+        await copyTextToClipboard(text);
+        copyBtn.classList.add("copied");
+        copyBtn.title = "已复制";
+        copyBtn.setAttribute("aria-label", copiedLabel);
+        copyBtn.innerHTML = lucideIcon("check");
+        refreshLucideIcons();
+        showConsoleToast(toastMessage);
+        window.setTimeout(() => {
+          if (!copyBtn.isConnected) return;
+          copyBtn.classList.remove("copied");
+          copyBtn.title = "复制";
+          copyBtn.setAttribute("aria-label", copyLabel);
+          copyBtn.innerHTML = lucideIcon("copy");
+          copyBtn.disabled = false;
+          refreshLucideIcons();
+        }, 1500);
+      } catch {
+        copyBtn.disabled = false;
+        showConsoleToast("复制失败，请重试", true);
+      }
+    });
+    actions.appendChild(copyBtn);
+  }
+
+  const timeEl = document.createElement("time");
+  timeEl.className = "msg-time";
+  timeEl.dateTime = timestamp;
+  timeEl.textContent = formatMessageTime(timestamp);
+  actions.appendChild(timeEl);
+  return actions;
+}
+
 function addMessage(role, text, timestamp, branchPoint, attachments, contextRefs) {
+  const messageTimestamp = timestamp || new Date().toISOString();
   const row = document.createElement("div");
   row.className = `msg-row ${role}`;
   if (branchPoint != null) row.dataset.branchPoint = String(branchPoint);
@@ -1837,7 +2037,6 @@ function addMessage(role, text, timestamp, branchPoint, attachments, contextRefs
     <div class="avatar ${role}">${role === "user" ? "你" : lucideIcon("bot")}</div>
     <div class="bubble-wrap"><div class="bubble"></div></div>`;
   const wrap = row.querySelector(".bubble-wrap");
-  if (timestamp) prependMsgTime(wrap, timestamp);
   const bubble = wrap.querySelector(".bubble");
   if (text) {
     const textEl = document.createElement("div");
@@ -1851,41 +2050,14 @@ function addMessage(role, text, timestamp, branchPoint, attachments, contextRefs
   if (contextRefs?.length) {
     renderMessageContextRefs(bubble, contextRefs, branchPoint);
   }
-  if (role === "user" && text) {
-    const actions = document.createElement("div");
-    actions.className = "msg-actions";
-    const copyBtn = document.createElement("button");
-    copyBtn.type = "button";
-    copyBtn.className = "msg-copy-btn";
-    copyBtn.title = "复制";
-    copyBtn.setAttribute("aria-label", "复制用户消息");
-    copyBtn.innerHTML = lucideIcon("copy");
-    copyBtn.addEventListener("click", async () => {
-      copyBtn.disabled = true;
-      try {
-        await copyTextToClipboard(text);
-        copyBtn.classList.add("copied");
-        copyBtn.title = "已复制";
-        copyBtn.setAttribute("aria-label", "用户消息已复制");
-        copyBtn.innerHTML = lucideIcon("check");
-        refreshLucideIcons();
-        showConsoleToast("已复制用户消息");
-        window.setTimeout(() => {
-          if (!copyBtn.isConnected) return;
-          copyBtn.classList.remove("copied");
-          copyBtn.title = "复制";
-          copyBtn.setAttribute("aria-label", "复制用户消息");
-          copyBtn.innerHTML = lucideIcon("copy");
-          copyBtn.disabled = false;
-          refreshLucideIcons();
-        }, 1500);
-      } catch {
-        copyBtn.disabled = false;
-        showConsoleToast("复制失败，请重试", true);
-      }
-    });
-    actions.appendChild(copyBtn);
-    wrap.appendChild(actions);
+  if (role === "user") {
+    wrap.appendChild(createMessageActions({
+      getText: text ? () => text : null,
+      timestamp: messageTimestamp,
+      copyLabel: "复制用户消息",
+      copiedLabel: "用户消息已复制",
+      toastMessage: "已复制用户消息",
+    }));
   }
   el.messages.appendChild(row);
   refreshLucideIcons();
@@ -1956,12 +2128,44 @@ async function onFilesSelected(e) {
 }
 
 async function onPaste(e) {
-  const items = Array.from(e.clipboardData?.items || []);
-  for (const item of items) {
-    if (!item.type.startsWith("image/")) continue;
-    e.preventDefault();
-    const file = item.getAsFile();
-    if (file) await uploadAttachment(file);
+  const files = Array.from(e.clipboardData?.files || []);
+  if (!files.length) return;
+  e.preventDefault();
+  for (const file of files) {
+    await uploadAttachment(file);
+  }
+}
+
+function setComposerDragging(active) {
+  el.composerDropZone?.classList.toggle("dragging", active);
+  el.composerDropOverlay?.setAttribute("aria-hidden", String(!active));
+}
+
+function onComposerDragEnter(event) {
+  if (!event.dataTransfer?.types?.includes("Files")) return;
+  event.preventDefault();
+  state.composerDragDepth += 1;
+  setComposerDragging(true);
+}
+
+function onComposerDragOver(event) {
+  if (!event.dataTransfer?.types?.includes("Files")) return;
+  event.preventDefault();
+  event.dataTransfer.dropEffect = "copy";
+}
+
+function onComposerDragLeave(event) {
+  event.preventDefault();
+  state.composerDragDepth = Math.max(0, state.composerDragDepth - 1);
+  if (state.composerDragDepth === 0) setComposerDragging(false);
+}
+
+async function onComposerDrop(event) {
+  event.preventDefault();
+  state.composerDragDepth = 0;
+  setComposerDragging(false);
+  for (const file of Array.from(event.dataTransfer?.files || [])) {
+    await uploadAttachment(file);
   }
 }
 
@@ -1989,6 +2193,9 @@ async function uploadAttachment(file) {
       id: data.id,
       name: data.name,
       mime: data.mime,
+      previewUrl: String(data.mime || "").toLowerCase().startsWith("image/")
+        ? URL.createObjectURL(file)
+        : null,
     });
     renderPendingAttachments();
   } catch (err) {
@@ -2007,9 +2214,19 @@ function renderPendingAttachments() {
   el.attachmentPreview.innerHTML = "";
   for (const att of state.pendingAttachments) {
     const chip = document.createElement("div");
-    chip.className = "pending-attachment";
-    chip.innerHTML = `<span>${escapeHtml(att.name || att.id)}</span><button type="button" title="移除" aria-label="移除附件">${lucideIcon("x")}</button>`;
-    chip.querySelector("button").addEventListener("click", () => {
+    chip.className = `pending-attachment${att.previewUrl ? " pending-image-attachment" : ""}`;
+    const label = escapeHtml(att.name || att.id);
+    chip.innerHTML = att.previewUrl
+      ? `<button type="button" class="pending-attachment-open" aria-label="预览图片 ${label}"><span>${label}</span><span class="pending-attachment-thumbnail"><img src="${escapeHtml(att.previewUrl)}" alt="" /></span></button><button type="button" class="pending-attachment-remove" aria-label="移除附件">${lucideIcon("x")}</button>`
+      : `<span class="pending-attachment-name">${label}</span><button type="button" class="pending-attachment-remove" aria-label="移除附件">${lucideIcon("x")}</button>`;
+    chip.querySelector(".pending-attachment-open")?.addEventListener("click", () => {
+      openAttachmentImagePreview(att);
+    });
+    chip.querySelector(".pending-attachment-remove").addEventListener("click", () => {
+      if (att.previewUrl) URL.revokeObjectURL(att.previewUrl);
+      if (el.attachmentImageDialog?.open && el.attachmentImageDialogImage?.src === att.previewUrl) {
+        closeAttachmentImagePreview();
+      }
       state.pendingAttachments = state.pendingAttachments.filter((a) => a.id !== att.id);
       renderPendingAttachments();
     });
@@ -2019,8 +2236,25 @@ function renderPendingAttachments() {
 }
 
 function clearPendingAttachments() {
+  closeAttachmentImagePreview();
+  for (const attachment of state.pendingAttachments) {
+    if (attachment.previewUrl) URL.revokeObjectURL(attachment.previewUrl);
+  }
   state.pendingAttachments = [];
   renderPendingAttachments();
+}
+
+function openAttachmentImagePreview(attachment) {
+  if (!attachment?.previewUrl || !el.attachmentImageDialog) return;
+  el.attachmentImageDialogImage.src = attachment.previewUrl;
+  el.attachmentImageDialogName.textContent = attachment.name || "图片附件";
+  if (!el.attachmentImageDialog.open) el.attachmentImageDialog.showModal();
+  refreshLucideIcons();
+}
+
+function closeAttachmentImagePreview() {
+  if (el.attachmentImageDialog?.open) el.attachmentImageDialog.close();
+  if (el.attachmentImageDialogImage) el.attachmentImageDialogImage.removeAttribute("src");
 }
 
 function addDateSeparator(iso) {
@@ -2028,13 +2262,6 @@ function addDateSeparator(iso) {
   sep.className = "date-separator";
   sep.textContent = formatDateSeparator(iso);
   el.messages.appendChild(sep);
-}
-
-function prependMsgTime(wrap, iso) {
-  const timeEl = document.createElement("div");
-  timeEl.className = "msg-time";
-  timeEl.textContent = formatMessageTime(iso);
-  wrap.insertBefore(timeEl, wrap.firstChild);
 }
 
 function addSystemNote(text) {
@@ -2047,22 +2274,40 @@ function addSystemNote(text) {
   scrollToBottom();
 }
 
-function createAssistantMessage(timestamp, branchPoint, beforeNode = null) {
+function processElapsedSecondsBetween(startedAt, completedAt) {
+  const startedMs = serverTimestampMilliseconds(startedAt);
+  const completedMs = serverTimestampMilliseconds(completedAt);
+  if (!startedMs || !completedMs || completedMs < startedMs) return null;
+  return Math.max(0, Math.round((completedMs - startedMs) / 1000));
+}
+
+function createAssistantMessage(timestamp, branchPoint, beforeNode = null, processTiming = {}) {
+  let isLive = !timestamp;
+  const messageTimestamp = timestamp || new Date().toISOString();
+  const suppliedStartMs = serverTimestampMilliseconds(processTiming.startedAt);
+  let processStartedAt = suppliedStartMs || Date.now();
+  let processFinished = !isLive;
+  let processElapsedSeconds = processElapsedSecondsBetween(
+    processTiming.startedAt,
+    processTiming.completedAt,
+  ) ?? 0;
+  let processTimer = null;
   const row = document.createElement("div");
   row.className = "msg-row assistant assistant-answer";
   if (branchPoint != null) row.dataset.branchPoint = String(branchPoint);
   row.innerHTML = `<div class="bubble-wrap assistant-message"></div>`;
   const wrap = row.querySelector(".bubble-wrap");
-  if (timestamp) prependMsgTime(wrap, timestamp);
 
   const processBlock = document.createElement("div");
   processBlock.className = "assistant-process hidden";
   processBlock.innerHTML = `
-    <button type="button" class="assistant-process-summary" aria-expanded="false">
-      <span class="chevron">${lucideIcon("chevron-right")}</span>
-      <span class="assistant-process-icon">${lucideIcon("activity")}</span>
-      <span class="assistant-process-title">处理过程</span>
-    </button>
+    <div class="assistant-process-header">
+      <button type="button" class="assistant-process-summary" aria-expanded="false">
+        <span class="chevron">${lucideIcon("chevron-right")}</span>
+        <span class="assistant-process-icon">${lucideIcon("activity")}</span>
+        <span class="assistant-process-title">处理过程</span>
+      </button>
+    </div>
     <div class="assistant-process-body"></div>`;
   wrap.appendChild(processBlock);
   const processSummary = processBlock.querySelector(".assistant-process-summary");
@@ -2076,17 +2321,53 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null) {
 
   let textBuffer = "";
   let finalContent = null;
+  let finalActions = null;
   let thinkingBlock = null;
   let thinkingBuffer = "";
   let interruptedStatus = null;
   const toolBlocks = new Map(); // tool_call_id -> element
 
+  function updateProcessTimer() {
+    processElapsedSeconds = Math.max(0, Math.floor((Date.now() - processStartedAt) / 1000));
+    updateProcessDisclosure();
+  }
+
+  function startProcess() {
+    isLive = true;
+    processFinished = false;
+    if (processTimer) window.clearInterval(processTimer);
+    updateProcessTimer();
+    processTimer = window.setInterval(updateProcessTimer, 1000);
+  }
+
+  function finishProcess() {
+    if (!processFinished) {
+      processElapsedSeconds = Math.max(0, Math.round((Date.now() - processStartedAt) / 1000));
+    }
+    processFinished = true;
+    if (processTimer) {
+      window.clearInterval(processTimer);
+      processTimer = null;
+    }
+    processBlock.classList.remove("open", "running");
+    processSummary.setAttribute("aria-expanded", "false");
+    updateProcessDisclosure();
+  }
+
   function updateProcessDisclosure() {
     const hasProcess = processBody.children.length > 0;
     const pending = Boolean(processBody.querySelector(".tool-block.hitl-pending"));
-    const running = Boolean(thinkingBlock) || [...toolBlocks.values()].some((block) => !block.dataset.done);
     processBlock.classList.toggle("hidden", !hasProcess);
-    processTitle.textContent = processDisclosureLabel({ pending, running });
+    processBlock.classList.toggle("running", isLive && !processFinished && hasProcess);
+    if (isLive && !processFinished && hasProcess) {
+      processBlock.classList.add("open");
+      processSummary.setAttribute("aria-expanded", "true");
+    }
+    processTitle.textContent = processDisclosureLabel({
+      pending,
+      running: isLive && !processFinished,
+      elapsedSeconds: processElapsedSeconds,
+    });
     processSummary.title = pending
       ? "展开并完成等待中的操作"
       : processBlock.classList.contains("open") ? "收起处理过程" : "展开处理过程";
@@ -2103,12 +2384,24 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null) {
     }
     updateProcessDisclosure();
   });
+  if (isLive) startProcess();
 
   function ensureFinalContent() {
     if (!finalContent) {
       finalContent = document.createElement("div");
       finalContent.className = "assistant-final markdown streaming";
       wrap.appendChild(finalContent);
+    }
+    if (!finalActions) {
+      finalActions = createMessageActions({
+        getText: () => textBuffer,
+        timestamp: messageTimestamp,
+        copyLabel: "复制 Agent 回复",
+        copiedLabel: "Agent 回复已复制",
+        toastMessage: "已复制 Agent 回复",
+      });
+      wrap.appendChild(finalActions);
+      refreshLucideIcons();
     }
     return finalContent;
   }
@@ -2127,7 +2420,9 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null) {
     if (!textBuffer) return;
     addProcessText(textBuffer);
     finalContent?.remove();
+    finalActions?.remove();
     finalContent = null;
+    finalActions = null;
     textBuffer = "";
   }
 
@@ -2137,10 +2432,12 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null) {
       thinkingBlock.className = "assistant-thinking";
       thinkingBlock.innerHTML = `
         <button type="button" class="assistant-thinking-head" aria-expanded="false">
-          <span class="thinking-chevron">${lucideIcon("chevron-right")}</span>
-          <span class="thinking-icon">${lucideIcon("brain")}</span>
-          <span class="thinking-title">思考中…</span>
-          <span class="thinking-status"><span class="spinner"></span></span>
+          <span class="thinking-heading">
+            <span class="thinking-icon">${lucideIcon("brain")}</span>
+            <span class="thinking-title">思考中…</span>
+            <span class="thinking-status"><span class="spinner"></span></span>
+          </span>
+          <span class="thinking-chevron">${lucideIcon("chevron-down")}</span>
         </button>
         <div class="assistant-thinking-body">
           <pre class="thinking-content"></pre>
@@ -2184,6 +2481,9 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null) {
 
   const presenter = {
     row,
+    resumeProcess() {
+      startProcess();
+    },
     appendThinking(delta) {
       promoteFinalToProcess();
       thinkingBuffer += delta;
@@ -2218,12 +2518,13 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null) {
     },
     finalizeText() {
       sealFinalContent();
+      if (isLive) finishProcess();
     },
     complete(output) {
       finalizeThinkingBlock();
       if (output != null) this.setFinalText(output);
       sealFinalContent();
-      updateProcessDisclosure();
+      finishProcess();
     },
     markInterrupted() {
       if (interruptedStatus) return;
@@ -2244,7 +2545,7 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null) {
       interruptedStatus.innerHTML = `${lucideIcon("circle-stop")}<span>已停止</span>`;
       wrap.appendChild(interruptedStatus);
       row.classList.add("interrupted");
-      updateProcessDisclosure();
+      finishProcess();
       refreshLucideIcons();
     },
     addToolCall(data) {
@@ -2273,18 +2574,15 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null) {
       const isToolSearch =
         merged.source === "tool_search" || ["search_tools", "tool_search"].includes(merged.tool);
       const isSkillLoad = merged.tool === "load_capability";
-      const defaultTitle = isToolSearch
-        ? "查找可用工具"
-        : isSkillLoad ? "正在加载 Skill" : (merged.tool || "tool");
+      const defaultTitle = merged.display_name || merged.tool || "tool";
       block.className = `tool-block${isToolSearch ? " tool-search-block" : ""}${isSkillLoad ? " skill-load-block" : ""}`;
       block.dataset.toolCallId = key;
       block.dataset.defaultTitle = defaultTitle;
       if (merged.widget) block.dataset.widget = merged.widget;
       if (merged.metadata) block.dataset.metadata = JSON.stringify(merged.metadata);
-      const argsHtml = hasArgs
-        ? (window.DeepAgentJson?.renderBlock(merged.args, { className: "args", ariaLabel: "工具参数 JSON" })
-          || `<pre class="args">${escapeHtml(pretty(merged.args))}</pre>`)
-        : `<pre class="args args-pending">参数接收中…</pre>`;
+      const renderedArgs = hasArgs ? merged.args : {};
+      const argsHtml = window.DeepAgentJson?.renderBlock(renderedArgs, { className: "args", ariaLabel: "工具参数 JSON" })
+        || `<pre class="args">${escapeHtml(pretty(renderedArgs))}</pre>`;
       block.innerHTML = `
         <div class="tool-head">
           <span class="chevron">${lucideIcon("chevron-right")}</span>
@@ -2325,7 +2623,7 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null) {
       body.querySelector("[data-tool-result]")?.remove();
       const res = document.createElement("div");
       res.dataset.toolResult = "1";
-      res.innerHTML = `${renderToolResultArtifacts(data.artifacts)}<div class="label" style="margin-top:8px">结果 result</div>${renderToolResult(data.result)}${renderLocalFileDownload(data.result)}`;
+      res.innerHTML = `${renderToolResultArtifacts(data.artifacts)}<div class="label" style="margin-top:8px">结果 result</div>${renderToolResult(data.result)}${renderLocalFileDownload(data.result, data.artifacts)}`;
       body.appendChild(res);
       refreshLucideIcons();
       updateProcessDisclosure();
@@ -2642,8 +2940,14 @@ function lastUserText() {
   return rows.length ? rows[rows.length - 1].textContent : "";
 }
 
-function scrollToBottom() {
-  el.messages.scrollTop = el.messages.scrollHeight;
+function scrollToBottom({ force = false } = {}) {
+  if (!el.messages || (!force && !state.messageAutoFollow)) return;
+  if (force) state.messageAutoFollow = true;
+  if (state.messageScrollFrame) cancelAnimationFrame(state.messageScrollFrame);
+  state.messageScrollFrame = requestAnimationFrame(() => {
+    state.messageScrollFrame = null;
+    el.messages.scrollTop = el.messages.scrollHeight;
+  });
 }
 
 function hasNonEmptyArgs(args) {
@@ -2688,7 +2992,8 @@ function findLocalFileResult(value) {
   return null;
 }
 
-function renderLocalFileDownload(result) {
+function renderLocalFileDownload(result, artifacts = []) {
+  if (artifacts.some((item) => item?.kind === "sandbox_output")) return "";
   const file = findLocalFileResult(result);
   if (!file) return "";
   const href = window.serviceUrl(
@@ -2699,12 +3004,30 @@ function renderLocalFileDownload(result) {
 
 function renderToolResultArtifacts(artifacts) {
   if (!Array.isArray(artifacts) || artifacts.length === 0) return "";
-  const totalBytes = artifacts.reduce(
+  const overflow = artifacts.filter((item) => item?.kind !== "sandbox_output");
+  const generated = artifacts.filter((item) => item?.kind === "sandbox_output");
+  const totalBytes = overflow.reduce(
     (total, item) => total + (Number.isFinite(Number(item?.byte_size)) ? Number(item.byte_size) : 0),
     0,
   );
   const size = totalBytes > 0 ? ` · ${formatArtifactBytes(totalBytes)}` : "";
-  return `<div class="tool-result-artifact">${lucideIcon("archive")}<span>完整结果已外置${escapeHtml(size)}，当前展示预览；Agent 可按需读取。</span></div>`;
+  const overflowHtml = overflow.length
+    ? `<div class="tool-result-artifact">${lucideIcon("archive")}<span>完整结果已外置${escapeHtml(size)}，当前展示预览；Agent 可按需读取。</span></div>`
+    : "";
+  const generatedHtml = generated.length
+    ? `<div class="generated-file-list"><div class="generated-file-heading">${lucideIcon("files")}<span>生成文件</span></div>${generated.map(renderGeneratedFileArtifact).join("")}</div>`
+    : "";
+  return `${overflowHtml}${generatedHtml}`;
+}
+
+function renderGeneratedFileArtifact(artifact) {
+  const fileId = String(artifact?.file_id || artifact?.artifact_id || "");
+  const fileName = String(artifact?.file_name || fileId || "未命名文件");
+  const details = [artifact?.mime, formatArtifactBytes(artifact?.byte_size)].filter(Boolean).join(" · ");
+  const download = fileId.startsWith("local_")
+    ? `<a href="${escapeHtml(window.serviceUrl(`api/v1/local-files/${encodeURIComponent(fileId)}/download`))}" download title="下载文件">${lucideIcon("download")}</a>`
+    : "";
+  return `<div class="generated-file-item"><span class="generated-file-icon">${lucideIcon("file-output")}</span><span class="generated-file-copy"><strong>${escapeHtml(fileName)}</strong>${details ? `<small>${escapeHtml(details)}</small>` : ""}<code title="${escapeHtml(fileId)}">${escapeHtml(fileId)}</code></span><span class="generated-file-actions">${download}<button type="button" data-copy-file-id="${escapeHtml(fileId)}" title="复制 File ID">${lucideIcon("copy")}</button></span></div>`;
 }
 
 function formatArtifactBytes(value) {

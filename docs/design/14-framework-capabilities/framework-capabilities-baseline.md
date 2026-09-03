@@ -1,4 +1,4 @@
-# Pydantic AI与Harness采用基线（v0.6.6）
+# Pydantic AI与Harness采用基线（v0.6.7）
 
 当前固定版本：`pydantic-ai-slim[openai,anthropic,google,mcp,duckduckgo,tavily,web-fetch]==2.35.1`、
 `pydantic-ai-harness[skills,exa,youdotcom]==0.26.0`。联动依赖固定为`openai==3.5.0`、
@@ -18,8 +18,9 @@ Harness仍是0.x能力库，升级必须固定准确版本并跑完整回归。
 | Core WebSearch/WebFetch、`ImageUrl`与Harness Exa/You.com | v0.6.5以显式`builtin:web`采用搜索/抓取；v0.6.6增加HTML图片引用与按视觉模型注入的`web_image_view`，Provider路由、Agent授权和审计仍由DeepAgent负责 |
 | PromptInjectionDefender、Playwright和FallbackCompaction | 只记录为后续候选；当前不安装、不配置、不向模型披露 |
 
-v0.6.5新增Web管理接口和`global_settings`；v0.6.6复用原生`ImageUrl`并保持现有Chat、SSE、
-History、Event、Plan、Deferred、附件、ToolOutputLimits和MCP契约。
+v0.6.7将产品编码规范化为`builtin:ptc`，但继续复用Harness CodeMode/Monty与`run_code`协议；
+Pydantic AI `ToolReturn.return_value`只向模型提供生成文件引用，`metadata.generated_files`用于
+DeepAgent恢复应用侧授权而不进入模型上下文。Chat、SSE、Event和大工具结果契约保持兼容。
 
 ## 职责边界
 
@@ -53,8 +54,9 @@ History、Event、Plan、Deferred、附件、ToolOutputLimits和MCP契约。
 - `Skills`：只负责`SKILL.md`渐进披露；安装、授权、文件和脚本隔离归DeepAgent。
 - `ToolOutputLimits + Spill`：完整大结果保存平台File，History保存预览和Artifact句柄；读取使用
   `read_tool_result`。
-- `CodeMode + CodeModeToolset + Monty`：仅在Agent显式关联`builtin:code-mode`时注入；
-  已披露MCP同时保留原生Schema和代码函数，文件载荷通过Run内不透明变量中转。
+- `CodeMode + CodeModeToolset + Monty`：仅在Agent显式关联`builtin:ptc`时注入；旧
+  `builtin:code-mode`只作兼容。已披露MCP同时保留原生Schema和代码函数，文件载荷通过Run内不透明
+  变量中转；Web工具和Python沙箱不进入PTC目录。
 - Clamp/Deduplicate等确定性思路按需吸收；不再使用批量清空旧Tool Result。
 - Exa/You.com搜索适配：只作为固定Web Search Provider，不引入另一套Fetch或Research协议。
 
@@ -75,7 +77,7 @@ History、Event、Plan、Deferred、附件、ToolOutputLimits和MCP契约。
 - 不保存Provider原始HTTP Request/Response、Header、Cookie、API Key或动态工具Schema留底表。
 - 不建立透明Tool Result缓存；重复读是否必要由模型结合Evidence和历史工具决定。
 - 不用Harness Memory替代聊天历史；长期记忆必须另行定义可查看、编辑、删除和授权。
-- CodeMode不是默认能力，也不自动获得MCP权限；不启用Shell、主服务文件系统或模型自建Capability。
+- PTC不是默认能力，也不自动获得MCP权限；不启用Shell、主服务文件系统或模型自建Capability。
 - 不做静默全局模型回退；候选模型、地域、成本和数据边界必须由Agent显式配置。
 
 ## 触发后再评估

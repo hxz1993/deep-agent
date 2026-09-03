@@ -222,7 +222,7 @@ class UiToolStoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.source, "builtin")
         self.assertEqual(response.widget, "confirm")
         self.assertEqual(response.result_schema["required"], ["confirmed"])
-        self.assertIsNone(response.metadata)
+        self.assertEqual(response.metadata, {"display_name": "确认操作"})
         self.assertIsNone(response.created_at)
         self.assertIsNone(response.updated_at)
 
@@ -593,6 +593,7 @@ class ToolHintsTests(unittest.TestCase):
         event = {"type": "tool_call", "tool": "builtin__confirm", "args": {"message": "ok"}, "tool_call_id": "c1"}
         enriched = enrich_tool_event(event, {})
         self.assertEqual(enriched["widget"], "confirm")
+        self.assertEqual(enriched["metadata"], {"display_name": "确认操作"})
 
     def test_legacy_builtin_name_is_not_enriched(self) -> None:
         event = {

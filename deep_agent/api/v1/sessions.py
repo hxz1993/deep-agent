@@ -20,7 +20,9 @@ from deep_agent.agent.context.budget import build_context_budget
 from deep_agent.agent.context.estimator import TokenEstimator
 from deep_agent.agent.context.manual import manual_compaction_availability
 from deep_agent.conversation.models import ConversationHistoryResponse
+from deep_agent.conversation.display_names import decorate_history_display_names
 from deep_agent.conversation.projector import ConversationProjectionError, project_session_events
+from deep_agent.capabilities.display_names import resolve_tool_display_name_map
 from deep_agent.schemas.chat import SessionInfo, SessionListResponse
 from deep_agent.time import UtcDatetime
 
@@ -250,15 +252,29 @@ async def get_session_history(
     )
     if resolved is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
-    _scope, resolved_session_id = resolved
+    scope, resolved_session_id = resolved
     events = await ctx.store.list_all_events(resolved_session_id)
     try:
-        return project_session_events(events, session_id=resolved_session_id)
+        projected = project_session_events(events, session_id=resolved_session_id)
     except ConversationProjectionError as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=str(exc),
         ) from exc
+    from deep_agent.db.session_scope import agent_scope_to_api
+
+    api_agent_id = agent_scope_to_api(scope)
+    row = (
+        await ctx.stores.agent.get_by_id(api_agent_id)
+        if api_agent_id is not None
+        else None
+    )
+    display_names = await resolve_tool_display_name_map(
+        ctx.registry,
+        ctx.stores,
+        capabilities=(list(row.capabilities or []) if row is not None else None),
+    )
+    return decorate_history_display_names(projected, display_names)
 
 
 @router.get("/sessions/{session_id}/events", response_model=SessionEventsResponse)

@@ -85,3 +85,7 @@ class ActiveRunRegistry:
     def get(self, *, agent_id: str | None, session_id: str) -> ActiveRun | None:
         with self._lock:
             return self._runs.get((agent_id, session_id))
+
+    def active_count(self) -> int:
+        with self._lock:
+            return len(self._runs)

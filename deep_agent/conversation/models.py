@@ -33,10 +33,14 @@ class ConversationAttachment(BaseModel):
 
 class ConversationArtifact(BaseModel):
     artifact_id: str
+    file_id: str | None = None
     kind: str = "tool_result_overflow"
     role: str | None = None
+    file_name: str | None = None
+    mime: str | None = None
     byte_size: int | None = None
     content_hash: str | None = None
+    sha256: str | None = None
 
 
 class ConversationItemBase(BaseModel):
@@ -77,6 +81,7 @@ class ToolConversationItem(ConversationItemBase):
     kind: Literal["tool"] = "tool"
     call_id: str
     tool_name: str | None = None
+    display_name: str | None = None
     mode: Literal["tool", "deferred", "tool_search", "native"] = "tool"
     input: Any = None
     output: Any = None
@@ -90,6 +95,7 @@ class PlanConversationItem(ConversationItemBase):
     kind: Literal["plan"] = "plan"
     call_id: str
     tool_name: Literal["write_plan"] = "write_plan"
+    display_name: str | None = None
     input: Any = None
     output: Any = None
     plan: dict[str, Any] | None = None

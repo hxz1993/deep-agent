@@ -48,8 +48,33 @@ Hash、Manifest 和资源索引，不包含平台文件服务中的原始 ZIP，
 会话标题不再有独立模型配置；首轮标题请求直接复用该轮实际生效的Provider和模型，因此配置备份
 无需保存标题专用表或环境变量。
 
-备份工具只负责数据库配置备份，不提供恢复命令。Skill原包的跨环境迁移由独立的单个/全部导出
-负责，两者职责不合并，避免把平台二进制文件塞入配置数据库。
+备份工具只负责生成数据库配置备份，不直接修改目标库。无会话新环境可通过企业管理员接口
+`POST /api/v1/configuration/import`执行受控初始化；接口只接受与目标库Alembic Revision完全一致的
+备份，不升级、降级或修改目标版本号。数据库文件通过multipart临时上传并在请求结束后删除，不进入
+平台File Store。若备份包含上传Skill，还必须同时提供Skill“导出全部”ZIP；接口会把原包上传到目标
+环境File Store，只替换新的`platform_file_id`，Skill code、Agent绑定及全部数据库主键保持不变。
+
+先预检：
+
+```bash
+curl -X POST '<DeepAgent>/api/v1/configuration/import' \
+  -F 'database_file=@deep-agent-config-test-v001-20260901-080000.db' \
+  -F 'apply=false'
+```
+
+确认Revision、表行数和Agent ID摘要后正式执行：
+
+```bash
+curl -X POST '<DeepAgent>/api/v1/configuration/import' \
+  -F 'database_file=@deep-agent-config-test-v001-20260901-080000.db' \
+  -F 'skills_bundle=@deepagent-skills-export-20260901T080000Z.zip' \
+  -F 'apply=true' \
+  -F 'confirm=true'
+```
+
+接口要求备份和目标两侧会话表均为空、目标当前没有活动Run，并动态核对当前ORM表、列、主键、
+外键、备份范围清单和引用关系。正式执行在单个数据库事务中整体替换配置；任一步失败即回滚，已上传
+的Skill文件尽力补偿删除。详细契约见[`../docs/guides/configuration-import.md`](../docs/guides/configuration-import.md)。
 
 ## v0.6.6 生产基线重整（012 → 001）
 

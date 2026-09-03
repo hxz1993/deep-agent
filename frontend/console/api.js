@@ -119,13 +119,18 @@
   }
 
   async function daFetch(url, options = {}) {
-    const { headers: extra = {}, includeContext = true, ...rest } = options;
+    const {
+      headers: extra = {},
+      includeContext = true,
+      reportStatus = true,
+      ...rest
+    } = options;
     const response = await fetch(url, {
       ...rest,
       credentials: "same-origin",
       headers: buildHeaders(extra, { includeContext }),
     });
-    if ([401, 403, 503].includes(response.status)) {
+    if (reportStatus && [401, 403, 503].includes(response.status)) {
       window.dispatchEvent(
         new CustomEvent("deep-agent-console-api-status", {
           detail: { status: response.status, url: String(url) },
@@ -166,6 +171,35 @@
       if (controller.signal.aborted) {
         const timeoutError = new Error(`连接后端超时（${timeoutMs}ms）：${baseUrl}`);
         timeoutError.code = "request_timeout";
+        throw timeoutError;
+      }
+      throw error;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  async function currentUser({ timeoutMs = 5000 } = {}) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const response = await daFetch(serviceUrl("api/v1/current-user"), {
+        includeContext: false,
+        reportStatus: false,
+        signal: controller.signal,
+      });
+      const body = await parseJson(response);
+      if (!response.ok) {
+        const detail = body?.detail || body?.message || `HTTP ${response.status}`;
+        const error = new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
+        error.status = response.status;
+        throw error;
+      }
+      return body;
+    } catch (error) {
+      if (controller.signal.aborted) {
+        const timeoutError = new Error("读取当前用户名超时");
+        timeoutError.code = "current_user_timeout";
         throw timeoutError;
       }
       throw error;
@@ -218,6 +252,7 @@
     adminAccess,
     buildHeaders,
     clearContext,
+    currentUser,
     defaultApiBaseUrl,
     consoleUrl,
     deriveSpaceFromApp,

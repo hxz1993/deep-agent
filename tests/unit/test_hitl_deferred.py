@@ -132,6 +132,7 @@ class AgentRunnerDeferredTests(unittest.IsolatedAsyncioTestCase):
             self.store,
             UsageLimits(request_limit=10),
             ui_tool_hints=build_tool_hints(builtin_ui_records()),
+            tool_display_names={"builtin__confirm": "确认操作"},
         )
 
         events_out: list[dict] = []
@@ -165,7 +166,12 @@ class AgentRunnerDeferredTests(unittest.IsolatedAsyncioTestCase):
         tool_calls = [e for e in events_out if e.get("type") == "tool_call"]
         self.assertEqual(len(tool_calls), 1)
         self.assertEqual(tool_calls[0]["tool"], "builtin__confirm")
+        self.assertEqual(tool_calls[0]["display_name"], "确认操作")
         self.assertEqual(events_out[-1]["deferred"]["calls"][0]["tool"], "builtin__confirm")
+        self.assertEqual(
+            events_out[-1]["deferred"]["calls"][0]["display_name"],
+            "确认操作",
+        )
 
     async def test_run_stream_tool_call_includes_metadata_from_hints(self) -> None:
         manual_tool = UIToolRecord(
@@ -237,7 +243,12 @@ class AgentRunnerDeferredTests(unittest.IsolatedAsyncioTestCase):
             deps_type=AgentDeps,
             toolsets=[FunctionToolset(tools=[workbook_get])],
         )
-        runner = AgentRunner(agent, self.store, UsageLimits(request_limit=5))
+        runner = AgentRunner(
+            agent,
+            self.store,
+            UsageLimits(request_limit=5),
+            tool_display_names={"workbook_get": "读取工作簿"},
+        )
 
         events_out = [
             event
@@ -262,6 +273,13 @@ class AgentRunnerDeferredTests(unittest.IsolatedAsyncioTestCase):
                 ("tool_call", "workbook-2"),
                 ("tool_result", "workbook-2"),
             ],
+        )
+        self.assertTrue(
+            all(
+                event["display_name"] == "读取工作簿"
+                for event in events_out
+                if event.get("type") in {"tool_call", "tool_call_removed", "tool_result"}
+            )
         )
         await self.persister.flush("sess-business-retry", agent_id=self.db_agent.id)
         history = await self.store.get_history(

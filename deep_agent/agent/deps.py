@@ -52,6 +52,10 @@ class AgentDeps:
     cancellation_token: CancellationToken | None = field(default=None, repr=False)
     has_context_references: bool = False
     attachment_by_id: dict[str, AttachmentRef] = field(default_factory=dict)
+    # All FileStore-backed artifacts authorized by the raw current-session history.
+    # Overflow artifacts are also kept in ``tool_output_artifacts`` because only
+    # those handles may be consumed by Harness ``read_tool_result``.
+    session_file_artifacts: dict[str, dict[str, Any]] = field(default_factory=dict)
     tool_output_artifacts: dict[str, dict[str, Any]] = field(default_factory=dict)
     file_bytes: dict[str, bytes] = field(default_factory=dict)
     file_parsed: dict[str, Any] = field(default_factory=dict)

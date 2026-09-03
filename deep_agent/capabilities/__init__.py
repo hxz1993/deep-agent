@@ -4,7 +4,6 @@ from typing import TYPE_CHECKING
 
 from deep_agent.capabilities.native import build_native_tool_package
 from deep_agent.capabilities.registry import ToolInfo, ToolPackage, ToolPackageRegistry
-from deep_agent.code_mode.file_payload import build_code_mode_tool_package
 from deep_agent.options import OPTION
 from loguru import logger
 
@@ -36,6 +35,7 @@ def build_registry(
     ``capabilities.mcp.resolver``.
     """
     _ = stores
+    from deep_agent.code_mode.file_payload import build_code_mode_tool_package
     from deep_agent.web.package import build_web_tool_package
 
     registry = ToolPackageRegistry()

@@ -214,9 +214,66 @@ test("真实 Pydantic 工具参数字符串可提取 run_code Python 源码", ()
   });
   const event = projected.find((item) => item.id === "tool:call-code");
   assert.equal(event.label, "run_code");
+  assert.doesNotMatch(trajectorySource, /display_name/);
   assert.equal(runCodeSource(event), code);
   assert.equal(runCodeSource({ payload: { args: { code } } }), code);
   assert.equal(runCodeSource({ payload: { args: "not-json" } }), "");
+});
+
+test("Python 生成文件在轨迹中只保留安全引用", () => {
+  const projected = buildTrajectory({
+    items: [
+      {
+        event_id: "evt-python-call",
+        sequence: 1,
+        event_type: "assistant/message",
+        run_id: "run-python",
+        payload: { message: { kind: "response", parts: [{
+          part_kind: "tool-call",
+          tool_name: "execute_python",
+          tool_call_id: "call-python",
+          args: { code: "pass" },
+        }] } },
+        created_at: "2026-09-01T08:00:00Z",
+        updated_at: "2026-09-01T08:00:00Z",
+      },
+      {
+        event_id: "evt-python-result",
+        sequence: 2,
+        event_type: "tool/results",
+        run_id: "run-python",
+        payload: { message: { kind: "request", parts: [{
+          part_kind: "tool-return",
+          tool_name: "execute_python",
+          tool_call_id: "call-python",
+          content: { result: { ok: true }, files: [{ file_id: "local_generated", file_name: "chart.png" }] },
+          metadata: { generated_files: [{
+            file_id: "local_generated",
+            file_name: "chart.png",
+            mime: "image/png",
+            byte_size: 2048,
+            sha256: "abc",
+            path: "/tmp/hidden.png",
+            base64: "hidden",
+          }] },
+        }] } },
+        created_at: "2026-09-01T08:00:01Z",
+        updated_at: "2026-09-01T08:00:01Z",
+      },
+    ],
+  });
+  const event = projected.find((item) => item.id === "tool:call-python");
+  assert.deepEqual(event.result.artifacts, [{
+    artifact_id: "local_generated",
+    file_id: "local_generated",
+    kind: "sandbox_output",
+    role: "generated_file",
+    file_name: "chart.png",
+    mime: "image/png",
+    byte_size: 2048,
+    sha256: "abc",
+  }]);
+  assert.doesNotMatch(JSON.stringify(event.result.artifacts), /\/tmp\/|base64|hidden/);
 });
 
 test("标题投影通知不进入语义轨迹", () => {
@@ -274,13 +331,24 @@ test("工作台以独立页签接入轨迹且默认对话链路不变", () => {
   assert.match(trajectorySource, /trajectory-summary-link local-file-download/);
   assert.doesNotMatch(trajectorySource, /icon\("list-checks"\)|icon\("archive-restore"\)|icon\("message-square-more"\)/);
   assert.match(trajectorySource, /fileId\.startsWith\("local_"\)/);
-  assert.match(chatSource, /renderLocalFileDownload\(data\.result\)/);
+  assert.match(chatSource, /renderLocalFileDownload\(data\.result, data\.artifacts\)/);
   assert.match(workspaceCss, /\.local-file-download\s*\{/);
+  assert.match(chatSource, /data-copy-file-id/);
+  assert.match(trajectorySource, /renderGeneratedFiles\(artifacts\)/);
+  assert.match(trajectorySource, /metadata\.generated_files/);
+  assert.match(workspaceCss, /\.generated-file-list\s*\{/);
   assert.doesNotMatch(trajectorySource, /\["timing", "Timing"\]/);
   assert.doesNotMatch(trajectorySource, /renderFact\("Role"|trajectory-preview-message|eventRole/);
   assert.doesNotMatch(trajectorySource, /trajectoryTimelineLayout|renderSequence|renderRowSignals|iconForKind/);
   assert.doesNotMatch(trajectorySource, /含思考|请求调用|个调用/);
   assert.match(workspaceCss, /\.trajectory-list\s*\{[\s\S]*overflow-x:\s*hidden/);
+  assert.match(workspaceCss, /\.trajectory-toolbar\s*\{[^}]*border-bottom:\s*0;/);
+  assert.match(workspaceCss, /\.trajectory-group\s*\{[^}]*border-bottom:\s*0;/);
+  assert.match(workspaceCss, /\.trajectory-row\s*\{[^}]*border-bottom:\s*0;/);
+  assert.match(workspaceCss, /\.trajectory-summary-meta\s*\{[^}]*border-bottom:\s*0;/);
+  assert.match(workspaceCss, /\.inspector-pane\.trajectory-inspector \.inspector-content\s*\{[^}]*overflow:\s*hidden;/);
+  assert.match(workspaceCss, /\.trajectory-detail-tabs\s*\{[^}]*overflow-x:\s*auto;/);
+  assert.match(workspaceCss, /\.trajectory-detail-body\s*\{[^}]*width:\s*100%;[^}]*min-width:\s*0;[^}]*overflow:\s*auto;/);
   assert.match(workspaceCss, /\.trajectory-summary-preview\.is-scroll \.trajectory-summary-section-body\s*\{[\s\S]*max-height:\s*180px;[\s\S]*overflow-y:\s*auto/);
   assert.doesNotMatch(workspaceCss, /\.trajectory-summary-preview\.is-scroll \.trajectory-summary-section-body\s*\{[^}]*\n\s*height:\s*180px/);
   assert.match(workspaceCss, /\.trajectory-export\s*\{[\s\S]*height:\s*32px;[\s\S]*min-height:\s*32px/);
@@ -290,10 +358,15 @@ test("工作台以独立页签接入轨迹且默认对话链路不变", () => {
   assert.match(workspaceCss, /\.trajectory-kind\.assistant,[\s\S]*background:\s*#f3edff/);
   assert.match(workspaceCss, /\.trajectory-kind\.tool\s*\{[^}]*background:\s*#fff3e7/);
   assert.match(workspaceCss, /\.trajectory-kind\.code\s*\{[^}]*background:\s*#e8f1ff/);
-  assert.match(trajectorySource, /return isRunCodeEvent\(event\) \? "CODE"/);
+  assert.match(trajectorySource, /return isRunCodeEvent\(event\) \? "PTC"/);
   assert.match(trajectorySource, /isRunCodeEvent\(event\)\) tabs\.push\(\["code", "Code"\]\)/);
   assert.match(trajectorySource, /class="hljs language-python"/);
   assert.match(trajectorySource, /data-copy-run-code/);
+  assert.match(trajectorySource, /activeTab === "code"[\s\S]*?"trajectory-detail-body is-code"/);
+  assert.match(workspaceCss, /\.trajectory-detail-body\.is-code\s*\{[^}]*padding-top:\s*0;[^}]*padding-bottom:\s*0;[^}]*overflow:\s*hidden;/);
+  assert.match(workspaceCss, /\.trajectory-code-view\s*\{[^}]*min-height:\s*100%;[^}]*display:\s*flex;[^}]*border:\s*0;[^}]*background:\s*transparent;/);
+  assert.match(workspaceCss, /\.trajectory-code-view pre\s*\{[^}]*flex:\s*1;[^}]*min-height:\s*0;[^}]*overflow:\s*auto;[^}]*background:\s*transparent;/);
+  assert.match(workspaceCss, /\.trajectory-code-view code\.hljs\s*\{[^}]*min-height:\s*100%;[^}]*padding:\s*0;[^}]*background:\s*transparent;/);
   assert.doesNotMatch(trajectorySource, /\bturns?\b/i);
   assert.match(trajectorySource, /currentUser\.run_id = currentRunId/);
   assert.doesNotMatch(trajectorySource, /Run \$\{groupOrdinal\}|data-trajectory-group/);

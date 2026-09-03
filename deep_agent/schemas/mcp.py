@@ -113,14 +113,16 @@ class McpInspection(BaseModel):
 
     @classmethod
     def from_value(cls, value: Any, *, transport: str | None = None) -> "McpInspection":
-        if transport == "builtin":
-            return cls(status="not_applicable")
         if not isinstance(value, dict):
-            return cls()
+            return cls(status="not_applicable") if transport == "builtin" else cls()
         try:
-            return cls.model_validate(value)
+            parsed = cls.model_validate(value)
+            if transport == "builtin":
+                return parsed.model_copy(update={"status": "not_applicable"})
+            return parsed
         except Exception:
             return cls(
+                status="not_applicable" if transport == "builtin" else "unknown",
                 error=McpInspectionError(
                     stage="stored_value",
                     type="ValidationError",

@@ -136,16 +136,29 @@ test("模型表单必填上下文和最大输出且模态与能力标签分开",
   assert.match(modelSource, /findCatalogProvider/);
   assert.doesNotMatch(modelTemplate, /llmModelApiKey|llmModelBaseUrl/);
   assert.doesNotMatch(modelSource, /capabilities_source|llmModelSource/);
-  assert.match(modelSource, /保存后生效/);
+  assert.match(modelSource, /setCatalogFeedback\(`已从模型目录读取 \$\{model\.model_label\}，保存后生效`\)/);
+  assert.match(modelTemplate, /id="llmModelCatalogFeedback"[^>]*aria-live="polite"/);
+  assert.doesNotMatch(modelSource.match(/async updateFromCatalog\(\)[\s\S]*?\n  },/)?.[0] || "", /showToast/);
   assert.doesNotMatch(modelSource, /refresh-metadata/);
 });
 
 test("模型管理只保留 Provider 内模态框而不再提供独立列表页", () => {
   assert.doesNotMatch(modelTemplate, /id="panel-llm-models"|id="llmModelsTableBody"|<h2>模型管理<\/h2>/);
   assert.match(modelTemplate, /id="llmModelModal"/);
-  assert.match(modelTemplate, /模型 API 编码/);
+  assert.match(modelTemplate, /模型名称/);
+  assert.doesNotMatch(modelTemplate, /模型 API 编码/);
   assert.match(modelSource, /lockProvider/);
   assert.match(modelSource, /deriveName/);
+});
+
+test("模型能力行左右对齐且模型弹框使用更紧凑宽度", async () => {
+  const consoleStyles = await readFile(
+    new URL("../../../frontend/console/console.css", import.meta.url),
+    "utf8",
+  );
+  assert.equal((modelTemplate.match(/class="field llm-option-row"/g) || []).length, 2);
+  assert.match(consoleStyles, /\.llm-option-row \{[^}]*grid-template-columns: minmax\(260px, 1fr\) minmax\(280px, auto\);[^}]*align-items: center/);
+  assert.match(consoleStyles, /dialog\.console-detail-dialog#llmModelModal \{ width: min\(840px, calc\(100vw - 32px\)\); \}/);
 });
 
 test("模型目录继续独立浏览并直接打开模型创建模态框", () => {

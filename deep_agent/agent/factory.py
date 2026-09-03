@@ -4,7 +4,7 @@ from typing import Any
 
 import httpx2
 from pydantic_ai import Agent
-from pydantic_ai.capabilities import AbstractCapability, IncludeToolReturnSchemas, ToolSearch
+from pydantic_ai.capabilities import AbstractCapability, IncludeToolReturnSchemas
 from pydantic_ai.models import DEFAULT_HTTP_TIMEOUT, Model, get_user_agent, parse_model_id
 from pydantic_ai.models.anthropic import AnthropicModel
 from pydantic_ai.models.google import GoogleModel
@@ -25,10 +25,12 @@ from deep_agent.agent.tool_discovery import (
     MCP_SEARCH_RESULT_LIMIT,
     TOOL_SEARCH_DESCRIPTION,
     TOOL_SEARCH_PARAMETER_DESCRIPTION,
+    DeepAgentToolSearch,
     build_return_schema_selector,
     build_mcp_discovery_toolset,
     search_deferred_tools,
 )
+from deep_agent.capabilities.codes import is_ptc_selected
 from deep_agent.capabilities.registry import ToolPackage, ToolPackageRegistry
 from deep_agent.code_mode import FilePayloadResolvingToolset, HybridCodeMode
 from deep_agent.options import OPTION
@@ -205,7 +207,7 @@ def _toolsets_for_spec(
         toolsets.append(web_toolset)
     if mcp_toolsets:
         effective_mcp_toolsets = mcp_toolsets
-        if "builtin:code-mode" in spec.capabilities:
+        if is_ptc_selected(spec.capabilities):
             effective_mcp_toolsets = [
                 FilePayloadResolvingToolset(
                     toolset,
@@ -297,7 +299,7 @@ def build_agent(
         capabilities.append(web_capability)
     if mcp_toolsets:
         capabilities.append(
-            ToolSearch(
+            DeepAgentToolSearch(
                 strategy=search_deferred_tools,
                 max_results=MCP_SEARCH_RESULT_LIMIT,
                 tool_description=TOOL_SEARCH_DESCRIPTION,
@@ -311,7 +313,7 @@ def build_agent(
                 )
             )
         )
-    if "builtin:code-mode" in spec.capabilities:
+    if is_ptc_selected(spec.capabilities):
         capabilities.append(
             HybridCodeMode(
                 tools=[],

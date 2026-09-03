@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import unittest
 from collections.abc import Mapping
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import aiohttp
 from fastapi import FastAPI
@@ -11,6 +11,7 @@ from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from loguru import logger
 
+from deepfos_platform.errors.classes import ServerInstanceNotFound
 from deepfos_platform.options import OPTION as PLATFORM_OPTION
 
 from deep_agent.api.v1 import api_router
@@ -152,6 +153,15 @@ class ConsoleAdminAuthorizerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(checker.await_count, 2)
 
 class PlatformEnterpriseAdminCheckerTests(unittest.IsolatedAsyncioTestCase):
+    @staticmethod
+    def _direct_checker(
+        *, timeout_seconds: float = 5.0
+    ) -> PlatformEnterpriseAdminChecker:
+        return PlatformEnterpriseAdminChecker(
+            account_service="https://account.test/system-account-api",
+            timeout_seconds=timeout_seconds,
+        )
+
     async def test_strict_boolean_and_platform_envelope_responses(self) -> None:
         response = _FakeResponse(
             200,
@@ -161,7 +171,7 @@ class PlatformEnterpriseAdminCheckerTests(unittest.IsolatedAsyncioTestCase):
             "deep_agent.security.console_admin.AioHttpCli.get",
             new=AsyncMock(return_value=response),
         ):
-            allowed = await PlatformEnterpriseAdminChecker()(
+            allowed = await self._direct_checker()(
                 "u1", {"authorization": "Bearer token"}
             )
 
@@ -173,7 +183,7 @@ class PlatformEnterpriseAdminCheckerTests(unittest.IsolatedAsyncioTestCase):
             "deep_agent.security.console_admin.AioHttpCli.get",
             new=AsyncMock(return_value=direct_response),
         ):
-            denied = await PlatformEnterpriseAdminChecker()("u1", {})
+            denied = await self._direct_checker()("u1", {})
         self.assertFalse(denied)
 
     async def test_401_is_authentication_error(self) -> None:
@@ -183,10 +193,10 @@ class PlatformEnterpriseAdminCheckerTests(unittest.IsolatedAsyncioTestCase):
             new=AsyncMock(return_value=response),
         ):
             with self.assertRaises(ConsoleAdminAuthenticationError):
-                await PlatformEnterpriseAdminChecker()("u1", {})
+                await self._direct_checker()("u1", {})
 
     async def test_timeout_and_malformed_data_are_unavailable(self) -> None:
-        checker = PlatformEnterpriseAdminChecker()
+        checker = self._direct_checker()
         with patch(
             "deep_agent.security.console_admin.AioHttpCli.get",
             new=AsyncMock(side_effect=asyncio.TimeoutError()),
@@ -211,7 +221,7 @@ class PlatformEnterpriseAdminCheckerTests(unittest.IsolatedAsyncioTestCase):
         request = AsyncMock(return_value=response)
         original_account_service = PLATFORM_OPTION.server.account
         try:
-            PLATFORM_OPTION.server.account = "https://account.test/system-account-api"
+            PLATFORM_OPTION.server.account = "http://account"
             checker = PlatformEnterpriseAdminChecker(timeout_seconds=4.0)
             with patch(
                 "deep_agent.security.console_admin.AioHttpCli.get",
@@ -229,11 +239,122 @@ class PlatformEnterpriseAdminCheckerTests(unittest.IsolatedAsyncioTestCase):
         args, kwargs = request.await_args
         self.assertEqual(
             args,
-            ("https://account.test/system-account-api/oauth/checkEnterpriseAdmin",),
+            ("http://account/oauth/checkEnterpriseAdmin",),
         )
         self.assertEqual(kwargs["params"], {"userId": "enterprise-user"})
         self.assertEqual(kwargs["headers"], {"authorization": "Bearer token"})
         self.assertEqual(kwargs["timeout"].total, 4.0)
+
+    async def test_service_name_resolves_through_service_discovery(self) -> None:
+        response = _FakeResponse(200, "true")
+        request = AsyncMock(return_value=response)
+        on_success = Mock()
+        on_failure = Mock()
+        discovery = Mock(closed=False)
+        discovery.get_url = AsyncMock(
+            return_value=(on_success, on_failure, "http://10.0.0.12:80")
+        )
+
+        with (
+            patch(
+                "deep_agent.security.console_admin.ServiceDiscovery.instantiate",
+                return_value=discovery,
+            ),
+            patch(
+                "deep_agent.security.console_admin.AioHttpCli.get",
+                new=request,
+            ),
+        ):
+            allowed = await PlatformEnterpriseAdminChecker(
+                account_service="seepln-account"
+            )("enterprise-user", {"authorization": "Bearer token"})
+
+        self.assertTrue(allowed)
+        discovery.get_url.assert_awaited_once_with("seepln-account")
+        request.assert_awaited_once()
+        self.assertEqual(
+            request.await_args.args,
+            ("http://10.0.0.12:80/oauth/checkEnterpriseAdmin",),
+        )
+        on_success.assert_called_once_with()
+        on_failure.assert_not_called()
+
+    async def test_service_discovery_starts_when_needed(self) -> None:
+        discovery = Mock(closed=True)
+        discovery.get_url = AsyncMock(
+            return_value=(Mock(), Mock(), "http://10.0.0.12:80")
+        )
+        start = AsyncMock()
+
+        with (
+            patch(
+                "deep_agent.security.console_admin.ServiceDiscovery.instantiate",
+                return_value=discovery,
+            ),
+            patch(
+                "deep_agent.security.console_admin.ServiceDiscovery.start",
+                new=start,
+            ),
+            patch(
+                "deep_agent.security.console_admin.AioHttpCli.get",
+                new=AsyncMock(return_value=_FakeResponse(200, "true")),
+            ),
+        ):
+            await PlatformEnterpriseAdminChecker(
+                account_service="seepln-account"
+            )("u1", {})
+
+        start.assert_awaited_once_with()
+
+    async def test_missing_discovery_instance_is_unavailable(self) -> None:
+        discovery = Mock(closed=False)
+        discovery.get_url = AsyncMock(
+            side_effect=ServerInstanceNotFound("seepln-account")
+        )
+        request = AsyncMock()
+
+        with (
+            patch(
+                "deep_agent.security.console_admin.ServiceDiscovery.instantiate",
+                return_value=discovery,
+            ),
+            patch(
+                "deep_agent.security.console_admin.AioHttpCli.get",
+                new=request,
+            ),
+        ):
+            with self.assertRaises(ConsoleAdminUnavailableError):
+                await PlatformEnterpriseAdminChecker(
+                    account_service="seepln-account"
+                )("u1", {})
+
+        request.assert_not_awaited()
+
+    async def test_discovered_instance_failure_is_reported_to_discovery(self) -> None:
+        on_success = Mock()
+        on_failure = Mock()
+        discovery = Mock(closed=False)
+        discovery.get_url = AsyncMock(
+            return_value=(on_success, on_failure, "http://10.0.0.12:80")
+        )
+
+        with (
+            patch(
+                "deep_agent.security.console_admin.ServiceDiscovery.instantiate",
+                return_value=discovery,
+            ),
+            patch(
+                "deep_agent.security.console_admin.AioHttpCli.get",
+                new=AsyncMock(side_effect=aiohttp.ClientConnectionError()),
+            ),
+        ):
+            with self.assertRaises(ConsoleAdminUnavailableError):
+                await PlatformEnterpriseAdminChecker(
+                    account_service="seepln-account"
+                )("u1", {})
+
+        on_success.assert_not_called()
+        on_failure.assert_called_once_with()
 
     async def test_http_failure_log_does_not_expose_identity_or_credentials(self) -> None:
         response = _FakeResponse(503, "unavailable")
@@ -245,7 +366,7 @@ class PlatformEnterpriseAdminCheckerTests(unittest.IsolatedAsyncioTestCase):
                 new=AsyncMock(return_value=response),
             ):
                 with self.assertRaises(ConsoleAdminUnavailableError):
-                    await PlatformEnterpriseAdminChecker()(
+                    await self._direct_checker()(
                         "sensitive-user",
                         {
                             "authorization": "Bearer very-secret-token",

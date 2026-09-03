@@ -166,8 +166,12 @@ def resolve_sandbox_profile(
 def format_python_tool_instructions(package_names: tuple[str, ...]) -> str:
     packages = "、".join(package_names) if package_names else "当前 Profile 声明的三方包"
     return (
-        "在全新的 Python 环境中执行数据计算。每次调用需提供完整 code 和 inputs。"
+        "在全新的 Python 环境中执行数据计算和文件处理。每次调用需提供完整 code 和 inputs。"
         f"预装 {packages}，常用标准库可用，不支持 pip install。"
+        "可使用 requests/httpx 访问公网；私网、回环、链路本地和云元数据地址会被阻断。"
+        "读取 files 中的平台文件时使用 from deepagent_files import input_path；"
+        "需要保留的输出必须使用 publish_path(file_name, mime=None) 取得写入路径，"
+        "成功执行后宿主会上传并在 files 中返回 file_id。普通临时文件不会上传。"
         "请将正式结果作为最后一行表达式返回到 result；print 仅用于少量 stdout 诊断。"
         "优先返回 dict/list 等结构化结果，大表返回汇总或必要预览。\n\n"
         "示例：\n"
@@ -175,6 +179,14 @@ def format_python_tool_instructions(package_names: tuple[str, ...]) -> str:
         'values = inputs["values"]\n'
         'print(f"共 {len(values)} 项")\n'
         '{"count": len(values), "total": sum(values)}\n'
+        "```\n\n"
+        "文件转换示例：\n"
+        "```python\n"
+        "from deepagent_files import input_path, publish_path\n"
+        'source = input_path(inputs["file_id"])\n'
+        'target = publish_path("result.png", mime="image/png")\n'
+        "# 读取 source 并将结果写入 target\n"
+        '{"saved": True}\n'
         "```"
     )
 

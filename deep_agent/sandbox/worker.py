@@ -10,7 +10,10 @@ import traceback
 from pathlib import Path
 from typing import Any, Iterator
 
+from deepagent_files import collect_published_files
+
 from deep_agent.sandbox.framing import FramingError, read_frame, write_frame
+from deep_agent.sandbox.network_guard import install_public_network_guard
 from deep_agent.sandbox.serialization import serialize_result, truncate_utf8
 from deep_agent.sandbox.types import (
     ExecuteRequest,
@@ -231,6 +234,13 @@ def handle_request(frame: dict[str, Any]) -> dict[str, Any]:
             dict(request.inputs),
         )
         exit_code = 0
+    published_files: list[dict[str, str | None]] = []
+    if error is None:
+        try:
+            published_files = collect_published_files()
+        except Exception as exc:
+            error = _exception_payload(exc)
+            exit_code = 1
     if error is not None:
         return {
             "request_id": request.request_id,
@@ -241,6 +251,7 @@ def handle_request(frame: dict[str, Any]) -> dict[str, Any]:
             "error": error,
             "exit_code": exit_code,
             "truncated": truncated.model_dump(),
+            "published_files": [],
         }
     return {
         "request_id": request.request_id,
@@ -251,10 +262,12 @@ def handle_request(frame: dict[str, Any]) -> dict[str, Any]:
         "error": None,
         "exit_code": exit_code,
         "truncated": truncated.model_dump(),
+        "published_files": published_files,
     }
 
 
 def main() -> None:
+    install_public_network_guard()
     try:
         request_frame = read_frame(sys.stdin.buffer)
     except FramingError as exc:

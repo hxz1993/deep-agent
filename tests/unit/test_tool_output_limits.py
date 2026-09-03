@@ -22,6 +22,7 @@ from deep_agent.agent.tool_output_limits import (
     artifact_handles_from_history,
     artifact_metadata_from_history,
     build_tool_output_limits,
+    session_file_metadata_from_history,
     tool_output_threshold_tokens,
 )
 from deep_agent.db.serialization import deserialize_message, serialize_message
@@ -113,6 +114,10 @@ class PlatformToolResultStoreTests(unittest.IsolatedAsyncioTestCase):
             50,
         )
         self.assertEqual(deps.tool_output_artifacts["platform-file-1"]["role"], "return_value")
+        self.assertEqual(
+            deps.session_file_artifacts["platform-file-1"]["kind"],
+            "tool_result_overflow",
+        )
         download = AsyncMock(return_value=b"line 1\nline 2")
         with patch("deep_agent.agent.tool_output_limits._download_file", download):
             first, second = await asyncio.gather(
@@ -126,6 +131,63 @@ class PlatformToolResultStoreTests(unittest.IsolatedAsyncioTestCase):
             file_store=store._file_store,
         )
         self.assertEqual(store.telemetry.platform_downloads, 1)
+
+    async def test_generated_files_restore_separately_from_overflow_handles(self) -> None:
+        generated = {
+            "file_id": "generated-file-1",
+            "file_name": "chart.png",
+            "mime": "image/png",
+            "byte_size": 321,
+            "sha256": "a" * 64,
+            "kind": "sandbox_output",
+            "path": "/tmp/must-not-leak.png",
+            "base64": "must-not-leak",
+        }
+        part = ToolReturnPart(
+            "execute_python",
+            {"result": {"ok": True}, "files": [generated]},
+            "call-python",
+            metadata={"generated_files": [generated]},
+        )
+        history = [ModelRequest(parts=[part])]
+        self.assertEqual(artifact_metadata_from_history(history), {})
+        restored = session_file_metadata_from_history(history)
+        self.assertEqual(set(restored), {"generated-file-1"})
+        self.assertEqual(restored["generated-file-1"]["file_name"], "chart.png")
+        self.assertEqual(restored["generated-file-1"]["sha256"], "a" * 64)
+        self.assertNotIn("path", restored["generated-file-1"])
+        self.assertNotIn("base64", restored["generated-file-1"])
+
+        deps = AgentDeps(session_id="session")
+        store = PlatformToolResultStore(request_headers={}, threshold_tokens=4_000)
+        store.bind(deps, history)
+        self.assertEqual(deps.tool_output_artifacts, {})
+        self.assertEqual(
+            deps.session_file_artifacts["generated-file-1"]["kind"],
+            "sandbox_output",
+        )
+        with self.assertRaises(FileNotFoundError):
+            await store.read("generated-file-1")
+
+        event = map_part(part)
+        artifact = event["artifacts"][0]
+        self.assertEqual(artifact["file_id"], "generated-file-1")
+        self.assertEqual(artifact["mime"], "image/png")
+        self.assertNotIn("path", artifact)
+        self.assertNotIn("base64", artifact)
+        projected = project_model_messages(history)
+        projected_artifact = projected[0].artifacts[0]
+        self.assertEqual(projected_artifact.file_id, "generated-file-1")
+        self.assertEqual(projected_artifact.sha256, "a" * 64)
+
+        serialized = serialize_message(ModelRequest(parts=[part]))
+        restored_message = deserialize_message(serialized)
+        self.assertEqual(
+            session_file_metadata_from_history([restored_message])["generated-file-1"][
+                "byte_size"
+            ],
+            321,
+        )
 
     async def test_untrusted_handle_never_reaches_platform(self) -> None:
         deps = AgentDeps(session_id="session")
@@ -221,6 +283,55 @@ class HarnessToolOutputLimitsTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIs(result, image)
         store.write.assert_not_awaited()  # type: ignore[attr-defined]
+
+    async def test_generated_file_metadata_survives_large_result_spill(self) -> None:
+        capability, store = build_tool_output_limits(
+            request_headers={},
+            context_window_tokens=10_000,
+            max_output_tokens=2_000,
+            estimator=TokenEstimator.conservative(),
+        )
+        store.write = AsyncMock(return_value="overflow-with-file")  # type: ignore[method-assign]
+        generated = {
+            "file_id": "generated-after-spill",
+            "file_name": "report.pdf",
+            "mime": "application/pdf",
+            "byte_size": 2048,
+            "sha256": "b" * 64,
+            "kind": "sandbox_output",
+        }
+        original = ToolReturn(
+            return_value={"result": "中文" * 20_000, "files": [generated]},
+            metadata={"generated_files": [generated]},
+        )
+
+        result = await capability.after_tool_execute(
+            _ctx(),
+            call=ToolCallPart("execute_python", {}, "call-spill-file"),
+            tool_def=ToolDefinition(name="execute_python"),
+            args={},
+            result=original,
+        )
+
+        self.assertIsInstance(result, ToolReturn)
+        self.assertEqual(
+            result.metadata["generated_files"][0]["file_id"],
+            "generated-after-spill",
+        )
+        self.assertIsInstance(result.return_value, dict)
+        self.assertEqual(
+            result.return_value["files"][0]["file_id"],
+            "generated-after-spill",
+        )
+        self.assertIn("read_tool_result", result.return_value["result"])
+        part = ToolReturnPart(
+            "execute_python",
+            result.return_value,
+            "call-spill-file",
+            metadata=result.metadata,
+        )
+        kinds = {item["kind"] for item in map_part(part)["artifacts"]}
+        self.assertEqual(kinds, {"tool_result_overflow", "sandbox_output"})
 
     async def test_capability_runs_inside_real_agent_loop(self) -> None:
         capability, store = build_tool_output_limits(

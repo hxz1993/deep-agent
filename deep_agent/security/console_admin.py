@@ -6,11 +6,13 @@ import json
 import time
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
+from urllib.parse import urlsplit
 
 import aiohttp
 from fastapi import Request
 from loguru import logger
 
+from deepfos_platform.discovery import ServiceDiscovery
 from deepfos_platform.lib.httpcli import AioHttpCli
 from deepfos_platform.lib.utils import concat_url
 from deepfos_platform.options import OPTION as PLATFORM_OPTION
@@ -48,7 +50,7 @@ class ConsoleAdminAccess:
 EnterpriseAdminChecker = Callable[[str, Mapping[str, str]], Awaitable[bool]]
 
 
-def _forwarded_auth_headers(request: Request, user_id: str) -> dict[str, str]:
+def forwarded_platform_auth_headers(request: Request, user_id: str) -> dict[str, str]:
     headers: dict[str, str] = {}
     for raw_name, value in request.headers.items():
         name = raw_name.lower()
@@ -62,7 +64,7 @@ def _forwarded_auth_headers(request: Request, user_id: str) -> dict[str, str]:
     return headers
 
 
-def _credential_digest(headers: Mapping[str, str]) -> str:
+def platform_credential_digest(headers: Mapping[str, str]) -> str:
     credential_items = sorted(
         (name.lower(), value)
         for name, value in headers.items()
@@ -82,30 +84,80 @@ class PlatformEnterpriseAdminChecker:
     def __init__(
         self,
         *,
+        account_service: str | None = None,
         timeout_seconds: float = 5.0,
     ) -> None:
-        self._url = concat_url(PLATFORM_OPTION.server.account, "oauth", "checkEnterpriseAdmin")
+        target = (
+            PLATFORM_OPTION.server.account
+            if account_service is None
+            else account_service
+        )
+        self._account_service = str(target).strip()
         self._timeout = aiohttp.ClientTimeout(
             connect=min(3.0, timeout_seconds),
             total=timeout_seconds,
         )
 
+    async def _resolve_url(
+        self,
+    ) -> tuple[str, Callable[[], None] | None, Callable[[], None] | None]:
+        target = self._account_service
+        if not target:
+            raise ConsoleAdminUnavailableError("platform account service is not configured")
+
+        parsed = urlsplit(target)
+        if parsed.scheme:
+            if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+                raise ConsoleAdminUnavailableError(
+                    "platform account service URL is invalid"
+                )
+            return (
+                concat_url(target, "oauth", "checkEnterpriseAdmin"),
+                None,
+                None,
+            )
+
+        try:
+            discovery = ServiceDiscovery.instantiate()
+            if discovery.closed:
+                await ServiceDiscovery.start()
+            on_success, on_failure, base_url = await discovery.get_url(target)
+        except Exception as exc:  # noqa: BLE001 - discovery failures fail closed
+            raise ConsoleAdminUnavailableError(
+                "enterprise-admin verification service is unavailable"
+            ) from exc
+
+        return (
+            concat_url(base_url, "oauth", "checkEnterpriseAdmin"),
+            on_success,
+            on_failure,
+        )
+
     async def __call__(self, user_id: str, headers: Mapping[str, str]) -> bool:
         response = None
+        on_success: Callable[[], None] | None = None
+        on_failure: Callable[[], None] | None = None
         try:
+            url, on_success, on_failure = await self._resolve_url()
             response = await AioHttpCli.get(
-                self._url,
+                url,
                 params={"userId": user_id},
                 headers=dict(headers),
                 timeout=self._timeout,
             )
             status_code = response.status
             body = await response.text()
+        except ConsoleAdminUnavailableError:
+            raise
         except (asyncio.TimeoutError, aiohttp.ClientError, OSError) as exc:
+            if on_failure is not None:
+                on_failure()
             raise ConsoleAdminUnavailableError(
                 "enterprise-admin verification is temporarily unavailable"
             ) from exc
         except Exception as exc:  # noqa: BLE001 - fail closed on client/runtime defects
+            if on_failure is not None:
+                on_failure()
             raise ConsoleAdminUnavailableError(
                 "enterprise-admin verification failed"
             ) from exc
@@ -113,12 +165,18 @@ class PlatformEnterpriseAdminChecker:
             if response is not None:
                 response.release()
 
+        if status_code >= 500:
+            if on_failure is not None:
+                on_failure()
+        elif on_success is not None:
+            on_success()
+
         if status_code == 401:
             raise ConsoleAdminAuthenticationError("platform login has expired")
         if not 200 <= status_code < 300:
             logger.warning(
                 f"enterprise-admin verification returned HTTP {status_code}, "
-                f"url: [{self._url}]"
+                f"url: [{url}]"
             )
             raise ConsoleAdminUnavailableError(
                 f"enterprise-admin verification returned HTTP {status_code}"
@@ -175,8 +233,8 @@ class ConsoleAdminAuthorizer:
         if normalized_user == "admin":
             return ConsoleAdminAccess(allowed=False)
 
-        headers = _forwarded_auth_headers(request, normalized_user)
-        key = (normalized_user, _credential_digest(headers))
+        headers = forwarded_platform_auth_headers(request, normalized_user)
+        key = (normalized_user, platform_credential_digest(headers))
         now = self._clock()
         cached = self._cache.get(key)
         if cached is not None and cached[0] > now:
@@ -212,4 +270,6 @@ __all__ = [
     "ENTERPRISE_ADMIN_ROLE",
     "LOCAL_CONSOLE_ADMIN_SCOPE_KEY",
     "PlatformEnterpriseAdminChecker",
+    "forwarded_platform_auth_headers",
+    "platform_credential_digest",
 ]

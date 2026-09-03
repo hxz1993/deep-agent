@@ -5,7 +5,13 @@ import unittest
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from pydantic_ai.messages import ModelRequest, UserPromptPart
+from pydantic_ai.messages import (
+    ModelRequest,
+    ModelResponse,
+    ToolCallPart,
+    ToolReturnPart,
+    UserPromptPart,
+)
 
 from deep_agent.api.v1 import api_router
 from deep_agent.capabilities import build_registry
@@ -41,13 +47,45 @@ class SessionOwnershipApiTests(unittest.TestCase):
         store = get_context().store
         model = (await self.stores.llm_model.list_all())[0]
         agent = await self.stores.agent.create_unique(
-            AgentCreate(name="ownership-test", model_id=model.id, prompt="test")
+            AgentCreate(
+                name="ownership-test",
+                model_id=model.id,
+                prompt="test",
+                capabilities=["builtin:general"],
+            )
         )
         self.agent_id = agent.id
         message = [ModelRequest(parts=[UserPromptPart(content="hello")])]
         await store.append(
             "mine", message, agent_id=self.agent_id, user_id=self.user_id,
             turn_id="run-mine", run_id="run-mine",
+        )
+        await store.append(
+            "mine",
+            [
+                ModelResponse(
+                    parts=[
+                        ToolCallPart(
+                            tool_name="get_current_time",
+                            args={},
+                            tool_call_id="call-time",
+                        )
+                    ]
+                ),
+                ModelRequest(
+                    parts=[
+                        ToolReturnPart(
+                            tool_name="get_current_time",
+                            content="2026-09-03T00:00:00+00:00",
+                            tool_call_id="call-time",
+                        )
+                    ]
+                ),
+            ],
+            agent_id=self.agent_id,
+            user_id=self.user_id,
+            turn_id="run-mine-tools",
+            run_id="run-mine-tools",
         )
         await store.append(
             "other", message, agent_id=self.agent_id, user_id="user-b",
@@ -61,8 +99,12 @@ class SessionOwnershipApiTests(unittest.TestCase):
         self.assertEqual(history.status_code, 200)
         self.assertEqual(history.json()["schema_version"], 1)
         self.assertEqual(history.json()["items"][0]["kind"], "user_message")
+        tool = next(item for item in history.json()["items"] if item["kind"] == "tool")
+        self.assertEqual(tool["tool_name"], "get_current_time")
+        self.assertEqual(tool["display_name"], "获取当前时间")
         events = self.client.get("/api/v1/sessions/mine/events")
         self.assertEqual(events.status_code, 200)
+        self.assertNotIn("display_name", str(events.json()))
         listed = self.client.get("/api/v1/sessions")
         self.assertEqual(listed.status_code, 200)
         timestamp_pairs = [

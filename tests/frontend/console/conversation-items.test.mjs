@@ -32,13 +32,40 @@ test("History 按 ConversationItem 顺序和稳定 ID 归一化", () => {
       base("tool:call-1", "tool", 2, {
         call_id: "call-1",
         tool_name: "lookup",
+        display_name: "查询数据",
         status: "completed",
         output: { ok: true },
       }),
     ],
   });
   assert.deepEqual(history.items.map((item) => item.item_id), ["message:u", "tool:call-1", "message:a"]);
+  assert.equal(history.items[1].display_name, "查询数据");
   assert.deepEqual(projectConversationItems(history.items).map((node) => node.type), ["user", "assistant"]);
+});
+
+test("Assistant 历史节点保留本轮用户开始与最终回复完成时间", () => {
+  const nodes = projectConversationItems([
+    base("message:u", "user_message", 1, {
+      text: "开始",
+      created_at: "2026-09-02T01:00:00Z",
+      updated_at: "2026-09-02T01:00:00Z",
+    }),
+    base("tool:t", "tool", 2, {
+      call_id: "call-1",
+      tool_name: "lookup",
+      created_at: "2026-09-02T01:00:10Z",
+      updated_at: "2026-09-02T01:00:45Z",
+    }),
+    base("message:a", "assistant_message", 3, {
+      text: "完成",
+      phase: "final",
+      created_at: "2026-09-02T01:01:10Z",
+      updated_at: "2026-09-02T01:01:12Z",
+    }),
+  ]);
+
+  assert.equal(nodes[1].startedAt, "2026-09-02T01:00:00Z");
+  assert.equal(nodes[1].completedAt, "2026-09-02T01:01:12Z");
 });
 
 test("Deferred 由 ConversationItem 恢复而历史 Plan 不投影到输入区", () => {

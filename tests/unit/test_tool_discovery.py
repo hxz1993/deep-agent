@@ -28,6 +28,7 @@ from deep_agent.agent.tool_discovery import (
     MCP_SEARCH_RESULT_LIMIT,
     TOOL_SEARCH_DESCRIPTION,
     TOOL_SEARCH_PARAMETER_DESCRIPTION,
+    DeepAgentToolSearch,
     ToolDiscoveryTelemetry,
     build_mcp_discovery_toolset,
     build_return_schema_selector,
@@ -376,6 +377,68 @@ class ToolDiscoveryTests(unittest.IsolatedAsyncioTestCase):
             )
         )
         self.assertEqual(search_result, [])
+
+    async def test_url_query_path_does_not_hide_explicit_send_tools(self) -> None:
+        def media_upload(base64_content: str) -> str:
+            """上传媒体文件，返回 media_id。"""
+            return base64_content
+
+        def message_aibot_send(chat_id: str, media_id: str) -> str:
+            """向企微机器人会话发送图片。"""
+            return f"{chat_id}:{media_id}"
+
+        ctx = self._ctx(
+            "https://docs.example.com/nodes/ds_query/report\n"
+            "了解网页并把最后一张图片发到企微机器人会话。"
+        )
+        toolset = FunctionToolset(tools=[media_upload, message_aibot_send]).prefixed(
+            "wecom-doc"
+        )
+        wrapper = build_mcp_discovery_toolset(
+            [toolset],
+            server_names=["wecom-doc"],
+            estimator=TokenEstimator.conservative(),
+        )
+        assert wrapper is not None
+
+        tools = await wrapper.get_tools(ctx)
+
+        self.assertFalse(ctx.deps.tool_discovery.read_only_intent)
+        direct = {
+            name for name, item in tools.items() if not item.tool_def.defer_loading
+        }
+        self.assertIn("wecom-doc_media_upload", direct)
+        self.assertIn("wecom-doc_message_aibot_send", direct)
+
+    async def test_wecom_media_relay_descriptions_explain_the_dependency_chain(self) -> None:
+        def media_upload(file_name: str, base64_content: str, type: str = "image") -> str:
+            """上传媒体文件，返回 media_id。"""
+            return f"{type}:{file_name}:{base64_content}"
+
+        def message_aibot_send(chat_id: str, msg_type: str, image: dict | None = None) -> str:
+            """以智能机器人身份发送消息。"""
+            return f"{chat_id}:{msg_type}:{image}"
+
+        ctx = self._ctx("把公网 WebP 图片发到企微机器人会话")
+        upload_toolset = FunctionToolset(tools=[media_upload]).prefixed("wecom-doc")
+        send_toolset = FunctionToolset(tools=[message_aibot_send]).prefixed("wecom-chat")
+        wrapper = build_mcp_discovery_toolset(
+            [upload_toolset, send_toolset],
+            server_names=["wecom-doc", "wecom-chat"],
+            estimator=TokenEstimator.conservative(),
+        )
+        assert wrapper is not None
+
+        tools = await wrapper.get_tools(ctx)
+
+        upload_description = tools["wecom-doc_media_upload"].tool_def.description or ""
+        send_description = tools["wecom-chat_message_aibot_send"].tool_def.description or ""
+        self.assertIn("load_file_data", upload_description)
+        self.assertIn("WebP", upload_description)
+        self.assertIn("禁止对它做 len", upload_description)
+        self.assertIn("未明确要求内联预览", upload_description)
+        self.assertIn("wecom-doc_media_upload", send_description)
+        self.assertIn("公开 URL 不能直接", send_description)
 
     async def test_context_reference_search_uses_only_type_and_label(self) -> None:
         ctx = self._ctx("")
@@ -757,6 +820,54 @@ class ToolDiscoveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, ["deepfos_platform_folder_list"])
         self.assertEqual(ctx.deps.tool_discovery.search_calls, 2)
 
+    async def test_exact_original_protocol_name_is_disclosed_before_fuzzy_matches(self) -> None:
+        def media_upload(file_data: str) -> str:
+            """Upload media bytes and return a media id."""
+            return file_data
+
+        def media_download(media_id: str) -> str:
+            """Download media bytes."""
+            return media_id
+
+        ctx = self._ctx("")
+        toolset = FunctionToolset(tools=[media_download, media_upload]).prefixed("wecom-doc")
+        tools = [item.tool_def for item in (await toolset.get_tools(ctx)).values()]
+        ctx.deps.tool_discovery = ToolDiscoveryTelemetry(server_names=("wecom-doc",))
+
+        result = search_deferred_tools(
+            ctx,
+            ["上传图片到企微", "upload media", "media_upload"],
+            tools,
+        )
+
+        self.assertEqual(result[0], "wecom-doc_media_upload")
+
+    async def test_protocol_name_embedded_in_one_query_is_still_disclosed_first(self) -> None:
+        def media_upload(file_data: str) -> str:
+            """Upload media bytes and return a media id."""
+            return file_data
+
+        def media_download(media_id: str) -> str:
+            """Download media bytes."""
+            return media_id
+
+        ctx = self._ctx("")
+        toolset = FunctionToolset(tools=[media_download, media_upload]).prefixed("wecom-doc")
+        tools = [item.tool_def for item in (await toolset.get_tools(ctx)).values()]
+        ctx.deps.tool_discovery = ToolDiscoveryTelemetry(server_names=("wecom-doc",))
+
+        result = search_deferred_tools(
+            ctx,
+            [
+                "上传图片到企微",
+                "upload media",
+                "wecom-doc_media_upload upload image and return media_id",
+            ],
+            tools,
+        )
+
+        self.assertEqual(result[0], "wecom-doc_media_upload")
+
     async def test_tool_search_definition_requests_complementary_queries(self) -> None:
         seen: dict[str, ToolDefinition] = {}
 
@@ -796,6 +907,66 @@ class ToolDiscoveryTests(unittest.IsolatedAsyncioTestCase):
         ]
         self.assertIn("2～3 个互补查询", query_description)
         self.assertIn("目录协议名", query_description)
+        self.assertIn("单独占一个数组项", query_description)
+
+    async def test_tool_search_repairs_singular_query_before_validation(self) -> None:
+        calls = 0
+
+        def model_function(_messages, _info: AgentInfo) -> ModelResponse:
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                return ModelResponse(
+                    parts=[
+                        ToolCallPart(
+                            "search_tools",
+                            {"query": "搜索维度成员"},
+                            "singular-search-query",
+                        )
+                    ]
+                )
+            return ModelResponse(parts=[TextPart(content="done")])
+
+        wrapper = build_mcp_discovery_toolset(
+            [self._toolset()],
+            server_names=["deepfos"],
+            estimator=TokenEstimator.conservative(),
+        )
+        assert wrapper is not None
+        deps = AgentDeps(session_id="repair-search", agent_id="agent")
+        agent = Agent(
+            FunctionModel(model_function),
+            deps_type=AgentDeps,
+            toolsets=[wrapper],
+            capabilities=[
+                DeepAgentToolSearch(
+                    strategy=search_deferred_tools,
+                    max_results=MCP_SEARCH_RESULT_LIMIT,
+                )
+            ],
+        )
+
+        result = await agent.run("搜索维度成员", deps=deps)
+
+        self.assertEqual(result.output, "done")
+        self.assertEqual(calls, 2)
+        self.assertEqual(deps.tool_discovery.search_calls, 1)
+        self.assertTrue(
+            any(
+                isinstance(part, ToolSearchReturnPart)
+                for message in result.all_messages()
+                if isinstance(message, ModelRequest)
+                for part in message.parts
+            )
+        )
+        self.assertFalse(
+            any(
+                isinstance(part, RetryPromptPart)
+                for message in result.all_messages()
+                if isinstance(message, ModelRequest)
+                for part in message.parts
+            )
+        )
 
     async def test_tool_search_uses_at_most_three_queries(self) -> None:
         ctx = self._ctx("")

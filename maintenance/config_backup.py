@@ -18,20 +18,23 @@ from sqlalchemy import MetaData, Table, delete, func, insert, inspect, select, t
 from sqlalchemy.engine import URL
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
+from deep_agent.capabilities.codes import canonical_tool_package_codes
 from deep_agent.db.models import Base
+from deep_agent.db.configuration_transfer import (
+    BACKUP_SCOPE_SCHEMA_VERSION,
+    SESSION_TABLES,
+    backup_scope_manifest,
+    configuration_table_names,
+    validate_table_classification,
+)
 
 
-SESSION_TABLES = (
-    "chat_sessions",
-    "chat_session_events",
-)
-CONFIG_TABLES = tuple(
-    table.name
-    for table in Base.metadata.sorted_tables
-    if table.name not in SESSION_TABLES
-)
+CONFIG_TABLES = configuration_table_names()
 ENVIRONMENT_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
-BACKUP_SCOPE_SCHEMA_VERSION = "1.1"
+
+# Backward-compatible private aliases used by existing maintenance tests.
+_backup_scope_manifest = backup_scope_manifest
+_validate_table_classification = validate_table_classification
 
 
 @dataclass(frozen=True)
@@ -305,6 +308,18 @@ async def _copy_table(
     async with source_engine.connect() as source_connection:
         result = await source_connection.execute(select(source_table))
         rows = [dict(row) for row in result.mappings().all()]
+    if table_name == "agents":
+        for row in rows:
+            raw_capabilities = row.get("capabilities") or []
+            serialized = isinstance(raw_capabilities, str)
+            if serialized:
+                raw_capabilities = json.loads(raw_capabilities)
+            canonical = canonical_tool_package_codes(raw_capabilities)
+            row["capabilities"] = (
+                json.dumps(canonical, ensure_ascii=False, separators=(",", ":"))
+                if serialized
+                else canonical
+            )
     if rows:
         async with target_engine.begin() as target_connection:
             await target_connection.execute(insert(target_table), rows)
@@ -411,34 +426,6 @@ async def _validate_backup(
         scope_manifest = json.loads(str(info["scope_manifest"]))
         if scope_manifest != _backup_scope_manifest(copied_tables):
             raise ValueError("Backup scope manifest does not match the current contract")
-
-
-def _backup_scope_manifest(copied_tables: Sequence[str]) -> dict[str, Any]:
-    return {
-        "schema_version": BACKUP_SCOPE_SCHEMA_VERSION,
-        "copied_tables": list(copied_tables),
-        "structure_only_tables": list(SESSION_TABLES),
-        "external_files": [
-            {
-                "kind": "uploaded_skill_packages",
-                "included": False,
-                "locator_table": "skill_packages",
-                "locator_column": "platform_file_id",
-                "export_api": "/api/v1/skills/export",
-            }
-        ],
-    }
-
-
-def _validate_table_classification() -> None:
-    structure_only = set(SESSION_TABLES)
-    model_tables = set(Base.metadata.tables)
-    unknown = structure_only - model_tables
-    if unknown:
-        raise ValueError(
-            "Backup session table exclusions are stale: "
-            + ", ".join(sorted(unknown))
-        )
 
 
 async def _table_count(connection: Any, table_name: str) -> int:

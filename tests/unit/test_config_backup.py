@@ -156,6 +156,16 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                     connection.execute("SELECT COUNT(*) FROM chat_session_events").fetchone(),
                     (0,),
                 )
+                self.assertEqual(
+                    json.loads(
+                        str(
+                            connection.execute(
+                                "SELECT capabilities FROM agents WHERE id = 'agent-1'"
+                            ).fetchone()[0]
+                        )
+                    ),
+                    ["mcp:remote"],
+                )
                 web_setting = connection.execute(
                     "SELECT key, value, version FROM global_settings"
                 ).fetchone()
@@ -222,6 +232,34 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
 
             generated = list(output_root.rglob("*")) if output_root.exists() else []
             self.assertFalse([path for path in generated if path.is_file()])
+
+    async def test_export_canonicalizes_legacy_ptc_capability(self) -> None:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+            root = Path(tmpdir)
+            source_path = root / "source.db"
+            await self._create_source(source_path)
+            with sqlite3.connect(source_path) as connection:
+                connection.execute(
+                    "UPDATE agents SET capabilities = ? WHERE id = 'agent-1'",
+                    ('["builtin:code-mode","mcp:remote"]',),
+                )
+
+            result = await export_backup(
+                self._url(source_path),
+                environment="test",
+                output_root=root / "backups",
+                exported_at=datetime(2026, 9, 1, tzinfo=timezone.utc),
+                git_commit="abc123",
+            )
+
+            with sqlite3.connect(result.path) as connection:
+                capabilities = connection.execute(
+                    "SELECT capabilities FROM agents WHERE id = 'agent-1'"
+                ).fetchone()[0]
+            self.assertEqual(
+                json.loads(str(capabilities)),
+                ["builtin:ptc", "mcp:remote"],
+            )
 
     def test_default_output_root_is_next_to_repository(self) -> None:
         self.assertEqual(

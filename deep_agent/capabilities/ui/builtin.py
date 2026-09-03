@@ -136,6 +136,7 @@ def builtin_ui_records() -> list[UIToolRecord]:
             parameters_json_schema=_CONFIRM_ACTION_SCHEMA,
             widget="confirm",
             result_schema=_CONFIRM_RESULT_SCHEMA,
+            metadata={"display_name": "确认操作"},
             source="builtin",
         ),
         UIToolRecord(
@@ -147,6 +148,7 @@ def builtin_ui_records() -> list[UIToolRecord]:
             parameters_json_schema=_ASK_USER_CHOICE_SCHEMA,
             widget="choice",
             result_schema=_CHOICE_RESULT_SCHEMA,
+            metadata={"display_name": "候选选择"},
             source="builtin",
         ),
     ]

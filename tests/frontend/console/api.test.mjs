@@ -183,6 +183,35 @@ test("上下文请求与业务请求使用同一个动态服务根地址", async
   ]);
 });
 
+test("当前用户资料通过同源适配接口读取用户名", async () => {
+  const requested = [];
+  const fetchImpl = async (url, options) => {
+    requested.push({ url: String(url), headers: options.headers });
+    return {
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({ user_id: "user-1", username: "周文俊" }),
+    };
+  };
+  const { api } = loadApi(
+    { da_console_request_context_v1: JSON.stringify({ app: "iirjgi005" }) },
+    fetchImpl,
+    "https://test.deepfos.com/deepfos-server/deep-agent-server1-0/console/",
+  );
+
+  const profile = await api.currentUser();
+
+  assert.deepEqual(JSON.parse(JSON.stringify(profile)), {
+    user_id: "user-1",
+    username: "周文俊",
+  });
+  assert.equal(
+    requested[0].url,
+    "https://test.deepfos.com/deepfos-server/deep-agent-server1-0/api/v1/current-user",
+  );
+  assert.equal(requested[0].headers["X-Deep-Agent-App"], undefined);
+});
+
 test("身份上下文请求超时后返回可识别错误", async () => {
   const pendingFetch = (_url, options) => new Promise((_resolve, reject) => {
     options.signal.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")));

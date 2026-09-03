@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import unittest
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -91,6 +92,18 @@ class _FakeInspectionClient:
         if error := self.errors.get("read"):
             raise error
         return self.content
+
+
+class _FakeBuiltinLeaseManager:
+    def __init__(self) -> None:
+        self.spawn_config = None
+
+    @asynccontextmanager
+    async def lease(self, _name, _session_id, factory, *, spawn_config=None):
+        self.spawn_config = spawn_config
+        client = factory("http://127.0.0.1:18080/mcp")
+        async with client:
+            yield client
 
 
 def _inspection(
@@ -407,15 +420,57 @@ class McpInspectionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.inspection.status, "unreachable")
         self.assertEqual(result.inspection.error.stage, "ping")
 
-    async def test_builtin_is_not_started(self) -> None:
+    async def test_builtin_refreshes_tool_snapshot_with_titles(self) -> None:
         row = _row("deepcube", transport="builtin", inspection=None)
-        with patch(
-            "deep_agent.capabilities.mcp.inspection.build_resource_client"
-        ) as build_client:
+        row.config = {"env": {"MODE": "test"}}
+        client = _FakeInspectionClient(
+            tools=[
+                Tool(
+                    name="query",
+                    title="查询数据",
+                    description="Query",
+                    inputSchema={"type": "object"},
+                ),
+                Tool(name="write", description="Write", inputSchema={"type": "object"}),
+            ],
+            resources=[Resource(name="guide", uri="deepfos://guide")],
+            templates=[],
+        )
+        lease_manager = _FakeBuiltinLeaseManager()
+        with (
+            patch(
+                "deep_agent.capabilities.mcp.lease_manager.get_mcp_lease_manager",
+                return_value=lease_manager,
+            ),
+            patch(
+                "deep_agent.capabilities.mcp.inspection.build_raw_url_mcp_toolset",
+                return_value=client,
+            ),
+        ):
             result = await inspect_mcp_server(row)
 
         self.assertEqual(result.inspection.status, "not_applicable")
-        build_client.assert_not_called()
+        self.assertEqual(result.inspection.tools.count, 2)
+        self.assertEqual(result.inspection.resources.count, 1)
+        self.assertEqual(result.inspection.tools.snapshot_status, "ready")
+        self.assertEqual(
+            result.inspection.tools.snapshot.definitions[0].title,
+            "查询数据",
+        )
+        self.assertEqual(lease_manager.spawn_config, row.config)
+
+    def test_builtin_inspection_round_trips_persisted_counts(self) -> None:
+        parsed = McpInspection.from_value(
+            {
+                "status": "not_applicable",
+                "tools": {"status": "supported", "count": 9},
+                "resources": {"status": "supported", "count": 2, "template_count": 1},
+            },
+            transport="builtin",
+        )
+        self.assertEqual(parsed.status, "not_applicable")
+        self.assertEqual(parsed.tools.count, 9)
+        self.assertEqual(parsed.resources.count, 2)
 
 
 class _FakeMcpStore:

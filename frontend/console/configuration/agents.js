@@ -53,14 +53,6 @@ function capKindLabel(cap) {
   return CATEGORY_LABELS[cap.category] || cap.category;
 }
 
-function capabilityDisclosureLabel(cap) {
-  if (cap.disclosure_mode === "conditional") return "有附件时可用";
-  if (cap.disclosure_mode === "search") {
-    return `自动预选 Top ${cap.preselect_limit || 3} · 搜索 Top ${cap.search_result_limit || 5}`;
-  }
-  return "始终可用";
-}
-
 function isCapabilitySelected(cap, selectedSet) {
   return selectedSet.has(cap.code);
 }
@@ -288,21 +280,11 @@ const agentsAdmin = {
   openEditor() {
     const editor = document.getElementById("agentModal");
     if (!editor) return;
-    this.switchEditorTab("tools");
+    this.switchCapTab("builtin");
     if (!editor.open) editor.show();
     document.body.classList.add("agent-editor-open");
     agentEditorDirty = false;
     window.lucide?.createIcons();
-  },
-
-  switchEditorTab(tab) {
-    const target = tab === "skills" ? "skills" : "tools";
-    document.querySelectorAll("[data-agent-editor-tab]").forEach((button) => {
-      button.setAttribute("aria-selected", String(button.dataset.agentEditorTab === target));
-    });
-    document.querySelectorAll("[data-agent-editor-pane]").forEach((pane) => {
-      pane.classList.toggle("hidden", pane.dataset.agentEditorPane !== target);
-    });
   },
 
   isEditorOpen() {
@@ -333,8 +315,6 @@ const agentsAdmin = {
     const displayName = cap.label || capDisplayName(cap.code, cap.category);
     const kindLabel = capKindLabel(cap);
     const toolCount = Number(cap.tool_count ?? cap.tools?.length ?? 0);
-    const searchText = `${displayName} ${cap.description || ""} ${cap.code}`.toLowerCase();
-
     const toolsHtml = toolCount
       ? `<details class="cap-card-tools">
           <summary>${toolCount} 个工具</summary>
@@ -347,7 +327,7 @@ const agentsAdmin = {
         </details>`
       : "";
 
-    return `<article class="cap-card kind-${escapeHtml(cap.category)}" data-cap-name="${escapeHtml(cap.code)}" data-search="${escapeHtml(searchText)}">
+    return `<article class="cap-card kind-${escapeHtml(cap.category)}" data-cap-name="${escapeHtml(cap.code)}">
       <div class="cap-card-header">
         <label class="cap-switch" title="${checked ? "已关联" : "未关联"}">
           <input type="checkbox" name="cap" value="${escapeHtml(cap.code)}" ${checked ? "checked" : ""} />
@@ -355,9 +335,8 @@ const agentsAdmin = {
         </label>
         <div class="cap-card-info">
           <div class="cap-card-title">
-          <span class="kind-badge kind-${escapeHtml(cap.category)} source-${escapeHtml(cap.source || "unknown")}">${escapeHtml(kindLabel)}</span>
+            <span class="kind-badge kind-${escapeHtml(cap.category)} source-${escapeHtml(cap.source || "unknown")}">${escapeHtml(kindLabel)}</span>
             <span>${escapeHtml(displayName)}</span>
-            <span class="kind-badge disclosure-badge">${escapeHtml(capabilityDisclosureLabel(cap))}</span>
           </div>
           ${cap.description ? `<p class="cap-card-desc">${escapeHtml(cap.description)}</p>` : ""}
         </div>
@@ -366,48 +345,21 @@ const agentsAdmin = {
     </article>`;
   },
 
-  countSelectedInGroup(group, selectedSet) {
-    const caps = (state.capabilities || []).filter((c) => capabilityGroup(c) === group);
-    return caps.filter((c) => isCapabilitySelected(c, selectedSet)).length;
-  },
-
   renderCapabilityCheckboxes(selected = []) {
     const container = document.getElementById("agentCapGroups");
-    const tabsEl = document.getElementById("capTabs");
-    const searchEl = document.getElementById("capSearch");
-    if (!container || !tabsEl) return;
-
-    if (searchEl) searchEl.value = "";
+    if (!container) return;
 
     const caps = state.capabilities || [];
-    if (!caps.length) {
-      tabsEl.innerHTML = "";
-      container.innerHTML = `<div class="cap-empty">无法加载能力列表</div>`;
-      this.updateCapCounter();
-      return;
-    }
-
     const selectedSet = buildCapabilitySelectionSet(selected);
-    const { byGroup, groups } = groupCapabilities(caps);
-    const defaultTab = groups.find((group) => group !== "mcp") || groups[0];
+    const { byGroup } = groupCapabilities(caps);
 
-    tabsEl.innerHTML = groups
+    container.innerHTML = GROUP_ORDER
       .map((group) => {
-        const total = byGroup[group].length;
-        const selectedCount = this.countSelectedInGroup(group, selectedSet);
-        const active = group === defaultTab ? "active" : "";
-        const label = GROUP_LABELS[group] || group;
-        return `<button type="button" class="cap-tab ${active}" data-kind="${escapeHtml(group)}">
-          ${escapeHtml(label)}
-          <span class="cap-tab-badge" data-kind-badge="${escapeHtml(group)}">${selectedCount}/${total}</span>
-        </button>`;
-      })
-      .join("");
-
-    container.innerHTML = groups
-      .map((group) => {
-        const cards = byGroup[group].map((c) => this.renderCapCard(c, selectedSet)).join("");
-        const hidden = group !== defaultTab ? "hidden" : "";
+        const groupCaps = byGroup[group] || [];
+        const cards = groupCaps.length
+          ? groupCaps.map((c) => this.renderCapCard(c, selectedSet)).join("")
+          : `<div class="cap-empty">暂无${escapeHtml(GROUP_LABELS[group] || group)}</div>`;
+        const hidden = group !== "builtin" ? "hidden" : "";
         const label = GROUP_LABELS[group] || group;
         return `<div class="cap-panel ${hidden}" data-kind-panel="${escapeHtml(group)}">
           <div class="cap-panel-toolbar">
@@ -419,20 +371,19 @@ const agentsAdmin = {
       })
       .join("");
 
-    this.filterCaps();
     this.updateCapCounter();
   },
 
   switchCapTab(kind) {
-    document.querySelectorAll(".cap-tab").forEach((tab) => {
-      tab.classList.toggle("active", tab.dataset.kind === kind);
+    const resources = document.querySelector(".agent-editor-resources");
+    resources?.querySelectorAll(".cap-tab").forEach((tab) => {
+      const active = tab.dataset.kind === kind;
+      tab.classList.toggle("active", active);
+      tab.setAttribute("aria-selected", String(active));
     });
-    document.querySelectorAll(".cap-panel").forEach((panel) => {
+    resources?.querySelectorAll(".cap-panel").forEach((panel) => {
       panel.classList.toggle("hidden", panel.dataset.kindPanel !== kind);
     });
-    const searchEl = document.getElementById("capSearch");
-    if (searchEl) searchEl.value = "";
-    this.filterCaps();
   },
 
   setCapsInKind(kind, checked) {
@@ -444,55 +395,11 @@ const agentsAdmin = {
     this.updateCapCounter();
   },
 
-  filterCaps() {
-    const query = (document.getElementById("capSearch")?.value || "").trim().toLowerCase();
-    const activePanel = document.querySelector(".cap-panel:not(.hidden)");
-    if (!activePanel) return;
-
-    const cards = activePanel.querySelectorAll(".cap-card");
-    let visible = 0;
-    cards.forEach((card) => {
-      const match = !query || (card.dataset.search || "").includes(query);
-      card.classList.toggle("is-filtered-out", !match);
-      if (match) visible += 1;
-    });
-
-    const grid = activePanel.querySelector(".cap-grid");
-    let emptyEl = activePanel.querySelector(".cap-grid-empty");
-    if (!emptyEl && grid) {
-      emptyEl = document.createElement("div");
-      emptyEl.className = "cap-empty cap-grid-empty hidden";
-      emptyEl.textContent = "没有匹配的能力";
-      grid.after(emptyEl);
-    }
-    if (emptyEl) {
-      emptyEl.classList.toggle("hidden", visible > 0 || cards.length === 0);
-    }
-  },
-
   updateCapCounter() {
-    const counter = document.getElementById("capCounter");
-    if (!counter) return;
-
-    const allBoxes = document.querySelectorAll('#agentCapGroups input[name="cap"]');
-    const checked = document.querySelectorAll('#agentCapGroups input[name="cap"]:checked');
     const configurableChecked = document.querySelectorAll(
       '#agentCapGroups input[name="cap"]:checked:not(:disabled)'
     );
-    const total = allBoxes.length;
-    const selected = checked.length;
     const selectedSet = new Set(Array.from(configurableChecked).map((b) => b.value));
-
-    if (!total) {
-      counter.textContent = "";
-      return;
-    }
-
-    if (selected === 0) {
-      counter.textContent = "无能力";
-    } else {
-      counter.textContent = `已选 ${selected} / ${total}`;
-    }
 
     document.querySelectorAll("[data-kind-badge]").forEach((badge) => {
       const group = badge.dataset.kindBadge;
@@ -533,7 +440,7 @@ const agentsAdmin = {
     ];
     if (!skills.length) {
       container.innerHTML = `<div class="cap-empty">暂无可配置 Skill</div>`;
-      counter.textContent = "未选择";
+      counter.textContent = "0/0";
       return;
     }
     container.innerHTML = skills.map((skill) => {
@@ -560,7 +467,8 @@ const agentsAdmin = {
     const counter = document.getElementById("agentSkillCounter");
     if (!counter) return;
     const selected = document.querySelectorAll('#agentSkillChoices input[name="agentSkill"]:checked').length;
-    counter.textContent = selected ? `已选 ${selected}` : "未选择";
+    const total = document.querySelectorAll('#agentSkillChoices input[name="agentSkill"]').length;
+    counter.textContent = `${selected}/${total}`;
   },
 
   getSelectedSkills() {
@@ -736,11 +644,11 @@ const agentsAdmin = {
   },
 
   initCapSection() {
-    const section = document.querySelector(".cap-section");
-    if (!section || section.dataset.bound) return;
-    section.dataset.bound = "1";
+    const resources = document.querySelector(".agent-editor-resources");
+    if (!resources || resources.dataset.bound) return;
+    resources.dataset.bound = "1";
 
-    section.addEventListener("click", (e) => {
+    resources.addEventListener("click", (e) => {
       const tab = e.target.closest(".cap-tab");
       if (tab) {
         this.switchCapTab(tab.dataset.kind);
@@ -757,17 +665,15 @@ const agentsAdmin = {
       }
     });
 
-    section.addEventListener("change", (e) => {
+    resources.addEventListener("change", (e) => {
       if (e.target.matches('input[name="cap"]')) {
         this.updateCapCounter();
       }
+      if (e.target.matches('input[name="agentSkill"]')) {
+        this.updateSkillCounter();
+      }
     });
 
-    document.getElementById("capSearch")?.addEventListener("input", () => this.filterCaps());
-    document.getElementById("agentSkillChoices")?.addEventListener("change", () => this.updateSkillCounter());
-    document.querySelectorAll("[data-agent-editor-tab]").forEach((button) => {
-      button.addEventListener("click", () => this.switchEditorTab(button.dataset.agentEditorTab));
-    });
   },
 
   initListControls() {

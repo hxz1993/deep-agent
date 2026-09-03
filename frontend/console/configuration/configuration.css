@@ -305,10 +305,21 @@ html, body {
 }
 
 .ui-tool-selected-header {
+  position: relative;
   align-items: flex-start;
   min-height: 90px;
   padding: 16px 18px;
-  border-bottom: 1px solid var(--console-card-border, var(--border));
+  border-bottom: 0;
+}
+
+.ui-tool-selected-header::after {
+  content: "";
+  position: absolute;
+  right: 18px;
+  bottom: 0;
+  left: 18px;
+  height: 1px;
+  background: var(--console-card-border, var(--border));
 }
 
 .ui-tool-selected-header .row-actions {
@@ -1400,45 +1411,6 @@ dialog.console-action-dialog::backdrop {
   line-height: 1.55;
 }
 
-.ui-tool-detail-grid {
-  display: grid;
-  grid-template-columns: 140px minmax(0, 1fr);
-  margin: 0;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  overflow: hidden;
-}
-
-.ui-tool-detail-grid dt,
-.ui-tool-detail-grid dd {
-  margin: 0;
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--border);
-}
-
-.ui-tool-detail-grid dt {
-  color: var(--text-dim);
-  background: var(--bg);
-  font-size: 13px;
-}
-
-.ui-tool-detail-grid dd {
-  min-width: 0;
-  border-left: 1px solid var(--border);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
-.ui-tool-detail-grid > :nth-last-child(-n + 2) {
-  border-bottom: none;
-}
-
-.ui-tool-detail-code {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 12px;
-  line-height: 1.55;
-}
-
 @media (max-width: 640px) {
   .web-search-mode-grid { grid-template-columns: 1fr; }
   .web-search-provider-grid,
@@ -1457,17 +1429,6 @@ dialog.console-action-dialog::backdrop {
     min-width: 840px;
   }
 
-  .ui-tool-detail-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .ui-tool-detail-grid dd {
-    border-left: none;
-  }
-
-  .ui-tool-detail-grid > :nth-last-child(2) {
-    border-bottom: 1px solid var(--border);
-  }
 }
 
 .field-hint {
@@ -2759,14 +2720,21 @@ dialog.console-action-dialog::backdrop {
 }
 
 .kind-badge {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  min-height: 18px;
   font-size: 12px;
+  line-height: 1;
   font-weight: 600;
   padding: 2px 6px;
   border-radius: 4px;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
+  letter-spacing: 0;
   flex-shrink: 0;
+}
+
+.kind-badge.kind-builtin {
+  background: color-mix(in srgb, var(--text-faint) 12%, transparent);
+  color: var(--text-dim);
 }
 
 .kind-badge.kind-native {
@@ -2816,35 +2784,34 @@ dialog.console-action-dialog::backdrop {
 }
 
 .cap-switch-ui {
-  width: 36px;
-  height: 20px;
+  width: 30px;
+  height: 18px;
   border-radius: 999px;
-  background: var(--bg-elev);
-  border: 1px solid var(--border);
-  transition: background 0.15s, border-color 0.15s;
+  background: var(--text-faint);
+  transition: background 0.15s;
   position: relative;
 }
 
 .cap-switch-ui::after {
   content: "";
   position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 14px;
-  height: 14px;
+  top: 50%;
+  left: 3px;
+  width: 12px;
+  height: 12px;
   border-radius: 50%;
-  background: var(--text-dim);
+  background: #fff;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 18%);
+  transform: translateY(-50%);
   transition: transform 0.15s, background 0.15s;
 }
 
 .cap-switch input:checked + .cap-switch-ui {
   background: var(--accent);
-  border-color: var(--accent);
 }
 
 .cap-switch input:checked + .cap-switch-ui::after {
-  transform: translateX(16px);
-  background: var(--send-fg);
+  transform: translate(12px, -50%);
 }
 
 .cap-switch input:disabled + .cap-switch-ui {
@@ -2973,7 +2940,7 @@ dialog.console-action-dialog::backdrop {
 }
 
 #uiToolModal {
-  width: min(1480px, calc(100vw - 48px));
+  width: min(1040px, calc(100vw - 48px));
   max-width: none;
 }
 

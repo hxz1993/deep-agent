@@ -1,7 +1,18 @@
-export function processDisclosureLabel({ pending = false, running = false } = {}) {
-  if (pending) return "处理过程 · 等待操作";
-  if (running) return "处理过程 · 处理中";
-  return "处理过程";
+export function formatProcessElapsed(elapsedSeconds) {
+  if (elapsedSeconds === null || elapsedSeconds === undefined || elapsedSeconds === "") return "";
+  const value = Number(elapsedSeconds);
+  if (!Number.isFinite(value) || value < 0) return "";
+  const totalSeconds = Math.max(0, Math.round(value));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return minutes > 0 ? `${minutes}分${seconds}秒` : `${seconds}秒`;
+}
+
+export function processDisclosureLabel({ pending = false, running = false, elapsedSeconds = null } = {}) {
+  if (pending) return "等待操作";
+  const elapsed = formatProcessElapsed(elapsedSeconds);
+  if (running) return elapsed ? `处理中 · ${elapsed}` : "处理中";
+  return elapsed ? `已处理 · 用时 ${elapsed}` : "已处理";
 }
 
 export const ASSISTANT_PRESENTATION_ACTIONS = Object.freeze({
@@ -27,6 +38,7 @@ export function isPlanningToolEvent(event = {}) {
 function toolCallFromConversationItem(item = {}) {
   return {
     tool: item.tool_name,
+    display_name: item.display_name,
     args: item.input,
     tool_call_id: item.call_id,
     source: item.mode === "tool_search" ? "tool_search" : null,
@@ -69,6 +81,7 @@ export function assistantActionsFromHistoryItems(items = []) {
         type: ASSISTANT_PRESENTATION_ACTIONS.TOOL_RESULT,
         result: {
           tool: item.tool_name,
+          display_name: item.display_name,
           result: item.output,
           tool_call_id: item.call_id,
           source: call.source,

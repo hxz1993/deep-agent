@@ -139,7 +139,7 @@ class SoftGuardrailBackendTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.result, 2)
         self.assertEqual(result.security_level, "none")
 
-    async def test_execute_blocks_inet_socket_when_seccomp_works(self) -> None:
+    async def test_execute_does_not_apply_blanket_network_seccomp(self) -> None:
         code = (
             "import socket\n"
             "outcome = 'allowed'\n"
@@ -158,10 +158,7 @@ class SoftGuardrailBackendTests(unittest.IsolatedAsyncioTestCase):
             )
         )
         self.assertEqual(result.status, "ok")
-        # Degrade path: if seccomp did not load, socket may still succeed.
-        if result.result == "allowed":
-            self.skipTest("network seccomp did not apply in worker (degraded)")
-        self.assertEqual(result.result, "blocked:1")
+        self.assertEqual(result.result, "allowed")
 
     async def test_execute_blocks_write_outside_work_dir_when_landlock_works(self) -> None:
         code = (

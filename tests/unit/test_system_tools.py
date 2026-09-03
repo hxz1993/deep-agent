@@ -48,6 +48,7 @@ class SystemToolCatalogTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(domain.label)
             self.assertTrue(domain.description)
             for tool in domain.tools:
+                self.assertTrue(tool.display_name)
                 self.assertTrue(tool.source)
                 self.assertTrue(tool.injection_condition)
                 self.assertTrue(tool.description)

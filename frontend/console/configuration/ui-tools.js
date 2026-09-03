@@ -1,18 +1,3 @@
-const SOURCE_LABELS = {
-  builtin: "内置",
-  manual: "自定义",
-};
-
-function uiToolDisplayValue(value) {
-  if (value === null || value === undefined || value === "") return "—";
-  return String(value);
-}
-
-function uiToolJsonValue(value) {
-  if (value === null || value === undefined) return "—";
-  return JSON.stringify(value, null, 2);
-}
-
 function parseUiToolSchema(value, { label, required = false, requireObject = false } = {}) {
   const text = String(value || "").trim();
   if (!text) {
@@ -176,6 +161,7 @@ const uiToolsAdmin = {
   editingToolPackageCode: null,
   selectedPackageCode: null,
   packages: [],
+  formMode: null,
   _schemaReadOnly: false,
 
   paramsEl() {
@@ -518,26 +504,19 @@ const uiToolsAdmin = {
   async openDetails(name) {
     try {
       const tool = await apiFetch(`/api/v1/ui-tools/${encodeURIComponent(name)}`);
-      const fields = [
-        ["名称", tool.name],
-        ["所属工具包", tool.package_code],
-        ["来源", SOURCE_LABELS[tool.source] || tool.source],
-        ["Widget", tool.widget],
-        ["描述", tool.description],
-        ["参数 Schema", uiToolJsonValue(tool.parameters_json_schema), "code"],
-        ["结果 Schema", uiToolJsonValue(tool.result_schema), "code"],
-        ["Metadata", uiToolJsonValue(tool.metadata), "code"],
-        ["创建时间", formatDate(tool.created_at)],
-        ["更新时间", formatDate(tool.updated_at)],
-      ];
-      document.getElementById("uiToolDetailTitle").textContent = `查看 · ${tool.name}`;
-      document.getElementById("uiToolDetailGrid").innerHTML = fields
-        .map(([label, value, kind]) => `
-          <dt>${escapeHtml(label)}</dt>
-          <dd class="${kind === "code" ? "ui-tool-detail-code" : ""}">${escapeHtml(uiToolDisplayValue(value))}</dd>
-        `)
-        .join("");
-      document.getElementById("uiToolDetailModal").showModal();
+      this.editingName = null;
+      this.editingSource = tool.source;
+      this.editingToolPackageCode = tool.package_code;
+      document.getElementById("uiToolModalTitle").textContent = `查看 · ${tool.name}`;
+      document.getElementById("uiToolName").value = tool.name;
+      document.getElementById("uiToolDescription").value = tool.description || "";
+      this.setWidgetValue(tool.widget || "");
+      document.getElementById("uiToolMetadata").value = tool.metadata
+        ? JSON.stringify(tool.metadata, null, 2)
+        : "";
+      this.setFormMode("readonly");
+      this.loadSchemas(tool.parameters_json_schema, tool.result_schema, { readOnly: true });
+      document.getElementById("uiToolModal").showModal();
     } catch (err) {
       showToast(err.message, true);
     }
@@ -545,13 +524,17 @@ const uiToolsAdmin = {
 
   setFormMode(mode) {
     const isCreate = mode === "create";
+    const isReadOnly = mode === "readonly";
+    this.formMode = mode;
     document.getElementById("uiToolTemplateSection").classList.toggle("hidden", !isCreate);
     document.getElementById("uiToolName").disabled = !isCreate;
-    document.getElementById("uiToolDescription").readOnly = false;
-    document.getElementById("uiToolWidget").disabled = false;
-    document.getElementById("uiToolWidgetCustom").readOnly = false;
-    document.getElementById("uiToolMetadata").readOnly = false;
-    this.setSchemaReadOnly(false);
+    document.getElementById("uiToolDescription").readOnly = isReadOnly;
+    document.getElementById("uiToolWidget").disabled = isReadOnly;
+    document.getElementById("uiToolWidgetCustom").readOnly = isReadOnly;
+    document.getElementById("uiToolMetadata").readOnly = isReadOnly;
+    document.getElementById("saveUiToolBtn").classList.toggle("hidden", isReadOnly);
+    document.getElementById("cancelUiToolBtn").textContent = isReadOnly ? "关闭" : "取消";
+    this.setSchemaReadOnly(isReadOnly);
   },
 
   openCreate() {
@@ -596,6 +579,7 @@ const uiToolsAdmin = {
 
   async save(event) {
     event.preventDefault();
+    if (this.formMode === "readonly") return;
     const form = event.currentTarget;
     AdminFormFeedback.clear(form);
     let parameters_json_schema;
@@ -724,11 +708,5 @@ document.addEventListener("DOMContentLoaded", () => {
   });
   document.getElementById("cancelUiToolBtn")?.addEventListener("click", () => {
     document.getElementById("uiToolModal").close();
-  });
-  document.getElementById("closeUiToolDetailModal")?.addEventListener("click", () => {
-    document.getElementById("uiToolDetailModal").close();
-  });
-  document.getElementById("dismissUiToolDetailModal")?.addEventListener("click", () => {
-    document.getElementById("uiToolDetailModal").close();
   });
 });

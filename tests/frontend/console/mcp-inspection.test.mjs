@@ -162,12 +162,36 @@ test("URL MCP 明确展示缺失、失效和沿用快照状态", () => {
 
 test("Builtin 显示内置运行时且不伪装成待检测", () => {
   const ui = loadInspectionUi();
-  const view = ui.inspectionView(null, "builtin");
+  const view = ui.inspectionView({
+    status: "not_applicable",
+    checked_at: "2026-09-02T10:00:00Z",
+    tools: { count: 18 },
+    resources: { count: 2, template_count: 1 },
+  }, "builtin");
   assert.equal(view.text, "内置运行时");
-  assert.deepEqual(JSON.parse(JSON.stringify(view.counts)), { tools: 0, resources: 0, templates: 0 });
+  assert.deepEqual(JSON.parse(JSON.stringify(view.counts)), { tools: 18, resources: 2, templates: 1 });
   assert.equal(ui.canDeleteMcp("builtin"), false);
   assert.equal(ui.canDeleteMcp("url"), true);
   assert.equal(ui.canDeleteMcp("stdio"), true);
+  assert.match(source, /s\.transport === "url" \|\| s\.transport === "builtin"/);
+});
+
+test("Builtin 刷新反馈只描述自身清单，不声称保存 URL 工具快照", () => {
+  const ui = loadInspectionUi();
+  const message = ui.inspectionToast({
+    inspection: {
+      status: "not_applicable",
+      tools: { count: 18 },
+      resources: { count: 2, template_count: 1 },
+    },
+    changes: {
+      tool_count: { before: 0, after: 18 },
+      resource_count: { before: 0, after: 2 },
+      template_count: { before: 0, after: 1 },
+    },
+  }).message;
+  assert.match(message, /内置清单已刷新并保存/);
+  assert.doesNotMatch(message, /工具快照|连接成功/);
 });
 
 test("历史 stdio MCP 明确显示为停止支持", () => {

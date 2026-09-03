@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import hashlib
 import unittest
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from pydantic_ai import ModelRetry, RunContext
+from pydantic_ai import ModelRetry, RunContext, ToolFailed, ToolReturn
 from pydantic_ai.models.test import TestModel
 from pydantic_ai.usage import RunUsage
 
@@ -17,8 +18,10 @@ from deep_agent.sandbox.toolset import build_python_sandbox_tool_package
 from deep_agent.sandbox.types import (
     ExecuteRequest,
     ExecuteResult,
+    SandboxPublishedFile,
     TruncationMetadata,
 )
+from deep_agent.files.storage import StoredFile
 from deep_agent.schemas.attachment import AttachmentRef
 from tests.helpers.sandbox import sandbox_test_python
 
@@ -28,6 +31,8 @@ def _context(
     user: str | None = "user-1",
     headers: dict[str, str] | None = None,
     attachment_bytes: dict[str, bytes] | None = None,
+    file_store: Any | None = None,
+    session_artifacts: dict[str, dict[str, Any]] | None = None,
 ) -> RunContext[AgentDeps]:
     refs = {}
     if attachment_bytes:
@@ -39,7 +44,9 @@ def _context(
             user=user,
             request_headers=headers or {"authorization": "Bearer secret", "cookie": "sid=1"},
             attachment_by_id=refs,
+            session_file_artifacts=session_artifacts or {},
             file_bytes={f"attachment:{key}": value for key, value in (attachment_bytes or {}).items()},
+            file_store=file_store,
             context_state=MagicMock(),
         ),
         model=TestModel(),
@@ -55,6 +62,7 @@ class FakeSandboxBackend:
         )
         self.execute = AsyncMock(side_effect=self._execute)
         self.aclose = AsyncMock()
+        self.published_files: tuple[SandboxPublishedFile, ...] = ()
 
     async def _execute(self, request: ExecuteRequest) -> ExecuteResult:
         self.requests.append(request)
@@ -72,7 +80,37 @@ class FakeSandboxBackend:
             security_level="none",
             memory_peak_bytes=None,
             truncated=TruncationMetadata(),
+            published_files=self.published_files,
         )
+
+
+class FakeFileStore:
+    def __init__(self, *, fail_upload_at: int | None = None) -> None:
+        self.fail_upload_at = fail_upload_at
+        self.uploaded: list[dict[str, Any]] = []
+        self.deleted: list[str] = []
+
+    async def upload(self, **kwargs: Any) -> StoredFile:
+        if self.fail_upload_at is not None and len(self.uploaded) + 1 == self.fail_upload_at:
+            raise OSError("upload failed")
+        self.uploaded.append(dict(kwargs))
+        index = len(self.uploaded)
+        return StoredFile(
+            id=f"file-{index}",
+            file_name=str(kwargs["file_name"]),
+            file_size=len(kwargs["data"]),
+            file_type=str(kwargs["file_type"]),
+            mime=kwargs.get("mime"),
+        )
+
+    async def download(self, file_id: str, request_headers: dict[str, str]) -> bytes:
+        raise AssertionError((file_id, request_headers))
+
+    async def delete(self, file_id: str, request_headers: dict[str, str]) -> None:
+        self.deleted.append(file_id)
+
+    async def register_download(self, **kwargs: Any) -> str:
+        raise AssertionError(kwargs)
 
 
 class SandboxFactoryTests(unittest.TestCase):
@@ -257,10 +295,7 @@ class SandboxCapabilityTests(unittest.IsolatedAsyncioTestCase):
             {item.name for item in capability.tools},
             {"execute_python"},
         )
-        self.assertEqual(
-            capability.tools[0].description,
-            "在全新的无状态 Python 环境中执行一次数据计算。",
-        )
+        self.assertIn("发布转换产物", capability.tools[0].description)
 
     async def test_model_instructions_are_concise_and_include_fixed_example(self) -> None:
         backend = FakeSandboxBackend()
@@ -284,11 +319,18 @@ class SandboxCapabilityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(registry.toolsets([]), [])
         self.assertEqual(registry.toolsets(["builtin:sandbox"]), [capability.toolset])
 
-    async def test_tool_signature_only_code_and_inputs(self) -> None:
+    async def test_tool_signature_exposes_code_inputs_and_files(self) -> None:
         backend = FakeSandboxBackend()
         tool, _ = await self._tool(backend)
         schema = tool.tool_def.parameters_json_schema
-        self.assertEqual(set(schema.get("properties", {}).keys()), {"code", "inputs"})
+        self.assertEqual(
+            set(schema.get("properties", {}).keys()),
+            {"code", "inputs", "files"},
+        )
+        description = tool.tool_def.description or ""
+        self.assertIn("确实需要解析、转码或生成新文件", description)
+        self.assertIn("load_file_data(url=...)", description)
+        self.assertIn("仅要求发送/转交 WebP", description)
 
     async def test_user_none_is_rejected(self) -> None:
         backend = FakeSandboxBackend()
@@ -333,15 +375,120 @@ class SandboxCapabilityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["arguments"], ())
         self.assertEqual(payload["files"], ())
 
-    async def test_backend_result_is_plain_dict(self) -> None:
+    async def test_backend_result_is_tool_return_without_binary(self) -> None:
         backend = FakeSandboxBackend()
         tool, _ = await self._tool(backend)
         result = await tool.call_func({"code": "21 * 2"}, _context())
 
-        self.assertIsInstance(result, dict)
-        self.assertEqual(result["status"], "ok")
-        self.assertEqual(result["result"], 42)
-        self.assertEqual(result["backend"], "fake")
+        self.assertIsInstance(result, ToolReturn)
+        assert isinstance(result, ToolReturn)
+        self.assertEqual(result.return_value["status"], "ok")
+        self.assertEqual(result.return_value["result"], 42)
+        self.assertEqual(result.return_value["backend"], "fake")
+        self.assertEqual(result.return_value["files"], [])
+        self.assertEqual(result.metadata, {"generated_files": []})
+
+    async def test_authorized_input_and_published_file_are_transferred_by_reference(self) -> None:
+        backend = FakeSandboxBackend()
+        backend.published_files = (
+            SandboxPublishedFile(
+                file_name="result.png",
+                mime="image/png",
+                byte_size=3,
+                sha256="ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+                data=b"abc",
+            ),
+        )
+        store = FakeFileStore()
+        tool, _ = await self._tool(backend)
+        ctx = _context(attachment_bytes={"source-id": b"source"}, file_store=store)
+
+        returned = await tool.call_func(
+            {
+                "code": "pass",
+                "files": [{"file_id": "source-id", "path": "inputs/source.bin"}],
+            },
+            ctx,
+        )
+
+        self.assertIsInstance(returned, ToolReturn)
+        assert isinstance(returned, ToolReturn)
+        request = backend.requests[-1]
+        self.assertEqual(request.files[0].file_id, "source-id")
+        self.assertEqual(request.files[0].decoded(), b"source")
+        refs = returned.return_value["files"]
+        self.assertEqual(refs[0]["file_id"], "file-1")
+        self.assertNotIn("data", refs[0])
+        self.assertNotIn("path", refs[0])
+        self.assertEqual(returned.metadata, {"generated_files": refs})
+        self.assertEqual(ctx.deps.session_file_artifacts["file-1"], refs[0])
+
+    async def test_tool_return_scrubs_sandbox_paths_but_keeps_file_references(self) -> None:
+        backend = FakeSandboxBackend()
+        published = SandboxPublishedFile(
+            file_name="result.png",
+            mime="image/png",
+            byte_size=3,
+            sha256=hashlib.sha256(b"abc").hexdigest(),
+            data=b"abc",
+        )
+        backend.execute = AsyncMock(
+            return_value=ExecuteResult(
+                request_id="request-1",
+                status="ok",
+                exit_code=0,
+                stdout=(
+                    "read inputs/source.bin, wrote outputs/result.png at "
+                    "/private/var/folders/demo/sandbox/result.png\n"
+                ),
+                stderr="",
+                result={"input": "inputs/source.bin", "output": "outputs/result.png"},
+                error=None,
+                duration_ms=1,
+                backend="fake",
+                environment="test",
+                security_level="none",
+                memory_peak_bytes=None,
+                truncated=TruncationMetadata(),
+                published_files=(published,),
+            )
+        )
+        store = FakeFileStore()
+        tool, _ = await self._tool(backend)
+
+        returned = await tool.call_func(
+            {
+                "code": "pass",
+                "files": [{"file_id": "source-id", "path": "inputs/source.bin"}],
+            },
+            _context(attachment_bytes={"source-id": b"source"}, file_store=store),
+        )
+
+        assert isinstance(returned, ToolReturn)
+        encoded = str(returned.return_value)
+        self.assertNotIn("inputs/source.bin", encoded)
+        self.assertNotIn("outputs/result.png", encoded)
+        self.assertNotIn("/private/var/folders", encoded)
+        self.assertIn("[sandbox-path]", encoded)
+        self.assertEqual(returned.return_value["files"][0]["file_id"], "file-1")
+
+    async def test_multiple_output_upload_failure_rolls_back(self) -> None:
+        backend = FakeSandboxBackend()
+        backend.published_files = tuple(
+            SandboxPublishedFile(
+                file_name=f"result-{index}.txt",
+                mime="text/plain",
+                byte_size=1,
+                sha256=hashlib.sha256(bytes([index])).hexdigest(),
+                data=bytes([index]),
+            )
+            for index in (1, 2)
+        )
+        store = FakeFileStore(fail_upload_at=2)
+        tool, _ = await self._tool(backend)
+        with self.assertRaises(ToolFailed):
+            await tool.call_func({"code": "pass"}, _context(file_store=store))
+        self.assertEqual(store.deleted, ["file-1"])
 
 
 if __name__ == "__main__":

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import hashlib
 import json
 from pathlib import PurePosixPath
 from typing import Any, Literal
@@ -32,7 +33,10 @@ ExecuteMode = Literal["expression", "script"]
 MAX_CODE_BYTES = 64 * 1024
 MAX_INPUTS_JSON_BYTES = 2 * 1024 * 1024
 MAX_SCRIPT_RESOURCE_FILES = 16
-MAX_SCRIPT_RESOURCE_BYTES = 2 * 1024 * 1024
+# FileStore attachments and generated files share the product's default 20 MiB
+# per-file ceiling. The tool layer additionally applies the current runtime
+# configuration before a request reaches the backend.
+MAX_SCRIPT_RESOURCE_BYTES = 20 * 1024 * 1024
 MAX_SCRIPT_ARGUMENTS = 64
 MAX_SCRIPT_ARGUMENT_BYTES = 4 * 1024
 MAX_STDOUT_BYTES = 64 * 1024
@@ -81,6 +85,7 @@ class SandboxInputFile(BaseModel):
 
     path: str
     content_base64: str
+    file_id: str | None = None
 
     @field_validator("path")
     @classmethod
@@ -93,7 +98,8 @@ class SandboxInputFile(BaseModel):
             or path.is_absolute()
             or not path.parts
             or ".." in path.parts
-            or path.parts[0] in {"outputs", "inputs.json", "main.py"}
+            or path.parts[0]
+            in {"outputs", "inputs.json", "main.py", ".deepagent-files.json"}
         ):
             raise ValueError("sandbox input file path is unsafe")
         return path.as_posix()
@@ -108,10 +114,17 @@ class SandboxInputFile(BaseModel):
         return value
 
     @classmethod
-    def from_bytes(cls, path: str, content: bytes) -> SandboxInputFile:
+    def from_bytes(
+        cls,
+        path: str,
+        content: bytes,
+        *,
+        file_id: str | None = None,
+    ) -> SandboxInputFile:
         return cls(
             path=path,
             content_base64=base64.b64encode(content).decode("ascii"),
+            file_id=file_id,
         )
 
     def decoded(self) -> bytes:
@@ -155,16 +168,38 @@ class ExecuteRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_mode_files(self) -> ExecuteRequest:
-        if self.mode == "expression" and (self.arguments or self.files):
-            raise ValueError("expression mode does not accept arguments or files")
+        if self.mode == "expression" and self.arguments:
+            raise ValueError("expression mode does not accept arguments")
         if len(self.files) > MAX_SCRIPT_RESOURCE_FILES:
             raise ValueError(f"files exceed {MAX_SCRIPT_RESOURCE_FILES} items")
         paths = [item.path for item in self.files]
         if len(paths) != len(set(paths)):
             raise ValueError("sandbox input file paths must be unique")
-        total = sum(len(item.decoded()) for item in self.files)
-        if total > MAX_SCRIPT_RESOURCE_BYTES:
-            raise ValueError(f"sandbox input files exceed {MAX_SCRIPT_RESOURCE_BYTES} bytes")
+        for item in self.files:
+            if len(item.decoded()) > MAX_SCRIPT_RESOURCE_BYTES:
+                raise ValueError(
+                    f"sandbox input file exceeds {MAX_SCRIPT_RESOURCE_BYTES} bytes"
+                )
+        return self
+
+
+class SandboxPublishedFile(BaseModel):
+    """Host-only bytes collected from a successful sandbox execution."""
+
+    model_config = ConfigDict(frozen=True)
+
+    file_name: str
+    mime: str | None = None
+    byte_size: int = Field(ge=0)
+    sha256: str
+    data: bytes = Field(exclude=True, repr=False)
+
+    @model_validator(mode="after")
+    def validate_integrity(self) -> SandboxPublishedFile:
+        if self.byte_size != len(self.data):
+            raise ValueError("published file size mismatch")
+        if self.sha256 != hashlib.sha256(self.data).hexdigest():
+            raise ValueError("published file hash mismatch")
         return self
 
 
@@ -184,6 +219,11 @@ class ExecuteResult(BaseModel):
     security_level: SecurityLevel
     memory_peak_bytes: int | None = Field(default=None, ge=0)
     truncated: TruncationMetadata
+    published_files: tuple[SandboxPublishedFile, ...] = Field(
+        default=(),
+        exclude=True,
+        repr=False,
+    )
 
     @field_validator("stdout")
     @classmethod

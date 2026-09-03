@@ -108,6 +108,26 @@ test("UI 工具基础信息左右布局且三类 JSON 并排编辑", () => {
   assert.match(styles, /\.ui-tool-json-grid\s*\{[^}]*grid-template-columns: repeat\(3,/);
 });
 
+test("内置 UI 工具复用自定义工具弹框并以只读模式展示", () => {
+  assert.match(template, /id="saveUiToolBtn"/);
+  assert.doesNotMatch(template, /id="uiToolDetailModal"|id="uiToolDetailGrid"/);
+  assert.match(source, /document\.getElementById\("uiToolModalTitle"\)\.textContent = `查看 · \$\{tool\.name\}`/);
+  assert.match(source, /this\.setFormMode\("readonly"\)/);
+  assert.match(source, /this\.loadSchemas\(tool\.parameters_json_schema, tool\.result_schema, \{ readOnly: true \}\)/);
+  assert.match(source, /const isReadOnly = mode === "readonly"/);
+  assert.match(source, /document\.getElementById\("uiToolDescription"\)\.readOnly = isReadOnly/);
+  assert.match(source, /document\.getElementById\("uiToolWidget"\)\.disabled = isReadOnly/);
+  assert.match(source, /document\.getElementById\("uiToolMetadata"\)\.readOnly = isReadOnly/);
+  assert.match(source, /document\.getElementById\("saveUiToolBtn"\)\.classList\.toggle\("hidden", isReadOnly\)/);
+  assert.match(source, /if \(this\.formMode === "readonly"\) return/);
+  assert.doesNotMatch(styles, /\.ui-tool-detail-grid/);
+});
+
+test("UI 工具包标题使用内缩分割线且工具编辑弹框更紧凑", () => {
+  assert.match(styles, /\.ui-tool-selected-header::after\s*\{[^}]*right: 18px;[^}]*left: 18px;[^}]*height: 1px/);
+  assert.match(styles, /#uiToolModal\s*\{[^}]*width: min\(1040px, calc\(100vw - 48px\)\)/);
+});
+
 test("Agent 能力页只渲染工具包级开关", async () => {
   const agents = await readFile(
     new URL("../../../frontend/console/configuration/agents.js", import.meta.url),

@@ -42,7 +42,8 @@ tests/
 | 文件 | 覆盖 |
 | --- | --- |
 | `test_agent_max_requests.py` | 全局 request 上限、旧 Agent 字段 422 兼容提示 |
-| `test_code_mode.py` | Hybrid Code Mode 装配、MCP 双通道、Monty 调用、文件变量与脱敏 |
+| `test_code_mode.py` | PTC新旧编码兼容、MCP双通道、Monty调用、URL/File ID文件变量与脱敏 |
+| `test_sandbox_*.py` | Python沙箱公网边界、FileStore输入、`deepagent_files`产物发布、回滚、依赖探针与子进程清理 |
 | `test_global_settings.py` | 运行设置安全白名单、Web Search唯一配置、六Provider校验、Key掩码/保留和草稿测试 |
 | `test_web_tools.py`、`test_web_proxy_compat.py` | `builtin:web`目录、视觉模型条件注入、HTML图片位置与URL规范化、固定Provider无降级、SSRF-safe Fetch/Image边界及HTTP代理fake-IP/SNI兼容 |
 | `test_console_admin_auth.py` | 企业管理员放行、普通用户与固定admin拒绝、401/503、凭证缓存、管理路由审计和运行接口开放边界 |
@@ -66,6 +67,7 @@ tests/
 | `test_sqlite_bootstrap.py` | 唯一生产基线001的空库创建、默认数据、完整结构及升降往返 |
 | `test_baseline_migration_dialects.py` | 唯一生产基线001在SQLite、MySQL、PostgreSQL的离线DDL编译 |
 | `test_rebaseline_database.py` | 旧012物理结构校验、显式改标、全表行数与内容哈希不变及异常拒绝 |
+| `test_configuration_import.py` | 同Revision配置初始化、主键保留、空会话门禁、事务回滚和Skill File ID重写 |
 | `test_runtime_dependencies.py` | Pydantic AI/Harness、OpenAI/aiohttp/deepfos联合版本锁定与模型导入 |
 | `test_session_model_override.py` | Agent 对话 `model_id` 请求级覆盖（`build_runner_for_agent`） |
 | `test_ui_tools_rfc.py` | builtin/manual UI 工具包、工具归属、Agent 整包选择、Schema 校验与 Deferred |
@@ -84,6 +86,7 @@ tests/
 | `test_llm_model_catalog.py` | 目录 DB 查询、两种视图、全量刷新及失败保留旧目录 |
 | `test_session_model_override.py` | Agent 流式对话 `model_id` 覆盖、默认回退、轮次切换 |
 | `test_chat_attachment_tools.py` | 附件引用 → 模型调用工具 → SSE/历史持久化 → 同会话续读 |
+| `test_configuration_import_api.py` | 企业管理员multipart预检/确认执行及配置DB不进入File Store |
 
 公共fixture：`integration/fixtures/header_echo_server.py`、`pid_echo_server.py`；真实Builtin进程测试使用
 `tests/fixtures/mcps/echo_fixture/`，该目录不会被生产Builtin扫描。
@@ -113,5 +116,7 @@ tests/
 - 配置备份按源Alembic Revision自动复制全部业务表，只排除`chat_sessions`和
   `chat_session_events`；新增配置表无需维护白名单，但必须在`test_config_backup.py`覆盖新Revision
   与旧Revision兼容，防止源库尚未升级时误要求未来表。
+- 配置初始化只允许备份/目标Revision完全一致且两侧会话为空；测试必须断言主键原样保留、失败事务
+  回滚、Skill只改目标File ID，并确认数据库上传文件不进入平台File Store。
 
 更多：[`README.md`](README.md)、[`unit/README.md`](unit/README.md)、[`integration/README.md`](integration/README.md)。

@@ -6,10 +6,12 @@ import json
 from datetime import datetime, timezone
 from time import perf_counter
 from typing import Any
+from uuid import uuid4
 
 from loguru import logger
 
 from deep_agent.capabilities.mcp.toolset_builder import (
+    build_raw_url_mcp_toolset,
     build_resource_client,
     resolve_mcp_init_timeout,
 )
@@ -120,6 +122,136 @@ def _changes(before: McpInspection, after: McpInspection) -> McpInspectionChange
     )
 
 
+async def _inspect_builtin_mcp_server(
+    row: McpServer,
+    *,
+    previous: McpInspection,
+    request_headers: dict[str, str] | None,
+) -> McpInspectionResult:
+    """Refresh metadata and the raw Tool snapshot from a builtin MCP runtime."""
+    from deep_agent.capabilities.mcp.lease_manager import get_mcp_lease_manager
+    from deep_agent.mcp_request_context import resolve_mcp_headers
+
+    started = perf_counter()
+    config = dict(row.config or {})
+    headers = resolve_mcp_headers("builtin", config, request_headers) or {}
+
+    def factory(connect_url: str):
+        return build_raw_url_mcp_toolset(
+            row.name,
+            connect_url,
+            static_headers=headers,
+            init_timeout=config.get("init_timeout"),
+        )
+
+    try:
+        async with get_mcp_lease_manager().lease(
+            row.name,
+            f"console-refresh:{uuid4().hex}",
+            factory,
+            spawn_config=config,
+        ) as client:
+            inspected_at = _utcnow()
+            server_info = client.server_info
+            init_result = client.client.initialize_result
+            server = McpInspectionServer(
+                name=getattr(server_info, "name", None),
+                version=getattr(server_info, "version", None),
+                protocol_version=str(getattr(init_result, "protocolVersion", "") or "") or None,
+                instructions_available=bool(client.instructions),
+            )
+
+            empty_snapshot, empty_snapshot_hash = _tool_snapshot(
+                [],
+                instructions=client.instructions,
+            )
+            tools = McpToolsInspection(
+                status="unsupported",
+                snapshot_status="ready",
+                snapshot_at=inspected_at,
+                snapshot_hash=empty_snapshot_hash,
+                snapshot=empty_snapshot,
+            )
+            resources = McpResourcesInspection(status="unsupported")
+            if client.capabilities.tools:
+                try:
+                    tool_items = await client.list_tools()
+                    snapshot, snapshot_hash = _tool_snapshot(
+                        tool_items or [],
+                        instructions=client.instructions,
+                    )
+                    tools = McpToolsInspection(
+                        status="supported",
+                        count=len(tool_items or []),
+                        snapshot_status="ready",
+                        snapshot_at=inspected_at,
+                        snapshot_hash=snapshot_hash,
+                        snapshot=snapshot,
+                    )
+                except Exception as exc:
+                    tools = previous.tools.model_copy(
+                        update={"status": "error", "error": _safe_error("tools/list", exc)}
+                    )
+
+            if client.capabilities.resources:
+                resource_items: list[Any] | None = None
+                template_items: list[Any] | None = None
+                resource_error: McpInspectionError | None = None
+                template_error: McpInspectionError | None = None
+                try:
+                    resource_items = await client.list_resources()
+                except Exception as exc:
+                    resource_error = _safe_error("resources/list", exc)
+                try:
+                    template_items = await client.list_resource_templates()
+                except Exception as exc:
+                    template_error = _safe_error("resources/templates/list", exc)
+                resources = McpResourcesInspection(
+                    status="error" if resource_error or template_error else (
+                        "supported" if resource_items or template_items else "unsupported"
+                    ),
+                    count=(
+                        len(resource_items)
+                        if resource_items is not None
+                        else previous.resources.count
+                    ),
+                    template_count=(
+                        len(template_items)
+                        if template_items is not None
+                        else previous.resources.template_count
+                    ),
+                    error=resource_error or template_error,
+                )
+
+            current = McpInspection(
+                status="not_applicable",
+                checked_at=inspected_at,
+                duration_ms=_duration_ms(started),
+                server=server,
+                tools=tools,
+                resources=resources,
+            )
+    except Exception as exc:
+        logger.warning(
+            "Builtin MCP catalog refresh failed for {!r} ({})",
+            row.name,
+            type(exc).__name__,
+        )
+        current = previous.model_copy(
+            update={
+                "status": "not_applicable",
+                "checked_at": _utcnow(),
+                "duration_ms": _duration_ms(started),
+                "error": _safe_error("initialize", exc),
+            }
+        )
+
+    return McpInspectionResult(
+        inspection=current,
+        changes=_changes(previous, current),
+    )
+
+
 async def inspect_mcp_server(
     row: McpServer,
     *,
@@ -130,6 +262,12 @@ async def inspect_mcp_server(
         getattr(row, "inspection", None),
         transport=row.transport,
     )
+    if row.transport == "builtin":
+        return await _inspect_builtin_mcp_server(
+            row,
+            previous=previous,
+            request_headers=request_headers,
+        )
     if row.transport != "url":
         current = McpInspection(status="not_applicable")
         return McpInspectionResult(

@@ -3,6 +3,17 @@
 本文件记录 DeepAgent 的产品版本变化，按新版本到旧版本排列。当前代码版本以
 `deep_agent.__version__` 为准；数据库结构版本以 Alembic head 为准，两者互不替代。
 
+## v0.6.8
+
+- Console完善配置中心、会话过程展示、当前用户名称适配和MCP检测刷新反馈；本地开发与平台账号中心
+  继续通过同一个`/api/v1/current-user`契约返回用户资料。
+- 修复Tool Search向模型暴露不兼容参数结构导致会话执行失败的问题，保持工具发现与实际调用参数一致。
+- 为内置工具、运行时系统工具、UI工具和MCP工具统一补充展示名称来源；实时SSE只额外返回
+  `display_name`，History根据当前Agent工具定义动态补充，Event Payload、数据库和轨迹保持不变。
+- Console普通会话工具卡使用`display_name || tool`展示，历史与实时逻辑一致；轨迹继续显示稳定协议名。
+  内置`builtin__confirm`和`builtin__choice`分别补充“确认操作”和“候选选择”元数据。
+- 本版本不新增数据库迁移，Alembic生产基线仍为`001`。
+
 ## v0.6.7
 
 - 将显式编排能力包规范化为`builtin:ptc`，Console名称为“程序编排”，模型协议仍保持Harness

@@ -13,6 +13,7 @@ from deep_agent.capabilities.display_names import (
     enrich_tool_event_display_name,
 )
 from deep_agent.capabilities.registry import ToolInfo, ToolPackage
+from deep_agent.capabilities.ui.builtin import build_builtin_ui_tool_package
 from deep_agent.conversation.display_names import decorate_history_display_names
 from deep_agent.conversation.models import (
     ConversationHistoryResponse,
@@ -83,6 +84,16 @@ class ToolDisplayNameMapTests(unittest.TestCase):
         )
 
         self.assertEqual(mapping["docs_lookup"], "docs_lookup")
+
+    def test_builtin_ui_tools_use_metadata_display_names(self) -> None:
+        mapping = build_tool_display_name_map(
+            build_registry(),
+            capabilities=["ui:builtin"],
+            ui_packages=[build_builtin_ui_tool_package()],
+        )
+
+        self.assertEqual(mapping["builtin__confirm"], "确认操作")
+        self.assertEqual(mapping["builtin__choice"], "候选选择")
 
     def test_sse_and_deferred_add_only_display_name(self) -> None:
         call = {

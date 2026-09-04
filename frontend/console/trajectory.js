@@ -1,6 +1,7 @@
 import { copyTextToClipboard } from "./message-actions.js?v=20260819-1";
 import { parseServerTimestamp } from "./time.js?v=20260831-1";
 import { renderWebImagePreview } from "./web-image.js?v=20260901-1";
+import { attachmentPreviewAttributes } from "./attachment-preview.js?v=20260904-8";
 
 const TOOL_KINDS = new Set(["tool", "planning", "deferred"]);
 const PRESENTATION_ONLY_SSE_TYPES = new Set(["session_title"]);
@@ -637,12 +638,16 @@ function renderInputSummary(event, events) {
       text: reference?.label || reference?.key || reference?.type || "未命名上下文",
       detail: reference?.type || reference?.key || "",
     })).join("");
-  const attachmentLinks = attachments.map((attachment) => renderJumpLink({
+  const attachmentLinks = attachments.map((attachment) => {
+    const previewAttributes = attachmentPreviewAttributes(attachment);
+    if (previewAttributes) return `<button type="button" class="trajectory-summary-link attachment-image-trigger" ${previewAttributes}>${icon("image")}<span><strong>${escapeHtml(attachment.name || attachment.id)}</strong><small>${escapeHtml(attachment.mime_type || attachment.mime || "图片")}</small></span></button>`;
+    return renderJumpLink({
       eventId: null,
       iconName: "paperclip",
       text: attachment?.name || attachment?.id || "未命名附件",
       detail: attachment?.mime_type || attachment?.mime || "附件",
-    })).join("");
+    });
+  }).join("");
   return `${renderSummarySection(
     "Preview",
     renderMarkdown(event.payload?.content, "本次输入只包含附件或结构化上下文。"),

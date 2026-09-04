@@ -16,6 +16,7 @@
 | 能力注册 | `capabilities/__init__.py` |
 | 配置解析 | `options.py`（`OPTION` + accessor）；DB URL 见 `db/url.py` |
 | MCP 加载 | `capabilities/mcp/resolver.py`、`db_loader.py`、`builtin.py` |
+| 企微 Channel | `channel_gateway/`、`api/v1/channel_accounts.py`、`db/stores/channel.py` |
 
 ---
 
@@ -49,6 +50,16 @@ HTTP (REST/SSE)
 未配置 `DEEP_AGENT_DBMS_*` 时默认使用 SQLite 文件 `data/deep-agent.db`（可用 `DEEP_AGENT_SQLITE_PATH` 覆盖）。配置 `DEEP_AGENT_DBMS_*` 则使用 PostgreSQL / MySQL。
 
 MCP 在请求时由 `resolve_mcp_toolsets` 解析（DB 行 + `mcps/` builtin 兜底）。
+
+企微Channel是独立可选进程`python -m deep_agent.channel_gateway`，与API复用同一代码、数据库和
+FileStore协议。官方SDK负责WebSocket认证、心跳、重连、消息分发、媒体解密和流式回复；Gateway只做
+Account轮询、同Peer串行、Binding/Run事务和现有Chat SSE投影。0.7.0只允许一个Gateway副本，且
+Gateway不执行Alembic，启动前数据库必须为`002`。
+
+渠道配置中的`session_user_id`由企业管理员直接填写，Console标签“会话用户”；只决定新建Session
+归属，不签发平台凭据。Gateway带内部Token和Account ID，API从当前配置解析用户；普通请求仍按
+平台可信身份鉴权。Peer保存上游ID键名`userid/chatid`；Binding普通消息不更新，仅Session改绑时更新。
+Run只保留created_at/finished_at，调用前必须落running以防未收到SSE Run ID时误重跑。
 
 ### 对话请求流（`POST /api/v1/chat/stream`）
 
@@ -278,7 +289,8 @@ user/App/Space上下文时，`export_file_to_download_center`始终直接披露�
 | `chat_session_events` | Message、Title、Compaction、Tool、Plan和Context的唯一有序事实源 |
 
 配置备份按源Alembic Revision自动发现并复制全部业务表，只把`chat_sessions`和
-`chat_session_events`两张会话事实表留空；新增配置表不得再依赖手工白名单。上传Skill原ZIP属于
+`chat_session_events`两张会话事实表和`channel_session_bindings/channel_message_runs`两张Channel
+运行事实表留空；`channel_accounts`作为配置复制。新增配置表不得再依赖手工白名单。上传Skill原ZIP属于
 平台外部文件，不进入SQLite配置备份，完整留存需另外执行Skill“导出全部”。
 
 无会话新环境可通过企业管理员接口`POST /api/v1/configuration/import`做同Revision初始化：默认
@@ -476,7 +488,11 @@ Provider Key（`OPENAI_API_KEY` 等）由 Pydantic AI 直接读取。
 alembic upgrade head
 ```
 
-迁移：v0.6.6 起再次只保留 `alembic/versions/001_initial_schema.py` 作为当前完整生产基线；旧 `001` … `012` 历史不再兼容。已有Revision 012数据库必须先用 `maintenance.rebaseline_database` 校验最终物理结构和全表内容哈希，再执行 `stamp --purge 001`，禁止仅手工修改版本号。涉及共享数据库时必须按维护窗口发布，并确保改标后不再启动旧镜像。本地 Postgres：`docker compose up -d`。
+迁移：v0.6.6 将旧结构折叠为 `alembic/versions/001_initial_schema.py` 生产基线；v0.7.0在其上增加
+`002_wecom_channel_gateway.py`，本轮未发布需求的修正均合并在002。旧 `001` … `012` 历史迁移不再兼容。已有Revision 012数据库必须先用
+`maintenance.rebaseline_database`校验最终物理结构和全表内容哈希，再执行`stamp --purge 001`，随后
+由0.7.0升级到`002`；禁止仅手工修改版本号。涉及共享数据库时必须按维护窗口发布，并确保改标后不再
+启动旧镜像。本地 Postgres：`docker compose up -d`。
 
 ---
 

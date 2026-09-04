@@ -99,7 +99,7 @@ class ConfigurationImportTests(unittest.IsolatedAsyncioTestCase):
     async def _target_engine(
         self,
         *,
-        revision: str = "001",
+        revision: str = "002",
         baseline: bool = False,
     ) -> AsyncEngine:
         target = self.root / f"target-{revision}-{baseline}.db"
@@ -131,7 +131,7 @@ class ConfigurationImportTests(unittest.IsolatedAsyncioTestCase):
         self,
         *,
         include_skill: bool = False,
-        revision: str = "001",
+        revision: str = "002",
     ) -> tuple[Path, Path | None, bytes | None]:
         source = self.root / f"source-{include_skill}-{revision}.db"
         await config_backup_tests.ConfigBackupTests()._create_source(source)
@@ -174,7 +174,7 @@ class ConfigurationImportTests(unittest.IsolatedAsyncioTestCase):
             exported_at=datetime(2026, 9, 1, 8, 0, tzinfo=timezone.utc),
             git_commit="test-commit",
         )
-        if revision != "001":
+        if revision != "002":
             with sqlite3.connect(result.path) as connection:
                 connection.execute(
                     "UPDATE alembic_version SET version_num = ?",
@@ -224,8 +224,8 @@ class ConfigurationImportTests(unittest.IsolatedAsyncioTestCase):
         return str(row[0])
 
     async def test_same_dynamic_revision_import_preserves_ids_and_revision(self) -> None:
-        backup_path, _, _ = await self._backup(revision="003")
-        engine = await self._target_engine(revision="003", baseline=True)
+        backup_path, _, _ = await self._backup(revision="002")
+        engine = await self._target_engine(revision="002", baseline=True)
         try:
             plan = await build_configuration_import_plan(
                 backup_path,
@@ -258,13 +258,13 @@ class ConfigurationImportTests(unittest.IsolatedAsyncioTestCase):
                 tuple(provider),
                 ("0123456789abcdef0123456789abcdef", "plain-api-key"),
             )
-            self.assertEqual(revision, "003")
+            self.assertEqual(revision, "002")
             self.assertEqual(sessions, 0)
         finally:
             await engine.dispose()
 
     async def test_different_revision_is_rejected(self) -> None:
-        backup_path, _, _ = await self._backup(revision="003")
+        backup_path, _, _ = await self._backup(revision="002")
         engine = await self._target_engine(revision="001")
         try:
             with self.assertRaisesRegex(

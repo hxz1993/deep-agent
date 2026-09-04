@@ -4,7 +4,7 @@ import json
 import uuid
 from collections.abc import Awaitable, Callable
 
-from fastapi import APIRouter, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.routing import APIRoute
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from sse_starlette.sse import EventSourceResponse
@@ -15,7 +15,7 @@ from deep_agent.agent.context.compaction import ContextWindowExceededError
 from deep_agent.agent.headers import extract_forward_headers
 from deep_agent.agent.run_identity import conversation_id_for, new_run_id
 from deep_agent.api.v1.deps import build_runner_for_agent
-from deep_agent.api.v1.request_identity import RequestUserDep
+from deep_agent.api.v1.channel_auth import ChannelRequestUserDep
 from deep_agent.core.context import AppContextDep
 from deep_agent.core.exceptions import AgentNotFoundError, LlmModelNotFoundError
 from deep_agent.db.ids import normalize_agent_id
@@ -168,11 +168,12 @@ async def chat(
     request: Request,
     ctx: AppContextDep,
     body: ChatRequest,
-    user: RequestUserDep,
+    user: ChannelRequestUserDep,
 ) -> ChatResponse:
     _validate_chat_body(body)
     session_id = body.session_id or uuid.uuid4().hex
     request_headers = extract_forward_headers(request)
+    request_headers["user"] = user
     agent_id = await _resolve_chat_agent_id(
         ctx, body, session_id=session_id, user=user
     )
@@ -225,13 +226,14 @@ async def chat_stream(
     request: Request,
     ctx: AppContextDep,
     body: StreamChatRequest,
-    user: RequestUserDep,
+    user: ChannelRequestUserDep,
 ) -> EventSourceResponse:
     _validate_chat_body(body)
     session_id = body.session_id or uuid.uuid4().hex
     deferred_tool_results = _deferred_results(body)
     message = body.message or ""
     request_headers = extract_forward_headers(request)
+    request_headers["user"] = user
 
     agent_id = await _resolve_chat_agent_id(
         ctx, body, session_id=session_id, user=user

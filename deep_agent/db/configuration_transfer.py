@@ -8,6 +8,8 @@ from deep_agent.db.models import Base
 SESSION_TABLES = (
     "chat_sessions",
     "chat_session_events",
+    "channel_session_bindings",
+    "channel_message_runs",
 )
 BACKUP_SCOPE_SCHEMA_VERSION = "1.1"
 

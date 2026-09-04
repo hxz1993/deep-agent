@@ -14,7 +14,8 @@ import {
   planPanelState,
   processDisclosureLabel,
 } from "./assistant-presentation.js?v=20260902-1";
-import { createTrajectoryController } from "./trajectory.js?v=20260901-1";
+import { createTrajectoryController } from "./trajectory.js?v=20260904-8";
+import { attachmentPreviewUrl, bindAttachmentImagePreviews, createImageGallery } from "./attachment-preview.js?v=20260904-8";
 import { bindWebImagePreviewFallback, renderWebImagePreview } from "./web-image.js?v=20260901-1";
 import { parseServerTimestamp, serverTimestampMilliseconds } from "./time.js?v=20260831-1";
 import {
@@ -206,6 +207,8 @@ const el = {
   attachmentImageDialogImage: $("attachmentImageDialogImage"),
   attachmentImageDialogName: $("attachmentImageDialogName"),
   attachmentImageDialogClose: $("attachmentImageDialogClose"),
+  attachmentImageDialogPrevious: $("attachmentImageDialogPrevious"),
+  attachmentImageDialogNext: $("attachmentImageDialogNext"),
   composerPlan: $("composerPlan"),
   composerPlanSummary: $("composerPlanSummary"),
   composerPlanProgress: $("composerPlanProgress"),
@@ -213,6 +216,7 @@ const el = {
   modelSelect: $("modelSelect"),
 };
 const trajectory = createTrajectoryController({ state });
+let attachmentImageGallery = { items: [], index: 0 };
 
 /* --------------------------- 初始化 --------------------------- */
 function updateAdminLink() {
@@ -510,11 +514,21 @@ function init() {
     }
   });
   el.attachmentImageDialogClose?.addEventListener("click", closeAttachmentImagePreview);
+  bindAttachmentImagePreviews({ openImage: openAttachmentImagePreview });
   el.attachmentImageDialog?.addEventListener("click", (event) => {
-    if (event.target === el.attachmentImageDialog) closeAttachmentImagePreview();
+    if (event.target === el.attachmentImageDialog || event.target.classList.contains("attachment-image-dialog-content")) closeAttachmentImagePreview();
+  });
+  el.attachmentImageDialogPrevious?.addEventListener("click", () => moveAttachmentImagePreview(-1));
+  el.attachmentImageDialogNext?.addEventListener("click", () => moveAttachmentImagePreview(1));
+  el.attachmentImageDialog?.addEventListener("keydown", (event) => {
+    if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+      event.preventDefault();
+      moveAttachmentImagePreview(event.key === "ArrowLeft" ? -1 : 1);
+    }
   });
   el.attachmentImageDialog?.addEventListener("close", () => {
     el.attachmentImageDialogImage?.removeAttribute("src");
+    attachmentImageGallery = { items: [], index: 0 };
   });
   $("toggleSidebar").addEventListener("click", () => el.sidebar.classList.toggle("collapsed"));
   $("refreshCapsBtn").addEventListener("click", loadCapabilities);
@@ -2038,17 +2052,17 @@ function addMessage(role, text, timestamp, branchPoint, attachments, contextRefs
     <div class="bubble-wrap"><div class="bubble"></div></div>`;
   const wrap = row.querySelector(".bubble-wrap");
   const bubble = wrap.querySelector(".bubble");
-  if (text) {
-    const textEl = document.createElement("div");
-    textEl.className = "bubble-text";
-    textEl.textContent = text;
-    bubble.appendChild(textEl);
-  }
   if (attachments?.length) {
     renderMessageAttachments(bubble, attachments);
   }
   if (contextRefs?.length) {
     renderMessageContextRefs(bubble, contextRefs, branchPoint);
+  }
+  if (text) {
+    const textEl = document.createElement("div");
+    textEl.className = "bubble-text";
+    textEl.textContent = text;
+    bubble.appendChild(textEl);
   }
   if (role === "user") {
     wrap.appendChild(createMessageActions({
@@ -2100,19 +2114,16 @@ function renderMessageAttachments(container, attachments) {
   const wrap = document.createElement("div");
   wrap.className = "msg-attachments";
   for (const att of attachments) {
-    const chip = document.createElement("div");
-    chip.className = "attachment-chip";
-    const mime = (att.mime || "").toLowerCase();
-    if (mime.startsWith("image/")) {
-      const img = document.createElement("div");
-      img.className = "attachment-thumb";
-      img.innerHTML = lucideIcon("image");
-      chip.appendChild(img);
+    const previewUrl = attachmentPreviewUrl(att);
+    const chip = document.createElement(previewUrl ? "button" : "div");
+    chip.className = `attachment-chip${previewUrl ? " attachment-image-trigger" : ""}`;
+    if (previewUrl) {
+      chip.type = "button";
+      chip.dataset.attachmentImageUrl = previewUrl;
+      chip.dataset.attachmentImageName = att.name || "图片附件";
+      chip.setAttribute("aria-label", `预览图片 ${att.name || "图片附件"}`);
     }
-    const label = document.createElement("span");
-    label.className = "attachment-name";
-    label.textContent = att.name || att.id || "附件";
-    chip.appendChild(label);
+    chip.innerHTML = `${lucideIcon(previewUrl ? "image" : "paperclip")}<span class="attachment-name">${escapeHtml(att.name || att.id || "附件")}</span>`;
     wrap.appendChild(chip);
   }
   container.appendChild(wrap);
@@ -2220,7 +2231,7 @@ function renderPendingAttachments() {
       ? `<button type="button" class="pending-attachment-open" aria-label="预览图片 ${label}"><span>${label}</span><span class="pending-attachment-thumbnail"><img src="${escapeHtml(att.previewUrl)}" alt="" /></span></button><button type="button" class="pending-attachment-remove" aria-label="移除附件">${lucideIcon("x")}</button>`
       : `<span class="pending-attachment-name">${label}</span><button type="button" class="pending-attachment-remove" aria-label="移除附件">${lucideIcon("x")}</button>`;
     chip.querySelector(".pending-attachment-open")?.addEventListener("click", () => {
-      openAttachmentImagePreview(att);
+      openAttachmentImagePreview(att, state.pendingAttachments);
     });
     chip.querySelector(".pending-attachment-remove").addEventListener("click", () => {
       if (att.previewUrl) URL.revokeObjectURL(att.previewUrl);
@@ -2244,12 +2255,32 @@ function clearPendingAttachments() {
   renderPendingAttachments();
 }
 
-function openAttachmentImagePreview(attachment) {
+function openAttachmentImagePreview(attachment, attachments) {
   if (!attachment?.previewUrl || !el.attachmentImageDialog) return;
-  el.attachmentImageDialogImage.src = attachment.previewUrl;
-  el.attachmentImageDialogName.textContent = attachment.name || "图片附件";
+  attachmentImageGallery = createImageGallery(attachment, attachments);
+  renderAttachmentImagePreview();
   if (!el.attachmentImageDialog.open) el.attachmentImageDialog.showModal();
   refreshLucideIcons();
+}
+
+function renderAttachmentImagePreview() {
+  const { items, index } = attachmentImageGallery;
+  const attachment = items[index];
+  if (!attachment) return;
+  el.attachmentImageDialogImage.src = attachment.previewUrl;
+  el.attachmentImageDialogImage.alt = attachment.name || "图片附件";
+  el.attachmentImageDialogName.textContent = `${attachment.name || "图片附件"}${items.length > 1 ? ` · ${index + 1} / ${items.length}` : ""}`;
+  el.attachmentImageDialogPrevious.hidden = items.length < 2;
+  el.attachmentImageDialogNext.hidden = items.length < 2;
+  el.attachmentImageDialogPrevious.disabled = index === 0;
+  el.attachmentImageDialogNext.disabled = index === items.length - 1;
+}
+
+function moveAttachmentImagePreview(step) {
+  const next = attachmentImageGallery.index + step;
+  if (next < 0 || next >= attachmentImageGallery.items.length) return;
+  attachmentImageGallery.index = next;
+  renderAttachmentImagePreview();
 }
 
 function closeAttachmentImagePreview() {

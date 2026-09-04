@@ -2665,6 +2665,165 @@ dialog.console-action-dialog::backdrop {
   color: var(--accent-hover);
 }
 
+/* Enterprise IM channels */
+.channel-admin-panel {
+  min-width: 0;
+}
+
+.channel-table {
+  min-width: 720px;
+}
+
+.channel-table td:first-child strong {
+  white-space: nowrap;
+}
+
+.channel-runtime-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: var(--config-compact-control-height);
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-muted);
+  color: var(--text-dim);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.channel-runtime-chip strong {
+  color: inherit;
+  font-weight: 500;
+}
+
+.channel-runtime-dot,
+.channel-status > span {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--text-faint);
+}
+
+.channel-runtime-chip[data-state="connected"] .channel-runtime-dot,
+.channel-status[data-state="connected"] > span {
+  background: var(--success);
+}
+
+.channel-runtime-chip[data-state="connecting"] .channel-runtime-dot,
+.channel-runtime-chip[data-state="reconnecting"] .channel-runtime-dot,
+.channel-status[data-state="connecting"] > span,
+.channel-status[data-state="reconnecting"] > span {
+  background: var(--accent);
+}
+
+.channel-runtime-chip[data-state="unreachable"] .channel-runtime-dot,
+.channel-runtime-chip[data-state="failed"] .channel-runtime-dot,
+.channel-runtime-chip[data-state="conflict"] .channel-runtime-dot,
+.channel-status[data-state="unreachable"] > span,
+.channel-status[data-state="failed"] > span,
+.channel-status[data-state="conflict"] > span {
+  background: var(--danger-text);
+}
+
+.channel-type-cell {
+  white-space: nowrap;
+}
+
+.channel-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  white-space: nowrap;
+}
+
+.channel-list-row {
+  cursor: pointer;
+}
+
+.channel-row-actions,
+.ui-tool-row-actions {
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+#configurationHost .console-list-a .compact-icon-actions .icon-btn {
+  display: inline-grid;
+  flex: 0 0 28px;
+  place-items: center;
+  width: 28px;
+  min-width: 28px;
+  height: 28px;
+  min-height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-faint);
+}
+
+#configurationHost .console-list-a .compact-icon-actions .icon-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+#configurationHost .console-list-a .compact-icon-actions .icon-btn:hover,
+#configurationHost .console-list-a .compact-icon-actions .icon-btn:focus-visible {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+#configurationHost .console-list-a .compact-icon-actions .icon-btn.danger:hover,
+#configurationHost .console-list-a .compact-icon-actions .icon-btn.danger:focus-visible {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+}
+
+#configurationHost .console-list-a .ui-tool-row-actions .icon-btn {
+  border: 1px solid var(--border);
+  background: var(--bg);
+}
+
+#configurationHost .console-list-a .channel-row-actions .model-enabled-switch {
+  width: 30px;
+  min-width: 30px;
+  height: 18px;
+  min-height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: var(--text-faint);
+}
+
+#configurationHost .console-list-a .channel-row-actions .model-enabled-switch.on {
+  background: var(--accent);
+}
+
+.channel-account-modal {
+  width: min(680px, calc(100vw - 32px));
+}
+
+.channel-account-form-body {
+  display: grid;
+  gap: 18px;
+}
+
+.channel-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+@media (max-width: 720px) {
+  .channel-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+}
+
 .cap-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));

@@ -3,6 +3,23 @@
 本文件记录 DeepAgent 的产品版本变化，按新版本到旧版本排列。当前代码版本以
 `deep_agent.__version__` 为准；数据库结构版本以 Alembic head 为准，两者互不替代。
 
+## v0.7.0
+
+- 新增可选企业微信Channel Gateway进程，使用官方`wecom-aibot-python-sdk==1.0.2`承接认证、心跳、
+  重连、事件分发、媒体下载解密和流式回复；API继续独立固定部署。
+- Alembic`002`新增Channel三表，本轮字段精简与纠正直接合并于002，不新增迁移版本。渠道通过管理员配置
+  `session_user_id`（会话用户），按`userid/chatid`映射Session；Agent/用户切换不改写旧历史。
+- 消息台账成功路径收敛为一次INSERT、三次UPDATE；调用前记录派发状态，避免SSE Run ID丢失时
+  重复执行Agent。重复投递不创建新会话，文字增量不更新台账。
+- text、image、file、voice、video和mixed通过现有FileStore与Chat SSE进入Agent；企微只接收节流后的
+  Markdown文本，不暴露thinking、工具参数或轨迹。AMR语音加入上传白名单。
+- Console配置中心新增“渠道”，支持账号CRUD、启停、运行状态和连接测试；Gateway未部署或不可达时
+  仍可维护配置并显示明确状态。
+- Console用户消息的附件与上下文引用置于气泡顶部，聊天和轨迹图片支持悬停预览及大图查看；
+  大图仅在同一条用户消息的图片之间切换，点击空白处可关闭。
+- 0.7.0固定单Gateway副本，不实现Webhook、Lease、Outbox、主动消息、卡片Action或企微用户级平台
+  身份映射；Secret按本版约定明文入库，但管理接口不返回原值，编辑留空时保持原配置。
+
 ## v0.6.8
 
 - Console完善配置中心、会话过程展示、当前用户名称适配和MCP检测刷新反馈；本地开发与平台账号中心

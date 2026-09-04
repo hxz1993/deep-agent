@@ -184,6 +184,41 @@
       </div>
     </section>
 
+    <!-- Enterprise IM Channel panel -->
+    <section class="panel channel-admin-panel" id="panel-channels">
+      <div class="panel-toolbar">
+        <div class="panel-title-copy">
+          <h2>渠道</h2>
+          <p class="panel-subtitle">将企微智能机器人绑定到一个 Agent；企微网关可按环境选择是否部署。</p>
+        </div>
+        <div class="panel-toolbar-actions">
+          <span class="channel-runtime-chip" id="channelRuntimeBanner" data-state="loading" role="status" aria-live="polite" title="正在读取企微网关状态…">
+            <span class="channel-runtime-dot" aria-hidden="true"></span>
+            <strong>企微网关：读取中</strong>
+          </span>
+          <button class="btn" type="button" id="refreshChannelsBtn" title="刷新企微网关状态"><i data-lucide="refresh-cw"></i>网关状态</button>
+          <button class="btn primary" type="button" id="newChannelBtn"><i data-lucide="plus"></i>新建渠道</button>
+        </div>
+      </div>
+      <div class="table-wrap console-list-a">
+        <table class="data-table channel-table">
+          <thead>
+            <tr>
+              <th>名称</th>
+              <th>渠道</th>
+              <th>Agent</th>
+              <th>连接状态</th>
+              <th>更新时间</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="channelTableBody">
+            <tr><td colspan="6" class="empty-cell">正在加载渠道…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
     <!-- MCP panel -->
     <section class="panel" id="panel-mcp">
       <div class="panel-toolbar">
@@ -583,6 +618,49 @@
       <div class="modal-footer">
         <button type="button" class="btn" id="cancelProviderCatalogPickerBtn">取消</button>
         <button type="submit" class="btn primary" id="confirmProviderCatalogPickerBtn" disabled>添加所选</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Channel account modal -->
+  <dialog class="modal channel-account-modal" id="channelAccountModal">
+    <form id="channelAccountForm" method="dialog" novalidate>
+      <div class="modal-header">
+        <div class="modal-title-copy">
+          <h3 id="channelAccountModalTitle">新建企微渠道</h3>
+          <span class="modal-entity-id">企微智能机器人 · WebSocket</span>
+        </div>
+        <button type="button" class="icon-btn" id="closeChannelAccountModal" aria-label="关闭"><i data-lucide="x"></i></button>
+      </div>
+      <div class="modal-body channel-account-form-body">
+        <div class="channel-form-grid">
+          <label class="field">
+            <span>渠道名称</span>
+            <input type="text" id="channelName" maxlength="191" required placeholder="例如：企微助手" />
+          </label>
+          <label class="field">
+            <span>绑定 Agent</span>
+            <select id="channelAgentId" required></select>
+          </label>
+          <label class="field">
+            <span>Bot ID</span>
+            <input type="text" id="channelBotId" maxlength="191" required autocomplete="off" />
+          </label>
+          <label class="field">
+            <span>Secret</span>
+            <input type="password" id="channelSecret" autocomplete="new-password" />
+          </label>
+          <label class="field">
+            <span>会话用户</span>
+            <input type="text" id="channelSessionUserId" maxlength="128" required autocomplete="off" placeholder="平台 User ID" aria-describedby="channelSessionUserHint" />
+            <small class="field-hint" id="channelSessionUserHint">使用此平台账号记录渠道会话。</small>
+          </label>
+        </div>
+      </div>
+      <div class="form-error hidden" data-form-error role="alert" aria-live="assertive"></div>
+      <div class="modal-footer">
+        <button type="button" class="btn" id="cancelChannelAccountBtn">取消</button>
+        <button type="submit" class="btn primary">保存</button>
       </div>
     </form>
   </dialog>

@@ -457,16 +457,17 @@ const uiToolsAdmin = {
         <td>${escapeHtml(tool.widget || "—")}</td>
         <td class="desc-cell" title="${escapeHtml(tool.description || "—")}">${escapeHtml(tool.description || "—")}</td>
         <td>${escapeHtml(formatDate(tool.updated_at))}</td>
-        <td><div class="row-actions">
+        <td><div class="row-actions ui-tool-row-actions compact-icon-actions">
           ${tool.source === "builtin"
-            ? `<button type="button" data-view="${escapeHtml(tool.name)}">查看</button>`
-            : `<button type="button" data-edit="${escapeHtml(tool.name)}">编辑</button><button type="button" class="danger" data-delete="${escapeHtml(tool.name)}" data-source="${escapeHtml(tool.source)}">删除</button>`}
+            ? `<button type="button" class="icon-btn" data-view="${escapeHtml(tool.name)}" title="查看" aria-label="查看"><i data-lucide="eye"></i></button>`
+            : `<button type="button" class="icon-btn" data-edit="${escapeHtml(tool.name)}" title="编辑" aria-label="编辑"><i data-lucide="pencil"></i></button><button type="button" class="icon-btn danger" data-delete="${escapeHtml(tool.name)}" data-source="${escapeHtml(tool.source)}" title="删除" aria-label="删除"><i data-lucide="trash-2"></i></button>`}
         </div></td>
       </tr>`)
       .join("");
     tbody.querySelectorAll("[data-view]").forEach((btn) => btn.addEventListener("click", () => this.openDetails(btn.dataset.view)));
     tbody.querySelectorAll("[data-edit]").forEach((btn) => btn.addEventListener("click", () => this.openEdit(btn.dataset.edit)));
     tbody.querySelectorAll("[data-delete]").forEach((btn) => btn.addEventListener("click", () => this.remove(btn.dataset.delete, btn.dataset.source)));
+    window.lucide?.createIcons();
   },
 
   async refresh() {

@@ -20,6 +20,7 @@
 | [`code-mode.md`](code-mode.md) | Hybrid Code Mode 启用、工具选择、文件变量、边界与排障 |
 | [`console-admin-access.md`](console-admin-access.md) | Console 企业管理员判定、管理API门禁和业务接口边界 |
 | [`console-ui-guidelines.md`](console-ui-guidelines.md) | Console 页面、弹窗、表单、容器、控件和视觉验收规范 |
+| [`wecom-channel.md`](wecom-channel.md) | 企微WebSocket Channel部署、配置、会话映射、状态与排障 |
 | [`project-structure.md`](project-structure.md) | 当前项目目录、运行链路和职责边界 |
 
 ## 实现经验

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from deep_agent.core.context import AppContextDep
 from deep_agent.db.stores.agent import AgentStoreBase
+from deep_agent.db.stores.channel import ChannelStore
 from deep_agent.db.stores.llm_model import LlmModelStoreBase
 from deep_agent.db.stores.mcp import McpServerStoreBase
 from deep_agent.db.stores.model_catalog import ModelCatalogStoreBase
@@ -41,3 +42,8 @@ def get_ui_tool_package_store(ctx: AppContextDep) -> UiToolPackageStoreBase:
 
 def get_skill_package_store(ctx: AppContextDep) -> SkillPackageStoreBase:
     return ctx.stores.skill_package
+
+
+def get_channel_store(ctx: AppContextDep) -> ChannelStore:
+    assert ctx.stores.channel is not None
+    return ctx.stores.channel

@@ -358,3 +358,126 @@ class ChatSessionEvent(Base):
         onupdate=func.now(),
         nullable=False,
     )
+
+
+class ChannelAccount(Base):
+    __tablename__ = "channel_accounts"
+    __table_args__ = (
+        UniqueConstraint(
+            "channel_type",
+            "bot_id",
+            name="uq_channel_accounts_type_bot",
+        ),
+        Index("ix_channel_accounts_enabled", "enabled"),
+    )
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    name: Mapped[str] = mapped_column(KeyText, nullable=False)
+    channel_type: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="wecom", server_default="wecom"
+    )
+    transport: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="websocket", server_default="websocket"
+    )
+    bot_id: Mapped[str] = mapped_column(KeyText, nullable=False)
+    secret: Mapped[str] = mapped_column(Text, nullable=False)
+    agent_id: Mapped[str] = mapped_column(
+        String(AGENT_ID_LENGTH),
+        ForeignKey("agents.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    session_user_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    settings: Mapped[dict] = mapped_column(JSONType, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        UtcTimestamp(), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        UtcTimestamp(), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+
+class ChannelSessionBinding(Base):
+    __tablename__ = "channel_session_bindings"
+    __table_args__ = (
+        UniqueConstraint(
+            "account_id",
+            "peer_type",
+            "peer_id",
+            name="uq_channel_bindings_account_peer",
+        ),
+        Index("ix_channel_bindings_session_id", "session_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    account_id: Mapped[str] = mapped_column(
+        String(32),
+        ForeignKey("channel_accounts.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    peer_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    peer_id: Mapped[str] = mapped_column(KeyText, nullable=False)
+    peer_display_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    session_id: Mapped[str | None] = mapped_column(
+        KeyText,
+        ForeignKey("chat_sessions.session_id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        UtcTimestamp(), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        UtcTimestamp(), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+
+class ChannelMessageRun(Base):
+    __tablename__ = "channel_message_runs"
+    __table_args__ = (
+        UniqueConstraint(
+            "account_id",
+            "external_message_id",
+            name="uq_channel_runs_account_message",
+        ),
+        Index("ix_channel_runs_binding_created", "binding_id", "created_at"),
+        Index("ix_channel_runs_processing_status", "processing_status"),
+    )
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    account_id: Mapped[str] = mapped_column(
+        String(32),
+        ForeignKey("channel_accounts.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    binding_id: Mapped[str] = mapped_column(
+        String(32),
+        ForeignKey("channel_session_bindings.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    external_message_id: Mapped[str] = mapped_column(KeyText, nullable=False)
+    external_request_id: Mapped[str | None] = mapped_column(KeyText, nullable=True)
+    sender_id: Mapped[str | None] = mapped_column(KeyText, nullable=True)
+    session_id: Mapped[str | None] = mapped_column(KeyText, nullable=True)
+    agent_run_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    stream_id: Mapped[str | None] = mapped_column(KeyText, nullable=True)
+    payload_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    processing_status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="received", server_default="received"
+    )
+    delivery_status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="pending", server_default="pending"
+    )
+    attempt_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default="1"
+    )
+    error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(UtcTimestamp(), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        UtcTimestamp(), server_default=func.now(), nullable=False
+    )

@@ -16,18 +16,21 @@ python3.12 -m maintenance.config_backup \
 deep-agent-config-<环境>-v<数据库版本>-<时间>.db
 ```
 
-备份按源数据库的Alembic Revision创建同版本结构，并复制该Revision中的全部业务表数据，唯一排除：
+备份按源数据库的Alembic Revision创建同版本结构，并复制该Revision中的全部配置表数据；以下运行
+事实表只保留结构：
 
 - `chat_sessions`
 - `chat_session_events`
+- `channel_session_bindings`
+- `channel_message_runs`
 
-`chat_sessions` 和 `chat_session_events` 只保留表结构，不复制会话事件。备份中的
-API Key、Token 和 MCP Header 保留原值。命令完成前会自动检查 SQLite
+`channel_accounts`属于配置，会随备份复制；其中明文Bot Secret使备份继续属于敏感文件。
+备份中的API Key、Token 和 MCP Header同样保留原值。命令完成前会自动检查 SQLite
 完整性、各配置表行数、数据库版本、模型到Provider的逻辑引用完整性和DeepAgent数据层连接。
 
 复制范围从源Revision实际结构自动发现，不维护配置表白名单；后续Migration新增配置表时会自动
 进入备份。源库仍在旧Revision时，备份也不会提前要求未来表存在。备份文件内的
-`_backup_info.scope_manifest`记录本次实际复制范围、只保留结构的两张会话表，以及未内嵌的外部
+`_backup_info.scope_manifest`记录本次实际复制范围、只保留结构的会话/Channel运行表，以及未内嵌的外部
 文件类型，便于脱离仓库后核对备份边界。
 
 `llm_models` 会完整保留上下文窗口、最大输出 Token、输入模态与能力标签；

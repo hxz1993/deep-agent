@@ -3,7 +3,7 @@
 DeepAgent 是基于 FastAPI、Pydantic AI 和 SQLAlchemy 的多用户 Agent 服务，并
 随服务发布一体化运维控制台。
 
-当前产品版本为 `0.6.8`。`deep_agent.__version__` 是唯一代码版本来源，FastAPI、
+当前产品版本为 `0.7.0`。`deep_agent.__version__` 是唯一代码版本来源，FastAPI、
 `GET /info` 和 Console 顶部版本徽标均读取该值。后续正式发布默认递增
 `MAJOR.MINOR.PATCH` 的第三位，只有明确规划重大版本时才调整前两位。产品版本不通过
 环境变量或数据库覆盖，也不等同于 Alembic 数据库结构 revision。
@@ -32,6 +32,11 @@ v0.6.5增加默认不关联的`builtin:web`和公开互联网`web_search/web_fet
 页面图片位置，并为图片输入模型增加`web_image_view`，通过原生`ImageUrl`按需读取公网图片。
 Search全局明确选择当前模型或一个固定Provider，不执行隐式降级；Web配置与安全边界见
 [`docs/design/21-web-tools/`](docs/design/21-web-tools/)。
+
+v0.7.0新增可选企业微信Channel Gateway：同仓、同镜像独立运行，使用企微官方Python SDK建立
+WebSocket长连接，通过三张Channel表完成配置、外部会话绑定和消息幂等；DeepAgent会话和历史仍由
+原Event Store负责。配置、部署和状态说明见
+[`docs/guides/wecom-channel.md`](docs/guides/wecom-channel.md)。
 
 ## 项目结构
 
@@ -126,6 +131,15 @@ Console 是管理入口，只允许平台综合权限接口确认的企业管理
 uvicorn deep_agent.main:app --host 0.0.0.0 --port 8000
 ```
 
+需要企业微信的环境再额外启动一个Gateway副本：
+
+```bash
+python -m deep_agent.channel_gateway --host 0.0.0.0 --port 8010
+```
+
+两个进程必须配置相同的`DEEP_AGENT_CHANNEL_INTERNAL_TOKEN`；API还需配置
+`DEEP_AGENT_CHANNEL_GATEWAY_URL`，Gateway可用`DEEP_AGENT_CHANNEL_API_URL`指定API地址。
+
 `deep_agent.local_dev` 只用于本机回环调试，不用于容器部署。容器镜像若启用
 `subprocess-dev`，构建阶段同样需要执行 `scripts/sandbox_venv/setup.sh`（或等价步骤），
 并设置 `DEEP_AGENT_SANDBOX_PYTHON`；详见
@@ -133,9 +147,12 @@ uvicorn deep_agent.main:app --host 0.0.0.0 --port 8000
 
 ## 数据库基线
 
-新数据库直接执行 `alembic upgrade head`。当前 Alembic 只有一个生产基线 `001`，它完整包含原
+新数据库直接执行 `alembic upgrade head`。当前 Alembic head 为`002`：生产基线 `001`完整包含原
 Revision 001～012 的最终结构和默认数据：Provider/Model/Agent、MCP、Skill、UI工具、模型目录、
-`chat_sessions + chat_session_events` Event Store，以及初始化为会话原生搜索的`global_settings`。
+`chat_sessions + chat_session_events` Event Store，以及初始化为会话原生搜索的`global_settings`；
+增量`002`增加企微Channel的Account、Session Binding和Message Run三表；渠道用户由管理员配置
+`session_user_id`，Peer键名使用`userid/chatid`。本轮未发布需求的字段修正直接合并在`002`内，
+不新增迁移版本。先停止Gateway、升级API，再启动同版本Gateway。
 
 已经处于旧Revision 012的数据库不能重放`001`，也不能在旧镜像运行时手工修改
 `alembic_version`。必须先完整备份并停止旧实例，再用`maintenance.rebaseline_database`校验物理
@@ -144,7 +161,8 @@ Revision 001～012 的最终结构和默认数据：Provider/Model/Agent、MCP�
 
 配置备份会复制全部配置表并只保留会话表结构；上传Skill的原始ZIP不塞入数据库备份。需要完整
 留存或跨环境迁移时，同时在Console Skill页面执行“导出全部”。复制范围按源Alembic Revision自动
-发现，后续新增配置表无需维护白名单，只有两张会话事实表固定留空；完整边界见
+发现，后续新增配置表无需维护白名单；两张会话事实表、Channel Binding和Channel Run固定留空，
+`channel_accounts`作为配置复制；完整边界见
 [`maintenance/README.md`](maintenance/README.md)。
 
 ## 工具包类型

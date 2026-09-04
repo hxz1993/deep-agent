@@ -148,8 +148,10 @@
         <button type="button" class="attachment-image-dialog-close" id="attachmentImageDialogClose" aria-label="关闭图片预览">
           <i data-lucide="x" aria-hidden="true"></i>
         </button>
+        <button type="button" class="attachment-image-dialog-nav previous" id="attachmentImageDialogPrevious" aria-label="上一张图片" hidden><i data-lucide="chevron-left" aria-hidden="true"></i></button>
+        <button type="button" class="attachment-image-dialog-nav next" id="attachmentImageDialogNext" aria-label="下一张图片" hidden><i data-lucide="chevron-right" aria-hidden="true"></i></button>
         <img id="attachmentImageDialogImage" alt="附件图片预览" />
-        <p id="attachmentImageDialogName"></p>
+        <p id="attachmentImageDialogName" aria-live="polite"></p>
       </div>
     </dialog>
   </div>

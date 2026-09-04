@@ -64,8 +64,10 @@ tests/
 | `test_attachment_extractors.py` | 文本编码、DOCX/XLSX 结构读取、分页与 Office 安全 |
 | `test_file_tools.py` | 附件与 Skill统一文件工具的来源参数、权限、Run缓存、single-flight、分页和多模态返回 |
 | `test_tool_package_registry.py` | ToolPackage Registry 的显式整包选择和空列表语义 |
-| `test_sqlite_bootstrap.py` | 唯一生产基线001的空库创建、默认数据、完整结构及升降往返 |
-| `test_baseline_migration_dialects.py` | 唯一生产基线001在SQLite、MySQL、PostgreSQL的离线DDL编译 |
+| `test_sqlite_bootstrap.py` | 生产基线001加Channel增量002的空库创建、默认数据、完整结构及升降往返 |
+| `test_baseline_migration_dialects.py` | 当前001→002在SQLite、MySQL、PostgreSQL的离线DDL编译 |
+| `test_channel_migration.py` | 确认Head仍为002，Channel物理字段与ORM一致，重复升级保留数据，临时库降升往返 |
+| `test_channel_gateway.py` | Account/Binding/Run Store、消息解析、幂等、SSE文本投影与Agent换代 |
 | `test_rebaseline_database.py` | 旧012物理结构校验、显式改标、全表行数与内容哈希不变及异常拒绝 |
 | `test_configuration_import.py` | 同Revision配置初始化、主键保留、空会话门禁、事务回滚和Skill File ID重写 |
 | `test_runtime_dependencies.py` | Pydantic AI/Harness、OpenAI/aiohttp/deepfos联合版本锁定与模型导入 |
@@ -83,6 +85,7 @@ tests/
 | `test_mcp_run_scoping.py` | builtin MCP 按 run lease 隔离 client |
 | `test_session_title.py` | 标题回显、AI 生成、兜底、DeepCube fixture |
 | `test_llm_model_modalities.py` | 模型运行属性 CRUD 与 DB-only 模态 |
+| `test_channel_accounts_api.py` | 渠道账号CRUD、管理员配置的会话用户、删除约束、未部署状态和测试503 |
 | `test_llm_model_catalog.py` | 目录 DB 查询、两种视图、全量刷新及失败保留旧目录 |
 | `test_session_model_override.py` | Agent 流式对话 `model_id` 覆盖、默认回退、轮次切换 |
 | `test_chat_attachment_tools.py` | 附件引用 → 模型调用工具 → SSE/历史持久化 → 同会话续读 |

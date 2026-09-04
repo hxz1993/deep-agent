@@ -59,7 +59,7 @@ test("待发送图片使用本地临时 URL 提供缩略图与全屏预览", () 
   assert.match(chatSource, /URL\.revokeObjectURL\(att\.previewUrl\)/);
   assert.match(chatSource, /pending-attachment-thumbnail/);
   assert.match(chatSource, /showModal\(\)/);
-  assert.match(chatSource, /openAttachmentImagePreview\(att\)/);
+  assert.match(chatSource, /openAttachmentImagePreview\(att, state.pendingAttachments\)/);
   assert.match(workspaceSource, /host\.replaceChildren\(sidebar, sessionResizer, chat, attachmentImageDialog\)/);
 });
 

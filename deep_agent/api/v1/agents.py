@@ -231,9 +231,17 @@ async def update_agent(
 )
 async def delete_agent(
     agent_id: str,
+    ctx: AppContextDep,
     store: AgentStoreBase = Depends(get_agent_store),
 ) -> None:
     normalized_id = _parse_agent_id(agent_id)
+    assert ctx.stores.channel is not None
+    channel_accounts = await ctx.stores.channel.list_referencing_agent(normalized_id)
+    if channel_accounts:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Agent 正被渠道配置使用，请先调整或停用对应渠道",
+        )
     deleted = await store.delete(normalized_id)
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Agent not found: {agent_id}")

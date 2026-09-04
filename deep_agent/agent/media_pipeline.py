@@ -26,6 +26,7 @@ _DEFAULT_ALLOWED_MIMES = frozenset(
         "application/json",
         "text/json",
         "audio/mpeg",
+        "audio/amr",
         "audio/wav",
         "video/mp4",
     }

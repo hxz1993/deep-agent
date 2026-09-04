@@ -32,6 +32,7 @@ _MIME_UPLOAD_KIND: dict[str, str] = {
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
     "audio/mpeg": "audio",
+    "audio/amr": "audio",
     "audio/wav": "audio",
     "video/mp4": "video",
 }
@@ -41,7 +42,7 @@ _UPLOAD_KIND_LABELS: dict[str, str] = {
     "text_file": "TXT / LOG / CSV / JSON / MD / HTML / XML",
     "docx": "DOCX",
     "xlsx": "XLSX",
-    "audio": "音频（MP3 / WAV）",
+    "audio": "音频（MP3 / WAV / AMR）",
     "video": "视频（MP4）",
 }
 

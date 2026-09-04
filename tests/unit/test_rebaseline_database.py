@@ -23,7 +23,7 @@ class RebaselineDatabaseTests(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
             db_path = Path(tmpdir) / "legacy-012.db"
             url = self._url(db_path)
-            await self._upgrade_head(url)
+            await self._upgrade_baseline(url)
             with sqlite3.connect(db_path) as connection:
                 connection.execute("UPDATE alembic_version SET version_num='012'")
                 connection.execute(
@@ -60,7 +60,7 @@ class RebaselineDatabaseTests(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
             db_path = Path(tmpdir) / "audit-012.db"
             url = self._url(db_path)
-            await self._upgrade_head(url)
+            await self._upgrade_baseline(url)
             with sqlite3.connect(db_path) as connection:
                 connection.execute("UPDATE alembic_version SET version_num='012'")
                 connection.commit()
@@ -78,7 +78,7 @@ class RebaselineDatabaseTests(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
             extra_path = Path(tmpdir) / "extra.db"
             extra_url = self._url(extra_path)
-            await self._upgrade_head(extra_url)
+            await self._upgrade_baseline(extra_url)
             with sqlite3.connect(extra_path) as connection:
                 connection.execute("CREATE TABLE stale_table (id INTEGER)")
                 connection.commit()
@@ -87,7 +87,7 @@ class RebaselineDatabaseTests(unittest.IsolatedAsyncioTestCase):
 
             missing_path = Path(tmpdir) / "missing.db"
             missing_url = self._url(missing_path)
-            await self._upgrade_head(missing_url)
+            await self._upgrade_baseline(missing_url)
             with sqlite3.connect(missing_path) as connection:
                 connection.execute("ALTER TABLE agents DROP COLUMN temperature")
                 connection.commit()
@@ -98,20 +98,20 @@ class RebaselineDatabaseTests(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
             db_path = Path(tmpdir) / "already-001.db"
             url = self._url(db_path)
-            await self._upgrade_head(url)
+            await self._upgrade_baseline(url)
             with self.assertRaisesRegex(
                 SchemaValidationError,
                 "Database revision is 001, expected 012",
             ):
                 await rebaseline_database(url, expected_revision="012", stamp=True)
 
-    async def _upgrade_head(self, url: str) -> None:
+    async def _upgrade_baseline(self, url: str) -> None:
         with patch("deep_agent.db.url.get_database_url", return_value=url):
             with patch("deep_agent.db.migrate.get_database_url", return_value=url):
                 await asyncio.to_thread(
                     command.upgrade,
                     migrate._build_alembic_config(),
-                    "head",
+                    "001",
                 )
 
     @staticmethod

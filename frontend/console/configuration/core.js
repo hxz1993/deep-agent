@@ -189,7 +189,7 @@ async function apiFetch(path, options = {}) {
     headers: { "Content-Type": "application/json", ...optionHeaders },
   });
 
-  if (resp.status === 503) {
+  if (resp.status === 503 && !String(path).includes("channel")) {
     showDbBanner(true);
     throw new Error("数据库未配置 (503)");
   }
@@ -323,6 +323,7 @@ function initTabs() {
         window.uiToolsAdmin.selectedPackageCode = null;
         window.uiToolsAdmin.refresh();
       }
+      if (name === "channels" && window.channelsAdmin) window.channelsAdmin.refresh();
       if (name === "catalog" && window.modelCatalogAdmin) window.modelCatalogAdmin.refresh();
     });
   });

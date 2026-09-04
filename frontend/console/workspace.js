@@ -1,10 +1,9 @@
 import { channelOriginPresentation } from "./session-display.js?v=20260904-13";
 import { copyTextToClipboard } from "./message-actions.js?v=20260819-1";
 
-const WORKSPACE_ASSET_VERSION = "20260904-16";
+const WORKSPACE_ASSET_VERSION = "20260905-03";
 
 const WORKSPACE_PANE_LIMITS = {
-  agent: { min: 150, max: 280, initial: 188, variable: "--console-agent-width" },
   session: { min: 220, max: 420, initial: 300, variable: "--console-session-width" },
   inspector: { min: 260, max: 720, initial: 320, variable: "--console-inspector-width" },
 };
@@ -30,7 +29,7 @@ function refreshChannelAccounts() {
     } finally {
       channelAccountsRequest = null;
       lastRenderKey = "";
-      renderAgents();
+      renderAgentSwitcher();
       renderInspector();
     }
   })();
@@ -71,9 +70,6 @@ function installLegacyDom(source) {
   agentSwitcher.innerHTML = `
     <button type="button" class="icon-action refresh-agent" id="refreshWorkspaceAgentsBtn" title="刷新 Agent" aria-label="刷新 Agent">
       <i data-lucide="refresh-cw"></i>
-    </button>
-    <button type="button" class="icon-action pin-agent" id="pinAgentPaneBtn" title="固定 Agent 列表到左侧" aria-label="固定 Agent 列表到左侧" aria-pressed="false">
-      <i data-lucide="pin"></i>
     </button>`;
   if (agentSelect) {
     const selectField = document.createElement("div");
@@ -212,43 +208,8 @@ function workspaceAgentChannelBadge(agentId) {
   return `<span class="workspace-agent-channel" title="${title}" aria-label="${title}"><i data-lucide="radio" aria-hidden="true"></i></span>`;
 }
 
-function renderAgents() {
-  const api = window.DeepAgentConsoleChat;
-  if (!api) return;
-  const query = document.getElementById("agentSearchInput")?.value.trim().toLowerCase() || "";
-  const agents = api.state.agents.filter((agent) => {
-    const text = `${agent.name || ""} ${agent.id || ""} ${agent.description || ""}`.toLowerCase();
-    return !query || text.includes(query);
-  });
-  renderAgentSwitcher(api.state);
-  const host = document.getElementById("consoleAgentList");
-  document.getElementById("agentCount").textContent = `${agents.length} 个`;
-  if (!agents.length) {
-    host.innerHTML = '<div class="list-empty">没有匹配的 Agent</div>';
-    return;
-  }
-  host.innerHTML = agents
-    .map((agent) => {
-      const active = agent.id === api.state.agentId;
-      const model = agent.model?.name || agent.model?.model || "未配置模型";
-      const capabilityCount = Array.isArray(agent.capabilities) ? agent.capabilities.length : "默认";
-      return `<button type="button" class="agent-item ${active ? "active" : ""}" data-agent-id="${escapeHtml(agent.id)}">
-        <span class="agent-avatar">${escapeHtml((agent.name || "A").slice(0, 1).toUpperCase())}</span>
-        <span class="agent-copy"><strong>${escapeHtml(agent.name)}${workspaceAgentChannelBadge(agent.id)}</strong><small>${escapeHtml(model)} · ${escapeHtml(capabilityCount)} 能力</small></span>
-        <span class="agent-state" title="可测试"></span>
-      </button>`;
-    })
-    .join("");
-
-  host.querySelectorAll("[data-agent-id]").forEach((button) => {
-    button.addEventListener("click", () => {
-      void selectWorkspaceAgent(button.dataset.agentId);
-    });
-  });
-  window.lucide?.createIcons();
-}
-
-function renderAgentSwitcher(state) {
+function renderAgentSwitcher(state = window.DeepAgentConsoleChat?.state) {
+  if (!state) return;
   const select = document.getElementById("agentSelect");
   const field = select?.closest(".agent-select-field");
   const trigger = document.getElementById("workspaceAgentSelectTrigger");
@@ -278,7 +239,7 @@ async function refreshWorkspaceAgents(button) {
   try {
     await Promise.all([window.DeepAgentConsoleChat?.refreshAgentWorkspace(), refreshChannelAccounts()]);
     lastRenderKey = "";
-    renderAgents();
+    renderAgentSwitcher();
     renderInspector();
   } finally {
     if (button) {
@@ -286,18 +247,6 @@ async function refreshWorkspaceAgents(button) {
       button.classList.remove("loading");
     }
   }
-}
-
-function setAgentPanePinned(pinned) {
-  const grid = document.getElementById("workspaceGrid");
-  const pinButton = document.getElementById("pinAgentPaneBtn");
-  const unpinButton = document.getElementById("unpinAgentPaneBtn");
-  if (!grid || !pinButton || !unpinButton) return;
-  grid.classList.toggle("agent-pinned", pinned);
-  pinButton.classList.toggle("active", pinned);
-  pinButton.setAttribute("aria-pressed", String(pinned));
-  unpinButton.setAttribute("aria-pressed", String(pinned));
-  constrainWorkspaceInspector();
 }
 
 function clampWorkspacePaneWidth(value, limits) {
@@ -315,7 +264,6 @@ export function calculateInspectorPaneWidth(value, layout = {}) {
   const available = Math.floor(
     finiteLayoutLength(layout.gridWidth)
       - finiteLayoutLength(layout.horizontalPadding)
-      - finiteLayoutLength(layout.agentWidth)
       - finiteLayoutLength(layout.sessionWidth)
       - finiteLayoutLength(layout.resizerWidth) * finiteLayoutLength(layout.resizerCount)
       - finiteLayoutLength(layout.mainMinWidth),
@@ -332,18 +280,16 @@ function readWorkspaceCssLength(styles, property, fallback) {
 
 function inspectorPaneLayout(grid) {
   const styles = getComputedStyle(grid);
-  const pinned = grid.classList.contains("agent-pinned");
   const resizerWidth = readWorkspaceCssLength(styles, "--console-resizer-width", 10);
   return {
     ...WORKSPACE_PANE_LIMITS.inspector,
     gridWidth: grid.clientWidth,
     horizontalPadding: readWorkspaceCssLength(styles, "padding-left", 0)
       + readWorkspaceCssLength(styles, "padding-right", 0),
-    agentWidth: pinned ? readWorkspacePaneWidth(grid, "agent") : 0,
     sessionWidth: readWorkspacePaneWidth(grid, "session"),
     resizerWidth,
-    resizerCount: pinned ? 3 : 2,
-    mainMinWidth: readWorkspaceCssLength(styles, "--console-workspace-main-min-width", pinned ? 500 : 520),
+    resizerCount: 2,
+    mainMinWidth: readWorkspaceCssLength(styles, "--console-workspace-main-min-width", 520),
     min: readWorkspaceCssLength(styles, "--console-inspector-min-width", WORKSPACE_PANE_LIMITS.inspector.min),
   };
 }
@@ -508,7 +454,7 @@ async function selectWorkspaceAgent(agentId) {
   closeAgentSelectMenu();
   await api.selectAgent(agentId);
   lastRenderKey = "";
-  renderAgents();
+  renderAgentSwitcher();
   renderInspector();
 }
 
@@ -816,7 +762,7 @@ function startStateMonitor() {
     });
     if (key === lastRenderKey) return;
     lastRenderKey = key;
-    renderAgents();
+    renderAgentSwitcher();
     renderInspector();
   }, 350);
 }
@@ -840,17 +786,6 @@ function bindWorkspaceControls() {
   document.getElementById("refreshWorkspaceAgentsBtn")?.addEventListener("click", (event) => {
     void refreshWorkspaceAgents(event.currentTarget);
   });
-  document.getElementById("pinAgentPaneBtn")?.addEventListener("click", () => {
-    const pinned = document.getElementById("workspaceGrid")?.classList.contains("agent-pinned");
-    setAgentPanePinned(!pinned);
-  });
-  document.getElementById("unpinAgentPaneBtn")?.addEventListener("click", () => {
-    setAgentPanePinned(false);
-  });
-  document.getElementById("agentSearchInput")?.addEventListener("input", renderAgents);
-  document.getElementById("refreshAgentsBtn")?.addEventListener("click", (event) => {
-    void refreshWorkspaceAgents(event.currentTarget);
-  });
   document.getElementById("toggleInspectorPaneBtn")?.addEventListener("click", toggleInspectorPane);
 }
 
@@ -870,9 +805,8 @@ export async function initWorkspace() {
   await import(`./chat.js?v=${WORKSPACE_ASSET_VERSION}`);
   bindWorkspaceControls();
   bindWorkspaceResizers();
-  setAgentPanePinned(false);
   window.addEventListener("resize", syncWorkspaceLayout);
-  renderAgents();
+  renderAgentSwitcher();
   renderInspector();
   startStateMonitor();
   void refreshChannelAccounts();

@@ -21,7 +21,7 @@
   <link rel="stylesheet" href="./themes.css?v=20260821-2" />
   <link rel="stylesheet" href="./workspace.css?v=20260904-13" />
   <link rel="stylesheet" href="./configuration/configuration.css?v=20260904-11" />
-  <link rel="stylesheet" href="./console.css?v=20260905-01" />
+  <link rel="stylesheet" href="./console.css?v=20260905-04" />
 </head>
 <body data-console-page="workspace">
   <div class="console-shell">
@@ -83,18 +83,6 @@
           <span class="loading-spinner"></span><span>正在加载测试工作台…</span>
         </div>
         <div class="workspace-grid hidden" id="workspaceGrid">
-          <aside class="agent-pane">
-            <div class="pane-heading">
-              <div><strong>测试 Agent</strong><span id="agentCount">—</span></div>
-              <div class="pane-heading-actions">
-                <button type="button" class="icon-action" id="refreshAgentsBtn" title="刷新 Agent" aria-label="刷新 Agent"><i data-lucide="refresh-cw"></i></button>
-                <button type="button" class="icon-action pin-agent active" id="unpinAgentPaneBtn" title="取消固定 Agent 列表" aria-label="取消固定 Agent 列表"><i data-lucide="pin-off"></i></button>
-              </div>
-            </div>
-            <label class="compact-search"><i data-lucide="search"></i><input id="agentSearchInput" type="search" placeholder="搜索 Agent" /></label>
-            <div class="agent-list" id="consoleAgentList"></div>
-          </aside>
-          <div class="workspace-resizer workspace-resizer-agent" id="agentPaneResizer" role="separator" tabindex="0" aria-label="调整 Agent 列表宽度" aria-orientation="vertical" aria-valuemin="150" aria-valuemax="280" aria-valuenow="188" data-resize-pane="agent"></div>
           <div class="workspace-legacy-host" id="workspaceLegacyHost"></div>
           <div class="workspace-resizer workspace-resizer-inspector" id="inspectorPaneResizer" role="separator" tabindex="0" aria-label="调整会话详情宽度" aria-orientation="vertical" aria-valuemin="260" aria-valuemax="720" aria-valuenow="320" data-resize-pane="inspector"></div>
           <aside class="inspector-pane" id="inspectorPane">
@@ -111,6 +99,7 @@
             <button class="tab resource-btn active" data-tab="agents"><i data-lucide="bot"></i><span>Agent</span></button>
             <div class="resource-group-label">设置</div>
             <button class="tab resource-btn" data-tab="llm-providers"><i data-lucide="waypoints"></i><span>Provider</span></button>
+            <button class="tab resource-btn" data-tab="skills"><i data-lucide="book-open-check"></i><span>Skill</span></button>
             <button class="tab resource-btn" data-tab="mcp">
               <svg class="mcp-brand-icon" viewBox="0 0 180 180" fill="none" aria-hidden="true">
                 <path d="M23.5996 85.2532L86.2021 22.6507C94.8457 14.0071 108.86 14.0071 117.503 22.6507C126.147 31.2942 126.147 45.3083 117.503 53.9519L70.2254 101.23" />
@@ -119,7 +108,6 @@
               </svg>
               <span>MCP</span>
             </button>
-            <button class="tab resource-btn" data-tab="skills"><i data-lucide="book-open-check"></i><span>Skill</span></button>
             <button class="tab resource-btn" data-tab="builtin-tools"><i data-lucide="blocks"></i><span>内置工具</span></button>
             <button class="tab resource-btn" data-tab="ui-tools"><i data-lucide="panel-top"></i><span>UI 工具</span></button>
             <button class="tab resource-btn" data-tab="channels"><i data-lucide="radio-tower"></i><span>渠道</span></button>
@@ -186,6 +174,6 @@
   <script src="../vendor/highlight.min.js"></script>
   <script src="./json-view.js?v=20260823-1"></script>
   <script src="./markdown.js?v=20260822-2"></script>
-  <script type="module" src="./main.js?v=20260904-16"></script>
+  <script type="module" src="./main.js?v=20260905-04"></script>
 </body>
 </html>

@@ -162,7 +162,6 @@ test("测试 App 使用锚定轻量浮层而不是抽屉", () => {
 });
 
 test("工作台所有宽度保持多栏交互并支持拖拽和键盘调宽", () => {
-  assert.match(consoleIndex, /id="agentPaneResizer"[\s\S]*data-resize-pane="agent"/);
   assert.match(consoleIndex, /id="inspectorPaneResizer"[\s\S]*data-resize-pane="inspector"/);
   assert.match(workspaceSource, /id = "sessionPaneResizer"/);
   assert.match(workspaceSource, /session: \{ min: 220, max: 420, initial: 300/);
@@ -219,12 +218,8 @@ test("Agent 使用自定义下拉并在切换后进入新对话", () => {
   assert.doesNotMatch(workspaceSource, /previousAgentBtn|nextAgentBtn|cycleWorkspaceAgent/);
   assert.match(workspaceSource, /id="refreshWorkspaceAgentsBtn"/);
   assert.doesNotMatch(workspaceSource, /id="workspaceAgentSelect"/);
-  assert.match(workspaceSource, /id="pinAgentPaneBtn"/);
-  assert.match(consoleIndex, /class="pane-heading-actions"/);
-  assert.match(consoleIndex, /id="unpinAgentPaneBtn"/);
   assert.doesNotMatch(consoleIndex, /class="agent-context-action"/);
-  assert.match(workspaceSource, /setAgentPanePinned\(false\)/);
-  assert.match(workspaceSource, /grid\.classList\.toggle\("agent-pinned", pinned\)/);
+  assert.doesNotMatch(workspaceSource + consoleIndex + consoleCss, /pinAgentPaneBtn|unpinAgentPaneBtn|setAgentPanePinned|agent-pinned|agent-pane|agentPaneResizer|consoleAgentList|agentSearchInput|console-agent-width/);
   assert.match(workspaceSource, /await api\.selectAgent\(agentId\)/);
   assert.match(chatSource, /async function selectAgent\(agentId\)/);
   assert.match(chatSource, /newChat\(agentId\);[\s\S]*await syncSessionsFromBackend\(\)/);
@@ -235,15 +230,10 @@ test("Agent 使用自定义下拉并在切换后进入新对话", () => {
   assert.match(workspaceSource, /refreshAgentWorkspace\(\)/);
   assert.match(workspaceSource, /sidebarHeader\?\.remove\(\)/);
   assert.doesNotMatch(workspaceSource, /sessionPanelSummary\.className/);
-  assert.match(consoleCss, /\.workspace-grid > \.agent-pane \{ display: none; \}/);
-  assert.match(consoleCss, /\.workspace-grid\.agent-pinned > \.agent-pane \{ display: flex; \}/);
-  assert.match(consoleCss, /\.workspace-grid\.agent-pinned #workspaceLegacyHost \.agent-switcher \{ display: none; \}/);
-  assert.match(consoleCss, /\.pane-heading > \.pane-heading-actions[\s\S]*flex-direction: row/);
   assert.match(consoleCss, /\.agent-select-trigger[\s\S]*border: 0;[\s\S]*background: transparent/);
   assert.match(consoleCss, /\.agent-select-menu[\s\S]*border-radius: 10px/);
   assert.match(consoleCss, /\.workspace-native-agent-select[\s\S]*clip-path: inset\(50%\)/);
   assert.match(consoleCss, /\.agent-switcher \.icon-action[\s\S]*border: 0;/);
-  assert.doesNotMatch(consoleCss, /#pinAgentPaneBtn \{ display: none; \}/);
 });
 
 test("会话头部与列表使用轻量圆角且图标无外框", () => {

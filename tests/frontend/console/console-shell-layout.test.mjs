@@ -92,6 +92,11 @@ test("内容外壳四边无间距圆角，用户信息浮层不展示内部分�
   assert.match(styles, /#configurationHost > \.panel \{ border: 0; border-radius: 0; box-shadow: none; \}/);
   assert.match(styles, /\.console-main \.workspace-grid\.inspector-hidden #workspaceLegacyHost > \.chat \{ border: 0 !important; border-radius: 0; box-shadow: none; \}/);
   assert.doesNotMatch(styles, /\.user-popover-(?:heading|runtime > span) \{[^}]*border-bottom:/);
+  assert.doesNotMatch(styles, /#configurationHost > \.panel\s*\{[^}]*border-radius: var\(--console-card-radius\) !important/);
+  assert.match(styles, /--console-nav-surface: color-mix/);
+  assert.match(styles, /background: var\(--console-nav-surface\)/);
+  assert.match(styles, /#configurationHost \.panel-toolbar h2,[\s\S]*?font-size: 16px;\s*font-weight: 600;/);
+  assert.match(styles, /#configurationHost \.global-settings-section-title h3,[\s\S]*?font-size: 14px; font-weight: 600;/);
 });
 
 test("配置弹窗统一水平居中，Agent 独立编辑页仍保持页面层级", () => {

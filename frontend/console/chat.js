@@ -612,6 +612,7 @@ function init() {
   localStorage.removeItem("da_sessions");
   renderSessions();
   el.sessionList.addEventListener("scroll", maybeLoadMoreSessions, { passive: true });
+  bindSessionListFeedback();
   checkHealth();
   loadCapabilities();
   loadUploadCapabilities();
@@ -667,11 +668,57 @@ async function loadMoreSessions() {
 function maybeLoadMoreSessions() {
   const list = el.sessionList;
   if (list.scrollTop > 0 && list.scrollHeight > list.clientHeight) sessionPage.hasScrolled = true;
-  const footer = list.querySelector(".session-list-footer");
-  if (footer) footer.hidden = !sessionPage.loading && !sessionPage.error && !sessionPage.hasMore && !sessionPage.hasScrolled;
+  updateSessionListFooter();
   if (!sessionPage.error && list.clientHeight > 0 && list.scrollHeight - list.scrollTop - list.clientHeight < 80) {
     void loadMoreSessions();
   }
+}
+
+function updateSessionListFooter() {
+  const list = el.sessionList;
+  const footer = list.querySelector(".session-list-footer");
+  if (!footer) return;
+  const rows = list.querySelectorAll(".session-item:not(.console-filtered)");
+  const last = rows[rows.length - 1];
+  // Measure history only: the footer must not make a short list qualify as a full screen.
+  const contentHeight = last ? last.offsetTop + last.offsetHeight - rows[0].offsetTop : 0;
+  // A screen is full when there is not enough room for another complete row.
+  const fillsViewport = !!last && list.clientHeight > 0 && contentHeight + last.offsetHeight > list.clientHeight;
+  footer.hidden = !sessionPage.loading && !sessionPage.error && !sessionPage.hasMore
+    && !(sessionPage.hasScrolled && fillsViewport);
+}
+
+function bindSessionListFeedback() {
+  const list = el.sessionList;
+  const feedback = (deltaY) => {
+    if (!deltaY) return;
+    const atEdge = deltaY < 0 ? list.scrollTop <= 1
+      : list.scrollHeight - list.scrollTop - list.clientHeight <= 1;
+    sessionPage.hasScrolled = true;
+    updateSessionListFooter();
+    if (!atEdge || (deltaY > 0 && (sessionPage.hasMore || sessionPage.loading))
+      || list.classList.contains("session-edge-feedback")
+      || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    list.style.setProperty("--session-edge-shift", deltaY > 0 ? "-8px" : "8px");
+    list.classList.add("session-edge-feedback");
+    setTimeout(() => list.classList.remove("session-edge-feedback"), 240);
+  };
+  list.addEventListener("wheel", (event) => {
+    if (!event.ctrlKey && Math.abs(event.deltaY) > Math.abs(event.deltaX)) feedback(event.deltaY);
+  }, { passive: true });
+  let touchY = null;
+  list.addEventListener("touchstart", (event) => {
+    touchY = event.touches.length === 1 ? event.touches[0].clientY : null;
+  }, { passive: true });
+  list.addEventListener("touchmove", (event) => {
+    if (touchY === null || event.touches.length !== 1) return;
+    const nextY = event.touches[0].clientY;
+    feedback(touchY - nextY);
+    touchY = nextY;
+  }, { passive: true });
+  list.addEventListener("touchend", () => { touchY = null; }, { passive: true });
+  list.addEventListener("touchcancel", () => { touchY = null; }, { passive: true });
+  new ResizeObserver(updateSessionListFooter).observe(list);
 }
 
 function autoGrow() {
@@ -888,6 +935,7 @@ function renderSessions() {
   const query = document.getElementById("sessionSearchInput")?.value.trim().toLowerCase() || "";
   el.sessionList.querySelectorAll(".session-item").forEach((row) => row.classList.toggle("console-filtered", !!query && !row.textContent.toLowerCase().includes(query)));
   el.sessionList.scrollTop = scrollTop;
+  updateSessionListFooter();
   refreshLucideIcons();
 }
 

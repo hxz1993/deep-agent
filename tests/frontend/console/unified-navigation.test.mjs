@@ -55,21 +55,23 @@ test("全局目录跨页先加载配置，且未授权点击不进入管理处�
   assert.match(main, /rememberConfigurationTab\(event\.detail\.name\);\s*syncNavigation\(\)/);
 });
 
-test("导航宽度达到阈值收起，向外拖动恢复且不超过200px", () => {
+test("导航宽度连续拖动，文字渐隐且宽度限制为56至200px", () => {
   const classes = new Set();
   const widths = [];
   const element = { setAttribute() {}, innerHTML: "" };
   const context = vm.createContext({
     document: {
       body: { classList: { toggle(name, active) { active ? classes.add(name) : classes.delete(name); } },
-        style: { setProperty(name, value) { widths.push(value); } } },
+        style: { setProperty(name, value) { if (name === "--console-rail-width") widths.push(value); } } },
       getElementById() { return element; },
     },
     window: { dispatchEvent() {}, lucide: { createIcons() {} } }, Event: class {},
   });
   vm.runInContext(main.slice(main.indexOf("let expandedNavigationWidth"), main.indexOf("function toggleConsoleNavigation")), context);
-  for (const width of [170, 110, 125, 230]) context.setConsoleNavigationWidth(width);
-  assert.deepEqual(widths, ["170px", "56px", "140px", "200px"]);
+  for (const width of [170, 110, 96, 30]) context.setConsoleNavigationWidth(width);
+  assert.equal(classes.has("console-nav-collapsed"), true);
+  for (const width of [125, 230]) context.setConsoleNavigationWidth(width);
+  assert.deepEqual(widths, ["170px", "110px", "96px", "56px", "125px", "200px"]);
   assert.equal(classes.has("console-nav-collapsed"), false);
 });
 

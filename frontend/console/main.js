@@ -5,7 +5,7 @@ import {
 } from "./configuration.js?v=20260904-16";
 import { bindContextControls, refreshIdentity } from "./context.js?v=20260904-14";
 import { initDiagnostics } from "./diagnostics.js?v=20260720-1";
-import { initWorkspace } from "./workspace.js?v=20260904-16";
+import { initWorkspace } from "./workspace.js?v=20260905-03";
 import "./time.js?v=20260831-1";
 
 const VALID_PAGES = new Set(["workspace", "configuration", "diagnostics"]);
@@ -93,11 +93,13 @@ async function showPage(page, { updateHash = true, restoreTab = true } = {}) {
 let expandedNavigationWidth = 200;
 
 function setConsoleNavigationWidth(width) {
-  const collapsed = width < 120;
-  const nextWidth = collapsed ? 56 : Math.max(140, Math.min(200, width));
-  if (!collapsed) expandedNavigationWidth = nextWidth;
+  // Keep the rail under the pointer; only the labels fade near the compact end.
+  const nextWidth = Math.max(56, Math.min(200, width));
+  const collapsed = nextWidth <= 96;
+  if (nextWidth >= 140) expandedNavigationWidth = nextWidth;
   document.body.classList.toggle("console-nav-collapsed", collapsed);
   document.body.style.setProperty("--console-rail-width", `${nextWidth}px`);
+  document.body.style.setProperty("--console-nav-label-opacity", String(Math.max(0, Math.min(1, (nextWidth - 96) / 44))));
   document.getElementById("consoleNavResizer")?.setAttribute("aria-valuenow", String(nextWidth));
   const button = document.getElementById("toggleConsoleNavBtn");
   const label = collapsed ? "展开导航" : "收起导航";
@@ -107,8 +109,6 @@ function setConsoleNavigationWidth(width) {
   const brand = document.getElementById("expandConsoleNavBtn");
   brand.title = collapsed ? "展开导航" : "DeepAgent";
   brand.setAttribute("aria-label", brand.title);
-  button.innerHTML = `<i data-lucide="${collapsed ? "panel-left-open" : "panel-left-close"}" aria-hidden="true"></i>`;
-  window.lucide?.createIcons();
   window.dispatchEvent(new Event("resize"));
 }
 
@@ -119,17 +119,37 @@ function toggleConsoleNavigation() {
 function bindConsoleNavigationResizer() {
   const handle = document.getElementById("consoleNavResizer");
   let drag = null;
+  let snapTimer = null;
+  const animateSnap = () => {
+    clearTimeout(snapTimer);
+    document.body.classList.add("console-nav-snapping");
+    snapTimer = setTimeout(() => document.body.classList.remove("console-nav-snapping"), 180);
+  };
   handle.addEventListener("pointerdown", (event) => {
     if (event.button !== 0) return;
-    drag = { x: event.clientX, width: document.querySelector(".console-rail").getBoundingClientRect().width };
+    drag = { x: event.clientX, width: document.querySelector(".console-rail").getBoundingClientRect().width, snapped: false };
     handle.setPointerCapture(event.pointerId);
+    handle.classList.add("dragging");
     document.body.classList.add("workspace-pane-resizing");
     event.preventDefault();
   });
   handle.addEventListener("pointermove", (event) => {
-    if (drag) setConsoleNavigationWidth(drag.width + event.clientX - drag.x);
+    if (!drag) return;
+    const width = drag.width + event.clientX - drag.x;
+    // Snap only while shrinking; pulling out from the icon rail stays continuous.
+    const snapped = width <= 88 && width < drag.width;
+    if (snapped !== drag.snapped) animateSnap();
+    drag.snapped = snapped;
+    setConsoleNavigationWidth(snapped ? 56 : width);
   });
-  const finish = () => { drag = null; document.body.classList.remove("workspace-pane-resizing"); };
+  const finish = () => {
+    if (!drag) return;
+    drag = null;
+    clearTimeout(snapTimer);
+    document.body.classList.remove("console-nav-snapping");
+    handle.classList.remove("dragging");
+    document.body.classList.remove("workspace-pane-resizing");
+  };
   handle.addEventListener("pointerup", finish);
   handle.addEventListener("pointercancel", finish);
   handle.addEventListener("lostpointercapture", finish);
@@ -137,7 +157,8 @@ function bindConsoleNavigationResizer() {
     if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
     event.preventDefault();
     const width = document.querySelector(".console-rail").getBoundingClientRect().width;
-    setConsoleNavigationWidth(event.key === "Home" ? 56 : event.key === "End" ? 200 : event.key === "ArrowRight" ? Math.max(140, width + 20) : width <= 140 ? 56 : width - 20);
+    const nextWidth = event.key === "Home" ? 56 : event.key === "End" ? 200 : width + (event.key === "ArrowRight" ? 20 : -20);
+    setConsoleNavigationWidth(event.key === "ArrowLeft" && nextWidth <= 88 ? 56 : nextWidth);
   });
 }
 

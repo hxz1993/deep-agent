@@ -5,19 +5,36 @@
 
 ## v0.7.0
 
-- 新增可选企业微信Channel Gateway进程，使用官方`wecom-aibot-python-sdk==1.0.2`承接认证、心跳、
-  重连、事件分发、媒体下载解密和流式回复；API继续独立固定部署。
+- 修复企微引用消息丢失：文本/语音引用走现有Context Reference，图片/文件/视频/图文引用复用SDK下载和附件链路；
+  引用与本次问题独立保存，命令不从引用中执行。五个命令仅识别独立纯文本，不再猜测剥离群聊@提及。
+- 渠道群聊逐条、私聊每个Session仅首轮将发送者以Context Reference写入模型与历史，群Binding不随发言人变化；可信渠道
+  请求追加中文会话规则，普通客户端不受影响。Agent卡片和列表标题旁显示派生的渠道关联标记。
+- Binding使用`peer_metadata` JSON替代独立名称列，保存来源会话身份；私聊不依赖Runs反查用户。
+  标题改为`User｜User ID`、`Group｜Chat ID`，实际有名时附名称并保留ID；保留人工改名，数据库仍为002。
+- Console工具过程改为无框灰字轻量行，保留工具图标，悬停或键盘聚焦时显示展开箭头。
+- 新增可选渠道网关进程；公共Gateway/ChannelService与WeCom Adapter分离，只有Adapter引用官方
+  `wecom-aibot-python-sdk==1.0.2`，连接、认证、心跳、重连、事件分发、媒体下载解密和流式回复均使用SDK；
+  API继续独立固定部署，未来平台复用公共逻辑但仍需新增Adapter与配置。
 - Alembic`002`新增Channel三表，本轮字段精简与纠正直接合并于002，不新增迁移版本。渠道通过管理员配置
-  `session_user_id`（会话用户），按`userid/chatid`映射Session；Agent/用户切换不改写旧历史。
-- 消息台账成功路径收敛为一次INSERT、三次UPDATE；调用前记录派发状态，避免SSE Run ID丢失时
-  重复执行Agent。重复投递不创建新会话，文字增量不更新台账。
+  `session_user_id`（会话用户），按`single/group`及对应User ID/Chat ID映射Session；Agent/用户切换不改写旧历史。
+- 入站先认领消息台账再排队；调用前记录派发边界，避免SSE Run ID丢失时误重跑Agent。
+  处理终态与投递结果分开保存，重复投递不执行第二次；文字增量、工具片段和心跳不更新台账。
+- 增加渠道专用`/help`、`/new`、`/stop`、`/status`、`/whoami`；停止/新建走独立控制路径，取消此前
+  排队消息并等待真实停止，15秒超时不换绑。`/new`在同一事务创建Session、来源事件、切换Binding并完成命令，
+  旧历史保留，不实现`/reset`，不改变Console/DeepCube/电子表格的命令规则。
+- Session取消接口支持可信渠道调用，新增`GET /api/v1/sessions/{id}/run-status`；
+  校验Account与Session归属，按实际任务身份取消，保持单API worker约束。
 - text、image、file、voice、video和mixed通过现有FileStore与Chat SSE进入Agent；企微只接收节流后的
   Markdown文本，不暴露thinking、工具参数或轨迹。AMR语音加入上传白名单。
 - Console配置中心新增“渠道”，支持账号CRUD、启停、运行状态和连接测试；Gateway未部署或不可达时
-  仍可维护配置并显示明确状态。
+  仍可维护配置并显示明确状态。顶部网关状态与机器人连接状态分开；快捷命令只读弹框与渠道`/help`
+  共用`GET /api/v1/channel-commands`目录。
+- 渠道Session通过`source=channel`标题事件保存来源快照，默认按用户/群名称或ID命名，不被首轮模型标题覆盖；
+  Console列表和详情显示来源。`maintenance.channel_origins`提供默认dry-run、备份后apply的本地旧数据修复，
+  保留人工标题和历史正文，不新增表或迁移版本。
 - Console用户消息的附件与上下文引用置于气泡顶部，聊天和轨迹图片支持悬停预览及大图查看；
   大图仅在同一条用户消息的图片之间切换，点击空白处可关闭。
-- 0.7.0固定单Gateway副本，不实现Webhook、Lease、Outbox、主动消息、卡片Action或企微用户级平台
+- 0.7.0固定单API worker和单Gateway副本，不实现飞书Adapter、Webhook、Lease、Outbox、主动消息、卡片Action或企微用户级平台
   身份映射；Secret按本版约定明文入库，但管理接口不返回原值，编辑留空时保持原配置。
 
 ## v0.6.8

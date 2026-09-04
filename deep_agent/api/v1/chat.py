@@ -15,7 +15,7 @@ from deep_agent.agent.context.compaction import ContextWindowExceededError
 from deep_agent.agent.headers import extract_forward_headers
 from deep_agent.agent.run_identity import conversation_id_for, new_run_id
 from deep_agent.api.v1.deps import build_runner_for_agent
-from deep_agent.api.v1.channel_auth import ChannelRequestUserDep
+from deep_agent.api.v1.channel_auth import ChannelAccountDep, ChannelRequestUserDep
 from deep_agent.core.context import AppContextDep
 from deep_agent.core.exceptions import AgentNotFoundError, LlmModelNotFoundError
 from deep_agent.db.ids import normalize_agent_id
@@ -169,6 +169,7 @@ async def chat(
     ctx: AppContextDep,
     body: ChatRequest,
     user: ChannelRequestUserDep,
+    channel_account: ChannelAccountDep,
 ) -> ChatResponse:
     _validate_chat_body(body)
     session_id = body.session_id or uuid.uuid4().hex
@@ -184,6 +185,7 @@ async def chat(
             model_id=body.model_id,
             capabilities=body.capabilities,
             request_headers=request_headers,
+            channel_type=channel_account.channel_type if channel_account is not None else None,
         )
     except (AgentNotFoundError, LlmModelNotFoundError) as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
@@ -227,6 +229,7 @@ async def chat_stream(
     ctx: AppContextDep,
     body: StreamChatRequest,
     user: ChannelRequestUserDep,
+    channel_account: ChannelAccountDep,
 ) -> EventSourceResponse:
     _validate_chat_body(body)
     session_id = body.session_id or uuid.uuid4().hex
@@ -245,6 +248,7 @@ async def chat_stream(
             model_id=body.model_id,
             capabilities=body.capabilities,
             request_headers=request_headers,
+            channel_type=channel_account.channel_type if channel_account is not None else None,
         )
     except AgentNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc

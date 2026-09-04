@@ -9,6 +9,7 @@ from pydantic_ai.messages import ModelMessage
 
 from deep_agent.core.context import AppContextDep
 from deep_agent.api.v1.request_identity import RequestUserDep
+from deep_agent.api.v1.channel_auth import ChannelControlAccountDep
 from deep_agent.db.session_list import MAX_LIST_LIMIT, SessionListFilters, SessionSummaryRow
 from deep_agent.db.session_scope import resolve_session
 from deep_agent.db.ids import normalize_agent_id
@@ -23,7 +24,7 @@ from deep_agent.conversation.models import ConversationHistoryResponse
 from deep_agent.conversation.display_names import decorate_history_display_names
 from deep_agent.conversation.projector import ConversationProjectionError, project_session_events
 from deep_agent.capabilities.display_names import resolve_tool_display_name_map
-from deep_agent.schemas.chat import SessionInfo, SessionListResponse
+from deep_agent.schemas.chat import ChannelSessionOrigin, SessionInfo, SessionListResponse
 from deep_agent.time import UtcDatetime
 
 router = APIRouter()
@@ -33,6 +34,25 @@ class SessionCancelResponse(BaseModel):
     status: Literal["cancel_requested", "not_running"]
     session_id: str
     agent_id: str | None = None
+
+
+class SessionRunStatusResponse(BaseModel):
+    status: Literal["idle", "running", "cancel_requested"]
+    session_id: str
+    agent_id: str | None = None
+    run_id: str | None = None
+    started_at: UtcDatetime | None = None
+
+
+async def _channel_control_scope(ctx, account, session_id, agent_id, user_id):
+    if account is None:
+        return agent_id, user_id
+    session = await ctx.stores.channel.get_channel_session(account.id, session_id)
+    if session is None or (agent_id is not None and agent_id != session.agent_id):
+        raise HTTPException(status_code=404, detail="Session not found")
+    # Ownership is a verified channel relationship, never a user-supplied
+    # header. Use the actual old Session identity after configuration changes.
+    return session.agent_id, session.user_id
 
 
 async def _resolve_agent_name(ctx: AppContextDep, agent_id: str | None) -> str | None:
@@ -92,6 +112,7 @@ async def _build_session_info(
         title=title,
         created_at=created_at,
         updated_at=updated_at,
+        channel=await ctx.stores.channel.get_session_origin(session_id) if ctx.stores.channel else None,
     )
 
 
@@ -124,8 +145,13 @@ async def list_sessions(
         sort=sort,
     )
     rows, total = await ctx.store.list_session_summaries(filters)
+    origins = await ctx.stores.channel.get_session_origins([row.session_id for row in rows]) if ctx.stores.channel else {}
+    items = [_summary_to_session_info(row) for row in rows]
+    for item in items:
+        origin = origins.get(item.session_id)
+        item.channel = ChannelSessionOrigin.model_validate(origin) if origin else None
     return SessionListResponse(
-        items=[_summary_to_session_info(row) for row in rows],
+        items=items,
         total=total,
         limit=limit,
         offset=offset,
@@ -164,6 +190,7 @@ async def get_session(
 async def cancel_session_run(
     ctx: AppContextDep,
     user_id: RequestUserDep,
+    channel_account: ChannelControlAccountDep,
     session_id: str,
     agent_id: str | None = None,
 ) -> SessionCancelResponse:
@@ -177,6 +204,9 @@ async def cancel_session_run(
                 detail="agent_id must be a valid UUID",
             ) from exc
 
+    normalized_agent_id, user_id = await _channel_control_scope(
+        ctx, channel_account, session_id, normalized_agent_id, user_id,
+    )
     # The stream registers before publishing its session SSE event and before
     # asynchronous user-message persistence is guaranteed to finish. Allow its
     # owner to cancel during that startup window without requiring a DB row.
@@ -213,6 +243,34 @@ async def cancel_session_run(
         session_id=resolved_session_id,
         agent_id=api_agent_id,
     )
+
+
+@router.get("/sessions/{session_id}/run-status", response_model=SessionRunStatusResponse)
+async def get_session_run_status(
+    ctx: AppContextDep,
+    user_id: RequestUserDep,
+    channel_account: ChannelControlAccountDep,
+    session_id: str,
+    agent_id: str | None = None,
+) -> SessionRunStatusResponse:
+    if agent_id is not None:
+        try:
+            agent_id = normalize_agent_id(agent_id)
+        except (ValueError, TypeError) as exc:
+            raise HTTPException(status_code=422, detail="agent_id must be a valid UUID") from exc
+    agent_id, user_id = await _channel_control_scope(ctx, channel_account, session_id, agent_id, user_id)
+    active = ctx.active_runs.get(agent_id=agent_id, session_id=session_id)
+    if active is None or active.user_id != user_id:
+        resolved = await resolve_session(ctx.store, session_id, agent_id=agent_id, user_id=user_id)
+        if resolved is None:
+            raise HTTPException(status_code=404, detail="Session not found")
+        from deep_agent.db.session_scope import agent_scope_to_api
+
+        agent_id = agent_scope_to_api(resolved[0])
+        active = ctx.active_runs.get(agent_id=agent_id, session_id=session_id)
+    if active is not None and active.user_id == user_id:
+        return SessionRunStatusResponse(status=active.status, session_id=session_id, agent_id=agent_id, run_id=active.run_id, started_at=active.started_at)
+    return SessionRunStatusResponse(status="idle", session_id=session_id, agent_id=agent_id)
 
 
 class SessionEventResponse(BaseModel):

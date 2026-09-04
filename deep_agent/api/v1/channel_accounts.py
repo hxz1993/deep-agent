@@ -25,6 +25,13 @@ from deep_agent.services.channel_gateway_client import (
 router = APIRouter()
 
 
+@router.get("/channel-commands", dependencies=CONSOLE_ADMIN_DEPENDENCIES)
+async def get_channel_commands() -> dict:
+    from deep_agent.channels.commands import command_catalog
+
+    return command_catalog()
+
+
 async def _ensure_agent(ctx: AppContextDep, agent_id: str) -> str:
     try:
         normalized = normalize_agent_id(agent_id)
@@ -166,7 +173,7 @@ async def get_channel_runtime() -> ChannelRuntimeResponse:
             deployed=False,
             reachable=False,
             state="not_deployed",
-            message="当前环境未部署 Channel Gateway；配置可保存，启用后需部署并重启服务。",
+            message="当前环境未部署渠道网关；可先保存渠道配置，部署网关并配置地址后需重启 DeepAgent API。",
         )
     try:
         payload = await client.statuses()
@@ -175,13 +182,13 @@ async def get_channel_runtime() -> ChannelRuntimeResponse:
             deployed=True,
             reachable=False,
             state="unreachable",
-            message="Channel Gateway 已配置但当前不可达。",
+            message="渠道网关已配置但当前不可达，请检查服务是否启动及内部连接配置。",
         )
     return ChannelRuntimeResponse(
         deployed=True,
         reachable=True,
         state=payload.get("state", "connected"),
-        message=payload.get("message", "Channel Gateway 运行正常"),
+        message=payload.get("message", "渠道网关运行正常"),
         accounts=[
             ChannelAccountRuntimeStatus.model_validate(item)
             for item in payload.get("accounts", [])
@@ -205,10 +212,10 @@ async def test_channel_connection(
     if not client.configured:
         raise HTTPException(
             status_code=503,
-            detail="当前环境未部署 Channel Gateway；请部署后重启 DeepAgent API。",
+            detail="当前环境未部署渠道网关；请部署并配置网关地址后重启 DeepAgent API。",
         )
     try:
         payload = await client.test_account(account_id)
     except ChannelGatewayUnavailableError as exc:
-        raise HTTPException(status_code=503, detail="Channel Gateway 当前不可达") from exc
+        raise HTTPException(status_code=503, detail="渠道网关当前不可达") from exc
     return ChannelConnectionTestResponse.model_validate(payload)

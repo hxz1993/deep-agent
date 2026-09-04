@@ -131,6 +131,17 @@ class ToolPackageDescription(BaseModel):
     search_result_limit: int | None = None
 
 
+class ChannelSessionOrigin(BaseModel):
+    """Presentation-only origin, persisted with the initial channel title event."""
+
+    account_id: str
+    account_name: str
+    channel_type: str
+    peer_type: str
+    peer_id: str
+    peer_metadata: dict[str, str] = Field(default_factory=dict)
+
+
 class SessionInfo(BaseModel):
     session_id: str
     message_count: int
@@ -139,7 +150,8 @@ class SessionInfo(BaseModel):
     agent_id: str | None = Field(default=None, description="Agent id used for this session.")
     agent_name: str | None = Field(default=None, description="Agent display name (if known).")
     user_prompt: str | None = Field(default=None, description="First user message in the session.")
-    title: str | None = Field(default=None, description="Session title (generated from first user message).")
+    title: str | None = Field(default=None, description="Session title (automatic, channel-derived, or user-defined).")
+    channel: ChannelSessionOrigin | None = Field(default=None, description="External channel origin, if this is a channel-created session.")
     created_at: UtcDatetime | None = Field(default=None, description="Session creation time (UTC).")
     updated_at: UtcDatetime | None = Field(default=None, description="Last conversation activity time (UTC).")
 

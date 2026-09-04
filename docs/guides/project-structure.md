@@ -39,6 +39,14 @@ FastAPI API
 - `db/`：ORM、Store、会话协调和数据库连接。
 - `schemas/`：API 输入输出结构。
 - `core/`：应用上下文、日志和通用异常。
+- `channel_gateway/`：可选渠道网关进程、运行配置、Account轮询和内部API/DeepAgent Client。
+- `channels/`：公共消息/Adapter契约、注册表、Peer队列、五个渠道命令与帮助目录。
+- `channels/adapters/wecom/`：企微SDK的唯一引用边界，负责SDK事件转换、连接状态、原生媒体和回复调用。
+
+渠道入站链路为“官方SDK → WeCom Adapter → 公共ChannelService → 现有Chat API”，出站反向调用
+Adapter的原生SDK回复。Gateway不是MCP工具，也不包含模型执行引擎；新增飞书需实现其Adapter与配置，
+而不是另建一套Gateway或重写共享Chat接口。当前单API worker/单Gateway和部署说明见
+[`wecom-channel.md`](wecom-channel.md)。
 
 ## 工具包边界
 
@@ -73,7 +81,8 @@ DeepAgent 已经依赖的配置、平台客户端、服务发现和部署适配�
 
 ### `maintenance/`
 
-只供开发或运维人员从命令行执行。例如配置数据库备份。这里的程序不会注册为
+只供开发或运维人员从命令行执行。例如配置数据库备份、`channel_origins.py`的本地渠道来源修复。
+来源修复默认dry-run，停服务后apply会先生成敏感SQLite备份，不运行Alembic。这里的程序不会注册为
 Pydantic AI Tool，也不会出现在 Console 的 Agent 能力列表。
 
 ### `mcps/` 与 `deep_agent/skills/`

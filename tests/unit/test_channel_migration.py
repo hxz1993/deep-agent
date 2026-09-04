@@ -32,8 +32,8 @@ class ChannelMigrationTests(unittest.TestCase):
                 db.execute("""INSERT INTO chat_sessions
                     (session_id,agent_id,user_id,next_sequence) VALUES ('session',?,'operator',1)""", (agent_id,))
                 db.execute("""INSERT INTO channel_session_bindings
-                    (id,account_id,peer_type,peer_id,session_id)
-                    VALUES ('binding','account','userid','u','session')""")
+                    (id,account_id,peer_type,peer_id,session_id,peer_metadata)
+                    VALUES ('binding','account','single','u','session','{}')""")
                 db.execute("""INSERT INTO channel_message_runs
                     (id,account_id,binding_id,external_message_id,session_id,payload_hash,
                      processing_status,delivery_status,finished_at)
@@ -46,7 +46,7 @@ class ChannelMigrationTests(unittest.TestCase):
                 self.assertEqual(db.execute("SELECT session_user_id,secret FROM channel_accounts").fetchone(),
                                  ("operator", "test-secret"))
                 self.assertEqual(db.execute("SELECT peer_type,peer_id,session_id FROM channel_session_bindings").fetchone(),
-                                 ("userid", "u", "session"))
+                                 ("single", "u", "session"))
                 self.assertEqual(db.execute("SELECT external_message_id,session_id,processing_status FROM channel_message_runs").fetchone(),
                                  ("message", "session", "completed"))
                 for model in (ChannelAccount, ChannelSessionBinding, ChannelMessageRun):

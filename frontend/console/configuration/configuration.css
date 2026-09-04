@@ -2670,6 +2670,15 @@ dialog.console-action-dialog::backdrop {
   min-width: 0;
 }
 
+.channel-title-row { display: flex; align-items: baseline; gap: 12px; }
+.channel-title-row .link-btn {
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+.channel-title-row .link-btn:hover { text-decoration: underline; }
+
 .channel-table {
   min-width: 720px;
 }
@@ -2805,6 +2814,43 @@ dialog.console-action-dialog::backdrop {
 .channel-account-modal {
   width: min(680px, calc(100vw - 32px));
 }
+
+.channel-admin-panel .panel-toolbar { flex-wrap: wrap; }
+#configurationHost .channel-admin-panel .panel-toolbar-actions { flex-wrap: wrap; max-width: 100%; }
+
+dialog.console-detail-dialog.modal.channel-commands-modal {
+  width: min(560px, calc(100vw - 32px));
+  height: fit-content;
+  min-height: 0;
+  max-height: calc(100vh - 32px);
+  overflow: hidden;
+  margin: auto;
+  border-radius: var(--console-card-radius);
+}
+
+#channelCommandsModal > .modal-body {
+  min-height: 0;
+  max-height: calc(100vh - 160px);
+  overflow-y: auto;
+}
+
+#retryChannelCommandsBtn[hidden] { display: none; }
+
+.channel-command-list { margin: 0; }
+.channel-command-list > div {
+  display: grid;
+  grid-template-columns: 84px minmax(0, 1fr);
+  gap: 12px;
+  padding: 10px 0;
+  align-items: baseline;
+}
+.channel-command-list dt,
+.channel-command-list dd { margin: 0; }
+.channel-command-list code { font-family: var(--mono); color: var(--text); }
+.channel-command-list dd { color: var(--text-dim); line-height: 1.6; overflow-wrap: anywhere; }
+.channel-command-notes { margin: 16px 0 0; padding-left: 18px; color: var(--text-faint); font-size: 12px; line-height: 1.7; }
+.channel-command-notes li + li { margin-top: 6px; }
+.channel-command-error { margin: 0; color: var(--danger-text); line-height: 1.6; }
 
 .channel-account-form-body {
   display: grid;

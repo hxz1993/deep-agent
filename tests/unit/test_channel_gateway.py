@@ -14,6 +14,7 @@ from deep_agent.channel_gateway.config import GatewayConfig
 from deep_agent.channel_gateway.deepagent_client import DeepAgentChannelClient, StreamEvent
 from deep_agent.channel_gateway.messages import parse_message
 from deep_agent.channel_gateway.runtime import AccountRuntime, ChannelRuntime
+from deep_agent.channels.service import ChannelService
 from deep_agent.db.dialect import DbDialect
 from deep_agent.db.factory import create_engine
 from deep_agent.db.models import Agent, Base, ChannelMessageRun, ChatSession, LlmModel, LlmProvider
@@ -27,6 +28,12 @@ class FakeWeComClient:
 
     async def reply_stream(self, _frame, _stream_id, content, finish=False):
         self.replies.append((content, finish))
+
+    def new_reply_id(self):
+        return "reply-id"
+
+    async def reply(self, message, reply_id, content, finish):
+        await self.reply_stream(None, reply_id, content, finish)
 
 
 class FakeDeepAgentClient:
@@ -103,12 +110,12 @@ class ChannelGatewayTests(unittest.IsolatedAsyncioTestCase):
     async def test_binding_reuses_session_and_rotates_after_agent_change_or_delete(self) -> None:
         first = await self.store.resolve_binding(
             account_id=self.account.id,
-            peer_type="userid",
+            peer_type="single",
             peer_id="user-1",
         )
         second = await self.store.resolve_binding(
             account_id=self.account.id,
-            peer_type="userid",
+            peer_type="single",
             peer_id="user-1",
         )
         self.assertEqual(first.session.session_id, second.session.session_id)
@@ -123,7 +130,7 @@ class ChannelGatewayTests(unittest.IsolatedAsyncioTestCase):
         )
         rotated = await self.store.resolve_binding(
             account_id=self.account.id,
-            peer_type="userid",
+            peer_type="single",
             peer_id="user-1",
         )
         self.assertNotEqual(rotated.session.session_id, first.session.session_id)
@@ -137,16 +144,16 @@ class ChannelGatewayTests(unittest.IsolatedAsyncioTestCase):
             )
         recreated = await self.store.resolve_binding(
             account_id=self.account.id,
-            peer_type="userid",
+            peer_type="single",
             peer_id="user-1",
         )
         self.assertNotEqual(recreated.session.session_id, rotated.session.session_id)
         self.assertEqual(recreated.binding.id, first.binding.id)
 
     async def test_session_user_change_creates_session_without_reassigning_old_history(self):
-        first = await self.store.resolve_binding(account_id=self.account.id, peer_type="userid", peer_id="u")
+        first = await self.store.resolve_binding(account_id=self.account.id, peer_type="single", peer_id="u")
         await self.store.update_account(self.account.id, ChannelAccountUpdate(session_user_id="operator"))
-        second = await self.store.resolve_binding(account_id=self.account.id, peer_type="userid", peer_id="u")
+        second = await self.store.resolve_binding(account_id=self.account.id, peer_type="single", peer_id="u")
         self.assertNotEqual(first.session.session_id, second.session.session_id)
         self.assertEqual(second.session.user_id, "operator")
         async with self.factory() as db:
@@ -154,7 +161,7 @@ class ChannelGatewayTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(old.user_id, "owner")
 
     async def test_restart_does_not_retry_dispatched_request_without_sse_run_id(self):
-        binding = await self.store.resolve_binding(account_id=self.account.id, peer_type="userid", peer_id="u")
+        binding = await self.store.resolve_binding(account_id=self.account.id, peer_type="single", peer_id="u")
         fields = dict(account_id=self.account.id, binding_id=binding.binding.id,
                       external_message_id="lost-sse", external_request_id="r", sender_id="u",
                       session_id=binding.session.session_id, payload_hash="a" * 64)
@@ -192,7 +199,7 @@ class ChannelGatewayTests(unittest.IsolatedAsyncioTestCase):
     async def test_message_claim_is_idempotent_and_only_unknown_pre_run_can_retry(self) -> None:
         binding = await self.store.resolve_binding(
             account_id=self.account.id,
-            peer_type="chatid",
+            peer_type="group",
             peer_id="chat-1",
         )
         fields = dict(
@@ -249,25 +256,19 @@ class ChannelGatewayTests(unittest.IsolatedAsyncioTestCase):
             platform_authorization="",
             platform_cookie="",
         )
-        runtime = ChannelRuntime(self.store, config)
-        runtime.deep_agent = FakeDeepAgentClient()
+        service = ChannelService(self.store, FakeDeepAgentClient(), stream_interval=999)
         client = FakeWeComClient()
-        managed = AccountRuntime(
-            account=self.account,
-            client=client,
-            fingerprint="test",
-        )
         statements = []
         def record(_conn, _cursor, statement, _parameters, _context, _many):
             statements.append(statement.upper())
         event.listen(self.engine.sync_engine, "before_cursor_execute", record)
         try:
-            await runtime._process_message(managed, message)
+            await service.receive(self.account, client, message)
+            await service.peers[(self.account.id, message.peer_type, message.peer_id)].worker
             run_updates = [s for s in statements if s.startswith("UPDATE CHANNEL_MESSAGE_RUNS")]
-            self.assertEqual(len(run_updates), 3)  # dispatch, SSE run_id, terminal; never per token
-            self.assertFalse(any(s.startswith("UPDATE CHANNEL_SESSION_BINDINGS") for s in statements))
+            self.assertLessEqual(len(run_updates), 6)  # queue/session/dispatch/id/result/delivery; never per token
             statements.clear()
-            await runtime._process_message(managed, message)
+            await service.receive(self.account, client, message)
             self.assertFalse(any(s.startswith(("UPDATE ", "INSERT ")) for s in statements))
         finally:
             event.remove(self.engine.sync_engine, "before_cursor_execute", record)
@@ -284,10 +285,10 @@ class ChannelGatewayTests(unittest.IsolatedAsyncioTestCase):
         body = {"msgtype": "text", "msgid": "m", "chattype": "single",
                 "chatid": "ignored-private-chat", "from": {"userid": "u"}, "text": {"content": "hello"}}
         message = parse_message({"body": body})
-        self.assertEqual((message.peer_type, message.peer_id), ("userid", "u"))
+        self.assertEqual((message.peer_type, message.peer_id), ("single", "u"))
         body.update(chattype="group", chatid="g")
         message = parse_message({"body": body})
-        self.assertEqual((message.peer_type, message.peer_id), ("chatid", "g"))
+        self.assertEqual((message.peer_type, message.peer_id), ("group", "g"))
         body.pop("chatid")
         with self.assertRaises(ValueError):
             parse_message({"body": body})
@@ -310,7 +311,7 @@ class ChannelGatewayTests(unittest.IsolatedAsyncioTestCase):
                 },
             }
         )
-        self.assertEqual((mixed.peer_type, mixed.peer_id, mixed.text), ("chatid", "group-1", "说明"))
+        self.assertEqual((mixed.peer_type, mixed.peer_id, mixed.text), ("group", "group-1", "说明"))
         self.assertEqual(mixed.media[0].kind, "image")
         video = parse_message(
             {

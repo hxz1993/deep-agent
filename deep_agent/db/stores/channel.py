@@ -2,19 +2,25 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from typing import Any, Sequence
 from uuid import uuid4
 
-from sqlalchemy import case, delete, func, select, update
+from sqlalchemy import case, delete, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from deep_agent.db.models import (
+    Agent,
     ChannelAccount,
     ChannelMessageRun,
     ChannelSessionBinding,
     ChatSession,
+    ChatSessionEvent,
+    LlmModel,
 )
 from deep_agent.db.stores._session import SessionBoundMixin
+from deep_agent.db.stores.event.base import SessionEventStore
+from deep_agent.channels.metadata import channel_session_title, normalize_channel_origin, normalize_peer_metadata
 from deep_agent.schemas.channel import ChannelAccountCreate, ChannelAccountUpdate
 
 
@@ -23,6 +29,7 @@ class ResolvedChannelBinding:
     binding: ChannelSessionBinding
     session: ChatSession
     created_session: bool
+    account: ChannelAccount | None = None
 
 
 @dataclass(frozen=True)
@@ -34,6 +41,7 @@ class ClaimedChannelMessage:
 class ChannelStore(SessionBoundMixin):
     def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
         super().__init__(session_factory)
+        self._events = SessionEventStore(session_factory)
 
     async def list_accounts(self) -> list[ChannelAccount]:
         stmt = select(ChannelAccount).order_by(ChannelAccount.name, ChannelAccount.id)
@@ -142,34 +150,150 @@ class ChannelStore(SessionBoundMixin):
                 ).scalars().all()
             )
 
+    async def get_binding(
+        self, account_id: str, peer_type: str, peer_id: str,
+    ) -> ChannelSessionBinding | None:
+        async with self._read() as db:
+            return await self._get_binding(db, account_id, peer_type, peer_id)
+
+    async def account_summary(self, account_id: str) -> dict[str, str]:
+        async with self._read() as db:
+            row = (await db.execute(
+                select(ChannelAccount, Agent, LlmModel)
+                .join(Agent, Agent.id == ChannelAccount.agent_id)
+                .outerjoin(LlmModel, LlmModel.id == Agent.model_id)
+                .where(ChannelAccount.id == account_id)
+            )).one_or_none()
+            if row is None:
+                raise LookupError("Channel account not found")
+            account, agent, model = row
+            return {
+                "agent_name": agent.name or account.agent_id,
+                "model_name": (model.name or model.model) if model is not None else "未配置",
+            }
+
+    async def ensure_binding(
+        self, *, account_id: str, peer_type: str, peer_id: str,
+        peer_metadata: dict[str, str] | None = None,
+    ) -> ChannelSessionBinding:
+        """Create a peer pointer without creating an empty model conversation."""
+        self._validate_peer(peer_type, peer_id)
+        async with self._write() as db:
+            account = await self._get_account(db, account_id, for_update=True)
+            if account is None:
+                raise LookupError("Channel account not found")
+            return await self._ensure_binding(
+                db, account_id, peer_type, peer_id, peer_metadata,
+            )
+
+    @staticmethod
+    def _validate_peer(peer_type: str, peer_id: str) -> None:
+        # The adapter owns conversation types; the common store only enforces
+        # the existing physical field bounds, not a WeCom-specific enum.
+        if not peer_type or len(peer_type) > 16 or not peer_id:
+            raise ValueError("Channel peer type and id are required")
+
+    async def _get_binding(
+        self, db: AsyncSession, account_id: str, peer_type: str, peer_id: str,
+        *, for_update: bool = False,
+    ) -> ChannelSessionBinding | None:
+        stmt = select(ChannelSessionBinding).where(
+            ChannelSessionBinding.account_id == account_id,
+            ChannelSessionBinding.peer_type == peer_type,
+            ChannelSessionBinding.peer_id == peer_id,
+        )
+        if for_update:
+            stmt = stmt.with_for_update()
+        return (await db.execute(stmt)).scalar_one_or_none()
+
+    async def _ensure_binding(
+        self, db: AsyncSession, account_id: str, peer_type: str, peer_id: str,
+        peer_metadata: dict[str, str] | None,
+    ) -> ChannelSessionBinding:
+        binding = await self._get_binding(
+            db, account_id, peer_type, peer_id, for_update=True,
+        )
+        if binding is None:
+            now = datetime.now(timezone.utc)
+            binding = ChannelSessionBinding(
+                id=uuid4().hex, account_id=account_id, peer_type=peer_type,
+                peer_id=peer_id, peer_metadata=normalize_peer_metadata(peer_type, peer_id, peer_metadata),
+                session_id=None, created_at=now, updated_at=now,
+            )
+            db.add(binding)
+            await db.flush()
+        else:
+            self._update_peer_metadata(binding, peer_metadata)
+            await db.flush()
+        return binding
+
+    @staticmethod
+    def _update_peer_metadata(binding: ChannelSessionBinding, metadata: dict[str, str] | None) -> None:
+        # Missing callback fields do not erase previously observed source facts.
+        incoming = {key: value for key, value in (metadata or {}).items() if isinstance(value, str) and value.strip()}
+        normalized = normalize_peer_metadata(
+            binding.peer_type, binding.peer_id, {**(binding.peer_metadata or {}), **incoming},
+        )
+        if normalized != binding.peer_metadata:
+            binding.peer_metadata = normalized
+            binding.updated_at = datetime.now(timezone.utc)
+
+    @staticmethod
+    def session_origin(
+        account: ChannelAccount, binding: ChannelSessionBinding,
+    ) -> dict[str, Any]:
+        return {
+            "account_id": account.id, "account_name": account.name,
+            "channel_type": account.channel_type,
+            "peer_type": binding.peer_type, "peer_id": binding.peer_id,
+            "peer_metadata": dict(binding.peer_metadata or {}),
+        }
+
+    @staticmethod
+    def session_title(account: ChannelAccount, binding: ChannelSessionBinding) -> str:
+        return channel_session_title(binding.peer_type, binding.peer_id, binding.peer_metadata)
+
+    async def _create_session(
+        self, db: AsyncSession, account: ChannelAccount,
+        binding: ChannelSessionBinding, peer_metadata: dict[str, str] | None,
+    ) -> ChatSession:
+        now = datetime.now(timezone.utc)
+        self._update_peer_metadata(binding, peer_metadata)
+        session = ChatSession(
+            session_id=uuid4().hex, agent_id=account.agent_id,
+            user_id=account.session_user_id, next_sequence=1,
+            created_at=now, updated_at=now,
+        )
+        db.add(session)
+        await db.flush()
+        await self._events._append_title(
+            db, session, title=self.session_title(account, binding), source="channel",
+            source_event_id=None, turn_id=None, run_id=None,
+            details={"channel": self.session_origin(account, binding)}, now=now,
+        )
+        binding.session_id = session.session_id
+        binding.updated_at = now
+        await db.flush()
+        return session
+
     async def resolve_binding(
         self,
         *,
         account_id: str,
         peer_type: str,
         peer_id: str,
-        peer_display_name: str | None = None,
+        peer_metadata: dict[str, str] | None = None,
     ) -> ResolvedChannelBinding:
-        if peer_type not in {"userid", "chatid"}:
-            raise ValueError(f"Unsupported peer type: {peer_type}")
-        now = datetime.now(timezone.utc)
+        self._validate_peer(peer_type, peer_id)
         async with self._write() as db:
             account = await self._get_account(db, account_id, for_update=True)
             if account is None:
                 raise LookupError("Channel account not found")
-            binding = (
-                await db.execute(
-                    select(ChannelSessionBinding)
-                    .where(
-                        ChannelSessionBinding.account_id == account_id,
-                        ChannelSessionBinding.peer_type == peer_type,
-                        ChannelSessionBinding.peer_id == peer_id,
-                    )
-                    .with_for_update()
-                )
-            ).scalar_one_or_none()
+            binding = await self._ensure_binding(
+                db, account_id, peer_type, peer_id, peer_metadata,
+            )
             session = None
-            if binding is not None and binding.session_id:
+            if binding.session_id:
                 session = (
                     await db.execute(
                         select(ChatSession).where(
@@ -184,38 +308,87 @@ class ChannelStore(SessionBoundMixin):
                     session = None
             created_session = session is None
             if created_session:
-                label = (peer_display_name or peer_id).strip()
-                prefix = "企微信群聊" if peer_type == "chatid" else "企微私聊"
-                session = ChatSession(
-                    session_id=uuid4().hex,
-                    agent_id=account.agent_id,
-                    user_id=account.session_user_id,
-                    title=f"{prefix} · {label}",
-                    next_sequence=1,
-                    created_at=now,
-                    updated_at=now,
-                )
-                db.add(session)
-                await db.flush()
-            if binding is None:
-                binding = ChannelSessionBinding(
-                    id=uuid4().hex,
-                    account_id=account_id,
-                    peer_type=peer_type,
-                    peer_id=peer_id,
-                    peer_display_name=peer_display_name,
-                    session_id=session.session_id,
-                    created_at=now,
-                    updated_at=now,
-                )
-                db.add(binding)
-            else:
-                if created_session:
-                    binding.session_id = session.session_id
-                    binding.updated_at = now
+                session = await self._create_session(db, account, binding, peer_metadata)
+            assert session is not None
             await db.flush()
             await db.refresh(binding)
-            return ResolvedChannelBinding(binding, session, created_session)
+            return ResolvedChannelBinding(binding, session, created_session, account)
+
+    async def has_user_messages(self, session_id: str) -> bool:
+        """Check persisted turns, not title events, Runs, or gateway memory."""
+        async with self._read() as db:
+            return (await db.scalar(select(ChatSessionEvent.event_id).where(
+                ChatSessionEvent.session_id == session_id,
+                ChatSessionEvent.event_type == "user/message",
+            ).limit(1))) is not None
+
+    async def rotate_binding(
+        self, *, account_id: str, peer_type: str, peer_id: str,
+        command_run_id: str, peer_metadata: dict[str, str] | None = None,
+    ) -> ResolvedChannelBinding:
+        """Commit /new's effect and command ledger together, before delivery."""
+        self._validate_peer(peer_type, peer_id)
+        async with self._write() as db:
+            account = await self._get_account(db, account_id, for_update=True)
+            if account is None:
+                raise LookupError("Channel account not found")
+            if not account.enabled:
+                raise PermissionError("Channel account is disabled")
+            binding = await self._get_binding(db, account_id, peer_type, peer_id, for_update=True)
+            command = (await db.execute(
+                select(ChannelMessageRun).where(ChannelMessageRun.id == command_run_id)
+                .with_for_update()
+            )).scalar_one_or_none()
+            if binding is None or command is None:
+                raise LookupError("Channel binding or command not found")
+            if command.account_id != account_id or command.binding_id != binding.id:
+                raise PermissionError("Command belongs to another channel peer")
+            if command.processing_status == "completed":
+                session = await db.get(ChatSession, command.session_id) if command.session_id else None
+                if session is None:
+                    raise LookupError("Completed command session no longer exists")
+                return ResolvedChannelBinding(binding, session, False, account)
+            if command.processing_status not in {"received", "queued", "running"} or command.agent_run_id:
+                raise ValueError("Command is not eligible for session rotation")
+            session = await self._create_session(db, account, binding, peer_metadata)
+            command.session_id = session.session_id
+            command.processing_status = "completed"
+            command.finished_at = datetime.now(timezone.utc)
+            await db.flush()
+            return ResolvedChannelBinding(binding, session, True, account)
+
+    async def get_channel_session(self, account_id: str, session_id: str) -> ChatSession | None:
+        """Resolve current or historical sessions, never by caller-supplied user."""
+        bindings = select(ChannelSessionBinding.id).where(
+            ChannelSessionBinding.account_id == account_id,
+            ChannelSessionBinding.session_id == session_id,
+        ).exists()
+        runs = select(ChannelMessageRun.id).where(
+            ChannelMessageRun.account_id == account_id,
+            ChannelMessageRun.session_id == session_id,
+        ).exists()
+        async with self._read() as db:
+            return (await db.execute(select(ChatSession).where(
+                ChatSession.session_id == session_id, or_(bindings, runs),
+            ))).scalar_one_or_none()
+
+    async def get_session_origin(self, session_id: str) -> dict[str, Any] | None:
+        return (await self.get_session_origins([session_id])).get(session_id)
+
+    async def get_session_origins(self, session_ids: Sequence[str]) -> dict[str, dict[str, Any]]:
+        if not session_ids:
+            return {}
+        async with self._read() as db:
+            rows = (await db.execute(select(ChatSessionEvent).where(
+                ChatSessionEvent.session_id.in_(session_ids),
+                ChatSessionEvent.event_type == "session/title",
+            ).order_by(ChatSessionEvent.sequence))).scalars().all()
+        result: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            origin = row.payload.get("channel")
+            if row.payload.get("source") == "channel" and isinstance(origin, dict) and row.session_id not in result:
+                result[row.session_id] = normalize_channel_origin(origin)
+        return result
 
     async def claim_message(
         self,
@@ -225,7 +398,7 @@ class ChannelStore(SessionBoundMixin):
         external_message_id: str,
         external_request_id: str | None,
         sender_id: str | None,
-        session_id: str,
+        session_id: str | None,
         payload_hash: str,
         stream_id: str | None = None,
     ) -> ClaimedChannelMessage:
@@ -302,6 +475,7 @@ class ChannelStore(SessionBoundMixin):
         processing_status: str | None = None,
         delivery_status: str | None = None,
         agent_run_id: str | None = None,
+        session_id: str | None = None,
         stream_id: str | None = None,
         error_code: str | None = None,
         error_message: str | None = None,
@@ -316,6 +490,8 @@ class ChannelStore(SessionBoundMixin):
             values["delivery_status"] = delivery_status
         if agent_run_id is not None:
             values["agent_run_id"] = agent_run_id
+        if session_id is not None:
+            values["session_id"] = session_id
         if stream_id is not None:
             values["stream_id"] = stream_id
         if error_code is not None:
@@ -341,12 +517,12 @@ class ChannelStore(SessionBoundMixin):
         async with self._write() as db:
             result = await db.execute(
                 update(ChannelMessageRun)
-                .where(ChannelMessageRun.processing_status.in_({"received", "running"}))
+                .where(ChannelMessageRun.processing_status.in_({"received", "queued", "running"}))
                 .values(
                     processing_status="interrupted",
                     delivery_status="failed",
                     error_code=case(
-                        (ChannelMessageRun.processing_status == "received", "preflight_failed"),
+                        (ChannelMessageRun.processing_status.in_({"received", "queued"}), "preflight_failed"),
                         else_="gateway_restarted",
                     ),
                     error_message="Gateway restarted before completion",

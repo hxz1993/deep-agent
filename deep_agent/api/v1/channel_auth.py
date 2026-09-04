@@ -38,6 +38,10 @@ async def resolve_channel_account(
     token: Annotated[str | None, Header(alias=CHANNEL_TOKEN_HEADER)] = None,
     account_id: Annotated[str | None, Header(alias="X-Deep-Agent-Channel-Account")] = None,
 ):
+    return await _load_channel_account(ctx, token, account_id, allow_disabled=False)
+
+
+async def _load_channel_account(ctx, token, account_id, *, allow_disabled):
     if token is None and account_id is None:
         return None
     if not token:
@@ -46,12 +50,24 @@ async def resolve_channel_account(
     if not account_id:
         raise HTTPException(status_code=422, detail="Missing channel account")
     account = await ctx.stores.channel.get_account(account_id) if ctx.stores.channel else None
-    if account is None or not account.enabled:
+    if account is None or (not allow_disabled and not account.enabled):
         raise HTTPException(status_code=403, detail="Channel account is unavailable")
     return account
 
 
 ChannelAccountDep = Annotated[object | None, Depends(resolve_channel_account)]
+
+
+async def resolve_channel_control_account(
+    ctx: AppContextDep,
+    token: Annotated[str | None, Header(alias=CHANNEL_TOKEN_HEADER)] = None,
+    account_id: Annotated[str | None, Header(alias="X-Deep-Agent-Channel-Account")] = None,
+):
+    # Disabling an account must still allow its Gateway to cancel owned work.
+    return await _load_channel_account(ctx, token, account_id, allow_disabled=True)
+
+
+ChannelControlAccountDep = Annotated[object | None, Depends(resolve_channel_control_account)]
 
 
 async def channel_request_user(user: RequestUserDep, account: ChannelAccountDep) -> str:

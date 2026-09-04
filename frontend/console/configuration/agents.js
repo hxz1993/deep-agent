@@ -20,6 +20,15 @@ let promptEstimateRequestId = 0;
 let agentListView = "cards";
 let agentEditorDirty = false;
 let agentsLoadedOnce = false;
+let agentListRecords = [];
+let agentChannelNames = new Map();
+
+function renderAgentChannelBadge(agentId) {
+  const names = agentChannelNames.get(agentId) || [];
+  if (!names.length) return "";
+  const description = escapeHtml(`已关联渠道：${names.join("、")}`);
+  return `<span class="agent-channel-badge" title="${description}" aria-label="${description}"><i data-lucide="radio" aria-hidden="true"></i>渠道${names.length > 1 ? ` ${names.length}` : ""}</span>`;
+}
 
 function formatCompactCount(value) {
   const count = Number(value);
@@ -93,6 +102,18 @@ function nextAgentCopyName(sourceName, existingNames) {
 }
 
 const agentsAdmin = {
+  setChannelAccounts(accounts, render = true) {
+    // Derived display only; the Channel Account remains the binding's sole source.
+    agentChannelNames = new Map();
+    for (const account of accounts || []) {
+      if (!account.agent_id) continue;
+      const names = agentChannelNames.get(account.agent_id) || [];
+      names.push(account.name || "未命名渠道");
+      agentChannelNames.set(account.agent_id, names);
+    }
+    if (render && agentsLoadedOnce) this.renderList(agentListRecords);
+  },
+
   setListView(view) {
     agentListView = view === "list" ? "list" : "cards";
     document.getElementById("agentsCardGrid")?.classList.toggle("hidden", agentListView !== "cards");
@@ -112,6 +133,7 @@ const agentsAdmin = {
   },
 
   renderList(agents) {
+    agentListRecords = agents;
     const cardGrid = document.getElementById("agentsCardGrid");
     const tbody = document.getElementById("agentsTableBody");
     if (!cardGrid || !tbody) return;
@@ -130,7 +152,7 @@ const agentsAdmin = {
       return `<article class="agent-card" data-agent-search="${escapeHtml(search)}" data-open-agent="${escapeHtml(agent.id)}" tabindex="0">
         <header class="agent-card-head">
           <span class="agent-card-icon tone-${tone}"><i data-lucide="bot"></i></span>
-          <div><strong>${escapeHtml(agent.name)}</strong><span>${escapeHtml(agent.model?.name || "未配置模型")}</span></div>
+          <div><div class="agent-name-line"><strong>${escapeHtml(agent.name)}</strong>${renderAgentChannelBadge(agent.id)}</div><span>${escapeHtml(agent.model?.name || "未配置模型")}</span></div>
         </header>
         <div class="agent-card-body">
           <div class="agent-card-fact"><span>能力</span><strong>${escapeHtml(capabilities)}</strong></div>
@@ -152,7 +174,7 @@ const agentsAdmin = {
       const skills = formatSkillsPreview(agent.skills);
       const search = `${agent.name || ""} ${agent.model?.name || ""} ${capabilities} ${skills}`.toLowerCase();
       return `<tr class="agent-list-row" data-agent-search="${escapeHtml(search)}" data-open-agent="${escapeHtml(agent.id)}" tabindex="0">
-        <td><strong>${escapeHtml(agent.name)}</strong></td>
+        <td><div class="agent-name-line"><strong>${escapeHtml(agent.name)}</strong>${renderAgentChannelBadge(agent.id)}</div></td>
         <td>${escapeHtml(agent.model?.name || "—")}</td>
         <td><div class="cap-preview">${escapeHtml(capabilities)}</div><div class="skill-preview">Skill：${escapeHtml(skills)}</div></td>
         <td>${escapeHtml(formatDate(agent.updated_at))}</td>
@@ -259,7 +281,12 @@ const agentsAdmin = {
       cardGrid.innerHTML = `<div class="agent-list-state"><span class="loading-spinner"></span><span>正在加载 Agent…</span></div>`;
     }
     try {
-      const agents = await apiFetch("/api/v1/agents");
+      const [agents, accounts] = await Promise.all([
+        apiFetch("/api/v1/agents"),
+        // This optional management annotation must not block the Agent directory.
+        apiFetch("/api/v1/channel-accounts").catch(() => null),
+      ]);
+      this.setChannelAccounts(accounts, false);
       showDbBanner(false);
       this.renderList(agents);
       agentsLoadedOnce = true;

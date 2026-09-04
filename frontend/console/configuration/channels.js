@@ -18,11 +18,11 @@ const CHANNEL_STATE_LABELS = {
 
 function channelRuntimeFor(account) {
   const runtime = channelAdminState.runtime;
-  if (!runtime?.deployed) return { state: "not_deployed", message: runtime?.message || "企微网关未部署" };
-  if (!runtime?.reachable) return { state: "unreachable", message: runtime?.message || "企微网关不可达" };
+  if (!runtime?.deployed) return { state: "not_deployed", message: runtime?.message || "渠道网关未部署" };
+  if (!runtime?.reachable) return { state: "unreachable", message: runtime?.message || "渠道网关不可达" };
   if (!account.enabled) return { state: "closed", message: "渠道已关闭" };
   return runtime.accounts?.find((item) => item.account_id === account.id)
-    || { state: "connecting", message: "等待企微网关加载配置" };
+    || { state: "connecting", message: "等待渠道网关加载配置" };
 }
 
 function renderChannelAgentOptions(selectedId = "") {
@@ -41,7 +41,11 @@ const channelsAdmin = {
     tbody.innerHTML = '<tr><td colspan="6" class="empty-cell">正在加载渠道…</td></tr>';
     try {
       const [accounts, agents, runtime] = await Promise.all([
-        apiFetch("/api/v1/channel-accounts"),
+        apiFetch("/api/v1/channel-accounts").then((accounts) => {
+          // Association display does not depend on Gateway deployment/health.
+          window.agentsAdmin?.setChannelAccounts(accounts);
+          return accounts;
+        }),
         apiFetch("/api/v1/agents"),
         apiFetch("/api/v1/channel-runtime"),
       ]);
@@ -60,10 +64,37 @@ const channelsAdmin = {
     const banner = document.getElementById("channelRuntimeBanner");
     const runtime = channelAdminState.runtime;
     if (!banner || !runtime) return;
-    banner.dataset.state = runtime.state;
-    const stateLabel = CHANNEL_STATE_LABELS[runtime.state] || runtime.state || "未知";
-    banner.querySelector("strong").textContent = `企微网关：${stateLabel}`;
+    const state = !runtime.deployed ? "not_deployed" : runtime.reachable ? "connected" : "unreachable";
+    banner.dataset.state = state;
+    const stateLabel = { not_deployed: "未部署", connected: "运行中", unreachable: "不可达" }[state];
+    banner.querySelector("strong").textContent = `网关：${stateLabel}`;
     banner.title = runtime.message || "";
+  },
+
+  async openCommands() {
+    const dialog = document.getElementById("channelCommandsModal");
+    const content = document.getElementById("channelCommandsContent");
+    const retry = document.getElementById("retryChannelCommandsBtn");
+    if (!dialog || !content || !retry) return;
+    if (!dialog.open) dialog.showModal();
+    const requestId = (this.commandsRequestId || 0) + 1;
+    this.commandsRequestId = requestId;
+    content.innerHTML = '<p class="field-hint" role="status">正在加载快捷命令…</p>';
+    retry.hidden = true;
+    try {
+      const catalog = await apiFetch("/api/v1/channel-commands");
+      if (this.commandsRequestId !== requestId) return;
+      if (!Array.isArray(catalog?.commands) || !Array.isArray(catalog?.notes)) {
+        throw new Error("快捷命令说明格式不正确，请重试。");
+      }
+      content.innerHTML = `<dl class="channel-command-list">${catalog.commands.map((item) =>
+        `<div><dt><code>${escapeHtml(item.command)}</code></dt><dd>${escapeHtml(item.description)}</dd></div>`,
+      ).join("")}</dl><ul class="channel-command-notes">${catalog.notes.map((note) => `<li>${escapeHtml(note)}</li>`).join("")}</ul>`;
+    } catch (error) {
+      if (this.commandsRequestId !== requestId) return;
+      content.innerHTML = `<p class="channel-command-error" role="alert">${escapeHtml(error.message)}</p>`;
+      retry.hidden = false;
+    }
   },
 
   renderTable() {
@@ -235,6 +266,10 @@ window.channelsAdmin = channelsAdmin;
 document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("newChannelBtn")?.addEventListener("click", () => channelsAdmin.openCreate());
   document.getElementById("refreshChannelsBtn")?.addEventListener("click", () => channelsAdmin.refresh());
+  document.getElementById("channelCommandsBtn")?.addEventListener("click", () => channelsAdmin.openCommands());
+  document.getElementById("retryChannelCommandsBtn")?.addEventListener("click", () => channelsAdmin.openCommands());
+  document.getElementById("closeChannelCommandsModal")?.addEventListener("click", () => document.getElementById("channelCommandsModal").close());
+  document.getElementById("dismissChannelCommandsBtn")?.addEventListener("click", () => document.getElementById("channelCommandsModal").close());
   document.getElementById("channelAccountForm")?.addEventListener("submit", (event) => channelsAdmin.save(event));
   document.getElementById("closeChannelAccountModal")?.addEventListener("click", () => document.getElementById("channelAccountModal").close());
   document.getElementById("cancelChannelAccountBtn")?.addEventListener("click", () => document.getElementById("channelAccountModal").close());

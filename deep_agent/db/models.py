@@ -421,7 +421,7 @@ class ChannelSessionBinding(Base):
     )
     peer_type: Mapped[str] = mapped_column(String(16), nullable=False)
     peer_id: Mapped[str] = mapped_column(KeyText, nullable=False)
-    peer_display_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    peer_metadata: Mapped[dict] = mapped_column(JSONType, nullable=False, default=dict)
     session_id: Mapped[str | None] = mapped_column(
         KeyText,
         ForeignKey("chat_sessions.session_id", ondelete="SET NULL"),

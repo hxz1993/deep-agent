@@ -151,7 +151,7 @@ test("方案 A 使用线性文档层级并移除对话中的装饰性色块", ()
     workspaceCss,
     /:is\(\.assistant-final, \.assistant-process-text\) \.markdown-body > :last-child \{ margin-bottom: 0; \}/,
   );
-  assert.match(workspaceCss, /\.tool-search-block \{[\s\S]*?border-style: solid;/);
+  assert.match(workspaceCss, /\.tool-search-block \{[^}]*background: transparent;[^}]*border: 0;/);
   assert.match(
     workspaceCss,
     /\.tool-status-complete \{[^}]*color: var\(--text-faint\);/,

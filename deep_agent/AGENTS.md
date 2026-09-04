@@ -16,7 +16,7 @@
 | 能力注册 | `capabilities/__init__.py` |
 | 配置解析 | `options.py`（`OPTION` + accessor）；DB URL 见 `db/url.py` |
 | MCP 加载 | `capabilities/mcp/resolver.py`、`db_loader.py`、`builtin.py` |
-| 企微 Channel | `channel_gateway/`、`api/v1/channel_accounts.py`、`db/stores/channel.py` |
+| 渠道网关与企微 Adapter | `channel_gateway/`、`channels/`、`api/v1/channel_accounts.py`、`db/stores/channel.py` |
 
 ---
 
@@ -51,15 +51,42 @@ HTTP (REST/SSE)
 
 MCP 在请求时由 `resolve_mcp_toolsets` 解析（DB 行 + `mcps/` builtin 兜底）。
 
-企微Channel是独立可选进程`python -m deep_agent.channel_gateway`，与API复用同一代码、数据库和
-FileStore协议。官方SDK负责WebSocket认证、心跳、重连、消息分发、媒体解密和流式回复；Gateway只做
-Account轮询、同Peer串行、Binding/Run事务和现有Chat SSE投影。0.7.0只允许一个Gateway副本，且
-Gateway不执行Alembic，启动前数据库必须为`002`。
+渠道网关是独立可选进程`python -m deep_agent.channel_gateway`，与API复用同一代码、数据库和
+FileStore协议。`channel_gateway/runtime.py`负责Account轮询与Adapter生命周期；`channels/service.py`
+负责同Peer队列、命令、消息处理和SSE投影；`channels/contracts.py/registry.py`提供公共接口与注册表。
+只有`channels/adapters/wecom/`引用官方`wecom-aibot-python-sdk==1.0.2`；连接、认证、心跳、重连、
+事件分发、媒体下载解密和回复协议均调用SDK，不写第二套协议。当前仅企微Adapter，不宣称飞书已实现。
+0.7.0只允许一个API worker与一个Gateway副本，Gateway不执行Alembic，启动前数据库必须为`002`。
 
 渠道配置中的`session_user_id`由企业管理员直接填写，Console标签“会话用户”；只决定新建Session
 归属，不签发平台凭据。Gateway带内部Token和Account ID，API从当前配置解析用户；普通请求仍按
-平台可信身份鉴权。Peer保存上游ID键名`userid/chatid`；Binding普通消息不更新，仅Session改绑时更新。
-Run只保留created_at/finished_at，调用前必须落running以防未收到SSE Run ID时误重跑。
+平台可信身份鉴权。企微Peer类型沿用原生`single/group`，ID分别取`from.userid/chatid`；Binding的
+`peer_metadata` JSON保存来源会话的`user_id/chat_id/display_name`白名单，缺失名称不造值。
+私聊身份直接从Binding读取；群发送者不作为群身份。仅Session改绑或来源信息确实变化时更新Binding。
+默认标题为`User｜User ID`或`Group｜Chat ID`，有实际名称时为`User｜名称（User ID）`等，保留定位ID。
+Run只保留created_at/finished_at，接收即认领再排队；调用前必须落running以防未收到SSE Run ID时误重跑。
+处理终态与投递状态分别更新，不能因最后回复失败重跑Agent或`/new`。不按SSE片段/心跳写台账。
+
+`channels/commands.py`统一定义`/help /new /stop /status /whoami`与帮助目录，只有渠道入口识别；
+`/reset`不支持，Console与其他客户端不增加共享拦截。`/new /stop`绕过普通队列、暂停派发、取消此前
+等待项并最多15秒确认真实停止；超时不换绑，不派发直到确认退出。`/new`将Session、来源标题事件、
+Binding当前指针和命令完成状态放在同一事务。群共享Session，群成员控制命令影响整个群。
+`GET /api/v1/channel-commands`供Console只读帮助；Session取消及`run-status`接口验证内部Token、
+Account与实际Session归属，不以修改后的Agent配置取消错误任务。
+企微Adapter将`body.quote`转换为公共`InboundQuote`，引用文本经`channel.message_quote` Context Reference
+进入当前User Event，引用媒体仍由官方SDK下载后走附件链路；原始帧/媒体URL/密钥不得外传。
+命令只识别独立纯文本，不剥离`@`；必须@才送达的企微群聊不支持快捷命令，引用/附件/句中命令不触发。
+群聊每条消息、私聊每个Session首轮以`channel.message_source` Context Reference保存发送者与Peer白名单；
+私聊用持久化`user/message`是否存在判定，不用内存标记或Session刚创建标志，重启不重复、`/new`后重带。
+来源进入User Event和
+模型历史；Runs仍记录sender_id，Binding不随群成员发言改身份。API只为内部Token认证的渠道请求在
+`build_runner_for_agent`追加中文渠道说明，不依据用户正文或context_refs启用，也不改普通客户端的Prompt。
+
+渠道Session创建时写入`source=channel`标题事件及`channel`来源快照，阻止首轮模型标题覆盖。
+SessionInfo可选`channel`字段来源于该Session事件，不依赖当前Binding；人工改名不删除来源。
+旧本地数据修复用`maintenance.channel_origins`，默认dry-run、apply先备份，停止服务后执行；不升级002。
+若已有002仍含`peer_display_name`物理列，先用`maintenance.channel_peer_metadata`完成备份后的
+JSON列转换和自动标题修正，再使用ORM维护入口。该脚本仅接受显式本地SQLite路径，不访问共享Test。
 
 ### 对话请求流（`POST /api/v1/chat/stream`）
 

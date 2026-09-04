@@ -188,15 +188,18 @@
     <section class="panel channel-admin-panel" id="panel-channels">
       <div class="panel-toolbar">
         <div class="panel-title-copy">
-          <h2>渠道</h2>
-          <p class="panel-subtitle">将企微智能机器人绑定到一个 Agent；企微网关可按环境选择是否部署。</p>
+          <div class="channel-title-row">
+            <h2>渠道</h2>
+            <button class="link-btn" type="button" id="channelCommandsBtn">快捷命令</button>
+          </div>
+          <p class="panel-subtitle">连接外部聊天平台，将消息交给绑定的 Agent 处理。</p>
         </div>
         <div class="panel-toolbar-actions">
-          <span class="channel-runtime-chip" id="channelRuntimeBanner" data-state="loading" role="status" aria-live="polite" title="正在读取企微网关状态…">
+          <span class="channel-runtime-chip" id="channelRuntimeBanner" data-state="loading" role="status" aria-live="polite" title="正在读取渠道网关状态…">
             <span class="channel-runtime-dot" aria-hidden="true"></span>
-            <strong>企微网关：读取中</strong>
+            <strong>网关：读取中</strong>
           </span>
-          <button class="btn" type="button" id="refreshChannelsBtn" title="刷新企微网关状态"><i data-lucide="refresh-cw"></i>网关状态</button>
+          <button class="btn" type="button" id="refreshChannelsBtn" title="刷新渠道网关状态"><i data-lucide="refresh-cw"></i>网关状态</button>
           <button class="btn primary" type="button" id="newChannelBtn"><i data-lucide="plus"></i>新建渠道</button>
         </div>
       </div>
@@ -620,6 +623,18 @@
         <button type="submit" class="btn primary" id="confirmProviderCatalogPickerBtn" disabled>添加所选</button>
       </div>
     </form>
+  </dialog>
+
+  <dialog class="modal channel-commands-modal" id="channelCommandsModal" aria-labelledby="channelCommandsModalTitle">
+    <div class="modal-header">
+      <h3 id="channelCommandsModalTitle">快捷命令</h3>
+      <button type="button" class="icon-btn" id="closeChannelCommandsModal" aria-label="关闭"><i data-lucide="x"></i></button>
+    </div>
+    <div class="modal-body" id="channelCommandsContent" aria-live="polite"></div>
+    <div class="modal-footer">
+      <button type="button" class="btn" id="retryChannelCommandsBtn" hidden>重新加载</button>
+      <button type="button" class="btn" id="dismissChannelCommandsBtn">关闭</button>
+    </div>
   </dialog>
 
   <!-- Channel account modal -->

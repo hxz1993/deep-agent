@@ -33,9 +33,12 @@ v0.6.5增加默认不关联的`builtin:web`和公开互联网`web_search/web_fet
 Search全局明确选择当前模型或一个固定Provider，不执行隐式降级；Web配置与安全边界见
 [`docs/design/21-web-tools/`](docs/design/21-web-tools/)。
 
-v0.7.0新增可选企业微信Channel Gateway：同仓、同镜像独立运行，使用企微官方Python SDK建立
-WebSocket长连接，通过三张Channel表完成配置、外部会话绑定和消息幂等；DeepAgent会话和历史仍由
-原Event Store负责。配置、部署和状态说明见
+v0.7.0新增可选渠道网关：同仓、同镜像独立运行，公共Gateway/ChannelService通过Adapter接入平台；
+当前只有企微Adapter，唯一引用官方`wecom-aibot-python-sdk==1.0.2`建立WebSocket长连接，
+不重写认证、心跳、重连、媒体解密或回复协议。三张Channel表负责配置、外部会话绑定和持久消息去重，
+正文及渠道来源标题仍由原Event Store负责。渠道支持`/help`、`/new`、`/stop`、`/status`、`/whoami`，
+不拦截控制台及其他客户端的普通消息；控制台提供同一目录的只读“快捷命令”说明。
+本版保持一个API worker和一个可选Gateway副本，飞书需要后续新增Adapter。配置、部署和状态说明见
 [`docs/guides/wecom-channel.md`](docs/guides/wecom-channel.md)。
 
 ## 项目结构

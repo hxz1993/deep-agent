@@ -1,4 +1,6 @@
-const WORKSPACE_ASSET_VERSION = "20260904-8";
+import { channelOriginPresentation } from "./session-display.js?v=20260904-13";
+
+const WORKSPACE_ASSET_VERSION = "20260904-13";
 
 const WORKSPACE_PANE_LIMITS = {
   agent: { min: 150, max: 280, initial: 188, variable: "--console-agent-width" },
@@ -642,6 +644,15 @@ function renderInspector() {
   </span>`;
   const agentIdentity = `<span class="inspector-stacked-value"><span>${escapeHtml(agentName)}</span><code>${escapeHtml(state.agentId || "—")}</code></span>`;
   const requestScope = `<span class="inspector-scope-value"><code>${escapeHtml(context.app || "继承")}</code><span>/</span><code>${escapeHtml(context.space || "继承")}</code></span>`;
+  const channelOrigin = channelOriginPresentation(activeSession.channel);
+  const channelSource = channelOrigin ? `<header class="inspector-subheading"><strong>渠道来源</strong><span>${escapeHtml(channelOrigin.platform)}</span></header>
+    <div class="inspector-facts compact">
+      ${inspectorFact("渠道名称", channelOrigin.accountName, { wide: true })}
+      ${inspectorFact("会话类型", channelOrigin.conversationType)}
+      ${channelOrigin.displayName ? inspectorFact("会话对象", channelOrigin.peerName, { wide: true }) : ""}
+      ${inspectorFact(channelOrigin.peerKey, channelOrigin.peerId, { mono: true, wide: true })}
+      ${channelOrigin.peerKey === "User ID" && channelOrigin.chatId ? inspectorFact("Chat ID", channelOrigin.chatId, { mono: true, wide: true }) : ""}
+    </div>` : "";
   const sessionContent = `<section class="inspector-section inspector-session-group">
     <header><strong>会话概览</strong></header>
     <div class="inspector-facts">
@@ -650,6 +661,7 @@ function renderInspector() {
       ${inspectorFact("模型", model?.name || model?.model || "—")}
       ${inspectorFactHtml("会话统计", sessionCounts)}
     </div>
+    ${channelSource}
     <header class="inspector-subheading"><strong>请求 Header</strong><span>自动推导</span></header>
     <div class="inspector-facts compact">
       ${inspectorFactHtml("App / Space", requestScope, { wide: true })}
@@ -717,7 +729,7 @@ function startStateMonitor() {
       conversationId: api.state.conversationId,
       sessionMetrics: api.state.sessions
         .filter((session) => session.id === api.state.sessionId && (session.agentId || "") === (api.state.agentId || ""))
-        .map((session) => [session.turnCount, session.messageCount, session.attachmentCount]),
+        .map((session) => [session.turnCount, session.messageCount, session.attachmentCount, session.channel]),
     });
     if (key === lastRenderKey) return;
     lastRenderKey = key;

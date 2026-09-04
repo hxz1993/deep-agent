@@ -157,7 +157,7 @@ class ChannelAccountsApiTests(unittest.IsolatedAsyncioTestCase):
         assert self.stores.channel is not None
         await self.stores.channel.resolve_binding(
             account_id=account_id,
-            peer_type="userid",
+            peer_type="single",
             peer_id="user-1",
         )
         response = await self.request("DELETE", f"/api/v1/channel-accounts/{account_id}")

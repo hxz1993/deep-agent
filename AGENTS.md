@@ -91,7 +91,8 @@ deep-agent/
 ├── requirements.txt
 ├── alembic/               ← 数据库迁移（详见 deep_agent/AGENTS.md）
 ├── deep_agent/            ← 后端 Python 包 → deep_agent/AGENTS.md
-│   └── channel_gateway/   ← 可选企微长连接进程，与API共享代码和数据库
+│   ├── channel_gateway/   ← 可选渠道网关宿主，与API共享代码和数据库
+│   └── channels/          ← 公共队列/命令/Adapter注册；adapters/wecom包装官方SDK
 ├── mcps/                  ← 内置 MCP → mcps/AGENTS.md
 ├── frontend/              ← 静态前端 → frontend/AGENTS.md
 ├── tests/                 ← 测试 → tests/AGENTS.md
@@ -160,11 +161,16 @@ v0.6.1删除目录资源自身的冗余启停层；v0.6.4只恢复Model的`enabl
 - v0.6.8为工具目录、实时SSE和动态History投影增加仅供会话卡片展示的`display_name`；稳定调用仍
   使用原始`tool/tool_name`和`tool_call_id`，Event Payload、数据库与轨迹不保存或展示派生名称。
   内置工具使用代码元数据，UI工具使用`metadata.display_name`，MCP使用官方`Tool.title`并按工具名回退。
-- v0.7.0新增可选企微Channel Gateway，使用官方`wecom-aibot-python-sdk==1.0.2`。API固定部署，
-  Gateway按环境部署一个副本；`channel_accounts`保存配置，`channel_session_bindings`映射企微Peer到
+- v0.7.0新增可选渠道网关，公共`channel_gateway/`宿主和`channels/`调度不引用企微SDK，
+  只有`channels/adapters/wecom/`调用官方`wecom-aibot-python-sdk==1.0.2`，不重写连接/认证/心跳/重连/解密/回复协议。
+  API固定一个worker，Gateway按环境部署一个副本；`channel_accounts`保存配置，`channel_session_bindings`映射企微Peer到
   Session，`channel_message_runs`负责幂等和生命周期。企微Session固定归属Account的管理员配置的会话用户，
   外部Peer不冒充平台用户。Gateway不执行迁移，数据库必须先由API升级到`002`。
   本轮未发布渠道需求的纠正直接合并在`002`内，不新增`003`；本地已有库须备份并核验物理结构，不能只改版本号。
+  五个命令`/help /new /stop /status /whoami`仅在渠道入口处理；没有`/reset`或共享Chat全局拦截。
+  控制命令绕过普通队列，15秒等待真实停止；`/new`原子换绑，旧历史保留，投递失败不重复命令副作用。
+  Session标题事件`source=channel`保存来源，Console帮助由公共目录生成；旧来源修复入口为
+  `python3.12 -m maintenance.channel_origins --sqlite <本地文件>`，默认dry-run，停服务后`--apply`自动备份。
 - Tool Search 首轮预选只使用聊天 API 的原始非空 `message`；`context_refs.type/label` 仅在纯上下文请求时回退，不能让 Page/Range 标签覆盖用户问题。实时工具若被 `ModelRetry` 或取消撤回，SSE 用 `tool_call_removed` 通知客户端删除临时卡片；取消后的非空部分回答必须以 `assistant.status=interrupted` 恢复。
 - 模型目录的 `max_output_tokens` 同时约束普通和流式回答；工具错误只有在模型修改参数或改选工具后可能成功时使用 `ModelRetry`，已确定的下载、解析或上游失败使用 `ToolFailed`，避免消耗工具重试预算。
 - v0.3.13 将正式 Run 的官方 `CancellationToken` 传给内部摘要 Agent；取消摘要直接终止 Run，不能转成 Sliding Window 后继续回答。Local/Native 工具配对统一使用 Pydantic AI 2.26 的 Call/Return 基类。

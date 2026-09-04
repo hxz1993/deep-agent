@@ -1413,34 +1413,49 @@ html, body {
 
 /* 工具调用块 */
 .tool-block {
-  border: 1px solid var(--tool-border);
-  background: var(--tool-bg);
-  border-radius: 6px;
-  overflow: hidden;
+  border: 0;
+  background: transparent;
   font-size: 13px;
 }
 
 .tool-search-block {
-  background: var(--tool-bg);
-  border-style: solid;
+  background: transparent;
+  border: 0;
 }
 .tool-head {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 9px;
+  width: 100%;
+  min-height: 32px;
+  padding: 5px 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-faint);
+  font: inherit;
+  text-align: left;
   cursor: pointer;
   user-select: none;
 }
-.tool-head .tool-name { font-weight: 600; font-family: var(--mono); }
-.tool-head .tool-status { margin-left: auto; font-size: 12px; color: var(--text-faint); }
+.tool-head:hover { background: transparent; }
+.tool-head:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.tool-head .tool-name { min-width: 0; overflow-wrap: anywhere; font-weight: 400; }
+.tool-head .tool-status { flex-shrink: 0; margin-left: auto; font-size: 12px; color: var(--text-faint); }
+.tool-head .chevron { flex-shrink: 0; opacity: 0; transition: transform 0.15s, opacity 0.15s; }
+.tool-head:hover .chevron,
+.tool-head:focus-visible .chevron { opacity: 1; }
+@media (hover: none) {
+  .tool-head .chevron { opacity: 1; }
+}
 .tool-block.open .chevron { transform: rotate(90deg); }
 .tool-status-complete { display: inline-flex; align-items: center; gap: 3px; color: var(--text-faint); }
 .tool-status-pending { color: var(--hitl-pending-border); font-weight: 600; }
+.tool-status-error { color: var(--danger); }
 .tool-status-interrupted { display: inline-flex; align-items: center; gap: 3px; color: var(--danger); }
 .tool-status-complete svg,
 .tool-status-interrupted svg { width: 12px; height: 12px; display: block; }
-.tool-body { display: none; border-top: 1px solid var(--tool-border); padding: 8px 10px; }
+.tool-body { display: none; padding: 8px 0 8px 21px; }
 .tool-block.open .tool-body { display: block; }
 .tool-body .label { font-size: 12px; color: var(--text-faint); text-transform: uppercase; margin-bottom: 4px; }
 .tool-body pre {
@@ -1499,7 +1514,6 @@ html, body {
   background: var(--bg);
   opacity: 0.9;
 }
-.tool-block.hitl-pending { border-color: var(--hitl-pending-border); }
 
 .spinner {
   width: 12px; height: 12px;

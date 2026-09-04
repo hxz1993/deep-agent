@@ -9,7 +9,7 @@ from typing import Any
 import aiohttp
 
 from deep_agent.channel_gateway.config import GatewayConfig
-from deep_agent.channel_gateway.messages import InboundMedia
+from deep_agent.channels.contracts import InboundMedia
 
 
 @dataclass(frozen=True)
@@ -75,6 +75,29 @@ class DeepAgentChannelClient:
                 raise RuntimeError("DeepAgent upload returned an invalid response")
             return payload
 
+    async def _session_action(self, account, session_id: str, action: str, *, method: str = "GET", agent_id: str | None = None) -> dict[str, Any]:
+        from urllib.parse import quote
+
+        await self.start()
+        assert self._session is not None
+        async with self._session.request(
+            method, f"{self.config.api_url}/api/v1/sessions/{quote(session_id, safe='')}/{action}",
+            headers=self._headers(account), params={"agent_id": agent_id} if agent_id else None,
+            timeout=aiohttp.ClientTimeout(total=3),
+        ) as response:
+            if response.status >= 400:
+                raise RuntimeError(f"DeepAgent session operation failed with HTTP {response.status}")
+            payload = await response.json(content_type=None)
+            if not isinstance(payload, dict):
+                raise RuntimeError("DeepAgent session operation returned invalid response")
+            return payload
+
+    async def cancel_session(self, account, session_id: str, *, agent_id: str | None = None) -> dict[str, Any]:
+        return await self._session_action(account, session_id, "cancel", method="POST", agent_id=agent_id)
+
+    async def run_status(self, account, session_id: str, *, agent_id: str | None = None) -> dict[str, Any]:
+        return await self._session_action(account, session_id, "run-status", agent_id=agent_id)
+
     async def stream_chat(
         self,
         account,
@@ -82,6 +105,7 @@ class DeepAgentChannelClient:
         session_id: str,
         message: str,
         attachments: list[dict[str, Any]],
+        context_refs: list[dict[str, Any]] | None = None,
     ) -> AsyncIterator[StreamEvent]:
         await self.start()
         assert self._session is not None
@@ -92,6 +116,8 @@ class DeepAgentChannelClient:
         }
         if attachments:
             body["attachments"] = attachments
+        if context_refs:
+            body["context_refs"] = context_refs
         async with self._session.post(
             f"{self.config.api_url}/api/v1/chat/stream",
             json=body,

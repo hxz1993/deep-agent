@@ -4,7 +4,7 @@ import {
   parseSseBlock,
   readSse,
 } from "./protocol.js?v=20260729-1";
-import { formatSessionIdSubtitle } from "./session-display.js?v=20260728-2";
+import { channelOriginPresentation, formatSessionIdSubtitle } from "./session-display.js?v=20260904-13";
 import { copyTextToClipboard } from "./message-actions.js?v=20260819-1";
 import {
   applyAssistantPresentationActions,
@@ -387,6 +387,7 @@ function currentSessionSnapshot() {
     messageCount: state.modelMessageCount,
     turnCount: persisted?.turnCount || 0,
     attachmentCount: persisted?.attachmentCount || 0,
+    channel: persisted?.channel || null,
   });
 }
 
@@ -404,6 +405,7 @@ function mergeSessionsFromBackend(rows) {
       messageCount: Number(row.message_count) || 0,
       turnCount: Number(row.turn_count) || 0,
       attachmentCount: Number(row.attachment_count) || 0,
+      channel: row.channel || null,
     });
   });
 
@@ -818,7 +820,9 @@ function renderSessions() {
       "session-item" +
       (s.id === state.sessionId && (s.agentId || "") === (state.agentId || "") ? " active" : "");
     const activity = formatSessionActivity(s);
-    li.innerHTML = `<span class="sid" title="${escapeHtml(`${s.title} · ${activity}`)}"><span class="session-title">${escapeHtml(s.title)}</span><span class="session-meta"><span class="session-activity">${escapeHtml(activity)}</span><span class="session-stat-group"><span title="回合数">${lucideIcon("messages-square")}${escapeHtml(String(s.turnCount || 0))}</span><span title="消息事件数">${lucideIcon("repeat-2")}${escapeHtml(String(s.messageCount || 0))}</span><span title="附件数">${lucideIcon("paperclip")}${escapeHtml(String(s.attachmentCount || 0))}</span></span></span></span><span class="session-actions"><span class="rename-btn" title="重命名" aria-label="重命名">${lucideIcon("pencil")}</span><span class="del" title="删除" aria-label="删除">${lucideIcon("trash-2")}</span></span>`;
+    const origin = channelOriginPresentation(s.channel);
+    const sourceMarker = origin ? `<span class="session-channel-source" title="${escapeHtml(origin.description)}" aria-label="${escapeHtml(origin.description)}">${lucideIcon("radio")}</span>` : "";
+    li.innerHTML = `<span class="sid" title="${escapeHtml(`${s.title} · ${activity}`)}"><span class="session-title-row"><span class="session-title">${escapeHtml(s.title)}</span>${sourceMarker}</span><span class="session-meta"><span class="session-activity">${escapeHtml(activity)}</span><span class="session-stat-group"><span title="回合数">${lucideIcon("messages-square")}${escapeHtml(String(s.turnCount || 0))}</span><span title="消息事件数">${lucideIcon("repeat-2")}${escapeHtml(String(s.messageCount || 0))}</span><span title="附件数">${lucideIcon("paperclip")}${escapeHtml(String(s.attachmentCount || 0))}</span></span></span></span><span class="session-actions"><span class="rename-btn" title="重命名" aria-label="重命名">${lucideIcon("pencil")}</span><span class="del" title="删除" aria-label="删除">${lucideIcon("trash-2")}</span></span>`;
     li.querySelector(".sid").addEventListener("click", (e) => {
       if (e.target.closest(".session-title-input")) return;
       switchSession(s);
@@ -2410,7 +2414,7 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null, proce
     processSummary.setAttribute("aria-expanded", String(open));
     if (open) {
       processBody.querySelectorAll(".tool-block.hitl-pending").forEach((block) => {
-        block.classList.add("open");
+        setToolBlockExpanded(block, true);
       });
     }
     updateProcessDisclosure();
@@ -2615,17 +2619,19 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null, proce
       const argsHtml = window.DeepAgentJson?.renderBlock(renderedArgs, { className: "args", ariaLabel: "工具参数 JSON" })
         || `<pre class="args">${escapeHtml(pretty(renderedArgs))}</pre>`;
       block.innerHTML = `
-        <div class="tool-head">
+        <button type="button" class="tool-head" aria-expanded="false">
           <span class="chevron">${lucideIcon("chevron-right")}</span>
           <span class="tool-icon">${lucideIcon(isToolSearch ? "search" : isSkillLoad ? "book-open-check" : "wrench")}</span>
           <span class="tool-name">${escapeHtml(defaultTitle)}</span>
-          <span class="tool-status"><span class="spinner"></span></span>
-        </div>
+          <span class="tool-status"><span class="spinner" role="status" aria-label="运行中"></span></span>
+        </button>
         <div class="tool-body">
           <div class="label">参数 args</div>
           ${argsHtml}
         </div>`;
-      block.querySelector(".tool-head").addEventListener("click", () => block.classList.toggle("open"));
+      block.querySelector(".tool-head").addEventListener("click", () => {
+        setToolBlockExpanded(block, !block.classList.contains("open"));
+      });
       processBody.appendChild(block);
       refreshLucideIcons();
       toolBlocks.set(key, block);
@@ -2846,13 +2852,18 @@ function renderHitlWidget(block, call, onSubmit) {
   body.appendChild(widgetEl);
 }
 
+function setToolBlockExpanded(block, expanded) {
+  block.classList.toggle("open", expanded);
+  block.querySelector(".tool-head")?.setAttribute("aria-expanded", String(expanded));
+}
+
 function renderHitlError(block, message) {
   const body = block.querySelector(".tool-body");
   if (!body || body.querySelector(".hitl-format-error")) return;
   block.classList.remove("hitl-pending");
   const title = block.querySelector(".tool-name");
   if (title && block.dataset.defaultTitle) title.textContent = block.dataset.defaultTitle;
-  block.querySelector(".tool-status").innerHTML = '<span style="color:#f85149">参数无效</span>';
+  block.querySelector(".tool-status").innerHTML = '<span class="tool-status-error">参数无效</span>';
   const error = document.createElement("div");
   error.className = "hitl-format-error";
   error.textContent = `工具参数格式无效：${message}`;

@@ -29,8 +29,13 @@
 
 - 企微 AIBot WebSocket Channel，使用官方 Python SDK 承接认证、心跳、重连、媒体解密和流式回复。
 - 可选独立 Gateway 进程、Account/Session Binding/Message Run 三表、管理员配置的会话用户与同Peer串行。
+- 公共 Gateway/ChannelService 与 WeCom Adapter 分离；仅 Adapter 引用官方 SDK，飞书适配仍需另行实现。
+- 五个渠道命令 `/help`、`/new`、`/stop`、`/status`、`/whoami`；停止独立控制路径与15秒确认，
+  `/new` 停止后原子换绑，旧历史保留；不实现 `/reset`，普通客户端不增加全局拦截。
 - text、mixed、图片、文件、AMR语音和视频进入现有Chat/FileStore链路，回复只投影Markdown文本。
 - Console渠道配置、连接状态和测试入口；Gateway未部署或不可达时仍可维护配置并明确显示状态。
+- Console只读快捷命令入口与 `/help` 共用目录；网关与机器人状态分开；Session标题事件保存渠道来源，
+  支持本地旧数据幂等修复，数据库仍为002。
 
 ## v0.6.0 已完成
 

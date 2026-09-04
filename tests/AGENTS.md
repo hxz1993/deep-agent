@@ -68,6 +68,9 @@ tests/
 | `test_baseline_migration_dialects.py` | 当前001→002在SQLite、MySQL、PostgreSQL的离线DDL编译 |
 | `test_channel_migration.py` | 确认Head仍为002，Channel物理字段与ORM一致，重复升级保留数据，临时库降升往返 |
 | `test_channel_gateway.py` | Account/Binding/Run Store、消息解析、幂等、SSE文本投影与Agent换代 |
+| `test_channel_commands.py` | 公共命令识别、非企微测试Adapter、队列与独立停止/新建、超时及投递失败 |
+| `test_channel_store_commands.py` | 无Session Binding、命令认领、新建会话原子换绑、来源标题、归属和重复执行保护 |
+| `test_wecom_adapter.py` | 官方SDK包装边界、连接生命周期、消息薄转换、媒体和回复 |
 | `test_rebaseline_database.py` | 旧012物理结构校验、显式改标、全表行数与内容哈希不变及异常拒绝 |
 | `test_configuration_import.py` | 同Revision配置初始化、主键保留、空会话门禁、事务回滚和Skill File ID重写 |
 | `test_runtime_dependencies.py` | Pydantic AI/Harness、OpenAI/aiohttp/deepfos联合版本锁定与模型导入 |
@@ -86,6 +89,8 @@ tests/
 | `test_session_title.py` | 标题回显、AI 生成、兜底、DeepCube fixture |
 | `test_llm_model_modalities.py` | 模型运行属性 CRUD 与 DB-only 模态 |
 | `test_channel_accounts_api.py` | 渠道账号CRUD、管理员配置的会话用户、删除约束、未部署状态和测试503 |
+| `test_channel_session_controls.py` | 可信渠道取消/run-status、真实Session归属、配置切换与旧任务身份隔离 |
+| `test_wecom_ingress.py` | 官方SDK→队列→认证HTTP→模型/History引用与逐条发送者闭环；独立纯命令不进入模型 |
 | `test_llm_model_catalog.py` | 目录 DB 查询、两种视图、全量刷新及失败保留旧目录 |
 | `test_session_model_override.py` | Agent 流式对话 `model_id` 覆盖、默认回退、轮次切换 |
 | `test_chat_attachment_tools.py` | 附件引用 → 模型调用工具 → SSE/历史持久化 → 同会话续读 |

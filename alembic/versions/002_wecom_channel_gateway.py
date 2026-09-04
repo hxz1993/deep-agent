@@ -77,7 +77,7 @@ def upgrade() -> None:
         sa.Column("account_id", sa.String(32), nullable=False),
         sa.Column("peer_type", sa.String(16), nullable=False),
         sa.Column("peer_id", _key_type(), nullable=False),
-        sa.Column("peer_display_name", sa.Text(), nullable=True),
+        sa.Column("peer_metadata", _json_type(), nullable=False),
         sa.Column("session_id", _key_type(), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=_now_default(), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=_now_default(), nullable=False),

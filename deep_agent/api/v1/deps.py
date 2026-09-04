@@ -30,6 +30,7 @@ from deep_agent.skills.script_tool import build_skill_script_toolset
 from deep_agent.skills.tools import build_skill_resource_toolset
 from deep_agent.files import build_file_export_toolset, build_file_toolset
 from deep_agent.core.context import AppContext
+from deep_agent.channels.instructions import channel_instructions
 from deep_agent.core.exceptions import AgentNotFoundError, LlmModelNotFoundError
 from deep_agent.options import OPTION
 from deep_agent.web.runtime import build_web_runtime
@@ -134,6 +135,7 @@ async def build_runner_for_agent(
     model_id: str | None = None,
     capabilities: list[str] | None = None,
     request_headers: dict[str, str] | None = None,
+    channel_type: str | None = None,
 ) -> AgentRunner:
     """Assemble a per-request AgentRunner from a database agent configuration."""
     row = await ctx.stores.agent.get_by_id(agent_id)
@@ -147,6 +149,9 @@ async def build_runner_for_agent(
 
     provider = await _provider_for_model(ctx, llm_row)
     spec = AgentSpec.from_row(row, llm_row, provider=provider)
+    entry_instructions = channel_instructions(channel_type)
+    if entry_instructions:
+        spec = replace(spec, instructions=f"{spec.instructions}\n\n{entry_instructions}")
     if capabilities is not None:
         spec.capabilities = canonical_tool_package_codes(capabilities)
     return await _build_runner_from_spec(spec, ctx, request_headers=request_headers)

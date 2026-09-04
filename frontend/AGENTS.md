@@ -52,7 +52,7 @@ frontend/
 | 配置 | `localStorage` 只保存调试 App；全局环境配置只读展示，身份和鉴权由平台提供 |
 | 内置工具目录 | 配置中心展示`builtin:general`、`builtin:sandbox`、`builtin:ptc`（程序编排）、`builtin:web`；Agent按包选择，旧`builtin:code-mode`不作为新目录项展示 |
 | 系统工具目录 | 配置中心按任务规划、Skill、文件、工具结果、MCP 工具发现、MCP Resource 分组展示自动注入工具；不参与 Agent 配置 |
-| 渠道配置 | 配置中心维护企微Account、Agent、Bot凭证和启停，展示Gateway部署/连接状态并提供连接测试 |
+| 渠道配置 | 配置中心维护企微Account、Agent、Bot凭证和启停；顶部展示渠道网关部署/运行状态，列表展示机器人连接状态；快捷命令弹框从公共只读目录获取，与渠道 `/help` 共用定义 |
 | 任务计划 | 只识别`write_plan`完整快照；仅当前Run直播展示，任何Run终态后隐藏，重新打开History不恢复；同Turn Deferred由后端恢复PlanStore |
 | Skill | 独立 Skill 列表与详情；上传包安装/替换/单个与全部导出/删除；文本、Word、Excel 资源可预览，脚本只列包内路径和数量，不展示可执行性判断；Agent 使用独立 `skills` 列表选择 |
 | 一体化控制台 | `/console/`；工作台、配置和诊断的唯一入口 |
@@ -132,6 +132,9 @@ Agent 独立编辑页的系统提示词标题栏显示“字符数 / 预估 Toke
   刷新后以完整Event分页结果校准。
 - 配置中心左侧页签只在当前前端页面的模块内存中保留；工作台与配置中心之间切换会恢复上次页签，浏览器刷新后重新回到 Agent，不写入 LocalStorage 或后端。
 - Agent 独立编辑页在标题区显示完整 Agent ID；测试工作台对话标题第二行以 `会话 ID：<完整 ID>` 展示当前会话，不再截取前八位。
+- Agent 卡片和列表标题旁以轻量“渠道”图标文字回显已有 Channel Account 关联，悬停显示渠道名称；
+  该信息只由渠道账号派生，不增加 Agent 表单字段或反向绑定。停用渠道仍保留关联标记，渠道改绑/删除
+  刷新时同步两个视图；渠道信息读取失败不阻断 Agent 目录，也不继续展示过期标记。
 - `/` 跳转到 `/console/#/workspace`；旧 `/settings.html`、`/models.html`、`/admin/` 返回 404。
 - 前端门禁只负责体验，后端管理Router仍统一校验企业管理员；不要把按钮隐藏当作权限控制。
 
@@ -220,6 +223,9 @@ python3.12 -m http.server 5173
 | Markdown 主题/安全 | `vendor/`，见 `vendor/README.md` |
 
 普通历史由后端按`session_id`投影；切换会话时一次读取`GET /api/v1/sessions/{id}/history`。
+SessionInfo 的可选 `channel` 是历史会话的渠道来源快照：列表提供来源图标提示，详情展示渠道名称和
+外部 User ID/Chat ID；缺省不增加展示。不得用当前 Binding 反推旧会话来源，也不从会话标题猜测渠道。
+`GET /api/v1/channel-commands` 只用于帮助展示，即使 Gateway 未部署也应可读；Console 不拦截渠道命令。
 只有轨迹循环读取`GET /api/v1/sessions/{id}/events`直到`next_after_sequence=null`。
 Pending UI工具的`tool/call`Event仍在Payload中携带`widget/metadata`。
 

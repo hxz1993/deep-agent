@@ -8,22 +8,20 @@
 也不应把 Channel 台账解释成第二套 Agent Run/聊天记录。现有 `chat_sessions/chat_session_events`
 继续负责会话和唯一正文事实源。
 
-## 当前网关并未完成多 Adapter 抽象
+## 当前网关与 Adapter 边界
 
-`ChannelRuntime` 直接创建官方企微 `WSClient`、解析企微帧、调用 `reply_stream/download_file`；
-Account Schema 只接受 `channel_type=wecom`。当前是“一个进程管理多个企微 Bot”，
-不是“一个通用网关注册多个平台 Adapter”。代码目录叫 `channel_gateway` 不代表此能力已经完成。
-
-原先讨论的多 Adapter 结构仍需把平台连接/消息转换/回复能力移到 WeCom Adapter，
-Gateway 通过统一接口管理 Adapter；会话映射、消息台账和 DeepAgent Client 作为公共业务层。
-这属于尚未完成的结构边界，本次核查没有把它静默改成一套新的插件框架。
+0.7.0 本轮已把平台连接、消息转换和回复移入 `channels/adapters/wecom/`；`ChannelRuntime` 通过
+注册表和公共接口管理 Adapter，`ChannelService` 管理队列、命令和消息生命周期。
+Account Schema 当前仍只接受 `channel_type=wecom`：公共结构可扩展不代表飞书已实现。
+新增平台需增加对应 Adapter、配置和测试，但可以复用 Binding、Run、命令和 DeepAgent API Client。
+官方 SDK 继续负责企微连接、认证、心跳、重连、解密和回复协议，不复制上游底层实现。
 
 - 只要求接消息、调用 Agent、返回文字时，两张表加内存去重也能做。
 - 要求重启后仍记住已经处理过的 msgid，并避免重复执行有副作用的工具，就需要持久去重记录。
   当前第三张表承担这个职责，保留合理。
 - 三表足够支撑当前单 Gateway、被动回复范围，不等于“可靠消息队列”或“端到端恰好一次”。
-  HTTP 已发出但结果未知时，不自动重跑；最终回复丢失时不自动补发；内存中尚未认领的排队消息
-  在进程崩溃后不能由本系统恢复。是否重投由上游决定。
+  HTTP 已发出但结果未知时，不自动重跑；最终回复丢失时不自动补发。排队消息已认领到台账，
+  但台账不保存正文，进程崩溃后不能据此重放；只有上游再次投递且确认尚未派发才可重试。
 - 多副本抢占、可靠主动通知、跨进程恢复队列等是新的产品需求，不能靠多加几个时间戳解决。
   这些需求可能需要 Lease/共享队列/Outbox，但现在不预建。
 
@@ -31,12 +29,13 @@ Gateway 通过统一接口管理 Adapter；会话映射、消息台账和 DeepAg
 
 - Account：`owner_user_id` 改为 `session_user_id`。控制台标签“会话用户”，管理员直接输入平台 ID。
   不再把“配置管理权限”与“会话归属用户”混在同一字段里；配置由企业管理员管理，聊天仍按原规则隔离。
-- Binding：保留 `peer_type/peer_id`。私聊为 `userid` + `from.userid`；群聊为 `chatid` + 群 ID。
+- Binding：保留 `peer_type/peer_id`。企微沿用原生会话类型：私聊为 `single` + `from.userid`；群聊为 `group` + `chatid`。
   UI/说明中读作 User ID / Chat ID，企微回调自身 `chattype=single/group` 不改变。
-- Binding：删除 `generation/last_active_at`。普通消息不更新映射；更换 Session 才更新 `updated_at`。
+- Binding：删除 `generation/last_active_at`，`peer_metadata` JSON保存来源会话身份。普通消息不重复更新；更换 Session 或来源信息变化才更新 `updated_at`。
 - Run：只保留 `created_at/finished_at`。删除 `received_at/started_at/updated_at`；原 `completed_at`
   改为 `finished_at`，因为失败和中断也会结束。
-- Run：取消 queued 过渡写入。成功消息实测为 1 INSERT + 3 UPDATE，不按 Token 写库。
+- Run：接收即认领，再写 queued，保证等待消息也可去重和取消；执行与投递结果分开更新，
+  不承诺固定 SQL 次数，不按 Token、工具片段或 SDK 心跳写库。
 
 ## 简单示例
 
@@ -45,28 +44,34 @@ Gateway 通过统一接口管理 Adapter；会话映射、消息台账和 DeepAg
 管理员已创建一个渠道：`id=c1, agent_id=a1, session_user_id=platform-u1, enabled=true`。
 企微用户 `zhangsan` 私聊发送“你好”，消息 ID 为 `m1`。
 
-| 步骤 | 执行动作 | 数据库变化 |
+| **步骤** | **执行动作** | **数据库变化** |
 | --- | --- | --- |
 | 1 | 官方 SDK 收到回调，解析 chattype/from.userid/msgid | 此时不改渠道配置 |
-| 2 | 按 c1 + m1 检查去重，按 c1 + userid + zhangsan 找 Binding | 首次没有记录 |
-| 3 | 创建 DeepAgent Session s1 和映射 b1 | `chat_sessions` INSERT：agent=a1、user=platform-u1；Binding INSERT：c1/userid/zhangsan→s1 |
-| 4 | 认领 m1，生成企微回复流 ID w1 | Run INSERT：id=r1、message=m1、binding=b1、session=s1、stream=w1、received/pending、created_at |
+| 2 | 按 c1 + m1 检查去重，按 c1 + single + zhangsan 找 Binding | 首次没有记录 |
+| 3 | 首次建立映射 b1，认领 m1 后进入队列 | Binding INSERT：c1/single/zhangsan→NULL；Run INSERT：r1、m1、b1、session=NULL、stream=w1、received/pending，再标 queued；尚不建 Session |
+| 4 | 轮到 m1 执行，解析当前 Binding | `chat_sessions` INSERT s1：agent=a1、user=platform-u1；写渠道标题/来源事件；Binding UPDATE：b1→s1；Run关联s1 |
 | 5 | SDK 回复处理中；如有媒体则下载解密并上传 FileStore | 普通文本没有附件写入；媒体正文不进 Channel 表 |
-| 6 | 即将调用 `/api/v1/chat/stream` | Run UPDATE #1：running/streaming，先提交再发 HTTP |
+| 6 | 即将调用 `/api/v1/chat/stream` | Run UPDATE：running/streaming，先提交再发 HTTP |
 | 7 | API 校验内部 Token/Account；按配置读取会话用户，恢复 s1 历史并启动 Agent | 原 Event Store 保存本轮用户输入、模型/工具消息等；不是 Channel Run 保存正文 |
-| 8 | 收到 session SSE，得知 Agent Run ID ar1 | Run UPDATE #2：agent_run_id=ar1 |
+| 8 | 收到 session SSE，得知 Agent Run ID ar1 | Run UPDATE：agent_run_id=ar1 |
 | 9 | Agent 输出“你好！”，Gateway 节流调用 SDK 更新 w1 | 文字只累计在内存和现有 Event Store；Channel Run 不随片段更新 |
-| 10 | 最终正文已发出 | Run UPDATE #3：completed/sent、finished_at |
+| 10 | API处理完成，再发送最终正文 | 先 Run UPDATE completed/finished_at；SDK发送成功后仅更新 delivery_status=sent；发送失败则 failed，不重跑Agent |
 
 同一个人再发新消息 m2：Account 不变，Binding 不变，继续使用 s1；只增加一条新消息台账，
 并由原 Event Store 增加新一轮历史。s1 的原有历史会传给 Agent。
 
 同一个 m1 被重新投递：直接命中既有台账，不创建 Session、不调用 Agent、不重复写台账。
 
-群 g1 中不同人发言：都使用 `c1 + chatid + g1`，共享一个 Session；`sender_id` 仍记录当条发送者。
+群 g1 中不同人发言：都使用 `c1 + group + g1`，共享一个 Session；`sender_id` 仍记录当条发送者。
 
 管理员把 a1 改为 a2，或把会话用户改为 platform-u2：下一条新消息创建 s2，仅更新 b1 的 session_id
 和 updated_at；s1 及旧正文不改。旧 Run 保留 s1，这是 Run 必须保存 session_id、不能只读 Binding 的原因。
+
+随后 zhangsan 发送 `/new`，命令 ID 为 m3：先认领 r3；独立控制路径停止该 Peer 当前任务并清理此前队列。
+确认停止后，在同一事务内创建 s3、写入渠道来源标题事件、把 b1 改为 s3，并将 r3 标为 completed。
+回复失败只把 r3.delivery_status 标为 failed，重复 m3 不能再次新建 s4。s1/s2 的来源仍在各自标题事件中。
+
+若首次发送的就是 `/help`：只建立 b1→NULL 和命令台账，返回固定帮助；不创建 Session、模型 Run 或聊天轮次。
 
 ## 两张运行表的记录生命周期
 
@@ -76,45 +81,49 @@ Gateway 通过统一接口管理 Adapter；会话映射、消息台账和 DeepAg
 
 下表使用虚构的同一个渠道 C、企微用户 U、消息 M1/M2/M3。
 
-| 发生的事情 | 映射表 | 消息台账 |
+| **发生的事情** | **映射表** | **消息台账** |
 | --- | --- | --- |
 | 只配置、启用机器人或测试连接 | 无记录 | 无记录 |
-| U 首次发送 M1，轮到它执行 | 新建 B1：C + userid + U → S1 | 新建 R1：M1、B1、S1，received/pending |
-| M1 开始请求 Agent、取得 Run ID、完成外发 | B1 不变 | 始终修改 R1：running/streaming → 记录 Agent Run ID → completed/sent |
+| U 首次发送 M1，进入队列 | 新建 B1：C + single + U → NULL | 认领 R1：M1、B1、session=NULL，received/pending → queued |
+| M1 轮到执行并开始请求 Agent | 创建 S1并把B1指向S1 | R1关联S1，running/streaming，收到SSE后记录Agent Run ID |
+| M1 处理结束并外发 | B1 不变 | 先写处理终态，再分别写投递sent/failed |
 | U 发送不同消息 M2 | 复用 B1，仍指向 S1；不 UPDATE | 新建 R2：M2、B1、S1；R1 不变 |
 | 上游重复投递已完成的 M1 | 不变 | 查到 R1 后跳过；不新建 R3、不调用 Agent |
-| U 正在处理 M2 时又发送 M3 | 不变 | M3 先在内存等待同 Peer 锁，尚未落台账；开始执行才 INSERT |
+| U 正在处理 M2 时又发送 M3 | 不变 | M3已认领并标queued，正文在内存等待；不提前关联Session |
+| 收到 /stop | B1不变；无Session时不创建 | 独立控制路径取消此前queued记录为interrupted，再等待当前任务真实停止；命令本身单独记账 |
+| 收到 /new且确认停止 | B1原子改指新S2，旧Session保留 | 同一事务将命令记录completed；回复结果另外更新，不因发送失败重复切换 |
+| /new等待停止超过15秒 | B1不变 | 命令失败并返回仍在停止中；暂不派发新消息，确认停止后恢复原Session队列 |
 | 管理员修改 Agent/会话用户 | 保存配置时 B1 不变 | 所有旧 Run 不变 |
 | 修改后 U 发送下一条新消息 | B1 改为指向新 S2，B1 的 id 保留 | 新 Run 指向 S2；R1/R2 仍指向旧 S1 |
 | 在控制台删除当前 S2 | 外键把 B1.session_id 置空，B1 不删除 | 历史 Run 仍保留原 ID；Run.session_id 不设会话外键 |
 | U 再发新消息 | 同一 B1 重新指向新 S3 | 新建一条对应 S3 的 Run |
 | 停用机器人、断线后恢复、正常重启 | B1 保留 | 已结束 Run 保留，不重新执行 |
-| Gateway 启动时发现未结束 Run | B1 不变 | 批量将 received/running 改为 interrupted/failed，记录 finished_at |
+| Gateway 启动时发现未结束 Run | B1 不变 | 批量将 received/queued/running 改为 interrupted/failed，记录 finished_at |
 
 重启后只有明确未越过 Agent 调用边界的记录可在**上游再次投递时**复用原 Run 并把 attempt_count 加一；
 已越过边界的未知结果不自动重跑。当前没有后台任务扫描并重放消息，也没有 Run 的自动过期清理，
 因此终态台账会持续保留、按消息数量增长。已有 Binding/Run 的渠道通过管理 API 删除会返回409，
 不提供级联删除这些历史数据的产品入口。
 
-## 核查发现的状态边界（尚未修正）
+## 状态边界与本轮修正
 
-用隔离临时 SQLite 和合成 SDK/SSE 回调核验了以下现状，不触碰本地验收会话：
+此前核查发现的混淆已在公共服务中修正，不再把机器人外发成功等同于 Agent 成功：
 
-- Agent 的 `final.status=failed` 仍会走通用收尾，只要发送成功就记 `completed/sent`。
+- `final.status=failed` 和 `error` 对应处理 failed；`cancelled` 对应 interrupted，投递结果另记。
 - `final.status=pending` 发出“控制台继续”提示后也记 `completed/sent`；这里只能理解为渠道转交结束，
   不能理解成 Agent 工作已完成，后续控制台续跑不会自动更新这条渠道 Run。
-- Agent 已完成但最后企微外发失败时，两列同时记 `failed/failed`，没有保留“处理完成、仅投递失败”的差别。
-- 同 Peer 等待中的消息尚未落库；进程退出后本系统无法从 Run 表恢复这部分等待消息。
+- Agent 已完成但最后企微外发失败时保留 `completed/failed`，不丢失处理完成的事实。
+- 同 Peer 等待中的消息在入队前认领，停止可以标记并移除等待项；进程退出后仍不从台账重放正文。
 
-因此第三张表确实已用于去重，但还不能称为完整、准确的 Agent 生命周期日志或可靠投递队列。
-这些问题应修正状态语义和调用边界，不能靠增加一张表或改数据库版本号来掩盖。
+第三张表是渠道处理与投递台账，不能替代 Agent Event Store 或可靠投递队列。
+这些修正复用现有三表及002，不增加新的迁移版本。当前单 API worker/单 Gateway 的约束不变。
 
 ## 三张表仍保留什么
 
-| 表 | 字段分组 | 职责 |
+| **表** | **字段分组** | **职责** |
 | --- | --- | --- |
 | Account | id/name/channel_type/transport、bot_id/secret、agent_id/session_user_id、enabled/settings、created_at/updated_at | 控制台配置；Secret 不回显，空输入保留 |
-| Binding | id/account_id、peer_type/peer_id/peer_display_name、session_id、created_at/updated_at | 外部标识到当前 Session 的指针，不复制 Agent 或聊天历史 |
+| Binding | id/account_id、peer_type/peer_id/peer_metadata、session_id、created_at/updated_at | 外部会话身份与当前 Session 指针，不复制 Agent 或聊天历史 |
 | Run | id/account_id/binding_id、external_message_id/external_request_id/sender_id、session_id/agent_run_id/stream_id、payload_hash、processing_status/delivery_status/attempt_count、error_code/error_message、created_at/finished_at | 去重、关联与脱敏结果诊断，不保存消息正文和媒体地址 |
 
 `processing_status` 和 `delivery_status` 是处理结果与外发结果，不是两个 Agent 执行器。
@@ -175,4 +184,4 @@ msgid 判重，disconnect 时清空；HTTP Bot 的幂等缓存为600秒、最多
 
 因此最终取舍是：LangBot 证明多 Adapter 分层值得参考，但不证明“行业必须建三张表”。
 我们的 Binding 来自重启后复用随机 DeepAgent Session 的要求；Run 来自跨重启保留上游 msgid 去重依据的要求。
-当前不需要新增表，先补齐公共 Adapter 边界和已有状态语义，不能因为对方监控表多就跟着扩表。
+当前已按上述约束补齐公共 Adapter 边界和状态语义；仍不需要新增表，不能因为对方监控表多就跟着扩表。

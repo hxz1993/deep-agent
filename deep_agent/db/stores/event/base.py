@@ -218,7 +218,7 @@ class SessionEventStore(SessionBoundMixin):
         session: ChatSession,
         *,
         title: str,
-        source: Literal["fallback", "model", "user"],
+        source: Literal["fallback", "model", "user", "channel"],
         source_event_id: str | None,
         turn_id: str | None,
         run_id: str | None,

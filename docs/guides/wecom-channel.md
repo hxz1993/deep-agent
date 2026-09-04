@@ -32,6 +32,11 @@ python -m deep_agent.channel_gateway --host 0.0.0.0 --port 8010
 Gateway 不运行迁移；Revision 不是 `002` 会失败关闭。0.7.0 保持一个 API worker、一个 Gateway 副本：
 当前取消注册表与消息队列不跨实例共享，相同 Bot 的多条长连接还可能互相顶替。DevBox 服务名为“渠道网关”。
 
+Test 的 Jenkins V2 采用同一容器内的两个独立进程：`deep_agent.combined_runtime` 先启动 API，
+等待迁移和健康检查完成后再启动只监听回环地址的 Gateway，并自动生成本次容器使用的内部 Token。
+它不新增 Deployment 或 Service。继续使用 Jenkins V1 的环境仍只执行 Gunicorn，不会启动 Gateway；
+对应说明见 [`jenkins/README.md`](jenkins/README.md)。
+
 可选私有运行配置：
 
 | **环境变量** | **默认值** | **用途** |

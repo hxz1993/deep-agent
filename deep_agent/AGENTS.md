@@ -57,6 +57,9 @@ FileStore协议。`channel_gateway/runtime.py`负责Account轮询与Adapter生�
 只有`channels/adapters/wecom/`引用官方`wecom-aibot-python-sdk==1.0.2`；连接、认证、心跳、重连、
 事件分发、媒体下载解密和回复协议均调用SDK，不写第二套协议。当前仅企微Adapter，不宣称飞书已实现。
 0.7.0只允许一个API worker与一个Gateway副本，Gateway不执行Alembic，启动前数据库必须为`002`。
+Test的Jenkins V2可由`combined_runtime.py`在同一容器托管两个独立进程：先等待API完成迁移并健康，
+再启动回环地址上的Gateway；任一子进程退出即整体退出。该入口只写入V2镜像CMD，继续使用V1
+Gunicorn CMD的环境不会启动Gateway。
 
 渠道配置中的`session_user_id`由企业管理员直接填写，Console标签“会话用户”；只决定新建Session
 归属，不签发平台凭据。Gateway带内部Token和Account ID，API从当前配置解析用户；普通请求仍按

@@ -1,244 +1,141 @@
-"""仅检查 V2 发布编排；无集群、数据库、镜像构建或真实机器人连接。"""
 from __future__ import annotations
 
-import base64
-import copy
-import importlib.util
-import io
-import json
-from contextlib import redirect_stdout
-from pathlib import Path
 import re
+import stat
 import subprocess
+import tempfile
 import unittest
-from unittest.mock import patch
+from pathlib import Path
+from unittest.mock import Mock, call, patch
+
+from deep_agent import combined_runtime as runtime
 
 
 ROOT = Path(__file__).resolve().parents[2]
-SPEC = importlib.util.spec_from_file_location("jenkins_deploy_v2", ROOT / "docs/guides/jenkins/deploy_v2.py")
-DEPLOY = importlib.util.module_from_spec(SPEC)
-SPEC.loader.exec_module(DEPLOY)
-OPTIONS = dict(name="deep-agent", container="deep-agent", namespace="smoke",
-               image="registry.invalid/smoke/deep-agent:42-abcdef", secret="channel-runtime", api_port=30098)
 
 
-def api_fixture():
-    return {"spec": {
-        "replicas": 1, "selector": {"matchLabels": {"app": "deep-agent"}},
-        "template": {"spec": {"serviceAccountName": "api-runtime", "containers": [{
-            "name": "deep-agent", "image": "old-image",
-            "env": [{"name": "KEEP_SETTING", "value": "keep"},
-                    {"name": "DEEP_AGENT_DBMS_USER", "value": "previous"}],
-            "volumeMounts": [{"name": "existing", "mountPath": "/existing"}],
-        }]}},
-    }, "status": {"readyReplicas": 1}}
+class CombinedRuntimeTest(unittest.TestCase):
+    def test_child_environment_connects_both_processes_with_one_token(self):
+        with patch.object(runtime.secrets, "token_urlsafe", return_value="generated-token"):
+            environ = runtime.build_child_env({
+                "DEEP_AGENT_PYTHON_BIND": "0.0.0.0:31000",
+                "DEEP_AGENT_CHANNEL_PORT": "8110",
+            })
+        self.assertEqual(environ[runtime.TOKEN_ENV], "generated-token")
+        self.assertEqual(environ["DEEP_AGENT_CHANNEL_API_URL"], "http://127.0.0.1:31000")
+        self.assertEqual(environ["DEEP_AGENT_CHANNEL_GATEWAY_URL"], "http://127.0.0.1:8110")
+        self.assertEqual(environ["DEEP_AGENT_CHANNEL_HOST"], "127.0.0.1")
+
+    def test_existing_internal_token_is_preserved(self):
+        environ = runtime.build_child_env({runtime.TOKEN_ENV: "configured-token"})
+        self.assertEqual(environ[runtime.TOKEN_ENV], "configured-token")
+
+    def test_runtime_token_file_is_private_and_readable_by_check(self):
+        with tempfile.TemporaryDirectory(prefix="TMP_to_delete-combined-runtime-") as directory:
+            token_file = Path(directory) / "runtime" / "token"
+            environ = {
+                runtime.TOKEN_ENV: "private-token",
+                runtime.TOKEN_FILE_ENV: str(token_file),
+            }
+            runtime.write_runtime_token(environ)
+            self.assertEqual(token_file.read_text(), "private-token")
+            self.assertEqual(stat.S_IMODE(token_file.stat().st_mode), 0o600)
+            self.assertEqual(
+                runtime.read_runtime_token({runtime.TOKEN_FILE_ENV: str(token_file)}),
+                "private-token",
+            )
+
+    def test_wait_for_health_fails_immediately_when_child_exits(self):
+        process = Mock()
+        process.poll.return_value = 7
+        with self.assertRaisesRegex(RuntimeError, "exited during startup with code 7"):
+            runtime.wait_for_health("API", "http://127.0.0.1:1/health", process, timeout=1)
+
+    def test_check_requires_api_gateway_and_revision_002(self):
+        environ = {
+            runtime.TOKEN_ENV: "token",
+            "DEEP_AGENT_PYTHON_PORT": "30098",
+            "DEEP_AGENT_CHANNEL_PORT": "8010",
+        }
+        with patch.object(runtime, "fetch_health", side_effect=[
+            {"status": "ok"},
+            {"status": "ok", "database_revision": "002"},
+        ]) as fetch:
+            runtime.check_runtime(environ)
+        self.assertEqual(fetch.call_args_list, [
+            call("http://127.0.0.1:30098/health"),
+            call("http://127.0.0.1:8010/health", token="token"),
+        ])
+
+    def test_check_command_waits_for_the_gateway_startup_race(self):
+        with patch.object(runtime, "check_runtime", side_effect=[RuntimeError("starting"), None]) as check:
+            with patch.object(runtime.time, "sleep"):
+                runtime.wait_for_runtime_health(timeout=1)
+        self.assertEqual(check.call_count, 2)
+
+    def test_supervisor_starts_gateway_only_after_api_health(self):
+        api = Mock(pid=101)
+        gateway = Mock(pid=102)
+        api.poll.return_value = None
+        gateway.poll.return_value = 9
+        child_env = runtime.build_child_env({runtime.TOKEN_ENV: "token"})
+        with tempfile.TemporaryDirectory(prefix="TMP_to_delete-combined-runtime-") as directory:
+            child_env[runtime.TOKEN_FILE_ENV] = str(Path(directory) / "token")
+            with (
+                patch.object(runtime, "build_child_env", return_value=child_env),
+                patch.object(runtime.subprocess, "Popen", side_effect=[api, gateway]) as popen,
+                patch.object(runtime, "wait_for_health", return_value={"status": "ok"}) as wait,
+                patch.object(runtime, "stop_processes") as stop,
+            ):
+                self.assertEqual(runtime.run_combined(startup_timeout=1), 9)
+        self.assertEqual(popen.call_args_list[0].args[0], runtime.API_COMMAND)
+        self.assertEqual(popen.call_args_list[1].args[0], runtime.GATEWAY_COMMAND)
+        self.assertIn("30098/health", wait.call_args_list[0].args[1])
+        self.assertIn("8010/health", wait.call_args_list[1].args[1])
+        stop.assert_called_once_with([api, gateway])
 
 
-def secret_fixture():
-    values = {key: "fixture-only" for key in DEPLOY.SHARED_KEYS}
-    values.update(DEEP_AGENT_DBMS_NAME="mysql", DEEP_AGENT_DBMS_PORT="3306")
-    return {"data": {key: base64.b64encode(value.encode()).decode() for key, value in values.items()}}
+class JenkinsPipelineV2Test(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.pipeline = (ROOT / "docs/guides/jenkins/Jenkinsfile.v2").read_text()
 
-
-class FakeCluster:
-    def __init__(self, existing_gateway=False):
-        self.api = api_fixture()
-        self.secret = secret_fixture()
-        self.gateway = DEPLOY.manifests(self.api, **OPTIONS)[1] if existing_gateway else {}
-        self.services = {}
-        self.hpas = []
-        self.events = []
-        self.runtime = {"database_matches": True, "api_port": 30098}
-        self.fail_api = False
-        self.fail_dry_run = False
-
-    def get(self, kind, name=None):
-        if kind == "deployment":
-            return copy.deepcopy(self.api if name == "deep-agent" else self.gateway)
-        if kind == "secret":
-            return copy.deepcopy(self.secret)
-        if kind == "hpa":
-            return {"items": self.hpas}
-        if kind == "service":
-            return self.services.get(name, {})
-        if kind == "serviceaccount":
-            return {"metadata": {"name": name}, "imagePullSecrets": [{"name": "harbor-pull"}]}
-        raise AssertionError(kind)
-
-    def run(self, *args, payload=None):
-        self.events.append((args, copy.deepcopy(payload)))
-        if "--dry-run=server" in args:
-            if self.fail_dry_run:
-                raise RuntimeError("admission rejected")
-            return ""
-        if args[0] == "scale":
-            self.gateway["spec"]["replicas"] = 0
-        elif args[0] == "patch":
-            self.api["spec"]["template"]["spec"]["containers"] = payload["spec"]["template"]["spec"]["containers"]
-        elif args[0] == "apply" and payload["kind"] == "Deployment":
-            self.gateway = copy.deepcopy(payload)
-            self.gateway["status"] = {"readyReplicas": 1}
-        elif args[:3] == ("rollout", "status", "deployment/deep-agent") and self.fail_api:
-            raise RuntimeError("API rollout timeout")
-        elif args[0] == "exec" and DEPLOY.RUNTIME_CHECK in args:
-            self.assert_preflight_payload(payload)
-            return json.dumps(self.runtime)
-        elif args[:2] == ("get", "pods"):
-            return json.dumps({"items": [{"metadata": {"name": "old-gateway-pod"}}]})
-        return ""
-
-    @staticmethod
-    def assert_preflight_payload(payload):
-        assert set(payload) == set(DEPLOY.DB_KEYS)
-
-
-class JenkinsDeploymentV2Smoke(unittest.TestCase):
-    def run_release(self, cluster):
-        with redirect_stdout(io.StringIO()):
-            DEPLOY.release(cluster, **OPTIONS)
-
-    def assert_no_mutation(self, cluster):
-        self.assertFalse(any(args[0] in ("scale", "patch", "apply") and "--dry-run=server" not in args
-                             for args, _ in cluster.events))
-
-    def test_manifests_preserve_api_settings_and_isolate_gateway(self):
-        original = api_fixture()
-        api_patch, gateway, services = DEPLOY.manifests(original, **OPTIONS)
-        target = api_patch["spec"]["template"]["spec"]["containers"][0]
-        env = {item["name"]: item for item in target["env"]}
-        self.assertEqual(env["KEEP_SETTING"]["value"], "keep")
-        self.assertNotIn("value", env["DEEP_AGENT_DBMS_USER"])
-        self.assertEqual(target["volumeMounts"], original["spec"]["template"]["spec"]["containers"][0]["volumeMounts"])
-        self.assertEqual(api_patch["spec"]["strategy"], {"type": "Recreate", "rollingUpdate": None})
-        self.assertEqual(gateway["spec"]["replicas"], 1)
-        pod = gateway["spec"]["template"]["spec"]
-        self.assertFalse(pod["automountServiceAccountToken"])
-        self.assertNotIn("volumes", pod)
-        self.assertEqual(pod["containers"][0]["command"], ["python", "-m", "deep_agent.channel_gateway"])
-        self.assertEqual(target["image"], pod["containers"][0]["image"])
-        self.assertNotEqual(services[0]["spec"]["selector"], services[1]["spec"]["selector"])
-        for container in (target, pod["containers"][0]):
-            keys = {item["name"]: item for item in container["env"]}
-            for key in DEPLOY.SHARED_KEYS:
-                self.assertEqual(keys[key]["valueFrom"]["secretKeyRef"], {"name": "channel-runtime", "key": key})
-        self.assertEqual(original, api_fixture())
-
-    def test_first_release_starts_both_and_inherits_pull_credentials(self):
-        cluster = FakeCluster()
-        self.run_release(cluster)
-        self.assertFalse(any(args[0] == "scale" for args, _ in cluster.events))
-        self.assertEqual(cluster.gateway["spec"]["template"]["spec"]["imagePullSecrets"], [{"name": "harbor-pull"}])
-        operations = [args for args, _ in cluster.events]
-        api_ready = operations.index(("rollout", "status", "deployment/deep-agent", "--timeout=600s"))
-        gateway_start = next(i for i, (args, payload) in enumerate(cluster.events)
-                             if args == ("apply", "-f", "-") and payload["kind"] == "Deployment")
-        self.assertLess(api_ready, gateway_start)
-        self.assertTrue(any("http://deep-agent-channel-gateway:8010/health" in " ".join(args) for args in operations))
-        self.assertTrue(any("http://deep-agent-channel-api:30098/health" in " ".join(args) for args in operations))
-
-    def test_repeat_release_waits_for_old_gateway_deletion_before_api_update(self):
-        cluster = FakeCluster(existing_gateway=True)
-        self.run_release(cluster)
-        operations = [args for args, _ in cluster.events]
-        scale = next(i for i, args in enumerate(operations) if args[0] == "scale")
-        deletion = next(i for i, args in enumerate(operations) if args[0] == "wait" and "--for=delete" in args)
-        api_update = next(i for i, args in enumerate(operations) if args[0] == "patch" and "--dry-run=server" not in args)
-        self.assertLess(scale, deletion)
-        self.assertLess(deletion, api_update)
-
-    def test_invalid_config_stops_before_mutation(self):
-        for scenario in ("missing_secret", "sqlite", "different_database", "wrong_port", "hpa", "multiple_api", "name_collision", "dry_run"):
-            with self.subTest(scenario=scenario):
-                cluster = FakeCluster(existing_gateway=True)
-                if scenario == "missing_secret":
-                    cluster.secret["data"].pop(DEPLOY.TOKEN_KEY)
-                elif scenario == "sqlite":
-                    cluster.secret["data"]["DEEP_AGENT_DBMS_NAME"] = base64.b64encode(b"sqlite").decode()
-                elif scenario == "different_database":
-                    cluster.runtime["database_matches"] = False
-                elif scenario == "wrong_port":
-                    cluster.runtime["api_port"] = 8000
-                elif scenario == "hpa":
-                    cluster.hpas = [{"spec": {"scaleTargetRef": {"name": "deep-agent"}}}]
-                elif scenario == "multiple_api":
-                    cluster.api["spec"]["replicas"] = 2
-                elif scenario == "name_collision":
-                    cluster.gateway["metadata"]["labels"] = {}
-                elif scenario == "dry_run":
-                    cluster.fail_dry_run = True
-                with self.assertRaises((ValueError, RuntimeError)):
-                    self.run_release(cluster)
-                self.assert_no_mutation(cluster)
-
-    def test_api_failure_does_not_start_or_restore_gateway(self):
-        cluster = FakeCluster(existing_gateway=True)
-        cluster.fail_api = True
-        with self.assertRaises(RuntimeError):
-            self.run_release(cluster)
-        self.assertEqual(cluster.gateway["spec"]["replicas"], 0)
-        self.assertFalse(any(args == ("apply", "-f", "-") and payload["kind"] == "Deployment"
-                             for args, payload in cluster.events))
-
-    def test_health_programs_compile_without_plaintext_credentials(self):
-        compile(DEPLOY.RUNTIME_CHECK, "runtime-preflight", "exec")
-        for authenticated in (False, True):
-            code = DEPLOY.health_code("http://127.0.0.1:8010/health", authenticated=authenticated)
-            compile(code, "health-probe", "exec")
-            self.assertIn("ProxyHandler({})", code)
-            self.assertNotIn("fixture-only", code)
-        gateway_probe = DEPLOY.probe(8010, authenticated=True)
-        self.assertNotIn("httpHeaders", json.dumps(gateway_probe))
-
-    def test_kubectl_failure_does_not_print_server_secret_response(self):
-        with patch.object(DEPLOY.subprocess, "run") as run:
-            run.return_value.returncode = 1
-            run.return_value.stderr = "SENSITIVE_SERVER_RESPONSE"
-            with self.assertRaises(RuntimeError) as caught:
-                DEPLOY.Kubectl("smoke").run("patch", "deployment", "deep-agent", payload={"sensitive": "value"})
-        self.assertNotIn("SENSITIVE_SERVER_RESPONSE", str(caught.exception))
-
-    def test_rollout_watch_uses_its_explicit_timeout(self):
-        with patch.object(DEPLOY.subprocess, "run") as run:
-            run.return_value.returncode = 0
-            run.return_value.stdout = "ready"
-            DEPLOY.Kubectl("smoke").run("rollout", "status", "deployment/deep-agent", "--timeout=600s")
-            self.assertIn("--request-timeout=0", run.call_args.args[0])
-            self.assertEqual(run.call_args.kwargs["timeout"], 660)
-
-    def test_missing_release_confirmation_never_connects(self):
-        argv = ["deploy_v2.py", "--name", "deep-agent", "--container", "deep-agent", "--namespace", "smoke", "--image", OPTIONS["image"], "--secret", "channel-runtime"]
-        with patch.object(DEPLOY.sys, "argv", argv), patch.object(DEPLOY.subprocess, "run") as run:
-            with self.assertRaises(ValueError):
-                DEPLOY.main()
-            run.assert_not_called()
-
-    def test_jenkins_embedded_shell_syntax(self):
-        pipeline = (ROOT / "docs/guides/jenkins/Jenkinsfile.v2").read_text()
-        scripts = re.findall(r"sh '''(.*?)'''", pipeline, flags=re.DOTALL)
+    def test_embedded_shell_scripts_are_valid(self):
+        scripts = re.findall(r"sh '''(.*?)'''", self.pipeline, flags=re.DOTALL)
         self.assertEqual(len(scripts), 4)
         for script in scripts:
-            # -n 仅解析语法，不执行 git、Docker、kubectl 或发布助手。
-            result = subprocess.run(["/bin/sh", "-n"], input=script, text=True, capture_output=True)
+            result = subprocess.run(
+                ["/bin/sh", "-n"], input=script, text=True, capture_output=True, check=False
+            )
             self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertNotIn("sh 'env'", pipeline)
-        self.assertIn("disableConcurrentBuilds()", pipeline)
-        self.assertIn("--release", pipeline)
-        parameter_block = re.search(r"parameters \{(.*?)\n    \}\n    stages", pipeline, flags=re.DOTALL)[1]
-        self.assertNotIn("CONFIRM_RELEASE", parameter_block)
-        self.assertNotIn("TARGET_NAMESPACE", parameter_block)
-        self.assertNotIn("API_DEPLOYMENT", parameter_block)
-        self.assertNotIn("API_CONTAINER", parameter_block)
-        self.assertNotIn("CHANNEL_RUNTIME_SECRET", parameter_block)
-        self.assertIn("defaultValue: 'test'", pipeline)
-        self.assertIn('env.RUNTIME_SECRET = "${env.NAME}-channel-runtime"', pipeline)
-        self.assertIn("env.API_PORT_VALUE = '30098'", pipeline)
-        self.assertEqual(re.findall(r"name: '([^']+)'", parameter_block), ["BRANCH_TAG", "AGENT", "RELOAD_PIPELINE"])
-        self.assertLess(pipeline.index("stage('漏洞检测')"), pipeline.index("stage('RELEASE API + Channel Gateway')"))
-        dockerfile = re.search(r"writeFile file: 'Dockerfile', text: '''(.*?)'''", pipeline, flags=re.DOTALL)[1]
-        dockerfile = dockerfile.replace("\\\\", "\\")  # Groovy 单引号字符串的反斜杠解码
-        self.assertIn("WORKDIR /deep-agent", dockerfile)
-        self.assertIn("&& \\\n", dockerfile)
-        self.assertIn("deep_agent.channel_gateway.__main__", dockerfile)
+
+    def test_pipeline_keeps_v1_deployment_shape_without_node_python(self):
+        self.assertNotIn("command -v python", self.pipeline)
+        self.assertNotIn("deploy_v2.py", self.pipeline)
+        self.assertNotIn("kubectl apply", self.pipeline)
+        self.assertNotIn("kubectl patch", self.pipeline)
+        self.assertIn('kubectl set image "deployment/$NAME"', self.pipeline)
+        self.assertIn('kubectl rollout status "deployment/$NAME"', self.pipeline)
+        self.assertIn("python -m deep_agent.combined_runtime --check", self.pipeline)
+
+    def test_v2_image_uses_combined_runtime_but_v1_stays_api_only(self):
+        dockerfile = re.search(
+            r"writeFile file: 'Dockerfile', text: '''(.*?)'''", self.pipeline, flags=re.DOTALL
+        )[1]
+        self.assertIn('CMD ["python", "-m", "deep_agent.combined_runtime"]', dockerfile)
+        v1 = (ROOT / "docs/guides/jenkins/Jenkinsfile.v1").read_text()
+        self.assertIn('CMD ["gunicorn", "-c", "deep_agent/gunicorn.conf.py", "deep_agent.main:app"]', v1)
+        self.assertNotIn("deep_agent.combined_runtime", v1)
+
+    def test_only_three_existing_parameters_are_required(self):
+        parameter_block = re.search(
+            r"parameters \{(.*?)\n    \}\n    stages", self.pipeline, flags=re.DOTALL
+        )[1]
+        self.assertEqual(
+            re.findall(r"name: '([^']+)'", parameter_block),
+            ["BRANCH_TAG", "AGENT", "RELOAD_PIPELINE"],
+        )
+        self.assertIn("defaultValue: 'test'", parameter_block)
 
 
 if __name__ == "__main__":

@@ -1,7 +1,5 @@
-// V2：同一镜像发布 API + Channel Gateway。首次使用先阅读本目录 README.md。
-// 本文件与 deploy_v2.py 必须同时存在于 BRANCH_TAG 指向的提交中。
+// V2：沿用 V1 的单 Deployment 发布方式；镜像内同时托管 API 与渠道网关。
 pipeline {
-    // 沿用现网旧流水线已经支持的普通动态节点写法。
     agent { label "$AGENT" }
     options {
         buildDiscarder(logRotator(numToKeepStr: '2'))
@@ -12,6 +10,7 @@ pipeline {
     environment {
         ArtifactsName = 'deep-agent.tar.gz'
         K8SCredentialsId = 'ShangHaiOffineK8SToken'
+        K8SServerAPI = credentials('ShangHaiOffineK8SApiServer')
         RegisterUrl = 'harbor.deepfos.com'
         RegistryCredential = 'harbor.deepfos.com'
     }
@@ -29,28 +28,21 @@ pipeline {
             when { environment name: 'RELOAD_PIPELINE', value: 'false' }
             steps {
                 script {
-                    // 与 V1 一致：test/deep-agent Job 自动得到 test 命名空间和 deep-agent 服务名。
                     env.NAMESPACE = sh(script: '''#!/bin/sh
 set -eu
 echo "$JOB_NAME" | awk -F/ '{print $1}'
 ''', returnStdout: true).trim()
                     env.NAME = env.JOB_BASE_NAME
-                    env.API_CONTAINER_NAME = env.NAME
-                    env.RUNTIME_SECRET = "${env.NAME}-channel-runtime"
-                    env.API_PORT_VALUE = '30098'
                     dir('source') {
                         checkout([$class: 'GitSCM', branches: [[name: "${BRANCH_TAG}"]], extensions: [[$class: 'CloneOption', noTags: false, reference: '', shallow: true, timeout: 30]], userRemoteConfigs: [[credentialsId: 'giteeKey', url: 'https://gitee.com/proinnova/deep-agent']]])
                         env.SOURCE_DIR = pwd()
                         env.REVISION = sh(script: 'git rev-parse HEAD', returnStdout: true).trim()
                         sh '''#!/bin/sh
 set -eu
+test -f deep_agent/combined_runtime.py
 test -f deep_agent/channel_gateway/__main__.py
-test -f docs/guides/jenkins/deploy_v2.py
-command -v python3 >/dev/null
-command -v kubectl >/dev/null
 '''
                     }
-                    // 构建号 + 源码 SHA，不依赖 BUILD_TIMESTAMP 插件；两服务始终使用相同标签。
                     env.NameTag = "${env.BUILD_NUMBER}-${env.REVISION.take(12)}"
                     env.LOCAL_IMAGE = "${env.NAMESPACE}/${env.NAME}:${env.NameTag}"
                     env.RELEASE_IMAGE = "${env.RegisterUrl}/${env.LOCAL_IMAGE}"
@@ -62,7 +54,6 @@ command -v kubectl >/dev/null
             when { environment name: 'RELOAD_PIPELINE', value: 'false' }
             steps {
                 dir("${env.BUILD_DIR}") {
-                    // 只归档选定提交，固定 /deep-agent；不移动工作区，不把 .git/未跟踪 .env/数据库打进镜像。
                     sh '''#!/bin/sh
 set -eu
 git -C "$SOURCE_DIR" archive --format=tar --prefix=deep-agent/ HEAD > deep-agent.tar
@@ -76,14 +67,14 @@ FROM harbor.deepfos.com/base/python3.11.9:debian12
 ENV TZ=Asia/Shanghai
 ADD deep-agent.tar.gz /
 WORKDIR /deep-agent
-RUN sed -i 's|mirrors.tuna.tsinghua.edu.cn|mirrors.aliyun.com|g' /etc/apt/sources.list && \\
-    apt-get update && \\
-    pip3 install -i https://mirrors.aliyun.com/pypi/simple/ *.whl && \\
-    pip3 install -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple/ && \\
-    bash scripts/sandbox_venv/setup.sh && \\
-    python -m compileall -q deep_agent/channel_gateway && \\
-    python -c "import deep_agent.channel_gateway.__main__"
-CMD ["gunicorn", "-c", "deep_agent/gunicorn.conf.py", "deep_agent.main:app"]
+RUN sed -i 's|mirrors.tuna.tsinghua.edu.cn|mirrors.aliyun.com|g' /etc/apt/sources.list && \
+    apt-get update && \
+    pip3 install -i https://mirrors.aliyun.com/pypi/simple/ *.whl && \
+    pip3 install -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple/ && \
+    bash scripts/sandbox_venv/setup.sh && \
+    python -m compileall -q deep_agent/combined_runtime.py deep_agent/channel_gateway && \
+    python -c "import deep_agent.combined_runtime; import deep_agent.channel_gateway.__main__"
+CMD ["python", "-m", "deep_agent.combined_runtime"]
 '''
                     script {
                         def dockerImage = docker.build(env.LOCAL_IMAGE, '-f Dockerfile .')
@@ -98,7 +89,6 @@ CMD ["gunicorn", "-c", "deep_agent/gunicorn.conf.py", "deep_agent.main:app"]
             when { environment name: 'RELOAD_PIPELINE', value: 'false' }
             steps {
                 dir("${env.BUILD_DIR}") {
-                    // 先生成 JSON，再转换，避免管道掩盖扫描命令失败。沿用原有报告策略，未增加严重性门禁。
                     sh '''#!/bin/sh
 set -eu
 /opt/nfs/trivy/trivy image --config /opt/nfs/trivy/trivy.yaml --skip-db-update --skip-java-db-update -f json --scanners vuln "$LOCAL_IMAGE" > vulnerabilities.json
@@ -111,16 +101,13 @@ set -eu
         stage('RELEASE API + Channel Gateway') {
             when { environment name: 'RELOAD_PIPELINE', value: 'false' }
             steps {
-                // 凭据只在发布阶段注入；不执行 env，不输出 Secret/Kubeconfig。
-                withCredentials([string(credentialsId: 'ShangHaiOffineK8SApiServer', variable: 'K8S_SERVER_API')]) {
-                    withKubeConfig([credentialsId: env.K8SCredentialsId, serverUrl: env.K8S_SERVER_API, namespace: env.NAMESPACE, restrictKubeConfigAccess: true]) {
-                        sh '''#!/bin/sh
+                withKubeConfig([credentialsId: "${env.K8SCredentialsId}", serverUrl: "${env.K8SServerAPI}", namespace: "${env.NAMESPACE}"]) {
+                    sh '''#!/bin/sh
 set -eu
-python3 "$SOURCE_DIR/docs/guides/jenkins/deploy_v2.py" --release \
-  --namespace "$NAMESPACE" --name "$NAME" --container "$API_CONTAINER_NAME" \
-  --secret "$RUNTIME_SECRET" --api-port "$API_PORT_VALUE" --image "$RELEASE_IMAGE"
+kubectl set image "deployment/$NAME" "$NAME=$RELEASE_IMAGE"
+kubectl rollout status "deployment/$NAME" --timeout=600s
+kubectl exec "deployment/$NAME" -c "$NAME" -- python -m deep_agent.combined_runtime --check
 '''
-                    }
                 }
             }
         }
@@ -133,11 +120,10 @@ python3 "$SOURCE_DIR/docs/guides/jenkins/deploy_v2.py" --release \
                 }
             }
         }
-        failure { echo '发布失败；未自动回滚数据库或恢复旧网关。请按 README 检查失败阶段及当前服务状态。' }
+        failure { echo '发布失败；请从首个失败命令检查构建日志、Pod 日志或数据库迁移状态。' }
         always {
             script {
                 if (env.BUILD_DIR) {
-                    // 只清理本次构建专用目录；不删除源码目录或其他任务产物。
                     dir(env.BUILD_DIR) { deleteDir() }
                 }
             }

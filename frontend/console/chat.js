@@ -690,24 +690,32 @@ function updateSessionListFooter() {
 
 function bindSessionListFeedback() {
   const list = el.sessionList;
+  let feedbackPlayed = false;
+  let wheelIdleTimer = null;
   const feedback = (deltaY) => {
     if (!deltaY) return;
-    const atEdge = deltaY < 0 ? list.scrollTop <= 1
-      : list.scrollHeight - list.scrollTop - list.clientHeight <= 1;
+    const atBottom = list.scrollHeight - list.scrollTop - list.clientHeight <= 1;
     sessionPage.hasScrolled = true;
     updateSessionListFooter();
-    if (!atEdge || (deltaY > 0 && (sessionPage.hasMore || sessionPage.loading))
+    if (deltaY <= 0 || !atBottom || feedbackPlayed
+      || sessionPage.hasMore || sessionPage.loading || sessionPage.error
       || list.classList.contains("session-edge-feedback")
       || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-    list.style.setProperty("--session-edge-shift", deltaY > 0 ? "-8px" : "8px");
+    feedbackPlayed = true;
     list.classList.add("session-edge-feedback");
-    setTimeout(() => list.classList.remove("session-edge-feedback"), 240);
+    setTimeout(() => list.classList.remove("session-edge-feedback"), 200);
   };
   list.addEventListener("wheel", (event) => {
-    if (!event.ctrlKey && Math.abs(event.deltaY) > Math.abs(event.deltaX)) feedback(event.deltaY);
+    if (event.ctrlKey || Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
+    // A wheel gesture includes its momentum tail, even after the short animation ends.
+    clearTimeout(wheelIdleTimer);
+    wheelIdleTimer = setTimeout(() => { feedbackPlayed = false; }, 350);
+    feedback(event.deltaY);
   }, { passive: true });
   let touchY = null;
   list.addEventListener("touchstart", (event) => {
+    clearTimeout(wheelIdleTimer);
+    feedbackPlayed = false;
     touchY = event.touches.length === 1 ? event.touches[0].clientY : null;
   }, { passive: true });
   list.addEventListener("touchmove", (event) => {

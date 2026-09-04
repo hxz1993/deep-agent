@@ -2394,10 +2394,10 @@ body.workspace-pane-resizing { cursor: col-resize; user-select: none; }
 #workspaceLegacyHost .session-list-footer { flex: 0 0 auto; padding: 12px 4px; color: var(--text-faint); font-size: 11px; text-align: center; list-style: none; }
 #workspaceLegacyHost .session-list-footer button { border: 0; padding: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; }
 #workspaceLegacyHost .session-list { overscroll-behavior-y: none; }
-#workspaceLegacyHost .session-list.session-edge-feedback > li { animation: session-edge-bounce .24s ease-out; }
+#workspaceLegacyHost .session-list.session-edge-feedback > li { animation: session-edge-bounce .2s ease-out; }
 @keyframes session-edge-bounce {
   0%, 100% { transform: translateY(0); }
-  30% { transform: translateY(var(--session-edge-shift)); }
+  40% { transform: translateY(-4px); }
 }
 @media (prefers-reduced-motion: reduce) {
   body.workspace-pane-resizing.console-nav-snapping .console-shell,

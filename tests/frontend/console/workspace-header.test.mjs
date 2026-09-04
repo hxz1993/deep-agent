@@ -87,11 +87,11 @@ test("会话详情使用会话、当前回合和上下文引用三页签", () =>
   assert.doesNotMatch(template, /<span>详情<\/span>/);
   assert.doesNotMatch(template, /<span>会话详情<\/span>/);
   assert.match(workspaceSource, /function toggleInspectorPane\(\)/);
-  assert.match(workspaceSource, /data-inspector-tab="session"[\s\S]*>会话<\/button>/);
-  assert.match(workspaceSource, /data-inspector-tab="run"[\s\S]*>当前回合<\/button>/);
-  assert.match(workspaceSource, /data-inspector-tab="context"[\s\S]*>上下文引用<\/button>/);
+  assert.match(workspaceSource, /data-inspector-tab="session"[\s\S]*>概览<\/button>/);
+  assert.match(workspaceSource, /data-inspector-tab="run"[\s\S]*>当前<\/button>/);
+  assert.match(workspaceSource, /data-inspector-tab="context"[\s\S]*>上下文<\/button>/);
   assert.doesNotMatch(workspaceSource, /metadata 不进入模型输入/);
-  assert.match(workspaceSource, /<strong>会话概览<\/strong>/);
+  assert.doesNotMatch(workspaceSource, /<strong>会话概览<\/strong>|自动推导|阈值与预留合并展示/);
   assert.match(workspaceSource, /inspector-session-group[\s\S]*<strong>请求 Header<\/strong>/);
   assert.match(workspaceSource, /inspector-tab-status[\s\S]*\$\{statusText\}/);
   assert.match(workspaceSource, /inspectorFactHtml\("Agent", agentIdentity/);
@@ -100,13 +100,13 @@ test("会话详情使用会话、当前回合和上下文引用三页签", () =>
   assert.match(workspaceSource, /inspectorFactHtml\("App \/ Space", requestScope/);
   assert.match(workspaceSource, /inspectorFact\("User ID"[\s\S]*identity\?\.user/);
   assert.match(workspaceSource, /<strong>上下文预算<\/strong>/);
-  assert.match(workspaceSource, /<strong>当前回合<\/strong>/);
-  assert.match(workspaceSource, /Conversation ID/);
+  assert.doesNotMatch(workspaceSource, /<strong>当前回合<\/strong>/);
+  assert.match(workspaceSource, /Conv\. ID/);
   assert.match(workspaceSource, /Run ID/);
   assert.match(workspaceSource, /缓存读取/);
   assert.match(workspaceSource, /缓存写入/);
   assert.match(workspaceSource, /Tool Search/);
-  assert.match(workspaceSource, /详细指标请查看运行日志/);
+  assert.doesNotMatch(workspaceSource, /详细指标请查看运行日志|只读 JSON<\/span>/);
   assert.match(workspaceSource, /value === null \|\| value === undefined/);
   assert.match(workspaceSource, /state\.lastRunMetrics/);
   assert.match(chatSource, /conversation_id/);
@@ -122,7 +122,7 @@ test("会话详情使用会话、当前回合和上下文引用三页签", () =>
 test("会话详情保留既有属性并用横向页签、键值列表与复合轨道展示", () => {
   for (const label of [
     "会话 ID", "会话统计", "App / Space", "Language", "User ID",
-    "Conversation ID", "Run ID", "请求", "本次使用", "预计剩余",
+    "Conv. ID", "Run ID", "请求", "本次使用", "预计剩余",
     "缓存读取", "缓存写入", "工具调用", "Tool Search", "耗时", "压缩",
     "压缩前", "压缩后", "压缩事件", "来源截止", "摘要模型", "更新时间", "估算方式",
   ]) {
@@ -133,7 +133,7 @@ test("会话详情保留既有属性并用横向页签、键值列表与复合�
   assert.match(consoleCss, /\.inspector-tabs button\s*\{[\s\S]*border: 0;[\s\S]*background: transparent;/);
   assert.match(consoleCss, /\.inspector-tabs button\[aria-selected="true"\]::after/);
   assert.match(consoleCss, /\.inspector-tab-panel \.inspector-section\s*\{[\s\S]*border: 0;[\s\S]*box-shadow: none/);
-  assert.match(consoleCss, /\.inspector-facts > div\s*\{[\s\S]*grid-template-columns: 82px minmax\(0, 1fr\);/);
+  assert.match(consoleCss, /\.inspector-facts > div\s*\{[\s\S]*grid-template-columns: 72px minmax\(0, 1fr\);/);
   assert.match(consoleCss, /\.inspector-facts > div\s*\{[\s\S]*border-bottom: 0;/);
   assert.match(consoleCss, /\.inspector-inline-metrics/);
   assert.match(consoleCss, /\.inspector-stacked-value/);

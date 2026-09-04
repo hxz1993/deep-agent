@@ -99,18 +99,21 @@ test("思考过程是独立的二级折叠，默认关闭且正文不受影响",
     workspaceCss,
     /\.assistant-thinking\.open \.assistant-thinking-body\s*\{\s*display:\s*block;/,
   );
-  assert.match(chatSource, /class="thinking-heading"[\s\S]*lucideIcon\("brain"\)[\s\S]*lucideIcon\("chevron-down"\)/);
+  const thinkingHeader = chatSource.match(/<button type="button" class="assistant-thinking-head"[\s\S]*?<\/button>/)[0];
+  assert.match(thinkingHeader, /thinking-icon[\s\S]*lucideIcon\("brain"\)[\s\S]*thinking-title[\s\S]*thinking-chevron/);
+  assert.match(thinkingHeader, /class="spinner" role="status" aria-label="思考中"/);
+  assert.doesNotMatch(workspaceCss, /\.assistant-thinking \{[^}]*border-left:/);
   assert.match(
     workspaceCss,
-    /\.assistant-thinking \{[\s\S]*?padding-left: 12px;[\s\S]*?border-left: 2px solid var\(--accent-soft\);/,
+    /\.assistant-thinking-body \{[^}]*padding: 8px 0 8px 20px;[^}]*border-left: 2px solid var\(--accent-soft\);/,
   );
   assert.match(
     workspaceCss,
-    /\.assistant-thinking-head \{[\s\S]*?justify-content: space-between;[\s\S]*?min-height: 38px;/,
+    /\.assistant-thinking-head \{[^}]*min-height: 32px;/,
   );
   assert.match(
     workspaceCss,
-    /\.assistant-thinking \.thinking-content \{[\s\S]*?max-height: 50vh;[\s\S]*?padding: 10px 0 2px 20px;[\s\S]*?line-height: 1\.6;/,
+    /\.assistant-thinking \.thinking-content \{[\s\S]*?max-height: 50vh;[\s\S]*?padding: 0;[\s\S]*?line-height: 1\.6;/,
   );
   assert.doesNotMatch(chatSource, /thinkingBlock\.classList\.add\("open"\)/);
   assert.match(chatSource, /finalContent\.className = "assistant-final markdown streaming"/);

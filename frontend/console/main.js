@@ -70,6 +70,9 @@ async function showPage(page, { updateHash = true } = {}) {
     await initConfiguration().catch((error) => toast(error.message, true));
     restoreConfigurationTab();
   }
+  if (consoleAllowed && next === "workspace" && current !== "workspace") {
+    void window.DeepAgentConsoleWorkspace?.refreshChannelAccounts();
+  }
   window.lucide?.createIcons();
 }
 

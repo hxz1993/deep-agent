@@ -1,4 +1,5 @@
 import { channelOriginPresentation } from "./session-display.js?v=20260904-13";
+import { copyTextToClipboard } from "./message-actions.js?v=20260819-1";
 
 const WORKSPACE_ASSET_VERSION = "20260904-13";
 
@@ -12,6 +13,28 @@ let initialized = false;
 let lastRenderKey = "";
 let selectedContextReference = null;
 let inspectorActiveTab = "session";
+let workspaceChannelAccounts = [];
+let channelAccountsRequest = null;
+
+function refreshChannelAccounts() {
+  if (channelAccountsRequest) return channelAccountsRequest;
+  channelAccountsRequest = (async () => {
+    try {
+      const response = await window.daFetch(window.serviceUrl("api/v1/channel-accounts"), { reportStatus: false, signal: AbortSignal.timeout(5000) });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const accounts = await response.json();
+      workspaceChannelAccounts = Array.isArray(accounts) ? accounts.map(({ id, name, channel_type, agent_id }) => ({ id, name, channel_type, agent_id })) : [];
+    } catch {
+      // Optional association data must not block chat or replace persisted origins.
+      workspaceChannelAccounts = [];
+    } finally {
+      channelAccountsRequest = null;
+      lastRenderKey = "";
+      renderInspector();
+    }
+  })();
+  return channelAccountsRequest;
+}
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -243,7 +266,7 @@ async function refreshWorkspaceAgents(button) {
     button.classList.add("loading");
   }
   try {
-    await window.DeepAgentConsoleChat?.refreshAgentWorkspace();
+    await Promise.all([window.DeepAgentConsoleChat?.refreshAgentWorkspace(), refreshChannelAccounts()]);
     lastRenderKey = "";
     renderAgents();
     renderInspector();
@@ -531,7 +554,7 @@ function renderContextReferenceInspector(state) {
     ariaLabel: "上下文引用 JSON",
   }) || `<pre class="inspector-json" aria-label="上下文引用 JSON">${escapeHtml(JSON.stringify(reference, null, 2))}</pre>`;
   return `<section class="inspector-section context-reference-inspector">
-      <header><strong>上下文引用</strong><span>只读 JSON</span></header>
+      <header><strong>上下文引用</strong></header>
       <div class="inspector-facts compact">
         <div><span>名称</span><strong>${escapeHtml(reference.label || "—")}</strong></div>
         <div><span>Key</span><strong class="mono">${escapeHtml(reference.key || "—")}</strong></div>
@@ -543,7 +566,7 @@ function renderContextReferenceInspector(state) {
 }
 
 function setInspectorTab(tab) {
-  if (!["session", "run", "context"].includes(tab)) return;
+  if (!["session", "channel", "run", "context"].includes(tab)) return;
   inspectorActiveTab = tab;
   lastRenderKey = "";
   renderInspector();
@@ -553,11 +576,23 @@ function bindInspectorTabs(host) {
   host.querySelectorAll("[data-inspector-tab]").forEach((button) => {
     button.addEventListener("click", () => setInspectorTab(button.dataset.inspectorTab));
   });
+  host.querySelectorAll("[data-inspector-copy]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      try {
+        await copyTextToClipboard(button.dataset.inspectorCopy);
+        window.DeepAgentConsole?.toast("已复制");
+      } catch {
+        window.DeepAgentConsole?.toast("复制失败，请手动选择 ID 复制", true);
+      }
+    });
+  });
 }
 
 function inspectorFact(label, value, options = {}) {
   const classes = [options.mono ? "mono" : "", options.wide ? "wide" : ""].filter(Boolean).join(" ");
-  return `<div class="${classes}"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value ?? "—")}</strong></div>`;
+  const text = escapeHtml(value ?? "—");
+  const copy = options.copy && value ? `<button type="button" class="inspector-copy-btn" data-inspector-copy="${text}" title="复制 ${escapeHtml(options.copyLabel || label)}" aria-label="复制 ${escapeHtml(options.copyLabel || label)}"><i data-lucide="copy" aria-hidden="true"></i></button>` : "";
+  return `<div class="${classes}"><span>${escapeHtml(label)}</span><strong${copy ? ' class="inspector-copy-value"' : ""}>${copy ? `<span class="inspector-id-text">${text}</span>${copy}` : text}</strong></div>`;
 }
 
 function inspectorFactHtml(label, valueHtml, options = {}) {
@@ -645,24 +680,29 @@ function renderInspector() {
   const agentIdentity = `<span class="inspector-stacked-value"><span>${escapeHtml(agentName)}</span><code>${escapeHtml(state.agentId || "—")}</code></span>`;
   const requestScope = `<span class="inspector-scope-value"><code>${escapeHtml(context.app || "继承")}</code><span>/</span><code>${escapeHtml(context.space || "继承")}</code></span>`;
   const channelOrigin = channelOriginPresentation(activeSession.channel);
-  const channelSource = channelOrigin ? `<header class="inspector-subheading"><strong>渠道来源</strong><span>${escapeHtml(channelOrigin.platform)}</span></header>
+  const agentChannels = workspaceChannelAccounts.filter((account) => account.agent_id === state.agentId);
+  const hasChannelTab = Boolean(channelOrigin || agentChannels.length);
+  if (!hasChannelTab && inspectorActiveTab === "channel") inspectorActiveTab = "session";
+  const channelSource = channelOrigin ? `<section class="inspector-section">
     <div class="inspector-facts compact">
-      ${inspectorFact("渠道名称", channelOrigin.accountName, { wide: true })}
-      ${inspectorFact("会话类型", channelOrigin.conversationType)}
+      ${inspectorFactHtml("渠道名称", `<span class="inspector-channel-name">${escapeHtml(channelOrigin.accountName)}<span class="inspector-channel-badge">${escapeHtml(channelOrigin.platform)}</span></span>`, { wide: true })}
       ${channelOrigin.displayName ? inspectorFact("会话对象", channelOrigin.peerName, { wide: true }) : ""}
-      ${inspectorFact(channelOrigin.peerKey, channelOrigin.peerId, { mono: true, wide: true })}
-      ${channelOrigin.peerKey === "User ID" && channelOrigin.chatId ? inspectorFact("Chat ID", channelOrigin.chatId, { mono: true, wide: true }) : ""}
-    </div>` : "";
+      ${inspectorFact(channelOrigin.conversationType, channelOrigin.peerId, { mono: true, wide: true, copy: true, copyLabel: channelOrigin.peerKey })}
+      ${channelOrigin.peerKey === "User ID" && channelOrigin.chatId ? inspectorFact("Chat ID", channelOrigin.chatId, { mono: true, wide: true, copy: true }) : ""}
+      ${inspectorFact("会话 ID", state.sessionId, { mono: true, wide: true, copy: true })}
+    </div></section>` : `<section class="inspector-section">
+      <p class="inspector-channel-note">${state.sessionId ? "当前会话不是由渠道发起的。" : "尚未选择渠道会话。"}</p>
+      <header><strong>Agent 关联渠道</strong></header>
+      <div class="inspector-facts compact">${agentChannels.map((account) => inspectorFactHtml("渠道名称", `<span class="inspector-channel-name">${escapeHtml(account.name)}<span class="inspector-channel-badge">${escapeHtml(account.channel_type === "wecom" ? "企微" : account.channel_type)}</span></span>`)).join("")}</div>
+    </section>`;
   const sessionContent = `<section class="inspector-section inspector-session-group">
-    <header><strong>会话概览</strong></header>
     <div class="inspector-facts">
-      ${inspectorFact("会话 ID", state.sessionId || "尚未创建", { mono: true, wide: true })}
+      ${inspectorFact("会话 ID", state.sessionId || "尚未创建", { mono: true, wide: true, copy: Boolean(state.sessionId) })}
       ${inspectorFactHtml("Agent", agentIdentity, { wide: true })}
       ${inspectorFact("模型", model?.name || model?.model || "—")}
       ${inspectorFactHtml("会话统计", sessionCounts)}
     </div>
-    ${channelSource}
-    <header class="inspector-subheading"><strong>请求 Header</strong><span>自动推导</span></header>
+    <header class="inspector-subheading"><strong>请求 Header</strong></header>
     <div class="inspector-facts compact">
       ${inspectorFactHtml("App / Space", requestScope, { wide: true })}
       ${inspectorFact("Language", context.language || "继承")}
@@ -670,13 +710,12 @@ function renderInspector() {
     </div>
   </section>
   <section class="inspector-section inspector-budget-section">
-    <header><strong>上下文预算</strong><span>阈值与预留合并展示</span></header>
+    <header><strong>上下文预算</strong></header>
     ${renderContextBudgetOverview(contextStatus)}
   </section>
   ${compactionContent}`;
 
   const runContent = `<section class="inspector-section">
-    <header><strong>当前回合</strong><span>${run.detailed === false ? "详细指标请查看运行日志" : "当前页面最近一次"}</span></header>
     ${renderRunUsageOverview(run, usage, contextStatus)}
     <div class="inspector-facts compact run-facts">
       ${inspectorFact("终态", run.status || "—")}
@@ -687,7 +726,7 @@ function renderInspector() {
       ${inspectorFact("缓存写入", formatTokens(run.cache_write_tokens))}
       ${inspectorFact("耗时", Number.isFinite(Number(run.duration_ms)) ? `${Number(run.duration_ms).toLocaleString("zh-CN")} ms` : "—")}
       ${inspectorFact("压缩", run.compaction || "—")}
-      ${inspectorFact("Conversation ID", state.conversationId || run.conversation_id || "—", { mono: true, wide: true })}
+      ${inspectorFact("Conv. ID", state.conversationId || run.conversation_id || "—", { mono: true, wide: true })}
       ${inspectorFact("Run ID", run.run_id || "—", { mono: true, wide: true })}
       ${inspectorFact("模型", runModel?.name || runModel?.model || model?.name || model?.model || run.model_id || "—", { wide: true })}
     </div>
@@ -695,14 +734,17 @@ function renderInspector() {
 
   const tabContent = inspectorActiveTab === "run"
     ? runContent
+    : inspectorActiveTab === "channel"
+      ? channelSource
     : inspectorActiveTab === "context"
       ? renderContextReferenceInspector(state)
       : sessionContent;
   host.innerHTML = `<nav class="inspector-tabs" role="tablist" aria-label="会话详情">
       <span class="inspector-tab-buttons">
-        <button type="button" role="tab" data-inspector-tab="session" aria-selected="${inspectorActiveTab === "session"}">会话</button>
-        <button type="button" role="tab" data-inspector-tab="run" aria-selected="${inspectorActiveTab === "run"}">当前回合</button>
-        <button type="button" role="tab" data-inspector-tab="context" aria-selected="${inspectorActiveTab === "context"}">上下文引用</button>
+        <button type="button" role="tab" data-inspector-tab="session" aria-selected="${inspectorActiveTab === "session"}">概览</button>
+        ${hasChannelTab ? `<button type="button" role="tab" data-inspector-tab="channel" aria-selected="${inspectorActiveTab === "channel"}">渠道</button>` : ""}
+        <button type="button" role="tab" data-inspector-tab="run" aria-selected="${inspectorActiveTab === "run"}">当前</button>
+        <button type="button" role="tab" data-inspector-tab="context" aria-selected="${inspectorActiveTab === "context"}">上下文</button>
       </span>
       <span class="status-badge inspector-tab-status ${statusClass}">${statusText}</span>
     </nav>
@@ -772,6 +814,7 @@ function bindWorkspaceControls() {
 }
 
 window.DeepAgentConsoleWorkspace = {
+  refreshChannelAccounts,
   isContextReferenceSelected,
   openInspectorPane,
   renderInspector,
@@ -791,6 +834,7 @@ export async function initWorkspace() {
   renderAgents();
   renderInspector();
   startStateMonitor();
+  void refreshChannelAccounts();
   document.getElementById("workspaceLoading")?.classList.add("hidden");
   document.getElementById("workspaceGrid")?.classList.remove("hidden");
   syncWorkspaceLayout();

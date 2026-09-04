@@ -27,7 +27,7 @@ test("结构化上下文可以单独形成可见的用户历史轮次", () => {
   assert.match(workspaceCss, /\.context-ref-chip\s*\{/);
 });
 
-test("上下文引用使用线性信息图标切换到右栏第三页签", () => {
+test("上下文引用使用线性信息图标切换到右栏上下文页签", () => {
   assert.match(chatSource, /className = "context-ref-info"/);
   assert.match(chatSource, /info\.innerHTML = lucideIcon\("info"\)/);
   assert.doesNotMatch(chatSource, /info\.innerHTML = lucideIcon\("circle-info"\)/);
@@ -48,6 +48,9 @@ test("控制台只显示中性标签且不渲染 payload 或 metadata", () => {
   assert.ok(renderer);
   assert.doesNotMatch(renderer, /payload/);
   assert.doesNotMatch(renderer, /metadata/);
+  assert.doesNotMatch(renderer, /上下文 ·/);
+  assert.match(renderer, /chip\.title = ref\.label \|\| ref\.type \|\| "引用"/);
+  assert.match(workspaceCss, /\.context-ref-label\s*\{[^}]*text-overflow: ellipsis;[^}]*white-space: nowrap;/);
 });
 
 test("含上下文引用的用户消息只复制可见正文且不提供编辑入口", () => {

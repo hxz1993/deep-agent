@@ -2089,10 +2089,10 @@ function renderMessageContextRefs(container, contextRefs, branchPoint) {
   for (const ref of contextRefs) {
     const chip = document.createElement("div");
     chip.className = "context-ref-chip";
-    chip.title = `${ref.type || "上下文引用"}@${ref.schema_version || "—"}`;
+    chip.title = ref.label || ref.type || "引用";
     const label = document.createElement("span");
     label.className = "context-ref-label";
-    label.textContent = `上下文 · ${ref.label || ref.type || "引用"}`;
+    label.textContent = ref.label || ref.type || "引用";
     const info = document.createElement("button");
     info.type = "button";
     info.className = "context-ref-info";
@@ -2467,12 +2467,12 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null, proce
       thinkingBlock.className = "assistant-thinking";
       thinkingBlock.innerHTML = `
         <button type="button" class="assistant-thinking-head" aria-expanded="false">
+          <span class="thinking-icon">${lucideIcon("brain")}</span>
           <span class="thinking-heading">
-            <span class="thinking-icon">${lucideIcon("brain")}</span>
             <span class="thinking-title">思考中…</span>
-            <span class="thinking-status"><span class="spinner"></span></span>
+            <span class="thinking-status"><span class="spinner" role="status" aria-label="思考中"></span></span>
           </span>
-          <span class="thinking-chevron">${lucideIcon("chevron-down")}</span>
+          <span class="thinking-chevron">${lucideIcon("chevron-right")}</span>
         </button>
         <div class="assistant-thinking-body">
           <pre class="thinking-content"></pre>
@@ -2572,7 +2572,7 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null, proce
         if (title && block.dataset.defaultTitle) title.textContent = block.dataset.defaultTitle;
         const status = block.querySelector(".tool-status");
         if (status) {
-          status.innerHTML = `<span class="tool-status-interrupted">${lucideIcon("circle-stop")}已中断</span>`;
+          status.innerHTML = '<span class="tool-status-interrupted">已中断</span>';
         }
       }
       interruptedStatus = document.createElement("div");
@@ -2620,10 +2620,10 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null, proce
         || `<pre class="args">${escapeHtml(pretty(renderedArgs))}</pre>`;
       block.innerHTML = `
         <button type="button" class="tool-head" aria-expanded="false">
-          <span class="chevron">${lucideIcon("chevron-right")}</span>
           <span class="tool-icon">${lucideIcon(isToolSearch ? "search" : isSkillLoad ? "book-open-check" : "wrench")}</span>
           <span class="tool-name">${escapeHtml(defaultTitle)}</span>
           <span class="tool-status"><span class="spinner" role="status" aria-label="运行中"></span></span>
+          <span class="chevron">${lucideIcon("chevron-right")}</span>
         </button>
         <div class="tool-body">
           <div class="label">参数 args</div>
@@ -2652,7 +2652,7 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null, proce
       block.classList.remove("hitl-pending");
       const title = block.querySelector(".tool-name");
       if (title && block.dataset.defaultTitle) title.textContent = block.dataset.defaultTitle;
-      block.querySelector(".tool-status").innerHTML = `<span class="tool-status-complete">${lucideIcon("check")}完成</span>`;
+      block.querySelector(".tool-status").innerHTML = '<span class="tool-status-complete">完成</span>';
       refreshLucideIcons();
       const body = block.querySelector(".tool-body");
       const existingWidget = body.querySelector(".hitl-widget");

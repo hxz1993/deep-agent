@@ -105,5 +105,5 @@ test("长附件名和上下文在窄气泡中省略，不撑出对话区域", as
   const css = await readFile(new URL("../../../frontend/console/workspace.css", import.meta.url), "utf8");
   assert.match(css, /\.msg-row\.user \.bubble \{\s*max-width: 100%;\s*min-width: 0;/);
   assert.match(css, /\.attachment-name \{ min-width: 0;/);
-  assert.match(css, /\.msg-context-refs \.context-ref-chip \{ min-width: 0; max-width: min\(360px, 100%\);/);
+  assert.match(css, /\.msg-context-refs \.context-ref-chip \{ min-width: 0; max-width: min\(180px, 100%\); border-radius: 999px;/);
 });

@@ -16,9 +16,14 @@ test("工具调用默认是无框透明的灰色普通文本行", () => {
 });
 
 test("展开箭头仅悬停、键盘焦点或触屏显示，状态保持可见", () => {
+  const toolHeader = chatSource.match(/<button type="button" class="tool-head"[\s\S]*?<\/button>/)[0];
+  assert.match(toolHeader, /class="tool-icon"[\s\S]*class="tool-name"[\s\S]*class="tool-status"[\s\S]*class="chevron"/);
+  assert.doesNotMatch(workspaceCss, /\.tool-head \.tool-status \{[^}]*margin-left: auto/);
   assert.match(workspaceCss, /\.tool-head \.chevron \{[^}]*opacity: 0;/);
   assert.match(workspaceCss, /\.tool-head:hover \.chevron,\s*\.tool-head:focus-visible \.chevron \{ opacity: 1; \}/);
   assert.match(workspaceCss, /@media \(hover: none\) \{\s*\.tool-head \.chevron \{ opacity: 1; \}/);
+  assert.match(workspaceCss, /\.tool-body \{[^}]*border-left: 2px solid var\(--accent-soft\);/);
+  assert.doesNotMatch(chatSource, /class="tool-status-(?:complete|error|interrupted)"[^<]*\$\{lucideIcon/);
   assert.match(chatSource, /<button type="button" class="tool-head" aria-expanded="false">/);
   assert.match(chatSource, /class="spinner" role="status" aria-label="运行中"/);
   for (const status of ["pending", "error", "interrupted"]) {

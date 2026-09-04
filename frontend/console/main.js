@@ -118,6 +118,7 @@ function toggleConsoleNavigation() {
 
 function bindConsoleNavigationResizer() {
   const handle = document.getElementById("consoleNavResizer");
+  const snapWidth = 100;
   let drag = null;
   let snapTimer = null;
   const animateSnap = () => {
@@ -137,7 +138,7 @@ function bindConsoleNavigationResizer() {
     if (!drag) return;
     const width = drag.width + event.clientX - drag.x;
     // Snap only while shrinking; pulling out from the icon rail stays continuous.
-    const snapped = width <= 88 && width < drag.width;
+    const snapped = width <= snapWidth && width < drag.width;
     if (snapped !== drag.snapped) animateSnap();
     drag.snapped = snapped;
     setConsoleNavigationWidth(snapped ? 56 : width);
@@ -158,7 +159,7 @@ function bindConsoleNavigationResizer() {
     event.preventDefault();
     const width = document.querySelector(".console-rail").getBoundingClientRect().width;
     const nextWidth = event.key === "Home" ? 56 : event.key === "End" ? 200 : width + (event.key === "ArrowRight" ? 20 : -20);
-    setConsoleNavigationWidth(event.key === "ArrowLeft" && nextWidth <= 88 ? 56 : nextWidth);
+    setConsoleNavigationWidth(event.key === "ArrowLeft" && nextWidth <= snapWidth ? 56 : nextWidth);
   });
 }
 

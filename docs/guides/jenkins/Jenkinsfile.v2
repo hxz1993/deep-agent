@@ -1,0 +1,158 @@
+// V2：同一镜像发布 API + Channel Gateway。首次使用先阅读本目录 README.md。
+// 本文件与 deploy_v2.py 必须同时存在于 BRANCH_TAG 指向的提交中。
+pipeline {
+    agent { label "${params.AGENT}" }
+    options {
+        buildDiscarder(logRotator(numToKeepStr: '2'))
+        disableConcurrentBuilds()
+        skipDefaultCheckout(true)
+        timeout(time: 60, unit: 'MINUTES')
+    }
+    environment {
+        ArtifactsName = 'deep-agent.tar.gz'
+        K8SCredentialsId = 'ShangHaiOffineK8SToken'
+        RegisterUrl = 'harbor.deepfos.com'
+        RegistryCredential = 'harbor.deepfos.com'
+    }
+    parameters {
+        gitParameter branchFilter: 'origin/(.*)', defaultValue: 'main', name: 'BRANCH_TAG', type: 'PT_BRANCH_TAG', quickFilterEnabled: true, useRepository: 'https://gitee.com/proinnova/deep-agent', requiredParameter: false, sortMode: 'DESCENDING_SMART'
+        choice name: 'AGENT', choices: ['java21-mvn3', 'java8-mvn3'], description: '沿用构建节点标签；节点需有 Docker、Git、kubectl、Python 3.9+ 和现有 Trivy'
+        choice name: 'RELOAD_PIPELINE', choices: ['false', 'true'], description: 'true 只刷新参数，不构建、不部署'
+        string name: 'TARGET_NAMESPACE', defaultValue: '', description: '留空沿用 JOB_NAME 第一段；必须是现有命名空间'
+        string name: 'API_DEPLOYMENT', defaultValue: '', description: '留空沿用 JOB_BASE_NAME；必须是现有 API Deployment'
+        string name: 'API_CONTAINER', defaultValue: '', description: '留空与 API Deployment 同名'
+        string name: 'API_PORT', defaultValue: '30098', description: '现有 API 容器监听端口；Gunicorn 源码默认 30098，不是本地开发的 8000'
+        string name: 'CHANNEL_RUNTIME_SECRET', defaultValue: '', description: '留空使用 <API_DEPLOYMENT>-channel-runtime；首次发布前由运维建立，必须对应 API 当前数据库'
+        booleanParam name: 'CONFIRM_RELEASE', defaultValue: false, description: '已确认目标数据库/端口、备份、schema 与镜像兼容、单副本和维护窗口；允许本次顺序重启 API 与网关'
+    }
+    stages {
+        stage('RELOAD_PIPELINE') {
+            when { environment name: 'RELOAD_PIPELINE', value: 'true' }
+            steps { echo '仅刷新流水线参数，不构建、不连接集群。' }
+        }
+        stage('Git Checkout') {
+            when { environment name: 'RELOAD_PIPELINE', value: 'false' }
+            steps {
+                script {
+                    if (!params.CONFIRM_RELEASE) {
+                        error('请先完成 README 中首次发布准备，并勾选 CONFIRM_RELEASE。')
+                    }
+                    env.NAMESPACE = params.TARGET_NAMESPACE.trim() ?: env.JOB_NAME.tokenize('/')[0]
+                    env.NAME = params.API_DEPLOYMENT.trim() ?: env.JOB_BASE_NAME
+                    env.API_CONTAINER_NAME = params.API_CONTAINER.trim() ?: env.NAME
+                    env.RUNTIME_SECRET = params.CHANNEL_RUNTIME_SECRET.trim() ?: "${env.NAME}-channel-runtime"
+                    env.API_PORT_VALUE = params.API_PORT.trim()
+                    for (String value : [env.NAMESPACE, env.NAME, env.API_CONTAINER_NAME, env.RUNTIME_SECRET]) {
+                        if (!(value ==~ /[a-z0-9]([a-z0-9-]*[a-z0-9])?/) || value.length() > 63) {
+                            error('命名空间/Deployment/容器/Secret 名称不符合 Kubernetes 规则。')
+                        }
+                    }
+                    if (env.NAME.length() > 47 || !(env.API_PORT_VALUE ==~ /[0-9]{1,5}/) || env.API_PORT_VALUE.toInteger() < 1 || env.API_PORT_VALUE.toInteger() > 65535) {
+                        error('API 名称过长或 API_PORT 无效。')
+                    }
+                    dir('source') {
+                        checkout([$class: 'GitSCM', branches: [[name: params.BRANCH_TAG]], extensions: [[$class: 'CloneOption', noTags: false, reference: '', shallow: true, timeout: 30]], userRemoteConfigs: [[credentialsId: 'giteeKey', url: 'https://gitee.com/proinnova/deep-agent']]])
+                        env.SOURCE_DIR = pwd()
+                        env.REVISION = sh(script: 'git rev-parse HEAD', returnStdout: true).trim()
+                        sh '''#!/bin/sh
+set -eu
+test -f deep_agent/channel_gateway/__main__.py
+test -f docs/guides/jenkins/deploy_v2.py
+command -v python3 >/dev/null
+command -v kubectl >/dev/null
+'''
+                    }
+                    // 构建号 + 源码 SHA，不依赖 BUILD_TIMESTAMP 插件；两服务始终使用相同标签。
+                    env.NameTag = "${env.BUILD_NUMBER}-${env.REVISION.take(12)}"
+                    env.LOCAL_IMAGE = "${env.NAMESPACE}/${env.NAME}:${env.NameTag}"
+                    env.RELEASE_IMAGE = "${env.RegisterUrl}/${env.LOCAL_IMAGE}"
+                    env.BUILD_DIR = "TMP_to_delete-jenkins-v2-${env.BUILD_NUMBER}"
+                }
+            }
+        }
+        stage('Build Image') {
+            when { environment name: 'RELOAD_PIPELINE', value: 'false' }
+            steps {
+                dir("${env.BUILD_DIR}") {
+                    // 只归档选定提交，固定 /deep-agent；不移动工作区，不把 .git/未跟踪 .env/数据库打进镜像。
+                    sh '''#!/bin/sh
+set -eu
+git -C "$SOURCE_DIR" archive --format=tar --prefix=deep-agent/ HEAD > deep-agent.tar
+mkdir -p wheel/deep-agent
+cp "/opt/nfs/python-whl/deepcube-${NAMESPACE}-cp38-abi3-linux_x86_64.whl" wheel/deep-agent/
+tar -rf deep-agent.tar -C wheel deep-agent
+gzip -c deep-agent.tar > "$ArtifactsName"
+'''
+                    writeFile file: 'Dockerfile', text: '''
+FROM harbor.deepfos.com/base/python3.11.9:debian12
+ENV TZ=Asia/Shanghai
+ADD deep-agent.tar.gz /
+WORKDIR /deep-agent
+RUN sed -i 's|mirrors.tuna.tsinghua.edu.cn|mirrors.aliyun.com|g' /etc/apt/sources.list && \\
+    apt-get update && \\
+    pip3 install -i https://mirrors.aliyun.com/pypi/simple/ *.whl && \\
+    pip3 install -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple/ && \\
+    bash scripts/sandbox_venv/setup.sh && \\
+    python -m compileall -q deep_agent/channel_gateway && \\
+    python -c "import deep_agent.channel_gateway.__main__"
+CMD ["gunicorn", "-c", "deep_agent/gunicorn.conf.py", "deep_agent.main:app"]
+'''
+                    script {
+                        def dockerImage = docker.build(env.LOCAL_IMAGE, '-f Dockerfile .')
+                        docker.withRegistry("https://${env.RegisterUrl}", env.RegistryCredential) {
+                            dockerImage.push()
+                        }
+                    }
+                }
+            }
+        }
+        stage('漏洞检测') {
+            when { environment name: 'RELOAD_PIPELINE', value: 'false' }
+            steps {
+                dir("${env.BUILD_DIR}") {
+                    // 先生成 JSON，再转换，避免管道掩盖扫描命令失败。沿用原有报告策略，未增加严重性门禁。
+                    sh '''#!/bin/sh
+set -eu
+/opt/nfs/trivy/trivy image --config /opt/nfs/trivy/trivy.yaml --skip-db-update --skip-java-db-update -f json --scanners vuln "$LOCAL_IMAGE" > vulnerabilities.json
+/opt/nfs/trivy/trivy report --excel-file 漏洞.xlsx < vulnerabilities.json
+'''
+                    archiveArtifacts artifacts: '漏洞.xlsx', followSymlinks: false, onlyIfSuccessful: true
+                }
+            }
+        }
+        stage('RELEASE API + Channel Gateway') {
+            when { environment name: 'RELOAD_PIPELINE', value: 'false' }
+            steps {
+                // 凭据只在发布阶段注入；不执行 env，不输出 Secret/Kubeconfig。
+                withCredentials([string(credentialsId: 'ShangHaiOffineK8SApiServer', variable: 'K8S_SERVER_API')]) {
+                    withKubeConfig([credentialsId: env.K8SCredentialsId, serverUrl: env.K8S_SERVER_API, namespace: env.NAMESPACE, restrictKubeConfigAccess: true]) {
+                        sh '''#!/bin/sh
+set -eu
+python3 "$SOURCE_DIR/docs/guides/jenkins/deploy_v2.py" --release \
+  --namespace "$NAMESPACE" --name "$NAME" --container "$API_CONTAINER_NAME" \
+  --secret "$RUNTIME_SECRET" --api-port "$API_PORT_VALUE" --image "$RELEASE_IMAGE"
+'''
+                    }
+                }
+            }
+        }
+    }
+    post {
+        success {
+            script {
+                if (params.RELOAD_PIPELINE == 'false') {
+                    echo "API + Channel Gateway 发布成功：${env.RELEASE_IMAGE}；源码 ${env.REVISION}"
+                }
+            }
+        }
+        failure { echo '发布失败；未自动回滚数据库或恢复旧网关。请按 README 检查失败阶段及当前服务状态。' }
+        always {
+            script {
+                if (env.BUILD_DIR) {
+                    // 只清理本次构建专用目录；不删除源码目录或其他任务产物。
+                    dir(env.BUILD_DIR) { deleteDir() }
+                }
+            }
+        }
+    }
+}

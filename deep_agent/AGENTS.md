@@ -60,6 +60,8 @@ FileStore协议。`channel_gateway/runtime.py`负责Account轮询与Adapter生�
 Test的Jenkins V2可由`combined_runtime.py`在同一容器托管两个独立进程：先等待API完成迁移并健康，
 再启动回环地址上的Gateway；任一子进程退出即整体退出。该入口只写入V2镜像CMD，继续使用V1
 Gunicorn CMD的环境不会启动Gateway。
+本地可传`--local-config ~/.config/deep-agent/sqlite.env --api-port 8000`，此时API子进程仍使用
+`local_dev`，不会丢失回环限制、本地身份注入或本地FileStore；配置中的身份字段不复制到Gateway环境。
 
 渠道配置中的`session_user_id`由企业管理员直接填写，Console标签“会话用户”；只决定新建Session
 归属，不签发平台凭据。Gateway带内部Token和Account ID，API从当前配置解析用户；普通请求仍按

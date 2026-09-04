@@ -104,7 +104,8 @@ set -eu
                 withKubeConfig([credentialsId: "${env.K8SCredentialsId}", serverUrl: "${env.K8SServerAPI}", namespace: "${env.NAMESPACE}"]) {
                     sh '''#!/bin/sh
 set -eu
-kubectl set image "deployment/$NAME" "$NAME=$RELEASE_IMAGE"
+DEPLOYMENT_PATCH=$(printf '{"spec":{"template":{"spec":{"containers":[{"name":"%s","image":"%s","command":["python"],"args":["-m","deep_agent.combined_runtime"]}]}}}}' "$NAME" "$RELEASE_IMAGE")
+kubectl patch "deployment/$NAME" --type=strategic --patch "$DEPLOYMENT_PATCH"
 kubectl rollout status "deployment/$NAME" --timeout=600s
 kubectl exec "deployment/$NAME" -c "$NAME" -- python -m deep_agent.combined_runtime --check
 '''

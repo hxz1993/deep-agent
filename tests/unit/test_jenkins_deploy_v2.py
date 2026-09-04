@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import json
+import os
 import re
+import signal
 import stat
 import subprocess
 import tempfile
@@ -29,6 +32,32 @@ class CombinedRuntimeTest(unittest.TestCase):
     def test_existing_internal_token_is_preserved(self):
         environ = runtime.build_child_env({runtime.TOKEN_ENV: "configured-token"})
         self.assertEqual(environ[runtime.TOKEN_ENV], "configured-token")
+
+    def test_local_plan_keeps_identity_in_profile_and_runs_local_dev(self):
+        with tempfile.TemporaryDirectory(prefix="TMP_to_delete-combined-runtime-") as directory:
+            profile = Path(directory) / "sqlite.env"
+            profile.write_text(
+                "\n".join([
+                    "DEEP_AGENT_LOCAL_USER=local-user",
+                    "DEEP_AGENT_LOCAL_TOKEN=local-platform-token",
+                    "DEEP_AGENT_SQLITE_PATH=/tmp/local.db",
+                ]),
+                encoding="utf-8",
+            )
+            profile.chmod(0o600)
+            with patch.object(runtime.secrets, "token_urlsafe", return_value="internal-token"):
+                environ, command = runtime.runtime_plan(
+                    local_config=profile,
+                    local_api_port=8000,
+                    environ={},
+                )
+        self.assertNotIn("DEEP_AGENT_LOCAL_USER", environ)
+        self.assertNotIn("DEEP_AGENT_LOCAL_TOKEN", environ)
+        self.assertEqual(environ[runtime.TOKEN_ENV], "internal-token")
+        self.assertEqual(environ["DEEP_AGENT_SQLITE_PATH"], "/tmp/local.db")
+        self.assertEqual(environ["DEEP_AGENT_CHANNEL_API_URL"], "http://127.0.0.1:8000")
+        self.assertEqual(command[1:3], ("-m", "deep_agent.local_dev"))
+        self.assertEqual(command[-4:], ("--config", str(profile.resolve()), "--port", "8000"))
 
     def test_runtime_token_file_is_private_and_readable_by_check(self):
         with tempfile.TemporaryDirectory(prefix="TMP_to_delete-combined-runtime-") as directory:
@@ -66,6 +95,13 @@ class CombinedRuntimeTest(unittest.TestCase):
             call("http://127.0.0.1:30098/health"),
             call("http://127.0.0.1:8010/health", token="token"),
         ])
+
+    def test_local_children_can_stay_in_devbox_process_group(self):
+        process = Mock()
+        process.poll.return_value = None
+        runtime._signal_process(process, signal.SIGTERM, use_process_group=False)
+        process.terminate.assert_called_once_with()
+        process.kill.assert_not_called()
 
     def test_check_command_waits_for_the_gateway_startup_race(self):
         with patch.object(runtime, "check_runtime", side_effect=[RuntimeError("starting"), None]) as check:
@@ -113,10 +149,60 @@ class JenkinsPipelineV2Test(unittest.TestCase):
         self.assertNotIn("command -v python", self.pipeline)
         self.assertNotIn("deploy_v2.py", self.pipeline)
         self.assertNotIn("kubectl apply", self.pipeline)
-        self.assertNotIn("kubectl patch", self.pipeline)
-        self.assertIn('kubectl set image "deployment/$NAME"', self.pipeline)
+        self.assertNotIn("kubectl set image", self.pipeline)
+        self.assertIn('kubectl patch "deployment/$NAME" --type=strategic', self.pipeline)
+        self.assertIn('"command":["python"]', self.pipeline)
+        self.assertIn('"args":["-m","deep_agent.combined_runtime"]', self.pipeline)
         self.assertIn('kubectl rollout status "deployment/$NAME"', self.pipeline)
         self.assertIn("python -m deep_agent.combined_runtime --check", self.pipeline)
+
+    def test_release_patch_targets_named_container_and_sets_runtime_entrypoint(self):
+        release_script = re.findall(r"sh '''(.*?)'''", self.pipeline, flags=re.DOTALL)[-1]
+        with tempfile.TemporaryDirectory(prefix="TMP_to_delete-jenkins-kubectl-") as directory:
+            root = Path(directory)
+            log = root / "kubectl.jsonl"
+            kubectl = root / "kubectl"
+            kubectl.write_text(
+                "#!/usr/bin/env python3\n"
+                "import json, os, sys\n"
+                "with open(os.environ['KUBECTL_LOG'], 'a') as stream:\n"
+                "    stream.write(json.dumps(sys.argv[1:]) + '\\n')\n",
+                encoding="utf-8",
+            )
+            kubectl.chmod(0o755)
+            environ = dict(os.environ)
+            environ.update(
+                {
+                    "PATH": f"{root}:{environ['PATH']}",
+                    "KUBECTL_LOG": str(log),
+                    "NAME": "deep-agent",
+                    "RELEASE_IMAGE": "harbor.deepfos.com/test/deep-agent:123-abc",
+                }
+            )
+            result = subprocess.run(
+                ["/bin/sh"],
+                input=release_script,
+                text=True,
+                capture_output=True,
+                env=environ,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            calls = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
+        patch_call = calls[0]
+        self.assertEqual(patch_call[:3], ["patch", "deployment/deep-agent", "--type=strategic"])
+        payload = json.loads(patch_call[patch_call.index("--patch") + 1])
+        self.assertEqual(
+            payload["spec"]["template"]["spec"]["containers"],
+            [
+                {
+                    "name": "deep-agent",
+                    "image": "harbor.deepfos.com/test/deep-agent:123-abc",
+                    "command": ["python"],
+                    "args": ["-m", "deep_agent.combined_runtime"],
+                }
+            ],
+        )
 
     def test_v2_image_uses_combined_runtime_but_v1_stays_api_only(self):
         dockerfile = re.search(

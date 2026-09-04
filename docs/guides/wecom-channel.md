@@ -37,6 +37,16 @@ Test 的 Jenkins V2 采用同一容器内的两个独立进程：`deep_agent.com
 它不新增 Deployment 或 Service。继续使用 Jenkins V1 的环境仍只执行 Gunicorn，不会启动 Gateway；
 对应说明见 [`jenkins/README.md`](jenkins/README.md)。
 
+稳定本地 SQLite 可用相同监督顺序，同时保留`local_dev`的本地身份和FileStore能力：
+
+```bash
+python3.12 -m deep_agent.combined_runtime \
+  --local-config ~/.config/deep-agent/sqlite.env \
+  --api-port 8000
+```
+
+统一入口运行时不要再单独启动Gateway；两进程分别监听`127.0.0.1:8000/8010`。
+
 可选私有运行配置：
 
 | **环境变量** | **默认值** | **用途** |

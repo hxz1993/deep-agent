@@ -1,7 +1,8 @@
 # Jenkins 流水线 V2：单 Deployment 启动 API + 渠道网关
 
 适用 DeepAgent `0.7.0` / Alembic `002`。V2 以现网 V1 为基础，仍然只构建一份镜像、更新
-一个已有 Deployment；区别仅是 V2 镜像的启动命令会在同一容器内托管 API 和渠道网关两个进程。
+一个已有 Deployment；区别仅是 V2 会明确设置目标容器的启动命令，在同一容器内托管 API 和渠道
+网关两个进程。
 
 ## 版本与适用环境
 
@@ -18,7 +19,7 @@ Alpha 可以继续使用 V1 发布同一套新代码：API 和其他功能会升
 
 ```text
 检出 test → 构建并推送一个镜像 → Trivy 报告
-→ kubectl set image 更新原 deep-agent Deployment
+→ 单次 kubectl patch 更新原 deep-agent Deployment 的镜像与启动入口
 → 原容器内先启动 API（30098）
 → API 完成 Alembic 001 → 002 并通过 /health
 → 再启动渠道网关（127.0.0.1:8010）
@@ -55,7 +56,8 @@ Test Job。V2 沿用 V1 的 Git、Harbor、Kubernetes 凭据 ID 和 Job 命名�
 ## 发布前确认
 
 1. 原 Deployment 和容器名仍为 Jenkins `JOB_BASE_NAME`，即当前约定的 `deep-agent`。
-2. 原 Deployment 没有显式覆盖镜像 `command` / `args`；否则 Dockerfile 的 V2 `CMD` 不会生效。
+2. V2 会按容器名用 strategic merge patch 同时更新镜像、`command` 和 `args`，因此可覆盖原
+   Deployment 遗留的 Gunicorn 启动命令；不会替换同一个 Pod 内的其他容器。
 3. 原 Service、Ingress 和健康探针仍指向 API 端口。API 默认端口为 `30098`；若通过
    `DEEP_AGENT_PYTHON_BIND` 或 `DEEP_AGENT_PYTHON_PORT` 修改，启动器会使用同一端口等待 API。
 4. 数据库是当前生产基线 `001` 或已经正确升级的 `002`。API 会自动执行 `upgrade head`；历史
@@ -72,7 +74,9 @@ Test Job。V2 沿用 V1 的 Git、Harbor、Kubernetes 凭据 ID 和 Job 命名�
 
 - 镜像构建失败：检查依赖、wheel、Docker 或镜像仓库。
 - rollout 失败：检查 `kubectl describe pod` 和容器日志；常见原因是 API 数据库迁移失败。
-- `combined_runtime --check` 失败：检查容器日志中 API 或 Channel Gateway 的启动错误。
+- `combined_runtime --check` 失败：检查容器日志中 API 或 Channel Gateway 的启动错误。若提示缺少
+  `/tmp/deep-agent-channel-runtime/token`，说明容器没有通过统一入口启动，应检查 Deployment 的
+  `command` / `args` 是否被其他发布配置再次覆盖。
 
 流水线不会自动回滚数据库。只更新一个原 Deployment，因此不再涉及额外网关资源的创建、缩容或回滚。
 

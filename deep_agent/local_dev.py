@@ -159,7 +159,7 @@ def _validate_config_file(path: str | Path) -> Path:
     return resolved
 
 
-def load_local_config(path: str | Path) -> LocalIdentity:
+def load_local_profile(path: str | Path) -> tuple[Path, dict[str, str]]:
     from dotenv import dotenv_values
 
     resolved = _validate_config_file(path)
@@ -168,6 +168,11 @@ def load_local_config(path: str | Path) -> LocalIdentity:
         for key, value in dotenv_values(resolved).items()
         if value is not None
     }
+    return resolved, file_values
+
+
+def load_local_config(path: str | Path) -> LocalIdentity:
+    _resolved, file_values = load_local_profile(path)
     identity = LocalIdentity.from_mapping(file_values)
 
     for key, value in file_values.items():

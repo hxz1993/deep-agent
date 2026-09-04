@@ -72,6 +72,52 @@ def build_child_env(environ: Mapping[str, str] | None = None) -> dict[str, str]:
     return child_env
 
 
+def load_local_runtime_env(
+    config_file: str | Path,
+    *,
+    api_port: int,
+    environ: Mapping[str, str] | None = None,
+) -> tuple[Path, dict[str, str]]:
+    from deep_agent.local_dev import LOCAL_IDENTITY_KEYS, load_local_profile
+
+    resolved, profile = load_local_profile(config_file)
+    runtime_env = dict(os.environ if environ is None else environ)
+    runtime_env.update(
+        {key: value for key, value in profile.items() if key not in LOCAL_IDENTITY_KEYS}
+    )
+    runtime_env.pop("DEEP_AGENT_PYTHON_BIND", None)
+    runtime_env["DEEP_AGENT_PYTHON_PORT"] = str(_port(str(api_port), name="API port"))
+    runtime_env["DEEP_AGENT_LOAD_DOTENV"] = "false"
+    runtime_env.setdefault("DEEP_AGENT_LOG_LEVEL", "WARNING")
+    return resolved, runtime_env
+
+
+def runtime_plan(
+    *,
+    local_config: str | Path | None = None,
+    local_api_port: int = 8000,
+    environ: Mapping[str, str] | None = None,
+) -> tuple[dict[str, str], tuple[str, ...]]:
+    if local_config is None:
+        return build_child_env(environ), API_COMMAND
+    resolved, runtime_env = load_local_runtime_env(
+        local_config,
+        api_port=local_api_port,
+        environ=environ,
+    )
+    child_env = build_child_env(runtime_env)
+    api_command = (
+        sys.executable,
+        "-m",
+        "deep_agent.local_dev",
+        "--config",
+        str(resolved),
+        "--port",
+        str(local_api_port),
+    )
+    return child_env, api_command
+
+
 def _token_path(environ: Mapping[str, str]) -> Path:
     return Path(environ.get(TOKEN_FILE_ENV, DEFAULT_TOKEN_FILE)).expanduser()
 
@@ -135,8 +181,19 @@ def wait_for_health(
     raise RuntimeError(f"{label} did not become healthy within {timeout:g}s{detail}")
 
 
-def _signal_process_group(process: subprocess.Popen, sig: int) -> None:
+def _signal_process(
+    process: subprocess.Popen,
+    sig: int,
+    *,
+    use_process_group: bool = True,
+) -> None:
     if process.poll() is not None:
+        return
+    if not use_process_group:
+        if sig == signal.SIGKILL:
+            process.kill()
+        else:
+            process.terminate()
         return
     try:
         os.killpg(process.pid, sig)
@@ -147,14 +204,19 @@ def _signal_process_group(process: subprocess.Popen, sig: int) -> None:
             process.terminate()
 
 
-def stop_processes(processes: Sequence[subprocess.Popen], *, timeout: float = 30.0) -> None:
+def stop_processes(
+    processes: Sequence[subprocess.Popen],
+    *,
+    timeout: float = 30.0,
+    use_process_groups: bool = True,
+) -> None:
     for process in processes:
-        _signal_process_group(process, signal.SIGTERM)
+        _signal_process(process, signal.SIGTERM, use_process_group=use_process_groups)
     deadline = time.monotonic() + timeout
     while any(process.poll() is None for process in processes) and time.monotonic() < deadline:
         time.sleep(0.1)
     for process in processes:
-        _signal_process_group(process, signal.SIGKILL)
+        _signal_process(process, signal.SIGKILL, use_process_group=use_process_groups)
     for process in processes:
         try:
             process.wait(timeout=1)
@@ -173,12 +235,14 @@ def check_runtime(environ: Mapping[str, str] | None = None) -> None:
         raise RuntimeError("Channel Gateway database revision is not 002")
 
 
-def wait_for_runtime_health(*, timeout: float) -> None:
+def wait_for_runtime_health(
+    *, timeout: float, environ: Mapping[str, str] | None = None
+) -> None:
     deadline = time.monotonic() + timeout
     last_error: Exception | None = None
     while time.monotonic() < deadline:
         try:
-            check_runtime()
+            check_runtime(environ)
             return
         except Exception as exc:
             last_error = exc
@@ -187,8 +251,16 @@ def wait_for_runtime_health(*, timeout: float) -> None:
     raise RuntimeError(f"Combined runtime did not become healthy within {timeout:g}s{detail}")
 
 
-def run_combined(*, startup_timeout: float) -> int:
-    child_env = build_child_env()
+def run_combined(
+    *,
+    startup_timeout: float,
+    local_config: str | Path | None = None,
+    local_api_port: int = 8000,
+) -> int:
+    child_env, api_command = runtime_plan(
+        local_config=local_config,
+        local_api_port=local_api_port,
+    )
     token_path = write_runtime_token(child_env)
     processes: list[subprocess.Popen] = []
     stopping = False
@@ -203,7 +275,16 @@ def run_combined(*, startup_timeout: float) -> int:
     try:
         api_port = api_port_from_env(child_env)
         gateway_port = gateway_port_from_env(child_env)
-        api = subprocess.Popen(API_COMMAND, env=child_env, start_new_session=True)
+        # A deployment container owns its process tree, so isolating each child
+        # lets the supervisor terminate any workers that child creates.  Local
+        # DevBox already owns one verified process group; keep local children in
+        # that group so both listening ports remain attributable to one card.
+        isolate_child_groups = local_config is None
+        api = subprocess.Popen(
+            api_command,
+            env=child_env,
+            start_new_session=isolate_child_groups,
+        )
         processes.append(api)
         wait_for_health(
             "DeepAgent API",
@@ -213,7 +294,11 @@ def run_combined(*, startup_timeout: float) -> int:
             shutdown_requested=lambda: stopping,
         )
 
-        gateway = subprocess.Popen(GATEWAY_COMMAND, env=child_env, start_new_session=True)
+        gateway = subprocess.Popen(
+            GATEWAY_COMMAND,
+            env=child_env,
+            start_new_session=isolate_child_groups,
+        )
         processes.append(gateway)
         wait_for_health(
             "Channel Gateway",
@@ -237,7 +322,10 @@ def run_combined(*, startup_timeout: float) -> int:
             time.sleep(0.5)
         return 0
     finally:
-        stop_processes(processes)
+        if local_config is None:
+            stop_processes(processes)
+        else:
+            stop_processes(processes, use_process_groups=False)
         token_path.unlink(missing_ok=True)
         for sig, handler in previous_handlers.items():
             signal.signal(sig, handler)
@@ -247,6 +335,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run DeepAgent API and Channel Gateway together")
     parser.add_argument("--check", action="store_true", help="check both local health endpoints")
     parser.add_argument(
+        "--local-config",
+        type=Path,
+        help="run the API through loopback-only local_dev using this private profile",
+    )
+    parser.add_argument(
+        "--api-port",
+        type=int,
+        default=8000,
+        help="local_dev API port when --local-config is used (default: 8000)",
+    )
+    parser.add_argument(
         "--startup-timeout",
         type=float,
         default=float(os.environ.get("DEEP_AGENT_COMBINED_STARTUP_TIMEOUT", "180")),
@@ -255,9 +354,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.startup_timeout <= 0:
         parser.error("--startup-timeout must be positive")
     if args.check:
-        wait_for_runtime_health(timeout=args.startup_timeout)
+        check_env = None
+        if args.local_config is not None:
+            _resolved, check_env = load_local_runtime_env(
+                args.local_config,
+                api_port=args.api_port,
+            )
+        wait_for_runtime_health(timeout=args.startup_timeout, environ=check_env)
         return 0
-    return run_combined(startup_timeout=args.startup_timeout)
+    return run_combined(
+        startup_timeout=args.startup_timeout,
+        local_config=args.local_config,
+        local_api_port=args.api_port,
+    )
 
 
 if __name__ == "__main__":

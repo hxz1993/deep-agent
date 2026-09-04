@@ -55,6 +55,16 @@ Profile:         ~/.config/deep-agent/sqlite.env
 启动端口:        8000
 ```
 
+需要同时运行本地渠道网关时，使用与部署相同的统一监督顺序，同时保留`local_dev`身份与文件能力：
+
+```bash
+python3.12 -m deep_agent.combined_runtime \
+  --local-config ~/.config/deep-agent/sqlite.env \
+  --api-port 8000
+```
+
+该命令先启动`local_dev`，健康后再启动回环地址8010网关；不要再并行启动独立Gateway。
+
 - 这套主数据库以共享 Test 的**配置数据**为基础，保留 Provider、Model、Agent、MCP 和 Skill 等真实
   配置；不复制 Test 会话历史。日常开发应继续沿用其中的本地会话、附件和验收数据，不得因为开始新
   任务就删除、覆盖、重新初始化或换成另一个数据库文件。

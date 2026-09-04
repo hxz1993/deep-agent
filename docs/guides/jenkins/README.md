@@ -34,20 +34,21 @@
 
 1. 将 V2 与 `deploy_v2.py` 发布到要构建的 Git 分支/标签。Jenkins 可使用 Pipeline script from SCM，
    Script Path 为 `docs/guides/jenkins/Jenkinsfile.v2`；也可复制 V2 到 Job，但所选 `BRANCH_TAG`
-   仍必须包含配套助手和渠道源码。默认分支名沿用 V1 的 `main`，**不是保证 main 已包含这些文件**。
+   仍必须包含配套助手和渠道源码。V2 默认选择已经包含配套文件的 `test`。
+   参数只保留 V1 已使用的 `BRANCH_TAG`、`AGENT`、`RELOAD_PIPELINE` 三项，不再要求填写环境参数或勾选发布确认框。
 2. 保留已有 API Deployment / Service / Ingress。确认 Deployment 和主容器名称；V2 默认仍取
-   `JOB_BASE_NAME`。命名空间默认取 `JOB_NAME` 第一段，也可显式填写。不要同时保留两个 Job
+   `JOB_BASE_NAME`。命名空间固定取 `JOB_NAME` 第一段。不要同时保留两个 Job
    发布同一环境；`disableConcurrentBuilds` 只保护同一个 Job。
 3. API 必须是一个副本、一个 Gunicorn worker；Gateway 固定一个副本，两者均不能由 HPA 自动扩容。
    两个 Deployment 使用 `Recreate`，有维护窗口和短暂停机，不承诺零停机。发布会等待旧 Gateway
    Pod 完全退出，避免新旧网关重复连接、消费消息；不要使用强制删 Pod 来绕过该等待。
-4. 确认原 API **容器监听端口**。源码 Gunicorn 默认是 `30098`，文档本地示例是 `8000`；
-   `API_PORT` 必须与当前环境一致。助手在旧 API 容器内只读解析配置，比较端口与数据库地址/库名/用户/密码；
+4. 确认原 API **容器监听端口**。V2 按当前 Test 约定固定为源码 Gunicorn 默认的 `30098`，
+   不是文档本地示例的 `8000`。助手在旧 API 容器内只读解析配置，比较端口与数据库地址/库名/用户/密码；
    不一致即中止。V2 显式设置 `DEEP_AGENT_PYTHON_BIND`，保留原外部 Service/Ingress。
    若原环境通过自定义 Gunicorn 参数、TLS、代理 sidecar 等改变实际监听方式，先适配这份模板，
    不要直接套用；配置比较不等于验证所有自定义启动方式。
-5. 运维在**同一命名空间**预建 `<API_DEPLOYMENT>-channel-runtime` Secret（或填写
-   `CHANNEL_RUNTIME_SECRET`），内容必须对应原 API 的同一数据库：
+5. 运维在**同一命名空间**预建 `<Job基础名>-channel-runtime` Secret；当前 `test/deep-agent` Job
+   默认就是 `test` 命名空间的 `deep-agent-channel-runtime`。内容必须对应原 API 的同一数据库：
 
    | Secret key | 要求 |
    | --- | --- |
@@ -65,7 +66,9 @@
    不支持两个 Pod 各自使用 SQLite，也不会自动替换数据库/创建空库。若采用 Secret 轮换，
    API/Gateway 必须一起重发；环境变量不会随 Secret 更新自动刷新。
 6. 在受控运维流程中完成源版本备份、源码 migration graph、现有数据库 Revision/物理表结构、
-   已部署镜像四方核对，再勾选 `CONFIRM_RELEASE`。API 启动执行迁移，网关只检查 `002`。
+   已部署镜像四方核对后再点击构建。流水线不再增加一层容易漏选的 `CONFIRM_RELEASE` 参数；
+   点击普通发布构建本身就是发布意图，脚本仍会在任何集群修改前强制执行 Secret、数据库、端口、
+   单副本、HPA、资源归属和 Kubernetes server dry-run 检查。API 启动执行迁移，网关只检查 `002`。
    早期渠道开发版可能同为 `002` 而物理字段不同，**版本号相同不代表可以直接发布**；
    V2 不修复结构、不 stamp 版本、不自动执行维护脚本、不自动回滚数据库。
 7. 构建节点需有 Python 3.9+、Git、GNU tar/gzip、Docker、kubectl、原有 wheel 路径和 Trivy。

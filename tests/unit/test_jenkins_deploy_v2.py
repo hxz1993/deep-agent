@@ -223,7 +223,16 @@ class JenkinsDeploymentV2Smoke(unittest.TestCase):
         self.assertNotIn("sh 'env'", pipeline)
         self.assertIn("disableConcurrentBuilds()", pipeline)
         self.assertIn("--release", pipeline)
-        self.assertIn("CONFIRM_RELEASE", pipeline)
+        parameter_block = re.search(r"parameters \{(.*?)\n    \}\n    stages", pipeline, flags=re.DOTALL)[1]
+        self.assertNotIn("CONFIRM_RELEASE", parameter_block)
+        self.assertNotIn("TARGET_NAMESPACE", parameter_block)
+        self.assertNotIn("API_DEPLOYMENT", parameter_block)
+        self.assertNotIn("API_CONTAINER", parameter_block)
+        self.assertNotIn("CHANNEL_RUNTIME_SECRET", parameter_block)
+        self.assertIn("defaultValue: 'test'", pipeline)
+        self.assertIn('env.RUNTIME_SECRET = "${env.NAME}-channel-runtime"', pipeline)
+        self.assertIn("env.API_PORT_VALUE = '30098'", pipeline)
+        self.assertEqual(re.findall(r"name: '([^']+)'", parameter_block), ["BRANCH_TAG", "AGENT", "RELOAD_PIPELINE"])
         self.assertLess(pipeline.index("stage('漏洞检测')"), pipeline.index("stage('RELEASE API + Channel Gateway')"))
         dockerfile = re.search(r"writeFile file: 'Dockerfile', text: '''(.*?)'''", pipeline, flags=re.DOTALL)[1]
         dockerfile = dockerfile.replace("\\\\", "\\")  # Groovy 单引号字符串的反斜杠解码

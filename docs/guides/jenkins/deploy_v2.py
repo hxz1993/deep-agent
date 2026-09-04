@@ -12,6 +12,7 @@ import json
 import re
 import subprocess
 import sys
+from typing import Optional
 
 
 OWNER = "deep-agent-jenkins-v2"
@@ -189,7 +190,7 @@ class Kubectl:
     def __init__(self, namespace: str):
         self.namespace = namespace
 
-    def run(self, *args: str, payload: dict | None = None) -> str:
+    def run(self, *args: str, payload: Optional[dict] = None) -> str:
         request_timeout = "0" if args[0] in ("rollout", "wait") else "20s"
         result = subprocess.run(
             ["kubectl", "--namespace", self.namespace, f"--request-timeout={request_timeout}", *args],
@@ -201,7 +202,7 @@ class Kubectl:
             raise RuntimeError(f"kubectl {args[0]} {args[1] if len(args) > 1 else ''} 失败；请运维在受控终端检查 RBAC、Pod 状态或事件")
         return result.stdout
 
-    def get(self, kind: str, name: str | None = None) -> dict:
+    def get(self, kind: str, name: Optional[str] = None) -> dict:
         args = ["get", kind]
         if name:
             args += [name, "--ignore-not-found"]

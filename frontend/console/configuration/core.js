@@ -300,11 +300,9 @@ function initTabs() {
         ?.classList.toggle("catalog-active", name === "catalog");
       document.querySelectorAll(".panel").forEach((p) => p.classList.remove("active"));
       document.getElementById(`panel-${name}`)?.classList.add("active");
+      document.dispatchEvent(new CustomEvent("deep-agent-configuration-tab", { detail: { name } }));
       if (name === "global-settings" && window.globalSettingsAdmin) {
         window.globalSettingsAdmin.refresh();
-      }
-      if (name === "database-connection" && window.databaseConnectionAdmin) {
-        window.databaseConnectionAdmin.refresh();
       }
       if (name === "agents" && window.agentsAdmin) {
         Promise.all([loadLlmModels(), loadCapabilities(), loadSkills()]).then(() => window.agentsAdmin.refresh());

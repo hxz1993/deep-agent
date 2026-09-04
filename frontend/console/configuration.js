@@ -7,7 +7,7 @@ if (typeof window !== "undefined") window.DeepAgentProviderCatalog = ProviderCat
 if (typeof window !== "undefined") window.DeepAgentSkillFrontmatter = SkillFrontmatter;
 if (typeof window !== "undefined") window.DeepAgentSchemaText = SchemaText;
 let loadingPromise = null;
-const CONFIGURATION_ASSET_VERSION = "20260904-9";
+const CONFIGURATION_ASSET_VERSION = "20260904-16";
 const CONFIGURATION_TABS = new Set([
   "agents",
   "llm-providers",
@@ -17,12 +17,12 @@ const CONFIGURATION_TABS = new Set([
   "ui-tools",
   "channels",
   "global-settings",
-  "database-connection",
   "catalog",
 ]);
 let activeConfigurationTab = "agents";
 
 export function rememberConfigurationTab(name) {
+  if (name === "database-connection") name = "global-settings";
   if (CONFIGURATION_TABS.has(name)) activeConfigurationTab = name;
   return activeConfigurationTab;
 }
@@ -120,29 +120,24 @@ function decorateConfiguration() {
   document.querySelectorAll("#configurationHost dialog.modal").forEach((dialog) => {
     dialog.classList.add("console-detail-dialog");
   });
-  document.getElementById("configurationHost")?.addEventListener("click", (event) => {
+  document.getElementById("configurationHost")?.addEventListener("click", async (event) => {
     const link = event.target.closest("a[href]");
     if (!link) return;
     const url = new URL(link.href, location.href);
     const agentId = url.searchParams.get("agent_id");
     if (agentId && link.matches("[data-agent-chat]")) {
       event.preventDefault();
-      window.DeepAgentConsoleChat?.selectAgent(agentId);
-      window.DeepAgentConsole?.showPage("workspace");
+      await window.DeepAgentConsole?.showPage("workspace");
+      await window.DeepAgentConsoleChat?.selectAgent(agentId);
       return;
     }
-  });
-  document.querySelector(".resource-nav")?.addEventListener("click", (event) => {
-    const tab = event.target.closest("[data-tab]");
-    if (tab) rememberConfigurationTab(tab.dataset.tab);
-  });
+  }, true);
   window.lucide?.createIcons();
 }
 
 export function refreshCurrentConfiguration() {
   const active = document.querySelector(".resource-btn.active")?.dataset.tab;
   if (active === "global-settings") return window.globalSettingsAdmin?.refresh();
-  if (active === "database-connection") return window.databaseConnectionAdmin?.refresh();
   if (active === "agents") return window.agentsAdmin?.refresh();
   if (active === "llm-providers") return window.llmProvidersAdmin?.refresh();
   if (active === "builtin-tools") {

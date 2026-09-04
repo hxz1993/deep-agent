@@ -1,10 +1,11 @@
 import {
   initConfiguration,
   restoreConfigurationTab,
-} from "./configuration.js?v=20260904-9";
-import { bindContextControls, refreshIdentity } from "./context.js?v=20260822-1";
+  rememberConfigurationTab,
+} from "./configuration.js?v=20260904-16";
+import { bindContextControls, refreshIdentity } from "./context.js?v=20260904-14";
 import { initDiagnostics } from "./diagnostics.js?v=20260720-1";
-import { initWorkspace } from "./workspace.js?v=20260904-13";
+import { initWorkspace } from "./workspace.js?v=20260904-16";
 import "./time.js?v=20260831-1";
 
 const VALID_PAGES = new Set(["workspace", "configuration", "diagnostics"]);
@@ -48,7 +49,21 @@ function pageFromLocation() {
   return VALID_PAGES.has(page) ? page : "workspace";
 }
 
-async function showPage(page, { updateHash = true } = {}) {
+function syncNavigation() {
+  const page = document.querySelector("[data-page-panel].active")?.dataset.pagePanel || "workspace";
+  document.body.dataset.consolePage = page;
+  document.querySelectorAll(".console-rail [data-page], .console-rail [data-tab]").forEach((button) => {
+    const selected = button.dataset.page ? button.dataset.page === page : page === "configuration" && button.classList.contains("active");
+    if (selected) button.setAttribute("aria-current", "page");
+    else button.removeAttribute("aria-current");
+  });
+  const sectionName = document.getElementById("consoleSectionName");
+  if (sectionName) sectionName.textContent = page === "configuration"
+    ? document.querySelector(".resource-btn.active span")?.textContent || PAGE_LABELS[page]
+    : PAGE_LABELS[page];
+}
+
+async function showPage(page, { updateHash = true, restoreTab = true } = {}) {
   const next = VALID_PAGES.has(page) ? page : "workspace";
   const current = document.querySelector("[data-page-panel].active")?.dataset.pagePanel;
   if (current === "configuration" && next !== "configuration" && window.agentsAdmin?.isEditorOpen?.()) {
@@ -63,12 +78,11 @@ async function showPage(page, { updateHash = true } = {}) {
   document.querySelectorAll("[data-page]").forEach((button) => {
     button.classList.toggle("active", button.dataset.page === next);
   });
-  const sectionName = document.getElementById("consoleSectionName");
-  if (sectionName) sectionName.textContent = PAGE_LABELS[next];
+  syncNavigation();
   if (updateHash && location.hash !== `#/${next}`) history.replaceState(null, "", `#/${next}`);
   if (consoleAllowed && next === "configuration") {
     await initConfiguration().catch((error) => toast(error.message, true));
-    restoreConfigurationTab();
+    if (restoreTab) restoreConfigurationTab();
   }
   if (consoleAllowed && next === "workspace" && current !== "workspace") {
     void window.DeepAgentConsoleWorkspace?.refreshChannelAccounts();
@@ -76,7 +90,86 @@ async function showPage(page, { updateHash = true } = {}) {
   window.lucide?.createIcons();
 }
 
+let expandedNavigationWidth = 200;
+
+function setConsoleNavigationWidth(width) {
+  const collapsed = width < 120;
+  const nextWidth = collapsed ? 56 : Math.max(140, Math.min(200, width));
+  if (!collapsed) expandedNavigationWidth = nextWidth;
+  document.body.classList.toggle("console-nav-collapsed", collapsed);
+  document.body.style.setProperty("--console-rail-width", `${nextWidth}px`);
+  document.getElementById("consoleNavResizer")?.setAttribute("aria-valuenow", String(nextWidth));
+  const button = document.getElementById("toggleConsoleNavBtn");
+  const label = collapsed ? "展开导航" : "收起导航";
+  button.setAttribute("aria-expanded", String(!collapsed));
+  button.setAttribute("aria-label", label);
+  button.title = label;
+  const brand = document.getElementById("expandConsoleNavBtn");
+  brand.title = collapsed ? "展开导航" : "DeepAgent";
+  brand.setAttribute("aria-label", brand.title);
+  button.innerHTML = `<i data-lucide="${collapsed ? "panel-left-open" : "panel-left-close"}" aria-hidden="true"></i>`;
+  window.lucide?.createIcons();
+  window.dispatchEvent(new Event("resize"));
+}
+
+function toggleConsoleNavigation() {
+  setConsoleNavigationWidth(document.body.classList.contains("console-nav-collapsed") ? expandedNavigationWidth : 56);
+}
+
+function bindConsoleNavigationResizer() {
+  const handle = document.getElementById("consoleNavResizer");
+  let drag = null;
+  handle.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) return;
+    drag = { x: event.clientX, width: document.querySelector(".console-rail").getBoundingClientRect().width };
+    handle.setPointerCapture(event.pointerId);
+    document.body.classList.add("workspace-pane-resizing");
+    event.preventDefault();
+  });
+  handle.addEventListener("pointermove", (event) => {
+    if (drag) setConsoleNavigationWidth(drag.width + event.clientX - drag.x);
+  });
+  const finish = () => { drag = null; document.body.classList.remove("workspace-pane-resizing"); };
+  handle.addEventListener("pointerup", finish);
+  handle.addEventListener("pointercancel", finish);
+  handle.addEventListener("lostpointercapture", finish);
+  handle.addEventListener("keydown", (event) => {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    event.preventDefault();
+    const width = document.querySelector(".console-rail").getBoundingClientRect().width;
+    setConsoleNavigationWidth(event.key === "Home" ? 56 : event.key === "End" ? 200 : event.key === "ArrowRight" ? Math.max(140, width + 20) : width <= 140 ? 56 : width - 20);
+  });
+}
+
 function bindNavigation() {
+  bindConsoleNavigationResizer();
+  const resourceNav = document.getElementById("consoleResourceNav");
+  const template = document.getElementById("configurationNavigation");
+  if (resourceNav && template) resourceNav.append(template.content);
+  const agentTab = resourceNav?.querySelector('[data-tab="agents"]');
+  if (agentTab) document.querySelector(".console-rail .console-nav")?.append(agentTab);
+  document.querySelectorAll(".console-rail [data-tab]").forEach((button) => {
+    const label = button.querySelector("span")?.textContent.trim();
+    if (label) { button.title = label; button.setAttribute("aria-label", label); }
+  });
+  document.getElementById("toggleConsoleNavBtn")?.addEventListener("click", toggleConsoleNavigation);
+  document.getElementById("expandConsoleNavBtn")?.addEventListener("click", () => {
+    if (document.body.classList.contains("console-nav-collapsed")) toggleConsoleNavigation();
+  });
+  // Capture cross-page clicks before the lazy-loaded configuration tab handlers.
+  document.querySelector(".console-rail")?.addEventListener("click", async (event) => {
+    const tab = event.target.closest("[data-tab]");
+    if (!tab) return;
+    if (!consoleAllowed) { event.stopImmediatePropagation(); return; }
+    if (document.body.dataset.consolePage === "configuration") return;
+    event.stopImmediatePropagation();
+    await showPage("configuration", { restoreTab: false });
+    tab.click();
+  }, true);
+  document.addEventListener("deep-agent-configuration-tab", (event) => {
+    rememberConfigurationTab(event.detail.name);
+    syncNavigation();
+  });
   document.querySelectorAll("[data-page]").forEach((button) => {
     button.addEventListener("click", () => showPage(button.dataset.page));
   });
@@ -87,6 +180,22 @@ function bindNavigation() {
 }
 
 function bindThemes() {
+  const trigger = document.getElementById("consoleThemeBtn");
+  const control = trigger.closest(".console-theme-control");
+  const settings = control.closest(".console-rail-settings");
+  new ResizeObserver(() => {
+    document.body.classList.toggle("console-theme-compact", settings.clientWidth < 124);
+  }).observe(settings);
+  const close = () => { control.classList.remove("open"); trigger.setAttribute("aria-expanded", "false"); };
+  trigger.addEventListener("click", () => {
+    const open = control.classList.toggle("open");
+    trigger.setAttribute("aria-expanded", String(open));
+    if (open) control.querySelector("[data-console-theme].active")?.focus();
+  });
+  document.addEventListener("click", (event) => { if (!control.contains(event.target)) close(); });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && control.classList.contains("open")) { close(); trigger.focus(); }
+  });
   const apply = (theme) => {
     window.DATheme?.apply(theme);
     const highlightTheme = document.getElementById("hljsTheme");
@@ -99,10 +208,18 @@ function bindThemes() {
     }
     document.querySelectorAll("[data-console-theme]").forEach((button) => {
       button.classList.toggle("active", button.dataset.consoleTheme === theme);
+      button.setAttribute("aria-pressed", String(button.dataset.consoleTheme === theme));
     });
+    const icon = { light: "sun", paper: "leaf", dark: "moon", contrast: "contrast" }[theme] || "sun";
+    trigger.innerHTML = `<i data-lucide="${icon}" aria-hidden="true"></i>`;
+    window.lucide?.createIcons();
   };
   document.querySelectorAll("[data-console-theme]").forEach((button) => {
-    button.addEventListener("click", () => apply(button.dataset.consoleTheme));
+    button.addEventListener("click", () => {
+      apply(button.dataset.consoleTheme);
+      close();
+      if (trigger.offsetParent !== null) trigger.focus();
+    });
   });
   apply(localStorage.getItem("da_theme") || "paper");
 }

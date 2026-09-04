@@ -376,6 +376,7 @@ const globalSettingsAdmin = {
   query: "",
   webSearch: null,
   async refresh() {
+    void window.databaseConnectionAdmin?.refresh();
     const runtimeTarget = document.getElementById("globalSettingsGroups");
     if (runtimeTarget) runtimeTarget.innerHTML = `<div class="global-settings-state">正在加载运行设置…</div>`;
     try {

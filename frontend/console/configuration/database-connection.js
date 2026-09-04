@@ -11,16 +11,9 @@ function databaseInfoHtml(info) {
     ...(remote ? [["主机", info.host], ["端口", info.port]] : []),
     [remote ? "数据库" : "文件", info.database],
   ];
-  return `<article class="database-connection-card">
-    <header class="database-connection-badge">
-      <span class="database-connection-icon"><i data-lucide="database"></i></span>
-      <div><strong>${escapeHtml(databaseInfoValue(info.database_type_label))}</strong><span>${escapeHtml(databaseInfoValue(info.connection_summary || info.connection_mode))}</span></div>
-      <span class="database-safe-badge"><i data-lucide="shield-check"></i>${info.credentials_hidden ? "凭证已隐藏" : "只读摘要"}</span>
-    </header>
-    <dl class="database-connection-facts">
+  return `<dl class="database-inline-facts" title="只读摘要；用户名、密码、连接参数和本地完整路径不会展示">
       ${rows.map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(databaseInfoValue(value))}</dd></div>`).join("")}
-    </dl>
-  </article>`;
+    </dl>`;
 }
 
 function schemaBadgeText(info) {

@@ -21,48 +21,45 @@
   <link rel="stylesheet" href="./themes.css?v=20260821-2" />
   <link rel="stylesheet" href="./workspace.css?v=20260904-13" />
   <link rel="stylesheet" href="./configuration/configuration.css?v=20260904-11" />
-  <link rel="stylesheet" href="./console.css?v=20260904-9" />
+  <link rel="stylesheet" href="./console.css?v=20260905-01" />
 </head>
-<body>
+<body data-console-page="workspace">
   <div class="console-shell">
     <aside class="console-rail" aria-label="控制台主导航">
+      <header class="console-rail-header">
+        <div class="console-brand">
+          <button type="button" class="console-brand-icon" id="expandConsoleNavBtn" aria-label="DeepAgent" title="DeepAgent"><img src="./favicon.svg?v=20260728-1" alt="" /></button>
+          <div class="console-brand-copy"><strong>DeepAgent</strong><span class="connection-pill" id="connStatus" title="后端服务连接状态"><span class="dot"></span><span class="conn-text">连接中</span></span></div>
+        </div>
+        <button type="button" class="console-rail-toggle" id="toggleConsoleNavBtn" aria-label="收起导航" title="收起导航" aria-expanded="true" aria-controls="consoleResourceNav"><i data-lucide="panel-left-close" aria-hidden="true"></i></button>
+      </header>
       <nav class="console-nav">
         <button type="button" class="console-nav-btn active" data-page="workspace" title="对话测试" aria-label="对话测试">
           <i data-lucide="message-square-code"></i><span>对话测试</span>
         </button>
-        <button type="button" class="console-nav-btn" data-page="configuration" title="配置中心" aria-label="配置中心">
-          <i data-lucide="bot"></i><span>配置中心</span>
-        </button>
+      </nav>
+      <nav class="resource-nav" aria-label="配置目录" id="consoleResourceNav"></nav>
+      <div class="console-nav-footer">
         <button type="button" class="console-nav-btn" data-page="diagnostics" title="诊断中心" aria-label="诊断中心">
           <i data-lucide="activity"></i><span>诊断中心</span>
         </button>
-      </nav>
-      <div class="console-rail-spacer"></div>
       <a class="console-rail-link" href="../docs" target="_blank" rel="noopener noreferrer" title="接口文档" aria-label="接口文档">
         <i data-lucide="book-open-text"></i><span>接口文档</span>
       </a>
-    </aside>
-
-    <header class="console-topbar">
-      <div class="console-brand">
-        <span class="console-brand-icon" aria-hidden="true"><img src="./favicon.svg?v=20260728-1" alt="" /></span>
-        <div class="console-brand-copy"><strong>DeepAgent</strong></div>
-        <i class="breadcrumb-chevron" data-lucide="chevron-right"></i>
-        <strong class="console-section-name" id="consoleSectionName">对话测试</strong>
       </div>
-
-      <div class="console-top-actions">
-        <div class="console-runtime-status" aria-label="运行状态">
-          <span class="connection-pill" id="connStatus"><span class="dot"></span><span class="conn-text">连接中</span></span>
-        </div>
-        <div class="theme-switch" aria-label="界面主题">
+      <div class="console-rail-settings">
+        <div class="console-theme-control">
+          <button type="button" id="consoleThemeBtn" aria-label="切换主题" title="切换主题" aria-expanded="false" aria-controls="consoleThemeMenu"><i data-lucide="sun"></i></button>
+        <div class="theme-switch" id="consoleThemeMenu" aria-label="界面主题">
           <button type="button" data-console-theme="light" title="明亮"><i data-lucide="sun"></i></button>
           <button type="button" data-console-theme="paper" title="护眼"><i data-lucide="leaf"></i></button>
           <button type="button" data-console-theme="dark" title="暗色"><i data-lucide="moon"></i></button>
           <button type="button" data-console-theme="contrast" title="高对比"><i data-lucide="contrast"></i></button>
         </div>
+        </div>
         <button type="button" class="user-pill" id="currentUserBtn" aria-label="当前平台用户" aria-expanded="false">
           <i data-lucide="circle-user-round"></i>
+          <span class="console-user-name" id="consoleUserName">当前用户</span>
           <span class="user-popover user-account-popover" role="tooltip">
             <span class="user-popover-heading">
               <span class="user-popover-icon"><i data-lucide="circle-user-round" aria-hidden="true"></i></span>
@@ -75,7 +72,8 @@
           </span>
         </button>
       </div>
-    </header>
+      <div id="consoleNavResizer" class="console-nav-resizer" role="separator" tabindex="0" aria-label="调整导航宽度" aria-orientation="vertical" aria-valuemin="56" aria-valuemax="200" aria-valuenow="200"></div>
+    </aside>
 
     <div class="console-banner hidden" id="consoleBanner" role="alert"></div>
 
@@ -109,15 +107,10 @@
 
       <section class="console-page" id="page-configuration" data-page-panel="configuration">
         <div class="configuration-shell">
-          <aside class="resource-nav">
-            <div class="resource-title">
-              <strong>配置中心</strong>
-            </div>
-            <div class="resource-group-label">Agent 设置</div>
+          <template id="configurationNavigation">
             <button class="tab resource-btn active" data-tab="agents"><i data-lucide="bot"></i><span>Agent</span></button>
+            <div class="resource-group-label">设置</div>
             <button class="tab resource-btn" data-tab="llm-providers"><i data-lucide="waypoints"></i><span>Provider</span></button>
-            <button class="tab resource-btn" data-tab="builtin-tools"><i data-lucide="blocks"></i><span>内置工具</span></button>
-            <button class="tab resource-btn" data-tab="skills"><i data-lucide="book-open-check"></i><span>Skill</span></button>
             <button class="tab resource-btn" data-tab="mcp">
               <svg class="mcp-brand-icon" viewBox="0 0 180 180" fill="none" aria-hidden="true">
                 <path d="M23.5996 85.2532L86.2021 22.6507C94.8457 14.0071 108.86 14.0071 117.503 22.6507C126.147 31.2942 126.147 45.3083 117.503 53.9519L70.2254 101.23" />
@@ -126,14 +119,14 @@
               </svg>
               <span>MCP</span>
             </button>
+            <button class="tab resource-btn" data-tab="skills"><i data-lucide="book-open-check"></i><span>Skill</span></button>
+            <button class="tab resource-btn" data-tab="builtin-tools"><i data-lucide="blocks"></i><span>内置工具</span></button>
             <button class="tab resource-btn" data-tab="ui-tools"><i data-lucide="panel-top"></i><span>UI 工具</span></button>
             <button class="tab resource-btn" data-tab="channels"><i data-lucide="radio-tower"></i><span>渠道</span></button>
-            <div class="resource-group-label separated">系统设置</div>
+            <div class="resource-group-label separated">系统</div>
             <button class="tab resource-btn" data-tab="global-settings"><i data-lucide="settings-2"></i><span>全局配置</span></button>
-            <button class="tab resource-btn" data-tab="database-connection"><i data-lucide="database"></i><span>数据库连接</span></button>
-            <div class="resource-group-label separated">外部资源</div>
             <button class="tab resource-btn" data-tab="catalog"><i data-lucide="library"></i><span>模型目录</span></button>
-          </aside>
+          </template>
           <section class="configuration-content">
             <div class="configuration-loading" id="configurationLoading">
               <span class="loading-spinner"></span><span>正在加载配置中心…</span>
@@ -193,6 +186,6 @@
   <script src="../vendor/highlight.min.js"></script>
   <script src="./json-view.js?v=20260823-1"></script>
   <script src="./markdown.js?v=20260822-2"></script>
-  <script type="module" src="./main.js?v=20260904-13"></script>
+  <script type="module" src="./main.js?v=20260904-16"></script>
 </body>
 </html>

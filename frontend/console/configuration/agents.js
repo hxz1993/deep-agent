@@ -161,7 +161,7 @@ const agentsAdmin = {
         <footer class="agent-card-footer">
           <span><i data-lucide="clock-3"></i>${escapeHtml(formatDate(agent.updated_at))}</span>
           <div class="row-actions agent-row-actions">
-            <a class="btn-link row-action icon-only" data-agent-chat href="${chatUrlForAgent(agent.id)}" target="_blank" rel="noopener" title="发起对话" aria-label="发起对话"><i data-lucide="message-square"></i></a>
+            <a class="btn-link row-action icon-only" data-agent-chat href="${chatUrlForAgent(agent.id)}" title="发起对话" aria-label="发起对话"><i data-lucide="message-square"></i></a>
             <button type="button" class="row-action icon-only" data-copy-agent="${escapeHtml(agent.id)}" title="复制" aria-label="复制"><i data-lucide="copy"></i></button>
             <button type="button" class="danger row-action icon-only" data-delete="${escapeHtml(agent.id)}" data-name="${escapeHtml(agent.name)}" title="删除" aria-label="删除"><i data-lucide="trash-2"></i></button>
           </div>
@@ -179,7 +179,7 @@ const agentsAdmin = {
         <td><div class="cap-preview">${escapeHtml(capabilities)}</div><div class="skill-preview">Skill：${escapeHtml(skills)}</div></td>
         <td>${escapeHtml(formatDate(agent.updated_at))}</td>
         <td><div class="row-actions agent-row-actions">
-          <a class="btn-link row-action icon-only" data-agent-chat href="${chatUrlForAgent(agent.id)}" target="_blank" rel="noopener" title="发起对话" aria-label="发起对话"><i data-lucide="message-square"></i></a>
+          <a class="btn-link row-action icon-only" data-agent-chat href="${chatUrlForAgent(agent.id)}" title="发起对话" aria-label="发起对话"><i data-lucide="message-square"></i></a>
           <button type="button" class="row-action icon-only" data-copy-agent="${escapeHtml(agent.id)}" title="复制" aria-label="复制"><i data-lucide="copy"></i></button>
           <button type="button" class="danger row-action icon-only" data-delete="${escapeHtml(agent.id)}" data-name="${escapeHtml(agent.name)}" title="删除" aria-label="删除"><i data-lucide="trash-2"></i></button>
         </div></td>

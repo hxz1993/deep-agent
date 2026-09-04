@@ -373,10 +373,10 @@ test("会话标题由持久化 Event 实时更新且不再轮询或自动重命�
   assert.doesNotMatch(chatSource, /auto-rename-btn|自动重命名|JSON\.stringify\(\{ auto: true \}\)/);
 });
 
-test("会话列表保留活动时间并展示三项统计", () => {
+test("会话列表保留活动时间、回合与附件统计，不展示中间Loop计数", () => {
   assert.match(chatSource, /class="session-activity">\$\{escapeHtml\(activity\)\}/);
   assert.match(chatSource, /title="回合数"[^\n]*messages-square/);
-  assert.match(chatSource, /title="消息事件数"[^\n]*repeat-2/);
+  assert.doesNotMatch(chatSource, /title="消息事件数"[^\n]*repeat-2/);
   assert.match(chatSource, /title="附件数"[^\n]*paperclip/);
   assert.match(consoleCss, /\.session-item:not\(\.active\):hover\s*\{[^}]*border-color: color-mix[^}]*background:\s*var\(--bg\)[^}]*box-shadow:/);
 });

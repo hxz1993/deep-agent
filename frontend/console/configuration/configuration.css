@@ -2670,14 +2670,24 @@ dialog.console-action-dialog::backdrop {
   min-width: 0;
 }
 
-.channel-title-row { display: flex; align-items: baseline; gap: 12px; }
-.channel-title-row .link-btn {
-  padding: 0;
+.channel-title-row { display: flex; align-items: center; gap: 12px; }
+.channel-title-row .channel-commands-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 28px;
+  padding: 3px 8px;
   border: 0;
-  background: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-faint);
+  font: inherit;
+  font-size: 12px;
   cursor: pointer;
 }
-.channel-title-row .link-btn:hover { text-decoration: underline; }
+.channel-title-row .channel-commands-btn svg { width: 14px; height: 14px; }
+.channel-title-row .channel-commands-btn:hover { color: var(--text); background: var(--bg-hover); }
+.channel-title-row .channel-commands-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
 .channel-table {
   min-width: 720px;

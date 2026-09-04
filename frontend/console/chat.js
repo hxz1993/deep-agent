@@ -391,7 +391,7 @@ function currentSessionSnapshot() {
   });
 }
 
-function mergeSessionsFromBackend(rows) {
+function mergeSessionsFromBackend(rows, { append = false, agentId = state.agentId } = {}) {
   const mapped = rows.map((row) => {
     const agentId = row.agent_id || "";
     const title = (row.title || row.user_prompt || row.session_id.slice(0, 8)).slice(0, 40);
@@ -409,7 +409,8 @@ function mergeSessionsFromBackend(rows) {
     });
   });
 
-  const mergedByKey = new Map(mapped.map((s) => [sessionLookupKey(s), s]));
+  const retained = state.sessions.filter((session) => append || (session.agentId || "") !== (agentId || ""));
+  const mergedByKey = new Map([...retained, ...mapped].map((s) => [sessionLookupKey(s), s]));
 
   const current = currentSessionSnapshot();
   if (current) {
@@ -610,7 +611,7 @@ function init() {
   initMarkdown();
   localStorage.removeItem("da_sessions");
   renderSessions();
-  syncSessionsFromBackend();
+  el.sessionList.addEventListener("scroll", maybeLoadMoreSessions, { passive: true });
   checkHealth();
   loadCapabilities();
   loadUploadCapabilities();
@@ -619,25 +620,57 @@ function init() {
     loadUiTools(state.agentId);
     if (agentFromUrl) newChat(agentFromUrl);
     else updateAgentSelectState();
+    await syncSessionsFromBackend();
   });
 }
 
-async function syncSessionsFromBackend() {
+let sessionPage = { agentId: null, offset: 0, hasMore: true, loading: false, error: false };
+
+function syncSessionsFromBackend() {
+  if (!state.agentId) return Promise.resolve();
+  if (sessionPage.agentId === state.agentId && sessionPage.loading && sessionPage.offset === 0) return sessionPage.promise;
+  sessionPage = { agentId: state.agentId, offset: 0, hasMore: true, loading: false, error: false };
+  return loadMoreSessions();
+}
+
+async function loadMoreSessions() {
+  const page = sessionPage;
+  if (!page.agentId || page.agentId !== state.agentId || page.loading || !page.hasMore) return;
+  page.loading = true;
+  page.error = false;
+  renderSessions();
+  const request = (async () => {
   try {
-    const r = await daFetch(serviceUrl("api/v1/sessions?limit=50"));
-    if (!r.ok) return;
+    const params = new URLSearchParams({ agent_id: page.agentId, limit: "50", offset: String(page.offset) });
+    const r = await daFetch(serviceUrl(`api/v1/sessions?${params}`));
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const payload = await r.json();
+    if (page !== sessionPage || page.agentId !== state.agentId) return;
     const rows = Array.isArray(payload?.items) ? payload.items : [];
-    mergeSessionsFromBackend(rows);
-    renderSessions();
+    mergeSessionsFromBackend(rows, { append: page.offset > 0, agentId: page.agentId });
+    page.offset += rows.length;
+    page.hasMore = rows.length > 0 && page.offset < Number(payload.total);
   } catch (_) {
-    if (state.sessionId) {
-      const current = currentSessionSnapshot();
-      state.sessions = current ? [current] : [];
-    } else {
-      state.sessions = [];
+    if (page === sessionPage) page.error = true;
+  } finally {
+    page.loading = false;
+    if (page === sessionPage && page.agentId === state.agentId) {
+      renderSessions();
+      requestAnimationFrame(maybeLoadMoreSessions);
     }
-    renderSessions();
+  }
+  })();
+  page.promise = request;
+  return request;
+}
+
+function maybeLoadMoreSessions() {
+  const list = el.sessionList;
+  if (list.scrollTop > 0 && list.scrollHeight > list.clientHeight) sessionPage.hasScrolled = true;
+  const footer = list.querySelector(".session-list-footer");
+  if (footer) footer.hidden = !sessionPage.loading && !sessionPage.error && !sessionPage.hasMore && !sessionPage.hasScrolled;
+  if (!sessionPage.error && list.clientHeight > 0 && list.scrollHeight - list.scrollTop - list.clientHeight < 80) {
+    void loadMoreSessions();
   }
 }
 
@@ -753,6 +786,10 @@ function newChat(agentId) {
   updateComposerContextControls();
   renderSessions();
   el.input.focus();
+  if (sessionPage.agentId !== state.agentId) {
+    el.sessionList.scrollTop = 0;
+    void syncSessionsFromBackend();
+  }
 }
 
 function upsertSession(id, title, agentId, agentName) {
@@ -798,6 +835,7 @@ function applySessionTitle(session, title) {
 }
 
 function renderSessions() {
+  const scrollTop = el.sessionList.scrollTop;
   el.sessionList.innerHTML = "";
   const activeAgent = state.agents.find((agent) => agent.id === state.agentId);
   const scopedSessions = state.sessions.filter(
@@ -811,8 +849,7 @@ function renderSessions() {
     panelSummary.title = state.sessionId ? "已选择会话" : "尚未选择会话";
   }
   if (scopedSessions.length === 0) {
-    el.sessionList.innerHTML = '<li class="session-empty">该 Agent 暂无历史会话</li>';
-    return;
+    if (!sessionPage.loading && !sessionPage.error) el.sessionList.innerHTML = '<li class="session-empty">该 Agent 暂无历史会话</li>';
   }
   for (const s of scopedSessions) {
     const li = document.createElement("li");
@@ -822,7 +859,7 @@ function renderSessions() {
     const activity = formatSessionActivity(s);
     const origin = channelOriginPresentation(s.channel);
     const sourceMarker = origin ? `<span class="session-channel-source" title="${escapeHtml(origin.description)}" aria-label="${escapeHtml(origin.description)}">${lucideIcon("radio")}</span>` : "";
-    li.innerHTML = `<span class="sid" title="${escapeHtml(`${s.title} · ${activity}`)}"><span class="session-title-row"><span class="session-title">${escapeHtml(s.title)}</span>${sourceMarker}</span><span class="session-meta"><span class="session-activity">${escapeHtml(activity)}</span><span class="session-stat-group"><span title="回合数">${lucideIcon("messages-square")}${escapeHtml(String(s.turnCount || 0))}</span><span title="消息事件数">${lucideIcon("repeat-2")}${escapeHtml(String(s.messageCount || 0))}</span><span title="附件数">${lucideIcon("paperclip")}${escapeHtml(String(s.attachmentCount || 0))}</span></span></span></span><span class="session-actions"><span class="rename-btn" title="重命名" aria-label="重命名">${lucideIcon("pencil")}</span><span class="del" title="删除" aria-label="删除">${lucideIcon("trash-2")}</span></span>`;
+    li.innerHTML = `<span class="sid" title="${escapeHtml(`${s.title} · ${activity}`)}"><span class="session-title-row"><span class="session-title">${escapeHtml(s.title)}</span>${sourceMarker}</span><span class="session-meta"><span class="session-activity">${escapeHtml(activity)}</span><span class="session-stat-group"><span title="回合数">${lucideIcon("messages-square")}${escapeHtml(String(s.turnCount || 0))}</span><span title="附件数">${lucideIcon("paperclip")}${escapeHtml(String(s.attachmentCount || 0))}</span></span></span></span><span class="session-actions"><span class="rename-btn" title="重命名" aria-label="重命名">${lucideIcon("pencil")}</span><span class="del" title="删除" aria-label="删除">${lucideIcon("trash-2")}</span></span>`;
     li.querySelector(".sid").addEventListener("click", (e) => {
       if (e.target.closest(".session-title-input")) return;
       switchSession(s);
@@ -837,6 +874,20 @@ function renderSessions() {
     });
     el.sessionList.appendChild(li);
   }
+  const footer = document.createElement("li");
+  footer.className = "session-list-footer";
+  footer.setAttribute("role", "status");
+  if (sessionPage.error) {
+    footer.innerHTML = '<button type="button">加载失败，点击重试</button>';
+    footer.querySelector("button").addEventListener("click", () => void loadMoreSessions());
+  } else {
+    footer.textContent = sessionPage.loading ? "正在加载…" : sessionPage.hasMore ? "向下滚动加载更多" : "已经到底了";
+  }
+  footer.hidden = !sessionPage.loading && !sessionPage.error && !sessionPage.hasMore && !sessionPage.hasScrolled;
+  el.sessionList.appendChild(footer);
+  const query = document.getElementById("sessionSearchInput")?.value.trim().toLowerCase() || "";
+  el.sessionList.querySelectorAll(".session-item").forEach((row) => row.classList.toggle("console-filtered", !!query && !row.textContent.toLowerCase().includes(query)));
+  el.sessionList.scrollTop = scrollTop;
   refreshLucideIcons();
 }
 
@@ -1179,6 +1230,7 @@ async function deleteSession(session) {
   const normalized = normalizeSession(session);
   const key = sessionLookupKey(normalized);
   state.sessions = state.sessions.filter((s) => sessionLookupKey(s) !== key);
+  if (sessionPage.agentId === normalized.agentId) sessionPage.offset = Math.max(0, sessionPage.offset - 1);
   renderSessions();
   try {
     await daFetch(sessionApiUrl(normalized), { method: "DELETE" });

@@ -68,6 +68,8 @@ function renderContext() {
 
   const currentUser = identity?.username || identity?.user || "未认证";
   document.getElementById("currentUserFull").textContent = currentUser;
+  const sidebarUser = document.getElementById("consoleUserName");
+  if (sidebarUser) sidebarUser.textContent = currentUser;
   const currentUserButton = document.getElementById("currentUserBtn");
   if (currentUserButton) {
     currentUserButton.removeAttribute("title");

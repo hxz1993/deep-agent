@@ -1,7 +1,7 @@
 import { channelOriginPresentation } from "./session-display.js?v=20260904-13";
 import { copyTextToClipboard } from "./message-actions.js?v=20260819-1";
 
-const WORKSPACE_ASSET_VERSION = "20260904-13";
+const WORKSPACE_ASSET_VERSION = "20260904-16";
 
 const WORKSPACE_PANE_LIMITS = {
   agent: { min: 150, max: 280, initial: 188, variable: "--console-agent-width" },
@@ -30,6 +30,7 @@ function refreshChannelAccounts() {
     } finally {
       channelAccountsRequest = null;
       lastRenderKey = "";
+      renderAgents();
       renderInspector();
     }
   })();
@@ -198,9 +199,17 @@ function renderContextBudgetOverview(contextStatus) {
 
 function filterSessions(event) {
   const query = String(event?.target?.value || "").trim().toLowerCase();
-  document.querySelectorAll("#sessionList > li").forEach((row) => {
+  document.querySelectorAll("#sessionList > .session-item").forEach((row) => {
     row.classList.toggle("console-filtered", !!query && !row.textContent.toLowerCase().includes(query));
   });
+  document.getElementById("sessionList")?.dispatchEvent(new Event("scroll"));
+}
+
+function workspaceAgentChannelBadge(agentId) {
+  const accounts = workspaceChannelAccounts.filter((account) => account.agent_id === agentId);
+  if (!accounts.length) return "";
+  const title = escapeHtml(`已配置渠道：${accounts.map((account) => account.name).join("、")}`);
+  return `<span class="workspace-agent-channel" title="${title}" aria-label="${title}"><i data-lucide="radio" aria-hidden="true"></i></span>`;
 }
 
 function renderAgents() {
@@ -225,7 +234,7 @@ function renderAgents() {
       const capabilityCount = Array.isArray(agent.capabilities) ? agent.capabilities.length : "默认";
       return `<button type="button" class="agent-item ${active ? "active" : ""}" data-agent-id="${escapeHtml(agent.id)}">
         <span class="agent-avatar">${escapeHtml((agent.name || "A").slice(0, 1).toUpperCase())}</span>
-        <span class="agent-copy"><strong>${escapeHtml(agent.name)}</strong><small>${escapeHtml(model)} · ${escapeHtml(capabilityCount)} 能力</small></span>
+        <span class="agent-copy"><strong>${escapeHtml(agent.name)}${workspaceAgentChannelBadge(agent.id)}</strong><small>${escapeHtml(model)} · ${escapeHtml(capabilityCount)} 能力</small></span>
         <span class="agent-state" title="可测试"></span>
       </button>`;
     })
@@ -236,6 +245,7 @@ function renderAgents() {
       void selectWorkspaceAgent(button.dataset.agentId);
     });
   });
+  window.lucide?.createIcons();
 }
 
 function renderAgentSwitcher(state) {
@@ -247,13 +257,13 @@ function renderAgentSwitcher(state) {
   if (!select || !field || !trigger || !labelNode || !menu) return;
   const label = state.agents.length ? currentAgentName(state) : "无可用 Agent";
   field.title = `切换测试 Agent：${label}`;
-  labelNode.textContent = label;
+  labelNode.innerHTML = `${escapeHtml(label)}${workspaceAgentChannelBadge(state.agentId)}`;
   trigger.disabled = !!state.streaming || !state.agents.length;
   menu.innerHTML = state.agents.map((agent) => {
     const selected = agent.id === state.agentId;
     return `<button type="button" class="agent-select-option${selected ? " selected" : ""}" role="option" aria-selected="${selected}" data-switch-agent-id="${escapeHtml(agent.id)}">
       <span class="agent-select-option-icon"><i data-lucide="bot" aria-hidden="true"></i></span>
-      <span>${escapeHtml(agent.name || agent.id)}</span>
+      <span>${escapeHtml(agent.name || agent.id)}${workspaceAgentChannelBadge(agent.id)}</span>
       ${selected ? '<i class="agent-select-check" data-lucide="check" aria-hidden="true"></i>' : ""}
     </button>`;
   }).join("");
@@ -447,18 +457,49 @@ function syncWorkspaceLayout() {
   constrainWorkspaceInspector();
 }
 
+let finishInspectorTransition = null;
+
 function toggleInspectorPane() {
   const grid = document.getElementById("workspaceGrid");
   const inspector = document.getElementById("inspectorPane");
   if (!grid || !inspector) return;
+  finishInspectorTransition?.();
   if (!grid.classList.contains("inspector-hidden") && inspectorActiveTab === "context") {
     inspectorActiveTab = "session";
     lastRenderKey = "";
     renderInspector();
     return;
   }
+  const before = getComputedStyle(grid).gridTemplateColumns;
+  const header = grid.querySelector(".chat-header");
+  const headerWidth = header.getBoundingClientRect().width;
+  const opening = grid.classList.contains("inspector-hidden");
   grid.classList.toggle("inspector-hidden");
   syncWorkspaceLayout();
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  const after = getComputedStyle(grid).gridTemplateColumns;
+  const handle = document.getElementById("inspectorPaneResizer");
+  inspector.style.display = "flex";
+  inspector.inert = !opening;
+  handle.style.display = "block";
+  header.style.width = `${headerWidth}px`;
+  const motion = grid.animate([
+    { gridTemplateColumns: opening ? `${before} 0px 0px` : before },
+    { gridTemplateColumns: opening ? after : `${after} 0px 0px` },
+  ], { duration: 180, easing: "ease-in-out" });
+  const fade = inspector.animate([{ opacity: opening ? 0 : 1 }, { opacity: opening ? 1 : 0 }], { duration: 160 });
+  const finish = () => {
+    if (finishInspectorTransition !== finish) return;
+    finishInspectorTransition = null;
+    motion.cancel();
+    fade.cancel();
+    inspector.style.removeProperty("display");
+    inspector.inert = false;
+    handle.style.removeProperty("display");
+    header.style.removeProperty("width");
+  };
+  finishInspectorTransition = finish;
+  motion.finished.then(finish, finish);
 }
 
 async function selectWorkspaceAgent(agentId) {

@@ -55,11 +55,11 @@ function commandHarness(fetchCatalog) {
   return { admin: context.window.channelsAdmin, elements, requests, context };
 }
 
-test("快捷命令在渠道标题后以无框文字链接展示", () => {
+test("快捷命令在渠道标题后以带图标的无框按钮展示", () => {
   const panel = templateHtml.split('id="panel-channels">')[1].split('<div class="table-wrap')[0];
-  assert.match(panel, /channel-title-row[\s\S]*<h2>渠道<\/h2>\s*<button class="link-btn" type="button" id="channelCommandsBtn">快捷命令<\/button>/);
+  assert.match(panel, /channel-title-row[\s\S]*<h2>渠道<\/h2>\s*<button class="channel-commands-btn" type="button" id="channelCommandsBtn">[\s\S]*?data-lucide="terminal"[\s\S]*?<span>快捷命令<\/span><\/button>/);
   assert.doesNotMatch(panel.split('class="panel-toolbar-actions"')[1], /channelCommandsBtn/);
-  assert.match(styles, /\.channel-title-row \.link-btn\s*\{[^}]*border: 0;[^}]*background: none;/);
+  assert.match(styles, /\.channel-commands-btn\s*\{[^}]*border: 0;[^}]*background: transparent;/);
 });
 
 test("快捷命令弹框独立于网关读取统一只读目录并转义内容", async () => {

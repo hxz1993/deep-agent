@@ -7,7 +7,7 @@ from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
-from aibot import MessageHandler, WsCmd
+from aibot import MessageHandler, WSClient, WsCmd
 
 from deep_agent.channels.adapters.wecom import WecomAdapter
 from deep_agent.channels.adapters.wecom.messages import parse_message
@@ -107,6 +107,24 @@ class WecomAdapterTests(unittest.IsolatedAsyncioTestCase):
         temporary = WecomAdapter(self.account, infinite_retry=False)
         self.addAsyncCleanup(temporary.stop)
         self.assertEqual(temporary.client.options.max_reconnect_attempts, 0)
+
+    async def test_loading_uses_native_thinking_stream_and_answer_replaces_it(self):
+        # Exercise the installed SDK serializer, replacing only transport I/O.
+        client = self.adapter.client
+        client.reply = AsyncMock(return_value={"errcode": 0})
+        client.reply_stream = WSClient.reply_stream.__get__(client, type(client))
+        message = parse_message(frame())
+        await self.adapter.reply_loading(message, "same-stream")
+        await self.adapter.reply(message, "same-stream", "最终回答", False)
+        await self.adapter.reply(message, "same-stream", "最终回答。", True)
+        payloads = [call.args[1] for call in client.reply.await_args_list]
+        self.assertEqual(payloads, [
+            {"msgtype": "stream", "stream": {"id": "same-stream", "content": "<think></think>", "finish": False}},
+            {"msgtype": "stream", "stream": {"id": "same-stream", "content": "最终回答", "finish": False}},
+            {"msgtype": "stream", "stream": {"id": "same-stream", "content": "最终回答。", "finish": True}},
+        ])
+        self.assertTrue(all(call.args[0] == {"headers": {"req_id": "request-test"}}
+                            for call in client.reply.await_args_list))
 
     async def test_stop_drains_callbacks_and_rejects_new_arrivals(self):
         entered = asyncio.Event()

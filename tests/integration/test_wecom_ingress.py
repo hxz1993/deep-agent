@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, patch
 from aiohttp import web
 from aiohttp.test_utils import TestServer
 from httpx import AsyncClient
-from pydantic_ai.models.function import FunctionModel
+from pydantic_ai.models.function import DeltaThinkingPart, DeltaToolCall, FunctionModel
 
 from deep_agent.channel_gateway.config import GatewayConfig
 from deep_agent.channel_gateway.deepagent_client import DeepAgentChannelClient
@@ -17,6 +17,7 @@ from deep_agent.channels.adapters.wecom import WecomAdapter
 from deep_agent.channels.service import ChannelService
 from deep_agent.core.context import get_context
 from deep_agent.schemas.channel import ChannelAccountCreate
+from deep_agent.schemas.agent import AgentUpdate
 from tests.helpers.request_identity import TEST_USER_ID
 from tests.integration import test_chat_context_references as context_tests
 from tests.integration.helpers.chat import mock_request_disconnect
@@ -71,6 +72,55 @@ class WecomIngressIntegrationTests(unittest.IsolatedAsyncioTestCase):
         await adapter.start(lambda message: service.receive(account, adapter, message))
         handler = MessageHandler(SafeSdkLogger())
         return account, service, adapter, handler, requests
+
+    async def test_native_loading_remains_during_thinking_and_tool_then_answer_replaces_it(self):
+        account, service, adapter, handler, requests = await self._create_ingress()
+        await get_context().stores.agent.update_unique(
+            self._agent_id, AgentUpdate(capabilities=["builtin:general"]),
+        )
+        tool_finished, allow_answer = asyncio.Event(), asyncio.Event()
+        self.addCleanup(allow_answer.set)
+        model_calls = 0
+
+        async def answer(messages, info):
+            nonlocal model_calls
+            model_calls += 1
+            if model_calls == 1:
+                yield {0: DeltaThinkingPart(content="private-thinking-fixture")}
+                tool = next(item for item in info.function_tools if item.name.endswith("get_current_time"))
+                yield {1: DeltaToolCall(name=tool.name, json_args="{}", tool_call_id="clock-fixture")}
+            else:
+                self.assertIn("clock-fixture", str(messages))
+                tool_finished.set()
+                await allow_answer.wait()
+                yield "已经查到时间，"
+                yield "这是回答。"
+
+        with patch("deep_agent.agent.factory._resolve_model", return_value=FunctionModel(stream_function=answer)), mock_request_disconnect():
+            handler.handle_frame(frame(payload={"content": "请查询当前时间"}, msgid="loading-turn"), adapter.client)
+            await adapter.client.flush()
+            try:
+                await asyncio.wait_for(tool_finished.wait(), 10)
+                # The real Agent/API has completed a tool round, but WeCom has
+                # received only its native thinking bubble, never tool/reasoning.
+                self.assertEqual(adapter.client.reply_stream.await_count, 1)
+                first = adapter.client.reply_stream.await_args.args
+                self.assertEqual(first[2:], ("<think></think>", False))
+            finally:
+                allow_answer.set()
+            async with asyncio.timeout(10):
+                while any(peer.active or peer.pending or peer.worker for peer in service.peers.values()):
+                    await asyncio.sleep(0.01)
+
+        calls = [call.args for call in adapter.client.reply_stream.await_args_list]
+        self.assertEqual(len({args[1] for args in calls}), 1)
+        self.assertEqual(calls[-1][2:], ("已经查到时间，这是回答。", True))
+        self.assertNotIn("private-thinking-fixture", str(calls))
+        self.assertNotIn("clock-fixture", str(calls))
+        self.assertEqual(model_calls, 2)
+        history = await self._history(requests[0]["session_id"])
+        self.assertNotIn("<think></think>", str(history))
+        self.assertTrue(any(item["kind"] == "tool" for item in history["items"]))
 
     async def test_quote_is_model_visible_persisted_and_group_help_never_calls_model(self):
         account, service, adapter, handler, requests = await self._create_ingress()

@@ -26,6 +26,9 @@ class FakeAdapter:
     def new_reply_id(self):
         return uuid4().hex
 
+    async def reply_loading(self, message, reply_id):
+        await self.reply(message, reply_id, "正在处理…", False)
+
     async def reply(self, message, reply_id, content, finish):
         if self.fail_delivery and finish:
             raise ConnectionError("fixture delivery failure")
@@ -192,6 +195,44 @@ class ChannelCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(agent.calls, [])
         self.assertEqual((await self.store.get_message(self.account.id, message.message_id)).processing_status, "failed")
         self.assertIn("失败", adapter.replies[-1][1])
+        self.assertTrue(adapter.replies[-1][2])
+
+    async def test_stop_during_media_preflight_finishes_the_original_loading_bubble(self):
+        service, adapter, agent = self.service()
+        downloading = asyncio.Event()
+
+        async def download(_media):
+            downloading.set()
+            await asyncio.Event().wait()
+
+        adapter.download_media = download
+        message = replace(self.message("查看图片", identifier="loading-media"),
+                          media=(InboundMedia("image", "x.jpg", "image/jpeg", object()),))
+        await service.receive(self.account, adapter, message)
+        await asyncio.wait_for(downloading.wait(), 2)
+        await service.receive(self.account, adapter, self.message("/stop"))
+        await self.wait_idle(service)
+        original = [(text, finish) for identifier, text, finish in adapter.replies
+                    if identifier == "loading-media"]
+        self.assertEqual(original, [("正在处理…", False), ("已停止。", True)])
+        self.assertEqual(agent.calls, [])
+        row = await self.store.get_message(self.account.id, "loading-media")
+        self.assertEqual((row.processing_status, row.delivery_status), ("interrupted", "sent"))
+
+    async def test_gateway_shutdown_finishes_bubble_and_preserves_partial_text(self):
+        service, adapter, agent = self.service()
+        agent.hold = True
+        service.stream_interval = 0
+        await service.receive(self.account, adapter, self.message("等待", identifier="shutdown-loading"))
+        await asyncio.wait_for(agent.started.wait(), 2)
+        async with asyncio.timeout(2):
+            while adapter.replies[-1][1] != "回答":
+                await asyncio.sleep(0.01)
+        self.assertEqual(adapter.replies[-1], ("shutdown-loading", "回答", False))
+        await service.close_account(self.account.id)
+        self.assertEqual(adapter.replies[-1], ("shutdown-loading", "回答\n\n服务已停止，请稍后重试。", True))
+        row = await self.store.get_message(self.account.id, "shutdown-loading")
+        self.assertEqual((row.processing_status, row.delivery_status), ("interrupted", "sent"))
 
     async def test_new_is_atomic_and_duplicate_does_not_rotate_after_delivery_failure(self):
         service, adapter, agent = self.service()

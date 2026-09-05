@@ -56,6 +56,8 @@ FileStore协议。`channel_gateway/runtime.py`负责Account轮询与Adapter生�
 负责同Peer队列、命令、消息处理和SSE投影；`channels/contracts.py/registry.py`提供公共接口与注册表。
 只有`channels/adapters/wecom/`引用官方`wecom-aibot-python-sdk==1.0.2`；连接、认证、心跳、重连、
 事件分发、媒体下载解密和回复协议均调用SDK，不写第二套协议。当前仅企微Adapter，不宣称飞书已实现。
+加载通过公共`reply_loading`交给Adapter；企微使用`<think></think>`原生占位，正文和终态复用同一Stream ID。
+占位不入历史、不外发思考/工具细节；停止和失败以非空文本及`finish=true`收尾，不用定时器反复发送假省略号。
 0.7.0只允许一个API worker与一个Gateway副本，Gateway不执行Alembic，启动前数据库必须为`002`。
 Gateway入口必须显式使用`uvicorn.run(..., workers=1, reload=False)`，不继承容器的
 `WEB_CONCURRENCY`；只改成应用导入字符串会放开多worker并造成渠道连接竞争，不是正确修复。

@@ -32,6 +32,9 @@ class FakeWeComClient:
     def new_reply_id(self):
         return "reply-id"
 
+    async def reply_loading(self, message, reply_id):
+        await self.reply(message, reply_id, "正在处理…", False)
+
     async def reply(self, message, reply_id, content, finish):
         await self.reply_stream(None, reply_id, content, finish)
 

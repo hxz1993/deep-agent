@@ -123,6 +123,11 @@ class WecomAdapter:
     def new_reply_id(self) -> str:
         return generate_req_id("deepagent")
 
+    async def reply_loading(self, message: InboundMessage, reply_id: str) -> None:
+        # Same native thinking placeholder as WecomTeam/wecom-openclaw-plugin.
+        # WeCom animates it; never send private reasoning or a timer-driven dot loop.
+        await self.reply(message, reply_id, "<think></think>", False)
+
     async def reply(
         self, message: InboundMessage, reply_id: str, content: str, finish: bool
     ) -> None:

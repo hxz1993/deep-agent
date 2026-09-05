@@ -139,6 +139,7 @@ class ChannelService:
 
     async def _process(self, job: MessageJob) -> None:
         output = ""
+        loading_started = False
         try:
             account = await self.store.get_account(job.account.id)
             if account is None or not account.enabled or account.id in self._closed:
@@ -157,7 +158,10 @@ class ChannelService:
             job.session_id = resolved.session.session_id
             job.agent_id = resolved.session.agent_id
             await self.store.update_run(job.run_id, session_id=job.session_id)
-            await job.adapter.reply(job.message, job.reply_id, "正在处理…", False)
+            # Start native feedback before media/model I/O, and reuse this reply
+            # ID for text and terminal replies so there is only one bubble.
+            loading_started = True
+            await job.adapter.reply_loading(job.message, job.reply_id)
             attachments = []
             for media in job.message.media:
                 data, filename = await job.adapter.download_media(media)
@@ -245,6 +249,16 @@ class ChannelService:
                 error_code="user_stopped" if job.stopped else ("gateway_cancelled" if job.dispatched else "preflight_failed"),
                 error_message="Channel processing interrupted",
             )
+            if loading_started:
+                # /stop during media preparation or gateway shutdown may cancel
+                # before the API emits a terminal SSE. Close the native spinner
+                # while the adapter is still connected; don't delay shutdown.
+                try:
+                    async with asyncio.timeout(2):
+                        notice = "已停止。" if job.stopped else "服务已停止，请稍后重试。"
+                        await self._deliver(job, f"{output}\n\n{notice}".strip())
+                except TimeoutError:
+                    logger.warning("Channel loading completion timed out during cancellation")
             raise
         except Exception as exc:
             logger.error("Channel processing failed error_type={}", type(exc).__name__)

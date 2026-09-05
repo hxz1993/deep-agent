@@ -9,6 +9,8 @@
 - [`Jenkinsfile.v1`](Jenkinsfile.v1)：旧流水线归档，镜像只启动 Gunicorn API，不启动渠道网关。
 - [`Jenkinsfile.v2`](Jenkinsfile.v2)：Test 双进程流水线，镜像启动
   `python -m deep_agent.combined_runtime`。
+- [`Jenkinsfile.diagnose.v1`](Jenkinsfile.diagnose.v1)：Test 只读诊断版，粘贴构建即可收集现有失败
+  Pod 的状态、事件和日志；不是发布流水线。
 - [`combined_runtime.py`](../../../deep_agent/combined_runtime.py)：镜像内启动器，不在 Jenkins 节点运行。
 
 Alpha 可以继续使用 V1 发布同一套新代码：API 和其他功能会升级，应用启动也会执行数据库迁移，
@@ -75,15 +77,35 @@ Test Job。V2 沿用 V1 的 Git、Harbor、Kubernetes 凭据 ID 和 Job 命名�
 - 镜像构建失败：检查依赖、wheel、Docker 或镜像仓库。
 - rollout 失败：检查 `kubectl describe pod` 和容器日志；常见原因是 API 数据库迁移失败。
 - `combined_runtime --check` 失败：检查容器日志中 API 或 Channel Gateway 的启动错误。若提示缺少
-  `/tmp/deep-agent-channel-runtime/token`，说明容器没有通过统一入口启动，应检查 Deployment 的
-  `command` / `args` 是否被其他发布配置再次覆盖。
+  `/tmp/deep-agent-channel-runtime/token`，应结合日志检查统一入口是否执行或是否提前退出，
+  以及 Deployment 的 `command` / `args` 是否被其他发布配置再次覆盖，不能只凭缺少文件确定原因。
 
 流水线不会自动回滚数据库。只更新一个原 Deployment，因此不再涉及额外网关资源的创建、缩容或回滚。
+
+## 只能粘贴脚本时，如何诊断失败的发布
+
+无需登录服务器或手动执行 `kubectl`：
+
+1. 先保留当前发布脚本，然后把 **`Jenkinsfile.diagnose.v1` 的完整内容**替换到现有 Test Job 的
+   Pipeline script，保存后点一次构建；现有参数保持原样即可，诊断脚本不读取它们。
+2. 把这次构建的 **Console Output** 发回排查。脚本固定读取 `test/deep-agent`，沿用现有
+   `java21-mvn3` 节点和 Kubernetes 凭据，不需要新增参数、Python、jq 或插件。
+3. 诊断结束后，需恢复发布脚本才会重新发布；不要把诊断成功当作服务恢复。
+
+诊断脚本不拉代码、不构建镜像、不更新 Deployment、不重启 Pod、不执行容器命令，也不连接数据库。
+它按 Deployment/ReplicaSet 的 controller UID 精确关联新旧 Pod，输出状态、退出码、重启次数、
+事件，以及目标 `deep-agent` 容器的当前/上次退出日志。没有上次日志或单项读取失败会明确提示并继续；
+无法读取 Deployment、ReplicaSet 或 Pod 清单时直接报错，不伪装成收集成功。
+
+不输出完整 YAML、环境变量或 Secret；日志会隐藏常见密钥赋值、带密码 URL 和配置初始化行。
+脱敏并非万能，转发前仍请检查业务日志中是否含账号信息或对话正文。事件和上次容器日志可能已被集群
+清理，脚本只能收集当前仍保留的证据，不会为了生成日志重新启动服务。
 
 维护者可在仓库根运行定向冒烟：
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 python3.12 -m unittest tests.unit.test_jenkins_deploy_v2 -v
+PYTHONDONTWRITEBYTECODE=1 python3.12 -m unittest tests.unit.test_jenkins_diagnostics -v
 ```
 
 参考契约：[渠道指南](../wecom-channel.md)、[API Gunicorn](../../../deep_agent/gunicorn.conf.py)、

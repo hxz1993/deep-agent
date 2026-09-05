@@ -1,6 +1,6 @@
 // V2：沿用 V1 的单 Deployment 发布方式；镜像内同时托管 API 与渠道网关。
 pipeline {
-    agent { label "$AGENT" }
+    agent { label "${params.AGENT ?: 'java21-mvn3'}" }
     options {
         buildDiscarder(logRotator(numToKeepStr: '2'))
         disableConcurrentBuilds()
@@ -21,11 +21,11 @@ pipeline {
     }
     stages {
         stage('RELOAD_PIPELINE') {
-            when { environment name: 'RELOAD_PIPELINE', value: 'true' }
+            when { expression { params.RELOAD_PIPELINE == 'true' } }
             steps { echo '仅刷新流水线参数，不构建、不连接集群。' }
         }
         stage('Git Checkout') {
-            when { environment name: 'RELOAD_PIPELINE', value: 'false' }
+            when { expression { params.RELOAD_PIPELINE != 'true' } }
             steps {
                 script {
                     env.NAMESPACE = sh(script: '''#!/bin/sh
@@ -34,7 +34,7 @@ echo "$JOB_NAME" | awk -F/ '{print $1}'
 ''', returnStdout: true).trim()
                     env.NAME = env.JOB_BASE_NAME
                     dir('source') {
-                        checkout([$class: 'GitSCM', branches: [[name: "${BRANCH_TAG}"]], extensions: [[$class: 'CloneOption', noTags: false, reference: '', shallow: true, timeout: 30]], userRemoteConfigs: [[credentialsId: 'giteeKey', url: 'https://gitee.com/proinnova/deep-agent']]])
+                        checkout([$class: 'GitSCM', branches: [[name: "${params.BRANCH_TAG ?: 'test'}"]], extensions: [[$class: 'CloneOption', noTags: false, reference: '', shallow: true, timeout: 30]], userRemoteConfigs: [[credentialsId: 'giteeKey', url: 'https://gitee.com/proinnova/deep-agent']]])
                         env.SOURCE_DIR = pwd()
                         env.REVISION = sh(script: 'git rev-parse HEAD', returnStdout: true).trim()
                         sh '''#!/bin/sh
@@ -51,7 +51,7 @@ test -f deep_agent/channel_gateway/__main__.py
             }
         }
         stage('Build Image') {
-            when { environment name: 'RELOAD_PIPELINE', value: 'false' }
+            when { expression { params.RELOAD_PIPELINE != 'true' } }
             steps {
                 dir("${env.BUILD_DIR}") {
                     sh '''#!/bin/sh
@@ -73,7 +73,8 @@ RUN sed -i 's|mirrors.tuna.tsinghua.edu.cn|mirrors.aliyun.com|g' /etc/apt/source
     pip3 install -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple/ && \
     bash scripts/sandbox_venv/setup.sh && \
     python -m compileall -q deep_agent/combined_runtime.py deep_agent/channel_gateway && \
-    python -c "import deep_agent.combined_runtime; import deep_agent.channel_gateway.__main__"
+    python -c "import deep_agent.combined_runtime; import deep_agent.channel_gateway.__main__" && \
+    python -m unittest tests.unit.test_channel_gateway_entrypoint -v
 CMD ["python", "-m", "deep_agent.combined_runtime"]
 '''
                     script {
@@ -86,7 +87,7 @@ CMD ["python", "-m", "deep_agent.combined_runtime"]
             }
         }
         stage('漏洞检测') {
-            when { environment name: 'RELOAD_PIPELINE', value: 'false' }
+            when { expression { params.RELOAD_PIPELINE != 'true' } }
             steps {
                 dir("${env.BUILD_DIR}") {
                     sh '''#!/bin/sh
@@ -99,7 +100,7 @@ set -eu
             }
         }
         stage('RELEASE API + Channel Gateway') {
-            when { environment name: 'RELOAD_PIPELINE', value: 'false' }
+            when { expression { params.RELOAD_PIPELINE != 'true' } }
             steps {
                 withKubeConfig([credentialsId: "${env.K8SCredentialsId}", serverUrl: "${env.K8SServerAPI}", namespace: "${env.NAMESPACE}"]) {
                     sh '''#!/bin/sh
@@ -116,7 +117,7 @@ kubectl exec "deployment/$NAME" -c "$NAME" -- python -m deep_agent.combined_runt
     post {
         success {
             script {
-                if (params.RELOAD_PIPELINE == 'false') {
+                if (params.RELOAD_PIPELINE != 'true') {
                     echo "API + Channel Gateway 发布成功：${env.RELEASE_IMAGE}；源码 ${env.REVISION}"
                 }
             }

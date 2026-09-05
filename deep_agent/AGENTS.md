@@ -57,9 +57,12 @@ FileStore协议。`channel_gateway/runtime.py`负责Account轮询与Adapter生�
 只有`channels/adapters/wecom/`引用官方`wecom-aibot-python-sdk==1.0.2`；连接、认证、心跳、重连、
 事件分发、媒体下载解密和回复协议均调用SDK，不写第二套协议。当前仅企微Adapter，不宣称飞书已实现。
 0.7.0只允许一个API worker与一个Gateway副本，Gateway不执行Alembic，启动前数据库必须为`002`。
+Gateway入口必须显式使用`uvicorn.run(..., workers=1, reload=False)`，不继承容器的
+`WEB_CONCURRENCY`；只改成应用导入字符串会放开多worker并造成渠道连接竞争，不是正确修复。
 Test的Jenkins V2可由`combined_runtime.py`在同一容器托管两个独立进程：先等待API完成迁移并健康，
-再启动回环地址上的Gateway；任一子进程退出即整体退出。该入口只写入V2镜像CMD，继续使用V1
-Gunicorn CMD的环境不会启动Gateway。
+再启动回环地址上的Gateway；任一子进程退出即整体退出。V2在镜像CMD与Deployment目标容器
+command/args中明确指定该入口。未被V2覆盖过入口的V1环境不启动Gateway；同环境退回V1时
+须同步恢复command/args，不能只换镜像。
 本地可传`--local-config ~/.config/deep-agent/sqlite.env --api-port 8000`，此时API子进程仍使用
 `local_dev`，不会丢失回环限制、本地身份注入或本地FileStore；配置中的身份字段不复制到Gateway环境。
 

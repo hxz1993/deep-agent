@@ -223,6 +223,15 @@ class JenkinsPipelineV2Test(unittest.TestCase):
         )
         self.assertIn("defaultValue: 'test'", parameter_block)
 
+    def test_restoring_release_after_diagnostics_has_first_build_defaults(self):
+        self.assertIn("params.AGENT ?: 'java21-mvn3'", self.pipeline)
+        self.assertIn("params.BRANCH_TAG ?: 'test'", self.pipeline)
+        self.assertEqual(self.pipeline.count("when { expression { params.RELOAD_PIPELINE != 'true' } }"), 4)
+        self.assertNotIn("when { environment name: 'RELOAD_PIPELINE'", self.pipeline)
+
+    def test_image_validates_gateway_entrypoint_with_its_installed_uvicorn(self):
+        self.assertIn("python -m unittest tests.unit.test_channel_gateway_entrypoint -v", self.pipeline)
+
 
 if __name__ == "__main__":
     unittest.main()

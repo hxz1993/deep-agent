@@ -13,9 +13,10 @@
   Pod 的状态、事件和日志；不是发布流水线。
 - [`combined_runtime.py`](../../../deep_agent/combined_runtime.py)：镜像内启动器，不在 Jenkins 节点运行。
 
-Alpha 可以继续使用 V1 发布同一套新代码：API 和其他功能会升级，应用启动也会执行数据库迁移，
-但因为镜像入口仍是 Gunicorn，所以不会启动 8010 渠道网关。数据库一旦升级到 `002`，不要再发布
-不认识 `002` 的旧源码镜像。
+尚未用 V2 覆盖过启动命令的 Alpha 可以继续使用 V1 发布同一套新代码：API 和其他功能会升级，
+应用启动也会执行数据库迁移，但 Gunicorn 入口不会启动 8010 渠道网关。已经用过 V2 的同一个
+Deployment 若要恢复 API-only，还必须恢复其 `command` / `args`，不能只换回 V1 镜像。
+数据库一旦升级到 `002`，不要再发布不认识 `002` 的旧源码镜像。
 
 ## V2 实际做了什么
 
@@ -37,6 +38,35 @@ Gateway Deployment、Service、Ingress、数据库 Secret 或 Jenkins 参数。8
 内部随机 Token，仅写入容器 `/tmp` 下权限为 `0600` 的临时文件，用于两个子进程及发布健康检查，
 不会写入仓库或 Jenkins 日志。API 或网关任一进程退出时，启动器会停止另一个进程并退出，让
 Kubernetes 按原策略重启容器。
+
+网关入口固定 `workers=1, reload=False`，不继承容器原有 `WEB_CONCURRENCY`。否则 Uvicorn
+在“应用对象 + 多 worker”组合下会拒绝启动；0.52.4 的表现是 import string 警告和退出码 3。
+V2 在镜像构建内运行入口定向测试，覆盖继承多 worker 环境的情况；测试不启动业务应用或连接数据库，
+并使用这次镜像实际安装的 Uvicorn。Jenkins 节点仍不需要安装 Python。
+
+本次修复不新增数据库迁移、端口或部署资源，也不改变现有 API、渠道配置与机器人消息协议。
+把诊断脚本换回当前 `Jenkinsfile.v2`，选择 `test`、`RELOAD_PIPELINE=false` 后重新构建即可发布修复。
+从无参数的诊断脚本切回时，首轮缺失参数会回退到 `java21-mvn3` / `test` / 正常发布，
+不必先构建一轮只为刷新参数；显式选择 `RELOAD_PIPELINE=true` 仍只刷新参数。
+
+## Test 便捷部署与正式部署的区别
+
+当前 V2 适合先沿用已有 Job 和 Deployment 完成 Test 验证：一份镜像、一个容器、两个进程。
+代价是 API 与 Gateway 共用容器生命周期，任一个退出都会整体重启，不能独立发布或做故障隔离。
+本脚本保留已有副本数和更新策略；即使 replicas=1，RollingUpdate 也可能短暂并存新旧 Gateway。
+在尚未实现网关选主前，不应让启用同一机器人账户的新旧网关并行运行。Test 初次发布成功后再启用
+机器人；后续维护应采用单副本、先停旧再起新的策略（例如 Recreate），并接受短时中断。
+更新策略的行为以 [Kubernetes Deployment 文档](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#recreate-deployment) 为准。
+
+正式部署建议复用同一镜像，分别启动 API 与 Gateway 两个 Deployment；仍可在一次流水线中依次发布，
+不需要重写渠道业务代码，但需补齐部署配置：
+
+- 独立的启动命令、资源限制、健康探针、日志和重启策略；网关故障不连带关闭普通 API。
+- 内部 Service 地址与共享 Secret 中的网关内部 Token，不能再依赖同一容器的回环地址和临时 Token。
+- API 先完成数据库迁移并就绪，Gateway 再启动；当前 Gateway 保持单实例且发布时不重叠。
+- 当前 API 的取消协调仍依赖进程内状态，不能仅靠增加 Pod/worker 声称支持多副本；需要另行设计。
+
+这轮不改集群部署拓扑或更新策略；正式上线前应单独核验这些条件，不把“Test 冒烟通过”当作高可用验收。
 
 ## Jenkins 配置
 
@@ -106,6 +136,7 @@ Test Job。V2 沿用 V1 的 Git、Harbor、Kubernetes 凭据 ID 和 Job 命名�
 ```bash
 PYTHONDONTWRITEBYTECODE=1 python3.12 -m unittest tests.unit.test_jenkins_deploy_v2 -v
 PYTHONDONTWRITEBYTECODE=1 python3.12 -m unittest tests.unit.test_jenkins_diagnostics -v
+PYTHONDONTWRITEBYTECODE=1 python3.12 -m unittest tests.unit.test_channel_gateway_entrypoint -v
 ```
 
 参考契约：[渠道指南](../wecom-channel.md)、[API Gunicorn](../../../deep_agent/gunicorn.conf.py)、

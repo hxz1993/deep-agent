@@ -32,7 +32,9 @@ def main() -> None:
     from deep_agent.channel_gateway.app import app
 
     config = GatewayConfig.from_env()
-    uvicorn.run(app, host=config.host, port=config.port)
+    # A gateway owns one set of channel connections and queues. Do not inherit
+    # WEB_CONCURRENCY from the API/container and start competing gateway workers.
+    uvicorn.run(app, host=config.host, port=config.port, workers=1, reload=False)
 
 
 if __name__ == "__main__":

@@ -27,7 +27,9 @@ from deep_agent.files.storage import FileStore, PlatformFileStore
 from deepfos_platform.client.platform import FILE_TYPE_ATTACHMENT
 
 TOOL_OUTPUT_MIN_TOKENS = 4_000
-TOOL_OUTPUT_MAX_TOKENS = 24_000
+# Long document tools may return ~30K CJK characters. Allow those inline only
+# when the configured model input budget supports it; unknown windows stay 24K.
+TOOL_OUTPUT_MAX_TOKENS = 48_000
 TOOL_OUTPUT_DEFAULT_TOKENS = 24_000
 TOOL_OUTPUT_RATIO = 0.20
 TOOL_OUTPUT_PREVIEW_CHARS = 2_000

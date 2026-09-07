@@ -429,8 +429,8 @@ Skill路径必须属于当前 Agent已选择且运行目录就绪的资源索引
 ### 大工具结果
 
 普通Function、MCP、Sandbox和MCP Resource工具的返回在进入模型历史前经过Harness
-`ToolOutputLimits`。阈值为模型可用输入窗口的20%，并限制在4K～24K Token；没有有效窗口时使用
-24K。超过阈值时，完整UTF-8结果上传为平台 `DL` 文件，历史只保存受限预览和
+`ToolOutputLimits`。阈值为模型配置窗口减去最大输出后的20%，并限制在4K～48K Token；没有有效窗口时使用
+24K。这不是当前会话剩余空间；长文档仍应分页，压缩时的工具裁剪阈值不随之放大。达到阈值时，完整UTF-8结果上传为平台 `DL` 文件，历史只保存受限预览和
 `ToolReturnPart.metadata.overflow_handle`。`read_file`、`read_tool_result`、Skill加载和Tool Search
 不再次进入该治理链路，避免递归外置。
 结构化返回使用Harness原生`json_lines` Serializer：顶层Sequence在Spill Artifact中每项一行，

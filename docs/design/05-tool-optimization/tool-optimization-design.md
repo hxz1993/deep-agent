@@ -865,9 +865,18 @@ v0.4.0 已直接采用Harness 0.18公开的 `ToolOutputLimits`。它在工具执
 
 ```text
 available_input = context_window_tokens - max_output_tokens
-threshold = clamp(available_input × 20%, 4K, 24K Token)
+threshold = clamp(available_input × 20%, 4K, 48K Token)
 无有效context_window_tokens时使用24K Token
 ```
+
+这里的可用输入是模型配置窗口减去最大输出，不是会话当前剩余空间。2026-09-07 将已知窗口的
+上限从24K提高到48K，减少长文档工具返回约30K中文字符时不必要的转存与再次读取；比例、4K下限、
+未知窗口24K回退不变。可用输入至少240K才会用满48K；例如128K窗口预留8K输出仍为24K。
+Harness在估算大小达到阈值时转存，未达到则保留原对象；该估算不等同于Provider账单Token。
+
+文档继续支持Tool返回，不要求客户端支持MCP Resource。搜索默认返回标题、定位和短摘录，正文工具
+提供分页/段落读取及明确的后续位置；不要因上限提高就默认返回多篇全文。连续长文档仍会更快耗尽上下文，
+也不能用此单工具阈值替代整轮上下文预算。压缩摘要副本的工具结果裁剪阈值（8192字符）维持不变。
 
 第一版只解决安全兜底，不把它扩成通用文件或Artifact平台：
 

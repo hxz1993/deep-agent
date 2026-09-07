@@ -138,8 +138,13 @@ class ChannelService:
             self._kick(peer)
 
     async def _process(self, job: MessageJob) -> None:
-        output = ""
+        # Public text phases accumulate only in the temporary preview. Keep the
+        # current phase separate for legacy final events without an output.
+        preview = ""
+        previous_previews = ""
+        final_output: str | None = None
         loading_started = False
+        stream = None
         try:
             account = await self.store.get_account(job.account.id)
             if account is None or not account.enabled or account.id in self._closed:
@@ -161,7 +166,8 @@ class ChannelService:
             # Start native feedback before media/model I/O, and reuse this reply
             # ID for text and terminal replies so there is only one bubble.
             loading_started = True
-            await job.adapter.reply_loading(job.message, job.reply_id)
+            preview_enabled = await self._preview(job)
+            showing_loading = True
             attachments = []
             for media in job.message.media:
                 data, filename = await job.adapter.download_media(media)
@@ -205,33 +211,58 @@ class ChannelService:
             job.dispatched = True
             last_sent = 0.0
             final_status = "completed"
-            async for event in self.deep_agent.stream_chat(
+            stream = self.deep_agent.stream_chat(
                 account, session_id=job.session_id, message=job.message.prompt, attachments=attachments,
                 **input_options,
-            ):
+            )
+            async for event in stream:
                 if event.event == "session":
                     run_id = event.data.get("run_id")
                     if run_id:
                         await self.store.update_run(job.run_id, agent_run_id=str(run_id))
                 elif event.event == "text":
-                    output += str(event.data.get("delta") or "")
+                    delta = event.data.get("delta")
+                    if not isinstance(delta, str) or not delta:
+                        continue
+                    preview += delta
                     now = time.monotonic()
-                    if output and now - last_sent >= self.stream_interval:
-                        await job.adapter.reply(job.message, job.reply_id, output, False)
+                    if showing_loading or now - last_sent >= self.stream_interval:
+                        if preview_enabled:
+                            content = f"{previous_previews}\n\n{preview.lstrip()}" if previous_previews else preview
+                            preview_enabled = await self._preview(job, content)
                         last_sent = now
+                    showing_loading = False
+                elif event.event in {"thinking", "tool_call", "context_compaction_progress"}:
+                    # Native tools use the same public tool_call event. Results
+                    # and reasoning stay in Event Store, not the IM bubble.
+                    if not showing_loading:
+                        if preview.strip():
+                            previous_previews = f"{previous_previews}\n\n{preview.strip()}" if previous_previews else preview.strip()
+                        preview = ""
+                        if preview_enabled:
+                            preview_enabled = await self._preview(job)
+                        showing_loading = True
                 elif event.event == "final":
                     job.terminal = True
                     final_status = str(event.data.get("status") or "completed")
-                    if not output and isinstance(event.data.get("output"), str):
-                        output = event.data["output"]
+                    if "output" in event.data:
+                        value = event.data["output"]
+                        final_output = value if isinstance(value, str) else ""
                 elif event.event == "cancelled":
                     job.terminal = True
                     final_status = "interrupted"
                 elif event.event == "error":
                     job.terminal = True
                     final_status = "failed"
+                if job.terminal:
+                    # Deliver immediately, without waiting for HTTP EOF. Late
+                    # deltas or a transport failure cannot overwrite a final.
+                    break
             if not job.terminal:
                 raise RuntimeError("DeepAgent stream ended without terminal event")
+            # Only old events that omit output may fall back to the last text
+            # phase. Explicitly empty output must not resurrect process text.
+            output = preview if final_output is None else final_output
             processing = "completed"
             if final_status in {"cancelled", "interrupted"}:
                 processing = "interrupted"
@@ -242,7 +273,7 @@ class ChannelService:
             elif final_status == "pending":
                 output = f"{output}\n\n此操作需要在 DeepAgent 控制台继续完成。".strip()
             await self.store.update_run(job.run_id, processing_status=processing)
-            await self._deliver(job, output or "已处理完成，但没有可展示的文本结果。")
+            await self._deliver(job, output if output.strip() else "已处理完成，但没有可展示的文本结果。")
         except asyncio.CancelledError:
             await self.store.update_run(
                 job.run_id, processing_status="interrupted", delivery_status="failed",
@@ -256,7 +287,7 @@ class ChannelService:
                 try:
                     async with asyncio.timeout(2):
                         notice = "已停止。" if job.stopped else "服务已停止，请稍后重试。"
-                        await self._deliver(job, f"{output}\n\n{notice}".strip())
+                        await self._deliver(job, f"{preview}\n\n{notice}".strip())
                 except TimeoutError:
                     logger.warning("Channel loading completion timed out during cancellation")
             raise
@@ -268,6 +299,27 @@ class ChannelService:
                 error_message="Channel message processing failed",
             )
             await self._deliver(job, "消息处理失败，请稍后重试或在 DeepAgent 控制台查看状态。")
+        finally:
+            if stream is not None:
+                try:
+                    async with asyncio.timeout(2):
+                        await stream.aclose()
+                except Exception as exc:
+                    logger.warning("Channel stream cleanup failed error_type={}", type(exc).__name__)
+
+    async def _preview(self, job: MessageJob, content: str | None = None) -> bool:
+        """Best-effort progress; a failed preview must not abort/replay a Run."""
+        try:
+            if content is None:
+                await job.adapter.reply_loading(job.message, job.reply_id)
+            else:
+                await job.adapter.reply(job.message, job.reply_id, content, False)
+        except Exception as exc:
+            # Stop preview attempts for this Run rather than waiting for an SDK
+            # timeout on every delta. Still attempt the final delivery once.
+            logger.warning("Channel preview disabled error_type={}", type(exc).__name__)
+            return False
+        return True
 
     async def _deliver(self, job: MessageJob, text: str) -> None:
         try:

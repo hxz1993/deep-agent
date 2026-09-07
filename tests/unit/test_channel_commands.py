@@ -48,15 +48,18 @@ class FakeAgent:
         done = asyncio.Event()
         self.running[session_id] = done
         self.started.set()
-        yield StreamEvent("session", {"run_id": uuid4().hex})
-        yield StreamEvent("thinking", {"delta": "private trace"})
-        yield StreamEvent("text", {"delta": "回答"})
-        if self.hold:
-            await done.wait()
-            yield StreamEvent("cancelled", {"status": "cancelled"})
-        else:
-            yield StreamEvent("final", {"status": "completed"})
-        self.running.pop(session_id, None)
+        try:
+            yield StreamEvent("session", {"run_id": uuid4().hex})
+            yield StreamEvent("thinking", {"delta": "private trace"})
+            yield StreamEvent("text", {"delta": "回答"})
+            if self.hold:
+                await done.wait()
+                yield StreamEvent("cancelled", {"status": "cancelled"})
+            else:
+                yield StreamEvent("final", {"status": "completed"})
+        finally:
+            # The channel may close HTTP immediately after a terminal event.
+            self.running.pop(session_id, None)
 
     async def cancel_session(self, account, session_id, **kwargs):
         done = self.running.get(session_id)

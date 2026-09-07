@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import delete, event, insert, select
@@ -50,6 +51,43 @@ class FakeDeepAgentClient:
         yield StreamEvent("text", {"delta": "你"})
         yield StreamEvent("text", {"delta": "好"})
         yield StreamEvent("final", {"status": "completed"})
+
+
+class PresentationDeepAgentClient(FakeDeepAgentClient):
+    def __init__(self, events):
+        self.events = events
+        self.calls = 0
+        self.closed = False
+
+    async def stream_chat(self, *_args, **_kwargs):
+        self.calls += 1
+        try:
+            yield StreamEvent("session", {"run_id": "presentation-run"})
+            for item in self.events:
+                if isinstance(item, Exception):
+                    raise item
+                yield item
+        finally:
+            self.closed = True
+
+
+class PresentationWeComClient(FakeWeComClient):
+    def __init__(self, *, fail_loading=False, fail_preview=False, fail_final=False):
+        super().__init__()
+        self.fail_loading = fail_loading
+        self.fail_preview = fail_preview
+        self.fail_final = fail_final
+        self.attempts = []
+
+    async def reply_stream(self, _frame, stream_id, content, finish=False):
+        self.attempts.append((stream_id, content, finish))
+        if (
+            (finish and self.fail_final)
+            or (not finish and content == "正在处理…" and self.fail_loading)
+            or (not finish and content != "正在处理…" and self.fail_preview)
+        ):
+            raise ConnectionError("fixture reply transport unavailable")
+        await super().reply_stream(_frame, stream_id, content, finish)
 
 
 class ChannelGatewayTests(unittest.IsolatedAsyncioTestCase):
@@ -109,6 +147,197 @@ class ChannelGatewayTests(unittest.IsolatedAsyncioTestCase):
     async def asyncTearDown(self) -> None:
         await self.engine.dispose()
         self.tmp.cleanup()
+
+    async def _run_presentation(self, events, *, message_id="presentation", adapter=None, stream_interval=0):
+        message = parse_message({
+            "headers": {"req_id": f"request-{message_id}"},
+            "body": {
+                "msgtype": "text", "msgid": message_id,
+                "from": {"userid": "presentation-user"},
+                "text": {"content": "本地展示测试，不执行业务修改"},
+            },
+        })
+        agent = PresentationDeepAgentClient(events)
+        adapter = adapter or PresentationWeComClient()
+        service = ChannelService(self.store, agent, stream_interval=stream_interval)
+        await service.receive(self.account, adapter, message)
+        peer = service.peers[(self.account.id, message.peer_type, message.peer_id)]
+        if peer.worker is not None:
+            await asyncio.wait_for(peer.worker, timeout=3)
+        row = await self.store.get_message(self.account.id, message_id)
+        self.assertTrue(agent.closed)
+        self.assertTrue(all(stream_id == "reply-id" for stream_id, _, _ in adapter.attempts))
+        return service, agent, adapter, row, message
+
+    async def test_presentation_accumulates_phases_with_newlines_and_only_rearms_loading_on_transition(self):
+        _, _, adapter, row, _ = await self._run_presentation([
+            StreamEvent("thinking", {"delta": "PRIVATE_THINKING"}),
+            StreamEvent("thinking", {"delta": "PRIVATE_THINKING_2"}),
+            StreamEvent("tool_call", {"tool": "PRIVATE_TOOL", "args": {"secret": "PRIVATE_ARGS"}}),
+            StreamEvent("text", {"delta": "第一轮："}),
+            StreamEvent("text", {"delta": "准备读取。"}),
+            StreamEvent("thinking", {"delta": "PRIVATE_NEXT_THOUGHT"}),
+            StreamEvent("thinking", {"delta": "PRIVATE_REPEATED_THOUGHT"}),
+            StreamEvent("tool_call", {"tool": "PRIVATE_TOOL_2"}),
+            StreamEvent("tool_result", {"result": "PRIVATE_RESULT"}),
+            StreamEvent("tool_call_removed", {"reason": "PRIVATE_REMOVED"}),
+            StreamEvent("text", {"delta": "第二轮预览"}),
+            StreamEvent("context_compaction_progress", {"message": "PRIVATE_COMPACTION"}),
+            StreamEvent("context_compaction_progress", {"message": "PRIVATE_COMPACTION_2"}),
+            StreamEvent("text", {"delta": "第三轮临时正文，比最终答案长很多。"}),
+            StreamEvent("final", {"status": "completed", "output": "完成"}),
+        ])
+        self.assertEqual(adapter.replies, [
+            ("正在处理…", False),
+            ("第一轮：", False),
+            ("第一轮：准备读取。", False),
+            ("正在处理…", False),
+            ("第一轮：准备读取。\n\n第二轮预览", False),
+            ("正在处理…", False),
+            ("第一轮：准备读取。\n\n第二轮预览\n\n第三轮临时正文，比最终答案长很多。", False),
+            ("完成", True),
+        ])
+        self.assertNotIn("PRIVATE_", "".join(text for text, _ in adapter.replies))
+        self.assertEqual((row.processing_status, row.delivery_status), ("completed", "sent"))
+
+    async def test_presentation_native_search_interleaving_does_not_keep_old_tail(self):
+        _, _, adapter, _, _ = await self._run_presentation([
+            StreamEvent("text", {"delta": "Searching with the provider's native tool."}),
+            StreamEvent("tool_call", {
+                "tool": "web_search", "source": "web", "execution": "native",
+                "tool_call_id": "native-search", "args": {"query": "PRIVATE_QUERY"},
+            }),
+            StreamEvent("tool_result", {
+                "tool": "web_search", "source": "web", "execution": "native",
+                "tool_call_id": "native-search", "result": "PRIVATE_RESULT",
+            }),
+            StreamEvent("text", {"delta": "已经找到答案，正在整理。"}),
+            StreamEvent("final", {"status": "completed", "output": "最终答案"}),
+        ])
+        self.assertEqual(adapter.replies, [
+            ("正在处理…", False),
+            ("Searching with the provider's native tool.", False),
+            ("正在处理…", False),
+            ("Searching with the provider's native tool.\n\n已经找到答案，正在整理。", False),
+            ("最终答案", True),
+        ])
+
+    async def test_presentation_explicit_empty_or_invalid_final_never_restores_preview(self):
+        for number, output in enumerate(("", " \n\t", None, {"unexpected": "shape"})):
+            with self.subTest(output=output):
+                _, _, adapter, row, _ = await self._run_presentation([
+                    StreamEvent("text", {"delta": "不能作为最终答案的过程正文"}),
+                    StreamEvent("final", {"status": "completed", "output": output}),
+                ], message_id=f"empty-final-{number}")
+                self.assertEqual(adapter.replies[-1], ("已处理完成，但没有可展示的文本结果。", True))
+                self.assertEqual((row.processing_status, row.delivery_status), ("completed", "sent"))
+
+    async def test_presentation_legacy_missing_output_uses_only_last_text_phase(self):
+        _, _, adapter, _, _ = await self._run_presentation([
+            StreamEvent("text", {"delta": "旧的过程正文"}),
+            StreamEvent("tool_call", {"tool": "some_tool"}),
+            StreamEvent("text", {"delta": "最后"}),
+            StreamEvent("text", {"delta": "一段"}),
+            StreamEvent("final", {"status": "completed"}),
+        ])
+        self.assertEqual(adapter.replies[-1], ("最后一段", True))
+
+    async def test_presentation_legacy_missing_output_after_tool_does_not_restore_prior_phase(self):
+        _, _, adapter, _, _ = await self._run_presentation([
+            StreamEvent("text", {"delta": "工具之前的临时内容"}),
+            StreamEvent("tool_call", {"tool": "some_tool"}),
+            StreamEvent("tool_result", {"result": "PRIVATE_RESULT"}),
+            StreamEvent("final", {"status": "completed"}),
+        ])
+        self.assertEqual(adapter.replies[-1], ("已处理完成，但没有可展示的文本结果。", True))
+
+    async def test_presentation_final_ignores_late_text_thinking_and_other_terminal_events(self):
+        _, _, adapter, row, _ = await self._run_presentation([
+            StreamEvent("text", {"delta": "临时预览"}),
+            StreamEvent("final", {"status": "completed", "output": "已完成"}),
+            StreamEvent("text", {"delta": "LATE_TEXT"}),
+            StreamEvent("thinking", {"delta": "LATE_THINKING"}),
+            StreamEvent("tool_call", {"tool": "LATE_TOOL"}),
+            StreamEvent("final", {"status": "failed", "output": "LATE_FINAL"}),
+        ])
+        self.assertEqual(adapter.replies, [
+            ("正在处理…", False), ("临时预览", False), ("已完成", True),
+        ])
+        self.assertEqual((row.processing_status, row.delivery_status), ("completed", "sent"))
+
+    async def test_presentation_no_tool_answer_keeps_text_throttling_and_flushes_final(self):
+        with patch("deep_agent.channels.service.time", SimpleNamespace(monotonic=lambda: 100.0)):
+            _, _, adapter, _, _ = await self._run_presentation([
+                StreamEvent("text", {"delta": "甲"}),
+                StreamEvent("text", {"delta": "乙"}),
+                StreamEvent("text", {"delta": "丙"}),
+                StreamEvent("final", {"status": "completed", "output": "甲乙丙"}),
+            ], stream_interval=1)
+        self.assertEqual(adapter.replies, [
+            ("正在处理…", False), ("甲", False), ("甲乙丙", True),
+        ])
+
+    async def test_presentation_transport_error_after_final_does_not_overwrite_completed_answer(self):
+        _, _, adapter, row, _ = await self._run_presentation([
+            StreamEvent("text", {"delta": "中间过程"}),
+            StreamEvent("final", {"status": "completed", "output": "最终答案"}),
+            ConnectionError("fixture SSE disconnected after terminal event"),
+        ])
+        self.assertEqual(adapter.replies[-1], ("最终答案", True))
+        self.assertEqual((row.processing_status, row.delivery_status), ("completed", "sent"))
+
+    async def test_presentation_progress_transport_failure_does_not_abort_or_repeat_agent(self):
+        for number, failure in enumerate(("loading", "preview")):
+            with self.subTest(failure=failure):
+                adapter = PresentationWeComClient(**{f"fail_{failure}": True})
+                service, agent, adapter, row, message = await self._run_presentation([
+                    StreamEvent("text", {"delta": "临时预览"}),
+                    StreamEvent("tool_call", {"tool": "some_tool"}),
+                    StreamEvent("text", {"delta": "另一个预览"}),
+                    StreamEvent("final", {"status": "completed", "output": "最终答案"}),
+                ], adapter=adapter, message_id=f"progress-error-{number}")
+                self.assertEqual(adapter.replies[-1], ("最终答案", True))
+                self.assertEqual((row.processing_status, row.delivery_status), ("completed", "sent"))
+                self.assertEqual(sum(finish for _, _, finish in adapter.attempts), 1)
+                await service.receive(self.account, adapter, message)
+                self.assertEqual(agent.calls, 1)
+                self.assertEqual(len(adapter.attempts), 2 if failure == "loading" else 3)
+
+    async def test_presentation_final_delivery_failure_is_durable_without_reexecuting_agent(self):
+        service, agent, adapter, row, message = await self._run_presentation([
+            StreamEvent("text", {"delta": "中间过程"}),
+            StreamEvent("final", {"status": "completed", "output": "最终答案"}),
+        ], adapter=PresentationWeComClient(fail_final=True))
+        self.assertEqual((row.processing_status, row.delivery_status), ("completed", "failed"))
+        self.assertEqual(row.error_code, "delivery_failed")
+        self.assertIsNotNone(row.finished_at)
+        self.assertEqual(adapter.attempts[-1], ("reply-id", "最终答案", True))
+        before = list(adapter.attempts)
+        await service.receive(self.account, adapter, message)
+        self.assertEqual(agent.calls, 1)
+        self.assertEqual(adapter.attempts, before)
+
+    async def test_presentation_terminal_notice_closes_loading_without_private_details(self):
+        cases = [
+            (StreamEvent("cancelled", {"status": "cancelled"}), "interrupted", "已停止"),
+            (StreamEvent("error", {"message": "PRIVATE_EXCEPTION"}), "failed", "失败"),
+            (StreamEvent("final", {"status": "failed", "output": ""}), "failed", "失败"),
+            (StreamEvent("final", {"status": "pending", "output": None}), "completed", "控制台"),
+            (RuntimeError("PRIVATE_EXCEPTION"), "failed", "失败"),
+        ]
+        for number, (terminal, processing, notice) in enumerate(cases):
+            with self.subTest(terminal=terminal):
+                _, _, adapter, row, _ = await self._run_presentation([
+                    StreamEvent("text", {"delta": "工具前的过程"}),
+                    StreamEvent("tool_call", {"tool": "PRIVATE_TOOL"}),
+                    terminal,
+                ], message_id=f"terminal-{number}")
+                final_text, finish = adapter.replies[-1]
+                self.assertTrue(finish)
+                self.assertIn(notice, final_text)
+                self.assertNotIn("PRIVATE_", final_text)
+                self.assertNotIn("工具前的过程", final_text)
+                self.assertEqual((row.processing_status, row.delivery_status), (processing, "sent"))
 
     async def test_binding_reuses_session_and_rotates_after_agent_change_or_delete(self) -> None:
         first = await self.store.resolve_binding(

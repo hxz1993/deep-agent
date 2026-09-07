@@ -6,6 +6,7 @@ import {
   normalizeConversationHistory,
   projectConversationItems,
 } from "../../../frontend/console/conversation-items.js";
+import { applyAssistantPresentationActions } from "../../../frontend/console/assistant-presentation.js";
 
 const order = (sequence, partOffset = 0) => ({ sequence, part_offset: partOffset });
 const base = (itemId, kind, sequence, overrides = {}) => ({
@@ -66,6 +67,68 @@ test("Assistant 历史节点保留本轮用户开始与最终回复完成时间"
 
   assert.equal(nodes[1].startedAt, "2026-09-02T01:00:00Z");
   assert.equal(nodes[1].completedAt, "2026-09-02T01:01:12Z");
+});
+
+test("同一响应内原生搜索穿插多段正文时按 part 顺序保留过程和最终回答", () => {
+  const segment = (partOffset, text, phase) => base(
+    `message:a:${partOffset}`, "assistant_message", 2,
+    { order: order(2, partOffset), text, phase },
+  );
+  const nativeTool = (partOffset, callId) => base(`tool:${callId}`, "tool", 2, {
+    order: order(2, partOffset),
+    call_id: callId,
+    tool_name: "web_search",
+    mode: "native",
+    input: { query: "测试查询" },
+    output: { sources: [] },
+  });
+  // All five items originate from one ModelResponse. Deliberately scramble
+  // them so the History consumer must honor part_offset, not arrival order.
+  const nodes = projectConversationItems([
+    segment(11, "这是最后的完整回答。", "final"),
+    nativeTool(6, "search-2"),
+    base("message:u", "user_message", 1, { text: "请查询" }),
+    segment(5, "还需要核对第二个来源。", "process"),
+    nativeTool(2, "search-1"),
+    segment(1, "先查询第一个来源。", "process"),
+  ]);
+
+  assert.deepEqual(nodes.map((node) => node.type), ["user", "assistant"]);
+  const actions = nodes[1].actions;
+  assert.deepEqual(actions.map((action) => action.type), [
+    "process_text", "tool_call", "tool_result",
+    "process_text", "tool_call", "tool_result",
+    "text", "finalize_thinking", "finalize_text",
+  ]);
+  assert.deepEqual(
+    actions.filter((action) => ["process_text", "text"].includes(action.type))
+      .map(({ type, content }) => [type, content]),
+    [
+      ["process_text", "先查询第一个来源。"],
+      ["process_text", "还需要核对第二个来源。"],
+      ["text", "这是最后的完整回答。"],
+    ],
+  );
+  assert.deepEqual(
+    actions.filter((action) => action.type === "tool_call")
+      .map((action) => action.call.tool_call_id),
+    ["search-1", "search-2"],
+  );
+
+  const rendered = [];
+  applyAssistantPresentationActions({
+    addProcessText: (content) => rendered.push(["process", content]),
+    addToolCall() {},
+    addToolResult() {},
+    setFinalText: (content) => rendered.push(["final", content]),
+    finalizeThinking() {},
+    finalizeText() {},
+  }, actions);
+  assert.deepEqual(rendered, [
+    ["process", "先查询第一个来源。"],
+    ["process", "还需要核对第二个来源。"],
+    ["final", "这是最后的完整回答。"],
+  ]);
 });
 
 test("Deferred 由 ConversationItem 恢复而历史 Plan 不投影到输入区", () => {

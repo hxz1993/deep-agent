@@ -29,8 +29,9 @@ test("产品版本只在顶部用户详情展示", () => {
 test("产品和数据库结构版本收进用户详情而连接状态保持只读", () => {
   assert.match(
     indexHtml,
-    /<div class="console-runtime-status"[\s\S]*id="connStatus"[\s\S]*id="currentUserBtn"[\s\S]*class="user-popover user-account-popover"[\s\S]*id="productVersion"[\s\S]*数据库结构[\s\S]*id="databaseSchemaVersion"/,
+    /<div class="console-brand-copy">[\s\S]*<span class="connection-pill" id="connStatus"[\s\S]*<button[^>]*id="currentUserBtn"[^>]*aria-expanded="false"[\s\S]*class="user-popover user-account-popover"[\s\S]*id="productVersion"[\s\S]*数据库结构[\s\S]*id="databaseSchemaVersion"/,
   );
+  assert.doesNotMatch(indexHtml, /<(?:button|details)[^>]*id="connStatus"/);
   assert.doesNotMatch(indexHtml, /<details class="console-runtime-status"|runtime-status-popover/);
   assert.doesNotMatch(indexHtml, />数据库版本</);
   assert.match(consoleCss, /\.user-popover-runtime \{[^}]*grid-template-columns: 1fr;|\.user-popover-runtime \{[^}]*display: grid;[^}]*gap: 0;/);

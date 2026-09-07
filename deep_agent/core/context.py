@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Annotated
 
@@ -51,6 +52,7 @@ class AppContext:
     file_store: FileStore
     sandbox_backend: PythonExecutionBackend | None = None
     sandbox_profile: ResolvedSandboxProfile | None = None
+    _recovery_task: asyncio.Task | None = field(default=None, repr=False)
 
     @property
     def store(self) -> SessionStore:
@@ -72,7 +74,10 @@ class AppContext:
             OPTION.agent.app_name,
             bundle.dialect.value,
         )
+        recovered = await bundle.stores.coordinator.recover_running_progress()
         interrupted = await bundle.stores.coordinator.interrupt_running()
+        if recovered:
+            logger.warning("Recovered {} durable Run checkpoints without replaying tools", recovered)
         if interrupted:
             logger.warning(
                 "Recovered {} unfinished Run/Compaction Events as interrupted",
@@ -151,7 +156,18 @@ class AppContext:
         )
         await ctx.event_persister.start()
         init_context(ctx)
+        ctx._recovery_task = asyncio.create_task(ctx._recover_abandoned_runs())
         return ctx
+
+    async def _recover_abandoned_runs(self) -> None:
+        while True:
+            await asyncio.sleep(30)
+            try:
+                recovered = await self.stores.coordinator.recover_running_progress()
+                if recovered:
+                    logger.warning("Recovered {} abandoned Run checkpoints; no tools replayed", recovered)
+            except Exception as exc:
+                logger.error("Run checkpoint recovery failed: {}", type(exc).__name__)
 
     @classmethod
     def for_testing(
@@ -215,6 +231,9 @@ class AppContext:
         )
 
     async def aclose(self) -> None:
+        if self._recovery_task is not None:
+            self._recovery_task.cancel()
+            await asyncio.gather(self._recovery_task, return_exceptions=True)
         self.active_runs.cancel_all()
         await self.mcp_lease_manager.close_all()
         if self.sandbox_backend is not None:

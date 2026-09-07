@@ -38,6 +38,11 @@ frontend/
 
 ## 功能概览
 
+v0.8.0 的观察页面用 `history-follower.js`串行读取现有 Run Status / History，当前 SSE 页面不额外轮询。
+检查点的 Sequence 不变但正文可变，不能仅按 Sequence 判断更新；终态 History 成功读取后才解锁。
+切会话/Agent/卸载必须中止请求且忽略迟到结果，刷新正文保留滚动和未变化 DOM 的折叠状态。
+History 中运行工具一律只读，不能因工具目录补齐 widget 自动挂 HITL；只有正式 awaiting_input 可交互。
+
 | 功能 | 实现 |
 | --- | --- |
 | 流式对话 | `fetch` + `ReadableStream` 手动解析 SSE（非 `EventSource`，因需 POST） |

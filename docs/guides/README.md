@@ -20,6 +20,7 @@
 | [`code-mode.md`](code-mode.md) | Hybrid Code Mode 启用、工具选择、文件变量、边界与排障 |
 | [`console-admin-access.md`](console-admin-access.md) | Console 企业管理员判定、管理API门禁和业务接口边界 |
 | [`console-ui-guidelines.md`](console-ui-guidelines.md) | Console 页面、弹窗、表单、容器、控件和视觉验收规范 |
+| [`run-progress-persistence.md`](run-progress-persistence.md) | 运行中历史检查点、刷新跟随、异常恢复与部署边界 |
 | [`wecom-channel.md`](wecom-channel.md) | 渠道网关与企微Adapter部署、五个快捷命令、会话来源和排障 |
 | [`jenkins/README.md`](jenkins/README.md) | Jenkins V1 归档与 V2 单 Deployment 双进程流水线：一次发布 API + 渠道网关 |
 | [`project-structure.md`](project-structure.md) | 当前项目目录、运行链路和职责边界 |

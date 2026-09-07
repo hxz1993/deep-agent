@@ -45,6 +45,10 @@ test("渠道来源保留在会话列表、当前快照和详情，展示不绑�
   assert.match(chat, /channelOriginPresentation\(s\.channel\)/);
   assert.match(chat, /session-channel-source.*escapeHtml\(origin\.description\)/);
   assert.match(workspace, /channelOriginPresentation\(activeSession\.channel\)/);
-  assert.match(workspace, /<strong>渠道来源<\/strong>/);
+  assert.match(workspace, /const channelSource = channelOrigin \?/);
+  assert.match(workspace, /inspectorFactHtml\("渠道名称",[\s\S]*escapeHtml\(channelOrigin\.accountName\)/);
+  assert.match(workspace, /inspectorFact\(channelOrigin\.conversationType, channelOrigin\.peerId,[^\n]*copy: true/);
+  assert.match(workspace, /当前会话不是由渠道发起的。/);
+  assert.match(workspace, /hasChannelTab[\s\S]*data-inspector-tab="channel"/);
   assert.match(workspace, /session\.attachmentCount, session\.channel/);
 });

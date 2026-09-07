@@ -270,6 +270,42 @@ test("History 与 SSE 通过同一动作入口驱动思考、正文和工具", (
   assert.ok(liveRecorder.calls.some(([method, value]) => method === "complete" && value === "核对完成"));
 });
 
+test("原生搜索实时文本和工具交错后仍由 final 输出完成正文", () => {
+  const recorder = recordingPresenter();
+  const frames = [
+    ["thinking", { item_id: "message:a:0", delta: "先核对来源" }],
+    ["text", { item_id: "message:a:1", delta: "正在查找" }],
+    ["tool_call", {
+      item_id: "tool:search-1", tool_call_id: "search-1", tool: "web_search",
+      source: "web", execution: "native", args: { query: "测试查询" },
+    }],
+    ["tool_result", {
+      item_id: "tool:search-1", tool_call_id: "search-1", tool: "web_search",
+      source: "web", execution: "native", result: { sources: [] },
+    }],
+    ["text", { item_id: "message:a:5", delta: "最后的" }],
+    ["text", { item_id: "message:a:5", delta: "完整回答。" }],
+    ["final", { status: "completed", output: "最后的完整回答。" }],
+  ];
+  for (const [type, data] of frames) {
+    applyAssistantPresentationActions(recorder.presenter, assistantActionsFromSse(type, data));
+  }
+
+  assert.deepEqual(
+    recorder.calls.filter(([method]) => ["appendText", "complete"].includes(method)),
+    [
+      ["appendText", "正在查找"],
+      ["appendText", "最后的"],
+      ["appendText", "完整回答。"],
+      ["complete", "最后的完整回答。"],
+    ],
+  );
+  assert.equal(recorder.calls.filter(([method]) => method === "addToolCall").length, 1);
+  assert.equal(recorder.calls.filter(([method]) => method === "addToolResult").length, 1);
+  assert.equal(recorder.calls.find(([method]) => method === "addToolCall")[1].execution, "native");
+  assert.deepEqual(recorder.calls.at(-1), ["complete", "最后的完整回答。"]);
+});
+
 test("展示动作覆盖多工具、撤回、失败、中断与 Deferred", () => {
   const historyActions = assistantActionsFromHistoryItems([
     {

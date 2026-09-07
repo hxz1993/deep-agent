@@ -5,7 +5,7 @@ import {
 } from "./configuration.js?v=20260904-16";
 import { bindContextControls, refreshIdentity } from "./context.js?v=20260904-14";
 import { initDiagnostics } from "./diagnostics.js?v=20260720-1";
-import { initWorkspace } from "./workspace.js?v=20260907-1";
+import { initWorkspace } from "./workspace.js?v=20260908-1";
 import "./time.js?v=20260831-1";
 
 const VALID_PAGES = new Set(["workspace", "configuration", "diagnostics"]);

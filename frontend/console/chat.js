@@ -15,7 +15,7 @@ import {
   processDisclosureLabel,
   toolResultPresentation,
 } from "./assistant-presentation.js?v=20260907-1";
-import { createTrajectoryController } from "./trajectory.js?v=20260907-1";
+import { createTrajectoryController } from "./trajectory.js?v=20260908-1";
 import { attachmentPreviewUrl, bindAttachmentImagePreviews, createImageGallery } from "./attachment-preview.js?v=20260904-8";
 import { bindWebImagePreviewFallback, renderWebImagePreview } from "./web-image.js?v=20260901-1";
 import { parseServerTimestamp, serverTimestampMilliseconds } from "./time.js?v=20260831-1";
@@ -34,6 +34,7 @@ import {
 } from "./model-options.js?v=20260828-1";
 import { shouldFollowMessages } from "./message-scroll.js?v=20260902-1";
 import { boundedStreamRequest, verifyStreamStop } from "./stop-recovery.js?v=20260907-1";
+import { createHistoryFollower } from "./history-follower.js?v=20260908-1";
 
 /* ------------------------------------------------------------------ *
  * deep-agent 前端 —— 适配 FastAPI /api/v1/chat/stream (SSE over POST)
@@ -134,6 +135,12 @@ const state = {
   conversationId: null,
   sessions: [], // [{id, agentId, agentName, title}] — 仅来自 GET /api/v1/sessions
   streaming: false,
+  observingRun: false,
+  historyLoading: false,
+  historyController: null,
+  historyFollower: null,
+  historyObservationPending: false,
+  historyRendered: [],
   awaitingHitl: false,
   abortController: null,
   stopController: null,
@@ -160,6 +167,9 @@ const state = {
 };
 
 window.addEventListener("pagehide", () => {
+  state.historyFollower?.stop();
+  state.historyController?.abort();
+  for (const record of state.historyRendered) record.presenter?.dispose?.();
   const streamController = state.abortController;
   state.abortController = null;
   state.stopController?.abort();
@@ -316,6 +326,8 @@ function showEmptyState() {
 }
 
 function clearMessages() {
+  for (const record of state.historyRendered) record.presenter?.dispose?.();
+  state.historyRendered = [];
   clearAutomaticCompactionState();
   state.assistantPresenter = null;
   state.messageAutoFollow = true;
@@ -824,10 +836,11 @@ function toggleNewChatMenu(anchor) {
 function newChat(agentId) {
   const id = normalizeAgentId(agentId);
   closeNewChatMenu();
-  if (state.streaming) {
+  if (state.streaming && !state.observingRun) {
     showConsoleToast("请先停止当前生成，再新建会话", true);
     return;
   }
+  stopHistoryObservation();
   if (id) {
     state.agentId = id;
     localStorage.setItem("da_console_agent_id_v1", state.agentId);
@@ -838,6 +851,7 @@ function newChat(agentId) {
   loadUiTools(state.agentId);
   state.sessionId = null;
   state.conversationId = null;
+  state.awaitingHitl = false;
   state.modelMessageCount = 0;
   state.contextStatus = null;
   state.lastRunUsage = null;
@@ -851,6 +865,7 @@ function newChat(agentId) {
   el.chatTitle.textContent = "新对话";
   updateChatHeader();
   updateAgentSelectState();
+  updateHitlInputState();
   updateComposerContextControls();
   renderSessions();
   el.input.focus();
@@ -961,10 +976,11 @@ function renderSessions() {
 }
 
 async function switchSession(s) {
-  if (state.streaming) {
+  if (state.streaming && !state.observingRun) {
     showConsoleToast("请先停止当前生成，再切换会话", true);
     return;
   }
+  stopHistoryObservation();
   const session = normalizeSession(s);
   state.sessionId = session.id;
   state.lastRunUsage = null;
@@ -1003,56 +1019,177 @@ async function loadAllSessionEvents(session, { signal } = {}) {
 }
 
 async function loadSessionHistory(session, { signal, isCurrent = () => true } = {}) {
-  const current = () => !signal?.aborted && isCurrent();
   const normalized = normalizeSession(session);
+  stopHistoryObservation();
+  const controller = new AbortController();
+  state.historyController = controller;
+  const abort = () => controller.abort();
+  signal?.addEventListener("abort", abort, { once: true });
+  if (signal?.aborted) abort();
+  const current = () => !controller.signal.aborted && isCurrent()
+    && state.historyController === controller
+    && state.sessionId === normalized.id && state.agentId === normalized.agentId;
+  state.historyLoading = true;
+  updateHitlInputState();
   clearMessages();
   trajectory?.setHistory({ session_id: normalized.id, items: [] });
   hideEmptyState();
   try {
-    await loadUiTools(state.agentId, { signal, isCurrent });
+    await boundedStreamRequest((requestSignal) => loadUiTools(normalized.agentId, {
+      signal: requestSignal, isCurrent: current,
+    }), { signal: controller.signal }).catch(() => {});
     if (!current()) return;
-    const [r, eventResult] = await Promise.all([
-      daFetch(sessionApiUrl(normalized, "/history"), { signal }),
-      loadAllSessionEvents(normalized, { signal }),
-    ]);
-    if (!current()) return;
-    if (r.status === 404) {
-      addSystemNote("会话不存在或尚无历史记录。");
-      return;
+    if (state.abortController) {
+      // Abnormal SSE recovery may still own its transport's finally block.
+      // Read once here, then follow only after that block releases ownership.
+      const [response, events] = await Promise.all([
+        daFetch(sessionApiUrl(normalized, "/history"), { signal: controller.signal }),
+        loadAllSessionEvents(normalized, { signal: controller.signal }),
+      ]);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const history = normalizeConversationHistory(await response.json());
+      if (!current()) return;
+      applyObservedHistory(history, { status: "running" });
+      if (events.response.ok) trajectory?.setHistory(events.data);
+      state.historyObservationPending = true;
+    } else {
+      await observeSessionHistory(normalized, controller, current);
     }
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    const history = normalizeConversationHistory(await r.json());
-    if (!current()) return;
-    trajectory?.setHistory(eventResult.response.ok ? eventResult.data : { session_id: normalized.id, items: [] });
-    const latestAssistant = [...history.items]
-      .reverse()
-      .find((item) => item.kind === "assistant_message");
-    state.conversationId = latestAssistant?.conversation_id || null;
-    state.lastRunMetrics = latestAssistant
-      ? {
-          usage: latestAssistant.usage || null,
-          model_name: latestAssistant.model_name || null,
-          provider_name: latestAssistant.provider_name || null,
-          run_id: latestAssistant.run_id,
-          status: latestAssistant.status || "completed",
-          detailed: false,
-        }
-      : null;
-    await loadContextStatus(normalized, { signal, isCurrent });
-    if (!current()) return;
-    if (!history.items.length) {
-      showEmptyState();
-      state.modelMessageCount = 0;
-      state.awaitingHitl = false;
-      updateHitlInputState();
-      return;
-    }
-    renderHistory(history.items);
+    if (current()) void loadContextStatus(normalized, { signal: controller.signal, isCurrent: current });
   } catch (e) {
     if (!current()) return;
-    trajectory?.setHistory({ session_id: normalized.id, items: [] });
     addSystemNote(`加载历史失败：${e.message}`);
+    if (state.abortController) state.historyObservationPending = true;
+  } finally {
+    signal?.removeEventListener("abort", abort);
   }
+}
+
+function stopHistoryObservation() {
+  state.historyFollower?.stop();
+  state.historyFollower = null;
+  state.historyController?.abort();
+  state.historyController = null;
+  state.historyLoading = false;
+  state.historyObservationPending = false;
+  if (state.observingRun) {
+    state.stopController?.abort();
+    state.stopController = null;
+    state.stopRequested = false;
+    state.observingRun = false;
+    state.streamSessionConfirmed = false;
+    setStreaming(false);
+  }
+  updateHitlInputState();
+}
+
+async function observeSessionHistory(session, controller, current) {
+  let lastHistory = null;
+  let lastStatus = null;
+  let lastError = null;
+  let eventRequest = null;
+  let eventsNeedRefresh = false;
+  let trajectoryLoaded = false;
+  const refreshTrajectory = () => {
+    if (!current() || state.abortController) return;
+    if (eventRequest) { eventsNeedRefresh = true; return; }
+    eventsNeedRefresh = false;
+    // A slow/failed audit request must not hold up visible History or leave
+    // the stop button spinning after the authoritative terminal read.
+    eventRequest = boundedStreamRequest((signal) => loadAllSessionEvents(session, { signal }), {
+      signal: controller.signal, timeoutMs: 10000,
+    }).then((events) => {
+      if (!current() || state.abortController || !events.response.ok) return;
+      trajectory?.setHistory(events.data, { preserveView: trajectoryLoaded });
+      updateObservedSessionMetrics(session, events.data.items);
+      trajectoryLoaded = true;
+    }).catch(() => {}).finally(() => {
+      eventRequest = null;
+      if (eventsNeedRefresh && current()) refreshTrajectory();
+    });
+  };
+  const follower = createHistoryFollower({
+    isCurrent: current,
+    readStatus: async (signal) => {
+      const response = await daFetch(sessionApiUrl(session, "/run-status"), { signal });
+      if (!response.ok) throw new Error(`运行状态 HTTP ${response.status}`);
+      return response.json();
+    },
+    readHistory: async (signal, status) => {
+      const response = await daFetch(sessionApiUrl(session, "/history"), { signal });
+      if (!response.ok) throw new Error(`历史 HTTP ${response.status}`);
+      const history = normalizeConversationHistory(await response.json());
+      // Checkpoint updates retain their Sequence, so compare payloads rather
+      // than treating event_head_sequence as a change/version token.
+      const signature = JSON.stringify(history);
+      const changed = signature !== lastHistory || status.status !== lastStatus;
+      return { history, signature, changed };
+    },
+    onStatus: (status) => {
+      state.historyLoading = false;
+      state.observingRun = status.status !== "idle";
+      state.streamSessionConfirmed = state.observingRun;
+      if (!state.observingRun) state.stopRequested = false;
+      setStreaming(state.observingRun);
+      if (status.status === "cancel_requested" || state.stopRequested) {
+        el.stopBtn.disabled = state.stopRequested;
+        el.stopBtn.title = state.stopRequested ? "正在停止…" : "正在停止，可重试";
+        el.stopBtn.setAttribute("aria-label", "正在停止");
+      }
+    },
+    onHistory: ({ history, signature, changed }, status) => {
+      if (changed) {
+        applyObservedHistory(history, status);
+        refreshTrajectory();
+      }
+      lastHistory = signature;
+      lastStatus = status.status;
+      lastError = null;
+      if (status.status === "idle") void loadContextStatus(session, { signal: controller.signal, isCurrent: current });
+    },
+    onError: (error) => {
+      // An unavailable status/history endpoint does not prove the Run ended.
+      // Keep the draft and last visible history, then retry without overlap.
+      if (error.message !== lastError) showConsoleToast(`会话同步失败，正在重试：${error.message}`, true);
+      lastError = error.message;
+    },
+  });
+  state.historyFollower = follower;
+  controller.signal.addEventListener("abort", () => follower.stop(), { once: true });
+  await follower.start();
+}
+
+function updateObservedSessionMetrics(session, events) {
+  const selected = state.sessions.find((item) => item.id === session.id && item.agentId === session.agentId);
+  if (!selected) return;
+  // Match Session list aggregation: a progress checkpoint, compaction or title
+  // is not a Message Event. One assistant Event may project to several items.
+  const messages = events.filter((event) => [
+    "user/message", "assistant/message", "tool/results", "model/request",
+  ].includes(event.event_type));
+  const messageCount = messages.length;
+  const turnCount = new Set(messages.map((event) => event.turn_id).filter((id) => id != null)).size;
+  if (selected.messageCount === messageCount && selected.turnCount === turnCount) return;
+  Object.assign(selected, { messageCount, turnCount });
+  // Inspector observes these counters directly; do not dismiss an inline title
+  // edit to refresh the sidebar's round count.
+  if (!el.sessionList.querySelector(".session-title-input")) renderSessions();
+}
+
+function applyObservedHistory(history, status) {
+  const latestAssistant = [...history.items].reverse().find((item) => item.kind === "assistant_message");
+  state.conversationId = latestAssistant?.conversation_id || null;
+  state.lastRunMetrics = latestAssistant ? {
+    usage: latestAssistant.usage || null,
+    model_name: latestAssistant.model_name || null,
+    provider_name: latestAssistant.provider_name || null,
+    run_id: latestAssistant.run_id,
+    status: latestAssistant.status || "completed",
+    detailed: false,
+  } : null;
+  if (history.items.length) hideEmptyState();
+  renderHistory(history.items, { updating: state.historyRendered.length > 0, running: status.status !== "idle" });
+  if (!history.items.length) showEmptyState();
 }
 
 async function loadContextStatus(session, { signal, isCurrent = () => true } = {}) {
@@ -1254,56 +1391,118 @@ async function refreshCurrentHistory(options = {}) {
   await loadSessionHistory({ id: state.sessionId, agentId: state.agentId }, options);
 }
 
-function renderHistory(items) {
+function renderHistory(items, { updating = false, running = false } = {}) {
   state.modelMessageCount = items.filter((item) => ["user_message", "assistant_message"].includes(item.kind)).length;
   let lastDayKey = null;
   state.assistantPresenter = null;
   const presentationNodes = projectConversationItems(items);
-
-  for (const node of presentationNodes) {
+  const previous = state.historyRendered;
+  const next = [];
+  const desired = [];
+  const scrollTop = el.messages.scrollTop;
+  const following = state.messageAutoFollow;
+  // Presenter methods normally auto-scroll. During reconciliation wait until
+  // all rows are stable, then keep the user's exact reading position.
+  state.messageAutoFollow = false;
+  for (const [index, node] of presentationNodes.entries()) {
     const ts = node.createdAt;
+    let date = null;
     if (ts) {
       const dayKey = localDayKey(ts);
       if (dayKey !== lastDayKey) {
-        addDateSeparator(ts);
+        date = dayKey;
         lastDayKey = dayKey;
       }
     }
+    const active = running && index === presentationNodes.length - 1 && node.type === "assistant";
+    const signature = JSON.stringify({ node, date, active, readOnly: running });
+    const old = previous[index];
+    if (old?.signature === signature) {
+      next.push(old);
+      desired.push(...old.elements);
+      if (old.presenter) state.assistantPresenter = old.presenter;
+      continue;
+    }
+    const elements = [];
+    if (date) {
+      addDateSeparator(ts);
+      elements.push(el.messages.lastElementChild);
+    }
+    let presenter = null;
     if (node.type === "user") {
       if (
         node.text
         || node.attachments.length
         || node.contextRefs.length
       ) {
-        addMessage(
+        elements.push(addMessage(
           "user",
           node.text,
           ts,
           node.order?.sequence,
           node.attachments,
           node.contextRefs,
-        );
+        ));
       }
-      continue;
     }
 
     if (node.type === "assistant") {
       const assistant = createAssistantMessage(ts, node.order?.sequence, null, {
         startedAt: node.startedAt,
         completedAt: node.completedAt,
+        allowDeferred: !running,
+        autoAttachDeferred: false,
       });
       applyAssistantPresentationActions(assistant, node.actions, {
         prepareDeferredCall: mergeUiToolCall,
       });
+      if (active) assistant.resumeProcess();
+      if (updating && old?.presenter) restoreHistoryDisclosure(old.presenter.row, assistant.row);
+      presenter = assistant;
+      elements.push(assistant.row);
       state.assistantPresenter = assistant;
     }
+    next.push({ signature, elements, presenter });
+    desired.push(...elements);
   }
-  state.awaitingHitl = latestPendingDeferredTool(items) !== null;
+  const retained = new Set(next);
+  for (const old of previous) {
+    if (retained.has(old)) continue;
+    old.presenter?.dispose?.();
+    old.elements.forEach((element) => element.remove());
+  }
+  desired.forEach((element, index) => {
+    const existing = el.messages.children[index];
+    if (existing !== element) el.messages.insertBefore(element, existing || null);
+  });
+  state.historyRendered = next;
+  state.messageAutoFollow = following;
+  if (updating && !following) {
+    el.messages.scrollTop = scrollTop;
+  } else {
+    scrollToBottom({ force: !updating });
+  }
+  state.awaitingHitl = !running && latestPendingDeferredTool(items) !== null;
   // Plan 是当前 Run 的实时辅助浮层；历史会话只保留其事实和轨迹，不恢复浮层。
   clearComposerPlan();
   updateHitlInputState();
   updateComposerContextControls();
-  scrollToBottom({ force: true });
+}
+
+function restoreHistoryDisclosure(oldRow, nextRow) {
+  for (const selector of [".assistant-process", ".assistant-thinking", ".tool-block"]) {
+    const oldBlocks = [...oldRow.querySelectorAll(selector)];
+    for (const [index, block] of [...nextRow.querySelectorAll(selector)].entries()) {
+      const previous = selector === ".tool-block"
+        ? oldBlocks.find((candidate) => candidate.dataset.toolCallId === block.dataset.toolCallId)
+        : oldBlocks[index];
+      if (!previous) continue;
+      const open = previous.classList.contains("open");
+      block.classList.toggle("open", open);
+      if (previous.dataset.disclosureTouched) block.dataset.disclosureTouched = "1";
+      block.querySelector("[aria-expanded]")?.setAttribute("aria-expanded", String(open));
+    }
+  }
 }
 
 async function deleteSession(session) {
@@ -1726,9 +1925,9 @@ async function copyCurrentSessionId() {
 }
 
 function updateAgentSelectState() {
-  if (el.agentSelect) el.agentSelect.disabled = state.streaming;
+  if (el.agentSelect) el.agentSelect.disabled = state.streaming && !state.observingRun;
   const trigger = document.getElementById("workspaceAgentSelectTrigger");
-  if (trigger) trigger.disabled = state.streaming;
+  if (trigger) trigger.disabled = state.streaming && !state.observingRun;
   updateComposerModelInfo();
 }
 
@@ -1761,7 +1960,7 @@ async function loadCapabilities() {
 async function onSend() {
   const text = el.input.value.trim();
   const attachments = state.pendingAttachments.slice();
-  if ((!text && attachments.length === 0) || state.streaming) return;
+  if ((!text && attachments.length === 0) || state.streaming || state.historyLoading) return;
   if (state.awaitingHitl) {
     addSystemNote("请先完成上方待处理的交互。");
     return;
@@ -1814,7 +2013,7 @@ async function onSend() {
 
 async function resumeDeferred(deferredResults) {
   if (!state.sessionId) return;
-  if (state.streaming) {
+  if (state.streaming || state.historyLoading) {
     showConsoleToast("当前会话仍在生成，请先停止后再提交交互结果", true);
     return;
   }
@@ -1843,6 +2042,10 @@ async function resumeDeferred(deferredResults) {
 }
 
 async function runChatStream(payload, assistant) {
+  state.historyFollower?.stop();
+  state.historyController?.abort();
+  state.historyFollower = null;
+  state.historyController = null;
   const streamController = new AbortController();
   state.stopController?.abort();
   state.abortController = streamController;
@@ -1911,6 +2114,17 @@ async function runChatStream(payload, assistant) {
     state.stopRequested = false;
     state.streamSessionConfirmed = false;
     setStreaming(false);
+    if (state.historyObservationPending) {
+      state.historyObservationPending = false;
+      const session = normalizeSession({ id: state.sessionId, agentId: state.agentId });
+      const controller = new AbortController();
+      state.historyController = controller;
+      state.historyLoading = true;
+      updateHitlInputState();
+      void observeSessionHistory(session, controller, () => !controller.signal.aborted
+        && state.historyController === controller && !state.abortController
+        && state.sessionId === session.id && state.agentId === session.agentId);
+    }
     if (state.sessionId) await syncSessionsFromBackend();
   }
 }
@@ -1926,12 +2140,13 @@ function updateHitlInputState() {
         : "输入消息…";
     el.input.disabled = locked;
   }
-  if (el.sendBtn) el.sendBtn.disabled = locked;
+  if (el.sendBtn) el.sendBtn.disabled = locked || state.historyLoading;
   updateComposerContextControls();
 }
 
 async function stopStream() {
   if (!state.streaming || state.stopRequested || !state.streamSessionConfirmed) return;
+  if (state.observingRun) return stopObservedRun();
   const sessionId = state.sessionId;
   const agentId = state.agentId;
   const streamController = state.abortController;
@@ -1968,6 +2183,41 @@ async function stopStream() {
     el.stopBtn.disabled = false;
     el.stopBtn.title = "停止失败，可重试";
     el.stopBtn.setAttribute("aria-label", "停止生成");
+    showConsoleToast(`尚未确认停止，可重试：${result.message}`, true);
+  }
+}
+
+async function stopObservedRun() {
+  const sessionId = state.sessionId;
+  const agentId = state.agentId;
+  const historyController = state.historyController;
+  const stopController = new AbortController();
+  const current = () => state.historyController === historyController
+    && !historyController?.signal.aborted && state.observingRun
+    && state.sessionId === sessionId && state.agentId === agentId;
+  state.stopController?.abort();
+  state.stopController = stopController;
+  state.stopRequested = true;
+  el.stopBtn.disabled = true;
+  el.stopBtn.title = "正在停止…";
+  const result = await verifyStreamStop({
+    signal: stopController.signal, isCurrent: current,
+    request: (kind, signal) => daFetch(
+      sessionApiUrl({ id: sessionId, agentId }, kind === "cancel" ? "/cancel" : "/run-status"),
+      { method: kind === "cancel" ? "POST" : "GET", signal },
+    ),
+    onAccepted: () => showConsoleToast("正在停止当前生成并同步已保存内容…"),
+  });
+  if (state.stopController === stopController) state.stopController = null;
+  stopController.abort();
+  if (!current() || result.status === "stale") return;
+  state.stopRequested = false;
+  if (result.status === "idle") {
+    // Only the follower's successful final History read may unlock controls.
+    void state.historyFollower?.refresh();
+  } else {
+    el.stopBtn.disabled = false;
+    el.stopBtn.title = "停止失败，可重试";
     showConsoleToast(`尚未确认停止，可重试：${result.message}`, true);
   }
 }
@@ -2477,6 +2727,8 @@ function processElapsedSecondsBetween(startedAt, completedAt) {
 }
 
 function createAssistantMessage(timestamp, branchPoint, beforeNode = null, processTiming = {}) {
+  const allowDeferred = processTiming.allowDeferred !== false;
+  const autoAttachDeferred = allowDeferred && processTiming.autoAttachDeferred !== false;
   let isLive = !timestamp;
   const messageTimestamp = timestamp || new Date().toISOString();
   const suppliedStartMs = serverTimestampMilliseconds(processTiming.startedAt);
@@ -2554,7 +2806,7 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null, proce
     const pending = Boolean(processBody.querySelector(".tool-block.hitl-pending"));
     processBlock.classList.toggle("hidden", !hasProcess);
     processBlock.classList.toggle("running", isLive && !processFinished && hasProcess);
-    if (isLive && !processFinished && hasProcess) {
+    if (isLive && !processFinished && hasProcess && !processBlock.dataset.disclosureTouched) {
       processBlock.classList.add("open");
       processSummary.setAttribute("aria-expanded", "true");
     }
@@ -2569,6 +2821,7 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null, proce
   }
 
   processSummary.addEventListener("click", () => {
+    processBlock.dataset.disclosureTouched = "1";
     const open = !processBlock.classList.contains("open");
     processBlock.classList.toggle("open", open);
     processSummary.setAttribute("aria-expanded", String(open));
@@ -2759,7 +3012,7 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null, proce
         }
         if (merged.widget) existing.dataset.widget = merged.widget;
         if (merged.metadata) existing.dataset.metadata = JSON.stringify(merged.metadata);
-        maybeAttachHitlWidget(existing, merged);
+        if (autoAttachDeferred) maybeAttachHitlWidget(existing, merged);
         updateProcessDisclosure();
         scrollToBottom();
         return;
@@ -2795,7 +3048,7 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null, proce
       processBody.appendChild(block);
       refreshLucideIcons();
       toolBlocks.set(key, block);
-      maybeAttachHitlWidget(block, merged);
+      if (autoAttachDeferred) maybeAttachHitlWidget(block, merged);
       updateProcessDisclosure();
       scrollToBottom();
     },
@@ -2837,6 +3090,7 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null, proce
       updateProcessDisclosure();
     },
     attachHitlWidget(call) {
+      if (!allowDeferred) return;
       const merged = mergeUiToolCall(call);
       const key = merged.tool_call_id;
       let block = key && toolBlocks.get(key);
@@ -2847,6 +3101,10 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null, proce
       if (!block || !isUiToolCall(merged)) return;
       renderHitlWidget(block, merged, resumeDeferred);
       updateProcessDisclosure();
+    },
+    dispose() {
+      if (processTimer) window.clearInterval(processTimer);
+      processTimer = null;
     },
   };
   return presenter;
@@ -3267,7 +3525,7 @@ function renderMarkdownDiagrams(root) {
 
 async function selectAgent(agentId) {
   if (!agentId || !state.agents.some((agent) => agent.id === agentId)) return false;
-  if (state.streaming) {
+  if (state.streaming && !state.observingRun) {
     showConsoleToast("请先停止当前生成，再切换 Agent", true);
     return false;
   }
@@ -3290,7 +3548,7 @@ async function refreshAgentWorkspace() {
   const target = scoped.find((session) => (
     state.agentId === previousAgentId && session.id === previousSessionId
   )) || scoped[0];
-  if (target && !state.streaming) await switchSession(target);
+  if (target && (!state.streaming || state.observingRun)) await switchSession(target);
   return true;
 }
 

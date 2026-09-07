@@ -274,6 +274,34 @@ function projectTitle(event, inputSequence) {
   return projected;
 }
 
+function projectRunProgress(event, inputSequence) {
+  const messages = Array.isArray(event.payload?.messages) ? event.payload.messages : [];
+  const parts = messages.flatMap((message) => Array.isArray(message?.parts) ? message.parts : []);
+  const payload = {
+    status: event.status || "running",
+    revision: Number(event.payload?.revision || 0),
+    message_count: Number(event.payload?.message_count ?? messages.length),
+    assistant_rounds: messages.filter((message) => message?.kind === "response").length,
+    tool_calls: parts.filter((part) => ["tool-call", "builtin-tool-call"].includes(part?.part_kind)).length,
+    tool_results: parts.filter((part) => ["tool-return", "builtin-tool-return"].includes(part?.part_kind)).length,
+  };
+  if (event.payload?.error) payload.error = event.payload.error;
+  const projected = newEvent({
+    id: event.event_id, kind: "run", inputSequence: Math.max(inputSequence, 1),
+    runId: event.run_id || null, timestamp: event.created_at || null,
+    status: payload.status, part: payload, payload,
+  });
+  projected.label = payload.status === "running" ? "运行中快照" : "运行保存记录";
+  projected.summary = payload.status === "running"
+    ? `已保存 ${payload.assistant_rounds} 轮助手输出 · ${payload.tool_results}/${payload.tool_calls} 个工具结果`
+    : `已保存 ${payload.message_count} 条消息`;
+  projected.sequence = Number(event.sequence || 0);
+  projected.turn_id = event.turn_id || null;
+  projected.event_type = event.event_type;
+  projected.timestamp_end = event.updated_at || event.created_at || null;
+  return projected;
+}
+
 /** Build semantic trajectory rows from complete Message Events. */
 export function buildTrajectory(history = {}) {
   const items = [...(Array.isArray(history?.items) ? history.items : [])]
@@ -283,6 +311,10 @@ export function buildTrajectory(history = {}) {
   const tools = new Map();
   const automaticTitles = new Map();
   for (const event of items) {
+    if (event.event_type === "run/progress") {
+      projected.push(projectRunProgress(event, inputSequence));
+      continue;
+    }
     if (event.event_type === "session/title") {
       const source = event.payload?.source;
       const sourceEventId = event.payload?.source_event_id;
@@ -985,6 +1017,7 @@ export function createTrajectoryController({ state }) {
   let detailTab = "summary";
   let mode = "sequence";
   let renderQueued = false;
+  let renderedSelectedId = null;
 
   const allEvents = () => [...historyEvents, ...liveEvents].sort((left, right) => {
     const leftSequence = Number.isFinite(Number(left.sequence)) ? Number(left.sequence) : Number.MAX_SAFE_INTEGER;
@@ -1041,6 +1074,8 @@ export function createTrajectoryController({ state }) {
   }
 
   function render() {
+    const listScrollTop = list.scrollTop;
+    const detailScrollTop = detail.scrollTop;
     const events = allEvents();
     const stats = trajectoryStats(events);
     const visible = filterTrajectory(events, { mode, query: search?.value });
@@ -1051,18 +1086,23 @@ export function createTrajectoryController({ state }) {
     if (document.querySelector("main.chat")?.classList.contains("trajectory-active")) {
       detail.innerHTML = renderDetail(selected, detailTab, events);
       globalThis.DeepAgentMarkdown?.renderDiagrams?.(detail);
+      if (selectedId === renderedSelectedId) detail.scrollTop = detailScrollTop;
     }
+    list.scrollTop = listScrollTop;
+    renderedSelectedId = selectedId;
     window.lucide?.createIcons();
   }
 
-  function setHistory(nextHistory) {
+  function setHistory(nextHistory, { preserveView = false } = {}) {
     history = nextHistory || { items: [] };
     historyEvents = buildTrajectory(history);
     liveEvents = [];
     currentRunId = null;
     activeAssistantLoop = null;
-    selectedId = historyEvents.at(-1)?.id || null;
-    detailTab = "summary";
+    if (!preserveView || !historyEvents.some((event) => event.id === selectedId)) {
+      selectedId = historyEvents.at(-1)?.id || null;
+      detailTab = "summary";
+    }
     scheduleRender();
   }
 
@@ -1177,9 +1217,11 @@ export function createTrajectoryController({ state }) {
       const projectedTitle = stored.event_type === "session/title"
         ? historyEvents.find((item) => item.kind === "title" && item.native?.event_ids?.includes(stored.event_id))
         : null;
-      selectedId = storedCallIds.size
-        ? `tool:${[...storedCallIds][0]}`
-        : projectedTitle?.id || stored.event_id;
+      if (stored.event_type !== "run/progress" || !selectedId) {
+        selectedId = storedCallIds.size
+          ? `tool:${[...storedCallIds][0]}`
+          : projectedTitle?.id || stored.event_id;
+      }
       scheduleRender();
       return;
     }

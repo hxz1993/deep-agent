@@ -64,6 +64,8 @@ from deep_agent.agent.attachments import (
 from deep_agent.agent.deferred import serialize_deferred
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.event_persister import EventPersister, PersistEvent
+from deep_agent.agent.run_progress import RunProgressCapability, StreamRunProgressCapability
+from deep_agent.db.run_ownership import live_run
 from deep_agent.agent.limits import format_stream_error
 from deep_agent.agent.observability import (
     cache_usage_available,
@@ -435,13 +437,15 @@ class AgentRunner:
         return state.telemetry.strategy
 
     @asynccontextmanager
-    async def _session_lock(self, session_id: str, *, agent_id: str | None) -> AsyncIterator[None]:
+    async def _session_lock(self, session_id: str, *, agent_id: str | None,
+                            run_id: str | None = None) -> AsyncIterator[None]:
         lock = getattr(self.store, "lock", None)
-        if callable(lock):
-            async with lock(session_id, agent_id=agent_id):
+        with live_run(run_id):
+            if callable(lock):
+                async with lock(session_id, agent_id=agent_id):
+                    yield
+            else:
                 yield
-        else:
-            yield
 
     @property
     def manual_compaction_enabled(self) -> bool:
@@ -510,7 +514,7 @@ class AgentRunner:
             return
         assert self._context_compaction is not None
 
-        async with self._session_lock(session_id, agent_id=deps.agent_id):
+        async with self._session_lock(session_id, agent_id=deps.agent_id, run_id=deps.run_id):
             raw_reader = getattr(self.store, "get_raw_history", self.store.get_history)
             raw = await raw_reader(session_id, agent_id=deps.agent_id)
             if not raw:
@@ -1195,10 +1199,10 @@ class AgentRunner:
                 else {}
             )
             to_append = repair_unprocessed_tool_calls(to_append, **repair_kwargs)
-        if not to_append:
+        if not to_append and terminal_status is None:
             return False
         async with asyncio.timeout(_TERMINAL_WRITE_TIMEOUT):
-            await self.store.append(
+            rows = await self.store.append(
                 session_id,
                 to_append,
                 agent_id=deps.agent_id,
@@ -1210,7 +1214,32 @@ class AgentRunner:
                 first_message_ordinal=1 if pre_persisted_user else 0,
                 terminal_status=terminal_status,
             )
+        if result_queue is not None:
+            for row in rows or []:
+                result_queue.put_nowait({
+                    "type": "session_event_appended", "persisted": True,
+                    "event": row.public_dict(),
+                })
         return True
+
+    async def _finish_progress_fallback(self, session_id: str, deps: AgentDeps, *, status: str) -> bool:
+        """Best-effort atomic promotion of the last committed checkpoint.
+
+        Do not claim the in-memory final answer was saved if its write failed.
+        This only ensures already durable work no longer appears to be running.
+        """
+        finish = getattr(self.store, "finish_run_progress", None)
+        if not callable(finish):
+            return False
+        try:
+            async with asyncio.timeout(_TERMINAL_WRITE_TIMEOUT):
+                return await finish(
+                    session_id, agent_id=deps.agent_id, user_id=deps.user,
+                    turn_id=deps.turn_id, run_id=deps.run_id, status=status,
+                ) is not None
+        except Exception as exc:
+            logger.error("Run checkpoint fallback failed: {}", type(exc).__name__)
+            return False
 
     def _publish_run_complete(
         self,
@@ -1447,7 +1476,7 @@ class AgentRunner:
         )
         self._set_tool_discovery_inputs(deps, message, context_refs)
         title_task: asyncio.Task[None] | None = None
-        async with self._session_lock(session_id, agent_id=deps.agent_id):
+        async with self._session_lock(session_id, agent_id=deps.agent_id, run_id=deps.run_id):
             try:
                 prepared = await self._prepare_history(
                     session_id,
@@ -1500,6 +1529,12 @@ class AgentRunner:
                 await self._cancel_title_task(title_task)
                 raise
             self._prepare_context_state(deps, prepared)
+            progress = (
+                RunProgressCapability(self.store, history_length=len(llm_history),
+                                      skip_user_prompt=prepared.pre_persisted_user,
+                                      model_name=self._model_id)
+                if callable(getattr(self.store, "save_run_progress", None)) else None
+            )
             try:
                 result = await self.agent.run(
                     user_prompt,
@@ -1511,8 +1546,29 @@ class AgentRunner:
                     model_settings=self.model_settings,
                     conversation_id=deps.conversation_id,
                     run_id=deps.run_id,
+                    **({"capabilities": [progress]} if progress is not None else {}),
                 )
             except BaseException as exc:
+                if progress is not None:
+                    # Even non-streaming callers get durable intermediate work.
+                    # Do not leave a live checkpoint behind on an HTTP failure.
+                    with anyio.CancelScope(shield=True):
+                        cancelled = isinstance(exc, (RunCancelled, asyncio.CancelledError))
+                        recovered = (
+                            mark_cancelled_response_interrupted(progress.messages)
+                            if cancelled else _with_failed_response_diagnostic(progress.messages, _safe_run_failure(exc))
+                        )
+                        try:
+                            await self._persist_run_messages(
+                                session_id, recovered, deps,
+                                pre_persisted_user=prepared.pre_persisted_user,
+                                terminal_status="interrupted" if cancelled else "failed",
+                            )
+                        except Exception as persistence_exc:
+                            logger.error("Non-stream terminal persistence failed: {}", type(persistence_exc).__name__)
+                            await self._finish_progress_fallback(
+                                session_id, deps, status="interrupted" if cancelled else "failed",
+                            )
                 await self._finish_run_event(
                     run_event,
                     status="cancelled" if isinstance(exc, (RunCancelled, asyncio.CancelledError)) else "failed",
@@ -1522,21 +1578,29 @@ class AgentRunner:
                 )
                 await self._cancel_title_task(title_task)
                 raise
-            new_messages = result.new_messages()
-            await self._attach_final_plan_snapshot(new_messages, deps)
-            self._record_loaded_skills(deps, result.all_messages())
-            await self._persist_run_messages(
-                session_id,
-                new_messages,
-                deps,
-                pre_persisted_user=prepared.pre_persisted_user,
-                repair_dangling_tool_calls=not isinstance(result.output, DeferredToolRequests),
-                terminal_status=(
-                    "pending"
-                    if isinstance(result.output, DeferredToolRequests)
-                    else "completed"
-                ),
-            )
+            new_messages = (progress.canonical_messages(result.new_messages())
+                            if progress is not None else result.new_messages())
+            try:
+                await self._attach_final_plan_snapshot(new_messages, deps)
+                self._record_loaded_skills(deps, result.all_messages())
+                await self._persist_run_messages(
+                    session_id, new_messages, deps,
+                    pre_persisted_user=prepared.pre_persisted_user,
+                    repair_dangling_tool_calls=not isinstance(result.output, DeferredToolRequests),
+                    terminal_status="pending" if isinstance(result.output, DeferredToolRequests) else "completed",
+                )
+            except BaseException as exc:
+                with anyio.CancelScope(shield=True):
+                    cancelled = isinstance(exc, (RunCancelled, asyncio.CancelledError))
+                    await self._finish_progress_fallback(
+                        session_id, deps, status="interrupted" if cancelled else "failed",
+                    )
+                    await self._finish_run_event(
+                        run_event, status="cancelled" if cancelled else "failed",
+                        started_at=started_at, usage=result.usage, error=type(exc).__name__,
+                    )
+                    await self._cancel_title_task(title_task)
+                raise
             compaction_event_saved: bool | None = None
             if not isinstance(result.output, DeferredToolRequests):
                 compaction_event = await self._maybe_save_compaction(
@@ -1625,6 +1689,7 @@ class AgentRunner:
         usage: RunUsage,
         session_events: asyncio.Queue[dict[str, Any]],
         snapshot: _StreamRunSnapshot,
+        progress: StreamRunProgressCapability | None = None,
     ) -> AsyncIterator[tuple[str, Any]]:
         """Interleave Pydantic stream events with DeepAgent lifecycle progress."""
 
@@ -1641,6 +1706,7 @@ class AgentRunner:
             conversation_id=deps.conversation_id,
             run_id=deps.run_id,
             usage=usage,
+            **({"capabilities": [progress]} if progress is not None else {}),
         ) as stream:
             stream_task: asyncio.Task[Any] | None = asyncio.create_task(
                 stream.__anext__()
@@ -1806,13 +1872,14 @@ class AgentRunner:
         pre_saved_compaction_event: Any | None = None
         cancelled_run: RunCancelled | None = None
         cancelled_messages: list[ModelMessage] = []
+        cancel_persistence_failed = False
         published_tool_calls: dict[str, str] = {}
         buffered_ui_tool_calls: dict[str, dict[str, Any]] = {}
         session_events: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         title_task: asyncio.Task[None] | None = None
         stream_snapshot = _StreamRunSnapshot()
         self._set_tool_discovery_inputs(deps, message, context_refs)
-        async with self._session_lock(session_id, agent_id=deps.agent_id):
+        async with self._session_lock(session_id, agent_id=deps.agent_id, run_id=deps.run_id):
             try:
                 prepared = await self._prepare_history(
                     session_id,
@@ -1897,6 +1964,7 @@ class AgentRunner:
             )
             result = None
             run_published = False
+            progress = None
             active_run = active_run or self._active_runs.register(
                 agent_id=deps.agent_id,
                 session_id=session_id,
@@ -1918,8 +1986,17 @@ class AgentRunner:
                 model_history = llm_history
                 model_usage = RunUsage()
                 provider_retry_safe = True
+                progress = (
+                    StreamRunProgressCapability(
+                        self.store, history_length=len(model_history),
+                        skip_user_prompt=prepared.pre_persisted_user, model_name=self._model_id,
+                    )
+                    if callable(getattr(self.store, "save_run_progress", None)) else None
+                )
                 for provider_attempt in range(2):
                     requests_before_attempt = model_usage.requests
+                    if progress is not None:
+                        progress.history_length = len(model_history)
                     try:
                         async with aclosing(self._stream_agent_events(
                             user_prompt=user_prompt,
@@ -1930,6 +2007,7 @@ class AgentRunner:
                             usage=model_usage,
                             session_events=session_events,
                             snapshot=stream_snapshot,
+                            progress=progress,
                         )) as stream_events:
                             async for source, event in stream_events:
                                 if source == "status":
@@ -2042,18 +2120,27 @@ class AgentRunner:
                         }
                 if result is not None:
                     deferred_pending = isinstance(result.output, DeferredToolRequests)
-                    new_messages = result.new_messages()
+                    new_messages = (progress.canonical_messages(result.new_messages())
+                                    if progress is not None else result.new_messages())
                     await self._attach_final_plan_snapshot(new_messages, deps)
-                    self._publish_run_complete(
-                        persister,
-                        session_id,
-                        deps,
-                        new_messages,
-                        pre_persisted_user=prepared.pre_persisted_user,
-                        repair_dangling_tool_calls=not deferred_pending,
-                        terminal_status="pending" if deferred_pending else "completed",
-                        result_queue=session_events,
-                    )
+                    if progress is not None:
+                        # Canonical promotion and checkpoint sealing must finish
+                        # before releasing the run lock / admitting a new Run.
+                        await self._persist_run_messages(
+                            session_id, new_messages, deps,
+                            pre_persisted_user=prepared.pre_persisted_user,
+                            repair_dangling_tool_calls=not deferred_pending,
+                            terminal_status="pending" if deferred_pending else "completed",
+                            result_queue=session_events,
+                        )
+                    else:
+                        self._publish_run_complete(
+                            persister, session_id, deps, new_messages,
+                            pre_persisted_user=prepared.pre_persisted_user,
+                            repair_dangling_tool_calls=not deferred_pending,
+                            terminal_status="pending" if deferred_pending else "completed",
+                            result_queue=session_events,
+                        )
                     run_published = True
                     if not deferred_pending and pre_saved_compaction_event is None:
                         compaction_projection = result.all_messages()
@@ -2081,8 +2168,12 @@ class AgentRunner:
             except Exception as exc:  # noqa: BLE001 - surface as an SSE error event
                 logger.exception("Agent stream failed for session {}", session_id)
                 failure_diagnostic = _safe_run_failure(exc)
+                official_failed = stream_snapshot.new_messages
+                if progress is not None:
+                    official_failed = (progress.canonical_messages(official_failed)
+                                       if official_failed else progress.messages)
                 failed_messages = _with_failed_response_diagnostic(
-                    stream_snapshot.new_messages, failure_diagnostic,
+                    official_failed, failure_diagnostic,
                 )
                 history_persisted = prepared.pre_persisted_user
                 if failed_messages:
@@ -2113,6 +2204,17 @@ class AgentRunner:
                             session_id,
                             persistence_exc,
                         )
+                        await self._finish_progress_fallback(session_id, deps, status="failed")
+                elif callable(getattr(self.store, "finish_run_progress", None)):
+                    try:
+                        async with asyncio.timeout(_TERMINAL_WRITE_TIMEOUT):
+                            await self.store.finish_run_progress(
+                                session_id, agent_id=deps.agent_id, user_id=deps.user,
+                                turn_id=deps.turn_id, run_id=deps.run_id, status="failed",
+                            )
+                    except Exception:
+                        history_persisted = False
+                        logger.exception("Failed to seal empty official Run snapshot")
                 failed_run_event = await self._finish_run_event(
                     run_event, status="failed", started_at=started_at,
                     usage=stream_snapshot.usage or model_usage,
@@ -2156,9 +2258,11 @@ class AgentRunner:
             finally:
                 cancelled_run_event = None
                 if cancelled_run is not None and not run_published:
-                    cancelled_messages = mark_cancelled_response_interrupted(
-                        cancelled_run.new_messages()
-                    )
+                    official_cancelled = cancelled_run.new_messages()
+                    if progress is not None:
+                        official_cancelled = (progress.canonical_messages(official_cancelled)
+                                              if official_cancelled else progress.messages)
+                    cancelled_messages = mark_cancelled_response_interrupted(official_cancelled)
                     # Transport cancellation re-raises before the normal cancelled
                     # SSE path below. Close its durable lifecycle here as well,
                     # even when the Provider has not emitted a first response.
@@ -2169,14 +2273,31 @@ class AgentRunner:
                             await self._attach_final_plan_snapshot(cancelled_messages, deps)
                         except Exception as exc:
                             logger.warning("Cancelled plan snapshot unavailable: {}", type(exc).__name__)
-                        self._publish_run_cancelled(
-                            persister,
-                            session_id,
-                            deps,
-                            pre_persisted_user=prepared.pre_persisted_user,
-                            official_messages=cancelled_messages,
-                            result_queue=session_events,
-                        )
+                        if callable(getattr(self.store, "save_run_progress", None)):
+                            try:
+                                if cancelled_messages:
+                                    await self._persist_run_messages(
+                                        session_id, cancelled_messages, deps,
+                                        pre_persisted_user=prepared.pre_persisted_user,
+                                        repair_dangling_tool_calls=False,
+                                        terminal_status="interrupted", result_queue=session_events,
+                                    )
+                                else:
+                                    async with asyncio.timeout(_TERMINAL_WRITE_TIMEOUT):
+                                        await self.store.finish_run_progress(
+                                            session_id, agent_id=deps.agent_id, user_id=deps.user,
+                                            turn_id=deps.turn_id, run_id=deps.run_id, status="interrupted",
+                                        )
+                            except Exception:
+                                cancel_persistence_failed = True
+                                logger.exception("Cancelled Run checkpoint finalization failed")
+                                await self._finish_progress_fallback(session_id, deps, status="interrupted")
+                        else:
+                            self._publish_run_cancelled(
+                                persister, session_id, deps,
+                                pre_persisted_user=prepared.pre_persisted_user,
+                                official_messages=cancelled_messages, result_queue=session_events,
+                            )
                         durable_messages = incremental_append_messages(
                             cancelled_messages,
                             skip_user_prompt=prepared.pre_persisted_user,
@@ -2195,7 +2316,7 @@ class AgentRunner:
             try:
                 # The runner's session lock is released before the persister acquires it.
                 await persister.flush(session_id, agent_id=deps.agent_id)
-                history_persisted = bool(pending) or prepared.pre_persisted_user
+                history_persisted = (bool(pending) or prepared.pre_persisted_user) and not cancel_persistence_failed
                 while not session_events.empty():
                     yield session_events.get_nowait()
             except Exception as exc:  # noqa: BLE001 - surface persistence state in SSE

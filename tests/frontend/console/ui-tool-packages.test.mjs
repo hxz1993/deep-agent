@@ -43,7 +43,7 @@ test("UI 工具页使用左侧工具包树和右侧单一工具表", () => {
   assert.match(template, /class="ui-tool-selected-title">[\s\S]*id="selectedUiToolPackageMeta"[\s\S]*<\/div>[\s\S]*id="selectedUiToolPackageDescription"/);
 });
 
-test("UI 工具页使用与 Skill 一致的分离轻卡片层级", () => {
+test("UI 工具页保留内部轻卡片，页面外壳直角并衔接导航", () => {
   assert.match(template, /class="ui-tools-workspace ui-tools-light-layout"/);
   assert.match(template, /class="panel-title-copy"[\s\S]*UI 工具（HITL）[\s\S]*panel-subtitle/);
   assert.match(template, /panel-toolbar[\s\S]*id="newUiToolPackageBtn"[\s\S]*data-lucide="plus"[\s\S]*新建工具包/);
@@ -65,7 +65,8 @@ test("UI 工具页使用与 Skill 一致的分离轻卡片层级", () => {
   assert.match(styles, /\.panel-title-copy \{[^}]*gap: 4px/);
   assert.match(consoleStyles, /--config-radius: 8px/);
   assert.match(consoleStyles, /--config-control-height: 32px/);
-  assert.match(consoleStyles, /#configurationHost > \.panel\s*\{[^}]*border-radius: var\(--console-card-radius\) !important/);
+  assert.match(consoleStyles, /#configurationHost > \.panel\s*\{[^}]*border: 0;[^}]*border-radius: 0;[^}]*box-shadow: none;/);
+  assert.match(consoleStyles, /\.console-main \.configuration-shell\s*\{[^}]*padding: 0;[^}]*border-radius: 0;/);
   assert.match(consoleStyles, /#configurationHost \.ui-tool-tree-node,[\s\S]*border-radius: var\(--config-radius\) !important/);
   assert.match(consoleStyles, /#configurationHost \.btn,[\s\S]*height: var\(--config-control-height\)/);
 });

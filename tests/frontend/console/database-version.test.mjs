@@ -57,8 +57,10 @@ test("非数字 revision 保留原始标识，缺失版本显示未知", () => {
 test("顶部连接状态不可展开且版本位于用户详情", () => {
   assert.match(
     indexHtml,
-    /<div class="console-runtime-status"[\s\S]*id="connStatus"[\s\S]*id="currentUserBtn"[\s\S]*class="user-popover user-account-popover"[\s\S]*id="productVersion"[\s\S]*id="databaseSchemaVersion"/,
+    /<div class="console-brand-copy">[\s\S]*<span class="connection-pill" id="connStatus"[\s\S]*<button[^>]*id="currentUserBtn"[^>]*aria-expanded="false"[\s\S]*class="user-popover user-account-popover"[\s\S]*id="productVersion"[\s\S]*id="databaseSchemaVersion"/,
   );
+  assert.equal((indexHtml.match(/id="connStatus"/g) || []).length, 1);
+  assert.doesNotMatch(indexHtml, /<(?:button|details)[^>]*id="connStatus"/);
   assert.doesNotMatch(indexHtml, /<details class="console-runtime-status"|runtime-status-popover/);
   assert.doesNotMatch(indexHtml, /class="resource-title"[\s\S]{0,240}databaseSchemaVersion/);
   assert.match(consoleCss, /\.user-account-popover\s*\{/);

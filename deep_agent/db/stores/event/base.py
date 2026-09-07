@@ -18,6 +18,12 @@ from deep_agent.db.event_codec import (
 )
 from deep_agent.db.ids import new_event_id
 from deep_agent.db.models import ChatSession, ChatSessionEvent
+from deep_agent.db.run_ownership import progress_is_abandoned
+from deep_agent.db.run_progress import (
+    RUN_PROGRESS_EVENT_TYPE,
+    run_progress_event_id,
+    sealed_run_progress_payload,
+)
 from deep_agent.db.stores._session import SessionBoundMixin
 from deep_agent.time import utc_rfc3339
 
@@ -52,12 +58,16 @@ class SessionEventSnapshot:
         )
 
     def public_dict(self) -> dict[str, Any]:
+        payload = self.payload
+        if self.event_type == RUN_PROGRESS_EVENT_TYPE:
+            payload = {key: value for key, value in payload.items()
+                       if key not in {"owner", "lease_expires_at"}}
         return {
             "event_id": self.event_id, "session_id": self.session_id,
             "sequence": self.sequence, "schema_version": self.schema_version,
             "event_type": self.event_type, "status": self.status,
             "turn_id": self.turn_id, "run_id": self.run_id,
-            "payload": self.payload, "created_at": utc_rfc3339(self.created_at),
+            "payload": payload, "created_at": utc_rfc3339(self.created_at),
             "updated_at": utc_rfc3339(self.updated_at),
         }
 
@@ -175,6 +185,91 @@ class SessionEventStore(SessionBoundMixin):
         session.updated_at = timestamp
         await db.flush()
         return rows
+
+    async def _save_run_progress(
+        self, db: AsyncSession, session: ChatSession, *, turn_id: str,
+        run_id: str, payload: dict[str, Any],
+    ) -> ChatSessionEvent | None:
+        event_id = run_progress_event_id(session.session_id, run_id)
+        row = (
+            await db.execute(
+                select(ChatSessionEvent).where(ChatSessionEvent.event_id == event_id).with_for_update()
+            )
+        ).scalar_one_or_none()
+        if row is not None:
+            if row.status != "running" or int(row.payload.get("revision", -1)) >= payload["revision"]:
+                return None
+            if row.turn_id != turn_id:
+                raise ValueError("Run progress turn identity cannot change")
+            if row.payload.get("first_message_ordinal") != payload["first_message_ordinal"]:
+                raise ValueError("Run progress message ordinal cannot change")
+            row.payload = payload
+            row.updated_at = datetime.now(timezone.utc)
+            session.updated_at = row.updated_at
+            await db.flush()
+            return row
+        # Reject a late first snapshot after a Run was already durably closed.
+        terminal = (
+            await db.execute(
+                select(ChatSessionEvent.event_id).where(
+                    ChatSessionEvent.session_id == session.session_id,
+                    ChatSessionEvent.run_id == run_id,
+                    ChatSessionEvent.status.is_not(None),
+                    ChatSessionEvent.event_type.in_({"assistant/message", "run/terminal"}),
+                ).limit(1)
+            )
+        ).scalar_one_or_none()
+        if terminal is not None:
+            return None
+        now = datetime.now(timezone.utc)
+        row = ChatSessionEvent(
+            event_id=event_id, session_id=session.session_id,
+            sequence=int(session.next_sequence), schema_version=1,
+            event_type=RUN_PROGRESS_EVENT_TYPE, status="running", turn_id=turn_id,
+            run_id=run_id, search_text=None, payload=payload,
+            created_at=now, updated_at=now,
+        )
+        session.next_sequence = int(session.next_sequence) + 1
+        session.updated_at = now
+        db.add(row)
+        await db.flush()
+        return row
+
+    async def _assert_progress_can_finish(
+        self, db: AsyncSession, session: ChatSession, *, run_id: str,
+        status: str, message_count: int,
+    ) -> None:
+        row = (await db.execute(
+            select(ChatSessionEvent).where(
+                ChatSessionEvent.event_id == run_progress_event_id(session.session_id, run_id),
+            ).with_for_update()
+        )).scalar_one_or_none()
+        if row is not None and row.status != "running" and (
+            row.status != status or row.payload.get("message_count") != message_count
+        ):
+            raise ValueError("Run progress terminal idempotency conflict")
+
+    async def _seal_run_progress(
+        self, db: AsyncSession, session: ChatSession, *, run_id: str,
+        status: str, message_count: int, recovered: bool = False,
+    ) -> ChatSessionEvent | None:
+        row = (
+            await db.execute(
+                select(ChatSessionEvent).where(
+                    ChatSessionEvent.event_id == run_progress_event_id(session.session_id, run_id),
+                ).with_for_update()
+            )
+        ).scalar_one_or_none()
+        if row is None or row.status != "running":
+            return None
+        row.status = status
+        row.payload = sealed_run_progress_payload(
+            row.payload, message_count=message_count, recovered=recovered,
+        )
+        row.updated_at = datetime.now(timezone.utc)
+        session.updated_at = row.updated_at
+        await db.flush()
+        return row
 
     async def _append_lifecycle(
         self, db: AsyncSession, session: ChatSession, *,
@@ -450,16 +545,53 @@ class SessionEventStore(SessionBoundMixin):
         ).scalar_one_or_none()
 
     async def interrupt_running(self) -> int:
-        async with self._write() as db:
-            result = await db.execute(
-                update(ChatSessionEvent)
-                .where(
+        """Interrupt abandoned compactions without stealing an overlapping Run."""
+        async with self._read() as db:
+            candidates = (await db.execute(
+                select(
+                    ChatSessionEvent.event_id, ChatSessionEvent.session_id,
+                    ChatSessionEvent.run_id,
+                ).where(
                     ChatSessionEvent.event_type == "compaction",
                     ChatSessionEvent.status == "running",
+                ).order_by(ChatSessionEvent.session_id, ChatSessionEvent.sequence)
+            )).all()
+        interrupted = 0
+        for event_id, session_id, run_id in candidates:
+            async with self._write() as db:
+                # Match progress/finalization writers: parent Session first,
+                # then progress, and only then the compaction event. Read the
+                # lease under these locks so a racing heartbeat is not ignored.
+                session = (await db.execute(
+                    select(ChatSession).where(ChatSession.session_id == session_id)
+                    .with_for_update()
+                )).scalar_one_or_none()
+                if session is None:
+                    continue
+                if run_id:
+                    progress = (await db.execute(
+                        select(ChatSessionEvent).where(
+                            ChatSessionEvent.session_id == session_id,
+                            ChatSessionEvent.run_id == run_id,
+                            ChatSessionEvent.event_type == RUN_PROGRESS_EVENT_TYPE,
+                            ChatSessionEvent.status == "running",
+                        ).with_for_update()
+                    )).scalar_one_or_none()
+                    if progress is not None and not progress_is_abandoned(
+                        progress.payload, progress.updated_at, run_id=run_id,
+                    ):
+                        continue
+                # A manual compaction without a live checkpoint keeps the
+                # previous restart behavior. Never replace a raced terminal.
+                result = await db.execute(
+                    update(ChatSessionEvent).where(
+                        ChatSessionEvent.event_id == event_id,
+                        ChatSessionEvent.event_type == "compaction",
+                        ChatSessionEvent.status == "running",
+                    ).values(status="interrupted", updated_at=datetime.now(timezone.utc))
                 )
-                .values(status="interrupted", updated_at=datetime.now(timezone.utc))
-            )
-            return int(result.rowcount or 0)
+                interrupted += int(result.rowcount or 0)
+        return interrupted
 
 
 def _compaction_anchor(payload: dict[str, Any]) -> ModelRequest:

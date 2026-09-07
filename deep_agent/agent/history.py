@@ -132,6 +132,7 @@ def filter_ephemeral_agent_messages(messages: list[ModelMessage]) -> list[ModelM
         if (
             isinstance(message, ModelResponse)
             and message.state != "interrupted"
+            and not (message.metadata or {}).get("deepagent_error")
             and is_thinking_only_response(message)
         ):
             continue
@@ -149,7 +150,8 @@ def filter_ephemeral_agent_messages(messages: list[ModelMessage]) -> list[ModelM
                 continue
             if len(kept_parts) != len(message.parts):
                 message = replace(message, parts=kept_parts)
-                if message.state != "interrupted" and is_thinking_only_response(message):
+                if (message.state != "interrupted" and not (message.metadata or {}).get("deepagent_error")
+                        and is_thinking_only_response(message)):
                     continue
         if isinstance(message, ModelRequest):
             terminal_retries = rejected_calls.terminal_retry_positions.get(message_index, set())

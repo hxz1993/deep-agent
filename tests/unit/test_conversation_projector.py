@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import unittest
+from copy import deepcopy
 from datetime import datetime, timezone
 
 from pydantic_ai.messages import (
     ImageUrl,
     ModelRequest,
     ModelResponse,
+    NativeToolCallPart,
+    NativeToolReturnPart,
     NativeToolSearchCallPart,
     NativeToolSearchReturnPart,
     TextPart,
@@ -50,6 +53,57 @@ def event(
 
 
 class ConversationProjectorTests(unittest.TestCase):
+    def test_interleaved_native_search_keeps_final_text_after_tools(self) -> None:
+        native = event(1, "assistant/message", status="completed", message=ModelResponse(parts=[
+            ThinkingPart(content="准备查询"), TextPart(content="先搜索"),
+            NativeToolCallPart(tool_name="web_search", args={}, tool_call_id="native-1"),
+            NativeToolReturnPart(tool_name="web_search", content={}, tool_call_id="native-1"),
+            ThinkingPart(content="继续分析"), TextPart(content="补充搜索"),
+            NativeToolCallPart(tool_name="web_search", args={}, tool_call_id="native-2"),
+            NativeToolCallPart(tool_name="web_search", args={}, tool_call_id="native-3"),
+            NativeToolReturnPart(tool_name="web_search", content={}, tool_call_id="native-2"),
+            NativeToolReturnPart(tool_name="web_search", content={}, tool_call_id="native-3"),
+            ThinkingPart(content="整理结果"), TextPart(content="最终回答"),
+        ]))
+        before = deepcopy(native)
+        history = project_session_events([native])
+        self.assertEqual([item.kind for item in history.items], [
+            "assistant_message", "tool", "assistant_message", "tool", "tool", "assistant_message",
+        ])
+        assistants = [item for item in history.items if item.kind == "assistant_message"]
+        self.assertEqual([item.text for item in assistants], ["先搜索", "补充搜索", "最终回答"])
+        self.assertEqual([item.thinking for item in assistants], ["准备查询", "继续分析", "整理结果"])
+        self.assertEqual([item.phase for item in assistants], ["process", "process", "final"])
+        self.assertEqual([item.order.part_offset for item in assistants], [0, 4, 10])
+        self.assertEqual(len({item.item_id for item in history.items}), len(history.items))
+        self.assertEqual(assistants[0].item_id, "message:event-1")
+        self.assertEqual(sum(item.usage is not None for item in assistants), 1)
+        self.assertTrue(all(item.source_event_ids == ["event-1"] for item in assistants))
+        self.assertEqual(native, before)
+        self.assertEqual(history, project_session_events([native]))
+
+    def test_native_search_before_final_with_empty_thinking(self) -> None:
+        history = project_session_events([event(1, "assistant/message", status="completed", message=ModelResponse(parts=[
+            ThinkingPart(content=""), TextPart(content="查询中"),
+            NativeToolCallPart(tool_name="web_search", args={}, tool_call_id="native-1"),
+            NativeToolReturnPart(tool_name="web_search", content={}, tool_call_id="native-1"),
+            ThinkingPart(content=""), TextPart(content="最终回答"),
+        ]))])
+        self.assertEqual([item.order.part_offset for item in history.items], [1, 2, 5])
+        self.assertEqual(history.items[-1].phase, "final")
+        self.assertEqual(history.items[-1].text, "最终回答")
+
+    def test_pending_tool_after_intermediate_text_has_no_final(self) -> None:
+        history = project_session_events([event(1, "assistant/message", status="pending", message=ModelResponse(parts=[
+            TextPart(content="查询中"),
+            NativeToolCallPart(tool_name="web_search", args={}, tool_call_id="native-1"),
+            NativeToolReturnPart(tool_name="web_search", content={}, tool_call_id="native-1"),
+            TextPart(content="请确认"),
+            ToolCallPart(tool_name="builtin__confirm", args={}, tool_call_id="confirm-1"),
+        ]))])
+        self.assertFalse(any(getattr(item, "phase", None) == "final" for item in history.items))
+        self.assertEqual(history.items[-1].status, "awaiting_input")
+
     def test_projects_messages_tools_plan_and_safe_user_context(self) -> None:
         plan = {
             "items": [{"id": "one", "content": "读取数据", "status": "completed"}]

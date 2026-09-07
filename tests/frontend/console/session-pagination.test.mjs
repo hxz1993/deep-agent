@@ -60,18 +60,37 @@ test("失败可重试且不会推进offset，空页停止加载", async () => {
   assert.equal(urls[0], urls[1]);
 });
 
-test("不足一屏不显示到底提示，溢出且实际滚动后才显示", async () => {
+test("不足一屏不显示到底提示，一屏历史在滚动后显示且不把页脚算作内容", async () => {
   const { context } = harness(async () => response([{ session_id: "1" }], 1));
   const footer = {};
-  const list = { clientHeight: 300, scrollHeight: 100, scrollTop: 0, querySelector: () => footer };
+  let rows = [{ offsetTop: 0, offsetHeight: 56 }];
+  const list = {
+    clientHeight: 300, scrollHeight: 100, scrollTop: 0,
+    querySelector: () => footer,
+    querySelectorAll(selector) {
+      assert.equal(selector, ".session-item:not(.console-filtered)");
+      return rows;
+    },
+  };
   context.el = { sessionList: list };
   await context.syncSessionsFromBackend();
   context.maybeLoadMoreSessions();
   assert.equal(footer.hidden, true);
+  // Even an oversized footer cannot make one short history row fill the viewport.
   list.scrollHeight = 600;
+  list.scrollTop = 50;
   context.maybeLoadMoreSessions();
   assert.equal(footer.hidden, true);
+  await context.syncSessionsFromBackend();
+  rows = Array.from({ length: 5 }, (_, index) => ({ offsetTop: index * 56, offsetHeight: 56 }));
+  list.scrollTop = 0;
+  context.maybeLoadMoreSessions();
+  assert.equal(footer.hidden, true);
+  // A 20px gap below the last row cannot fit another row: this is one full screen.
   list.scrollTop = 50;
   context.maybeLoadMoreSessions();
   assert.equal(footer.hidden, false);
+  rows = [];
+  context.maybeLoadMoreSessions();
+  assert.equal(footer.hidden, true);
 });

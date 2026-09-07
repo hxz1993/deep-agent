@@ -8,6 +8,12 @@
 
 ## 运行命令
 
+运行中持久化回归入口：`test_run_progress_capability/store/projection`、
+`integration/test_run_progress_history.py`、`test_run_progress_recovery.py`。
+真实 SDK 需在模型静默/并行工具中途设屏障，从独立 HTTP/SQLite 连接读 History，不能先 flush 后宣称实时。
+强杀验证只能使用隔离子进程及临时库；禁止杀稳定 8000 或重放真实业务工具。
+Console 跟随验证包含请求串行、同 Sequence 更新、切页迟到数据及运行工具只读。
+
 ```bash
 # 全部
 python3.12 -m unittest discover -s tests -p "test_*.py" -v

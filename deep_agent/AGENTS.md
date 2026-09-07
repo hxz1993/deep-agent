@@ -22,6 +22,16 @@
 
 ## 架构与数据流
 
+### v0.8.0 运行中持久化
+
+`agent/run_progress.py`通过 SDK 公开 Capability 节点和工具事件保存运行快照，
+`db/conversation.py`以短事务写同一 Event Store 的 `run/progress`，不能排队等待整个 Run 的逻辑锁。
+正式阶段/已接受工具/结果及时提交，半段约 1 秒节流；官方节点 ledger 在压缩后仍保留当前 Run 的早期轮次。
+最终正式消息与检查点封口必须同事务完成，不把预览或未知结果伪造成成功，不重复保存终态。
+`db/run_ownership.py`保护活 Run 与租约；重启恢复只标中断，不自动重跑工具或渠道投递。
+运行快照不进入 LLM History，Deferred 仅正式持久化待操作状态才可执行。详见
+[`../docs/guides/run-progress-persistence.md`](../docs/guides/run-progress-persistence.md)。
+
 ```
 HTTP (REST/SSE)
     → api/v1/chat.py
@@ -214,6 +224,11 @@ Web图片在当前`agent.run()`内部保持原生视觉结果；写入Event Stor
 11. `IncludeToolReturnSchemas` 发生在模型请求前的 Tool Definition 准备阶段，不是工具执行后给真实结果追加 Schema。首版只允许按最终稳定协议名的明确白名单启用，并要求存在可信、稳定的返回 Schema；不得通过名称包含 `query` 等模糊规则自动扩大范围。延迟 MCP 工具只有被 Tool Search 披露时才携带其返回 Schema，并必须观测新增 Schema Token。真实结果过大或空字段过多继续由分页、投影或 `ToolOutputLimits`/Artifact 治理。
 12. Prompt Cache 不是跨 Provider 的统一 DeepAgent 缓存。DeepSeek 等 Provider 的自动缓存只读取其 Usage 命中/未命中数据，不改写请求；显式 `CachePoint`、cache key 和 TTL 只能在模型目录确认具体 Provider 支持后启用。统一观测可以归一化指标，不能伪造统一缓存协议。
 13. v0.3.17 使用 Pydantic AI 官方 `conversation_id/run_id` 贯通运行：`conversation_id=deepagent:{agent_id}:{session_id}` 在同一 Session 内稳定，每次发送、Deferred 恢复、重试或主动压缩使用新的 `run_id`。第一阶段只输出脱敏结构化日志和当前页面 Run 指标，不把高频运行数据写入业务 MySQL；后续 OTLP/Instrumentation 不得建立第二套 Agent 生命周期。
+
+普通History遇到同一ModelResponse内文字与原生工具交错时，按工具Call/Return边界拆分Assistant展示项，
+保留原始part_offset，最后正文才标记final；不能将全部文字合并到首段位置。首段保留原Item ID，
+后续段以part_offset派生稳定ID，响应Usage只放最后一个Assistant段，避免重复统计。
+这是只读投影，不拆写原始Message Event、不改模型历史或轨迹；旧会话重新读取History即可恢复。
 
 框架能力是否应采用、部分采用或明确关闭，统一先查
 [`../docs/design/14-framework-capabilities/framework-capabilities-baseline.md`](../docs/design/14-framework-capabilities/framework-capabilities-baseline.md)。

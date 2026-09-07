@@ -1,7 +1,7 @@
 import { channelOriginPresentation } from "./session-display.js?v=20260904-13";
 import { copyTextToClipboard } from "./message-actions.js?v=20260819-1";
 
-const WORKSPACE_ASSET_VERSION = "20260907-1";
+const WORKSPACE_ASSET_VERSION = "20260908-1";
 
 const WORKSPACE_PANE_LIMITS = {
   session: { min: 220, max: 420, initial: 300, variable: "--console-session-width" },
@@ -219,7 +219,7 @@ function renderAgentSwitcher(state = window.DeepAgentConsoleChat?.state) {
   const label = state.agents.length ? currentAgentName(state) : "无可用 Agent";
   field.title = `切换测试 Agent：${label}`;
   labelNode.innerHTML = `${escapeHtml(label)}${workspaceAgentChannelBadge(state.agentId)}`;
-  trigger.disabled = !!state.streaming || !state.agents.length;
+  trigger.disabled = (!!state.streaming && !state.observingRun) || !state.agents.length;
   menu.innerHTML = state.agents.map((agent) => {
     const selected = agent.id === state.agentId;
     return `<button type="button" class="agent-select-option${selected ? " selected" : ""}" role="option" aria-selected="${selected}" data-switch-agent-id="${escapeHtml(agent.id)}">
@@ -750,6 +750,7 @@ function startStateMonitor() {
       sessionId: api.state.sessionId,
       llmModelId: api.state.llmModelId,
       streaming: api.state.streaming,
+      observingRun: api.state.observingRun,
       awaitingHitl: api.state.awaitingHitl,
       attachments: api.state.pendingAttachments.length,
       contextStatus: api.state.contextStatus,

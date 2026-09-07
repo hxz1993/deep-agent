@@ -18,7 +18,8 @@ from deep_agent.conversation.models import (
     ToolConversationItem,
     UserConversationItem,
 )
-from deep_agent.db.event_codec import EVENT_SCHEMA_VERSION, MESSAGE_EVENT_TYPES
+from deep_agent.db.event_codec import EVENT_SCHEMA_VERSION, MESSAGE_EVENT_TYPES, event_type_for_message
+from deep_agent.db.run_progress import RUN_PROGRESS_EVENT_TYPE
 from deep_agent.time import ensure_utc
 
 
@@ -50,6 +51,10 @@ def project_session_events(
 
     for event in ordered:
         event_type = str(_get(event, "event_type", ""))
+        if event_type == RUN_PROGRESS_EVENT_TYPE:
+            if _get(event, "status") == "running":
+                items.extend(_progress_items(event))
+            continue
         if event_type == "run/terminal":
             run_id = _optional_str(_get(event, "run_id"))
             if run_id:
@@ -75,9 +80,7 @@ def project_session_events(
             assistant_terminal = _assistant_terminal_status(event, message)
             if run_id and assistant_terminal:
                 terminal_by_run[run_id] = assistant_terminal
-            assistant = _assistant_item(event, message)
-            if assistant is not None:
-                items.append(assistant)
+            items.extend(_assistant_items(event, message))
             for part_offset, part in enumerate(_parts(message)):
                 part_kind = str(part.get("part_kind") or "")
                 call_id = _optional_str(part.get("tool_call_id"))
@@ -144,6 +147,49 @@ def project_session_events(
         ),
         items=items,
     )
+
+
+def _progress_items(event: Any) -> list[ConversationItem]:
+    """Render a durable checkpoint; it can never grant a Deferred action."""
+    payload = _get(event, "payload") or {}
+    messages = payload.get("messages", []) if isinstance(payload, Mapping) else []
+    if not isinstance(messages, list):
+        raise ConversationProjectionError("Run progress messages must be a list")
+    virtual: list[dict[str, Any]] = []
+    offsets: dict[int, int] = {}
+    offset = 0
+    for index, message in enumerate(messages):
+        if not isinstance(message, dict):
+            raise ConversationProjectionError("Invalid Run progress message")
+        offsets[index + 1] = offset
+        offset += max(1, len(_parts(message)))
+        virtual.append({
+            "event_id": f"{_get(event, 'event_id')}:preview:{index}",
+            "event_type": event_type_for_message(message),
+            "sequence": index + 1, "schema_version": EVENT_SCHEMA_VERSION,
+            "session_id": _get(event, "session_id"),
+            "turn_id": _get(event, "turn_id"), "run_id": _get(event, "run_id"),
+            "status": "pending", "payload": {"message": message},
+            "created_at": _get(event, "created_at"), "updated_at": _get(event, "updated_at"),
+        })
+    items = project_session_events(virtual, session_id=str(_get(event, "session_id"))).items
+    for item in items:
+        item.order.part_offset += offsets[item.order.sequence]
+        item.order.sequence = int(_get(event, "sequence", 0))
+        item.source_event_ids = [str(_get(event, "event_id"))]
+        if item.kind == "assistant_message":
+            item.status = "pending"
+            item.phase = "process"
+        elif item.kind == "tool":
+            # Even a validated UI call is only a preview until the terminal
+            # pending transaction commits its official Deferred request.
+            if item.status == "awaiting_input":
+                item.status = "pending"
+            if item.mode == "deferred":
+                item.mode = "tool"
+            item.widget = None
+            item.metadata = None
+    return items
 
 
 def _message(event: Any) -> dict[str, Any] | None:
@@ -229,9 +275,48 @@ def _user_item(event: Any, message: Mapping[str, Any]) -> UserConversationItem |
     )
 
 
+def _assistant_items(
+    event: Any,
+    message: Mapping[str, Any],
+) -> list[AssistantConversationItem]:
+    """Keep text on its own side of tool boundaries within a ModelResponse.
+
+    Provider-native tools can interleave several text segments in one persisted
+    response. Collapsing them into its first offset hides the final answer.
+    Only the read projection is split; the source Message Event stays intact.
+    """
+    items: list[AssistantConversationItem] = []
+    parts = _parts(message)
+    start = 0
+
+    def append_segment(end: int) -> None:
+        if start == end:
+            return
+        item = _assistant_item(
+            event, {**message, "parts": parts[start:end]}, part_start=start,
+        )
+        if item is not None:
+            if items:
+                item.item_id += f":part:{item.order.part_offset}"
+            items.append(item)
+
+    for offset, part in enumerate(parts):
+        kind = part.get("part_kind")
+        if kind in _TOOL_CALL_KINDS or kind in _TOOL_RESULT_KINDS:
+            append_segment(offset)
+            start = offset + 1
+    append_segment(len(parts))
+    # Usage belongs to the whole response, not each rendered segment.
+    for item in items[:-1]:
+        item.usage = None
+    return items
+
+
 def _assistant_item(
     event: Any,
     message: Mapping[str, Any],
+    *,
+    part_start: int = 0,
 ) -> AssistantConversationItem | None:
     thinking: list[str] = []
     texts: list[str] = []
@@ -240,10 +325,10 @@ def _assistant_item(
         kind = part.get("part_kind")
         if kind == "thinking" and part.get("content"):
             thinking.append(str(part["content"]))
-            offsets.append(offset)
+            offsets.append(part_start + offset)
         elif kind == "text" and part.get("content"):
             texts.append(str(part["content"]))
-            offsets.append(offset)
+            offsets.append(part_start + offset)
     if not offsets:
         return None
     event_id = str(_get(event, "event_id"))
@@ -433,7 +518,7 @@ def _mark_final_assistant_items(items: Sequence[ConversationItem]) -> None:
             renderable,
             key=lambda item: (item.order.sequence, item.order.part_offset, item.item_id),
         )
-        if isinstance(last, AssistantConversationItem) and last.text:
+        if isinstance(last, AssistantConversationItem) and last.text and last.status != "pending":
             last.phase = "final"
 
 

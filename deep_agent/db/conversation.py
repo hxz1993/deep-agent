@@ -7,10 +7,11 @@ import json
 import sys
 from collections import defaultdict
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Any, Callable, Protocol, runtime_checkable
 
-from pydantic_ai.messages import ModelMessage, ModelRequest, UserPromptPart
+from pydantic_ai.messages import ModelMessage, ModelRequest, ModelResponse, UserPromptPart
 from sqlalchemy import and_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -30,6 +31,13 @@ from deep_agent.db.stores.event.base import LifecycleStatus, SessionEventSnapsho
 from deep_agent.db.stores._session import serialized_sqlite_session
 from deep_agent.db.models import ChatSession, ChatSessionEvent
 from deep_agent.db.serialization import serialize_message
+from deep_agent.db.run_ownership import owned_progress_payload, progress_is_abandoned, run_owner
+from deep_agent.db.run_progress import (
+    RUN_PROGRESS_EVENT_TYPE,
+    RUN_PROGRESS_TERMINAL_STATUSES,
+    decode_run_progress_messages,
+    encode_run_progress,
+)
 
 __all__ = ["SessionStore", "SqlConversationCoordinator", "SqlConversationStore"]
 
@@ -47,6 +55,21 @@ class SessionStore(Protocol):
         turn_id: str | None = None, run_id: str | None = None,
         first_message_ordinal: int = 0, terminal_status: str | None = None,
     ) -> list[SessionEventSnapshot]: ...
+
+    async def save_run_progress(
+        self, session_id: str, *, agent_id: str | None, user_id: str | None,
+        turn_id: str, run_id: str, messages: list[ModelMessage], revision: int,
+        first_message_ordinal: int = 1, app_id: str | None = None,
+        space_id: str | None = None,
+    ) -> SessionEventSnapshot | None: ...
+
+    async def recover_running_progress(self, *, force: bool = False) -> int: ...
+    async def touch_run_progress(self, session_id: str, *, run_id: str) -> bool: ...
+
+    async def finish_run_progress(
+        self, session_id: str, *, agent_id: str | None, user_id: str | None,
+        turn_id: str, run_id: str, status: str,
+    ) -> SessionEventSnapshot | None: ...
 
     async def list_sessions(self) -> list[tuple[str, str]]: ...
     async def resolve_ref(
@@ -165,8 +188,10 @@ class SqlConversationCoordinator:
         turn_id: str | None = None, run_id: str | None = None,
         first_message_ordinal: int = 0, terminal_status: str | None = None,
     ) -> list[SessionEventSnapshot]:
-        if not messages:
+        if not messages and terminal_status is None:
             return []
+        if terminal_status is not None and terminal_status not in RUN_PROGRESS_TERMINAL_STATUSES:
+            raise ValueError("Invalid Run terminal status")
         scope, user = self._required_identity(agent_id, user_id)
         async with self._write() as db:
             existing_owner = await self._chat_sessions._get_owner(
@@ -192,12 +217,214 @@ class SqlConversationCoordinator:
                 db, session_id, agent_id=scope, user_id=user,
                 app_id=app_id, space_id=space_id, title=title, now=now,
             )
+            if terminal_status is not None and run_id:
+                await self._events._assert_progress_can_finish(
+                    db, session, run_id=run_id, status=terminal_status,
+                    message_count=len(messages),
+                )
             rows = await self._events._append_messages(
                 db, session, messages, turn_id=resolved_turn_id, run_id=run_id, now=now,
                 first_message_ordinal=first_message_ordinal,
                 terminal_status=terminal_status,
             )
+            if terminal_status is not None and run_id:
+                await self._events._seal_run_progress(
+                    db, session, run_id=run_id, status=terminal_status,
+                    message_count=len(messages),
+                )
             return [SessionEventSnapshot.from_row(row) for row in rows]
+
+    async def save_run_progress(
+        self, session_id: str, *, agent_id: str | None, user_id: str | None,
+        turn_id: str, run_id: str, messages: list[ModelMessage], revision: int,
+        first_message_ordinal: int = 1, app_id: str | None = None,
+        space_id: str | None = None,
+    ) -> SessionEventSnapshot | None:
+        """Commit one replaceable snapshot without acquiring the whole-Run lock."""
+        scope, user = self._required_identity(agent_id, user_id)
+        if not run_id or not turn_id:
+            raise ValueError("Run progress requires run_id and turn_id")
+        payload = owned_progress_payload(encode_run_progress(
+            messages, first_message_ordinal=first_message_ordinal, revision=revision,
+        ))
+        async with self._write() as db:
+            owner = await self._chat_sessions._get_owner(db, scope, session_id, for_update=True)
+            if owner.exists and owner.user_id != user:
+                raise PermissionError("Session belongs to another user")
+            session = await self._chat_sessions._ensure(
+                db, session_id, agent_id=scope, user_id=user,
+                app_id=app_id, space_id=space_id,
+            )
+            row = await self._events._save_run_progress(
+                db, session, turn_id=turn_id, run_id=run_id, payload=payload,
+            )
+            return SessionEventSnapshot.from_row(row) if row is not None else None
+
+    async def touch_run_progress(self, session_id: str, *, run_id: str) -> bool:
+        """Refresh this process's lease without changing message revision/sequence."""
+        from deep_agent.db.run_progress import run_progress_event_id
+        async with self._write() as db:
+            session = (await db.execute(select(ChatSession).where(
+                ChatSession.session_id == session_id).with_for_update())).scalar_one_or_none()
+            if session is None:
+                return False
+            row = (await db.execute(select(ChatSessionEvent).where(
+                ChatSessionEvent.event_id == run_progress_event_id(session_id, run_id)
+            ).with_for_update())).scalar_one_or_none()
+            if row is None or row.status != "running" or row.payload.get("owner") != run_owner():
+                return False
+            row.payload = owned_progress_payload(row.payload)
+            row.updated_at = datetime.now(timezone.utc)
+            return True
+
+    async def recover_running_progress(self, *, force: bool = False) -> int:
+        """Recover abandoned process checkpoints, respecting live owners/leases.
+
+        This never executes or replays a tool. A transaction promotes the last
+        committed snapshot into ordinary immutable messages and seals its Run.
+        """
+        from deep_agent.agent.history import (
+            incremental_append_messages,
+            mark_cancelled_response_interrupted,
+            repair_unprocessed_tool_calls,
+        )
+
+        async with self._events._read() as db:
+            event_ids = list((await db.execute(
+                select(ChatSessionEvent.event_id).where(
+                    ChatSessionEvent.event_type == RUN_PROGRESS_EVENT_TYPE,
+                    ChatSessionEvent.status == "running",
+                ).order_by(ChatSessionEvent.session_id, ChatSessionEvent.sequence)
+            )).scalars())
+        recovered = 0
+        for event_id in event_ids:
+            async with self._write() as db:
+                row = (await db.execute(
+                    select(ChatSessionEvent).where(ChatSessionEvent.event_id == event_id)
+                )).scalar_one_or_none()
+                if row is None or row.status != "running":
+                    continue
+                if not force and not progress_is_abandoned(row.payload, row.updated_at, run_id=row.run_id):
+                    continue
+                session = (await db.execute(
+                    select(ChatSession).where(ChatSession.session_id == row.session_id).with_for_update()
+                )).scalar_one()
+                # All writers lock the session before its event, including on
+                # PostgreSQL/MySQL; reversing that order can deadlock finalization.
+                row = (await db.execute(
+                    select(ChatSessionEvent).where(ChatSessionEvent.event_id == event_id)
+                    .with_for_update().execution_options(populate_existing=True)
+                )).scalar_one_or_none()
+                if row is None or row.status != "running":
+                    continue
+                if not force and not progress_is_abandoned(row.payload, row.updated_at, run_id=row.run_id):
+                    continue
+                # Recovery also ends this abandoned Run's live compaction UI.
+                # Keep the lock order session -> progress -> compaction, and
+                # leave other Runs (including manual compaction) untouched.
+                compactions = (await db.execute(
+                    select(ChatSessionEvent).where(
+                        ChatSessionEvent.session_id == row.session_id,
+                        ChatSessionEvent.run_id == row.run_id,
+                        ChatSessionEvent.event_type == "compaction",
+                        ChatSessionEvent.status == "running",
+                    ).order_by(ChatSessionEvent.sequence).with_for_update()
+                )).scalars().all()
+                for compaction in compactions:
+                    compaction.status = "interrupted"
+                    compaction.updated_at = datetime.now(timezone.utc)
+                messages = incremental_append_messages(
+                    mark_cancelled_response_interrupted(decode_run_progress_messages(row.payload)),
+                    skip_user_prompt=True,
+                )
+                messages = repair_unprocessed_tool_calls(messages)
+                await self._events._append_messages(
+                    db, session, messages, turn_id=row.turn_id or row.run_id,
+                    run_id=row.run_id,
+                    first_message_ordinal=int(row.payload.get("first_message_ordinal", 1)),
+                    terminal_status="interrupted",
+                )
+                await self._events._append_terminal(
+                    db, session, status="interrupted", turn_id=row.turn_id,
+                    run_id=row.run_id, payload={"error": {"code": "run_interrupted_by_restart"}},
+                )
+                await self._events._seal_run_progress(
+                    db, session, run_id=row.run_id, status="interrupted",
+                    message_count=len(messages), recovered=True,
+                )
+                recovered += 1
+        return recovered
+
+    async def finish_run_progress(
+        self, session_id: str, *, agent_id: str | None, user_id: str | None,
+        turn_id: str, run_id: str, status: str,
+    ) -> SessionEventSnapshot | None:
+        """Close an exceptional Run from its last durable snapshot, not a replay.
+
+        Use only when official final/cancellation state is unavailable. A normal
+        result must use ``append`` so its authoritative messages win atomically.
+        """
+        from deep_agent.agent.history import (
+            incremental_append_messages,
+            mark_cancelled_response_interrupted,
+            repair_unprocessed_tool_calls,
+        )
+
+        if status not in {"failed", "interrupted", "cancelled"}:
+            raise ValueError("Progress fallback requires an exceptional terminal status")
+        scope, user = self._required_identity(agent_id, user_id)
+        async with self._write() as db:
+            owner = await self._chat_sessions._get_owner(db, scope, session_id, for_update=True)
+            if not owner.exists:
+                return None
+            if owner.user_id != user:
+                raise PermissionError("Session belongs to another user")
+            session = (await db.execute(
+                select(ChatSession).where(ChatSession.session_id == session_id).with_for_update()
+            )).scalar_one()
+            row = (await db.execute(
+                select(ChatSessionEvent).where(
+                    ChatSessionEvent.session_id == session_id,
+                    ChatSessionEvent.run_id == run_id,
+                    ChatSessionEvent.event_type == RUN_PROGRESS_EVENT_TYPE,
+                ).with_for_update()
+            )).scalar_one_or_none()
+            if row is None or row.status != "running":
+                return None
+            if row.turn_id != turn_id:
+                raise ValueError("Run progress turn identity cannot change")
+            raw_messages = decode_run_progress_messages(row.payload)
+            # Mark before normal history filtering so an interrupted pure
+            # thinking response is not mistaken for an ephemeral model retry.
+            if status != "failed":
+                raw_messages = mark_cancelled_response_interrupted(raw_messages)
+            else:
+                for index in range(len(raw_messages) - 1, -1, -1):
+                    message = raw_messages[index]
+                    if isinstance(message, ModelResponse):
+                        raw_messages[index] = replace(message, metadata={
+                            **(message.metadata or {}), "deepagent_error": {
+                                "code": "agent_run_failed",
+                                "message": "本轮执行失败，已保留已产生的记录。",
+                            },
+                        })
+                        break
+            messages = incremental_append_messages(raw_messages, skip_user_prompt=True)
+            if status == "failed":
+                messages = repair_unprocessed_tool_calls(
+                    messages, failure_message="本轮执行失败，已保留已产生的记录。",
+                )
+            else:
+                messages = repair_unprocessed_tool_calls(mark_cancelled_response_interrupted(messages))
+            await self._events._append_messages(
+                db, session, messages, turn_id=turn_id, run_id=run_id,
+                first_message_ordinal=int(row.payload.get("first_message_ordinal", 1)),
+                terminal_status=status,
+            )
+            sealed = await self._events._seal_run_progress(
+                db, session, run_id=run_id, status=status, message_count=len(messages),
+            )
+            return SessionEventSnapshot.from_row(sealed) if sealed is not None else None
 
     async def append_lifecycle(
         self, session_id: str, *, event_type: str, status: LifecycleStatus,

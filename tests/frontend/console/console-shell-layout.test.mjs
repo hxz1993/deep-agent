@@ -48,7 +48,7 @@ test("控制台合并为图文一级导航且保留三个真实页面", () => {
   assert.match(index, /data-page="workspace"[\s\S]*?class="resource-nav"[\s\S]*?class="console-nav-footer"[\s\S]*?data-page="diagnostics"[\s\S]*?title="接口文档"/);
   assert.doesNotMatch(index, /data-page="configuration"|<aside class="resource-nav"/);
   assert.match(styles, /--console-resource-nav-width: 0px/);
-  assert.match(styles, /\.console-rail \.resource-nav\s*\{[^}]*flex: 1 1 auto;[^}]*overflow: auto;/);
+  assert.match(styles, /\.console-rail \.resource-nav\s*\{[^}]*flex: 1 1 auto;[^}]*overflow: hidden auto;/);
   assert.doesNotMatch(index, /<header class="console-topbar">[\s\S]*?<nav class="console-nav"/);
   assert.match(styles, /grid-template-columns: var\(--console-rail-width\) minmax\(0, 1fr\)/);
   assert.match(index, /class="console-brand-icon"[\s\S]*favicon\.svg/);

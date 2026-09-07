@@ -429,7 +429,9 @@ class AgentRunnerHistoryTests(unittest.IsolatedAsyncioTestCase):
             await self._flush(session_id, agent_id=self.db_agent.id)
             rows = await self.store.list_events(session_id, limit=100)
             rows = [row for row in rows if row.event_type != "session/title"]
-            self.assertEqual([row.event_type for row in rows], ["user/message", "run/terminal"])
+            self.assertEqual([row.event_type for row in rows], ["user/message", "run/progress", "run/terminal"])
+            self.assertEqual(rows[1].status, "interrupted")
+            self.assertNotIn("messages", rows[1].payload)
             self.assertEqual(rows[-1].status, "cancelled")
             self.assertEqual(rows[-1].run_id, deps.run_id)
             self.assertTrue(exited.is_set(), "Provider task survived the disconnected consumer")

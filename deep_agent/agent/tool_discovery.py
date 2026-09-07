@@ -116,7 +116,7 @@ class ToolDiscoveryTelemetry:
     estimated_return_schema_tokens: int = 0
     read_only_intent: bool = field(default=False, repr=False)
     candidate_tools: list[str] = field(default_factory=list, repr=False)
-    seen_search_queries: set[str] = field(default_factory=set, repr=False)
+    search_query_matches: dict[str, tuple[str, ...]] = field(default_factory=dict, repr=False)
     server_names: tuple[str, ...] = field(default_factory=tuple, repr=False)
 
     def as_dict(self) -> dict[str, Any]:
@@ -711,21 +711,30 @@ def search_deferred_tools(
     query_fingerprint = " ".join(sorted(set(lexical_tokens(query_text)))) or normalize_text(
         query_text
     )
-    if query_fingerprint in telemetry.seen_search_queries:
-        logger.info(
-            "MCP tool search catalog={} call={} skipped_duplicate_query=true",
-            telemetry.catalog_hash,
-            telemetry.search_calls,
+    # Telemetry is cumulative, while SDK availability reflects the current
+    # history/tool definitions (including deferred resume and compaction).
+    # Never let an old successful search permanently hide a now-unavailable tool.
+    available_names = ctx.available_tool_names
+    searchable_tools = [
+        tool for tool in tools
+        if tool.name not in available_names
+        and not (
+            telemetry.read_only_intent
+            and set(lexical_tokens(tool.name)) & {"write", "delete"}
         )
-        return []
-    telemetry.seen_search_queries.add(query_fingerprint)
-    excluded_names = (
-        set(ctx.discovered_tool_names)
-        | set(telemetry.discovered_tools)
-        | set(telemetry.preselected_tools)
-    )
-    searchable_tools = [tool for tool in tools if tool.name not in excluded_names]
+    ]
     try:
+        previous_matches = telemetry.search_query_matches.get(query_fingerprint)
+        if previous_matches:
+            # Repeat queries may restore lost disclosure evidence, but must not
+            # progressively disclose the next Top N batch on every repetition.
+            searchable_names = {tool.name for tool in searchable_tools}
+            restored = [name for name in previous_matches if name in searchable_names]
+            logger.info(
+                "MCP tool search catalog={} call={} repeated_query=true restored={}",
+                telemetry.catalog_hash, telemetry.search_calls, restored,
+            )
+            return restored
         # Protocol names are stable identifiers, not fuzzy prose.  When the
         # model copies one from the catalog, disclose that exact tool first;
         # otherwise a broad multi-query search can bury the requested tool
@@ -784,6 +793,7 @@ def search_deferred_tools(
         ranked = sorted(tool.name for tool in fallback_tools)[:MCP_SEARCH_RESULT_LIMIT]
     finally:
         telemetry.retrieval_ms += (time.perf_counter() - started) * 1_000
+    telemetry.search_query_matches[query_fingerprint] = tuple(ranked)
     telemetry.discovered_tools = list(
         dict.fromkeys([*telemetry.discovered_tools, *ranked])
     )

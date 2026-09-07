@@ -3,10 +3,11 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import re
 import time
 from contextlib import aclosing, asynccontextmanager, suppress
 from copy import deepcopy
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, AsyncIterator
 
 import anyio
@@ -19,7 +20,7 @@ from pydantic_ai import (
     DeferredToolResults,
     RunContext,
 )
-from pydantic_ai.exceptions import RunCancelled
+from pydantic_ai.exceptions import RunCancelled, UnexpectedModelBehavior
 from pydantic_ai.messages import (
     FunctionToolCallEvent,
     FunctionToolResultEvent,
@@ -102,6 +103,41 @@ from deep_agent.options import OPTION
 
 _STREAM_OUTPUT_TYPE: list[Any] = [str, DeferredToolRequests]
 _TERMINAL_WRITE_TIMEOUT = 10.0
+
+
+def _safe_run_failure(exc: Exception) -> dict[str, Any]:
+    """Durable diagnostics contain categories, never raw exception/argument text."""
+    error_type = type(exc).__name__
+    diagnostic: dict[str, Any] = {
+        "code": "agent_run_failed",
+        "error_type": error_type if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,79}", error_type) else "Exception",
+        "message": "本轮执行失败，已保存已产生的记录。",
+    }
+    if isinstance(exc, UnexpectedModelBehavior):
+        match = re.match(
+            r"Tool '([A-Za-z0-9_.:-]{1,200})' exceeded max retries count of ([0-9]{1,6})\.",
+            str(exc),
+        )
+        if match:
+            diagnostic.update(
+                code="tool_retry_exhausted",
+                tool=match.group(1),
+                max_retries=int(match.group(2)),
+                message="工具参数纠错次数已达上限，本轮已停止；可以补充要求后继续。",
+            )
+    return diagnostic
+
+
+def _with_failed_response_diagnostic(
+    messages: list[ModelMessage], diagnostic: dict[str, Any],
+) -> list[ModelMessage]:
+    result = list(messages)
+    for index in range(len(result) - 1, -1, -1):
+        message = result[index]
+        if isinstance(message, ModelResponse):
+            result[index] = replace(message, metadata={**(message.metadata or {}), "deepagent_error": diagnostic})
+            break
+    return result
 
 
 @dataclass(frozen=True)
@@ -1154,7 +1190,7 @@ class AgentRunner:
         to_append = incremental_append_messages(new_messages, skip_user_prompt=pre_persisted_user)
         if repair_dangling_tool_calls:
             repair_kwargs = (
-                {"denied_message": dangling_tool_message}
+                {"failure_message" if terminal_status == "failed" else "denied_message": dangling_tool_message}
                 if dangling_tool_message is not None
                 else {}
             )
@@ -2044,7 +2080,10 @@ class AgentRunner:
                 raise
             except Exception as exc:  # noqa: BLE001 - surface as an SSE error event
                 logger.exception("Agent stream failed for session {}", session_id)
-                failed_messages = stream_snapshot.new_messages
+                failure_diagnostic = _safe_run_failure(exc)
+                failed_messages = _with_failed_response_diagnostic(
+                    stream_snapshot.new_messages, failure_diagnostic,
+                )
                 history_persisted = prepared.pre_persisted_user
                 if failed_messages:
                     try:
@@ -2057,9 +2096,7 @@ class AgentRunner:
                             deps,
                             pre_persisted_user=prepared.pre_persisted_user,
                             repair_dangling_tool_calls=True,
-                            dangling_tool_message=(
-                                "Tool execution failed before a result was produced"
-                            ),
+                            dangling_tool_message=failure_diagnostic["message"],
                             terminal_status="failed",
                         ) or history_persisted
                         log_model_requests(
@@ -2098,6 +2135,18 @@ class AgentRunner:
                     duration_ms=max(0, round((time.perf_counter() - started_at) * 1_000)),
                     error_type=type(exc).__name__,
                 )
+                # Ordinary tools may have already been shown before execution
+                # failed. Close every unresolved live card as well as history;
+                # rejected UI calls remain buffered and are never published.
+                for call_id, tool_name in published_tool_calls.items():
+                    failed_tool = events.tool_result(tool_name, failure_diagnostic["message"], call_id)
+                    failed_tool["outcome"] = "failed"
+                    prefix = "plan" if is_planning_tool(tool_name) else "tool"
+                    failed_tool["item_id"] = f"{prefix}:{call_id}"
+                    yield enrich_tool_event_display_name(
+                        enrich_tool_event(failed_tool, self.ui_tool_hints), self.tool_display_names,
+                    )
+                published_tool_calls.clear()
                 yield events.error(
                     format_stream_error(exc),
                     history_persisted=history_persisted,

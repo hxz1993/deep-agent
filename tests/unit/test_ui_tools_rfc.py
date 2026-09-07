@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import unittest
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -8,7 +9,8 @@ from unittest.mock import MagicMock
 
 from pydantic import ValidationError
 from pydantic_ai import Agent, DeferredToolRequests, ModelRetry
-from pydantic_ai.messages import ModelResponse, ToolCallPart
+from pydantic_ai.exceptions import UnexpectedModelBehavior
+from pydantic_ai.messages import ModelRequest, ModelResponse, RetryPromptPart, ToolCallPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
@@ -620,10 +622,58 @@ class ExternalToolsetTests(unittest.IsolatedAsyncioTestCase):
         toolset = build_external_toolset(builtin_ui_records())
         self.assertEqual(toolset.id, "ui-dynamic")
 
-    async def test_external_ui_tool_allows_one_model_retry(self) -> None:
+    async def test_external_ui_tool_allows_three_model_retries(self) -> None:
         toolset = build_external_toolset(builtin_ui_records())
         tools = await toolset.get_tools(None)
-        self.assertEqual(tools["builtin__confirm"].max_retries, 1)
+        self.assertEqual(tools["builtin__confirm"].max_retries, 3)
+
+    async def test_three_invalid_ui_calls_can_correct_on_fourth_attempt(self) -> None:
+        calls = 0
+
+        def model_function(messages: list[Any], _info: AgentInfo) -> ModelResponse:
+            nonlocal calls
+            calls += 1
+            retries = [
+                part
+                for message in messages if isinstance(message, ModelRequest)
+                for part in message.parts if isinstance(part, RetryPromptPart)
+            ]
+            self.assertEqual(len(retries), calls - 1)
+            args = {} if calls <= 3 else {"message": "继续？"}
+            return ModelResponse(parts=[
+                ToolCallPart("builtin__confirm", args, tool_call_id=f"call-{calls}")
+            ])
+
+        agent = Agent(
+            FunctionModel(model_function),
+            toolsets=[build_external_toolset(builtin_ui_records())],
+            output_type=[str, DeferredToolRequests],
+        )
+        result = await asyncio.wait_for(agent.run("请确认"), timeout=5)
+        self.assertEqual(calls, 4)
+        self.assertIsInstance(result.output, DeferredToolRequests)
+        self.assertEqual(len(result.output.calls), 1)
+        self.assertEqual(result.output.calls[0].tool_call_id, "call-4")
+        self.assertEqual(result.output.calls[0].args, {"message": "继续？"})
+
+    async def test_persistent_invalid_ui_calls_stop_after_three_corrections(self) -> None:
+        calls = 0
+
+        def model_function(_messages: list[Any], _info: AgentInfo) -> ModelResponse:
+            nonlocal calls
+            calls += 1
+            return ModelResponse(parts=[
+                ToolCallPart("builtin__confirm", {}, tool_call_id=f"call-{calls}")
+            ])
+
+        agent = Agent(
+            FunctionModel(model_function),
+            toolsets=[build_external_toolset(builtin_ui_records())],
+            output_type=[str, DeferredToolRequests],
+        )
+        with self.assertRaisesRegex(UnexpectedModelBehavior, "max retries count of 3"):
+            await asyncio.wait_for(agent.run("请确认"), timeout=5)
+        self.assertEqual(calls, 4)
 
     async def test_invalid_json_is_retried_once_and_then_deferred(self) -> None:
         calls = 0

@@ -110,6 +110,20 @@ def project_session_events(
                 _apply_result(existing, event, part)
 
     for item in items:
+        # Older releases repaired failed calls with a default-success ToolDenied.
+        # Correct only that legacy sentinel, without rewriting Event facts or
+        # treating genuine user rejection / successful tools as run failures.
+        if (
+            item.kind == "tool"
+            and item.status == "completed"
+            and terminal_by_run.get(item.run_id or "") == "failed"
+            and isinstance(item.output, Mapping)
+            and item.output.get("kind") == "tool-denied"
+            and item.output.get("message")
+            == "Tool execution failed before a result was produced"
+        ):
+            item.status = "failed"
+            item.outcome = "failed"
         if item.kind not in {"tool", "plan"} or item.status not in {
             "pending",
             "awaiting_input",

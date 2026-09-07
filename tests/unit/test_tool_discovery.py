@@ -992,6 +992,7 @@ class ToolDiscoveryTests(unittest.IsolatedAsyncioTestCase):
     async def test_search_excludes_preselected_and_already_discovered_tools(self) -> None:
         ctx = self._ctx("")
         ctx.discovered_tool_names.add("deepfos_resolve_members")
+        ctx.discovered_tool_names.add("deepfos_list_cube_dimensions")
         ctx.deps.tool_discovery = None
         tools = [
             item.tool_def
@@ -1014,6 +1015,7 @@ class ToolDiscoveryTests(unittest.IsolatedAsyncioTestCase):
         ]
 
         first = search_deferred_tools(ctx, ["搜索维度成员"], tools)
+        ctx.discovered_tool_names.update(first)
         second = search_deferred_tools(ctx, ["搜索维度成员"], tools)
 
         self.assertTrue(first)

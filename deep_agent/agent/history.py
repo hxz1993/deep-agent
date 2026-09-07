@@ -199,6 +199,7 @@ def repair_unprocessed_tool_calls(
     messages: list[ModelMessage],
     *,
     denied_message: str = _USER_CANCELLED_TOOL_MESSAGE,
+    failure_message: str | None = None,
 ) -> list[ModelMessage]:
     """Close legacy dangling tool calls without touching official interrupted turns.
 
@@ -206,6 +207,8 @@ def repair_unprocessed_tool_calls(
     belong to, not only at history tail. Pydantic AI owns the repair of
     ``state='interrupted'`` responses and synthesizes ``outcome='interrupted'``
     when that history is reused, so those responses must remain unchanged.
+    ``failure_message`` is reserved for an exceptional Run exit; cancellation
+    keeps the existing ToolDenied semantics instead of becoming a tool failure.
     """
     if not messages:
         return messages
@@ -223,8 +226,13 @@ def repair_unprocessed_tool_calls(
             parts=[
                 ToolReturnPart(
                     tool_name=tool_name,
-                    content=ToolDenied(message=denied_message),
+                    content=(
+                        failure_message
+                        if failure_message is not None
+                        else ToolDenied(message=denied_message)
+                    ),
                     tool_call_id=tool_call_id,
+                    outcome="failed" if failure_message is not None else "success",
                 )
                 for tool_call_id, tool_name in pending.items()
             ]

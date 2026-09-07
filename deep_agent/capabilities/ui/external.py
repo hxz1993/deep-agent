@@ -12,7 +12,9 @@ from pydantic_ai.tools import ToolDefinition
 from deep_agent.capabilities.ui.types import UIToolRecord
 
 
-UI_TOOL_MAX_RETRIES = 1
+# Allow three model corrections after the initial invalid call. This is not a
+# limit on successful UI calls, which keep the normal deferred lifecycle.
+UI_TOOL_MAX_RETRIES = 3
 _CLARIFY_FIELD_TYPES = frozenset({"select", "text", "textarea", "input"})
 _FIELD_ID_KEYS = ("field", "id", "name", "dimension")
 _OPTION_ID_KEYS = ("value", "code", "name", "label")
@@ -115,7 +117,7 @@ def build_args_validator(record: UIToolRecord) -> ArgsValidator:
 
 
 class RetryableExternalToolset(ExternalToolset):
-    """External UI tools with one model-correction retry and schema validation."""
+    """External UI tools with bounded model-correction retries and validation."""
 
     def __init__(
         self,

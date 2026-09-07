@@ -208,7 +208,7 @@ class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
                     get_context().active_runs.get(agent_id=self._agent_id, session_id=session_id)
                 )
 
-    async def test_e1_generator_close_is_cleanup_not_synthetic_cancel_history(self) -> None:
+    async def test_e1_generator_close_preserves_sdk_partial_history(self) -> None:
         chunks = ["chunk-one-", "chunk-two-", "chunk-three-", "chunk-four-", "chunk-five-"]
         model, tracker = build_slow_stream_model(chunks=chunks, delay_s=0.25)
         session_id = "e1-cancel-session"
@@ -243,8 +243,9 @@ class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
                 self.assertNotIn("final", {ev.get("type") for ev in events})
 
             data = await self._history(session_id)
-            self.assertGreaterEqual(len(_message_items(data)), 1)
+            self.assertGreaterEqual(len(_message_items(data)), 2)
             self.assertEqual(data["items"][0]["kind"], "user_message")
+            self.assertEqual(_last_assistant(data)["status"], "interrupted")
             self.assertIsNone(
                 get_context().active_runs.get(agent_id=self._agent_id, session_id=session_id)
             )
@@ -354,6 +355,7 @@ class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
                 get_context(),
                 body,
                 TEST_USER_ID,
+                None,
             )
             iterator = response.body_iterator
             first_event = await anext(iterator)

@@ -17,6 +17,7 @@ from deep_agent.db.conversation import SessionStore
 from deep_agent.db.session_scope import runtime_session_key
 
 _SENTINEL = object()
+_WRITE_TIMEOUT = 10.0
 
 
 @dataclass
@@ -51,6 +52,7 @@ class EventPersister:
         self._queues: dict[str, asyncio.Queue[Any]] = {}
         self._workers: dict[str, asyncio.Task[None]] = {}
         self._session_ids: dict[str, tuple[str, str | None]] = {}
+        self._write_errors: dict[str, str] = {}
         self._closed = False
 
     async def start(self) -> None:
@@ -61,6 +63,8 @@ class EventPersister:
             logger.warning("EventPersister closed, dropping {} for {}", ev.kind, ev.session_id)
             return
         key = runtime_session_key(ev.session_id, agent_id=ev.agent_id)
+        if ev.kind == "user_turn":
+            self._write_errors.pop(key, None)
         q = self._queues.get(key)
         if q is None:
             q = asyncio.Queue()
@@ -84,6 +88,7 @@ class EventPersister:
         timeout: float = 5.0,
     ) -> None:
         key = runtime_session_key(session_id, agent_id=agent_id)
+        self._raise_write_error(key)
         q = self._queues.get(key)
         if q is None:
             return
@@ -105,11 +110,17 @@ class EventPersister:
                 await worker
             else:
                 await marker_waiter
+            self._raise_write_error(key)
         finally:
             if not marker_waiter.done():
                 marker_waiter.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await marker_waiter
+
+    def _raise_write_error(self, key: str) -> None:
+        error = self._write_errors.get(key)
+        if error is not None:
+            raise RuntimeError(f"Session history persistence failed ({error})")
 
     async def aclose(self) -> None:
         self._closed = True
@@ -121,6 +132,7 @@ class EventPersister:
         self._queues.clear()
         self._workers.clear()
         self._session_ids.clear()
+        self._write_errors.clear()
 
     async def _session_worker(self, key: str) -> None:
         q = self._queues[key]
@@ -137,6 +149,14 @@ class EventPersister:
                 if item.kind in ("run_complete", "run_cancelled"):
                     await self._drain_pending(q, session_id, agent_id)
                     break
+        except Exception as exc:
+            # Keep a bounded failure receipt after removing the finished worker;
+            # a subsequent flush must not falsely acknowledge a failed write.
+            if len(self._write_errors) >= 128:
+                self._write_errors.pop(next(iter(self._write_errors)))
+            self._write_errors[key] = type(exc).__name__
+            logger.error("Session history persistence failed session={} error={}",
+                         session_id, type(exc).__name__)
         finally:
             self._queues.pop(key, None)
             self._workers.pop(key, None)
@@ -164,9 +184,11 @@ class EventPersister:
         lock = getattr(self._store, "lock", None)
         if callable(lock):
             async with lock(session_id, agent_id=agent_id):
-                await self._persist_locked(session_id, agent_id, ev)
+                async with asyncio.timeout(_WRITE_TIMEOUT):
+                    await self._persist_locked(session_id, agent_id, ev)
         else:
-            await self._persist_locked(session_id, agent_id, ev)
+            async with asyncio.timeout(_WRITE_TIMEOUT):
+                await self._persist_locked(session_id, agent_id, ev)
 
     async def _persist_locked(
         self,

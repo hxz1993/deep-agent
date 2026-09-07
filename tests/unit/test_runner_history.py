@@ -346,7 +346,7 @@ class AgentRunnerHistoryTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(run_events)
             self.assertEqual({event.turn_id for event in run_events}, {run_id})
 
-    async def test_transport_close_keeps_user_without_synthetic_partial_response(self) -> None:
+    async def test_transport_close_preserves_official_partial_response(self) -> None:
         from tests.integration.helpers.models import build_slow_stream_model
 
         chunks = ["alpha-", "beta-", "gamma-", "delta-", "omega"]
@@ -367,10 +367,13 @@ class AgentRunnerHistoryTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertLess(tracker.yielded_chunks, tracker.total_chunks)
         history = await self.store.get_history("sess-cancel", agent_id=self.db_agent.id)
-        self.assertEqual(len(history), 1)
+        self.assertEqual(len(history), 2)
         self.assertIsInstance(history[0], ModelRequest)
+        self.assertIsInstance(history[1], ModelResponse)
+        self.assertEqual(history[1].state, "interrupted")
+        self.assertTrue(history[1].parts[0].content.startswith("alpha-"))
 
-    async def test_consumer_close_does_not_fabricate_cancelled_assistant(self) -> None:
+    async def test_consumer_close_saves_actual_sdk_content_not_synthetic_text(self) -> None:
         from tests.integration.helpers.models import build_slow_stream_model
 
         chunks = ["part-a-", "part-b-", "part-c-"]
@@ -390,8 +393,62 @@ class AgentRunnerHistoryTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreater(tracker.yielded_chunks, 0)
         self.assertLess(tracker.yielded_chunks, tracker.total_chunks)
         history = await self.store.get_history("sess-close", agent_id=self.db_agent.id)
-        self.assertEqual(len(history), 1)
+        self.assertEqual(len(history), 2)
         self.assertIsInstance(history[0], ModelRequest)
+        self.assertEqual(history[1].state, "interrupted")
+        self.assertIn(history[1].parts[0].content, ["part-a-", "part-a-part-b-"])
+
+    async def test_terminal_store_failure_does_not_mask_stream_error_or_leak_run(self) -> None:
+        registry = ActiveRunRegistry()
+
+        async def failing_model(_messages, _info):
+            raise RuntimeError("model failed")
+            yield "unreachable"
+
+        agent = Agent(FunctionModel(stream_function=failing_model), deps_type=AgentDeps)
+        runner = AgentRunner(agent, self.store, UsageLimits(request_limit=10), active_runs=registry)
+        deps = self._deps("terminal-store-failure")
+
+        async def fail_terminal(*args, **kwargs):
+            raise RuntimeError("database unavailable")
+
+        with patch.object(self.store, "append_terminal", side_effect=fail_terminal):
+            result = [ev async for ev in runner.run_stream(
+                deps.session_id, "hello", deps, persister=self.persister,
+            )]
+        self.assertEqual(result[-1]["type"], "error")
+        self.assertIn("model failed", result[-1]["message"])
+        self.assertEqual(registry.active_count(), 0)
+
+    async def test_terminal_write_timeout_keeps_original_error_and_releases_run(self) -> None:
+        registry = ActiveRunRegistry()
+        exited = asyncio.Event()
+
+        async def failing_model(_messages, _info):
+            raise RuntimeError("model failed before terminal")
+            yield "unreachable"
+
+        async def stalled_terminal(*args, **kwargs):
+            try:
+                await asyncio.Event().wait()
+            finally:
+                exited.set()
+
+        runner = AgentRunner(
+            Agent(FunctionModel(stream_function=failing_model), deps_type=AgentDeps),
+            self.store, UsageLimits(request_limit=10), active_runs=registry,
+        )
+        deps = self._deps("terminal-write-timeout")
+        with patch("deep_agent.agent.runner._TERMINAL_WRITE_TIMEOUT", 0.02), \
+                patch.object(self.store, "append_terminal", side_effect=stalled_terminal):
+            async with asyncio.timeout(2):
+                result = [ev async for ev in runner.run_stream(
+                    deps.session_id, "hello", deps, persister=self.persister,
+                )]
+        self.assertTrue(exited.is_set())
+        self.assertEqual(result[-1]["type"], "error")
+        self.assertIn("model failed before terminal", result[-1]["message"])
+        self.assertEqual(registry.active_count(), 0)
 
     async def test_official_interrupted_tool_call_is_repaired_by_pydantic_next_run(self) -> None:
         captured: list[ModelMessage] = []

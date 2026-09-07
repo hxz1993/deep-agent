@@ -3,9 +3,12 @@ from __future__ import annotations
 import json
 import uuid
 from collections.abc import Awaitable, Callable
+from contextlib import aclosing
 
+import anyio
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.routing import APIRoute
+from loguru import logger
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from sse_starlette.sse import EventSourceResponse
 
@@ -281,7 +284,7 @@ async def chat_stream(
             # Register the cancellable run first so an immediate stop cannot race
             # asynchronous history/input preparation and incorrectly return 404.
             yield {"event": "session", "data": json.dumps(session_data)}
-            async for ev in runner.run_stream(
+            async with aclosing(runner.run_stream(
                 session_id,
                 message,
                 deps,
@@ -291,12 +294,20 @@ async def chat_stream(
                 branch_from=body.branch_from,
                 persister=ctx.event_persister,
                 active_run=active_run,
-            ):
-                yield {"event": ev["type"], "data": json.dumps(ev, ensure_ascii=False)}
+            )) as stream:
+                async for ev in stream:
+                    yield {"event": ev["type"], "data": json.dumps(ev, ensure_ascii=False)}
         finally:
             active_run.cancellation_token.cancel()
             ctx.active_runs.unregister(active_run)
             # Ensure background persistence finishes before the client refreshes session list.
-            await ctx.event_persister.flush(session_id, agent_id=agent_id)
+            with anyio.move_on_after(5, shield=True):
+                try:
+                    await ctx.event_persister.flush(session_id, agent_id=agent_id)
+                except Exception as exc:
+                    # Runner reports write failures before its terminal frame. Cleanup
+                    # must not replace that error or an in-flight transport cancellation.
+                    logger.error("Stream cleanup persistence failed session={} error={}",
+                                 session_id, type(exc).__name__)
 
     return EventSourceResponse(event_generator())

@@ -13,8 +13,9 @@ import {
   isPlanningToolEvent,
   planPanelState,
   processDisclosureLabel,
-} from "./assistant-presentation.js?v=20260902-1";
-import { createTrajectoryController } from "./trajectory.js?v=20260904-8";
+  toolResultPresentation,
+} from "./assistant-presentation.js?v=20260907-1";
+import { createTrajectoryController } from "./trajectory.js?v=20260907-1";
 import { attachmentPreviewUrl, bindAttachmentImagePreviews, createImageGallery } from "./attachment-preview.js?v=20260904-8";
 import { bindWebImagePreviewFallback, renderWebImagePreview } from "./web-image.js?v=20260901-1";
 import { parseServerTimestamp, serverTimestampMilliseconds } from "./time.js?v=20260831-1";
@@ -22,7 +23,7 @@ import {
   latestPendingDeferredTool,
   normalizeConversationHistory,
   projectConversationItems,
-} from "./conversation-items.js?v=20260902-1";
+} from "./conversation-items.js?v=20260907-1";
 import {
   firstSelectableModelId,
   isModelSelectable,
@@ -32,6 +33,7 @@ import {
   renderGroupedModelOptions,
 } from "./model-options.js?v=20260828-1";
 import { shouldFollowMessages } from "./message-scroll.js?v=20260902-1";
+import { boundedStreamRequest, verifyStreamStop } from "./stop-recovery.js?v=20260907-1";
 
 /* ------------------------------------------------------------------ *
  * deep-agent 前端 —— 适配 FastAPI /api/v1/chat/stream (SSE over POST)
@@ -102,13 +104,14 @@ function resolveWidgetType(call) {
   return null;
 }
 
-async function loadUiTools(agentId) {
+async function loadUiTools(agentId, { signal, isCurrent = () => true } = {}) {
   try {
     const params = new URLSearchParams();
     if (agentId) params.set("agent_id", agentId);
-    const r = await daFetch(serviceUrl(`api/v1/ui-tools?${params}`));
+    const r = await daFetch(serviceUrl(`api/v1/ui-tools?${params}`), { signal });
     if (!r.ok) return;
     const data = await r.json();
+    if (!isCurrent() || signal?.aborted) return;
     const rows = Array.isArray(data?.items) ? data.items : [];
     uiToolsByName.clear();
     for (const tool of rows) {
@@ -133,6 +136,8 @@ const state = {
   streaming: false,
   awaitingHitl: false,
   abortController: null,
+  stopController: null,
+  streamRecoveryNote: null,
   stopRequested: false,
   streamSessionConfirmed: false,
   refreshHistoryAfterStream: false,
@@ -153,6 +158,14 @@ const state = {
   planSnapshot: null,
   planningCallIds: new Set(),
 };
+
+window.addEventListener("pagehide", () => {
+  const streamController = state.abortController;
+  state.abortController = null;
+  state.stopController?.abort();
+  state.stopController = null;
+  streamController?.abort();
+});
 
 const LLM_MODALITY_LABELS = {
   text: "文本",
@@ -970,12 +983,13 @@ async function switchSession(s) {
 }
 
 /** 从后端拉取并渲染指定会话的历史（唯一消息来源）。 */
-async function loadAllSessionEvents(session) {
+async function loadAllSessionEvents(session, { signal } = {}) {
   const items = [];
   let afterSequence = 0;
   for (;;) {
     const response = await daFetch(
       sessionApiUrl(session, "/events", { after_sequence: afterSequence, limit: 500 }),
+      { signal },
     );
     if (!response.ok) return { response, data: null };
     const page = await response.json();
@@ -988,23 +1002,27 @@ async function loadAllSessionEvents(session) {
   }
 }
 
-async function loadSessionHistory(session) {
+async function loadSessionHistory(session, { signal, isCurrent = () => true } = {}) {
+  const current = () => !signal?.aborted && isCurrent();
   const normalized = normalizeSession(session);
   clearMessages();
   trajectory?.setHistory({ session_id: normalized.id, items: [] });
   hideEmptyState();
   try {
-    await loadUiTools(state.agentId);
+    await loadUiTools(state.agentId, { signal, isCurrent });
+    if (!current()) return;
     const [r, eventResult] = await Promise.all([
-      daFetch(sessionApiUrl(normalized, "/history")),
-      loadAllSessionEvents(normalized),
+      daFetch(sessionApiUrl(normalized, "/history"), { signal }),
+      loadAllSessionEvents(normalized, { signal }),
     ]);
+    if (!current()) return;
     if (r.status === 404) {
       addSystemNote("会话不存在或尚无历史记录。");
       return;
     }
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const history = normalizeConversationHistory(await r.json());
+    if (!current()) return;
     trajectory?.setHistory(eventResult.response.ok ? eventResult.data : { session_id: normalized.id, items: [] });
     const latestAssistant = [...history.items]
       .reverse()
@@ -1020,7 +1038,8 @@ async function loadSessionHistory(session) {
           detailed: false,
         }
       : null;
-    await loadContextStatus(normalized);
+    await loadContextStatus(normalized, { signal, isCurrent });
+    if (!current()) return;
     if (!history.items.length) {
       showEmptyState();
       state.modelMessageCount = 0;
@@ -1030,22 +1049,27 @@ async function loadSessionHistory(session) {
     }
     renderHistory(history.items);
   } catch (e) {
+    if (!current()) return;
     trajectory?.setHistory({ session_id: normalized.id, items: [] });
     addSystemNote(`加载历史失败：${e.message}`);
   }
 }
 
-async function loadContextStatus(session) {
+async function loadContextStatus(session, { signal, isCurrent = () => true } = {}) {
   const lastCompaction = state.contextStatus?.last_compaction;
   try {
     const response = await daFetch(
       sessionApiUrl(session, "/context-status", { model_id: chatPayloadModelId() }),
+      { signal },
     );
-    state.contextStatus = response.ok ? await response.json() : null;
+    const context = response.ok ? await response.json() : null;
+    if (!isCurrent() || signal?.aborted) return;
+    state.contextStatus = context;
     if (state.contextStatus && lastCompaction) {
       state.contextStatus.last_compaction = lastCompaction;
     }
   } catch {
+    if (!isCurrent() || signal?.aborted) return;
     if (!lastCompaction) state.contextStatus = null;
   }
   updateComposerContextControls();
@@ -1225,9 +1249,9 @@ function showConsoleToast(message, isError = false) {
   if (window.DeepAgentConsole?.toast) window.DeepAgentConsole.toast(message, isError);
 }
 
-async function refreshCurrentHistory() {
+async function refreshCurrentHistory(options = {}) {
   if (!state.sessionId) return;
-  await loadSessionHistory({ id: state.sessionId, agentId: state.agentId });
+  await loadSessionHistory({ id: state.sessionId, agentId: state.agentId }, options);
 }
 
 function renderHistory(items) {
@@ -1820,7 +1844,12 @@ async function resumeDeferred(deferredResults) {
 
 async function runChatStream(payload, assistant) {
   const streamController = new AbortController();
+  state.stopController?.abort();
   state.abortController = streamController;
+  const current = () => state.abortController === streamController;
+  const abortStop = () => { if (current()) state.stopController?.abort(); };
+  streamController.signal.addEventListener("abort", abortStop, { once: true });
+  state.streamRecoveryNote = null;
   state.stopRequested = false;
   state.streamSessionConfirmed = false;
   // A stream without any terminal event may have persisted facts that the
@@ -1838,10 +1867,19 @@ async function runChatStream(payload, assistant) {
       const detail = await resp.text().catch(() => "");
       throw new Error(`HTTP ${resp.status} ${detail}`.trim());
     }
+    if (!current()) return;
     setConn("ok", "已连接");
 
-    await readSse(resp.body, (evt) => handleEvent(evt, assistant));
+    await readSse(resp.body, (evt) => {
+      if (!current() || streamController.signal.aborted) return;
+      handleEvent(evt, assistant);
+      if (["final", "error", "cancelled"].includes(evt.event || evt.data?.type)) {
+        // A real terminal frame needs no further socket bytes to finish.
+        streamController.abort();
+      }
+    });
   } catch (e) {
+    if (!current()) return;
     if (e.name === "AbortError") {
       // Transport cleanup (page unload/network teardown), not a user stop result.
       applyAssistantPresentationActions(assistant, assistantActionsFromSse("error"));
@@ -1853,18 +1891,27 @@ async function runChatStream(payload, assistant) {
       addErrorTo(assistant, `请求失败：${e.message}`);
     }
   } finally {
+    streamController.signal.removeEventListener("abort", abortStop);
+    if (!current()) return;
+    state.stopController?.abort();
+    state.stopController = null;
     applyAssistantPresentationActions(assistant, assistantActionsFromSse("error"));
     clearComposerPlan();
-    setStreaming(false);
-    if (state.abortController === streamController) state.abortController = null;
+    if (state.sessionId && state.refreshHistoryAfterStream) {
+      try {
+        await boundedStreamRequest((signal) => refreshCurrentHistory({ signal, isCurrent: current }));
+      } catch {
+        if (current()) addSystemNote("恢复历史超时或失败，请重新打开会话查看已保存内容。");
+      }
+    }
+    if (!current()) return;
+    if (state.streamRecoveryNote) addSystemNote(state.streamRecoveryNote);
+    state.streamRecoveryNote = null;
+    state.abortController = null;
     state.stopRequested = false;
     state.streamSessionConfirmed = false;
-    if (state.sessionId) {
-      if (state.refreshHistoryAfterStream) {
-        await refreshCurrentHistory();
-      }
-      await syncSessionsFromBackend();
-    }
+    setStreaming(false);
+    if (state.sessionId) await syncSessionsFromBackend();
   }
 }
 
@@ -1887,36 +1934,41 @@ async function stopStream() {
   if (!state.streaming || state.stopRequested || !state.streamSessionConfirmed) return;
   const sessionId = state.sessionId;
   const agentId = state.agentId;
-  if (!sessionId) return;
+  const streamController = state.abortController;
+  if (!sessionId || !streamController) return;
+  const current = () => state.abortController === streamController
+    && state.sessionId === sessionId && state.agentId === agentId
+    && state.streaming && state.refreshHistoryAfterStream;
+  const stopController = new AbortController();
+  state.stopController?.abort();
+  state.stopController = stopController;
   state.stopRequested = true;
   el.stopBtn.disabled = true;
   el.stopBtn.title = "正在停止…";
   el.stopBtn.setAttribute("aria-label", "正在停止");
 
-  try {
-    const response = await daFetch(
-      sessionApiUrl({ id: sessionId, agentId }, "/cancel"),
-      { method: "POST" },
-    );
-    const body = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      throw new Error(body.detail || `HTTP ${response.status}`);
-    }
-    if (body.status === "cancel_requested") {
-      showConsoleToast("正在停止当前生成…");
-      return;
-    }
-    state.stopRequested = false;
-    el.stopBtn.disabled = false;
-    el.stopBtn.title = "未找到运行中的会话，可重试";
-    el.stopBtn.setAttribute("aria-label", "停止生成");
-    showConsoleToast("当前实例未找到运行中的会话，仍在等待流的真实终态", true);
-  } catch (error) {
+  const result = await verifyStreamStop({
+    signal: stopController.signal,
+    isCurrent: current,
+    request: (kind, signal) => daFetch(
+      sessionApiUrl({ id: sessionId, agentId }, kind === "cancel" ? "/cancel" : "/run-status"),
+      { method: kind === "cancel" ? "POST" : "GET", signal },
+    ),
+    onAccepted: () => showConsoleToast("正在停止当前生成并核验运行状态…"),
+  });
+  if (state.stopController === stopController) state.stopController = null;
+  stopController.abort();
+  if (!current() || result.status === "stale") return;
+  if (result.status === "idle") {
+    // idle proves no Run remains, not that cancellation itself succeeded.
+    state.streamRecoveryNote = "连接异常中断：后端已无运行中的任务，已尝试恢复保存的历史；未收到正常结束通知。";
+    streamController.abort();
+  } else {
     state.stopRequested = false;
     el.stopBtn.disabled = false;
     el.stopBtn.title = "停止失败，可重试";
     el.stopBtn.setAttribute("aria-label", "停止生成");
-    showConsoleToast(`停止失败，可重试：${error.message}`, true);
+    showConsoleToast(`尚未确认停止，可重试：${result.message}`, true);
   }
 }
 
@@ -2410,7 +2462,7 @@ function addDateSeparator(iso) {
 function addSystemNote(text) {
   const row = document.createElement("div");
   row.className = "msg-row assistant";
-  row.innerHTML = `<div class="avatar assistant system-avatar">${lucideIcon("circle-info")}</div><div class="bubble-wrap"><div class="bubble" style="opacity:.7;font-size:13px"></div></div>`;
+  row.innerHTML = `<div class="avatar assistant system-avatar">${lucideIcon("info")}</div><div class="bubble-wrap"><div class="bubble" style="opacity:.7;font-size:13px"></div></div>`;
   row.querySelector(".bubble").textContent = text;
   el.messages.appendChild(row);
   refreshLucideIcons();
@@ -2760,7 +2812,8 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null, proce
       block.classList.remove("hitl-pending");
       const title = block.querySelector(".tool-name");
       if (title && block.dataset.defaultTitle) title.textContent = block.dataset.defaultTitle;
-      block.querySelector(".tool-status").innerHTML = '<span class="tool-status-complete">完成</span>';
+      const resultStatus = toolResultPresentation(data);
+      block.querySelector(".tool-status").innerHTML = `<span class="${resultStatus.className}">${resultStatus.label}</span>`;
       refreshLucideIcons();
       const body = block.querySelector(".tool-body");
       const existingWidget = body.querySelector(".hitl-widget");

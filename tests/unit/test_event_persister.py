@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import unittest
+from unittest.mock import patch
 
 from pydantic_ai.messages import (
     ModelMessage,
@@ -56,6 +57,47 @@ class EventPersisterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(event["type"], "session_event_appended")
         self.assertTrue(event["persisted"])
         self.assertEqual(event["event"]["event_type"], "user/message")
+
+    async def test_flush_reports_write_failure_even_after_worker_exited(self) -> None:
+        failed = asyncio.Event()
+
+        async def broken_write(*args, **kwargs):
+            failed.set()
+            raise RuntimeError("storage offline")
+
+        with patch.object(self.store, "append", side_effect=broken_write):
+            self.persister.publish(PersistEvent(
+                session_id="failed-write", agent_id=self.agent.id, user_id="user-1",
+                kind="user_turn", turn_id="failed-run", run_id="failed-run",
+                user_message=ModelRequest(parts=[UserPromptPart(content="hello")]),
+            ))
+            await failed.wait()
+            await asyncio.sleep(0)
+            with self.assertRaisesRegex(RuntimeError, "persistence failed"):
+                await self.persister.flush("failed-write", agent_id=self.agent.id)
+
+    async def test_stalled_write_times_out_and_releases_session_lock(self) -> None:
+        exited = asyncio.Event()
+
+        async def stalled_write(*args, **kwargs):
+            try:
+                await asyncio.Event().wait()
+            finally:
+                exited.set()
+
+        with patch("deep_agent.agent.event_persister._WRITE_TIMEOUT", 0.01), \
+                patch.object(self.store, "append", side_effect=stalled_write):
+            self.persister.publish(PersistEvent(
+                session_id="stalled-write", agent_id=self.agent.id, user_id="user-1",
+                kind="user_turn", turn_id="stalled-run", run_id="stalled-run",
+                user_message=ModelRequest(parts=[UserPromptPart(content="hello")]),
+            ))
+            with self.assertRaisesRegex(RuntimeError, "TimeoutError"):
+                await self.persister.flush("stalled-write", agent_id=self.agent.id, timeout=1)
+        self.assertTrue(exited.is_set())
+        async with asyncio.timeout(1):
+            async with self.store.lock("stalled-write", agent_id=self.agent.id):
+                pass
 
     async def test_run_complete_skips_duplicate_user(self) -> None:
         user = ModelRequest(parts=[UserPromptPart(content="hi")])

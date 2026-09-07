@@ -136,7 +136,14 @@ Pydantic AI 形成合法 Tool Result，但只有 `ModelRetry` 消耗工具重试
 `CancellationToken` 传入 Runner。否则客户端刚拿到 `session_id` 就停止时，会在用户消息尚未
 持久化的窗口内误报 `404 Session not found`。
 
-页面关闭或网络断开只触发 Token 清理无人消费的 Run，不是正常停止入口。UI Deferred 已经
+PTC 默认不用于普通 MCP 调用或工具发现；仅在中间二进制/批量数据无需模型阅读时推荐使用。
+PTC 执行错误用官方 `ToolFailedError + ToolReturnPart(outcome=failed)` 保留脱敏嵌套调用审计，
+不转为消耗重试预算的 `ModelRetry`。取消与系统异常仍传播给 Runner 收尾，不能吞掉。
+
+页面关闭或网络断开触发 Token 清理无人消费的 Run，不是正常停止入口。API 与 Runner 必须显式
+关闭内层异步流，SDK 上下文退出前后捕获官方消息，并保存已有部分历史为中断；不拼接假消息。
+EventPersister 写入失败需保留有界失败回执，使后续 flush 明确报错。进程强杀或数据库不可写
+不在历史完整性保证范围内。UI Deferred 已经
 Pending 时没有活动 Run，其表单取消仍通过 `DeferredToolResults` 处理。当前注册表只在单进程
 内有效。v0.3.14 起每个 Pod 固定一个异步 Gunicorn Worker；多 Pod 发布仍必须使用会话粘性，
 或后续增加共享取消协调器。

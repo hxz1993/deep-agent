@@ -4,7 +4,7 @@ import asyncio
 import hashlib
 import json
 import time
-from contextlib import asynccontextmanager, suppress
+from contextlib import aclosing, asynccontextmanager, suppress
 from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator
@@ -99,6 +99,7 @@ from deep_agent.schemas.context_reference import ContextReference
 from deep_agent.options import OPTION
 
 _STREAM_OUTPUT_TYPE: list[Any] = [str, DeferredToolRequests]
+_TERMINAL_WRITE_TIMEOUT = 10.0
 
 
 @dataclass(frozen=True)
@@ -303,17 +304,25 @@ class AgentRunner:
             "usage": _run_usage_dict(usage),
             "error": {"code": error} if error else None,
         }
-        return await append_terminal(
-            run_event.session_id,
-            status=status,
-            agent_id=deps.agent_id,
-            user_id=deps.user,
-            app_id=deps.app_id,
-            space_id=deps.space_id,
-            turn_id=deps.turn_id,
-            run_id=deps.run_id,
-            payload=payload,
-        )
+        try:
+            async with asyncio.timeout(_TERMINAL_WRITE_TIMEOUT):
+                return await append_terminal(
+                    run_event.session_id,
+                    status=status,
+                    agent_id=deps.agent_id,
+                    user_id=deps.user,
+                    app_id=deps.app_id,
+                    space_id=deps.space_id,
+                    turn_id=deps.turn_id,
+                    run_id=deps.run_id,
+                    payload=payload,
+                )
+        except Exception as exc:
+            # A second DB failure must not hide the original error/cancel SSE or
+            # prevent the active-run registry from being released.
+            logger.error("Run terminal persistence failed session={} error={}",
+                         run_event.session_id, type(exc).__name__)
+            return None
 
     @staticmethod
     async def _capture_planning_result(event: Any, deps: AgentDeps) -> None:
@@ -1115,18 +1124,19 @@ class AgentRunner:
             to_append = repair_unprocessed_tool_calls(to_append, **repair_kwargs)
         if not to_append:
             return False
-        await self.store.append(
-            session_id,
-            to_append,
-            agent_id=deps.agent_id,
-            user_id=deps.user,
-            app_id=deps.app_id,
-            space_id=deps.space_id,
-            turn_id=deps.turn_id,
-            run_id=deps.run_id,
-            first_message_ordinal=1 if pre_persisted_user else 0,
-            terminal_status=terminal_status,
-        )
+        async with asyncio.timeout(_TERMINAL_WRITE_TIMEOUT):
+            await self.store.append(
+                session_id,
+                to_append,
+                agent_id=deps.agent_id,
+                user_id=deps.user,
+                app_id=deps.app_id,
+                space_id=deps.space_id,
+                turn_id=deps.turn_id,
+                run_id=deps.run_id,
+                first_message_ordinal=1 if pre_persisted_user else 0,
+                terminal_status=terminal_status,
+            )
         return True
 
     def _publish_run_complete(
@@ -1514,6 +1524,23 @@ class AgentRunner:
         )
         return response
 
+    @asynccontextmanager
+    async def _captured_stream(self, snapshot: _StreamRunSnapshot, **kwargs: Any):
+        stream = None
+        try:
+            async with self.agent.run_stream_events(**kwargs) as stream:
+                try:
+                    yield stream
+                finally:
+                    # Preserve the official state before any resource teardown
+                    # can raise. Never rebuild assistant messages from SSE text.
+                    snapshot.capture(stream)
+        finally:
+            # The SDK commits partial responses while closing its background
+            # run. Capture again after that close, including transport disconnect.
+            if stream is not None:
+                snapshot.capture(stream)
+
     async def _stream_agent_events(
         self,
         *,
@@ -1528,8 +1555,9 @@ class AgentRunner:
     ) -> AsyncIterator[tuple[str, Any]]:
         """Interleave Pydantic stream events with DeepAgent lifecycle progress."""
 
-        async with self.agent.run_stream_events(
-            user_prompt,
+        async with self._captured_stream(
+            snapshot,
+            user_prompt=user_prompt,
             deps=deps,
             message_history=message_history,
             usage_limits=self.usage_limits,
@@ -1571,12 +1599,13 @@ class AgentRunner:
                     stream_task = asyncio.create_task(stream.__anext__())
                     yield "model", event
             finally:
-                for task in (stream_task, status_task):
-                    if task is not None and not task.done():
-                        task.cancel()
-                        with suppress(asyncio.CancelledError):
-                            await task
                 snapshot.capture(stream)
+                pending = [task for task in (stream_task, status_task) if task is not None]
+                for task in pending:
+                    if not task.done():
+                        task.cancel()
+                # Child cleanup must not replace the original stream exception.
+                await asyncio.gather(*pending, return_exceptions=True)
 
     async def _recover_provider_overflow(
         self,
@@ -1819,7 +1848,7 @@ class AgentRunner:
                 for provider_attempt in range(2):
                     requests_before_attempt = model_usage.requests
                     try:
-                        async for source, event in self._stream_agent_events(
+                        async with aclosing(self._stream_agent_events(
                             user_prompt=user_prompt,
                             message_history=model_history,
                             deferred_tool_results=deferred_tool_results,
@@ -1828,88 +1857,89 @@ class AgentRunner:
                             usage=model_usage,
                             session_events=session_events,
                             snapshot=stream_snapshot,
-                        ):
-                            if source == "status":
-                                status_event = event
-                                if status_event.get("type") == "context_compaction_progress":
-                                    log_event(
-                                        "context_compaction_phase",
-                                        conversation_id=deps.conversation_id,
-                                        run_id=deps.run_id,
-                                        agent_id=deps.agent_id,
-                                        session_id=session_id,
-                                        phase=status_event.get("phase"),
-                                        mode=status_event.get("mode", "automatic"),
-                                    )
-                                yield status_event
-                                continue
-                            if isinstance(event, AgentRunResultEvent):
-                                result = event.result
-                                continue
-                            await self._capture_planning_result(event, deps)
-                            mapped = events.map_event(event)
-                            if mapped is not None:
-                                if not _should_publish_tool_call(event, mapped):
-                                    continue
-                                mapped_type = mapped.get("type")
-                                mapped_call_id = mapped.get("tool_call_id")
-                                if mapped_type in {"text", "thinking"}:
-                                    mapped["item_id"] = f"live:{deps.run_id}:assistant"
-                                elif mapped_type in {
-                                    "tool_call",
-                                    "tool_result",
-                                    "tool_call_removed",
-                                } and mapped_call_id:
-                                    prefix = (
-                                        "plan"
-                                        if is_planning_tool(mapped.get("tool"))
-                                        else "tool"
-                                    )
-                                    mapped["item_id"] = f"{prefix}:{mapped_call_id}"
-                                provider_retry_safe = False
-                                event_type = mapped.get("type")
-                                tool_call_id = mapped.get("tool_call_id")
-                                enriched = enrich_tool_event(mapped, self.ui_tool_hints)
-                                enriched = enrich_tool_event_display_name(
-                                    enriched,
-                                    self.tool_display_names,
-                                )
-                                if event_type == "tool_call" and tool_call_id:
-                                    tool_name = str(mapped.get("tool") or "tool")
-                                    if tool_name in self.ui_tool_hints:
-                                        buffered_ui_tool_calls[tool_call_id] = enriched
-                                        continue
-                                if event_type == "tool_call_removed" and tool_call_id:
-                                    if buffered_ui_tool_calls.pop(tool_call_id, None) is not None:
-                                        continue
-                                if event_type == "tool_result" and tool_call_id:
-                                    buffered_call = buffered_ui_tool_calls.pop(tool_call_id, None)
-                                    if buffered_call is not None:
-                                        published_tool_calls[tool_call_id] = str(
-                                            buffered_call.get("tool") or "tool"
+                        )) as stream_events:
+                            async for source, event in stream_events:
+                                if source == "status":
+                                    status_event = event
+                                    if status_event.get("type") == "context_compaction_progress":
+                                        log_event(
+                                            "context_compaction_phase",
+                                            conversation_id=deps.conversation_id,
+                                            run_id=deps.run_id,
+                                            agent_id=deps.agent_id,
+                                            session_id=session_id,
+                                            phase=status_event.get("phase"),
+                                            mode=status_event.get("mode", "automatic"),
                                         )
-                                        yield buffered_call
-                                if event_type == "tool_call_removed":
-                                    if not tool_call_id or tool_call_id not in published_tool_calls:
+                                    yield status_event
+                                    continue
+                                if isinstance(event, AgentRunResultEvent):
+                                    result = event.result
+                                    continue
+                                await self._capture_planning_result(event, deps)
+                                mapped = events.map_event(event)
+                                if mapped is not None:
+                                    if not _should_publish_tool_call(event, mapped):
                                         continue
-                                    published_tool_calls.pop(tool_call_id, None)
-                                elif event_type == "tool_call" and tool_call_id:
-                                    published_tool_calls[tool_call_id] = str(mapped.get("tool") or "tool")
-                                elif event_type == "tool_result" and tool_call_id:
-                                    published_tool_calls.pop(tool_call_id, None)
-                                if event_type in {"tool_call", "tool_result", "tool_call_removed"}:
-                                    log_event(
-                                        "agent_tool_event",
-                                        conversation_id=deps.conversation_id,
-                                        run_id=deps.run_id,
-                                        agent_id=deps.agent_id,
-                                        session_id=session_id,
-                                        phase=event_type,
-                                        tool=mapped.get("tool"),
-                                        tool_call_id=tool_call_id,
-                                        source=mapped.get("source") or "tool",
+                                    mapped_type = mapped.get("type")
+                                    mapped_call_id = mapped.get("tool_call_id")
+                                    if mapped_type in {"text", "thinking"}:
+                                        mapped["item_id"] = f"live:{deps.run_id}:assistant"
+                                    elif mapped_type in {
+                                        "tool_call",
+                                        "tool_result",
+                                        "tool_call_removed",
+                                    } and mapped_call_id:
+                                        prefix = (
+                                            "plan"
+                                            if is_planning_tool(mapped.get("tool"))
+                                            else "tool"
+                                        )
+                                        mapped["item_id"] = f"{prefix}:{mapped_call_id}"
+                                    provider_retry_safe = False
+                                    event_type = mapped.get("type")
+                                    tool_call_id = mapped.get("tool_call_id")
+                                    enriched = enrich_tool_event(mapped, self.ui_tool_hints)
+                                    enriched = enrich_tool_event_display_name(
+                                        enriched,
+                                        self.tool_display_names,
                                     )
-                                yield enriched
+                                    if event_type == "tool_call" and tool_call_id:
+                                        tool_name = str(mapped.get("tool") or "tool")
+                                        if tool_name in self.ui_tool_hints:
+                                            buffered_ui_tool_calls[tool_call_id] = enriched
+                                            continue
+                                    if event_type == "tool_call_removed" and tool_call_id:
+                                        if buffered_ui_tool_calls.pop(tool_call_id, None) is not None:
+                                            continue
+                                    if event_type == "tool_result" and tool_call_id:
+                                        buffered_call = buffered_ui_tool_calls.pop(tool_call_id, None)
+                                        if buffered_call is not None:
+                                            published_tool_calls[tool_call_id] = str(
+                                                buffered_call.get("tool") or "tool"
+                                            )
+                                            yield buffered_call
+                                    if event_type == "tool_call_removed":
+                                        if not tool_call_id or tool_call_id not in published_tool_calls:
+                                            continue
+                                        published_tool_calls.pop(tool_call_id, None)
+                                    elif event_type == "tool_call" and tool_call_id:
+                                        published_tool_calls[tool_call_id] = str(mapped.get("tool") or "tool")
+                                    elif event_type == "tool_result" and tool_call_id:
+                                        published_tool_calls.pop(tool_call_id, None)
+                                    if event_type in {"tool_call", "tool_result", "tool_call_removed"}:
+                                        log_event(
+                                            "agent_tool_event",
+                                            conversation_id=deps.conversation_id,
+                                            run_id=deps.run_id,
+                                            agent_id=deps.agent_id,
+                                            session_id=session_id,
+                                            phase=event_type,
+                                            tool=mapped.get("tool"),
+                                            tool_call_id=tool_call_id,
+                                            source=mapped.get("source") or "tool",
+                                        )
+                                    yield enriched
                         break
                     except Exception as exc:
                         if (
@@ -1959,11 +1989,20 @@ class AgentRunner:
                 cancelled_run = exc
             except asyncio.CancelledError as exc:
                 active_run.cancellation_token.cancel()
-                cancelled_run = RunCancelled.from_cancellation(exc)
+                cancelled_run = RunCancelled.from_cancellation(exc) or RunCancelled(
+                    "Transport disconnected",
+                    messages=stream_snapshot.new_messages,
+                    usage=stream_snapshot.usage,
+                )
                 await self._cancel_title_task(title_task)
                 raise
             except GeneratorExit:
                 active_run.cancellation_token.cancel()
+                cancelled_run = RunCancelled(
+                    "Transport disconnected",
+                    messages=stream_snapshot.new_messages,
+                    usage=stream_snapshot.usage,
+                )
                 await self._cancel_title_task(title_task)
                 raise
             except Exception as exc:  # noqa: BLE001 - surface as an SSE error event
@@ -1994,6 +2033,7 @@ class AgentRunner:
                             session_id=session_id,
                         )
                     except Exception as persistence_exc:
+                        history_persisted = False
                         logger.exception(
                             "Failed-run history persistence failed for session {}: {}",
                             session_id,
@@ -2032,7 +2072,10 @@ class AgentRunner:
                     cancelled_messages = mark_cancelled_response_interrupted(
                         cancelled_run.new_messages()
                     )
-                    await self._attach_final_plan_snapshot(cancelled_messages, deps)
+                    try:
+                        await self._attach_final_plan_snapshot(cancelled_messages, deps)
+                    except Exception as exc:
+                        logger.warning("Cancelled plan snapshot unavailable: {}", type(exc).__name__)
                     self._publish_run_cancelled(
                         persister,
                         session_id,

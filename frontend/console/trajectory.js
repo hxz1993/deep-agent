@@ -2,6 +2,7 @@ import { copyTextToClipboard } from "./message-actions.js?v=20260819-1";
 import { parseServerTimestamp } from "./time.js?v=20260831-1";
 import { renderWebImagePreview } from "./web-image.js?v=20260901-1";
 import { attachmentPreviewAttributes } from "./attachment-preview.js?v=20260904-8";
+import { toolResultPresentation } from "./assistant-presentation.js?v=20260907-1";
 
 const TOOL_KINDS = new Set(["tool", "planning", "deferred"]);
 const PRESENTATION_ONLY_SSE_TYPES = new Set(["session_title"]);
@@ -428,12 +429,13 @@ export function buildTrajectory(history = {}) {
         tool.native = { ...(tool.native || {}), call_event_id: event.event_id, call_part_offset: offset };
       } else {
         const metadata = part.metadata && typeof part.metadata === "object" ? part.metadata : {};
-        tool.status = normalizedStatus(part.outcome === "failed" ? "failed" : "completed");
+        tool.status = toolResultPresentation(part).status;
         tool.result = redactTrajectoryValue(jsonClone({
           result: part.content ?? null,
           outcome: part.outcome || null,
           plan: toolName === "write_plan" ? metadata.deepagent_plan || null : null,
           artifacts: toolResultArtifacts(metadata),
+          metadata: { code_mode: metadata.code_mode, nested_calls: metadata.nested_calls },
         }));
         tool.native = { ...(tool.native || {}), result_event_id: event.event_id, result_part_offset: offset };
         tool.timestamp_end = event.updated_at || part.timestamp || tool.timestamp_end;
@@ -1231,9 +1233,10 @@ export function createTrajectoryController({ state }) {
         if (type === "tool_result" && payload.tool_call_id) {
       const call = [...liveEvents].reverse().find((item) => item.tool_call_id === payload.tool_call_id);
       if (call) {
-        call.result = redactTrajectoryValue(jsonClone({ result: payload.result, artifacts: payload.artifacts || null, plan: payload.plan || null }));
+        call.result = redactTrajectoryValue(jsonClone({ result: payload.result, outcome: payload.outcome || null, artifacts: payload.artifacts || null, plan: payload.plan || null,
+          metadata: { code_mode: payload.metadata?.code_mode, nested_calls: payload.metadata?.nested_calls } }));
         call.summary = liveSummary(type, payload);
-        call.status = payload.outcome === "failed" ? "failed" : "completed";
+        call.status = toolResultPresentation(payload).status;
         call.timestamp_end = timestamp;
         if (activeAssistantLoop?.run_id === currentRunId) {
           activeAssistantLoop.status = "completed";
@@ -1274,7 +1277,8 @@ export function createTrajectoryController({ state }) {
     const status = type === "error" ? "failed"
       : type === "cancelled" ? "interrupted"
         : type === "final" ? normalizedStatus(payload.status)
-          : type === "tool_call" ? "pending" : "running";
+          : type === "tool_result" ? toolResultPresentation(payload).status
+            : type === "tool_call" ? "pending" : "running";
     liveEvents.push({
       id: `live-${type}-${payload.tool_call_id || Date.now()}-${liveEvents.length}`,
       kind,

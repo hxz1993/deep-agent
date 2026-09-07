@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import asyncio
 import inspect
+import json
 import unittest
 from dataclasses import replace
 from unittest import mock
@@ -10,7 +11,7 @@ from unittest import mock
 import httpx2
 from pydantic_ai import Agent, FunctionToolset, ModelRetry, RunContext, ToolDefinition
 from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart, ToolReturnPart
-from pydantic_ai.models.function import AgentInfo, FunctionModel
+from pydantic_ai.models.function import AgentInfo, DeltaToolCall, FunctionModel
 from pydantic_ai.models.test import TestModel
 from pydantic_ai.toolsets.abstract import ToolsetTool
 from pydantic_ai.usage import RunUsage
@@ -66,6 +67,182 @@ class _MemoryFileStore:
 
 
 class CodeModeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_discovery_announcement_and_schemas_keep_native_as_default(self) -> None:
+        from pydantic_ai.capabilities import ToolSearch
+        from pydantic_ai.messages import SystemPromptPart, UserPromptPart
+
+        steps = 0
+        called = []
+        announcements = []
+
+        async def lookup() -> str:
+            called.append(True)
+            return "found"
+
+        def strategy(ctx, queries, tool_defs):
+            return [tool.name for tool in tool_defs]
+
+        def respond(messages, info: AgentInfo) -> ModelResponse:
+            nonlocal steps
+            steps += 1
+            descriptions = {tool.name: tool.description or "" for tool in info.function_tools}
+            self.assertIn("Default to ordinary native MCP calls", descriptions["run_code"])
+            if "search_tools" in descriptions:
+                self.assertIn("Default to ordinary native MCP calls", descriptions["search_tools"])
+                self.assertNotIn("Note: discovered tools become callable", descriptions["search_tools"])
+            if steps == 1:
+                self.assertNotIn("demo_lookup", descriptions)
+                return ModelResponse(parts=[ToolCallPart("search_tools", {"queries": ["lookup"]}, "discover")])
+            if steps == 2:
+                self.assertIn("demo_lookup", descriptions)
+                announcements.extend(part.content for message in messages for part in message.parts
+                                     if isinstance(part, (SystemPromptPart, UserPromptPart))
+                                     and isinstance(part.content, str)
+                                     and "New tool schemas are available" in part.content)
+                return ModelResponse(parts=[ToolCallPart("demo_lookup", {}, "native")])
+            return ModelResponse(parts=[TextPart("done")])
+
+        deferred = FunctionToolset(tools=[lookup]).prefixed("demo").defer_loading()
+        agent = Agent(
+            FunctionModel(respond), deps_type=AgentDeps,
+            toolsets=[build_code_mode_tool_package().toolset, FilePayloadResolvingToolset(deferred)],
+            capabilities=[ToolSearch(strategy=strategy), HybridCodeMode(tools=[], dynamic_catalog=True)],
+        )
+        result = await agent.run("lookup", deps=AgentDeps(session_id="isolated"))
+        self.assertEqual(result.output, "done")
+        self.assertEqual(called, [True])
+        self.assertEqual(len(announcements), 1)
+        self.assertIn("Default to ordinary native MCP calls", announcements[0])
+        self.assertIn("opaque file/binary relay", announcements[0])
+
+    def test_discovery_announcement_preserves_seen_tool_deduplication(self) -> None:
+        capability = HybridCodeMode(tools=[], dynamic_catalog=True)
+        ctx = mock.Mock()
+        capability._announce_newly_discovered(ctx, ["demo_one"])
+        capability._announce_newly_discovered(ctx, ["demo_one"])
+        capability._announce_newly_discovered(ctx, ["demo_one", "demo_two"])
+        self.assertEqual(ctx.enqueue.call_count, 2)
+        self.assertIn("demo_one", ctx.enqueue.call_args_list[0].args[0].content)
+        self.assertIn("demo_two", ctx.enqueue.call_args_list[1].args[0].content)
+        self.assertNotIn("demo_one", ctx.enqueue.call_args_list[1].args[0].content)
+
+    async def test_streamed_ptc_failure_remains_a_failed_result(self) -> None:
+        from deep_agent.agent.events import map_event
+
+        step = 0
+
+        async def stream(messages, info: AgentInfo):
+            nonlocal step
+            step += 1
+            if step == 1:
+                yield {0: DeltaToolCall(
+                    name="run_code", json_args=json.dumps({"code": "await search_tools(query='demo')"}),
+                    tool_call_id="failed-code",
+                )}
+            else:
+                yield "native fallback is available"
+
+        agent = Agent(
+            FunctionModel(stream_function=stream), deps_type=AgentDeps,
+            toolsets=[build_code_mode_tool_package().toolset],
+            capabilities=[HybridCodeMode(tools=[], dynamic_catalog=True)],
+        )
+        mapped = []
+        official_results = []
+        async with agent.run_stream_events("lookup", deps=AgentDeps(session_id="isolated")) as events:
+            async for event in events:
+                if isinstance(getattr(event, "part", None), ToolReturnPart):
+                    official_results.append(event.part)
+                item = map_event(event)
+                if item is not None:
+                    mapped.append(item)
+        failed = next(item for item in mapped if item.get("type") == "tool_result")
+        self.assertIn("native", str(failed["result"]))
+        self.assertEqual(official_results[0].outcome, "failed")
+        self.assertEqual(official_results[0].metadata, {"code_mode": True, "nested_calls": []})
+        self.assertFalse(any(item.get("type") == "tool_call_removed" for item in mapped))
+
+    async def test_ptc_execution_errors_are_failed_results_and_native_remains_available(self) -> None:
+        steps = 0
+        native_calls = []
+
+        async def lookup() -> str:
+            native_calls.append(True)
+            return "native-result"
+
+        def respond(messages, info: AgentInfo) -> ModelResponse:
+            nonlocal steps
+            steps += 1
+            names = {tool.name for tool in info.function_tools}
+            self.assertIn("demo_lookup", names)
+            if steps <= 4:
+                return ModelResponse(parts=[ToolCallPart(
+                    "run_code", {"code": "await search_tools(query='lookup')"}, f"bad-{steps}"
+                )])
+            if steps == 5:
+                return ModelResponse(parts=[ToolCallPart("demo_lookup", {}, "native")])
+            return ModelResponse(parts=[TextPart("done")])
+
+        agent = Agent(
+            FunctionModel(respond), deps_type=AgentDeps,
+            toolsets=[build_code_mode_tool_package().toolset,
+                      FilePayloadResolvingToolset(FunctionToolset(tools=[lookup]).prefixed("demo"))],
+            capabilities=[HybridCodeMode(tools=[], dynamic_catalog=True, max_retries=1)],
+        )
+        result = await agent.run("lookup", deps=AgentDeps(session_id="isolated"))
+        failures = [part for message in result.new_messages() for part in message.parts
+                    if isinstance(part, ToolReturnPart) and part.tool_name == "run_code"]
+        self.assertEqual(len(failures), 4)
+        self.assertTrue(all(part.outcome == "failed" for part in failures))
+        self.assertTrue(all("native" in str(part.content) for part in failures))
+        self.assertTrue(all(part.metadata["code_mode"] for part in failures))
+        self.assertEqual(native_calls, [True])
+        self.assertEqual(result.output, "done")
+
+    async def test_ptc_failure_retains_prior_nested_success_audit(self) -> None:
+        from pydantic_ai.messages import ModelMessagesTypeAdapter
+
+        steps = 0
+
+        async def lookup() -> dict[str, str]:
+            return {"value": "safe-result", "authorization": "Bearer synthetic-test-secret"}
+
+        def respond(messages, info: AgentInfo) -> ModelResponse:
+            nonlocal steps
+            steps += 1
+            if steps == 1:
+                # Start the real Monty REPL so the next error is runtime, not a
+                # whole-snippet type-check failure before the nested tool executes.
+                code = "1"
+            elif steps == 2:
+                code = "value = await demo_lookup()\nmissing_after_side_effect"
+            else:
+                return ModelResponse(parts=[TextPart("done")])
+            return ModelResponse(parts=[ToolCallPart("run_code", {"code": code}, f"ptc-{steps}")])
+
+        agent = Agent(
+            FunctionModel(respond), deps_type=AgentDeps,
+            toolsets=[build_code_mode_tool_package().toolset,
+                      FilePayloadResolvingToolset(FunctionToolset(tools=[lookup]).prefixed("demo"))],
+            capabilities=[HybridCodeMode(tools=[], dynamic_catalog=True)],
+        )
+        result = await agent.run("process data", deps=AgentDeps(session_id="isolated"))
+        failed = next(part for message in result.new_messages() for part in message.parts
+                      if isinstance(part, ToolReturnPart) and part.tool_call_id == "ptc-2")
+        self.assertEqual(failed.outcome, "failed")
+        audit = failed.metadata["nested_calls"]
+        self.assertEqual(audit[0]["tool_name"], "demo_lookup")
+        self.assertEqual(audit[0]["status"], "completed")
+        self.assertEqual(audit[0]["result"]["value"], "safe-result")
+        self.assertNotIn("synthetic-test-secret", json.dumps(audit))
+        restored = ModelMessagesTypeAdapter.validate_json(
+            ModelMessagesTypeAdapter.dump_json(result.new_messages())
+        )
+        persisted = next(part for message in restored for part in message.parts
+                         if isinstance(part, ToolReturnPart) and part.tool_call_id == "ptc-2")
+        self.assertEqual(persisted.outcome, "failed")
+        self.assertEqual(persisted.metadata, failed.metadata)
+
     def test_registry_exposes_explicit_default_off_package(self) -> None:
         registry = build_registry()
         package = registry.get("builtin:ptc")
@@ -467,8 +644,11 @@ class CodeModeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("never wrap it with `asyncio.run()`", descriptions[0])
         self.assertIn("exist only inside `run_code`", descriptions[0])
         self.assertIn("separately present in the ordinary tool list", descriptions[0])
-        self.assertIn("one tool's result feeds another", descriptions[0])
-        self.assertIn("execute the\n  remaining chain in one `run_code` call", descriptions[0])
+        self.assertIn("Default to ordinary native MCP calls", descriptions[0])
+        self.assertIn("intermediate rows/bytes do not need model interpretation", descriptions[0])
+        self.assertIn("`search_tools` is native-only", descriptions[0])
+        self.assertIn("connection/pairing, and canvas snapshots", descriptions[0])
+        self.assertNotIn("one tool's result feeds another", descriptions[0])
         catalog = HybridCodeModeToolset._render_catalog(
             {
                 "load_file_data": type("Definition", (), {"metadata": {}})(),

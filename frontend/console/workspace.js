@@ -1,7 +1,7 @@
 import { channelOriginPresentation } from "./session-display.js?v=20260904-13";
 import { copyTextToClipboard } from "./message-actions.js?v=20260819-1";
 
-const WORKSPACE_ASSET_VERSION = "20260905-03";
+const WORKSPACE_ASSET_VERSION = "20260907-1";
 
 const WORKSPACE_PANE_LIMITS = {
   session: { min: 220, max: 420, initial: 300, variable: "--console-session-width" },

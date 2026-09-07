@@ -35,6 +35,17 @@ export function isPlanningToolEvent(event = {}) {
   return PLANNING_TOOL_NAMES.has(event.tool);
 }
 
+export function toolResultPresentation(result = {}) {
+  const values = [result.outcome, result.status];
+  if (values.some((value) => ['interrupted', 'cancelled', 'canceled'].includes(value))) {
+    return { status: 'interrupted', label: '已中断', className: 'tool-status-interrupted' };
+  }
+  if (values.some((value) => ['failed', 'error'].includes(value))) {
+    return { status: 'failed', label: '失败', className: 'tool-status-error' };
+  }
+  return { status: 'completed', label: '完成', className: 'tool-status-complete' };
+}
+
 function toolCallFromConversationItem(item = {}) {
   return {
     tool: item.tool_name,

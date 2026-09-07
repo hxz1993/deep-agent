@@ -303,9 +303,9 @@ test("输入框提供附件入口和圆环预算且不再暴露手动压缩", ()
   assert.doesNotMatch(chatSource, /context_compaction_target_ratio|safety_margin\s*=|predict.*output/i);
 });
 
-test("停止生成只请求正式取消接口并等待真实 cancelled 事件", () => {
-  assert.match(chatSource, /sessionApiUrl\(\{ id: sessionId, agentId \}, "\/cancel"\)/);
-  assert.match(chatSource, /body\.status === "cancel_requested"/);
+test("停止生成请求正式取消并有界核验，真实 cancelled 保留部分回答", () => {
+  assert.match(chatSource, /kind === "cancel" \? "\/cancel" : "\/run-status"/);
+  assert.match(chatSource, /await verifyStreamStop\(/);
   assert.match(chatSource, /case "cancelled":[\s\S]*assistantActionsFromSse\(type, data\)/);
   assert.match(
     chatSource,
@@ -405,7 +405,7 @@ test("正常终态保留直播结果且只有异常断流恢复 History", () => 
   );
   assert.match(
     chatSource,
-    /if \(state\.refreshHistoryAfterStream\) \{[\s\S]*await refreshCurrentHistory\(\);/,
+    /if \(state\.sessionId && state\.refreshHistoryAfterStream\) \{[\s\S]*await boundedStreamRequest\(\(signal\) => refreshCurrentHistory\(\{ signal, isCurrent: current \}\)\);/,
   );
 });
 

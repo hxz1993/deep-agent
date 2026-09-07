@@ -188,6 +188,15 @@ def _map_tool_return_part(part: ToolReturnPart) -> dict[str, Any] | None:
         artifacts=tool_result_artifacts(part),
         plan=plan_snapshot_from_part(part),
     )
+    if part.outcome != "success":
+        payload["outcome"] = part.outcome
+    if part.tool_name == "run_code" and isinstance(part.metadata, dict):
+        # CodeMode owns redaction and aggregate bounds; never copy arbitrary
+        # tool metadata (which may contain internal credentials) onto SSE.
+        payload["metadata"] = _to_jsonable({
+            key: part.metadata[key]
+            for key in ("code_mode", "nested_calls") if key in part.metadata
+        })
     if part.tool_name in {"web_search", "web_fetch", "web_image_view"} and isinstance(part.metadata, dict):
         audit = part.metadata.get(part.tool_name)
         if isinstance(audit, dict):

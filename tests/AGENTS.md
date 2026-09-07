@@ -43,6 +43,8 @@ tests/
 | --- | --- |
 | `test_agent_max_requests.py` | 全局 request 上限、旧 Agent 字段 422 兼容提示 |
 | `test_code_mode.py` | PTC新旧编码兼容、MCP双通道、Monty调用、URL/File ID文件变量与脱敏 |
+| `test_ptc_stream_failures.py` | 真实 SDK/Monty + 隔离 SQLite：PTC 连续失败后原生恢复、嵌套等待取消、Provider异常及普通工具重试耗尽的 SSE/History/Registry 闭环 |
+| `test_event_persister.py`、`test_runner_history.py` | 写入失败回执与超时释放、显式关闭 SDK 流后部分历史保存、终态写入失败不覆盖原始错误 |
 | `test_sandbox_*.py` | Python沙箱公网边界、FileStore输入、`deepagent_files`产物发布、回滚、依赖探针与子进程清理 |
 | `test_global_settings.py` | 运行设置安全白名单、Web Search唯一配置、六Provider校验、Key掩码/保留和草稿测试 |
 | `test_web_tools.py`、`test_web_proxy_compat.py` | `builtin:web`目录、视觉模型条件注入、HTML图片位置与URL规范化、固定Provider无降级、SSRF-safe Fetch/Image边界及HTTP代理fake-IP/SNI兼容 |

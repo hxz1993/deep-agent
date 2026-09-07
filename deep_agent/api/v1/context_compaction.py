@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from contextlib import aclosing
 
 from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel
@@ -99,10 +100,11 @@ async def compact_session_context(
     )
 
     async def event_generator():
-        async for event in runner.run_manual_compaction(resolved_session_id, deps):
-            yield {
-                "event": event["type"],
-                "data": json.dumps(event, ensure_ascii=False, default=str),
-            }
+        async with aclosing(runner.run_manual_compaction(resolved_session_id, deps)) as stream:
+            async for event in stream:
+                yield {
+                    "event": event["type"],
+                    "data": json.dumps(event, ensure_ascii=False, default=str),
+                }
 
     return EventSourceResponse(event_generator())

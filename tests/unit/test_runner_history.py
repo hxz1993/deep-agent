@@ -5,6 +5,8 @@ import unittest
 from contextlib import asynccontextmanager
 from unittest.mock import patch
 
+import anyio
+
 from pydantic_ai import Agent
 from pydantic_ai.exceptions import ModelHTTPError
 from pydantic_ai.messages import (
@@ -372,6 +374,82 @@ class AgentRunnerHistoryTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(history[1], ModelResponse)
         self.assertEqual(history[1].state, "interrupted")
         self.assertTrue(history[1].parts[0].content.startswith("alpha-"))
+
+    async def _assert_disconnect_before_first_response(
+        self, *, close_generator: bool, cancel_scope: bool = False,
+    ) -> None:
+        entered = asyncio.Event()
+        exited = asyncio.Event()
+
+        async def waiting_stream(messages, info):
+            entered.set()
+            try:
+                await asyncio.Event().wait()
+                yield "never emitted"
+            finally:
+                exited.set()
+
+        registry = ActiveRunRegistry()
+        runner = AgentRunner(
+            Agent(FunctionModel(stream_function=waiting_stream), deps_type=AgentDeps),
+            self.store,
+            UsageLimits(request_limit=10),
+            active_runs=registry,
+        )
+        session_id = "disconnect-before-response"
+        deps = self._deps(session_id)
+        stream = runner.run_stream(session_id, "hello", deps, persister=self.persister)
+        task = None
+        try:
+            if close_generator:
+                # The persisted User Event can reach the consumer before the
+                # Provider has produced any response. Close at that boundary.
+                first = await asyncio.wait_for(anext(stream), 2)
+                self.assertEqual(first["event"]["event_type"], "user/message")
+                await asyncio.wait_for(entered.wait(), 2)
+                await asyncio.wait_for(stream.aclose(), 2)
+            else:
+                scopes = []
+
+                async def consume():
+                    with anyio.CancelScope() as scope:
+                        scopes.append(scope)
+                        async for _ in stream:
+                            pass
+
+                task = asyncio.create_task(consume())
+                await asyncio.wait_for(entered.wait(), 2)
+                if cancel_scope:
+                    scopes[0].cancel()
+                    await asyncio.wait_for(task, 2)
+                else:
+                    task.cancel()
+                    with self.assertRaises(asyncio.CancelledError):
+                        await task
+            await self._flush(session_id, agent_id=self.db_agent.id)
+            rows = await self.store.list_events(session_id, limit=100)
+            rows = [row for row in rows if row.event_type != "session/title"]
+            self.assertEqual([row.event_type for row in rows], ["user/message", "run/terminal"])
+            self.assertEqual(rows[-1].status, "cancelled")
+            self.assertEqual(rows[-1].run_id, deps.run_id)
+            self.assertTrue(exited.is_set(), "Provider task survived the disconnected consumer")
+            self.assertIsNone(registry.get(agent_id=self.db_agent.id, session_id=session_id))
+        finally:
+            if task is not None and not task.done():
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+            await stream.aclose()
+
+    async def test_transport_close_before_first_response_persists_terminal(self) -> None:
+        await self._assert_disconnect_before_first_response(close_generator=True)
+
+    async def test_transport_cancel_before_first_response_persists_terminal(self) -> None:
+        await self._assert_disconnect_before_first_response(close_generator=False)
+
+    async def test_sse_cancel_scope_before_first_response_persists_terminal(self) -> None:
+        await self._assert_disconnect_before_first_response(
+            close_generator=False, cancel_scope=True,
+        )
 
     async def test_consumer_close_saves_actual_sdk_content_not_synthetic_text(self) -> None:
         from tests.integration.helpers.models import build_slow_stream_model

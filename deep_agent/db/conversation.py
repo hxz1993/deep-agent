@@ -8,7 +8,7 @@ import sys
 from collections import defaultdict
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Callable, Protocol, runtime_checkable
 
 from pydantic_ai.messages import ModelMessage, ModelRequest, UserPromptPart
 from sqlalchemy import and_, select, text
@@ -26,7 +26,7 @@ from deep_agent.db.event_codec import (
 from deep_agent.db.session_list import SessionListFilters, SessionSummaryRow
 from deep_agent.db.session_scope import NO_AGENT_SCOPE, SessionOwner, normalize_agent_scope, runtime_session_key
 from deep_agent.db.stores.chat_session.base import ChatSessionStoreBase
-from deep_agent.db.stores.event.base import LifecycleStatus, SessionEventSnapshot, SessionEventStore
+from deep_agent.db.stores.event.base import LifecycleStatus, SessionEventSnapshot, SessionEventStore, _compaction_anchor
 from deep_agent.db.stores._session import serialized_sqlite_session
 from deep_agent.db.models import ChatSession, ChatSessionEvent
 from deep_agent.db.serialization import serialize_message
@@ -259,6 +259,7 @@ class SqlConversationCoordinator:
         compaction_event_id: str | None = None,
         pruned_tool_results: list[dict[str, Any]] | None = None,
         summary_call: dict[str, Any] | None = None,
+        validate_projection: Callable[[list[ModelMessage]], int] | None = None,
     ) -> SessionEventSnapshot | None:
         scope, user = self._required_identity(agent_id, user_id)
         suffix = _common_message_suffix(raw_history, projected_history)
@@ -362,6 +363,14 @@ class SqlConversationCoordinator:
                 "context_evidence": context_evidence,
                 "attachment_evidence": attachment_evidence,
             }
+            if validate_projection is not None:
+                # Persisted evidence carries Event locations and can differ from
+                # the runtime index. Validate the exact anchor readers will use
+                # before changing the successful checkpoint in this transaction.
+                tail = list(raw_history[-suffix:]) if suffix else []
+                estimated_after = validate_projection([
+                    _compaction_anchor({"replacement": rendered}), *tail,
+                ])
             lifecycle_row = None
             if compaction_event_id is not None:
                 lifecycle_row = (

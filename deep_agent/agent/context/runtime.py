@@ -31,6 +31,11 @@ class CompactionTelemetry:
     summary_chunks: int = 0
     fallback_reason: str | None = None
     failure: str | None = None
+    target_tokens: int | None = None
+    candidate_tokens: int | None = None
+    retained_tail_tokens: int | None = None
+    evidence_tokens: int | None = None
+    summary_tokens: int | None = None
     estimated_input_tokens: int | None = None
     provider_input_tokens: int | None = None
     estimation_error_ratio: float | None = None
@@ -54,6 +59,11 @@ class CompactionTelemetry:
             "summary_chunks": self.summary_chunks,
             "fallback_reason": self.fallback_reason,
             "failure": self.failure,
+            "target_tokens": self.target_tokens,
+            "candidate_tokens": self.candidate_tokens,
+            "retained_tail_tokens": self.retained_tail_tokens,
+            "evidence_tokens": self.evidence_tokens,
+            "summary_tokens": self.summary_tokens,
             "estimated_input_tokens": self.estimated_input_tokens,
             "provider_input_tokens": self.provider_input_tokens,
             "estimation_error_ratio": self.estimation_error_ratio,

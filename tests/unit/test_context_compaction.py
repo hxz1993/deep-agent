@@ -6,7 +6,7 @@ import time
 import unittest
 from decimal import Decimal
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from pydantic_ai.exceptions import ModelHTTPError
 from pydantic_ai.messages import (
@@ -30,6 +30,8 @@ from deep_agent.agent.context.compaction import (
     _safe_boundaries,
     _prune_tool_results,
     _jsonable_usage,
+    _summary_anchor,
+    _summary_materials,
     _run_preparation_step,
     is_provider_context_overflow,
     summary_contents,
@@ -291,6 +293,61 @@ class DshCompactionRulesTests(unittest.TestCase):
 
 
 class CompactionPreparationProgressTests(unittest.IsolatedAsyncioTestCase):
+    async def test_incremental_summary_reserves_evidence_before_model_call(self) -> None:
+        raw = [ModelRequest(parts=[UserPromptPart(content="较早任务")])]
+        for i in range(45):
+            raw.extend([
+                ModelResponse(parts=[ToolCallPart("query", {"id": str(i)}, str(i))]),
+                ModelRequest(parts=[ToolReturnPart("query", {"id": str(i), "name": "甲" * 180}, str(i))]),
+            ])
+        evidence = _summary_materials(raw, raw, len(raw))[2]
+        tail = [
+            ModelRequest(parts=[UserPromptPart(content="乙" * 70_000)]),
+            ModelResponse(parts=[TextPart(content="完成第一步")]),
+            ModelRequest(parts=[UserPromptPart(content="丙" * 41_000)]),
+            ModelResponse(parts=[TextPart(content="完成第二步")]),
+            ModelRequest(parts=[UserPromptPart(content="丁" * 48_000)]),
+            ModelResponse(parts=[TextPart(content="完成第三步")]),
+        ]
+        messages = [_summary_anchor(valid_summary(), evidence), *tail]
+        raw = [*raw, *tail]
+        est = TokenEstimator.conservative()
+        state = ContextRunState(raw_history=raw, estimator=est)
+        state.telemetry.estimated_tokens_before = est.request(messages)[0]
+        comp = DeepAgentContextCompaction(context_window_tokens=1_000_000, max_output_tokens=384_000)
+        summary = AsyncMock(return_value=valid_summary() + "\n" + "戊" * 2_000)
+        with patch.object(DeepAgentContextCompaction, "_single_summary", summary):
+            result, after = await comp._compact_projection(
+                messages, SimpleNamespace(), SimpleNamespace(model_request_parameters=None),
+                96_474, state, require_summary=True, emit_deterministic=False,
+                reserve_answer_request=False,
+            )
+        self.assertEqual(summary.await_count, 1)
+        self.assertLessEqual(after, 96_474)
+        self.assertGreater(state.telemetry.evidence_tokens, 4_000)
+        self.assertEqual(result[-2:], tail[-2:])
+        self.assertEqual(state.raw_history, raw)
+
+    async def test_target_failure_records_candidate_without_applying_it(self) -> None:
+        est = TokenEstimator.conservative()
+        original = [ModelRequest(parts=[UserPromptPart(content="原文" * 2000)])]
+        candidate = [_summary_anchor(valid_summary() + "甲" * 1500, ())]
+        state = ContextRunState(raw_history=original, estimator=est)
+        before = est.request(original)[0]
+        state.telemetry.estimated_tokens_before = before
+        state.telemetry.estimated_tokens_after = before
+        comp = DeepAgentContextCompaction(context_window_tokens=100_000, max_output_tokens=4096)
+        with patch.object(DeepAgentContextCompaction, "_summarize_projection", AsyncMock(return_value=candidate)):
+            with self.assertRaisesRegex(SummaryUnavailable, "target_not_met"):
+                await comp._compact_projection(
+                    original, SimpleNamespace(), SimpleNamespace(model_request_parameters=None),
+                    1000, state, require_summary=True, emit_deterministic=False,
+                    reserve_answer_request=False,
+                )
+        self.assertEqual(state.telemetry.candidate_tokens, est.request(candidate)[0])
+        self.assertEqual(state.telemetry.estimated_tokens_after, before)
+        self.assertFalse(state.telemetry.summary_applied)
+
     async def test_cpu_preparation_yields_periodic_sse_progress(self) -> None:
         queue: asyncio.Queue[dict] = asyncio.Queue()
         state = ContextRunState(

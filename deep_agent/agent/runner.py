@@ -9,6 +9,8 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator
 
+import anyio
+
 from pydantic_ai import (
     Agent,
     AgentRunResultEvent,
@@ -562,6 +564,8 @@ class AgentRunner:
                 compacted = task.result()
             except SummaryUnavailable as exc:
                 reason = exc.reason
+                state.telemetry.summary_failed = True
+                state.telemetry.failure = reason
                 await state.finish_compaction(
                     "timed_out" if reason == "summary_timeout" else "failed",
                     reason,
@@ -576,7 +580,6 @@ class AgentRunner:
                 no_reduction_reasons = {
                     "no_new_summary_content",
                     "summary_not_applied",
-                    "target_not_met",
                 }
                 status_name = (
                     "noop"
@@ -598,11 +601,12 @@ class AgentRunner:
                     target_tokens=target_tokens,
                 )
                 return
-            except asyncio.CancelledError:
-                await state.finish_compaction("cancelled", "cancelled")
-                task.cancel()
-                with suppress(asyncio.CancelledError):
-                    await task
+            except (asyncio.CancelledError, GeneratorExit):
+                with anyio.CancelScope(shield=True):
+                    task.cancel()
+                    with suppress(asyncio.CancelledError, SummaryUnavailable, RunCancelled):
+                        await task
+                    await state.finish_compaction("cancelled", "cancelled")
                 raise
             except Exception as exc:  # provider errors must preserve the prior surface
                 await state.finish_compaction("failed", type(exc).__name__)
@@ -617,12 +621,22 @@ class AgentRunner:
                 )
                 return
             finally:
+                if not task.done():
+                    task.cancel()
+                    with anyio.CancelScope(shield=True):
+                        with suppress(asyncio.CancelledError):
+                            await task
                 if queue_task is not None and not queue_task.done():
                     queue_task.cancel()
                     with suppress(asyncio.CancelledError):
                         await queue_task
 
-            current_raw = await raw_reader(session_id, agent_id=deps.agent_id)
+            try:
+                current_raw = await raw_reader(session_id, agent_id=deps.agent_id)
+            except asyncio.CancelledError:
+                with anyio.CancelScope(shield=True):
+                    await state.finish_compaction("cancelled", "cancelled")
+                raise
             if _history_hash(current_raw) != original_hash:
                 await state.finish_compaction("stale", "source_history_changed")
                 while not event_queue.empty():
@@ -635,28 +649,31 @@ class AgentRunner:
                     target_tokens=target_tokens,
                 )
                 return
-            yield {
-                "type": "context_compaction_progress",
-                "persisted": False,
-                "event_id": state.compaction_event_id,
-                "phase": "committing",
-                "mode": "manual",
-                "message": "正在保存压缩事件…",
-            }
             try:
+                yield {
+                    "type": "context_compaction_progress",
+                    "persisted": False,
+                    "event_id": state.compaction_event_id,
+                    "phase": "committing",
+                    "mode": "manual",
+                    "message": "正在保存压缩事件…",
+                }
                 event = await self._persist_compaction(
                     session_id, deps, raw_history=raw, projected_history=compacted,
                     trigger="manual",
                     started_at=state.compaction_started_at or started_at,
                     target_tokens=target_tokens,
                 )
-            except asyncio.CancelledError:
-                await state.finish_compaction("cancelled", "cancelled")
-                while not event_queue.empty():
-                    yield event_queue.get_nowait()
+            except (asyncio.CancelledError, GeneratorExit):
+                with anyio.CancelScope(shield=True):
+                    await state.finish_compaction("cancelled", "cancelled")
                 raise
             except Exception as exc:
-                error_code = type(exc).__name__
+                error_code = exc.reason if isinstance(exc, SummaryUnavailable) else type(exc).__name__
+                state.telemetry.estimated_tokens_after = state.telemetry.estimated_tokens_before
+                state.telemetry.summary_applied = False
+                state.telemetry.target_met = False
+                state.telemetry.reduction_ratio = 0.0
                 logger.warning(
                     "Manual context compaction Event save failed for {}/{}: {}",
                     deps.agent_id,
@@ -896,6 +913,8 @@ class AgentRunner:
                     0, round((time.perf_counter() - started_at) * 1_000)
                 ),
                 "error": {"code": error} if error else None,
+                "budget": state.telemetry.as_dict(),
+                "summary_call": state.summary_call,
             }
             return await self.store.update_lifecycle(
                 event_id, status=status, payload=terminal_payload
@@ -992,6 +1011,23 @@ class AgentRunner:
             for message in projected_history
             if not summary_contents([message])
         ]
+        def validate_persisted_projection(candidate: list[ModelMessage]) -> int:
+            tokens = self._estimator.messages(candidate)
+            state = deps.context_state
+            overhead = max(0, (
+                state.telemetry.estimated_tokens_after
+                - self._estimator.messages(projected_history)
+            )) if state is not None else 0
+            request_tokens = tokens + overhead
+            if state is not None:
+                state.telemetry.candidate_tokens = request_tokens
+            if request_tokens > target_tokens:
+                raise SummaryUnavailable("persisted_target_not_met")
+            if state is not None:
+                state.telemetry.estimated_tokens_after = request_tokens
+                state.telemetry.reduction_ratio = max(0.0, 1 - request_tokens / max(1, state.telemetry.estimated_tokens_before))
+            return tokens
+
         return await persist(
             session_id,
             agent_id=deps.agent_id,
@@ -1004,6 +1040,7 @@ class AgentRunner:
             estimated_before=self._estimator.messages(raw_history),
             estimated_after=self._estimator.messages(projected_history),
             target_tokens=target_tokens,
+            validate_projection=validate_persisted_projection,
             context_window_tokens=self._context_window_tokens,
             preserved_tail_tokens=self._estimator.messages(preserved_tail),
             duration_ms=max(0, round((time.perf_counter() - started_at) * 1_000)),
@@ -2068,22 +2105,38 @@ class AgentRunner:
                 await self._cancel_title_task(title_task)
                 return
             finally:
+                cancelled_run_event = None
                 if cancelled_run is not None and not run_published:
                     cancelled_messages = mark_cancelled_response_interrupted(
                         cancelled_run.new_messages()
                     )
-                    try:
-                        await self._attach_final_plan_snapshot(cancelled_messages, deps)
-                    except Exception as exc:
-                        logger.warning("Cancelled plan snapshot unavailable: {}", type(exc).__name__)
-                    self._publish_run_cancelled(
-                        persister,
-                        session_id,
-                        deps,
-                        pre_persisted_user=prepared.pre_persisted_user,
-                        official_messages=cancelled_messages,
-                        result_queue=session_events,
-                    )
+                    # Transport cancellation re-raises before the normal cancelled
+                    # SSE path below. Close its durable lifecycle here as well,
+                    # even when the Provider has not emitted a first response.
+                    # Shield from the SSE transport's level-triggered cancel scope;
+                    # terminal writes still have their own bounded timeout.
+                    with anyio.CancelScope(shield=True):
+                        try:
+                            await self._attach_final_plan_snapshot(cancelled_messages, deps)
+                        except Exception as exc:
+                            logger.warning("Cancelled plan snapshot unavailable: {}", type(exc).__name__)
+                        self._publish_run_cancelled(
+                            persister,
+                            session_id,
+                            deps,
+                            pre_persisted_user=prepared.pre_persisted_user,
+                            official_messages=cancelled_messages,
+                            result_queue=session_events,
+                        )
+                        durable_messages = incremental_append_messages(
+                            cancelled_messages,
+                            skip_user_prompt=prepared.pre_persisted_user,
+                        )
+                        if not any(isinstance(item, ModelResponse) for item in durable_messages):
+                            cancelled_run_event = await self._finish_run_event(
+                                run_event, status="cancelled", started_at=started_at,
+                                usage=cancelled_run.usage,
+                            )
                 self._active_runs.unregister(active_run)
 
         if cancelled_run is not None:
@@ -2114,10 +2167,11 @@ class AgentRunner:
                     removed,
                     self.tool_display_names,
                 )
-            cancelled_run_event = await self._finish_run_event(
-                run_event, status="cancelled", started_at=started_at,
-                usage=cancelled_run.usage,
-            )
+            if cancelled_run_event is None:
+                cancelled_run_event = await self._finish_run_event(
+                    run_event, status="cancelled", started_at=started_at,
+                    usage=cancelled_run.usage,
+                )
             if cancelled_run_event is not None:
                 yield {
                     "type": "session_event_updated",
@@ -2402,6 +2456,10 @@ def _manual_compaction_result(
         "reduction_ratio": telemetry.get("reduction_ratio", 0.0),
         "summary_calls": telemetry.get("summary_calls", 0),
         "summary_chunks": telemetry.get("summary_chunks", 0),
+        "candidate_tokens": telemetry.get("candidate_tokens"),
+        "retained_tail_tokens": telemetry.get("retained_tail_tokens"),
+        "evidence_tokens": telemetry.get("evidence_tokens"),
+        "summary_tokens": telemetry.get("summary_tokens"),
         "usage": _run_usage_dict(usage),
         "compaction_event": compaction_event,
         "conversation_id": conversation_id,

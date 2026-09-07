@@ -14,6 +14,7 @@ from pydantic_ai.usage import RunUsage
 
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.skills.resource_reader import (
+    SkillResourceReadError,
     present_resource_entry,
     read_resource_page,
 )
@@ -54,6 +55,37 @@ def _entry(path: str, *, category: str = "asset", readable: bool = False) -> dic
 
 
 class SkillResourceReadingTests(unittest.IsolatedAsyncioTestCase):
+    def test_long_text_resource_has_lossless_character_cursor(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="TMP_to_delete-skill-cursor-") as tmpdir:
+            target = Path(tmpdir) / "guide.md"
+            original = "说明🙂" * 20_000
+            target.write_text(original, encoding="utf-8")
+            entry = _entry("guide.md", category="reference", readable=True)
+            first = read_resource_page(entry, target)
+            last = read_resource_page(entry, target, offset=first.next_offset,
+                                      char_offset=first.next_char_offset)
+        self.assertEqual((first.next_offset, first.next_char_offset), (1, 50_000))
+        self.assertEqual(first.content + last.content, original)
+        self.assertEqual(last.char_offset, 50_000)
+        self.assertIsNone(last.next_char_offset)
+        self.assertFalse(last.has_more)
+
+    def test_office_character_cursor_is_forwarded_and_validated(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="TMP_to_delete-skill-cursor-") as tmpdir:
+            for filename, raw, expected in (("guide.docx", _docx_bytes(), "一段"),
+                                            ("data.xlsx", _xlsx_bytes(), "称,值")):
+                with self.subTest(filename=filename):
+                    target = Path(tmpdir) / filename
+                    target.write_bytes(raw)
+                    page = read_resource_page(_entry(filename), target, limit=1, char_offset=1)
+                    self.assertEqual(page.content, expected)
+                    self.assertEqual(page.char_offset, 1)
+                    self.assertEqual((page.next_offset, page.next_char_offset), (2, 0))
+                    for char_offset in (-1, 50_001):
+                        with self.assertRaises(SkillResourceReadError) as raised:
+                            read_resource_page(_entry(filename), target, char_offset=char_offset)
+                        self.assertTrue(raised.exception.correctable)
+
     def test_text_uses_one_based_line_pagination(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "guide.md"

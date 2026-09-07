@@ -414,6 +414,10 @@ Plan表、隐藏全局计划、Reminder用户消息或自研任务状态机。
 Skill路径必须属于当前 Agent已选择且运行目录就绪的资源索引。字节和解析结果只缓存到
 本次用户消息对应的完整 Run终态，不跨Run、进程或数据库保存。
 
+文件分页文本默认/最大1000/4000行，Office为200/1000项，正文上限仍50,000字符。
+`has_more`时必须同时将`next_offset/next_char_offset`作为`offset/char_offset`续读；后者是项内
+Unicode字符位置，部分项不向后跳号、不加省略标记。不能用returned_count推导游标。
+
 图片、音频和视频不进入 `read_file`。当前轮媒体附件直接作为原生多模态内容交给Provider；
 `llm_models.input_modalities`用于目录和管理员说明，不在DeepAgent本地建立第二层拒绝判断，所选模型
 不接受时由Provider正常返回错误。历史媒体和Skill媒体不读取。PDF和PPT/PPTX若未来需要读取，
@@ -428,6 +432,12 @@ Skill路径必须属于当前 Agent已选择且运行目录就绪的资源索引
 
 ### 大工具结果
 
+正文大小治理前不得使用审计摘要替换正式结果：PTC最终返回使用完整递归脱敏投影，
+仅nested audit保留4K字符串/32项/4层和32,768字符总预览限制。Web Fetch取消50K字符提前截断，
+保留5MiB下载安全上限，完整正文交给以下Token治理与回读，不创建第二套网页Store。
+XLSX单元格不按4K字符截断；全工作簿解析正文最多8,000,000字符，超出明确失败，
+防止sharedStrings重复展开；文件metadata仅为8K字符内的sheet/header预览，完整首行仍按游标读取。
+
 普通Function、MCP、Sandbox和MCP Resource工具的返回在进入模型历史前经过Harness
 `ToolOutputLimits`。阈值为模型配置窗口减去最大输出后的20%，并限制在4K～48K Token；没有有效窗口时使用
 24K。这不是当前会话剩余空间；长文档仍应分页，压缩时的工具裁剪阈值不随之放大。达到阈值时，完整UTF-8结果上传为平台 `DL` 文件，历史只保存受限预览和
@@ -437,11 +447,22 @@ Skill路径必须属于当前 Agent已选择且运行目录就绪的资源索引
 用于`read_tool_result`按记录分页和关键词筛选；顶层Mapping使用缩进JSON，不猜测业务字段。
 未达到Spill阈值的结果继续保持原对象。
 
+回读通过DeepAgent的公开`get_toolset()`覆盖同名`read_tool_result`，不patch安装包。
+默认/最大400/2000行，正文50,000字符；原handle授权、字面pattern和from_end保留。
+结构化结果的`next_read`给出完整续读参数（0-based行offset、char_offset、end_offset），
+尾窗截断先正向续读该窗口，随后用首次返回的`previous_read`选择更早窗口。文件压缩去重键
+必须包含char_offset，工具结果还要包含end_offset，不能把不同片段误当重复读取。
+
 平台File ID就是当前会话的`artifact_id`，不增加Artifact表。新Run只从当前会话完整原始Tool Result
 Event索引允许的句柄；摘要Evidence不能作为授权事实源。同一Run回读复用`AgentDeps.file_bytes`并使用
 single-flight。Spill失败时Event保存完整`inline_fallback`并标记失败，模型只接收受限投影；取消原样传播。
 
 ### Python Sandbox
+
+结果传输上限仍512KiB，DataFrame/Series/ndarray保留前10行或项预览，但必须通过
+`is_preview/returned_count/total_count`和`truncated.result`明确告知不完整。字节超限返回
+`reason=byte_limit`的结构化预览，不再把repr伪装为完整结果。完整数据须由同次执行显式写入
+`publish_path`，沿用成功后FileStore上传与会话文件授权；不自动重跑脚本、不自动保存大中间数据。
 
 `execute_python` 属于 `builtin:sandbox`，与时间工具分开整包选择；新Agent不会自动关联。v0.3.22 的
 `execute_skill_script` 复用同一 Backend，但只接受已索引的 UTF-8 `.py`、JSON inputs、显式参数和

@@ -63,6 +63,11 @@ test("Skill 上传使用 multipart 且资源按安全 API 读取", () => {
   assert.doesNotMatch(source, /已保存，当前不可读取或执行/);
 });
 
+test("Skill 预览续读提示包含行号和行内字符位置", () => {
+  assert.match(source, /offset=\$\{escapeHtml\(page\.next_offset\)\}/);
+  assert.match(source, /char_offset=\$\{escapeHtml\(page\.next_char_offset \?\? 0\)\}/);
+});
+
 test("Skill Markdown 资源复用对话渲染器，其他文本保持原文预览", () => {
   assert.match(source, /const isMarkdown = \/\\\.md\$\/i\.test\(path\)/);
   assert.match(source, /window\.DeepAgentMarkdown\?\.renderBody\(markdownDocument\?\.body \?\? page\.content\)/);

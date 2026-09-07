@@ -12,6 +12,7 @@ from deep_agent.agent.attachment_extractors import (
     select_xlsx_sheet,
     text_document,
     xlsx_workbook,
+    xlsx_sheet_metadata,
 )
 from deep_agent.skills.package import READABLE_SUFFIXES
 
@@ -41,6 +42,8 @@ class SkillResourcePage:
     returned_count: int
     total_count: int
     truncated_by: str | None
+    char_offset: int = 0
+    next_char_offset: int | None = None
 
 
 def resource_format(entry: dict[str, Any]) -> SkillResourceFormat | None:
@@ -88,7 +91,9 @@ def _read_bytes(path: Path) -> bytes:
         ) from exc
 
 
-def _text_page(path: Path, *, offset: int | None, limit: int | None) -> SkillResourcePage:
+def _text_page(
+    path: Path, *, offset: int | None, limit: int | None, char_offset: int = 0,
+) -> SkillResourcePage:
     try:
         resolved_offset, resolved_limit = normalize_range(
             offset=offset,
@@ -111,6 +116,7 @@ def _text_page(path: Path, *, offset: int | None, limit: int | None) -> SkillRes
         total_count=len(lines),
         offset=resolved_offset,
         limit=resolved_limit,
+        char_offset=char_offset,
     )
     return SkillResourcePage(
         format="text",
@@ -123,6 +129,8 @@ def _text_page(path: Path, *, offset: int | None, limit: int | None) -> SkillRes
         returned_count=page.returned_count,
         total_count=len(lines),
         truncated_by=page.truncated_by,
+        char_offset=char_offset,
+        next_char_offset=page.next_char_offset,
     )
 
 
@@ -138,7 +146,9 @@ def _office_range(offset: int | None, limit: int | None) -> tuple[int, int]:
         raise SkillResourceReadError(str(exc), correctable=True) from exc
 
 
-def _docx_page(path: Path, *, offset: int | None, limit: int | None) -> SkillResourcePage:
+def _docx_page(
+    path: Path, *, offset: int | None, limit: int | None, char_offset: int = 0,
+) -> SkillResourcePage:
     resolved_offset, resolved_limit = _office_range(offset, limit)
     try:
         document = docx_document(_read_bytes(path))
@@ -149,6 +159,7 @@ def _docx_page(path: Path, *, offset: int | None, limit: int | None) -> SkillRes
         total_count=len(document.blocks),
         offset=resolved_offset,
         limit=resolved_limit,
+        char_offset=char_offset,
     )
     return SkillResourcePage(
         format="docx",
@@ -161,6 +172,8 @@ def _docx_page(path: Path, *, offset: int | None, limit: int | None) -> SkillRes
         returned_count=page.returned_count,
         total_count=len(document.blocks),
         truncated_by=page.truncated_by,
+        char_offset=char_offset,
+        next_char_offset=page.next_char_offset,
     )
 
 
@@ -170,6 +183,7 @@ def _xlsx_page(
     offset: int | None,
     limit: int | None,
     sheet: str | None,
+    char_offset: int = 0,
 ) -> SkillResourcePage:
     resolved_offset, resolved_limit = _office_range(offset, limit)
     try:
@@ -185,31 +199,21 @@ def _xlsx_page(
         total_count=len(selected.rows),
         offset=resolved_offset,
         limit=resolved_limit,
+        char_offset=char_offset,
     )
     return SkillResourcePage(
         format="xlsx",
         unit="row",
         content=page.content,
-        metadata={
-            "selected_sheet": selected.name,
-            "sheets": [
-                {
-                    "name": item.name,
-                    "state": item.state,
-                    "rows": len(item.rows),
-                    "columns": item.columns,
-                    "headers": list(item.headers),
-                }
-                for item in workbook.sheets
-            ],
-            "formula_mode": "cached_values_only",
-        },
+        metadata=xlsx_sheet_metadata(workbook, selected),
         offset=resolved_offset,
         next_offset=page.next_offset,
         has_more=page.has_more,
         returned_count=page.returned_count,
         total_count=len(selected.rows),
         truncated_by=page.truncated_by,
+        char_offset=char_offset,
+        next_char_offset=page.next_char_offset,
     )
 
 
@@ -220,6 +224,7 @@ def read_resource_page(
     offset: int | None = None,
     limit: int | None = None,
     sheet: str | None = None,
+    char_offset: int = 0,
 ) -> SkillResourcePage:
     kind = resource_format(entry)
     if kind is None:
@@ -229,8 +234,11 @@ def read_resource_page(
         )
     if sheet is not None and kind != "xlsx":
         raise SkillResourceReadError("sheet is only valid for XLSX resources", correctable=True)
-    if kind == "text":
-        return _text_page(path, offset=offset, limit=limit)
-    if kind == "docx":
-        return _docx_page(path, offset=offset, limit=limit)
-    return _xlsx_page(path, offset=offset, limit=limit, sheet=sheet)
+    try:
+        if kind == "text":
+            return _text_page(path, offset=offset, limit=limit, char_offset=char_offset)
+        if kind == "docx":
+            return _docx_page(path, offset=offset, limit=limit, char_offset=char_offset)
+        return _xlsx_page(path, offset=offset, limit=limit, sheet=sheet, char_offset=char_offset)
+    except AttachmentParseError as exc:
+        raise SkillResourceReadError(str(exc), correctable=True) from exc

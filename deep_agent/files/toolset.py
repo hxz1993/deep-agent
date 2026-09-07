@@ -21,6 +21,7 @@ from deep_agent.agent.attachment_extractors import (
     select_xlsx_sheet,
     text_document,
     xlsx_workbook,
+    xlsx_sheet_metadata,
 )
 from deep_agent.agent.attachments import AttachmentDownloadError, _download_file
 from deep_agent.agent.deps import AgentDeps
@@ -53,10 +54,10 @@ _TEXT_MIMES = frozenset(
 _DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 _XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
-_TEXT_DEFAULT_LIMIT = 500
-_TEXT_MAX_LIMIT = 2_000
-_OFFICE_DEFAULT_LIMIT = 100
-_OFFICE_MAX_LIMIT = 500
+_TEXT_DEFAULT_LIMIT = 1_000
+_TEXT_MAX_LIMIT = 4_000
+_OFFICE_DEFAULT_LIMIT = 200
+_OFFICE_MAX_LIMIT = 1_000
 
 T = TypeVar("T")
 _RESOURCE_ADAPTER = TypeAdapter(FileResourceRef)
@@ -310,6 +311,8 @@ def _result(
     has_more: bool,
     truncated_by: str | None,
     content_hash: str,
+    char_offset: int,
+    next_char_offset: int | None,
 ) -> FileReadResult:
     return FileReadResult(
         source=resolved.source,
@@ -321,10 +324,12 @@ def _result(
         content=content,
         metadata=metadata,
         offset=offset,
+        char_offset=char_offset,
         limit=limit,
         returned_count=returned_count,
         total_count=total_count,
         next_offset=next_offset,
+        next_char_offset=next_char_offset,
         has_more=has_more,
         truncated_by=truncated_by,
         content_hash=content_hash,
@@ -340,6 +345,7 @@ async def _read_paged(
     limit: int | None,
     sheet: str | None,
     content_hash: str,
+    char_offset: int,
 ) -> FileReadResult:
     if resolved.format == "text":
         if sheet is not None:
@@ -361,6 +367,7 @@ async def _read_paged(
             total_count=len(lines),
             offset=start,
             limit=page_limit,
+            char_offset=char_offset,
         )
         return _result(
             resolved,
@@ -375,6 +382,8 @@ async def _read_paged(
             has_more=page.has_more,
             truncated_by=page.truncated_by,
             content_hash=content_hash,
+            char_offset=char_offset,
+            next_char_offset=page.next_char_offset,
         )
 
     if resolved.format == "docx":
@@ -397,6 +406,7 @@ async def _read_paged(
             total_count=len(document.blocks),
             offset=start,
             limit=page_limit,
+            char_offset=char_offset,
         )
         result = _result(
             resolved,
@@ -411,6 +421,8 @@ async def _read_paged(
             has_more=page.has_more,
             truncated_by=page.truncated_by,
             content_hash=content_hash,
+            char_offset=char_offset,
+            next_char_offset=page.next_char_offset,
         )
         return result
 
@@ -435,25 +447,13 @@ async def _read_paged(
         total_count=len(selected.rows),
         offset=start,
         limit=page_limit,
+        char_offset=char_offset,
     )
     return _result(
         resolved,
         unit="row",
         content=page.content,
-        metadata={
-            "selected_sheet": selected.name,
-            "sheets": [
-                {
-                    "name": item.name,
-                    "state": item.state,
-                    "rows": len(item.rows),
-                    "columns": item.columns,
-                    "headers": list(item.headers),
-                }
-                for item in workbook.sheets
-            ],
-            "formula_mode": "cached_values_only",
-        },
+        metadata=xlsx_sheet_metadata(workbook, selected),
         offset=start,
         limit=page_limit,
         returned_count=page.returned_count,
@@ -462,6 +462,8 @@ async def _read_paged(
         has_more=page.has_more,
         truncated_by=page.truncated_by,
         content_hash=content_hash,
+        char_offset=char_offset,
+        next_char_offset=page.next_char_offset,
     )
 
 
@@ -474,7 +476,8 @@ def build_file_toolset(
         instructions=(
             "read_file统一读取当前会话附件和已授权Skill文件。先使用来源提供的精确file_id，"
             "或先调用list_skill_resources取得Skill路径。首次通常只传resource；若has_more=true，"
-            "使用next_offset继续读取。不要猜测file_id、Skill编码或路径，脚本不能作为文件正文读取。"
+            "把next_offset和next_char_offset分别作为offset和char_offset继续读取；"
+            "长行/段落可能分多页，必须同时传两个续读值。不要猜测file_id、Skill编码或路径，脚本不能作为文件正文读取。"
         ),
     )
 
@@ -485,8 +488,17 @@ def build_file_toolset(
         offset: int | None = None,
         limit: int | None = None,
         sheet: str | None = None,
+        char_offset: int = 0,
     ) -> FileReadResult:
-        """按需读取当前会话附件或已授权 Skill 文件；有下一页时使用 next_offset 继续。"""
+        """按需读取附件或 Skill 文件；有下一页时同时使用 next_offset/next_char_offset 续读。
+
+        Args:
+            resource: 当前会话附件或已授权 Skill 文件引用。
+            offset: 起始行、段或行号，从 1 开始。
+            limit: 文本默认 1000、最多 4000 行；Office 默认 200、最多 1000 项。
+            sheet: XLSX 工作表名，省略时读取第一个可见工作表。
+            char_offset: 当前 offset 项内部的字符偏移，从 0 开始；续读时使用 next_char_offset。
+        """
         resolved = await _resolve_file(ctx, resource, authorized)
         data = await _load_cached(
             ctx,
@@ -497,15 +509,19 @@ def build_file_toolset(
             expected_hash=resolved.content_hash,
         )
         content_hash = resolved.content_hash or hashlib.sha256(data).hexdigest()
-        return await _read_paged(
-            ctx,
-            resolved,
-            data=data,
-            offset=offset,
-            limit=limit,
-            sheet=sheet,
-            content_hash=content_hash,
-        )
+        try:
+            return await _read_paged(
+                ctx,
+                resolved,
+                data=data,
+                offset=offset,
+                limit=limit,
+                sheet=sheet,
+                content_hash=content_hash,
+                char_offset=char_offset,
+            )
+        except AttachmentParseError as exc:
+            raise ModelRetry(str(exc)) from exc
 
     async def prepare(ctx: RunContext[AgentDeps], tools: dict[str, Any]) -> dict[str, Any]:
         if _has_readable_attachment(ctx) or has_readable_skill_resources(authorized):

@@ -7,7 +7,7 @@ import json
 from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
 
-from pydantic_ai import RunContext, ToolReturn
+from pydantic_ai import FunctionToolset, RunContext, ToolReturn
 from pydantic_ai.messages import ModelMessage, ModelRequest, ToolReturnPart
 from pydantic_ai.tools import ToolDefinition
 from pydantic_ai_harness.tool_output_limits import (
@@ -24,6 +24,7 @@ from deep_agent.agent.context.estimator import TokenEstimator
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.observability import log_event
 from deep_agent.files.storage import FileStore, PlatformFileStore
+from deep_agent.files.tool_result_reader import TOOL_RESULT_DEFAULT_LINES, read_stored_tool_result
 from deepfos_platform.client.platform import FILE_TYPE_ATTACHMENT
 
 TOOL_OUTPUT_MIN_TOKENS = 4_000
@@ -376,6 +377,43 @@ class PlatformToolResultStore(OverflowStore):
 
 class DeepAgentToolOutputLimits(ToolOutputLimits[AgentDeps]):
     """Preserve a complete Event-only fallback when platform spill fails."""
+
+    def get_toolset(self) -> FunctionToolset[AgentDeps]:
+        # Use the public capability extension point, not SDK globals/private readers.
+        store = self.store
+        assert store is not None
+
+        async def read_tool_result(
+            ctx: RunContext[AgentDeps],
+            handle: str,
+            offset: int = 0,
+            limit: int = TOOL_RESULT_DEFAULT_LINES,
+            from_end: bool = False,
+            pattern: str | None = None,
+            char_offset: int = 0,
+            end_offset: int | None = None,
+        ) -> dict[str, Any]:
+            """Read an authorized spilled result, up to 400 lines by default (max 2000).
+
+            Args:
+                handle: Exact overflow handle from the original tool result.
+                offset: Zero-based count of matching lines to skip.
+                limit: Maximum lines; the body is also limited to 50000 characters.
+                from_end: Select a tail window, retaining document order.
+                pattern: Literal substring filter, not a regular expression.
+                char_offset: Zero-based character position within the first selected line.
+                end_offset: Exclusive forward boundary, copied from next_read only.
+
+            Call with the returned next_read arguments to continue without losing a
+            partial line. For tail reads, finish next_read first; previous_read selects
+            an older window. Changing the filter starts a new pagination sequence.
+            """
+            return await read_stored_tool_result(
+                store, handle, offset=offset, limit=limit, from_end=from_end,
+                pattern=pattern, char_offset=char_offset, end_offset=end_offset,
+            )
+
+        return FunctionToolset([read_tool_result])
 
     async def after_tool_execute(
         self,

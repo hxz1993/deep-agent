@@ -16,6 +16,12 @@ from deep_agent.sandbox.types import MAX_RESULT_BYTES
 MAX_PREVIEW_ROWS = 10
 _MAX_REPR_CHARS = 4_096
 _MAX_BYTES_REPR = 256
+RESULT_PREVIEW_GUIDANCE = (
+    "This is only a result preview, not the full data. For complete output, write "
+    "the data to publish_path(file_name, mime=...) in the same execution and use "
+    "the returned files/file_id for subsequent reading. Do not use print for full "
+    "data or repeat an execution with side effects merely to recover a preview."
+)
 
 
 def truncate_utf8(text: str, max_bytes: int) -> tuple[str, bool]:
@@ -231,6 +237,7 @@ def _preview_dataframe(df: Any) -> dict[str, Any]:
         "columns": [str(column) for column in df.columns],
         "dtypes": {str(column): str(dtype) for column, dtype in df.dtypes.items()},
         "records": records,
+        **_preview_metadata(len(df), len(records)),
     }
 
 
@@ -246,11 +253,12 @@ def _preview_series(series: Any) -> dict[str, Any]:
         "length": int(len(series)),
         "dtype": str(series.dtype),
         "records": records,
+        **_preview_metadata(len(series), len(records)),
     }
 
 
 def _preview_ndarray(arr: Any) -> dict[str, Any]:
-    flat = arr.flatten()
+    flat = arr.flat
     head_count = min(len(flat), MAX_PREVIEW_ROWS)
     values = [to_json_value(flat[i]) for i in range(head_count)]
     return {
@@ -258,6 +266,16 @@ def _preview_ndarray(arr: Any) -> dict[str, Any]:
         "shape": list(arr.shape),
         "dtype": str(arr.dtype),
         "values": values,
+        **_preview_metadata(int(arr.size), head_count),
+    }
+
+
+def _preview_metadata(total: int, returned: int) -> dict[str, Any]:
+    return {
+        "is_preview": returned < total,
+        "returned_count": returned,
+        "total_count": total,
+        **({"guidance": RESULT_PREVIEW_GUIDANCE} if returned < total else {}),
     }
 
 
@@ -354,13 +372,15 @@ def serialize_result(value: Any) -> tuple[Any, bool]:
         serialized = to_json_value(value)
 
     if _json_byte_length(serialized) <= MAX_RESULT_BYTES:
-        return serialized, False
+        return serialized, bool(preview is not None and preview["is_preview"])
 
-    fallback = truncate_utf8(repr_value(value), MAX_RESULT_BYTES)[0]
-    if _json_byte_length(fallback) <= MAX_RESULT_BYTES:
-        return fallback, True
-
-    return truncate_utf8(
-        json.dumps(fallback, ensure_ascii=False, separators=(",", ":")),
-        MAX_RESULT_BYTES,
-    )[0], True
+    # The transport stays bounded. Never present the lossy repr as a complete
+    # result; explicit publish_path outputs are collected separately by the host.
+    return {
+        "kind": "result_preview",
+        "is_preview": True,
+        "reason": "byte_limit",
+        "full_result_saved_automatically": False,
+        "preview": repr_value(value),
+        "guidance": RESULT_PREVIEW_GUIDANCE,
+    }, True

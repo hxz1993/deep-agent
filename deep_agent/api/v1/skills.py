@@ -576,6 +576,7 @@ async def read_skill_resource(
     offset: int | None = None,
     limit: int | None = None,
     sheet: str | None = None,
+    char_offset: int = 0,
 ) -> SkillResourceContent:
     root, index = await _resource_root(code, request, ctx)
     entry = next((item for item in index if item.get("path") == path and item.get("category") != "script"), None)
@@ -608,6 +609,7 @@ async def read_skill_resource(
             offset=offset,
             limit=limit,
             sheet=sheet,
+            char_offset=char_offset,
         )
     except SkillResourceReadError as exc:
         raise HTTPException(
@@ -622,7 +624,9 @@ async def read_skill_resource(
         content=page.content,
         metadata=page.metadata,
         offset=page.offset,
+        char_offset=page.char_offset,
         next_offset=page.next_offset,
+        next_char_offset=page.next_char_offset,
         has_more=page.has_more,
         returned_count=page.returned_count,
         total_count=page.total_count,

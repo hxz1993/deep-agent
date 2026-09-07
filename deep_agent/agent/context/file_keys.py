@@ -24,7 +24,8 @@ def deep_agent_file_key(call: ToolCallPart) -> str | None:
             return None
         return (
             f"file:{source}:{identity}:{args.get('sheet') or ''}:"
-            f"{args.get('offset') or 1}:{args.get('limit') or ''}"
+            f"{args.get('offset') or 1}:{args.get('limit') or ''}:"
+            f"{args.get('char_offset') or 0}"
         )
     # History created before v0.3.23 can still contain the retired attachment
     # tool names.  Keep recognizing their pagination keys during compaction,
@@ -53,7 +54,8 @@ def deep_agent_file_key(call: ToolCallPart) -> str | None:
             return None
         return (
             f"tool-result:{handle}:{args.get('offset') or 0}:"
-            f"{args.get('limit') or 200}:{bool(args.get('from_end', False))}:"
-            f"{args.get('pattern') or ''}"
+            f"{args.get('limit') or ''}:{bool(args.get('from_end', False))}:"
+            f"{args.get('pattern') or ''}:{args.get('char_offset') or 0}:"
+            f"{args.get('end_offset')}"
         )
     return None

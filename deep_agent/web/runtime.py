@@ -152,6 +152,13 @@ def _fetch_transport_failure(exc: BaseException) -> str | None:
     if any(_is_tls_certificate_failure(cause) for cause in chain):
         return "Web Fetch could not verify the public page TLS certificate"
     for cause in chain:
+        # Pinned pydantic-ai 2.35.1 safe_download uses this precise ValueError
+        # contract for wire/decoded size overflow. Other ValueErrors (including
+        # invalid URLs and SSRF checks) remain correctable ModelRetry failures.
+        if isinstance(cause, ValueError) and re.fullmatch(
+            r"Download exceeds the maximum size of [0-9]+ bytes\.", str(cause)
+        ):
+            return "Web Fetch download exceeds the configured maximum size; use a smaller source"
         if isinstance(cause, (httpx2.TimeoutException, TimeoutError)):
             return "Web Fetch timed out while connecting to the public page"
         if isinstance(cause, httpx2.HTTPStatusError):
@@ -300,7 +307,10 @@ def web_fetch_tool(
 
 def _web_fetch_tool() -> Tool[Any]:
     upstream = web_fetch_tool(
-        max_content_length=50_000,
+        # Keep the complete safety-bounded body for the shared token-based
+        # ToolOutputLimits/Spill path. Cutting here loses the tail permanently,
+        # before read_tool_result can provide resumable access to it.
+        max_content_length=None,
         allow_local_urls=False,
         timeout=_WEB_FETCH_ATTEMPT_TIMEOUT_SECONDS,
         max_download_bytes=5 * 1024 * 1024,

@@ -881,6 +881,14 @@ Harness在估算大小达到阈值时转存，未达到则保留原对象；该�
 第一版只解决安全兜底，不把它扩成通用文件或Artifact平台：
 
 - Store仅适配现有平台文件服务，不使用Harness默认本地文件Store。
+- 回读由DeepAgent通过公开`get_toolset()`扩展点提供同名`read_tool_result`，不改Harness安装包，
+  Spill与Store授权/缓存继续复用原实现。默认400行，最多2,000行，单页正文仍最多50,000字符。
+  返回结构化`content/returned_count/has_more/truncated_by/next_read`；`next_read`是下一次调用的
+  完整参数，包含0-based行`offset`及该行内Unicode字符`char_offset`。超长行分段时不跳过后缀，
+  完整JSONL记录能放到下一页时不切开；分页片段本身不保证是完整JSON，应读齐再解析。
+  `pattern`仍为字面子串，游标相对于筛选后的行集，改筛选条件需重开分页。
+  `from_end`保留尾窗内原文顺序；`next_read`通过排他`end_offset`边界正向读完被截断的尾窗，
+  首次尾窗返回的`previous_read`用于继续读更早窗口。两者不是同一个方向，不得混用游标。
 - 使用Harness原生`json_lines` Serializer：顶层Sequence在Artifact中每项一行，
   `read_tool_result(offset, limit, pattern)`可按记录分页并返回整条命中记录；顶层Mapping继续保留
   完整嵌套结构并使用缩进JSON，不猜测`rows/data/items`等业务字段。未达到Spill阈值的

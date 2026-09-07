@@ -173,7 +173,10 @@ def format_python_tool_instructions(package_names: tuple[str, ...]) -> str:
         "需要保留的输出必须使用 publish_path(file_name, mime=None) 取得写入路径，"
         "成功执行后宿主会上传并在 files 中返回 file_id。普通临时文件不会上传。"
         "请将正式结果作为最后一行表达式返回到 result；print 仅用于少量 stdout 诊断。"
-        "优先返回 dict/list 等结构化结果，大表返回汇总或必要预览。\n\n"
+        "优先返回 dict/list 等结构化结果，大表返回汇总或必要预览。"
+        "result 超过512 KiB以及表格/数组超过10行或项时只返回标记为不完整的预览；"
+        "完整数据必须在同一次执行中写入 publish_path 返回的路径，再根据 files/file_id 读取。"
+        "不要仅为找回预览遗漏的数据重复执行有副作用的脚本。\n\n"
         "示例：\n"
         "```python\n"
         'values = inputs["values"]\n'

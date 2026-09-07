@@ -424,6 +424,93 @@ def payload_secrets(deps: AgentDeps) -> frozenset[str]:
     return frozenset(secrets)
 
 
+def _redact_result_text(value: str, sensitive_values: frozenset[str]) -> str:
+    for secret in sensitive_values:
+        if secret:
+            value = value.replace(secret, "[file-payload-redacted]")
+    value = _FILE_TOKEN_RE.sub("[file-data-token]", value)
+    value = _BASE64_SEGMENT_RE.sub("[base64-redacted]", value)
+    value = _IDENTITY_CONTEXT_RE.sub("[identity-context-redacted]", value)
+    value = _BEARER_RE.sub("Bearer [redacted]", value)
+    return _SECRET_ASSIGNMENT_RE.sub(r"\1\2[redacted]", value)
+
+
+def _safe_result_text(value: str, sensitive_values: frozenset[str]) -> Any:
+    text = _redact_result_text(value, sensitive_values)
+    if _looks_like_base64(text):
+        return {
+            "type": "base64",
+            "char_count": len(text),
+            "sha256": hashlib.sha256(text.encode("utf-8", errors="replace")).hexdigest(),
+        }
+    return text
+
+
+def safe_result_value(
+    value: Any,
+    *,
+    sensitive_values: frozenset[str] = frozenset(),
+) -> Any:
+    """Redact the final result without applying the smaller audit preview budget.
+
+    ToolOutputLimits owns model-output sizing and full-result spilling. Walk containers
+    iteratively so cyclic values cannot hang and deep JSON does not exhaust our stack.
+    Only cycles on the current path are replaced; repeated references remain intact.
+    """
+    root: list[Any] = [None]
+    active: set[int] = set()
+    pending: list[tuple[Any, Any, Any, bool]] = [(value, root, 0, False)]
+    while pending:
+        current, target, key, exiting = pending.pop()
+        if exiting:
+            active.remove(id(current))
+            continue
+        if isinstance(current, str):
+            target[key] = _safe_result_text(current, sensitive_values)
+        elif current is None or isinstance(current, (bool, int, float)):
+            target[key] = current
+        elif isinstance(current, (bytes, bytearray, memoryview)):
+            target[key] = safe_audit_value(current, sensitive_values=sensitive_values)
+        elif isinstance(current, (dict, list, tuple, set, frozenset)):
+            if id(current) in active:
+                target[key] = {"type": type(current).__name__, "circular": True}
+                continue
+            active.add(id(current))
+            pending.append((current, None, None, True))
+            if isinstance(current, dict):
+                projected: Any = {}
+                target[key] = projected
+                children = []
+                for child_key, child in current.items():
+                    original_key = str(child_key)
+                    safe_key = _safe_result_text(original_key, sensitive_values)
+                    normalized = safe_key if isinstance(safe_key, str) else "[base64-redacted]"
+                    # Different private keys may redact to the same label. Preserve
+                    # their values without reintroducing the original key text.
+                    base_key = normalized
+                    suffix = 1
+                    while normalized in projected:
+                        normalized = f"{base_key} [key-{suffix}]"
+                        suffix += 1
+                    projected[normalized] = None
+                    if original_key.lower() in _SENSITIVE_KEYS:
+                        projected[normalized] = "[redacted]"
+                    else:
+                        children.append((child, projected, normalized, False))
+            else:
+                items = list(current)
+                projected = [None] * len(items)
+                target[key] = projected
+                children = [(child, projected, index, False) for index, child in enumerate(items)]
+            pending.extend(reversed(children))
+        else:
+            target[key] = {
+                "type": type(current).__name__,
+                "value": _safe_result_text(str(current), sensitive_values),
+            }
+    return root[0]
+
+
 def safe_audit_value(
     value: Any,
     *,
@@ -434,14 +521,7 @@ def safe_audit_value(
     if depth > 4:
         return {"type": type(value).__name__, "redacted": True}
     if isinstance(value, str):
-        for secret in sensitive_values:
-            if secret:
-                value = value.replace(secret, "[file-payload-redacted]")
-        value = _FILE_TOKEN_RE.sub("[file-data-token]", value)
-        value = _BASE64_SEGMENT_RE.sub("[base64-redacted]", value)
-        value = _IDENTITY_CONTEXT_RE.sub("[identity-context-redacted]", value)
-        value = _BEARER_RE.sub("Bearer [redacted]", value)
-        value = _SECRET_ASSIGNMENT_RE.sub(r"\1\2[redacted]", value)
+        value = _redact_result_text(value, sensitive_values)
         digest = hashlib.sha256(value.encode("utf-8", errors="replace")).hexdigest()
         if _looks_like_base64(value):
             return {"type": "base64", "char_count": len(value), "sha256": digest}

@@ -187,7 +187,7 @@ class WebFetchSafetyTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertFalse(upstream.function.__self__.allow_local_urls)
         self.assertEqual(upstream.function.__self__.timeout, 30)
-        self.assertEqual(upstream.function.__self__.max_content_length, 50_000)
+        self.assertIsNone(upstream.function.__self__.max_content_length)
         self.assertEqual(upstream.function.__self__.max_download_bytes, 5 * 1024 * 1024)
         self.assertIsNone(upstream.function.__self__.headers)
 

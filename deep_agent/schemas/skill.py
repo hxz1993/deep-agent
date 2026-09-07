@@ -104,7 +104,9 @@ class SkillResourceContent(BaseModel):
     content: str
     metadata: dict = Field(default_factory=dict)
     offset: int
+    char_offset: int = Field(default=0, ge=0)
     next_offset: int | None
+    next_char_offset: int | None = Field(default=None, ge=0)
     has_more: bool
     returned_count: int
     total_count: int

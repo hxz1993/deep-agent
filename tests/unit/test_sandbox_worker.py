@@ -195,6 +195,9 @@ class SandboxWorkerTests(unittest.TestCase):
         self.assertIn("dtypes", result)
         self.assertLessEqual(len(result["records"]), 10)
         self.assertEqual(len(result["records"]), 10)
+        self.assertTrue(response["truncated"]["result"])
+        self.assertTrue(result["is_preview"])
+        self.assertIn("publish_path", result["guidance"])
 
     @unittest.skipUnless(_PANDAS_AVAILABLE, "pandas not installed")
     def test_series_preview(self) -> None:
@@ -206,6 +209,8 @@ class SandboxWorkerTests(unittest.TestCase):
         assert isinstance(result, dict)
         self.assertEqual(result["kind"], "series")
         self.assertEqual(result["name"], "values")
+        self.assertTrue(response["truncated"]["result"])
+        self.assertTrue(result["is_preview"])
         self.assertEqual(result["length"], 25)
         self.assertIn("dtype", result)
         self.assertLessEqual(len(result["records"]), 10)

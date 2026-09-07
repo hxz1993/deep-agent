@@ -23,6 +23,7 @@ from deep_agent.code_mode.file_payload import (
     FILE_DATA_TOKEN_PREFIX,
     payload_secrets,
     safe_audit_value,
+    safe_result_value,
 )
 
 _RUN_CODE_NAME = "run_code"
@@ -350,7 +351,7 @@ class HybridCodeModeToolset(CodeModeToolset[AgentDeps]):
         secrets = payload_secrets(ctx.deps)
         if isinstance(result, ToolReturn):
             return ToolReturn(
-                return_value=safe_audit_value(
+                return_value=safe_result_value(
                     result.return_value,
                     sensitive_values=secrets,
                 ),
@@ -362,4 +363,4 @@ class HybridCodeModeToolset(CodeModeToolset[AgentDeps]):
                     ),
                 },
             )
-        return safe_audit_value(result, sensitive_values=secrets)
+        return safe_result_value(result, sensitive_values=secrets)

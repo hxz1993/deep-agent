@@ -17,7 +17,13 @@ MAX_OFFICE_EXPANDED_BYTES = 256 * 1024 * 1024
 MAX_OFFICE_MEMBER_BYTES = 64 * 1024 * 1024
 MAX_OFFICE_COMPRESSION_RATIO = 200
 MAX_XLSX_CELLS = 2_000_000
-MAX_CELL_CHARS = 4_000
+# Bound rendered text across all sheets, including repeated shared strings.
+# A per-cell preview limit loses data before char-offset pagination can read it.
+MAX_XLSX_TEXT_CHARS = 8_000_000
+MAX_XLSX_METADATA_CHARS = 8_000
+MAX_XLSX_PREVIEW_SHEETS = 32
+MAX_XLSX_PREVIEW_HEADERS = 32
+MAX_XLSX_PREVIEW_HEADER_CHARS = 128
 
 
 class AttachmentParseError(ValueError):
@@ -31,6 +37,7 @@ class DocumentPage:
     has_more: bool
     next_offset: int | None
     truncated_by: str | None
+    next_char_offset: int | None = None
 
 
 @dataclass(frozen=True)
@@ -76,30 +83,46 @@ def paginate_items(
     offset: int,
     limit: int,
     max_chars: int = MAX_TOOL_OUTPUT_CHARS,
+    char_offset: int = 0,
 ) -> DocumentPage:
+    """Page already-offset items without losing a long item's unread suffix.
+
+    ``next_offset`` and ``next_char_offset`` form the continuation cursor. An
+    item is split only when it cannot fit on an otherwise empty page. Character
+    offsets count Python Unicode code points in the rendered item, not bytes.
+    """
+    if isinstance(char_offset, bool) or not isinstance(char_offset, int) or char_offset < 0:
+        raise AttachmentParseError("char_offset 必须是非负整数（从 0 开始）")
+    if offset < 1 or limit < 1 or max_chars < 1:
+        raise AttachmentParseError("offset、limit 和 max_chars 必须是正整数")
     selected = list(items)
+    if char_offset and (not selected or char_offset >= len(selected[0])):
+        raise AttachmentParseError("char_offset 超出当前项正文范围；请使用返回的续读位置")
     output: list[str] = []
     used = 0
+    completed = 0
+    next_char_offset = 0
     truncated_by: str | None = None
 
-    for item in selected[:limit]:
+    for index, item in enumerate(selected[:limit]):
+        item_start = char_offset if index == 0 else 0
+        remaining = item[item_start:]
         separator = 1 if output else 0
         available = max_chars - used - separator
-        if available <= 0:
+        if available < len(remaining) and output:
             truncated_by = "output_size"
             break
-        if len(item) > available:
-            suffix = "\n…（该项内容过长，已截断）"
-            keep = max(0, available - len(suffix))
-            output.append(item[:keep] + suffix)
-            used = max_chars
+        if len(remaining) > available:
+            output.append(remaining[:available])
+            next_char_offset = item_start + available
             truncated_by = "item_size"
             break
-        output.append(item)
-        used += separator + len(item)
+        output.append(remaining)
+        used += separator + len(remaining)
+        completed += 1
 
     returned_count = len(output)
-    next_offset = offset + returned_count
+    next_offset = offset + completed
     has_more = next_offset <= total_count
     if truncated_by is None and returned_count >= limit and has_more:
         truncated_by = "limit"
@@ -109,6 +132,7 @@ def paginate_items(
         has_more=has_more,
         next_offset=next_offset if has_more else None,
         truncated_by=truncated_by,
+        next_char_offset=next_char_offset if has_more else None,
     )
 
 
@@ -346,6 +370,7 @@ def xlsx_workbook(data: bytes) -> XlsxWorkbook:
 
     sheets: list[XlsxSheet] = []
     cell_count = 0
+    text_chars = 0
     try:
         for name in workbook.sheetnames:
             worksheet = workbook[name]
@@ -359,7 +384,18 @@ def xlsx_workbook(data: bytes) -> XlsxWorkbook:
                 cell_count += len(row)
                 if cell_count > MAX_XLSX_CELLS:
                     raise AttachmentParseError("XLSX 单次解析的单元格数量过多")
-                values = tuple(_cell_text(value) for value in row)
+                values_list: list[str] = []
+                text_chars += 1 if rows else 0
+                for value in row:
+                    text = _cell_text(value)
+                    text_chars += len(text) + (1 if values_list else 0)
+                    if text_chars > MAX_XLSX_TEXT_CHARS:
+                        raise AttachmentParseError(
+                            f"XLSX 解析正文超过 {MAX_XLSX_TEXT_CHARS} 字符安全上限；"
+                            "请拆分工作簿后读取，未返回截断内容"
+                        )
+                    values_list.append(text)
+                values = tuple(values_list)
                 columns = max(columns, len(values))
                 if row_index == 0:
                     headers = values
@@ -396,6 +432,48 @@ def select_xlsx_sheet(workbook: XlsxWorkbook, requested: str | None) -> XlsxShee
     raise AttachmentParseError("XLSX 不包含工作表")
 
 
+def xlsx_sheet_metadata(workbook: XlsxWorkbook, selected: XlsxSheet) -> dict[str, Any]:
+    """Keep the sheet directory and header previews bounded, never the row data."""
+    metadata: dict[str, Any] = {
+        "selected_sheet": selected.name[:128],
+        "selected_sheet_truncated": len(selected.name) > 128,
+        "sheets": [],
+        "sheet_count": len(workbook.sheets),
+        "sheets_truncated": False,
+        "formula_mode": "cached_values_only",
+        "headers_note": "表头仅为预览；完整首行使用 offset=1 并按 next_offset/next_char_offset 续读。目录省略不影响按已知工作表名读取。",
+    }
+
+    def fits() -> bool:
+        return len(json.dumps(metadata, ensure_ascii=False)) <= MAX_XLSX_METADATA_CHARS
+
+    for sheet in workbook.sheets[:MAX_XLSX_PREVIEW_SHEETS]:
+        entry: dict[str, Any] = {
+            "name": sheet.name[:128],
+            "name_truncated": len(sheet.name) > 128,
+            "state": sheet.state,
+            "rows": len(sheet.rows),
+            "columns": sheet.columns,
+            "headers": [],
+            "headers_truncated": bool(sheet.headers),
+        }
+        metadata["sheets"].append(entry)
+        if not fits():
+            metadata["sheets"].pop()
+            break
+        clipped = False
+        for index, header in enumerate(sheet.headers[:MAX_XLSX_PREVIEW_HEADERS]):
+            clipped = clipped or len(header) > MAX_XLSX_PREVIEW_HEADER_CHARS
+            entry["headers"].append(header[:MAX_XLSX_PREVIEW_HEADER_CHARS])
+            entry["headers_truncated"] = clipped or index + 1 < len(sheet.headers)
+            if not fits():
+                entry["headers"].pop()
+                entry["headers_truncated"] = True
+                break
+    metadata["sheets_truncated"] = len(metadata["sheets"]) < len(workbook.sheets)
+    return metadata
+
+
 def _cell_text(value: Any) -> str:
     if value is None:
         return ""
@@ -405,8 +483,6 @@ def _cell_text(value: Any) -> str:
         text = value.isoformat()
     else:
         text = str(value)
-    if len(text) > MAX_CELL_CHARS:
-        return text[: MAX_CELL_CHARS - 1] + "…"
     return text
 
 

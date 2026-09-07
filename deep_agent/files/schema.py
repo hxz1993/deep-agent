@@ -36,10 +36,12 @@ class FileReadResult(BaseModel):
     content: str
     metadata: dict[str, Any] = Field(default_factory=dict)
     offset: int = Field(ge=1)
+    char_offset: int = Field(default=0, ge=0)
     limit: int = Field(ge=1)
     returned_count: int = Field(ge=0)
     total_count: int = Field(ge=0)
     next_offset: int | None = Field(default=None, ge=1)
+    next_char_offset: int | None = Field(default=None, ge=0)
     has_more: bool
     truncated_by: Literal["limit", "output_size", "item_size"] | None = None
     content_hash: str

@@ -302,7 +302,7 @@ const skillsAdmin = {
         : isJson
           ? (window.DeepAgentJson?.renderBlock(page.content, { className: "skill-preview-json", ariaLabel: `${path} JSON` }) || `<pre>${escapeHtml(page.content)}</pre>`)
         : `<pre>${escapeHtml(page.content)}</pre>`;
-      preview.innerHTML = `${this.previewHeading(path, { format: page.format, lineCount: page.returned_count, content: page.content })}${content}${page.has_more ? `<p class="skill-preview-more">内容较长，可由 Agent 使用 next_offset=${escapeHtml(page.next_offset)} 继续分页读取。</p>` : ""}`;
+      preview.innerHTML = `${this.previewHeading(path, { format: page.format, lineCount: page.returned_count, content: page.content })}${content}${page.has_more ? `<p class="skill-preview-more">内容较长，可由 Agent 使用 offset=${escapeHtml(page.next_offset)}、char_offset=${escapeHtml(page.next_char_offset ?? 0)} 继续分页读取。</p>` : ""}`;
       window.lucide?.createIcons();
       if (isMarkdown) void window.DeepAgentMarkdown?.renderDiagrams(preview);
     } catch (error) {

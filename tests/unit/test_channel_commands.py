@@ -26,8 +26,8 @@ class FakeAdapter:
     def new_reply_id(self):
         return uuid4().hex
 
-    async def reply_loading(self, message, reply_id):
-        await self.reply(message, reply_id, "正在处理…", False)
+    async def reply_loading(self, message, reply_id, content=""):
+        await self.reply(message, reply_id, f"{content}\n\n正在处理…" if content else "正在处理…", False)
 
     async def reply(self, message, reply_id, content, finish):
         if self.fail_delivery and finish:

@@ -123,10 +123,14 @@ class WecomAdapter:
     def new_reply_id(self) -> str:
         return generate_req_id("deepagent")
 
-    async def reply_loading(self, message: InboundMessage, reply_id: str) -> None:
+    async def reply_loading(self, message: InboundMessage, reply_id: str, content: str = "") -> None:
         # Same native thinking placeholder as WecomTeam/wecom-openclaw-plugin.
         # WeCom animates it; never send private reasoning or a timer-driven dot loop.
-        await self.reply(message, reply_id, "<think></think>", False)
+        # WeCom renders only text after </think>; a trailing marker hides all
+        # preceding progress. Use its native animation only before any public
+        # text exists, then retain progress with a non-animated waiting notice.
+        loading = f"{content}\n\n处理中…" if content else "<think></think>"
+        await self.reply(message, reply_id, loading, False)
 
     async def reply(
         self, message: InboundMessage, reply_id: str, content: str, finish: bool

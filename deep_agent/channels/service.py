@@ -166,7 +166,7 @@ class ChannelService:
             # Start native feedback before media/model I/O, and reuse this reply
             # ID for text and terminal replies so there is only one bubble.
             loading_started = True
-            preview_enabled = await self._preview(job)
+            preview_enabled = await self._preview(job, loading=True)
             showing_loading = True
             attachments = []
             for media in job.message.media:
@@ -235,12 +235,14 @@ class ChannelService:
                 elif event.event in {"thinking", "tool_call", "context_compaction_progress"}:
                     # Native tools use the same public tool_call event. Results
                     # and reasoning stay in Event Store, not the IM bubble.
+                    # Waiting preserves all public phases, including text not
+                    # yet sent by the throttle. Only a terminal replaces them.
                     if not showing_loading:
                         if preview.strip():
                             previous_previews = f"{previous_previews}\n\n{preview.strip()}" if previous_previews else preview.strip()
                         preview = ""
                         if preview_enabled:
-                            preview_enabled = await self._preview(job)
+                            preview_enabled = await self._preview(job, previous_previews, loading=True)
                         showing_loading = True
                 elif event.event == "final":
                     job.terminal = True
@@ -307,11 +309,11 @@ class ChannelService:
                 except Exception as exc:
                     logger.warning("Channel stream cleanup failed error_type={}", type(exc).__name__)
 
-    async def _preview(self, job: MessageJob, content: str | None = None) -> bool:
+    async def _preview(self, job: MessageJob, content: str = "", *, loading: bool = False) -> bool:
         """Best-effort progress; a failed preview must not abort/replay a Run."""
         try:
-            if content is None:
-                await job.adapter.reply_loading(job.message, job.reply_id)
+            if loading:
+                await job.adapter.reply_loading(job.message, job.reply_id, content)
             else:
                 await job.adapter.reply(job.message, job.reply_id, content, False)
         except Exception as exc:

@@ -188,8 +188,8 @@ class WecomIngressIntegrationTests(unittest.IsolatedAsyncioTestCase):
                         before_final = [c.args[2:] for c in adapter.client.reply_stream.await_args_list]
                         self.assertEqual(before_final, [
                             ("<think></think>", False), ("临时过程1", False),
-                            ("<think></think>", False), ("临时过程1\n\n临时过程2", False),
-                            ("<think></think>", False),
+                            ("临时过程1\n\n处理中…", False), ("临时过程1\n\n临时过程2", False),
+                            ("临时过程1\n\n临时过程2\n\n处理中…", False),
                         ])
                     finally:
                         release.set()

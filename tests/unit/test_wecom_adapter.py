@@ -115,11 +115,13 @@ class WecomAdapterTests(unittest.IsolatedAsyncioTestCase):
         client.reply_stream = WSClient.reply_stream.__get__(client, type(client))
         message = parse_message(frame())
         await self.adapter.reply_loading(message, "same-stream")
+        await self.adapter.reply_loading(message, "same-stream", "第一轮进度\n\n第二轮进度")
         await self.adapter.reply(message, "same-stream", "最终回答", False)
         await self.adapter.reply(message, "same-stream", "最终回答。", True)
         payloads = [call.args[1] for call in client.reply.await_args_list]
         self.assertEqual(payloads, [
             {"msgtype": "stream", "stream": {"id": "same-stream", "content": "<think></think>", "finish": False}},
+            {"msgtype": "stream", "stream": {"id": "same-stream", "content": "第一轮进度\n\n第二轮进度\n\n处理中…", "finish": False}},
             {"msgtype": "stream", "stream": {"id": "same-stream", "content": "最终回答", "finish": False}},
             {"msgtype": "stream", "stream": {"id": "same-stream", "content": "最终回答。", "finish": True}},
         ])

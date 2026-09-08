@@ -33,8 +33,8 @@ class FakeWeComClient:
     def new_reply_id(self):
         return "reply-id"
 
-    async def reply_loading(self, message, reply_id):
-        await self.reply(message, reply_id, "正在处理…", False)
+    async def reply_loading(self, message, reply_id, content=""):
+        await self.reply(message, reply_id, f"{content}\n\n正在处理…" if content else "正在处理…", False)
 
     async def reply(self, message, reply_id, content, finish):
         await self.reply_stream(None, reply_id, content, finish)
@@ -72,10 +72,11 @@ class PresentationDeepAgentClient(FakeDeepAgentClient):
 
 
 class PresentationWeComClient(FakeWeComClient):
-    def __init__(self, *, fail_loading=False, fail_preview=False, fail_final=False):
+    def __init__(self, *, fail_loading=False, fail_preview=False, fail_wait=False, fail_final=False):
         super().__init__()
         self.fail_loading = fail_loading
         self.fail_preview = fail_preview
+        self.fail_wait = fail_wait
         self.fail_final = fail_final
         self.attempts = []
 
@@ -85,6 +86,7 @@ class PresentationWeComClient(FakeWeComClient):
             (finish and self.fail_final)
             or (not finish and content == "正在处理…" and self.fail_loading)
             or (not finish and content != "正在处理…" and self.fail_preview)
+            or (not finish and content.endswith("\n\n正在处理…") and self.fail_wait)
         ):
             raise ConnectionError("fixture reply transport unavailable")
         await super().reply_stream(_frame, stream_id, content, finish)
@@ -191,9 +193,9 @@ class ChannelGatewayTests(unittest.IsolatedAsyncioTestCase):
             ("正在处理…", False),
             ("第一轮：", False),
             ("第一轮：准备读取。", False),
-            ("正在处理…", False),
+            ("第一轮：准备读取。\n\n正在处理…", False),
             ("第一轮：准备读取。\n\n第二轮预览", False),
-            ("正在处理…", False),
+            ("第一轮：准备读取。\n\n第二轮预览\n\n正在处理…", False),
             ("第一轮：准备读取。\n\n第二轮预览\n\n第三轮临时正文，比最终答案长很多。", False),
             ("完成", True),
         ])
@@ -217,7 +219,7 @@ class ChannelGatewayTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(adapter.replies, [
             ("正在处理…", False),
             ("Searching with the provider's native tool.", False),
-            ("正在处理…", False),
+            ("Searching with the provider's native tool.\n\n正在处理…", False),
             ("Searching with the provider's native tool.\n\n已经找到答案，正在整理。", False),
             ("最终答案", True),
         ])
@@ -231,6 +233,23 @@ class ChannelGatewayTests(unittest.IsolatedAsyncioTestCase):
                 ], message_id=f"empty-final-{number}")
                 self.assertEqual(adapter.replies[-1], ("已处理完成，但没有可展示的文本结果。", True))
                 self.assertEqual((row.processing_status, row.delivery_status), ("completed", "sent"))
+
+    async def test_loading_preserves_throttled_tail_even_without_another_text_phase(self):
+        with patch("deep_agent.channels.service.time", SimpleNamespace(monotonic=lambda: 100.0)):
+            _, _, adapter, _, _ = await self._run_presentation([
+                StreamEvent("text", {"delta": "已读取"}),
+                StreamEvent("text", {"delta": "两份资料，正在对比。"}),
+                StreamEvent("tool_call", {"tool": "some_tool"}),
+                StreamEvent("thinking", {"delta": "PRIVATE_REASONING"}),
+                StreamEvent("tool_call", {"tool": "another_tool"}),
+                StreamEvent("final", {"status": "completed", "output": "完成"}),
+            ], stream_interval=1)
+        self.assertEqual(adapter.replies, [
+            ("正在处理…", False),
+            ("已读取", False),
+            ("已读取两份资料，正在对比。\n\n正在处理…", False),
+            ("完成", True),
+        ])
 
     async def test_presentation_legacy_missing_output_uses_only_last_text_phase(self):
         _, _, adapter, _, _ = await self._run_presentation([
@@ -287,7 +306,7 @@ class ChannelGatewayTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((row.processing_status, row.delivery_status), ("completed", "sent"))
 
     async def test_presentation_progress_transport_failure_does_not_abort_or_repeat_agent(self):
-        for number, failure in enumerate(("loading", "preview")):
+        for number, failure in enumerate(("loading", "preview", "wait")):
             with self.subTest(failure=failure):
                 adapter = PresentationWeComClient(**{f"fail_{failure}": True})
                 service, agent, adapter, row, message = await self._run_presentation([
@@ -301,7 +320,7 @@ class ChannelGatewayTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(sum(finish for _, _, finish in adapter.attempts), 1)
                 await service.receive(self.account, adapter, message)
                 self.assertEqual(agent.calls, 1)
-                self.assertEqual(len(adapter.attempts), 2 if failure == "loading" else 3)
+                self.assertEqual(len(adapter.attempts), {"loading": 2, "preview": 3, "wait": 4}[failure])
 
     async def test_presentation_final_delivery_failure_is_durable_without_reexecuting_agent(self):
         service, agent, adapter, row, message = await self._run_presentation([

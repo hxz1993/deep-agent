@@ -146,6 +146,15 @@ class ChannelRunProgressIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 tools = self._assert_items(during, texts=["PROCESS_1", "PROCESS_2"], tool_count=2)
                 self.assertTrue(all(t["status"] == "completed" and t["output"] for t in tools))
                 self.assertEqual(self.ctx.active_runs.active_count(), 1)
+                if fail_delivery != "preview":
+                    async with asyncio.timeout(3):
+                        while adapter.client.reply_stream.await_args.args[2] != "PROCESS_1\n\nPROCESS_2\n\n处理中…":
+                            await asyncio.sleep(0.01)
+                    # Assert the currently visible waiting frame, not merely
+                    # that accumulated text was sent sometime in the past.
+                    self.assertEqual(adapter.client.reply_stream.await_args.args[2:], (
+                        "PROCESS_1\n\nPROCESS_2\n\n处理中…", False,
+                    ))
             finally:
                 release.set()
                 await self._drain(service)

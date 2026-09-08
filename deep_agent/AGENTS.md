@@ -66,10 +66,12 @@ FileStore协议。`channel_gateway/runtime.py`负责Account轮询与Adapter生�
 负责同Peer队列、命令、消息处理和SSE投影；`channels/contracts.py/registry.py`提供公共接口与注册表。
 只有`channels/adapters/wecom/`引用官方`wecom-aibot-python-sdk==1.0.2`；连接、认证、心跳、重连、
 事件分发、媒体下载解密和回复协议均调用SDK，不写第二套协议。当前仅企微Adapter，不宣称飞书已实现。
-加载通过公共`reply_loading`交给Adapter；企微使用`<think></think>`原生占位，正文和终态复用同一Stream ID。
+加载通过公共`reply_loading`交给Adapter，并传入累计公开正文；首段正文之前企微使用`<think></think>`原生占位，正文和终态复用同一Stream ID。
 占位不入历史、不外发思考/工具细节；停止和失败以非空文本及`finish=true`收尾，不用定时器反复发送假省略号。
-渠道临时正文按阶段换行累加；thinking、tool_call和context_compaction_progress切回原生加载，
-后续正文到来时恢复累加预览（不累加思考、工具参数或结果）。
+渠道临时正文按阶段换行累加；thinking、tool_call和context_compaction_progress必须保留已有正文，
+在下方显示“处理中…”，后续正文替换等待提示并继续累加（不累加思考、工具参数或结果）。
+企微客户端实测：末尾附加`<think></think>`会隐藏此前所有正文，不能用“累计正文+末尾think”冒充保留进度；
+前置think也不同时显示原生三个点，因此有正文后的等待提示使用文字，不承诺原生动画。
 连续加载事件不重复发占位。正常结束必须以`final.output`覆盖全部预览，显式空正文不能回填过程；
 只有缺少output字段的旧事件才回退末段文本。预览失败后本Run停止预览但继续执行并尝试最终投递，
 处理状态与最终投递状态分离，不重跑Agent。企微不增加伪造引用条或“回复：原问题”文本前缀。

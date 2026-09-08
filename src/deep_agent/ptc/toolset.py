@@ -14,7 +14,7 @@ from pydantic_ai.toolsets.abstract import ToolsetTool
 from pydantic_ai_harness.code_mode import CodeModeToolset
 
 from deep_agent.agent.deps import AgentDeps
-from deep_agent.code_mode.file_payload import (
+from deep_agent.ptc.file_payload import (
     CODE_MODE_CODE_ONLY,
     CODE_MODE_HYBRID,
     CODE_MODE_METADATA_KEY,

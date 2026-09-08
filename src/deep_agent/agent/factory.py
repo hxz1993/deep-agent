@@ -16,9 +16,9 @@ from pydantic_ai.providers.google import GoogleProvider
 from pydantic_ai.providers.openai import OpenAIProvider
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.context_references import context_reference_instructions
-from deep_agent.agent.models import OpenAICompatibleVideoChatModel
+from deep_agent.models import OpenAICompatibleVideoChatModel
 from deep_agent.agent.planning import build_planning_capability
-from deep_agent.agent.provider_registry import resolve_provider_model
+from deep_agent.models.provider_registry import resolve_provider_model
 from deep_agent.agent.spec import AgentSpec
 from deep_agent.agent.context.estimator import TokenEstimator
 from deep_agent.agent.tool_discovery import (
@@ -32,7 +32,7 @@ from deep_agent.agent.tool_discovery import (
 )
 from deep_agent.capabilities.codes import is_ptc_selected
 from deep_agent.capabilities.registry import ToolPackage, ToolPackageRegistry
-from deep_agent.code_mode import FilePayloadResolvingToolset, HybridCodeMode
+from deep_agent.ptc import FilePayloadResolvingToolset, HybridCodeMode
 from deep_agent.options import OPTION
 
 _OPENAI_PREFIXES = {"openai", "openai-chat"}

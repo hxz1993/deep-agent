@@ -255,7 +255,7 @@ class ChannelStoreCommandTests(unittest.IsolatedAsyncioTestCase):
         from deep_agent.capabilities.mcp.lease_manager import McpLeaseManager
         from deep_agent.core.context import AppContext, init_context, reset_context
         from tests.integration.helpers.chat import mock_request_disconnect, parse_sse_events
-        from tests.integration.helpers.models import text_only_model
+        from tests.helpers.models import text_only_model
 
         resolved = await self.store.resolve_binding(**self.peer)
         app = FastAPI()

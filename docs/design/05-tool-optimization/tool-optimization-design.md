@@ -347,7 +347,7 @@ DeepAgent 原有自研 `Capability` 只是产品配置包装，却与 Pydantic A
 附件和Skill文件由自动注入的系统工具 `read_file`统一读取，不进入内置工具包或
 `agents.capabilities`。位置：
 
-- `src/deep_agent/capabilities/native/builtin.py`
+- `src/deep_agent/capabilities/general/builtin.py`
 - `src/deep_agent/files/toolset.py`
 - `src/deep_agent/sandbox/toolset.py`
 

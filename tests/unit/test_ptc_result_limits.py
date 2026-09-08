@@ -11,8 +11,8 @@ from pydantic_ai.models.function import FunctionModel
 from deep_agent.agent.context.estimator import TokenEstimator
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.tool_output_limits import build_tool_output_limits
-from deep_agent.code_mode import FilePayloadResolvingToolset, HybridCodeMode
-from deep_agent.code_mode.file_payload import (
+from deep_agent.ptc import FilePayloadResolvingToolset, HybridCodeMode
+from deep_agent.ptc.file_payload import (
     build_code_mode_tool_package, safe_audit_value, safe_result_value,
 )
 

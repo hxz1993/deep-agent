@@ -14,10 +14,10 @@ from pydantic_ai_harness.tool_output_limits import ToolOutputLimits
 
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.factory import _resolve_model, _toolsets_for_spec, build_agent
-from deep_agent.agent.models import OpenAICompatibleVideoChatModel
-from deep_agent.agent.provider_registry import ProviderRuntimeConfig
+from deep_agent.models import OpenAICompatibleVideoChatModel
+from deep_agent.models.provider_registry import ProviderRuntimeConfig
 from deep_agent.capabilities.registry import ToolPackage, ToolPackageRegistry
-from deep_agent.code_mode import HybridCodeMode
+from deep_agent.ptc import HybridCodeMode
 from deep_agent.agent.spec import AgentSpec
 from deep_agent.agent.tool_discovery import McpDiscoveryToolset
 from deep_agent.capabilities import build_registry
@@ -215,7 +215,7 @@ class ResolveModelTests(unittest.TestCase):
             for capability in agent.root_capability.capabilities
         }
         self.assertFalse(
-            any(module.startswith("deep_agent.agent.models") for module in capability_modules)
+            any(module.startswith("deep_agent.models") for module in capability_modules)
         )
 
     def test_harness_tool_output_limits_can_be_added_as_standard_capability(self) -> None:

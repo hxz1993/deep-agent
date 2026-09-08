@@ -27,7 +27,7 @@ from pydantic_ai.providers.openai import OpenAIProvider
 from pydantic_ai.providers.openrouter import OpenRouterProvider
 from pydantic_ai.providers.zai import ZaiProvider
 
-from deep_agent.agent.models import OpenAICompatibleVideoChatModel
+from deep_agent.models import OpenAICompatibleVideoChatModel
 from deep_agent.core.exceptions import DeepAgentError
 from deep_agent.options import OPTION
 

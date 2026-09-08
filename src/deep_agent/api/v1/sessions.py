@@ -468,7 +468,7 @@ async def _build_context_data(
     context_window_tokens = model.context_window_tokens if model is not None else None
     max_output_tokens = model.max_output_tokens if model is not None else None
     if model is not None:
-        from deep_agent.agent.provider_registry import (
+        from deep_agent.models.provider_registry import (
             ProviderRuntimeConfig,
             effective_base_url,
             load_provider_for_model,

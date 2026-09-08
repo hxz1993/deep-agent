@@ -2,7 +2,9 @@
 
 > 父索引：[`../AGENTS.md`](../AGENTS.md) · 后端加载逻辑：[`../src/deep_agent/AGENTS.md`](../src/deep_agent/AGENTS.md)
 
-`mcp_servers/` 存放**随仓库发布的 stdio MCP server**。每个子目录是独立子进程，与 `deep_agent` 进程隔离。
+`mcp_servers/` 存放**随仓库发布的 MCP Server 启动器**。每个子目录是独立子进程，与
+`deep_agent` 的 Agent 执行进程隔离；生产 builtin 使用 Pod 内共享的 streamable-http 进程，
+直接启动仍可使用 stdio。
 
 ---
 
@@ -12,11 +14,11 @@
 mcp_servers/<name>/server.py  →  capability mcp:<name>  →  工具前缀 <name>_
 ```
 
-1. 每次构建 Agent / 列举工具时，`resolve_mcp_toolsets`（`src/deep_agent/capabilities/mcp/resolver.py`）从 DB 读取 enabled 行
-2. `load_builtin_mcp_capabilities`（`builtin.py`）扫描本目录作兜底：**DB 无同名 enabled 记录**时启用 builtin
-3. 连接懒加载：`async with agent` 时才拉起子进程
-4. `MCP_STDIO_SESSION_SCOPE=true`（默认）时，stdio 子进程按 chat session 保活
-5. MCP CRUD API 更新数据库，后续请求按最新配置解析
+1. `resolve_mcp_toolsets`（`src/deep_agent/capabilities/mcp/resolver.py`）从 DB 读取 MCP 配置；没有资源级 enabled 字段
+2. `load_builtin_mcp_tool_packages`（`builtin.py`）扫描本目录作兜底：**DB 无同名记录**时补充 builtin 工具包
+3. 只有 Agent 显式关联的 `mcp:<name>` 才参与 Run，目录扫描本身不启动进程
+4. builtin 在首次真实调用时取得 Run 租约并按需启动或复用 Pod 共享 HTTP 进程；TTL/租约由 `shared_registry.py`、`lease_manager.py` 管理
+5. URL MCP 使用检测时保存的工具快照，真实调用才连接；MCP CRUD 修改影响后续请求，不改已构建 Run
 
 未显式配置 DBMS 时应用使用默认文件 SQLite，不存在“无数据库”的正常启动模式。builtin
 实现是程序兜底，是否进入模型工具列表仍取决于 Agent 是否选择对应 `mcp:<name>`。
@@ -27,7 +29,7 @@ mcp_servers/<name>/server.py  →  capability mcp:<name>  →  工具前缀 <nam
 
 1. 创建 `mcp_servers/<name>/server.py`
 2. 使用 `FastMCP`，`if __name__ == "__main__": mcp.run()`
-3. **禁止** `import deep_agent` 或依赖后端包（须能独立 `PYTHONPATH=src:. python3.12 mcp_servers/<name>/server.py` 运行）
+3. 不依赖 Agent/API/数据库业务运行时；可复用 `_run.py` 与轻量的 `deep_agent.core.mcp_constants`。须能独立 `PYTHONPATH=src:. python3.12 mcp_servers/<name>/server.py` 运行
 4. 工具名在 MCP 内用短名即可，运行时自动加 `<name>_` 前缀
 
 ```python
@@ -124,7 +126,7 @@ HTTP 请求 header（`authorization` 等）经 `DEEP_AGENT_MCP_FORWARD_REQUEST_H
 
 | 现象 | 检查 |
 | --- | --- |
-| 工具列表空 | `mcp_servers.enabled` 与 Agent capability 是否包含对应 `mcp:<name>` |
+| 工具列表空 | Agent 是否关联 `mcp:<name>`；URL MCP 是否已有有效检测快照 |
 | 子进程启动失败 | 独立运行 `server.py`；Python 环境是否含依赖 |
 | DeepCube 无 metadata | `DEEPCUBE_MCP_HEADERS` 是否配置 |
 | 改了 server.py 不生效 | DB 有同名记录时用 DB config，非 builtin 发现 |

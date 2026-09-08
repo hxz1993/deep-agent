@@ -4,7 +4,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from deep_agent.agent.provider_registry import (
+from deep_agent.models.provider_registry import (
     UnknownProviderTypeError,
     provider_type_definition,
 )

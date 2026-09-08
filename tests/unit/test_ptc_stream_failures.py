@@ -15,8 +15,8 @@ from deep_agent.agent.active_runs import ActiveRunRegistry
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.event_persister import EventPersister
 from deep_agent.agent.runner import AgentRunner
-from deep_agent.code_mode import FilePayloadResolvingToolset, HybridCodeMode
-from deep_agent.code_mode.file_payload import build_code_mode_tool_package
+from deep_agent.ptc import FilePayloadResolvingToolset, HybridCodeMode
+from deep_agent.ptc.file_payload import build_code_mode_tool_package
 from deep_agent.conversation import project_session_events
 from tests.helpers.sqlite_stores import make_sqlite_stores, seed_default_agent
 

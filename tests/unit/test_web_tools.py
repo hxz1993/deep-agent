@@ -12,7 +12,7 @@ from pydantic_ai.messages import ImageUrl, ModelResponse, NativeToolReturnPart, 
 from pydantic_ai.capabilities import WebSearch
 from pydantic_ai.toolsets import CombinedToolset, FunctionToolset
 
-from deep_agent.code_mode.file_payload import CODE_MODE_METADATA_KEY
+from deep_agent.ptc.file_payload import CODE_MODE_METADATA_KEY
 from deep_agent.web.package import build_web_tool_package
 from deep_agent.web.runtime import (
     _search_duckduckgo,

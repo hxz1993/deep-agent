@@ -5,7 +5,7 @@ from __future__ import annotations
 import unittest
 from datetime import datetime, timezone
 
-from deep_agent.agent.models.catalog import (
+from deep_agent.models.catalog import (
     CatalogValidationError,
     PROVIDER_ALLOWLIST,
     build_catalog_page,

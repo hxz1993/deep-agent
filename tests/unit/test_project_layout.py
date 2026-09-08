@@ -58,6 +58,16 @@ class ProjectLayoutTest(unittest.TestCase):
             "frontend", "mcps", "alembic", "docker-compose.yml",
             "src/deep_agent/gunicorn.conf.py", "src/deep_agent/channel_gateway",
             "docs/guides/jenkins",
+            "src/deep_agent/code_mode", "src/deep_agent/web_tools",
+            "src/deep_agent/capabilities/web", "src/deep_agent/capabilities/skills",
+            "src/deep_agent/capabilities/attachments", "src/deep_agent/capabilities/cursor_skills",
+            "src/deep_agent/db/stores/message", "src/deep_agent/db/stores/auxiliary_model",
+            "src/deep_agent/db/stores/output_contract", "src/deep_agent/db/stores/context_checkpoint",
+            "src/deep_agent/lib", "src/deep_agent/capabilities/native",
+            "src/deep_agent/agent/models", "src/deep_agent/agent/provider_registry.py",
+            "src/deep_agent/channels/gateway/messages.py",
+            "src/deep_agent/channels/gateway/sdk_logger.py", "console/prototypes",
+            "tests/integration/helpers/models.py", "scripts/__init__.py",
         )
         for legacy_name in legacy_paths:
             with self.subTest(path=legacy_name):
@@ -70,11 +80,31 @@ class ProjectLayoutTest(unittest.TestCase):
             "src/deep_agent", "src/deepfos_platform", "src/maintenance",
             "console", "console/vendor", "mcp_servers", "migrations", "deploy",
             "src/deep_agent/channels/gateway", "deploy/jenkins",
+            "src/deep_agent/ptc", "src/deep_agent/web",
+            "src/deep_agent/models", "src/deep_agent/capabilities/general",
         ):
             with self.subTest(path=name):
                 path = REPO_ROOT / name
                 self.assertTrue(path.is_dir())
                 self.assertFalse(path.is_symlink())
+
+    def test_ptc_public_module_uses_the_canonical_path_without_a_legacy_alias(self):
+        actual = self._probe("""
+            import importlib.util
+            import json
+            from pathlib import Path
+            import deep_agent.ptc as ptc
+            print(json.dumps({
+                'path': str(Path(ptc.__file__).resolve()),
+                'implementation': ptc.FilePayloadResolvingToolset.__module__,
+                'legacy_available': importlib.util.find_spec('deep_agent.code_mode') is not None,
+            }))
+        """)
+        self.assertEqual(actual, {
+            "path": str(SOURCE_ROOT / "deep_agent/ptc/__init__.py"),
+            "implementation": "deep_agent.ptc.file_payload",
+            "legacy_available": False,
+        })
 
     def test_public_packages_resolve_to_src_with_the_same_environment_from_any_cwd(self):
         probe = """
@@ -142,12 +172,23 @@ class ProjectLayoutTest(unittest.TestCase):
             "console/vendor/mermaid.min.js", "mcp_servers/deepcube/server.py",
             "migrations/env.py", "deploy/gunicorn.conf.py", "deploy/docker-compose.yml",
             "src/deepagent_files.py",
+            "tests/helpers/models.py",
             "src/deep_agent/builtin_skills/deepagent-diagnostics/SKILL.md",
         ):
             with self.subTest(resource=name):
                 path = REPO_ROOT / name
                 self.assertTrue(path.is_file())
                 self.assertFalse(path.is_symlink())
+
+    def test_console_prototypes_are_kept_outside_the_production_static_root(self):
+        prototype_root = REPO_ROOT / "docs/design/17-console-ui"
+        for name in (
+            "Prototype DeepAgent 0825 单层导航方案",
+            "Prototype DeepAgent 统一侧边栏",
+        ):
+            with self.subTest(prototype=name):
+                self.assertTrue((prototype_root / name / "index.html").is_file())
+        self.assertFalse(any((REPO_ROOT / "console").rglob("*Prototype*")))
 
     def test_gateway_imports_only_the_canonical_modules_without_starting_lifespan(self):
         actual = self._probe("""
@@ -157,8 +198,7 @@ class ProjectLayoutTest(unittest.TestCase):
             from pathlib import Path
             from unittest.mock import patch
 
-            names = ('config', 'deepagent_client', 'messages', 'runtime',
-                     'sdk_logger', 'app', '__main__')
+            names = ('config', 'deepagent_client', 'runtime', 'app', '__main__')
             result = {}
             with (
                 patch('dotenv.load_dotenv', side_effect=AssertionError('profile read')),
@@ -173,10 +213,45 @@ class ProjectLayoutTest(unittest.TestCase):
                 result['lifespan_started'] = hasattr(app_module.app.state, 'gateway')
             print(json.dumps(result))
         """)
-        for name in ("config", "deepagent_client", "messages", "runtime", "sdk_logger", "app", "__main__"):
+        for name in ("config", "deepagent_client", "runtime", "app", "__main__"):
             self.assertEqual(actual[name], str(SOURCE_ROOT / "deep_agent/channels/gateway" / f"{name}.py"))
         self.assertFalse(actual["legacy_available"])
         self.assertFalse(actual["lifespan_started"])
+
+    def test_shared_model_and_general_tool_modules_have_explicit_owners(self):
+        actual = self._probe("""
+            import json
+            from deep_agent.models import OpenAICompatibleVideoChatModel
+            from deep_agent.models.provider_registry import ProviderRuntimeConfig
+            from deep_agent.models.models_dev import ModelsDevBundle
+            from deep_agent.capabilities.general import build_native_tool_package
+            print(json.dumps({value.__name__: value.__module__ for value in (
+                OpenAICompatibleVideoChatModel, ProviderRuntimeConfig,
+                ModelsDevBundle, build_native_tool_package,
+            )}))
+        """)
+        self.assertEqual(actual, {
+            "OpenAICompatibleVideoChatModel": "deep_agent.models.openai_compatible_video",
+            "ProviderRuntimeConfig": "deep_agent.models.provider_registry",
+            "ModelsDevBundle": "deep_agent.models.models_dev",
+            "build_native_tool_package": "deep_agent.capabilities.general.builtin",
+        })
+
+    def test_mcp_subprocess_constants_do_not_load_runtime_or_configuration(self):
+        actual = self._probe("""
+            import json
+            import sys
+            from deep_agent.core.mcp_constants import (
+                MCP_REGISTRY_JSON_ENV, MCP_SERVER_TTL_ENV, REQUEST_HEADERS_ENV,
+            )
+            assert 'deep_agent.options' not in sys.modules
+            assert 'deep_agent.capabilities' not in sys.modules
+            print(json.dumps([MCP_REGISTRY_JSON_ENV, MCP_SERVER_TTL_ENV, REQUEST_HEADERS_ENV]))
+        """)
+        self.assertEqual(actual, [
+            "DEEP_AGENT_MCP_REGISTRY_JSON", "DEEP_AGENT_MCP_SERVER_TTL",
+            "DEEP_AGENT_MCP_REQUEST_HEADERS",
+        ])
 
     def test_canonical_command_help_works_without_loading_runtime_configuration(self):
         modules = (

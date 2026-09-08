@@ -22,7 +22,7 @@ Console 跟随验证包含请求串行、同 Sequence 更新、切页迟到数�
 # 全部
 PYTHONPATH=src python3.12 -m unittest discover -s tests -p "test_*.py" -v
 
-# 排查失败：首个报错即停（推荐配合 tests/run.ps1 的 30s 超时）
+# 排查失败：首个报错即停
 PYTHONPATH=src python3.12 -m unittest discover -s tests -p "test_*.py" --failfast -v
 
 # 仅单元（无网络、无外部子进程）
@@ -38,10 +38,16 @@ PYTHONPATH=src python3.12 -m unittest discover -s tests/integration -p "test_*.p
 
 ```
 tests/
-├── unit/                    # 纯逻辑，快速
-├── integration/             # 需启动 app 或 MCP 子进程
-│   ├── fixtures/          # 测试用 MCP server（header_echo、pid_echo）
-│   └── helpers/           # chat.py、mcp.py 公共 helper
+├── unit/                    # 单模块与隔离依赖回归
+├── integration/             # HTTP、Agent、MCP 等边界协作
+│   ├── fixtures/             # 集成场景专用 MCP server 与历史样本
+│   └── helpers/              # HTTP/SSE、MCP 生命周期与会话准备
+├── helpers/                 # 跨测试组共用的身份、SQLite、模型等辅助代码
+├── fixtures/                # 共用样本与测试专用 builtin MCP 扫描目录
+│   ├── mcps/echo_fixture/    # 不进入生产 mcp_servers/ 扫描
+│   └── sessions/             # 会话 JSON 样本
+├── frontend/console/        # Console 的 Node.js 测试
+├── check_context_compaction_coverage.py  # 上下文压缩覆盖率门槛
 └── README.md
 ```
 
@@ -52,7 +58,7 @@ tests/
 | 文件 | 覆盖 |
 | --- | --- |
 | `test_agent_max_requests.py` | 全局 request 上限、旧 Agent 字段 422 兼容提示 |
-| `test_code_mode.py` | PTC新旧编码兼容、MCP双通道、Monty调用、URL/File ID文件变量与脱敏 |
+| `test_ptc.py` | PTC新旧编码兼容、MCP双通道、Monty调用、URL/File ID文件变量与脱敏 |
 | `test_ptc_stream_failures.py` | 真实 SDK/Monty + 隔离 SQLite：PTC 连续失败后原生恢复、嵌套等待取消、Provider异常及普通工具重试耗尽的 SSE/History/Registry 闭环 |
 | `test_event_persister.py`、`test_runner_history.py` | 写入失败回执与超时释放、显式关闭 SDK 流后部分历史保存、终态写入失败不覆盖原始错误 |
 | `test_sandbox_*.py` | Python沙箱公网边界、FileStore输入、`deepagent_files`产物发布、回滚、依赖探针与子进程清理 |
@@ -119,8 +125,8 @@ tests/
 
 1. **先分类**：无外部依赖 → `unit/`；需 HTTP/MCP/子进程 → `integration/`
 2. **命名**：`test_<主题>.py`
-3. **helper**：集成测试复用逻辑放 `integration/helpers/`，勿复制
-4. **fixture MCP**：放 `integration/fixtures/`，保持自包含（同 `mcp_servers/` 规则，不 import `deep_agent`）
+3. **helper**：跨测试组共用逻辑放 `helpers/`，包括 `models.py`；HTTP/SSE、MCP 生命周期等集成专用逻辑放 `integration/helpers/`，勿复制
+4. **fixture**：跨测试组样本放 `fixtures/`，集成场景专用样本放 `integration/fixtures/`；Builtin扫描替身固定放 `fixtures/mcps/`，不得进入生产 `mcp_servers/`。测试MCP保持自包含（同 `mcp_servers/` 规则，不 import `deep_agent`）
 
 ---
 

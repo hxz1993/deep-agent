@@ -13,7 +13,7 @@ from sqlalchemy import delete, event, insert, select
 from deep_agent.channels.gateway.app import create_gateway_app
 from deep_agent.channels.gateway.config import GatewayConfig
 from deep_agent.channels.gateway.deepagent_client import DeepAgentChannelClient, StreamEvent
-from deep_agent.channels.gateway.messages import parse_message
+from deep_agent.channels.adapters.wecom.messages import parse_message
 from deep_agent.channels.gateway.runtime import AccountRuntime, ChannelRuntime
 from deep_agent.channels.service import ChannelService
 from deep_agent.db.dialect import DbDialect

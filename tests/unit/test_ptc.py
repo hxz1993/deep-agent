@@ -19,13 +19,13 @@ from pydantic_core import SchemaValidator
 
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.capabilities import build_registry
-from deep_agent.code_mode import FilePayloadResolvingToolset, HybridCodeMode
-from deep_agent.code_mode.toolset import (
+from deep_agent.ptc import FilePayloadResolvingToolset, HybridCodeMode
+from deep_agent.ptc.toolset import (
     HybridCodeModeToolset,
     _bounded_nested_audit,
     _scrub_error_text,
 )
-from deep_agent.code_mode.file_payload import (
+from deep_agent.ptc.file_payload import (
     CODE_MODE_TRUSTED_RETURN_SCHEMA_KEY,
     FILE_DATA_TOKEN_PREFIX,
     MAX_FILE_BYTES,
@@ -718,7 +718,7 @@ class CodeModeTests(unittest.IsolatedAsyncioTestCase):
             capabilities=[HybridCodeMode(tools=[], dynamic_catalog=True)],
         )
         with mock.patch(
-            "deep_agent.code_mode.file_payload._load_public_url",
+            "deep_agent.ptc.file_payload._load_public_url",
             new=mock.AsyncMock(
                 return_value=(
                     raw,
@@ -773,7 +773,7 @@ class CodeModeTests(unittest.IsolatedAsyncioTestCase):
             ),
         )
         with mock.patch(
-            "deep_agent.code_mode.file_payload.safe_download",
+            "deep_agent.ptc.file_payload.safe_download",
             new=mock.AsyncMock(return_value=response),
         ) as downloader:
             data, name, mime, final_url = await _load_public_url(
@@ -789,7 +789,7 @@ class CodeModeTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_public_url_rejects_credentials_before_download(self) -> None:
         with mock.patch(
-            "deep_agent.code_mode.file_payload.safe_download",
+            "deep_agent.ptc.file_payload.safe_download",
             new=mock.AsyncMock(),
         ) as downloader:
             with self.assertRaisesRegex(ModelRetry, "用户名或密码"):
@@ -798,7 +798,7 @@ class CodeModeTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_public_url_preserves_safe_download_ssrf_rejection(self) -> None:
         with mock.patch(
-            "deep_agent.code_mode.file_payload.safe_download",
+            "deep_agent.ptc.file_payload.safe_download",
             new=mock.AsyncMock(side_effect=ValueError("private/internal IP address")),
         ) as downloader:
             with self.assertRaisesRegex(ModelRetry, "地址不安全"):

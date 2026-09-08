@@ -349,7 +349,7 @@ class AgentRunnerHistoryTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual({event.turn_id for event in run_events}, {run_id})
 
     async def test_transport_close_preserves_official_partial_response(self) -> None:
-        from tests.integration.helpers.models import build_slow_stream_model
+        from tests.helpers.models import build_slow_stream_model
 
         chunks = ["alpha-", "beta-", "gamma-", "delta-", "omega"]
         model, tracker = build_slow_stream_model(chunks=chunks, delay_s=0.03)
@@ -454,7 +454,7 @@ class AgentRunnerHistoryTests(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_consumer_close_saves_actual_sdk_content_not_synthetic_text(self) -> None:
-        from tests.integration.helpers.models import build_slow_stream_model
+        from tests.helpers.models import build_slow_stream_model
 
         chunks = ["part-a-", "part-b-", "part-c-"]
         model, tracker = build_slow_stream_model(chunks=chunks, delay_s=0.05)
@@ -633,7 +633,7 @@ class AgentRunnerHistoryTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("final", {event.get("type") for event in events_out})
 
     async def test_run_stream_normal_complete_does_not_snapshot_after_full_persist(self) -> None:
-        from tests.integration.helpers.models import build_slow_stream_model
+        from tests.helpers.models import build_slow_stream_model
 
         chunks = ["only-reply"]
         model, _ = build_slow_stream_model(chunks=chunks, delay_s=0.01)

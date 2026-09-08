@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from deep_agent.db.ids import normalize_provider_id
-from deep_agent.agent.provider_registry import model_unavailable_reason
+from deep_agent.models.provider_registry import model_unavailable_reason
 from deep_agent.time import UtcDatetime
 
 if TYPE_CHECKING:

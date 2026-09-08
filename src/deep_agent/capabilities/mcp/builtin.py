@@ -11,7 +11,7 @@ from deep_agent.capabilities.registry import ToolPackage
 
 @functools.lru_cache(maxsize=None)
 def load_builtin_mcp_tool_packages(mcps_dir: str) -> list[ToolPackage]:
-    """Discover builtin MCP servers shipped under ``mcps/``.
+    """Discover builtin MCP servers shipped under ``mcp_servers/``.
 
     Each immediate subdirectory containing a ``server.py`` becomes one MCP
     tool package, launched lazily as a shared HTTP server in the pod.

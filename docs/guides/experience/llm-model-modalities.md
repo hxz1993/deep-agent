@@ -166,8 +166,8 @@ OpenRouter、Azure、Bedrock、Vertex 和长尾 Gateway 暂不进入目录。白
 | --- | --- |
 | 目录 ORM | `src/deep_agent/db/models.py` 的 `ModelCatalog` |
 | 目录 Store | `src/deep_agent/db/stores/model_catalog/` |
-| models.dev 获取 | `src/deep_agent/agent/models/models_dev.py` |
-| 标准化与视图 | `src/deep_agent/agent/models/catalog.py` |
+| models.dev 获取 | `src/deep_agent/models/models_dev.py` |
+| 标准化与视图 | `src/deep_agent/models/catalog.py` |
 | API | `src/deep_agent/api/v1/llm_models.py` |
 | 运行时模态 | `src/deep_agent/agent/attachments.py`、`input_capabilities.py` |
 | Console | `console/configuration/catalog.js`、`llm-models.js` |

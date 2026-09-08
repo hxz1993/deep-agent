@@ -12,7 +12,7 @@ from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
-from deep_agent.lib.const import MCP_REGISTRY_JSON_ENV, MCP_SERVER_TTL_ENV
+from deep_agent.core.mcp_constants import MCP_REGISTRY_JSON_ENV, MCP_SERVER_TTL_ENV
 
 
 def _registry_mtime_age(path: Path) -> float | None:

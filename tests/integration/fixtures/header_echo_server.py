@@ -12,7 +12,7 @@ from mcp.server.fastmcp import Context, FastMCP
 
 mcp = FastMCP("header-echo")
 
-# Keep in sync with deep_agent.lib.const.REQUEST_HEADERS_ENV (standalone subprocess).
+# Keep in sync with deep_agent.core.mcp_constants.REQUEST_HEADERS_ENV (standalone subprocess).
 _STARTUP_HEADERS_RAW = os.environ.get("DEEP_AGENT_MCP_REQUEST_HEADERS")
 
 
@@ -64,7 +64,7 @@ def _record_headers(headers: dict[str, str]) -> None:
 
 @mcp.tool()
 def echo_startup_headers() -> str:
-    """Return HTTP headers injected at subprocess startup (see deep_agent.lib.const)."""
+    """Return HTTP headers injected at subprocess startup (see deep_agent.core.mcp_constants)."""
     return _STARTUP_HEADERS_RAW or "{}"
 
 

@@ -21,7 +21,7 @@ TestClient (HTTP)
 ### 1. 用 TestClient + TestModel，不要调真 LLM
 
 ```python
-from tests.integration.helpers.models import text_only_model, tool_call_model
+from tests.helpers.models import text_only_model, tool_call_model
 
 # 纯文本回复（不调用任何 tool）
 test_model = text_only_model("ok")
@@ -31,7 +31,7 @@ test_model = tool_call_model("builtin__confirm", text="done after confirm")
 ```
 
 - `TestModel` 默认 `call_tools='all'`，会调用 Agent 实际挂载的**每一个** tool。UI 工具必须通过 `capabilities` 选择所属工具包，例如 `ui:builtin` 或 `ui:deepcube`；`null`只使用默认包，`[]` 不挂载任何可选包。
-- `text_only_model` / `tool_call_model`：见 [`helpers/models.py`](helpers/models.py)。
+- `text_only_model` / `tool_call_model`：见共享 [`../helpers/models.py`](../helpers/models.py)，单元与集成测试使用同一组模型替身。
 - `custom_output_text`：tool 执行后的最终回复文本。
 
 ### 2. 不要用 `main.app` 直接做 TestClient
@@ -101,7 +101,10 @@ stdio 读 `ctx.request_context.meta.headers`；HTTP MCP 读连接上的 request 
 
 | 路径 | 说明 |
 |------|------|
-| [`helpers/chat.py`](helpers/chat.py) | TestClient、TestModel、最小 app |
+| [`../helpers/`](../helpers/) | 跨测试组共享身份、SQLite Stores、模型替身等 |
+| [`../fixtures/`](../fixtures/) | 共用样本与测试专用 builtin MCP 扫描目录 |
+| [`helpers/chat.py`](helpers/chat.py) | TestClient、SSE、最小 app 与 context 生命周期 |
+| [`../helpers/models.py`](../helpers/models.py) | 共用 TestModel / FunctionModel 构造器 |
 | [`helpers/session_seed.py`](helpers/session_seed.py) | 灌入会话 fixture、`wait_for_session_title` |
 | [`helpers/export_session_fixture.py`](helpers/export_session_fixture.py) | 从 DB 导出会话 JSON fixture |
 | [`helpers/mcp.py`](helpers/mcp.py) | 直接调 toolset、启动 HTTP echo 子进程 |

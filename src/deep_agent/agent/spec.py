@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from deep_agent.agent.provider_registry import ProviderRuntimeConfig
+from deep_agent.models.provider_registry import ProviderRuntimeConfig
 from deep_agent.capabilities.codes import canonical_tool_package_codes
 from deep_agent.db.models import Agent, LlmModel, LlmProvider
 

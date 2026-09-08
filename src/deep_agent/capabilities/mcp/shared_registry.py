@@ -15,7 +15,7 @@ from loguru import logger
 import psutil
 
 from deep_agent.capabilities.mcp.builtin_config import resolve_builtin_spawn_config
-from deep_agent.lib.const import MCP_REGISTRY_JSON_ENV, MCP_SERVER_TTL_ENV
+from deep_agent.core.mcp_constants import MCP_REGISTRY_JSON_ENV, MCP_SERVER_TTL_ENV
 from deep_agent.core.paths import REPO_ROOT, SOURCE_ROOT
 from deep_agent.options import OPTION
 

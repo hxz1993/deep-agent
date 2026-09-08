@@ -1,10 +1,30 @@
-# DeepAgent 配置备份
-
-这个维护命令把一个 DeepAgent 环境的配置导出为单个 SQLite `.db` 文件。
-文件可以直接用 DBeaver 打开，也可以复制后作为本地 DeepAgent 数据库使用。
+# DeepAgent 维护命令
 
 维护程序唯一源码位于 `src/maintenance/`。下列命令从仓库根执行，并用 `PYTHONPATH=src`
 加载与本地服务、部署镜像相同的 Python 包；根目录不保留维护程序的兼容入口。
+这些程序由开发或运维人员显式执行，不注册为 Agent 工具。
+
+| 模块入口 | 用途与执行边界 |
+| --- | --- |
+| [`maintenance.config_backup`](config_backup.py) | 按源 Revision 导出配置 SQLite，保留凭据；会话和渠道运行事实只保留结构 |
+| [`maintenance.session_history_backup`](session_history_backup.py) | 归档历史 Revision 007 会话与完整性证据；不是通用恢复命令，也不是当前服务可直接挂载的数据库 |
+| [`maintenance.rebaseline_database`](rebaseline_database.py) | 校验历史 012 物理结构并受控改标到基线 001；默认只读，正式执行必须遵循下方停机、备份和发布顺序 |
+| [`maintenance.channel_origins`](channel_origins.py) | 修复本地 SQLite 渠道来源、标题及旧 Peer 类型；默认 dry-run，`--apply` 前停止 API/Gateway，命令先创建私有完整备份，不运行 Alembic |
+| [`maintenance.channel_peer_metadata`](channel_peer_metadata.py) | 修正未发布 002 的本地 SQLite Binding 结构与 Peer 元数据；默认只读，`--apply` 仅用于已停服务的本地库，先创建私有备份，再在事务内修改和核验 |
+
+查看任一命令的参数时，使用对应模块入口，例如：
+
+```bash
+PYTHONPATH=src python3.12 -m maintenance.channel_origins --help
+```
+
+配置、会话归档与修复前备份都可能包含敏感信息，不提交 Git。两个渠道修复命令只接受明确指定的
+本地 SQLite 文件，不用它们代替共享环境迁移，也不因整理代码目录而执行。
+
+## 配置备份
+
+这个维护命令把一个 DeepAgent 环境的配置导出为单个 SQLite `.db` 文件。
+文件可以直接用 DBeaver 打开，也可以复制后作为本地 DeepAgent 数据库使用。
 
 ```bash
 PYTHONPATH=src python3.12 -m maintenance.config_backup \

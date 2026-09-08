@@ -2,7 +2,7 @@
 
 > 首次整理：2026-08-21
 >
-> 当前状态：轻量企业控制台视觉体系已在 `console/` 持续落地；用户保留的统一侧边栏原型归档在本课题目录，生产页面仍以 `console/` 为准。
+> 当前状态：轻量企业控制台视觉体系已在 `console/` 持续落地；保留的统一侧边栏与 0825 单层导航原型归档在本课题目录，生产页面仍以 `console/` 为准。
 
 本课题记录 DeepAgent bundled Console 的界面架构、视觉规则、关键交互和原型取舍。
 它只约束 Console 前端呈现，不修改 REST、SSE、History、数据库或工具协议。
@@ -10,6 +10,7 @@
 - [`console-ui-design.md`](console-ui-design.md)：当前有效的页面架构、视觉 token、组件模式和实现映射。
 - [`prototype-decisions.md`](prototype-decisions.md)：原型来源、采用内容、舍弃方向和后续原型约定。
 - [`Prototype DeepAgent 统一侧边栏/`](<Prototype DeepAgent 统一侧边栏/>)：用户保留的统一侧边栏原型，从仓库根移入，不属于生产静态资源。
+- [`Prototype DeepAgent 0825 单层导航方案/`](<Prototype DeepAgent 0825 单层导航方案/>)：四种单层导航方案的独立 HTML 对比原型，从 `console/prototypes/` 移入，不依赖产品资源或业务 API。
 - [`../../guides/console-ui-guidelines.md`](../../guides/console-ui-guidelines.md)：后续修改 Console UI 时必须执行的实施与验收规范。
 
 ## 一句话方向

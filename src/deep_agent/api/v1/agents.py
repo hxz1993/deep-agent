@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from deep_agent.agent.context.estimator import TokenEstimator
-from deep_agent.agent.provider_registry import (
+from deep_agent.models.provider_registry import (
     ProviderRuntimeConfig,
     ProviderRuntimeError,
     effective_base_url,

@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from deep_agent.api.v1.deps import build_runner_for_agent
-from deep_agent.agent.provider_registry import ProviderConfigurationError
+from deep_agent.models.provider_registry import ProviderConfigurationError
 from deep_agent.core.exceptions import AgentNotFoundError, LlmModelNotFoundError
 from deep_agent.db.models import Agent, ChatSession, LlmModel
 

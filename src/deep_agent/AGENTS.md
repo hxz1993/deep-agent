@@ -16,6 +16,7 @@
 | 启动与全局状态 | `main.py` → `core/context.py` |
 | 对话入口 | `api/v1/chat.py` |
 | Agent 执行 | `agent/runner.py` |
+| 模型与 Provider 适配、目录标准化 | `models/`；CRUD 编排在 `services/llm_configuration.py` |
 | 能力注册 | `capabilities/__init__.py` |
 | 配置解析 | `options.py`（`OPTION` + accessor）；DB URL 见 `db/url.py` |
 | MCP 加载 | `capabilities/mcp/resolver.py`、`db_loader.py`、`builtin.py` |
@@ -186,7 +187,7 @@ DeepAgent 自研 `capabilities.registry.ToolPackage` 是产品配置单位，包
 
 URL 与 Builtin MCP 的运行态不同：URL MCP 在管理员检测时保存 Tool Definitions 和 Server Instructions，Run 只读快照，首次真实调用时才创建官方 `MCPToolset`；Builtin MCP 仍由 Run-scoped Client 按需启动。两者最终工具名都由 `PrefixedToolset` 统一加 Server 前缀。缺少或配置失效的 URL 快照不披露工具，也不会因远端不可达阻塞普通聊天。
 
-v0.6.2起的 Hybrid Code Mode 实现位于 `code_mode/`；v0.6.3增加可信返回Schema、
+v0.6.2起的 Hybrid Code Mode 实现位于 `ptc/`；v0.6.3增加可信返回Schema、
 总量受限的嵌套审计和更明确的SDK作用域说明。产品配置单位仍是
 `builtin:ptc` ToolPackage，运行时由 `HybridCodeMode` Capability 在最外层包装
 ToolSearch。只有已授权 MCP Toolset 会被标记为 Hybrid；已披露工具保留原生 Schema，
@@ -280,7 +281,7 @@ XML + JSON 投影。业务字段语义仍由具体 Agent Prompt 负责。
 | `history.py` | 模型历史过滤、取消修复和运行时辅助；不生成前端 DTO |
 | `../conversation/` | Event → `ConversationItem`纯投影；供`/history`与持久化SSE共用 |
 | `factory.py` | `build_agent()` — model 字符串或 OpenAI 兼容 endpoint |
-| `models/` | models.dev 管理员刷新、目录标准化和 Provider/模型适配 |
+| `../models/` | API、配置服务与 Agent 共用的 Provider/模型适配及 models.dev 目录解析 |
 | `attachment_extractors.py` | 文本、DOCX、XLSX 按需解析、分页与文件安全限制 |
 | `attachments.py` | 会话附件引用、原生模态校验和平台下载 |
 | `runner.py` | `run()` / `run_stream()` — 会话锁、history、事件映射 |
@@ -294,7 +295,7 @@ XML + JSON 投影。业务字段语义仍由具体 Agent Prompt 负责。
 | 路径 | 职责 |
 | --- | --- |
 | `registry.py` | `ToolInfo` / `ToolPackage` / `ToolPackageRegistry` |
-| `native/builtin.py` | 内置“通用工具”，当前提供 `get_current_time` |
+| `general/builtin.py` | 内置“通用工具”，当前提供 `get_current_time` |
 | `mcp/db_loader.py` | 从 `mcp_servers` 构建 MCP ToolPackage 与快照 Toolset |
 | `mcp/builtin.py` | 发现 `mcp_servers/<name>/server.py` |
 | `mcp/toolset_builder.py` | url / stdio / builtin + header 注入 |

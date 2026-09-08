@@ -7,13 +7,13 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile, status
 
-from deep_agent.agent.models.catalog import (
+from deep_agent.models.catalog import (
     CatalogValidationError,
     build_catalog_page,
     export_models_dev_catalog,
     normalize_models_dev_bundle,
 )
-from deep_agent.agent.models.models_dev import (
+from deep_agent.models.models_dev import (
     ModelsDevCatalogError,
     ModelsDevFetchError,
     fetch_models_dev_bundle,

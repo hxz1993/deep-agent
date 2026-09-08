@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from deep_agent.agent.provider_registry import PROVIDER_TYPES, provider_type_definition
+from deep_agent.models.provider_registry import PROVIDER_TYPES, provider_type_definition
 from deep_agent.api.v1.admin import CONSOLE_ADMIN_DEPENDENCIES
 from deep_agent.db.deps import get_llm_configuration_service
 from deep_agent.db.ids import normalize_provider_id

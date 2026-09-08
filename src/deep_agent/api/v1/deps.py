@@ -13,7 +13,7 @@ from deep_agent.agent.runner import AgentRunner
 from deep_agent.agent.tool_output_limits import build_tool_output_limits
 from deep_agent.agent.history_tools import build_history_toolset
 from deep_agent.agent.spec import DEFAULT_INSTRUCTIONS, AgentSpec
-from deep_agent.agent.provider_registry import (
+from deep_agent.models.provider_registry import (
     ProviderRuntimeError,
     effective_base_url,
     load_provider_for_model,

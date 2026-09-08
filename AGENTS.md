@@ -12,7 +12,7 @@
 | 项 | 内容 |
 | --- | --- |
 | **是什么** | 通用 AI Agent 全栈：FastAPI 后端 + Pydantic AI 运行时 + 静态前端 |
-| **产品版本** | `deep_agent.__version__`为唯一来源；当前`0.8.3`，数据库Head为`002` |
+| **产品版本** | `deep_agent.__version__`为唯一来源；当前`0.8.4`，数据库Head为`002` |
 | **启动** | 本地 Test 联调固定使用下方命令；部署入口才使用 `deep_agent.main:app` |
 | **测试** | `PYTHONPATH=src python3.12 -m unittest discover -s tests -p "test_*.py" -v` |
 | **配置** | 仓库根 `.env`（`DEEP_AGENT_*` / `DEEP_AGENT_DBMS_*` / `DEEP_AGENT_SQLITE_PATH`） |
@@ -120,6 +120,16 @@ v0.8.3 完成目录收敛，本地与线上都从同一份 `src/` 加载 Python 
 原型归入 `docs/design/17-console-ui/`，原始 Jenkins 脚本只在 `docs/archive/jenkins/` 归档；
 `data/`、`.venv` 和 `.venv-sandbox` 保留；临时验证按需创建 `tmp/`，任务结束清理，不长期保留空目录。
 详见 [`项目结构指南`](docs/guides/project-structure.md)。
+
+目录按职责命名，不为外观一致移动公开 CLI、协议名或持久化字段。共享模型支持在
+`src/deep_agent/models/`，程序编排在 `ptc/`，通用工具在 `capabilities/general/`；
+Gateway 不保留指向企微 Adapter 的旧转发模块。原型不得放在生产 `console/` 静态目录，
+跨 unit/integration 的公共模型替身使用 `tests/helpers/models.py`。调整路径后同时检查
+真实空目录、导入/子进程路径、文档和 `test_project_layout.py`，不要只看 Git 的文件状态。
+
+2026-09-08 用户同步运维现状：Alpha 与 Test 均使用 `python -m deep_agent.combined_runtime`
+和 `PYTHONPATH=/deep-agent/src`，同时运行 API 与企微网关。v0.8.4 保持该入口和线上流水线不变；
+不要再默认 Alpha 为仅 API 模式。该记录来自用户提供的部署信息，不替代线上健康验收。
 
 ---
 

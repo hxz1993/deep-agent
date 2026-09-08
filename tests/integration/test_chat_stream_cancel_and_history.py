@@ -27,7 +27,7 @@ from tests.helpers.sqlite_stores import (
     seed_default_agent,
 )
 from tests.integration.helpers.chat import mock_request_disconnect, parse_sse_buffer, parse_sse_events
-from tests.integration.helpers.models import build_slow_stream_model, text_only_model, tool_call_model
+from tests.helpers.models import build_slow_stream_model, text_only_model, tool_call_model
 
 _CHAT_JSON = {"capabilities": []}
 _CONFIRM_CAPABILITIES = ["ui:builtin"]

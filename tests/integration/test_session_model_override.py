@@ -21,7 +21,7 @@ from tests.helpers.sqlite_stores import (
     make_sqlite_stores,
 )
 from tests.integration.helpers.chat import mock_request_disconnect, parse_sse_events
-from tests.integration.helpers.models import text_only_model
+from tests.helpers.models import text_only_model
 
 
 _VALID_COMPACTION_SUMMARY = """## 1. Primary Request and Intent

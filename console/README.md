@@ -44,6 +44,9 @@ Console 使用原生 HTML、CSS 和 JavaScript ES Modules，不需要 npm 构建
 `console/` 是唯一前端源码目录，旧 `frontend/` 已移除。前端测试仍放在 `tests/frontend/console/`，
 它是测试分类目录，不是产品源码的兼容入口。
 
+交互原型统一保存在 [`Console UI 设计课题`](../docs/design/17-console-ui/README.md)，包括
+统一侧边栏和 0825 单层导航方案；`console/` 不放原型，避免随正式静态路由对外发布。
+
 压缩过程由后端状态和 SSE 驱动，自动与主动压缩复用消息区中的独立过程条；普通历史聊天默认隐藏
 完成标记，轨迹保留实际发生位置。前端只展示后端预算和压缩结果，不实现压缩策略或编辑摘要正文。
 具体交互与模块边界以 [`AGENTS.md`](AGENTS.md) 为准。

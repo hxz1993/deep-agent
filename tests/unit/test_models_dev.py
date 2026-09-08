@@ -7,7 +7,7 @@ import unittest
 
 import httpx
 
-from deep_agent.agent.models.models_dev import (
+from deep_agent.models.models_dev import (
     ModelsDevCatalogError,
     ModelsDevFetchError,
     fetch_models_dev_bundle,

@@ -12,7 +12,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from deep_agent.capabilities.mcp.shared_registry import McpSharedRegistry, shared_mcp_identity
 from deep_agent.core.paths import REPO_ROOT, SOURCE_ROOT
-from deep_agent.lib.const import MCP_REGISTRY_JSON_ENV, MCP_SERVER_TTL_ENV
+from deep_agent.core.mcp_constants import MCP_REGISTRY_JSON_ENV, MCP_SERVER_TTL_ENV
 
 
 class SharedRegistryTests(unittest.TestCase):

@@ -1,5 +1,5 @@
-from deep_agent.code_mode.capability import HybridCodeMode
-from deep_agent.code_mode.file_payload import (
+from deep_agent.ptc.capability import HybridCodeMode
+from deep_agent.ptc.file_payload import (
     CODE_MODE_CODE_ONLY,
     CODE_MODE_HYBRID,
     FilePayloadResolvingToolset,

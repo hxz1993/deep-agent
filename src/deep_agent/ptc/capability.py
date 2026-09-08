@@ -7,7 +7,7 @@ from pydantic_ai.messages import SystemPromptPart
 from pydantic_ai_harness import CodeMode
 
 from deep_agent.agent.deps import AgentDeps
-from deep_agent.code_mode.toolset import DISCOVERY_POLICY, HybridCodeModeToolset
+from deep_agent.ptc.toolset import DISCOVERY_POLICY, HybridCodeModeToolset
 
 
 class HybridCodeMode(CodeMode[AgentDeps]):

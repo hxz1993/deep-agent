@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 
 from deep_agent.agent.context.budget import build_context_budget
 from deep_agent.agent.context.estimator import TokenEstimator
-from deep_agent.agent.provider_registry import (
+from deep_agent.models.provider_registry import (
     ProviderRuntimeConfig,
     effective_base_url,
     load_provider_for_model,

@@ -76,13 +76,13 @@ class UIRetryPersistenceTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(any(e["type"] == "tool_call" for e in events))
         self.assertEqual(self.registry.active_count(), 0)
         stored = await self.store.list_events(session, limit=100)
-        failed = [e for e in stored if e.event_type == "assistant/message" and e.status == "failed"]
-        self.assertEqual(len(failed), 1)
-        diagnostic = failed[0].payload["message"]["metadata"]["deepagent_error"]
+        failures = [e for e in stored if e.event_type == "execution/error"]
+        self.assertEqual(len(failures), 1)
+        diagnostic = failures[0].payload
         self.assertEqual(diagnostic["code"], "tool_retry_exhausted")
-        self.assertEqual(diagnostic["tool"], "builtin__confirm")
-        self.assertEqual(diagnostic["max_retries"], 3)
-        self.assertEqual(diagnostic["error_type"], "UnexpectedModelBehavior")
+        self.assertEqual(diagnostic["phase"], "tool_validation")
+        self.assertIn("builtin__confirm", diagnostic["message"])
+        self.assertIn("3", diagnostic["message"])
         history = project_session_events(stored, session_id=session)
         tools = [i for i in history.items if i.kind == "tool"]
         self.assertEqual([(i.status, i.outcome) for i in tools], [("failed", "failed")])
@@ -115,8 +115,10 @@ class UIRetryPersistenceTests(unittest.IsolatedAsyncioTestCase):
         await asyncio.wait_for(self._collect(self._runner(invalid_stream, toolset=toolset), session), 5)
         stored = await self.store.list_events(session, limit=100)
         self.assertNotIn(secret, json.dumps([e.public_dict() for e in stored], default=str))
-        failed = next(e for e in stored if e.event_type == "assistant/message" and e.status == "failed")
-        self.assertEqual(failed.payload["message"]["metadata"]["deepagent_error"]["code"], "tool_retry_exhausted")
+        failures = [e for e in stored if e.event_type == "execution/error"]
+        self.assertEqual(len(failures), 1)
+        self.assertEqual(failures[0].payload["code"], "tool_retry_exhausted")
+        self.assertEqual(failures[0].payload["phase"], "tool_validation")
 
     async def test_execution_exception_closes_published_card_without_persisting_secret(self):
         secret = "synthetic-provider-secret-do-not-store"
@@ -142,8 +144,9 @@ class UIRetryPersistenceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.registry.active_count(), 0)
         stored = await self.store.list_events(session, limit=100)
         self.assertNotIn(secret, json.dumps([e.public_dict() for e in stored], default=str))
-        failed = next(e for e in stored if e.event_type == "assistant/message" and e.status == "failed")
-        self.assertEqual(failed.payload["message"]["metadata"]["deepagent_error"]["code"], "agent_run_failed")
+        failures = [e for e in stored if e.event_type == "execution/error"]
+        self.assertEqual(len(failures), 1)
+        self.assertEqual(failures[0].payload["code"], "agent_run_failed")
         history = project_session_events(stored, session_id=session)
         tool = next(item for item in history.items if item.kind == "tool")
         self.assertEqual((tool.status, tool.outcome), ("failed", "failed"))

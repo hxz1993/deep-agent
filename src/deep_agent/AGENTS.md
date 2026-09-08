@@ -26,15 +26,20 @@
 
 ## 架构与数据流
 
-### v0.8.0 运行中持久化
+### v0.8.5 真实事件及时持久化
 
-`agent/run_progress.py`通过 SDK 公开 Capability 节点和工具事件保存运行快照，
-`db/conversation.py`以短事务写同一 Event Store 的 `run/progress`，不能排队等待整个 Run 的逻辑锁。
-正式阶段/已接受工具/结果及时提交，半段约 1 秒节流；官方节点 ledger 在压缩后仍保留当前 Run 的早期轮次。
-最终正式消息与检查点封口必须同事务完成，不把预览或未知结果伪造成成功，不重复保存终态。
-`db/run_ownership.py`保护活 Run 与租约；重启恢复只标中断，不自动重跑工具或渠道投递。
-运行快照不进入 LLM History，Deferred 仅正式持久化待操作状态才可执行。详见
-[`../../docs/guides/run-progress-persistence.md`](../../docs/guides/run-progress-persistence.md)。
+`agent/message_persistence.py`通过 SDK 公开节点和已接受工具事件插入真实消息内容，
+采用短数据库事务，不能等待整个 Run 的逻辑锁；不新增运行快照、计数回执或正常结束事件。
+完整助手阶段、已接受调用及每个已完成结果及时提交，以来源消息和部分身份去重并归组读取。
+半段流式文本仅保留在当前 SSE；正常取消/异常时尽力保存 SDK 已返回的部分内容，强杀不承诺半段恢复。
+异常终止只记一次有原因的 `execution/error`，工具可恢复失败只记录自身结果，主动停止不新增异常。
+已发布旧 RUN 数据原样保留，不增加解析/恢复兼容；Deferred 仅正式待操作状态可交互。详见
+[`真实事件保存说明`](../../../docs/guides/message-event-persistence.md)。
+
+`core/session_live.py`只在API进程内有界转发已有POST SSE，`GET /sessions/{id}/live`必须指定当前
+`run_id`并校验会话归属。订阅只活到该轮结束；观察连接断开不触发CancellationToken，空闲不订阅。
+先订阅缓冲再读History，以基线Sequence和Run归属去重；溢出退回该轮历史轮询，不拼接残缺回放。
+不得为观察流恢复RUN落库、增加另一个模型执行或跨进程持久化系统。
 
 ```
 HTTP (REST/SSE)
@@ -151,6 +156,7 @@ Pydantic AI `CancellationToken`。Runner 捕获 `RunCancelled` 后只持久化
 普通工具在参数校验后发布 `tool_call`；若业务执行返回 Pydantic AI `ModelRetry`，对应官方
 `RetryPromptPart` 必须映射为 `tool_call_removed(reason=model_retry)`。客户端按
 `tool_call_id` 删除临时卡片，修正后的新调用再按新的 ID 正常展示。
+0.8.5 起已接受并实际执行的业务重试仍保留调用及脱敏结果事实；未通过参数校验的中间纠错不保存成正式调用或孤儿结果。历史归组不能跨轮合并复用的调用 ID。
 
 工具错误需按可纠正性分类：参数、对象选择或工具选择错误使用 `ModelRetry`；同样参数重试也
 不会成功的下载、文件损坏、解析、大小上限或明确上游失败使用 `ToolFailed`。两者都由
@@ -209,8 +215,8 @@ Web图片在当前`agent.run()`内部保持原生视觉结果；写入Event Stor
 直接`web_fetch`二进制图片仍走原有`BinaryContent`与ToolOutputLimits，本版本不得修改大工具治理。
 
 流式Run在模型或工具链最终异常时，必须从Pydantic AI `AgentRunEvents`实时句柄保存已经产生的
-`new_messages/all_messages/usage`；最后一条Assistant Event标记`failed`并修复悬空Tool Call。只有
-模型尚未产生Assistant时才保存独立`run/terminal`，不得把已直播的工具轨迹丢掉而只留下User Event。
+`new_messages/all_messages/usage`；仅保存尚未入库的真实内容并标记必要失败状态，已完成内容不得回滚。
+执行终止异常记录 `execution/error`，不依赖是否已有Assistant，不得把已完成的工具轨迹丢掉。
 
 新增横切能力时遵循：
 

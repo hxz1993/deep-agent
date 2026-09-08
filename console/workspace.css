@@ -582,6 +582,7 @@ html, body {
 .trajectory-kind.code { background: #e8f1ff; color: #3156c8; }
 .trajectory-kind.planning { background: #e7f7f4; color: #078573; }
 .trajectory-kind.deferred { background: #fff5df; color: #b45309; }
+.trajectory-kind.error { background: var(--danger-soft); color: var(--danger-text); }
 .trajectory-row-meta { display: flex; align-items: center; justify-content: flex-end; gap: 7px; padding-left: 8px; white-space: nowrap; }
 .trajectory-row-meta time { color: var(--text-faint); font-family: var(--mono); font-size: 12px; }
 .trajectory-row-meta em { font-size: 12px; font-style: normal; color: var(--text-faint); }

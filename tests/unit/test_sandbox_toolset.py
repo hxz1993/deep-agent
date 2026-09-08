@@ -188,7 +188,6 @@ class SandboxBootstrapHardGateTests(unittest.IsolatedAsyncioTestCase):
         fake_bundle.dialect.value = "sqlite"
         fake_bundle.stores = MagicMock()
         fake_bundle.stores.coordinator.interrupt_running = AsyncMock(return_value=0)
-        fake_bundle.stores.coordinator.recover_running_progress = AsyncMock(return_value=0)
         fake_bundle.engine = MagicMock()
         fake_bundle.session_factory = MagicMock()
 
@@ -213,7 +212,7 @@ class SandboxBootstrapHardGateTests(unittest.IsolatedAsyncioTestCase):
                     await AppContext.bootstrap()
             self.assertIn("pandas", str(ctx.exception))
             self.assertIn("/tmp/fake-sandbox-python", str(ctx.exception))
-            fake_bundle.stores.coordinator.recover_running_progress.assert_awaited_once_with()
+            fake_bundle.stores.coordinator.interrupt_running.assert_awaited_once_with()
         finally:
             OPTION.agent.sandbox_enabled = previous
             reset_context()
@@ -227,7 +226,6 @@ class SandboxBootstrapHardGateTests(unittest.IsolatedAsyncioTestCase):
         fake_bundle.dialect.value = "sqlite"
         fake_bundle.stores = MagicMock()
         fake_bundle.stores.coordinator.interrupt_running = AsyncMock(return_value=0)
-        fake_bundle.stores.coordinator.recover_running_progress = AsyncMock(return_value=0)
         fake_bundle.engine = MagicMock()
         fake_bundle.session_factory = MagicMock()
         persister = MagicMock()
@@ -257,11 +255,8 @@ class SandboxBootstrapHardGateTests(unittest.IsolatedAsyncioTestCase):
             verify.assert_not_awaited()
             self.assertIsNone(ctx.sandbox_backend)
             self.assertIsNone(ctx.sandbox_profile)
-            fake_bundle.stores.coordinator.recover_running_progress.assert_awaited_once_with()
+            fake_bundle.stores.coordinator.interrupt_running.assert_awaited_once_with()
         finally:
-            if ctx is not None and ctx._recovery_task is not None:
-                ctx._recovery_task.cancel()
-                await asyncio.gather(ctx._recovery_task, return_exceptions=True)
             OPTION.agent.sandbox_enabled = previous
             reset_context()
 

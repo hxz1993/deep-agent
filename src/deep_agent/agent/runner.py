@@ -20,7 +20,7 @@ from pydantic_ai import (
     DeferredToolResults,
     RunContext,
 )
-from pydantic_ai.exceptions import RunCancelled, UnexpectedModelBehavior
+from pydantic_ai.exceptions import RunCancelled, UnexpectedModelBehavior, ModelHTTPError, UsageLimitExceeded
 from pydantic_ai.messages import (
     FunctionToolCallEvent,
     FunctionToolResultEvent,
@@ -64,7 +64,7 @@ from deep_agent.agent.attachments import (
 from deep_agent.agent.deferred import serialize_deferred
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.event_persister import EventPersister, PersistEvent
-from deep_agent.agent.run_progress import RunProgressCapability, StreamRunProgressCapability
+from deep_agent.agent.message_persistence import MessagePersistenceCapability, StreamMessagePersistenceCapability, MessagePersistenceError
 from deep_agent.db.run_ownership import live_run
 from deep_agent.agent.limits import format_stream_error
 from deep_agent.agent.observability import (
@@ -79,6 +79,7 @@ from deep_agent.agent.planning import (
     attach_plan_snapshot,
     current_plan_snapshot,
     is_planning_tool,
+    plan_snapshot_from_part,
     prepare_plan_store,
     restore_plan_snapshot,
 )
@@ -113,9 +114,24 @@ def _safe_run_failure(exc: Exception) -> dict[str, Any]:
     diagnostic: dict[str, Any] = {
         "code": "agent_run_failed",
         "error_type": error_type if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,79}", error_type) else "Exception",
-        "message": "本轮执行失败，已保存已产生的记录。",
+        "message": f"执行发生 {error_type if re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]{0,79}', error_type) else 'Exception'}，本轮已停止。",
+        "phase": "agent",
     }
+    if isinstance(exc, MessagePersistenceError):
+        diagnostic.update(code="message_persistence_failed", phase="persistence",
+                          message="已完成内容写入失败，本轮已停止；不能确认本次写入已保存。")
+    elif isinstance(exc, TimeoutError):
+        diagnostic.update(code="execution_timeout", phase="execution",
+                          message="执行等待超时，本轮已停止。")
+    elif isinstance(exc, ModelHTTPError):
+        diagnostic.update(code="provider_http_error", phase="provider",
+                          message=f"模型服务返回 HTTP {exc.status_code}，本轮已停止。")
+    elif isinstance(exc, UsageLimitExceeded):
+        diagnostic.update(code="usage_limit_exceeded", phase="model",
+                          message="模型请求或用量达到执行上限，本轮已停止。")
     if isinstance(exc, UnexpectedModelBehavior):
+        diagnostic.update(code="unexpected_model_behavior", phase="model",
+                          message="模型返回未满足执行协议，本轮已停止。")
         match = re.match(
             r"Tool '([A-Za-z0-9_.:-]{1,200})' exceeded max retries count of ([0-9]{1,6})\.",
             str(exc),
@@ -125,7 +141,8 @@ def _safe_run_failure(exc: Exception) -> dict[str, Any]:
                 code="tool_retry_exhausted",
                 tool=match.group(1),
                 max_retries=int(match.group(2)),
-                message="工具参数纠错次数已达上限，本轮已停止；可以补充要求后继续。",
+                phase="tool_validation",
+                message=f"工具 {match.group(1)} 参数纠错次数已达上限（{match.group(2)} 次），本轮已停止；可以补充要求后继续。",
             )
     return diagnostic
 
@@ -330,23 +347,27 @@ class AgentRunner:
         started_at: float,
         usage: RunUsage | None,
         error: str | None = None,
+        exception: BaseException | None = None,
+        phase: str | None = None,
     ):
-        if status not in {"failed", "cancelled", "interrupted"}:
+        if status not in {"failed", "interrupted"}:
             return None
         deps = run_event.deps
-        append_terminal = getattr(self.store, "append_terminal", None)
-        if not callable(append_terminal):
+        append_error = getattr(self.store, "append_execution_error", None)
+        if not callable(append_error):
             return None
         payload = {
-            "mode": run_event.mode,
-            "model_id": self._model_id,
-            "duration_ms": max(0, round((time.perf_counter() - started_at) * 1_000)),
-            "usage": _run_usage_dict(usage),
-            "error": {"code": error} if error else None,
+            "code": error or ("execution_interrupted" if status == "interrupted" else "agent_run_failed"),
+            "message": "执行意外中断，已保留已完成的内容。" if status == "interrupted" else "本轮执行失败，请查看异常分类和服务日志。",
+            "phase": "agent",
         }
+        if isinstance(exception, Exception):
+            payload = _safe_run_failure(exception)
+        if phase:
+            payload["phase"] = phase
         try:
             async with asyncio.timeout(_TERMINAL_WRITE_TIMEOUT):
-                return await append_terminal(
+                return await append_error(
                     run_event.session_id,
                     status=status,
                     agent_id=deps.agent_id,
@@ -358,9 +379,9 @@ class AgentRunner:
                     payload=payload,
                 )
         except Exception as exc:
-            # A second DB failure must not hide the original error/cancel SSE or
+            # A second DB failure must not hide the original error SSE or
             # prevent the active-run registry from being released.
-            logger.error("Run terminal persistence failed session={} error={}",
+            logger.error("Execution error persistence failed session={} error={}",
                          run_event.session_id, type(exc).__name__)
             return None
 
@@ -373,8 +394,10 @@ class AgentRunner:
         part = event.part
         if not isinstance(part, ToolReturnPart) or not is_planning_tool(part.tool_name):
             return
-        snapshot = await current_plan_snapshot(deps)
-        attach_plan_snapshot(part, snapshot)
+        snapshot = plan_snapshot_from_part(part)
+        if snapshot is None:
+            snapshot = await current_plan_snapshot(deps)
+            attach_plan_snapshot(part, snapshot)
         if part.tool_call_id:
             deps.plan_snapshots[part.tool_call_id] = snapshot
 
@@ -1222,23 +1245,21 @@ class AgentRunner:
                 })
         return True
 
-    async def _finish_progress_fallback(self, session_id: str, deps: AgentDeps, *, status: str) -> bool:
-        """Best-effort atomic promotion of the last committed checkpoint.
-
-        Do not claim the in-memory final answer was saved if its write failed.
-        This only ensures already durable work no longer appears to be running.
-        """
-        finish = getattr(self.store, "finish_run_progress", None)
-        if not callable(finish):
+    async def _close_saved_messages(self, session_id: str, deps: AgentDeps, *, status: str) -> bool:
+        """Close statuses on real persisted messages without snapshots or replay."""
+        append = getattr(self.store, "append_message_parts", None)
+        if not callable(append):
             return False
         try:
             async with asyncio.timeout(_TERMINAL_WRITE_TIMEOUT):
-                return await finish(
+                await append(
                     session_id, agent_id=deps.agent_id, user_id=deps.user,
-                    turn_id=deps.turn_id, run_id=deps.run_id, status=status,
-                ) is not None
+                    turn_id=deps.turn_id, run_id=deps.run_id, messages=[],
+                    terminal_status=status,
+                )
+            return True
         except Exception as exc:
-            logger.error("Run checkpoint fallback failed: {}", type(exc).__name__)
+            logger.error("Message status finalization failed: {}", type(exc).__name__)
             return False
 
     def _publish_run_complete(
@@ -1493,7 +1514,7 @@ class AgentRunner:
                     status="cancelled" if isinstance(exc, (RunCancelled, asyncio.CancelledError)) else "failed",
                     started_at=started_at,
                     usage=None,
-                    error=type(exc).__name__,
+                    error=type(exc).__name__, exception=exc,
                 )
                 raise
             title_task = await self._start_title_generation(
@@ -1524,16 +1545,16 @@ class AgentRunner:
                     ),
                     started_at=started_at,
                     usage=None,
-                    error=type(exc).__name__,
+                    error=type(exc).__name__, exception=exc,
                 )
                 await self._cancel_title_task(title_task)
                 raise
             self._prepare_context_state(deps, prepared)
             progress = (
-                RunProgressCapability(self.store, history_length=len(llm_history),
+                MessagePersistenceCapability(self.store, history_length=len(llm_history),
                                       skip_user_prompt=prepared.pre_persisted_user,
                                       model_name=self._model_id)
-                if callable(getattr(self.store, "save_run_progress", None)) else None
+                if callable(getattr(self.store, "append_message_parts", None)) else None
             )
             try:
                 result = await self.agent.run(
@@ -1550,8 +1571,7 @@ class AgentRunner:
                 )
             except BaseException as exc:
                 if progress is not None:
-                    # Even non-streaming callers get durable intermediate work.
-                    # Do not leave a live checkpoint behind on an HTTP failure.
+                    # Non-streaming callers also preserve completed message facts.
                     with anyio.CancelScope(shield=True):
                         cancelled = isinstance(exc, (RunCancelled, asyncio.CancelledError))
                         recovered = (
@@ -1566,7 +1586,7 @@ class AgentRunner:
                             )
                         except Exception as persistence_exc:
                             logger.error("Non-stream terminal persistence failed: {}", type(persistence_exc).__name__)
-                            await self._finish_progress_fallback(
+                            await self._close_saved_messages(
                                 session_id, deps, status="interrupted" if cancelled else "failed",
                             )
                 await self._finish_run_event(
@@ -1574,7 +1594,7 @@ class AgentRunner:
                     status="cancelled" if isinstance(exc, (RunCancelled, asyncio.CancelledError)) else "failed",
                     started_at=started_at,
                     usage=getattr(exc, "usage", None),
-                    error=type(exc).__name__,
+                    error=type(exc).__name__, exception=exc,
                 )
                 await self._cancel_title_task(title_task)
                 raise
@@ -1592,12 +1612,12 @@ class AgentRunner:
             except BaseException as exc:
                 with anyio.CancelScope(shield=True):
                     cancelled = isinstance(exc, (RunCancelled, asyncio.CancelledError))
-                    await self._finish_progress_fallback(
+                    await self._close_saved_messages(
                         session_id, deps, status="interrupted" if cancelled else "failed",
                     )
                     await self._finish_run_event(
                         run_event, status="cancelled" if cancelled else "failed",
-                        started_at=started_at, usage=result.usage, error=type(exc).__name__,
+                        started_at=started_at, usage=result.usage, error=type(exc).__name__, exception=exc, phase="persistence",
                     )
                     await self._cancel_title_task(title_task)
                 raise
@@ -1689,7 +1709,7 @@ class AgentRunner:
         usage: RunUsage,
         session_events: asyncio.Queue[dict[str, Any]],
         snapshot: _StreamRunSnapshot,
-        progress: StreamRunProgressCapability | None = None,
+        progress: StreamMessagePersistenceCapability | None = None,
     ) -> AsyncIterator[tuple[str, Any]]:
         """Interleave Pydantic stream events with DeepAgent lifecycle progress."""
 
@@ -1901,7 +1921,7 @@ class AgentRunner:
                     ),
                     started_at=started_at,
                     usage=None,
-                    error=type(exc).__name__,
+                    error=type(exc).__name__, exception=exc,
                 )
                 if failed_run_event is not None:
                     yield {
@@ -1943,7 +1963,7 @@ class AgentRunner:
                     status="failed",
                     started_at=started_at,
                     usage=None,
-                    error=type(exc).__name__,
+                    error=type(exc).__name__, exception=exc,
                 )
                 if failed_run_event is not None:
                     yield {
@@ -1987,11 +2007,12 @@ class AgentRunner:
                 model_usage = RunUsage()
                 provider_retry_safe = True
                 progress = (
-                    StreamRunProgressCapability(
+                    StreamMessagePersistenceCapability(
                         self.store, history_length=len(model_history),
                         skip_user_prompt=prepared.pre_persisted_user, model_name=self._model_id,
+                        event_queue=session_events,
                     )
-                    if callable(getattr(self.store, "save_run_progress", None)) else None
+                    if callable(getattr(self.store, "append_message_parts", None)) else None
                 )
                 for provider_attempt in range(2):
                     requests_before_attempt = model_usage.requests
@@ -2124,8 +2145,8 @@ class AgentRunner:
                                     if progress is not None else result.new_messages())
                     await self._attach_final_plan_snapshot(new_messages, deps)
                     if progress is not None:
-                        # Canonical promotion and checkpoint sealing must finish
-                        # before releasing the run lock / admitting a new Run.
+                        # Insert only remaining real facts and close statuses before
+                        # releasing the session lock / admitting a new Run.
                         await self._persist_run_messages(
                             session_id, new_messages, deps,
                             pre_persisted_user=prepared.pre_persisted_user,
@@ -2204,21 +2225,15 @@ class AgentRunner:
                             session_id,
                             persistence_exc,
                         )
-                        await self._finish_progress_fallback(session_id, deps, status="failed")
-                elif callable(getattr(self.store, "finish_run_progress", None)):
-                    try:
-                        async with asyncio.timeout(_TERMINAL_WRITE_TIMEOUT):
-                            await self.store.finish_run_progress(
-                                session_id, agent_id=deps.agent_id, user_id=deps.user,
-                                turn_id=deps.turn_id, run_id=deps.run_id, status="failed",
-                            )
-                    except Exception:
-                        history_persisted = False
-                        logger.exception("Failed to seal empty official Run snapshot")
+                        await self._close_saved_messages(session_id, deps, status="failed")
+                else:
+                    history_persisted = await self._close_saved_messages(
+                        session_id, deps, status="failed",
+                    ) and history_persisted
                 failed_run_event = await self._finish_run_event(
                     run_event, status="failed", started_at=started_at,
                     usage=stream_snapshot.usage or model_usage,
-                    error=type(exc).__name__,
+                    error=type(exc).__name__, exception=exc,
                 )
                 if failed_run_event is not None:
                     yield {
@@ -2273,7 +2288,7 @@ class AgentRunner:
                             await self._attach_final_plan_snapshot(cancelled_messages, deps)
                         except Exception as exc:
                             logger.warning("Cancelled plan snapshot unavailable: {}", type(exc).__name__)
-                        if callable(getattr(self.store, "save_run_progress", None)):
+                        if callable(getattr(self.store, "append_message_parts", None)):
                             try:
                                 if cancelled_messages:
                                     await self._persist_run_messages(
@@ -2283,15 +2298,11 @@ class AgentRunner:
                                         terminal_status="interrupted", result_queue=session_events,
                                     )
                                 else:
-                                    async with asyncio.timeout(_TERMINAL_WRITE_TIMEOUT):
-                                        await self.store.finish_run_progress(
-                                            session_id, agent_id=deps.agent_id, user_id=deps.user,
-                                            turn_id=deps.turn_id, run_id=deps.run_id, status="interrupted",
-                                        )
+                                    await self._close_saved_messages(session_id, deps, status="interrupted")
                             except Exception:
                                 cancel_persistence_failed = True
-                                logger.exception("Cancelled Run checkpoint finalization failed")
-                                await self._finish_progress_fallback(session_id, deps, status="interrupted")
+                                logger.exception("Cancelled message finalization failed")
+                                await self._close_saved_messages(session_id, deps, status="interrupted")
                         else:
                             self._publish_run_cancelled(
                                 persister, session_id, deps,
@@ -2402,7 +2413,7 @@ class AgentRunner:
                     status="failed",
                     started_at=started_at,
                     usage=result.usage,
-                    error="EventPersistenceFailed",
+                    error="EventPersistenceFailed", phase="persistence",
                 )
                 if failed_run_event is not None:
                     yield {

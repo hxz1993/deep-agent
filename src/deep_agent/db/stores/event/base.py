@@ -12,18 +12,15 @@ from deep_agent.db.event_codec import (
     MESSAGE_EVENT_TYPES,
     decode_message_events,
     encode_messages,
+    encode_message_parts,
+    group_message_events,
     event_contains_call,
     message_parts,
     tool_part_references,
 )
 from deep_agent.db.ids import new_event_id
 from deep_agent.db.models import ChatSession, ChatSessionEvent
-from deep_agent.db.run_ownership import progress_is_abandoned
-from deep_agent.db.run_progress import (
-    RUN_PROGRESS_EVENT_TYPE,
-    run_progress_event_id,
-    sealed_run_progress_payload,
-)
+from deep_agent.db.run_ownership import run_is_live
 from deep_agent.db.stores._session import SessionBoundMixin
 from deep_agent.time import utc_rfc3339
 
@@ -59,9 +56,6 @@ class SessionEventSnapshot:
 
     def public_dict(self) -> dict[str, Any]:
         payload = self.payload
-        if self.event_type == RUN_PROGRESS_EVENT_TYPE:
-            payload = {key: value for key, value in payload.items()
-                       if key not in {"owner", "lease_expires_at"}}
         return {
             "event_id": self.event_id, "session_id": self.session_id,
             "sequence": self.sequence, "schema_version": self.schema_version,
@@ -186,90 +180,80 @@ class SessionEventStore(SessionBoundMixin):
         await db.flush()
         return rows
 
-    async def _save_run_progress(
-        self, db: AsyncSession, session: ChatSession, *, turn_id: str,
-        run_id: str, payload: dict[str, Any],
-    ) -> ChatSessionEvent | None:
-        event_id = run_progress_event_id(session.session_id, run_id)
-        row = (
-            await db.execute(
-                select(ChatSessionEvent).where(ChatSessionEvent.event_id == event_id).with_for_update()
-            )
-        ).scalar_one_or_none()
-        if row is not None:
-            if row.status != "running" or int(row.payload.get("revision", -1)) >= payload["revision"]:
-                return None
-            if row.turn_id != turn_id:
-                raise ValueError("Run progress turn identity cannot change")
-            if row.payload.get("first_message_ordinal") != payload["first_message_ordinal"]:
-                raise ValueError("Run progress message ordinal cannot change")
-            row.payload = payload
-            row.updated_at = datetime.now(timezone.utc)
-            session.updated_at = row.updated_at
-            await db.flush()
-            return row
-        # Reject a late first snapshot after a Run was already durably closed.
-        terminal = (
-            await db.execute(
-                select(ChatSessionEvent.event_id).where(
-                    ChatSessionEvent.session_id == session.session_id,
-                    ChatSessionEvent.run_id == run_id,
-                    ChatSessionEvent.status.is_not(None),
-                    ChatSessionEvent.event_type.in_({"assistant/message", "run/terminal"}),
-                ).limit(1)
-            )
-        ).scalar_one_or_none()
-        if terminal is not None:
-            return None
+    async def _append_message_parts(
+        self, db: AsyncSession, session: ChatSession, messages: Sequence[ModelMessage],
+        *, turn_id: str, run_id: str, first_message_ordinal: int = 1,
+        terminal_status: str | None = None,
+    ) -> list[ChatSessionEvent]:
+        drafts = encode_message_parts(messages, session_id=session.session_id,
+            run_id=run_id, first_message_ordinal=first_message_ordinal)
+        existing_rows = list((await db.execute(select(ChatSessionEvent).where(
+            ChatSessionEvent.session_id == session.session_id,
+            ChatSessionEvent.run_id == run_id,
+            ChatSessionEvent.event_type.in_(MESSAGE_EVENT_TYPES),
+        ))).scalars())
+        existing = {row.event_id: row for row in existing_rows}
         now = datetime.now(timezone.utc)
-        row = ChatSessionEvent(
-            event_id=event_id, session_id=session.session_id,
-            sequence=int(session.next_sequence), schema_version=1,
-            event_type=RUN_PROGRESS_EVENT_TYPE, status="running", turn_id=turn_id,
-            run_id=run_id, search_text=None, payload=payload,
-            created_at=now, updated_at=now,
-        )
-        session.next_sequence = int(session.next_sequence) + 1
-        session.updated_at = now
-        db.add(row)
-        await db.flush()
-        return row
-
-    async def _assert_progress_can_finish(
-        self, db: AsyncSession, session: ChatSession, *, run_id: str,
-        status: str, message_count: int,
-    ) -> None:
-        row = (await db.execute(
-            select(ChatSessionEvent).where(
-                ChatSessionEvent.event_id == run_progress_event_id(session.session_id, run_id),
-            ).with_for_update()
-        )).scalar_one_or_none()
-        if row is not None and row.status != "running" and (
-            row.status != status or row.payload.get("message_count") != message_count
-        ):
-            raise ValueError("Run progress terminal idempotency conflict")
-
-    async def _seal_run_progress(
-        self, db: AsyncSession, session: ChatSession, *, run_id: str,
-        status: str, message_count: int, recovered: bool = False,
-    ) -> ChatSessionEvent | None:
-        row = (
-            await db.execute(
-                select(ChatSessionEvent).where(
-                    ChatSessionEvent.event_id == run_progress_event_id(session.session_id, run_id),
-                ).with_for_update()
+        changed: dict[str, ChatSessionEvent] = {}
+        for draft in drafts:
+            row = existing.get(draft.event_id)
+            if row is not None:
+                def immutable_parts(payload):
+                    return [{key: value for key, value in part.items() if key != "timestamp"}
+                            for part in payload.get("message", {}).get("parts", [])]
+                if immutable_parts(row.payload) != immutable_parts(draft.payload):
+                    raise ValueError(f"Immutable message part conflict for event_id={draft.event_id}")
+                old_source = row.payload.get("source")
+                source = draft.payload.get("source")
+                if isinstance(old_source, dict) and isinstance(source, dict) and old_source != source:
+                    # A parallel result commits on completion, before the SDK
+                    # creates the request in model call order. Finalize only
+                    # its grouping position; the original fact stays intact.
+                    row.payload = {**row.payload, "source": dict(source)}
+                    row.updated_at = now
+                    changed[row.event_id] = row
+                if terminal_status is not None and draft.event_type == "assistant/message":
+                    current_message = dict(row.payload["message"])
+                    # Only SDK completion metadata may be finalized, not text,
+                    # thoughts, call arguments, or already confirmed results.
+                    finalized = dict(current_message)
+                    for key in ("usage", "state", "finish_reason", "provider_response_id"):
+                        if key in draft.payload["message"]:
+                            finalized[key] = draft.payload["message"][key]
+                    if finalized != current_message:
+                        row.payload = {**row.payload, "message": finalized}
+                        row.updated_at = now
+                        changed[row.event_id] = row
+                continue
+            row = ChatSessionEvent(
+                event_id=draft.event_id, session_id=session.session_id,
+                sequence=int(session.next_sequence), schema_version=draft.schema_version,
+                event_type=draft.event_type, status=None, turn_id=turn_id, run_id=run_id,
+                search_text=draft.search_text, payload=draft.payload,
+                created_at=now, updated_at=now,
             )
-        ).scalar_one_or_none()
-        if row is None or row.status != "running":
-            return None
-        row.status = status
-        row.payload = sealed_run_progress_payload(
-            row.payload, message_count=message_count, recovered=recovered,
-        )
-        row.updated_at = datetime.now(timezone.utc)
-        session.updated_at = row.updated_at
+            db.add(row)
+            existing[row.event_id] = row
+            existing_rows.append(row)
+            session.next_sequence = int(session.next_sequence) + 1
+            changed[row.event_id] = row
+        if terminal_status is not None:
+            assistant_rows = [row for row in existing_rows if row.event_type == "assistant/message"]
+            if assistant_rows:
+                latest = max(assistant_rows, key=lambda row: int(
+                    (row.payload.get("source") or {}).get("message_ordinal", row.sequence)))
+                ordinal = (latest.payload.get("source") or {}).get("message_ordinal")
+                closing = [row for row in assistant_rows if row is latest or (
+                    ordinal is not None and (row.payload.get("source") or {}).get("message_ordinal") == ordinal)]
+                for row in closing:
+                    if row.status != terminal_status:
+                        row.status = terminal_status
+                        row.updated_at = now
+                        changed[row.event_id] = row
+        if changed:
+            session.updated_at = now
         await db.flush()
-        return row
+        return sorted(changed.values(), key=lambda row: row.sequence)
 
     async def _append_lifecycle(
         self, db: AsyncSession, session: ChatSession, *,
@@ -348,45 +332,26 @@ class SessionEventStore(SessionBoundMixin):
         await db.flush()
         return row
 
-    async def _append_terminal(
+    async def _append_execution_error(
         self, db: AsyncSession, session: ChatSession, *,
         status: LifecycleStatus, turn_id: str | None, run_id: str,
         payload: dict[str, Any], now: datetime | None = None,
-    ) -> ChatSessionEvent | None:
-        """Append one exceptional Run terminal only when no response was saved."""
-
-        assistant = (
-            await db.execute(
-                select(ChatSessionEvent.event_id).where(
-                    ChatSessionEvent.session_id == session.session_id,
-                    ChatSessionEvent.run_id == run_id,
-                    ChatSessionEvent.event_type == "assistant/message",
-                ).limit(1)
-            )
-        ).scalar_one_or_none()
-        if assistant is not None:
-            return None
-        existing = (
-            await db.execute(
-                select(ChatSessionEvent).where(
-                    ChatSessionEvent.session_id == session.session_id,
-                    ChatSessionEvent.run_id == run_id,
-                    ChatSessionEvent.event_type == "run/terminal",
-                ).limit(1)
-            )
-        ).scalar_one_or_none()
+    ) -> ChatSessionEvent:
+        """Record the actual execution failure once, regardless of saved output."""
+        existing = (await db.execute(select(ChatSessionEvent).where(
+            ChatSessionEvent.session_id == session.session_id,
+            ChatSessionEvent.run_id == run_id,
+            ChatSessionEvent.event_type == "execution/error",
+        ).limit(1))).scalar_one_or_none()
         if existing is not None:
-            if existing.status != status or existing.payload != payload:
-                raise ValueError(
-                    f"Run terminal idempotency conflict for run_id={run_id}"
-                )
             return existing
+        from deep_agent.db.execution_error import safe_execution_error
         timestamp = now or datetime.now(timezone.utc)
         row = ChatSessionEvent(
             event_id=new_event_id(), session_id=session.session_id,
             sequence=int(session.next_sequence), schema_version=1,
-            event_type="run/terminal", status=status, turn_id=turn_id,
-            run_id=run_id, search_text=None, payload=payload,
+            event_type="execution/error", status=status, turn_id=turn_id,
+            run_id=run_id, search_text=None, payload=safe_execution_error(payload),
             created_at=timestamp, updated_at=timestamp,
         )
         session.next_sequence = int(session.next_sequence) + 1
@@ -495,14 +460,16 @@ class SessionEventStore(SessionBoundMixin):
                     )
                 ).scalars()
             )
-        for row in rows:
+        for row in group_message_events(rows):
             found = {
                 item["call_id"]
                 for item in tool_part_references(row)
                 if item["role"] == "call"
             }
-            if wanted <= found and row.turn_id and row.run_id:
-                return row.turn_id, row.run_id
+            turn_id = row.get("turn_id") if isinstance(row, dict) else row.turn_id
+            run_id = row.get("run_id") if isinstance(row, dict) else row.run_id
+            if wanted <= found and turn_id and run_id:
+                return turn_id, run_id
         return None
 
     async def latest_plan_snapshot(
@@ -559,30 +526,12 @@ class SessionEventStore(SessionBoundMixin):
         interrupted = 0
         for event_id, session_id, run_id in candidates:
             async with self._write() as db:
-                # Match progress/finalization writers: parent Session first,
-                # then progress, and only then the compaction event. Read the
-                # lease under these locks so a racing heartbeat is not ignored.
                 session = (await db.execute(
                     select(ChatSession).where(ChatSession.session_id == session_id)
                     .with_for_update()
                 )).scalar_one_or_none()
-                if session is None:
+                if session is None or run_is_live(run_id):
                     continue
-                if run_id:
-                    progress = (await db.execute(
-                        select(ChatSessionEvent).where(
-                            ChatSessionEvent.session_id == session_id,
-                            ChatSessionEvent.run_id == run_id,
-                            ChatSessionEvent.event_type == RUN_PROGRESS_EVENT_TYPE,
-                            ChatSessionEvent.status == "running",
-                        ).with_for_update()
-                    )).scalar_one_or_none()
-                    if progress is not None and not progress_is_abandoned(
-                        progress.payload, progress.updated_at, run_id=run_id,
-                    ):
-                        continue
-                # A manual compaction without a live checkpoint keeps the
-                # previous restart behavior. Never replace a raced terminal.
                 result = await db.execute(
                     update(ChatSessionEvent).where(
                         ChatSessionEvent.event_id == event_id,

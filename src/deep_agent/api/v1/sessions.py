@@ -6,6 +6,7 @@ from typing import Any, Literal, Optional
 from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pydantic_ai.messages import ModelMessage
+from sse_starlette.sse import EventSourceResponse
 
 from deep_agent.core.context import AppContextDep
 from deep_agent.api.v1.request_identity import RequestUserDep
@@ -271,6 +272,57 @@ async def get_session_run_status(
     if active is not None and active.user_id == user_id:
         return SessionRunStatusResponse(status=active.status, session_id=session_id, agent_id=agent_id, run_id=active.run_id, started_at=active.started_at)
     return SessionRunStatusResponse(status="idle", session_id=session_id, agent_id=agent_id)
+
+
+@router.get("/sessions/{session_id}/live")
+async def observe_session_run(
+    ctx: AppContextDep,
+    user_id: RequestUserDep,
+    session_id: str,
+    run_id: str = Query(min_length=1, max_length=128),
+    agent_id: str | None = None,
+) -> EventSourceResponse:
+    """Read-only observation of one existing execution, never start/resume it."""
+    resolved = await resolve_session(ctx.store, session_id, agent_id=agent_id, user_id=user_id)
+    if resolved is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    from deep_agent.db.session_scope import agent_scope_to_api
+
+    key = (agent_scope_to_api(resolved[0]), resolved[1], user_id)
+
+    # Check before sending headers, then acquire the actual subscription inside
+    # the generator so cancellation before its first iteration leaks no queue.
+    try:
+        probe = ctx.session_live.subscribe(key, run_id)
+    except (LookupError, BufferError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    ctx.session_live.unsubscribe(probe)
+
+    async def stream():
+        try:
+            subscription = ctx.session_live.subscribe(key, run_id)
+        except (LookupError, BufferError, RuntimeError):
+            # The producer can finish between route dispatch and ASGI iteration.
+            yield {"event": "observation_reset", "data": '{"reason":"execution_changed"}'}
+            return
+        try:
+            for frame in subscription.initial:
+                if subscription.closed:
+                    break
+                yield frame.sse()
+            subscription.initial = ()
+            while True:
+                frame = await subscription.get()
+                yield frame.sse()
+                if frame.event in {"observation_end", "observation_reset"}:
+                    break
+        finally:
+            ctx.session_live.unsubscribe(subscription)
+
+    return EventSourceResponse(stream(), ping=15, send_timeout=15,
+                               headers={"Cache-Control": "no-store"})
 
 
 class SessionEventResponse(BaseModel):

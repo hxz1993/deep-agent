@@ -19,6 +19,32 @@
 直播中的 Thinking、工具进度、自动压缩提示等可以只存在于当前页面，不要求在 History 中重放。
 History 的用户消息、助手回复、工具、Plan、附件和 Context 均由后端从 Event Store 确定性投影。
 
+## 观察正在执行的一轮（v0.8.5）
+
+`GET /api/v1/sessions/{session_id}/live?agent_id=…&run_id=…` 是只读 SSE，
+沿用 History 的用户与 Agent 归属校验。客户端打开会话时从 `run-status` 获取当前 Run，
+只观察这个 ID；空闲时不连接，也不自动跟随下一轮。原页面 POST SSE 不重复订阅。
+
+| 事件 | 内容与用途 |
+| --- | --- |
+| `observation_sync` | `session_id, agent_id, run_id, replay_available, baseline_sequence`；历史与当前回放衔接边界 |
+| `observation` | `run_id, event, data`；内部 `event/data` 原样复用现有聊天 SSE |
+| `observation_end` | `run_id`；该轮源请求已收尾，回读历史后解除运行状态，连接结束 |
+| `observation_reset` | 有界原因；观察连接不可继续，重新校准历史，不取消或重跑 Agent |
+
+上述包装是瞬时传输控制，不写入事件表、模型历史或轨迹行。`baseline_sequence` 只读取该轮开始前
+已有的数据库序号；先订阅并缓冲新帧，再读取 History，保留基线前的内容与该轮用户输入，
+当前轮助手/工具由回放呈现，不能与 History 重复。终态只校准这一轮，不混入后来轮次的直播。
+
+指定 Run 已结束/不匹配或回放已超限返回 409；订阅容量不可用返回 503，未授权会话返回 404。
+断线只尝试原 Run；无法完整回放时退回该轮 History 轮询。UI 工具只有正式待操作终态才可操作。
+终态 `final/error/cancelled` 不代表底层已完成清理；观察页等待 `observation_end` 或历史校准收口。
+
+转发与原执行位于同一个 API worker，不引入跨进程协调。回放最多每 Run 4 MiB/4,096 帧、
+进程共 32 MiB；观察队列最多 1 MiB/512 帧，总订阅上限 128。慢客户端被断开而非阻塞执行。
+Run 结束释放回放，连接断开释放队列；首轮已发送页面/渠道仍负责原请求生命周期，
+关闭只读观察页面不会停止 Agent，明确停止仍调用现有取消接口。
+
 工具生命周期帧继续使用稳定调用字段 `tool`，并额外返回展示字段 `display_name`：
 
 ```json

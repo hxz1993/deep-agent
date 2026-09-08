@@ -35,6 +35,7 @@ import {
 import { shouldFollowMessages } from "./message-scroll.js?v=20260902-1";
 import { boundedStreamRequest, verifyStreamStop } from "./stop-recovery.js?v=20260907-1";
 import { createHistoryFollower } from "./history-follower.js?v=20260908-1";
+import { createSessionObserver, historyThroughRun } from "./session-observer.js?v=20260909-1";
 
 /* ------------------------------------------------------------------ *
  * deep-agent 前端 —— 适配 FastAPI /api/v1/chat/stream (SSE over POST)
@@ -1084,6 +1085,137 @@ function stopHistoryObservation() {
 }
 
 async function observeSessionHistory(session, controller, current) {
+  let status;
+  try {
+    status = await boundedStreamRequest(async (signal) => {
+      const response = await daFetch(sessionApiUrl(session, "/run-status"), { signal });
+      if (!response.ok) throw new Error(`运行状态 HTTP ${response.status}`);
+      return response.json();
+    }, { signal: controller.signal });
+  } catch {
+    if (current()) return observePersistedSessionHistory(session, controller, current, {
+      snapshotOnly: true, readOnly: true,
+    });
+    return;
+  }
+  if (!current()) return;
+  if (status.status === "idle" || !status.run_id) {
+    return observePersistedSessionHistory(session, controller, current, {
+      snapshotOnly: true, readOnly: status.status !== "idle",
+    });
+  }
+  const runId = status.run_id;
+  let baselineSequence = null;
+  let assistant = null;
+  let fallback = null;
+  let lastError = null;
+  let liveRevision = 0;
+  const discardPreview = () => {
+    assistant?.dispose?.();
+    assistant?.row?.remove();
+    assistant = null;
+  };
+  const readHistory = async (signal, { replay = false } = {}) => {
+    const data = await boundedStreamRequest(async (requestSignal) => {
+      const response = await daFetch(sessionApiUrl(session, "/history"), { signal: requestSignal });
+      if (!response.ok) throw new Error(`历史 HTTP ${response.status}`);
+      return response.json();
+    }, { signal });
+    const history = historyThroughRun(normalizeConversationHistory(data), runId, { replay, baselineSequence });
+    if (!current() || signal.aborted) return;
+    discardPreview();
+    applyObservedHistory(history, { status: replay ? "running" : "idle" });
+    return history;
+  };
+  const refreshTrajectory = async (signal, { replay = false } = {}) => {
+    const revision = liveRevision;
+    const events = await loadAllSessionEvents(session, { signal });
+    if (current() && !signal.aborted && events.response.ok && revision === liveRevision) {
+      const items = Number.isInteger(baselineSequence)
+        ? events.data.items.filter((event) => event.sequence <= baselineSequence || (!replay && event.run_id === runId))
+        : events.data.items;
+      trajectory?.setHistory({ ...events.data, items }, { preserveView: true });
+      updateObservedSessionMetrics(session, items);
+    }
+  };
+  const setObservedStatus = (active) => {
+    state.historyLoading = false;
+    state.observingRun = active;
+    state.streamSessionConfirmed = active;
+    if (!active) state.stopRequested = false;
+    setStreaming(active);
+    updateHitlInputState();
+  };
+  const makeAssistant = () => {
+    hideEmptyState();
+    assistant = createAssistantMessage(null, null, null, { autoAttachDeferred: false });
+    state.assistantPresenter = assistant;
+    return assistant;
+  };
+  const observer = createSessionObserver({
+    runId,
+    isCurrent: current,
+    connect: (signal) => daFetch(sessionApiUrl(session, "/live", { run_id: runId }), {
+      signal, headers: { Accept: "text/event-stream" },
+    }),
+    onSync: async (data, signal) => {
+      baselineSequence = data.baseline_sequence;
+      fallback?.stop();
+      fallback = null;
+      await readHistory(signal, { replay: true });
+      if (!current() || signal.aborted) return;
+      // Install the audit baseline before replaying its live mirrors; a late
+      // Event API response must not replace newly received thinking/text rows.
+      await boundedStreamRequest((requestSignal) => refreshTrajectory(requestSignal, { replay: true }), {
+        signal, timeoutMs: 5000,
+      }).catch(() => {});
+      if (!current() || signal.aborted) return;
+      setObservedStatus(true);
+      lastError = null;
+    },
+    onEvent: async (frame, signal) => {
+      if (!current() || signal.aborted) return;
+      liveRevision += 1;
+      // Input commits after the first session frame. Reload its authoritative
+      // projection before replaying any model deltas (attachments/refs included).
+      if (frame.event === "session_event_appended" && frame.data?.event?.event_type === "user/message") {
+        await readHistory(signal, { replay: true });
+        if (!current() || signal.aborted) return;
+      }
+      handleEvent({ event: frame.event, data: frame.data }, assistant || makeAssistant(), { allowDeferred: false });
+    },
+    onEnd: async (_data, signal) => {
+      await readHistory(signal);
+      if (!current() || signal.aborted) return;
+      setObservedStatus(false);
+      void refreshTrajectory(controller.signal).catch(() => {});
+      void loadContextStatus(session, { signal: controller.signal, isCurrent: current });
+    },
+    onError: (error) => {
+      if (error.message !== lastError) showConsoleToast(`实时连接中断，正在同步已保存内容：${error.message}`, true);
+      lastError = error.message;
+    },
+    onFallback: async () => {
+      if (!current() || fallback) return;
+      discardPreview();
+      fallback = await observePersistedSessionHistory(session, controller, current, {
+        runId, baselineSequence, register: false, onIdle: () => observer.stop(),
+      });
+    },
+  });
+  state.historyFollower = observer;
+  controller.signal.addEventListener("abort", () => {
+    observer.stop();
+    fallback?.stop();
+    assistant?.dispose?.();
+  }, { once: true });
+  await observer.start();
+}
+
+async function observePersistedSessionHistory(session, controller, current, {
+  runId = null, baselineSequence = null, register = true, onIdle,
+  snapshotOnly = false, readOnly = false,
+} = {}) {
   let lastHistory = null;
   let lastStatus = null;
   let lastError = null;
@@ -1100,8 +1232,9 @@ async function observeSessionHistory(session, controller, current) {
       signal: controller.signal, timeoutMs: 10000,
     }).then((events) => {
       if (!current() || state.abortController || !events.response.ok) return;
-      trajectory?.setHistory(events.data, { preserveView: trajectoryLoaded });
-      updateObservedSessionMetrics(session, events.data.items);
+      const history = historyThroughRun(events.data, runId, { baselineSequence });
+      trajectory?.setHistory(history, { preserveView: trajectoryLoaded });
+      updateObservedSessionMetrics(session, history.items);
       trajectoryLoaded = true;
     }).catch(() => {}).finally(() => {
       eventRequest = null;
@@ -1111,14 +1244,19 @@ async function observeSessionHistory(session, controller, current) {
   const follower = createHistoryFollower({
     isCurrent: current,
     readStatus: async (signal) => {
+      if (snapshotOnly) return { status: "idle", read_only: readOnly };
       const response = await daFetch(sessionApiUrl(session, "/run-status"), { signal });
       if (!response.ok) throw new Error(`运行状态 HTTP ${response.status}`);
-      return response.json();
+      const status = await response.json();
+      // Reconnection is tied to the original Run, never a later channel turn.
+      return runId && status.run_id !== runId
+        ? { status: "idle", read_only: status.status !== "idle" }
+        : status;
     },
     readHistory: async (signal, status) => {
       const response = await daFetch(sessionApiUrl(session, "/history"), { signal });
       if (!response.ok) throw new Error(`历史 HTTP ${response.status}`);
-      const history = normalizeConversationHistory(await response.json());
+      const history = historyThroughRun(normalizeConversationHistory(await response.json()), runId, { baselineSequence });
       // Checkpoint updates retain their Sequence, so compare payloads rather
       // than treating event_head_sequence as a change/version token.
       const signature = JSON.stringify(history);
@@ -1136,6 +1274,7 @@ async function observeSessionHistory(session, controller, current) {
         el.stopBtn.title = state.stopRequested ? "正在停止…" : "正在停止，可重试";
         el.stopBtn.setAttribute("aria-label", "正在停止");
       }
+      if (status.status === "idle") onIdle?.();
     },
     onHistory: ({ history, signature, changed }, status) => {
       if (changed) {
@@ -1154,9 +1293,10 @@ async function observeSessionHistory(session, controller, current) {
       lastError = error.message;
     },
   });
-  state.historyFollower = follower;
+  if (register) state.historyFollower = follower;
   controller.signal.addEventListener("abort", () => follower.stop(), { once: true });
   await follower.start();
+  return follower;
 }
 
 function updateObservedSessionMetrics(session, events) {
@@ -1188,7 +1328,10 @@ function applyObservedHistory(history, status) {
     detailed: false,
   } : null;
   if (history.items.length) hideEmptyState();
-  renderHistory(history.items, { updating: state.historyRendered.length > 0, running: status.status !== "idle" });
+  renderHistory(history.items, {
+    updating: state.historyRendered.length > 0,
+    running: status.status !== "idle" || status.read_only === true,
+  });
   if (!history.items.length) showEmptyState();
 }
 
@@ -2244,7 +2387,7 @@ function setStreaming(v) {
   updateComposerContextControls();
 }
 
-function handleEvent({ event, data }, assistant) {
+function handleEvent({ event, data }, assistant, { allowDeferred = true } = {}) {
   if (state.assistantPresenter?.row?.isConnected) {
     assistant = state.assistantPresenter;
   }
@@ -2352,7 +2495,7 @@ function handleEvent({ event, data }, assistant) {
       finalizeAutomaticContextCompaction(data.context, data.status);
       state.refreshHistoryAfterStream = false;
       clearComposerPlan();
-      if (data.status === "pending" && data.deferred) {
+      if (data.status === "pending" && data.deferred && allowDeferred) {
         state.awaitingHitl = true;
         setStreaming(false);
         applyAssistantPresentationActions(

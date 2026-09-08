@@ -429,10 +429,7 @@ class AgentRunnerHistoryTests(unittest.IsolatedAsyncioTestCase):
             await self._flush(session_id, agent_id=self.db_agent.id)
             rows = await self.store.list_events(session_id, limit=100)
             rows = [row for row in rows if row.event_type != "session/title"]
-            self.assertEqual([row.event_type for row in rows], ["user/message", "run/progress", "run/terminal"])
-            self.assertEqual(rows[1].status, "interrupted")
-            self.assertNotIn("messages", rows[1].payload)
-            self.assertEqual(rows[-1].status, "cancelled")
+            self.assertEqual([row.event_type for row in rows], ["user/message"])
             self.assertEqual(rows[-1].run_id, deps.run_id)
             self.assertTrue(exited.is_set(), "Provider task survived the disconnected consumer")
             self.assertIsNone(registry.get(agent_id=self.db_agent.id, session_id=session_id))
@@ -492,7 +489,7 @@ class AgentRunnerHistoryTests(unittest.IsolatedAsyncioTestCase):
         async def fail_terminal(*args, **kwargs):
             raise RuntimeError("database unavailable")
 
-        with patch.object(self.store, "append_terminal", side_effect=fail_terminal):
+        with patch.object(self.store, "append_execution_error", side_effect=fail_terminal):
             result = [ev async for ev in runner.run_stream(
                 deps.session_id, "hello", deps, persister=self.persister,
             )]
@@ -520,7 +517,7 @@ class AgentRunnerHistoryTests(unittest.IsolatedAsyncioTestCase):
         )
         deps = self._deps("terminal-write-timeout")
         with patch("deep_agent.agent.runner._TERMINAL_WRITE_TIMEOUT", 0.02), \
-                patch.object(self.store, "append_terminal", side_effect=stalled_terminal):
+                patch.object(self.store, "append_execution_error", side_effect=stalled_terminal):
             async with asyncio.timeout(2):
                 result = [ev async for ev in runner.run_stream(
                     deps.session_id, "hello", deps, persister=self.persister,

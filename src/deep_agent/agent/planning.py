@@ -125,6 +125,10 @@ def attach_known_plan_snapshots(
             if not isinstance(part, ToolReturnPart) or not is_planning_tool(part.tool_name):
                 continue
             planning_returns.append(part)
+            if plan_snapshot_from_part(part) is not None:
+                # Provider call IDs may repeat in a later response. The
+                # snapshot on this completed result is already authoritative.
+                continue
             snapshot = snapshots.get(part.tool_call_id)
             if snapshot is not None:
                 attach_plan_snapshot(part, snapshot)

@@ -14,14 +14,14 @@ from unittest.mock import AsyncMock, patch
 
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
-from pydantic_ai import Agent, FunctionToolset
-from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
+from pydantic_ai import Agent, FunctionToolset, ModelRetry
+from pydantic_ai.messages import BinaryContent, ModelRequest, ModelResponse, TextPart, ToolCallPart, ToolReturn, ToolReturnPart, UserPromptPart
 from pydantic_ai.models.function import DeltaToolCall, FunctionModel
+from pydantic_ai.exceptions import ModelHTTPError
 from pydantic_ai.usage import UsageLimits
 
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.runner import AgentRunner
-from deep_agent.agent.run_progress import RunProgressCapability
 from deep_agent.api.v1 import api_router
 from deep_agent.capabilities import build_registry
 from deep_agent.capabilities.ui.builtin import builtin_ui_records
@@ -40,15 +40,15 @@ def _kind(history: dict, kind: str) -> list[dict]:
     return [item for item in history["items"] if item["kind"] == kind]
 
 
-class RunProgressHistoryIntegrationTests(unittest.IsolatedAsyncioTestCase):
+class IncrementalMessagePersistenceTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory(
-            prefix="TMP_to_delete-run-progress-history-", dir=Path(__file__).resolve().parents[2],
+            prefix="TMP_to_delete-message-persistence-", dir=Path(__file__).resolve().parents[2],
         )
         stores, engine, factory = await make_sqlite_stores(
             f"sqlite+aiosqlite:///{Path(self.tmp.name) / 'history.sqlite3'}",
         )
-        self.agent_id = await seed_default_agent(stores, name="isolated-progress-history")
+        self.agent_id = await seed_default_agent(stores, name="isolated-message-history")
         self.store = stores.coordinator
         self.ctx = AppContext.for_testing(
             registry=build_registry(), stores=stores, db_engine=engine,
@@ -93,7 +93,7 @@ class RunProgressHistoryIntegrationTests(unittest.IsolatedAsyncioTestCase):
         async def collect():
             deps = AgentDeps(session_id=session, user=TEST_USER_ID, agent_id=self.agent_id)
             async for event in runner.run_stream(
-                session, "synthetic progress verification", deps, persister=self.ctx.event_persister,
+                session, "synthetic completed-message verification", deps, persister=self.ctx.event_persister,
             ):
                 events.append(event)
                 if on_event is not None:
@@ -144,7 +144,7 @@ class RunProgressHistoryIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(ids), len(set(ids)))
 
     async def test_completed_round_visible_over_http_before_second_model_returns(self):
-        session = "progress-second-model"
+        session = "facts-second-model"
         ready, release = asyncio.Event(), asyncio.Event()
         requests = 0
 
@@ -176,10 +176,11 @@ class RunProgressHistoryIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self._canonical_once(await self._history(session), answers=["ROUND_ONE", "FINAL_ANSWER"], calls=["read-one"])
         stored = await self._events(session)
         self.assertEqual(len([item for item in stored if item["event_type"] == "user/message"]), 1)
-        self.assertFalse(any(item["event_type"] == "run/progress" and item["status"] == "running" for item in stored))
+        self.assertFalse(any(item["event_type"].startswith("run/") for item in stored))
+        self.assertFalse(any(item["event_type"] == "execution/error" for item in stored))
 
     async def test_fast_parallel_result_visible_while_sibling_tool_waits(self):
-        session = "progress-parallel-tools"
+        session = "facts-parallel-tools"
         slow_started, fast_published, release = asyncio.Event(), asyncio.Event(), asyncio.Event()
         requests = 0
 
@@ -221,9 +222,10 @@ class RunProgressHistoryIntegrationTests(unittest.IsolatedAsyncioTestCase):
         final = await self._history(session)
         self._canonical_once(final, answers=["READING_IN_PARALLEL", "PARALLEL_DONE"], calls=["fast", "slow"])
         self.assertTrue(all(item["status"] == "completed" for item in _kind(final, "tool")))
+        self.assertFalse(any(item["event_type"].startswith("run/") for item in await self._events(session)))
 
-    async def test_partial_text_is_durable_during_provider_silence(self):
-        session = "progress-provider-silence"
+    async def test_partial_text_stays_live_only_until_response_completes(self):
+        session = "facts-provider-silence"
         ready, release = asyncio.Event(), asyncio.Event()
 
         async def stream(messages, info):
@@ -235,22 +237,19 @@ class RunProgressHistoryIntegrationTests(unittest.IsolatedAsyncioTestCase):
 
         task, _ = self._start(self._runner(stream), session)
         await self._ready(ready, task)
-        async with asyncio.timeout(3):
-            while True:
-                history = await self._history(session)
-                if any(item.get("text") == "PARTIAL_PREFIX_MIDDLE" for item in _kind(history, "assistant_message")):
-                    break
-                await asyncio.sleep(0.05)
+        await asyncio.sleep(0.2)
+        history = await self._history(session)
+        self.assertEqual(_kind(history, "assistant_message"), [])
         self.assertFalse(task.done())
         self.assertEqual(len(_kind(history, "user_message")), 1)
         await self._finish(task, release)
         self._canonical_once(await self._history(session), answers=["PARTIAL_PREFIX_MIDDLE_FINISHED"], calls=[])
 
-    async def test_progress_write_failure_prevents_next_side_effect_tool(self):
-        session = "progress-write-failure"
+    async def test_message_write_failure_prevents_next_side_effect_tool(self):
+        session = "facts-write-failure"
         requests = 0
         executed: list[str] = []
-        original_save = self.store.save_run_progress
+        original_save = self.store.append_message_parts
         rejected = False
 
         async def safe_read() -> str:
@@ -275,10 +274,10 @@ class RunProgressHistoryIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 for message in kwargs["messages"]
             ):
                 rejected = True
-                raise OSError("synthetic progress database unavailable")
+                raise OSError("synthetic message database unavailable")
             return await original_save(*args, **kwargs)
 
-        with patch.object(self.store, "save_run_progress", side_effect=fail_before_side_effect):
+        with patch.object(self.store, "append_message_parts", side_effect=fail_before_side_effect):
             task, events = self._start(self._runner(stream, tools=[safe_read, side_effect]), session)
             await self._finish(task)
         self.assertTrue(rejected)
@@ -290,133 +289,8 @@ class RunProgressHistoryIntegrationTests(unittest.IsolatedAsyncioTestCase):
         tool = next(item for item in _kind(history, "tool") if item["call_id"] == "read")
         self.assertEqual(tool["output"], "READ_BEFORE_FAILURE")
 
-    async def _verify_heartbeat_during_silence(self, *, in_tool: bool) -> None:
-        session = "progress-heartbeat-tool" if in_tool else "progress-heartbeat-provider"
-        ready, release, renewed = asyncio.Event(), asyncio.Event(), asyncio.Event()
-        original_touch = self.store.touch_run_progress
-        heartbeat_count = requests = 0
-
-        async def trace_touch(session_id: str, *, run_id: str) -> bool:
-            # Keep the real coordinator's keyword-only contract; an AsyncMock
-            # accepting arbitrary positional arguments would hide a live bug.
-            nonlocal heartbeat_count
-            before = next(row for row in await self.store.list_all_events(session_id)
-                          if row.event_type == "run/progress")
-            result = await original_touch(session_id, run_id=run_id)
-            after = next(row for row in await self.store.list_all_events(session_id)
-                         if row.event_type == "run/progress")
-            self.assertTrue(result)
-            self.assertEqual((after.event_id, after.sequence, after.payload["revision"], after.payload["messages"]),
-                             (before.event_id, before.sequence, before.payload["revision"], before.payload["messages"]))
-            heartbeat_count += 1
-            if heartbeat_count >= 2:
-                renewed.set()
-            return result
-
-        async def slow_read() -> str:
-            ready.set()
-            await release.wait()
-            return "SLOW_RESULT_AFTER_HEARTBEATS"
-
-        async def stream(messages, info):
-            nonlocal requests
-            requests += 1
-            if in_tool:
-                if requests == 1:
-                    yield "BEFORE_SLOW_TOOL"
-                    yield _call("slow_read", "slow-heartbeat")
-                else:
-                    yield "TOOL_FINISHED"
-            else:
-                yield "BEFORE_PROVIDER_SILENCE"
-                ready.set()
-                await release.wait()
-                yield "_FINISHED"
-
-        with patch.object(RunProgressCapability, "snapshot_interval", 0.025), \
-                patch.object(RunProgressCapability, "heartbeat_interval", 0.05), \
-                patch.object(self.store, "touch_run_progress", side_effect=trace_touch):
-            task, events = self._start(self._runner(stream, tools=[slow_read] if in_tool else []), session)
-            await self._ready(ready, task)
-            await self._ready(renewed, task)
-            self.assertFalse(task.done())
-            self.assertGreaterEqual(heartbeat_count, 2)
-            self.assertFalse(any(event["type"] == "error" for event in events))
-            self.assertEqual(len(_kind(await self._history(session), "user_message")), 1)
-            await self._finish(task, release)
-        self.assertEqual(events[-1]["type"], "final")
-        self._canonical_once(
-            await self._history(session),
-            answers=["BEFORE_SLOW_TOOL", "TOOL_FINISHED"] if in_tool else ["BEFORE_PROVIDER_SILENCE_FINISHED"],
-            calls=["slow-heartbeat"] if in_tool else [],
-        )
-
-    async def test_provider_silence_renews_real_coordinator_lease(self):
-        await self._verify_heartbeat_during_silence(in_tool=False)
-
-    async def test_long_tool_renews_real_coordinator_lease(self):
-        await self._verify_heartbeat_during_silence(in_tool=True)
-
-    async def test_lost_lease_fails_run_preserving_history_without_next_side_effect(self):
-        session = "progress-lost-lease"
-        ready, revoked, closed = asyncio.Event(), asyncio.Event(), asyncio.Event()
-        original_touch = self.store.touch_run_progress
-        requests = 0
-        executed: list[str] = []
-
-        async def touch_until_revoked(session_id: str, *, run_id: str) -> bool:
-            if revoked.is_set():
-                return False
-            return await original_touch(session_id, run_id=run_id)
-
-        async def first_read() -> str:
-            executed.append("read")
-            return "DURABLE_BEFORE_LOST_LEASE"
-
-        async def waiting_read() -> str:
-            ready.set()
-            try:
-                await asyncio.Event().wait()
-            finally:
-                closed.set()
-            return "unreachable"
-
-        async def side_effect() -> str:
-            executed.append("SIDE_EFFECT_MUST_NOT_RUN")
-            return "unreachable"
-
-        async def stream(messages, info):
-            nonlocal requests
-            requests += 1
-            name = ["first_read", "waiting_read", "side_effect"][requests - 1]
-            yield f"ROUND_{requests}"
-            yield _call(name, name)
-
-        with patch.object(RunProgressCapability, "snapshot_interval", 0.025), \
-                patch.object(RunProgressCapability, "heartbeat_interval", 0.05), \
-                patch.object(self.store, "touch_run_progress", side_effect=touch_until_revoked):
-            task, events = self._start(self._runner(stream, tools=[first_read, waiting_read, side_effect]), session)
-            await self._ready(ready, task)
-            self.assertEqual(next(item for item in _kind(await self._history(session), "tool")
-                                  if item["call_id"] == "first_read")["output"], "DURABLE_BEFORE_LOST_LEASE")
-            revoked.set()
-            await self._finish(task)
-        self.assertTrue(closed.is_set())
-        self.assertEqual(executed, ["read"])
-        self.assertEqual(requests, 2)
-        self.assertEqual(events[-1]["type"], "error")
-        self.assertFalse(any(event["type"] in {"final", "cancelled"} for event in events))
-        self.assertEqual(self.ctx.active_runs.active_count(), 0)
-        history = await self._history(session)
-        self._canonical_once(history, answers=["ROUND_1", "ROUND_2"], calls=["first_read", "waiting_read"])
-        self.assertEqual(_kind(history, "tool")[0]["output"], "DURABLE_BEFORE_LOST_LEASE")
-        self.assertFalse(any(item["status"] in {"running", "pending", "awaiting_input"} for item in history["items"]))
-        rows = await self._events(session)
-        progress = next(item for item in rows if item["event_type"] == "run/progress")
-        self.assertEqual(progress["status"], "failed")
-
     async def test_unvalidated_ui_preview_is_not_actionable_until_pending_commit(self):
-        session = "progress-ui-preview"
+        session = "facts-ui-preview"
         ready, release = asyncio.Event(), asyncio.Event()
         published_histories: list[dict] = []
 
@@ -443,7 +317,7 @@ class RunProgressHistoryIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self._canonical_once(await self._history(session), answers=["PLEASE_CONFIRM"], calls=["confirm-once"])
 
     async def test_http_cancel_preserves_completed_result_and_closes_waiting_tool(self):
-        session = "progress-cancel"
+        session = "facts-cancel"
         ready, exited = asyncio.Event(), asyncio.Event()
         requests = 0
 
@@ -474,6 +348,8 @@ class RunProgressHistoryIntegrationTests(unittest.IsolatedAsyncioTestCase):
         await self._finish(task)
         self.assertTrue(exited.is_set())
         self.assertEqual(events[-1]["type"], "cancelled")
+        stored = await self._events(session)
+        self.assertFalse(any(row["event_type"].startswith("run/") or row["event_type"] == "execution/error" for row in stored))
         self.assertEqual(self.ctx.active_runs.active_count(), 0)
         history = await self._history(session)
         tools = {item["call_id"]: item for item in _kind(history, "tool")}
@@ -482,7 +358,7 @@ class RunProgressHistoryIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(any(item["status"] in {"running", "pending", "awaiting_input"} for item in history["items"]))
 
     async def test_provider_failure_after_durable_round_does_not_lose_or_duplicate_it(self):
-        session = "progress-provider-failure"
+        session = "facts-provider-failure"
         ready, release = asyncio.Event(), asyncio.Event()
         requests = 0
 
@@ -510,118 +386,282 @@ class RunProgressHistoryIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self._canonical_once(history, answers=["PRESERVED_TEXT"], calls=["preserved"])
         self.assertEqual(_kind(history, "tool")[0]["output"], "PRESERVED_RESULT")
         self.assertFalse(any(item["status"] in {"running", "pending", "awaiting_input"} for item in history["items"]))
+        stored = await self._events(session)
+        self.assertFalse(any(row["event_type"].startswith("run/") for row in stored))
+        failures = [row for row in stored if row["event_type"] == "execution/error"]
+        self.assertEqual(len(failures), 1)
 
-    def _reject_terminal_appends(self):
-        original = self.store.append
+    async def test_first_provider_failure_has_one_error_without_empty_assistant(self):
+        async def stream(messages, info):
+            raise RuntimeError("synthetic first request failed")
+            yield "unreachable"
 
-        async def reject(*args, **kwargs):
-            if kwargs.get("terminal_status") is not None:
-                raise OSError("synthetic immutable terminal append failure")
-            return await original(*args, **kwargs)
+        task, events = self._start(self._runner(stream), "first-provider-error")
+        await self._finish(task)
+        self.assertEqual(events[-1]["type"], "error")
+        rows = await self._events("first-provider-error")
+        self.assertEqual([row["event_type"] for row in rows if row["event_type"] != "session/title"],
+                         ["user/message", "execution/error"])
+        self.assertEqual(_kind(await self._history("first-provider-error"), "assistant_message"), [])
 
-        return patch.object(self.store, "append", side_effect=reject)
+    async def test_recoverable_tool_failure_does_not_create_execution_error(self):
+        requests = executions = 0
 
-    async def _assert_fallback_closed(self, session, *, status):
-        stored = await self.store.list_all_events(session)
-        progress = [row for row in stored if row.event_type == "run/progress"]
-        self.assertEqual(len(progress), 1)
-        self.assertEqual(progress[0].status, status)
-        self.assertNotIn("messages", progress[0].payload)
-        self.assertFalse(any(row.status == "running" for row in stored))
-        self.assertEqual(self.ctx.active_runs.active_count(), 0)
-
-    async def test_final_append_failure_uses_durable_fallback_and_never_reports_final(self):
-        session = "progress-final-append-failure"
-        requests = executed = 0
-
-        async def read_value() -> str:
-            nonlocal executed
-            executed += 1
-            return "RESULT_BEFORE_APPEND_FAILURE"
+        async def retry_read() -> str:
+            nonlocal executions
+            executions += 1
+            if executions == 1:
+                raise ModelRetry("synthetic recoverable read failure")
+            return "RECOVERED_RESULT"
 
         async def stream(messages, info):
             nonlocal requests
             requests += 1
-            if requests == 1:
-                yield "ROUND_BEFORE_APPEND_FAILURE"
-                yield _call("read_value", "kept-call")
+            if requests < 3:
+                yield f"READ_ATTEMPT_{requests}"
+                yield _call("retry_read", f"attempt-{requests}")
             else:
-                yield "FINAL_BEFORE_APPEND_FAILURE"
+                yield "RECOVERED_FINAL"
 
-        with self._reject_terminal_appends():
-            task, events = self._start(self._runner(stream, tools=[read_value]), session)
-            await self._finish(task)
-        self.assertEqual((requests, executed), (2, 1))
-        self.assertEqual(events[-1]["type"], "error")
-        self.assertFalse(any(event["type"] == "final" for event in events))
-        history = await self._history(session)
-        self._canonical_once(history, answers=["ROUND_BEFORE_APPEND_FAILURE", "FINAL_BEFORE_APPEND_FAILURE"], calls=["kept-call"])
-        self.assertEqual(_kind(history, "tool")[0]["output"], "RESULT_BEFORE_APPEND_FAILURE")
-        await self._assert_fallback_closed(session, status="failed")
+        task, events = self._start(self._runner(stream, tools=[retry_read]), "tool-retry-facts")
+        await self._finish(task)
+        self.assertEqual((requests, executions), (3, 2))
+        self.assertEqual(events[-1]["type"], "final")
+        history = await self._history("tool-retry-facts")
+        tools = _kind(history, "tool")
+        self.assertEqual(len(tools), 2)
+        # ModelRetry is the existing rejected/retry attempt, rather than an
+        # execution-level failure; its real retry reason remains in the events.
+        self.assertEqual(tools[0]["status"], "removed")
+        self.assertEqual(tools[1]["output"], "RECOVERED_RESULT")
+        self.assertIn("synthetic recoverable read failure", str(await self._events("tool-retry-facts")))
+        self.assertFalse(any(row["event_type"].startswith("run/") or row["event_type"] == "execution/error"
+                             for row in await self._events("tool-retry-facts")))
 
-    async def test_cancel_append_failure_reports_incomplete_persistence_but_seals_checkpoint(self):
-        session = "progress-cancel-append-failure"
-        ready, closed = asyncio.Event(), asyncio.Event()
+    async def test_parallel_reverse_completion_keeps_both_results_and_model_group(self):
+        first_started, second_committed, release = asyncio.Event(), asyncio.Event(), asyncio.Event()
         requests = 0
 
-        async def read_value() -> str:
-            return "RESULT_BEFORE_CANCEL_APPEND_FAILURE"
+        async def first() -> str:
+            first_started.set()
+            await release.wait()
+            return "FIRST_RESULT"
+
+        async def second() -> str:
+            await first_started.wait()
+            return "SECOND_RESULT"
 
         async def stream(messages, info):
             nonlocal requests
             requests += 1
             if requests == 1:
-                yield "DURABLE_BEFORE_CANCEL_APPEND_FAILURE"
-                yield _call("read_value", "kept-before-cancel")
+                yield "PARALLEL_START"
+                yield {0: DeltaToolCall(name="first", json_args="{}", tool_call_id="first"),
+                       1: DeltaToolCall(name="second", json_args="{}", tool_call_id="second")}
             else:
-                ready.set()
-                try:
-                    await asyncio.Event().wait()
-                finally:
-                    closed.set()
+                results = [part for message in messages for part in message.parts if isinstance(part, ToolReturnPart)]
+                self.assertEqual({part.tool_call_id: part.content for part in results},
+                                 {"first": "FIRST_RESULT", "second": "SECOND_RESULT"})
+                yield "BOTH_DONE"
 
-        with self._reject_terminal_appends():
-            task, events = self._start(self._runner(stream, tools=[read_value]), session)
-            await self._ready(ready, task)
-            response = await self.http.post(f"/api/v1/sessions/{session}/cancel", params={"agent_id": self.agent_id})
-            self.assertEqual(response.status_code, 200, response.text)
-            self.assertEqual(response.json()["status"], "cancel_requested")
-            await self._finish(task)
-        self.assertTrue(closed.is_set())
-        self.assertEqual(events[-1]["type"], "cancelled")
-        self.assertFalse(events[-1]["history_persisted"])
+        async def observe(event):
+            if event["type"] == "tool_result" and event.get("tool_call_id") == "second":
+                second_committed.set()
+
+        session = "parallel-reverse-completion"
+        task, events = self._start(self._runner(stream, tools=[first, second]), session, on_event=observe)
+        await self._ready(second_committed, task)
+        before = await self._events(session)
+        visible = {item["call_id"]: item for item in _kind(await self._history(session), "tool")}
+        self.assertEqual(visible["second"]["output"], "SECOND_RESULT")
+        self.assertIsNone(visible["first"]["output"])
+        await self._finish(task, release)
+        self.assertEqual(events[-1]["type"], "final")
+        final = {row["event_id"]: row for row in await self._events(session)}
+        # Previously committed facts keep their identities, sequence and payload;
+        # only a real terminal status may be attached on completion.
+        for row in before:
+            self.assertEqual(final[row["event_id"]]["sequence"], row["sequence"])
+            if "message" in row["payload"]:
+                self.assertEqual(final[row["event_id"]]["payload"]["message"]["parts"],
+                                 row["payload"]["message"]["parts"])
+        self._canonical_once(await self._history(session), answers=["PARALLEL_START", "BOTH_DONE"], calls=["first", "second"])
+
+    async def test_identical_text_and_reused_call_ids_in_different_rounds_are_not_deduplicated(self):
+        requests = executions = 0
+
+        async def read() -> str:
+            nonlocal executions
+            executions += 1
+            return f"RESULT_{executions}"
+
+        async def stream(messages, info):
+            nonlocal requests
+            requests += 1
+            yield "IDENTICAL_TEXT"
+            if requests < 3:
+                yield _call("read", "reused-provider-id")
+
+        session = "identical-facts-distinct-rounds"
+        task, events = self._start(self._runner(stream, tools=[read]), session)
+        await self._finish(task)
+        self.assertEqual(events[-1]["type"], "final")
+        self.assertEqual((requests, executions), (3, 2))
         history = await self._history(session)
-        self._canonical_once(history, answers=["DURABLE_BEFORE_CANCEL_APPEND_FAILURE"], calls=["kept-before-cancel"])
-        self.assertEqual(_kind(history, "tool")[0]["output"], "RESULT_BEFORE_CANCEL_APPEND_FAILURE")
-        await self._assert_fallback_closed(session, status="interrupted")
+        self._canonical_once(history, answers=["IDENTICAL_TEXT"] * 3,
+                             calls=["reused-provider-id", "reused-provider-id"])
+        self.assertEqual([item["output"] for item in _kind(history, "tool")], ["RESULT_1", "RESULT_2"])
 
-    async def test_nonstream_final_append_failure_raises_original_and_closes_lifecycle(self):
-        session = "progress-nonstream-append-failure"
-        requests = executed = 0
+    async def test_nonstream_runner_commits_each_round_before_next_request(self):
+        ready, release = asyncio.Event(), asyncio.Event()
+        requests = 0
 
-        async def read_value() -> str:
-            nonlocal executed
-            executed += 1
-            return "NONSTREAM_DURABLE_RESULT"
+        async def read() -> str:
+            return "NONSTREAM_RESULT"
 
         async def answer(messages, info):
             nonlocal requests
             requests += 1
             if requests == 1:
-                return ModelResponse(parts=[TextPart("NONSTREAM_ROUND"), ToolCallPart("read_value", {}, "nonstream-call")])
+                return ModelResponse(parts=[TextPart("NONSTREAM_ROUND"), ToolCallPart("read", {}, "call")])
+            ready.set()
+            await release.wait()
             return ModelResponse(parts=[TextPart("NONSTREAM_FINAL")])
 
-        runner = AgentRunner(
-            Agent(FunctionModel(function=answer), deps_type=AgentDeps,
-                  toolsets=[FunctionToolset(tools=[read_value])]),
-            self.store, UsageLimits(request_limit=4), active_runs=self.ctx.active_runs,
-        )
-        with self._reject_terminal_appends(), self.assertRaisesRegex(OSError, "synthetic immutable terminal append failure"):
-            await asyncio.wait_for(runner.run(session, "synthetic nonstream verification", AgentDeps(
-                session_id=session, user=TEST_USER_ID, agent_id=self.agent_id,
-            )), timeout=5)
-        self.assertEqual((requests, executed), (2, 1))
-        history = await self._history(session)
-        self._canonical_once(history, answers=["NONSTREAM_ROUND", "NONSTREAM_FINAL"], calls=["nonstream-call"])
-        self.assertEqual(_kind(history, "tool")[0]["output"], "NONSTREAM_DURABLE_RESULT")
-        await self._assert_fallback_closed(session, status="failed")
+        session = "nonstream-round-boundary"
+        runner = AgentRunner(Agent(FunctionModel(function=answer), deps_type=AgentDeps,
+                                   toolsets=[FunctionToolset(tools=[read])]),
+                             self.store, UsageLimits(request_limit=4), active_runs=self.ctx.active_runs)
+        task = asyncio.create_task(runner.run(session, "synthetic nonstream verification", AgentDeps(
+            session_id=session, user=TEST_USER_ID, agent_id=self.agent_id,
+        )))
+        self.tasks.append(task)
+        await self._ready(ready, task)
+        during = await self._history(session)
+        self._canonical_once(during, answers=["NONSTREAM_ROUND"], calls=["call"])
+        self.assertEqual(_kind(during, "tool")[0]["output"], "NONSTREAM_RESULT")
+        self.assertFalse(task.done())
+        await self._finish(task, release)
+        self._canonical_once(await self._history(session), answers=["NONSTREAM_ROUND", "NONSTREAM_FINAL"], calls=["call"])
+        self.assertFalse(any(row["event_type"].startswith("run/") or row["event_type"] == "execution/error"
+                             for row in await self._events(session)))
+
+    async def test_provider_http_error_persists_safe_classification_and_not_model_history(self):
+        secret = "SYNTHETIC_PROVIDER_KEY_NOT_FOR_STORAGE"
+
+        async def stream(messages, info):
+            raise ModelHTTPError(403, "synthetic-model", body={"access_token": secret, "prompt": "PRIVATE_PROMPT"},
+                                 headers={"Authorization": f"Bearer {secret}"})
+            yield "unreachable"
+
+        session = "classified-provider-error"
+        task, events = self._start(self._runner(stream), session)
+        await self._finish(task)
+        self.assertEqual(events[-1]["type"], "error")
+        rows = await self._events(session)
+        failures = [row for row in rows if row["event_type"] == "execution/error"]
+        self.assertEqual(len(failures), 1)
+        payload = failures[0]["payload"]
+        self.assertEqual((payload["code"], payload["phase"]), ("provider_http_error", "provider"))
+        self.assertIn("403", payload["message"])
+        self.assertNotIn(secret, json.dumps(rows))
+        self.assertNotIn("PRIVATE_PROMPT", json.dumps(rows))
+        model_history = await self.store.get_history(session, agent_id=self.agent_id)
+        self.assertEqual(len(model_history), 1)
+        self.assertNotIn("provider_http_error", str(model_history))
+
+    async def test_tool_validation_exhaustion_has_one_specific_error_and_no_execution(self):
+        executed = requests = 0
+
+        async def integer_read(number: int) -> str:
+            nonlocal executed
+            executed += 1
+            return str(number)
+
+        async def stream(messages, info):
+            nonlocal requests
+            requests += 1
+            yield _call("integer_read", f"invalid-{requests}", {"number": "not-an-integer"})
+
+        session = "classified-tool-exhaustion"
+        task, events = self._start(self._runner(stream, tools=[integer_read]), session)
+        await self._finish(task)
+        self.assertEqual(events[-1]["type"], "error")
+        self.assertEqual(executed, 0)
+        self.assertGreater(requests, 1)
+        rows = await self._events(session)
+        failures = [row for row in rows if row["event_type"] == "execution/error"]
+        self.assertEqual(len(failures), 1)
+        payload = failures[0]["payload"]
+        self.assertEqual((payload["code"], payload["phase"]), ("tool_retry_exhausted", "tool_validation"))
+        self.assertIn("integer_read", payload["message"])
+        self.assertNotIn("not-an-integer", json.dumps(payload))
+        model_history = await self.store.get_history(session, agent_id=self.agent_id)
+        # Only model message parts become conversation content. Safe diagnostic
+        # metadata on a failed response is not another model message/event.
+        self.assertNotIn("tool_retry_exhausted", str([message.parts for message in model_history]))
+        self.assertNotIn("execution/error", str([message.parts for message in model_history]))
+
+    async def test_nonstream_parallel_tool_content_keeps_official_request_group(self):
+        slow_started, release = asyncio.Event(), asyncio.Event()
+        requests = 0
+        media = BinaryContent(data=b"synthetic-local-image-bytes", media_type="image/png")
+
+        async def media_read() -> ToolReturn:
+            return ToolReturn("MEDIA_RESULT", content=["SUPPLEMENTAL_CONTENT", media], metadata={"safe": True})
+
+        async def slow_read() -> str:
+            slow_started.set()
+            await release.wait()
+            return "SLOW_RESULT"
+
+        async def answer(messages, info):
+            nonlocal requests
+            requests += 1
+            if requests == 1:
+                return ModelResponse(parts=[TextPart("READING_MEDIA"),
+                                            ToolCallPart("media_read", {}, "media"),
+                                            ToolCallPart("slow_read", {}, "slow")])
+            return ModelResponse(parts=[TextPart("MEDIA_FINAL")])
+
+        session = "nonstream-parallel-content"
+        runner = AgentRunner(Agent(FunctionModel(function=answer), deps_type=AgentDeps,
+                                   toolsets=[FunctionToolset(tools=[media_read, slow_read])]),
+                             self.store, UsageLimits(request_limit=4), active_runs=self.ctx.active_runs)
+        task = asyncio.create_task(runner.run(session, "synthetic media verification", AgentDeps(
+            session_id=session, user=TEST_USER_ID, agent_id=self.agent_id,
+        )))
+        self.tasks.append(task)
+        await self._ready(slow_started, task)
+        async with asyncio.timeout(3):
+            while True:
+                history = await self._history(session)
+                tools = {item["call_id"]: item for item in _kind(history, "tool")}
+                if tools.get("media", {}).get("output") == "MEDIA_RESULT":
+                    break
+                await asyncio.sleep(0.005)
+        self.assertFalse(task.done())
+        self.assertIsNone(tools["slow"]["output"])
+        await self._finish(task, release)
+        stored_history = await self.store.get_raw_history(session, agent_id=self.agent_id)
+        result_requests = [message for message in stored_history if isinstance(message, ModelRequest)
+                           and any(isinstance(part, ToolReturnPart) for part in message.parts)]
+        self.assertEqual(len(result_requests), 1)
+        request = result_requests[0]
+        results = [part for part in request.parts if isinstance(part, ToolReturnPart)]
+        self.assertEqual({part.tool_call_id for part in results}, {"media", "slow"})
+        self.assertEqual(next(part for part in results if part.tool_call_id == "media").metadata, {"safe": True})
+        contents = [part for part in request.parts if isinstance(part, UserPromptPart)]
+        self.assertEqual(len(contents), 1)
+        self.assertIsInstance(contents[0].content, list)
+        self.assertEqual(len(contents[0].content), 2)
+        self.assertEqual(contents[0].content[0], "SUPPLEMENTAL_CONTENT")
+        restored_media = contents[0].content[1]
+        # The SDK codec narrows image/png BinaryContent to BinaryImage and
+        # derives its identifier; preserve exact bytes, MIME and content order
+        # without requiring the pre-serialization Python subclass to survive.
+        self.assertIsInstance(restored_media, BinaryContent)
+        self.assertEqual(restored_media.data, media.data)
+        self.assertEqual(restored_media.media_type, media.media_type)
+        self.assertEqual(restored_media.identifier, media.identifier)
+        self.assertEqual(len(_kind(await self._history(session), "user_message")), 1)

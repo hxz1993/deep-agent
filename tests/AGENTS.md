@@ -12,11 +12,11 @@ Sandbox Worker 仍只使用受控的 `src`，禁止继承宿主的任意 `PYTHON
 
 ## 运行命令
 
-运行中持久化回归入口：`test_run_progress_capability/store/projection`、
-`integration/test_run_progress_history.py`、`test_run_progress_recovery.py`。
+运行中持久化回归入口：`unit/test_message_persistence.py`、`test_message_part_store.py`、
+`integration/test_incremental_message_persistence.py`、`test_message_persistence_process_exit.py`、`test_channel_message_persistence.py`。
 真实 SDK 需在模型静默/并行工具中途设屏障，从独立 HTTP/SQLite 连接读 History，不能先 flush 后宣称实时。
 强杀验证只能使用隔离子进程及临时库；禁止杀稳定 8000 或重放真实业务工具。
-Console 跟随验证包含请求串行、同 Sequence 更新、切页迟到数据及运行工具只读。
+Console 跟随验证包含请求串行、同 Sequence 状态更新、切页迟到数据及运行工具只读。正常/取消不新增 RUN 或异常回执；执行失败仅一条 execution/error，不能进入模型正文；半段文本不定时落库。
 
 ```bash
 # 全部

@@ -185,7 +185,7 @@ class ConversationProjectorTests(unittest.TestCase):
                 tool_call_id="confirm-1",
             )]),
         )
-        terminal = event(2, "run/terminal", status="interrupted")
+        terminal = event(2, "execution/error", status="interrupted")
 
         tool = project_session_events([pending, terminal]).items[0]
 

@@ -30,19 +30,19 @@ from tests.integration import test_wecom_ingress as ingress_fixture
 from tests.unit.test_wecom_adapter import frame
 
 
-class ChannelRunProgressIntegrationTests(unittest.IsolatedAsyncioTestCase):
+class ChannelMessagePersistenceIntegrationTests(unittest.IsolatedAsyncioTestCase):
     # Reuse the streaming ASGI->aiohttp bridge, not a buffered fake SSE source.
     _create_ingress = ingress_fixture.WecomIngressIntegrationTests._create_ingress
 
     async def asyncSetUp(self):
         temporary = tempfile.TemporaryDirectory(
-            prefix="TMP_to_delete-channel-run-progress-", dir=Path(__file__).resolve().parents[2],
+            prefix="TMP_to_delete-channel-message-facts-", dir=Path(__file__).resolve().parents[2],
         )
         self.addCleanup(temporary.cleanup)
         stores, engine, factory = await make_sqlite_stores(
             f"sqlite+aiosqlite:///{Path(temporary.name) / 'channel.sqlite3'}",
         )
-        self._agent_id = await seed_default_agent(stores, name="isolated-channel-progress")
+        self._agent_id = await seed_default_agent(stores, name="isolated-channel-facts")
         await stores.agent.update_unique(self._agent_id, AgentUpdate(capabilities=["builtin:general"]))
         self.ctx = AppContext.for_testing(
             registry=build_registry(), stores=stores, db_engine=engine,
@@ -175,14 +175,13 @@ class ChannelRunProgressIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(record.delivery_status, "failed" if fail_delivery == "final" else "sent")
         self.assertEqual(record.error_code, "delivery_failed" if fail_delivery == "final" else None)
         self.assertEqual(self.ctx.active_runs.active_count(), 0)
-        await self._assert_sealed(requests[0]["session_id"], status="completed")
+        await self._assert_fact_events(requests[0]["session_id"], status="completed")
 
-    async def _assert_sealed(self, session_id, *, status):
+    async def _assert_fact_events(self, session_id, *, status):
         events = await self.ctx.stores.coordinator.list_all_events(session_id)
-        progress = [row for row in events if row.event_type == "run/progress"]
-        self.assertEqual(len(progress), 1)
-        self.assertEqual(progress[0].status, status)
-        self.assertNotIn("messages", progress[0].payload)
+        self.assertFalse(any(row.event_type.startswith("run/") for row in events))
+        failures = [row for row in events if row.event_type == "execution/error"]
+        self.assertEqual(len(failures), 1 if status == "failed" else 0)
 
     async def test_private_two_tool_rounds_are_durable_before_final_delivery(self):
         await self._two_rounds()
@@ -246,7 +245,7 @@ class ChannelRunProgressIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(record.processing_status, "interrupted" if cancel else "failed")
         self.assertEqual(record.delivery_status, "sent")
         self.assertEqual(self.ctx.active_runs.active_count(), 0)
-        await self._assert_sealed(requests[0]["session_id"], status="interrupted" if cancel else "failed")
+        await self._assert_fact_events(requests[0]["session_id"], status="interrupted" if cancel else "failed")
 
     async def test_console_cancel_ends_channel_loading_and_preserves_completed_tool(self):
         await self._interrupted_after_tool(cancel=True)
@@ -286,4 +285,4 @@ class ChannelRunProgressIntegrationTests(unittest.IsolatedAsyncioTestCase):
         record = await self._run_record(account.id, "durable-ui-wait")
         self.assertEqual((record.processing_status, record.delivery_status), ("completed", "sent"))
         self.assertEqual(self.ctx.active_runs.active_count(), 0)
-        await self._assert_sealed(requests[0]["session_id"], status="pending")
+        await self._assert_fact_events(requests[0]["session_id"], status="pending")

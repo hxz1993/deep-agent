@@ -63,7 +63,7 @@ function eventLabel(kind, part = {}) {
   if (kind === "thinking") return "模型思考";
   if (kind === "assistant") return "助手输出";
   if (kind === "title") return "会话标题";
-  if (kind === "run") return "模型运行";
+  if (kind === "error") return "异常";
   if (kind === "compaction") return "上下文压缩";
   if (kind === "planning") return part.tool || "任务规划";
   if (kind === "deferred") return part.tool || "等待用户操作";
@@ -76,7 +76,7 @@ function eventSummary(kind, source = {}) {
   if (kind === "context") return valuePreview(source.label || source.content || source.type || source.key) || "结构化上下文";
   if (["thinking", "assistant"].includes(kind)) return valuePreview(source.content);
   if (kind === "title") return valuePreview(source.title) || "会话标题";
-  if (kind === "run") return source.status ? `Run ${source.status}` : "模型运行";
+  if (kind === "error") return valuePreview(source.message) || "执行异常";
   if (kind === "compaction") {
     const before = source.budget?.estimated_before;
     const after = source.budget?.estimated_after;
@@ -274,27 +274,13 @@ function projectTitle(event, inputSequence) {
   return projected;
 }
 
-function projectRunProgress(event, inputSequence) {
-  const messages = Array.isArray(event.payload?.messages) ? event.payload.messages : [];
-  const parts = messages.flatMap((message) => Array.isArray(message?.parts) ? message.parts : []);
-  const payload = {
-    status: event.status || "running",
-    revision: Number(event.payload?.revision || 0),
-    message_count: Number(event.payload?.message_count ?? messages.length),
-    assistant_rounds: messages.filter((message) => message?.kind === "response").length,
-    tool_calls: parts.filter((part) => ["tool-call", "builtin-tool-call"].includes(part?.part_kind)).length,
-    tool_results: parts.filter((part) => ["tool-return", "builtin-tool-return"].includes(part?.part_kind)).length,
-  };
-  if (event.payload?.error) payload.error = event.payload.error;
+function projectExecutionError(event, inputSequence) {
+  const payload = event.payload || {};
   const projected = newEvent({
-    id: event.event_id, kind: "run", inputSequence: Math.max(inputSequence, 1),
+    id: event.event_id, kind: "error", inputSequence: Math.max(inputSequence, 1),
     runId: event.run_id || null, timestamp: event.created_at || null,
-    status: payload.status, part: payload, payload,
+    status: "failed", part: payload, payload,
   });
-  projected.label = payload.status === "running" ? "运行中快照" : "运行保存记录";
-  projected.summary = payload.status === "running"
-    ? `已保存 ${payload.assistant_rounds} 轮助手输出 · ${payload.tool_results}/${payload.tool_calls} 个工具结果`
-    : `已保存 ${payload.message_count} 条消息`;
   projected.sequence = Number(event.sequence || 0);
   projected.turn_id = event.turn_id || null;
   projected.event_type = event.event_type;
@@ -309,10 +295,11 @@ export function buildTrajectory(history = {}) {
   let inputSequence = 0;
   const projected = [];
   const tools = new Map();
+  const assistantMessages = new Map();
   const automaticTitles = new Map();
   for (const event of items) {
-    if (event.event_type === "run/progress") {
-      projected.push(projectRunProgress(event, inputSequence));
+    if (event.event_type === "execution/error") {
+      projected.push(projectExecutionError(event, inputSequence));
       continue;
     }
     if (event.event_type === "session/title") {
@@ -336,23 +323,6 @@ export function buildTrajectory(history = {}) {
     }
     if (event.event_type === "compaction") {
       projected.push(projectCompaction(event, inputSequence));
-      continue;
-    }
-    if (event.event_type === "run/terminal") {
-      const terminal = newEvent({
-        id: event.event_id,
-        kind: "run",
-        inputSequence: Math.max(inputSequence, 1),
-        runId: event.run_id || null,
-        timestamp: event.created_at || null,
-        status: event.status || "failed",
-        part: { status: event.status },
-        payload: event.payload || {},
-      });
-      terminal.sequence = Number(event.sequence || 0);
-      terminal.turn_id = event.turn_id || null;
-      terminal.event_type = event.event_type;
-      projected.push(terminal);
       continue;
     }
     const message = storedMessage(event);
@@ -382,7 +352,19 @@ export function buildTrajectory(history = {}) {
     }
 
     if (event.event_type === "assistant/message") {
-      const assistantParts = parts.map((part) => {
+      const source = event.payload?.source;
+      const messageKey = event.run_id && Number.isInteger(source?.message_ordinal)
+        ? `${event.run_id}:${source.message_ordinal}` : event.event_id;
+      let group = assistantMessages.get(messageKey);
+      if (!group) {
+        group = { event, parts: new Map(), eventIds: [], row: null };
+        assistantMessages.set(messageKey, group);
+      }
+      group.eventIds.push(event.event_id);
+      parts.forEach((part, offset) => {
+        group.parts.set(Number.isInteger(source?.part_index) ? source.part_index + offset : offset, part);
+      });
+      const assistantParts = [...group.parts.entries()].sort(([left], [right]) => left - right).map(([, part]) => {
         if (part?.part_kind === "thinking") return { type: "thinking", content: part.content || "" };
         if (part?.part_kind === "text") return { type: "text", content: part.content || "" };
         if (toolRole(part) === "call") return {
@@ -399,22 +381,26 @@ export function buildTrajectory(history = {}) {
       const assistantPayload = assistantLoopPayload(assistantParts);
       if (assistantPayload.thinking || assistantPayload.content) {
         const assistant = newEvent({
-          id: event.event_id,
+          id: group.event.event_id,
           kind: "assistant",
           inputSequence: Math.max(inputSequence, 1),
           runId: event.run_id || message.run_id || null,
-          timestamp: event.created_at || message.timestamp || null,
+          timestamp: group.event.created_at || message.timestamp || null,
           status: event.status || message.state || "completed",
           part: { content: assistantPayload.content },
           payload: assistantPayload,
-          native: messageMeta(message),
+          native: { ...messageMeta(message), event_ids: [...group.eventIds] },
         });
         assistant.summary = assistantLoopSummary(assistantPayload);
-        assistant.sequence = Number(event.sequence || 0);
+        assistant.sequence = Number(group.event.sequence || 0);
         assistant.turn_id = event.turn_id || null;
         assistant.event_type = event.event_type;
         assistant.timestamp_end = event.updated_at || assistant.timestamp;
-        projected.push(assistant);
+        if (group.row) Object.assign(group.row, assistant);
+        else {
+          group.row = assistant;
+          projected.push(assistant);
+        }
       }
     }
 
@@ -424,6 +410,9 @@ export function buildTrajectory(history = {}) {
       if (!role || !callId) return;
       const toolName = part.tool_name || null;
       let tool = tools.get(callId);
+      const repeatedCall = role === "call" && tool?.native?.call_event_id
+        && (tool.native.call_event_id !== event.event_id || tool.native.call_part_offset !== offset);
+      if (repeatedCall) tool = null;
       if (!tool) {
         const pseudoPart = {
           type: role === "call" ? "tool_call" : "tool_result",
@@ -436,7 +425,7 @@ export function buildTrajectory(history = {}) {
           metadata: part.metadata || null,
         };
         tool = newEvent({
-          id: `tool:${callId}`,
+          id: repeatedCall ? `tool:${callId}:${event.event_id}:${offset}` : `tool:${callId}`,
           kind: partKind(pseudoPart, toolName),
           inputSequence: Math.max(inputSequence, 1),
           runId: event.run_id || message.run_id || null,
@@ -511,7 +500,6 @@ export function filterTrajectory(events = [], { mode = "sequence", query = "" } 
 
 function liveEventKind(type, data) {
   if (["thinking", "text"].includes(type)) return "assistant";
-  if (["cancelled", "error"].includes(type)) return "run";
   if (["context_compaction", "context_compaction_progress", "context_compaction_result"].includes(type)) return "compaction";
   if (type === "tool_call" || type === "tool_result" || type === "tool_call_removed") {
     if (data?.source === "planning") return "planning";
@@ -522,20 +510,12 @@ function liveEventKind(type, data) {
 }
 
 function liveLabel(type, data) {
-  if (type === "session") return "Run 已建立";
-  if (type === "final") return "Run 终态";
-  if (type === "cancelled") return "Run 已取消";
-  if (type === "error") return "Run 错误";
   if (type.startsWith("context_compaction")) return "上下文压缩";
   return eventLabel(liveEventKind(type, data), data);
 }
 
 function liveSummary(type, data) {
   if (["thinking", "text"].includes(type)) return valuePreview(data?.delta);
-  if (type === "session") return data?.run_id ? `run_id=${data.run_id}` : "会话已建立";
-  if (type === "final") return data?.status || "completed";
-  if (type === "cancelled") return "cancelled";
-  if (type === "error") return valuePreview(data?.message) || "请求失败";
   if (type === "tool_result") return valuePreview(data?.result) || "工具已返回";
   if (type === "tool_call_removed") return data?.reason || "调用已撤回";
   return valuePreview(data?.message || data?.args) || type;
@@ -576,6 +556,7 @@ function kindBadge(kind) {
   if (kind === "input") return "USER";
   if (kind === "context") return "CONTEXT";
   if (kind === "title") return "TITLE";
+  if (kind === "error") return "异常";
   return String(kind || "event").toUpperCase();
 }
 
@@ -713,7 +694,11 @@ function renderAssistantTools(event, events) {
   const calls = Array.isArray(event.payload?.tool_calls) ? event.payload.tool_calls : [];
   if (!calls.length) return "";
   return `<div class="trajectory-summary-links">${calls.map((call) => {
-    const target = events.find((item) => TOOL_KINDS.has(item.kind) && item.tool_call_id && item.tool_call_id === call?.tool_call_id);
+    const target = [...events].reverse().find((item) => TOOL_KINDS.has(item.kind)
+      && item.tool_call_id === call?.tool_call_id
+      && (event.source === "sse"
+        ? item.run_id === event.run_id
+        : (event.native?.event_ids || [event.id]).includes(item.native?.call_event_id)));
     return renderJumpLink({
       eventId: target?.id || null,
       iconName: "wrench",
@@ -873,6 +858,12 @@ function renderTitleSummary(event) {
   );
 }
 
+function renderExecutionErrorSummary(event) {
+  return renderSummarySection("异常", `<p class="trajectory-summary-copy">${escapeHtml(event.payload?.message || event.summary)}</p>
+    ${renderFact("错误类型", event.payload?.code, { mono: true })}
+    ${renderFact("发生阶段", event.payload?.phase)}`);
+}
+
 const SUMMARY_RENDERERS = Object.freeze({
   input: renderInputSummary,
   context: renderContextSummary,
@@ -882,6 +873,7 @@ const SUMMARY_RENDERERS = Object.freeze({
   tool: renderToolSummary,
   compaction: renderCompactionSummary,
   title: renderTitleSummary,
+  error: renderExecutionErrorSummary,
 });
 
 function renderSummary(event, events) {
@@ -1214,14 +1206,10 @@ export function createTrajectoryController({ state }) {
         liveEvents = liveEvents.filter((item) => item !== activeAssistantLoop || item.run_id !== stored.run_id);
         if (activeAssistantLoop?.run_id === stored.run_id) activeAssistantLoop = null;
       }
-      const projectedTitle = stored.event_type === "session/title"
-        ? historyEvents.find((item) => item.kind === "title" && item.native?.event_ids?.includes(stored.event_id))
-        : null;
-      if (stored.event_type !== "run/progress" || !selectedId) {
-        selectedId = storedCallIds.size
-          ? `tool:${[...storedCallIds][0]}`
-          : projectedTitle?.id || stored.event_id;
-      }
+      const projectedMessage = historyEvents.find((item) => item.native?.event_ids?.includes(stored.event_id));
+      const projectedTool = historyEvents.find((item) => TOOL_KINDS.has(item.kind)
+        && [item.native?.call_event_id, item.native?.result_event_id].includes(stored.event_id));
+      selectedId = projectedTool?.id || projectedMessage?.id || stored.event_id;
       scheduleRender();
       return;
     }
@@ -1272,8 +1260,17 @@ export function createTrajectoryController({ state }) {
       scheduleRender();
       return;
     }
+    if (type === "tool_call" && payload.tool_call_id
+      && [...historyEvents].reverse().find((item) => item.tool_call_id === payload.tool_call_id
+        && item.run_id === currentRunId)?.status === "pending") {
+      // Accepted calls are committed before their presentation frame arrives.
+      // Keep the persisted row instead of adding the same call a second time.
+      return;
+    }
         if (type === "tool_result" && payload.tool_call_id) {
-      const call = [...liveEvents].reverse().find((item) => item.tool_call_id === payload.tool_call_id);
+      const call = [...historyEvents, ...liveEvents].reverse().find((item) => (
+        item.tool_call_id === payload.tool_call_id && item.run_id === currentRunId
+      ));
       if (call) {
         call.result = redactTrajectoryValue(jsonClone({ result: payload.result, outcome: payload.outcome || null, artifacts: payload.artifacts || null, plan: payload.plan || null,
           metadata: { code_mode: payload.metadata?.code_mode, nested_calls: payload.metadata?.nested_calls } }));
@@ -1313,14 +1310,15 @@ export function createTrajectoryController({ state }) {
       liveEvents.filter((item) => item.run_id === currentRunId && ["running", "pending"].includes(item.status))
         .forEach((item) => { item.status = type === "error" ? "failed" : "interrupted"; item.timestamp_end = timestamp; });
       activeAssistantLoop = null;
+      // Transport termination closes live content; only a persisted execution
+      // error is a separate trajectory fact. Cancellation adds no receipt.
+      scheduleRender();
+      return;
     }
 
     const kind = liveEventKind(type, payload);
-    const status = type === "error" ? "failed"
-      : type === "cancelled" ? "interrupted"
-        : type === "final" ? normalizedStatus(payload.status)
-          : type === "tool_result" ? toolResultPresentation(payload).status
-            : type === "tool_call" ? "pending" : "running";
+    const status = type === "tool_result" ? toolResultPresentation(payload).status
+      : type === "tool_call" ? "pending" : "running";
     liveEvents.push({
       id: `live-${type}-${payload.tool_call_id || Date.now()}-${liveEvents.length}`,
       kind,

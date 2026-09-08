@@ -141,8 +141,8 @@ class SessionEventStoreTests(unittest.IsolatedAsyncioTestCase):
                 run_id="run-idem",
             )
 
-    async def test_exceptional_terminal_is_saved_only_without_assistant_response(self) -> None:
-        terminal = await self.store.append_terminal(
+    async def test_execution_error_is_saved_even_after_assistant_response(self) -> None:
+        terminal = await self.store.append_execution_error(
             "session-terminal",
             status="failed",
             agent_id=self.agent_id,
@@ -153,7 +153,7 @@ class SessionEventStoreTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIsNotNone(terminal)
         assert terminal is not None
-        self.assertEqual(terminal.event_type, "run/terminal")
+        self.assertEqual(terminal.event_type, "execution/error")
         self.assertEqual(terminal.status, "failed")
 
         await self.store.append(
@@ -165,18 +165,18 @@ class SessionEventStoreTests(unittest.IsolatedAsyncioTestCase):
             run_id="run-partial",
             terminal_status="interrupted",
         )
-        suppressed = await self.store.append_terminal(
+        suppressed = await self.store.append_execution_error(
             "session-response-terminal",
             status="interrupted",
             agent_id=self.agent_id,
             user_id="user-1",
             turn_id="run-partial",
             run_id="run-partial",
-            payload={"reason": "cancelled"},
+            payload={"code": "unexpected_disconnect", "message": "连接意外中断"},
         )
-        self.assertIsNone(suppressed)
+        self.assertIsNotNone(suppressed)
         events = await self.store.list_events("session-response-terminal")
-        self.assertEqual([event.event_type for event in events], ["assistant/message"])
+        self.assertEqual([event.event_type for event in events], ["assistant/message", "execution/error"])
 
     async def test_pre_persisted_user_and_run_tail_keep_message_ordinals(self) -> None:
         user = ModelRequest(parts=[UserPromptPart(content="question")], run_id="run-split")

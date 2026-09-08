@@ -210,6 +210,9 @@ class ChatSessionStoreBase(SessionBoundMixin):
             attachment_counts = await self._attachment_counts(
                 db, [str(row.session_id) for row in rows]
             )
+            message_counts = await self._message_counts(
+                db, [str(row.session_id) for row in rows]
+            )
             count_stmt = self._apply_session_filters(
                 select(func.count()).select_from(ChatSession),
                 agent_id=agent_id, user_id=user_id,
@@ -232,7 +235,7 @@ class ChatSessionStoreBase(SessionBoundMixin):
             SessionSummaryRow(
                 session_id=row.session_id, agent_id=agent_scope_to_api(row.agent_id),
                 agent_name=row.agent_name, created_at=row.created_at,
-                updated_at=row.updated_at, message_count=int(row.message_count),
+                updated_at=row.updated_at, message_count=message_counts.get(row.session_id, 0),
                 turn_count=int(row.turn_count),
                 attachment_count=attachment_counts.get(row.session_id, 0),
                 user_prompt=prompts.get(row.session_id), title=row.title,
@@ -240,6 +243,35 @@ class ChatSessionStoreBase(SessionBoundMixin):
             for row in rows
         ]
         return summaries, total
+
+    async def _message_counts(self, db: AsyncSession, session_ids: list[str]) -> dict[str, int]:
+        """Keep list counts at SDK-message granularity, not inserted-part count.
+
+        The schema intentionally uses portable TEXT JSON, including databases
+        without JSON operators. Stream only this page's events and retain keys,
+        never all large tool payloads or the session's decoded model history.
+        """
+        if not session_ids:
+            return {}
+        keys: dict[str, set[tuple]] = {session_id: set() for session_id in session_ids}
+        stream = await db.stream(select(
+            ChatSessionEvent.session_id, ChatSessionEvent.run_id,
+            ChatSessionEvent.event_id, ChatSessionEvent.payload,
+        ).where(
+            ChatSessionEvent.session_id.in_(session_ids),
+            ChatSessionEvent.event_type.in_(
+                ("user/message", "assistant/message", "tool/results", "model/request")),
+        ).execution_options(yield_per=128))
+        try:
+            async for session_id, run_id, event_id, payload in stream:
+                source = payload.get("source")
+                key = (("parts", run_id, source["message_ordinal"])
+                       if isinstance(source, dict) and "message_ordinal" in source
+                       else ("message", event_id))
+                keys[session_id].add(key)
+        finally:
+            await stream.close()
+        return {session_id: len(values) for session_id, values in keys.items()}
 
     async def _attachment_counts(
         self, db: AsyncSession, session_ids: list[str],

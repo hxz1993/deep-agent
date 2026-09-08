@@ -149,7 +149,13 @@ def filter_ephemeral_agent_messages(messages: list[ModelMessage]) -> list[ModelM
             if not kept_parts:
                 continue
             if len(kept_parts) != len(message.parts):
-                message = replace(message, parts=kept_parts)
+                metadata = dict(message.metadata or {})
+                if "deepagent_part_indices" in metadata:
+                    metadata["deepagent_part_indices"] = [
+                        metadata["deepagent_part_indices"][i]
+                        for i in range(len(message.parts)) if i not in rejected_parts
+                    ]
+                message = replace(message, parts=kept_parts, metadata=metadata)
                 if (message.state != "interrupted" and not (message.metadata or {}).get("deepagent_error")
                         and is_thinking_only_response(message)):
                     continue
@@ -163,7 +169,14 @@ def filter_ephemeral_agent_messages(messages: list[ModelMessage]) -> list[ModelM
             if not kept_parts:
                 continue
             if len(kept_parts) != len(message.parts):
-                message = replace(message, parts=kept_parts)
+                metadata = dict(message.metadata or {})
+                if "deepagent_part_indices" in metadata:
+                    metadata["deepagent_part_indices"] = [
+                        metadata["deepagent_part_indices"][i]
+                        for i, part in enumerate(message.parts)
+                        if not isinstance(part, RetryPromptPart) or i in terminal_retries
+                    ]
+                message = replace(message, parts=kept_parts, metadata=metadata)
         filtered.append(message)
     return filtered
 
@@ -224,6 +237,9 @@ def repair_unprocessed_tool_calls(
         nonlocal changed, pending
         if not pending:
             return
+        preceding_metadata = repaired[-1].metadata or {} if repaired else {}
+        source_metadata = ({"deepagent_message_ordinal": preceding_metadata["deepagent_message_ordinal"] + 1}
+                           if "deepagent_message_ordinal" in preceding_metadata else None)
         repaired.append(ModelRequest(
             parts=[
                 ToolReturnPart(
@@ -237,7 +253,7 @@ def repair_unprocessed_tool_calls(
                     outcome="failed" if failure_message is not None else "success",
                 )
                 for tool_call_id, tool_name in pending.items()
-            ]
+            ], metadata=source_metadata,
         ))
         changed = True
         pending = {}
@@ -264,7 +280,8 @@ def repair_unprocessed_tool_calls(
             continue
 
         if isinstance(message, ModelRequest):
-            if pending and any(isinstance(part, UserPromptPart) for part in message.parts):
+            if (pending and any(isinstance(part, UserPromptPart) for part in message.parts)
+                    and not any(isinstance(part, (BaseToolReturnPart, RetryPromptPart)) for part in message.parts)):
                 flush_pending()
             kept_parts = []
             current_retry_resolved: set[tuple[str, str | None]] = set()

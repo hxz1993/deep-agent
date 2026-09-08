@@ -18,8 +18,7 @@ from deep_agent.conversation.models import (
     ToolConversationItem,
     UserConversationItem,
 )
-from deep_agent.db.event_codec import EVENT_SCHEMA_VERSION, MESSAGE_EVENT_TYPES, event_type_for_message
-from deep_agent.db.run_progress import RUN_PROGRESS_EVENT_TYPE
+from deep_agent.db.event_codec import EVENT_SCHEMA_VERSION, MESSAGE_EVENT_TYPES, group_message_events
 from deep_agent.time import ensure_utc
 
 
@@ -49,13 +48,9 @@ def project_session_events(
     tool_by_call: dict[str, ToolConversationItem | PlanConversationItem] = {}
     terminal_by_run: dict[str, str] = {}
 
-    for event in ordered:
+    for event in group_message_events(ordered):
         event_type = str(_get(event, "event_type", ""))
-        if event_type == RUN_PROGRESS_EVENT_TYPE:
-            if _get(event, "status") == "running":
-                items.extend(_progress_items(event))
-            continue
-        if event_type == "run/terminal":
+        if event_type == "execution/error":
             run_id = _optional_str(_get(event, "run_id"))
             if run_id:
                 terminal_by_run[run_id] = _terminal_status(_get(event, "status"))
@@ -88,6 +83,8 @@ def project_session_events(
                     continue
                 if part_kind in _TOOL_CALL_KINDS:
                     tool = _tool_call_item(event, part, part_offset)
+                    if call_id in tool_by_call:
+                        tool.item_id += f":{_get(event, 'event_id')}:{part_offset}"
                     tool_by_call[call_id] = tool
                     items.append(tool)
                 elif part_kind in _TOOL_RESULT_KINDS:
@@ -147,49 +144,6 @@ def project_session_events(
         ),
         items=items,
     )
-
-
-def _progress_items(event: Any) -> list[ConversationItem]:
-    """Render a durable checkpoint; it can never grant a Deferred action."""
-    payload = _get(event, "payload") or {}
-    messages = payload.get("messages", []) if isinstance(payload, Mapping) else []
-    if not isinstance(messages, list):
-        raise ConversationProjectionError("Run progress messages must be a list")
-    virtual: list[dict[str, Any]] = []
-    offsets: dict[int, int] = {}
-    offset = 0
-    for index, message in enumerate(messages):
-        if not isinstance(message, dict):
-            raise ConversationProjectionError("Invalid Run progress message")
-        offsets[index + 1] = offset
-        offset += max(1, len(_parts(message)))
-        virtual.append({
-            "event_id": f"{_get(event, 'event_id')}:preview:{index}",
-            "event_type": event_type_for_message(message),
-            "sequence": index + 1, "schema_version": EVENT_SCHEMA_VERSION,
-            "session_id": _get(event, "session_id"),
-            "turn_id": _get(event, "turn_id"), "run_id": _get(event, "run_id"),
-            "status": "pending", "payload": {"message": message},
-            "created_at": _get(event, "created_at"), "updated_at": _get(event, "updated_at"),
-        })
-    items = project_session_events(virtual, session_id=str(_get(event, "session_id"))).items
-    for item in items:
-        item.order.part_offset += offsets[item.order.sequence]
-        item.order.sequence = int(_get(event, "sequence", 0))
-        item.source_event_ids = [str(_get(event, "event_id"))]
-        if item.kind == "assistant_message":
-            item.status = "pending"
-            item.phase = "process"
-        elif item.kind == "tool":
-            # Even a validated UI call is only a preview until the terminal
-            # pending transaction commits its official Deferred request.
-            if item.status == "awaiting_input":
-                item.status = "pending"
-            if item.mode == "deferred":
-                item.mode = "tool"
-            item.widget = None
-            item.metadata = None
-    return items
 
 
 def _message(event: Any) -> dict[str, Any] | None:
@@ -266,7 +220,7 @@ def _user_item(event: Any, message: Mapping[str, Any]) -> UserConversationItem |
             sequence=int(_get(event, "sequence", 0)),
             part_offset=part_offset,
         ),
-        source_event_ids=[event_id],
+        source_event_ids=list(_get(event, "source_event_ids", [event_id])),
         created_at=timestamp,
         updated_at=_event_datetime(event, "updated_at"),
         text="\n".join(texts).strip() or None,
@@ -343,7 +297,7 @@ def _assistant_item(
             sequence=int(_get(event, "sequence", 0)),
             part_offset=min(offsets),
         ),
-        source_event_ids=[event_id],
+        source_event_ids=list(_get(event, "source_event_ids", [event_id])),
         created_at=_datetime(message.get("timestamp")) or _event_datetime(event, "created_at"),
         updated_at=_event_datetime(event, "updated_at"),
         thinking="\n".join(thinking).strip() or None,
@@ -375,7 +329,7 @@ def _tool_call_item(
             sequence=int(_get(event, "sequence", 0)),
             part_offset=part_offset,
         ),
-        source_event_ids=[event_id],
+        source_event_ids=list(_get(event, "source_event_ids", [event_id])),
         created_at=_event_datetime(event, "created_at"),
         updated_at=_event_datetime(event, "updated_at"),
         call_id=call_id,
@@ -388,8 +342,8 @@ def _tool_call_item(
         **common,
         tool_name=tool_name,
         mode=("deferred" if pending_status == "awaiting_input" else _tool_mode(tool_name, part)),
-        widget=_optional_str((metadata or {}).get("widget")),
-        metadata=metadata,
+        widget=_optional_str((metadata or {}).get("widget")) if pending_status == "awaiting_input" else None,
+        metadata=metadata if pending_status == "awaiting_input" or not (metadata or {}).get("widget") else None,
     )
 
 
@@ -417,8 +371,9 @@ def _apply_result(
     part: Mapping[str, Any],
 ) -> None:
     event_id = str(_get(event, "event_id"))
-    if event_id not in item.source_event_ids:
-        item.source_event_ids.append(event_id)
+    for source_id in _get(event, "source_event_ids", [event_id]):
+        if source_id not in item.source_event_ids:
+            item.source_event_ids.append(source_id)
     item.updated_at = _event_datetime(event, "updated_at")
     item.output = safe_web_image_value(part.get("content"))
     outcome = _optional_str(part.get("outcome"))
@@ -460,7 +415,8 @@ def _artifacts(part: Mapping[str, Any]) -> list[ConversationArtifact]:
 def _pending_tool_status(event: Any, part: Mapping[str, Any]) -> str:
     metadata = part.get("metadata")
     widget = metadata.get("widget") if isinstance(metadata, Mapping) else None
-    if _get(event, "status") == "pending" or widget:
+    source = (_get(event, "payload") or {}).get("source")
+    if _get(event, "status") == "pending" or (widget and not source):
         return "awaiting_input"
     return "pending"
 

@@ -50,7 +50,7 @@ async def _run_waiting_fixture(url: str, agent_id: str, session: str, connection
         requests += 1
         if requests != 1:
             raise AssertionError("the barrier must prevent another model request")
-        yield "PARTIAL_PROCESS_SURVIVES_KILL"
+        yield "COMPLETED_ROUND_SURVIVES_KILL"
         yield {
             0: DeltaToolCall(name="fast_read", json_args="{}", tool_call_id="fast-before-kill"),
             1: DeltaToolCall(name="slow_read", json_args="{}", tool_call_id="slow-at-kill"),
@@ -70,7 +70,7 @@ async def _run_waiting_fixture(url: str, agent_id: str, session: str, connection
             ):
                 if event["type"] == "tool_result" and event.get("tool_call_id") == "fast-before-kill":
                     await asyncio.wait_for(slow_started.wait(), timeout=5)
-                    connection.send({"state": "checkpoint", "pid": os.getpid()})
+                    connection.send({"state": "completed_fact_boundary", "pid": os.getpid()})
         connection.send({"state": "unexpected_terminal"})
     finally:
         registry.cancel_all()
@@ -89,10 +89,10 @@ def _fixture_process(url: str, agent_id: str, session: str, connection) -> None:
         connection.close()
 
 
-class RunProgressRecoveryIntegrationTests(unittest.IsolatedAsyncioTestCase):
+class MessagePersistenceProcessExitTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory(
-            prefix="TMP_to_delete-run-progress-recovery-", dir=Path(__file__).resolve().parents[2],
+            prefix="TMP_to_delete-message-process-exit-", dir=Path(__file__).resolve().parents[2],
         )
         self.url = f"sqlite+aiosqlite:///{Path(self.tmp.name) / 'recovery.sqlite3'}"
         self.stores, self.engine, _ = await make_sqlite_stores(self.url)
@@ -127,8 +127,8 @@ class RunProgressRecoveryIntegrationTests(unittest.IsolatedAsyncioTestCase):
             return int((await db.execute(text("SELECT count(*) FROM fixture_executions"))).scalar_one())
 
     @unittest.skipUnless(os.name == "posix", "this scenario verifies actual POSIX SIGKILL")
-    async def test_sigkill_recovers_committed_progress_without_reexecuting_tools(self):
-        session = "sigkill-durable-progress"
+    async def test_sigkill_preserves_committed_facts_without_reexecuting_tools(self):
+        session = "sigkill-durable-facts"
         context = multiprocessing.get_context("spawn")
         receive, send = context.Pipe(duplex=False)
         self.connections.append(receive)
@@ -136,43 +136,45 @@ class RunProgressRecoveryIntegrationTests(unittest.IsolatedAsyncioTestCase):
         process.start()
         self.processes.append(process)
         send.close()
-        self.assertTrue(await asyncio.to_thread(receive.poll, 20), "fixture did not reach its checkpoint barrier")
+        self.assertTrue(await asyncio.to_thread(receive.poll, 20), "fixture did not reach its completed_fact_boundary barrier")
         message = receive.recv()
-        self.assertEqual(message, {"state": "checkpoint", "pid": process.pid})
+        self.assertEqual(message, {"state": "completed_fact_boundary", "pid": process.pid})
         self.assertTrue(process.is_alive())
         before, visible = await self._history(session)
-        self.assertTrue(any(event.event_type == "run/progress" and event.status == "running" for event in before))
+        self.assertFalse(any(event.event_type.startswith("run/") for event in before))
         tools = {item.call_id: item for item in visible.items if item.kind == "tool"}
         self.assertEqual(tools["fast-before-kill"].output, "FAST_RESULT_SURVIVES_KILL")
         self.assertEqual(tools["fast-before-kill"].status, "completed")
         self.assertIsNone(tools["slow-at-kill"].output)
         self.assertEqual(await self._execution_count(), 1)
 
-        # No shutdown hook can run: only the previously committed checkpoint survives.
+        # No shutdown hook can run: only the previously committed completed_fact_boundary survives.
         process.kill()
         await asyncio.to_thread(process.join, 5)
         self.assertFalse(process.is_alive())
         self.assertEqual(process.exitcode, -signal.SIGKILL)
         await self._reopen()
-        self.assertEqual(await self.stores.coordinator.recover_running_progress(), 1)
         recovered, history = await self._history(session)
         self.assertEqual(len([item for item in history.items if item.kind == "user_message"]), 1)
         self.assertEqual(
             [item.text for item in history.items if item.kind == "assistant_message" and item.text],
-            ["PARTIAL_PROCESS_SURVIVES_KILL"],
+            ["COMPLETED_ROUND_SURVIVES_KILL"],
         )
         tools = {item.call_id: item for item in history.items if item.kind == "tool"}
         self.assertEqual(set(tools), {"fast-before-kill", "slow-at-kill"})
         self.assertEqual((tools["fast-before-kill"].status, tools["fast-before-kill"].output),
                          ("completed", "FAST_RESULT_SURVIVES_KILL"))
-        self.assertEqual(tools["slow-at-kill"].status, "interrupted")
-        self.assertFalse(any(item.status in {"running", "pending", "awaiting_input"} for item in history.items))
+        self.assertIsNone(tools["slow-at-kill"].output)
+        # No cross-process recovery/lease mechanism is added. The complete facts
+        # survive unchanged; a forced kill cannot invent a tool result or error.
+        self.assertEqual([event.public_dict() for event in recovered],
+                         [event.public_dict() for event in before])
+        self.assertFalse(any(event.event_type == "execution/error" for event in recovered))
         self.assertEqual(await self._execution_count(), 1)
 
-        snapshots = [event.public_dict() for event in recovered]
-        self.assertEqual(await self.stores.coordinator.recover_running_progress(), 0)
+        committed = [event.public_dict() for event in recovered]
         after, second_history = await self._history(session)
-        self.assertEqual([event.public_dict() for event in after], snapshots)
+        self.assertEqual([event.public_dict() for event in after], committed)
         self.assertEqual(second_history.model_dump(), history.model_dump())
         self.assertEqual(await self._execution_count(), 1)
 
@@ -209,7 +211,6 @@ class RunProgressRecoveryIntegrationTests(unittest.IsolatedAsyncioTestCase):
 
         before, before_history = await self._history(session)
         await self._reopen()
-        self.assertEqual(await self.stores.coordinator.recover_running_progress(), 0)
         after, history = await self._history(session)
         self.assertEqual([event.public_dict() for event in after], [event.public_dict() for event in before])
         self.assertEqual(history.model_dump(), before_history.model_dump())

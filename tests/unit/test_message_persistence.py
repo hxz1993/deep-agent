@@ -5,8 +5,6 @@ import tempfile
 import unittest
 from copy import deepcopy
 from dataclasses import replace
-from datetime import datetime, timedelta, timezone
-from types import SimpleNamespace
 from pathlib import Path
 
 from pydantic_ai import Agent, DeferredToolRequests, DeferredToolResults, FunctionToolset, ModelRequestNode, RunContext
@@ -21,12 +19,12 @@ from pydantic_ai.models.test import TestModel
 from pydantic_ai.usage import RunUsage
 
 from deep_agent.agent.deps import AgentDeps
-from deep_agent.agent.run_progress import (
-    RunProgressCapability, RunProgressPersistenceError, StreamRunProgressCapability,
+from deep_agent.agent.message_persistence import (
+    MessagePersistenceCapability, MessagePersistenceError, StreamMessagePersistenceCapability,
 )
 from deep_agent.capabilities.ui.builtin import builtin_ui_records
 from deep_agent.capabilities.ui.registry import build_external_toolset
-from deep_agent.db.run_ownership import live_run, owned_progress_payload, progress_is_abandoned, run_is_live
+from deep_agent.db.run_ownership import run_is_live
 from deep_agent.ptc import FilePayloadResolvingToolset, HybridCodeMode
 from deep_agent.ptc.file_payload import build_code_mode_tool_package
 from deep_agent.agent.context.estimator import TokenEstimator
@@ -37,29 +35,21 @@ from deep_agent.files.storage import LocalFileStore
 class RecordingStore:
     def __init__(self):
         self.writes = []
-        self.touches = 0
         self.reject = False
         self.fail_when = lambda messages: False
-        self.lease_valid = True
 
-    async def save_run_progress(self, session_id, **kwargs):
-        if self.reject:
-            return None
-        if self.fail_when(kwargs["messages"]):
+    async def append_message_parts(self, session_id, **kwargs):
+        if self.reject or self.fail_when(kwargs["messages"]):
             raise RuntimeError("simulated database outage")
         self.writes.append(deepcopy(kwargs))
-        return SimpleNamespace(status="running", event_id="progress")
-
-    async def touch_run_progress(self, session_id, *, run_id):
-        self.touches += 1
-        return self.lease_valid
+        return []
 
 
 def parts(messages, kind):
     return [part for message in messages for part in message.parts if isinstance(part, kind)]
 
 
-class RunProgressCapabilityTests(unittest.IsolatedAsyncioTestCase):
+class MessagePersistenceCapabilityTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.store = RecordingStore()
         self.deps = AgentDeps(session_id="session", agent_id="agent", user="user",
@@ -67,7 +57,7 @@ class RunProgressCapabilityTests(unittest.IsolatedAsyncioTestCase):
         self.ctx = RunContext(deps=self.deps, model=TestModel(), usage=RunUsage(), messages=[])
 
     def capability(self, *, stream=True, history_length=0):
-        cls = StreamRunProgressCapability if stream else RunProgressCapability
+        cls = StreamMessagePersistenceCapability if stream else MessagePersistenceCapability
         return cls(self.store, history_length=history_length, skip_user_prompt=True)
 
     async def asyncTearDown(self):
@@ -75,17 +65,19 @@ class RunProgressCapabilityTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse([task for task in asyncio.all_tasks()
                           if task.get_name() == "deepagent-run-progress-writer" and not task.done()])
 
-    async def test_thinking_only_partial_is_durable_not_final_answer(self):
+    async def test_partial_text_and_thinking_do_not_create_message_facts(self):
         cap = self.capability()
 
         async def stream():
             yield PartStartEvent(index=0, part=ThinkingPart("first"))
             yield PartDeltaEvent(index=0, delta=ThinkingPartDelta(content_delta=" second"))
+            yield PartStartEvent(index=1, part=TextPart("unfinished"))
+            yield PartDeltaEvent(index=1, delta=TextPartDelta(content_delta=" text"))
 
         async for _ in cap.wrap_run_event_stream(self.ctx, stream=stream()):
             pass
-        self.assertEqual(parts(cap.messages, ThinkingPart)[0].content, "first second")
-        self.assertEqual(cap.messages[-1].state, "incomplete")
+        self.assertEqual(cap.messages, [])
+        self.assertFalse(any(write["messages"] for write in self.store.writes))
         self.assertEqual(cap.canonical_messages([]), [])
 
     async def test_native_search_parts_preserve_order_without_exposing_local_args(self):
@@ -101,6 +93,10 @@ class RunProgressCapabilityTests(unittest.IsolatedAsyncioTestCase):
 
         async for _ in cap.wrap_run_event_stream(self.ctx, stream=stream()):
             pass
+        self.assertEqual(cap.messages, [])
+        response = ModelResponse(parts=[TextPart("lookup"), native_call, native_result,
+                                        ToolCallPart("ui", {"unsafe": 1}, "invalid"), TextPart("answer")])
+        await cap.after_model_request(self.ctx, request_context=None, response=response)
         self.assertEqual([part.part_kind for part in cap.messages[-1].parts],
                          ["text", "builtin-tool-call", "builtin-tool-return", "text"])
 
@@ -119,7 +115,7 @@ class RunProgressCapabilityTests(unittest.IsolatedAsyncioTestCase):
         await cap.after_model_request(self.ctx, request_context=None, response=final)
         self.assertEqual([p.content for p in parts(cap.messages, TextPart)], ["first", "final"])
         canonical = cap.canonical_messages([deepcopy(next_request), deepcopy(final)])
-        self.assertEqual(len(canonical), 4)
+        self.assertEqual(len(canonical), 3)
         self.assertEqual([p.content for p in parts(canonical, TextPart)], ["first", "final"])
         self.assertEqual(len(parts(canonical, ToolReturnPart)), 1)
 
@@ -134,25 +130,6 @@ class RunProgressCapabilityTests(unittest.IsolatedAsyncioTestCase):
         await cap.after_model_request(self.ctx, request_context=None, response=second)
         self.assertEqual(len(parts(cap.messages, ToolCallPart)), 1)
         self.assertEqual(parts(cap.messages, ToolCallPart)[0].args, {"valid": 1})
-
-    async def test_delta_reuses_frozen_large_tool_prefix_until_official_boundary(self):
-        cap = self.capability()
-        request = ModelRequest(parts=[ToolReturnPart("read", "large" * 50_000, "call")])
-        cap._record(request)
-        cap._stage(self.ctx)
-        frozen = cap._pending[0]
-        # A live SDK object changes later; the cached official prefix is already
-        # frozen and cannot be retroactively changed in a pending DB snapshot.
-        request.parts[0].content = "updated"
-        cap._parts[0] = TextPart("first token")
-        for index in range(100):
-            cap._parts[0] = TextPart(str(index))
-            cap._stage(self.ctx)
-            self.assertIs(cap._pending[0], frozen)
-        self.assertEqual(frozen.parts[0].content, "large" * 50_000)
-        cap._record(request)
-        cap._stage(self.ctx)
-        self.assertEqual(cap._pending[0].parts[0].content, "updated")
 
     async def test_resume_without_prompt_does_not_copy_previous_request(self):
         cap = self.capability()
@@ -256,8 +233,8 @@ class RunProgressCapabilityTests(unittest.IsolatedAsyncioTestCase):
                         task.cancel()
                     await asyncio.gather(task, return_exceptions=True)
 
-    async def test_nonstream_progress_only_sees_actual_governed_large_tool_result(self):
-        with tempfile.TemporaryDirectory(prefix="TMP_to_delete-progress-spill-",
+    async def test_nonstream_persistence_only_sees_actual_governed_large_tool_result(self):
+        with tempfile.TemporaryDirectory(prefix="TMP_to_delete-message-spill-",
                                          dir=Path(__file__).resolve().parents[2]) as folder:
             files = LocalFileStore(folder)
             await files.initialize()
@@ -275,7 +252,7 @@ class RunProgressCapabilityTests(unittest.IsolatedAsyncioTestCase):
                 return ModelResponse(parts=[TextPart("done")])
 
             # The real runtime capability is appended after configured policies.
-            # Public ordering must move progress outside limits at Run assembly.
+            # Public ordering must move persistence outside limits at Run assembly.
             agent = Agent(FunctionModel(model), deps_type=AgentDeps, capabilities=[limits])
 
             @agent.tool_plain
@@ -309,7 +286,8 @@ class RunProgressCapabilityTests(unittest.IsolatedAsyncioTestCase):
         agent = Agent(FunctionModel(model), deps_type=AgentDeps, capabilities=[ReplaceRequest()])
         result = await agent.run("original", deps=self.deps, run_id="run", capabilities=[cap])
         canonical = cap.canonical_messages(result.new_messages())
-        self.assertEqual([p.content for p in parts(canonical, UserPromptPart)], ["replacement"])
+        self.assertEqual(parts(canonical, UserPromptPart), [])
+        self.assertEqual([p.content for p in parts(canonical, TextPart)], ["done"])
 
     async def test_database_failure_prevents_real_tool_side_effect(self):
         for reject in (False, True):
@@ -332,7 +310,7 @@ class RunProgressCapabilityTests(unittest.IsolatedAsyncioTestCase):
                     executions.append("executed")
                     return "done"
 
-                with self.assertRaises(RunProgressPersistenceError):
+                with self.assertRaises(MessagePersistenceError):
                     await agent.run("question", deps=self.deps, run_id="run")
                 self.assertEqual(executions, [])
 
@@ -371,30 +349,28 @@ class RunProgressCapabilityTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_unknown_top_level_call_cannot_bypass_durable_guard(self):
         cap = self.capability()
-        with self.assertRaisesRegex(RunProgressPersistenceError, "no official"):
+        with self.assertRaisesRegex(MessagePersistenceError, "no official"):
             await cap.before_tool_execute(self.ctx, call=ToolCallPart("read", {}, "guessed__1"),
                                           tool_def=None, args={})
 
-    async def test_nested_call_does_not_continue_after_timer_persistence_failure(self):
+    async def test_nested_call_does_not_continue_after_persistence_failure(self):
         cap = self.capability()
         response = ModelResponse(parts=[ToolCallPart("run_code", {}, "outer")])
         self.ctx.messages.append(response)
         await cap.before_tool_execute(self.ctx, call=response.parts[0], tool_def=None, args={})
 
         async def nested(args):
-            cap.persistence_error = RunProgressPersistenceError("database failed")
+            cap.persistence_error = MessagePersistenceError("database failed")
             await cap.before_tool_execute(self.ctx, call=ToolCallPart("read", {}, "outer__1"),
                                           tool_def=None, args={})
             self.fail("Nested side effect must remain blocked")
 
-        with self.assertRaisesRegex(RunProgressPersistenceError, "database failed"):
+        with self.assertRaisesRegex(MessagePersistenceError, "database failed"):
             await cap.wrap_tool_execute(self.ctx, call=response.parts[0], tool_def=None, args={}, handler=nested)
         self.assertIsNone(cap._executing_parent.get())
 
-    async def test_provider_silence_flushes_last_delta_and_renews_lease(self):
+    async def test_provider_silence_does_not_write_partial_text_or_heartbeat(self):
         cap = self.capability()
-        cap.snapshot_interval = 0.05
-        cap.heartbeat_interval = 0.08
         paused = asyncio.Event()
         release = asyncio.Event()
 
@@ -410,9 +386,10 @@ class RunProgressCapabilityTests(unittest.IsolatedAsyncioTestCase):
             await asyncio.wait_for(paused.wait(), 2)
             await asyncio.sleep(0.22)
             self.assertFalse(task.done())
-            self.assertEqual(parts(cap.messages, TextPart)[-1].content, "first second")
-            self.assertGreater(self.store.touches, 0)
-            self.assertLess(len(self.store.writes), 10)
+            self.assertEqual(parts(cap.messages, TextPart), [])
+            writes_before = len(self.store.writes)
+            await asyncio.sleep(0.15)
+            self.assertEqual(len(self.store.writes), writes_before)
             release.set()
             self.assertEqual((await asyncio.wait_for(task, 2)).output, "first second")
         finally:
@@ -420,20 +397,6 @@ class RunProgressCapabilityTests(unittest.IsolatedAsyncioTestCase):
             if not task.done():
                 task.cancel()
             await asyncio.gather(task, return_exceptions=True)
-
-    async def test_timer_database_failure_interrupts_silent_sdk_without_cancel_misreport(self):
-        cap = self.capability()
-        cap.snapshot_interval = 0.05
-        self.store.fail_when = lambda items: any(p.content == "first second" for p in parts(items, TextPart))
-
-        async def model(messages, info):
-            yield "first"
-            yield " second"
-            await asyncio.Event().wait()
-
-        agent = Agent(FunctionModel(stream_function=model), deps_type=AgentDeps, capabilities=[cap])
-        with self.assertRaises(RunProgressPersistenceError):
-            await asyncio.wait_for(agent.run("question", deps=self.deps, run_id="run"), 2)
 
     async def test_external_cancellation_does_not_become_persistence_failure(self):
         cap = self.capability()
@@ -452,33 +415,6 @@ class RunProgressCapabilityTests(unittest.IsolatedAsyncioTestCase):
             await task
         self.assertIsNone(cap.persistence_error)
         self.assertFalse(run_is_live("run"))
-
-    async def test_expired_same_owner_requires_no_live_run_and_keeps_commit_grace(self):
-        now = datetime.now(timezone.utc)
-        fresh = owned_progress_payload({})
-        expired = {**fresh, "lease_expires_at": (now - timedelta(seconds=1)).isoformat()}
-        self.assertFalse(progress_is_abandoned(fresh, now, run_id="run"))
-        with live_run("run"):
-            with live_run("run"):
-                self.assertFalse(progress_is_abandoned(expired, now, run_id="run"))
-            self.assertTrue(run_is_live("run"))
-            self.assertFalse(progress_is_abandoned(expired, now, run_id="run"))
-        self.assertFalse(run_is_live("run"))
-        self.assertTrue(progress_is_abandoned(expired, now, run_id="run"))
-
-    async def test_lost_lease_stops_silent_provider_with_explicit_failure(self):
-        cap = self.capability()
-        cap.snapshot_interval = cap.heartbeat_interval = 0.04
-        self.store.lease_valid = False
-
-        async def model(messages, info):
-            yield "first"
-            await asyncio.Event().wait()
-
-        agent = Agent(FunctionModel(stream_function=model), deps_type=AgentDeps, capabilities=[cap])
-        with self.assertRaisesRegex(RunProgressPersistenceError, "lease was lost"):
-            await asyncio.wait_for(agent.run("question", deps=self.deps, run_id="run"), 2)
-        self.assertEqual(self.store.touches, 1)
 
     async def test_actual_sdk_compaction_preserves_prior_loop_canonical_events(self):
         cap = self.capability(stream=False, history_length=20)

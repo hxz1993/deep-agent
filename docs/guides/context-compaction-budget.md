@@ -9,6 +9,6 @@
 - SSE 中 `after_tokens` 表示实际生效历史的估算；失败时可仍等于 `before_tokens`。`candidate_tokens` 才是被拒绝候选的完整估算，不能把二者相等解释成模型没有压缩。
 - 失败 Event 的 `budget` 保存 `target_tokens/candidate_tokens/retained_tail_tokens/evidence_tokens/summary_tokens` 等数值，并保留安全的 `summary_call` 使用量，不保存被拒绝摘要正文。
 
-手动压缩流必须显式关闭内层生成器，取消并等待摘要任务退出，以同一个 Event 收口为 `cancelled`。普通聊天在模型首字前断流、没有可持久化 Assistant 时，仍必须保存独立 `run/terminal`；有部分正文时保留原生中断消息。取消清理需避开传输层重复取消，但数据库写入仍受超时约束。
+手动压缩流必须显式关闭内层生成器，取消并等待摘要任务退出，以同一个 Compaction Event 收口为 `cancelled`。普通聊天主动停止不追加回执或异常；有部分正文时尽量保留原生中断消息一次。执行异常终止使用 `execution/error`，不作为模型正文。取消清理需避开传输层重复取消，但数据库写入仍受超时约束。
 
 这些保证不覆盖进程被强杀、数据库完全不可写等情况。线上仅有 User Event 不能单凭形状确定断流原因，应结合对应 Run 的服务端日志和 Pod 生命周期。

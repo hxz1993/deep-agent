@@ -12,7 +12,7 @@
 | 项 | 内容 |
 | --- | --- |
 | **是什么** | 通用 AI Agent 全栈：FastAPI 后端 + Pydantic AI 运行时 + 静态前端 |
-| **产品版本** | `deep_agent.__version__`为唯一来源；当前`0.8.4`，数据库Head为`002` |
+| **产品版本** | `deep_agent.__version__`为唯一来源；当前`0.8.5`，数据库Head为`002` |
 | **启动** | 本地 Test 联调固定使用下方命令；部署入口才使用 `deep_agent.main:app` |
 | **测试** | `PYTHONPATH=src python3.12 -m unittest discover -s tests -p "test_*.py" -v` |
 | **配置** | 仓库根 `.env`（`DEEP_AGENT_*` / `DEEP_AGENT_DBMS_*` / `DEEP_AGENT_SQLITE_PATH`） |
@@ -128,7 +128,7 @@ Gateway 不保留指向企微 Adapter 的旧转发模块。原型不得放在生
 真实空目录、导入/子进程路径、文档和 `test_project_layout.py`，不要只看 Git 的文件状态。
 
 2026-09-08 用户同步运维现状：Alpha 与 Test 均使用 `python -m deep_agent.combined_runtime`
-和 `PYTHONPATH=/deep-agent/src`，同时运行 API 与企微网关。v0.8.4 保持该入口和线上流水线不变；
+和 `PYTHONPATH=/deep-agent/src`，同时运行 API 与企微网关。v0.8.5 保持该入口和线上流水线不变；
 不要再默认 Alpha 为仅 API 模式。该记录来自用户提供的部署信息，不替代线上健康验收。
 
 ---
@@ -154,9 +154,15 @@ v0.6.1删除目录资源自身的冗余启停层；v0.6.4只恢复Model的`enabl
 - DeepAgent 自研 `ToolPackage` 是产品配置单位，负责把分类、展示元数据和恰好一个 Toolset 组织起来；Pydantic AI 的 `AbstractCapability` 只表示压缩、重试等运行扩展，二者不能混用。
 - 模型直接接收 Instructions、历史、当前输入和 Tool Definitions。MCP Resource/Prompt 不会自动成为模型工具，必须由宿主读取、注入或显式包装。
 - Pydantic AI 负责 Agent loop、参数校验、工具调用、重试、流式事件和 Deferred 原语；DeepAgent 负责 SQL 会话、用户隔离、MCP 配置/Header、HITL、SSE 和 Console。
-- v0.6.0将会话域统一为`chat_sessions + chat_session_events`：一个完整Pydantic Message一行；
+- v0.6.0将会话域统一为`chat_sessions + chat_session_events`；v0.8.5运行期间按真实消息部分及时保存，
+  以稳定的消息序号和部分标识去重、排序，读取模型历史时重新归组为完整Pydantic Message。
   Event Store是唯一事实源。模型历史、审计轨迹和面向客户端的`ConversationItem`均由服务端确定性
   投影，不双写History表。Branch不兼容也不预埋。
+- 不生成`run/progress`或`run/terminal`。正常完成、主动停止不追加辅助回执；真正终止执行的异常
+  幂等保存一条脱敏`execution/error`，不进入模型正文。半段只经SSE展示，取消/异常收尾尽量保存一次。
+  保留控制台轮询、渠道投递和压缩生命周期；旧RUN行不清理、不迁移、不加解析或恢复兼容。
+- 控制台切入活动会话仅订阅指定`run_id`的只读SSE，空闲不连接、结束不跟随下一轮；有界内存回放
+  与数据库History校准分离，失败退回该轮轮询。观察断开不取消执行，不增加持久化快照或成功回执。
 - v0.6.0增加显式FileStore适配层：Platform仍是默认实现；仅`local_dev + SQLite`可启用本地Blob。
   上传、附件读取、原生图片、Tool Spill、上传Skill和导出共用同一注入接口，业务层不得自行判断
   环境。Compaction增加确定性Attachment Evidence，但文件授权仍只从原始Event恢复。

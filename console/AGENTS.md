@@ -37,8 +37,13 @@ console/
 
 ## 功能概览
 
-v0.8.0 的观察页面用 `history-follower.js`串行读取现有 Run Status / History，当前 SSE 页面不额外轮询。
-检查点的 Sequence 不变但正文可变，不能仅按 Sequence 判断更新；终态 History 成功读取后才解锁。
+观察页面先读取 Run Status；已有活动 Run 时，`session-observer.js` 通过带固定 `run_id` 的只读
+`GET /sessions/{id}/live`接收原有 SSE 实时变化，当前 POST SSE 页面不重复订阅。
+连接先建立、随后读取 History；按服务端 Run 起点 Sequence 和目标 Run ID 排除待重放内容及后续 Run，
+保留已保存用户输入，串行重放后继续接收增量。终态后忽略迟到正文，`observation_end`校准历史后关闭。
+此连接只观察打开时已在运行的那次执行；空闲会话不订阅、不自动跟随企微后续新消息。
+断线仅重连同一 Run；无重放缓存时回退 `history-follower.js`串行读取该 Run 的状态与 History，
+不得因状态返回新 Run 而继续跟随。正常终态 History 成功读取后才解锁。
 切会话/Agent/卸载必须中止请求且忽略迟到结果，刷新正文保留滚动和未变化 DOM 的折叠状态。
 History 中运行工具一律只读，不能因工具目录补齐 widget 自动挂 HITL；只有正式 awaiting_input 可交互。
 
@@ -90,6 +95,15 @@ Session ID同样可复制。四页签在窄栏可横向滚动。顶部页签固�
 悬停可见完整标签，JSON详情保留完整内容；不重复显示“上下文”前缀。工具过程仍由对话区负责；History与当前Run的实时SSE
 分别通过同一套Assistant展示动作驱动DOM Presenter，不引入持久化Conversation Item推送。
 独立轨迹页只读取Event API，并在刷新后以持久事件重新校准。
+v0.8.5不再投影RUN快照或保存回执；执行异常按`execution/error`展示“异常”和脱敏原因、分类、阶段。
+普通完成或用户取消不增加独立轨迹行；`error/cancelled` SSE只收口当前内容，异常行来自持久事件，
+避免同一次故障被SSE与Event重复展示。旧RUN数据不做特殊隐藏、迁移或恢复兼容。
+真实消息part事件通过`run_id + payload.source.message_ordinal`归组助手Loop，按`part_index`排序；
+工具调用与结果仍以真实事件关联独立展示，不改变普通History轮询或人工操作权限。
+同组助手行ID固定为最早Sequence的源事件ID，后续part追加不换ID；`native.event_ids`保留组内全部
+源事件ID，模型usage是该消息的完整元信息而不是按part相加。已落库工具后的同名SSE帧复用该调用行。
+不同助手Loop复用`tool_call_id`时，以调用源事件和part位置区分轨迹行，结果配最近调用，详情链接
+按助手Loop来源匹配；不能用全会话call_id去重而覆盖早轮结果或抑制后轮SSE。
 轨迹将同一ModelResponse中的thinking、text和tool call意图聚合为一个助手Loop，同时保留独立
 Tool Call/Result记录；用户输入行只按Event中现有`context_refs.type/label/schema_version`和
 附件元数据加标记，不从正文猜测业务上下文。轨迹详情复用工作台右侧Inspector，返回对话后恢复
@@ -159,6 +173,11 @@ Agent/MCP独立编辑页从主导航右侧展开，跨页和目录切换均保�
 - 控制台请求固定使用当前同源后端。本地联调直接访问本机 `8000/console/`，不在浏览器中切换后端地址。
 - SSE 解析、HITL 参数归一化和 Schema 文本校验分别位于 `protocol.js`、`hitl.js`、`schema-editor.js`，可由 Node 内置测试独立验证。
 - 控制台测试：`node --test tests/frontend/console/*.test.mjs`。
+- 只读SSE须覆盖历史屏障、当前Run重放去重、逐段输出、切页Abort无取消副作用、固定Run重连、
+  有界缓冲回退、终态迟到帧、终态History失败不解锁及不自动观察后续Run。
+- 增量事实轨迹测试须覆盖同轮part乱序/分批到达、助手行ID和来源ID稳定、usage不重复累计、并行工具
+  先后返回、持久事件先于工具SSE无重复、异常SSE无重复异常行、取消无回执，以及旧RUN旁正常历史可读。
+  History跟随仍须测试轮询串行、切会话忽略迟到结果、终态History失败不解锁、运行工具禁止提前交互。
 - 全局配置上下排列Web Search、紧凑数据库摘要和运行设置：Web Search默认只回显一个当前Provider选择，点击编辑后在标准Console弹窗中维护当前模型/指定Provider及当前Provider必填字段；Provider与模型同排并使用Console自定义下拉，DeepSeek/Kimi可选择沿用同类型会话Provider或单独配置API Key；条件字段直接落在弹窗正文，不增加装饰性配置卡片；Fetch无配置不展示；运行设置沿用原安全白名单。数据库摘要通过 `GET /api/v1/database-info` 只展示类型、主机、端口、库名或 SQLite 文件名，不返回凭据、连接参数或本地完整路径。Provider详情默认撑满剩余页面高度。会话标题使用首轮实际模型并通过`session/title`事件更新，不提供独立模型入口或轮询刷新。
 - “内置工具”位于模型之后，在同一目录中分别展示代码随版本发布、由Agent显式配置的工具包，
   以及运行时自动注入的系统工具。页面没有注册、编辑、删除、全局启停或重新加载入口；系统工具

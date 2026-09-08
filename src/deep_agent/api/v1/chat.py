@@ -279,10 +279,22 @@ async def chat_stream(
             conversation_id=deps.conversation_id,
             run_id=deps.run_id,
         )
+        live_key = (deps.agent_id, session_id, deps.user)
         try:
+            # Capture the durable prefix before this Run writes its first fact.
+            # Observer history/replay can then exclude any later concurrent Run.
+            # Failure of this optional observation read must not rerun or abort
+            # an otherwise valid request; normal persistence still fails closed.
+            try:
+                baseline = await ctx.store.get_event_head(session_id, agent_id=deps.agent_id)
+            except Exception as exc:
+                logger.warning("Live observation unavailable error_type={}", type(exc).__name__)
+            else:
+                ctx.session_live.begin(live_key, deps.run_id, baseline_sequence=baseline)
             # The client may expose its stop action as soon as this event arrives.
             # Register the cancellable run first so an immediate stop cannot race
             # asynchronous history/input preparation and incorrectly return 404.
+            ctx.session_live.publish(live_key, deps.run_id, "session", session_data)
             yield {"event": "session", "data": json.dumps(session_data)}
             async with aclosing(runner.run_stream(
                 session_id,
@@ -296,18 +308,21 @@ async def chat_stream(
                 active_run=active_run,
             )) as stream:
                 async for ev in stream:
+                    ctx.session_live.publish(live_key, deps.run_id, ev["type"], ev)
                     yield {"event": ev["type"], "data": json.dumps(ev, ensure_ascii=False)}
         finally:
             active_run.cancellation_token.cancel()
             ctx.active_runs.unregister(active_run)
             # Ensure background persistence finishes before the client refreshes session list.
-            with anyio.move_on_after(5, shield=True):
-                try:
-                    await ctx.event_persister.flush(session_id, agent_id=agent_id)
-                except Exception as exc:
-                    # Runner reports write failures before its terminal frame. Cleanup
-                    # must not replace that error or an in-flight transport cancellation.
-                    logger.error("Stream cleanup persistence failed session={} error={}",
-                                 session_id, type(exc).__name__)
+            try:
+                with anyio.move_on_after(5, shield=True):
+                    try:
+                        await ctx.event_persister.flush(session_id, agent_id=agent_id)
+                    except Exception as exc:
+                        # Runner reports write failures before its terminal frame.
+                        logger.error("Stream cleanup persistence failed session={} error={}",
+                                     session_id, type(exc).__name__)
+            finally:
+                ctx.session_live.end(live_key, deps.run_id)
 
     return EventSourceResponse(event_generator())

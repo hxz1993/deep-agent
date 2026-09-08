@@ -8,7 +8,7 @@ import { buildTrajectory } from "../../../console/trajectory.js";
 const source = readFileSync(new URL("../../../console/chat.js", import.meta.url), "utf8");
 const history = (text = "第一轮") => [
   { item_id: "user", kind: "user_message", text: "查询", created_at: "2026-09-08T00:00:00Z", order: { sequence: 1 } },
-  { item_id: "progress:0", kind: "assistant_message", text, phase: "process", status: "pending", created_at: "2026-09-08T00:00:01Z", order: { sequence: 2 } },
+  { item_id: "assistant:0", kind: "assistant_message", text, phase: "process", status: "pending", created_at: "2026-09-08T00:00:01Z", order: { sequence: 2 } },
 ];
 
 function renderHarness() {
@@ -64,7 +64,7 @@ test("unchanged history preserves exact rows, disclosure and pending form DOM", 
   assert.equal(h.state.assistantPresenter.options.allowDeferred, false);
 });
 
-test("a same-sequence checkpoint update only replaces the changed assistant, preserving scroll and draft outside it", () => {
+test("a changed assistant projection preserves scroll and draft outside it", () => {
   const h = renderHarness();
   h.render(history(), { running: true });
   const user = h.messages.children[1];
@@ -83,7 +83,7 @@ test("a same-sequence checkpoint update only replaces the changed assistant, pre
   assert.equal(h.calls.length, scrolls);
 });
 
-test("terminal history replaces temporary IDs and permits only genuine pending Deferred interaction", () => {
+test("terminal history permits only genuine pending Deferred interaction", () => {
   const h = renderHarness();
   h.render(history(), { running: true });
   const final = [history()[0], {
@@ -111,7 +111,7 @@ test("running history never activates a previous pending Deferred while another 
   assert.equal(h.state.assistantPresenter.options.allowDeferred, false);
 });
 
-test("progress trajectory presents a compact durable receipt without dumping snapshot prompts or full results", () => {
+test("obsolete auxiliary events are not trajectory facts; ordinary history remains visible", () => {
   const progress = {
     event_id: "progress", event_type: "run/progress", sequence: 2, run_id: "run", status: "running",
     payload: { revision: 4, messages: [
@@ -119,17 +119,12 @@ test("progress trajectory presents a compact durable receipt without dumping sna
       { kind: "request", parts: [{ part_kind: "tool-return", content: "large private result" }] },
     ] },
   };
-  const [row] = buildTrajectory({ items: [progress] });
-  assert.equal(row.id, "progress");
-  assert.equal(row.status, "running");
-  assert.equal(row.label, "运行中快照");
-  assert.equal(row.payload.message_count, 2);
-  assert.equal(row.payload.assistant_rounds, 1);
-  assert.equal(row.payload.tool_calls, 1);
-  assert.equal(row.payload.tool_results, 1);
-  assert.equal(JSON.stringify(row).includes("private"), false);
-  const [updated] = buildTrajectory({ items: [{ ...progress, status: "completed", payload: { revision: 5, message_count: 3 } }] });
-  assert.equal(updated.id, row.id);
-  assert.equal(updated.status, "completed");
-  assert.equal(updated.summary, "已保存 3 条消息");
+  const items = [progress, { ...progress, event_id: "terminal", event_type: "run/terminal", status: "failed" }, {
+    event_id: "answer", event_type: "assistant/message", sequence: 3,
+    payload: { message: { kind: "response", parts: [{ part_kind: "text", content: "真正的回答" }] } },
+  }];
+  const rows = buildTrajectory({ items });
+  assert.deepEqual(rows.map((row) => row.id), ["answer"]);
+  assert.equal(rows[0].payload.content, "真正的回答");
+  assert.equal(JSON.stringify(rows).includes("private"), false);
 });

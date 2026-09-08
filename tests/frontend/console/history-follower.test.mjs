@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import vm from "node:vm";
 import { createHistoryFollower } from "../../../console/history-follower.js";
 import { boundedStreamRequest } from "../../../console/stop-recovery.js";
+import { historyThroughRun } from "../../../console/session-observer.js";
 
 const turn = () => new Promise(setImmediate);
 const deferred = () => { let resolve; const promise = new Promise((done) => { resolve = done; }); return { promise, resolve }; };
@@ -276,33 +277,35 @@ test("leaving an initially unavailable history view clears its loading lock and 
   assert.equal(state.historyObservationPending, false);
 });
 
-async function observedMetricsFixture() {
+async function observedMetricsFixture(options = {}) {
   const selected = { id: "session", agentId: "agent", messageCount: 1, turnCount: 1 };
   const state = { sessionId: selected.id, agentId: selected.agentId, sessions: [selected], abortController: null };
   const requests = [];
   let callbacks;
   let renders = 0;
   let trajectoryUpdates = 0;
+  let trajectoryItems = [];
   let editingTitle = false;
   const controller = new AbortController();
   const context = {
-    state, boundedStreamRequest,
+    state, boundedStreamRequest, historyThroughRun,
     createHistoryFollower(options) { callbacks = options; return { start: async () => {}, stop() {} }; },
     loadAllSessionEvents() { const gate = deferred(); requests.push(gate); return gate.promise; },
-    trajectory: { setHistory() { trajectoryUpdates += 1; } },
+    trajectory: { setHistory(history) { trajectoryUpdates += 1; trajectoryItems = history.items; } },
     applyObservedHistory() {}, loadContextStatus() {},
     el: { sessionList: { querySelector: () => editingTitle } },
     renderSessions() { renders += 1; },
   };
   vm.createContext(context);
-  const fn = source.slice(source.indexOf("async function observeSessionHistory("), source.indexOf("\nfunction applyObservedHistory("));
-  vm.runInContext(`${fn}\nthis.observe = observeSessionHistory;`, context);
-  await context.observe(selected, controller, () => !controller.signal.aborted && state.sessionId === selected.id && state.agentId === selected.agentId);
+  const fn = source.slice(source.indexOf("async function observePersistedSessionHistory("), source.indexOf("\nfunction applyObservedHistory("));
+  vm.runInContext(`${fn}\nthis.observe = observePersistedSessionHistory;`, context);
+  await context.observe(selected, controller, () => !controller.signal.aborted && state.sessionId === selected.id && state.agentId === selected.agentId, options);
   return {
     selected, state, requests, controller,
     history(status) { callbacks.onHistory({ history: { items: [] }, signature: status, changed: true }, { status }); },
     finish(index, items) { requests[index].resolve({ response: { ok: true }, data: { items } }); },
     get renders() { return renders; }, get trajectoryUpdates() { return trajectoryUpdates; },
+    get trajectoryItems() { return trajectoryItems; },
     editTitle() { editingTitle = true; },
   };
 }
@@ -361,4 +364,27 @@ test("observed statistics refresh preserves an in-progress sidebar title edit", 
   assert.equal(h.selected.turnCount, 0);
   assert.equal(h.renders, 0);
   h.controller.abort();
+});
+
+test("fallback trajectory uses the same target Run boundary as History, including terminal races", async () => {
+  const facts = [
+    { event_id: "prior", sequence: 1, run_id: "prior", event_type: "user/message", turn_id: "prior" },
+    { event_id: "target", sequence: 2, run_id: "target", event_type: "assistant/message", turn_id: "target" },
+    { event_id: "future", sequence: 3, run_id: "future", event_type: "user/message", turn_id: "future" },
+  ];
+  for (const [options, expected] of [
+    [{ runId: "target", baselineSequence: 1 }, ["prior", "target"]],
+    [{ runId: "target" }, ["prior", "target"]],
+    [{ runId: "empty-resume", baselineSequence: 1 }, ["prior"]],
+    [{ runId: "empty-resume" }, ["prior", "target", "future"]],
+  ]) {
+    const h = await observedMetricsFixture(options);
+    try {
+      h.history("idle"); await turn();
+      h.finish(0, facts); await turn(); await turn();
+      assert.deepEqual(h.trajectoryItems.map((item) => item.event_id), expected);
+      assert.equal(h.selected.messageCount, expected.length, "metrics use the same bounded facts");
+      assert.equal(h.requests.length, 1, "no additional observation of the future Run");
+    } finally { h.controller.abort(); }
+  }
 });

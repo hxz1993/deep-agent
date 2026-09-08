@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from copy import deepcopy
 import json
 import re
 import unicodedata
@@ -81,29 +82,108 @@ def encode_messages(
     return drafts
 
 
+def encode_message_parts(
+    messages: Sequence[ModelMessage], *, session_id: str, run_id: str,
+    first_message_ordinal: int = 1,
+) -> list[MessageEventDraft]:
+    """Insert confirmed immutable parts, retaining their SDK message boundary."""
+    drafts: list[MessageEventDraft] = []
+    for offset, message in enumerate(messages):
+        serialized = serialize_message(message)
+        metadata = dict(serialized.get("metadata") or {})
+        ordinal = int(metadata.pop("deepagent_message_ordinal", first_message_ordinal + offset))
+        indices = metadata.pop("deepagent_part_indices", None)
+        serialized["metadata"] = metadata or None
+        parts = serialized.get("parts") or []
+        # The first input is already durable before SDK execution starts.
+        has_results = any(part.get("part_kind") in _TOOL_RESULT_PART_KINDS for part in parts)
+        if event_type_for_message(serialized) == "user/message" and not has_results:
+            drafts.extend(encode_messages(
+                [deserialize_message(serialized)], session_id=session_id,
+                run_id=run_id, first_message_ordinal=ordinal,
+            ))
+            continue
+        for local_index, part in enumerate(parts):
+            part_index = int(indices[local_index]) if indices is not None else local_index
+            kind = str(part.get("part_kind") or "")
+            call_id = part.get("tool_call_id")
+            part_key = f"{kind}:{call_id}" if call_id else f"{kind}:{part_index}"
+            piece = {**serialized, "parts": [part]}
+            event_type = event_type_for_message(piece)
+            if has_results and kind == "user-prompt":
+                event_type = "model/request"
+            drafts.append(MessageEventDraft(
+                event_id=uuid5(NAMESPACE_URL,
+                    f"deep-agent-part:{session_id}:{run_id}:{ordinal}:{part_key}").hex,
+                event_type=event_type,
+                search_text=build_search_text(event_type, piece),
+                payload={"message": piece, "source": {
+                    "message_ordinal": ordinal, "part_index": part_index, "part_key": part_key,
+                }},
+            ))
+    return drafts
+
+
+def group_message_events(events: Sequence[Any]) -> list[Any]:
+    """Reassemble SDK boundaries for model/history reads; facts remain separate."""
+    grouped: dict[tuple[Any, ...], dict[str, Any]] = {}
+    result: list[Any] = []
+    for event in sorted(events, key=lambda item: int(_get(item, "sequence"))):
+        payload = _get_optional(event, "payload") or {}
+        source = payload.get("source") if isinstance(payload, Mapping) else None
+        if _get(event, "event_type") not in MESSAGE_EVENT_TYPES or not isinstance(source, Mapping):
+            result.append(event)
+            continue
+        key = (_get_optional(event, "session_id"), _get_optional(event, "run_id"),
+               source["message_ordinal"])
+        target = grouped.get(key)
+        if target is None:
+            target = {field: _get_optional(event, field) for field in (
+                "event_id", "session_id", "sequence", "schema_version", "event_type",
+                "status", "turn_id", "run_id", "created_at", "updated_at",
+            )}
+            target["payload"] = deepcopy(payload)
+            target["payload"]["message"]["parts"] = []
+            target["source_event_ids"] = []
+            target["_parts"] = []
+            target["through_sequence"] = int(_get(event, "sequence"))
+            grouped[key] = target
+            result.append(target)
+        message = payload["message"]
+        target["_parts"].extend((int(source["part_index"]), part)
+                                for part in message.get("parts", []))
+        target["source_event_ids"].append(str(_get(event, "event_id")))
+        target["through_sequence"] = max(target["through_sequence"], int(_get(event, "sequence")))
+        target["updated_at"] = max(target["updated_at"], _get(event, "updated_at"))
+        if _get_optional(event, "status") is not None:
+            target["status"] = _get(event, "status")
+        # All immutable parts share the same SDK header; a terminal commit may
+        # finalize usage/state without replacing any already persisted content.
+        target["payload"]["message"].update({k: deepcopy(v) for k, v in message.items() if k != "parts"})
+    for target in grouped.values():
+        target["payload"]["message"]["parts"] = [
+            part for _, part in sorted(target.pop("_parts"), key=lambda entry: entry[0])
+        ]
+        target["event_type"] = event_type_for_message(target["payload"]["message"])
+    return result
+
+
 def decode_message_events(events: Sequence[Any]) -> list[ModelMessage]:
     messages: list[ModelMessage] = []
-    for event in sorted(events, key=lambda item: int(_get(item, "sequence"))):
-        event_type = str(_get(event, "event_type"))
-        if event_type not in MESSAGE_EVENT_TYPES:
+    for event in group_message_events(events):
+        if str(_get(event, "event_type")) not in MESSAGE_EVENT_TYPES:
             continue
         schema_version = int(_get(event, "schema_version"))
         if schema_version != EVENT_SCHEMA_VERSION:
-            raise EventCodecError(
-                f"Unsupported session event schema_version={schema_version}"
-            )
+            raise EventCodecError(f"Unsupported session event schema_version={schema_version}")
         payload = _get(event, "payload")
-        if not isinstance(payload, Mapping):
-            raise EventCodecError("Message Event payload must be an object")
-        serialized = payload.get("message")
-        if not isinstance(serialized, dict):
+        if not isinstance(payload, Mapping) or not isinstance(payload.get("message"), dict):
             raise EventCodecError("Message Event is missing payload.message")
         try:
-            messages.append(deserialize_message(serialized))
+            messages.append(deserialize_message(payload["message"]))
         except Exception as exc:
-            event_id = _get_optional(event, "event_id") or "unknown"
             raise EventCodecError(
-                f"Message Event {event_id} cannot be restored"
+                f"Message Event {_get_optional(event, 'event_id') or 'unknown'} cannot be restored"
             ) from exc
     return messages
 
@@ -126,15 +206,15 @@ def event_type_for_message(message: Mapping[str, Any]) -> str:
     if kind == "response":
         return "assistant/message"
     if any(
-        isinstance(part, Mapping) and part.get("part_kind") == "user-prompt"
-        for part in part_items
-    ):
-        return "user/message"
-    if any(
         isinstance(part, Mapping) and part.get("part_kind") in _TOOL_RESULT_PART_KINDS
         for part in part_items
     ):
         return "tool/results"
+    if any(
+        isinstance(part, Mapping) and part.get("part_kind") == "user-prompt"
+        for part in part_items
+    ):
+        return "user/message"
     return "model/request"
 
 

@@ -72,6 +72,13 @@ class UIRetryFailureAPITests(unittest.IsolatedAsyncioTestCase):
         status = await self.client.get(f"/api/v1/sessions/{session_id}/run-status")
         self.assertEqual(status.status_code, 200)
         self.assertEqual(status.json()["status"], "idle")
+        stored = await self.client.get(f"/api/v1/sessions/{session_id}/events", params={"agent_id": self.agent.id})
+        self.assertEqual(stored.status_code, 200, stored.text)
+        failures = [row for row in stored.json()["items"] if row["event_type"] == "execution/error"]
+        self.assertEqual(len(failures), 1)
+        self.assertEqual(failures[0]["payload"]["code"], "tool_retry_exhausted")
+        self.assertEqual(failures[0]["payload"]["phase"], "tool_validation")
+        self.assertFalse(any(row["event_type"].startswith("run/") for row in stored.json()["items"]))
         history = await self.client.get(f"/api/v1/sessions/{session_id}/history", params={"agent_id": self.agent.id})
         self.assertEqual(history.status_code, 200)
         items = history.json()["items"]

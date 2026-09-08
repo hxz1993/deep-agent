@@ -7,36 +7,36 @@ import {
   isModelSelectable,
   preserveCurrentModel,
   renderGroupedModelOptions,
-} from "../../../frontend/console/model-options.js";
+} from "../../../console/model-options.js";
 import {
   buildProviderCatalogChoices,
   buildProviderCatalogCreatePlan,
   catalogProviderIdForType,
   providerCatalogSummary,
-} from "../../../frontend/console/provider-catalog.js";
+} from "../../../console/provider-catalog.js";
 
 const providerSource = await readFile(
-  new URL("../../../frontend/console/configuration/llm-providers.js", import.meta.url),
+  new URL("../../../console/configuration/llm-providers.js", import.meta.url),
   "utf8",
 );
 const modelSource = await readFile(
-  new URL("../../../frontend/console/configuration/llm-models.js", import.meta.url),
+  new URL("../../../console/configuration/llm-models.js", import.meta.url),
   "utf8",
 );
 const coreSource = await readFile(
-  new URL("../../../frontend/console/configuration/core.js", import.meta.url),
+  new URL("../../../console/configuration/core.js", import.meta.url),
   "utf8",
 );
 const chatSource = await readFile(
-  new URL("../../../frontend/console/chat.js", import.meta.url),
+  new URL("../../../console/chat.js", import.meta.url),
   "utf8",
 );
 const template = await readFile(
-  new URL("../../../frontend/console/configuration-template.html", import.meta.url),
+  new URL("../../../console/configuration-template.html", import.meta.url),
   "utf8",
 );
 const indexHtml = await readFile(
-  new URL("../../../frontend/console/index.html", import.meta.url),
+  new URL("../../../console/index.html", import.meta.url),
   "utf8",
 );
 

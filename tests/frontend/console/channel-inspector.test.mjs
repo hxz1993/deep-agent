@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import vm from "node:vm";
-import { channelOriginPresentation } from "../../../frontend/console/session-display.js";
+import { channelOriginPresentation } from "../../../console/session-display.js";
 
-const source = await readFile(new URL("../../../frontend/console/workspace.js", import.meta.url), "utf8");
+const source = await readFile(new URL("../../../console/workspace.js", import.meta.url), "utf8");
 
 function inspector({ accounts = [], channel = null, tab = "channel" } = {}) {
   const host = { innerHTML: "", querySelectorAll: () => [] };

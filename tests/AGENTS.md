@@ -4,6 +4,10 @@
 
 自动化测试位于仓库根 `tests/`，使用 **`unittest`**（非 pytest 作为主入口）。在仓库根运行，需已安装 `requirements.txt` 依赖。
 
+源码统一从 `src/` 导入；本地和镜像都显式设置 `PYTHONPATH`，不再依赖根目录兼容链接。
+测试子进程若需要同时导入 `tests` 或根目录的 `mcp_servers`，使用绝对 `src + 仓库根` 路径；
+Sandbox Worker 仍只使用受控的 `src`，禁止继承宿主的任意 `PYTHONPATH`。
+
 ---
 
 ## 运行命令
@@ -16,16 +20,16 @@ Console 跟随验证包含请求串行、同 Sequence 更新、切页迟到数�
 
 ```bash
 # 全部
-python3.12 -m unittest discover -s tests -p "test_*.py" -v
+PYTHONPATH=src python3.12 -m unittest discover -s tests -p "test_*.py" -v
 
 # 排查失败：首个报错即停（推荐配合 tests/run.ps1 的 30s 超时）
-python3.12 -m unittest discover -s tests -p "test_*.py" --failfast -v
+PYTHONPATH=src python3.12 -m unittest discover -s tests -p "test_*.py" --failfast -v
 
 # 仅单元（无网络、无外部子进程）
-python3.12 -m unittest discover -s tests/unit -p "test_*.py" -v
+PYTHONPATH=src python3.12 -m unittest discover -s tests/unit -p "test_*.py" -v
 
 # 仅集成（HTTP、MCP 子进程、header 转发）
-python3.12 -m unittest discover -s tests/integration -p "test_*.py" -v
+PYTHONPATH=src python3.12 -m unittest discover -s tests/integration -p "test_*.py" -v
 ```
 
 ---
@@ -79,9 +83,11 @@ tests/
 | `test_channel_commands.py` | 公共命令识别、非企微测试Adapter、队列与独立停止/新建、超时及投递失败 |
 | `test_channel_store_commands.py` | 无Session Binding、命令认领、新建会话原子换绑、来源标题、归属和重复执行保护 |
 | `test_wecom_adapter.py` | 官方SDK包装边界、连接生命周期、消息薄转换、媒体和回复 |
+| `test_jenkins_deploy.py`、`test_jenkins_api_only.py` | 网关/仅API流水线Shell、按名覆盖启动命令、失败中断、API探针及原始归档完整性 |
 | `test_rebaseline_database.py` | 旧012物理结构校验、显式改标、全表行数与内容哈希不变及异常拒绝 |
 | `test_configuration_import.py` | 同Revision配置初始化、主键保留、空会话门禁、事务回滚和Skill File ID重写 |
 | `test_runtime_dependencies.py` | Pydantic AI/Harness、OpenAI/aiohttp/deepfos联合版本锁定与模型导入 |
+| `test_project_layout.py` | 旧入口已移除、唯一源码目录、规范命令与资源路径、Gateway导入和Sandbox子进程路径 |
 | `test_session_model_override.py` | Agent 对话 `model_id` 请求级覆盖（`build_runner_for_agent`） |
 | `test_ui_tools_rfc.py` | builtin/manual UI 工具包、工具归属、Agent 整包选择、Schema 校验与 Deferred |
 

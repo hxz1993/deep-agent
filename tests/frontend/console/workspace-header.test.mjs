@@ -2,44 +2,44 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-import { formatSessionIdSubtitle } from "../../../frontend/console/session-display.js";
+import { formatSessionIdSubtitle } from "../../../console/session-display.js";
 
 const template = await readFile(
-  new URL("../../../frontend/console/workspace-template.html", import.meta.url),
+  new URL("../../../console/workspace-template.html", import.meta.url),
   "utf8",
 );
 const chatSource = await readFile(
-  new URL("../../../frontend/console/chat.js", import.meta.url),
+  new URL("../../../console/chat.js", import.meta.url),
   "utf8",
 );
 const assistantPresentationSource = await readFile(
-  new URL("../../../frontend/console/assistant-presentation.js", import.meta.url),
+  new URL("../../../console/assistant-presentation.js", import.meta.url),
   "utf8",
 );
 const workspaceSource = await readFile(
-  new URL("../../../frontend/console/workspace.js", import.meta.url),
+  new URL("../../../console/workspace.js", import.meta.url),
   "utf8",
 );
 const consoleCss = await readFile(
-  new URL("../../../frontend/console/console.css", import.meta.url),
+  new URL("../../../console/console.css", import.meta.url),
   "utf8",
 );
 const workspaceCss = await readFile(
-  new URL("../../../frontend/console/workspace.css", import.meta.url),
+  new URL("../../../console/workspace.css", import.meta.url),
   "utf8",
 );
 const consoleIndex = await readFile(
-  new URL("../../../frontend/console/index.html", import.meta.url),
+  new URL("../../../console/index.html", import.meta.url),
   "utf8",
 );
 const contextSource = await readFile(
-  new URL("../../../frontend/console/context.js", import.meta.url),
+  new URL("../../../console/context.js", import.meta.url),
   "utf8",
 );
 
 globalThis.window = {};
 const { calculateInspectorPaneWidth } = await import(
-  new URL("../../../frontend/console/workspace.js", import.meta.url)
+  new URL("../../../console/workspace.js", import.meta.url)
 );
 
 test("会话标题第二行显示带前缀的完整会话 ID", () => {

@@ -2,7 +2,7 @@
 
 > 本文档提炼自 2026-07-16 早间 deepcube 全量报错事故，记录 **`McpSharedRegistry` / `McpLeaseManager` 诊断日志** 的目录、含义、grep 用法与排障 runbook，供后续类似事故快速定位。
 
-相关文档：[`../../../deep_agent/AGENTS.md`](../../../src/deep_agent/AGENTS.md)（`capabilities/mcp/` 索引）、[`../../../mcps/AGENTS.md` 中 DeepCube 段](../../../mcp_servers/AGENTS.md#deepcube)builtin-server 配置。
+相关文档：[`../../../src/deep_agent/AGENTS.md`](../../../src/deep_agent/AGENTS.md)（`capabilities/mcp/` 索引）、[`../../../mcp_servers/AGENTS.md` 中 DeepCube 段](../../../mcp_servers/AGENTS.md#deepcube)builtin-server 配置。
 
 ---
 

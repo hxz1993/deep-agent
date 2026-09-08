@@ -4,19 +4,19 @@ import test from "node:test";
 import vm from "node:vm";
 
 const indexHtml = await readFile(
-  new URL("../../../frontend/console/index.html", import.meta.url),
+  new URL("../../../console/index.html", import.meta.url),
   "utf8",
 );
 const templateHtml = await readFile(
-  new URL("../../../frontend/console/configuration-template.html", import.meta.url),
+  new URL("../../../console/configuration-template.html", import.meta.url),
   "utf8",
 );
 const source = await readFile(
-  new URL("../../../frontend/console/configuration/channels.js", import.meta.url),
+  new URL("../../../console/configuration/channels.js", import.meta.url),
   "utf8",
 );
 const styles = await readFile(
-  new URL("../../../frontend/console/configuration/configuration.css", import.meta.url),
+  new URL("../../../console/configuration/configuration.css", import.meta.url),
   "utf8",
 );
 

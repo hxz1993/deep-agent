@@ -11,7 +11,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
-PIPELINE = ROOT / "docs/guides/jenkins/Jenkinsfile.diagnose.v1"
+PIPELINE = ROOT / "deploy/jenkins/Jenkinsfile.diagnose"
 
 # Only simulated data. The stub rejects any non-read-only command or other namespace.
 KUBECTL_STUB = r'''

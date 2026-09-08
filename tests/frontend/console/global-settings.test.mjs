@@ -5,25 +5,25 @@ import vm from "node:vm";
 
 const source = await readFile(
   new URL(
-    "../../../frontend/console/configuration/global-settings.js",
+    "../../../console/configuration/global-settings.js",
     import.meta.url,
   ),
   "utf8",
 );
 const indexHtml = await readFile(
-  new URL("../../../frontend/console/index.html", import.meta.url),
+  new URL("../../../console/index.html", import.meta.url),
   "utf8",
 );
 const templateHtml = await readFile(
   new URL(
-    "../../../frontend/console/configuration-template.html",
+    "../../../console/configuration-template.html",
     import.meta.url,
   ),
   "utf8",
 );
 const configurationCss = await readFile(
   new URL(
-    "../../../frontend/console/configuration/configuration.css",
+    "../../../console/configuration/configuration.css",
     import.meta.url,
   ),
   "utf8",

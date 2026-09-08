@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { parseSchemaText } from "../../../frontend/console/schema-editor.js";
+import { parseSchemaText } from "../../../console/schema-editor.js";
 
 test("Schema 文本必须是合法 JSON 对象", () => {
   assert.deepEqual(parseSchemaText('{"type":"object","properties":{}}'), {

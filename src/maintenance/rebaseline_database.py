@@ -471,7 +471,7 @@ async def capture_database_state(engine: AsyncEngine) -> DatabaseState:
 def _alembic_config(database_url: str) -> Config:
     root = repository_root()
     config = Config(str(root / "alembic.ini"))
-    config.set_main_option("script_location", str(root / "alembic"))
+    config.set_main_option("script_location", str(root / "migrations"))
     config.attributes["database_url"] = database_url
     return config
 

@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
-import { createHistoryFollower } from "../../../frontend/console/history-follower.js";
-import { boundedStreamRequest } from "../../../frontend/console/stop-recovery.js";
+import { createHistoryFollower } from "../../../console/history-follower.js";
+import { boundedStreamRequest } from "../../../console/stop-recovery.js";
 
 const turn = () => new Promise(setImmediate);
 const deferred = () => { let resolve; const promise = new Promise((done) => { resolve = done; }); return { promise, resolve }; };
@@ -183,7 +183,7 @@ test("hanging status and body reads time out then allow the next polling attempt
   } finally { h.follower.stop(); }
 });
 
-const source = readFileSync(new URL("../../../frontend/console/chat.js", import.meta.url), "utf8");
+const source = readFileSync(new URL("../../../console/chat.js", import.meta.url), "utf8");
 
 test("Console checks the selected session identity after asynchronous UI tool loading", async () => {
   const gates = { a: deferred(), b: deferred() };

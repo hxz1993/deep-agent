@@ -1,8 +1,7 @@
 """Run the API and optional channel gateway in one deployment container.
 
-This entry point is intentionally selected by the Jenkins V2 image only.  The
-normal image entry point remains Gunicorn, so environments that keep the V1
-pipeline continue to run the API without a channel gateway.
+This entry point is selected by the gateway-enabled Jenkins image. The API-only
+pipeline starts Gunicorn directly and does not launch a channel gateway.
 """
 from __future__ import annotations
 
@@ -23,7 +22,7 @@ from typing import Mapping, Sequence
 API_COMMAND = (
     "gunicorn",
     "-c",
-    "deep_agent/gunicorn.conf.py",
+    "deploy/gunicorn.conf.py",
     "deep_agent.main:app",
 )
 GATEWAY_COMMAND = (sys.executable, "-m", "deep_agent.channels.gateway")

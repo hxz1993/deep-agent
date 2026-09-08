@@ -131,10 +131,10 @@ class CombinedRuntimeTest(unittest.TestCase):
         stop.assert_called_once_with([api, gateway])
 
 
-class JenkinsPipelineV2Test(unittest.TestCase):
+class JenkinsGatewayPipelineTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.pipeline = (ROOT / "docs/guides/jenkins/Jenkinsfile.v2").read_text()
+        cls.pipeline = (ROOT / "deploy/jenkins/Jenkinsfile.gateway").read_text()
 
     def test_embedded_shell_scripts_are_valid(self):
         scripts = re.findall(r"sh '''(.*?)'''", self.pipeline, flags=re.DOTALL)
@@ -200,16 +200,20 @@ class JenkinsPipelineV2Test(unittest.TestCase):
                     "image": "harbor.deepfos.com/test/deep-agent:123-abc",
                     "command": ["python"],
                     "args": ["-m", "deep_agent.combined_runtime"],
+                    "workingDir": "/deep-agent",
+                    "env": [{"name": "PYTHONPATH", "value": "/deep-agent/src", "valueFrom": None}],
                 }
             ],
         )
 
-    def test_v2_image_uses_combined_runtime_but_v1_stays_api_only(self):
+    def test_gateway_image_uses_canonical_source_and_retains_original_archive(self):
         dockerfile = re.search(
             r"writeFile file: 'Dockerfile', text: '''(.*?)'''", self.pipeline, flags=re.DOTALL
         )[1]
         self.assertIn('CMD ["python", "-m", "deep_agent.combined_runtime"]', dockerfile)
-        v1 = (ROOT / "docs/guides/jenkins/Jenkinsfile.v1").read_text()
+        self.assertIn("WORKDIR /deep-agent", dockerfile)
+        self.assertIn("ENV PYTHONPATH=/deep-agent/src", dockerfile)
+        v1 = (ROOT / "docs/archive/jenkins/Jenkinsfile.original").read_text()
         self.assertIn('CMD ["gunicorn", "-c", "deep_agent/gunicorn.conf.py", "deep_agent.main:app"]', v1)
         self.assertNotIn("deep_agent.combined_runtime", v1)
 

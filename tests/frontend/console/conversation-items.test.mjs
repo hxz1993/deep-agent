@@ -5,8 +5,8 @@ import {
   latestPendingDeferredTool,
   normalizeConversationHistory,
   projectConversationItems,
-} from "../../../frontend/console/conversation-items.js";
-import { applyAssistantPresentationActions } from "../../../frontend/console/assistant-presentation.js";
+} from "../../../console/conversation-items.js";
+import { applyAssistantPresentationActions } from "../../../console/assistant-presentation.js";
 
 const order = (sequence, partOffset = 0) => ({ sequence, part_offset: partOffset });
 const base = (itemId, kind, sequence, overrides = {}) => ({

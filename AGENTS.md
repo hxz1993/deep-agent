@@ -12,9 +12,9 @@
 | 项 | 内容 |
 | --- | --- |
 | **是什么** | 通用 AI Agent 全栈：FastAPI 后端 + Pydantic AI 运行时 + 静态前端 |
-| **产品版本** | `deep_agent.__version__`为唯一来源；当前`0.8.2`，数据库Head为`002` |
+| **产品版本** | `deep_agent.__version__`为唯一来源；当前`0.8.3`，数据库Head为`002` |
 | **启动** | 本地 Test 联调固定使用下方命令；部署入口才使用 `deep_agent.main:app` |
-| **测试** | `python3.12 -m unittest discover -s tests -p "test_*.py" -v` |
+| **测试** | `PYTHONPATH=src python3.12 -m unittest discover -s tests -p "test_*.py" -v` |
 | **配置** | 仓库根 `.env`（`DEEP_AGENT_*` / `DEEP_AGENT_DBMS_*` / `DEEP_AGENT_SQLITE_PATH`） |
 
 ### 本地 Test 联调固定启动命令
@@ -25,7 +25,7 @@
 # 首次或缺 .venv-sandbox 时：local_dev 默认会自动 setup；也可手动：
 # bash scripts/sandbox_venv/setup.sh
 
-python3.12 -m deep_agent.local_dev \
+PYTHONPATH=src python3.12 -m deep_agent.local_dev \
   --config ~/.config/deep-agent/test.env \
   --port 8000
 ```
@@ -58,7 +58,7 @@ Profile:         ~/.config/deep-agent/sqlite.env
 需要同时运行本地渠道网关时，使用与部署相同的统一监督顺序，同时保留`local_dev`身份与文件能力：
 
 ```bash
-python3.12 -m deep_agent.combined_runtime \
+PYTHONPATH=src python3.12 -m deep_agent.combined_runtime \
   --local-config ~/.config/deep-agent/sqlite.env \
   --api-port 8000
 ```
@@ -108,16 +108,18 @@ deep-agent/
 ├── scripts/               ← 开发与环境准备
 ├── tests/                 ← Python、接口、MCP、控制台测试
 ├── docs/                  ← 说明、设计与原型
-├── data/                  ← 持久运行数据，原地保留且不提交
-└── tmp/                   ← TMP_to_delete 临时产物，不提交
+└── data/                  ← 持久运行数据，原地保留且不提交
 ```
 
-v0.8.2 只调整物理目录与路径解析，不改业务、协议和数据库。根 `deep_agent`、
-`deepfos_platform`、`maintenance`、`deepagent_files.py`、`mcps`、`alembic` 等是相对兼容链接，
-唯一源码在上图新位置，不能在旧路径建立第二份实现。旧 `deep_agent.channel_gateway` 的叶模块
-是新 `deep_agent.channels.gateway` 的同一模块别名，旧 `python -m` 命令继续可用。
-源码树交付与 `requirements.txt` 安装方式不变，不引入 wheel 或控制台构建；发布归档须包含链接
-及目标目录。Windows checkout 必须支持 Git 符号链接。详见项目结构指南。
+v0.8.3 完成目录收敛，本地与线上都从同一份 `src/` 加载 Python 源码，不改业务、协议和数据库。
+根目录旧包链接、`frontend/` 和网关兼容包已移除；渠道入口统一为 `deep_agent.channels.gateway`。
+安装依赖仍用 `requirements.txt`，不引入 `pyproject.toml`、wheel 或控制台构建。
+所有启动、维护和 Python 测试命令从仓库根执行并设置 `PYTHONPATH=src`；Gunicorn 配置统一为
+`deploy/gunicorn.conf.py`；Compose 在仓库根使用 `--project-directory "$PWD" -f deploy/docker-compose.yml`，
+保留项目名和数据卷范围，不依赖旧路径或符号链接。
+原型归入 `docs/design/17-console-ui/`，原始 Jenkins 脚本只在 `docs/archive/jenkins/` 归档；
+`data/`、`.venv` 和 `.venv-sandbox` 保留；临时验证按需创建 `tmp/`，任务结束清理，不长期保留空目录。
+详见 [`项目结构指南`](docs/guides/project-structure.md)。
 
 ---
 
@@ -179,7 +181,7 @@ v0.6.1删除目录资源自身的冗余启停层；v0.6.4只恢复Model的`enabl
 - v0.6.8为工具目录、实时SSE和动态History投影增加仅供会话卡片展示的`display_name`；稳定调用仍
   使用原始`tool/tool_name`和`tool_call_id`，Event Payload、数据库与轨迹不保存或展示派生名称。
   内置工具使用代码元数据，UI工具使用`metadata.display_name`，MCP使用官方`Tool.title`并按工具名回退。
-- v0.7.0新增可选渠道网关，公共`channel_gateway/`宿主和`channels/`调度不引用企微SDK，
+- v0.7.0新增可选渠道网关，当前公共`channels/gateway/`宿主和`channels/`调度不引用企微SDK，
   只有`channels/adapters/wecom/`调用官方`wecom-aibot-python-sdk==1.0.2`，不重写连接/认证/心跳/重连/解密/回复协议。
   API固定一个worker，Gateway按环境部署一个副本；`channel_accounts`保存配置，`channel_session_bindings`映射企微Peer到
   Session，`channel_message_runs`负责幂等和生命周期。企微Session固定归属Account的管理员配置的会话用户，
@@ -188,7 +190,7 @@ v0.6.1删除目录资源自身的冗余启停层；v0.6.4只恢复Model的`enabl
   五个命令`/help /new /stop /status /whoami`仅在渠道入口处理；没有`/reset`或共享Chat全局拦截。
   控制命令绕过普通队列，15秒等待真实停止；`/new`原子换绑，旧历史保留，投递失败不重复命令副作用。
   Session标题事件`source=channel`保存来源，Console帮助由公共目录生成；旧来源修复入口为
-  `python3.12 -m maintenance.channel_origins --sqlite <本地文件>`，默认dry-run，停服务后`--apply`自动备份。
+  `PYTHONPATH=src python3.12 -m maintenance.channel_origins --sqlite <本地文件>`，默认dry-run，停服务后`--apply`自动备份。
 - Tool Search 首轮预选只使用聊天 API 的原始非空 `message`；`context_refs.type/label` 仅在纯上下文请求时回退，不能让 Page/Range 标签覆盖用户问题。实时工具若被 `ModelRetry` 或取消撤回，SSE 用 `tool_call_removed` 通知客户端删除临时卡片；取消后的非空部分回答必须以 `assistant.status=interrupted` 恢复。
 - 模型目录的 `max_output_tokens` 同时约束普通和流式回答；工具错误只有在模型修改参数或改选工具后可能成功时使用 `ModelRetry`，已确定的下载、解析或上游失败使用 `ToolFailed`，避免消耗工具重试预算。
 - v0.3.13 将正式 Run 的官方 `CancellationToken` 传给内部摘要 Agent；取消摘要直接终止 Run，不能转成 Sliding Window 后继续回答。Local/Native 工具配对统一使用 Pydantic AI 2.26 的 Call/Return 基类。

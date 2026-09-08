@@ -151,7 +151,7 @@ headers = getattr(meta, "headers", None) or {}
 ## 运行
 
 ```bash
-python3.12 -m unittest discover -s tests/integration -p "test_*.py" -v
+PYTHONPATH=src python3.12 -m unittest discover -s tests/integration -p "test_*.py" -v
 ```
 
 ## 新增集成测试检查清单

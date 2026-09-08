@@ -35,8 +35,7 @@ Thumbs.db
 /data/**
 !/data/README.md
 /output/
-/tmp/**
-!/tmp/README.md
+/tmp/
 /TMP_to_delete*
 
 .agents/

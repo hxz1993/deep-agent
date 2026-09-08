@@ -41,8 +41,8 @@ console/
 
 Console 使用原生 HTML、CSS 和 JavaScript ES Modules，不需要 npm 构建，随同一份后端源码目录发布。
 后端将 `console/` 挂载到 `/console/`，将 `console/vendor/` 挂载到 `/vendor/`，浏览器地址保持不变。
-`frontend/console` 与 `frontend/vendor` 只保留指向真实目录的相对符号链接，兼容旧脚本与测试路径；
-新修改统一写入 `console/`，不在旧路径另放一份代码。
+`console/` 是唯一前端源码目录，旧 `frontend/` 已移除。前端测试仍放在 `tests/frontend/console/`，
+它是测试分类目录，不是产品源码的兼容入口。
 
 压缩过程由后端状态和 SSE 驱动，自动与主动压缩复用消息区中的独立过程条；普通历史聊天默认隐藏
 完成标记，轨迹保留实际发生位置。前端只展示后端预算和压缩结果，不实现压缩策略或编辑摘要正文。
@@ -59,17 +59,17 @@ Console 使用原生 HTML、CSS 和 JavaScript ES Modules，不需要 npm 构建
 所有命令从仓库根目录执行；日常本地开发复用稳定 SQLite Profile：
 
 ```bash
-python3.12 -m deep_agent.local_dev --config ~/.config/deep-agent/sqlite.env --port 8000
+PYTHONPATH=src python3.12 -m deep_agent.local_dev --config ~/.config/deep-agent/sqlite.env --port 8000
 ```
 
 本地连接 Test 配置时使用项目的安全启动入口：
 
 ```bash
-python3.12 -m deep_agent.local_dev --config ~/.config/deep-agent/test.env --port 8000
+PYTHONPATH=src python3.12 -m deep_agent.local_dev --config ~/.config/deep-agent/test.env --port 8000
 ```
 
 页面固定请求当前同源后端。单独启动静态文件服务器只适合查看静态资源，不能替代完整 Console 联调。
-源码目录打包时必须同时包含 `console/` 及其兼容链接；Windows 检出需要支持真实符号链接。
+本地与线上都使用仓库根 `PYTHONPATH=src` 和同一份 `console/` 资源，不依赖旧目录或符号链接。
 依赖安装和发布方式见 [`项目结构`](../docs/guides/project-structure.md) 与 [`部署目录`](../deploy/README.md)。
 
 常用地址：
@@ -83,7 +83,7 @@ python3.12 -m deep_agent.local_dev --config ~/.config/deep-agent/test.env --port
 ```bash
 rg --files console -g '*.js' -g '!console/vendor/**' -0 | xargs -0 -n1 node --check
 node --test tests/frontend/console/*.test.mjs
-python3.12 -m unittest tests.unit.test_console_routes -v
+PYTHONPATH=src python3.12 -m unittest tests.unit.test_console_routes -v
 ```
 
 完整 SSE 协议见 [`docs/guides/sse-protocol.md`](../docs/guides/sse-protocol.md)。UI 工具见 [`docs/guides/ui-tools-external.md`](../docs/guides/ui-tools-external.md)。

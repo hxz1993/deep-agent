@@ -4,19 +4,19 @@ import test from "node:test";
 import vm from "node:vm";
 
 const source = await readFile(
-  new URL("../../../frontend/console/configuration/core.js", import.meta.url),
+  new URL("../../../console/configuration/core.js", import.meta.url),
   "utf8",
 );
 const indexHtml = await readFile(
-  new URL("../../../frontend/console/index.html", import.meta.url),
+  new URL("../../../console/index.html", import.meta.url),
   "utf8",
 );
 const consoleCss = await readFile(
-  new URL("../../../frontend/console/console.css", import.meta.url),
+  new URL("../../../console/console.css", import.meta.url),
   "utf8",
 );
 const faviconSvg = await readFile(
-  new URL("../../../frontend/console/favicon.svg", import.meta.url),
+  new URL("../../../console/favicon.svg", import.meta.url),
   "utf8",
 );
 

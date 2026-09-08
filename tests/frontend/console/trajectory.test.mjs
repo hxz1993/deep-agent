@@ -9,38 +9,38 @@ import {
   runCodeSource,
   shouldIngestTrajectoryEvent,
   trajectoryStats,
-} from "../../../frontend/console/trajectory.js";
+} from "../../../console/trajectory.js";
 
 const template = await readFile(
-  new URL("../../../frontend/console/workspace-template.html", import.meta.url),
+  new URL("../../../console/workspace-template.html", import.meta.url),
   "utf8",
 );
 const chatSource = await readFile(
-  new URL("../../../frontend/console/chat.js", import.meta.url),
+  new URL("../../../console/chat.js", import.meta.url),
   "utf8",
 );
 const workspaceCss = await readFile(
-  new URL("../../../frontend/console/workspace.css", import.meta.url),
+  new URL("../../../console/workspace.css", import.meta.url),
   "utf8",
 );
 const consoleCss = await readFile(
-  new URL("../../../frontend/console/console.css", import.meta.url),
+  new URL("../../../console/console.css", import.meta.url),
   "utf8",
 );
 const configurationCss = await readFile(
-  new URL("../../../frontend/console/configuration/configuration.css", import.meta.url),
+  new URL("../../../console/configuration/configuration.css", import.meta.url),
   "utf8",
 );
 const themesCss = await readFile(
-  new URL("../../../frontend/console/themes.css", import.meta.url),
+  new URL("../../../console/themes.css", import.meta.url),
   "utf8",
 );
 const trajectorySource = await readFile(
-  new URL("../../../frontend/console/trajectory.js", import.meta.url),
+  new URL("../../../console/trajectory.js", import.meta.url),
   "utf8",
 );
 const jsonViewSource = await readFile(
-  new URL("../../../frontend/console/json-view.js", import.meta.url),
+  new URL("../../../console/json-view.js", import.meta.url),
   "utf8",
 );
 

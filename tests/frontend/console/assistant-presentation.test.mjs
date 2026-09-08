@@ -12,7 +12,7 @@ import {
   normalizePlanSnapshot,
   planPanelState,
   processDisclosureLabel,
-} from "../../../frontend/console/assistant-presentation.js";
+} from "../../../console/assistant-presentation.js";
 
 function recordingPresenter() {
   const calls = [];
@@ -38,19 +38,19 @@ function recordingPresenter() {
 }
 
 const chatSource = await readFile(
-  new URL("../../../frontend/console/chat.js", import.meta.url),
+  new URL("../../../console/chat.js", import.meta.url),
   "utf8",
 );
 const workspaceCss = await readFile(
-  new URL("../../../frontend/console/workspace.css", import.meta.url),
+  new URL("../../../console/workspace.css", import.meta.url),
   "utf8",
 );
 const workspaceTemplate = await readFile(
-  new URL("../../../frontend/console/workspace-template.html", import.meta.url),
+  new URL("../../../console/workspace-template.html", import.meta.url),
   "utf8",
 );
 const themesCss = await readFile(
-  new URL("../../../frontend/console/themes.css", import.meta.url),
+  new URL("../../../console/themes.css", import.meta.url),
   "utf8",
 );
 

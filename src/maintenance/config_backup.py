@@ -206,7 +206,7 @@ async def _source_revision(engine: AsyncEngine) -> str:
 
 def _upgrade_target_schema(database_url: str, revision: str = "head") -> None:
     config = Config(str(repository_root() / "alembic.ini"))
-    config.set_main_option("script_location", str(repository_root() / "alembic"))
+    config.set_main_option("script_location", str(repository_root() / "migrations"))
     config.attributes["database_url"] = database_url
     command.upgrade(config, revision)
 

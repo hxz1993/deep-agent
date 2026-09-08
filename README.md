@@ -3,7 +3,7 @@
 DeepAgent 是基于 FastAPI、Pydantic AI 和 SQLAlchemy 的多用户 Agent 服务，并
 随服务发布一体化运维控制台。
 
-当前产品版本为 `0.8.2`。`deep_agent.__version__` 是唯一代码版本来源，FastAPI、
+当前产品版本为 `0.8.3`。`deep_agent.__version__` 是唯一代码版本来源，FastAPI、
 `GET /info` 和 Console 顶部版本徽标均读取该值。后续正式发布默认递增
 `MAJOR.MINOR.PATCH` 的第三位，只有明确规划重大版本时才调整前两位。产品版本不通过
 环境变量或数据库覆盖，也不等同于 Alembic 数据库结构 revision。
@@ -58,20 +58,27 @@ v0.7.0新增可选渠道网关：同仓、同镜像独立运行，公共Gateway/
 | [`tests/`](tests/README.md) | Python、接口、MCP 和 Console 测试 |
 | [`docs/`](docs/README.md) | 当前说明、技术设计和交互原型 |
 
-v0.8.2 按工程用途整理目录，业务逻辑和接口不变。根目录旧包名及部署路径保留为相对兼容链接，
-不保存第二份源码；继续在仓库根使用原有安装和启动命令。源码树发布须同时包含链接与目标目录，
-Windows checkout 需启用 Git 符号链接支持。本次不增加 Python wheel 或前端构建流程。
+v0.8.3 将本地与线上统一到上述源码目录，业务逻辑和接口不变。根目录旧包链接、`frontend/`
+和网关兼容包已移除；从仓库根运行时通过 `PYTHONPATH=src` 加载 Python 包，渠道入口统一为
+`deep_agent.channels.gateway`。部署和本地开发均携带完整 `src/`、`console/`、`mcp_servers/`、
+`migrations/` 与 `deploy/`，不依赖符号链接，也不增加 `pyproject.toml`、Python wheel 或前端构建。
+
+稳定 `data/`、`.venv` 和 `.venv-sandbox` 保留；临时产物只在验证期间存放于 `tmp/`，任务结束清理。
+统一侧边栏原型归入 `docs/design/17-console-ui/`，Jenkins 原始脚本只在 `docs/archive/jenkins/` 归档。
 
 完整边界见
 [`docs/guides/project-structure.md`](docs/guides/project-structure.md)。
 
 ## 本地启动
 
-默认使用本机 Python 3.12。安装依赖：
+所有命令从仓库根执行，默认使用本机 Python 3.12。安装依赖：
 
 ```bash
 python3.12 -m pip install -r requirements.txt
 ```
+
+Python 启动、维护与测试命令都需要 `PYTHONPATH=src`；下方 macOS/Linux 示例按命令设置。
+Windows PowerShell 先执行 `$env:PYTHONPATH = 'src'`，再运行相同的 Python 命令。
 
 若启用 Python Sandbox（默认 `DEEP_AGENT_SANDBOX_ENABLED=true`、backend=`subprocess-dev`），
 还需**独立** sandbox 解释器（与宿主 `venv` 分离，预装 numpy/pandas）。  
@@ -87,7 +94,7 @@ bash scripts/sandbox_venv/setup.sh
 连接 Test 数据库进行本地联调时，使用仓库外的私有 Profile：
 
 ```bash
-python3.12 -m deep_agent.local_dev \
+PYTHONPATH=src python3.12 -m deep_agent.local_dev \
   --config ~/.config/deep-agent/test.env \
   --port 8000
 ```
@@ -138,13 +145,13 @@ Console 是管理入口，只允许平台综合权限接口确认的企业管理
 部署环境使用：
 
 ```bash
-uvicorn deep_agent.main:app --host 0.0.0.0 --port 8000
+PYTHONPATH=src gunicorn -c deploy/gunicorn.conf.py deep_agent.main:app
 ```
 
 需要企业微信的环境再额外启动一个Gateway副本：
 
 ```bash
-python -m deep_agent.channels.gateway --host 0.0.0.0 --port 8010
+PYTHONPATH=src python -m deep_agent.channels.gateway --host 0.0.0.0 --port 8010
 ```
 
 两个进程必须配置相同的`DEEP_AGENT_CHANNEL_INTERNAL_TOKEN`；API还需配置
@@ -225,12 +232,12 @@ v0.4.18自动注入系统工具`export_file_to_download_center`。当请求具�
 ## 测试
 
 ```bash
-python3.12 -m unittest discover -s tests -p 'test_*.py'
+PYTHONPATH=src python3.12 -m unittest discover -s tests -p 'test_*.py'
 node --test tests/frontend/console/*.test.mjs
 
 # 压缩核心覆盖率门槛（开发依赖，不进入生产镜像）
 python3.12 -m pip install -r requirements-dev.txt
-python3.12 tests/check_context_compaction_coverage.py
+PYTHONPATH=src python3.12 tests/check_context_compaction_coverage.py
 ```
 
 具体开发和测试要求见根目录及子目录的 `AGENTS.md`。

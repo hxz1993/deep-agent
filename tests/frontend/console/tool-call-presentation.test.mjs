@@ -3,8 +3,8 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import vm from "node:vm";
 
-const chatSource = await readFile(new URL("../../../frontend/console/chat.js", import.meta.url), "utf8");
-const workspaceCss = await readFile(new URL("../../../frontend/console/workspace.css", import.meta.url), "utf8");
+const chatSource = await readFile(new URL("../../../console/chat.js", import.meta.url), "utf8");
+const workspaceCss = await readFile(new URL("../../../console/workspace.css", import.meta.url), "utf8");
 
 test("工具调用默认是无框透明的灰色普通文本行", () => {
   assert.match(workspaceCss, /\.tool-block \{[^}]*border: 0;[^}]*background: transparent;/);

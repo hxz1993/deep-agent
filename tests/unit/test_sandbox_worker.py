@@ -8,6 +8,7 @@ import sys
 import unittest
 
 from deep_agent.sandbox.framing import encode_frame, read_frame
+from deep_agent.sandbox.subprocess_dev.env import build_worker_env
 from deep_agent.sandbox.types import (
     MAX_RESULT_BYTES,
     MAX_STDERR_BYTES,
@@ -32,6 +33,7 @@ def _run_worker(
     }
     completed = subprocess.run(
         [sys.executable, "-m", "deep_agent.sandbox.worker"],
+        env=build_worker_env(),
         input=encode_frame(request),
         capture_output=True,
         timeout=timeout,
@@ -163,6 +165,7 @@ class SandboxWorkerTests(unittest.TestCase):
         }
         completed = subprocess.run(
             [sys.executable, "-m", "deep_agent.sandbox.worker"],
+            env=build_worker_env(),
             input=encode_frame(request),
             capture_output=True,
             timeout=10,

@@ -12,11 +12,12 @@ from coverage import Coverage
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
-if str(REPOSITORY_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPOSITORY_ROOT))
+for import_root in (REPOSITORY_ROOT, REPOSITORY_ROOT / "src"):
+    if str(import_root) not in sys.path:
+        sys.path.insert(0, str(import_root))
 
 
-TARGET = "deep_agent/agent/context/compaction.py"
+TARGET = "src/deep_agent/agent/context/compaction.py"
 REPORT_PATH = Path("/tmp/deep-agent-context-compaction-coverage-TMP_to_delete.json")
 TEST_MODULES = (
     "tests.unit.test_context_compaction",

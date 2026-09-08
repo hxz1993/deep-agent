@@ -3,8 +3,11 @@
 这个维护命令把一个 DeepAgent 环境的配置导出为单个 SQLite `.db` 文件。
 文件可以直接用 DBeaver 打开，也可以复制后作为本地 DeepAgent 数据库使用。
 
+维护程序唯一源码位于 `src/maintenance/`。下列命令从仓库根执行，并用 `PYTHONPATH=src`
+加载与本地服务、部署镜像相同的 Python 包；根目录不保留维护程序的兼容入口。
+
 ```bash
-python3.12 -m maintenance.config_backup \
+PYTHONPATH=src python3.12 -m maintenance.config_backup \
   --config ~/.config/deep-agent/test.env \
   --environment test
 ```
@@ -77,7 +80,7 @@ curl -X POST '<DeepAgent>/api/v1/configuration/import' \
 
 接口要求备份和目标两侧会话表均为空、目标当前没有活动Run，并动态核对当前ORM表、列、主键、
 外键、备份范围清单和引用关系。正式执行在单个数据库事务中整体替换配置；任一步失败即回滚，已上传
-的Skill文件尽力补偿删除。详细契约见[`../docs/guides/configuration-import.md`](../../docs/guides/configuration-import.md)。
+的Skill文件尽力补偿删除。详细契约见[`../../docs/guides/configuration-import.md`](../../docs/guides/configuration-import.md)。
 
 ## v0.6.6 生产基线重整（012 → 001）
 
@@ -92,7 +95,7 @@ curl -X POST '<DeepAgent>/api/v1/configuration/import' \
 只读预检：
 
 ```bash
-python3.12 -m maintenance.rebaseline_database \
+PYTHONPATH=src python3.12 -m maintenance.rebaseline_database \
   --config ~/.config/deep-agent/test.env \
   --report ../deep-agent-rebaseline-reports/test-012-audit-TMP-to-delete.json
 ```
@@ -105,7 +108,7 @@ python3.12 -m maintenance.rebaseline_database \
 4. 使用即将部署的新代码执行：
 
    ```bash
-   python3.12 -m maintenance.rebaseline_database \
+   PYTHONPATH=src python3.12 -m maintenance.rebaseline_database \
      --config ~/.config/deep-agent/test.env \
      --stamp --yes \
      --report ../deep-agent-rebaseline-reports/test-012-to-001.json
@@ -123,7 +126,7 @@ python3.12 -m maintenance.rebaseline_database \
 会话历史与配置是两个独立备份范围。Revision 007 升级到 008 前必须额外执行：
 
 ```bash
-python3.12 -m maintenance.session_history_backup \
+PYTHONPATH=src python3.12 -m maintenance.session_history_backup \
   --config ~/.config/deep-agent/test.env \
   --environment test
 ```
@@ -163,7 +166,7 @@ v0.3.17 备份仍位于 `002` 的配置，并确认 `agents.capabilities` 不存
 
 `003` 降级只允许 `skill_packages` 为空且所有 `agents.skills=[]`。上传 Skill 的 ZIP 位于平台文件
 服务，不包含在配置 SQLite 备份中；跨环境恢复需要同时迁移或重新上传平台原包。Test MySQL和
-平台文件服务验收步骤见 [`../docs/guides/skills.md`](../../docs/guides/skills.md)。
+平台文件服务验收步骤见 [`../../docs/guides/skills.md`](../../docs/guides/skills.md)。
 
 ## v0.3.23 文件工具配置清理
 

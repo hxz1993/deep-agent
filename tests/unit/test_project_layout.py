@@ -18,7 +18,7 @@ SOURCE_ROOT = REPO_ROOT / "src"
 
 
 class ProjectLayoutTest(unittest.TestCase):
-    def _safe_environment(self, *, source_path: bool = False) -> dict[str, str]:
+    def _safe_environment(self) -> dict[str, str]:
         # Never inherit a developer's credentials, database, profile or import path.
         environment = {
             key: os.environ[key]
@@ -29,17 +29,15 @@ class ProjectLayoutTest(unittest.TestCase):
             "DEEP_AGENT_LOAD_DOTENV": "false",
             "PYTHONDONTWRITEBYTECODE": "1",
             "PYTHONIOENCODING": "utf-8",
+            "PYTHONPATH": str(SOURCE_ROOT),
         })
-        if source_path:
-            environment["PYTHONPATH"] = str(SOURCE_ROOT)
         return environment
 
-    def _python(self, *arguments: str, cwd: Path = REPO_ROOT,
-                source_path: bool = False) -> subprocess.CompletedProcess[str]:
+    def _python(self, *arguments: str, cwd: Path = REPO_ROOT) -> subprocess.CompletedProcess[str]:
         result = subprocess.run(
             [sys.executable, "-B", *arguments],
             cwd=cwd,
-            env=self._safe_environment(source_path=source_path),
+            env=self._safe_environment(),
             text=True,
             encoding="utf-8",
             capture_output=True,
@@ -49,60 +47,62 @@ class ProjectLayoutTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         return result
 
-    def _probe(self, source: str, *, cwd: Path = REPO_ROOT,
-               source_path: bool = False) -> dict:
+    def _probe(self, source: str, *, cwd: Path = REPO_ROOT) -> dict:
         return json.loads(self._python(
-            "-c", textwrap.dedent(source), cwd=cwd, source_path=source_path,
+            "-c", textwrap.dedent(source), cwd=cwd,
         ).stdout)
 
-    def test_legacy_paths_are_relative_links_to_one_physical_copy(self):
-        links = {
-            "deep_agent": "src/deep_agent",
-            "deepfos_platform": "src/deepfos_platform",
-            "maintenance": "src/maintenance",
-            "deepagent_files.py": "src/deepagent_files.py",
-            "frontend/console": "console",
-            "frontend/vendor": "console/vendor",
-            "mcps": "mcp_servers",
-            "alembic": "migrations",
-            "docker-compose.yml": "deploy/docker-compose.yml",
-            "src/deep_agent/gunicorn.conf.py": "deploy/gunicorn.conf.py",
-            "docs/guides/jenkins": "deploy/jenkins",
-        }
-        for legacy_name, canonical_name in links.items():
+    def test_legacy_paths_have_been_removed(self):
+        legacy_paths = (
+            "deep_agent", "deepfos_platform", "maintenance", "deepagent_files.py",
+            "frontend", "mcps", "alembic", "docker-compose.yml",
+            "src/deep_agent/gunicorn.conf.py", "src/deep_agent/channel_gateway",
+            "docs/guides/jenkins",
+        )
+        for legacy_name in legacy_paths:
             with self.subTest(path=legacy_name):
                 legacy = REPO_ROOT / legacy_name
-                canonical = REPO_ROOT / canonical_name
-                self.assertTrue(legacy.is_symlink(), f"{legacy_name} duplicates source")
-                self.assertFalse(Path(os.readlink(legacy)).is_absolute())
-                self.assertTrue(canonical.exists(), canonical_name)
-                self.assertFalse(canonical.is_symlink(), canonical_name)
-                self.assertTrue(legacy.samefile(canonical))
+                self.assertFalse(legacy.exists(), f"legacy entry remains: {legacy_name}")
+                self.assertFalse(legacy.is_symlink(), f"broken legacy link remains: {legacy_name}")
 
-    def test_public_packages_resolve_to_src_from_both_supported_import_roots(self):
+    def test_canonical_directories_are_physical_sources(self):
+        for name in (
+            "src/deep_agent", "src/deepfos_platform", "src/maintenance",
+            "console", "console/vendor", "mcp_servers", "migrations", "deploy",
+            "src/deep_agent/channels/gateway", "deploy/jenkins",
+        ):
+            with self.subTest(path=name):
+                path = REPO_ROOT / name
+                self.assertTrue(path.is_dir())
+                self.assertFalse(path.is_symlink())
+
+    def test_public_packages_resolve_to_src_with_the_same_environment_from_any_cwd(self):
         probe = """
             import importlib
             import json
+            import sys
             from pathlib import Path
             names = ('deep_agent', 'deepfos_platform', 'maintenance', 'deepagent_files')
-            print(json.dumps({
+            original_search_path = list(sys.path)
+            modules = {
                 name: str(Path(importlib.import_module(name).__file__).resolve())
                 for name in names
-            }))
+            }
+            assert sys.path == original_search_path, 'public packages changed the import path'
+            print(json.dumps(modules))
         """
         expected = {
             name: str(SOURCE_ROOT / name / "__init__.py")
             for name in ("deep_agent", "deepfos_platform", "maintenance")
         }
         expected["deepagent_files"] = str(SOURCE_ROOT / "deepagent_files.py")
-        # Existing commands still work at the repository root without PYTHONPATH.
+        # Local commands and deployed commands both load the explicit source root.
         self.assertEqual(self._probe(probe), expected)
-        # The new source root must also work from a directory without root links.
         with tempfile.TemporaryDirectory(
             prefix="TMP_to_delete-layout-import-", dir=REPO_ROOT,
         ) as directory:
             self.assertEqual(
-                self._probe(probe, cwd=Path(directory), source_path=True), expected,
+                self._probe(probe, cwd=Path(directory)), expected,
             )
 
     def test_runtime_paths_point_at_the_repository_and_canonical_resources(self):
@@ -136,74 +136,52 @@ class ProjectLayoutTest(unittest.TestCase):
             "sandbox_setup": str(REPO_ROOT / "scripts/sandbox_venv/setup.sh"),
         })
 
-    def test_resource_files_remain_accessible_through_legacy_paths(self):
-        resources = {
-            "frontend/console/index.html": "console/index.html",
-            "frontend/vendor/marked.min.js": "console/vendor/marked.min.js",
-            "frontend/vendor/mermaid.min.js": "console/vendor/mermaid.min.js",
-            "mcps/deepcube/server.py": "mcp_servers/deepcube/server.py",
-            "alembic/env.py": "migrations/env.py",
-            "deep_agent/gunicorn.conf.py": "deploy/gunicorn.conf.py",
-            "deep_agent/builtin_skills/deepagent-diagnostics/SKILL.md":
-                "src/deep_agent/builtin_skills/deepagent-diagnostics/SKILL.md",
-        }
-        for legacy, canonical in resources.items():
-            with self.subTest(resource=legacy):
-                self.assertTrue((REPO_ROOT / canonical).is_file())
-                self.assertTrue((REPO_ROOT / legacy).samefile(REPO_ROOT / canonical))
+    def test_resource_files_exist_at_canonical_paths(self):
+        for name in (
+            "console/index.html", "console/vendor/marked.min.js",
+            "console/vendor/mermaid.min.js", "mcp_servers/deepcube/server.py",
+            "migrations/env.py", "deploy/gunicorn.conf.py", "deploy/docker-compose.yml",
+            "src/deepagent_files.py",
+            "src/deep_agent/builtin_skills/deepagent-diagnostics/SKILL.md",
+        ):
+            with self.subTest(resource=name):
+                path = REPO_ROOT / name
+                self.assertTrue(path.is_file())
+                self.assertFalse(path.is_symlink())
 
-    def test_gateway_legacy_imports_share_canonical_modules_in_either_order(self):
-        for legacy_first in (True, False):
-            with self.subTest(legacy_first=legacy_first):
-                actual = self._probe("""
-                    import importlib
-                    import json
-                    from pathlib import Path
-                    from unittest.mock import patch
+    def test_gateway_imports_only_the_canonical_modules_without_starting_lifespan(self):
+        actual = self._probe("""
+            import importlib
+            import importlib.util
+            import json
+            from pathlib import Path
+            from unittest.mock import patch
 
-                    names = ('config', 'deepagent_client', 'messages', 'runtime',
-                             'sdk_logger', 'app')
-                    result = {}
-                    # Module loading may construct an ASGI object, but must never
-                    # read the real profile, connect to a database or bind a port.
-                    with (
-                        patch('dotenv.load_dotenv', side_effect=AssertionError('profile read')),
-                        patch('socket.socket.connect', side_effect=AssertionError('network access')),
-                        patch('socket.socket.bind', side_effect=AssertionError('listener started')),
-                    ):
-                        for name in names:
-                            legacy_name = 'deep_agent.channel_gateway.' + name
-                            canonical_name = 'deep_agent.channels.gateway.' + name
-                            order = (legacy_name, canonical_name) if LEGACY_FIRST else (
-                                canonical_name, legacy_name)
-                            first, second = (importlib.import_module(item) for item in order)
-                            result[name] = {
-                                'same_module': first is second,
-                                'path': str(Path(second.__file__).resolve()),
-                            }
-                        old_entrypoint = importlib.import_module('deep_agent.channel_gateway.__main__')
-                        new_entrypoint = importlib.import_module('deep_agent.channels.gateway.__main__')
-                        result['same_main'] = old_entrypoint.main is new_entrypoint.main
-                        old_app = importlib.import_module('deep_agent.channel_gateway.app')
-                        new_app = importlib.import_module('deep_agent.channels.gateway.app')
-                        result['same_app'] = old_app.app is new_app.app
-                        result['lifespan_started'] = hasattr(new_app.app.state, 'gateway')
-                    print(json.dumps(result))
-                """.replace("LEGACY_FIRST", repr(legacy_first)))
-                for name in ("config", "deepagent_client", "messages", "runtime", "sdk_logger", "app"):
-                    self.assertEqual(actual[name], {
-                        "same_module": True,
-                        "path": str(SOURCE_ROOT / "deep_agent/channels/gateway" / f"{name}.py"),
-                    })
-                self.assertTrue(actual["same_main"])
-                self.assertTrue(actual["same_app"])
-                self.assertFalse(actual["lifespan_started"])
+            names = ('config', 'deepagent_client', 'messages', 'runtime',
+                     'sdk_logger', 'app', '__main__')
+            result = {}
+            with (
+                patch('dotenv.load_dotenv', side_effect=AssertionError('profile read')),
+                patch('socket.socket.connect', side_effect=AssertionError('network access')),
+                patch('socket.socket.bind', side_effect=AssertionError('listener started')),
+            ):
+                for name in names:
+                    module = importlib.import_module('deep_agent.channels.gateway.' + name)
+                    result[name] = str(Path(module.__file__).resolve())
+                result['legacy_available'] = importlib.util.find_spec('deep_agent.channel_gateway') is not None
+                app_module = importlib.import_module('deep_agent.channels.gateway.app')
+                result['lifespan_started'] = hasattr(app_module.app.state, 'gateway')
+            print(json.dumps(result))
+        """)
+        for name in ("config", "deepagent_client", "messages", "runtime", "sdk_logger", "app", "__main__"):
+            self.assertEqual(actual[name], str(SOURCE_ROOT / "deep_agent/channels/gateway" / f"{name}.py"))
+        self.assertFalse(actual["legacy_available"])
+        self.assertFalse(actual["lifespan_started"])
 
-    def test_existing_command_help_works_without_loading_runtime_configuration(self):
+    def test_canonical_command_help_works_without_loading_runtime_configuration(self):
         modules = (
             "deep_agent.local_dev",
             "deep_agent.combined_runtime",
-            "deep_agent.channel_gateway",
             "deep_agent.channels.gateway",
             "maintenance.config_backup",
             "maintenance.rebaseline_database",
@@ -233,13 +211,16 @@ class ProjectLayoutTest(unittest.TestCase):
                         values[target.id] = ast.literal_eval(statement.value)
             if "revision" in values:
                 revision_chain[values["revision"]] = values["down_revision"]
-                self.assertTrue((REPO_ROOT / "alembic/versions" / path.name).samefile(path))
         self.assertEqual(revision_chain, {"001": None, "002": "001"})
         configuration = configparser.ConfigParser(defaults={"here": str(REPO_ROOT)})
         configuration.read(REPO_ROOT / "alembic.ini", encoding="utf-8")
         self.assertEqual(
             Path(configuration.get("alembic", "script_location")).resolve(),
             REPO_ROOT / "migrations",
+        )
+        self.assertEqual(
+            Path(configuration.get("alembic", "prepend_sys_path")).resolve(),
+            SOURCE_ROOT,
         )
 
     def test_sandbox_worker_pythonpath_contains_only_the_source_root(self):

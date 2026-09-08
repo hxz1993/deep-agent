@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile, readdir } from "node:fs/promises";
 import test from "node:test";
 
-const consoleRoot = new URL("../../../frontend/console/", import.meta.url);
+const consoleRoot = new URL("../../../console/", import.meta.url);
 const configurationCore = await readFile(new URL("configuration/core.js", consoleRoot), "utf8");
 const configurationStyles = await readFile(new URL("configuration/configuration.css", consoleRoot), "utf8");
 const skills = await readFile(new URL("configuration/skills.js", consoleRoot), "utf8");

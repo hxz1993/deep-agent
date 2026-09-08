@@ -11,9 +11,9 @@ DeepAgent 当前直接复用它提供的能力：
 - `runtime/`：Gunicorn 和平台运行生命周期。
 - `log.py`：平台日志桥接。
 
-这个目录保留在仓库根，是因为部署时 DeepAgent 需要和它一起打包运行。业务
-Agent 的运行循环、能力注册、会话和 API 都位于 `src/deep_agent/`；新增业务能力时
-不要放进本目录。
+源码唯一位置为仓库根下的 `src/deepfos_platform/`，随 DeepAgent 的完整 `src/` 一起打包运行。
+本地与线上都通过 `PYTHONPATH=src` 加载，根目录不保留同名包或兼容链接。业务 Agent 的运行循环、
+能力注册、会话和 API 位于 `src/deep_agent/`；新增业务能力时不要放进本目录。
 
 该包目前按平台兼容代码维护。除非任务明确涉及平台配置、服务发现、文件客户端
 或部署运行时，否则不要修改。

@@ -1,4 +1,4 @@
-// Test 只读诊断 V1：整份粘贴到现有 Jenkins Job，保存后点构建即可。
+// Test 只读诊断版（非发布流水线）：整份粘贴到现有 Jenkins Job，保存后点构建即可。
 // 不检出源码、不构建镜像、不发布、不重启、不连接数据库；不受旧 Job 参数影响。
 pipeline {
     agent { label 'java21-mvn3' }
@@ -39,7 +39,7 @@ show() {
 printf '\\n=== 只读诊断：test/deep-agent，不执行发布 ===\\n'
 DEPLOY_UID=$(kube get deployment/deep-agent -o jsonpath='{.metadata.uid}')
 test -n "$DEPLOY_UID"
-show get deployment/deep-agent -o 'jsonpath={.metadata.name}{" replicas="}{.spec.replicas}{" strategy="}{.spec.strategy.type}{" ready="}{.status.readyReplicas}{" updated="}{.status.updatedReplicas}{"\\n"}{range .spec.template.spec.containers[*]}{.name}{" image="}{.image}{" command="}{.command}{" args="}{.args}{"\\n"}{end}{range .status.conditions[*]}{.type}{"="}{.status}{" reason="}{.reason}{" "}{.message}{"\\n"}{end}'
+show get deployment/deep-agent -o 'jsonpath={.metadata.name}{" replicas="}{.spec.replicas}{" strategy="}{.spec.strategy.type}{" ready="}{.status.readyReplicas}{" updated="}{.status.updatedReplicas}{"\\n"}{range .spec.template.spec.containers[*]}{.name}{" image="}{.image}{" workingDir="}{.workingDir}{" command="}{.command}{" args="}{.args}{"\\n"}{end}{range .status.conditions[*]}{.type}{"="}{.status}{" reason="}{.reason}{" "}{.message}{"\\n"}{end}'
 show get events --field-selector "involvedObject.uid=$DEPLOY_UID" --sort-by=.lastTimestamp
 
 # 用 controller UID 关联 Deployment -> ReplicaSet -> Pod，同时包含失败的新 Pod 和仍存活的旧 Pod。

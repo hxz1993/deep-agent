@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import vm from "node:vm";
 
-const source = await readFile(new URL("../../../frontend/console/chat.js", import.meta.url), "utf8");
+const source = await readFile(new URL("../../../console/chat.js", import.meta.url), "utf8");
 const binding = source.slice(source.indexOf("function bindSessionListFeedback()"), source.indexOf("function autoGrow()"));
 
 function harness() {
@@ -110,7 +110,7 @@ test("加载更多、失败、减少动画偏好以及非纵向滚动不触发",
 });
 
 test("回弹幅度4px、200ms，只有一次偏移后回到原位", async () => {
-  const css = await readFile(new URL("../../../frontend/console/console.css", import.meta.url), "utf8");
+  const css = await readFile(new URL("../../../console/console.css", import.meta.url), "utf8");
   assert.match(css, /animation: session-edge-bounce \.2s ease-out/);
   assert.match(css, /0%, 100% \{ transform: translateY\(0\); \}\s*40% \{ transform: translateY\(-4px\); \}/);
   assert.doesNotMatch(source, /--session-edge-shift/);

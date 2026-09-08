@@ -3,19 +3,19 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const source = await readFile(
-  new URL("../../../frontend/console/configuration/ui-tools.js", import.meta.url),
+  new URL("../../../console/configuration/ui-tools.js", import.meta.url),
   "utf8",
 );
 const template = await readFile(
-  new URL("../../../frontend/console/configuration-template.html", import.meta.url),
+  new URL("../../../console/configuration-template.html", import.meta.url),
   "utf8",
 );
 const styles = await readFile(
-  new URL("../../../frontend/console/configuration/configuration.css", import.meta.url),
+  new URL("../../../console/configuration/configuration.css", import.meta.url),
   "utf8",
 );
 const consoleStyles = await readFile(
-  new URL("../../../frontend/console/console.css", import.meta.url),
+  new URL("../../../console/console.css", import.meta.url),
   "utf8",
 );
 
@@ -140,7 +140,7 @@ test("UI 工具包标题使用内缩分割线且工具编辑弹框更紧凑", ()
 
 test("Agent 能力页只渲染工具包级开关", async () => {
   const agents = await readFile(
-    new URL("../../../frontend/console/configuration/agents.js", import.meta.url),
+    new URL("../../../console/configuration/agents.js", import.meta.url),
     "utf8",
   );
   assert.match(agents, /value="\$\{escapeHtml\(cap\.code\)\}"/);

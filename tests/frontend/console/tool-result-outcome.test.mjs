@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import * as presentation from '../../../frontend/console/assistant-presentation.js';
-import { buildTrajectory, createTrajectoryController } from '../../../frontend/console/trajectory.js';
+import * as presentation from '../../../console/assistant-presentation.js';
+import { buildTrajectory, createTrajectoryController } from '../../../console/trajectory.js';
 
 for (const [outcome, expected, label] of [['failed', 'failed', '失败'], ['interrupted', 'interrupted', '已中断'], ['success', 'completed', '完成']]) {
   test(`SSE ${outcome} keeps outcome and uses the correct visible tool status`, () => {

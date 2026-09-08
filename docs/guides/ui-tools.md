@@ -297,7 +297,7 @@ curl http://127.0.0.1:8000/api/v1/tools
 ### 7.3 单元测试
 
 ```bash
-python3.12 -m unittest tests.unit.test_hitl_deferred -v
+PYTHONPATH=src python3.12 -m unittest tests.unit.test_hitl_deferred -v
 ```
 
 可为新工具增加类似用例：TestModel `call_tools=["your_tool"]` → `final.status == "pending"` → 带 `DeferredToolResults` 续跑。

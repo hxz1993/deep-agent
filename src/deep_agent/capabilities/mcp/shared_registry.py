@@ -16,7 +16,7 @@ import psutil
 
 from deep_agent.capabilities.mcp.builtin_config import resolve_builtin_spawn_config
 from deep_agent.lib.const import MCP_REGISTRY_JSON_ENV, MCP_SERVER_TTL_ENV
-from deep_agent.core.paths import REPO_ROOT
+from deep_agent.core.paths import REPO_ROOT, SOURCE_ROOT
 from deep_agent.options import OPTION
 
 _SHARED_HOST = "127.0.0.1"
@@ -283,7 +283,7 @@ class McpSharedRegistry:
                 env.update(spawn_config.get("env") or {})
                 env[MCP_REGISTRY_JSON_ENV] = str(json_path)
                 env[MCP_SERVER_TTL_ENV] = str(self._server_ttl)
-                env["PYTHONPATH"] = str(REPO_ROOT)
+                env["PYTHONPATH"] = os.pathsep.join((str(SOURCE_ROOT), str(REPO_ROOT)))
                 command = spawn_config["command"]
                 args = list(spawn_config.get("args", []))
                 args.extend(

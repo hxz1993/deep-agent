@@ -13,12 +13,14 @@ Gateway 是可选独立进程：不使用渠道的环境无需启动，也不会
 
 ## 启动
 
+以下命令从仓库根运行，通过 `PYTHONPATH=src` 加载与部署镜像相同的源码。
+
 API：
 
 ```bash
 DEEP_AGENT_CHANNEL_GATEWAY_URL=http://channel-gateway:8010 \
 DEEP_AGENT_CHANNEL_INTERNAL_TOKEN='<private-token>' \
-uvicorn deep_agent.main:app --host 0.0.0.0 --port 8000 --workers 1
+PYTHONPATH=src uvicorn deep_agent.main:app --host 0.0.0.0 --port 8000 --workers 1
 ```
 
 Gateway：
@@ -26,21 +28,23 @@ Gateway：
 ```bash
 DEEP_AGENT_CHANNEL_API_URL=http://deep-agent:8000 \
 DEEP_AGENT_CHANNEL_INTERNAL_TOKEN='<same-private-token>' \
-python -m deep_agent.channels.gateway --host 0.0.0.0 --port 8010
+PYTHONPATH=src python -m deep_agent.channels.gateway --host 0.0.0.0 --port 8010
 ```
 
 Gateway 不运行迁移；Revision 不是 `002` 会失败关闭。0.7.0 保持一个 API worker、一个 Gateway 副本：
 当前取消注册表与消息队列不跨实例共享，相同 Bot 的多条长连接还可能互相顶替。DevBox 服务名为“渠道网关”。
 
-Test 的 Jenkins V2 采用同一容器内的两个独立进程：`deep_agent.combined_runtime` 先启动 API，
+Jenkins 网关启动版（`Jenkinsfile.gateway`）采用同一容器内的两个独立进程：`deep_agent.combined_runtime` 先启动 API，
 等待迁移和健康检查完成后再启动只监听回环地址的 Gateway，并自动生成本次容器使用的内部 Token。
-它不新增 Deployment 或 Service。继续使用 Jenkins V1 的环境仍只执行 Gunicorn，不会启动 Gateway；
-对应说明见 [`jenkins/README.md`](../../deploy/jenkins/README.md)。
+它不新增 Deployment 或 Service。不需要网关时使用仅 API 版（`Jenkinsfile.api-only`），显式恢复
+Gunicorn 启动命令并清空 API 的网关地址；数据库版本和渠道配置保留。不要用原始归档版切换停用网关。
+对应说明见 [`deploy/jenkins/README.md`](../../deploy/jenkins/README.md)；原始脚本只在
+[`docs/archive/jenkins/`](../archive/jenkins/README.md) 归档，不是当前发布入口。
 
 稳定本地 SQLite 可用相同监督顺序，同时保留`local_dev`的本地身份和FileStore能力：
 
 ```bash
-python3.12 -m deep_agent.combined_runtime \
+PYTHONPATH=src python3.12 -m deep_agent.combined_runtime \
   --local-config ~/.config/deep-agent/sqlite.env \
   --api-port 8000
 ```
@@ -175,7 +179,7 @@ Console 可通过原有“引用消息”上下文查看，无需额外查询群
 - Binding 的 `peer_metadata` JSON保存来源会话的用户/群ID及实际收到的名称；查私聊身份不依赖Runs。
   私聊可同时保留回调的Chat ID；群内每条消息的发送者仅记在Runs，不作为群绑定身份。
 - 本地已安装早期002结构时，先停止API和Gateway，运行
-  `python3.12 -m maintenance.channel_peer_metadata --sqlite data/deep-agent-local.db`只读预检，
+  `PYTHONPATH=src python3.12 -m maintenance.channel_peer_metadata --sqlite data/deep-agent-local.db`只读预检，
   确认后追加`--apply`。脚本先生成带`TMP_to_delete`的私有完整备份，再转换旧名称列、来源快照和
   自动渠道标题；保留Session/Binding ID、人工标题与历史正文，Revision仍为002。共享环境需维护窗口，不自动执行。
 - 重复 `msgid` 不会重复执行；Gateway 重启会把未完成 Run 标为 interrupted。只有明确在调用 Agent
@@ -189,7 +193,7 @@ Gateway 只向企微输出模型 Markdown 文本；thinking、工具参数、轨
 旧 0.7.0 测试数据可通过幂等维护工具补充来源，不新增表，不修改 Alembic `002`：
 
 ```bash
-python3.12 -m maintenance.channel_origins --sqlite data/deep-agent-local.db
+PYTHONPATH=src python3.12 -m maintenance.channel_origins --sqlite data/deep-agent-local.db
 ```
 
 默认只检查；先停止 API 和 Gateway，再加 `--apply` 执行。工具会先生成权限 `0600`、名称带

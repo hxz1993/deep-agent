@@ -1,7 +1,8 @@
 # DeepAgent 项目结构与职责
 
-本文说明当前仓库的目录职责与兼容入口。此次整理只调整工程位置，业务接口、数据库结构、依赖安装
-和源码目录发布方式保持原有约定。具体实现细节以各目录的 `AGENTS.md` 为准。
+本文说明 v0.8.3 的唯一源码布局。本地与线上使用相同目录和 Python 导入方式，旧链接与网关兼容包
+已经移除。此次整理不改变业务接口或数据库结构，依赖继续按 `requirements.txt` 安装，发布仍交付
+完整源码目录。具体实现细节以各目录的 `AGENTS.md` 为准。
 
 ## 目录总览
 
@@ -9,8 +10,7 @@
 deep-agent/
 ├── src/                       Python 源码
 │   ├── deep_agent/            DeepAgent 产品后端
-│   │   ├── channels/gateway/  渠道网关实现
-│   │   └── channel_gateway/   旧 Python 模块导入与命令兼容
+│   │   └── channels/gateway/  渠道网关唯一实现
 │   ├── deepfos_platform/      平台配置、客户端、发现和运行时支撑
 │   ├── maintenance/           人工执行的维护程序
 │   └── deepagent_files.py     沙箱文件输入与产物发布辅助模块
@@ -21,13 +21,14 @@ deep-agent/
 ├── deploy/                    Gunicorn、Compose 和 Jenkins 部署配置
 ├── scripts/                   开发与环境准备脚本
 ├── tests/                     Python、接口、MCP 和 Console 测试
-├── docs/                      当前说明、历史设计与文档内原型
-├── data/                      稳定本地数据库与文件，保留原地
-└── tmp/                       标记为 TMP_to_delete 的临时产物
+├── docs/                      当前说明、历史设计、原型与归档
+└── data/                      稳定本地数据库与文件，保留原地
 ```
 
-根目录保留 `requirements.txt`、`alembic.ini` 等工程入口以及下文列出的兼容链接。
+根目录保留 `requirements.txt`、`alembic.ini` 等工程入口，不保留旧目录兼容链接。
 `src/` 是源码归类，不代表改为安装 wheel；本轮不引入 `pyproject.toml`、Python 包构建或前端构建。
+`.venv` 与 `.venv-sandbox` 是本地依赖环境，原地保留且不提交。`tmp/` 只在任务需要时创建，
+验证结束清理，不作为长期目录保留。
 
 ## 运行链路
 
@@ -55,7 +56,6 @@ FastAPI API
 - `channels/`：公共消息/Adapter契约、注册表、Peer队列、五个渠道命令与帮助目录。
 - `channels/gateway/`：可选渠道网关进程、运行配置、Account轮询和内部API/DeepAgent Client。
 - `channels/adapters/wecom/`：企微SDK的唯一引用边界，负责SDK事件转换、连接状态、原生媒体和回复调用。
-- `channel_gateway/`：旧模块的逐模块别名与 CLI 委托；实现统一维护在 `channels/gateway/`。
 
 渠道入站链路为“官方SDK → WeCom Adapter → 公共ChannelService → 现有Chat API”，出站反向调用
 Adapter的原生SDK回复。Gateway不是MCP工具，也不包含模型执行引擎；新增飞书需实现其Adapter与配置，
@@ -110,43 +110,55 @@ Pydantic AI Tool，也不会出现在 Console 的 Agent 能力列表。
 
 MCP 提供可执行工具；Skill 提供渐进披露的说明和素材。两者生命周期、权限和协议不同，不应混放。
 
-## 旧路径兼容与开发命令
+## 本地与线上统一入口
 
-旧文件路径由相对符号链接指向唯一真实目录，后续修改直接使用右列路径，不复制第二份实现。
+当前源码、资源和配置只维护下列位置：
 
-| 旧入口 | 唯一真实位置 |
+| 用途 | 唯一位置 |
 | --- | --- |
-| `deep_agent/` | `src/deep_agent/` |
-| `deepfos_platform/` | `src/deepfos_platform/` |
-| `maintenance/` | `src/maintenance/` |
-| `deepagent_files.py` | `src/deepagent_files.py` |
-| `frontend/console/` | `console/` |
-| `frontend/vendor/` | `console/vendor/` |
-| `mcps/` | `mcp_servers/` |
-| `alembic/` | `migrations/` |
-| `deep_agent/gunicorn.conf.py` | `deploy/gunicorn.conf.py`（经 `src/deep_agent/gunicorn.conf.py` 链接） |
-| `docker-compose.yml` | `deploy/docker-compose.yml` |
-| `docs/guides/jenkins/` | `deploy/jenkins/` |
+| Python 产品与支撑包 | `src/deep_agent/`、`src/deepfos_platform/`、`src/maintenance/`、`src/deepagent_files.py` |
+| 渠道网关 | `src/deep_agent/channels/gateway/`，模块入口 `deep_agent.channels.gateway` |
+| Console 与第三方资源 | `console/`、`console/vendor/` |
+| 内置 MCP | `mcp_servers/` |
+| 数据库迁移 | `migrations/`，根 `alembic.ini` 将 `src` 加入模块搜索路径 |
+| Gunicorn 与 Compose | `deploy/gunicorn.conf.py`、`deploy/docker-compose.yml` |
+| 当前 Jenkins 脚本 | `deploy/jenkins/Jenkinsfile.gateway`、`Jenkinsfile.api-only`、`Jenkinsfile.diagnose` |
+| 原始 Jenkins 脚本归档 | `docs/archive/jenkins/Jenkinsfile.original`，按原字节保存，不作为发布入口 |
 
-Python 的旧 `deep_agent.channel_gateway` 导入路径由兼容模块转交给
-`deep_agent.channels.gateway`，`python -m deep_agent.channel_gateway` 继续委托相同入口执行。
-这层 Python 兼容与目录符号链接用途相同，均不维护另一套网关业务代码。
-
-依赖安装、启动、维护和测试命令继续从仓库根执行：
+根目录旧包链接、`frontend/` 与旧网关兼容包已移除。依赖安装、启动、维护和测试命令都从仓库根执行；
+Python 使用显式 `PYTHONPATH=src`：
 
 ```bash
 python3.12 -m pip install -r requirements.txt
-python3.12 -m deep_agent.local_dev --config ~/.config/deep-agent/sqlite.env --port 8000
+PYTHONPATH=src python3.12 -m deep_agent.local_dev --config ~/.config/deep-agent/sqlite.env --port 8000
+```
+
+部署 API、维护命令、测试与本地数据库辅助服务分别使用：
+
+```bash
+PYTHONPATH=src gunicorn -c deploy/gunicorn.conf.py deep_agent.main:app
+PYTHONPATH=src python3.12 -m maintenance.config_backup --help
+PYTHONPATH=src python3.12 -m unittest discover -s tests -p 'test_*.py' -v
+docker compose --project-directory "$PWD" -f deploy/docker-compose.yml up -d
 ```
 
 Test 联调改用 `~/.config/deep-agent/test.env`。需要同时运行本地渠道网关时，使用仓库根
 `AGENTS.md` 中的 `deep_agent.combined_runtime` 命令；不要同时启动独立 Gateway。
-部署仍使用同一源码目录，要求归档和解压同时保留符号链接及其目标；Windows 检出环境也必须支持
-真实符号链接，不能把链接检出为普通文本文件。完整发布要求见 [`deploy/README.md`](../../deploy/README.md)。
+Windows PowerShell 先设置 `$env:PYTHONPATH = 'src'`，再执行对应 Python 命令，不需要创建符号链接。
+Compose 显式保留仓库根作为项目目录，避免配置文件移位后改变默认项目名和数据卷范围。
+
+部署从提交的同一源码树构建，打包应包含完整 `src/`、`console/`、`mcp_servers/`、`migrations/`、
+`deploy/` 以及根依赖和配置入口。上线需要使用当前流水线重新构建和发布，目录整理不代表线上已经更新。
+完整发布要求见 [`deploy/README.md`](../../deploy/README.md)。
 
 ## 本地数据与临时产物
 
 稳定 SQLite `data/deep-agent-local.db` 与文件目录 `data/deep-agent-local-files/` 保留原地，
 继续由仓库外 Profile 引用，不因目录整理重新初始化、覆盖或提交 Git。
-已明确标记 `TMP_to_delete` 的旧根目录产物收拢到 `tmp/TMP_to_delete-prior-artifacts/`。
-现有原型、未标记的 `output/` 和根目录 `skills/` 不因名称推断为垃圾，也不在本轮移动或删除。
+已确认无业务内容的旧缓存和临时产物清理后，不在项目中保留另一份备份；需要恢复的历史本地调试备份
+进入系统废纸篓。后续验证按需创建 `tmp/`，产物标记 `TMP_to_delete`，在测试结束或任务收尾时清理。
+稳定数据库、本地文件、依赖环境与用户交付材料不得作为临时产物清理。
+
+保留的统一侧边栏原型放在
+[`docs/design/17-console-ui/Prototype DeepAgent 统一侧边栏/`](<../design/17-console-ui/Prototype DeepAgent 统一侧边栏/>)。
+生产界面只从 `console/` 发布，原型不进入产品运行链路。

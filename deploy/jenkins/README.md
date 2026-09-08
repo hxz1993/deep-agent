@@ -1,24 +1,47 @@
-# Jenkins 流水线 V2：单 Deployment 启动 API + 渠道网关
+# Jenkins 发布与诊断
 
-适用 DeepAgent `0.7.0` / Alembic `002`。V2 以现网 V1 为基础，仍然只构建一份镜像、更新
-一个已有 Deployment；区别仅是 V2 会明确设置目标容器的启动命令，在同一容器内托管 API 和渠道
-网关两个进程。
+两种在用发布方式都构建所选分支或 Tag 的最新代码，并只更新一个已有 Deployment。
+区别只是是否启动渠道网关，不是应用代码版本或数据库版本。当前数据库仍为 Alembic `002`，
+这次整理不新增迁移、不降级数据库、不删除渠道配置或历史。
 
-## 版本与适用环境
+## 三个活动入口
 
-- [`Jenkinsfile.v1`](Jenkinsfile.v1)：旧流水线归档，镜像只启动 Gunicorn API，不启动渠道网关。
-- [`Jenkinsfile.v2`](Jenkinsfile.v2)：Test 双进程流水线，镜像启动
-  `python -m deep_agent.combined_runtime`。
-- [`Jenkinsfile.diagnose.v1`](Jenkinsfile.diagnose.v1)：Test 只读诊断版，粘贴构建即可收集现有失败
-  Pod 的状态、事件和日志；不是发布流水线。
-- [`combined_runtime.py`](../../src/deep_agent/combined_runtime.py)：镜像内启动器，不在 Jenkins 节点运行。
+| 用途 | 文件 | 行为 |
+| --- | --- | --- |
+| 网关启动 | [`Jenkinsfile.gateway`](Jenkinsfile.gateway) | 同一容器运行 API + Gateway |
+| 仅 API | [`Jenkinsfile.api-only`](Jenkinsfile.api-only) | 只启动 API，覆盖此前网关启动入口 |
+| 只读诊断 | [`Jenkinsfile.diagnose`](Jenkinsfile.diagnose) | 收集 Test 失败 Pod 的状态、事件和日志，不发布 |
 
-尚未用 V2 覆盖过启动命令的 Alpha 可以继续使用 V1 发布同一套新代码：API 和其他功能会升级，
-应用启动也会执行数据库迁移，但 Gunicorn 入口不会启动 8010 渠道网关。已经用过 V2 的同一个
-Deployment 若要恢复 API-only，还必须恢复其 `command` / `args`，不能只换回 V1 镜像。
-数据库一旦升级到 `002`，不要再发布不认识 `002` 的旧源码镜像。
+[`combined_runtime.py`](../../src/deep_agent/combined_runtime.py) 是镜像内启动器，不在 Jenkins 节点运行。
+最初的发布脚本按原字节移至 [`历史归档`](../../docs/archive/jenkins/README.md)，不能发布当前 `src/`
+源码树，也不能用于停用网关。活动目录不再保留旧文件名或旧目录兼容链接。
 
-## V2 实际做了什么
+Jenkins 中已粘贴的脚本不会自动变化；发布当前代码前需要替换整份当前脚本。
+使用 SCM Script Path 的 Job 需同步改为 `deploy/jenkins/` 下的对应路径。
+
+## 怎么选、怎么切换
+
+- 需要企微等渠道：粘贴 `Jenkinsfile.gateway`。
+- 不需要网关（包括已经发过网关版的 Test）：粘贴 `Jenkinsfile.api-only`。
+- 两者都选择同一个目标分支或 Tag，正常发布选 `RELOAD_PIPELINE=false`。
+
+仅 API 版会在同一次按容器名的 strategic merge patch 中更新镜像、明确设置
+`gunicorn -c deploy/gunicorn.conf.py deep_agent.main:app`，并把
+`DEEP_AGENT_CHANNEL_GATEWAY_URL` 置空（移除该项旧的 `valueFrom`）。
+两种发布模式同时把目标容器的 `workingDir` 固定为 `/deep-agent`、`PYTHONPATH` 固定为
+`/deep-agent/src`，并移除 `PYTHONPATH` 旧的 `valueFrom`。这与镜像内的 `WORKDIR` 和 `ENV` 一致，
+覆盖 Deployment 遗留的源码路径。除此之外保留其他环境变量、其他容器、副本数、Service 和 Ingress。
+仅 API 模式既停止托管网关，也让 API 不再引用旧网关。
+部署完成后只检查 API 健康，不要求网关健康，也不在 Jenkins 节点安装 Python。
+
+再切回网关启动版时会明确恢复 `python -m deep_agent.combined_runtime`，监督进程会为 API 子进程
+重新注入正确网关地址。数据库内已启用的机器人会重新连接；停用网关不等于删除或关闭账号配置。
+切换需要滚动替换容器，旧 Pod 退出前旧网关可能仍在工作；如有任务执行中，请先停止任务并安排维护窗口。
+
+两种在用脚本都使用当前 `src/` 源码树 / Alembic `002`。API 启动仍按代码执行正常迁移，
+这里不是跳过迁移的开关；不要选用不认识现有数据库 Revision 的旧源码 Tag。
+
+## 网关启动版实际做了什么
 
 ```text
 检出 test → 构建并推送一个镜像 → Trivy 报告
@@ -41,17 +64,16 @@ Kubernetes 按原策略重启容器。
 
 网关入口固定 `workers=1, reload=False`，不继承容器原有 `WEB_CONCURRENCY`。否则 Uvicorn
 在“应用对象 + 多 worker”组合下会拒绝启动；0.52.4 的表现是 import string 警告和退出码 3。
-V2 在镜像构建内运行入口定向测试，覆盖继承多 worker 环境的情况；测试不启动业务应用或连接数据库，
+网关启动版在镜像构建内运行入口定向测试，覆盖继承多 worker 环境的情况；测试不启动业务应用或连接数据库，
 并使用这次镜像实际安装的 Uvicorn。Jenkins 节点仍不需要安装 Python。
 
-本次修复不新增数据库迁移、端口或部署资源，也不改变现有 API、渠道配置与机器人消息协议。
-把诊断脚本换回当前 `Jenkinsfile.v2`，选择 `test`、`RELOAD_PIPELINE=false` 后重新构建即可发布修复。
+诊断结束后换回需要的发布脚本，选择目标分支或 Tag、`RELOAD_PIPELINE=false` 后重新构建。
 从无参数的诊断脚本切回时，首轮缺失参数会回退到 `java21-mvn3` / `test` / 正常发布，
 不必先构建一轮只为刷新参数；显式选择 `RELOAD_PIPELINE=true` 仍只刷新参数。
 
 ## Test 便捷部署与正式部署的区别
 
-当前 V2 适合先沿用已有 Job 和 Deployment 完成 Test 验证：一份镜像、一个容器、两个进程。
+当前网关启动版适合先沿用已有 Job 和 Deployment 完成 Test 验证：一份镜像、一个容器、两个进程。
 代价是 API 与 Gateway 共用容器生命周期，任一个退出都会整体重启，不能独立发布或做故障隔离。
 本脚本保留已有副本数和更新策略；即使 replicas=1，RollingUpdate 也可能短暂并存新旧 Gateway。
 在尚未实现网关选主前，不应让启用同一机器人账户的新旧网关并行运行。Test 初次发布成功后再启用
@@ -70,7 +92,7 @@ V2 在镜像构建内运行入口定向测试，覆盖继承多 worker 环境的
 
 ## Jenkins 配置
 
-V2 只保留三个参数：
+网关启动版和仅 API 版都只保留三个参数：
 
 | 参数 | 默认值 | 说明 |
 | --- | --- | --- |
@@ -78,18 +100,31 @@ V2 只保留三个参数：
 | `AGENT` | `java21-mvn3` | 沿用现有 Jenkins 节点 |
 | `RELOAD_PIPELINE` | `false` | `true` 时只刷新参数 |
 
-可将 Job 的 Script Path 设置为 `deploy/jenkins/Jenkinsfile.v2`，也可以把文件内容复制到现有
-Test Job。V2 沿用 V1 的 Git、Harbor、Kubernetes 凭据 ID 和 Job 命名规则：`test/deep-agent`
+可将 Job 的 Script Path 设置为 `deploy/jenkins/Jenkinsfile.gateway` 或
+`deploy/jenkins/Jenkinsfile.api-only`，也可以把对应文件内容复制到现有 Job。
+只读诊断的 Script Path 为 `deploy/jenkins/Jenkinsfile.diagnose`。
+两者沿用原始版的 Git、Harbor、Kubernetes 凭据 ID 和 Job 命名规则：`test/deep-agent`
 会更新 `test` 命名空间内的 `deep-agent` Deployment。
 
-构建节点只需具备 V1 已经使用的 Git、tar/gzip、Docker、kubectl、DeepCube wheel 路径和 Trivy。
+构建节点只需具备原始版已经使用的 Git、tar/gzip、Docker、kubectl、DeepCube wheel 路径和 Trivy。
 不再要求 Jenkins 节点安装 Python；Python 启动检查在镜像构建阶段和目标容器内执行。
+
+## 源码路径与构建检查
+
+本地与镜像使用同一套路径：Python 在 `src/`，Gunicorn 配置为 `deploy/gunicorn.conf.py`，
+渠道网关模块为 `deep_agent.channels.gateway`。仓库根不再提供 Python 包或旧网关模块兼容入口。
+
+两份镜像使用 `WORKDIR /deep-agent`、`ENV PYTHONPATH=/deep-agent/src`，继续安装
+`requirements.txt` 和独立沙箱环境。构建时检查并编译真实路径，随后用模块导入验证 Python 路径；
+网关版继续运行单 worker 入口测试。发布后的容器内 Python 健康探针继承相同 `PYTHONPATH`。
+不增加应用 wheel 构建、数据库流程或额外发布阶段。
 
 ## 发布前确认
 
 1. 原 Deployment 和容器名仍为 Jenkins `JOB_BASE_NAME`，即当前约定的 `deep-agent`。
-2. V2 会按容器名用 strategic merge patch 同时更新镜像、`command` 和 `args`，因此可覆盖原
-   Deployment 遗留的 Gunicorn 启动命令；不会替换同一个 Pod 内的其他容器。
+2. 两种在用发布脚本都会按容器名用 strategic merge patch 同时更新镜像、`command` 和 `args`，
+   并统一 `workingDir` 与 `PYTHONPATH`，因此可覆盖上次发布模式遗留的启动路径；不会替换同一个
+   Pod 内的其他容器。
 3. 原 Service、Ingress 和健康探针仍指向 API 端口。API 默认端口为 `30098`；若通过
    `DEEP_AGENT_PYTHON_BIND` 或 `DEEP_AGENT_PYTHON_PORT` 修改，启动器会使用同一端口等待 API。
 4. 数据库是当前生产基线 `001` 或已经正确升级的 `002`。API 会自动执行 `upgrade head`；历史
@@ -98,7 +133,8 @@ Test Job。V2 沿用 V1 的 Git、Harbor、Kubernetes 凭据 ID 和 Job 命名�
 
 ## 成功与失败判断
 
-流水线只有在以下三项都通过后才成功：Deployment rollout 完成、API `/health` 返回 `ok`、Gateway
+仅 API 版要求 Deployment rollout 完成、容器内 API `/health` 返回 `ok`；不会检查或启动网关。
+网关启动版要求以下三项都通过：Deployment rollout 完成、API `/health` 返回 `ok`、Gateway
 鉴权 `/health` 返回 `ok` 且数据库 Revision 为 `002`。发布后再到 Console「渠道」新增或启用 Test
 机器人，并执行渠道测试；流水线健康检查不会主动连接或发送机器人消息来制造业务副作用。
 
@@ -116,14 +152,14 @@ Test Job。V2 沿用 V1 的 Git、Harbor、Kubernetes 凭据 ID 和 Job 命名�
 
 无需登录服务器或手动执行 `kubectl`：
 
-1. 先保留当前发布脚本，然后把 **`Jenkinsfile.diagnose.v1` 的完整内容**替换到现有 Test Job 的
+1. 先保留当前发布脚本，然后把 **`Jenkinsfile.diagnose` 的完整内容**替换到现有 Test Job 的
    Pipeline script，保存后点一次构建；现有参数保持原样即可，诊断脚本不读取它们。
 2. 把这次构建的 **Console Output** 发回排查。脚本固定读取 `test/deep-agent`，沿用现有
    `java21-mvn3` 节点和 Kubernetes 凭据，不需要新增参数、Python、jq 或插件。
 3. 诊断结束后，需恢复发布脚本才会重新发布；不要把诊断成功当作服务恢复。
 
 诊断脚本不拉代码、不构建镜像、不更新 Deployment、不重启 Pod、不执行容器命令，也不连接数据库。
-它按 Deployment/ReplicaSet 的 controller UID 精确关联新旧 Pod，输出状态、退出码、重启次数、
+它按 Deployment/ReplicaSet 的 controller UID 精确关联新旧 Pod，输出工作目录、启动命令、状态、退出码、重启次数、
 事件，以及目标 `deep-agent` 容器的当前/上次退出日志。没有上次日志或单项读取失败会明确提示并继续；
 无法读取 Deployment、ReplicaSet 或 Pod 清单时直接报错，不伪装成收集成功。
 
@@ -134,7 +170,9 @@ Test Job。V2 沿用 V1 的 Git、Harbor、Kubernetes 凭据 ID 和 Job 命名�
 维护者可在仓库根运行定向冒烟：
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 python3.12 -m unittest tests.unit.test_jenkins_deploy_v2 -v
+export PYTHONPATH="$PWD/src"
+PYTHONDONTWRITEBYTECODE=1 python3.12 -m unittest tests.unit.test_jenkins_deploy -v
+PYTHONDONTWRITEBYTECODE=1 python3.12 -m unittest tests.unit.test_jenkins_api_only -v
 PYTHONDONTWRITEBYTECODE=1 python3.12 -m unittest tests.unit.test_jenkins_diagnostics -v
 PYTHONDONTWRITEBYTECODE=1 python3.12 -m unittest tests.unit.test_channel_gateway_entrypoint -v
 ```

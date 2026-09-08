@@ -4,27 +4,27 @@ import test from "node:test";
 import vm from "node:vm";
 
 const catalogSource = await readFile(
-  new URL("../../../frontend/console/configuration/catalog.js", import.meta.url),
+  new URL("../../../console/configuration/catalog.js", import.meta.url),
   "utf8",
 );
 const catalogTemplate = await readFile(
-  new URL("../../../frontend/console/catalog-template.html", import.meta.url),
+  new URL("../../../console/catalog-template.html", import.meta.url),
   "utf8",
 );
 const modelSource = await readFile(
-  new URL("../../../frontend/console/configuration/llm-models.js", import.meta.url),
+  new URL("../../../console/configuration/llm-models.js", import.meta.url),
   "utf8",
 );
 const modelTemplate = await readFile(
-  new URL("../../../frontend/console/configuration-template.html", import.meta.url),
+  new URL("../../../console/configuration-template.html", import.meta.url),
   "utf8",
 );
 const consoleStyles = await readFile(
-  new URL("../../../frontend/console/console.css", import.meta.url),
+  new URL("../../../console/console.css", import.meta.url),
   "utf8",
 );
 const coreSource = await readFile(
-  new URL("../../../frontend/console/configuration/core.js", import.meta.url),
+  new URL("../../../console/configuration/core.js", import.meta.url),
   "utf8",
 );
 
@@ -153,7 +153,7 @@ test("模型管理只保留 Provider 内模态框而不再提供独立列表页"
 
 test("模型能力行左右对齐且模型弹框使用更紧凑宽度", async () => {
   const consoleStyles = await readFile(
-    new URL("../../../frontend/console/console.css", import.meta.url),
+    new URL("../../../console/console.css", import.meta.url),
     "utf8",
   );
   assert.equal((modelTemplate.match(/class="field llm-option-row"/g) || []).length, 2);

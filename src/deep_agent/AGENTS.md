@@ -1,8 +1,11 @@
 # AGENTS.md — 后端（deep_agent）
 
-> 父索引：[`../AGENTS.md`](../../AGENTS.md)
+> 父索引：[`../../AGENTS.md`](../../AGENTS.md)
 
 后端 Python 包：FastAPI 传输层、Pydantic AI 运行时封装、能力层、会话存储、Agent/MCP 配置。
+
+源码唯一位于 `src/deep_agent/`；启动、维护与测试从仓库根执行并设置 `PYTHONPATH=src`。
+本地与线上都加载这份源码，根目录不再保留包链接，渠道入口统一为 `deep_agent.channels.gateway`。
 
 ---
 
@@ -30,7 +33,7 @@
 最终正式消息与检查点封口必须同事务完成，不把预览或未知结果伪造成成功，不重复保存终态。
 `db/run_ownership.py`保护活 Run 与租约；重启恢复只标中断，不自动重跑工具或渠道投递。
 运行快照不进入 LLM History，Deferred 仅正式持久化待操作状态才可执行。详见
-[`../docs/guides/run-progress-persistence.md`](../../docs/guides/run-progress-persistence.md)。
+[`../../docs/guides/run-progress-persistence.md`](../../docs/guides/run-progress-persistence.md)。
 
 ```
 HTTP (REST/SSE)
@@ -61,7 +64,7 @@ HTTP (REST/SSE)
 
 MCP 在请求时由 `resolve_mcp_toolsets` 解析（DB 行 + `mcp_servers/` builtin 兜底）。
 
-渠道网关是独立可选进程`python -m deep_agent.channels.gateway`，与API复用同一代码、数据库和
+渠道网关是独立可选进程`PYTHONPATH=src python -m deep_agent.channels.gateway`，与API复用同一代码、数据库和
 FileStore协议。`channels/gateway/runtime.py`负责Account轮询与Adapter生命周期；`channels/service.py`
 负责同Peer队列、命令、消息处理和SSE投影；`channels/contracts.py/registry.py`提供公共接口与注册表。
 只有`channels/adapters/wecom/`引用官方`wecom-aibot-python-sdk==1.0.2`；连接、认证、心跳、重连、
@@ -78,10 +81,13 @@ FileStore协议。`channels/gateway/runtime.py`负责Account轮询与Adapter生�
 0.7.0只允许一个API worker与一个Gateway副本，Gateway不执行Alembic，启动前数据库必须为`002`。
 Gateway入口必须显式使用`uvicorn.run(..., workers=1, reload=False)`，不继承容器的
 `WEB_CONCURRENCY`；只改成应用导入字符串会放开多worker并造成渠道连接竞争，不是正确修复。
-Test的Jenkins V2可由`combined_runtime.py`在同一容器托管两个独立进程：先等待API完成迁移并健康，
-再启动回环地址上的Gateway；任一子进程退出即整体退出。V2在镜像CMD与Deployment目标容器
-command/args中明确指定该入口。未被V2覆盖过入口的V1环境不启动Gateway；同环境退回V1时
-须同步恢复command/args，不能只换镜像。
+Jenkins网关启动版`Jenkinsfile.gateway`可由`combined_runtime.py`在同一容器托管两个独立进程：
+先等待API完成迁移并健康，再启动回环地址上的Gateway；任一子进程退出即整体退出。
+仅API版`Jenkinsfile.api-only`在同一次patch中更新镜像、恢复Gunicorn command/args并清空API网关地址，
+可用于同环境停用网关；重新发布网关版会恢复双进程入口及子进程网关地址，两者均不降级数据库。
+原始脚本按原字节保存于[`docs/archive/jenkins/Jenkinsfile.original`](../../docs/archive/jenkins/Jenkinsfile.original)，
+仅供历史对照；活动入口为`deploy/jenkins/`下的`Jenkinsfile.gateway`、`Jenkinsfile.api-only`与
+`Jenkinsfile.diagnose`，发布配置见[`部署指南`](../../deploy/jenkins/README.md)。
 本地可传`--local-config ~/.config/deep-agent/sqlite.env --api-port 8000`，此时API子进程仍使用
 `local_dev`，不会丢失回环限制、本地身份注入或本地FileStore；配置中的身份字段不复制到Gateway环境。
 
@@ -170,7 +176,7 @@ Pending 时没有活动 Run，其表单取消仍通过 `DeferredToolResults` 处
 - MySQL 引擎使用 `pool_pre_ping=True` 和 `pool_recycle=90`，在 Test 默认 120 秒空闲超时前主动换新连接。
 - 仅 pre-ping 阶段的 asyncmy `TCPTransport closed=True` / `handler is closed` RuntimeError 会被标记为断链并交给 SQLAlchemy 重连。
 - 不对已经开始执行的业务 SQL 做通用重试，避免写请求被重复执行；SQLite 和 PostgreSQL 不使用 MySQL 的 90 秒回收策略。
-- 排障、环境取值和未来配置项约定见 [`../docs/guides/mysql-idle-connection-timeout.md`](../../docs/guides/mysql-idle-connection-timeout.md)。
+- 排障、环境取值和未来配置项约定见 [`../../docs/guides/mysql-idle-connection-timeout.md`](../../docs/guides/mysql-idle-connection-timeout.md)。
 
 ### 能力装配与模型输入
 
@@ -195,7 +201,7 @@ Web工具不进入PTC；原生搜索由Provider执行。不得因此开放PTC内
 Internal HTTP。显式HTTP CONNECT代理下，`web/proxy_compat.py`只修正fake-IP
 公共解析与TLS SNI传递，并覆盖Pydantic AI组装下一次请求时的`ImageUrl(force_download=true)`延迟
 下载；SSRF地址校验、固定IP、重定向复检和正文解析仍由Pydantic AI负责。完整边界见
-`../docs/design/21-web-tools/`。
+`../../docs/design/21-web-tools/`。
 
 Web图片在当前`agent.run()`内部保持原生视觉结果；写入Event Store时只允许URL、MIME、
 `force_download`和无敏感审计，下一次独立Run必须投影成轻量URL说明，禁止重复携带旧图片或Base64。
@@ -233,7 +239,7 @@ Web图片在当前`agent.run()`内部保持原生视觉结果；写入Event Stor
 这是只读投影，不拆写原始Message Event、不改模型历史或轨迹；旧会话重新读取History即可恢复。
 
 框架能力是否应采用、部分采用或明确关闭，统一先查
-[`../docs/design/14-framework-capabilities/framework-capabilities-baseline.md`](../../docs/design/14-framework-capabilities/framework-capabilities-baseline.md)。
+[`../../docs/design/14-framework-capabilities/framework-capabilities-baseline.md`](../../docs/design/14-framework-capabilities/framework-capabilities-baseline.md)。
 升级 Pydantic AI/Harness 时只做相对该基线的增量审计，不从历史 TODO 重新发散；没有真实触发条件的
 框架能力不得因为“官方已经提供”就进入开发计划。
 
@@ -257,10 +263,10 @@ v0.3.5 的普通与流式聊天支持结构化 `context_refs`。公共外壳在 
 `payload/metadata` 随消息保存，模型、Token 估算、自动/主动压缩只使用排除 `metadata` 的
 XML + JSON 投影。业务字段语义仍由具体 Agent Prompt 负责。
 
-研究依据见
-[`../docs/design/03-context-compaction/context-compaction-research.md`](../../docs/design/03-context-compaction/context-compaction-research.md)；
+上下文压缩课题入口见
+[`../../docs/design/03-context-compaction/README.md`](../../docs/design/03-context-compaction/README.md)；
 当前数据结构和运行方案见
-[`../docs/design/03-context-compaction/context-compaction-design.md`](../../docs/design/03-context-compaction/context-compaction-design.md)。
+[`../../docs/design/03-context-compaction/context-compaction-design.md`](../../docs/design/03-context-compaction/context-compaction-design.md)。
 
 ---
 
@@ -405,11 +411,11 @@ Plan表、隐藏全局计划、Reminder用户消息或自研任务状态机。
   `builtin:sandbox`时，`execute_skill_script`与 `execute_python`共用当前Python沙箱Backend。
 - 单个上传 Skill 文件缺失或同步失败时，本轮跳过该 Skill 并继续运行；不得让它阻塞其他 Skill、
   MCP 或普通回答。诊断进入 `/skills` 的派生状态与 `final.context.skills`，不写数据库状态字段。
-- 完整边界见 [`../docs/design/12-agent-skills/skill-system-design.md`](../../docs/design/12-agent-skills/skill-system-design.md)。
+- 完整边界见 [`../../docs/design/12-agent-skills/skill-system-design.md`](../../docs/design/12-agent-skills/skill-system-design.md)。
 
 ### MCP Server
 
-开发内置 server → 见 [`../mcps/AGENTS.md`](../../mcp_servers/AGENTS.md)。
+开发内置 server → 见 [`../../mcp_servers/AGENTS.md`](../../mcp_servers/AGENTS.md)。
 
 生产配置 → `POST /api/v1/mcp` 或 `/console/#/configuration`。用户新建只支持 URL MCP；Builtin 由仓库内 `mcp_servers/` 和程序配置管理，可查看、更新允许运行时调整的配置，但不能通过 Console 或删除 API 移除。历史 stdio 行只允许读取或删除，不能新建、修改或运行，需迁移为 URL MCP。
 
@@ -445,7 +451,7 @@ Unicode字符位置，部分项不向后跳号、不加省略标记。不能用r
 不接受时由Provider正常返回错误。历史媒体和Skill媒体不读取。PDF和PPT/PPTX若未来需要读取，
 单独建设文档解析工具，不并入普通文件工具。新上传不抽文本，
 历史 `extracted_text` 仅为回放兼容。完整设计见
-[`../docs/design/06-attachment-parsing/`](../../docs/design/06-attachment-parsing)。
+[`../../docs/design/06-attachment-parsing/`](../../docs/design/06-attachment-parsing)。
 
 `export_file_to_download_center`与读取工具方向相反：`source=content`把完整UTF-8文本上传为平台DL文件后
 登记下载记录；`source=platform_file`只接受当前会话附件或大工具Artifact的File ID，并复用原文件。
@@ -498,7 +504,7 @@ single-flight。Spill失败时Event保存完整`inline_fallback`并标记失败�
 回环、私网、链路本地与云元数据地址，重定向连接也重新校验。Landlock、资源限制、环境变量白名单
 和无平台凭据边界仍保留；`security_level=none`必须如实说明这不是面向恶意代码的强隔离沙箱。
 它不是MCP，也不等同于Provider托管的 `CodeExecutionTool`。完整边界见
-[`../docs/design/07-python-sandbox/`](../../docs/design/07-python-sandbox)。
+[`../../docs/design/07-python-sandbox/`](../../docs/design/07-python-sandbox)。
 
 ---
 
@@ -511,7 +517,7 @@ single-flight。Spill失败时Event保存完整`inline_fallback`并标记失败�
 生产环境继续启动 `deep_agent.main:app`，只使用平台网关注入的身份。需要从本地浏览器调试 Test 数据和服务时，使用独立入口：
 
 ```bash
-python3.12 -m deep_agent.local_dev \
+PYTHONPATH=src python3.12 -m deep_agent.local_dev \
   --config ~/.config/deep-agent/test.env \
   --port 8000
 ```
@@ -543,7 +549,7 @@ DEEP_AGENT_LOCAL_TOKEN_COOKIE=<可选，仅在目标环境要求 Cookie 时填�
 
 管理Router统一使用`CONSOLE_ADMIN_DEPENDENCIES`，不要在业务函数里复制账号或角色判断。新增管理接口
 必须加入路由审计测试；Chat、Session、History、附件和固定Agent读取等运行接口不能误加管理员门禁。
-完整边界见[`../docs/guides/console-admin-access.md`](../../docs/guides/console-admin-access.md)。
+完整边界见[`../../docs/guides/console-admin-access.md`](../../docs/guides/console-admin-access.md)。
 
 ### Agent（`DEEP_AGENT_` 前缀）
 
@@ -579,7 +585,7 @@ alembic upgrade head
 `002_wecom_channel_gateway.py`，本轮未发布需求的修正均合并在002。旧 `001` … `012` 历史迁移不再兼容。已有Revision 012数据库必须先用
 `maintenance.rebaseline_database`校验最终物理结构和全表内容哈希，再执行`stamp --purge 001`，随后
 由0.7.0升级到`002`；禁止仅手工修改版本号。涉及共享数据库时必须按维护窗口发布，并确保改标后不再
-启动旧镜像。本地 Postgres：`docker compose up -d`。
+启动旧镜像。本地 Postgres：`docker compose --project-directory "$PWD" -f deploy/docker-compose.yml up -d`。
 
 ---
 
@@ -607,7 +613,7 @@ alembic upgrade head
 | | `/api/v1/sessions/*` | 是 |
 | | `/console/#/configuration` | 是 |
 
-SSE 协议：[`../docs/guides/sse-protocol.md`](../../docs/guides/sse-protocol.md)。前端对接：[`../frontend/AGENTS.md`](../../console/AGENTS.md)。
+SSE 协议：[`../../docs/guides/sse-protocol.md`](../../docs/guides/sse-protocol.md)。前端对接：[`../../console/AGENTS.md`](../../console/AGENTS.md)。
 
 ---
 

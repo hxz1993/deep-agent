@@ -3,8 +3,8 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import vm from "node:vm";
 
-const source = await readFile(new URL("../../../frontend/console/configuration/agents.js", import.meta.url), "utf8");
-const channelsSource = await readFile(new URL("../../../frontend/console/configuration/channels.js", import.meta.url), "utf8");
+const source = await readFile(new URL("../../../console/configuration/agents.js", import.meta.url), "utf8");
+const channelsSource = await readFile(new URL("../../../console/configuration/channels.js", import.meta.url), "utf8");
 const agent = { id: "agent-a", name: "测试助手", model: { name: "测试模型" }, capabilities: [], skills: [] };
 
 function harness(fetcher) {

@@ -3,19 +3,19 @@ import { access, readFile } from "node:fs/promises";
 import test from "node:test";
 
 const markdownSource = await readFile(
-  new URL("../../../frontend/console/markdown.js", import.meta.url),
+  new URL("../../../console/markdown.js", import.meta.url),
   "utf8",
 );
 const chatSource = await readFile(
-  new URL("../../../frontend/console/chat.js", import.meta.url),
+  new URL("../../../console/chat.js", import.meta.url),
   "utf8",
 );
 const shell = await readFile(
-  new URL("../../../frontend/console/index.html", import.meta.url),
+  new URL("../../../console/index.html", import.meta.url),
   "utf8",
 );
 const workspaceCss = await readFile(
-  new URL("../../../frontend/console/workspace.css", import.meta.url),
+  new URL("../../../console/workspace.css", import.meta.url),
   "utf8",
 );
 
@@ -28,7 +28,7 @@ test("Console 使用共享 Markdown 渲染器并按需加载本地 Mermaid", asy
   assert.match(markdownSource, /data-mermaid-state="pending"/);
   assert.match(markdownSource, /new URL\("\.\.\/vendor\/mermaid\.min\.js", document\.baseURI\)/);
   assert.doesNotMatch(markdownSource, /https?:\/\//);
-  await access(new URL("../../../frontend/vendor/mermaid.min.js", import.meta.url));
+  await access(new URL("../../../console/vendor/mermaid.min.js", import.meta.url));
 });
 
 test("Mermaid 使用严格模式且失败时保留围栏源码", () => {

@@ -3,8 +3,8 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import vm from "node:vm";
 
-const core = await readFile(new URL("../../../frontend/console/configuration/core.js", import.meta.url), "utf8");
-const main = await readFile(new URL("../../../frontend/console/main.js", import.meta.url), "utf8");
+const core = await readFile(new URL("../../../console/configuration/core.js", import.meta.url), "utf8");
+const main = await readFile(new URL("../../../console/main.js", import.meta.url), "utf8");
 
 function navigation(allowClose) {
   const events = [];
@@ -76,8 +76,8 @@ test("导航宽度连续拖动，文字渐隐且宽度限制为56至200px", () =
 });
 
 test("Agent对话链接在捕获阶段接管，避免行操作阻止冒泡而新开页面", async () => {
-  const config = await readFile(new URL("../../../frontend/console/configuration.js", import.meta.url), "utf8");
-  const agents = await readFile(new URL("../../../frontend/console/configuration/agents.js", import.meta.url), "utf8");
+  const config = await readFile(new URL("../../../console/configuration.js", import.meta.url), "utf8");
+  const agents = await readFile(new URL("../../../console/configuration/agents.js", import.meta.url), "utf8");
   assert.match(config, /addEventListener\("click", async \(event\) => \{[\s\S]*?event.preventDefault\(\);[\s\S]*?await window.DeepAgentConsole\?\.showPage\("workspace"\);[\s\S]*?await window.DeepAgentConsoleChat\?\.selectAgent\(agentId\);[\s\S]*?\}, true\)/);
   assert.doesNotMatch(agents, /data-agent-chat[^>]*target="_blank"/);
 });

@@ -2,10 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
-import { projectConversationItems, latestPendingDeferredTool } from "../../../frontend/console/conversation-items.js";
-import { buildTrajectory } from "../../../frontend/console/trajectory.js";
+import { projectConversationItems, latestPendingDeferredTool } from "../../../console/conversation-items.js";
+import { buildTrajectory } from "../../../console/trajectory.js";
 
-const source = readFileSync(new URL("../../../frontend/console/chat.js", import.meta.url), "utf8");
+const source = readFileSync(new URL("../../../console/chat.js", import.meta.url), "utf8");
 const history = (text = "第一轮") => [
   { item_id: "user", kind: "user_message", text: "查询", created_at: "2026-09-08T00:00:00Z", order: { sequence: 1 } },
   { item_id: "progress:0", kind: "assistant_message", text, phase: "process", status: "pending", created_at: "2026-09-08T00:00:01Z", order: { sequence: 2 } },

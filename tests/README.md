@@ -4,17 +4,17 @@
 
 ```bash
 # 全部
-python3.12 -m unittest discover -s tests -p "test_*.py" -v
+PYTHONPATH=src python3.12 -m unittest discover -s tests -p "test_*.py" -v
 
 # 仅单元
-python3.12 -m unittest discover -s tests/unit -p "test_*.py" -v
+PYTHONPATH=src python3.12 -m unittest discover -s tests/unit -p "test_*.py" -v
 
 # 仅集成
-python3.12 -m unittest discover -s tests/integration -p "test_*.py" -v
+PYTHONPATH=src python3.12 -m unittest discover -s tests/integration -p "test_*.py" -v
 
 # 上下文压缩核心行/分支覆盖率门槛
 python3.12 -m pip install -r requirements-dev.txt
-python3.12 tests/check_context_compaction_coverage.py
+PYTHONPATH=src python3.12 tests/check_context_compaction_coverage.py
 ```
 
 | 目录 | 用途 | 文档 |

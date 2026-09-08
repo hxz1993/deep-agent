@@ -5,7 +5,7 @@ import test from "node:test";
 import {
   parseServerTimestamp,
   serverTimestampMilliseconds,
-} from "../../../frontend/console/time.js";
+} from "../../../console/time.js";
 
 test("时间解析兼容旧无时区值、Z 和显式偏移", () => {
   const expected = "2026-08-31T10:23:46.000Z";
@@ -18,7 +18,7 @@ test("时间解析兼容旧无时区值、Z 和显式偏移", () => {
 });
 
 function browserLocalHour(tz) {
-  const moduleUrl = new URL("../../../frontend/console/time.js", import.meta.url).href;
+  const moduleUrl = new URL("../../../console/time.js", import.meta.url).href;
   const source = `
     const { parseServerTimestamp } = await import(${JSON.stringify(moduleUrl)});
     const value = parseServerTimestamp("2026-08-31T10:23:46+00:00");

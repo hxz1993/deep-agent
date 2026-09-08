@@ -1,6 +1,6 @@
 # AGENTS.md — 内置 MCP Servers
 
-> 父索引：[`../AGENTS.md`](../AGENTS.md) · 后端加载逻辑：[`../deep_agent/AGENTS.md`](../src/deep_agent/AGENTS.md)
+> 父索引：[`../AGENTS.md`](../AGENTS.md) · 后端加载逻辑：[`../src/deep_agent/AGENTS.md`](../src/deep_agent/AGENTS.md)
 
 `mcp_servers/` 存放**随仓库发布的 stdio MCP server**。每个子目录是独立子进程，与 `deep_agent` 进程隔离。
 
@@ -27,7 +27,7 @@ mcp_servers/<name>/server.py  →  capability mcp:<name>  →  工具前缀 <nam
 
 1. 创建 `mcp_servers/<name>/server.py`
 2. 使用 `FastMCP`，`if __name__ == "__main__": mcp.run()`
-3. **禁止** `import deep_agent` 或依赖后端包（须能独立 `python3.12 mcp_servers/<name>/server.py` 运行）
+3. **禁止** `import deep_agent` 或依赖后端包（须能独立 `PYTHONPATH=src:. python3.12 mcp_servers/<name>/server.py` 运行）
 4. 工具名在 MCP 内用短名即可，运行时自动加 `<name>_` 前缀
 
 ```python
@@ -47,8 +47,11 @@ if __name__ == "__main__":
 本地验证：
 
 ```bash
-python3.12 mcp_servers/<name>/server.py
+PYTHONPATH=src:. python3.12 mcp_servers/<name>/server.py
 ```
+
+命令在仓库根执行；按文件启动时同时提供 `src` 与仓库根，使平台支撑包和 `mcp_servers._run`
+都可导入。Windows PowerShell 对应设置 `$env:PYTHONPATH = 'src;.'`。
 
 ---
 
@@ -96,7 +99,8 @@ DB 配置示例（`mcp_servers.config.env`）：
 }
 ```
 
-种子迁移：`migrations/versions/004_seed_deepcube_mcp.py`。
+当前种子已并入生产基线 `migrations/versions/001_initial_schema.py`；旧 `004_seed_deepcube_mcp.py`
+仅属历史迁移，不是当前可执行入口。
 
 ---
 

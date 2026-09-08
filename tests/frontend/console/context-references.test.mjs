@@ -3,19 +3,19 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const chatSource = await readFile(
-  new URL("../../../frontend/console/chat.js", import.meta.url),
+  new URL("../../../console/chat.js", import.meta.url),
   "utf8",
 );
 const workspaceCss = await readFile(
-  new URL("../../../frontend/console/workspace.css", import.meta.url),
+  new URL("../../../console/workspace.css", import.meta.url),
   "utf8",
 );
 const workspaceSource = await readFile(
-  new URL("../../../frontend/console/workspace.js", import.meta.url),
+  new URL("../../../console/workspace.js", import.meta.url),
   "utf8",
 );
 const conversationItemsSource = await readFile(
-  new URL("../../../frontend/console/conversation-items.js", import.meta.url),
+  new URL("../../../console/conversation-items.js", import.meta.url),
   "utf8",
 );
 

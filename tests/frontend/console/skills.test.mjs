@@ -1,26 +1,26 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { parseSkillFrontmatter } from "../../../frontend/console/skill-frontmatter.js";
+import { parseSkillFrontmatter } from "../../../console/skill-frontmatter.js";
 
 const source = await readFile(
-  new URL("../../../frontend/console/configuration/skills.js", import.meta.url),
+  new URL("../../../console/configuration/skills.js", import.meta.url),
   "utf8",
 );
 const template = await readFile(
-  new URL("../../../frontend/console/configuration-template.html", import.meta.url),
+  new URL("../../../console/configuration-template.html", import.meta.url),
   "utf8",
 );
 const shell = await readFile(
-  new URL("../../../frontend/console/index.html", import.meta.url),
+  new URL("../../../console/index.html", import.meta.url),
   "utf8",
 );
 const styles = await readFile(
-  new URL("../../../frontend/console/configuration/configuration.css", import.meta.url),
+  new URL("../../../console/configuration/configuration.css", import.meta.url),
   "utf8",
 );
 const consoleStyles = await readFile(
-  new URL("../../../frontend/console/console.css", import.meta.url),
+  new URL("../../../console/console.css", import.meta.url),
   "utf8",
 );
 

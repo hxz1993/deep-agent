@@ -100,7 +100,7 @@ def sync_env() -> None:
 
 
 if __name__ == "__main__":
-    from mcps._run import run_fastmcp
+    from mcp_servers._run import run_fastmcp
     sync_env()
     finalize_mcp(["--transport", "http"])
     run_fastmcp(mcp, prog="deepcube")

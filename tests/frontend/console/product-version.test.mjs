@@ -3,15 +3,15 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const indexHtml = await readFile(
-  new URL("../../../frontend/console/index.html", import.meta.url),
+  new URL("../../../console/index.html", import.meta.url),
   "utf8",
 );
 const mainSource = await readFile(
-  new URL("../../../frontend/console/main.js", import.meta.url),
+  new URL("../../../console/main.js", import.meta.url),
   "utf8",
 );
 const consoleCss = await readFile(
-  new URL("../../../frontend/console/console.css", import.meta.url),
+  new URL("../../../console/console.css", import.meta.url),
   "utf8",
 );
 

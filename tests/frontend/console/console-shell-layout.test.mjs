@@ -3,43 +3,43 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const index = await readFile(
-  new URL("../../../frontend/console/index.html", import.meta.url),
+  new URL("../../../console/index.html", import.meta.url),
   "utf8",
 );
 const template = await readFile(
-  new URL("../../../frontend/console/configuration-template.html", import.meta.url),
+  new URL("../../../console/configuration-template.html", import.meta.url),
   "utf8",
 );
 const agents = await readFile(
-  new URL("../../../frontend/console/configuration/agents.js", import.meta.url),
+  new URL("../../../console/configuration/agents.js", import.meta.url),
   "utf8",
 );
 const configurationCore = await readFile(
-  new URL("../../../frontend/console/configuration/core.js", import.meta.url),
+  new URL("../../../console/configuration/core.js", import.meta.url),
   "utf8",
 );
 const configurationModule = await readFile(
-  new URL("../../../frontend/console/configuration.js", import.meta.url),
+  new URL("../../../console/configuration.js", import.meta.url),
   "utf8",
 );
 const styles = await readFile(
-  new URL("../../../frontend/console/console.css", import.meta.url),
+  new URL("../../../console/console.css", import.meta.url),
   "utf8",
 );
 const configurationStyles = await readFile(
-  new URL("../../../frontend/console/configuration/configuration.css", import.meta.url),
+  new URL("../../../console/configuration/configuration.css", import.meta.url),
   "utf8",
 );
 const themes = await readFile(
-  new URL("../../../frontend/console/themes.css", import.meta.url),
+  new URL("../../../console/themes.css", import.meta.url),
   "utf8",
 );
 const catalogTemplate = await readFile(
-  new URL("../../../frontend/console/catalog-template.html", import.meta.url),
+  new URL("../../../console/catalog-template.html", import.meta.url),
   "utf8",
 );
 const systemTools = await readFile(
-  new URL("../../../frontend/console/configuration/system-tools.js", import.meta.url),
+  new URL("../../../console/configuration/system-tools.js", import.meta.url),
   "utf8",
 );
 

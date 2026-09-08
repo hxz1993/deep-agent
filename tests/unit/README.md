@@ -39,5 +39,5 @@
 ## 运行
 
 ```bash
-python3.12 -m unittest discover -s tests/unit -p "test_*.py" -v
+PYTHONPATH=src python3.12 -m unittest discover -s tests/unit -p "test_*.py" -v
 ```

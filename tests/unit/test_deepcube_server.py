@@ -11,7 +11,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-SERVER_FILE = Path(__file__).resolve().parents[2] / "mcps" / "deepcube" / "server.py"
+SERVER_FILE = Path(__file__).resolve().parents[2] / "mcp_servers" / "deepcube" / "server.py"
 
 
 def _build_option_stub() -> SimpleNamespace:

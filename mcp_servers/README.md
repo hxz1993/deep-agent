@@ -44,8 +44,11 @@ if __name__ == "__main__":
 本地直接运行时，stdio 服务会等待 MCP 客户端连接：
 
 ```bash
-python3.12 mcp_servers/<name>/server.py
+PYTHONPATH=src:. python3.12 mcp_servers/<name>/server.py
 ```
+
+从仓库根按文件启动时，`PYTHONPATH` 同时包含 `src` 和仓库根，以支持平台支撑包及
+`mcp_servers._run` 导入；Windows PowerShell 对应 `$env:PYTHONPATH = 'src;.'`。
 
 ## DeepCube
 

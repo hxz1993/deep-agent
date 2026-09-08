@@ -841,7 +841,7 @@ Tool Output/Artifact治理。禁止按名称包含 `query` 等模糊规则全量
 推荐采用 Harness `TieredCompaction`，而不是在 `AgentRunner` 中自行裁剪消息。详细方案见：
 
 - [上下文压缩设计](../03-context-compaction/context-compaction-design.md)
-- [上下文治理研究结论](../03-context-compaction/context-compaction-research.md)
+- [上下文压缩课题入口](../03-context-compaction/README.md)
 
 ### 9.2 ToolOutputLimits 与大工具结果外置
 
@@ -1125,7 +1125,6 @@ Overflow Spill 的状态统一维护在 [`../TODO.md`](../TODO.md)，不在本�
 
 - [UI 工具课题](../01-ui-tools/README.md)
 - [上下文压缩课题](../03-context-compaction/README.md)
-- [上下文治理研究结论](../03-context-compaction/context-compaction-research.md)
 - [上下文压缩设计](../03-context-compaction/context-compaction-design.md)
 - [Harness Engineering 对 DeepAgent 的研究结论](../../../../agent-labs/harness-engineering/DEEPAGENT_STUDY.md)
 

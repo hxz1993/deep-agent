@@ -1,6 +1,6 @@
 # AGENTS.md — 前端
 
-> 父索引：[`../AGENTS.md`](../AGENTS.md) · 后端 API：[`../deep_agent/AGENTS.md`](../src/deep_agent/AGENTS.md)
+> 父索引：[`../AGENTS.md`](../AGENTS.md) · 后端 API：[`../src/deep_agent/AGENTS.md`](../src/deep_agent/AGENTS.md)
 
 纯静态 HTML/CSS/JS，**无构建步骤**。后端将 `console/` 挂载到 `/console`，根路径跳转到 Console。
 
@@ -225,23 +225,17 @@ AbortController 只用于页面卸载或网络资源清理。首条 `session` �
 
 ## 运行
 
-**随后端（推荐）**
+从仓库根使用稳定本地 Profile 启动后端：
 
 ```bash
 # 仓库根
-uvicorn deep_agent.main:app --reload
+PYTHONPATH=src python3.12 -m deep_agent.local_dev --config ~/.config/deep-agent/sqlite.env --port 8000
 # → http://127.0.0.1:8000/console/
 ```
 
-**旧静态预览路径（不含 API）**
-
-```bash
-cd frontend  # 兼容链接目录；产品源码在 ../console/
-python3.12 -m http.server 5173
-# → http://localhost:5173/console/
-```
-
-页面固定请求当前同源后端；顶部状态表示 `/health` 是否正常。
+Test 联调改用 `~/.config/deep-agent/test.env`。页面固定请求当前同源后端，品牌处连接状态表示
+`/health` 是否正常；完整 Console 联调使用后端提供的静态路由。旧 `frontend/` 已移除，
+不再提供旧目录预览命令；`console/` 与 `console/vendor/` 是唯一产品资源。
 
 ---
 

@@ -7,7 +7,7 @@ import {
   isImageAttachment,
   createImageGallery,
   bindAttachmentImagePreviews,
-} from "../../../frontend/console/attachment-preview.js";
+} from "../../../console/attachment-preview.js";
 
 test("点击图片只收集同一条用户消息的附件，不跨轮次", () => {
   const handlers = {};
@@ -43,11 +43,11 @@ test("图片组保持区域内顺序和点击位置，忽略普通文件", () =>
 });
 
 test("大图支持前后按钮、方向键和内容区域空白关闭", async () => {
-  const source = await readFile(new URL("../../../frontend/console/chat.js", import.meta.url), "utf8");
+  const source = await readFile(new URL("../../../console/chat.js", import.meta.url), "utf8");
   assert.match(source, /event.target.classList.contains\("attachment-image-dialog-content"\)/);
   assert.match(source, /event.key === "ArrowLeft" \|\| event.key === "ArrowRight"/);
   assert.match(source, /openAttachmentImagePreview\(att, state.pendingAttachments\)/);
-  const template = await readFile(new URL("../../../frontend/console/workspace-template.html", import.meta.url), "utf8");
+  const template = await readFile(new URL("../../../console/workspace-template.html", import.meta.url), "utf8");
   assert.match(template, /aria-label="上一张图片"/);
   assert.match(template, /aria-label="下一张图片"/);
 });
@@ -86,7 +86,7 @@ test("缺少文件引用不预览，文件名不能注入 HTML", () => {
 });
 
 test("直播和历史共用的用户气泡把附件与上下文放在正文前", async () => {
-  const source = await readFile(new URL("../../../frontend/console/chat.js", import.meta.url), "utf8");
+  const source = await readFile(new URL("../../../console/chat.js", import.meta.url), "utf8");
   const addMessage = source.match(/function addMessage\([\s\S]*?\n\}/)?.[0];
   assert.ok(addMessage);
   assert.ok(addMessage.indexOf("renderMessageAttachments(bubble") < addMessage.indexOf("bubble.appendChild(textEl)"));
@@ -95,14 +95,14 @@ test("直播和历史共用的用户气泡把附件与上下文放在正文前",
 });
 
 test("轨迹图片用可预览按钮，普通附件保持原展示", async () => {
-  const source = await readFile(new URL("../../../frontend/console/trajectory.js", import.meta.url), "utf8");
+  const source = await readFile(new URL("../../../console/trajectory.js", import.meta.url), "utf8");
   assert.match(source, /attachmentPreviewAttributes\(attachment\)/);
   assert.match(source, /trajectory-summary-link attachment-image-trigger/);
   assert.match(source, /return renderJumpLink\(\{\s*eventId: null/);
 });
 
 test("长附件名和上下文在窄气泡中省略，不撑出对话区域", async () => {
-  const css = await readFile(new URL("../../../frontend/console/workspace.css", import.meta.url), "utf8");
+  const css = await readFile(new URL("../../../console/workspace.css", import.meta.url), "utf8");
   assert.match(css, /\.msg-row\.user \.bubble \{\s*max-width: 100%;\s*min-width: 0;/);
   assert.match(css, /\.attachment-name \{ min-width: 0;/);
   assert.match(css, /\.msg-context-refs \.context-ref-chip \{ min-width: 0; max-width: min\(180px, 100%\); border-radius: 999px;/);

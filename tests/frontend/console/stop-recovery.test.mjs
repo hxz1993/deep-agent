@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
-import { boundedStreamRequest, verifyStreamStop } from '../../../frontend/console/stop-recovery.js';
+import { boundedStreamRequest, verifyStreamStop } from '../../../console/stop-recovery.js';
 
 const response = (body) => ({ ok: true, json: async () => body });
 const options = (request) => ({ request, isCurrent: () => true, requestTimeoutMs: 15, verificationTimeoutMs: 40, pollIntervalMs: 1 });
@@ -62,7 +62,7 @@ test('real terminal or teardown aborts pending verification', async () => {
 });
 
 function stopHarness(verify) {
-  const source = readFileSync(new URL('../../../frontend/console/chat.js', import.meta.url), 'utf8');
+  const source = readFileSync(new URL('../../../console/chat.js', import.meta.url), 'utf8');
   const stop = source.slice(source.indexOf('async function stopStream()'), source.indexOf('\nfunction setStreaming('));
   const controller = new AbortController();
   const state = { streaming: true, streamSessionConfirmed: true, sessionId: 'session', agentId: 'agent', abortController: controller, refreshHistoryAfterStream: true };
@@ -103,7 +103,7 @@ test('Console ignores old cancel results after switching to a newer stream', asy
 });
 
 function streamHarness() {
-  const source = readFileSync(new URL('../../../frontend/console/chat.js', import.meta.url), 'utf8');
+  const source = readFileSync(new URL('../../../console/chat.js', import.meta.url), 'utf8');
   const run = source.slice(source.indexOf('async function runChatStream('), source.indexOf('\nfunction updateHitlInputState('));
   const state = { streaming: true, sessionId: 'session' };
   const calls = [];

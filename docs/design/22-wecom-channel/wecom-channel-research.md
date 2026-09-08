@@ -11,7 +11,7 @@ OpenClaw 的企微接入不是“给 Agent 加一个企微 MCP”，而是由长
 官方 SDK 的连接、心跳、重连、媒体和流式回复可以复用或参考；OpenClaw 的 Plugin SDK、SessionKey、
 Binding 和运行调度必须按 DeepAgent 自己的 Event Store、身份、SSE 与 Deferred 机制适配。
 
-实施说明（0.7.0，2026-09-04）：本研究固定版本对照继续保留。当前代码已拆分公共 `channel_gateway/`
+实施说明（0.7.0，2026-09-04）：本研究固定版本对照继续保留。当前代码已拆分公共 `channels/gateway/`
 宿主、`channels/` 调度与 `channels/adapters/wecom/` 官方 SDK 包装，尚未实现飞书；底层能力直接调用
 `wecom-aibot-python-sdk==1.0.2`，不复制本文引用的 Node 或其他项目的 WebSocket/加密代码。
 渠道 `/stop`、`/new` 在普通任务队列之外处理，避免控制命令被长任务阻塞；完整语义以

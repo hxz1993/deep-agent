@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { channelOriginPresentation } from "../../../frontend/console/session-display.js";
+import { channelOriginPresentation } from "../../../console/session-display.js";
 
 test("普通或旧会话没有渠道来源时不增加展示", () => {
   for (const value of [null, undefined, {}, "wecom", { channel_type: "wecom" }]) {
@@ -38,8 +38,8 @@ test("私聊来源自带用户和可选会话ID，不从运行记录反查", () 
 });
 
 test("渠道来源保留在会话列表、当前快照和详情，展示不绑定当前渠道指针", async () => {
-  const chat = await readFile(new URL("../../../frontend/console/chat.js", import.meta.url), "utf8");
-  const workspace = await readFile(new URL("../../../frontend/console/workspace.js", import.meta.url), "utf8");
+  const chat = await readFile(new URL("../../../console/chat.js", import.meta.url), "utf8");
+  const workspace = await readFile(new URL("../../../console/workspace.js", import.meta.url), "utf8");
   assert.match(chat, /channel: row\.channel \|\| null/);
   assert.match(chat, /channel: persisted\?\.channel \|\| null/);
   assert.match(chat, /channelOriginPresentation\(s\.channel\)/);

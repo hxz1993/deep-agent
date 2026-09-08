@@ -91,7 +91,7 @@ class Log(Category):
     #: 日志文件
     file = Option(
         None, val_type=str,
-        bind_env="DP_LOG_FILE_PATH",
+        bind_env="LOG_FILE_PATH",
         convertor=_normalize_path,
     )
     #: 单一日志文件轮转条件

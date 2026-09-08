@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, patch
 
 from sqlalchemy import func, select
 
-from deep_agent.channel_gateway.deepagent_client import StreamEvent
+from deep_agent.channels.gateway.deepagent_client import StreamEvent
 from deep_agent.channels.commands import parse_command, command_catalog, help_text
 from deep_agent.channels.contracts import InboundMessage, InboundMedia
 from deep_agent.channels.service import ChannelService, MessageJob

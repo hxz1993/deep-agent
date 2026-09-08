@@ -3,7 +3,7 @@
 DeepAgent 是基于 FastAPI、Pydantic AI 和 SQLAlchemy 的多用户 Agent 服务，并
 随服务发布一体化运维控制台。
 
-当前产品版本为 `0.8.0`。`deep_agent.__version__` 是唯一代码版本来源，FastAPI、
+当前产品版本为 `0.8.2`。`deep_agent.__version__` 是唯一代码版本来源，FastAPI、
 `GET /info` 和 Console 顶部版本徽标均读取该值。后续正式发布默认递增
 `MAJOR.MINOR.PATCH` 的第三位，只有明确规划重大版本时才调整前两位。产品版本不通过
 环境变量或数据库覆盖，也不等同于 Alembic 数据库结构 revision。
@@ -13,13 +13,13 @@ DeepAgent 是基于 FastAPI、Pydantic AI 和 SQLAlchemy 的多用户 Agent 服�
 Console 对话测试提供独立的“对话 / 轨迹”页签。会话历史、轨迹、Plan 和持久化 SSE 统一读取
 `chat_session_events`；轨迹按 Sequence 原位展示 Run、模型 Part、工具调用/结果和 Compaction，
 不再从整条 ModelMessage 做第二套拆解，也不额外建立轨迹表。能力边界见
-[`docs/design/18-session-trajectory/`](docs/design/18-session-trajectory/)。
+[`docs/design/18-session-trajectory/`](docs/design/18-session-trajectory)。
 
 v0.5.6 完成 Provider + Model 两层配置：Provider 独占 Pydantic AI 适配类型、地址和密钥，
 Model 只保存 Provider 外键、模型编码与能力属性。Provider 不设置启停层，其可用性由真实连接
 配置决定；v0.6.4 恢复模型级 `enabled`，用于管理员控制哪些已配置模型可供 Agent 和聊天选择。
 模型目录仍是只读候选数据，不参与运行时关联。设计与迁移边界见
-[`docs/design/19-model-provider-architecture/`](docs/design/19-model-provider-architecture/)。
+[`docs/design/19-model-provider-architecture/`](docs/design/19-model-provider-architecture)。
 
 v0.6.2 增加显式 Agent 能力包 `builtin:code-mode`。关联后，已授权且已披露的
 MCP 工具既保留普通 Tool Schema，也可在 Harness `run_code` 的 Monty 环境内组合调用。
@@ -31,7 +31,7 @@ v0.6.3进一步收紧 SDK 函数作用域、可信返回类型和嵌套审计，
 v0.6.5增加默认不关联的`builtin:web`和公开互联网`web_search/web_fetch`；v0.6.6让Fetch保留
 页面图片位置，并为图片输入模型增加`web_image_view`，通过原生`ImageUrl`按需读取公网图片。
 Search全局明确选择当前模型或一个固定Provider，不执行隐式降级；Web配置与安全边界见
-[`docs/design/21-web-tools/`](docs/design/21-web-tools/)。
+[`docs/design/21-web-tools/`](docs/design/21-web-tools)。
 
 v0.7.0新增可选渠道网关：同仓、同镜像独立运行，公共Gateway/ChannelService通过Adapter接入平台；
 当前只有企微Adapter，唯一引用官方`wecom-aibot-python-sdk==1.0.2`建立WebSocket长连接，
@@ -46,14 +46,21 @@ v0.7.0新增可选渠道网关：同仓、同镜像独立运行，公共Gateway/
 | 路径 | 职责 |
 | --- | --- |
 | [`CHANGELOG.md`](CHANGELOG.md) | 产品版本更新记录与迁移摘要 |
-| [`deep_agent/`](deep_agent/AGENTS.md) | API、Agent 运行时、能力装配、会话和数据库 |
-| [`frontend/`](frontend/AGENTS.md) | `/console/` 静态控制台 |
-| [`mcps/`](mcps/AGENTS.md) | 仓库内置 MCP Server |
-| [`deep_agent/builtin_skills/`](deep_agent/builtin_skills/) | 代码内置只读 Skill；上传 Skill 由平台文件服务保存原包 |
-| [`deepfos_platform/`](deepfos_platform/README.md) | 平台配置、客户端、服务发现和部署运行时支撑 |
-| [`maintenance/`](maintenance/README.md) | 人工维护程序，不属于 Agent 工具 |
+| [`src/deep_agent/`](src/deep_agent/AGENTS.md) | API、Agent 运行时、能力装配、会话和数据库 |
+| [`console/`](console/AGENTS.md) | `/console/` 静态控制台 |
+| [`mcp_servers/`](mcp_servers/AGENTS.md) | 仓库内置 MCP Server |
+| [`src/deep_agent/builtin_skills/`](src/deep_agent/builtin_skills) | 代码内置只读 Skill；上传 Skill 由平台文件服务保存原包 |
+| [`src/deepfos_platform/`](src/deepfos_platform/README.md) | 平台配置、客户端、服务发现和部署运行时支撑 |
+| [`src/maintenance/`](src/maintenance/README.md) | 人工维护程序，不属于 Agent 工具 |
+| [`deploy/`](deploy/README.md) | Jenkins、Gunicorn 和 Docker Compose 部署配置 |
+| [`migrations/`](migrations/) | 数据库迁移；结构版本仍为 `002` |
+| [`scripts/`](scripts/) | 开发、构建与环境准备脚本 |
 | [`tests/`](tests/README.md) | Python、接口、MCP 和 Console 测试 |
 | [`docs/`](docs/README.md) | 当前说明、技术设计和交互原型 |
+
+v0.8.2 按工程用途整理目录，业务逻辑和接口不变。根目录旧包名及部署路径保留为相对兼容链接，
+不保存第二份源码；继续在仓库根使用原有安装和启动命令。源码树发布须同时包含链接与目标目录，
+Windows checkout 需启用 Git 符号链接支持。本次不增加 Python wheel 或前端构建流程。
 
 完整边界见
 [`docs/guides/project-structure.md`](docs/guides/project-structure.md)。
@@ -137,7 +144,7 @@ uvicorn deep_agent.main:app --host 0.0.0.0 --port 8000
 需要企业微信的环境再额外启动一个Gateway副本：
 
 ```bash
-python -m deep_agent.channel_gateway --host 0.0.0.0 --port 8010
+python -m deep_agent.channels.gateway --host 0.0.0.0 --port 8010
 ```
 
 两个进程必须配置相同的`DEEP_AGENT_CHANNEL_INTERNAL_TOKEN`；API还需配置
@@ -160,13 +167,13 @@ Revision 001～012 的最终结构和默认数据：Provider/Model/Agent、MCP�
 已经处于旧Revision 012的数据库不能重放`001`，也不能在旧镜像运行时手工修改
 `alembic_version`。必须先完整备份并停止旧实例，再用`maintenance.rebaseline_database`校验物理
 结构和全表内容哈希后只做`012 → 001`改标，随后只允许启动包含新`001`基线的镜像。完整切换边界
-见[`maintenance/README.md`](maintenance/README.md)。
+见[`src/maintenance/README.md`](src/maintenance/README.md)。
 
 配置备份会复制全部配置表并只保留会话表结构；上传Skill的原始ZIP不塞入数据库备份。需要完整
 留存或跨环境迁移时，同时在Console Skill页面执行“导出全部”。复制范围按源Alembic Revision自动
 发现，后续新增配置表无需维护白名单；两张会话事实表、Channel Binding和Channel Run固定留空，
 `channel_accounts`作为配置复制；完整边界见
-[`maintenance/README.md`](maintenance/README.md)。
+[`src/maintenance/README.md`](src/maintenance/README.md)。
 
 ## 工具包类型
 
@@ -213,7 +220,7 @@ v0.4.18自动注入系统工具`export_file_to_download_center`。当请求具�
 模型可以把新生成的UTF-8文本内容上传为平台文件并登记到当前用户下载中心，也可以复用当前会话附件或
 已外置大工具结果的File ID，仅新增下载记录而不重复上传。工具只返回文件与下载记录元数据；最终正文
 提示用户前往下载中心获取，不把它伪装成结构化最终输出或聊天附件协议。完整边界见
-[`docs/design/08-artifact-export/`](docs/design/08-artifact-export/)。
+[`docs/design/08-artifact-export/`](docs/design/08-artifact-export)。
 
 ## 测试
 

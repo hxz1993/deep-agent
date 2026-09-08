@@ -28,7 +28,7 @@ v0.6.7使用显式`builtin:ptc`提供Harness`run_code`。它不运行完整CPyth
 ## 当前执行边界
 
 - 每次调用启动新的 `.venv-sandbox` Python 进程，工作目录使用系统临时目录。
-- 预装包由`deep_agent/sandbox/profiles/pydata.json`定义，包含numpy、pandas、pydantic，以及常用
+- 预装包由`src/deep_agent/sandbox/profiles/pydata.json`定义，包含numpy、pandas、pydantic，以及常用
   网络/网页、图片/图表、PDF与Office处理库；
   不支持运行时 `pip install`。
 - 使用 Semaphore 限制并发，使用超时、CPU与地址空间限制和输出上限防止失控。
@@ -75,12 +75,12 @@ DEEP_AGENT_SANDBOX_MAX_PIDS=0
 
 | 路径 | 职责 |
 | --- | --- |
-| `deep_agent/sandbox/types.py` | 表达式与脚本请求、受控输入文件、统一结果 |
-| `deep_agent/sandbox/subprocess_dev/` | 子进程生命周期、资源限制和临时目录清理 |
-| `deep_agent/sandbox/worker.py` | 一次性 Python执行与结果序列化 |
-| `deep_agent/sandbox/toolset.py` | `execute_python` |
-| `deep_agent/skills/script_tool.py` | `execute_skill_script` 的Skill权限和文件组装 |
-| `deep_agent/api/v1/sandbox.py` | 沙箱健康接口 |
+| `src/deep_agent/sandbox/types.py` | 表达式与脚本请求、受控输入文件、统一结果 |
+| `src/deep_agent/sandbox/subprocess_dev/` | 子进程生命周期、资源限制和临时目录清理 |
+| `src/deep_agent/sandbox/worker.py` | 一次性 Python执行与结果序列化 |
+| `src/deep_agent/sandbox/toolset.py` | `execute_python` |
+| `src/deep_agent/skills/script_tool.py` | `execute_skill_script` 的Skill权限和文件组装 |
+| `src/deep_agent/api/v1/sandbox.py` | 沙箱健康接口 |
 
 ## 验收重点
 

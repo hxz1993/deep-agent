@@ -347,9 +347,9 @@ DeepAgent 原有自研 `Capability` 只是产品配置包装，却与 Pydantic A
 附件和Skill文件由自动注入的系统工具 `read_file`统一读取，不进入内置工具包或
 `agents.capabilities`。位置：
 
-- `deep_agent/capabilities/native/builtin.py`
-- `deep_agent/files/toolset.py`
-- `deep_agent/sandbox/toolset.py`
+- `src/deep_agent/capabilities/native/builtin.py`
+- `src/deep_agent/files/toolset.py`
+- `src/deep_agent/sandbox/toolset.py`
 
 v0.3.18 起 Skill 不再使用 `FunctionToolset`，也不属于 ToolPackage。Skill 通过 Harness
 `load_capability` 渐进披露说明，实际工具权限仍来自 Agent 独立选择的 ToolPackage。
@@ -377,10 +377,10 @@ Agent 选择 `mcp:<server_name>` 后，请求级加载 MCP 配置并构造 Tools
 
 关键位置：
 
-- `deep_agent/capabilities/mcp/resolver.py`
-- `deep_agent/capabilities/mcp/toolset_builder.py`
-- `deep_agent/capabilities/mcp/snapshot_toolset.py`
-- `deep_agent/capabilities/mcp/run_scoped.py`
+- `src/deep_agent/capabilities/mcp/resolver.py`
+- `src/deep_agent/capabilities/mcp/toolset_builder.py`
+- `src/deep_agent/capabilities/mcp/snapshot_toolset.py`
+- `src/deep_agent/capabilities/mcp/run_scoped.py`
 
 ### 4.3 UI External Tool
 
@@ -485,10 +485,10 @@ flowchart TD
 
 关键位置：
 
-- `deep_agent/api/v1/deps.py`：加载 Agent、模型、MCP、Resource 和 UI Toolset。
-- `deep_agent/agent/factory.py`：合并 Toolset 并构造 Agent。
-- `deep_agent/agent/runner.py`：运行、SSE、消息持久化和 Deferred 恢复。
-- `deep_agent/capabilities/registry.py`：DeepAgent 产品工具包注册表。
+- `src/deep_agent/api/v1/deps.py`：加载 Agent、模型、MCP、Resource 和 UI Toolset。
+- `src/deep_agent/agent/factory.py`：合并 Toolset 并构造 Agent。
+- `src/deep_agent/agent/runner.py`：运行、SSE、消息持久化和 Deferred 恢复。
+- `src/deep_agent/capabilities/registry.py`：DeepAgent 产品工具包注册表。
 
 ## 5. MCP 工具命名优化
 

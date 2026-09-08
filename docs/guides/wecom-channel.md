@@ -26,7 +26,7 @@ Gateway：
 ```bash
 DEEP_AGENT_CHANNEL_API_URL=http://deep-agent:8000 \
 DEEP_AGENT_CHANNEL_INTERNAL_TOKEN='<same-private-token>' \
-python -m deep_agent.channel_gateway --host 0.0.0.0 --port 8010
+python -m deep_agent.channels.gateway --host 0.0.0.0 --port 8010
 ```
 
 Gateway 不运行迁移；Revision 不是 `002` 会失败关闭。0.7.0 保持一个 API worker、一个 Gateway 副本：
@@ -35,7 +35,7 @@ Gateway 不运行迁移；Revision 不是 `002` 会失败关闭。0.7.0 保持�
 Test 的 Jenkins V2 采用同一容器内的两个独立进程：`deep_agent.combined_runtime` 先启动 API，
 等待迁移和健康检查完成后再启动只监听回环地址的 Gateway，并自动生成本次容器使用的内部 Token。
 它不新增 Deployment 或 Service。继续使用 Jenkins V1 的环境仍只执行 Gunicorn，不会启动 Gateway；
-对应说明见 [`jenkins/README.md`](jenkins/README.md)。
+对应说明见 [`jenkins/README.md`](../../deploy/jenkins/README.md)。
 
 稳定本地 SQLite 可用相同监督顺序，同时保留`local_dev`的本地身份和FileStore能力：
 

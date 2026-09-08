@@ -61,9 +61,9 @@ Session列表/详情通过可选`channel`字段展示该快照；不写入模型
 
 ## 关键实现与测试
 
-- `deep_agent/agent/title_generator.py`：安全投影、兜底和有界模型请求。
-- `deep_agent/agent/runner.py`：首轮并行调度、SSE 顺序和失败闭合。
-- `deep_agent/db/conversation.py`：标题 CAS、投影与 Event 原子写入。
+- `src/deep_agent/agent/title_generator.py`：安全投影、兜底和有界模型请求。
+- `src/deep_agent/agent/runner.py`：首轮并行调度、SSE 顺序和失败闭合。
+- `src/deep_agent/db/conversation.py`：标题 CAS、投影与 Event 原子写入。
 - `tests/unit/test_title_generator.py`：输入安全、图片和失败行为。
 - `tests/integration/test_session_title.py`：首轮一次性、SSE、回退和已删除接口。
 - `tests/integration/test_session_rename.py`：手动改名及空标题拒绝。

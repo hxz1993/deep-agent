@@ -2,7 +2,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock
 
-from deep_agent.channel_gateway.runtime import ChannelRuntime
+from deep_agent.channels.gateway.runtime import ChannelRuntime
 from deep_agent.channels.registry import AdapterRegistry
 
 

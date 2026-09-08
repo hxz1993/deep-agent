@@ -298,11 +298,11 @@ v0.6.6 已将Revision 001～012的稳定结构再次压缩为完整基线 `001_i
 一次性创建`model_catalog`、`llm_models`运行属性及全部当前表、约束、索引和默认数据。新数据库
 从空库升级；旧Revision 012数据库必须在完整备份、停止旧实例并通过物理结构与全表内容哈希校验后，
 使用`maintenance.rebaseline_database`执行无DDL的`stamp --purge 001`，不能重放或手工伪造迁移
-状态。共享环境的具体安全门和校验命令见`maintenance/README.md`。
+状态。共享环境的具体安全门和校验命令见`src/maintenance/README.md`。
 
 ## 10. 配置备份
 
-`maintenance/config_backup.py`按源Alembic Revision自动复制全部业务表，只将
+`src/maintenance/config_backup.py`按源Alembic Revision自动复制全部业务表，只将
 `chat_sessions`和`chat_session_events`保留为空结构；新增配置表不再维护手工白名单。
 
 备份完整保存：

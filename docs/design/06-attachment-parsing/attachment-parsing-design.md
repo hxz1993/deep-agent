@@ -297,14 +297,14 @@ chat_session_events
 
 | 范围 | 主要路径 |
 | --- | --- |
-| 附件引用、会话索引与原生模态 | `deep_agent/agent/attachments.py` |
-| TXT/DOCX/XLSX 解析和 Office 安全 | `deep_agent/agent/attachment_extractors.py` |
-| 上传处理 | `deep_agent/agent/media_pipeline.py` |
-| 统一文件工具与单 Run缓存 | `deep_agent/files/`、`deep_agent/agent/deps.py` |
-| Runner 与附件白名单 | `deep_agent/agent/runner.py` |
-| 压缩去重键 | `deep_agent/agent/context/file_keys.py` |
-| 上传 API | `deep_agent/api/v1/uploads.py` |
-| Console 上传与历史展示 | `frontend/console/chat.js` |
+| 附件引用、会话索引与原生模态 | `src/deep_agent/agent/attachments.py` |
+| TXT/DOCX/XLSX 解析和 Office 安全 | `src/deep_agent/agent/attachment_extractors.py` |
+| 上传处理 | `src/deep_agent/agent/media_pipeline.py` |
+| 统一文件工具与单 Run缓存 | `src/deep_agent/files/`、`src/deep_agent/agent/deps.py` |
+| Runner 与附件白名单 | `src/deep_agent/agent/runner.py` |
+| 压缩去重键 | `src/deep_agent/agent/context/file_keys.py` |
+| 上传 API | `src/deep_agent/api/v1/uploads.py` |
+| Console 上传与历史展示 | `console/chat.js` |
 
 ## 12. 安全与资源边界
 
@@ -324,5 +324,5 @@ chat_session_events
 后续方向包括PDF/PPTX专用解析、复杂Office、异步解析、资源隔离、结构
 索引、跨 Run 缓存和长结果外置。PDF/PPTX的行业方案、Anthropic Skills目录、许可证边界和
 DeepAgent建议链路已独立记录在
-[`../16-pdf-and-presentation-parsing/`](../16-pdf-and-presentation-parsing/)。优先级和状态统一维护在
+[`../16-pdf-and-presentation-parsing/`](../16-pdf-and-presentation-parsing)。优先级和状态统一维护在
 [`../TODO.md`](../TODO.md)，不在本文维护第二份待办。

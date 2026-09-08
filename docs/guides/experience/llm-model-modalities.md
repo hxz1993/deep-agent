@@ -150,8 +150,8 @@ OpenRouter、Azure、Bedrock、Vertex 和长尾 Gateway 暂不进入目录。白
 
 以下内容不再用于生产运行：
 
-- `deep_agent/agent/models/modality_data.json`
-- `deep_agent/agent/models/models_dev_snapshot.json`
+- `src/deep_agent/agent/models/modality_data.json`
+- `src/deep_agent/agent/models/models_dev_snapshot.json`
 - `model_lookup.py`
 - `modality_resolver.py`
 - 模型名称或 Base URL 猜测模态
@@ -164,15 +164,15 @@ OpenRouter、Azure、Bedrock、Vertex 和长尾 Gateway 暂不进入目录。白
 
 | 能力 | 路径 |
 | --- | --- |
-| 目录 ORM | `deep_agent/db/models.py` 的 `ModelCatalog` |
-| 目录 Store | `deep_agent/db/stores/model_catalog/` |
-| models.dev 获取 | `deep_agent/agent/models/models_dev.py` |
-| 标准化与视图 | `deep_agent/agent/models/catalog.py` |
-| API | `deep_agent/api/v1/llm_models.py` |
-| 运行时模态 | `deep_agent/agent/attachments.py`、`input_capabilities.py` |
-| Console | `frontend/console/configuration/catalog.js`、`llm-models.js` |
-| 迁移 | v0.3.0 完整基线 `alembic/versions/001_initial_schema.py` |
-| 配置备份 | `maintenance/config_backup.py` |
+| 目录 ORM | `src/deep_agent/db/models.py` 的 `ModelCatalog` |
+| 目录 Store | `src/deep_agent/db/stores/model_catalog/` |
+| models.dev 获取 | `src/deep_agent/agent/models/models_dev.py` |
+| 标准化与视图 | `src/deep_agent/agent/models/catalog.py` |
+| API | `src/deep_agent/api/v1/llm_models.py` |
+| 运行时模态 | `src/deep_agent/agent/attachments.py`、`input_capabilities.py` |
+| Console | `console/configuration/catalog.js`、`llm-models.js` |
+| 迁移 | v0.3.0 完整基线 `migrations/versions/001_initial_schema.py` |
+| 配置备份 | `src/maintenance/config_backup.py` |
 
 ## 8. 验证清单
 

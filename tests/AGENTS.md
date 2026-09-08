@@ -114,7 +114,7 @@ tests/
 1. **先分类**：无外部依赖 → `unit/`；需 HTTP/MCP/子进程 → `integration/`
 2. **命名**：`test_<主题>.py`
 3. **helper**：集成测试复用逻辑放 `integration/helpers/`，勿复制
-4. **fixture MCP**：放 `integration/fixtures/`，保持自包含（同 `mcps/` 规则，不 import `deep_agent`）
+4. **fixture MCP**：放 `integration/fixtures/`，保持自包含（同 `mcp_servers/` 规则，不 import `deep_agent`）
 
 ---
 
@@ -122,7 +122,7 @@ tests/
 
 - 渠道累加展示必须断言工具/思考等待时的当前投递帧仍含全部公开正文，不能只断言曾经发过累加文本。
   首段前企微原生加载，有正文后保留正文加文字等待提示；临时投递失败不重跑，final只保留最终正文。
-- 在 `deep_agent/` 子目录运行 discover 会找不到测试；**始终在仓库根**
+- 在 `src/deep_agent/` 子目录运行 discover 会找不到测试；**始终在仓库根**
 - 集成测试可能依赖环境变量；勿把 `.env` 密钥写进测试
 - 改 `capabilities/mcp/` 或 `agent/headers.py` 后跑 integration 相关用例
 - 改内置 UI 工具时同时覆盖：`ui:builtin` 整包选择、空 `capabilities` 不加载、内置包/工具修改删除保护，以及 choice 的单选、多选、自由输入和空提交阻止。

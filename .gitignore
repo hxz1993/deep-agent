@@ -31,10 +31,13 @@ htmlcov/
 .DS_Store
 Thumbs.db
 
-# Default local SQLite database
-data/deep-agent.db
-data/local-file-store/
-data/acceptance-v8-local-files-*/
+# Runtime data stays outside version control; never discard existing databases.
+/data/**
+!/data/README.md
+/output/
+/tmp/**
+!/tmp/README.md
+/TMP_to_delete*
 
 .agents/
 .claude/

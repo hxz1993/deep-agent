@@ -67,5 +67,5 @@ History 的用户消息、助手回复、工具、Plan、附件和 Context 均�
 - 断流后重新请求 `/history`，不从 `final` 或本地 Event Payload 猜终态。
 - 标题通过 `session_title` 更新，不轮询 `/sessions/{id}`。
 
-Console 实现见 `frontend/console/chat.js`、`conversation-items.js`、`protocol.js` 和
+Console 实现见 `console/chat.js`、`conversation-items.js`、`protocol.js` 和
 `trajectory.js`。

@@ -2,7 +2,7 @@
 
 > 面向 AI Agent 的渐进式披露文档。**本文件仅为索引**；具体章节见各子目录下的 `AGENTS.md`。
 >
-> **边界说明**：`deepfos_platform/` 是随仓库发布的平台运行时支撑包，不是
+> **边界说明**：`src/deepfos_platform/` 是随仓库发布的平台运行时支撑包，不是
 > Agent 能力目录；只在平台配置、客户端、服务发现或部署运行时任务中修改。
 
 ---
@@ -12,7 +12,7 @@
 | 项 | 内容 |
 | --- | --- |
 | **是什么** | 通用 AI Agent 全栈：FastAPI 后端 + Pydantic AI 运行时 + 静态前端 |
-| **产品版本** | `deep_agent.__version__`为唯一来源；当前`0.8.1`，数据库Head为`002` |
+| **产品版本** | `deep_agent.__version__`为唯一来源；当前`0.8.2`，数据库Head为`002` |
 | **启动** | 本地 Test 联调固定使用下方命令；部署入口才使用 `deep_agent.main:app` |
 | **测试** | `python3.12 -m unittest discover -s tests -p "test_*.py" -v` |
 | **配置** | 仓库根 `.env`（`DEEP_AGENT_*` / `DEEP_AGENT_DBMS_*` / `DEEP_AGENT_SQLITE_PATH`） |
@@ -85,9 +85,9 @@ python3.12 -m deep_agent.combined_runtime \
 
 | 你想… | 阅读 |
 | --- | --- |
-| 改后端、API、能力层、数据库、配置 | [`deep_agent/AGENTS.md`](deep_agent/AGENTS.md) |
-| 新增或调试内置 MCP server | [`mcps/AGENTS.md`](mcps/AGENTS.md) |
-| 改聊天 UI、admin 或 SSE 客户端 | [`frontend/AGENTS.md`](frontend/AGENTS.md) |
+| 改后端、API、能力层、数据库、配置 | [`src/deep_agent/AGENTS.md`](src/deep_agent/AGENTS.md) |
+| 新增或调试内置 MCP server | [`mcp_servers/AGENTS.md`](mcp_servers/AGENTS.md) |
+| 改聊天 UI、admin 或 SSE 客户端 | [`console/AGENTS.md`](console/AGENTS.md) |
 | 写或跑测试 | [`tests/AGENTS.md`](tests/AGENTS.md) |
 
 ---
@@ -96,32 +96,40 @@ python3.12 -m deep_agent.combined_runtime \
 
 ```
 deep-agent/
-├── AGENTS.md              ← 本文件（索引）
-├── .env                   ← 运行时配置
-├── requirements.txt
-├── alembic/               ← 数据库迁移（详见 deep_agent/AGENTS.md）
-├── deep_agent/            ← 后端 Python 包 → deep_agent/AGENTS.md
-│   ├── channel_gateway/   ← 可选渠道网关宿主，与API共享代码和数据库
-│   └── channels/          ← 公共队列/命令/Adapter注册；adapters/wecom包装官方SDK
-├── mcps/                  ← 内置 MCP → mcps/AGENTS.md
-├── frontend/              ← 静态前端 → frontend/AGENTS.md
-├── tests/                 ← 测试 → tests/AGENTS.md
-├── docs/                  ← 说明与设计文档，入口见 docs/README.md
-├── deep_agent/builtin_skills/ ← 代码内置只读 Skill
-└── deepfos_platform/      ← 平台配置、客户端、服务发现和部署运行时支撑
+├── src/
+│   ├── deep_agent/        ← 产品后端；渠道宿主在 channels/gateway/
+│   ├── deepfos_platform/  ← 平台运行时支撑包
+│   ├── maintenance/       ← 管理员维护命令，不注册为 Agent 工具
+│   └── deepagent_files.py ← 沙箱公共文件接口
+├── console/               ← 无构建控制台及 vendor/
+├── mcp_servers/           ← 独立 MCP Server 启动入口
+├── migrations/            ← Alembic 迁移；配置仍在根 alembic.ini
+├── deploy/                ← Gunicorn、Docker Compose、Jenkins
+├── scripts/               ← 开发与环境准备
+├── tests/                 ← Python、接口、MCP、控制台测试
+├── docs/                  ← 说明、设计与原型
+├── data/                  ← 持久运行数据，原地保留且不提交
+└── tmp/                   ← TMP_to_delete 临时产物，不提交
 ```
+
+v0.8.2 只调整物理目录与路径解析，不改业务、协议和数据库。根 `deep_agent`、
+`deepfos_platform`、`maintenance`、`deepagent_files.py`、`mcps`、`alembic` 等是相对兼容链接，
+唯一源码在上图新位置，不能在旧路径建立第二份实现。旧 `deep_agent.channel_gateway` 的叶模块
+是新 `deep_agent.channels.gateway` 的同一模块别名，旧 `python -m` 命令继续可用。
+源码树交付与 `requirements.txt` 安装方式不变，不引入 wheel 或控制台构建；发布归档须包含链接
+及目标目录。Windows checkout 必须支持 Git 符号链接。详见项目结构指南。
 
 ---
 
 ## 架构一图
 
 ```
-HTTP → deep_agent/api/v1 → AgentRunner → pydantic_ai.Agent → Toolsets
+HTTP → src/deep_agent/api/v1 → AgentRunner → pydantic_ai.Agent → Toolsets
                                       └→ SessionStore (postgres/mysql/sqlite)
 ```
 
 工具包来源：`builtin:general` | `builtin:sandbox` | `builtin:ptc` | `builtin:web` | `mcp:*`
-（DB + `mcps/` 兜底）| `ui:builtin` | `ui:<package>`。Skill 与 ToolPackage 分离，Agent 通过
+（DB + `mcp_servers/` 兜底）| `ui:builtin` | `ui:<package>`。Skill 与 ToolPackage 分离，Agent 通过
 `agents.skills` 显式选择，上传包元数据位于 `skill_packages`。
 
 v0.6.1删除目录资源自身的冗余启停层；v0.6.4只恢复Model的`enabled`。Provider是否可用仍由
@@ -219,7 +227,7 @@ v0.6.1删除目录资源自身的冗余启停层；v0.6.4只恢复Model的`enabl
 - 新上传只保存附件引用；运行时 `read_file`通过 1-based `offset/limit`、
   `has_more/next_offset`渐进读取 TXT、LOG、DOCX、XLSX。合法 `file_id`
   必须来自当前会话的原始Event或Artifact，不能从摘要Evidence推断授权。详见
-  [`docs/design/06-attachment-parsing/`](docs/design/06-attachment-parsing/)。
+  [`docs/design/06-attachment-parsing/`](docs/design/06-attachment-parsing)。
 
 ### 框架能力说明方式
 

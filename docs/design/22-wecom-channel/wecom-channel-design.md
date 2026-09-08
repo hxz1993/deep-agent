@@ -12,7 +12,7 @@ Channel Gateway 位于同一代码仓和镜像，但以两个进程运行：API 
 ```text
 企微用户
   → 企微 AIBot WebSocket
-  → deep_agent.channel_gateway（可选单副本，端口 8010）
+  → deep_agent.channels.gateway（可选单副本，端口 8010）
        ├─ channels：公共消息、Peer 队列、命令、会话与消息生命周期
        ├─ adapters/wecom：格式转换 → 官方 SDK 原生连接、媒体与回复
        ├─ ChannelStore：配置、会话映射、幂等事务
@@ -28,14 +28,14 @@ Channel Gateway 位于同一代码仓和镜像，但以两个进程运行：API 
 
 | **模块** | **职责** |
 | --- | --- |
-| `deep_agent/channel_gateway/runtime.py` | 公共进程宿主、Account 轮询、注册表创建 Adapter、启停和状态代理 |
-| `deep_agent/channels/contracts.py`、`registry.py` | 公共消息与 Adapter 接口、按渠道类型选择实现 |
-| `deep_agent/channels/service.py`、`commands.py` | 去重认领、同 Peer 队列、快捷命令、停止确认、SSE 文本投影及统一帮助目录 |
-| `deep_agent/channels/adapters/wecom/` | 唯一引用企微 SDK 的渠道实现；SDK 事件到公共消息、下载解密、回复和连接状态 |
-| `deep_agent/channel_gateway/deepagent_client.py` | 解密后字节上传 FileStore、调用现有 Chat SSE |
-| `deep_agent/db/stores/channel.py` | Account、Binding、Run 的事务与约束 |
-| `deep_agent/api/v1/channel_accounts.py` | Console 管理接口和 Gateway 状态代理 |
-| `deep_agent/channel_gateway/app.py` | Gateway 健康、状态、连接测试内部接口 |
+| `src/deep_agent/channels/gateway/runtime.py` | 公共进程宿主、Account 轮询、注册表创建 Adapter、启停和状态代理 |
+| `src/deep_agent/channels/contracts.py`、`registry.py` | 公共消息与 Adapter 接口、按渠道类型选择实现 |
+| `src/deep_agent/channels/service.py`、`commands.py` | 去重认领、同 Peer 队列、快捷命令、停止确认、SSE 文本投影及统一帮助目录 |
+| `src/deep_agent/channels/adapters/wecom/` | 唯一引用企微 SDK 的渠道实现；SDK 事件到公共消息、下载解密、回复和连接状态 |
+| `src/deep_agent/channels/gateway/deepagent_client.py` | 解密后字节上传 FileStore、调用现有 Chat SSE |
+| `src/deep_agent/db/stores/channel.py` | Account、Binding、Run 的事务与约束 |
+| `src/deep_agent/api/v1/channel_accounts.py` | Console 管理接口和 Gateway 状态代理 |
+| `src/deep_agent/channels/gateway/app.py` | Gateway 健康、状态、连接测试内部接口 |
 
 Gateway 不执行 Alembic。启动时数据库不是 `002` 就拒绝运行；API 进程先完成升级。
 本版固定一个 API worker 和一个可选 Gateway 副本，取消注册表和 Peer 队列尚不跨进程共享。

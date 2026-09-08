@@ -11,8 +11,8 @@ from aiohttp import web
 from aiohttp.test_utils import TestServer
 from pydantic_ai.models.function import DeltaThinkingPart, DeltaToolCall, FunctionModel
 
-from deep_agent.channel_gateway.config import GatewayConfig
-from deep_agent.channel_gateway.deepagent_client import DeepAgentChannelClient
+from deep_agent.channels.gateway.config import GatewayConfig
+from deep_agent.channels.gateway.deepagent_client import DeepAgentChannelClient
 from deep_agent.channels.adapters.wecom import WecomAdapter
 from deep_agent.channels.service import ChannelService
 from deep_agent.core.context import get_context

@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 import uvicorn
 
-from deep_agent.channel_gateway import __main__ as entrypoint
+from deep_agent.channels.gateway import __main__ as entrypoint
 
 
 async def _fixture_app(scope, receive, send):
@@ -20,7 +20,7 @@ class ChannelGatewayEntrypointTest(unittest.TestCase):
         # Keep Uvicorn's real run/Config path: that is where WEB_CONCURRENCY
         # caused the deployment failure. Replace only the application and the
         # final server loop, so this test never opens a listener or database.
-        app_module = types.ModuleType("deep_agent.channel_gateway.app")
+        app_module = types.ModuleType("deep_agent.channels.gateway.app")
         app_module.app = _fixture_app
         configs = []
 
@@ -34,7 +34,7 @@ class ChannelGatewayEntrypointTest(unittest.TestCase):
                 "DEEP_AGENT_CHANNEL_INTERNAL_TOKEN": "entrypoint-test-only",
                 **(environment or {}),
             }, clear=True),
-            patch.dict(sys.modules, {"deep_agent.channel_gateway.app": app_module}),
+            patch.dict(sys.modules, {"deep_agent.channels.gateway.app": app_module}),
             patch.object(sys, "argv", ["channel_gateway", *arguments]),
             patch.object(uvicorn.Server, "run", server_run),
         ):

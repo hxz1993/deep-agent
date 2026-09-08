@@ -134,7 +134,7 @@ await toolset.call_tool(..., ctx with deps)
 
 | 传输 | 机制 |
 |------|------|
-| stdio（`mcps/*`） | `inject_request_meta` → `_meta.headers` |
+| stdio（`mcp_servers/*`） | `inject_request_meta` → `_meta.headers` |
 | HTTP URL | `DynamicToolset` 每 run 合并 headers 建连 |
 
 MCP server 内读取示例：

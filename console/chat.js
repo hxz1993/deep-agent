@@ -168,6 +168,8 @@ const state = {
 };
 
 window.addEventListener("pagehide", () => {
+  clearTimeout(sessionSearchTimer);
+  sessionPage.controller?.abort();
   state.historyFollower?.stop();
   state.historyController?.abort();
   for (const record of state.historyRendered) record.presenter?.dispose?.();
@@ -638,6 +640,8 @@ function init() {
   localStorage.removeItem("da_sessions");
   renderSessions();
   el.sessionList.addEventListener("scroll", maybeLoadMoreSessions, { passive: true });
+  document.getElementById("sessionSearchInput")?.addEventListener("input", scheduleSessionSearch);
+  document.getElementById("sessionSearchInput")?.addEventListener("compositionend", scheduleSessionSearch);
   bindSessionListFeedback();
   checkHealth();
   loadCapabilities();
@@ -652,33 +656,67 @@ function init() {
 }
 
 let sessionPage = { agentId: null, offset: 0, hasMore: true, loading: false, error: false };
+let sessionSearchTimer = null;
+
+function sessionSearchQuery() {
+  return document.getElementById("sessionSearchInput")?.value.trim() || "";
+}
+
+function resetSessionPage() {
+  clearTimeout(sessionSearchTimer);
+  sessionSearchTimer = null;
+  sessionPage.controller?.abort();
+  sessionPage = {
+    agentId: state.agentId, query: sessionSearchQuery(), ids: new Set(),
+    offset: 0, hasMore: true, loading: false, error: false, scheduled: false,
+  };
+  el.sessionList.scrollTop = 0;
+}
+
+function scheduleSessionSearch(event) {
+  // Invalidate immediately: neither an old page nor an old search may append
+  // while a new input is waiting for its debounce (including IME input).
+  resetSessionPage();
+  sessionPage.scheduled = true;
+  renderSessions();
+  if (event?.isComposing) return;
+  sessionSearchTimer = setTimeout(() => {
+    sessionSearchTimer = null;
+    sessionPage.scheduled = false;
+    void loadMoreSessions();
+  }, 250);
+}
 
 function syncSessionsFromBackend() {
   if (!state.agentId) return Promise.resolve();
-  if (sessionPage.agentId === state.agentId && sessionPage.loading && sessionPage.offset === 0) return sessionPage.promise;
-  sessionPage = { agentId: state.agentId, offset: 0, hasMore: true, loading: false, error: false };
+  if (sessionPage.agentId === state.agentId && sessionPage.query === sessionSearchQuery()
+      && sessionPage.loading && sessionPage.offset === 0) return sessionPage.promise;
+  resetSessionPage();
   return loadMoreSessions();
 }
 
 async function loadMoreSessions() {
   const page = sessionPage;
-  if (!page.agentId || page.agentId !== state.agentId || page.loading || !page.hasMore) return;
+  if (!page.agentId || page.agentId !== state.agentId || page.loading || page.scheduled || !page.hasMore) return;
   page.loading = true;
   page.error = false;
+  page.controller = new AbortController();
   renderSessions();
   const request = (async () => {
   try {
     const params = new URLSearchParams({ agent_id: page.agentId, limit: "50", offset: String(page.offset) });
-    const r = await daFetch(serviceUrl(`api/v1/sessions?${params}`));
+    if (page.query) params.set("query", page.query);
+    const r = await daFetch(serviceUrl(`api/v1/sessions?${params}`), { signal: page.controller.signal });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const payload = await r.json();
-    if (page !== sessionPage || page.agentId !== state.agentId) return;
+    if (page !== sessionPage || page.agentId !== state.agentId || page.controller.signal.aborted) return;
     const rows = Array.isArray(payload?.items) ? payload.items : [];
+    for (const row of rows) page.ids.add(row.session_id);
     mergeSessionsFromBackend(rows, { append: page.offset > 0, agentId: page.agentId });
     page.offset += rows.length;
     page.hasMore = rows.length > 0 && page.offset < Number(payload.total);
-  } catch (_) {
-    if (page === sessionPage) page.error = true;
+  } catch (error) {
+    if (page === sessionPage && error.name !== "AbortError") page.error = true;
   } finally {
     page.loading = false;
     if (page === sessionPage && page.agentId === state.agentId) {
@@ -923,7 +961,9 @@ function renderSessions() {
   el.sessionList.innerHTML = "";
   const activeAgent = state.agents.find((agent) => agent.id === state.agentId);
   const scopedSessions = state.sessions.filter(
-    (session) => (session.agentId || "") === (state.agentId || ""),
+    (session) => (session.agentId || "") === (state.agentId || "")
+      && !(sessionPage.scheduled || (sessionPage.loading && sessionPage.offset === 0))
+      && (!sessionPage.query || sessionPage.ids?.has(session.id)),
   );
   const panelTitle = document.getElementById("sessionPanelTitle");
   const panelSummary = document.getElementById("sessionPanelSummary");
@@ -933,7 +973,9 @@ function renderSessions() {
     panelSummary.title = state.sessionId ? "已选择会话" : "尚未选择会话";
   }
   if (scopedSessions.length === 0) {
-    if (!sessionPage.loading && !sessionPage.error) el.sessionList.innerHTML = '<li class="session-empty">该 Agent 暂无历史会话</li>';
+    if (!sessionPage.loading && !sessionPage.scheduled && !sessionPage.error) {
+      el.sessionList.innerHTML = `<li class="session-empty">${sessionPage.query ? "未找到匹配会话" : "该 Agent 暂无历史会话"}</li>`;
+    }
   }
   for (const s of scopedSessions) {
     const li = document.createElement("li");
@@ -965,12 +1007,10 @@ function renderSessions() {
     footer.innerHTML = '<button type="button">加载失败，点击重试</button>';
     footer.querySelector("button").addEventListener("click", () => void loadMoreSessions());
   } else {
-    footer.textContent = sessionPage.loading ? "正在加载…" : sessionPage.hasMore ? "向下滚动加载更多" : "已经到底了";
+    footer.textContent = sessionPage.loading || sessionPage.scheduled ? "正在加载…" : sessionPage.hasMore ? "向下滚动加载更多" : "已经到底了";
   }
   footer.hidden = !sessionPage.loading && !sessionPage.error && !sessionPage.hasMore && !sessionPage.hasScrolled;
   el.sessionList.appendChild(footer);
-  const query = document.getElementById("sessionSearchInput")?.value.trim().toLowerCase() || "";
-  el.sessionList.querySelectorAll(".session-item").forEach((row) => row.classList.toggle("console-filtered", !!query && !row.textContent.toLowerCase().includes(query)));
   el.sessionList.scrollTop = scrollTop;
   updateSessionListFooter();
   refreshLucideIcons();

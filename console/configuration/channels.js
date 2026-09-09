@@ -34,6 +34,16 @@ function renderChannelAgentOptions(selectedId = "") {
   select.disabled = !channelAdminState.agents.length;
 }
 
+function setChannelSecretEditor({ maskedValue = "", secretSet = false, required = false } = {}) {
+  const input = document.getElementById("channelSecret");
+  const masked = String(maskedValue || "");
+  input.dataset.maskedValue = masked;
+  input.value = masked;
+  input.type = masked ? "text" : "password";
+  input.required = required;
+  input.placeholder = masked || secretSet ? "留空则保持不变" : "请输入 Secret";
+}
+
 const channelsAdmin = {
   async refresh() {
     const tbody = document.getElementById("channelTableBody");
@@ -159,10 +169,7 @@ const channelsAdmin = {
     renderChannelAgentOptions(channelAdminState.agents[0]?.id || "");
     document.getElementById("channelBotId").value = "";
     document.getElementById("channelSessionUserId").value = "";
-    const secret = document.getElementById("channelSecret");
-    secret.value = "";
-    secret.required = true;
-    secret.placeholder = "请输入 Secret";
+    setChannelSecretEditor({ required: true });
     AdminFormFeedback.clear(document.getElementById("channelAccountForm"));
     document.getElementById("channelAccountModal").showModal();
   },
@@ -176,10 +183,7 @@ const channelsAdmin = {
     renderChannelAgentOptions(account.agent_id);
     document.getElementById("channelBotId").value = account.bot_id;
     document.getElementById("channelSessionUserId").value = account.session_user_id;
-    const secret = document.getElementById("channelSecret");
-    secret.value = "";
-    secret.required = false;
-    secret.placeholder = account.secret_set ? "已配置，留空则保持不变" : "请输入 Secret";
+    setChannelSecretEditor({ maskedValue: account.secret_masked, secretSet: account.secret_set });
     AdminFormFeedback.clear(document.getElementById("channelAccountForm"));
     document.getElementById("channelAccountModal").showModal();
   },
@@ -195,8 +199,9 @@ const channelsAdmin = {
       agent_id: document.getElementById("channelAgentId").value,
       session_user_id: document.getElementById("channelSessionUserId").value.trim(),
     };
-    const secret = document.getElementById("channelSecret").value.trim();
-    if (secret) payload.secret = secret;
+    const secretInput = document.getElementById("channelSecret");
+    const secret = secretInput.value.trim();
+    if (secret && secret !== secretInput.dataset.maskedValue) payload.secret = secret;
     if (!editingId) payload.enabled = false;
     try {
       await apiFetch(editingId ? `/api/v1/channel-accounts/${editingId}` : "/api/v1/channel-accounts", {
@@ -271,6 +276,14 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("closeChannelCommandsModal")?.addEventListener("click", () => document.getElementById("channelCommandsModal").close());
   document.getElementById("dismissChannelCommandsBtn")?.addEventListener("click", () => document.getElementById("channelCommandsModal").close());
   document.getElementById("channelAccountForm")?.addEventListener("submit", (event) => channelsAdmin.save(event));
+  document.getElementById("channelSecret")?.addEventListener("focus", (event) => {
+    const input = event.currentTarget;
+    if (input.value === input.dataset.maskedValue) input.select();
+  });
+  document.getElementById("channelSecret")?.addEventListener("input", (event) => {
+    const input = event.currentTarget;
+    input.type = input.value && input.value === input.dataset.maskedValue ? "text" : "password";
+  });
   document.getElementById("closeChannelAccountModal")?.addEventListener("click", () => document.getElementById("channelAccountModal").close());
   document.getElementById("cancelChannelAccountBtn")?.addEventListener("click", () => document.getElementById("channelAccountModal").close());
 });

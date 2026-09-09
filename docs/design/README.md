@@ -27,6 +27,7 @@
 | `20` | [`PTC程序编排`](20-code-mode/README.md) | 2026-08 | v0.6.7规范化`builtin:ptc`，保留MCP原生+`run_code`双通道，并支持URL/File ID不透明中转 |
 | `21` | [`Web 工具`](21-web-tools/README.md) | 2026-09 | v0.6.6显式`builtin:web`、搜索路由、SSRF-safe Fetch与按需Web图片读取已实现 |
 | `22` | [`渠道网关与企微 Channel`](22-wecom-channel/README.md) | 2026-09 | v0.7.0公共Gateway/官方SDK Adapter、三表、五个渠道命令与来源标题；002不变 |
+| `23` | [`诊断中心与日志`](23-diagnostics-and-logs/README.md) | 2026-09 | 四种导航布局与日志、会话排查、会话统计的可混搭 HTML 原型；管理态会话能力待确认 |
 
 ## 文档命名
 

@@ -19,6 +19,7 @@ class SessionListFilters:
     updated_before: datetime | None = None
     has_messages: bool | None = None
     sort: SortField = "updated_at"
+    query: str | None = None
 
 
 @dataclass(frozen=True)

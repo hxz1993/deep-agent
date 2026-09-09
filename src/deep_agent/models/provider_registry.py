@@ -315,6 +315,7 @@ def resolve_provider_model(
     input_modalities: list[str] | None = None,
     tags: list[str] | None = None,
     native_web_search: bool = False,
+    http_retry_attempts: int | None = None,
 ) -> Model:
     """Build a Pydantic AI model from an explicit model/provider pair."""
     definition = validate_provider_config(provider)
@@ -354,6 +355,7 @@ def resolve_provider_model(
         runtime_provider = GoogleProvider(
             api_key=provider.api_key,
             http_client=_gemini_http_client(proxy) if proxy else None,
+            **({"retry_options": {"attempts": http_retry_attempts}} if http_retry_attempts is not None else {}),
             **(
                 {}
                 if provider.use_default_base_url

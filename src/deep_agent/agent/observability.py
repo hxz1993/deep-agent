@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-import json
 import time
 from typing import Any, Iterable
 
-from loguru import logger
 from pydantic_ai.messages import ModelMessage, ModelResponse
 from pydantic_ai.usage import RunUsage
 
@@ -78,39 +76,13 @@ def run_metrics(
 
 
 def log_event(event: str, **fields: Any) -> None:
-    """Write one stable JSON line without prompts, arguments, results or headers."""
+    """The unified, allowlisted diagnostic writer is never a business dependency."""
+    try:
+        from deep_agent.diagnostics import emit
 
-    payload = {"event": event, **fields}
-    logger.info(json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str))
-
-
-def log_model_requests(
-    messages: Iterable[ModelMessage],
-    *,
-    conversation_id: str,
-    run_id: str,
-    agent_id: str | None,
-    session_id: str,
-) -> None:
-    request_index = 0
-    for message in messages:
-        if not isinstance(message, ModelResponse):
-            continue
-        request_index += 1
-        usage = message.usage
-        cache_available = cache_usage_available([message])
-        log_event(
-            "model_request_completed",
-            conversation_id=conversation_id,
-            run_id=run_id,
-            agent_id=agent_id,
-            session_id=session_id,
-            request_index=request_index,
-            model_name=message.model_name,
-            provider_name=message.provider_name,
-            finish_reason=message.finish_reason,
-            input_tokens=usage.input_tokens,
-            output_tokens=usage.output_tokens,
-            cache_read_tokens=usage.cache_read_tokens if cache_available else None,
-            cache_write_tokens=usage.cache_write_tokens if cache_available else None,
-        )
+        if event == "agent_run_completed" and fields.get("status") == "pending":
+            event = "agent_run_pending"
+        level = "ERROR" if event.endswith("_failed") else "WARNING" if event.endswith("_retrying") else "INFO"
+        emit(event, level=level, **fields)
+    except Exception:
+        pass

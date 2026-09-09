@@ -5,16 +5,19 @@ from uuid import UUID
 
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import text
 from deep_agent.api.v1 import api_router
 from deep_agent.core.context import AppContext, get_context, init_context, reset_context
 from deep_agent.db.models import LlmModel
 from tests.helpers.admin_auth import allow_console_admin
-from tests.helpers.sqlite_stores import make_sqlite_stores
+from tests.helpers.sqlite_stores import make_sqlite_stores, seed_default_agent
 
 
 class LlmProviderApiTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         self.stores, self._engine, self._session_factory = await make_sqlite_stores()
+        async with self._engine.begin() as connection:
+            await connection.execute(text("PRAGMA foreign_keys=ON"))
         app = FastAPI()
         app.include_router(api_router)
         allow_console_admin(app)
@@ -329,20 +332,14 @@ class LlmProviderApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(filtered.status_code, 200, filtered.text)
         self.assertEqual([item["id"] for item in filtered.json()], [model.json()["id"]])
 
-        referenced_delete = await self._client.delete(
-            f"/api/v1/llm-providers/{hyphenated_id}"
-        )
-        self.assertEqual(referenced_delete.status_code, 409, referenced_delete.text)
-        deleted_model = await self._client.delete(
-            f"/api/v1/llm-models/{model.json()['id']}"
-        )
-        self.assertEqual(deleted_model.status_code, 200, deleted_model.text)
         deleted_provider = await self._client.delete(
             f"/api/v1/llm-providers/{hyphenated_id}"
         )
         self.assertEqual(deleted_provider.status_code, 200, deleted_provider.text)
         missing = await self._client.get(f"/api/v1/llm-providers/{provider_id}")
         self.assertEqual(missing.status_code, 404, missing.text)
+        self.assertIsNone(await self.stores.llm_model.get_by_id(model.json()["id"]))
+        self.assertIsNotNone(await self.stores.llm_model.get_by_id(self._default_model.id))
 
     async def test_compatible_requires_custom_url_and_effective_availability_is_derived(self) -> None:
         invalid = await self._client.post(
@@ -438,7 +435,7 @@ class LlmProviderApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(model["enabled"])
         self.assertTrue(model["selectable"])
 
-    async def test_referenced_provider_cannot_change_type_or_be_deleted(self) -> None:
+    async def test_last_provider_with_models_can_be_deleted_but_cannot_change_type(self) -> None:
         provider_id = self._default_model.provider_id
         changed = await self._client.patch(
             f"/api/v1/llm-providers/{provider_id}",
@@ -446,7 +443,62 @@ class LlmProviderApiTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(changed.status_code, 409, changed.text)
         deleted = await self._client.delete(f"/api/v1/llm-providers/{provider_id}")
+        self.assertEqual(deleted.status_code, 200, deleted.text)
+        self.assertEqual((await self._client.get("/api/v1/llm-providers")).json(), [])
+        self.assertEqual((await self._client.get("/api/v1/llm-models")).json(), [])
+        again = await self._client.delete(f"/api/v1/llm-providers/{provider_id}")
+        self.assertEqual(again.status_code, 404, again.text)
+        created = await self._client.post(
+            "/api/v1/llm-providers",
+            json={"name": "New empty provider", "provider_type": "deepseek", "use_default_base_url": True},
+        )
+        self.assertEqual(created.status_code, 201, created.text)
+        deleted_empty = await self._client.delete(f"/api/v1/llm-providers/{created.json()['id']}")
+        self.assertEqual(deleted_empty.status_code, 200, deleted_empty.text)
+
+    async def test_agent_reference_rejects_entire_provider_delete_with_agent_name(self) -> None:
+        agent_id = await seed_default_agent(self.stores, name="预算分析助手")
+        provider_id = self._default_model.provider_id
+        unused_model = await self._client.post(
+            "/api/v1/llm-models",
+            json={"provider_id": provider_id, "name": "unused", "model": "unused", "input_modalities": ["text"], "context_window_tokens": 32000, "max_output_tokens": 4096},
+        )
+        self.assertEqual(unused_model.status_code, 201, unused_model.text)
+        deleted = await self._client.delete(f"/api/v1/llm-providers/{provider_id}")
         self.assertEqual(deleted.status_code, 409, deleted.text)
+        self.assertIn("预算分析助手", deleted.json()["detail"])
+        self.assertIsNotNone(await self.stores.llm_configuration.get_provider(provider_id))
+        self.assertEqual(len(await self.stores.llm_model.list_all()), 2)
+        self.assertIsNotNone(await self.stores.agent.get_by_id(agent_id))
+
+    async def test_active_search_credential_reference_must_be_changed_before_delete(self) -> None:
+        provider_id = self._default_model.provider_id
+        await self.stores.global_setting.upsert("web_search", version=1, value={
+            "mode": "provider", "provider": "deepseek",
+            "credential_source": "llm_provider", "llm_provider_id": provider_id,
+        })
+        deleted = await self._client.delete(f"/api/v1/llm-providers/{provider_id}")
+        self.assertEqual(deleted.status_code, 409, deleted.text)
+        self.assertIn("Web Search", deleted.json()["detail"])
+        self.assertIsNotNone(await self.stores.llm_model.get_by_id(self._default_model.id))
+        # An unused identifier in native search settings is not an active reference.
+        await self.stores.global_setting.upsert("web_search", version=1, value={"mode": "native", "llm_provider_id": provider_id})
+        deleted = await self._client.delete(f"/api/v1/llm-providers/{provider_id}")
+        self.assertEqual(deleted.status_code, 200, deleted.text)
+
+    async def test_provider_delete_constraint_failure_rolls_back_model_deletion(self) -> None:
+        async with self._engine.begin() as connection:
+            await connection.execute(text("""
+                CREATE TRIGGER reject_provider_delete BEFORE DELETE ON llm_providers
+                BEGIN SELECT RAISE(ABORT, 'FOREIGN KEY constraint failed'); END
+            """))
+        provider_id = self._default_model.provider_id
+        deleted = await self._client.delete(f"/api/v1/llm-providers/{provider_id}")
+        self.assertEqual(deleted.status_code, 409, deleted.text)
+        self.assertNotIn("FOREIGN KEY", deleted.text)
+        self.assertNotIn("DELETE FROM", deleted.text)
+        self.assertIsNotNone(await self.stores.llm_configuration.get_provider(provider_id))
+        self.assertIsNotNone(await self.stores.llm_model.get_by_id(self._default_model.id))
 
 
 if __name__ == "__main__":

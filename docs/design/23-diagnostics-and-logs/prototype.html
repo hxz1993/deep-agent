@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>DeepAgent · 诊断中心与日志 · 四方案原型</title>
+  <link rel="stylesheet" href="prototype.css">
+</head>
+<body>
+  <header class="design-bar">
+    <div class="design-title"><span class="design-mark">D</span><div><strong>诊断中心与日志</strong><small>DeepAgent / 23 · 交互草稿</small></div></div>
+    <nav id="variants" aria-label="布局方案"></nav>
+    <span class="demo-label">模拟数据 · 不连接任何环境</span>
+  </header>
+  <section class="design-options">
+    <div id="variantNote"></div>
+    <div class="mix"><label for="contentMode">混搭内容</label><select id="contentMode"></select><label for="demoState">状态</label><select id="demoState"><option value="ready">正常</option><option value="empty">无匹配结果</option><option value="denied">权限不足</option><option value="unavailable">日志不可用</option><option value="partial">部分查询范围</option></select></div>
+  </section>
+  <div class="app" id="app">
+    <aside class="rail" id="rail"></aside>
+    <aside class="subnav" id="subnav"></aside>
+    <main>
+      <header class="page-head"><div><div class="breadcrumb" id="breadcrumb"></div><h1 id="pageTitle"></h1></div><div class="head-actions"><span class="scope-badge">演示实例 / 管理员</span><button id="refreshBtn" class="button">刷新</button></div></header>
+      <nav class="page-tabs" id="pageTabs" aria-label="诊断功能"></nav>
+      <section id="agentScope"></section>
+      <section class="filterbar">
+        <label class="search"><span id="searchIcon"></span><input id="search" type="search" autocomplete="off" aria-label="查询关键词" placeholder="关键词 / Session ID / Run ID"><kbd>↵</kbd></label>
+        <select id="agentFilter" aria-label="Agent 范围"></select>
+        <select id="statusFilter" aria-label="执行结果"><option value="all">全部执行结果</option><option value="完成">完成</option><option value="失败">失败</option><option value="等待中">等待中</option><option value="取消">取消</option></select>
+        <span class="time-range">09.03 — 09.09 <small>近 7 天示例</small></span>
+        <button class="button primary" id="queryBtn">查询</button><button class="text-button" id="resetBtn">重置</button>
+      </section>
+      <div id="rangeNotice" role="status"></div>
+      <section id="content" class="content"></section>
+      <footer class="page-foot"><span id="resultCount"></span><span>只读排查 · 不改变会话归属或执行状态</span></footer>
+    </main>
+  </div>
+  <div id="toast" role="status" class="toast" hidden></div>
+  <script src="prototype.js"></script>
+</body>
+</html>

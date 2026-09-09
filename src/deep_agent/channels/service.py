@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from loguru import logger
+from deep_agent.agent.observability import log_event
 
 from .commands import help_text, parse_command
 from .contracts import ChannelAdapter, InboundMessage
@@ -27,6 +28,13 @@ class MessageJob:
     stopped: bool = False
     terminal: bool = False
     task: asyncio.Task | None = None
+    agent_run_id: str | None = None
+
+
+def _log_job(event: str, job: MessageJob, **fields: Any) -> None:
+    log_event(event, account_id=job.account.id, channel_run_id=job.run_id,
+              run_id=job.agent_run_id, session_id=job.session_id,
+              agent_id=job.agent_id, **fields)
 
 
 @dataclass
@@ -72,6 +80,7 @@ class ChannelService:
         if task:
             self._receivers[task] = account.id
         try:
+            log_event("channel_received", account_id=account.id)
             async with peer.ingress:
                 account = await self.store.get_account(account.id)
                 if account is None or not account.enabled or account.id in self._closed:
@@ -96,6 +105,7 @@ class ChannelService:
                 if command is None:
                     await self.store.update_run(job.run_id, processing_status="queued")
                     peer.pending.append(job)
+                    _log_job("channel_queued", job, queue_depth=len(peer.pending))
                     self._kick(peer)
                     return
             if control:
@@ -106,7 +116,7 @@ class ChannelService:
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            logger.error("Channel ingress failed error_type={}", type(exc).__name__)
+            log_event("channel_ingress_failed", account_id=account.id, error_type=type(exc).__name__)
         finally:
             if control:
                 peer.controls -= 1
@@ -209,6 +219,7 @@ class ChannelService:
             # that the API did not execute the request.
             await self.store.update_run(job.run_id, processing_status="running", delivery_status="streaming")
             job.dispatched = True
+            _log_job("channel_dispatched", job)
             last_sent = 0.0
             final_status = "completed"
             stream = self.deep_agent.stream_chat(
@@ -220,6 +231,8 @@ class ChannelService:
                     run_id = event.data.get("run_id")
                     if run_id:
                         await self.store.update_run(job.run_id, agent_run_id=str(run_id))
+                        job.agent_run_id = str(run_id)
+                        _log_job("channel_agent_linked", job)
                 elif event.event == "text":
                     delta = event.data.get("delta")
                     if not isinstance(delta, str) or not delta:
@@ -275,8 +288,12 @@ class ChannelService:
             elif final_status == "pending":
                 output = f"{output}\n\n此操作需要在 DeepAgent 控制台继续完成。".strip()
             await self.store.update_run(job.run_id, processing_status=processing)
+            _log_job("channel_processing_failed" if processing == "failed" else
+                     "channel_cancelled" if processing == "interrupted" else "channel_completed",
+                     job, status=final_status)
             await self._deliver(job, output if output.strip() else "已处理完成，但没有可展示的文本结果。")
         except asyncio.CancelledError:
+            _log_job("channel_cancelled", job)
             await self.store.update_run(
                 job.run_id, processing_status="interrupted", delivery_status="failed",
                 error_code="user_stopped" if job.stopped else ("gateway_cancelled" if job.dispatched else "preflight_failed"),
@@ -294,7 +311,7 @@ class ChannelService:
                     logger.warning("Channel loading completion timed out during cancellation")
             raise
         except Exception as exc:
-            logger.error("Channel processing failed error_type={}", type(exc).__name__)
+            _log_job("channel_processing_failed", job, error_type=type(exc).__name__)
             await self.store.update_run(
                 job.run_id, processing_status="failed", delivery_status="failed",
                 error_code="agent_failed" if job.dispatched else "preflight_failed",
@@ -319,7 +336,7 @@ class ChannelService:
         except Exception as exc:
             # Stop preview attempts for this Run rather than waiting for an SDK
             # timeout on every delta. Still attempt the final delivery once.
-            logger.warning("Channel preview disabled error_type={}", type(exc).__name__)
+            _log_job("channel_preview_failed", job, error_type=type(exc).__name__)
             return False
         return True
 
@@ -327,12 +344,13 @@ class ChannelService:
         try:
             await job.adapter.reply(job.message, job.reply_id, text, True)
         except Exception as exc:
-            logger.warning("Channel reply failed error_type={}", type(exc).__name__)
+            _log_job("channel_delivery_failed", job, error_type=type(exc).__name__)
             # Never turn a completed /new into a retryable operation because
             # the network lost its acknowledgement.
             await self.store.update_run(job.run_id, delivery_status="failed", error_code="delivery_failed", error_message="Channel reply delivery failed")
         else:
             await self.store.update_run(job.run_id, delivery_status="sent")
+            _log_job("channel_delivery_sent", job)
 
     async def _read_command(self, peer: PeerQueue, job: MessageJob, command: str) -> None:
         await self.store.update_run(job.run_id, processing_status="running")

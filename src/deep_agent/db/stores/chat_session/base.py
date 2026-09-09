@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import Select, delete, exists, func, select, update
+from sqlalchemy import Select, delete, exists, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from deep_agent.db.models import Agent, ChatSession, ChatSessionEvent
@@ -151,6 +151,7 @@ class ChatSessionStoreBase(SessionBoundMixin):
     def _apply_session_filters(
         stmt: Select, *, agent_id: str | None, user_id: str | None,
         updated_after: datetime | None, updated_before: datetime | None,
+        query: str | None = None,
     ) -> Select:
         if agent_id is not None:
             stmt = stmt.where(ChatSession.agent_id == agent_id)
@@ -160,6 +161,14 @@ class ChatSessionStoreBase(SessionBoundMixin):
             stmt = stmt.where(ChatSession.updated_at >= updated_after)
         if updated_before is not None:
             stmt = stmt.where(ChatSession.updated_at <= updated_before)
+        search = (query or "").strip()
+        if search:
+            # Literal title substring, not SQL wildcard syntax. Never broaden
+            # session ID lookup to a prefix or bypass the owner/Agent filters.
+            stmt = stmt.where(or_(
+                ChatSession.title.icontains(search, autoescape=True),
+                ChatSession.session_id == search,
+            ))
         return stmt
 
     async def list_summaries(
@@ -168,6 +177,7 @@ class ChatSessionStoreBase(SessionBoundMixin):
         updated_after: datetime | None = None,
         updated_before: datetime | None = None,
         has_messages: bool | None = None, sort: SortField = "updated_at",
+        query: str | None = None,
     ) -> tuple[list[SessionSummaryRow], int]:
         limit = min(max(limit, 1), MAX_LIST_LIMIT)
         offset = max(offset, 0)
@@ -197,13 +207,14 @@ class ChatSessionStoreBase(SessionBoundMixin):
         stmt = self._apply_session_filters(
             stmt, agent_id=agent_id, user_id=user_id,
             updated_after=updated_after, updated_before=updated_before,
+            query=query,
         )
         if has_messages is True:
             stmt = stmt.having(message_count > 0)
         elif has_messages is False:
             stmt = stmt.having(message_count == 0)
         order_column = ChatSession.updated_at if sort == "updated_at" else ChatSession.created_at
-        stmt = stmt.order_by(order_column.desc()).limit(limit).offset(offset)
+        stmt = stmt.order_by(order_column.desc(), ChatSession.session_id.desc()).limit(limit).offset(offset)
         async with self._read() as db:
             rows = list((await db.execute(stmt)).all())
             prompts = await self._first_user_prompts(db, [str(row.session_id) for row in rows])
@@ -217,6 +228,7 @@ class ChatSessionStoreBase(SessionBoundMixin):
                 select(func.count()).select_from(ChatSession),
                 agent_id=agent_id, user_id=user_id,
                 updated_after=updated_after, updated_before=updated_before,
+                query=query,
             )
             message_exists = exists(
                 select(ChatSessionEvent.event_id).where(

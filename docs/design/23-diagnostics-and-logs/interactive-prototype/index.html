@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'">
+  <title>DeepAgent · 诊断中心交互原型</title>
+  <link rel="icon" href="/console/favicon.svg">
+  <link rel="stylesheet" href="/console/themes.css">
+  <link rel="stylesheet" href="/console/workspace.css">
+  <link rel="stylesheet" href="/console/console.css">
+  <link rel="stylesheet" href="/console/vendor/highlight-github.min.css">
+  <link rel="stylesheet" href="./prototype.css">
+</head>
+<body class="diagnostic-prototype">
+  <div class="prototype-shell">
+    <aside class="prototype-nav" aria-label="主导航">
+      <a class="prototype-brand" href="#/sessions/overview"><img src="/console/favicon.svg" alt=""><strong>DeepAgent</strong></a>
+      <div class="reference-nav" aria-label="原有控制台入口，仅示意">
+        <span><i data-lucide="message-square-code"></i>对话测试</span>
+        <span><i data-lucide="bot"></i>Agent</span>
+        <small>设置</small>
+        <span><i data-lucide="waypoints"></i>Provider</span>
+        <span><i data-lucide="book-open-check"></i>Skill</span>
+        <span><i data-lucide="network"></i>MCP</span>
+        <span><i data-lucide="radio"></i>渠道</span>
+      </div>
+      <small class="nav-section-label">诊断中心</small>
+      <nav class="diagnostic-nav">
+        <a href="#/logs" data-nav="logs"><i data-lucide="logs"></i><span>日志</span></a>
+        <a href="#/sessions/overview" data-nav="sessions"><i data-lucide="messages-square"></i><span>会话</span></a>
+      </nav>
+      <footer><span class="admin-avatar">A</span><span>管理员<small>设计原型 · 示例数据</small></span></footer>
+    </aside>
+    <main class="prototype-main" id="prototypeMain"></main>
+  </div>
+  <div class="prototype-toast" id="prototypeToast" role="status" hidden></div>
+  <script src="/console/vendor/lucide.min.js"></script>
+  <script src="/console/vendor/marked.min.js"></script>
+  <script src="/console/vendor/purify.min.js"></script>
+  <script src="/console/vendor/highlight.min.js"></script>
+  <script src="/console/json-view.js"></script>
+  <script src="/console/markdown.js"></script>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

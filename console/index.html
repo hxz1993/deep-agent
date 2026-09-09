@@ -20,8 +20,9 @@
   <link id="hljsTheme" rel="stylesheet" href="/vendor/highlight-github-dark.min.css" />
   <link rel="stylesheet" href="./themes.css?v=20260821-2" />
   <link rel="stylesheet" href="./workspace.css?v=20260904-13" />
-  <link rel="stylesheet" href="./configuration/configuration.css?v=20260904-11" />
-  <link rel="stylesheet" href="./console.css?v=20260905-04" />
+  <link rel="stylesheet" href="./configuration/configuration.css?v=20260909-7" />
+  <link rel="stylesheet" href="./console.css?v=20260909-5" />
+  <link rel="stylesheet" href="./diagnostics.css?v=20260909-1" />
 </head>
 <body data-console-page="workspace">
   <div class="console-shell">
@@ -127,21 +128,31 @@
       <section class="console-page" id="page-diagnostics" data-page-panel="diagnostics">
         <div class="diagnostics-page">
           <header class="diagnostics-head">
-            <div><span class="eyebrow">Phase 1</span><h1>诊断中心</h1><p>为一次 Agent 请求提供可追踪、可解释的运行诊断入口。</p></div>
-            <span class="future-badge">能力规划中</span>
+            <div><h1>诊断中心</h1><p id="diagnosticsInstance">当前部署实例 · API / 企微网关</p></div>
+            <button type="button" class="diagnostics-button" id="diagnosticsRefresh"><i data-lucide="refresh-cw" aria-hidden="true"></i><span>刷新</span></button>
           </header>
-          <div class="diagnostics-band current">
-            <div class="diagnostic-icon"><i data-lucide="history"></i></div>
-            <div><h2>当前已经可用</h2><p>测试工作台可查看会话历史、SSE 事件顺序、模型工具调用、HITL 状态和服务健康。</p></div>
-            <button type="button" data-page-link="workspace">返回测试工作台</button>
+          <form class="diagnostics-filters" id="diagnosticsFilters" autocomplete="off">
+            <div class="diagnostics-filter-row">
+              <div class="diagnostics-field"><span id="diagnosticsPeriodLabel">时间范围</span><div class="console-select" data-diagnostic-select="period"><button type="button" class="console-select-trigger" aria-labelledby="diagnosticsPeriodLabel diagnosticsPeriodValue" aria-haspopup="listbox" aria-expanded="false" aria-controls="diagnosticsPeriodMenu"><span id="diagnosticsPeriodValue">最近 24 小时</span><i data-lucide="chevron-down" aria-hidden="true"></i></button><div class="console-select-menu hidden" role="listbox" aria-labelledby="diagnosticsPeriodLabel" id="diagnosticsPeriodMenu"></div></div></div>
+              <div class="diagnostics-field"><span id="diagnosticsSourceLabel">来源</span><div class="console-select" data-diagnostic-select="source"><button type="button" class="console-select-trigger" aria-labelledby="diagnosticsSourceLabel diagnosticsSourceValue" aria-haspopup="listbox" aria-expanded="false" aria-controls="diagnosticsSourceMenu"><span id="diagnosticsSourceValue">全部来源</span><i data-lucide="chevron-down" aria-hidden="true"></i></button><div class="console-select-menu hidden" role="listbox" aria-labelledby="diagnosticsSourceLabel" id="diagnosticsSourceMenu"></div></div></div>
+              <div class="diagnostics-field"><span id="diagnosticsLevelLabel">等级</span><div class="console-select" data-diagnostic-select="level"><button type="button" class="console-select-trigger" aria-labelledby="diagnosticsLevelLabel diagnosticsLevelValue" aria-haspopup="listbox" aria-expanded="false" aria-controls="diagnosticsLevelMenu"><span id="diagnosticsLevelValue">全部等级</span><i data-lucide="chevron-down" aria-hidden="true"></i></button><div class="console-select-menu hidden" role="listbox" aria-labelledby="diagnosticsLevelLabel" id="diagnosticsLevelMenu"></div></div></div>
+              <label class="diagnostics-field diagnostics-keyword"><span>关键词</span><input type="search" id="diagnosticsKeyword" placeholder="搜索摘要、事件或标识" maxlength="200" /></label>
+            </div>
+            <div class="diagnostics-custom-time hidden" id="diagnosticsCustomTime"><label class="diagnostics-field"><span>开始时间（本地时区）</span><input type="datetime-local" id="diagnosticsStart" /></label><label class="diagnostics-field"><span>结束时间（本地时区）</span><input type="datetime-local" id="diagnosticsEnd" /></label></div>
+            <div class="diagnostics-filter-row diagnostics-identifiers">
+              <label class="diagnostics-field"><span>Session ID</span><input type="text" id="diagnosticsSession" placeholder="全部会话（跨用户）" maxlength="128" spellcheck="false" /></label>
+              <label class="diagnostics-field"><span>Run ID</span><input type="text" id="diagnosticsRun" placeholder="全部执行" maxlength="128" spellcheck="false" /></label>
+              <div class="diagnostics-filter-actions"><button type="submit" class="diagnostics-button primary" id="diagnosticsQuery"><i data-lucide="search" aria-hidden="true"></i><span>查询</span></button><button type="button" class="diagnostics-button" id="diagnosticsReset">清空条件</button></div>
+            </div>
+          </form>
+          <div class="diagnostics-notice hidden" id="diagnosticsNotice" role="status" aria-live="polite"></div>
+          <div class="diagnostics-result-head"><span id="diagnosticsMeta" aria-live="polite">尚未查询</span><span id="diagnosticsCopyStatus" role="status" aria-live="polite"></span></div>
+          <div class="diagnostics-log-view" tabindex="0" aria-label="诊断日志列表">
+            <div class="diagnostics-columns" aria-hidden="true"><span></span><span>时间</span><span>等级</span><span>来源</span><span>摘要 / 事件</span><span>耗时</span></div>
+            <div id="diagnosticsRecords"></div>
+            <div class="diagnostics-empty" id="diagnosticsEmpty">正在准备日志查询…</div>
           </div>
-          <div class="diagnostics-grid">
-            <article><i data-lucide="search-code"></i><h3>Request ID 查询</h3><p>未来按 Request ID 定位一次跨服务请求和对应日志。</p><button disabled>暂未开放</button></article>
-            <article><i data-lucide="messages-square"></i><h3>Session 链路</h3><p>未来按 Session ID 汇总模型、MCP、UI 工具和重试过程。</p><button disabled>暂未开放</button></article>
-            <article><i data-lucide="plug-zap"></i><h3>MCP 主动探测</h3><p>未来检查 MCP 工具列表、连通性、延迟和错误响应。</p><button disabled>暂未开放</button></article>
-            <article><i data-lucide="chart-no-axes-combined"></i><h3>运行指标</h3><p>未来展示成功率、失败类型、P95 和服务健康趋势。</p><button disabled>暂未开放</button></article>
-          </div>
-          <div class="diagnostics-note"><i data-lucide="info"></i><span>本阶段不生成演示日志或虚构 Request ID。诊断能力将在后端具备真实链路数据后逐步开放。</span></div>
+          <footer class="diagnostics-footer"><span id="diagnosticsPartial" class="hidden"></span><button type="button" class="diagnostics-button hidden" id="diagnosticsMore">加载更多</button></footer>
         </div>
       </section>
     </main>
@@ -174,6 +185,6 @@
   <script src="../vendor/highlight.min.js"></script>
   <script src="./json-view.js?v=20260823-1"></script>
   <script src="./markdown.js?v=20260822-2"></script>
-  <script type="module" src="./main.js?v=20260908-1"></script>
+  <script type="module" src="./main.js?v=20260909-8"></script>
 </body>
 </html>

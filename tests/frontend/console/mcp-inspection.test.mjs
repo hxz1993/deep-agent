@@ -16,8 +16,8 @@ const styles = await readFile(
   "utf8",
 );
 
-function loadInspectionUi() {
-  const window = {};
+function loadInspectionUi(overrides = {}) {
+  const window = overrides.window || {};
   const document = {
     addEventListener() {},
   };
@@ -28,10 +28,57 @@ function loadInspectionUi() {
       escapeHtml: (value) => String(value),
       formatDate: (value) => String(value),
       window,
+      ...overrides,
     }),
   );
   return window.__McpInspectionUI;
 }
+
+test("内部 MCP 缺少有效 App 时提示真实配置入口", () => {
+  const ui = loadInspectionUi();
+  const server = { request_context: { mode: "inherit" } };
+  assert.match(ui.missingInspectionAppHint(server, { app: null }), /未提供测试 App.*「对话测试」右上角「测试App」/);
+  assert.equal(ui.missingInspectionAppHint(server, { app: "platform001" }), "");
+  assert.equal(ui.missingInspectionAppHint({ ...server, config: { headers: { App: "static001" } } }, { app: null }), "");
+  assert.equal(ui.missingInspectionAppHint({ request_context: { mode: "isolated" } }, { app: null }), "");
+});
+
+test("失败提示查询后端有效 App 并保留原错误", async () => {
+  const requests = [];
+  const server = { request_context: { mode: "inherit" } };
+  const ui = loadInspectionUi({
+    window: { DeepAgentConsoleAPI: { requestContext: async () => { requests.push("context"); return { app: null }; } } },
+  });
+  const message = await ui.inspectionFailureMessage(server, "MCP 初始化失败（TimeoutError）");
+  assert.match(message, /^MCP 初始化失败（TimeoutError）。当前请求未提供测试 App/);
+  assert.equal(requests.length, 1);
+});
+
+test("API 鉴权或网络失败不会被改写成缺少测试 App", async () => {
+  const messages = [];
+  let contextRequests = 0;
+  const window = { DeepAgentConsoleAPI: { requestContext: async () => { contextRequests++; return { app: null }; } } };
+  loadInspectionUi({
+    window,
+    apiFetch: async () => { throw new Error("权限不足"); },
+    showToast: (message) => messages.push(message),
+  });
+  const button = { textContent: "刷新", isConnected: true };
+  await window.mcpAdmin.inspect("deepfos", button, { request_context: { mode: "inherit" } });
+  assert.deepEqual(messages, ["权限不足"]);
+  assert.equal(contextRequests, 0);
+  assert.equal(button.disabled, false);
+  assert.equal(button.textContent, "刷新");
+});
+
+test("App 已生效或上下文查询失败时不推断为 App 未配置", async () => {
+  for (const requestContext of [async () => ({ app: "inherited001" }), async () => { throw new Error("network"); }]) {
+    const ui = loadInspectionUi({
+      window: { DeepAgentConsoleAPI: { requestContext } },
+    });
+    assert.equal(await ui.inspectionFailureMessage({ request_context: { mode: "inherit" } }, "MCP Ping 失败"), "MCP Ping 失败");
+  }
+});
 
 test("URL MCP 在提交前拒绝空地址", () => {
   const ui = loadInspectionUi();
@@ -45,7 +92,7 @@ test("MCP 编辑使用详情页式工作台并保留原配置字段", () => {
   assert.match(template, /class="modal agent-editor-page mcp-editor-page" id="mcpModal"/);
   assert.match(template, /id="closeMcpModal"[^>]*>[\s\S]*arrow-left[\s\S]*返回/);
   assert.match(template, /class="mcp-editor-workbench"/);
-  assert.match(template, /基本信息[\s\S]*连接与请求上下文/);
+  assert.doesNotMatch(template, /mcp-editor-section-head|定义服务名称和用途|连接与请求上下文/);
   ["mcpName", "mcpDescription", "mcpTransport", "mcpUrl", "mcpHeaders", "mcpRequestContextDescription"]
     .forEach((id) => assert.match(template, new RegExp(`id="${id}"`)));
   assert.doesNotMatch(template, /id="mcpEnabled"/);
@@ -56,6 +103,24 @@ test("MCP 编辑使用详情页式工作台并保留原配置字段", () => {
   assert.doesNotMatch(source, /document\.getElementById\("mcpModal"\)\.showModal\(\)/);
   assert.match(source, /放弃未保存的修改/);
   assert.match(source, /data-open-mcp/);
+});
+
+test("MCP 表单居中限宽，窄屏不保留横向最小宽度", () => {
+  assert.match(styles, /\.mcp-editor-page > form\s*\{ width: min\(1080px, 100%\); \}/);
+  assert.doesNotMatch(styles, /\.mcp-editor-workbench\s*\{[^}]*min-width: (?:720|760)px/);
+  assert.match(styles, /@media \(max-width: 1100px\)[\s\S]*?\.mcp-editor-workbench \{ grid-template-columns: minmax\(0, 1fr\); \}/);
+});
+
+test("MCP JSON 编辑器使用普通输入底色，高亮与输入层保持透明叠加", () => {
+  assert.match(styles, /\.mcp-json-input\s*\{[^}]*background: var\(--bg\);/);
+  assert.match(styles, /\.mcp-json-input > \.mcp-json-highlight\s*\{[^}]*background: transparent;/);
+  assert.match(styles, /\.mcp-editor-page \.mcp-json-input #mcpHeaders\s*\{[^}]*background: transparent;/);
+});
+
+test("MCP 高亮层与输入层共用字形度量且高亮不撑大输入框", () => {
+  assert.match(styles, /\.mcp-json-input > \.mcp-json-highlight,\s*\.mcp-json-input > #mcpHeaders\s*\{[^}]*font-weight: 400;[^}]*word-break: normal;[^}]*scrollbar-gutter: stable;/);
+  assert.match(styles, /\.mcp-json-input \.mcp-json-highlight code span\s*\{\s*font: inherit;\s*letter-spacing: inherit;/);
+  assert.match(styles, /\.mcp-json-input > \.mcp-json-highlight\s*\{[^}]*position: absolute;[^}]*height: 100%;/);
 });
 
 test("MCP Header 来源使用互斥的外部固定和内部继承", () => {

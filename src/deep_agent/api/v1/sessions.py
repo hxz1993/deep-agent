@@ -124,6 +124,10 @@ async def list_sessions(
     agent_id: str | None = Query(default=None, description="Filter by agent id."),
     limit: int = Query(default=50, ge=1, le=MAX_LIST_LIMIT, description="Page size."),
     offset: int = Query(default=0, ge=0, description="Page offset."),
+    query: str | None = Query(
+        default=None, max_length=256,
+        description="Case-insensitive title substring or exact session id; whitespace is trimmed.",
+    ),
     updated_after: UtcDatetime | None = Query(default=None, description="Only sessions updated at or after this time (UTC)."),
     updated_before: UtcDatetime | None = Query(default=None, description="Only sessions updated at or before this time (UTC)."),
     has_messages: bool | None = Query(
@@ -140,6 +144,7 @@ async def list_sessions(
         user_id=user_id,
         limit=limit,
         offset=offset,
+        query=query,
         updated_after=updated_after,
         updated_before=updated_before,
         has_messages=has_messages,

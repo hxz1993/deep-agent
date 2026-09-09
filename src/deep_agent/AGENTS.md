@@ -21,10 +21,19 @@
 | 配置解析 | `options.py`（`OPTION` + accessor）；DB URL 见 `db/url.py` |
 | MCP 加载 | `capabilities/mcp/resolver.py`、`db_loader.py`、`builtin.py` |
 | 渠道网关与企微 Adapter | `channels/gateway/`、`channels/`、`api/v1/channel_accounts.py`、`db/stores/channel.py` |
+| 管理员诊断日志 | `diagnostics/`、`api/v1/diagnostics.py`；模型/工具观察在 `agent/diagnostics.py` |
 
 ---
 
 ## 架构与数据流
+
+### 诊断日志边界
+
+`diagnostics.emit` 只接收白名单事实，后台有界队列负责安全序列化后的双出口与文件轮转；
+日志失败不改变模型、工具、SSE 或持久化行为。诊断文件不是会话 Event Store，不新增 RUN 回执。
+管理员查询只读取当前实例受控文件，与普通会话所有者权限分开；不增加 MCP 容器日志或自动探测。
+新增日志点先注册固定事件名及摘要，不传正文、参数、结果、异常原文或凭据。详见
+[`诊断日志指南`](../../../docs/guides/diagnostic-logs.md)。
 
 ### v0.8.5 真实事件及时持久化
 

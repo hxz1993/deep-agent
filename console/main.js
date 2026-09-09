@@ -2,10 +2,10 @@ import {
   initConfiguration,
   restoreConfigurationTab,
   rememberConfigurationTab,
-} from "./configuration.js?v=20260904-16";
+} from "./configuration.js?v=20260909-8";
 import { bindContextControls, refreshIdentity } from "./context.js?v=20260904-14";
-import { initDiagnostics } from "./diagnostics.js?v=20260720-1";
-import { initWorkspace } from "./workspace.js?v=20260908-1";
+import { initDiagnostics, setDiagnosticsActive } from "./diagnostics.js?v=20260909-1";
+import { initWorkspace } from "./workspace.js?v=20260909-2";
 import "./time.js?v=20260831-1";
 
 const VALID_PAGES = new Set(["workspace", "configuration", "diagnostics"]);
@@ -75,10 +75,12 @@ async function showPage(page, { updateHash = true, restoreTab = true } = {}) {
   document.querySelectorAll("[data-page-panel]").forEach((panel) => {
     panel.classList.toggle("active", panel.dataset.pagePanel === next);
   });
+  if (next !== "configuration") window.llmProvidersAdmin?.cancelModelTests();
   document.querySelectorAll("[data-page]").forEach((button) => {
     button.classList.toggle("active", button.dataset.page === next);
   });
   syncNavigation();
+  setDiagnosticsActive(consoleAllowed && next === "diagnostics");
   if (updateHash && location.hash !== `#/${next}`) history.replaceState(null, "", `#/${next}`);
   if (consoleAllowed && next === "configuration") {
     await initConfiguration().catch((error) => toast(error.message, true));

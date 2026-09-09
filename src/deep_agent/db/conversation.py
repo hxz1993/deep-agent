@@ -805,6 +805,7 @@ class SqlConversationCoordinator:
             limit=filters.limit, offset=filters.offset,
             updated_after=filters.updated_after, updated_before=filters.updated_before,
             has_messages=filters.has_messages, sort=filters.sort,
+            query=filters.query,
         )
 
     async def interrupt_running(self) -> int:

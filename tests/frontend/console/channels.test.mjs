@@ -109,7 +109,7 @@ test("网关状态与机器人认证状态分开表达", () => {
   }
 });
 
-test("渠道表单绑定Agent且Secret不回显并支持留空保留", () => {
+test("渠道表单绑定Agent且Secret只展示脱敏值并支持留空保留", () => {
   assert.match(templateHtml, /id="channelAgentId"/);
   assert.match(templateHtml, /<span>会话用户<\/span>/);
   assert.match(templateHtml, /type="text" id="channelSessionUserId" maxlength="128" required/);
@@ -128,13 +128,91 @@ test("渠道表单绑定Agent且Secret不回显并支持留空保留", () => {
   assert.doesNotMatch(templateHtml, /owner_user_id|platform_token|cookie/i);
   assert.doesNotMatch(templateHtml, /channelAppId|channelSpaceId|channelLanguage|欢迎语/);
   assert.doesNotMatch(source, /app_id|space_id|language|welcome/i);
-  assert.match(source, /secret\.placeholder = account\.secret_set \? "已配置，留空则保持不变"/);
+  assert.match(source, /setChannelSecretEditor\(\{ maskedValue: account\.secret_masked, secretSet: account\.secret_set \}\)/);
   assert.match(source, /channelAccountModalTitle"\)\.textContent = account\.name/);
   assert.doesNotMatch(source, /编辑企微渠道 ·/);
   assert.doesNotMatch(source, /account\.secret\b/);
-  assert.match(source, /if \(secret\) payload\.secret = secret/);
+  assert.match(source, /if \(secret && secret !== secretInput\.dataset\.maskedValue\) payload\.secret = secret/);
+  assert.doesNotMatch(templateHtml, /clearChannelSecret|channelSecretClear/);
+  assert.doesNotMatch(source, /clear_secret|clearSecret|clearRequested/);
   assert.match(source, /\/api\/v1\/channel-accounts/);
   assert.match(source, /\/test-connection/);
+});
+
+function secretEditorHarness() {
+  const elements = new Map();
+  const ready = [];
+  const requests = [];
+  const getElement = (id) => {
+    if (!elements.has(id)) elements.set(id, {
+      value: "", dataset: {}, listeners: {}, open: false, selected: false,
+      addEventListener(type, listener) { this.listeners[type] = listener; },
+      showModal() { this.open = true; }, close() { this.open = false; },
+      select() { this.selected = true; }, reportValidity() { return true; },
+    });
+    return elements.get(id);
+  };
+  const context = vm.createContext({
+    window: {},
+    document: {
+      addEventListener(type, listener) { if (type === "DOMContentLoaded") ready.push(listener); },
+      getElementById: getElement,
+    },
+    apiFetch: async (path, options) => { requests.push({ path, ...options, payload: JSON.parse(options.body) }); },
+    AdminFormFeedback: { clear() {}, show() { assert.fail("unexpected save failure"); } },
+    escapeHtml: (value) => String(value ?? ""),
+    showToast() {},
+  });
+  vm.runInContext(source, context);
+  vm.runInContext(`channelAdminState.accounts = [
+    { id: "channel-1", name: "示例渠道", agent_id: "agent-1", bot_id: "bot-1", session_user_id: "user-1", secret_set: true, secret_masked: "sample********1234" },
+    { id: "channel-2", name: "另一渠道", agent_id: "agent-1", bot_id: "bot-2", session_user_id: "user-2", secret_set: true, secret_masked: "other-********5678" }
+  ]; channelAdminState.agents = [{ id: "agent-1", name: "示例 Agent" }];`, context);
+  ready.forEach((listener) => listener());
+  const admin = context.window.channelsAdmin;
+  admin.refresh = async () => {};
+  return { admin, getElement, requests };
+}
+
+test("渠道Secret回显安全掩码，聚焦全选且编辑后隐藏新值", () => {
+  const { admin, getElement } = secretEditorHarness();
+  admin.openEdit("channel-1");
+  const secret = getElement("channelSecret");
+  assert.equal(secret.value, "sample********1234");
+  assert.equal(secret.type, "text");
+  assert.equal(secret.required, false);
+  secret.listeners.focus({ currentTarget: secret });
+  assert.equal(secret.selected, true);
+  secret.value = "replacement-fixture";
+  secret.listeners.input({ currentTarget: secret });
+  assert.equal(secret.type, "password");
+  admin.openEdit("channel-2");
+  assert.equal(secret.value, "other-********5678");
+  assert.equal(secret.type, "text");
+  admin.openCreate();
+  assert.equal(secret.value, "");
+  assert.equal(secret.dataset.maskedValue, "");
+  assert.equal(secret.type, "password");
+  assert.equal(secret.required, true);
+});
+
+test("保存渠道时掩码和留空均不提交Secret，只有重新填写才更新", async () => {
+  const { admin, getElement, requests } = secretEditorHarness();
+  const form = getElement("channelAccountForm");
+  const submit = () => admin.save({ preventDefault() {}, currentTarget: form });
+  for (const editedValue of [null, "", "   ", "replacement-fixture"]) {
+    admin.openEdit("channel-1");
+    if (editedValue !== null) getElement("channelSecret").value = editedValue;
+    await submit();
+    const request = requests.at(-1);
+    assert.equal(request.method, "PUT");
+    assert.equal(request.path, "/api/v1/channel-accounts/channel-1");
+    if (editedValue === "replacement-fixture") assert.equal(request.payload.secret, editedValue);
+    else assert.equal(Object.hasOwn(request.payload, "secret"), false);
+    assert.equal(Object.hasOwn(request.payload, "clear_secret"), false);
+  }
+  admin.openEdit("channel-1");
+  assert.equal(getElement("channelSecret").value, "sample********1234");
 });
 
 test("渠道启停只在列表使用Switch切换", () => {

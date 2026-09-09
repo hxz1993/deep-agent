@@ -55,6 +55,8 @@ def logger_config(
                 "<level>{message}</level>"
             ),
             "colorize": level == "DEBUG",
+            # Exception frames may contain credentials or customer payloads.
+            "diagnose": False,
         }],
         "patcher": lambda record: record["extra"].update({"request-id": get_request_id()}),
     }

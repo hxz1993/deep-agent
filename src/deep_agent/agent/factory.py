@@ -18,6 +18,7 @@ from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.context_references import context_reference_instructions
 from deep_agent.models import OpenAICompatibleVideoChatModel
 from deep_agent.agent.planning import build_planning_capability
+from deep_agent.agent.diagnostics import RuntimeDiagnostics
 from deep_agent.models.provider_registry import resolve_provider_model
 from deep_agent.agent.spec import AgentSpec
 from deep_agent.agent.context.estimator import TokenEstimator
@@ -288,7 +289,7 @@ def build_agent(
         estimator=estimator,
         web_toolset=web_toolset,
     )
-    capabilities: list[AbstractCapability[AgentDeps]] = []
+    capabilities: list[AbstractCapability[AgentDeps]] = [RuntimeDiagnostics()]
     if context_compaction is not None:
         capabilities.append(context_compaction)
     if skill_capability is not None:

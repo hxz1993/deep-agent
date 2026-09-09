@@ -75,6 +75,34 @@ class SkillApiTests(unittest.IsolatedAsyncioTestCase):
         reset_context()
         await self.engine.dispose()
 
+    async def test_download_named_by_code_and_version_preserves_reinstallable_bytes(self) -> None:
+        async with AsyncClient(transport=self.transport, base_url="http://test",
+                               headers=self.client_headers) as client:
+            for version, expected in [(None, "example-skill.zip"), ("1.1.0", "example-skill-v1.1.0.zip"),
+                                      ("v2.0.0-rc.1", "example-skill-v2.0.0-rc.1.zip")]:
+                with self.subTest(version=version):
+                    buffer = io.BytesIO(skill_zip(scripts=True, office=True))
+                    if version:
+                        with zipfile.ZipFile(buffer, "a") as archive:
+                            archive.writestr("example-skill/manifest.yaml", f"version: {version}\n")
+                    raw = buffer.getvalue()
+                    installed = await client.post("/api/v1/skills", files={
+                        "file": ("short.zip", raw, "application/zip"),
+                    })
+                    self.assertEqual(installed.status_code, 201, installed.text)
+                    package = await client.get("/api/v1/skills/example-skill/package")
+                    self.assertEqual(package.status_code, 200)
+                    self.assertEqual(package.headers["content-disposition"],
+                                     f"attachment; filename*=UTF-8''{expected}")
+                    self.assertEqual(package.content, raw)
+                    self.assertEqual((await client.delete("/api/v1/skills/example-skill")).status_code, 200)
+                    reinstalled = await client.post("/api/v1/skills", files={
+                        "file": (expected, package.content, "application/zip"),
+                    })
+                    self.assertEqual(reinstalled.status_code, 201, reinstalled.text)
+                    self.assertEqual(reinstalled.json()["skill"]["version"], version)
+                    self.assertEqual((await client.delete("/api/v1/skills/example-skill")).status_code, 200)
+
     async def test_long_resource_character_cursor_roundtrip_and_invalid_cursor(self) -> None:
         original = "说明🙂" * 20_000
         payload = io.BytesIO()

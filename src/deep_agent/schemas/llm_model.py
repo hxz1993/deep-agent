@@ -19,6 +19,13 @@ _ALLOWED_MODALITIES = {"text", "image", "audio", "video"}
 LLM_REQUIRED_FIELDS = ("name", "model")
 
 
+class LlmModelTestResponse(BaseModel):
+    ok: bool
+    message: str
+    elapsed_ms: int = Field(ge=0)
+    error_code: str | None = None
+
+
 def _supported_modalities(values: list[str] | None) -> list[str]:
     """Hide retired modality values from historical database rows."""
     return [value for value in (values or []) if value in _ALLOWED_MODALITIES]

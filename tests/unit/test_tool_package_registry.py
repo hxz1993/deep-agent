@@ -9,7 +9,7 @@ from pydantic_ai.models.test import TestModel
 from pydantic_ai.usage import RunUsage
 
 from deep_agent.capabilities import build_registry
-from deep_agent.capabilities.native import build_native_tool_package
+from deep_agent.capabilities.general import build_native_tool_package
 from deep_agent.capabilities.registry import ToolPackage, ToolPackageRegistry
 from deep_agent.sandbox.toolset import build_python_sandbox_tool_package
 

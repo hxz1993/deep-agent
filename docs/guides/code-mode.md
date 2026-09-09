@@ -65,7 +65,7 @@ sorted({row["id"]: row for group in items for row in group}.values(), key=lambda
 固定使用稳定基线：
 
 ```bash
-python3.12 -m deep_agent.local_dev \
+PYTHONPATH=src python3.12 -m deep_agent.local_dev \
   --config ~/.config/deep-agent/sqlite.env \
   --port 8000
 ```

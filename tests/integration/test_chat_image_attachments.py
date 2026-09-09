@@ -20,7 +20,7 @@ from tests.helpers.sqlite_stores import (
     seed_default_agent,
 )
 from tests.integration.helpers.chat import mock_request_disconnect, parse_sse_events
-from tests.integration.helpers.models import text_only_model
+from tests.helpers.models import text_only_model
 
 _CHAT_JSON = {"capabilities": []}
 _IMAGE_ATTACHMENT = {

@@ -5,7 +5,7 @@ import unittest
 from pydantic_ai.messages import BinaryContent, VideoUrl
 from pydantic_ai.providers.openai import OpenAIProvider
 
-from deep_agent.agent.models.openai_compatible_video import (
+from deep_agent.models.openai_compatible_video import (
     OpenAICompatibleVideoChatModel,
 )
 

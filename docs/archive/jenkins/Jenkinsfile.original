@@ -1,0 +1,146 @@
+
+pipeline {
+    agent { label "$AGENT" }
+    options {
+        buildDiscarder(logRotator(numToKeepStr: '2'))
+        disableConcurrentBuilds()
+    }
+    environment {
+        ArtifactsName = "deep-agent.tar.gz"
+        ArtifactTarget = "deep-agent.tar.gz"
+        NAME = "${env.JOB_BASE_NAME}"
+        K8SCredentialsId = "ShangHaiOffineK8SToken"
+        K8SServerAPI=credentials("ShangHaiOffineK8SApiServer")
+        NameTag = "${env.BUILD_TIMESTAMP}"
+        RegisterUrl = "harbor.deepfos.com"
+        RegistryCredential = "harbor.deepfos.com"
+    }
+    parameters {
+        gitParameter branchFilter: 'origin/(.*)', defaultValue: 'main', name: 'BRANCH_TAG', type: 'PT_BRANCH_TAG', quickFilterEnabled: true, useRepository: 'https://gitee.com/proinnova/deep-agent', requiredParameter: false, sortMode: 'DESCENDING_SMART'
+        choice name: 'AGENT', choices: ['java21-mvn3', 'java8-mvn3'], description: '选择jdk 版本'
+        choice name: 'PROFILE', choices: ['eureka', 'bes_jar,eureka', 'tong_jar,eureka', 'nacos', "k8s"], description: ''
+        choice name: 'RELOAD_PIPELINE', choices: ['false', 'true'], description: 'reload pipeline，do not build project'
+    }
+
+    stages {
+        stage('Git Checkout') {
+            steps {
+                checkout([$class: 'GitSCM', branches: [[name: "${BRANCH_TAG}"]], extensions: [[$class: 'CloneOption', noTags: false, reference: '', shallow: true, timeout: 30]], userRemoteConfigs: [[credentialsId: 'giteeKey', url: 'https://gitee.com/proinnova/deep-agent']]])
+            }
+        }
+        stage('RELOAD_PIPELINE') {
+            when {
+               allOf {
+                    environment name: 'RELOAD_PIPELINE', value: 'true'
+               }
+            }
+            steps {
+                sh """
+                   echo "load pipeline"
+                """
+            }
+        }
+        stage('Build') {
+            when {
+               allOf {
+                    environment name: 'RELOAD_PIPELINE', value: 'false'
+               }
+            }
+            steps {
+                script {
+                    env.NAMESPACE = sh(script: '''
+                        echo "${JOB_NAME}" | awk -F/ '{print $1}'
+                    ''', returnStdout: true).trim()
+                    sh '''
+                        
+                    lists=`ls`
+                    rm -rf ${JOB_BASE_NAME}/
+                    mkdir -p ${JOB_BASE_NAME}
+                    for item in $lists
+                    do
+                        mv $item ${JOB_BASE_NAME}/
+                    done
+                    cp /opt/nfs/python-whl/deepcube-${NAMESPACE}-cp38-abi3-linux_x86_64.whl ${JOB_BASE_NAME}/
+                    tar -czvf ${ArtifactsName} ${JOB_BASE_NAME}/
+
+                    '''
+                }
+            }
+        }
+
+        stage('Build Image') {
+            when {
+               allOf {
+                    environment name: 'RELOAD_PIPELINE', value: 'false'
+               }
+            }
+            steps {
+                script {
+                    
+   writeFile file: 'Dockerfile', text: '''
+FROM harbor.deepfos.com/base/python3.11.9:debian12
+ENV TZ=Asia/Shanghai
+
+ADD deep-agent.tar.gz /
+
+WORKDIR deep-agent
+
+RUN sed -i 's|mirrors.tuna.tsinghua.edu.cn|mirrors.aliyun.com|g' /etc/apt/sources.list &&\
+    apt update &&\
+    pip3 install -i  https://mirrors.aliyun.com/pypi/simple/ *.whl &&\
+    pip3 install -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple/ &&\
+    bash -x scripts/sandbox_venv/setup.sh
+
+CMD ["gunicorn", "-c", "deep_agent/gunicorn.conf.py", "deep_agent.main:app"]
+
+'''
+
+                    env.NAMESPACE = sh(script: '''
+                        echo "${JOB_NAME}" | awk -F/ '{print $1}'
+                    ''', returnStdout: true).trim()
+
+                    sh 'env'
+
+                    def dockerImage = docker.build("${env.NAMESPACE}/${env.NAME}:${env.NameTag}")
+
+                    docker.withRegistry("https://${env.RegisterUrl}", "${env.RegistryCredential}") {
+                        dockerImage.push()
+                    }
+                }
+            }
+        }
+
+        stage('RELEASE') {
+            when {
+               allOf {
+                    environment name: 'RELOAD_PIPELINE', value: 'false'
+               }
+            }
+            steps {
+                withKubeConfig([credentialsId: "${env.K8SCredentialsId}", serverUrl: "${env.K8SServerAPI}", namespace: "${env.NAMESPACE}"]) {
+                     sh """
+                        kubectl set image deployment/${env.NAME} ${env.NAME}="${env.RegisterUrl}/${env.NAMESPACE}/${env.NAME}:${env.NameTag}"
+                     """
+                }
+            }
+        }
+
+        stage('漏洞检测') {
+            when {
+               allOf {
+                    environment name: 'RELOAD_PIPELINE', value: 'false'
+               }
+            }
+
+            steps {
+                script {
+                    sh """
+                        /opt/nfs/trivy/trivy image --config /opt/nfs/trivy/trivy.yaml --skip-db-update --skip-java-db-update -f json --scanners vuln ${env.NAMESPACE}/${env.NAME}:${env.NameTag} |/opt/nfs/trivy/trivy report --excel-file 漏洞.xlsx
+                    """
+                    archiveArtifacts artifacts: '漏洞.xlsx', followSymlinks: false, onlyIfSuccessful: true
+                }
+            }
+        }
+    }
+}
+        

@@ -9,38 +9,38 @@ import {
   runCodeSource,
   shouldIngestTrajectoryEvent,
   trajectoryStats,
-} from "../../../frontend/console/trajectory.js";
+} from "../../../console/trajectory.js";
 
 const template = await readFile(
-  new URL("../../../frontend/console/workspace-template.html", import.meta.url),
+  new URL("../../../console/workspace-template.html", import.meta.url),
   "utf8",
 );
 const chatSource = await readFile(
-  new URL("../../../frontend/console/chat.js", import.meta.url),
+  new URL("../../../console/chat.js", import.meta.url),
   "utf8",
 );
 const workspaceCss = await readFile(
-  new URL("../../../frontend/console/workspace.css", import.meta.url),
+  new URL("../../../console/workspace.css", import.meta.url),
   "utf8",
 );
 const consoleCss = await readFile(
-  new URL("../../../frontend/console/console.css", import.meta.url),
+  new URL("../../../console/console.css", import.meta.url),
   "utf8",
 );
 const configurationCss = await readFile(
-  new URL("../../../frontend/console/configuration/configuration.css", import.meta.url),
+  new URL("../../../console/configuration/configuration.css", import.meta.url),
   "utf8",
 );
 const themesCss = await readFile(
-  new URL("../../../frontend/console/themes.css", import.meta.url),
+  new URL("../../../console/themes.css", import.meta.url),
   "utf8",
 );
 const trajectorySource = await readFile(
-  new URL("../../../frontend/console/trajectory.js", import.meta.url),
+  new URL("../../../console/trajectory.js", import.meta.url),
   "utf8",
 );
 const jsonViewSource = await readFile(
-  new URL("../../../frontend/console/json-view.js", import.meta.url),
+  new URL("../../../console/json-view.js", import.meta.url),
   "utf8",
 );
 
@@ -291,7 +291,7 @@ test("工作台以独立页签接入轨迹且默认对话链路不变", () => {
   assert.match(template, /data-trajectory-mode="calls"[\s\S]*data-lucide="wrench"/);
   assert.doesNotMatch(template, /id="trajectoryDetail"/);
   assert.match(chatSource, /createTrajectoryController\(\{ state \}\)/);
-  assert.match(chatSource, /trajectory\?\.setHistory\(eventResult\.response\.ok/);
+  assert.match(chatSource, /if \(events\.response\.ok\) trajectory\?\.setHistory\(events\.data\)/);
   assert.match(chatSource, /trajectory\?\.ingest\(\{ event: type, data \}\)/);
   assert.match(workspaceCss, /\.chat-view-tabs[\s\S]*border-radius:\s*8px/);
   assert.doesNotMatch(workspaceCss, /\.chat-view-tab\.active::after/);
@@ -398,21 +398,31 @@ test("轨迹JSON自动换行且只由详情正文承担滚动", () => {
   assert.match(workspaceCss, /\.trajectory-detail-body \.trajectory-json\s*\{[\s\S]*?max-height:\s*none;[\s\S]*?overflow:\s*visible;/);
 });
 
-test("Console自有样式不再使用低于12px的可读文字", () => {
+test("Console正文不低于12px，只有明确的辅助标签使用紧凑字号", () => {
   const lowFontDeclarations = (css) => {
     const sizes = [];
-    for (const match of css.matchAll(/font-size\s*:\s*(\d+(?:\.\d+)?)px/gi)) {
-      if (Number(match[1]) < 12) sizes.push(match[0]);
-    }
-    for (const match of css.matchAll(/(?<!-)font\s*:\s*([^;{}]+)/gi)) {
-      for (const size of match[1].matchAll(/(\d+(?:\.\d+)?)px/g)) {
-        if (Number(size[1]) < 12) sizes.push(match[0]);
+    const withoutComments = css.replace(/\/\*[\s\S]*?\*\//g, "");
+    for (const rule of withoutComments.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+      const selector = rule[1].trim();
+      for (const match of rule[2].matchAll(/font-size\s*:\s*(\d+(?:\.\d+)?)px/gi)) {
+        if (Number(match[1]) < 12) sizes.push([selector, match[0]]);
+      }
+      for (const match of rule[2].matchAll(/(?<!-)font\s*:\s*([^;{}]+)/gi)) {
+        for (const size of match[1].matchAll(/(\d+(?:\.\d+)?)px/g)) {
+          if (Number(size[1]) < 12) sizes.push([selector, match[0]]);
+        }
       }
     }
     return sizes;
   };
   assert.deepEqual(lowFontDeclarations(workspaceCss), []);
-  assert.deepEqual(lowFontDeclarations(consoleCss), []);
+  assert.deepEqual(lowFontDeclarations(consoleCss), [
+    [".console-rail .resource-group-label", "font-size: 11px"],
+    [".console-brand .console-brand-copy .connection-pill", "font-size: 10px"],
+    [".agent-name-line .agent-channel-badge", "font-size: 11px"],
+    ["#workspaceLegacyHost .session-list-footer", "font-size: 11px"],
+    [".inspector-facts .inspector-channel-badge", "font-size: 11px"],
+  ]);
   assert.deepEqual(lowFontDeclarations(configurationCss), []);
   assert.deepEqual(lowFontDeclarations(themesCss), []);
   assert.match(consoleCss, /\.agent-select-label[^}]*font-size:\s*14px/);

@@ -4,19 +4,19 @@ import test from "node:test";
 import vm from "node:vm";
 
 const source = await readFile(
-  new URL("../../../frontend/console/configuration/system-tools.js", import.meta.url),
+  new URL("../../../console/configuration/system-tools.js", import.meta.url),
   "utf8",
 );
 const indexHtml = await readFile(
-  new URL("../../../frontend/console/index.html", import.meta.url),
+  new URL("../../../console/index.html", import.meta.url),
   "utf8",
 );
 const templateHtml = await readFile(
-  new URL("../../../frontend/console/configuration-template.html", import.meta.url),
+  new URL("../../../console/configuration-template.html", import.meta.url),
   "utf8",
 );
 const configurationCss = await readFile(
-  new URL("../../../frontend/console/configuration/configuration.css", import.meta.url),
+  new URL("../../../console/configuration/configuration.css", import.meta.url),
   "utf8",
 );
 
@@ -46,9 +46,11 @@ function loadSystemToolsUi() {
 test("系统工具合并进内置工具目录", () => {
   const builtinPosition = indexHtml.indexOf('data-tab="builtin-tools"');
   const systemPosition = indexHtml.indexOf('data-tab="system-tools"');
-  const skillPosition = indexHtml.indexOf('data-tab="skills"');
+  const mcpPosition = indexHtml.indexOf('data-tab="mcp"');
+  const uiPosition = indexHtml.indexOf('data-tab="ui-tools"');
 
-  assert.ok(builtinPosition >= 0 && builtinPosition < skillPosition);
+  assert.ok(mcpPosition >= 0 && mcpPosition < builtinPosition);
+  assert.ok(builtinPosition < uiPosition);
   assert.equal(systemPosition, -1);
   assert.doesNotMatch(templateHtml, /id="panel-system-tools"/);
   assert.match(templateHtml, /id="panel-builtin-tools"[\s\S]*运行时系统工具[\s\S]*id="systemToolDomains"/);

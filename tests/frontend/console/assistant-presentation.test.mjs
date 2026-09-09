@@ -12,7 +12,7 @@ import {
   normalizePlanSnapshot,
   planPanelState,
   processDisclosureLabel,
-} from "../../../frontend/console/assistant-presentation.js";
+} from "../../../console/assistant-presentation.js";
 
 function recordingPresenter() {
   const calls = [];
@@ -38,19 +38,19 @@ function recordingPresenter() {
 }
 
 const chatSource = await readFile(
-  new URL("../../../frontend/console/chat.js", import.meta.url),
+  new URL("../../../console/chat.js", import.meta.url),
   "utf8",
 );
 const workspaceCss = await readFile(
-  new URL("../../../frontend/console/workspace.css", import.meta.url),
+  new URL("../../../console/workspace.css", import.meta.url),
   "utf8",
 );
 const workspaceTemplate = await readFile(
-  new URL("../../../frontend/console/workspace-template.html", import.meta.url),
+  new URL("../../../console/workspace-template.html", import.meta.url),
   "utf8",
 );
 const themesCss = await readFile(
-  new URL("../../../frontend/console/themes.css", import.meta.url),
+  new URL("../../../console/themes.css", import.meta.url),
   "utf8",
 );
 
@@ -99,18 +99,21 @@ test("思考过程是独立的二级折叠，默认关闭且正文不受影响",
     workspaceCss,
     /\.assistant-thinking\.open \.assistant-thinking-body\s*\{\s*display:\s*block;/,
   );
-  assert.match(chatSource, /class="thinking-heading"[\s\S]*lucideIcon\("brain"\)[\s\S]*lucideIcon\("chevron-down"\)/);
+  const thinkingHeader = chatSource.match(/<button type="button" class="assistant-thinking-head"[\s\S]*?<\/button>/)[0];
+  assert.match(thinkingHeader, /thinking-icon[\s\S]*lucideIcon\("brain"\)[\s\S]*thinking-title[\s\S]*thinking-chevron/);
+  assert.match(thinkingHeader, /class="spinner" role="status" aria-label="思考中"/);
+  assert.doesNotMatch(workspaceCss, /\.assistant-thinking \{[^}]*border-left:/);
   assert.match(
     workspaceCss,
-    /\.assistant-thinking \{[\s\S]*?padding-left: 12px;[\s\S]*?border-left: 2px solid var\(--accent-soft\);/,
+    /\.assistant-thinking-body \{[^}]*padding: 8px 0 8px 20px;[^}]*border-left: 2px solid var\(--accent-soft\);/,
   );
   assert.match(
     workspaceCss,
-    /\.assistant-thinking-head \{[\s\S]*?justify-content: space-between;[\s\S]*?min-height: 38px;/,
+    /\.assistant-thinking-head \{[^}]*min-height: 32px;/,
   );
   assert.match(
     workspaceCss,
-    /\.assistant-thinking \.thinking-content \{[\s\S]*?max-height: 50vh;[\s\S]*?padding: 10px 0 2px 20px;[\s\S]*?line-height: 1\.6;/,
+    /\.assistant-thinking \.thinking-content \{[\s\S]*?max-height: 50vh;[\s\S]*?padding: 0;[\s\S]*?line-height: 1\.6;/,
   );
   assert.doesNotMatch(chatSource, /thinkingBlock\.classList\.add\("open"\)/);
   assert.match(chatSource, /finalContent\.className = "assistant-final markdown streaming"/);
@@ -151,7 +154,7 @@ test("方案 A 使用线性文档层级并移除对话中的装饰性色块", ()
     workspaceCss,
     /:is\(\.assistant-final, \.assistant-process-text\) \.markdown-body > :last-child \{ margin-bottom: 0; \}/,
   );
-  assert.match(workspaceCss, /\.tool-search-block \{[\s\S]*?border-style: solid;/);
+  assert.match(workspaceCss, /\.tool-search-block \{[^}]*background: transparent;[^}]*border: 0;/);
   assert.match(
     workspaceCss,
     /\.tool-status-complete \{[^}]*color: var\(--text-faint\);/,
@@ -265,6 +268,42 @@ test("History 与 SSE 通过同一动作入口驱动思考、正文和工具", (
   );
   assert.ok(historyRecorder.calls.some(([method, value]) => method === "setFinalText" && value === "核对完成"));
   assert.ok(liveRecorder.calls.some(([method, value]) => method === "complete" && value === "核对完成"));
+});
+
+test("原生搜索实时文本和工具交错后仍由 final 输出完成正文", () => {
+  const recorder = recordingPresenter();
+  const frames = [
+    ["thinking", { item_id: "message:a:0", delta: "先核对来源" }],
+    ["text", { item_id: "message:a:1", delta: "正在查找" }],
+    ["tool_call", {
+      item_id: "tool:search-1", tool_call_id: "search-1", tool: "web_search",
+      source: "web", execution: "native", args: { query: "测试查询" },
+    }],
+    ["tool_result", {
+      item_id: "tool:search-1", tool_call_id: "search-1", tool: "web_search",
+      source: "web", execution: "native", result: { sources: [] },
+    }],
+    ["text", { item_id: "message:a:5", delta: "最后的" }],
+    ["text", { item_id: "message:a:5", delta: "完整回答。" }],
+    ["final", { status: "completed", output: "最后的完整回答。" }],
+  ];
+  for (const [type, data] of frames) {
+    applyAssistantPresentationActions(recorder.presenter, assistantActionsFromSse(type, data));
+  }
+
+  assert.deepEqual(
+    recorder.calls.filter(([method]) => ["appendText", "complete"].includes(method)),
+    [
+      ["appendText", "正在查找"],
+      ["appendText", "最后的"],
+      ["appendText", "完整回答。"],
+      ["complete", "最后的完整回答。"],
+    ],
+  );
+  assert.equal(recorder.calls.filter(([method]) => method === "addToolCall").length, 1);
+  assert.equal(recorder.calls.filter(([method]) => method === "addToolResult").length, 1);
+  assert.equal(recorder.calls.find(([method]) => method === "addToolCall")[1].execution, "native");
+  assert.deepEqual(recorder.calls.at(-1), ["complete", "最后的完整回答。"]);
 });
 
 test("展示动作覆盖多工具、撤回、失败、中断与 Deferred", () => {

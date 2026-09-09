@@ -2,44 +2,44 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-import { formatSessionIdSubtitle } from "../../../frontend/console/session-display.js";
+import { formatSessionIdSubtitle } from "../../../console/session-display.js";
 
 const template = await readFile(
-  new URL("../../../frontend/console/workspace-template.html", import.meta.url),
+  new URL("../../../console/workspace-template.html", import.meta.url),
   "utf8",
 );
 const chatSource = await readFile(
-  new URL("../../../frontend/console/chat.js", import.meta.url),
+  new URL("../../../console/chat.js", import.meta.url),
   "utf8",
 );
 const assistantPresentationSource = await readFile(
-  new URL("../../../frontend/console/assistant-presentation.js", import.meta.url),
+  new URL("../../../console/assistant-presentation.js", import.meta.url),
   "utf8",
 );
 const workspaceSource = await readFile(
-  new URL("../../../frontend/console/workspace.js", import.meta.url),
+  new URL("../../../console/workspace.js", import.meta.url),
   "utf8",
 );
 const consoleCss = await readFile(
-  new URL("../../../frontend/console/console.css", import.meta.url),
+  new URL("../../../console/console.css", import.meta.url),
   "utf8",
 );
 const workspaceCss = await readFile(
-  new URL("../../../frontend/console/workspace.css", import.meta.url),
+  new URL("../../../console/workspace.css", import.meta.url),
   "utf8",
 );
 const consoleIndex = await readFile(
-  new URL("../../../frontend/console/index.html", import.meta.url),
+  new URL("../../../console/index.html", import.meta.url),
   "utf8",
 );
 const contextSource = await readFile(
-  new URL("../../../frontend/console/context.js", import.meta.url),
+  new URL("../../../console/context.js", import.meta.url),
   "utf8",
 );
 
 globalThis.window = {};
 const { calculateInspectorPaneWidth } = await import(
-  new URL("../../../frontend/console/workspace.js", import.meta.url)
+  new URL("../../../console/workspace.js", import.meta.url)
 );
 
 test("会话标题第二行显示带前缀的完整会话 ID", () => {
@@ -87,11 +87,11 @@ test("会话详情使用会话、当前回合和上下文引用三页签", () =>
   assert.doesNotMatch(template, /<span>详情<\/span>/);
   assert.doesNotMatch(template, /<span>会话详情<\/span>/);
   assert.match(workspaceSource, /function toggleInspectorPane\(\)/);
-  assert.match(workspaceSource, /data-inspector-tab="session"[\s\S]*>会话<\/button>/);
-  assert.match(workspaceSource, /data-inspector-tab="run"[\s\S]*>当前回合<\/button>/);
-  assert.match(workspaceSource, /data-inspector-tab="context"[\s\S]*>上下文引用<\/button>/);
+  assert.match(workspaceSource, /data-inspector-tab="session"[\s\S]*>概览<\/button>/);
+  assert.match(workspaceSource, /data-inspector-tab="run"[\s\S]*>当前<\/button>/);
+  assert.match(workspaceSource, /data-inspector-tab="context"[\s\S]*>上下文<\/button>/);
   assert.doesNotMatch(workspaceSource, /metadata 不进入模型输入/);
-  assert.match(workspaceSource, /<strong>会话概览<\/strong>/);
+  assert.doesNotMatch(workspaceSource, /<strong>会话概览<\/strong>|自动推导|阈值与预留合并展示/);
   assert.match(workspaceSource, /inspector-session-group[\s\S]*<strong>请求 Header<\/strong>/);
   assert.match(workspaceSource, /inspector-tab-status[\s\S]*\$\{statusText\}/);
   assert.match(workspaceSource, /inspectorFactHtml\("Agent", agentIdentity/);
@@ -100,13 +100,13 @@ test("会话详情使用会话、当前回合和上下文引用三页签", () =>
   assert.match(workspaceSource, /inspectorFactHtml\("App \/ Space", requestScope/);
   assert.match(workspaceSource, /inspectorFact\("User ID"[\s\S]*identity\?\.user/);
   assert.match(workspaceSource, /<strong>上下文预算<\/strong>/);
-  assert.match(workspaceSource, /<strong>当前回合<\/strong>/);
-  assert.match(workspaceSource, /Conversation ID/);
+  assert.doesNotMatch(workspaceSource, /<strong>当前回合<\/strong>/);
+  assert.match(workspaceSource, /Conv\. ID/);
   assert.match(workspaceSource, /Run ID/);
   assert.match(workspaceSource, /缓存读取/);
   assert.match(workspaceSource, /缓存写入/);
   assert.match(workspaceSource, /Tool Search/);
-  assert.match(workspaceSource, /详细指标请查看运行日志/);
+  assert.doesNotMatch(workspaceSource, /详细指标请查看运行日志|只读 JSON<\/span>/);
   assert.match(workspaceSource, /value === null \|\| value === undefined/);
   assert.match(workspaceSource, /state\.lastRunMetrics/);
   assert.match(chatSource, /conversation_id/);
@@ -122,7 +122,7 @@ test("会话详情使用会话、当前回合和上下文引用三页签", () =>
 test("会话详情保留既有属性并用横向页签、键值列表与复合轨道展示", () => {
   for (const label of [
     "会话 ID", "会话统计", "App / Space", "Language", "User ID",
-    "Conversation ID", "Run ID", "请求", "本次使用", "预计剩余",
+    "Conv. ID", "Run ID", "请求", "本次使用", "预计剩余",
     "缓存读取", "缓存写入", "工具调用", "Tool Search", "耗时", "压缩",
     "压缩前", "压缩后", "压缩事件", "来源截止", "摘要模型", "更新时间", "估算方式",
   ]) {
@@ -133,7 +133,7 @@ test("会话详情保留既有属性并用横向页签、键值列表与复合�
   assert.match(consoleCss, /\.inspector-tabs button\s*\{[\s\S]*border: 0;[\s\S]*background: transparent;/);
   assert.match(consoleCss, /\.inspector-tabs button\[aria-selected="true"\]::after/);
   assert.match(consoleCss, /\.inspector-tab-panel \.inspector-section\s*\{[\s\S]*border: 0;[\s\S]*box-shadow: none/);
-  assert.match(consoleCss, /\.inspector-facts > div\s*\{[\s\S]*grid-template-columns: 82px minmax\(0, 1fr\);/);
+  assert.match(consoleCss, /\.inspector-facts > div\s*\{[\s\S]*grid-template-columns: 72px minmax\(0, 1fr\);/);
   assert.match(consoleCss, /\.inspector-facts > div\s*\{[\s\S]*border-bottom: 0;/);
   assert.match(consoleCss, /\.inspector-inline-metrics/);
   assert.match(consoleCss, /\.inspector-stacked-value/);
@@ -162,7 +162,6 @@ test("测试 App 使用锚定轻量浮层而不是抽屉", () => {
 });
 
 test("工作台所有宽度保持多栏交互并支持拖拽和键盘调宽", () => {
-  assert.match(consoleIndex, /id="agentPaneResizer"[\s\S]*data-resize-pane="agent"/);
   assert.match(consoleIndex, /id="inspectorPaneResizer"[\s\S]*data-resize-pane="inspector"/);
   assert.match(workspaceSource, /id = "sessionPaneResizer"/);
   assert.match(workspaceSource, /session: \{ min: 220, max: 420, initial: 300/);
@@ -219,12 +218,8 @@ test("Agent 使用自定义下拉并在切换后进入新对话", () => {
   assert.doesNotMatch(workspaceSource, /previousAgentBtn|nextAgentBtn|cycleWorkspaceAgent/);
   assert.match(workspaceSource, /id="refreshWorkspaceAgentsBtn"/);
   assert.doesNotMatch(workspaceSource, /id="workspaceAgentSelect"/);
-  assert.match(workspaceSource, /id="pinAgentPaneBtn"/);
-  assert.match(consoleIndex, /class="pane-heading-actions"/);
-  assert.match(consoleIndex, /id="unpinAgentPaneBtn"/);
   assert.doesNotMatch(consoleIndex, /class="agent-context-action"/);
-  assert.match(workspaceSource, /setAgentPanePinned\(false\)/);
-  assert.match(workspaceSource, /grid\.classList\.toggle\("agent-pinned", pinned\)/);
+  assert.doesNotMatch(workspaceSource + consoleIndex + consoleCss, /pinAgentPaneBtn|unpinAgentPaneBtn|setAgentPanePinned|agent-pinned|agent-pane|agentPaneResizer|consoleAgentList|agentSearchInput|console-agent-width/);
   assert.match(workspaceSource, /await api\.selectAgent\(agentId\)/);
   assert.match(chatSource, /async function selectAgent\(agentId\)/);
   assert.match(chatSource, /newChat\(agentId\);[\s\S]*await syncSessionsFromBackend\(\)/);
@@ -235,15 +230,10 @@ test("Agent 使用自定义下拉并在切换后进入新对话", () => {
   assert.match(workspaceSource, /refreshAgentWorkspace\(\)/);
   assert.match(workspaceSource, /sidebarHeader\?\.remove\(\)/);
   assert.doesNotMatch(workspaceSource, /sessionPanelSummary\.className/);
-  assert.match(consoleCss, /\.workspace-grid > \.agent-pane \{ display: none; \}/);
-  assert.match(consoleCss, /\.workspace-grid\.agent-pinned > \.agent-pane \{ display: flex; \}/);
-  assert.match(consoleCss, /\.workspace-grid\.agent-pinned #workspaceLegacyHost \.agent-switcher \{ display: none; \}/);
-  assert.match(consoleCss, /\.pane-heading > \.pane-heading-actions[\s\S]*flex-direction: row/);
   assert.match(consoleCss, /\.agent-select-trigger[\s\S]*border: 0;[\s\S]*background: transparent/);
   assert.match(consoleCss, /\.agent-select-menu[\s\S]*border-radius: 10px/);
   assert.match(consoleCss, /\.workspace-native-agent-select[\s\S]*clip-path: inset\(50%\)/);
   assert.match(consoleCss, /\.agent-switcher \.icon-action[\s\S]*border: 0;/);
-  assert.doesNotMatch(consoleCss, /#pinAgentPaneBtn \{ display: none; \}/);
 });
 
 test("会话头部与列表使用轻量圆角且图标无外框", () => {
@@ -313,9 +303,9 @@ test("输入框提供附件入口和圆环预算且不再暴露手动压缩", ()
   assert.doesNotMatch(chatSource, /context_compaction_target_ratio|safety_margin\s*=|predict.*output/i);
 });
 
-test("停止生成只请求正式取消接口并等待真实 cancelled 事件", () => {
-  assert.match(chatSource, /sessionApiUrl\(\{ id: sessionId, agentId \}, "\/cancel"\)/);
-  assert.match(chatSource, /body\.status === "cancel_requested"/);
+test("停止生成请求正式取消并有界核验，真实 cancelled 保留部分回答", () => {
+  assert.match(chatSource, /kind === "cancel" \? "\/cancel" : "\/run-status"/);
+  assert.match(chatSource, /await verifyStreamStop\(/);
   assert.match(chatSource, /case "cancelled":[\s\S]*assistantActionsFromSse\(type, data\)/);
   assert.match(
     chatSource,
@@ -361,8 +351,10 @@ test("普通聊天读取 History 投影且轨迹独立读取 Event API", () => {
   assert.match(chatSource, /sessionApiUrl\(session, "\/events"/);
   assert.match(chatSource, /after_sequence: afterSequence, limit: 500/);
   assert.match(chatSource, /page\.next_after_sequence/);
-  assert.match(chatSource, /normalizeConversationHistory\(await r\.json\(\)\)/);
-  assert.match(chatSource, /trajectory\?\.setHistory\(eventResult\.response\.ok/);
+  assert.match(chatSource, /normalizeConversationHistory\(await response\.json\(\)\)/);
+  assert.match(chatSource, /if \(events\.response\.ok\) trajectory\?\.setHistory\(events\.data\)/);
+  assert.match(chatSource, /historyThroughRun\(events\.data, runId, \{ baselineSequence \}\)/);
+  assert.match(chatSource, /trajectory\?\.setHistory\(history, \{ preserveView: trajectoryLoaded \}\)/);
   assert.doesNotMatch(chatSource, /projectSessionEvents|context_checkpoint|addContextCheckpointMarker/);
 });
 
@@ -373,10 +365,10 @@ test("会话标题由持久化 Event 实时更新且不再轮询或自动重命�
   assert.doesNotMatch(chatSource, /auto-rename-btn|自动重命名|JSON\.stringify\(\{ auto: true \}\)/);
 });
 
-test("会话列表保留活动时间并展示三项统计", () => {
+test("会话列表保留活动时间、回合与附件统计，不展示中间Loop计数", () => {
   assert.match(chatSource, /class="session-activity">\$\{escapeHtml\(activity\)\}/);
   assert.match(chatSource, /title="回合数"[^\n]*messages-square/);
-  assert.match(chatSource, /title="消息事件数"[^\n]*repeat-2/);
+  assert.doesNotMatch(chatSource, /title="消息事件数"[^\n]*repeat-2/);
   assert.match(chatSource, /title="附件数"[^\n]*paperclip/);
   assert.match(consoleCss, /\.session-item:not\(\.active\):hover\s*\{[^}]*border-color: color-mix[^}]*background:\s*var\(--bg\)[^}]*box-shadow:/);
 });
@@ -415,7 +407,7 @@ test("正常终态保留直播结果且只有异常断流恢复 History", () => 
   );
   assert.match(
     chatSource,
-    /if \(state\.refreshHistoryAfterStream\) \{[\s\S]*await refreshCurrentHistory\(\);/,
+    /if \(state\.sessionId && state\.refreshHistoryAfterStream\) \{[\s\S]*await boundedStreamRequest\(\(signal\) => refreshCurrentHistory\(\{ signal, isCurrent: current \}\)\);/,
   );
 });
 

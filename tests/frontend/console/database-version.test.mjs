@@ -4,19 +4,19 @@ import test from "node:test";
 import vm from "node:vm";
 
 const source = await readFile(
-  new URL("../../../frontend/console/configuration/core.js", import.meta.url),
+  new URL("../../../console/configuration/core.js", import.meta.url),
   "utf8",
 );
 const indexHtml = await readFile(
-  new URL("../../../frontend/console/index.html", import.meta.url),
+  new URL("../../../console/index.html", import.meta.url),
   "utf8",
 );
 const consoleCss = await readFile(
-  new URL("../../../frontend/console/console.css", import.meta.url),
+  new URL("../../../console/console.css", import.meta.url),
   "utf8",
 );
 const faviconSvg = await readFile(
-  new URL("../../../frontend/console/favicon.svg", import.meta.url),
+  new URL("../../../console/favicon.svg", import.meta.url),
   "utf8",
 );
 
@@ -57,8 +57,10 @@ test("非数字 revision 保留原始标识，缺失版本显示未知", () => {
 test("顶部连接状态不可展开且版本位于用户详情", () => {
   assert.match(
     indexHtml,
-    /<div class="console-runtime-status"[\s\S]*id="connStatus"[\s\S]*id="currentUserBtn"[\s\S]*class="user-popover user-account-popover"[\s\S]*id="productVersion"[\s\S]*id="databaseSchemaVersion"/,
+    /<div class="console-brand-copy">[\s\S]*<span class="connection-pill" id="connStatus"[\s\S]*<button[^>]*id="currentUserBtn"[^>]*aria-expanded="false"[\s\S]*class="user-popover user-account-popover"[\s\S]*id="productVersion"[\s\S]*id="databaseSchemaVersion"/,
   );
+  assert.equal((indexHtml.match(/id="connStatus"/g) || []).length, 1);
+  assert.doesNotMatch(indexHtml, /<(?:button|details)[^>]*id="connStatus"/);
   assert.doesNotMatch(indexHtml, /<details class="console-runtime-status"|runtime-status-popover/);
   assert.doesNotMatch(indexHtml, /class="resource-title"[\s\S]{0,240}databaseSchemaVersion/);
   assert.match(consoleCss, /\.user-account-popover\s*\{/);

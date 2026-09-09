@@ -21,7 +21,7 @@ from tests.helpers.sqlite_stores import (
     make_sqlite_stores,
 )
 from tests.integration.helpers.chat import mock_request_disconnect, parse_sse_events
-from tests.integration.helpers.models import text_only_model
+from tests.helpers.models import text_only_model
 
 
 _VALID_COMPACTION_SUMMARY = """## 1. Primary Request and Intent
@@ -434,6 +434,72 @@ class SessionModelOverrideIntegrationTests(unittest.IsolatedAsyncioTestCase):
             other_model_status.json()["compaction_event_id"],
             context_status["compaction_event_id"],
         )
+
+    async def test_manual_target_failure_is_failed_with_candidate_diagnostics(self) -> None:
+        history = [item for _ in range(3) for item in (
+            ModelRequest(parts=[UserPromptPart(content="背景" * 5000)]),
+            ModelResponse(parts=[TextPart(content="已完成" * 1000)]),
+        )]
+        store = get_context().store
+        await store.append(
+            self._session_id, history, agent_id=self._agent_id,
+            user_id="integration-test-user", turn_id="seed", run_id="seed",
+        )
+        before = await store.get_history(self._session_id, agent_id=self._agent_id)
+        # Valid structure but deliberately too large: validation must not be relaxed.
+        with patch("deep_agent.agent.factory._resolve_model", return_value=text_only_model(
+            _VALID_COMPACTION_SUMMARY + "\n" + "事实" * 30_000
+        )):
+            with mock_request_disconnect():
+                async with AsyncClient(transport=self._transport, base_url="http://test") as client:
+                    response = await client.post(
+                        f"/api/v1/sessions/{self._session_id}/compact",
+                        params={"agent_id": self._agent_id}, json={"model_id": self._model_b_id},
+                    )
+                    trajectory = await client.get(
+                        f"/api/v1/sessions/{self._session_id}/events",
+                        params={"agent_id": self._agent_id},
+                    )
+        result = parse_sse_events(response.text)[-1]
+        self.assertEqual(result["status"], "failed", result)
+        self.assertEqual(result["reason"], "target_not_met")
+        self.assertGreater(result["candidate_tokens"], result["target_tokens"])
+        self.assertEqual(result["before_tokens"], result["after_tokens"])
+        event = next(e for e in trajectory.json()["items"] if e["event_type"] == "compaction")
+        self.assertEqual(event["status"], "failed")
+        self.assertEqual(event["payload"]["error"]["code"], "target_not_met")
+        self.assertEqual(event["payload"]["budget"]["candidate_tokens"], result["candidate_tokens"])
+        self.assertIsNotNone(event["payload"]["summary_call"])
+        self.assertIsNone(event["payload"]["replacement"])
+        self.assertEqual(await store.get_history(self._session_id, agent_id=self._agent_id), before)
+
+    async def test_persisted_anchor_is_revalidated_before_commit(self) -> None:
+        store = get_context().store
+        history = [item for _ in range(3) for item in (
+            ModelRequest(parts=[UserPromptPart(content="背景" * 5000)]),
+            ModelResponse(parts=[TextPart(content="完成")]),
+        )]
+        await store.append(self._session_id, history, agent_id=self._agent_id,
+                           user_id="integration-test-user", turn_id="seed", run_id="seed")
+        before = await store.get_history(self._session_id, agent_id=self._agent_id)
+        with patch("deep_agent.agent.factory._resolve_model", return_value=text_only_model(_VALID_COMPACTION_SUMMARY)), patch(
+            "deep_agent.db.conversation._bounded_evidence", return_value=[{"name": "甲" * 50_000}]
+        ), mock_request_disconnect():
+            async with AsyncClient(transport=self._transport, base_url="http://test") as client:
+                response = await client.post(
+                    f"/api/v1/sessions/{self._session_id}/compact",
+                    params={"agent_id": self._agent_id}, json={"model_id": self._model_b_id},
+                )
+                trajectory = await client.get(f"/api/v1/sessions/{self._session_id}/events",
+                                              params={"agent_id": self._agent_id})
+        result = parse_sse_events(response.text)[-1]
+        self.assertEqual(result["reason"], "persisted_target_not_met", result)
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["after_tokens"], result["before_tokens"])
+        event = next(e for e in trajectory.json()["items"] if e["event_type"] == "compaction")
+        self.assertEqual(event["status"], "failed")
+        self.assertIsNone(event["payload"]["replacement"])
+        self.assertEqual(await store.get_history(self._session_id, agent_id=self._agent_id), before)
 
     async def test_manual_compaction_persistence_failure_closes_sse_and_event(self) -> None:
         history = []

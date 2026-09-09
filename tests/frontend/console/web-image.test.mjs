@@ -5,18 +5,18 @@ import test from "node:test";
 import {
   findWebImageReference,
   renderWebImagePreview,
-} from "../../../frontend/console/web-image.js";
+} from "../../../console/web-image.js";
 
 const chatSource = await readFile(
-  new URL("../../../frontend/console/chat.js", import.meta.url),
+  new URL("../../../console/chat.js", import.meta.url),
   "utf8",
 );
 const trajectorySource = await readFile(
-  new URL("../../../frontend/console/trajectory.js", import.meta.url),
+  new URL("../../../console/trajectory.js", import.meta.url),
   "utf8",
 );
 const workspaceCss = await readFile(
-  new URL("../../../frontend/console/workspace.css", import.meta.url),
+  new URL("../../../console/workspace.css", import.meta.url),
   "utf8",
 );
 

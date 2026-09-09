@@ -109,5 +109,5 @@ Console 通过平台综合权限接口判断当前用户是否为企业管理员
 ## 原型与生产代码
 
 原型位于 [`prototype/operations-console/`](prototype/operations-console/README.md)，只保留
-信息架构和视觉参考。实现和测试以 `frontend/console/`、`tests/frontend/console/`
+信息架构和视觉参考。实现和测试以 `console/`、`tests/frontend/console/`
 为准。

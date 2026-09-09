@@ -1,0 +1,83 @@
+from __future__ import annotations
+
+import os
+import unittest
+from unittest.mock import AsyncMock, patch
+
+from httpx import AsyncClient
+
+from deep_agent.core.context import get_context
+from deep_agent.schemas.channel import ChannelAccountUpdate
+from deep_agent.security import ConsoleAdminAuthorizer
+from tests.integration.test_channel_accounts_api import ChannelAccountsApiTests
+
+
+class ChannelSessionControlTests(unittest.IsolatedAsyncioTestCase):
+    asyncSetUp = ChannelAccountsApiTests.asyncSetUp
+    asyncTearDown = ChannelAccountsApiTests.asyncTearDown
+    request = ChannelAccountsApiTests.request
+    payload = ChannelAccountsApiTests.payload
+
+    async def prepare(self):
+        payload = self.payload()
+        payload["enabled"] = True
+        created = await self.request("POST", "/api/v1/channel-accounts", json=payload)
+        self.assertEqual(created.status_code, 201, created.text)
+        account_id = created.json()["id"]
+        resolved = await self.stores.channel.resolve_binding(account_id=account_id, peer_type="single", peer_id="external")
+        headers = {"user": "not-the-session-owner", "X-Deep-Agent-Channel-Account": account_id, "X-Deep-Agent-Channel-Token": "fixture-internal"}
+        return account_id, resolved.session, headers
+
+    async def test_commands_catalog_has_admin_gate_and_no_gateway_dependency(self):
+        with patch.dict(os.environ, {"DEEP_AGENT_CHANNEL_GATEWAY_URL": ""}):
+            response = await self.request("GET", "/api/v1/channel-commands")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([item["command"] for item in response.json()["commands"]], ["/help", "/new", "/stop", "/status", "/whoami"])
+        self.app.dependency_overrides.clear()
+        get_context().console_admin_authorizer = ConsoleAdminAuthorizer(AsyncMock(return_value=False))
+        denied = await self.request("GET", "/api/v1/channel-commands")
+        self.assertIn(denied.status_code, (401, 403, 503))
+
+    async def test_gateway_controls_owned_session_using_original_identity(self):
+        account_id, session, headers = await self.prepare()
+        active = get_context().active_runs.register(agent_id=self.agent_id, session_id=session.session_id, user_id="session-user", run_id="fixture-run")
+        self.addCleanup(get_context().active_runs.unregister, active)
+        await self.stores.channel.update_account(account_id, ChannelAccountUpdate(session_user_id="different-user", enabled=False))
+        with patch.dict(os.environ, {"DEEP_AGENT_CHANNEL_INTERNAL_TOKEN": "fixture-internal"}):
+            async with AsyncClient(transport=self.transport, base_url="http://test") as client:
+                url = f"/api/v1/sessions/{session.session_id}"
+                state = await client.get(url + "/run-status", headers=headers)
+                self.assertEqual(state.status_code, 200, state.text)
+                self.assertEqual(state.json()["run_id"], "fixture-run")
+                cancelled = await client.post(url + "/cancel", headers=headers)
+                self.assertEqual(cancelled.status_code, 200, cancelled.text)
+                self.assertEqual(cancelled.json()["status"], "cancel_requested")
+                state = await client.get(url + "/run-status", headers=headers)
+                self.assertEqual(state.json()["status"], "cancel_requested")
+
+    async def test_invalid_token_cross_channel_and_normal_user_are_denied(self):
+        account_id, session, headers = await self.prepare()
+        other = self.payload()
+        other.update(name="second", bot_id="another", enabled=True)
+        second = await self.request("POST", "/api/v1/channel-accounts", json=other)
+        with patch.dict(os.environ, {"DEEP_AGENT_CHANNEL_INTERNAL_TOKEN": "fixture-internal"}):
+            async with AsyncClient(transport=self.transport, base_url="http://test") as client:
+                for suffix, method in (("run-status", "GET"), ("cancel", "POST")):
+                    path = f"/api/v1/sessions/{session.session_id}/{suffix}"
+                    denied = await client.request(method, path, headers={**headers, "X-Deep-Agent-Channel-Token": "wrong"})
+                    self.assertEqual(denied.status_code, 401)
+                    denied = await client.request(method, path, headers={**headers, "X-Deep-Agent-Channel-Account": second.json()["id"]})
+                    self.assertEqual(denied.status_code, 404, denied.text)
+                    denied = await client.request(method, path, headers={"user": "wrong-user"})
+                    self.assertEqual(denied.status_code, 404)
+                    allowed = await client.request(method, path, headers={"user": "session-user"})
+                    self.assertEqual(allowed.status_code, 200, allowed.text)
+
+    async def test_session_list_and_detail_return_persisted_origin(self):
+        account_id, session, _ = await self.prepare()
+        detail = await self.request("GET", f"/api/v1/sessions/{session.session_id}", user="session-user")
+        self.assertEqual(detail.status_code, 200, detail.text)
+        self.assertEqual(detail.json()["channel"]["account_id"], account_id)
+        listing = await self.request("GET", "/api/v1/sessions", user="session-user")
+        self.assertEqual(listing.status_code, 200, listing.text)
+        self.assertEqual(listing.json()["items"][0]["channel"]["peer_id"], "external")

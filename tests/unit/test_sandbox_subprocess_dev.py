@@ -4,10 +4,10 @@ import asyncio
 import os
 import resource
 import signal
-import subprocess
 import sys
 import tempfile
 import unittest
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from deep_agent.sandbox.framing import encode_frame
@@ -21,18 +21,6 @@ from deep_agent.sandbox.subprocess_dev.rlimit import (
 )
 from deep_agent.sandbox.types import ExecuteRequest, SandboxInputFile
 from tests.helpers.sandbox import FAKE_SANDBOX_PYTHON, sandbox_test_python
-
-
-def _worker_pids() -> list[int]:
-    completed = subprocess.run(
-        ["pgrep", "-f", "deep_agent.sandbox.worker"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if completed.returncode != 0:
-        return []
-    return [int(pid) for pid in completed.stdout.split() if pid.strip()]
 
 
 class BuildWorkerEnvTests(unittest.TestCase):
@@ -87,6 +75,37 @@ class SubprocessBackendTests(unittest.IsolatedAsyncioTestCase):
 
     async def asyncTearDown(self) -> None:
         await self.backend.aclose()
+
+    @asynccontextmanager
+    async def _track_workers(self, backend=None):
+        """Track only children returned by this exact fixture backend instance."""
+        backend = backend or self.backend
+        original_spawn = backend._spawn_worker
+        workers: list[asyncio.subprocess.Process] = []
+        spawned = asyncio.Event()
+
+        async def spawn(*args, **kwargs):
+            worker = await original_spawn(*args, **kwargs)
+            workers.append(worker)
+            spawned.set()
+            return worker
+
+        try:
+            with patch.object(backend, "_spawn_worker", side_effect=spawn):
+                yield workers, spawned
+        finally:
+            # Assertions run before this fallback. A real leak still fails the
+            # test, but the failing fixture must not leave its own worker alive.
+            for worker in workers:
+                if worker.returncode is None:
+                    await backend._terminate_process_group(worker)
+
+    def _assert_workers_reaped(self, workers):
+        self.assertTrue(workers, "the test must actually spawn a sandbox worker")
+        for worker in workers:
+            self.assertIsNotNone(worker.returncode, f"fixture worker {worker.pid} was not reaped")
+            with self.assertRaises(ProcessLookupError, msg=f"fixture worker {worker.pid} is still alive"):
+                os.kill(worker.pid, 0)
 
     async def test_health_reports_no_security(self) -> None:
         health = await self.backend.health()
@@ -416,19 +435,20 @@ class SubprocessBackendTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("blocks non-public", private.error.message)
 
     async def test_timeout_returns_timeout_error(self) -> None:
-        result = await self.backend.execute(
-            ExecuteRequest(
-                request_id="timeout-1",
-                code="import time; time.sleep(30)",
-                inputs={},
-                timeout_ms=200,
+        async with self._track_workers() as (workers, _):
+            result = await self.backend.execute(
+                ExecuteRequest(
+                    request_id="timeout-1",
+                    code="import time; time.sleep(30)",
+                    inputs={},
+                    timeout_ms=200,
+                )
             )
-        )
-        self.assertEqual(result.status, "error")
-        assert result.error is not None
-        self.assertEqual(result.error.code, "TIMEOUT")
-        await asyncio.sleep(0.2)
-        self.assertEqual(_worker_pids(), [])
+            self.assertEqual(result.status, "error")
+            assert result.error is not None
+            self.assertEqual(result.error.code, "TIMEOUT")
+            self.assertEqual(len(workers), 1)
+            self._assert_workers_reaped(workers)
 
     async def test_cancel_kills_process_group(self) -> None:
         request = ExecuteRequest(
@@ -437,22 +457,51 @@ class SubprocessBackendTests(unittest.IsolatedAsyncioTestCase):
             inputs={},
             timeout_ms=120_000,
         )
-        task = asyncio.create_task(self.backend.execute(request))
-        for _ in range(50):
-            if _worker_pids():
-                break
-            await asyncio.sleep(0.05)
-        self.assertTrue(_worker_pids())
+        async with self._track_workers() as (workers, spawned):
+            task = asyncio.create_task(self.backend.execute(request))
+            try:
+                await asyncio.wait_for(spawned.wait(), timeout=5)
+                self.assertEqual(len(workers), 1)
+                self.assertIsNone(workers[0].returncode)
+                os.kill(workers[0].pid, 0)
+                task.cancel()
+                with self.assertRaises(asyncio.CancelledError):
+                    await asyncio.wait_for(task, timeout=5)
+                self._assert_workers_reaped(workers)
+            finally:
+                if not task.done():
+                    task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
 
-        task.cancel()
-        with self.assertRaises(asyncio.CancelledError):
-            await task
-
-        for _ in range(50):
-            if not _worker_pids():
-                break
-            await asyncio.sleep(0.05)
-        self.assertEqual(_worker_pids(), [])
+    async def test_worker_cleanup_check_does_not_count_another_backend_worker(self) -> None:
+        companion = SubprocessBackend(python_executable=sandbox_test_python(), max_concurrency=1)
+        try:
+            async with self._track_workers(companion) as (other_workers, other_spawned):
+                other_task = asyncio.create_task(companion.execute(ExecuteRequest(
+                    request_id="independent-fixture", code="import time; time.sleep(120)",
+                    inputs={}, timeout_ms=120_000,
+                )))
+                try:
+                    await asyncio.wait_for(other_spawned.wait(), timeout=5)
+                    async with self._track_workers() as (workers, _):
+                        result = await self.backend.execute(ExecuteRequest(
+                            request_id="owned-fixture-timeout", code="import time; time.sleep(30)",
+                            inputs={}, timeout_ms=200,
+                        ))
+                        self.assertEqual(result.error.code, "TIMEOUT")
+                        self.assertEqual(len(workers), 1)
+                        self._assert_workers_reaped(workers)
+                        self.assertNotEqual(workers[0].pid, other_workers[0].pid)
+                        self.assertIsNone(other_workers[0].returncode)
+                        os.kill(other_workers[0].pid, 0)
+                        with self.assertRaisesRegex(AssertionError, "was not reaped"):
+                            self._assert_workers_reaped(other_workers)
+                finally:
+                    other_task.cancel()
+                    await asyncio.gather(other_task, return_exceptions=True)
+                self._assert_workers_reaped(other_workers)
+        finally:
+            await companion.aclose()
 
     async def test_nonzero_exit_returns_execution_failed(self) -> None:
         with patch(

@@ -12,7 +12,7 @@ from pydantic_ai.messages import ImageUrl, ModelResponse, NativeToolReturnPart, 
 from pydantic_ai.capabilities import WebSearch
 from pydantic_ai.toolsets import CombinedToolset, FunctionToolset
 
-from deep_agent.code_mode.file_payload import CODE_MODE_METADATA_KEY
+from deep_agent.ptc.file_payload import CODE_MODE_METADATA_KEY
 from deep_agent.web.package import build_web_tool_package
 from deep_agent.web.runtime import (
     _search_duckduckgo,
@@ -187,7 +187,7 @@ class WebFetchSafetyTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertFalse(upstream.function.__self__.allow_local_urls)
         self.assertEqual(upstream.function.__self__.timeout, 30)
-        self.assertEqual(upstream.function.__self__.max_content_length, 50_000)
+        self.assertIsNone(upstream.function.__self__.max_content_length)
         self.assertEqual(upstream.function.__self__.max_download_bytes, 5 * 1024 * 1024)
         self.assertIsNone(upstream.function.__self__.headers)
 

@@ -75,6 +75,38 @@ class SkillApiTests(unittest.IsolatedAsyncioTestCase):
         reset_context()
         await self.engine.dispose()
 
+    async def test_long_resource_character_cursor_roundtrip_and_invalid_cursor(self) -> None:
+        original = "说明🙂" * 20_000
+        payload = io.BytesIO()
+        with zipfile.ZipFile(io.BytesIO(skill_zip())) as source, zipfile.ZipFile(payload, "w") as target:
+            for name in source.namelist():
+                data = original.encode("utf-8") if name.endswith("references/guide.md") else source.read(name)
+                target.writestr(name, data)
+        async with AsyncClient(transport=self.transport, base_url="http://test",
+                               headers=self.client_headers) as client:
+            installed = await client.post("/api/v1/skills", files={
+                "file": ("example-skill.zip", payload.getvalue(), "application/zip"),
+            })
+            self.assertEqual(installed.status_code, 201, installed.text)
+            endpoint = "/api/v1/skills/example-skill/resources/references/guide.md"
+            first = await client.get(endpoint)
+            self.assertEqual(first.status_code, 200, first.text)
+            first_page = first.json()
+            self.assertEqual((first_page["next_offset"], first_page["next_char_offset"]), (1, 50_000))
+            last = await client.get(endpoint, params={
+                "offset": first_page["next_offset"], "char_offset": first_page["next_char_offset"],
+            })
+            self.assertEqual(last.status_code, 200, last.text)
+            self.assertEqual(first_page["content"] + last.json()["content"], original)
+            self.assertFalse(last.json()["has_more"])
+            self.assertIsNone(last.json()["next_char_offset"])
+            self.assertEqual(last.json()["char_offset"], 50_000)
+            self.assertEqual(first_page["content_hash"], last.json()["content_hash"])
+            for char_offset in (-1, len(original), len(original) + 1, "invalid"):
+                with self.subTest(char_offset=char_offset):
+                    invalid = await client.get(endpoint, params={"char_offset": char_offset})
+                    self.assertEqual(invalid.status_code, 422, invalid.text)
+
     async def test_install_configure_read_and_delete_protection(self) -> None:
         async with AsyncClient(
             transport=self.transport,

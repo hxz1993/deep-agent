@@ -1,6 +1,6 @@
 # UI 工具扩展指南（Human-in-the-Loop）
 
-> **读者**：deep-agent **仓库贡献者**（需修改 `deep_agent/`、`frontend/` 代码）。
+> **读者**：deep-agent **仓库贡献者**（需修改 `src/deep_agent/`、`console/` 代码）。
 >
 > 若你仅**使用已部署的服务**、自建客户端或配置 Agent，请参阅
 > [`ui-tools-external.md`](ui-tools-external.md)。
@@ -39,8 +39,8 @@ sequenceDiagram
 | **Agent 配置** | 通过 `ui:<package>` 工具包编码决定本 Agent 可使用哪组 UI 工具 |
 | **Agent 指令** | 告诉模型何时应调用哪个 UI 工具 |
 
-内置 UI 工具定义在 [`deep_agent/capabilities/ui/builtin.py`](../../deep_agent/capabilities/ui/builtin.py)。
-前端控件在 [`frontend/console/chat.js`](../../frontend/console/chat.js) 的 `renderHitlWidget`。
+内置 UI 工具定义在 [`src/deep_agent/capabilities/ui/builtin.py`](../../src/deep_agent/capabilities/ui/builtin.py)。
+前端控件在 [`console/chat.js`](../../console/chat.js) 的 `renderHitlWidget`。
 
 ---
 
@@ -50,15 +50,15 @@ sequenceDiagram
 
 | # | 位置 | 做什么 |
 |---|------|--------|
-| 1 | `deep_agent/capabilities/ui/builtin.py` | 增加 `UIToolRecord`（name、description、JSON Schema、widget） |
-| 2 | `frontend/console/chat.js` → `BUILTIN_UI_TOOLS` | 把新工具名加入 Set |
-| 3 | `frontend/console/chat.js` → `renderHitlWidget` | 根据 `tool` 名渲染控件并调用 `onSubmit` |
+| 1 | `src/deep_agent/capabilities/ui/builtin.py` | 增加 `UIToolRecord`（name、description、JSON Schema、widget） |
+| 2 | `console/chat.js` → `BUILTIN_UI_TOOLS` | 把新工具名加入 Set |
+| 3 | `console/chat.js` → `renderHitlWidget` | 根据 `tool` 名渲染控件并调用 `onSubmit` |
 
 可选：
 
 - **Agent instructions**：说明何时调用新工具
 - **单元测试**：[`tests/unit/test_hitl_deferred.py`](../../tests/unit/test_hitl_deferred.py) 参考 deferred 流程
-- **样式**：[`frontend/console/workspace.css`](../../frontend/console/workspace.css) 中 `.hitl-*` 类
+- **样式**：[`console/workspace.css`](../../console/workspace.css) 中 `.hitl-*` 类
 
 ---
 
@@ -75,7 +75,7 @@ DeepAgent 会在 `ExternalToolset` 外补充两层保护：
 
 ### 3.1 示例：新增 `ask_user_text`
 
-在 [`builtin.py`](../../deep_agent/capabilities/ui/builtin.py) 中：
+在 [`builtin.py`](../../src/deep_agent/capabilities/ui/builtin.py) 中：
 
 **① 定义参数 JSON Schema**
 
@@ -143,7 +143,7 @@ UIToolRecord(
 
 ### 3.4 SSE 上的 `widget` / `metadata`（builtin 回退）
 
-流式 `tool_call` 与 `final.deferred` 事件上的 `widget`、`metadata` 由 [`registry.py`](../../deep_agent/capabilities/ui/registry.py) 的 `enrich_tool_event` / `enrich_deferred` 注入：
+流式 `tool_call` 与 `final.deferred` 事件上的 `widget`、`metadata` 由 [`registry.py`](../../src/deep_agent/capabilities/ui/registry.py) 的 `enrich_tool_event` / `enrich_deferred` 注入：
 
 - **manual 工具**：从 `load_ui_tool_hints()` 加载的数据库 hints 合并进事件。
 - **builtin 工具**（当前为 `builtin__confirm`、`builtin__choice`）：即使 DB 无对应行，也会在 hints 未命中时回退到 `builtin_ui_records()`，保证Agent已关联工具的SSE仍带`widget`供客户端渲染。
@@ -156,7 +156,7 @@ UIToolRecord(
 
 ### 4.1 注册工具名
 
-[`frontend/console/chat.js`](../../frontend/console/chat.js) 顶部：
+[`console/chat.js`](../../console/chat.js) 顶部：
 
 ```javascript
 const BUILTIN_UI_TOOLS = new Set(["builtin__confirm", "builtin__choice", "ask_user_text"]);
@@ -213,7 +213,7 @@ const BUILTIN_UI_TOOLS = new Set(["builtin__confirm", "builtin__choice", "ask_us
 
 ### 4.4 历史回放
 
-用户刷新页面后，[`renderHistory`](../../frontend/console/chat.js) 会对「有 `tool_call`、无 `tool_result`」的 UI 工具自动恢复交互控件，无需额外处理。
+用户刷新页面后，[`renderHistory`](../../console/chat.js) 会对「有 `tool_call`、无 `tool_result`」的 UI 工具自动恢复交互控件，无需额外处理。
 新增代码内置工具需要加入 `BUILTIN_UI_TOOLS`，并在 `renderHitlWidget` 中实现分支。
 
 ---
@@ -272,7 +272,7 @@ Content-Type: application/json
 
 ### 6.3 非流式接口
 
-`POST /api/v1/chat` 同样支持 `deferred_tool_results`；响应含 `status` / `deferred` 字段（见 [`schemas/chat.py`](../../deep_agent/schemas/chat.py)）。
+`POST /api/v1/chat` 同样支持 `deferred_tool_results`；响应含 `status` / `deferred` 字段（见 [`schemas/chat.py`](../../src/deep_agent/schemas/chat.py)）。
 
 ---
 
@@ -297,7 +297,7 @@ curl http://127.0.0.1:8000/api/v1/tools
 ### 7.3 单元测试
 
 ```bash
-python3.12 -m unittest tests.unit.test_hitl_deferred -v
+PYTHONPATH=src python3.12 -m unittest tests.unit.test_hitl_deferred -v
 ```
 
 可为新工具增加类似用例：TestModel `call_tools=["your_tool"]` → `final.status == "pending"` → 带 `DeferredToolResults` 续跑。
@@ -343,14 +343,14 @@ UI 工具适合确认、表单、选择器；业务 API 调用仍应使用 MCP�
 
 | 文件 | 说明 |
 |------|------|
-| [`deep_agent/capabilities/ui/builtin.py`](../../deep_agent/capabilities/ui/builtin.py) | `ui:builtin` 工具 schema |
-| [`deep_agent/capabilities/ui/registry.py`](../../deep_agent/capabilities/ui/registry.py) | UI 工具按包筛选、Toolset 组装与 SSE enrichment |
-| [`deep_agent/api/v1/tools.py`](../../deep_agent/api/v1/tools.py) | Agent 可选工具包目录 |
-| [`deep_agent/api/v1/ui_tool_packages.py`](../../deep_agent/api/v1/ui_tool_packages.py) | UI 工具包 CRUD 与引用保护 |
-| [`deep_agent/agent/runner.py`](../../deep_agent/agent/runner.py) | deferred run / pending final |
-| [`deep_agent/agent/deferred.py`](../../deep_agent/agent/deferred.py) | 序列化与 `DeferredToolResults` 转换 |
-| [`deep_agent/api/v1/chat.py`](../../deep_agent/api/v1/chat.py) | HTTP 入口 |
-| [`deep_agent/schemas/chat.py`](../../deep_agent/schemas/chat.py) | `DeferredToolResultItem` |
-| [`frontend/console/chat.js`](../../frontend/console/chat.js) | SSE、`renderHitlWidget`、`resumeDeferred` |
+| [`src/deep_agent/capabilities/ui/builtin.py`](../../src/deep_agent/capabilities/ui/builtin.py) | `ui:builtin` 工具 schema |
+| [`src/deep_agent/capabilities/ui/registry.py`](../../src/deep_agent/capabilities/ui/registry.py) | UI 工具按包筛选、Toolset 组装与 SSE enrichment |
+| [`src/deep_agent/api/v1/tools.py`](../../src/deep_agent/api/v1/tools.py) | Agent 可选工具包目录 |
+| [`src/deep_agent/api/v1/ui_tool_packages.py`](../../src/deep_agent/api/v1/ui_tool_packages.py) | UI 工具包 CRUD 与引用保护 |
+| [`src/deep_agent/agent/runner.py`](../../src/deep_agent/agent/runner.py) | deferred run / pending final |
+| [`src/deep_agent/agent/deferred.py`](../../src/deep_agent/agent/deferred.py) | 序列化与 `DeferredToolResults` 转换 |
+| [`src/deep_agent/api/v1/chat.py`](../../src/deep_agent/api/v1/chat.py) | HTTP 入口 |
+| [`src/deep_agent/schemas/chat.py`](../../src/deep_agent/schemas/chat.py) | `DeferredToolResultItem` |
+| [`console/chat.js`](../../console/chat.js) | SSE、`renderHitlWidget`、`resumeDeferred` |
 | [`sse-protocol.md`](sse-protocol.md) | SSE 协议 |
 | [`tests/unit/test_hitl_deferred.py`](../../tests/unit/test_hitl_deferred.py) | 单元测试 |

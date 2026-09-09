@@ -4,19 +4,19 @@ import test from "node:test";
 import vm from "node:vm";
 
 const source = await readFile(
-  new URL("../../../frontend/console/configuration/database-connection.js", import.meta.url),
+  new URL("../../../console/configuration/database-connection.js", import.meta.url),
   "utf8",
 );
 const indexHtml = await readFile(
-  new URL("../../../frontend/console/index.html", import.meta.url),
+  new URL("../../../console/index.html", import.meta.url),
   "utf8",
 );
 const templateHtml = await readFile(
-  new URL("../../../frontend/console/configuration-template.html", import.meta.url),
+  new URL("../../../console/configuration-template.html", import.meta.url),
   "utf8",
 );
 const styles = await readFile(
-  new URL("../../../frontend/console/configuration/configuration.css", import.meta.url),
+  new URL("../../../console/configuration/configuration.css", import.meta.url),
   "utf8",
 );
 
@@ -38,24 +38,22 @@ function loadUi() {
   return window.__DatabaseConnectionUI;
 }
 
-test("配置中心按 Agent 设置、系统设置和外部资源分组", () => {
-  const agentGroup = indexHtml.indexOf("Agent 设置");
-  const systemGroup = indexHtml.indexOf("系统设置");
-  const resourceGroup = indexHtml.indexOf("外部资源");
-  assert.ok(agentGroup >= 0 && agentGroup < systemGroup && systemGroup < resourceGroup);
-  assert.ok(indexHtml.indexOf('data-tab="ui-tools"') < systemGroup);
+test("数据库连接并入全局配置，不再提供独立目录", () => {
+  const systemGroup = indexHtml.indexOf(">系统</div>");
+  assert.ok(systemGroup > indexHtml.indexOf('data-tab="ui-tools"'));
   assert.ok(systemGroup < indexHtml.indexOf('data-tab="global-settings"'));
   assert.doesNotMatch(indexHtml, /data-tab="auxiliary-models"|辅助模型|辅助工具/);
-  assert.ok(indexHtml.indexOf('data-tab="database-connection"') < resourceGroup);
-  assert.ok(resourceGroup < indexHtml.indexOf('data-tab="catalog"'));
+  assert.doesNotMatch(indexHtml, /data-tab="database-connection"/);
+  assert.ok(systemGroup < indexHtml.indexOf('data-tab="catalog"'));
   assert.doesNotMatch(indexHtml, />模型资源</);
 });
 
-test("数据库连接页是只读安全摘要", () => {
-  assert.match(templateHtml, /id="panel-database-connection"/);
-  assert.match(templateHtml, /用户名、密码、连接参数和本地完整路径不会展示/);
+test("数据库信息在Web Search和运行设置之间以紧凑只读摘要展示", () => {
+  assert.doesNotMatch(templateHtml, /id="panel-database-connection"/);
+  assert.ok(templateHtml.indexOf('id="globalSettingsWebSearch"') < templateHtml.indexOf('id="globalSettingsDatabase"'));
+  assert.ok(templateHtml.indexOf('id="globalSettingsDatabase"') < templateHtml.indexOf('id="globalSettingsRuntime"'));
   const panelHtml = templateHtml.match(
-    /<section class="panel database-connection-panel"[\s\S]*?<\/section>/,
+    /<section class="global-settings-section" id="globalSettingsDatabase"[\s\S]*?<\/section>/,
   )?.[0] || "";
   assert.doesNotMatch(panelHtml, /type="password"|name="username"|保存数据库/);
 
@@ -73,9 +71,9 @@ test("数据库连接页是只读安全摘要", () => {
   assert.equal(loadUi().schemaBadgeText({ schema_version: "002" }), "V2");
   assert.match(html, /test-db/);
   assert.match(html, /deep_agent/);
-  assert.match(html, /已隐藏/);
-  assert.match(html, /database-connection-facts/);
-  assert.match(html, /database-safe-badge/);
+  assert.match(html, /用户名、密码、连接参数和本地完整路径不会展示/);
+  assert.match(html, /database-inline-facts/);
+  assert.doesNotMatch(html, /database-connection-card/);
   assert.doesNotMatch(html, /当前连接|database-connection-note|数据库结构/);
   assert.doesNotMatch(html, /input|textarea|保存/);
   assert.match(styles, /\.database-connection-card\s*\{[^}]*border-radius: 14px;[^}]*background: var\(--console-surface/);

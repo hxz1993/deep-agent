@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from deep_agent.api.v1.deps import build_runner_for_agent
-from deep_agent.agent.provider_registry import ProviderConfigurationError
+from deep_agent.models.provider_registry import ProviderConfigurationError
 from deep_agent.core.exceptions import AgentNotFoundError, LlmModelNotFoundError
 from deep_agent.db.models import Agent, ChatSession, LlmModel
 
@@ -51,6 +51,21 @@ def _ctx() -> AsyncMock:
 
 
 class BuildRunnerForAgentTests(unittest.IsolatedAsyncioTestCase):
+    async def test_channel_instructions_are_request_local_and_chinese(self):
+        model = _llm("00000000-0000-4000-8000-000000000010", "gpt-a")
+        agent = _agent(model_id=model.id)
+        ctx = _ctx()
+        ctx.stores.agent.get_by_id = AsyncMock(return_value=agent)
+        ctx.stores.llm_model.get_by_id = AsyncMock(return_value=model)
+        with patch("deep_agent.api.v1.deps._build_runner_from_spec", new_callable=AsyncMock) as build:
+            await build_runner_for_agent(ctx, agent.id, channel_type="wecom")
+            channel_spec = build.call_args.args[0]
+            self.assertIn("本轮消息来自企业微信", channel_spec.instructions)
+            self.assertIn("不同 sender_id 代表不同发言者", channel_spec.instructions)
+            await build_runner_for_agent(ctx, agent.id)
+            self.assertEqual(build.call_args.args[0].instructions, agent.prompt)
+            self.assertEqual(agent.prompt, "You are helpful.")
+
     async def test_uses_agent_default_model(self) -> None:
         default = _llm("00000000-0000-4000-8000-000000000010", "gpt-a")
         agent = _agent(model_id=default.id)

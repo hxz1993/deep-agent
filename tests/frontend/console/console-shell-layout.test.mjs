@@ -3,55 +3,60 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const index = await readFile(
-  new URL("../../../frontend/console/index.html", import.meta.url),
+  new URL("../../../console/index.html", import.meta.url),
   "utf8",
 );
 const template = await readFile(
-  new URL("../../../frontend/console/configuration-template.html", import.meta.url),
+  new URL("../../../console/configuration-template.html", import.meta.url),
   "utf8",
 );
 const agents = await readFile(
-  new URL("../../../frontend/console/configuration/agents.js", import.meta.url),
+  new URL("../../../console/configuration/agents.js", import.meta.url),
   "utf8",
 );
 const configurationCore = await readFile(
-  new URL("../../../frontend/console/configuration/core.js", import.meta.url),
+  new URL("../../../console/configuration/core.js", import.meta.url),
   "utf8",
 );
 const configurationModule = await readFile(
-  new URL("../../../frontend/console/configuration.js", import.meta.url),
+  new URL("../../../console/configuration.js", import.meta.url),
   "utf8",
 );
 const styles = await readFile(
-  new URL("../../../frontend/console/console.css", import.meta.url),
+  new URL("../../../console/console.css", import.meta.url),
   "utf8",
 );
 const configurationStyles = await readFile(
-  new URL("../../../frontend/console/configuration/configuration.css", import.meta.url),
+  new URL("../../../console/configuration/configuration.css", import.meta.url),
   "utf8",
 );
 const themes = await readFile(
-  new URL("../../../frontend/console/themes.css", import.meta.url),
+  new URL("../../../console/themes.css", import.meta.url),
   "utf8",
 );
 const catalogTemplate = await readFile(
-  new URL("../../../frontend/console/catalog-template.html", import.meta.url),
+  new URL("../../../console/catalog-template.html", import.meta.url),
   "utf8",
 );
 const systemTools = await readFile(
-  new URL("../../../frontend/console/configuration/system-tools.js", import.meta.url),
+  new URL("../../../console/configuration/system-tools.js", import.meta.url),
   "utf8",
 );
 
-test("原控制台把一级入口迁移到左侧图标栏且保留三个真实页面", () => {
+test("控制台合并为图文一级导航且保留三个真实页面", () => {
   assert.match(index, /<aside class="console-rail"[\s\S]*?<nav class="console-nav">/);
-  assert.match(index, /data-page="workspace"[\s\S]*?data-page="configuration"[\s\S]*?data-page="diagnostics"/);
+  assert.match(index, /data-page="workspace"[\s\S]*?class="resource-nav"[\s\S]*?class="console-nav-footer"[\s\S]*?data-page="diagnostics"[\s\S]*?title="接口文档"/);
+  assert.doesNotMatch(index, /data-page="configuration"|<aside class="resource-nav"/);
+  assert.match(styles, /--console-resource-nav-width: 0px/);
+  assert.match(styles, /\.console-rail \.resource-nav\s*\{[^}]*flex: 1 1 auto;[^}]*overflow: hidden auto;/);
   assert.doesNotMatch(index, /<header class="console-topbar">[\s\S]*?<nav class="console-nav"/);
   assert.match(styles, /grid-template-columns: var\(--console-rail-width\) minmax\(0, 1fr\)/);
   assert.match(index, /class="console-brand-icon"[\s\S]*favicon\.svg/);
   assert.doesNotMatch(index, /class="console-rail-brand"/);
-  assert.match(styles, /\.console-rail\s*\{[\s\S]*grid-row: 2;/);
-  assert.match(styles, /\.console-topbar\s*\{[\s\S]*grid-column: 1 \/ -1;/);
+  assert.match(styles, /\.console-rail\s*\{[\s\S]*grid-row: 1;/);
+  assert.doesNotMatch(index, /<header class="console-topbar">/);
+  assert.match(index, /class="console-brand-copy"[\s\S]*?id="connStatus"/);
+  assert.match(index, /class="console-rail-settings"[\s\S]*?id="consoleThemeBtn"[\s\S]*?id="currentUserBtn"[\s\S]*?<\/aside>/);
 });
 
 test("Agent 提供卡片和列表双视图并复用同一真实数据源", () => {
@@ -68,8 +73,8 @@ test("Agent 提供卡片和列表双视图并复用同一真实数据源", () =>
   assert.match(agents, /Agent 刷新失败/);
 });
 
-test("Agent 容器圆角收口且工具包卡片改为单列两行摘要", () => {
-  assert.match(styles, /#configurationHost #panel-agents\s*\{[^}]*overflow: clip;[^}]*border-radius: var\(--console-card-radius\) !important;/);
+test("Agent 页面使用直角且工具包卡片改为单列两行摘要", () => {
+  assert.match(styles, /#configurationHost #panel-agents\s*\{[^}]*overflow: clip;[^}]*border-radius: 0;/);
   assert.match(styles, /\.agent-editor-pane \.cap-grid\s*\{[^}]*grid-template-columns: minmax\(0, 1fr\);/);
   assert.match(styles, /\.agent-editor-pane\s*\{[^}]*display: flex;[^}]*overflow: hidden;/);
   assert.match(styles, /\.agent-editor-pane \.cap-panels\s*\{[^}]*flex: 1 1 auto;[^}]*max-height: none;[^}]*overflow: auto;/);
@@ -77,6 +82,21 @@ test("Agent 容器圆角收口且工具包卡片改为单列两行摘要", () =>
   assert.match(styles, /\.agent-editor-pane \.cap-grid\s*\{[^}]*flex: 1 1 auto;[^}]*align-content: start;/);
   assert.match(styles, /\.agent-editor-pane \.cap-card\s*\{[^}]*grid-template-columns: minmax\(0, 1fr\) auto;[^}]*min-height: 58px;/);
   assert.match(styles, /\.agent-editor-pane \.cap-card-desc\s*\{[^}]*-webkit-line-clamp: 1;/);
+});
+
+test("内容外壳四边无间距圆角，用户信息浮层不展示内部分割线", () => {
+  assert.match(index, /class="resource-group-label separated">系统<\/div>/);
+  assert.doesNotMatch(index, />环境设置</);
+  assert.match(styles, /--console-config-padding: 0px/);
+  assert.match(styles, /\.console-main \.workspace-grid,\s*\.console-main \.configuration-shell \{ padding: 0; border-radius: 0; \}/);
+  assert.match(styles, /#configurationHost > \.panel \{ border: 0; border-radius: 0; box-shadow: none; \}/);
+  assert.match(styles, /\.console-main \.workspace-grid\.inspector-hidden #workspaceLegacyHost > \.chat \{ border: 0 !important; border-radius: 0; box-shadow: none; \}/);
+  assert.doesNotMatch(styles, /\.user-popover-(?:heading|runtime > span) \{[^}]*border-bottom:/);
+  assert.doesNotMatch(styles, /#configurationHost > \.panel\s*\{[^}]*border-radius: var\(--console-card-radius\) !important/);
+  assert.match(styles, /--console-nav-surface: color-mix/);
+  assert.match(styles, /background: var\(--console-nav-surface\)/);
+  assert.match(styles, /#configurationHost \.panel-toolbar h2,[\s\S]*?font-size: 16px;\s*font-weight: 600;/);
+  assert.match(styles, /#configurationHost \.global-settings-section-title h3,[\s\S]*?font-size: 14px; font-weight: 600;/);
 });
 
 test("配置弹窗统一水平居中，Agent 独立编辑页仍保持页面层级", () => {
@@ -108,7 +128,7 @@ test("Agent 编辑使用独立页面层级而不是模态框", () => {
   assert.doesNotMatch(agents, /agentModal"\)\.showModal\(\)/);
   assert.match(agents, /放弃未保存的修改/);
   assert.match(styles, /dialog\.agent-editor-page\.console-detail-dialog\.modal-agent[\s\S]*?position: fixed/);
-  assert.match(styles, /inset: var\(--console-topbar\) 0 0 calc\(var\(--console-rail-width\) \+ var\(--console-resource-nav-width\) \+ var\(--console-config-padding\)\)/);
+  assert.match(styles, /inset: 0 0 0 calc\(var\(--console-rail-width\) \+ var\(--console-config-padding\)\)/);
   assert.match(styles, /\.agent-editor-page \.agent-editor-back[\s\S]*?border: 0;/);
   assert.match(styles, /\.agent-editor-header-actions[\s\S]*?justify-content: flex-end/);
   assert.match(configurationCore, /agentsAdmin\?\.isEditorOpen\?\.\(\)[\s\S]*agentsAdmin\.requestCloseEditor\(\)/);

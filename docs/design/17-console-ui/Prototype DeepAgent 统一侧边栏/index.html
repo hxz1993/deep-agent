@@ -1,0 +1,1012 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>DeepAgent 统一侧边栏布局原型</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --accent: #5852f5;
+      --accent-hover: #4b45df;
+      --accent-soft: #efefff;
+      --accent-border: #bbb8ff;
+      --page: #edf1f5;
+      --surface: #ffffff;
+      --surface-soft: #f6f8fa;
+      --surface-muted: #eef1f4;
+      --text: #242833;
+      --text-secondary: #5f6774;
+      --text-muted: #8a919d;
+      --border: #dce1e7;
+      --border-strong: #cfd6df;
+      --success: #258653;
+      --danger: #d34d5b;
+      --warning: #c57a19;
+      --sidebar-width: 248px;
+      --sidebar-collapsed-width: 72px;
+      --topbar-height: 56px;
+      --shadow-menu: 0 10px 30px rgba(35, 42, 58, .12);
+      font-family: Inter, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body { width: 100%; min-width: 0; height: 100%; margin: 0; }
+
+    body {
+      overflow: hidden;
+      color: var(--text);
+      background: var(--page);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    button, input, textarea, select { font: inherit; }
+    button { color: inherit; }
+    svg { display: block; width: 16px; height: 16px; stroke-width: 1.8; }
+
+    .app-shell {
+      display: grid;
+      width: 100%;
+      height: 100%;
+      grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+      grid-template-rows: var(--topbar-height) minmax(0, 1fr);
+      transition: grid-template-columns .18s ease;
+    }
+
+    .unified-sidebar {
+      position: relative;
+      z-index: 30;
+      display: flex;
+      min-width: 0;
+      grid-row: 1 / -1;
+      flex-direction: column;
+      overflow: hidden;
+      border-right: 1px solid var(--border);
+      background: var(--surface);
+      transition: width .18s ease, transform .2s ease;
+    }
+
+    .sidebar-brand {
+      display: flex;
+      min-height: var(--topbar-height);
+      align-items: center;
+      gap: 10px;
+      padding: 0 12px 0 16px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .brand-mark {
+      position: relative;
+      display: grid;
+      width: 30px;
+      height: 30px;
+      flex: 0 0 30px;
+      place-items: center;
+      overflow: hidden;
+      border-radius: 7px;
+      background: var(--accent);
+      color: #fff;
+    }
+
+    .brand-mark::before,
+    .brand-mark::after {
+      position: absolute;
+      width: 13px;
+      height: 11px;
+      border: 1.5px solid currentColor;
+      border-radius: 3px;
+      content: "";
+    }
+
+    .brand-mark::before { transform: translate(-3px, -2px); opacity: .7; }
+    .brand-mark::after { transform: translate(3px, 2px); }
+
+    .brand-copy { min-width: 0; flex: 1; }
+    .brand-copy strong { display: block; overflow: hidden; font-size: 15px; white-space: nowrap; text-overflow: ellipsis; }
+    .brand-copy span { display: block; color: var(--text-muted); font-size: 11px; white-space: nowrap; }
+
+    .icon-button,
+    .plain-button,
+    .primary-button,
+    .segmented button,
+    .nav-button,
+    .subnav-button,
+    .session-item,
+    .tab-button {
+      border: 0;
+      background: transparent;
+      cursor: pointer;
+    }
+
+    .icon-button {
+      display: inline-grid;
+      width: 30px;
+      height: 30px;
+      flex: 0 0 30px;
+      place-items: center;
+      border: 1px solid transparent;
+      border-radius: 5px;
+    }
+
+    .icon-button:hover { border-color: var(--border); background: var(--surface-soft); }
+
+    .primary-nav { display: grid; gap: 4px; padding: 12px 10px 10px; }
+
+    .nav-button,
+    .subnav-button {
+      position: relative;
+      display: flex;
+      min-width: 0;
+      height: 36px;
+      align-items: center;
+      gap: 10px;
+      padding: 0 11px;
+      border-radius: 5px;
+      color: var(--text-secondary);
+      text-align: left;
+    }
+
+    .nav-button svg,
+    .subnav-button svg { flex: 0 0 16px; }
+    .nav-button > span,
+    .subnav-button > span { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+
+    .nav-button:hover,
+    .subnav-button:hover { background: var(--surface-soft); color: var(--text); }
+
+    .nav-button.active {
+      color: var(--accent);
+      background: var(--accent-soft);
+      font-weight: 600;
+    }
+
+    .nav-button.active::before {
+      position: absolute;
+      top: 8px;
+      bottom: 8px;
+      left: 0;
+      width: 2px;
+      border-radius: 2px;
+      background: var(--accent);
+      content: "";
+    }
+
+    .context-divider { height: 1px; flex: 0 0 1px; margin: 0 12px; background: var(--border); }
+
+    .sidebar-context {
+      display: none;
+      min-height: 0;
+      flex: 1;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    body[data-mode="chat"] .sidebar-context-chat,
+    body[data-mode="config"] .sidebar-context-config { display: flex; }
+
+    .context-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 16px 8px;
+    }
+
+    .context-head strong { font-size: 12px; letter-spacing: .02em; }
+    .context-actions { display: flex; align-items: center; gap: 2px; }
+    .context-actions .icon-button { width: 26px; height: 26px; }
+
+    .agent-select {
+      display: flex;
+      height: 34px;
+      align-items: center;
+      gap: 8px;
+      margin: 0 12px 8px;
+      padding: 0 10px;
+      border: 1px solid var(--border-strong);
+      border-radius: 5px;
+      background: var(--surface);
+      cursor: pointer;
+    }
+
+    .agent-select .agent-symbol {
+      display: grid;
+      width: 20px;
+      height: 20px;
+      place-items: center;
+      border-radius: 4px;
+      color: var(--accent);
+      background: var(--accent-soft);
+    }
+
+    .agent-select strong { min-width: 0; flex: 1; overflow: hidden; font-size: 12px; white-space: nowrap; text-overflow: ellipsis; }
+    .agent-select > svg { width: 14px; height: 14px; color: var(--text-muted); }
+
+    .search-field {
+      display: flex;
+      height: 32px;
+      align-items: center;
+      gap: 7px;
+      margin: 0 12px 8px;
+      padding: 0 9px;
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      background: var(--surface-soft);
+      color: var(--text-muted);
+    }
+
+    .search-field svg { width: 14px; height: 14px; }
+    .search-field input { min-width: 0; flex: 1; border: 0; outline: 0; background: transparent; color: var(--text); }
+
+    .session-list { min-height: 0; flex: 1; overflow: auto; padding: 0 8px 10px; }
+
+    .session-item {
+      display: block;
+      width: 100%;
+      padding: 9px 10px;
+      border: 1px solid transparent;
+      border-radius: 5px;
+      color: var(--text-secondary);
+      text-align: left;
+    }
+
+    .session-item:hover { background: var(--surface-soft); }
+    .session-item.active { border-color: var(--accent-border); background: var(--accent-soft); color: var(--text); }
+    .session-title { display: block; overflow: hidden; font-size: 12px; white-space: nowrap; text-overflow: ellipsis; }
+    .session-meta { display: flex; align-items: center; justify-content: space-between; margin-top: 2px; color: var(--text-muted); font-size: 11px; }
+    .session-meta span:last-child { display: inline-flex; align-items: center; gap: 4px; }
+    .session-meta svg { width: 11px; height: 11px; }
+
+    .sidebar-group { padding: 10px 8px 0; }
+    .sidebar-group + .sidebar-group { margin-top: 4px; padding-top: 11px; border-top: 1px solid var(--border); }
+    .sidebar-group-label { padding: 0 8px 5px; color: var(--text-muted); font-size: 11px; white-space: nowrap; }
+    .subnav-button { width: 100%; height: 34px; }
+    .subnav-button.active { color: var(--accent); background: var(--accent-soft); font-weight: 600; }
+
+    .count-badge {
+      margin-left: auto;
+      padding: 1px 6px;
+      border-radius: 9px;
+      background: var(--surface-muted);
+      color: var(--text-muted);
+      font-size: 10px;
+      font-weight: 500;
+    }
+
+    .subnav-button.active .count-badge { background: #dcdbff; color: var(--accent); }
+
+    .config-scroll { min-height: 0; flex: 1; overflow: auto; padding-bottom: 10px; }
+
+    .sidebar-footer {
+      display: grid;
+      gap: 4px;
+      padding: 8px 10px 12px;
+      border-top: 1px solid var(--border);
+    }
+
+    .sidebar-collapsed .app-shell { grid-template-columns: var(--sidebar-collapsed-width) minmax(0, 1fr); }
+    .sidebar-collapsed .brand-copy,
+    .sidebar-collapsed .primary-nav .nav-button > span,
+    body.sidebar-collapsed .sidebar-context,
+    .sidebar-collapsed .sidebar-footer .nav-button > span { display: none; }
+    .sidebar-collapsed .sidebar-brand { padding: 0; justify-content: center; }
+    .sidebar-collapsed .sidebar-brand .icon-button { display: none; }
+    .sidebar-collapsed .primary-nav,
+    .sidebar-collapsed .sidebar-footer { padding-inline: 10px; }
+    .sidebar-collapsed .nav-button { justify-content: center; padding: 0; }
+    .sidebar-collapsed .context-divider { margin-inline: 10px; }
+
+    .topbar {
+      display: flex;
+      min-width: 0;
+      grid-column: 2;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      padding: 0 18px;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+    }
+
+    .topbar-left,
+    .topbar-actions { display: flex; min-width: 0; align-items: center; gap: 10px; }
+    .mobile-menu-button { display: none; }
+    .breadcrumbs { display: flex; min-width: 0; align-items: center; gap: 7px; }
+    .breadcrumbs span { color: var(--text-muted); }
+    .breadcrumbs strong { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+
+    .prototype-badge {
+      padding: 2px 7px;
+      border: 1px solid var(--accent-border);
+      border-radius: 10px;
+      background: var(--accent-soft);
+      color: var(--accent);
+      font-size: 10px;
+    }
+
+    .connection-pill {
+      display: inline-flex;
+      height: 28px;
+      align-items: center;
+      gap: 6px;
+      padding: 0 9px;
+      border-radius: 14px;
+      background: #edf8f1;
+      color: var(--success);
+      font-size: 11px;
+    }
+
+    .connection-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+
+    .user-avatar {
+      display: grid;
+      width: 30px;
+      height: 30px;
+      place-items: center;
+      border: 1px solid var(--border);
+      border-radius: 50%;
+      background: var(--surface-soft);
+      font-weight: 600;
+    }
+
+    .main-stage { min-width: 0; min-height: 0; grid-column: 2; overflow: hidden; padding: 10px; }
+    .view { display: none; width: 100%; height: 100%; }
+    .view.active { display: block; }
+
+    .surface {
+      min-width: 0;
+      min-height: 0;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: var(--surface);
+    }
+
+    .chat-layout { display: grid; height: 100%; grid-template-columns: minmax(440px, 1fr) minmax(270px, 310px); overflow: hidden; }
+    .chat-main { display: flex; min-width: 0; min-height: 0; flex-direction: column; border-right: 1px solid var(--border); }
+
+    .panel-head,
+    .page-head {
+      display: flex;
+      min-width: 0;
+      min-height: 52px;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 0 14px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .title-block { min-width: 0; }
+    .title-block h1,
+    .title-block h2 { margin: 0; font-size: 15px; line-height: 1.35; }
+    .title-block p { margin: 2px 0 0; overflow: hidden; color: var(--text-muted); font-size: 11px; white-space: nowrap; text-overflow: ellipsis; }
+    .title-block p code { color: var(--text-secondary); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+    .plain-button,
+    .primary-button {
+      display: inline-flex;
+      height: 32px;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding: 0 11px;
+      border: 1px solid var(--border-strong);
+      border-radius: 5px;
+      background: var(--surface);
+      white-space: nowrap;
+      cursor: pointer;
+    }
+
+    .plain-button:hover { border-color: var(--accent-border); color: var(--accent); background: var(--accent-soft); }
+    .primary-button { border-color: var(--accent); background: var(--accent); color: #fff; }
+    .primary-button:hover { border-color: var(--accent-hover); background: var(--accent-hover); }
+
+    .segmented { display: inline-flex; padding: 2px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-soft); }
+    .segmented button { height: 26px; padding: 0 10px; border-radius: 4px; color: var(--text-secondary); }
+    .segmented button.active { background: var(--surface); color: var(--accent); box-shadow: 0 1px 2px rgba(35, 42, 58, .08); }
+
+    .chat-stream { min-height: 0; flex: 1; overflow: auto; padding: 24px max(24px, 8vw) 10px; }
+    .day-divider { display: flex; align-items: center; gap: 10px; margin: 4px 0 22px; color: var(--text-muted); font-size: 11px; }
+    .day-divider::before,
+    .day-divider::after { height: 1px; flex: 1; background: var(--border); content: ""; }
+
+    .message { display: flex; margin-bottom: 20px; }
+    .message.user { justify-content: flex-end; }
+    .message-bubble { max-width: 72%; padding: 11px 13px; border: 1px solid var(--border); border-radius: 8px 8px 2px; background: var(--surface-muted); line-height: 1.65; }
+    .assistant-process { width: 100%; }
+    .process-summary { display: inline-flex; height: 28px; align-items: center; gap: 6px; padding: 0; font-weight: 600; }
+    .process-summary svg { width: 13px; height: 13px; }
+    .process-line { height: 1px; margin: -14px 0 14px 154px; background: var(--border); }
+    .assistant-copy { max-width: 720px; color: var(--text); line-height: 1.8; }
+    .assistant-copy p { margin: 0 0 8px; }
+    .assistant-copy ul { margin: 4px 0; padding-left: 20px; }
+
+    .composer-wrap { padding: 0 14px 14px; }
+    .composer { padding: 9px 10px 8px; border: 1px solid var(--border-strong); border-radius: 9px; background: var(--surface); box-shadow: 0 1px 2px rgba(35, 42, 58, .05); }
+    .composer textarea { width: 100%; min-height: 42px; resize: none; border: 0; outline: 0; color: var(--text); background: transparent; font-size: 13px; }
+    .composer-actions { display: flex; align-items: center; justify-content: space-between; }
+    .composer-actions > div { display: flex; align-items: center; gap: 5px; }
+    .send-button { width: 30px; height: 30px; border: 0; border-radius: 50%; background: var(--accent); color: #fff; cursor: pointer; }
+
+    .inspector { display: flex; min-width: 0; min-height: 0; flex-direction: column; }
+    .inspector-tabs { display: flex; height: 43px; align-items: flex-end; gap: 22px; padding: 0 14px; border-bottom: 1px solid var(--border); }
+    .tab-button { position: relative; height: 43px; padding: 0; color: var(--text-secondary); }
+    .tab-button.active { color: var(--accent); font-weight: 600; }
+    .tab-button.active::after { position: absolute; right: 0; bottom: -1px; left: 0; height: 2px; background: var(--accent); content: ""; }
+    .inspector-body { min-height: 0; overflow: auto; padding: 14px; }
+    .detail-section { padding-bottom: 14px; }
+    .detail-section + .detail-section { padding-top: 14px; border-top: 1px solid var(--border); }
+    .detail-section h3 { margin: 0 0 10px; font-size: 12px; }
+    .detail-row { display: grid; grid-template-columns: 78px minmax(0, 1fr); gap: 8px; margin: 8px 0; color: var(--text-secondary); font-size: 11px; }
+    .detail-row dt { color: var(--text-muted); }
+    .detail-row dd { min-width: 0; margin: 0; overflow-wrap: anywhere; }
+    .budget-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; }
+    .budget-item { padding: 8px; border-radius: 5px; background: var(--surface-soft); }
+    .budget-item span { display: block; color: var(--text-muted); font-size: 10px; }
+    .budget-item strong { font-size: 12px; }
+    .budget-track { position: relative; height: 6px; margin-top: 12px; overflow: hidden; border-radius: 3px; background: #dcece4; }
+    .budget-track span { display: block; width: 28%; height: 100%; background: var(--accent); }
+
+    .list-page { display: flex; height: 100%; min-height: 0; flex-direction: column; overflow: hidden; }
+    .page-head { min-height: 68px; padding: 0 18px; }
+    .page-head .title-block h1 { font-size: 18px; }
+    .page-actions { display: flex; align-items: center; gap: 8px; }
+    .page-search { width: 210px; margin: 0; }
+    .page-body { min-height: 0; flex: 1; overflow: auto; padding: 14px 18px 20px; }
+
+    .summary-strip { display: flex; align-items: center; gap: 22px; min-height: 38px; margin-bottom: 10px; padding: 0 2px; color: var(--text-secondary); }
+    .summary-strip strong { color: var(--text); }
+    .summary-strip .dot { width: 3px; height: 3px; border-radius: 50%; background: var(--text-muted); }
+
+    .agent-table { width: 100%; border-collapse: separate; border-spacing: 0; }
+    .agent-table th { padding: 8px 12px; border-bottom: 1px solid var(--border); color: var(--text-muted); font-size: 11px; font-weight: 500; text-align: left; }
+    .agent-table td { padding: 11px 12px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+    .agent-table tbody tr { cursor: pointer; }
+    .agent-table tbody tr:hover { background: var(--surface-soft); }
+    .agent-table tbody tr:last-child td { border-bottom: 0; }
+    .agent-name { display: flex; align-items: center; gap: 10px; }
+    .agent-icon { display: grid; width: 30px; height: 30px; flex: 0 0 30px; place-items: center; border-radius: 6px; color: var(--accent); background: var(--accent-soft); }
+    .agent-name strong { display: block; font-size: 12px; }
+    .agent-name span { display: block; color: var(--text-muted); font-size: 10px; }
+    .mini-badges { display: flex; flex-wrap: wrap; gap: 4px; }
+    .mini-badge { padding: 2px 6px; border-radius: 3px; background: var(--surface-muted); color: var(--text-secondary); font-size: 10px; }
+    .status-line { display: inline-flex; align-items: center; gap: 6px; color: var(--success); font-size: 11px; }
+    .status-line::before { width: 6px; height: 6px; border-radius: 50%; background: currentColor; content: ""; }
+    .row-actions { display: flex; justify-content: flex-end; gap: 4px; }
+    .row-actions .icon-button { width: 28px; height: 28px; }
+
+    .agent-editor { display: flex; height: 100%; min-height: 0; flex-direction: column; overflow: hidden; }
+    .editor-head { display: grid; min-height: 56px; grid-template-columns: 110px minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 0 14px; border-bottom: 1px solid var(--border); }
+    .back-button { justify-self: start; border: 0; background: transparent; padding: 0; }
+    .back-button:hover { color: var(--accent); }
+    .editor-title { min-width: 0; text-align: center; }
+    .editor-title strong { display: block; font-size: 14px; }
+    .editor-title span { display: block; overflow: hidden; color: var(--text-muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; white-space: nowrap; text-overflow: ellipsis; }
+    .editor-actions { display: flex; justify-content: flex-end; gap: 7px; }
+    .editor-workbench { display: grid; min-width: 780px; min-height: 0; flex: 1; grid-template-columns: minmax(310px, 40%) minmax(470px, 60%); overflow: auto; }
+    .editor-form { display: flex; min-height: 0; flex-direction: column; gap: 13px; padding: 16px; border-right: 1px solid var(--border); }
+    .field { display: grid; gap: 6px; }
+    .field label { display: flex; align-items: center; justify-content: space-between; color: var(--text-secondary); font-size: 11px; }
+    .field label span { color: var(--text-muted); }
+    .field input,
+    .field select,
+    .field textarea { width: 100%; border: 1px solid var(--border-strong); border-radius: 5px; outline: 0; background: var(--surface); color: var(--text); }
+    .field input,
+    .field select { height: 34px; padding: 0 10px; }
+    .field textarea { min-height: 286px; flex: 1; resize: none; padding: 10px; line-height: 1.6; }
+    .field-grow { min-height: 0; flex: 1; }
+    .field-grow textarea { height: 100%; }
+
+    .editor-resources { display: flex; min-height: 0; flex-direction: column; overflow: hidden; }
+    .resource-tabs { display: flex; flex: 0 0 auto; align-items: center; gap: 6px; padding: 12px 16px 0; overflow-x: auto; }
+    .resource-tab { display: inline-flex; height: 32px; flex: 0 0 auto; align-items: center; gap: 7px; padding: 0 11px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--text-secondary); white-space: nowrap; cursor: pointer; }
+    .resource-tab.active { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+    .resource-tab small { padding: 1px 5px; border-radius: 8px; background: var(--surface-muted); color: var(--text-muted); }
+    .resource-tab.active small { background: #dcdbff; color: var(--accent); }
+    .resource-toolbar { display: flex; height: 42px; align-items: center; justify-content: space-between; padding: 0 18px; color: var(--text-muted); font-size: 11px; }
+    .resource-toolbar div { display: flex; gap: 12px; }
+    .link-button { border: 0; background: transparent; color: var(--accent); cursor: pointer; }
+    .resource-list { min-height: 0; flex: 1; overflow: auto; padding: 0 16px 16px; }
+    .resource-panel { display: none; }
+    .resource-panel.active { display: block; }
+    .resource-card { display: grid; min-height: 62px; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 11px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface); }
+    .resource-card + .resource-card { margin-top: 8px; }
+    .resource-card.selected { border-color: var(--accent-border); background: var(--accent-soft); }
+    .switch { position: relative; width: 30px; height: 18px; border-radius: 9px; background: #7b8491; }
+    .switch::after { position: absolute; top: 3px; left: 3px; width: 12px; height: 12px; border-radius: 50%; background: #fff; content: ""; box-shadow: 0 1px 2px rgba(24, 28, 38, .22); }
+    .selected .switch { background: var(--accent); }
+    .selected .switch::after { left: 15px; }
+    .resource-card h3 { margin: 0; font-size: 12px; }
+    .resource-card p { margin: 2px 0 0; color: var(--text-muted); font-size: 11px; }
+    .resource-card-meta { color: var(--text-muted); font-size: 11px; white-space: nowrap; }
+
+    .resource-empty { display: grid; min-height: 270px; place-items: center; color: var(--text-muted); text-align: center; }
+    .resource-empty svg { width: 24px; height: 24px; margin: 0 auto 8px; }
+
+    .generic-layout { display: grid; gap: 12px; grid-template-columns: minmax(0, 1fr) 300px; }
+    .generic-list,
+    .generic-inspector { border: 1px solid var(--border); border-radius: 7px; background: var(--surface); }
+    .generic-list header,
+    .generic-inspector header { height: 38px; padding: 0 12px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border); }
+    .generic-list-row { display: grid; min-height: 52px; grid-template-columns: minmax(0, 1fr) 120px 80px; align-items: center; gap: 12px; padding: 0 12px; border-bottom: 1px solid var(--border); }
+    .generic-list-row:last-child { border-bottom: 0; }
+    .generic-list-row strong { display: block; font-size: 12px; }
+    .generic-list-row span { color: var(--text-muted); font-size: 10px; }
+    .generic-inspector .inspector-body { padding: 12px; }
+
+    .notes-dialog {
+      width: min(560px, calc(100vw - 32px));
+      padding: 0;
+      border: 1px solid var(--border-strong);
+      border-radius: 9px;
+      color: var(--text);
+      background: var(--surface);
+      box-shadow: var(--shadow-menu);
+    }
+    .notes-dialog::backdrop { background: rgba(32, 38, 50, .3); }
+    .notes-dialog header { display: flex; height: 48px; align-items: center; justify-content: space-between; padding: 0 14px; border-bottom: 1px solid var(--border); }
+    .notes-dialog header strong { font-size: 14px; }
+    .notes-dialog .dialog-body { padding: 14px 16px; }
+    .notes-dialog ol { margin: 0; padding-left: 19px; }
+    .notes-dialog li + li { margin-top: 10px; }
+    .notes-dialog footer { display: flex; justify-content: flex-end; padding: 10px 14px; border-top: 1px solid var(--border); }
+
+    .toast {
+      position: fixed;
+      z-index: 80;
+      right: 18px;
+      bottom: 18px;
+      transform: translateY(12px);
+      padding: 8px 12px;
+      border: 1px solid var(--border-strong);
+      border-radius: 6px;
+      opacity: 0;
+      background: var(--surface);
+      box-shadow: var(--shadow-menu);
+      pointer-events: none;
+      transition: opacity .15s ease, transform .15s ease;
+    }
+    .toast.show { transform: translateY(0); opacity: 1; }
+
+    .mobile-overlay { display: none; }
+
+    body.dark {
+      color-scheme: dark;
+      --page: #15181e;
+      --surface: #1d2129;
+      --surface-soft: #232832;
+      --surface-muted: #292f3a;
+      --text: #eef1f6;
+      --text-secondary: #b8bfca;
+      --text-muted: #838c99;
+      --border: #303744;
+      --border-strong: #3a4352;
+      --accent-soft: #292754;
+      --accent-border: #6662bd;
+    }
+    body.dark .connection-pill { background: #1f372c; }
+    body.dark .selected .switch { background: var(--accent); }
+
+    @media (max-width: 1120px) {
+      .chat-layout { grid-template-columns: minmax(430px, 1fr); }
+      .inspector { display: none; }
+      .chat-main { border-right: 0; }
+      .page-search { width: 170px; }
+    }
+
+    @media (max-width: 900px) {
+      .app-shell,
+      .sidebar-collapsed .app-shell { grid-template-columns: minmax(0, 1fr); }
+      .unified-sidebar { position: fixed; top: 0; bottom: 0; left: 0; width: 264px; transform: translateX(-100%); box-shadow: var(--shadow-menu); }
+      .sidebar-open .unified-sidebar { transform: translateX(0); }
+      .sidebar-collapsed .brand-copy,
+      .sidebar-collapsed .primary-nav .nav-button > span,
+      .sidebar-collapsed .sidebar-context,
+      .sidebar-collapsed .sidebar-footer .nav-button > span { display: initial; }
+      .sidebar-collapsed .sidebar-context { display: none; }
+      .sidebar-collapsed[data-mode="chat"] .sidebar-context-chat,
+      .sidebar-collapsed[data-mode="config"] .sidebar-context-config { display: flex; }
+      .sidebar-collapsed .sidebar-brand { padding: 0 12px 0 16px; justify-content: flex-start; }
+      .sidebar-collapsed .sidebar-brand .icon-button { display: inline-grid; }
+      .sidebar-collapsed .nav-button { justify-content: flex-start; padding: 0 11px; }
+      .topbar,
+      .main-stage { grid-column: 1; }
+      .mobile-menu-button { display: inline-grid; }
+      .mobile-overlay { position: fixed; z-index: 25; inset: 0; background: rgba(28, 33, 43, .28); }
+      .sidebar-open .mobile-overlay { display: block; }
+      .main-stage { padding: 7px; }
+      .page-head { align-items: flex-start; padding-block: 10px; }
+      .page-actions .page-search,
+      .page-actions .segmented { display: none; }
+      .editor-workbench { min-width: 700px; }
+    }
+
+    @media (max-width: 640px) {
+      .topbar { padding-inline: 10px; }
+      .prototype-badge,
+      .connection-pill span:last-child { display: none; }
+      .page-head .title-block p { max-width: 210px; }
+      .page-actions .plain-button { display: none; }
+      .chat-stream { padding-inline: 16px; }
+      .message-bubble { max-width: 88%; }
+      .generic-layout { grid-template-columns: 1fr; }
+      .generic-inspector { display: none; }
+    }
+  </style>
+</head>
+<body data-mode="chat">
+  <div class="app-shell">
+    <aside class="unified-sidebar" aria-label="统一导航边栏">
+      <div class="sidebar-brand">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <div class="brand-copy"><strong>DeepAgent</strong><span>一体化控制台</span></div>
+        <button class="icon-button" id="collapseSidebar" type="button" title="收起边栏" aria-label="收起边栏"><i data-lucide="panel-left-close"></i></button>
+      </div>
+
+      <nav class="primary-nav" aria-label="主页面">
+        <button class="nav-button active" type="button" data-primary="chat" data-view="chat"><i data-lucide="message-square-code"></i><span>对话</span></button>
+        <button class="nav-button" type="button" data-primary="config" data-view="agents"><i data-lucide="bot"></i><span>Agent</span></button>
+      </nav>
+
+      <div class="context-divider"></div>
+
+      <section class="sidebar-context sidebar-context-chat" aria-label="会话目录">
+        <div class="context-head">
+          <strong>最近会话</strong>
+          <div class="context-actions">
+            <button class="icon-button" type="button" title="刷新会话"><i data-lucide="refresh-cw"></i></button>
+            <button class="icon-button" type="button" title="新建会话"><i data-lucide="square-pen"></i></button>
+          </div>
+        </div>
+        <button class="agent-select" type="button">
+          <span class="agent-symbol"><i data-lucide="bot"></i></span>
+          <strong>乳鸽测试</strong>
+          <i data-lucide="chevrons-up-down"></i>
+        </button>
+        <label class="search-field"><i data-lucide="search"></i><input type="search" placeholder="搜索当前 Agent 会话" /></label>
+        <div class="session-list">
+          <button class="session-item active" type="button">
+            <span class="session-title">网页图片发送企微机器人</span>
+            <span class="session-meta"><span>今天 12:44</span><span><i data-lucide="messages-square"></i>32</span></span>
+          </button>
+          <button class="session-item" type="button"><span class="session-title">获取 DeepFOS 图片发送企微</span><span class="session-meta"><span>今天 10:43</span><span><i data-lucide="messages-square"></i>11</span></span></button>
+          <button class="session-item" type="button"><span class="session-title">获取网页图片发送企微</span><span class="session-meta"><span>昨天 23:29</span><span><i data-lucide="messages-square"></i>30</span></span></button>
+          <button class="session-item" type="button"><span class="session-title">PTC 文件中转回归（迭代前）</span><span class="session-meta"><span>昨天 18:46</span><span><i data-lucide="messages-square"></i>45</span></span></button>
+          <button class="session-item" type="button"><span class="session-title">企微机器人发送图片</span><span class="session-meta"><span>昨天 18:17</span><span><i data-lucide="messages-square"></i>11</span></span></button>
+          <button class="session-item" type="button"><span class="session-title">用户初次问候</span><span class="session-meta"><span>昨天 11:18</span><span><i data-lucide="messages-square"></i>2</span></span></button>
+          <button class="session-item" type="button"><span class="session-title">DeepFOS 文档图片介绍请求</span><span class="session-meta"><span>昨天 09:14</span><span><i data-lucide="messages-square"></i>26</span></span></button>
+        </div>
+      </section>
+
+      <section class="sidebar-context sidebar-context-config" aria-label="Agent 配置目录">
+        <div class="context-head"><strong>Agent 配置</strong></div>
+        <div class="config-scroll">
+          <div class="sidebar-group">
+            <div class="sidebar-group-label">运行基础</div>
+            <button class="subnav-button" type="button" data-view="providers" data-resource="Provider"><i data-lucide="waypoints"></i><span>Provider</span><small class="count-badge">3</small></button>
+            <button class="subnav-button" type="button" data-view="catalog" data-resource="模型目录"><i data-lucide="library"></i><span>模型目录</span></button>
+          </div>
+          <div class="sidebar-group">
+            <div class="sidebar-group-label">能力资源</div>
+            <button class="subnav-button" type="button" data-view="builtin" data-resource="内置工具"><i data-lucide="blocks"></i><span>内置工具</span><small class="count-badge">4</small></button>
+            <button class="subnav-button" type="button" data-view="mcp" data-resource="MCP"><i data-lucide="plug"></i><span>MCP</span><small class="count-badge">6</small></button>
+            <button class="subnav-button" type="button" data-view="ui-tools" data-resource="UI 工具"><i data-lucide="panel-top"></i><span>UI 工具</span><small class="count-badge">3</small></button>
+            <button class="subnav-button" type="button" data-view="skills" data-resource="Skill"><i data-lucide="book-open-check"></i><span>Skill</span><small class="count-badge">4</small></button>
+          </div>
+          <div class="sidebar-group">
+            <div class="sidebar-group-label">系统设置</div>
+            <button class="subnav-button" type="button" data-view="global" data-resource="全局配置"><i data-lucide="settings-2"></i><span>全局配置</span></button>
+            <button class="subnav-button" type="button" data-view="database" data-resource="数据库连接"><i data-lucide="database"></i><span>数据库连接</span></button>
+          </div>
+        </div>
+      </section>
+
+      <div class="sidebar-footer">
+        <button class="nav-button" type="button" data-view="diagnostics"><i data-lucide="activity"></i><span>诊断中心</span></button>
+        <button class="nav-button" type="button" id="openNotes"><i data-lucide="info"></i><span>原型说明</span></button>
+      </div>
+    </aside>
+
+    <header class="topbar">
+      <div class="topbar-left">
+        <button class="icon-button mobile-menu-button" id="mobileMenu" type="button" aria-label="打开边栏"><i data-lucide="menu"></i></button>
+        <div class="breadcrumbs"><span>DeepAgent</span><i data-lucide="chevron-right"></i><strong id="pageTitle">对话</strong></div>
+        <span class="prototype-badge">布局原型</span>
+      </div>
+      <div class="topbar-actions">
+        <span class="connection-pill"><span class="connection-dot"></span><span>已连接</span></span>
+        <button class="icon-button" id="themeToggle" type="button" title="切换明暗主题"><i data-lucide="sun-moon"></i></button>
+        <span class="user-avatar" title="当前用户：周文俊">周</span>
+      </div>
+    </header>
+
+    <main class="main-stage">
+      <section class="view active" id="view-chat">
+        <div class="surface chat-layout">
+          <section class="chat-main">
+            <header class="panel-head">
+              <div class="title-block">
+                <h2>网页图片发送企微机器人</h2>
+                <p>会话 ID：<code>f8ff311610b341ff83d6c21330e46022</code></p>
+              </div>
+              <div class="page-actions">
+                <div class="segmented"><button class="active" type="button">对话</button><button type="button">轨迹</button></div>
+                <button class="plain-button" type="button"><i data-lucide="test-tube-2"></i>测试 App</button>
+                <button class="icon-button" type="button" title="复制会话 ID" data-copy-session><i data-lucide="copy"></i></button>
+              </div>
+            </header>
+            <div class="chat-stream">
+              <div class="day-divider">今天</div>
+              <div class="message user"><div class="message-bubble">了解一下这个网页，然后拿到最后一张图片，以图片格式发送到企微机器人。</div></div>
+              <div class="message assistant">
+                <div class="assistant-process">
+                  <button class="process-summary" type="button"><i data-lucide="chevron-down"></i>已处理 · 用时 2分50秒</button>
+                  <div class="process-line"></div>
+                  <div class="assistant-copy">
+                    <p>完成。图片已作为图片消息发送到「乳鸽（周文俊/Ruge）」的会话。</p>
+                    <p>处理结果：</p>
+                    <ul><li>确认页面最后一张内容图为 SQL 模式截图。</li><li>源图为 WebP，已转为 PNG 以便企微内联展示。</li><li>媒体上传和发送均已成功。</li></ul>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="composer-wrap">
+              <div class="composer">
+                <textarea placeholder="输入消息…"></textarea>
+                <div class="composer-actions">
+                  <div><button class="icon-button" type="button" title="添加附件"><i data-lucide="paperclip"></i></button><button class="icon-button" type="button" title="压缩上下文"><i data-lucide="package-open"></i></button></div>
+                  <div><span style="color:var(--text-muted);font-size:11px">deepseek-v4-flash-vision-exp</span><button class="send-button" type="button" aria-label="发送"><i data-lucide="send"></i></button></div>
+                </div>
+              </div>
+            </div>
+          </section>
+          <aside class="inspector">
+            <nav class="inspector-tabs"><button class="tab-button active" type="button">会话</button><button class="tab-button" type="button">当前回合</button><button class="tab-button" type="button">上下文引用</button></nav>
+            <div class="inspector-body">
+              <section class="detail-section">
+                <h3>会话概览</h3>
+                <dl>
+                  <div class="detail-row"><dt>会话 ID</dt><dd>f8ff311610b341ff83d6c21330e46022</dd></div>
+                  <div class="detail-row"><dt>Agent</dt><dd><strong>乳鸽测试</strong></dd></div>
+                  <div class="detail-row"><dt>模型</dt><dd>deepseek-v4-flash-vision-exp</dd></div>
+                  <div class="detail-row"><dt>会话统计</dt><dd>2 轮 · 32 个事件</dd></div>
+                </dl>
+              </section>
+              <section class="detail-section">
+                <h3>请求 Header</h3>
+                <dl>
+                  <div class="detail-row"><dt>App / Space</dt><dd>继承 / 继承</dd></div>
+                  <div class="detail-row"><dt>Language</dt><dd>zh-cn</dd></div>
+                  <div class="detail-row"><dt>User</dt><dd>周文俊</dd></div>
+                </dl>
+              </section>
+              <section class="detail-section">
+                <h3>上下文预算</h3>
+                <div class="budget-grid"><div class="budget-item"><span>历史占用</span><strong>88,668</strong></div><div class="budget-item"><span>可用输入</span><strong>989,059</strong></div><div class="budget-item"><span>窗口</span><strong>1,000,000</strong></div></div>
+                <div class="budget-track"><span></span></div>
+              </section>
+            </div>
+          </aside>
+        </div>
+      </section>
+
+      <section class="view" id="view-agents">
+        <div class="surface list-page">
+          <header class="page-head">
+            <div class="title-block"><h1>Agent</h1><p>集中管理模型、Prompt、能力资源，并可直接发起测试。</p></div>
+            <div class="page-actions">
+              <label class="search-field page-search"><i data-lucide="search"></i><input type="search" placeholder="搜索 Agent" /></label>
+              <div class="segmented"><button class="active" type="button"><i data-lucide="list"></i></button><button type="button"><i data-lucide="layout-grid"></i></button></div>
+              <button class="primary-button" type="button"><i data-lucide="plus"></i>新建 Agent</button>
+            </div>
+          </header>
+          <div class="page-body">
+            <div class="summary-strip"><span><strong>4</strong> 个 Agent</span><span class="dot"></span><span><strong>3</strong> 个已配置模型</span><span class="dot"></span><span>资源选择均为显式配置</span></div>
+            <div class="surface" style="border-radius:7px;overflow:hidden">
+              <table class="agent-table">
+                <thead><tr><th>名称</th><th>默认模型</th><th>能力</th><th>状态</th><th style="text-align:right">操作</th></tr></thead>
+                <tbody>
+                  <tr data-open-agent><td><div class="agent-name"><span class="agent-icon"><i data-lucide="bot"></i></span><div><strong>Code Mode 本地验收</strong><span>da180505-9d3e-4ff8-b68b-4ac768796b81</span></div></div></td><td>deepseek-v4-flash-vision-exp</td><td><div class="mini-badges"><span class="mini-badge">内置 2</span><span class="mini-badge">MCP 4</span></div></td><td><span class="status-line">可测试</span></td><td><div class="row-actions"><button class="icon-button" type="button" title="发起测试"><i data-lucide="message-square-code"></i></button><button class="icon-button" type="button" title="编辑"><i data-lucide="pencil"></i></button><button class="icon-button" type="button" title="更多"><i data-lucide="ellipsis"></i></button></div></td></tr>
+                  <tr data-open-agent><td><div class="agent-name"><span class="agent-icon"><i data-lucide="bot"></i></span><div><strong>乳鸽测试</strong><span>c4a87e3e-328a-40f7-a055-df91548f12ac</span></div></div></td><td>deepseek-v4-flash-vision-exp</td><td><div class="mini-badges"><span class="mini-badge">MCP 3</span><span class="mini-badge">UI 1</span><span class="mini-badge">Skill 1</span></div></td><td><span class="status-line">可测试</span></td><td><div class="row-actions"><button class="icon-button" type="button"><i data-lucide="message-square-code"></i></button><button class="icon-button" type="button"><i data-lucide="pencil"></i></button><button class="icon-button" type="button"><i data-lucide="ellipsis"></i></button></div></td></tr>
+                  <tr data-open-agent><td><div class="agent-name"><span class="agent-icon"><i data-lucide="bot"></i></span><div><strong>DeepCube 助手</strong><span>74d026f7-39ac-47b4-b7ec-4bc233036d8b</span></div></div></td><td>deepseek-chat</td><td><div class="mini-badges"><span class="mini-badge">MCP 1</span><span class="mini-badge">UI 1</span></div></td><td><span class="status-line">可测试</span></td><td><div class="row-actions"><button class="icon-button" type="button"><i data-lucide="message-square-code"></i></button><button class="icon-button" type="button"><i data-lucide="pencil"></i></button><button class="icon-button" type="button"><i data-lucide="ellipsis"></i></button></div></td></tr>
+                  <tr data-open-agent><td><div class="agent-name"><span class="agent-icon"><i data-lucide="bot"></i></span><div><strong>数据流 Canvas</strong><span>acf5385f-b518-43fa-9e03-40f0cfc12567</span></div></div></td><td>gpt-5.6</td><td><div class="mini-badges"><span class="mini-badge">MCP 2</span><span class="mini-badge">Skill 2</span></div></td><td><span class="status-line">可测试</span></td><td><div class="row-actions"><button class="icon-button" type="button"><i data-lucide="message-square-code"></i></button><button class="icon-button" type="button"><i data-lucide="pencil"></i></button><button class="icon-button" type="button"><i data-lucide="ellipsis"></i></button></div></td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="view" id="view-agent-edit">
+        <div class="surface agent-editor">
+          <header class="editor-head">
+            <button class="plain-button back-button" id="backToAgents" type="button"><i data-lucide="arrow-left"></i>返回</button>
+            <div class="editor-title"><strong>Code Mode 本地验收</strong><span>Agent ID：da180505-9d3e-4ff8-b68b-4ac768796b81</span></div>
+            <div class="editor-actions"><button class="plain-button" type="button"><i data-lucide="message-square-code"></i>发起测试</button><button class="primary-button" type="button"><i data-lucide="save"></i>保存</button></div>
+          </header>
+          <div class="editor-workbench">
+            <section class="editor-form">
+              <div class="field"><label for="agentName">名称</label><input id="agentName" value="Code Mode 本地验收" /></div>
+              <div class="field"><label for="modelSelect">默认模型</label><select id="modelSelect"><option>deepseek-v4-flash-vision-exp</option></select></div>
+              <div class="field"><label for="temperature">Temperature（可选）</label><input id="temperature" value="0" /></div>
+              <div class="field field-grow"><label for="systemPrompt">System Prompt <span>142 字 / 111 Token</span></label><textarea id="systemPrompt">你是 DeepAgent Code Mode 通用验收 Agent。严格根据用户请求和工具说明选择原生工具或 run_code；多步依赖、并发、筛选聚合或文件载荷中转优先使用 run_code。</textarea></div>
+            </section>
+            <section class="editor-resources">
+              <nav class="resource-tabs" aria-label="Agent 资源选择">
+                <button class="resource-tab active" type="button" data-resource-tab="builtin"><i data-lucide="blocks"></i>内置工具 <small>2/4</small></button>
+                <button class="resource-tab" type="button" data-resource-tab="mcp"><i data-lucide="plug"></i>MCP <small>4/6</small></button>
+                <button class="resource-tab" type="button" data-resource-tab="ui"><i data-lucide="panel-top"></i>UI 工具 <small>0/3</small></button>
+                <button class="resource-tab" type="button" data-resource-tab="skill"><i data-lucide="book-open-check"></i>Skill <small>0/4</small></button>
+              </nav>
+              <div class="resource-toolbar"><span id="resourceHint">选择当前 Agent 可调用的内置工具包。</span><div><button class="link-button" type="button">全选</button><button class="link-button" type="button">全不选</button></div></div>
+              <div class="resource-list">
+                <div class="resource-panel active" data-resource-panel="builtin">
+                  <article class="resource-card selected"><span class="switch"></span><div><h3>通用工具</h3><p>随 DeepAgent 发布的进程内通用工具。</p></div><span class="resource-card-meta">1 个工具</span></article>
+                  <article class="resource-card selected"><span class="switch"></span><div><h3>程序编排</h3><p>在受限环境中编排当前 Agent 已授权的 MCP 工具。</p></div><span class="resource-card-meta">1 个工具</span></article>
+                  <article class="resource-card"><span class="switch"></span><div><h3>Python 沙箱</h3><p>在无状态 Python 环境中执行数据计算。</p></div><span class="resource-card-meta">1 个工具</span></article>
+                  <article class="resource-card"><span class="switch"></span><div><h3>Web</h3><p>搜索公开互联网并安全抓取公开网页。</p></div><span class="resource-card-meta">3 个工具</span></article>
+                </div>
+                <div class="resource-panel" data-resource-panel="mcp">
+                  <article class="resource-card selected"><span class="switch"></span><div><h3>DeepCube</h3><p>财务多维模型查询与脚本执行能力。</p></div><span class="resource-card-meta">9 个工具</span></article>
+                  <article class="resource-card selected"><span class="switch"></span><div><h3>Canvas</h3><p>数据流画布读取、编辑与保存。</p></div><span class="resource-card-meta">13 个工具</span></article>
+                  <article class="resource-card selected"><span class="switch"></span><div><h3>企业微信</h3><p>企业微信会话与媒体消息能力。</p></div><span class="resource-card-meta">18 个工具</span></article>
+                </div>
+                <div class="resource-panel" data-resource-panel="ui"><div class="resource-empty"><div><i data-lucide="panel-top"></i><strong>未选择 UI 工具</strong><div>0 / 3 已选</div></div></div></div>
+                <div class="resource-panel" data-resource-panel="skill"><div class="resource-empty"><div><i data-lucide="book-open-check"></i><strong>未选择 Skill</strong><div>0 / 4 已选</div></div></div></div>
+              </div>
+            </section>
+          </div>
+        </div>
+      </section>
+
+      <section class="view" id="view-resource">
+        <div class="surface list-page">
+          <header class="page-head">
+            <div class="title-block"><h1 id="resourcePageTitle">Provider</h1><p id="resourcePageDescription">集中维护模型接入地址与凭据。</p></div>
+            <div class="page-actions"><button class="plain-button" type="button"><i data-lucide="refresh-cw"></i>重新加载</button><button class="primary-button" type="button"><i data-lucide="plus"></i><span id="resourcePrimaryAction">新建 Provider</span></button></div>
+          </header>
+          <div class="page-body">
+            <div class="generic-layout">
+              <section class="generic-list">
+                <header><strong id="resourceListTitle">资源列表</strong><span style="color:var(--text-muted);font-size:11px">3 项</span></header>
+                <div id="resourceRows"></div>
+              </section>
+              <aside class="generic-inspector">
+                <header><strong>当前选择</strong><button class="icon-button" type="button"><i data-lucide="ellipsis"></i></button></header>
+                <div class="inspector-body"><div class="detail-row"><dt>名称</dt><dd id="resourceSelectedName">DeepSeek</dd></div><div class="detail-row"><dt>状态</dt><dd><span class="status-line">可用</span></dd></div><div class="detail-row"><dt>说明</dt><dd id="resourceSelectedDescription">选择一项后在这里查看紧凑详情和操作。</dd></div></div>
+              </aside>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="view" id="view-diagnostics">
+        <div class="surface list-page">
+          <header class="page-head"><div class="title-block"><h1>诊断中心</h1><p>运行链路、服务健康与请求定位。</p></div><span class="prototype-badge">规划中</span></header>
+          <div class="resource-empty"><div><i data-lucide="activity"></i><strong>诊断信息放在独立主页面</strong><div>不再占用一条永久图标导航栏。</div></div></div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <button class="mobile-overlay" id="mobileOverlay" type="button" aria-label="关闭边栏"></button>
+
+  <dialog class="notes-dialog" id="notesDialog">
+    <header><strong>统一侧边栏设计说明</strong><button class="icon-button" id="closeNotesIcon" type="button" aria-label="关闭"><i data-lucide="x"></i></button></header>
+    <div class="dialog-body">
+      <ol>
+        <li><strong>合并全局图标栏与二级目录：</strong>对话和 Agent 放在同一主层级；下方区域根据当前主页面切换为“最近会话”或“Agent 配置目录”。</li>
+        <li><strong>主工作区不再重复导航：</strong>对话直接获得更宽的消息区；Agent 编辑沿用左右工作台，只保留一组资源 Tab。</li>
+        <li><strong>响应式只改变空间归属：</strong>桌面可收起为图标栏，窄屏变为覆盖式边栏；页面信息结构和操作顺序不变。</li>
+      </ol>
+    </div>
+    <footer><button class="primary-button" id="closeNotes" type="button">知道了</button></footer>
+  </dialog>
+
+  <div class="toast" id="toast">已复制会话 ID</div>
+
+  <script src="../frontend/vendor/lucide.min.js"></script>
+  <script>
+    (() => {
+      const body = document.body;
+      const views = [...document.querySelectorAll('.view')];
+      const title = document.getElementById('pageTitle');
+      const resourceViewNames = new Set(['providers', 'catalog', 'builtin', 'mcp', 'ui-tools', 'skills', 'global', 'database']);
+      const resourceContent = {
+        providers: ['Provider', '集中维护模型接入地址与凭据，模型只引用一个 Provider。', '新建 Provider', ['DeepSeek', 'OpenAI', 'Google Gemini']],
+        catalog: ['模型目录', '浏览并更新模型能力目录；保存模型时只引用当前目录数据。', '更新目录', ['DeepSeek V4 Flash', 'GPT-5.6', 'Gemini 3 Pro']],
+        builtin: ['内置工具', '查看随 DeepAgent 发布、由 Agent 显式选择的工具包。', '刷新工具数', ['通用工具', '程序编排', 'Python 沙箱', 'Web']],
+        mcp: ['MCP', '维护 URL MCP 与内置 MCP 的检测快照和资源信息。', '新建 MCP', ['DeepCube', 'Canvas', '企业微信']],
+        'ui-tools': ['UI 工具', '维护需要控制台或宿主客户端完成交互的工具包。', '新建工具包', ['内置交互', 'DeepCube 助手', '审批组件']],
+        skills: ['Skill', '管理任务方法、说明与只读资源；Skill 不自动授予工具权限。', '上传安装', ['DeepFOS 文档', '数据流建模', '财务模型验收']],
+        global: ['全局配置', '维护 Web Search 与 DeepAgent 运行级配置。', '编辑配置', ['Web Search', '运行设置', '上下文压缩']],
+        database: ['数据库连接', '只读查看当前进程实际使用的数据库和结构版本。', '重新加载', ['SQLite 本地开发库', '数据库结构 V001']]
+      };
+
+      const iconRefresh = () => window.lucide && window.lucide.createIcons({ attrs: { 'aria-hidden': 'true' } });
+
+      function closeMobileSidebar() {
+        body.classList.remove('sidebar-open');
+      }
+
+      function selectView(name) {
+        const actualView = resourceViewNames.has(name) ? 'resource' : name;
+        views.forEach((view) => view.classList.toggle('active', view.id === `view-${actualView}`));
+
+        const configMode = name !== 'chat';
+        body.dataset.mode = configMode ? 'config' : 'chat';
+        document.querySelectorAll('[data-primary]').forEach((button) => {
+          button.classList.toggle('active', button.dataset.primary === (configMode ? 'config' : 'chat'));
+        });
+        document.querySelectorAll('.subnav-button').forEach((button) => button.classList.toggle('active', button.dataset.view === name));
+
+        if (name === 'chat') title.textContent = '对话';
+        else if (name === 'agents') title.textContent = 'Agent';
+        else if (name === 'agent-edit') title.textContent = 'Agent / 编辑';
+        else if (name === 'diagnostics') title.textContent = '诊断中心';
+        else if (resourceContent[name]) {
+          const [resourceTitle, description, primaryAction, rows] = resourceContent[name];
+          title.textContent = `Agent / ${resourceTitle}`;
+          document.getElementById('resourcePageTitle').textContent = resourceTitle;
+          document.getElementById('resourcePageDescription').textContent = description;
+          document.getElementById('resourcePrimaryAction').textContent = primaryAction;
+          document.getElementById('resourceListTitle').textContent = `${resourceTitle}列表`;
+          document.getElementById('resourceSelectedName').textContent = rows[0];
+          document.getElementById('resourceRows').innerHTML = rows.map((row, index) => `
+            <div class="generic-list-row">
+              <div><strong>${row}</strong><span>${index === 0 ? '当前配置，最近已更新' : '可用于 Agent 配置'}</span></div>
+              <span>${index === 0 ? '刚刚' : `${index + 1} 天前`}</span>
+              <span class="status-line">可用</span>
+            </div>`).join('');
+        }
+        closeMobileSidebar();
+        iconRefresh();
+      }
+
+      document.querySelectorAll('[data-view]').forEach((button) => button.addEventListener('click', () => selectView(button.dataset.view)));
+      document.querySelectorAll('[data-open-agent]').forEach((row) => row.addEventListener('click', () => selectView('agent-edit')));
+      document.getElementById('backToAgents').addEventListener('click', () => selectView('agents'));
+
+      document.getElementById('collapseSidebar').addEventListener('click', () => {
+        body.classList.toggle('sidebar-collapsed');
+        const button = document.getElementById('collapseSidebar');
+        const collapsed = body.classList.contains('sidebar-collapsed');
+        button.title = collapsed ? '展开边栏' : '收起边栏';
+        button.innerHTML = `<i data-lucide="${collapsed ? 'panel-left-open' : 'panel-left-close'}"></i>`;
+        iconRefresh();
+      });
+
+      document.getElementById('mobileMenu').addEventListener('click', () => body.classList.add('sidebar-open'));
+      document.getElementById('mobileOverlay').addEventListener('click', closeMobileSidebar);
+      document.getElementById('themeToggle').addEventListener('click', () => body.classList.toggle('dark'));
+
+      document.querySelectorAll('.session-item').forEach((item) => item.addEventListener('click', () => {
+        document.querySelectorAll('.session-item').forEach((candidate) => candidate.classList.remove('active'));
+        item.classList.add('active');
+      }));
+
+      document.querySelectorAll('.resource-tab').forEach((button) => button.addEventListener('click', () => {
+        document.querySelectorAll('.resource-tab').forEach((candidate) => candidate.classList.toggle('active', candidate === button));
+        document.querySelectorAll('.resource-panel').forEach((panel) => panel.classList.toggle('active', panel.dataset.resourcePanel === button.dataset.resourceTab));
+        const labels = { builtin: '选择当前 Agent 可调用的内置工具包。', mcp: '选择当前 Agent 已授权的 MCP 服务。', ui: '选择需要宿主客户端完成交互的 UI 工具包。', skill: '选择为当前 Agent 提供方法与资源的 Skill。' };
+        document.getElementById('resourceHint').textContent = labels[button.dataset.resourceTab];
+      }));
+
+      const notes = document.getElementById('notesDialog');
+      document.getElementById('openNotes').addEventListener('click', () => notes.showModal());
+      document.getElementById('closeNotes').addEventListener('click', () => notes.close());
+      document.getElementById('closeNotesIcon').addEventListener('click', () => notes.close());
+
+      document.querySelector('[data-copy-session]').addEventListener('click', async () => {
+        try { await navigator.clipboard.writeText('f8ff311610b341ff83d6c21330e46022'); } catch (_) {}
+        const toast = document.getElementById('toast');
+        toast.classList.add('show');
+        setTimeout(() => toast.classList.remove('show'), 1300);
+      });
+
+      iconRefresh();
+    })();
+  </script>
+</body>
+</html>

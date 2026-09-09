@@ -347,9 +347,9 @@ DeepAgent 原有自研 `Capability` 只是产品配置包装，却与 Pydantic A
 附件和Skill文件由自动注入的系统工具 `read_file`统一读取，不进入内置工具包或
 `agents.capabilities`。位置：
 
-- `deep_agent/capabilities/native/builtin.py`
-- `deep_agent/files/toolset.py`
-- `deep_agent/sandbox/toolset.py`
+- `src/deep_agent/capabilities/general/builtin.py`
+- `src/deep_agent/files/toolset.py`
+- `src/deep_agent/sandbox/toolset.py`
 
 v0.3.18 起 Skill 不再使用 `FunctionToolset`，也不属于 ToolPackage。Skill 通过 Harness
 `load_capability` 渐进披露说明，实际工具权限仍来自 Agent 独立选择的 ToolPackage。
@@ -377,10 +377,10 @@ Agent 选择 `mcp:<server_name>` 后，请求级加载 MCP 配置并构造 Tools
 
 关键位置：
 
-- `deep_agent/capabilities/mcp/resolver.py`
-- `deep_agent/capabilities/mcp/toolset_builder.py`
-- `deep_agent/capabilities/mcp/snapshot_toolset.py`
-- `deep_agent/capabilities/mcp/run_scoped.py`
+- `src/deep_agent/capabilities/mcp/resolver.py`
+- `src/deep_agent/capabilities/mcp/toolset_builder.py`
+- `src/deep_agent/capabilities/mcp/snapshot_toolset.py`
+- `src/deep_agent/capabilities/mcp/run_scoped.py`
 
 ### 4.3 UI External Tool
 
@@ -485,10 +485,10 @@ flowchart TD
 
 关键位置：
 
-- `deep_agent/api/v1/deps.py`：加载 Agent、模型、MCP、Resource 和 UI Toolset。
-- `deep_agent/agent/factory.py`：合并 Toolset 并构造 Agent。
-- `deep_agent/agent/runner.py`：运行、SSE、消息持久化和 Deferred 恢复。
-- `deep_agent/capabilities/registry.py`：DeepAgent 产品工具包注册表。
+- `src/deep_agent/api/v1/deps.py`：加载 Agent、模型、MCP、Resource 和 UI Toolset。
+- `src/deep_agent/agent/factory.py`：合并 Toolset 并构造 Agent。
+- `src/deep_agent/agent/runner.py`：运行、SSE、消息持久化和 Deferred 恢复。
+- `src/deep_agent/capabilities/registry.py`：DeepAgent 产品工具包注册表。
 
 ## 5. MCP 工具命名优化
 
@@ -841,7 +841,7 @@ Tool Output/Artifact治理。禁止按名称包含 `query` 等模糊规则全量
 推荐采用 Harness `TieredCompaction`，而不是在 `AgentRunner` 中自行裁剪消息。详细方案见：
 
 - [上下文压缩设计](../03-context-compaction/context-compaction-design.md)
-- [上下文治理研究结论](../03-context-compaction/context-compaction-research.md)
+- [上下文压缩课题入口](../03-context-compaction/README.md)
 
 ### 9.2 ToolOutputLimits 与大工具结果外置
 
@@ -865,13 +865,30 @@ v0.4.0 已直接采用Harness 0.18公开的 `ToolOutputLimits`。它在工具执
 
 ```text
 available_input = context_window_tokens - max_output_tokens
-threshold = clamp(available_input × 20%, 4K, 24K Token)
+threshold = clamp(available_input × 20%, 4K, 48K Token)
 无有效context_window_tokens时使用24K Token
 ```
+
+这里的可用输入是模型配置窗口减去最大输出，不是会话当前剩余空间。2026-09-07 将已知窗口的
+上限从24K提高到48K，减少长文档工具返回约30K中文字符时不必要的转存与再次读取；比例、4K下限、
+未知窗口24K回退不变。可用输入至少240K才会用满48K；例如128K窗口预留8K输出仍为24K。
+Harness在估算大小达到阈值时转存，未达到则保留原对象；该估算不等同于Provider账单Token。
+
+文档继续支持Tool返回，不要求客户端支持MCP Resource。搜索默认返回标题、定位和短摘录，正文工具
+提供分页/段落读取及明确的后续位置；不要因上限提高就默认返回多篇全文。连续长文档仍会更快耗尽上下文，
+也不能用此单工具阈值替代整轮上下文预算。压缩摘要副本的工具结果裁剪阈值（8192字符）维持不变。
 
 第一版只解决安全兜底，不把它扩成通用文件或Artifact平台：
 
 - Store仅适配现有平台文件服务，不使用Harness默认本地文件Store。
+- 回读由DeepAgent通过公开`get_toolset()`扩展点提供同名`read_tool_result`，不改Harness安装包，
+  Spill与Store授权/缓存继续复用原实现。默认400行，最多2,000行，单页正文仍最多50,000字符。
+  返回结构化`content/returned_count/has_more/truncated_by/next_read`；`next_read`是下一次调用的
+  完整参数，包含0-based行`offset`及该行内Unicode字符`char_offset`。超长行分段时不跳过后缀，
+  完整JSONL记录能放到下一页时不切开；分页片段本身不保证是完整JSON，应读齐再解析。
+  `pattern`仍为字面子串，游标相对于筛选后的行集，改筛选条件需重开分页。
+  `from_end`保留尾窗内原文顺序；`next_read`通过排他`end_offset`边界正向读完被截断的尾窗，
+  首次尾窗返回的`previous_read`用于继续读更早窗口。两者不是同一个方向，不得混用游标。
 - 使用Harness原生`json_lines` Serializer：顶层Sequence在Artifact中每项一行，
   `read_tool_result(offset, limit, pattern)`可按记录分页并返回整条命中记录；顶层Mapping继续保留
   完整嵌套结构并使用缩进JSON，不猜测`rows/data/items`等业务字段。未达到Spill阈值的
@@ -1108,7 +1125,6 @@ Overflow Spill 的状态统一维护在 [`../TODO.md`](../TODO.md)，不在本�
 
 - [UI 工具课题](../01-ui-tools/README.md)
 - [上下文压缩课题](../03-context-compaction/README.md)
-- [上下文治理研究结论](../03-context-compaction/context-compaction-research.md)
 - [上下文压缩设计](../03-context-compaction/context-compaction-design.md)
 - [Harness Engineering 对 DeepAgent 的研究结论](../../../../agent-labs/harness-engineering/DEEPAGENT_STUDY.md)
 

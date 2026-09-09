@@ -5,7 +5,7 @@ import {
   contextCompactionPresentation,
   createSseParser,
   parseSseBlock,
-} from "../../../frontend/console/protocol.js";
+} from "../../../console/protocol.js";
 
 test("SSE 事件可以跨网络 chunk 解析", () => {
   const events = [];

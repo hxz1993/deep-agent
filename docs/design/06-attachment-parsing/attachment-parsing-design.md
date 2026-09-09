@@ -86,17 +86,21 @@ Skill请求：
 - 不传 `limit` 时使用工具默认页大小。
 - 用户传入超过硬上限的 `limit` 会自动收紧。
 - 单次工具文本输出最多约 50,000 字符。
-- `has_more=true` 时使用 `next_offset` 读取下一页。
+- `has_more=true` 时将 `next_offset/next_char_offset` 分别传为 `offset/char_offset` 读取下一页。
+- `char_offset` 默认为0，按当前项内Unicode字符计数，不是字节。整项能放入下一页时不拆项；单项自身
+  超过50,000字符时保留同一`next_offset`并推进`next_char_offset`，正文不混入省略标记。最后一项的
+  后缀未读完也必须`has_more=true`，读完才返回两个空游标。`returned_count`包含本页部分读取的项，
+  不能自行用`offset + returned_count`计算续读位置。
 
 ### 3.2 文本
 
 ```text
-read_file(resource, offset=None, limit=None)
+read_file(resource, offset=None, limit=None, char_offset=0)
 ```
 
 - 单位：物理行。
-- 默认：500 行。
-- 硬上限：2,000 行。
+- 默认：1,000 行。
+- 硬上限：4,000 行。
 - 支持：TXT、CSV、JSON、Markdown、HTML、XML。
 - 编码：UTF-16 BOM、UTF-8 BOM、UTF-8、GB18030，最后才使用替换字符兜底。
 - 只有明确 JSON MIME 或 `.json` 文件名才格式化 JSON，不根据内容猜格式。
@@ -108,8 +112,8 @@ read_file(resource, offset=None, limit=None)
 ```
 
 - 单位：逻辑块。
-- 默认：100 块。
-- 硬上限：500 块。
+- 默认：200 块。
+- 硬上限：1,000 块。
 - 顺序：页眉 → 正文段落/表格 → 页脚 → 批注附录。
 - 表格转成可读行，正文段落与表格保持文档内出现顺序。
 - DOCX内嵌图片不进入 `read_file`返回；本工具只返回可分页的文本与表格结构。
@@ -123,13 +127,19 @@ read_file(resource, offset=None, limit=None)
 
 ### 3.4 XLSX
 
+单元格正文不再先截到4,000字符；长首行、长单元格均通过`offset/char_offset`完整续读。
+解析安全预算按所有Sheet渲染正文累计8,000,000字符，包含共享字符串重复展开、逗号和行分隔符；
+超出明确失败并要求拆分，不返回残缺正文。Office解压和单元格数量上限不变。
+Sheet/header metadata只是有界预览（序列化最多8K字符），通过`headers_truncated/sheets_truncated`
+说明省略；完整首行用`offset=1`读取，已知Sheet名仍可直接指定。
+
 ```text
 read_file(resource, sheet=None, offset=None, limit=None)
 ```
 
 - 单位：物理行，包含表头。
-- 默认：100 行。
-- 硬上限：500 行。
+- 默认：200 行。
+- 硬上限：1,000 行。
 - 未指定 `sheet` 时选择第一个可见工作表。
 - 显式工作表名不区分大小写。
 - 返回工作表列表、行列数、表头等元数据。
@@ -287,14 +297,14 @@ chat_session_events
 
 | 范围 | 主要路径 |
 | --- | --- |
-| 附件引用、会话索引与原生模态 | `deep_agent/agent/attachments.py` |
-| TXT/DOCX/XLSX 解析和 Office 安全 | `deep_agent/agent/attachment_extractors.py` |
-| 上传处理 | `deep_agent/agent/media_pipeline.py` |
-| 统一文件工具与单 Run缓存 | `deep_agent/files/`、`deep_agent/agent/deps.py` |
-| Runner 与附件白名单 | `deep_agent/agent/runner.py` |
-| 压缩去重键 | `deep_agent/agent/context/file_keys.py` |
-| 上传 API | `deep_agent/api/v1/uploads.py` |
-| Console 上传与历史展示 | `frontend/console/chat.js` |
+| 附件引用、会话索引与原生模态 | `src/deep_agent/agent/attachments.py` |
+| TXT/DOCX/XLSX 解析和 Office 安全 | `src/deep_agent/agent/attachment_extractors.py` |
+| 上传处理 | `src/deep_agent/agent/media_pipeline.py` |
+| 统一文件工具与单 Run缓存 | `src/deep_agent/files/`、`src/deep_agent/agent/deps.py` |
+| Runner 与附件白名单 | `src/deep_agent/agent/runner.py` |
+| 压缩去重键 | `src/deep_agent/agent/context/file_keys.py` |
+| 上传 API | `src/deep_agent/api/v1/uploads.py` |
+| Console 上传与历史展示 | `console/chat.js` |
 
 ## 12. 安全与资源边界
 
@@ -314,5 +324,5 @@ chat_session_events
 后续方向包括PDF/PPTX专用解析、复杂Office、异步解析、资源隔离、结构
 索引、跨 Run 缓存和长结果外置。PDF/PPTX的行业方案、Anthropic Skills目录、许可证边界和
 DeepAgent建议链路已独立记录在
-[`../16-pdf-and-presentation-parsing/`](../16-pdf-and-presentation-parsing/)。优先级和状态统一维护在
+[`../16-pdf-and-presentation-parsing/`](../16-pdf-and-presentation-parsing)。优先级和状态统一维护在
 [`../TODO.md`](../TODO.md)，不在本文维护第二份待办。

@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 from deep_agent.options import OPTION
 from deep_agent.sandbox import venv as sandbox_venv
 
-_GUNICORN_CONF_PATH = Path(__file__).resolve().parents[2] / "deep_agent" / "gunicorn.conf.py"
+_GUNICORN_CONF_PATH = Path(__file__).resolve().parents[2] / "deploy" / "gunicorn.conf.py"
 
 
 def _load_gunicorn_conf():

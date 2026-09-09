@@ -8,6 +8,7 @@ import sys
 import unittest
 
 from deep_agent.sandbox.framing import encode_frame, read_frame
+from deep_agent.sandbox.subprocess_dev.env import build_worker_env
 from deep_agent.sandbox.types import (
     MAX_RESULT_BYTES,
     MAX_STDERR_BYTES,
@@ -32,6 +33,7 @@ def _run_worker(
     }
     completed = subprocess.run(
         [sys.executable, "-m", "deep_agent.sandbox.worker"],
+        env=build_worker_env(),
         input=encode_frame(request),
         capture_output=True,
         timeout=timeout,
@@ -163,6 +165,7 @@ class SandboxWorkerTests(unittest.TestCase):
         }
         completed = subprocess.run(
             [sys.executable, "-m", "deep_agent.sandbox.worker"],
+            env=build_worker_env(),
             input=encode_frame(request),
             capture_output=True,
             timeout=10,
@@ -195,6 +198,9 @@ class SandboxWorkerTests(unittest.TestCase):
         self.assertIn("dtypes", result)
         self.assertLessEqual(len(result["records"]), 10)
         self.assertEqual(len(result["records"]), 10)
+        self.assertTrue(response["truncated"]["result"])
+        self.assertTrue(result["is_preview"])
+        self.assertIn("publish_path", result["guidance"])
 
     @unittest.skipUnless(_PANDAS_AVAILABLE, "pandas not installed")
     def test_series_preview(self) -> None:
@@ -206,6 +212,8 @@ class SandboxWorkerTests(unittest.TestCase):
         assert isinstance(result, dict)
         self.assertEqual(result["kind"], "series")
         self.assertEqual(result["name"], "values")
+        self.assertTrue(response["truncated"]["result"])
+        self.assertTrue(result["is_preview"])
         self.assertEqual(result["length"], 25)
         self.assertIn("dtype", result)
         self.assertLessEqual(len(result["records"]), 10)

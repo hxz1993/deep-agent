@@ -24,12 +24,15 @@ class BaselineMigrationDialectTests(unittest.TestCase):
                 with redirect_stdout(output):
                     command.upgrade(config, "head", sql=True)
                 sql = output.getvalue().upper()
-                self.assertEqual(sql.count("CREATE TABLE"), 12)
+                self.assertEqual(sql.count("CREATE TABLE"), 15)
                 self.assertIn("CREATE TABLE GLOBAL_SETTINGS", sql)
                 self.assertIn("CREATE TABLE LLM_PROVIDERS", sql)
                 self.assertIn("CREATE TABLE CHAT_SESSION_EVENTS", sql)
+                self.assertIn("CREATE TABLE CHANNEL_ACCOUNTS", sql)
+                self.assertIn("CREATE TABLE CHANNEL_SESSION_BINDINGS", sql)
+                self.assertIn("CREATE TABLE CHANNEL_MESSAGE_RUNS", sql)
                 self.assertIn("INSERT INTO ALEMBIC_VERSION", sql)
-                self.assertIn("001", sql)
+                self.assertIn("002", sql)
                 self.assertNotIn("CHAT_MESSAGES", sql)
                 self.assertNotIn("AUXILIARY_MODEL_CONFIGS", sql)
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import unittest
 from typing import Any
@@ -15,6 +16,7 @@ from deep_agent.capabilities.registry import ToolPackageRegistry
 from deep_agent.options import OPTION
 from deep_agent.sandbox.factory import SandboxInterpreterError, build_sandbox_backend
 from deep_agent.sandbox.toolset import build_python_sandbox_tool_package
+from deep_agent.sandbox.subprocess_dev.backend import SubprocessBackend
 from deep_agent.sandbox.types import (
     ExecuteRequest,
     ExecuteResult,
@@ -210,6 +212,7 @@ class SandboxBootstrapHardGateTests(unittest.IsolatedAsyncioTestCase):
                     await AppContext.bootstrap()
             self.assertIn("pandas", str(ctx.exception))
             self.assertIn("/tmp/fake-sandbox-python", str(ctx.exception))
+            fake_bundle.stores.coordinator.interrupt_running.assert_awaited_once_with()
         finally:
             OPTION.agent.sandbox_enabled = previous
             reset_context()
@@ -227,6 +230,7 @@ class SandboxBootstrapHardGateTests(unittest.IsolatedAsyncioTestCase):
         fake_bundle.session_factory = MagicMock()
         persister = MagicMock()
         persister.start = AsyncMock()
+        ctx = None
 
         try:
             with (
@@ -251,6 +255,7 @@ class SandboxBootstrapHardGateTests(unittest.IsolatedAsyncioTestCase):
             verify.assert_not_awaited()
             self.assertIsNone(ctx.sandbox_backend)
             self.assertIsNone(ctx.sandbox_profile)
+            fake_bundle.stores.coordinator.interrupt_running.assert_awaited_once_with()
         finally:
             OPTION.agent.sandbox_enabled = previous
             reset_context()
@@ -278,6 +283,32 @@ class SandboxRegistryTests(unittest.TestCase):
 
 
 class SandboxCapabilityTests(unittest.IsolatedAsyncioTestCase):
+    async def test_real_worker_publishes_full_large_result_alongside_explicit_preview(self) -> None:
+        backend = SubprocessBackend(python_executable=sandbox_test_python())
+        store = FakeFileStore()
+        ctx = _context(file_store=store)
+        package = build_python_sandbox_tool_package(backend, timeout_sec=30)
+        try:
+            tool = (await package.toolset.get_tools(ctx))["execute_python"]
+            returned = await tool.call_func({"code": (
+                "from deepagent_files import publish_path\n"
+                "body = '长文' * 100000 + '完整末尾'\n"
+                "target = publish_path('full-result.txt', mime='text/plain')\n"
+                "with open(target, 'w', encoding='utf-8') as stream:\n"
+                "    stream.write(body)\n"
+                "body"
+            )}, ctx)
+            value = returned.return_value
+            self.assertEqual(value["status"], "ok")
+            self.assertTrue(value["truncated"]["result"])
+            self.assertTrue(value["result"]["is_preview"])
+            self.assertEqual(store.uploaded[0]["data"].decode(), "长文" * 100000 + "完整末尾")
+            file_id = value["files"][0]["file_id"]
+            self.assertIn(file_id, ctx.deps.session_file_artifacts)
+            self.assertEqual(returned.metadata["generated_files"][0]["file_id"], file_id)
+        finally:
+            await backend.aclose()
+
     async def _tool(self, backend: FakeSandboxBackend):
         package = build_python_sandbox_tool_package(backend, timeout_sec=30.0)
         tools = await package.toolset.get_tools(_context())

@@ -59,7 +59,7 @@ GET /api/v1/admin/access
 
 ## 本地 SQLite 调试例外
 
-回环地址专用入口 `python3.12 -m deep_agent.local_dev` 支持在仓库外私有 Profile 中显式设置
+回环地址专用入口 `PYTHONPATH=src python3.12 -m deep_agent.local_dev` 支持在仓库外私有 Profile 中显式设置
 `DEEP_AGENT_LOCAL_ADMIN_BYPASS=true`。该入口仍要求 `DEEP_AGENT_LOCAL_USER`，但可以不提供平台
 Token，也不要求 App/Space；本地适配器通过不可由浏览器伪造的 ASGI scope 内部标记放行管理接口。
 

@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 import unittest
-from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from deep_agent.core.paths import REPO_ROOT
+from deep_agent.core.paths import CONSOLE_ROOT, REPO_ROOT
 from deep_agent.main import app
 
 
@@ -60,41 +59,27 @@ class ConsoleRoutesTest(unittest.TestCase):
                 self.assertEqual(self.client.get(path).status_code, 404)
 
     def test_console_has_no_runtime_dependency_on_legacy_pages(self) -> None:
-        frontend = Path(REPO_ROOT) / "frontend"
-        for path in (
-            "index.html",
-            "app.js",
-            "settings.html",
-            "settings.js",
-            "models.html",
-            "models.js",
-            "request_config.js",
-            "theme.js",
-            "styles.css",
-            "themes.css",
-            "admin",
-        ):
-            with self.subTest(path=path):
-                self.assertFalse((frontend / path).exists())
-
-        console = frontend / "console"
+        self.assertFalse((REPO_ROOT / "frontend").exists())
         runtime_files = [
             path
-            for path in console.rglob("*")
+            for path in CONSOLE_ROOT.rglob("*")
             if path.is_file() and path.suffix in {".html", ".css", ".js"}
+            and "vendor" not in path.relative_to(CONSOLE_ROOT).parts
         ]
+        self.assertTrue(runtime_files)
         runtime_source = "\n".join(path.read_text(encoding="utf-8") for path in runtime_files)
         for reference in ("../index.html", "../models.html", "../admin/"):
             with self.subTest(reference=reference):
                 self.assertNotIn(reference, runtime_source)
 
     def test_mcp_ui_discovery_surface_is_removed(self) -> None:
-        frontend = Path(REPO_ROOT) / "frontend" / "console"
         runtime_source = "\n".join(
             path.read_text(encoding="utf-8")
-            for path in frontend.rglob("*")
+            for path in CONSOLE_ROOT.rglob("*")
             if path.is_file() and path.suffix in {".html", ".css", ".js"}
+            and "vendor" not in path.relative_to(CONSOLE_ROOT).parts
         )
+        self.assertTrue(runtime_source)
         for removed in (
             "ui_tools_list",
             "ui://tools/manifest",

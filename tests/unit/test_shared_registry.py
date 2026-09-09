@@ -11,7 +11,8 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from deep_agent.capabilities.mcp.shared_registry import McpSharedRegistry, shared_mcp_identity
-from deep_agent.lib.const import MCP_REGISTRY_JSON_ENV, MCP_SERVER_TTL_ENV
+from deep_agent.core.paths import REPO_ROOT, SOURCE_ROOT
+from deep_agent.core.mcp_constants import MCP_REGISTRY_JSON_ENV, MCP_SERVER_TTL_ENV
 
 
 class SharedRegistryTests(unittest.TestCase):
@@ -78,6 +79,7 @@ class SharedRegistryTests(unittest.TestCase):
         self.assertIn("streamable-http", args)
         self.assertEqual(env.get(MCP_SERVER_TTL_ENV), "120.0")
         self.assertTrue(env.get(MCP_REGISTRY_JSON_ENV))
+        self.assertEqual(env["PYTHONPATH"].split(os.pathsep), [str(SOURCE_ROOT), str(REPO_ROOT)])
 
 
 if __name__ == "__main__":

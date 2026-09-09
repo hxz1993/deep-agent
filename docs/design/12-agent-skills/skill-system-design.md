@@ -158,7 +158,7 @@ MIME和后缀派生读取模式，v0.3.20已安装的XLSX无需重装。同一Ru
 
 ## 6. Builtin Skill
 
-Builtin Skill 位于 `deep_agent/builtin_skills/`，随代码发布、不写数据库、在 `/skills` 与上传包合并
+Builtin Skill 位于 `src/deep_agent/builtin_skills/`，随代码发布、不写数据库、在 `/skills` 与上传包合并
 展示且只读：
 
 - `deepagent-diagnostics`：排查会话、模型、工具、压缩和取消；不读取服务器日志、不执行 Shell。

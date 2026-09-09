@@ -3,19 +3,19 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const source = await readFile(
-  new URL("../../../frontend/console/configuration/ui-tools.js", import.meta.url),
+  new URL("../../../console/configuration/ui-tools.js", import.meta.url),
   "utf8",
 );
 const template = await readFile(
-  new URL("../../../frontend/console/configuration-template.html", import.meta.url),
+  new URL("../../../console/configuration-template.html", import.meta.url),
   "utf8",
 );
 const styles = await readFile(
-  new URL("../../../frontend/console/configuration/configuration.css", import.meta.url),
+  new URL("../../../console/configuration/configuration.css", import.meta.url),
   "utf8",
 );
 const consoleStyles = await readFile(
-  new URL("../../../frontend/console/console.css", import.meta.url),
+  new URL("../../../console/console.css", import.meta.url),
   "utf8",
 );
 
@@ -43,7 +43,7 @@ test("UI 工具页使用左侧工具包树和右侧单一工具表", () => {
   assert.match(template, /class="ui-tool-selected-title">[\s\S]*id="selectedUiToolPackageMeta"[\s\S]*<\/div>[\s\S]*id="selectedUiToolPackageDescription"/);
 });
 
-test("UI 工具页使用与 Skill 一致的分离轻卡片层级", () => {
+test("UI 工具页保留内部轻卡片，页面外壳直角并衔接导航", () => {
   assert.match(template, /class="ui-tools-workspace ui-tools-light-layout"/);
   assert.match(template, /class="panel-title-copy"[\s\S]*UI 工具（HITL）[\s\S]*panel-subtitle/);
   assert.match(template, /panel-toolbar[\s\S]*id="newUiToolPackageBtn"[\s\S]*data-lucide="plus"[\s\S]*新建工具包/);
@@ -65,7 +65,8 @@ test("UI 工具页使用与 Skill 一致的分离轻卡片层级", () => {
   assert.match(styles, /\.panel-title-copy \{[^}]*gap: 4px/);
   assert.match(consoleStyles, /--config-radius: 8px/);
   assert.match(consoleStyles, /--config-control-height: 32px/);
-  assert.match(consoleStyles, /#configurationHost > \.panel\s*\{[^}]*border-radius: var\(--console-card-radius\) !important/);
+  assert.match(consoleStyles, /#configurationHost > \.panel\s*\{[^}]*border: 0;[^}]*border-radius: 0;[^}]*box-shadow: none;/);
+  assert.match(consoleStyles, /\.console-main \.configuration-shell\s*\{[^}]*padding: 0;[^}]*border-radius: 0;/);
   assert.match(consoleStyles, /#configurationHost \.ui-tool-tree-node,[\s\S]*border-radius: var\(--config-radius\) !important/);
   assert.match(consoleStyles, /#configurationHost \.btn,[\s\S]*height: var\(--config-control-height\)/);
 });
@@ -74,6 +75,15 @@ test("工具创建入口依赖当前选中的自定义工具包", () => {
   assert.match(source, /selected\.source !== "manual"/);
   assert.match(source, /请先在左侧选择一个自定义 UI 工具包/);
   assert.match(source, /this\.populatePackageSelect\(selected\.code\)/);
+});
+
+test("自定义 UI 工具行操作统一使用纯图标", () => {
+  assert.match(source, /class="row-actions ui-tool-row-actions compact-icon-actions"/);
+  assert.match(source, /data-edit="\$\{escapeHtml\(tool\.name\)\}" title="编辑" aria-label="编辑"><i data-lucide="pencil"/);
+  assert.match(source, /data-delete="\$\{escapeHtml\(tool\.name\)\}"[\s\S]*title="删除" aria-label="删除"><i data-lucide="trash-2"/);
+  assert.doesNotMatch(source, /data-edit="\$\{escapeHtml\(tool\.name\)\}">编辑<\/button>/);
+  assert.match(styles, /\.compact-icon-actions \.icon-btn\s*\{[\s\S]*width: 28px;[\s\S]*height: 28px;[\s\S]*padding: 0;[\s\S]*border: 0;/);
+  assert.match(styles, /\.ui-tool-row-actions \.icon-btn\s*\{\s*border: 1px solid var\(--border\);\s*background: var\(--bg\);/);
 });
 
 test("自定义 UI 工具保存时必须提交所属工具包", () => {
@@ -130,7 +140,7 @@ test("UI 工具包标题使用内缩分割线且工具编辑弹框更紧凑", ()
 
 test("Agent 能力页只渲染工具包级开关", async () => {
   const agents = await readFile(
-    new URL("../../../frontend/console/configuration/agents.js", import.meta.url),
+    new URL("../../../console/configuration/agents.js", import.meta.url),
     "utf8",
   );
   assert.match(agents, /value="\$\{escapeHtml\(cap\.code\)\}"/);

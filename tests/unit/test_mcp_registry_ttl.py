@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from mcps._run import should_exit_on_registry_ttl
+from mcp_servers._run import should_exit_on_registry_ttl
 
 
 class RegistryTtlWatcherTests(unittest.TestCase):

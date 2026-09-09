@@ -218,15 +218,15 @@ Skill 轻卡片列表 | 跨栏标题与操作
 
 | 设计区域 | 主要实现 |
 | --- | --- |
-| 顶栏、图标栏、主题和全局 token | `frontend/console/index.html`、`frontend/console/console.css` |
-| 对话工作台分栏与拖拽 | `frontend/console/workspace.js`、`frontend/console/workspace-template.html` |
-| Assistant 最终/过程分流 | `frontend/console/assistant-presentation.js`、`frontend/console/chat.js`、`frontend/console/protocol.js` |
-| 配置中心资源目录 | `frontend/console/index.html`、`frontend/console/configuration-template.html` |
-| Agent 卡片/列表与二级编辑 | `frontend/console/configuration/agents.js` |
-| Skill 列表与资源预览 | `frontend/console/configuration/skills.js` |
-| UI 工具包与工具列表 | `frontend/console/configuration/ui-tools.js` |
-| 模型目录 | `frontend/console/catalog-template.html`、`frontend/console/configuration/catalog.js` |
-| 配置页局部样式 | `frontend/console/configuration/configuration.css` |
+| 顶栏、图标栏、主题和全局 token | `console/index.html`、`console/console.css` |
+| 对话工作台分栏与拖拽 | `console/workspace.js`、`console/workspace-template.html` |
+| Assistant 最终/过程分流 | `console/assistant-presentation.js`、`console/chat.js`、`console/protocol.js` |
+| 配置中心资源目录 | `console/index.html`、`console/configuration-template.html` |
+| Agent 卡片/列表与二级编辑 | `console/configuration/agents.js` |
+| Skill 列表与资源预览 | `console/configuration/skills.js` |
+| UI 工具包与工具列表 | `console/configuration/ui-tools.js` |
+| 模型目录 | `console/catalog-template.html`、`console/configuration/catalog.js` |
+| 配置页局部样式 | `console/configuration/configuration.css` |
 
 ## 9. 不可破坏边界
 

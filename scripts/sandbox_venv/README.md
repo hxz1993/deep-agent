@@ -20,7 +20,7 @@ bash scripts/sandbox_venv/setup.sh /usr/bin/python3.12
 
 | 类别 | 包 |
 | --- | --- |
-| Profile `pydata` | `numpy>=1.26,<2`、`pandas`、`pydantic>=2,<3`（清单见 `deep_agent/sandbox/profiles/pydata.json`） |
+| Profile `pydata` | `numpy>=1.26,<2`、`pandas`、`pydantic>=2,<3`（清单见 `src/deep_agent/sandbox/profiles/pydata.json`） |
 | Worker harness | 同上 `pydantic`（worker 经 `PYTHONPATH` 加载 `deep_agent.sandbox.*` 时需要） |
 
 **不要**把宿主业务依赖（DeepCube、`deepfos`、MCP 包等）装进此 venv。

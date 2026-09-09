@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const templatePath = path.resolve(__dirname, "../../../frontend/console/configuration-template.html");
+const templatePath = path.resolve(__dirname, "../../../console/configuration-template.html");
 const templateHtml = fs.readFileSync(templatePath, "utf8");
 const retiredNames = [
   ["text", "tools"].join("_"),

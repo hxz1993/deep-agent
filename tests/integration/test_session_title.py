@@ -19,7 +19,7 @@ from deep_agent.schemas.llm_model import LlmModelCreate
 from tests.helpers.request_identity import TEST_USER_ID, install_test_user_header
 from tests.helpers.sqlite_stores import get_default_test_provider_id, make_sqlite_stores
 from tests.integration.helpers.chat import mock_request_disconnect, parse_sse_events
-from tests.integration.helpers.models import text_only_model
+from tests.helpers.models import text_only_model
 
 
 class SessionTitleIntegrationTests(unittest.IsolatedAsyncioTestCase):

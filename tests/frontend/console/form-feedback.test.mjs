@@ -4,7 +4,7 @@ import test from "node:test";
 import vm from "node:vm";
 
 const source = await readFile(
-  new URL("../../../frontend/console/configuration/form-feedback.js", import.meta.url),
+  new URL("../../../console/configuration/form-feedback.js", import.meta.url),
   "utf8",
 );
 

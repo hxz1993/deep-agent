@@ -5,25 +5,25 @@ import vm from "node:vm";
 
 const source = await readFile(
   new URL(
-    "../../../frontend/console/configuration/global-settings.js",
+    "../../../console/configuration/global-settings.js",
     import.meta.url,
   ),
   "utf8",
 );
 const indexHtml = await readFile(
-  new URL("../../../frontend/console/index.html", import.meta.url),
+  new URL("../../../console/index.html", import.meta.url),
   "utf8",
 );
 const templateHtml = await readFile(
   new URL(
-    "../../../frontend/console/configuration-template.html",
+    "../../../console/configuration-template.html",
     import.meta.url,
   ),
   "utf8",
 );
 const configurationCss = await readFile(
   new URL(
-    "../../../frontend/console/configuration/configuration.css",
+    "../../../console/configuration/configuration.css",
     import.meta.url,
   ),
   "utf8",
@@ -57,7 +57,7 @@ function loadGlobalSettingsUi() {
   return window.__GlobalSettingsUI;
 }
 
-test("Agent 是配置中心默认页且全局配置位于系统设置分组", () => {
+test("Agent 是配置中心默认页，系统分组包含全局配置和模型目录", () => {
   assert.match(
     indexHtml,
     /class="tab resource-btn active" data-tab="agents"/,
@@ -86,14 +86,12 @@ test("Agent 是配置中心默认页且全局配置位于系统设置分组", ()
   assert.doesNotMatch(templateHtml, /当前页面只读|只读标签/);
   assert.doesNotMatch(templateHtml, /agentMaxRequests|max_requests|最大请求次数（可选）/);
   assert.doesNotMatch(indexHtml, /data-tab="auxiliary-models"|辅助模型|辅助工具/);
-  assert.ok(
-    indexHtml.indexOf("系统设置") <
-      indexHtml.indexOf('data-tab="global-settings"'),
-  );
+  assert.match(indexHtml, /class="resource-group-label separated">系统<\/div>[\s\S]*data-tab="global-settings"/);
   assert.ok(
     indexHtml.indexOf('data-tab="global-settings"') <
-      indexHtml.indexOf('data-tab="database-connection"'),
+      indexHtml.indexOf('data-tab="catalog"'),
   );
+  assert.doesNotMatch(indexHtml, /data-tab="database-connection"/);
 });
 
 test("Web Search 配置采用两个显式模式并列出原生 Provider", () => {

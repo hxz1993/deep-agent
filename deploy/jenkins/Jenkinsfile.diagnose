@@ -1,0 +1,82 @@
+// Test 只读诊断版（非发布流水线）：整份粘贴到现有 Jenkins Job，保存后点构建即可。
+// 不检出源码、不构建镜像、不发布、不重启、不连接数据库；不受旧 Job 参数影响。
+pipeline {
+    agent { label 'java21-mvn3' }
+    options {
+        skipDefaultCheckout(true)
+        disableConcurrentBuilds()
+        timeout(time: 10, unit: 'MINUTES')
+    }
+    environment {
+        K8SServerAPI = credentials('ShangHaiOffineK8SApiServer')
+    }
+    stages {
+        stage('DIAGNOSE ONLY - test/deep-agent') {
+            steps {
+                withKubeConfig([credentialsId: 'ShangHaiOffineK8SToken', serverUrl: env.K8SServerAPI, namespace: 'test']) {
+                    sh '''#!/bin/sh
+set -eu
+# 固定目标，避免粘贴到其他 Job 时误选环境。只使用 get 和 logs。
+kube() { kubectl --request-timeout=15s -n test "$@"; }
+redact() {
+    awk '{
+        text = tolower($0)
+        if (text ~ /(password|passwd|secret|token|api.?key|authorization|cookie|credential)[^[:space:]]*[[:space:]]*[:=]/ ||
+            text ~ /:\\/\\/[^\\/[:space:]]+:[^\\/[:space:]]+@/ ||
+            text ~ /\\[parameters:/ || text ~ /set option/) {
+            print "[可能含敏感配置，已隐藏整行]"
+        } else { print }
+    }'
+}
+show() {
+    if result=$(kube "$@" 2>&1); then code=0; else code=$?; fi
+    printf '%s\\n' "$result" | redact
+    if [ "$code" -ne 0 ]; then
+        printf '[读取失败 exit=%s；继续收集其他诊断项]\\n' "$code"
+    fi
+    return 0
+}
+printf '\\n=== 只读诊断：test/deep-agent，不执行发布 ===\\n'
+DEPLOY_UID=$(kube get deployment/deep-agent -o jsonpath='{.metadata.uid}')
+test -n "$DEPLOY_UID"
+show get deployment/deep-agent -o 'jsonpath={.metadata.name}{" replicas="}{.spec.replicas}{" strategy="}{.spec.strategy.type}{" ready="}{.status.readyReplicas}{" updated="}{.status.updatedReplicas}{"\\n"}{range .spec.template.spec.containers[*]}{.name}{" image="}{.image}{" workingDir="}{.workingDir}{" command="}{.command}{" args="}{.args}{"\\n"}{end}{range .status.conditions[*]}{.type}{"="}{.status}{" reason="}{.reason}{" "}{.message}{"\\n"}{end}'
+show get events --field-selector "involvedObject.uid=$DEPLOY_UID" --sort-by=.lastTimestamp
+
+# 用 controller UID 关联 Deployment -> ReplicaSet -> Pod，同时包含失败的新 Pod 和仍存活的旧 Pod。
+# 不猜 app 标签，不读取同命名空间其他应用的日志。
+RS_ROWS=$(kube get replicasets -o 'jsonpath={range .items[*]}{.metadata.uid}{" "}{.metadata.name}{" "}{.metadata.ownerReferences[?(@.controller==true)].uid}{"\\n"}{end}')
+OWN_RS=$(printf '%s\\n' "$RS_ROWS" | awk -v uid="$DEPLOY_UID" '$3 == uid { print $1, $2 }')
+POD_ROWS=$(kube get pods -o 'jsonpath={range .items[*]}{.metadata.name}{" "}{.metadata.uid}{" "}{.metadata.ownerReferences[?(@.controller==true)].uid}{"\\n"}{end}')
+if [ -z "$OWN_RS" ]; then
+    echo '[没有找到该 Deployment 的 ReplicaSet；请查看上方 Deployment 事件]'
+fi
+printf '%s\\n' "$OWN_RS" | while read -r rs_uid rs_name; do
+    [ -n "$rs_uid" ] || continue
+    printf '\\n=== ReplicaSet: %s ===\\n' "$rs_name"
+    show get "replicaset/$rs_name" -o wide
+    show get events --field-selector "involvedObject.uid=$rs_uid" --sort-by=.lastTimestamp
+    OWN_PODS=$(printf '%s\\n' "$POD_ROWS" | awk -v uid="$rs_uid" '$3 == uid { print $1, $2 }')
+    if [ -z "$OWN_PODS" ]; then echo '[此 ReplicaSet 当前没有 Pod]'; fi
+    printf '%s\\n' "$OWN_PODS" | while read -r pod_name pod_uid; do
+        [ -n "$pod_name" ] || continue
+        printf '\\n=== Pod: %s ===\\n' "$pod_name"
+        show get "pod/$pod_name" -o wide
+        show get "pod/$pod_name" -o 'jsonpath={range .status.initContainerStatuses[*]}{"init "}{.name}{" restarts="}{.restartCount}{" state="}{.state}{" previous="}{.lastState}{"\\n"}{end}{range .status.containerStatuses[*]}{.name}{" ready="}{.ready}{" restarts="}{.restartCount}{" image="}{.image}{" state="}{.state}{" previous="}{.lastState}{"\\n"}{end}'
+        show get events --field-selector "involvedObject.uid=$pod_uid" --sort-by=.lastTimestamp
+        printf '\\n--- %s / deep-agent 当前日志（最多 200 行）---\\n' "$pod_name"
+        show logs "$pod_name" -c deep-agent --tail=200 --limit-bytes=65536 --timestamps --pod-running-timeout=10s
+        printf '\\n--- %s / deep-agent 上次退出日志（最多 200 行）---\\n' "$pod_name"
+        show logs "$pod_name" -c deep-agent --previous --tail=200 --limit-bytes=65536 --timestamps --pod-running-timeout=10s
+    done
+done
+printf '\\n=== 诊断收集结束；不代表发布成功或服务已恢复 ===\\n'
+'''
+                }
+            }
+        }
+    }
+    post {
+        success { echo '只读诊断完成。请提供本次 Console Output；本次没有发布或重启服务。' }
+        failure { echo '诊断未完成。请提供 Console Output 中首个错误；本次没有发布或重启服务。' }
+    }
+}

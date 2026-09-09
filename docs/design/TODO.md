@@ -23,6 +23,19 @@
 | `PLAN-GLOBAL-001` | 跨Turn可编辑全局计划 | 当前Plan是给用户看的Turn内完整快照，不是执行调度事实源 | 产品需要跨消息人工编辑、继续或共享计划 |
 | `TOOL-APPROVAL-001` | 写入/删除/外发工具审批 | 需要业务权限、操作人、TTL、审计和幂等共同设计 | 出现明确高风险工具与审批责任方 |
 | `DOCUMENT-001` | PDF/PPT/PPTX页面级解析 | 不塞入普通文本`read_file` | 出现需要页面、图片、版面或OCR的真实业务样本 |
+| `WECOM-HA-001` | 企微Channel多副本、主动消息与用户级身份映射 | v0.7.0只承诺单Gateway副本、被动回复和管理员配置的会话用户，不预埋Lease/Outbox/Identity表 | 出现多副本、可靠主动通知或企微用户差异权限的真实需求 |
+
+## v0.7.0 已完成
+
+- 企微 AIBot WebSocket Channel，使用官方 Python SDK 承接认证、心跳、重连、媒体解密和流式回复。
+- 可选独立 Gateway 进程、Account/Session Binding/Message Run 三表、管理员配置的会话用户与同Peer串行。
+- 公共 Gateway/ChannelService 与 WeCom Adapter 分离；仅 Adapter 引用官方 SDK，飞书适配仍需另行实现。
+- 五个渠道命令 `/help`、`/new`、`/stop`、`/status`、`/whoami`；停止独立控制路径与15秒确认，
+  `/new` 停止后原子换绑，旧历史保留；不实现 `/reset`，普通客户端不增加全局拦截。
+- text、mixed、图片、文件、AMR语音和视频进入现有Chat/FileStore链路，回复只投影Markdown文本。
+- Console渠道配置、连接状态和测试入口；Gateway未部署或不可达时仍可维护配置并明确显示状态。
+- Console只读快捷命令入口与 `/help` 共用目录；网关与机器人状态分开；Session标题事件保存渠道来源，
+  支持本地旧数据幂等修复，数据库仍为002。
 
 ## v0.6.0 已完成
 

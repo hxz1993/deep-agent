@@ -1,26 +1,26 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { parseSkillFrontmatter } from "../../../frontend/console/skill-frontmatter.js";
+import { parseSkillFrontmatter } from "../../../console/skill-frontmatter.js";
 
 const source = await readFile(
-  new URL("../../../frontend/console/configuration/skills.js", import.meta.url),
+  new URL("../../../console/configuration/skills.js", import.meta.url),
   "utf8",
 );
 const template = await readFile(
-  new URL("../../../frontend/console/configuration-template.html", import.meta.url),
+  new URL("../../../console/configuration-template.html", import.meta.url),
   "utf8",
 );
 const shell = await readFile(
-  new URL("../../../frontend/console/index.html", import.meta.url),
+  new URL("../../../console/index.html", import.meta.url),
   "utf8",
 );
 const styles = await readFile(
-  new URL("../../../frontend/console/configuration/configuration.css", import.meta.url),
+  new URL("../../../console/configuration/configuration.css", import.meta.url),
   "utf8",
 );
 const consoleStyles = await readFile(
-  new URL("../../../frontend/console/console.css", import.meta.url),
+  new URL("../../../console/console.css", import.meta.url),
   "utf8",
 );
 
@@ -61,6 +61,11 @@ test("Skill 上传使用 multipart 且资源按安全 API 读取", () => {
   assert.match(source, /Word 可读/);
   assert.match(source, /Excel 可读/);
   assert.doesNotMatch(source, /已保存，当前不可读取或执行/);
+});
+
+test("Skill 预览续读提示包含行号和行内字符位置", () => {
+  assert.match(source, /offset=\$\{escapeHtml\(page\.next_offset\)\}/);
+  assert.match(source, /char_offset=\$\{escapeHtml\(page\.next_char_offset \?\? 0\)\}/);
 });
 
 test("Skill Markdown 资源复用对话渲染器，其他文本保持原文预览", () => {

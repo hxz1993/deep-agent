@@ -54,8 +54,28 @@ class ToolOutputThresholdTests(unittest.TestCase):
         )
         self.assertEqual(
             tool_output_threshold_tokens(context_window_tokens=1_000_000, max_output_tokens=8_000),
-            24_000,
+            48_000,
         )
+
+    def test_document_limit_preserves_small_and_unknown_window_budgets(self) -> None:
+        cases = [
+            (None, 8_000, 24_000),
+            (0, 8_000, 24_000),
+            (-1, 8_000, 24_000),
+            (128_000, 8_000, 24_000),
+            (200_000, 8_000, 38_400),
+            (248_000, 8_000, 48_000),
+            (1_000_000, 384_000, 48_000),
+            (10_000, 20_000, 4_000),
+        ]
+        for window, output, expected in cases:
+            with self.subTest(window=window, output=output):
+                self.assertEqual(
+                    tool_output_threshold_tokens(
+                        context_window_tokens=window, max_output_tokens=output,
+                    ),
+                    expected,
+                )
 
     def test_read_tool_result_compaction_key_includes_slice(self) -> None:
         first = ToolCallPart(
@@ -201,6 +221,51 @@ class PlatformToolResultStoreTests(unittest.IsolatedAsyncioTestCase):
 
 
 class HarnessToolOutputLimitsTests(unittest.IsolatedAsyncioTestCase):
+    async def test_long_document_keeps_structure_only_with_sufficient_model_window(self) -> None:
+        original = {"path": "guide.md", "content": "文" * 30_000, "has_more": False}
+        for window, should_spill in [(1_000_000, False), (128_000, True), (None, True)]:
+            with self.subTest(window=window):
+                capability, store = build_tool_output_limits(
+                    request_headers={}, context_window_tokens=window,
+                    max_output_tokens=8_000, estimator=TokenEstimator.conservative(),
+                )
+                store.write = AsyncMock(return_value="document-artifact")  # type: ignore[method-assign]
+                result = await capability.after_tool_execute(
+                    _ctx(), call=ToolCallPart("docs_read", {}, "call-document"),
+                    tool_def=ToolDefinition(name="docs_read"), args={}, result=original,
+                )
+                if should_spill:
+                    self.assertIsInstance(result, ToolReturn)
+                    self.assertEqual(result.metadata["overflow_handle"], "document-artifact")
+                    store.write.assert_awaited_once()
+                    self.assertEqual(json.loads(store.write.await_args.args[1]), original)
+                else:
+                    self.assertIs(result, original)
+                    store.write.assert_not_awaited()
+
+    async def test_large_window_spills_at_exact_token_threshold(self) -> None:
+        estimator = TokenEstimator.conservative()
+        for size in [47_999, 48_000, 48_001]:
+            with self.subTest(tokens=size):
+                capability, store = build_tool_output_limits(
+                    request_headers={}, context_window_tokens=1_000_000,
+                    max_output_tokens=8_000, estimator=estimator,
+                )
+                store.write = AsyncMock(return_value="boundary-artifact")  # type: ignore[method-assign]
+                original = "文" * size
+                self.assertEqual(estimator.text(original), size)
+                result = await capability.after_tool_execute(
+                    _ctx(), call=ToolCallPart("docs_read", {}, "call-boundary"),
+                    tool_def=ToolDefinition(name="docs_read"), args={}, result=original,
+                )
+                if size >= 48_000:
+                    self.assertIsInstance(result, ToolReturn)
+                    store.write.assert_awaited_once()
+                    self.assertEqual(store.write.await_args.args[1].decode("utf-8"), original)
+                else:
+                    self.assertIs(result, original)
+                    store.write.assert_not_awaited()
+
     async def test_large_sequence_spills_as_pageable_json_lines(self) -> None:
         capability, store = build_tool_output_limits(
             request_headers={},

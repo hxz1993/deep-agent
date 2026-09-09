@@ -4,22 +4,32 @@
 
 自动化测试位于仓库根 `tests/`，使用 **`unittest`**（非 pytest 作为主入口）。在仓库根运行，需已安装 `requirements.txt` 依赖。
 
+源码统一从 `src/` 导入；本地和镜像都显式设置 `PYTHONPATH`，不再依赖根目录兼容链接。
+测试子进程若需要同时导入 `tests` 或根目录的 `mcp_servers`，使用绝对 `src + 仓库根` 路径；
+Sandbox Worker 仍只使用受控的 `src`，禁止继承宿主的任意 `PYTHONPATH`。
+
 ---
 
 ## 运行命令
 
+运行中持久化回归入口：`unit/test_message_persistence.py`、`test_message_part_store.py`、
+`integration/test_incremental_message_persistence.py`、`test_message_persistence_process_exit.py`、`test_channel_message_persistence.py`。
+真实 SDK 需在模型静默/并行工具中途设屏障，从独立 HTTP/SQLite 连接读 History，不能先 flush 后宣称实时。
+强杀验证只能使用隔离子进程及临时库；禁止杀稳定 8000 或重放真实业务工具。
+Console 跟随验证包含请求串行、同 Sequence 状态更新、切页迟到数据及运行工具只读。正常/取消不新增 RUN 或异常回执；执行失败仅一条 execution/error，不能进入模型正文；半段文本不定时落库。
+
 ```bash
 # 全部
-python3.12 -m unittest discover -s tests -p "test_*.py" -v
+PYTHONPATH=src python3.12 -m unittest discover -s tests -p "test_*.py" -v
 
-# 排查失败：首个报错即停（推荐配合 tests/run.ps1 的 30s 超时）
-python3.12 -m unittest discover -s tests -p "test_*.py" --failfast -v
+# 排查失败：首个报错即停
+PYTHONPATH=src python3.12 -m unittest discover -s tests -p "test_*.py" --failfast -v
 
 # 仅单元（无网络、无外部子进程）
-python3.12 -m unittest discover -s tests/unit -p "test_*.py" -v
+PYTHONPATH=src python3.12 -m unittest discover -s tests/unit -p "test_*.py" -v
 
 # 仅集成（HTTP、MCP 子进程、header 转发）
-python3.12 -m unittest discover -s tests/integration -p "test_*.py" -v
+PYTHONPATH=src python3.12 -m unittest discover -s tests/integration -p "test_*.py" -v
 ```
 
 ---
@@ -28,10 +38,16 @@ python3.12 -m unittest discover -s tests/integration -p "test_*.py" -v
 
 ```
 tests/
-├── unit/                    # 纯逻辑，快速
-├── integration/             # 需启动 app 或 MCP 子进程
-│   ├── fixtures/          # 测试用 MCP server（header_echo、pid_echo）
-│   └── helpers/           # chat.py、mcp.py 公共 helper
+├── unit/                    # 单模块与隔离依赖回归
+├── integration/             # HTTP、Agent、MCP 等边界协作
+│   ├── fixtures/             # 集成场景专用 MCP server 与历史样本
+│   └── helpers/              # HTTP/SSE、MCP 生命周期与会话准备
+├── helpers/                 # 跨测试组共用的身份、SQLite、模型等辅助代码
+├── fixtures/                # 共用样本与测试专用 builtin MCP 扫描目录
+│   ├── mcps/echo_fixture/    # 不进入生产 mcp_servers/ 扫描
+│   └── sessions/             # 会话 JSON 样本
+├── frontend/console/        # Console 的 Node.js 测试
+├── check_context_compaction_coverage.py  # 上下文压缩覆盖率门槛
 └── README.md
 ```
 
@@ -42,7 +58,9 @@ tests/
 | 文件 | 覆盖 |
 | --- | --- |
 | `test_agent_max_requests.py` | 全局 request 上限、旧 Agent 字段 422 兼容提示 |
-| `test_code_mode.py` | PTC新旧编码兼容、MCP双通道、Monty调用、URL/File ID文件变量与脱敏 |
+| `test_ptc.py` | PTC新旧编码兼容、MCP双通道、Monty调用、URL/File ID文件变量与脱敏 |
+| `test_ptc_stream_failures.py` | 真实 SDK/Monty + 隔离 SQLite：PTC 连续失败后原生恢复、嵌套等待取消、Provider异常及普通工具重试耗尽的 SSE/History/Registry 闭环 |
+| `test_event_persister.py`、`test_runner_history.py` | 写入失败回执与超时释放、显式关闭 SDK 流后部分历史保存、终态写入失败不覆盖原始错误 |
 | `test_sandbox_*.py` | Python沙箱公网边界、FileStore输入、`deepagent_files`产物发布、回滚、依赖探针与子进程清理 |
 | `test_global_settings.py` | 运行设置安全白名单、Web Search唯一配置、六Provider校验、Key掩码/保留和草稿测试 |
 | `test_web_tools.py`、`test_web_proxy_compat.py` | `builtin:web`目录、视觉模型条件注入、HTML图片位置与URL规范化、固定Provider无降级、SSRF-safe Fetch/Image边界及HTTP代理fake-IP/SNI兼容 |
@@ -64,11 +82,18 @@ tests/
 | `test_attachment_extractors.py` | 文本编码、DOCX/XLSX 结构读取、分页与 Office 安全 |
 | `test_file_tools.py` | 附件与 Skill统一文件工具的来源参数、权限、Run缓存、single-flight、分页和多模态返回 |
 | `test_tool_package_registry.py` | ToolPackage Registry 的显式整包选择和空列表语义 |
-| `test_sqlite_bootstrap.py` | 唯一生产基线001的空库创建、默认数据、完整结构及升降往返 |
-| `test_baseline_migration_dialects.py` | 唯一生产基线001在SQLite、MySQL、PostgreSQL的离线DDL编译 |
+| `test_sqlite_bootstrap.py` | 生产基线001加Channel增量002的空库创建、默认数据、完整结构及升降往返 |
+| `test_baseline_migration_dialects.py` | 当前001→002在SQLite、MySQL、PostgreSQL的离线DDL编译 |
+| `test_channel_migration.py` | 确认Head仍为002，Channel物理字段与ORM一致，重复升级保留数据，临时库降升往返 |
+| `test_channel_gateway.py` | Account/Binding/Run Store、消息解析、幂等、SSE文本投影与Agent换代 |
+| `test_channel_commands.py` | 公共命令识别、非企微测试Adapter、队列与独立停止/新建、超时及投递失败 |
+| `test_channel_store_commands.py` | 无Session Binding、命令认领、新建会话原子换绑、来源标题、归属和重复执行保护 |
+| `test_wecom_adapter.py` | 官方SDK包装边界、连接生命周期、消息薄转换、媒体和回复 |
+| `test_jenkins_deploy.py`、`test_jenkins_api_only.py` | 网关/仅API流水线Shell、按名覆盖启动命令、失败中断、API探针及原始归档完整性 |
 | `test_rebaseline_database.py` | 旧012物理结构校验、显式改标、全表行数与内容哈希不变及异常拒绝 |
 | `test_configuration_import.py` | 同Revision配置初始化、主键保留、空会话门禁、事务回滚和Skill File ID重写 |
 | `test_runtime_dependencies.py` | Pydantic AI/Harness、OpenAI/aiohttp/deepfos联合版本锁定与模型导入 |
+| `test_project_layout.py` | 旧入口已移除、唯一源码目录、规范命令与资源路径、Gateway导入和Sandbox子进程路径 |
 | `test_session_model_override.py` | Agent 对话 `model_id` 请求级覆盖（`build_runner_for_agent`） |
 | `test_ui_tools_rfc.py` | builtin/manual UI 工具包、工具归属、Agent 整包选择、Schema 校验与 Deferred |
 
@@ -83,6 +108,9 @@ tests/
 | `test_mcp_run_scoping.py` | builtin MCP 按 run lease 隔离 client |
 | `test_session_title.py` | 标题回显、AI 生成、兜底、DeepCube fixture |
 | `test_llm_model_modalities.py` | 模型运行属性 CRUD 与 DB-only 模态 |
+| `test_channel_accounts_api.py` | 渠道账号CRUD、管理员配置的会话用户、删除约束、未部署状态和测试503 |
+| `test_channel_session_controls.py` | 可信渠道取消/run-status、真实Session归属、配置切换与旧任务身份隔离 |
+| `test_wecom_ingress.py` | 官方SDK→队列→认证HTTP→模型/History引用与逐条发送者闭环；独立纯命令不进入模型 |
 | `test_llm_model_catalog.py` | 目录 DB 查询、两种视图、全量刷新及失败保留旧目录 |
 | `test_session_model_override.py` | Agent 流式对话 `model_id` 覆盖、默认回退、轮次切换 |
 | `test_chat_attachment_tools.py` | 附件引用 → 模型调用工具 → SSE/历史持久化 → 同会话续读 |
@@ -97,14 +125,16 @@ tests/
 
 1. **先分类**：无外部依赖 → `unit/`；需 HTTP/MCP/子进程 → `integration/`
 2. **命名**：`test_<主题>.py`
-3. **helper**：集成测试复用逻辑放 `integration/helpers/`，勿复制
-4. **fixture MCP**：放 `integration/fixtures/`，保持自包含（同 `mcps/` 规则，不 import `deep_agent`）
+3. **helper**：跨测试组共用逻辑放 `helpers/`，包括 `models.py`；HTTP/SSE、MCP 生命周期等集成专用逻辑放 `integration/helpers/`，勿复制
+4. **fixture**：跨测试组样本放 `fixtures/`，集成场景专用样本放 `integration/fixtures/`；Builtin扫描替身固定放 `fixtures/mcps/`，不得进入生产 `mcp_servers/`。测试MCP保持自包含（同 `mcp_servers/` 规则，不 import `deep_agent`）
 
 ---
 
 ## 陷阱
 
-- 在 `deep_agent/` 子目录运行 discover 会找不到测试；**始终在仓库根**
+- 渠道累加展示必须断言工具/思考等待时的当前投递帧仍含全部公开正文，不能只断言曾经发过累加文本。
+  首段前企微原生加载，有正文后保留正文加文字等待提示；临时投递失败不重跑，final只保留最终正文。
+- 在 `src/deep_agent/` 子目录运行 discover 会找不到测试；**始终在仓库根**
 - 集成测试可能依赖环境变量；勿把 `.env` 密钥写进测试
 - 改 `capabilities/mcp/` 或 `agent/headers.py` 后跑 integration 相关用例
 - 改内置 UI 工具时同时覆盖：`ui:builtin` 整包选择、空 `capabilities` 不加载、内置包/工具修改删除保护，以及 choice 的单选、多选、自由输入和空提交阻止。

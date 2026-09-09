@@ -1,7 +1,10 @@
 # 会话标题生成
 
-DeepAgent 只在会话首轮自动生成一次标题。标题请求复用该轮实际生效的 Provider 与模型，包括请求级
+DeepAgent 普通会话只在首轮自动生成一次标题。标题请求复用该轮实际生效的 Provider 与模型，包括请求级
 `model_id` 覆盖；不存在标题专用模型、独立配置表或环境变量。
+
+渠道来源是例外：创建Session时已写入`source=channel`的标题事件，按外部用户/群名称或ID命名，
+不启动模型标题请求。来源快照与该Session绑定，不因渠道Binding转向新Session或人工改名而丢失。
 
 ## 调用链
 
@@ -31,7 +34,7 @@ DeepAgent 只在会话首轮自动生成一次标题。标题请求复用该轮�
   "event_type": "session/title",
   "payload": {
     "title": "分析预算差异",
-    "source": "fallback | model | user",
+    "source": "fallback | model | user | channel",
     "source_event_id": "首条 user/message Event ID",
     "provider_id": "仅模型来源",
     "provider_type": "仅模型来源",
@@ -50,11 +53,17 @@ DeepAgent 只在会话首轮自动生成一次标题。标题请求复用该轮�
 客户端监听标题 Event 更新侧边栏和页头，不轮询 Session API。`PATCH /sessions/{id}` 只接受非空
 `title`，用于手动改名；`auto` 字段与自动刷新入口已删除。
 
+`source=channel`时，标题事件额外携带`channel`对象：`account_id/account_name/channel_type/peer_type/peer_id/peer_metadata`。
+`peer_metadata`保存来源会话的用户/群ID及实际收到的名称。默认标题使用`User｜User ID`、`Group｜Chat ID`；
+有真实名称时使用`User｜名称（User ID）`等，仍保留ID，不重复渠道前缀，不调用模型猜姓名。
+Session列表/详情通过可选`channel`字段展示该快照；不写入模型输入。旧本地会话的补齐流程见
+[`渠道使用指南`](../wecom-channel.md#已有本地会话来源修复)，仍使用Alembic002。
+
 ## 关键实现与测试
 
-- `deep_agent/agent/title_generator.py`：安全投影、兜底和有界模型请求。
-- `deep_agent/agent/runner.py`：首轮并行调度、SSE 顺序和失败闭合。
-- `deep_agent/db/conversation.py`：标题 CAS、投影与 Event 原子写入。
+- `src/deep_agent/agent/title_generator.py`：安全投影、兜底和有界模型请求。
+- `src/deep_agent/agent/runner.py`：首轮并行调度、SSE 顺序和失败闭合。
+- `src/deep_agent/db/conversation.py`：标题 CAS、投影与 Event 原子写入。
 - `tests/unit/test_title_generator.py`：输入安全、图片和失败行为。
 - `tests/integration/test_session_title.py`：首轮一次性、SSE、回退和已删除接口。
 - `tests/integration/test_session_rename.py`：手动改名及空标题拒绝。

@@ -4,15 +4,15 @@ import test from "node:test";
 import vm from "node:vm";
 
 const source = await readFile(
-  new URL("../../../frontend/console/configuration/builtin-tools.js", import.meta.url),
+  new URL("../../../console/configuration/builtin-tools.js", import.meta.url),
   "utf8",
 );
 const indexHtml = await readFile(
-  new URL("../../../frontend/console/index.html", import.meta.url),
+  new URL("../../../console/index.html", import.meta.url),
   "utf8",
 );
 const templateHtml = await readFile(
-  new URL("../../../frontend/console/configuration-template.html", import.meta.url),
+  new URL("../../../console/configuration-template.html", import.meta.url),
   "utf8",
 );
 
@@ -46,13 +46,17 @@ function loadBuiltinToolsUi() {
   return window.__BuiltinToolsUI;
 }
 
-test("内置工具页位于 Provider 之后和 MCP 之前", () => {
+test("设置目录按 Provider、Skill、MCP、内置工具、UI 工具排列", () => {
   const providerPosition = indexHtml.indexOf('data-tab="llm-providers"');
+  const skillPosition = indexHtml.indexOf('data-tab="skills"');
   const builtinPosition = indexHtml.indexOf('data-tab="builtin-tools"');
   const mcpPosition = indexHtml.indexOf('data-tab="mcp"');
+  const uiPosition = indexHtml.indexOf('data-tab="ui-tools"');
 
-  assert.ok(providerPosition < builtinPosition);
-  assert.ok(builtinPosition < mcpPosition);
+  assert.ok(providerPosition >= 0 && providerPosition < skillPosition);
+  assert.ok(skillPosition < mcpPosition);
+  assert.ok(mcpPosition < builtinPosition);
+  assert.ok(builtinPosition < uiPosition);
   assert.match(templateHtml, /id="panel-builtin-tools"/);
   assert.match(templateHtml, /预制工具包[\s\S]*运行时系统工具/);
   assert.doesNotMatch(templateHtml, /refreshBuiltinToolsBtn|refreshSystemToolsBtn/);

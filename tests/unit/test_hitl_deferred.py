@@ -292,7 +292,9 @@ class AgentRunnerDeferredTests(unittest.IsolatedAsyncioTestCase):
             for part in message.parts
             if isinstance(part, ToolCallPart)
         ]
-        self.assertEqual(call_ids, ["workbook-2"])
+        # Both were accepted executions; the first real correction result is
+        # retained even though its transient SSE card was removed.
+        self.assertEqual(call_ids, ["workbook-1", "workbook-2"])
 
     async def test_run_stream_only_publishes_validated_external_ui_call(self) -> None:
         clarify = UIToolRecord(

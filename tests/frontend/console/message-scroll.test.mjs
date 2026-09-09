@@ -4,7 +4,7 @@ import test from "node:test";
 import {
   messageDistanceToBottom,
   shouldFollowMessages,
-} from "../../../frontend/console/message-scroll.js";
+} from "../../../console/message-scroll.js";
 
 test("消息吸底只在用户接近底部时保持", () => {
   const container = { scrollHeight: 1000, clientHeight: 400, scrollTop: 552 };

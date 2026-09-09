@@ -9,8 +9,8 @@ from unittest.mock import AsyncMock, patch
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
-from deep_agent.agent.models.catalog import normalize_models_dev_bundle
-from deep_agent.agent.models.models_dev import ModelsDevBundle, ModelsDevFetchError
+from deep_agent.models.catalog import normalize_models_dev_bundle
+from deep_agent.models.models_dev import ModelsDevBundle, ModelsDevFetchError
 from deep_agent.api.v1 import api_router
 from deep_agent.capabilities import build_registry
 from deep_agent.capabilities.mcp.lease_manager import McpLeaseManager

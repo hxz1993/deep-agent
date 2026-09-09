@@ -117,6 +117,33 @@ class SandboxSerializationTests(unittest.TestCase):
             len(json.dumps(result, ensure_ascii=False).encode("utf-8")),
             512 * 1024,
         )
+        self.assertTrue(result["is_preview"])
+        self.assertEqual(result["reason"], "byte_limit")
+        self.assertFalse(result["full_result_saved_automatically"])
+        self.assertIn("publish_path", result["guidance"])
+
+    @unittest.skipUnless(_PANDAS_AVAILABLE, "pandas not installed")
+    def test_large_tables_explicitly_report_partial_preview(self) -> None:
+        import pandas as pd
+
+        for value in (pd.DataFrame({"x": range(100)}), pd.Series(range(100))):
+            with self.subTest(kind=type(value).__name__):
+                result, truncated = serialize_result(value)
+                self.assertTrue(truncated)
+                self.assertTrue(result["is_preview"])
+                self.assertEqual(result["returned_count"], 10)
+                self.assertEqual(result["total_count"], 100)
+
+    @unittest.skipUnless(_NUMPY_AVAILABLE, "numpy not installed")
+    def test_array_preview_and_complete_array_have_distinct_flags(self) -> None:
+        import numpy as np
+
+        for count in (0, 10, 11):
+            result, truncated = serialize_result(np.arange(count))
+            self.assertEqual(truncated, count > 10)
+            self.assertEqual(result["is_preview"], count > 10)
+            self.assertEqual(result["returned_count"], min(count, 10))
+            self.assertEqual(result["total_count"], count)
 
 
 if __name__ == "__main__":

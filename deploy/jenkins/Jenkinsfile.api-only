@@ -1,0 +1,134 @@
+// 仅 API 版：发布最新代码，显式覆盖网关启动入口；数据库不降级。
+pipeline {
+    agent { label "${params.AGENT ?: 'java21-mvn3'}" }
+    options {
+        buildDiscarder(logRotator(numToKeepStr: '2'))
+        disableConcurrentBuilds()
+        skipDefaultCheckout(true)
+        timeout(time: 60, unit: 'MINUTES')
+    }
+    environment {
+        ArtifactsName = 'deep-agent.tar.gz'
+        K8SCredentialsId = 'ShangHaiOffineK8SToken'
+        K8SServerAPI = credentials('ShangHaiOffineK8SApiServer')
+        RegisterUrl = 'harbor.deepfos.com'
+        RegistryCredential = 'harbor.deepfos.com'
+    }
+    parameters {
+        gitParameter branchFilter: 'origin/(.*)', defaultValue: 'test', name: 'BRANCH_TAG', type: 'PT_BRANCH_TAG', quickFilterEnabled: true, useRepository: 'https://gitee.com/proinnova/deep-agent', requiredParameter: false, sortMode: 'DESCENDING_SMART'
+        choice name: 'AGENT', choices: ['java21-mvn3', 'java8-mvn3'], description: '选择现有构建节点'
+        choice name: 'RELOAD_PIPELINE', choices: ['false', 'true'], description: 'true 只刷新参数，不构建、不部署'
+    }
+    stages {
+        stage('RELOAD_PIPELINE') {
+            when { expression { params.RELOAD_PIPELINE == 'true' } }
+            steps { echo '仅刷新流水线参数，不构建、不连接集群。' }
+        }
+        stage('Git Checkout') {
+            when { expression { params.RELOAD_PIPELINE != 'true' } }
+            steps {
+                script {
+                    env.NAMESPACE = sh(script: '''#!/bin/sh
+set -eu
+echo "$JOB_NAME" | awk -F/ '{print $1}'
+''', returnStdout: true).trim()
+                    env.NAME = env.JOB_BASE_NAME
+                    dir('source') {
+                        checkout([$class: 'GitSCM', branches: [[name: "${params.BRANCH_TAG ?: 'test'}"]], extensions: [[$class: 'CloneOption', noTags: false, reference: '', shallow: true, timeout: 30]], userRemoteConfigs: [[credentialsId: 'giteeKey', url: 'https://gitee.com/proinnova/deep-agent']]])
+                        env.SOURCE_DIR = pwd()
+                        env.REVISION = sh(script: 'git rev-parse HEAD', returnStdout: true).trim()
+                        sh '''#!/bin/sh
+set -eu
+test -f src/deep_agent/combined_runtime.py
+test -f deploy/gunicorn.conf.py
+'''
+                    }
+                    env.NameTag = "${env.BUILD_NUMBER}-${env.REVISION.take(12)}"
+                    env.LOCAL_IMAGE = "${env.NAMESPACE}/${env.NAME}:${env.NameTag}"
+                    env.RELEASE_IMAGE = "${env.RegisterUrl}/${env.LOCAL_IMAGE}"
+                    env.BUILD_DIR = "TMP_to_delete-jenkins-api-only-${env.BUILD_NUMBER}"
+                }
+            }
+        }
+        stage('Build Image') {
+            when { expression { params.RELOAD_PIPELINE != 'true' } }
+            steps {
+                dir("${env.BUILD_DIR}") {
+                    sh '''#!/bin/sh
+set -eu
+git -C "$SOURCE_DIR" archive --format=tar --prefix=deep-agent/ HEAD > deep-agent.tar
+mkdir -p wheel/deep-agent
+cp "/opt/nfs/python-whl/deepcube-${NAMESPACE}-cp38-abi3-linux_x86_64.whl" wheel/deep-agent/
+tar -rf deep-agent.tar -C wheel deep-agent
+gzip -c deep-agent.tar > "$ArtifactsName"
+'''
+                    writeFile file: 'Dockerfile', text: '''
+FROM harbor.deepfos.com/base/python3.11.9:debian12
+ENV TZ=Asia/Shanghai
+ADD deep-agent.tar.gz /
+WORKDIR /deep-agent
+ENV PYTHONPATH=/deep-agent/src
+RUN sed -i 's|mirrors.tuna.tsinghua.edu.cn|mirrors.aliyun.com|g' /etc/apt/sources.list && \
+    apt-get update && \
+    pip3 install -i https://mirrors.aliyun.com/pypi/simple/ *.whl && \
+    pip3 install -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple/ && \
+    bash scripts/sandbox_venv/setup.sh && \
+    python -m compileall -q src/deep_agent/combined_runtime.py deploy/gunicorn.conf.py && \
+    python -c "import gunicorn; from deep_agent.combined_runtime import api_port_from_env, fetch_health"
+CMD ["gunicorn", "-c", "deploy/gunicorn.conf.py", "deep_agent.main:app"]
+'''
+                    script {
+                        def dockerImage = docker.build(env.LOCAL_IMAGE, '-f Dockerfile .')
+                        docker.withRegistry("https://${env.RegisterUrl}", env.RegistryCredential) {
+                            dockerImage.push()
+                        }
+                    }
+                }
+            }
+        }
+        stage('漏洞检测') {
+            when { expression { params.RELOAD_PIPELINE != 'true' } }
+            steps {
+                dir("${env.BUILD_DIR}") {
+                    sh '''#!/bin/sh
+set -eu
+/opt/nfs/trivy/trivy image --config /opt/nfs/trivy/trivy.yaml --skip-db-update --skip-java-db-update -f json --scanners vuln "$LOCAL_IMAGE" > vulnerabilities.json
+/opt/nfs/trivy/trivy report --excel-file 漏洞.xlsx < vulnerabilities.json
+'''
+                    archiveArtifacts artifacts: '漏洞.xlsx', followSymlinks: false, onlyIfSuccessful: true
+                }
+            }
+        }
+        stage('RELEASE API only') {
+            when { expression { params.RELOAD_PIPELINE != 'true' } }
+            steps {
+                withKubeConfig([credentialsId: "${env.K8SCredentialsId}", serverUrl: "${env.K8SServerAPI}", namespace: "${env.NAMESPACE}"]) {
+                    sh '''#!/bin/sh
+set -eu
+DEPLOYMENT_PATCH=$(printf '{"spec":{"template":{"spec":{"containers":[{"name":"%s","image":"%s","workingDir":"/deep-agent","command":["gunicorn"],"args":["-c","deploy/gunicorn.conf.py","deep_agent.main:app"],"env":[{"name":"PYTHONPATH","value":"/deep-agent/src","valueFrom":null},{"name":"DEEP_AGENT_CHANNEL_GATEWAY_URL","value":"","valueFrom":null}]}]}}}}' "$NAME" "$RELEASE_IMAGE")
+kubectl patch "deployment/$NAME" --type=strategic --patch "$DEPLOYMENT_PATCH"
+kubectl rollout status "deployment/$NAME" --timeout=600s
+kubectl exec "deployment/$NAME" -c "$NAME" -- python -c "import os; from deep_agent.combined_runtime import api_port_from_env, fetch_health; fetch_health('http://127.0.0.1:%s/health' % api_port_from_env(os.environ)); print('API health OK')"
+'''
+                }
+            }
+        }
+    }
+    post {
+        success {
+            script {
+                if (params.RELOAD_PIPELINE != 'true') {
+                    echo "仅 API 发布成功（未启动渠道网关）：${env.RELEASE_IMAGE}；源码 ${env.REVISION}"
+                }
+            }
+        }
+        failure { echo '发布失败；请从首个失败命令检查构建日志、Pod 日志或数据库迁移状态。' }
+        always {
+            script {
+                if (env.BUILD_DIR) {
+                    dir(env.BUILD_DIR) { deleteDir() }
+                }
+            }
+        }
+    }
+}

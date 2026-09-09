@@ -6,7 +6,7 @@ import {
   normalizeOption,
   normalizeStructuredFields,
   validateUiToolCall,
-} from "../../../frontend/console/hitl.js";
+} from "../../../console/hitl.js";
 
 test("结构化表单兼容 field 和 option.name/description", () => {
   const result = normalizeStructuredFields([

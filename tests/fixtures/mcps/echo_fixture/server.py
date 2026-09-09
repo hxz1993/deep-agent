@@ -15,6 +15,6 @@ def reverse(text: str) -> str:
 
 
 if __name__ == "__main__":
-    from mcps._run import run_fastmcp
+    from mcp_servers._run import run_fastmcp
 
     run_fastmcp(mcp, prog="echo_fixture")

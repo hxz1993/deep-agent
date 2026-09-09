@@ -1,6 +1,6 @@
 # DeepAgent Console UI 实施规范
 
-> 适用范围：`frontend/console/`。
+> 适用范围：`console/`。
 >
 > 本文规定新增或修改 Console UI 时必须遵守的实施方法。视觉背景与历史取舍见
 > [`../design/17-console-ui/`](../design/17-console-ui/README.md)，真实行为始终以当前源码和接口为准。

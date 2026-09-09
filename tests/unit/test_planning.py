@@ -27,6 +27,9 @@ from deep_agent.agent.planning import (
     current_plan_snapshot,
     is_planning_tool,
     prepare_plan_store,
+    attach_known_plan_snapshots,
+    attach_plan_snapshot,
+    plan_snapshot_from_part,
 )
 from deep_agent.agent.runner import AgentRunner
 from deep_agent.agent.spec import AgentSpec
@@ -36,6 +39,23 @@ from tests.helpers.sqlite_stores import make_sqlite_stores
 
 
 class PlanningCapabilityTests(unittest.IsolatedAsyncioTestCase):
+    async def test_reused_call_id_keeps_each_completed_plan_snapshot(self) -> None:
+        first = ToolReturnPart("write_plan", "ok", "reused")
+        second = ToolReturnPart("write_plan", "ok", "reused")
+        earlier = {"items": [{"id": "one", "content": "read", "status": "pending"}], "total": 1, "completed": 0}
+        later = {"items": [{"id": "one", "content": "read", "status": "completed"}], "total": 1, "completed": 1}
+        attach_plan_snapshot(first, earlier)
+        attach_plan_snapshot(second, later)
+        messages = [ModelRequest(parts=[first]), ModelRequest(parts=[second])]
+        attach_known_plan_snapshots(messages, {"reused": later}, final_snapshot=later)
+        self.assertEqual(plan_snapshot_from_part(first), earlier)
+        self.assertEqual(plan_snapshot_from_part(second), later)
+        from pydantic_ai.messages import FunctionToolResultEvent
+        deps = AgentDeps(session_id="plan-preserved")
+        prepare_plan_store(deps)
+        await AgentRunner._capture_planning_result(FunctionToolResultEvent(first), deps)
+        self.assertEqual(plan_snapshot_from_part(first), earlier)
+
     async def test_every_agent_gets_default_harness_planning(self) -> None:
         agent = build_agent(
             AgentSpec(
@@ -102,6 +122,12 @@ class PlanningRunnerTests(unittest.IsolatedAsyncioTestCase):
         await self.engine.dispose()
 
     async def test_stream_snapshots_follow_planning_results_and_persist(self) -> None:
+        await self._exercise_stream_plans()
+
+    async def test_stream_reused_call_id_preserves_each_round_plan(self) -> None:
+        await self._exercise_stream_plans(reuse_call_id=True)
+
+    async def _exercise_stream_plans(self, *, reuse_call_id=False) -> None:
         calls = 0
         guidance_seen = False
 
@@ -116,7 +142,7 @@ class PlanningRunnerTests(unittest.IsolatedAsyncioTestCase):
             if calls == 1:
                 yield {0: DeltaToolCall(
                     name="write_plan",
-                    tool_call_id="plan-write",
+                    tool_call_id="reused" if reuse_call_id else "plan-write",
                     json_args=json.dumps({
                         "items": [
                             {
@@ -138,7 +164,7 @@ class PlanningRunnerTests(unittest.IsolatedAsyncioTestCase):
             if calls == 2:
                 yield {0: DeltaToolCall(
                     name="write_plan",
-                    tool_call_id="plan-progress",
+                    tool_call_id="reused" if reuse_call_id else "plan-progress",
                     json_args=json.dumps({
                         "items": [
                             {"id": "step-1", "content": "读取输入", "active_form": "正在读取输入", "status": "completed"},
@@ -150,7 +176,7 @@ class PlanningRunnerTests(unittest.IsolatedAsyncioTestCase):
             if calls == 3:
                 yield {0: DeltaToolCall(
                     name="write_plan",
-                    tool_call_id="plan-complete",
+                    tool_call_id="reused" if reuse_call_id else "plan-complete",
                     json_args=json.dumps({
                         "items": [
                             {"id": "step-1", "content": "读取输入", "active_form": "正在读取输入", "status": "completed"},
@@ -199,6 +225,8 @@ class PlanningRunnerTests(unittest.IsolatedAsyncioTestCase):
             await self.store.list_all_events("planning-stream")
         )
         plan_items = [item for item in projection.items if item.kind == "plan"]
+        self.assertEqual([item.plan["completed"] for item in plan_items], [0, 1, 2])
+        self.assertEqual(len({item.item_id for item in plan_items}), 3)
         self.assertEqual(plan_items[-1].plan["completed"], 2)
         self.assertEqual(plan_items[-1].plan["total"], 2)
         persisted_reminders = [

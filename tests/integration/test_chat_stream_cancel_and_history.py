@@ -27,7 +27,7 @@ from tests.helpers.sqlite_stores import (
     seed_default_agent,
 )
 from tests.integration.helpers.chat import mock_request_disconnect, parse_sse_buffer, parse_sse_events
-from tests.integration.helpers.models import build_slow_stream_model, text_only_model, tool_call_model
+from tests.helpers.models import build_slow_stream_model, text_only_model, tool_call_model
 
 _CHAT_JSON = {"capabilities": []}
 _CONFIRM_CAPABILITIES = ["ui:builtin"]
@@ -208,7 +208,7 @@ class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
                     get_context().active_runs.get(agent_id=self._agent_id, session_id=session_id)
                 )
 
-    async def test_e1_generator_close_is_cleanup_not_synthetic_cancel_history(self) -> None:
+    async def test_e1_generator_close_preserves_sdk_partial_history(self) -> None:
         chunks = ["chunk-one-", "chunk-two-", "chunk-three-", "chunk-four-", "chunk-five-"]
         model, tracker = build_slow_stream_model(chunks=chunks, delay_s=0.25)
         session_id = "e1-cancel-session"
@@ -243,8 +243,9 @@ class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
                 self.assertNotIn("final", {ev.get("type") for ev in events})
 
             data = await self._history(session_id)
-            self.assertGreaterEqual(len(_message_items(data)), 1)
+            self.assertGreaterEqual(len(_message_items(data)), 2)
             self.assertEqual(data["items"][0]["kind"], "user_message")
+            self.assertEqual(_last_assistant(data)["status"], "interrupted")
             self.assertIsNone(
                 get_context().active_runs.get(agent_id=self._agent_id, session_id=session_id)
             )
@@ -354,6 +355,7 @@ class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
                 get_context(),
                 body,
                 TEST_USER_ID,
+                None,
             )
             iterator = response.body_iterator
             first_event = await anext(iterator)
@@ -468,7 +470,8 @@ class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(tracker.yielded_chunks, 0)
         self.assertEqual(streamed[-1]["type"], "cancelled")
         self.assertIn("session_event_appended", {event["type"] for event in streamed})
-        self.assertIn("session_event_updated", {event["type"] for event in streamed})
+        self.assertFalse(any(event.get("event", {}).get("event_type") in
+                             {"run/progress", "run/terminal", "execution/error"} for event in streamed))
         history = await self._history(session_id)
         self.assertEqual([item["kind"] for item in history["items"]], ["user_message"])
         self.assertIsNone(

@@ -26,8 +26,8 @@ def use_test_builtin_mcp():
                 TEST_MCPS_DIR,
             ),
             patch(
-                "deep_agent.capabilities.mcp.resolver.DEEP_AGENT_ROOT",
-                TEST_FIXTURE_ROOT,
+                "deep_agent.capabilities.mcp.resolver.MCP_SERVERS_ROOT",
+                TEST_MCPS_DIR,
             ),
         ):
             yield

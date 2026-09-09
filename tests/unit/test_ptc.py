@@ -1,0 +1,1139 @@
+from __future__ import annotations
+
+import base64
+import asyncio
+import inspect
+import json
+import unittest
+from dataclasses import replace
+from unittest import mock
+
+import httpx2
+from pydantic_ai import Agent, FunctionToolset, ModelRetry, RunContext, ToolDefinition
+from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart, ToolReturnPart
+from pydantic_ai.models.function import AgentInfo, DeltaToolCall, FunctionModel
+from pydantic_ai.models.test import TestModel
+from pydantic_ai.toolsets.abstract import ToolsetTool
+from pydantic_ai.usage import RunUsage
+from pydantic_core import SchemaValidator
+
+from deep_agent.agent.deps import AgentDeps
+from deep_agent.capabilities import build_registry
+from deep_agent.ptc import FilePayloadResolvingToolset, HybridCodeMode
+from deep_agent.ptc.toolset import (
+    HybridCodeModeToolset,
+    _bounded_nested_audit,
+    _scrub_error_text,
+)
+from deep_agent.ptc.file_payload import (
+    CODE_MODE_TRUSTED_RETURN_SCHEMA_KEY,
+    FILE_DATA_TOKEN_PREFIX,
+    MAX_FILE_BYTES,
+    FilePayload,
+    _load_public_url,
+    _resolve_payload_value,
+    build_code_mode_tool_package,
+    safe_audit_value,
+)
+from deep_agent.files.storage import StoredFile
+from deep_agent.schemas.attachment import AttachmentRef
+
+
+class _MemoryFileStore:
+    def __init__(self, files: dict[str, bytes]) -> None:
+        self.files = files
+        self.downloads = 0
+
+    async def download(self, file_id, request_headers):
+        del request_headers
+        self.downloads += 1
+        return self.files[file_id]
+
+    async def upload(self, **kwargs):
+        return StoredFile(
+            id="uploaded",
+            file_name=kwargs["file_name"],
+            file_size=len(kwargs["data"]),
+            file_type=kwargs["file_type"],
+            mime=kwargs.get("mime"),
+        )
+
+    async def delete(self, file_id, request_headers):
+        del file_id, request_headers
+
+    async def register_download(self, **kwargs):
+        del kwargs
+        return "download-record"
+
+
+class CodeModeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_discovery_announcement_and_schemas_keep_native_as_default(self) -> None:
+        from pydantic_ai.capabilities import ToolSearch
+        from pydantic_ai.messages import SystemPromptPart, UserPromptPart
+
+        steps = 0
+        called = []
+        announcements = []
+
+        async def lookup() -> str:
+            called.append(True)
+            return "found"
+
+        def strategy(ctx, queries, tool_defs):
+            return [tool.name for tool in tool_defs]
+
+        def respond(messages, info: AgentInfo) -> ModelResponse:
+            nonlocal steps
+            steps += 1
+            descriptions = {tool.name: tool.description or "" for tool in info.function_tools}
+            self.assertIn("Default to ordinary native MCP calls", descriptions["run_code"])
+            if "search_tools" in descriptions:
+                self.assertIn("Default to ordinary native MCP calls", descriptions["search_tools"])
+                self.assertNotIn("Note: discovered tools become callable", descriptions["search_tools"])
+            if steps == 1:
+                self.assertNotIn("demo_lookup", descriptions)
+                return ModelResponse(parts=[ToolCallPart("search_tools", {"queries": ["lookup"]}, "discover")])
+            if steps == 2:
+                self.assertIn("demo_lookup", descriptions)
+                announcements.extend(part.content for message in messages for part in message.parts
+                                     if isinstance(part, (SystemPromptPart, UserPromptPart))
+                                     and isinstance(part.content, str)
+                                     and "New tool schemas are available" in part.content)
+                return ModelResponse(parts=[ToolCallPart("demo_lookup", {}, "native")])
+            return ModelResponse(parts=[TextPart("done")])
+
+        deferred = FunctionToolset(tools=[lookup]).prefixed("demo").defer_loading()
+        agent = Agent(
+            FunctionModel(respond), deps_type=AgentDeps,
+            toolsets=[build_code_mode_tool_package().toolset, FilePayloadResolvingToolset(deferred)],
+            capabilities=[ToolSearch(strategy=strategy), HybridCodeMode(tools=[], dynamic_catalog=True)],
+        )
+        result = await agent.run("lookup", deps=AgentDeps(session_id="isolated"))
+        self.assertEqual(result.output, "done")
+        self.assertEqual(called, [True])
+        self.assertEqual(len(announcements), 1)
+        self.assertIn("Default to ordinary native MCP calls", announcements[0])
+        self.assertIn("opaque file/binary relay", announcements[0])
+
+    def test_discovery_announcement_preserves_seen_tool_deduplication(self) -> None:
+        capability = HybridCodeMode(tools=[], dynamic_catalog=True)
+        ctx = mock.Mock()
+        capability._announce_newly_discovered(ctx, ["demo_one"])
+        capability._announce_newly_discovered(ctx, ["demo_one"])
+        capability._announce_newly_discovered(ctx, ["demo_one", "demo_two"])
+        self.assertEqual(ctx.enqueue.call_count, 2)
+        self.assertIn("demo_one", ctx.enqueue.call_args_list[0].args[0].content)
+        self.assertIn("demo_two", ctx.enqueue.call_args_list[1].args[0].content)
+        self.assertNotIn("demo_one", ctx.enqueue.call_args_list[1].args[0].content)
+
+    async def test_streamed_ptc_failure_remains_a_failed_result(self) -> None:
+        from deep_agent.agent.events import map_event
+
+        step = 0
+
+        async def stream(messages, info: AgentInfo):
+            nonlocal step
+            step += 1
+            if step == 1:
+                yield {0: DeltaToolCall(
+                    name="run_code", json_args=json.dumps({"code": "await search_tools(query='demo')"}),
+                    tool_call_id="failed-code",
+                )}
+            else:
+                yield "native fallback is available"
+
+        agent = Agent(
+            FunctionModel(stream_function=stream), deps_type=AgentDeps,
+            toolsets=[build_code_mode_tool_package().toolset],
+            capabilities=[HybridCodeMode(tools=[], dynamic_catalog=True)],
+        )
+        mapped = []
+        official_results = []
+        async with agent.run_stream_events("lookup", deps=AgentDeps(session_id="isolated")) as events:
+            async for event in events:
+                if isinstance(getattr(event, "part", None), ToolReturnPart):
+                    official_results.append(event.part)
+                item = map_event(event)
+                if item is not None:
+                    mapped.append(item)
+        failed = next(item for item in mapped if item.get("type") == "tool_result")
+        self.assertIn("native", str(failed["result"]))
+        self.assertEqual(official_results[0].outcome, "failed")
+        self.assertEqual(official_results[0].metadata, {"code_mode": True, "nested_calls": []})
+        self.assertFalse(any(item.get("type") == "tool_call_removed" for item in mapped))
+
+    async def test_ptc_execution_errors_are_failed_results_and_native_remains_available(self) -> None:
+        steps = 0
+        native_calls = []
+
+        async def lookup() -> str:
+            native_calls.append(True)
+            return "native-result"
+
+        def respond(messages, info: AgentInfo) -> ModelResponse:
+            nonlocal steps
+            steps += 1
+            names = {tool.name for tool in info.function_tools}
+            self.assertIn("demo_lookup", names)
+            if steps <= 4:
+                return ModelResponse(parts=[ToolCallPart(
+                    "run_code", {"code": "await search_tools(query='lookup')"}, f"bad-{steps}"
+                )])
+            if steps == 5:
+                return ModelResponse(parts=[ToolCallPart("demo_lookup", {}, "native")])
+            return ModelResponse(parts=[TextPart("done")])
+
+        agent = Agent(
+            FunctionModel(respond), deps_type=AgentDeps,
+            toolsets=[build_code_mode_tool_package().toolset,
+                      FilePayloadResolvingToolset(FunctionToolset(tools=[lookup]).prefixed("demo"))],
+            capabilities=[HybridCodeMode(tools=[], dynamic_catalog=True, max_retries=1)],
+        )
+        result = await agent.run("lookup", deps=AgentDeps(session_id="isolated"))
+        failures = [part for message in result.new_messages() for part in message.parts
+                    if isinstance(part, ToolReturnPart) and part.tool_name == "run_code"]
+        self.assertEqual(len(failures), 4)
+        self.assertTrue(all(part.outcome == "failed" for part in failures))
+        self.assertTrue(all("native" in str(part.content) for part in failures))
+        self.assertTrue(all(part.metadata["code_mode"] for part in failures))
+        self.assertEqual(native_calls, [True])
+        self.assertEqual(result.output, "done")
+
+    async def test_ptc_failure_retains_prior_nested_success_audit(self) -> None:
+        from pydantic_ai.messages import ModelMessagesTypeAdapter
+
+        steps = 0
+
+        async def lookup() -> dict[str, str]:
+            return {"value": "safe-result", "authorization": "Bearer synthetic-test-secret"}
+
+        def respond(messages, info: AgentInfo) -> ModelResponse:
+            nonlocal steps
+            steps += 1
+            if steps == 1:
+                # Start the real Monty REPL so the next error is runtime, not a
+                # whole-snippet type-check failure before the nested tool executes.
+                code = "1"
+            elif steps == 2:
+                code = "value = await demo_lookup()\nmissing_after_side_effect"
+            else:
+                return ModelResponse(parts=[TextPart("done")])
+            return ModelResponse(parts=[ToolCallPart("run_code", {"code": code}, f"ptc-{steps}")])
+
+        agent = Agent(
+            FunctionModel(respond), deps_type=AgentDeps,
+            toolsets=[build_code_mode_tool_package().toolset,
+                      FilePayloadResolvingToolset(FunctionToolset(tools=[lookup]).prefixed("demo"))],
+            capabilities=[HybridCodeMode(tools=[], dynamic_catalog=True)],
+        )
+        result = await agent.run("process data", deps=AgentDeps(session_id="isolated"))
+        failed = next(part for message in result.new_messages() for part in message.parts
+                      if isinstance(part, ToolReturnPart) and part.tool_call_id == "ptc-2")
+        self.assertEqual(failed.outcome, "failed")
+        audit = failed.metadata["nested_calls"]
+        self.assertEqual(audit[0]["tool_name"], "demo_lookup")
+        self.assertEqual(audit[0]["status"], "completed")
+        self.assertEqual(audit[0]["result"]["value"], "safe-result")
+        self.assertNotIn("synthetic-test-secret", json.dumps(audit))
+        restored = ModelMessagesTypeAdapter.validate_json(
+            ModelMessagesTypeAdapter.dump_json(result.new_messages())
+        )
+        persisted = next(part for message in restored for part in message.parts
+                         if isinstance(part, ToolReturnPart) and part.tool_call_id == "ptc-2")
+        self.assertEqual(persisted.outcome, "failed")
+        self.assertEqual(persisted.metadata, failed.metadata)
+
+    def test_registry_exposes_explicit_default_off_package(self) -> None:
+        registry = build_registry()
+        package = registry.get("builtin:ptc")
+        self.assertIs(registry.get("builtin:code-mode"), package)
+        self.assertEqual(package.label, "程序编排")
+        self.assertEqual([tool.name for tool in package.tools], ["run_code"])
+
+    def test_small_file_payload_is_removed_from_error_text(self) -> None:
+        encoded = base64.b64encode(b"small-secret").decode("ascii")
+        scrubbed = _scrub_error_text(
+            f"upstream rejected {encoded}",
+            sensitive_values=frozenset({encoded}),
+        )
+        self.assertNotIn(encoded, scrubbed)
+        self.assertIn("[file-payload-redacted]", scrubbed)
+        identity_scrubbed = _scrub_error_text(
+            "<extra_identity_context>private identity</extra_identity_context>",
+            sensitive_values=frozenset(),
+        )
+        self.assertNotIn("private identity", identity_scrubbed)
+
+    async def test_hybrid_tool_is_native_and_callable_from_run_code(self) -> None:
+        seen_tools: list[list[str]] = []
+        called: list[tuple[int, int]] = []
+
+        async def add(a: int, b: int) -> dict[str, int]:
+            called.append((a, b))
+            return {"sum": a + b}
+
+        steps = 0
+
+        def respond(_messages, info: AgentInfo) -> ModelResponse:
+            nonlocal steps
+            steps += 1
+            seen_tools.append([tool.name for tool in info.function_tools])
+            if steps == 1:
+                return ModelResponse(
+                    parts=[
+                        ToolCallPart(
+                            "run_code",
+                            {"code": "value = await demo_add(a=2, b=3)\nvalue"},
+                            "code-1",
+                        )
+                    ]
+                )
+            return ModelResponse(parts=[TextPart(content="done")])
+
+        agent = Agent(
+            FunctionModel(respond),
+            deps_type=AgentDeps,
+            toolsets=[
+                build_code_mode_tool_package().toolset,
+                FilePayloadResolvingToolset(
+                    FunctionToolset(tools=[add]).prefixed("demo")
+                ),
+            ],
+            capabilities=[HybridCodeMode(tools=[], dynamic_catalog=True)],
+        )
+        result = await agent.run("add", deps=AgentDeps(session_id="session"))
+
+        self.assertEqual(result.output, "done")
+        self.assertEqual(called, [(2, 3)])
+        self.assertIn("run_code", seen_tools[0])
+        self.assertIn("demo_add", seen_tools[0])
+        self.assertNotIn("load_file_data", seen_tools[0])
+        returns = [
+            part
+            for message in result.all_messages()
+            for part in message.parts
+            if isinstance(part, ToolReturnPart)
+        ]
+        self.assertEqual(returns[0].content, {"sum": 5})
+        self.assertEqual(returns[0].metadata["code_mode"], True)
+        self.assertEqual(returns[0].metadata["nested_calls"][0]["tool_name"], "demo_add")
+
+    async def test_native_schema_is_unchanged_and_code_repl_state_is_run_scoped(self) -> None:
+        schemas: list[tuple[str, dict, str | None]] = []
+        step = 0
+
+        async def lookup(query: str, limit: int = 3) -> dict[str, object]:
+            """Look up a bounded number of records."""
+            return {"query": query, "limit": limit}
+
+        def respond(_messages, info: AgentInfo) -> ModelResponse:
+            nonlocal step
+            step += 1
+            native = next(tool for tool in info.function_tools if tool.name == "demo_lookup")
+            schemas.append((native.name, native.parameters_json_schema, native.description))
+            if step == 1:
+                return ModelResponse(
+                    parts=[ToolCallPart("run_code", {"code": "value = 41\nvalue"}, "state-1")]
+                )
+            if step == 2:
+                return ModelResponse(
+                    parts=[ToolCallPart("run_code", {"code": "value + 1"}, "state-2")]
+                )
+            return ModelResponse(parts=[TextPart(content="done")])
+
+        agent = Agent(
+            FunctionModel(respond),
+            deps_type=AgentDeps,
+            toolsets=[
+                build_code_mode_tool_package().toolset,
+                FilePayloadResolvingToolset(
+                    FunctionToolset(tools=[lookup]).prefixed("demo")
+                ),
+            ],
+            capabilities=[HybridCodeMode(tools=[], dynamic_catalog=True)],
+        )
+        await agent.run("state", deps=AgentDeps(session_id="session-1"))
+
+        self.assertEqual(schemas[0], schemas[1])
+        self.assertEqual(schemas[0][0], "demo_lookup")
+        self.assertIn("query", schemas[0][1]["properties"])
+        self.assertEqual(schemas[0][2], "Look up a bounded number of records.")
+
+        second_run_step = 0
+
+        def second_run(_messages, _info: AgentInfo) -> ModelResponse:
+            nonlocal second_run_step
+            second_run_step += 1
+            if second_run_step == 1:
+                return ModelResponse(
+                    parts=[ToolCallPart("run_code", {"code": "value"}, "isolated")]
+                )
+            return ModelResponse(parts=[TextPart(content="isolated")])
+
+        isolated_agent = Agent(
+            FunctionModel(second_run),
+            deps_type=AgentDeps,
+            toolsets=[build_code_mode_tool_package().toolset],
+            capabilities=[HybridCodeMode(tools=[], dynamic_catalog=True, max_retries=1)],
+        )
+        result = await isolated_agent.run("state", deps=AgentDeps(session_id="session-2"))
+        self.assertEqual(result.output, "isolated")
+
+    async def test_asyncio_gather_can_fan_out_and_aggregate(self) -> None:
+        started = 0
+        both_started = asyncio.Event()
+
+        async def fetch(value: int) -> dict[str, int]:
+            nonlocal started
+            started += 1
+            if started == 2:
+                both_started.set()
+            await asyncio.wait_for(both_started.wait(), timeout=1)
+            return {"value": value}
+
+        step = 0
+
+        def respond(_messages, _info: AgentInfo) -> ModelResponse:
+            nonlocal step
+            step += 1
+            if step == 1:
+                code = (
+                    "import asyncio\n"
+                    "rows = await asyncio.gather(demo_fetch(value=2), demo_fetch(value=1))\n"
+                    "sorted([row['value'] for row in rows])"
+                )
+                return ModelResponse(parts=[ToolCallPart("run_code", {"code": code}, "fanout")])
+            return ModelResponse(parts=[TextPart(content="done")])
+
+        agent = Agent(
+            FunctionModel(respond),
+            deps_type=AgentDeps,
+            toolsets=[
+                build_code_mode_tool_package().toolset,
+                FilePayloadResolvingToolset(FunctionToolset(tools=[fetch]).prefixed("demo")),
+            ],
+            capabilities=[HybridCodeMode(tools=[], dynamic_catalog=True)],
+        )
+        result = await agent.run("fanout", deps=AgentDeps(session_id="session"))
+        returns = [
+            part
+            for message in result.all_messages()
+            for part in message.parts
+            if isinstance(part, ToolReturnPart)
+        ]
+        self.assertEqual(returns[0].content, [1, 2])
+        self.assertEqual(started, 2)
+
+    async def test_file_payload_is_resolved_only_at_mcp_boundary_and_redacted(self) -> None:
+        raw = b"\x89PNG\r\n\x1a\nDeepAgent"
+        encoded = base64.b64encode(raw).decode("ascii")
+        received: dict[str, str] = {}
+
+        async def upload_media(file_name: str, base64_content: str) -> dict[str, str]:
+            received.update(file_name=file_name, base64_content=base64_content)
+            return {"media_id": "media-1"}
+
+        steps = 0
+
+        def respond(_messages, _info: AgentInfo) -> ModelResponse:
+            nonlocal steps
+            steps += 1
+            if steps == 1:
+                code = (
+                    "payload = await load_file_data(file_id='file-1', encoding='base64')\n"
+                    "uploaded = await wecom_upload_media("
+                    "file_name=payload['name'], base64_content=payload['content'])\n"
+                    "uploaded"
+                )
+                return ModelResponse(
+                    parts=[ToolCallPart("run_code", {"code": code}, "code-file")]
+                )
+            return ModelResponse(parts=[TextPart(content="sent")])
+
+        store = _MemoryFileStore({"file-1": raw})
+        deps = AgentDeps(
+            session_id="session",
+            user="user",
+            file_store=store,
+            attachment_by_id={
+                "file-1": AttachmentRef(
+                    id="file-1",
+                    name="image.png",
+                    mime="image/png",
+                )
+            },
+        )
+        agent = Agent(
+            FunctionModel(respond),
+            deps_type=AgentDeps,
+            toolsets=[
+                build_code_mode_tool_package().toolset,
+                FilePayloadResolvingToolset(
+                    FunctionToolset(tools=[upload_media]).prefixed("wecom")
+                ),
+            ],
+            capabilities=[HybridCodeMode(tools=[], dynamic_catalog=True)],
+        )
+        result = await agent.run("send image", deps=deps)
+
+        self.assertEqual(received, {"file_name": "image.png", "base64_content": encoded})
+        self.assertEqual(store.downloads, 1)
+        serialized = str(result.all_messages())
+        self.assertNotIn(encoded, serialized)
+        self.assertNotIn("deepagent-file-data://", serialized)
+        returns = [
+            part
+            for message in result.all_messages()
+            for part in message.parts
+            if isinstance(part, ToolReturnPart)
+        ]
+        nested = returns[0].metadata["nested_calls"]
+        self.assertEqual(
+            [item["tool_name"] for item in nested],
+            ["load_file_data", "wecom_upload_media"],
+        )
+        self.assertEqual(
+            nested[1]["args"]["base64_content"],
+            "[file-payload-redacted]",
+        )
+        self.assertEqual(nested[1]["result"], {"media_id": "media-1"})
+
+    async def test_text_file_is_strictly_decoded_without_creating_payload_token(self) -> None:
+        raw = "预算：100".encode("gb18030")
+        step = 0
+
+        def respond(_messages, _info: AgentInfo) -> ModelResponse:
+            nonlocal step
+            step += 1
+            if step == 1:
+                code = (
+                    "payload = await load_file_data(file_id='text-1', encoding='text', "
+                    "text_encoding='gb18030', max_chars=16)\n"
+                    "payload['content']"
+                )
+                return ModelResponse(parts=[ToolCallPart("run_code", {"code": code}, "text")])
+            return ModelResponse(parts=[TextPart(content="done")])
+
+        deps = AgentDeps(
+            session_id="session",
+            file_store=_MemoryFileStore({"text-1": raw}),
+            attachment_by_id={
+                "text-1": AttachmentRef(id="text-1", name="预算.txt", mime="text/plain")
+            },
+        )
+        agent = Agent(
+            FunctionModel(respond),
+            deps_type=AgentDeps,
+            toolsets=[build_code_mode_tool_package().toolset],
+            capabilities=[HybridCodeMode(tools=[], dynamic_catalog=True)],
+        )
+        result = await agent.run("read text", deps=deps)
+        returns = [
+            part
+            for message in result.all_messages()
+            for part in message.parts
+            if isinstance(part, ToolReturnPart)
+        ]
+        self.assertEqual(returns[0].content, "预算：100")
+        self.assertFalse(deps.code_mode_file_payloads)
+
+    def test_payload_resolution_requires_an_exact_run_scoped_token(self) -> None:
+        token = f"{FILE_DATA_TOKEN_PREFIX}{'a' * 32}"
+        payload = FilePayload(
+            token=token,
+            file_id="file-1",
+            name="tiny.bin",
+            mime="application/octet-stream",
+            byte_size=3,
+            sha256="unused",
+            data=b"abc",
+        )
+        deps = AgentDeps(
+            session_id="session",
+            code_mode_file_payloads={token: payload},
+        )
+
+        self.assertEqual(_resolve_payload_value(token, deps), "YWJj")
+        self.assertEqual(
+            _resolve_payload_value(f"prefix:{token}:suffix", deps),
+            f"prefix:{token}:suffix",
+        )
+        with self.assertRaisesRegex(Exception, "无效、已过期"):
+            _resolve_payload_value(f"{FILE_DATA_TOKEN_PREFIX}{'b' * 32}", deps)
+
+    def test_small_payload_base64_is_redacted_by_exact_run_secret(self) -> None:
+        deps = AgentDeps(session_id="session")
+        token = f"{FILE_DATA_TOKEN_PREFIX}{'c' * 32}"
+        payload = FilePayload(
+            token=token,
+            file_id="file-1",
+            name="tiny.bin",
+            mime="application/octet-stream",
+            byte_size=3,
+            sha256="unused",
+            data=b"abc",
+        )
+        deps.code_mode_file_payloads[token] = payload
+        encoded = base64.b64encode(payload.data).decode("ascii")
+
+        self.assertEqual(
+            safe_audit_value(
+                {"content": encoded},
+                sensitive_values=frozenset({token, encoded}),
+            ),
+            {"content": "[file-payload-redacted]"},
+        )
+
+    def test_identity_context_is_removed_from_nested_tool_results(self) -> None:
+        projected = safe_audit_value(
+            {
+                "extra_identity_context": "private operator identity",
+                "sessions_count": 2,
+            }
+        )
+        self.assertEqual(
+            projected,
+            {
+                "extra_identity_context": "[redacted]",
+                "sessions_count": 2,
+            },
+        )
+        projected_output = safe_audit_value(
+            {
+                "output": "debug: {'extra_identity_context': "
+                "'<extra_identity_context>private identity</extra_identity_context>'}",
+            }
+        )
+        self.assertNotIn("private identity", str(projected_output))
+        self.assertIn("[identity-context-redacted]", str(projected_output))
+        credential_output = safe_audit_value(
+            {"output": "Authorization: Bearer abcdefghijklmnop api_key=secret-value"}
+        )
+        self.assertNotIn("abcdefghijklmnop", str(credential_output))
+        self.assertNotIn("secret-value", str(credential_output))
+
+    async def test_catalog_teaches_top_level_await_without_asyncio_run(self) -> None:
+        async def lookup(query: str) -> dict[str, str]:
+            return {"query": query}
+
+        descriptions: list[str] = []
+
+        def respond(_messages, info: AgentInfo) -> ModelResponse:
+            descriptions.append(
+                next(
+                    tool.description or ""
+                    for tool in info.function_tools
+                    if tool.name == "run_code"
+                )
+            )
+            return ModelResponse(parts=[TextPart(content="done")])
+
+        agent = Agent(
+            FunctionModel(respond),
+            deps_type=AgentDeps,
+            toolsets=[
+                build_code_mode_tool_package().toolset,
+                FilePayloadResolvingToolset(
+                    FunctionToolset(tools=[lookup]).prefixed("demo")
+                ),
+            ],
+            capabilities=[HybridCodeMode(tools=[], dynamic_catalog=False)],
+        )
+        await agent.run("inspect", deps=AgentDeps(session_id="session"))
+
+        self.assertIn("never wrap it with `asyncio.run()`", descriptions[0])
+        self.assertIn("exist only inside `run_code`", descriptions[0])
+        self.assertIn("separately present in the ordinary tool list", descriptions[0])
+        self.assertIn("Default to ordinary native MCP calls", descriptions[0])
+        self.assertIn("intermediate rows/bytes do not need model interpretation", descriptions[0])
+        self.assertIn("`search_tools` is native-only", descriptions[0])
+        self.assertIn("connection/pairing, and canvas snapshots", descriptions[0])
+        self.assertNotIn("one tool's result feeds another", descriptions[0])
+        catalog = HybridCodeModeToolset._render_catalog(
+            {
+                "load_file_data": type("Definition", (), {"metadata": {}})(),
+                "demo_lookup": type("Definition", (), {"metadata": {}})(),
+            }
+        )
+        self.assertIn("await demo_lookup(...)", catalog)
+        self.assertIn("await load_file_data", catalog)
+
+    def test_load_file_data_catalog_signature_matches_function_schema(self) -> None:
+        rendered = HybridCodeModeToolset._render_catalog(
+            {
+                "load_file_data": type("Definition", (), {"metadata": {}})(),
+            }
+        )
+        toolset = build_code_mode_tool_package().toolset
+        function = next(iter(toolset.tools.values())).function
+        signature = inspect.signature(function)
+        self.assertIsNone(signature.parameters["file_id"].default)
+        self.assertIsNone(signature.parameters["url"].default)
+        self.assertEqual(signature.parameters["encoding"].default, "base64")
+        self.assertEqual(signature.parameters["text_encoding"].default, "utf-8")
+        self.assertEqual(signature.parameters["max_chars"].default, 65_536)
+        self.assertIn("max_chars: int = 65536", rendered)
+
+    async def test_public_url_file_payload_uses_opaque_token(self) -> None:
+        raw = b"public-image"
+        received: dict[str, str] = {}
+
+        async def upload(file_name: str, base64_content: str) -> dict[str, str]:
+            received.update(file_name=file_name, base64_content=base64_content)
+            return {"media_id": "media-public"}
+
+        step = 0
+
+        def respond(_messages, _info: AgentInfo) -> ModelResponse:
+            nonlocal step
+            step += 1
+            if step == 1:
+                return ModelResponse(
+                    parts=[
+                        ToolCallPart(
+                            "run_code",
+                            {
+                                "code": (
+                                    "payload = await load_file_data("
+                                    "url='https://example.com/image.png')\n"
+                                    "await relay_upload(file_name=payload['name'], "
+                                    "base64_content=payload['content'])"
+                                )
+                            },
+                            "public-file",
+                        )
+                    ]
+                )
+            return ModelResponse(parts=[TextPart(content="done")])
+
+        agent = Agent(
+            FunctionModel(respond),
+            deps_type=AgentDeps,
+            toolsets=[
+                build_code_mode_tool_package().toolset,
+                FilePayloadResolvingToolset(
+                    FunctionToolset(tools=[upload]).prefixed("relay")
+                ),
+            ],
+            capabilities=[HybridCodeMode(tools=[], dynamic_catalog=True)],
+        )
+        with mock.patch(
+            "deep_agent.ptc.file_payload._load_public_url",
+            new=mock.AsyncMock(
+                return_value=(
+                    raw,
+                    "image.png",
+                    "image/png",
+                    "https://example.com/image.png",
+                )
+            ),
+        ):
+            result = await agent.run("relay", deps=AgentDeps(session_id="session"))
+
+        encoded = base64.b64encode(raw).decode("ascii")
+        self.assertEqual(
+            received,
+            {"file_name": "image.png", "base64_content": encoded},
+        )
+        serialized = str(result.all_messages())
+        self.assertNotIn(encoded, serialized)
+        self.assertNotIn(FILE_DATA_TOKEN_PREFIX, serialized)
+
+    async def test_load_file_data_requires_exactly_one_source(self) -> None:
+        function = next(
+            iter(build_code_mode_tool_package().toolset.tools.values())
+        ).function
+        ctx = RunContext(
+            deps=AgentDeps(session_id="session"),
+            model=TestModel(),
+            usage=RunUsage(),
+        )
+
+        with self.assertRaisesRegex(ModelRetry, "必须且只能提供一个"):
+            await function(ctx)
+        with self.assertRaisesRegex(ModelRetry, "必须且只能提供一个"):
+            await function(
+                ctx,
+                file_id="file-1",
+                url="https://example.com/file.bin",
+            )
+
+    async def test_public_url_uses_bounded_pydantic_safe_download(self) -> None:
+        response = httpx2.Response(
+            200,
+            headers={
+                "content-type": "image/png",
+                "content-disposition": 'attachment; filename="chart.png"',
+            },
+            content=b"image-bytes",
+            request=httpx2.Request(
+                "GET",
+                "https://93.184.216.34/assets/chart",
+                headers={"host": "example.com"},
+            ),
+        )
+        with mock.patch(
+            "deep_agent.ptc.file_payload.safe_download",
+            new=mock.AsyncMock(return_value=response),
+        ) as downloader:
+            data, name, mime, final_url = await _load_public_url(
+                "https://example.com/assets/chart"
+            )
+
+        self.assertEqual(data, b"image-bytes")
+        self.assertEqual(name, "chart.png")
+        self.assertEqual(mime, "image/png")
+        self.assertEqual(final_url, "https://example.com/assets/chart")
+        self.assertFalse(downloader.await_args.kwargs["allow_local"])
+        self.assertEqual(downloader.await_args.kwargs["max_bytes"], MAX_FILE_BYTES)
+
+    async def test_public_url_rejects_credentials_before_download(self) -> None:
+        with mock.patch(
+            "deep_agent.ptc.file_payload.safe_download",
+            new=mock.AsyncMock(),
+        ) as downloader:
+            with self.assertRaisesRegex(ModelRetry, "用户名或密码"):
+                await _load_public_url("https://user:secret@example.com/file")
+        downloader.assert_not_awaited()
+
+    async def test_public_url_preserves_safe_download_ssrf_rejection(self) -> None:
+        with mock.patch(
+            "deep_agent.ptc.file_payload.safe_download",
+            new=mock.AsyncMock(side_effect=ValueError("private/internal IP address")),
+        ) as downloader:
+            with self.assertRaisesRegex(ModelRetry, "地址不安全"):
+                await _load_public_url("http://127.0.0.1/private")
+        self.assertEqual(downloader.await_count, 1)
+
+    def test_nested_audit_has_an_aggregate_limit(self) -> None:
+        entries = [
+            {"tool_name": f"tool-{index}", "result": "x" * 2_000}
+            for index in range(100)
+        ]
+        projected = _bounded_nested_audit(
+            entries,
+            sensitive_values=frozenset(),
+            max_chars=4_096,
+        )
+        self.assertLess(len(str(projected)), 6_000)
+        self.assertEqual(projected[-1]["reason"], "nested_audit_limit")
+        self.assertGreater(projected[-1]["truncated_calls"], 0)
+
+    async def test_untrusted_mcp_return_schema_degrades_to_generic_json(self) -> None:
+        wrapped = FilePayloadResolvingToolset(
+            FunctionToolset(),
+            server_names=("demo",),
+        )
+        validator = SchemaValidator(
+            {
+                "type": "dict",
+                "keys_schema": {"type": "str"},
+                "values_schema": {"type": "any"},
+            }
+        )
+        tools = {
+            "demo_untrusted": ToolsetTool(
+                toolset=wrapped,
+                tool_def=ToolDefinition(
+                    name="demo_untrusted",
+                    parameters_json_schema={
+                        "type": "object",
+                        "properties": {"query": {"type": "string"}},
+                    },
+                    return_schema={"type": "object", "properties": {"rows": {"type": "array"}}},
+                    metadata={
+                        "deepagent_code_mode": "hybrid",
+                        "deepagent_trusted_return_schema": False,
+                    },
+                ),
+                max_retries=1,
+                args_validator=validator,
+            )
+        }
+        hybrid = HybridCodeModeToolset(wrapped=wrapped)
+        callable_defs, _aliases = hybrid._partition_callable_tools(tools)
+        self.assertIsNone(callable_defs["demo_untrusted"].return_schema)
+
+    async def test_trusted_mcp_return_schema_remains_typed(self) -> None:
+        wrapped = FilePayloadResolvingToolset(
+            FunctionToolset(),
+            server_names=("demo",),
+        )
+        validator = SchemaValidator(
+            {
+                "type": "dict",
+                "keys_schema": {"type": "str"},
+                "values_schema": {"type": "any"},
+            }
+        )
+        return_schema = {
+            "type": "object",
+            "properties": {"rows": {"type": "array"}},
+        }
+        tools = {
+            "demo_trusted": ToolsetTool(
+                toolset=wrapped,
+                tool_def=ToolDefinition(
+                    name="demo_trusted",
+                    parameters_json_schema={
+                        "type": "object",
+                        "properties": {"query": {"type": "string"}},
+                    },
+                    return_schema=return_schema,
+                    metadata={
+                        "deepagent_code_mode": "hybrid",
+                        CODE_MODE_TRUSTED_RETURN_SCHEMA_KEY: True,
+                    },
+                ),
+                max_retries=1,
+                args_validator=validator,
+            )
+        }
+        hybrid = HybridCodeModeToolset(wrapped=wrapped)
+        callable_defs, _aliases = hybrid._partition_callable_tools(tools)
+        self.assertEqual(callable_defs["demo_trusted"].return_schema, return_schema)
+
+    async def test_unknown_file_id_fails_closed(self) -> None:
+        calls = 0
+
+        def respond(_messages, _info: AgentInfo) -> ModelResponse:
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                return ModelResponse(
+                    parts=[
+                        ToolCallPart(
+                            "run_code",
+                            {"code": "await load_file_data(file_id='missing')"},
+                            "code-missing",
+                        )
+                    ]
+                )
+            return ModelResponse(parts=[TextPart(content="closed")])
+
+        agent = Agent(
+            FunctionModel(respond),
+            deps_type=AgentDeps,
+            toolsets=[build_code_mode_tool_package().toolset],
+            capabilities=[HybridCodeMode(tools=[], dynamic_catalog=True, max_retries=1)],
+        )
+        result = await agent.run("missing", deps=AgentDeps(session_id="session"))
+        self.assertEqual(result.output, "closed")
+
+    async def test_declared_oversized_artifact_fails_before_download(self) -> None:
+        calls = 0
+        store = _MemoryFileStore({"artifact-1": b"must-not-download"})
+
+        def respond(_messages, _info: AgentInfo) -> ModelResponse:
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                return ModelResponse(
+                    parts=[
+                        ToolCallPart(
+                            "run_code",
+                            {"code": "await load_file_data(file_id='artifact-1')"},
+                            "oversized",
+                        )
+                    ]
+                )
+            return ModelResponse(parts=[TextPart(content="closed")])
+
+        deps = AgentDeps(
+            session_id="session",
+            file_store=store,
+            tool_output_artifacts={
+                "artifact-1": {
+                    "artifact_id": "artifact-1",
+                    "byte_size": MAX_FILE_BYTES + 1,
+                    "file_name": "large.json",
+                }
+            },
+        )
+        agent = Agent(
+            FunctionModel(respond),
+            deps_type=AgentDeps,
+            toolsets=[build_code_mode_tool_package().toolset],
+            capabilities=[HybridCodeMode(tools=[], dynamic_catalog=True, max_retries=1)],
+        )
+        result = await agent.run("large", deps=deps)
+        self.assertEqual(result.output, "closed")
+        self.assertEqual(store.downloads, 0)
+
+    async def test_alias_collision_keeps_both_tools_native_only(self) -> None:
+        toolset = FunctionToolset[AgentDeps]()
+
+        @toolset.tool_plain(name="a-b")
+        def first(value: int) -> int:
+            return value
+
+        @toolset.tool_plain(name="a.b")
+        def second(value: int) -> int:
+            return value
+
+        seen: dict[str, str] = {}
+
+        def respond(_messages, info: AgentInfo) -> ModelResponse:
+            seen.update({tool.name: tool.description or "" for tool in info.function_tools})
+            return ModelResponse(parts=[TextPart(content="done")])
+
+        agent = Agent(
+            FunctionModel(respond),
+            deps_type=AgentDeps,
+            toolsets=[
+                build_code_mode_tool_package().toolset,
+                FilePayloadResolvingToolset(toolset),
+            ],
+            capabilities=[HybridCodeMode(tools=[], dynamic_catalog=True)],
+        )
+        await agent.run("inspect", deps=AgentDeps(session_id="session"))
+        self.assertIn("a-b", seen)
+        self.assertIn("a.b", seen)
+        self.assertIn("run_code", seen)
+
+    async def test_code_only_helper_never_falls_back_native_on_alias_collision(self) -> None:
+        helpers = FunctionToolset[AgentDeps]()
+
+        @helpers.tool_plain(
+            name="hidden-helper",
+            metadata={"deepagent_code_mode": "code_only"},
+        )
+        def hidden_helper(value: int) -> int:
+            return value
+
+        hybrid = FunctionToolset[AgentDeps]()
+
+        @hybrid.tool_plain(name="hidden.helper")
+        def native_peer(value: int) -> int:
+            return value
+
+        seen: set[str] = set()
+
+        def respond(_messages, info: AgentInfo) -> ModelResponse:
+            seen.update(tool.name for tool in info.function_tools)
+            return ModelResponse(parts=[TextPart(content="done")])
+
+        agent = Agent(
+            FunctionModel(respond),
+            deps_type=AgentDeps,
+            toolsets=[helpers, FilePayloadResolvingToolset(hybrid)],
+            capabilities=[HybridCodeMode(tools=[], dynamic_catalog=True)],
+        )
+        await agent.run("inspect", deps=AgentDeps(session_id="session"))
+
+        self.assertNotIn("hidden-helper", seen)
+        self.assertIn("hidden.helper", seen)
+        self.assertIn("run_code", seen)
+
+    async def test_hybrid_does_not_reveal_deferred_tool_natively(self) -> None:
+        async def hidden(value: int) -> int:
+            return value
+
+        base = FunctionToolset(tools=[hidden])
+        original_get_tools = base.get_tools
+
+        async def deferred_get_tools(ctx):
+            tools = await original_get_tools(ctx)
+            return {
+                name: replace(
+                    tool,
+                    tool_def=replace(tool.tool_def, defer_loading=True),
+                )
+                for name, tool in tools.items()
+            }
+
+        base.get_tools = deferred_get_tools  # type: ignore[method-assign]
+        seen: set[str] = set()
+
+        def respond(_messages, info: AgentInfo) -> ModelResponse:
+            seen.update(tool.name for tool in info.function_tools)
+            return ModelResponse(parts=[TextPart(content="done")])
+
+        agent = Agent(
+            FunctionModel(respond),
+            deps_type=AgentDeps,
+            toolsets=[
+                build_code_mode_tool_package().toolset,
+                FilePayloadResolvingToolset(base),
+            ],
+            capabilities=[HybridCodeMode(tools=[], dynamic_catalog=True)],
+        )
+        await agent.run("inspect", deps=AgentDeps(session_id="session"))
+        self.assertEqual(seen, {"run_code"})
+
+    async def test_deferred_tool_becomes_native_and_code_callable_after_reveal(self) -> None:
+        revealed = False
+        called: list[str] = []
+        base = FunctionToolset[AgentDeps]()
+
+        @base.tool_plain
+        def reveal_tools() -> dict[str, object]:
+            nonlocal revealed
+            revealed = True
+            return {"discovered_tools": [{"name": "hidden_lookup"}]}
+
+        @base.tool_plain
+        def hidden_lookup(query: str) -> dict[str, str]:
+            called.append(query)
+            return {"query": query}
+
+        original_get_tools = base.get_tools
+
+        async def dynamic_get_tools(ctx):
+            tools = await original_get_tools(ctx)
+            output = {}
+            for name, tool in tools.items():
+                if name == "reveal_tools":
+                    output[name] = replace(
+                        tool,
+                        tool_def=replace(tool.tool_def, tool_kind="capability-load"),
+                    )
+                elif name == "hidden_lookup":
+                    output[name] = replace(
+                        tool,
+                        tool_def=replace(tool.tool_def, defer_loading=not revealed),
+                    )
+                else:
+                    output[name] = tool
+            return output
+
+        base.get_tools = dynamic_get_tools  # type: ignore[method-assign]
+        seen_steps: list[set[str]] = []
+        step = 0
+
+        def respond(_messages, info: AgentInfo) -> ModelResponse:
+            nonlocal step
+            step += 1
+            seen_steps.append({tool.name for tool in info.function_tools})
+            if step == 1:
+                return ModelResponse(parts=[ToolCallPart("reveal_tools", {}, "search")])
+            if step == 2:
+                return ModelResponse(
+                    parts=[
+                        ToolCallPart(
+                            "run_code",
+                            {"code": "await hidden_lookup(query='revealed')"},
+                            "code-revealed",
+                        )
+                    ]
+                )
+            return ModelResponse(parts=[TextPart(content="done")])
+
+        agent = Agent(
+            FunctionModel(respond),
+            deps_type=AgentDeps,
+            toolsets=[
+                build_code_mode_tool_package().toolset,
+                FilePayloadResolvingToolset(base),
+            ],
+            capabilities=[HybridCodeMode(tools=[], dynamic_catalog=True)],
+        )
+        await agent.run("reveal", deps=AgentDeps(session_id="session"))
+
+        self.assertEqual(seen_steps[0], {"reveal_tools", "run_code"})
+        self.assertEqual(seen_steps[1], {"reveal_tools", "hidden_lookup", "run_code"})
+        self.assertEqual(called, ["revealed"])
+
+
+if __name__ == "__main__":
+    unittest.main()

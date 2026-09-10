@@ -131,7 +131,7 @@
 .diagnostic-sessions-page .diagnostic-filter-chip { color:var(--diag-accent); background:var(--diag-accent-soft); padding:4px 8px; border-radius:6px; font-size:12px; white-space:nowrap; }
 .diagnostic-sessions-page .diagnostic-session-table-scroll { flex:1; overflow:auto; min-height:0; border:1px solid var(--diag-border); border-radius:8px; }
 .diagnostic-sessions-page .diagnostic-session-table { min-width:822px; border:0; border-radius:0; overflow:visible; }
-.diagnostic-sessions-page .diagnostic-session-row { display:grid; grid-template-columns:var(--diagnostic-columns,minmax(330px,1fr) 104px 84px 52px 64px 128px); align-items:center; gap:8px; min-height:50px; padding:5px 10px; border-bottom:1px solid var(--diag-border); font-size:13px; }
+.diagnostic-sessions-page .diagnostic-session-row { display:grid; grid-template-columns:var(--diagnostic-columns,minmax(280px,2.6fr) minmax(140px,1fr) minmax(120px,1fr) 70px 80px 160px); align-items:center; gap:8px; min-height:50px; padding:5px 10px; border-bottom:1px solid var(--diag-border); font-size:13px; }
 .diagnostic-sessions-page .diagnostic-session-row:last-child { border-bottom:0; }
 .diagnostic-sessions-page .diagnostic-session-columns { position:sticky; top:0; z-index:1; min-height:34px; padding-top:6px; padding-bottom:6px; background:var(--diag-inset); color:var(--diag-muted); font-size:12px; border-bottom:1px solid var(--diag-border); cursor:default; }
 .diagnostic-sessions-page .diagnostic-session-columns > span { position:relative; display:flex; align-items:center; gap:4px; min-width:0; }
@@ -144,6 +144,7 @@
 .diagnostic-sessions-page .diagnostic-session-title strong { min-width:0; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; font-size:13px; line-height:18px; font-weight:600; color:var(--diag-text); }
 .diagnostic-sessions-page .diagnostic-session-id button { color:var(--diag-muted); display:inline-flex; flex-shrink:0; padding:1px; border-radius:4px; }
 .diagnostic-sessions-page .diagnostic-session-id button > svg { width:12px; height:12px; }
+.diagnostic-sessions-page .diagnostic-session-id button.copied { color:var(--diag-accent); opacity:1; }
 .diagnostic-sessions-page .diagnostic-session-id { display:flex; align-items:center; gap:5px; min-width:0; margin:2px 0 0; color:var(--diag-muted); }
 .diagnostic-sessions-page .diagnostic-session-id p { margin:0; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; line-height:18px; }
 .diagnostic-sessions-page .diagnostic-session-id code { display:inline; flex-shrink:0; font-size:12px; color:var(--diag-muted); }

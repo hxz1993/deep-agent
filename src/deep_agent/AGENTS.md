@@ -87,6 +87,13 @@ HTTP (REST/SSE)
 
 未配置 `DEEP_AGENT_DBMS_*` 时默认使用 SQLite 文件 `data/deep-agent.db`（可用 `DEEP_AGENT_SQLITE_PATH` 覆盖）。配置 `DEEP_AGENT_DBMS_*` 则使用 PostgreSQL / MySQL。
 
+全新空库首次升级至Head时，`migrations/env.py`调用`db/initial_configuration.py`设置当前默认配置：
+DeepSeek Provider（官方默认地址、Key为空）和`deepseek-flash`模型，保留默认Agent及其固定关联ID。
+模型初始上下文1000000、最大输出384000，输入模态text/image；能力标签attachment、reasoning、
+tool_call、structured_output、temperature、open_weights、interleaved。模型配置界面本身不因此改变。
+只在迁移前无Revision且目标为Head时执行；历史Revision回放、已有库升级/重启和用户删除默认项后
+都不覆盖或补建配置。已发布001/002迁移及表结构不改写；离线SQL生成与在线空库初始化一致。
+
 MCP 在请求时由 `resolve_mcp_toolsets` 解析（DB 行 + `mcp_servers/` builtin 兜底）。
 
 渠道网关是独立可选进程`PYTHONPATH=src python -m deep_agent.channels.gateway`，与API复用同一代码、数据库和

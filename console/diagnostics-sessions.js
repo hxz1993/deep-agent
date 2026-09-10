@@ -239,7 +239,33 @@ export function initDiagnosticSessions({ root, navigate, replace, onBack }) {
   }
   async function click(event) {
     const target = event.target.closest("button,[data-session-id],[data-day-index]"); if (!target || !root.contains(target) || state.route?.view === "detail") return;
-    if (target.dataset.copySession) { event.stopPropagation(); try { await navigator.clipboard.writeText(target.dataset.copySession); window.DeepAgentConsole?.toast("会话 ID 已复制"); } catch { window.DeepAgentConsole?.toast("复制失败，请手动选择", true); } return; }
+    if (target.dataset.copySession) {
+      event.stopPropagation();
+      if (target.disabled) return;
+      target.disabled = true;
+      try {
+        await navigator.clipboard.writeText(target.dataset.copySession);
+        target.classList.add("copied");
+        target.innerHTML = icon("check");
+        target.title = "会话 ID 已复制";
+        target.setAttribute("aria-label", "会话 ID 已复制");
+        icons();
+        window.DeepAgentConsole?.toast("会话 ID 已复制");
+        setTimeout(() => {
+          if (!target.isConnected) return;
+          target.classList.remove("copied");
+          target.innerHTML = icon("copy");
+          target.title = `复制 Session ID：${target.dataset.copySession}`;
+          target.setAttribute("aria-label", "复制 Session ID");
+          target.disabled = false;
+          icons();
+        }, 1500);
+      } catch {
+        target.disabled = false;
+        window.DeepAgentConsole?.toast("复制失败，请手动选择", true);
+      }
+      return;
+    }
     if (target.dataset.loadedUser !== undefined) { state.filters.user_id = target.dataset.loadedUser; state.filters.offset = 0; void loadCurrent(); return; }
     if (target.dataset.sessionView) {
       if (state.route.view === "list") listFilters = Object.fromEntries(Object.entries(state.filters).filter(([key]) => ["user_id", "query", "latest_status", "has_questions", "has_execution_error", "limit"].includes(key)));

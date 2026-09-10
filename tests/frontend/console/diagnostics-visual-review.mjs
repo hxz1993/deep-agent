@@ -389,6 +389,11 @@ async function sessionReview() {
     if (mode === "fixture") assert.equal(await page.locator(".diagnostic-session-row[data-session-id]").count(), 50);
   });
   await check("list: six compact columns show copy, eight-character ID and question", async () => {
+    const proportions = await first('.diagnostic-session-columns').evaluate(node => {
+      const widths = [...node.children].map(child => child.getBoundingClientRect().width);
+      return widths[0] / widths.reduce((a, b) => a + b, 0);
+    });
+    assert(proportions < 0.57, `Session column dominates the table: ${proportions}`);
     assert.equal(await page.locator(".diagnostic-session-title [data-copy-session]").count(), 0);
     const rows = await page.locator(".diagnostic-session-row[data-session-id]").evaluateAll(nodes => nodes.map(node => {
       const secondary = node.querySelector(".diagnostic-session-id");
@@ -461,7 +466,12 @@ async function sessionReview() {
   await check("list: copy reports the existing toast and does not enter detail", async () => {
     const url = page.url(), copy = first('[data-copy-session]'), id = await copy.getAttribute('data-copy-session');
     await copy.click(); assert.equal(await page.evaluate(() => navigator.clipboard.readText()), id);
+    assert.equal(await copy.getAttribute('aria-label'), '会话 ID 已复制');
+    assert.equal(await copy.locator('svg[data-lucide="check"]').count(), 1);
+    assert.equal(await copy.isDisabled(), true);
     await page.getByText('会话 ID 已复制', { exact: true }).waitFor({ state: 'visible' }); assert.equal(page.url(), url);
+    await copy.locator('svg[data-lucide="copy"]').waitFor({ state: 'visible' });
+    assert.equal(await copy.isEnabled(), true);
   });
   await check("list: borderless user and status align right of search; focus has no glow", async () => {
     assert.equal(await page.locator('.diagnostic-session-filters input[name="user_id"]').count(), 0);

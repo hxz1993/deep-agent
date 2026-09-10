@@ -39,7 +39,7 @@ const session = () => ({
 });
 
 function eventTarget(dataset = {}, extra = {}) {
-  return { dataset, closest() { return this; }, matches() { return false; }, ...extra };
+  return { dataset, classList: { add() {}, remove() {} }, setAttribute() {}, closest() { return this; }, matches() { return false; }, ...extra };
 }
 
 function sessionHarness(request = async () => overview()) {

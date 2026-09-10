@@ -150,6 +150,7 @@ function assistantLoopPayload(parts = []) {
 
 function assistantLoopSummary(payload = {}) {
   if (payload.content) return valuePreview(payload.content);
+  if (payload.tool_calls?.length) return `调用 ${payload.tool_calls.length} 个工具`;
   return payload.thinking ? "模型处理中" : "模型响应";
 }
 
@@ -379,28 +380,28 @@ export function buildTrajectory(history = {}) {
         return null;
       }).filter(Boolean);
       const assistantPayload = assistantLoopPayload(assistantParts);
-      if (assistantPayload.thinking || assistantPayload.content) {
-        const assistant = newEvent({
-          id: group.event.event_id,
-          kind: "assistant",
-          inputSequence: Math.max(inputSequence, 1),
-          runId: event.run_id || message.run_id || null,
-          timestamp: group.event.created_at || message.timestamp || null,
-          status: event.status || message.state || "completed",
-          part: { content: assistantPayload.content },
-          payload: assistantPayload,
-          native: { ...messageMeta(message), event_ids: [...group.eventIds] },
-        });
-        assistant.summary = assistantLoopSummary(assistantPayload);
-        assistant.sequence = Number(group.event.sequence || 0);
-        assistant.turn_id = event.turn_id || null;
-        assistant.event_type = event.event_type;
-        assistant.timestamp_end = event.updated_at || assistant.timestamp;
-        if (group.row) Object.assign(group.row, assistant);
-        else {
-          group.row = assistant;
-          projected.push(assistant);
-        }
+      // A tool-only response is still a persisted assistant decision. Keep one
+      // row per SDK message, including empty thinking, rather than hiding facts.
+      const assistant = newEvent({
+        id: group.event.event_id,
+        kind: "assistant",
+        inputSequence: Math.max(inputSequence, 1),
+        runId: event.run_id || message.run_id || null,
+        timestamp: group.event.created_at || message.timestamp || null,
+        status: event.status || message.state || "completed",
+        part: { content: assistantPayload.content },
+        payload: assistantPayload,
+        native: { ...messageMeta(message), event_ids: [...group.eventIds] },
+      });
+      assistant.summary = assistantLoopSummary(assistantPayload);
+      assistant.sequence = Number(group.event.sequence || 0);
+      assistant.turn_id = event.turn_id || null;
+      assistant.event_type = event.event_type;
+      assistant.timestamp_end = event.updated_at || assistant.timestamp;
+      if (group.row) Object.assign(group.row, assistant);
+      else {
+        group.row = assistant;
+        projected.push(assistant);
       }
     }
 
@@ -1375,6 +1376,7 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
       limitations: [
         "不包含系统提示词、动态工具Schema、认证Header、Token或Cookie",
         "历史轨迹没有持久化逐Part精确耗时",
+        "同一模型响应的 Part 合并展示；native.event_ids 保留对应数据库事件 ID",
       ],
       events: redactTrajectoryValue(allEvents()),
     };

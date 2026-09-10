@@ -210,6 +210,13 @@ async function logReview() {
     const count = await rows.count();
     if (mode === "fixture") assert.equal(count, 200);
     else if (!count) assert(await first("#diagnosticsEmpty").isVisible(), "Live empty state is visible");
+    const ids = await page.locator('#diagnosticsRecords [data-open-session]').evaluateAll(nodes => nodes.map(node => ({ text:node.textContent, id:node.dataset.openSession })));
+    assert(ids.every(item => item.text === item.id.slice(0, 8)), 'Log rows shorten display only, preserving full navigation ID');
+    const entries = await rows.evaluateAll(nodes => nodes.map((node, index) => ({ sequence:node.querySelector('.diagnostics-sequence')?.textContent, expected:String(index + 1), height:node.getBoundingClientRect().height, font:getComputedStyle(node.querySelector('.diagnostics-summary')).fontSize })));
+    assert(entries.every(item => item.sequence === item.expected && item.height === 26 && item.font === '12px'));
+    assert.equal(await page.locator('#diagnosticsLogPage .diagnostics-footer').count(), 0);
+    assert.equal(await page.locator('.diagnostics-result-title #diagnosticsMeta').count(), 1);
+    assert.equal(await page.locator('.diagnostics-result-title #diagnosticsMore').count(), 1);
     return { loadedRows: count };
   });
   if (await rows.count()) {
@@ -267,6 +274,13 @@ async function logReview() {
     assert.equal(await first("#diagnosticsReset").evaluate(node => getComputedStyle(node).borderTopWidth), "0px");
     await capture("logs", "filters");
   });
+  await check("logs: focused keyword and Session ID have no inset outline or glow", async () => {
+    for (const selector of ["#diagnosticsKeyword", "#diagnosticsSession"]) {
+      await first(selector).focus();
+      const styles = await first(selector).evaluate(node => [node, node.parentElement].map(item => { const style = getComputedStyle(item); return { outline: style.outlineStyle, shadow: style.boxShadow }; }));
+      assert(styles.every(item => item.outline === "none" && item.shadow === "none"), JSON.stringify(styles));
+    }
+  });
   await check("logs: Session ID jump opens correct readonly detail", async () => {
     await rows.first().click(); await page.locator("#diagnosticsDrawer [data-open-session]").click();
     await page.waitForFunction(id => location.hash.includes(`/sessions/${id}`), selectedLog.session_id);
@@ -279,6 +293,7 @@ async function logReview() {
   await check("logs: cursor appends rather than replacing rows", async () => {
     await gotoView("logs"); await first("#diagnosticsMore").click(); await settleLogs();
     assert.equal(await rows.count(), 240);
+    assert.equal(await rows.last().locator('.diagnostics-sequence').innerText(), '240');
     assert.equal(new URLSearchParams(diagnosticCalls("/api/v1/diagnostics/logs").at(-1).query).get("cursor"), "200");
   });
 }
@@ -309,9 +324,10 @@ async function sessionReview() {
       return { height: node.getBoundingClientRect().height, metaWidth: meta.width, alignment: Math.abs(title.y + title.height / 2 - meta.y - meta.height / 2) };
     }));
     assert(rows.every(row => row.height <= 40 && row.alignment < 2));
-    assert(rows.every(row => row.metaWidth <= 274), "Metadata stays compact so questions have more space");
-    const columns = await page.locator(".diagnostic-question-meta").evaluateAll(nodes => nodes.map(node => [...node.children].map(child => child.getBoundingClientRect().x)));
-    assert(columns.every(row => row.every((x, i) => Math.abs(x - columns[0][i]) < 1)), "Metadata columns align across different text lengths");
+    const metadata = await page.locator(".diagnostic-question-meta").evaluateAll(nodes => nodes.map(node => ({ right: node.getBoundingClientRect().right, width: node.getBoundingClientRect().width, display: getComputedStyle(node).display, time: node.querySelector("time").textContent, fullTime: node.querySelector("time").title })));
+    assert(metadata.every(item => item.display === "flex" && /^\d{2}-\d{2} \d{2}:\d{2}$/.test(item.time)), "Natural-width metadata uses short dates");
+    assert(metadata.every(item => Math.abs(item.right - metadata[0].right) < 1), "Metadata is right aligned as a whole");
+    assert(metadata.every(item => item.fullTime.length > item.time.length), "Full timestamp remains available on hover");
   });
   await check("overview: chart resizing preserves circular points and text scale", async () => {
     for (const width of [1594, 1100, viewport.width]) {
@@ -346,7 +362,25 @@ async function sessionReview() {
     assert(Math.abs((await first(".diagnostic-session-scroll").boundingBox()).y - initial.y) < 1);
     await gotoView("overview");
   });
-  await page.locator('[data-session-view="list"]').click(); await settleSessions();
+  if (mode === 'fixture') await check('list: delayed loading stays in header without overlapping controls or shifting rows', async () => {
+    const match = url => new URL(url).pathname === '/api/v1/diagnostics/sessions';
+    let release; const gate = new Promise(resolve => { release = resolve; });
+    const handler = async route => { await gate; await route.fallback(); };
+    await page.route(match, handler);
+    let before;
+    try {
+      await page.locator('[data-session-view="list"]').click();
+      const status = first('.diagnostic-loading'); await status.getByText('正在加载…').waitFor();
+      const statusBox = await status.boundingBox(), toolbar = await first('.diagnostic-list-toolbar').boundingBox();
+      before = await first('.diagnostic-session-columns').boundingBox();
+      assert(statusBox.y + statusBox.height <= toolbar.y);
+      assert.equal(await status.evaluate(node => getComputedStyle(node).position), 'static');
+      await capture('list', 'loading');
+    } finally { release(); await page.unroute(match, handler); }
+    await settleSessions();
+    assert(Math.abs((await first('.diagnostic-session-columns').boundingBox()).y - before.y) < 1);
+  });
+  else { await page.locator('[data-session-view="list"]').click(); await settleSessions(); }
   await capture("list");
   await check("list: master-sized layout and font boundaries", () => assertLayout("list"));
   await check("list: username cells have no avatars/email", async () => {
@@ -354,23 +388,39 @@ async function sessionReview() {
     assert(!(await first(".diagnostic-session-table").innerText()).includes("@invalid.example"));
     if (mode === "fixture") assert.equal(await page.locator(".diagnostic-session-row[data-session-id]").count(), 50);
   });
-  await check("list: compact rows show ID, copy, separator and question on the second line", async () => {
+  await check("list: six compact columns show copy, eight-character ID and question", async () => {
     assert.equal(await page.locator(".diagnostic-session-title [data-copy-session]").count(), 0);
     const rows = await page.locator(".diagnostic-session-row[data-session-id]").evaluateAll(nodes => nodes.map(node => {
       const secondary = node.querySelector(".diagnostic-session-id");
-      return { height: node.getBoundingClientRect().height, text: secondary.textContent, idVisible: getComputedStyle(secondary.querySelector("code")).display !== "none", copy: !!secondary.querySelector("code + [data-copy-session]") };
+      return { height: node.getBoundingClientRect().height, cells: node.children.length, text: secondary.textContent, id: secondary.querySelector("code").textContent, expected: node.dataset.sessionId.slice(0, 8), idColor: getComputedStyle(secondary.querySelector("code")).color, questionColor: getComputedStyle(secondary.querySelector("p")).color, copy: !!secondary.querySelector("[data-copy-session] + code") };
     }));
-    assert(rows.every(row => row.height <= 52 && row.idVisible && row.copy && row.text.includes("·") && !row.text.includes("最近问题：")));
+    assert(rows.every(row => row.height <= 52 && row.cells === 6 && row.id === row.expected && row.idColor === row.questionColor && row.copy && row.text.includes("·") && !row.text.includes("最近问题：")));
+    assert.equal(await page.locator('.diagnostic-session-row [aria-label="进入会话详情"]').count(), 0);
   });
-  await check("list: pagination follows status in toolbar and table fills remaining height", async () => {
-    assert.equal(await page.locator(".diagnostic-list-toolbar .diagnostic-pagination").count(), 1);
-    assert.equal(await page.locator(".diagnostic-list-workbench > footer").count(), 0);
-    const status = await first('[data-diagnostic-control="latest_status"]').boundingBox(), pagination = await first(".diagnostic-pagination").boundingBox();
-    assert(pagination.x >= status.x + status.width && Math.abs(pagination.y - status.y) < 2);
+  await check("list: borderless pagination stays below the table at the workbench bottom", async () => {
+    assert.equal(await page.locator(".diagnostic-list-toolbar .diagnostic-pagination").count(), 0);
+    assert.equal(await page.locator(".diagnostic-list-workbench > footer .diagnostic-pagination").count(), 1);
+    assert.equal(await page.locator('.diagnostic-pagination [data-diagnostic-control="limit"]').count(), 1);
+    assert.equal(await page.locator('.diagnostic-page-range, [data-session-page]').count(), 0);
+    assert.match(await first('.diagnostic-page-current').innerText(), /^\d+ \/ \d+$/);
+    const pagination = await first(".diagnostic-pagination").boundingBox();
     const table = await first(".diagnostic-session-table-scroll").boundingBox(), workbench = await first(".diagnostic-list-workbench").boundingBox();
-    assert(Math.abs(table.y + table.height - workbench.y - workbench.height) < 2);
+    assert(pagination.y >= table.y + table.height);
+    assert(Math.abs(pagination.y + pagination.height - workbench.y - workbench.height) < 2);
+    assert.equal(await first('.diagnostic-pagination').evaluate(node => getComputedStyle(node).borderTopWidth), '0px');
+  });
+  await check("list: bottom page-size menu opens upward and remains usable", async () => {
+    await choose('#diagnosticsSessionsPage', 'limit', '20'); await settleSessions();
+    assert.equal(currentFilters().get('limit'), '20');
+    await choose('#diagnosticsSessionsPage', 'limit', '50'); await settleSessions();
+    assert.equal(currentFilters().get('limit'), '50');
   });
   if (mode === "live") {
+    await check("live: user labels use supplied names with truthful ID fallbacks", async () => {
+      const counts = await page.locator('.diagnostic-session-table .diagnostic-username').evaluateAll(nodes => ({ total: nodes.length, named: nodes.filter(node => node.textContent.trim() && node.textContent.trim() !== node.title).length, idFallback: nodes.filter(node => node.textContent.trim() === node.title).length, blank: nodes.filter(node => !node.textContent.trim()).length }));
+      assert.equal(counts.blank, 0, 'No blank platform user labels');
+      return counts; // Do not record names or full platform IDs in live reports.
+    });
     await check("live: saved session detail remains strictly readonly", async () => {
       const rows = page.locator(".diagnostic-session-row[data-session-id]");
       if (!(await rows.count())) return { skipped: "No saved sessions in the current live range" };
@@ -391,6 +441,40 @@ async function sessionReview() {
     return;
   }
   if (screenOnly) return;
+  await check("list: bounded column resizing keeps headers and rows aligned", async () => {
+    const handle = first('[data-resize-column="0"]');
+    assert.equal(await page.locator('[data-resize-column]').count(), 5);
+    const readWidths = () => first('.diagnostic-session-columns').evaluate(node => [...node.children].map(child => child.getBoundingClientRect().width));
+    const original = await readWidths(); const box = await handle.boundingBox();
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2); await page.mouse.down();
+    try { await page.mouse.move(box.x + box.width / 2 + 1000, box.y + box.height / 2, { steps: 5 }); } finally { await page.mouse.up(); }
+    const resized = await readWidths();
+    assert(resized[0] >= original[0] && resized[0] <= Math.max(720, original[0]) + 1);
+    if (original[0] < 720) assert(resized[0] > original[0]);
+    assert(resized[1] >= Math.min(80, original[1]) - 1);
+    assert(Math.abs(resized.reduce((sum, value) => sum + value, 0) - original.reduce((sum, value) => sum + value, 0)) < 1);
+    const alignment = await page.locator('.diagnostic-session-row').evaluateAll(nodes => nodes.slice(0, 8).map(node => [...node.children].map(child => child.getBoundingClientRect().x)));
+    assert(alignment.every(row => row.every((x, i) => Math.abs(x - alignment[0][i]) < 1)), 'Headers and body use one column width definition');
+    await handle.focus(); await page.keyboard.press('ArrowLeft'); const keyboard = await readWidths(); assert(keyboard[0] < resized[0]);
+    await capture('list', 'resized');
+  });
+  await check("list: copy reports the existing toast and does not enter detail", async () => {
+    const url = page.url(), copy = first('[data-copy-session]'), id = await copy.getAttribute('data-copy-session');
+    await copy.click(); assert.equal(await page.evaluate(() => navigator.clipboard.readText()), id);
+    await page.getByText('会话 ID 已复制', { exact: true }).waitFor({ state: 'visible' }); assert.equal(page.url(), url);
+  });
+  await check("list: borderless user and status align right of search; focus has no glow", async () => {
+    assert.equal(await page.locator('.diagnostic-session-filters input[name="user_id"]').count(), 0);
+    const userInput = first('.diagnostic-list-options input[name="user_id"]');
+    const user = await userInput.boundingBox(); const search = first('.diagnostic-list-search input[name="query"]');
+    const searchBox = await search.boundingBox(); assert(user.x >= searchBox.x + searchBox.width);
+    const status = await first('[data-diagnostic-control="latest_status"]').boundingBox();
+    assert(status.x >= user.x + user.width && Math.abs(status.y - user.y) < 2);
+    assert.equal(await userInput.evaluate(node => getComputedStyle(node).borderTopColor), 'rgba(0, 0, 0, 0)');
+    await search.focus();
+    const styles = await search.evaluate(node => [node, node.parentElement].map(item => ({ outline: getComputedStyle(item).outlineStyle, shadow: getComputedStyle(item).boxShadow })));
+    assert(styles.every(item => item.outline === 'none' && item.shadow === 'none'), JSON.stringify(styles));
+  });
   await check("sessions: overview/list preserves common filters and fixed time", async () => {
     await choose("#diagnosticsSessionsPage", "agent_id", agents[0].id); await settleSessions();
     const before = currentFilters(); await page.locator('[data-session-view="overview"]').click(); await settleSessions();
@@ -404,11 +488,20 @@ async function sessionReview() {
     await search.fill("费用"); await search.press("Enter"); await settleSessions();
     assert.equal(currentFilters().get("query"), "费用"); assert.equal(currentFilters().get("start"), before.get("start"));
     assert((await page.locator(".diagnostic-session-name strong").allTextContents()).every(title => title.includes("费用")));
+    await first('[data-session-view="overview"]').click(); await settleSessions();
+    assert.equal(await page.locator('#diagnosticsSessionsPage input[name="user_id"]').count(), 0);
+    const overviewCall = new URLSearchParams(diagnosticCalls('/api/v1/diagnostics/sessions/overview').at(-1).query);
+    for (const key of ['query', 'user_id', 'latest_status', 'has_questions']) assert(!overviewCall.has(key), `Overview excludes list-only ${key}`);
+    assert(!currentFilters().get('query'));
+    await first('[data-session-view="list"]').click(); await settleSessions(); assert.equal(currentFilters().get('query'), '费用');
     await search.fill(""); await search.press("Enter"); await settleSessions();
   });
   await check("sessions: username picker submits platform ID, not display name", async () => {
     const input = first('#diagnosticsSessionsPage input[name="user_id"]');
-    await input.click(); await first('[data-loaded-user="visual-user-01"]').click(); await settleSessions();
+    await input.click();
+    const options = await first('#diagnosticLoadedUsers').boundingBox(), workbench = await first('.diagnostic-list-workbench').boundingBox();
+    assert(options.x >= workbench.x && options.x + options.width <= viewport.width, 'User options stay inside the list workbench');
+    await first('[data-loaded-user="visual-user-01"]').click(); await settleSessions();
     assert.equal(await input.inputValue(), "chenliang"); assert.equal(currentFilters().get("user_id"), "visual-user-01");
     await input.press("Enter"); await settleSessions(); assert.equal(currentFilters().get("user_id"), "visual-user-01");
     await input.click(); await first('[data-loaded-user=""]').click(); await settleSessions(); assert(!currentFilters().get("user_id"));
@@ -419,11 +512,12 @@ async function sessionReview() {
     assert.equal(currentFilters().get("offset"), "50"); assert.equal(currentFilters().get("start"), before.get("start"));
     assert.notEqual(await row.getAttribute("data-session-id"), original);
     await page.locator('[data-session-action="previous"]').click(); await settleSessions(); assert.equal(await row.getAttribute("data-session-id"), original);
-    if (await page.locator('[data-session-page="3"]').count()) {
-      await page.locator('[data-session-page="3"]').click(); await settleSessions();
-      assert.equal(currentFilters().get("offset"), "100"); assert.equal(await page.locator(".diagnostic-session-row[data-session-id]").count(), 28);
-      await page.locator('[data-session-page="1"]').click(); await settleSessions();
-    }
+    await page.locator('[data-session-action="next"]').click(); await settleSessions();
+    await page.locator('[data-session-action="next"]').click(); await settleSessions();
+    assert.equal(currentFilters().get("offset"), "100"); assert.equal(await page.locator(".diagnostic-session-row[data-session-id]").count(), 28);
+    assert.equal(await first('.diagnostic-page-current').innerText(), '3 / 3'); assert(await first('[data-session-action="next"]').isDisabled());
+    await page.locator('[data-session-action="previous"]').click(); await settleSessions();
+    await page.locator('[data-session-action="previous"]').click(); await settleSessions();
   });
   await check("sessions: detail return restores list page and inner scroll", async () => {
     await page.locator('[data-session-action="next"]').click(); await settleSessions();

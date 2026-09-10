@@ -19,6 +19,7 @@ const styles = await readFile(
   new URL("../../../console/configuration/configuration.css", import.meta.url),
   "utf8",
 );
+const consoleStyles = await readFile(new URL("../../../console/console.css", import.meta.url), "utf8");
 
 test("配置中心提供企微渠道页和完整运行状态", () => {
   assert.match(indexHtml, /data-tab="channels"[\s\S]*?<span>渠道<\/span>/);
@@ -60,6 +61,12 @@ test("快捷命令在渠道标题后以带图标的无框按钮展示", () => {
   assert.match(panel, /channel-title-row[\s\S]*<h2>渠道<\/h2>\s*<button class="channel-commands-btn" type="button" id="channelCommandsBtn">[\s\S]*?data-lucide="terminal"[\s\S]*?<span>快捷命令<\/span><\/button>/);
   assert.doesNotMatch(panel.split('class="panel-toolbar-actions"')[1], /channelCommandsBtn/);
   assert.match(styles, /\.channel-commands-btn\s*\{[^}]*border: 0;[^}]*background: transparent;/);
+});
+
+test("渠道标题沿用目录标题基线，快捷命令热区不撑高标题行", () => {
+  assert.match(consoleStyles, /#configurationHost #panel-channels \.panel-title-copy\s*\{\s*display: block;/);
+  assert.match(consoleStyles, /#configurationHost \.channel-title-row \.channel-commands-btn\s*\{\s*margin-block: -4px;/);
+  assert.match(styles, /\.channel-title-row \.channel-commands-btn\s*\{[^}]*min-height: 28px;/);
 });
 
 test("快捷命令弹框独立于网关读取统一只读目录并转义内容", async () => {

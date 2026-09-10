@@ -1,7 +1,7 @@
-import { LIST_FILTER_KEYS } from "./diagnostics-navigation.js?v=20260909-2";
+import { LIST_FILTER_KEYS } from "./diagnostics-navigation.js?v=20260910-10";
 export function buildSessionQuery(filters, overview = false) {
   const params = new URLSearchParams();
-  const keys = overview ? ["start", "end", "timezone", "agent_id", "user_id", "source"] : LIST_FILTER_KEYS.filter(key => key !== "period");
+  const keys = overview ? ["start", "end", "timezone", "agent_id", "source"] : LIST_FILTER_KEYS.filter(key => key !== "period");
   for (const key of keys) if (filters[key] !== undefined && filters[key] !== null && filters[key] !== "" && filters[key] !== false) params.set(key, String(filters[key]));
   return params.toString();
 }

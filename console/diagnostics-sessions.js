@@ -1,8 +1,9 @@
-import { escapeHtml as e, icon, shortId, icons, localInput, selectHtml, bindDiagnosticSelects, diagnosticRequest } from "./diagnostics-ui.js?v=20260909-2";
-import { diagnosticTime } from "./diagnostics.js?v=20260910-7";
-import { diagnosticHash, sessionRange, sessionDrilldown } from "./diagnostics-navigation.js?v=20260910-7";
-import { buildSessionQuery, sessionQueryError, createSessionReader } from "./diagnostics-session-query.js?v=20260909-2";
-import { createReadonlySessionView } from "./diagnostic-detail.js?v=20260910-7";
+import { escapeHtml as e, icon, icons, localInput, selectHtml, bindDiagnosticSelects, diagnosticRequest } from "./diagnostics-ui.js?v=20260909-2";
+import { diagnosticTime } from "./diagnostics.js?v=20260910-13";
+import { diagnosticHash, sessionRange, sessionDrilldown, overviewFilters } from "./diagnostics-navigation.js?v=20260910-10";
+import { bindDiagnosticColumns, COLUMN_BOUNDS } from "./diagnostic-columns.js?v=20260910-10";
+import { buildSessionQuery, sessionQueryError, createSessionReader } from "./diagnostics-session-query.js?v=20260910-10";
+import { createReadonlySessionView } from "./diagnostic-detail.js?v=20260910-15";
 
 export const SESSION_STATUSES = { running: "进行中", pending: "待操作", waiting: "待操作", completed: "已完成", stopped: "已停止", error: "异常", failed: "异常", unknown: "未确认", not_started: "未开始" };
 const PERIODS = [["24", "最近 24 小时"], ["168", "最近 7 天"], ["720", "最近 30 天"], ["custom", "自定义时间"]];
@@ -12,6 +13,10 @@ const empty = message => `<div class="diagnostics-empty">${e(message)}</div>`;
 export function userCardHtml(id, profiles = {}) {
   const user = profiles[id] || {}, name = user.display_name || id || "未记录";
   return `<span class="diagnostic-user diagnostic-username" title="${e(id)}">${e(name)}</span>`;
+}
+export function shortQuestionTime(value) {
+  const full = diagnosticTime(value);
+  return /^\d{4}-\d{2}-\d{2} /.test(full) ? full.slice(5, 16) : full;
 }
 export function questionTrendHtml(bins = [], availableWidth = 800) {
   if (!bins.length) return empty("当前范围暂无提问趋势");
@@ -29,6 +34,7 @@ export function initDiagnosticSessions({ root, navigate, replace, onBack }) {
   const reader = createSessionReader(diagnosticRequest), contextReader = createSessionReader(diagnosticRequest), eventsReader = createSessionReader(diagnosticRequest);
   const state = { active: false, route: null, filters: {}, data: null, busy: false, error: "", users: {}, agents: new Map(), showUsers: false, showAgents: false };
   let detail = null, detailData = null, selectBinding = null, scrollToUsers = false, eventsLoading = false, trendObserver = null;
+  let releaseColumns = () => {}, columnWidths = null, listFilters = {};
   const disconnectTrend = () => { trendObserver?.disconnect(); trendObserver = null; };
   function observeTrend() {
     const host = root.querySelector(".diagnostic-trend-host");
@@ -46,7 +52,7 @@ export function initDiagnosticSessions({ root, navigate, replace, onBack }) {
     resize();
     if (typeof ResizeObserver !== "undefined") { trendObserver = new ResizeObserver(resize); trendObserver.observe(host); }
   }
-  const cancelReaders = () => { disconnectTrend(); reader.cancel(); contextReader.cancel(); eventsReader.cancel(); eventsLoading = false; };
+  const cancelReaders = () => { releaseColumns(); disconnectTrend(); reader.cancel(); contextReader.cancel(); eventsReader.cancel(); eventsLoading = false; };
   const publishFilters = () => replace(diagnosticHash(state.route.view, state.filters));
   const scrollRegions = { scroll: ".diagnostic-session-scroll", tableScroll: ".diagnostic-session-table-scroll", questionsScroll: ".diagnostic-question-list", errorsScroll: ".diagnostic-dashboard-side > section:first-child", usersScroll: "#diagnosticActiveUsers", agentsScroll: ".diagnostic-agent-bars" };
   const captureScroll = () => Object.fromEntries(Object.entries(scrollRegions).map(([key, selector]) => [key, root.querySelector(selector)?.scrollTop || 0]));
@@ -66,16 +72,19 @@ export function initDiagnosticSessions({ root, navigate, replace, onBack }) {
   function viewSwitchHtml() {
     return `<div class="agent-view-switch diagnostic-view-switch" role="group" aria-label="会话视图">${["overview", "list"].map((view, index) => `<button type="button" data-session-view="${view}" class="${view === state.route.view ? "active" : ""}" aria-pressed="${view === state.route.view}" title="${index ? "列表" : "概览"}">${icon(index ? "list" : "layout-grid")}<span>${index ? "列表" : "概览"}</span></button>`).join("")}</div>`;
   }
+  function userFilterHtml() {
+    const f = state.filters;
+    return `<div class="diagnostics-field diagnostic-user-filter"><div class="diagnostic-user-combobox">
+        ${icon("user-round")}<input name="user_id" value="${e(state.users[f.user_id]?.display_name || f.user_id || "")}" placeholder="全部用户" aria-label="平台用户" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="diagnosticLoadedUsers" title="可选择已加载用户，或输入完整用户 ID 后按回车查询" spellcheck="false"/>
+        <button type="button" data-session-action="user-picker" class="diagnostic-user-picker" aria-label="选择平台用户">${icon("chevron-down")}</button>
+        <div class="diagnostic-user-options hidden" id="diagnosticLoadedUsers" role="listbox" aria-label="已加载平台账号"></div>
+      </div></div>`;
+  }
   function filtersHtml() {
     const f = state.filters;
     return `<form id="diagnosticSessionFilters" class="diagnostic-session-filters" data-session-form="filters" autocomplete="off">
       ${field("Agent", selectHtml("agent_id", "全部 Agent", f.agent_id || "", [["", "全部 Agent"], ...state.agents]), "bot")}
       ${field("时间范围", selectHtml("period", "时间范围", f.period, PERIODS), "clock-3")}
-      <div class="diagnostics-field diagnostic-user-filter"><div class="diagnostic-user-combobox">
-        ${icon("user-round")}<input name="user_id" value="${e(state.users[f.user_id]?.display_name || f.user_id || "")}" placeholder="全部用户" aria-label="平台用户" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="diagnosticLoadedUsers" title="可选择已加载用户，或输入完整用户 ID 后按回车查询" spellcheck="false"/>
-        <button type="button" data-session-action="user-picker" class="diagnostic-user-picker" aria-label="选择平台用户">${icon("chevron-down")}</button>
-        <div class="diagnostic-user-options hidden" id="diagnosticLoadedUsers" role="listbox" aria-label="已加载平台账号"></div>
-      </div></div>
       ${field("来源", selectHtml("source", "全部来源", f.source || "", SOURCE_OPTIONS), "database")}
       <button type="submit" class="btn diagnostics-button primary" ${state.busy ? "disabled" : ""}>${icon("search")}查询</button>
       ${button("重置", "reset", "", "text")}
@@ -83,7 +92,7 @@ export function initDiagnosticSessions({ root, navigate, replace, onBack }) {
   }
   function filterFeedbackHtml() {
     const f = state.filters, range = `${diagnosticTime(f.start)} — ${diagnosticTime(f.end)} · ${f.timezone}`;
-    return `<div class="diagnostic-filter-secondary"><div class="diagnostic-filter-feedback"><span class="diagnostic-filter-meta" title="${e(range)}">${e(range)}</span><div class="diagnostic-filter-chips">${chipsHtml()}</div></div><div class="diagnostic-secondary-actions">
+    return `<div class="diagnostic-filter-secondary"><span class="diagnostic-loading" role="status" aria-live="polite">${state.busy ? "正在加载…" : ""}</span><div class="diagnostic-filter-feedback"><span class="diagnostic-filter-meta" title="${e(range)}">${e(range)}</span><div class="diagnostic-filter-chips">${chipsHtml()}</div></div><div class="diagnostic-secondary-actions">
       ${f.period === "custom" ? `<div class="diagnostics-custom-time"><label class="diagnostics-field"><input form="diagnosticSessionFilters" type="datetime-local" name="start" aria-label="开始时间" title="开始时间" value="${localInput(f.start)}" required/></label><span>至</span><label class="diagnostics-field"><input form="diagnosticSessionFilters" type="datetime-local" name="end" aria-label="结束时间" title="结束时间（不含）" value="${localInput(f.end)}" required/></label><button form="diagnosticSessionFilters" class="diagnostics-button primary" type="submit" ${state.busy ? "disabled" : ""}>应用</button></div>` : ""}
       ${viewSwitchHtml()}</div></div>`;
   }
@@ -107,7 +116,7 @@ export function initDiagnosticSessions({ root, navigate, replace, onBack }) {
         <section class="diagnostic-recent"><header><h2>最近提问</h2>${button(`查看全部${icon("arrow-right")}`, "all-questions", "", "text")}</header>
           <div class="diagnostic-question-list">${questions.map((question, index) => `<button type="button" class="diagnostic-question" data-question-index="${index}">
             <span class="diagnostic-question-icon">${icon("message-circle-more")}</span>
-            <span class="diagnostic-question-copy"><strong title="${e(question.summary)}">${e(question.summary || "附件 / 上下文输入")}</strong><span class="diagnostic-question-meta"><span title="${e(question.agent_name || question.agent_id)}">${e(question.agent_name || question.agent_id)}</span><span aria-hidden="true">·</span>${userCardHtml(question.user_id, state.users)}<span aria-hidden="true">·</span><time>${e(diagnosticTime(question.created_at))}</time></span></span>
+            <span class="diagnostic-question-copy"><strong title="${e(question.summary)}">${e(question.summary || "附件 / 上下文输入")}</strong><span class="diagnostic-question-meta"><span title="${e(question.agent_name || question.agent_id)}">${e(question.agent_name || question.agent_id)}</span><span aria-hidden="true">·</span>${userCardHtml(question.user_id, state.users)}<span aria-hidden="true">·</span><time title="${e(diagnosticTime(question.created_at))}">${e(shortQuestionTime(question.created_at))}</time></span></span>
             <span class="diagnostic-question-arrow">${icon("arrow-right")}</span>
           </button>`).join("") || empty("当前范围暂无提问")}</div>
         </section>
@@ -120,39 +129,37 @@ export function initDiagnosticSessions({ root, navigate, replace, onBack }) {
   function listHtml(data) {
     const f = state.filters, total = Number(data?.total || 0), offset = Number(f.offset || 0), limit = Number(f.limit || 50), items = data?.items || [];
     const currentPage = Math.floor(offset / limit) + 1, pageCount = Math.max(1, Math.ceil(total / limit));
-    const firstPage = Math.max(1, Math.min(currentPage - 2, pageCount - 4)), pages = Array.from({ length: Math.min(5, pageCount) }, (_, index) => firstPage + index);
     return `<section class="diagnostic-list-workbench" aria-label="会话列表">
-      <div class="diagnostic-list-toolbar"><form class="diagnostic-list-search" data-session-form="search"><label class="diagnostics-field"><button class="diagnostic-search-submit" type="submit" aria-label="查询会话">${icon("search")}</button><input type="search" name="query" value="${e(f.query || "")}" placeholder="搜索会话名称或 ID" aria-label="搜索会话名称或 ID" maxlength="200"/></label></form>
-        <div class="diagnostic-list-options">${selectHtml("latest_status", "全部状态", f.latest_status || "", [["", "全部状态"], ...Object.entries(SESSION_STATUSES).filter(([key]) => !["pending", "failed"].includes(key))])}
-          <nav class="diagnostic-pagination" aria-label="会话分页">${selectHtml("limit", "每页条数", String(limit), [["20", "20 条 / 页"], ["50", "50 条 / 页"], ["100", "100 条 / 页"]])}<span class="diagnostic-page-range" title="共 ${total.toLocaleString()} 个会话">${total ? `${offset + 1}–${Math.min(offset + items.length, total)} / ${total}` : "0 / 0"}</span>${button(icon("arrow-left"), "previous", `aria-label="上一页" title="上一页" ${offset <= 0 || state.busy ? "disabled" : ""}`)}<div class="diagnostic-page-numbers">${pages.map(page => `<button type="button" data-session-page="${page}" class="${page === currentPage ? "active" : ""}" aria-label="第 ${page} 页" ${page === currentPage ? 'aria-current="page"' : ""} ${state.busy ? "disabled" : ""}>${page}</button>`).join("")}</div>${button(icon("arrow-right"), "next", `aria-label="下一页" title="下一页" ${offset + limit >= total || state.busy ? "disabled" : ""}`)}</nav>
+      <form class="diagnostic-list-toolbar" data-session-form="search"><div class="diagnostic-list-search"><label class="diagnostics-field"><button class="diagnostic-search-submit" type="submit" aria-label="查询会话">${icon("search")}</button><input type="search" name="query" value="${e(f.query || "")}" placeholder="搜索会话名称或 ID" aria-label="搜索会话名称或 ID" maxlength="200"/></label></div>
+        <div class="diagnostic-list-options">${userFilterHtml()}${selectHtml("latest_status", "全部状态", f.latest_status || "", [["", "全部状态"], ...Object.entries(SESSION_STATUSES).filter(([key]) => !["pending", "failed"].includes(key))])}
         </div>
-      </div>
+      </form>
       <div class="diagnostic-session-table-scroll"><div class="diagnostic-session-table" role="table" aria-label="会话查询列表">
-        <div class="diagnostic-session-row diagnostic-session-columns" role="row"><span role="columnheader">会话</span><span role="columnheader">Agent</span><span role="columnheader">用户</span><span role="columnheader">来源</span><span role="columnheader">状态</span><span role="columnheader">最近活动 ${icon("arrow-down")}</span><span role="columnheader" aria-label="操作"></span></div>
+        <div class="diagnostic-session-row diagnostic-session-columns" role="row">${["会话", "Agent", "用户", "来源", "状态", "最近活动"].map((label, i) => `<span role="columnheader">${label}${i === 5 ? icon("arrow-down") : `<span class="diagnostic-column-resizer" role="separator" tabindex="0" aria-orientation="vertical" aria-label="调整${label}列宽" aria-valuemin="${COLUMN_BOUNDS[i][0]}" aria-valuemax="${COLUMN_BOUNDS[i][1]}" data-resize-column="${i}"></span>`}</span>`).join("")}</div>
         ${items.map(item => `<div class="diagnostic-session-row" role="row" tabindex="0" data-session-id="${e(item.session_id)}">
-          <div class="diagnostic-session-name" role="cell"><div class="diagnostic-session-title"><strong title="${e(item.title || "未命名会话")}">${e(item.title || "未命名会话")}</strong></div><div class="diagnostic-session-id"><code title="${e(item.session_id)}">${e(shortId(item.session_id))}</code><button type="button" data-copy-session="${e(item.session_id)}" aria-label="复制 Session ID" title="复制 Session ID：${e(item.session_id)}">${icon("copy")}</button><span aria-hidden="true">·</span><p title="${e(item.recent_question?.summary || "当前范围暂无提问")}">${e(item.recent_question?.summary || "当前范围暂无提问")}</p></div></div>
+          <div class="diagnostic-session-name" role="cell"><div class="diagnostic-session-title"><strong title="${e(item.title || "未命名会话")}">${e(item.title || "未命名会话")}</strong></div><div class="diagnostic-session-id"><button type="button" data-copy-session="${e(item.session_id)}" aria-label="复制 Session ID" title="复制 Session ID：${e(item.session_id)}">${icon("copy")}</button><code title="${e(item.session_id)}">${e(String(item.session_id).slice(0, 8))}</code><span aria-hidden="true">·</span><p title="${e(item.recent_question?.summary || "当前范围暂无提问")}">${e(item.recent_question?.summary || "当前范围暂无提问")}</p></div></div>
           <span class="diagnostic-agent-name" role="cell"><span class="diagnostic-agent-icon">${icon("bot")}</span><span title="${e(item.agent_name || item.agent_id)}">${e(item.agent_name || item.agent_id || "未记录")}</span></span>
           <span role="cell">${userCardHtml(item.user_id, state.users)}</span>
           <span role="cell"><span class="diagnostic-source-pill">${item.source === "channel" ? "渠道" : "普通"}</span></span>
           <span role="cell"><span class="diagnostic-status ${e(item.latest_status)}">${e(SESSION_STATUSES[item.latest_status] || "未确认")}</span></span>
           <time role="cell">${e(diagnosticTime(item.last_activity_at || item.updated_at))}</time>
-          <span role="cell"><button type="button" class="diagnostics-inline-action" data-open-session="${e(item.session_id)}" aria-label="进入会话详情">${icon("arrow-right")}</button></span>
         </div>`).join("")}
       </div>
       ${!items.length && !state.busy ? empty("没有匹配会话，可重置时间、Agent 或用户条件后再查询。") : ""}
       </div>
+      <footer class="diagnostic-list-footer"><nav class="diagnostic-pagination" aria-label="会话分页" title="共 ${total.toLocaleString()} 个会话">${selectHtml("limit", "每页条数", String(limit), [["20", "20 条 / 页"], ["50", "50 条 / 页"], ["100", "100 条 / 页"]])}${button(icon("arrow-left"), "previous", `aria-label="上一页" title="上一页" ${offset <= 0 || state.busy ? "disabled" : ""}`)}<span class="diagnostic-page-current" aria-live="polite" aria-label="第 ${currentPage} 页，共 ${pageCount} 页">${currentPage} / ${pageCount}</span>${button(icon("arrow-right"), "next", `aria-label="下一页" title="下一页" ${offset + limit >= total || state.busy ? "disabled" : ""}`)}</nav></footer>
     </section>`;
   }
   function render() {
     if (!state.active || state.route.view === "detail") return;
     const scroll = captureScroll();
-    selectBinding?.dispose(); disconnectTrend();
+    selectBinding?.dispose(); disconnectTrend(); releaseColumns();
     root.innerHTML = `<div class="diagnostics-page diagnostic-sessions-page" data-diagnostic-view="${state.route.view}">
       <header class="diagnostics-head"><div class="diagnostic-page-heading"><h1>会话</h1><p>了解用户提问与使用情况，查看完整会话。</p></div>
         <div class="diagnostic-head-actions">${filtersHtml()}</div>
         ${filterFeedbackHtml()}
       </header>
-      <div class="diagnostic-session-scroll">${state.error ? `<div class="diagnostics-notice" data-kind="error" role="alert">${e(state.error)}</div>` : ""}${state.busy ? '<div class="diagnostic-loading" role="status">正在读取已保存数据…</div>' : ""}${state.route.view === "overview" ? overviewHtml(state.data) : listHtml(state.data)}</div>
+      <div class="diagnostic-session-scroll">${state.error ? `<div class="diagnostics-notice" data-kind="error" role="alert">${e(state.error)}</div>` : ""}${state.route.view === "overview" ? overviewHtml(state.data) : listHtml(state.data)}</div>
     </div>`;
     restoreScroll(scroll);
     root.setAttribute("aria-busy", String(state.busy));
@@ -161,10 +168,12 @@ export function initDiagnosticSessions({ root, navigate, replace, onBack }) {
       if (key === "period") { delete state.filters.start; delete state.filters.end; if (value === "custom") { Object.assign(state.filters, sessionRange({ ...state.filters, period: "168" }), { period: "custom" }); render(); return; } }
       void loadCurrent();
     });
+    releaseColumns = bindDiagnosticColumns(root.querySelector(".diagnostic-session-table"), columnWidths, values => { columnWidths = values; });
     icons(); observeTrend();
     if (scrollToUsers) { scrollToUsers = false; root.querySelector("#diagnosticActiveUsers")?.scrollIntoView({ block: "center" }); root.querySelector("#diagnosticActiveUsers")?.focus({ preventScroll: true }); }
   }
   async function loadCurrent() {
+    if (state.route.view === "overview") state.filters = overviewFilters(state.filters);
     try { state.filters = sessionRange(state.filters); } catch (error) { reader.cancel(); state.busy = false; state.data = null; state.error = error.message; render(); return; }
     publishFilters(); const scope = reader.begin(); state.busy = true; state.error = ""; state.data = null; restoreScroll(); render();
     try {
@@ -230,9 +239,13 @@ export function initDiagnosticSessions({ root, navigate, replace, onBack }) {
   }
   async function click(event) {
     const target = event.target.closest("button,[data-session-id],[data-day-index]"); if (!target || !root.contains(target) || state.route?.view === "detail") return;
-    if (target.dataset.copySession) { event.stopPropagation(); try { await navigator.clipboard.writeText(target.dataset.copySession); window.DeepAgentConsole?.toast("已复制 Session ID"); } catch { window.DeepAgentConsole?.toast("复制失败，请手动选择", true); } return; }
+    if (target.dataset.copySession) { event.stopPropagation(); try { await navigator.clipboard.writeText(target.dataset.copySession); window.DeepAgentConsole?.toast("会话 ID 已复制"); } catch { window.DeepAgentConsole?.toast("复制失败，请手动选择", true); } return; }
     if (target.dataset.loadedUser !== undefined) { state.filters.user_id = target.dataset.loadedUser; state.filters.offset = 0; void loadCurrent(); return; }
-    if (target.dataset.sessionView) { navigate(diagnosticHash(target.dataset.sessionView, state.filters)); return; }
+    if (target.dataset.sessionView) {
+      if (state.route.view === "list") listFilters = Object.fromEntries(Object.entries(state.filters).filter(([key]) => ["user_id", "query", "latest_status", "has_questions", "has_execution_error", "limit"].includes(key)));
+      const common = overviewFilters(state.filters);
+      navigate(diagnosticHash(target.dataset.sessionView, target.dataset.sessionView === "overview" ? common : { ...listFilters, ...common, offset: 0 })); return;
+    }
     if (target.dataset.sessionPage) {
       const page = Number(target.dataset.sessionPage), limit = Number(state.filters.limit || 50), pages = Math.ceil(Number(state.data?.total || 0) / limit);
       if (Number.isInteger(page) && page >= 1 && page <= pages && !state.busy) { state.filters.offset = (page - 1) * limit; void loadCurrent(); }
@@ -277,9 +290,17 @@ export function initDiagnosticSessions({ root, navigate, replace, onBack }) {
   });
   document.addEventListener("click", event => { if (!event.target.closest(".diagnostic-user-combobox")) { root.querySelector("#diagnosticLoadedUsers")?.classList.add("hidden"); root.querySelector('input[name="user_id"]')?.setAttribute("aria-expanded", "false"); } });
   return {
-    activate(route, saved = null) { cancelReaders(); state.active = true; state.route = route; detail?.destroy(); detail = null; state.busy = false; state.error = ""; if (route.view === "detail") return mountDetail(saved); state.filters = { limit: 50, offset: 0, ...route.filters }; state.data = saved?.data || null; if (saved) Object.assign(state, { filters: saved.filters, showUsers: saved.showUsers, showAgents: saved.showAgents }); try { state.filters = sessionRange(state.filters); } catch (error) { state.error = error.message; render(); return; } if (state.data) { rememberProfiles(state.data); render(); restoreScroll(saved); } else void loadCurrent(); },
+    activate(route, saved = null) {
+      cancelReaders(); state.active = true; state.route = route; detail?.destroy(); detail = null; state.busy = false; state.error = "";
+      if (route.view === "detail") return mountDetail(saved);
+      state.filters = { limit: 50, offset: 0, ...route.filters }; state.data = saved?.data || null;
+      if (saved) Object.assign(state, { filters: saved.filters, showUsers: saved.showUsers, showAgents: saved.showAgents });
+      if (route.view === "overview") state.filters = overviewFilters(state.filters);
+      try { state.filters = sessionRange(state.filters); } catch (error) { state.error = error.message; render(); return; }
+      if (state.data) { rememberProfiles(state.data); render(); restoreScroll(saved); } else void loadCurrent();
+    },
     deactivate() { state.active = false; cancelReaders(); selectBinding?.close(); detail?.destroy(); detail = null; },
     snapshot() { return state.route?.view === "detail" ? { detailData, detailSnapshot: detail?.snapshot?.() } : { filters: { ...state.filters }, data: state.data, showUsers: state.showUsers, showAgents: state.showAgents, ...captureScroll() }; },
-    clear() { state.active = false; cancelReaders(); detail?.destroy(); detail = null; detailData = null; state.data = null; state.users = {}; state.agents.clear(); root.replaceChildren(); },
+    clear() { state.active = false; cancelReaders(); detail?.destroy(); detail = null; detailData = null; state.data = null; state.users = {}; listFilters = {}; columnWidths = null; state.agents.clear(); root.replaceChildren(); },
   };
 }

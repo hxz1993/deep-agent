@@ -21,11 +21,11 @@
   <link rel="stylesheet" href="./themes.css?v=20260821-2" />
   <link rel="stylesheet" href="./workspace.css?v=20260904-13" />
   <link rel="stylesheet" href="./configuration/configuration.css?v=20260909-7" />
-  <link rel="stylesheet" href="./console.css?v=20260910-7" />
-  <link rel="stylesheet" href="./diagnostics.css?v=20260910-7" />
-  <link rel="stylesheet" href="./diagnostics-design.css?v=20260910-7" />
-  <link rel="stylesheet" href="./diagnostics-sessions.css?v=20260910-9" />
-  <link rel="stylesheet" href="./diagnostic-detail.css?v=20260910-7" />
+  <link rel="stylesheet" href="./console.css?v=20260910-13" />
+  <link rel="stylesheet" href="./diagnostics.css?v=20260910-13" />
+  <link rel="stylesheet" href="./diagnostics-design.css?v=20260910-13" />
+  <link rel="stylesheet" href="./diagnostics-sessions.css?v=20260910-13" />
+  <link rel="stylesheet" href="./diagnostic-detail.css?v=20260910-13" />
 </head>
 <body data-console-page="workspace">
   <div class="console-shell">
@@ -151,12 +151,11 @@
           <div class="diagnostics-notice hidden" id="diagnosticsNotice" role="status" aria-live="polite"></div>
           <div class="diagnostics-split" id="diagnosticsSplit">
           <div class="diagnostics-log-workspace">
-          <div class="diagnostics-result-head"><div class="diagnostics-result-title"><h2>查询结果</h2><span id="diagnosticsMeta" aria-live="polite">尚未查询</span></div><span id="diagnosticsQueryRange"></span><span id="diagnosticsCopyStatus" role="status" aria-live="polite"></span></div>
+          <div class="diagnostics-result-head"><div class="diagnostics-result-title"><h2>查询结果</h2><span id="diagnosticsMeta" aria-live="polite">尚未查询</span><span id="diagnosticsPartial" class="hidden"></span><button type="button" class="diagnostics-button text hidden" id="diagnosticsMore">加载更多</button></div><span id="diagnosticsQueryRange"></span><span id="diagnosticsCopyStatus" role="status" aria-live="polite"></span></div>
           <div class="diagnostics-log-view" tabindex="0" aria-label="诊断日志列表">
             <div id="diagnosticsRecords"></div>
             <div class="diagnostics-empty" id="diagnosticsEmpty">正在准备日志查询…</div>
           </div>
-          <footer class="diagnostics-footer"><span id="diagnosticsRange"></span><span id="diagnosticsPartial" class="hidden"></span><button type="button" class="diagnostics-button text hidden" id="diagnosticsMore">加载更多</button></footer>
           </div>
           <div class="diagnostics-resizer" id="diagnosticsResizer" role="separator" tabindex="0" aria-label="调整日志详情宽度" aria-orientation="vertical" aria-valuemin="220" aria-valuemax="720" aria-valuenow="436"></div>
           <aside class="diagnostics-drawer" id="diagnosticsDrawer" aria-label="日志详情"></aside>
@@ -179,7 +178,7 @@
     <footer><button type="button" id="resetContextBtn">不分应用</button><button type="button" class="primary" id="saveContextBtn">确定</button></footer>
   </aside>
 
-  <div class="console-toast hidden" id="consoleToast"></div>
+  <div class="console-toast hidden" id="consoleToast" role="status" aria-live="polite"></div>
   <div class="hidden" id="consoleRuntimeControls">
     <select id="agentSelect"></select>
     <select id="themeSelect"></select>
@@ -194,6 +193,6 @@
   <script src="../vendor/highlight.min.js"></script>
   <script src="./json-view.js?v=20260823-1"></script>
   <script src="./markdown.js?v=20260822-2"></script>
-  <script type="module" src="./main.js?v=20260910-7"></script>
+  <script type="module" src="./main.js?v=20260910-15"></script>
 </body>
 </html>

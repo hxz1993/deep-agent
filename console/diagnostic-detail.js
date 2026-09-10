@@ -1,7 +1,7 @@
 import { createConversationPresenter } from "./conversation-presenter.js?v=20260909-1";
 import { projectConversationItems, sortConversationItems } from "./conversation-items.js?v=20260907-1";
 import { applyAssistantPresentationActions } from "./assistant-presentation.js?v=20260907-1";
-import { buildTrajectory, createTrajectoryController, redactTrajectoryValue } from "./trajectory.js?v=20260910-7";
+import { buildTrajectory, createTrajectoryController, redactTrajectoryValue } from "./trajectory.js?v=20260910-15";
 import { renderSessionInspector } from "./session-inspector.js?v=20260909-1";
 import { channelOriginPresentation } from "./session-display.js?v=20260904-13";
 import { copyTextToClipboard } from "./message-actions.js?v=20260819-1";

@@ -46,6 +46,13 @@
 .diagnostics-page :is(button, input, summary):focus-visible {
   outline: 2px solid var(--diag-accent); outline-offset: 2px;
 }
+.diagnostics-page #diagnosticsFilters input:focus,
+.diagnostic-sessions-page .diagnostic-list-search input:focus {
+  outline:none; box-shadow:none; border-color:var(--diag-border-strong);
+}
+.diagnostics-page #diagnosticsFilters .compact-search:focus-within {
+  outline:none; box-shadow:none; border-color:var(--diag-border-strong);
+}
 .diagnostics-page .console-select-menu {
   background: var(--diag-surface); border: 1px solid var(--diag-border); border-radius: 9px;
   padding: 5px; box-shadow: var(--diag-popover-shadow); z-index: 50;

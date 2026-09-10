@@ -1,9 +1,11 @@
 """Allowlisted operational facts. Never serialize arbitrary application objects."""
 from __future__ import annotations
 
+import json
 import math
 import re
 from datetime import datetime, timezone
+from urllib.parse import urlsplit
 
 EVENTS = {
     "service_starting": "服务正在初始化", "service_started": "服务已启动",
@@ -25,6 +27,8 @@ EVENTS = {
     "channel_adapter_stopped": "渠道连接已停止", "channel_adapter_start_failed": "渠道连接启动失败",
     "channel_reconcile_failed": "渠道配置同步失败",
     "tool_validation_retry": "工具参数校验要求重试",
+    "model_api_request": "模型 API 请求开始",
+    "model_api_response": "模型 API 响应头已收到",
 }
 for prefix, label in (("model_request", "模型请求"), ("agent_tool", "工具调用")):
     for suffix, detail in {
@@ -42,6 +46,7 @@ NUMBER_FIELDS = frozenset({
     "duration_ms", "request_index", "attempt", "queue_depth", "input_tokens", "output_tokens",
     "total_tokens", "requests", "tool_calls", "tool_search_calls", "cache_read_tokens",
     "cache_write_tokens", "spill_count", "spill_failures", "byte_size", "spilled_bytes",
+    "tool_count", "unique_tool_count",
 })
 TOKEN = re.compile(r"[A-Za-z0-9_.:/-]{1,180}\Z")
 ISSUE_CODES = frozenset({
@@ -49,6 +54,71 @@ ISSUE_CODES = frozenset({
     "runtime_fault", "file_limit_exceeded", "status_unavailable", "source_stale", "operational_output_failed",
 })
 MAX_RECORD_BYTES = 8192
+TOOL_LIST_BUDGET = 3600
+TOOL_NAME = re.compile(r"[A-Za-z0-9_-]{1,128}\Z")
+TOOL_LIST_FIELDS = ("redeclared_tool_names", "duplicate_tool_names", "added_tool_names", "history_tool_names", "tool_names")
+API_PATHS = frozenset(("/chat/completions", "/responses", "/messages", "/custom"))
+MANIFEST_STATUSES = frozenset(("complete", "unavailable", "body_too_large", "unsupported"))
+
+
+def _safe_model_origin(value: object) -> str | None:
+    """Never retain custom gateway paths, credentials or URL parameters."""
+    if type(value) is not str or len(value) > 300 or not re.fullmatch(r"https?://[A-Za-z0-9.:[\]-]+", value):
+        return None
+    try:
+        parsed = urlsplit(value)
+        if (not parsed.hostname or parsed.username or parsed.password or parsed.path
+                or parsed.query or parsed.fragment or parsed.port == 0):
+            return None
+    except ValueError:
+        return None
+    return value
+
+
+def _model_api_fields(fields: dict, result: dict) -> None:
+    origin = _safe_model_origin(fields.get("model_api"))
+    if origin is not None:
+        result["model_api"] = origin
+    for name, allowed in (("api_path", API_PATHS), ("tool_manifest_status", MANIFEST_STATUSES),
+                          ("http_method", ("POST", "GET", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"))):
+        value = fields.get(name)
+        if type(value) is str and value in allowed:
+            result[name] = value
+    status = fields.get("http_status")
+    if type(status) is int and 100 <= status <= 599:
+        result["http_status"] = status
+    for name, pattern in (("api_request_id", r"[a-f0-9]{32}"), ("tool_names_hash", r"[a-f0-9]{64}")):
+        value = fields.get(name)
+        if type(value) is str and re.fullmatch(pattern, value):
+            result[name] = value
+
+    if not any(type(fields.get(name)) is list for name in TOOL_LIST_FIELDS) and "tools_omitted" not in fields:
+        return
+
+    # Reserve the fixed record envelope plus omission counters. Even a fully
+    # populated scalar record must leave room for useful, bounded tool facts.
+    budget = min(TOOL_LIST_BUDGET, max(0, MAX_RECORD_BYTES - 1152
+        - len(json.dumps(result, ensure_ascii=False, separators=(",", ":")).encode())))
+    budget -= sum(len(name) + 6 for name in TOOL_LIST_FIELDS if type(fields.get(name)) is list)
+    omitted = fields.get("tools_omitted", 0)
+    omitted = omitted if type(omitted) is int and 0 <= omitted <= 10**15 else 0
+    for name in TOOL_LIST_FIELDS:
+        value = fields.get(name)
+        if type(value) is not list:
+            continue
+        kept = []
+        # Duplicate names are more actionable than the full inventory. Bound
+        # inspection as well as output; count skipped entries without repr().
+        for item in value[:256]:
+            if budget < 4:
+                break
+            if type(item) is str and TOOL_NAME.fullmatch(item) and len(item) + 3 <= budget:
+                kept.append(item)
+                budget -= len(item) + 3
+        result[name] = kept
+        omitted += len(value) - len(kept)
+    if any(type(fields.get(name)) is list for name in TOOL_LIST_FIELDS) or "tools_omitted" in fields:
+        result["tools_omitted"] = omitted
 
 
 def safe_fields(fields: dict) -> dict:
@@ -63,6 +133,7 @@ def safe_fields(fields: dict) -> dict:
         value = fields.get(name)
         if type(value) in (int, float) and 0 <= value <= 10**15 and math.isfinite(value):
             result[name] = value
+    _model_api_fields(fields, result)
     return result
 
 

@@ -2738,6 +2738,10 @@ html[data-theme="paper"] .run-usage-legend .remaining { color: #5e9e7f; }
   letter-spacing: -.02em;
 }
 
+/* Keep the inline channel command's hit area without lowering the page title. */
+#configurationHost #panel-channels .panel-title-copy { display: block; }
+#configurationHost .channel-title-row .channel-commands-btn { margin-block: -4px; }
+
 #configurationHost .panel-subtitle,
 #configurationHost .catalog-panel .models-desc {
   overflow: hidden;

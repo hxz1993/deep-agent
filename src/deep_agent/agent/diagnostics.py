@@ -12,6 +12,7 @@ from pydantic_ai.exceptions import ApprovalRequired, CallDeferred, ModelRetry, T
 
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.observability import cache_usage_available, log_event
+from deep_agent.agent.model_api_diagnostics import observed_model
 
 
 class RuntimeDiagnostics(AbstractCapability[AgentDeps]):
@@ -83,6 +84,7 @@ class RuntimeDiagnostics(AbstractCapability[AgentDeps]):
                 status = "failed"
             self._emit(prefix + "_" + status, **fields, status=status,
                        duration_ms=self._duration(started),
+                       http_status=getattr(exc, "status_code", None),
                        error_type=type(exc).__name__)
             raise
         finally:
@@ -100,6 +102,13 @@ class RuntimeDiagnostics(AbstractCapability[AgentDeps]):
         except Exception:
             pass
         async with self._observe("model_request", fields) as started:
+            try:
+                request_context.model = observed_model(
+                    request_context.model, fields,
+                    getattr(ctx.deps, "model_api_previous_tools", {}),
+                )
+            except Exception:
+                pass
             response = await handler(request_context)
             extra = {}
             try:

@@ -35,6 +35,16 @@
 新增日志点先注册固定事件名及摘要，不传正文、参数、结果、异常原文或凭据。详见
 [`诊断日志指南`](../../../docs/guides/diagnostic-logs.md)。
 
+OpenAI 兼容协议的 HTTP 日志在 `agent/model_api_diagnostics.py`；只记录安全地址、状态与工具名清单。
+流式请求在 SDK 消费者任务中延迟发出，须在透明模型包装器的实际调用边界建立 ContextVar，
+不能仅依赖 `wrap_model_request` 的任务上下文。测试须覆盖真实 SDK 的流式成功/400及请求体等价。
+
+诊断账号资料使用 `security/diagnostic_users.py` 批量读取平台用户：通过现有 Space 服务发现，
+调用 `POST /api/space/user-info/batch/query/by-user-ids`（不需要 App / Space；不要误用需要
+Space 的 `query/batch` 路由）。只传管理员当前认证和本次涉及的 ID，每批最多100个、总预算2秒，
+显示名优先用户名。2026-09-10 Test 已通过真实凭证只读联调；旧账号 `info/by-user-ids` 在该环境
+返回业务失败，不再依赖。仅无平台凭证的 local bypass 才使用本地资料；缓存仍按调用者权限隔离。
+
 ### v0.8.5 真实事件及时持久化
 
 `agent/message_persistence.py`通过 SDK 公开节点和已接受工具事件插入真实消息内容，
@@ -197,6 +207,13 @@ Pending 时没有活动 Run，其表单取消仍通过 `DeferredToolResults` 处
 ### 能力装配与模型输入
 
 DeepAgent 自研 `capabilities.registry.ToolPackage` 是产品配置单位，包含分类、展示元数据、工具目录和恰好一个 Toolset；Pydantic AI 的 `AbstractCapability` 才是可介入模型请求、消息历史、工具准备和事件生命周期的原生扩展点。当前上下文压缩使用这一层；DeepSeek V4 已交由 Pydantic AI 官方 Provider/Profile，不再注册项目自定义重试能力。
+
+DeepSeek Responses 的原生工具能力在 `models/provider_registry.py` 通过公开 Profile 限定为
+`WebSearchTool`；MCP 查找沿用 SDK 的普通 `search_tools` 函数回退。2026-09-10 核验知识库
+Pydantic AI 2.41.0 与上游 2.42.0 仍误继承 OpenAI 原生 Tool Search，导致已发现工具同时在
+顶层 `tools` 与历史 `tool_search_output.tools` 声明，DeepSeek 返回重名 400。不得全局删历史、
+重命名工具或修改 site-packages；升级后先用 `test_deepseek_responses_tool_search.py` 验证
+真实序列化、旧历史回放及搜索后工具调用，再评估是否移除这一 Provider 兼容配置。
 
 模型每轮直接看到的是：Agent/能力 Instructions、`message_history`、当前用户输入/附件和本轮 Tool Definitions。Toolset 负责列出、准备和调用工具；MCP Prompt 不会自动进入模型工具列表。MCP Resource 由宿主侧动态代理工具按需读取。
 

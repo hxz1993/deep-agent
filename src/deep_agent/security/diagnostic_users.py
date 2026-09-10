@@ -126,12 +126,14 @@ def _normalize_profiles(
     for item in payload:
         if not isinstance(item, Mapping):
             continue
-        user_id = _text(item.get("userId") or item.get("id") or item.get("user_id"))
+        raw_id = next((item[key] for key in ("userId", "id", "user_id")
+                       if item.get(key) is not None and item.get(key) != ""), None)
+        user_id = str(raw_id) if isinstance(raw_id, int) and not isinstance(raw_id, bool) else _text(raw_id)
         if user_id not in allowed:
             continue
         display_name = (
-            _text(item.get("nickName")) or _text(item.get("nickname"))
-            or _text(item.get("userName")) or _text(item.get("username")) or user_id
+            _text(item.get("userName")) or _text(item.get("username"))
+            or _text(item.get("nickName")) or _text(item.get("nickname")) or user_id
         )
         result[user_id] = {
             "id": user_id, "user_id": user_id, "display_name": display_name,
@@ -143,19 +145,25 @@ def _normalize_profiles(
 
 
 class PlatformDiagnosticUserFetcher:
-    """Adapter for the platform account service's existing batch endpoint."""
+    """Use the existing space-service batch adapter for platform account data.
 
-    def __init__(self, *, account_service: str | None = None) -> None:
-        self._account_service = str(
-            PLATFORM_OPTION.server.account if account_service is None else account_service
+    ``batch/query`` resolves account profiles without requiring an App/Space.
+    The similarly named ``query/batch`` route requires Space and is not suitable
+    for diagnostics. The old account ``info/by-user-ids`` URL failed in the
+    verified Test deployment; do not use the frontend's stale route as evidence.
+    """
+
+    def __init__(self, *, space_service: str | None = None) -> None:
+        self._profile_service = str(
+            PLATFORM_OPTION.server.space if space_service is None else space_service
         ).strip()
         # The namespace is deployment-specific; never retain a configured secret as a key.
-        self.cache_namespace = hashlib.sha256(self._account_service.encode()).hexdigest()
+        self.cache_namespace = hashlib.sha256(self._profile_service.encode()).hexdigest()
 
     async def _resolve_url(
         self,
     ) -> tuple[str, Callable[[], None] | None, Callable[[], None] | None]:
-        target = self._account_service
+        target = self._profile_service
         if not target:
             raise DiagnosticUserUnavailableError("account service is not configured")
         parsed = urlsplit(target)
@@ -163,7 +171,7 @@ class PlatformDiagnosticUserFetcher:
             if (parsed.scheme not in {"http", "https"} or not parsed.netloc
                     or parsed.username or parsed.password or parsed.query or parsed.fragment):
                 raise DiagnosticUserUnavailableError("account service URL is invalid")
-            return concat_url(target, "api", "user", "info", "by-user-ids"), None, None
+            return concat_url(target, "api", "space", "user-info", "batch", "query", "by-user-ids"), None, None
         try:
             discovery = ServiceDiscovery.instantiate()
             if discovery.closed:
@@ -171,7 +179,7 @@ class PlatformDiagnosticUserFetcher:
             on_success, on_failure, base_url = await discovery.get_url(target)
         except Exception as exc:
             raise DiagnosticUserUnavailableError("account service is unavailable") from exc
-        return concat_url(base_url, "api", "user", "info", "by-user-ids"), on_success, on_failure
+        return concat_url(base_url, "api", "space", "user-info", "batch", "query", "by-user-ids"), on_success, on_failure
 
     async def __call__(
         self, user_ids: tuple[str, ...], headers: Mapping[str, str],
@@ -248,14 +256,17 @@ class DiagnosticUserProfileResolver:
         if not caller:
             raise DiagnosticUserAuthenticationError()
         result = {user_id: _fallback(user_id) for user_id in ids}
-        if request.scope.get(LOCAL_CONSOLE_ADMIN_SCOPE_KEY) is True:
+        headers = forwarded_platform_auth_headers(request, caller)
+        has_platform_login = any(headers.get(name, "").strip() for name in (
+            "authorization", "cookie", "token", "x-user-token",
+        ))
+        if request.scope.get(LOCAL_CONSOLE_ADMIN_SCOPE_KEY) is True and not has_platform_login:
             # Only trusted local_dev scope enables this. A user-supplied header cannot.
             local_name = _text(request.scope.get(LOCAL_CURRENT_USERNAME_SCOPE_KEY))
             if caller in result and local_name:
                 result[caller] = {**_fallback(caller, "local"), "display_name": local_name}
             return result
 
-        headers = forwarded_platform_auth_headers(request, caller)
         scope = (str(self._scope), str(request.base_url), caller, platform_credential_digest(headers))
         now = self._clock()
         for key, (expires_at, _) in tuple(self._cache.items()):

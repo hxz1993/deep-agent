@@ -4,8 +4,8 @@ import {
   rememberConfigurationTab,
 } from "./configuration.js?v=20260909-8";
 import { bindContextControls, refreshIdentity } from "./context.js?v=20260904-14";
-import { initDiagnostics, setDiagnosticsActive, openDiagnostics } from "./diagnostics-center.js?v=20260910-7";
-import { initWorkspace } from "./workspace.js?v=20260909-2";
+import { initDiagnostics, setDiagnosticsActive, openDiagnostics } from "./diagnostics-center.js?v=20260910-15";
+import { initWorkspace } from "./workspace.js?v=20260910-15";
 import "./time.js?v=20260831-1";
 
 const VALID_PAGES = new Set(["workspace", "configuration", "diagnostics"]);

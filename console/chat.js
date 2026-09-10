@@ -16,7 +16,7 @@ import {
   processDisclosureLabel,
   toolResultPresentation,
 } from "./assistant-presentation.js?v=20260907-1";
-import { createTrajectoryController } from "./trajectory.js?v=20260910-7";
+import { createTrajectoryController } from "./trajectory.js?v=20260910-15";
 import { attachmentPreviewUrl, bindAttachmentImagePreviews, createImageGallery } from "./attachment-preview.js?v=20260904-8";
 import { bindWebImagePreviewFallback, renderWebImagePreview } from "./web-image.js?v=20260901-1";
 import { parseServerTimestamp, serverTimestampMilliseconds } from "./time.js?v=20260831-1";

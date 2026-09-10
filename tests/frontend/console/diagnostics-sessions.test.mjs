@@ -4,12 +4,13 @@ import test from "node:test";
 import vm from "node:vm";
 import {
   parseDiagnosticRoute, diagnosticHash, sessionRange, sessionDrilldown,
-  createDiagnosticNavigation,
+  createDiagnosticNavigation, overviewFilters,
 } from "../../../console/diagnostics-navigation.js";
 import {
   buildSessionQuery, sessionQueryError, createSessionReader,
 } from "../../../console/diagnostics-session-query.js";
 import { escapeHtml, icon, localInput, selectHtml } from "../../../console/diagnostics-ui.js";
+import { COLUMN_BOUNDS } from "../../../console/diagnostic-columns.js";
 
 const source = await readFile(new URL("../../../console/diagnostics-sessions.js", import.meta.url), "utf8");
 const uiSource = await readFile(new URL("../../../console/diagnostics-ui.js", import.meta.url), "utf8");
@@ -61,7 +62,8 @@ function sessionHarness(request = async () => overview()) {
     FormData: class { constructor(form) { this.values = form.values; } [Symbol.iterator]() { return Object.entries(this.values)[Symbol.iterator](); } },
     e: escapeHtml, icon, shortId: value => value, icons() {}, localInput, selectHtml,
     bindDiagnosticSelects(_root, callback) { selectCallback = callback; return { dispose() {}, close() {} }; },
-    diagnosticTime: value => value || "未记录", diagnosticHash, sessionRange, sessionDrilldown,
+    diagnosticTime: value => value || "未记录", diagnosticHash, sessionRange, sessionDrilldown, overviewFilters,
+    COLUMN_BOUNDS, bindDiagnosticColumns: () => () => {},
     buildSessionQuery, sessionQueryError, createSessionReader,
     diagnosticRequest: (path, signal) => { requests.push({ path, signal }); return request(path, signal); },
     createReadonlySessionView(options) {
@@ -267,7 +269,7 @@ test("overview session, question and exception metrics drill to correctly labell
   const h = sessionHarness(); h.activate(); await settle();
   for (const [key, expected] of [["session_count", {}], ["question_count", { has_questions: "true" }], ["error_session_count", { has_execution_error: "true" }]]) {
     await h.click({ stat: key }); const route = parseDiagnosticRoute(h.navigations.at(-1));
-    assert.equal(route.view, "list"); assert.equal(route.filters.user_id, "platform-owner"); assert.equal(route.filters.source, "channel");
+    assert.equal(route.view, "list"); assert.equal(route.filters.user_id, undefined); assert.equal(route.filters.source, "channel");
     for (const [name, value] of Object.entries(expected)) assert.equal(route.filters[name], value);
   }
 });
@@ -284,7 +286,7 @@ test("trend, Agent and platform-account drilldowns preserve other conditions", a
   assert.equal(route.filters.start, overview().trend[0].start); assert.equal(route.filters.end, overview().trend[0].end);
   assert.equal(route.filters.has_questions, "true"); assert.equal(route.filters.agent_id, "agent-a");
   await h.click({ agentDrill: "agent-b" }); route = parseDiagnosticRoute(h.navigations.at(-1));
-  assert.equal(route.filters.agent_id, "agent-b"); assert.equal(route.filters.user_id, "platform-owner");
+  assert.equal(route.filters.agent_id, "agent-b"); assert.equal(route.filters.user_id, undefined);
   await h.click({ userDrill: "platform-other" }); route = parseDiagnosticRoute(h.navigations.at(-1));
   assert.equal(route.filters.user_id, "platform-other"); assert.equal(route.filters.agent_id, "agent-a");
 });
@@ -299,12 +301,18 @@ test("recent questions View all opens filtered list while exact question/error o
   assert.deepEqual(route.filters, { view: "trajectory", event_id: "event-error", run_id: "run-error" });
 });
 
-test("ordinary view switches preserve filters; copying a full Session ID never navigates", async () => {
+test("overview ignores list filters, list restores them; copying a full Session ID never navigates", async () => {
   const h = sessionHarness(); h.activate("list", { ...filters, query: "literal_%", offset: 100 }); await settle();
   await h.click({ sessionView: "overview" }); const route = parseDiagnosticRoute(h.navigations.at(-1));
-  assert.equal(route.view, "overview"); assert.equal(route.filters.user_id, "platform-owner"); assert.equal(route.filters.query, "literal_%");
+  assert.equal(route.view, "overview"); assert.equal(route.filters.user_id, undefined); assert.equal(route.filters.query, undefined);
+  h.activate("overview", route.filters); await settle();
+  assert.doesNotMatch(h.root.innerHTML, /name="user_id"|name="query"/);
+  await h.click({ sessionView: "list" });
+  const restored = parseDiagnosticRoute(h.navigations.at(-1));
+  assert.equal(restored.filters.user_id, "platform-owner"); assert.equal(restored.filters.query, "literal_%");
   const count = h.navigations.length; await h.click({ copySession: "full-untruncated-session-id" });
   assert.deepEqual(h.copied, ["full-untruncated-session-id"]); assert.equal(h.navigations.length, count);
+  assert.equal(h.toasts.at(-1)[0], "会话 ID 已复制");
   await h.click({ sessionId: "full-untruncated-session-id" });
   assert.equal(parseDiagnosticRoute(h.navigations.at(-1)).id, "full-untruncated-session-id");
 });
@@ -351,6 +359,15 @@ test("inner dashboard scroll survives local rerenders, while a new query resets 
   assert.equal(h.controller.snapshot().questionsScroll, 0);
   assert.equal(h.controller.snapshot().tableScroll, 0);
   assert.equal(h.controller.snapshot().usersScroll, 0);
+});
+
+test("loading status lives in header, outside the list controls and rows", async () => {
+  const gate = deferred(), h = sessionHarness(() => gate.promise);
+  h.activate("list");
+  assert.match(h.root.innerHTML, /diagnostic-filter-secondary[\s\S]*class="diagnostic-loading"[^>]*>正在加载…<\/span>[\s\S]*<\/header>/);
+  assert.doesNotMatch(h.root.innerHTML.split('</header>')[1], /diagnostic-loading/);
+  gate.resolve({ total: 0, items: [] }); await settle();
+  assert.doesNotMatch(h.root.innerHTML, /正在加载…/);
 });
 
 test("new session query wins over late response and deactivation ignores all late data", async () => {
@@ -509,9 +526,10 @@ test("session Query refreshes relative windows but preserves unchanged custom ti
   assert.doesNotMatch(h.root.innerHTML, /重置筛选/);
 });
 
-test("numbered pagination keeps fixed filters and rejects out-of-range pages", async () => {
+test("compact pagination keeps fixed filters and rejects out-of-range pages", async () => {
   const h = sessionHarness(async () => ({ total: 128, items: [] })); h.activate("list", { ...filters, offset: 0, limit: 50 }); await settle();
-  assert.match(h.root.innerHTML, /data-session-page="3"/);
+  assert.match(h.root.innerHTML, /第 1 页，共 3 页/);
+  assert.doesNotMatch(h.root.innerHTML, /diagnostic-page-range|diagnostic-page-numbers/);
   await h.click({ sessionPage: "2" }); await settle();
   let params = new URL(h.requests.at(-1).path, "http://local").searchParams;
   assert.equal(params.get("offset"), "50"); assert.equal(params.get("user_id"), "platform-owner");
@@ -521,7 +539,7 @@ test("numbered pagination keeps fixed filters and rejects out-of-range pages", a
 });
 
 test("resolved username in picker submits the original platform ID, never its display name", async () => {
-  const h = sessionHarness(); h.activate(); await settle();
+  const h = sessionHarness(); h.activate("list"); await settle();
   assert.match(h.root.innerHTML, /name="user_id" value="平台账号"/);
   h.submit({ user_id: "平台账号" }); await settle();
   assert.equal(new URL(h.requests.at(-1).path, "http://local").searchParams.get("user_id"), "platform-owner");

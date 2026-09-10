@@ -305,12 +305,50 @@ test("diagnostics styles share theme tokens and retain actions and detail layout
   assert.match(ui, /Escape/);
 });
 
+test("model API details show safe tool inventories in the existing property layout", () => {
+  const data = record("api", { event: "model_api_request", model_api: "https://models.example.test",
+    api_path: "/chat/completions", http_method: "POST", http_status: 400,
+    api_request_id: "a".repeat(32), tool_manifest_status: "complete", tool_count: 3, unique_tool_count: 2,
+    tool_names: ["read_file", "docs_search", "docs_search"], duplicate_tool_names: ["docs_search"],
+    added_tool_names: ["docs_search"], history_tool_names: ["docs_search"], redeclared_tool_names: ["docs_search"],
+    tools_omitted: 0, tool_names_hash: "b".repeat(64),
+    headers: "NEVER_LOG_HEADERS", body: "NEVER_LOG_BODY", request_body: { prompt: "NEVER_LOG_PROMPT" },
+    other_list: ["NEVER_LOG_OTHER"] });
+  const output = diagnosticDetailHtml(data);
+  assert.match(output, /<h3>模型 API<\/h3>/);
+  assert.match(output, /<dt>HTTP 状态<\/dt><dd><code>400<\/code>/);
+  assert.match(output, /<dt>工具清单状态<\/dt><dd><code>已读取<\/code>/);
+  assert.match(output, /<dt>请求工具名<\/dt><dd><code>read_file · docs_search · docs_search<\/code>/);
+  assert.match(output, /<dt>重复工具名<\/dt><dd><code>docs_search<\/code>/);
+  assert.match(output, /<dt>历史搜索工具名<\/dt><dd><code>docs_search<\/code>/);
+  assert.match(output, /<dt>顶层与历史重声明<\/dt><dd><code>docs_search<\/code>/);
+  assert.match(output, /<dt>省略工具名条目<\/dt><dd><code>0<\/code>/);
+  assert.equal((output.match(/<dt>API 地址<\/dt>/g) || []).length, 1);
+  assert.doesNotMatch(output, /NEVER_LOG|<details|<a href/);
+  assert.equal(diagnosticScalars({ duplicate_tool_names: [] }).duplicate_tool_names, "无");
+});
+
+test("model API tool arrays reject arbitrary structures and have a shared display bound", () => {
+  const fields = diagnosticScalars({ tool_names: ["safe_name", "<img src=x>", { token: "SECRET" }, 12],
+    duplicate_tool_names: "SECRET", added_tool_names: ["https://SECRET", "with space"],
+    history_tool_names: ["docs_search", "<script>", { token: "SECRET" }], redeclared_tool_names: "SECRET",
+    metadata: { token: "SECRET" } });
+  assert.deepEqual(fields, { tool_names: "safe_name", added_tool_names: "工具名已省略", history_tool_names: "docs_search" });
+  const names = Array.from({ length: 1000 }, (_, i) => `tool_${i}_${"x".repeat(100)}`);
+  const bounded = diagnosticScalars({ tool_names: names, duplicate_tool_names: names, added_tool_names: names,
+    history_tool_names: names, redeclared_tool_names: ["important_redeclaration"] });
+  assert.equal(bounded.redeclared_tool_names, "important_redeclaration");
+  assert.ok(Object.values(bounded).reduce((size, text) => size + text.length, 0) < 3700);
+});
+
 test("dense log rows highlight literal text safely and details never duplicate facts", () => {
   assert.equal(highlightedDiagnostic('<b>x.*</b>', 'x.*'), '&lt;b&gt;<mark>x.*</mark>&lt;/b&gt;');
   const data = record("1", { session_id: "complete-session", run_id: "complete-run", channel_run_id: "channel-only", duration_ms: 50 });
   const row = diagnosticRowsHtml([data]);
   assert.doesNotMatch(row, /50|duration|data-filter-id|<details/);
   assert.match(row, /data-open-session="complete-session"/);
+  assert.match(row, />complete<\/button>/);
+  assert.match(row, /class="diagnostics-sequence" aria-label="当前查询第 1 条">1<\/span>/);
   const detail = diagnosticDetailHtml(data);
   assert.equal((detail.match(/<dt>Session ID<\/dt>/g) || []).length, 1);
   assert.match(detail, /渠道处理 ID/);
@@ -356,9 +394,11 @@ test("compact Console log composition places its header above the split workbenc
   assert.match(section, /id="diagnosticsQueryRange"/);
   assert.doesNotMatch(section, /aria-label="更多筛选"/);
   assert.match(css, /#diagnosticsLogPage \.diagnostics-head h1[^}]*font-size:16px/);
-  assert.match(css, /#diagnosticsLogPage \.diagnostics-row[^}]*height:34px/);
-  assert.match(css, /#diagnosticsLogPage \.diagnostics-row[^}]*grid-template-columns:164px 70px 64px minmax\(180px,1fr\) 152px; gap:28px/);
-  assert.match(css, /#diagnosticsLogPage \.diagnostics-summary[^}]*font-size:13px/);
+  assert.match(css, /#diagnosticsLogPage \.diagnostics-row[^}]*height:26px/);
+  assert.match(css, /#diagnosticsLogPage \.diagnostics-row[^}]*grid-template-columns:32px 150px 72px 52px minmax\(180px,1fr\) 72px; gap:12px/);
+  assert.match(css, /#diagnosticsLogPage \.diagnostics-summary[^}]*font-size:12px/);
+  assert.doesNotMatch(section, /diagnostics-footer|diagnosticsRange/);
+  assert.match(section, /diagnostics-result-title[\s\S]*diagnosticsMeta[\s\S]*diagnosticsMore/);
   assert.match(css, /#diagnosticsLogPage \.diagnostics-split[^}]*border:0; border-radius:0/);
   assert.match(css, /#diagnosticsLogPage \.diagnostics-filters \.console-select-trigger[^}]*height:32px/);
   assert.match(css, /#diagnosticsLogPage \.diagnostics-split[^}]*--diagnostic-drawer-width:436px/);

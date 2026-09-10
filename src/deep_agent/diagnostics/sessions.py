@@ -172,6 +172,10 @@ def latest_status_expression(active_entries=()):
     state = select(last.status).where(*conditions).order_by(last.sequence.desc()).limit(1).scalar_subquery()
     has_execution = exists(select(last.event_id).where(last.session_id == ChatSession.session_id,
         last.event_type.in_(EXECUTION_EVENT_TYPES)))
+    return _status_case(kind, state, has_execution, active_entries)
+
+
+def _status_case(kind, state, has_execution, active_entries=()):
     return case(
         (_active_condition(active_entries), "running"),
         (kind == "execution/error", "error"),
@@ -180,6 +184,42 @@ def latest_status_expression(active_entries=()):
         (and_(kind == "assistant/message", state.in_(("interrupted", "cancelled"))), "stopped"),
         (and_(kind == "assistant/message", state == "failed"), "error"),
         (~has_execution, "not_started"), else_="unknown")
+
+
+def execution_summary_statement(session_ids=None, active_entries=()):
+    """Derive each latest Run/terminal once, without loading event payloads.
+
+    The latest execution may have a NULL run ID; null-safe matching is required
+    for historical records. The public run_id separately retains the newest
+    non-NULL execution Run, matching the detail contract.
+    """
+    event = ChatSessionEvent
+    heads = select(event.session_id,
+        func.max(event.sequence).label("sequence"),
+        func.max(case((event.run_id.is_not(None), event.sequence))).label("run_sequence"),
+    ).where(event.event_type.in_(EXECUTION_EVENT_TYPES))
+    if session_ids is not None:
+        heads = heads.where(event.session_id.in_(session_ids))
+    heads = heads.group_by(event.session_id).subquery()
+    latest, terminal, public_run = (aliased(event) for _ in range(3))
+    terminal_head = select(terminal.session_id, func.max(terminal.sequence).label("sequence"))\
+        .select_from(heads).join(latest, and_(latest.session_id == heads.c.session_id,
+            latest.sequence == heads.c.sequence))\
+        .join(terminal, and_(terminal.session_id == latest.session_id,
+            terminal.run_id.is_not_distinct_from(latest.run_id),
+            terminal.event_type.in_(("user/message", "assistant/message", "execution/error"))))\
+        .group_by(terminal.session_id).subquery()
+    state = _status_case(terminal.event_type, terminal.status, heads.c.sequence.is_not(None), active_entries)
+    statement = select(ChatSession.session_id, public_run.run_id, state.label("latest_status"))\
+        .outerjoin(heads, heads.c.session_id == ChatSession.session_id)\
+        .outerjoin(public_run, and_(public_run.session_id == heads.c.session_id,
+            public_run.sequence == heads.c.run_sequence))\
+        .outerjoin(terminal_head, terminal_head.c.session_id == ChatSession.session_id)\
+        .outerjoin(terminal, and_(terminal.session_id == terminal_head.c.session_id,
+            terminal.sequence == terminal_head.c.sequence))
+    if session_ids is not None:
+        statement = statement.where(ChatSession.session_id.in_(session_ids))
+    return statement
 
 
 def question_summary(event) -> str:
@@ -309,7 +349,9 @@ class DiagnosticSessionQueries(SessionBoundMixin):
             scope = self._filters(f)
             total = (await db.execute(select(func.count()).select_from(ChatSession).where(*scope))).scalar_one()
             activity = self._activity()
-            rows = (await db.execute(select(ChatSession, Agent.name, latest_status_expression(self.active_entries), activity)
+            # Display-only states are derived in one page-bounded batch below.
+            # State filtering remains in scope, before count/order/pagination.
+            rows = (await db.execute(select(ChatSession, Agent.name, literal(None), activity)
                 .outerjoin(Agent, Agent.id == ChatSession.agent_id).where(*scope)
                 .order_by(activity.desc(), ChatSession.session_id.desc()).limit(f.limit).offset(f.offset))).all()
             items = await self._items(db, rows, f)
@@ -351,10 +393,8 @@ class DiagnosticSessionQueries(SessionBoundMixin):
             .join(q, and_(event.session_id == q.c.session_id, event.sequence == q.c.sequence)))).all()}
         errors = dict((await db.execute(select(event.session_id, func.count()).where(event.session_id.in_(ids),
             event.event_type == "execution/error", in_range).group_by(event.session_id))).all())
-        latest_run = select(event.session_id, func.max(event.sequence).label("sequence")).where(event.session_id.in_(ids),
-            event.event_type.in_(EXECUTION_EVENT_TYPES), event.run_id.is_not(None)).group_by(event.session_id).subquery()
-        runs = dict((await db.execute(select(event.session_id, event.run_id).join(latest_run,
-            and_(event.session_id == latest_run.c.session_id, event.sequence == latest_run.c.sequence)))).all())
+        execution = {sid: (run, state) for sid, run, state in (await db.execute(
+            execution_summary_statement(ids, self.active_entries))).all()}
         origins = {}
         title_rows = (await db.execute(select(event.session_id, event.payload).where(event.session_id.in_(ids),
             event.event_type == "session/title").order_by(event.sequence))).all()
@@ -375,8 +415,8 @@ class DiagnosticSessionQueries(SessionBoundMixin):
                 "agent_id": agent_scope_to_api(session.agent_id), "agent_name": name, "user_id": session.user_id,
                 "source": "channel" if session.session_id in origins else "direct", "channel": origins.get(session.session_id),
                 "created_at": utc_rfc3339(session.created_at), "updated_at": utc_rfc3339(activity),
-                "last_activity_at": utc_rfc3339(activity), "latest_status": state,
-                "run_id": active.run_id if active else runs.get(session.session_id),
+                "last_activity_at": utc_rfc3339(activity), "latest_status": execution[session.session_id][1] if state is None else state,
+                "run_id": active.run_id if active else execution[session.session_id][0],
                 "question_count": question[1] if question else 0, "error_count": errors.get(session.session_id, 0),
                 "recent_question": event_link(question[0], session, name) if question else None})
         return items

@@ -78,6 +78,32 @@ Agent 可复用管理员身份调用同一只读接口：
 
 ## 后续增加日志点
 
+### 模型 API 请求诊断
+
+OpenAI 兼容模型（包含 DeepSeek 的 Chat Completions / Responses）额外记录
+`model_api_request`、`model_api_response`，Console 详情的「模型 API」分组展示：
+
+- API 来源地址与规范路径、HTTP 方法和状态码；地址不包含认证信息、查询参数或自定义前缀。
+- 顶层函数工具名、总数、去重数、重复项、相对上一请求新增项及清单 SHA256。
+- Responses 搜索结果历史里的工具名，以及它们与顶层工具清单的交集，辅助排查重复声明。
+- 每次 HTTP 请求的本地关联 ID；响应耗时只到收到响应头，不等于流式生成完成时间。
+
+名单经过格式校验和共享长度预算，`tools_omitted` 明确标记省略的名单条目数；
+`tool_manifest_status` 非 `complete` 时不能根据缺少重复项判定没有重复。
+其他模型协议仍保留原有模型开始/完成/失败日志，不宣称已采集 HTTP 清单。
+不保存请求/响应正文、工具 Schema、参数、图片内容、API Key、Cookie 或 Headers。
+
+DeepSeek Responses 的重名错误需要同时看 `duplicate_tool_names` 和 `redeclared_tool_names`：
+顶层工具名没有重复，不代表搜索历史没有再次声明同一工具。2026-09-10 已在模型装配时将
+DeepSeek 原生能力限制为其支持的 Web Search，工具搜索使用 SDK 普通函数回退，避免双处声明；
+其他 Provider 不受影响。核验的 [Pydantic AI 2.42.0 DeepSeek Profile](https://github.com/pydantic/pydantic-ai/blob/v2.42.0/pydantic_ai_slim/pydantic_ai/providers/deepseek.py)
+尚未包含此限制；不需要修改数据库、工具名或清除历史。
+
+采集使用现有 HTTP 客户端的事件钩子，不更换客户端、重试或超时策略。
+SDK 流式请求延迟到消费者任务执行，因此通过透明 `WrapperModel` 在实际
+`request` / `request_stream` 调用边界建立隔离上下文，不能只在 Capability 外层设置 ContextVar。
+请求与流对象原样委托，日志失败不能改变业务结果；不会写入会话 Event Store，也不涉及迁移。
+
 统一入口是 `deep_agent.diagnostics.emit`；Agent 代码可沿用 `agent.observability.log_event`。
 先在 `diagnostics/schema.py` 注册稳定事件名与固定中文摘要，再提交白名单中的标识、数值、阶段和错误分类；未知字段直接丢弃。
 不要传 `str(exc)`、`repr(...)`、完整模型/工具对象或业务正文；不要在诊断代码中修改执行状态。

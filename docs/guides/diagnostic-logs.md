@@ -4,6 +4,11 @@
 它与会话 Event Store、普通 History 和原有运维日志独立，不生成会话事件，不执行工具或自动重试。
 管理员可以跨用户按 Session ID 排查；普通会话接口仍按原有所有者权限校验。
 
+标题生成使用 `title_generation_started/completed/failed/cancelled`，关联 Session、Run、Agent 和模型。
+失败中的 `reason=output_token_limit/timeout/empty_title/model_error` 区分预算不足、超时、空标题与其他模型错误；
+`phase=image_download/title_update` 定位图片读取或标题更新失败。成功日志仅说明标题已生成，人工改名保护可能阻止覆盖。
+日志不含输入、标题正文或异常原文。渠道的来源固定标题不调用模型，因此没有标题生成日志。
+
 ## 使用
 
 进入控制台「诊断 → 日志」（`/console/#/diagnostics/logs`），选择时间、来源、级别或关键词，

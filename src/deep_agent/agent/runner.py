@@ -1430,6 +1430,15 @@ class AgentRunner:
         try:
             result = await generate_title(
                 model=self.agent.model,
+                provider_type=self._provider_type,
+                diagnostic_fields={
+                    "session_id": session_id,
+                    "run_id": deps.run_id,
+                    "agent_id": deps.agent_id,
+                    "model_id": self._model_id,
+                    "model_name": self._model_name,
+                    "provider_name": self._provider_type,
+                },
                 user_text=message,
                 context_refs=context_refs,
                 attachments=attachments,
@@ -1459,6 +1468,9 @@ class AgentRunner:
                 },
             )
         except Exception as exc:  # noqa: BLE001 - fallback remains authoritative
+            log_event("title_generation_failed", session_id=session_id, run_id=deps.run_id,
+                      agent_id=deps.agent_id, model_id=self._model_id,
+                      phase="title_update", error_type=type(exc).__name__)
             logger.warning(
                 "Model title persistence failed for session {}: {}",
                 session_id,

@@ -154,6 +154,10 @@ Account与实际Session归属，不以修改后的Agent配置取消错误任务�
 `build_runner_for_agent`追加中文渠道说明，不依据用户正文或context_refs启用，也不改普通客户端的Prompt。
 
 渠道Session创建时写入`source=channel`标题事件及`channel`来源快照，阻止首轮模型标题覆盖。
+
+普通会话标题在`agent/title_generator.py`单独关闭思考，不能修改主聊天的Model或默认设置。
+DeepSeek新别名可能尚无SDK Profile：Responses使用原生reasoning开关，Chat和Kimi使用原生thinking开关；
+Kimi标题请求省略temperature，让服务端按关闭思考的模式选默认值。标题失败查`title_generation_*`诊断事件。
 SessionInfo可选`channel`字段来源于该Session事件，不依赖当前Binding；人工改名不删除来源。
 旧本地数据修复用`maintenance.channel_origins`，默认dry-run、apply先备份，停止服务后执行；不升级002。
 若已有002仍含`peer_display_name`物理列，先用`maintenance.channel_peer_metadata`完成备份后的

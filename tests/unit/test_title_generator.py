@@ -3,8 +3,14 @@
 from __future__ import annotations
 
 import json
+import asyncio
 import unittest
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
+
+import httpx2
+from pydantic_ai import Agent
+from pydantic_ai.models.openai import OpenAIChatModel, OpenAIResponsesModel
+from pydantic_ai.providers.openai import OpenAIProvider
 
 from pydantic_ai.models.test import TestModel
 
@@ -71,6 +77,68 @@ class TestTitleHelpers(unittest.TestCase):
 
 
 class TestGenerateTitle(unittest.IsolatedAsyncioTestCase):
+    async def test_native_title_switches_do_not_change_main_model_requests(self) -> None:
+        for provider_type, model_class in [("deepseek", OpenAIResponsesModel), ("deepseek", OpenAIChatModel), ("moonshotai", OpenAIChatModel)]:
+            with self.subTest(provider=provider_type, protocol=model_class.__name__):
+                sent = []
+                def transport(request):
+                    body = json.loads(request.content)
+                    sent.append(body)
+                    if model_class is OpenAIResponsesModel:
+                        payload = {"id": "resp-1", "object": "response", "created_at": 0,
+                                   "model": "deepseek-flash", "status": "completed",
+                                   "output": [{"id": "msg-1", "type": "message", "role": "assistant", "status": "completed",
+                                               "content": [{"type": "output_text", "text": "代码轨迹测试", "annotations": []}]}]}
+                    else:
+                        payload = {"id": "chat-1", "object": "chat.completion", "created": 0, "model": "fixture",
+                                   "choices": [{"index": 0, "finish_reason": "stop", "message": {"role": "assistant", "content": "代码轨迹测试"}}]}
+                    return httpx2.Response(200, json=payload)
+                async with httpx2.AsyncClient(transport=httpx2.MockTransport(transport)) as client:
+                    # A custom endpoint has no native profile for newly named models.
+                    model = model_class("deepseek-flash" if provider_type == "deepseek" else "kimi-k2.6",
+                                        provider=OpenAIProvider(api_key="private-key", http_client=client))
+                    result = await generate_title(model=model, provider_type=provider_type, user_text="private prompt")
+                    self.assertEqual(result.title, "代码轨迹测试")
+                    await Agent(model).run("normal chat", model_settings={"temperature": 0.7})
+                if model_class is OpenAIResponsesModel:
+                    self.assertEqual(sent[0]["reasoning"]["effort"], "none")
+                    self.assertNotIn("reasoning", sent[1])
+                else:
+                    self.assertEqual(sent[0]["thinking"], {"type": "disabled"})
+                    self.assertNotIn("thinking", sent[1])
+                if provider_type == "moonshotai":
+                    self.assertNotIn("temperature", sent[0])
+                self.assertEqual(sent[1]["temperature"], 0.7)
+
+    async def test_token_limit_failure_has_correlated_safe_diagnostic_and_no_retry(self) -> None:
+        calls, records = [], []
+        def transport(request):
+            calls.append(request)
+            return httpx2.Response(200, json={"id": "resp-1", "object": "response", "created_at": 0,
+                "model": "deepseek-flash", "status": "incomplete", "incomplete_details": {"reason": "max_output_tokens"},
+                "output": [{"id": "reasoning-1", "type": "reasoning", "summary": [{"type": "summary_text", "text": "private reasoning"}]}]})
+        async with httpx2.AsyncClient(transport=httpx2.MockTransport(transport)) as client:
+            model = OpenAIResponsesModel("deepseek-flash", provider=OpenAIProvider(api_key="private-key", http_client=client))
+            with patch("deep_agent.agent.title_generator.log_event", side_effect=lambda event, **facts: records.append((event, facts))):
+                result = await generate_title(model=model, provider_type="deepseek", user_text="private prompt",
+                                              diagnostic_fields={"session_id": "session-1", "run_id": "run-1"})
+        self.assertIsNone(result)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(records[-1][0], "title_generation_failed")
+        self.assertEqual(records[-1][1]["reason"], "output_token_limit")
+        self.assertEqual(records[-1][1]["session_id"], "session-1")
+        self.assertEqual(records[-1][1]["run_id"], "run-1")
+        self.assertNotIn("private", repr(records))
+
+    async def test_cancellation_is_logged_and_propagated(self) -> None:
+        store = AsyncMock()
+        store.download.side_effect = asyncio.CancelledError()
+        with patch("deep_agent.agent.title_generator.log_event") as logged:
+            with self.assertRaises(asyncio.CancelledError):
+                await generate_title(model=TestModel(), user_text="", file_store=store,
+                                     attachments=[AttachmentRef(id="image", mime="image/png")])
+        self.assertEqual(logged.call_args.args[0], "title_generation_cancelled")
+
     async def test_uses_effective_model_once(self) -> None:
         result = await generate_title(
             model=TestModel(call_tools=[], custom_output_text="分析预算差异"),

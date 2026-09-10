@@ -357,7 +357,7 @@ test("工作台以独立页签接入轨迹且默认对话链路不变", () => {
   assert.match(workspaceCss, /\.trajectory-kind\.tool\s*\{[^}]*background:\s*#fff3e7/);
   assert.match(workspaceCss, /\.trajectory-kind\.code\s*\{[^}]*background:\s*#e8f1ff/);
   assert.match(trajectorySource, /return isRunCodeEvent\(event\) \? "PTC"/);
-  assert.match(trajectorySource, /isRunCodeEvent\(event\)\) tabs\.push\(\["code", "Code"\]\)/);
+  assert.match(trajectorySource, /isPythonCodeEvent\(event\)\) tabs\.push\(\["code", "Code"\]\)/);
   assert.match(trajectorySource, /class="hljs language-python"/);
   assert.match(trajectorySource, /data-copy-run-code/);
   assert.match(trajectorySource, /activeTab === "code"[\s\S]*?"trajectory-detail-body is-code"/);

@@ -565,6 +565,10 @@ function isRunCodeEvent(event) {
   return event?.kind === "tool" && event?.label === "run_code";
 }
 
+function isPythonCodeEvent(event) {
+  return event?.kind === "tool" && ["run_code", "execute_python"].includes(event?.label);
+}
+
 function eventKindClass(event) {
   return isRunCodeEvent(event) ? "code" : event?.kind;
 }
@@ -921,7 +925,7 @@ function highlightPython(code) {
 
 function renderRunCode(event) {
   const code = runCodeSource(event);
-  if (!code) return `<p class="trajectory-summary-empty">本次代码编排没有可展示的源代码。</p>`;
+  if (!code) return `<p class="trajectory-summary-empty">本次调用没有可展示的源代码。</p>`;
   return `<section class="trajectory-code-view">
     <header><span>Python</span><button type="button" data-copy-run-code>${icon("copy")}复制</button></header>
     <pre><code class="hljs language-python">${highlightPython(code)}</code></pre>
@@ -931,7 +935,7 @@ function renderRunCode(event) {
 function detailTabs(event) {
   if (event.kind === "title") return [["summary", "Summary"], ["request", "Request"], ["result", "Result"]];
   const tabs = [["summary", "Summary"]];
-  if (isRunCodeEvent(event)) tabs.push(["code", "Code"]);
+  if (isPythonCodeEvent(event)) tabs.push(["code", "Code"]);
   if (hasMeaningfulValue(event.payload)) tabs.push(["payload", "Payload"]);
   if (["input", "assistant"].includes(event.kind)) {
     tabs.push(["preview", "Preview"], ["raw", "Raw"]);

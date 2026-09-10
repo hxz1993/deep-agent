@@ -8,6 +8,10 @@ from datetime import datetime, timezone
 from urllib.parse import urlsplit
 
 EVENTS = {
+    "title_generation_started": "会话标题生成开始",
+    "title_generation_completed": "会话标题生成完成",
+    "title_generation_failed": "会话标题生成失败，保留兜底标题",
+    "title_generation_cancelled": "会话标题生成已取消",
     "service_starting": "服务正在初始化", "service_started": "服务已启动",
     "service_stopped": "服务已停止", "service_initialization_failed": "服务初始化失败",
     "service_shutdown_failed": "服务关闭失败",

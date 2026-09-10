@@ -1,0 +1,24 @@
+/* Body, header, actions, trajectory and inspector share workspace styles.
+   Only the independent two-column host and diagnostic notices live here. */
+.diagnostic-session-detail { display: flex; flex-direction: column; min-width: 0; min-height: 0; height: 100%; color: var(--text); background: var(--console-surface); }
+.diagnostic-detail-grid { --diagnostic-inspector-width: 320px; display: grid; grid-template-columns: minmax(0, 1fr) var(--console-resizer-width) minmax(260px, var(--diagnostic-inspector-width)); flex: 1; min-height: 0; min-width: 0; }
+.diagnostic-detail-grid > .chat { height: 100%; min-height: 0; overflow: hidden; background: var(--console-surface); }
+.diagnostic-detail-grid .messages { min-height: 0; }
+.diagnostic-detail-grid .inspector-pane { min-height: 0; min-width: 0; padding-top: 0; }
+.diagnostic-detail-grid.inspector-hidden { grid-template-columns: minmax(0, 1fr); }
+.diagnostic-detail-grid.inspector-hidden > .inspector-pane, .diagnostic-detail-grid.inspector-hidden > .diagnostic-detail-resizer { display: none; }
+.diagnostic-detail-notice, .diagnostic-detail-events-notice { margin: 0; padding: 8px 17px; font-size: 12px; color: var(--text); background: var(--accent-soft); }
+.diagnostic-message-marker { display: block; width: fit-content; margin-bottom: 5px; padding: 1px 6px; border-radius: 4px; color: var(--accent); background: var(--accent-soft); font-size: 11px; line-height: 18px; }
+.diagnostic-detail-error { padding: 40px 24px; display: grid; justify-items: center; gap: 12px; color: var(--text); text-align: center; }
+.diagnostic-detail-error svg { color: var(--danger); width: 28px; height: 28px; }
+.diagnostic-detail-error p, .diagnostic-detail-error span { margin: 0; font-size: 12px; }
+.diagnostic-session-detail .attachment-image-dialog footer { padding: 12px 18px; }
+@media (max-width: 1440px) {
+  .diagnostic-detail-grid { grid-template-columns: minmax(0, 1fr) var(--console-resizer-width) minmax(240px, var(--diagnostic-inspector-width)); }
+}
+@media (max-width: 920px) {
+  .diagnostic-detail-grid { grid-template-columns: minmax(0, 1fr) var(--console-resizer-width) 230px; }
+}
+@media (max-width: 620px) {
+  .diagnostic-detail-grid { grid-template-columns: minmax(180px, 1fr) var(--console-resizer-width) 200px; }
+}

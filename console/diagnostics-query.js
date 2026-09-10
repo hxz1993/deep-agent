@@ -2,7 +2,7 @@ const MAX_VISIBLE_RECORDS = 5000;
 
 export function buildDiagnosticsQuery(filters = {}, cursor = null) {
   const params = new URLSearchParams({ limit: "200" });
-  for (const key of ["start", "end", "source", "level", "session_id", "run_id", "q"]) {
+  for (const key of ["start", "end", "source", "level", "session_id", "q"]) {
     const value = String(filters[key] || "").trim();
     if (value) params.set(key, value);
   }
@@ -108,5 +108,10 @@ export function createDiagnosticsQuery({ request, onChange = () => {} }) {
       if (current()) { state.busy = false; controller = null; notify(); }
     }
   }
-  return { state, setActive, changeFilters, query, cancel };
+  function restore(snapshot) {
+    cancel();
+    Object.assign(state, snapshot, { active: state.active, busy: false, items: [...(snapshot.items || [])], filters: { ...snapshot.filters } });
+    notify();
+  }
+  return { state, setActive, changeFilters, query, cancel, restore };
 }

@@ -5,9 +5,10 @@ from fastapi import APIRouter, HTTPException, Query
 from starlette.concurrency import run_in_threadpool
 
 from deep_agent.api.v1.admin import CONSOLE_ADMIN_DEPENDENCIES
+from deep_agent.api.v1.diagnostic_routes import NoStoreRoute
 from deep_agent.diagnostics.query import QueryError, logs_status, query_logs
 
-router = APIRouter(prefix="/diagnostics/logs", dependencies=CONSOLE_ADMIN_DEPENDENCIES)
+router = APIRouter(prefix="/diagnostics/logs", dependencies=CONSOLE_ADMIN_DEPENDENCIES, route_class=NoStoreRoute)
 tag = "diagnostics"
 
 

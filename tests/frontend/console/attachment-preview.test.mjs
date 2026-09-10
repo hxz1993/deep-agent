@@ -1,3 +1,4 @@
+import { readPresentationSource } from "./shared-presentation-source.mjs";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
@@ -43,7 +44,7 @@ test("图片组保持区域内顺序和点击位置，忽略普通文件", () =>
 });
 
 test("大图支持前后按钮、方向键和内容区域空白关闭", async () => {
-  const source = await readFile(new URL("../../../console/chat.js", import.meta.url), "utf8");
+  const source = await readPresentationSource("chat.js");
   assert.match(source, /event.target.classList.contains\("attachment-image-dialog-content"\)/);
   assert.match(source, /event.key === "ArrowLeft" \|\| event.key === "ArrowRight"/);
   assert.match(source, /openAttachmentImagePreview\(att, state.pendingAttachments\)/);
@@ -86,12 +87,12 @@ test("缺少文件引用不预览，文件名不能注入 HTML", () => {
 });
 
 test("直播和历史共用的用户气泡把附件与上下文放在正文前", async () => {
-  const source = await readFile(new URL("../../../console/chat.js", import.meta.url), "utf8");
+  const source = await readPresentationSource("chat.js");
   const addMessage = source.match(/function addMessage\([\s\S]*?\n\}/)?.[0];
   assert.ok(addMessage);
   assert.ok(addMessage.indexOf("renderMessageAttachments(bubble") < addMessage.indexOf("bubble.appendChild(textEl)"));
   assert.ok(addMessage.indexOf("renderMessageContextRefs(bubble") < addMessage.indexOf("bubble.appendChild(textEl)"));
-  assert.match(source, /bindAttachmentImagePreviews\(\{ openImage: openAttachmentImagePreview \}\)/);
+  assert.match(source, /bindAttachmentImagePreviews\(\{ root: document.getElementById\("workspaceGrid"\), openImage: openAttachmentImagePreview \}\)/);
 });
 
 test("轨迹图片用可预览按钮，普通附件保持原展示", async () => {

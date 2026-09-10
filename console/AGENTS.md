@@ -27,7 +27,13 @@ API、SSE、Event Store或持久化契约变化，应先确认产品边界，再
 console/
 ├── index.html           # 唯一页面：测试工作台 / 配置中心 / 诊断中心
 ├── chat.js              # SSE、会话、附件、HITL
+├── conversation-presenter.js # 对话测试 / 诊断共用正文与工具展示
+├── session-inspector.js # 共用右侧会话信息栏，只读数据注入
 ├── workspace.js
+├── diagnostics-center.js # 诊断入口、白名单路由与返回状态
+├── diagnostics-sessions.js # 会话概览 / 列表 / 独立只读详情控制器
+├── diagnostic-detail.js # 只读详情宿主，不导入工作台执行控制器
+├── diagnostics.js      # 紧凑日志列表与右侧详情
 ├── configuration.js
 ├── configuration/       # Agent / 模型 / MCP / Skill / UI 工具管理
 └── vendor/              # marked、DOMPurify、highlight.js 等预构建库
@@ -66,6 +72,7 @@ History 中运行工具一律只读，不能因工具目录补齐 widget 自动�
 | Skill | 独立 Skill 列表与详情；上传包安装/替换/单个与全部导出/删除；文本、Word、Excel 资源可预览，脚本只列包内路径和数量，不展示可执行性判断；Agent 使用独立 `skills` 列表选择 |
 | 一体化控制台 | `/console/`；工作台、配置和诊断的唯一入口 |
 | 诊断日志 | `diagnostics.js`／`diagnostics-query.js`使用管理员只读`/diagnostics/logs/status`与`/diagnostics/logs`，查询当前实例API／网关的安全结构化日志；不读会话事件、不查询任意文件路径 |
+| 诊断会话 | `diagnostics-center.js`／`diagnostics-sessions.js`使用管理员`/diagnostics/sessions`五个GET接口，跨用户概览、列表和完整只读详情；统计按平台账号归属，含渠道会话但不解析企微发送人 |
 | 会话轨迹 | 工作台“对话 / 轨迹”页签；普通对话读History/SSE ConversationItem，只有轨迹按Sequence读取Event API |
 
 v0.6.7起，轨迹把`run_code`显示为独立`PTC`类型，并在详情中提供带Python高亮与复制能力的
@@ -150,7 +157,7 @@ Agent 独立编辑页的系统提示词标题栏显示“字符数 / 预估 Toke
 主导航与配置目录合为唯一左栏：品牌与收起按钮位于左栏顶部，移除右侧顶栏，内容从页面顶部开始。
 对话测试、Agent位于目录顶部；“设置”按Provider、Skill、MCP、内置工具、UI工具、渠道排列；
 “系统”包含全局配置、模型目录；数据库只读摘要并入全局配置。分组以弱灰文字和留白区分，不加分隔线。
-底部固定诊断中心和接口文档，下方以一条分隔线划分用户栏；展开导航时四选一主题栏位于用户名
+设置之后的“诊断”分组只提供日志和会话；底部“系统”分组提供全局配置、模型目录和接口文档；下方以一条分隔线划分用户栏；展开导航时四选一主题栏位于用户名
 和头像上方，四个按钮固定为28px正方形，不拉伸；可用宽度不足124px或收起导航时，单个主题按钮打开向右的横向浮层。连接状态表示后端健康检查，放在品牌副标题；点击头像向右上展开用户信息，
 悬停与单纯聚焦不展开；再次点击、点击外部或Esc关闭。保留版本与数据库信息，浮层内部不加分割线。目录中部独立滚动，不再嵌套配置二级侧栏。
 导航宽度桌面200px、920px以下176px、760px以下148px；手动收起为56px纯图标，保留tooltip与
@@ -217,11 +224,47 @@ Headers JSON使用透明输入层与语法高亮层重叠，两层及高亮token
   刷新时同步两个视图；渠道信息读取失败不阻断 Agent 目录，也不继续展示过期标记。
 - `/` 跳转到 `/console/#/workspace`；旧 `/settings.html`、`/models.html`、`/admin/` 返回 404。
 - 前端门禁只负责体验，后端管理Router仍统一校验企业管理员；不要把按钮隐藏当作权限控制。
-- 诊断中心进入页面才加载，查询不带调试App，不按当前用户限制Session／Run；只允许后端企业管理员。
+- 诊断日志进入页面才加载，查询不带调试App，不按当前用户限制Session／Run；只允许后端企业管理员。
   默认最近24小时、每页200条，手动筛选/刷新/继续查询，页面最多保留5000条；不增加后台轮询、下载或
   Agent工具。换条件与离开页面立即Abort并失效旧请求；分页固定原时间范围，409游标失效提示重查。
   API／网关日志使用独立运行诊断文件，不把Run回执重新写入会话Event Store。详情只展示后端安全标量，
   HTML转义、不渲染Markdown；日志不可用、缺失/丢弃、部分扫描、权限失败不能伪装成没有匹配结果。
+  2026-09-10 后续按用户要求将两个查询页标题与字体收回Console规范：页面标题16px、分组14px、
+  正文12–13px，不再显示英文eyebrow。两页整体底色直接继承Console surface，light为白底；日志行34px、正文13px，右侧仅Session ID，
+  无状态圆点/逐行线/表格网格；顶栏32px，第一行时间/来源/等级/Session ID，第二行关键词/查询/文字重置；共用640px最大宽度，左右对齐，不用高级展开或浮层。760px以下首行改两列，避免溢出。
+  日志只保留一个“查询”（同时更新相对时间窗口），重置为无边框文字。自定义时间、返回、分页保留固定范围。
+  详情默认436px、可调宽，左侧固定标签列12px、右侧值12–13px，密集属性行；复制仅Session ID，所有字段直接平铺，
+  不展示重复JSON或大号关联按钮。窄屏仍用同一布局，先压缩次要列与宽度。
+- 诊断会话默认最近7天，UTC半开范围最多31天，按浏览器时区分日；概览和列表共享公共筛选，
+  列表默认50条；完整Session ID存在时精确匹配，否则名称字面量模糊匹配；不做ID前缀/包含匹配，
+  不按ID格式猜测搜索类型（允许业务自定义ID）。筛选不加外层表单卡；指标独立卡片、图表及列表
+  保留白色工作区、Console控件及必要边界，不再把“少边框”理解为全部无框；表格保留表头、外框和行线。
+  概览/列表直接复用Agent的`agent-view-switch`样式和图标，固定第二行；第一行“查询”右边常显文字“重置”。
+  第二行集中时间/条件回显与自定义时间，header预留固定行高，加载提示不得挤动内容起点。
+  最近提问38px单行，右侧Agent/用户名/时间逐列固定宽度，日期等宽数字；会话列表50px双行，次行“Session ID＋复制 · 最近问题”，不加“最近问题：”前缀。
+  趋势按容器实测宽度重算横坐标，保持184px高、固定文字/圆点尺寸；ResizeObserver离页必须断开，不触发数据请求。
+  “范围内有执行异常”不等同“最近一轮异常”，提问数下钻的列表仍按会话计数。
+  用户只显示平台User ID对应用户名，不显示头像/邮箱；姓名搜索仅过滤已加载选项，实际查询提交ID；
+  不依赖测试App或企微发送人接口。
+- `diagnostics-navigation.js`负责白名单路由、完整ID、范围和返回快照；`diagnostics-session-query.js`
+  负责可取消读取和Events分页。`diagnostics-sessions.js`使用独立状态，History/Events/上下文估算各有请求代次，
+  切会话、刷新、离开与鉴权失败均取消旧读取并拒绝迟到响应。URL仅保存筛选/定位ID，正文、日志、头像和认证
+  不写URL或LocalStorage；来源/滚动/展开仅当前历史与内存保存，鉴权失效清空诊断数据。
+  会话列表表头/分页留在工作区内；返回同时恢复外层、表格和概览内部滚动，不能只保存外层位置。
+- `diagnostic-detail.js`注入共享正文Presenter、`trajectory.js`和`session-inspector.js`，不导入会触发
+  初始化的`chat.js`/`workspace.js`。只读页不挂载发送、上传、重试、停止、审批、改名、删除、压缩或widget
+  提交处理器，不调用普通用户接口伪装所有者，不订阅SSE/轮询。Events仅在轨迹或轮次定位需要时按500条分页，
+  History投影失败保留显式错误及轨迹入口。上下文仅按需估算并标注当前配置，不拿管理员测试Header补历史。
+  元数据/上下文迟到后重绘正文必须保留已定位消息的高亮与滚动，不重复滚动或遗失定位。
+- 所有诊断下钻和返回按[联动矩阵](../docs/guides/diagnostic-sessions.md#页面联动)维护并测试。
+  会话详情按最新要求不新增反向查日志按钮，完整骨架复用对话测试；日志跳会话不受旧列表条件限制。
+  完整ID用于查询，缩略仅展示；日志Run ID只保留值，不支持筛选/复制/跳转，日志跳会话只传Session ID，旧log路由run_id忽略。
+  会话内部的真实问题/异常事件定位不受影响。复制不得冒泡触发跳转，返回恢复分页和滚动。
+- 这两个查询页面使用限定作用域的`diagnostics-design.css`（直接映射Console主题变量）以及各自CSS；不全局导入
+  DevBox样式，也不影响会话详情和其他目录。旧视觉依据、生成提示词、合成截图/逐点比较保存在
+  `docs/design/23-diagnostics-and-logs/visual-rebuild-20260910/`；图片中的演示计数不能进入生产。
+  可复跑`node tests/frontend/console/diagnostics-visual-review.mjs`：默认隔离路由夹具；`--mode live`
+  仅同源GET/HEAD，禁止执行请求和外网。浏览器必须finally关闭，截图通过不等于像素完全相等。
 
 ---
 
@@ -312,8 +355,17 @@ Console会话渲染模块边界：
 
 - `conversation-items.js`：把History `ConversationItem[]`确定性投影为用户节点和Assistant节点。
 - `assistant-presentation.js`：把History节点和实时SSE统一转换为Presenter展示动作。
-- `chat.js`：负责请求编排、Session/附件/Context状态、DOM Presenter和副作用，不再维护第二套事件投影。
-- `trajectory.js`：独立消费Event API，不参与普通聊天消息投影。
+- `conversation-presenter.js`：共用正文、思考和工具DOM呈现，通过宿主和能力注入支持工作台与诊断；导入不触发业务请求。
+- `session-inspector.js`：共用概览/当前/上下文与已有渠道信息，只读取注入的会话数据；不取管理员当前测试身份替代历史。
+- `chat.js`：保留工作台请求编排、SSE、Session/附件/Context状态和执行副作用，使用共享Presenter，不维护第二套事件投影。
+- `diagnostic-detail.js`：独立只读宿主，复用以上呈现与轨迹，不复制整页工作台或挂载可写工具widget。
+- 诊断页面视觉以 `docs/design/23-diagnostics-and-logs/interactive-prototype` 的 L4/S1/S2 为基线；
+  表格保留外框、表头与行分隔，图表保留坐标与参考线，不把减少装饰理解成全面去边框。
+  用户信息只显示用户名，资料缺失回退真实 ID，不再显示头像或邮箱。详情严格复用对话测试模板与信息栏，
+  不新增用户卡、轮次日志栏或跳日志按钮。日志右上筛选首行时间/来源/等级/Session ID，次行关键词/查询/重置，不提供Run筛选；
+  详情优先会话和执行结果，服务及其他字段紧凑左右平铺，不折叠，仅 Session ID 保留复制。
+- `trajectory.js`：独立消费Event API，不参与普通聊天消息投影。诊断复用导出按钮，仅完整读取后允许导出脱敏history轨迹。
+- `session-view-shell.js` 从原始工作台模板取只读骨架；标题、按钮、正文间距在 `console.css` 共享选择器维护，禁止在诊断另复制一套外观。定位消息保留准确滚动，使用小标签而非整块描边。
 
 ---
 

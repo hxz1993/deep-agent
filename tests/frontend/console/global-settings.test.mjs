@@ -86,7 +86,7 @@ test("Agent 是配置中心默认页，系统分组包含全局配置和模型�
   assert.doesNotMatch(templateHtml, /当前页面只读|只读标签/);
   assert.doesNotMatch(templateHtml, /agentMaxRequests|max_requests|最大请求次数（可选）/);
   assert.doesNotMatch(indexHtml, /data-tab="auxiliary-models"|辅助模型|辅助工具/);
-  assert.match(indexHtml, /class="resource-group-label separated">系统<\/div>[\s\S]*data-tab="global-settings"/);
+  assert.match(indexHtml, /class="console-nav-footer">\s*<div class="resource-group-label">系统<\/div>[\s\S]*data-tab="global-settings"/);
   assert.ok(
     indexHtml.indexOf('data-tab="global-settings"') <
       indexHtml.indexOf('data-tab="catalog"'),

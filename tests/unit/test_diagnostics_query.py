@@ -238,6 +238,25 @@ class DiagnosticsQueryTests(unittest.TestCase):
             self.assertEqual(client.get("/api/v1/diagnostics/logs").status_code, 403)
             self.assertEqual(client.get("/api/v1/diagnostics/logs/status").status_code, 403)
 
+    def test_log_reads_and_errors_must_not_be_cached(self):
+        app = FastAPI()
+        app.include_router(router, prefix="/api/v1")
+        app.dependency_overrides[require_console_admin] = lambda: None
+        with TestClient(app) as client, patch("deep_agent.api.v1.diagnostics._runtime", return_value=(self.config, None)):
+            for path, params in (("/status", {}), ("", self.filters),
+                                 ("", {"start": "invalid"}), ("", {"limit": 501}),
+                                 ("", {"cursor": "tampered"})):
+                response = client.get("/api/v1/diagnostics/logs" + path, params=params)
+                self.assertEqual(response.headers.get("cache-control"), "no-store")
+            app.dependency_overrides.pop(require_console_admin)
+            response = client.get("/api/v1/diagnostics/logs/status")
+            self.assertEqual(response.status_code, 401)
+            self.assertEqual(response.headers.get("cache-control"), "no-store")
+            app.dependency_overrides[resolve_console_admin_access] = lambda: ConsoleAdminAccess(allowed=False, roles=())
+            response = client.get("/api/v1/diagnostics/logs/status")
+            self.assertEqual(response.status_code, 403)
+            self.assertEqual(response.headers.get("cache-control"), "no-store")
+
     def test_real_writer_files_are_read_without_event_store_or_db(self):
         from deep_agent.diagnostics.runtime import DiagnosticConfig, DiagnosticRuntime
         config = DiagnosticConfig(directory=self.directory, instance_id="a" * 16)

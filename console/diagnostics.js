@@ -1,214 +1,138 @@
-import { createDiagnosticsQuery } from "./diagnostics-query.js?v=20260909-1";
+import { createDiagnosticsQuery } from "./diagnostics-query.js?v=20260910-7";
+import { escapeHtml as escape, icon, shortId, icons, localInput, diagnosticRequest, bindDiagnosticResizer, bindDiagnosticSelects, selectHtml } from "./diagnostics-ui.js?v=20260909-2";
 
-const SOURCE_LABELS = { api: "API", gateway: "企微网关" };
-const FILTER_OPTIONS = {
+const SOURCES = { api: "API", gateway: "网关" };
+const OPTIONS = {
   period: [["24", "最近 24 小时"], ["1", "最近 1 小时"], ["6", "最近 6 小时"], ["168", "最近 7 天"], ["custom", "自定义时间"]],
-  source: [["", "全部来源"], ["api", "API"], ["gateway", "企微网关"]],
-  level: [["", "全部等级"], ["ERROR", "ERROR · 错误"], ["WARNING", "WARNING · 警告"], ["INFO", "INFO · 信息"], ["DEBUG", "DEBUG · 调试"]],
+  source: [["", "全部来源"], ["api", "API"], ["gateway", "网关"]],
+  level: [["", "全部等级"], ["CRITICAL", "CRITICAL · 严重"], ["ERROR", "ERROR · 错误"], ["WARNING", "WARNING · 警告"], ["INFO", "INFO · 信息"], ["DEBUG", "DEBUG · 调试"]],
 };
-const escape = (value) => String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#39;");
-
 export function diagnosticScalars(record) {
-  return Object.fromEntries(Object.entries(record || {}).filter(([, value]) => value === null || ["string", "number", "boolean"].includes(typeof value)));
+  return Object.fromEntries(Object.entries(record || {}).filter(([, value]) => value !== null && ["string", "number", "boolean"].includes(typeof value)));
 }
-
 export function diagnosticTime(timestamp) {
   const date = new Date(timestamp);
   if (!Number.isFinite(date.getTime())) return String(timestamp || "—");
-  return new Intl.DateTimeFormat("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).format(date);
+  const pad = value => String(value).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
 }
-
-export function diagnosticRowsHtml(items) {
+export function highlightedDiagnostic(text, query = "") {
+  const value = String(text || ""), term = query.trim();
+  if (!term) return escape(value);
+  const lower = value.toLowerCase(), needle = term.toLowerCase();
+  let start = 0, found, result = "";
+  while ((found = lower.indexOf(needle, start)) >= 0) {
+    result += escape(value.slice(start, found)) + `<mark>${escape(value.slice(found, found + term.length))}</mark>`;
+    start = found + term.length;
+  }
+  return result + escape(value.slice(start));
+}
+const recordKey = item => `${item.boot_id}:${item.record_id}`;
+const levelTone = value => ["ERROR", "CRITICAL"].includes(value) ? "error" : value === "WARNING" ? "warning" : value === "DEBUG" ? "debug" : "info";
+export function diagnosticRowsHtml(items, { selected = "", keyword = "" } = {}) {
   return items.map((item, index) => {
     const level = String(item.level || "INFO").toUpperCase();
-    const tone = ["ERROR", "WARNING", "INFO", "DEBUG"].includes(level) ? level.toLowerCase() : "info";
-    const fields = Object.entries(diagnosticScalars(item)).map(([key, value]) => `<div><dt>${escape(key)}</dt><dd><code>${escape(value ?? "—")}</code>${["session_id", "run_id"].includes(key) && value ? `<button type="button" class="diagnostics-inline-action" data-filter-id="${key}" title="按此 ${escape(key)} 查询"><i data-lucide="filter" aria-hidden="true"></i><span>筛选</span></button><button type="button" class="diagnostics-inline-action" data-copy-id="${key}" title="复制 ${escape(key)}"><i data-lucide="copy" aria-hidden="true"></i><span class="diagnostics-sr-only">复制</span></button>` : ""}</dd></div>`).join("");
-    return `<details class="diagnostics-record" data-record-index="${index}">
-      <summary class="diagnostics-row"><span class="diagnostics-chevron"><i data-lucide="chevron-right" aria-hidden="true"></i></span><time title="${escape(item.timestamp)}">${escape(diagnosticTime(item.timestamp))}</time><span class="diagnostics-level ${tone}">${escape(level)}</span><span class="diagnostics-source">${escape(SOURCE_LABELS[item.source] || item.source || "—")}</span><span class="diagnostics-summary"><span>${escape(item.summary || item.event || "—")}</span><code>${escape(item.event || "")}</code></span>${Number.isFinite(item.duration_ms) ? `<span class="diagnostics-duration">${escape((item.duration_ms / 1000).toFixed(1))}s</span>` : ""}</summary>
-      <div class="diagnostics-detail"><div class="diagnostics-detail-heading"><strong>结构化记录</strong><button type="button" class="diagnostics-inline-action" data-copy-record><i data-lucide="copy" aria-hidden="true"></i><span>复制记录</span></button></div><dl>${fields}</dl></div>
-    </details>`;
+    return `<div class="diagnostics-row${recordKey(item) === selected ? " selected" : ""}" role="button" tabindex="0" aria-label="${escape(item.summary || item.event)}" aria-pressed="${recordKey(item) === selected}" data-record-index="${index}"><time title="${escape(item.timestamp)}">${escape(diagnosticTime(item.timestamp))}</time><span class="diagnostics-level ${levelTone(level)}">${escape(level)}</span><span class="diagnostics-source">${escape(SOURCES[item.source] || item.source || "—")}</span><span class="diagnostics-summary" title="${escape(item.summary || item.event)}">${highlightedDiagnostic(item.summary || item.event || "—", keyword)}</span><span class="diagnostics-session">${item.session_id ? `<button type="button" data-open-session="${escape(item.session_id)}" title="打开会话 ${escape(item.session_id)}">${escape(shortId(item.session_id))}</button>` : ""}</span></div>`;
   }).join("");
 }
-
+const LABELS = { event: "事件", phase: "阶段", tool: "工具", model_name: "模型", model_id: "模型 ID", provider_name: "Provider", duration_ms: "耗时", attempt: "尝试次数", request_index: "请求序号", error_type: "错误分类", error_code: "错误代码", reason: "原因", status: "状态", agent_id: "Agent ID", session_id: "Session ID", run_id: "Run ID", tool_call_id: "Tool Call ID", conversation_id: "Conversation ID", channel_run_id: "渠道处理 ID", account_id: "渠道账号 ID", instance_id: "实例", process_id: "进程", boot_id: "启动标识", source: "来源", finish_reason: "结束原因", queue_depth: "队列长度", input_tokens: "输入 Token", output_tokens: "输出 Token", total_tokens: "总 Token", tool_calls: "工具调用数" };
+export function diagnosticDetailHtml(record) {
+  if (!record) return "";
+  const fields = diagnosticScalars(record), used = new Set(["timestamp", "summary", "level", "schema_version", "record_id"]);
+  const field = key => {
+    if (!(key in fields) || fields[key] === "" || used.has(key)) return "";
+    used.add(key);
+    const value = key === "duration_ms" ? (typeof fields[key] === "number" && fields[key] >= 1000 ? `${(fields[key] / 1000).toFixed(1)} s` : `${fields[key]} ms`) : key === "source" ? SOURCES[fields[key]] || fields[key] : fields[key];
+    const copy = key === "session_id" ? `<button type="button" class="diagnostics-inline-action" data-copy-id="${escape(key)}" aria-label="复制 ${escape(LABELS[key] || key)}">${icon("copy")}</button>` : "";
+    const jump = key === "session_id" ? `<button type="button" class="diagnostics-inline-action" data-open-session="${escape(value)}" aria-label="打开关联会话">${icon("external-link")}</button>` : "";
+    return `<div class="diagnostics-property" data-field="${escape(key)}"><dt>${escape(LABELS[key] || key)}</dt><dd><code>${escape(value)}</code>${copy || jump ? `<span class="diagnostics-property-actions">${copy}${jump}</span>` : ""}</dd></div>`;
+  };
+  const group = (label, keys) => { const body = keys.map(field).join(""); return body ? `<section class="diagnostics-field-group">${label ? `<h3>${label}</h3>` : ""}<dl>${body}</dl></section>` : ""; };
+  const relations = group("会话", ["session_id", "run_id"]);
+  const execution = group("执行结果", ["tool", "model_name", "provider_name", "duration_ms", "attempt", "status", "phase", "finish_reason", "reason", "error_type", "error_code"]);
+  const service = group("服务信息", ["source", "event", "model_id", "request_index", "tool_call_id", "conversation_id", "channel_run_id", "account_id", "agent_id", "instance_id", "process_id", "boot_id"]);
+  const extra = group("其他信息", Object.keys(fields).filter(key => !used.has(key)));
+  const level = String(record.level || "INFO").toUpperCase();
+  return `<header class="diagnostics-drawer-head"><h2>日志详情</h2><button type="button" class="diagnostics-inline-action" data-close-detail aria-label="关闭日志详情">${icon("x")}</button></header><div class="diagnostics-drawer-body"><div class="diagnostics-facts"><span class="diagnostics-level ${levelTone(level)}">${escape(level)}</span><time title="${escape(record.timestamp)}">${escape(diagnosticTime(record.timestamp))}</time></div><h3 class="diagnostics-full-summary">${escape(record.summary || record.event)}</h3>${relations}${execution}${service}${extra}</div>`;
+}
 export function diagnosticFilters(values, now = new Date()) {
-  let start;
-  let end;
+  let start, end;
   if (values.period === "custom") {
     if (!values.start || !values.end) throw new Error("请选择开始和结束时间。");
-    start = new Date(values.start);
-    end = new Date(values.end);
-  } else {
-    end = new Date(now);
-    start = new Date(end.getTime() - Number(values.period || 24) * 3600000);
-  }
+    start = new Date(values.start); end = new Date(values.end);
+  } else { end = new Date(now); start = new Date(end.getTime() - Number(values.period || 24) * 3600000); }
   if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime()) || start >= end) throw new Error("开始时间必须早于结束时间。");
-  return { start: start.toISOString(), end: end.toISOString(), source: values.source || "", level: values.level || "", session_id: values.session_id || "", run_id: values.run_id || "", q: values.q || "" };
+  return { start: start.toISOString(), end: end.toISOString(), source: values.source || "", level: values.level || "", session_id: values.session_id || "", q: values.q || "" };
 }
 
-let diagnostics = null;
-export function setDiagnosticsActive(active) {
-  if (!diagnostics || diagnostics.state.active === active) return;
-  diagnostics.setActive(active);
-  if (active) diagnostics.search();
-  else diagnostics.closeMenus();
-}
-
-export function initDiagnostics() {
-  const page = document.getElementById("page-diagnostics");
-  if (!page || diagnostics) return;
-  const byId = (id) => page.querySelector(`#${id}`);
-  const form = byId("diagnosticsFilters");
-  const list = byId("diagnosticsRecords");
-  const notice = byId("diagnosticsNotice");
-  const empty = byId("diagnosticsEmpty");
-  const more = byId("diagnosticsMore");
-  const meta = byId("diagnosticsMeta");
+export function initDiagnosticLogs({ page, onQuery = () => {}, onOpenSession = () => {}, onBack = () => {} }) {
+  const byId = id => page.querySelector(`#${id}`);
+  const form = byId("diagnosticsFilters"), list = byId("diagnosticsRecords"), notice = byId("diagnosticsNotice"), empty = byId("diagnosticsEmpty"), more = byId("diagnosticsMore"), meta = byId("diagnosticsMeta"), drawer = byId("diagnosticsDrawer"), split = byId("diagnosticsSplit");
   const values = { period: "24", source: "", level: "" };
-  let renderedItems = null;
-
-  async function request(path, signal) {
-    const transport = new AbortController();
-    const abort = () => transport.abort();
-    signal.addEventListener("abort", abort, { once: true });
-    if (signal.aborted) abort();
-    const timeout = window.setTimeout(abort, 15000);
-    try {
-      const response = await window.daFetch(window.serviceUrl(path), { signal: transport.signal, includeContext: false, reportStatus: false, cache: "no-store" });
-      if (!response.ok) throw Object.assign(new Error(`HTTP ${response.status}`), { status: response.status });
-      return await response.json();
-    } finally {
-      window.clearTimeout(timeout);
-      signal.removeEventListener("abort", abort);
-    }
-  }
-
+  let rendered = "", selected = "", fixedRange = null;
+  const query = createDiagnosticsQuery({ request: diagnosticRequest, onChange: render });
   function render(state) {
     byId("diagnosticsQuery").disabled = state.busy;
-    byId("diagnosticsRefresh").disabled = state.busy;
     page.setAttribute("aria-busy", String(state.busy));
-    const instance = state.instanceId ? `当前实例 ${state.instanceId}` : "当前部署实例";
-    byId("diagnosticsInstance").textContent = `${instance} · API / 企微网关`;
-    const fingerprint = state.items.map((item) => `${item.boot_id}:${item.record_id}`).join("|");
-    if (renderedItems !== fingerprint) {
-      renderedItems = fingerprint;
-      const opened = new Set([...list.querySelectorAll("details[open]")].map((row) => row.dataset.recordIndex));
-      list.innerHTML = diagnosticRowsHtml(state.items);
-      for (const row of list.querySelectorAll("details")) row.open = opened.has(row.dataset.recordIndex);
-      window.lucide?.createIcons();
-    }
-    notice.classList.toggle("hidden", !state.notice);
-    notice.dataset.kind = state.notice?.kind || "info";
+    byId("diagnosticsInstance").textContent = "查看会话执行过程，排查运行问题。";
+    if (!state.items.some(item => recordKey(item) === selected)) selected = "";
+    const fingerprint = `${state.items.map(recordKey).join("|")}:${selected}:${state.filters.q || ""}`;
+    if (rendered !== fingerprint) { rendered = fingerprint; list.innerHTML = diagnosticRowsHtml(state.items, { selected, keyword: state.filters.q || "" }); renderDetail(); }
+    notice.classList.toggle("hidden", !state.notice); notice.dataset.kind = state.notice?.kind || "info";
     notice.textContent = state.notice ? `${state.notice.title}：${state.notice.message}` : "";
-    if (state.status?.issues?.length) {
-      const issues = state.status.issues.map((issue) => `${SOURCE_LABELS[issue.source] || issue.source || "日志"}: ${issue.code}${Number.isFinite(issue.dropped_records) ? ` (${issue.dropped_records})` : ""}`).join("；");
-      notice.textContent += ` ${issues}`;
-    }
+    if (state.status?.issues?.length) notice.textContent += ` ${state.status.issues.map(issue => `${SOURCES[issue.source] || "日志"}: ${issue.code}${Number.isFinite(issue.dropped_records) ? ` (${issue.dropped_records})` : ""}`).join("；")}`;
     empty.classList.toggle("hidden", Boolean(state.items.length));
-    empty.textContent = state.busy ? "正在查询日志…" : state.notice ? state.notice.title : "没有匹配的日志，可调整时间范围或筛选条件。";
-    meta.textContent = state.busy ? "正在查询…" : `已展示 ${state.items.length} 条${state.range ? ` · ${diagnosticTime(state.range.start)} — ${diagnosticTime(state.range.end)}` : ""}`;
-    const partial = byId("diagnosticsPartial");
-    partial.classList.toggle("hidden", !state.partial && !state.capped);
-    partial.textContent = state.capped ? "已达到页面 5,000 条展示上限，请缩小查询范围。" : state.nextCursor ? "本次仅扫描了部分范围，可继续查询或缩小筛选范围。" : "本次仅扫描了部分范围，请缩小来源或查询范围，并检查日志状态。";
-    more.classList.toggle("hidden", !state.nextCursor);
-    more.disabled = state.busy;
-    more.textContent = state.busy ? "查询中…" : state.partial ? "继续查询" : "加载更多";
+    empty.textContent = state.busy ? "正在查询日志…" : state.notice ? state.notice.title : state.partial ? "当前扫描范围未匹配，可继续查询。" : "没有匹配的日志，可调整条件；会话历史可能早于日志保留范围。";
+    meta.textContent = state.busy ? "正在查询…" : `已加载 ${state.items.length} 条`;
+    byId("diagnosticsQueryRange").textContent = state.filters.start ? `查询时间：${diagnosticTime(state.filters.start)} ～ ${diagnosticTime(state.filters.end)}` : "";
+    const partial = byId("diagnosticsPartial"); partial.classList.toggle("hidden", !state.partial && !state.capped);
+    partial.textContent = state.capped ? "已达到页面 5,000 条展示上限，请缩小查询范围。" : state.nextCursor ? "本次仅扫描部分范围，可继续查询。" : "本次仅扫描部分范围，请缩小条件并检查日志状态。";
+    const retention = Number(state.status?.retention_days);
+    byId("diagnosticsRange").textContent = `已显示 ${state.items.length} 条`;
+    byId("diagnosticsRange").title = Number.isFinite(retention) && retention > 0 ? `日志保留策略：最近 ${retention} 天；更早的会话可能没有对应日志。` : "";
+    more.classList.toggle("hidden", !state.nextCursor); more.disabled = state.busy;
+    more.innerHTML = `${state.busy ? "查询中…" : state.partial ? "继续查询" : "加载更多"}${icon("arrow-down")}`;
+    icons();
   }
-
-  const query = createDiagnosticsQuery({ request, onChange: render });
-  const search = () => {
+  function renderDetail() { const item = query.state.items.find(record => recordKey(record) === selected); drawer.innerHTML = diagnosticDetailHtml(item); split.classList.toggle("drawer-open", Boolean(item)); icons(); }
+  const inputs = () => ({ ...values, start: byId("diagnosticsStart").value, end: byId("diagnosticsEnd").value, session_id: byId("diagnosticsSession").value.trim(), q: byId("diagnosticsKeyword").value.trim() });
+  function search({ refresh = false } = {}) {
     try {
-      const filters = diagnosticFilters({ ...values, start: byId("diagnosticsStart").value, end: byId("diagnosticsEnd").value, session_id: byId("diagnosticsSession").value, run_id: byId("diagnosticsRun").value, q: byId("diagnosticsKeyword").value });
-      closeMenus();
+      const filters = fixedRange && (!refresh || values.period === "custom") ? diagnosticFilters({ ...inputs(), period: "custom", ...fixedRange }) : diagnosticFilters(inputs());
+      fixedRange = { start: filters.start, end: filters.end }; menus.close(); onQuery({ ...filters, period: values.period });
       return query.query(filters);
-    } catch (error) {
-      query.changeFilters();
-      notice.classList.remove("hidden");
-      notice.dataset.kind = "error";
-      notice.textContent = error.message;
-    }
-  };
-  function closeMenus() {
-    for (const menu of page.querySelectorAll(".console-select-menu")) menu.classList.add("hidden");
-    for (const trigger of page.querySelectorAll(".console-select-trigger")) trigger.setAttribute("aria-expanded", "false");
+    } catch (error) { query.changeFilters(); notice.classList.remove("hidden"); notice.dataset.kind = "error"; notice.textContent = error.message; }
   }
-  function updateSelect(name) {
-    const host = page.querySelector(`[data-diagnostic-select="${name}"]`);
-    const options = FILTER_OPTIONS[name];
-    const selected = options.find(([value]) => value === values[name]);
-    host.querySelector(".console-select-trigger span").textContent = selected[1];
-    host.querySelector(".console-select-menu").innerHTML = options.map(([value, label]) => `<button class="console-select-option${value === values[name] ? " selected" : ""}" type="button" role="option" aria-selected="${value === values[name]}" data-value="${escape(value)}"><span>${escape(label)}</span></button>`).join("");
-  }
-  for (const host of page.querySelectorAll("[data-diagnostic-select]")) {
-    const name = host.dataset.diagnosticSelect;
-    const trigger = host.querySelector(".console-select-trigger");
-    const menu = host.querySelector(".console-select-menu");
-    const open = () => {
-      closeMenus();
-      menu.classList.remove("open-up");
-      menu.classList.remove("hidden");
-      trigger.setAttribute("aria-expanded", "true");
-      const bounds = trigger.getBoundingClientRect();
-      if (menu.getBoundingClientRect().height > window.innerHeight - bounds.bottom - 8 && bounds.top > window.innerHeight - bounds.bottom) menu.classList.add("open-up");
-      menu.querySelector('[aria-selected="true"]')?.focus();
-    };
-    trigger.addEventListener("click", () => menu.classList.contains("hidden") ? open() : closeMenus());
-    trigger.addEventListener("keydown", (event) => { if (["ArrowDown", "ArrowUp"].includes(event.key)) { event.preventDefault(); open(); } });
-    menu.addEventListener("keydown", (event) => {
-      const options = [...menu.querySelectorAll("[role=option]")];
-      let index = options.indexOf(document.activeElement);
-      if (event.key === "ArrowDown") index = (index + 1) % options.length;
-      else if (event.key === "ArrowUp") index = (index - 1 + options.length) % options.length;
-      else if (event.key === "Home") index = 0;
-      else if (event.key === "End") index = options.length - 1;
-      else if (event.key === "Escape") { closeMenus(); trigger.focus(); }
-      else if (event.key === "Tab") closeMenus();
-      else return;
-      if (event.key !== "Tab") event.preventDefault();
-      if (!["Escape", "Tab"].includes(event.key)) options[index]?.focus();
-    });
-    menu.addEventListener("click", (event) => {
-      const option = event.target.closest("[data-value]");
-      if (!option) return;
-      values[name] = option.dataset.value;
-      updateSelect(name);
-      byId("diagnosticsCustomTime").classList.toggle("hidden", values.period !== "custom");
-      closeMenus();
-      trigger.focus();
-      query.changeFilters();
-    });
-    updateSelect(name);
-  }
-  document.addEventListener("click", (event) => { if (!event.target.closest("#page-diagnostics .console-select")) closeMenus(); });
-  document.addEventListener("keydown", (event) => { if (event.key === "Escape") closeMenus(); });
-  window.addEventListener("resize", closeMenus);
-  window.addEventListener("pagehide", () => { query.setActive(false); closeMenus(); });
-  form.addEventListener("input", () => query.changeFilters());
-  form.addEventListener("submit", (event) => { event.preventDefault(); void search(); });
-  byId("diagnosticsRefresh").addEventListener("click", () => void search());
-  byId("diagnosticsReset").addEventListener("click", () => {
-    form.reset();
-    Object.assign(values, { period: "24", source: "", level: "" });
-    Object.keys(FILTER_OPTIONS).forEach(updateSelect);
-    byId("diagnosticsCustomTime").classList.add("hidden");
-    void search();
-  });
+  function updateSelect(name) { const host = page.querySelector(`[data-diagnostic-select="${name}"]`); host.innerHTML = selectHtml(name, { period: "时间范围", source: "来源", level: "等级" }[name], values[name], OPTIONS[name]); host.querySelector(".console-select-trigger").insertAdjacentHTML("afterbegin", icon({ period: "clock-3", source: "database", level: "triangle-alert" }[name])); }
+  const menus = bindDiagnosticSelects(page, (name, value) => { values[name] = value; if (name === "period") fixedRange = null; updateSelect(name); byId("diagnosticsCustomTime").classList.toggle("hidden", values.period !== "custom"); if (name === "period" && value === "custom") byId("diagnosticsStart").focus(); query.changeFilters(); icons(); });
+  Object.keys(OPTIONS).forEach(updateSelect);
+  window.addEventListener("pagehide", () => { query.setActive(false); menus.close(); });
+  form.addEventListener("input", event => { if (["diagnosticsStart", "diagnosticsEnd"].includes(event.target.id)) fixedRange = null; query.changeFilters(); });
+  form.addEventListener("submit", event => { event.preventDefault(); void search({ refresh: true }); });
+  byId("diagnosticsBack").addEventListener("click", onBack);
+  byId("diagnosticsReset").addEventListener("click", () => { form.reset(); Object.assign(values, { period: "24", source: "", level: "" }); fixedRange = null; Object.keys(OPTIONS).forEach(updateSelect); byId("diagnosticsCustomTime").classList.add("hidden"); void search(); });
   more.addEventListener("click", () => void query.query(undefined, { more: true }));
-  list.addEventListener("click", async (event) => {
-    const button = event.target.closest("button");
-    const row = button?.closest("[data-record-index]");
-    const item = query.state.items[Number(row?.dataset.recordIndex)];
-    if (!button || !item) return;
-    const key = button.dataset.filterId || button.dataset.copyId;
-    if (button.dataset.filterId && ["session_id", "run_id"].includes(key)) {
-      byId(key === "session_id" ? "diagnosticsSession" : "diagnosticsRun").value = item[key];
-      void search();
-    } else if (button.hasAttribute("data-copy-record") || ["session_id", "run_id"].includes(key)) {
-      try {
-        await navigator.clipboard.writeText(button.hasAttribute("data-copy-record") ? JSON.stringify(diagnosticScalars(item), null, 2) : String(item[key]));
-        byId("diagnosticsCopyStatus").textContent = "已复制";
-      } catch { byId("diagnosticsCopyStatus").textContent = "复制失败，请选中记录手动复制。"; }
-    }
+  page.addEventListener("click", async event => {
+    const button = event.target.closest("button"), row = event.target.closest("[data-record-index]");
+    const item = row ? query.state.items[Number(row.dataset.recordIndex)] : query.state.items.find(record => recordKey(record) === selected);
+    if (button?.hasAttribute("data-close-detail")) { selected = ""; render(query.state); return; }
+    if (!item) return;
+    if (button?.hasAttribute("data-open-session")) { event.stopPropagation(); onOpenSession(item.session_id); return; }
+    if (button?.dataset.copyId === "session_id") { try { await navigator.clipboard.writeText(String(item.session_id)); byId("diagnosticsCopyStatus").textContent = "已复制"; } catch { byId("diagnosticsCopyStatus").textContent = "复制失败，请手动选择。"; } return; }
+    if (row) { selected = recordKey(item); render(query.state); }
   });
-  diagnostics = { ...query, search, closeMenus };
-  render(query.state);
+  list.addEventListener("keydown", event => { if ((event.key === "Enter" || event.key === " ") && event.target.matches("[data-record-index]")) { event.preventDefault(); event.target.click(); } });
+  bindDiagnosticResizer(byId("diagnosticsResizer"), split, "--diagnostic-drawer-width", 436);
+  function activate(filters = {}, snapshot = null, hasBack = false) {
+    query.setActive(true);
+    Object.assign(values, { period: filters.period || (filters.start ? "custom" : "24"), source: filters.source || "", level: filters.level || "" }, snapshot?.values || {});
+    const source = snapshot?.inputs || filters;
+    byId("diagnosticsSession").value = source.session_id || ""; byId("diagnosticsKeyword").value = source.q || "";
+    byId("diagnosticsStart").value = localInput(source.start); byId("diagnosticsEnd").value = localInput(source.end);
+    Object.keys(OPTIONS).forEach(updateSelect); byId("diagnosticsCustomTime").classList.toggle("hidden", values.period !== "custom"); byId("diagnosticsBack").classList.toggle("hidden", !hasBack);
+    fixedRange = source.start && source.end ? { start: source.start, end: source.end } : null; selected = snapshot?.selected || "";
+    if (snapshot?.query) { query.restore(snapshot.query); page.querySelector(".diagnostics-log-view").scrollTop = snapshot.scroll || 0; }
+    else void search();
+  }
+  return { activate, deactivate: () => { query.setActive(false); menus.close(); }, snapshot: () => ({ values: { ...values }, inputs: { ...inputs(), ...fixedRange }, selected, query: { ...query.state, items: [...query.state.items] }, scroll: page.querySelector(".diagnostics-log-view").scrollTop }), clear: () => { selected = ""; query.changeFilters(); query.setActive(false); } };
 }

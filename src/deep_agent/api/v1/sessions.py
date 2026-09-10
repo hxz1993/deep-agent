@@ -520,6 +520,7 @@ async def _build_context_data(
     history: list[ModelMessage],
     *,
     model_id: str | None,
+    offload: bool = False,
 ) -> dict[str, Any]:
     model = await _context_model(ctx, agent_id, model_id)
     context_window_tokens = model.context_window_tokens if model is not None else None
@@ -543,14 +544,14 @@ async def _build_context_data(
         )
     else:
         estimator = TokenEstimator.for_model("")
-    budget = build_context_budget(
-        history,
-        context_window_tokens=context_window_tokens,
-        max_output_tokens=max_output_tokens,
-        estimator=estimator,
-        output_history=history,
-        estimate_scope="history_only",
-    )
+    budget_kwargs = dict(context_window_tokens=context_window_tokens,
+        max_output_tokens=max_output_tokens, estimator=estimator,
+        output_history=history, estimate_scope="history_only")
+    if offload:
+        from starlette.concurrency import run_in_threadpool
+        budget = await run_in_threadpool(build_context_budget, history, **budget_kwargs)
+    else:
+        budget = build_context_budget(history, **budget_kwargs)
     latest_loader = getattr(ctx.store, "latest_completed_compaction", None)
     compaction = await latest_loader(session_id) if callable(latest_loader) else None
     raw_reader = getattr(ctx.store, "get_raw_history", None)
@@ -608,6 +609,11 @@ async def get_session_context_status(
         history,
         model_id=model_id,
     )
+    return context_status_from_data(resolved_session_id, context_data)
+
+
+def context_status_from_data(resolved_session_id: str, context_data: dict[str, Any]) -> SessionContextStatus:
+    """Shared presentation of the existing context estimator's result."""
     budget = context_data["budget"]
     compaction = context_data["compaction"]
     compaction_source = compaction.payload.get("source", {}) if compaction else {}

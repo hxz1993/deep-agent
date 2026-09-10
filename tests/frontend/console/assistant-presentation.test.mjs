@@ -1,3 +1,4 @@
+import { readPresentationSource } from "./shared-presentation-source.mjs";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
@@ -37,10 +38,7 @@ function recordingPresenter() {
   return { presenter, calls };
 }
 
-const chatSource = await readFile(
-  new URL("../../../console/chat.js", import.meta.url),
-  "utf8",
-);
+const chatSource = await readPresentationSource("chat.js");
 const workspaceCss = await readFile(
   new URL("../../../console/workspace.css", import.meta.url),
   "utf8",
@@ -71,7 +69,7 @@ test("实时处理过程展开计时并在最终结果后折叠", () => {
   assert.equal(formatProcessElapsed(72), "1分12秒");
   assert.equal(processDisclosureLabel({ running: true, elapsedSeconds: 72 }), "处理中 · 1分12秒");
   assert.equal(processDisclosureLabel({ elapsedSeconds: 72 }), "已处理 · 用时 1分12秒");
-  assert.match(chatSource, /let isLive = !timestamp/);
+  assert.match(chatSource, /let isLive = !readOnly && !timestamp/);
   assert.match(chatSource, /processElapsedSecondsBetween\([\s\S]*processTiming\.startedAt[\s\S]*processTiming\.completedAt/);
   assert.match(chatSource, /processDisclosureLabel\(\{[\s\S]*elapsedSeconds: processElapsedSeconds/);
   assert.match(chatSource, /window\.setInterval\(updateProcessTimer, 1000\)/);

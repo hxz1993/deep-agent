@@ -4,7 +4,7 @@ import {
   rememberConfigurationTab,
 } from "./configuration.js?v=20260909-8";
 import { bindContextControls, refreshIdentity } from "./context.js?v=20260904-14";
-import { initDiagnostics, setDiagnosticsActive } from "./diagnostics.js?v=20260909-1";
+import { initDiagnostics, setDiagnosticsActive, openDiagnostics } from "./diagnostics-center.js?v=20260910-7";
 import { initWorkspace } from "./workspace.js?v=20260909-2";
 import "./time.js?v=20260831-1";
 
@@ -45,7 +45,7 @@ function toast(message, isError = false) {
 }
 
 function pageFromLocation() {
-  const page = location.hash.replace(/^#\/?/, "");
+  const page = location.hash.replace(/^#\/?/, "").split(/[/?]/)[0];
   return VALID_PAGES.has(page) ? page : "workspace";
 }
 
@@ -53,7 +53,8 @@ function syncNavigation() {
   const page = document.querySelector("[data-page-panel].active")?.dataset.pagePanel || "workspace";
   document.body.dataset.consolePage = page;
   document.querySelectorAll(".console-rail [data-page], .console-rail [data-tab]").forEach((button) => {
-    const selected = button.dataset.page ? button.dataset.page === page : page === "configuration" && button.classList.contains("active");
+    const selected = button.dataset.diagnosticsNav ? page === "diagnostics" && location.hash.startsWith(`#/diagnostics/${button.dataset.diagnosticsNav}`) : button.dataset.page ? button.dataset.page === page : page === "configuration" && button.classList.contains("active");
+    if (button.dataset.diagnosticsNav) button.classList.toggle("active", selected);
     if (selected) button.setAttribute("aria-current", "page");
     else button.removeAttribute("aria-current");
   });
@@ -63,7 +64,7 @@ function syncNavigation() {
     : PAGE_LABELS[page];
 }
 
-async function showPage(page, { updateHash = true, restoreTab = true } = {}) {
+async function showPage(page, { updateHash = true, restoreTab = true, diagnosticTarget = null } = {}) {
   const next = VALID_PAGES.has(page) ? page : "workspace";
   const current = document.querySelector("[data-page-panel].active")?.dataset.pagePanel;
   if (current === "configuration" && next !== "configuration" && window.agentsAdmin?.isEditorOpen?.()) {
@@ -77,11 +78,17 @@ async function showPage(page, { updateHash = true, restoreTab = true } = {}) {
   });
   if (next !== "configuration") window.llmProvidersAdmin?.cancelModelTests();
   document.querySelectorAll("[data-page]").forEach((button) => {
-    button.classList.toggle("active", button.dataset.page === next);
+    if (!button.dataset.diagnosticsNav) button.classList.toggle("active", button.dataset.page === next);
   });
   syncNavigation();
+  if (updateHash) {
+    const target = next === "diagnostics" ? diagnosticTarget || (location.hash.startsWith("#/diagnostics/") ? location.hash : "#/diagnostics/logs") : `#/${next}`;
+    if (location.hash !== target) {
+      if (next === "diagnostics" || current === "diagnostics") history.pushState(null, "", target);
+      else history.replaceState(null, "", target);
+    }
+  }
   setDiagnosticsActive(consoleAllowed && next === "diagnostics");
-  if (updateHash && location.hash !== `#/${next}`) history.replaceState(null, "", `#/${next}`);
   if (consoleAllowed && next === "configuration") {
     await initConfiguration().catch((error) => toast(error.message, true));
     if (restoreTab) restoreConfigurationTab();
@@ -195,12 +202,13 @@ function bindNavigation() {
     syncNavigation();
   });
   document.querySelectorAll("[data-page]").forEach((button) => {
-    button.addEventListener("click", () => showPage(button.dataset.page));
+    button.addEventListener("click", () => button.dataset.diagnosticsNav ? openDiagnostics(button.dataset.diagnosticsNav) : showPage(button.dataset.page));
   });
   document.querySelectorAll("[data-page-link]").forEach((button) => {
     button.addEventListener("click", () => showPage(button.dataset.pageLink));
   });
   window.addEventListener("hashchange", () => showPage(pageFromLocation(), { updateHash: false }));
+  window.addEventListener("popstate", () => showPage(pageFromLocation(), { updateHash: false }));
 }
 
 function bindThemes() {
@@ -300,6 +308,10 @@ async function boot() {
   bindContextControls();
   loadProductVersion();
   window.addEventListener("deep-agent-console-api-status", (event) => showApiBanner(event.detail?.status));
+  window.addEventListener("deep-agent-diagnostics-denied", event => {
+    consoleAllowed = false;
+    showAccessLock({ title: event.detail?.status === 401 ? "平台登录状态已失效" : "无诊断查询权限", message: "请重新验证平台管理员身份后再打开诊断中心。", icon: "shield-x" });
+  });
   window.lucide?.createIcons();
 
   try {

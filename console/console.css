@@ -113,7 +113,7 @@ textarea {
 .user-pill,
 .theme-switch button,
 .icon-action,
-.diagnostics-page button,
+:where(.diagnostics-page) button,
 .context-popover button,
 .auth-lock button {
   border: 0;
@@ -514,14 +514,13 @@ textarea {
   position: relative;
   z-index: 3;
   width: calc(100% + var(--console-inspector-width));
-  min-height: 54px;
-  padding: 0 16px;
-  background: var(--bg-soft);
 }
-#workspaceLegacyHost .chat-actions { display: flex; align-items: center; gap: 9px; }
+:is(#workspaceLegacyHost, .diagnostic-session-detail) .chat-actions { display: flex; align-items: center; gap: 5px; }
+:is(#workspaceLegacyHost, .diagnostic-session-detail) .chat-title { overflow: hidden; }
+:is(#workspaceLegacyHost, .diagnostic-session-detail) .chat-title > span:first-child { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #workspaceLegacyHost .workspace-context-action { padding: 0 10px; }
 #workspaceLegacyHost #toggleSidebar { display: none; }
-#workspaceLegacyHost .messages { padding: 18px 0; }
+:is(#workspaceLegacyHost, .diagnostic-session-detail) .messages { padding: 18px 0; }
 #workspaceLegacyHost .message { max-width: min(820px, calc(100% - 38px)); }
 #workspaceLegacyHost .composer { padding: 10px 16px 12px; }
 #workspaceLegacyHost .composer-inner { max-width: none; }
@@ -951,10 +950,9 @@ dialog.console-detail-dialog#llmModelModal { width: min(840px, calc(100vw - 32px
 #workspaceLegacyHost .agent-switcher .icon-action svg { width: 15px; height: 15px; }
 #workspaceLegacyHost .agent-switcher .icon-action.loading svg { animation: console-spin .8s linear infinite; }
 #workspaceLegacyHost .agent-switcher .icon-action:disabled { cursor: wait; opacity: .48; }
-#workspaceLegacyHost .workspace-header-action.active { color: var(--accent); background: var(--accent-soft); }
+:is(#workspaceLegacyHost, .diagnostic-session-detail) .workspace-header-action.active { color: var(--accent); background: var(--accent-soft); }
 
-#workspaceLegacyHost .chat-actions { gap: 5px; }
-#workspaceLegacyHost .workspace-header-action {
+:is(#workspaceLegacyHost, .diagnostic-session-detail) .workspace-header-action {
   height: 30px;
   display: inline-flex;
   align-items: center;
@@ -968,9 +966,9 @@ dialog.console-detail-dialog#llmModelModal { width: min(840px, calc(100vw - 32px
   cursor: pointer;
   font: inherit;
 }
-#workspaceLegacyHost .workspace-header-action:hover { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 22%, var(--border)); background: var(--accent-soft); }
-#workspaceLegacyHost .workspace-header-action svg { width: 14px; height: 14px; }
-#workspaceLegacyHost #toggleInspectorPaneBtn { width: 30px; padding: 0; }
+:is(#workspaceLegacyHost, .diagnostic-session-detail) .workspace-header-action:hover { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 22%, var(--border)); background: var(--accent-soft); }
+:is(#workspaceLegacyHost, .diagnostic-session-detail) .workspace-header-action svg { width: 14px; height: 14px; }
+:is(#workspaceLegacyHost, .diagnostic-session-detail) .workspace-header-action:not(:has(span)) { width: 30px; padding: 0; }
 
 .inspector-pane { padding-top: 48px; }
 .inspector-content { padding: 11px; }
@@ -1034,8 +1032,8 @@ dialog.console-detail-dialog#llmModelModal { width: min(840px, calc(100vw - 32px
 .budget-meter span { display: block; height: 100%; background: var(--accent); transition: width .2s; }
 
 @media (max-width: 620px) {
-  #workspaceLegacyHost .workspace-header-action span { display: none; }
-  #workspaceLegacyHost .workspace-header-action { width: 30px; padding: 0; }
+  :is(#workspaceLegacyHost, .diagnostic-session-detail) .workspace-header-action span { display: none; }
+  :is(#workspaceLegacyHost, .diagnostic-session-detail) .workspace-header-action { width: 30px; padding: 0; }
   #workspaceLegacyHost .composer-meta { grid-template-columns: minmax(0, 1fr); }
   #workspaceLegacyHost #composerUploadCapabilities { grid-column: auto; }
 }
@@ -1440,8 +1438,9 @@ body:not(.console-nav-collapsed):not(.console-theme-compact) .console-rail-setti
   box-shadow: var(--console-card-shadow);
 }
 #workspaceLegacyHost > .sidebar { border-right: 1px solid var(--console-card-border); }
-#workspaceLegacyHost .chat-header {
-  width: 100%;
+/* Shared session presentation: the readonly host inherits workspace UI updates.
+   Width/position remain host layout rules below, not duplicate visual styles. */
+:is(#workspaceLegacyHost, .diagnostic-session-detail) .chat-header {
   min-height: 56px;
   padding: 0 17px;
   border-bottom-color: var(--console-card-border);
@@ -3000,7 +2999,7 @@ html[data-theme="paper"] .run-usage-legend .remaining { color: #5e9e7f; }
 .console-main #workspaceLegacyHost > .chat,
 .console-main .inspector-pane,
 .console-main .workspace-grid.inspector-hidden #workspaceLegacyHost > .chat { border: 0 !important; border-radius: 0; box-shadow: none; }
-.console-main #workspaceLegacyHost .chat-header,
+.console-main :is(#workspaceLegacyHost, .diagnostic-session-detail) .chat-header,
 .console-main .workspace-grid.inspector-hidden #workspaceLegacyHost .chat-header { margin: 0; border: 0; border-bottom: 1px solid var(--console-card-border); border-radius: 0; }
 .console-main .diagnostics-page { margin: 0; background: var(--console-surface); }
 dialog.agent-editor-page.console-detail-dialog.modal-agent,

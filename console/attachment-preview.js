@@ -44,6 +44,8 @@ export function createImageGallery(attachment, attachments = [attachment]) {
 // same hover preview and existing image dialog. The floating preview is outside
 // scroll panes so a bubble near the viewport edge cannot clip it.
 export function bindAttachmentImagePreviews({ root = document, openImage }) {
+  const listeners = [];
+  const listen = (target, name, handler, options) => { target.addEventListener(name, handler, options); listeners.push(() => target.removeEventListener(name, handler, options)); };
   let active = null;
   let preview = null;
   const selector = "[data-attachment-image-url]";
@@ -74,21 +76,21 @@ export function bindAttachmentImagePreviews({ root = document, openImage }) {
     const top = rect.top >= box.height + 15 ? rect.top - box.height - 7 : rect.bottom + 7;
     preview.style.top = `${Math.max(8, Math.min(top, window.innerHeight - box.height - 8))}px`;
   };
-  root.addEventListener("mouseover", (event) => {
+  listen(root, "mouseover", (event) => {
     const button = event.target.closest?.(selector);
     if (button) show(button);
   });
-  root.addEventListener("mouseout", (event) => {
+  listen(root, "mouseout", (event) => {
     if (active && !active.contains(event.relatedTarget)) hide();
   });
-  root.addEventListener("focusin", (event) => {
+  listen(root, "focusin", (event) => {
     const button = event.target.closest?.(selector);
     if (button) show(button);
   });
-  root.addEventListener("focusout", hide);
-  root.addEventListener("scroll", hide, true);
-  window.addEventListener("resize", hide);
-  root.addEventListener("click", (event) => {
+  listen(root, "focusout", hide);
+  listen(root, "scroll", hide, true);
+  listen(window, "resize", hide);
+  listen(root, "click", (event) => {
     const button = event.target.closest?.(selector);
     if (!button) return;
     event.preventDefault();
@@ -98,4 +100,5 @@ export function bindAttachmentImagePreviews({ root = document, openImage }) {
     const items = buttons.map((item) => ({ previewUrl: item.dataset.attachmentImageUrl, name: item.dataset.attachmentImageName }));
     openImage(items[buttons.indexOf(button)], items);
   });
+  return () => { hide(); listeners.splice(0).forEach((remove) => remove()); };
 }

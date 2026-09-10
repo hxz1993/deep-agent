@@ -1,3 +1,4 @@
+import { readPresentationSource } from "./shared-presentation-source.mjs";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
@@ -8,18 +9,12 @@ const template = await readFile(
   new URL("../../../console/workspace-template.html", import.meta.url),
   "utf8",
 );
-const chatSource = await readFile(
-  new URL("../../../console/chat.js", import.meta.url),
-  "utf8",
-);
+const chatSource = await readPresentationSource("chat.js");
 const assistantPresentationSource = await readFile(
   new URL("../../../console/assistant-presentation.js", import.meta.url),
   "utf8",
 );
-const workspaceSource = await readFile(
-  new URL("../../../console/workspace.js", import.meta.url),
-  "utf8",
-);
+const workspaceSource = await readPresentationSource("workspace.js");
 const consoleCss = await readFile(
   new URL("../../../console/console.css", import.meta.url),
   "utf8",

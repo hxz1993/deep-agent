@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from threading import RLock
 
@@ -89,3 +89,8 @@ class ActiveRunRegistry:
     def active_count(self) -> int:
         with self._lock:
             return len(self._runs)
+
+    def snapshot(self) -> tuple[ActiveRun, ...]:
+        """Read existing registrations without changing execution ownership."""
+        with self._lock:
+            return tuple(replace(entry) for entry in self._runs.values())

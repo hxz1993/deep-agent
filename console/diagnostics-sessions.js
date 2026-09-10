@@ -123,7 +123,9 @@ export function initDiagnosticSessions({ root, navigate, replace, onBack }) {
     const firstPage = Math.max(1, Math.min(currentPage - 2, pageCount - 4)), pages = Array.from({ length: Math.min(5, pageCount) }, (_, index) => firstPage + index);
     return `<section class="diagnostic-list-workbench" aria-label="会话列表">
       <div class="diagnostic-list-toolbar"><form class="diagnostic-list-search" data-session-form="search"><label class="diagnostics-field"><button class="diagnostic-search-submit" type="submit" aria-label="查询会话">${icon("search")}</button><input type="search" name="query" value="${e(f.query || "")}" placeholder="搜索会话名称或 ID" aria-label="搜索会话名称或 ID" maxlength="200"/></label></form>
-        <div class="diagnostic-list-options">${selectHtml("latest_status", "全部状态", f.latest_status || "", [["", "全部状态"], ...Object.entries(SESSION_STATUSES).filter(([key]) => !["pending", "failed"].includes(key))])}<span>${data ? `${total.toLocaleString()} 个会话` : ""}</span>${selectHtml("limit", "每页条数", String(limit), [["20", "20 条 / 页"], ["50", "50 条 / 页"], ["100", "100 条 / 页"]])}</div>
+        <div class="diagnostic-list-options">${selectHtml("latest_status", "全部状态", f.latest_status || "", [["", "全部状态"], ...Object.entries(SESSION_STATUSES).filter(([key]) => !["pending", "failed"].includes(key))])}
+          <nav class="diagnostic-pagination" aria-label="会话分页">${selectHtml("limit", "每页条数", String(limit), [["20", "20 条 / 页"], ["50", "50 条 / 页"], ["100", "100 条 / 页"]])}<span class="diagnostic-page-range" title="共 ${total.toLocaleString()} 个会话">${total ? `${offset + 1}–${Math.min(offset + items.length, total)} / ${total}` : "0 / 0"}</span>${button(icon("arrow-left"), "previous", `aria-label="上一页" title="上一页" ${offset <= 0 || state.busy ? "disabled" : ""}`)}<div class="diagnostic-page-numbers">${pages.map(page => `<button type="button" data-session-page="${page}" class="${page === currentPage ? "active" : ""}" aria-label="第 ${page} 页" ${page === currentPage ? 'aria-current="page"' : ""} ${state.busy ? "disabled" : ""}>${page}</button>`).join("")}</div>${button(icon("arrow-right"), "next", `aria-label="下一页" title="下一页" ${offset + limit >= total || state.busy ? "disabled" : ""}`)}</nav>
+        </div>
       </div>
       <div class="diagnostic-session-table-scroll"><div class="diagnostic-session-table" role="table" aria-label="会话查询列表">
         <div class="diagnostic-session-row diagnostic-session-columns" role="row"><span role="columnheader">会话</span><span role="columnheader">Agent</span><span role="columnheader">用户</span><span role="columnheader">来源</span><span role="columnheader">状态</span><span role="columnheader">最近活动 ${icon("arrow-down")}</span><span role="columnheader" aria-label="操作"></span></div>
@@ -136,9 +138,9 @@ export function initDiagnosticSessions({ root, navigate, replace, onBack }) {
           <time role="cell">${e(diagnosticTime(item.last_activity_at || item.updated_at))}</time>
           <span role="cell"><button type="button" class="diagnostics-inline-action" data-open-session="${e(item.session_id)}" aria-label="进入会话详情">${icon("arrow-right")}</button></span>
         </div>`).join("")}
-      </div></div>
+      </div>
       ${!items.length && !state.busy ? empty("没有匹配会话，可重置时间、Agent 或用户条件后再查询。") : ""}
-      <footer class="diagnostic-pagination"><span>共 ${total.toLocaleString()} 个会话</span><span class="diagnostic-page-range">${total ? `${offset + 1}–${Math.min(offset + items.length, total)} / ${total}` : ""}</span>${button(`${icon("arrow-left")}上一页`, "previous", `aria-label="上一页" ${offset <= 0 || state.busy ? "disabled" : ""}`)}<div class="diagnostic-page-numbers">${pages.map(page => `<button type="button" data-session-page="${page}" class="${page === currentPage ? "active" : ""}" aria-label="第 ${page} 页" ${page === currentPage ? 'aria-current="page"' : ""} ${state.busy ? "disabled" : ""}>${page}</button>`).join("")}</div>${button(`下一页${icon("arrow-right")}`, "next", `aria-label="下一页" ${offset + limit >= total || state.busy ? "disabled" : ""}`)}</footer>
+      </div>
     </section>`;
   }
   function render() {

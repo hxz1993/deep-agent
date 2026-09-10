@@ -1,5 +1,5 @@
 import { initDiagnosticLogs } from "./diagnostics.js?v=20260910-7";
-import { initDiagnosticSessions } from "./diagnostics-sessions.js?v=20260910-7";
+import { initDiagnosticSessions } from "./diagnostics-sessions.js?v=20260910-9";
 import { createDiagnosticNavigation, diagnosticHash, parseDiagnosticRoute } from "./diagnostics-navigation.js?v=20260910-7";
 
 let center = null;

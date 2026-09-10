@@ -306,9 +306,10 @@ async function sessionReview() {
     assert.equal(await first('.diagnostic-session-filters button[type="submit"]').innerText(), "查询");
     const rows = await page.locator(".diagnostic-question[data-question-index]").evaluateAll(nodes => nodes.map(node => {
       const title = node.querySelector("strong").getBoundingClientRect(), meta = node.querySelector(".diagnostic-question-meta").getBoundingClientRect();
-      return { height: node.getBoundingClientRect().height, alignment: Math.abs(title.y + title.height / 2 - meta.y - meta.height / 2) };
+      return { height: node.getBoundingClientRect().height, metaWidth: meta.width, alignment: Math.abs(title.y + title.height / 2 - meta.y - meta.height / 2) };
     }));
     assert(rows.every(row => row.height <= 40 && row.alignment < 2));
+    assert(rows.every(row => row.metaWidth <= 274), "Metadata stays compact so questions have more space");
     const columns = await page.locator(".diagnostic-question-meta").evaluateAll(nodes => nodes.map(node => [...node.children].map(child => child.getBoundingClientRect().x)));
     assert(columns.every(row => row.every((x, i) => Math.abs(x - columns[0][i]) < 1)), "Metadata columns align across different text lengths");
   });
@@ -360,6 +361,14 @@ async function sessionReview() {
       return { height: node.getBoundingClientRect().height, text: secondary.textContent, idVisible: getComputedStyle(secondary.querySelector("code")).display !== "none", copy: !!secondary.querySelector("code + [data-copy-session]") };
     }));
     assert(rows.every(row => row.height <= 52 && row.idVisible && row.copy && row.text.includes("·") && !row.text.includes("最近问题：")));
+  });
+  await check("list: pagination follows status in toolbar and table fills remaining height", async () => {
+    assert.equal(await page.locator(".diagnostic-list-toolbar .diagnostic-pagination").count(), 1);
+    assert.equal(await page.locator(".diagnostic-list-workbench > footer").count(), 0);
+    const status = await first('[data-diagnostic-control="latest_status"]').boundingBox(), pagination = await first(".diagnostic-pagination").boundingBox();
+    assert(pagination.x >= status.x + status.width && Math.abs(pagination.y - status.y) < 2);
+    const table = await first(".diagnostic-session-table-scroll").boundingBox(), workbench = await first(".diagnostic-list-workbench").boundingBox();
+    assert(Math.abs(table.y + table.height - workbench.y - workbench.height) < 2);
   });
   if (mode === "live") {
     await check("live: saved session detail remains strictly readonly", async () => {

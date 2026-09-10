@@ -22,9 +22,47 @@ from tests.helpers.sqlite_stores import (
     make_sqlite_stores,
 )
 from tests.integration.helpers.chat import mock_request_disconnect, parse_sse_events
+from deepfos_platform.errors.classes import APIStatusNotTrue
 
 
 class ChatFileExportIntegrationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_native_failure_reaches_model_sse_and_persisted_history(self):
+        seen_results = []
+
+        async def stream(messages, info):
+            returns = [p for m in messages for p in m.parts if isinstance(p, ToolReturnPart)]
+            if not returns:
+                yield {0: DeltaToolCall(name="export_file_to_download_center", tool_call_id="format-failure",
+                                       json_args=json.dumps({"source": {"type": "content", "content": "fixture"}, "file_name": "test.html"}))}
+            else:
+                seen_results.extend(returns)
+                yield "平台错误：" + str(returns[-1].content)
+
+        native = APIStatusNotTrue("files/upload", "此环境不允许 html 文件", "FILE_TYPE_DENIED", http_status=200)
+        upload = AsyncMock(side_effect=native)
+        with patch("deep_agent.files.storage.PlatformAPI", return_value=SimpleNamespace(file=SimpleNamespace(upload=upload))), \
+             patch("deep_agent.files.storage.SpaceAPI") as space:
+            events = await self._stream(body={"agent_id": self.agent.id, "message": "导出测试文件"}, model=FunctionModel(stream_function=stream))
+        upload.assert_awaited_once()
+        space.assert_not_called()
+        self.assertEqual(len(seen_results), 1)
+        self.assertEqual(seen_results[0].outcome, "failed")
+        self.assertIn("此环境不允许 html 文件", str(seen_results[0].content))
+        self.assertIn("FILE_TYPE_DENIED", json.dumps(events, ensure_ascii=False))
+        session_id = events[0]["session_id"]
+        await get_context().event_persister.flush(session_id, agent_id=self.agent.id)
+        history = await get_context().store.get_history(session_id, agent_id=self.agent.id)
+        persisted = [p for m in history for p in m.parts if isinstance(p, ToolReturnPart)]
+        self.assertEqual(len(persisted), 1)
+        self.assertEqual(persisted[0].outcome, "failed")
+        self.assertIn("FILE_TYPE_DENIED", str(persisted[0].content))
+        async with AsyncClient(transport=self.transport, base_url="http://test") as client:
+            for projection in ("history", "events"):
+                response = await client.get(f"/api/v1/sessions/{session_id}/{projection}", params={"agent_id": self.agent.id})
+                self.assertEqual(response.status_code, 200, response.text)
+                self.assertIn("FILE_TYPE_DENIED", response.text)
+                self.assertIn("此环境不允许 html 文件", response.text)
+
     async def asyncSetUp(self) -> None:
         stores, self._engine, session_factory = await make_sqlite_stores()
         model = await stores.llm_configuration.create_model(

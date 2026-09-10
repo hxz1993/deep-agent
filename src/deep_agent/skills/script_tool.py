@@ -8,6 +8,7 @@ from pydantic import ValidationError
 from pydantic_ai import FunctionToolset, ModelRetry, RunContext, ToolFailed
 
 from deep_agent.agent.deps import AgentDeps
+from deep_agent.agent.tool_errors import tool_error_message
 from deep_agent.sandbox.backend import PythonExecutionBackend
 from deep_agent.sandbox.types import (
     ExecuteRequest,
@@ -51,7 +52,7 @@ def _read_script(path: Path) -> str:
     try:
         raw = path.read_bytes()
     except OSError as exc:
-        raise ToolFailed(f"Skill script could not be read: {path.name}") from exc
+        raise ToolFailed(tool_error_message(f"Skill script could not be read: {path.name}", exc)) from exc
     if len(raw) > MAX_CODE_BYTES:
         raise ToolFailed(f"Skill script exceeds {MAX_CODE_BYTES} bytes: {path.name}")
     try:
@@ -75,7 +76,7 @@ def _resource_files(item: ResolvedSkill, paths: list[str]) -> tuple[SandboxInput
         try:
             raw = target.read_bytes()
         except OSError as exc:
-            raise ToolFailed(f"Skill resource could not be read: {path}") from exc
+            raise ToolFailed(tool_error_message(f"Skill resource could not be read: {path}", exc)) from exc
         total += len(raw)
         if total > MAX_SCRIPT_RESOURCE_BYTES:
             raise ModelRetry(

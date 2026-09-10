@@ -1,0 +1,1889 @@
+{
+  "mode": "fixture",
+  "theme": "light",
+  "startedAt": "2026-09-09T17:40:28.899Z",
+  "viewport": {
+    "width": 1100,
+    "height": 900
+  },
+  "output": "/Users/wuzhiruge/PycharmProjects/deepfos-knowleage_base/deepfos-AI/deep-agent/docs/design/23-diagnostics-and-logs/visual-rebuild-20260910/verification/narrow",
+  "note": "Screenshot and DOM measurement evidence only; a passing behavioral test does not prove visual equivalence.",
+  "checks": [
+    {
+      "name": "logs: real rows or explicit truthful empty state",
+      "passed": true,
+      "detail": {
+        "loadedRows": 200
+      }
+    },
+    {
+      "name": "logs: master-sized layout and font boundaries",
+      "passed": true,
+      "detail": {
+        "main": {
+          "x": 200,
+          "y": 0,
+          "width": 900,
+          "height": 900
+        },
+        "theme": "light",
+        "documentOverflow": 0,
+        "elements": {
+          "title": {
+            "rectangle": [
+              28,
+              50,
+              240,
+              46
+            ],
+            "textRectangle": [
+              28,
+              49,
+              78,
+              47
+            ],
+            "fontSize": "40px",
+            "fontWeight": "800",
+            "lineHeight": "46px",
+            "color": "rgb(23, 32, 43)",
+            "background": "rgba(0, 0, 0, 0)",
+            "borderColor": "rgb(23, 32, 43)",
+            "radius": "0px",
+            "overflowX": "visible",
+            "overflowOwner": null,
+            "clientWidth": 240,
+            "scrollWidth": 240,
+            "target": [
+              45,
+              54,
+              85,
+              44
+            ],
+            "delta": [
+              -17,
+              -5,
+              -7,
+              3
+            ]
+          },
+          "header": {
+            "rectangle": [
+              28,
+              28,
+              844,
+              209
+            ],
+            "textRectangle": [
+              28,
+              28,
+              844,
+              304.5
+            ],
+            "fontSize": "13px",
+            "fontWeight": "400",
+            "lineHeight": "19.5px",
+            "color": "rgb(23, 32, 43)",
+            "background": "rgba(0, 0, 0, 0)",
+            "borderColor": "rgb(23, 32, 43)",
+            "radius": "0px",
+            "overflowX": "visible",
+            "overflowOwner": null,
+            "clientWidth": 844,
+            "scrollWidth": 844
+          },
+          "filters": {
+            "rectangle": [
+              28,
+              140,
+              844,
+              97
+            ],
+            "textRectangle": [
+              28,
+              140,
+              844,
+              192.5
+            ],
+            "fontSize": "13px",
+            "fontWeight": "400",
+            "lineHeight": "19.5px",
+            "color": "rgb(23, 32, 43)",
+            "background": "rgba(0, 0, 0, 0)",
+            "borderColor": "rgb(23, 32, 43)",
+            "radius": "0px",
+            "overflowX": "visible",
+            "overflowOwner": null,
+            "clientWidth": 844,
+            "scrollWidth": 844
+          },
+          "workbench": {
+            "rectangle": [
+              28,
+              257,
+              844,
+              615
+            ],
+            "textRectangle": [
+              29,
+              258,
+              842,
+              6867.5
+            ],
+            "fontSize": "13px",
+            "fontWeight": "400",
+            "lineHeight": "19.5px",
+            "color": "rgb(23, 32, 43)",
+            "background": "rgb(255, 255, 255)",
+            "borderColor": "rgba(23, 32, 43, 0.1)",
+            "radius": "12px",
+            "overflowX": "hidden",
+            "overflowOwner": null,
+            "clientWidth": 842,
+            "scrollWidth": 842,
+            "target": [
+              41,
+              147,
+              1452,
+              838
+            ],
+            "delta": [
+              -13,
+              110,
+              -608,
+              -223
+            ]
+          },
+          "drawer": {
+            "rectangle": [
+              500.5,
+              258,
+              370.5,
+              613
+            ],
+            "textRectangle": [
+              500.5,
+              258,
+              370.5,
+              1198
+            ],
+            "fontSize": "13px",
+            "fontWeight": "400",
+            "lineHeight": "19.5px",
+            "color": "rgb(23, 32, 43)",
+            "background": "rgb(255, 255, 255)",
+            "borderColor": "rgb(23, 32, 43)",
+            "radius": "0px",
+            "overflowX": "hidden",
+            "overflowOwner": null,
+            "clientWidth": 370,
+            "scrollWidth": 370,
+            "target": [
+              1057,
+              148,
+              436,
+              836
+            ],
+            "delta": [
+              -556.5,
+              110,
+              -65.5,
+              -223
+            ]
+          },
+          "firstRow": {
+            "rectangle": [
+              36,
+              334.5,
+              780,
+              34
+            ],
+            "textRectangle": [
+              50,
+              338.5,
+              755,
+              26
+            ],
+            "fontSize": "14px",
+            "fontWeight": "400",
+            "lineHeight": "22px",
+            "color": "rgb(23, 32, 43)",
+            "background": "rgba(0, 0, 0, 0)",
+            "borderColor": "rgb(23, 32, 43)",
+            "radius": "5px",
+            "overflowX": "visible",
+            "overflowOwner": {
+              "className": "diagnostics-log-view",
+              "clientWidth": 471,
+              "scrollWidth": 787,
+              "x": 29,
+              "width": 470.53125
+            },
+            "clientWidth": 780,
+            "scrollWidth": 780,
+            "target": [
+              50,
+              208,
+              999,
+              33
+            ],
+            "delta": [
+              -14,
+              126.5,
+              -219,
+              1
+            ]
+          },
+          "rowSummary": {
+            "rectangle": [
+              432,
+              340.5,
+              193,
+              22
+            ],
+            "textRectangle": [
+              432,
+              342.5,
+              154,
+              17
+            ],
+            "fontSize": "14px",
+            "fontWeight": "400",
+            "lineHeight": "22px",
+            "color": "rgb(23, 32, 43)",
+            "background": "rgba(0, 0, 0, 0)",
+            "borderColor": "rgb(23, 32, 43)",
+            "radius": "0px",
+            "overflowX": "hidden",
+            "overflowOwner": {
+              "className": "diagnostics-log-view",
+              "clientWidth": 471,
+              "scrollWidth": 787,
+              "x": 29,
+              "width": 470.53125
+            },
+            "clientWidth": 193,
+            "scrollWidth": 193
+          },
+          "resultHeader": {
+            "rectangle": [
+              29,
+              258,
+              470.5,
+              71.5
+            ],
+            "textRectangle": [
+              43,
+              270,
+              442.5,
+              47.5
+            ],
+            "fontSize": "12px",
+            "fontWeight": "400",
+            "lineHeight": "18px",
+            "color": "rgb(95, 109, 122)",
+            "background": "rgba(0, 0, 0, 0)",
+            "borderColor": "rgb(95, 109, 122)",
+            "radius": "0px",
+            "overflowX": "visible",
+            "overflowOwner": null,
+            "clientWidth": 471,
+            "scrollWidth": 471
+          },
+          "detailSummary": {
+            "rectangle": [
+              520.5,
+              369,
+              330.5,
+              34
+            ],
+            "textRectangle": [
+              520.5,
+              372,
+              144,
+              28
+            ],
+            "fontSize": "24px",
+            "fontWeight": "700",
+            "lineHeight": "34px",
+            "color": "rgb(23, 32, 43)",
+            "background": "rgba(0, 0, 0, 0)",
+            "borderColor": "rgb(23, 32, 43)",
+            "radius": "0px",
+            "overflowX": "visible",
+            "overflowOwner": null,
+            "clientWidth": 330,
+            "scrollWidth": 330
+          }
+        }
+      }
+    },
+    {
+      "name": "logs: copy actions restricted to Session ID and Run ID",
+      "passed": true,
+      "detail": [
+        "run_id",
+        "session_id"
+      ]
+    },
+    {
+      "name": "log review sequence",
+      "passed": true
+    },
+    {
+      "name": "overview: master-sized layout and font boundaries",
+      "passed": true,
+      "detail": {
+        "main": {
+          "x": 200,
+          "y": 0,
+          "width": 900,
+          "height": 900
+        },
+        "theme": "light",
+        "documentOverflow": 0,
+        "elements": {
+          "title": {
+            "rectangle": [
+              40,
+              50,
+              285,
+              46
+            ],
+            "textRectangle": [
+              40,
+              49,
+              78.4,
+              47
+            ],
+            "fontSize": "40px",
+            "fontWeight": "800",
+            "lineHeight": "46px",
+            "color": "rgb(23, 32, 43)",
+            "background": "rgba(0, 0, 0, 0)",
+            "borderColor": "rgb(23, 32, 43)",
+            "radius": "0px",
+            "overflowX": "visible",
+            "overflowOwner": null,
+            "clientWidth": 285,
+            "scrollWidth": 285,
+            "target": [
+              44,
+              53,
+              88,
+              44
+            ],
+            "delta": [
+              -4,
+              -4,
+              -9.6,
+              3
+            ]
+          },
+          "header": {
+            "rectangle": [
+              40,
+              26,
+              820,
+              152
+            ],
+            "textRectangle": [
+              40,
+              26,
+              820,
+              246.5
+            ],
+            "fontSize": "13px",
+            "fontWeight": "400",
+            "lineHeight": "19.5px",
+            "color": "rgb(23, 32, 43)",
+            "background": "rgba(0, 0, 0, 0)",
+            "borderColor": "rgb(23, 32, 43)",
+            "radius": "0px",
+            "overflowX": "visible",
+            "overflowOwner": null,
+            "clientWidth": 820,
+            "scrollWidth": 820
+          },
+          "filters": {
+            "rectangle": [
+              40,
+              138,
+              820,
+              40
+            ],
+            "textRectangle": [
+              40,
+              138,
+              702,
+              134.5
+            ],
+            "fontSize": "13px",
+            "fontWeight": "400",
+            "lineHeight": "19.5px",
+            "color": "rgb(23, 32, 43)",
+            "background": "rgba(0, 0, 0, 0)",
+            "borderColor": "rgb(23, 32, 43)",
+            "radius": "0px",
+            "overflowX": "visible",
+            "overflowOwner": null,
+            "clientWidth": 820,
+            "scrollWidth": 820
+          },
+          "metrics": {
+            "rectangle": [
+              40,
+              228,
+              820,
+              100
+            ],
+            "textRectangle": [
+              40,
+              228,
+              820,
+              100
+            ],
+            "fontSize": "13px",
+            "fontWeight": "400",
+            "lineHeight": "19.5px",
+            "color": "rgb(23, 32, 43)",
+            "background": "rgba(0, 0, 0, 0)",
+            "borderColor": "rgb(23, 32, 43)",
+            "radius": "0px",
+            "overflowX": "visible",
+            "overflowOwner": null,
+            "clientWidth": 820,
+            "scrollWidth": 820,
+            "target": [
+              41,
+              173,
+              1455,
+              116
+            ],
+            "delta": [
+              -1,
+              55,
+              -635,
+              -16
+            ]
+          },
+          "trend": {
+            "rectangle": [
+              40,
+              345,
+              469,
+              254
+            ],
+            "textRectangle": [
+              55.8,
+              362,
+              436.2,
+              222
+            ],
+            "fontSize": "13px",
+            "fontWeight": "400",
+            "lineHeight": "19.5px",
+            "color": "rgb(23, 32, 43)",
+            "background": "rgb(255, 255, 255)",
+            "borderColor": "rgba(23, 32, 43, 0.1)",
+            "radius": "12px",
+            "overflowX": "visible",
+            "overflowOwner": null,
+            "clientWidth": 467,
+            "scrollWidth": 467,
+            "target": [
+              41,
+              305,
+              914,
+              254
+            ],
+            "delta": [
+              -1,
+              40,
+              -445,
+              0
+            ]
+          },
+          "recent": {
+            "rectangle": [
+              40,
+              615,
+              469,
+              350
+            ],
+            "textRectangle": [
+              57,
+              632,
+              435,
+              1113
+            ],
+            "fontSize": "13px",
+            "fontWeight": "400",
+            "lineHeight": "19.5px",
+            "color": "rgb(23, 32, 43)",
+            "background": "rgb(255, 255, 255)",
+            "borderColor": "rgba(23, 32, 43, 0.1)",
+            "radius": "12px",
+            "overflowX": "visible",
+            "overflowOwner": null,
+            "clientWidth": 467,
+            "scrollWidth": 467,
+            "target": [
+              41,
+              576,
+              914,
+              410
+            ],
+            "delta": [
+              -1,
+              39,
+              -445,
+              -60
+            ]
+          },
+          "firstQuestion": {
+            "rectangle": [
+              57,
+              672,
+              435,
+              109
+            ],
+            "textRectangle": [
+              59,
+              686,
+              431,
+              80
+            ],
+            "fontSize": "13px",
+            "fontWeight": "400",
+            "lineHeight": "19.5px",
+            "color": "rgb(23, 32, 43)",
+            "background": "rgba(0, 0, 0, 0)",
+            "borderColor": "rgb(23, 32, 43) rgb(23, 32, 43) rgba(23, 32, 43, 0.1)",
+            "radius": "0px",
+            "overflowX": "visible",
+            "overflowOwner": null,
+            "clientWidth": 435,
+            "scrollWidth": 435
+          },
+          "username": {
+            "rectangle": [
+              207,
+              712.5,
+              62.3,
+              20
+            ],
+            "textRectangle": [
+              207,
+              713.5,
+              62.3,
+              17
+            ],
+            "fontSize": "14px",
+            "fontWeight": "400",
+            "lineHeight": "20px",
+            "color": "rgb(95, 109, 122)",
+            "background": "rgba(0, 0, 0, 0)",
+            "borderColor": "rgb(95, 109, 122)",
+            "radius": "0px",
+            "overflowX": "hidden",
+            "overflowOwner": null,
+            "clientWidth": 62,
+            "scrollWidth": 62
+          }
+        },
+        "chartPlot": {
+          "x": 73.3125,
+          "y": 410.6526184082031,
+          "width": 417.5999755859375,
+          "height": 143.32632446289062
+        }
+      }
+    },
+    {
+      "name": "overview: chart and metrics use loaded data",
+      "passed": true
+    },
+    {
+      "name": "overview: account labels contain username only",
+      "passed": true
+    },
+    {
+      "name": "list: master-sized layout and font boundaries",
+      "passed": true,
+      "detail": {
+        "main": {
+          "x": 200,
+          "y": 0,
+          "width": 900,
+          "height": 900
+        },
+        "theme": "light",
+        "documentOverflow": 0,
+        "elements": {
+          "title": {
+            "rectangle": [
+              40,
+              50,
+              285,
+              46
+            ],
+            "textRectangle": [
+              40,
+              49,
+              78.4,
+              47
+            ],
+            "fontSize": "40px",
+            "fontWeight": "800",
+            "lineHeight": "46px",
+            "color": "rgb(23, 32, 43)",
+            "background": "rgba(0, 0, 0, 0)",
+            "borderColor": "rgb(23, 32, 43)",
+            "radius": "0px",
+            "overflowX": "visible",
+            "overflowOwner": null,
+            "clientWidth": 285,
+            "scrollWidth": 285,
+            "target": [
+              44,
+              53,
+              88,
+              44
+            ],
+            "delta": [
+              -4,
+              -4,
+              -9.6,
+              3
+            ]
+          },
+          "header": {
+            "rectangle": [
+              40,
+              26,
+              820,
+              152
+            ],
+            "textRectangle": [
+              40,
+              26,
+              820,
+              246.5
+            ],
+            "fontSize": "13px",
+            "fontWeight": "400",
+            "lineHeight": "19.5px",
+            "color": "rgb(23, 32, 43)",
+            "background": "rgba(0, 0, 0, 0)",
+            "borderColor": "rgb(23, 32, 43)",
+            "radius": "0px",
+            "overflowX": "visible",
+            "overflowOwner": null,
+            "clientWidth": 820,
+            "scrollWidth": 820
+          },
+          "filters": {
+            "rectangle": [
+              40,
+              138,
+              820,
+              40
+            ],
+            "textRectangle": [
+              40,
+              138,
+              702,
+              134.5
+            ],
+            "fontSize": "13px",
+            "fontWeight": "400",
+            "lineHeight": "19.5px",
+            "color": "rgb(23, 32, 43)",
+            "background": "rgba(0, 0, 0, 0)",
+            "borderColor": "rgb(23, 32, 43)",
+            "radius": "0px",
+            "overflowX": "visible",
+            "overflowOwner": null,
+            "clientWidth": 820,
+            "scrollWidth": 820
+          },
+          "workbench": {
+            "rectangle": [
+              40,
+              219,
+              820,
+              645
+            ],
+            "textRectangle": [
+              55,
+              220,
+              914.1,
+              3511
+            ],
+            "fontSize": "13px",
+            "fontWeight": "400",
+            "lineHeight": "19.5px",
+            "color": "rgb(23, 32, 43)",
+            "background": "rgb(255, 255, 255)",
+            "borderColor": "rgba(23, 32, 43, 0.1)",
+            "radius": "12px",
+            "overflowX": "hidden",
+            "overflowOwner": null,
+            "clientWidth": 818,
+            "scrollWidth": 818,
+            "target": [
+              41,
+              165,
+              1455,
+              825
+            ],
+            "delta": [
+              -1,
+              54,
+              -635,
+              -180
+            ]
+          },
+          "columns": {
+            "rectangle": [
+              55,
+              298,
+              960,
+              46
+            ],
+            "textRectangle": [
+              71,
+              310.5,
+              888,
+              21
+            ],
+            "fontSize": "14px",
+            "fontWeight": "400",
+            "lineHeight": "21px",
+            "color": "rgb(95, 109, 122)",
+            "background": "rgb(244, 247, 250)",
+            "borderColor": "rgb(95, 109, 122)",
+            "radius": "8px",
+            "overflowX": "visible",
+            "overflowOwner": {
+              "className": "diagnostic-session-table-scroll",
+              "clientWidth": 790,
+              "scrollWidth": 960,
+              "x": 55,
+              "width": 790
+            },
+            "clientWidth": 960,
+            "scrollWidth": 960,
+            "target": [
+              55,
+              245,
+              1428,
+              46
+            ],
+            "delta": [
+              0,
+              53,
+              -468,
+              0
+            ]
+          },
+          "firstRow": {
+            "rectangle": [
+              55,
+              344,
+              960,
+              68
+            ],
+            "textRectangle": [
+              71,
+              354.5,
+              928,
+              46
+            ],
+            "fontSize": "14px",
+            "fontWeight": "400",
+            "lineHeight": "21px",
+            "color": "rgb(23, 32, 43)",
+            "background": "rgba(0, 0, 0, 0)",
+            "borderColor": "rgb(23, 32, 43) rgb(23, 32, 43) rgba(23, 32, 43, 0.1)",
+            "radius": "0px",
+            "overflowX": "visible",
+            "overflowOwner": {
+              "className": "diagnostic-session-table-scroll",
+              "clientWidth": 790,
+              "scrollWidth": 960,
+              "x": 55,
+              "width": 790
+            },
+            "clientWidth": 960,
+            "scrollWidth": 960,
+            "target": [
+              55,
+              291,
+              1428,
+              65
+            ],
+            "delta": [
+              0,
+              53,
+              -468,
+              3
+            ]
+          },
+          "username": {
+            "rectangle": [
+              516.7,
+              367.5,
+              100.3,
+              20
+            ],
+            "textRectangle": [
+              516.7,
+              368.5,
+              62.3,
+              17
+            ],
+            "fontSize": "14px",
+            "fontWeight": "400",
+            "lineHeight": "20px",
+            "color": "rgb(23, 32, 43)",
+            "background": "rgba(0, 0, 0, 0)",
+            "borderColor": "rgb(23, 32, 43)",
+            "radius": "0px",
+            "overflowX": "hidden",
+            "overflowOwner": {
+              "className": "diagnostic-session-table-scroll",
+              "clientWidth": 790,
+              "scrollWidth": 960,
+              "x": 55,
+              "width": 790
+            },
+            "clientWidth": 100,
+            "scrollWidth": 100
+          },
+          "pagination": {
+            "rectangle": [
+              55,
+              786,
+              790,
+              77
+            ],
+            "textRectangle": [
+              61,
+              805,
+              778,
+              40
+            ],
+            "fontSize": "14px",
+            "fontWeight": "400",
+            "lineHeight": "21px",
+            "color": "rgb(95, 109, 122)",
+            "background": "rgba(0, 0, 0, 0)",
+            "borderColor": "rgba(23, 32, 43, 0.1) rgb(95, 109, 122) rgb(95, 109, 122)",
+            "radius": "0px",
+            "overflowX": "visible",
+            "overflowOwner": null,
+            "clientWidth": 790,
+            "scrollWidth": 790
+          }
+        }
+      }
+    },
+    {
+      "name": "list: username cells have no avatars/email",
+      "passed": true
+    },
+    {
+      "name": "session review sequence",
+      "passed": true
+    },
+    {
+      "name": "browser has no unhandled page errors",
+      "passed": true
+    },
+    {
+      "name": "review made no mutation requests",
+      "passed": true
+    },
+    {
+      "name": "fixture usernames do not fetch avatar URLs",
+      "passed": true
+    }
+  ],
+  "screenshots": [
+    "logs.png",
+    "overview.png",
+    "list.png"
+  ],
+  "layouts": {
+    "logs": {
+      "main": {
+        "x": 200,
+        "y": 0,
+        "width": 900,
+        "height": 900
+      },
+      "theme": "light",
+      "documentOverflow": 0,
+      "elements": {
+        "title": {
+          "rectangle": [
+            28,
+            50,
+            240,
+            46
+          ],
+          "textRectangle": [
+            28,
+            49,
+            78,
+            47
+          ],
+          "fontSize": "40px",
+          "fontWeight": "800",
+          "lineHeight": "46px",
+          "color": "rgb(23, 32, 43)",
+          "background": "rgba(0, 0, 0, 0)",
+          "borderColor": "rgb(23, 32, 43)",
+          "radius": "0px",
+          "overflowX": "visible",
+          "overflowOwner": null,
+          "clientWidth": 240,
+          "scrollWidth": 240,
+          "target": [
+            45,
+            54,
+            85,
+            44
+          ],
+          "delta": [
+            -17,
+            -5,
+            -7,
+            3
+          ]
+        },
+        "header": {
+          "rectangle": [
+            28,
+            28,
+            844,
+            209
+          ],
+          "textRectangle": [
+            28,
+            28,
+            844,
+            304.5
+          ],
+          "fontSize": "13px",
+          "fontWeight": "400",
+          "lineHeight": "19.5px",
+          "color": "rgb(23, 32, 43)",
+          "background": "rgba(0, 0, 0, 0)",
+          "borderColor": "rgb(23, 32, 43)",
+          "radius": "0px",
+          "overflowX": "visible",
+          "overflowOwner": null,
+          "clientWidth": 844,
+          "scrollWidth": 844
+        },
+        "filters": {
+          "rectangle": [
+            28,
+            140,
+            844,
+            97
+          ],
+          "textRectangle": [
+            28,
+            140,
+            844,
+            192.5
+          ],
+          "fontSize": "13px",
+          "fontWeight": "400",
+          "lineHeight": "19.5px",
+          "color": "rgb(23, 32, 43)",
+          "background": "rgba(0, 0, 0, 0)",
+          "borderColor": "rgb(23, 32, 43)",
+          "radius": "0px",
+          "overflowX": "visible",
+          "overflowOwner": null,
+          "clientWidth": 844,
+          "scrollWidth": 844
+        },
+        "workbench": {
+          "rectangle": [
+            28,
+            257,
+            844,
+            615
+          ],
+          "textRectangle": [
+            29,
+            258,
+            842,
+            6867.5
+          ],
+          "fontSize": "13px",
+          "fontWeight": "400",
+          "lineHeight": "19.5px",
+          "color": "rgb(23, 32, 43)",
+          "background": "rgb(255, 255, 255)",
+          "borderColor": "rgba(23, 32, 43, 0.1)",
+          "radius": "12px",
+          "overflowX": "hidden",
+          "overflowOwner": null,
+          "clientWidth": 842,
+          "scrollWidth": 842,
+          "target": [
+            41,
+            147,
+            1452,
+            838
+          ],
+          "delta": [
+            -13,
+            110,
+            -608,
+            -223
+          ]
+        },
+        "drawer": {
+          "rectangle": [
+            500.5,
+            258,
+            370.5,
+            613
+          ],
+          "textRectangle": [
+            500.5,
+            258,
+            370.5,
+            1198
+          ],
+          "fontSize": "13px",
+          "fontWeight": "400",
+          "lineHeight": "19.5px",
+          "color": "rgb(23, 32, 43)",
+          "background": "rgb(255, 255, 255)",
+          "borderColor": "rgb(23, 32, 43)",
+          "radius": "0px",
+          "overflowX": "hidden",
+          "overflowOwner": null,
+          "clientWidth": 370,
+          "scrollWidth": 370,
+          "target": [
+            1057,
+            148,
+            436,
+            836
+          ],
+          "delta": [
+            -556.5,
+            110,
+            -65.5,
+            -223
+          ]
+        },
+        "firstRow": {
+          "rectangle": [
+            36,
+            334.5,
+            780,
+            34
+          ],
+          "textRectangle": [
+            50,
+            338.5,
+            755,
+            26
+          ],
+          "fontSize": "14px",
+          "fontWeight": "400",
+          "lineHeight": "22px",
+          "color": "rgb(23, 32, 43)",
+          "background": "rgba(0, 0, 0, 0)",
+          "borderColor": "rgb(23, 32, 43)",
+          "radius": "5px",
+          "overflowX": "visible",
+          "overflowOwner": {
+            "className": "diagnostics-log-view",
+            "clientWidth": 471,
+            "scrollWidth": 787,
+            "x": 29,
+            "width": 470.53125
+          },
+          "clientWidth": 780,
+          "scrollWidth": 780,
+          "target": [
+            50,
+            208,
+            999,
+            33
+          ],
+          "delta": [
+            -14,
+            126.5,
+            -219,
+            1
+          ]
+        },
+        "rowSummary": {
+          "rectangle": [
+            432,
+            340.5,
+            193,
+            22
+          ],
+          "textRectangle": [
+            432,
+            342.5,
+            154,
+            17
+          ],
+          "fontSize": "14px",
+          "fontWeight": "400",
+          "lineHeight": "22px",
+          "color": "rgb(23, 32, 43)",
+          "background": "rgba(0, 0, 0, 0)",
+          "borderColor": "rgb(23, 32, 43)",
+          "radius": "0px",
+          "overflowX": "hidden",
+          "overflowOwner": {
+            "className": "diagnostics-log-view",
+            "clientWidth": 471,
+            "scrollWidth": 787,
+            "x": 29,
+            "width": 470.53125
+          },
+          "clientWidth": 193,
+          "scrollWidth": 193
+        },
+        "resultHeader": {
+          "rectangle": [
+            29,
+            258,
+            470.5,
+            71.5
+          ],
+          "textRectangle": [
+            43,
+            270,
+            442.5,
+            47.5
+          ],
+          "fontSize": "12px",
+          "fontWeight": "400",
+          "lineHeight": "18px",
+          "color": "rgb(95, 109, 122)",
+          "background": "rgba(0, 0, 0, 0)",
+          "borderColor": "rgb(95, 109, 122)",
+          "radius": "0px",
+          "overflowX": "visible",
+          "overflowOwner": null,
+          "clientWidth": 471,
+          "scrollWidth": 471
+        },
+        "detailSummary": {
+          "rectangle": [
+            520.5,
+            369,
+            330.5,
+            34
+          ],
+          "textRectangle": [
+            520.5,
+            372,
+            144,
+            28
+          ],
+          "fontSize": "24px",
+          "fontWeight": "700",
+          "lineHeight": "34px",
+          "color": "rgb(23, 32, 43)",
+          "background": "rgba(0, 0, 0, 0)",
+          "borderColor": "rgb(23, 32, 43)",
+          "radius": "0px",
+          "overflowX": "visible",
+          "overflowOwner": null,
+          "clientWidth": 330,
+          "scrollWidth": 330
+        }
+      }
+    },
+    "overview": {
+      "main": {
+        "x": 200,
+        "y": 0,
+        "width": 900,
+        "height": 900
+      },
+      "theme": "light",
+      "documentOverflow": 0,
+      "elements": {
+        "title": {
+          "rectangle": [
+            40,
+            50,
+            285,
+            46
+          ],
+          "textRectangle": [
+            40,
+            49,
+            78.4,
+            47
+          ],
+          "fontSize": "40px",
+          "fontWeight": "800",
+          "lineHeight": "46px",
+          "color": "rgb(23, 32, 43)",
+          "background": "rgba(0, 0, 0, 0)",
+          "borderColor": "rgb(23, 32, 43)",
+          "radius": "0px",
+          "overflowX": "visible",
+          "overflowOwner": null,
+          "clientWidth": 285,
+          "scrollWidth": 285,
+          "target": [
+            44,
+            53,
+            88,
+            44
+          ],
+          "delta": [
+            -4,
+            -4,
+            -9.6,
+            3
+          ]
+        },
+        "header": {
+          "rectangle": [
+            40,
+            26,
+            820,
+            152
+          ],
+          "textRectangle": [
+            40,
+            26,
+            820,
+            246.5
+          ],
+          "fontSize": "13px",
+          "fontWeight": "400",
+          "lineHeight": "19.5px",
+          "color": "rgb(23, 32, 43)",
+          "background": "rgba(0, 0, 0, 0)",
+          "borderColor": "rgb(23, 32, 43)",
+          "radius": "0px",
+          "overflowX": "visible",
+          "overflowOwner": null,
+          "clientWidth": 820,
+          "scrollWidth": 820
+        },
+        "filters": {
+          "rectangle": [
+            40,
+            138,
+            820,
+            40
+          ],
+          "textRectangle": [
+            40,
+            138,
+            702,
+            134.5
+          ],
+          "fontSize": "13px",
+          "fontWeight": "400",
+          "lineHeight": "19.5px",
+          "color": "rgb(23, 32, 43)",
+          "background": "rgba(0, 0, 0, 0)",
+          "borderColor": "rgb(23, 32, 43)",
+          "radius": "0px",
+          "overflowX": "visible",
+          "overflowOwner": null,
+          "clientWidth": 820,
+          "scrollWidth": 820
+        },
+        "metrics": {
+          "rectangle": [
+            40,
+            228,
+            820,
+            100
+          ],
+          "textRectangle": [
+            40,
+            228,
+            820,
+            100
+          ],
+          "fontSize": "13px",
+          "fontWeight": "400",
+          "lineHeight": "19.5px",
+          "color": "rgb(23, 32, 43)",
+          "background": "rgba(0, 0, 0, 0)",
+          "borderColor": "rgb(23, 32, 43)",
+          "radius": "0px",
+          "overflowX": "visible",
+          "overflowOwner": null,
+          "clientWidth": 820,
+          "scrollWidth": 820,
+          "target": [
+            41,
+            173,
+            1455,
+            116
+          ],
+          "delta": [
+            -1,
+            55,
+            -635,
+            -16
+          ]
+        },
+        "trend": {
+          "rectangle": [
+            40,
+            345,
+            469,
+            254
+          ],
+          "textRectangle": [
+            55.8,
+            362,
+            436.2,
+            222
+          ],
+          "fontSize": "13px",
+          "fontWeight": "400",
+          "lineHeight": "19.5px",
+          "color": "rgb(23, 32, 43)",
+          "background": "rgb(255, 255, 255)",
+          "borderColor": "rgba(23, 32, 43, 0.1)",
+          "radius": "12px",
+          "overflowX": "visible",
+          "overflowOwner": null,
+          "clientWidth": 467,
+          "scrollWidth": 467,
+          "target": [
+            41,
+            305,
+            914,
+            254
+          ],
+          "delta": [
+            -1,
+            40,
+            -445,
+            0
+          ]
+        },
+        "recent": {
+          "rectangle": [
+            40,
+            615,
+            469,
+            350
+          ],
+          "textRectangle": [
+            57,
+            632,
+            435,
+            1113
+          ],
+          "fontSize": "13px",
+          "fontWeight": "400",
+          "lineHeight": "19.5px",
+          "color": "rgb(23, 32, 43)",
+          "background": "rgb(255, 255, 255)",
+          "borderColor": "rgba(23, 32, 43, 0.1)",
+          "radius": "12px",
+          "overflowX": "visible",
+          "overflowOwner": null,
+          "clientWidth": 467,
+          "scrollWidth": 467,
+          "target": [
+            41,
+            576,
+            914,
+            410
+          ],
+          "delta": [
+            -1,
+            39,
+            -445,
+            -60
+          ]
+        },
+        "firstQuestion": {
+          "rectangle": [
+            57,
+            672,
+            435,
+            109
+          ],
+          "textRectangle": [
+            59,
+            686,
+            431,
+            80
+          ],
+          "fontSize": "13px",
+          "fontWeight": "400",
+          "lineHeight": "19.5px",
+          "color": "rgb(23, 32, 43)",
+          "background": "rgba(0, 0, 0, 0)",
+          "borderColor": "rgb(23, 32, 43) rgb(23, 32, 43) rgba(23, 32, 43, 0.1)",
+          "radius": "0px",
+          "overflowX": "visible",
+          "overflowOwner": null,
+          "clientWidth": 435,
+          "scrollWidth": 435
+        },
+        "username": {
+          "rectangle": [
+            207,
+            712.5,
+            62.3,
+            20
+          ],
+          "textRectangle": [
+            207,
+            713.5,
+            62.3,
+            17
+          ],
+          "fontSize": "14px",
+          "fontWeight": "400",
+          "lineHeight": "20px",
+          "color": "rgb(95, 109, 122)",
+          "background": "rgba(0, 0, 0, 0)",
+          "borderColor": "rgb(95, 109, 122)",
+          "radius": "0px",
+          "overflowX": "hidden",
+          "overflowOwner": null,
+          "clientWidth": 62,
+          "scrollWidth": 62
+        }
+      },
+      "chartPlot": {
+        "x": 73.3125,
+        "y": 410.6526184082031,
+        "width": 417.5999755859375,
+        "height": 143.32632446289062
+      }
+    },
+    "list": {
+      "main": {
+        "x": 200,
+        "y": 0,
+        "width": 900,
+        "height": 900
+      },
+      "theme": "light",
+      "documentOverflow": 0,
+      "elements": {
+        "title": {
+          "rectangle": [
+            40,
+            50,
+            285,
+            46
+          ],
+          "textRectangle": [
+            40,
+            49,
+            78.4,
+            47
+          ],
+          "fontSize": "40px",
+          "fontWeight": "800",
+          "lineHeight": "46px",
+          "color": "rgb(23, 32, 43)",
+          "background": "rgba(0, 0, 0, 0)",
+          "borderColor": "rgb(23, 32, 43)",
+          "radius": "0px",
+          "overflowX": "visible",
+          "overflowOwner": null,
+          "clientWidth": 285,
+          "scrollWidth": 285,
+          "target": [
+            44,
+            53,
+            88,
+            44
+          ],
+          "delta": [
+            -4,
+            -4,
+            -9.6,
+            3
+          ]
+        },
+        "header": {
+          "rectangle": [
+            40,
+            26,
+            820,
+            152
+          ],
+          "textRectangle": [
+            40,
+            26,
+            820,
+            246.5
+          ],
+          "fontSize": "13px",
+          "fontWeight": "400",
+          "lineHeight": "19.5px",
+          "color": "rgb(23, 32, 43)",
+          "background": "rgba(0, 0, 0, 0)",
+          "borderColor": "rgb(23, 32, 43)",
+          "radius": "0px",
+          "overflowX": "visible",
+          "overflowOwner": null,
+          "clientWidth": 820,
+          "scrollWidth": 820
+        },
+        "filters": {
+          "rectangle": [
+            40,
+            138,
+            820,
+            40
+          ],
+          "textRectangle": [
+            40,
+            138,
+            702,
+            134.5
+          ],
+          "fontSize": "13px",
+          "fontWeight": "400",
+          "lineHeight": "19.5px",
+          "color": "rgb(23, 32, 43)",
+          "background": "rgba(0, 0, 0, 0)",
+          "borderColor": "rgb(23, 32, 43)",
+          "radius": "0px",
+          "overflowX": "visible",
+          "overflowOwner": null,
+          "clientWidth": 820,
+          "scrollWidth": 820
+        },
+        "workbench": {
+          "rectangle": [
+            40,
+            219,
+            820,
+            645
+          ],
+          "textRectangle": [
+            55,
+            220,
+            914.1,
+            3511
+          ],
+          "fontSize": "13px",
+          "fontWeight": "400",
+          "lineHeight": "19.5px",
+          "color": "rgb(23, 32, 43)",
+          "background": "rgb(255, 255, 255)",
+          "borderColor": "rgba(23, 32, 43, 0.1)",
+          "radius": "12px",
+          "overflowX": "hidden",
+          "overflowOwner": null,
+          "clientWidth": 818,
+          "scrollWidth": 818,
+          "target": [
+            41,
+            165,
+            1455,
+            825
+          ],
+          "delta": [
+            -1,
+            54,
+            -635,
+            -180
+          ]
+        },
+        "columns": {
+          "rectangle": [
+            55,
+            298,
+            960,
+            46
+          ],
+          "textRectangle": [
+            71,
+            310.5,
+            888,
+            21
+          ],
+          "fontSize": "14px",
+          "fontWeight": "400",
+          "lineHeight": "21px",
+          "color": "rgb(95, 109, 122)",
+          "background": "rgb(244, 247, 250)",
+          "borderColor": "rgb(95, 109, 122)",
+          "radius": "8px",
+          "overflowX": "visible",
+          "overflowOwner": {
+            "className": "diagnostic-session-table-scroll",
+            "clientWidth": 790,
+            "scrollWidth": 960,
+            "x": 55,
+            "width": 790
+          },
+          "clientWidth": 960,
+          "scrollWidth": 960,
+          "target": [
+            55,
+            245,
+            1428,
+            46
+          ],
+          "delta": [
+            0,
+            53,
+            -468,
+            0
+          ]
+        },
+        "firstRow": {
+          "rectangle": [
+            55,
+            344,
+            960,
+            68
+          ],
+          "textRectangle": [
+            71,
+            354.5,
+            928,
+            46
+          ],
+          "fontSize": "14px",
+          "fontWeight": "400",
+          "lineHeight": "21px",
+          "color": "rgb(23, 32, 43)",
+          "background": "rgba(0, 0, 0, 0)",
+          "borderColor": "rgb(23, 32, 43) rgb(23, 32, 43) rgba(23, 32, 43, 0.1)",
+          "radius": "0px",
+          "overflowX": "visible",
+          "overflowOwner": {
+            "className": "diagnostic-session-table-scroll",
+            "clientWidth": 790,
+            "scrollWidth": 960,
+            "x": 55,
+            "width": 790
+          },
+          "clientWidth": 960,
+          "scrollWidth": 960,
+          "target": [
+            55,
+            291,
+            1428,
+            65
+          ],
+          "delta": [
+            0,
+            53,
+            -468,
+            3
+          ]
+        },
+        "username": {
+          "rectangle": [
+            516.7,
+            367.5,
+            100.3,
+            20
+          ],
+          "textRectangle": [
+            516.7,
+            368.5,
+            62.3,
+            17
+          ],
+          "fontSize": "14px",
+          "fontWeight": "400",
+          "lineHeight": "20px",
+          "color": "rgb(23, 32, 43)",
+          "background": "rgba(0, 0, 0, 0)",
+          "borderColor": "rgb(23, 32, 43)",
+          "radius": "0px",
+          "overflowX": "hidden",
+          "overflowOwner": {
+            "className": "diagnostic-session-table-scroll",
+            "clientWidth": 790,
+            "scrollWidth": 960,
+            "x": 55,
+            "width": 790
+          },
+          "clientWidth": 100,
+          "scrollWidth": 100
+        },
+        "pagination": {
+          "rectangle": [
+            55,
+            786,
+            790,
+            77
+          ],
+          "textRectangle": [
+            61,
+            805,
+            778,
+            40
+          ],
+          "fontSize": "14px",
+          "fontWeight": "400",
+          "lineHeight": "21px",
+          "color": "rgb(95, 109, 122)",
+          "background": "rgba(0, 0, 0, 0)",
+          "borderColor": "rgba(23, 32, 43, 0.1) rgb(95, 109, 122) rgb(95, 109, 122)",
+          "radius": "0px",
+          "overflowX": "visible",
+          "overflowOwner": null,
+          "clientWidth": 790,
+          "scrollWidth": 790
+        }
+      }
+    }
+  },
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/info",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/request-context",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/current-user",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/access",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/health",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/tools",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/uploads/capabilities",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/agents",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/channel-accounts",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/diagnostics/logs/status",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/llm-models",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/diagnostics/logs",
+      "query": "limit=200&start=2026-09-08T16%3A00%3A00.000Z&end=2026-09-09T16%3A00%3A00.000Z"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/llm-models",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/ui-tools",
+      "query": "agent_id=visual-agent-chat"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/sessions",
+      "query": "agent_id=visual-agent-chat&limit=50&offset=0"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/database-info",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/tools",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/llm-models",
+      "query": "selectable_only=false"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/skills",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/agents",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/channel-accounts",
+      "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/llm-models/catalog",
+      "query": "view=model&offset=0&limit=50"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/diagnostics/sessions/overview",
+      "query": "start=2026-09-02T16%3A00%3A00.000Z&end=2026-09-09T16%3A00%3A00.000Z&timezone=Asia%2FShanghai"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/diagnostics/sessions",
+      "query": "start=2026-09-02T16%3A00%3A00.000Z&end=2026-09-09T16%3A00%3A00.000Z&timezone=Asia%2FShanghai&limit=50&offset=0"
+    }
+  ],
+  "blockedRequests": [],
+  "pageErrors": [],
+  "playwrightRuntime": "/Users/wuzhiruge/.npm/_npx/c61c9351a0dbcfa7/node_modules/playwright/index.mjs",
+  "completedAt": "2026-09-09T17:40:30.673Z",
+  "browserClosed": true,
+  "passed": true
+}

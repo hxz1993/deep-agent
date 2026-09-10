@@ -21,10 +21,43 @@
 | 配置解析 | `options.py`（`OPTION` + accessor）；DB URL 见 `db/url.py` |
 | MCP 加载 | `capabilities/mcp/resolver.py`、`db_loader.py`、`builtin.py` |
 | 渠道网关与企微 Adapter | `channels/gateway/`、`channels/`、`api/v1/channel_accounts.py`、`db/stores/channel.py` |
+| 管理员诊断日志 | `diagnostics/`、`api/v1/diagnostics.py`；模型/工具观察在 `agent/diagnostics.py` |
 
 ---
 
 ## 架构与数据流
+
+### 诊断日志边界
+
+`diagnostics.emit` 只接收白名单事实，后台有界队列负责安全序列化后的双出口与文件轮转；
+日志失败不改变模型、工具、SSE 或持久化行为。诊断文件不是会话 Event Store，不新增 RUN 回执。
+管理员查询只读取当前实例受控文件，与普通会话所有者权限分开；不增加 MCP 容器日志或自动探测。
+新增日志点先注册固定事件名及摘要，不传正文、参数、结果、异常原文或凭据。详见
+[`诊断日志指南`](../../../docs/guides/diagnostic-logs.md)。
+
+取消诊断按 Session/Run 关联停止接口入口、活动执行首次取消来源和发送连接结束记录。
+`http_disconnect` 只在实际收到 ASGI 断连消息时使用，不能由 `CancelledError` 推断；
+后者无明确证据时为 `task_cancelled_unknown`，更外层的服务退出记录可能晚于执行终态。
+`api/v1/stream_diagnostics.py` 仅包装现有 ASGI 收发，不额外读消息、不改取消及心跳策略；
+观察流 `/live` 不接入发送连接的取消观察。回归见 `test_cancel_diagnostics.py` 和 `test_session_live_api.py`。
+
+OpenAI 兼容协议的 HTTP 日志在 `agent/model_api_diagnostics.py`；只记录安全地址、状态与工具名清单。
+流式请求在 SDK 消费者任务中延迟发出，须在透明模型包装器的实际调用边界建立 ContextVar，
+不能仅依赖 `wrap_model_request` 的任务上下文。测试须覆盖真实 SDK 的流式成功/400及请求体等价。
+
+诊断账号资料使用 `security/diagnostic_users.py` 批量读取平台用户：通过现有 Space 服务发现，
+调用 `POST /api/space/user-info/batch/query/by-user-ids`（不需要 App / Space；不要误用需要
+Space 的 `query/batch` 路由）。只传管理员当前认证和本次涉及的 ID，每批最多100个、总预算2秒，
+显示名优先用户名。2026-09-10 Test 已通过真实凭证只读联调；旧账号 `info/by-user-ids` 在该环境
+返回业务失败，不再依赖。仅无平台凭证的 local bypass 才使用本地资料；缓存仍按调用者权限隔离。
+
+### 历史工具结果匹配
+
+`agent/history.py` 在补齐缺失工具结果前，按同一助手消息段、调用 ID 和工具名识别用户消息之后的真实结果或重试。
+Deferred 续跑可能把用户输入单独先入库，再写工具结果；不能仅因遇到用户消息就判定调用取消。
+匹配不跨下一条助手响应，不按全局调用 ID 去重；原始事件不重写，正式 interrupted 响应继续由 SDK 处理。
+日志 `history_tool_result_matched/synthesized` 关联当前读取 Run 和历史 Tool Call，正文不入日志。
+回归入口为 `test_history_repair.py`、`test_history_resume_persistence.py`。
 
 ### v0.8.5 真实事件及时持久化
 
@@ -67,6 +100,13 @@ HTTP (REST/SSE)
 5. 关闭：`ctx.aclose()` → `reset_context()`
 
 未配置 `DEEP_AGENT_DBMS_*` 时默认使用 SQLite 文件 `data/deep-agent.db`（可用 `DEEP_AGENT_SQLITE_PATH` 覆盖）。配置 `DEEP_AGENT_DBMS_*` 则使用 PostgreSQL / MySQL。
+
+全新空库首次升级至Head时，`migrations/env.py`调用`db/initial_configuration.py`设置当前默认配置：
+DeepSeek Provider（官方默认地址、Key为空）和`deepseek-flash`模型，保留默认Agent及其固定关联ID。
+模型初始上下文1000000、最大输出384000，输入模态text/image；能力标签attachment、reasoning、
+tool_call、structured_output、temperature、open_weights、interleaved。模型配置界面本身不因此改变。
+只在迁移前无Revision且目标为Head时执行；历史Revision回放、已有库升级/重启和用户删除默认项后
+都不覆盖或补建配置。已发布001/002迁移及表结构不改写；离线SQL生成与在线空库初始化一致。
 
 MCP 在请求时由 `resolve_mcp_toolsets` 解析（DB 行 + `mcp_servers/` builtin 兜底）。
 
@@ -122,6 +162,10 @@ Account与实际Session归属，不以修改后的Agent配置取消错误任务�
 `build_runner_for_agent`追加中文渠道说明，不依据用户正文或context_refs启用，也不改普通客户端的Prompt。
 
 渠道Session创建时写入`source=channel`标题事件及`channel`来源快照，阻止首轮模型标题覆盖。
+
+普通会话标题在`agent/title_generator.py`单独关闭思考，不能修改主聊天的Model或默认设置。
+DeepSeek新别名可能尚无SDK Profile：Responses使用原生reasoning开关，Chat和Kimi使用原生thinking开关；
+Kimi标题请求省略temperature，让服务端按关闭思考的模式选默认值。标题失败查`title_generation_*`诊断事件。
 SessionInfo可选`channel`字段来源于该Session事件，不依赖当前Binding；人工改名不删除来源。
 旧本地数据修复用`maintenance.channel_origins`，默认dry-run、apply先备份，停止服务后执行；不升级002。
 若已有002仍含`peer_display_name`物理列，先用`maintenance.channel_peer_metadata`完成备份后的
@@ -162,6 +206,14 @@ Pydantic AI `CancellationToken`。Runner 捕获 `RunCancelled` 后只持久化
 不会成功的下载、文件损坏、解析、大小上限或明确上游失败使用 `ToolFailed`。两者都由
 Pydantic AI 形成合法 Tool Result，但只有 `ModelRetry` 消耗工具重试预算并要求模型纠正。
 
+内置工具封装上游失败时，通过 `agent/tool_errors.py::tool_error_message` 保留操作说明、原生
+错误类型、真实 HTTP 状态、业务码与有界脱敏提示。平台客户端的 `upstream_*` 字段与本地
+ExpectedError 的 HTTP 200 包装状态分开；不从附件格式清单推断环境导出白名单。
+原生文本只进入授权会话的 Tool Result，日志只记录白名单事实。文件读取、上传、下载中心登记、
+回滚使用 `observe_tool_operation` 记录真实步骤，并关联 Session/Run/Tool Call；日志失败不影响
+业务。清理失败与原始失败分别报告，不能把隐式异常上下文误当同一操作的根因，也不能宣称已回滚。
+新增工具应复用这条错误链，不能只写“发布失败”，也不能裸拼完整响应 data、凭据、文件正文或堆栈。
+
 流式接口必须先把 Active Run 注册到 Registry，再发布首条 `session` SSE，并将同一个
 `CancellationToken` 传入 Runner。否则客户端刚拿到 `session_id` 就停止时，会在用户消息尚未
 持久化的窗口内误报 `404 Session not found`。
@@ -188,6 +240,13 @@ Pending 时没有活动 Run，其表单取消仍通过 `DeferredToolResults` 处
 ### 能力装配与模型输入
 
 DeepAgent 自研 `capabilities.registry.ToolPackage` 是产品配置单位，包含分类、展示元数据、工具目录和恰好一个 Toolset；Pydantic AI 的 `AbstractCapability` 才是可介入模型请求、消息历史、工具准备和事件生命周期的原生扩展点。当前上下文压缩使用这一层；DeepSeek V4 已交由 Pydantic AI 官方 Provider/Profile，不再注册项目自定义重试能力。
+
+DeepSeek Responses 的原生工具能力在 `models/provider_registry.py` 通过公开 Profile 限定为
+`WebSearchTool`；MCP 查找沿用 SDK 的普通 `search_tools` 函数回退。2026-09-10 核验知识库
+Pydantic AI 2.41.0 与上游 2.42.0 仍误继承 OpenAI 原生 Tool Search，导致已发现工具同时在
+顶层 `tools` 与历史 `tool_search_output.tools` 声明，DeepSeek 返回重名 400。不得全局删历史、
+重命名工具或修改 site-packages；升级后先用 `test_deepseek_responses_tool_search.py` 验证
+真实序列化、旧历史回放及搜索后工具调用，再评估是否移除这一 Provider 兼容配置。
 
 模型每轮直接看到的是：Agent/能力 Instructions、`message_history`、当前用户输入/附件和本轮 Tool Definitions。Toolset 负责列出、准备和调用工具；MCP Prompt 不会自动进入模型工具列表。MCP Resource 由宿主侧动态代理工具按需读取。
 

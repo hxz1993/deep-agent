@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 from deep_agent.core.logging import configure_logging, is_configured
 from deep_agent.db.url import escape_for_ini, get_database_url
 from deep_agent.db.models import Base
+from deep_agent.db.initial_configuration import initialize_current_defaults
 
 config = context.config
 
@@ -33,14 +34,27 @@ def run_migrations_offline() -> None:
     )
 
     with context.begin_transaction():
-        context.run_migrations()
+        run_migrations_with_initial_defaults()
+
+
+def run_migrations_with_initial_defaults() -> None:
+    migration_context = context.get_context()
+    # Do not replay defaults on upgrades, restarts, or historical revision targets.
+    initialize = (
+        not migration_context.get_current_heads()
+        and context.get_revision_argument() == context.get_head_revision()
+    )
+    context.run_migrations()
+    if initialize:
+        initialize_current_defaults(migration_context.bind)
 
 
 def do_run_migrations(connection: Connection) -> None:
-    context.configure(connection=connection, target_metadata=target_metadata)
-
-    with context.begin_transaction():
-        context.run_migrations()
+    # Keep post-migration defaults in the same explicit transaction, including
+    # SQLite where Alembic otherwise treats DDL as non-transactional.
+    with connection.begin():
+        context.configure(connection=connection, target_metadata=target_metadata)
+        run_migrations_with_initial_defaults()
 
 
 async def run_async_migrations() -> None:

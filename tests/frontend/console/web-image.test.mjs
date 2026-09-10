@@ -1,3 +1,4 @@
+import { readPresentationSource } from "./shared-presentation-source.mjs";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
@@ -7,10 +8,7 @@ import {
   renderWebImagePreview,
 } from "../../../console/web-image.js";
 
-const chatSource = await readFile(
-  new URL("../../../console/chat.js", import.meta.url),
-  "utf8",
-);
+const chatSource = await readPresentationSource("chat.js");
 const trajectorySource = await readFile(
   new URL("../../../console/trajectory.js", import.meta.url),
   "utf8",

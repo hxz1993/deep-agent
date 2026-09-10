@@ -70,7 +70,6 @@ from deep_agent.agent.limits import format_stream_error
 from deep_agent.agent.observability import (
     cache_usage_available,
     log_event,
-    log_model_requests,
     run_metrics,
     usage_dict,
 )
@@ -338,6 +337,36 @@ class AgentRunner:
     async def _start_run_event(self, session_id: str, deps: AgentDeps, *, mode: str):
         # This is an in-memory context only. Normal runs never persist a Run row.
         return _RunTerminalContext(session_id=session_id, deps=deps, mode=mode)
+
+    def _log_run_terminal(
+        self, run_event: _RunTerminalContext, *, status: str, started_at: float,
+        error: BaseException | None = None, phase: str | None = None,
+        usage: RunUsage | None = None,
+        reason: str | None = None,
+    ) -> None:
+        """Observe a terminal branch without participating in its persistence."""
+        try:
+            deps = run_event.deps
+            metrics = {}
+            if usage is not None:
+                try:
+                    metrics = run_metrics(
+                        status=status, started_at=started_at, model_id=self._model_id, usage=usage,
+                        tool_search_calls=(deps.tool_discovery.search_calls if deps.tool_discovery else 0),
+                        compaction=self._compaction_name(deps),
+                    )
+                except Exception:
+                    pass
+            metrics.update(status=status, model_id=self._model_id,
+                           duration_ms=max(0, round((time.perf_counter() - started_at) * 1_000)))
+            log_event(
+                f"agent_run_{status}", session_id=run_event.session_id,
+                conversation_id=deps.conversation_id, run_id=deps.run_id,
+                agent_id=deps.agent_id, mode=run_event.mode, phase=phase, reason=reason, **metrics,
+                error_type=type(error).__name__ if error is not None else None,
+            )
+        except Exception:
+            pass
 
     async def _finish_run_event(
         self,
@@ -813,7 +842,10 @@ class AgentRunner:
         history = await self.store.get_history(session_id, agent_id=deps.agent_id)
         deps.turn_id = deps.turn_id or deps.run_id
         if not deferred_tool_results:
-            repaired = repair_unprocessed_tool_calls(history)
+            repaired = repair_unprocessed_tool_calls(history, diagnostic_fields={
+                "session_id": session_id, "run_id": deps.run_id, "agent_id": deps.agent_id,
+                "phase": "history_prepare",
+            })
             if repaired is not history:
                 history = repaired
         pre_persisted_user = False
@@ -1221,22 +1253,31 @@ class AgentRunner:
                 if dangling_tool_message is not None
                 else {}
             )
-            to_append = repair_unprocessed_tool_calls(to_append, **repair_kwargs)
+            to_append = repair_unprocessed_tool_calls(to_append, **repair_kwargs, diagnostic_fields={
+                "session_id": session_id, "run_id": deps.run_id, "agent_id": deps.agent_id,
+                "phase": "terminal_persistence",
+            })
         if not to_append and terminal_status is None:
             return False
-        async with asyncio.timeout(_TERMINAL_WRITE_TIMEOUT):
-            rows = await self.store.append(
-                session_id,
-                to_append,
-                agent_id=deps.agent_id,
-                user_id=deps.user,
-                app_id=deps.app_id,
-                space_id=deps.space_id,
-                turn_id=deps.turn_id,
-                run_id=deps.run_id,
-                first_message_ordinal=1 if pre_persisted_user else 0,
-                terminal_status=terminal_status,
-            )
+        try:
+            async with asyncio.timeout(_TERMINAL_WRITE_TIMEOUT):
+                rows = await self.store.append(
+                    session_id,
+                    to_append,
+                    agent_id=deps.agent_id,
+                    user_id=deps.user,
+                    app_id=deps.app_id,
+                    space_id=deps.space_id,
+                    turn_id=deps.turn_id,
+                    run_id=deps.run_id,
+                    first_message_ordinal=1 if pre_persisted_user else 0,
+                    terminal_status=terminal_status,
+                )
+        except Exception as exc:
+            log_event("message_persistence_failed", session_id=session_id,
+                      run_id=deps.run_id, agent_id=deps.agent_id,
+                      phase="terminal", error_type=type(exc).__name__)
+            raise
         if result_queue is not None:
             for row in rows or []:
                 result_queue.put_nowait({
@@ -1259,7 +1300,9 @@ class AgentRunner:
                 )
             return True
         except Exception as exc:
-            logger.error("Message status finalization failed: {}", type(exc).__name__)
+            log_event("message_persistence_failed", session_id=session_id,
+                      run_id=deps.run_id, agent_id=deps.agent_id,
+                      phase="status_finalization", error_type=type(exc).__name__)
             return False
 
     def _publish_run_complete(
@@ -1393,6 +1436,15 @@ class AgentRunner:
         try:
             result = await generate_title(
                 model=self.agent.model,
+                provider_type=self._provider_type,
+                diagnostic_fields={
+                    "session_id": session_id,
+                    "run_id": deps.run_id,
+                    "agent_id": deps.agent_id,
+                    "model_id": self._model_id,
+                    "model_name": self._model_name,
+                    "provider_name": self._provider_type,
+                },
                 user_text=message,
                 context_refs=context_refs,
                 attachments=attachments,
@@ -1422,6 +1474,9 @@ class AgentRunner:
                 },
             )
         except Exception as exc:  # noqa: BLE001 - fallback remains authoritative
+            log_event("title_generation_failed", session_id=session_id, run_id=deps.run_id,
+                      agent_id=deps.agent_id, model_id=self._model_id,
+                      phase="title_update", error_type=type(exc).__name__)
             logger.warning(
                 "Model title persistence failed for session {}: {}",
                 session_id,
@@ -1509,6 +1564,8 @@ class AgentRunner:
                     deferred_tool_results=deferred_tool_results,
                 )
             except BaseException as exc:
+                self._log_run_terminal(run_event, status="cancelled" if isinstance(exc, (RunCancelled, asyncio.CancelledError)) else "failed",
+                                       started_at=started_at, error=exc, phase="history")
                 await self._finish_run_event(
                     run_event,
                     status="cancelled" if isinstance(exc, (RunCancelled, asyncio.CancelledError)) else "failed",
@@ -1536,6 +1593,8 @@ class AgentRunner:
                     pre_persisted_user=prepared.pre_persisted_user,
                 )
             except BaseException as exc:
+                self._log_run_terminal(run_event, status="cancelled" if isinstance(exc, (RunCancelled, asyncio.CancelledError)) else "failed",
+                                       started_at=started_at, error=exc, phase="input")
                 await self._finish_run_event(
                     run_event,
                     status=(
@@ -1570,6 +1629,8 @@ class AgentRunner:
                     **({"capabilities": [progress]} if progress is not None else {}),
                 )
             except BaseException as exc:
+                self._log_run_terminal(run_event, status="cancelled" if isinstance(exc, (RunCancelled, asyncio.CancelledError)) else "failed",
+                                       started_at=started_at, error=exc, phase="agent")
                 if progress is not None:
                     # Non-streaming callers also preserve completed message facts.
                     with anyio.CancelScope(shield=True):
@@ -1610,6 +1671,8 @@ class AgentRunner:
                     terminal_status="pending" if isinstance(result.output, DeferredToolRequests) else "completed",
                 )
             except BaseException as exc:
+                self._log_run_terminal(run_event, status="cancelled" if isinstance(exc, (RunCancelled, asyncio.CancelledError)) else "failed",
+                                       started_at=started_at, error=exc, phase="persistence")
                 with anyio.CancelScope(shield=True):
                     cancelled = isinstance(exc, (RunCancelled, asyncio.CancelledError))
                     await self._close_saved_messages(
@@ -1664,15 +1727,8 @@ class AgentRunner:
         )
         if updated_run_event is not None:
             response["session_event"] = updated_run_event.public_dict()
-        log_model_requests(
-            result.new_messages(),
-            conversation_id=deps.conversation_id,
-            run_id=deps.run_id,
-            agent_id=deps.agent_id,
-            session_id=session_id,
-        )
         log_event(
-            "agent_run_completed",
+            "agent_run_pending" if terminal_status == "pending" else "agent_run_completed",
             conversation_id=deps.conversation_id,
             run_id=deps.run_id,
             agent_id=deps.agent_id,
@@ -1912,6 +1968,8 @@ class AgentRunner:
                     session_event_queue=session_events,
                 )
             except BaseException as exc:
+                self._log_run_terminal(run_event, status="cancelled" if isinstance(exc, (RunCancelled, asyncio.CancelledError)) else "failed",
+                                       started_at=started_at, error=exc, phase="history")
                 failed_run_event = await self._finish_run_event(
                     run_event,
                     status=(
@@ -1953,6 +2011,7 @@ class AgentRunner:
                     pre_persisted_user=prepared.pre_persisted_user,
                 )
             except Exception as exc:  # attachment/media validation before model start
+                self._log_run_terminal(run_event, status="failed", started_at=started_at, error=exc, phase="input")
                 logger.warning(
                     "Agent input preparation failed for session {}: {}",
                     session_id,
@@ -2099,18 +2158,6 @@ class AgentRunner:
                                         published_tool_calls[tool_call_id] = str(mapped.get("tool") or "tool")
                                     elif event_type == "tool_result" and tool_call_id:
                                         published_tool_calls.pop(tool_call_id, None)
-                                    if event_type in {"tool_call", "tool_result", "tool_call_removed"}:
-                                        log_event(
-                                            "agent_tool_event",
-                                            conversation_id=deps.conversation_id,
-                                            run_id=deps.run_id,
-                                            agent_id=deps.agent_id,
-                                            session_id=session_id,
-                                            phase=event_type,
-                                            tool=mapped.get("tool"),
-                                            tool_call_id=tool_call_id,
-                                            source=mapped.get("source") or "tool",
-                                        )
                                     yield enriched
                         break
                     except Exception as exc:
@@ -2211,13 +2258,6 @@ class AgentRunner:
                             dangling_tool_message=failure_diagnostic["message"],
                             terminal_status="failed",
                         ) or history_persisted
-                        log_model_requests(
-                            failed_messages,
-                            conversation_id=deps.conversation_id,
-                            run_id=deps.run_id,
-                            agent_id=deps.agent_id,
-                            session_id=session_id,
-                        )
                     except Exception as persistence_exc:
                         history_persisted = False
                         logger.exception(
@@ -2272,6 +2312,11 @@ class AgentRunner:
                 return
             finally:
                 cancelled_run_event = None
+                if cancelled_run is not None:
+                    self._log_run_terminal(
+                        run_event, status="cancelled", started_at=started_at, usage=cancelled_run.usage,
+                        reason=active_run.cancel_reason or "task_cancelled_unknown",
+                    )
                 if cancelled_run is not None and not run_published:
                     official_cancelled = cancelled_run.new_messages()
                     if progress is not None:
@@ -2376,31 +2421,6 @@ class AgentRunner:
                     cache_metrics_available=cache_usage_available(pending),
                 ),
             )
-            log_model_requests(
-                pending,
-                conversation_id=deps.conversation_id,
-                run_id=deps.run_id,
-                agent_id=deps.agent_id,
-                session_id=session_id,
-            )
-            log_event(
-                "agent_run_cancelled",
-                conversation_id=deps.conversation_id,
-                run_id=deps.run_id,
-                agent_id=deps.agent_id,
-                session_id=session_id,
-                **run_metrics(
-                    status="cancelled",
-                    started_at=started_at,
-                    model_id=self._model_id,
-                    usage=cancelled_run.usage,
-                    tool_search_calls=(
-                        deps.tool_discovery.search_calls if deps.tool_discovery else 0
-                    ),
-                    compaction=self._compaction_name(deps),
-                    cache_metrics_available=cache_usage_available(pending),
-                ),
-            )
             return
 
         if result is not None:
@@ -2408,6 +2428,7 @@ class AgentRunner:
             try:
                 await persister.flush(session_id, agent_id=deps.agent_id)
             except Exception as exc:
+                self._log_run_terminal(run_event, status="failed", started_at=started_at, error=exc, phase="persistence")
                 failed_run_event = await self._finish_run_event(
                     run_event,
                     status="failed",
@@ -2431,17 +2452,6 @@ class AgentRunner:
                 tool_name = str(buffered_call.get("tool") or "tool")
                 if tool_call_id:
                     published_tool_calls[tool_call_id] = tool_name
-                log_event(
-                    "agent_tool_event",
-                    conversation_id=deps.conversation_id,
-                    run_id=deps.run_id,
-                    agent_id=deps.agent_id,
-                    session_id=session_id,
-                    phase="tool_call",
-                    tool=tool_name,
-                    tool_call_id=tool_call_id or None,
-                    source=buffered_call.get("source") or "tool",
-                )
                 yield buffered_call
             buffered_ui_tool_calls.clear()
         if title_task is not None:
@@ -2492,16 +2502,8 @@ class AgentRunner:
                 cache_usage_available(result.new_messages()) if result is not None else False
             ),
         )
-        if result is not None:
-            log_model_requests(
-                result.new_messages(),
-                conversation_id=deps.conversation_id,
-                run_id=deps.run_id,
-                agent_id=deps.agent_id,
-                session_id=session_id,
-            )
         log_event(
-            "agent_run_completed",
+            "agent_run_pending" if metrics["status"] == "pending" else "agent_run_completed",
             conversation_id=deps.conversation_id,
             run_id=deps.run_id,
             agent_id=deps.agent_id,

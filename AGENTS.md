@@ -12,10 +12,17 @@
 | 项 | 内容 |
 | --- | --- |
 | **是什么** | 通用 AI Agent 全栈：FastAPI 后端 + Pydantic AI 运行时 + 静态前端 |
-| **产品版本** | `deep_agent.__version__`为唯一来源；当前`0.8.5`，数据库Head为`002` |
+| **产品版本** | `deep_agent.__version__`为唯一来源；当前`0.9.6`，数据库Head为`002` |
 | **启动** | 本地 Test 联调固定使用下方命令；部署入口才使用 `deep_agent.main:app` |
 | **测试** | `PYTHONPATH=src python3.12 -m unittest discover -s tests -p "test_*.py" -v` |
 | **配置** | 仓库根 `.env`（`DEEP_AGENT_*` / `DEEP_AGENT_DBMS_*` / `DEEP_AGENT_SQLITE_PATH`） |
+
+诊断中心分「日志 / 会话」两个入口：见[日志指南](docs/guides/diagnostic-logs.md)和[会话指南](docs/guides/diagnostic-sessions.md)。
+会话概览、列表和跨用户只读详情统一使用管理员 `/diagnostics/sessions` 接口；统计只读取现有会话与真实事件，
+用户维度为平台账号（包含渠道会话的归属账号），不解析企微发送人，不新增统计表或事件。
+`diagnostics/` 是独立、尽力写入的安全 JSONL 日志模块，不写会话事件、不改变业务执行。
+日志查询限当前实例 API/网关；所有诊断接口均校验管理员，普通 Session 权限保持不变。
+新增日志只注册固定事件摘要并提交安全白名单字段，禁止正文、参数、结果、凭据和异常原文。
 
 ### 本地 Test 联调固定启动命令
 

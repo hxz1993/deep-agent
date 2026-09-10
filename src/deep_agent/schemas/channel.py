@@ -112,6 +112,7 @@ class ChannelAccountResponse(BaseModel):
     transport: str
     bot_id: str
     secret_set: bool
+    secret_masked: str | None = None
     agent_id: str
     agent_name: str | None = None
     session_user_id: str

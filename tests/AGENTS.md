@@ -55,6 +55,13 @@ tests/
 
 ## 单元测试（`unit/`）
 
+诊断日志定向验证：`test_diagnostics_runtime.py`（轮转、预算、并发、故障隔离）、
+`test_diagnostics_query.py`（受控文件、管理员权限、游标及扫描预算）、
+`test_runtime_diagnostics.py` / `test_channel_diagnostics.py`（真实 SDK/Runner、PTC、UI 等待、取消、持久化及投递失败），
+`test_diagnostic_runner_equivalence.py`（真实 Runner + SQLite，日志启用/关闭/写入失败时请求、调用、SSE 与历史等价）。
+使用隔离临时日志目录；日志开关或写入失败不能改变模型/工具次数、参数、返回、异常、SSE 和落库。
+不要向真实群发送日志验收消息，也不能把真实凭证、模型正文或日志原文写进夹具。
+
 | 文件 | 覆盖 |
 | --- | --- |
 | `test_agent_max_requests.py` | 全局 request 上限、旧 Agent 字段 422 兼容提示 |

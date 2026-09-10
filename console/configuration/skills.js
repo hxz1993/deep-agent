@@ -4,6 +4,117 @@ const skillsAdmin = {
   details: new Map(),
   uploadMode: "install",
   moreMenuDismissController: null,
+  installQueue: [],
+  installing: false,
+
+  renderInstallQueue() {
+    const states = {
+      queued: { label: "待安装", icon: "clock-3" },
+      uploading: { label: "安装中", icon: "loader-circle" },
+      done: { label: "已安装", icon: "circle-check" },
+      error: { label: "未安装", icon: "circle-x" },
+      unknown: { label: "待确认", icon: "circle-help" },
+    };
+    document.getElementById("skillInstallResults").innerHTML = this.installQueue.map((item) => {
+      const state = states[item.status] || states.unknown;
+      const detail = ["done", "error", "unknown"].includes(item.status)
+        ? `<small class="skill-install-detail">${escapeHtml(item.message)}</small>` : "";
+      return `<li class="skill-install-card" data-status="${item.status}">
+        <span class="skill-install-file-icon" aria-hidden="true"><i data-lucide="file-archive"></i></span>
+        <div class="skill-install-file"><strong title="${escapeHtml(item.file.name)}">${escapeHtml(item.file.name)}</strong><span class="skill-install-file-meta">${this.formatBytes(item.file.size)}</span>${detail}</div>
+        <span class="skill-install-status"><i data-lucide="${state.icon}" aria-hidden="true"></i>${state.label}</span>
+      </li>`;
+    }).join("");
+    window.lucide?.createIcons();
+    for (const id of ["chooseSkillPackagesBtn", "closeSkillInstallBtn", "dismissSkillInstallBtn"]) {
+      document.getElementById(id).disabled = this.installing;
+    }
+    document.getElementById("startSkillInstallBtn").disabled = this.installing || !this.installQueue.some((item) => item.status === "queued");
+    document.getElementById("startSkillInstallBtn").textContent = this.installing ? "正在安装…" : "开始安装";
+  },
+
+  openInstallDialog() {
+    if (this.installing) return;
+    this.installQueue = [];
+    document.getElementById("skillInstallFiles").value = "";
+    document.getElementById("skillInstallMessage").textContent = "选择 ZIP 后开始安装。";
+    this.renderInstallQueue();
+    document.getElementById("skillInstallDialog").showModal();
+  },
+
+  selectInstallFiles(files) {
+    if (this.installing) return;
+    this.installQueue = Array.from(files || [], (file) => {
+      const error = !/\.zip$/i.test(file.name) ? "请选择 ZIP 文件" : file.size > 10 * 1024 * 1024 ? "文件超过 10 MiB" : "";
+      return { file, status: error ? "error" : "queued", message: error || "等待安装" };
+    });
+    document.getElementById("skillInstallMessage").textContent = `已选择 ${this.installQueue.length} 个包 · 各包独立安装，失败不影响已成功的包。`;
+    this.renderInstallQueue();
+  },
+
+  async installSelected() {
+    if (this.installing || !this.installQueue.some((item) => item.status === "queued")) return;
+    this.installing = true;
+    this.renderInstallQueue();
+    let installed = 0;
+    let shouldRefresh = false;
+    try {
+      for (const item of this.installQueue) {
+        if (item.status !== "queued") continue;
+        item.status = "uploading";
+        item.message = "正在上传安装…";
+        this.renderInstallQueue();
+        const form = new FormData();
+        form.append("file", item.file);
+        let stop = false;
+        let rejected = false;
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 120000);
+        try {
+          const response = await daFetch(serviceUrl("/api/v1/skills"), { method: "POST", body: form, signal: controller.signal });
+          if (!response.ok) {
+            // A gateway/server failure may happen after the package was committed.
+            rejected = response.status >= 400 && response.status < 500 && response.status !== 408;
+            let detail = `安装失败（HTTP ${response.status}）`;
+            try {
+              const body = await response.json();
+              detail = window.AdminFormFeedback?.formatDetail(body.detail || body.message) || detail;
+            } catch { /* Retain HTTP status when no JSON is available. */ }
+            stop = response.status === 401 || response.status === 403;
+            if (response.status === 409) detail = "编码已存在，未覆盖；请到对应 Skill 详情上传替换。";
+            throw new Error(detail);
+          }
+          const result = await response.json();
+          item.status = "done";
+          item.message = `已安装：${result.skill.code}`;
+          installed += 1;
+          this.selectedCode = result.skill.code;
+        } catch (error) {
+          item.status = rejected ? "error" : "unknown";
+          item.message = rejected ? error.message : "未确认安装结果，请刷新列表核实后再操作；不会自动重试。";
+          if (controller.signal.aborted) stop = true;
+        } finally {
+          clearTimeout(timeout);
+        }
+        this.renderInstallQueue();
+        if (stop) {
+          for (const pending of this.installQueue) {
+            if (pending.status === "queued") Object.assign(pending, { status: "error", message: controller.signal.aborted ? "前一包请求超时，未上传。" : "权限不可用，未上传。" });
+          }
+          break;
+        }
+      }
+      const unknown = this.installQueue.filter((item) => item.status === "unknown").length;
+      document.getElementById("skillInstallMessage").textContent = `安装结束：成功 ${installed} 个，未安装 ${this.installQueue.length - installed - unknown} 个${unknown ? `，结果待确认 ${unknown} 个` : ""}。`;
+      shouldRefresh = Boolean(installed || unknown);
+    } finally {
+      this.installing = false;
+      document.getElementById("skillInstallFiles").value = "";
+      this.renderInstallQueue();
+    }
+    // Refreshing the background list must not keep a finished install modal locked.
+    if (shouldRefresh) await this.refresh();
+  },
 
   async refresh() {
     const pane = document.getElementById("skillListPane");
@@ -311,6 +422,17 @@ const skillsAdmin = {
     }
   },
 
+  downloadFilename(response, fallbackName) {
+    const disposition = response.headers.get("Content-Disposition") || "";
+    const encoded = /filename\*=UTF-8''([^;]+)/i.exec(disposition);
+    const plain = /filename=(?:"([^"]+)"|([^;]+))/i.exec(disposition);
+    try {
+      const name = (encoded ? decodeURIComponent(encoded[1]) : plain?.[1] || plain?.[2] || "").trim();
+      if (name.endsWith(".zip") && !/[\\/\x00-\x1f\x7f]/.test(name)) return name;
+    } catch { /* Malformed header: retain the safe fallback. */ }
+    return fallbackName;
+  },
+
   async download(path, fallbackName) {
     const response = await daFetch(serviceUrl(path));
     if (!response.ok) {
@@ -325,7 +447,7 @@ const skillsAdmin = {
     try {
       const anchor = document.createElement("a");
       anchor.href = blobUrl;
-      anchor.download = fallbackName;
+      anchor.download = this.downloadFilename(response, fallbackName);
       document.body.appendChild(anchor);
       anchor.click();
       anchor.remove();
@@ -344,7 +466,7 @@ const skillsAdmin = {
       try {
         await this.download(
           `/api/v1/skills/${encodeURIComponent(skill.code)}/package`,
-          skill.file_name || `${skill.code}.zip`,
+          `${skill.code}.zip`,
         );
       } catch (error) {
         showToast(error.message, true);
@@ -447,8 +569,18 @@ const skillsAdmin = {
       }
     });
     document.getElementById("installSkillBtn")?.addEventListener("click", () => {
-      this.uploadMode = "install";
-      document.getElementById("skillPackageInput")?.click();
+      this.openInstallDialog();
+    });
+    document.getElementById("chooseSkillPackagesBtn")?.addEventListener("click", () => document.getElementById("skillInstallFiles").click());
+    document.getElementById("skillInstallFiles")?.addEventListener("change", (event) => this.selectInstallFiles(event.target.files));
+    document.getElementById("startSkillInstallBtn")?.addEventListener("click", () => this.installSelected());
+    for (const id of ["closeSkillInstallBtn", "dismissSkillInstallBtn"]) {
+      document.getElementById(id)?.addEventListener("click", () => {
+        if (!this.installing) document.getElementById("skillInstallDialog").close();
+      });
+    }
+    document.getElementById("skillInstallDialog")?.addEventListener("cancel", (event) => {
+      if (this.installing) event.preventDefault();
     });
     document.getElementById("skillPackageInput")?.addEventListener("change", (event) => this.upload(event.target.files?.[0]));
   },

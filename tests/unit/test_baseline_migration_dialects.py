@@ -35,6 +35,9 @@ class BaselineMigrationDialectTests(unittest.TestCase):
                 self.assertIn("002", sql)
                 self.assertNotIn("CHAT_MESSAGES", sql)
                 self.assertNotIn("AUXILIARY_MODEL_CONFIGS", sql)
+                self.assertIn("UPDATE LLM_PROVIDERS", sql)
+                self.assertIn("HTTPS://API.DEEPSEEK.COM", sql)
+                self.assertIn("DEEPSEEK-FLASH", sql)
 
 
 if __name__ == "__main__":

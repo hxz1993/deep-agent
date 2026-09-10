@@ -40,7 +40,7 @@ function loadUi() {
 
 test("数据库连接并入全局配置，不再提供独立目录", () => {
   const systemGroup = indexHtml.indexOf(">系统</div>");
-  assert.ok(systemGroup > indexHtml.indexOf('data-tab="ui-tools"'));
+  assert.ok(systemGroup > indexHtml.indexOf('class="console-nav-footer"'));
   assert.ok(systemGroup < indexHtml.indexOf('data-tab="global-settings"'));
   assert.doesNotMatch(indexHtml, /data-tab="auxiliary-models"|辅助模型|辅助工具/);
   assert.doesNotMatch(indexHtml, /data-tab="database-connection"/);

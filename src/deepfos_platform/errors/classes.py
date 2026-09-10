@@ -1,6 +1,6 @@
 import functools
 import itertools
-from typing import Optional
+from typing import Optional, Union
 
 from fastapi.exceptions import HTTPException
 
@@ -50,6 +50,11 @@ class ExpectedError(HTTPException):
 
 class APIError(ExpectedError):
     errno = 99
+    # 上游响应信息与本地 ExpectedError 的 HTTP 200 包装状态分开保存。
+    upstream_message = None
+    upstream_code = None
+    upstream_error_type = None
+    upstream_http_status = None
 
 
 class ServerNotFound(APIError):
@@ -76,6 +81,16 @@ class APIHttpCodeNotOK(APIError):
     msg = "调用外部接口http异常。接口：{}；状态码：{}"
     errno = 5
 
+    def __init__(self, path, status_code, *, message=None, code=None, error_type=None):
+        self.upstream_message = message
+        self.upstream_code = code
+        self.upstream_error_type = error_type
+        self.upstream_http_status = status_code
+        super().__init__(path, status_code)
+        if message:
+            self.msg += f"；原生提示：{message}"
+            self.detail = self.msg
+
 
 APIStatusCodeError = APIHttpCodeNotOK
 APINotAvailError = APINotAvailable
@@ -85,11 +100,16 @@ class APIStatusNotTrue(APIError):
     msg = "调用外部接口返回错误。接口：{}；提示：{}"
     errno = 6
 
+    def __init__(self, path, message, code=None, *, http_status=None, error_type=None):
+        self.upstream_message = message
+        self.upstream_code = code
+        self.upstream_error_type = error_type
+        self.upstream_http_status = http_status
+        super().__init__(path, message or '上游接口返回 status=false', code)
+
     @property
-    def code(self) -> Optional[int]:
-        if len(self.args) >= 3:
-            return self.args[2]
-        return None
+    def code(self) -> Optional[Union[int, str]]:
+        return self.upstream_code
 
 
 class APIResponseParseError(APIError):

@@ -1,9 +1,10 @@
+import { readPresentationSource } from "./shared-presentation-source.mjs";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import vm from "node:vm";
 
-const chatSource = await readFile(new URL("../../../console/chat.js", import.meta.url), "utf8");
+const chatSource = await readPresentationSource("chat.js");
 const workspaceCss = await readFile(new URL("../../../console/workspace.css", import.meta.url), "utf8");
 
 test("工具调用默认是无框透明的灰色普通文本行", () => {

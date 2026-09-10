@@ -6,16 +6,19 @@ import asyncio
 import json
 import logging
 import re
+import time
 from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
 
 from pydantic_ai import Agent
 from pydantic_ai.messages import BinaryContent, UserContent
 from pydantic_ai.models import Model
+from pydantic_ai.models.openai import OpenAIChatModel, OpenAIResponsesModel
 from pydantic_ai.settings import ModelSettings
 from pydantic_ai.usage import UsageLimits
 
 from deep_agent.files.storage import FileStore
+from deep_agent.agent.observability import log_event
 from deep_agent.schemas.attachment import AttachmentRef
 from deep_agent.schemas.context_reference import ContextReference
 
@@ -36,7 +39,24 @@ _TITLE_PROMPT = (
 _TITLE_SETTINGS: ModelSettings = {
     "max_tokens": TITLE_MAX_OUTPUT_TOKENS,
     "temperature": 0.2,
+    "thinking": False,
 }
+
+
+def _title_model_settings(model: Model | str, provider_type: str | None) -> ModelSettings:
+    settings: ModelSettings = dict(_TITLE_SETTINGS)
+    provider = provider_type or getattr(model, "system", None)
+    # New aliases may not yet have an SDK thinking profile. Use the provider's
+    # native off switch without mutating the model shared with the main run.
+    if provider == "deepseek" and isinstance(model, OpenAIResponsesModel):
+        settings["openai_reasoning_effort"] = "none"
+    elif provider in {"deepseek", "moonshotai"} and isinstance(model, OpenAIChatModel):
+        settings["extra_body"] = {"thinking": {"type": "disabled"}}
+    if provider == "moonshotai":
+        # Kimi's allowed temperature changes with its native thinking mode.
+        # Let the provider select the compatible default for this small request.
+        settings.pop("temperature", None)
+    return settings
 
 
 @dataclass(frozen=True)
@@ -162,19 +182,37 @@ async def generate_title(
     attachments: Sequence[AttachmentRef] | None = None,
     file_store: FileStore | None = None,
     request_headers: Mapping[str, str] | None = None,
+    provider_type: str | None = None,
+    diagnostic_fields: Mapping[str, Any] | None = None,
 ) -> TitleGenerationResult | None:
     """Run exactly one title request with the effective first-turn model."""
 
+    started_at = time.perf_counter()
+    fields = dict(diagnostic_fields or {})
+
+    def record(event: str, **facts: Any) -> None:
+        log_event(event, **{
+            **fields,
+            "duration_ms": round((time.perf_counter() - started_at) * 1000),
+            **facts,
+        })
+
+    record("title_generation_started")
     prompt: list[UserContent] = [_safe_title_input(user_text, context_refs, attachments)]
     image_used = False
     image = _first_image(attachments)
     if image is not None:
         if file_store is None:
+            record("title_generation_failed", phase="image_download", reason="file_store_unavailable")
             logger.warning("Title image was present but no FileStore is available")
             return None
         try:
             data = await file_store.download(image.id, request_headers or {})
+        except asyncio.CancelledError:
+            record("title_generation_cancelled", phase="image_download")
+            raise
         except Exception as exc:  # noqa: BLE001 - title failure must not fail chat
+            record("title_generation_failed", phase="image_download", error_type=type(exc).__name__)
             logger.warning("Title image download failed: %s", type(exc).__name__)
             return None
         prompt.append(
@@ -187,21 +225,33 @@ async def generate_title(
         result = await asyncio.wait_for(
             agent.run(
                 prompt,
-                model_settings=_TITLE_SETTINGS,
+                model_settings=_title_model_settings(model, provider_type),
                 usage_limits=UsageLimits(request_limit=1),
             ),
             timeout=TITLE_GENERATION_TIMEOUT_SECONDS,
         )
     except TimeoutError:
+        record("title_generation_failed", phase="model", reason="timeout", error_type="TimeoutError")
         logger.warning(
             "Title generation timed out after %.1fs", TITLE_GENERATION_TIMEOUT_SECONDS
         )
         return None
+    except asyncio.CancelledError:
+        record("title_generation_cancelled", phase="model")
+        raise
     except Exception as exc:  # noqa: BLE001 - fallback title remains authoritative
+        reason = "output_token_limit" if str(exc).startswith("Model token limit (") else "model_error"
+        record("title_generation_failed", phase="model", reason=reason,
+               error_type=type(exc).__name__, http_status=getattr(exc, "status_code", None))
         logger.warning("Title generation failed: %s", type(exc).__name__)
         logger.debug("Title generation traceback", exc_info=True)
         return None
 
     raw = result.output if isinstance(result.output, str) else str(result.output or "")
     title = _clean_title(raw)
+    if title:
+        record("title_generation_completed", input_tokens=result.usage.input_tokens,
+               output_tokens=result.usage.output_tokens)
+    else:
+        record("title_generation_failed", phase="output", reason="empty_title")
     return TitleGenerationResult(title=title, image_used=image_used) if title else None

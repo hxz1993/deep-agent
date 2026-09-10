@@ -94,10 +94,40 @@ test("persisted tool facts and their following SSE presentation frames produce o
     controller.ingest({ event: "tool_call", data: { tool: "lookup", tool_call_id: "a", args: {} } });
     controller.ingest({ event: "session_event_appended", data: { event: result } });
     controller.ingest({ event: "tool_result", data: { tool: "lookup", tool_call_id: "a", result: "完成" } });
-    assert.equal(controller.events().length, 1);
-    assert.equal(controller.events()[0].status, "completed");
-    assert.equal(controller.events()[0].result.result, "完成");
+    assert.equal(controller.events().length, 2);
+    const tool = controller.events().find(row => row.kind === "tool");
+    assert.equal(tool.status, "completed");
+    assert.equal(tool.result.result, "完成");
   });
+});
+
+test("tool-only assistant responses remain visible and exportable without inventing text", () => {
+  const facts = [];
+  let sequence = 0;
+  for (let loop = 0; loop < 4; loop += 1) {
+    const ordinal = loop * 2 + 1;
+    facts.push(fact(`empty-${loop}`, ++sequence, ordinal, 0, { part_kind: "thinking", content: "" }));
+    for (let index = 0; index < (loop % 2 ? 2 : 1); index += 1) {
+      const id = `call-${loop}-${index}`;
+      facts.push(fact(id, ++sequence, ordinal, index + 1, {
+        part_kind: "tool-call", tool_name: "lookup", tool_call_id: id, args: {},
+      }));
+      facts.push(fact(`result-${id}`, ++sequence, ordinal + 1, index, {
+        part_kind: "tool-return", tool_name: "lookup", tool_call_id: id, content: "fixture result",
+      }, "tool/results"));
+    }
+  }
+  const rows = buildTrajectory({ items: facts });
+  const assistants = rows.filter(row => row.kind === "assistant");
+  assert.equal(assistants.length, 4);
+  assert.equal(rows.filter(row => row.kind === "tool").length, 6);
+  assert.equal(assistants.reduce((sum, row) => sum + row.native.event_ids.length, 0), 10);
+  for (const row of assistants) {
+    assert.equal(row.payload.content, null);
+    assert.equal(row.payload.thinking, null);
+    assert.equal(row.summary, `调用 ${row.payload.tool_calls.length} 个工具`);
+  }
+  assert.equal(JSON.parse(JSON.stringify(rows)).filter(row => row.kind === "assistant").length, 4);
 });
 
 test("reused tool call IDs in different loops retain distinct arguments, results, selection and SSE rows", () => {
@@ -117,7 +147,7 @@ test("reused tool call IDs in different loops retain distinct arguments, results
       controller.ingest({ event: "tool_result", data: { tool: "lookup", tool_call_id: "reused", result: `结果${loop}` } });
       assert.match(elements.get("inspectorContent").innerHTML, new RegExp(`结果${loop}`));
     }
-    const rows = controller.events();
+    const rows = controller.events().filter(row => row.kind === "tool");
     assert.equal(rows.length, 2);
     assert.equal(new Set(rows.map((row) => row.id)).size, 2);
     assert.deepEqual(rows.map((row) => row.payload.args), [{ loop: 0 }, { loop: 1 }]);

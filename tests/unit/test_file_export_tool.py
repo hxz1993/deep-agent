@@ -11,6 +11,7 @@ from pydantic_ai.usage import RunUsage
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.files import build_file_export_toolset
 from deep_agent.schemas.attachment import AttachmentRef
+from deepfos_platform.errors.classes import APIStatusNotTrue
 
 
 def _context(
@@ -45,6 +46,56 @@ async def _tool(ctx: RunContext[AgentDeps]):
 
 
 class FileExportToolTests(unittest.IsolatedAsyncioTestCase):
+    async def test_upload_rejection_returns_native_reason_and_does_not_register(self):
+        ctx = _context()
+        tool = await _tool(ctx)
+        failure = APIStatusNotTrue("files/upload", "当前环境不允许上传 html 文件", "FILE_TYPE_DENIED")
+        upload = AsyncMock(side_effect=failure)
+        rows = []
+        with patch("deep_agent.files.storage.PlatformAPI", return_value=SimpleNamespace(file=SimpleNamespace(upload=upload))), \
+             patch("deep_agent.files.storage.SpaceAPI") as space, \
+             patch("deep_agent.agent.tool_errors.log_event", side_effect=lambda e, **f: rows.append((e, f))):
+            with self.assertRaises(ToolFailed) as raised:
+                await tool.call_func({"source": {"type": "content", "content": "private HTML"}, "file_name": "test.html"}, ctx)
+        self.assertIn("当前环境不允许上传 html 文件", str(raised.exception))
+        self.assertIn("FILE_TYPE_DENIED", str(raised.exception))
+        self.assertIs(raised.exception.__cause__, failure)
+        upload.assert_awaited_once()
+        space.assert_not_called()
+        self.assertEqual([f["phase"] for _, f in rows], ["upload", "upload"])
+        self.assertEqual(rows[-1][0], "builtin_operation_failed")
+        self.assertNotIn("private HTML", repr(rows))
+        self.assertNotIn("当前环境不允许", repr(rows))
+
+    async def test_registration_and_cleanup_failures_both_remain_visible(self):
+        ctx = _context()
+        ctx.deps.file_store = SimpleNamespace(
+            upload=AsyncMock(return_value=SimpleNamespace(id="new-file", file_size=4)),
+            register_download=AsyncMock(side_effect=APIStatusNotTrue("record/save", "下载中心无权限", "NO_PERMISSION")),
+            delete=AsyncMock(side_effect=OSError("cleanup unavailable")),
+        )
+        tool = await _tool(ctx)
+        rows = []
+        with patch("deep_agent.agent.tool_errors.log_event", side_effect=lambda e, **f: rows.append((e, f))):
+            with self.assertRaises(ToolFailed) as raised:
+                await tool.call_func({"source": {"type": "content", "content": "test"}, "file_name": "test.txt"}, ctx)
+        message = str(raised.exception)
+        self.assertIn("下载中心无权限", message)
+        self.assertIn("NO_PERMISSION", message)
+        self.assertIn("cleanup unavailable", message)
+        self.assertIn("可能仍有残留", message)
+        self.assertEqual([f["phase"] for e, f in rows if e.endswith("failed")], ["register_download", "rollback_upload"])
+        ctx.deps.file_store.delete.assert_awaited_once_with("new-file", ctx.deps.request_headers)
+
+    async def test_existing_download_business_json_preserves_native_error(self):
+        ctx = _context(attachments=(AttachmentRef(id="file", name="test.txt", mime="text/plain"),))
+        ctx.deps.file_store = SimpleNamespace(download=AsyncMock(return_value=b'{"status":false,"code":"FILE_MISSING","message":"file expired"}'))
+        tool = await _tool(ctx)
+        with self.assertRaises(ToolFailed) as raised:
+            await tool.call_func({"source": {"type": "platform_file", "file_id": "file"}, "file_name": "test.txt"}, ctx)
+        self.assertIn("FILE_MISSING", str(raised.exception))
+        self.assertIn("file expired", str(raised.exception))
+
     async def test_directly_visible_with_platform_context_and_hidden_without_it(self) -> None:
         tool = await _tool(_context())
         self.assertIsNotNone(tool)

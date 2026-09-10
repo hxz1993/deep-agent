@@ -8,6 +8,7 @@ from pydantic_ai import ModelRetry
 from pydantic_ai_harness.tool_output_limits import OverflowStore
 
 from deep_agent.agent.attachment_extractors import AttachmentParseError, paginate_items
+from deep_agent.agent.tool_errors import tool_error_message
 
 TOOL_RESULT_DEFAULT_LINES = 400
 TOOL_RESULT_MAX_LINES = 2_000
@@ -37,8 +38,10 @@ async def read_stored_tool_result(
     limit = min(limit, TOOL_RESULT_MAX_LINES)
     try:
         data = await store.read(handle)
-    except OSError:
-        return {"error": "Stored tool result unavailable. Use the exact authorized overflow handle or rerun the original tool."}
+    except OSError as exc:
+        return {"error": tool_error_message(
+            "Stored tool result unavailable. Verify the exact authorized overflow handle.", exc,
+        )}
 
     lines = data.decode("utf-8", errors="replace").splitlines()
     if pattern is not None:

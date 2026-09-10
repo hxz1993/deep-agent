@@ -26,6 +26,7 @@ from deep_agent.agent.attachment_extractors import (
 from deep_agent.agent.attachments import AttachmentDownloadError, _download_file
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.media_pipeline import is_log_text_attachment, max_upload_bytes
+from deep_agent.agent.tool_errors import observe_tool_operation, tool_error_message
 from deep_agent.files.schema import (
     AttachmentFileRef,
     FileReadResult,
@@ -156,18 +157,22 @@ async def _load_cached(
         return cached
     task = ctx.deps.file_load_tasks.get(key)
     if task is None:
-        task = asyncio.create_task(loader(), name=f"file-load:{key}")
+        async def observed_load() -> bytes:
+            async with observe_tool_operation(ctx, "file_read", tool="read_file"):
+                return await loader()
+
+        task = asyncio.create_task(observed_load(), name=f"file-load:{key}")
         ctx.deps.file_load_tasks[key] = task
     try:
         data = await task
     except asyncio.CancelledError:
         raise
     except AttachmentDownloadError as exc:
-        raise ToolFailed(f"{failure_label}下载失败: {exc}") from exc
+        raise ToolFailed(tool_error_message(f"{failure_label}下载失败", exc, ctx.deps.request_headers)) from exc
     except OSError as exc:
-        raise ToolFailed(f"{failure_label}读取失败: {type(exc).__name__}") from exc
+        raise ToolFailed(tool_error_message(f"{failure_label}读取失败", exc, ctx.deps.request_headers)) from exc
     except Exception as exc:
-        raise ToolFailed(f"{failure_label}读取失败: {type(exc).__name__}") from exc
+        raise ToolFailed(tool_error_message(f"{failure_label}读取失败", exc, ctx.deps.request_headers)) from exc
     finally:
         ctx.deps.file_load_tasks.pop(key, None)
     if max_bytes is not None and len(data) > max_bytes:
@@ -190,7 +195,11 @@ async def _parse_cached(
         return cached
     task = ctx.deps.file_parse_tasks.get(key)
     if task is None:
-        task = asyncio.create_task(asyncio.to_thread(parser), name=f"file-parse:{key}")
+        async def observed_parse() -> T:
+            async with observe_tool_operation(ctx, "file_parse", tool="read_file"):
+                return await asyncio.to_thread(parser)
+
+        task = asyncio.create_task(observed_parse(), name=f"file-parse:{key}")
         ctx.deps.file_parse_tasks[key] = task
     try:
         parsed = await task
@@ -199,7 +208,7 @@ async def _parse_cached(
     except AttachmentParseError as exc:
         raise ToolFailed(str(exc)) from exc
     except Exception as exc:
-        raise ToolFailed(f"{failure_label}解析失败: {type(exc).__name__}: {exc}") from exc
+        raise ToolFailed(tool_error_message(f"{failure_label}解析失败", exc, ctx.deps.request_headers)) from exc
     finally:
         ctx.deps.file_parse_tasks.pop(key, None)
     ctx.deps.file_parsed[key] = parsed

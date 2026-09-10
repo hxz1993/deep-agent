@@ -60,6 +60,7 @@ class ChannelAccountsApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(account["session_user_id"], "session-user")
         self.assertNotIn("owner_user_id", account)
         self.assertTrue(account["secret_set"])
+        self.assertEqual(account["secret_masked"], "pla********ret")
         self.assertNotIn("secret", account)
         self.assertNotIn("plain-secret", created.text)
         self.assertTrue({"app_id", "space_id", "language"}.isdisjoint(account))
@@ -89,6 +90,47 @@ class ChannelAccountsApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(retained.status_code, 200, retained.text)
         stored = await self.stores.channel.get_account(account["id"])
         self.assertEqual(stored.secret, "plain-secret")
+
+    async def test_secret_mask_is_safe_for_all_reads_and_changes_after_replacement(self):
+        samples = [
+            ("abcd", "****"),
+            ("abcde", "a********de"),
+            ("abc123456xyz", "abc********xyz"),
+            ("fixture-secret-for-channel-1234", "fixtur********1234"),
+        ]
+        for index, (secret, expected_mask) in enumerate(samples):
+            with self.subTest(length=len(secret)):
+                payload = self.payload()
+                payload.update(name=f"示例渠道 {index}", bot_id=f"bot-{index}", secret=secret)
+                created = await self.request("POST", "/api/v1/channel-accounts", json=payload)
+                self.assertEqual(created.status_code, 201, created.text)
+                path = f"/api/v1/channel-accounts/{created.json()['id']}"
+                detail = await self.request("GET", path)
+                listed = await self.request("GET", "/api/v1/channel-accounts")
+                for response in (created, detail):
+                    self.assertEqual(response.json()["secret_masked"], expected_mask)
+                    self.assertNotIn("secret", response.json())
+                    self.assertNotIn(secret, response.text)
+                self.assertNotIn(secret, listed.text)
+                replacement = "updated-fixture-secret-6789"
+                updated = await self.request("PUT", path, json={"secret": replacement})
+                self.assertEqual(updated.status_code, 200, updated.text)
+                self.assertEqual(updated.json()["secret_masked"], "update********6789")
+                self.assertNotIn(replacement, updated.text)
+                for value in ("", "   "):
+                    retained = await self.request("PUT", path, json={"secret": value})
+                    self.assertEqual(retained.json()["secret_masked"], "update********6789")
+                stored = await self.stores.channel.get_account(created.json()["id"])
+                self.assertEqual(stored.secret, replacement)
+
+    async def test_secret_hint_remains_admin_only(self):
+        created = await self.request("POST", "/api/v1/channel-accounts", json=self.payload())
+        self.app.dependency_overrides.clear()
+        get_context().console_admin_authorizer = ConsoleAdminAuthorizer(AsyncMock(return_value=False))
+        for path in ("/api/v1/channel-accounts", f"/api/v1/channel-accounts/{created.json()['id']}"):
+            denied = await self.request("GET", path, user="ordinary-user")
+            self.assertIn(denied.status_code, (401, 403, 503))
+            self.assertNotIn("secret_masked", denied.text)
 
     async def test_body_cannot_supply_owner_or_platform_credentials(self) -> None:
         payload = self.payload()

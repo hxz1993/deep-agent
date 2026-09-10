@@ -1395,6 +1395,17 @@ dialog.console-action-dialog::backdrop {
 
 .field textarea { resize: vertical; min-height: 80px; }
 
+/* Chromium 对缓存候选预览强制使用 small-control + sans-serif。
+   模型名称采用相同规格，避免预览、选中和手工输入之间发生字体跳变。 */
+@supports (font: -webkit-small-control) {
+  #llmModelModel {
+    font: -webkit-small-control;
+    font-family: sans-serif;
+    height: 32px;
+    padding-block: 6px;
+  }
+}
+
 .field input.mcp-name-readonly {
   background: var(--bg-elev);
   color: var(--text-dim);
@@ -1767,7 +1778,7 @@ dialog.console-action-dialog::backdrop {
   white-space: nowrap;
 }
 .provider-models-section { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
-.provider-section-head h4 { margin: 0; font-size: 14px; }
+.provider-section-head h4 { flex: none; margin: 0; font-size: 14px; white-space: nowrap; }
 .provider-related-models { display: grid; gap: 6px; margin-top: 12px; }
 .provider-related-model {
   display: flex;
@@ -1814,6 +1825,12 @@ dialog.console-action-dialog::backdrop {
 }
 .provider-model-facts > span { display: inline-flex; align-items: center; gap: 4px; }
 .provider-model-facts svg { width: 12px; height: 12px; color: var(--text-faint); }
+.provider-model-test-result { flex: none; font-size: 12px; color: var(--text-dim); white-space: nowrap; cursor: help; }
+.provider-model-test-result:empty { display: none; }
+.provider-model-test-result.testing { color: var(--accent); }
+.provider-model-test-result.success { color: var(--success); }
+.provider-model-test-result.error { color: var(--danger); }
+.provider-section-head > .provider-action-group { flex-wrap: wrap; justify-content: flex-end; }
 .provider-model-delete {
   display: inline-grid;
   flex: none;

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import vm from "node:vm";
 import { parseSkillFrontmatter } from "../../../console/skill-frontmatter.js";
 
 const source = await readFile(
@@ -23,6 +24,151 @@ const consoleStyles = await readFile(
   new URL("../../../console/console.css", import.meta.url),
   "utf8",
 );
+
+test("Skill 下载遵循服务端编码和版本文件名，错误响应头安全回退", () => {
+  const context = { window: {}, document: { addEventListener() {} } };
+  vm.runInNewContext(source, context);
+  const filename = (header) => context.window.skillsAdmin.downloadFilename(
+    { headers: { get: () => header } }, "example-skill.zip",
+  );
+  assert.equal(filename("attachment; filename*=UTF-8''example-skill-v1.1.0.zip"), "example-skill-v1.1.0.zip");
+  assert.equal(filename("attachment; filename=deepagent-skills-export-20260909.zip"), "deepagent-skills-export-20260909.zip");
+  assert.equal(filename("attachment; filename*=UTF-8''example-skill-v1.0%2Bbuild.zip"), "example-skill-v1.0+build.zip");
+  for (const header of [null, "", "attachment; filename*=UTF-8''%ZZ.zip", 'attachment; filename="../secret.zip"',
+    "attachment; filename*=UTF-8''bad%0Aname.zip"]) {
+    assert.equal(filename(header), "example-skill.zip");
+  }
+  assert.match(source, /anchor\.download = this\.downloadFilename\(response, fallbackName\)/);
+  assert.doesNotMatch(source, /skill\.file_name \|\|/);
+});
+
+function installHarness(replies, timers = {}) {
+  const elements = new Map();
+  const calls = [];
+  const context = {
+    window: { AdminFormFeedback: { formatDetail: (value) => String(value) } },
+    document: { addEventListener() {}, getElementById(id) {
+      if (!elements.has(id)) elements.set(id, { textContent: "", innerHTML: "", value: "", disabled: false, showModal() { this.open = true; } });
+      return elements.get(id);
+    } },
+    escapeHtml: (value) => String(value).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll('"', "&quot;"),
+    serviceUrl: (path) => path,
+    FormData: class { append(key, value) { this[key] = value; } },
+    AbortController, setTimeout, clearTimeout, ...timers,
+    daFetch: async (path, options) => {
+      calls.push({ path, ...options });
+      const reply = replies.shift();
+      if (reply instanceof Error) throw reply;
+      return typeof reply === "function" ? reply(options) : reply;
+    },
+  };
+  vm.runInNewContext(source, context);
+  const admin = context.window.skillsAdmin;
+  let refreshes = 0;
+  admin.refresh = async () => { refreshes++; };
+  return { admin, calls, elements, refreshes: () => refreshes };
+}
+const installReply = (status, code = "example-skill") => ({ ok: status === 201, status, json: async () => ({ skill: { code }, detail: "test error" }) });
+
+test("上传说明分段强调，安装包横向卡片以图标文字区分五种状态", () => {
+  const h = installHarness([]);
+  h.admin.installQueue = ["queued", "uploading", "done", "error", "unknown"].map((status) => ({
+    status, file: { name: "<long-package>.zip", size: 2048 }, message: "<safe detail>",
+  }));
+  h.admin.renderInstallQueue();
+  const html = h.elements.get("skillInstallResults").innerHTML;
+  for (const label of ["待安装", "安装中", "已安装", "未安装", "待确认", "2.0 KiB"]) assert.ok(html.includes(label));
+  assert.ok(html.includes("&lt;long-package>.zip"));
+  assert.ok(html.includes("&lt;safe detail>"));
+  assert.match(template, /skill-install-note-number">1\.[\s\S]*<strong>多包新建<\/strong>[\s\S]*skill-install-note-number">2\./);
+  assert.doesNotMatch(template, /skill-install-note-label/);
+  assert.match(consoleStyles, /\.skill-install-note \{[^}]*background: var\(--accent-soft\);/);
+  assert.match(consoleStyles, /\.skill-install-picker \{[^}]*width: 100%;[^}]*min-height: 88px;/);
+  assert.match(consoleStyles, /\.skill-install-card \{[^}]*display: flex;[^}]*border: 0;/);
+  assert.match(consoleStyles, /prefers-reduced-motion: reduce/);
+});
+
+test("批量安装逐包 POST，冲突不覆盖，失败不回滚其他成功包", async () => {
+  const h = installHarness([installReply(201, "one"), installReply(409), installReply(422), installReply(201, "four")]);
+  h.admin.openInstallDialog();
+  assert.equal(h.elements.get("skillInstallDialog").open, true);
+  h.admin.selectInstallFiles(["one.zip", "two.zip", "three.zip", "four.zip"].map((name) => ({ name, size: 12 })));
+  await h.admin.installSelected();
+  assert.deepEqual(Array.from(h.admin.installQueue, (item) => item.status), ["done", "error", "error", "done"]);
+  assert.match(h.admin.installQueue[1].message, /未覆盖/);
+  assert.equal(h.calls.length, 4);
+  assert.ok(h.calls.every((call) => call.method === "POST" && call.path === "/api/v1/skills"));
+  assert.equal(h.refreshes(), 1);
+  await h.admin.installSelected();
+  assert.equal(h.calls.length, 4, "完成后再次点击不重传");
+});
+
+test("安装校验、文件名转义、权限中断与未知网络结果", async () => {
+  const h = installHarness([new Error("network"), installReply(403)]);
+  h.admin.selectInstallFiles([{ name: "<bad>.txt", size: 1 }, { name: "big.zip", size: 11 * 1024 * 1024 },
+    { name: "one.zip", size: 1 }, { name: "two.zip", size: 1 }, { name: "three.zip", size: 1 }]);
+  assert.match(h.elements.get("skillInstallResults").innerHTML, /&lt;bad>/);
+  await h.admin.installSelected();
+  assert.equal(h.calls.length, 2);
+  assert.equal(h.admin.installQueue[2].status, "unknown");
+  assert.match(h.admin.installQueue[4].message, /未上传/);
+  assert.match(h.elements.get("skillInstallMessage").textContent, /结果待确认 1/);
+  assert.equal(h.admin.installing, false);
+});
+
+test("安装期间阻止重复执行和更换文件，弹窗只允许完成后关闭", async () => {
+  let release;
+  const h = installHarness([() => new Promise((resolve) => { release = resolve; })]);
+  h.admin.selectInstallFiles([{ name: "one.zip", size: 1 }]);
+  const pending = h.admin.installSelected();
+  await h.admin.installSelected();
+  h.admin.selectInstallFiles([{ name: "other.zip", size: 1 }]);
+  assert.equal(h.admin.installQueue[0].file.name, "one.zip");
+  assert.equal(h.elements.get("dismissSkillInstallBtn").disabled, true);
+  release(installReply(201));
+  await pending;
+  assert.equal(h.calls.length, 1);
+  assert.equal(h.elements.get("dismissSkillInstallBtn").disabled, false);
+  assert.match(source, /if \(this\.installing\) event\.preventDefault\(\)/);
+  assert.match(template, /id="skillInstallFiles"[^>]*multiple/);
+});
+
+test("安装返回网关或服务错误时标记待确认，不能声称未安装", async () => {
+  const h = installHarness([installReply(502), installReply(500)]);
+  h.admin.selectInstallFiles([{ name: "one.zip", size: 1 }, { name: "two.zip", size: 1 }]);
+  await h.admin.installSelected();
+  assert.deepEqual(Array.from(h.admin.installQueue, (item) => item.status), ["unknown", "unknown"]);
+  assert.equal(h.refreshes(), 1);
+  assert.equal(h.calls.length, 2);
+});
+
+test("上传超时解锁弹框、保留待确认状态并停止后续包，不自动重试", async () => {
+  let expire;
+  const h = installHarness([(options) => new Promise((_, reject) => {
+    options.signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+  })], { setTimeout: (fn) => { expire = fn; return 1; }, clearTimeout() {} });
+  h.admin.selectInstallFiles([{ name: "one.zip", size: 1 }, { name: "two.zip", size: 1 }]);
+  const pending = h.admin.installSelected();
+  assert.equal(typeof expire, "function");
+  expire();
+  await pending;
+  assert.equal(h.calls.length, 1);
+  assert.equal(h.admin.installQueue[0].status, "unknown");
+  assert.match(h.admin.installQueue[1].message, /未上传/);
+  assert.equal(h.elements.get("dismissSkillInstallBtn").disabled, false);
+});
+
+test("安装完成后列表刷新等待不锁住弹框", async () => {
+  let release;
+  const h = installHarness([installReply(201)]);
+  h.admin.refresh = () => new Promise((resolve) => { release = resolve; });
+  h.admin.selectInstallFiles([{ name: "one.zip", size: 1 }]);
+  const pending = h.admin.installSelected();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(h.admin.installing, false);
+  assert.equal(h.elements.get("dismissSkillInstallBtn").disabled, false);
+  release(); await pending;
+});
 
 test("配置中心提供独立 Skill 页面而不是工具包分类", () => {
   assert.match(shell, /data-tab="skills"/);

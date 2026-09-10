@@ -5,11 +5,13 @@ import unittest
 from unittest.mock import AsyncMock, patch
 
 from httpx import AsyncClient
+from pydantic_ai.models.test import TestModel
 
 from deep_agent.core.context import get_context
 from deep_agent.schemas.channel import ChannelAccountUpdate
 from deep_agent.security import ConsoleAdminAuthorizer
 from tests.integration.test_channel_accounts_api import ChannelAccountsApiTests
+from tests.integration.helpers.chat import mock_request_disconnect, parse_sse_events
 
 
 class ChannelSessionControlTests(unittest.IsolatedAsyncioTestCase):
@@ -27,6 +29,23 @@ class ChannelSessionControlTests(unittest.IsolatedAsyncioTestCase):
         resolved = await self.stores.channel.resolve_binding(account_id=account_id, peer_type="single", peer_id="external")
         headers = {"user": "not-the-session-owner", "X-Deep-Agent-Channel-Account": account_id, "X-Deep-Agent-Channel-Token": "fixture-internal"}
         return account_id, resolved.session, headers
+
+    async def test_channel_title_stays_deterministic_without_title_model_call(self):
+        _, session, headers = await self.prepare()
+        with patch.dict(os.environ, {"DEEP_AGENT_CHANNEL_INTERNAL_TOKEN": "fixture-internal"}), \
+             patch("deep_agent.agent.factory._resolve_model", return_value=TestModel(call_tools=[], custom_output_text="渠道回复")), \
+             patch("deep_agent.agent.title_generator.generate_title", new_callable=AsyncMock) as title, \
+             mock_request_disconnect():
+            async with AsyncClient(transport=self.transport, base_url="http://test") as client:
+                response = await client.post("/api/v1/chat/stream", headers=headers,
+                    json={"agent_id": self.agent_id, "session_id": session.session_id, "message": "测试渠道标题", "capabilities": []})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertTrue(any(event["type"] == "final" for event in parse_sse_events(response.text)), response.text)
+        title.assert_not_awaited()
+        events = await self.stores.coordinator.list_events(session.session_id, event_type="session/title")
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0].payload["source"], "channel")
+        self.assertEqual(events[0].payload["title"], "User｜external")
 
     async def test_commands_catalog_has_admin_gate_and_no_gateway_dependency(self):
         with patch.dict(os.environ, {"DEEP_AGENT_CHANNEL_GATEWAY_URL": ""}):

@@ -150,6 +150,7 @@ function assistantLoopPayload(parts = []) {
 
 function assistantLoopSummary(payload = {}) {
   if (payload.content) return valuePreview(payload.content);
+  if (payload.tool_calls?.length) return `调用 ${payload.tool_calls.length} 个工具`;
   return payload.thinking ? "模型处理中" : "模型响应";
 }
 
@@ -379,28 +380,28 @@ export function buildTrajectory(history = {}) {
         return null;
       }).filter(Boolean);
       const assistantPayload = assistantLoopPayload(assistantParts);
-      if (assistantPayload.thinking || assistantPayload.content) {
-        const assistant = newEvent({
-          id: group.event.event_id,
-          kind: "assistant",
-          inputSequence: Math.max(inputSequence, 1),
-          runId: event.run_id || message.run_id || null,
-          timestamp: group.event.created_at || message.timestamp || null,
-          status: event.status || message.state || "completed",
-          part: { content: assistantPayload.content },
-          payload: assistantPayload,
-          native: { ...messageMeta(message), event_ids: [...group.eventIds] },
-        });
-        assistant.summary = assistantLoopSummary(assistantPayload);
-        assistant.sequence = Number(group.event.sequence || 0);
-        assistant.turn_id = event.turn_id || null;
-        assistant.event_type = event.event_type;
-        assistant.timestamp_end = event.updated_at || assistant.timestamp;
-        if (group.row) Object.assign(group.row, assistant);
-        else {
-          group.row = assistant;
-          projected.push(assistant);
-        }
+      // A tool-only response is still a persisted assistant decision. Keep one
+      // row per SDK message, including empty thinking, rather than hiding facts.
+      const assistant = newEvent({
+        id: group.event.event_id,
+        kind: "assistant",
+        inputSequence: Math.max(inputSequence, 1),
+        runId: event.run_id || message.run_id || null,
+        timestamp: group.event.created_at || message.timestamp || null,
+        status: event.status || message.state || "completed",
+        part: { content: assistantPayload.content },
+        payload: assistantPayload,
+        native: { ...messageMeta(message), event_ids: [...group.eventIds] },
+      });
+      assistant.summary = assistantLoopSummary(assistantPayload);
+      assistant.sequence = Number(group.event.sequence || 0);
+      assistant.turn_id = event.turn_id || null;
+      assistant.event_type = event.event_type;
+      assistant.timestamp_end = event.updated_at || assistant.timestamp;
+      if (group.row) Object.assign(group.row, assistant);
+      else {
+        group.row = assistant;
+        projected.push(assistant);
       }
     }
 
@@ -562,6 +563,10 @@ function kindBadge(kind) {
 
 function isRunCodeEvent(event) {
   return event?.kind === "tool" && event?.label === "run_code";
+}
+
+function isPythonCodeEvent(event) {
+  return event?.kind === "tool" && ["run_code", "execute_python"].includes(event?.label);
 }
 
 function eventKindClass(event) {
@@ -920,7 +925,7 @@ function highlightPython(code) {
 
 function renderRunCode(event) {
   const code = runCodeSource(event);
-  if (!code) return `<p class="trajectory-summary-empty">本次代码编排没有可展示的源代码。</p>`;
+  if (!code) return `<p class="trajectory-summary-empty">本次调用没有可展示的源代码。</p>`;
   return `<section class="trajectory-code-view">
     <header><span>Python</span><button type="button" data-copy-run-code>${icon("copy")}复制</button></header>
     <pre><code class="hljs language-python">${highlightPython(code)}</code></pre>
@@ -930,7 +935,7 @@ function renderRunCode(event) {
 function detailTabs(event) {
   if (event.kind === "title") return [["summary", "Summary"], ["request", "Request"], ["result", "Result"]];
   const tabs = [["summary", "Summary"]];
-  if (isRunCodeEvent(event)) tabs.push(["code", "Code"]);
+  if (isPythonCodeEvent(event)) tabs.push(["code", "Code"]);
   if (hasMeaningfulValue(event.payload)) tabs.push(["payload", "Payload"]);
   if (["input", "assistant"].includes(event.kind)) {
     tabs.push(["preview", "Preview"], ["raw", "Raw"]);
@@ -989,14 +994,32 @@ function renderDetail(event, activeTab = "summary", events = []) {
     <div class="${detailBodyClass}">${content}</div>`;
 }
 
-export function createTrajectoryController({ state }) {
-  const root = document.getElementById("trajectoryView");
-  const list = document.getElementById("trajectoryList");
-  const detail = document.getElementById("inspectorContent");
-  const conversationTab = document.getElementById("conversationViewTab");
-  const trajectoryTab = document.getElementById("trajectoryViewTab");
-  const search = document.getElementById("trajectorySearch");
-  const exportButton = document.getElementById("exportTrajectoryBtn");
+export function createTrajectoryController({ state = {}, host = null, readOnly = false, onViewChange = null, onInspector = null, onOpenInspector = null, onSelectEvent = null } = {}) {
+  const scope = host || document;
+  const byId = (id) => host ? host.querySelector(`[data-session-role="${id}"]`) : document.getElementById(id);
+  const query = (selector) => scope.querySelector(selector);
+  const queryAll = (selector) => scope.querySelectorAll(selector);
+  const bindings = [];
+  const listen = (element, event, handler) => { if (element) { element.addEventListener(event, handler); bindings.push(() => element.removeEventListener(event, handler)); } };
+  let disposed = false;
+  let animationFrame = null;
+  let activeView = "conversation";
+  const root = byId("trajectoryView");
+  const list = byId("trajectoryList");
+  const detail = byId("inspectorContent");
+  const conversationTab = byId("conversationViewTab");
+  const trajectoryTab = byId("trajectoryViewTab");
+  const search = byId("trajectorySearch");
+  const exportButton = byId("exportTrajectoryBtn");
+  let exportReady = !readOnly;
+  function setExportReady(ready) {
+    exportReady = Boolean(ready);
+    if (exportButton) {
+      exportButton.disabled = !exportReady;
+      exportButton.title = exportReady ? "导出轨迹" : "轨迹完整读取后可导出";
+    }
+  }
+  setExportReady(exportReady);
   if (!root || !list || !detail || !conversationTab || !trajectoryTab) return null;
 
   let history = { items: [] };
@@ -1017,31 +1040,38 @@ export function createTrajectoryController({ state }) {
     return leftSequence - rightSequence;
   });
 
-  function selectView(view) {
+  function selectView(view, { notify = true } = {}) {
+    if (disposed) return;
+    const changed = activeView !== view;
+    activeView = view === "trajectory" ? "trajectory" : "conversation";
     const trajectoryActive = view === "trajectory";
-    document.querySelector("main.chat")?.classList.toggle("trajectory-active", trajectoryActive);
+    query("main.chat")?.classList.toggle("trajectory-active", trajectoryActive);
     root.classList.toggle("hidden", !trajectoryActive);
-    document.getElementById("messages")?.classList.toggle("hidden", trajectoryActive);
-    document.querySelector("main.chat > .composer")?.classList.toggle("hidden", trajectoryActive);
+    byId("messages")?.classList.toggle("hidden", trajectoryActive);
+    query("main.chat > .composer")?.classList.toggle("hidden", trajectoryActive);
     conversationTab.classList.toggle("active", !trajectoryActive);
     trajectoryTab.classList.toggle("active", trajectoryActive);
     conversationTab.setAttribute("aria-selected", String(!trajectoryActive));
     trajectoryTab.setAttribute("aria-selected", String(trajectoryActive));
-    document.getElementById("inspectorPane")?.classList.toggle("trajectory-inspector", trajectoryActive);
+    byId("inspectorPane")?.classList.toggle("trajectory-inspector", trajectoryActive);
     if (trajectoryActive) {
-      window.DeepAgentConsoleWorkspace?.openInspectorPane?.();
+      if (onOpenInspector) onOpenInspector();
+      else if (!host) window.DeepAgentConsoleWorkspace?.openInspectorPane?.();
       scheduleRender();
     } else {
-      window.DeepAgentConsoleWorkspace?.renderInspector?.();
+      if (onInspector) onInspector();
+      else if (!host) window.DeepAgentConsoleWorkspace?.renderInspector?.();
     }
+    if (changed && notify) onViewChange?.(activeView);
   }
 
   function scheduleRender() {
-    if (renderQueued) return;
+    if (disposed || renderQueued) return;
     renderQueued = true;
-    window.requestAnimationFrame(() => {
+    animationFrame = window.requestAnimationFrame(() => {
+      animationFrame = null;
       renderQueued = false;
-      render();
+      if (!disposed) render();
     });
   }
 
@@ -1071,16 +1101,17 @@ export function createTrajectoryController({ state }) {
     const events = allEvents();
     const stats = trajectoryStats(events);
     const visible = filterTrajectory(events, { mode, query: search?.value });
-    document.getElementById("trajectoryCallCount").textContent = String(stats.calls);
-    renderRows(visible);
+    if (byId("trajectoryCallCount")) byId("trajectoryCallCount").textContent = String(stats.calls);
     const selected = events.find((event) => event.id === selectedId) || visible[0] || null;
     selectedId = selected?.id || null;
-    if (document.querySelector("main.chat")?.classList.contains("trajectory-active")) {
+    renderRows(visible);
+    if (query("main.chat")?.classList.contains("trajectory-active")) {
       detail.innerHTML = renderDetail(selected, detailTab, events);
       globalThis.DeepAgentMarkdown?.renderDiagrams?.(detail);
       if (selectedId === renderedSelectedId) detail.scrollTop = detailScrollTop;
     }
     list.scrollTop = listScrollTop;
+    if (selectedId !== renderedSelectedId) onSelectEvent?.(selected);
     renderedSelectedId = selectedId;
     window.lucide?.createIcons();
   }
@@ -1338,18 +1369,20 @@ export function createTrajectoryController({ state }) {
   }
 
   function exportTrace() {
+    if (!exportReady || disposed) return;
     const payload = {
       format: "deepagent-session-trajectory",
       version: 1,
-      source: "history+sse",
+      source: readOnly ? "history" : "history+sse",
       generated_at: new Date().toISOString(),
       session_id: state.sessionId || history.session_id || null,
       conversation_id: state.conversationId || history.conversation_id || null,
       limitations: [
         "不包含系统提示词、动态工具Schema、认证Header、Token或Cookie",
         "历史轨迹没有持久化逐Part精确耗时",
+        "同一模型响应的 Part 合并展示；native.event_ids 保留对应数据库事件 ID",
       ],
-      events: allEvents(),
+      events: redactTrajectoryValue(allEvents()),
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
@@ -1361,27 +1394,27 @@ export function createTrajectoryController({ state }) {
     URL.revokeObjectURL(url);
   }
 
-  document.getElementById("chatViewTabs")?.addEventListener("click", (event) => {
+  listen(byId("chatViewTabs"), "click", (event) => {
     const button = event.target.closest("[data-chat-view]");
     if (button) selectView(button.dataset.chatView);
   });
-  document.querySelector(".trajectory-modes")?.addEventListener("click", (event) => {
+  listen(query(".trajectory-modes"), "click", (event) => {
     const button = event.target.closest("[data-trajectory-mode]");
     if (!button) return;
     mode = button.dataset.trajectoryMode;
-    document.querySelectorAll("[data-trajectory-mode]").forEach((item) => item.classList.toggle("active", item === button));
+    queryAll("[data-trajectory-mode]").forEach((item) => item.classList.toggle("active", item === button));
     scheduleRender();
   });
-  search?.addEventListener("input", scheduleRender);
-  exportButton?.addEventListener("click", exportTrace);
-      list.addEventListener("click", (event) => {
+  listen(search, "input", scheduleRender);
+  listen(exportButton, "click", exportTrace);
+  listen(list, "click", (event) => {
         const row = event.target.closest("[data-trajectory-id]");
     if (!row) return;
     selectedId = row.dataset.trajectoryId;
     detailTab = "summary";
     scheduleRender();
   });
-  detail.addEventListener("click", (event) => {
+  listen(detail, "click", (event) => {
     const copyFile = event.target.closest("[data-copy-file-id]");
     if (copyFile) {
       copyTextToClipboard(copyFile.dataset.copyFileId || "").then(() => {
@@ -1419,5 +1452,32 @@ export function createTrajectoryController({ state }) {
   });
 
   render();
-  return { setHistory, reset, addUser, ingest, selectView, events: allEvents };
+  function focus({ eventId = null, runId = null } = {}) {
+    const target = allEvents().find((event) => eventId
+      ? event.id === eventId || event.native?.event_id === eventId || event.native?.event_ids?.includes(eventId)
+      : runId && event.run_id === runId);
+    if (!target) return false;
+    selectedId = target.id; detailTab = "summary";
+    mode = "sequence"; if (search) search.value = "";
+    queryAll("[data-trajectory-mode]").forEach((button) => button.classList.toggle("active", button.dataset.trajectoryMode === mode));
+    selectView("trajectory", { notify: false }); render();
+    [...list.querySelectorAll("[data-trajectory-id]")].find((row) => row.dataset.trajectoryId === target.id)?.scrollIntoView?.({ block: "center" });
+    return true;
+  }
+  function snapshot() {
+    return { selectedId, detailTab, mode, view: activeView, query: search?.value || "", listScrollTop: list.scrollTop, detailScrollTop: detail.scrollTop };
+  }
+  function restore(value = {}) {
+    if (value.selectedId && allEvents().some((event) => event.id === value.selectedId)) selectedId = value.selectedId;
+    detailTab = value.detailTab || "summary"; mode = value.mode === "calls" ? "calls" : "sequence";
+    if (search) search.value = value.query || "";
+    queryAll("[data-trajectory-mode]").forEach((button) => button.classList.toggle("active", button.dataset.trajectoryMode === mode));
+    selectView(value.view, { notify: false }); render();
+    list.scrollTop = Number(value.listScrollTop) || 0; detail.scrollTop = Number(value.detailScrollTop) || 0;
+  }
+  function destroy() {
+    disposed = true; if (animationFrame !== null) window.cancelAnimationFrame(animationFrame);
+    bindings.splice(0).forEach((remove) => remove()); historyEvents = []; liveEvents = []; history = {};
+  }
+  return { setHistory, setExportReady, reset, addUser, ingest, selectView, focus, snapshot, restore, destroy, events: allEvents };
 }

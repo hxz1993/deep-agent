@@ -1,11 +1,9 @@
+import { readPresentationSource } from "./shared-presentation-source.mjs";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const chatSource = await readFile(
-  new URL("../../../console/chat.js", import.meta.url),
-  "utf8",
-);
+const chatSource = await readPresentationSource("chat.js");
 const agentSource = await readFile(
   new URL("../../../console/configuration/agents.js", import.meta.url),
   "utf8",
@@ -14,10 +12,7 @@ const template = await readFile(
   new URL("../../../console/workspace-template.html", import.meta.url),
   "utf8",
 );
-const workspaceSource = await readFile(
-  new URL("../../../console/workspace.js", import.meta.url),
-  "utf8",
-);
+const workspaceSource = await readPresentationSource("workspace.js");
 
 test("附件上传不再要求可配置的附件工具包", () => {
   assert.match(agentSource, /builtin:\s*"内置工具"/);

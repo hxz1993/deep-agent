@@ -7,6 +7,7 @@
 | ID | 事项 | 当前边界 | 启动条件 |
 | --- | --- | --- | --- |
 | `CLIENT-EVENTS-001` | 电子表格助手与DeepCube助手适配Event API | 本仓只审计和交接，不跨仓修改 | 客户端维护方按v0.6.0契约排期 |
+| `ASSISTANT-INSTALL-001` | [业务助手初始化与升级](24-assistant-installation/README.md) | 讨论稿；两业务清单已核对，不实现安装器、不新增表 | 确认包发布责任、固定ID接管、字段保护及首版操作边界后排期 |
 | `OPS-SSE-001` | 网关SSE Read Timeout至少330秒、建议360秒并关闭缓冲 | 应用已每约10秒发送压缩进度；网关由部署平台维护 | 发布0.6.0 Test镜像时同步调整并验证 |
 | `ATT-CONFIG-001` | 平台附件扩展名白名单补充MD/HTML/XML/WEBP/GIF/WAV | 只改环境配置，不扩展`read_file`或Provider模态 | 各环境完成六种最小文件上传验证 |
 | `WEB-PROVIDER-VERIFY-001` | Kimi、Tavily、Exa、You.com真实Key联调 | v0.6.5已完成协议、Mock全链路和测试入口；不再改架构 | 获得各Provider Key后补真实搜索验收 |

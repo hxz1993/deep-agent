@@ -616,6 +616,31 @@
     </form>
   </dialog>
 
+  <dialog class="modal" id="skillInstallDialog" aria-labelledby="skillInstallTitle">
+    <div class="modal-header">
+      <h3 id="skillInstallTitle">上传安装 Skill</h3>
+      <button type="button" class="icon-btn" id="closeSkillInstallBtn" aria-label="关闭"><i data-lucide="x"></i></button>
+    </div>
+    <div class="modal-body">
+      <aside class="skill-install-note" aria-label="上传说明">
+        <p><span class="skill-install-note-number">1.</span>支持<strong>多包新建</strong>，已有编码<strong>不覆盖</strong>；更新请用详情“上传”。</p>
+        <p><span class="skill-install-note-number">2.</span><strong>ZIP 含 SKILL.md · 每包 ≤ 10 MiB</strong>；解压 ≤ 50 MiB / 256 文件。</p>
+      </aside>
+      <button type="button" class="skill-install-picker" id="chooseSkillPackagesBtn" aria-label="选择 ZIP 文件">
+        <i data-lucide="upload"></i>
+        <span><strong>选择 ZIP 文件</strong><small>可多选；“导出全部”请先解压，再选择其中的包</small></span>
+        <i data-lucide="plus" class="skill-install-picker-plus"></i>
+      </button>
+      <input class="hidden" type="file" id="skillInstallFiles" accept=".zip,application/zip" multiple />
+      <ul class="skill-install-results" id="skillInstallResults" aria-live="polite"></ul>
+      <div class="skill-install-message" id="skillInstallMessage" role="status"></div>
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="btn" id="dismissSkillInstallBtn">关闭</button>
+      <button type="button" class="btn primary" id="startSkillInstallBtn" disabled>开始安装</button>
+    </div>
+  </dialog>
+
   <dialog class="modal channel-commands-modal" id="channelCommandsModal" aria-labelledby="channelCommandsModalTitle">
     <div class="modal-header">
       <h3 id="channelCommandsModalTitle">快捷命令</h3>
@@ -687,10 +712,6 @@
       <div class="modal-body">
         <div class="mcp-editor-workbench">
           <section class="mcp-editor-section mcp-editor-basics">
-            <div class="mcp-editor-section-head">
-              <h4>基本信息</h4>
-              <p>定义服务名称和用途；是否参与运行由 Agent 关联决定。</p>
-            </div>
             <label class="field">
               <span>名称</span>
               <input type="text" id="mcpName" required maxlength="191" pattern="[a-zA-Z][a-zA-Z0-9_-]*" />
@@ -703,10 +724,6 @@
           </section>
 
           <section class="mcp-editor-section mcp-editor-connection">
-            <div class="mcp-editor-section-head">
-              <h4>连接与请求上下文</h4>
-              <p>配置传输方式、访问地址、静态 Header 和上下文继承策略。</p>
-            </div>
             <label class="field">
               <span>传输类型</span>
               <select id="mcpTransport">

@@ -144,14 +144,35 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
             [],
         )
         provider_id = str(
-            self._scalar(db_path, "SELECT provider_id FROM llm_models WHERE name='openai:gpt-4o'")
+            self._scalar(db_path, "SELECT provider_id FROM llm_models WHERE name='deepseek-flash'")
         )
         self.assertEqual(len(provider_id), 32)
         self.assertNotIn("-", provider_id)
         self.assertEqual(
             self._scalar(db_path, "SELECT model_id FROM agents WHERE name='default'"),
-            self._scalar(db_path, "SELECT id FROM llm_models WHERE name='openai:gpt-4o'"),
+            self._scalar(db_path, "SELECT id FROM llm_models WHERE name='deepseek-flash'"),
         )
+        with sqlite3.connect(db_path) as connection:
+            self.assertEqual(
+                connection.execute(
+                    "SELECT name, provider_type, use_default_base_url, base_url, api_key "
+                    "FROM llm_providers"
+                ).fetchall(),
+                [("DeepSeek", "deepseek", 1, "https://api.deepseek.com", None)],
+            )
+            self.assertEqual(
+                connection.execute("SELECT name, model, enabled FROM llm_models").fetchall(),
+                [("deepseek-flash", "deepseek-flash", 1)],
+            )
+            row = connection.execute(
+                "SELECT context_window_tokens, max_output_tokens, input_modalities, tags FROM llm_models"
+            ).fetchone()
+            self.assertEqual(row[:2], (1_000_000, 384_000))
+            self.assertEqual(json.loads(row[2]), ["text", "image"])
+            self.assertEqual(json.loads(row[3]), [
+                "attachment", "reasoning", "tool_call", "structured_output",
+                "temperature", "open_weights", "interleaved",
+            ])
         self.assertEqual(
             json.loads(
                 str(
@@ -163,6 +184,43 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
             ),
             {"status": "not_applicable"},
         )
+
+    async def test_existing_baseline_upgrade_preserves_provider_and_model(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="TMP_to_delete-bootstrap-") as tmpdir:
+            db_path = Path(tmpdir) / "existing.db"
+            config = migrate._build_alembic_config()
+            config.attributes["database_url"] = f"sqlite+aiosqlite:///{db_path}"
+            # A historical revision target retains its released OpenAI defaults.
+            await asyncio.to_thread(command.upgrade, config, "001")
+            for customize in (False, True):
+                if customize:
+                    with sqlite3.connect(db_path) as connection:
+                        connection.execute(
+                            "UPDATE llm_providers SET name='Custom', api_key='test-key'"
+                        )
+                        connection.execute("UPDATE llm_models SET model='custom-model'")
+                with sqlite3.connect(db_path) as connection:
+                    before = connection.execute("SELECT * FROM llm_providers").fetchall()
+                    models_before = connection.execute("SELECT * FROM llm_models").fetchall()
+                await asyncio.to_thread(command.upgrade, config, "head")
+                with sqlite3.connect(db_path) as connection:
+                    self.assertEqual(before, connection.execute("SELECT * FROM llm_providers").fetchall())
+                    self.assertEqual(models_before, connection.execute("SELECT * FROM llm_models").fetchall())
+
+    async def test_restart_does_not_recreate_deleted_defaults(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="TMP_to_delete-bootstrap-") as tmpdir:
+            db_path = Path(tmpdir) / "deleted.db"
+            config = migrate._build_alembic_config()
+            config.attributes["database_url"] = f"sqlite+aiosqlite:///{db_path}"
+            await asyncio.to_thread(command.upgrade, config, "head")
+            with sqlite3.connect(db_path) as connection:
+                connection.execute("DELETE FROM agents")
+                connection.execute("DELETE FROM llm_models")
+                connection.execute("DELETE FROM llm_providers")
+            await asyncio.to_thread(command.upgrade, config, "head")
+            self.assertEqual(self._row_count(db_path, "agents"), 0)
+            self.assertEqual(self._row_count(db_path, "llm_models"), 0)
+            self.assertEqual(self._row_count(db_path, "llm_providers"), 0)
 
     @staticmethod
     def _revision(db_path: Path) -> str:

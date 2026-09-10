@@ -21,6 +21,7 @@ from pydantic_ai.toolsets.abstract import ToolsetTool
 
 from deep_agent.agent.attachments import _download_file
 from deep_agent.agent.deps import AgentDeps
+from deep_agent.agent.tool_errors import observe_tool_operation, tool_error_message
 from deep_agent.capabilities.codes import PTC_PACKAGE_CODE
 from deep_agent.files.storage import FileStore, PlatformFileStore
 from deep_agent.web.proxy_compat import proxy_compatible_web_fetch
@@ -155,7 +156,10 @@ async def _load_authorized_file(
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            raise ToolFailed("当前会话文件读取失败") from exc
+            raise ToolFailed(_redact_result_text(
+                tool_error_message("当前会话文件读取失败", exc, _request_headers(ctx)),
+                payload_secrets(ctx.deps),
+            )) from exc
         ctx.deps.file_bytes[cache_key] = data
 
     if len(data) > MAX_FILE_BYTES:
@@ -247,7 +251,7 @@ async def _load_public_url(url: str) -> tuple[bytes, str, str, str]:
                 ):
                     await asyncio.sleep(_WEB_FETCH_RETRY_DELAY_SECONDS)
                     continue
-            raise ModelRetry("公网文件下载失败或地址不安全") from exc
+            raise ModelRetry(tool_error_message("公网文件下载失败或地址不安全", exc)) from exc
 
     data = response.content
     if len(data) > MAX_FILE_BYTES:
@@ -296,13 +300,15 @@ def build_code_mode_tool_package() -> "ToolPackage":
                 raise ModelRetry("file_id 与 url 必须且只能提供一个")
             final_url: str | None = None
             if normalized_file_id is not None:
-                data, name, mime = await _load_authorized_file(
-                    ctx,
-                    normalized_file_id,
-                )
+                async with observe_tool_operation(ctx, "file_download", tool="load_file_data"):
+                    data, name, mime = await _load_authorized_file(
+                        ctx,
+                        normalized_file_id,
+                    )
             else:
                 assert normalized_url is not None
-                data, name, mime, final_url = await _load_public_url(normalized_url)
+                async with observe_tool_operation(ctx, "public_file_download", tool="load_file_data"):
+                    data, name, mime, final_url = await _load_public_url(normalized_url)
             digest = hashlib.sha256(data).hexdigest()
             if encoding == "text":
                 if not 1 <= max_chars <= MAX_TEXT_CHARS:

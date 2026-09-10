@@ -6,6 +6,7 @@ from pydantic_ai import FunctionToolset, ModelRetry, RunContext, ToolFailed
 from pydantic_ai.messages import BinaryContent
 
 from deep_agent.agent.deps import AgentDeps
+from deep_agent.agent.tool_errors import tool_error_message
 from deep_agent.agent.spec import AgentSpec
 from deep_agent.capabilities.mcp.toolset_builder import build_resource_client
 from deep_agent.db.models import McpServer
@@ -130,7 +131,7 @@ def build_mcp_resource_toolset(
             raise
         except Exception as exc:
             raise ToolFailed(
-                f"Could not list resources from {server_name!r} ({type(exc).__name__})."
+                tool_error_message(f"Could not list resources from {server_name!r}", exc, ctx.deps.request_headers)
             ) from exc
         return {
             "server_name": server_name,
@@ -149,7 +150,7 @@ def build_mcp_resource_toolset(
             raise
         except Exception as exc:
             raise ToolFailed(
-                f"Could not list resource templates from {server_name!r} ({type(exc).__name__})."
+                tool_error_message(f"Could not list resource templates from {server_name!r}", exc, ctx.deps.request_headers)
             ) from exc
         return {
             "server_name": server_name,
@@ -172,8 +173,7 @@ def build_mcp_resource_toolset(
             raise
         except Exception as exc:
             raise ToolFailed(
-                f"Could not read resource {uri!r} from {server_name!r} "
-                f"({type(exc).__name__})."
+                tool_error_message(f"Could not read resource from {server_name!r}", exc, ctx.deps.request_headers)
             ) from exc
         return {"server_name": server_name, "uri": uri, **normalized}
 

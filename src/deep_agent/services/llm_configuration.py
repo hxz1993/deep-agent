@@ -8,11 +8,16 @@ from deep_agent.models.provider_registry import (
     UnknownProviderTypeError,
     provider_type_definition,
 )
-from deep_agent.db.models import Agent, LlmModel, LlmProvider
+from deep_agent.db.models import Agent, GlobalSetting, LlmModel, LlmProvider
 from deep_agent.db.stores._session import SessionBoundMixin
 from deep_agent.db.stores.llm_model.base import _validate_runtime_metadata
 from deep_agent.schemas.llm_model import LlmModelCreate, LlmModelUpdate
 from deep_agent.schemas.llm_provider import LlmProviderCreate, LlmProviderUpdate
+from deep_agent.web.settings import (
+    WEB_SEARCH_SETTING_KEY,
+    WebSearchConfigurationError,
+    resolve_web_search_config,
+)
 
 
 class LlmConfigurationConflictError(ValueError):
@@ -171,15 +176,44 @@ class LlmConfigurationService(SessionBoundMixin):
             raise
 
     async def delete_provider(self, provider_id: str) -> bool:
-        async with self._write() as db:
-            if await self._count_provider_models(db, provider_id):
-                raise LlmConfigurationConflictError(
-                    "LLM provider is still referenced by one or more models"
+        try:
+            async with self._write() as db:
+                provider = await db.get(LlmProvider, provider_id, with_for_update=True)
+                if provider is None:
+                    return False
+                agents = await db.execute(
+                    select(Agent.name)
+                    .join(LlmModel, Agent.model_id == LlmModel.id)
+                    .where(LlmModel.provider_id == provider_id)
+                    .order_by(Agent.name)
                 )
-            result = await db.execute(
-                delete(LlmProvider).where(LlmProvider.id == provider_id)
-            )
-            return bool(result.rowcount)
+                names = list(agents.scalars())
+                if names:
+                    raise LlmConfigurationConflictError(
+                        "无法删除：模型仍被 Agent「"
+                        + "、".join(names)
+                        + "」使用，请先更换这些 Agent 的模型。"
+                    )
+                setting = await db.get(GlobalSetting, WEB_SEARCH_SETTING_KEY)
+                if setting is not None:
+                    try:
+                        search = resolve_web_search_config(setting.value, require_credentials=False)
+                    except WebSearchConfigurationError:
+                        search = None
+                    if search is not None and search.llm_provider_id == provider_id:
+                        raise LlmConfigurationConflictError(
+                            "无法删除：全局 Web Search 正在使用此 Provider 的凭据，请先更换搜索配置。"
+                        )
+                # Keep FK protection for external references; remove only this
+                # provider's model configuration in the same transaction.
+                await db.execute(delete(LlmModel).where(LlmModel.provider_id == provider_id))
+                await db.delete(provider)
+                await db.flush()
+                return True
+        except IntegrityError as exc:
+            raise LlmConfigurationConflictError(
+                "无法删除：Provider 或模型仍存在配置引用，请刷新后检查引用关系。"
+            ) from exc
 
     async def create_model(self, data: LlmModelCreate) -> LlmModel:
         try:

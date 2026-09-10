@@ -185,6 +185,7 @@ test("hanging status and body reads time out then allow the next polling attempt
 });
 
 const source = readFileSync(new URL("../../../console/chat.js", import.meta.url), "utf8");
+const presenterSource = readFileSync(new URL("../../../console/conversation-presenter.js", import.meta.url), "utf8");
 
 test("Console checks the selected session identity after asynchronous UI tool loading", async () => {
   const gates = { a: deferred(), b: deferred() };
@@ -254,9 +255,9 @@ test("Console old observed cancel response cannot affect another selected sessio
 test("running History is presentation-only even when the tool catalog can restore a UI widget", () => {
   assert.match(source, /allowDeferred: !running/);
   assert.match(source, /autoAttachDeferred: false/);
-  assert.match(source, /if \(autoAttachDeferred\) maybeAttachHitlWidget\(existing, merged\)/);
-  assert.match(source, /if \(autoAttachDeferred\) maybeAttachHitlWidget\(block, merged\)/);
-  assert.match(source, /attachHitlWidget\(call\) \{\s*if \(!allowDeferred\) return/);
+  assert.match(presenterSource, /if \(autoAttachDeferred\) maybeAttachHitlWidget\(existing, merged\)/);
+  assert.match(presenterSource, /if \(autoAttachDeferred\) maybeAttachHitlWidget\(block, merged\)/);
+  assert.match(presenterSource, /attachHitlWidget\(call\) \{\s*if \(!allowDeferred\) \{[\s\S]*?return;/);
   assert.match(source, /state\.awaitingHitl = !running && latestPendingDeferredTool/);
 });
 

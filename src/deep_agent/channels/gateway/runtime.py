@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from loguru import logger
+from deep_agent.agent.observability import log_event
 
 from deep_agent.channels.gateway.config import GatewayConfig
 from deep_agent.channels.gateway.deepagent_client import DeepAgentChannelClient
@@ -65,7 +66,7 @@ class ChannelRuntime:
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                logger.error("Channel reconcile failed error_type={}", type(exc).__name__)
+                log_event("channel_reconcile_failed", error_type=type(exc).__name__)
 
     async def reconcile(self) -> None:
         async with self._reconcile_lock:
@@ -96,8 +97,9 @@ class ChannelRuntime:
                         await self.service.receive(managed.account, managed.adapter, message)
 
                     await adapter.start(on_message)
+                    log_event("channel_adapter_started", account_id=row.id)
                 except Exception as exc:
-                    logger.error("Channel adapter start failed error_type={}", type(exc).__name__)
+                    log_event("channel_adapter_start_failed", account_id=row.id, error_type=type(exc).__name__)
                     await self._stop_account(row.id)
                     self._failed[row.id] = {"account_id": row.id, "state": "failed", "message": "渠道适配器启动失败，请检查部署配置", "authenticated": False}
 
@@ -112,6 +114,7 @@ class ChannelRuntime:
                 # Retain a failed-to-close adapter for a subsequent retry. Never
                 # lose its handle and create a second client for the same Bot.
                 self._accounts.pop(account_id, None)
+                log_event("channel_adapter_stopped", account_id=account_id)
 
     def status_payload(self) -> dict[str, Any]:
         accounts = [{"account_id": key, **managed.adapter.status()} for key, managed in sorted(self._accounts.items())]

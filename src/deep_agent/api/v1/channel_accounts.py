@@ -16,6 +16,7 @@ from deep_agent.schemas.channel import (
     ChannelConnectionTestResponse,
     ChannelRuntimeResponse,
 )
+from deep_agent.schemas.llm_provider import mask_api_key
 from deep_agent.services.channel_gateway_client import (
     ChannelGatewayClient,
     ChannelGatewayUnavailableError,
@@ -51,6 +52,7 @@ async def _response(row, ctx: AppContextDep) -> ChannelAccountResponse:
         transport=row.transport,
         bot_id=row.bot_id,
         secret_set=bool(row.secret),
+        secret_masked=mask_api_key(row.secret),
         agent_id=row.agent_id,
         agent_name=agent.name if agent else None,
         session_user_id=row.session_user_id,

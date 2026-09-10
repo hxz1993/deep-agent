@@ -1,19 +1,14 @@
+import { readPresentationSource } from "./shared-presentation-source.mjs";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const chatSource = await readFile(
-  new URL("../../../console/chat.js", import.meta.url),
-  "utf8",
-);
+const chatSource = await readPresentationSource("chat.js");
 const workspaceCss = await readFile(
   new URL("../../../console/workspace.css", import.meta.url),
   "utf8",
 );
-const workspaceSource = await readFile(
-  new URL("../../../console/workspace.js", import.meta.url),
-  "utf8",
-);
+const workspaceSource = await readPresentationSource("workspace.js");
 const conversationItemsSource = await readFile(
   new URL("../../../console/conversation-items.js", import.meta.url),
   "utf8",
@@ -32,7 +27,7 @@ test("上下文引用使用线性信息图标切换到右栏上下文页签", ()
   assert.match(chatSource, /info\.innerHTML = lucideIcon\("info"\)/);
   assert.doesNotMatch(chatSource, /info\.innerHTML = lucideIcon\("circle-info"\)/);
   assert.match(chatSource, /refreshLucideIcons\(\)/);
-  assert.match(chatSource, /toggleContextReferenceInspector\(ref, branchPoint\)/);
+  assert.match(chatSource, /onContextReference\(ref, branchPoint\)/);
   assert.match(workspaceSource, /function toggleContextReferenceInspector/);
   assert.match(workspaceSource, /JSON\.stringify\(reference, null, 2\)/);
   assert.match(workspaceSource, /inspectorActiveTab = "context";[\s\S]*openInspectorPane\(\)[\s\S]*renderInspector\(\)/);

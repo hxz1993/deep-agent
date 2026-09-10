@@ -16,6 +16,7 @@ from deep_agent.core.exceptions import AgentNotFoundError, DeepAgentError
 from deep_agent.core.logging import configure_logging
 from deep_agent.core.paths import CONSOLE_ROOT
 from deep_agent.options import OPTION
+from deep_agent.diagnostics.runtime import observe_lifespan
 
 
 @asynccontextmanager
@@ -31,7 +32,7 @@ app = FastAPI(
     title="deep-agent",
     version=__version__,
     description="General-purpose AI agent backend.",
-    lifespan=lifespan,
+    lifespan=observe_lifespan(lifespan, "api"),
     docs_url=None,
     redoc_url=None,
 )

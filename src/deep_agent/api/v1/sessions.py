@@ -18,6 +18,7 @@ from deep_agent.agent.history import (
     first_user_prompt,
     session_activity_timestamps,
 )
+from deep_agent.agent.observability import log_event
 from deep_agent.agent.context.budget import build_context_budget
 from deep_agent.agent.context.estimator import TokenEstimator
 from deep_agent.agent.context.manual import manual_compaction_availability
@@ -124,6 +125,10 @@ async def list_sessions(
     agent_id: str | None = Query(default=None, description="Filter by agent id."),
     limit: int = Query(default=50, ge=1, le=MAX_LIST_LIMIT, description="Page size."),
     offset: int = Query(default=0, ge=0, description="Page offset."),
+    query: str | None = Query(
+        default=None, max_length=256,
+        description="Case-insensitive title substring or exact session id; whitespace is trimmed.",
+    ),
     updated_after: UtcDatetime | None = Query(default=None, description="Only sessions updated at or after this time (UTC)."),
     updated_before: UtcDatetime | None = Query(default=None, description="Only sessions updated at or before this time (UTC)."),
     has_messages: bool | None = Query(
@@ -140,6 +145,7 @@ async def list_sessions(
         user_id=user_id,
         limit=limit,
         offset=offset,
+        query=query,
         updated_after=updated_after,
         updated_before=updated_before,
         has_messages=has_messages,
@@ -208,6 +214,14 @@ async def cancel_session_run(
     normalized_agent_id, user_id = await _channel_control_scope(
         ctx, channel_account, session_id, normalized_agent_id, user_id,
     )
+    cancel_reason = "channel_cancel_api" if channel_account is not None else "cancel_api"
+    entry = ctx.active_runs.get(agent_id=normalized_agent_id, session_id=session_id)
+    # Do not attribute another user's active Run to an unauthorized request.
+    owned_entry = entry if entry is not None and entry.user_id == user_id else None
+    log_event("agent_cancel_api_received", session_id=session_id,
+              agent_id=normalized_agent_id, reason=cancel_reason,
+              run_id=owned_entry.run_id if owned_entry else None,
+              status="active" if owned_entry else "not_matched")
     # The stream registers before publishing its session SSE event and before
     # asynchronous user-message persistence is guaranteed to finish. Allow its
     # owner to cancel during that startup window without requiring a DB row.
@@ -215,6 +229,7 @@ async def cancel_session_run(
         agent_id=normalized_agent_id,
         session_id=session_id,
         user_id=user_id,
+        reason=cancel_reason,
     ):
         return SessionCancelResponse(
             status="cancel_requested",
@@ -238,6 +253,7 @@ async def cancel_session_run(
         agent_id=api_agent_id,
         session_id=resolved_session_id,
         user_id=user_id,
+        reason=cancel_reason,
     )
     return SessionCancelResponse(
         status="cancel_requested" if requested else "not_running",
@@ -515,6 +531,7 @@ async def _build_context_data(
     history: list[ModelMessage],
     *,
     model_id: str | None,
+    offload: bool = False,
 ) -> dict[str, Any]:
     model = await _context_model(ctx, agent_id, model_id)
     context_window_tokens = model.context_window_tokens if model is not None else None
@@ -538,14 +555,14 @@ async def _build_context_data(
         )
     else:
         estimator = TokenEstimator.for_model("")
-    budget = build_context_budget(
-        history,
-        context_window_tokens=context_window_tokens,
-        max_output_tokens=max_output_tokens,
-        estimator=estimator,
-        output_history=history,
-        estimate_scope="history_only",
-    )
+    budget_kwargs = dict(context_window_tokens=context_window_tokens,
+        max_output_tokens=max_output_tokens, estimator=estimator,
+        output_history=history, estimate_scope="history_only")
+    if offload:
+        from starlette.concurrency import run_in_threadpool
+        budget = await run_in_threadpool(build_context_budget, history, **budget_kwargs)
+    else:
+        budget = build_context_budget(history, **budget_kwargs)
     latest_loader = getattr(ctx.store, "latest_completed_compaction", None)
     compaction = await latest_loader(session_id) if callable(latest_loader) else None
     raw_reader = getattr(ctx.store, "get_raw_history", None)
@@ -603,6 +620,11 @@ async def get_session_context_status(
         history,
         model_id=model_id,
     )
+    return context_status_from_data(resolved_session_id, context_data)
+
+
+def context_status_from_data(resolved_session_id: str, context_data: dict[str, Any]) -> SessionContextStatus:
+    """Shared presentation of the existing context estimator's result."""
     budget = context_data["budget"]
     compaction = context_data["compaction"]
     compaction_source = compaction.payload.get("source", {}) if compaction else {}

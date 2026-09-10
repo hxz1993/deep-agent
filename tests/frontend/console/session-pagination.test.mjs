@@ -7,15 +7,19 @@ const source = await readFile(new URL("../../../console/chat.js", import.meta.ur
 function harness(fetch) {
   const merges = [];
   const urls = [];
+  const requests = [];
+  const search = { value: "" };
   const context = vm.createContext({
-    state: { agentId: "agent-a" }, URLSearchParams,
+    state: { agentId: "agent-a" }, URLSearchParams, AbortController, setTimeout, clearTimeout,
+    document: { getElementById: () => search },
+    el: { sessionList: { scrollTop: 0 } },
     serviceUrl: (url) => url,
-    daFetch: (url) => { urls.push(url); return fetch(url); },
+    daFetch: (url, options) => { urls.push(url); requests.push(options); return fetch(url); },
     renderSessions() {}, requestAnimationFrame() {},
     mergeSessionsFromBackend: (rows, options) => merges.push({ rows, options }),
   });
   vm.runInContext(source.slice(source.indexOf("let sessionPage ="), source.indexOf("function autoGrow()")), context);
-  return { context, merges, urls };
+  return { context, merges, urls, requests, search };
 }
 const response = (items, total) => ({ ok: true, json: async () => ({ items, total }) });
 
@@ -58,6 +62,50 @@ test("失败可重试且不会推进offset，空页停止加载", async () => {
   await context.loadMoreSessions();
   assert.equal(urls.length, 2);
   assert.equal(urls[0], urls[1]);
+});
+
+test("检索在后端分页，完整ID原样发送；清空回到首个未筛选页", async () => {
+  const { context, urls, search } = harness(async () => response([{ session_id: "exact-ID" }], 1));
+  search.value = "  exact-ID  ";
+  await context.syncSessionsFromBackend();
+  assert.equal(new URLSearchParams(urls[0].split("?")[1]).get("query"), "exact-ID");
+  search.value = "";
+  await context.syncSessionsFromBackend();
+  assert.equal(new URLSearchParams(urls[1].split("?")[1]).has("query"), false);
+  assert.match(urls[1], /offset=0/);
+});
+
+test("新检索立即取消旧页，防抖前禁止触底请求，迟到结果不会覆盖", async () => {
+  const pending = [];
+  const { context, merges, urls, requests, search } = harness(() => new Promise((resolve) => pending.push(resolve)));
+  const first = context.syncSessionsFromBackend();
+  search.value = "销售";
+  context.scheduleSessionSearch({ isComposing: true });
+  assert.equal(requests[0].signal.aborted, true);
+  await context.loadMoreSessions();
+  assert.equal(urls.length, 1);
+  pending[0](response([{ session_id: "old" }], 1));
+  await first;
+  assert.equal(merges.length, 0);
+  const next = context.syncSessionsFromBackend();
+  pending[1](response([{ session_id: "new" }], 1));
+  await next;
+  assert.equal(merges.length, 1);
+  assert.equal(merges[0].rows[0].session_id, "new");
+});
+
+test("连续输入仅发最后一次请求且检索分页保留query", async () => {
+  const { context, urls, search } = harness(async () => response([{ session_id: "match" }], 2));
+  search.value = "销";
+  context.scheduleSessionSearch({});
+  search.value = "销售";
+  context.scheduleSessionSearch({});
+  await new Promise((resolve) => setTimeout(resolve, 280));
+  assert.equal(urls.length, 1);
+  assert.equal(new URLSearchParams(urls[0].split("?")[1]).get("query"), "销售");
+  await context.loadMoreSessions();
+  assert.equal(new URLSearchParams(urls[1].split("?")[1]).get("query"), "销售");
+  assert.match(urls[1], /offset=1/);
 });
 
 test("不足一屏不显示到底提示，一屏历史在滚动后显示且不把页脚算作内容", async () => {

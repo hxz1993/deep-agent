@@ -17,6 +17,7 @@ from pydantic_ai.messages import (
 
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.history import is_user_only_request
+from deep_agent.agent.observability import log_event
 from deep_agent.agent.planning import (
     attach_plan_snapshot, current_plan_snapshot, is_planning_tool, plan_snapshot_from_part,
 )
@@ -206,6 +207,9 @@ class MessagePersistenceCapability(AbstractCapability[AgentDeps]):
                             "event": row.public_dict(),
                         })
             except Exception as exc:
+                log_event("message_persistence_failed", session_id=deps.session_id,
+                          run_id=deps.run_id, agent_id=deps.agent_id,
+                          phase="incremental", error_type=type(exc).__name__)
                 self.persistence_error = MessagePersistenceError("Unable to persist completed message")
                 raise self.persistence_error from exc
 

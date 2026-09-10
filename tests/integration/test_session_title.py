@@ -147,6 +147,9 @@ class SessionTitleIntegrationTests(unittest.IsolatedAsyncioTestCase):
         call = title_mock.await_args.kwargs
         self.assertIsInstance(call["model"], TestModel)
         self.assertEqual(call["user_text"], "请分析本季度预算差异")
+        self.assertEqual(call["diagnostic_fields"]["session_id"], session_id)
+        self.assertEqual(call["diagnostic_fields"]["agent_id"], self._agent_id)
+        self.assertTrue(call["diagnostic_fields"]["run_id"])
         self.assertEqual(title_events[-1]["event"]["payload"]["model_name"], "test:chat-model")
 
         detail = await self._stores.coordinator.get_session_title(

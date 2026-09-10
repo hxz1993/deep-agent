@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import io
 import json
+import re
 import shutil
 import zipfile
 from datetime import UTC, datetime
@@ -533,10 +534,15 @@ async def download_skill_package(code: str, request: Request, ctx: AppContextDep
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"Platform Skill download failed: {type(exc).__name__}",
         ) from exc
+    # Name the original bytes, without repacking or changing persisted metadata.
+    version = re.sub(r"[^A-Za-z0-9._+-]+", "-", row.version or "").strip(".-_")[:64]
+    if version and not version.startswith("v"):
+        version = f"v{version}"
+    filename = f"{row.code}{'-' + version if version else ''}.zip"
     return Response(
         content=raw,
         media_type="application/zip",
-        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(row.file_name)}"},
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename, safe='')}"},
     )
 
 

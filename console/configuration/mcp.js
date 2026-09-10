@@ -56,6 +56,29 @@ function inspectionErrorMessage(error) {
   return error?.message || "";
 }
 
+function missingInspectionAppHint(server, context) {
+  if (!server || server.transport === "stdio") return "";
+  const mode = server?.request_context?.mode || server?.config?.request_context?.mode || "inherit";
+  if (mode !== "inherit") return "";
+  const staticApp = Object.entries(server?.config?.headers || {})
+    .find(([name]) => name.toLowerCase() === "app")?.[1];
+  if (String(context?.app || staticApp || "").trim()) return "";
+  return "当前请求未提供测试 App；请到「对话测试」右上角「测试App」配置后，再返回 MCP 刷新。";
+}
+
+async function inspectionFailureMessage(server, message) {
+  // Only enrich a completed inspection. Context lookup failures preserve the
+  // original error without guessing whether the App was configured.
+  if (!missingInspectionAppHint(server, {}) || !window.DeepAgentConsoleAPI?.requestContext) return message;
+  try {
+    const context = await window.DeepAgentConsoleAPI.requestContext();
+    const hint = missingInspectionAppHint(server, context);
+    return hint ? `${message}。${hint}` : message;
+  } catch (_) {
+    return message;
+  }
+}
+
 function inspectionFailureLabel(error) {
   if (!error) return "";
   const stages = {
@@ -326,7 +349,7 @@ const mcpAdmin = {
       tbody.querySelectorAll("[data-inspect-mcp]").forEach((btn) => {
         btn.addEventListener("click", (event) => {
           event.stopPropagation();
-          this.inspect(btn.dataset.inspectMcp, btn);
+          this.inspect(btn.dataset.inspectMcp, btn, servers.find((server) => server.name === btn.dataset.inspectMcp));
         });
       });
       tbody.querySelectorAll("[data-rename-mcp]").forEach((btn) => {
@@ -432,7 +455,7 @@ const mcpAdmin = {
     return parsed;
   },
 
-  async inspect(name, button) {
+  async inspect(name, button, server) {
     const originalText = button?.textContent || "刷新";
     if (button) {
       button.disabled = true;
@@ -444,7 +467,8 @@ const mcpAdmin = {
         { method: "POST" }
       );
       const toast = inspectionToast(result);
-      showToast(toast.message, toast.error);
+      const message = toast.error ? await inspectionFailureMessage(server, toast.message) : toast.message;
+      showToast(message, toast.error);
       await refreshAfterSuccessfulMutation("MCP 检测已完成", () => this.refresh());
     } catch (err) {
       showToast(err.message, true);
@@ -756,6 +780,8 @@ const mcpAdmin = {
 
 window.mcpAdmin = mcpAdmin;
 window.__McpInspectionUI = {
+  missingInspectionAppHint,
+  inspectionFailureMessage,
   highlightJsonEditorSource,
   inspectionView,
   inspectionToast,

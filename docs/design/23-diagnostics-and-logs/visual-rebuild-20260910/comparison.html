@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>DeepAgent 诊断中心 · 图片与页面对照</title>
+  <style>
+    *{box-sizing:border-box}body{margin:0;background:#eef2f6;color:#17202b;font:14px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",sans-serif}header{padding:24px 30px 18px;background:white;border-bottom:1px solid #dce3ec}h1{font-size:24px;margin:0 0 6px}p{margin:0;color:#5f6d7a}a{color:#2f6fde;text-decoration:none}a:hover{text-decoration:underline}.toolbar{display:flex;align-items:center;flex-wrap:wrap;gap:18px;padding:16px 30px}.group{display:flex;gap:4px;padding:4px;border:1px solid #dce3ec;border-radius:9px;background:#fff}button{font:inherit;border:0;border-radius:6px;padding:6px 15px;background:transparent;color:#45525f;cursor:pointer}button[aria-pressed=true]{background:#2f6fde;color:white}button:focus-visible,input:focus-visible{outline:2px solid #2f6fde;outline-offset:2px}.mix{display:flex;align-items:center;gap:10px}.mix[hidden]{display:none}input{accent-color:#2f6fde}.links{margin-left:auto;display:flex;gap:16px}.review{padding:0 30px 18px;font-size:13px;color:#45525f}.stage{margin:0 20px 24px;display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start}figure{margin:0;min-width:0;border:1px solid #dce3ec;background:white;border-radius:10px;overflow:hidden}figcaption{padding:8px 13px;font-size:12px;color:#5f6d7a;background:#fff}.picture{position:relative;aspect-ratio:3/2}.picture img{width:100%;height:100%;object-fit:contain;display:block}.stage.overlay{display:block;max-width:1536px;margin:0 auto 24px}.stage.overlay figure:first-child{display:none}.stage:not(.overlay) .master-overlay{display:none}.stage.overlay .master-overlay{position:absolute;inset:0;opacity:.5;pointer-events:none}.foot{padding:0 30px 30px;display:flex;flex-wrap:wrap;gap:12px 24px;font-size:12px;color:#5f6d7a}.stage.actual-size{display:flex;overflow:auto}.stage.actual-size figure{min-width:1536px}.stage.overlay.actual-size{overflow:auto;max-width:none}.stage.overlay.actual-size figure{width:1536px}.stage.overlay.actual-size .picture{width:1536px;height:1024px}@media(max-width:850px){header{padding:20px}.toolbar{padding:12px 20px;gap:10px}.links{margin-left:0}.stage{grid-template-columns:1fr;margin:0 12px 18px}.review{padding:0 20px 14px}}
+  </style>
+</head>
+<body>
+  <header><h1>诊断中心 · 图片与页面对照</h1><p>左侧为 imagegen 生成的视觉主稿，右侧为真实 Console 代码的浏览器截图。相同 1536 × 1024 内容画布，截图数据来自隔离夹具，不是生产演示数据。</p></header>
+  <nav class="toolbar" aria-label="视觉对照控制">
+    <div class="group" aria-label="页面"><button data-page="logs" aria-pressed="true">日志</button><button data-page="overview" aria-pressed="false">会话概览</button><button data-page="list" aria-pressed="false">会话列表</button></div>
+    <div class="group" aria-label="比较方式"><button data-mode="side" aria-pressed="true">并排</button><button data-mode="overlay" aria-pressed="false">叠加</button></div>
+    <button id="size" aria-pressed="false">原始尺寸</button>
+    <label class="mix" hidden>主稿透明度 <input id="opacity" type="range" min="0" max="100" value="50"><output for="opacity">50%</output></label>
+    <div class="links"><a id="masterLink" href="logs-master.png" target="_blank" rel="noopener">主稿原图</a><a id="actualLink" href="verification/light/logs.png" target="_blank" rel="noopener">页面原图</a><a href="verification/light/review.json">测量记录</a></div>
+  </nav>
+  <div class="review" id="review" role="status"></div>
+  <main class="stage" id="stage">
+    <figure><figcaption>视觉主稿 · imagegen</figcaption><div class="picture"><img id="master" src="logs-master.png" alt="日志图片主稿" width="1536" height="1024"></div></figure>
+    <figure><figcaption id="actualCaption">Console 实际截图 · 只读隔离验收</figcaption><div class="picture"><img id="actual" src="verification/light/logs.png" alt="日志页面实际截图" width="1536" height="1024"><img class="master-overlay" id="overlay" src="logs-master.png" alt="" aria-hidden="true" width="1536" height="1024"></div></figure>
+  </main>
+  <footer class="foot"><span>检查：标题与层级、筛选、卡片比例、图表、行高、字段分组、复制与跳转、独立滚动。</span><span>实际字体由系统渲染；统计数值、真实长 ID 不为贴合图片而伪造。</span><a href="verification/light/session-detail-readonly.png">只读详情截图</a><a href="verification/light/logs-filters.png">日志筛选浮层</a><a href="verification/narrow/list.png">窄屏列表</a></footer>
+  <script>
+    const pages = {
+      logs: {title:"日志",master:"logs-master.png",actual:"verification/light/logs.png",notes:"已对齐：工具栏 44px；工作区 (42,147) / 1452×837；右栏 436px；行高 34px，正文 14px。内容起点 x446，右侧只放 Session ID，技术信息折叠，仅主要 ID 可复制。"},
+      overview: {title:"会话概览",master:"sessions-overview-master.png",actual:"verification/light/overview.png",notes:"已对齐：指标 y174 / h114；趋势卡片 y305 / h254；最近提问 y575；图表有效网格约834×143px。账号仅用户名；最近提问、异常和活跃用户各自滚动，不把下方内容挤出工作区。"},
+      list: {title:"会话列表",master:"sessions-list-master.png",actual:"verification/light/list.png",notes:"已对齐：工作区 y165；表头 46px、会话行 68px、名称 16px。保留状态筛选；表格独立滚动，分页始终在底部；返回恢复筛选、页码和列表滚动位置。"}
+    };
+    const stage=document.querySelector("#stage");
+    document.querySelectorAll("[data-page]").forEach(button=>button.addEventListener("click",()=>{
+      const page=pages[button.dataset.page];
+      document.querySelectorAll("[data-page]").forEach(item=>item.setAttribute("aria-pressed",String(item===button)));
+      document.querySelector("#master").src=page.master;document.querySelector("#overlay").src=page.master;document.querySelector("#actual").src=page.actual;
+      document.querySelector("#master").alt=page.title+"图片主稿";document.querySelector("#actual").alt=page.title+"页面实际截图";
+      document.querySelector("#masterLink").href=page.master;document.querySelector("#actualLink").href=page.actual;document.querySelector("#review").textContent=page.notes;
+    }));
+    document.querySelectorAll("[data-mode]").forEach(button=>button.addEventListener("click",()=>{
+      const overlay=button.dataset.mode==="overlay";stage.classList.toggle("overlay",overlay);document.querySelector(".mix").hidden=!overlay;
+      document.querySelectorAll("[data-mode]").forEach(item=>item.setAttribute("aria-pressed",String(item===button)));
+      document.querySelector("#actualCaption").textContent=overlay?"底图为 Console 截图，叠图为视觉主稿；拖动透明度比较边界":"Console 实际截图 · 只读隔离验收";
+    }));
+    document.querySelector("#size").addEventListener("click",event=>{const active=stage.classList.toggle("actual-size");event.currentTarget.setAttribute("aria-pressed",String(active));});
+    document.querySelector("#opacity").addEventListener("input",event=>{document.querySelector("#overlay").style.opacity=event.target.value/100;document.querySelector("output").textContent=event.target.value+"%";});
+    document.querySelector("#review").textContent=pages.logs.notes;
+  </script>
+</body>
+</html>

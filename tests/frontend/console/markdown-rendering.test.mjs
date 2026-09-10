@@ -1,3 +1,4 @@
+import { readPresentationSource } from "./shared-presentation-source.mjs";
 import assert from "node:assert/strict";
 import { access, readFile } from "node:fs/promises";
 import test from "node:test";
@@ -6,10 +7,7 @@ const markdownSource = await readFile(
   new URL("../../../console/markdown.js", import.meta.url),
   "utf8",
 );
-const chatSource = await readFile(
-  new URL("../../../console/chat.js", import.meta.url),
-  "utf8",
-);
+const chatSource = await readPresentationSource("chat.js");
 const shell = await readFile(
   new URL("../../../console/index.html", import.meta.url),
   "utf8",

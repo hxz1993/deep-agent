@@ -20,8 +20,12 @@
   <link id="hljsTheme" rel="stylesheet" href="/vendor/highlight-github-dark.min.css" />
   <link rel="stylesheet" href="./themes.css?v=20260821-2" />
   <link rel="stylesheet" href="./workspace.css?v=20260904-13" />
-  <link rel="stylesheet" href="./configuration/configuration.css?v=20260904-11" />
-  <link rel="stylesheet" href="./console.css?v=20260905-04" />
+  <link rel="stylesheet" href="./configuration/configuration.css?v=20260910-8" />
+  <link rel="stylesheet" href="./console.css?v=20260910-13" />
+  <link rel="stylesheet" href="./diagnostics.css?v=20260910-13" />
+  <link rel="stylesheet" href="./diagnostics-design.css?v=20260910-13" />
+  <link rel="stylesheet" href="./diagnostics-sessions.css?v=20260910-16" />
+  <link rel="stylesheet" href="./diagnostic-detail.css?v=20260910-13" />
 </head>
 <body data-console-page="workspace">
   <div class="console-shell">
@@ -40,9 +44,9 @@
       </nav>
       <nav class="resource-nav" aria-label="配置目录" id="consoleResourceNav"></nav>
       <div class="console-nav-footer">
-        <button type="button" class="console-nav-btn" data-page="diagnostics" title="诊断中心" aria-label="诊断中心">
-          <i data-lucide="activity"></i><span>诊断中心</span>
-        </button>
+        <div class="resource-group-label">系统</div>
+        <button class="tab resource-btn" data-tab="global-settings"><i data-lucide="settings-2"></i><span>全局配置</span></button>
+        <button class="tab resource-btn" data-tab="catalog"><i data-lucide="library"></i><span>模型目录</span></button>
       <a class="console-rail-link" href="../docs" target="_blank" rel="noopener noreferrer" title="接口文档" aria-label="接口文档">
         <i data-lucide="book-open-text"></i><span>接口文档</span>
       </a>
@@ -111,9 +115,9 @@
             <button class="tab resource-btn" data-tab="builtin-tools"><i data-lucide="blocks"></i><span>内置工具</span></button>
             <button class="tab resource-btn" data-tab="ui-tools"><i data-lucide="panel-top"></i><span>UI 工具</span></button>
             <button class="tab resource-btn" data-tab="channels"><i data-lucide="radio-tower"></i><span>渠道</span></button>
-            <div class="resource-group-label separated">系统</div>
-            <button class="tab resource-btn" data-tab="global-settings"><i data-lucide="settings-2"></i><span>全局配置</span></button>
-            <button class="tab resource-btn" data-tab="catalog"><i data-lucide="library"></i><span>模型目录</span></button>
+            <div class="resource-group-label separated diagnostic-nav-label">诊断</div>
+            <button type="button" class="console-nav-btn" data-page="diagnostics" data-diagnostics-nav="logs" title="日志" aria-label="日志"><i data-lucide="logs"></i><span>日志</span></button>
+            <button type="button" class="console-nav-btn" data-page="diagnostics" data-diagnostics-nav="sessions" title="会话" aria-label="会话"><i data-lucide="messages-square"></i><span>会话</span></button>
           </template>
           <section class="configuration-content">
             <div class="configuration-loading" id="configurationLoading">
@@ -125,24 +129,39 @@
       </section>
 
       <section class="console-page" id="page-diagnostics" data-page-panel="diagnostics">
-        <div class="diagnostics-page">
-          <header class="diagnostics-head">
-            <div><span class="eyebrow">Phase 1</span><h1>诊断中心</h1><p>为一次 Agent 请求提供可追踪、可解释的运行诊断入口。</p></div>
-            <span class="future-badge">能力规划中</span>
+        <div class="diagnostics-page" id="diagnosticsLogPage">
+          <header class="diagnostics-head diagnostics-log-header">
+            <div class="diagnostics-log-heading"><h1>日志</h1><p id="diagnosticsInstance">查看会话执行过程，排查运行问题。</p></div>
+          <form class="diagnostics-filters" id="diagnosticsFilters" autocomplete="off">
+            <div class="diagnostics-primary-row">
+            <div data-diagnostic-select="period"></div>
+            <div data-diagnostic-select="source"></div>
+            <div data-diagnostic-select="level"></div>
+              <label class="compact-search diagnostics-keyword diagnostics-session-search"><i data-lucide="messages-square" aria-hidden="true"></i><input type="text" id="diagnosticsSession" placeholder="会话 ID" aria-label="会话 ID" maxlength="128" spellcheck="false" /></label>
+            </div>
+            <div class="diagnostics-search-row">
+              <label class="compact-search diagnostics-keyword"><i data-lucide="search" aria-hidden="true"></i><input type="search" id="diagnosticsKeyword" placeholder="搜索日志内容" aria-label="搜索日志内容" maxlength="200" /></label>
+            <button type="submit" class="diagnostics-button primary" id="diagnosticsQuery"><i data-lucide="search" aria-hidden="true"></i><span>查询</span></button>
+            <button type="button" class="diagnostics-button text" id="diagnosticsReset" title="清空条件">重置</button>
+            </div>
+                <div class="diagnostics-custom-time hidden" id="diagnosticsCustomTime"><input type="datetime-local" id="diagnosticsStart" aria-label="开始时间（本地时区）" title="开始时间（本地时区）"/><span>至</span><input type="datetime-local" id="diagnosticsEnd" aria-label="结束时间（本地时区）" title="结束时间（本地时区）"/></div>
+          </form>
           </header>
-          <div class="diagnostics-band current">
-            <div class="diagnostic-icon"><i data-lucide="history"></i></div>
-            <div><h2>当前已经可用</h2><p>测试工作台可查看会话历史、SSE 事件顺序、模型工具调用、HITL 状态和服务健康。</p></div>
-            <button type="button" data-page-link="workspace">返回测试工作台</button>
+          <button type="button" class="diagnostics-button hidden" id="diagnosticsBack"><i data-lucide="arrow-left" aria-hidden="true"></i>返回</button>
+          <div class="diagnostics-notice hidden" id="diagnosticsNotice" role="status" aria-live="polite"></div>
+          <div class="diagnostics-split" id="diagnosticsSplit">
+          <div class="diagnostics-log-workspace">
+          <div class="diagnostics-result-head"><div class="diagnostics-result-title"><h2>查询结果</h2><span id="diagnosticsMeta" aria-live="polite">尚未查询</span><span id="diagnosticsPartial" class="hidden"></span><button type="button" class="diagnostics-button text hidden" id="diagnosticsMore">加载更多</button></div><span id="diagnosticsQueryRange"></span><span id="diagnosticsCopyStatus" role="status" aria-live="polite"></span></div>
+          <div class="diagnostics-log-view" tabindex="0" aria-label="诊断日志列表">
+            <div id="diagnosticsRecords"></div>
+            <div class="diagnostics-empty" id="diagnosticsEmpty">正在准备日志查询…</div>
           </div>
-          <div class="diagnostics-grid">
-            <article><i data-lucide="search-code"></i><h3>Request ID 查询</h3><p>未来按 Request ID 定位一次跨服务请求和对应日志。</p><button disabled>暂未开放</button></article>
-            <article><i data-lucide="messages-square"></i><h3>Session 链路</h3><p>未来按 Session ID 汇总模型、MCP、UI 工具和重试过程。</p><button disabled>暂未开放</button></article>
-            <article><i data-lucide="plug-zap"></i><h3>MCP 主动探测</h3><p>未来检查 MCP 工具列表、连通性、延迟和错误响应。</p><button disabled>暂未开放</button></article>
-            <article><i data-lucide="chart-no-axes-combined"></i><h3>运行指标</h3><p>未来展示成功率、失败类型、P95 和服务健康趋势。</p><button disabled>暂未开放</button></article>
           </div>
-          <div class="diagnostics-note"><i data-lucide="info"></i><span>本阶段不生成演示日志或虚构 Request ID。诊断能力将在后端具备真实链路数据后逐步开放。</span></div>
+          <div class="diagnostics-resizer" id="diagnosticsResizer" role="separator" tabindex="0" aria-label="调整日志详情宽度" aria-orientation="vertical" aria-valuemin="220" aria-valuemax="720" aria-valuenow="436"></div>
+          <aside class="diagnostics-drawer" id="diagnosticsDrawer" aria-label="日志详情"></aside>
+          </div>
         </div>
+        <div id="diagnosticsSessionsPage" class="hidden"></div>
       </section>
     </main>
   </div>
@@ -159,7 +178,7 @@
     <footer><button type="button" id="resetContextBtn">不分应用</button><button type="button" class="primary" id="saveContextBtn">确定</button></footer>
   </aside>
 
-  <div class="console-toast hidden" id="consoleToast"></div>
+  <div class="console-toast hidden" id="consoleToast" role="status" aria-live="polite"></div>
   <div class="hidden" id="consoleRuntimeControls">
     <select id="agentSelect"></select>
     <select id="themeSelect"></select>
@@ -174,6 +193,6 @@
   <script src="../vendor/highlight.min.js"></script>
   <script src="./json-view.js?v=20260823-1"></script>
   <script src="./markdown.js?v=20260822-2"></script>
-  <script type="module" src="./main.js?v=20260908-1"></script>
+  <script type="module" src="./main.js?v=20260910-15"></script>
 </body>
 </html>

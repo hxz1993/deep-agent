@@ -32,6 +32,7 @@ from pydantic_ai.providers.deepseek import DeepSeekProvider
 from pydantic_ai.toolsets import CombinedToolset, FunctionToolset
 
 from deep_agent.agent.deps import AgentDeps
+from deep_agent.agent.tool_errors import tool_error_message
 from deep_agent.web.proxy_compat import (
     install_proxy_compatibility,
     proxy_compatible_web_fetch,
@@ -246,7 +247,7 @@ class _DeepAgentWebFetchLocalTool(WebFetchLocalTool):
                 max_bytes=self.max_download_bytes,
             )
         except (ValueError, httpx2.HTTPStatusError, httpx2.RequestError) as exc:
-            raise ModelRetry(f"Failed to fetch {url}: {exc}") from exc
+            raise ModelRetry(tool_error_message("Failed to fetch public URL", exc)) from exc
 
         media_type = response.headers.get("content-type", "").split(";", 1)[0].strip().lower()
         title = ""
@@ -367,7 +368,7 @@ def _web_fetch_tool() -> Tool[Any]:
                     raise
                 if attempts > 1:
                     failure = f"{failure} after {attempts} attempts"
-                raise ToolFailed(failure) from exc
+                raise ToolFailed(tool_error_message(failure, exc)) from exc
         if (
             isinstance(result, BinaryContent)
             and result.media_type not in _ALLOWED_BINARY_MEDIA_TYPES
@@ -457,7 +458,7 @@ def _web_image_view_tool() -> Tool[Any]:
         try:
             await validate_and_resolve_url(url, allow_local=False)
         except (ValueError, httpx2.RequestError) as exc:
-            raise ModelRetry(f"Web Image View rejected URL: {exc}") from exc
+            raise ModelRetry(tool_error_message("Web Image View rejected URL", exc)) from exc
 
         media_type = _image_media_type_from_url(url)
         if media_type is None:
@@ -577,7 +578,7 @@ def _native_result_sources(result: Any) -> list[dict[str, str | None]]:
     return sources
 
 
-def _safe_provider_failure(provider: str, exc: Exception) -> ToolFailed:
+def _safe_provider_failure(provider: str, exc: Exception, api_key: str | None = None) -> ToolFailed:
     name = type(exc).__name__.lower()
     if "auth" in name or "permission" in name or "unauthorized" in name:
         reason = "authentication failed"
@@ -587,7 +588,10 @@ def _safe_provider_failure(provider: str, exc: Exception) -> ToolFailed:
         reason = "request timed out"
     else:
         reason = "provider request failed"
-    return ToolFailed(f"Web Search {reason} (provider={provider})")
+    return ToolFailed(tool_error_message(
+        f"Web Search {reason} (provider={provider})", exc,
+        {"api_key": api_key} if api_key else None,
+    ))
 
 
 async def _search_duckduckgo(query: str) -> ToolReturn:
@@ -766,7 +770,7 @@ async def execute_provider_search(
     except ToolFailed:
         raise
     except Exception as exc:
-        raise _safe_provider_failure(provider, exc) from exc
+        raise _safe_provider_failure(provider, exc, config.api_key) from exc
 
 
 def _web_search_tool(config: WebSearchRuntimeConfig) -> Tool[Any]:

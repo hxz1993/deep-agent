@@ -45,7 +45,10 @@ const systemTools = await readFile(
 
 test("控制台合并为图文一级导航且保留三个真实页面", () => {
   assert.match(index, /<aside class="console-rail"[\s\S]*?<nav class="console-nav">/);
-  assert.match(index, /data-page="workspace"[\s\S]*?class="resource-nav"[\s\S]*?class="console-nav-footer"[\s\S]*?data-page="diagnostics"[\s\S]*?title="接口文档"/);
+  assert.match(index, /data-page="workspace"[\s\S]*?class="resource-nav"[\s\S]*?class="console-nav-footer"[\s\S]*?>系统<\/div>[\s\S]*?title="接口文档"/);
+  const navigation = index.match(/<template id="configurationNavigation">([\s\S]*?)<\/template>/)[1];
+  assert.match(navigation, /data-tab="channels"[\s\S]*?>诊断<\/div>[\s\S]*?data-diagnostics-nav="logs"[\s\S]*?data-diagnostics-nav="sessions"/);
+  assert.doesNotMatch(navigation, /data-tab="global-settings"|data-tab="catalog"|接口文档/);
   assert.doesNotMatch(index, /data-page="configuration"|<aside class="resource-nav"/);
   assert.match(styles, /--console-resource-nav-width: 0px/);
   assert.match(styles, /\.console-rail \.resource-nav\s*\{[^}]*flex: 1 1 auto;[^}]*overflow: hidden auto;/);
@@ -85,7 +88,7 @@ test("Agent 页面使用直角且工具包卡片改为单列两行摘要", () =>
 });
 
 test("内容外壳四边无间距圆角，用户信息浮层不展示内部分割线", () => {
-  assert.match(index, /class="resource-group-label separated">系统<\/div>/);
+  assert.match(index, /class="console-nav-footer">\s*<div class="resource-group-label">系统<\/div>/);
   assert.doesNotMatch(index, />环境设置</);
   assert.match(styles, /--console-config-padding: 0px/);
   assert.match(styles, /\.console-main \.workspace-grid,\s*\.console-main \.configuration-shell \{ padding: 0; border-radius: 0; \}/);

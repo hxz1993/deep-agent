@@ -42,6 +42,8 @@ class AgentDeps:
     context_state: "ContextRunState | None" = None
     tool_discovery: "ToolDiscoveryTelemetry | None" = None
     tool_output_limits: "ToolOutputTelemetry | None" = None
+    # Names only, per Run, for model-wire diagnostics; never a tool authority.
+    model_api_previous_tools: dict[str, set[str]] = field(default_factory=dict, repr=False)
     plan_store: "InMemoryPlanStore | None" = field(default=None, repr=False)
     plan_snapshots: dict[str, dict[str, Any]] = field(default_factory=dict, repr=False)
     tool_discovery_inputs_explicit: bool = False

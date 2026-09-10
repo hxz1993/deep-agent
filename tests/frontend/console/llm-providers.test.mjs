@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import vm from "node:vm";
 
 import {
   firstSelectableModelId,
@@ -39,6 +40,62 @@ const indexHtml = await readFile(
   new URL("../../../console/index.html", import.meta.url),
   "utf8",
 );
+
+function providerDeleteHarness({ confirmed = true, error, refreshed = true } = {}) {
+  const calls = { confirmations: [], requests: [], refreshes: [], toasts: [] };
+  const context = {
+    window: {}, document: { addEventListener() {} },
+    state: { llmProviders: [{ id: "last", name: "最后一个" }], llmModels: [{ provider_id: "last" }, { provider_id: "last" }] },
+    confirmAction: async (options) => { calls.confirmations.push(options); return confirmed; },
+    apiFetch: async (...args) => { calls.requests.push(args); if (error) throw error; },
+    showToast: (...args) => calls.toasts.push(args),
+  };
+  vm.runInNewContext(providerSource, context);
+  const admin = context.window.llmProvidersAdmin;
+  admin.refresh = async (options) => { calls.refreshes.push(options); return refreshed; };
+  return { admin, calls, context };
+}
+
+test("删除最后一个 Provider 会确认关联模型范围并刷新空列表", async () => {
+  const { admin, calls } = providerDeleteHarness();
+  await admin.remove({ id: "last", name: "最后一个" });
+  assert.match(calls.confirmations[0].message, /最后一个.*2 个模型配置/);
+  assert.equal(calls.requests[0][0], "/api/v1/llm-providers/last");
+  assert.equal(calls.requests[0][1].method, "DELETE");
+  assert.equal(calls.refreshes[0].preserveSelection, false);
+  assert.equal(calls.toasts[0][0], "Provider 已删除");
+});
+
+test("取消 Provider 删除不发送请求", async () => {
+  const { admin, calls } = providerDeleteHarness({ confirmed: false });
+  await admin.remove({ id: "last", name: "最后一个" });
+  assert.equal(calls.requests.length, 0);
+  assert.equal(calls.refreshes.length, 0);
+});
+
+test("删除被实际配置引用阻止时显示原因而不报成功", async () => {
+  const { admin, calls } = providerDeleteHarness({ error: new Error("模型被预算助手使用") });
+  await admin.remove({ id: "last", name: "最后一个" });
+  assert.equal(calls.refreshes.length, 0);
+  assert.deepEqual(calls.toasts, [["模型被预算助手使用", true]]);
+});
+
+test("删除成功但刷新失败时明确提示部分结果", async () => {
+  const { admin, calls } = providerDeleteHarness({ refreshed: false });
+  await admin.remove({ id: "last", name: "最后一个" });
+  assert.deepEqual(calls.toasts, [["Provider 已删除，列表刷新失败，请重新加载", true]]);
+});
+
+test("没有 Provider 时列表和详情均显示可新建的空状态", () => {
+  const { admin, context } = providerDeleteHarness();
+  const list = {}, detail = {};
+  context.state.llmProviders = [];
+  context.document.getElementById = (id) => id === "llmProviderList" ? list : detail;
+  admin.renderList();
+  admin.renderDetail();
+  assert.match(list.innerHTML, /暂无 Provider/);
+  assert.match(detail.innerHTML, /新建 Provider/);
+});
 
 test("配置中心只保留 Provider 模型管理入口并继续保留独立模型目录", () => {
   const agent = indexHtml.indexOf('data-tab="agents"');

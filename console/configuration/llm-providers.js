@@ -1,6 +1,8 @@
 const providerAdminState = {
   selectedId: null,
   afterSave: null,
+  modelTests: new Map(),
+  testBatch: null,
 };
 
 const providerCatalogPickerState = {
@@ -95,7 +97,80 @@ function setProviderApiKeyEditor({ maskedValue = "", clearRequested = false } = 
 }
 
 const llmProvidersAdmin = {
+  cancelModelTests() {
+    providerAdminState.testBatch?.controller.abort();
+    providerAdminState.testBatch = null;
+    for (const [id, result] of providerAdminState.modelTests) {
+      if (result.status === "pending" || result.status === "testing") providerAdminState.modelTests.delete(id);
+    }
+    this.updateModelTests();
+  },
+
+  updateModelTests() {
+    const host = document.getElementById("llmProviderDetail");
+    if (!host) return;
+    host.querySelectorAll("[data-model-test-result]").forEach((element) => {
+      const result = providerAdminState.modelTests.get(element.dataset.modelTestResult);
+      const labels = { pending: "等待测试", testing: "测试中…", success: "成功", error: "失败" };
+      element.className = `provider-model-test-result ${result?.status || ""}`;
+      element.textContent = result ? `${labels[result.status]}${Number.isFinite(result.elapsed_ms) ? ` · ${(result.elapsed_ms / 1000).toFixed(1)}s` : ""}` : "";
+      element.title = result?.message || "";
+      element.tabIndex = result ? 0 : -1;
+      element.setAttribute("aria-label", result ? `${element.textContent}，${result.message || ""}` : "");
+    });
+    const button = host.querySelector("[data-provider-test-models]");
+    if (button) {
+      button.disabled = Boolean(providerAdminState.testBatch) || !providerModels(providerAdminState.selectedId).some((model) => model.enabled !== false);
+      button.querySelector("span").textContent = providerAdminState.testBatch ? "测试中…" : "测试模型";
+    }
+  },
+
+  async testModels(provider) {
+    if (providerAdminState.testBatch) return;
+    const models = providerModels(provider.id).filter((model) => model.enabled !== false);
+    if (!models.length) return;
+    const batch = { controller: new AbortController() };
+    providerAdminState.testBatch = batch;
+    for (const model of providerModels(provider.id)) providerAdminState.modelTests.delete(model.id);
+    for (const model of models) providerAdminState.modelTests.set(model.id, { status: "pending" });
+    this.updateModelTests();
+    try {
+      for (const model of models) {
+        if (providerAdminState.testBatch !== batch) break;
+        // Re-check current state: a model may have been disabled/deleted while a previous test ran.
+        if (!providerModels(provider.id).some((item) => item.id === model.id && item.enabled !== false)) {
+          providerAdminState.modelTests.delete(model.id);
+          continue;
+        }
+        providerAdminState.modelTests.set(model.id, { status: "testing" });
+        this.updateModelTests();
+        let result;
+        const timeout = setTimeout(() => batch.controller.abort(), 35000);
+        try {
+          result = await apiFetch(`/api/v1/llm-models/${encodeURIComponent(model.id)}/test?provider_id=${encodeURIComponent(provider.id)}`, {
+            method: "POST", signal: batch.controller.signal,
+          });
+        } catch (error) {
+          result = { ok: false, message: batch.controller.signal.aborted ? "请求中断，结果未确认，请重新测试" : error.message };
+        } finally {
+          clearTimeout(timeout);
+        }
+        if (providerAdminState.testBatch !== batch) break;
+        providerAdminState.modelTests.set(model.id, { ...result, status: result?.ok === true ? "success" : "error" });
+        this.updateModelTests();
+        if (batch.controller.signal.aborted) break;
+      }
+    } finally {
+      if (providerAdminState.testBatch === batch) {
+        this.cancelModelTests();
+        this.updateModelTests();
+      }
+    }
+  },
+
   async refresh({ preserveSelection = true } = {}) {
+    this.cancelModelTests();
+    providerAdminState.modelTests.clear();
     const list = document.getElementById("llmProviderList");
     if (!list) return;
     list.innerHTML = `<div class="provider-list-state">正在加载 Provider…</div>`;
@@ -112,8 +187,12 @@ const llmProvidersAdmin = {
       this.renderList();
       this.renderDetail();
       showDbBanner(false);
+      return true;
     } catch (error) {
       list.innerHTML = `<div class="provider-list-state error">${escapeHtml(error.message)}</div>`;
+      const detail = document.getElementById("llmProviderDetail");
+      if (detail) detail.innerHTML = `<div class="provider-detail-empty">列表加载失败，请重新加载</div>`;
+      return false;
     }
   },
 
@@ -136,6 +215,7 @@ const llmProvidersAdmin = {
       </button>
     `).join("");
     list.querySelectorAll("[data-provider-id]").forEach((button) => button.addEventListener("click", () => {
+      this.cancelModelTests();
       providerAdminState.selectedId = button.dataset.providerId;
       this.renderList();
       this.renderDetail();
@@ -148,7 +228,7 @@ const llmProvidersAdmin = {
     const provider = state.llmProviders.find((item) => item.id === providerAdminState.selectedId);
     if (!host) return;
     if (!provider) {
-      host.innerHTML = `<div class="provider-detail-empty"><i data-lucide="waypoints"></i><p>选择一个 Provider 查看接入配置与关联模型</p></div>`;
+      host.innerHTML = `<div class="provider-detail-empty"><i data-lucide="waypoints"></i><p>${state.llmProviders.length ? "选择一个 Provider 查看接入配置与关联模型" : "暂无 Provider，请点击右上角新建 Provider"}</p></div>`;
       window.lucide?.createIcons();
       return;
     }
@@ -175,13 +255,14 @@ const llmProvidersAdmin = {
         </div>
       </header>
       <section class="provider-models-section">
-        <div class="provider-section-head"><h4>关联模型</h4><div class="row-actions provider-action-group">${catalogId ? `<button type="button" class="provider-action" data-provider-catalog><i data-lucide="library"></i><span>从目录添加</span></button>` : ""}<button type="button" class="provider-action" data-provider-model><i data-lucide="plus"></i><span>新建模型</span></button></div></div>
+        <div class="provider-section-head"><h4>关联模型</h4><div class="row-actions provider-action-group"><button type="button" class="provider-action" data-provider-test-models title="逐个测试已开启的模型，会产生少量模型用量；结果仅当前页面保留"><i data-lucide="plug-zap"></i><span>测试模型</span></button>${catalogId ? `<button type="button" class="provider-action" data-provider-catalog><i data-lucide="library"></i><span>从目录添加</span></button>` : ""}<button type="button" class="provider-action" data-provider-model><i data-lucide="plus"></i><span>新建模型</span></button></div></div>
         <div class="provider-related-models">${models.length ? models.map((model) => `
           <div class="provider-related-model ${model.selectable === false ? "is-disabled" : ""}">
             <button type="button" class="provider-related-model-main" data-edit-model="${escapeHtml(model.id)}">
               <code>${escapeHtml(model.model)}</code>
               <span class="provider-model-facts">${providerModelFacts(model)}</span>
             </button>
+            <span class="provider-model-test-result" data-model-test-result="${escapeHtml(model.id)}" role="status" aria-live="polite"></span>
             <button type="button" class="model-enabled-switch ${model.enabled === false ? "off" : "on"}" data-toggle-model="${escapeHtml(model.id)}" role="switch" aria-checked="${model.enabled !== false}" title="${model.enabled === false ? "启用模型" : "停用模型"}" aria-label="${model.enabled === false ? "启用模型" : "停用模型"}"><span></span></button>
             <button type="button" class="provider-model-delete" data-delete-model="${escapeHtml(model.id)}" data-model-name="${escapeHtml(model.model)}" title="删除模型" aria-label="删除模型"><i data-lucide="trash-2"></i></button>
           </div>`).join("") : `<div class="provider-model-empty">尚未关联模型</div>`}</div>
@@ -190,10 +271,12 @@ const llmProvidersAdmin = {
     host.querySelector("[data-provider-delete]")?.addEventListener("click", () => this.remove(provider));
     host.querySelector("[data-provider-model]")?.addEventListener("click", () => window.llmModelsAdmin?.openCreate({ provider_id: provider.id }, { lockProvider: true, deriveName: true }));
     host.querySelector("[data-provider-catalog]")?.addEventListener("click", (event) => this.initializeFromCatalog(provider, event.currentTarget));
+    host.querySelector("[data-provider-test-models]")?.addEventListener("click", () => this.testModels(provider));
     host.querySelectorAll("[data-edit-model]").forEach((button) => button.addEventListener("click", () => window.llmModelsAdmin?.openEdit(button.dataset.editModel, { lockProvider: true, deriveName: true })));
     host.querySelectorAll("[data-toggle-model]").forEach((button) => button.addEventListener("click", () => window.llmModelsAdmin?.toggleEnabled(button.dataset.toggleModel)));
     host.querySelectorAll("[data-delete-model]").forEach((button) => button.addEventListener("click", () => window.llmModelsAdmin?.remove(button.dataset.deleteModel, button.dataset.modelName)));
     window.lucide?.createIcons();
+    this.updateModelTests();
   },
 
   async initializeFromCatalog(provider, button) {
@@ -380,12 +463,14 @@ const llmProvidersAdmin = {
   },
 
   async remove(provider) {
-    if (!(await confirmAction({ title: "删除 Provider？", message: `只有未关联模型的 Provider 才能删除。当前对象：${provider.name}`, icon: "trash-2", tone: "danger", confirmLabel: "删除" }))) return;
+    const modelCount = providerModels(provider.id).length;
+    const related = modelCount ? `及其 ${modelCount} 个模型配置` : "";
+    if (!(await confirmAction({ title: "删除 Provider？", message: `将删除 Provider「${provider.name}」${related}，此操作不可撤销。仍被 Agent 或 Web Search 使用时不会删除。`, icon: "trash-2", tone: "danger", confirmLabel: "删除" }))) return;
     try {
       await apiFetch(`/api/v1/llm-providers/${encodeURIComponent(provider.id)}`, { method: "DELETE" });
       providerAdminState.selectedId = null;
-      await this.refresh({ preserveSelection: false });
-      showToast("Provider 已删除");
+      const refreshed = await this.refresh({ preserveSelection: false });
+      showToast(refreshed ? "Provider 已删除" : "Provider 已删除，列表刷新失败，请重新加载", !refreshed);
     } catch (error) { showToast(error.message, true); }
   },
 };
@@ -425,6 +510,10 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("toggleProviderCatalogSelection")?.addEventListener("click", () => llmProvidersAdmin.toggleCatalogPickerSelection());
   document.getElementById("closeProviderCatalogPickerModal")?.addEventListener("click", () => llmProvidersAdmin.closeCatalogPicker());
   document.getElementById("cancelProviderCatalogPickerBtn")?.addEventListener("click", () => llmProvidersAdmin.closeCatalogPicker());
+});
+
+document.addEventListener("deep-agent-configuration-tab", (event) => {
+  if (event.detail?.name !== "llm-providers") llmProvidersAdmin.cancelModelTests();
 });
 
 window.__LlmProviderConfigurationUI = { providerBrand, providerTypeLabel, syncProviderBaseUrl };

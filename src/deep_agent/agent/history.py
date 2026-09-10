@@ -210,11 +210,44 @@ def _is_tool_denied_content(value: object) -> bool:
     )
 
 
+def _results_after_user_message(messages: list[ModelMessage]) -> dict[int, set[tuple[str, str | None]]]:
+    """Match within one assistant segment in linear time, never by global call ID.
+
+    A deferred resume may persist its user input before its tool result. Both
+    requests belong to the preceding call until the next assistant response.
+    """
+    matched: dict[int, set[tuple[str, str | None]]] = {}
+    calls: set[tuple[str, str | None]] = set()
+    response_index = -1
+    crossed_user = False
+    for index, message in enumerate(messages):
+        if isinstance(message, ModelResponse):
+            response_index = index
+            crossed_user = False
+            calls = {(p.tool_call_id, p.tool_name) for p in message.parts
+                     if isinstance(p, BaseToolCallPart) and p.tool_call_id}
+        elif isinstance(message, ModelRequest):
+            if (any(isinstance(p, UserPromptPart) for p in message.parts)
+                    and not any(isinstance(p, (BaseToolReturnPart, RetryPromptPart)) for p in message.parts)):
+                crossed_user = True
+            for part in message.parts:
+                if isinstance(part, (BaseToolReturnPart, RetryPromptPart)) and part.tool_call_id:
+                    key = (part.tool_call_id, part.tool_name)
+                    if crossed_user and key in calls:
+                        matched.setdefault(response_index, set()).add(key)
+                    calls.discard(key)
+        else:
+            calls.clear()
+            crossed_user = False
+    return matched
+
+
 def repair_unprocessed_tool_calls(
     messages: list[ModelMessage],
     *,
     denied_message: str = _USER_CANCELLED_TOOL_MESSAGE,
     failure_message: str | None = None,
+    diagnostic_fields: Mapping[str, str | None] | None = None,
 ) -> list[ModelMessage]:
     """Close legacy dangling tool calls without touching official interrupted turns.
 
@@ -227,6 +260,17 @@ def repair_unprocessed_tool_calls(
     """
     if not messages:
         return messages
+
+    late_results = _results_after_user_message(messages)
+
+    def observe(event: str, tool_call_id: str, tool: str, reason: str) -> None:
+        if diagnostic_fields is None:
+            return
+        try:
+            from deep_agent.agent.observability import log_event
+            log_event(event, **diagnostic_fields, tool_call_id=tool_call_id, tool=tool, reason=reason)
+        except Exception:
+            pass  # Diagnostics must never change history or persistence.
 
     repaired: list[ModelMessage] = []
     pending: dict[str, str] = {}
@@ -255,10 +299,13 @@ def repair_unprocessed_tool_calls(
                 for tool_call_id, tool_name in pending.items()
             ], metadata=source_metadata,
         ))
+        for call_id, tool_name in pending.items():
+            observe("history_tool_result_synthesized", call_id, tool_name,
+                    "missing_result_failed" if failure_message is not None else "missing_result_cancelled")
         changed = True
         pending = {}
 
-    for message in messages:
+    for message_index, message in enumerate(messages):
         if isinstance(message, ModelResponse):
             retry_resolved = set()
             returned_ids = {
@@ -274,7 +321,11 @@ def repair_unprocessed_tool_calls(
                 continue
             for part in message.parts:
                 if isinstance(part, BaseToolCallPart) and part.tool_call_id:
-                    pending[part.tool_call_id] = part.tool_name
+                    if (part.tool_call_id, part.tool_name) in late_results.get(message_index, ()):
+                        observe("history_tool_result_matched", part.tool_call_id, part.tool_name,
+                                "result_after_user_message")
+                    else:
+                        pending[part.tool_call_id] = part.tool_name
             for tool_call_id in returned_ids:
                 pending.pop(tool_call_id, None)
             continue

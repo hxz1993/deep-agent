@@ -113,7 +113,7 @@ textarea {
 .user-pill,
 .theme-switch button,
 .icon-action,
-.diagnostics-page button,
+:where(.diagnostics-page) button,
 .context-popover button,
 .auth-lock button {
   border: 0;
@@ -424,7 +424,7 @@ textarea {
 #workspaceLegacyHost .session-panel-summary { color: var(--text-faint); font-size: 12px; white-space: nowrap; }
 #workspaceLegacyHost .section-title { font-size: 12px; }
 #workspaceLegacyHost .session-toolbar { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 7px; margin-bottom: 6px; }
-#workspaceLegacyHost .session-search { min-width: 0; margin: 0; }
+#workspaceLegacyHost .session-search { min-width: 0; margin: 0; border-radius: 9px; }
 #workspaceLegacyHost .session-new-action { width: auto; height: 31px; display: inline-flex; align-items: center; gap: 6px; padding: 0 10px; color: var(--accent); border: 1px solid var(--border); background: var(--bg); font-size: 12px; }
 #workspaceLegacyHost .session-new-action:hover,
 #workspaceLegacyHost .session-new-action:focus-visible { border-color: var(--border); color: var(--accent); background: var(--bg-elev); }
@@ -514,14 +514,13 @@ textarea {
   position: relative;
   z-index: 3;
   width: calc(100% + var(--console-inspector-width));
-  min-height: 54px;
-  padding: 0 16px;
-  background: var(--bg-soft);
 }
-#workspaceLegacyHost .chat-actions { display: flex; align-items: center; gap: 9px; }
+:is(#workspaceLegacyHost, .diagnostic-session-detail) .chat-actions { display: flex; align-items: center; gap: 5px; }
+:is(#workspaceLegacyHost, .diagnostic-session-detail) .chat-title { overflow: hidden; }
+:is(#workspaceLegacyHost, .diagnostic-session-detail) .chat-title > span:first-child { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #workspaceLegacyHost .workspace-context-action { padding: 0 10px; }
 #workspaceLegacyHost #toggleSidebar { display: none; }
-#workspaceLegacyHost .messages { padding: 18px 0; }
+:is(#workspaceLegacyHost, .diagnostic-session-detail) .messages { padding: 18px 0; }
 #workspaceLegacyHost .message { max-width: min(820px, calc(100% - 38px)); }
 #workspaceLegacyHost .composer { padding: 10px 16px 12px; }
 #workspaceLegacyHost .composer-inner { max-width: none; }
@@ -704,24 +703,7 @@ dialog.console-detail-dialog.modal-agent,
 dialog.console-detail-dialog.modal-wide { width: min(980px, calc(100vw - 28px)); }
 dialog.console-detail-dialog#llmModelModal { width: min(840px, calc(100vw - 32px)); }
 
-.diagnostics-page { height: 100%; overflow: auto; padding: 28px clamp(20px, 5vw, 72px); }
-.diagnostics-head { max-width: 1120px; margin: 0 auto 22px; display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; }
-.diagnostics-head h1 { margin: 5px 0 7px; font-size: 25px; }
-.diagnostics-head p { margin: 0; color: var(--text-dim); }
 .eyebrow { color: var(--accent); font-size: 12px; font-weight: 700; text-transform: uppercase; }
-.future-badge { display: inline-flex; padding: 5px 8px; border: 1px solid var(--border); border-radius: 5px; color: var(--text-faint); background: var(--bg-soft); white-space: nowrap; }
-.diagnostics-band, .diagnostics-grid, .diagnostics-note { max-width: 1120px; margin-left: auto; margin-right: auto; }
-.diagnostics-band { display: grid; grid-template-columns: 42px minmax(0, 1fr) auto; align-items: center; gap: 14px; padding: 18px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg-soft); }
-.diagnostic-icon { width: 42px; height: 42px; display: grid; place-items: center; border-radius: 6px; color: var(--accent); background: var(--accent-soft); }
-.diagnostic-icon svg { width: 20px; height: 20px; }
-.diagnostics-band h2, .diagnostics-grid h3 { margin: 0 0 5px; font-size: 14px; }
-.diagnostics-band p, .diagnostics-grid p { margin: 0; color: var(--text-dim); line-height: 1.6; }
-.diagnostics-band button { padding: 7px 10px; border: 1px solid var(--accent); border-radius: 5px; color: var(--accent); }
-.diagnostics-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 12px; }
-.diagnostics-grid article { min-height: 185px; display: flex; flex-direction: column; align-items: flex-start; padding: 17px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg-soft); }
-.diagnostics-grid article > svg { width: 20px; height: 20px; margin-bottom: 18px; color: var(--text-faint); }
-.diagnostics-grid article button { margin-top: auto; padding: 6px 0; color: var(--text-faint); cursor: not-allowed; }
-.diagnostics-note { display: flex; gap: 9px; margin-top: 12px; padding: 12px 14px; border-left: 3px solid var(--accent); background: var(--accent-soft); color: var(--text-dim); }
 
 .context-popover {
   position: fixed;
@@ -815,7 +797,6 @@ dialog.console-detail-dialog#llmModelModal { width: min(840px, calc(100vw - 32px
   .docs-link { width: 32px; padding: 0; justify-content: center; }
   .docs-link span { display: none; }
   .configuration-shell { grid-template-columns: 150px minmax(0, 1fr); }
-  .diagnostics-grid { grid-template-columns: repeat(2, 1fr); }
 }
 
 @media (max-width: 620px) {
@@ -830,11 +811,6 @@ dialog.console-detail-dialog#llmModelModal { width: min(840px, calc(100vw - 32px
   .resource-title { display: none; }
   .resource-btn.tab { width: auto; flex: 0 0 auto; padding: 0 9px; }
   .configuration-content { padding: 11px; }
-  .diagnostics-page { padding: 20px 12px; }
-  .diagnostics-head, .diagnostics-band { align-items: flex-start; }
-  .diagnostics-band { grid-template-columns: 36px minmax(0, 1fr); }
-  .diagnostics-band button { grid-column: 2; }
-  .diagnostics-grid { grid-template-columns: 1fr; }
   dialog.console-detail-dialog.modal { width: 100vw; max-height: 100vh; height: 100vh; margin: 0; border-radius: 0; }
 }
 
@@ -974,10 +950,9 @@ dialog.console-detail-dialog#llmModelModal { width: min(840px, calc(100vw - 32px
 #workspaceLegacyHost .agent-switcher .icon-action svg { width: 15px; height: 15px; }
 #workspaceLegacyHost .agent-switcher .icon-action.loading svg { animation: console-spin .8s linear infinite; }
 #workspaceLegacyHost .agent-switcher .icon-action:disabled { cursor: wait; opacity: .48; }
-#workspaceLegacyHost .workspace-header-action.active { color: var(--accent); background: var(--accent-soft); }
+:is(#workspaceLegacyHost, .diagnostic-session-detail) .workspace-header-action.active { color: var(--accent); background: var(--accent-soft); }
 
-#workspaceLegacyHost .chat-actions { gap: 5px; }
-#workspaceLegacyHost .workspace-header-action {
+:is(#workspaceLegacyHost, .diagnostic-session-detail) .workspace-header-action {
   height: 30px;
   display: inline-flex;
   align-items: center;
@@ -991,9 +966,9 @@ dialog.console-detail-dialog#llmModelModal { width: min(840px, calc(100vw - 32px
   cursor: pointer;
   font: inherit;
 }
-#workspaceLegacyHost .workspace-header-action:hover { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 22%, var(--border)); background: var(--accent-soft); }
-#workspaceLegacyHost .workspace-header-action svg { width: 14px; height: 14px; }
-#workspaceLegacyHost #toggleInspectorPaneBtn { width: 30px; padding: 0; }
+:is(#workspaceLegacyHost, .diagnostic-session-detail) .workspace-header-action:hover { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 22%, var(--border)); background: var(--accent-soft); }
+:is(#workspaceLegacyHost, .diagnostic-session-detail) .workspace-header-action svg { width: 14px; height: 14px; }
+:is(#workspaceLegacyHost, .diagnostic-session-detail) .workspace-header-action:not(:has(span)) { width: 30px; padding: 0; }
 
 .inspector-pane { padding-top: 48px; }
 .inspector-content { padding: 11px; }
@@ -1057,8 +1032,8 @@ dialog.console-detail-dialog#llmModelModal { width: min(840px, calc(100vw - 32px
 .budget-meter span { display: block; height: 100%; background: var(--accent); transition: width .2s; }
 
 @media (max-width: 620px) {
-  #workspaceLegacyHost .workspace-header-action span { display: none; }
-  #workspaceLegacyHost .workspace-header-action { width: 30px; padding: 0; }
+  :is(#workspaceLegacyHost, .diagnostic-session-detail) .workspace-header-action span { display: none; }
+  :is(#workspaceLegacyHost, .diagnostic-session-detail) .workspace-header-action { width: 30px; padding: 0; }
   #workspaceLegacyHost .composer-meta { grid-template-columns: minmax(0, 1fr); }
   #workspaceLegacyHost #composerUploadCapabilities { grid-column: auto; }
 }
@@ -1293,6 +1268,42 @@ body.console-nav-collapsed { --console-rail-width: 56px; }
 .console-rail .resource-group-label,
 .console-rail .console-brand-copy { overflow: hidden; }
 body.console-nav-collapsed .console-rail-toggle { pointer-events: none; visibility: hidden; }
+body.console-nav-collapsed .console-rail-header .console-brand { justify-content: center; padding-right: 0; gap: 0; }
+body.console-nav-collapsed .console-rail-header .console-brand-copy { display: none; }
+
+.skill-install-note { display: grid; gap: 4px; padding: 10px 12px; border-radius: 8px; background: var(--accent-soft); }
+.skill-install-note-number { color: var(--accent); margin-right: 7px; }
+.skill-install-note p { margin: 0; color: var(--text-muted); font-size: 12px; line-height: 1.7; }
+.skill-install-note strong { color: var(--text); font-weight: 600; }
+.skill-install-picker { display: flex; align-items: center; gap: 14px; width: 100%; min-height: 88px; margin-top: 16px; padding: 18px 20px; border: 1px dashed var(--border); border-radius: 10px; background: var(--bg); color: var(--accent); text-align: left; cursor: pointer; font: inherit; }
+.skill-install-picker:hover:not(:disabled) { border-color: var(--accent); background: var(--accent-soft); }
+.skill-install-picker:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.skill-install-picker > svg { width: 24px; height: 24px; flex-shrink: 0; }
+.skill-install-picker > span { display: grid; gap: 5px; flex: 1; min-width: 0; }
+.skill-install-picker strong { font-size: 13px; font-weight: 600; }
+.skill-install-picker small { font-size: 12px; line-height: 1.5; color: var(--text-muted); }
+.skill-install-picker > .skill-install-picker-plus { width: 18px; height: 18px; color: var(--text-faint); }
+.skill-install-results { display: grid; gap: 6px; max-height: 320px; overflow: auto; margin: 12px 0 0; padding: 0; list-style: none; }
+.skill-install-results:empty { margin: 0; }
+.skill-install-card { display: flex; gap: 10px; align-items: center; padding: 8px 12px; border: 0; border-radius: 8px; background: var(--bg); box-shadow: inset 0 0 0 1px var(--border-soft); }
+.skill-install-file-icon { display: grid; place-items: center; width: 30px; height: 32px; flex-shrink: 0; border-radius: 6px; color: var(--text-muted); background: var(--bg-hover); }
+.skill-install-file-icon svg { width: 17px; height: 17px; }
+.skill-install-file { flex: 1; min-width: 0; display: grid; gap: 3px; }
+.skill-install-file strong { color: var(--text); font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+.skill-install-file-meta { font-size: 12px; color: var(--text-faint); }
+.skill-install-detail { color: var(--text-muted); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.skill-install-status { display: inline-flex; align-items: center; gap: 5px; flex-shrink: 0; padding: 5px 8px; border-radius: 6px; color: var(--text-muted); background: var(--bg-hover); font-size: 12px; font-weight: 500; white-space: nowrap; }
+.skill-install-status svg { width: 13px; height: 13px; }
+.skill-install-card[data-status="uploading"] .skill-install-status { color: var(--accent); background: var(--accent-soft); }
+.skill-install-card[data-status="uploading"] .skill-install-status svg { animation: skill-install-spin 1s linear infinite; }
+.skill-install-card[data-status="done"] .skill-install-status { color: var(--conn-ok); background: color-mix(in srgb, var(--conn-ok) 10%, transparent); }
+.skill-install-card[data-status="error"] .skill-install-status { color: var(--danger); background: var(--danger-soft); }
+.skill-install-card[data-status="unknown"] .skill-install-status { color: var(--hitl-pending-border); background: color-mix(in srgb, var(--hitl-pending-border) 10%, transparent); }
+@keyframes skill-install-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .skill-install-card[data-status="uploading"] .skill-install-status svg { animation: none; } }
+@media (max-width: 520px) { .skill-install-picker { gap: 10px; padding: 16px 12px; } .skill-install-card { gap: 8px; padding: 8px; } }
+.skill-install-message { margin-top: 12px; font-size: 12px; color: var(--text-muted); }
+#skillInstallDialog button:disabled { opacity: .5; cursor: not-allowed; }
 
 .console-topbar {
   grid-column: 2;
@@ -1427,8 +1438,9 @@ body:not(.console-nav-collapsed):not(.console-theme-compact) .console-rail-setti
   box-shadow: var(--console-card-shadow);
 }
 #workspaceLegacyHost > .sidebar { border-right: 1px solid var(--console-card-border); }
-#workspaceLegacyHost .chat-header {
-  width: 100%;
+/* Shared session presentation: the readonly host inherits workspace UI updates.
+   Width/position remain host layout rules below, not duplicate visual styles. */
+:is(#workspaceLegacyHost, .diagnostic-session-detail) .chat-header {
   min-height: 56px;
   padding: 0 17px;
   border-bottom-color: var(--console-card-border);
@@ -1675,22 +1687,17 @@ dialog.agent-editor-page::backdrop { display: none; }
 .mcp-editor-page .modal-body { overflow: auto; }
 .mcp-editor-workbench {
   width: 100%;
-  height: 100%;
-  min-width: 760px;
+  min-width: 0;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(320px, .78fr) minmax(480px, 1.22fr);
-  align-items: stretch;
+  grid-template-columns: minmax(0, .78fr) minmax(0, 1.22fr);
+  align-items: start;
 }
 .mcp-editor-section {
   min-width: 0;
   padding: 24px;
-  overflow: auto;
+  overflow: visible;
 }
-.mcp-editor-basics { border-right: 1px solid var(--console-card-border); }
-.mcp-editor-section-head { margin-bottom: 22px; }
-.mcp-editor-section-head h4 { margin: 0; color: var(--text); font-size: 16px; }
-.mcp-editor-section-head p { margin: 6px 0 0; color: var(--text-faint); font-size: 12px; line-height: 1.6; }
 .mcp-editor-section .field + .field,
 .mcp-editor-section .mcp-transport-fields { margin-top: 18px; }
 .mcp-editor-basics #mcpDescription { min-height: 150px; resize: vertical; }
@@ -1744,12 +1751,13 @@ dialog.agent-editor-page::backdrop { display: none; }
   outline-offset: 1px;
 }
 .mcp-json-input {
+  position: relative;
   display: grid;
   min-height: 170px;
   overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--console-card-border));
   border-radius: 9px;
-  background: var(--code-bg);
+  background: var(--bg);
 }
 .mcp-json-input:focus-within {
   border-color: var(--accent);
@@ -1767,16 +1775,31 @@ dialog.agent-editor-page::backdrop { display: none; }
   border-radius: 9px;
   font-family: var(--mono);
   font-size: 12px;
+  font-weight: 400;
+  font-style: normal;
+  font-variant-ligatures: none;
+  letter-spacing: normal;
   line-height: 1.55;
   tab-size: 2;
   white-space: pre-wrap;
   overflow-wrap: break-word;
+  word-break: normal;
+  scrollbar-gutter: stable;
 }
 .mcp-json-input > .mcp-json-highlight {
+  position: absolute;
+  inset: 0;
+  height: 100%;
   pointer-events: none;
   overflow: hidden;
   background: transparent;
   color: var(--text);
+}
+/* 高亮只改变颜色；字段标签及只读 JSON 的字体样式不能改变编辑器字形尺寸。 */
+.mcp-json-input .mcp-json-highlight code,
+.mcp-json-input .mcp-json-highlight code span {
+  font: inherit;
+  letter-spacing: inherit;
 }
 .mcp-editor-page .mcp-json-input #mcpHeaders {
   position: relative;
@@ -1862,11 +1885,6 @@ dialog.agent-editor-page::backdrop { display: none; }
 .agent-editor-pane .agent-skill-card-meta svg { width: 13px; height: 13px; }
 .agent-editor-pane .agent-skill-unavailable { color: var(--danger); }
 
-.diagnostics-page { padding: 22px clamp(18px, 4vw, 58px); background: var(--console-canvas); }
-.diagnostics-band,
-.diagnostics-grid article,
-.diagnostics-note { border-color: var(--console-card-border); border-radius: var(--console-card-radius); background: var(--console-surface); box-shadow: var(--console-card-shadow); }
-.diagnostics-note { border-left: 1px solid var(--console-card-border); }
 
 @media (max-width: 920px) {
   :root { --console-rail-width: 176px; }
@@ -1908,7 +1926,6 @@ dialog.agent-editor-page::backdrop { display: none; }
   .agent-editor-header-actions .btn { padding-left: 9px; padding-right: 9px; }
   .agent-editor-page .modal-body { padding: 12px; }
   .agent-editor-workbench { min-width: 760px; }
-  .mcp-editor-workbench { min-width: 720px; }
   .agent-editor-primary { padding: 14px; }
   .agent-editor-pane { padding: 14px; }
 }
@@ -1916,7 +1933,6 @@ dialog.agent-editor-page::backdrop { display: none; }
 @media (max-width: 620px) {
   .console-section-name { font-size: 12px; }
   .workspace-grid { padding: 7px; }
-  .diagnostics-page { padding: 14px 8px; }
 }
 
 /* 0821：会话检查器与护眼主题轻量化。 */
@@ -2722,6 +2738,10 @@ html[data-theme="paper"] .run-usage-legend .remaining { color: #5e9e7f; }
   letter-spacing: -.02em;
 }
 
+/* Keep the inline channel command's hit area without lowering the page title. */
+#configurationHost #panel-channels .panel-title-copy { display: block; }
+#configurationHost .channel-title-row .channel-commands-btn { margin-block: -4px; }
+
 #configurationHost .panel-subtitle,
 #configurationHost .catalog-panel .models-desc {
   overflow: hidden;
@@ -2983,13 +3003,19 @@ html[data-theme="paper"] .run-usage-legend .remaining { color: #5e9e7f; }
 .console-main #workspaceLegacyHost > .chat,
 .console-main .inspector-pane,
 .console-main .workspace-grid.inspector-hidden #workspaceLegacyHost > .chat { border: 0 !important; border-radius: 0; box-shadow: none; }
-.console-main #workspaceLegacyHost .chat-header,
+.console-main :is(#workspaceLegacyHost, .diagnostic-session-detail) .chat-header,
 .console-main .workspace-grid.inspector-hidden #workspaceLegacyHost .chat-header { margin: 0; border: 0; border-bottom: 1px solid var(--console-card-border); border-radius: 0; }
 .console-main .diagnostics-page { margin: 0; background: var(--console-surface); }
 dialog.agent-editor-page.console-detail-dialog.modal-agent,
 dialog.mcp-editor-page.console-detail-dialog { padding: 0; }
-.agent-editor-page > form,
-.mcp-editor-page > form { width: 100%; border: 0; border-radius: 0; box-shadow: none; }
+.agent-editor-page > form { width: 100%; border: 0; border-radius: 0; box-shadow: none; }
+dialog.mcp-editor-page.console-detail-dialog { background: var(--console-surface); }
+.mcp-editor-page > form { width: min(1080px, 100%); }
+@media (max-width: 1100px) {
+  .mcp-editor-workbench { grid-template-columns: minmax(0, 1fr); }
+  .mcp-editor-section { padding: 18px; }
+  .mcp-editor-page .modal-body { padding: 0; }
+}
 .workspace-agent-channel { display: inline-flex; vertical-align: middle; margin-left: 5px; color: var(--text-faint); flex: 0 0 auto; }
 .workspace-agent-channel svg { width: 12px; height: 12px; }
 .agent-select-option > span:nth-child(2) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -3011,8 +3037,7 @@ dialog.mcp-editor-page.console-detail-dialog { padding: 0; }
 /* 配置页标题保持紧凑层级，不影响工作台消息与 Markdown 正文。 */
 #configurationHost .global-settings-section-title h3,
 #configurationHost .provider-detail-header h3,
-#configurationHost .modal-header h3,
-#configurationHost .mcp-editor-section-head h4 { font-size: 14px; font-weight: 600; }
+#configurationHost .modal-header h3 { font-size: 14px; font-weight: 600; }
 #configurationHost .global-settings-section-title > svg { width: 16px; height: 16px; }
 #configurationHost .agent-card-head strong,
 #configurationHost .provider-section-head h4 { font-size: 13px; font-weight: 600; }

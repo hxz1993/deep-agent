@@ -14,6 +14,7 @@ from deep_agent.db.dialect import resolve_dialect
 from deep_agent.db.factory import close_db, create_engine
 from deep_agent.db.stores.bundle import create_data_stores
 from deep_agent.db.url import get_database_url
+from deep_agent.diagnostics.runtime import observe_lifespan
 
 
 @dataclass
@@ -50,7 +51,7 @@ def create_gateway_app() -> FastAPI:
                 await context.runtime.stop()
             await close_db(engine)
 
-    app = FastAPI(title="DeepAgent Channel Gateway", version="0.7.0", lifespan=lifespan)
+    app = FastAPI(title="DeepAgent Channel Gateway", version="0.7.0", lifespan=observe_lifespan(lifespan, "gateway"))
 
     async def authorize(
         request: Request,

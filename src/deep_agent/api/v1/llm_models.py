@@ -19,6 +19,8 @@ from deep_agent.models.models_dev import (
     fetch_models_dev_bundle,
     parse_models_dev_catalog,
 )
+from deep_agent.models.connectivity import probe_model
+from deep_agent.models.provider_registry import model_unavailable_reason
 from deep_agent.api.v1.admin import CONSOLE_ADMIN_DEPENDENCIES
 from deep_agent.db.deps import (
     get_llm_configuration_service,
@@ -31,7 +33,7 @@ from deep_agent.db.stores.llm_model import (
     LlmModelValidationError,
 )
 from deep_agent.db.stores.model_catalog import ModelCatalogStoreBase
-from deep_agent.schemas.llm_model import LlmModelCreate, LlmModelResponse, LlmModelUpdate
+from deep_agent.schemas.llm_model import LlmModelCreate, LlmModelResponse, LlmModelUpdate, LlmModelTestResponse
 from deep_agent.schemas.model_catalog import (
     ModelCatalogRefreshResponse,
     ModelCatalogResponse,
@@ -45,6 +47,7 @@ from deep_agent.services.llm_configuration import (
 router = APIRouter(dependencies=CONSOLE_ADMIN_DEPENDENCIES)
 _catalog_refresh_lock = asyncio.Lock()
 _MAX_CATALOG_IMPORT_BYTES = 16 * 1024 * 1024
+_model_test_slots = asyncio.Semaphore(2)
 
 
 def _parse_model_id(model_id: str) -> str:
@@ -273,6 +276,36 @@ async def import_model_catalog(
         labs=stats.lab_count,
         refreshed_at=stats.refreshed_at,
     )
+
+
+@router.post("/llm-models/{model_id}/test", response_model=LlmModelTestResponse)
+async def test_llm_model(
+    model_id: str,
+    provider_id: str = Query(...),
+    store: LlmModelStoreBase = Depends(get_llm_model_store),
+    service: LlmConfigurationService = Depends(get_llm_configuration_service),
+) -> LlmModelTestResponse:
+    row = await store.get_by_id(_parse_model_id(model_id))
+    if row is None:
+        raise HTTPException(status_code=404, detail="模型不存在，请刷新列表")
+    if row.provider_id != _parse_provider_id(provider_id):
+        raise HTTPException(status_code=409, detail="模型所属 Provider 已变化，请刷新列表")
+    provider = await service.get_provider(row.provider_id)
+    if provider is None:
+        raise HTTPException(status_code=404, detail="Provider 不存在，请刷新列表")
+    reason = model_unavailable_reason(row, provider)
+    if reason:
+        messages = {
+            "model_disabled": "模型已停用，不参与测试",
+            "provider_unconfigured": "Provider 未配置 API Key，请先编辑 Provider",
+            "provider_invalid": "Provider 配置无效，请检查类型和地址",
+        }
+        raise HTTPException(status_code=409, detail=messages[reason])
+    # Reject excess checks instead of leaving an unbounded queue of billable work.
+    if _model_test_slots.locked():
+        raise HTTPException(status_code=429, detail="模型测试正在进行，请稍后再试")
+    async with _model_test_slots:
+        return await probe_model(row, provider)
 
 
 @router.get("/llm-models/{model_id}", response_model=LlmModelResponse)

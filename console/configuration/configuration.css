@@ -1395,6 +1395,17 @@ dialog.console-action-dialog::backdrop {
 
 .field textarea { resize: vertical; min-height: 80px; }
 
+/* Chromium 对缓存候选预览强制使用 small-control + sans-serif。
+   模型名称采用相同规格，避免预览、选中和手工输入之间发生字体跳变。 */
+@supports (font: -webkit-small-control) {
+  #llmModelModel {
+    font: -webkit-small-control;
+    font-family: sans-serif;
+    height: 32px;
+    padding-block: 6px;
+  }
+}
+
 .field input.mcp-name-readonly {
   background: var(--bg-elev);
   color: var(--text-dim);

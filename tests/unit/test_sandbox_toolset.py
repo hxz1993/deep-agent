@@ -26,6 +26,7 @@ from deep_agent.sandbox.types import (
 from deep_agent.files.storage import StoredFile
 from deep_agent.schemas.attachment import AttachmentRef
 from tests.helpers.sandbox import sandbox_test_python
+from deepfos_platform.errors.classes import APIStatusNotTrue
 
 
 def _context(
@@ -520,6 +521,32 @@ class SandboxCapabilityTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ToolFailed):
             await tool.call_func({"code": "pass"}, _context(file_store=store))
         self.assertEqual(store.deleted, ["file-1"])
+
+    async def test_upload_native_error_and_incomplete_cleanup_are_reported(self):
+        backend = FakeSandboxBackend()
+        backend.published_files = tuple(
+            SandboxPublishedFile(file_name=f"output-{i}.html", mime="text/html", byte_size=1,
+                                 sha256=hashlib.sha256(b"x").hexdigest(), data=b"x")
+            for i in (1, 2)
+        )
+        store = FakeFileStore()
+        store.upload = AsyncMock(side_effect=[
+            StoredFile(id="first", file_name="output-1.html", file_size=1, file_type="DL"),
+            APIStatusNotTrue("files/upload", "不支持该文件类型 html", "FORMAT_DENIED"),
+        ])
+        store.delete = AsyncMock(side_effect=OSError("storage unavailable"))
+        ctx = _context(file_store=store)
+        tool, _ = await self._tool(backend)
+        with self.assertRaises(ToolFailed) as raised:
+            await tool.call_func({"code": "pass"}, ctx)
+        message = str(raised.exception)
+        self.assertIn("不支持该文件类型 html", message)
+        self.assertIn("FORMAT_DENIED", message)
+        self.assertIn("storage unavailable", message)
+        self.assertIn("部分本次产物清理失败", message)
+        self.assertNotIn("已回滚", message)
+        self.assertFalse(ctx.deps.session_file_artifacts)
+        store.delete.assert_awaited_once_with("first", {**ctx.deps.request_headers, "user": ctx.deps.user})
 
 
 if __name__ == "__main__":

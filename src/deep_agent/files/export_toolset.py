@@ -11,6 +11,7 @@ from pydantic_ai.toolsets import PreparedToolset
 from deep_agent.agent.attachments import _download_file
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.media_pipeline import max_upload_bytes
+from deep_agent.agent.tool_errors import observe_tool_operation, tool_error_message
 from deep_agent.files.export_schema import (
     ExistingPlatformFileSource,
     ExportFileResult,
@@ -66,15 +67,18 @@ async def _authorized_existing_file(
         if cached is not None:
             return cached, len(cached)
         try:
-            data = await _download_file(
-                file_id,
-                _request_headers(ctx),
-                file_store=_file_store(ctx),
-            )
+            async with observe_tool_operation(ctx, "download", tool="export_file_to_download_center"):
+                data = await _download_file(
+                    file_id,
+                    _request_headers(ctx),
+                    file_store=_file_store(ctx),
+                )
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            raise ToolFailed("已有附件下载失败，无法登记到下载中心") from exc
+            raise ToolFailed(tool_error_message(
+                "已有附件下载失败，无法登记到下载中心", exc, _request_headers(ctx),
+            )) from exc
         ctx.deps.file_bytes[cache_key] = data
         return data, len(data)
 
@@ -99,15 +103,18 @@ async def _authorized_existing_file(
     if cached is not None:
         return cached, len(cached)
     try:
-        data = await _download_file(
-            file_id,
-            _request_headers(ctx),
-            file_store=_file_store(ctx),
-        )
+        async with observe_tool_operation(ctx, "download", tool="export_file_to_download_center"):
+            data = await _download_file(
+                file_id,
+                _request_headers(ctx),
+                file_store=_file_store(ctx),
+            )
     except asyncio.CancelledError:
         raise
     except Exception as exc:
-        raise ToolFailed("当前会话工具生成文件下载失败，无法登记到下载中心") from exc
+        raise ToolFailed(tool_error_message(
+            "当前会话工具生成文件下载失败，无法登记到下载中心", exc, _request_headers(ctx),
+        )) from exc
     ctx.deps.file_bytes[cache_key] = data
     return data, len(data)
 
@@ -121,18 +128,19 @@ async def _register_download(
 ) -> str:
     headers = _request_headers(ctx)
     try:
-        record_id = await _file_store(ctx).register_download(
-            file_id=file_id,
-            file_name=file_name,
-            byte_size=byte_size,
-            request_headers=headers,
-        )
+        async with observe_tool_operation(ctx, "register_download", tool="export_file_to_download_center", byte_size=byte_size):
+            record_id = await _file_store(ctx).register_download(
+                file_id=file_id,
+                file_name=file_name,
+                byte_size=byte_size,
+                request_headers=headers,
+            )
+            if not isinstance(record_id, str) or not record_id:
+                raise ToolFailed("下载中心登记成功但未返回记录ID")
     except asyncio.CancelledError:
         raise
     except Exception as exc:
-        raise ToolFailed("下载中心登记失败，请稍后重试") from exc
-    if not isinstance(record_id, str) or not record_id:
-        raise ToolFailed("下载中心登记成功但未返回记录ID")
+        raise ToolFailed(tool_error_message("下载中心登记失败", exc, headers)) from exc
     return record_id
 
 
@@ -145,6 +153,9 @@ def build_file_export_toolset() -> PreparedToolset[AgentDeps]:
             "可以复用当前会话附件或工具生成文件，也可以提交新生成的UTF-8文本文件内容。"
             "成功后文件已经可以在下载中心获取，最终回答应说明文件名并引导用户前往下载中心。"
             "普通文字回答不要调用，不得传宿主机路径或未经当前会话授权的File ID。"
+            "文件格式是否允许由当前环境平台决定，不能从会话附件类型推断。"
+            "失败时向用户说明返回的原生错误；没有原生证据时不要猜测是格式限制，"
+            "不要反复重试或自行改后缀绕过限制。"
         ),
     )
 
@@ -190,20 +201,21 @@ def build_file_export_toolset() -> PreparedToolset[AgentDeps]:
                 "请缩小内容或先通过其他工具生成平台文件"
             )
         try:
-            uploaded = await _file_store(ctx).upload(
-                file_type=FILE_TYPE_ATTACHMENT,
-                file_name=normalized_name,
-                mime="text/plain; charset=utf-8",
-                data=data,
-                request_headers=headers,
-            )
+            async with observe_tool_operation(ctx, "upload", tool="export_file_to_download_center", byte_size=len(data)):
+                uploaded = await _file_store(ctx).upload(
+                    file_type=FILE_TYPE_ATTACHMENT,
+                    file_name=normalized_name,
+                    mime="text/plain; charset=utf-8",
+                    data=data,
+                    request_headers=headers,
+                )
+                if not isinstance(uploaded.id, str) or not uploaded.id:
+                    raise ToolFailed("平台文件上传成功但未返回File ID")
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            raise ToolFailed("新文件上传到平台失败，请检查格式或稍后重试") from exc
+            raise ToolFailed(tool_error_message("新文件上传到平台失败", exc, headers)) from exc
         uploaded_id = uploaded.id
-        if not isinstance(uploaded_id, str) or not uploaded_id:
-            raise ToolFailed("平台文件上传成功但未返回File ID")
         byte_size = uploaded.file_size
         try:
             record_id = await _register_download(
@@ -214,11 +226,14 @@ def build_file_export_toolset() -> PreparedToolset[AgentDeps]:
             )
         except asyncio.CancelledError:
             raise
-        except Exception:
+        except Exception as exc:
             try:
-                await _file_store(ctx).delete(uploaded_id, headers)
-            except Exception:
-                pass
+                async with observe_tool_operation(ctx, "rollback_upload", tool="export_file_to_download_center"):
+                    await _file_store(ctx).delete(uploaded_id, headers)
+            except Exception as cleanup_exc:
+                raise ToolFailed(str(exc) + "；" + tool_error_message(
+                    "本次新文件清理失败，可能仍有残留文件", cleanup_exc, headers,
+                )) from exc
             raise
         return ExportFileResult(
             source_type="content",

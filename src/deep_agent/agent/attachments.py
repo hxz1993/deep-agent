@@ -24,6 +24,7 @@ from deep_agent.schemas.attachment import AttachmentRef
 from deep_agent.schemas.context_reference import ContextReference
 from deep_agent.files.storage import FileStore, FileStoreError, PlatformFileStore
 from deep_agent.web.images import prior_run_web_image_value
+from deepfos_platform.errors.classes import APIStatusNotTrue
 
 ATTACHMENT_REF_KIND = "attachment-ref"
 _NATIVE_MEDIA_PREFIXES = ("image/", "audio/", "video/")
@@ -204,7 +205,12 @@ async def _download_file(
     except FileStoreError as exc:
         raise AttachmentDownloadError(f"File download failed for {file_id}") from exc
     if _looks_like_platform_error_json(data):
-        raise AttachmentDownloadError(f"Platform file download failed for {file_id}")
+        payload = json.loads(data)
+        cause = APIStatusNotTrue(
+            "files/download", payload.get("message") or payload.get("msg") or "平台未提供错误说明",
+            payload.get("code"),
+        )
+        raise AttachmentDownloadError(f"Platform file download failed for {file_id}") from cause
     return data
 
 

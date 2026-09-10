@@ -32,6 +32,10 @@ EVENTS = {
     "tool_validation_retry": "工具参数校验要求重试",
     "model_api_request": "模型 API 请求开始",
     "model_api_response": "模型 API 响应头已收到",
+    "builtin_operation_started": "内置工具处理步骤开始",
+    "builtin_operation_completed": "内置工具处理步骤完成",
+    "builtin_operation_failed": "内置工具处理步骤失败",
+    "builtin_operation_cancelled": "内置工具处理步骤已取消",
 }
 for prefix, label in (("model_request", "模型请求"), ("agent_tool", "工具调用")):
     for suffix, detail in {

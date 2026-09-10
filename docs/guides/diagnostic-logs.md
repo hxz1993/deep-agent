@@ -78,6 +78,24 @@ Agent 可复用管理员身份调用同一只读接口：
 
 ## 后续增加日志点
 
+### 内置工具文件处理与原生错误
+
+文件相关工具增加 `builtin_operation_started/completed/failed/cancelled`，用 `phase` 区分
+`download`、`upload`、`register_download`、`rollback_upload`，文件阅读器另有 `file_read/file_parse`，
+程序编排另有文件与公网下载阶段。结合 `session_id/run_id/tool_call_id/tool`、耗时、字节数和
+`error_type/error_code/http_status` 定位失败步骤；通用 `agent_tool_failed` 也追踪显式原生异常链。
+
+格式限制随环境的平台配置生效，不能由会话附件支持类型推断。上传失败与下载中心登记失败是不同
+阶段；登记失败仅清理本次新上传的文件，已有来源文件不删除。若清理也失败，保留两项失败，不能
+把“尝试回滚”解读为已清理。取消仍沿原有取消路径传播，不因日志重试业务操作。
+
+具体原生提示、业务码及 HTTP 状态经脱敏后进入工具返回，模型与会话 History/轨迹可读取；
+日志不保存该提示正文。响应没有业务提示时，只保留有证据的类型/状态，不猜测“格式不允许”。
+旧轨迹中已被抹去的原生原因无法由新版补出，新日志在部署新版后的执行中生效。
+
+验证入口：`test_tool_errors.py`、`test_platform_api_errors.py`、`test_builtin_native_errors.py`、
+`test_file_export_tool.py`、`test_sandbox_toolset.py` 和 `integration/test_chat_file_export.py`。
+
 ### 停止与 SSE 断连诊断
 
 按同一 Session / Run 关联三类事实：`agent_cancel_api_received`（鉴权后的停止接口请求）、

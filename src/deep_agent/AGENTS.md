@@ -194,6 +194,14 @@ Pydantic AI `CancellationToken`。Runner 捕获 `RunCancelled` 后只持久化
 不会成功的下载、文件损坏、解析、大小上限或明确上游失败使用 `ToolFailed`。两者都由
 Pydantic AI 形成合法 Tool Result，但只有 `ModelRetry` 消耗工具重试预算并要求模型纠正。
 
+内置工具封装上游失败时，通过 `agent/tool_errors.py::tool_error_message` 保留操作说明、原生
+错误类型、真实 HTTP 状态、业务码与有界脱敏提示。平台客户端的 `upstream_*` 字段与本地
+ExpectedError 的 HTTP 200 包装状态分开；不从附件格式清单推断环境导出白名单。
+原生文本只进入授权会话的 Tool Result，日志只记录白名单事实。文件读取、上传、下载中心登记、
+回滚使用 `observe_tool_operation` 记录真实步骤，并关联 Session/Run/Tool Call；日志失败不影响
+业务。清理失败与原始失败分别报告，不能把隐式异常上下文误当同一操作的根因，也不能宣称已回滚。
+新增工具应复用这条错误链，不能只写“发布失败”，也不能裸拼完整响应 data、凭据、文件正文或堆栈。
+
 流式接口必须先把 Active Run 注册到 Registry，再发布首条 `session` SSE，并将同一个
 `CancellationToken` 传入 Runner。否则客户端刚拿到 `session_id` 就停止时，会在用户消息尚未
 持久化的窗口内误报 `404 Session not found`。

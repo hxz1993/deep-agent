@@ -13,6 +13,7 @@ from pydantic_ai.exceptions import ApprovalRequired, CallDeferred, ModelRetry, T
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.observability import cache_usage_available, log_event
 from deep_agent.agent.model_api_diagnostics import observed_model
+from deep_agent.agent.tool_errors import native_error_facts
 
 
 class RuntimeDiagnostics(AbstractCapability[AgentDeps]):
@@ -54,7 +55,7 @@ class RuntimeDiagnostics(AbstractCapability[AgentDeps]):
             pass
 
     @asynccontextmanager
-    async def _observe(self, prefix: str, fields: dict[str, Any]):
+    async def _observe(self, prefix: str, fields: dict[str, Any], *, request_headers=None):
         started = self._clock()
 
         async def waiting() -> None:
@@ -82,10 +83,13 @@ class RuntimeDiagnostics(AbstractCapability[AgentDeps]):
                 status = "deferred"
             else:
                 status = "failed"
-            self._emit(prefix + "_" + status, **fields, status=status,
-                       duration_ms=self._duration(started),
-                       http_status=getattr(exc, "status_code", None),
-                       error_type=type(exc).__name__)
+            details = {"error_type": type(exc).__name__}
+            try:
+                details = native_error_facts(exc, request_headers)
+            except Exception:
+                pass
+            self._emit(prefix + "_" + status, **fields, **details, status=status,
+                       duration_ms=self._duration(started))
             raise
         finally:
             if watchdog is not None:
@@ -101,7 +105,7 @@ class RuntimeDiagnostics(AbstractCapability[AgentDeps]):
             fields["model_name"] = ctx.model.model_name
         except Exception:
             pass
-        async with self._observe("model_request", fields) as started:
+        async with self._observe("model_request", fields, request_headers=getattr(ctx.deps, "request_headers", None)) as started:
             try:
                 request_context.model = observed_model(
                     request_context.model, fields,
@@ -130,7 +134,7 @@ class RuntimeDiagnostics(AbstractCapability[AgentDeps]):
             fields.update(tool=call.tool_name, tool_call_id=call.tool_call_id, attempt=ctx.retry + 1)
         except Exception:
             pass
-        async with self._observe("agent_tool", fields) as started:
+        async with self._observe("agent_tool", fields, request_headers=getattr(ctx.deps, "request_headers", None)) as started:
             result = await handler(args)
             self._emit("agent_tool_completed", **fields, status="completed",
                        duration_ms=self._duration(started))

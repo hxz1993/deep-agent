@@ -14,6 +14,7 @@ from pydantic_ai import FunctionToolset, ModelRetry, RunContext, ToolFailed, Too
 from deep_agent.agent.attachments import _download_file
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.media_pipeline import max_upload_bytes
+from deep_agent.agent.tool_errors import observe_tool_operation, tool_error_message
 from deep_agent.capabilities.registry import ToolInfo, ToolPackage
 from deep_agent.files.storage import FileStore, PlatformFileStore
 from deep_agent.options import OPTION
@@ -121,15 +122,16 @@ async def _authorized_input(
     data = ctx.deps.file_bytes.get(cache_key)
     if data is None:
         try:
-            data = await _download_file(
-                file_id,
-                _request_headers(ctx),
-                file_store=_file_store(ctx),
-            )
+            async with observe_tool_operation(ctx, "download", tool="execute_python"):
+                data = await _download_file(
+                    file_id,
+                    _request_headers(ctx),
+                    file_store=_file_store(ctx),
+                )
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            raise ToolFailed("当前会话文件读取失败") from exc
+            raise ToolFailed(tool_error_message("当前会话文件读取失败", exc, _request_headers(ctx))) from exc
         ctx.deps.file_bytes[cache_key] = data
     if len(data) > max_upload_bytes():
         raise ModelRetry(
@@ -150,12 +152,16 @@ async def _rollback_uploads(
     store: FileStore,
     file_ids: list[str],
     headers: dict[str, str],
-) -> None:
+    ctx: RunContext[AgentDeps],
+) -> list[str]:
+    failures = []
     for file_id in reversed(file_ids):
         try:
-            await store.delete(file_id, headers)
-        except Exception:
-            pass
+            async with observe_tool_operation(ctx, "rollback_upload", tool="execute_python"):
+                await store.delete(file_id, headers)
+        except Exception as exc:
+            failures.append(tool_error_message("产物清理失败", exc, headers))
+    return failures
 
 
 def build_python_sandbox_tool_package(
@@ -242,13 +248,14 @@ def build_python_sandbox_tool_package(
             for output in result.published_files:
                 mime = output.mime or mimetypes.guess_type(output.file_name)[0]
                 mime = mime or "application/octet-stream"
-                stored = await store.upload(
-                    file_type=FILE_TYPE_ATTACHMENT,
-                    file_name=output.file_name,
-                    mime=mime,
-                    data=output.data,
-                    request_headers=headers,
-                )
+                async with observe_tool_operation(ctx, "upload", tool="execute_python", byte_size=output.byte_size):
+                    stored = await store.upload(
+                        file_type=FILE_TYPE_ATTACHMENT,
+                        file_name=output.file_name,
+                        mime=mime,
+                        data=output.data,
+                        request_headers=headers,
+                    )
                 uploaded_ids.append(stored.id)
                 refs.append(
                     {
@@ -261,11 +268,18 @@ def build_python_sandbox_tool_package(
                     }
                 )
         except asyncio.CancelledError:
-            await _rollback_uploads(store, uploaded_ids, headers)
+            await _rollback_uploads(store, uploaded_ids, headers, ctx)
             raise
         except Exception as exc:
-            await _rollback_uploads(store, uploaded_ids, headers)
-            raise ToolFailed("Python 生成文件上传失败，已回滚本次产物") from exc
+            cleanup_failures = await _rollback_uploads(store, uploaded_ids, headers, ctx)
+            message = tool_error_message("Python 生成文件上传失败", exc, headers)
+            if cleanup_failures:
+                message += "；部分本次产物清理失败，可能仍有残留文件；" + cleanup_failures[0]
+            elif uploaded_ids:
+                message += "；已清理本次已上传的产物"
+            else:
+                message += "；本次没有已上传成功的产物"
+            raise ToolFailed(message) from exc
 
         artifacts = getattr(ctx.deps, "session_file_artifacts", None)
         if not isinstance(artifacts, dict):

@@ -35,6 +35,53 @@ _PUBLIC_MODULE = (
 )
 
 
+def _upstream_error_fields(payload):
+    """仅提取已知错误字段，不把业务 data、请求 Header 或整个响应正文带入异常。"""
+    if not isinstance(payload, dict):
+        return {}
+    sources = [payload]
+    sources.extend(
+        payload[key] for key in ('error', 'detail')
+        if isinstance(payload.get(key), dict)
+    )
+    fields = {}
+    for target, keys in (
+        ('message', ('message', 'msg', 'error_description', 'detail', 'error')),
+        ('code', ('code', 'errorCode', 'error_code')),
+        ('error_type', ('type', 'errorType', 'error_type')),
+    ):
+        for source in sources:
+            for key in keys:
+                value = source.get(key)
+                if isinstance(value, str) and value.strip():
+                    fields[target] = value
+                    break
+                if target == 'code' and type(value) in (int, float):
+                    fields[target] = value
+                    break
+            if target in fields:
+                break
+    return fields
+
+
+def _plain_upstream_error(body, content_type):
+    """保留纯文本错误提示；HTML 页面和堆栈不作为模型错误消息返回。"""
+    if content_type != 'text/plain':
+        return {}
+    try:
+        message = body.decode('utf-8').strip()
+    except UnicodeError:
+        return {}
+    if not message or re.search(
+        r'<(?:!doctype|html|head|body|script|style|div|pre)\b|'
+        r'Traceback \(most recent call last\)|'
+        r'\n\s*(?:at\s+\S+\(|File "[^"\n]+", line \d+)',
+        message, re.IGNORECASE,
+    ):
+        return {}
+    return {'message': message[:4000]}
+
+
 class RequestInfo:
     """请求参数wrapper，提供参数的展示，合并，构造功能"""
 
@@ -258,10 +305,13 @@ class Route:
 
                 if flag is not True:
                     if raise_false:
+                        error_fields = _upstream_error_fields(obj)
                         raise APIStatusNotTrue(
                             _RE_TRIM_HOST.match(req.uri).group(2),
-                            obj['message'],
-                            obj.get('code')
+                            error_fields.get('message'),
+                            error_fields.get('code'),
+                            http_status=resp.status,
+                            error_type=error_fields.get('error_type'),
                         )
                     else:
                         return data
@@ -399,19 +449,25 @@ class BaseAPI(metaclass=APIMeta):
         content_type: ContentType = ContentType.json
     ):
         try:
+            status_code = response.status
+            if not (200 <= status_code < 300):
+                body = await response.read()
+                try:
+                    error_fields = _upstream_error_fields(json.loads(body))
+                except (ValueError, UnicodeError):
+                    error_fields = _plain_upstream_error(body, response.content_type)
+                logger.warning(
+                    "Platform API returned HTTP error: status={}, exception_type={}",
+                    status_code, APIStatusCodeError.__name__,
+                )
+                raise APIStatusCodeError(
+                    _RE_TRIM_HOST.match(request.uri).group(2),
+                    status_code, **error_fields)
+
             if content_type is ContentType.bytes:
                 return True, (await response.read())
 
             text = await response.text()
-            status_code = response.status
-
-            if not (200 <= status_code < 300):
-                msg = f'Call api: {request.uri} failed. ' \
-                      f"[code: {status_code}] ErrMsg from server: {text}]"
-                logger.warning(msg)
-                raise APIStatusCodeError(
-                    _RE_TRIM_HOST.match(request.uri).group(2),
-                    status_code)
 
             if content_type is ContentType.text:
                 return True, text
@@ -423,17 +479,19 @@ class BaseAPI(metaclass=APIMeta):
                     return True, resp
 
                 if resp['status'] is False:
-                    msg = f"Call api: {request.uri} failed. " \
-                          f"Bad response because status is False. Detail: {text}"
-                    logger.warning(msg)
+                    logger.warning(
+                        "Platform API returned business error: status={}, exception_type={}",
+                        status_code, APIStatusNotTrue.__name__,
+                    )
                     return False, resp
             except (TypeError, ValueError):
                 if not data_wrapped and not text:
                     return True, None
 
-                logger.exception(
-                    f'Call api: {request.uri} failed. '
-                    f'Response << {text} >> cannot be decoded as json.')
+                logger.warning(
+                    "Platform API returned invalid JSON: status={}, exception_type={}",
+                    status_code, APIResponseParseError.__name__,
+                )
                 raise APIResponseParseError(
                     path=_RE_TRIM_HOST.match(request.uri).group(2)
                 ) from None

@@ -272,6 +272,42 @@ class RepairUnprocessedToolCallsTests(unittest.TestCase):
         self.assertIsInstance(repaired[2], ModelRequest)
         self.assertIsInstance(repaired[2].parts[0], UserPromptPart)
 
+    def test_result_after_user_message_is_not_cancelled(self):
+        for result in (ToolReturnPart("ui", {"ok": True}, "call"),
+                       RetryPromptPart("retry", tool_name="ui", tool_call_id="call")):
+            with self.subTest(result=type(result).__name__):
+                messages = [ModelResponse(parts=[ToolCallPart("ui", {}, "call")]),
+                            ModelRequest(parts=[UserPromptPart("continue")]),
+                            ModelRequest(parts=[result])]
+                self.assertIs(repair_unprocessed_tool_calls(messages), messages)
+
+    def test_parallel_missing_call_is_closed_but_late_result_is_preserved(self):
+        messages = [ModelResponse(parts=[ToolCallPart("ui", {}, "late"),
+                                        ToolCallPart("other", {}, "missing")]),
+                    ModelRequest(parts=[UserPromptPart("continue")]),
+                    ModelRequest(parts=[ToolReturnPart("ui", "real", "late")])]
+        repaired = repair_unprocessed_tool_calls(messages)
+        results = [p for m in repaired for p in m.parts if isinstance(p, ToolReturnPart)]
+        self.assertEqual([(p.tool_call_id, isinstance(p.content, ToolDenied)) for p in results],
+                         [("missing", True), ("late", False)])
+        self.assertIs(repair_unprocessed_tool_calls(repaired), repaired)
+
+    def test_later_call_reusing_id_does_not_resolve_earlier_call(self):
+        messages = [ModelResponse(parts=[ToolCallPart("ui", {}, "same")]),
+                    ModelRequest(parts=[UserPromptPart("continue")]),
+                    ModelResponse(parts=[ToolCallPart("ui", {}, "same")]),
+                    ModelRequest(parts=[ToolReturnPart("ui", "second result", "same")])]
+        repaired = repair_unprocessed_tool_calls(messages)
+        self.assertIsInstance(repaired[1].parts[0].content, ToolDenied)
+        self.assertIs(repaired[-1], messages[-1])
+
+    def test_late_result_with_different_name_does_not_resolve_call(self):
+        messages = [ModelResponse(parts=[ToolCallPart("ui", {}, "same")]),
+                    ModelRequest(parts=[UserPromptPart("continue")]),
+                    ModelRequest(parts=[ToolReturnPart("other", "result", "same")])]
+        repaired = repair_unprocessed_tool_calls(messages)
+        self.assertIsInstance(repaired[1].parts[0].content, ToolDenied)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -8,6 +8,8 @@ from datetime import datetime, timezone
 from urllib.parse import urlsplit
 
 EVENTS = {
+    "history_tool_result_matched": "历史工具已匹配后续结果",
+    "history_tool_result_synthesized": "历史缺失工具结果已补齐",
     "title_generation_started": "会话标题生成开始",
     "title_generation_completed": "会话标题生成完成",
     "title_generation_failed": "会话标题生成失败，保留兜底标题",

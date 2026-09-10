@@ -842,7 +842,10 @@ class AgentRunner:
         history = await self.store.get_history(session_id, agent_id=deps.agent_id)
         deps.turn_id = deps.turn_id or deps.run_id
         if not deferred_tool_results:
-            repaired = repair_unprocessed_tool_calls(history)
+            repaired = repair_unprocessed_tool_calls(history, diagnostic_fields={
+                "session_id": session_id, "run_id": deps.run_id, "agent_id": deps.agent_id,
+                "phase": "history_prepare",
+            })
             if repaired is not history:
                 history = repaired
         pre_persisted_user = False
@@ -1250,7 +1253,10 @@ class AgentRunner:
                 if dangling_tool_message is not None
                 else {}
             )
-            to_append = repair_unprocessed_tool_calls(to_append, **repair_kwargs)
+            to_append = repair_unprocessed_tool_calls(to_append, **repair_kwargs, diagnostic_fields={
+                "session_id": session_id, "run_id": deps.run_id, "agent_id": deps.agent_id,
+                "phase": "terminal_persistence",
+            })
         if not to_append and terminal_status is None:
             return False
         try:

@@ -43,6 +43,30 @@ class DiagnosticRuntimeTests(unittest.TestCase):
         return [json.loads(line) for file in self.directory.glob("*.jsonl")
                 for line in file.read_text().splitlines()]
 
+    def test_history_repair_events_are_safe_and_queryable(self):
+        from pydantic_ai.messages import ModelRequest, ModelResponse, ToolCallPart, ToolReturnPart, UserPromptPart
+        from deep_agent.agent.history import repair_unprocessed_tool_calls
+        writer = self.writer()
+        messages = [ModelResponse(parts=[ToolCallPart("ui", {"secret": "NEVER_LOG"}, "late"),
+                                        ToolCallPart("other", {}, "missing")]),
+                    ModelRequest(parts=[UserPromptPart("NEVER_LOG_USER")]),
+                    ModelRequest(parts=[ToolReturnPart("ui", "NEVER_LOG_RESULT", "late")])]
+        with patch.object(module, "_runtime", writer):
+            repair_unprocessed_tool_calls(messages, diagnostic_fields={
+                "session_id": "session-1", "run_id": "run-1", "agent_id": "agent-1",
+                "phase": "history_prepare",
+            })
+        self.drain(writer)
+        records = self.records()
+        self.assertEqual({r["event"] for r in records},
+                         {"history_tool_result_matched", "history_tool_result_synthesized"})
+        self.assertEqual({r["tool_call_id"] for r in records}, {"late", "missing"})
+        for record in records:
+            self.assertEqual(sanitize_record(record), record)
+            self.assertEqual(record["session_id"], "session-1")
+            self.assertEqual(record["run_id"], "run-1")
+        self.assertNotIn("NEVER_LOG", json.dumps(records))
+
     def test_safe_record_roundtrip_and_no_arbitrary_serialization(self):
         class Dangerous:
             def __str__(self):

@@ -220,7 +220,10 @@ class EventPersister:
                 skip_user_prompt=ev.skip_user_prompt,
             )
             if ev.repair_dangling_tool_calls:
-                to_append = repair_unprocessed_tool_calls(to_append)
+                to_append = repair_unprocessed_tool_calls(to_append, diagnostic_fields={
+                    "session_id": session_id, "run_id": ev.run_id, "agent_id": agent_id,
+                    "phase": "terminal_persistence",
+                })
             if to_append:
                 rows = await self._store.append(
                     session_id,

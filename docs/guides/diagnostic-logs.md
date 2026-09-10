@@ -9,6 +9,12 @@
 `phase=image_download/title_update` 定位图片读取或标题更新失败。成功日志仅说明标题已生成，人工改名保护可能阻止覆盖。
 日志不含输入、标题正文或异常原文。渠道的来源固定标题不调用模型，因此没有标题生成日志。
 
+历史恢复补齐使用 `history_tool_result_matched` 和 `history_tool_result_synthesized`：
+
+- `matched / reason=result_after_user_message`：调用与结果之间存在独立用户消息，已在同一助手消息段内匹配后续结果，不再补重复取消结果。
+- `synthesized / reason=missing_result_cancelled` 或 `missing_result_failed`：调用确实缺少结果，分别补取消或异常结束结果。
+- `phase=history_prepare/terminal_persistence` 区分模型历史准备与终态持久化；可按 Session、Run、工具名和 `tool_call_id` 关联。只记录固定原因与标识，不保存正文。匹配日志描述本次历史读取，不代表工具又执行了一次。
+
 ## 使用
 
 进入控制台「诊断 → 日志」（`/console/#/diagnostics/logs`），选择时间、来源、级别或关键词，

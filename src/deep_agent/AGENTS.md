@@ -51,6 +51,14 @@ Space 的 `query/batch` 路由）。只传管理员当前认证和本次涉及�
 显示名优先用户名。2026-09-10 Test 已通过真实凭证只读联调；旧账号 `info/by-user-ids` 在该环境
 返回业务失败，不再依赖。仅无平台凭证的 local bypass 才使用本地资料；缓存仍按调用者权限隔离。
 
+### 历史工具结果匹配
+
+`agent/history.py` 在补齐缺失工具结果前，按同一助手消息段、调用 ID 和工具名识别用户消息之后的真实结果或重试。
+Deferred 续跑可能把用户输入单独先入库，再写工具结果；不能仅因遇到用户消息就判定调用取消。
+匹配不跨下一条助手响应，不按全局调用 ID 去重；原始事件不重写，正式 interrupted 响应继续由 SDK 处理。
+日志 `history_tool_result_matched/synthesized` 关联当前读取 Run 和历史 Tool Call，正文不入日志。
+回归入口为 `test_history_repair.py`、`test_history_resume_persistence.py`。
+
 ### v0.8.5 真实事件及时持久化
 
 `agent/message_persistence.py`通过 SDK 公开节点和已接受工具事件插入真实消息内容，

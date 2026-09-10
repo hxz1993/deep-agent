@@ -241,7 +241,74 @@ class SessionLiveApiTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(any(row["event_type"].startswith(("run/", "observation")) for row in rows))
 
     async def test_explicit_stop_terminates_observation_but_not_as_execution_error(self):
-        await self._terminal_runner(cancel=True)
+        rows = []
+        with patch("deep_agent.diagnostics.emit", side_effect=lambda event, **kw: rows.append((event, kw))):
+            await self._terminal_runner(cancel=True)
+        for name in ("agent_cancel_api_received", "agent_cancel_observed", "agent_run_cancelled"):
+            matches = [fields for event, fields in rows if event == name]
+            self.assertEqual(len(matches), 1, name)
+            self.assertEqual(matches[0]["reason"], "cancel_api")
+            self.assertTrue(matches[0]["run_id"])
+
+    async def test_sending_connection_disconnect_logs_source_and_preserves_history(self):
+        await self._diagnostic_interruption("http_disconnect")
+
+    async def test_shutdown_cancellation_logs_source_and_preserves_history(self):
+        await self._diagnostic_interruption("server_shutdown")
+
+    async def test_unattributed_task_cancellation_is_not_a_client_stop(self):
+        await self._diagnostic_interruption("task_cancelled_unknown")
+
+    async def test_disconnect_with_broken_diagnostics_preserves_history(self):
+        await self._diagnostic_interruption("http_disconnect", broken_sink=True)
+
+    async def _diagnostic_interruption(self, reason, *, broken_sink=False):
+        ready = asyncio.Event()
+
+        async def stream(messages, info):
+            yield "SYNTHETIC_PARTIAL"
+            yield "_MORE"
+            ready.set()
+            await asyncio.Event().wait()
+
+        runner = AgentRunner(Agent(FunctionModel(stream_function=stream), deps_type=AgentDeps), self.ctx.store,
+                             UsageLimits(request_limit=3), active_runs=self.ctx.active_runs)
+        rows = []
+        def emit(event, **fields):
+            if broken_sink:
+                raise RuntimeError("synthetic diagnostic failure")
+            rows.append((event, fields))
+
+        with patch("deep_agent.api.v1.chat.build_runner_for_agent", new=AsyncMock(return_value=runner)), \
+             patch.object(AgentRunner, "_generate_model_title", new_callable=AsyncMock), \
+             patch("deep_agent.diagnostics.emit", side_effect=emit):
+            producer = self._request("/api/v1/chat/stream", method="POST", body={
+                "agent_id": self.agent_id, "session_id": self.session, "message": "synthetic disconnect"})
+            self.assertEqual((await producer.started())["status"], 200)
+            run_id = (await producer.frame())[1]["run_id"]
+            await asyncio.wait_for(ready.wait(), 5)
+            if reason == "server_shutdown":
+                self.ctx.active_runs.cancel_all()
+                await asyncio.wait_for(producer.task, 5)
+            elif reason == "task_cancelled_unknown":
+                producer.task.cancel()
+                await asyncio.wait_for(asyncio.gather(producer.task, return_exceptions=True), 5)
+                # Mark the already-closed transport for fixture teardown, which
+                # otherwise re-raises the expected CancelledError.
+                self.requests.remove(producer)
+            else:
+                await producer.close()
+        for name in (() if broken_sink else ("agent_cancel_observed", "agent_run_cancelled", "agent_stream_closed")):
+            matches = [fields for event, fields in rows if event == name]
+            self.assertEqual(len(matches), 1, name)
+            expected = "stream_completed" if reason == "server_shutdown" and name == "agent_stream_closed" else reason
+            self.assertEqual(matches[0]["reason"], expected)
+            self.assertEqual(matches[0]["run_id"], run_id)
+        self.assertFalse(any(event == "agent_cancel_api_received" for event, _ in rows))
+        self.assertEqual(self.ctx.active_runs.active_count(), 0)
+        events = await self.ctx.store.list_all_events(self.session)
+        self.assertTrue(any(event.status == "interrupted" for event in events))
+        self.assertFalse(any(event.event_type == "execution/error" for event in events))
 
     async def test_provider_error_is_forwarded_once_then_observation_closes(self):
         await self._terminal_runner(cancel=False)

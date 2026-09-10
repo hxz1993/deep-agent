@@ -18,6 +18,7 @@ from deep_agent.agent.history import (
     first_user_prompt,
     session_activity_timestamps,
 )
+from deep_agent.agent.observability import log_event
 from deep_agent.agent.context.budget import build_context_budget
 from deep_agent.agent.context.estimator import TokenEstimator
 from deep_agent.agent.context.manual import manual_compaction_availability
@@ -213,6 +214,14 @@ async def cancel_session_run(
     normalized_agent_id, user_id = await _channel_control_scope(
         ctx, channel_account, session_id, normalized_agent_id, user_id,
     )
+    cancel_reason = "channel_cancel_api" if channel_account is not None else "cancel_api"
+    entry = ctx.active_runs.get(agent_id=normalized_agent_id, session_id=session_id)
+    # Do not attribute another user's active Run to an unauthorized request.
+    owned_entry = entry if entry is not None and entry.user_id == user_id else None
+    log_event("agent_cancel_api_received", session_id=session_id,
+              agent_id=normalized_agent_id, reason=cancel_reason,
+              run_id=owned_entry.run_id if owned_entry else None,
+              status="active" if owned_entry else "not_matched")
     # The stream registers before publishing its session SSE event and before
     # asynchronous user-message persistence is guaranteed to finish. Allow its
     # owner to cancel during that startup window without requiring a DB row.
@@ -220,6 +229,7 @@ async def cancel_session_run(
         agent_id=normalized_agent_id,
         session_id=session_id,
         user_id=user_id,
+        reason=cancel_reason,
     ):
         return SessionCancelResponse(
             status="cancel_requested",
@@ -243,6 +253,7 @@ async def cancel_session_run(
         agent_id=api_agent_id,
         session_id=resolved_session_id,
         user_id=user_id,
+        reason=cancel_reason,
     )
     return SessionCancelResponse(
         status="cancel_requested" if requested else "not_running",

@@ -78,6 +78,31 @@ Agent 可复用管理员身份调用同一只读接口：
 
 ## 后续增加日志点
 
+### 停止与 SSE 断连诊断
+
+按同一 Session / Run 关联三类事实：`agent_cancel_api_received`（鉴权后的停止接口请求）、
+`agent_cancel_observed`（活动执行首次观察到的取消来源）、`agent_stream_closed`（发送连接结束）。
+已知来源同时写入流式 `agent_run_cancelled.reason`；更外层才观察到的来源可能晚于执行终态日志，
+此时应结合连接结束记录，不能只看终态的 `task_cancelled_unknown`。
+
+`reason` 含义：
+
+- `cancel_api` / `channel_cancel_api`：普通客户端 / 渠道控制接口请求取消；不等于用户亲自点击。
+- `http_disconnect`：ASGI 实际收到发送连接的断连通知；无法单独区分浏览器、代理或网络原因。
+- `transport_send_error`：ASGI 发送抛出 OSError，保留原异常传播，不记录异常原文。
+- `server_shutdown`：注册表关闭所有 Run，或 SSE 库已有关闭标志表明服务正在退出。
+- `task_cancelled_unknown`：没有更明确证据的任务取消，禁止解释为客户端断开。
+- `stream_generator_closed`：生成器被关闭，尚无更明确来源。
+- `stream_completed` / `stream_error`：连接正常收尾 / 异常退出，不表示模型一定成功；
+  业务可能已经返回 `error`、`cancelled` 或等待人工操作，需结合执行终态。
+
+重复停止请求仍分别记录接口入口，活动 Run 只保留首次来源，后续断连清理不覆盖它。
+接口入口 `status=not_matched` 仅表示首次注册表查询未匹配，可能随后从数据库解析 Agent 后成功取消，
+不是最终拒绝或不存在判定；是否实际命中需结合 `agent_cancel_observed`。
+日志只含稳定原因码、已有 Session/Run/Agent 标识和连接耗时，不采集 Header、正文、IP 或凭据。
+不新增会话事件或数据库字段，不改变停止、断连、超时、SSE 心跳及持久化语义。
+旧日志无法补出过去的取消来源；部署新版后发生的执行才有这些事实。
+
 ### 模型 API 请求诊断
 
 OpenAI 兼容模型（包含 DeepSeek 的 Chat Completions / Responses）额外记录

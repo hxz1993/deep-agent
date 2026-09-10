@@ -342,6 +342,7 @@ class AgentRunner:
         self, run_event: _RunTerminalContext, *, status: str, started_at: float,
         error: BaseException | None = None, phase: str | None = None,
         usage: RunUsage | None = None,
+        reason: str | None = None,
     ) -> None:
         """Observe a terminal branch without participating in its persistence."""
         try:
@@ -361,7 +362,7 @@ class AgentRunner:
             log_event(
                 f"agent_run_{status}", session_id=run_event.session_id,
                 conversation_id=deps.conversation_id, run_id=deps.run_id,
-                agent_id=deps.agent_id, mode=run_event.mode, phase=phase, **metrics,
+                agent_id=deps.agent_id, mode=run_event.mode, phase=phase, reason=reason, **metrics,
                 error_type=type(error).__name__ if error is not None else None,
             )
         except Exception:
@@ -2294,7 +2295,10 @@ class AgentRunner:
             finally:
                 cancelled_run_event = None
                 if cancelled_run is not None:
-                    self._log_run_terminal(run_event, status="cancelled", started_at=started_at, usage=cancelled_run.usage)
+                    self._log_run_terminal(
+                        run_event, status="cancelled", started_at=started_at, usage=cancelled_run.usage,
+                        reason=active_run.cancel_reason or "task_cancelled_unknown",
+                    )
                 if cancelled_run is not None and not run_published:
                     official_cancelled = cancelled_run.new_messages()
                     if progress is not None:

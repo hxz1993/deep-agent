@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import uuid
 from collections.abc import Awaitable, Callable
@@ -10,7 +11,6 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.routing import APIRoute
 from loguru import logger
 from starlette.exceptions import HTTPException as StarletteHTTPException
-from sse_starlette.sse import EventSourceResponse
 
 from deep_agent.agent.deferred import build_deferred_tool_results
 from deep_agent.agent.deps import AgentDeps
@@ -19,6 +19,7 @@ from deep_agent.agent.headers import extract_forward_headers
 from deep_agent.agent.run_identity import conversation_id_for, new_run_id
 from deep_agent.api.v1.deps import build_runner_for_agent
 from deep_agent.api.v1.channel_auth import ChannelAccountDep, ChannelRequestUserDep
+from deep_agent.api.v1.stream_diagnostics import DiagnosticEventSourceResponse, transport_cancel_reason
 from deep_agent.core.context import AppContextDep
 from deep_agent.core.exceptions import AgentNotFoundError, LlmModelNotFoundError
 from deep_agent.db.ids import normalize_agent_id
@@ -271,7 +272,10 @@ async def chat_stream(
         "run_id": deps.run_id,
     }
 
+    stream_run = None
+
     async def event_generator():
+        nonlocal stream_run
         active_run = ctx.active_runs.register(
             agent_id=deps.agent_id,
             session_id=session_id,
@@ -279,6 +283,7 @@ async def chat_stream(
             conversation_id=deps.conversation_id,
             run_id=deps.run_id,
         )
+        stream_run = active_run
         live_key = (deps.agent_id, session_id, deps.user)
         try:
             # Capture the durable prefix before this Run writes its first fact.
@@ -310,6 +315,12 @@ async def chat_stream(
                 async for ev in stream:
                     ctx.session_live.publish(live_key, deps.run_id, ev["type"], ev)
                     yield {"event": ev["type"], "data": json.dumps(ev, ensure_ascii=False)}
+        except asyncio.CancelledError:
+            active_run.observe_cancellation(transport_cancel_reason())
+            raise
+        except GeneratorExit:
+            active_run.observe_cancellation("stream_generator_closed")
+            raise
         finally:
             active_run.cancellation_token.cancel()
             ctx.active_runs.unregister(active_run)
@@ -325,4 +336,9 @@ async def chat_stream(
             finally:
                 ctx.session_live.end(live_key, deps.run_id)
 
-    return EventSourceResponse(event_generator())
+    return DiagnosticEventSourceResponse(
+        event_generator(), fields=session_data,
+        active_run=lambda: stream_run if ctx.active_runs.get(
+            agent_id=deps.agent_id, session_id=session_id,
+        ) is stream_run else None,
+    )

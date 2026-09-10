@@ -35,6 +35,12 @@
 新增日志点先注册固定事件名及摘要，不传正文、参数、结果、异常原文或凭据。详见
 [`诊断日志指南`](../../../docs/guides/diagnostic-logs.md)。
 
+取消诊断按 Session/Run 关联停止接口入口、活动执行首次取消来源和发送连接结束记录。
+`http_disconnect` 只在实际收到 ASGI 断连消息时使用，不能由 `CancelledError` 推断；
+后者无明确证据时为 `task_cancelled_unknown`，更外层的服务退出记录可能晚于执行终态。
+`api/v1/stream_diagnostics.py` 仅包装现有 ASGI 收发，不额外读消息、不改取消及心跳策略；
+观察流 `/live` 不接入发送连接的取消观察。回归见 `test_cancel_diagnostics.py` 和 `test_session_live_api.py`。
+
 OpenAI 兼容协议的 HTTP 日志在 `agent/model_api_diagnostics.py`；只记录安全地址、状态与工具名清单。
 流式请求在 SDK 消费者任务中延迟发出，须在透明模型包装器的实际调用边界建立 ContextVar，
 不能仅依赖 `wrap_model_request` 的任务上下文。测试须覆盖真实 SDK 的流式成功/400及请求体等价。

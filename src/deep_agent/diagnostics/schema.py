@@ -7,6 +7,8 @@ import re
 from datetime import datetime, timezone
 from urllib.parse import urlsplit
 
+from .messages import describe
+
 EVENTS = {
     "history_tool_result_matched": "历史工具已匹配后续结果",
     "history_tool_result_synthesized": "历史缺失工具结果已补齐",
@@ -53,7 +55,7 @@ for prefix, label in (("model_request", "模型请求"), ("agent_tool", "工具�
 IDENTIFIER_FIELDS = frozenset({
     "request_id", "session_id", "run_id", "agent_id", "conversation_id", "channel_run_id", "account_id",
     "tool_call_id", "tool", "model_id", "model_name", "provider_name", "phase", "status",
-    "error_type", "error_code", "command", "mode", "finish_reason", "compaction", "reason",
+    "error_type", "error_code", "result_status", "command", "mode", "finish_reason", "compaction", "reason",
 })
 NUMBER_FIELDS = frozenset({
     "duration_ms", "request_index", "attempt", "queue_depth", "input_tokens", "output_tokens",
@@ -146,6 +148,10 @@ def safe_fields(fields: dict) -> dict:
         value = fields.get(name)
         if type(value) in (int, float) and 0 <= value <= 10**15 and math.isfinite(value):
             result[name] = value
+    # Display names come from the loaded Agent configuration, never prompts.
+    name = fields.get("agent_name")
+    if type(name) is str and re.fullmatch(r"[\w .:/()\-|\\]{1,100}", name) and "://" not in name:
+        result["agent_name"] = name
     _model_api_fields(fields, result)
     return result
 
@@ -174,7 +180,7 @@ def sanitize_record(payload: dict) -> dict | None:
     pid = payload.get("process_id")
     if type(pid) is not int or not 0 < pid < 2**32:
         return None
-    return {
+    record = {
         "schema_version": 1,
         "timestamp": parsed.astimezone(timezone.utc).isoformat(timespec="milliseconds"),
         "event": payload["event"], "summary": EVENTS[payload["event"]],
@@ -182,3 +188,6 @@ def sanitize_record(payload: dict) -> dict | None:
         **{key: payload[key] for key in ("record_id", "boot_id", "instance_id")},
         **safe_fields(payload),
     }
+
+    record["summary"] = describe(record)
+    return record

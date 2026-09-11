@@ -6,7 +6,7 @@ import {
   rememberConfigurationTab,
 } from "./configuration.js?v=20260912-21";
 import { bindContextControls, refreshIdentity } from "./context.js?v=20260912-21";
-import { initDiagnostics, setDiagnosticsActive, openDiagnostics } from "./diagnostics-center.js?v=20260912-21";
+import { initDiagnostics, setDiagnosticsActive, openDiagnostics } from "./diagnostics-center.js?v=20260912-23";
 import { initWorkspace } from "./workspace.js?v=20260912-21";
 import "./time.js?v=20260912-21";
 

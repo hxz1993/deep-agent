@@ -317,6 +317,7 @@ async def _build_runner_from_spec(
         context_compaction=context_compaction,
         model_id=spec.llm_model_id or spec.model,
         model_name=spec.model,
+        agent_name=spec.name,
         provider_id=(spec.provider_config.id if spec.provider_config else None),
         provider_type=(
             spec.provider_config.provider_type if spec.provider_config else None

@@ -6,7 +6,7 @@ import time
 from contextlib import asynccontextmanager
 from typing import Any
 
-from pydantic_ai import RunContext
+from pydantic_ai import RunContext, ToolReturn
 from pydantic_ai.capabilities import AbstractCapability
 from pydantic_ai.exceptions import ApprovalRequired, CallDeferred, ModelRetry, ToolRetryError
 
@@ -28,6 +28,7 @@ class RuntimeDiagnostics(AbstractCapability[AgentDeps]):
         try:
             return {
                 "session_id": ctx.deps.session_id, "agent_id": ctx.deps.agent_id,
+                "agent_name": ctx.deps.agent_name,
                 "conversation_id": ctx.deps.conversation_id or ctx.conversation_id,
                 "run_id": ctx.deps.run_id or ctx.run_id,
                 "request_index": ctx.run_step,
@@ -136,7 +137,17 @@ class RuntimeDiagnostics(AbstractCapability[AgentDeps]):
             pass
         async with self._observe("agent_tool", fields, request_headers=getattr(ctx.deps, "request_headers", None)) as started:
             result = await handler(args)
-            self._emit("agent_tool_completed", **fields, status="completed",
+            outcome = {}
+            # Sandbox failures are successful tool returns with a typed envelope.
+            # Read only its status/code, never arbitrary result text or metadata.
+            if fields.get("tool") == "execute_python" and type(result) is ToolReturn:
+                value = result.return_value
+                if type(value) is dict and type(value.get("status")) is str and value["status"] in ("ok", "error"):
+                    outcome["result_status"] = value["status"]
+                    error = value.get("error")
+                    if type(error) is dict and type(error.get("code")) is str:
+                        outcome["error_code"] = error["code"]
+            self._emit("agent_tool_completed", **fields, **outcome, status="completed",
                        duration_ms=self._duration(started))
             return result
 

@@ -4,7 +4,7 @@ import test from "node:test";
 import { readFile } from "node:fs/promises";
 import vm from "node:vm";
 import { buildDiagnosticsQuery, createDiagnosticsQuery, diagnosticsError, diagnosticsStatusNotice } from "../../../console/diagnostics-query.js";
-import { diagnosticFilters, diagnosticRowsHtml, diagnosticDetailHtml, diagnosticScalars, diagnosticTime, highlightedDiagnostic } from "../../../console/diagnostics.js";
+import { diagnosticFilters, diagnosticRowsHtml, diagnosticDetailHtml, diagnosticScalars, diagnosticFieldLabel, diagnosticTime, highlightedDiagnostic } from "../../../console/diagnostics.js";
 
 const root = new URL("../../../console/", import.meta.url);
 const html = await readFile(new URL("index.html", root), "utf8");
@@ -289,7 +289,7 @@ test("records escape summaries, events, field names and values; only scalar deta
   assert.doesNotMatch(output, /<h3>会话<\/h3>/);
   assert.match(output, /<code>1234<\/code>/);
   assert.doesNotMatch(output, /结构化记录|规范字段|diagnostics-chevron|diagnostics-duration/);
-  assert.doesNotMatch(output, /<details|<summary/);
+  assert.match(output, /<details class="diagnostics-raw-details">/);
   assert.doesNotMatch(output, /<h3>服务信息<\/h3>/);
   assert.doesNotMatch(output, /not-rendered/);
   assert.equal("metadata" in diagnosticScalars(row), false);
@@ -318,15 +318,15 @@ test("model API details show safe tool inventories in the existing property layo
     other_list: ["NEVER_LOG_OTHER"] });
   const output = diagnosticDetailHtml(data);
   assert.doesNotMatch(output, /<h3>模型 API<\/h3>/);
-  assert.match(output, /<dt>http_status<\/dt><dd><code>400<\/code>/);
-  assert.match(output, /<dt>tool_manifest_status<\/dt><dd><code>complete<\/code>/);
-  assert.match(output, /<dt>tool_names<\/dt><dd><code>read_file, docs_search, docs_search<\/code>/);
-  assert.match(output, /<dt>duplicate_tool_names<\/dt><dd><code>docs_search<\/code>/);
-  assert.match(output, /<dt>history_tool_names<\/dt><dd><code>docs_search<\/code>/);
-  assert.match(output, /<dt>redeclared_tool_names<\/dt><dd><code>docs_search<\/code>/);
-  assert.match(output, /<dt>tools_omitted<\/dt><dd><code>0<\/code>/);
-  assert.equal((output.match(/<dt>model_api<\/dt>/g) || []).length, 1);
-  assert.doesNotMatch(output, /NEVER_LOG|<details|<a href/);
+  assert.match(output, /<dt title="http_status">HTTP 状态<\/dt><dd><code>400<\/code>/);
+  assert.match(output, /<dt title="tool_manifest_status">工具清单状态<\/dt><dd><code>complete<\/code>/);
+  assert.match(output, /<dt title="tool_names">工具清单<\/dt><dd><code>read_file, docs_search, docs_search<\/code>/);
+  assert.match(output, /<dt title="duplicate_tool_names">重复工具<\/dt><dd><code>docs_search<\/code>/);
+  assert.match(output, /<dt title="history_tool_names">历史工具<\/dt><dd><code>docs_search<\/code>/);
+  assert.match(output, /<dt title="redeclared_tool_names">重新声明工具<\/dt><dd><code>docs_search<\/code>/);
+  assert.match(output, /<dt title="tools_omitted">省略工具数<\/dt><dd><code>0<\/code>/);
+  assert.equal((output.match(/<dt title="model_api">模型 API<\/dt>/g) || []).length, 1);
+  assert.doesNotMatch(output, /NEVER_LOG|<a href/);
   assert.equal(diagnosticScalars({ duplicate_tool_names: [] }).duplicate_tool_names, "");
 });
 
@@ -352,18 +352,19 @@ test("dense log rows highlight literal text safely and details never duplicate f
   assert.match(row, />complete<\/button>/);
   assert.match(row, /class="diagnostics-sequence" aria-label="当前查询第 1 条">1<\/span>/);
   const detail = diagnosticDetailHtml(data);
-  assert.equal((detail.match(/<dt>session_id<\/dt>/g) || []).length, 1);
+  assert.equal((detail.match(/<dt title="session_id">会话 ID<\/dt>/g) || []).length, 1);
   assert.match(detail, /channel_run_id/);
   assert.doesNotMatch(diagnosticRowsHtml([record("service")]), /data-open-session/);
 });
 
-test("log details keep raw keys and copy values, only sessions support navigation", () => {
+test("log details translate labels and limit copy and navigation actions to sessions", () => {
   const detail = diagnosticDetailHtml(record("a", { session_id: "session-a", run_id: "run-a", process_id: 42, instance_id: "node", tool_call_id: "call", agent_id: "agent" }));
-  assert.match(detail, /data-copy-id="raw"/);
-  assert.match(detail, /data-copy-id="run_id"/);
+  assert.deepEqual([...detail.matchAll(/data-copy-id="([^"]+)"/g)].map(match => match[1]), ["session_id"]);
+  assert.match(detail, /<details class="diagnostics-raw-details"><summary>/);
+  assert.doesNotMatch(detail, /<details[^>]* open/);
   assert.doesNotMatch(detail, /<h3>会话|<h3>服务信息/);
   assert.match(detail, /data-open-session="session-a"/);
-  assert.match(detail, /data-field="run_id"><dt>run_id<\/dt><dd><code>run-a<\/code>/);
+  assert.match(detail, /data-field="run_id"><dt title="run_id">执行 ID<\/dt><dd><code>run-a<\/code>/);
   assert.doesNotMatch(detail, /data-filter-id/);
   assert.match(source, /onOpenSession\(item\.session_id\)/);
   assert.doesNotMatch(source, /onOpenSession\(item\.session_id,|filterId|diagnosticsRun/);
@@ -398,7 +399,7 @@ test("compact Console log composition places its header above the split workbenc
   assert.doesNotMatch(section, /aria-label="更多筛选"/);
   assert.match(css, /#diagnosticsLogPage \.diagnostics-head h1[^}]*font-size:16px/);
   assert.match(css, /#diagnosticsLogPage \.diagnostics-row[^}]*height:24px/);
-  assert.match(css, /#diagnosticsLogPage \.diagnostics-row[^}]*grid-template-columns:30px 150px 52px 48px minmax\(120px,1fr\) 64px; gap:6px/);
+  assert.match(css, /#diagnosticsLogPage \.diagnostics-row[^}]*grid-template-columns:30px 150px 52px 48px minmax\(120px,1fr\) 72px; gap:6px/);
   assert.match(css, /#diagnosticsLogPage \.diagnostics-summary[^}]*font-size:12px/);
   assert.doesNotMatch(section, /diagnostics-footer|id="diagnosticsRange"/);
   assert.match(section, /diagnostics-result-title[\s\S]*diagnosticsMeta[\s\S]*diagnosticsMore/);
@@ -408,14 +409,14 @@ test("compact Console log composition places its header above the split workbenc
   assert.match(source, /bindDiagnosticResizer\(byId\("diagnosticsResizer"\), split, "--diagnostic-drawer-width", 436\)/);
 });
 
-test("log details retain exact numeric values and original field names", () => {
+test("log details retain exact numeric values and keep compact label columns", () => {
   const detail = diagnosticDetailHtml(record("detail", { model_name: "model-a", duration_ms: 30000, attempt: 2, reason: "请求超时", session_id: "session-a", run_id: "run-a" }));
   assert.match(detail, /<code>30000<\/code>/);
   assert.ok(detail.indexOf('data-field="model_name"') < detail.indexOf('data-field="duration_ms"'));
   assert.ok(detail.indexOf('data-field="duration_ms"') < detail.indexOf('data-field="reason"'));
-  assert.equal((detail.match(/<dt>source<\/dt>/g) || []).length, 1);
+  assert.equal((detail.match(/<dt title="source">来源<\/dt>/g) || []).length, 1);
   assert.match(detail, /diagnostics-property-actions/);
-  assert.match(css, /#diagnosticsLogPage \.diagnostics-property \{ display:grid; grid-template-columns:90px minmax\(0,1fr\); align-items:start/);
+  assert.match(css, /#diagnosticsLogPage \.diagnostics-property \{ display:grid; grid-column:1\/-1; grid-template-columns:subgrid; align-items:start; column-gap:8px/);
   assert.match(diagnosticTime("2026-09-09T08:00:00Z"), /^2026-09-09 \d{2}:\d{2}:\d{2}$/);
   assert.equal(diagnosticTime("not-a-date"), "not-a-date");
 });
@@ -472,10 +473,36 @@ test("原始视图自动分页并逐字展示，切换查询时取消旧加载",
   assert.equal(late.node("#diagnosticsRawText").value, "");
 });
 test("列表使用写入时的消息，未解析行不伪造 INFO 或时间", () => {
-  const item = record("one", { message: "工具 search_tools 完成 | duration_ms=320", raw: "raw actual" });
-  assert.match(diagnosticRowsHtml([item]), /工具 search_tools 完成/);
+  const item = record("one", { message: "工具 search_tools 完成，耗时 320ms", duration_ms: 320, agent_id: "hidden-list-agent", raw: "raw actual | agent_id=hidden-list-agent" });
+  assert.match(diagnosticRowsHtml([item]), /工具 search_tools 完成，耗时 320ms/);
+  assert.doesNotMatch(diagnosticRowsHtml([item]), /duration_ms|agent_id|hidden-list-agent|raw actual/);
   const unknown = diagnosticRowsHtml([{ boot_id: "file", record_id: "offset", raw: "old JSON line" }]);
   assert.match(unknown, /old JSON line/); assert.doesNotMatch(unknown, />INFO</);
   const detail = diagnosticDetailHtml(item);
-  assert.match(detail, /raw actual/); assert.match(detail, /<dt>message<\/dt>/);
+  assert.match(detail, /raw actual/); assert.match(detail, /<dt title="message">正文<\/dt>/);
+});
+
+
+test("detail fields use Chinese labels with unknown scalar fallback and no duplicate message", () => {
+  const detail = diagnosticDetailHtml(record("labels", { agent_name: "日志展示验收", future_fact: "unknown_value", summary: "工具完成", message: "工具完成", source: "api" }));
+  assert.equal(diagnosticFieldLabel("future_fact"), "future_fact");
+  assert.match(detail, /<dt title="agent_name">Agent 名称<\/dt><dd><code>日志展示验收<\/code>/);
+  assert.match(detail, /<dt title="future_fact">future_fact<\/dt><dd><code>unknown_value<\/code>/);
+  assert.match(detail, /<dt title="source">来源<\/dt><dd><code>api<\/code>/);
+  assert.doesNotMatch(detail, /data-field="summary"|data-copy-id/);
+  assert.match(detail, /<dt title="message">正文<\/dt>/);
+});
+
+test("session preview preserves exactly eight characters and raw detail is collapsed on every render", () => {
+  const row = diagnosticRowsHtml([record("preview", { session_id: "b662a978abcdefghijklmnop" })]);
+  assert.match(row, /title="打开会话 b662a978abcdefghijklmnop">b662a978<\/button>/);
+  assert.match(css, /\.diagnostics-session button[^}]*text-overflow:clip/);
+  assert.match(css, /#diagnosticsLogPage \.diagnostics-session button[^}]*width:8ch; padding:0/);
+  for (const id of ["one", "two"]) {
+    const detail = diagnosticDetailHtml(record(id, { raw: "literal <markup> | value=a\\|b" }));
+    assert.match(detail, /<details class="diagnostics-raw-details"><summary>/);
+    assert.doesNotMatch(detail, /<details[^>]* open|data-copy-id="raw"/);
+    assert.match(detail, /literal &lt;markup&gt; \| value=a\\\|b/);
+  }
+  assert.match(css, /\.diagnostics-raw-record[^}]*border:1px solid var\(--border\)/);
 });

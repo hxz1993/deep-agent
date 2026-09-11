@@ -8,16 +8,30 @@ const OPTIONS = {
   source: [["", "全部来源"], ["api", "API"], ["gateway", "网关"]],
   level: [["", "全部等级"], ["CRITICAL", "CRITICAL · 严重"], ["ERROR", "ERROR · 错误"], ["WARNING", "WARNING · 警告"], ["INFO", "INFO · 信息"], ["DEBUG", "DEBUG · 调试"]],
 };
-const DETAIL_SCALARS = new Set(("timestamp summary message raw request_id event level source schema_version record_id boot_id instance_id process_id " +
-  "session_id run_id agent_id conversation_id channel_run_id account_id tool_call_id tool model_id model_name provider_name phase status " +
-  "error_type error_code command mode finish_reason compaction reason duration_ms request_index attempt queue_depth input_tokens output_tokens " +
-  "total_tokens requests tool_calls tool_search_calls cache_read_tokens cache_write_tokens spill_count spill_failures byte_size spilled_bytes " +
-  "model_api api_path http_method http_status api_request_id tool_manifest_status tool_count unique_tool_count tools_omitted tool_names_hash").split(" "));
+const FIELD_LABELS = {
+  timestamp: "时间", summary: "摘要", message: "正文", raw: "原始日志", request_id: "请求 ID", event: "事件",
+  level: "等级", source: "来源", schema_version: "格式版本", record_id: "记录 ID", boot_id: "启动 ID",
+  instance_id: "实例 ID", process_id: "进程 ID", session_id: "会话 ID", run_id: "执行 ID", agent_id: "Agent ID",
+  agent_name: "Agent 名称", conversation_id: "对话 ID", channel_run_id: "渠道执行 ID", account_id: "渠道账号 ID",
+  tool_call_id: "工具调用 ID", tool: "工具", model_id: "模型 ID", model_name: "模型", provider_name: "供应商",
+  phase: "阶段", status: "状态", result_status: "执行结果", error_type: "错误类型", error_code: "错误码", command: "命令", mode: "模式",
+  finish_reason: "结束原因", compaction: "压缩", reason: "原因", duration_ms: "耗时（ms）", request_index: "请求轮次",
+  attempt: "尝试次数", queue_depth: "队列长度", input_tokens: "输入 Token", output_tokens: "输出 Token",
+  total_tokens: "总 Token", requests: "请求数", tool_calls: "工具调用数", tool_search_calls: "工具搜索数",
+  cache_read_tokens: "缓存读取 Token", cache_write_tokens: "缓存写入 Token", spill_count: "转存次数",
+  spill_failures: "转存失败数", byte_size: "大小（字节）", spilled_bytes: "转存字节数", model_api: "模型 API",
+  api_path: "接口路径", http_method: "HTTP 方法", http_status: "HTTP 状态", api_request_id: "API 请求 ID",
+  tool_manifest_status: "工具清单状态", tool_count: "工具数", unique_tool_count: "去重工具数",
+  tools_omitted: "省略工具数", tool_names_hash: "工具清单哈希", redeclared_tool_names: "重新声明工具",
+  duplicate_tool_names: "重复工具", added_tool_names: "新增工具", history_tool_names: "历史工具", tool_names: "工具清单",
+};
+export function diagnosticFieldLabel(key) { return Object.hasOwn(FIELD_LABELS, key) ? FIELD_LABELS[key] : key; }
+const EXCLUDED_DETAIL_FIELDS = new Set(["headers", "body", "request_body", "response_body", "metadata", "arguments", "result", "prompt"]);
 const TOOL_LIST_FIELDS = new Set(["redeclared_tool_names", "duplicate_tool_names", "added_tool_names", "history_tool_names", "tool_names"]);
 export function diagnosticScalars(record) {
   const result = {};
   for (const [key, value] of Object.entries(record || {})) {
-    if (DETAIL_SCALARS.has(key) && value !== null && ["string", "number", "boolean"].includes(typeof value)) result[key] = value;
+    if (!EXCLUDED_DETAIL_FIELDS.has(key) && !TOOL_LIST_FIELDS.has(key) && /^[a-z][a-z0-9_]*$/.test(key) && value !== null && ["string", "number", "boolean"].includes(typeof value)) result[key] = value;
   }
   let budget = 3600;
   for (const key of TOOL_LIST_FIELDS) {
@@ -60,11 +74,11 @@ export function diagnosticRowsHtml(items, { selected = "", keyword = "" } = {}) 
 export function diagnosticDetailHtml(record) {
   if (!record) return "";
   const fields = diagnosticScalars(record);
-  const body = Object.entries(fields).filter(([key]) => key !== "raw").map(([key, value]) => {
-    const jump = key === "session_id" ? `<button type="button" class="diagnostics-inline-action" data-open-session="${escape(value)}" aria-label="打开关联会话">${icon("external-link")}</button>` : "";
-    return `<div class="diagnostics-property" data-field="${escape(key)}"><dt>${escape(key)}</dt><dd><code>${escape(String(value))}</code><span class="diagnostics-property-actions"><button type="button" class="diagnostics-inline-action" data-copy-id="${escape(key)}" aria-label="复制 ${escape(key)}">${icon("copy")}</button>${jump}</span></dd></div>`;
+  const body = Object.entries(fields).filter(([key, value]) => key !== "raw" && !(key === "summary" && value === fields.message)).map(([key, value]) => {
+    const actions = key === "session_id" ? `<span class="diagnostics-property-actions"><button type="button" class="diagnostics-inline-action" data-copy-id="session_id" aria-label="复制会话 ID">${icon("copy")}</button><button type="button" class="diagnostics-inline-action" data-open-session="${escape(value)}" aria-label="打开关联会话">${icon("external-link")}</button></span>` : "";
+    return `<div class="diagnostics-property" data-field="${escape(key)}"><dt title="${escape(key)}">${escape(diagnosticFieldLabel(key))}</dt><dd><code>${escape(String(value))}</code>${actions}</dd></div>`;
   }).join("");
-  return `<header class="diagnostics-drawer-head"><h2>日志详情</h2><button type="button" class="diagnostics-inline-action" data-close-detail aria-label="关闭日志详情">${icon("x")}</button></header><div class="diagnostics-drawer-body"><div class="diagnostics-raw-head"><span>raw</span><button type="button" class="diagnostics-inline-action" data-copy-id="raw" aria-label="复制原始日志">${icon("copy")}</button></div><pre class="diagnostics-raw-record">${escape(record.raw || "")}</pre><section class="diagnostics-field-group"><dl>${body}</dl></section></div>`;
+  return `<header class="diagnostics-drawer-head"><h2>日志详情</h2><button type="button" class="diagnostics-inline-action" data-close-detail aria-label="关闭日志详情">${icon("x")}</button></header><div class="diagnostics-drawer-body"><details class="diagnostics-raw-details"><summary><span>原始日志</span>${icon("chevron-down")}</summary><pre class="diagnostics-raw-record">${escape(record.raw || "")}</pre></details><section class="diagnostics-field-group"><dl>${body}</dl></section></div>`;
 }
 export function diagnosticFilters(values, now = new Date()) {
   let start, end;

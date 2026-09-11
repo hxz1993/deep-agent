@@ -242,6 +242,7 @@ class AgentRunner:
         context_compaction: DeepAgentContextCompaction | None = None,
         model_id: str | None = None,
         model_name: str | None = None,
+        agent_name: str | None = None,
         provider_id: str | None = None,
         provider_type: str | None = None,
         estimator: TokenEstimator | None = None,
@@ -261,6 +262,7 @@ class AgentRunner:
         self._context_compaction = context_compaction
         self._model_id = model_id
         self._model_name = model_name
+        self.agent_name = agent_name
         self._provider_id = provider_id
         self._provider_type = provider_type
         self._estimator = estimator or TokenEstimator.conservative()
@@ -362,7 +364,8 @@ class AgentRunner:
             log_event(
                 f"agent_run_{status}", session_id=run_event.session_id,
                 conversation_id=deps.conversation_id, run_id=deps.run_id,
-                agent_id=deps.agent_id, mode=run_event.mode, phase=phase, reason=reason, **metrics,
+                agent_id=deps.agent_id, agent_name=deps.agent_name, model_name=self._model_name,
+                mode=run_event.mode, phase=phase, reason=reason, **metrics,
                 error_type=type(error).__name__ if error is not None else None,
             )
         except Exception:
@@ -510,6 +513,7 @@ class AgentRunner:
     ) -> AsyncIterator[dict[str, Any]]:
         """Force one persisted compaction Event without appending a chat turn."""
 
+        deps.agent_name = self.agent_name
         self._start_run_identity(session_id, deps)
         self._prepare_skill_runtime(deps)
         started_at = time.perf_counter()
@@ -545,7 +549,7 @@ class AgentRunner:
                 "manual_compaction_completed",
                 conversation_id=deps.conversation_id,
                 run_id=deps.run_id,
-                agent_id=deps.agent_id,
+                agent_id=deps.agent_id, agent_name=deps.agent_name, model_name=self._model_name,
                 session_id=session_id,
                 reason=reason,
                 **metrics,
@@ -556,7 +560,7 @@ class AgentRunner:
             "manual_compaction_started",
             conversation_id=deps.conversation_id,
             run_id=deps.run_id,
-            agent_id=deps.agent_id,
+            agent_id=deps.agent_id, agent_name=deps.agent_name, model_name=self._model_name,
             session_id=session_id,
             model_id=self._model_id,
         )
@@ -1275,7 +1279,7 @@ class AgentRunner:
                 )
         except Exception as exc:
             log_event("message_persistence_failed", session_id=session_id,
-                      run_id=deps.run_id, agent_id=deps.agent_id,
+                      run_id=deps.run_id, agent_id=deps.agent_id, agent_name=deps.agent_name, model_name=self._model_name,
                       phase="terminal", error_type=type(exc).__name__)
             raise
         if result_queue is not None:
@@ -1301,7 +1305,7 @@ class AgentRunner:
             return True
         except Exception as exc:
             log_event("message_persistence_failed", session_id=session_id,
-                      run_id=deps.run_id, agent_id=deps.agent_id,
+                      run_id=deps.run_id, agent_id=deps.agent_id, agent_name=deps.agent_name, model_name=self._model_name,
                       phase="status_finalization", error_type=type(exc).__name__)
             return False
 
@@ -1475,7 +1479,7 @@ class AgentRunner:
             )
         except Exception as exc:  # noqa: BLE001 - fallback remains authoritative
             log_event("title_generation_failed", session_id=session_id, run_id=deps.run_id,
-                      agent_id=deps.agent_id, model_id=self._model_id,
+                      agent_id=deps.agent_id, agent_name=deps.agent_name, model_name=self._model_name, model_id=self._model_id,
                       phase="title_update", error_type=type(exc).__name__)
             logger.warning(
                 "Model title persistence failed for session {}: {}",
@@ -1532,6 +1536,7 @@ class AgentRunner:
         deferred_tool_results: DeferredToolResults | None = None,
         branch_from: int | None = None,
     ) -> dict[str, Any]:
+        deps.agent_name = self.agent_name
         self._start_run_identity(session_id, deps)
         await self._ensure_turn_identity(
             session_id, deps, message=message, attachments=attachments,
@@ -1545,7 +1550,7 @@ class AgentRunner:
             "agent_run_started",
             conversation_id=deps.conversation_id,
             run_id=deps.run_id,
-            agent_id=deps.agent_id,
+            agent_id=deps.agent_id, agent_name=deps.agent_name, model_name=self._model_name,
             session_id=session_id,
             model_id=self._model_id,
             mode="non_stream",
@@ -1731,7 +1736,7 @@ class AgentRunner:
             "agent_run_pending" if terminal_status == "pending" else "agent_run_completed",
             conversation_id=deps.conversation_id,
             run_id=deps.run_id,
-            agent_id=deps.agent_id,
+            agent_id=deps.agent_id, agent_name=deps.agent_name, model_name=self._model_name,
             session_id=session_id,
             **response["run_metrics"],
         )
@@ -1922,6 +1927,7 @@ class AgentRunner:
         persister: EventPersister,
         active_run: ActiveRun | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
+        deps.agent_name = self.agent_name
         self._start_run_identity(
             session_id,
             deps,
@@ -1939,7 +1945,7 @@ class AgentRunner:
             "agent_run_started",
             conversation_id=deps.conversation_id,
             run_id=deps.run_id,
-            agent_id=deps.agent_id,
+            agent_id=deps.agent_id, agent_name=deps.agent_name, model_name=self._model_name,
             session_id=session_id,
             model_id=self._model_id,
             mode="stream",
@@ -2097,7 +2103,7 @@ class AgentRunner:
                                             "context_compaction_phase",
                                             conversation_id=deps.conversation_id,
                                             run_id=deps.run_id,
-                                            agent_id=deps.agent_id,
+                                            agent_id=deps.agent_id, agent_name=deps.agent_name, model_name=self._model_name,
                                             session_id=session_id,
                                             phase=status_event.get("phase"),
                                             mode=status_event.get("mode", "automatic"),
@@ -2285,7 +2291,7 @@ class AgentRunner:
                     "agent_run_failed",
                     conversation_id=deps.conversation_id,
                     run_id=deps.run_id,
-                    agent_id=deps.agent_id,
+                    agent_id=deps.agent_id, agent_name=deps.agent_name, model_name=self._model_name,
                     session_id=session_id,
                     model_id=self._model_id,
                     status="failed",
@@ -2506,7 +2512,7 @@ class AgentRunner:
             "agent_run_pending" if metrics["status"] == "pending" else "agent_run_completed",
             conversation_id=deps.conversation_id,
             run_id=deps.run_id,
-            agent_id=deps.agent_id,
+            agent_id=deps.agent_id, agent_name=deps.agent_name, model_name=self._model_name,
             session_id=session_id,
             **metrics,
         )

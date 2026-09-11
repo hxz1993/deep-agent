@@ -89,6 +89,21 @@ class DiagnosticRuntimeTests(unittest.TestCase):
         self.assertNotIn("prompt", safe)
         self.assertIsNone(sanitize_record({"event": []}))
 
+    def test_large_readable_messages_do_not_drop_lifecycle_records(self):
+        from deep_agent.diagnostics.schema import IDENTIFIER_FIELDS, NUMBER_FIELDS, MAX_RECORD_BYTES
+        fields = {key: "x" * 180 for key in IDENTIFIER_FIELDS}
+        fields.update({key: 10**15 for key in NUMBER_FIELDS})
+        fields.update(agent_name="中" * 100, tool_names=["tool_" + str(n) * 30 for n in range(256)])
+        writer = self.writer()
+        for event in ("model_api_request", "model_api_response"):
+            writer.emit(event, level="INFO", **fields)
+        self.drain(writer)
+        lines = [line for file in self.directory.glob("*.log") for line in file.read_text().splitlines()]
+        self.assertEqual(len(lines), 2)
+        for line in lines:
+            self.assertLessEqual(len(line.encode()) + 1, MAX_RECORD_BYTES)
+            self.assertEqual(parse_record(line)["level"], "INFO")
+
     def test_request_context_is_captured_before_background_write(self):
         from deepfos_platform.lib.context import RequsetId
         writer = self.writer()

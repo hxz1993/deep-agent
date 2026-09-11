@@ -337,7 +337,7 @@ async def chat_stream(
                 ctx.session_live.end(live_key, deps.run_id)
 
     return DiagnosticEventSourceResponse(
-        event_generator(), fields=session_data,
+        event_generator(), fields={**session_data, "agent_name": getattr(runner, "agent_name", None)},
         active_run=lambda: stream_run if ctx.active_runs.get(
             agent_id=deps.agent_id, session_id=session_id,
         ) is stream_run else None,

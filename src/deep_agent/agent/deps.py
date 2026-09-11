@@ -31,6 +31,7 @@ class AgentDeps:
     session_id: str
     user: str | None = None
     agent_id: str | None = None
+    agent_name: str | None = None
     conversation_id: str | None = None
     run_id: str | None = None
     turn_id: str | None = None

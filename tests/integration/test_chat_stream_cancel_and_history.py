@@ -3,7 +3,9 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 from fastapi import FastAPI
@@ -70,7 +72,13 @@ def _tool_result_ids(history: dict) -> list[str]:
 
 class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
-        stores, self._engine, session_factory = await make_sqlite_stores()
+        # Cancellation may invalidate an in-flight SQLite connection. An
+        # in-memory database then disappears with that connection; use an
+        # isolated file like the real runtime so reconnect preserves history.
+        directory = tempfile.TemporaryDirectory(prefix="deep-agent-cancel-TMP_to_delete-")
+        self.addCleanup(directory.cleanup)
+        url = f"sqlite+aiosqlite:///{Path(directory.name) / 'history.db'}"
+        stores, self._engine, session_factory = await make_sqlite_stores(url)
         self._agent_id = await seed_default_agent(stores, name="cancel-agent")
         self._app = FastAPI()
         install_test_user_header(self._app)

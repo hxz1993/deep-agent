@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import re
 
-from .schema import NUMBER_FIELDS, TOOL_LIST_FIELDS, sanitize_record
+from .schema import MAX_RECORD_BYTES, NUMBER_FIELDS, TOOL_LIST_FIELDS, sanitize_record
 
 
 def escape(value: str) -> str:
@@ -33,6 +33,33 @@ def format_record(payload: dict) -> str:
     record = sanitize_record(payload)
     if record is None:
         raise ValueError("Invalid operational record")
+    line = _render(record)
+    # Account for the actual UTF-8 wire representation, including escaping and
+    # the writer's newline. Keep scalar facts; trim the existing bounded tool
+    # inventories first, in reverse priority order, with an explicit count.
+    for key in reversed(TOOL_LIST_FIELDS):
+        while len(line.encode()) + 1 > MAX_RECORD_BYTES and record.get(key):
+            record[key].pop()
+            record["tools_omitted"] = record.get("tools_omitted", 0) + 1
+            line = _render(record)
+    if len(line.encode()) + 1 > MAX_RECORD_BYTES:
+        # Only the repeated prose is shortened. The complete scalar facts stay
+        # in the appended fields; never split a UTF-8 character or escape pair.
+        message = record["summary"]
+        low, high = 0, len(message)
+        while low < high:
+            middle = (low + high + 1) // 2
+            record["summary"] = message[:middle] + "…"
+            if len(_render(record).encode()) + 1 <= MAX_RECORD_BYTES:
+                low = middle
+            else:
+                high = middle - 1
+        record["summary"] = message[:low] + "…"
+        line = _render(record)
+    return line
+
+
+def _render(record: dict) -> str:
     prefix = [record["timestamp"], str(record["process_id"]), record["level"],
               record.get("request_id", "-"), f'{record["source"]} - {record["summary"]}']
     excluded = {"schema_version", "timestamp", "process_id", "level", "source", "summary", "request_id"}
@@ -73,8 +100,9 @@ def parse_record(line: str) -> dict | None:
         safe = sanitize_record(record)
         if safe is None:
             return None
-        # This is an exact substring of the written message, not a UI template.
-        safe["message"] = " | ".join(parts[4:])[len(escape(source)) + 3:]
+        # The written body is authoritative; never regenerate it while reading.
+        safe["summary"] = summary
+        safe["message"] = summary
         safe["raw"] = line
         return safe
     except (ValueError, TypeError, OverflowError):

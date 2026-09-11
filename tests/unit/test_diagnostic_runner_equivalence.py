@@ -77,7 +77,7 @@ class DiagnosticRunnerEquivalenceTests(unittest.IsolatedAsyncioTestCase):
         runner = AgentRunner(
             Agent(FunctionModel(stream_function=stream), deps_type=AgentDeps, tools=[sample],
                   capabilities=[RuntimeDiagnostics()]),
-            stores.coordinator, UsageLimits(request_limit=6),
+            stores.coordinator, UsageLimits(request_limit=6), agent_name="日志验收",
         )
         try:
             with TemporaryDirectory(prefix="TMP_to_delete_diagnostic_equivalence_") as tmp:
@@ -117,6 +117,10 @@ class DiagnosticRunnerEquivalenceTests(unittest.IsolatedAsyncioTestCase):
                     else:
                         self.assertGreater(writer.status()["dropped_records"], 0)
 
+                for row in operational:
+                    if row["event"].startswith(("agent_run_", "agent_tool_", "model_request_")):
+                        self.assertEqual(row["agent_name"], "日志验收")
+                        self.assertIn("日志验收", row["message"])
                 names = [row["event"] for row in operational]
                 self.assertEqual(names.count("model_request_started"), 3)
                 self.assertEqual(names.count("agent_tool_started"), 2)

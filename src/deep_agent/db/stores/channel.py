@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from typing import Any, Sequence
 from uuid import uuid4
 
-from sqlalchemy import case, delete, func, or_, select, update
+from sqlalchemy import case, delete, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -17,6 +17,9 @@ from deep_agent.db.models import (
     ChatSession,
     ChatSessionEvent,
     LlmModel,
+)
+from deep_agent.db.reference_integrity import (
+    ReferenceConflict, is_unique_conflict, lock_optional, lock_reference,
 )
 from deep_agent.db.stores._session import SessionBoundMixin
 from deep_agent.db.stores.event.base import SessionEventStore
@@ -66,6 +69,7 @@ class ChannelStore(SessionBoundMixin):
     ) -> ChannelAccount:
         try:
             async with self._write() as db:
+                await lock_reference(db, Agent, Agent.id, data.agent_id, "Agent")
                 row = ChannelAccount(
                     id=uuid4().hex,
                     **data.model_dump(),
@@ -75,6 +79,8 @@ class ChannelStore(SessionBoundMixin):
                 await db.refresh(row)
                 return row
         except IntegrityError as exc:
+            if not is_unique_conflict(exc):
+                raise
             raise ValueError("同一企微 Bot 只能配置一次") from exc
 
     async def update_account(
@@ -84,15 +90,9 @@ class ChannelStore(SessionBoundMixin):
     ) -> ChannelAccount | None:
         try:
             async with self._write() as db:
-                row = (
-                    await db.execute(
-                        select(ChannelAccount)
-                        .where(
-                            ChannelAccount.id == account_id,
-                        )
-                        .with_for_update()
-                    )
-                ).scalar_one_or_none()
+                row = await self._lock_account_for_write(
+                    db, account_id, new_agent_id=data.agent_id,
+                )
                 if row is None:
                     return None
                 for field, value in data.model_dump(exclude_unset=True).items():
@@ -102,6 +102,8 @@ class ChannelStore(SessionBoundMixin):
                 await db.refresh(row)
                 return row
         except IntegrityError as exc:
+            if not is_unique_conflict(exc):
+                raise
             raise ValueError("同一企微 Bot 只能配置一次") from exc
 
     async def delete_account(self, account_id: str) -> bool:
@@ -117,25 +119,14 @@ class ChannelStore(SessionBoundMixin):
             ).scalar_one_or_none()
             if row is None:
                 return False
-            binding_count = int(
-                (
-                    await db.execute(
-                        select(func.count()).select_from(ChannelSessionBinding).where(
-                            ChannelSessionBinding.account_id == account_id
-                        )
-                    )
-                ).scalar_one()
-            )
-            run_count = int(
-                (
-                    await db.execute(
-                        select(func.count()).select_from(ChannelMessageRun).where(
-                            ChannelMessageRun.account_id == account_id
-                        )
-                    )
-                ).scalar_one()
-            )
-            if binding_count or run_count:
+            # Locking reads see newly committed children under MySQL REPEATABLE READ.
+            binding = await db.scalar(select(ChannelSessionBinding.id).where(
+                ChannelSessionBinding.account_id == account_id,
+            ).limit(1).with_for_update())
+            run = await db.scalar(select(ChannelMessageRun.id).where(
+                ChannelMessageRun.account_id == account_id,
+            ).limit(1).with_for_update())
+            if binding is not None or run is not None:
                 raise ValueError("渠道已经产生会话或运行记录，请停用后保留配置")
             await db.execute(delete(ChannelAccount).where(ChannelAccount.id == account_id))
             return True
@@ -179,7 +170,7 @@ class ChannelStore(SessionBoundMixin):
         """Create a peer pointer without creating an empty model conversation."""
         self._validate_peer(peer_type, peer_id)
         async with self._write() as db:
-            account = await self._get_account(db, account_id, for_update=True)
+            account = await self._lock_account_for_write(db, account_id)
             if account is None:
                 raise LookupError("Channel account not found")
             return await self._ensure_binding(
@@ -203,13 +194,15 @@ class ChannelStore(SessionBoundMixin):
             ChannelSessionBinding.peer_id == peer_id,
         )
         if for_update:
-            stmt = stmt.with_for_update()
+            stmt = stmt.with_for_update().execution_options(populate_existing=True)
         return (await db.execute(stmt)).scalar_one_or_none()
 
     async def _ensure_binding(
         self, db: AsyncSession, account_id: str, peer_type: str, peer_id: str,
         peer_metadata: dict[str, str] | None,
     ) -> ChannelSessionBinding:
+        if await self._get_account(db, account_id, for_update=True) is None:
+            raise ReferenceConflict(f"Channel account not found: {account_id}")
         binding = await self._get_binding(
             db, account_id, peer_type, peer_id, for_update=True,
         )
@@ -286,19 +279,22 @@ class ChannelStore(SessionBoundMixin):
     ) -> ResolvedChannelBinding:
         self._validate_peer(peer_type, peer_id)
         async with self._write() as db:
-            account = await self._get_account(db, account_id, for_update=True)
+            account, expected_session_id = await self._lock_peer_account(
+                db, account_id, peer_type, peer_id,
+            )
             if account is None:
                 raise LookupError("Channel account not found")
             binding = await self._ensure_binding(
                 db, account_id, peer_type, peer_id, peer_metadata,
             )
+            self._check_binding_snapshot(binding, expected_session_id)
             session = None
             if binding.session_id:
                 session = (
                     await db.execute(
                         select(ChatSession).where(
                             ChatSession.session_id == binding.session_id
-                        )
+                        ).with_for_update().execution_options(populate_existing=True)
                     )
                 ).scalar_one_or_none()
                 if session is not None and (
@@ -329,12 +325,16 @@ class ChannelStore(SessionBoundMixin):
         """Commit /new's effect and command ledger together, before delivery."""
         self._validate_peer(peer_type, peer_id)
         async with self._write() as db:
-            account = await self._get_account(db, account_id, for_update=True)
+            account, expected_session_id = await self._lock_peer_account(
+                db, account_id, peer_type, peer_id,
+            )
             if account is None:
                 raise LookupError("Channel account not found")
             if not account.enabled:
                 raise PermissionError("Channel account is disabled")
             binding = await self._get_binding(db, account_id, peer_type, peer_id, for_update=True)
+            if binding is not None:
+                self._check_binding_snapshot(binding, expected_session_id)
             command = (await db.execute(
                 select(ChannelMessageRun).where(ChannelMessageRun.id == command_run_id)
                 .with_for_update()
@@ -405,6 +405,7 @@ class ChannelStore(SessionBoundMixin):
         now = datetime.now(timezone.utc)
         try:
             async with self._write() as db:
+                await self._lock_run_references(db, account_id, binding_id)
                 row = ChannelMessageRun(
                     id=uuid4().hex,
                     account_id=account_id,
@@ -424,10 +425,13 @@ class ChannelStore(SessionBoundMixin):
                 await db.flush()
                 await db.refresh(row)
                 return ClaimedChannelMessage(row, True)
-        except IntegrityError:
-            pass
+        except IntegrityError as exc:
+            if not is_unique_conflict(exc):
+                raise
+            duplicate_error = exc
 
         async with self._write() as db:
+            await self._lock_run_references(db, account_id, binding_id)
             row = (
                 await db.execute(
                     select(ChannelMessageRun)
@@ -437,7 +441,11 @@ class ChannelStore(SessionBoundMixin):
                     )
                     .with_for_update()
                 )
-            ).scalar_one()
+            ).scalar_one_or_none()
+            if row is None:
+                # A different unique key (for example a run ID collision) must
+                # not be mistaken for delivery of the same external message.
+                raise duplicate_error
             retryable = self.can_retry(row)
             if retryable:
                 row.processing_status = "received"
@@ -531,6 +539,64 @@ class ChannelStore(SessionBoundMixin):
             )
             return int(result.rowcount or 0)
 
+    async def _lock_account_for_write(
+        self, db: AsyncSession, account_id: str, *, new_agent_id: str | None = None,
+        extra_agent_ids: Sequence[str] = (),
+    ) -> ChannelAccount | None:
+        # Snapshot IDs only; never retain an ORM object across a lock wait.
+        old_agent_id = await db.scalar(select(ChannelAccount.agent_id).where(
+            ChannelAccount.id == account_id,
+        ))
+        if old_agent_id is None:
+            return None
+        agent_ids = {old_agent_id, *extra_agent_ids}
+        if new_agent_id is not None:
+            agent_ids.add(new_agent_id)
+        for agent_id in sorted(agent_ids):
+            await lock_reference(db, Agent, Agent.id, agent_id, "Agent")
+        account = await self._get_account(db, account_id, for_update=True)
+        if account is not None and account.agent_id != old_agent_id:
+            raise ReferenceConflict("Channel Agent changed concurrently; retry the operation")
+        return account
+
+    async def _lock_peer_account(
+        self, db: AsyncSession, account_id: str, peer_type: str, peer_id: str,
+    ) -> tuple[ChannelAccount | None, str | None]:
+        # An account can be switched to another Agent while its binding still
+        # points at the old Agent's session. Lock both parents in sorted order.
+        session_id = await db.scalar(select(ChannelSessionBinding.session_id).where(
+            ChannelSessionBinding.account_id == account_id,
+            ChannelSessionBinding.peer_type == peer_type,
+            ChannelSessionBinding.peer_id == peer_id,
+        ))
+        session_agent_id = await db.scalar(select(ChatSession.agent_id).where(
+            ChatSession.session_id == session_id,
+        )) if session_id else None
+        account = await self._lock_account_for_write(
+            db, account_id, extra_agent_ids=[session_agent_id] if session_agent_id else [],
+        )
+        if account is not None and session_id:
+            await lock_optional(db, ChatSession, ChatSession.session_id, session_id)
+        return account, session_id
+
+    @staticmethod
+    def _check_binding_snapshot(binding: ChannelSessionBinding, session_id: str | None) -> None:
+        if binding.session_id != session_id and binding.session_id is not None:
+            raise ReferenceConflict("Channel session changed concurrently; retry the operation")
+
+    async def _lock_run_references(
+        self, db: AsyncSession, account_id: str, binding_id: str,
+    ) -> ChannelSessionBinding:
+        account = await self._lock_account_for_write(db, account_id)
+        if account is None:
+            raise ReferenceConflict(f"Channel account not found: {account_id}")
+        binding = await lock_reference(
+            db, ChannelSessionBinding, ChannelSessionBinding.id, binding_id, "Channel binding",
+        )
+        if binding.account_id != account_id:
+            raise ReferenceConflict("Channel binding belongs to another account")
+        return binding
+
     async def _get_account(
         self,
         db: AsyncSession,
@@ -540,7 +606,7 @@ class ChannelStore(SessionBoundMixin):
     ) -> ChannelAccount | None:
         stmt = select(ChannelAccount).where(ChannelAccount.id == account_id)
         if for_update:
-            stmt = stmt.with_for_update()
+            stmt = stmt.with_for_update().execution_options(populate_existing=True)
         return (await db.execute(stmt)).scalar_one_or_none()
 
 

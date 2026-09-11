@@ -29,6 +29,7 @@
 
 | 文档 | 用途 |
 | --- | --- |
+| [`application-references.md`](application-references.md) | 数据库003逻辑引用、发布顺序、迁移回退及验收 |
 | [`mysql-idle-connection-timeout.md`](mysql-idle-connection-timeout.md) | MySQL 空闲断链、连接池参数、环境取值和复现验收指南 |
 | [`experience/ai-title-generator.md`](experience/ai-title-generator.md) | AI 会话标题生成经验 |
 | [`experience/llm-model-modalities.md`](experience/llm-model-modalities.md) | 模型输入模态元数据经验 |

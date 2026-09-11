@@ -6,7 +6,6 @@ from sqlalchemy import (
     BigInteger,
     Boolean,
     Float,
-    ForeignKey,
     Index,
     Integer,
     PrimaryKeyConstraint,
@@ -47,7 +46,6 @@ class LlmModel(Base):
     id: Mapped[str] = mapped_column(String(AGENT_ID_LENGTH), primary_key=True, default=new_agent_id)
     provider_id: Mapped[str] = mapped_column(
         String(PROVIDER_ID_LENGTH),
-        ForeignKey("llm_providers.id", ondelete="RESTRICT"),
         nullable=False,
         index=True,
     )
@@ -148,7 +146,6 @@ class Agent(Base):
     name: Mapped[str] = mapped_column(KeyText, nullable=False)
     model_id: Mapped[str] = mapped_column(
         String(AGENT_ID_LENGTH),
-        ForeignKey("llm_models.id", ondelete="RESTRICT"),
         nullable=False,
     )
     temperature: Mapped[float | None] = mapped_column(Float, nullable=True)
@@ -162,7 +159,7 @@ class Agent(Base):
         onupdate=func.now(),
         nullable=False,
     )
-    llm_model: Mapped[LlmModel] = relationship("LlmModel", lazy="joined")
+    llm_model: Mapped[LlmModel] = relationship("LlmModel", primaryjoin="foreign(Agent.model_id) == LlmModel.id", lazy="joined")
 
 
 class GlobalSetting(Base):
@@ -242,7 +239,6 @@ class ChatSession(Base):
     session_id: Mapped[str] = mapped_column(KeyText, primary_key=True)
     agent_id: Mapped[str] = mapped_column(
         String(AGENT_ID_LENGTH),
-        ForeignKey("agents.id", ondelete="RESTRICT"),
         nullable=False,
     )
     user_id: Mapped[str] = mapped_column(String(128), nullable=False)
@@ -289,7 +285,6 @@ class UiToolDefinition(Base):
     name: Mapped[str] = mapped_column(KeyText, primary_key=True)
     package_code: Mapped[str] = mapped_column(
         KeyText,
-        ForeignKey("ui_tool_packages.code", ondelete="RESTRICT"),
         nullable=False,
     )
     description: Mapped[str] = mapped_column(Text, nullable=False)
@@ -305,7 +300,7 @@ class UiToolDefinition(Base):
         onupdate=func.now(),
         nullable=False,
     )
-    package: Mapped[UiToolPackage] = relationship("UiToolPackage", lazy="joined")
+    package: Mapped[UiToolPackage] = relationship("UiToolPackage", primaryjoin="foreign(UiToolDefinition.package_code) == UiToolPackage.code", lazy="joined")
 
 
 class ChatSessionEvent(Base):
@@ -340,7 +335,6 @@ class ChatSessionEvent(Base):
     event_id: Mapped[str] = mapped_column(String(32), primary_key=True)
     session_id: Mapped[str] = mapped_column(
         KeyText,
-        ForeignKey("chat_sessions.session_id", ondelete="CASCADE"),
         nullable=False,
     )
     sequence: Mapped[int] = mapped_column(BigInteger, nullable=False)
@@ -383,7 +377,6 @@ class ChannelAccount(Base):
     secret: Mapped[str] = mapped_column(Text, nullable=False)
     agent_id: Mapped[str] = mapped_column(
         String(AGENT_ID_LENGTH),
-        ForeignKey("agents.id", ondelete="RESTRICT"),
         nullable=False,
         index=True,
     )
@@ -415,7 +408,6 @@ class ChannelSessionBinding(Base):
     id: Mapped[str] = mapped_column(String(32), primary_key=True)
     account_id: Mapped[str] = mapped_column(
         String(32),
-        ForeignKey("channel_accounts.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
@@ -424,7 +416,6 @@ class ChannelSessionBinding(Base):
     peer_metadata: Mapped[dict] = mapped_column(JSONType, nullable=False, default=dict)
     session_id: Mapped[str | None] = mapped_column(
         KeyText,
-        ForeignKey("chat_sessions.session_id", ondelete="SET NULL"),
         nullable=True,
     )
     created_at: Mapped[datetime] = mapped_column(
@@ -450,13 +441,11 @@ class ChannelMessageRun(Base):
     id: Mapped[str] = mapped_column(String(32), primary_key=True)
     account_id: Mapped[str] = mapped_column(
         String(32),
-        ForeignKey("channel_accounts.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
     binding_id: Mapped[str] = mapped_column(
         String(32),
-        ForeignKey("channel_session_bindings.id", ondelete="CASCADE"),
         nullable=False,
     )
     external_message_id: Mapped[str] = mapped_column(KeyText, nullable=False)

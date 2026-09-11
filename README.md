@@ -53,7 +53,7 @@ v0.7.0新增可选渠道网关：同仓、同镜像独立运行，公共Gateway/
 | [`src/deepfos_platform/`](src/deepfos_platform/README.md) | 平台配置、客户端、服务发现和部署运行时支撑 |
 | [`src/maintenance/`](src/maintenance/README.md) | 人工维护程序，不属于 Agent 工具 |
 | [`deploy/`](deploy/README.md) | Jenkins、Gunicorn 和 Docker Compose 部署配置 |
-| [`migrations/`](migrations/) | 数据库迁移；结构版本仍为 `002` |
+| [`migrations/`](migrations/) | 数据库迁移；结构版本为 `003` |
 | [`scripts/`](scripts/) | 开发、构建与环境准备脚本 |
 | [`tests/`](tests/README.md) | Python、接口、MCP 和 Console 测试 |
 | [`docs/`](docs/README.md) | 当前说明、技术设计和交互原型 |
@@ -164,12 +164,16 @@ PYTHONPATH=src python -m deep_agent.channels.gateway --host 0.0.0.0 --port 8010
 
 ## 数据库基线
 
-新数据库直接执行 `alembic upgrade head`。当前 Alembic head 为`002`：生产基线 `001`完整包含原
+新数据库直接执行 `alembic upgrade head`。当前 Alembic head 为`003`：生产基线 `001`完整包含原
 Revision 001～012 的最终结构和默认数据：Provider/Model/Agent、MCP、Skill、UI工具、模型目录、
 `chat_sessions + chat_session_events` Event Store，以及初始化为会话原生搜索的`global_settings`；
 增量`002`增加企微Channel的Account、Session Binding和Message Run三表；渠道用户由管理员配置
-`session_user_id`，Peer键名使用`userid/chatid`。本轮未发布需求的字段修正直接合并在`002`内，
-不新增迁移版本。先停止Gateway、升级API，再启动同版本Gateway。
+`session_user_id`，Peer键名使用`userid/chatid`。
+增量 `003` 移除 10 条数据库外键，由后端事务、记录锁和逻辑引用校验维持原有删除规则。
+已发布的 `001`、`002` 不改写。上线顺序：完整备份 → 停止旧 API/Gateway 写入 → 升级并核验
+`003` → 启动新版 → 业务冒烟；不能让旧代码继续向无外键数据库写入。
+迁移预检发现孤儿数据会停止，MySQL 中断后保持维护状态并重跑。具体见
+[无外键部署与回归](docs/guides/application-references.md)。
 
 已经处于旧Revision 012的数据库不能重放`001`，也不能在旧镜像运行时手工修改
 `alembic_version`。必须先完整备份并停止旧实例，再用`maintenance.rebaseline_database`校验物理
@@ -178,7 +182,7 @@ Revision 001～012 的最终结构和默认数据：Provider/Model/Agent、MCP�
 
 配置备份会复制全部配置表并只保留会话表结构；上传Skill的原始ZIP不塞入数据库备份。需要完整
 留存或跨环境迁移时，同时在Console Skill页面执行“导出全部”。复制范围按源Alembic Revision自动
-发现，后续新增配置表无需维护白名单；两张会话事实表、Channel Binding和Channel Run固定留空，
+发现，新增配置表需登记明确逻辑依赖顺序；两张会话事实表、Channel Binding和Channel Run固定留空，
 `channel_accounts`作为配置复制；完整边界见
 [`src/maintenance/README.md`](src/maintenance/README.md)。
 

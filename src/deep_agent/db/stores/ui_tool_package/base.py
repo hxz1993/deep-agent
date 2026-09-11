@@ -3,7 +3,8 @@ from __future__ import annotations
 from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 
-from deep_agent.db.models import UiToolDefinition, UiToolPackage
+from deep_agent.db.models import UiToolDefinition, UiToolPackage, Agent
+from deep_agent.db.reference_integrity import ReferenceConflict, lock_optional, is_unique_conflict
 from deep_agent.db.stores._session import SessionBoundMixin
 from deep_agent.schemas.ui_tools import UiToolPackageCreate, UiToolPackageUpdate
 
@@ -52,6 +53,8 @@ class UiToolPackageStoreBase(SessionBoundMixin):
                 await db.refresh(row)
                 return row
         except IntegrityError as exc:
+            if not is_unique_conflict(exc):
+                raise
             raise ValueError(f"UI tool package already exists: {data.code}") from exc
 
     async def update(
@@ -70,6 +73,13 @@ class UiToolPackageStoreBase(SessionBoundMixin):
 
     async def delete(self, code: str) -> bool:
         async with self._write() as db:
+            if await lock_optional(db, UiToolPackage, UiToolPackage.code, code) is None:
+                return False
+            tools = (await db.execute(select(UiToolDefinition.name).where(
+                UiToolDefinition.package_code == code).order_by(UiToolDefinition.name).with_for_update())).all()
+            refs = (await db.execute(select(Agent.name, Agent.capabilities).order_by(Agent.id).with_for_update())).all()
+            if tools or any(code in (caps or []) for _, caps in refs):
+                raise ReferenceConflict("UI 工具包包含工具或正在被 Agent 引用，不能删除")
             result = await db.execute(delete(UiToolPackage).where(UiToolPackage.code == code))
             await db.flush()
             return result.rowcount > 0

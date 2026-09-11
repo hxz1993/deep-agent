@@ -242,6 +242,9 @@ async def delete_agent(
             status_code=status.HTTP_409_CONFLICT,
             detail="Agent 正被渠道配置使用，请先调整或停用对应渠道",
         )
-    deleted = await store.delete(normalized_id)
+    try:
+        deleted = await store.delete(normalized_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Agent not found: {agent_id}")

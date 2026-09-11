@@ -49,10 +49,13 @@ deep-agent-config-<环境>-v<数据库版本>-<时间>.db
 
 `channel_accounts`属于配置，会随备份复制；其中明文Bot Secret使备份继续属于敏感文件。
 备份中的API Key、Token 和 MCP Header同样保留原值。命令完成前会自动检查 SQLite
-完整性、各配置表行数、数据库版本、模型到Provider的逻辑引用完整性和DeepAgent数据层连接。
+完整性、各配置表行数、数据库版本、四类配置逻辑引用（模型→Provider、Agent→模型、UI工具→工具包、
+渠道账号→Agent）和DeepAgent数据层连接。`003`没有数据库外键，不能用空的`foreign_key_check`结果
+替代上述逻辑校验。
 
-复制范围从源Revision实际结构自动发现，不维护配置表白名单；后续Migration新增配置表时会自动
-进入备份。源库仍在旧Revision时，备份也不会提前要求未来表存在。备份文件内的
+复制范围从源Revision实际结构发现，插入及删除顺序由`configuration_transfer.CONFIGURATION_TABLE_ORDER`
+明确维护，不依赖ORM外键自动排序。新增配置表必须补充逻辑顺序；未知表会明确失败，不会漏备份。
+源库仍在`002`时新版工具继续导出`002`，只有源库升级后才导出`003`；不修改已有`.db`备份。备份文件内的
 `_backup_info.scope_manifest`记录本次实际复制范围、只保留结构的会话/Channel运行表，以及未内嵌的外部
 文件类型，便于脱离仓库后核对备份边界。
 
@@ -84,7 +87,7 @@ Hash、Manifest 和资源索引，不包含平台文件服务中的原始 ZIP，
 
 ```bash
 curl -X POST '<DeepAgent>/api/v1/configuration/import' \
-  -F 'database_file=@deep-agent-config-test-v001-20260901-080000.db' \
+  -F 'database_file=@deep-agent-config-test-v003-20260911-080000.db' \
   -F 'apply=false'
 ```
 
@@ -92,15 +95,34 @@ curl -X POST '<DeepAgent>/api/v1/configuration/import' \
 
 ```bash
 curl -X POST '<DeepAgent>/api/v1/configuration/import' \
-  -F 'database_file=@deep-agent-config-test-v001-20260901-080000.db' \
+  -F 'database_file=@deep-agent-config-test-v003-20260911-080000.db' \
   -F 'skills_bundle=@deepagent-skills-export-20260901T080000Z.zip' \
   -F 'apply=true' \
   -F 'confirm=true'
 ```
 
 接口要求备份和目标两侧会话表均为空、目标当前没有活动Run，并动态核对当前ORM表、列、主键、
-外键、备份范围清单和引用关系。正式执行在单个数据库事务中整体替换配置；任一步失败即回滚，已上传
+约束形状（当前`003`应无外键）、备份范围清单和逻辑引用。正式执行持有数据库维护写锁，在单个数据库
+事务中整体替换配置；普通新版写入与导入互斥，任一步失败即回滚，已上传
 的Skill文件尽力补偿删除。详细契约见[`../../docs/guides/configuration-import.md`](../../docs/guides/configuration-import.md)。
+
+## 当前 `002 → 003`：移除数据库外键
+
+当前Head为`003`。迁移仅移除十条外键，保留列、数据、主键、唯一约束及索引；运行时代码接管引用
+校验、删除限制和关联清理。迁移及降级前都检查逻辑引用；发现孤儿数据会报告关系和数量并停止，
+不会自动删除数据。运维已删除部分外键时，升级会识别剩余约束；MySQL DDL中断后须继续保持停写，
+排除原因后重跑迁移，不能假定DDL已整体回滚。
+
+发布顺序：**完整备份 → 停止旧API/Gateway写入 → 升级003并核验 → 启动新版 → 业务冒烟**。
+旧代码仍依赖级联行为，不允许在外键已移除后继续承担写入。配置备份不包含会话，不能替代完整备份。
+字符集转换是独立运维操作，本迁移不修改Alpha字符集。
+
+`channel_origins`和`channel_peer_metadata`只接受历史`002`，`session_history_backup`只接受历史`007`，
+`rebaseline_database`固定校验历史`012`后改标为`001`。保留这些版本的原结构检查，不要将历史修复命令
+用于当前`003`。当前维护代码统一使用`db.reference_schema`检查逻辑引用。
+
+下列章节记录历史发布操作。生产基线重整之前的`002`、`003`与当前同名Revision不是同一次迁移，
+不得混用旧命令或只修改版本号。
 
 ## v0.6.6 生产基线重整（012 → 001）
 

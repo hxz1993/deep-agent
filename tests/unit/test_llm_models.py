@@ -188,10 +188,9 @@ class LlmModelMigrationShapeTests(unittest.TestCase):
             },
         )
 
-    def test_provider_reference_is_a_restricting_foreign_key(self) -> None:
-        foreign_key = next(iter(LlmModel.__table__.c.provider_id.foreign_keys))
-        self.assertEqual(foreign_key.target_fullname, "llm_providers.id")
-        self.assertEqual(foreign_key.ondelete, "RESTRICT")
+    def test_provider_reference_is_logical_and_keeps_its_index(self) -> None:
+        self.assertFalse(LlmModel.__table__.c.provider_id.foreign_keys)
+        self.assertTrue(LlmModel.__table__.c.provider_id.index)
 
     def test_model_name_uniqueness_is_scoped_to_provider(self) -> None:
         constraints = {

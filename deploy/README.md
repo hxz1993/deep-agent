@@ -63,3 +63,11 @@ docker compose --project-directory "$PWD" -f deploy/docker-compose.yml up -d
 `data/`、仓库外 Profile、密钥、`tmp/` 和输出文件不属于发布源码。现有稳定数据库和本地文件
 保留原地；源码路径整理不迁移、不重建业务数据。完整目录说明见
 [`项目结构与职责`](../docs/guides/project-structure.md)。
+
+## v0.9.7 / 数据库 003 发布要求
+
+完整备份 → 停止旧 API 与 Gateway 的写入 → 执行 `alembic upgrade head` 并核验003、10类逻辑引用及业务数据 → 启动新版 → 冒烟测试。
+003移除10条外键，新版代码负责原有引用与级联语义，不能滚动混跑旧写入实例。
+MySQL DDL中断不等于回滚：保持维护状态，修复故障后重跑迁移，禁止手动修改Revision。
+如需回退，先停写并确认逻辑引用有效，再执行 `alembic downgrade 002` 恢复约束后启动旧版。
+迁移不会修改字符集；详见[逻辑引用与验收](../docs/guides/application-references.md)。

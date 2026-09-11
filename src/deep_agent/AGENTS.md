@@ -106,7 +106,7 @@ DeepSeek Provider（官方默认地址、Key为空）和`deepseek-flash`模型�
 模型初始上下文1000000、最大输出384000，输入模态text/image；能力标签attachment、reasoning、
 tool_call、structured_output、temperature、open_weights、interleaved。模型配置界面本身不因此改变。
 只在迁移前无Revision且目标为Head时执行；历史Revision回放、已有库升级/重启和用户删除默认项后
-都不覆盖或补建配置。已发布001/002迁移及表结构不改写；离线SQL生成与在线空库初始化一致。
+都不覆盖或补建配置。已发布001/002迁移及表结构不改写；001/002支持离线SQL；003需要在线检查实际约束和数据，不支持离线SQL。
 
 MCP 在请求时由 `resolve_mcp_toolsets` 解析（DB 行 + `mcp_servers/` builtin 兜底）。
 
@@ -124,7 +124,7 @@ FileStore协议。`channels/gateway/runtime.py`负责Account轮询与Adapter生�
 连续加载事件不重复发占位。正常结束必须以`final.output`覆盖全部预览，显式空正文不能回填过程；
 只有缺少output字段的旧事件才回退末段文本。预览失败后本Run停止预览但继续执行并尝试最终投递，
 处理状态与最终投递状态分离，不重跑Agent。企微不增加伪造引用条或“回复：原问题”文本前缀。
-0.7.0只允许一个API worker与一个Gateway副本，Gateway不执行Alembic，启动前数据库必须为`002`。
+0.7.0只允许一个API worker与一个Gateway副本，Gateway不执行Alembic，启动前数据库必须为`003`。
 Gateway入口必须显式使用`uvicorn.run(..., workers=1, reload=False)`，不继承容器的
 `WEB_CONCURRENCY`；只改成应用导入字符串会放开多worker并造成渠道连接竞争，不是正确修复。
 Jenkins网关启动版`Jenkinsfile.gateway`可由`combined_runtime.py`在同一容器托管两个独立进程：
@@ -648,7 +648,7 @@ alembic upgrade head
 ```
 
 迁移：v0.6.6 将旧结构折叠为 `migrations/versions/001_initial_schema.py` 生产基线；v0.7.0在其上增加
-`002_wecom_channel_gateway.py`，本轮未发布需求的修正均合并在002。旧 `001` … `012` 历史迁移不再兼容。已有Revision 012数据库必须先用
+`002_wecom_channel_gateway.py`；v0.9.7新增`003_application_references.py`去除10条外键并由数据层维护引用。旧 `001` … `012` 历史迁移不再兼容。已有Revision 012数据库必须先用
 `maintenance.rebaseline_database`校验最终物理结构和全表内容哈希，再执行`stamp --purge 001`，随后
 由0.7.0升级到`002`；禁止仅手工修改版本号。涉及共享数据库时必须按维护窗口发布，并确保改标后不再
 启动旧镜像。本地 Postgres：`docker compose --project-directory "$PWD" -f deploy/docker-compose.yml up -d`。
@@ -706,3 +706,8 @@ SSE 协议：[`../../docs/guides/sse-protocol.md`](../../docs/guides/sse-protoco
 | --- | --- |
 | MCP 工具为空 | Agent 未选择对应 `mcp:<name>`，或URL MCP缺少有效工具快照 |
 | 历史不在预期数据库 | 未配置 DBMS 时实际使用默认文件 SQLite；检查 `DEEP_AGENT_SQLITE_PATH` |
+
+### 003 写入边界
+
+新增引用必须在事务内锁定父记录，删除方持相同父记录锁后检查子引用；变更父ID时先锁旧/新父记录，再锁子记录并核对快照。公共入口为 `db/reference_integrity.py`。ORM Agent→Model 和 UI Tool→Package 使用显式 join，不能重新增加 ForeignKey。
+配置替换用 Revision 行独占锁协调所有正常写入的共享锁；数据库异常不可笼统当作重复消息。数据库逻辑引用审计见 `db/reference_schema.py`，部署与验收见 `docs/guides/application-references.md`。

@@ -7,13 +7,15 @@ from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 from sqlalchemy import delete, func, insert, select
+from sqlalchemy.exc import IntegrityError
 
 from deep_agent.db.dialect import DbDialect
 from deep_agent.db.factory import create_engine
 from deep_agent.db.models import (
-    Agent, Base, ChannelMessageRun, ChannelSessionBinding, ChatSession,
+    Agent, Base, ChannelAccount, ChannelMessageRun, ChannelSessionBinding, ChatSession,
     ChatSessionEvent, LlmModel, LlmProvider,
 )
+from deep_agent.db.reference_integrity import ReferenceConflict
 from deep_agent.db.stores.bundle import create_data_stores
 from deep_agent.schemas.channel import ChannelAccountCreate, ChannelAccountUpdate
 from maintenance.channel_origins import repair_channel_origins
@@ -84,6 +86,104 @@ class ChannelStoreCommandTests(unittest.IsolatedAsyncioTestCase):
         claims = await asyncio.gather(*(self._claim() for _ in range(5)))
         self.assertEqual(sum(result.claimed for result in claims), 1)
         self.assertEqual(await self._count(ChannelSessionBinding), 1)
+
+    async def test_account_references_are_guarded_without_database_foreign_keys(self):
+        self.assertFalse(any(table.foreign_keys for table in Base.metadata.tables.values()))
+        before = await self._count(ChannelAccount)
+        with self.assertRaisesRegex(ReferenceConflict, "Agent not found"):
+            await self.store.create_account(ChannelAccountCreate(
+                name="invalid", bot_id="invalid-bot", secret="fixture", agent_id="missing",
+                session_user_id="fixture",
+            ))
+        with self.assertRaisesRegex(ReferenceConflict, "Agent not found"):
+            await self.store.update_account(self.account.id, ChannelAccountUpdate(
+                name="must roll back", agent_id="missing",
+            ))
+        self.assertEqual(await self._count(ChannelAccount), before)
+        account = await self.store.get_account(self.account.id)
+        self.assertEqual(account.name, "测试渠道")
+        self.assertEqual(account.agent_id, self.agent_id)
+
+    async def test_claim_validates_account_binding_and_account_ownership(self):
+        binding = await self.store.ensure_binding(**self.peer)
+        other = await self.store.create_account(ChannelAccountCreate(
+            name="other", bot_id="other-bot", secret="fixture", agent_id=self.agent_id,
+            session_user_id="fixture",
+        ))
+        for account_id, binding_id, message in [
+            ("missing", binding.id, "Channel account not found"),
+            (self.account.id, "missing", "Channel binding not found"),
+            (other.id, binding.id, "another account"),
+        ]:
+            with self.subTest(account_id=account_id, binding_id=binding_id):
+                with self.assertRaisesRegex(ReferenceConflict, message):
+                    await self.store.claim_message(
+                        account_id=account_id, binding_id=binding_id,
+                        external_message_id="invalid", external_request_id=None,
+                        sender_id=None, session_id=None, payload_hash="a" * 64,
+                    )
+        self.assertEqual(await self._count(ChannelMessageRun), 0)
+
+    async def test_retry_revalidates_references_and_rolls_back_attempt(self):
+        claim = await self._claim()
+        await self.store.update_run(claim.run.id, processing_status="failed", error_code="preflight_failed")
+        with self.assertRaisesRegex(ReferenceConflict, "Channel binding not found"):
+            await self.store.claim_message(
+                account_id=self.account.id, binding_id="missing",
+                external_message_id="command-1", external_request_id=None,
+                sender_id=None, session_id=None, payload_hash="a" * 64,
+            )
+        row = await self.store.get_message(self.account.id, "command-1")
+        self.assertEqual(row.attempt_count, 1)
+        self.assertEqual(row.processing_status, "failed")
+        self.assertTrue((await self._claim()).claimed)
+        self.assertEqual((await self.store.get_message(self.account.id, "command-1")).attempt_count, 2)
+
+    async def test_non_unique_database_errors_are_not_message_deduplication(self):
+        binding = await self.store.ensure_binding(**self.peer)
+        with self.assertRaises(IntegrityError):
+            await self.store.claim_message(
+                account_id=self.account.id, binding_id=binding.id,
+                external_message_id=None, external_request_id=None,
+                sender_id=None, session_id=None, payload_hash="a" * 64,
+            )
+        self.assertEqual(await self._count(ChannelMessageRun), 0)
+
+    async def test_other_unique_key_collision_is_not_message_deduplication(self):
+        from types import SimpleNamespace
+        first = await self._claim()
+        with patch("deep_agent.db.stores.channel.uuid4", return_value=SimpleNamespace(hex=first.run.id)):
+            with self.assertRaises(IntegrityError):
+                await self._claim("different-message")
+        self.assertEqual(await self._count(ChannelMessageRun), 1)
+        self.assertIsNone(await self.store.get_message(self.account.id, "different-message"))
+
+    async def test_historical_run_session_id_remains_a_weak_reference(self):
+        binding = await self.store.ensure_binding(**self.peer)
+        claim = await self.store.claim_message(
+            account_id=self.account.id, binding_id=binding.id,
+            external_message_id="historical", external_request_id=None,
+            sender_id=None, session_id="historical-session-not-present", payload_hash="a" * 64,
+        )
+        self.assertTrue(claim.claimed)
+        self.assertEqual(claim.run.session_id, "historical-session-not-present")
+
+    async def test_account_delete_preserves_channel_history(self):
+        empty = await self.store.create_account(ChannelAccountCreate(
+            name="empty", bot_id="empty-bot", secret="fixture", agent_id=self.agent_id,
+            session_user_id="fixture",
+        ))
+        self.assertTrue(await self.store.delete_account(empty.id))
+        self.assertFalse(await self.store.delete_account(empty.id))
+        await self.store.ensure_binding(**self.peer)
+        with self.assertRaisesRegex(ValueError, "请停用后保留配置"):
+            await self.store.delete_account(self.account.id)
+        await self._claim()
+        with self.assertRaisesRegex(ValueError, "请停用后保留配置"):
+            await self.store.delete_account(self.account.id)
+        self.assertIsNotNone(await self.store.get_account(self.account.id))
+        self.assertEqual(await self._count(ChannelSessionBinding), 1)
+        self.assertEqual(await self._count(ChannelMessageRun), 1)
 
     async def test_title_origin_blocks_fallback_and_model_but_allows_rename(self):
         resolved = await self.store.resolve_binding(**self.peer, peer_metadata={"display_name": "小明"})
@@ -177,8 +277,11 @@ class ChannelStoreCommandTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_deleted_current_session_gets_recreated(self):
         first = await self.store.resolve_binding(**self.peer)
-        async with self.factory.begin() as db:
-            await db.execute(delete(ChatSession).where(ChatSession.session_id == first.session.session_id))
+        await self.stores.coordinator.delete(
+            first.session.session_id, agent_id=self.agent_id,
+        )
+        self.assertIsNone((await self.store.get_binding(**self.peer)).session_id)
+        self.assertEqual(await self._count(ChatSessionEvent), 0)
         second = await self.store.resolve_binding(**self.peer)
         self.assertNotEqual(first.session.session_id, second.session.session_id)
         self.assertEqual(first.binding.id, second.binding.id)

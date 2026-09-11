@@ -53,6 +53,10 @@ def do_run_migrations(connection: Connection) -> None:
     # Keep post-migration defaults in the same explicit transaction, including
     # SQLite where Alembic otherwise treats DDL as non-transactional.
     with connection.begin():
+        if connection.dialect.name == "sqlite":
+            # sqlite3 otherwise defers BEGIN until the first DML, leaving the
+            # first batch-rebuild CREATE TABLE outside rollback protection.
+            connection.exec_driver_sql("BEGIN IMMEDIATE")
         context.configure(connection=connection, target_metadata=target_metadata)
         run_migrations_with_initial_defaults()
 

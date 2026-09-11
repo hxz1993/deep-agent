@@ -5,7 +5,8 @@ from datetime import datetime, timezone
 from sqlalchemy import Select, delete, exists, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from deep_agent.db.models import Agent, ChatSession, ChatSessionEvent
+from deep_agent.db.models import Agent, ChatSession, ChatSessionEvent, ChannelSessionBinding
+from deep_agent.db.reference_integrity import lock_reference, lock_optional
 from deep_agent.db.session_list import MAX_LIST_LIMIT, SessionSummaryRow, SortField
 from deep_agent.db.session_scope import SessionOwner, agent_scope_to_api
 from deep_agent.db.stores._session import SessionBoundMixin
@@ -20,6 +21,7 @@ class ChatSessionStoreBase(SessionBoundMixin):
         app_id: str | None = None, space_id: str | None = None,
         title: str | None = None, now: datetime | None = None,
     ) -> ChatSession:
+        await lock_reference(db, Agent, Agent.id, agent_id, "Agent")
         timestamp = now or datetime.now(timezone.utc)
         row = (
             await db.execute(
@@ -73,6 +75,8 @@ class ChatSessionStoreBase(SessionBoundMixin):
         self, db: AsyncSession, agent_id: str, session_id: str,
         *, for_update: bool = False,
     ) -> SessionOwner:
+        if for_update:
+            await lock_reference(db, Agent, Agent.id, agent_id, "Agent")
         stmt = select(ChatSession.user_id).where(
             ChatSession.session_id == session_id, ChatSession.agent_id == agent_id,
         )
@@ -96,6 +100,17 @@ class ChatSessionStoreBase(SessionBoundMixin):
         return (row.created_at, row.updated_at) if row is not None else (None, None)
 
     async def _delete(self, db: AsyncSession, agent_id: str, session_id: str) -> None:
+        if await lock_optional(db, Agent, Agent.id, agent_id) is None:
+            return
+        row = await lock_optional(db, ChatSession, ChatSession.session_id, session_id)
+        if row is None or row.agent_id != agent_id:
+            return
+        # The session lock also fences direct Event Store writers. All cleanup
+        # commits with the parent deletion, or rolls back as a whole.
+        await db.execute(update(ChannelSessionBinding).where(
+            ChannelSessionBinding.session_id == session_id
+        ).values(session_id=None))
+        await db.execute(delete(ChatSessionEvent).where(ChatSessionEvent.session_id == session_id))
         await db.execute(
             delete(ChatSession).where(
                 ChatSession.session_id == session_id,

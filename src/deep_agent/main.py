@@ -14,6 +14,7 @@ from deep_agent.capabilities.catalog import selectable_tool_package_codes
 from deep_agent.core.context import AppContext, AppContextDep, reset_context
 from deep_agent.core.exceptions import AgentNotFoundError, DeepAgentError
 from deep_agent.core.logging import configure_logging
+from deep_agent.db.reference_integrity import ReferenceConflict
 from deep_agent.core.paths import CONSOLE_ROOT
 from deep_agent.options import OPTION
 from deep_agent.diagnostics.runtime import observe_lifespan
@@ -55,6 +56,11 @@ async def disable_console_cache(request: Request, call_next):
     if path == "/console" or path.startswith("/console/"):
         response.headers["Cache-Control"] = "no-store"
     return response
+
+
+@app.exception_handler(ReferenceConflict)
+async def reference_conflict_handler(request: Request, exc: ReferenceConflict) -> JSONResponse:
+    return JSONResponse(status_code=409, content={"detail": str(exc)})
 
 
 @app.exception_handler(AgentNotFoundError)

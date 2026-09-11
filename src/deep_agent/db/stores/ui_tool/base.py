@@ -4,7 +4,8 @@ from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from deep_agent.db.models import UiToolDefinition
+from deep_agent.db.models import UiToolDefinition, UiToolPackage, Agent
+from deep_agent.db.reference_integrity import ReferenceConflict, lock_reference, lock_optional, is_unique_conflict
 from deep_agent.db.stores._session import SessionBoundMixin
 from deep_agent.schemas.ui_tools import UiToolCreate, UiToolUpdate
 
@@ -28,6 +29,7 @@ class UiToolStoreBase(SessionBoundMixin):
     async def create_manual(self, data: UiToolCreate) -> UiToolDefinition:
         try:
             async with self._write() as db:
+                await lock_reference(db, UiToolPackage, UiToolPackage.code, data.package_code, "UI tool package")
                 row = UiToolDefinition(
                     name=data.name,
                     package_code=data.package_code,
@@ -43,6 +45,8 @@ class UiToolStoreBase(SessionBoundMixin):
                 await db.refresh(row)
                 return row
         except IntegrityError as exc:
+            if not is_unique_conflict(exc):
+                raise
             raise ValueError(f"UI tool already exists: {data.name}") from exc
 
     async def update(self, name: str, data: UiToolUpdate) -> UiToolDefinition | None:
@@ -50,6 +54,14 @@ class UiToolStoreBase(SessionBoundMixin):
             row = await self._get_by_name(db, name)
             if row is None:
                 return None
+            previous_package = row.package_code
+            for code in sorted({previous_package, data.package_code or previous_package}):
+                await lock_reference(db, UiToolPackage, UiToolPackage.code, code, "UI tool package")
+            row = await lock_optional(db, UiToolDefinition, UiToolDefinition.name, name)
+            if row is None:
+                return None
+            if row.package_code != previous_package:
+                raise ReferenceConflict("UI tool package changed concurrently; refresh and retry")
             updates = data.model_dump(exclude_unset=True)
             if "metadata" in updates:
                 updates["metadata_"] = updates.pop("metadata")
@@ -61,6 +73,19 @@ class UiToolStoreBase(SessionBoundMixin):
 
     async def delete(self, name: str) -> bool:
         async with self._write() as db:
+            current = await self._get_by_name(db, name)
+            if current is None:
+                return False
+            code = current.package_code
+            await lock_reference(db, UiToolPackage, UiToolPackage.code, code, "UI tool package")
+            row = await lock_optional(db, UiToolDefinition, UiToolDefinition.name, name)
+            if row is None:
+                return False
+            if row.package_code != code:
+                raise ReferenceConflict("UI tool package changed concurrently; refresh and retry")
+            refs = (await db.execute(select(Agent.name, Agent.capabilities).order_by(Agent.id).with_for_update())).all()
+            if any(code in (caps or []) for _, caps in refs):
+                raise ReferenceConflict("UI 工具正在被 Agent 引用，不能删除")
             result = await db.execute(delete(UiToolDefinition).where(UiToolDefinition.name == name))
             await db.flush()
             return result.rowcount > 0

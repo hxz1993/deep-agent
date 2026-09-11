@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from deep_agent.db.reference_integrity import acquire_write_barrier
+
 import asyncio
 import contextlib
 import sys
@@ -120,6 +122,7 @@ class SessionBoundMixin:
                 try:
                     if db.get_bind().dialect.name == "sqlite":
                         await db.execute(text("BEGIN IMMEDIATE"))
+                    await acquire_write_barrier(db)
                     yield db
                     await asyncio.shield(db.commit())
                 except BaseException:

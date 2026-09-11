@@ -12,7 +12,7 @@
 | 项 | 内容 |
 | --- | --- |
 | **是什么** | 通用 AI Agent 全栈：FastAPI 后端 + Pydantic AI 运行时 + 静态前端 |
-| **产品版本** | `deep_agent.__version__`为唯一来源；当前`0.9.6`，数据库Head为`002` |
+| **产品版本** | `deep_agent.__version__`为唯一来源；当前`0.9.7`，数据库Head为`003` |
 | **启动** | 本地 Test 联调固定使用下方命令；部署入口才使用 `deep_agent.main:app` |
 | **测试** | `PYTHONPATH=src python3.12 -m unittest discover -s tests -p "test_*.py" -v` |
 | **配置** | 仓库根 `.env`（`DEEP_AGENT_*` / `DEEP_AGENT_DBMS_*` / `DEEP_AGENT_SQLITE_PATH`） |
@@ -208,8 +208,8 @@ v0.6.1删除目录资源自身的冗余启停层；v0.6.4只恢复Model的`enabl
   只有`channels/adapters/wecom/`调用官方`wecom-aibot-python-sdk==1.0.2`，不重写连接/认证/心跳/重连/解密/回复协议。
   API固定一个worker，Gateway按环境部署一个副本；`channel_accounts`保存配置，`channel_session_bindings`映射企微Peer到
   Session，`channel_message_runs`负责幂等和生命周期。企微Session固定归属Account的管理员配置的会话用户，
-  外部Peer不冒充平台用户。Gateway不执行迁移，数据库必须先由API升级到`002`。
-  本轮未发布渠道需求的纠正直接合并在`002`内，不新增`003`；本地已有库须备份并核验物理结构，不能只改版本号。
+  外部Peer不冒充平台用户。Gateway不执行迁移，数据库必须先由API升级到`003`。
+  v0.9.7新增`003`移除数据库外键；先停止旧API/Gateway写入、迁移核验，再启动新版，不能只改版本号。
   五个命令`/help /new /stop /status /whoami`仅在渠道入口处理；没有`/reset`或共享Chat全局拦截。
   控制命令绕过普通队列，15秒等待真实停止；`/new`原子换绑，旧历史保留，投递失败不重复命令副作用。
   Session标题事件`source=channel`保存来源，Console帮助由公共目录生成；旧来源修复入口为
@@ -287,3 +287,13 @@ v0.6.1删除目录资源自身的冗余启停层；v0.6.4只恢复Model的`enabl
 | [`docs/guides/README.md`](docs/guides/README.md) | **说明**：协议、使用指南、实现经验和排障记录 |
 | [`docs/design/README.md`](docs/design/README.md) | **设计**：当前方案、研究依据、历史决策和原型 |
 | [`docs/design/TODO.md`](docs/design/TODO.md) | **待办**：跨课题唯一待办清单和来源索引 |
+
+### 数据库逻辑引用规范（v0.9.7 / 003）
+
+- 不新增数据库外键。ID、主键、唯一约束和索引保留，10类逻辑引用见 `db/reference_schema.py`。
+- 在 Store/Service 同一事务锁父记录、重新校验后写子记录；同类父记录按 ID 排序。不可仅在 HTTP 层或进程内保证引用。
+- 普通写事务先持数据库 Revision 行共享锁，配置替换持独占锁；SQLite 使用 BEGIN IMMEDIATE。绕过公共事务入口的维护写入必须显式协调或停服务。
+- 会话删除原子删除 Events 并将 Channel Binding.session_id 置空；Agent 有历史会话/渠道引用、模型有 Agent 引用时禁止删除。
+- `PRAGMA foreign_key_check` 为空不代表逻辑引用有效，必须执行 `assert_logical_references`。
+- 升级/降级需要实际数据库结构检查，不支持生成003离线SQL；001/002保留历史离线编译。
+- 备份按源Revision输出，导入要求同版；测试必须使用隔离库，不能改共享Alpha/Test或稳定本地SQLite。

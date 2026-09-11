@@ -234,7 +234,7 @@ async def chat_stream(
     body: StreamChatRequest,
     user: ChannelRequestUserDep,
     channel_account: ChannelAccountDep,
-) -> EventSourceResponse:
+) -> DiagnosticEventSourceResponse:
     _validate_chat_body(body)
     session_id = body.session_id or uuid.uuid4().hex
     deferred_tool_results = _deferred_results(body)

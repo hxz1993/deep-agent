@@ -420,7 +420,7 @@ const uiToolsAdmin = {
   async removePackage(code) {
     if (!(await confirmAction({
       title: "删除 UI 工具包？",
-      message: `删除工具包会同时移除其中的自定义 UI 工具。当前对象：${code}`,
+      message: `工具包包含工具或被 Agent 引用时不能删除，请先移除相关工具和引用。当前对象：${code}`,
       icon: "trash-2",
       tone: "danger",
       confirmLabel: "删除",

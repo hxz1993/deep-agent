@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from deep_agent.db.reference_integrity import acquire_write_barrier
+
 import asyncio
 import json
 import shutil
@@ -255,35 +257,15 @@ async def _validate_logical_references(
     *,
     prefix: str,
 ) -> None:
-    checks = (
-        (
-            "llm_models",
-            "llm_providers",
-            "SELECT COUNT(*) FROM llm_models AS child "
-            "LEFT JOIN llm_providers AS parent ON parent.id = child.provider_id "
-            "WHERE parent.id IS NULL",
-        ),
-        (
-            "agents",
-            "llm_models",
-            "SELECT COUNT(*) FROM agents AS child "
-            "LEFT JOIN llm_models AS parent ON parent.id = child.model_id "
-            "WHERE parent.id IS NULL",
-        ),
-        (
-            "ui_tool_definitions",
-            "ui_tool_packages",
-            "SELECT COUNT(*) FROM ui_tool_definitions AS child "
-            "LEFT JOIN ui_tool_packages AS parent ON parent.code = child.package_code "
-            "WHERE parent.code IS NULL",
-        ),
-    )
-    for child, parent, statement in checks:
-        count = int((await connection.execute(text(statement))).scalar_one())
-        if count:
-            raise ConfigurationImportError(
-                f"{prefix} contains invalid {child} references to {parent}"
-            )
+    from deep_agent.db.reference_schema import logical_reference_violations
+    violations = await connection.run_sync(logical_reference_violations)
+    if violations:
+        details = "; ".join(
+            f"{item['table']}.{item['column']} -> "
+            f"{item['parent_table']}.{item['parent_column']}: {item['count']}"
+            for item in violations
+        )
+        raise ConfigurationImportError(f"{prefix} contains invalid logical references: {details}")
 
 
 async def inspect_configuration_backup(
@@ -522,6 +504,7 @@ async def _validate_target(
             "Backup revision does not match the target database revision"
         )
     await _validate_empty_sessions(connection, target=True)
+    await _validate_logical_references(connection, prefix="Target database")
     return target_revision
 
 
@@ -679,6 +662,11 @@ async def _replace_configuration(
     rows: Mapping[str, Sequence[Mapping[str, Any]]],
 ) -> None:
     async with connection.begin():
+        if connection.dialect.name == "sqlite":
+            # Read validation must share the database writer transaction with
+            # replacement, including when the target currently has no rows.
+            await connection.execute(text("BEGIN IMMEDIATE"))
+        await acquire_write_barrier(connection, exclusive=True)
         await _validate_target(
             connection,
             source_revision=plan.source.revision,

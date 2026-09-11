@@ -22,7 +22,7 @@ class BaselineMigrationDialectTests(unittest.TestCase):
                 config.attributes["database_url"] = url
                 output = StringIO()
                 with redirect_stdout(output):
-                    command.upgrade(config, "head", sql=True)
+                    command.upgrade(config, "002", sql=True)
                 sql = output.getvalue().upper()
                 self.assertEqual(sql.count("CREATE TABLE"), 15)
                 self.assertIn("CREATE TABLE GLOBAL_SETTINGS", sql)
@@ -35,9 +35,11 @@ class BaselineMigrationDialectTests(unittest.TestCase):
                 self.assertIn("002", sql)
                 self.assertNotIn("CHAT_MESSAGES", sql)
                 self.assertNotIn("AUXILIARY_MODEL_CONFIGS", sql)
-                self.assertIn("UPDATE LLM_PROVIDERS", sql)
-                self.assertIn("HTTPS://API.DEEPSEEK.COM", sql)
-                self.assertIn("DEEPSEEK-FLASH", sql)
+                # Historical baseline SQL stays available; current defaults run only
+                # after an online upgrade to the current head.
+                with redirect_stdout(StringIO()):
+                    with self.assertRaisesRegex(RuntimeError, "online database"):
+                        command.upgrade(config, "002:head", sql=True)
 
 
 if __name__ == "__main__":

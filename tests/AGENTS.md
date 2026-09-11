@@ -82,16 +82,16 @@ tests/
 | `test_title_generator.py` | AI 标题清洗与无配置行为 |
 | `test_catalog.py` | models.dev Lab/Model/Provider 标准化、白名单、扩展元数据和数据库视图 |
 | `test_models_dev.py` | models.dev 严格获取、官方JSON解析与 Lab 可选补充 |
-| `test_llm_models.py` | Provider硬外键、Provider内唯一性、模型启停、上下文、最大输出、输入模态与 tags Service/Store/Schema |
+| `test_llm_models.py` | Provider逻辑引用、Provider内唯一性、模型启停、上下文、最大输出、输入模态与 tags Service/Store/Schema |
 | `test_provider_registry.py` | 九种Provider顺序、默认地址、Pydantic AI Provider/Model工厂及配置失败边界 |
 | `test_context_compaction.py` | 统一Token估算、八段单次摘要、Tool/Context Evidence、DSH式裁剪、超时/重试/取消、Provider Overflow识别、SSE状态和失败闭合 |
 | `test_context_test_scenarios.py` | 管理员测试会话场景、实时预算、消息往返序列化、常驻接口与用户归属 |
 | `test_attachment_extractors.py` | 文本编码、DOCX/XLSX 结构读取、分页与 Office 安全 |
 | `test_file_tools.py` | 附件与 Skill统一文件工具的来源参数、权限、Run缓存、single-flight、分页和多模态返回 |
 | `test_tool_package_registry.py` | ToolPackage Registry 的显式整包选择和空列表语义 |
-| `test_sqlite_bootstrap.py` | 生产基线001加Channel增量002的空库创建、默认数据、完整结构及升降往返 |
-| `test_baseline_migration_dialects.py` | 当前001→002在SQLite、MySQL、PostgreSQL的离线DDL编译 |
-| `test_channel_migration.py` | 确认Head仍为002，Channel物理字段与ORM一致，重复升级保留数据，临时库降升往返 |
+| `test_sqlite_bootstrap.py` | 生产基线001、Channel增量002及逻辑引用003的空库创建、默认数据、完整结构及升降往返 |
+| `test_baseline_migration_dialects.py` | 历史001→002离线DDL编译，以及003必须在线迁移 |
+| `test_channel_migration.py` | 确认Head为003，Channel物理字段与ORM一致，重复升级保留数据，临时库降升往返 |
 | `test_channel_gateway.py` | Account/Binding/Run Store、消息解析、幂等、SSE文本投影与Agent换代 |
 | `test_channel_commands.py` | 公共命令识别、非企微测试Adapter、队列与独立停止/新建、超时及投递失败 |
 | `test_channel_store_commands.py` | 无Session Binding、命令认领、新建会话原子换绑、来源标题、归属和重复执行保护 |
@@ -157,3 +157,7 @@ tests/
   回滚、Skill只改目标File ID，并确认数据库上传文件不进入平台File Store。
 
 更多：[`README.md`](README.md)、[`unit/README.md`](unit/README.md)、[`integration/README.md`](integration/README.md)。
+
+### 无外键真实事务验收
+
+`integration/test_logical_references.py`、`test_channel_reference_transactions.py`、`test_reference_migration_databases.py`、`test_configuration_import_databases.py`提供隔离MySQL/PostgreSQL的opt-in回归。环境变量及防误用数据库名见各文件首部。未提供URL必须报告skip，不能当作真实数据库通过；SQLite无法替代记录锁验证。MySQL真实schema通过Alembic创建，不使用metadata.create_all替代部署结构。

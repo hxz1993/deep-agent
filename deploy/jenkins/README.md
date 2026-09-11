@@ -1,7 +1,7 @@
 # Jenkins 发布与诊断
 
 两种在用发布方式都构建所选分支或 Tag 的最新代码，并只更新一个已有 Deployment。
-区别只是是否启动渠道网关，不是应用代码版本或数据库版本。当前数据库仍为 Alembic `002`，
+区别只是是否启动渠道网关，不是应用代码版本或数据库版本。当前数据库 Head 为 Alembic `003`，
 这次整理不新增迁移、不降级数据库、不删除渠道配置或历史。
 
 ## 三个活动入口
@@ -38,7 +38,7 @@ Jenkins 中已粘贴的脚本不会自动变化；发布当前代码前需要替
 重新注入正确网关地址。数据库内已启用的机器人会重新连接；停用网关不等于删除或关闭账号配置。
 切换需要滚动替换容器，旧 Pod 退出前旧网关可能仍在工作；如有任务执行中，请先停止任务并安排维护窗口。
 
-两种在用脚本都使用当前 `src/` 源码树 / Alembic `002`。API 启动仍按代码执行正常迁移，
+两种在用脚本都使用当前 `src/` 源码树 / Alembic Head。API 启动仍按代码执行正常迁移，
 这里不是跳过迁移的开关；不要选用不认识现有数据库 Revision 的旧源码 Tag。
 
 ## 网关启动版实际做了什么
@@ -47,7 +47,7 @@ Jenkins 中已粘贴的脚本不会自动变化；发布当前代码前需要替
 检出 test → 构建并推送一个镜像 → Trivy 报告
 → 单次 kubectl patch 更新原 deep-agent Deployment 的镜像与启动入口
 → 原容器内先启动 API（30098）
-→ API 完成 Alembic 001 → 002 并通过 /health
+→ API 完成当前代码的 Alembic 迁移并通过 /health
 → 再启动渠道网关（127.0.0.1:8010）
 → kubectl rollout status
 → 容器内检查 API /health 与网关鉴权 /health
@@ -127,7 +127,7 @@ Kubernetes 按原策略重启容器。
    Pod 内的其他容器。
 3. 原 Service、Ingress 和健康探针仍指向 API 端口。API 默认端口为 `30098`；若通过
    `DEEP_AGENT_PYTHON_BIND` 或 `DEEP_AGENT_PYTHON_PORT` 修改，启动器会使用同一端口等待 API。
-4. 数据库是当前生产基线 `001` 或已经正确升级的 `002`。API 会自动执行 `upgrade head`；历史
+4. 当前代码数据库 Head 为 `003`，升级必须按维护窗口先停旧写入。API 会执行 `upgrade head`；历史
    Revision `012` 必须先按维护文档校验并 rebaseline，不能只手工改版本号。
 5. Test 与本地不要同时启用同一个企微机器人。当前约定是本地使用 `local测试`，Test 再配置原机器人。
 
@@ -135,7 +135,7 @@ Kubernetes 按原策略重启容器。
 
 仅 API 版要求 Deployment rollout 完成、容器内 API `/health` 返回 `ok`；不会检查或启动网关。
 网关启动版要求以下三项都通过：Deployment rollout 完成、API `/health` 返回 `ok`、Gateway
-鉴权 `/health` 返回 `ok` 且数据库 Revision 为 `002`。发布后再到 Console「渠道」新增或启用 Test
+鉴权 `/health` 返回 `ok`。不使用固定 Revision 白名单判断网关健康，Revision 仅供诊断。发布后再到 Console「渠道」新增或启用 Test
 机器人，并执行渠道测试；流水线健康检查不会主动连接或发送机器人消息来制造业务副作用。
 
 如果失败，先看日志中的第一个失败命令：
@@ -180,3 +180,15 @@ PYTHONDONTWRITEBYTECODE=1 python3.12 -m unittest tests.unit.test_channel_gateway
 参考契约：[渠道指南](../../docs/guides/wecom-channel.md)、[API Gunicorn](../gunicorn.conf.py)、
 [网关入口](../../src/deep_agent/channels/gateway/__main__.py)、
 [网关健康/迁移门禁](../../src/deep_agent/channels/gateway/app.py)。
+
+
+## v0.9.7 启动失败：只读取证
+
+将 `Jenkinsfile.diagnose` 完整粘贴到现有 Test Job，保存后点击构建，旧分支/Tag 参数不用改。
+固定查 `test/deep-agent`，不检出、不构建、不发布、不重启、不执行容器命令、不连接数据库。
+收集新旧 Pod 的状态、退出原因、Events、健康探针路径/端口/时限，以及各自最多 1000 行/256 KiB 的当前和上次退出日志。
+执行结果在 Console Output 中；诊断成功仅代表收集完成。
+
+v0.9.7 源码已发现 Gateway 启动和统一健康检查仍硬编码要求 `002`，而 API 迁移至 `003`。
+需在 Pod 日志核对 `Channel Gateway requires database revision 002, found 003`。
+本次只读流水线仅收集证据，不会修复或回退数据库。v0.9.8 已移除两处版本拦截；需发布修复后的代码才能生效。

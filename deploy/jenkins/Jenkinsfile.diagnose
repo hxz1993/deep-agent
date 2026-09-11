@@ -1,4 +1,4 @@
-// Test 只读诊断版（非发布流水线）：整份粘贴到现有 Jenkins Job，保存后点构建即可。
+// DeepAgent v0.9.7 Test 只读诊断版（非发布流水线）：整份粘贴到现有 Jenkins Job，保存后点构建即可。
 // 不检出源码、不构建镜像、不发布、不重启、不连接数据库；不受旧 Job 参数影响。
 pipeline {
     agent { label 'java21-mvn3' }
@@ -62,11 +62,13 @@ printf '%s\\n' "$OWN_RS" | while read -r rs_uid rs_name; do
         printf '\\n=== Pod: %s ===\\n' "$pod_name"
         show get "pod/$pod_name" -o wide
         show get "pod/$pod_name" -o 'jsonpath={range .status.initContainerStatuses[*]}{"init "}{.name}{" restarts="}{.restartCount}{" state="}{.state}{" previous="}{.lastState}{"\\n"}{end}{range .status.containerStatuses[*]}{.name}{" ready="}{.ready}{" restarts="}{.restartCount}{" image="}{.image}{" state="}{.state}{" previous="}{.lastState}{"\\n"}{end}'
+        # 只输出探针路径、端口和时限；不输出 Header、环境变量或 exec 命令。
+        show get "pod/$pod_name" -o 'jsonpath={range .spec.containers[?(@.name=="deep-agent")]}{"container="}{.name}{" ports="}{.ports[*].containerPort}{"\\n"}{"startup http="}{.startupProbe.httpGet.path}{":"}{.startupProbe.httpGet.port}{" tcp="}{.startupProbe.tcpSocket.port}{" delay="}{.startupProbe.initialDelaySeconds}{" period="}{.startupProbe.periodSeconds}{" timeout="}{.startupProbe.timeoutSeconds}{" failures="}{.startupProbe.failureThreshold}{"\\n"}{"readiness http="}{.readinessProbe.httpGet.path}{":"}{.readinessProbe.httpGet.port}{" tcp="}{.readinessProbe.tcpSocket.port}{" delay="}{.readinessProbe.initialDelaySeconds}{" period="}{.readinessProbe.periodSeconds}{" timeout="}{.readinessProbe.timeoutSeconds}{" failures="}{.readinessProbe.failureThreshold}{"\\n"}{"liveness http="}{.livenessProbe.httpGet.path}{":"}{.livenessProbe.httpGet.port}{" tcp="}{.livenessProbe.tcpSocket.port}{" delay="}{.livenessProbe.initialDelaySeconds}{" period="}{.livenessProbe.periodSeconds}{" timeout="}{.livenessProbe.timeoutSeconds}{" failures="}{.livenessProbe.failureThreshold}{"\\n"}{end}{range .status.conditions[*]}{.type}{"="}{.status}{" reason="}{.reason}{" "}{.message}{"\\n"}{end}'
         show get events --field-selector "involvedObject.uid=$pod_uid" --sort-by=.lastTimestamp
-        printf '\\n--- %s / deep-agent 当前日志（最多 200 行）---\\n' "$pod_name"
-        show logs "$pod_name" -c deep-agent --tail=200 --limit-bytes=65536 --timestamps --pod-running-timeout=10s
-        printf '\\n--- %s / deep-agent 上次退出日志（最多 200 行）---\\n' "$pod_name"
-        show logs "$pod_name" -c deep-agent --previous --tail=200 --limit-bytes=65536 --timestamps --pod-running-timeout=10s
+        printf '\\n--- %s / deep-agent 当前日志（最多 1000 行 / 256 KiB）---\\n' "$pod_name"
+        show logs "$pod_name" -c deep-agent --tail=1000 --limit-bytes=262144 --timestamps --pod-running-timeout=10s
+        printf '\\n--- %s / deep-agent 上次退出日志（最多 1000 行 / 256 KiB）---\\n' "$pod_name"
+        show logs "$pod_name" -c deep-agent --previous --tail=1000 --limit-bytes=262144 --timestamps --pod-running-timeout=10s
     done
 done
 printf '\\n=== 诊断收集结束；不代表发布成功或服务已恢复 ===\\n'

@@ -31,6 +31,7 @@ if args[0] == "logs":
         sys.exit(1)
     print("LOG " + args[1])
     print("RuntimeError: API exited during startup with code 3")
+    print("RuntimeError: Channel Gateway requires database revision 002, found 003")
     print("FileNotFoundError: /tmp/deep-agent-channel-runtime/token")
     print("DEEP_AGENT_CHANNEL_INTERNAL_TOKEN=fixture-secret")
     print('{"password": "fixture-password"}')
@@ -134,9 +135,15 @@ class JenkinsDiagnosticsTest(unittest.TestCase):
         })
         self.assertEqual(sum("--previous" in cmd for cmd in logs), 2)
         for cmd in logs:
-            self.assertIn("--tail=200", cmd)
-            self.assertIn("--limit-bytes=65536", cmd)
+            self.assertIn("--tail=1000", cmd)
+            self.assertIn("--limit-bytes=262144", cmd)
         self.assertIn("API exited during startup with code 3", result.stdout)
+        self.assertIn("Channel Gateway requires database revision 002, found 003", result.stdout)
+        probe_commands = [cmd for cmd in commands if any(".startupProbe." in part for part in cmd)]
+        self.assertEqual(len(probe_commands), 2)
+        for cmd in probe_commands:
+            self.assertNotIn("httpHeaders", " ".join(cmd))
+            self.assertNotIn(".env", " ".join(cmd))
         self.assertIn("/tmp/deep-agent-channel-runtime/token", result.stdout)
         self.assertIn("读取失败 exit=1", result.stdout)
         self.assertIn("诊断收集结束", result.stdout)

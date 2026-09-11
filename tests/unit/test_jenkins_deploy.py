@@ -80,21 +80,27 @@ class CombinedRuntimeTest(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "exited during startup with code 7"):
             runtime.wait_for_health("API", "http://127.0.0.1:1/health", process, timeout=1)
 
-    def test_check_requires_api_gateway_and_revision_002(self):
+    def test_check_requires_both_health_endpoints_without_revision_gate(self):
         environ = {
             runtime.TOKEN_ENV: "token",
             "DEEP_AGENT_PYTHON_PORT": "30098",
             "DEEP_AGENT_CHANNEL_PORT": "8010",
         }
-        with patch.object(runtime, "fetch_health", side_effect=[
-            {"status": "ok"},
-            {"status": "ok", "database_revision": "002"},
-        ]) as fetch:
-            runtime.check_runtime(environ)
-        self.assertEqual(fetch.call_args_list, [
-            call("http://127.0.0.1:30098/health"),
-            call("http://127.0.0.1:8010/health", token="token"),
-        ])
+        for revision in ("003", "future-compatible-fixture", None):
+            with self.subTest(revision=revision), patch.object(runtime, "fetch_health", side_effect=[
+                {"status": "ok"},
+                {"status": "ok", "database_revision": revision},
+            ]) as fetch:
+                runtime.check_runtime(environ)
+                self.assertEqual(fetch.call_args_list, [
+                    call("http://127.0.0.1:30098/health"),
+                    call("http://127.0.0.1:8010/health", token="token"),
+                ])
+
+    def test_check_still_propagates_unhealthy_gateway(self):
+        with patch.object(runtime, "fetch_health", side_effect=[{"status": "ok"}, RuntimeError("gateway unhealthy")]):
+            with self.assertRaisesRegex(RuntimeError, "gateway unhealthy"):
+                runtime.check_runtime({runtime.TOKEN_ENV: "token"})
 
     def test_local_children_can_stay_in_devbox_process_group(self):
         process = Mock()

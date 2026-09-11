@@ -124,7 +124,8 @@ FileStore协议。`channels/gateway/runtime.py`负责Account轮询与Adapter生�
 连续加载事件不重复发占位。正常结束必须以`final.output`覆盖全部预览，显式空正文不能回填过程；
 只有缺少output字段的旧事件才回退末段文本。预览失败后本Run停止预览但继续执行并尝试最终投递，
 处理状态与最终投递状态分离，不重跑Agent。企微不增加伪造引用条或“回复：原问题”文本前缀。
-0.7.0只允许一个API worker与一个Gateway副本，Gateway不执行Alembic，启动前数据库必须为`003`。
+当前只允许一个API worker与一个Gateway副本。API负责Alembic迁移，Gateway不维护固定数据库版本白名单；健康接口的database_revision仅为启动时读取的诊断信息。
+新增迁移必须回归真实Gateway lifespan及combined_runtime双进程启动，不能仅测绕过lifespan的HTTP路由。
 Gateway入口必须显式使用`uvicorn.run(..., workers=1, reload=False)`，不继承容器的
 `WEB_CONCURRENCY`；只改成应用导入字符串会放开多worker并造成渠道连接竞争，不是正确修复。
 Jenkins网关启动版`Jenkinsfile.gateway`可由`combined_runtime.py`在同一容器托管两个独立进程：

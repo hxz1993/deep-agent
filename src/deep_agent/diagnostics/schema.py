@@ -51,7 +51,7 @@ for prefix, label in (("model_request", "模型请求"), ("agent_tool", "工具�
         EVENTS[f"{prefix}_{suffix}"] = label + detail
 
 IDENTIFIER_FIELDS = frozenset({
-    "session_id", "run_id", "agent_id", "conversation_id", "channel_run_id", "account_id",
+    "request_id", "session_id", "run_id", "agent_id", "conversation_id", "channel_run_id", "account_id",
     "tool_call_id", "tool", "model_id", "model_name", "provider_name", "phase", "status",
     "error_type", "error_code", "command", "mode", "finish_reason", "compaction", "reason",
 })

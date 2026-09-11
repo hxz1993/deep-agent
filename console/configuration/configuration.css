@@ -312,15 +312,7 @@ html, body {
   border-bottom: 0;
 }
 
-.ui-tool-selected-header::after {
-  content: "";
-  position: absolute;
-  right: 18px;
-  bottom: 0;
-  left: 18px;
-  height: 1px;
-  background: var(--console-card-border, var(--border));
-}
+
 
 .ui-tool-selected-header .row-actions {
   display: flex;
@@ -1777,7 +1769,7 @@ dialog.console-action-dialog::backdrop {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.provider-models-section { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+.provider-models-section { margin-top: 12px; padding-top: 12px; }
 .provider-section-head h4 { flex: none; margin: 0; font-size: 14px; white-space: nowrap; }
 .provider-related-models { display: grid; gap: 6px; margin-top: 12px; }
 .provider-related-model {
@@ -2710,7 +2702,7 @@ dialog.console-action-dialog::backdrop {
   min-width: 720px;
 }
 
-.channel-table td:first-child strong {
+.channel-table td:nth-child(2) strong {
   white-space: nowrap;
 }
 
@@ -2818,12 +2810,13 @@ dialog.console-action-dialog::backdrop {
   background: color-mix(in srgb, var(--danger) 8%, transparent);
 }
 
+#configurationHost .console-list-a .channel-row-actions .icon-btn,
 #configurationHost .console-list-a .ui-tool-row-actions .icon-btn {
   border: 1px solid var(--border);
   background: var(--bg);
 }
 
-#configurationHost .console-list-a .channel-row-actions .model-enabled-switch {
+#configurationHost .console-list-a .channel-enabled-cell .model-enabled-switch {
   width: 30px;
   min-width: 30px;
   height: 18px;
@@ -2834,7 +2827,7 @@ dialog.console-action-dialog::backdrop {
   background: var(--text-faint);
 }
 
-#configurationHost .console-list-a .channel-row-actions .model-enabled-switch.on {
+#configurationHost .console-list-a .channel-enabled-cell .model-enabled-switch.on {
   background: var(--accent);
 }
 
@@ -3442,3 +3435,7 @@ code {
   font-family: var(--mono);
   font-size: 12px;
 }
+
+#configurationHost .channel-table .channel-enabled-cell { width:50px; min-width:50px; padding-left:12px; padding-right:8px; text-align:left; }
+
+#configurationHost .channel-table th:last-child { text-align:right; }

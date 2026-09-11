@@ -143,6 +143,8 @@ class ChannelSessionOrigin(BaseModel):
 
 
 class SessionInfo(BaseModel):
+    app_id: str | None = Field(default=None, description="App recorded when the session was created.")
+    space_id: str | None = Field(default=None, description="Space recorded when the session was created.")
     session_id: str
     message_count: int
     turn_count: int = Field(default=0, description="Distinct conversation turns in this session.")

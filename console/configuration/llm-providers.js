@@ -121,7 +121,7 @@ const llmProvidersAdmin = {
     const button = host.querySelector("[data-provider-test-models]");
     if (button) {
       button.disabled = Boolean(providerAdminState.testBatch) || !providerModels(providerAdminState.selectedId).some((model) => model.enabled !== false);
-      button.querySelector("span").textContent = providerAdminState.testBatch ? "测试中…" : "测试模型";
+      button.querySelector("span").textContent = providerAdminState.testBatch ? "测试中…" : "测试";
     }
   },
 
@@ -173,7 +173,7 @@ const llmProvidersAdmin = {
     providerAdminState.modelTests.clear();
     const list = document.getElementById("llmProviderList");
     if (!list) return;
-    list.innerHTML = `<div class="provider-list-state">正在加载 Provider…</div>`;
+    list.innerHTML = `<div class="provider-list-state">正在加载供应商…</div>`;
     try {
       const [providers, types] = await Promise.all([
         loadLlmProviders(),
@@ -200,7 +200,7 @@ const llmProvidersAdmin = {
     const list = document.getElementById("llmProviderList");
     if (!list) return;
     if (!state.llmProviders.length) {
-      list.innerHTML = `<div class="provider-list-state">暂无 Provider</div>`;
+      list.innerHTML = `<div class="provider-list-state">暂无供应商</div>`;
       return;
     }
     list.innerHTML = state.llmProviders.map((provider) => `
@@ -211,7 +211,6 @@ const llmProvidersAdmin = {
           <span class="provider-key-state ${provider.api_key_set ? "on" : "off"}" title="${provider.api_key_set ? "API Key 已配置" : "API Key 未配置"}"><i data-lucide="key-round"></i></span>
           <span class="provider-model-count"><i data-lucide="cpu"></i>${Number(provider.model_count ?? providerModels(provider.id).length)}</span>
         </span>
-        <i data-lucide="chevron-right"></i>
       </button>
     `).join("");
     list.querySelectorAll("[data-provider-id]").forEach((button) => button.addEventListener("click", () => {
@@ -228,7 +227,7 @@ const llmProvidersAdmin = {
     const provider = state.llmProviders.find((item) => item.id === providerAdminState.selectedId);
     if (!host) return;
     if (!provider) {
-      host.innerHTML = `<div class="provider-detail-empty"><i data-lucide="waypoints"></i><p>${state.llmProviders.length ? "选择一个 Provider 查看接入配置与关联模型" : "暂无 Provider，请点击右上角新建 Provider"}</p></div>`;
+      host.innerHTML = `<div class="provider-detail-empty"><i data-lucide="waypoints"></i><p>${state.llmProviders.length ? "选择一个供应商查看接入配置与关联模型" : "暂无供应商，请点击右上角新建供应商"}</p></div>`;
       window.lucide?.createIcons();
       return;
     }
@@ -241,7 +240,7 @@ const llmProvidersAdmin = {
           <div class="provider-detail-copy">
             <div class="provider-detail-title-line">
               <h3>${escapeHtml(provider.name)}</h3>
-              <div class="provider-facts" aria-label="Provider 接入信息">
+              <div class="provider-facts" aria-label="供应商接入信息">
                 <span class="provider-fact" title="地址模式"><i data-lucide="route"></i><span>${provider.use_default_base_url ? "默认地址" : "自定义地址"}</span></span>
                 <span class="provider-fact ${provider.api_key_set ? "on" : "off"}" title="API Key"><i data-lucide="key-round"></i><span>${provider.api_key_set ? "Key 已配" : "Key 未配"}</span></span>
               </div>
@@ -250,20 +249,21 @@ const llmProvidersAdmin = {
           </div>
         </div>
         <div class="row-actions provider-action-group">
+          <button type="button" class="provider-action" data-provider-test-models title="逐个测试已开启的模型，会产生少量模型用量；结果仅当前页面保留"><i data-lucide="plug-zap"></i><span>测试</span></button>
           <button type="button" class="provider-action" data-provider-edit><i data-lucide="pencil"></i><span>编辑</span></button>
           <button type="button" class="provider-action danger" data-provider-delete><i data-lucide="trash-2"></i><span>删除</span></button>
         </div>
       </header>
       <section class="provider-models-section">
-        <div class="provider-section-head"><h4>关联模型</h4><div class="row-actions provider-action-group"><button type="button" class="provider-action" data-provider-test-models title="逐个测试已开启的模型，会产生少量模型用量；结果仅当前页面保留"><i data-lucide="plug-zap"></i><span>测试模型</span></button>${catalogId ? `<button type="button" class="provider-action" data-provider-catalog><i data-lucide="library"></i><span>从目录添加</span></button>` : ""}<button type="button" class="provider-action" data-provider-model><i data-lucide="plus"></i><span>新建模型</span></button></div></div>
+        <div class="provider-section-head"><h4>关联模型</h4><div class="row-actions provider-action-group">${catalogId ? `<button type="button" class="provider-action" data-provider-catalog><i data-lucide="library"></i><span>从目录添加</span></button>` : ""}<button type="button" class="provider-action" data-provider-model><i data-lucide="plus"></i><span>新建模型</span></button></div></div>
         <div class="provider-related-models">${models.length ? models.map((model) => `
           <div class="provider-related-model ${model.selectable === false ? "is-disabled" : ""}">
+            <button type="button" class="model-enabled-switch ${model.enabled === false ? "off" : "on"}" data-toggle-model="${escapeHtml(model.id)}" role="switch" aria-checked="${model.enabled !== false}" title="${model.enabled === false ? "启用模型" : "停用模型"}" aria-label="${model.enabled === false ? "启用模型" : "停用模型"}"><span></span></button>
             <button type="button" class="provider-related-model-main" data-edit-model="${escapeHtml(model.id)}">
               <code>${escapeHtml(model.model)}</code>
               <span class="provider-model-facts">${providerModelFacts(model)}</span>
             </button>
             <span class="provider-model-test-result" data-model-test-result="${escapeHtml(model.id)}" role="status" aria-live="polite"></span>
-            <button type="button" class="model-enabled-switch ${model.enabled === false ? "off" : "on"}" data-toggle-model="${escapeHtml(model.id)}" role="switch" aria-checked="${model.enabled !== false}" title="${model.enabled === false ? "启用模型" : "停用模型"}" aria-label="${model.enabled === false ? "启用模型" : "停用模型"}"><span></span></button>
             <button type="button" class="provider-model-delete" data-delete-model="${escapeHtml(model.id)}" data-model-name="${escapeHtml(model.model)}" title="删除模型" aria-label="删除模型"><i data-lucide="trash-2"></i></button>
           </div>`).join("") : `<div class="provider-model-empty">尚未关联模型</div>`}</div>
       </section>`;
@@ -397,7 +397,7 @@ const llmProvidersAdmin = {
     providerAdminState.afterSave = afterSave;
     document.getElementById("llmProviderForm").dataset.providerId = "";
     renderProviderTypeOptions(providerType || state.llmProviderTypes[0]?.code || "");
-    document.getElementById("llmProviderModalTitle").textContent = "新建 Provider";
+    document.getElementById("llmProviderModalTitle").textContent = "新建供应商";
     document.getElementById("llmProviderName").value = "";
     setProviderApiKeyEditor();
     document.getElementById("llmProviderUseDefaultBaseUrl").checked = Boolean(providerTypeByCode(document.getElementById("llmProviderType").value)?.supports_default_base_url);
@@ -412,7 +412,7 @@ const llmProvidersAdmin = {
     providerAdminState.afterSave = null;
     document.getElementById("llmProviderForm").dataset.providerId = providerId;
     renderProviderTypeOptions(provider.provider_type);
-    document.getElementById("llmProviderModalTitle").textContent = `编辑 Provider · ${provider.name}`;
+    document.getElementById("llmProviderModalTitle").textContent = `编辑供应商 · ${provider.name}`;
     document.getElementById("llmProviderName").value = provider.name;
     document.getElementById("llmProviderUseDefaultBaseUrl").checked = Boolean(provider.use_default_base_url);
     document.getElementById("llmProviderBaseUrl").value = provider.base_url || provider.effective_base_url || "";
@@ -451,7 +451,7 @@ const llmProvidersAdmin = {
       document.getElementById("llmProviderModal").close();
       providerAdminState.selectedId = saved.id;
       await this.refresh();
-      showToast(editingId ? "Provider 已更新" : "Provider 已创建");
+      showToast(editingId ? "供应商已更新" : "供应商已创建");
       const afterSave = providerAdminState.afterSave;
       providerAdminState.afterSave = null;
       afterSave?.(saved);
@@ -465,12 +465,12 @@ const llmProvidersAdmin = {
   async remove(provider) {
     const modelCount = providerModels(provider.id).length;
     const related = modelCount ? `及其 ${modelCount} 个模型配置` : "";
-    if (!(await confirmAction({ title: "删除 Provider？", message: `将删除 Provider「${provider.name}」${related}，此操作不可撤销。仍被 Agent 或 Web Search 使用时不会删除。`, icon: "trash-2", tone: "danger", confirmLabel: "删除" }))) return;
+    if (!(await confirmAction({ title: "删除供应商？", message: `将删除供应商「${provider.name}」${related}，此操作不可撤销。仍被 Agent 或 Web Search 使用时不会删除。`, icon: "trash-2", tone: "danger", confirmLabel: "删除" }))) return;
     try {
       await apiFetch(`/api/v1/llm-providers/${encodeURIComponent(provider.id)}`, { method: "DELETE" });
       providerAdminState.selectedId = null;
       const refreshed = await this.refresh({ preserveSelection: false });
-      showToast(refreshed ? "Provider 已删除" : "Provider 已删除，列表刷新失败，请重新加载", !refreshed);
+      showToast(refreshed ? "供应商已删除" : "供应商已删除，列表刷新失败，请重新加载", !refreshed);
     } catch (error) { showToast(error.message, true); }
   },
 };

@@ -1,0 +1,35 @@
+/* UI tool editing keeps existing control sizes and the active theme. */
+#uiToolModal { width: min(560px, calc(100vw - 32px)); }
+#uiToolModal .ui-tool-basic-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
+#uiToolModal .ui-tool-basic-grid > .field { margin: 0; }
+#uiToolModal #uiToolName:read-only { color: var(--text-faint); background: var(--bg-elev); cursor: default; }
+#uiToolModal .ui-tool-schema-tabs { display: flex; gap: 24px; flex: 1 1 auto; min-width: 0; }
+#uiToolModal .ui-tool-schema-tabs > button { position: relative; display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 5px 0 8px; border: 0; border-radius: 0; background: transparent; color: var(--text-dim); font: inherit; font-size: 12px; white-space: nowrap; cursor: pointer; }
+#uiToolModal .ui-tool-schema-tabs > button[aria-selected="true"] { color: var(--accent); }
+#uiToolModal .ui-tool-schema-tabs > button[aria-selected="true"]::after { position: absolute; content: ""; height: 2px; bottom: -1px; left: 0; right: 0; background: var(--accent); }
+#uiToolModal .ui-tool-schema-tabs > button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+#uiToolModal .ui-tool-json-grid { display: block; min-height: 0; }
+#uiToolModal .ui-tool-json-field { min-height: 0; margin: 0; }
+#uiToolModal .ui-tool-json-field[hidden] { display: none; }
+#uiToolModal .ui-tool-json-field .schema-json-textarea { height: 220px; min-height: 180px; }
+.da-editable-select { position: relative; display: flex; align-items: center; width: 100%; min-width: 0; }
+.da-editable-select > input { box-sizing: border-box; width: 100%; min-width: 0; height: 32px; padding-right: 58px !important; }
+.da-editable-select > button { position: absolute; display: inline-flex; align-items: center; justify-content: center; top: 50%; transform: translateY(-50%); width: 24px; height: 26px; padding: 0; border: 0; background: transparent; color: var(--text-faint); border-radius: 4px; cursor: pointer; }
+.da-editable-select > button:hover { color: var(--accent); background: var(--accent-soft); }
+.da-editable-select > button:focus-visible { outline: 2px solid var(--accent); }
+.da-editable-select > button:disabled { cursor: default; color: var(--text-faint); background: transparent; }
+.da-editable-select > button[hidden] { display: none; }
+.da-editable-select .da-editable-toggle { right: 4px; }
+.da-editable-select .da-editable-clear { right: 28px; }
+.da-editable-select > button svg { width: 13px; height: 13px; }
+.da-editable-select.readonly > input { color: var(--text-faint); background: var(--bg-elev); }
+.da-editable-menu .da-select-option { justify-content: space-between; gap: 16px; font-weight: 400; }
+.da-editable-menu .da-select-option code { color: var(--text-faint); font-size: 11px; background: transparent; }
+.da-editable-menu .da-select-option[aria-selected="true"] code { color: inherit; }
+
+@media (max-width: 640px) { #uiToolModal { width: 100%; } }
+
+#uiToolModal .ui-tool-schema-bar { display: flex; align-items: center; gap: 12px; margin-top: 18px; margin-bottom: 10px; border-bottom: 1px solid var(--border); }
+#uiToolModal .ui-tool-schema-bar > .schema-json-format { flex-shrink: 0; margin-left: auto; }
+#uiToolModal .ui-tool-schema-tabs .field-help { display: inline-flex; align-items: center; justify-content: center; }
+@media (max-width: 540px) { #uiToolModal .ui-tool-schema-tabs { gap: 12px; flex-wrap: wrap; } #uiToolModal .ui-tool-schema-bar { flex-wrap: wrap; } }

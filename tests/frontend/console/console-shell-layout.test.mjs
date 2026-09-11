@@ -42,6 +42,10 @@ const systemTools = await readFile(
   new URL("../../../console/configuration/system-tools.js", import.meta.url),
   "utf8",
 );
+const builtinTools = await readFile(
+  new URL("../../../console/configuration/builtin-tools.js", import.meta.url),
+  "utf8",
+);
 
 test("控制台合并为图文一级导航且保留三个真实页面", () => {
   assert.match(index, /<aside class="console-rail"[\s\S]*?<nav class="console-nav">/);
@@ -157,13 +161,9 @@ test("配置导航将 MCP 服务简化为 MCP", () => {
   assert.match(index, /data-tab="mcp"[^>]*>[\s\S]*?<span>MCP<\/span>/);
   assert.doesNotMatch(index, /<span>MCP 服务<\/span>/);
   const mcpButton = index.match(/<button class="tab resource-btn" data-tab="mcp">[\s\S]*?<\/button>/)?.[0] || "";
-  assert.match(mcpButton, /<svg class="mcp-brand-icon"/);
+  assert.match(mcpButton, /class="lucide lucide-plug"/);
   assert.match(mcpButton, /<path d=/);
-  assert.doesNotMatch(mcpButton, /<rect|fill="black"/);
-  assert.match(
-    styles,
-    /\.resource-btn \.mcp-brand-icon\s*\{[\s\S]*?color: var\(--text-faint\);[\s\S]*?stroke: currentColor;[\s\S]*?stroke-width: 12;/,
-  );
+  assert.doesNotMatch(mcpButton, /fill="black"/);
 });
 
 test("护眼主题使用清透暖橙而不是土黄配色", () => {
@@ -176,7 +176,9 @@ test("护眼主题使用清透暖橙而不是土黄配色", () => {
 test("配置中心的主要业务表格统一使用连续轻列表风格 A", () => {
   assert.ok((template.match(/class="table-wrap console-list-a/g) || []).length >= 4);
   assert.match(catalogTemplate, /class="table-wrap console-list-a models-table-wrap"/);
-  assert.match(systemTools, /class="table-wrap console-list-a"/);
+  assert.match(systemTools, /window\.__BuiltinToolsUI\.renderToolCatalog/);
+  assert.match(builtinTools, /class="table-wrap console-list-a"/);
+  assert.match(builtinTools, /class="data-table tool-catalog-table/);
   assert.match(styles, /#configurationHost \.console-list-a \.data-table th[\s\S]*border-bottom: 1px solid var\(--console-card-border\)/);
   assert.match(styles, /#configurationHost \.console-list-a \.data-table td[\s\S]*border: 0;[\s\S]*border-bottom:/);
   assert.match(styles, /tbody tr:hover > td:first-child[\s\S]*border-left-color: var\(--accent\)/);

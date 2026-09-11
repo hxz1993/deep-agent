@@ -1,8 +1,8 @@
-import { copyTextToClipboard } from "./message-actions.js?v=20260819-1";
-import { parseServerTimestamp, serverTimestampMilliseconds } from "./time.js?v=20260831-1";
-import { attachmentPreviewUrl } from "./attachment-preview.js?v=20260904-8";
-import { renderWebImagePreview } from "./web-image.js?v=20260901-1";
-import { isPlanningToolEvent, processDisclosureLabel, toolResultPresentation } from "./assistant-presentation.js?v=20260907-1";
+import { copyTextToClipboard } from "./message-actions.js?v=20260912-21";
+import { parseServerTimestamp, serverTimestampMilliseconds } from "./time.js?v=20260912-21";
+import { attachmentPreviewUrl } from "./attachment-preview.js?v=20260912-21";
+import { renderWebImagePreview } from "./web-image.js?v=20260912-21";
+import { isPlanningToolEvent, processDisclosureLabel, toolResultPresentation } from "./assistant-presentation.js?v=20260912-21";
 
 // No controller imports or initialization: each host owns its DOM and capabilities.
 export function createConversationPresenter({

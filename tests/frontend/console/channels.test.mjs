@@ -121,7 +121,7 @@ test("渠道表单绑定Agent且Secret只展示脱敏值并支持留空保留", 
   assert.match(templateHtml, /<span>会话用户<\/span>/);
   assert.match(templateHtml, /type="text" id="channelSessionUserId" maxlength="128" required/);
   assert.match(templateHtml, /id="channelSessionUserId"[^>]*aria-describedby="channelSessionUserHint"/);
-  assert.match(templateHtml, /<small class="field-hint" id="channelSessionUserHint">使用此平台账号记录渠道会话。<\/small>/);
+  assert.match(templateHtml, /field-label-row[^\n]*<span>会话用户<\/span><small class="field-subtitle" id="channelSessionUserHint">使用此平台账号记录渠道会话。<\/small>/);
   assert.match(source, /session_user_id: document.getElementById\("channelSessionUserId"\).value.trim\(\)/);
   assert.match(source, /channelSessionUserId"\).value = account.session_user_id/);
   assert.match(templateHtml, /id="channelBotId"/);
@@ -225,7 +225,7 @@ test("保存渠道时掩码和留空均不提交Secret，只有重新填写才�
 test("渠道启停只在列表使用Switch切换", () => {
   assert.match(source, /data-toggle-channel=/);
   assert.match(source, /role="switch"/);
-  assert.match(source, /channel-row-actions compact-icon-actions[\s\S]*data-toggle-channel=[\s\S]*data-channel-test=[\s\S]*data-channel-delete=/);
+  assert.match(source, /channel-enabled-cell[\s\S]*data-toggle-channel=[\s\S]*channel-row-actions compact-icon-actions[\s\S]*data-channel-test=[\s\S]*data-channel-delete=/);
   assert.match(source, /async toggleEnabled\(accountId, button\)/);
   assert.match(source, /JSON\.stringify\(\{ enabled: !account\.enabled \}\)/);
   assert.doesNotMatch(templateHtml, /<th>启用<\/th>/);
@@ -243,7 +243,7 @@ test("渠道列表使用单行类型、行点击编辑与统一纯图标操作",
   assert.doesNotMatch(source, /data-channel-edit=/);
   assert.doesNotMatch(source, /data-channel-test[^>]*>[\s\S]*?测试<\/button>/);
   assert.match(styles, /\.compact-icon-actions \.icon-btn\s*\{[\s\S]*width: 28px;[\s\S]*height: 28px;[\s\S]*padding: 0;[\s\S]*border: 0;/);
-  assert.match(styles, /\.channel-row-actions \.model-enabled-switch\.on\s*\{\s*background: var\(--accent\);/);
+  assert.match(styles, /\.channel-enabled-cell \.model-enabled-switch\.on\s*\{\s*background: var\(--accent\);/);
 });
 
 test("渠道布局包含窄屏适配且不引入第二个页面结构", () => {
@@ -255,4 +255,39 @@ test("渠道布局包含窄屏适配且不引入第二个页面结构", () => {
 test("快捷命令弹框随内容收缩，长说明仅正文滚动", () => {
   assert.match(styles, /dialog\.console-detail-dialog\.modal\.channel-commands-modal\s*\{[^}]*height: fit-content;[^}]*min-height: 0;[^}]*max-height: calc\(100vh - 32px\);/);
   assert.match(styles, /#channelCommandsModal > \.modal-body\s*\{[^}]*max-height: calc\(100vh - 160px\);[^}]*overflow-y: auto;/);
+});
+
+
+test("新建渠道先选择企微，支持键盘和外部关闭且不提前创建", () => {
+  const { admin, context, elements } = commandHarness(async () => ({}));
+  const documentEvents = {};
+  let opened = 0;
+  const element = () => ({ hidden: true, attributes: {}, listeners: {},
+    addEventListener(type, listener) { this.listeners[type] = listener; },
+    setAttribute(name, value) { this.attributes[name] = value; },
+    focus() { this.focused = true; },
+    contains(target) { return target === this; },
+  });
+  const trigger = elements.newChannelBtn = element();
+  const menu = elements.newChannelMenu = element();
+  const option = elements.createWecomChannelBtn = element();
+  context.document.addEventListener = (type, listener) => { documentEvents[type] = listener; };
+  admin.openCreate = () => { opened += 1; };
+  vm.runInContext("bindChannelCreateMenu()", context);
+  trigger.listeners.click();
+  assert.equal(opened, 0);
+  assert.equal(menu.hidden, false);
+  assert.equal(trigger.attributes["aria-expanded"], "true");
+  documentEvents.keydown({ key: "Escape", preventDefault() {} });
+  assert.equal(menu.hidden, true);
+  assert.equal(trigger.focused, true);
+  trigger.listeners.keydown({ key: "ArrowDown", preventDefault() {} });
+  assert.equal(option.focused, true);
+  option.listeners.click();
+  assert.equal(opened, 1);
+  assert.equal(menu.hidden, true);
+  trigger.listeners.click();
+  documentEvents.click({ target: {} });
+  assert.equal(menu.hidden, true);
+  assert.match(templateHtml, /id="createWecomChannelBtn" role="menuitem"[^\n]*<span>企微<\/span>/);
 });

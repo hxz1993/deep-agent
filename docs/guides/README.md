@@ -31,6 +31,7 @@
 | --- | --- |
 | [`application-references.md`](application-references.md) | 数据库003逻辑引用、发布顺序、迁移回退及验收 |
 | [`mysql-idle-connection-timeout.md`](mysql-idle-connection-timeout.md) | MySQL 空闲断链、连接池参数、环境取值和复现验收指南 |
+| [`mysql-character-set.md`](mysql-character-set.md) | MySQL utf8mb4 部署要求、Emoji 保存失败、只读检查和修复验收 |
 | [`experience/ai-title-generator.md`](experience/ai-title-generator.md) | AI 会话标题生成经验 |
 | [`experience/llm-model-modalities.md`](experience/llm-model-modalities.md) | 模型输入模态元数据经验 |
 | [`experience/mcp-shared-registry-diagnostics.md`](experience/mcp-shared-registry-diagnostics.md) | MCP Registry 事故排障说明 |

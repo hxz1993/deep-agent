@@ -40,8 +40,8 @@ function unavailableSuffix(model) {
   const provider = modelProvider(model);
   const reason = model?.unavailable_reason;
   if (reason === "model_disabled" || model?.enabled === false) return "（模型已停用）";
-  if (reason === "provider_unconfigured" || provider?.api_key_set === false) return "（Provider 未配置密钥）";
-  if (reason === "provider_invalid") return "（Provider 配置无效）";
+  if (reason === "provider_unconfigured" || provider?.api_key_set === false) return "（供应商未配置密钥）";
+  if (reason === "provider_invalid") return "（供应商配置无效）";
   return "";
 }
 
@@ -70,7 +70,7 @@ export function renderGroupedModelOptions(models, { selectedId = "", emptyLabel 
     const key = provider?.id || model?.provider_id || "unassigned";
     if (!groups.has(key)) {
       groups.set(key, {
-        label: provider?.name || "未关联 Provider",
+        label: provider?.name || "未关联供应商",
         models: [],
       });
     }

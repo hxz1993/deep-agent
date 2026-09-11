@@ -1,4 +1,4 @@
-import { readSse } from "./protocol.js?v=20260729-1";
+import { readSse } from "./protocol.js?v=20260912-21";
 
 /** Observe exactly one existing Run. Closing this connection never cancels it. */
 export function createSessionObserver({

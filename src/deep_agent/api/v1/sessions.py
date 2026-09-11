@@ -67,6 +67,7 @@ async def _resolve_agent_name(ctx: AppContextDep, agent_id: str | None) -> str |
 def _summary_to_session_info(row: SessionSummaryRow) -> SessionInfo:
     return SessionInfo(
         session_id=row.session_id,
+        app_id=row.app_id, space_id=row.space_id,
         message_count=row.message_count,
         turn_count=row.turn_count,
         attachment_count=row.attachment_count,
@@ -93,12 +94,17 @@ async def _build_session_info(
     created_at: datetime | None = None
     updated_at: datetime | None = None
     title: str | None = None
+    app_id: str | None = None
+    space_id: str | None = None
     if ctx.stores.chat_session is not None:
         from deep_agent.db.session_scope import normalize_agent_scope
 
         created_at, updated_at = await ctx.stores.chat_session.get_timestamps(
             normalize_agent_scope(agent_id),
             session_id,
+        )
+        app_id, space_id = await ctx.stores.chat_session.get_initial_scope(
+            normalize_agent_scope(agent_id), session_id,
         )
         # 通过 coordinator 获取标题（封装了 db_session 管理）
         title = await ctx.store.get_session_title(session_id, agent_id=agent_id)
@@ -107,6 +113,7 @@ async def _build_session_info(
 
     return SessionInfo(
         session_id=session_id,
+        app_id=app_id, space_id=space_id,
         message_count=len(history),
         agent_id=agent_id,
         agent_name=agent_name,

@@ -27,7 +27,7 @@ function renderAgentChannelBadge(agentId) {
   const names = agentChannelNames.get(agentId) || [];
   if (!names.length) return "";
   const description = escapeHtml(`已关联渠道：${names.join("、")}`);
-  return `<span class="agent-channel-badge" title="${description}" aria-label="${description}"><i data-lucide="radio" aria-hidden="true"></i>渠道${names.length > 1 ? ` ${names.length}` : ""}</span>`;
+  return `<span class="agent-channel-badge" title="${description}" aria-label="${description}"><i data-lucide="rss" aria-hidden="true"></i>渠道${names.length > 1 ? ` ${names.length}` : ""}</span>`;
 }
 
 function formatCompactCount(value) {
@@ -518,7 +518,6 @@ const agentsAdmin = {
     document.getElementById("agentName").disabled = false;
     document.getElementById("agentName").value = "";
     populateAgentModelSelect(window.DeepAgentModelOptions.firstSelectableModelId(state.llmModels));
-    document.getElementById("agentTemperature").value = "";
     document.getElementById("agentPrompt").value =
       "You are a helpful assistant. Use available tools when they help answer accurately.";
     this.renderCapabilityCheckboxes([]);
@@ -538,8 +537,6 @@ const agentsAdmin = {
       document.getElementById("agentName").value = agent.name;
       this.syncEditorTitle();
       populateAgentModelSelect(agent.model_id);
-      document.getElementById("agentTemperature").value =
-        agent.temperature == null ? "" : String(agent.temperature);
       document.getElementById("agentPrompt").value = agent.prompt;
       this.renderCapabilityCheckboxes(agent.capabilities);
       this.renderSkillChoices(agent.skills || []);
@@ -613,12 +610,6 @@ const agentsAdmin = {
       capabilities,
       skills: this.getSelectedSkills(),
     };
-    const tempRaw = document.getElementById("agentTemperature").value.trim();
-    if (tempRaw) {
-      payload.temperature = Number(tempRaw);
-    } else if (state.editingAgentId) {
-      payload.temperature = null;
-    }
 
     let saved = false;
     try {

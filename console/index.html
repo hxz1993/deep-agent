@@ -18,14 +18,20 @@
   <title>DeepAgent 一体化控制台</title>
   <link rel="icon" type="image/svg+xml" href="./favicon.svg?v=20260728-1" />
   <link id="hljsTheme" rel="stylesheet" href="/vendor/highlight-github-dark.min.css" />
-  <link rel="stylesheet" href="./themes.css?v=20260821-2" />
-  <link rel="stylesheet" href="./workspace.css?v=20260904-13" />
-  <link rel="stylesheet" href="./configuration/configuration.css?v=20260910-8" />
-  <link rel="stylesheet" href="./console.css?v=20260910-13" />
-  <link rel="stylesheet" href="./diagnostics.css?v=20260910-13" />
-  <link rel="stylesheet" href="./diagnostics-design.css?v=20260910-13" />
-  <link rel="stylesheet" href="./diagnostics-sessions.css?v=20260910-16" />
-  <link rel="stylesheet" href="./diagnostic-detail.css?v=20260910-13" />
+  <link rel="stylesheet" href="./themes.css?v=20260912-21" />
+  <link rel="stylesheet" href="./workspace.css?v=20260912-21" />
+  <link rel="stylesheet" href="./configuration/configuration.css?v=20260912-21" />
+  <link rel="stylesheet" href="./console.css?v=20260912-21" />
+  <link rel="stylesheet" href="./diagnostics.css?v=20260912-21" />
+  <link rel="stylesheet" href="./diagnostics-design.css?v=20260912-21" />
+  <link rel="stylesheet" href="./diagnostics-sessions.css?v=20260912-21" />
+  <link rel="stylesheet" href="./diagnostic-detail.css?v=20260912-21" />
+  <link rel="stylesheet" href="./ui-select.css?v=20260912-21" />
+  <link rel="stylesheet" href="./ui-channel-hints.css?v=20260912-21" />
+  <link rel="stylesheet" href="./ui-dialogs.css?v=20260912-21" />
+  <link rel="stylesheet" href="./ui-tool-catalog.css?v=20260912-21" />
+  <link rel="stylesheet" href="./ui-tool-editor.css?v=20260912-21" />
+  <link rel="stylesheet" href="./ui-resource-layout.css?v=20260912-21" />
 </head>
 <body data-console-page="workspace">
   <div class="console-shell">
@@ -38,8 +44,8 @@
         <button type="button" class="console-rail-toggle" id="toggleConsoleNavBtn" aria-label="收起导航" title="收起导航" aria-expanded="true" aria-controls="consoleResourceNav"><i data-lucide="panel-left-close" aria-hidden="true"></i></button>
       </header>
       <nav class="console-nav">
-        <button type="button" class="console-nav-btn active" data-page="workspace" title="对话测试" aria-label="对话测试">
-          <i data-lucide="message-square-code"></i><span>对话测试</span>
+        <button type="button" class="console-nav-btn active" data-page="workspace" title="测试" aria-label="测试">
+          <i data-lucide="message-square-code"></i><span>测试</span>
         </button>
       </nav>
       <nav class="resource-nav" aria-label="配置目录" id="consoleResourceNav"></nav>
@@ -101,20 +107,15 @@
         <div class="configuration-shell">
           <template id="configurationNavigation">
             <button class="tab resource-btn active" data-tab="agents"><i data-lucide="bot"></i><span>Agent</span></button>
+            <button class="tab resource-btn" data-tab="channels"><i data-lucide="rss"></i><span>渠道</span></button>
             <div class="resource-group-label">设置</div>
-            <button class="tab resource-btn" data-tab="llm-providers"><i data-lucide="waypoints"></i><span>Provider</span></button>
+            <button class="tab resource-btn" data-tab="llm-providers"><svg xmlns="http://www.w3.org/2000/svg" class="lucide lucide-sparkles" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11.017 2.814a1 1 0 0 1 1.966 0l1.051 5.558a2 2 0 0 0 1.594 1.594l5.558 1.051a1 1 0 0 1 0 1.966l-5.558 1.051a2 2 0 0 0-1.594 1.594l-1.051 5.558a1 1 0 0 1-1.966 0l-1.051-5.558a2 2 0 0 0-1.594-1.594l-5.558-1.051a1 1 0 0 1 0-1.966l5.558-1.051a2 2 0 0 0 1.594-1.594z"/><path d="M20 2v4"/><path d="M22 4h-4"/><circle cx="4" cy="20" r="2"/></svg><span>模型</span></button>
             <button class="tab resource-btn" data-tab="skills"><i data-lucide="book-open-check"></i><span>Skill</span></button>
             <button class="tab resource-btn" data-tab="mcp">
-              <svg class="mcp-brand-icon" viewBox="0 0 180 180" fill="none" aria-hidden="true">
-                <path d="M23.5996 85.2532L86.2021 22.6507C94.8457 14.0071 108.86 14.0071 117.503 22.6507C126.147 31.2942 126.147 45.3083 117.503 53.9519L70.2254 101.23" />
-                <path d="M70.8789 100.578L117.504 53.952C126.148 45.3083 140.163 45.3083 148.806 53.952L149.132 54.278C157.776 62.9216 157.776 76.9357 149.132 85.5792L92.5139 142.198C89.6327 145.079 89.6327 149.75 92.5139 152.631L104.14 164.257" />
-                <path d="M101.853 38.3013L55.553 84.6011C46.9094 93.2447 46.9094 107.258 55.553 115.902C64.1966 124.546 78.2106 124.546 86.8543 115.902L133.154 69.6025" />
-              </svg>
+              <svg xmlns="http://www.w3.org/2000/svg" class="lucide lucide-plug" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22v-5"/><path d="M15 8V2"/><path d="M17 8a1 1 0 0 1 1 1v4a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V9a1 1 0 0 1 1-1z"/><path d="M9 8V2"/></svg>
               <span>MCP</span>
             </button>
-            <button class="tab resource-btn" data-tab="builtin-tools"><i data-lucide="blocks"></i><span>内置工具</span></button>
-            <button class="tab resource-btn" data-tab="ui-tools"><i data-lucide="panel-top"></i><span>UI 工具</span></button>
-            <button class="tab resource-btn" data-tab="channels"><i data-lucide="radio-tower"></i><span>渠道</span></button>
+            <button class="tab resource-btn" data-tab="tools"><i data-lucide="hammer"></i><span>工具</span></button>
             <div class="resource-group-label separated diagnostic-nav-label">诊断</div>
             <button type="button" class="console-nav-btn" data-page="diagnostics" data-diagnostics-nav="logs" title="日志" aria-label="日志"><i data-lucide="logs"></i><span>日志</span></button>
             <button type="button" class="console-nav-btn" data-page="diagnostics" data-diagnostics-nav="sessions" title="会话" aria-label="会话"><i data-lucide="messages-square"></i><span>会话</span></button>
@@ -141,6 +142,7 @@
             </div>
             <div class="diagnostics-search-row">
               <label class="compact-search diagnostics-keyword"><i data-lucide="search" aria-hidden="true"></i><input type="search" id="diagnosticsKeyword" placeholder="搜索日志内容" aria-label="搜索日志内容" maxlength="200" /></label>
+            <button type="button" class="diagnostics-button" id="diagnosticsExport"><i data-lucide="download" aria-hidden="true"></i><span>导出</span></button>
             <button type="submit" class="diagnostics-button primary" id="diagnosticsQuery"><i data-lucide="search" aria-hidden="true"></i><span>查询</span></button>
             <button type="button" class="diagnostics-button text" id="diagnosticsReset" title="清空条件">重置</button>
             </div>
@@ -149,18 +151,31 @@
           </header>
           <button type="button" class="diagnostics-button hidden" id="diagnosticsBack"><i data-lucide="arrow-left" aria-hidden="true"></i>返回</button>
           <div class="diagnostics-notice hidden" id="diagnosticsNotice" role="status" aria-live="polite"></div>
+        <dialog class="modal" id="diagnosticsExportDialog" aria-labelledby="diagnosticsExportTitle">
+          <div class="modal-header"><h3 id="diagnosticsExportTitle">导出日志</h3><button type="button" class="icon-action" id="diagnosticsExportClose" aria-label="关闭"><i data-lucide="x"></i></button></div>
+          <div class="modal-body">
+            <p id="diagnosticsExportRange"></p>
+            <p id="diagnosticsExportFilters"></p>
+            <p id="diagnosticsExportStatus" role="status" aria-live="polite">正在统计匹配日志…</p>
+            <p class="field-hint">按当前查询条件导出原始文本，最多 5,000 条、10 MB，最多读取 60 秒。若有截断，将在导出前提示。</p>
+          </div>
+          <div class="modal-footer"><button type="button" class="btn" id="diagnosticsExportCancel">取消</button><button type="button" class="btn primary" id="diagnosticsExportConfirm" disabled>导出日志</button></div>
+        </dialog>
+          <div class="agent-view-switch diagnostics-view-switch" role="group" aria-label="日志视图"><button type="button" id="diagnosticsListView" class="active" aria-pressed="true"><i data-lucide="list"></i>列表</button><button type="button" id="diagnosticsRawView" aria-pressed="false"><i data-lucide="file-text"></i>原始</button></div>
           <div class="diagnostics-split" id="diagnosticsSplit">
           <div class="diagnostics-log-workspace">
-          <div class="diagnostics-result-head"><div class="diagnostics-result-title"><h2>查询结果</h2><span id="diagnosticsMeta" aria-live="polite">尚未查询</span><span id="diagnosticsPartial" class="hidden"></span><button type="button" class="diagnostics-button text hidden" id="diagnosticsMore">加载更多</button></div><span id="diagnosticsQueryRange"></span><span id="diagnosticsCopyStatus" role="status" aria-live="polite"></span></div>
-          <div class="diagnostics-log-view" tabindex="0" aria-label="诊断日志列表">
+          <div class="diagnostics-result-head"><div class="diagnostics-result-title"><span id="diagnosticsQueryRange"></span><span id="diagnosticsRangeSeparator" aria-hidden="true" hidden>·</span><span id="diagnosticsMeta" aria-live="polite">尚未查询</span><span id="diagnosticsPartial" class="hidden"></span><button type="button" class="diagnostics-button text hidden" id="diagnosticsMore">加载更多</button></div><span id="diagnosticsCopyStatus" role="status" aria-live="polite"></span></div>
+          <div class="diagnostics-log-view" id="diagnosticsListPane" tabindex="0" aria-label="诊断日志列表">
             <div id="diagnosticsRecords"></div>
             <div class="diagnostics-empty" id="diagnosticsEmpty">正在准备日志查询…</div>
           </div>
           </div>
+          <div id="diagnosticsRawPane" class="diagnostics-raw-pane" hidden><span id="diagnosticsRawStatus" role="status" aria-live="polite"></span><textarea id="diagnosticsRawText" aria-label="原始日志" readonly wrap="off" spellcheck="false"></textarea></div>
           <div class="diagnostics-resizer" id="diagnosticsResizer" role="separator" tabindex="0" aria-label="调整日志详情宽度" aria-orientation="vertical" aria-valuemin="220" aria-valuemax="720" aria-valuenow="436"></div>
           <aside class="diagnostics-drawer" id="diagnosticsDrawer" aria-label="日志详情"></aside>
           </div>
         </div>
+
         <div id="diagnosticsSessionsPage" class="hidden"></div>
       </section>
     </main>
@@ -170,10 +185,9 @@
     <div class="auth-lock-content"><i data-lucide="shield-alert" data-access-lock-icon></i><h2 id="authLockTitle">正在检查控制台权限</h2><p id="authLockMessage">请稍候…</p><button type="button" id="retryIdentityBtn">重新检查</button></div>
   </div>
 
-  <aside class="context-popover hidden" id="contextPopover" aria-hidden="true" role="dialog" aria-label="测试 App" inert>
-    <header><div><strong>测试 App</strong><span>仅影响当前控制台请求</span></div><button type="button" id="closeContextBtn" title="关闭" aria-label="关闭"><i data-lucide="x"></i></button></header>
-    <label class="context-app-field"><span>应用编码 App</span><input id="contextAppInput" autocomplete="off" placeholder="例如 mdxath003" /></label>
-    <p class="context-popover-hint">Space 根据 App 自动推导，语言固定为简体中文。</p>
+  <aside class="context-popover hidden" id="contextPopover" aria-hidden="true" role="dialog" aria-label="调试" inert>
+    <header><div><strong>调试</strong><span>仅影响当前控制台请求</span></div><button type="button" id="closeContextBtn" title="关闭" aria-label="关闭"><i data-lucide="x"></i></button></header>
+    <label class="context-app-field"><span class="field-label-row"><span>应用编码 App</span><span class="field-help" tabindex="0" aria-label="应用编码说明" aria-describedby="contextAppHelp"><i data-lucide="circle-help" aria-hidden="true"></i><span class="field-help-tooltip" id="contextAppHelp" role="tooltip">Space 根据 App 自动推导，语言固定为简体中文。</span></span></span><input id="contextAppInput" autocomplete="off" placeholder="例如 mdxath003" /></label>
     <dl class="context-effective-values" id="effectiveContext"></dl>
     <footer><button type="button" id="resetContextBtn">不分应用</button><button type="button" class="primary" id="saveContextBtn">确定</button></footer>
   </aside>
@@ -186,13 +200,13 @@
   </div>
 
   <script src="../vendor/lucide.min.js"></script>
-  <script src="./api.js?v=20260902-1"></script>
-  <script src="./theme.js?v=20260720-1"></script>
+  <script src="./api.js?v=20260912-21"></script>
+  <script src="./theme.js?v=20260912-21"></script>
   <script src="../vendor/marked.min.js"></script>
   <script src="../vendor/purify.min.js"></script>
   <script src="../vendor/highlight.min.js"></script>
-  <script src="./json-view.js?v=20260823-1"></script>
-  <script src="./markdown.js?v=20260822-2"></script>
-  <script type="module" src="./main.js?v=20260910-15"></script>
+  <script src="./json-view.js?v=20260912-21"></script>
+  <script src="./markdown.js?v=20260912-21"></script>
+  <script type="module" src="./main.js?v=20260912-21"></script>
 </body>
 </html>

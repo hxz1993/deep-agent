@@ -114,7 +114,6 @@ export function renderSessionInspector({
     : contextStatus.compaction_enabled
       ? "未触发"
       : "未启用";
-  const estimatorLabel = [contextStatus.estimate_scope, contextStatus.estimator_source].filter(Boolean).join(" · ") || "—";
   const compactionContent = `<section class="inspector-section">
     <header><strong>上下文压缩</strong><span>${escapeHtml(compactionState)}</span></header>
     <div class="compaction-comparison">
@@ -127,7 +126,6 @@ export function renderSessionInspector({
       ${inspectorFact("来源截止", contextStatus.compaction_source_through_sequence ?? "—")}
       ${inspectorFact("摘要模型", contextStatus.summary_model_id || "—")}
       ${inspectorFact("更新时间", contextStatus.compaction_updated_at || "—")}
-      ${inspectorFact("估算方式", estimatorLabel)}
     </div>
   </section>`;
   const diagnosticCount = (value) => value == null ? "未记录" : String(value);
@@ -136,8 +134,7 @@ export function renderSessionInspector({
     <span title="消息事件数"><i data-lucide="repeat-2"></i>${escapeHtml(diagnostic ? diagnosticCount(activeSession.messageCount) : String(activeSession.messageCount ?? contextStatus.raw_message_count ?? state.modelMessageCount ?? 0))}</span>
     <span title="附件数"><i data-lucide="paperclip"></i>${escapeHtml(diagnostic ? diagnosticCount(activeSession.attachmentCount) : String(activeSession.attachmentCount || 0))}</span>
   </span>`;
-  const agentIdentity = `<span class="inspector-stacked-value"><span>${escapeHtml(agentName)}</span><code>${escapeHtml(state.agentId || "—")}</code></span>`;
-  const requestScope = `<span class="inspector-scope-value"><code>${escapeHtml(context.app || (diagnostic ? "未记录" : "继承"))}</code><span>/</span><code>${escapeHtml(context.space || (diagnostic ? "未记录" : "继承"))}</code></span>`;
+  const sessionScope = `<span class="inspector-scope-value"><code>${escapeHtml(activeSession.appId || "—")}</code><span>/</span><code>${escapeHtml(activeSession.spaceId || "—")}</code></span>`;
   const hasChannelTab = Boolean(channelOrigin || agentChannels.length);
   if (!hasChannelTab && activeTab === "channel") activeTab = "session";
   const channelSource = channelOrigin ? `<section class="inspector-section">
@@ -155,15 +152,11 @@ export function renderSessionInspector({
   const sessionContent = `<section class="inspector-section inspector-session-group">
     <div class="inspector-facts">
       ${inspectorFact("会话 ID", state.sessionId || "尚未创建", { mono: true, wide: true, copy: Boolean(state.sessionId) })}
-      ${inspectorFactHtml("Agent", agentIdentity, { wide: true })}
+      ${inspectorFact("Agent", agentName, { wide: true })}
       ${inspectorFact("模型", model?.name || model?.model || (diagnostic ? "未记录" : "—"))}
+      ${inspectorFactHtml("App / Space", sessionScope, { wide: true })}
       ${inspectorFactHtml("会话统计", sessionCounts)}
-    </div>
-    <header class="inspector-subheading"><strong>请求 Header</strong></header>
-    <div class="inspector-facts compact">
-      ${inspectorFactHtml("App / Space", requestScope, { wide: true })}
-      ${inspectorFact("Language", context.language || (diagnostic ? "未记录" : "继承"))}
-      ${inspectorFact("User ID", identity?.user || "未认证", { mono: true, wide: true })}
+      ${diagnostic ? inspectorFact("Language", context.language || "未记录") + inspectorFact("User ID", identity?.user || "未认证", { mono: true, wide: true }) : ""}
     </div>
   </section>
   <section class="inspector-section inspector-budget-section">

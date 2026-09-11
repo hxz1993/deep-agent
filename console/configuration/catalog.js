@@ -10,20 +10,18 @@ const MODALITY_LABELS = {
 const TAG_LABELS = {
   attachment: "附件",
   reasoning: "推理",
-  tool_call: "工具调用",
-  structured_output: "结构化输出",
-  temperature: "Temperature",
-  open_weights: "开放权重",
-  interleaved: "交错推理",
+  tool_call: "工具",
+  structured_output: "结构化",
+  temperature: "温度",
+  open_weights: "开放",
+  interleaved: "交错",
 };
 
 const catalogState = {
-  view: "model",
   items: [],
   total: 0,
   offset: 0,
   query: "",
-  labId: "",
   providerId: "",
   modality: "",
   facets: { labs: [], providers: [] },
@@ -32,6 +30,8 @@ const catalogState = {
 };
 
 let searchTimer = null;
+let loadGeneration = 0;
+let pendingLoad = false;
 
 function element(id) {
   return document.getElementById(id);
@@ -108,12 +108,11 @@ async function request(path, options = {}) {
 
 function queryString() {
   const params = new URLSearchParams({
-    view: catalogState.view,
+    view: "model",
     offset: String(catalogState.offset),
     limit: String(PAGE_SIZE),
   });
   if (catalogState.query.trim()) params.set("q", catalogState.query.trim());
-  if (catalogState.labId) params.set("lab_id", catalogState.labId);
   if (catalogState.providerId) params.set("provider_id", catalogState.providerId);
   if (catalogState.modality) params.set("modality", catalogState.modality);
   return params.toString();
@@ -128,152 +127,109 @@ function setFeedback(message = "", isError = false) {
 }
 
 function renderFacets() {
-  const labs = Array.isArray(catalogState.facets?.labs) ? catalogState.facets.labs : [];
-  const total = labs.reduce((sum, item) => sum + Number(item.count || 0), 0);
-  const sidebar = element("catalogLabSidebar");
-  element("catalogBrowser")?.classList.toggle(
-    "catalog-provider-view",
-    catalogState.view === "provider",
-  );
-  if (sidebar) {
-    sidebar.innerHTML = [
-      '<div class="catalog-lab-heading"><span>模型研发方</span><i data-lucide="flask-conical"></i></div>',
-      `<button type="button" class="catalog-lab-item ${catalogState.labId ? "" : "active"}" data-lab-id="">
-        <span>全部 Lab</span><strong>${total}</strong>
-      </button>`,
-      ...labs.map(
-        (lab) => `<button type="button" class="catalog-lab-item ${catalogState.labId === lab.id ? "active" : ""}"
-          data-lab-id="${escapeHtml(lab.id)}">
-          <span>${escapeHtml(lab.label)}</span><strong>${Number(lab.count || 0)}</strong>
-        </button>`,
-      ),
-    ].join("");
-    sidebar.querySelectorAll("[data-lab-id]").forEach((button) => {
-      button.addEventListener("click", () => {
-        catalogState.labId = button.dataset.labId || "";
-        catalogState.offset = 0;
-        loadCatalog();
-      });
+  const providers = Array.isArray(catalogState.facets?.providers) ? catalogState.facets.providers : [];
+  const sidebar = element("catalogSupplierSidebar");
+  if (!sidebar) return;
+  sidebar.innerHTML = [
+    '<div class="catalog-lab-heading"><span>供应商</span></div>',
+    ...providers.map((provider) => `<button type="button" class="catalog-lab-item ${catalogState.providerId === provider.id ? "active" : ""}"
+      data-provider-id="${escapeHtml(provider.id)}" aria-pressed="${catalogState.providerId === provider.id}">
+      <span>${escapeHtml(provider.label)}</span><strong>${Number(provider.count || 0)}</strong>
+    </button>`),
+  ].join("");
+  sidebar.querySelectorAll("[data-provider-id]").forEach((button) => {
+    button.addEventListener("click", () => {
+      if (catalogState.providerId === button.dataset.providerId) return;
+      catalogState.providerId = button.dataset.providerId;
+      catalogState.offset = 0;
+      loadCatalog();
     });
-    sidebar.classList.toggle("hidden", catalogState.view !== "model");
-  }
-
-  const providerSelect = element("catalogProviderSelect");
-  if (providerSelect) {
-    const providers = Array.isArray(catalogState.facets?.providers)
-      ? catalogState.facets.providers
-      : [];
-    providerSelect.innerHTML = [
-      '<option value="">全部接入渠道</option>',
-      ...providers.map(
-        (provider) =>
-          `<option value="${escapeHtml(provider.id)}">${escapeHtml(provider.label)}（${Number(provider.count || 0)}）</option>`,
-      ),
-    ].join("");
-    providerSelect.value = catalogState.providerId;
-  }
+  });
+  const selected = providers.find((provider) => provider.id === catalogState.providerId);
+  if (element("catalogSupplierTitle")) element("catalogSupplierTitle").textContent = selected?.label || "模型";
 }
 
-function modelDetailRow(model) {
-  const providers = Array.isArray(model.providers) ? model.providers : [];
-  return `<tr class="catalog-detail-row hidden" data-detail-for="${escapeHtml(model.canonical_model_id)}">
-    <td colspan="6">
-      <div class="catalog-provider-options">
-        <div class="catalog-model-description">
-          ${escapeHtml(model.model_description || "暂无模型说明")}
-        </div>
-        ${providers
-          .map(
-            (provider, index) => `<div class="catalog-provider-option">
-              <div>
-                <strong>${escapeHtml(provider.provider_label)}</strong>
-                <code>${escapeHtml(provider.provider_model_id)}</code>
-                ${
-                  provider.configured_preset
-                    ? `<span class="badge on">已配置：${escapeHtml(provider.configured_preset)}</span>`
-                    : ""
-                }
-              </div>
-              <div class="catalog-provider-meta">
-                <span>${escapeHtml(formatTokenCount(provider.context_window_tokens))} 上下文</span>
-                <span>${escapeHtml(formatTokenCount(provider.max_output_tokens))} 最大输出</span>
-                <span>${escapeHtml(provider.adapter)}</span>
-              </div>
-              <button type="button" class="btn btn-sm ${index === 0 ? "primary" : ""}"
-                data-use-model="${escapeHtml(model.canonical_model_id)}"
-                data-provider-id="${escapeHtml(provider.provider_id)}">使用此模型</button>
-            </div>`,
-          )
-          .join("")}
-      </div>
-    </td>
-  </tr>`;
+// Keep the backing select and change event as the filter contract; the visible
+// control follows the same Console select markup as configuration and diagnostics.
+function renderCatalogSelect(id) {
+  const select = element(id);
+  const menu = element(`${id}Menu`);
+  const label = element(`${id}Label`);
+  if (!select || !menu || !label) return;
+  const options = Array.from(select.options);
+  label.textContent = options.find((option) => option.value === select.value)?.textContent || "";
+  menu.innerHTML = options.map((option) => `<button type="button" class="console-select-option${option.value === select.value ? " selected" : ""}" role="option" aria-selected="${option.value === select.value}" data-catalog-option="${escapeHtml(option.value)}"><span>${escapeHtml(option.textContent)}</span></button>`).join("");
+}
+
+function closeCatalogSelects({ restoreFocus = false } = {}) {
+  document.querySelectorAll("[data-catalog-select]").forEach((host) => {
+    const trigger = host.querySelector(".console-select-trigger");
+    const menu = host.querySelector(".console-select-menu");
+    if (restoreFocus && trigger.getAttribute("aria-expanded") === "true") trigger.focus();
+    trigger.setAttribute("aria-expanded", "false");
+    menu.classList.add("hidden");
+  });
+}
+
+function bindCatalogSelect(id) {
+  const select = element(id);
+  const trigger = element(`${id}Trigger`);
+  const menu = element(`${id}Menu`);
+  if (!select || !trigger || !menu) return;
+  function open() {
+    closeCatalogSelects();
+    renderCatalogSelect(id);
+    menu.classList.remove("hidden");
+    trigger.setAttribute("aria-expanded", "true");
+    (menu.querySelector('[aria-selected="true"]') || menu.querySelector("button"))?.focus();
+  }
+  trigger.addEventListener("click", () => {
+    if (trigger.getAttribute("aria-expanded") === "true") closeCatalogSelects();
+    else open();
+  });
+  trigger.addEventListener("keydown", (event) => {
+    if (!["ArrowDown", "ArrowUp"].includes(event.key)) return;
+    event.preventDefault();
+    open();
+  });
+  menu.addEventListener("click", (event) => {
+    const option = event.target.closest("[data-catalog-option]");
+    if (!option) return;
+    select.value = option.dataset.catalogOption;
+    renderCatalogSelect(id);
+    closeCatalogSelects({ restoreFocus: true });
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  menu.addEventListener("keydown", (event) => {
+    const options = Array.from(menu.querySelectorAll("[data-catalog-option]"));
+    const index = options.indexOf(document.activeElement);
+    if (event.key === "Escape") { event.preventDefault(); closeCatalogSelects({ restoreFocus: true }); }
+    else if (event.key === "Tab") closeCatalogSelects();
+    else if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
+      event.preventDefault();
+      const target = event.key === "Home" ? 0 : event.key === "End" ? options.length - 1 : (index + (event.key === "ArrowDown" ? 1 : -1) + options.length) % options.length;
+      options[target]?.focus();
+    }
+  });
+  renderCatalogSelect(id);
 }
 
 function renderModelRows() {
-  return catalogState.items
-    .map(
-      (model) => `<tr class="catalog-result-row">
-        <td>
-          <strong>${escapeHtml(model.model_label)}</strong>
-          <div class="models-sub"><code>${escapeHtml(model.canonical_model_id)}</code></div>
-        </td>
-        <td>${escapeHtml(formatTokenCount(model.context_window_tokens))}</td>
-        <td>${escapeHtml(formatTokenCount(model.max_output_tokens))}</td>
-        <td class="model-tag-cell">${renderBadges(model.input_modalities, MODALITY_LABELS)}</td>
-        <td class="model-tag-cell">${renderBadges(model.tags, TAG_LABELS)}</td>
-        <td><button type="button" class="catalog-channel-trigger" data-toggle-model="${escapeHtml(model.canonical_model_id)}" title="查看 ${Number(model.provider_count || 0)} 个可用渠道" aria-label="查看 ${Number(model.provider_count || 0)} 个可用渠道">
-          <i data-lucide="network"></i><strong>${Number(model.provider_count || 0)}</strong><i data-lucide="chevron-down"></i>
-        </button></td>
-      </tr>
-      ${modelDetailRow(model)}`,
-    )
-    .join("");
-}
+  return catalogState.items.map((model) => {
+    const provider = model.providers?.find((item) => item.provider_id === catalogState.providerId);
+    if (!provider) return "";
+    return `<tr class="catalog-result-row">
+      <td>
+        <strong title="${escapeHtml(model.model_description || model.model_label)}">${escapeHtml(model.model_label)}</strong>
+        <div class="models-sub"><code>${escapeHtml(provider.provider_model_id)}</code></div>
+      </td>
+      <td>${escapeHtml(formatTokenCount(provider.context_window_tokens))}</td>
+      <td>${escapeHtml(formatTokenCount(provider.max_output_tokens))}</td>
+      <td class="model-tag-cell">${renderBadges(provider.input_modalities, MODALITY_LABELS)}</td>
+      <td class="model-tag-cell">${renderBadges(provider.tags, TAG_LABELS)}</td>
 
-function renderProviderRows() {
-  return catalogState.items
-    .map(
-      (provider) => `<tr>
-        <td>
-          <strong>${escapeHtml(provider.provider_label)}</strong>
-          <div class="models-sub"><code>${escapeHtml(provider.provider_id)}</code></div>
-        </td>
-        <td>${Number(provider.model_count || 0)}</td>
-        <td><code>${escapeHtml(provider.adapter || "—")}</code></td>
-        <td>${escapeHtml(provider.provider_api_url || "—")}</td>
-        <td class="model-tag-cell">${(provider.models || [])
-          .slice(0, 5)
-          .map((model) => `<span class="badge">${escapeHtml(model.model_label)}</span>`)
-          .join(" ")}${
-            provider.models?.length > 5
-              ? ` <span class="catalog-muted">等 ${provider.models.length} 个</span>`
-              : ""
-          }</td>
-      </tr>`,
-    )
-    .join("");
-}
-
-function bindModelActions() {
-  element("catalogTableBody")?.querySelectorAll("[data-toggle-model]").forEach((button) => {
-    button.addEventListener("click", () => {
-      const selector = `[data-detail-for="${CSS.escape(button.dataset.toggleModel)}"]`;
-      element("catalogTableBody")?.querySelector(selector)?.classList.toggle("hidden");
-    });
-  });
-  element("catalogTableBody")?.querySelectorAll("[data-use-model]").forEach((button) => {
-    button.addEventListener("click", () => {
-      const model = catalogState.items.find(
-        (item) => item.canonical_model_id === button.dataset.useModel,
-      );
-      const provider = model?.providers?.find(
-        (item) => item.provider_id === button.dataset.providerId,
-      );
-      if (!model || !provider) return;
-      window.llmModelsAdmin?.openCreateFromCatalog(model, provider);
-    });
-  });
+    </tr>`;
+  }).join("");
 }
 
 function renderResults() {
@@ -286,29 +242,16 @@ function renderResults() {
   const databaseEmpty =
     catalogState.total === 0 &&
     !catalogState.query &&
-    !catalogState.labId &&
     !catalogState.providerId &&
     !catalogState.modality;
   empty.classList.toggle("hidden", !databaseEmpty);
   table.classList.toggle("hidden", databaseEmpty);
-  table.classList.toggle("catalog-provider-table", catalogState.view === "provider");
-
-  if (catalogState.view === "model") {
-    head.innerHTML = `<tr>
-      <th>模型</th><th>上下文</th><th>最大输出</th><th>输入模态</th><th>能力标签</th><th>接入渠道</th>
-    </tr>`;
-    body.innerHTML = catalogState.items.length
-      ? renderModelRows()
-      : '<tr><td colspan="6" class="empty-cell">无匹配模型</td></tr>';
-    bindModelActions();
-  } else {
-    head.innerHTML = `<tr>
-      <th>接入渠道</th><th>可用模型</th><th>运行协议</th><th>API 地址</th><th>模型示例</th>
-    </tr>`;
-    body.innerHTML = catalogState.items.length
-      ? renderProviderRows()
-      : '<tr><td colspan="5" class="empty-cell">无匹配接入渠道</td></tr>';
-  }
+  head.innerHTML = `<tr>
+    <th>模型</th><th>上下文</th><th>最大输出</th><th>输入模态</th><th>能力</th>
+  </tr>`;
+  body.innerHTML = catalogState.items.length
+    ? renderModelRows()
+    : '<tr><td colspan="5" class="empty-cell">无匹配模型</td></tr>';
   window.lucide?.createIcons();
 }
 
@@ -330,17 +273,27 @@ function renderPagination() {
 }
 
 async function loadCatalog() {
-  if (catalogState.loading) return;
+  const generation = ++loadGeneration;
+  if (catalogState.loading) { pendingLoad = true; return; }
+  pendingLoad = false;
   catalogState.loading = true;
   setFeedback();
   if (element("catalogStatusLine")) element("catalogStatusLine").textContent = "加载中…";
   if (element("catalogTableBody")) {
     element("catalogTableBody").innerHTML =
-      '<tr><td colspan="6" class="empty-cell">加载中…</td></tr>';
+      '<tr><td colspan="5" class="empty-cell">加载中…</td></tr>';
   }
   renderPagination();
   try {
-    const response = await request(`/api/v1/llm-models/catalog?${queryString()}`);
+    let response = await request(`/api/v1/llm-models/catalog?${queryString()}`);
+    if (generation !== loadGeneration) return;
+    const providers = response.facets?.providers || [];
+    if (providers.length && !providers.some((provider) => provider.id === catalogState.providerId)) {
+      catalogState.providerId = providers[0].id;
+      catalogState.offset = 0;
+      response = await request(`/api/v1/llm-models/catalog?${queryString()}`);
+    }
+    if (generation !== loadGeneration) return;
     catalogState.items = Array.isArray(response.items) ? response.items : [];
     catalogState.total = Number(response.total || 0);
     catalogState.facets = response.facets || { labs: [], providers: [] };
@@ -348,8 +301,9 @@ async function loadCatalog() {
     renderFacets();
     renderResults();
     element("catalogStatusLine").textContent =
-      `当前视图 ${catalogState.total} 项 · 最近更新 ${formatDateTime(catalogState.refreshedAt)}`;
+      `${catalogState.total} 个模型 · 最近更新 ${formatDateTime(catalogState.refreshedAt)}`;
   } catch (error) {
+    if (generation !== loadGeneration) return;
     catalogState.items = [];
     catalogState.total = 0;
     setFeedback(`加载失败：${error.message}`, true);
@@ -358,6 +312,7 @@ async function loadCatalog() {
   } finally {
     catalogState.loading = false;
     renderPagination();
+    if (pendingLoad) await loadCatalog();
   }
 }
 
@@ -369,13 +324,14 @@ async function refreshCatalog() {
   try {
     const result = await request("/api/v1/llm-models/catalog/refresh", { method: "POST" });
     setFeedback(
-      `目录更新完成：${result.labs} 个 Lab、${result.models} 个模型、${result.providers} 个接入渠道、${result.rows} 条组合。`,
+      `目录更新完成：${result.providers} 个供应商、${result.models} 个模型。`,
     );
   } catch (error) {
     setFeedback(`目录更新失败，旧目录已保留：${error.message}`, true);
     catalogState.loading = false;
     renderPagination();
     element("catalogRefreshBtn").disabled = false;
+    if (pendingLoad) await loadCatalog();
     return;
   }
   catalogState.loading = false;
@@ -409,7 +365,7 @@ async function importCatalog(file) {
       );
     }
     setFeedback(
-      `目录导入完成：${result.labs} 个 Lab、${result.models} 个模型、${result.providers} 个接入渠道、${result.rows} 条组合。`,
+      `目录导入完成：${result.providers} 个供应商、${result.models} 个模型。`,
     );
   } catch (error) {
     setFeedback(`目录导入失败，旧目录已保留：${error.message}`, true);
@@ -417,6 +373,7 @@ async function importCatalog(file) {
     renderPagination();
     element("catalogRefreshBtn").disabled = false;
     element("catalogImportBtn").disabled = false;
+    if (pendingLoad) await loadCatalog();
     return;
   }
   catalogState.loading = false;
@@ -471,20 +428,16 @@ async function exportCatalog() {
     element("catalogImportBtn").disabled = false;
     element("catalogExportBtn").disabled = false;
     element("catalogRefreshBtn").disabled = false;
+    if (pendingLoad) await loadCatalog();
   }
 }
 
 function initCatalog() {
-  document.querySelectorAll("[data-catalog-view]").forEach((button) => {
-    button.addEventListener("click", () => {
-      catalogState.view = button.dataset.catalogView;
-      catalogState.offset = 0;
-      document.querySelectorAll("[data-catalog-view]").forEach((item) => {
-        item.classList.toggle("active", item === button);
-      });
-      loadCatalog();
-    });
+  bindCatalogSelect("catalogModalitySelect");
+  document.addEventListener("click", (event) => {
+    if (!event.target.closest("[data-catalog-select]")) closeCatalogSelects();
   });
+  window.addEventListener("hashchange", () => closeCatalogSelects());
   element("catalogSearchInput")?.addEventListener("input", (event) => {
     catalogState.query = event.target.value || "";
     clearTimeout(searchTimer);
@@ -492,11 +445,6 @@ function initCatalog() {
       catalogState.offset = 0;
       loadCatalog();
     }, 250);
-  });
-  element("catalogProviderSelect")?.addEventListener("change", (event) => {
-    catalogState.providerId = event.target.value || "";
-    catalogState.offset = 0;
-    loadCatalog();
   });
   element("catalogModalitySelect")?.addEventListener("change", (event) => {
     catalogState.modality = event.target.value || "";

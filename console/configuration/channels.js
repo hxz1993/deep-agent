@@ -48,7 +48,7 @@ const channelsAdmin = {
   async refresh() {
     const tbody = document.getElementById("channelTableBody");
     if (!tbody) return;
-    tbody.innerHTML = '<tr><td colspan="6" class="empty-cell">正在加载渠道…</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="7" class="empty-cell">正在加载渠道…</td></tr>';
     try {
       const [accounts, agents, runtime] = await Promise.all([
         apiFetch("/api/v1/channel-accounts").then((accounts) => {
@@ -66,7 +66,7 @@ const channelsAdmin = {
       this.renderTable();
       showDbBanner(false);
     } catch (error) {
-      tbody.innerHTML = `<tr><td colspan="6" class="empty-cell">${escapeHtml(error.message)}</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="7" class="empty-cell">${escapeHtml(error.message)}</td></tr>`;
     }
   },
 
@@ -111,19 +111,19 @@ const channelsAdmin = {
     const tbody = document.getElementById("channelTableBody");
     if (!tbody) return;
     if (!channelAdminState.accounts.length) {
-      tbody.innerHTML = '<tr><td colspan="6" class="empty-cell">暂无渠道配置</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="7" class="empty-cell">暂无渠道配置</td></tr>';
       return;
     }
     tbody.innerHTML = channelAdminState.accounts.map((account) => {
       const runtime = channelRuntimeFor(account);
       return `<tr class="channel-list-row" data-open-channel="${escapeHtml(account.id)}" tabindex="0">
+        <td class="channel-enabled-cell"><button type="button" class="model-enabled-switch ${account.enabled ? "on" : "off"}" data-toggle-channel="${escapeHtml(account.id)}" role="switch" aria-checked="${account.enabled}" title="${account.enabled ? "停用渠道" : "启用渠道"}" aria-label="${account.enabled ? "停用渠道" : "启用渠道"}"><span></span></button></td>
         <td><strong>${escapeHtml(account.name)}</strong></td>
         <td class="channel-type-cell">企微（WS）</td>
         <td>${escapeHtml(account.agent_name || account.agent_id)}</td>
         <td><span class="channel-status" data-state="${escapeHtml(runtime.state)}" title="${escapeHtml(runtime.message || "")}"><span></span>${escapeHtml(CHANNEL_STATE_LABELS[runtime.state] || runtime.state)}</span></td>
         <td>${escapeHtml(formatDate(account.updated_at))}</td>
         <td><div class="row-actions channel-row-actions compact-icon-actions">
-          <button type="button" class="model-enabled-switch ${account.enabled ? "on" : "off"}" data-toggle-channel="${escapeHtml(account.id)}" role="switch" aria-checked="${account.enabled}" title="${account.enabled ? "停用渠道" : "启用渠道"}" aria-label="${account.enabled ? "停用渠道" : "启用渠道"}"><span></span></button>
           <button class="icon-btn" type="button" data-channel-test="${escapeHtml(account.id)}" title="测试连接" aria-label="测试连接"><i data-lucide="plug-zap"></i></button>
           <button class="icon-btn danger" type="button" data-channel-delete="${escapeHtml(account.id)}" title="删除渠道" aria-label="删除渠道"><i data-lucide="trash-2"></i></button>
         </div></td>
@@ -266,10 +266,54 @@ const channelsAdmin = {
   },
 };
 
+function bindChannelCreateMenu() {
+  const trigger = document.getElementById("newChannelBtn");
+  const menu = document.getElementById("newChannelMenu");
+  const option = document.getElementById("createWecomChannelBtn");
+  if (!trigger || !menu || !option) return;
+  const close = (restoreFocus = false) => {
+    menu.hidden = true;
+    trigger.setAttribute("aria-expanded", "false");
+    if (restoreFocus) trigger.focus();
+  };
+  const open = (focusOption = false) => {
+    menu.hidden = false;
+    trigger.setAttribute("aria-expanded", "true");
+    if (focusOption) option.focus();
+  };
+  trigger.addEventListener("click", () => menu.hidden ? open() : close());
+  trigger.addEventListener("keydown", (event) => {
+    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+    event.preventDefault();
+    open(true);
+  });
+  option.addEventListener("click", () => {
+    close();
+    channelsAdmin.openCreate();
+  });
+  menu.addEventListener("keydown", (event) => {
+    if (event.key === "ArrowDown" || event.key === "ArrowUp" || event.key === "Home" || event.key === "End") {
+      event.preventDefault();
+      option.focus();
+    }
+  });
+  document.addEventListener("keydown", (event) => {
+    if (menu.hidden) return;
+    if (event.key === "Escape") { event.preventDefault(); close(true); }
+    if (event.key === "Tab") close();
+  });
+  document.addEventListener("click", (event) => {
+    if (!menu.hidden && !trigger.contains(event.target) && !menu.contains(event.target)) close();
+  });
+  document.addEventListener("focusin", (event) => {
+    if (!menu.hidden && !trigger.contains(event.target) && !menu.contains(event.target)) close();
+  });
+}
+
 window.channelsAdmin = channelsAdmin;
 
 document.addEventListener("DOMContentLoaded", () => {
-  document.getElementById("newChannelBtn")?.addEventListener("click", () => channelsAdmin.openCreate());
+  bindChannelCreateMenu();
   document.getElementById("refreshChannelsBtn")?.addEventListener("click", () => channelsAdmin.refresh());
   document.getElementById("channelCommandsBtn")?.addEventListener("click", () => channelsAdmin.openCommands());
   document.getElementById("retryChannelCommandsBtn")?.addEventListener("click", () => channelsAdmin.openCommands());

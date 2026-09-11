@@ -308,19 +308,12 @@ function initTabs() {
         Promise.all([loadLlmModels(), loadCapabilities(), loadSkills()]).then(() => window.agentsAdmin.refresh());
       }
       if (name === "llm-providers" && window.llmProvidersAdmin) window.llmProvidersAdmin.refresh();
-      if (name === "builtin-tools") {
-        window.builtinToolsAdmin?.refresh();
-        window.systemToolsAdmin?.refresh();
-      }
+      if (name === "tools") window.toolsAdmin?.refresh();
       if (name === "skills" && window.skillsAdmin) {
         window.skillsAdmin.selectedCode = null;
         window.skillsAdmin.refresh();
       }
       if (name === "mcp" && window.mcpAdmin) window.mcpAdmin.refresh();
-      if (name === "ui-tools" && window.uiToolsAdmin) {
-        window.uiToolsAdmin.selectedPackageCode = null;
-        window.uiToolsAdmin.refresh();
-      }
       if (name === "channels" && window.channelsAdmin) window.channelsAdmin.refresh();
       if (name === "catalog" && window.modelCatalogAdmin) window.modelCatalogAdmin.refresh();
     });

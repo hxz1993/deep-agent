@@ -21,7 +21,7 @@
             <div class="global-settings-section-title">
               <i data-lucide="globe-2"></i>
               <h3>Web Search</h3>
-              <span class="global-settings-section-copy">配置 Agent 的搜索 Provider。</span>
+              <span class="global-settings-section-copy">配置 Agent 的搜索供应商。</span>
             </div>
             <div class="global-settings-section-actions">
               <span class="global-settings-summary-value" id="webSearchSummaryValue">会话原生搜索</span>
@@ -114,63 +114,21 @@
       </div>
     </section>
 
-    <!-- LLM Provider panel -->
+    <!-- LLM 供应商 panel -->
     <section class="panel provider-admin-panel" id="panel-llm-providers">
       <div class="panel-toolbar">
         <div>
-          <h2>Provider</h2>
-          <p class="panel-subtitle">集中维护模型接入地址与凭据，模型只引用一个 Provider。</p>
+          <h2>模型</h2>
+          <p class="panel-subtitle">管理模型供应商、接入凭据及关联模型。</p>
         </div>
-        <button class="btn primary" type="button" id="newLlmProviderBtn"><i data-lucide="plus"></i>新建 Provider</button>
+        <button class="btn primary" type="button" id="newLlmProviderBtn"><i data-lucide="plus"></i>新建供应商</button>
       </div>
       <div class="provider-admin-workspace">
         <aside class="provider-list-pane" id="llmProviderList" aria-live="polite">
-          <div class="provider-list-state">正在加载 Provider…</div>
+          <div class="provider-list-state">正在加载供应商…</div>
         </aside>
         <section class="provider-detail-pane" id="llmProviderDetail">
-          <div class="provider-detail-empty"><i data-lucide="waypoints"></i><p>选择一个 Provider 查看接入配置与关联模型</p></div>
-        </section>
-      </div>
-    </section>
-
-    <!-- Read-only built-in tools panel -->
-    <section class="panel builtin-tools-panel" id="panel-builtin-tools">
-      <div class="panel-toolbar">
-        <div>
-          <h2>内置工具</h2>
-          <p class="panel-subtitle">集中查看可由 Agent 配置的能力工具包，以及按运行条件自动注入、无需配置的系统工具。</p>
-        </div>
-      </div>
-      <div class="builtin-tools-sections">
-        <section class="builtin-tools-section">
-          <div class="configuration-subheading">
-            <h3>预制工具包</h3>
-            <p>随 DeepAgent 版本发布，是否参与运行只由 Agent 能力关联决定。</p>
-          </div>
-          <div class="table-wrap console-list-a">
-            <table class="data-table builtin-tools-table">
-              <thead>
-                <tr>
-                  <th>能力包</th>
-                  <th>能力编码</th>
-                  <th>包含工具</th>
-                  <th>说明</th>
-                </tr>
-              </thead>
-              <tbody id="builtinToolsTableBody">
-                <tr><td colspan="4" class="empty-cell">正在加载内置工具…</td></tr>
-              </tbody>
-            </table>
-          </div>
-        </section>
-        <section class="builtin-tools-section">
-          <div class="configuration-subheading">
-            <h3>运行时系统工具</h3>
-            <p>由 DeepAgent 按当前 Agent 和 Run 条件自动注入，不参与 Agent 能力配置。</p>
-          </div>
-          <div class="system-tool-domains" id="systemToolDomains" aria-live="polite">
-            <div class="system-tools-state">正在加载系统工具…</div>
-          </div>
+          <div class="provider-detail-empty"><i data-lucide="waypoints"></i><p>选择一个供应商查看接入配置与关联模型</p></div>
         </section>
       </div>
     </section>
@@ -191,13 +149,19 @@
             <strong>网关：读取中</strong>
           </span>
           <button class="btn" type="button" id="refreshChannelsBtn" title="刷新渠道网关状态"><i data-lucide="refresh-cw"></i>网关状态</button>
-          <button class="btn primary" type="button" id="newChannelBtn"><i data-lucide="plus"></i>新建渠道</button>
+          <div class="channel-create-control">
+            <button class="btn primary" type="button" id="newChannelBtn" aria-haspopup="menu" aria-expanded="false" aria-controls="newChannelMenu"><i data-lucide="plus"></i><span>新建渠道</span><i data-lucide="chevron-down"></i></button>
+            <div class="channel-create-menu" id="newChannelMenu" role="menu" aria-label="选择渠道" hidden>
+              <button class="console-select-option" type="button" id="createWecomChannelBtn" role="menuitem"><i data-lucide="messages-square"></i><span>企微</span></button>
+            </div>
+          </div>
         </div>
       </div>
       <div class="table-wrap console-list-a">
         <table class="data-table channel-table">
           <thead>
             <tr>
+              <th class="channel-enabled-cell" aria-label="启用状态"></th>
               <th>名称</th>
               <th>渠道</th>
               <th>Agent</th>
@@ -207,7 +171,7 @@
             </tr>
           </thead>
           <tbody id="channelTableBody">
-            <tr><td colspan="6" class="empty-cell">正在加载渠道…</td></tr>
+            <tr><td colspan="7" class="empty-cell">正在加载渠道…</td></tr>
           </tbody>
         </table>
       </div>
@@ -241,15 +205,22 @@
       </div>
     </section>
 
-    <!-- UI tools panel -->
-    <section class="panel" id="panel-ui-tools">
+    <!-- Unified tool management -->
+    <section class="panel tools-admin-panel" id="panel-tools">
       <div class="panel-toolbar">
         <div class="panel-title-copy">
-          <h2>UI 工具（HITL）</h2>
-          <p class="panel-subtitle">先管理工具包，再在选中的自定义工具包中维护 UI 工具；是否参与运行只由 Agent 关联决定。</p>
+          <h2>工具</h2>
+          <p class="panel-subtitle" id="toolsViewDescription">管理 UI 交互工具包及其中的工具，由 Agent 关联使用。</p>
         </div>
-        <button class="btn primary" id="newUiToolPackageBtn"><i data-lucide="plus"></i>新建工具包</button>
+        <div class="tools-toolbar-actions">
+          <button type="button" class="btn primary" id="newUiToolPackageBtn" aria-label="新建工具包"><i data-lucide="plus"></i>新建</button>
+          <div class="agent-view-switch tools-view-switch" role="tablist" aria-label="工具类型">
+            <button type="button" class="active" id="toolsUiTab" role="tab" aria-selected="true" aria-controls="panel-ui-tools" data-tools-view="ui"><i data-lucide="monitor-check" aria-hidden="true"></i><span>UI</span></button>
+            <button type="button" id="toolsBuiltinTab" role="tab" aria-selected="false" aria-controls="panel-builtin-tools" data-tools-view="builtin" tabindex="-1"><i data-lucide="hammer" aria-hidden="true"></i><span>内置</span></button>
+          </div>
+        </div>
       </div>
+      <div class="tools-view" id="panel-ui-tools" role="tabpanel" aria-labelledby="toolsUiTab" data-tools-panel="ui">
       <div class="ui-tools-workspace ui-tools-light-layout">
         <aside class="ui-tool-package-pane">
           <div class="ui-tool-package-tree" id="uiToolPackageTree">
@@ -290,6 +261,10 @@
           </div>
         </section>
       </div>
+      </div>
+      <div class="tools-view" id="panel-builtin-tools" role="tabpanel" aria-labelledby="toolsBuiltinTab" data-tools-panel="builtin" hidden>
+        <div id="builtinToolCatalog" aria-live="polite"><div class="skill-list-state">正在加载内置工具…</div></div>
+      </div>
     </section>
   </div>
 
@@ -306,12 +281,12 @@
             <label class="web-search-mode-card">
               <input type="radio" name="webSearchMode" value="native" checked />
               <span class="web-search-mode-dot" aria-hidden="true"></span>
-              <span><strong>会话原生搜索</strong><small>使用当前会话模型的原生搜索能力。</small></span>
+              <span><strong>会话原生搜索</strong></span>
             </label>
             <label class="web-search-mode-card">
               <input type="radio" name="webSearchMode" value="provider" />
               <span class="web-search-mode-dot" aria-hidden="true"></span>
-              <span><strong>指定 Provider</strong><small>使用固定搜索服务。</small></span>
+              <span><strong>指定供应商</strong></span>
             </label>
           </div>
         </fieldset>
@@ -323,12 +298,12 @@
         <div class="web-search-provider-fields hidden" data-web-search-detail="provider">
           <div class="web-search-provider-grid" id="webSearchProviderGrid">
             <div class="field web-search-provider-field">
-              <span>Provider</span>
+              <span>供应商</span>
               <div class="console-select" data-console-select="webSearchProvider">
                 <button class="console-select-trigger" id="webSearchProviderTrigger" type="button" aria-haspopup="listbox" aria-expanded="false">
                   <span id="webSearchProviderLabel">DeepSeek</span><i data-lucide="chevron-down" aria-hidden="true"></i>
                 </button>
-                <div class="console-select-menu hidden" id="webSearchProviderMenu" role="listbox" aria-label="选择搜索 Provider"></div>
+                <div class="console-select-menu hidden" id="webSearchProviderMenu" role="listbox" aria-label="选择搜索供应商"></div>
                 <select class="hidden" id="webSearchProvider" name="provider" tabindex="-1" aria-hidden="true">
                   <option value="deepseek">DeepSeek</option>
                   <option value="kimi">Kimi</option>
@@ -353,7 +328,7 @@
             <div class="web-search-credential-source" data-web-search-field="credential-source" role="group" aria-label="凭据来源">
               <strong>凭据</strong>
               <div class="web-search-credential-options">
-                <label><input type="radio" name="webSearchCredentialSource" value="llm_provider" checked /><span>沿用 Provider</span></label>
+                <label><input type="radio" name="webSearchCredentialSource" value="llm_provider" checked /><span>沿用供应商</span></label>
                 <label><input type="radio" name="webSearchCredentialSource" value="api_key" /><span>单独 API Key</span></label>
               </div>
             </div>
@@ -364,7 +339,7 @@
                   <button class="console-select-trigger" id="webSearchLlmProviderTrigger" type="button" aria-haspopup="listbox" aria-expanded="false">
                     <span id="webSearchLlmProviderLabel">请选择</span><i data-lucide="chevron-down" aria-hidden="true"></i>
                   </button>
-                  <div class="console-select-menu hidden" id="webSearchLlmProviderMenu" role="listbox" aria-label="选择会话 Provider"></div>
+                  <div class="console-select-menu hidden" id="webSearchLlmProviderMenu" role="listbox" aria-label="选择会话供应商"></div>
                   <select class="hidden" id="webSearchLlmProvider" name="llmProviderId" tabindex="-1" aria-hidden="true"></select>
                 </div>
                 <button class="btn icon-btn" id="testWebSearchLlmProviderBtn" type="button" title="测试连接" aria-label="测试连接"><i data-lucide="plug-zap"></i></button>
@@ -424,10 +399,6 @@
               <span>默认模型</span>
               <select id="agentModelId" required></select>
             </label>
-            <label class="field">
-              <span>Temperature（可选）</span>
-              <input type="number" id="agentTemperature" min="0" max="2" step="0.1" placeholder="留空使用模型默认" />
-            </label>
             <label class="field field-grow">
               <span class="field-title-row">
                 <span>System Prompt</span>
@@ -463,22 +434,24 @@
     </form>
   </dialog>
 
-  <!-- LLM Provider modal -->
+  <!-- LLM 供应商 modal -->
   <dialog class="modal" id="llmProviderModal">
     <form id="llmProviderForm" method="dialog">
       <div class="modal-header">
-        <h3 id="llmProviderModalTitle">新建 Provider</h3>
+        <h3 id="llmProviderModalTitle">新建供应商</h3>
         <button type="button" class="icon-btn" id="closeLlmProviderModal" aria-label="关闭"><i data-lucide="x"></i></button>
       </div>
       <div class="modal-body">
+        <div class="dialog-field-grid">
         <label class="field">
           <span>名称</span>
           <input type="text" id="llmProviderName" required placeholder="例如 Kimi" />
         </label>
         <label class="field">
-          <span>Provider 类型</span>
+          <span>供应商类型</span>
           <select id="llmProviderType" required></select>
         </label>
+        </div>
         <div class="field">
           <div class="field-label-actions">
             <label for="llmProviderBaseUrl">Base URL</label>
@@ -511,22 +484,23 @@
         <button type="button" class="icon-btn" id="closeLlmModelModal" aria-label="关闭"><i data-lucide="x"></i></button>
       </div>
       <div class="modal-body">
-        <label class="field">
-          <span>模型名称</span>
-          <input type="text" id="llmModelModel" placeholder="例如 gpt-4.1-mini" required />
-        </label>
-        <label class="field">
-          <span>描述（可选）</span>
-          <input type="text" id="llmModelDescription" />
-        </label>
+        <div class="llm-identity-grid">
+          <label class="field">
+            <span>模型名称</span>
+            <input type="text" id="llmModelModel" placeholder="例如 gpt-4.1-mini" required />
+          </label>
+          <label class="field">
+            <span>描述（可选）</span>
+            <input type="text" id="llmModelDescription" />
+          </label>
+        </div>
         <label class="field" id="llmModelNameField">
           <span>名称</span>
           <input type="text" id="llmModelName" required />
         </label>
         <label class="field" id="llmModelProviderField">
-          <span>Provider</span>
+          <span class="field-label-row"><span>供应商</span><small class="field-subtitle">统一维护地址和凭据</small></span>
           <select id="llmModelProviderId" required></select>
-          <small class="field-hint">地址和凭据由 Provider 统一维护。</small>
         </label>
         <div class="llm-advanced-divider" role="separator">
           <span class="llm-advanced-label">
@@ -545,20 +519,15 @@
           <label class="field">
             <span>上下文窗口 Token</span>
             <input type="number" id="llmModelContextWindow" min="1" step="1" required />
-            <small class="field-hint">模型输入与输出共享的总窗口。</small>
           </label>
           <label class="field">
             <span>最大输出 Token</span>
             <input type="number" id="llmModelMaxOutput" min="1" step="1" required />
-            <small class="field-hint">模型能力上限，不是每轮固定预留值。</small>
           </label>
         </div>
         <div class="field llm-option-row">
           <div class="llm-option-copy">
             <span>输入模态</span>
-            <p class="field-hint">
-              仅描述 LLM 原生输入能力；平台文件上传和 Agent 附件工具不在此列。
-            </p>
           </div>
           <div class="modality-checkboxes" id="llmModelModalities">
             <label class="checkbox-field"><input type="checkbox" name="llmModelModality" value="text" checked /> 文本</label>
@@ -570,16 +539,15 @@
         <div class="field llm-option-row">
           <div class="llm-option-copy">
             <span>能力标签</span>
-            <p class="field-hint">模型能力标签与输入模态分开保存；私有模型可手工指定。</p>
           </div>
           <div class="modality-checkboxes" id="llmModelTags">
             <label class="checkbox-field"><input type="checkbox" name="llmModelTag" value="attachment" /> 附件</label>
             <label class="checkbox-field"><input type="checkbox" name="llmModelTag" value="reasoning" /> 推理</label>
-            <label class="checkbox-field"><input type="checkbox" name="llmModelTag" value="tool_call" /> 工具调用</label>
-            <label class="checkbox-field"><input type="checkbox" name="llmModelTag" value="structured_output" /> 结构化输出</label>
-            <label class="checkbox-field"><input type="checkbox" name="llmModelTag" value="temperature" /> Temperature</label>
-            <label class="checkbox-field"><input type="checkbox" name="llmModelTag" value="open_weights" /> 开放权重</label>
-            <label class="checkbox-field"><input type="checkbox" name="llmModelTag" value="interleaved" /> 交错推理</label>
+            <label class="checkbox-field"><input type="checkbox" name="llmModelTag" value="tool_call" /> 工具</label>
+            <label class="checkbox-field"><input type="checkbox" name="llmModelTag" value="structured_output" /> 结构化</label>
+            <label class="checkbox-field"><input type="checkbox" name="llmModelTag" value="temperature" /> 温度</label>
+            <label class="checkbox-field"><input type="checkbox" name="llmModelTag" value="open_weights" /> 开放</label>
+            <label class="checkbox-field"><input type="checkbox" name="llmModelTag" value="interleaved" /> 交错</label>
           </div>
         </div>
       </div>
@@ -591,7 +559,7 @@
     </form>
   </dialog>
 
-  <!-- Provider catalog picker -->
+  <!-- 供应商 catalog picker -->
   <dialog class="modal provider-catalog-picker-modal" id="providerCatalogPickerModal">
     <form id="providerCatalogPickerForm" method="dialog">
       <div class="modal-header">
@@ -603,7 +571,7 @@
       </div>
       <div class="modal-body provider-catalog-picker-body">
         <div class="provider-catalog-picker-toolbar">
-          <p class="field-hint">已添加的模型仅作标识且不可选择；勾选其他模型后，点击“添加所选”才会创建。</p>
+          <span class="field-subtitle">勾选模型后添加，已添加项不可重复选择</span>
           <button type="button" class="btn-link" id="toggleProviderCatalogSelection">全选可添加</button>
         </div>
         <div class="provider-catalog-choice-list" id="providerCatalogChoiceList" aria-live="polite"></div>
@@ -622,15 +590,14 @@
       <button type="button" class="icon-btn" id="closeSkillInstallBtn" aria-label="关闭"><i data-lucide="x"></i></button>
     </div>
     <div class="modal-body">
-      <aside class="skill-install-note" aria-label="上传说明">
-        <p><span class="skill-install-note-number">1.</span>支持<strong>多包新建</strong>，已有编码<strong>不覆盖</strong>；更新请用详情“上传”。</p>
-        <p><span class="skill-install-note-number">2.</span><strong>ZIP 含 SKILL.md · 每包 ≤ 10 MiB</strong>；解压 ≤ 50 MiB / 256 文件。</p>
-      </aside>
-      <button type="button" class="skill-install-picker" id="chooseSkillPackagesBtn" aria-label="选择 ZIP 文件">
-        <i data-lucide="upload"></i>
-        <span><strong>选择 ZIP 文件</strong><small>可多选；“导出全部”请先解压，再选择其中的包</small></span>
-        <i data-lucide="plus" class="skill-install-picker-plus"></i>
-      </button>
+      <div class="field">
+        <span class="field-label-row"><span>Skill 安装包</span><small class="field-subtitle">ZIP · 每包 ≤ 10 MiB</small><span class="field-help" tabindex="0" aria-label="Skill 安装包说明" aria-describedby="skillInstallHelp"><i data-lucide="circle-help" aria-hidden="true"></i><span class="field-help-tooltip" id="skillInstallHelp" role="tooltip">支持多包新建，已有编码不覆盖；更新请用详情“上传”。ZIP 须包含 SKILL.md，每包不超过 10 MiB；解压后不超过 50 MiB、256 个文件。“导出全部”请先解压，再选择其中的包。</span></span></span>
+        <button type="button" class="skill-install-picker" id="chooseSkillPackagesBtn" aria-label="选择 ZIP 文件">
+          <i data-lucide="upload"></i>
+          <span><strong>选择 ZIP 文件</strong><small>可多选</small></span>
+          <i data-lucide="plus" class="skill-install-picker-plus"></i>
+        </button>
+      </div>
       <input class="hidden" type="file" id="skillInstallFiles" accept=".zip,application/zip" multiple />
       <ul class="skill-install-results" id="skillInstallResults" aria-live="polite"></ul>
       <div class="skill-install-message" id="skillInstallMessage" role="status"></div>
@@ -659,7 +626,7 @@
       <div class="modal-header">
         <div class="modal-title-copy">
           <h3 id="channelAccountModalTitle">新建企微渠道</h3>
-          <span class="modal-entity-id">企微智能机器人 · WebSocket</span>
+          <span class="channel-modal-subtitle"><span>企微智能机器人</span><span class="channel-transport-tag">WebSocket</span></span>
         </div>
         <button type="button" class="icon-btn" id="closeChannelAccountModal" aria-label="关闭"><i data-lucide="x"></i></button>
       </div>
@@ -682,9 +649,8 @@
             <input type="password" id="channelSecret" autocomplete="new-password" />
           </label>
           <label class="field">
-            <span>会话用户</span>
+            <span class="field-label-row"><span>会话用户</span><small class="field-subtitle" id="channelSessionUserHint">使用此平台账号记录渠道会话。</small></span>
             <input type="text" id="channelSessionUserId" maxlength="128" required autocomplete="off" placeholder="平台 User ID" aria-describedby="channelSessionUserHint" />
-            <small class="field-hint" id="channelSessionUserHint">使用此平台账号记录渠道会话。</small>
           </label>
         </div>
       </div>
@@ -713,9 +679,8 @@
         <div class="mcp-editor-workbench">
           <section class="mcp-editor-section mcp-editor-basics">
             <label class="field">
-              <span>名称</span>
+              <span class="field-label-row"><span>名称</span><span class="field-help hidden" id="mcpNameReadOnlyHint" tabindex="0" aria-label="名称说明" aria-describedby="mcpNameTooltip"><i data-lucide="circle-help" aria-hidden="true"></i><span class="field-help-tooltip" id="mcpNameTooltip" role="tooltip">名称用于能力编码和模型工具前缀；请通过列表中的“重命名”操作修改。</span></span></span>
               <input type="text" id="mcpName" required maxlength="191" pattern="[a-zA-Z][a-zA-Z0-9_-]*" />
-              <small class="field-hint hidden" id="mcpNameReadOnlyHint">名称用于能力编码和模型工具前缀；请通过列表中的“重命名”操作修改。</small>
             </label>
             <label class="field">
               <span>描述（可选）</span>
@@ -826,6 +791,7 @@
         <button type="button" class="icon-btn" id="closeUiToolPackageModal" aria-label="关闭"><i data-lucide="x"></i></button>
       </div>
       <div class="modal-body">
+        <div class="dialog-field-grid">
         <label class="field">
           <span>工具包编码</span>
           <input type="text" id="uiToolPackageEditCode" required pattern="ui:[a-z][a-z0-9_\-]{1,120}" placeholder="ui:spreadsheet" />
@@ -834,6 +800,7 @@
           <span>显示名称</span>
           <input type="text" id="uiToolPackageLabel" required />
         </label>
+        </div>
         <label class="field">
           <span>说明</span>
           <textarea id="uiToolPackageDescription" rows="3"></textarea>
@@ -857,60 +824,46 @@
       <div class="modal-body">
         <section class="ui-tool-template-section" id="uiToolTemplateSection">
           <label class="field">
-            <span>配置模板</span>
+            <span class="field-label-row"><span>配置模板</span><span class="field-help" tabindex="0" aria-label="配置模板说明" aria-describedby="uiToolTemplateDesc"><i data-lucide="circle-help" aria-hidden="true"></i><span class="field-help-tooltip" id="uiToolTemplateDesc" role="tooltip"></span></span></span>
             <select id="uiToolTemplate"></select>
           </label>
-          <p class="field-hint" id="uiToolTemplateDesc"></p>
         </section>
 
         <input type="hidden" id="uiToolPackageCode" />
         <div class="ui-tool-basic-grid">
-          <section class="ui-tool-basic-column">
-            <label class="field">
-              <span>名称</span>
-              <input type="text" id="uiToolName" required pattern="[a-z][a-z0-9_]{1,120}" placeholder="myapp__ask_confirm" />
-            </label>
-            <label class="field">
-              <span>描述</span>
-              <textarea id="uiToolDescription" rows="4" required></textarea>
-            </label>
-          </section>
-          <section class="ui-tool-basic-column">
-            <label class="field">
-              <span>Widget</span>
-              <div class="widget-picker">
-                <select id="uiToolWidget">
-                  <option value="">—</option>
-                  <option value="confirm">confirm</option>
-                  <option value="choice">choice</option>
-                  <option value="text">text</option>
-                  <option value="date_picker">date_picker</option>
-                  <option value="custom">自定义…</option>
-                </select>
-                <input type="text" id="uiToolWidgetCustom" class="hidden" placeholder="输入客户端自定义渲染器标识" />
-              </div>
-              <small class="field-hint">Widget 是前端渲染器标识；选择“自定义”时，填写客户端已注册的渲染器名称。</small>
-            </label>
-          </section>
+          <label class="field">
+            <span>名称</span>
+            <input type="text" id="uiToolName" required pattern="[a-z][a-z0-9_]{1,120}" placeholder="myapp__ask_confirm" />
+          </label>
+          <div class="field">
+            <span class="field-label-row"><label for="uiToolWidget">Widget</label><span class="field-help" tabindex="0" aria-label="Widget说明" aria-describedby="uiToolWidgetHint"><i data-lucide="circle-help" aria-hidden="true"></i><span class="field-help-tooltip" id="uiToolWidgetHint" role="tooltip">Widget 是前端渲染器标识；可选择常用渲染器，也可直接输入客户端已注册的标识。</span></span></span>
+            <input type="text" id="uiToolWidget" aria-label="Widget" placeholder="选择或输入渲染器" autocomplete="off" />
+          </div>
+          <label class="field">
+            <span>描述</span>
+            <textarea id="uiToolDescription" rows="3" required></textarea>
+          </label>
         </div>
 
+        <div class="ui-tool-schema-bar">
+        <div class="ui-tool-schema-tabs" role="tablist" aria-label="工具结构">
+          <button type="button" role="tab" id="uiToolParamsTab" aria-selected="true" aria-controls="uiToolParamsPanel" data-schema-tab="params" aria-describedby="uiToolParamsHint"><span>参数 Schema</span><span class="field-help" aria-label="参数 Schema说明" aria-describedby="uiToolParamsHint"><i data-lucide="circle-help" aria-hidden="true"></i><span class="field-help-tooltip" id="uiToolParamsHint" role="tooltip">参数顶层类型必须是 object；保存时校验 JSON。</span></span></button>
+          <button type="button" role="tab" id="uiToolResultTab" aria-selected="false" aria-controls="uiToolResultPanel" data-schema-tab="result" tabindex="-1" aria-describedby="uiToolResultHint"><span>结果 Schema</span><span class="field-help" aria-label="结果 Schema说明" aria-describedby="uiToolResultHint"><i data-lucide="circle-help" aria-hidden="true"></i><span class="field-help-tooltip" id="uiToolResultHint" role="tooltip">留空时保存为 null。</span></span></button>
+          <button type="button" role="tab" id="uiToolMetadataTab" aria-selected="false" aria-controls="uiToolMetadataPanel" data-schema-tab="metadata" tabindex="-1" aria-describedby="uiToolMetadataHint"><span>Metadata</span><span class="field-help" aria-label="Metadata（选填）说明" aria-describedby="uiToolMetadataHint"><i data-lucide="circle-help" aria-hidden="true"></i><span class="field-help-tooltip" id="uiToolMetadataHint" role="tooltip">工具展示和客户端行为的扩展元数据；留空时保存为 null。</span></span></button>
+        </div>
+        <code class="schema-json-format" id="uiToolSchemaFormat">JSON Schema</code>
+        </div>
         <div class="ui-tool-json-grid">
-          <section class="field field-grow ui-tool-json-field">
-            <span class="field-title-row"><span>参数 Schema</span><code class="schema-json-format">JSON Schema</code></span>
-            <textarea id="uiToolParamsEditor" class="mono-textarea schema-json-textarea" rows="13" required spellcheck="false" aria-describedby="uiToolParamsHint"></textarea>
-            <small class="field-hint" id="uiToolParamsHint">参数顶层类型必须是 object；保存时校验 JSON。</small>
+          <section class="field field-grow ui-tool-json-field" role="tabpanel" id="uiToolParamsPanel" aria-labelledby="uiToolParamsTab" data-schema-panel="params">
+            <textarea aria-labelledby="uiToolParamsTab" id="uiToolParamsEditor" class="mono-textarea schema-json-textarea" rows="13" required spellcheck="false" aria-describedby="uiToolParamsHint"></textarea>
           </section>
 
-          <section class="field field-grow ui-tool-json-field">
-            <span class="field-title-row"><span>结果 Schema</span><code class="schema-json-format">JSON Schema</code></span>
-            <textarea id="uiToolResultEditor" class="mono-textarea schema-json-textarea" rows="13" spellcheck="false" aria-describedby="uiToolResultHint" placeholder="留空表示不声明结果 Schema"></textarea>
-            <small class="field-hint" id="uiToolResultHint">留空时保存为 null。</small>
+          <section class="field field-grow ui-tool-json-field" role="tabpanel" id="uiToolResultPanel" aria-labelledby="uiToolResultTab" data-schema-panel="result" hidden>
+            <textarea aria-labelledby="uiToolResultTab" id="uiToolResultEditor" class="mono-textarea schema-json-textarea" rows="13" spellcheck="false" aria-describedby="uiToolResultHint" placeholder="留空表示不声明结果 Schema"></textarea>
           </section>
 
-          <section class="field field-grow ui-tool-json-field">
-            <span class="field-title-row"><span>Metadata（选填）</span><code class="schema-json-format">JSON</code></span>
-            <textarea id="uiToolMetadata" rows="13" class="mono-textarea schema-json-textarea" spellcheck="false" placeholder='{"key": "value"}'></textarea>
-            <small class="field-hint">工具展示和客户端行为的扩展元数据；留空时保存为 null。</small>
+          <section class="field field-grow ui-tool-json-field" role="tabpanel" id="uiToolMetadataPanel" aria-labelledby="uiToolMetadataTab" data-schema-panel="metadata" hidden>
+            <textarea aria-labelledby="uiToolMetadataTab" id="uiToolMetadata" rows="13" class="mono-textarea schema-json-textarea" spellcheck="false" placeholder='{"key": "value"}'></textarea>
           </section>
         </div>
       </div>

@@ -214,11 +214,11 @@
 #diagnosticsLogPage #diagnosticsPartial { max-width:240px; font-size:12px; }
 #diagnosticsLogPage .diagnostics-result-title h2 { margin:0; font-size:14px; line-height:20px; font-weight:600; color:var(--diag-text,var(--text)); }
 #diagnosticsLogPage #diagnosticsMeta { font-size:12px; }
-#diagnosticsLogPage #diagnosticsQueryRange { margin-left:auto; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:13px; }
+#diagnosticsLogPage #diagnosticsQueryRange { margin-left:0; white-space:nowrap; font-size:12px; }
 #diagnosticsLogPage #diagnosticsCopyStatus:empty { display:none; }
 #diagnosticsLogPage #diagnosticsCopyStatus { position:absolute; right:20px; padding:5px 9px; background:var(--diag-surface,var(--bg)); color:var(--diag-accent,var(--accent)); }
 #diagnosticsLogPage .diagnostics-log-view { padding:2px 0 0; border:0; }
-#diagnosticsLogPage .diagnostics-row { height:26px; padding:0 8px; grid-template-columns:32px 150px 72px 52px minmax(180px,1fr) 72px; gap:12px; min-width:640px; border:0; border-radius:4px; font-size:12px; line-height:18px; }
+#diagnosticsLogPage .diagnostics-row { height:24px; padding:0 2px; grid-template-columns:30px 150px 52px 48px minmax(120px,1fr) 64px; gap:6px; min-width:580px; border:0; border-radius:4px; font-size:12px; line-height:18px; }
 #diagnosticsLogPage .diagnostics-sequence { color:var(--diag-muted,var(--text-dim)); font:12px var(--mono); text-align:right; font-variant-numeric:tabular-nums; }
 #diagnosticsLogPage .diagnostics-row time { color:var(--diag-muted,var(--text-dim)); font:12px var(--mono); }
 #diagnosticsLogPage .diagnostics-row:hover { background:color-mix(in srgb,var(--diag-accent,var(--accent)) 5%,var(--diag-surface,var(--bg))); }
@@ -318,3 +318,24 @@
   .diagnostic-view-switch button { padding:5px 8px; }
   .diagnostic-filter-meta { margin-bottom:16px; }
 }
+
+#diagnosticsExportDialog { width:480px; max-width:calc(100vw - 32px); }
+#diagnosticsExportDialog .modal-body { display:grid; gap:12px; }
+#diagnosticsExportDialog p { margin:0; overflow-wrap:anywhere; }
+#diagnosticsExportDialog .field-hint { color:var(--text-dim); font-size:12px; }
+#diagnosticsExportStatus { font-weight:500; }
+
+/* Raw view uses the exact log lines returned by the reader. */
+#diagnosticsLogPage .diagnostics-view-switch { align-self:flex-end; flex-shrink:0; display:inline-flex; gap:2px; padding:3px; border:1px solid var(--border); border-radius:8px; background:var(--bg-soft); }
+#diagnosticsLogPage .diagnostics-view-switch button { display:inline-flex; align-items:center; justify-content:center; gap:6px; min-width:64px; height:26px; padding:0 8px; border-radius:5px; font-size:12px; color:var(--text-dim); }
+#diagnosticsLogPage .diagnostics-view-switch button.active { background:var(--console-surface,var(--bg)); color:var(--accent); }
+#diagnosticsLogPage .diagnostics-raw-pane { display:flex; flex:1; min-width:0; min-height:0; flex-direction:column; gap:8px; }
+#diagnosticsLogPage .diagnostics-raw-pane[hidden], #diagnosticsLogPage .diagnostics-log-view[hidden] { display:none; }
+#diagnosticsLogPage .diagnostics-split.raw-view > .diagnostics-log-workspace,
+#diagnosticsLogPage .diagnostics-split.raw-view > .diagnostics-resizer,
+#diagnosticsLogPage .diagnostics-split.raw-view > .diagnostics-drawer { display:none; }
+#diagnosticsRawText { flex:1; width:100%; min-height:0; resize:none; overflow:auto; white-space:pre; font:12px/1.6 var(--mono); color:var(--text); background:var(--console-surface,var(--bg)); border:1px solid var(--border); border-radius:6px; padding:8px; }
+#diagnosticsRawStatus { color:var(--text-dim); font-size:12px; }
+.diagnostics-raw-head { display:flex; align-items:center; justify-content:space-between; font:12px var(--mono); }
+.diagnostics-raw-record { font:12px/1.6 var(--mono); white-space:pre-wrap; overflow-wrap:anywhere; margin:8px 0; }
+#diagnosticsLogPage .diagnostics-property { grid-template-columns:minmax(100px, 40%) minmax(0,1fr); }

@@ -139,10 +139,10 @@ const UI_TOOL_TEMPLATES = {
   },
   custom: {
     label: "空白自定义",
-    hint: "从空白 schema 开始，自行添加参数字段与结果类型；Widget 可选「自定义」输入客户端组件名。",
+    hint: "从空白 schema 开始，自行添加参数字段与结果类型；Widget 可直接输入客户端组件名。",
     nameExample: "myapp__custom_form",
     description: "Collect structured user input via a custom client-side form.",
-    widget: "custom",
+    widget: "",
     parameters_json_schema: {
       type: "object",
       properties: {},
@@ -152,7 +152,12 @@ const UI_TOOL_TEMPLATES = {
   },
 };
 
-const KNOWN_WIDGETS = ["confirm", "choice", "text", "date_picker", "custom"];
+const WIDGET_OPTIONS = [
+  { value: "confirm", label: "确认" },
+  { value: "choice", label: "选项" },
+  { value: "text", label: "文本输入" },
+  { value: "date_picker", label: "日期选择" },
+];
 
 const uiToolsAdmin = {
   editingName: null,
@@ -182,45 +187,60 @@ const uiToolsAdmin = {
   },
 
   initWidgetPicker() {
-    const select = document.getElementById("uiToolWidget");
-    const customInput = document.getElementById("uiToolWidgetCustom");
-    if (!select || !customInput) return;
-    select.addEventListener("change", () => {
-      customInput.classList.toggle("hidden", select.value !== "custom");
-      if (select.value !== "custom") customInput.value = "";
+    const input = document.getElementById("uiToolWidget");
+    if (!input) return;
+    this.widgetPicker = window.createEditableSelect(input, {
+      options: WIDGET_OPTIONS,
     });
   },
 
   setWidgetValue(widget) {
-    const select = document.getElementById("uiToolWidget");
-    const customInput = document.getElementById("uiToolWidgetCustom");
-    if (!select || !customInput) return;
-    if (!widget) {
-      select.value = "";
-      customInput.value = "";
-      customInput.classList.add("hidden");
-      return;
-    }
-    if (KNOWN_WIDGETS.includes(widget)) {
-      select.value = widget;
-      customInput.value = "";
-      customInput.classList.toggle("hidden", widget !== "custom");
-    } else {
-      select.value = "custom";
-      customInput.value = widget;
-      customInput.classList.remove("hidden");
-    }
+    const input = document.getElementById("uiToolWidget");
+    if (input) input.value = widget || "";
+    this.widgetPicker?.refresh();
   },
 
   getWidgetValue() {
-    const select = document.getElementById("uiToolWidget");
-    const customInput = document.getElementById("uiToolWidgetCustom");
-    if (!select) return null;
-    if (select.value === "custom") {
-      const custom = customInput?.value.trim() || "";
-      return custom || null;
-    }
-    return select.value || null;
+    return document.getElementById("uiToolWidget")?.value.trim() || null;
+  },
+
+  selectSchemaTab(key, { focus = false } = {}) {
+    const modal = document.getElementById("uiToolModal");
+    modal.querySelectorAll("[data-schema-tab]").forEach((tab) => {
+      const selected = tab.dataset.schemaTab === key;
+      tab.setAttribute("aria-selected", String(selected));
+      tab.tabIndex = selected ? 0 : -1;
+      if (selected && focus) tab.focus();
+    });
+    const format = document.getElementById("uiToolSchemaFormat");
+    if (format) format.textContent = key === "metadata" ? "JSON" : "JSON Schema";
+    modal.querySelectorAll("[data-schema-panel]").forEach((panel) => {
+      panel.hidden = panel.dataset.schemaPanel !== key;
+    });
+  },
+
+  initSchemaTabs() {
+    const modal = document.getElementById("uiToolModal");
+    const tabs = Array.from(modal.querySelectorAll("[data-schema-tab]"));
+    tabs.forEach((tab, index) => {
+      tab.addEventListener("click", () => this.selectSchemaTab(tab.dataset.schemaTab));
+      tab.addEventListener("keydown", (event) => {
+        const offset = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
+        const target = event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1
+          : offset ? (index + offset + tabs.length) % tabs.length : -1;
+        if (target < 0) return;
+        event.preventDefault();
+        this.selectSchemaTab(tabs[target].dataset.schemaTab, { focus: true });
+      });
+    });
+    modal.addEventListener("invalid", (event) => {
+      const panel = event.target.closest("[data-schema-panel]");
+      if (!panel) return;
+      // Native constraint validation happens before submit; reveal the invalid
+      // field synchronously so the browser can focus it and show its message.
+      this.selectSchemaTab(panel.dataset.schemaPanel);
+      event.target.focus();
+    }, true);
   },
 
   loadSchemas(parametersSchema, resultSchema, { readOnly = false } = {}) {
@@ -293,13 +313,13 @@ const uiToolsAdmin = {
           ${items.length ? items.map((item) => `
             <button type="button" class="ui-tool-tree-node ${item.code === this.selectedPackageCode ? "is-selected" : ""}" data-select-package="${escapeHtml(item.code)}">
               <span class="ui-tool-tree-node-head">
-                <span class="ui-tool-tree-icon"><i data-lucide="${item.source === "builtin" ? "panel-top" : "blocks"}"></i></span>
+                <span class="ui-tool-tree-icon"><i data-lucide="monitor-check"></i></span>
                 <span class="ui-tool-tree-node-main">
                   <strong>${escapeHtml(item.label)}</strong>
                   <code>${escapeHtml(item.code)}</code>
                 </span>
                 <span class="ui-tool-tree-node-meta">
-                  <span class="ui-tool-tree-count" title="工具数量"><strong>${escapeHtml(String(item.tool_count || 0))}</strong><i data-lucide="wrench"></i></span>
+                  <span class="ui-tool-tree-count" title="工具数量"><strong>${escapeHtml(String(item.tool_count || 0))}</strong></span>
                 </span>
               </span>
             </button>`).join("") : `<div class="configuration-group-empty">${label === "自定义" ? "暂无自定义工具包，请先新建" : "暂无内置工具包"}</div>`}
@@ -528,10 +548,12 @@ const uiToolsAdmin = {
     const isReadOnly = mode === "readonly";
     this.formMode = mode;
     document.getElementById("uiToolTemplateSection").classList.toggle("hidden", !isCreate);
-    document.getElementById("uiToolName").disabled = !isCreate;
+    document.getElementById("uiToolName").disabled = false;
+    document.getElementById("uiToolName").readOnly = !isCreate;
     document.getElementById("uiToolDescription").readOnly = isReadOnly;
-    document.getElementById("uiToolWidget").disabled = isReadOnly;
-    document.getElementById("uiToolWidgetCustom").readOnly = isReadOnly;
+    document.getElementById("uiToolWidget").readOnly = isReadOnly;
+    this.widgetPicker?.refresh();
+    this.selectSchemaTab("params");
     document.getElementById("uiToolMetadata").readOnly = isReadOnly;
     document.getElementById("saveUiToolBtn").classList.toggle("hidden", isReadOnly);
     document.getElementById("cancelUiToolBtn").textContent = isReadOnly ? "关闭" : "取消";
@@ -586,15 +608,19 @@ const uiToolsAdmin = {
     let parameters_json_schema;
     let result_schema;
     let metadata;
+    let schemaTab = "params";
     try {
       parameters_json_schema = parseUiToolSchema(this.paramsEl()?.value, {
         label: "参数 Schema",
         required: true,
         requireObject: true,
       });
+      schemaTab = "result";
       result_schema = parseUiToolSchema(this.resultEl()?.value, { label: "结果 Schema" });
+      schemaTab = "metadata";
       metadata = parseJsonOrEmpty(document.getElementById("uiToolMetadata").value);
     } catch (err) {
+      this.selectSchemaTab(schemaTab);
       AdminFormFeedback.show(form, err);
       return;
     }
@@ -692,6 +718,7 @@ window.uiToolsAdmin = uiToolsAdmin;
 document.addEventListener("DOMContentLoaded", () => {
   uiToolsAdmin.initTemplates();
   uiToolsAdmin.initWidgetPicker();
+  uiToolsAdmin.initSchemaTabs();
   document.getElementById("newUiToolPackageBtn")?.addEventListener("click", () => uiToolsAdmin.openPackageCreate());
   document.getElementById("newUiToolBtn")?.addEventListener("click", () => uiToolsAdmin.openCreate());
   document.getElementById("editUiToolPackageBtn")?.addEventListener("click", () => uiToolsAdmin.openPackageEdit(uiToolsAdmin.selectedPackageCode));

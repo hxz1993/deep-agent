@@ -32,6 +32,19 @@ PYTHONPATH=src python3.12 -m maintenance.config_backup \
   --environment test
 ```
 
+Alpha 使用独立的私有连接文件，不能只改 `--environment` 后继续使用 Test 配置：
+
+```bash
+PYTHONPATH=src python3.12 -m maintenance.config_backup \
+  --config ~/.config/deep-agent/alpha.env \
+  --environment alpha
+```
+
+`--environment` 只决定备份标签和输出子目录，实际源库由 `--config` 决定。连接文件保存在仓库外，
+权限设为 `0600`，包含该环境真实的 `DEEP_AGENT_DBMS_NAME/USER/PASSWORD/HOSTNAME/PORT/DATABASE`。
+在 DevBox 登记为独立网页任务时，命令只引用文件路径，并将下方对应环境目录登记为
+`outputDirectory`。配置备份不包含会话历史，不能替代字符集转换或其他 DDL 操作前的全库备份。
+
 默认输出到仓库相邻目录：
 
 ```text

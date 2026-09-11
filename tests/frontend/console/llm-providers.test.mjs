@@ -56,17 +56,17 @@ function providerDeleteHarness({ confirmed = true, error, refreshed = true } = {
   return { admin, calls, context };
 }
 
-test("删除最后一个 Provider 会确认关联模型范围并刷新空列表", async () => {
+test("删除最后一个供应商会确认关联模型范围并刷新空列表", async () => {
   const { admin, calls } = providerDeleteHarness();
   await admin.remove({ id: "last", name: "最后一个" });
   assert.match(calls.confirmations[0].message, /最后一个.*2 个模型配置/);
   assert.equal(calls.requests[0][0], "/api/v1/llm-providers/last");
   assert.equal(calls.requests[0][1].method, "DELETE");
   assert.equal(calls.refreshes[0].preserveSelection, false);
-  assert.equal(calls.toasts[0][0], "Provider 已删除");
+  assert.equal(calls.toasts[0][0], "供应商已删除");
 });
 
-test("取消 Provider 删除不发送请求", async () => {
+test("取消供应商删除不发送请求", async () => {
   const { admin, calls } = providerDeleteHarness({ confirmed: false });
   await admin.remove({ id: "last", name: "最后一个" });
   assert.equal(calls.requests.length, 0);
@@ -83,24 +83,24 @@ test("删除被实际配置引用阻止时显示原因而不报成功", async ()
 test("删除成功但刷新失败时明确提示部分结果", async () => {
   const { admin, calls } = providerDeleteHarness({ refreshed: false });
   await admin.remove({ id: "last", name: "最后一个" });
-  assert.deepEqual(calls.toasts, [["Provider 已删除，列表刷新失败，请重新加载", true]]);
+  assert.deepEqual(calls.toasts, [["供应商已删除，列表刷新失败，请重新加载", true]]);
 });
 
-test("没有 Provider 时列表和详情均显示可新建的空状态", () => {
+test("没有供应商时列表和详情均显示可新建的空状态", () => {
   const { admin, context } = providerDeleteHarness();
   const list = {}, detail = {};
   context.state.llmProviders = [];
   context.document.getElementById = (id) => id === "llmProviderList" ? list : detail;
   admin.renderList();
   admin.renderDetail();
-  assert.match(list.innerHTML, /暂无 Provider/);
-  assert.match(detail.innerHTML, /新建 Provider/);
+  assert.match(list.innerHTML, /暂无供应商/);
+  assert.match(detail.innerHTML, /新建供应商/);
 });
 
-test("配置中心只保留 Provider 模型管理入口并继续保留独立模型目录", () => {
+test("配置中心只保留供应商模型管理入口并继续保留独立模型目录", () => {
   const agent = indexHtml.indexOf('data-tab="agents"');
   const provider = indexHtml.indexOf('data-tab="llm-providers"');
-  const builtin = indexHtml.indexOf('data-tab="builtin-tools"');
+  const builtin = indexHtml.indexOf('data-tab="tools"');
   assert.ok(agent < provider);
   assert.ok(provider < builtin);
   assert.doesNotMatch(indexHtml, /data-tab="llm-models"/);
@@ -110,7 +110,7 @@ test("配置中心只保留 Provider 模型管理入口并继续保留独立模�
   assert.match(template, /id="panel-llm-providers"[\s\S]*id="llmProviderList"[\s\S]*id="llmProviderDetail"/);
 });
 
-test("Provider 使用正式 API 和后端类型目录契约", () => {
+test("供应商使用正式 API 和后端类型目录契约", () => {
   assert.match(coreSource, /apiFetch\("\/api\/v1\/llm-providers"\)/);
   assert.match(coreSource, /apiFetch\("\/api\/v1\/llm-provider-types"\)/);
   assert.doesNotMatch(coreSource, /llm-providers\/types/);
@@ -122,7 +122,7 @@ test("Provider 使用正式 API 和后端类型目录契约", () => {
   assert.match(providerSource, /llmProviderUseDefaultBaseUrl"\)\.checked = Boolean\(type\?\.supports_default_base_url && type\?\.default_base_url\)/);
 });
 
-test("Provider Key 回显脱敏标识且未修改时不重复写入", () => {
+test("供应商 Key 回显脱敏标识且未修改时不重复写入", () => {
   assert.match(providerSource, /provider\.api_key_set \? "Key 已配" : "Key 未配"/);
   assert.match(providerSource, /maskedValue: provider\.api_key_masked \|\| ""/);
   assert.match(providerSource, /apiKey !== maskedValue/);
@@ -133,8 +133,8 @@ test("Provider Key 回显脱敏标识且未修改时不重复写入", () => {
   assert.doesNotMatch(template, /llmProviderApiKeyState|llmProviderBaseUrlHint|清除当前 API Key|API Key（编辑时留空表示不修改）/);
 });
 
-test("Provider 无启停层而关联模型可独立启停", () => {
-  assert.doesNotMatch(template, /id="llmProviderEnabled"|启用 Provider/);
+test("供应商无启停层而关联模型可独立启停", () => {
+  assert.doesNotMatch(template, /id="llmProviderEnabled"|启用供应商/);
   assert.doesNotMatch(providerSource, /provider\.enabled|data-provider-toggle/);
   assert.match(providerSource, /model\.enabled/);
   assert.match(providerSource, /data-toggle-model/);
@@ -142,7 +142,7 @@ test("Provider 无启停层而关联模型可独立启停", () => {
   assert.match(coreSource, /\/api\/v1\/llm-models\?selectable_only=false/);
 });
 
-test("Provider 详情操作统一使用轻风格按钮", () => {
+test("供应商详情操作统一使用轻风格按钮", () => {
   assert.match(providerSource, /class="row-actions provider-action-group"/);
   assert.match(providerSource, /class="provider-action" data-provider-edit/);
   assert.match(providerSource, /class="provider-action danger" data-provider-delete/);
@@ -152,19 +152,19 @@ test("Provider 详情操作统一使用轻风格按钮", () => {
   assert.doesNotMatch(providerSource, /data-provider-toggle/);
 });
 
-test("Provider 接入信息使用紧凑图标胶囊而不是纵向定义列表", () => {
-  assert.match(providerSource, /class="provider-detail-title-line">[\s\S]*class="provider-facts" aria-label="Provider 接入信息"/);
-  assert.match(providerSource, /class="provider-facts" aria-label="Provider 接入信息"/);
+test("供应商接入信息使用紧凑图标胶囊而不是纵向定义列表", () => {
+  assert.match(providerSource, /class="provider-detail-title-line">[\s\S]*class="provider-facts" aria-label="供应商接入信息"/);
+  assert.match(providerSource, /class="provider-facts" aria-label="供应商接入信息"/);
   assert.match(providerSource, /class="provider-fact provider-fact-url"/);
   assert.match(providerSource, /data-lucide="link-2"/);
   assert.match(providerSource, /data-lucide="route"/);
   assert.match(providerSource, /Key 已配/);
   assert.doesNotMatch(providerSource, /<small><span>\$\{escapeHtml\(providerTypeLabel\(provider\)\)\}<\/span><code>/);
   assert.doesNotMatch(providerSource, /<dl class="provider-facts">|<dt>Base URL<\/dt>/);
-  assert.doesNotMatch(providerSource, /个模型使用此 Provider/);
+  assert.doesNotMatch(providerSource, /个模型使用此供应商/);
 });
 
-test("Provider 使用本地官方标识且模型行只展示 API 编码和两项能力事实", () => {
+test("供应商使用本地官方标识且模型行只展示 API 编码和两项能力事实", () => {
   for (const name of ["deepseek", "kimi", "qwen", "zai", "openrouter", "openai", "anthropic", "google-gemini", "openai-compatible"]) {
     assert.match(providerSource, new RegExp(`provider-logos/${name}`));
   }
@@ -176,13 +176,13 @@ test("Provider 使用本地官方标识且模型行只展示 API 编码和两项
   assert.doesNotMatch(providerSource, /provider-model-chip|>LLM<|>CHAT</);
 });
 
-test("Provider 保存由表单捕获提交模式，避免创建被异步状态改写为编辑", () => {
+test("供应商保存由表单捕获提交模式，避免创建被异步状态改写为编辑", () => {
   assert.match(providerSource, /const editingId = String\(form\.dataset\.providerId \|\| ""\)\.trim\(\) \|\| null/);
   assert.match(providerSource, /method: editingId \? "PATCH" : "POST"/);
   assert.doesNotMatch(providerSource, /providerAdminState\.editingId/);
 });
 
-test("Provider 目录初始化只映射明确渠道并跳过当前 Provider 已有模型", () => {
+test("供应商目录初始化只映射明确渠道并跳过当前供应商已有模型", () => {
   assert.equal(catalogProviderIdForType("deepseek"), "deepseek");
   assert.equal(catalogProviderIdForType("zai"), "zhipuai");
   assert.equal(catalogProviderIdForType("openrouter"), null);
@@ -229,7 +229,7 @@ test("Provider 目录初始化只映射明确渠道并跳过当前 Provider 已�
   assert.match(providerSource, /for \(const choice of selected\)/);
 });
 
-test("模型只提交 Provider 逻辑关联并移除重复连接字段", () => {
+test("模型只提交供应商逻辑关联并移除重复连接字段", () => {
   assert.match(modelSource, /provider_id: document\.getElementById\("llmModelProviderId"\)\.value/);
   assert.match(modelSource, /nameInput\.required = !deriveName/);
   assert.doesNotMatch(modelSource, /base_url:/);
@@ -239,10 +239,10 @@ test("模型只提交 Provider 逻辑关联并移除重复连接字段", () => {
   assert.doesNotMatch(modelSource, /getElementById\("llmModelEnabled"\)/);
 });
 
-test("目录按 0、1、多 Provider 分流且不再按 URL 猜测", () => {
+test("目录按 0、1、多供应商分流且不再按 URL 猜测", () => {
   assert.match(modelSource, /if \(!matches\.length\)/);
   assert.match(modelSource, /if \(matches\.length > 1\)/);
-  assert.match(modelSource, /title: "选择 Provider"/);
+  assert.match(modelSource, /title: "选择供应商"/);
   assert.match(modelSource, /fields: \[\{/);
   assert.doesNotMatch(modelSource, /provider_api_url.*base_url|normalizeBaseUrl/);
 });
@@ -265,7 +265,7 @@ test("业务模型选项隐藏不可用模型并仅保留既有 Agent 当前引�
   assert.equal(firstSelectableModelId(models), "a");
 
   const preserved = renderGroupedModelOptions(models, { selectedId: "c" });
-  assert.match(preserved, /value="c" selected[^>]*>C — model-c（Provider 未配置密钥）<\/option>/);
+  assert.match(preserved, /value="c" selected[^>]*>C — model-c（供应商未配置密钥）<\/option>/);
   assert.doesNotMatch(preserved, /value="d"|value="e"/);
 
   assert.equal(isModelSelectable({ enabled: false, provider: { api_key_set: true } }), false);
@@ -277,7 +277,7 @@ test("业务模型选项隐藏不可用模型并仅保留既有 Agent 当前引�
   assert.equal(preserveCurrentModel(models, models[0]).length, models.length);
 });
 
-test("Agent 和 Chat 统一复用 Provider 分组模型选项", () => {
+test("Agent 和 Chat 统一复用供应商分组模型选项", () => {
   assert.match(coreSource, /renderGroupedModelOptions/);
   assert.match(chatSource, /renderGroupedModelOptions/);
   assert.match(chatSource, /firstSelectableModelId/);

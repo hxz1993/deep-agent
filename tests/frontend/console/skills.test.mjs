@@ -70,7 +70,7 @@ function installHarness(replies, timers = {}) {
 }
 const installReply = (status, code = "example-skill") => ({ ok: status === 201, status, json: async () => ({ skill: { code }, detail: "test error" }) });
 
-test("上传说明分段强调，安装包横向卡片以图标文字区分五种状态", () => {
+test("上传约束集中于问号提示，安装包横向卡片以图标文字区分五种状态", () => {
   const h = installHarness([]);
   h.admin.installQueue = ["queued", "uploading", "done", "error", "unknown"].map((status) => ({
     status, file: { name: "<long-package>.zip", size: 2048 }, message: "<safe detail>",
@@ -80,9 +80,10 @@ test("上传说明分段强调，安装包横向卡片以图标文字区分五�
   for (const label of ["待安装", "安装中", "已安装", "未安装", "待确认", "2.0 KiB"]) assert.ok(html.includes(label));
   assert.ok(html.includes("&lt;long-package>.zip"));
   assert.ok(html.includes("&lt;safe detail>"));
-  assert.match(template, /skill-install-note-number">1\.[\s\S]*<strong>多包新建<\/strong>[\s\S]*skill-install-note-number">2\./);
-  assert.doesNotMatch(template, /skill-install-note-label/);
-  assert.match(consoleStyles, /\.skill-install-note \{[^}]*background: var\(--accent-soft\);/);
+  assert.match(template, /<span>Skill 安装包<\/span><small class="field-subtitle">ZIP · 每包 ≤ 10 MiB<\/small>/);
+  assert.match(template, /id="skillInstallHelp" role="tooltip">支持多包新建，已有编码不覆盖；更新请用详情“上传”。ZIP 须包含 SKILL.md，每包不超过 10 MiB；解压后不超过 50 MiB、256 个文件。“导出全部”请先解压，再选择其中的包。<\/span>/);
+  assert.match(template, /<strong>选择 ZIP 文件<\/strong><small>可多选<\/small>/);
+  assert.doesNotMatch(template, /skill-install-note-number|skill-install-note-label/);
   assert.match(consoleStyles, /\.skill-install-picker \{[^}]*width: 100%;[^}]*min-height: 88px;/);
   assert.match(consoleStyles, /\.skill-install-card \{[^}]*display: flex;[^}]*border: 0;/);
   assert.match(consoleStyles, /prefers-reduced-motion: reduce/);
@@ -92,6 +93,7 @@ test("批量安装逐包 POST，冲突不覆盖，失败不回滚其他成功包
   const h = installHarness([installReply(201, "one"), installReply(409), installReply(422), installReply(201, "four")]);
   h.admin.openInstallDialog();
   assert.equal(h.elements.get("skillInstallDialog").open, true);
+  assert.equal(h.elements.get("skillInstallMessage").textContent, "");
   h.admin.selectInstallFiles(["one.zip", "two.zip", "three.zip", "four.zip"].map((name) => ({ name, size: 12 })));
   await h.admin.installSelected();
   assert.deepEqual(Array.from(h.admin.installQueue, (item) => item.status), ["done", "error", "error", "done"]);

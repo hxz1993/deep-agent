@@ -24,9 +24,9 @@ function escapeHtml(value) {
     .replaceAll('"', "&quot;");
 }
 
-function loadBuiltinToolsUi() {
+function loadBuiltinToolsUi(customDocument) {
   const window = {};
-  const document = {
+  const document = customDocument || {
     addEventListener() {},
     getElementById() {
       return null;
@@ -46,19 +46,20 @@ function loadBuiltinToolsUi() {
   return window.__BuiltinToolsUI;
 }
 
-test("设置目录按 Provider、Skill、MCP、内置工具、UI 工具排列", () => {
+test("设置目录按 Provider、Skill、MCP、工具排列", () => {
   const providerPosition = indexHtml.indexOf('data-tab="llm-providers"');
   const skillPosition = indexHtml.indexOf('data-tab="skills"');
-  const builtinPosition = indexHtml.indexOf('data-tab="builtin-tools"');
+  const builtinPosition = indexHtml.indexOf('data-tab="tools"');
   const mcpPosition = indexHtml.indexOf('data-tab="mcp"');
   const uiPosition = indexHtml.indexOf('data-tab="ui-tools"');
 
   assert.ok(providerPosition >= 0 && providerPosition < skillPosition);
   assert.ok(skillPosition < mcpPosition);
   assert.ok(mcpPosition < builtinPosition);
-  assert.ok(builtinPosition < uiPosition);
+  assert.equal(uiPosition, -1);
   assert.match(templateHtml, /id="panel-builtin-tools"/);
-  assert.match(templateHtml, /预制工具包[\s\S]*运行时系统工具/);
+  assert.match(source, /预制工具[\s\S]*运行时工具/);
+  assert.doesNotMatch(templateHtml, /data-builtin-tab|builtinPresetPanel|builtinRuntimePanel/);
   assert.doesNotMatch(templateHtml, /refreshBuiltinToolsBtn|refreshSystemToolsBtn/);
 });
 
@@ -81,7 +82,7 @@ test("内置工具页只接受后端 builtin 分类工具包", () => {
 
 test("内置工具列表展示能力和工具且没有资源级状态或管理操作", () => {
   const ui = loadBuiltinToolsUi();
-  const row = ui.builtinCapabilityRow({
+  const row = ui.toolCatalogDetails({
     code: "builtin:general",
     category: "builtin",
     label: "通用工具",
@@ -91,7 +92,6 @@ test("内置工具列表展示能力和工具且没有资源级状态或管理�
   });
 
   assert.match(row, /通用工具/);
-  assert.match(row, /内置工具包/);
   assert.match(row, /builtin:general/);
   assert.match(row, /get_current_time/);
   assert.doesNotMatch(row, /默认启用|默认关闭|启用|停用/);
@@ -101,7 +101,7 @@ test("内置工具列表展示能力和工具且没有资源级状态或管理�
 
 test("Python 沙箱作为独立的可关联内置工具包展示", () => {
   const ui = loadBuiltinToolsUi();
-  const row = ui.builtinCapabilityRow({
+  const row = ui.toolCatalogDetails({
     code: "builtin:sandbox",
     category: "builtin",
     label: "Python 沙箱",
@@ -110,7 +110,8 @@ test("Python 沙箱作为独立的可关联内置工具包展示", () => {
     tools: [{ name: "execute_python", description: "执行 Python。" }],
   });
 
-  assert.match(row, /Python 沙箱/);
+  assert.match(row, /<h3>沙箱<\/h3>/);
+  assert.doesNotMatch(row, /Python 沙箱/);
   assert.match(row, /builtin:sandbox/);
   assert.match(row, /execute_python/);
   assert.doesNotMatch(row, /默认启用|默认关闭|启用|停用/);
@@ -118,4 +119,30 @@ test("Python 沙箱作为独立的可关联内置工具包展示", () => {
 
 test("附件读取不再作为可配置内置工具包", () => {
   assert.doesNotMatch(source, /builtin:attachment|read_text_attachment|read_docx|read_xlsx/);
+});
+
+
+test("两组目录共用详情，异步加载第二组不会丢失第一组选择", () => {
+  const host = { innerHTML: "", querySelectorAll: () => [] };
+  const ui = loadBuiltinToolsUi({ getElementById: () => host });
+  ui.updateToolCatalogGroup(false, [{ code: "builtin:sandbox", label: "Python 沙箱", tools: [{ name: "execute_python" }] }]);
+  ui.updateToolCatalogGroup(true, [{ code: "runtime:planning", label: "任务规划", tools: [{ name: "write_plan" }] }]);
+  assert.match(host.innerHTML, /预制工具/);
+  assert.match(host.innerHTML, /运行时工具/);
+  assert.match(host.innerHTML, /data-tool-catalog-code="builtin:sandbox" aria-pressed="true"/);
+  assert.match(host.innerHTML, /execute_python/);
+  assert.doesNotMatch(host.innerHTML, /write_plan|Python 沙箱/);
+  ui.updateToolCatalogGroup(false, []);
+  assert.match(host.innerHTML, /write_plan/);
+  assert.match(host.innerHTML, /实现来源/);
+  assert.match(host.innerHTML, /自动注入条件/);
+});
+
+test("目录项与工具说明转义外部字符串", () => {
+  const ui = loadBuiltinToolsUi();
+  const item = { code: '" onclick="bad', label: '<img src=x>', description: '<script>bad</script>', tools: [{ name: '<tool>', description: '<img>' }] };
+  const html = ui.toolCatalogCard(item, true) + ui.toolCatalogDetails(item);
+  assert.doesNotMatch(html, /<img|<script|<tool>/);
+  assert.match(html, /&quot;/);
+  assert.match(html, /&lt;script&gt;/);
 });

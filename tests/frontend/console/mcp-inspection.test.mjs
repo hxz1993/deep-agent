@@ -37,7 +37,7 @@ function loadInspectionUi(overrides = {}) {
 test("内部 MCP 缺少有效 App 时提示真实配置入口", () => {
   const ui = loadInspectionUi();
   const server = { request_context: { mode: "inherit" } };
-  assert.match(ui.missingInspectionAppHint(server, { app: null }), /未提供测试 App.*「对话测试」右上角「测试App」/);
+  assert.match(ui.missingInspectionAppHint(server, { app: null }), /未提供测试 App.*「对话测试」右上角「调试上下文」/);
   assert.equal(ui.missingInspectionAppHint(server, { app: "platform001" }), "");
   assert.equal(ui.missingInspectionAppHint({ ...server, config: { headers: { App: "static001" } } }, { app: null }), "");
   assert.equal(ui.missingInspectionAppHint({ request_context: { mode: "isolated" } }, { app: null }), "");

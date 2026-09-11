@@ -1,20 +1,19 @@
 let initialized = false;
-import "./model-options.js?v=20260825-1";
-import * as ProviderCatalog from "./provider-catalog.js?v=20260825-2";
-import * as SkillFrontmatter from "./skill-frontmatter.js?v=20260825-1";
-import * as SchemaText from "./schema-editor.js?v=20260825-1";
+import "./model-options.js?v=20260912-21";
+import * as ProviderCatalog from "./provider-catalog.js?v=20260912-21";
+import * as SkillFrontmatter from "./skill-frontmatter.js?v=20260912-21";
+import * as SchemaText from "./schema-editor.js?v=20260912-21";
 if (typeof window !== "undefined") window.DeepAgentProviderCatalog = ProviderCatalog;
 if (typeof window !== "undefined") window.DeepAgentSkillFrontmatter = SkillFrontmatter;
 if (typeof window !== "undefined") window.DeepAgentSchemaText = SchemaText;
 let loadingPromise = null;
-const CONFIGURATION_ASSET_VERSION = "20260909-8";
+const CONFIGURATION_ASSET_VERSION = "20260912-21";
 const CONFIGURATION_TABS = new Set([
   "agents",
   "llm-providers",
-  "builtin-tools",
+  "tools",
   "skills",
   "mcp",
-  "ui-tools",
   "channels",
   "global-settings",
   "catalog",
@@ -22,6 +21,7 @@ const CONFIGURATION_TABS = new Set([
 let activeConfigurationTab = "agents";
 
 export function rememberConfigurationTab(name) {
+  if (name === "builtin-tools" || name === "ui-tools") name = "tools";
   if (name === "database-connection") name = "global-settings";
   if (CONFIGURATION_TABS.has(name)) activeConfigurationTab = name;
   return activeConfigurationTab;
@@ -98,7 +98,9 @@ async function loadAdminScripts() {
     "./configuration/system-tools.js",
     "./configuration/skills.js",
     "./configuration/mcp.js",
+    "./ui-editable-select.js",
     "./configuration/ui-tools.js",
+    "./configuration/tools.js",
     "./configuration/channels.js",
   ];
   for (const script of scripts) await loadClassicScript(script);
@@ -106,7 +108,7 @@ async function loadAdminScripts() {
   // The legacy scripts were loaded after the browser's original DOMContentLoaded.
   // Replaying it once initializes their existing, tested bindings against the new DOM.
   document.dispatchEvent(new Event("DOMContentLoaded"));
-  await import("./configuration/catalog.js?v=20260729-4");
+  await import("./configuration/catalog.js?v=20260912-21");
 }
 
 function decorateConfiguration() {
@@ -140,15 +142,9 @@ export function refreshCurrentConfiguration() {
   if (active === "global-settings") return window.globalSettingsAdmin?.refresh();
   if (active === "agents") return window.agentsAdmin?.refresh();
   if (active === "llm-providers") return window.llmProvidersAdmin?.refresh();
-  if (active === "builtin-tools") {
-    return Promise.all([
-      window.builtinToolsAdmin?.refresh(),
-      window.systemToolsAdmin?.refresh(),
-    ]);
-  }
+  if (active === "tools") return window.toolsAdmin?.refresh();
   if (active === "skills") return window.skillsAdmin?.refresh();
   if (active === "mcp") return window.mcpAdmin?.refresh();
-  if (active === "ui-tools") return window.uiToolsAdmin?.refresh();
   if (active === "channels") return window.channelsAdmin?.refresh();
   if (active === "catalog") return window.modelCatalogAdmin?.refresh();
   return null;

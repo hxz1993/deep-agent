@@ -94,7 +94,7 @@ test("Agent 是配置中心默认页，系统分组包含全局配置和模型�
   assert.doesNotMatch(indexHtml, /data-tab="database-connection"/);
 });
 
-test("Web Search 配置采用两个显式模式并列出原生 Provider", () => {
+test("Web Search 配置采用两个显式模式并列出原生供应商", () => {
   assert.match(templateHtml, /value="native" checked/);
   assert.match(templateHtml, /value="provider"/);
   assert.match(templateHtml, /DeepSeek、OpenAI、Anthropic Claude、Google Gemini 和 OpenRouter/);
@@ -125,12 +125,12 @@ test("Web Search 配置采用两个显式模式并列出原生 Provider", () => 
   assert.doesNotMatch(templateHtml, /id="webSearchApiKeyHint"|输入 DeepSeek 的 API Key/);
   assert.doesNotMatch(templateHtml, /class="web-search-mode-detail/);
   assert.match(templateHtml, /web-search-mode-dot/);
-  assert.match(templateHtml, /<strong>会话原生搜索<\/strong><small>使用当前会话模型的原生搜索能力。<\/small>/);
-  assert.match(templateHtml, /<small>使用固定搜索服务。<\/small>/);
-  assert.match(templateHtml, /沿用 Provider/);
+  assert.match(templateHtml, /<strong>会话原生搜索<\/strong>/);
+  assert.match(templateHtml, /<strong>指定供应商<\/strong>/);
+  assert.match(templateHtml, /沿用供应商/);
   assert.match(templateHtml, /单独 API Key/);
   assert.match(templateHtml, /class="web-search-credential-source"[\s\S]*?<strong>凭据<\/strong>/);
-  assert.doesNotMatch(templateHtml, /<span>会话 Provider<\/span>/);
+  assert.doesNotMatch(templateHtml, /<span>会话供应商<\/span>/);
   assert.match(configurationCss, /\.web-search-mode-card\s*\{[\s\S]*?min-height: 64px/);
   assert.match(configurationCss, /\.web-search-provider-grid\s*\{[\s\S]*?grid-template-columns: repeat\(2,/);
   assert.match(configurationCss, /\.web-search-credential-row\s*\{[\s\S]*?grid-template-columns: minmax\(0, 1fr\)/);
@@ -170,7 +170,7 @@ test("Web Search 连接测试在当前弹框内展示简短反馈", () => {
   assert.doesNotMatch(testMethod, /showToast/);
 });
 
-test("Web Search 摘要只回显当前生效的一个 Provider 选择", () => {
+test("Web Search 摘要只回显当前生效的一个供应商选择", () => {
   const ui = loadGlobalSettingsUi();
   assert.equal(ui.webSearchSummaryLabel({ value: { mode: "native" } }), "会话原生搜索");
   assert.equal(
@@ -179,14 +179,14 @@ test("Web Search 摘要只回显当前生效的一个 Provider 选择", () => {
   );
   assert.match(templateHtml, /id="webSearchSummaryValue">会话原生搜索/);
   const webSearchSection = templateHtml.match(/<section class="global-settings-section" id="globalSettingsWebSearch">[\s\S]*?<\/section>/)?.[0] || "";
-  assert.match(webSearchSection, /Web Search[\s\S]*?配置 Agent 的搜索 Provider。[\s\S]*?id="webSearchSummaryValue"[\s\S]*?openWebSearchSettingsBtn/);
+  assert.match(webSearchSection, /Web Search[\s\S]*?配置 Agent 的搜索供应商。[\s\S]*?id="webSearchSummaryValue"[\s\S]*?openWebSearchSettingsBtn/);
   assert.doesNotMatch(webSearchSection, /global-settings-summary-row|<p|当前支持|Kimi/);
   const runtimeSection = templateHtml.match(/<section class="global-settings-section" id="globalSettingsRuntime">[\s\S]*?<\/section>/)?.[0] || "";
   assert.doesNotMatch(runtimeSection, /数据库连接、密钥|查看当前 DeepAgent 进程/);
   assert.doesNotMatch(templateHtml, /配置状态|配置有效|跟随 Agent 当前模型/);
 });
 
-test("不同搜索 Provider 只生成必要配置", () => {
+test("不同搜索供应商只生成必要配置", () => {
   const ui = loadGlobalSettingsUi();
   assert.deepEqual(
     JSON.parse(JSON.stringify(ui.buildPayload({ mode: "native" }))),

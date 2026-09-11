@@ -1,6 +1,6 @@
-import { initDiagnosticLogs } from "./diagnostics.js?v=20260910-15";
-import { initDiagnosticSessions } from "./diagnostics-sessions.js?v=20260910-16";
-import { createDiagnosticNavigation, diagnosticHash, parseDiagnosticRoute } from "./diagnostics-navigation.js?v=20260910-13";
+import { initDiagnosticLogs } from "./diagnostics.js?v=20260912-21";
+import { initDiagnosticSessions } from "./diagnostics-sessions.js?v=20260912-21";
+import { createDiagnosticNavigation, diagnosticHash, parseDiagnosticRoute } from "./diagnostics-navigation.js?v=20260912-21";
 
 let center = null;
 export function initDiagnostics() {

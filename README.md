@@ -164,6 +164,9 @@ PYTHONPATH=src python -m deep_agent.channels.gateway --host 0.0.0.0 --port 8010
 
 ## 数据库基线
 
+MySQL 的连接及业务文本字段应使用 `utf8mb4`，避免 Emoji 等字符损失引发保存失败；
+已有数据库需要检查实际字段。详见[字符集部署要求与排查](docs/guides/mysql-character-set.md)。
+
 新数据库直接执行 `alembic upgrade head`。当前 Alembic head 为`003`：生产基线 `001`完整包含原
 Revision 001～012 的最终结构和默认数据：Provider/Model/Agent、MCP、Skill、UI工具、模型目录、
 `chat_sessions + chat_session_events` Event Store，以及初始化为会话原生搜索的`global_settings`；

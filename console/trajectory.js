@@ -1,8 +1,8 @@
-import { copyTextToClipboard } from "./message-actions.js?v=20260819-1";
-import { parseServerTimestamp } from "./time.js?v=20260831-1";
-import { renderWebImagePreview } from "./web-image.js?v=20260901-1";
-import { attachmentPreviewAttributes } from "./attachment-preview.js?v=20260904-8";
-import { toolResultPresentation } from "./assistant-presentation.js?v=20260907-1";
+import { copyTextToClipboard } from "./message-actions.js?v=20260912-21";
+import { parseServerTimestamp } from "./time.js?v=20260912-21";
+import { renderWebImagePreview } from "./web-image.js?v=20260912-21";
+import { attachmentPreviewAttributes } from "./attachment-preview.js?v=20260912-21";
+import { toolResultPresentation } from "./assistant-presentation.js?v=20260912-21";
 
 const TOOL_KINDS = new Set(["tool", "planning", "deferred"]);
 const PRESENTATION_ONLY_SSE_TYPES = new Set(["session_title"]);
@@ -59,13 +59,12 @@ function usageTotal(usage) {
 
 function eventLabel(kind, part = {}) {
   if (kind === "input") return "用户输入";
-  if (kind === "context") return "输入上下文";
   if (kind === "thinking") return "模型思考";
   if (kind === "assistant") return "助手输出";
   if (kind === "title") return "会话标题";
   if (kind === "error") return "异常";
   if (kind === "compaction") return "上下文压缩";
-  if (kind === "planning") return part.tool || "任务规划";
+  if (kind === "planning") return part.tool || "任务计划";
   if (kind === "deferred") return part.tool || "等待用户操作";
   if (kind === "tool") return part.tool || "工具调用";
   return part.event_type || "会话事件";
@@ -73,7 +72,6 @@ function eventLabel(kind, part = {}) {
 
 function eventSummary(kind, source = {}) {
   if (kind === "input") return valuePreview(source.content) || "仅包含附件或上下文引用";
-  if (kind === "context") return valuePreview(source.label || source.content || source.type || source.key) || "结构化上下文";
   if (["thinking", "assistant"].includes(kind)) return valuePreview(source.content);
   if (kind === "title") return valuePreview(source.title) || "会话标题";
   if (kind === "error") return valuePreview(source.message) || "执行异常";
@@ -554,11 +552,17 @@ function escapeHtml(value) {
 }
 
 function kindBadge(kind) {
-  if (kind === "input") return "USER";
-  if (kind === "context") return "CONTEXT";
-  if (kind === "title") return "TITLE";
-  if (kind === "error") return "异常";
-  return String(kind || "event").toUpperCase();
+  return {
+    input: "用户",
+    assistant: "助手",
+    thinking: "思考",
+    title: "标题",
+    tool: "工具",
+    planning: "计划",
+    deferred: "交互",
+    compaction: "压缩",
+    error: "异常",
+  }[kind] || String(kind || "事件");
 }
 
 function isRunCodeEvent(event) {
@@ -648,12 +652,11 @@ function renderJumpLink({ eventId, iconName, text, detail = "" }) {
   return `<button type="button" class="trajectory-summary-link"${attributes}>${icon(iconName)}<span><strong>${escapeHtml(text)}</strong>${detail ? `<small>${escapeHtml(detail)}</small>` : ""}</span>${eventId ? icon("arrow-up-right") : ""}</button>`;
 }
 
-function renderInputSummary(event, events) {
+function renderInputSummary(event) {
   const contextRefs = Array.isArray(event.payload?.context_refs) ? event.payload.context_refs : [];
   const attachments = Array.isArray(event.payload?.attachments) ? event.payload.attachments : [];
-  const contextEvents = events.filter((item) => item.kind === "context" && item.payload?.parent_input_id === event.id);
-  const contextLinks = contextRefs.map((reference, index) => renderJumpLink({
-      eventId: contextEvents[index]?.id || null,
+  const contextLinks = contextRefs.map((reference) => renderJumpLink({
+      eventId: null,
       iconName: "braces",
       text: reference?.label || reference?.key || reference?.type || "未命名上下文",
       detail: reference?.type || reference?.key || "",
@@ -669,28 +672,17 @@ function renderInputSummary(event, events) {
     });
   }).join("");
   return `${renderSummarySection(
-    "Preview",
+    "预览",
     renderMarkdown(event.payload?.content, "本次输入只包含附件或结构化上下文。"),
     { targetTab: "preview", className: "trajectory-summary-preview is-scroll" },
-  )}${attachmentLinks ? renderSummarySection("Attachments", `<div class="trajectory-summary-links">${attachmentLinks}</div>`) : ""}
-    ${contextLinks ? renderSummarySection("Context References", `<div class="trajectory-summary-links">${contextLinks}</div>`) : ""}`;
-}
-
-function renderContextSummary(event) {
-  const reference = event.payload?.reference || {};
-  return renderSummarySection("Context", `<p class="trajectory-summary-lead">${escapeHtml(reference.label || reference.key || reference.type || "结构化上下文")}</p>
-    <div class="trajectory-context-standard">
-      ${renderFact("名称", reference.label || "未命名")}
-      ${renderFact("类型", reference.type)}
-      ${renderFact("Key", reference.key, { mono: true })}
-      ${renderFact("版本", reference.schema_version)}
-    </div>`);
+  )}${attachmentLinks ? renderSummarySection("附件", `<div class="trajectory-summary-links">${attachmentLinks}</div>`) : ""}
+    ${contextLinks ? renderSummarySection("上下文引用", `<div class="trajectory-summary-links">${contextLinks}</div>`) : ""}`;
 }
 
 function renderThinking(thinking) {
   if (!thinking) return "";
   return `<details class="trajectory-thinking">
-    <summary><span>${icon("brain")}Thinking</span>${icon("chevron-down")}</summary>
+    <summary><span>${icon("brain")}思考</span>${icon("chevron-down")}</summary>
     <div class="trajectory-thinking-content">${escapeHtml(thinking)}</div>
   </details>`;
 }
@@ -719,11 +711,11 @@ function renderAssistantSummary(event, events) {
     event.payload?.thinking ? "模型尚未输出正文。" : "本次模型响应没有正文。",
   )}`;
   return `${renderSummarySection(
-    "Preview",
+    "预览",
     preview,
     { targetTab: "preview", className: "trajectory-summary-preview trajectory-summary-assistant-preview is-scroll" },
   )}
-    ${event.payload?.tool_calls?.length ? renderSummarySection("Tools", renderAssistantTools(event, events)) : ""}`;
+    ${event.payload?.tool_calls?.length ? renderSummarySection("工具", renderAssistantTools(event, events)) : ""}`;
 }
 
 function toolResultValue(event) {
@@ -759,7 +751,7 @@ function renderLocalFileDownload(value, artifacts = []) {
   const path = `api/v1/local-files/${encodeURIComponent(file.fileId)}/download`;
   const href = globalThis.serviceUrl?.(path) || `/${path}`;
   return renderSummarySection(
-    "File",
+    "文件",
     `<a class="trajectory-summary-link local-file-download" href="${escapeHtml(href)}" download>${icon("download")}<span><strong>${escapeHtml(file.fileName)}</strong></span></a>`,
   );
 }
@@ -783,23 +775,23 @@ function renderGeneratedFiles(artifacts) {
     const download = fileId.startsWith("local_")
       ? `<a class="local-file-download" href="${escapeHtml(globalThis.serviceUrl?.(`api/v1/local-files/${encodeURIComponent(fileId)}/download`) || `/api/v1/local-files/${encodeURIComponent(fileId)}/download`)}" download title="下载文件">${icon("download")}</a>`
       : "";
-    return `<div class="generated-file-item"><span class="generated-file-icon">${icon("file-output")}</span><span class="generated-file-copy"><strong>${escapeHtml(fileName)}</strong>${details ? `<small>${escapeHtml(details)}</small>` : ""}<code title="${escapeHtml(fileId)}">${escapeHtml(fileId)}</code></span><span class="generated-file-actions">${download}<button type="button" data-copy-file-id="${escapeHtml(fileId)}" title="复制 File ID">${icon("copy")}</button></span></div>`;
+    return `<div class="generated-file-item"><span class="generated-file-icon">${icon("file-output")}</span><span class="generated-file-copy"><strong>${escapeHtml(fileName)}</strong>${details ? `<small>${escapeHtml(details)}</small>` : ""}<code title="${escapeHtml(fileId)}">${escapeHtml(fileId)}</code></span><span class="generated-file-actions">${download}<button type="button" data-copy-file-id="${escapeHtml(fileId)}" title="复制文件 ID">${icon("copy")}</button></span></div>`;
   }).join("");
-  return renderSummarySection("Generated Files", `<div class="generated-file-list">${rows}</div>`);
+  return renderSummarySection("生成文件", `<div class="generated-file-list">${rows}</div>`);
 }
 
 function renderPayloadResultSections({ payload, result }) {
   const payloadText = hasMeaningfulValue(payload) ? valuePreview(payload, 280) : null;
   const resultText = hasMeaningfulValue(result) ? valuePreview(result, 360) : null;
-  return `${payloadText ? renderSummarySection("Payload", `<p class="trajectory-summary-code">${escapeHtml(payloadText)}</p>`, { targetTab: "payload" }) : ""}
-    ${resultText ? renderSummarySection("Result", `<p class="trajectory-summary-code">${escapeHtml(resultText)}</p>`, { targetTab: "result" }) : ""}`;
+  return `${payloadText ? renderSummarySection("数据", `<p class="trajectory-summary-code">${escapeHtml(payloadText)}</p>`, { targetTab: "payload" }) : ""}
+    ${resultText ? renderSummarySection("结果", `<p class="trajectory-summary-code">${escapeHtml(resultText)}</p>`, { targetTab: "result" }) : ""}`;
 }
 
 function renderToolSummary(event) {
   const result = toolResultValue(event);
   const artifacts = Array.isArray(event.result?.artifacts) ? event.result.artifacts : [];
   const imagePreview = renderWebImagePreview(result, { className: "trajectory-web-image-preview" });
-  return `${imagePreview ? renderSummarySection("Web Image", imagePreview) : ""}${renderGeneratedFiles(artifacts)}${renderPayloadResultSections({
+  return `${imagePreview ? renderSummarySection("网络图片", imagePreview) : ""}${renderGeneratedFiles(artifacts)}${renderPayloadResultSections({
     payload: event.payload?.args ?? event.payload,
     result,
   })}${renderLocalFileDownload(result, artifacts)}`;
@@ -816,7 +808,7 @@ function renderPlanningSummary(event) {
   const label = event.label === "write_plan" ? "创建或改写任务计划" : event.label;
   const progress = `<p class="trajectory-summary-lead"><strong>${escapeHtml(label)}</strong></p>
     ${total ? `<div class="trajectory-plan-progress"><span style="width:${Math.min(100, Math.max(0, completed / total * 100))}%"></span></div><p class="trajectory-plan-count">${completed} / ${total} 已完成</p>` : ""}`;
-  return `${renderSummarySection("Plan", progress)}
+  return `${renderSummarySection("计划", progress)}
     ${renderPayloadResultSections({ payload: event.payload, result: toolResultValue(event) })}`;
 }
 
@@ -826,7 +818,7 @@ function renderDeferredSummary(event) {
   const reason = args.reason || args.message || event.summary;
   const primary = `<p class="trajectory-summary-lead"><strong>${escapeHtml(title)}</strong></p>
     ${reason && reason !== title ? `<p class="trajectory-summary-copy">${escapeHtml(reason)}</p>` : ""}`;
-  return `${renderSummarySection("Interaction", primary)}
+  return `${renderSummarySection("交互", primary)}
     ${renderPayloadResultSections({ payload: event.payload, result: toolResultValue(event) })}`;
 }
 
@@ -838,11 +830,11 @@ function renderCompactionSummary(event) {
     : event.summary;
   const source = event.payload?.source || {};
   const detail = [
-    source.through_sequence != null ? `截至 Sequence ${source.through_sequence}` : null,
+    source.through_sequence != null ? `截至序号 ${source.through_sequence}` : null,
     event.payload?.summary_call?.model_id || null,
     event.payload?.error?.message || event.payload?.error || null,
   ].filter(Boolean).join(" · ");
-  return renderSummarySection("Compaction", `<p class="trajectory-summary-lead"><strong>${escapeHtml(primary || event.label)}</strong></p>${detail ? `<p class="trajectory-summary-copy">${escapeHtml(detail)}</p>` : ""}`);
+  return renderSummarySection("压缩", `<p class="trajectory-summary-lead"><strong>${escapeHtml(primary || event.label)}</strong></p>${detail ? `<p class="trajectory-summary-copy">${escapeHtml(detail)}</p>` : ""}`);
 }
 
 function renderTitleSummary(event) {
@@ -858,7 +850,7 @@ function renderTitleSummary(event) {
     renderFact("源事件", event.payload?.source_event_id, { mono: true }),
   ].join("");
   return renderSummarySection(
-    "Title",
+    "标题",
     `<p class="trajectory-summary-lead"><strong>${escapeHtml(event.payload?.title || event.summary || "会话标题")}</strong></p>${facts ? `<div class="trajectory-context-standard">${facts}</div>` : ""}`,
   );
 }
@@ -871,7 +863,6 @@ function renderExecutionErrorSummary(event) {
 
 const SUMMARY_RENDERERS = Object.freeze({
   input: renderInputSummary,
-  context: renderContextSummary,
   assistant: renderAssistantSummary,
   planning: renderPlanningSummary,
   deferred: renderDeferredSummary,
@@ -885,7 +876,7 @@ function renderSummary(event, events) {
   const renderer = SUMMARY_RENDERERS[event.kind];
   const primary = renderer
     ? renderer(event, events)
-    : renderSummarySection("Event", `<p class="trajectory-summary-lead">${escapeHtml(event.summary || event.label)}</p>`);
+    : renderSummarySection("事件", `<p class="trajectory-summary-lead">${escapeHtml(event.summary || event.label)}</p>`);
   return `<section class="trajectory-summary">${renderMeta(event)}<div class="trajectory-summary-primary">${primary}</div></section>`;
 }
 
@@ -933,22 +924,22 @@ function renderRunCode(event) {
 }
 
 function detailTabs(event) {
-  if (event.kind === "title") return [["summary", "Summary"], ["request", "Request"], ["result", "Result"]];
-  const tabs = [["summary", "Summary"]];
-  if (isPythonCodeEvent(event)) tabs.push(["code", "Code"]);
-  if (hasMeaningfulValue(event.payload)) tabs.push(["payload", "Payload"]);
+  if (event.kind === "title") return [["summary", "摘要"], ["request", "请求"], ["result", "结果"]];
+  const tabs = [["summary", "摘要"]];
+  if (isPythonCodeEvent(event)) tabs.push(["code", "代码"]);
+  if (hasMeaningfulValue(event.payload)) tabs.push(["payload", "数据"]);
   if (["input", "assistant"].includes(event.kind)) {
-    tabs.push(["preview", "Preview"], ["raw", "Raw"]);
+    tabs.push(["preview", "预览"], ["raw", "原文"]);
   }
-  if (TOOL_KINDS.has(event.kind) && hasMeaningfulValue(event.result)) tabs.push(["result", "Result"]);
+  if (TOOL_KINDS.has(event.kind) && hasMeaningfulValue(event.result)) tabs.push(["result", "结果"]);
   return tabs;
 }
 
 function renderRaw(event) {
   if (event.kind === "assistant") {
     const sections = [
-      ["Thinking", event.payload?.thinking],
-      ["Content", event.payload?.content],
+      ["思考", event.payload?.thinking],
+      ["正文", event.payload?.content],
     ].filter(([, content]) => content);
     if (!sections.length) return `<p class="trajectory-summary-empty">暂无原始文本。</p>`;
     return `<div class="trajectory-raw-sections">${sections.map(([title, content]) => `
@@ -982,7 +973,7 @@ function renderDetail(event, activeTab = "summary", events = []) {
   if (activeTab === "code") content = renderRunCode(event);
   const headerLabel = TOOL_KINDS.has(event.kind) || ["compaction", "title"].includes(event.kind)
     ? event.label
-    : event.run_id ? `Run ${String(event.run_id).slice(0, 8)}` : "";
+    : event.run_id ? `回合 ${String(event.run_id).slice(0, 8)}` : "";
   const detailBodyClass = activeTab === "code"
     ? "trajectory-detail-body is-code"
     : "trajectory-detail-body";
@@ -1146,17 +1137,6 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
       payload: { content: content || null, attachments, context_refs, branch_point },
     });
     liveEvents.push(inputEvent);
-    context_refs.forEach((reference, referenceIndex) => {
-      liveEvents.push(newEvent({
-        id: `${inputEvent.id}-context-${referenceIndex}`,
-        kind: "context",
-        inputSequence,
-        timestamp: inputEvent.timestamp,
-        source: "sse",
-        part: { type: "context", content: reference?.label || reference?.type || reference?.key },
-        payload: { reference, parent_input_id: inputEvent.id },
-      }));
-    });
     scheduleRender();
   }
 
@@ -1221,9 +1201,7 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
       history.items = rawItems.sort((left, right) => Number(left.sequence || 0) - Number(right.sequence || 0));
       historyEvents = buildTrajectory(history);
       if (stored.event_type === "user/message") {
-        if (liveInput) liveEvents = liveEvents.filter((item) => (
-          item !== liveInput && item.payload?.parent_input_id !== liveInput.id
-        ));
+        if (liveInput) liveEvents = liveEvents.filter((item) => item !== liveInput);
       }
       if (stored.event_type === "compaction") {
         liveEvents = liveEvents.filter((item) => !(item.kind === "compaction" && item.compaction_event_id === stored.event_id));
@@ -1269,20 +1247,13 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
       scheduleRender();
       return;
     }
-        if (type === "session") {
+    if (type === "session") {
       currentRunId = payload.run_id || currentRunId;
       const currentUser = [...liveEvents].reverse().find((item) => item.kind === "input" && !item.run_id);
-      if (currentUser && currentRunId) {
-        currentUser.run_id = currentRunId;
-        liveEvents.filter((item) => (
-          item.kind === "context"
-          && !item.run_id
-          && item.input_sequence === currentUser.input_sequence
-        )).forEach((item) => { item.run_id = currentRunId; });
-          }
-          scheduleRender();
-          return;
-        }
+      if (currentUser && currentRunId) currentUser.run_id = currentRunId;
+      scheduleRender();
+      return;
+    }
     const inputSequence = Math.max(trajectoryStats(allEvents()).inputs, 1);
     const timestamp = new Date().toISOString();
 

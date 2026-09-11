@@ -35,7 +35,7 @@ test("首次加载 Agent 的卡片和列表都回显真实渠道关联，停用�
     const html = elements[id].innerHTML;
     assert.match(html, /class="agent-channel-badge"/);
     assert.match(html, /已关联渠道：财务群、&lt;业务 &quot;机器人&quot;&gt;/);
-    assert.match(html, /data-lucide="radio"/);
+    assert.match(html, /data-lucide="rss"/);
     assert.match(html, /渠道 2/);
     assert.doesNotMatch(html, /无关渠道|<业务/);
   }

@@ -34,3 +34,5 @@ class SessionSummaryRow:
     attachment_count: int = 0
     user_prompt: str | None = None
     title: str | None = None
+    app_id: str | None = None
+    space_id: str | None = None

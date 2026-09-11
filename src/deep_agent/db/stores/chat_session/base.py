@@ -85,6 +85,13 @@ class ChatSessionStoreBase(SessionBoundMixin):
         user_id = (await db.execute(stmt)).scalar_one_or_none()
         return SessionOwner(exists=user_id is not None, user_id=user_id)
 
+    async def get_initial_scope(self, agent_id: str, session_id: str) -> tuple[str | None, str | None]:
+        async with self._read() as db:
+            row = (await db.execute(select(ChatSession.app_id, ChatSession.space_id).where(
+                ChatSession.agent_id == agent_id, ChatSession.session_id == session_id,
+            ))).one_or_none()
+            return (row.app_id, row.space_id) if row else (None, None)
+
     async def get_timestamps(
         self, agent_id: str, session_id: str,
     ) -> tuple[datetime | None, datetime | None]:
@@ -201,7 +208,7 @@ class ChatSessionStoreBase(SessionBoundMixin):
         stmt = (
             select(
                 ChatSession.session_id, ChatSession.agent_id, ChatSession.title,
-                ChatSession.created_at, ChatSession.updated_at,
+                ChatSession.created_at, ChatSession.updated_at, ChatSession.app_id, ChatSession.space_id,
                 Agent.name.label("agent_name"), message_count.label("message_count"),
                 turn_count.label("turn_count"),
             )
@@ -216,7 +223,7 @@ class ChatSessionStoreBase(SessionBoundMixin):
             )
             .group_by(
                 ChatSession.session_id, ChatSession.agent_id, ChatSession.title,
-                ChatSession.created_at, ChatSession.updated_at, Agent.name,
+                ChatSession.created_at, ChatSession.updated_at, ChatSession.app_id, ChatSession.space_id, Agent.name,
             )
         )
         stmt = self._apply_session_filters(
@@ -266,6 +273,7 @@ class ChatSessionStoreBase(SessionBoundMixin):
                 turn_count=int(row.turn_count),
                 attachment_count=attachment_counts.get(row.session_id, 0),
                 user_prompt=prompts.get(row.session_id), title=row.title,
+                app_id=row.app_id, space_id=row.space_id,
             )
             for row in rows
         ]

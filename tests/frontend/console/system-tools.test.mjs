@@ -7,6 +7,8 @@ const source = await readFile(
   new URL("../../../console/configuration/system-tools.js", import.meta.url),
   "utf8",
 );
+const builtinSource = await readFile(new URL("../../../console/configuration/builtin-tools.js", import.meta.url), "utf8");
+const catalogCss = await readFile(new URL("../../../console/ui-tool-catalog.css", import.meta.url), "utf8");
 const indexHtml = await readFile(
   new URL("../../../console/index.html", import.meta.url),
   "utf8",
@@ -37,24 +39,24 @@ function loadSystemToolsUi() {
     },
   };
   vm.runInContext(
-    source,
+    builtinSource + "\n" + source,
     vm.createContext({ apiFetch: async () => [], document, escapeHtml, window }),
   );
-  return window.__SystemToolsUI;
+  return { ...window.__SystemToolsUI, systemToolDomain: (domain) => window.__BuiltinToolsUI.toolCatalogDetails(domain, true) };
 }
 
 test("系统工具合并进内置工具目录", () => {
-  const builtinPosition = indexHtml.indexOf('data-tab="builtin-tools"');
+  const builtinPosition = indexHtml.indexOf('data-tab="tools"');
   const systemPosition = indexHtml.indexOf('data-tab="system-tools"');
   const mcpPosition = indexHtml.indexOf('data-tab="mcp"');
   const uiPosition = indexHtml.indexOf('data-tab="ui-tools"');
 
   assert.ok(mcpPosition >= 0 && mcpPosition < builtinPosition);
-  assert.ok(builtinPosition < uiPosition);
+  assert.equal(uiPosition, -1);
   assert.equal(systemPosition, -1);
   assert.doesNotMatch(templateHtml, /id="panel-system-tools"/);
-  assert.match(templateHtml, /id="panel-builtin-tools"[\s\S]*运行时系统工具[\s\S]*id="systemToolDomains"/);
-  assert.match(templateHtml, /不参与 Agent 能力配置/);
+  assert.match(templateHtml, /id="panel-builtin-tools"[\s\S]*id="builtinToolCatalog"/);
+  assert.doesNotMatch(templateHtml, /builtin-catalog-tabs/);
 });
 
 test("系统工具按领域展示来源、条件和说明", () => {
@@ -79,12 +81,9 @@ test("系统工具按领域展示来源、条件和说明", () => {
   assert.match(html, /Agent 已配置可用 Skill/);
   assert.match(html, /加载完整说明/);
   assert.doesNotMatch(html, /编辑|删除|启用|checkbox|switch/);
-  assert.match(html, /system-tool-group-row/);
-  assert.match(html, /system-tool-group-help/);
-  assert.match(html, /system-tool-group-code">runtime:skill/);
-  assert.match(html, /data-tooltip="按需加载 Skill。"/);
-  assert.match(source, /className = "system-tool-tooltip hidden"/);
-  assert.match(configurationCss, /\.system-tool-tooltip\s*\{[^}]*position: fixed;[^}]*z-index: 1000;/);
+  assert.match(html, /tool-catalog-detail-header/);
+  assert.match(html, /按需加载 Skill。/);
+  assert.match(html, /tool-catalog-runtime-table/);
 });
 
 test("任务规划只暴露完整快照写入工具", () => {
@@ -153,20 +152,19 @@ test("MCP 工具发现与 Resource 只在前端合并为一个展示分组", () 
   assert.match(merged[1].description, /MCP Resource：读取资源/);
 });
 
-test("系统工具页面保留加载与窄屏横向查看，但不提供单独刷新入口", () => {
-  assert.match(source, /正在加载系统工具/);
+test("运行时目录复用预制工具的卡片与详情，并保留加载与窄屏查看", () => {
+  assert.match(source, /updateToolCatalogGroup/);
   assert.doesNotMatch(source, /data-retry-system-tools|refreshSystemToolsBtn/);
-  assert.match(templateHtml, /class="system-tool-domains"/);
-  assert.match(source, /class="table-wrap console-list-a"/);
-  assert.equal((source.match(/<thead>/g) || []).length, 1);
-  assert.match(configurationCss, /\.system-tool-group-row th/);
+  assert.match(templateHtml, /id="builtinToolCatalog"/);
+  assert.match(source, /window\.__BuiltinToolsUI\.renderToolCatalog/);
+  assert.match(catalogCss, /tool-catalog-workspace[\s\S]*grid-template-columns: minmax\(230px, 290px\) minmax\(0, 1fr\)/);
+  assert.match(catalogCss, /@media \(max-width: 800px\)/);
+  assert.match(catalogCss, /tool-catalog-runtime-table \{ min-width: 560px; \}/);
 });
 
-test("所有系统工具分组复用同一组固定列宽", () => {
-  assert.match(source, /<colgroup>[\s\S]*system-tool-col-name[\s\S]*system-tool-col-source[\s\S]*system-tool-col-condition[\s\S]*system-tool-col-description/);
-  assert.match(configurationCss, /\.system-tools-table[\s\S]*table-layout: fixed/);
-  assert.match(configurationCss, /system-tool-col-name \{ width: 18%; \}/);
-  assert.match(configurationCss, /system-tool-col-source \{ width: 16%; \}/);
-  assert.match(configurationCss, /system-tool-col-condition \{ width: 34%; \}/);
-  assert.match(configurationCss, /system-tool-col-description \{ width: 32%; \}/);
+test("运行时分组切换只读现有目录，不增加执行或配置接口", () => {
+  assert.match(source, /apiFetch\("\/api\/v1\/system-tools"\)/);
+  assert.doesNotMatch(source, /method:|POST|PATCH|DELETE/);
+  assert.match(source, /updateToolCatalogGroup\(true, mergeSystemToolDomains\(domains\)\)/);
+  assert.match(source, /renderSystemTools\(domains\)/);
 });

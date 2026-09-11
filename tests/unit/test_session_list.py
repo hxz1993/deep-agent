@@ -236,8 +236,10 @@ class SummaryToSessionInfoTests(unittest.TestCase):
                 updated_at=now,
                 message_count=3,
                 user_prompt="hello",
+                app_id="initial001", space_id="initial",
             )
         )
+        self.assertEqual((info.app_id, info.space_id), ("initial001", "initial"))
         self.assertEqual(info.session_id, "sess-1")
         self.assertEqual(info.agent_name, "Demo")
         self.assertEqual(info.message_count, 3)

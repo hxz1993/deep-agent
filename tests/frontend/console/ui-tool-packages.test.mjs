@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import vm from "node:vm";
 
 const source = await readFile(
   new URL("../../../console/configuration/ui-tools.js", import.meta.url),
@@ -14,6 +15,9 @@ const styles = await readFile(
   new URL("../../../console/configuration/configuration.css", import.meta.url),
   "utf8",
 );
+const editorStyles = await readFile(
+  new URL("../../../console/ui-tool-editor.css", import.meta.url), "utf8",
+);
 const consoleStyles = await readFile(
   new URL("../../../console/console.css", import.meta.url),
   "utf8",
@@ -24,7 +28,7 @@ test("UI 工具页使用左侧工具包树和右侧单一工具表", () => {
   assert.match(template, /id="uiToolsTableBody"/);
   assert.doesNotMatch(template, /id="uiToolPackagesTableBody"/);
   assert.equal((template.match(/id="uiToolsTableBody"/g) || []).length, 1);
-  assert.match(template, /是否参与运行只由 Agent 关联决定/);
+  assert.match(template, /由 Agent 关联使用/);
   assert.doesNotMatch(template, /id="uiToolPackageEnabled"|id="uiToolEnabled"/);
   assert.match(source, /api\/v1\/ui-tool-packages/);
   assert.doesNotMatch(template, /uiToolsFilters|uiToolFilterSearch|uiToolFilterEnabled/);
@@ -37,7 +41,7 @@ test("UI 工具页使用左侧工具包树和右侧单一工具表", () => {
   assert.match(source, /this\.packages\.find\(\(item\) => item\.source === "manual"\)/);
   assert.match(source, /class="ui-tool-tree-count" title="工具数量"/);
   assert.doesNotMatch(source, /class="ui-tool-tree-status/);
-  assert.match(source, /data-lucide="wrench"/);
+  assert.doesNotMatch(source, /data-lucide="wrench"/);
   assert.doesNotMatch(source, /<span class="badge">\$\{escapeHtml\(String\(selected\.tool_count/);
   assert.doesNotMatch(source, /meta\.innerHTML = `[\s\S]*source-\$\{escapeHtml\(selected\.source\)/);
   assert.match(template, /class="ui-tool-selected-title">[\s\S]*id="selectedUiToolPackageMeta"[\s\S]*<\/div>[\s\S]*id="selectedUiToolPackageDescription"/);
@@ -45,8 +49,8 @@ test("UI 工具页使用左侧工具包树和右侧单一工具表", () => {
 
 test("UI 工具页保留内部轻卡片，页面外壳直角并衔接导航", () => {
   assert.match(template, /class="ui-tools-workspace ui-tools-light-layout"/);
-  assert.match(template, /class="panel-title-copy"[\s\S]*UI 工具（HITL）[\s\S]*panel-subtitle/);
-  assert.match(template, /panel-toolbar[\s\S]*id="newUiToolPackageBtn"[\s\S]*data-lucide="plus"[\s\S]*新建工具包/);
+  assert.match(template, /class="panel-title-copy"[\s\S]*<h2>工具<\/h2>[\s\S]*panel-subtitle/);
+  assert.match(template, /panel-toolbar[\s\S]*id="newUiToolPackageBtn"[\s\S]*data-lucide="plus"[\s\S]*新建/);
   assert.doesNotMatch(template, /class="ui-tool-pane-header"/);
   assert.match(template, /id="editUiToolPackageBtn"[^>]*>[\s\S]*data-lucide="pencil"/);
   assert.match(template, /id="deleteUiToolPackageBtn"[^>]*>[\s\S]*data-lucide="trash-2"/);
@@ -108,14 +112,16 @@ test("UI 工具直接编辑 JSON Schema 并在保存前校验", () => {
   assert.match(styles, /\.schema-json-textarea\s*\{[^}]*min-height: 180px;/);
 });
 
-test("UI 工具基础信息左右布局且三类 JSON 并排编辑", () => {
-  assert.match(template, /class="ui-tool-basic-grid"/);
-  assert.match(template, /Widget 是前端渲染器标识/);
-  assert.match(template, /class="ui-tool-json-grid"/);
-  assert.equal((template.match(/class="field field-grow ui-tool-json-field"/g) || []).length, 3);
-  assert.match(template, /Metadata（选填）[\s\S]*schema-json-format">JSON</);
-  assert.match(styles, /\.ui-tool-basic-grid\s*\{[^}]*grid-template-columns: repeat\(2,/);
-  assert.match(styles, /\.ui-tool-json-grid\s*\{[^}]*grid-template-columns: repeat\(3,/);
+test("UI 工具为紧凑单列布局，三类 JSON 按标签切换", () => {
+  const modal = template.slice(template.indexOf('id="uiToolModal"'));
+  assert.ok(modal.indexOf('id="uiToolName"') < modal.indexOf('id="uiToolWidget"'));
+  assert.ok(modal.indexOf('id="uiToolWidget"') < modal.indexOf('id="uiToolDescription"'));
+  assert.match(modal, /role="tablist" aria-label="工具结构"/);
+  assert.equal((modal.match(/role="tabpanel"/g) || []).length, 3);
+  assert.equal((modal.match(/data-schema-panel="[^"]+" hidden/g) || []).length, 2);
+  assert.doesNotMatch(modal, /uiToolWidgetCustom|<select id="uiToolWidget"/);
+  assert.match(editorStyles, /#uiToolModal\s*\{[^}]*width: min\(560px,/);
+  assert.match(editorStyles, /#uiToolModal \.ui-tool-basic-grid\s*\{[^}]*grid-template-columns: minmax\(0, 1fr\)/);
 });
 
 test("内置 UI 工具复用自定义工具弹框并以只读模式展示", () => {
@@ -126,7 +132,7 @@ test("内置 UI 工具复用自定义工具弹框并以只读模式展示", () =
   assert.match(source, /this\.loadSchemas\(tool\.parameters_json_schema, tool\.result_schema, \{ readOnly: true \}\)/);
   assert.match(source, /const isReadOnly = mode === "readonly"/);
   assert.match(source, /document\.getElementById\("uiToolDescription"\)\.readOnly = isReadOnly/);
-  assert.match(source, /document\.getElementById\("uiToolWidget"\)\.disabled = isReadOnly/);
+  assert.match(source, /document\.getElementById\("uiToolWidget"\)\.readOnly = isReadOnly/);
   assert.match(source, /document\.getElementById\("uiToolMetadata"\)\.readOnly = isReadOnly/);
   assert.match(source, /document\.getElementById\("saveUiToolBtn"\)\.classList\.toggle\("hidden", isReadOnly\)/);
   assert.match(source, /if \(this\.formMode === "readonly"\) return/);
@@ -134,8 +140,8 @@ test("内置 UI 工具复用自定义工具弹框并以只读模式展示", () =
 });
 
 test("UI 工具包标题使用内缩分割线且工具编辑弹框更紧凑", () => {
-  assert.match(styles, /\.ui-tool-selected-header::after\s*\{[^}]*right: 18px;[^}]*left: 18px;[^}]*height: 1px/);
-  assert.match(styles, /#uiToolModal\s*\{[^}]*width: min\(1040px, calc\(100vw - 48px\)\)/);
+  assert.doesNotMatch(styles, /\.ui-tool-selected-header::after/);
+  assert.match(editorStyles, /#uiToolModal\s*\{[^}]*width: min\(560px, calc\(100vw - 32px\)\)/);
 });
 
 test("Agent 能力页只渲染工具包级开关", async () => {
@@ -145,4 +151,72 @@ test("Agent 能力页只渲染工具包级开关", async () => {
   );
   assert.match(agents, /value="\$\{escapeHtml\(cap\.code\)\}"/);
   assert.doesNotMatch(agents, /name="tool"|data-tool-checkbox/);
+});
+
+function controllerWith(elements) {
+  const sandbox = { window: {}, document: { getElementById: (id) => elements[id], addEventListener() {} } };
+  vm.runInNewContext(source, sandbox);
+  return sandbox.window.uiToolsAdmin;
+}
+
+test("Widget 保留未知标识和 custom 原值，清空才返回 null", () => {
+  const input = { value: "" };
+  const admin = controllerWith({ uiToolWidget: input });
+  for (const value of ["confirm", "date_picker", "custom", "client_registered_form"]) {
+    admin.setWidgetValue(value);
+    assert.equal(admin.getWidgetValue(), value);
+  }
+  input.value = "  client_form  ";
+  assert.equal(admin.getWidgetValue(), "client_form");
+  admin.setWidgetValue(null);
+  assert.equal(admin.getWidgetValue(), null);
+  input.value = "  ";
+  assert.equal(admin.getWidgetValue(), null);
+});
+
+test("切换 Schema Tabs 保留三个草稿并只显示所选面板", () => {
+  const keys = ["params", "result", "metadata"];
+  const tabs = keys.map((key) => ({ dataset: { schemaTab: key }, attributes: {}, setAttribute(name, value) { this.attributes[name] = value; }, focus() { this.focused = true; } }));
+  const panels = keys.map((key) => ({ dataset: { schemaPanel: key }, hidden: false, draft: `{${key}}` }));
+  const format = { textContent: "" };
+  const admin = controllerWith({ uiToolSchemaFormat: format, uiToolModal: { querySelectorAll: (selector) => selector === "[data-schema-tab]" ? tabs : panels } });
+  admin.selectSchemaTab("metadata", { focus: true });
+  assert.deepEqual(panels.map((panel) => panel.hidden), [true, true, false]);
+  assert.deepEqual(tabs.map((tab) => tab.tabIndex), [-1, -1, 0]);
+  assert.equal(tabs[2].focused, true);
+  assert.equal(format.textContent, "JSON");
+  admin.selectSchemaTab("params");
+  assert.equal(format.textContent, "JSON Schema");
+  assert.deepEqual(panels.map((panel) => panel.draft), ["{params}", "{result}", "{metadata}"]);
+  assert.deepEqual(panels.map((panel) => panel.hidden), [false, true, true]);
+});
+
+
+test("隐藏参数页签的 required 校验会先切回并聚焦参数，不进入保存", () => {
+  const keys = ["params", "result", "metadata"];
+  const tabs = keys.map((key) => ({ dataset: { schemaTab: key }, setAttribute() {}, addEventListener() {} }));
+  const panels = keys.map((key) => ({ dataset: { schemaPanel: key }, hidden: key !== "metadata" }));
+  const listeners = new Map();
+  const modal = {
+    querySelectorAll: (selector) => selector === "[data-schema-tab]" ? tabs : panels,
+    addEventListener(type, callback, capture) { listeners.set(type, { callback, capture }); },
+  };
+  const admin = controllerWith({ uiToolModal: modal });
+  let saved = 0;
+  admin.save = () => { saved += 1; };
+  admin.initSchemaTabs();
+  const invalid = listeners.get("invalid");
+  assert.equal(invalid.capture, true, "invalid does not bubble and must be captured");
+  let focused = false;
+  const textarea = {
+    closest: () => panels[0],
+    focus() {
+      assert.equal(panels[0].hidden, false, "required control must be visible before focus");
+      focused = true;
+    },
+  };
+  invalid.callback({ target: textarea });
+  assert.deepEqual(panels.map((panel) => panel.hidden), [false, true, true]);
+  assert.equal(focused, true);
+  assert.equal(saved, 0);
 });

@@ -56,7 +56,7 @@ test("usage is counted once per complete assistant message, never per persisted 
 });
 
 test("diagnostic inspector uses injected saved identity, historical model and unknown values", () => {
-  const html = renderSessionInspector({ diagnostic: true, state: { sessionId: "session-1", agentId: "agent-1" }, agentName: "Agent", identity: { user: "platform-owner" }, context: { app: "saved-app", space: "saved-space" }, model: { name: "historical-model" }, statusText: "未确认" });
+  const html = renderSessionInspector({ diagnostic: true, state: { sessionId: "session-1", agentId: "agent-1" }, agentName: "Agent", identity: { user: "platform-owner" }, activeSession: { appId: "saved-app", spaceId: "saved-space" }, model: { name: "historical-model" }, statusText: "未确认" });
   assert.match(html, /platform-owner/);
   assert.match(html, /saved-app/);
   assert.match(html, /historical-model/);
@@ -159,4 +159,30 @@ test("missing saved timestamps and corrupt metadata remain unknown, not current 
   assert.match(html, /title="回合数"[^]*?未记录/);
   assert.match(html, /title="消息事件数"[^]*?未记录/);
   assert.match(html, /title="附件数"[^]*?未记录/);
+});
+
+
+test("session inspector shows persisted scope, never current test request headers", () => {
+  const html = renderSessionInspector({
+    state: { sessionId: "history" },
+    activeSession: { appId: "original001", spaceId: "original" },
+    context: { app: "current002", space: "current" }, identity: { user: "test-user" },
+  });
+  assert.match(html, /模型[\s\S]*App \/ Space[\s\S]*original001[\s\S]*original[\s\S]*会话统计/);
+  assert.doesNotMatch(html, /current002|test-user|请求 Header/);
+  const missing = renderSessionInspector({ context: { app: "current002" } });
+  assert.doesNotMatch(missing, /current002/);
+  assert.match(missing, /App \/ Space[\s\S]*—/);
+});
+
+
+test("empty fields retain their original labels and styles while values and zero remain intact", () => {
+  const empty = renderSessionInspector({ state: { agentId: "internal-agent-id" }, activeSession: { appId: null, spaceId: "" } });
+  assert.match(empty, /inspector-scope-value"><code>—<\/code>/);
+  assert.doesNotMatch(empty, /internal-agent-id|console-empty-value|>No<|估算方式|estimator_source/);
+  const filled = renderSessionInspector({ diagnostic: true, agentName: "Agent name", state: { agentId: "hidden-id" }, activeSession: { appId: "<app>", spaceId: "space", turnCount: 0 }, contextStatus: { estimator_source: "conservative_fallback" } });
+  assert.match(filled, /&lt;app&gt;/);
+  assert.match(filled, /<code>space<\/code>/);
+  assert.match(filled, /title="回合数"><i[^]*?<\/i>0<\/span>/);
+  assert.doesNotMatch(filled, /hidden-id|conservative_fallback/);
 });

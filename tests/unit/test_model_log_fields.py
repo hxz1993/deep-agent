@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 from deep_agent.diagnostics.runtime import DiagnosticConfig, DiagnosticRuntime
 from deep_agent.diagnostics.query import query_logs
+from deep_agent.diagnostics.text import parse_record
 from deep_agent.diagnostics.schema import (
     IDENTIFIER_FIELDS, MAX_RECORD_BYTES, NUMBER_FIELDS, TOOL_LIST_BUDGET,
     TOOL_LIST_FIELDS, safe_fields, sanitize_record,
@@ -38,10 +39,10 @@ class ModelLogFieldsTests(unittest.TestCase):
                                 body={"image": "NEVER_LOG_BASE64"}, provider_request_id="NEVER_LOG_SERVER_ID")
                 finally:
                     writer.close()
-            lines = [line for file in Path(directory).glob("*.jsonl") for line in file.read_text().splitlines()]
+            lines = [line for file in Path(directory).glob("*.log") for line in file.read_text().splitlines()]
             self.assertEqual(len(lines), 1)
             self.assertNotIn("NEVER_LOG", lines[0])
-            record = json.loads(lines[0])
+            record = sanitize_record(parse_record(lines[0]))
             self.assertEqual(record["tool_names"], self.facts()["tool_names"])
             self.assertEqual(record["history_tool_names"], ["docs_search"])
             self.assertEqual(record["redeclared_tool_names"], ["docs_search"])

@@ -51,7 +51,7 @@ test("系统工具合并进内置工具目录", () => {
   const mcpPosition = indexHtml.indexOf('data-tab="mcp"');
   const uiPosition = indexHtml.indexOf('data-tab="ui-tools"');
 
-  assert.ok(mcpPosition >= 0 && mcpPosition < builtinPosition);
+  assert.ok(builtinPosition >= 0 && builtinPosition < mcpPosition);
   assert.equal(uiPosition, -1);
   assert.equal(systemPosition, -1);
   assert.doesNotMatch(templateHtml, /id="panel-system-tools"/);

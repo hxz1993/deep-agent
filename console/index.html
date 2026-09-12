@@ -20,9 +20,9 @@
   <link id="hljsTheme" rel="stylesheet" href="/vendor/highlight-github-dark.min.css" />
   <link rel="stylesheet" href="./themes.css?v=20260912-21" />
   <link rel="stylesheet" href="./workspace.css?v=20260912-21" />
-  <link rel="stylesheet" href="./configuration/configuration.css?v=20260912-21" />
-  <link rel="stylesheet" href="./console.css?v=20260912-21" />
-  <link rel="stylesheet" href="./diagnostics.css?v=20260912-23" />
+  <link rel="stylesheet" href="./configuration/configuration.css?v=20260912-35" />
+  <link rel="stylesheet" href="./console.css?v=20260912-35" />
+  <link rel="stylesheet" href="./diagnostics.css?v=20260912-31" />
   <link rel="stylesheet" href="./diagnostics-design.css?v=20260912-21" />
   <link rel="stylesheet" href="./diagnostics-sessions.css?v=20260912-21" />
   <link rel="stylesheet" href="./diagnostic-detail.css?v=20260912-21" />
@@ -32,6 +32,7 @@
   <link rel="stylesheet" href="./ui-tool-catalog.css?v=20260912-21" />
   <link rel="stylesheet" href="./ui-tool-editor.css?v=20260912-21" />
   <link rel="stylesheet" href="./ui-resource-layout.css?v=20260912-21" />
+  <link rel="stylesheet" href="./integrations.css?v=20260912-36" />
 </head>
 <body data-console-page="workspace">
   <div class="console-shell">
@@ -108,14 +109,15 @@
           <template id="configurationNavigation">
             <button class="tab resource-btn active" data-tab="agents"><i data-lucide="bot"></i><span>Agent</span></button>
             <button class="tab resource-btn" data-tab="channels"><i data-lucide="rss"></i><span>渠道</span></button>
+            <button class="tab resource-btn" data-tab="integrations"><i data-lucide="puzzle"></i><span>集成</span></button>
             <div class="resource-group-label">设置</div>
             <button class="tab resource-btn" data-tab="llm-providers"><svg xmlns="http://www.w3.org/2000/svg" class="lucide lucide-sparkles" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11.017 2.814a1 1 0 0 1 1.966 0l1.051 5.558a2 2 0 0 0 1.594 1.594l5.558 1.051a1 1 0 0 1 0 1.966l-5.558 1.051a2 2 0 0 0-1.594 1.594l-1.051 5.558a1 1 0 0 1-1.966 0l-1.051-5.558a2 2 0 0 0-1.594-1.594l-5.558-1.051a1 1 0 0 1 0-1.966l5.558-1.051a2 2 0 0 0 1.594-1.594z"/><path d="M20 2v4"/><path d="M22 4h-4"/><circle cx="4" cy="20" r="2"/></svg><span>模型</span></button>
-            <button class="tab resource-btn" data-tab="skills"><i data-lucide="book-open-check"></i><span>Skill</span></button>
+            <button class="tab resource-btn" data-tab="tools"><i data-lucide="hammer"></i><span>工具</span></button>
             <button class="tab resource-btn" data-tab="mcp">
               <svg xmlns="http://www.w3.org/2000/svg" class="lucide lucide-plug" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22v-5"/><path d="M15 8V2"/><path d="M17 8a1 1 0 0 1 1 1v4a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V9a1 1 0 0 1 1-1z"/><path d="M9 8V2"/></svg>
               <span>MCP</span>
             </button>
-            <button class="tab resource-btn" data-tab="tools"><i data-lucide="hammer"></i><span>工具</span></button>
+            <button class="tab resource-btn" data-tab="skills"><i data-lucide="book-open-check"></i><span>Skill</span></button>
             <div class="resource-group-label separated diagnostic-nav-label">诊断</div>
             <button type="button" class="console-nav-btn" data-page="diagnostics" data-diagnostics-nav="logs" title="日志" aria-label="日志"><i data-lucide="logs"></i><span>日志</span></button>
             <button type="button" class="console-nav-btn" data-page="diagnostics" data-diagnostics-nav="sessions" title="会话" aria-label="会话"><i data-lucide="messages-square"></i><span>会话</span></button>
@@ -142,6 +144,7 @@
             </div>
             <div class="diagnostics-search-row">
               <label class="compact-search diagnostics-keyword"><i data-lucide="search" aria-hidden="true"></i><input type="search" id="diagnosticsKeyword" placeholder="搜索日志内容" aria-label="搜索日志内容" maxlength="200" /></label>
+            <div class="agent-view-switch diagnostics-view-switch" role="group" aria-label="日志视图"><button type="button" id="diagnosticsListView" class="active" aria-pressed="true" aria-label="列表" title="列表"><i data-lucide="list" aria-hidden="true"></i></button><button type="button" id="diagnosticsRawView" aria-pressed="false" aria-label="原始" title="原始"><i data-lucide="file-text" aria-hidden="true"></i></button></div>
             <button type="button" class="diagnostics-button" id="diagnosticsExport"><i data-lucide="download" aria-hidden="true"></i><span>导出</span></button>
             <button type="submit" class="diagnostics-button primary" id="diagnosticsQuery"><i data-lucide="search" aria-hidden="true"></i><span>查询</span></button>
             <button type="button" class="diagnostics-button text" id="diagnosticsReset" title="清空条件">重置</button>
@@ -161,7 +164,6 @@
           </div>
           <div class="modal-footer"><button type="button" class="btn" id="diagnosticsExportCancel">取消</button><button type="button" class="btn primary" id="diagnosticsExportConfirm" disabled>导出日志</button></div>
         </dialog>
-          <div class="agent-view-switch diagnostics-view-switch" role="group" aria-label="日志视图"><button type="button" id="diagnosticsListView" class="active" aria-pressed="true"><i data-lucide="list"></i>列表</button><button type="button" id="diagnosticsRawView" aria-pressed="false"><i data-lucide="file-text"></i>原始</button></div>
           <div class="diagnostics-split" id="diagnosticsSplit">
           <div class="diagnostics-log-workspace">
           <div class="diagnostics-result-head"><div class="diagnostics-result-title"><span id="diagnosticsQueryRange"></span><span id="diagnosticsRangeSeparator" aria-hidden="true" hidden>·</span><span id="diagnosticsMeta" aria-live="polite">尚未查询</span><span id="diagnosticsPartial" class="hidden"></span><button type="button" class="diagnostics-button text hidden" id="diagnosticsMore">加载更多</button></div><span id="diagnosticsCopyStatus" role="status" aria-live="polite"></span></div>
@@ -207,6 +209,6 @@
   <script src="../vendor/highlight.min.js"></script>
   <script src="./json-view.js?v=20260912-21"></script>
   <script src="./markdown.js?v=20260912-21"></script>
-  <script type="module" src="./main.js?v=20260912-23"></script>
+  <script type="module" src="./main.js?v=20260912-37"></script>
 </body>
 </html>

@@ -21,6 +21,7 @@
 | 配置解析 | `options.py`（`OPTION` + accessor）；DB URL 见 `db/url.py` |
 | MCP 加载 | `capabilities/mcp/resolver.py`、`db_loader.py`、`builtin.py` |
 | 渠道网关与企微 Adapter | `channels/gateway/`、`channels/`、`api/v1/channel_accounts.py`、`db/stores/channel.py` |
+| 组件集成 | `integrations/catalog.py` 定义目录；`api/v1/integrations.py` 管理配置、`integration_runtime.py` 读取与接口示例；`db/stores/integration_settings.py` 持久化 |
 | 管理员诊断日志 | `diagnostics/`、`api/v1/diagnostics.py`；模型/工具观察在 `agent/diagnostics.py` |
 
 ---

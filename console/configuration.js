@@ -7,7 +7,7 @@ if (typeof window !== "undefined") window.DeepAgentProviderCatalog = ProviderCat
 if (typeof window !== "undefined") window.DeepAgentSkillFrontmatter = SkillFrontmatter;
 if (typeof window !== "undefined") window.DeepAgentSchemaText = SchemaText;
 let loadingPromise = null;
-const CONFIGURATION_ASSET_VERSION = "20260912-21";
+const CONFIGURATION_ASSET_VERSION = "20260912-37";
 const CONFIGURATION_TABS = new Set([
   "agents",
   "llm-providers",
@@ -15,6 +15,7 @@ const CONFIGURATION_TABS = new Set([
   "skills",
   "mcp",
   "channels",
+  "integrations",
   "global-settings",
   "catalog",
 ]);
@@ -102,6 +103,7 @@ async function loadAdminScripts() {
     "./configuration/ui-tools.js",
     "./configuration/tools.js",
     "./configuration/channels.js",
+    "./configuration/integrations.js",
   ];
   for (const script of scripts) await loadClassicScript(script);
 
@@ -145,6 +147,7 @@ export function refreshCurrentConfiguration() {
   if (active === "tools") return window.toolsAdmin?.refresh();
   if (active === "skills") return window.skillsAdmin?.refresh();
   if (active === "mcp") return window.mcpAdmin?.refresh();
+  if (active === "integrations") return window.integrationsAdmin?.refresh();
   if (active === "channels") return window.channelsAdmin?.refresh();
   if (active === "catalog") return window.modelCatalogAdmin?.refresh();
   return null;

@@ -1,0 +1,23 @@
+.integration-row-actions { flex-wrap: nowrap; }
+.integration-row-actions .btn { white-space: nowrap; }
+.integration-table th:last-child { width: 82px; text-align: right; }
+.integration-table td:nth-child(2), .integration-table td:nth-child(3) { overflow-wrap: anywhere; }
+dialog#integrationConfigModal { width: min(920px, calc(100vw - 40px)); height: min(680px, calc(100dvh - 48px)); max-width: none; max-height: none; }
+#integrationConfigForm { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+#integrationConfigModal .modal-header, #integrationConfigModal .modal-footer { flex-shrink: 0; }
+#integrationConfigModal .integration-dialog-columns { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); padding: 0; flex: 1; min-height: 0; max-height: none; overflow: hidden; }
+.integration-example-pane, .integration-editor-pane { min-width: 0; padding: 24px; overflow: auto; }
+.integration-example-pane { display: flex; flex-direction: column; min-height: 0; border-left: 1px solid var(--border); }
+#integrationApiContent { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+#integrationApiContent > .field-hint { margin: 0 0 12px; flex-shrink: 0; }
+.integration-dialog-columns h4 { margin: 0 0 16px; font-size: 14px; }
+#integrationConfigCode { margin: 0 0 12px; color: var(--text); font: 600 14px/1.5 var(--mono); overflow-wrap: anywhere; }
+#integrationConfigDescription { margin: 0 0 24px; font-size: 12px; line-height: 1.7; }
+#integrationApiContent pre { flex: 1; min-height: 0; margin: 0; overflow: auto; padding: 12px; background: var(--bg-input, var(--bg)); border: 1px solid var(--border); border-radius: var(--config-radius, 8px); font-size: 12px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
+.integration-code-label { color: var(--text-dim); font-family: var(--font); font-weight: 600; }
+#retryIntegrationApiBtn[hidden] { display: none; }
+@media (max-width: 700px) {
+  #integrationConfigModal .integration-dialog-columns { grid-template-columns: 1fr; overflow: auto; }
+  .integration-example-pane, .integration-editor-pane { overflow: visible; padding: 18px; }
+  .integration-example-pane { min-height: 320px; border-left: 0; border-top: 1px solid var(--border); }
+}

@@ -25,10 +25,10 @@ test("配置中心提供企微渠道页和完整运行状态", () => {
   assert.match(indexHtml, /data-tab="channels"[\s\S]*?<span>渠道<\/span>/);
   assert.match(templateHtml, /id="panel-channels"/);
   assert.match(templateHtml, /id="channelRuntimeBanner"/);
-  assert.match(templateHtml, /panel-toolbar-actions[\s\S]*id="channelRuntimeBanner"[\s\S]*id="refreshChannelsBtn"/);
+  assert.match(templateHtml, /channel-title-row[\s\S]*id="channelRuntimeBanner"[\s\S]*id="refreshChannelsBtn"/);
   assert.match(templateHtml, /连接外部聊天平台，将消息交给绑定的 Agent 处理。/);
   assert.match(templateHtml, /网关：读取中/);
-  assert.match(templateHtml, /id="refreshChannelsBtn" title="刷新渠道网关状态"[\s\S]*网关状态<\/button>/);
+  assert.match(templateHtml, /id="refreshChannelsBtn" title="刷新渠道网关状态"[\s\S]*data-lucide="refresh-cw"/);
   assert.doesNotMatch(templateHtml, />刷新状态<\/button>/);
   assert.doesNotMatch(templateHtml, /channel-runtime-banner/);
   assert.match(source, /not_deployed:\s*"未部署"/);
@@ -56,17 +56,18 @@ function commandHarness(fetchCatalog) {
   return { admin: context.window.channelsAdmin, elements, requests, context };
 }
 
-test("快捷命令在渠道标题后以带图标的无框按钮展示", () => {
+test("快捷命令与新建并排，网关胶囊包含刷新入口并跟随标题", () => {
   const panel = templateHtml.split('id="panel-channels">')[1].split('<div class="table-wrap')[0];
-  assert.match(panel, /channel-title-row[\s\S]*<h2>渠道<\/h2>\s*<button class="channel-commands-btn" type="button" id="channelCommandsBtn">[\s\S]*?data-lucide="terminal"[\s\S]*?<span>快捷命令<\/span><\/button>/);
-  assert.doesNotMatch(panel.split('class="panel-toolbar-actions"')[1], /channelCommandsBtn/);
-  assert.match(styles, /\.channel-commands-btn\s*\{[^}]*border: 0;[^}]*background: transparent;/);
+  const [title, actions] = panel.split('class="panel-toolbar-actions"');
+  assert.match(title, /channelRuntimeBanner[\s\S]*refreshChannelsBtn/);
+  assert.doesNotMatch(title, /channelCommandsBtn/);
+  assert.match(actions, /channelCommandsBtn[\s\S]*newChannelBtn/);
+  assert.match(styles, /\.channel-commands-btn\s*\{[^}]*border: 0;[^}]*background: var\(--bg-muted\);/);
 });
 
-test("渠道标题沿用目录标题基线，快捷命令热区不撑高标题行", () => {
+test("渠道标题沿用目录标题基线，状态胶囊不撑高标题行", () => {
   assert.match(consoleStyles, /#configurationHost #panel-channels \.panel-title-copy\s*\{\s*display: block;/);
-  assert.match(consoleStyles, /#configurationHost \.channel-title-row \.channel-commands-btn\s*\{\s*margin-block: -4px;/);
-  assert.match(styles, /\.channel-title-row \.channel-commands-btn\s*\{[^}]*min-height: 28px;/);
+  assert.match(consoleStyles, /#configurationHost \.channel-title-row \.channel-runtime-chip\s*\{\s*margin-block: -4px;/);
 });
 
 test("快捷命令弹框独立于网关读取统一只读目录并转义内容", async () => {

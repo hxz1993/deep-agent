@@ -162,6 +162,15 @@ class Agent(Base):
     llm_model: Mapped[LlmModel] = relationship("LlmModel", primaryjoin="foreign(Agent.model_id) == LlmModel.id", lazy="joined")
 
 
+class IntegrationSettings(Base):
+    __tablename__ = "integration_settings"
+
+    code: Mapped[str] = mapped_column(String(64), primary_key=True)
+    settings: Mapped[dict] = mapped_column(JSONType, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UtcTimestamp(), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(UtcTimestamp(), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+
 class GlobalSetting(Base):
     __tablename__ = "global_settings"
 

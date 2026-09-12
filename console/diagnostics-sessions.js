@@ -1,5 +1,5 @@
 import { escapeHtml as e, icon, icons, localInput, selectHtml, bindDiagnosticSelects, diagnosticRequest } from "./diagnostics-ui.js?v=20260912-21";
-import { diagnosticTime } from "./diagnostics.js?v=20260912-21";
+import { diagnosticTime } from "./diagnostics.js?v=20260912-37";
 import { diagnosticHash, sessionRange, sessionDrilldown, overviewFilters } from "./diagnostics-navigation.js?v=20260912-21";
 import { bindDiagnosticColumns, COLUMN_BOUNDS } from "./diagnostic-columns.js?v=20260912-21";
 import { buildSessionQuery, sessionQueryError, createSessionReader } from "./diagnostics-session-query.js?v=20260912-21";

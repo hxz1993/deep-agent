@@ -524,6 +524,7 @@ class ConsoleAdminRouteAuditTests(unittest.TestCase):
             "/api/v1/health/sandbox",
             "/api/v1/system-tools",
             "/api/v1/tools",
+            "/api/v1/integrations",
         }
         app = FastAPI()
         app.include_router(api_router)
@@ -537,6 +538,8 @@ class ConsoleAdminRouteAuditTests(unittest.TestCase):
             )
             if route.path.startswith("/api/v1/agents/") and route.path != "/api/v1/agents/prompt-estimate":
                 should_be_protected = route.methods != {"GET"}
+            if route.path.startswith("/api/v1/integrations/") and route.methods & {"PUT", "DELETE"}:
+                should_be_protected = True
             if not should_be_protected:
                 continue
             audited += 1

@@ -6,7 +6,7 @@ const SOURCES = { api: "API", gateway: "网关" };
 const OPTIONS = {
   period: [["24", "最近 24 小时"], ["1", "最近 1 小时"], ["6", "最近 6 小时"], ["168", "最近 7 天"], ["custom", "自定义时间"]],
   source: [["", "全部来源"], ["api", "API"], ["gateway", "网关"]],
-  level: [["", "全部等级"], ["CRITICAL", "CRITICAL · 严重"], ["ERROR", "ERROR · 错误"], ["WARNING", "WARNING · 警告"], ["INFO", "INFO · 信息"], ["DEBUG", "DEBUG · 调试"]],
+  level: [["", "全部等级"], ["CRITICAL", "CRITICAL"], ["ERROR", "ERROR"], ["WARNING", "WARNING"], ["INFO", "INFO"], ["DEBUG", "DEBUG"]],
 };
 const FIELD_LABELS = {
   timestamp: "时间", summary: "摘要", message: "正文", raw: "原始日志", request_id: "请求 ID", event: "事件",
@@ -109,11 +109,12 @@ export function initDiagnosticLogs({ page, onQuery = () => {}, onOpenSession = (
     if (area.value !== text) { const top = area.scrollTop, left = area.scrollLeft; area.value = text; area.scrollTop = top; area.scrollLeft = left; }
     byId("diagnosticsRawStatus").textContent = logExportSummary(state).replace("预计导出", "已加载").replace("正在统计匹配日志，已准备", "正在加载，已读取");
     if (view === "raw") {
-      byId("diagnosticsQuery").disabled = state.phase === "loading";
       page.setAttribute("aria-busy", String(state.phase === "loading"));
+      notice.classList.add("hidden"); notice.textContent = "";
     }
   }
   function setView(next) {
+    if (next === view) return;
     view = next;
     for (const name of ["list", "raw"]) {
       const button = byId(name === "list" ? "diagnosticsListView" : "diagnosticsRawView");
@@ -156,15 +157,16 @@ export function initDiagnosticLogs({ page, onQuery = () => {}, onOpenSession = (
     finally { link.remove(); setTimeout(() => URL.revokeObjectURL(url), 0); }
   });
   function render(state) {
-    byId("diagnosticsQuery").disabled = state.busy;
-    page.setAttribute("aria-busy", String(state.busy));
+    if (view === "list") page.setAttribute("aria-busy", String(state.busy));
     byId("diagnosticsInstance").textContent = "查看会话执行过程，排查运行问题。";
     if (!state.items.some(item => recordKey(item) === selected)) selected = "";
     const fingerprint = `${state.items.map(recordKey).join("|")}:${selected}:${state.filters.q || ""}`;
     if (rendered !== fingerprint) { rendered = fingerprint; list.innerHTML = diagnosticRowsHtml(state.items, { selected, keyword: state.filters.q || "" }); renderDetail(); }
-    notice.classList.toggle("hidden", !state.notice); notice.dataset.kind = state.notice?.kind || "info";
-    notice.textContent = state.notice ? `${state.notice.title}：${state.notice.message}` : "";
-    if (state.status?.issues?.length) notice.textContent += ` ${state.status.issues.map(issue => `${SOURCES[issue.source] || "日志"}: ${issue.code}${Number.isFinite(issue.dropped_records) ? ` (${issue.dropped_records})` : ""}`).join("；")}`;
+    if (view === "list") {
+      notice.classList.toggle("hidden", !state.notice); notice.dataset.kind = state.notice?.kind || "info";
+      notice.textContent = state.notice ? `${state.notice.title}：${state.notice.message}` : "";
+      if (state.status?.issues?.length) notice.textContent += ` ${state.status.issues.map(issue => `${SOURCES[issue.source] || "日志"}: ${issue.code}${Number.isFinite(issue.dropped_records) ? ` (${issue.dropped_records})` : ""}`).join("；")}`;
+    }
     empty.classList.toggle("hidden", Boolean(state.items.length));
     empty.textContent = state.busy ? "正在查询日志…" : state.notice ? state.notice.title : state.partial ? "当前扫描范围未匹配，可继续查询。" : "没有匹配的日志，可调整条件；会话历史可能早于日志保留范围。";
     meta.textContent = `已加载 ${state.items.length} 条${state.busy ? " · 正在查询…" : ""}`;

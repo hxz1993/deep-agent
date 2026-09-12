@@ -189,7 +189,7 @@ async function apiFetch(path, options = {}) {
     headers: { "Content-Type": "application/json", ...optionHeaders },
   });
 
-  if (resp.status === 503 && !String(path).includes("channel")) {
+  if (resp.status === 503 && !String(path).includes("channel") && !String(path).startsWith("/api/v1/integrations")) {
     showDbBanner(true);
     throw new Error("数据库未配置 (503)");
   }
@@ -292,6 +292,7 @@ function initTabs() {
     tab.addEventListener("click", async () => {
       if (window.agentsAdmin?.isEditorOpen?.() && !(await window.agentsAdmin.requestCloseEditor())) return;
       if (window.mcpAdmin?.isEditorOpen?.() && !(await window.mcpAdmin.requestCloseEditor())) return;
+      if (tab.dataset.tab !== "integrations" && window.integrationsAdmin?.deactivate() === false) return;
       tabs.forEach((t) => t.classList.remove("active"));
       tab.classList.add("active");
       const name = tab.dataset.tab;
@@ -314,6 +315,7 @@ function initTabs() {
         window.skillsAdmin.refresh();
       }
       if (name === "mcp" && window.mcpAdmin) window.mcpAdmin.refresh();
+      if (name === "integrations") window.integrationsAdmin?.refresh();
       if (name === "channels" && window.channelsAdmin) window.channelsAdmin.refresh();
       if (name === "catalog" && window.modelCatalogAdmin) window.modelCatalogAdmin.refresh();
     });

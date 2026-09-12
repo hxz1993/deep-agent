@@ -16,7 +16,7 @@ from sqlalchemy import insert, select, text, update
 from sqlalchemy.dialects.mysql import TINYINT
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
-from deep_agent.db.models import Agent, Base, GlobalSetting, SkillPackage
+from deep_agent.db.models import Agent, Base, GlobalSetting, SkillPackage, IntegrationSettings
 from deep_agent.files.storage import StoredFile
 from deep_agent.services.configuration_import import (
     ConfigurationImportConflictError,
@@ -99,7 +99,7 @@ class ConfigurationImportTests(unittest.IsolatedAsyncioTestCase):
     async def _target_engine(
         self,
         *,
-        revision: str = "003",
+        revision: str = "004",
         baseline: bool = False,
     ) -> AsyncEngine:
         target = self.root / f"target-{revision}-{baseline}.db"
@@ -131,7 +131,7 @@ class ConfigurationImportTests(unittest.IsolatedAsyncioTestCase):
         self,
         *,
         include_skill: bool = False,
-        revision: str = "003",
+        revision: str = "004",
     ) -> tuple[Path, Path | None, bytes | None]:
         source = self.root / f"source-{include_skill}-{revision}.db"
         await config_backup_tests.ConfigBackupTests()._create_source(source)
@@ -174,7 +174,7 @@ class ConfigurationImportTests(unittest.IsolatedAsyncioTestCase):
             exported_at=datetime(2026, 9, 1, 8, 0, tzinfo=timezone.utc),
             git_commit="test-commit",
         )
-        if revision != "003":
+        if revision != "004":
             with sqlite3.connect(result.path) as connection:
                 connection.execute(
                     "UPDATE alembic_version SET version_num = ?",
@@ -224,8 +224,8 @@ class ConfigurationImportTests(unittest.IsolatedAsyncioTestCase):
         return str(row[0])
 
     async def test_same_dynamic_revision_import_preserves_ids_and_revision(self) -> None:
-        backup_path, _, _ = await self._backup(revision="003")
-        engine = await self._target_engine(revision="003", baseline=True)
+        backup_path, _, _ = await self._backup(revision="004")
+        engine = await self._target_engine(revision="004", baseline=True)
         try:
             plan = await build_configuration_import_plan(
                 backup_path,
@@ -250,6 +250,7 @@ class ConfigurationImportTests(unittest.IsolatedAsyncioTestCase):
                 revision = await connection.scalar(
                     text("SELECT version_num FROM alembic_version")
                 )
+                integrations = (await connection.execute(select(IntegrationSettings.__table__))).mappings().all()
                 sessions = await connection.scalar(
                     text("SELECT COUNT(*) FROM chat_sessions")
                 )
@@ -258,13 +259,30 @@ class ConfigurationImportTests(unittest.IsolatedAsyncioTestCase):
                 tuple(provider),
                 ("0123456789abcdef0123456789abcdef", "plain-api-key"),
             )
-            self.assertEqual(revision, "003")
+            self.assertEqual(revision, "004")
             self.assertEqual(sessions, 0)
+            self.assertEqual(integrations[0]["code"], "deeptable-assistant")
+            self.assertEqual(integrations[0]["settings"], {"enabled": True, "options": [1, None, "中文"]})
+        finally:
+            await engine.dispose()
+
+    async def test_invalid_integration_rows_cannot_bypass_import_validation(self) -> None:
+        backup_path, _, _ = await self._backup()
+        engine = await self._target_engine(baseline=True)
+        try:
+            plan = await build_configuration_import_plan(backup_path, target_engine=engine)
+            for value, code in (([], "deeptable-assistant"), ({}, "deeptable-assistant"), ({"a": "x"}, "unknown")):
+                rows = copy.deepcopy(plan.rows)
+                rows["integration_settings"][0].update(code=code, settings=value)
+                with self.assertRaisesRegex(ConfigurationImportError, "integration_settings"):
+                    await apply_configuration_import(replace(plan, rows=rows), target_engine=engine, file_store=_MemoryFileStore(), request_headers={})
+            async with engine.connect() as connection:
+                self.assertEqual(await connection.scalar(select(GlobalSetting.key)), "target-only")
         finally:
             await engine.dispose()
 
     async def test_different_revision_is_rejected(self) -> None:
-        backup_path, _, _ = await self._backup(revision="003")
+        backup_path, _, _ = await self._backup(revision="004")
         engine = await self._target_engine(revision="001")
         try:
             with self.assertRaisesRegex(

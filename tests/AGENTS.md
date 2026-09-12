@@ -91,7 +91,7 @@ tests/
 | `test_tool_package_registry.py` | ToolPackage Registry 的显式整包选择和空列表语义 |
 | `test_sqlite_bootstrap.py` | 生产基线001、Channel增量002及逻辑引用003的空库创建、默认数据、完整结构及升降往返 |
 | `test_baseline_migration_dialects.py` | 历史001→002离线DDL编译，以及003必须在线迁移 |
-| `test_channel_migration.py` | 确认Head为003，Channel物理字段与ORM一致，重复升级保留数据，临时库降升往返 |
+| `test_channel_migration.py` | 确认Head为004，Channel物理字段与ORM一致，重复升级保留数据，临时库降升往返 |
 | `test_channel_gateway.py` | Account/Binding/Run Store、消息解析、幂等、SSE文本投影与Agent换代 |
 | `test_channel_commands.py` | 公共命令识别、非企微测试Adapter、队列与独立停止/新建、超时及投递失败 |
 | `test_channel_store_commands.py` | 无Session Binding、命令认领、新建会话原子换绑、来源标题、归属和重复执行保护 |
@@ -161,3 +161,5 @@ tests/
 ### 无外键真实事务验收
 
 `integration/test_logical_references.py`、`test_channel_reference_transactions.py`、`test_reference_migration_databases.py`、`test_configuration_import_databases.py`提供隔离MySQL/PostgreSQL的opt-in回归。环境变量及防误用数据库名见各文件首部。未提供URL必须报告skip，不能当作真实数据库通过；SQLite无法替代记录锁验证。MySQL真实schema通过Alembic创建，不使用metadata.create_all替代部署结构。
+
+集成配置回归：`unit/test_integration_configuration.py`覆盖空库目录、JSON值、首次保存/并发与清空，`integration/test_integration_runtime_api.py`覆盖登录/管理权限、未配置错误及弹窗与OpenAPI示例一致性。`004`只建表不种数据；迁移往返与配置备份/导入均使用隔离库。

@@ -139,16 +139,16 @@
         <div class="panel-title-copy">
           <div class="channel-title-row">
             <h2>渠道</h2>
-            <button class="channel-commands-btn" type="button" id="channelCommandsBtn"><i data-lucide="terminal"></i><span>快捷命令</span></button>
+            <span class="channel-runtime-chip" id="channelRuntimeBanner" data-state="loading" role="status" aria-live="polite" title="正在读取渠道网关状态…">
+              <span class="channel-runtime-dot" aria-hidden="true"></span>
+              <strong>网关：读取中</strong>
+              <button class="channel-runtime-refresh" type="button" id="refreshChannelsBtn" title="刷新渠道网关状态" aria-label="刷新渠道网关状态"><i data-lucide="refresh-cw" aria-hidden="true"></i></button>
+            </span>
           </div>
           <p class="panel-subtitle">连接外部聊天平台，将消息交给绑定的 Agent 处理。</p>
         </div>
         <div class="panel-toolbar-actions">
-          <span class="channel-runtime-chip" id="channelRuntimeBanner" data-state="loading" role="status" aria-live="polite" title="正在读取渠道网关状态…">
-            <span class="channel-runtime-dot" aria-hidden="true"></span>
-            <strong>网关：读取中</strong>
-          </span>
-          <button class="btn" type="button" id="refreshChannelsBtn" title="刷新渠道网关状态"><i data-lucide="refresh-cw"></i>网关状态</button>
+            <button class="btn channel-commands-btn" type="button" id="channelCommandsBtn"><i data-lucide="terminal"></i><span>快捷命令</span></button>
           <div class="channel-create-control">
             <button class="btn primary" type="button" id="newChannelBtn" aria-haspopup="menu" aria-expanded="false" aria-controls="newChannelMenu"><i data-lucide="plus"></i><span>新建渠道</span><i data-lucide="chevron-down"></i></button>
             <div class="channel-create-menu" id="newChannelMenu" role="menu" aria-label="选择渠道" hidden>
@@ -203,6 +203,11 @@
           </tbody>
         </table>
       </div>
+    </section>
+
+    <section class="panel integrations-admin-panel" id="panel-integrations">
+      <div class="panel-toolbar"><div><h2>集成</h2><p class="panel-subtitle">配置组件服务中 AI 功能的关联关系，统一管理各项功能使用的 Agent。</p></div></div>
+      <div class="table-wrap console-list-a"><table class="data-table integration-table"><thead><tr><th>名称</th><th>集成编码</th><th>配置</th><th>操作</th></tr></thead><tbody id="integrationTableBody"><tr><td colspan="4" class="empty-cell">加载中…</td></tr></tbody></table></div>
     </section>
 
     <!-- Unified tool management -->
@@ -872,6 +877,18 @@
         <button type="button" class="btn" id="cancelUiToolBtn">取消</button>
         <button type="submit" class="btn primary" id="saveUiToolBtn">保存</button>
       </div>
+    </form>
+  </dialog>
+
+
+  <dialog class="modal integration-dialog" id="integrationConfigModal" aria-labelledby="integrationConfigTitle">
+    <form id="integrationConfigForm" novalidate>
+      <div class="modal-header"><h3 id="integrationConfigTitle">集成配置</h3><button type="button" class="icon-btn" data-integration-close aria-label="关闭"><i data-lucide="x"></i></button></div>
+      <div class="modal-body integration-dialog-columns">
+        <section class="integration-editor-pane" aria-label="配置"><h4 id="integrationConfigCode"></h4><p class="field-hint" id="integrationConfigDescription"></p><div id="integrationEditor"></div><div class="form-error hidden" data-form-error role="alert" aria-live="assertive"></div></section>
+        <section class="integration-example-pane" aria-label="接口示例"><h4>接口示例</h4><div id="integrationApiContent"></div><button type="button" class="btn" id="retryIntegrationApiBtn" hidden>重试</button></section>
+      </div>
+      <div class="modal-footer"><button type="button" class="btn" data-integration-close>取消</button><button type="submit" class="btn primary" id="saveIntegrationConfigBtn">保存</button></div>
     </form>
   </dialog>
 

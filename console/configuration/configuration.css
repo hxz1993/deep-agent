@@ -2680,23 +2680,16 @@ dialog.console-action-dialog::backdrop {
 }
 
 .channel-title-row { display: flex; align-items: center; gap: 12px; }
-.channel-title-row .channel-commands-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  min-height: 28px;
-  padding: 3px 8px;
+#configurationHost .channel-commands-btn {
   border: 0;
-  border-radius: 7px;
-  background: transparent;
-  color: var(--text-faint);
-  font: inherit;
-  font-size: 12px;
-  cursor: pointer;
+  background: var(--bg-muted);
+  color: var(--text-dim);
 }
-.channel-title-row .channel-commands-btn svg { width: 14px; height: 14px; }
-.channel-title-row .channel-commands-btn:hover { color: var(--text); background: var(--bg-hover); }
-.channel-title-row .channel-commands-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+#configurationHost .channel-commands-btn:hover { color: var(--text); background: var(--bg-hover); }
+.channel-runtime-refresh { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: inherit; cursor: pointer; }
+.channel-runtime-refresh svg { width: 13px; height: 13px; }
+.channel-runtime-refresh:hover { background: var(--bg-hover); color: var(--text); }
+.channel-runtime-refresh:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
 .channel-table {
   min-width: 720px;

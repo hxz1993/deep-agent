@@ -4,9 +4,9 @@ import {
   initConfiguration,
   restoreConfigurationTab,
   rememberConfigurationTab,
-} from "./configuration.js?v=20260912-21";
+} from "./configuration.js?v=20260912-37";
 import { bindContextControls, refreshIdentity } from "./context.js?v=20260912-21";
-import { initDiagnostics, setDiagnosticsActive, openDiagnostics } from "./diagnostics-center.js?v=20260912-23";
+import { initDiagnostics, setDiagnosticsActive, openDiagnostics } from "./diagnostics-center.js?v=20260912-37";
 import { initWorkspace } from "./workspace.js?v=20260912-21";
 import "./time.js?v=20260912-21";
 
@@ -75,6 +75,7 @@ async function showPage(page, { updateHash = true, restoreTab = true, diagnostic
   if (current === "configuration" && next !== "configuration" && window.mcpAdmin?.isEditorOpen?.()) {
     if (!(await window.mcpAdmin.requestCloseEditor())) return;
   }
+  if (next !== "configuration" && window.integrationsAdmin?.deactivate() === false) return;
   document.querySelectorAll("[data-page-panel]").forEach((panel) => {
     panel.classList.toggle("active", panel.dataset.pagePanel === next);
   });
@@ -94,6 +95,9 @@ async function showPage(page, { updateHash = true, restoreTab = true, diagnostic
   if (consoleAllowed && next === "configuration") {
     await initConfiguration().catch((error) => toast(error.message, true));
     if (restoreTab) restoreConfigurationTab();
+    if (restoreTab && current !== "configuration" && document.querySelector('[data-tab="integrations"]')?.classList.contains("active")) {
+      void window.integrationsAdmin?.refresh();
+    }
   }
   if (consoleAllowed && next === "workspace" && current !== "workspace") {
     void window.DeepAgentConsoleWorkspace?.refreshChannelAccounts();
@@ -183,6 +187,8 @@ function bindNavigation() {
   if (agentTab) document.querySelector(".console-rail .console-nav")?.append(agentTab);
   const channelTab = resourceNav?.querySelector('[data-tab="channels"]');
   if (channelTab) document.querySelector(".console-rail .console-nav")?.append(channelTab);
+  const integrationTab = resourceNav?.querySelector('[data-tab="integrations"]');
+  if (integrationTab) document.querySelector(".console-rail .console-nav")?.append(integrationTab);
   document.querySelectorAll(".console-rail [data-tab]").forEach((button) => {
     const label = button.querySelector("span")?.textContent.trim();
     if (label) { button.title = label; button.setAttribute("aria-label", label); }

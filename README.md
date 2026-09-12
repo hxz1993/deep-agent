@@ -53,7 +53,7 @@ v0.7.0新增可选渠道网关：同仓、同镜像独立运行，公共Gateway/
 | [`src/deepfos_platform/`](src/deepfos_platform/README.md) | 平台配置、客户端、服务发现和部署运行时支撑 |
 | [`src/maintenance/`](src/maintenance/README.md) | 人工维护程序，不属于 Agent 工具 |
 | [`deploy/`](deploy/README.md) | Jenkins、Gunicorn 和 Docker Compose 部署配置 |
-| [`migrations/`](migrations/) | 数据库迁移；结构版本为 `003` |
+| [`migrations/`](migrations/) | 数据库迁移；结构版本为 `004` |
 | [`scripts/`](scripts/) | 开发、构建与环境准备脚本 |
 | [`tests/`](tests/README.md) | Python、接口、MCP 和 Console 测试 |
 | [`docs/`](docs/README.md) | 当前说明、技术设计和交互原型 |
@@ -167,14 +167,15 @@ PYTHONPATH=src python -m deep_agent.channels.gateway --host 0.0.0.0 --port 8010
 MySQL 的连接及业务文本字段应使用 `utf8mb4`，避免 Emoji 等字符损失引发保存失败；
 已有数据库需要检查实际字段。详见[字符集部署要求与排查](docs/guides/mysql-character-set.md)。
 
-新数据库直接执行 `alembic upgrade head`。当前 Alembic head 为`003`：生产基线 `001`完整包含原
+新数据库直接执行 `alembic upgrade head`。当前 Alembic head 为`004`：生产基线 `001`完整包含原
 Revision 001～012 的最终结构和默认数据：Provider/Model/Agent、MCP、Skill、UI工具、模型目录、
 `chat_sessions + chat_session_events` Event Store，以及初始化为会话原生搜索的`global_settings`；
 增量`002`增加企微Channel的Account、Session Binding和Message Run三表；渠道用户由管理员配置
 `session_user_id`，Peer键名使用`userid/chatid`。
 增量 `003` 移除 10 条数据库外键，由后端事务、记录锁和逻辑引用校验维持原有删除规则。
-已发布的 `001`、`002` 不改写。上线顺序：完整备份 → 停止旧 API/Gateway 写入 → 升级并核验
-`003` → 启动新版 → 业务冒烟；不能让旧代码继续向无外键数据库写入。
+增量 `004` 新增 `integration_settings`，保存组件 AI 功能的 JSON 配置，不插入初始记录。见[集成配置](docs/guides/integrations.md)。
+已发布的 `001`、`002`、`003` 不改写。上线顺序：完整备份 → 停止旧 API/Gateway 写入 → 升级并核验
+`004` → 启动新版 → 业务冒烟；不能让旧代码继续向无外键数据库写入。
 迁移预检发现孤儿数据会停止，MySQL 中断后保持维护状态并重跑。具体见
 [无外键部署与回归](docs/guides/application-references.md)。
 

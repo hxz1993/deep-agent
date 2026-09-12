@@ -506,3 +506,37 @@ test("session preview preserves exactly eight characters and raw detail is colla
   }
   assert.match(css, /\.diagnostics-raw-record[^}]*border:1px solid var\(--border\)/);
 });
+
+test('视图切换和分页加载不禁用查询按钮，重复选择当前视图不重新请求', async () => {
+  const pending = deferred();
+  const h = logControllerHarness([status, page([]), status, pending.promise]);
+  const changes = [];
+  Object.defineProperty(h.node('#diagnosticsQuery'), 'disabled', {set(value) { changes.push(value); }});
+  h.controller.activate({period:'24'}); await turn();
+  h.fire('#diagnosticsRawView', 'click'); await turn();
+  const count=h.calls.length;
+  h.fire('#diagnosticsRawView', 'click'); await turn();
+  assert.equal(h.calls.length,count);
+  h.fire('#diagnosticsListView', 'click'); await turn();
+  pending.resolve(page([record('late')])); await turn();
+  assert.equal(h.node('#diagnosticsRawPane').hidden,true);
+  assert.equal(changes.includes(true),false);
+  h.controller.deactivate();
+});
+
+
+test('从失败列表切到原始日志不残留列表错误，返回列表仍显示自身错误', async () => {
+ const failure = Object.assign(new Error('列表服务不可用'), {status:503});
+ const h = logControllerHarness([failure, status, page([record('raw-ok')]), failure]);
+ h.controller.activate({period:'24'}); await turn();
+ assert.equal(h.node('#diagnosticsNotice').classList.contains('hidden'),false);
+ h.fire('#diagnosticsRawView','click'); await turn();
+ assert.match(h.node('#diagnosticsRawStatus').textContent,/已加载 1 条/);
+ assert.equal(h.node('#diagnosticsNotice').classList.contains('hidden'),true);
+ assert.equal(h.node('#diagnosticsNotice').textContent,'');
+ h.fire('#diagnosticsFilters','input');
+ assert.equal(h.node('#diagnosticsNotice').classList.contains('hidden'),true);
+ h.fire('#diagnosticsListView','click'); await turn();
+ assert.equal(h.node('#diagnosticsNotice').classList.contains('hidden'),false);
+ h.controller.deactivate();
+});

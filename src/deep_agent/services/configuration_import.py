@@ -22,6 +22,8 @@ from deep_agent.db.configuration_transfer import (
     validate_table_classification,
 )
 from deep_agent.db.models import Base
+from deep_agent.integrations.catalog import get_integration_definition
+from deep_agent.schemas.integration import validate_integration_settings
 from deep_agent.files.storage import FileStore, StoredFile
 from deep_agent.skills.package import MAX_ZIP_BYTES, SkillPackageError, parse_skill_zip
 from deepfos_platform.client.platform import FILE_TYPE_SKILL_PACKAGE
@@ -241,6 +243,18 @@ async def _actual_primary_keys(
     return {tuple(row) for row in result.all()}
 
 
+def _validate_integration_rows(rows: Sequence[Mapping[str, Any]]) -> None:
+    for row in rows:
+        if get_integration_definition(row.get("code")) is None:
+            raise ConfigurationImportError("integration_settings contains an unknown integration code")
+        try:
+            value = validate_integration_settings(row.get("settings"))
+        except ValueError as exc:
+            raise ConfigurationImportError("integration_settings contains an invalid JSON configuration") from exc
+        if not value:
+            raise ConfigurationImportError("integration_settings must not contain empty configurations")
+
+
 async def _validate_empty_sessions(connection: AsyncConnection, *, target: bool) -> None:
     counts = {
         table_name: await _table_count(connection, table_name)
@@ -338,6 +352,7 @@ async def inspect_configuration_backup(
                 table = Base.metadata.tables[table_name]
                 result = await connection.execute(select(table))
                 rows[table_name] = [dict(row) for row in result.mappings().all()]
+            _validate_integration_rows(rows.get("integration_settings", []))
             for row in rows.get("agents", []):
                 row["capabilities"] = canonical_tool_package_codes(
                     row.get("capabilities") or []
@@ -705,6 +720,7 @@ async def apply_configuration_import(
     request_headers: Mapping[str, str],
     active_run_count: int = 0,
 ) -> ConfigurationImportResult:
+    _validate_integration_rows(plan.rows.get("integration_settings", []))
     if active_run_count:
         raise ConfigurationImportConflictError("Target DeepAgent has active runs")
     if _IMPORT_LOCK.locked():

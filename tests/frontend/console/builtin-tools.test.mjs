@@ -46,16 +46,16 @@ function loadBuiltinToolsUi(customDocument) {
   return window.__BuiltinToolsUI;
 }
 
-test("设置目录按 Provider、Skill、MCP、工具排列", () => {
+test("设置目录按模型、工具、MCP、Skill排列", () => {
   const providerPosition = indexHtml.indexOf('data-tab="llm-providers"');
   const skillPosition = indexHtml.indexOf('data-tab="skills"');
   const builtinPosition = indexHtml.indexOf('data-tab="tools"');
   const mcpPosition = indexHtml.indexOf('data-tab="mcp"');
   const uiPosition = indexHtml.indexOf('data-tab="ui-tools"');
 
-  assert.ok(providerPosition >= 0 && providerPosition < skillPosition);
-  assert.ok(skillPosition < mcpPosition);
-  assert.ok(mcpPosition < builtinPosition);
+  assert.ok(providerPosition >= 0 && providerPosition < builtinPosition);
+  assert.ok(builtinPosition < mcpPosition);
+  assert.ok(mcpPosition < skillPosition);
   assert.equal(uiPosition, -1);
   assert.match(templateHtml, /id="panel-builtin-tools"/);
   assert.match(source, /预制工具[\s\S]*运行时工具/);

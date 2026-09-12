@@ -5,7 +5,8 @@ from datetime import datetime, timezone
 from sqlalchemy import Select, delete, exists, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from deep_agent.db.models import Agent, ChatSession, ChatSessionEvent
+from deep_agent.db.models import Agent, ChatSession, ChatSessionEvent, ChannelSessionBinding
+from deep_agent.db.reference_integrity import lock_reference, lock_optional
 from deep_agent.db.session_list import MAX_LIST_LIMIT, SessionSummaryRow, SortField
 from deep_agent.db.session_scope import SessionOwner, agent_scope_to_api
 from deep_agent.db.stores._session import SessionBoundMixin
@@ -20,6 +21,7 @@ class ChatSessionStoreBase(SessionBoundMixin):
         app_id: str | None = None, space_id: str | None = None,
         title: str | None = None, now: datetime | None = None,
     ) -> ChatSession:
+        await lock_reference(db, Agent, Agent.id, agent_id, "Agent")
         timestamp = now or datetime.now(timezone.utc)
         row = (
             await db.execute(
@@ -73,6 +75,8 @@ class ChatSessionStoreBase(SessionBoundMixin):
         self, db: AsyncSession, agent_id: str, session_id: str,
         *, for_update: bool = False,
     ) -> SessionOwner:
+        if for_update:
+            await lock_reference(db, Agent, Agent.id, agent_id, "Agent")
         stmt = select(ChatSession.user_id).where(
             ChatSession.session_id == session_id, ChatSession.agent_id == agent_id,
         )
@@ -80,6 +84,13 @@ class ChatSessionStoreBase(SessionBoundMixin):
             stmt = stmt.with_for_update()
         user_id = (await db.execute(stmt)).scalar_one_or_none()
         return SessionOwner(exists=user_id is not None, user_id=user_id)
+
+    async def get_initial_scope(self, agent_id: str, session_id: str) -> tuple[str | None, str | None]:
+        async with self._read() as db:
+            row = (await db.execute(select(ChatSession.app_id, ChatSession.space_id).where(
+                ChatSession.agent_id == agent_id, ChatSession.session_id == session_id,
+            ))).one_or_none()
+            return (row.app_id, row.space_id) if row else (None, None)
 
     async def get_timestamps(
         self, agent_id: str, session_id: str,
@@ -96,6 +107,17 @@ class ChatSessionStoreBase(SessionBoundMixin):
         return (row.created_at, row.updated_at) if row is not None else (None, None)
 
     async def _delete(self, db: AsyncSession, agent_id: str, session_id: str) -> None:
+        if await lock_optional(db, Agent, Agent.id, agent_id) is None:
+            return
+        row = await lock_optional(db, ChatSession, ChatSession.session_id, session_id)
+        if row is None or row.agent_id != agent_id:
+            return
+        # The session lock also fences direct Event Store writers. All cleanup
+        # commits with the parent deletion, or rolls back as a whole.
+        await db.execute(update(ChannelSessionBinding).where(
+            ChannelSessionBinding.session_id == session_id
+        ).values(session_id=None))
+        await db.execute(delete(ChatSessionEvent).where(ChatSessionEvent.session_id == session_id))
         await db.execute(
             delete(ChatSession).where(
                 ChatSession.session_id == session_id,
@@ -186,7 +208,7 @@ class ChatSessionStoreBase(SessionBoundMixin):
         stmt = (
             select(
                 ChatSession.session_id, ChatSession.agent_id, ChatSession.title,
-                ChatSession.created_at, ChatSession.updated_at,
+                ChatSession.created_at, ChatSession.updated_at, ChatSession.app_id, ChatSession.space_id,
                 Agent.name.label("agent_name"), message_count.label("message_count"),
                 turn_count.label("turn_count"),
             )
@@ -201,7 +223,7 @@ class ChatSessionStoreBase(SessionBoundMixin):
             )
             .group_by(
                 ChatSession.session_id, ChatSession.agent_id, ChatSession.title,
-                ChatSession.created_at, ChatSession.updated_at, Agent.name,
+                ChatSession.created_at, ChatSession.updated_at, ChatSession.app_id, ChatSession.space_id, Agent.name,
             )
         )
         stmt = self._apply_session_filters(
@@ -251,6 +273,7 @@ class ChatSessionStoreBase(SessionBoundMixin):
                 turn_count=int(row.turn_count),
                 attachment_count=attachment_counts.get(row.session_id, 0),
                 user_prompt=prompts.get(row.session_id), title=row.title,
+                app_id=row.app_id, space_id=row.space_id,
             )
             for row in rows
         ]

@@ -20,6 +20,7 @@ from deep_agent.db.event_codec import (
 )
 from deep_agent.db.ids import new_event_id
 from deep_agent.db.models import ChatSession, ChatSessionEvent
+from deep_agent.db.reference_integrity import lock_reference
 from deep_agent.db.run_ownership import run_is_live
 from deep_agent.db.stores._session import SessionBoundMixin
 from deep_agent.time import utc_rfc3339
@@ -123,6 +124,7 @@ class SessionEventStore(SessionBoundMixin):
         *, turn_id: str, run_id: str | None, first_message_ordinal: int = 0,
         now: datetime | None = None, terminal_status: str | None = None,
     ) -> list[ChatSessionEvent]:
+        session = await lock_reference(db, ChatSession, ChatSession.session_id, session.session_id, "Session")
         timestamp = now or datetime.now(timezone.utc)
         drafts = encode_messages(
             messages, session_id=session.session_id, run_id=run_id,
@@ -185,6 +187,7 @@ class SessionEventStore(SessionBoundMixin):
         *, turn_id: str, run_id: str, first_message_ordinal: int = 1,
         terminal_status: str | None = None,
     ) -> list[ChatSessionEvent]:
+        session = await lock_reference(db, ChatSession, ChatSession.session_id, session.session_id, "Session")
         drafts = encode_message_parts(messages, session_id=session.session_id,
             run_id=run_id, first_message_ordinal=first_message_ordinal)
         existing_rows = list((await db.execute(select(ChatSessionEvent).where(
@@ -261,6 +264,7 @@ class SessionEventStore(SessionBoundMixin):
         turn_id: str | None, run_id: str | None, payload: dict[str, Any],
         now: datetime | None = None,
     ) -> ChatSessionEvent:
+        session = await lock_reference(db, ChatSession, ChatSession.session_id, session.session_id, "Session")
         timestamp = now or datetime.now(timezone.utc)
         row = ChatSessionEvent(
             event_id=new_event_id(), session_id=session.session_id,
@@ -304,6 +308,7 @@ class SessionEventStore(SessionBoundMixin):
         details: dict[str, Any] | None = None,
         now: datetime | None = None,
     ) -> ChatSessionEvent:
+        session = await lock_reference(db, ChatSession, ChatSession.session_id, session.session_id, "Session")
         timestamp = now or datetime.now(timezone.utc)
         payload: dict[str, Any] = {
             "title": title,
@@ -337,6 +342,7 @@ class SessionEventStore(SessionBoundMixin):
         status: LifecycleStatus, turn_id: str | None, run_id: str,
         payload: dict[str, Any], now: datetime | None = None,
     ) -> ChatSessionEvent:
+        session = await lock_reference(db, ChatSession, ChatSession.session_id, session.session_id, "Session")
         """Record the actual execution failure once, regardless of saved output."""
         existing = (await db.execute(select(ChatSessionEvent).where(
             ChatSessionEvent.session_id == session.session_id,

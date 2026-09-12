@@ -538,6 +538,42 @@ test("compact pagination keeps fixed filters and rejects out-of-range pages", as
   assert.equal(h.requests.length, count);
 });
 
+test("pagination retains the server total while loading either direction and ignores a superseded page", async () => {
+  const next = deferred(), previous = deferred(), stale = deferred();
+  const replies = [{ total: 128, items: [] }, next.promise, previous.promise, stale.promise, { total: 8, items: [] }];
+  const h = sessionHarness(() => replies.shift()); h.activate("list"); await settle();
+  assert.match(h.root.innerHTML, /第 1 \/ 3 页 · 共 128 项/);
+  await h.click({ sessionAction: "next" });
+  assert.match(h.root.innerHTML, /第 2 \/ 3 页 · 共 128 项/);
+  assert.equal(h.root.attributes["aria-busy"], "true");
+  const requestCount = h.requests.length;
+  await h.click({ sessionAction: "next" });
+  assert.equal(h.requests.length, requestCount, "repeated clicks while loading do not skip a page");
+  next.resolve({ total: 128, items: [] }); await settle();
+  await h.click({ sessionAction: "previous" });
+  assert.match(h.root.innerHTML, /第 1 \/ 3 页 · 共 128 项/);
+  previous.resolve({ total: 128, items: [] }); await settle();
+  await h.click({ sessionAction: "next" });
+  h.select("agent_id", "new-agent"); await settle();
+  assert.equal(h.requests.at(-2).signal.aborted, true);
+  assert.match(h.root.innerHTML, /第 1 \/ 1 页 · 共 8 项/);
+  stale.resolve({ total: 999, items: [] }); await settle();
+  assert.match(h.root.innerHTML, /第 1 \/ 1 页 · 共 8 项/);
+  assert.equal(h.controller.snapshot().data.total, 8);
+});
+
+test("session list uses fixed fifty-row pages and retains original missing-field labels", async () => {
+  const h = sessionHarness(async () => ({ total: 1, items: [{ session_id: "empty-fields", title: "", agent_name: "", agent_id: "", user_id: "", latest_status: "completed", updated_at: "2026-09-11T01:00:00Z" }] }));
+  h.activate("list", { ...filters, limit: 100 }); await settle();
+  assert.equal(new URL(h.requests[0].path, "http://local").searchParams.get("limit"), "50");
+  assert.doesNotMatch(h.root.innerHTML, /每页条数|20 条 \/ 页|100 条 \/ 页|diagnostic-missing-value|>No</);
+  assert.match(h.root.innerHTML, /未命名会话[\s\S]*当前范围暂无提问[\s\S]*未记录/);
+  assert.match(h.root.innerHTML, /data-session-action="previous"[^>]*>上一页<\/button>/);
+  const count = h.requests.length;
+  await h.click({ sessionAction: "previous" }); await h.click({ sessionAction: "next" });
+  assert.equal(h.requests.length, count, "first and last page boundaries do not issue requests");
+});
+
 test("resolved username in picker submits the original platform ID, never its display name", async () => {
   const h = sessionHarness(); h.activate("list"); await settle();
   assert.match(h.root.innerHTML, /name="user_id" value="平台账号"/);

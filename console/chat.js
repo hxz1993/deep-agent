@@ -1,12 +1,12 @@
-import { createConversationPresenter } from "./conversation-presenter.js?v=20260909-1";
-import { buildChoiceResult, normalizeOption, normalizeStructuredFields, validateUiToolCall } from "./hitl.js?v=20260728-2";
+import { createConversationPresenter } from "./conversation-presenter.js?v=20260912-21";
+import { buildChoiceResult, normalizeOption, normalizeStructuredFields, validateUiToolCall } from "./hitl.js?v=20260912-21";
 import {
   contextCompactionPresentation,
   parseSseBlock,
   readSse,
-} from "./protocol.js?v=20260729-1";
-import { channelOriginPresentation, formatSessionIdSubtitle } from "./session-display.js?v=20260904-13";
-import { copyTextToClipboard } from "./message-actions.js?v=20260819-1";
+} from "./protocol.js?v=20260912-21";
+import { channelOriginPresentation, formatSessionIdSubtitle } from "./session-display.js?v=20260912-21";
+import { copyTextToClipboard } from "./message-actions.js?v=20260912-21";
 import {
   applyAssistantPresentationActions,
   assistantActionsFromDeferred,
@@ -15,16 +15,16 @@ import {
   planPanelState,
   processDisclosureLabel,
   toolResultPresentation,
-} from "./assistant-presentation.js?v=20260907-1";
-import { createTrajectoryController } from "./trajectory.js?v=20260910-15";
-import { attachmentPreviewUrl, bindAttachmentImagePreviews, createImageGallery } from "./attachment-preview.js?v=20260904-8";
-import { bindWebImagePreviewFallback, renderWebImagePreview } from "./web-image.js?v=20260901-1";
-import { parseServerTimestamp, serverTimestampMilliseconds } from "./time.js?v=20260831-1";
+} from "./assistant-presentation.js?v=20260912-21";
+import { createTrajectoryController } from "./trajectory.js?v=20260912-21";
+import { attachmentPreviewUrl, bindAttachmentImagePreviews, createImageGallery } from "./attachment-preview.js?v=20260912-21";
+import { bindWebImagePreviewFallback, renderWebImagePreview } from "./web-image.js?v=20260912-21";
+import { parseServerTimestamp, serverTimestampMilliseconds } from "./time.js?v=20260912-21";
 import {
   latestPendingDeferredTool,
   normalizeConversationHistory,
   projectConversationItems,
-} from "./conversation-items.js?v=20260907-1";
+} from "./conversation-items.js?v=20260912-21";
 import {
   firstSelectableModelId,
   isModelSelectable,
@@ -32,11 +32,11 @@ import {
   modelOptionLabel,
   preserveCurrentModel,
   renderGroupedModelOptions,
-} from "./model-options.js?v=20260828-1";
-import { shouldFollowMessages } from "./message-scroll.js?v=20260902-1";
-import { boundedStreamRequest, verifyStreamStop } from "./stop-recovery.js?v=20260907-1";
-import { createHistoryFollower } from "./history-follower.js?v=20260908-1";
-import { createSessionObserver, historyThroughRun } from "./session-observer.js?v=20260909-1";
+} from "./model-options.js?v=20260912-21";
+import { shouldFollowMessages } from "./message-scroll.js?v=20260912-21";
+import { boundedStreamRequest, verifyStreamStop } from "./stop-recovery.js?v=20260912-21";
+import { createHistoryFollower } from "./history-follower.js?v=20260912-21";
+import { createSessionObserver, historyThroughRun } from "./session-observer.js?v=20260912-21";
 
 /* ------------------------------------------------------------------ *
  * deep-agent 前端 —— 适配 FastAPI /api/v1/chat/stream (SSE over POST)
@@ -417,6 +417,8 @@ function currentSessionSnapshot() {
     turnCount: persisted?.turnCount || 0,
     attachmentCount: persisted?.attachmentCount || 0,
     channel: persisted?.channel || null,
+    appId: persisted?.appId ?? null,
+    spaceId: persisted?.spaceId ?? null,
   });
 }
 
@@ -435,6 +437,8 @@ function mergeSessionsFromBackend(rows, { append = false, agentId = state.agentI
       turnCount: Number(row.turn_count) || 0,
       attachmentCount: Number(row.attachment_count) || 0,
       channel: row.channel || null,
+      appId: row.app_id ?? null,
+      spaceId: row.space_id ?? null,
     });
   });
 

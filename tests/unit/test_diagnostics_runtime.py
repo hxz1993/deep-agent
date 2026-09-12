@@ -12,6 +12,7 @@ from unittest.mock import patch
 from deep_agent.diagnostics import runtime as module
 from deep_agent.diagnostics.runtime import DiagnosticConfig, DiagnosticRuntime, regular_open, open_directory
 from deep_agent.diagnostics.schema import sanitize_record
+from deep_agent.diagnostics.text import parse_record
 
 
 @unittest.skipIf(module.fcntl is None, "POSIX file locks required")
@@ -40,7 +41,7 @@ class DiagnosticRuntimeTests(unittest.TestCase):
         self.assertEqual(writer.queue.unfinished_tasks, 0)
 
     def records(self):
-        return [json.loads(line) for file in self.directory.glob("*.jsonl")
+        return [sanitize_record(parse_record(line)) for file in self.directory.glob("*.log")
                 for line in file.read_text().splitlines()]
 
     def test_history_repair_events_are_safe_and_queryable(self):
@@ -88,12 +89,38 @@ class DiagnosticRuntimeTests(unittest.TestCase):
         self.assertNotIn("prompt", safe)
         self.assertIsNone(sanitize_record({"event": []}))
 
+    def test_large_readable_messages_do_not_drop_lifecycle_records(self):
+        from deep_agent.diagnostics.schema import IDENTIFIER_FIELDS, NUMBER_FIELDS, MAX_RECORD_BYTES
+        fields = {key: "x" * 180 for key in IDENTIFIER_FIELDS}
+        fields.update({key: 10**15 for key in NUMBER_FIELDS})
+        fields.update(agent_name="中" * 100, tool_names=["tool_" + str(n) * 30 for n in range(256)])
+        writer = self.writer()
+        for event in ("model_api_request", "model_api_response"):
+            writer.emit(event, level="INFO", **fields)
+        self.drain(writer)
+        lines = [line for file in self.directory.glob("*.log") for line in file.read_text().splitlines()]
+        self.assertEqual(len(lines), 2)
+        for line in lines:
+            self.assertLessEqual(len(line.encode()) + 1, MAX_RECORD_BYTES)
+            self.assertEqual(parse_record(line)["level"], "INFO")
+
+    def test_request_context_is_captured_before_background_write(self):
+        from deepfos_platform.lib.context import RequsetId
+        writer = self.writer()
+        token = RequsetId.set("request-123")
+        try:
+            writer.emit("service_started")
+        finally:
+            RequsetId.reset(token)
+        self.drain(writer)
+        self.assertEqual(self.records()[0]["request_id"], "request-123")
+
     def test_size_rotation_and_active_file_is_never_cleaned(self):
         writer = self.writer(max_file_bytes=600)
         for _ in range(5):
             writer.emit("service_started")
         self.drain(writer)
-        self.assertGreater(len(list(self.directory.glob("*.jsonl"))), 1)
+        self.assertGreater(len(list(self.directory.glob("*.log"))), 1)
         active = self.directory / writer._file_name
         os.utime(active, (0, 0))
         second = self.writer(source="gateway", retention_days=1)
@@ -118,11 +145,11 @@ class DiagnosticRuntimeTests(unittest.TestCase):
         self.assertTrue((self.directory / "unrelated.log").exists())
 
     def test_budget_full_of_active_files_drops_without_deleting(self):
-        first = self.writer(max_directory_bytes=600)
+        first = self.writer(max_directory_bytes=300)
         first.emit("service_started")
         self.drain(first)
         first_path = self.directory / first._file_name
-        second = self.writer("gateway", max_directory_bytes=600)
+        second = self.writer("gateway", max_directory_bytes=300)
         second.emit("service_started")
         self.drain(second)
         self.assertTrue(first_path.exists())
@@ -243,7 +270,7 @@ class DiagnosticRuntimeTests(unittest.TestCase):
             self.drain(writer)
             self.assertEqual(len(self.records()), 2)
             self.assertEqual(writer.status()["dropped_records"], 0)
-            self.assertEqual(len(list(self.directory.glob("*.jsonl"))), 1)
+            self.assertEqual(len(list(self.directory.glob("*.log"))), 1)
             self.assertIn("status_unavailable", {x["code"] for x in writer.status()["issues"]})
 
     def test_operational_and_diagnostic_outputs_fail_independently(self):
@@ -257,7 +284,7 @@ class DiagnosticRuntimeTests(unittest.TestCase):
             writer.emit("agent_run_completed")
             self.drain(writer)
             mirror.assert_called_once()
-            self.assertEqual(json.loads(mirror.call_args.args[0])["event"], "agent_run_completed")
+            self.assertEqual(parse_record(mirror.call_args.args[0].decode().rstrip("\n"))["event"], "agent_run_completed")
 
 
 class DiagnosticLifespanTests(unittest.IsolatedAsyncioTestCase):

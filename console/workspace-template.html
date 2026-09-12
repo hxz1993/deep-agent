@@ -45,14 +45,14 @@
             <button type="button" class="session-copy-btn" id="copySessionIdBtn" title="复制会话 ID" aria-label="复制会话 ID" hidden><i data-lucide="copy"></i></button>
           </span>
         </div>
-        <nav class="chat-view-tabs" id="chatViewTabs" role="tablist" aria-label="会话视图">
-          <button type="button" class="chat-view-tab active" id="conversationViewTab" role="tab" aria-selected="true" aria-controls="messages" data-chat-view="conversation">对话</button>
-          <button type="button" class="chat-view-tab" id="trajectoryViewTab" role="tab" aria-selected="false" aria-controls="trajectoryView" data-chat-view="trajectory">轨迹</button>
-        </nav>
+        <button type="button" class="workspace-header-action workspace-test-app" data-open-context title="调试" aria-label="调试" aria-haspopup="dialog">
+          <i data-lucide="sliders-horizontal"></i><span class="workspace-test-app-label">调试</span><span class="workspace-test-app-id" data-test-app-id>不分应用</span>
+        </button>
         <div class="chat-actions">
-          <button type="button" class="workspace-header-action" data-open-context title="测试App" aria-label="测试App">
-            <i data-lucide="waypoints"></i><span>测试App</span>
-          </button>
+          <nav class="chat-view-tabs" id="chatViewTabs" role="tablist" aria-label="会话视图">
+            <button type="button" class="chat-view-tab active" id="conversationViewTab" role="tab" aria-selected="true" aria-controls="messages" data-chat-view="conversation">对话</button>
+            <button type="button" class="chat-view-tab" id="trajectoryViewTab" role="tab" aria-selected="false" aria-controls="trajectoryView" data-chat-view="trajectory">轨迹</button>
+          </nav>
           <button type="button" class="workspace-header-action active" id="toggleInspectorPaneBtn" title="隐藏详情" aria-label="显示或隐藏详情" aria-pressed="true">
             <i data-lucide="panel-right"></i>
           </button>
@@ -125,7 +125,7 @@
               <div class="composer-model-picker" id="composerMeta">
                 <select id="modelSelect" class="composer-model-select" aria-hidden="true" tabindex="-1"></select>
                 <button type="button" class="composer-model-trigger" id="composerModelTrigger" aria-haspopup="listbox" aria-expanded="false" title="选择模型">
-                  <span class="composer-provider-icon"><i data-lucide="waypoints" aria-hidden="true"></i></span>
+                  <span class="composer-provider-icon"><i data-lucide="sliders-horizontal" aria-hidden="true"></i></span>
                   <span class="composer-model-trigger-label">模型</span>
                   <i class="composer-model-chevron" data-lucide="chevron-up" aria-hidden="true"></i>
                 </button>

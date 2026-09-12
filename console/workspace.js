@@ -1,9 +1,9 @@
-import { renderSessionInspector } from "./session-inspector.js?v=20260909-1";
-import { channelOriginPresentation } from "./session-display.js?v=20260904-13";
-import { copyTextToClipboard } from "./message-actions.js?v=20260819-1";
-import { registerSessionViewTemplate } from "./session-view-shell.js?v=20260910-7";
+import { renderSessionInspector } from "./session-inspector.js?v=20260912-21";
+import { channelOriginPresentation } from "./session-display.js?v=20260912-21";
+import { copyTextToClipboard } from "./message-actions.js?v=20260912-21";
+import { registerSessionViewTemplate } from "./session-view-shell.js?v=20260912-21";
 
-const WORKSPACE_ASSET_VERSION = "20260910-15";
+const WORKSPACE_ASSET_VERSION = "20260912-21";
 
 const WORKSPACE_PANE_LIMITS = {
   session: { min: 220, max: 420, initial: 300, variable: "--console-session-width" },
@@ -147,7 +147,7 @@ function workspaceAgentChannelBadge(agentId) {
   const accounts = workspaceChannelAccounts.filter((account) => account.agent_id === agentId);
   if (!accounts.length) return "";
   const title = escapeHtml(`已配置渠道：${accounts.map((account) => account.name).join("、")}`);
-  return `<span class="workspace-agent-channel" title="${title}" aria-label="${title}"><i data-lucide="radio" aria-hidden="true"></i></span>`;
+  return `<span class="workspace-agent-channel" title="${title}" aria-label="${title}"><i data-lucide="rss" aria-hidden="true"></i></span>`;
 }
 
 function renderAgentSwitcher(state = window.DeepAgentConsoleChat?.state) {
@@ -420,7 +420,7 @@ function toggleAgentSelectMenu() {
 }
 
 function currentAgentName(state) {
-  return state.agents.find((agent) => agent.id === state.agentId)?.name || state.agentId || "—";
+  return state.agents.find((agent) => agent.id === state.agentId)?.name || null;
 }
 
 function contextReferenceSelectionId(reference, branchPoint) {
@@ -568,7 +568,7 @@ function startStateMonitor() {
       conversationId: api.state.conversationId,
       sessionMetrics: api.state.sessions
         .filter((session) => session.id === api.state.sessionId && (session.agentId || "") === (api.state.agentId || ""))
-        .map((session) => [session.turnCount, session.messageCount, session.attachmentCount, session.channel]),
+        .map((session) => [session.turnCount, session.messageCount, session.attachmentCount, session.channel, session.appId, session.spaceId]),
     });
     if (key === lastRenderKey) return;
     lastRenderKey = key;
@@ -612,6 +612,7 @@ export async function initWorkspace() {
   initialized = true;
   const source = await fetchLegacyPage();
   installLegacyDom(source);
+  window.DeepAgentConsoleContext?.render?.();
   await import(`./chat.js?v=${WORKSPACE_ASSET_VERSION}`);
   bindWorkspaceControls();
   bindWorkspaceResizers();

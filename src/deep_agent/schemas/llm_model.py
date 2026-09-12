@@ -60,7 +60,7 @@ def _validate_token_pair(context_window_tokens: int | None, max_output_tokens: i
 class LlmModelCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    provider_id: str = Field(..., description="Foreign-key reference to an LLM provider.")
+    provider_id: str = Field(..., description="Logical reference to an LLM provider.")
     name: str = Field(..., max_length=191, description="Display name for this model preset.")
     description: str | None = Field(default=None, description="Optional human-readable description.")
     model: str = Field(

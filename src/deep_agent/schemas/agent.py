@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
 
 from deep_agent.capabilities.codes import canonical_tool_package_codes
+from deep_agent.capabilities.ui.selection import normalize_ui_tool_selection
 from deep_agent.schemas.llm_model import LlmModelSummary
 from deep_agent.time import UtcDatetime
 
@@ -15,13 +16,20 @@ if TYPE_CHECKING:
 LEGACY_MAX_REQUESTS_MESSAGE = (
     "max_requests 已改为全局配置，请使用环境变量 DEEP_AGENT_MAX_REQUESTS"
 )
-AGENT_REQUIRED_FIELDS = ("name", "model_id", "prompt")
+AGENT_REQUIRED_FIELDS = ("name", "prompt")
 
 
-class _RejectLegacyMaxRequests(BaseModel):
+class _RejectRemovedAgentFields(BaseModel):
+    @field_validator("ui_tool_selection", check_fields=False)
+    @classmethod
+    def validate_ui_tool_scope(cls, value):
+        return normalize_ui_tool_selection(value) if value is not None else value
+
     @model_validator(mode="before")
     @classmethod
-    def reject_legacy_max_requests(cls, value):
+    def reject_removed_fields(cls, value):
+        if isinstance(value, dict) and "temperature" in value:
+            raise ValueError("temperature 已移除，模型使用服务端默认采样参数")
         if isinstance(value, dict) and "max_requests" in value:
             raise ValueError(LEGACY_MAX_REQUESTS_MESSAGE)
         return value
@@ -37,28 +45,25 @@ class AgentChatRequest(BaseModel):
     user: str | None = Field(default=None, description="Optional user identifier.")
 
 
-class AgentCreate(_RejectLegacyMaxRequests):
+class AgentCreate(_RejectRemovedAgentFields):
     name: str = Field(..., max_length=191, description="Unique agent display name.")
-    model_id: str = Field(..., description="LLM model preset id.")
+    model_id: str | None = Field(default=None, description="Optional LLM model preset id.")
     prompt: str = Field(..., description="System prompt / instructions.")
-    temperature: float | None = Field(
-        default=None,
-        ge=0,
-        le=2,
-        description="Optional sampling temperature for this agent.",
-    )
     capabilities: list[str] = Field(
         default_factory=list,
         description="Tool package codes explicitly associated with this agent.",
     )
+    ui_tool_selection: dict[str, list[str]] = Field(default_factory=dict)
     skills: list[str] = Field(
         default_factory=list,
         description="Skill package codes explicitly associated with this agent.",
     )
 
-    @field_validator(*AGENT_REQUIRED_FIELDS)
+    @field_validator(*AGENT_REQUIRED_FIELDS, "model_id")
     @classmethod
-    def normalize_required_text(cls, value: str) -> str:
+    def normalize_required_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         normalized = value.strip()
         if not normalized:
             raise ValueError("must not be blank")
@@ -79,13 +84,13 @@ class AgentCreate(_RejectLegacyMaxRequests):
         )
 
 
-class AgentUpdate(_RejectLegacyMaxRequests):
+class AgentUpdate(_RejectRemovedAgentFields):
     name: str | None = Field(default=None, max_length=191)
     model_id: str | None = None
     prompt: str | None = None
-    temperature: float | None = Field(default=None, ge=0, le=2)
     capabilities: list[str] | None = None
     skills: list[str] | None = None
+    ui_tool_selection: dict[str, list[str]] | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -94,13 +99,15 @@ class AgentUpdate(_RejectLegacyMaxRequests):
             for field in AGENT_REQUIRED_FIELDS:
                 if field in value and value[field] is None:
                     raise ValueError(f"{field} cannot be null")
+            if "ui_tool_selection" in value and value["ui_tool_selection"] is None:
+                raise ValueError("ui_tool_selection cannot be null")
             if "skills" in value and value["skills"] is None:
                 raise ValueError("skills cannot be null")
             if "capabilities" in value and value["capabilities"] is None:
                 raise ValueError("capabilities cannot be null")
         return value
 
-    @field_validator(*AGENT_REQUIRED_FIELDS)
+    @field_validator(*AGENT_REQUIRED_FIELDS, "model_id")
     @classmethod
     def normalize_required_text(cls, value: str | None) -> str | None:
         if value is None:
@@ -145,26 +152,26 @@ class AgentPromptEstimateResponse(BaseModel):
 class AgentResponse(BaseModel):
     id: str
     name: str
-    model_id: str
-    model: LlmModelSummary
+    model_id: str | None
+    model: LlmModelSummary | None
     prompt: str
-    temperature: float | None = None
     capabilities: list[str] = Field(default_factory=list)
     skills: list[str] = Field(default_factory=list)
+    ui_tool_selection: dict[str, list[str]] = Field(default_factory=dict)
     created_at: UtcDatetime
     updated_at: UtcDatetime
 
     @classmethod
-    def from_row(cls, row: Agent, llm_model: LlmModel) -> AgentResponse:
+    def from_row(cls, row: Agent, llm_model: LlmModel | None) -> AgentResponse:
         return cls(
             id=row.id,
             name=row.name,
             model_id=row.model_id,
-            model=LlmModelSummary.from_row(llm_model),
+            model=LlmModelSummary.from_row(llm_model) if llm_model is not None else None,
             prompt=row.prompt,
-            temperature=row.temperature,
             capabilities=canonical_tool_package_codes(row.capabilities),
             skills=row.skills or [],
+            ui_tool_selection=getattr(row, "ui_tool_selection", None) or {},
             created_at=row.created_at,
             updated_at=row.updated_at,
         )

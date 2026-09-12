@@ -312,15 +312,7 @@ html, body {
   border-bottom: 0;
 }
 
-.ui-tool-selected-header::after {
-  content: "";
-  position: absolute;
-  right: 18px;
-  bottom: 0;
-  left: 18px;
-  height: 1px;
-  background: var(--console-card-border, var(--border));
-}
+
 
 .ui-tool-selected-header .row-actions {
   display: flex;
@@ -1183,15 +1175,32 @@ dialog.web-search-settings-dialog.console-detail-dialog.modal {
   color: var(--danger);
 }
 
+:root {
+  --console-readonly-surface: color-mix(in srgb, var(--text) 5%, var(--console-surface, var(--bg)));
+}
+
 .modal {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 0;
-  background: var(--bg-soft);
+  background: var(--console-surface, var(--bg));
   color: var(--text);
   width: min(560px, 92vw);
   max-height: 90vh;
 }
+
+/* Dialogs use the same surface as editors; insets are reserved for read-only content. */
+dialog.modal .table-wrap { background: var(--console-surface, var(--bg)); }
+dialog.modal .data-table thead th { background: var(--console-readonly-surface); }
+dialog:is(.modal, .console-action-dialog) :is(input, textarea, select):not([type="checkbox"]):not([type="radio"]):not([readonly]):not(:disabled) {
+  background: var(--console-surface, var(--bg));
+}
+dialog:is(.modal, .console-action-dialog) :is(input, textarea)[readonly],
+dialog:is(.modal, .console-action-dialog) :is(input, textarea, select):disabled {
+  background: var(--console-readonly-surface);
+  color: var(--text-muted);
+}
+dialog:is(.modal, .console-action-dialog) :is(input, textarea)::placeholder { color: var(--text-faint); opacity: 1; }
 
 .modal-agent {
   width: min(960px, 94vw);
@@ -1206,7 +1215,7 @@ dialog.web-search-settings-dialog.console-detail-dialog.modal {
 }
 
 .modal::backdrop {
-  background: rgba(0, 0, 0, 0.55);
+  background: rgba(0, 0, 0, 0.45);
 }
 
 dialog.console-action-dialog {
@@ -1216,7 +1225,7 @@ dialog.console-action-dialog {
   border: 1px solid color-mix(in srgb, var(--border) 88%, transparent);
   border-radius: 12px;
   color: var(--text);
-  background: var(--bg-elev);
+  background: var(--console-surface, var(--bg));
   box-shadow: 0 18px 52px rgb(15 23 42 / 14%);
 }
 
@@ -1225,14 +1234,13 @@ dialog.console-action-dialog[data-variant="form"] {
 }
 
 dialog.console-action-dialog::backdrop {
-  background: rgb(15 23 42 / 28%);
-  backdrop-filter: blur(2px);
+  background: rgba(0, 0, 0, 0.45);
 }
 
 .console-action-dialog form { padding: 18px; }
 .console-action-dialog-main {
   display: grid;
-  grid-template-columns: 36px minmax(0, 1fr);
+  grid-template-columns: 15px minmax(0, 1fr);
   gap: 12px;
   align-items: start;
 }
@@ -1240,13 +1248,12 @@ dialog.console-action-dialog::backdrop {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 36px;
-  height: 36px;
-  border-radius: 10px;
+  width: 15px;
+  height: 15px;
+  margin-top: 4px;
   color: var(--accent);
-  background: var(--accent-soft);
 }
-.console-action-dialog-icon svg { width: 18px; height: 18px; stroke-width: 1.8; }
+.console-action-dialog-icon svg { width: 15px; height: 15px; stroke-width: 1.8; }
 .console-action-dialog[data-variant="form"] .console-action-dialog-main {
   display: block;
 }
@@ -1262,7 +1269,6 @@ dialog.console-action-dialog::backdrop {
 }
 .console-action-dialog[data-tone="danger"] .console-action-dialog-icon {
   color: var(--danger);
-  background: var(--danger-soft);
 }
 .console-action-dialog-copy { min-width: 0; }
 .console-action-dialog-copy h3 { margin: 1px 0 6px; font-size: 15px; line-height: 1.4; }
@@ -1284,7 +1290,7 @@ dialog.console-action-dialog::backdrop {
   border: 1px solid var(--border);
   border-radius: 8px;
   color: var(--text);
-  background: var(--bg-soft);
+  background: var(--console-surface, var(--bg));
   font: inherit;
   outline: none;
 }
@@ -1340,6 +1346,7 @@ dialog.console-action-dialog::backdrop {
 }
 
 .modal-header h3 { margin: 0; font-size: 16px; }
+.modal-header :is(h2, h3) svg { width: 15px; height: 15px; flex-shrink: 0; vertical-align: -2px; }
 .modal-title-copy { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 .modal-entity-id {
   color: var(--text-faint);
@@ -1407,7 +1414,7 @@ dialog.console-action-dialog::backdrop {
 }
 
 .field input.mcp-name-readonly {
-  background: var(--bg-elev);
+  background: var(--console-readonly-surface);
   color: var(--text-dim);
   cursor: text;
 }
@@ -1777,7 +1784,7 @@ dialog.console-action-dialog::backdrop {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.provider-models-section { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+.provider-models-section { margin-top: 12px; padding-top: 12px; }
 .provider-section-head h4 { flex: none; margin: 0; font-size: 14px; white-space: nowrap; }
 .provider-related-models { display: grid; gap: 6px; margin-top: 12px; }
 .provider-related-model {
@@ -1942,7 +1949,7 @@ dialog.console-action-dialog::backdrop {
 
 #llmProviderBaseUrl[readonly] {
   color: var(--text-dim);
-  background: var(--bg-elev);
+  background: var(--console-readonly-surface);
   cursor: default;
 }
 
@@ -2688,29 +2695,22 @@ dialog.console-action-dialog::backdrop {
 }
 
 .channel-title-row { display: flex; align-items: center; gap: 12px; }
-.channel-title-row .channel-commands-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  min-height: 28px;
-  padding: 3px 8px;
+#configurationHost .channel-commands-btn {
   border: 0;
-  border-radius: 7px;
-  background: transparent;
-  color: var(--text-faint);
-  font: inherit;
-  font-size: 12px;
-  cursor: pointer;
+  background: var(--bg-muted);
+  color: var(--text-dim);
 }
-.channel-title-row .channel-commands-btn svg { width: 14px; height: 14px; }
-.channel-title-row .channel-commands-btn:hover { color: var(--text); background: var(--bg-hover); }
-.channel-title-row .channel-commands-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+#configurationHost .channel-commands-btn:hover { color: var(--text); background: var(--bg-hover); }
+.channel-runtime-refresh { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: inherit; cursor: pointer; }
+.channel-runtime-refresh svg { width: 13px; height: 13px; }
+.channel-runtime-refresh:hover { background: var(--bg-hover); color: var(--text); }
+.channel-runtime-refresh:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
 .channel-table {
   min-width: 720px;
 }
 
-.channel-table td:first-child strong {
+.channel-table td:nth-child(2) strong {
   white-space: nowrap;
 }
 
@@ -2818,12 +2818,13 @@ dialog.console-action-dialog::backdrop {
   background: color-mix(in srgb, var(--danger) 8%, transparent);
 }
 
+#configurationHost .console-list-a .channel-row-actions .icon-btn,
 #configurationHost .console-list-a .ui-tool-row-actions .icon-btn {
   border: 1px solid var(--border);
   background: var(--bg);
 }
 
-#configurationHost .console-list-a .channel-row-actions .model-enabled-switch {
+#configurationHost .console-list-a .channel-enabled-cell .model-enabled-switch {
   width: 30px;
   min-width: 30px;
   height: 18px;
@@ -2834,7 +2835,7 @@ dialog.console-action-dialog::backdrop {
   background: var(--text-faint);
 }
 
-#configurationHost .console-list-a .channel-row-actions .model-enabled-switch.on {
+#configurationHost .console-list-a .channel-enabled-cell .model-enabled-switch.on {
   background: var(--accent);
 }
 
@@ -3442,3 +3443,7 @@ code {
   font-family: var(--mono);
   font-size: 12px;
 }
+
+#configurationHost .channel-table .channel-enabled-cell { width:50px; min-width:50px; padding-left:12px; padding-right:8px; text-align:left; }
+
+#configurationHost .channel-table th:last-child { text-align:right; }

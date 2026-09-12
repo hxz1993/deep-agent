@@ -26,6 +26,7 @@ EXPECTED_TABLES = {
     "channel_message_runs",
     "channel_session_bindings",
     "global_settings",
+    "integration_settings",
     "llm_models",
     "llm_providers",
     "mcp_servers",
@@ -92,7 +93,7 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
                     self._assert_current_baseline(db_path)
 
     def _assert_current_baseline(self, db_path: Path) -> None:
-        self.assertEqual(self._revision(db_path), "002")
+        self.assertEqual(self._revision(db_path), "005")
         self.assertEqual(self._business_tables(db_path), EXPECTED_TABLES)
         self.assertEqual(self._primary_key(db_path, "chat_sessions"), ["session_id"])
         self.assertEqual(self._primary_key(db_path, "chat_session_events"), ["event_id"])
@@ -112,10 +113,8 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
             self._index_columns(db_path, "ix_llm_models_provider_id"),
             ["provider_id"],
         )
-        self.assertIn(
-            ("provider_id", "llm_providers", "id", "RESTRICT"),
-            self._foreign_keys(db_path, "llm_models"),
-        )
+        for table in EXPECTED_TABLES:
+            self.assertEqual(self._foreign_keys(db_path, table), set())
         self.assertIn("skills", self._columns(db_path, "agents"))
         self.assertIn("enabled", self._columns(db_path, "llm_models"))
         for table in (

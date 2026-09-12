@@ -60,6 +60,14 @@ function renderContext() {
   effectiveContext = mergedContext(overrides);
   window.DeepAgentConsoleContext.effectiveContext = effectiveContext;
 
+  document.querySelectorAll("[data-open-context]").forEach((button) => {
+    const appId = effectiveContext.app || "不分应用";
+    const label = button.querySelector("[data-test-app-id]");
+    if (label) label.textContent = appId;
+    button.title = `调试：${appId}\nSpace：${effectiveContext.space || "未提供"}\nLanguage：${effectiveContext.language || "未提供"}\nUser ID：${identity?.user || "未认证"}`;
+    button.setAttribute("aria-label", `调试：${appId}，查看或修改调试上下文`);
+  });
+
   const appInput = document.getElementById("contextAppInput");
   if (appInput) {
     appInput.value = overrides.app || "";
@@ -161,7 +169,7 @@ function currentFormContext() {
 
 function saveContext() {
   if (window.DeepAgentConsoleChat?.state?.streaming) {
-    window.DeepAgentConsole?.toast("请先停止当前生成，再修改测试 App", true);
+    window.DeepAgentConsole?.toast("请先停止当前生成，再修改调试上下文", true);
     return;
   }
   const before = api.loadContext();
@@ -184,7 +192,7 @@ function saveContext() {
 
 function resetContext() {
   if (window.DeepAgentConsoleChat?.state?.streaming) {
-    window.DeepAgentConsole?.toast("请先停止当前生成，再重置测试 App", true);
+    window.DeepAgentConsole?.toast("请先停止当前生成，再重置调试上下文", true);
     return;
   }
   const hadScope = Boolean(api.loadContext().app);
@@ -243,5 +251,6 @@ window.DeepAgentConsoleContext = {
     return identity;
   },
   open: openContextPopover,
+  render: renderContext,
   refreshIdentity,
 };

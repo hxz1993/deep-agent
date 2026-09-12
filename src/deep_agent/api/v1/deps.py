@@ -31,7 +31,7 @@ from deep_agent.skills.tools import build_skill_resource_toolset
 from deep_agent.files import build_file_export_toolset, build_file_toolset
 from deep_agent.core.context import AppContext
 from deep_agent.channels.instructions import channel_instructions
-from deep_agent.core.exceptions import AgentNotFoundError, LlmModelNotFoundError
+from deep_agent.core.exceptions import AgentModelNotConfiguredError, AgentNotFoundError, LlmModelNotFoundError
 from deep_agent.options import OPTION
 from deep_agent.web.runtime import build_web_runtime
 from deep_agent.web.settings import (
@@ -47,8 +47,6 @@ async def _provider_for_model(ctx: AppContext, llm_row):
 
 def _model_settings_for_spec(spec: AgentSpec) -> ModelSettings | None:
     values: ModelSettings = {}
-    if spec.temperature is not None:
-        values["temperature"] = spec.temperature
     if spec.max_output_tokens is not None:
         values["max_tokens"] = spec.max_output_tokens
     if not values:
@@ -77,7 +75,6 @@ async def build_runner(
     *,
     model: str | None = None,
     model_id: str | None = None,
-    temperature: float | None = None,
     capabilities: list[str] | None = None,
     request_headers: dict[str, str] | None = None,
 ) -> AgentRunner:
@@ -89,7 +86,6 @@ async def build_runner(
         provider = await _provider_for_model(ctx, llm_row)
         spec = AgentSpec.from_llm_model(
             llm_row,
-            temperature=temperature,
             provider=provider,
         )
     elif model:
@@ -97,7 +93,6 @@ async def build_runner(
             name="default",
             model=model,
             instructions=DEFAULT_INSTRUCTIONS,
-            temperature=temperature,
         )
     else:
         llm_rows = await ctx.stores.llm_model.list_all()
@@ -120,7 +115,6 @@ async def build_runner(
             raise LlmModelNotFoundError("default")
         spec = AgentSpec.from_llm_model(
             llm_row,
-            temperature=temperature,
             provider=provider,
         )
     if capabilities is not None:
@@ -142,7 +136,9 @@ async def build_runner_for_agent(
     if row is None:
         raise AgentNotFoundError(agent_id)
 
-    effective_model_id = model_id or row.model_id
+    effective_model_id = model_id if model_id is not None else row.model_id
+    if effective_model_id is None:
+        raise AgentModelNotConfiguredError(agent_id)
     llm_row = await ctx.stores.llm_model.get_by_id(effective_model_id)
     if llm_row is None:
         raise LlmModelNotFoundError(effective_model_id)
@@ -317,6 +313,7 @@ async def _build_runner_from_spec(
         context_compaction=context_compaction,
         model_id=spec.llm_model_id or spec.model,
         model_name=spec.model,
+        agent_name=spec.name,
         provider_id=(spec.provider_config.id if spec.provider_config else None),
         provider_type=(
             spec.provider_config.provider_type if spec.provider_config else None

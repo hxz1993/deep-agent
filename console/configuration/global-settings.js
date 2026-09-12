@@ -211,7 +211,7 @@ function renderWebSearchLlmProviderOptions(provider, selectedId = "") {
   const providers = reusableLlmProviders(provider);
   select.innerHTML = providers.map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)}</option>`).join("");
   select.value = providers.some((item) => item.id === selectedId) ? selectedId : (providers[0]?.id || "");
-  renderConsoleSelect("webSearchLlmProvider", "暂无可沿用的 Provider");
+  renderConsoleSelect("webSearchLlmProvider", "暂无可沿用的供应商");
 }
 
 function webSearchSummaryLabel(settings) {

@@ -31,7 +31,7 @@ DEEP_AGENT_CHANNEL_INTERNAL_TOKEN='<same-private-token>' \
 PYTHONPATH=src python -m deep_agent.channels.gateway --host 0.0.0.0 --port 8010
 ```
 
-Gateway 不运行迁移；Revision 不是 `002` 会失败关闭。0.7.0 保持一个 API worker、一个 Gateway 副本：
+Gateway 不运行迁移，由 API 先完成当前代码的迁移。Gateway 不维护固定 Revision 白名单，健康接口仅返回启动时读取的实际 Revision。0.7.0 保持一个 API worker、一个 Gateway 副本：
 当前取消注册表与消息队列不跨实例共享，相同 Bot 的多条长连接还可能互相顶替。DevBox 服务名为“渠道网关”。
 
 Jenkins 网关启动版（`Jenkinsfile.gateway`）采用同一容器内的两个独立进程：`deep_agent.combined_runtime` 先启动 API，

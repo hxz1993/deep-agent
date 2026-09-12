@@ -11,6 +11,7 @@ from deep_agent.db.stores.chat_session import ChatSessionStoreBase, create_chat_
 from deep_agent.db.stores.channel import ChannelStore
 from deep_agent.db.stores.event import SessionEventStore
 from deep_agent.db.stores.global_setting import GlobalSettingStore
+from deep_agent.db.stores.integration_settings import IntegrationSettingsStore
 from deep_agent.db.stores.llm_model import LlmModelStoreBase, create_llm_model_store
 from deep_agent.db.stores.mcp import McpServerStoreBase, create_mcp_store
 from deep_agent.db.stores.model_catalog import ModelCatalogStoreBase, create_model_catalog_store
@@ -42,6 +43,7 @@ class DataStores:
     # the production factory below always supplies the store.
     global_setting: GlobalSettingStore | None = None
     channel: ChannelStore | None = None
+    integration_settings: IntegrationSettingsStore | None = None
 
 
 def create_data_stores(
@@ -69,4 +71,5 @@ def create_data_stores(
         skill_package=create_skill_package_store(dialect, session_factory),
         channel=ChannelStore(session_factory),
         global_setting=GlobalSettingStore(session_factory),
+        integration_settings=IntegrationSettingsStore(session_factory),
     )

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import io
-import json
 import unittest
 
 from loguru import logger
@@ -16,6 +15,7 @@ from deep_agent.agent.observability import (
     usage_dict,
 )
 from deep_agent.agent.run_identity import conversation_id_for
+from deep_agent.diagnostics.text import parse_record
 
 
 class RunObservabilityTests(unittest.TestCase):
@@ -33,7 +33,7 @@ class RunObservabilityTests(unittest.TestCase):
         self.assertEqual(projected["cache_write_tokens"], 5)
         self.assertEqual(projected["tool_calls"], 3)
 
-    def test_structured_log_is_json_and_has_no_content_fields(self) -> None:
+    def test_text_log_preserves_facts_and_has_no_content_fields(self) -> None:
         sink = io.StringIO()
         sink_id = logger.add(sink, format="{message}")
         try:
@@ -45,7 +45,13 @@ class RunObservabilityTests(unittest.TestCase):
             )
         finally:
             logger.remove(sink_id)
-        payload = json.loads(sink.getvalue().strip())
+        raw = sink.getvalue().strip()
+        payload = parse_record(raw)
+        self.assertIsNotNone(payload)
+        self.assertFalse(raw.startswith("{"))
+        self.assertEqual(payload["raw"], raw)
+        self.assertEqual(payload["input_tokens"], 10)
+        self.assertEqual(payload["run_id"], "run-1")
         self.assertEqual(payload["event"], "agent_run_completed")
         self.assertNotIn("prompt", payload)
         self.assertNotIn("headers", payload)

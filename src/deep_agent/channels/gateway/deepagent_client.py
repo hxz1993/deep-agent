@@ -10,6 +10,7 @@ import aiohttp
 
 from deep_agent.channels.gateway.config import GatewayConfig
 from deep_agent.channels.contracts import InboundMedia
+from deep_agent.core.exceptions import AgentModelNotConfiguredError
 
 
 @dataclass(frozen=True)
@@ -124,7 +125,14 @@ class DeepAgentChannelClient:
             headers={**self._headers(account), "Accept": "text/event-stream"},
         ) as response:
             if response.status >= 400:
-                await response.read()
+                raw_error = await response.read()
+                if response.status == 422:
+                    try:
+                        error = json.loads(raw_error)
+                    except (ValueError, UnicodeError):
+                        error = None
+                    if isinstance(error, dict) and error.get("detail") == "Agent 尚未配置模型":
+                        raise AgentModelNotConfiguredError(account.agent_id)
                 raise RuntimeError(f"DeepAgent chat failed with HTTP {response.status}")
             event_name = "message"
             data_lines: list[str] = []

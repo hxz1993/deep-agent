@@ -116,6 +116,21 @@ class SessionModelOverrideIntegrationTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(resp.status_code, 200, resp.text)
                     return parse_sse_events(resp.text)
 
+    async def test_real_model_request_omits_temperature(self) -> None:
+        from pydantic_ai.models.test import TestModel
+        observed = []
+        class CapturingModel(TestModel):
+            async def request(self, messages, model_settings, model_request_parameters):
+                observed.append(dict(model_settings or {}))
+                return await super().request(messages, model_settings, model_request_parameters)
+        with patch("deep_agent.agent.factory._resolve_model", return_value=CapturingModel(custom_output_text="ok", call_tools=[])):
+            async with AsyncClient(transport=self._transport, base_url="http://test") as client:
+                response = await client.post("/api/v1/chat", json={"agent_id": self._agent_id, "message": "hello"})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertTrue(observed)
+        self.assertTrue(all("temperature" not in settings for settings in observed))
+        self.assertEqual(observed[0]["max_tokens"], 8192)
+
     async def test_request_model_id_overrides_agent_default(self) -> None:
         with patch(
             "deep_agent.api.v1.chat.build_runner_for_agent",

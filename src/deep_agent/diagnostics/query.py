@@ -1,6 +1,7 @@
 """Bounded, read-only diagnostics access. No conversation/Event Store access."""
 from __future__ import annotations
 
+import hashlib
 import heapq
 import json
 import os
@@ -20,7 +21,7 @@ MAX_CURSOR_ENTRIES = 128
 MAX_CURSOR_BYTES = 16 * 1024 * 1024
 CURSOR_TTL_SECONDS = 15 * 60
 _SLOTS = threading.BoundedSemaphore(2)
-_NAME = re.compile(r"da-([a-f0-9]{16})-(api|gateway)-(\d+)-([a-f0-9]{32})-(\d{6})\.jsonl\Z")
+_NAME = re.compile(r"da-([a-f0-9]{16})-(api|gateway)-(\d+)-([a-f0-9]{32})-(\d{6})\.(?:log|jsonl)\Z")
 _STATUS = re.compile(r"da-([a-f0-9]{16})-(api|gateway)-(\d+)-([a-f0-9]{32})\.status\.json\Z")
 
 
@@ -229,25 +230,35 @@ def _lines(fd: int, position: int, budget: _Budget, *, skipping=False):
         yield (None if oversized else buffer), 0, 0, line_end, False
 
 
-def _candidate(raw, *, sanitize_record, instance, file_source, filters, start_at, end_at):
-    from .schema import MAX_RECORD_BYTES
-    if not raw or len(raw) > MAX_RECORD_BYTES:
+def _candidate(raw, *, instance, file, offset, filters, start_at, end_at):
+    from .text import parse_record
+    if not raw or len(raw) > MAX_LINE_BYTES:
         return None
-    try:
-        payload = json.loads(raw)
-        record = sanitize_record(payload) if isinstance(payload, dict) else None
-        if not record or record.get("instance_id") != instance or record.get("source") != file_source:
+    line = raw.decode("utf-8", errors="replace")
+    record = parse_record(line)
+    if record:
+        if record.get("instance_id") != instance or record.get("source") != _NAME.fullmatch(file["name"])[2]:
             return None
-        if not start_at <= _utc(record.get("timestamp")) <= end_at:
+        if not start_at <= _utc(record["timestamp"]) <= end_at:
             return None
-        if any(value and record.get(key) != value for key, value in filters.items()
-               if key in ("source", "level", "session_id", "run_id")):
-            return None
-        if filters["q"] and filters["q"].casefold() not in json.dumps(record, ensure_ascii=False).casefold():
-            return None
-        return record
-    except (ValueError, TypeError, KeyError, OverflowError, RecursionError):
+    else:
+        # Reading identity is distinct from log content. Never invent a time,
+        # level or source for an opaque legacy/malformed line.
+        identity = f'{file["dev"]}:{file["ino"]}:{offset}'
+        record = {"raw": line, "record_id": hashlib.sha256(identity.encode()).hexdigest(),
+                  "boot_id": _NAME.fullmatch(file["name"])[4], "instance_id": instance}
+    if any(value and record.get(key) != value for key, value in filters.items()
+           if key in ("source", "level", "session_id", "run_id")):
         return None
+    if filters["q"] and filters["q"].casefold() not in line.casefold():
+        return None
+    return record
+
+
+def _order(record, file):
+    # Opaque lines have no claimed event time; mtime is used only internally to
+    # provide deterministic pagination among files, never returned as timestamp.
+    return _utc(record["timestamp"]).timestamp() if "timestamp" in record else file["mtime"] / 1e9
 
 
 def _file(directory, item):
@@ -271,8 +282,6 @@ def query_logs(config, *, start=None, end=None, source=None, level=None,
 
 
 def _query(config, *, start, end, source, level, session_id, run_id, q, limit, cursor):
-    from .schema import sanitize_record
-
     budget = _Budget()
     previous = _decode(cursor) if cursor else None
     now = datetime.now(timezone.utc)
@@ -331,11 +340,10 @@ def _query(config, *, start, end, source, level, session_id, run_id, q, limit, c
                             fd, state["pos"], budget, skipping=state.get("skip", False)):
                         state["pos"] = offset
                         state["skip"] = skipping
-                        record = _candidate(raw, sanitize_record=sanitize_record, instance=instance,
-                                            file_source=_NAME.fullmatch(item["name"])[2], filters=filters,
+                        record = _candidate(raw, instance=instance, file=item, offset=line_start, filters=filters,
                                             start_at=start_at, end_at=end_at)
                         if record:
-                            state["head"] = [line_start, line_end, _utc(record["timestamp"]).timestamp()]
+                            state["head"] = [line_start, line_end, _order(record, item)]
                             break
                 finally:
                     os.close(fd)
@@ -360,10 +368,9 @@ def _query(config, *, start, end, source, level, session_id, run_id, q, limit, c
             finally:
                 os.close(fd)
             _validate(directory, [files[index]], instance)
-            record = _candidate(raw, sanitize_record=sanitize_record, instance=instance,
-                                file_source=_NAME.fullmatch(files[index]["name"])[2], filters=filters,
+            record = _candidate(raw, instance=instance, file=files[index], offset=head[0], filters=filters,
                                 start_at=start_at, end_at=end_at)
-            if record is None or _utc(record["timestamp"]).timestamp() != head[2]:
+            if record is None or _order(record, files[index]) != head[2]:
                 raise QueryError("log_snapshot_changed")
             items.append(record)
             states[index]["head"] = None

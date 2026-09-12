@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from deep_agent.db.reference_integrity import acquire_write_barrier
+
 import asyncio
 import contextlib
 import sys
@@ -106,7 +108,7 @@ class SessionBoundMixin:
                 await _shield_exit(db, *exc_info)
 
     @asynccontextmanager
-    async def _write(self) -> AsyncIterator[AsyncSession]:
+    async def _write(self, *, exclusive: bool = False) -> AsyncIterator[AsyncSession]:
         factory = self._require_factory()
         async with serialized_sqlite_session(factory):
             db = factory()
@@ -120,6 +122,7 @@ class SessionBoundMixin:
                 try:
                     if db.get_bind().dialect.name == "sqlite":
                         await db.execute(text("BEGIN IMMEDIATE"))
+                    await acquire_write_barrier(db, exclusive=exclusive)
                     yield db
                     await asyncio.shield(db.commit())
                 except BaseException:

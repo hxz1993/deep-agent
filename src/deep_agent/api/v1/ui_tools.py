@@ -99,7 +99,10 @@ async def update_ui_tool(
         package = await package_store.get_by_code(body.package_code)
         if package is None or package.source != "manual":
             raise HTTPException(status_code=422, detail="Manual UI tool package does not exist")
-    updated = await store.update(name, body)
+    try:
+        updated = await store.update(name, body)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     assert updated is not None
     return UiToolResponse.from_row(updated)
 
@@ -127,4 +130,7 @@ async def delete_ui_tool(
                 "referenced_by": [agent.name for agent in referenced_by],
             },
         )
-    await store.delete(name)
+    try:
+        await store.delete(name)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc

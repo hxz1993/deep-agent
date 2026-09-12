@@ -76,7 +76,7 @@ test("工作台只读展示上下文预算与压缩事件状态", () => {
 });
 
 test("会话详情使用会话、当前回合和上下文引用三页签", () => {
-  assert.match(template, /data-open-context[\s\S]*测试App/);
+  assert.match(template, /data-open-context[\s\S]*调试/);
   assert.doesNotMatch(template, /id="usageInfo"/);
   assert.match(template, /id="toggleInspectorPaneBtn"[\s\S]*data-lucide="panel-right"/);
   assert.doesNotMatch(template, /<span>详情<\/span>/);
@@ -87,12 +87,12 @@ test("会话详情使用会话、当前回合和上下文引用三页签", () =>
   assert.match(workspaceSource, /data-inspector-tab="context"[\s\S]*>上下文<\/button>/);
   assert.doesNotMatch(workspaceSource, /metadata 不进入模型输入/);
   assert.doesNotMatch(workspaceSource, /<strong>会话概览<\/strong>|自动推导|阈值与预留合并展示/);
-  assert.match(workspaceSource, /inspector-session-group[\s\S]*<strong>请求 Header<\/strong>/);
+  assert.doesNotMatch(workspaceSource, /<strong>请求 Header<\/strong>/);
   assert.match(workspaceSource, /inspector-tab-status[\s\S]*\$\{statusText\}/);
-  assert.match(workspaceSource, /inspectorFactHtml\("Agent", agentIdentity/);
+  assert.match(workspaceSource, /inspectorFact\("Agent", agentName/);
   assert.match(workspaceSource, /inspectorFactHtml\("会话统计", sessionCounts/);
   assert.match(workspaceSource, /title="回合数"[\s\S]*title="消息事件数"[\s\S]*title="附件数"/);
-  assert.match(workspaceSource, /inspectorFactHtml\("App \/ Space", requestScope/);
+  assert.match(workspaceSource, /inspectorFactHtml\("App \/ Space", sessionScope/);
   assert.match(workspaceSource, /inspectorFact\("User ID"[\s\S]*identity\?\.user/);
   assert.match(workspaceSource, /<strong>上下文预算<\/strong>/);
   assert.doesNotMatch(workspaceSource, /<strong>当前回合<\/strong>/);
@@ -119,7 +119,7 @@ test("会话详情保留既有属性并用横向页签、键值列表与复合�
     "会话 ID", "会话统计", "App / Space", "Language", "User ID",
     "Conv. ID", "Run ID", "请求", "本次使用", "预计剩余",
     "缓存读取", "缓存写入", "工具调用", "Tool Search", "耗时", "压缩",
-    "压缩前", "压缩后", "压缩事件", "来源截止", "摘要模型", "更新时间", "估算方式",
+    "压缩前", "压缩后", "压缩事件", "来源截止", "摘要模型", "更新时间",
   ]) {
     assert.match(workspaceSource, new RegExp(label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   }
@@ -142,7 +142,7 @@ test("会话详情保留既有属性并用横向页签、键值列表与复合�
 
 test("测试 App 使用锚定轻量浮层而不是抽屉", () => {
   assert.match(consoleIndex, /id="contextPopover"[\s\S]*role="dialog"/);
-  assert.match(consoleIndex, /<strong>测试 App<\/strong>/);
+  assert.match(consoleIndex, /<strong>调试<\/strong>/);
   assert.match(consoleIndex, /id="saveContextBtn">确定<\/button>/);
   assert.match(consoleIndex, /id="contextAppInput"/);
   assert.doesNotMatch(consoleIndex, /contextDrawer|contextBackdrop|context-drawer|drawer-backdrop/);

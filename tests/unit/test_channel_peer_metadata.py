@@ -23,7 +23,8 @@ class ChannelPeerMetadataRepairTests(unittest.TestCase):
         with patch("deep_agent.db.migrate.get_database_url", return_value=url):
             config = migrate._build_alembic_config()
         config.attributes["database_url"] = url
-        command.upgrade(config, "head")
+        # This maintenance command repairs the historical 002 layout only.
+        command.upgrade(config, "002")
         with sqlite3.connect(self.path) as db:
             db.execute("PRAGMA foreign_keys=ON")
             db.execute("ALTER TABLE channel_session_bindings DROP COLUMN peer_metadata")

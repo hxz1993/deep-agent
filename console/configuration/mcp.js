@@ -63,7 +63,7 @@ function missingInspectionAppHint(server, context) {
   const staticApp = Object.entries(server?.config?.headers || {})
     .find(([name]) => name.toLowerCase() === "app")?.[1];
   if (String(context?.app || staticApp || "").trim()) return "";
-  return "当前请求未提供测试 App；请到「对话测试」右上角「测试App」配置后，再返回 MCP 刷新。";
+  return "当前请求未提供测试 App；请到「对话测试」右上角「调试上下文」配置后，再返回 MCP 刷新。";
 }
 
 async function inspectionFailureMessage(server, message) {

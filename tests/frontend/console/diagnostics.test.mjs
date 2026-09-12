@@ -1,9 +1,10 @@
+import { createDiagnosticsExport, logExportSummary } from "../../../console/diagnostics-export.js";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFile } from "node:fs/promises";
 import vm from "node:vm";
 import { buildDiagnosticsQuery, createDiagnosticsQuery, diagnosticsError, diagnosticsStatusNotice } from "../../../console/diagnostics-query.js";
-import { diagnosticFilters, diagnosticRowsHtml, diagnosticDetailHtml, diagnosticScalars, diagnosticTime, highlightedDiagnostic } from "../../../console/diagnostics.js";
+import { diagnosticFilters, diagnosticRowsHtml, diagnosticDetailHtml, diagnosticScalars, diagnosticFieldLabel, diagnosticTime, highlightedDiagnostic } from "../../../console/diagnostics.js";
 
 const root = new URL("../../../console/", import.meta.url);
 const html = await readFile(new URL("index.html", root), "utf8");
@@ -12,7 +13,7 @@ const source = await readFile(new URL("diagnostics.js", root), "utf8");
 const main = await readFile(new URL("main.js", root), "utf8");
 const ui = await readFile(new URL("diagnostics-ui.js", root), "utf8");
 const status = { enabled: true, available: true, instance_id: "pod-a", sources: ["api", "gateway"], issues: [] };
-const record = (id, fields = {}) => ({ timestamp: "2026-09-09T08:00:00Z", level: "INFO", source: "api", event: "tool.started", summary: "工具开始", boot_id: "boot-a", record_id: id, ...fields });
+const record = (id, fields = {}) => ({ timestamp: "2026-09-09T08:00:00Z", level: "INFO", source: "api", event: "tool.started", summary: "工具开始", raw: "2026-09-09 | INFO | 工具开始", boot_id: "boot-a", record_id: id, ...fields });
 const page = (items, fields = {}) => ({ instance_id: "pod-a", items, next_cursor: null, partial: false, range: { start: "2026-09-08T08:00:00Z", end: "2026-09-09T08:00:00Z" }, ...fields });
 const deferred = () => { let resolve; let reject; const promise = new Promise((a, b) => { resolve = a; reject = b; }); return { promise, resolve, reject }; };
 const turn = () => new Promise(setImmediate);
@@ -31,7 +32,7 @@ function harness(responses) {
   return { query, calls, changes };
 }
 
-function logControllerHarness() {
+function logControllerHarness(responses = []) {
   const nodes = new Map(), calls = [];
   let now = "2026-09-10T08:00:00.000Z", selectCallback;
   function node(key) {
@@ -42,6 +43,7 @@ function logControllerHarness() {
         setAttribute: (name, value) => attributes.set(name, value), getAttribute: name => attributes.get(name),
         addEventListener(name, fn) { const list = handlers.get(name) || []; list.push(fn); handlers.set(name, list); },
         querySelector: selector => node(`${key} ${selector}`), insertAdjacentHTML() {}, focus() {},
+        showModal() { this.open = true; }, close() { this.open = false; },
         reset() { for (const [id, target] of nodes) if (/^#diagnostics(?:Session|Keyword|Start|End)$/.test(id)) target.value = ""; },
       });
     }
@@ -50,11 +52,11 @@ function logControllerHarness() {
   const root = node("page"); root.querySelector = node;
   const context = vm.createContext({
     Date: class extends Date { constructor(...args) { super(...(args.length ? args : [now])); } },
-    createDiagnosticsQuery, escape: value => String(value ?? ""), icon: () => "", shortId: value => value,
+    createDiagnosticsQuery, createDiagnosticsExport, logExportSummary, escape: value => String(value ?? ""), icon: () => "", shortId: value => value,
     icons() {}, localInput: value => value || "", selectHtml: () => "", bindDiagnosticResizer() {},
     bindDiagnosticSelects(_root, callback) { selectCallback = callback; return { close() {} }; },
     window: { addEventListener() {} },
-    diagnosticRequest: async path => { calls.push(path); return path.endsWith("/status") ? status : page([]); },
+    diagnosticRequest: async path => { calls.push(path); const result = responses.length ? responses.shift() : path.endsWith("/status") ? status : page([]); if (result instanceof Error) throw result; return result; },
   });
   vm.runInContext(source.replace(/^import .*;\n/gm, "").replace(/^export /gm, ""), context);
   const controller = context.initDiagnosticLogs({ page: root });
@@ -108,10 +110,10 @@ test("diagnostics retains its navigation entry and replaces all placeholder capa
   assert.ok(main.indexOf("if (current === \"configuration\"") < main.indexOf("setDiagnosticsActive(consoleAllowed"), "dirty-editor navigation gates still precede diagnostic activation");
 });
 
-test("query uses central same-origin helper without App context, no polling or download", () => {
+test("query uses central same-origin helper without App context, no polling or server-side download", () => {
   assert.match(ui, /window\.daFetch\(window\.serviceUrl\(path\)/);
   assert.match(ui, /includeContext: false, reportStatus: false/);
-  assert.doesNotMatch(source, /setInterval|EventSource|WebSocket|createObjectURL|\/download|localStorage/);
+  assert.doesNotMatch(source, /setInterval|EventSource|WebSocket|\/download|localStorage/);
   assert.match(source, /window\.addEventListener\("pagehide"/);
 });
 
@@ -282,13 +284,13 @@ test("records escape summaries, events, field names and values; only scalar deta
   assert.doesNotMatch(output, /<img|<iframe|<script>|onclick="bad/);
   assert.match(output, /&lt;img/);
   assert.match(output, /data-open-session=/);
-  assert.doesNotMatch(output, /data-filter-id|data-copy-id="run_id"/);
+  assert.doesNotMatch(output, /data-filter-id/);
   assert.match(output, /data-field="run_id"/);
-  assert.match(output, /<h3>会话<\/h3>/);
-  assert.match(output, /1\.2 s/);
+  assert.doesNotMatch(output, /<h3>会话<\/h3>/);
+  assert.match(output, /<code>1234<\/code>/);
   assert.doesNotMatch(output, /结构化记录|规范字段|diagnostics-chevron|diagnostics-duration/);
-  assert.doesNotMatch(output, /<details|<summary/);
-  assert.match(output, /<h3>服务信息<\/h3>/);
+  assert.match(output, /<details class="diagnostics-raw-details">/);
+  assert.doesNotMatch(output, /<h3>服务信息<\/h3>/);
   assert.doesNotMatch(output, /not-rendered/);
   assert.equal("metadata" in diagnosticScalars(row), false);
 });
@@ -315,17 +317,17 @@ test("model API details show safe tool inventories in the existing property layo
     headers: "NEVER_LOG_HEADERS", body: "NEVER_LOG_BODY", request_body: { prompt: "NEVER_LOG_PROMPT" },
     other_list: ["NEVER_LOG_OTHER"] });
   const output = diagnosticDetailHtml(data);
-  assert.match(output, /<h3>模型 API<\/h3>/);
-  assert.match(output, /<dt>HTTP 状态<\/dt><dd><code>400<\/code>/);
-  assert.match(output, /<dt>工具清单状态<\/dt><dd><code>已读取<\/code>/);
-  assert.match(output, /<dt>请求工具名<\/dt><dd><code>read_file · docs_search · docs_search<\/code>/);
-  assert.match(output, /<dt>重复工具名<\/dt><dd><code>docs_search<\/code>/);
-  assert.match(output, /<dt>历史搜索工具名<\/dt><dd><code>docs_search<\/code>/);
-  assert.match(output, /<dt>顶层与历史重声明<\/dt><dd><code>docs_search<\/code>/);
-  assert.match(output, /<dt>省略工具名条目<\/dt><dd><code>0<\/code>/);
-  assert.equal((output.match(/<dt>API 地址<\/dt>/g) || []).length, 1);
-  assert.doesNotMatch(output, /NEVER_LOG|<details|<a href/);
-  assert.equal(diagnosticScalars({ duplicate_tool_names: [] }).duplicate_tool_names, "无");
+  assert.doesNotMatch(output, /<h3>模型 API<\/h3>/);
+  assert.match(output, /<dt title="http_status">HTTP 状态<\/dt><dd><code>400<\/code>/);
+  assert.match(output, /<dt title="tool_manifest_status">工具清单状态<\/dt><dd><code>complete<\/code>/);
+  assert.match(output, /<dt title="tool_names">工具清单<\/dt><dd><code>read_file, docs_search, docs_search<\/code>/);
+  assert.match(output, /<dt title="duplicate_tool_names">重复工具<\/dt><dd><code>docs_search<\/code>/);
+  assert.match(output, /<dt title="history_tool_names">历史工具<\/dt><dd><code>docs_search<\/code>/);
+  assert.match(output, /<dt title="redeclared_tool_names">重新声明工具<\/dt><dd><code>docs_search<\/code>/);
+  assert.match(output, /<dt title="tools_omitted">省略工具数<\/dt><dd><code>0<\/code>/);
+  assert.equal((output.match(/<dt title="model_api">模型 API<\/dt>/g) || []).length, 1);
+  assert.doesNotMatch(output, /NEVER_LOG|<a href/);
+  assert.equal(diagnosticScalars({ duplicate_tool_names: [] }).duplicate_tool_names, "");
 });
 
 test("model API tool arrays reject arbitrary structures and have a shared display bound", () => {
@@ -333,7 +335,7 @@ test("model API tool arrays reject arbitrary structures and have a shared displa
     duplicate_tool_names: "SECRET", added_tool_names: ["https://SECRET", "with space"],
     history_tool_names: ["docs_search", "<script>", { token: "SECRET" }], redeclared_tool_names: "SECRET",
     metadata: { token: "SECRET" } });
-  assert.deepEqual(fields, { tool_names: "safe_name", added_tool_names: "工具名已省略", history_tool_names: "docs_search" });
+  assert.deepEqual(fields, { tool_names: "safe_name", added_tool_names: "", history_tool_names: "docs_search" });
   const names = Array.from({ length: 1000 }, (_, i) => `tool_${i}_${"x".repeat(100)}`);
   const bounded = diagnosticScalars({ tool_names: names, duplicate_tool_names: names, added_tool_names: names,
     history_tool_names: names, redeclared_tool_names: ["important_redeclaration"] });
@@ -350,23 +352,25 @@ test("dense log rows highlight literal text safely and details never duplicate f
   assert.match(row, />complete<\/button>/);
   assert.match(row, /class="diagnostics-sequence" aria-label="当前查询第 1 条">1<\/span>/);
   const detail = diagnosticDetailHtml(data);
-  assert.equal((detail.match(/<dt>Session ID<\/dt>/g) || []).length, 1);
-  assert.match(detail, /渠道处理 ID/);
+  assert.equal((detail.match(/<dt title="session_id">会话 ID<\/dt>/g) || []).length, 1);
+  assert.match(detail, /channel_run_id/);
   assert.doesNotMatch(diagnosticRowsHtml([record("service")]), /data-open-session/);
 });
 
-test("business log details keep Run as plain value and reserve actions for Session only", () => {
+test("log details translate labels and limit copy and navigation actions to sessions", () => {
   const detail = diagnosticDetailHtml(record("a", { session_id: "session-a", run_id: "run-a", process_id: 42, instance_id: "node", tool_call_id: "call", agent_id: "agent" }));
   assert.deepEqual([...detail.matchAll(/data-copy-id="([^"]+)"/g)].map(match => match[1]), ["session_id"]);
-  assert.ok(detail.indexOf('<h3>会话</h3>') < detail.indexOf('<h3>服务信息</h3>'));
+  assert.match(detail, /<details class="diagnostics-raw-details"><summary>/);
+  assert.doesNotMatch(detail, /<details[^>]* open/);
+  assert.doesNotMatch(detail, /<h3>会话|<h3>服务信息/);
   assert.match(detail, /data-open-session="session-a"/);
-  assert.match(detail, /data-field="run_id"><dt>Run ID<\/dt><dd><code>run-a<\/code><\/dd>/);
+  assert.match(detail, /data-field="run_id"><dt title="run_id">执行 ID<\/dt><dd><code>run-a<\/code>/);
   assert.doesNotMatch(detail, /data-filter-id/);
   assert.match(source, /onOpenSession\(item\.session_id\)/);
   assert.doesNotMatch(source, /onOpenSession\(item\.session_id,|filterId|diagnosticsRun/);
 });
 
-test("logs place Session ID with dropdowns above the aligned search and actions row", () => {
+test("logs place session_id with dropdowns above the aligned search and actions row", () => {
   const header = html.match(/<header class="diagnostics-head diagnostics-log-header">([\s\S]*?)<\/header>/)[1];
   assert.match(header, /id="diagnosticsFilters"/);
   assert.match(header, /placeholder="搜索日志内容"/);
@@ -381,23 +385,23 @@ test("logs place Session ID with dropdowns above the aligned search and actions 
   assert.match(header, /class="diagnostics-button text" id="diagnosticsReset"[^>]*>重置<\/button>/);
   assert.match(css, /\.diagnostics-search-row \{ flex:0 0 100%[^}]*display:flex/);
   assert.doesNotMatch(css, /\.diagnostics-search-row \{[^}]*(?:position:absolute|position:fixed|box-shadow)/);
-  assert.doesNotMatch(header, /<span>关键词<\/span>|<span>Session ID<\/span>|当前部署实例/);
+  assert.doesNotMatch(header, /<span>关键词<\/span>|<span>session_id<\/span>|当前部署实例/);
   assert.match(header, /aria-label="会话 ID"/);
 });
 
-test("compact Console log composition places its header above the split workbench and only one result heading", () => {
+test("compact Console log composition places its header above the split workbench without a redundant result heading", () => {
   const section = html.match(/<section[^>]+id="page-diagnostics"[\s\S]*?<\/section>/)[0];
   const headerEnd = section.indexOf("</header>");
   assert.ok(headerEnd < section.indexOf('id="diagnosticsSplit"'), "the filter toolbar must not shrink when opening details");
   assert.doesNotMatch(section, /DIAGNOSTICS|diagnostics-eyebrow/);
-  assert.match(section, /<h2>查询结果<\/h2>/);
+  assert.doesNotMatch(section, /<h2>查询结果<\/h2>/);
   assert.match(section, /id="diagnosticsQueryRange"/);
   assert.doesNotMatch(section, /aria-label="更多筛选"/);
   assert.match(css, /#diagnosticsLogPage \.diagnostics-head h1[^}]*font-size:16px/);
-  assert.match(css, /#diagnosticsLogPage \.diagnostics-row[^}]*height:26px/);
-  assert.match(css, /#diagnosticsLogPage \.diagnostics-row[^}]*grid-template-columns:32px 150px 72px 52px minmax\(180px,1fr\) 72px; gap:12px/);
+  assert.match(css, /#diagnosticsLogPage \.diagnostics-row[^}]*height:24px/);
+  assert.match(css, /#diagnosticsLogPage \.diagnostics-row[^}]*grid-template-columns:30px 150px 52px 48px minmax\(120px,1fr\) 72px; gap:6px/);
   assert.match(css, /#diagnosticsLogPage \.diagnostics-summary[^}]*font-size:12px/);
-  assert.doesNotMatch(section, /diagnostics-footer|diagnosticsRange/);
+  assert.doesNotMatch(section, /diagnostics-footer|id="diagnosticsRange"/);
   assert.match(section, /diagnostics-result-title[\s\S]*diagnosticsMeta[\s\S]*diagnosticsMore/);
   assert.match(css, /#diagnosticsLogPage \.diagnostics-split[^}]*border:0; border-radius:0/);
   assert.match(css, /#diagnosticsLogPage \.diagnostics-filters \.console-select-trigger[^}]*height:32px/);
@@ -405,14 +409,14 @@ test("compact Console log composition places its header above the split workbenc
   assert.match(source, /bindDiagnosticResizer\(byId\("diagnosticsResizer"\), split, "--diagnostic-drawer-width", 436\)/);
 });
 
-test("log details keep related facts grouped with precise display formatting", () => {
+test("log details retain exact numeric values and keep compact label columns", () => {
   const detail = diagnosticDetailHtml(record("detail", { model_name: "model-a", duration_ms: 30000, attempt: 2, reason: "请求超时", session_id: "session-a", run_id: "run-a" }));
-  assert.match(detail, /<code>30\.0 s<\/code>/);
+  assert.match(detail, /<code>30000<\/code>/);
   assert.ok(detail.indexOf('data-field="model_name"') < detail.indexOf('data-field="duration_ms"'));
   assert.ok(detail.indexOf('data-field="duration_ms"') < detail.indexOf('data-field="reason"'));
-  assert.equal((detail.match(/<dt>来源<\/dt>/g) || []).length, 1);
+  assert.equal((detail.match(/<dt title="source">来源<\/dt>/g) || []).length, 1);
   assert.match(detail, /diagnostics-property-actions/);
-  assert.match(css, /#diagnosticsLogPage \.diagnostics-property \{ display:grid; grid-template-columns:90px minmax\(0,1fr\); align-items:start/);
+  assert.match(css, /#diagnosticsLogPage \.diagnostics-property \{ display:grid; grid-column:1\/-1; grid-template-columns:subgrid; align-items:start; column-gap:8px/);
   assert.match(diagnosticTime("2026-09-09T08:00:00Z"), /^2026-09-09 \d{2}:\d{2}:\d{2}$/);
   assert.equal(diagnosticTime("not-a-date"), "not-a-date");
 });
@@ -426,4 +430,113 @@ test("restored log snapshot retains cursor and fixed range without an automatic 
   assert.equal(h.query.state.nextCursor, "saved-cursor");
   assert.equal(h.query.state.filters.start, "fixed");
   assert.equal(h.query.state.busy, false);
+});
+
+
+test("日志导出按当前输入和固定查询时间预检，导航离开关闭弹框", async () => {
+  const h = logControllerHarness();
+  h.controller.activate({ period: "24", start: "2026-09-08T08:00:00.123Z", end: "2026-09-09T08:00:00.456Z" });
+  await turn();
+  h.node("#diagnosticsKeyword").value = "new filter";
+  h.node("#diagnosticsSession").value = "session-2";
+  h.setNow("2026-09-11T09:00:00.000Z");
+  h.fire("#diagnosticsExport", "click");
+  assert.equal(h.node("#diagnosticsExportDialog").open, true);
+  await turn();
+  assert.equal(h.lastFilters().get("q"), "new filter");
+  assert.equal(h.lastFilters().get("session_id"), "session-2");
+  assert.equal(h.lastFilters().get("end"), "2026-09-09T08:00:00.456Z");
+  assert.equal(h.node("#diagnosticsExportConfirm").disabled, true, "empty results cannot download");
+  h.controller.deactivate();
+  assert.equal(h.node("#diagnosticsExportDialog").open, false);
+});
+
+test("原始视图自动分页并逐字展示，切换查询时取消旧加载", async () => {
+  const pending = deferred();
+  const first = record("one", { raw: "时间 | INFO | message | key=a\\|b" });
+  const second = record("two", { raw: "<script>literal</script>" });
+  const h = logControllerHarness([status, page([]), status, page([first], { next_cursor: "next" }), page([second])]);
+  h.controller.activate({ period: "24" }); await turn();
+  h.fire("#diagnosticsRawView", "click"); await turn();
+  assert.equal(h.node("#diagnosticsRawText").value, first.raw + "\n" + second.raw + "\n");
+  assert.equal(h.node("#diagnosticsRawPane").hidden, false);
+  assert.match(h.node("#diagnosticsRawStatus").textContent, /已加载 2 条/);
+  assert.equal(h.node("#diagnosticsRawText").innerHTML, "");
+  h.fire("#diagnosticsKeyword", "input");
+  h.fire("#diagnosticsFilters", "input");
+  assert.equal(h.node("#diagnosticsRawText").value, "");
+  h.controller.deactivate();
+  const late = logControllerHarness([status, page([]), status, pending.promise]);
+  late.controller.activate({ period: "24" }); await turn();
+  late.fire("#diagnosticsRawView", "click"); await turn(); late.controller.deactivate();
+  pending.resolve(page([second])); await turn();
+  assert.equal(late.node("#diagnosticsRawText").value, "");
+});
+test("列表使用写入时的消息，未解析行不伪造 INFO 或时间", () => {
+  const item = record("one", { message: "工具 search_tools 完成，耗时 320ms", duration_ms: 320, agent_id: "hidden-list-agent", raw: "raw actual | agent_id=hidden-list-agent" });
+  assert.match(diagnosticRowsHtml([item]), /工具 search_tools 完成，耗时 320ms/);
+  assert.doesNotMatch(diagnosticRowsHtml([item]), /duration_ms|agent_id|hidden-list-agent|raw actual/);
+  const unknown = diagnosticRowsHtml([{ boot_id: "file", record_id: "offset", raw: "old JSON line" }]);
+  assert.match(unknown, /old JSON line/); assert.doesNotMatch(unknown, />INFO</);
+  const detail = diagnosticDetailHtml(item);
+  assert.match(detail, /raw actual/); assert.match(detail, /<dt title="message">正文<\/dt>/);
+});
+
+
+test("detail fields use Chinese labels with unknown scalar fallback and no duplicate message", () => {
+  const detail = diagnosticDetailHtml(record("labels", { agent_name: "日志展示验收", future_fact: "unknown_value", summary: "工具完成", message: "工具完成", source: "api" }));
+  assert.equal(diagnosticFieldLabel("future_fact"), "future_fact");
+  assert.match(detail, /<dt title="agent_name">Agent 名称<\/dt><dd><code>日志展示验收<\/code>/);
+  assert.match(detail, /<dt title="future_fact">future_fact<\/dt><dd><code>unknown_value<\/code>/);
+  assert.match(detail, /<dt title="source">来源<\/dt><dd><code>api<\/code>/);
+  assert.doesNotMatch(detail, /data-field="summary"|data-copy-id/);
+  assert.match(detail, /<dt title="message">正文<\/dt>/);
+});
+
+test("session preview preserves exactly eight characters and raw detail is collapsed on every render", () => {
+  const row = diagnosticRowsHtml([record("preview", { session_id: "b662a978abcdefghijklmnop" })]);
+  assert.match(row, /title="打开会话 b662a978abcdefghijklmnop">b662a978<\/button>/);
+  assert.match(css, /\.diagnostics-session button[^}]*text-overflow:clip/);
+  assert.match(css, /#diagnosticsLogPage \.diagnostics-session button[^}]*width:8ch; padding:0/);
+  for (const id of ["one", "two"]) {
+    const detail = diagnosticDetailHtml(record(id, { raw: "literal <markup> | value=a\\|b" }));
+    assert.match(detail, /<details class="diagnostics-raw-details"><summary>/);
+    assert.doesNotMatch(detail, /<details[^>]* open|data-copy-id="raw"/);
+    assert.match(detail, /literal &lt;markup&gt; \| value=a\\\|b/);
+  }
+  assert.match(css, /\.diagnostics-raw-record[^}]*border:1px solid var\(--border\)/);
+});
+
+test('视图切换和分页加载不禁用查询按钮，重复选择当前视图不重新请求', async () => {
+  const pending = deferred();
+  const h = logControllerHarness([status, page([]), status, pending.promise]);
+  const changes = [];
+  Object.defineProperty(h.node('#diagnosticsQuery'), 'disabled', {set(value) { changes.push(value); }});
+  h.controller.activate({period:'24'}); await turn();
+  h.fire('#diagnosticsRawView', 'click'); await turn();
+  const count=h.calls.length;
+  h.fire('#diagnosticsRawView', 'click'); await turn();
+  assert.equal(h.calls.length,count);
+  h.fire('#diagnosticsListView', 'click'); await turn();
+  pending.resolve(page([record('late')])); await turn();
+  assert.equal(h.node('#diagnosticsRawPane').hidden,true);
+  assert.equal(changes.includes(true),false);
+  h.controller.deactivate();
+});
+
+
+test('从失败列表切到原始日志不残留列表错误，返回列表仍显示自身错误', async () => {
+ const failure = Object.assign(new Error('列表服务不可用'), {status:503});
+ const h = logControllerHarness([failure, status, page([record('raw-ok')]), failure]);
+ h.controller.activate({period:'24'}); await turn();
+ assert.equal(h.node('#diagnosticsNotice').classList.contains('hidden'),false);
+ h.fire('#diagnosticsRawView','click'); await turn();
+ assert.match(h.node('#diagnosticsRawStatus').textContent,/已加载 1 条/);
+ assert.equal(h.node('#diagnosticsNotice').classList.contains('hidden'),true);
+ assert.equal(h.node('#diagnosticsNotice').textContent,'');
+ h.fire('#diagnosticsFilters','input');
+ assert.equal(h.node('#diagnosticsNotice').classList.contains('hidden'),true);
+ h.fire('#diagnosticsListView','click'); await turn();
+ assert.equal(h.node('#diagnosticsNotice').classList.contains('hidden'),false);
+ h.controller.deactivate();
 });

@@ -10,6 +10,7 @@ from deep_agent.models.provider_registry import (
 )
 from deep_agent.db.models import Agent, GlobalSetting, LlmModel, LlmProvider
 from deep_agent.db.stores._session import SessionBoundMixin
+from deep_agent.db.reference_integrity import lock_optional, is_unique_conflict
 from deep_agent.db.stores.llm_model.base import _validate_runtime_metadata
 from deep_agent.schemas.llm_model import LlmModelCreate, LlmModelUpdate
 from deep_agent.schemas.llm_provider import LlmProviderCreate, LlmProviderUpdate
@@ -29,15 +30,7 @@ class LlmConfigurationValidationError(ValueError):
 
 
 def _is_unique_constraint_error(exc: IntegrityError) -> bool:
-    message = str(exc.orig).lower()
-    return any(
-        marker in message
-        for marker in (
-            "unique constraint",
-            "duplicate entry",
-            "duplicate key",
-        )
-    )
+    return is_unique_conflict(exc)
 
 
 def resolve_provider_base_url(
@@ -131,7 +124,7 @@ class LlmConfigurationService(SessionBoundMixin):
     ) -> LlmProvider | None:
         try:
             async with self._write() as db:
-                row = await db.get(LlmProvider, provider_id)
+                row = await db.get(LlmProvider, provider_id, with_for_update=True)
                 if row is None:
                     return None
                 updates = data.model_dump(exclude_unset=True)
@@ -181,11 +174,16 @@ class LlmConfigurationService(SessionBoundMixin):
                 provider = await db.get(LlmProvider, provider_id, with_for_update=True)
                 if provider is None:
                     return False
+                # Freeze the model set before checking Agent references. Model
+                # creation/moves lock this Provider; Agent writes lock the Model.
+                await db.execute(select(LlmModel.id).where(
+                    LlmModel.provider_id == provider_id
+                ).order_by(LlmModel.id).with_for_update())
                 agents = await db.execute(
                     select(Agent.name)
                     .join(LlmModel, Agent.model_id == LlmModel.id)
                     .where(LlmModel.provider_id == provider_id)
-                    .order_by(Agent.name)
+                    .order_by(Agent.id).with_for_update()
                 )
                 names = list(agents.scalars())
                 if names:
@@ -204,21 +202,27 @@ class LlmConfigurationService(SessionBoundMixin):
                         raise LlmConfigurationConflictError(
                             "无法删除：全局 Web Search 正在使用此 Provider 的凭据，请先更换搜索配置。"
                         )
-                # Keep FK protection for external references; remove only this
-                # provider's model configuration in the same transaction.
+                # Delete this Provider and its unreferenced models atomically.
                 await db.execute(delete(LlmModel).where(LlmModel.provider_id == provider_id))
                 await db.delete(provider)
                 await db.flush()
                 return True
         except IntegrityError as exc:
-            raise LlmConfigurationConflictError(
-                "无法删除：Provider 或模型仍存在配置引用，请刷新后检查引用关系。"
-            ) from exc
+            # A manually retained legacy reference/trigger is an expected
+            # conflict. NOT NULL, CHECK and other persistence failures are not.
+            orig = exc.orig
+            code = getattr(orig, "sqlstate", None) or getattr(orig, "pgcode", None)
+            args = getattr(orig, "args", ())
+            if code == "23503" or (args and args[0] in (1451, 1452)) or "foreign key constraint failed" in str(orig).lower():
+                raise LlmConfigurationConflictError(
+                    "无法删除：Provider 或模型仍存在配置引用，请刷新后检查引用关系。"
+                ) from exc
+            raise
 
     async def create_model(self, data: LlmModelCreate) -> LlmModel:
         try:
             async with self._write() as db:
-                provider = await db.get(LlmProvider, data.provider_id)
+                provider = await db.get(LlmProvider, data.provider_id, with_for_update=True)
                 if provider is None:
                     raise LlmConfigurationValidationError(
                         f"LLM provider not found: {data.provider_id}"
@@ -269,7 +273,16 @@ class LlmConfigurationService(SessionBoundMixin):
                     return None
                 updates = data.model_dump(exclude_unset=True)
                 provider_id = str(updates.get("provider_id", row.provider_id))
-                provider = await db.get(LlmProvider, provider_id)
+                old_provider = row.provider_id
+                parents = {}
+                for parent_id in sorted({old_provider, provider_id}):
+                    parents[parent_id] = await db.get(LlmProvider, parent_id, with_for_update=True)
+                row = await lock_optional(db, LlmModel, LlmModel.id, model_id)
+                if row is None:
+                    return None
+                if row.provider_id != old_provider:
+                    raise LlmConfigurationConflictError("Model Provider changed concurrently; refresh and retry")
+                provider = parents[provider_id]
                 if provider is None:
                     raise LlmConfigurationValidationError(
                         f"LLM provider not found: {provider_id}"
@@ -303,13 +316,13 @@ class LlmConfigurationService(SessionBoundMixin):
 
     async def delete_model(self, model_id: str) -> bool:
         async with self._write() as db:
-            row = await db.get(LlmModel, model_id)
+            row = await lock_optional(db, LlmModel, LlmModel.id, model_id)
             if row is None:
                 return False
             agent_count = await db.execute(
-                select(func.count()).select_from(Agent).where(Agent.model_id == model_id)
+                select(Agent.id).where(Agent.model_id == model_id).order_by(Agent.id).with_for_update()
             )
-            reference_count = int(agent_count.scalar_one())
+            reference_count = len(agent_count.all())
             if reference_count:
                 raise LlmConfigurationConflictError(
                     f"LLM model is referenced by {reference_count} configuration(s)"

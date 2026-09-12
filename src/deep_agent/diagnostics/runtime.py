@@ -23,15 +23,17 @@ except ImportError:  # Windows is not a supported file-locking deployment target
     fcntl = None
 
 from deep_agent.core.paths import REPO_ROOT
+from deepfos_platform.lib.context import get_request_id
 from .schema import EVENTS, ISSUE_CODES, MAX_RECORD_BYTES, safe_fields
+from .text import format_record
 
-FILE_PATTERN = re.compile(r"da-[a-f0-9]{16}-(?:api|gateway)-[0-9]+-[a-f0-9]{32}-[0-9]{6}\.jsonl\Z")
+FILE_PATTERN = re.compile(r"da-[a-f0-9]{16}-(?:api|gateway)-[0-9]+-[a-f0-9]{32}-[0-9]{6}\.(?:log|jsonl)\Z")
 
 
 def mirror_operational(data: bytes, level: str) -> None:
-    """Only pre-sanitized JSON reaches the existing operational log sink."""
+    """Mirror the exact text record without a second operational prefix."""
     from loguru import logger
-    logger.log(level, data.decode().rstrip("\n"))
+    logger.opt(raw=True).log(level, data.decode())
 
 
 def instance_id() -> str:
@@ -149,9 +151,10 @@ class DiagnosticRuntime:
                     "event": event, "summary": EVENTS[event],
                     "level": level if level in ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL") else "INFO",
                     "source": self.source, "instance_id": self.config.instance_id,
-                    "process_id": self.pid, "boot_id": self.boot_id, **safe_fields(fields),
+                    "process_id": self.pid, "boot_id": self.boot_id,
+                    **safe_fields({**fields, "request_id": get_request_id()}),
                 }
-                data = (json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n").encode()
+                data = (format_record(payload) + "\n").encode()
                 if len(data) > MAX_RECORD_BYTES:
                     self._issue("runtime_fault", dropped=True)
                     return
@@ -273,7 +276,7 @@ class DiagnosticRuntime:
                 return
             if self._filefd is None:
                 self._sequence += 1
-                name = f"{self.stem}-{self._sequence:06d}.jsonl"
+                name = f"{self.stem}-{self._sequence:06d}.log"
                 self._filefd = regular_open(self._dirfd, name, os.O_WRONLY | os.O_CREAT | os.O_EXCL)
                 fcntl.flock(self._filefd, fcntl.LOCK_EX)
                 self._file_name = name
@@ -298,7 +301,7 @@ class DiagnosticRuntime:
                 try:
                     if data is not None:
                         try:
-                            mirror_operational(data, json.loads(data)["level"])
+                            mirror_operational(data, data.decode().split(" | ", 3)[2])
                         except Exception:
                             self._issue("operational_output_failed")
                     if not self.config.enabled:
@@ -321,7 +324,7 @@ class DiagnosticRuntime:
                     self._available = False
                     self._issue("directory_unavailable" if self._dirfd is None else "write_failed", dropped=data is not None)
                     # A partial write is never continued in the same file. The
-                    # query reader skips its incomplete last line.
+                    # query reader can retain its last fragment as raw text.
                     self._close_file()
                 finally:
                     if self.config.enabled and self._dirfd is not None and time.monotonic() - self._last_status >= 1:
@@ -405,8 +408,13 @@ def emit(event: str, *, level: str = "INFO", **fields) -> None:
         elif event in EVENTS:
             # Outside an initialized ASGI service, retain the original
             # operational logging path (CLI/tests). No diagnostic file I/O.
-            payload = {"event": event, "summary": EVENTS[event], **safe_fields(fields)}
-            mirror_operational(json.dumps(payload, ensure_ascii=False).encode(), level)
+            payload = {"event": event, "summary": EVENTS[event],
+                       **safe_fields({**fields, "request_id": get_request_id()}),
+                       "timestamp": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
+                       "process_id": os.getpid(), "level": level, "source": "api",
+                       "record_id": uuid.uuid4().hex, "boot_id": uuid.uuid4().hex,
+                       "instance_id": instance_id()}
+            mirror_operational((format_record(payload) + "\n").encode(), level)
     except Exception:
         pass
 

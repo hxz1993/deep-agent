@@ -116,4 +116,7 @@ async def delete_ui_tool_package(
                 "referenced_by": [agent.name for agent in referenced_by],
             },
         )
-    await store.delete(code)
+    try:
+        await store.delete(code)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc

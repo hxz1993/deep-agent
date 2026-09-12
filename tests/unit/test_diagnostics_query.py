@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 from deep_agent.api.v1.admin import require_console_admin, resolve_console_admin_access
 from deep_agent.api.v1.diagnostics import router
 from deep_agent.diagnostics import query
+from deep_agent.diagnostics.text import format_record
 from deep_agent.security import ConsoleAdminAccess
 
 
@@ -31,8 +32,8 @@ class DiagnosticsQueryTests(unittest.TestCase):
                 "timestamp": f"2026-09-08T00:00:{number:02d}Z", "session_id": "session-one", **extra}
 
     def write(self, records, source="api", sequence=1):
-        path = self.directory / f"da-{'a' * 16}-{source}-123-{'b' * 32}-{sequence:06d}.jsonl"
-        path.write_text("".join(json.dumps(record) + "\n" for record in records))
+        path = self.directory / f"da-{'a' * 16}-{source}-123-{'b' * 32}-{sequence:06d}.log"
+        path.write_text("".join(format_record(record) + "\n" for record in records))
         return path
 
     def search(self, **kwargs):
@@ -52,7 +53,7 @@ class DiagnosticsQueryTests(unittest.TestCase):
         path = self.write([self.record(1), self.record(2), self.record(3)])
         first = self.search(limit=1)
         with path.open("a") as stream:
-            stream.write(json.dumps(self.record(4)) + "\n")
+            stream.write(format_record(self.record(4)) + "\n")
         second = self.search(limit=1, cursor=first["next_cursor"])
         third = self.search(limit=1, cursor=second["next_cursor"])
         self.assertEqual([int(page["items"][0]["record_id"], 16) for page in (first, second, third)], [3, 2, 1])
@@ -133,18 +134,39 @@ class DiagnosticsQueryTests(unittest.TestCase):
         with self.assertRaisesRegex(query.QueryError, "snapshot_changed"):
             self.search(cursor=cursor)
 
-    def test_unknown_event_malformed_raw_and_symbols_never_exposed(self):
-        path = self.write([self.record(1, event="unknown", stack="secret"), self.record(2),
+    def test_malformed_raw_is_preserved_and_unsafe_files_rejected(self):
+        path = self.write([self.record(1, stack="secret"), self.record(2),
                            self.record(3, duration_ms=10**500)])
         with path.open("a") as stream:
             stream.write("Traceback raw secret\n" + "x" * 100000 + "\n")
         records = self.search()["items"]
-        self.assertEqual([int(item["record_id"], 16) for item in records], [3, 2])
-        self.assertNotIn("duration_ms", records[0])
-        other = self.directory / f"da-{'a' * 16}-api-124-{'c' * 32}-000001.jsonl"
+        self.assertEqual(records[0]["raw"], "Traceback raw secret")
+        self.assertNotIn("timestamp", records[0])
+        self.assertEqual([int(item["record_id"], 16) for item in records[1:]], [3, 2, 1])
+        self.assertNotIn("duration_ms", records[1])
+        other = self.directory / f"da-{'a' * 16}-api-124-{'c' * 32}-000001.log"
         other.symlink_to(path)
         with self.assertRaises(query.QueryError):
             self.search()
+
+    def test_legacy_json_and_unknown_lines_are_raw_not_reinterpreted(self):
+        path = self.directory / f"da-{'a' * 16}-api-123-{'b' * 32}-000001.jsonl"
+        legacy = json.dumps(self.record(1))
+        path.write_text(legacy + "\n" + "unparsed 中文 | value=one\n")
+        first = self.search(limit=1)
+        second = self.search(limit=1, cursor=first["next_cursor"])
+        self.assertEqual(first["items"][0]["raw"], "unparsed 中文 | value=one")
+        self.assertEqual(second["items"][0]["raw"], legacy)
+        for item in first["items"] + second["items"]:
+            self.assertNotIn("timestamp", item)
+            self.assertNotIn("level", item)
+            self.assertNotIn("source", item)
+            self.assertNotIn("event", item)
+        self.assertNotEqual(first["items"][0]["record_id"], second["items"][0]["record_id"])
+        self.assertEqual(self.search(limit=1)["items"], first["items"])
+        for filters in ({"level": "INFO"}, {"source": "api"}, {"session_id": "session-one"}):
+            self.assertEqual(self.search(**filters)["items"], [])
+        self.assertEqual(len(self.search(q="中文")["items"]), 1)
 
     def test_directory_symlink_and_path_input_are_not_read(self):
         self.write([self.record(1)])
@@ -158,7 +180,7 @@ class DiagnosticsQueryTests(unittest.TestCase):
     def test_oversized_line_continuation_makes_progress_without_inventing_records(self):
         path = self.write([self.record(1)])
         with path.open("a") as stream:
-            stream.write(json.dumps(self.record(2)) + "x" * 500000 + "\n")
+            stream.write(format_record(self.record(2)) + "x" * 500000 + "\n")
         gathered, cursor = [], None
         with patch.object(query, "MAX_SCAN_BYTES", 100000):
             for _ in range(20):

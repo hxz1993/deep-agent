@@ -22,6 +22,7 @@ class GatewayContext:
     config: GatewayConfig
     runtime: ChannelRuntime
     engine: object
+    database_revision: str | None
 
 
 def create_gateway_app() -> FastAPI:
@@ -35,14 +36,12 @@ def create_gateway_app() -> FastAPI:
                 revision = (
                     await connection.execute(text("SELECT version_num FROM alembic_version"))
                 ).scalar_one_or_none()
-            if revision != "002":
-                raise RuntimeError(
-                    f"Channel Gateway requires database revision 002, found {revision or 'none'}"
-                )
             stores = create_data_stores(resolve_dialect(database_url), session_factory)
             assert stores.channel is not None
             runtime = ChannelRuntime(stores.channel, config)
-            app.state.gateway = GatewayContext(config, runtime, engine)
+            # API owns migrations; the revision is diagnostic metadata, not a
+            # gateway-maintained version allowlist.
+            app.state.gateway = GatewayContext(config, runtime, engine, revision)
             await runtime.start()
             yield
         finally:
@@ -68,7 +67,7 @@ def create_gateway_app() -> FastAPI:
 
     @app.get("/health")
     async def health(context: GatewayContext = Depends(authorize)) -> dict:
-        return {"status": "ok", "database_revision": "002"}
+        return {"status": "ok", "database_revision": context.database_revision}
 
     @app.get("/accounts/status")
     async def account_statuses(

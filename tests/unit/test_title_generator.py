@@ -106,8 +106,7 @@ class TestGenerateTitle(unittest.IsolatedAsyncioTestCase):
                 else:
                     self.assertEqual(sent[0]["thinking"], {"type": "disabled"})
                     self.assertNotIn("thinking", sent[1])
-                if provider_type == "moonshotai":
-                    self.assertNotIn("temperature", sent[0])
+                self.assertNotIn("temperature", sent[0])
                 self.assertEqual(sent[1]["temperature"], 0.7)
 
     async def test_token_limit_failure_has_correlated_safe_diagnostic_and_no_retry(self) -> None:

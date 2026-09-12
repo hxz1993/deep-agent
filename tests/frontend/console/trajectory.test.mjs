@@ -297,8 +297,8 @@ test("工作台以独立页签接入轨迹且默认对话链路不变", () => {
   assert.doesNotMatch(workspaceCss, /trajectory-timeline|trajectory-segment|trajectory-sequence/);
   assert.match(workspaceCss, /\.inspector-pane\.trajectory-inspector/);
   assert.match(workspaceCss, /\.trajectory-fact[^}]*grid-template-columns:\s*64px minmax\(0, 1fr\)/);
-  assert.match(trajectorySource, /kind === "input"\) return "USER"/);
-  assert.match(trajectorySource, /kind === "context"\) return "CONTEXT"/);
+  assert.match(trajectorySource, /input: "用户"/);
+  assert.doesNotMatch(trajectorySource, /kind === "context"|kind: "context"|renderContextSummary|parent_input_id/);
   assert.match(trajectorySource, /DeepAgentMarkdown\?\.renderBody/);
   assert.match(trajectorySource, /DeepAgentJson\?\.renderBlock/);
   assert.match(workspaceCss, /\.trajectory-summary-markdown/);
@@ -307,22 +307,18 @@ test("工作台以独立页签接入轨迹且默认对话链路不变", () => {
   assert.match(workspaceCss, /\.trajectory-summary-preview \.trajectory-thinking,[\s\S]*border-left:\s*2px solid var\(--accent-soft\)/);
   assert.doesNotMatch(workspaceCss, /trajectory-thinking-preview|trajectory-technical-details/);
   assert.doesNotMatch(trajectorySource, /标识与模型信息|renderTechnicalDetails/);
-  assert.match(trajectorySource, /\["summary", "Summary"\]/);
-  assert.match(trajectorySource, /event\.kind === "title"\) return \[\["summary", "Summary"\], \["request", "Request"\], \["result", "Result"\]\]/);
-  assert.match(trajectorySource, /tabs\.push\(\["preview", "Preview"\], \["raw", "Raw"\]\)/);
-  assert.match(trajectorySource, /\["Thinking", event\.payload\?\.thinking\][\s\S]*\["Content", event\.payload\?\.content\]/);
+  assert.match(trajectorySource, /\["summary", "摘要"\]/);
+  assert.match(trajectorySource, /event\.kind === "title"\) return \[\["summary", "摘要"\], \["request", "请求"\], \["result", "结果"\]\]/);
+  assert.match(trajectorySource, /tabs\.push\(\["preview", "预览"\], \["raw", "原文"\]\)/);
+  assert.match(trajectorySource, /\["思考", event\.payload\?\.thinking\][\s\S]*\["正文", event\.payload\?\.content\]/);
   assert.match(trajectorySource, /completed: "Completed"/);
-  assert.doesNotMatch(trajectorySource, /completed: "完成"|trajectoryRunCount/);
-  assert.match(trajectorySource, /renderSummarySection\("Payload"[\s\S]*renderSummarySection\("Result"/);
+  assert.doesNotMatch(trajectorySource, /trajectoryRunCount/);
+  assert.match(trajectorySource, /renderSummarySection\("数据"[\s\S]*renderSummarySection\("结果"/);
   assert.match(trajectorySource, /data-trajectory-detail-tab-target/);
   assert.match(trajectorySource, /data-trajectory-event-target/);
   assert.match(trajectorySource, /renderDetail\(selected, detailTab, events\)/);
-  assert.match(trajectorySource, /renderFact\("名称", reference\.label/);
-  assert.match(trajectorySource, /renderFact\("类型", reference\.type/);
-  assert.match(trajectorySource, /renderFact\("Key", reference\.key/);
-  assert.match(trajectorySource, /renderFact\("版本", reference\.schema_version/);
-  assert.match(trajectorySource, /renderSummarySection\("Attachments"/);
-  assert.match(trajectorySource, /renderSummarySection\("Context References"/);
+  assert.match(trajectorySource, /renderSummarySection\("附件"/);
+  assert.match(trajectorySource, /renderSummarySection\("上下文引用"/);
   assert.doesNotMatch(trajectorySource, /Object\.entries\(reference\.payload/);
   assert.match(trajectorySource, /TOOL_KINDS\.has\(event\.kind\) && hasMeaningfulValue\(event\.result\)/);
   assert.doesNotMatch(trajectorySource, /下载本地文件/);
@@ -352,12 +348,11 @@ test("工作台以独立页签接入轨迹且默认对话链路不变", () => {
   assert.match(workspaceCss, /\.trajectory-export\s*\{[\s\S]*height:\s*32px;[\s\S]*min-height:\s*32px/);
   assert.match(workspaceCss, /\.trajectory-detail-body \.trajectory-json\.is-flat\s*\{[\s\S]*border:\s*0;[\s\S]*background:\s*transparent/);
   assert.match(workspaceCss, /\.trajectory-kind\.input\s*\{[^}]*background:\s*#eef4ff/);
-  assert.match(workspaceCss, /\.trajectory-kind\.context\s*\{[^}]*background:\s*#e9f8f0/);
   assert.match(workspaceCss, /\.trajectory-kind\.assistant,[\s\S]*background:\s*#f3edff/);
   assert.match(workspaceCss, /\.trajectory-kind\.tool\s*\{[^}]*background:\s*#fff3e7/);
   assert.match(workspaceCss, /\.trajectory-kind\.code\s*\{[^}]*background:\s*#e8f1ff/);
   assert.match(trajectorySource, /return isRunCodeEvent\(event\) \? "PTC"/);
-  assert.match(trajectorySource, /isPythonCodeEvent\(event\)\) tabs\.push\(\["code", "Code"\]\)/);
+  assert.match(trajectorySource, /isPythonCodeEvent\(event\)\) tabs\.push\(\["code", "代码"\]\)/);
   assert.match(trajectorySource, /class="hljs language-python"/);
   assert.match(trajectorySource, /data-copy-run-code/);
   assert.match(trajectorySource, /activeTab === "code"[\s\S]*?"trajectory-detail-body is-code"/);
@@ -413,13 +408,14 @@ test("Console正文不低于12px，只有明确的辅助标签使用紧凑字号
     }
     return sizes;
   };
-  assert.deepEqual(lowFontDeclarations(workspaceCss), []);
+  assert.deepEqual(lowFontDeclarations(workspaceCss), [[".trajectory-kind", "font-size: 10px"]]);
   assert.deepEqual(lowFontDeclarations(consoleCss), [
     [".console-rail .resource-group-label", "font-size: 11px"],
     [".console-brand .console-brand-copy .connection-pill", "font-size: 10px"],
     [".agent-name-line .agent-channel-badge", "font-size: 11px"],
     ["#workspaceLegacyHost .session-list-footer", "font-size: 11px"],
     [".inspector-facts .inspector-channel-badge", "font-size: 11px"],
+    [".catalog-model-table .model-tag-cell .badge", "font-size: 11px"],
   ]);
   assert.deepEqual(lowFontDeclarations(configurationCss), []);
   assert.deepEqual(lowFontDeclarations(themesCss), []);

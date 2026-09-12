@@ -40,7 +40,7 @@ test("切走页面时立即恢复按钮和行内状态，不依赖重新加载�
   assert.equal(button.disabled, true);
   h.admin.cancelModelTests();
   assert.equal(button.disabled, false);
-  assert.equal(label.textContent, "测试模型");
+  assert.equal(label.textContent, "测试");
   assert.equal(result.textContent, "");
   release({ ok: true });
   await run;
@@ -98,9 +98,9 @@ test("等待期间被停用的模型不会继续发请求", async () => {
   assert.equal(h.calls.length, 1);
 });
 
-test("按钮在从目录添加之前，结果紧邻开关左侧且无 HTML 注入", () => {
+test("测试按钮位于供应商操作区，模型开关在名称左侧且结果无 HTML 注入", () => {
   assert.ok(source.indexOf("data-provider-test-models title=") < source.indexOf("data-provider-catalog>"));
-  assert.match(source, /data-model-test-result=.*[\s\S]*?class="model-enabled-switch/);
+  assert.match(source, /class="model-enabled-switch[\s\S]*?provider-related-model-main[\s\S]*?data-model-test-result=/);
   assert.match(source, /element\.textContent = result/);
   assert.match(source, /element\.title = result\?\.message/);
 });

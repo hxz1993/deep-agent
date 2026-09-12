@@ -3,10 +3,15 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import os
 import shutil
 import tempfile
 import uuid
 from dataclasses import dataclass
+from contextlib import asynccontextmanager
+
+from sqlalchemy import select
+from deep_agent.db.reference_integrity import lock_optional
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Mapping
@@ -24,7 +29,9 @@ from deepfos_platform.lib.constants import INTERNAL_TOKEN_HEADER
 from deepfos_platform.options import OPTION as PLATFORM_OPTION
 
 
-SKILL_RUNTIME_ROOT = Path(tempfile.gettempdir()) / "deep-agent-runtime-skills"
+SKILL_RUNTIME_ROOT = Path(os.environ.get(
+    "DEEP_AGENT_SKILL_RUNTIME_ROOT", str(Path(tempfile.gettempdir()) / "deep-agent-runtime-skills")
+)).expanduser().resolve()
 SKILL_RUNTIME_MARKER = ".deepagent-runtime.json"
 SKILL_STARTUP_SYNC_TIMEOUT_SECONDS = 30
 SKILL_DOWNLOAD_TIMEOUT_SECONDS = 15
@@ -310,6 +317,18 @@ class SkillRuntimeLibrary:
             shutil.rmtree(staging, ignore_errors=True)
             shutil.rmtree(old, ignore_errors=True)
 
+    @asynccontextmanager
+    async def coordinated_row(self, stores: DataStores, code: str):
+        """Acquire DB coordination before runtime locks; never publish a stale row.
+
+        Cold-cache download intentionally holds the barrier and row lock. Callers
+        already holding a configuration transaction (installer/reconcile) use the
+        low-level materialize/resolve methods instead of nesting this context.
+        """
+        async with stores.skill_package._write() as db:
+            row = await lock_optional(db, SkillPackage, SkillPackage.code, code)
+            yield row
+
     async def materialize(
         self,
         row: SkillPackage,
@@ -347,7 +366,14 @@ class SkillRuntimeLibrary:
                         row,
                         request_headers=request_headers,
                     )
-                await asyncio.to_thread(self._install_payload, row, raw)
+                # Cancellation must not release the DB/runtime locks while the
+                # worker thread is still replacing the directory.
+                publish = asyncio.create_task(asyncio.to_thread(self._install_payload, row, raw))
+                try:
+                    await asyncio.shield(publish)
+                except asyncio.CancelledError:
+                    await publish
+                    raise
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001 - derived runtime state must fail open
@@ -425,7 +451,13 @@ class SkillRuntimeLibrary:
             self._states[code] = SkillRuntimeState(code=code, status=status)
 
     async def reconcile(self, stores: DataStores) -> None:
-        rows = await stores.skill_package.list_all()
+        # Startup cleanup must exclude both ordinary runtime readers and package
+        # installers, including their temporary checkpoint/staging directories.
+        async with stores.skill_package._write(exclusive=True) as db:
+            await self._reconcile_locked(db)
+
+    async def _reconcile_locked(self, db) -> None:
+        rows = list((await db.execute(select(SkillPackage))).scalars())
         by_code = {row.code: row for row in rows}
         configured = set(by_code)
         self.root.mkdir(parents=True, exist_ok=True)
@@ -527,11 +559,11 @@ async def resolve_skills_for_run(
         if builtin is not None:
             items.append(_resolved_builtin(builtin))
             continue
-        row = await stores.skill_package.get_by_code(code)
-        if row is None:
-            unavailable.append(SkillRuntimeIssue(code=code, reason="unknown"))
-            continue
-        resolved = await runtime.resolve(row, request_headers=request_headers)
+        async with runtime.coordinated_row(stores, code) as row:
+            if row is None:
+                unavailable.append(SkillRuntimeIssue(code=code, reason="unknown"))
+                continue
+            resolved = await runtime.resolve(row, request_headers=request_headers)
         if resolved is None:
             state = runtime.state(code)
             unavailable.append(

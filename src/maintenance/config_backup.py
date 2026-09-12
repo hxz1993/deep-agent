@@ -25,6 +25,7 @@ from deep_agent.db.configuration_transfer import (
     SESSION_TABLES,
     backup_scope_manifest,
     configuration_table_names,
+    order_configuration_tables,
     validate_table_classification,
 )
 
@@ -228,15 +229,7 @@ async def _discover_copied_tables(engine: AsyncEngine) -> tuple[str, ...]:
         )
 
     copied_names = table_names - set(SESSION_TABLES) - {"alembic_version"}
-    metadata = MetaData()
-    async with engine.connect() as connection:
-        await connection.run_sync(
-            lambda sync_connection: metadata.reflect(
-                bind=sync_connection,
-                only=sorted(copied_names),
-            )
-        )
-    return tuple(table.name for table in metadata.sorted_tables)
+    return order_configuration_tables(tuple(copied_names))
 
 
 async def _validate_source_tables(
@@ -389,22 +382,12 @@ async def _validate_backup(
             if await _table_count(connection, table_name) != 0:
                 raise ValueError(f"Session table must be empty: {table_name}")
 
-        orphan_models = int(
-            (
-                await connection.execute(
-                    text(
-                        "SELECT COUNT(*) FROM llm_models AS model "
-                        "LEFT JOIN llm_providers AS provider "
-                        "ON provider.id = model.provider_id "
-                        "WHERE provider.id IS NULL"
-                    )
-                )
-            ).scalar_one()
+        # PRAGMA foreign_key_check is insufficient after 003. Audit the
+        # logical relations, including the configured channel Agent reference.
+        from deep_agent.db.reference_schema import assert_logical_references
+        await connection.run_sync(
+            lambda sync: assert_logical_references(sync, tables=set(copied_tables))
         )
-        if orphan_models:
-            raise ValueError(
-                "Backup contains LLM models with missing Provider references"
-            )
 
         stored_revision = (
             await connection.execute(

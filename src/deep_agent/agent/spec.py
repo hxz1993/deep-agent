@@ -49,10 +49,10 @@ class AgentSpec:
     model: str
     instructions: str
     capabilities: list[str] = field(default_factory=list)
+    ui_tool_selection: dict[str, list[str]] = field(default_factory=dict)
     skills: list[str] = field(default_factory=list)
     base_url: str | None = None
     api_key: str | None = None
-    temperature: float | None = None
     agent_id: str | None = None
     input_modalities: list[str] | None = None
     context_window_tokens: int | None = None
@@ -74,8 +74,8 @@ class AgentSpec:
             model=llm_model.model,
             instructions=row.prompt,
             capabilities=canonical_tool_package_codes(row.capabilities),
+            ui_tool_selection={code: list(names) for code, names in (getattr(row, "ui_tool_selection", None) or {}).items()},
             skills=list(row.skills or []),
-            temperature=row.temperature,
             agent_id=row.id,
             input_modalities=_input_modalities(llm_model),
             context_window_tokens=llm_model.context_window_tokens,
@@ -92,7 +92,6 @@ class AgentSpec:
         *,
         name: str = "default",
         instructions: str | None = None,
-        temperature: float | None = None,
         capabilities: list[str] | None = None,
         skills: list[str] | None = None,
         provider: LlmProvider | None = None,
@@ -103,7 +102,6 @@ class AgentSpec:
             instructions=instructions or DEFAULT_INSTRUCTIONS,
             capabilities=canonical_tool_package_codes(capabilities),
             skills=list(skills or []),
-            temperature=temperature,
             input_modalities=_input_modalities(llm_model),
             context_window_tokens=llm_model.context_window_tokens,
             max_output_tokens=llm_model.max_output_tokens,

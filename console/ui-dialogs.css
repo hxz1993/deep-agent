@@ -1,0 +1,19 @@
+/* Layout helpers only. Dialog theme, sizing and spacing use the existing Console styles. */
+.dialog-field-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-bottom: 12px; }
+.dialog-field-grid > .field { margin-bottom: 0; }
+.da-select-menu, .da-select-option { font-weight: 400; }
+@media (max-width: 640px) { .dialog-field-grid { grid-template-columns: 1fr; } }
+/* MCP content is centered and compact, while page actions retain their normal header. */
+.mcp-editor-page .modal-body { padding: 0 24px; }
+.mcp-editor-workbench { max-width: 860px; margin: 20px auto; grid-template-columns: minmax(0, .85fr) minmax(0, 1.15fr); gap: 0; }
+.mcp-editor-section { padding: 0 22px; }
+.mcp-editor-section + .mcp-editor-section { border-left: 1px solid var(--border); }
+.mcp-editor-section .field + .field, .mcp-editor-section .mcp-transport-fields { margin-top: 12px; }
+.mcp-editor-section .field { margin-bottom: 0; }
+.mcp-editor-basics #mcpDescription { min-height: 130px; }
+.mcp-editor-page #mcpHeaders, .mcp-editor-page #mcpEnv { min-height: 150px; }
+@media (max-width: 760px) {
+ .mcp-editor-workbench { grid-template-columns: 1fr; gap: 18px; }
+ .mcp-editor-section { padding: 0; }
+ .mcp-editor-section + .mcp-editor-section { border-left: 0; border-top: 1px solid var(--border); padding-top: 18px; }
+}

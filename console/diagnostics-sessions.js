@@ -1,12 +1,13 @@
-import { escapeHtml as e, icon, icons, localInput, selectHtml, bindDiagnosticSelects, diagnosticRequest } from "./diagnostics-ui.js?v=20260909-2";
-import { diagnosticTime } from "./diagnostics.js?v=20260910-13";
-import { diagnosticHash, sessionRange, sessionDrilldown, overviewFilters } from "./diagnostics-navigation.js?v=20260910-10";
-import { bindDiagnosticColumns, COLUMN_BOUNDS } from "./diagnostic-columns.js?v=20260910-10";
-import { buildSessionQuery, sessionQueryError, createSessionReader } from "./diagnostics-session-query.js?v=20260910-10";
-import { createReadonlySessionView } from "./diagnostic-detail.js?v=20260910-15";
+import { escapeHtml as e, icon, icons, localInput, selectHtml, bindDiagnosticSelects, diagnosticRequest } from "./diagnostics-ui.js?v=20260912-21";
+import { diagnosticTime } from "./diagnostics.js?v=20260912-37";
+import { diagnosticHash, sessionRange, sessionDrilldown, overviewFilters } from "./diagnostics-navigation.js?v=20260912-21";
+import { bindDiagnosticColumns, COLUMN_BOUNDS } from "./diagnostic-columns.js?v=20260912-21";
+import { buildSessionQuery, sessionQueryError, createSessionReader } from "./diagnostics-session-query.js?v=20260912-21";
+import { createReadonlySessionView } from "./diagnostic-detail.js?v=20260912-21";
 
 export const SESSION_STATUSES = { running: "进行中", pending: "待操作", waiting: "待操作", completed: "已完成", stopped: "已停止", error: "异常", failed: "异常", unknown: "未确认", not_started: "未开始" };
 const PERIODS = [["24", "最近 24 小时"], ["168", "最近 7 天"], ["720", "最近 30 天"], ["custom", "自定义时间"]];
+const PAGE_SIZE = 50;
 const SOURCE_OPTIONS = [["", "全部来源"], ["direct", "普通会话"], ["channel", "渠道会话"]];
 const button = (label, action, extra = "", kind = "") => `<button type="button" class="btn diagnostics-button ${kind}" data-session-action="${action}" ${extra}>${label}</button>`;
 const empty = message => `<div class="diagnostics-empty">${e(message)}</div>`;
@@ -32,7 +33,7 @@ export function questionTrendHtml(bins = [], availableWidth = 800) {
 
 export function initDiagnosticSessions({ root, navigate, replace, onBack }) {
   const reader = createSessionReader(diagnosticRequest), contextReader = createSessionReader(diagnosticRequest), eventsReader = createSessionReader(diagnosticRequest);
-  const state = { active: false, route: null, filters: {}, data: null, busy: false, error: "", users: {}, agents: new Map(), showUsers: false, showAgents: false };
+  const state = { active: false, route: null, filters: {}, data: null, listTotal: null, busy: false, error: "", users: {}, agents: new Map(), showUsers: false, showAgents: false };
   let detail = null, detailData = null, selectBinding = null, scrollToUsers = false, eventsLoading = false, trendObserver = null;
   let releaseColumns = () => {}, columnWidths = null, listFilters = {};
   const disconnectTrend = () => { trendObserver?.disconnect(); trendObserver = null; };
@@ -100,7 +101,7 @@ export function initDiagnosticSessions({ root, navigate, replace, onBack }) {
   function overviewHtml(data) {
     const metrics = data?.metrics || {}, questions = data?.recent_questions || [], errors = data?.recent_errors || [], users = data?.active_users || [], agents = data?.agents || [];
     const max = Math.max(1, ...agents.map(agent => agent.question_count));
-    const stats = [["session_count", "会话数", "message-circle-more", "blue"], ["question_count", "提问数", "file-text", "purple"], ["active_user_count", "活跃用户", "user-round", "green"], ["error_session_count", "含异常会话", "triangle-alert", "red"]];
+    const stats = [["session_count", "会话数", "messages-square", "blue"], ["question_count", "提问数", "message-circle-more", "purple"], ["active_user_count", "活跃用户", "user-round", "green"], ["error_session_count", "含异常会话", "triangle-alert", "red"]];
     return `<div class="diagnostic-stats">${stats.map(([key, label, glyph, tone]) => `
       <button type="button" data-stat="${key}" ${!data ? "disabled" : ""}>
         <span class="diagnostic-stat-icon ${tone}">${icon(glyph)}</span>
@@ -127,7 +128,7 @@ export function initDiagnosticSessions({ root, navigate, replace, onBack }) {
       </div>`;
   }
   function listHtml(data) {
-    const f = state.filters, total = Number(data?.total || 0), offset = Number(f.offset || 0), limit = Number(f.limit || 50), items = data?.items || [];
+    const f = state.filters, total = Number(data?.total ?? state.listTotal ?? 0), offset = Number(f.offset || 0), limit = PAGE_SIZE, items = data?.items || [];
     const currentPage = Math.floor(offset / limit) + 1, pageCount = Math.max(1, Math.ceil(total / limit));
     return `<section class="diagnostic-list-workbench" aria-label="会话列表">
       <form class="diagnostic-list-toolbar" data-session-form="search"><div class="diagnostic-list-search"><label class="diagnostics-field"><button class="diagnostic-search-submit" type="submit" aria-label="查询会话">${icon("search")}</button><input type="search" name="query" value="${e(f.query || "")}" placeholder="搜索会话名称或 ID" aria-label="搜索会话名称或 ID" maxlength="200"/></label></div>
@@ -147,7 +148,7 @@ export function initDiagnosticSessions({ root, navigate, replace, onBack }) {
       </div>
       ${!items.length && !state.busy ? empty("没有匹配会话，可重置时间、Agent 或用户条件后再查询。") : ""}
       </div>
-      <footer class="diagnostic-list-footer"><nav class="diagnostic-pagination" aria-label="会话分页" title="共 ${total.toLocaleString()} 个会话">${selectHtml("limit", "每页条数", String(limit), [["20", "20 条 / 页"], ["50", "50 条 / 页"], ["100", "100 条 / 页"]])}${button(icon("arrow-left"), "previous", `aria-label="上一页" title="上一页" ${offset <= 0 || state.busy ? "disabled" : ""}`)}<span class="diagnostic-page-current" aria-live="polite" aria-label="第 ${currentPage} 页，共 ${pageCount} 页">${currentPage} / ${pageCount}</span>${button(icon("arrow-right"), "next", `aria-label="下一页" title="下一页" ${offset + limit >= total || state.busy ? "disabled" : ""}`)}</nav></footer>
+      <footer class="diagnostic-list-footer"><nav class="diagnostic-pagination" aria-label="会话分页" title="共 ${total.toLocaleString()} 个会话">${button("上一页", "previous", `aria-label="上一页" ${offset <= 0 || state.busy ? "disabled" : ""}`, "btn-sm")}<span class="diagnostic-page-current models-page-info" aria-live="polite" aria-label="第 ${currentPage} 页，共 ${pageCount} 页">第 ${currentPage} / ${pageCount} 页 · 共 ${total.toLocaleString()} 项</span>${button("下一页", "next", `aria-label="下一页" ${offset + limit >= total || state.busy ? "disabled" : ""}`, "btn-sm")}</nav></footer>
     </section>`;
   }
   function render() {
@@ -172,8 +173,10 @@ export function initDiagnosticSessions({ root, navigate, replace, onBack }) {
     icons(); observeTrend();
     if (scrollToUsers) { scrollToUsers = false; root.querySelector("#diagnosticActiveUsers")?.scrollIntoView({ block: "center" }); root.querySelector("#diagnosticActiveUsers")?.focus({ preventScroll: true }); }
   }
-  async function loadCurrent() {
+  async function loadCurrent({ pageChange = false } = {}) {
     if (state.route.view === "overview") state.filters = overviewFilters(state.filters);
+    else state.filters.limit = PAGE_SIZE;
+    state.listTotal = pageChange ? state.data?.total ?? state.listTotal : null;
     try { state.filters = sessionRange(state.filters); } catch (error) { reader.cancel(); state.busy = false; state.data = null; state.error = error.message; render(); return; }
     publishFilters(); const scope = reader.begin(); state.busy = true; state.error = ""; state.data = null; restoreScroll(); render();
     try {
@@ -273,8 +276,8 @@ export function initDiagnosticSessions({ root, navigate, replace, onBack }) {
       navigate(diagnosticHash(target.dataset.sessionView, target.dataset.sessionView === "overview" ? common : { ...listFilters, ...common, offset: 0 })); return;
     }
     if (target.dataset.sessionPage) {
-      const page = Number(target.dataset.sessionPage), limit = Number(state.filters.limit || 50), pages = Math.ceil(Number(state.data?.total || 0) / limit);
-      if (Number.isInteger(page) && page >= 1 && page <= pages && !state.busy) { state.filters.offset = (page - 1) * limit; void loadCurrent(); }
+      const page = Number(target.dataset.sessionPage), limit = PAGE_SIZE, pages = Math.ceil(Number(state.data?.total || 0) / limit);
+      if (Number.isInteger(page) && page >= 1 && page <= pages && !state.busy) { state.filters.offset = (page - 1) * limit; void loadCurrent({ pageChange: true }); }
       return;
     }
     if (target.dataset.openSession || target.dataset.sessionId) return openSession(target.dataset.openSession || target.dataset.sessionId);
@@ -291,8 +294,12 @@ export function initDiagnosticSessions({ root, navigate, replace, onBack }) {
       case "user-picker": root.querySelector('input[name="user_id"]')?.focus(); break;
       case "agents": state.showAgents = !state.showAgents; render(); break;
       case "reset": state.filters = { period: "168", limit: 50, offset: 0 }; void loadCurrent(); break;
-      case "previous": state.filters.offset = Math.max(0, Number(state.filters.offset || 0) - Number(state.filters.limit || 50)); void loadCurrent(); break;
-      case "next": state.filters.offset = Number(state.filters.offset || 0) + Number(state.filters.limit || 50); void loadCurrent(); break;
+      case "previous":
+        if (state.busy || Number(state.filters.offset || 0) <= 0) break;
+        state.filters.offset = Math.max(0, Number(state.filters.offset || 0) - PAGE_SIZE); void loadCurrent({ pageChange: true }); break;
+      case "next":
+        if (state.busy || Number(state.filters.offset || 0) + PAGE_SIZE >= Number(state.data?.total || 0)) break;
+        state.filters.offset = Number(state.filters.offset || 0) + PAGE_SIZE; void loadCurrent({ pageChange: true }); break;
     }
   }
   function userOptions(event) {
@@ -319,8 +326,12 @@ export function initDiagnosticSessions({ root, navigate, replace, onBack }) {
     activate(route, saved = null) {
       cancelReaders(); state.active = true; state.route = route; detail?.destroy(); detail = null; state.busy = false; state.error = "";
       if (route.view === "detail") return mountDetail(saved);
-      state.filters = { limit: 50, offset: 0, ...route.filters }; state.data = saved?.data || null;
-      if (saved) Object.assign(state, { filters: saved.filters, showUsers: saved.showUsers, showAgents: saved.showAgents });
+      state.filters = { offset: 0, ...route.filters, limit: PAGE_SIZE }; state.data = saved?.data || null; state.listTotal = null;
+      if (saved) {
+        Object.assign(state, { filters: { ...saved.filters, limit: PAGE_SIZE }, showUsers: saved.showUsers, showAgents: saved.showAgents });
+        if (Number(saved.filters?.limit || PAGE_SIZE) !== PAGE_SIZE) state.data = null;
+      }
+      state.filters.offset = Math.max(0, Math.floor(Number(state.filters.offset || 0) / PAGE_SIZE)) * PAGE_SIZE;
       if (route.view === "overview") state.filters = overviewFilters(state.filters);
       try { state.filters = sessionRange(state.filters); } catch (error) { state.error = error.message; render(); return; }
       if (state.data) { rememberProfiles(state.data); render(); restoreScroll(saved); } else void loadCurrent();

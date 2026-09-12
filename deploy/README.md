@@ -18,6 +18,11 @@
 
 ## 本地与镜像的运行方式
 
+MySQL 部署要求应用连接及业务文本字段使用 `utf8mb4`。旧库或旧字段不能只依赖服务器默认值；
+字符损失可能触发会话保存失败，不能视为仅显示异常。上线前按
+[`MySQL 字符集部署与排查`](../docs/guides/mysql-character-set.md) 检查并验证 Emoji 完整存取。
+当前版本不自动检查或转换字符集。
+
 从仓库根执行，`PYTHONPATH` 指向该工作目录下的 `src`，不继承旧的源码路径：
 
 ```bash
@@ -46,7 +51,9 @@ python3.12 -m deep_agent.combined_runtime \
 
 源码归档须包含完整的 `src/`、`console/`、`mcp_servers/`、`migrations/`、`deploy/`、
 `scripts/`、`tests/` 及根工程配置。当前两份发布脚本使用所选提交的 `git archive` 构建镜像，
-继续先安装内部 DeepCube wheel，再安装应用依赖和沙箱环境。
+继续先安装内部 DeepCube wheel，再安装应用依赖和沙箱环境。`src/deep_agent/agent_packages/builtin/` 中纳入版本控制的
+完整 ZIP 会一并发布，不需预先解压；API 直接读取 ZIP 并复用上传安装的校验流程，不在启动时安装。
+包目录与替换方法见[自带 Agent 安装包](../src/deep_agent/agent_packages/builtin/README.md)。
 
 现有 Jenkins Job 需要使用当前完整脚本：粘贴模式替换脚本正文；SCM 模式设置
 `deploy/jenkins/Jenkinsfile.gateway`、`deploy/jenkins/Jenkinsfile.api-only` 或
@@ -63,3 +70,11 @@ docker compose --project-directory "$PWD" -f deploy/docker-compose.yml up -d
 `data/`、仓库外 Profile、密钥、`tmp/` 和输出文件不属于发布源码。现有稳定数据库和本地文件
 保留原地；源码路径整理不迁移、不重建业务数据。完整目录说明见
 [`项目结构与职责`](../docs/guides/project-structure.md)。
+
+## v0.9.7 / 数据库 003 发布要求
+
+完整备份 → 停止旧 API 与 Gateway 的写入 → 执行 `alembic upgrade head` 并核验003、10类逻辑引用及业务数据 → 启动新版 → 冒烟测试。
+003移除10条外键，新版代码负责原有引用与级联语义，不能滚动混跑旧写入实例。
+MySQL DDL中断不等于回滚：保持维护状态，修复故障后重跑迁移，禁止手动修改Revision。
+如需回退，先停写并确认逻辑引用有效，再执行 `alembic downgrade 002` 恢复约束后启动旧版。
+迁移不会修改字符集；详见[逻辑引用与验收](../docs/guides/application-references.md)。

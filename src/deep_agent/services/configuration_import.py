@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from deep_agent.db.reference_integrity import acquire_write_barrier
+
 import asyncio
 import json
 import shutil
@@ -20,6 +22,8 @@ from deep_agent.db.configuration_transfer import (
     validate_table_classification,
 )
 from deep_agent.db.models import Base
+from deep_agent.integrations.catalog import get_integration_definition
+from deep_agent.schemas.integration import validate_integration_settings
 from deep_agent.files.storage import FileStore, StoredFile
 from deep_agent.skills.package import MAX_ZIP_BYTES, SkillPackageError, parse_skill_zip
 from deepfos_platform.client.platform import FILE_TYPE_SKILL_PACKAGE
@@ -239,6 +243,18 @@ async def _actual_primary_keys(
     return {tuple(row) for row in result.all()}
 
 
+def _validate_integration_rows(rows: Sequence[Mapping[str, Any]]) -> None:
+    for row in rows:
+        if get_integration_definition(row.get("code")) is None:
+            raise ConfigurationImportError("integration_settings contains an unknown integration code")
+        try:
+            value = validate_integration_settings(row.get("settings"))
+        except ValueError as exc:
+            raise ConfigurationImportError("integration_settings contains an invalid JSON configuration") from exc
+        if not value:
+            raise ConfigurationImportError("integration_settings must not contain empty configurations")
+
+
 async def _validate_empty_sessions(connection: AsyncConnection, *, target: bool) -> None:
     counts = {
         table_name: await _table_count(connection, table_name)
@@ -255,35 +271,24 @@ async def _validate_logical_references(
     *,
     prefix: str,
 ) -> None:
-    checks = (
-        (
-            "llm_models",
-            "llm_providers",
-            "SELECT COUNT(*) FROM llm_models AS child "
-            "LEFT JOIN llm_providers AS parent ON parent.id = child.provider_id "
-            "WHERE parent.id IS NULL",
-        ),
-        (
-            "agents",
-            "llm_models",
-            "SELECT COUNT(*) FROM agents AS child "
-            "LEFT JOIN llm_models AS parent ON parent.id = child.model_id "
-            "WHERE parent.id IS NULL",
-        ),
-        (
-            "ui_tool_definitions",
-            "ui_tool_packages",
-            "SELECT COUNT(*) FROM ui_tool_definitions AS child "
-            "LEFT JOIN ui_tool_packages AS parent ON parent.code = child.package_code "
-            "WHERE parent.code IS NULL",
-        ),
-    )
-    for child, parent, statement in checks:
-        count = int((await connection.execute(text(statement))).scalar_one())
-        if count:
-            raise ConfigurationImportError(
-                f"{prefix} contains invalid {child} references to {parent}"
-            )
+    from deep_agent.capabilities.ui.selection import validate_ui_tool_selection
+    from deep_agent.db.models import Agent, UiToolDefinition
+
+    tool_rows = (await connection.execute(select(UiToolDefinition.name, UiToolDefinition.package_code))).all()
+    for row in (await connection.execute(select(Agent.capabilities, Agent.ui_tool_selection))).all():
+        try:
+            validate_ui_tool_selection(row.ui_tool_selection, row.capabilities, dict(tool_rows))
+        except (ValueError, TypeError, AttributeError) as exc:
+            raise ConfigurationImportError(f"{prefix} contains invalid UI tool selections: {exc}") from exc
+    from deep_agent.db.reference_schema import logical_reference_violations
+    violations = await connection.run_sync(logical_reference_violations)
+    if violations:
+        details = "; ".join(
+            f"{item['table']}.{item['column']} -> "
+            f"{item['parent_table']}.{item['parent_column']}: {item['count']}"
+            for item in violations
+        )
+        raise ConfigurationImportError(f"{prefix} contains invalid logical references: {details}")
 
 
 async def inspect_configuration_backup(
@@ -356,6 +361,7 @@ async def inspect_configuration_backup(
                 table = Base.metadata.tables[table_name]
                 result = await connection.execute(select(table))
                 rows[table_name] = [dict(row) for row in result.mappings().all()]
+            _validate_integration_rows(rows.get("integration_settings", []))
             for row in rows.get("agents", []):
                 row["capabilities"] = canonical_tool_package_codes(
                     row.get("capabilities") or []
@@ -522,6 +528,7 @@ async def _validate_target(
             "Backup revision does not match the target database revision"
         )
     await _validate_empty_sessions(connection, target=True)
+    await _validate_logical_references(connection, prefix="Target database")
     return target_revision
 
 
@@ -679,6 +686,11 @@ async def _replace_configuration(
     rows: Mapping[str, Sequence[Mapping[str, Any]]],
 ) -> None:
     async with connection.begin():
+        if connection.dialect.name == "sqlite":
+            # Read validation must share the database writer transaction with
+            # replacement, including when the target currently has no rows.
+            await connection.execute(text("BEGIN IMMEDIATE"))
+        await acquire_write_barrier(connection, exclusive=True)
         await _validate_target(
             connection,
             source_revision=plan.source.revision,
@@ -717,6 +729,7 @@ async def apply_configuration_import(
     request_headers: Mapping[str, str],
     active_run_count: int = 0,
 ) -> ConfigurationImportResult:
+    _validate_integration_rows(plan.rows.get("integration_settings", []))
     if active_run_count:
         raise ConfigurationImportConflictError("Target DeepAgent has active runs")
     if _IMPORT_LOCK.locked():

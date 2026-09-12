@@ -115,7 +115,7 @@ function populateModelProviderSelect(selectedId = "") {
   if (!select) return;
   const providers = state.llmProviders || [];
   if (!providers.length) {
-    select.innerHTML = '<option value="">（请先创建 Provider）</option>';
+    select.innerHTML = '<option value="">（请先创建供应商）</option>';
     select.disabled = true;
     return;
   }
@@ -232,14 +232,14 @@ const llmModelsAdmin = {
     if (targetProviderId && (!targeted || targeted.provider_type !== providerType)) {
       showToast(targeted
         ? `该目录渠道不能添加到 ${targeted.name}，请选择同类型模型`
-        : "当前 Provider 不存在", true);
+        : "当前供应商不存在", true);
       return;
     }
     const matches = targeted ? [targeted] : providerChoicesForCatalog(provider);
     if (!matches.length) {
       const supported = state.llmProviderTypes.find((item) => item.code === providerType);
       if (!supported) {
-        showToast(`当前目录渠道 ${provider.provider_label || provider.provider_id} 没有可用的 Provider 类型`, true);
+        showToast(`当前目录渠道 ${provider.provider_label || provider.provider_id} 没有可用的供应商类型`, true);
         return;
       }
       await window.llmProvidersAdmin?.openCreate({
@@ -251,18 +251,18 @@ const llmModelsAdmin = {
           model_description: model.model_description,
         }, { lockProvider: true, deriveName: true }),
       });
-      showToast(`请先创建 ${supported.label} Provider`);
+      showToast(`请先创建 ${supported.label} 供应商`);
       return;
     }
     let selected = matches[0];
     if (matches.length > 1) {
       const result = await requestActionFields({
-        title: "选择 Provider",
-        message: `${model.model_label} 有多个可用接入，请明确选择本次使用的 Provider。`,
+        title: "选择供应商",
+        message: `${model.model_label} 有多个可用接入，请明确选择本次使用的供应商。`,
         confirmLabel: "继续",
         fields: [{
           name: "provider_id",
-          label: "Provider",
+          label: "供应商",
           type: "select",
           required: true,
           value: matches[0].id,
@@ -398,7 +398,7 @@ const llmModelsAdmin = {
         max_output_tokens: maxOutput,
         tags: readCheckedValues("llmModelTag"),
       };
-      if (!payload.provider_id) throw new Error("请选择 Provider");
+      if (!payload.provider_id) throw new Error("请选择供应商");
 
       if (state.editingLlmModelId) {
         await apiFetch(`/api/v1/llm-models/${encodeURIComponent(state.editingLlmModelId)}`, {

@@ -1,16 +1,18 @@
+import { initFieldHelp } from "./ui-field-help.js?v=20260913-49";
+import { initConsoleSelects } from "./ui-select.js?v=20260913-49";
 import {
   initConfiguration,
   restoreConfigurationTab,
   rememberConfigurationTab,
-} from "./configuration.js?v=20260909-8";
-import { bindContextControls, refreshIdentity } from "./context.js?v=20260904-14";
-import { initDiagnostics, setDiagnosticsActive, openDiagnostics } from "./diagnostics-center.js?v=20260910-15";
-import { initWorkspace } from "./workspace.js?v=20260910-15";
-import "./time.js?v=20260831-1";
+} from "./configuration.js?v=20260913-49";
+import { bindContextControls, refreshIdentity } from "./context.js?v=20260913-49";
+import { initDiagnostics, setDiagnosticsActive, openDiagnostics } from "./diagnostics-center.js?v=20260913-49";
+import { initWorkspace } from "./workspace.js?v=20260913-49";
+import "./time.js?v=20260913-49";
 
 const VALID_PAGES = new Set(["workspace", "configuration", "diagnostics"]);
 const PAGE_LABELS = {
-  workspace: "对话测试",
+  workspace: "测试",
   configuration: "配置中心",
   diagnostics: "诊断中心",
 };
@@ -73,6 +75,7 @@ async function showPage(page, { updateHash = true, restoreTab = true, diagnostic
   if (current === "configuration" && next !== "configuration" && window.mcpAdmin?.isEditorOpen?.()) {
     if (!(await window.mcpAdmin.requestCloseEditor())) return;
   }
+  if (next !== "configuration" && window.integrationsAdmin?.deactivate() === false) return;
   document.querySelectorAll("[data-page-panel]").forEach((panel) => {
     panel.classList.toggle("active", panel.dataset.pagePanel === next);
   });
@@ -92,6 +95,9 @@ async function showPage(page, { updateHash = true, restoreTab = true, diagnostic
   if (consoleAllowed && next === "configuration") {
     await initConfiguration().catch((error) => toast(error.message, true));
     if (restoreTab) restoreConfigurationTab();
+    if (restoreTab && current !== "configuration" && document.querySelector('[data-tab="integrations"]')?.classList.contains("active")) {
+      void window.integrationsAdmin?.refresh();
+    }
   }
   if (consoleAllowed && next === "workspace" && current !== "workspace") {
     void window.DeepAgentConsoleWorkspace?.refreshChannelAccounts();
@@ -116,7 +122,7 @@ function setConsoleNavigationWidth(width) {
   button.setAttribute("aria-label", label);
   button.title = label;
   const brand = document.getElementById("expandConsoleNavBtn");
-  brand.title = collapsed ? "展开导航" : "DeepAgent";
+  brand.title = label;
   brand.setAttribute("aria-label", brand.title);
   window.dispatchEvent(new Event("resize"));
 }
@@ -179,14 +185,16 @@ function bindNavigation() {
   if (resourceNav && template) resourceNav.append(template.content);
   const agentTab = resourceNav?.querySelector('[data-tab="agents"]');
   if (agentTab) document.querySelector(".console-rail .console-nav")?.append(agentTab);
+  const channelTab = resourceNav?.querySelector('[data-tab="channels"]');
+  if (channelTab) document.querySelector(".console-rail .console-nav")?.append(channelTab);
+  const integrationTab = resourceNav?.querySelector('[data-tab="integrations"]');
+  if (integrationTab) document.querySelector(".console-rail .console-nav")?.append(integrationTab);
   document.querySelectorAll(".console-rail [data-tab]").forEach((button) => {
     const label = button.querySelector("span")?.textContent.trim();
     if (label) { button.title = label; button.setAttribute("aria-label", label); }
   });
   document.getElementById("toggleConsoleNavBtn")?.addEventListener("click", toggleConsoleNavigation);
-  document.getElementById("expandConsoleNavBtn")?.addEventListener("click", () => {
-    if (document.body.classList.contains("console-nav-collapsed")) toggleConsoleNavigation();
-  });
+  document.getElementById("expandConsoleNavBtn")?.addEventListener("click", toggleConsoleNavigation);
   // Capture cross-page clicks before the lazy-loaded configuration tab handlers.
   document.querySelector(".console-rail")?.addEventListener("click", async (event) => {
     const tab = event.target.closest("[data-tab]");
@@ -376,4 +384,6 @@ async function boot() {
 
 window.__ProductVersionUI = { loadProductVersion };
 
+initConsoleSelects();
+initFieldHelp();
 boot();

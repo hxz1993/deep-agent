@@ -25,12 +25,12 @@ class AgentRunnerModelSettingsTests(unittest.IsolatedAsyncioTestCase):
             agent,
             store=_NoopStore(),
             usage_limits=UsageLimits(request_limit=5),
-            model_settings=ModelSettings(temperature=0.3, max_tokens=2048),
+            model_settings=ModelSettings(max_tokens=2048),
         )
         await runner.run("sess", "hi", AgentDeps(session_id="sess"))
         settings = captured.get("model_settings")
         self.assertIsNotNone(settings)
-        self.assertEqual(settings["temperature"], 0.3)
+        self.assertNotIn("temperature", settings)
         self.assertEqual(settings["max_tokens"], 2048)
 
 

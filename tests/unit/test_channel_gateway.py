@@ -600,6 +600,7 @@ class ChannelGatewayApiTests(unittest.IsolatedAsyncioTestCase):
         app.state.gateway = SimpleNamespace(
             config=SimpleNamespace(internal_token="gateway-token"),
             runtime=runtime,
+            database_revision="fixture-revision",
         )
         transport = ASGITransport(app=app, raise_app_exceptions=False)
         async with AsyncClient(transport=transport, base_url="http://gateway") as client:
@@ -613,7 +614,7 @@ class ChannelGatewayApiTests(unittest.IsolatedAsyncioTestCase):
             )
         self.assertEqual(missing.status_code, 401)
         self.assertEqual(health.status_code, 200, health.text)
-        self.assertEqual(health.json()["database_revision"], "002")
+        self.assertEqual(health.json()["database_revision"], "fixture-revision")
         self.assertEqual(statuses.json()["state"], "connected")
 
 

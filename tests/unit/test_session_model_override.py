@@ -17,7 +17,6 @@ def _agent(*, model_id: str) -> Agent:
     row.model_id = model_id
     row.prompt = "You are helpful."
     row.capabilities = None
-    row.temperature = 0.2
     row.llm_model = _llm(model_id, "default-model")
     return row
 
@@ -93,7 +92,6 @@ class BuildRunnerForAgentTests(unittest.IsolatedAsyncioTestCase):
             await build_runner_for_agent(ctx, agent.id, model_id=override.id)
             spec = build.call_args.args[0]
             self.assertEqual(spec.model, "openai:gpt-b")
-            self.assertEqual(spec.temperature, 0.2)
 
     async def test_missing_override_model_raises(self) -> None:
         agent = _agent(model_id="00000000-0000-4000-8000-000000000010")

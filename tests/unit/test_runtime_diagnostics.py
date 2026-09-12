@@ -62,6 +62,24 @@ class RuntimeDiagnosticsTests(unittest.IsolatedAsyncioTestCase):
                     self.assertGreaterEqual(rows[3][1]["duration_ms"], 0)
         self.assertFalse([task for task in asyncio.all_tasks() if task.get_name() == "agent-diagnostic-wait"])
 
+    async def test_sandbox_error_return_retains_event_level_and_only_safe_facts(self):
+        from pydantic_ai import ToolReturn
+        rows = []
+        result = ToolReturn(return_value={"status": "error", "error": {
+            "code": "PYTHON_EXCEPTION", "message": "private error text", "traceback": "private trace"},
+            "stdout": "private result"})
+        ctx = SimpleNamespace(deps=self.deps(), run_step=1, retry=0)
+        call = SimpleNamespace(tool_name="execute_python", tool_call_id="sandbox-call")
+        handler = AsyncMock(return_value=result)
+        with patch("deep_agent.agent.diagnostics.log_event", side_effect=lambda event, **kw: rows.append((event, kw))):
+            actual = await RuntimeDiagnostics().wrap_tool_execute(ctx, call=call, tool_def=None,
+                                                                  args={"code": "private code"}, handler=handler)
+        self.assertIs(actual, result)
+        self.assertEqual([row[0] for row in rows], ["agent_tool_started", "agent_tool_completed"])
+        self.assertEqual(rows[-1][1]["result_status"], "error")
+        self.assertEqual(rows[-1][1]["error_code"], "PYTHON_EXCEPTION")
+        self.assertNotIn("private", repr(rows))
+
     async def test_retry_failure_and_deferred_preserve_framework_semantics(self):
         for mode in ("retry", "failed", "deferred", "schema"):
             with self.subTest(mode=mode):

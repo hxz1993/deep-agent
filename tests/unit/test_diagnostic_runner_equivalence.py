@@ -21,6 +21,7 @@ from deep_agent.agent.diagnostics import RuntimeDiagnostics
 from deep_agent.agent.event_persister import EventPersister
 from deep_agent.agent.runner import AgentRunner
 from deep_agent.diagnostics import runtime
+from deep_agent.diagnostics.text import parse_record
 from tests.helpers.sqlite_stores import make_sqlite_stores, seed_default_agent
 
 
@@ -76,7 +77,7 @@ class DiagnosticRunnerEquivalenceTests(unittest.IsolatedAsyncioTestCase):
         runner = AgentRunner(
             Agent(FunctionModel(stream_function=stream), deps_type=AgentDeps, tools=[sample],
                   capabilities=[RuntimeDiagnostics()]),
-            stores.coordinator, UsageLimits(request_limit=6),
+            stores.coordinator, UsageLimits(request_limit=6), agent_name="日志验收",
         )
         try:
             with TemporaryDirectory(prefix="TMP_to_delete_diagnostic_equivalence_") as tmp:
@@ -86,7 +87,7 @@ class DiagnosticRunnerEquivalenceTests(unittest.IsolatedAsyncioTestCase):
                 with ExitStack() as stack:
                     stack.enter_context(patch.object(runtime, "_runtime", writer))
                     stack.enter_context(patch.object(runtime, "mirror_operational",
-                        side_effect=lambda data, level: operational.append(json.loads(data))))
+                        side_effect=lambda data, level: operational.append(parse_record(data.decode().rstrip("\n")))))
                     stack.enter_context(patch.object(AgentRunner, "_generate_model_title", return_value=None))
                     stack.enter_context(patch("deep_agent.agent.runner.logger.exception"))
                     if mode == "write_error":
@@ -108,7 +109,7 @@ class DiagnosticRunnerEquivalenceTests(unittest.IsolatedAsyncioTestCase):
                     self.assertFalse(writer.thread.is_alive())
                     self.assertEqual(writer.queue.unfinished_tasks, 0)
                     if mode == "enabled":
-                        persisted = [json.loads(line) for path in writer.config.directory.glob("*.jsonl")
+                        persisted = [parse_record(line) for path in writer.config.directory.glob("*.log")
                                      for line in path.read_text().splitlines()]
                         self.assertEqual([row["event"] for row in persisted], [row["event"] for row in operational])
                     elif mode == "disabled":
@@ -116,6 +117,10 @@ class DiagnosticRunnerEquivalenceTests(unittest.IsolatedAsyncioTestCase):
                     else:
                         self.assertGreater(writer.status()["dropped_records"], 0)
 
+                for row in operational:
+                    if row["event"].startswith(("agent_run_", "agent_tool_", "model_request_")):
+                        self.assertEqual(row["agent_name"], "日志验收")
+                        self.assertIn("日志验收", row["message"])
                 names = [row["event"] for row in operational]
                 self.assertEqual(names.count("model_request_started"), 3)
                 self.assertEqual(names.count("agent_tool_started"), 2)

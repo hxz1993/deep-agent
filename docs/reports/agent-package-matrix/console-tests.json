@@ -1,0 +1,10 @@
+{
+  "command": "node --test tests/frontend/console/*.test.mjs",
+  "node": "20.19.6",
+  "executed": 547,
+  "passed": 547,
+  "failed": 0,
+  "skipped": 0,
+  "duration_ms": 3566.287917,
+  "output_summary": "1..547\n# tests 547\n# suites 0\n# pass 547\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 3566.287917"
+}

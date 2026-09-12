@@ -229,9 +229,7 @@ def check_runtime(environ: Mapping[str, str] | None = None) -> None:
     gateway_port = gateway_port_from_env(runtime_env)
     token = read_runtime_token(runtime_env)
     fetch_health(f"http://127.0.0.1:{api_port}/health")
-    payload = fetch_health(f"http://127.0.0.1:{gateway_port}/health", token=token)
-    if payload.get("database_revision") != "002":
-        raise RuntimeError("Channel Gateway database revision is not 002")
+    fetch_health(f"http://127.0.0.1:{gateway_port}/health", token=token)
 
 
 def wait_for_runtime_health(

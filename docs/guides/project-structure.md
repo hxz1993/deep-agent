@@ -1,6 +1,6 @@
 # DeepAgent 项目结构与职责
 
-本文说明 v0.8.4 的唯一源码布局。本地与线上使用相同目录和 Python 导入方式，旧链接与网关兼容包
+本文说明当前项目在 v0.8.4 整理基础上维护的唯一源码布局。本地与线上使用相同目录和 Python 导入方式，旧链接与网关兼容包
 已经移除。此次整理不改变业务接口或数据库结构，依赖继续按 `requirements.txt` 安装，发布仍交付
 完整源码目录。具体实现细节以各目录的 `AGENTS.md` 为准。
 
@@ -18,7 +18,8 @@ deep-agent/
 │   └── vendor/                随仓库保存的第三方静态资源
 ├── mcp_servers/               仓库内置 MCP 实现与启动入口
 ├── migrations/                数据库结构迁移
-├── deploy/                    Gunicorn、Compose 和 Jenkins 部署配置
+├── deploy/                    部署配置
+│   └── jenkins/               发布流水线
 ├── scripts/                   开发与环境准备脚本
 ├── tests/                     Python、接口、MCP 和 Console 测试
 ├── docs/                      当前说明、历史设计、原型与归档
@@ -46,6 +47,7 @@ FastAPI API
 
 - `api/`：HTTP 接口和依赖组装。
 - `agent/`：模型、运行器、消息、附件和事件处理。
+- `agent_packages/`：Agent 安装包解析、预检、导出与安装服务；可安装 ZIP 归 `src/deep_agent/agent_packages/builtin/`。
 - `capabilities/`：工具包目录以及 General、MCP、UI Toolset 适配。
 - `models/`：API、配置服务和 Agent 共用的 Provider 工厂、模型适配和 models.dev 目录解析；不是 ORM 表。
 - `files/`：附件与 Skill 文件统一读取、权限校验、分页和 Run内缓存。
@@ -83,8 +85,7 @@ Adapter的原生SDK回复。Gateway不是MCP工具，也不包含模型执行引
 | `ui:<package>` | `ui_tool_packages` + `ui_tool_definitions` | Agent 显式选择的手工 HITL 工具包 |
 
 分类只是 ToolPackage 的 `category` 字段；ToolPackage 是 Agent 配置单位，Toolset 是运行时
-交给 Pydantic AI 的对象。一个包严格包装一个 Toolset，当前不提供包内逐工具授权；未来可在
-该 Toolset 上使用过滤包装器实现包内工具选择。
+交给 Pydantic AI 的对象。一个包严格包装一个 Toolset，Agent.ui_tool_selection 可限制包内工具；缺少包 key 沿用整包，显式名单仅允许名单内工具，空名单不提供工具。
 
 所有工具包只在 `agents.capabilities` 中显式关联后进入Run；新Agent默认空列表。Skill 不属于
 工具包，也不进入 `agents.capabilities`。Agent 使用独立 `agents.skills` 选择
@@ -117,7 +118,7 @@ Skill 不能扩大 MCP 或其他工具授权。
 | `console/` | `configuration/`、`assets/provider-logos/`、`vendor/` | 生产页面、资源与第三方库；全部设计原型归 `docs/design/17-console-ui/` |
 | `docs/` | `guides/`、`design/`、`archive/` | 当前指南、课题设计、历史归档；历史课题 `20-code-mode/` 保留原名，当前实现为 `ptc/` |
 | `docs/guides/` | `client-adaptation/`、`experience/`、`fixtures/` | 客户端接入、实现经验、配套样例；设计下原型可带自身资源层级 |
-| `deploy/` | `jenkins/` | 活动流水线与运行部署配置；归档脚本不混作默认入口 |
+| `deploy/` | `jenkins/`、`agent-packages/` | 活动流水线、运行部署配置与完整 Agent 安装 ZIP；归档脚本不混作默认入口 |
 | `migrations/` | `versions/` | Alembic 标准结构，Revision 与数据库不变 |
 | `mcp_servers/` | `deepcube/` | 独立 Server 启动器，不能并入 Agent 工具实现；当前目录扫描与配置编码保持一致 |
 | `scripts/` | `sandbox_venv/` | 开发环境 Shell 脚本，不再保留无用途的 Python 包标记 |
@@ -128,6 +129,14 @@ Skill 不能扩大 MCP 或其他工具授权。
 `web/`、`conversation/` 都是当前具体功能的单层实现，职责见上文，不再人为加一层空包装。
 `local_security.py` 和 `mcp_request_context.py` 是无运行时依赖的共享策略，当前保留轻量入口，
 避免移入带初始化导入的安全或 MCP 包后形成循环依赖。
+
+### `src/deep_agent/agent_packages/builtin/`
+
+自带 Agent 是独立安装资源，每包一个完整 ZIP，包含 Agent 配置、上传 Skill ZIP 和自定义 UI 工具定义。
+它与 Console 导出或上传的包格式相同，不与 Python 运行源码、内置 Skill 或数据库迁移混放。
+安装服务位于 `src/deep_agent/agent_packages/`；安装产出的数据库记录和运行文件仍由既有 Store 管理。
+当前电子表格和 DeepCube 两包为暂行版，后续整包替换不覆盖已安装的 Agent。
+发布携带此目录，不预先解压、不启动时安装；详情见[目录说明](../../src/deep_agent/agent_packages/builtin/README.md)。
 
 ### `src/deepfos_platform/`
 
@@ -163,6 +172,7 @@ MCP 提供可执行工具；Skill 提供渐进披露的说明和素材。两者�
 | 渠道网关 | `src/deep_agent/channels/gateway/`，模块入口 `deep_agent.channels.gateway` |
 | Console 与第三方资源 | `console/`、`console/vendor/` |
 | 内置 MCP | `mcp_servers/` |
+| 自带 Agent 安装包 | `src/deep_agent/agent_packages/builtin/<code>.zip` |
 | 数据库迁移 | `migrations/`，根 `alembic.ini` 将 `src` 加入模块搜索路径 |
 | Gunicorn 与 Compose | `deploy/gunicorn.conf.py`、`deploy/docker-compose.yml` |
 | 当前 Jenkins 脚本 | `deploy/jenkins/Jenkinsfile.gateway`、`Jenkinsfile.api-only`、`Jenkinsfile.diagnose` |

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import sqlite3
 import tempfile
@@ -7,7 +8,7 @@ import unittest
 from datetime import datetime, timezone
 from pathlib import Path
 
-from sqlalchemy import insert, text
+from sqlalchemy import column, insert, table, text
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from deep_agent.db.models import (
@@ -15,7 +16,9 @@ from deep_agent.db.models import (
     Base,
     ChatSession,
     ChatSessionEvent,
+    ChannelAccount,
     GlobalSetting,
+    IntegrationSettings,
     LlmModel,
     LlmProvider,
     McpServer,
@@ -33,6 +36,7 @@ from maintenance.config_backup import (
     database_url_from_config,
     default_output_root,
     export_backup,
+    _upgrade_target_schema,
     repository_root,
 )
 
@@ -55,14 +59,15 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
 
             self.assertEqual(
                 result.path.name,
-                "deep-agent-config-test-v002-20260723-131415.db",
+                "deep-agent-config-test-v005-20260723-131415.db",
             )
             self.assertEqual(
                 [path.resolve() for path in (output_root / "test").iterdir()],
                 [result.path.resolve()],
             )
-            self.assertEqual(result.revision, "002")
+            self.assertEqual(result.revision, "005")
             self.assertEqual(result.row_counts["agents"], 1)
+            self.assertEqual(result.row_counts["integration_settings"], 1)
             self.assertEqual(result.row_counts["chat_sessions"], 0)
             self.assertEqual(result.row_counts["chat_session_events"], 0)
 
@@ -83,8 +88,10 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                     connection.execute(
                         "SELECT version_num FROM alembic_version"
                     ).fetchone(),
-                    ("002",),
+                    ("005",),
                 )
+                config = connection.execute("SELECT settings FROM integration_settings WHERE code='deeptable-assistant'").fetchone()[0]
+                self.assertEqual(json.loads(config), {"enabled": True, "options": [1, None, "中文"]})
                 self.assertEqual(
                     connection.execute(
                         "SELECT context_window_tokens, max_output_tokens, tags "
@@ -178,7 +185,7 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                         "SELECT environment, source_dialect, alembic_revision, "
                         "git_commit FROM _backup_info"
                     ).fetchone(),
-                    ("test", "sqlite", "002", "abc123"),
+                    ("test", "sqlite", "005", "abc123"),
                 )
                 scope_manifest = json.loads(
                     str(
@@ -261,6 +268,62 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                 ["builtin:ptc", "mcp:remote"],
             )
 
+    async def test_004_backup_keeps_required_model_shape(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="TMP_to_delete_backup_004_") as directory:
+            root = Path(directory)
+            source = root / "source.db"
+            await self._create_source(source, revision="004")
+            result = await export_backup(self._url(source), environment="test", output_root=root / "backups", git_commit="test")
+            self.assertEqual(result.revision, "004")
+            with sqlite3.connect(result.path) as db:
+                self.assertEqual(next(row[3] for row in db.execute("PRAGMA table_info(agents)") if row[1] == "model_id"), 1)
+
+    async def test_003_backup_does_not_require_future_integration_table(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="TMP_to_delete_backup_003_") as tmpdir:
+            root = Path(tmpdir)
+            source = root / "source.db"
+            await self._create_source(source, revision="003")
+            result = await export_backup(self._url(source), environment="test", output_root=root / "backups", git_commit="test")
+            self.assertEqual(result.revision, "003")
+            self.assertNotIn("integration_settings", result.row_counts)
+            with sqlite3.connect(result.path) as db:
+                self.assertEqual(db.execute("SELECT name FROM sqlite_master WHERE name='integration_settings'").fetchall(), [])
+
+    async def test_002_source_stays_002_with_original_foreign_keys(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            source = root / "source-002.db"
+            await self._create_source(source, revision="002")
+            backup = await export_backup(self._url(source), environment="test",
+                                         output_root=root / "backups", git_commit="test")
+            self.assertEqual(backup.revision, "002")
+            for path in (source, backup.path):
+                with sqlite3.connect(path) as db:
+                    self.assertEqual(db.execute("SELECT version_num FROM alembic_version").fetchone()[0], "002")
+                    self.assertEqual(sum(len(db.execute(f"PRAGMA foreign_key_list({name})").fetchall())
+                                         for name in Base.metadata.tables), 10)
+
+    async def test_005_backup_rejects_orphan_channel_agent(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            source = root / "source.db"
+            await self._create_source(source)
+            from deep_agent.db.models import ChannelAccount
+            engine = create_async_engine(self._url(source))
+            try:
+                async with engine.begin() as connection:
+                    await connection.execute(insert(ChannelAccount.__table__), {
+                        "id": "account", "name": "fixture", "channel_type": "wecom",
+                        "agent_id": "missing", "bot_id": "bot", "secret": "fixture",
+                        "session_user_id": "fixture-user", "settings": {},
+                    })
+            finally:
+                await engine.dispose()
+            with self.assertRaisesRegex(RuntimeError, "channel_accounts.agent_id"):
+                await export_backup(self._url(source), environment="test",
+                                    output_root=root / "backups", git_commit="test")
+            self.assertFalse(list((root / "backups").rglob("*.db")))
+
     def test_default_output_root_is_next_to_repository(self) -> None:
         self.assertEqual(
             default_output_root().name,
@@ -291,22 +354,17 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                 f"sqlite+aiosqlite:///{(root / 'source.db').resolve().as_posix()}",
             )
 
-    async def _create_source(self, path: Path) -> None:
+    async def _create_source(self, path: Path, *, revision: str = "005") -> None:
+        await asyncio.to_thread(_upgrade_target_schema, self._url(path), revision)
         engine = create_async_engine(self._url(path))
         try:
             async with engine.begin() as connection:
-                await connection.run_sync(Base.metadata.create_all)
-                await connection.execute(
-                    text(
-                        "CREATE TABLE alembic_version "
-                        "(version_num VARCHAR(32) NOT NULL PRIMARY KEY)"
-                    )
-                )
-                await connection.execute(
-                    text(
-                        "INSERT INTO alembic_version (version_num) VALUES ('002')"
-                    )
-                )
+                for name in ("channel_message_runs", "channel_session_bindings",
+                             "chat_session_events", "chat_sessions", *reversed(CONFIG_TABLES)):
+                    if name != "integration_settings" or revision in {"004", "005"}:
+                        await connection.execute(Base.metadata.tables[name].delete())
+                if revision in {"004", "005"}:
+                    await connection.execute(insert(IntegrationSettings.__table__), {"code": "deeptable-assistant", "settings": {"enabled": True, "options": [1, None, "中文"]}})
                 await connection.execute(
                     insert(GlobalSetting.__table__),
                     {
@@ -385,7 +443,7 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                     },
                 )
                 await connection.execute(
-                    insert(Agent.__table__),
+                    insert(Agent.__table__ if revision == "005" else table("agents", *[column(item.name, item.type) for item in Agent.__table__.columns if item.name != "ui_tool_selection"])),
                     {
                         "id": "agent-1",
                         "name": "agent",
@@ -395,6 +453,11 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                         "prompt": "test",
                     },
                 )
+                await connection.execute(insert(ChannelAccount.__table__), {
+                    "id": "channel-1", "name": "fixture channel", "channel_type": "wecom",
+                    "bot_id": "fixture-bot", "secret": "fixture-secret",
+                    "agent_id": "agent-1", "session_user_id": "fixture-user", "settings": {},
+                })
                 await connection.execute(
                     insert(SkillPackage.__table__),
                     {

@@ -189,7 +189,7 @@ async function apiFetch(path, options = {}) {
     headers: { "Content-Type": "application/json", ...optionHeaders },
   });
 
-  if (resp.status === 503 && !String(path).includes("channel")) {
+  if (resp.status === 503 && !String(path).includes("channel") && !String(path).startsWith("/api/v1/integrations")) {
     showDbBanner(true);
     throw new Error("数据库未配置 (503)");
   }
@@ -277,13 +277,11 @@ function populateAgentModelSelect(selectedId = null) {
   const select = document.getElementById("agentModelId");
   if (!select) return;
   const models = state.llmModels || [];
-  if (!models.length) {
-    select.innerHTML = `<option value="">（请先创建模型配置）</option>`;
-    select.disabled = true;
-    return;
-  }
   select.disabled = false;
-  select.innerHTML = window.DeepAgentModelOptions.renderGroupedModelOptions(models, { selectedId });
+  select.innerHTML = `<option value="">未配置模型</option>` + (models.length
+    ? window.DeepAgentModelOptions.renderGroupedModelOptions(models, { selectedId })
+    : "");
+  select.value = selectedId || "";
 }
 
 function initTabs() {
@@ -292,6 +290,7 @@ function initTabs() {
     tab.addEventListener("click", async () => {
       if (window.agentsAdmin?.isEditorOpen?.() && !(await window.agentsAdmin.requestCloseEditor())) return;
       if (window.mcpAdmin?.isEditorOpen?.() && !(await window.mcpAdmin.requestCloseEditor())) return;
+      if (tab.dataset.tab !== "integrations" && window.integrationsAdmin?.deactivate() === false) return;
       tabs.forEach((t) => t.classList.remove("active"));
       tab.classList.add("active");
       const name = tab.dataset.tab;
@@ -308,19 +307,13 @@ function initTabs() {
         Promise.all([loadLlmModels(), loadCapabilities(), loadSkills()]).then(() => window.agentsAdmin.refresh());
       }
       if (name === "llm-providers" && window.llmProvidersAdmin) window.llmProvidersAdmin.refresh();
-      if (name === "builtin-tools") {
-        window.builtinToolsAdmin?.refresh();
-        window.systemToolsAdmin?.refresh();
-      }
+      if (name === "tools") window.toolsAdmin?.refresh();
       if (name === "skills" && window.skillsAdmin) {
         window.skillsAdmin.selectedCode = null;
         window.skillsAdmin.refresh();
       }
       if (name === "mcp" && window.mcpAdmin) window.mcpAdmin.refresh();
-      if (name === "ui-tools" && window.uiToolsAdmin) {
-        window.uiToolsAdmin.selectedPackageCode = null;
-        window.uiToolsAdmin.refresh();
-      }
+      if (name === "integrations") window.integrationsAdmin?.refresh();
       if (name === "channels" && window.channelsAdmin) window.channelsAdmin.refresh();
       if (name === "catalog" && window.modelCatalogAdmin) window.modelCatalogAdmin.refresh();
     });

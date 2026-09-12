@@ -14,7 +14,7 @@ from deep_agent.agent.run_identity import conversation_id_for, new_run_id
 from deep_agent.api.v1.deps import build_runner_for_agent
 from deep_agent.api.v1.request_identity import RequestUserDep
 from deep_agent.core.context import AppContextDep
-from deep_agent.core.exceptions import AgentNotFoundError, LlmModelNotFoundError
+from deep_agent.core.exceptions import AgentModelNotConfiguredError, AgentNotFoundError, LlmModelNotFoundError
 from deep_agent.db.ids import normalize_agent_id
 from deep_agent.db.session_scope import resolve_session
 
@@ -63,6 +63,8 @@ async def compact_session_context(
             model_id=body.model_id,
             request_headers=request_headers,
         )
+    except AgentModelNotConfiguredError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except (AgentNotFoundError, LlmModelNotFoundError) as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 

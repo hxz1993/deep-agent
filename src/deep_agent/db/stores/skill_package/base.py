@@ -3,7 +3,8 @@ from __future__ import annotations
 from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 
-from deep_agent.db.models import SkillPackage
+from deep_agent.db.models import Agent, SkillPackage
+from deep_agent.db.reference_integrity import ReferenceConflict, lock_optional
 from deep_agent.db.stores._session import SessionBoundMixin
 from deep_agent.schemas.skill import SkillPackageRecord, SkillUpdate
 
@@ -60,7 +61,14 @@ class SkillPackageStoreBase(SessionBoundMixin):
             return row
 
     async def delete(self, code: str) -> bool:
-        async with self._write() as db:
+        # Exclude installation/configuration writers until reference validation
+        # and deletion commit together. The API preflight can already be stale.
+        async with self._write(exclusive=True) as db:
+            if await lock_optional(db, SkillPackage, SkillPackage.code, code) is None:
+                return False
+            references = await db.execute(select(Agent.skills))
+            if any(code in (skills or []) for skills in references.scalars()):
+                raise ReferenceConflict("Skill is still referenced by Agents")
             result = await db.execute(delete(SkillPackage).where(SkillPackage.code == code))
             await db.flush()
             return result.rowcount > 0

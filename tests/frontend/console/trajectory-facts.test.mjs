@@ -155,3 +155,29 @@ test("reused tool call IDs in different loops retain distinct arguments, results
     assert.deepEqual(rows.map((row) => row.native.result_event_id), ["result-0", "result-1"]);
   });
 });
+
+test("上下文引用保留在用户输入中，不再派生独立轨迹，入库后只保留事实行", () => {
+  withController((controller, elements) => {
+    const refs = [{ type: "deeptable.range", key: "range-1", label: "选中区域" }];
+    controller.addUser({ content: "分析选区", context_refs: refs });
+    assert.equal(controller.events().length, 1);
+    assert.equal(controller.events()[0].kind, "input");
+    assert.deepEqual(controller.events()[0].payload.context_refs, refs);
+    controller.ingest({ event: "session", data: { run_id: "run-context" } });
+    assert.equal(controller.events()[0].run_id, "run-context");
+    controller.ingest({ event: "session_event_appended", data: { event: {
+      event_id: "user-context", event_type: "user/message", sequence: 1,
+      run_id: "run-context", status: "completed",
+      payload: { message: { kind: "request", parts: [{ part_kind: "user-prompt", content: [{ kind: "text-content", content: "分析选区" }, ...refs.map(ref => ({ kind: "context-ref", ...ref }))] }] } },
+    } } });
+    assert.equal(controller.events().length, 1);
+    assert.equal(controller.events()[0].id, "user-context");
+    assert.deepEqual(controller.events()[0].payload.context_refs, refs.map(ref => ({ kind: "context-ref", ...ref })));
+    const markup = elements.get("inspectorContent").innerHTML;
+    assert.match(markup, /用户/);
+    assert.match(markup, /摘要/);
+    assert.match(markup, />Completed</);
+    assert.match(markup, /选中区域/);
+    assert.doesNotMatch(markup, />USER<|>CONTEXT<|>Summary</);
+  });
+});

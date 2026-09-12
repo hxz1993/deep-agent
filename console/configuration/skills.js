@@ -37,7 +37,7 @@ const skillsAdmin = {
     if (this.installing) return;
     this.installQueue = [];
     document.getElementById("skillInstallFiles").value = "";
-    document.getElementById("skillInstallMessage").textContent = "选择 ZIP 后开始安装。";
+    document.getElementById("skillInstallMessage").textContent = "";
     this.renderInstallQueue();
     document.getElementById("skillInstallDialog").showModal();
   },
@@ -159,7 +159,6 @@ const skillsAdmin = {
             <span class="skill-runtime-dot runtime-${escapeHtml(skill.runtime_status || "missing")}" title="${escapeHtml(runtime.label)}"></span>
             <span class="skill-list-count" title="References"><i data-lucide="book-open-text"></i>${Number(skill.reference_count || 0)}</span>
             <span class="skill-list-count" title="Assets"><i data-lucide="paperclip"></i>${Number(skill.asset_count || 0)}</span>
-            <i class="skill-list-chevron" data-lucide="chevron-right"></i>
           </span>
         </span>
       </button>`;

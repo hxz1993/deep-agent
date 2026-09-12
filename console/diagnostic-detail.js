@@ -1,13 +1,13 @@
-import { createConversationPresenter } from "./conversation-presenter.js?v=20260909-1";
-import { projectConversationItems, sortConversationItems } from "./conversation-items.js?v=20260907-1";
-import { applyAssistantPresentationActions } from "./assistant-presentation.js?v=20260907-1";
-import { buildTrajectory, createTrajectoryController, redactTrajectoryValue } from "./trajectory.js?v=20260910-15";
-import { renderSessionInspector } from "./session-inspector.js?v=20260909-1";
-import { channelOriginPresentation } from "./session-display.js?v=20260904-13";
-import { copyTextToClipboard } from "./message-actions.js?v=20260819-1";
-import { parseServerTimestamp } from "./time.js?v=20260831-1";
-import { bindAttachmentImagePreviews } from "./attachment-preview.js?v=20260909-2";
-import { createReadonlySessionShell } from "./session-view-shell.js?v=20260910-7";
+import { createConversationPresenter } from "./conversation-presenter.js?v=20260912-21";
+import { projectConversationItems, sortConversationItems } from "./conversation-items.js?v=20260912-21";
+import { applyAssistantPresentationActions } from "./assistant-presentation.js?v=20260912-21";
+import { buildTrajectory, createTrajectoryController, redactTrajectoryValue } from "./trajectory.js?v=20260912-21";
+import { renderSessionInspector } from "./session-inspector.js?v=20260912-21";
+import { channelOriginPresentation } from "./session-display.js?v=20260912-21";
+import { copyTextToClipboard } from "./message-actions.js?v=20260912-21";
+import { parseServerTimestamp } from "./time.js?v=20260912-21";
+import { bindAttachmentImagePreviews } from "./attachment-preview.js?v=20260912-21";
+import { createReadonlySessionShell } from "./session-view-shell.js?v=20260912-21";
 
 const escapeHtml = (value) => String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 const icon = (name) => `<i data-lucide="${name}" aria-hidden="true"></i>`;
@@ -122,7 +122,7 @@ export function createReadonlySessionView({ root, onBack = () => {}, onRefresh =
     role("inspectorContent").innerHTML = renderSessionInspector({
       diagnostic: true,
       state: { sessionId: session.session_id, agentId: session.agent_id, conversationId: session.conversation_id, modelMessageCount: data.history.items?.filter((item) => ["user_message", "assistant_message"].includes(item.kind)).length },
-      activeSession: { turnCount: session.turn_count, messageCount: session.message_count, attachmentCount: session.attachment_count },
+      activeSession: { appId: session.app_id, spaceId: session.space_id, turnCount: session.turn_count, messageCount: session.message_count, attachmentCount: session.attachment_count },
       model, runModel,
       run, usage, contextStatus, agentName: session.agent_name || session.agent_id || "未记录",
       context: { app: session.app_id, space: session.space_id, language: session.language }, identity: { user: userId || "未记录" },

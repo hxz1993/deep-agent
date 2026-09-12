@@ -31,8 +31,8 @@ class ChatSessionStoreTests(unittest.IsolatedAsyncioTestCase):
             ])])],
             agent_id=self.agent_id,
             user_id="user-1",
-            app_id=None,
-            space_id=None,
+            app_id="initial001",
+            space_id="initial",
             turn_id="1" * 32,
             run_id="run-1",
         )
@@ -43,10 +43,14 @@ class ChatSessionStoreTests(unittest.IsolatedAsyncioTestCase):
             user_id="user-1",
             turn_id="2" * 32,
             run_id="run-2",
+            app_id="later002", space_id="later",
         )
         rows, total = await self.store.list_session_summaries(
             SessionListFilters(user_id="user-1")
         )
+        self.assertEqual((rows[0].app_id, rows[0].space_id), ("initial001", "initial"))
+        self.assertEqual(await self.stores.chat_session.get_initial_scope(self.agent_id, "sess-1"), ("initial001", "initial"))
+        self.assertEqual(await self.stores.chat_session.get_initial_scope("another-agent", "sess-1"), (None, None))
         self.assertEqual(total, 1)
         self.assertEqual(rows[0].message_count, 2)
         self.assertEqual(rows[0].turn_count, 2)

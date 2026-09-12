@@ -16,7 +16,7 @@ from sqlalchemy import insert, select, text, update
 from sqlalchemy.dialects.mysql import TINYINT
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
-from deep_agent.db.models import Agent, Base, GlobalSetting, SkillPackage
+from deep_agent.db.models import Agent, Base, GlobalSetting, SkillPackage, IntegrationSettings
 from deep_agent.files.storage import StoredFile
 from deep_agent.services.configuration_import import (
     ConfigurationImportConflictError,
@@ -99,7 +99,7 @@ class ConfigurationImportTests(unittest.IsolatedAsyncioTestCase):
     async def _target_engine(
         self,
         *,
-        revision: str = "002",
+        revision: str = "005",
         baseline: bool = False,
     ) -> AsyncEngine:
         target = self.root / f"target-{revision}-{baseline}.db"
@@ -131,7 +131,7 @@ class ConfigurationImportTests(unittest.IsolatedAsyncioTestCase):
         self,
         *,
         include_skill: bool = False,
-        revision: str = "002",
+        revision: str = "005",
     ) -> tuple[Path, Path | None, bytes | None]:
         source = self.root / f"source-{include_skill}-{revision}.db"
         await config_backup_tests.ConfigBackupTests()._create_source(source)
@@ -174,7 +174,7 @@ class ConfigurationImportTests(unittest.IsolatedAsyncioTestCase):
             exported_at=datetime(2026, 9, 1, 8, 0, tzinfo=timezone.utc),
             git_commit="test-commit",
         )
-        if revision != "002":
+        if revision != "005":
             with sqlite3.connect(result.path) as connection:
                 connection.execute(
                     "UPDATE alembic_version SET version_num = ?",
@@ -224,8 +224,8 @@ class ConfigurationImportTests(unittest.IsolatedAsyncioTestCase):
         return str(row[0])
 
     async def test_same_dynamic_revision_import_preserves_ids_and_revision(self) -> None:
-        backup_path, _, _ = await self._backup(revision="002")
-        engine = await self._target_engine(revision="002", baseline=True)
+        backup_path, _, _ = await self._backup(revision="005")
+        engine = await self._target_engine(revision="005", baseline=True)
         try:
             plan = await build_configuration_import_plan(
                 backup_path,
@@ -250,6 +250,7 @@ class ConfigurationImportTests(unittest.IsolatedAsyncioTestCase):
                 revision = await connection.scalar(
                     text("SELECT version_num FROM alembic_version")
                 )
+                integrations = (await connection.execute(select(IntegrationSettings.__table__))).mappings().all()
                 sessions = await connection.scalar(
                     text("SELECT COUNT(*) FROM chat_sessions")
                 )
@@ -258,13 +259,44 @@ class ConfigurationImportTests(unittest.IsolatedAsyncioTestCase):
                 tuple(provider),
                 ("0123456789abcdef0123456789abcdef", "plain-api-key"),
             )
-            self.assertEqual(revision, "002")
+            self.assertEqual(revision, "005")
             self.assertEqual(sessions, 0)
+            self.assertEqual(integrations[0]["code"], "deeptable-assistant")
+            self.assertEqual(integrations[0]["settings"], {"enabled": True, "options": [1, None, "中文"]})
+        finally:
+            await engine.dispose()
+
+    async def test_nullable_agent_model_survives_configuration_import(self) -> None:
+        backup_path, _, _ = await self._backup()
+        with sqlite3.connect(backup_path) as connection:
+            connection.execute("UPDATE agents SET model_id=NULL")
+        engine = await self._target_engine()
+        try:
+            plan = await build_configuration_import_plan(backup_path, target_engine=engine)
+            await apply_configuration_import(plan, target_engine=engine,
+                file_store=_MemoryFileStore(), request_headers={})
+            async with engine.connect() as connection:
+                self.assertEqual(await connection.scalar(text("SELECT COUNT(*) FROM agents WHERE model_id IS NULL")), 1)
+        finally:
+            await engine.dispose()
+
+    async def test_invalid_integration_rows_cannot_bypass_import_validation(self) -> None:
+        backup_path, _, _ = await self._backup()
+        engine = await self._target_engine(baseline=True)
+        try:
+            plan = await build_configuration_import_plan(backup_path, target_engine=engine)
+            for value, code in (([], "deeptable-assistant"), ({}, "deeptable-assistant"), ({"a": "x"}, "unknown")):
+                rows = copy.deepcopy(plan.rows)
+                rows["integration_settings"][0].update(code=code, settings=value)
+                with self.assertRaisesRegex(ConfigurationImportError, "integration_settings"):
+                    await apply_configuration_import(replace(plan, rows=rows), target_engine=engine, file_store=_MemoryFileStore(), request_headers={})
+            async with engine.connect() as connection:
+                self.assertEqual(await connection.scalar(select(GlobalSetting.key)), "target-only")
         finally:
             await engine.dispose()
 
     async def test_different_revision_is_rejected(self) -> None:
-        backup_path, _, _ = await self._backup(revision="002")
+        backup_path, _, _ = await self._backup(revision="005")
         engine = await self._target_engine(revision="001")
         try:
             with self.assertRaisesRegex(
@@ -342,6 +374,44 @@ class ConfigurationImportTests(unittest.IsolatedAsyncioTestCase):
         finally:
             await target.dispose()
 
+    async def test_each_configuration_reference_is_checked_without_foreign_keys(self) -> None:
+        backup_path, _, _ = await self._backup()
+        mutations = (
+            ("llm_models", "provider_id"), ("agents", "model_id"),
+            ("ui_tool_definitions", "package_code"), ("channel_accounts", "agent_id"),
+        )
+        target = await self._target_engine()
+        try:
+            for table, column in mutations:
+                with self.subTest(table=table):
+                    candidate = self.root / f"orphan-{table}.db"
+                    shutil.copy2(backup_path, candidate)
+                    with sqlite3.connect(candidate) as db:
+                        self.assertEqual(db.execute(f"PRAGMA foreign_key_list({table})").fetchall(), [])
+                        db.execute(f"UPDATE {table} SET {column} = 'missing'")
+                        self.assertEqual(db.execute("PRAGMA foreign_key_check").fetchall(), [])
+                    with self.assertRaisesRegex(ConfigurationImportError, table + r"\." + column):
+                        await build_configuration_import_plan(candidate, target_engine=target)
+        finally:
+            await target.dispose()
+
+    async def test_import_revalidates_channel_agent_before_commit_and_rolls_back(self) -> None:
+        backup_path, _, _ = await self._backup()
+        target = await self._target_engine(baseline=True)
+        try:
+            plan = await build_configuration_import_plan(backup_path, target_engine=target)
+            rows = {name: [dict(row) for row in data] for name, data in plan.rows.items()}
+            rows["channel_accounts"][0]["agent_id"] = "missing"
+            with self.assertRaisesRegex(ConfigurationImportError, r"channel_accounts.agent_id"):
+                await apply_configuration_import(replace(plan, rows=rows), target_engine=target,
+                                                  file_store=_MemoryFileStore(), request_headers={})
+            async with target.connect() as db:
+                self.assertEqual(await db.scalar(text("SELECT COUNT(*) FROM agents")), 0)
+                self.assertEqual(await db.scalar(text("SELECT COUNT(*) FROM channel_accounts")), 0)
+                self.assertEqual(await db.scalar(text("SELECT COUNT(*) FROM global_settings WHERE key='target-only'")), 1)
+        finally:
+            await target.dispose()
+
     async def test_orphan_reference_and_missing_skill_bundle_are_rejected(self) -> None:
         target = await self._target_engine()
         try:
@@ -352,7 +422,7 @@ class ConfigurationImportTests(unittest.IsolatedAsyncioTestCase):
                 )
             with self.assertRaisesRegex(
                 ConfigurationImportError,
-                "invalid foreign key references",
+                "invalid logical references",
             ):
                 await build_configuration_import_plan(
                     backup_path,

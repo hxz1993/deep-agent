@@ -21,6 +21,7 @@
 | 配置解析 | `options.py`（`OPTION` + accessor）；DB URL 见 `db/url.py` |
 | MCP 加载 | `capabilities/mcp/resolver.py`、`db_loader.py`、`builtin.py` |
 | 渠道网关与企微 Adapter | `channels/gateway/`、`channels/`、`api/v1/channel_accounts.py`、`db/stores/channel.py` |
+| 组件集成 | `integrations/catalog.py` 定义目录；`api/v1/integrations.py` 管理配置、`integration_runtime.py` 读取与接口示例；`db/stores/integration_settings.py` 持久化 |
 | 管理员诊断日志 | `diagnostics/`、`api/v1/diagnostics.py`；模型/工具观察在 `agent/diagnostics.py` |
 
 ---
@@ -32,7 +33,7 @@
 `diagnostics.emit` 只接收白名单事实，后台有界队列负责安全序列化后的双出口与文件轮转；
 日志失败不改变模型、工具、SSE 或持久化行为。诊断文件不是会话 Event Store，不新增 RUN 回执。
 管理员查询只读取当前实例受控文件，与普通会话所有者权限分开；不增加 MCP 容器日志或自动探测。
-新增日志点先注册固定事件名及摘要，不传正文、参数、结果、异常原文或凭据。详见
+新增日志点先注册事件名与基础描述，由 `diagnostics/messages.py` 从安全事实生成可读正文；不传用户或模型正文、完整参数、结果、异常原文或凭据。查询保留实际写入正文。详见
 [`诊断日志指南`](../../../docs/guides/diagnostic-logs.md)。
 
 取消诊断按 Session/Run 关联停止接口入口、活动执行首次取消来源和发送连接结束记录。
@@ -106,7 +107,7 @@ DeepSeek Provider（官方默认地址、Key为空）和`deepseek-flash`模型�
 模型初始上下文1000000、最大输出384000，输入模态text/image；能力标签attachment、reasoning、
 tool_call、structured_output、temperature、open_weights、interleaved。模型配置界面本身不因此改变。
 只在迁移前无Revision且目标为Head时执行；历史Revision回放、已有库升级/重启和用户删除默认项后
-都不覆盖或补建配置。已发布001/002迁移及表结构不改写；离线SQL生成与在线空库初始化一致。
+都不覆盖或补建配置。已发布001/002迁移及表结构不改写；001/002支持离线SQL；003需要在线检查实际约束和数据，不支持离线SQL。
 
 MCP 在请求时由 `resolve_mcp_toolsets` 解析（DB 行 + `mcp_servers/` builtin 兜底）。
 
@@ -124,7 +125,8 @@ FileStore协议。`channels/gateway/runtime.py`负责Account轮询与Adapter生�
 连续加载事件不重复发占位。正常结束必须以`final.output`覆盖全部预览，显式空正文不能回填过程；
 只有缺少output字段的旧事件才回退末段文本。预览失败后本Run停止预览但继续执行并尝试最终投递，
 处理状态与最终投递状态分离，不重跑Agent。企微不增加伪造引用条或“回复：原问题”文本前缀。
-0.7.0只允许一个API worker与一个Gateway副本，Gateway不执行Alembic，启动前数据库必须为`002`。
+当前只允许一个API worker与一个Gateway副本。API负责Alembic迁移，Gateway不维护固定数据库版本白名单；健康接口的database_revision仅为启动时读取的诊断信息。
+新增迁移必须回归真实Gateway lifespan及combined_runtime双进程启动，不能仅测绕过lifespan的HTTP路由。
 Gateway入口必须显式使用`uvicorn.run(..., workers=1, reload=False)`，不继承容器的
 `WEB_CONCURRENCY`；只改成应用导入字符串会放开多worker并造成渠道连接竞争，不是正确修复。
 Jenkins网关启动版`Jenkinsfile.gateway`可由`combined_runtime.py`在同一容器托管两个独立进程：
@@ -165,7 +167,7 @@ Account与实际Session归属，不以修改后的Agent配置取消错误任务�
 
 普通会话标题在`agent/title_generator.py`单独关闭思考，不能修改主聊天的Model或默认设置。
 DeepSeek新别名可能尚无SDK Profile：Responses使用原生reasoning开关，Chat和Kimi使用原生thinking开关；
-Kimi标题请求省略temperature，让服务端按关闭思考的模式选默认值。标题失败查`title_generation_*`诊断事件。
+Agent及标题请求均不传采样温度，使用模型服务端默认值。标题失败查`title_generation_*`诊断事件。
 SessionInfo可选`channel`字段来源于该Session事件，不依赖当前Binding；人工改名不删除来源。
 旧本地数据修复用`maintenance.channel_origins`，默认dry-run、apply先备份，停止服务后执行；不升级002。
 若已有002仍含`peer_display_name`物理列，先用`maintenance.channel_peer_metadata`完成备份后的
@@ -467,6 +469,7 @@ Plan表、隐藏全局计划、Reminder用户消息或自研任务状态机。
 - 当前 Pod 只保留 `runtime-skills/<code>/` 一份上传 Skill 运行副本；启动、安装、替换和
   `POST /api/v1/skills/{code}/reload` 负责同步，普通 Run 不访问平台文件服务。Hash 只用于完整性
   和过期判断，不代表产品版本，也不保留历史目录。
+- 安装更新与普通运行、reload、资源读取通过配置屏障及 Skill 行锁协调；必须锁后重读最新记录，禁止旧请求在覆盖完成后重新发布旧 ZIP。启动 reconcile 持独占屏障，文件线程取消时等待结束后才释放锁。隔离实例用 `DEEP_AGENT_SKILL_RUNTIME_ROOT` 指定独立目录。
 - 同 Hash包替换必须先验证平台原 ZIP：可下载时返回 `noop`；原 File ID失效时重新上传原包、
   原子更新记录并返回 `repaired`。不得只用请求字节恢复当前 Pod而让后续重启再次失败。
 - Harness 0.26 `Skills` 负责 `load_capability` 渐进披露；DeepAgent通过 `list_skill_resources`
@@ -648,7 +651,7 @@ alembic upgrade head
 ```
 
 迁移：v0.6.6 将旧结构折叠为 `migrations/versions/001_initial_schema.py` 生产基线；v0.7.0在其上增加
-`002_wecom_channel_gateway.py`，本轮未发布需求的修正均合并在002。旧 `001` … `012` 历史迁移不再兼容。已有Revision 012数据库必须先用
+`002_wecom_channel_gateway.py`；v0.9.7新增`003_application_references.py`去除10条外键并由数据层维护引用。旧 `001` … `012` 历史迁移不再兼容。已有Revision 012数据库必须先用
 `maintenance.rebaseline_database`校验最终物理结构和全表内容哈希，再执行`stamp --purge 001`，随后
 由0.7.0升级到`002`；禁止仅手工修改版本号。涉及共享数据库时必须按维护窗口发布，并确保改标后不再
 启动旧镜像。本地 Postgres：`docker compose --project-directory "$PWD" -f deploy/docker-compose.yml up -d`。
@@ -706,3 +709,8 @@ SSE 协议：[`../../docs/guides/sse-protocol.md`](../../docs/guides/sse-protoco
 | --- | --- |
 | MCP 工具为空 | Agent 未选择对应 `mcp:<name>`，或URL MCP缺少有效工具快照 |
 | 历史不在预期数据库 | 未配置 DBMS 时实际使用默认文件 SQLite；检查 `DEEP_AGENT_SQLITE_PATH` |
+
+### 003 写入边界
+
+新增引用必须在事务内锁定父记录，删除方持相同父记录锁后检查子引用；变更父ID时先锁旧/新父记录，再锁子记录并核对快照。公共入口为 `db/reference_integrity.py`。ORM Agent→Model 和 UI Tool→Package 使用显式 join，不能重新增加 ForeignKey。
+配置替换用 Revision 行独占锁协调所有正常写入的共享锁；数据库异常不可笼统当作重复消息。数据库逻辑引用审计见 `db/reference_schema.py`，部署与验收见 `docs/guides/application-references.md`。

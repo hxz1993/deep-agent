@@ -45,7 +45,7 @@ class LlmModelStoreBase(SessionBoundMixin):
     async def count_agents_by_model(self) -> dict[str, int]:
         async with self._read() as db:
             result = await db.execute(
-                select(Agent.model_id, func.count()).group_by(Agent.model_id)
+                select(Agent.model_id, func.count()).where(Agent.model_id.is_not(None)).group_by(Agent.model_id)
             )
             return {str(model_id): int(count) for model_id, count in result.all()}
 

@@ -1,14 +1,14 @@
-import { initFieldHelp } from "./ui-field-help.js?v=20260912-21";
-import { initConsoleSelects } from "./ui-select.js?v=20260912-21";
+import { initFieldHelp } from "./ui-field-help.js?v=20260913-49";
+import { initConsoleSelects } from "./ui-select.js?v=20260913-49";
 import {
   initConfiguration,
   restoreConfigurationTab,
   rememberConfigurationTab,
-} from "./configuration.js?v=20260912-37";
-import { bindContextControls, refreshIdentity } from "./context.js?v=20260912-21";
-import { initDiagnostics, setDiagnosticsActive, openDiagnostics } from "./diagnostics-center.js?v=20260912-37";
-import { initWorkspace } from "./workspace.js?v=20260912-21";
-import "./time.js?v=20260912-21";
+} from "./configuration.js?v=20260913-49";
+import { bindContextControls, refreshIdentity } from "./context.js?v=20260913-49";
+import { initDiagnostics, setDiagnosticsActive, openDiagnostics } from "./diagnostics-center.js?v=20260913-49";
+import { initWorkspace } from "./workspace.js?v=20260913-49";
+import "./time.js?v=20260913-49";
 
 const VALID_PAGES = new Set(["workspace", "configuration", "diagnostics"]);
 const PAGE_LABELS = {

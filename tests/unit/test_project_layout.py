@@ -68,6 +68,7 @@ class ProjectLayoutTest(unittest.TestCase):
             "src/deep_agent/channels/gateway/messages.py",
             "src/deep_agent/channels/gateway/sdk_logger.py", "console/prototypes",
             "tests/integration/helpers/models.py", "scripts/__init__.py",
+            "src/deep_agent/builtin_agent_packages",
         )
         for legacy_name in legacy_paths:
             with self.subTest(path=legacy_name):
@@ -80,6 +81,7 @@ class ProjectLayoutTest(unittest.TestCase):
             "src/deep_agent", "src/deepfos_platform", "src/maintenance",
             "console", "console/vendor", "mcp_servers", "migrations", "deploy",
             "src/deep_agent/channels/gateway", "deploy/jenkins",
+            "src/deep_agent/agent_packages/builtin",
             "src/deep_agent/ptc", "src/deep_agent/web",
             "src/deep_agent/models", "src/deep_agent/capabilities/general",
         ):
@@ -286,7 +288,7 @@ class ProjectLayoutTest(unittest.TestCase):
                         values[target.id] = ast.literal_eval(statement.value)
             if "revision" in values:
                 revision_chain[values["revision"]] = values["down_revision"]
-        self.assertEqual(revision_chain, {"001": None, "002": "001", "003": "002", "004": "003"})
+        self.assertEqual(revision_chain, {"001": None, "002": "001", "003": "002", "004": "003", "005": "004"})
         configuration = configparser.ConfigParser(defaults={"here": str(REPO_ROOT)})
         configuration.read(REPO_ROOT / "alembic.ini", encoding="utf-8")
         self.assertEqual(

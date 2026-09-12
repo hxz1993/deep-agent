@@ -81,9 +81,10 @@ test("工具创建入口依赖当前选中的自定义工具包", () => {
   assert.match(source, /this\.populatePackageSelect\(selected\.code\)/);
 });
 
-test("自定义 UI 工具行操作统一使用纯图标", () => {
+test("UI 工具点击行打开弹框，行内仅保留删除", () => {
   assert.match(source, /class="row-actions ui-tool-row-actions compact-icon-actions"/);
-  assert.match(source, /data-edit="\$\{escapeHtml\(tool\.name\)\}" title="编辑" aria-label="编辑"><i data-lucide="pencil"/);
+  assert.doesNotMatch(source, /data-edit=|data-view=|tool\.updated_at/);
+  assert.match(source, /data-open-ui-tool=/);
   assert.match(source, /data-delete="\$\{escapeHtml\(tool\.name\)\}"[\s\S]*title="删除" aria-label="删除"><i data-lucide="trash-2"/);
   assert.doesNotMatch(source, /data-edit="\$\{escapeHtml\(tool\.name\)\}">编辑<\/button>/);
   assert.match(styles, /\.compact-icon-actions \.icon-btn\s*\{[\s\S]*width: 28px;[\s\S]*height: 28px;[\s\S]*padding: 0;[\s\S]*border: 0;/);

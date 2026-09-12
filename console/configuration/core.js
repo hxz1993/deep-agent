@@ -277,13 +277,11 @@ function populateAgentModelSelect(selectedId = null) {
   const select = document.getElementById("agentModelId");
   if (!select) return;
   const models = state.llmModels || [];
-  if (!models.length) {
-    select.innerHTML = `<option value="">（请先创建模型配置）</option>`;
-    select.disabled = true;
-    return;
-  }
   select.disabled = false;
-  select.innerHTML = window.DeepAgentModelOptions.renderGroupedModelOptions(models, { selectedId });
+  select.innerHTML = `<option value="">未配置模型</option>` + (models.length
+    ? window.DeepAgentModelOptions.renderGroupedModelOptions(models, { selectedId })
+    : "");
+  select.value = selectedId || "";
 }
 
 function initTabs() {

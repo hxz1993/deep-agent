@@ -38,7 +38,6 @@ _TITLE_PROMPT = (
 )
 _TITLE_SETTINGS: ModelSettings = {
     "max_tokens": TITLE_MAX_OUTPUT_TOKENS,
-    "temperature": 0.2,
     "thinking": False,
 }
 
@@ -52,10 +51,6 @@ def _title_model_settings(model: Model | str, provider_type: str | None) -> Mode
         settings["openai_reasoning_effort"] = "none"
     elif provider in {"deepseek", "moonshotai"} and isinstance(model, OpenAIChatModel):
         settings["extra_body"] = {"thinking": {"type": "disabled"}}
-    if provider == "moonshotai":
-        # Kimi's allowed temperature changes with its native thinking mode.
-        # Let the provider select the compatible default for this small request.
-        settings.pop("temperature", None)
     return settings
 
 

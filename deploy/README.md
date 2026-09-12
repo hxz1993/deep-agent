@@ -51,7 +51,9 @@ python3.12 -m deep_agent.combined_runtime \
 
 源码归档须包含完整的 `src/`、`console/`、`mcp_servers/`、`migrations/`、`deploy/`、
 `scripts/`、`tests/` 及根工程配置。当前两份发布脚本使用所选提交的 `git archive` 构建镜像，
-继续先安装内部 DeepCube wheel，再安装应用依赖和沙箱环境。
+继续先安装内部 DeepCube wheel，再安装应用依赖和沙箱环境。`src/deep_agent/agent_packages/builtin/` 中纳入版本控制的
+完整 ZIP 会一并发布，不需预先解压；API 直接读取 ZIP 并复用上传安装的校验流程，不在启动时安装。
+包目录与替换方法见[自带 Agent 安装包](../src/deep_agent/agent_packages/builtin/README.md)。
 
 现有 Jenkins Job 需要使用当前完整脚本：粘贴模式替换脚本正文；SCM 模式设置
 `deploy/jenkins/Jenkinsfile.gateway`、`deploy/jenkins/Jenkinsfile.api-only` 或

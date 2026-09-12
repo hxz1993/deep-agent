@@ -9,6 +9,7 @@ from typing import Any
 
 from loguru import logger
 from deep_agent.agent.observability import log_event
+from deep_agent.core.exceptions import AgentModelNotConfiguredError
 
 from .commands import help_text, parse_command
 from .contracts import ChannelAdapter, InboundMessage
@@ -312,12 +313,13 @@ class ChannelService:
             raise
         except Exception as exc:
             _log_job("channel_processing_failed", job, error_type=type(exc).__name__)
+            missing_model = isinstance(exc, AgentModelNotConfiguredError)
             await self.store.update_run(
                 job.run_id, processing_status="failed", delivery_status="failed",
-                error_code="agent_failed" if job.dispatched else "preflight_failed",
-                error_message="Channel message processing failed",
+                error_code="model_not_configured" if missing_model else ("agent_failed" if job.dispatched else "preflight_failed"),
+                error_message="Agent 尚未配置模型" if missing_model else "Channel message processing failed",
             )
-            await self._deliver(job, "消息处理失败，请稍后重试或在 DeepAgent 控制台查看状态。")
+            await self._deliver(job, "Agent 尚未配置模型，请在 DeepAgent 控制台配置模型。" if missing_model else "消息处理失败，请稍后重试或在 DeepAgent 控制台查看状态。")
         finally:
             if stream is not None:
                 try:

@@ -33,12 +33,7 @@ class ChatRequest(BaseModel):
         default=None,
         description="Optional LLM preset id. With agent_id, overrides the agent default for this request only.",
     )
-    temperature: float | None = Field(
-        default=None,
-        ge=0,
-        le=2,
-        description="Optional sampling temperature. Ignored when agent_id is set.",
-    )
+
     capabilities: list[str] | None = Field(
         default=None,
         description="Optional tool package codes to enable for this run.",

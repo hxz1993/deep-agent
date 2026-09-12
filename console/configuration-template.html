@@ -90,6 +90,7 @@
             <button type="button" class="active" data-agent-view="cards" title="卡片视图" aria-label="卡片视图"><i data-lucide="layout-grid"></i></button>
             <button type="button" data-agent-view="list" title="列表视图" aria-label="列表视图"><i data-lucide="list"></i></button>
           </div>
+          <button type="button" class="btn" id="installAgentBtn"><i data-lucide="package-plus"></i>安装 Agent</button>
           <button class="btn primary" id="newAgentBtn"><i data-lucide="plus"></i>新建 Agent</button>
         </div>
       </div>
@@ -255,12 +256,11 @@
                   <th>名称</th>
                   <th>Widget</th>
                   <th>描述</th>
-                  <th>更新时间</th>
                   <th>操作</th>
                 </tr>
               </thead>
               <tbody id="uiToolsTableBody">
-                <tr><td colspan="5" class="empty-cell">请选择左侧工具包</td></tr>
+                <tr><td colspan="4" class="empty-cell">请选择左侧工具包</td></tr>
               </tbody>
             </table>
           </div>
@@ -378,6 +378,26 @@
     </form>
   </dialog>
 
+  <dialog class="modal" id="agentPackageModal" aria-labelledby="agentPackageTitle">
+    <form id="agentPackageForm">
+      <header class="modal-header"><div class="agent-package-heading"><i data-lucide="package"></i><h3 id="agentPackageTitle">安装 Agent</h3></div><button type="button" class="icon-action" id="closeAgentPackageBtn" title="关闭" aria-label="关闭"><i data-lucide="x"></i></button></header>
+      <ol class="agent-package-steps" id="agentPackageSteps" aria-label="安装步骤"><li data-package-step="1"><b>1</b>选择安装包</li><li data-package-step="2"><b>2</b>配置 Agent</li><li data-package-step="3"><b>3</b>检查并安装</li></ol>
+      <div class="modal-body agent-package-body">
+        <div id="agentPackageContent"></div>
+      </div>
+      <p id="agentPackageStatus" class="field-hint" role="status" aria-live="polite"></p>
+      <footer class="modal-footer"><label class="agent-package-acknowledge" id="agentPackageAcknowledge" hidden><input type="checkbox" id="agentPackageSharedAck">我已了解共享资源变更的影响</label><div class="agent-package-footer-actions"><button type="button" class="btn-link" id="agentPackageConfigureBtn" hidden>查看 Agent 配置</button><button type="button" class="btn" id="agentPackageBackBtn">上一步</button><button type="button" class="btn" id="cancelAgentPackageBtn">取消</button><button type="submit" class="btn primary" id="agentPackageNextBtn">下一步</button></div></footer>
+    </form>
+  </dialog>
+
+  <dialog class="modal" id="agentExportModal" aria-labelledby="agentExportTitle">
+    <form id="agentExportForm">
+      <header class="modal-header"><div class="modal-title-copy"><h3 id="agentExportTitle"><i data-lucide="download" aria-hidden="true"></i>导出 Agent 安装包</h3><p class="agent-export-subtitle">模型与 MCP 仅作参考，密钥不导出；内置能力由目标环境提供。</p></div><button type="button" class="icon-action" id="closeAgentExportBtn" title="关闭" aria-label="关闭"><i data-lucide="x"></i></button></header>
+      <div class="modal-body"><div id="agentExportContent"></div><p id="agentExportStatus" role="status" aria-live="polite"></p></div>
+      <footer class="modal-footer"><div class="panel-toolbar-actions"><button type="button" class="btn" id="cancelAgentExportBtn">取消</button><button type="submit" class="btn primary" id="confirmAgentExportBtn" disabled><i data-lucide="download"></i>导出安装包</button></div></footer>
+    </form>
+  </dialog>
+
   <!-- Agent 独立编辑页：复用既有表单和保存契约，不再使用模态交互。 -->
   <dialog class="modal modal-agent agent-editor-page" id="agentModal">
     <form id="agentForm" method="dialog">
@@ -402,7 +422,7 @@
             </label>
             <label class="field">
               <span>默认模型</span>
-              <select id="agentModelId" required></select>
+              <select id="agentModelId"></select>
             </label>
             <label class="field field-grow">
               <span class="field-title-row">

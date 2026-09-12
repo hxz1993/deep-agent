@@ -32,13 +32,13 @@ test("Agent 副本名称按现有唯一约束稳定递增", () => {
   );
 });
 
-test("Agent 复制完整保留模型、提示词、温度、能力和 Skill", () => {
+test("Agent 复制完整保留模型、提示词、能力和 Skill", () => {
   assert.match(source, /title: "复制 Agent"/);
   assert.match(source, /label: "Agent 名称"/);
   assert.match(source, /value: nextAgentCopyName\(agent\.name, existingNames\)/);
   assert.match(source, /model_id: agent\.model_id/);
   assert.match(source, /prompt: agent\.prompt/);
-  assert.match(source, /temperature: agent\.temperature/);
+  assert.doesNotMatch(source, /temperature/);
   assert.match(source, /capabilities: \[\.\.\.\(agent\.capabilities \|\| \[\]\)\]/);
   assert.match(source, /skills: \[\.\.\.\(agent\.skills \|\| \[\]\)\]/);
   assert.match(source, /data-agent-chat[\s\S]*data-copy-agent[\s\S]*data-delete/);

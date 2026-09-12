@@ -1,0 +1,29 @@
+{
+  "command": "PYTHONPATH=src python3 -m pytest tests/unit/test_agent_packages.py tests/unit/test_agent_package_archive_boundaries.py tests/integration/test_agent_packages_api.py tests/integration/test_builtin_agent_packages.py -q",
+  "passed": 48,
+  "failed": 0,
+  "skipped": 0,
+  "subtests_passed": 42,
+  "elapsed_seconds": 33.58,
+  "warnings": [
+    "python_multipart PendingDeprecationWarning from installed Starlette"
+  ],
+  "coverage": [
+    "ZIP integrity, exact limits and exceeded limits",
+    "administrator authorization",
+    "upload and builtin real ZIP roundtrip",
+    "missing MCP/builtin resources and nullable model",
+    "resource updates/reuse/shared UI extra retention",
+    "create and overwrite identity and stale target",
+    "legacy choices/mode validation",
+    "multiple same-name model stable match across providers",
+    "concurrent installation and aborted request outcome",
+    "FileStore upload failure and transaction rollback",
+    "shared Skill runtime partial failure restoration",
+    "committed acknowledgment lost versus true commit failure",
+    "UI-only overwrite commit failure discrimination",
+    "temporary checkpoint cleanup failure preserves committed success",
+    "explicit UI selection persists and validates"
+  ],
+  "matrix_count_independent": true
+}

@@ -12,7 +12,7 @@
 | 项 | 内容 |
 | --- | --- |
 | **是什么** | 通用 AI Agent 全栈：FastAPI 后端 + Pydantic AI 运行时 + 静态前端 |
-| **产品版本** | `deep_agent.__version__`为唯一来源；当前`0.9.11`，数据库Head为`004` |
+| **产品版本** | `deep_agent.__version__`为唯一来源；当前`0.10.0`，数据库Head为`005` |
 | **启动** | 本地 Test 联调固定使用下方命令；部署入口才使用 `deep_agent.main:app` |
 | **测试** | `PYTHONPATH=src python3.12 -m unittest discover -s tests -p "test_*.py" -v` |
 | **配置** | 仓库根 `.env`（`DEEP_AGENT_*` / `DEEP_AGENT_DBMS_*` / `DEEP_AGENT_SQLITE_PATH`） |
@@ -25,6 +25,9 @@
 日志消息在后端写入时生成，格式为 `时间 | 进程 | 等级 | request-id | 来源 - 消息 | key=value`，管道、换行和反斜杠统一转义；查询返回真实 `raw`。旧行只保留原文，不增加 JSON 兼容解析。新增日志仍只提交安全白名单字段，禁止业务正文、完整参数、结果、凭据和异常原文。消息从已校验的工具名、模型名、Agent名称、状态和耗时生成；查询的message/summary只返回实际写入正文，附加字段独立返回。
 
 集成入口见[集成配置](docs/guides/integrations.md)：固定目录由后端定义，`004`新增`integration_settings`但不插入初始记录。仅保存非空配置才落库；清空删除配置记录。普通组件按集成编码读取JSON，未配置返回409；管理操作仍需企业管理员。
+
+Agent 安装包见[安装包说明](docs/guides/agent-packages.md)。自带包唯一位置为 `src/deep_agent/agent_packages/builtin/<code>.zip`，每个完整 ZIP 集中保存 Agent、上传 Skill 和自定义 UI 工具，与导出/上传格式相同；当前电子表格和 DeepCube 两包为暂行版，后续正式资产整包替换。服务从安装功能模块相对路径读取，不保留散文件副本；测试包使用隔离目录。安装可新建或显式覆盖指定 Agent；共享 Skill/UI 同编码同内容复用、内容不同更新并提示影响，UI 多余工具保留供其他 Agent 使用。Agent.ui_tool_selection 保存单工具范围（缺省整包、显式名单限定）。MCP 同编码自动关联，缺失只提示；模型同名优先、其次首个可用模型、无则留空。005 支持空模型并保存工具范围；运行需请求模型或 Agent 模型，禁止环境默认回退。预检只读，安装用配置独占屏障二次校验摘要，文件补偿先核对数据库引用，避免提交确认失败后误删已落库资源。
+
 
 ### 本地 Test 联调固定启动命令
 
@@ -210,7 +213,7 @@ v0.6.1删除目录资源自身的冗余启停层；v0.6.4只恢复Model的`enabl
   只有`channels/adapters/wecom/`调用官方`wecom-aibot-python-sdk==1.0.2`，不重写连接/认证/心跳/重连/解密/回复协议。
   API固定一个worker，Gateway按环境部署一个副本；`channel_accounts`保存配置，`channel_session_bindings`映射企微Peer到
   Session，`channel_message_runs`负责幂等和生命周期。企微Session固定归属Account的管理员配置的会话用户，
-  外部Peer不冒充平台用户。Gateway不执行迁移，数据库必须先由API升级到当前Head（`004`）。
+  外部Peer不冒充平台用户。Gateway不执行迁移，数据库必须先由API升级到当前Head（`005`）。
   v0.9.7新增`003`移除数据库外键；先停止旧API/Gateway写入、迁移核验，再启动新版，不能只改版本号。
   五个命令`/help /new /stop /status /whoami`仅在渠道入口处理；没有`/reset`或共享Chat全局拦截。
   控制命令绕过普通队列，15秒等待真实停止；`/new`原子换绑，旧历史保留，投递失败不重复命令副作用。

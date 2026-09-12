@@ -8,6 +8,7 @@ import re
 import shutil
 import zipfile
 from datetime import UTC, datetime
+from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import quote
 
@@ -19,6 +20,7 @@ from deep_agent.agent.headers import extract_forward_headers
 from deep_agent.api.v1.admin import CONSOLE_ADMIN_DEPENDENCIES
 from deep_agent.core.context import AppContextDep
 from deep_agent.db.models import SkillPackage
+from deep_agent.db.reference_integrity import ReferenceConflict
 from deep_agent.schemas.skill import (
     SkillDetail,
     SkillInstallResult,
@@ -208,6 +210,16 @@ async def _best_effort_delete(
         )
 
 
+async def _materialize_current(ctx, code, *, request_headers, payload=None, expected=None, force=False):
+    async with ctx.skill_runtime.coordinated_row(ctx.stores, code) as row:
+        if row is None:
+            raise HTTPException(status_code=404, detail=f"Skill not found: {code}")
+        if expected is not None and (row.platform_file_id, row.content_hash) != (expected.platform_file_id, expected.content_hash):
+            raise HTTPException(status_code=409, detail="Skill changed during runtime preparation; refresh and retry")
+        state = await ctx.skill_runtime.materialize(row, request_headers=request_headers, payload=payload, force=force)
+        return row, state
+
+
 @router.get("/skills", response_model=list[SkillSummary])
 async def list_skills(ctx: AppContextDep) -> list[SkillSummary]:
     details = [_builtin_detail(item) for item in list_builtin_skills()]
@@ -329,10 +341,8 @@ async def install_skill(
                 context="install-compensation",
             )
             raise
-        await ctx.skill_runtime.materialize(
-            row,
-            request_headers=request_headers,
-            payload=raw,
+        row, _ = await _materialize_current(
+            ctx, row.code, expected=row, request_headers=request_headers, payload=raw,
         )
         return SkillInstallResult(
             status="installed",
@@ -381,10 +391,8 @@ async def replace_skill_package(
                     type(exc).__name__,
                 )
             else:
-                await ctx.skill_runtime.materialize(
-                    current,
-                    request_headers=request_headers,
-                    payload=raw,
+                current, _ = await _materialize_current(
+                    ctx, code, expected=current, request_headers=request_headers, payload=raw,
                 )
                 return SkillInstallResult(
                     status="noop",
@@ -432,11 +440,8 @@ async def replace_skill_package(
             current.platform_file_id,
             context="update-old-file",
         )
-        await ctx.skill_runtime.materialize(
-            row,
-            request_headers=request_headers,
-            payload=raw,
-            force=True,
+        row, _ = await _materialize_current(
+            ctx, code, expected=row, request_headers=request_headers, payload=raw, force=True,
         )
         return SkillInstallResult(
             status="repaired" if same_content else "updated",
@@ -476,8 +481,16 @@ async def delete_skill(code: str, request: Request, ctx: AppContextDep) -> dict:
                 "agents": [item.name for item in agents],
             },
         )
-    await ctx.stores.skill_package.delete(code)
-    await ctx.skill_runtime.remove(code)
+    try:
+        await ctx.stores.skill_package.delete(code)
+    except ReferenceConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    # A concurrent installation may have reused this code since deletion.
+    # Hold the configuration barrier through cache removal, so stale cleanup
+    # cannot delete runtime files belonging to the newly installed Skill.
+    async with ctx.stores.skill_package._write(exclusive=True) as db:
+        if await db.get(SkillPackage, code) is None:
+            await ctx.skill_runtime.remove(code)
     file_headers = skill_platform_file_headers(extract_forward_headers(request))
     await _best_effort_delete(
         ctx.file_store,
@@ -491,12 +504,9 @@ async def delete_skill(code: str, request: Request, ctx: AppContextDep) -> dict:
 @router.post("/skills/{code}/reload", response_model=SkillReloadResult)
 async def reload_skill(code: str, request: Request, ctx: AppContextDep) -> SkillReloadResult:
     _reject_builtin(code)
-    row = await _row_or_404(ctx, code)
     request_headers = extract_forward_headers(request)
-    runtime_state = await ctx.skill_runtime.materialize(
-        row,
-        request_headers=request_headers,
-        force=True,
+    _, runtime_state = await _materialize_current(
+        ctx, code, request_headers=request_headers, force=True,
     )
     if runtime_state.status == RUNTIME_ERROR:
         raise HTTPException(
@@ -546,31 +556,35 @@ async def download_skill_package(code: str, request: Request, ctx: AppContextDep
     )
 
 
-async def _resource_root(code: str, request: Request, ctx: AppContextDep) -> tuple[Path, list[dict]]:
+@asynccontextmanager
+async def _resource_root(code: str, request: Request, ctx: AppContextDep):
     builtin = get_builtin_skill(code)
     if builtin is not None:
-        return builtin.package_root, builtin.resource_index
-    row = await _row_or_404(ctx, code)
-    try:
-        resolved = await ctx.skill_runtime.resolve(
-            row,
-            request_headers=extract_forward_headers(request),
-        )
-    except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Could not materialize Skill package: {type(exc).__name__}",
-        ) from exc
-    if resolved is None:
-        runtime_state = ctx.skill_runtime.state(code)
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail={
-                "message": "Skill runtime files are unavailable",
-                "error_code": runtime_state.error_code or runtime_state.status,
-            },
-        )
-    return resolved.package_root, resolved.resource_index
+        yield builtin.package_root, builtin.resource_index
+        return
+    async with ctx.skill_runtime.coordinated_row(ctx.stores, code) as row:
+        if row is None:
+            raise HTTPException(status_code=404, detail=f"Skill not found: {code}")
+        try:
+            resolved = await ctx.skill_runtime.resolve(
+                row,
+                request_headers=extract_forward_headers(request),
+            )
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Could not materialize Skill package: {type(exc).__name__}",
+            ) from exc
+        if resolved is None:
+            runtime_state = ctx.skill_runtime.state(code)
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail={
+                    "message": "Skill runtime files are unavailable",
+                    "error_code": runtime_state.error_code or runtime_state.status,
+                },
+            )
+        yield resolved.package_root, resolved.resource_index
 
 
 @router.get("/skills/{code}/resources/{path:path}", response_model=SkillResourceContent)
@@ -584,58 +598,58 @@ async def read_skill_resource(
     sheet: str | None = None,
     char_offset: int = 0,
 ) -> SkillResourceContent:
-    root, index = await _resource_root(code, request, ctx)
-    entry = next((item for item in index if item.get("path") == path and item.get("category") != "script"), None)
-    if path == "SKILL.md":
-        target = root / "SKILL.md"
-        if not target.is_file():
+    async with _resource_root(code, request, ctx) as (root, index):
+        entry = next((item for item in index if item.get("path") == path and item.get("category") != "script"), None)
+        if path == "SKILL.md":
+            target = root / "SKILL.md"
+            if not target.is_file():
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Skill resource not found")
+            try:
+                content_hash = hashlib.sha256(target.read_bytes()).hexdigest()
+            except OSError as exc:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Skill resource not found") from exc
+            entry = {
+                "path": "SKILL.md",
+                "category": "definition",
+                "mime": "text/markdown",
+                "readable": True,
+                "content_hash": content_hash,
+            }
+        if entry is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Skill resource not found")
+        target = (root / path).resolve()
+        resolved_root = root.resolve()
+        if (target != resolved_root and resolved_root not in target.parents) or not target.is_file():
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Skill resource not found")
         try:
-            content_hash = hashlib.sha256(target.read_bytes()).hexdigest()
-        except OSError as exc:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Skill resource not found") from exc
-        entry = {
-            "path": "SKILL.md",
-            "category": "definition",
-            "mime": "text/markdown",
-            "readable": True,
-            "content_hash": content_hash,
-        }
-    if entry is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Skill resource not found")
-    target = (root / path).resolve()
-    resolved_root = root.resolve()
-    if (target != resolved_root and resolved_root not in target.parents) or not target.is_file():
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Skill resource not found")
-    try:
-        page = await asyncio.to_thread(
-            read_resource_page,
-            entry,
-            target,
-            offset=offset,
-            limit=limit,
-            sheet=sheet,
-            char_offset=char_offset,
+            page = await asyncio.to_thread(
+                read_resource_page,
+                entry,
+                target,
+                offset=offset,
+                limit=limit,
+                sheet=sheet,
+                char_offset=char_offset,
+            )
+        except SkillResourceReadError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=str(exc),
+            ) from exc
+        return SkillResourceContent(
+            skill_code=code,
+            path=path,
+            format=page.format,
+            unit=page.unit,
+            content=page.content,
+            metadata=page.metadata,
+            offset=page.offset,
+            char_offset=page.char_offset,
+            next_offset=page.next_offset,
+            next_char_offset=page.next_char_offset,
+            has_more=page.has_more,
+            returned_count=page.returned_count,
+            total_count=page.total_count,
+            truncated_by=page.truncated_by,
+            content_hash=str(entry["content_hash"]),
         )
-    except SkillResourceReadError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=str(exc),
-        ) from exc
-    return SkillResourceContent(
-        skill_code=code,
-        path=path,
-        format=page.format,
-        unit=page.unit,
-        content=page.content,
-        metadata=page.metadata,
-        offset=page.offset,
-        char_offset=page.char_offset,
-        next_offset=page.next_offset,
-        next_char_offset=page.next_char_offset,
-        has_more=page.has_more,
-        returned_count=page.returned_count,
-        total_count=page.total_count,
-        truncated_by=page.truncated_by,
-        content_hash=str(entry["content_hash"]),
-    )

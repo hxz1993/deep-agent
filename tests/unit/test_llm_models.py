@@ -164,7 +164,7 @@ class LlmModelMigrationShapeTests(unittest.TestCase):
     def test_agent_requires_model_id_column(self) -> None:
         cols = {column.name for column in Agent.__table__.columns}
         self.assertIn("model_id", cols)
-        self.assertIn("temperature", cols)
+        self.assertNotIn("temperature", cols)
         self.assertNotIn("model", cols)
         self.assertNotIn("base_url", cols)
         self.assertNotIn("api_key", cols)

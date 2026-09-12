@@ -21,7 +21,7 @@ from deep_agent.api.v1.deps import build_runner_for_agent
 from deep_agent.api.v1.channel_auth import ChannelAccountDep, ChannelRequestUserDep
 from deep_agent.api.v1.stream_diagnostics import DiagnosticEventSourceResponse, transport_cancel_reason
 from deep_agent.core.context import AppContextDep
-from deep_agent.core.exceptions import AgentNotFoundError, LlmModelNotFoundError
+from deep_agent.core.exceptions import AgentModelNotConfiguredError, AgentNotFoundError, LlmModelNotFoundError
 from deep_agent.db.ids import normalize_agent_id
 from deep_agent.options import OPTION
 from deep_agent.schemas.chat import ChatRequest, ChatResponse, StreamChatRequest
@@ -191,6 +191,8 @@ async def chat(
             request_headers=request_headers,
             channel_type=channel_account.channel_type if channel_account is not None else None,
         )
+    except AgentModelNotConfiguredError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except (AgentNotFoundError, LlmModelNotFoundError) as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     deps = _agent_deps(
@@ -254,6 +256,8 @@ async def chat_stream(
             request_headers=request_headers,
             channel_type=channel_account.channel_type if channel_account is not None else None,
         )
+    except AgentModelNotConfiguredError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except AgentNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except LlmModelNotFoundError as exc:

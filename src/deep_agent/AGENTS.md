@@ -167,7 +167,7 @@ Account与实际Session归属，不以修改后的Agent配置取消错误任务�
 
 普通会话标题在`agent/title_generator.py`单独关闭思考，不能修改主聊天的Model或默认设置。
 DeepSeek新别名可能尚无SDK Profile：Responses使用原生reasoning开关，Chat和Kimi使用原生thinking开关；
-Kimi标题请求省略temperature，让服务端按关闭思考的模式选默认值。标题失败查`title_generation_*`诊断事件。
+Agent及标题请求均不传采样温度，使用模型服务端默认值。标题失败查`title_generation_*`诊断事件。
 SessionInfo可选`channel`字段来源于该Session事件，不依赖当前Binding；人工改名不删除来源。
 旧本地数据修复用`maintenance.channel_origins`，默认dry-run、apply先备份，停止服务后执行；不升级002。
 若已有002仍含`peer_display_name`物理列，先用`maintenance.channel_peer_metadata`完成备份后的
@@ -469,6 +469,7 @@ Plan表、隐藏全局计划、Reminder用户消息或自研任务状态机。
 - 当前 Pod 只保留 `runtime-skills/<code>/` 一份上传 Skill 运行副本；启动、安装、替换和
   `POST /api/v1/skills/{code}/reload` 负责同步，普通 Run 不访问平台文件服务。Hash 只用于完整性
   和过期判断，不代表产品版本，也不保留历史目录。
+- 安装更新与普通运行、reload、资源读取通过配置屏障及 Skill 行锁协调；必须锁后重读最新记录，禁止旧请求在覆盖完成后重新发布旧 ZIP。启动 reconcile 持独占屏障，文件线程取消时等待结束后才释放锁。隔离实例用 `DEEP_AGENT_SKILL_RUNTIME_ROOT` 指定独立目录。
 - 同 Hash包替换必须先验证平台原 ZIP：可下载时返回 `noop`；原 File ID失效时重新上传原包、
   原子更新记录并返回 `repaired`。不得只用请求字节恢复当前 Pod而让后续重启再次失败。
 - Harness 0.26 `Skills` 负责 `load_capability` 渐进披露；DeepAgent通过 `list_skill_resources`

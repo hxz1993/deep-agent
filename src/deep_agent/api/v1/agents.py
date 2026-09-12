@@ -24,6 +24,7 @@ from deep_agent.schemas.agent import (
     AgentUpdate,
 )
 from deep_agent.skills.runtime import validate_skill_codes
+from deep_agent.capabilities.ui.selection import validate_ui_tool_selection
 
 router = APIRouter()
 
@@ -85,6 +86,14 @@ async def _validate_tool_packages(
                 "invalid_tool_packages": invalid,
             },
         )
+
+
+async def _validate_ui_selection(selection, capabilities, ctx) -> None:
+    rows = await ctx.stores.ui_tool.list_all()
+    try:
+        validate_ui_tool_selection(selection, capabilities, {row.name: row.package_code for row in rows})
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 async def _validate_skills(
@@ -171,12 +180,11 @@ async def create_agent(
     model_store: LlmModelStoreBase = Depends(get_llm_model_store),
 ) -> AgentResponse:
     await _validate_tool_packages(body.capabilities, ctx)
+    await _validate_ui_selection(body.ui_tool_selection, body.capabilities, ctx)
     await _validate_skills(body.skills, ctx)
-    normalized_model_id = await _ensure_model_selectable(
-        model_store,
-        body.model_id,
-        ctx,
-    )
+    normalized_model_id = None
+    if body.model_id is not None:
+        normalized_model_id = await _ensure_model_selectable(model_store, body.model_id, ctx)
     body = body.model_copy(update={"model_id": normalized_model_id})
     existing = await store.get_by_name(body.name)
     if existing is not None:
@@ -206,6 +214,12 @@ async def update_agent(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Agent not found: {agent_id}")
     if "capabilities" in body.model_fields_set:
         await _validate_tool_packages(body.capabilities, ctx)
+    if "ui_tool_selection" in body.model_fields_set:
+        await _validate_ui_selection(
+            body.ui_tool_selection,
+            body.capabilities if "capabilities" in body.model_fields_set else current.capabilities,
+            ctx,
+        )
     if "skills" in body.model_fields_set:
         await _validate_skills(body.skills or [], ctx)
     if body.model_id is not None and body.model_id != current.model_id:

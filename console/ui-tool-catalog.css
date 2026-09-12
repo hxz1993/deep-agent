@@ -58,3 +58,7 @@
  .tool-catalog-list { padding-right: 1px; }
  .tool-catalog-detail { border-left: 0; border-top: 1px solid var(--border); padding: 16px 0 0; }
 }
+
+.ui-tool-table-wrap tr[data-open-ui-tool] { cursor: pointer; }
+.ui-tool-table-wrap tr[data-open-ui-tool]:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.ui-tool-table-wrap th:last-child { width: 60px; }

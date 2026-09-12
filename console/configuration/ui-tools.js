@@ -462,31 +462,44 @@ const uiToolsAdmin = {
     const tbody = document.getElementById("uiToolsTableBody");
     if (!tbody) return;
     if (!this.selectedPackageCode) {
-      tbody.innerHTML = `<tr><td colspan="5" class="empty-cell">请选择左侧工具包</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="4" class="empty-cell">请选择左侧工具包</td></tr>`;
       return;
     }
     const packageTools = items.filter((item) => item.package_code === this.selectedPackageCode);
     if (!packageTools.length) {
-      tbody.innerHTML = `<tr><td colspan="5" class="empty-cell">当前工具包暂无 UI 工具</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="4" class="empty-cell">当前工具包暂无 UI 工具</td></tr>`;
       return;
     }
     tbody.innerHTML = packageTools
       .map((tool) => `
-      <tr>
+      <tr data-open-ui-tool="${escapeHtml(tool.name)}" data-source="${escapeHtml(tool.source)}" tabindex="0" aria-label="${tool.source === "builtin" ? "查看" : "编辑"} ${escapeHtml(tool.name)}">
         <td><strong>${escapeHtml(tool.name)}</strong></td>
         <td>${escapeHtml(tool.widget || "—")}</td>
         <td class="desc-cell" title="${escapeHtml(tool.description || "—")}">${escapeHtml(tool.description || "—")}</td>
-        <td>${escapeHtml(formatDate(tool.updated_at))}</td>
         <td><div class="row-actions ui-tool-row-actions compact-icon-actions">
           ${tool.source === "builtin"
-            ? `<button type="button" class="icon-btn" data-view="${escapeHtml(tool.name)}" title="查看" aria-label="查看"><i data-lucide="eye"></i></button>`
-            : `<button type="button" class="icon-btn" data-edit="${escapeHtml(tool.name)}" title="编辑" aria-label="编辑"><i data-lucide="pencil"></i></button><button type="button" class="icon-btn danger" data-delete="${escapeHtml(tool.name)}" data-source="${escapeHtml(tool.source)}" title="删除" aria-label="删除"><i data-lucide="trash-2"></i></button>`}
+            ? `<span class="field-hint">只读</span>`
+            : `<button type="button" class="icon-btn danger" data-delete="${escapeHtml(tool.name)}" data-source="${escapeHtml(tool.source)}" title="删除" aria-label="删除"><i data-lucide="trash-2"></i></button>`}
         </div></td>
       </tr>`)
       .join("");
-    tbody.querySelectorAll("[data-view]").forEach((btn) => btn.addEventListener("click", () => this.openDetails(btn.dataset.view)));
-    tbody.querySelectorAll("[data-edit]").forEach((btn) => btn.addEventListener("click", () => this.openEdit(btn.dataset.edit)));
-    tbody.querySelectorAll("[data-delete]").forEach((btn) => btn.addEventListener("click", () => this.remove(btn.dataset.delete, btn.dataset.source)));
+    tbody.querySelectorAll("[data-open-ui-tool]").forEach((row) => {
+      const open = () => row.dataset.source === "builtin"
+        ? this.openDetails(row.dataset.openUiTool) : this.openEdit(row.dataset.openUiTool);
+      row.addEventListener("click", (event) => {
+        if (event.target.closest("button, a")) return;
+        open();
+      });
+      row.addEventListener("keydown", (event) => {
+        if (event.target !== row || !["Enter", " "].includes(event.key)) return;
+        event.preventDefault();
+        open();
+      });
+    });
+    tbody.querySelectorAll("[data-delete]").forEach((btn) => btn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      this.remove(btn.dataset.delete, btn.dataset.source);
+    }));
     window.lucide?.createIcons();
   },
 
@@ -494,7 +507,7 @@ const uiToolsAdmin = {
     const tbody = document.getElementById("uiToolsTableBody");
     const tree = document.getElementById("uiToolPackageTree");
     if (!tbody || !tree) return;
-    tbody.innerHTML = `<tr><td colspan="5" class="empty-cell">加载中…</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="4" class="empty-cell">加载中…</td></tr>`;
     tree.innerHTML = `<div class="ui-tool-tree-state">加载中…</div>`;
     try {
       const [packageData, data] = await Promise.all([
@@ -517,7 +530,7 @@ const uiToolsAdmin = {
       this.populatePackageSelect(this.selectedPackageCode);
     } catch (err) {
       tree.innerHTML = `<div class="ui-tool-tree-state">${escapeHtml(err.message)}<br /><button type="button" class="btn" data-ui-tools-retry>重新加载</button></div>`;
-      tbody.innerHTML = `<tr><td colspan="5" class="empty-cell">加载失败</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="4" class="empty-cell">加载失败</td></tr>`;
       tree.querySelector("[data-ui-tools-retry]")?.addEventListener("click", () => this.refresh());
     }
   },

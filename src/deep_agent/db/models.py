@@ -5,7 +5,6 @@ from datetime import datetime
 from sqlalchemy import (
     BigInteger,
     Boolean,
-    Float,
     Index,
     Integer,
     PrimaryKeyConstraint,
@@ -144,12 +143,12 @@ class Agent(Base):
 
     id: Mapped[str] = mapped_column(String(AGENT_ID_LENGTH), primary_key=True, default=new_agent_id)
     name: Mapped[str] = mapped_column(KeyText, nullable=False)
-    model_id: Mapped[str] = mapped_column(
+    model_id: Mapped[str | None] = mapped_column(
         String(AGENT_ID_LENGTH),
-        nullable=False,
+        nullable=True,
     )
-    temperature: Mapped[float | None] = mapped_column(Float, nullable=True)
     capabilities: Mapped[list[str]] = mapped_column(JSONType, nullable=False, default=list)
+    ui_tool_selection: Mapped[dict[str, list[str]]] = mapped_column(JSONType, nullable=False, default=dict)
     skills: Mapped[list[str]] = mapped_column(JSONType, nullable=False, default=list)
     prompt: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(UtcTimestamp(), server_default=func.now(), nullable=False)
@@ -159,7 +158,7 @@ class Agent(Base):
         onupdate=func.now(),
         nullable=False,
     )
-    llm_model: Mapped[LlmModel] = relationship("LlmModel", primaryjoin="foreign(Agent.model_id) == LlmModel.id", lazy="joined")
+    llm_model: Mapped[LlmModel | None] = relationship("LlmModel", primaryjoin="foreign(Agent.model_id) == LlmModel.id", lazy="joined")
 
 
 class IntegrationSettings(Base):

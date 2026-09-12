@@ -248,7 +248,7 @@ class AgentRunnerHistoryTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_run_stream_passes_merged_model_settings(self) -> None:
         agent = Agent(TestModel(), deps_type=AgentDeps)
-        settings = ModelSettings(temperature=0.2, max_tokens=1024)
+        settings = ModelSettings(max_tokens=1024)
         runner = AgentRunner(
             agent,
             self.store,

@@ -117,18 +117,18 @@ class IntegrationMigrationTests(unittest.TestCase):
             command.upgrade(config, "003")
             with sqlite3.connect(path) as db:
                 db.execute("INSERT INTO global_settings (key,value,version) VALUES ('fixture','{\"keep\":true}',1)")
-            command.upgrade(config, "head")
+            command.upgrade(config, "004")
             with sqlite3.connect(path) as db:
                 self.assertEqual(db.execute("SELECT version_num FROM alembic_version").fetchone(), ("004",))
                 self.assertEqual(db.execute("SELECT count(*) FROM integration_settings").fetchone(), (0,))
                 self.assertEqual({row[1] for row in db.execute("PRAGMA table_info(integration_settings)")}, set(IntegrationSettings.__table__.columns.keys()))
                 self.assertEqual(db.execute("PRAGMA foreign_key_list(integration_settings)").fetchall(), [])
                 db.execute("INSERT INTO integration_settings(code,settings) VALUES ('deeptable-assistant','{\"mode\":\"fixture\"}')")
-            command.upgrade(config, "head")
+            command.upgrade(config, "004")
             with sqlite3.connect(path) as db:
                 self.assertEqual(db.execute("SELECT count(*) FROM integration_settings").fetchone(), (1,))
             command.downgrade(config, "003")
-            command.upgrade(config, "head")
+            command.upgrade(config, "004")
             with sqlite3.connect(path) as db:
                 self.assertEqual(db.execute("SELECT count(*) FROM integration_settings").fetchone(), (0,))
                 self.assertEqual(db.execute("SELECT value FROM global_settings WHERE key='fixture'").fetchone(), ('{"keep":true}',))

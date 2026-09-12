@@ -8,7 +8,7 @@ import unittest
 from datetime import datetime, timezone
 from pathlib import Path
 
-from sqlalchemy import insert, text
+from sqlalchemy import column, insert, table, text
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from deep_agent.db.models import (
@@ -59,13 +59,13 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
 
             self.assertEqual(
                 result.path.name,
-                "deep-agent-config-test-v004-20260723-131415.db",
+                "deep-agent-config-test-v005-20260723-131415.db",
             )
             self.assertEqual(
                 [path.resolve() for path in (output_root / "test").iterdir()],
                 [result.path.resolve()],
             )
-            self.assertEqual(result.revision, "004")
+            self.assertEqual(result.revision, "005")
             self.assertEqual(result.row_counts["agents"], 1)
             self.assertEqual(result.row_counts["integration_settings"], 1)
             self.assertEqual(result.row_counts["chat_sessions"], 0)
@@ -88,7 +88,7 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                     connection.execute(
                         "SELECT version_num FROM alembic_version"
                     ).fetchone(),
-                    ("004",),
+                    ("005",),
                 )
                 config = connection.execute("SELECT settings FROM integration_settings WHERE code='deeptable-assistant'").fetchone()[0]
                 self.assertEqual(json.loads(config), {"enabled": True, "options": [1, None, "中文"]})
@@ -185,7 +185,7 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                         "SELECT environment, source_dialect, alembic_revision, "
                         "git_commit FROM _backup_info"
                     ).fetchone(),
-                    ("test", "sqlite", "004", "abc123"),
+                    ("test", "sqlite", "005", "abc123"),
                 )
                 scope_manifest = json.loads(
                     str(
@@ -268,6 +268,16 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                 ["builtin:ptc", "mcp:remote"],
             )
 
+    async def test_004_backup_keeps_required_model_shape(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="TMP_to_delete_backup_004_") as directory:
+            root = Path(directory)
+            source = root / "source.db"
+            await self._create_source(source, revision="004")
+            result = await export_backup(self._url(source), environment="test", output_root=root / "backups", git_commit="test")
+            self.assertEqual(result.revision, "004")
+            with sqlite3.connect(result.path) as db:
+                self.assertEqual(next(row[3] for row in db.execute("PRAGMA table_info(agents)") if row[1] == "model_id"), 1)
+
     async def test_003_backup_does_not_require_future_integration_table(self) -> None:
         with tempfile.TemporaryDirectory(prefix="TMP_to_delete_backup_003_") as tmpdir:
             root = Path(tmpdir)
@@ -293,7 +303,7 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(sum(len(db.execute(f"PRAGMA foreign_key_list({name})").fetchall())
                                          for name in Base.metadata.tables), 10)
 
-    async def test_004_backup_rejects_orphan_channel_agent(self) -> None:
+    async def test_005_backup_rejects_orphan_channel_agent(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             source = root / "source.db"
@@ -344,16 +354,16 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                 f"sqlite+aiosqlite:///{(root / 'source.db').resolve().as_posix()}",
             )
 
-    async def _create_source(self, path: Path, *, revision: str = "004") -> None:
+    async def _create_source(self, path: Path, *, revision: str = "005") -> None:
         await asyncio.to_thread(_upgrade_target_schema, self._url(path), revision)
         engine = create_async_engine(self._url(path))
         try:
             async with engine.begin() as connection:
                 for name in ("channel_message_runs", "channel_session_bindings",
                              "chat_session_events", "chat_sessions", *reversed(CONFIG_TABLES)):
-                    if name != "integration_settings" or revision == "004":
+                    if name != "integration_settings" or revision in {"004", "005"}:
                         await connection.execute(Base.metadata.tables[name].delete())
-                if revision == "004":
+                if revision in {"004", "005"}:
                     await connection.execute(insert(IntegrationSettings.__table__), {"code": "deeptable-assistant", "settings": {"enabled": True, "options": [1, None, "中文"]}})
                 await connection.execute(
                     insert(GlobalSetting.__table__),
@@ -433,7 +443,7 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                     },
                 )
                 await connection.execute(
-                    insert(Agent.__table__),
+                    insert(Agent.__table__ if revision == "005" else table("agents", *[column(item.name, item.type) for item in Agent.__table__.columns if item.name != "ui_tool_selection"])),
                     {
                         "id": "agent-1",
                         "name": "agent",

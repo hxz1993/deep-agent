@@ -162,6 +162,7 @@ const agentsAdmin = {
           <span><i data-lucide="clock-3"></i>${escapeHtml(formatDate(agent.updated_at))}</span>
           <div class="row-actions agent-row-actions">
             <a class="btn-link row-action icon-only" data-agent-chat href="${chatUrlForAgent(agent.id)}" title="发起对话" aria-label="发起对话"><i data-lucide="message-square"></i></a>
+            <button type="button" class="row-action icon-only" data-export-agent="${escapeHtml(agent.id)}" title="导出安装包" aria-label="导出安装包"><i data-lucide="download"></i></button>
             <button type="button" class="row-action icon-only" data-copy-agent="${escapeHtml(agent.id)}" title="复制" aria-label="复制"><i data-lucide="copy"></i></button>
             <button type="button" class="danger row-action icon-only" data-delete="${escapeHtml(agent.id)}" data-name="${escapeHtml(agent.name)}" title="删除" aria-label="删除"><i data-lucide="trash-2"></i></button>
           </div>
@@ -175,12 +176,13 @@ const agentsAdmin = {
       const search = `${agent.name || ""} ${agent.model?.name || ""} ${capabilities} ${skills}`.toLowerCase();
       return `<tr class="agent-list-row" data-agent-search="${escapeHtml(search)}" data-open-agent="${escapeHtml(agent.id)}" tabindex="0">
         <td><div class="agent-name-line"><strong>${escapeHtml(agent.name)}</strong>${renderAgentChannelBadge(agent.id)}</div></td>
-        <td>${escapeHtml(agent.model?.name || "—")}</td>
+        <td>${escapeHtml(agent.model?.name || "未配置模型")}</td>
         <td><div class="cap-preview">${escapeHtml(capabilities)}</div><div class="skill-preview">Skill：${escapeHtml(skills)}</div></td>
         <td>${escapeHtml(formatDate(agent.updated_at))}</td>
         <td><div class="row-actions agent-row-actions">
           <a class="btn-link row-action icon-only" data-agent-chat href="${chatUrlForAgent(agent.id)}" title="发起对话" aria-label="发起对话"><i data-lucide="message-square"></i></a>
-          <button type="button" class="row-action icon-only" data-copy-agent="${escapeHtml(agent.id)}" title="复制" aria-label="复制"><i data-lucide="copy"></i></button>
+          <button type="button" class="row-action icon-only" data-export-agent="${escapeHtml(agent.id)}" title="导出安装包" aria-label="导出安装包"><i data-lucide="download"></i></button>
+            <button type="button" class="row-action icon-only" data-copy-agent="${escapeHtml(agent.id)}" title="复制" aria-label="复制"><i data-lucide="copy"></i></button>
           <button type="button" class="danger row-action icon-only" data-delete="${escapeHtml(agent.id)}" data-name="${escapeHtml(agent.name)}" title="删除" aria-label="删除"><i data-lucide="trash-2"></i></button>
         </div></td>
       </tr>`;
@@ -203,6 +205,12 @@ const agentsAdmin = {
     document.querySelectorAll(".agent-row-actions").forEach((actions) => {
       actions.addEventListener("click", (event) => event.stopPropagation());
       actions.addEventListener("keydown", (event) => event.stopPropagation());
+    });
+    document.querySelectorAll("[data-export-agent]").forEach((button) => {
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        window.agentPackagesAdmin?.exportAgent(button.dataset.exportAgent, button);
+      });
     });
     document.querySelectorAll("[data-copy-agent]").forEach((button) => {
       button.addEventListener("click", (event) => {
@@ -342,7 +350,9 @@ const agentsAdmin = {
     const displayName = cap.label || capDisplayName(cap.code, cap.category);
     const kindLabel = capKindLabel(cap);
     const toolCount = Number(cap.tool_count ?? cap.tools?.length ?? 0);
-    const toolsHtml = toolCount
+    const toolsHtml = cap.category === "ui" || cap.code.startsWith("ui:")
+      ? this.renderUiToolChoices(cap)
+      : toolCount
       ? `<details class="cap-card-tools">
           <summary>${toolCount} 个工具</summary>
           <ul>${cap.tools
@@ -372,7 +382,39 @@ const agentsAdmin = {
     </article>`;
   },
 
-  renderCapabilityCheckboxes(selected = []) {
+  renderUiToolChoices(cap) {
+    const tools = cap.tools || [];
+    const limited = Object.hasOwn(this.uiToolSelection || {}, cap.code);
+    const selected = new Set(limited ? this.uiToolSelection[cap.code] : tools.map(tool => tool.name));
+    return `<details class="cap-card-tools cap-ui-tool-range"><summary data-ui-tool-count="${escapeHtml(cap.code)}">已选 ${selected.size} / ${tools.length} 个工具</summary><label class="cap-ui-all"><input type="checkbox" data-ui-tool-all="${escapeHtml(cap.code)}" ${limited ? '' : 'checked'} />整个工具包（包含后续新增工具）</label><ul>${tools.map(tool => `<li><label title="${escapeHtml(tool.description || tool.name)}"><input type="checkbox" data-ui-tool-package="${escapeHtml(cap.code)}" value="${escapeHtml(tool.name)}" ${selected.has(tool.name) ? 'checked' : ''} /><span>${escapeHtml(tool.name)}</span></label></li>`).join('')}</ul></details>`;
+  },
+
+  setUiToolEnabled(code, name, checked) {
+    this.uiToolSelection ||= {};
+    const tools = (state.capabilities || []).find(cap => cap.code === code)?.tools || [];
+    const allowed = tools.map(tool => tool.name);
+    const selected = new Set(Object.hasOwn(this.uiToolSelection, code) ? this.uiToolSelection[code] : allowed);
+    if (checked && allowed.includes(name)) selected.add(name); else selected.delete(name);
+    this.uiToolSelection[code] = [...selected];
+  },
+
+  syncUiToolChoices(code) {
+    const card = Array.from(document.querySelectorAll('[data-cap-name]')).find(node => node.dataset.capName === code);
+    if (!card) return;
+    const all = !Object.hasOwn(this.uiToolSelection || {}, code);
+    card.querySelector('[data-ui-tool-all]').checked = all;
+    const selected = new Set(this.uiToolSelection?.[code] || []);
+    const boxes = [...card.querySelectorAll('[data-ui-tool-package]')];
+    boxes.forEach(box => { box.checked = all || selected.has(box.value); });
+    card.querySelector('[data-ui-tool-count]').textContent = `已选 ${boxes.filter(box => box.checked).length} / ${boxes.length} 个工具`;
+  },
+
+  getSelectedUiToolSelection(capabilities) {
+    return Object.fromEntries((capabilities || this.getSelectedCapabilities()).filter(code => Object.hasOwn(this.uiToolSelection || {}, code)).map(code => [code, [...this.uiToolSelection[code]]]));
+  },
+
+  renderCapabilityCheckboxes(selected = [], uiToolSelection = {}) {
+    this.uiToolSelection = Object.fromEntries(Object.entries(uiToolSelection || {}).map(([code, names]) => [code, [...names]]));
     const container = document.getElementById("agentCapGroups");
     if (!container) return;
 
@@ -538,7 +580,7 @@ const agentsAdmin = {
       this.syncEditorTitle();
       populateAgentModelSelect(agent.model_id);
       document.getElementById("agentPrompt").value = agent.prompt;
-      this.renderCapabilityCheckboxes(agent.capabilities);
+      this.renderCapabilityCheckboxes(agent.capabilities, agent.ui_tool_selection);
       this.renderSkillChoices(agent.skills || []);
       document.getElementById("testAgentBtn")?.classList.remove("hidden");
       this.openEditor();
@@ -558,7 +600,7 @@ const agentsAdmin = {
       const existingNames = new Set((agents || []).map((item) => item.name));
       const values = await requestActionFields({
         title: "复制 Agent",
-        message: "除 Agent ID 外，模型、Prompt、温度、工具包和 Skill 都会完整复制。",
+        message: "除 Agent ID 外，模型、Prompt、工具包和 Skill 都会完整复制。",
         icon: "copy",
         confirmLabel: "复制",
         fields: [{
@@ -577,8 +619,8 @@ const agentsAdmin = {
           name,
           model_id: agent.model_id,
           prompt: agent.prompt,
-          temperature: agent.temperature,
           capabilities: [...(agent.capabilities || [])],
+          ui_tool_selection: agent.ui_tool_selection || {},
           skills: [...(agent.skills || [])],
         }),
       });
@@ -598,16 +640,17 @@ const agentsAdmin = {
     const name = document.getElementById("agentName").value.trim();
     const modelId = document.getElementById("agentModelId").value.trim();
     const prompt = document.getElementById("agentPrompt").value.trim();
-    if (!name || !modelId || !prompt) {
-      AdminFormFeedback.show(form, "名称、模型配置和 System Prompt 不能为空");
+    if (!name || !prompt) {
+      AdminFormFeedback.show(form, "名称和 System Prompt 不能为空");
       return;
     }
     AdminFormFeedback.setSubmitting(form, true);
     const capabilities = this.getSelectedCapabilities();
     const payload = {
-      model_id: modelId,
+      model_id: modelId || null,
       prompt,
       capabilities,
+      ui_tool_selection: this.getSelectedUiToolSelection(capabilities),
       skills: this.getSelectedSkills(),
     };
 
@@ -684,6 +727,17 @@ const agentsAdmin = {
     });
 
     resources.addEventListener("change", (e) => {
+      if (e.target.matches('[data-ui-tool-package]')) {
+        this.setUiToolEnabled(e.target.dataset.uiToolPackage, e.target.value, e.target.checked);
+        this.syncUiToolChoices(e.target.dataset.uiToolPackage);
+      }
+      if (e.target.matches('[data-ui-tool-all]')) {
+        const code = e.target.dataset.uiToolAll;
+        this.uiToolSelection ||= {};
+        if (e.target.checked) delete this.uiToolSelection[code];
+        else this.uiToolSelection[code] = ((state.capabilities || []).find(cap => cap.code === code)?.tools || []).map(tool => tool.name);
+        this.syncUiToolChoices(code);
+      }
       if (e.target.matches('input[name="cap"]')) {
         this.updateCapCounter();
       }

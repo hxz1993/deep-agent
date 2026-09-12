@@ -73,7 +73,7 @@ class ConfigurationImportApiTests(unittest.IsolatedAsyncioTestCase):
                 )
             )
             await connection.execute(
-                text("INSERT INTO alembic_version (version_num) VALUES ('004')")
+                text("INSERT INTO alembic_version (version_num) VALUES ('005')")
             )
         self.app = FastAPI()
         self.app.include_router(api_router)

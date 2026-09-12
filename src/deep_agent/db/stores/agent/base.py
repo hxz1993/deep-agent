@@ -4,10 +4,11 @@ from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from deep_agent.db.models import Agent, LlmModel, UiToolPackage, ChatSession, ChannelAccount
+from deep_agent.db.models import Agent, LlmModel, UiToolPackage, UiToolDefinition, ChatSession, ChannelAccount
 from deep_agent.db.reference_integrity import ReferenceConflict, lock_reference, lock_optional, is_unique_conflict
 from deep_agent.db.stores._session import SessionBoundMixin
 from deep_agent.schemas.agent import AgentCreate, AgentUpdate
+from deep_agent.capabilities.ui.selection import validate_ui_tool_selection
 
 
 class AgentStoreBase(SessionBoundMixin):
@@ -26,15 +27,17 @@ class AgentStoreBase(SessionBoundMixin):
     async def create_unique(self, data: AgentCreate) -> Agent:
         try:
             async with self._write() as db:
-                await lock_reference(db, LlmModel, LlmModel.id, data.model_id, "LLM model")
+                if data.model_id is not None:
+                    await lock_reference(db, LlmModel, LlmModel.id, data.model_id, "LLM model")
                 await self._lock_ui_packages(db, data.capabilities)
+                await self._validate_ui_selection(db, data.ui_tool_selection, data.capabilities)
                 if await self._get_by_name(db, data.name) is not None:
                     raise ValueError(f"Agent already exists: {data.name}")
                 row = Agent(
                     name=data.name,
                     model_id=data.model_id,
-                    temperature=data.temperature,
                     capabilities=data.capabilities,
+                    ui_tool_selection=data.ui_tool_selection,
                     skills=data.skills,
                     prompt=data.prompt,
                 )
@@ -54,7 +57,8 @@ class AgentStoreBase(SessionBoundMixin):
                 if row is None:
                     return None
                 old_model, old_caps = row.model_id, list(row.capabilities or [])
-                for model_id in sorted({old_model, data.model_id or old_model}):
+                new_model = data.model_id if "model_id" in data.model_fields_set else old_model
+                for model_id in sorted(value for value in {old_model, new_model} if value is not None):
                     await lock_reference(db, LlmModel, LlmModel.id, model_id, "LLM model")
                 await self._lock_ui_packages(db, old_caps + (data.capabilities or []))
                 row = await lock_optional(db, Agent, Agent.id, agent_id)
@@ -67,6 +71,12 @@ class AgentStoreBase(SessionBoundMixin):
                     if conflict is not None:
                         raise ValueError(f"Agent already exists: {data.name}")
                 updates = data.model_dump(exclude_unset=True)
+                new_caps = updates.get("capabilities", row.capabilities or [])
+                selection = updates.get("ui_tool_selection", row.ui_tool_selection or {})
+                if "ui_tool_selection" not in updates:
+                    selection = {code: names for code, names in selection.items() if code in new_caps}
+                await self._validate_ui_selection(db, selection, new_caps)
+                updates["ui_tool_selection"] = selection
                 for field, value in updates.items():
                     setattr(row, field, value)
                 await db.flush()
@@ -100,6 +110,11 @@ class AgentStoreBase(SessionBoundMixin):
             result = await db.execute(delete(Agent).where(Agent.id == agent_id))
             await db.flush()
             return result.rowcount > 0
+
+    @staticmethod
+    async def _validate_ui_selection(db: AsyncSession, selection, capabilities) -> None:
+        rows = (await db.execute(select(UiToolDefinition.name, UiToolDefinition.package_code))).all()
+        validate_ui_tool_selection(selection, capabilities, dict(rows))
 
     @staticmethod
     async def _lock_ui_packages(db: AsyncSession, capabilities: list[str]) -> None:

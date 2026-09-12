@@ -110,6 +110,7 @@
 
 ## 10. 公共弹框与字段组件
 
+- 弹框表面统一使用 `--console-surface`，与 Agent/MCP 编辑页一致；只读字段和表头使用 `--console-readonly-surface`，可编辑控件使用基础表面与边框，错误和提醒使用各自状态色。不得用 `--bg-soft` / `--bg-elev` 染满整张弹窗。
 - 弹框严格沿用 Console 已有主题色、按钮和输入框高度、内边距及字段间距。视觉参考只辅助信息排版，不覆盖主题或强制复制参考图尺寸；`console/ui-dialogs.css` 仅维护布局。
 - 简单字段使用 `dialog-field-grid` 两列，长字段整行；窄屏折成一列。正文独立滚动，Footer 操作始终可见。不要在业务模块重复覆盖公共尺寸。
 - 短说明用 `field-label-row` 中的 `field-subtitle` 放在标题右侧；长约束使用 `field-help` 问号及 `field-help-tooltip`，设置 `tabindex="0"`、`aria-describedby` 和 `role="tooltip"`。错误和操作进度继续就近展示，不收进提示。

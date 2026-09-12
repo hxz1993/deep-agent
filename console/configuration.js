@@ -1,13 +1,13 @@
 let initialized = false;
-import "./model-options.js?v=20260912-21";
-import * as ProviderCatalog from "./provider-catalog.js?v=20260912-21";
-import * as SkillFrontmatter from "./skill-frontmatter.js?v=20260912-21";
-import * as SchemaText from "./schema-editor.js?v=20260912-21";
+import "./model-options.js?v=20260913-49";
+import * as ProviderCatalog from "./provider-catalog.js?v=20260913-49";
+import * as SkillFrontmatter from "./skill-frontmatter.js?v=20260913-49";
+import * as SchemaText from "./schema-editor.js?v=20260913-49";
 if (typeof window !== "undefined") window.DeepAgentProviderCatalog = ProviderCatalog;
 if (typeof window !== "undefined") window.DeepAgentSkillFrontmatter = SkillFrontmatter;
 if (typeof window !== "undefined") window.DeepAgentSchemaText = SchemaText;
 let loadingPromise = null;
-const CONFIGURATION_ASSET_VERSION = "20260912-37";
+const CONFIGURATION_ASSET_VERSION = "20260913-49";
 const CONFIGURATION_TABS = new Set([
   "agents",
   "llm-providers",
@@ -95,6 +95,8 @@ async function loadAdminScripts() {
     "./configuration/llm-providers.js",
     "./configuration/llm-models.js",
     "./configuration/agents.js",
+    "./configuration/agent-packages.js",
+    "./configuration/agent-package-export.js",
     "./configuration/builtin-tools.js",
     "./configuration/system-tools.js",
     "./configuration/skills.js",
@@ -110,7 +112,7 @@ async function loadAdminScripts() {
   // The legacy scripts were loaded after the browser's original DOMContentLoaded.
   // Replaying it once initializes their existing, tested bindings against the new DOM.
   document.dispatchEvent(new Event("DOMContentLoaded"));
-  await import("./configuration/catalog.js?v=20260912-21");
+  await import("./configuration/catalog.js?v=20260913-49");
 }
 
 function decorateConfiguration() {

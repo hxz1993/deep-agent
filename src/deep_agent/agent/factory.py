@@ -200,10 +200,21 @@ def _toolsets_for_spec(
 ) -> list[Any]:
     """Resolve selected product tool packages into Pydantic AI toolsets."""
     toolsets: list[Any] = []
+
+    def add_package(package: ToolPackage) -> None:
+        if package.code not in spec.capabilities:
+            return
+        if package.code.startswith("ui:") and package.code in spec.ui_tool_selection:
+            allowed = frozenset(spec.ui_tool_selection[package.code])
+            if allowed:
+                toolsets.append(package.toolset.filtered(lambda _ctx, definition: definition.name in allowed))
+        else:
+            toolsets.append(package.toolset)
+
     for package in registry.selected(spec.capabilities):
         if package.code == "builtin:web":
             continue
-        toolsets.append(package.toolset)
+        add_package(package)
     if web_toolset is not None:
         toolsets.append(web_toolset)
     if mcp_toolsets:
@@ -237,7 +248,8 @@ def _toolsets_for_spec(
         toolsets.append(history_toolset)
 
     if dynamic_ui_packages:
-        toolsets.extend(package.toolset for package in dynamic_ui_packages)
+        for package in dynamic_ui_packages:
+            add_package(package)
     return toolsets
 
 
